@@ -33,6 +33,7 @@ namespace {
 
 std::mutex g_lock;
 std::string g_note;
+NoteKind g_noteKind = NoteKind::Info;
 unsigned long long g_noteUntil = 0;
 std::filesystem::path g_session; // the open session's folder (empty: none); under g_lock
 int g_sessionCount = 0;
@@ -46,6 +47,7 @@ std::map<std::filesystem::path, std::string> g_failedText;
 std::map<std::filesystem::path, bool> g_shotJobs; // pending PNGs; protected by g_lock
 bool g_copyFailed = false, g_shotFailed = false;
 bool g_notifyCompletion = false;
+CaptureKind g_retryKind = CaptureKind::Generic;
 std::vector<std::pair<std::filesystem::path, std::filesystem::path>> g_removed;
 
 std::string DescriptionText(const std::string& title, const std::string& text) {
@@ -117,12 +119,39 @@ uint64_t FolderSize(const std::filesystem::path& path) {
 // Screenshot.png on a short-lived thread (WIC). Menu closed: at Present, so the picture has everything the player sees
 // (Color filters included); the capture notes are not drawn that frame (ScreenshotPending). Menu open: at the end of the
 // scene, before the Apex menu draws (the Color filters come after the menu, so they are not in that one).
-std::vector<std::filesystem::path> g_shots; // folders waiting for their screenshot (render thread)
+struct ShotJob {
+    std::filesystem::path file;
+    std::filesystem::path reportFolder;
+    bool report = true;
+    int skipPresents = 0;
+};
+std::vector<ShotJob> g_shots; // render-thread requests; report shots and standalone player photos
 bool g_shotHooks = false;
 std::atomic<bool> g_shotsOn{true};
+std::atomic<bool> g_gameUiHidden{false};
+struct PlayerPhotoState {
+    bool active = false;
+    bool restoreOverlay = false;
+    bool toggledGameUi = false;
+};
+PlayerPhotoState g_playerPhoto;
 
-void WritePng(std::filesystem::path file, std::vector<BYTE> bgr, UINT w, UINT h) {
-    std::thread([file = std::move(file), bgr = std::move(bgr), w, h] {
+bool PostGameUiToggle() {
+    return Overlay::PostGameKeyPress(VK_F10); // bypass Apex hotkey handling, but let the game toggle its UI
+}
+
+void RestorePlayerPhoto() {
+    if (!g_playerPhoto.active) return;
+    if (g_playerPhoto.toggledGameUi && !PostGameUiToggle())
+        LOG_WARNING("[Captures] Could not restore the game's UI after a screenshot");
+    Overlay::SetCaptureSuppressed(false);
+    Overlay::SetVisible(g_playerPhoto.restoreOverlay);
+    g_playerPhoto = {};
+}
+
+void WritePng(ShotJob job, std::vector<BYTE> bgr, UINT w, UINT h) {
+    std::thread([job = std::move(job), bgr = std::move(bgr), w, h] {
+        const auto& file = job.file;
         const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         IWICImagingFactory* factory = nullptr;
         IWICStream* stream = nullptr;
@@ -142,18 +171,26 @@ void WritePng(std::filesystem::path file, std::vector<BYTE> bgr, UINT w, UINT h)
         if (factory) factory->Release();
         if (SUCCEEDED(com)) CoUninitialize();
         if (!ok) LOG_WARNING("[Captures] The screenshot could not be written: " + file.string());
-        CompleteShot(file.parent_path(), ok);
+        if (job.report) CompleteShot(job.reportFolder, ok);
+        else Notify(I18n::Tr(ok ? "Screenshot saved" : "The screenshot could not be saved"), 4,
+                    ok ? NoteKind::Screenshot : NoteKind::Warning);
     }).detach();
 }
 
-// Render thread: the back buffer now -> Screenshot.png in every queued folder
+// Render thread: the finished back buffer (including post-scene and Picture passes) -> queued PNGs.
 void TakeShots(IDirect3DDevice9* dev) {
     if (g_shots.empty() || !dev) return;
-    const std::vector<std::filesystem::path> folders = std::move(g_shots);
-    g_shots.clear();
+    std::vector<ShotJob> jobs;
+    for (auto it = g_shots.begin(); it != g_shots.end();) {
+        if (it->skipPresents > 0) { --it->skipPresents; ++it; }
+        else { jobs.push_back(std::move(*it)); it = g_shots.erase(it); }
+    }
+    if (jobs.empty()) return;
+    const bool hasPlayerPhoto = std::any_of(jobs.begin(), jobs.end(), [](const ShotJob& j) { return !j.report; });
     IDirect3DSurface9 *bb = nullptr, *resolved = nullptr, *sys = nullptr;
     if (FAILED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb) {
-        for (const auto& folder : folders) CompleteShot(folder, false);
+        for (const auto& job : jobs) if (job.report) CompleteShot(job.reportFolder, false);
+        if (hasPlayerPhoto) RestorePlayerPhoto();
         return;
     }
     D3DSURFACE_DESC d{};
@@ -187,10 +224,12 @@ void TakeShots(IDirect3DDevice9* dev) {
     bb->Release();
     if (bgr.empty()) {
         LOG_WARNING("[Captures] No screenshot: the screen format could not be read");
-        for (const auto& folder : folders) CompleteShot(folder, false);
+        for (const auto& job : jobs) if (job.report) CompleteShot(job.reportFolder, false);
+        if (hasPlayerPhoto) RestorePlayerPhoto();
         return;
     }
-    for (size_t i = 0; i < folders.size(); i++) WritePng(folders[i] / L"Screenshot.png", i + 1 < folders.size() ? bgr : std::move(bgr), d.Width, d.Height);
+    for (size_t i = 0; i < jobs.size(); i++) WritePng(std::move(jobs[i]), i + 1 < jobs.size() ? bgr : std::move(bgr), d.Width, d.Height);
+    if (hasPlayerPhoto) RestorePlayerPhoto();
 }
 
 void ShotAtSceneEnd(IDirect3DDevice9* dev) {
@@ -199,7 +238,7 @@ void ShotAtSceneEnd(IDirect3DDevice9* dev) {
 
 void QueueShot(const std::filesystem::path& folder) {
     if (!g_shotsOn.load()) return;
-    g_shots.push_back(folder);
+    g_shots.push_back({folder / L"Screenshot.png", folder, true, 0});
     { std::lock_guard<std::mutex> lk(g_lock); g_shotJobs[folder] = true; }
     if (g_shotHooks) return;
     g_shotHooks = true; // once; the callbacks do nothing while nothing is queued
@@ -208,6 +247,30 @@ void QueueShot(const std::filesystem::path& folder) {
         TakeShots(ctx.device); // menu closed: the frame as it is shown (notes held back for it)
         return D3D9Hooks::HookAction::Continue;
     }, D3D9Hooks::Priority::First);
+}
+
+bool QueuePlayerPhoto(const std::filesystem::path& file, bool hideGameUi) {
+    g_playerPhoto.active = true;
+    g_playerPhoto.restoreOverlay = Overlay::IsVisible();
+    g_playerPhoto.toggledGameUi = hideGameUi && !g_gameUiHidden.load();
+    Overlay::SetVisible(false);
+    Overlay::SetCaptureSuppressed(true);
+    if (g_playerPhoto.toggledGameUi && !PostGameUiToggle()) {
+        LOG_WARNING("[Captures] Could not hide the game's UI; screenshot cancelled");
+        Overlay::SetCaptureSuppressed(false);
+        Overlay::SetVisible(g_playerPhoto.restoreOverlay);
+        g_playerPhoto = {};
+        return false;
+    }
+    g_shots.push_back({file, {}, false, 1}); // allow the posted F10 toggle to reach the game before reading the back buffer
+    if (g_shotHooks) return true;
+    g_shotHooks = true; // once; the callbacks do nothing while nothing is queued
+    RenderCallbacks::endSceneBeforeOverlay.Add(ShotAtSceneEnd);
+    D3D9Hooks::RegisterPresent("CapturesScreenshot", [](D3D9Hooks::DeviceContext& ctx, const RECT*, const RECT*, HWND, const RGNDATA*) {
+        TakeShots(ctx.device); // menu closed: the frame as it is shown (notes held back for it)
+        return D3D9Hooks::HookAction::Continue;
+    }, D3D9Hooks::Priority::First);
+    return true;
 }
 
 } // namespace
@@ -242,6 +305,7 @@ void BeginSession() {
     if (!PlainDirectory(g_session)) {
         g_session.clear();
         g_note = I18n::Tr("Could not create the collection. Check folder access and free space");
+        g_noteKind = NoteKind::Warning;
         g_noteUntil = GetTickCount64() + 6000;
         return;
     }
@@ -282,6 +346,7 @@ void EndSession() {
         if (g_retryFolder != s) { g_retryDescription.clear(); g_retryTitle.clear(); }
         g_retryFolder = s;
         g_retryWhat.clear(); // retrying this receipt finishes the still-open collection
+        g_retryKind = CaptureKind::Generic;
         g_copyFailed = !logOk || !configOk || !crashOk;
         g_shotFailed = false;
         g_result = {g_result.serial + 1, s.filename().string(), false, false};
@@ -290,7 +355,9 @@ void EndSession() {
     }
     const std::string name = s.filename().string();
     LOG_INFO(std::format("[Captures] Session ended: Captures\\{} ({} captures)", name, items.size()));
-    Notify(LastSave().failed ? I18n::Tr("Some files could not be saved. Open Report a problem to retry") : I18n::Trf("Session saved in Captures \xE2\x80\xBA {}", name), 6);
+    const bool failed = LastSave().failed;
+    Notify(failed ? I18n::Tr("Some files could not be saved. Open Report a problem to retry") : I18n::Trf("Session saved in Captures \xE2\x80\xBA {}", name), 6,
+           failed ? NoteKind::Warning : NoteKind::Success);
 }
 
 bool SessionActive() {
@@ -349,7 +416,8 @@ bool SaveDescription(const std::string& title, const std::string& text) {
     }
     const bool ok = WriteText(folder / L"User notes.txt", DescriptionText(title, text));
     { std::lock_guard<std::mutex> lk(g_lock); UpdateResultLocked(); }
-    Notify(I18n::Tr(ok ? "Description saved with the capture" : "Some files could not be saved. Open Report a problem to retry"));
+    Notify(I18n::Tr(ok ? "Description saved with the capture" : "Some files could not be saved. Open Report a problem to retry"), 5,
+           ok ? NoteKind::Success : NoteKind::Warning);
     return ok;
 }
 
@@ -386,12 +454,13 @@ bool SaveFolderDescription(const std::string& folder, const std::string& title, 
     return ApexUtil::WriteFileAtomic(file.wstring(), DescriptionText(title, text));
 }
 
-void Finish(const std::filesystem::path& folder, const std::string& what) {
+void Finish(const std::filesystem::path& folder, const std::string& what, CaptureKind kind) {
     std::string description, title;
     bool retry = false, inSession = false;
     {
         std::lock_guard<std::mutex> lk(g_lock);
         retry = folder == g_retryFolder && g_result.failed;
+        if (retry) kind = g_retryKind;
         // Only the latest receipt offers Retry. Do not accumulate large failed recordings in the 32-bit game.
         if (!retry) {
             for (auto it = g_failedText.begin(); it != g_failedText.end();) {
@@ -408,6 +477,7 @@ void Finish(const std::filesystem::path& folder, const std::string& what) {
         }
         g_retryFolder = folder;
         g_retryWhat = what;
+        g_retryKind = kind;
         g_retryDescription = description;
         g_retryTitle = title;
         g_shotFailed = false;
@@ -445,8 +515,15 @@ void Finish(const std::filesystem::path& folder, const std::string& what) {
         UpdateResultLocked();
     }
     LOG_INFO(std::format("[Captures] {}: {} ({})", LastSave().failed ? "Save incomplete" : "Capture written", folder.string(), what));
-    Notify(I18n::Tr(LastSave().failed ? "Some files could not be saved. Open Report a problem to retry" :
-           Saving() ? "Saving the capture and screenshot..." : "Capture saved. Open Report a problem to find your files"), 6);
+    const SaveResult result = LastSave();
+    const bool saving = Saving();
+    const char* message = "Capture saved. Open Report a problem to find your files";
+    if (result.failed) message = "Some files could not be saved. Open Report a problem to retry";
+    else if (saving) message = "Saving the capture and screenshot...";
+    else if (kind == CaptureKind::Recording) message = "Recording saved. Open Report a problem to find your files";
+    else if (kind == CaptureKind::LightCapture) message = "Light capture saved. Open Report a problem to find your files";
+    else if (kind == CaptureKind::LightingSnapshot) message = "Lighting snapshot saved. Open Report a problem to find your files";
+    Notify(I18n::Tr(message), 6, result.failed ? NoteKind::Warning : saving ? NoteKind::Saving : NoteKind::Success);
     (void)inSession;
 }
 
@@ -468,21 +545,62 @@ void RetrySave() {
         if (SessionActive()) EndSession();
         else {
             { std::lock_guard<std::mutex> lk(g_lock); UpdateResultLocked(); ++g_result.serial; }
-            Notify(I18n::Tr(LastSave().failed ? "Some files could not be saved. Open Report a problem to retry" : "Description saved with the capture"));
+            const bool failed = LastSave().failed;
+            Notify(I18n::Tr(failed ? "Some files could not be saved. Open Report a problem to retry" : "Description saved with the capture"), 5,
+                   failed ? NoteKind::Warning : NoteKind::Success);
         }
         return;
     }
     Finish(folder, what);
     if (shot) {
         QueueShot(folder); // current frame, not a promise to reproduce the earlier image
-        Notify(I18n::Tr("Saving the capture and screenshot..."), 6);
+        Notify(I18n::Tr("Saving the capture and screenshot..."), 6, NoteKind::Saving);
     }
     { std::lock_guard<std::mutex> lk(g_lock); UpdateResultLocked(); }
 }
 
 void SetScreenshots(bool on) { g_shotsOn = on; }
 bool Screenshots() { return g_shotsOn.load(); }
-bool ScreenshotPending() { return !g_shots.empty(); }
+bool ScreenshotPending() {
+    return std::any_of(g_shots.begin(), g_shots.end(), [](const ShotJob& job) { return job.report; });
+}
+
+void ObserveGameUiKey(WPARAM vk, bool repeat) {
+    if (vk == VK_F10 && !repeat) g_gameUiHidden.store(!g_gameUiHidden.load());
+}
+
+bool RequestPlayerScreenshot(bool hideGameUi) {
+    if (g_playerPhoto.active) return false;
+    std::error_code ec;
+    const std::wstring& gameDir = ApexPaths::GameDocumentsDirectory();
+    if (gameDir.empty()) {
+        Notify(I18n::Tr("Could not create the screenshots folder"), 5, NoteKind::Warning);
+        return false;
+    }
+    const std::filesystem::path folder = std::filesystem::path(gameDir) / L"Screenshots";
+    std::filesystem::create_directories(folder, ec);
+    if (ec) {
+        Notify(I18n::Tr("Could not create the screenshots folder"), 5, NoteKind::Warning);
+        return false;
+    }
+    SYSTEMTIME t{};
+    GetLocalTime(&t);
+    const std::string base = std::format("Screenshot_{:04}-{:02}-{:02}_{:02}-{:02}-{:02}_{:03}",
+                                         t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds);
+    std::filesystem::path file = folder / (base + ".png");
+    for (unsigned suffix = 2; std::filesystem::exists(file, ec) && !ec; ++suffix)
+        file = folder / (base + std::format(" ({})", suffix) + ".png");
+    if (ec) {
+        Notify(I18n::Tr("Could not create the screenshots folder"), 5, NoteKind::Warning);
+        return false;
+    }
+    if (!QueuePlayerPhoto(file, hideGameUi)) {
+        Notify(I18n::Tr("Could not hide the game interface; screenshot was not taken"), 5, NoteKind::Warning);
+        return false;
+    }
+    LOG_INFO("[Captures] Filtered screenshot requested: " + file.string());
+    return true;
+}
 
 void SaveReport() { Finish(NewFolder("Report"), "a report: the log and the settings"); }
 
@@ -504,9 +622,10 @@ std::string RecentCrash() {
     return std::format("{:04}-{:02}-{:02} {:02}:{:02}", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute);
 }
 
-void Notify(const std::string& text, int seconds) {
+void Notify(const std::string& text, int seconds, NoteKind kind) {
     std::lock_guard<std::mutex> lk(g_lock);
     g_note = text;
+    g_noteKind = kind;
     g_noteUntil = GetTickCount64() + static_cast<unsigned long long>(seconds) * 1000ull;
 }
 
@@ -514,13 +633,21 @@ Note CurrentNote() {
     std::lock_guard<std::mutex> lk(g_lock);
     if (g_notifyCompletion && !g_result.saving) {
         g_notifyCompletion = false;
-        g_note = I18n::Tr(g_result.failed ? "Some files could not be saved. Open Report a problem to retry" : "Capture saved. Open Report a problem to find your files");
+        const bool failed = g_result.failed;
+        const char* message = "Capture saved. Open Report a problem to find your files";
+        if (failed) message = "Some files could not be saved. Open Report a problem to retry";
+        else if (g_retryKind == CaptureKind::Recording) message = "Recording saved. Open Report a problem to find your files";
+        else if (g_retryKind == CaptureKind::LightCapture) message = "Light capture saved. Open Report a problem to find your files";
+        else if (g_retryKind == CaptureKind::LightingSnapshot) message = "Lighting snapshot saved. Open Report a problem to find your files";
+        g_note = I18n::Tr(message);
+        g_noteKind = failed ? NoteKind::Warning : NoteKind::Success;
         g_noteUntil = GetTickCount64() + 6000;
     }
     Note n;
     if (!g_note.empty() && GetTickCount64() < g_noteUntil) {
         n.text = g_note;
         n.visible = true;
+        n.kind = g_noteKind;
     }
     return n;
 }

@@ -496,12 +496,15 @@ This is one shared trigger for effects that work on the finished 3D scene, befor
   - `Remove` of the last effect unregisters them.
 - **Trigger:**
   1. Count back-buffer draws (RT0 == back buffer) with `ZENABLE != FALSE`.
-  2. The first back-buffer draw with `ZENABLE == FALSE`, after at least `kMinSceneDraws = 20` depth-tested draws, fires
-     every effect **once** (`g_done`). This is the bloom composite, then the UI.
-  3. The effects run **inside that draw's DIP/DP callback, before the game's draw executes**.
+  2. Normally, the first back-buffer draw with `ZENABLE == FALSE`, after at least `kMinSceneDraws = 20` depth-tested
+     draws, fires every effect **once** (`g_done`) inside that draw's DIP/DP callback, before the game's draw executes.
+  3. If no qualifying depth-off draw happened (for example, when the game UI is hidden), `endSceneBeforeOverlay` checks
+     that at least 20 scene draws occurred and RT0 is still the back buffer, then runs the same ordered chain once before
+     Picture's scene copy and Apex's overlay.
   4. Draws marked with `DepthShare::SetInternalPass(true)` are ignored. The lake-lamp pass in `lot_light_bridge.cpp`
      turns Z off and must not look like the UI.
-  5. The Present hook resets the counters at the frame boundary.
+  5. The Present hook resets the counters at the frame boundary. The fallback does not change the existing behavior in
+     interiors where a depth-off backbuffer draw occurs mid-scene; validate those scenes separately.
 - **Camera for the effects (combined build only):** `CameraNear()`, `CameraViewProj()` and `CameraDepthA()` (near vote
   over VS blocks `c0`, `c4`, `c40`, `c180`, `c192`, `c216`; view-projection `c40..c43`) existed for Ambient Occlusion.
   The standalone's `post_scene.cpp` is the v0.1.0 one and has none of them; Depth Blur's Auto focus uses depth ratios

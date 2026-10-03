@@ -58,11 +58,10 @@ immediately; values apply live every frame while dragging.
 | Shadow amount (Split toning) | `shadow_tint` | float | 0.0 | 0..1 | clamp 0..1, `cTintS.w` | 0 = off. |
 | Highlight colour (Split toning) | `highlight_hue` | float | 40.0 | 0..360 deg | `cTintH.rgb` | |
 | Highlight amount (Split toning) | `highlight_tint` | float | 0.0 | 0..1 | clamp 0..1, `cTintH.w` | 0 = off. |
-| Reds / Yellows / Greens / Cyans / Blues / Magentas (Colour mixer) | `mixer` | array of 6 floats | [1,1,1,1,1,1] | 0..2 each | clamp 0..2, `cMixA`, `cMixB.xy`; `cMixB.z` = on when any differs from 1 by > 0.001 | Saturation per hue family; tooltip on Greens: "grass and leaves. Lower = less neon foliage." Button "Reset mixer" sets all to 1 and saves. |
+| Reds / Yellows / Greens / Cyans / Blues / Magentas (Colour mixer) | `mixer` | array of 6 floats | [1,1,1,1,1,1] | 0..2 each | clamp 0..2, `cMixA`, `cMixB.xy`; `cMixB.z` = on when any differs from 1 by > 0.001 | Saturation per hue family; tooltip on Greens: "grass and leaves. Lower = less neon foliage." |
 | Clarity (Detail) | `clarity` | float | 0.0 | -1..1 | clamp -1..1, `cColor.w`; 0 when abs < 0.001 | Needs the 1/8-size scene chain (built only when clarity != 0). |
 | Amount (Vignette) | `vignette` | float | 0.0 | 0..0.8 | clamp 0..0.8, `cVig.x`; on when > 0.001 | |
 | Size (Vignette) | `vignette_size` | float | 0.5 | 0..0.95 | clamp 0..0.95, `cVig.y` | Radius (0 centre, 1 corner) where darkening starts. |
-| Reset Picture to defaults (Advanced) | - | button | - | - | - | `PictureParams{}` but keeps `enabled` and `compare`; saves. |
 
 Defaults are the member initialisers of `struct PictureParams` (`hdr_output.h`); `LoadFromToml` falls back to the
 current member value for every missing key, so a partial table keeps defaults for the rest.
@@ -246,8 +245,10 @@ FrameCapture 24/09 #977; UI drawn with ZENABLE off).
 - **S3SS overlay / Apex menu.** Drawn after `BeforeOverlay`, so it is always UI (unchanged pixels), including frames with
   no game UI.
 - **Frame Capture (dev tool).** Source of the bloom-strip rule (#977); see [dev-tools/frame-capture.md](dev-tools/frame-capture.md).
-- **Game screenshots / video capture:** whether the game's own screenshot includes the filters is unverified (the pass
-  runs inside the last EndScene of the frame; the game's capture point is not documented).
+- **The game's C screenshot:** when Apex's screenshot shortcut is enabled, it consumes C and saves one filtered PNG
+  in the game's Documents `Screenshots` folder. It reads the back buffer at Present, after the scene effects and Picture
+  pass; see [bug-reports.md](bug-reports.md#player-screenshots). If the shortcut is disabled, the native C capture's
+  inclusion of the filters remains unverified.
 - **Game's own Edge Smoothing (MSAA):** unverified for Picture. If the game renders the scene off the back buffer and
   resolves it with a copy, fewer than 20 depth-tested back-buffer draws would mean no scene copy and no filtering
   (inferred from the counter rule, not tested). The README asks for the game's Edge Smoothing off for all post effects.

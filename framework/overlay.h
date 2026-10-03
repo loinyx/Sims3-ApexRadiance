@@ -40,6 +40,8 @@ class Client {
         (void)repeat;
         return false;
     }
+    // A key-down that survived Apex's shortcut / ImGui interception and will be forwarded to the game.
+    virtual void GameKeyDown(WPARAM vk, bool repeat) { (void)vk; (void)repeat; }
 };
 
 void SetClient(Client* client);
@@ -53,6 +55,8 @@ void Shutdown(); // FreeLibrary only: restores the window procedure
 
 bool IsVisible();
 void SetVisible(bool visible);
+void SetCaptureSuppressed(bool suppressed); // skip all Apex ImGui draw data for a player screenshot frame
+bool PostGameKeyPress(WPARAM vk); // post a synthetic key press to the game, bypassing Apex shortcut interception
 HWND Window();
 bool WndProcInstalled();
 

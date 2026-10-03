@@ -113,6 +113,23 @@ names for players: "Recording", "Light capture", "Lighting snapshot".
   comes after the menu, so it is not in that one). Back buffer -> SYSTEMMEM (GetRenderTargetData, a resolve first if it
   were multisampled), BGR 24-bit, encoded with WIC on a short-lived thread. 8-bit back buffers only.
 
+## Player screenshots
+
+For new or missing screenshot-key settings, Settings > Shortcuts enables the player screenshot shortcut on C,
+replacing the game's native screenshot key while the option is enabled. Apex consumes that key and writes one filtered PNG to the game's standard Documents
+`Screenshots` folder; it does not also invoke the game's unfiltered screenshot. Existing saved screenshot keys remain
+unchanged. Bare F10 remains available for the game's UI toggle, which the mod uses internally only while hiding the
+interface for the shot. Apex only runs Compare on the exact Ctrl+Shift+F10 chord; the synthetic bare F10 bypasses Apex
+shortcut interception.
+It reads the game's final back buffer at Present, after Ambient Occlusion, Edge Smoothing, Depth Blur and Picture have
+rendered, and writes a timestamped PNG to the game's standard `Screenshots` folder in Documents. This differs from `SceneCaptureManager`'s
+off-screen photo/thumbnail path, whose inclusion of post-processing is not established. Apex's overlay is suppressed
+for the shot. By default, the mod sends F10 for a single frame to hide the game's UI, captures the frame, then restores
+the prior tracked F10 state. It tracks F10 key presses seen after the overlay hook starts; it cannot infer an earlier
+UI state if F10 was pressed before that hook was installed. The player can disable UI hiding or rebind the screenshot
+to a bare key or modifier chord in Settings. Compile and offline checks cannot validate the game message-pump timing,
+F10 behavior, CC/game visuals, or screenshot output in a running game; test those in game before release.
+
 ## Guided capture (local preview, 2026-10-02)
 The public and private Report page now starts with four plain-language choices: lighting, an object's appearance, a crash, or another/unknown problem. Selecting one starts or reuses a capture session. The guide presents only the relevant action; all existing capture tools, session controls, help and the capture library remain available in collapsed sections. Finishing explicitly ends the session and opens its folder. ZIP creation remains manual; no automatic upload is performed.
 The appearance action arms a one-shot light probe and closes the menu. A Violet target follows the mouse and the top-left capture note displays the actual configured probe chord and Esc cancellation. Opening the menu also cancels selection. The marker is visual only, does not identify an object, and does not run scene searches. A guided capture does not schedule automatic floor-change follow-ups; the direct shortcut retains that diagnostic behavior. No target is drawn in capture screenshots. Selection is transient and not saved to TOML. The guide, hint and controls are translated into EN/PT/ES/FR. Gameplay validation of pointer alignment and capture completion remains necessary.

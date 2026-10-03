@@ -22,8 +22,10 @@ Client* g_client = nullptr;
 std::mutex g_imguiLock; // ImGui is fed from the window thread and drawn on the render thread
 std::atomic<bool> g_ready{false};
 std::atomic<bool> g_visible{false};
+std::atomic<bool> g_captureSuppressed{false};
 std::atomic<bool> g_clearInput{false};
 std::atomic<bool> g_wndProcInstalled{false};
+constexpr LPARAM kSyntheticGameKey = 1ll << 25; // reserved LPARAM bit: stripped before the game's original procedure
 HWND g_window = nullptr;
 WNDPROC g_original = nullptr;
 WPARAM g_eatKeyUp = 0; // the toggle key's key-up is eaten too (window thread only)
@@ -88,6 +90,15 @@ LRESULT CALLBACK ApexWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     LRESULT result = 0;
     if (g_client && g_client->OnWindowMessage(hwnd, msg, wp, lp, &result)) return result;
 
+    // The screenshot temporarily sends F10 to the game itself. Mark those posted messages so they bypass Apex's F10
+    // screenshot shortcut and are forwarded with a normal key-message LPARAM to the game's window procedure.
+    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN || msg == WM_KEYUP || msg == WM_SYSKEYUP) && (lp & kSyntheticGameKey)) {
+        const LPARAM gameLp = lp & ~kSyntheticGameKey;
+        if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && g_client)
+            g_client->GameKeyDown(wp, (gameLp & (1 << 30)) != 0);
+        return CallWindowProcW(g_original, hwnd, msg, wp, gameLp);
+    }
+
     // Apex's toggle chord (auto-repeat ignored); its key-up is eaten as well so the game never sees half of it
     if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && g_client && g_client->IsToggleKey(wp)) {
         if (!(lp & (1 << 30))) SetVisible(!g_visible.load());
@@ -132,6 +143,7 @@ LRESULT CALLBACK ApexWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if ((IsMouseMessage(msg) && wantMouse) || (IsKeyboardMessage(msg) && wantKeyboard)) return 0;
     }
     if (claimedUp || claimedChar) return 0;
+    if (keyDown && g_client) g_client->GameKeyDown(wp, (lp & (1 << 30)) != 0);
     return CallWindowProcW(g_original, hwnd, msg, wp, lp);
 }
 
@@ -191,7 +203,7 @@ void Frame(IDirect3DDevice9* device) {
         g_bbHeight.store(desc.Height);
     }
     const bool always = g_client && g_client->AlwaysDraw(); // every frame (the client runs its shortcuts there)
-    const bool draw = g_visible.load() || always;
+    const bool draw = !g_captureSuppressed.load() && (g_visible.load() || always);
     if (!draw || !g_client) return;
 
     const auto beforeLock = FrameClock::Clock::now();
@@ -268,6 +280,18 @@ bool IsVisible() { return g_visible.load(); }
 void SetVisible(bool visible) {
     if (visible && g_client && !g_client->CanOpen()) return;
     if (g_visible.exchange(visible) != visible && !visible) g_clearInput.store(true); // no stuck keys when it opens again
+}
+
+void SetCaptureSuppressed(bool suppressed) { g_captureSuppressed.store(suppressed); }
+
+bool PostGameKeyPress(WPARAM vk) {
+    if (!g_window || !g_original || !IsWindow(g_window)) return false;
+    const LPARAM scan = static_cast<LPARAM>((MapVirtualKeyW(static_cast<UINT>(vk), MAPVK_VK_TO_VSC) << 16) | kSyntheticGameKey);
+    if (!PostMessageW(g_window, WM_KEYDOWN, vk, scan)) return false;
+    const LPARAM up = scan | (1ll << 30) | (1ll << 31);
+    if (!PostMessageW(g_window, WM_KEYUP, vk, up) && !PostMessageW(g_window, WM_KEYUP, vk, up))
+        LOG_WARNING("[Overlay] Could not post the synthetic game key release");
+    return true;
 }
 
 HWND Window() { return g_window; }

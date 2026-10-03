@@ -183,6 +183,9 @@ Published since 2.5.5: one ASI contains the player features and optional develop
 
 ## Rendering optimizations and world lights (2.5.6)
 
+Published 2.5.6 included the Optimize rendering switch described below. The current development PR removes that
+switch and its mode-dependent rendering paths; it does not change the published build.
+
 System > Performance contains **Optimize rendering**, enabled by default when no
 explicit choice is saved. It reduces repeated rendering work without changing
 resolution, filters, light counts or lighting-update budgets. Existing off choices

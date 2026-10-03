@@ -40,7 +40,6 @@ picks Fixed.
 | Advanced > Focus speed (Auto) | `velocidadeFoco` | float | 0.3 | 0.1 - 1.0 | Easing time constant tau in seconds (shown "0.3 s"). |
 | Advanced > Blur the sky | `blurSky` | bool | true | | Sky pixels (d >= 0.99999) get k = 1 (true) or 0 (false). |
 | Advanced > Glowing lights | `realceLuzes` | bool | true | | Near-white taps weigh a little more in blurred areas (lamps stay bright). |
-| Reset Depth Blur (button) | | | | | `g.p = Params{}`: every field, including `farPlane` and `debugView`. |
 | (not shown) | `tamanho` | float | 1.5 | 0.5 - 6.0 | Legacy Gaussian spread of the old blur. Still registered so old configs and profiles round-trip; **no longer used**. |
 | Developer > Far plane (dev) | `farPlane` | float | 1000.0 | 10 - 10000 | Fixed only. A curve parameter of the heuristic, NOT the game's far plane. |
 | Developer > Show blur amount (dev) | `debugView` | bool | false | | Composite paints k as grey (white = blurred); in Auto the focus window is tinted violet. Runs even at strength 0 / amount 0 and in map view. |

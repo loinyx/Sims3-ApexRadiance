@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apex menu"
+  short_description: "Planeja e audita mudanças no menu do Apex Radiance"
+  default_prompt: "Use $apex-menu ao adicionar ou revisar opções e organização do menu deste projeto."

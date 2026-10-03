@@ -30,7 +30,6 @@
 #define NOMINMAX
 #endif
 #include "lightmap_smooth.h"
-#include "performance_mode.h"
 #include "apex_log.h"
 #include "build_flavor.h"
 #include "d3d9_extra_hooks.h"
@@ -128,7 +127,6 @@ std::atomic<bool> g_enabled{true};
 std::atomic<bool> g_failed{false}; // out of memory once: off for the rest of the session
 std::map<LightmapSmooth::Key, Entry> g_entries; // render thread only
 size_t g_checkCursor = 0;
-std::vector<decltype(g_entries)::value_type*> g_checkIndex;
 size_t g_boostCursor = 0;
 int g_inFlight = 0;
 uint32_t g_frame = 0; // OnPresent counter, for Entry::lastUse
@@ -1669,7 +1667,8 @@ void OnPresentGpu(IDirect3DDevice9* dev) {
         }
     }
     g_checkCursor = (g_checkCursor + 1) % g_entries.size();
-    auto* it = PerformanceMode::EntryAt(g_entries, g_checkCursor, g_checkIndex, PerformanceMode::Enabled());
+    auto it = g_entries.begin();
+    std::advance(it, g_checkCursor);
     GpuHashCheck(it->first, it->second, "round robin");
     EndSweepIfDone();
     EnsureAtlas(dev);
@@ -1934,7 +1933,8 @@ static void OnPresentBody(IDirect3DDevice9* dev) {
     // 4. One round-robin check of any chunk per frame (changes outside a rebuild, chunks out of view).
     if (reads == 0) {
         g_checkCursor = (g_checkCursor + 1) % g_entries.size();
-        auto* it = PerformanceMode::EntryAt(g_entries, g_checkCursor, g_checkIndex, PerformanceMode::Enabled());
+        auto it = g_entries.begin();
+        std::advance(it, g_checkCursor);
         if (it->second.hash > 1) CheckEntry(it->first, it->second, "round robin");
     }
     EndSweepIfDone();
@@ -2070,7 +2070,6 @@ void Clear() {
         if (e.src) e.src->Release();
         if (e.smooth) e.smooth->Release();
     }
-    g_checkIndex.clear();
     g_entries.clear();
     ForgetByUse();
     g_checkCursor = g_boostCursor = 0;

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apex: revisão de PR e release"
+  short_description: "Revisa bugs, regressões, desempenho, visual e documentação"
+  default_prompt: "Use $apex-review-pr-release para revisar esta PR antes da release, debater os riscos e corrigir os problemas encontrados."

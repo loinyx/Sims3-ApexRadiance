@@ -46,3 +46,9 @@ trace_targets.h
 
 # Harness build output
 *.obj
+
+# Task-local artifacts and portable skill machine state
+/work/
+/outputs/
+/.codex/skills/*/cache/
+/.codex/skills/*/state/

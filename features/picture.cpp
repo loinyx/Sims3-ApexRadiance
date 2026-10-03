@@ -986,11 +986,7 @@ void Picture::RenderUI(int tab) {
             o.defaultValue = kDef.mixer[i];
             slide(names[i], &q.mixer[i], 0.0f, 2.0f, o);
         }
-        if (ApexUi::IconTextButton("Reset mixer", IconId::RotateCcw, "Set every color family back to 100%")) {
-            for (float& m : q.mixer) m = 1.0f;
-            changed = save = true;
-            ApexUi::ReportChange("Color mixer reset");
-        }
+
         break;
     }
     case TabDetail: {
@@ -1020,15 +1016,7 @@ void Picture::RenderUI(int tab) {
         break;
     }
     }
-    if (ApexUi::IconTextButton("Reset Picture", IconId::RotateCcw, "Put every Picture setting back to default (on or off stays as it is)")) {
-        const bool en = q.enabled, cmp = q.compare;
-        q = PictureParams{};
-        q.enabled = en;
-        q.compare = cmp;
-        q.deband = GetParams().deband; // Smooth gradients belongs to the Banding tab now
-        changed = save = true;
-        ApexUi::ReportChange("Picture reset");
-    }
+
     if (!q.enabled) ImGui::EndDisabled();
     if (changed) SetParams(q, save);
 }

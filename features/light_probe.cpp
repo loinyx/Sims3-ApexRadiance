@@ -805,7 +805,7 @@ void FinishCapture(IDirect3DDevice9* dev) {
     LOG_INFO("[LightProbe] " + g_status);
     Recorder::Note(std::format("[probe] {} ({})", g_capName, g_captureWhy));
     Captures::Finish(g_capDir, std::format("a light capture of the pixel ({}, {}) under the mouse: the {} draws that paint it and their textures ({})", g_pixel.x,
-                                           g_pixel.y, covering, g_captureWhy));
+                                           g_pixel.y, covering, g_captureWhy), Captures::CaptureKind::LightCapture);
 }
 
 } // namespace
@@ -880,7 +880,7 @@ void OnPresent(IDirect3DDevice9* dev) {
         pixel.y = std::clamp<LONG>(static_cast<LONG>(static_cast<double>(p.y) * bd.Height / ch), 0, static_cast<LONG>(bd.Height) - 1);
         const bool guided = g_aiming.exchange(false) || click != 0;
         start(pixel, guided ? "guided one-shot capture under the mouse" : "requested by the shortcut; the same pixel is measured again 1 s and 3 s after any lot changes the story it shows, for 2 minutes");
-        Captures::Notify(I18n::Tr("Capturing the light under the mouse\xE2\x80\xA6"), 3);
+        Captures::Notify(I18n::Tr("Capturing the light under the mouse\xE2\x80\xA6"), 3, Captures::NoteKind::Probe);
         g_watch = guided ? Watch{} : Watch{true, pixel, ShownStories(), now + 120000, 6, {}};
         return;
     }

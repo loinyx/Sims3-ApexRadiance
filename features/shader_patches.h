@@ -170,6 +170,11 @@ DitherResult AddDither2(std::vector<DWORD>& t, int* amountConst = nullptr, int* 
 // already written, no free temp, subroutines, or another version (vs_3_0 pairs with ps_3_0 only).
 bool AddScreenPosVs(std::vector<DWORD>& t, int texcoord);
 
+// AO receiver mask: paired shader copies preserve geometry/alpha rejection, writing clip z/w to colour.
+// Rejects unsupported models, occupied interpolators, extra colour/depth outputs and early returns.
+// Inputs remain unchanged on failure.
+bool MakeAoReceiverMask(std::vector<DWORD>& vs, std::vector<DWORD>& ps, bool hair = false, bool transparent = false);
+
 // Temporal anti-aliasing (temporal_aa.cpp): every write to the position output (oPos, or the vs_3_0 output declared
 // POSITION0) goes to a free temp rP, and at the end rP.xy += c[jitterConst].xy * rP.w, then position = rP: the image moves
 // by c.xy in clip units (2 / width = one pixel), the depth is unchanged. Any vertex shader version. Refused (t unchanged):

@@ -1982,6 +1982,90 @@ DitherResult AddDither2(std::vector<DWORD>& t, int* amountConst, int* texcoordOu
     return DitherResult::Ok;
 }
 
+bool MakeAoReceiverMask(std::vector<DWORD>& vs, std::vector<DWORD>& ps, bool hair, bool transparent) {
+    if (transparent && !hair) return false;
+    if (vs.empty() || ps.empty() || vs.back() != 0xFFFFu || ps.back() != 0xFFFFu) return false;
+    const bool v3 = vs[0] == 0xFFFE0300u, p3 = ps[0] == 0xFFFF0300u;
+    if ((!v3 && vs[0] != 0xFFFE0200u && vs[0] != 0xFFFE0201u) ||
+        (!p3 && ps[0] != 0xFFFF0200u && ps[0] != 0xFFFF0201u)) return false;
+    const auto vi = Parse(vs), pi = Parse(ps);
+    if (vi.empty() || pi.empty()) return false;
+    constexpr DWORD regBits = 0x70001800u | 0x7FFu;
+    DWORD posType = 4, posNum = 0;
+    bool havePosition = !v3, coord[8] = {}, output[12] = {}, input[10] = {};
+    std::vector<size_t> positionWrites, colourWrites;
+    DWORD colourMask = 0;
+    for (const auto& x : vi) {
+        if (x.op == 0x19 || x.op == 0x1A || x.op == 0x1C || x.op == 0x1E) return false;
+        if (x.op == kDcl && x.len == 2 && Type(vs[x.at + 2]) == kOutput && v3) {
+            const DWORD sem = vs[x.at + 1], r = Num(vs[x.at + 2]);
+            if (r >= 12) return false;
+            output[r] = true;
+            if ((sem & 31) == 0 && ((sem >> 16) & 15) == 0) { posType = kOutput; posNum = r; havePosition = true; }
+            if ((sem & 31) == 5 && ((sem >> 16) & 15) < 8) coord[(sem >> 16) & 15] = true;
+        }
+        if (!v3 && x.op != kDcl && x.op != kDef && x.op != kDefI && x.op != kDefB)
+            for (size_t j = 1; j <= x.len; ++j)
+                if (Type(vs[x.at + j]) == kOutput && Num(vs[x.at + j]) < 8) coord[Num(vs[x.at + j])] = true;
+    }
+    if (!havePosition) return false;
+    for (const auto& x : vi)
+        if (x.op != kDcl && x.op != kDef && x.op != kDefI && x.op != kDefB && x.len &&
+            IsReg(vs[x.at + 1], posType, posNum)) positionWrites.push_back(x.at + 1);
+    for (const auto& x : pi) {
+        if (x.op == 0x19 || x.op == 0x1A || x.op == 0x1C || x.op == 0x1E) return false;
+        if (x.op == kDcl && x.len == 2) {
+            const DWORD r = ps[x.at + 2], sem = ps[x.at + 1];
+            if (p3 && Type(r) == kInput) {
+                if (Num(r) >= 10) return false;
+                input[Num(r)] = true;
+                if ((sem & 31) == 5 && ((sem >> 16) & 15) < 8) coord[(sem >> 16) & 15] = true;
+            }
+        }
+        if (x.op == kDef || x.op == kDefI || x.op == kDefB || x.op == kDcl) continue;
+        for (size_t j = 1; j <= x.len; ++j) {
+            const DWORD r = ps[x.at + j];
+            if (!p3 && Type(r) == kTexture && Num(r) < 8) coord[Num(r)] = true;
+            if (Type(r) == 9 || (Type(r) == kColorOut && Num(r) != 0)) return false;
+        }
+        if (x.len && Type(ps[x.at + 1]) == kColorOut) {
+            colourWrites.push_back(x.at + 1);
+            colourMask |= WMask(ps[x.at + 1]);
+        }
+    }
+    if (positionWrites.empty() || colourWrites.empty() || colourMask != 15) return false;
+    const auto vu = Scan(vs, vi), pu = Scan(ps, pi);
+    if (vu.maxTemp + 1 >= (v3 ? 32 : 12) || pu.maxTemp + 2 >= 32 || pu.maxConst + 1 >= 224) return false;
+    int tc = -1, vo = -1, pin = -1;
+    for (int i = 0; i < 8; ++i) if (!coord[i]) { tc = i; break; }
+    if (tc < 0) return false;
+    if (v3) { for (int i = 0; i < 12; ++i) if (!output[i]) { vo = i; break; } }
+    else vo = tc;
+    if (p3) { for (int i = 0; i < 10; ++i) if (!input[i]) { pin = i; break; } }
+    else pin = tc;
+    if (vo < 0 || pin < 0) return false;
+    auto v = vs, p = ps;
+    const DWORD vp = vu.maxTemp + 1, po = pu.maxTemp + 1, tmp = po + 1, cMask = pu.maxConst + 1;
+    for (const auto at : positionWrites) v[at] = (v[at] & ~regBits) | (Reg(kTemp, vp) & regBits);
+    for (const auto at : colourWrites) p[at] = (p[at] & ~regBits) | (Reg(kTemp, po) & regBits);
+    std::vector<Edit> ve, pe;
+    if (v3) ve.push_back({1, {Op(kDcl, 2), 0x80000005u | (static_cast<DWORD>(tc) << 16), Dst(kOutput, vo)}});
+    ve.push_back({v.size() - 1, {Op(kMov, 2), Dst(posType, posNum), Src(kTemp, vp),
+                               Op(kMov, 2), Dst(kOutput, vo), Src(kTemp, vp)}});
+    pe.push_back({1, {Op(kDcl, 2), p3 ? (0x80000005u | (static_cast<DWORD>(tc) << 16)) : 0x80000000u,
+                     Dst(p3 ? kInput : kTexture, pin)}});
+    pe.push_back({1, {Op(kDef, 5), Dst(kConst, cMask), F(hair ? -1.0f : 1.0f), F(1.0f), F(0.0f), F(0.0f)}});
+    pe.push_back({p.size() - 1, {Op(0x06, 2), Dst(kTemp, tmp, 1), Src(p3 ? kInput : kTexture, pin, kSwzW),
+                               Op(kMul, 3), Dst(kTemp, tmp, 1), Src(p3 ? kInput : kTexture, pin, 0xAA), Src(kTemp, tmp, kSwzX),
+                               Op(kMul, 3), Dst(kTemp, po, 1), Src(kTemp, tmp, kSwzX), Src(kConst, cMask, kSwzX),
+                               Op(kMov, 2), Dst(kTemp, po, 2, true), transparent ? Src(kTemp, po, kSwzW) : Src(kConst, cMask, 0x55),
+                               Op(kMov, 2), Dst(kColorOut, 0), Src(kTemp, po)}});
+    if (!p3) p[0] = 0xFFFF0201u;
+    Apply(v, std::move(ve)); Apply(p, std::move(pe));
+    vs = std::move(v); ps = std::move(p);
+    return true;
+}
+
 bool AddScreenPosVs(std::vector<DWORD>& t, int texcoord) {
     if (t.empty() || (t[0] != 0xFFFE0101 && t[0] != 0xFFFE0200 && t[0] != 0xFFFE0201)) return false;
     if (t.back() != 0x0000FFFFu) return false;

@@ -1,28 +1,35 @@
 # Performance: Faster Game File Lookups, Lot Lighting While Moving, Faster Texture / Cache Compression, Spread New Objects, Faster Object Lookups
 
-## Optimize rendering (published 2.5.6)
+## Current development state
 
-The Performance page has a live, persistent switch (`[ui] performance_mode`, default true).
-The label is Optimize rendering (PT-BR: Otimizar renderizacao). Existing explicit false
-settings remain false; missing settings, the row reset and Reset all use true.
-It leaves visual settings and existing performance patch choices unchanged. It caches the fully prepared outdoor
-object lamp parameter block in the existing exact-position lamp memo; every memo miss invalidates that block.
-Strength is applied after the cached copy, so live strength edits do not reuse stale values. It also indexes the
-light-map entries in map-key order, preserving the original round-robin hash sequence and frequency on both CPU
-and GPU paths. Insertions rebuild the index; Clear releases it before deleting map nodes. Disabling uses the original
-map traversal and prepares lamp rows per draw again. No visible update is postponed.
+The optional Optimize rendering switch and its mode-dependent code paths are removed in the current development
+branch. The renderer always uses the pre-2.5.6 code paths for those operations. Existing performance patches and
+their settings are unaffected. Configurations that still contain `[ui].performance_mode` continue to load; the
+unrecognized key is ignored and is omitted when the configuration is next saved.
 
-Adjacent atlas/strength PS constants are read together per draw for outdoor objects, instanced objects and snow; failures fall back to individual reads. No persistent shader-state cache is introduced. World chunks reuse only immutable metadata of validated, retained textures; contents and lightmap notifications remain live, and reset/release clears ownership.
+The published 2.5.6 behavior and validation record are retained in Git history and in the release documentation.
+In-game visual and performance validation of the removal is still required.
 
 Optional registry timing covers draw and state callbacks, including nested work. Disable detailed timing for A/B measurements; see [frame-profiler.md](frame-profiler.md).
 
-Offline constant-read tests passed 24577 checks, including bit preservation and failure fallback. Offline tests compare 10000 lamp blocks byte for byte with the former calculation and 10000 map-index results
-with the original traversal, including insertion, empty maps, reset and live mode switching. In-game image and
-performance validation is still required; no FPS improvement is claimed.
+## Published 2.5.6 implementation record
+
+The released Performance page had a live, persistent switch (`[ui] performance_mode`, default true). Explicit saved
+false settings remained false; missing settings, the row reset and Reset all used true. It left visual settings and
+existing performance patch choices unchanged. When enabled, it cached the prepared outdoor object lamp parameter
+block in the exact-position lamp memo, indexed light-map entries in map-key order, read adjacent atlas/strength pixel
+shader constants together, and reused immutable metadata for validated retained world-chunk textures. Disabling
+restored the original map traversal, per-draw lamp-row preparation, separate constant reads and texture metadata
+checks. No visible update was postponed.
+
+The published offline constant-read tests passed 24577 checks, including bit preservation and failure fallback. Tests
+compared 10000 lamp blocks byte for byte and 10000 map-index results with the original calculations, including
+insertion, empty maps, reset and live mode switching. Those checks do not establish in-game image or performance
+behavior; no FPS improvement was claimed.
 
 ## Historical implementation baseline (2026-09-29)
 
-The following records the original implementation and test plan. Build-flavour, menu and unpublished-status notes are historical; use the current release section above and [UI documentation](../ui.md) for current behavior.
+The following records the original implementation and test plan. Build-flavour, menu and unpublished-status notes are historical; use the current development section above and [UI documentation](../ui.md) for current behavior.
 
 > Six anti-stutter features from the perf round 2 plan (`research\perf2\plan.md`, candidates C1, C7, C9, C4, C6 and C8), written
 > on 2026-09-29 from the game's disassembly and Apex's own framework (no Sims3SettingsSetter code). Both builds (public

@@ -1278,12 +1278,18 @@ bool CardHeader(IconId icon, const char* title, const char* subtitle, const char
     const float iconBox = hasIcon ? 22.0f * u : 0.0f;
     const float bs = 24.0f * u; // header icon buttons
 
-    // The right cluster, laid out from the right edge: [chip] [hold] [before / after] [switch]
+    // The right cluster, laid out from the right edge: [chip] [hold] [before / after] [badge] [switch]
     float x = startX + width;
-    float toggleX = 0.0f, extraX = 0.0f, holdX = 0.0f, chipX = 0.0f;
+    float toggleX = 0.0f, badgeX = 0.0f, extraX = 0.0f, holdX = 0.0f, chipX = 0.0f;
+    const bool hasBadge = extra && extra->badge && *extra->badge;
+    const ImVec2 badgeSize = hasBadge ? ChipSize(extra->badge) : ImVec2(0.0f, 0.0f);
     if (toggle) {
         toggleX = x - toggleSize.x;
         x = toggleX - kSpace3 * u;
+    }
+    if (hasBadge) {
+        badgeX = x - badgeSize.x;
+        x = badgeX - kSpace2 * u;
     }
     const bool hasExtra = extra && extra->value;
     if (hasExtra) {
@@ -1333,6 +1339,11 @@ bool CardHeader(IconId icon, const char* title, const char* subtitle, const char
         ImGui::SetCursorPos(ImVec2(chipX, startY + std::fmax(0.0f, (rowH - chipSize.y) * 0.5f)));
         ChipImpl(chip, VioletTheme::kTextMuted);
         Tooltip(kCostChipTooltip);
+    }
+    if (hasBadge) {
+        ImGui::SetCursorPos(ImVec2(badgeX, startY + std::fmax(0.0f, (rowH - badgeSize.y) * 0.5f)));
+        ChipImpl(extra->badge, VioletTheme::kWarning);
+        Tooltip(extra->badgeTooltip);
     }
     if (hasHold) {
         ImGui::SetCursorPos(ImVec2(holdX, startY + std::fmax(0.0f, (rowH - bs) * 0.5f)));

@@ -171,7 +171,7 @@ void WriteDiag() {
     const uintptr_t lightMgr = root ? Rd<uintptr_t>(root + 0x1C0) : 0;
     if (!lightMgr) {
         g_status = "No world loaded";
-        Captures::Notify(I18n::Tr("Lighting snapshot: load a world first"), 4);
+        Captures::Notify(I18n::Tr("Lighting snapshot: load a world first"), 4, Captures::NoteKind::Warning);
         return;
     }
     // its own folder in Captures\ (never overwritten), with the log and settings (features/captures.h)
@@ -261,7 +261,7 @@ void WriteDiag() {
     g_status = std::format("Saved: {} lights, {} lot stories, {} rooms", g_lights.size(), managers, rooms);
     LOG_INFO("[LightDiag] " + g_status);
     Captures::WriteText(folder / L"Lighting snapshot.txt", out.str());
-    Captures::Finish(folder, std::format("a snapshot of every light and room ({} lights, {} lot stories, {} rooms)", g_lights.size(), managers, rooms));
+    Captures::Finish(folder, std::format("a snapshot of every light and room ({} lights, {} lot stories, {} rooms)", g_lights.size(), managers, rooms), Captures::CaptureKind::LightingSnapshot);
 }
 
 } // namespace

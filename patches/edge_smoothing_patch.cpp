@@ -1141,11 +1141,7 @@ class EdgeSmoothingPatch : public ApexPatch {
             ApexUi::Tooltip("Turn it on in the NVIDIA Control Panel (DSR) or AMD Software (VSR), then pick 1440p or 4K in the game; "
                             "it costs more and the game's interface gets smaller");
         }
-        if (ApexUi::IconTextButton("Reset Edge Smoothing##EdgeSmoothing", IconId::RotateCcw, "Back to SMAA, High quality")) {
-            ApexUi::ReportChange("Edge Smoothing reset");
-            g.p = Params{};
-            changed = true;
-        }
+
         if (changed) NotifySettingChanged();
     }
 

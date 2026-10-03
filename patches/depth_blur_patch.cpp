@@ -1139,11 +1139,7 @@ class DepthBlurPatch : public ApexPatch {
             changed |= ApexUi::SwitchRow("Glowing lights", &g.p.glowLights, "Lamps stay bright in the blur", kDefaults.glowLights);
             ApexUi::EndAdvanced();
         }
-        if (ApexUi::IconTextButton("Reset Depth Blur##DepthBlur", IconId::RotateCcw, "Back to the default focus, blur and look")) {
-            ApexUi::ReportChange("Depth Blur reset");
-            g.p = Params{};
-            changed = true;
-        }
+
         if (changed) NotifySettingChanged();
     }
 

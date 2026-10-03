@@ -3,12 +3,20 @@
 This page is the operating manual for working on Apex Radiance (formerly Sims3 Settings Setter Apex Edition). The
 user's rules in section 3 are not optional.
 
+## Version branches and pull requests
+
+Before every release, apply [apex-review-pr-release](../.codex/skills/apex-review-pr-release/SKILL.md). Substantive code receives independent review and evidence-based discussion; fix demonstrated bugs/regressions, assess equivalence-preserving optimizations, preserve intended visuals and update documentation in its existing format. Record the exact reviewed/tested commit and unresolved gameplay/performance validation. Review relevant changes added afterwards before publishing. This is a release requirement, not authorization to merge or publish; artifact verification after publication must match the reviewed build.
+
+New versions/features are developed on a branch with small coherent commits and a draft PR. Resume the existing PR across chats; keep its current scope, tested commit and remaining validation visible. Concurrent contributors use separate worktrees and contribution branches, with one integrator updating the shared PR. Fetch and inspect new remote commits before pushing; never overwrite another agent's work with a force push. Merge and release follow explicit user requests.
+
+Reusable workflows are tracked in [.codex/skills/apex-version-pr-workflow](../.codex/skills/apex-version-pr-workflow/SKILL.md), [.codex/skills/apex-compile-project](../.codex/skills/apex-compile-project/SKILL.md), and [.codex/skills/apex-review-pr-release](../.codex/skills/apex-review-pr-release/SKILL.md). The UI workflow and portable audit are in [.agents/skills/apex-menu](../.agents/skills/apex-menu/SKILL.md), with a matching [Claude Code discovery copy](../.claude/skills/apex-menu/SKILL.md); keep both and their audit scripts in sync. The audit uses Perl and accepts the repository root as an argument. The compilation helper accepts a reviewed executable/argument recipe, verifies expected artifacts, saves full local logs and reuses successful commands. Skill caches/checkpoints and task scratch/output directories are ignored; no machine-specific recipes or build binaries are committed.
+
 Paths used below:
 
 | What | Path |
 |---|---|
 | Combined build (frozen, tag `combined-final`, commit 45e36e2, branch `night-remake`) | `%USERPROFILE%\Desktop\S3SS-dev\Sims3SettingsSetter\` |
-| Standalone project, Apex Radiance (folder name not changed yet) | `%USERPROFILE%\Desktop\S3SS-dev\S3SSApex\` |
+| Standalone project, Apex Radiance | `%USERPROFILE%\Documents\Projetos\ApexRadiance\` |
 | Game binaries (`TS3W.exe`, `Sims3LauncherW.exe`, ASIs, DXVK `d3d9.dll`) | `C:\Games\Hydra\The Sims 3\Game\Bin\` |
 | Game shaders (read-only reference) | `C:\Games\Hydra\The Sims 3\Game\Bin\Shaders_Win32.precomp` |
 | Mod config, log and dev outputs | standalone: `%USERPROFILE%\Documents\Electronic Arts\The Sims 3\Apex Radiance\`; combined build and official S3SS: `...\The Sims 3\S3SS\`; previous standalone (S3SSApex.asi, migrated from): `...\S3SS\Apex\` |

@@ -2,7 +2,7 @@
 
 These fixtures access temporary capture files and an ImGui context. They do not run the game or validate its GPU, lighting, loading transitions or point selection callback.
 
-`report_check.cpp` exercises capture storage, atomic required descriptions, collections, removal/Undo and real WIC image failure/retry. `recorder_check.cpp` exercises the production request/cancel/deadline implementation. `overlay_check.cpp` checks the clock and extracted loading gate against simulated state.
+`report_check.cpp` exercises capture storage, atomic required descriptions, collections, removal/Undo and real WIC image failure/retry. It also checks that the filtered player screenshot targets an isolated game's Documents `Screenshots` folder. `recorder_check.cpp` exercises the production request/cancel/deadline implementation. `overlay_check.cpp` checks the clock and extracted loading gate against simulated state.
 
 `menu_check.cpp` draws the extracted native Report page with the real Violet widgets, Segoe fonts, Lucide icons and translation tables. It renders 312 fixture frames across EN/PT/ES/FR and normal/narrow layouts, checks visible controls, and clicks the real buttons in 18 interaction scenarios. Recording and probe requests are stubbed; note files are real. The fixture's `frames` count excludes the interaction frames.
 

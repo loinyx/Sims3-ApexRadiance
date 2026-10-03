@@ -150,6 +150,26 @@ void OnGameDraw(IDirect3DDevice9* dev) {
     for (const auto& e : run) e.second(dev);
 }
 
+// With the game's UI hidden there may be no depth-off UI draw to mark the end of the scene. In that case run the same
+// ordered effects at the game's EndScene, before Apex's overlay and Picture's scene copy. Keep the draw-triggered path
+// above for frames that do have a depth-off boundary (including its existing interior behavior).
+void AtEndSceneBeforeOverlay(IDirect3DDevice9* dev) {
+    if (!dev || g_done || g_sceneDraws < kMinSceneDraws || !g_backBuffer || g_curRT0 != g_backBuffer) return;
+    IDirect3DSurface9* rt = nullptr;
+    if (FAILED(dev->GetRenderTarget(0, &rt)) || !rt) return;
+    const bool onBackBuffer = rt == g_backBuffer;
+    rt->Release();
+    if (!onBackBuffer) return;
+
+    g_done = true; // no depth-off scene/UI draw occurred this frame; one fallback pass is enough
+    std::vector<std::pair<int, PostScene::Effect>> run;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        run = g_effects;
+    }
+    for (const auto& e : run) e.second(dev);
+}
+
 // A Reset replaces the back buffer and sets render target 0 to it without a SetRenderTarget call: both are read again at
 // the next frame boundary
 void OnPreReset(IDirect3DDevice9*) {
@@ -160,6 +180,7 @@ void OnPreReset(IDirect3DDevice9*) {
 
 void RegisterHooks() {
     using namespace D3D9Hooks;
+    RenderCallbacks::Add(RenderCallbacks::endSceneBeforeOverlay, AtEndSceneBeforeOverlay);
     RenderCallbacks::Add(RenderCallbacks::preReset, OnPreReset);
     RegisterPresent(kHookName, [](DeviceContext& ctx, const RECT*, const RECT*, HWND, const RGNDATA*) {
         OnFrameBoundary(ctx.device);
@@ -205,6 +226,7 @@ void Remove(Effect fn) {
     if (g_effects.empty() && g_hooks) {
         g_hooks = false;
         D3D9Hooks::UnregisterAll(kHookName);
+        RenderCallbacks::Remove(RenderCallbacks::endSceneBeforeOverlay, AtEndSceneBeforeOverlay);
         RenderCallbacks::Remove(RenderCallbacks::preReset, OnPreReset);
     }
 }

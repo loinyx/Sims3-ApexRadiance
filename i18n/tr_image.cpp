@@ -8,6 +8,10 @@ namespace {
 
 // {English (exactly as in the code), Portuguese (Brazil), Spanish, French}
 const I18n::Entry kEntries[] = {
+    {"Sim intensity", "Intensidade nos Sims", "Intensidad en los Sims", "Intensité sur les Sims"},
+    {"Shade on supported Sim materials; 0% removes it, 100% keeps the original", "Sombra nos materiais de Sims reconhecidos; 0% remove, 100% preserva a original", "Sombra en materiales de Sims reconocidos; 0% la elimina, 100% conserva la original", "Ombre sur les matériaux Sims reconnus ; 0 % la retire, 100 % conserve l'originale"},
+    {"Distance at which the shade fades out outside map view", "Distância em que a sombra desaparece fora da visão de mapa", "Distancia a la que desaparece la sombra fuera de la vista de mapa", "Distance à laquelle l'ombre disparaît hors de la vue carte"},
+    {"Sim shading control is unavailable; original shade is kept", "Controle de sombra nos Sims indisponível; a sombra original foi mantida", "Control de sombra de Sims no disponible; se conserva la sombra original", "Contrôle d'ombre des Sims indisponible ; l'ombre originale est conservée"},
     {"FXAA is recommended for lower GPU cost; SMAA is an alternative", "FXAA é recomendado por exigir menos da placa de vídeo; SMAA é uma alternativa", "Se recomienda FXAA porque exige menos a la tarjeta gráfica; SMAA es una alternativa", "FXAA est recommandé pour moins solliciter la carte graphique ; SMAA est une alternative"},
     {"could not copy the scene for SMAA", "não foi possível copiar a cena para o SMAA", "no se pudo copiar la escena para SMAA", "impossible de copier la scène pour SMAA"},
     {"Also finds edges between different colors of similar brightness", "Também encontra bordas entre cores diferentes com brilho parecido", "También detecta bordes entre colores distintos de brillo parecido", "Détecte aussi les bords entre couleurs différentes de luminosité similaire"},
@@ -430,6 +434,20 @@ const I18n::Entry kEntries[] = {
      "A Cor também tinge os menus do jogo aqui, porque o jogo desenha a imagem de um jeito que o Apex não consegue separar; desligar a Suavização de Bordas do próprio jogo (Opções \xE2\x80\xBA Gráficos) costuma resolver",
      "El Color también tiñe los menús del juego aquí, porque el juego dibuja la imagen de una forma que Apex no puede separar; desactivar el Suavizado de Bordes del propio juego (Opciones \xE2\x80\xBA Gráficos) suele solucionarlo",
      "La Couleur teinte aussi les menus du jeu ici, car le jeu dessine l'image d'une façon qu'Apex ne peut pas séparer ; désactiver le Lissage des Bords du jeu (Options \xE2\x80\xBA Graphismes) règle généralement le problème"},
+    // Sim occlusion card
+    {"Sim Occlusion", "Oclusão dos Sims", "Oclusión de los Sims", "Occlusion des Sims"},
+    {"Softer shade on Sims and hair", "Sombras mais suaves nos Sims e no cabelo", "Sombras más suaves en Sims y cabello", "Ombres plus douces sur les Sims et les cheveux"},
+    {"Adjust occlusion on Sims separately from the scene", "Ajusta a oclusão dos Sims separadamente do cenário", "Ajusta la oclusión de los Sims por separado del escenario", "Ajuste l’occlusion des Sims séparément de la scène"},
+    {"Needs Ambient Occlusion", "Precisa da Oclusão de Ambiente", "Necesita Oclusión Ambiental", "Nécessite l’Occlusion Ambiante"},
+    {"Shade on the body, face and clothes; hair has its own control", "Sombra no corpo, rosto e roupas; o cabelo tem seu próprio controle", "Sombra en cuerpo, rostro y ropa; el cabello tiene su propio control", "Ombre sur le corps, le visage et les vêtements ; les cheveux ont leur propre réglage"},
+    {"Hair intensity", "Intensidade no cabelo", "Intensidad en el cabello", "Intensité sur les cheveux"},
+    {"Shade on recognized hair; 0% removes it, 100% keeps the original", "Sombra no cabelo reconhecido; 0% remove, 100% mantém a original", "Sombra en el cabello reconocido; 0% la elimina, 100% conserva la original", "Ombre sur les cheveux reconnus ; 0 % la supprime, 100 % conserve l’originale"},
+    {"Maximum darkening", "Escurecimento máximo", "Oscurecimiento máximo", "Assombrissement maximal"},
+    {"Limit the maximum added shade on Sims and hair", "Limita a sombra máxima adicionada aos Sims e ao cabelo", "Limita la sombra máxima añadida a Sims y cabello", "Limite l’ombre maximale ajoutée aux Sims et aux cheveux"},
+    {"Transparent hair", "Cabelo transparente", "Cabello transparente", "Cheveux transparents"},
+    {"Also adjust supported transparent hair strands", "Também ajusta mechas transparentes compatíveis", "También ajusta mechones transparentes compatibles", "Ajuste aussi les mèches transparentes compatibles"},
+    {"Show Sim coverage", "Mostrar cobertura dos Sims", "Mostrar cobertura de los Sims", "Afficher la couverture des Sims"},
+    {"Blue shows Sims, green shows hair, black is unrecognized; preview is not saved", "Azul mostra Sims, verde mostra cabelo, preto não foi reconhecido; prévia não é salva", "Azul muestra Sims, verde cabello, negro no reconocido; la vista previa no se guarda", "Bleu : Sims, vert : cheveux, noir : non reconnu ; aperçu non enregistré"},
 };
 const I18n::Table kTable(kEntries, std::size(kEntries));
 

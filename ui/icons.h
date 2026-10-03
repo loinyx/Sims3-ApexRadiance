@@ -78,6 +78,7 @@ enum class IconId : int {
     Eye,           // eye
     Bookmark,      // bookmark
     Trash2,        // trash-2
+    UserRound,     // user-round
     Count,
     None = Count, // "no icon" for widgets that take an optional one
 };

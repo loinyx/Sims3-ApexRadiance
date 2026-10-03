@@ -17,7 +17,10 @@ re-derive anything from the long Portuguese notes. Start with [../CLAUDE.md](../
 
 ### Current release (2.5.6)
 
-- [Performance](features/performance.md): Optimize rendering, defaults, preserved settings, constant reads, texture metadata and validation limits.
+The current development PR removes the optional Optimize rendering switch and restores its original rendering paths;
+this does not change the already published 2.5.6 build.
+
+- [Performance](features/performance.md): rendering paths, lookup caches, lighting budgets, compression, scene-node scheduling, object indexing and validation limits.
 - [World lamp response](features/night-lighting/world-lamp-response.md): captured evidence, terrain/rig reconciliation, failed approaches and player acceptance.
 - [Roads](features/night-lighting/roads.md): alpha-blended sidewalk shader recognition.
 - [Frame profiler](features/frame-profiler.md): optional timing of draw and state callbacks.
@@ -70,7 +73,7 @@ re-derive anything from the long Portuguese notes. Start with [../CLAUDE.md](../
 | [features/banding-fix.md](features/banding-fix.md) | Banding Fix: dither of the scene pixel shaders |
 | [features/depth-blur.md](features/depth-blur.md) | Depth Blur (off in map view) |
 | [features/frame-profiler.md](features/frame-profiler.md) | Frame Profiler (developer mode only): sampling, per-service and per-hook timing, hitches |
-| [features/performance.md](features/performance.md) | Optimize rendering, lookup caches, lighting budgets, compression, scene-node scheduling, object indexing and offline validation |
+| [features/performance.md](features/performance.md) | Rendering paths, lookup caches, lighting budgets, compression, scene-node scheduling, object indexing and offline validation |
 | [changes-since-0.1.0.md](changes-since-0.1.0.md) | Lighting changes after v0.1.0 and the re-add order (fences first) |
 
 ### Developer tools (developer mode only)

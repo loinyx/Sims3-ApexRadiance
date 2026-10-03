@@ -58,6 +58,7 @@ confirmed at runtime.
 | 0x009E1B70 | SceneCaptureManager getter: `[[0x011E9AF0]+0x20]` | full.asm |
 | 0x009DC550 | "capture pending?" test before 0x009DE140 | f_ECA960.asm (inferred) |
 | **0x009DE140** | **SceneCaptureManager::Process**(callback 0x00ECA030, app): thumbnails / photos / video captures | f_ECA960.asm; profiler_targets.tsv |
+| Apex player screenshot | Reads the presented D3D9 back buffer in the registered Present hook; this is the path that includes Apex's in-frame post-processing. It does not call SceneCaptureManager. | `features/captures.cpp`; in-game visual validation pending |
 | 0x00ECA030 | capture render callback: BeginFrame, render frame **with arg 0 (no Present)**, EndFrame | full.asm |
 | 0x006E8330 | Scene getter `[0x011D1860]` | full.asm |
 | **0x006EBB70** | **Scene::BeginFrame**: submits scene jobs, hands the render queue over; returns early if scene+0x290 set or renderer+0x8D set; may wait on the previous frame's job | full.asm; profiler_targets.tsv |

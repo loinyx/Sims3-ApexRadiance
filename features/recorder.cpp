@@ -182,7 +182,7 @@ void Stop() {
     }
     Captures::WriteText(folder / L"Recording.txt", out.str());
     LOG_INFO(std::format("[Recorder] Saved {} lines to Captures\\{}", all.size(), name));
-    Captures::Finish(folder, std::format("a recording of {:.0f} s of the lighting", (end - g_startTick) / 1000.0));
+    Captures::Finish(folder, std::format("a recording of {:.0f} s of the lighting", (end - g_startTick) / 1000.0), Captures::CaptureKind::Recording);
     g_saved = name;
     g_savedAt = GetTickCount();
 }

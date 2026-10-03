@@ -225,13 +225,15 @@ struct HeaderExtra {
     IconId holdIcon = IconId::None; // None = no hold button
     const char* holdTooltip = nullptr;
     bool held = false; // set by CardHeader
+    const char* badge = nullptr; // optional warning-colour chip immediately left of the header switch
+    const char* badgeTooltip = nullptr;
 };
 // Tooltip of the performance chips
 inline constexpr const char* kCostChipTooltip = "Measured cost on your GPU per frame";
 // The card's header row: violet icon, bold title, muted subtitle, the tooltip on hover (the feature description) and,
 // when toggle is not null, the switch on the right (greyed out and inert when toggleEnabled is false; the title stays
-// readable). chip (optional) = a small muted chip left of the switch (the GPU cost, "~0.4 ms"). True on the frame the
-// switch was clicked (it reports "<title> turned on/off").
+// readable). chip (optional) = a small muted chip left of the switch (the GPU cost, "~0.4 ms"). HeaderExtra::badge
+// (optional) draws a warning-colour label immediately left of the switch. True on the frame the switch was clicked.
 bool CardHeader(IconId icon, const char* title, const char* subtitle, const char* tooltip, bool* toggle, bool toggleEnabled = true,
                 HeaderExtra* extra = nullptr, const char* chip = nullptr);
 // An overview row (Overview page, a list inside one card): icon, name (clickable: *nameClicked), muted phrase under it,

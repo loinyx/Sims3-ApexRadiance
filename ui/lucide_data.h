@@ -386,8 +386,7 @@ inline constexpr Element kX[] = {
     {Kind::Path, "M18 6 6 18", {}, false},
     {Kind::Path, "m6 6 12 12", {}, false},
 };
-
-// ---- Added for the search / undo / looks / profiles features (2026-09-28). These were not in the downloaded set:
+// ---- Added by hand from Lucide SVGs for search / undo / looks / profiles / Sim Occlusion:
 // their elements were entered by hand from Lucide's published icons (same 24x24 stroke format), not copied from a file
 // in third_party/lucide/icons/.
 // search
@@ -439,6 +438,11 @@ inline constexpr Element kTrash2[] = {
     {Kind::Path, "M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2", {}, false},
     {Kind::Line, nullptr, {10.0f, 11.0f, 10.0f, 17.0f}, false},
     {Kind::Line, nullptr, {14.0f, 11.0f, 14.0f, 17.0f}, false},
+};
+// user-round.svg
+inline constexpr Element kUserRound[] = {
+    {Kind::Circle, nullptr, {12.0f, 8.0f, 5.0f}, false},
+    {Kind::Path, "M20 21a8 8 0 0 0-16 0", {}, false},
 };
 
 inline constexpr IconData kIcons[] = {
@@ -505,6 +509,7 @@ inline constexpr IconData kIcons[] = {
     {"eye", kEye, static_cast<int>(sizeof(kEye) / sizeof(kEye[0]))},
     {"bookmark", kBookmark, static_cast<int>(sizeof(kBookmark) / sizeof(kBookmark[0]))},
     {"trash-2", kTrash2, static_cast<int>(sizeof(kTrash2) / sizeof(kTrash2[0]))},
+    {"user-round", kUserRound, static_cast<int>(sizeof(kUserRound) / sizeof(kUserRound[0]))},
 };
 
 } // namespace ApexUi::LucideData

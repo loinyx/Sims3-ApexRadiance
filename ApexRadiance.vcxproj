@@ -203,7 +203,6 @@
     <ClInclude Include="features\rig_tracker.h" />
     <ClInclude Include="features\scene_budget.h" />
     <ClInclude Include="features\shader_patches.h" />
-    <ClInclude Include="features\performance_mode.h" />
     <ClInclude Include="features\terrain_chunk_relight.h" />
     <ClInclude Include="framework\apex_log.h" />
     <ClInclude Include="framework\apex_paths.h" />

@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <string>
 #include <vector>
+#include <windows.h>
 
 namespace Captures {
 
@@ -19,7 +20,8 @@ std::filesystem::path Root(); // ...\Apex Radiance\Captures
 std::filesystem::path NewFolder(const char* kind);
 // The folder is complete: copies the log, the settings and the crash report into it, writes "About this capture.txt"
 // (what = one line on what was captured). The save receipt waits for asynchronous PNG completion and reports failures.
-void Finish(const std::filesystem::path& folder, const std::string& what);
+enum class CaptureKind { Generic, Recording, LightCapture, LightingSnapshot };
+void Finish(const std::filesystem::path& folder, const std::string& what, CaptureKind kind = CaptureKind::Generic);
 // Render-thread capture output. Failed text is retained for RetrySave, without repeating the measurement.
 bool WriteText(const std::filesystem::path& file, const std::string& text);
 void SetDescription(const std::string& text);
@@ -44,16 +46,21 @@ void RetrySave(); // text and metadata retained; a failed screenshot is taken ag
 void SetScreenshots(bool on);
 bool Screenshots();
 bool ScreenshotPending(); // render thread: a screenshot is taken at the next Present (the capture notes are not drawn)
+// Captures the finished back buffer (all Apex passes included) into Screenshots, optionally hiding the game's F10 UI for one frame.
+bool RequestPlayerScreenshot(bool hideGameUi);
+void ObserveGameUiKey(WPARAM vk, bool repeat); // call for game-window key-down messages to track the F10 visibility toggle
 // "<date time> Report": only the log, the settings and the crash report (for any problem, crashes included)
 void SaveReport();
 // ApexRadiance_Crash.txt was written in the last 7 days: its date and time ("2026-09-30 21:50"), else ""
 std::string RecentCrash();
 
 // On-screen note at the top center for a few seconds; recording = the live recording note
-void Notify(const std::string& text, int seconds = 5);
+enum class NoteKind { Info, Success, Warning, Saving, Screenshot, Probe };
+void Notify(const std::string& text, int seconds = 5, NoteKind kind = NoteKind::Info);
 struct Note {
     std::string text;
     bool visible = false;
+    NoteKind kind = NoteKind::Info;
 };
 Note CurrentNote(); // render thread: the note to draw now
 
