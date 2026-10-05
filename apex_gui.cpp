@@ -1725,12 +1725,13 @@ struct ProfilesState {
 ProfilesState g_profiles;
 
 // ---- Welcome page: a new installation's first menu open offers a built-in profile to start with. Shown once: the first
-// draw sets [ui] start_profile_done; it stays on screen this session until answered or another page is opened. ----
-int g_welcomeState = -1;                     // -1 not decided yet, 0 not shown, 1 showing
+// draw sets [ui] start_profile_done; it stays on screen this session until answered or another page is opened. When an
+// Attention item applies, a second step ("Before you play") lists them after the profile choice. ----
+int g_welcomeState = -1;                     // -1 not decided yet, 0 not shown, 1 profile step, 2 Before you play
 int g_welcomeChoice = ApexPresets::kDefault; // the selected starting profile (Default, listed second)
 bool WelcomeActive() {
     if (g_welcomeState < 0) g_welcomeState = ApexConfig::GetUi().startProfileDone ? 0 : 1;
-    return g_welcomeState == 1;
+    return g_welcomeState >= 1;
 }
 void HideWelcome() { g_welcomeState = 0; }
 
@@ -2423,22 +2424,28 @@ void Sidebar(bool collapsed) {
 
 
 // Queried only while drawing the open menu; the backbuffer reflects actual MSAA after reset.
-void GameAaCompatibilityNotice() {
+bool RefreshGameAa() {
     g_menuGameAaOn = false;
-    if (Loading()) return;
+    if (Loading()) return false;
     auto* device = ApexD3D::Device();
-    if (!device) return;
+    if (!device) return false;
     IDirect3DSurface9* backbuffer = nullptr;
-    if (FAILED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backbuffer)) || !backbuffer) return;
+    if (FAILED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backbuffer)) || !backbuffer) return false;
     D3DSURFACE_DESC desc{};
     const HRESULT result = backbuffer->GetDesc(&desc);
     backbuffer->Release();
-    if (FAILED(result) || desc.MultiSampleType == D3DMULTISAMPLE_NONE) return;
+    if (FAILED(result) || desc.MultiSampleType == D3DMULTISAMPLE_NONE) return false;
     g_menuGameAaOn = true;
+    return true;
+}
+
+// allEffects: list every blocked effect, as the Attention page does (the welcome step has no page of its own)
+void GameAaCompatibilityNotice(bool allEffects = false) {
+    if (!RefreshGameAa()) return;
     const auto active = [](const char* name) { auto* p = Find(name); return p && p->IsEnabled(); };
     const bool aa = active("EdgeSmoothing"), blur = active("DepthBlur"), ao = active("AmbientOcclusion");
     const bool water = active(kNightLighting) && NightLighting::ShoreReflection() > 0.0f;
-    const bool overview = g_page == PageOverview || g_page == PageConflicts;
+    const bool overview = allEffects || g_page == PageOverview || g_page == PageConflicts;
     const bool relevant = overview ? (aa || blur || ao || water) :
         (g_page == PageDepthBlur && blur) || (g_page == PageAmbientOcclusion && ao) ||
         (g_page == PageEdgeSmoothing && aa) || (g_page == PageWaterSnow && water);
@@ -2475,7 +2482,7 @@ void MarkWelcomeShown() {
 
 // The content area while the welcome is pending: one card with the built-in profiles (the same choice rows as the
 // lighting balance) and two actions. Apply goes through the Saved profiles path, so Undo is offered.
-void WelcomePage() {
+void WelcomeProfileStep() {
     MarkWelcomeShown();
     ApexUi::PageTitle("Welcome to " APEX_PRODUCT_NAME, "Choose how you want to start");
     ImGui::PushID("Welcome");
@@ -2498,7 +2505,7 @@ void WelcomePage() {
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::fmax(0.0f, ImGui::GetContentRegionAvail().x - actionsW));
             if (ApexUi::TextButton("Keep as it is", "Your current settings stay as they are")) {
                 LOG_INFO("[Menu] Welcome: settings kept");
-                HideWelcome();
+                g_welcomeState = 2;
             }
             ImGui::SameLine();
             ImGui::BeginDisabled(Loading());
@@ -2509,13 +2516,67 @@ void WelcomePage() {
                 if (ApexPresets::Read(choice, state)) parts = ApexConfig::ProfilePartsOf(state);
                 LOG_INFO(std::format("[Menu] Welcome: {} chosen", ApexPresets::Get(choice).name));
                 LoadBuiltinProfileNow(choice, parts & ~(ApexConfig::kPartShortcuts | ApexConfig::kPartDeveloper));
-                HideWelcome();
+                g_welcomeState = 2;
             }
             ImGui::EndDisabled();
         }
     }
     ApexUi::EndCard();
     ImGui::PopID();
+}
+
+void DrawPage();
+
+// The welcome's second step: the Attention items, only when one applies once the profile is chosen. Decided on entry
+// (with the chosen profile already applied), then kept until answered, so a fix's result stays readable.
+void WelcomeAttentionStep() {
+    static int entered = 0; // 0 not yet, 1 shown
+    if (!entered) {
+        RefreshGameAa();
+        if (Loading() || !HasAttentionItems()) {
+            HideWelcome(); // nothing to show (or not known yet: the Attention page still lists it later)
+            ImGui::PushID(g_page);
+            DrawPage();
+            ImGui::PopID();
+            return;
+        }
+        entered = 1;
+        LOG_INFO("[Menu] Welcome: Before you play shown");
+    }
+    ApexUi::PageTitle("Before you play", "Some game settings stop a few effects; fix them now or later in Attention");
+    ImGui::PushID("WelcomeAttention");
+    GameAaCompatibilityNotice(true);
+    S3SSRoomColourItem();
+    OldStandaloneItem();
+    const bool pending = HasAttentionItems();
+    if (!pending) ApexUi::IconNote(IconId::CircleCheck, "Done: nothing is blocking the effects any more", VioletTheme::kSuccess);
+    ApexUi::Gap(ApexUi::kSpace2);
+    {
+        const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Primary);
+        if (ApexUi::TextButton("Back##WelcomeAttention", "Choose the starting profile again")) {
+            entered = 0;
+            g_welcomeState = 1;
+        }
+        const float gap = ImGui::GetStyle().ItemSpacing.x;
+        const float actionsW = (pending ? ApexUi::ButtonWidth("Fix later", false) + gap : 0.0f) + ApexUi::ButtonWidth("Start playing", true);
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::fmax(0.0f, ImGui::GetContentRegionAvail().x - actionsW));
+        if (pending) {
+            if (ApexUi::TextButton("Fix later", "Opens the Attention page; it stays in the menu until everything is fixed")) {
+                LOG_INFO("[Menu] Welcome: fix later");
+                g_page = PageConflicts;
+                HideWelcome();
+            }
+            ImGui::SameLine();
+        }
+        if (ApexUi::IconTextButton("Start playing", IconId::Check, nullptr, ButtonKind::Primary)) HideWelcome();
+    }
+    ImGui::PopID();
+}
+
+void WelcomePage() {
+    if (g_welcomeState == 2) WelcomeAttentionStep();
+    else WelcomeProfileStep();
 }
 
 void DrawPage() {
