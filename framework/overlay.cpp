@@ -299,10 +299,13 @@ void SetCaptureSuppressed(bool suppressed) { g_captureSuppressed.store(suppresse
 
 bool PostGameKeyPress(WPARAM vk) {
     if (!g_window || !g_original || !IsWindow(g_window)) return false;
-    const LPARAM scan = static_cast<LPARAM>((MapVirtualKeyW(static_cast<UINT>(vk), MAPVK_VK_TO_VSC) << 16) | kSyntheticGameKey);
-    if (!PostMessageW(g_window, WM_KEYDOWN, vk, scan)) return false;
+    // Windows delivers a bare F10 as WM_SYSKEYDOWN/WM_SYSKEYUP: post it the same way a real press arrives.
+    const bool sys = vk == VK_F10;
+    const UINT downMsg = sys ? WM_SYSKEYDOWN : WM_KEYDOWN, upMsg = sys ? WM_SYSKEYUP : WM_KEYUP;
+    const LPARAM scan = static_cast<LPARAM>((MapVirtualKeyW(static_cast<UINT>(vk), MAPVK_VK_TO_VSC) << 16) | 1 | kSyntheticGameKey);
+    if (!PostMessageW(g_window, downMsg, vk, scan)) return false;
     const LPARAM up = scan | (1ll << 30) | (1ll << 31);
-    if (!PostMessageW(g_window, WM_KEYUP, vk, up) && !PostMessageW(g_window, WM_KEYUP, vk, up))
+    if (!PostMessageW(g_window, upMsg, vk, up) && !PostMessageW(g_window, upMsg, vk, up))
         LOG_WARNING("[Overlay] Could not post the synthetic game key release");
     return true;
 }

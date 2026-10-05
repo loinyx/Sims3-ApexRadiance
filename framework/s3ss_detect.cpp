@@ -221,6 +221,22 @@ bool S3SSOverlayDisabled() {
     return (*root)["qol"]["ui"]["disable_overlay"].value_or(false);
 }
 
+std::optional<std::array<float, 3>> SavedRoomAmbientOverride(bool fresh) {
+    static std::mutex lock;
+    static ULONGLONG checkedAt = 0;
+    static std::optional<std::array<float, 3>> saved;
+    std::lock_guard<std::mutex> guard(lock);
+    const ULONGLONG now = GetTickCount64();
+    if (!fresh && checkedAt && now - checkedAt < 3000) return saved;
+    checkedAt = now;
+    saved.reset();
+    if (!Scan().s3ssLoaded) return saved;
+    std::string text;
+    if (!ApexUtil::ReadFileBytes(ApexPaths::S3SSConfigFile(), text)) return saved;
+    if (const auto correction = S3SSAmbientPolicy::Prepare(text)) saved = correction->rgb;
+    return saved;
+}
+
 RoomAmbientCorrection CorrectRoomAmbientOverride() {
     RoomAmbientCorrection result;
     if (!Scan().s3ssLoaded) return result;

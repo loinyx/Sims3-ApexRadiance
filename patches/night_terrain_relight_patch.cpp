@@ -2366,43 +2366,9 @@ class NightTerrainRelightPatch : public ApexPatch {
                 }
                 return changed;
             });
-            if (S3SSDetect::Scan().s3ssLoaded) {
-                ApexUi::Gap(ApexUi::kSpace2);
-                if (ApexUi::BeginCard("##S3SSCompatibility")) {
-                    ApexUi::CardHeader(ApexUi::IconId::Puzzle, "S3SS compatibility",
-                        "If S3SS's saved room-light color conflicts with Apex, you can correct it here", nullptr, nullptr);
-                    ApexUi::CardDivider();
-                    if (ApexUi::BeginAdvanced("##S3SSCompatibilityDetails", "What changes")) {
-                        ApexUi::MutedText("When you choose the action below, Apex backs up S3SS.toml and disables only the saved BradyBunchBlue RGB override. This is separate from the Brady Bunch BEGONE switch; turning that switch off does not disable the saved color. All other S3SS settings stay as they are. Apex applies the correction to this session when Rooms at Night is on; restart the game for S3SS to keep using its default room-light color.");
-                        ApexUi::EndAdvanced();
-                    }
-                    static bool attemptedCorrection = false;
-                    static S3SSDetect::RoomAmbientCorrectionStatus correctionStatus = S3SSDetect::RoomAmbientCorrectionStatus::S3SSNotLoaded;
-                    if (ApexUi::BeginControlRow("Correct the S3SS setting", "Back up S3SS.toml, then disable only the saved BradyBunchBlue RGB override",
-                            ApexUi::ButtonWidth("Back up and correct##S3SSFix", true))) {
-                        if (ApexUi::IconTextButton("Back up and correct##S3SSFix", ApexUi::IconId::Save, "Other S3SS settings are preserved")) {
-                            const auto result = UnlitRooms::CorrectS3SSConflict();
-                            correctionStatus = result.status;
-                            attemptedCorrection = true;
-                        }
-                        ApexUi::EndControlRow();
-                    }
-                    if (attemptedCorrection) {
-                        const char* statusText = "";
-                        switch (correctionStatus) {
-                        case S3SSDetect::RoomAmbientCorrectionStatus::S3SSNotLoaded: statusText = "Sims3SettingsSetter is not loaded. No changes were made."; break;
-                        case S3SSDetect::RoomAmbientCorrectionStatus::ConfigUnavailable: statusText = "Could not read S3SS.toml. No changes were made."; break;
-                        case S3SSDetect::RoomAmbientCorrectionStatus::NoOverride: statusText = "No supported saved room-light color override was found. S3SS was not changed."; break;
-                        case S3SSDetect::RoomAmbientCorrectionStatus::BackupFailed: statusText = "Apex could not verify the backup. S3SS was not changed."; break;
-                        case S3SSDetect::RoomAmbientCorrectionStatus::ConfigChanged: statusText = "S3SS.toml changed during correction. No changes were written; try again."; break;
-                        case S3SSDetect::RoomAmbientCorrectionStatus::WriteFailed: statusText = "Apex could not save the correction. Check the Apex log; the backup is preserved."; break;
-                        case S3SSDetect::RoomAmbientCorrectionStatus::Saved: statusText = "Correction complete. The backup is in the Apex Radiance folder; restart the game for S3SS to keep the change."; break;
-                        }
-                        ApexUi::MutedText(statusText);
-                    }
-                }
-            }
-            ApexUi::EndCard();
+            // S3SS's saved room colour: Rooms at Night already uses the game's blue in its place; removing it is on the Attention page
+            if (g_unlitOn && S3SSDetect::SavedRoomAmbientOverride())
+                ApexUi::IconNote(ApexUi::IconId::Puzzle, "S3SS saves its own room color; Rooms at Night replaces it (see Attention)");
             // 30/09 (user: "a button to recalculate these lights when they bug"): the "Refresh the lighting" shortcut as a button
             const std::string key = ApexConfig::KeyChordText(Hotkeys::Key(Hotkeys::Action::Refresh));
             const float gap = ImGui::GetStyle().ItemSpacing.x;

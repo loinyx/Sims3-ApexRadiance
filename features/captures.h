@@ -49,6 +49,7 @@ bool ScreenshotPending(); // render thread: a screenshot is taken at the next Pr
 // Captures the finished back buffer (all Apex passes included) into Screenshots, optionally hiding the game's F10 UI for one frame.
 bool RequestPlayerScreenshot(bool hideGameUi);
 void ObserveGameUiKey(WPARAM vk, bool repeat); // call for game-window key-down messages to track the F10 visibility toggle
+void OnWorldSessionChanged(); // render thread: world loaded or left; the inferred F10 state goes back to "UI shown"
 // "<date time> Report": only the log, the settings and the crash report (for any problem, crashes included)
 void SaveReport();
 // ApexRadiance_Crash.txt was written in the last 7 days: its date and time ("2026-09-30 21:50"), else ""

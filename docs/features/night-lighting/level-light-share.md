@@ -1,907 +1,615 @@
-# Level light share (outdoor lamps on every story)
+# Light between stories
 
-### Multi-story indoor openings (2026-10-04)
+Lamps light every story of a house, not only the story they stand on. An outdoor sconce on the upper wall also lights the
+wall below it, with no straight cut at the floor line, and garden lamps keep lighting the upper stories. Indoor lamps
+shine through stairwells, atriums and removed floors into the rooms above and below, and the walls of a double-height
+room meet at the floor line without a step in the light. Lamps never shine through a solid floor or around the walls of
+their own story. Part of [Night Lighting](README.md).
 
-Indoor gathers now consider lamps on all stories 0..7, with adjacent stories first
-under the existing 64-lamp cap. Each intervening floor must expose a nearby opening;
-opening masks and recipient room spans are cached per boundary for that gather.
-This filter does not transmit light by itself. The point solve tests the actual ray
-at every intervening floor, including tile-specific heights. It then tests wall
-segments in the lamp's room and intermediate stories, preserving the native wall
-mode and multiplying transmission. Unknown floors, stale ownership, missing
-intermediate rooms and ambiguous crossing order fail closed. Native light range
-and attenuation are unchanged. The receiving room's wall test remains native.
+## Status
 
-`tools/terrain_lighting_test/run_indoor_stories_checks.ps1` extracts the production
-floor and wall routines and exercises all story pairs with mock game structures.
-These checks cover open shafts, every solid intermediate floor, wall blocking,
-wall-mode restoration, tile heights and unavailable data. They do not validate
-native game room topology, lamp falloff, visual convergence or performance; repeat
-the user's three-story open-shaft scene in the game before promotion.
+| | |
+|---|---|
+| Availability | Outdoor and indoor light between stories: released (present since 2.1.0, the first version in this repository). Indoor light through openings across more than one floor, the raised-room wall veto, structure-change refresh and the *Wall seams.csv* recording: in development (PR #2) |
+| Default | On (all four switches) |
+| Menu | Lighting > Stories (*Seamless walls between floors* and *Every floor in full detail* under Advanced > *Floor detail*) |
+| Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
+| Source | [`features/level_light_share.cpp`](../../../features/level_light_share.cpp), [`features/lamp_mark_filter.cpp`](../../../features/lamp_mark_filter.cpp), [`features/room_ambient_policy.h`](../../../features/room_ambient_policy.h), driven by [`patches/night_terrain_relight_patch.cpp`](../../../patches/night_terrain_relight_patch.cpp) |
 
-The first test build incorrectly required one ray/plane crossing per nominal
-story boundary. Ghost wall rows and split-level tile heights can place a sample
-on the lamp's side of a boundary despite its owning room's story number. Test2
-retains every floor intersection test but builds wall segments from actual
-crossings, including a terminal intermediate-story segment when required.
-Six regression assertions fail on test1 and pass on test2; ordinary adjacent
-results still match the previous implementation. The 16-45-19 recording confirms
-shared ambient RGB and normalization on the red atrium's three rooms, but does not
-by itself identify every component of its visible seam. In-game validation remains
-required; no artificial brightness increase or native attenuation change is used.
+## The problem
 
-### Lighting response test (2026-10-03)
+Walls and floors of a lot are lit by a baked light map per room and per story (the room light solve, see
+[room-light-maps.md](../../engine/room-light-maps.md)). The outside of each story is room 0, and the game builds room 0's
+light list separately for every story. In the unmodified game:
 
-Changed lamp signatures and lamp-driven lot refreshes request a bounded window reevaluation burst on the light thread,
-before the native changed-room walk: immediately, then at most once per 250 ms for six seconds.
-The request validates the ground manager and is discarded on world changes or manager replacement.
-Unchanged entries do not explicitly requeue whole lots. Existing startup passes, ambient merge,
-fresh-solve retention, lighting budgets and visual parameters remain unchanged. This is independent
-of Performance mode. Session 00-29-16 shows a lamp switch at 00:29:34.970, terrain completion at
-35.092, and two window activation changes only at 43.163. Offline checks and compilation do not
-validate native evaluation cost, convergence or visual latency; repeat the switch in-game.
+- A sconce on the outside wall of the upper story lights the upper wall and nothing below the floor line: a straight cut.
+- Garden lamps of the ground story light the upper stories only until the first update of that story's room 0.
+- Windows and doors are lit by object rigs that compare only the room id (room 0 has id 0 on every story), so a lamp can
+  light the window of one story and not the wall around it.
+- An indoor room only ever receives lamps registered in that room. A lamp beside a stairwell lights its own story and
+  stops at the moulding; the room below stays at its ambient colour.
+- A double-height room is two rooms with separate ambient colours and separate wall sampling, so its walls show a seam at
+  the floor line even when the lamps are shared.
 
-> **Status in the standalone:** in the v0.1.0 baseline (b84d5f1) exactly as described; `level_light_share.cpp` changed
-> after v0.1.0 only in its error and status strings (Portuguese in v0.1.0, e.g. "Luz entre andares nao confere",
-> "Ativo | luzes externas levadas a outros andares ...").
+## How Apex Radiance solves it
 
-> Outdoor lot lamps light the walls and floors of every story of a house, not only the story they are registered on, and a
-> lamp from another story is tested against the walls of its own story (and the stories in between) exactly the way the
-> game tests a lamp against the walls of the story being solved, including the game's per-batch wall culling. Removes
-> the straight cut of lamp light at the floor line. Status: working (confirmed by the user 25/09 ~10:00 as "almost
-> perfect"; the second round with the wall test was "much better"). Both build flavours (public and dev); the F8 section
-> and the "Stories" status line are dev-only.
+Apex Radiance adds lamps of other stories to the game's own room light lists, with the same weight the game gives them
+on their own story, and tests every borrowed lamp against the floors and walls it must pass, with the game's own wall
+test. The light solve itself, lamp ranges and attenuation are the game's.
 
-Module: `level_light_share.cpp` / `level_light_share.h` (namespace `LevelLightShare`), driven by
-`patches/night_terrain_relight_patch.cpp` (the Night Lighting patch, `NightTerrainRelight`).
+1. **Outdoor sharing.** After the game gathers room 0 of a story (0 to 7), the outdoor lamps of every other story are
+   added with the game's gather function.
+2. **Refresh cascade.** A change in room 0 of any story refreshes room 0 of all stories, so switching an upper lamp also
+   updates the stories below.
+3. **Walls of the lamp's story.** A borrowed outdoor lamp is tested against the walls of its own story and of every
+   story in between, mirroring the game's per-batch wall culling. A porch lamp under an upper overhang is not affected.
+4. **Indoor openings.** An indoor room near a removed floor takes the lamps of rooms on other stories that are near the
+   same opening. Every point of the light map is lit by such a lamp only when the real ray from the lamp passes through an
+   opening in every floor it crosses, then past the walls of the lamp's room and of the stories in between.
+5. **Detail and ambient.** Rooms seen through an opening get the camera story's lighting detail. Rooms joined by removed
+   floors into an atrium share one ambient colour and normalisation.
+6. **Seamless walls.** Wall samples are lit at the height the wall mesh draws them, and atrium walls are blurred across
+   the floor line as one wall.
+7. **Updates.** Lamp changes, floor edits, wall or roof changes, lot rebuilds and world loads send exactly the affected
+   rooms to gather again, without loops and without re-solving rooms whose lamps did not change.
 
-Related docs: [README](README.md) (all Night Lighting settings), [walls.md](walls.md) (outside wall lamp gain, the wall
-light-map atlas), [lot-light-pass.md](lot-light-pass.md), [../../engine/room-light-maps.md](../../engine/room-light-maps.md)
-(room light maps, lot light solve), [../../engine/light-objects-and-rigs.md](../../engine/light-objects-and-rigs.md).
+## Settings
 
-## Purpose
-
-Walls and floors of a lot are lit by a baked light map per room and per story (the room light solve). The wall shader
-(e.g. `PS_2669DA40`, LightProbe-andar2-b/andar1-b) reads it in `s2` through per-vertex UVs (`o2.xy = TEXCOORD1 * 1/4096`,
-then `texld r1, v1, s2; mad r5.xyz, r1, c3.x, r2`). The outdoor room of each story is room 0, and the game builds room
-0's light list separately per story. The result in the vanilla game:
-
-- A sconce on the outside wall of the upper story lit the upper wall and nothing below the floor line (straight cut,
-  LightProbe-andar2-b m44 / andar1-b m45).
-- Garden lamps of the ground story lit the upper stories only until the first update of that story's room 0.
-- Objects (windows, doors) are lit by rigs that compare only the room id (room 0 has id 0 on every story), so a lamp could
-  light the window of one story and not the wall around it ("the street lamp lights the wall of one story and the window
-  of another", friend's hint 2, 25/09 ~10:30).
-
-The fix puts the outdoor lamps of all stories 0..7 into every story's room 0 list with the same weight the game gives
-them on their own story, and adds a wall-occlusion test on the lamp's own story so upper lamps do not leak around corners
-of the lower story.
-
-## User-facing settings
-
-Saved in `Documents\Electronic Arts\The Sims 3\S3SS\S3SS.toml`, table `[patches.NightTerrainRelight]`.
-
-| UI label (Apex tab > Night Lighting) | TOML key | Type | Default | Range | Notes |
+| Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| Outdoor lights reach every story | `luzExternaEntreAndares` | bool | `true` | - | Main options (not under Advanced). Applied live: `ApplyLive` calls `LevelLightShare::Install` / `Uninstall` immediately. Reset to defaults sets it `true`. |
-| Indoor light between floors (Experimental; "Through stair openings" until 2026-09-29) | `luzInternaEntreAndares` | bool | `true` | - | Part 4. Lighting > Stories tab (with "Upper floors light the ground" and "Outdoor light between floors" (then "Light passes between floors"), moved there from Ground & Lots on 2026-09-29), right under "Seamless walls between floors" and disabled while "Outdoor light between floors" is off. Applied live: `LevelLightShare::SetIndoor` every frame; a change sends every lot's rooms near openings to gather again. Reset sets it `true`. |
-| Seamless walls between floors | `paredesSemEmendaEntreAndares` | bool | `true` | - | Part 5 (2026-09-29). Stories tab, between the two rows above, disabled while "Outdoor light between floors" is off (the part is installed with the module). Applied live: `LevelLightShare::SetWallAlign` every frame; a change sends every room of every loaded lot to light its walls again (`RequeueAllRooms`). Reset sets it `true`. |
-| Every floor in full detail | `todosOsAndaresEmDetalhe` | bool | `true` | - | 30/09. Stories tab, disabled while "Outdoor light between floors" is off. `LodChoiceHook` (FUN_0069e710 at its 4 calls) gives every room of the active lot (+0x288 == 1) the top LOD class on every story, so a floor change leaves the light maps as they are instead of re-solving the floors the camera left and reached (the game gives the top class only to the camera story). More solve work once when entering a lot. A change relights every room. |
+| Outdoor light between floors | `luzExternaEntreAndares` | bool | on | | Shares outdoor lamps between stories (parts 1 to 3). Installs or removes the whole module live; the other three switches need it |
+| Indoor light between floors | `luzInternaEntreAndares` | bool | on | | Indoor lamps light other stories through openings (part 4). A change sends every lot's rooms near openings to gather again |
+| Advanced > Seamless walls between floors | `paredesSemEmendaEntreAndares` | bool | on | | Wall samples at their drawn height and atrium walls blurred across the floor line (part 5). A change relights every room |
+| Advanced > Every floor in full detail | `todosOsAndaresEmDetalhe` | bool | on | | Every room of the played lot gets the top lighting detail on every story, so changing floors keeps the light. More solve work when entering a lot. A change relights every room |
 
-The option has no strength. It is independent of the other Night Lighting options except that the whole module is
-installed only while the Night Lighting patch is enabled (`NightTerrainRelightPatch::Install`, "if (g_levelShare &&
-!LevelLightShare::IsInstalled())").
+All four are applied live (`LevelLightShare::Install`/`Uninstall`, `SetIndoor`, `SetWallAlign`, `SetAllFloors`) and
+reset to on. There is no strength: borrowed lamps keep the game's weight. The module is installed only while Night
+Lighting is on. The *Lighting > Stories* card also hosts *Every-Story Ground Light* (`SplitLevelGroundLight`), a separate
+patch.
 
-## How it works
+## Compatibility and interactions
 
-### The game's gather (what is patched)
+- **Walls and floors** ([walls.md](walls.md), [floors.md](floors.md)) read the room maps this module changes; the
+  outside wall gain multiplies the result.
+- **Objects** ([objects-and-rigs.md](objects-and-rigs.md)): rigs already take outdoor lamps of every story (room id 0
+  matches everywhere), so walls and windows now agree on the lamp list. A rig still uses the 3 strongest lamps at the
+  object centre without wall shadow; the map sums every lamp per point with wall occlusion. Object rigs only take lamps
+  of their own room, so an indoor lamp added to another room's list never reaches that room's objects.
+- **Indoor objects** drawn by Apex's indoor-object shader read the room's four directional basis maps, which this module
+  also guards (see *Directional maps*).
+- **Rooms at Night** ([unlit-rooms.md](unlit-rooms.md)): a room whose own lamps are off but which takes lamps through an
+  opening is lit by them; the atrium ambient merge works on the colour Rooms at Night produced, and slider changes move
+  whole atrium groups together.
+- **Sims3SettingsSetter Split-Level Lighting Fix** (`BaseLight::GetLotID` forced to 0 at `0x006BC020`): type-11 lot
+  lights then also enter every story through the world-cell part of the gather. Compatible.
+- **Sims3SettingsSetter Lighting Quality** (detour of `LightPointWithAllLights` at `0x0069FD60`, original called N times
+  on jittered samples): no byte overlap (Apex redirects the call sites, and the return address `0x0069FE19` still
+  matches inside the re-entered body), but the cross-story wall tests then run N times.
+- **Refresh the lighting** (Lighting > Buildings, shortcut) and the automatic refresh after any lighting setting relight
+  every room of every loaded lot, basements included.
 
-Room light lists live at `room+0xC8..+0xCC` (vector of light pointers). They are built by
-`FUN_006c7010 -> FUN_006c6ab0(treeLevel, room)` (thiscall, `ret 4`):
+## Limitations
 
-1. `FUN_006c6990(treeLevel, room, 1)` at `0x006C6B08`: the lot lights registered on that story for that room.
-2. Only for room 0 (`cmp [esi+0xC], ebx; jnz` at `0x006C6B0D`) and only when the tree level is level 0
-   (`cmp dword [edi+0x1A0], ebx; jnz` at `0x006C6B16`): `FUN_006c6990(level0, room, 0)` once more at `0x006C6B2D`
-   (argument `lea ecx, [eax+0x6A0]` = the tracker's level 0). So level-0 outdoor lamps count twice (confirmed in
-   `S3SS_LightDiag.txt` 01:39: outdoor lot lamps of the own lot appear 2x (type 3) or 3x (type 11) in room 0 of level 0).
-   Verified in `re/out/dump/asm/006c6ab0.asm`. (The code comment in `level_light_share.cpp` cites `0x6C6B25`, the
-   first `push` of that call sequence; same place.)
-3. World lights around the lot from the light cells (`FUN_006b66b0`). With S3SS's Split-Level Lighting Fix
-   (`BaseLight::GetLotID` forced to 0 at `0x6BC020`) lot lights of type 11 also come in here, on every story.
+- A balcony slab of the upper story does not block outdoor light going down: occluders are per story. The same holds for
+  type-11 lights under the Split-Level fix.
+- The cross-story wall test runs only on the light tree thread. Points the game solves on another thread get no
+  cross-story occlusion (status *on another thread: N*).
+- Basements (stories -4 to -1) keep the game's lighting: no sharing, no cascade. Stories above 7 do not exist in the
+  tracker.
+- Indoor sharing reaches only rooms and lamps within 8 m of an opening, and at most 64 borrowed lamps per room, nearest
+  stories first.
+- The receiving room's own walls are tested by the game over the whole ray. For a lamp below the room, a wall of the
+  room may block the part of the ray that is still under the floor. A lamp above, the common case, is exact.
+- The horizontal sample offset of wall texels is left as the game has it, so a very slight step can remain at wall
+  corners. Where a real floor strip separates two walls, the step at the floor line stays by design.
+- After a load or a lamp switch, rooms are solved one at a time by the game's queue, so a room can show its previous
+  light for a moment. The menu notes that changing floors forces the shown rooms to update.
+- The game's other basis-map readers (stairs, instanced objects drawn by game shaders) read the directional maps as
+  the game builds them, without Apex's per-object cap.
+- Steam 1.67.2 only. The optional parts (detail boost, ambient merge, normalisation guard, directional-map guard,
+  seamless walls) each install only when their bytes match and otherwise leave the game's behaviour.
 
-Data layout used (all from RE of these functions; see NOTAS-ILUMINACAO.md "Andares"):
+## Technical reference
+
+TS3W.exe Steam 1.67.2, image base `0x00400000`. Every site is validated before writing. A mismatch in the core sites
+makes `Install` fail with *Light between stories differs (different game version?)*. If only the per-point part fails,
+parts 1 and 2 still install and the log says *Per-point evaluation differs; no shadow from the walls of other stories*.
+The log line on success is `[LevelLightShare] Installed (walls of the light's story: N of 9 classes; indoor lamps
+through stair openings: ...; seamless walls between floors: ...)`.
+
+### Data layout
 
 | Structure | Offset | Meaning |
 |---|---|---|
-| lot "tracker" | `+0x6A0 + L*0x1A4` | tree level L (levels -4..7); `TreeLevel(tracker, L)` in code |
+| lot tracker | `+0x6A0 + L*0x1A4` | tree level L (levels -4..7), `TreeLevel(tracker, L)` |
+| lot tracker | `+0x90`, `+0xC0/+0xC4` | lot id parts |
 | tree level | `+0x00` | room manager of that story (null = story absent) |
 | tree level | `+0x04` | back pointer to the tracker |
-| tree level | `+0x28` | set "rooms pending restart" (room ids) |
-| tree level | `+0x90` | hash of lights registered on the story: buckets `+0x98`, count `+0x9C`; node `+8` -> {begin, end} of entries, next `+0x10`; entry `+0x1C` = room id, `+0x24` = light |
-| tree level | `+0x1A0` | the level number (`FUN_006c70c0`) |
+| tree level | `+0x08` | set of rooms marked changed (buckets `+0x0C`, count `+0x10`, node {id, next}) |
+| tree level | `+0x28` | set of rooms pending restart (room ids) |
+| tree level | `+0x90` | hash of lights registered on the story: buckets `+0x98`, count `+0x9C`; node `+8` -> {begin, end} of entries, next `+0x10`; entry `+0x1C` = room id, `+0x24` = light, `+0x20` -> record `+0x90` flags |
+| tree level | `+0x1A0` | level number (`FUN_006c70c0`) |
 | room | `+0x00` | its manager; the manager's `+0x88` = the room's real story |
 | room | `+0x0C` | room id (0 = outside) |
-| room | `+0x30/+0x34` | 2D occluders (walls) vector, used by the wall test |
-| room | `+0xC8/+0xCC` | light list |
-| room | `+0xF0`, `+0x168` | pending flag / countdown (a room with `+0xF0 == 1 && +0x168 != 0` is already waiting for its gather) |
-| room | `+0x639` | wall mode byte read by `FUN_0069fc40` (wall height test / soft shadows of this pass) |
-| room manager | `+0x288` | non-zero = active lot (high lighting quality); used only by the F8 diagnostic |
+| room | `+0x10` | 3D blob occluders (`FUN_006c6a20` + `FUN_0069e5e0`), per story |
+| room | `+0x18` | roofless / outdoor classification byte |
+| room | `+0x30/+0x34` | 2D occluders (walls) of the room's own story, built by `FUN_006a1de0` from `room+0xD8..+0xDC` (LightingWall + 4) in the room rebuild `FUN_006a2740` |
+| room | `+0xC8/+0xCC` | light list (vector of light pointers) |
+| room | `+0xF0`, `+0x168` | state of the budgeted solve (1-3 = waiting or being solved, 5 = at rest) / countdown (`+0xF0 == 1 && +0x168 != 0`: already waiting for its gather) |
+| room | `+0xF4` | lighting LOD class of the current solve; `== 2` gates the class-2 wall blur |
+| room | `+0xF8` | pointer to the room's world matrix |
+| room | `+0x110`, `+0x120` | ambient colour (walls, floors) and object ambient |
+| room | `+0x160` | light map normalisation |
+| room | `+0x584 + i*0x28`, `+0x629`, `+0x62A` | basis map locks, their gate, the basis pass flag |
+| room | `+0x639` | wall mode byte read by `FUN_0069fc40` (wall height test / soft shadows) |
+| room | `+0x63C` | per-light threshold: the game drops a light whose r+g+b is under it (`0x0069FE40`) |
+| room | `+0x640`, `+0x660` | wall-ramp samplers (`FUN_006ab110`: `[0]` base, `[4..7]` colour copy; `+0x650` the colour copy of `+0x640`) |
+| room manager | `+0x98` | `+0xD4` plus the story's lowest tile height (`FUN_006a59a0`; 100000 without tiles) |
+| room manager | `+0xE0/+0xF0/+0x100/+0x110` | world-to-lot rows (inverse lot matrix, the same on every story) |
+| room manager | `+0x220` | the story's LightBasisMap0..3 (bound by `FUN_006a7700`) |
+| room manager | `+0x260`, `+0x264`, `+0x268` | lighting tiles (pointers), width, height; index `iz*w + ix` (`FUN_006a42d0`) |
+| room manager | `+0x284` | the camera's story |
+| room manager | `+0x288` | non-zero = active lot (high lighting quality) |
+| lighting tile | `+0x78` | floor height in lot space (`FUN_006a9620`, set from `0x00A880C0`) |
+| lighting tile | `+0x7C + q*0x14` | room of quadrant q (`FUN_006a9760`) |
+| light | `+0x08` | its room id; `+0x10` intensity; `+0x20` fade; `+0x90` entry flags; `+0xB0` type; `+0xE0` lit colour; `+0x100` flags (`& 0x20` lit); `+0x120` head; `+0x130` range; `+0x134` bounds; `+0x170..+0x1A0` cone (types 4, 5) |
 | light manager | `+0xD4` | tree of lot trackers: buckets `+0x58`, count `+0x5C`, node `+8` = tracker |
+| root `0x011D1860` | `+0x1C0` | light manager |
 
-Lot load (`FUN_006c54e0`, `0x6C5525`) gathers room 0 of EVERY story through level 0's tree level; later updates
-(`FUN_006c7250`) gather it through the room's own story. `FUN_006c7250` (dirty rooms per story) already refreshes room 0 of
-all levels 0..7 when room 0 of level 0 changes (`0x6C73B6..0x6C7426`: `FUN_006a6550(mgr, 0)`, `FUN_0069eed0(room, 1, 0)`,
-insert 0 into `+0x28`), which is why the analysis concluded EA intended upper stories to see the ground lamps and the test
-in `FUN_006c6ab0` looks inverted.
+Quadrants (`FUN_006aa390`) split a tile along its diagonals: with fx, fz the fractions, `|fx-.5| <= |fz-.5|` gives
+`fz > .5 ? 2 : 0`, else `fx > .5 ? 1 : 3`. The floor grid uses the same q (`FUN_006a61a0` passes it straight on).
 
-### Part 1: sharing (OutdoorGather)
+### The game's gather
 
-- Both callers of `FUN_006c6ab0` (`0x006C5816` room creation, `0x006C7094` room update) are redirected (rel32 rewrite of the
-  `E8` call) to `OutdoorGather(treeLevel, room)`.
-- `OutdoorGather` calls the original, then (under `__try`) `ShareOutdoorLights`:
-  1. Only room 0 (`room+0xC == 0`), real story `roomLevel = [room[0] + 0x88]` in 0..7 (basements stay vanilla), and only if
-     the tree level passed is either the room's own story or level 0 (the lot-load path). Sanity: `TreeLevel(tracker,
-     level) == treeLevel` and the tracker's tree level of `roomLevel` holds the same manager.
-  2. For every other story `other` in 0..7 that exists: call the game's own `FUN_006c6990(tl_other, room, 0)` twice when
-     `other == 0`, else once (the weight each lamp has on its own story). The list therefore gets each outdoor lamp of each
-     story with the same multiplicity everywhere; the ground story's list does not change.
-  3. `RecordRoom`: remember per room pointer `{mgr, tracker, level, cross[]}` where `cross` = (light, home story) of every
-     outdoor light registered on the OTHER stories (walk of `+0x90`, entries with room id 0), sorted by light pointer.
-     `g_rooms` is cleared on world change (`OnWorldChanged`) or above 8192 rooms. The thread that ran the gather is
-     remembered (`g_gatherThread`): the light tree thread.
+Room light lists are built on the light tree thread by `FUN_006c7010 -> FUN_006c6ab0(treeLevel, room)` (thiscall,
+`ret 4`):
 
-### Part 2: refresh cascade (JNZ -> JL)
+1. `FUN_006c6990(treeLevel, room, 1)` at `0x006C6B08`: the lot lights registered on that story for that room (filter
+   `FUN_006c7820`: entry `+0x90 & 2`, lit `+0x100 & 0x20`, bright enough `FUN_006bc520`, type >= 3, `+0x90 & 4` only for
+   type 11, and `entry+0x1C == room+0x0C`).
+2. Only for room 0 (`cmp [esi+0xC], ebx; jnz` at `0x006C6B0D`) and only when the tree level is level 0
+   (`cmp [edi+0x1A0], ebx; jnz` at `0x006C6B16`): `FUN_006c6990(level0, room, 0)` once more at `0x006C6B2D` (argument
+   `lea ecx, [eax+0x6A0]`, the tracker's level 0; the call sequence starts with a `push` at `0x006C6B25`). Level-0 outdoor
+   lamps therefore count twice in room 0 of level 0 (type 3 twice, type 11 three times with the Split-Level fix).
+3. World lights around the lot from the light cells (`FUN_006b66b0`).
 
-- `0x006C73AA`: `cmp [esi+0x1A0], eax` / `jnz 0x6C7432` (bytes `39 86 A0 01 00 00 0F 85 7C 00 00 00`, validated).
-- The Jcc opcode byte at `0x006C73B1` changes from `0x85` (jnz) to `0x8C` (jl). Now a change of room 0 of any level 0..7
-  (not only level 0) refreshes room 0 of all stories, so turning on, recolouring or moving an upper-story lamp also updates
-  the stories below. Levels < 0 still skip.
+Lot load (`FUN_006c54e0`, `0x006C5525`) gathers room 0 of every story through level 0's tree level; later updates
+(`FUN_006c7250`) gather it through the room's own story. `FUN_006c7250` already refreshes room 0 of levels 0..7 when room
+0 of level 0 changes (`0x006C73B6..0x006C7426`: `FUN_006a6550(mgr, 0)`, `FUN_0069eed0(room, 1, 0)`, insert 0 into
+`+0x28`), which suggests the game intended upper stories to see ground lamps.
 
-### Part 3: walls of the lamp's story (cross-floor occlusion)
+### Part 1: outdoor sharing
 
-Why: the light map of a point sums every light of the room's list in `LightPointWithAllLights` (`0x0069FD60`, thiscall
-`(room, out, list2D, list3D, flags, sample)`, `ret 0x14`) and tests each light with `FUN_0069fc40` -> `FUN_0069d4c0`
-against the room's 2D occluders (`room+0x30`). Those are only the walls of the room's own story (list built by
-`FUN_006a1de0` from `room+0xD8..+0xDC` (LightingWall+4) during the room rebuild `FUN_006a2740`), and `FUN_0069aa90`
-blocks a ray only if it passes BELOW the top of a wall (no base test). So a sconce upstairs near a corner passed above the
-lower story's walls and lit the lower story's side wall around the corner (LightProbe-andar1-c m47: side face lighter
-below the floor line). 3D blob occluders (`FUN_006c6a20` + `FUN_0069e5e0`, `room+0x10`) are also per story.
+- Both callers of `FUN_006c6ab0` (`0x006C5816` room creation, `0x006C7094` room update) are redirected (`E8` rel32
+  rewrite) to `OutdoorGather(treeLevel, room)`, which calls the original, then under `__try` `NoteRoomStructure`,
+  `ShareOutdoorLights`, `ShareIndoorLights` and `NoteGatherStamp`.
+- `ShareOutdoorLights` acts only on room 0 whose real story `[room[0] + 0x88]` is 0..7, and only when the tree level
+  passed is the room's own story or level 0 (the lot-load path). Sanity: `TreeLevel(tracker, level) == treeLevel` and the
+  tracker's tree level of the real story holds the same manager.
+- For every other existing story 0..7 it calls `FUN_006c6990(tl_other, room, 0)`, twice for story 0 and once otherwise,
+  so each lamp has the multiplicity it has on its own story; the ground story's list does not change.
+- `RecordRoom` keeps per room pointer `{mgr, tracker, level, cross[]}`, where `cross` lists (light, home story) of every
+  outdoor light registered on the other stories (walk of `+0x90`, entries with room id 0), sorted by light pointer.
+  `g_rooms` is cleared on a world change or above 8192 rooms. A reused room pointer is detected by comparing the manager
+  (`RoomStillSame`). The gathering thread is remembered (`g_gatherThread`).
 
-Mechanics:
+### Part 2: refresh cascade
 
-1. The 3 calls of `LightPointWithAllLights` (`0x006A1187`, `0x006A126F` in `FUN_006a0f50`, `0x006A3336` in
-   `FUN_006a31d0`) are redirected to `SolvePointSingle` / `SolvePointBatch` (the last one). They set a context `g_ctx` =
-   {room info from `g_rooms` if this room is a recorded room 0 and still the same manager, `list2D`, `flags`, batch flag,
-   `room[0x639]`} and call the original. Only on the gather thread; otherwise `g_otherThread` is counted and nothing
-   happens.
-2. The light evaluation `vfunc+0x4C` of all 9 light classes is wrapped (vtable slot write, only if the slot holds the
-   expected function and `vfunc+0x24` is `0x009691E0` = light position getter):
+`0x006C73AA` holds `39 86 A0 01 00 00 0F 85 7C 00 00 00` (`cmp [esi+0x1A0], eax` / `jnz 0x6C7432`). The Jcc byte at
+`0x006C73B1` changes from `0x85` (jnz) to `0x8C` (jl), so a change of room 0 of any level 0..7 refreshes room 0 of all
+stories. Levels below 0 still skip.
 
-   | Class vtable | original `+0x4C` |
+When the indoor part's changed-set hook is installed, `InstallIndoor` writes `90 E9` over the `0F 8C` at `0x006C73B0`
+instead: every room 0 takes the plain path (its own floor only), and `AfterChangedWalk` sends room 0 of the other
+floors 0..7 with the same signature rules as indoor rooms (status *outside of a floor marked changed without a change*).
+This removes the game's restart of room 0 on every story for changes that are not lamp changes.
+
+### Part 3: walls of the lamp's story
+
+`LightPointWithAllLights` (`0x0069FD60`, thiscall `(room, out, list2D, list3D, flags, sample)`, `ret 0x14`) sums every
+light of the room's list and tests each with `FUN_0069fc40 -> FUN_0069d4c0` against the room's 2D occluders
+(`room+0x30`), which are only the walls of the room's own story. `FUN_0069aa90` blocks a ray only below the top of a wall
+(no base test). Without a cross-story test, a sconce near a corner of the upper story passed above the lower story's
+walls and lit the lower side wall around the corner.
+
+1. The 3 calls of `LightPointWithAllLights` (`0x006A1187`, `0x006A126F` in `FUN_006a0f50`; `0x006A3336` in
+   `FUN_006a31d0`) go to `SolvePointSingle` / `SolvePointBatch`. They set a context `g_ctx` (the recorded room info if
+   the room is a recorded room and still the same manager, `list2D`, `flags`, batch flag, `room+0x639`, `room+0x63C`)
+   and call the original. Only on the gather thread; elsewhere `g_otherThread` is counted. Thread checks read the thread
+   id from the TEB (`__readfsdword(0x24)`).
+2. The light evaluation `vfunc+0x4C` of all 9 light classes (factory `FUN_006ac590`) is wrapped by a vtable slot write,
+   only if the slot holds the expected function and `vfunc+0x24` is `0x009691E0` (light position getter,
+   `thiscall(light, float out[4])`):
+
+   | Class vtable | Original `+0x4C` |
    |---|---|
    | `0x00FF42A0` | `0x006BDE90` |
-   | `0x00FF42F8` (street lamp class) | `0x006BE020` |
+   | `0x00FF42F8` (street lamp) | `0x006BE020` |
    | `0x00FF4350` | `0x006BE1C0` |
    | `0x00FF43A8` | `0x006BEFD0` |
    | `0x00FF44C0` | `0x006BFBA0` |
    | `0x00FF4518` | `0x006BFDC0` |
-   | `0x00FF4570` (spot, type 4 per LightDiag-passo3-holofote) | `0x006BFFB0` |
+   | `0x00FF4570` (spot, type 4) | `0x006BFFB0` |
    | `0x00FF4408` CircleWindowLight | `0x006BF880` |
    | `0x00FF4468` TubeLight | `0x006BFA70` |
 
-   The last two were missing from `re/out/dump/light_vtables.txt` (it merged `0xFF4408` with `0xFF43A8` and omitted
-   `0xFF4468`); the factory `FUN_006ac590` creates 9 classes (review 25/09 ~10:40).
 3. `LightEvalHook<I>` calls the original, then acts only if `g_ctx.info` is set and the return address is `0x0069FE19`
-   (right after `call edx` in `LightPointWithAllLights`). `CrossFloorShadow`: if the light is in the room's `cross` list
-   (it came from another story), the colour is non-zero and `flags[0]` is set (the game tests 2D walls in this batch),
-   `WallPass` runs:
-   - light position from `vfunc+0x24` (`0x009691E0`, `thiscall(light, float out[4])`);
-   - for each story from `min(home, roomLevel)` to `max(home, roomLevel)` except the room's own story (the game tests that
-     one right afterwards): room 0 of that story (`FUN_006a6550(mgr, 0)`), then the game's own wall test
-     `FUN_0069fc40(room0, indexVec, lightPos, sample, &t)` (thiscall, `ret 0x10`) with the room's `+0x639` byte temporarily
-     replaced by the solving room's value (restored after, also on an SEH fault through `g_swapAt`);
-   - failed test -> factor 0; passed -> multiply by the transmission `t`. The colour (4 floats) is multiplied by the
-     product.
-4. **Mirroring the game's per-batch wall culling.** For a batch of samples (`FUN_006a31d0`, the 4 callers push the global
-   batch vector `0x01158AC8` = {begin, end}, 0x30 bytes per sample; pushes at `0x006A3B03`, `0x006A3687`, `0x006A37CD`,
-   `0x006A3956`, each validated as `68 C8 8A 15 01`), the game does not test every wall: `FUN_006a30b0` builds, per light,
-   the walls whose culling edge crosses the segment from the batch centre (mean of the samples, `FUN_0069f1e0`) to the
-   light, with `FUN_0069dff0(walls, int-vector* out, from, lightPos)` (call at `0x006A311F`), and each sample is tested
-   only against that list (`list2D`). Level light share does the same for the other story: `BatchCentreFor` recomputes the
-   mean of the batch samples when the batch changes; `CulledWalls` calls `FUN_0069dff0` on `room0+0x30` of the lamp's
-   story with that centre and caches the list per (light, story) for the batch (up to 256 entries). The output vector is
-   pre-sized to `walls + 1` so the game never reallocates it. When the game passes no per-light lists (`list2D` null, or
-   not a batch), the test uses all walls (index vector null), as the game does.
-5. The room's own lights are never touched: a porch lamp under an upper overhang is not blocked by the upper story's walls
-   (same as vanilla).
+   (after `call edx`, bytes `FF D2` at `0x0069FE17`). `CrossFloorShadow` runs `WallPass` when the light is in the room's
+   `cross` list, the colour is non-zero and `flags[0]` is set (the game tests 2D walls in this batch): for each story
+   from `min(home, roomLevel)` to `max(home, roomLevel)` except the room's own (the game tests that one next), room 0 of
+   that story (`FUN_006a6550(mgr, 0)`) is tested with `FUN_0069fc40(room0, indexVec, lightPos, sample, &t)` (thiscall,
+   `ret 0x10`), with its `+0x639` byte temporarily set to the solving room's value (restored after, also on an SEH fault,
+   through `g_swapAt`). A failed test gives factor 0, a passed one multiplies by the transmission `t`; the colour (4
+   floats) is multiplied by the product.
+4. **Per-batch wall culling.** For a batch of samples (`FUN_006a31d0`; its 4 callers push the global batch vector
+   `0x01158AC8` = {begin, end}, 0x30 bytes per sample, at `0x006A3B03`, `0x006A3687`, `0x006A37CD`, `0x006A3956`, each
+   validated as `68 C8 8A 15 01`), the game builds per light the walls whose culling edge crosses the segment from the
+   batch centre (mean of the samples, `FUN_0069f1e0`) to the light: `FUN_006a30b0 -> FUN_0069dff0(walls, int-vector* out,
+   from, lightPos)` (call at `0x006A311F`, `ret 0xC`). `BatchCentreFor` recomputes the same centre when the batch changes,
+   and `CulledWalls` calls `FUN_0069dff0` on `room0+0x30` of the lamp's story, caching the list per (light, story) for
+   the batch (up to 256 entries; the output vector is pre-sized to `walls + 1` so the game never reallocates it). Without
+   per-light lists (`list2D` null, or not a batch) all walls are tested, as the game does.
+5. The room's own lights are never touched.
 
-### Part 4: indoor lamps through stair openings
+### Part 4: indoor light through openings
 
-Added 2026-09-29 (user report: a red lamp next to the stairwell on story 2 lit the story-2 wall and stopped at the
-moulding; LightProbe `andares2`: the story-1 wall below uses its own room's wall atlas, 256x128, with only the room's
-ambient). Not tested in game yet.
+An indoor room's list comes from `FUN_006c6990(treeLevel, room, 1)`, whose filter requires `entry+0x1C == room+0xC`, and
+room ids are unique in a lot, so a lamp only lights its own room. `FUN_006c6990` cannot be reused.
 
-Why the game never does it: an indoor room's list comes from `FUN_006c6990(treeLevel, room, 1)`, whose filter
-`FUN_006c7820` requires `entry+0x1C == room+0xC`, and room ids are unique in a lot (story 1: rooms 1, 2, 3, 4, 8; story 2:
-5, 6, 7, 9, 11, 12 in the test house). So a lamp only ever lights its own room. `FUN_006c6990` cannot be reused.
+**Floor objects.** The world-side level floor object (0x350 bytes, ctor `0x00A88790`, vtable `0x01062680`): `+0x214`
+owner lot, `+0x230` world level, byte `+0x234` (1 = the story's own floor, 0 = a layer), `+0x238` a copy of the story's
+lighting manager written once at setup (`0x00A89B60..0x00A89B89`; it goes stale), `+0x264` FloorGrid* (null: no floor).
+The manager is found from the lot like the game does (`LevelManager`: owner `+0x214` -> `[+0x23C]` lot lighting ->
+`0x00ADBCC0(level)`, a deque of story managers, translated as `LotStoryManager`; the world level code does the same at
+`0x00A9D0DC`). Two objects name each story: the lot's floor renderer (`0x00AA1710`; callers `0x00AA35F4` / `0x00AA3690`
+with byte 1, `0x00AA4171` / `0x00AA4398` with byte 0) makes the story's own floor (world level L, byte 1) and a layer
+at world level L+1 with byte 0, lit by story L: its ceiling, with the outline of the floor above and none of its holes.
+Only the own floor (`LevelOwnFloor`) says where the story is open, and `LevelFor(mgr)` returns only that object. Floor
+objects are recorded at construction (`LevelCtorHook` on the only ctor CALL at `0x00AA179E`, after `new 0x350`) and at
+every floor set or remove: the 5 calls that set or remove a floor quadrant (`FUN_00a89dd0` from `0x00AA0ADB`,
+`0x00AA0CCC`, `0x00AA0E4A`, `0x00AA0F72`; `FUN_00a893a0` from `0x00AA05C7`; `ecx = [worldLevel+0x100]`) go through the
+naked `FloorSetThunk` / `FloorRemoveThunk` (`NoteLevel(ecx)`, then the game's function).
 
-Data (RE agent 2026-09-29, verified in code unless marked):
-- **Lighting tiles** (per story manager): `mgr+0x260` pointers, width `+0x264`, height `+0x268`, index `iz*w + ix`
-  (`FUN_006a42d0`); tile `+0x78` floor height in lot space (`FUN_006a9620`, set from `0x00A880C0`), `+0x7C + q*0x14` the
-  room of quadrant q (`FUN_006a9760`). The floor and ceiling batches light every quadrant of a room, holes included: the
-  lighting side cannot tell a floor from an opening.
-- **Floor grid** (world side): the level floor object (0x350 bytes, ctor `0x00A88790`, vtable `0x01062680`): `+0x214` its owner lot, `+0x230` world
-  level, byte `+0x234` (lighting level = world level, minus 1 when it is 0), `+0x238` a COPY of the story's lighting manager
-  written only when the floor is set up (`0x00A89B60..0x00A89B89`), `+0x264` FloorGrid* (null: no floor on the story). The
-  game itself finds the manager every time from the lot (`[owner+0x23C]` = the lot's lighting, then `0x00ADBCC0(level)`,
-  a deque of story managers; the world level code does the same at `0x00A9D0DC`): pair through that, never through the
-  copy (30/09, see Pitfalls). **Two objects name each story:** the lot's floor renderer (`0x00AA1710`, callers `0x00AA35F4` /
-  `0x00AA3690` byte 1, `0x00AA4171` / `0x00AA4398` byte 0) makes the story's own floor (world level L, byte 1) and a layer at
-  world level L+1 with byte 0, lit by story L: its ceiling, with the outline of the floor above and none of its holes. Only
-  the own floor (`LevelOwnFloor`) says where the story is open. FloorGrid (ctor `0x00A89300`): `+0` data, `+0x10` width, `+0x14`
-  height, 40-byte tiles, quadrant key at `+8 + q*8` (two dwords), never built = `0xFFFFFFF8 / 0xFFFFFFFF`.
-- **A removed floor is not the empty key** (measured with F8 maps, 2026-09-29): removing a floor leaves a key with bit
-  `0x40000000` of its low dword (test tower: `0001E00F` with its floor, `4001E000` without; the ground under the
-  house's foundation `4001BFFE`; the house stairwell `4000E000`; the air next to walls `40000000`). Floors players place
-  have keys without that bit. An opening is only a removed floor, `RemovedFloorKey`: the bit AND other low bits. The
-  bare `40000000` (along walls and around the edges of a story's floor, over rooms that keep their ceiling) is not one:
-  counting it (second in-game test) found 200 "openings" on the house's story 2 instead of about 40, and the white lamps
-  of the story below washed out the upper wall around the red lamp. The RE assumption "empty key only" found no
-  opening anywhere (first in-game test).
-- **Quadrants** (`FUN_006aa390`): split along the diagonals; with fx, fz the fractions, `|fx-.5| <= |fz-.5|` gives
-  `fz > .5 ? 2 : 0`, else `fx > .5 ? 1 : 3`. The floor grid uses the same q (`FUN_006a61a0` passes it straight on).
-- **World to lot**: rows at `mgr+0xE0/+0xF0/+0x100/+0x110` (inverse of the lot matrix, the same on every story).
-  `mgr+0x98` = `mgr+0xD4` + the story's lowest tile height (`FUN_006a59a0`; 100000 without tiles).
-- **Rigs are not affected**: the object rig's room gather `FUN_006bb2f0` keeps only lights with `light+8` (their room) ==
-  `rig+0x1E0`, so a lamp added to another room's list never reaches the objects of that room.
+**FloorGrid** (ctor `0x00A89300`): `+0` data, `+0x10` width, `+0x14` height, 40-byte tiles, quadrant key at `+8 + q*8`
+(two dwords); never built = `0xFFFFFFF8 / 0xFFFFFFFF`. A removed floor leaves a key with bit `0x40000000` of its low
+dword plus other low bits (`RemovedFloorKey`), for example `4001E000` against `0001E00F` with the floor. The bare
+`40000000` (along walls and around a story's floor edge, over rooms that keep their ceiling) is not an opening. Floors
+players place have keys without that bit. The lighting side cannot tell a floor from an opening: floor and ceiling
+batches light every quadrant of a room.
 
-What the module does:
-1. **Floor objects.** Nothing found links a manager to its floor object, so the 5 calls that set or remove a floor
-   quadrant (`FUN_00a89dd0` from `0x00AA0ADB/0CCC/0E4A/0F72`, `FUN_00a893a0` from `0x00AA05C7`; `ecx` =
-   `[worldLevel+0x100]` = the floor object) go through `FloorSetThunk` / `FloorRemoveThunk` (naked: `NoteLevel(ecx)` then
-   jump to the game's function). `LevelFor(mgr)` finds the object whose manager, found through its lot like the game does (`LevelManager`:
-   owner `+0x214` -> `+0x23C` -> `0x00ADBCC0` translated as `LotStoryManager`), is `mgr` (vtable checked, all under SEH). A lot loads its floors through these calls, so objects are known from the first lot load after the mod started.
-2. **Openings** (`ReadOpenings` / `BuildOpeningMask`): quadrants with a removed floor on story B (`RemovedFloorKey`) over a quadrant of an
-   indoor room (id > 0) of story B-1. The room is read below: the landing around the test house's stairwell is room 0 on
-   story 2 (railings close no room), and the air outside a house has no indoor room under it. The point test uses the
-   same rule at the crossing.
-3. **Gather** (`ShareIndoorLights`, after the game's gather in `OutdoorGather`, rooms with id > 0 on stories 0..7): for
-   U = S+1 and S-1, B = max(S, U); an `OpeningMask` of B (per tile: holds an opening, lies within 8 m = `kOpeningReach`
-   of one; a mask, not a list: an atrium had 1356 opening quadrants and a list capped at 256 dropped the openings near
-   some lamps); the room must have a tile near an opening; the rooms of U with a tile near one; their registry entries
-   whose lamp stands near an opening and within 30 m of the room's tiles (no range test: `+0x130` is the range only
-   for some classes; wall lights, type 7, hold 0, 0.1, 1 or garbage there, and testing it dropped the sconces of a
-   double-height room), whose class has its evaluation wrapped, that pass the checks of `FUN_006c7820` (entry info
-   `+0x90 & 2`, lit `light+0x100 & 0x20`, `FUN_006bc520(light)`, type >= 3, `+0x90 & 4` only for type 11) and are not in
-   the list yet: the 64 nearest are added with the game's `FUN_006a2060(room, light)` (AddRef + push_back). The room is recorded in
-   `g_rooms` with `indoor = true` and, per lamp, its story, room and the floor object of B.
-4. **Per point** (`IndoorShadow` from `LightEvalHook`, `IndoorPass`): the lamp head and the point in lot space; the ray's
-   crossing of B's floor (the lowest floor first, then the height of the tile it lands on); the quadrant there must be an
-   opening, else the lamp gives nothing (also when anything cannot be read: never light through an unknown floor). Then,
-   when the game tests 2D walls in the batch (`flags[0]`), the lamp's own room walls are tested with the game's
-   `FUN_0069fc40` from the lamp to the crossing point (the sample copied with its position moved there; `+0x639`
-   swapped as in part 3). The receiving room's walls are tested by the game itself.
-5. **Updates** (`RoomUpdateHook`): `FUN_006c5e20` pushes `FUN_006c7250` (the per-story room update, fastcall(treeLevel))
-   as a function pointer (`push 0x6C7250` at `0x006C5E2A`) that `FUN_006c4b40` calls for levels -4..7 of every lot; the
-   immediate is replaced by the hook (`BeforeRoomUpdate` first), and its call that empties the "changed rooms" set
-   (`call 0x7F3790` at `0x6C7497`, `ecx = tl+8`, `ret 8`) goes through `ChangedClearHook`:
-   - the rooms the game found changed on that story (`tl+0x8` set: buckets `+0xC`, count `+0x10`, node {id, next}) send
-     the rooms of the other stories that take their lamps (`g_deps`, written by the gather) to gather again. They are read
-     just before the set is emptied: it is filled inside the update itself (a dirty lamp entry's vfunc+8 calls
-     `FUN_006c7160`), so a read before the update would miss most lamp changes (review 2026-09-29);
-   - on level 0, every 2 s per lot (`BeforeRoomUpdate`, `LotState`): when the number of its stories whose floor object is
-     known grows, or its opening count changes, the rooms near its openings gather again. A lot gathers its rooms while it
-     loads, before its floors or room ids are ready (in-game test: after a restart the stairwell light was gone until a
-     floor was edited), and this catches that without a floor edit;
-   - on level 0, once per lot (`BeforeRoomUpdate`): when `g_indoorGen` moved (install, option switched) or the lot's floors changed (the floor
-     thunks, then 1.5 s quiet in `OnPresent`), the rooms near its openings (both sides) and the rooms holding lamps of
-     another story gather again (`QueueOpeningRooms`).
-   Rooms are queued like the game's own refresh (`QueueRoom`: invalidate + insert into `tl+0x28`, skipped when already
-   pending), never into the "changed" set, so a queued room never sends others: no loop.
-6. **Safety rules from the review (2026-09-29)**: a floor that cannot be read (no grid, outside it, a fault) counts as
-   solid; a room's record is written before each lamp goes into its list; clearing the room records on a world change
-   keeps the indoor ones (the list `g_indoorList`, not `g_rooms`, says which rooms to send again); the point solve context
-   is set and read only on the light tree thread; points within 2 cm of the floor plane are tested at their own place.
-7. **No re-gather loop** (`RoomLampSignature`, 2026-09-29): the game marks a room changed for more than a
-   lamp change (the light entry update `0x6C7BA0` does it for any lit lamp whose entry is updated, changed or not; the
-   exact trigger in the test house is not known; not `treeLevel+0x4C`: those are object rigs, review 2026-09-29), so two
-   rooms taking each other's lamps sent each other to gather again without end (atrium house: rooms 19 and 20 dozens of times in a row, every re-
-   gather resetting their lighting LOD). A changed room now sends the rooms that take its lamps only when the state of
-   its lamps (each lamp: lit flag `+0x100 & 0x20`, lit colour `+0xE0`, intensity `+0x10`, head `+0x120`, range `+0x130`,
-   cone `+0x170..+0x1A0` for types 4 and 5) or its walls (`room+0x30`, tested by the point test of the other stories)
-   differs from the last one sent.
-8. **Lighting detail of rooms seen through an opening** (`LodChoiceHook`, 2026-09-29). `FUN_0069e710(room)` picks a
-   room's lighting LOD class: the max class `[0x01158B00]` (2; 1 with the low lighting setting, set at `0x6A238A`) only
-   for the rooms of the camera's story (`mgr+0x88 == mgr+0x284`) on the active lot (`mgr+0x288`), 0 for rooms below.
-   Class 0 samples walls every 0.75 m (vertical) and ~0.95 m (horizontal), class 2 about every 0.25 m (F8 samples of the
-   atrium house). Seen from above through an opening, the lower room's coarse grid showed as a bright step at the floor
-   line under a sconce: its top sample, 0.47 m over the lamp, 5.65, stretched up to the line, while the finely sampled
-   wall above started at 0.45 (1.22 m over it); switching the camera's story changed the look (user). Its 4 CALLs
-   (`0x69E82E`, `0x69EA86`, `0x69EF46`, `0x69F1B3`) go through `LodChoiceHook`, which gives the max class to indoor rooms
-   below the camera's story that take lamps through an opening (bit 1, set in the gather) or whose lamps another story
-   takes (bit 2; queued once when first seen). The game then raises them itself: `FUN_0069ea70` at the end of a solve
-   steps the class 0 -> 1 -> 2 while it is below `FUN_0069e710`, and `FUN_0069e770` gives such solves their priority
-   (weights `[0x01158B10]` 10000 / 1000 / 100 by class; 0 when the class is above what `FUN_0069e710` asks, which is why
-   the lower room never rose before). Optional: the rest works without it.
-9. **One ambient for the rooms stacked through an opening** (`RoomSolveStartHook`, `MergeStackedAmbient`, 2026-09-29;
-   RE agent report, VERIFIED in code unless noted). With the lamps shared and the LOD raised, an atrium wall still showed
-   a thin seam at the floor line (Light Probe: c4 (0.041 0.045 0.044) above, (0.058 0.058 0.054) below). State 0 of
-   the budgeted room solve (`FUN_006a18b0`, its only call `0x6A3D0B` in `FUN_006a3c90`) computes per indoor room:
-   - the ambient colour `room+0x110` (the wall shader adds `lightmap.a × c4`; the parameter table binds a pointer to
-     `room+0x110`, so a change shows at once) in `FUN_006a0f50`: the room's lights sampled on every 2nd floor tile and
-     4 m above it, over its area (floor quadrants × 0.25 + wall sizes × 3), through the curve `FUN_006a00A0`, clamped to
-     [0, 0.35]; `+0x120` (objects, clamped to 0.5) likewise;
-   - the normalisation `room+0x160` (`FUN_006a0230`: 1/m if m < 1, 3/m if m > 3, m = the strongest light or sample);
-   - the ambient weight ramp of the wall samples `(1 − k) + 2k (y − base)/3` (`FUN_006ab210`), base = the story's
-     lowest floor (`mgr+0x98`) in the samplers `room+0x640` and `room+0x660` (`FUN_006ab110`: `[0]` base, `[4..7]` a
-     colour copy).
-   An atrium's upper room has almost no floor, so its ambient differs, and the ramp restarts at `(1 − k)` at the floor
-   line. After the original state 0, the rooms joined by removed floors into a real atrium (`ReadStacked`, breadth
-   first over the stories, 12 rooms at most; an edge counts with 16 shared quadrants and 30% of the smaller room's floor,
-   so a stairwell never joins two rooms) all get the same ambient colour (each room's colour, which already carries its
-   normalisation, brought to the group's, then averaged by floor quadrants; into `+0x110` and the sampler copy `+0x650`)
-   and the smallest normalisation. The ramp base of the group's lowest story is used for the WALL pass only
-   (`WallPassHook` on the CALL `0x6A3D4C` of `FUN_006a3a30`, `thiscall(room, int, float) ret 8`: it swaps `room+0x640`
-   around each call and restores it), since the floor, ceiling and object passes share that sampler (review 2026-09-29:
-   the lowest base there made the upper room's floors and ceilings much brighter). A member whose last merge differs
-   (colour, normalisation or wall base; the ceiling pass bakes the colour into its texels) is sent to solve again from
-   the next room update (`g_ambToQueue`, 3 s apart at most), where its own state 0 reaches the same values. Only on the
-   light tree thread (the lot impostor's synchronous solve goes through the same CALL). Optional, like the LOD part.
-10. **Uninstall**: the rooms holding lamps of another story (`g_indoorList`, any thread) gather again from
-   `RefreshAllLots` (only lots still in the tracker hash), so no lamp keeps shining through a floor without the test.
+**Gather** (`ShareIndoorLights`, rooms with id > 0 on stories 0..7, after the game's gather):
 
-### Part 5: wall light lined up with the wall (every wall, 2026-09-29)
+1. For each other story U, nearest first (distance 1 to 7, above then below), until the room holds 64 borrowed lamps:
+   B = max(S, U) is the boundary floor next to the lamp's side. An `OpeningMask` of B (per tile: holds an opening
+   quadrant; lies within `kOpeningReach` = 8 m of one) and the room's span are built once per boundary for the whole
+   gather. A mask rather than a list, because an atrium can have more than a thousand opening quadrants.
+2. The room must have a tile near an opening of B, and for stories further than one floor every intermediate boundary
+   must also have an opening near the room (a conservative filter; the point test checks the real ray).
+3. Openings are quadrants with a removed floor on story B over an indoor room (id > 0) of story B-1. The landing around a
+   stairwell is room 0 on the upper story (railings close no room), and the air outside a house has no indoor room
+   under it.
+4. Candidates are the registry entries of the rooms of U near an opening whose lamp stands near an opening and within
+   30 m of the room's tiles, whose class evaluation is wrapped, that pass the checks of `FUN_006c7820` (`GameTakesLight`)
+   and are not yet in the list. No range test: `+0x130` is the range only for some classes, and wall lights (type 7) hold
+   0, 0.1, 1 or garbage there. The 64 nearest are added with the game's `FUN_006a2060(room, light)` (AddRef plus
+   push_back).
+5. The room is recorded in `g_rooms` with `indoor = true` before each lamp goes in, with per lamp its story, its room
+   and the floor object of the highest boundary (other boundaries are resolved through the current managers at solve
+   time). `NoteDeps` records which rooms take which rooms' lamps (`g_deps`).
 
-The step that stayed on the atrium walls at the floor line after parts 1-4 (user: "the floor got better, the walls stay
-the same"; the same slight step on outside walls, F7 captures 048/049 of 29/09 on two stories' atlases) is the game's own
-wall sampling, not the lamps:
+**Per point** (`IndoorShadow` from `LightEvalHook`, `IndoorPassImpl`):
 
-- The wall pass `FUN_006a3a30` lights each piece of each wall (room+0xD8 list) with `FUN_006ac070(wall, piece, class,
-  batch)` -> `FUN_006abdd0`: sample (i, k) at `origin + (i + 0.5) * run / cols + (0, 3 * k / N, 0)`, texel
-  `(x0 + i, y0 + N - 1 - k)`, with `cols = wall+class*0x10+0x28`, `N = +0x2C`, the atlas block at `wall+class*0x20+0x58` =
-  `{x0, y0, x1, y1}` (`y1 = y0 + N - 1`), `run = wall+0xF0`, `origin = wall+0x110`, and `3.0` the float at `0x00FF37DC`.
-  Rows cover [0, 3): the top row is 3/N under the top of the wall (N = 13 / 7 / 4 for LOD classes 2 / 1 / 0: 0.23 /
-  0.43 / 0.75 m). Verified on the F8 of 29/09: the atrium's lower room had rows up to 46.44 / 46.24 / 45.92 for the three
-  classes, the upper room's bottom row at the line (46.67).
-- The wall meshes take their light UVs from `FUN_006ac200` (through `FUN_006a5600`, called by the straight wall builder
-  `FUN_00c38530` and `CurvedWallGeometry::UpdateLightingTexCoords` `FUN_00a5e0a0`): `v = (y0 + 0.5) / H` at the top
-  vertices, `(y1 + 0.5) / H` at the bottom ones, linear in between. So row k is drawn at `k * 3 / (N - 1)`.
-- Every row is drawn higher than where it was lit, the top row right at the top: the wall below a floor line shows the
-  light from 3/N under the line, the wall above shows the light at the line. Next to a sconce 1.2 m under the line that
-  is 0.86 against 0.46 (class 2).
-- `WallSamplesHook` (the CALL at `0x006A3AF5`): after the game filled the batch with a piece, each sample moves to
-  `k * 3 / (N - 1)` (`y += k * (3 / (N - 1) - 3 / N)`), after checking the whole piece against the formula above (else
-  the piece stays as the game has it and counts as "left as the game has them"). Both walls then end on the light at the
-  line, and every row is lit where it is drawn.
-- The class-2 blur `FUN_0069f650` (the CALL at `0x006A3B62`; `[0x01158B1C]` = 2 passes, mode `[0x011D02E4]` = 0: each
-  pass `[1 2 1]` along every row of the block, then down every column, clamped to the block) pulls the edge rows back
-  towards the inside of each wall (top row -> `(10 e0 + 5 e1 + e2) / 16`). First version (29/09 19:33): `WallBlurHook`
-  kept the top and bottom rows out of the vertical blur (blurred along the row only, the game's rounding
-  `(a | b) - ((a ^ b) >> 1 & 0x7F7F7F7F)`). Both walls then ended on the same light, but with a sconce just under the line
-  the rows next to the edges were raised by the blur and the edges were not: a crease along the line (user: "almost
-  perfect", "only a veeery slight difference"; the east sconce column: slope under the line 0.54/m against 0.11/m above,
-  4.8x, where a blur that went on across the line gives 0.44/0.19, 2.4x, like any other row).
-- Second version (29/09 ~20:15), the rooms of an atrium group only (`GhostRoom`: members of `g_wallBase`, both lit at class
-  2): after the game lights a piece (`WallSolveHook`, the CALL of `FUN_006a31d0` at `0x006A3B0A`), copies of its top-row
-  samples 1 and 2 rows (0.25 m) higher and of its bottom-row samples 1 and 2 rows lower are lit by the same function into
-  a private 4 x n buffer (`g_ghosts`, per wall, reset at piece 0). `BlurWalls` then blurs every class-2 block itself, the
-  game's algorithm over the block with those rows around it, and writes the block back: the wall below and the wall above
-  both blur across the line as if they were one wall. Walls without those rows (room 0, other rooms, another thread) keep
-  the first version's edges. Room 0 is left out on purpose: the outside walls of the stories under the camera are lit at
-  class 0 (no blur), so the wall above must end on the exact light at the line.
-- Where a floor really separates the two walls (the solid strip along the atrium's north wall, keys `00028019`), the step
-  stays: the lamp under the strip cannot light the wall above it.
-- The horizontal direction has the same kind of offset (samples at `(i + 0.5) * run / cols`, drawn from texel centre to
-  texel centre); it is left alone: samples on a wall's very end sit on the next wall's line, where the 2D wall test is
-  ambiguous.
+1. The lamp head and the sample are converted to lot space. For each boundary between the lamp's story and the room's
+   story, `IndoorBoundaryPass` finds the ray's crossing of that floor (the lowest floor height first, then the height of
+   the tile it lands on). The quadrant there must be an opening over an indoor room of the story below, else the lamp
+   gives nothing. Points within 2 cm of the floor plane are tested at their own place.
+2. The crossings must be strictly ordered along the ray. Wall segments are built from the actual crossings, not from
+   nominal story planes: ghost wall rows and split-level tile heights can place a sample on the lamp's side of a boundary
+   despite its room's story number. The segment of the story holding the ray's endpoint is kept when it is not the
+   receiving story.
+3. When the game tests 2D walls in this batch (`flags[0]`), each segment is tested with `FUN_0069fc40` against the room
+   of that story found at the segment's midpoint (the lamp's own room for the first segment), from the segment's start
+   to its end, with `+0x639` swapped as in part 3. Transmissions multiply (clamped 0..1). The receiving room's walls are
+   tested by the game.
+4. Fail closed: an unreadable floor, a stale manager, a missing intermediate room or an ambiguous crossing order blocks
+   the lamp. Exception: for adjacent stories in the normal solve, a missing room on the segment keeps the earlier
+   behaviour (pass).
 
-### Rooms still holding a lamp switched off (2026-09-30, not tested in game yet)
+**Directional maps.** The story's four directional basis maps (LightBasisMap0..3, 64x64, 1 texel per metre) are filled
+by `FUN_006a09f0` (called at `0x006A3C0A` from `FUN_006a3b80`, state 7 of the room solve `FUN_006a3c90`; only indoor
+rooms of lots with `mgr+0x288`, `room+0x62A` set at `0x006A1BB0`): one sample per tile centre (lot x+.5, floor height,
+z+.5; world through `room+0xF8`) and, for each light of the room's own list, `FUN_0069f280` (stdcall `(pos, light, float
+acc[4][4])`, `ret 0xC`; its only call `0x006A0C56` after `mov ecx, edi`; pos = the sample 0.5 m up) adds the light's rig
+colour (`vfunc+0x10`, `FUN_006bdb00`) weighted towards the 4 directions (±0.894, 0.447, 0) and (0, 0.447, ±0.894), with no
+threshold, wall or floor test. `BasisLightHook` redirects that call (bytes `8D 94 24 C8 00 00 00 52 8B CF` checked).
+For a lamp of another story (`FindCross`):
 
-The game switches a lamp off through its intensity (+0x10 = 0, so the lit colour +0xE0 = 0); the lit flag +0x100 & 0x20
-stays set. A room's light list (`room+0xC8..+0xCC`, light pointers) holds what its last gather took, and the gather's
-filter (`GameTakesLight`: flag 0x20 and `LightBright` = `FUN_006bc520`, the sum of +0xE0..+0xE8 >= `[0x010459E4]`) keeps
-a switched-off lamp out. F8 30/09 01:26 (house C49C001BCF2DEA20, every lamp off): after the load, room 2 of story 1 still
-held two of its lamps switched off for ~25 s (journal: lights 20, 9, 4, then 2 only when the user switched another lamp
-on; user: "right after entering the game the background colour was wrong, after a while it fixed itself"). Why the game
-did not gather it again is not known. `OnPresent` (render thread) now scans, once a second, every indoor room (id > 0) at
-rest (state not 1..3) of the loaded lots (`ForEachRoomImpl` in lazy mode: its tile walk at most every 10 s, lots gone
-skipped, no new walk when lots stream in or out) and sends a room whose list still holds a lamp the filter refuses now
-to gather again (`QueueRoomSafe`), once per set of such lamps (`g_staleSent`, so a gather that keeps them is not repeated).
-Left out: room 0 (the outside), window lights (types 7 and 8, they follow the sky) and street lamps (type 11, lot 0).
-Status: "rooms still holding a lamp switched off gathered again N".
+- `IndoorShadow` runs with wall flags on and the basis flag set, so the floor crossings, every segment including the
+  receiving story's (the builder has no wall test of its own) and the raised-room veto are tested.
+- **Raised-room veto:** the whole ray is also tested against room 0 (the exterior wall collection) of every story from
+  the lamp's to the room's. A raised part of an intermediate story can hold walls outside the nominal story interval;
+  any failure or non-finite or zero transmission blocks the lamp. This is a veto only; the segment tests own the glass
+  and soft transmission.
+- Blocked, the lamp adds nothing; partly transmitted, the game's function runs into a temporary accumulator and only
+  that lamp's contribution is scaled.
 
-### Refresh on install / uninstall
+Status: *directional maps: lamps of another story tested N, behind a floor M*. While this hook is installed and the
+indoor part is ready (`BasisFloorGuardReady`), the indoor-object shader omits its floor-map cap; see
+[objects-and-rigs.md](objects-and-rigs.md).
 
-`RefreshAllLots` (render thread only; from `Install`, `Uninstall` and `OnPresent` when requested) walks the lot tracker tree
-(`lightMgr+0xD4`) and, per tracker, queues room 0 of levels 0..7 for a new gather exactly like the game's own refresh in
-`FUN_006c7250`: `FUN_006a6550(mgr, 0)`, `FUN_0069eed0(room0, 1, 0)`, insert key 0 into `tl+0x28` via `0x00B7AAD0`
-(`thiscall(set, out, const int* key, char)`), skipping rooms already pending (`+0xF0 == 1 && +0x168 != 0`). On uninstall
-the lists drop the other stories' lamps at that re-gather.
+**Normalisation guard** (`RoomNormHook`). `FUN_006a0230` (thiscall `(room, float brightest[4])`, its only call
+`0x006A13B4` in `FUN_006a0f50`) sets `+0x160 = limit / max(the lamps' vfunc+0x30, brightest sample x k)` when that is
+under `[0x01158B24]` or over `[0x01158B20]`. With every lamp blocked this is limit / 0 = inf, the ambient becomes NaN and
+the clamp makes it 0. The hook turns a non-finite value into 1, and a room whose lamps are all of another story
+(`CrossOnly`) gets at most 1 (no boost): light through an opening is not spread over the whole room, and with none
+coming the room takes the unlit colour like an empty room. Status: *rooms lit only by lamps of another story given no
+boost N (normalisation not finite M)*.
 
-## Cost of the per-point hooks (standalone, 2026-09-29, not tested in game yet)
+**Lighting detail** (`LodChoiceHook`). `FUN_0069e710(room)` (fastcall, plain `ret`) picks a room's lighting LOD class:
+the max class `[0x01158B00]` (2; 1 with the low lighting setting, set at `0x006A238A`; read by `mov eax,[0x01158B00]` at
++0x4B) only for rooms of the camera's story (`mgr+0x88 == mgr+0x284`) on the active lot (`mgr+0x288`), 0 below. Class
+0 samples walls every 0.75 m vertically and about 0.95 m horizontally, class 2 about every 0.25 m. Its 4 CALLs
+(`0x0069E82E`, `0x0069EA86`, `0x0069EF46`, `0x0069F1B3`) go through `LodChoiceHook`, which gives the max class to indoor
+rooms below the camera story that take lamps through an opening (bit 1, set in the gather) or whose lamps another story
+takes (bit 2, queued once when first seen), and, with *Every floor in full detail*, to every room of the active lot. The
+game then raises them itself: `FUN_0069ea70` at the end of a solve steps the class 0 -> 1 -> 2 while below
+`FUN_0069e710`, and `FUN_0069e770` gives such solves priority (weights `[0x01158B10]` 10000 / 1000 / 100 by class; 0
+when the class is above what `FUN_0069e710` asks). Apex's room queue ([`room_light_queue.cpp`](../../../features/room_light_queue.cpp),
+`RoomAmbientPolicy::FloorPriorityFactor`) weights the priority lot's rooms 4000 on every floor with full detail,
+otherwise 4000 on the camera story, 2000 below and 1 above; other lots 1.
 
-The point solve runs for every texel of a room light map, so what the hooks do there counts:
-- the thread checks (`SolveInfo` per point, `ShareOutdoorLights`, `RefreshSoon`, `OnPresent`) read the thread id from the
-  TEB (`__readfsdword(0x24)`, what `GetCurrentThreadId` returns) instead of calling it;
-- the F8 sample records (`Diag`, called from `CrossFloorShadow` for every lit cross-story evaluation: the active-lot test
-  under SEH and a distance test, then a record near the lamps) exist only in the development build and are collected
-  only while armed: Developer > Lighting "Record story light samples for the diagnostics", or the first F8 / "Save light
-  diagnostics" of a session, which writes the section with a note and arms it (the next dump has the samples of the
-  solves in between; `DiagText` still empties the records). The game's own wall test is wrapped (`GameWallTest`, only to
-  record its result) in the development build only; the public build leaves its CALL as the game has it. Light shares,
-  wall tests and the lighting itself are unchanged.
+**One ambient per atrium** (`RoomSolveStartHook`, `MergeStackedAmbient`). State 0 of the budgeted room solve
+(`FUN_006a18b0`, its only call `0x006A3D0B` in `FUN_006a3c90`) computes per indoor room:
 
-## Files and functions
+- the ambient colour `room+0x110` in `FUN_006a0f50` (the wall shader adds `lightmap.a x c4`; the parameter table binds a
+  pointer to `room+0x110`, so a change shows at once): the room's lights sampled on every second floor tile and 4 m above
+  it, over its area (floor quadrants x 0.25 + wall sizes x 3), through the curve `FUN_006a00a0`, clamped to [0, 0.35];
+  `+0x120` (objects) likewise, clamped to 0.5;
+- the normalisation `room+0x160` (`FUN_006a0230`: 1/m if m < 1, 3/m if m > 3, m = the strongest light or sample);
+- the ambient weight ramp of wall samples `(1 - k) + 2k (y - base)/3` (`FUN_006ab210`), base = the story's lowest floor
+  (`mgr+0x98`) in the samplers `room+0x640` and `room+0x660`.
 
-| File | Function | Role |
+After the original state 0, rooms joined by removed floors into an atrium (`ReadStacked`: breadth first over the stories,
+at most 12 rooms; an edge needs 16 shared quadrants and 30% of the smaller room's floor, so a stairwell never joins two
+rooms) get the same ambient colour (each room's colour, which carries its normalisation, brought to the group's, then
+averaged by floor quadrants; written to `+0x110` and the sampler copy `+0x650`) and the smallest normalisation. The ramp
+base of the group's lowest story is used for the wall pass only (`WallPassHook` on the CALL `0x006A3D4C` of
+`FUN_006a3a30`, thiscall `(room, int, float)`, `ret 8`, returns al: it swaps `room+0x640` around each call), because the
+floor, ceiling and object passes share that sampler.
+
+Group coordination:
+
+- The latest group target per room is kept (`g_ambToQueue`) until a merge confirms convergence. A member whose last
+  merge differs (colour, normalisation or wall base) is sent to solve again from the next room update, at most every 3 s
+  (`AmbientUpdateDue`); a failed queue attempt retries after that cooldown. Pending ambient work counts as busy for the
+  post-load settle.
+- Compatible colour-only changes (same normalisation and ramp, `AmbientMapsCompatible`) are applied without a native
+  solve: targets are staged for every member, and before the lot's room update the whole group is checked (identity,
+  finite target, matching revision, unchanged normalisation and ramp, idle ambient ownership), written in that update and
+  checked again. A failed write restores the previous colours and falls back to ordinary reconciliation. The wait is at
+  most 1.5 s from the first staging (`GroupWaitExpired`). Publication is limited to 16 members per 50 ms globally; pending
+  idle updates resume from a key-based cursor (128 visits, 16 writes per poll). An object-rig refresh is requested at the
+  next Present after publication.
+- Live slider changes from Rooms at Night (`StageAmbientBaseChange`, `StageUnlitAmbientChange`,
+  `ApplyAmbientBaseChanges`) update only the background part of each member's original colour, then recompute cached
+  groups with the solver's area and normalisation rule, writing the merged colour and its sampler copy together.
+- Caches are forgotten only for removed lots or lots whose story managers changed; other lots keep their groups. Only on
+  the light tree thread (the lot impostor's synchronous solve goes through the same CALL).
+
+### Part 5: seamless walls
+
+The wall pass `FUN_006a3a30` lights each piece of each wall (`room+0xD8` list) with `FUN_006ac070(wall, piece, class,
+batch)` (`ret 0xC`) -> `FUN_006abdd0`: sample (i, k) at `origin + (i + 0.5) * run / cols + (0, 3k/N, 0)`, texel
+`(x0 + i, y0 + N - 1 - k)`, with `cols = wall+class*0x10+0x28`, `N = +0x2C`, the atlas block `{x0, y0, x1, y1}` at
+`wall+class*0x20+0x58` (`y1 = y0 + N - 1`), `run = wall+0xF0`, `origin = wall+0x110`, and 3.0 the float at `0x00FF37DC`.
+Rows cover [0, 3): the top row is 3/N under the top (N = 13 / 7 / 4 for classes 2 / 1 / 0: 0.23 / 0.43 / 0.75 m). The wall
+meshes take their light UVs from `FUN_006ac200` (through `FUN_006a5600`, called by the straight wall builder
+`FUN_00c38530` and `CurvedWallGeometry::UpdateLightingTexCoords` `FUN_00a5e0a0`): `v = (y0 + 0.5)/H` at the top vertices,
+`(y1 + 0.5)/H` at the bottom, linear between, so row k is drawn at `k * 3/(N - 1)`. Every row is drawn higher than where
+it was lit: the wall below a floor line shows the light from 3/N under the line, the wall above shows the light at the
+line (next to a sconce 1.2 m under the line: 0.86 against 0.46 at class 2).
+
+- `WallSamplesHook` (CALL at `0x006A3AF5`): after the game fills the batch with a piece, each sample moves to
+  `k * 3/(N - 1)` (`y += k * (3/(N - 1) - 3/N)`), after checking the whole piece against the formula above (otherwise
+  the piece stays as the game has it). Both walls then end on the light at the line.
+- The class-2 blur `FUN_0069f650` (fastcall `(room)`, CALL at `0x006A3B62`; `[0x01158B1C]` = 2 passes, mode
+  `[0x011D02E4]` = 0: each pass `[1 2 1]` along every row of the block, then down every column, clamped to the block;
+  `cmp [room+0xF4],2` at +0x0D) would pull the edge rows towards the inside of each wall (top row ->
+  `(10 e0 + 5 e1 + e2)/16`). `WallBlurHook` keeps the top and bottom rows out of the vertical blur (blurred along the row
+  only, with the game's rounding `(a | b) - ((a ^ b) >> 1 & 0x7F7F7F7F)`).
+- For rooms of an atrium group (`GhostRoom`: members of `g_wallBase`, both lit at class 2), `WallSolveHook` (CALL of
+  `FUN_006a31d0` at `0x006A3B0A`; thiscall `(room, batch {begin, end}, atlas {base, pitch}, char flags[2], sampler, char
+  ambient)`, `ret 0x14`, writes each texel at `Y * pitch + X * 4`) also lights copies of the top-row samples 1 and 2 rows
+  (0.25 m) higher and of the bottom-row samples 1 and 2 rows lower into a private 4 x n buffer (`g_ghosts`, per wall,
+  reset at piece 0). `BlurWalls` then blurs every class-2 block with the game's algorithm with those rows around it and
+  writes it back, so the walls below and above blur across the line as one wall. Room 0 is left out: outside walls of
+  stories under the camera are lit at class 0 (no blur), so the wall above must end on the exact light at the line.
+- The horizontal offset (samples at `(i + 0.5) * run/cols`, drawn texel centre to texel centre) is left alone: samples on
+  a wall's very end sit on the next wall's line, where the 2D wall test is ambiguous.
+
+The three wall-pass redirects install all together or not at all. Status: *seamless walls between floors: on (N wall
+samples moved to their drawn height, N wall pieces left as the game has them, N walls blurred across their edges, N edge
+rows kept out of the blur)*.
+
+### Updates
+
+`FUN_006c5e20` pushes `FUN_006c7250` (per-story room update, fastcall `(treeLevel)`, plain `ret`) as a function pointer
+(`push 0x6C7250` at `0x006C5E2A`) that `FUN_006c4b40` calls for levels -4..7 of every lot. The immediate is replaced by
+`RoomUpdateHook` (`BeforeRoomUpdate` first). Its call that empties the changed-rooms set (`call 0x7F3790` at
+`0x006C7497`, `ecx = tl+8`, thiscall `(set, buckets, count)`, `ret 8`) goes through `ChangedClearHook`.
+
+- **Changed rooms.** The set is read just before it is emptied (it is filled inside the update itself: a dirty lamp
+  entry's vfunc+8 calls `FUN_006c7160`). The rooms of other stories that take those rooms' lamps (`g_deps`) are sent
+  again, never the story being updated.
+- **Signatures** (`RoomLampSignature`, `LampChange`). The game marks a room changed for more than lamp changes (the
+  entry update `0x006C7BA0` does it for any lit lamp whose entry is updated). A changed room sends its takers only when
+  its lamps or walls differ from the last send. Two hashes: the shape (which lamps, cone, the room's walls `room+0x30`)
+  and the values (lit flag, lit colour `+0xE0`, intensity `+0x10`, cone `+0x170..+0x1A0` for types 4 and 5). Position
+  and range are tracked per lamp at the last send (`LampAt`): a move counts beyond 10 cm, a range change beyond 2%. A new
+  shape sends the takers at once and stops their solve; a value change sends them at once only if they were not sent for
+  a value change in the last 1 s, without stopping a solve; later value changes wait for 300 ms of quiet, at most 1.5 s
+  (`kDepQuiet`, `kDepRecent`, `kDepMaxWait`; `g_depWait`, `FlushDepWaits`).
+- **Lot state** (`LotState`, every 2 s per lot on level 0): the lot's 8 story managers are compared (a rebuilt lot starts
+  again: *lots rebuilt N*); when the number of stories with a known floor object grows or the opening count changes, or
+  `g_indoorGen` moved (install, option, `OnWorldLive`), or the lot's floors were edited, the rooms near its openings (both
+  sides) and the rooms holding lamps of another story gather again (`QueueOpeningRooms`).
+- **Settle after loading.** A lot that finds its openings sends those rooms once more when its first round is over: none
+  of its watched rooms gathers, waits or solves (states 1-3), none is held and no lamp burst waits, for 400 ms, not before
+  500 ms after arming and at the latest after 6 s (`kSettleMin`, `kSettleQuiet`, `kSettleMax`).
+- **Floor edits.** Floor set or remove calls mark the floor object; after 250 ms without another edit
+  (`RoomAmbientPolicy::FloorEditReady`) the room list is marked stale, Rooms at Night is told, and the lot's rooms near
+  openings gather again.
+- **Structure changes.** `NoteRoomStructure` hashes each indoor room's manager, id, roofless byte `+0x18` and wall list
+  (`room+0x30`, at most 1024 entries) at every gather. A changed signature queues that room; at most every 250 ms
+  (`StructureRefreshDue`), Present marks the cached room list stale and calls `UnlitRooms::OnRoomChanged` for each queued
+  room. Lamp colour, animation and lighting LOD are not part of the signature. The cache holds at most 8192 rooms and is
+  cleared on a world change.
+- **Window lights.** `FUN_006c7ba0` (light registry entry vfunc+8) resolves the room at the window sample, reads its
+  roofless flag (`FUN_006c7b20`, `FUN_0069e620`), checks its paired entry and the tree's state, passes the computed lit
+  boolean to `FUN_006bdca0` (which alone only sets the flag and colour) and marks rooms with `FUN_006c7160`. On a new lot
+  or manager, a world-live generation, a geometry refresh or a change of the displayed story, `BeforeRoomUpdate` runs this
+  evaluator for the lot's window lights (type 7/8, validated evaluator at vfunc+8, registry snapshotted first) at once,
+  after 2 s and after 6 s (`WindowRecheckDue`). The game decides whether each window is lit. `LightEntryUpdate` has two
+  signatures, both resolving to `0x006C7BA0`.
+- **Stale switched-off lamps.** The game switches a lamp off through its intensity (`+0x10 = 0`, so `+0xE0 = 0`) and
+  keeps the lit flag. `OnPresent` scans once a second every indoor room at rest (state not 1..3) of the loaded lots
+  (`ForEachRoomImpl` in lazy mode: tile walk at most every 10 s, lots gone skipped) and sends a room whose list still
+  holds a lamp the gather filter now refuses (`GameTakesLight`: flag 0x20 and `FUN_006bc520`, the sum of `+0xE0..+0xE8`
+  >= `[0x010459E4]`), once per set of such lamps (`g_staleSent`, kept while the room is busy). Room 0, window lights
+  (types 7 and 8) and street lamps (type 11) are excluded.
+- **Queueing** (`QueueRoom`) is the game's own refresh: `FUN_006a6550(mgr, id)` (thiscall, `ret 4`), `FUN_0069eed0(room,
+  1, 0)` (invalidate, `ret 8`), insert into `tl+0x28` with `0x00B7AAD0` (thiscall `(set, out, const int* key, char)`,
+  `ret 0xC`), skipped when already pending. Rooms are never put into the changed set, so a queued room never sends
+  others. A value-change send defers while the room is being solved.
+- **Room enumeration** (`ForEachRoom`, `CachedStoryRooms`) is rebuilt at most every 3 s, or at once when the lot list,
+  the story managers or a room structure changed.
+- **Install / uninstall** (`RefreshAllLots`, render thread): walks the lot tracker tree (`lightMgr+0xD4`) and queues room
+  0 of levels 0..7 exactly like `FUN_006c7250`. Uninstall also sends the rooms in `g_indoorList` (rooms holding lamps of
+  another story; kept across world-change clears of `g_rooms`), so no lamp keeps shining through a floor without the test.
+- Option changes of other Night Lighting settings leave this module installed (`ReinstallNow`'s `reinstalling` flag).
+
+### Floor switches (lamp mark filter)
+
+`features/lamp_mark_filter.cpp`. On every floor switch the game restarts room 0 of every story and every room holding a
+lamp (`0x006C7451` in `FUN_006c7250`). The lamp entry update `FUN_006c7ba0` (entry vtable `0x00FF5984` slot +8; for a lamp
+light vfunc+0x18 = `0x00620D60` returns false) finds the lamp's room (`FUN_006c7b20`), rewrites its lit bit and colour
+(`FUN_006bdca0`) and marks the room changed (`FUN_006c7160`, thiscall `(tl, room)`, `ret 4`: `0x006C7CCA` for the room
+left, `0x006C7CD6` always) without comparing. Entries are flagged by `FUN_006c4cf0` from the light manager's messages
+(transform `0x3361F6C9` at `0x006B0A8D` and colour `0x966EC80A` at `0x006B0BFA` always; intensity `0x006B0B33`, enable
+`0x006B0C9A`, alpha `0x006B0D26` only on a change). Nothing in the room solve reads the shown story or a light's
+visibility.
+
+- `MarkThunk` on the call at `0x006C7CD6` (esi = entry, edi = light, ecx = tl) hashes the lamp's values (its room, lit bit,
+  object flags `entry+0x20` record `+0x90 & 6`, `+0x10` x4, type `+0xB0`, `+0xC0..+0xDC`, `+0xE0..+0xF0`, position
+  `+0x120` x3, range `+0x130`, cone `+0x170` x13 for types 4 and 5) and compares them with its last mark per (tree level,
+  light). The same values drop the mark; first sight, window lights, unreadable lamps and the filter switched off always
+  mark. Not filtered: `0x006C7CCA`, occluder entries (`0x006C7939`), room creation and object removal.
+- `MarkDecide` keeps per lamp whether it is on (lit bit and colour sum > 1e-3), its position and room. A change makes the
+  lot due after 120 ms for a pure on/off change or 700 ms for a move or room change (`LampRefreshDelay`), then
+  `LampMarkFilter::OnPresent` runs `LevelLightShare::RelightLot` (every room of the lot, stories -4..7, room 0 too) and the
+  rig refresh, at most once per 2 s per lot (`kLotGap`). Nothing happens while the night level is between 0.02 and 0.98
+  (dusk and dawn switch every lamp), without a world, for first sight, for window lights, or for a light switching more
+  than 3 times in 10 s.
+- A switch-only relight may keep a room that is at rest (state 5), has the same manager and id, gathered strictly after
+  the last switch (`NoteGatherStamp`, `GatherAfterChange`; the stamp is written only after the original gather and both
+  sharing steps succeed) and has no pending ambient, dependent or deferred work. The stamp cache is bounded and cleared on
+  a world change.
+- Developer > Lighting has a checkbox for the filter (on, not saved) and its status; the recorder writes *Rooms keep their
+  light: ...*.
+
+### After loading
+
+`OnWorldLive` (called when Night Lighting sees the world drawn) bumps `g_indoorGen`, so every lot's rooms near openings
+gather once more and settle. `RequestRefreshAfterLoad` then runs `NightLighting::RefreshAll("after loading")` (lots,
+every room, rigs; the terrain keeps the load's own rebuild) once the room list is fresh and no room is busy or pending
+for 250 ms, polled every 200 ms from 500 ms after world-live, and at the latest after 8 s (`AfterLoadRefreshReady`). The
+room enumeration is expired at world-live. A setting change pending at that moment takes over.
+
+### Wall seam recording
+
+Starting a recording (Developer > Recorder) arms `BeginSeamRecording`; saving writes `Wall seams.csv` to the recording
+folder, cancelling discards it. Only wall samples (|normal.y| <= 0.3) of indoor rooms that are not roofless, from batch
+solves other than ghost rows, within 2.5 cm of the story base or base + 3 m, are kept, in a separate 8,192-entry ring
+(latest samples retained). Columns: `elapsed_ms, lot, story, room, class, x, y, z, nx, ny, nz, story_base, raw_r, raw_g,
+raw_b, normalization, after_curve_sum`. Raw samples precede the wall blur and atlas upload. Recording does not change
+lighting, diagnostic arming, solves or budgets. An empty file means no qualifying wall-edge solve happened.
+
+### Diagnostics (developer mode)
+
+- Status line *Stories* on the Developer page (see the strings in `LevelLightShare::Status`).
+- F8 (`light_diag.cpp`, namespace `LightDiag`) appends `DiagText()`: the per-story room 0 lists, the section
+  `==== ANDARES (luz externa entre andares) ====` (samples within 3.5 m of each light of the active lot: point story,
+  light, type, home story, point, normal, colour sum, the game's wall test (1 passed / 0 blocked / -1 not run) and factor,
+  Apex's factor, batch and culled-list flags, per-light per-story summary), `==== STORIES INDOORS ====` (per story: tiles,
+  floor grid, every floor object naming it with "its floor" / "the ceiling layer", openings; the indoor gathers),
+  `==== SEAM ====` (latest wall solves of atrium rooms with their LOD class) and `==== SOLVES ====` (kept from the world
+  load: ambient steps and wall passes of rooms sharing light, with thread, LOD class solving and shown, state, lamps,
+  boost and merge flags, normalisation, ambient, ramp base, `Q` sent by Apex, `H` held until the solve ended, lot id,
+  camera story and the room flag `+0x19` whose change invalidates a room, `0x006A5E00 -> 0x0069F160`).
+- Samples are recorded only while armed (Developer > Lighting *Record story light samples for the diagnostics*, or the
+  first F8 of a session). The game's wall test is wrapped (`GameWallTest`, CALL at `0x0069FE93`) only in developer
+  mode, to record its result.
+
+### Address reference
+
+| Address | What | Check |
 |---|---|---|
-| `level_light_share.cpp` | `Install` / `Uninstall` | byte checks, call redirects, JNZ->JL, 9 vtable slot writes, `RefreshSoon` |
-| | `OutdoorGather`, `ShareOutdoorLights`, `RecordRoom`, `FloorOutdoorLights` | part 1 (sharing, cross-story list) |
-| | `SolvePoint`, `SolvePointSingle`, `SolvePointBatch`, `SolveInfo`, `BatchCentreFor` | per-point solve context |
-| | `LightEvalHook<I>`, `CrossFloorShadow`, `WallPass(Impl)`, `CulledWalls`, `HomeFloor` | part 3 (walls of the lamp's story) |
-| | `GameWallTest` | wrapper of the game's own wall test at `0x69FE93`, records its result for F8 (development build only since 2026-09-29: the public build leaves that CALL untouched) |
-| | `QueueOutdoorRegather`, `RefreshAllLots`, `OnPresent`, `OnWorldChanged` | refresh |
-| | `Diag`, `DiagText`, `SetDiagArmed` / `DiagArmed`, `Status` | F8 section (development build, recorded only while armed since 2026-09-29) and status line |
-| | `FloorSetThunk`, `FloorRemoveThunk`, `NoteLevel`, `LevelFor`, `RemovedFloorKey`, `ReadOpenings`, `BuildOpeningMask`, `ReadRoomSpan`, `RoomsNearOpenings` | part 4: floor objects and openings |
-| | `ShareIndoorLights`, `GameTakesLight`, `NoteDeps`, `IndoorShadow`, `IndoorPass(Impl)` | part 4: gather and per-point test |
-| | `RoomUpdateHook`, `BeforeRoomUpdate`, `ChangedClearHook`, `AfterChangedWalk`, `RoomLampSignature`, `ChangedRooms`, `QueueOpeningRooms`, `QueueRoom`, `SetIndoor`, `InstallIndoor` | part 4: updates, option, install |
-| | `BoostRoom`, `Boosted`, `BoostedLod`, `LodChoiceHook` | part 4: lighting detail of the rooms seen through an opening |
-| | `IndoorDiagText` | F8 "STORIES INDOORS": per story of the active lot (tiles, floor grid, floors, openings) and the indoor gathers (while armed) |
-| `patches/night_terrain_relight_patch.cpp` | `Install`, `ApplyLive`, `ReinstallNow`, Present hook | install/uninstall, calls `LevelLightShare::OnPresent()` every frame |
-| `light_diag.cpp` (F8) and `patches/light_diag_patch.cpp` | dump | append `LevelLightShare::DiagText()` (both: the F8 key uses `light_diag.cpp`, namespace `LightDiag`) |
-
-## Game addresses and patterns
-
-All TS3W.exe 1.67.2 Steam, image base `0x00400000`. Every site is validated before writing; any mismatch makes `Install`
-fail with "Light between stories code differs (different game version?)" (the wall part is optional: if its checks fail,
-parts 1-2 still install and the log says "Calculo por ponto nao confere; sem sombra das paredes de outros andares").
-
-| Address | What | How found / verified at runtime |
-|---|---|---|
-| `0x006C6AB0` | `FUN_006c6ab0` AddWorldLights(treeLevel, room) | RE (m44/m45 analysis); call targets checked |
-| `0x006C5816`, `0x006C7094` | its two callers (room creation, room update) | `E8` + rel32 == target, then rel32 rewritten to `OutdoorGather` |
-| `0x006C6990` | `FUN_006c6990(treeLevel, room, char ownFloor)` `ret 8` | calls at `0x006C6B08`, `0x006C6B2D` validated |
-| `0x006C6B16` | `cmp [edi+0x1A0], ebx; jnz` (level-0-only double gather) | not patched; `re/out/dump/asm/006c6ab0.asm` |
-| `0x006A6550` | room by id `thiscall(manager, id)` `ret 4` | call at `0x006C73F0` validated |
-| `0x0069EED0` | invalidate room `thiscall(room, char full, char keep)` `ret 8` | call at `0x006C73FF` validated |
-| `0x00B7AAD0` | set insert `thiscall(set, out, const int*, char)` `ret 0xC` | call at `0x006C741B` validated |
-| `0x006C73AA` | `39 86 A0 01 00 00 0F 85 7C 00 00 00` (cmp/jnz of the cascade) | `ValidateBytes` |
-| `0x006C73B1` | Jcc byte `0x85` -> `0x8C` | `WriteBytes` with original `0x85` |
-| `0x0069FD60` | `LightPointWithAllLights` | calls at `0x006A1187`, `0x006A126F`, `0x006A3336` validated and redirected |
-| `0x0069FE19` | return address after `call edx` (light `vfunc+0x4C`) | bytes `FF D2` at `0x69FE17` checked |
-| `0x0069FC40` | wall test `thiscall(room, int* idx, lightPos, sample, float* t)` `ret 0x10` | its call at `0x0069FE93` validated and redirected to `GameWallTest` |
-| `0x0069DFF0` | wall culling `thiscall(walls, int-vector* out, from, lightPos)` `ret 0xC` | call at `0x006A311F` (in `FUN_006a30b0`) validated |
-| `0x01158AC8` | global batch sample vector (0x30/sample) | `push 0x1158AC8` at `0x006A3B03/3687/37CD/3956` validated |
-| `0x009691E0` | light position `vfunc+0x24` of all 9 classes | checked per class before wrapping |
-| class vtables `+0x4C` | see table above | slot value compared with the expected function |
-| `0x011D1860` | root pointer; `root+0x1C0` = light manager | used by `RefreshAllLots` |
-| `0x006C7820` | registry entry filter of the story gather (`LightFilter`) | signature; `LightBright` and `AddRoomLight` are the CALLs inside it |
-| `0x006BC520` | light bright enough, `fastcall(light)` (al) | CALL at `0x006C7848` |
-| `0x006A2060` | add a light to a room, `thiscall(room, light)` `ret 4` | CALL at `0x006C7874` |
-| `0x006C5E2A` | `push 0x6C7250` (68 imm32) in `FUN_006c5e20` | byte `0x68` and imm32 == `RoomUpdate` checked, imm32 replaced by `RoomUpdateHook` |
-| `0x006C7250` | per-story room update, `fastcall(treeLevel)`, plain `ret` | the pushed immediate |
-| `0x006C7497` / `0x007F3790` | in it: `call` that empties the "changed rooms" set (`ecx = tl+8`), `thiscall(set, buckets, count)` `ret 8` | `E8` validated (within 0x400 of the update) and redirected to `ChangedClearHook` |
-| `0x00A89DD0` / `0x00A893A0` | floor set / remove `thiscall(level floor object, ...)` | 4 / 1 callers (`CallersOf`), each `E8` validated and redirected to the thunks; no branch lands inside the calls |
-| `0x0069E710` / `0x01158B00` | lighting LOD choice `fastcall(room)`, plain `ret`; the max class it returns (`mov eax,[0x01158B00]` at +0x4B) | 4 callers (`CallersOf`), each `E8` validated and redirected to `LodChoiceHook`; the `A1` + address at +0x4B checked |
-| `0x006A3D0B` / `0x006A18B0` | the CALL of state 0 of the room solve / its function `thiscall(room)`, plain `ret` | signature, `E8` validated, redirected to `RoomSolveStartHook` |
-| `0x006A3D4C` / `0x006A3A30` | the CALL of the wall texel pass / `thiscall(room, int, float) ret 8`, returns al (done) | signature, `E8` validated, redirected to `WallPassHook` (both or none) |
-| `0x006A3AF5` / `0x006AC070` | in it: the CALL of the samples of one wall piece / `thiscall(wall, piece, class, batch)` `ret 0xC` | signature within the wall pass (`InRange` 0x150), `E8` validated, redirected to `WallSamplesHook` (part 5) |
-| `0x006A3B62` / `0x0069F650` | in it: the CALL of the class-2 wall blur / `fastcall(room)`, plain `ret` | signature within the wall pass, `E8` validated, redirected to `WallBlurHook` (part 5; all three or none) |
-| `0x006A3B0A` / `0x006A31D0` | in it: the CALL of the batch solve for each piece / `thiscall(room, batch {begin, end}, atlas {base, pitch}, char flags[2], sampler, char ambient)` `ret 0x14`, writes each sample's texel at `Y * pitch + X * 4` | signature within the wall pass, `E8` validated, the point solve call `0x006A3336` must lie within 0x300 of it; redirected to `WallSolveHook` (part 5) |
-| `0x01158B1C` / `0x011D02E4` | blur passes (dword, 2) / blur mode (byte, 0) | `Deref` of the blur at +0x20 (`8B 0D`) and +0x88 (`80 3D`), both opcodes and the `cmp [room+0xF4],2` at +0x0D checked |
-| `0x01062680` | level floor object vtable | `mov [esi],imm32` after the base ctor call in `0x00A88790` |
-| `0x00AA179E` / `0x00A88790` | the only CALL of the level floor object ctor (after `new 0x350`) / the ctor `thiscall(object)`, returns it, plain `ret` | signature, `E8` validated, the ctor must write the level vtable at +0x0D (`C7 06` + vtable); redirected to `LevelCtorHook` (optional; every floor object is remembered at its construction) |
-
-## Interactions
-
-- **Walls / floors** ([walls.md](walls.md), [floors.md](floors.md)): the wall and floor shaders read the room maps this
-  module changes. The outside wall gain (`forcaNasParedes`) multiplies the result.
-- **Objects** ([objects-and-rigs.md](objects-and-rigs.md)): rigs already gather outdoor lamps of every story (room id 0
-  matches everywhere); now walls agree with windows/doors on the lamp list. Remaining differences: a rig uses the 3
-  strongest lamps at the object centre without wall shadow; the map sums all lamps per point with wall occlusion.
-- **Split-Level Lighting Fix** (S3SS patch, `0x6BC020`): type-11 lot lights also come through the world-cell part of the
-  gather on every story. Compatible; accounted for in the design.
-- **S3SS Lighting Quality** (`lighting_quality_patch.cpp`): detours the entry of `LightPointWithAllLights` (`0x69FD60`)
-  and calls the original N times on jittered sample positions. No byte overlap (our redirects are at the three call
-  sites, and the return address `0x69FE19` still matches inside the re-entered body), but the cross-story wall tests run
-  N times (cost). PLANO-SEPARACAO.md policy: cooperate; measure the cost with Lighting Quality at 16/32 samples.
-- **F8 (light_diag)**: the "ANDARES" section is produced here.
-
-## Known limitations
-
-- The floor slab of an upper balcony does not block light to the story below (the blockers are per story), the same as
-  what Split-Level already does for type-11 lights.
-- The wall test only runs on the thread that did the gather (the light tree thread). If the game ever solves points on
-  another thread the status shows "on another thread: N" and those points get no cross-story occlusion.
-- Basements (levels < 0) are left exactly as the game has them (no sharing, no cascade).
-- Stories above 7 are ignored (the tracker holds levels -4..7).
-- `g_rooms` is keyed by room pointer; a reused pointer is detected by comparing the manager (`RoomStillSame`).
-- Part 4: only stories next to each other (a lamp two stories away through two aligned openings is ignored); only lamps
-  and rooms within 8 m of an opening; the floor objects are known only after a floor set / remove call since the mod
-  started (a lot loaded before the option was installed gets them at its next load or floor edit); the receiving room's
-  walls are tested by the game over the whole ray, so for a lamp BELOW the room a wall of the room may block the part of
-  the ray that is still under the floor (the case of the lamp above, the reported one, is exact).
-
-## Pitfalls and failed approaches
-
-### Indoor story seam investigation (2026-10-04)
-
-Session `2026-10-04 16-58-09 Session`, recording `18-11-40`, runs
-`2.5.6-indoor-stories-test2`. The connected rooms (story 0 room 23, story 1
-room 19, story 2 room 20) converge to identical ambient RGB after lamp edits,
-but their native wall passes finish separately. The first recorded update goes
-from queued rooms at 18:11:30.743 to matching ambient at 18:11:31.399.
-This measures queue-to-ambient convergence, not click-to-visible latency or a
-validated wall-map fix. The player still reports inconsistent indoor walls.
-
-The `indoor-seam-trace` candidate adds `Wall seams.csv` to ordinary recordings.
-It records raw RGB, normalization, estimated curve result, lot/story/room,
-normal, world position and elapsed time for actual wall-edge rows. Collection
-is enabled only by starting a recording, stops on save/cancel, uses a separate
-8,192-entry ring (latest samples retained), and does no quadratic pair matching.
-It does not activate developer mode, alter diagnostic arming, change lighting,
-force solves or change solver budgets. Compare identical positions/normals and
-the latest completed passes; raw samples precede the wall blur and atlas upload,
-so equal raw values do not establish equal displayed atlas pixels. Empty output
-means no qualifying wall-edge solve occurred during the recording. Gameplay
-validation of the capture and the visual seam remain pending.
-
-- First version (25/09 ~09:20) shared lights but had no wall test: the side face of the ground story near a corner became
-  lighter than the upper one (m46/m47). Fixed by part 3.
-- The lot-load path gathers room 0 of every story through level 0 (`FUN_006c54e0`, `0x6C5525`): the real story must be read
-  from the manager (`room[0] + 0x88`), not from the tree level passed in (review finding).
-- A "cascade by signature" (re-queue other stories whenever the set of lights of room 0 changed) was in the first design
-  and was removed in review (25/09 ~10:00): it could re-enter rooms whose `+0x28` set was being walked. Only the game's own
-  cascade (JNZ -> JL) and the explicit refresh on install/uninstall remain. Never queue the story whose set is being
-  iterated.
-- `FUN_0069fc40` reads the wall mode `+0x639` of the room it is given, not of the room being solved; without swapping the
-  byte the other story's test used the wrong mode (review 25/09 ~10:40, item 2).
-- Two light classes (CircleWindowLight `0xFF4408`, TubeLight `0xFF4468`) were initially not wrapped because of the
-  incomplete `light_vtables.txt`.
-- Option changes of other Night Lighting settings used to reinstall this module too; `ReinstallNow` now leaves it in place
-  (`reinstalling` flag) and removes it only if the rest cannot come back.
-- **Pairing a story with its floor through the floor's `+0x238` (until 30/09).** That field is a copy the game writes once,
-  when the floor is set up; it goes stale when the lot's lighting is built again, and a new story manager allocated at the
-  old address made another floor "belong" to that story. In game (30/09, a double-height room, lot `8C41002E4010A180`): F8
-  paired story 2 with a floor of another shape and other floor keys (`0000C007` / `00000006`, 1064 quadrants, no removed
-  floor), so no opening was seen and the lamp below never lit the walls above; after leaving and entering the lot, the real
-  floor (`0000C041`, `4000C000` removed x224, `0000C010`) was found and the light passed. Now the manager is found through the
-  floor's lot like the game does (`LevelManager`); F8 counts the floors whose copy is stale.
-  **That was only half of it** (same day, next session: 37 of 37 copies were fresh, and story 2 was again paired with the
-  `0000C007` / `00000006` object; Refresh the lighting did not help): that object is story 2's CEILING layer (world level 3,
-  byte `+0x234` = 0, the attic's outline), which names story 2 as well; the pairing took whichever of the two objects was
-  noted last, so leaving and entering the lot sometimes "fixed" it. `LevelFor` now keeps only the story's own floor
-  (`LevelOwnFloor`), and F8 lists every object naming each story ("its floor" / "the ceiling layer"). Confirmed in game by the user
-  (30/09, build e3fab9d4: the walls above the double-height room lit at once).
-
-## Testing in game
-
-- Scene: a two-story house with a wall sconce on the upper outside wall near a corner, garden lamps on the ground, at night.
-  Expected: the wall below the sconce is lit continuously across the floor line; the side wall around the corner of the
-  lower story is not brighter than the upper one.
-- Dev build status line (Apex > Night Lighting > Developer > Status): `Stories: Active | outdoor lights carried to other
-  stories: N | stories updated: N | walls on the light's story: 9/9 classes, N tests, N blocked` (plus "on another thread"
-  or "faults" when non-zero).
-- `S3SS_LOG.txt`: `[LevelLightShare] Installed (paredes do andar da luz: 9 de 9 classes)`.
-- F8 (Ctrl+Shift+F8, dev build): `S3SS_LightDiag.txt` has the per-story room 0 lists (the same lamps must appear on every
-  story, level-0 lamps twice) and the section `==== ANDARES (luz externa entre andares) ====` with, for the active lot,
-  samples within 3.5 m of each light: story of the point, light, type, home story (-1 = own/world light), point, normal,
-  colour sum, the game's wall test (1 passed / 0 blocked / -1 not run) and factor, our factor, batch flag, culled-list flag,
-  plus a per-light/per-story summary.
-- F7 (Ctrl+Shift+F7) on the two walls: the light map in `s2` of both stories should show the lamp.
-- Part 4: the house with the red lamp next to the stairwell (story 2, room 7). Expected: the story-1 wall under the
-  moulding is lit red where the lamp sees it through the opening, and nothing is lit through solid floor. F8 section
-  "STORIES INDOORS": a floor object per story, openings > 0 on story 2, and a gather line for story 1 room 4 listing the
-  lamp with all four flags 1. Turning the option off and on must bring the light back within about a second.
-- Part 5: the atrium's east wall next to the sconce, both stories in view. Expected: no step in the light at the floor
-  line (the solid strip along the north wall keeps its step). Status: "seamless walls between floors: on (N wall samples
-  moved to their drawn height, 0 wall pieces left as the game has them, N edge rows kept out of the blur)". F8 section
-  "SEAM" (latest solves first, with each room's LOD class): the lower room's rows now reach the line (`y` = the upper
-  room's base) and pair with the upper room's bottom row at the same height.
-- Re-entering a lot (29/09, user: "sometimes I even have to reload the save for the indoor fix to work"): the lot state
-  (`LotState`, keyed by the lot tracker's address) kept the counts of the lot as it was; a lot whose lighting was built
-  again (the camera left and came back: new story managers) or a tracker address reused by another lot counted the same
-  floors and openings, so its rooms were never sent again and were lit without the other story's lamps. The state now
-  keeps the lot's 8 story managers and starts again when any of them changed (status "lots rebuilt N"). The level floor
-  objects are also remembered at their construction (`LevelCtorHook`, status "floor objects made N"), not only when a
-  floor is set or removed, so a lot built again without floor calls still has its floors known (unverified whether the
-  game rebuilds them that way; this covers it either way).
-- Loading (29/09, user: "moving the lamps makes it perfect; ideally the lot would load already right"): a lot that finds
-  its openings (`LotState`) sends its rooms near them once more, the way a lamp moved by hand relights them (status
-  "lots settled after loading N"). F8 section "SOLVES" (development build, kept from the world load, not emptied by a
-  dump): every ambient step and wall pass of the rooms that take or give light through an opening or are merged, with
-  the thread, the LOD class solving / shown, the state, the lamps (of other stories), boosted / merged, the
-  normalisation, ambient and ramp base, and the running totals of moved samples, walls blurred across and pieces left
-  alone; since 29/09 also `Q` (Apex sent the room to gather) and `H` (Apex held it until its solve ended), and per line
-  the lot id, the camera story and the room flag +0x19 (the flag whose change makes the game invalidate a room,
-  0x006A5E00 -> 0x0069F160). One dump right after entering the lot and one after moving a lamp show what differs.
-- Atrium house, slow to look right (29/09 F8, user: "the lights still take very long to be 100% between the stories"):
-  the lot was entered at night with its lamps still off; they switched on one after another over about 1.5 s. Each
-  switch changed a lamp's values, so every room taking those lamps was sent again at once and the solve it was in was
-  thrown away (room 10 of story 2 solved 10 times in 2 s; room 20 of story 2, the atrium's upper room, restarted twice
-  before its first full solve). The first round was over 2.25 s after the lamps came on, but the fixed 6 s settle only
-  came 2.5 s later. Now:
-  - `RoomLampSignature` gives two hashes: the shape (which lamps, their position, range and cone, the room's walls) and
-    all values. A new shape (a lamp added, deleted, moved or turned, a wall changed) sends the taking rooms at once,
-    stopping their solve (their lists may hold the deleted lamp; a lamp dragged in build mode must be followed frame by
-    frame: the first build had the position among the values and the light lagged behind a dragged lamp), as before. A
-    value change (switched, dimmed, recoloured) sends them at once only if they were
-    not sent for a value change in the last 1 s, and without stopping a solve in progress (QueueRoom's defer); later
-    changes wait until the lamps are quiet for 300 ms, at most 1.5 s after the first wait (`g_depWait`,
-    `FlushDepWaits` from the room update; status "lamp changes folded into one update N").
-  - The settle fires as soon as the first round is over: none of the rooms the lot sent (`LotState::watch`) gathers,
-    waits or is being solved (states 1-3), none is held back and no lamp burst waits, for 400 ms (not before 500 ms
-    after arming); at the latest after 6 s as before (status "lots settled after loading N (M as soon as their rooms
-    were done)").
-  - World load (user: "only when I opened the game some lights failed"; Night Lighting off and on fixed it): a world
-    loaded at night gets no lot relight, its lots are solved during the load screen and the early settle could fire
-    before a lot was complete. `OnWorldLive` (called when NightTerrainRelight sees the world drawn) bumps
-    `g_indoorGen`: every lot's rooms near openings gather once more, then settle.
-  - Invalidate callers (29/09 F8 with the new `I` / `F` notes): 465 of 589 invalidations came from 0x006C7404, the
-    part 2 cascade in FUN_006c7250 (room 0 of any floor changed -> room 0 of every floor restarted); room 0 of stories
-    1-3 of lot 7D6F001A00D62480 was restarted ~140 times each in 70 s and never shown above class 0 (user: "outside lights
-    take very long on both floors"; "on load the light is weak; after opening the map it is right"). The cascade is gone
-    when the changed-set hook is in (InstallIndoor writes "90 E9" over the "0F 8C" at 0x006C73B0, so every room 0 takes
-    the plain path, its own floor only); AfterChangedWalk sends room 0 of the other floors 0..7 with the same rules as
-    the indoor rooms (status: "outside of a floor marked changed without a change N").
-  - Same F8: 1028 "sent at once" with the camera still. Position and range are no longer hashed as shape: `LampChange`
-    keeps each real lamp's position and range at the last send (`LampAt`) and counts a move only beyond 10 cm or a 2%
-    range change (animated lamps wobble; a slow drag adds up against the last send). Status: "lamp values changed
-    without a move N".
-  - Not done yet: an outdoor room (room 0 of story 3, shown class 0) was sent to solve about every 50 ms for 3 s at
-    the end of the same dump, never finishing (its shown class stayed 0). Nothing of Apex sends room 0 there; the new
-    journal fields (Q/H, lot, camera story, flag +0x19) should tell whether it is the game (and which invalidate).
-
-## Open items
-
-- Measure the cost together with S3SS Lighting Quality at high sample counts (standalone split).
-- Balcony slabs as occluders for lamps of the story above (would need the upper story's floor as a blocker).
-- Basements are untouched by design; no user report yet.
-
-## Floor switches: rooms keep their light when their lamps did not change (30/09, `features/lamp_mark_filter.cpp`)
-
-Installed 81934361 (dev build), not tested in game yet; the approved floor build is backup 108, the previous asi backup 127.
-User: "the indoor light breaks for a moment at every floor switch"; "keep the light cached and change it only when
-something changes". F6 092629: every switch restarted room 0 of every story and every room holding a lamp (0x006C7451 in
-FUN_006c7250, twice within 16 ms), solved again in 110-140 ms with the same ambient, light counts and normalisation. Two
-studies (30/09): Apex added one room of its own (room 14 of story 0, `AfterChangedWalk` deps); the rest is the game. The
-lamp entry update FUN_006c7ba0 (entry vtable 0x00FF5984 slot +8; for a lamp light vfunc+0x18 = 0x00620D60 returns false)
-finds the lamp's room (FUN_006c7b20), rewrites its lit bit and lit colour (FUN_006bdca0) and marks the room changed
-(FUN_006c7160, thiscall(tl, room) ret 4: 0x006C7CCA for the room left, 0x006C7CD6 always) without comparing anything.
-Entries are flagged by FUN_006c4cf0 from the light manager's messages (transform 0x3361F6C9 at 0x6B0A8D and colour
-0x966EC80A at 0x6B0BFA always; intensity 0x6B0B33, enable 0x6B0C9A, alpha 0x6B0D26 only on a change). Nothing of the room
-solve reads the shown story or a light's visibility (a lamp hidden on an upper floor keeps lighting in the unmodded game).
-
-The call at 0x006C7CD6 goes through `MarkThunk` (esi = entry, edi = light, ecx = tl): the lamp's values (its room, lit bit,
-object flags entry+0x20 record +0x90 & 6, +0x10 x4, type +0xB0, +0xC0..+0xDC, +0xE0..+0xF0, position +0x120 x3, range
-+0x130, cone +0x170 x13 for types 4 and 5) are hashed and compared with its last mark per (tree level, light): the same
-values drop the mark (the rooms keep their solve), anything else marks as before. First sight, window lights (types 7 and 8),
-unreadable lamps and the filter switched off always mark. Not filtered: 0x006C7CCA, occluder entries (0x006C7939: objects
-that fade or hide block light differently), room creation and object removal. Steam 1.67.2 only (fixed addresses, bytes
-checked). Developer page > Lighting: a checkbox (on by default, not saved) and the status; the F6 recorder writes
-"Rooms keep their light: ..." with the marks kept / let through and, in the dev build, how many light entries each of the
-five messages flagged (the floor switch's trigger). If a lamp change is ever missed: "Refresh the lighting".
-
-**A lamp switched or moved lights its lot again (30/09; built 5eba1685, not installed yet).** User: "also refresh the lighting
-whenever a lamp is moved, switched off or on, if it costs no performance". `MarkDecide` (lamp_mark_filter.cpp) keeps, per
-(tree level, light), whether the lamp is on (lit bit and lit colour sum > 1e-3), where it is and its room; a change of one
-of them (a move of more than 10 cm) makes that lot due 0.7 s later (a drag: once, when it stops). `LampMarkFilter::OnPresent`
-(Night Lighting's Present) runs `LevelLightShare::RelightLot` (every room of that lot, stories -4..7, room 0 too) and the rig
-refresh (now and 1.5 s later); at most once per 2 s per lot; nothing while the night level is between 0.02 and 0.98 (dusk
-and dawn switch every lamp at once) or without a world. Left out: first sight, window lights, and a light switching itself
-on and off more than 3 times in 10 s (a flickering TV or effect). Counted in the F6 line "Rooms keep their light".
-
-**Pitfall: the 4 basis maps do not see the floor test (30/09, F7 128, F8 10:45).** A TV in room 5 of story 2 (closed from
-below: the only opening of that floor is the stairwell in room 7) took the green lamp of story 1. The lamp is in the light
-list of rooms 5, 6 and 7 of story 2 (rooms near an opening take lamps of the story below); the room light map of story 2 is
-solved point by point with `IndoorShadow` (the F8 samples: 21 points of the lamp on story 2, all blocked; the map black),
-but the 4 directional basis maps (64x64, 1 texel per metre) are filled by another routine of the game that never goes through
-the hooked `LightPointWithAllLights` calls (no basis sample in the F8; not identified yet): they held the green light. The
-game's own furniture shader does not read them; Apex's indoor-object shader (path A, `PatchIndoorBasis`) does. Fix in that
-shader: after the 4 directions are summed, `min(basis, 2 x room light map)` per channel (texld of the room light map at its
-own uv, `kBasisCap`, def cS+11): where both are right they agree (captures 096-103: light map 0.239, basis 0.157), behind a
-floor or a wall the basis light goes with the light map. Checked offline (4 captured indoor-object shaders). Open: the game's
-other basis-reading shaders (stairs, instanced objects) still read the maps as they are; the source fix is to find that
-routine and give it the floor test.
-
-**Rooms lit only by lamps of another story: no boost (30/09, F6 105204; built 96f17fbe, not installed yet).** User: "a room
-did not take the brightness of rooms for a while", mostly right after loading. Rooms 5 and 7 of story 2 held only the green
-lamp of story 1 (rooms near an opening take the lamps of the story below) and the floor test blocked every point of it:
-ambient (0, 0, 0), normalisation +0x160 = inf, the Brightness slider did nothing to them (room 6, almost all blocked: x98).
-FUN_006a0230 (thiscall(room, float brightest[4]); its only call 0x006A13B4 in FUN_006a0f50) sets +0x160 = limit / max(the
-lamps' vfunc+0x30, the brightest sample x k) when that is under [0x01158B24] or over [0x01158B20]; all lamps blocked gives
-limit / 0 = inf, the ambient (average x +0x160) 0 x inf = NaN, and the clamp (maxps with 0) makes it 0. `RoomNormHook`
-(level_light_share.cpp, installed with the indoor part, Steam 1.67.2 only): a value that is not finite becomes 1, and a room
-whose lamps are all of another story (`CrossOnly`: every light of its list has a `FindCross` record) gets no boost (+0x160 at
-most 1): the light through an opening is not spread over the whole room, and with none coming the room takes the unlit colour
-(the top-up) as an empty room does. Status: "rooms lit only by lamps of another story given no boost N (normalisation not
-finite M)".
-
-**Refresh after a load (30/09, user: "right after loading, apply that refresh").** `RequestRefreshAfterLoad` (Night Lighting,
-when the world is live): 8 s later the lots, every room and the rigs light again once (`RefreshAll("after loading", terrain
-false)`; the terrain keeps the load's own rebuild); a setting change pending at that moment takes over (with the terrain).
-
-**The floor test in the 4 basis maps, at the source (30/09, third agent study; built c05df4fe, not installed yet).** The
-story's LightBasisMap0..3 (bound from mgr+0x220 by FUN_006a7700; locked at room+0x584 + i*0x28 in FUN_0069fa40, gated by
-room+0x629) are filled by FUN_006a09f0 (called at 0x006A3C0A from FUN_006a3b80, state 7 of the room solve FUN_006a3c90; only
-indoor rooms of lots with mgr+0x288, room+0x62A set at 0x006A1BB0): one sample per tile centre (lot point x+.5, floor height,
-z+.5, world through room+0xF8), and for each light of the solving room's own list FUN_0069f280 (stdcall(pos, light, float
-acc[4][4]) ret 0xC, its only call 0x006A0C56 after `mov ecx, edi` = the room; pos = the sample 0.5 m up) adds the light's rig
-colour (vfunc+0x10, FUN_006bdb00) weighted towards the 4 directions (+-0.894, 0.447, 0) / (0, 0.447, +-0.894); no threshold,
-wall or floor test. `BasisLightHook` (redirect of that call, bytes 8D 94 24 C8 00 00 00 52 8B CF checked, Steam 1.67.2 only):
-a lamp of another story (FindCross in the room's RoomInfo) is tested with IndoorShadow at pos (no 2D wall flags: pass or
-not); blocked, it adds nothing. Status "directional maps: lamps of another story tested N, behind a floor M". The shader cap
-in PatchIndoorBasis stays as a safety net. The maps change only when a room is solved again (a refresh, a lamp change).
-
-## Pending Group Ambient Updates (2026-10-01)
-
-Candidate `2.5.2-room-sync-pending-test` retains the latest group ambient target per room instead of dropping it when
-another member solves during the 3 s requeue cooldown. `BeforeRoomUpdate` checks the deadline on each lot update, even
-without a new lamp event. Dispatch leaves the target pending until a merge confirms convergence; a failed/already-waiting
-queue attempt can retry after the cooldown. Further merges replace the target or cancel it if the room already agrees.
-Pending ambient work now participates in `LotBusy`, so the existing post-load quiet/settle pass includes it (the 6 s
-maximum is unchanged). World/topology/uninstall resets clear the pending map together with the other ambient caches.
-
-Evidence: session `2026-10-01 14-48-54`, lot `27D24720`, recognises 540/1356/4 openings throughout the three snapshots.
-Before the lamp toggle, the solve journal ends with rooms 19/20/3 near 0.017 and room 23 near 0.012; after switching lamps
-off, the last solves for all four agree near 0.012. Lamp changes at 14:49:04.965 and 14:49:13.433 requeue 31 rooms. The
-old cooldown branch discarded differing group updates outright. This supports the candidate but is not runtime proof.
-
-Offline policy tests cover the deadline, first dispatch, overdue updates and DWORD tick wrap. The candidate still needs
-in-game validation: load/enter the affected lot without toggling lamps, wait for the bounded group reconciliation, switch
-stories and verify the result remains stable. Do not replace this with a repeating world-wide lighting refresh.
-
-## Live Group Background (2026-10-01)
-
-Candidate `2.5.2-room-sync-live-test`: the 15-06-08 recording in session `2026-10-01 15-03-22` shows lot 27D24720
-rooms 19/20 holding their merged ambient while the slider changes, although both are idle (state 5). Their merged
-colour no longer matches the original BaseHook result, so MoveBase previously refused the direct update until rest.
-
-StageAmbientBaseChange validates the cached original, applied group colour, second ambient and idle state before
-updating only the background delta in the original room colour. Lamp contributions remain intact. Unlit members use
-StageUnlitAmbientChange with the same ownership checks and a verified empty lamp list. After the full room traversal,
-ApplyAmbientBaseChanges recomputes cached groups using the same area/normalisation rule as the solver merge. It writes
-the merged colour and sampler copy together, without changing map normalisation or wall ramps. Busy, unknown or
-incompatible members retain the existing pending-solve fallback. Cached groups clear on world/topology resets.
-
-The live path uses cached group membership instead of scanning floor tiles on each slider update, and unchanged unlit
-colours do not trigger a rig refresh. Offline tests cover background delta preservation, round trips, weighted merging,
-normalisation and zero brightness (51 checks total). Build succeeds; in-game validation remains required.
-Window-light initial activation is a separate observed issue and is not modified by this candidate.
-
-## Window Activation Recheck (2026-10-01)
-
-Candidate `2.5.2-window-sync-test` retains the live background change. Session 15-26-42 confirms rooms 23/19/3/20
-of lot 27D24720 change their merged ambient during the slider drag (15:28:39 onward). The residual bright room is
-not evidence that this group colour is frozen: the 15-30-33 snapshot has all ordinary lamps in room 20 at zero
-intensity, but RectangleWindowLight L3ACB0300 (#2326) is lit with effective white (1,1,1,1). After the user removes
-and restores a wall, the 15-37-13 snapshot shows the same light, position and room with flag 0x20 cleared and
-effective colour zero. The background setting also differs slightly, so this is not a pixel-identical comparison.
-
-RE: FUN_006c7ba0 is the light registry entry's vfunc +8. It resolves the room at the window sample, obtains the
-room's roofless flag through FUN_006c7b20 / FUN_0069e620, checks its paired entry and the tree's state, then passes
-the computed lit boolean to FUN_006bdca0 and marks affected rooms through FUN_006c7160. FUN_006bdca0 alone only
-sets the flag/effective colour; calling it without the computed boolean is not an activation refresh.
-
-BeforeRoomUpdate now runs a bounded window-only reevaluation on the light thread, before iterating changed rooms:
-on a new lot/manager, world-live generation, geometry refresh or displayed-story change, then at 2 s and 6 s.
-The registry is snapshotted before invoking callbacks because paired entries may move during reevaluation.
-Each entry must still belong to its tree, have type 7/8, and have the validated evaluator at vfunc +8. The game
-decides whether it should be lit; there is no blanket night-time disable, no room/roof flag rewrite, and no forced
-wall edit. Existing sky updates continue unchanged. Changed entries use the game's own room invalidation.
-
-LightEntryUpdate has two signatures; the offline checker on the installed TS3W.exe found one match for each,
-resolving to 006C7BA0 (229 address IDs checked, zero mismatches). Development logs record evaluated/changed counts
-per lot/pass. Scheduling tests include delay boundaries, bounded completion and tick wrap (58 checks total).
-Compilation succeeds. Runtime confirmation is still required: this cannot prove whether a particular stale
-roof/topology classification itself needs a separate reconstruction beyond window reevaluation.
-
-## Test 001: Faster Switch Reconciliation (2026-10-01)
-
-Version `2.5.2-test001-fast-switch`, baseline `2.5.2-window-sync-test`. Session 15-43-24, recording 15-44-07:
-room 20 finishes at 15:43:58.042, but the delayed whole-lot reconciliation sends 31 rooms at 15:43:58.513.
-After switching on, it finishes again at 15:44:03.042 before another whole-lot reconciliation at 15:44:03.190.
-These are opportunities to remove repeated work, not proof of the candidate's runtime performance.
-
-LampMarkFilter batches pure on/off changes for 120 ms instead of 700 ms. Movement/room changes, including mixed
-switch-and-movement batches, retain 700 ms. The 2 s minimum gap per lot, dusk/dawn guard and self-switching guard
-are unchanged. This removes 580 ms of the first-switch debounce; it does not promise a 580 ms visual gain.
-
-OutdoorGather records the start tick and room identity only after the original gather and both sharing steps
-return successfully. The switch-only lot reconciliation may retain a room only in completed state 5, with matching
-manager/id, a gather strictly newer than the final switch, and no pending ambient, dependent-room or deferred work.
-Equal ticks, unknown ownership, incomplete solves and moves take the original queue path. The stamp cache is bounded
-and clears on world change. Full manual/setting refreshes retain their original behavior. Logs show both sent and
-retained room counts. No shader/solver budget, group retry cooldown or window recheck timing is increased or removed.
-
-65 offline policy checks pass, covering short/drag debounce and gather ordering including tick wrap. Build succeeds.
-Actual settle time and frame-time impact remain unmeasured until an in-game comparison with the baseline. The rig
-fallback timer remains unchanged in this candidate; optimizing it is a separate step after measuring this change.
-
-## Test 002: Fresh Group Sources (2026-10-01)
-
-**Rejected and reverted after runtime testing.** Recording `2026-10-01 16-37-06` confirms this build was installed
-and shows repeated solves with inconsistent group colours over several seconds. After a lamp change at 16:36:59,
-room 20 solves without a merge at 59.856 and again at 16:37:00.028. At 16:37:04.497 rooms 19 and 20 are both in
-state 5 but hold different ambient RGB (0.0512, 0.0532, 0.0486) and (0.0525, 0.0543, 0.0515). The user also reports
-poorer responsiveness. Clearing sources on each gather while requiring all sources creates missing-member windows
-and more reconciliation through the existing 3 s retry cooldown. Do not repeat this design as a speed optimization.
-The six readiness-policy tests only tested the gating rule, not convergence of the asynchronous scheduler; their
-success did not validate this design. Runtime behavior is authoritative. Source behavior/version restored to Test 001;
-the original Test 001 binary remains the rollback artifact. The following candidate notes are historical, not approval.
-
-Version `2.5.2-test002-fresh-ambient`, baseline Test 001. Session 16-11-41 ends with room 20 having no lights
-at 16:11:58.747 but merged RGB (0.0422, 0.0402, 0.0384), while its second ambient is (0.0287, 0.0287, 0.0287).
-The merge reaches the latter value at 58.856. This supports removing old source contributions during a new gather;
-it does not prove that the entire delay, or the furniture delay, comes from the ambient merge.
-
-After a successful gather/sharing pass, the room's cached original ambient is erased, with current manager/story
-identity checks. The native ambient calculation restores that source at RoomSolveStart. A connected group is merged
-only when all its sources are available. Until then the native own result is recorded as applied, and its outdated
-pending target is removed. The last available source reconciles the group through the existing pending queue.
-Live slider recomputation also refuses a group with missing sources. No busy-room map write is added, and map
-normalisation, wall ramp, solver/drain budgets, cooldowns, window checks and rig fallback timing remain unchanged.
-
-71 offline policy checks pass. In-game comparison against Test 001 is still required, especially repeated switches,
-initial lot loads, slider changes during a solve, and unequal lamp contributions across an atrium.
-
-Separate wall investigation, session 16-18-44: the lower-wall probe at 16:18:48 and upper-wall probe at 16:18:51 use
-the same native wall shader and PS c4 (0.05354, 0.05010, 0.05087, 0.05263). The upper probe samples near the top of
-the open atrium. Shared ambient is therefore a possible explanation for its background brightness; these probes
-alone do not establish a ray crossing a solid balcony slab. No wall/floor occlusion behavior is changed in Test 002.
-
-Performance follow-up: Test 001 reportedly feels laggier during ordinary play/camera movement, not just switches.
-The existing profiler run at 16:16:36-16:17:05 does not coincide with the 16:11 recording's switches.
-Hitch frame #2562 takes 33.95 ms, with texture creation 27.20 ms and lot lighting update 0.01 ms; #2571 takes
-24.79 ms, with driver Present 19.67 ms and lighting 0.02 ms. Other sampled hitches are dominated by texture
-creation/resource loading. This does not establish a lighting regression or exclude a performance regression.
-A paired baseline/Test 002 run on the same camera/lot is required. Do not raise solver budgets or change unrelated
-streaming features based on this sample. Test 002 does not claim to fix the reported camera slowdown.
-
-### 2.5.2-test004-reviewed-sync (2026-10-01, development test)
-
-Recovered the unfinished test003 work and retained test001's use of cached stacked-room ambient sources. Test002's all-members-ready gate remains rejected. Fresh post-switch gathers may complete without being restarted; furniture refresh waits for the tracked rooms, with a bounded fallback. Development diagnostics stop doing collection work after their capacity is reached.
-
-Test004 additionally applies compatible colour-only ambient updates before scheduling another native room solve. Scale or wall-ramp changes, busy rooms and failed identity/ambient validation continue through the native solve path. Pending idle updates resume from a key-based cursor (128 visits and 16 writes per 50 ms poll), avoiding starvation behind busy rooms and keeping the cursor valid after erase/rehash. The stale switched-off-lamp scan preserves its sent signature during states 1-3, so a busy solve does not rearm an unchanged stale set every scan.
-
-Validation: Release/Win32 development build; 89 room-ambient policy checks; extracted production pending-loop harness with 4,500 ready entries behind 500 busy entries, cursor removal, rehash and empty queue; extracted production stale visitor harness with busy-state transitions and changed/cleared lamp signatures. All passed. Native thread interactions, visual convergence and FPS remain unverified in-game. Available test001 hitch samples also contain texture creation and Present/driver waits, so no overall performance improvement is claimed from these offline checks.
-
-### 2.5.2-test005-coordinated-floors (2026-10-01; development test)
-
-Compatible colour-only changes of an already coherent atrium group retain its previous ambient while native solves continue. Latest targets are staged for every member. Before the lot's native room update, the complete group is checked for identity, finite target, matching target revision, unchanged normalization/ramp and idle ambient ownership; all colours are written in that update, then checked. Failed writes restore still-owned previous colours and return to ordinary reconciliation. There is no all-sources-ready gate on native solves or on initial group discovery. Unavailable/incompatible groups use the native path. The presentation wait is bounded to 1.5 s from first staging; new gathers do not extend it. Normal group publication shares a global allowance of 16 members per 50 ms; object-rig refresh is requested at Present after publication. This coordinates ambient colour, not an atomic replacement of all native directional textures and furniture rigs.
-
-Streaming now forgets ambient/group caches only for removed lots or lots whose story managers changed. Valid other lots keep their own colours and group history. Fresh, manager-checked cached room ids are reused for complete relights; missing, stale or overflowing lists retain the tile-walk fallback. The scheduler boosts every floor of the priority lot when the existing full-detail-all-floors policy is active; its 1/4 ms drain limits and the configured lot budgets are unchanged. Native priority differences remain within those boosted floors.
-
-Startup refresh checks from 500 ms after world-live: a fresh room enumeration, no cached busy room or pending ambient, and 250 ms of quiet allow early refresh. It polls at 200 ms and retains the original 8 s upper bound. Room enumeration is expired at world-live to avoid treating load-screen ids as an authoritative completed list. This does not promise an 0.5 s complete load.
-
-Session `2026-10-01 17-58-56 Session` shows unlit room 22 following a brightness drag while atrium members 23/19/20 lag, plus inconsistent ambient during the later drag. Code review found a retry gap for busy/unknown rooms and global streaming cache eviction. Rooms at Night recovery, stale identity, merged-base ownership and queue acknowledgement are fixed in the same candidate (see unlit-rooms.md). The installed capture binary SHA256 is 677D742EB3DD9EDB5D02C7A0072184BD3055BF77EC4BAD8E72525C2510AAC1D3; it differs from this chat's test004 baseline. The capture does not uniquely prove every cause of the visual issue.
-
-Validation: 89 existing policy checks; 36 group/startup/priority/cache checks using the extracted production group publisher and cache forgetting function; extracted production pending loop, stale lamp visitor, Rooms at Night visitor/acknowledgement and SEH MoveBase checks. Busy members, inconsistent targets, identity loss, map incompatibility, write failure/rollback, publication allowance, deadline wrap, stale manager entries, retry after busy/queue failure, unchanged merged ownership and disabling the option are covered. In-game appearance, full native thread interactions, convergence after repeated switches and FPS remain unverified.
-# Indoor wall guard candidate (2026-10-04)
-
-The user validated the preceding indoor seam build visually. Subsequent isolated
-captures showed a separate leak from a story-2 lamp into furniture behind walls.
-The native directional basis builder does not perform the receiving room's wall
-test. Imported lamps now test source, intermediate and receiving wall segments;
-fractional transmission scales only that lamp's temporary basis contribution.
-The normal floor/wall point solve retains its existing receiving-room test.
-
-The ground capture also exposed contracted regular-lot UVs sampling the indoor
-row outside a closed wall. The exact recognized vertex shader now inverts that
-contraction when its map constants are valid and square. Unsupported layouts
-retain native coordinates. This changes neither light intensity nor texture-read
-count; it does not modify the world atlas or CPU light-map generation.
-
-Candidate `2.5.6-indoor-wall-guard-test`: Release x86 build succeeded with no
-warnings. Extracted indoor/basis tests: 30,890 checks; resource restoration and
-UV fallback tests: 13,682; UV inversion and production ps_2_0 compilation/device
-acceptance: 128,512. All passed. GPU device: RTX 4070 Ti SUPER. These checks do
-not establish gameplay appearance, DXVK compatibility or frame-time cost.
-In-game validation of both leakage paths remains pending; the preceding
-approved candidate and backup 368 are preserved.
-
-### Raised-room object-map guard (2026-10-05)
-
-The 23:54:37 F7 samples the table at basis texel (15,25); T9 is red there (74,0,0), while the direct rig constants are grey. The 23:58:17 F8 identifies only lamp #2084, story 2 room 16, imported into lower stories. Its tower uses floor heights 3.24/6.24 while the corresponding story minima are 0.99/3.99. Nominal ray segments can miss an exterior wall belonging to the raised part of an intermediate story.
-
-Only imported indoor directional-map lamps now additionally test the full ray against each story's native exterior wall collection. This is a blocking veto, not another attenuation multiplier: the existing segment tests retain glass/soft transmission. The wall/floor batch path is unchanged. A raised-wall fixture failed twice before the guard and passes afterwards; 18,992 extracted checks pass. These mocks establish the regression and control flow, not final gameplay appearance.
+| `0x006C6AB0` | AddWorldLights `(treeLevel, room)` | call targets checked |
+| `0x006C5816`, `0x006C7094` | its two callers | `E8` + rel32 == target, redirected to `OutdoorGather` |
+| `0x006C6990` | per-story gather `(treeLevel, room, char ownFloor)`, `ret 8` | calls at `0x006C6B08`, `0x006C6B2D` |
+| `0x006A6550` | room by id `thiscall(manager, id)`, `ret 4` | call at `0x006C73F0` |
+| `0x0069EED0` | invalidate room `thiscall(room, char full, char keep)`, `ret 8` | call at `0x006C73FF` |
+| `0x00B7AAD0` | set insert, `ret 0xC` | call at `0x006C741B` |
+| `0x006C73AA` / `0x006C73B1` | cascade cmp/jnz; Jcc byte `0x85 -> 0x8C` (or `90 E9` at `0x006C73B0` with the indoor part) | `ValidateBytes`, `WriteBytes` |
+| `0x0069FD60` | `LightPointWithAllLights` | calls at `0x006A1187`, `0x006A126F`, `0x006A3336` |
+| `0x0069FE19` | return after `call edx` | `FF D2` at `0x0069FE17` |
+| `0x0069FC40` | wall test `thiscall(room, int* idx, lightPos, sample, float* t)`, `ret 0x10` | its call at `0x0069FE93` (developer mode: `GameWallTest`) |
+| `0x0069DFF0` | wall culling, `ret 0xC` | call at `0x006A311F` |
+| `0x01158AC8` | global batch sample vector | 4 pushes validated |
+| `0x009691E0` | light position `vfunc+0x24` | per class |
+| `0x011D1860` | root; `+0x1C0` light manager | `RefreshAllLots` |
+| `0x006C7820` / `0x006BC520` / `0x006A2060` | gather filter; bright enough `fastcall(light)` (CALL at `0x006C7848`); add light to room `thiscall(room, light)`, `ret 4` (CALL at `0x006C7874`) | signature |
+| `0x006C5E2A` / `0x006C7250` | `push imm32` of the room update / the update | byte `0x68` and imm32 checked |
+| `0x006C7497` / `0x007F3790` | changed-set clear | `E8` within 0x400 of the update |
+| `0x00A89DD0` / `0x00A893A0` | floor set / remove | 4 / 1 callers (`CallersOf`), each `E8` validated, no branch lands inside |
+| `0x00AA179E` / `0x00A88790` / `0x01062680` | floor object ctor CALL / ctor / vtable | ctor writes the vtable at +0x0D (`C7 06`) |
+| `0x0069E710` / `0x01158B00` | LOD choice / max class | 4 callers; `A1` + address at +0x4B |
+| `0x006A3D0B` / `0x006A18B0` | state 0 CALL / function | signature, `E8` |
+| `0x006A3D4C` / `0x006A3A30` | wall pass CALL / function | signature, `E8` |
+| `0x006A3AF5` / `0x006AC070` | wall piece samples | within 0x150 of the wall pass |
+| `0x006A3B62` / `0x0069F650` | class-2 wall blur | within the wall pass; `8B 0D` at +0x20, `80 3D` at +0x88 |
+| `0x006A3B0A` / `0x006A31D0` | batch solve per piece | point-solve call within 0x300 |
+| `0x01158B1C` / `0x011D02E4` | blur passes (2) / blur mode (0) | `Deref` |
+| `0x006A13B4` / `0x006A0230` | normalisation CALL / function | Steam 1.67.2 only |
+| `0x006A0C56` / `0x0069F280` | basis light CALL / function | bytes `8D 94 24 C8 00 00 00 52 8B CF` |
+| `0x006C7CD6` | lamp mark call (`MarkThunk`) | bytes checked, Steam 1.67.2 only |
+
+### Cost
+
+The point solve runs for every texel of a room light map. The hooks read the thread id from the TEB and do nothing for
+rooms without borrowed lamps. Diagnostic sample recording exists only in developer mode and runs only while armed. Every
+floor in full detail adds solve work once when entering a lot. In-game cost has not been measured (see
+[validation](../../validation/night-lighting-level-light-share.md)).
+
+## Rejected approaches
+
+- Sharing lamps without a wall test: lower side walls near corners became brighter than the upper ones. Details in
+  [history](../../history/night-lighting-level-light-share.md).
+- Re-queueing other stories by a light-list signature: could re-enter a story whose pending set was being walked.
+- Reading the story from the tree level passed in: the lot-load path gathers every story through level 0.
+- Testing another story's walls without swapping the wall-mode byte `+0x639`.
+- Pairing a story with its floor through the floor object's `+0x238` copy, or with whichever of the two objects naming the
+  story was seen last.
+- Treating the bare `40000000` floor key, or only the never-built key, as an opening.
+- Requiring one ray crossing per nominal story boundary.
+- Clearing every group member's source on each gather and merging only when all sources are present (*Test 002*): more
+  repeated solves and inconsistent group colours.
+- Rebuilding a world-wide lighting refresh periodically instead of tracking lamp, floor and structure changes.
+
+## See also
+
+- [Validation](../../validation/night-lighting-level-light-share.md)
+- [History](../../history/night-lighting-level-light-share.md)
+- [Room light maps](../../engine/room-light-maps.md), [Light objects and rigs](../../engine/light-objects-and-rigs.md)
+- [Walls](walls.md), [Floors](floors.md), [Objects and rigs](objects-and-rigs.md), [Rooms at Night](unlit-rooms.md),
+  [Lot light pass](lot-light-pass.md)

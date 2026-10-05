@@ -1,16 +1,31 @@
 # Game builds and game-code addresses
 
-> How Apex Radiance finds the game code it patches on every build of The Sims 3: the fixed addresses of Steam 1.67.2
-> (`TS3W.exe`), and a runtime signature scan for every other build, first of all the EA app 1.69.47 (`TS3.exe`). Covers
-> the EA app DRM finding, the decision not to dump the decrypted game, how resolution works, what is logged, the full
-> signature table, which features need which addresses, and what is still unverified on EA.
-> Code: `framework/game_addresses.{h,cpp}` (table and resolver), `framework/game_version.{h,cpp}` (build detection),
-> the features that use the addresses (`patches/night_terrain_relight_patch.cpp`,
-> `patches/split_level_ground_light_patch.cpp`, `features/object_light_bridge.cpp`, `features/level_light_share.cpp`,
-> `features/rig_tracker.cpp`, `features/lot_light_bridge.cpp`, `features/light_diag.cpp`, `framework/s3ss_detect.cpp`).
-> Offline checker: `S3SS-dev\research\port169\sigcheck.pl`. Research notes: `S3SS-dev\research\port169\method.md`.
+This page documents how Apex Radiance finds the game code it patches on every build of The Sims 3: the fixed addresses of Steam 1.67.2 (`TS3W.exe`) and a runtime signature scan for every other build, first of all the EA app 1.69.47 (`TS3.exe`). Every feature that patches or calls game code depends on it.
 
-## 1. Builds
+## Scope
+
+| | |
+|---|---|
+| Game build | Steam 1.67.2 (`TS3W.exe`, image base 0x00400000, fixed addresses); EA app 1.69.47 (`TS3.exe`) and other builds through the signature scan |
+| Used by | Every game-code feature: [Night Lighting](../features/night-lighting/README.md), [Every-Story Ground Light](../features/night-lighting/level-light-share.md), [Performance](../features/performance/README.md), [Light Diag](../features/dev-tools/light-diag.md), S3SS detection |
+| Evidence | `framework/game_addresses.{h,cpp}`, `framework/game_version.{h,cpp}`, offline checker `S3SS-dev\research\port169\sigcheck.pl`, research notes `S3SS-dev\research\port169\method.md` |
+
+## Overview
+
+The page covers the EA app DRM finding, the decision not to dump the decrypted game, how resolution works, what is logged, the full
+signature table, which features need which addresses, and what is still unverified on EA.
+Code: `framework/game_addresses.{h,cpp}` (table and resolver), `framework/game_version.{h,cpp}` (build detection),
+the features that use the addresses (`patches/night_terrain_relight_patch.cpp`,
+`patches/split_level_ground_light_patch.cpp`, `features/object_light_bridge.cpp`, `features/level_light_share.cpp`,
+`features/rig_tracker.cpp`, `features/lot_light_bridge.cpp`, `features/light_diag.cpp`, `framework/s3ss_detect.cpp`,
+and the Performance and Frame Profiler sources in `features/`, such as `resource_cache.cpp`, `lot_lighting_motion.cpp`,
+`scene_budget.cpp`, `object_index.cpp`, `fast_memory.cpp`, `fast_crc.cpp`, `unlit_rooms.cpp` and `frame_profiler.cpp`; the
+loaded-world gate `features/world_session.h` uses `WorldManagerPtr` and `UiServiceGetter`).
+Offline checker: `S3SS-dev\research\port169\sigcheck.pl`. Research notes: `S3SS-dev\research\port169\method.md`.
+
+## Details
+
+### Builds
 
 | Build | Exe | PE timestamp | `GameVersion` | Game-code addresses |
 |---|---|---|---|---|
@@ -26,7 +41,7 @@ game-code features stay registered with `supportedVersions = VERSION_STEAM` plus
 (`ApexPatch::IsCompatibleWithCurrentVersion`), otherwise the menu says "Not available on <version>: missing <names>"
 (`ApexPatch::UnavailableReason`) and nothing is written.
 
-## 2. The EA app build: encrypted code, no dump
+### The EA app build: encrypted code, no dump
 
 `TS3.exe` 1.69.47 carries an extra section `.ooa` (EA Origin/EA-app online activation; entry point 0xEB4000 inside it,
 references `Core/Activation.dll`). Its `.text` is encrypted on disk: 8.000 bits/byte entropy with a flat histogram and a
@@ -41,20 +56,20 @@ constant (-0x10 near 0x404573, -0x130 at 0x4D58B0, -0x460 at 0x567460, -0x6F0 at
 S3SS's patterns matching both builds suggest the same compiler and mostly the same code generation (unverified for the
 functions below).
 
-**Decision (user, 2026-09-28): no dump of the decrypted image.** Writing the decrypted game to disk would create an
+**Decision (2026-09-28): no dump of the decrypted image.** Writing the decrypted game to disk would create an
 unprotected copy of it. Instead the mod scans its own process memory: at the point where it installs the features (first
 Present + 1 s, see `apex_main.cpp`) the stub has long decrypted `.text`. Nothing is written besides the normal log lines;
 at most 16 bytes per match are logged, never a memory region. The price: the EA matches cannot be reviewed offline before
-shipping, so every signature logs enough to be refined from a user's `ApexRadiance_LOG.txt`.
+shipping, so every signature logs enough to be refined from a player's `ApexRadiance_LOG.txt`.
 
-## 3. How addresses are resolved
+### How addresses are resolved
 
 `GameAddr::Resolve()` runs once on the init thread after `WaitForSettle()` and before `ApexConfig::LoadFeatures()`:
 
 1. `.text` of the main module from its in-memory PE headers, split into readable ranges (`VirtualQuery`).
 2. Non-Steam builds: if `.text` has fewer than 1000 `55 8B EC` it is taken as still encrypted: wait 1 s and count again,
    up to 15 times (a warning each time).
-3. Every entry of the table (section 6), in order (dependencies first). A signature is an IDA-style masked pattern
+3. Every entry of the table ([Address reference](#address-reference)), in order (dependencies first). A signature is an IDA-style masked pattern
    (`??` = any byte); rel32 call/jump targets, absolute addresses (globals, vtables, constants) and anything relocation
    dependent are always wildcards.
    - an address counts only when its signature matches **exactly once**; for signatures that read a value (a call
@@ -85,7 +100,7 @@ and checks that only pinned Steam's exact register allocation or stack frame (fu
 the `call edx` before a return address, the `jnz` distance in the GetLotID gather and the story cascade) are relaxed to
 what the patch needs.
 
-### Struct offsets
+#### Struct offsets
 
 All object offsets (light manager `+0x1C0` of the root, night level `+0xF0`, light cells `+0x104`, countdowns
 `+0x38/+0x3C`, light fields `+0xB0` type, `+0xC0` lot id, `+0x100` flags, `+0x120` position, rig `+0x1D4/+0x1E0/+0x224`,
@@ -96,7 +111,7 @@ non-Steam builds by `GameAddr::CheckWorldStructs` when the first world is live: 
 (0..1), light cells and countdowns (-1..), light tree bucket count, and every enumerated light's vtable type (from the
 light factory) against its type field `+0xB0` plus the alive flag. It only logs (`[Addr] Struct check: ...`).
 
-## 4. Diagnostics in the log
+### Diagnostics in the log
 
 Both builds (development and public), log only:
 
@@ -114,11 +129,11 @@ Both builds (development and public), log only:
 
 (The values above only illustrate the format.) One line per signature attempt with the match count and the first 8
 matches, then for each of the first 3 matches 16 bytes (4 before the match, `|`, 12 from the match start) on non-Steam
-builds, or on Steam when the self-check differs. To refine a signature from a user's log: take the bytes after `|` of
+builds, or on Steam when the self-check differs. To refine a signature from a player's log: take the bytes after `|` of
 the right match, compare with the table below, widen the wildcards where the build differs, and check the new pattern
 for uniqueness on Steam with `sigcheck.pl` (it must still resolve every id to the fixed address).
 
-## 5. Features and the addresses they need
+### Features and the addresses they need
 
 | Feature / part | Needs | Without them |
 |---|---|---|
@@ -138,8 +153,8 @@ for uniqueness on Steam with `sigcheck.pl` (it must still resolve every id to th
 | Doors and windows stay lit (rig tracker) | ModelDraw, BinderCall, Binder, InstanceFlush, RigVtable | warning, part off |
 | Every-Story Ground Light (group `SplitLevel`) | GetLotIdGatherCall, GetLotId | "Not available on <version>: missing ..." |
 | S3SS Split-Level fix detection | GetLotId | treated as not active |
-| Light Diag (Ctrl+Shift+F8, development build) | RootGetter, EnumLights (light vtables 4/5 for the cone lines) | "not available"; the raw Steam globals are printed on Steam only |
-| Faster Game File Lookups (`ResourceLookupCache`, group `ResourceCache`) | ResFindProvider + 2 slots, ResRegisterDb + slot, ResRegisterDbDerived + slot, ResSetDbPriority + 2 slots, ResDbChanged + 2 slots, ShadowedDbVtable (and its three methods checked at run time, [../features/performance.md](../features/performance.md)) | "Not available on <version>: missing ..." / the read-only class check fails the install |
+| Light Diag (Ctrl+Shift+F8, developer mode) | RootGetter, EnumLights (light vtables 4/5 for the cone lines) | "not available"; the raw Steam globals are printed on Steam only |
+| Faster Game File Lookups (`ResourceLookupCache`, group `ResourceCache`) | ResFindProvider + 2 slots, ResRegisterDb + slot, ResRegisterDbDerived + slot, ResSetDbPriority + 2 slots, ResDbChanged + 2 slots, ShadowedDbVtable (and its three methods checked at run time, [../features/performance/README.md](../features/performance/README.md)) | "Not available on <version>: missing ..." / the read-only class check fails the install |
 | Lot Lighting While Moving (`LotLightingMotion`, group `LotLightingMotion`) | LotLightBudgetCall, LotLightBudget, CameraRootCall, CameraGetterCall, CameraRootGetter, CameraGetter (the root global, camera offset and eye offset are parsed from those bytes) | "Not available on <version>: missing ..." / "The camera position was not found" |
 | Faster Texture Compression (`FastTextureCompression`, group `FastTextureCompression`) | DxtEncode1, DxtEncode5 (the prologue `55 8B EC 83 E4 F0` is checked by `framework/entry_chain.cpp`); the first 16 textures of a session are compared with the game's own encoder on every build | "Not available on <version>: missing ..." / "the entry bytes ... changed"; a difference turns it off |
 | Faster Cache Compression (`FastCacheCompression`, group `FastCacheCompression`) | RefPackCompress + RefPackCompressSlot; RefPackDecompress optional (the checks then use Apex's copy of the decoder) | "Not available on <version>: missing ..." |
@@ -149,12 +164,59 @@ for uniqueness on Steam with `sigcheck.pl` (it must still resolve every id to th
 | Spread New Objects Over Frames (`SceneNodeBudget`, group `SceneNodeBudget`) | SceneDrainCall, SceneDrain, SceneBoundsCall, SceneNodeBounds, SceneSpatialCall, SceneNodeSpatial, SceneNodeDtor, SceneAddNode, SceneHolderTeardown, the four camera ids; at run time the whole drain (0xD1 bytes) is compared with the Steam code (rel32s excepted) and its two CALLs must sit at +0xAE / +0xB6 and reach SceneNodeBounds / SceneNodeSpatial; the heads of AddNode, the node destructor and the teardown are compared too | "Not available on <version>: missing ..." / "... is not the code Apex was written for" |
 | Faster Object Lookups (`ObjectLookupIndex`, group `ObjectIndex`) | ObjectById, ObjectTreeWalk, ObjectTreeSearch; at run time the three bodies are compared with the Steam code (rel32s and the lookup's first 8 bytes excepted), the lookup must CALL the walk at +0x10, the walk the search at +0x41, the search itself at +0x68; container / object classes are recognised by the bytes of their vtable functions | "Not available on <version>: missing ..." / "... is not the code Apex was written for" |
 | Night Lights: local terrain relight and paced sweep (developer toggles `relightNearbyChunks`, `relightPacedSweep`; no group, optional) | WorldManagerPtr, TerrainUpdateCall (the terrain offset is the disp8 of its `mov ecx,[esi+disp8]`), ChunkRenderCall / ChunkRenderFn (the completion signal); at run time the terrain back pointer, the chunk grid (nx x nz, cell 256, dense), each chunk's corner / centre / size / rect and its bake record are checked before a chunk is flagged | lamp changes keep the full rebuild; the developer status says why |
+| Night Lights brightness controls ("Street lamps" / "Lot lamps" on the ground, "Moonlight") | BakeColourSite, SunlightScale | those controls are not available |
+| Rooms at Night (`features/unlit_rooms.cpp`) | UnlitColourA/B, DimColourA/B, FillGate, FillColour; the base under the lamps (optional) also needs DimAmbient, DimAmbientCall0..1, WorldManagerPtr; the `mov ecx, imm32`, `cmp byte` and `movaps` encodings around each site are checked | "Rooms at night: Not available on <version>: missing ..." / "the game code differs" |
+| Light between stories: indoor light (`InstallIndoor`) | LightBright, AddRoomLight, RoomUpdatePush, RoomUpdate, ChangedClearCall, ChangedClear, FloorSet + FloorSetCall0..3, FloorRemove + FloorRemoveCall, LevelVtable; optional: LevelCtorCall/LevelCtor (floors at construction), LodChoice + 4 calls + LodMax (detail for rooms seen through an opening), RoomSolveStartCall/RoomSolveStart + WallPassCall/WallPass (one ambient for stacked rooms), WallSamplesCall/WallSamples, WallBlurCall/WallBlur, WallBlurPasses, WallBlurMode, WallSolveCall/WallSolve (wall alignment) | "Not available on <version>: missing ..." / "the game code differs"; each optional part logs a warning and is left as the game has it |
+| | Faster Room Lighting (`features/room_light_queue.cpp`) | PriorityLotObject, PriorityLotTest (all parts); then per part: RoomPriorityCall + RoomPriority, LodStepSite, KeepClassA + KeepClassB, RoomPickJump + RoomPick + RoomSolveStep + StopwatchCtor/Start/Elapsed | "Faster room lighting: Not available ..."; a part whose bytes differ stays off |
+| Faster Sim Building (`FastCasSort`, group `FastCasSort`) | CasTriSort | "Not available on <version>: missing ..." |
+| Faster Memory (`FastMemory`, group `FastMemory`) | AllocGlobal, AllocMmapFreeCall | "Not available on <version>: missing ..." |
+| Faster cache compression, record checksums (group `FastRecordCrc`) | RecordCrc, RecordCrcTable | "Not available on <version>: missing ..." |
+| Frame Profiler texture load counters (developer mode) | TexCreateCall, TexCreate, TexFillCall, TexFill | those counters are not installed |
+| Loaded-world gate (`features/world_session.h`: start note, Depth Blur) | WorldManagerPtr, UiServiceGetter (its first bytes must be `A1 imm32 ... C3`) | the world counts as not loaded: no start note and no Depth Blur |
 
 Not part of this table: the map view probe (`features/map_view.cpp`) already finds its function at run time through the
-script binding name in `.rdata` and its `{function, name}` table, on any build; the Frame Profiler (development build
-only) keeps its own fixed Steam targets; shader patches match game shaders by bytecode, not game code.
+script binding name in `.rdata` and its `{function, name}` table, on any build; the Frame Profiler (developer mode)
+keeps its own Steam targets (address plus pattern), except the targets that name a table id (the performance hooks and
+the texture load calls above), which take the resolved address and, for a CALL site, check its callee; shader patches match game shaders by bytecode, not game code.
 
-## 6. Signature table
+### What is uncertain on EA 1.69.47
+
+- **Nothing here has run on EA yet.** The signatures are unique on Steam; whether they match on the EA build is only
+  known from a first log. The EA build is a later compile (2024 timestamp, 0x49DC9 more code). Register allocation,
+  stack frame sizes, branch distances and inlining may differ.
+- Code sites that Apex overwrites (TerrainVisitorSite, the ArmSites, LampColourSite, LotPassSite, QualitySites,
+  CapOperandSite, CascadeTest) are patched with bytes that assume Steam's registers (`push edi` = the light, `esi` = the
+  light, `[esp+0Ch]`, `[edi+0D8h]`). Their exact original bytes stay checked before writing, so a register-agnostic
+  alternate would only turn "not found" into "differs": these entries have alternates with other context, not other
+  registers. If EA allocates registers differently here, the patch code itself has to be adapted.
+- Call sites that Apex redirects only change the rel32 of an existing CALL, so they work with any registers: their
+  alternates (RigCtorCall, RoomGatherCall, ScriptSetColourCall, GetLotIdGatherCall, ...) keep less context. The function
+  starts that Apex detours (ModelDraw, InstanceFlush) have alternates with the frame size open.
+- Counts that must match exactly: 3 arm sites, 2 quality sites, 7 callers of SetLightColour, 2 of AddWorldLights, 2 of
+  LevelGather, 3 of SolvePoint. A new caller on EA (or an inlined one fewer) makes that entry fail rather than guess.
+- WallCullBatchFn is the lower of two twin functions (2D and 3D wall culling). On Steam the lower one is the 2D one; on EA
+  the linker order is assumed to be the same (unverified). A wrong pick only affects the optional "walls of other stories".
+- LevelGather's alternate (`53 56 8D 88 A0 06 00 00 E8`, call at +8) takes the second call of it in AddWorldLights; it
+  resolves to the same function.
+- GetLotId comes from the call in the outdoor-room gather, so it is found also when official S3SS already zeroed its body
+  (its Split-Level fix, applied by pattern before Apex scans). S3SS's own pattern for it is Steam's exact 13-byte body,
+  so where S3SS patched it the offsets `+0xC0/+0xC4` that `VanillaGetLotId` copies are the same.
+- Official S3SS patches other game code before Apex scans (Apex waits for it). None of its fixed Steam patch sites (from its source) overlaps
+  these signatures on Steam; on EA this is assumed.
+- Struct offsets are assumed from Steam; `CheckWorldStructs` logs whether the ones it can read look right.
+
+### Checking a table change
+
+```
+perl S3SS-dev\research\port169\sigcheck.pl [exe] [game_addresses.cpp]
+```
+
+Read-only. It parses `kInfo` and `kTable` (keep one entry per line in their current shape), runs the resolution rules
+over the Steam exe and prints, per id, the match counts of both signatures and `ok` / `MISMATCH` against the fixed Steam
+address. A change to the table is only done when it prints `101 ok, 0 mismatch`. The per-address context used to write
+the signatures comes from `research\engine_map\full.asm` (dumpbin disassembly of `TS3W.exe`).
+
+## Address reference
 
 Checked on `S3SS-dev\re\TS3W.exe` (Steam 1.67.2) with `research\port169\sigcheck.pl`, which parses the table from
 `game_addresses.cpp` and runs the same rules: **all 101 ids resolve to the fixed Steam address** (116 of 116 since
@@ -296,39 +358,113 @@ Removed from the Steam-only checks on other builds: the four `push BatchSamples`
 (`.text` has 9 pushes of that global on Steam, so "all pushes" cannot identify them); on other builds BatchSamples comes
 from a signature that is itself such a push.
 
-## 7. What is uncertain on EA 1.69.47
+### Ids not covered by the recorded check
 
-- **Nothing here has run on EA yet.** The signatures are unique on Steam; whether they match on the EA build is only
-  known from a first log. The EA build is a later compile (2024 timestamp, 0x49DC9 more code). Register allocation,
-  stack frame sizes, branch distances and inlining may differ.
-- Code sites that Apex overwrites (TerrainVisitorSite, the ArmSites, LampColourSite, LotPassSite, QualitySites,
-  CapOperandSite, CascadeTest) are patched with bytes that assume Steam's registers (`push edi` = the light, `esi` = the
-  light, `[esp+0Ch]`, `[edi+0D8h]`). Their exact original bytes stay checked before writing, so a register-agnostic
-  alternate would only turn "not found" into "differs": these entries have alternates with other context, not other
-  registers. If EA allocates registers differently here, the patch code itself has to be adapted.
-- Call sites that Apex redirects only change the rel32 of an existing CALL, so they work with any registers: their
-  alternates (RigCtorCall, RoomGatherCall, ScriptSetColourCall, GetLotIdGatherCall, ...) keep less context. The function
-  starts that Apex detours (ModelDraw, InstanceFlush) have alternates with the frame size open.
-- Counts that must match exactly: 3 arm sites, 2 quality sites, 7 callers of SetLightColour, 2 of AddWorldLights, 2 of
-  LevelGather, 3 of SolvePoint. A new caller on EA (or an inlined one fewer) makes that entry fail rather than guess.
-- WallCullBatchFn is the lower of two twin functions (2D and 3D wall culling). On Steam the lower one is the 2D one; on EA
-  the linker order is assumed to be the same (unverified). A wrong pick only affects the optional "walls of other stories".
-- LevelGather's alternate (`53 56 8D 88 A0 06 00 00 E8`, call at +8) takes the second call of it in AddWorldLights; it
-  resolves to the same function.
-- GetLotId comes from the call in the outdoor-room gather, so it is found also when official S3SS already zeroed its body
-  (its Split-Level fix, applied by pattern before Apex scans). S3SS's own pattern for it is Steam's exact 13-byte body,
-  so where S3SS patched it the offsets `+0xC0/+0xC4` that `VanillaGetLotId` copies are the same.
-- Official S3SS patches other game code before Apex scans (Apex waits for it). None of its fixed Steam patch sites (from its source) overlaps
-  these signatures on Steam; on EA this is assumed.
-- Struct offsets are assumed from Steam; `CheckWorldStructs` logs whether the ones it can read look right.
+At HEAD, `framework/game_addresses.cpp` lists 230 ids (207 table rows; the other ids are filled by `Multi`,
+`CallersOf` and `SlotsOf` rows, by address). The rows below are the ids added after the last check recorded above. Their
+Steam address and signatures are copied from `kInfo` and `kTable`, and the notes from the comments in
+`framework/game_addresses.h`. Their match counts on Steam are not recorded in this page *(unverified here)*; run
+`sigcheck.pl` to record them. The self-check in `ApexRadiance_LOG.txt` reports any id whose signature does not give
+the fixed Steam address.
 
-## 8. Checking a table change
+| Id | Steam VA | Kind | Signature(s) | Notes |
+|---|---|---|---|---|
+| LightVtable4 | 0x00FF4570 | LightType(LightJumpTable, 4) | - |  |
+| LightVtable5 | 0x00FF4350 | LightType(LightJumpTable, 5) | - |  |
+| LightVtable6 | 0x00FF4468 | LightType(LightJumpTable, 6) | - |  |
+| LightVtable7 | 0x00FF43A8 | LightType(LightJumpTable, 7) | - |  |
+| LightVtable8 | 0x00FF4408 | LightType(LightJumpTable, 8) | - |  |
+| LightVtable9 | 0x00FF44C0 | LightType(LightJumpTable, 9) | - |  |
+| LightVtable10 | 0x00FF4518 | LightType(LightJumpTable, 10) | - |  |
+| LightColour4 | 0x006C1BC0 | Deref(LightVtable4, 0x10) | - |  |
+| LightColour5 | 0x006C0690 | Deref(LightVtable5, 0x10) | - |  |
+| LightColour6 | 0x006C1320 | Deref(LightVtable6, 0x10) | - |  |
+| LightColour7 | 0x006C0AF0 | Deref(LightVtable7, 0x10) | - |  |
+| LightColour8 | 0x006C0FE0 | Deref(LightVtable8, 0x10) | - |  |
+| LightColour9 | 0x006C16D0 | Deref(LightVtable9, 0x10) | - |  |
+| LightColour10 | 0x006C1980 | Deref(LightVtable10, 0x10) | - |  |
+| LightEval4 | 0x006BFFB0 | Deref(LightVtable4, 0x4C) | - |  |
+| LightEval5 | 0x006BE1C0 | Deref(LightVtable5, 0x4C) | - |  |
+| LightEval6 | 0x006BFA70 | Deref(LightVtable6, 0x4C) | - |  |
+| LightEval7 | 0x006BEFD0 | Deref(LightVtable7, 0x4C) | - |  |
+| LightEval8 | 0x006BF880 | Deref(LightVtable8, 0x4C) | - |  |
+| LightEval9 | 0x006BFBA0 | Deref(LightVtable9, 0x4C) | - |  |
+| LightEval10 | 0x006BFDC0 | Deref(LightVtable10, 0x4C) | - |  |
+| LightFilter | 0x006C7820 | Sig | `53 8B 5C 24 08 56 8B F1 8B 46 1C 3B 43 0C 75 ?? 8B 4E 20 F6 81 90 00 00 00 02 74` +0<br>alt: `8B 46 1C 3B 43 0C 75 ?? 8B 4E 20 F6 81 90 00 00 00 02 74` +-8 | FUN_006c7820: the registry entry filter of a story's light gather |
+| LightBright | 0x006BC520 | InRange(LightFilter, 0x40) | `F6 81 00 01 00 00 20 74 ?? E8` call at +9<br>alt: `20 74 ?? E8 ?? ?? ?? ?? 84 C0 74` call at +3 | FUN_006bc520 fastcall(light): the light is bright enough to count |
+| AddRoomLight | 0x006A2060 | InRange(LightFilter, 0x70) | `57 8B CB E8` call at +3<br>alt: `83 F8 0B 75 ?? 57 8B CB E8` call at +8 | FUN_006a2060 thiscall(room, light) ret 4: adds a light to a room's list |
+| RoomUpdatePush | 0x006C5E2A | Sig | `56 6A 00 8B F1 E8 ?? ?? ?? ?? 68 ?? ?? ?? ?? 8B CE E8 ?? ?? ?? ?? 8B CE 5E E9` +10<br>alt: `6A 00 8B F1 E8 ?? ?? ?? ?? 68 ?? ?? ?? ?? 8B CE E8` +9 | push FUN_006c7250 in FUN_006c5e20: the per-story room update, run for every story of every lot |
+| RoomUpdate | 0x006C7250 | Deref(RoomUpdatePush, 1) | - | FUN_006c7250 fastcall(treeLevel) |
+| LightEntryUpdate | 0x006C7BA0 | Sig | `55 8B EC 83 E4 F0 83 EC 24 53 56 8B F1 83 7E 24 00 57 0F 84 ?? ?? ?? ?? 8B 46 14 85 C0 0F 84` +0<br>alt: `83 7E 24 00 57 0F 84 ?? ?? ?? ?? 8B 46 14 85 C0 0F 84 ?? ?? ?? ?? 83 38 00 0F 84` +-13 | FUN_006c7ba0 thiscall(entry): recomputes window room/sky activation |
+| ChangedClearCall | 0x006C7497 | InRange(CascadeTest, 0x100) | `8D 7E 08 52 50 8B CF E8` +7<br>alt: `52 50 8B CF E8` +4 | its call that empties the "changed rooms" set (ecx = treeLevel+8) after walking it |
+| ChangedClear | 0x007F3790 | Target(ChangedClearCall) | - | FUN_007f3790 thiscall(set, buckets, count) ret 8 |
+| FloorSet | 0x00A89DD0 | Sig | `53 55 56 8B F1 83 BE 64 02 00 00 00 57 75 ?? 6A 00 6A 00 6A 00 6A 00 68` +0<br>alt: `83 BE 64 02 00 00 00 57 75 ?? 6A 00 6A 00 6A 00 6A 00 68` +-5 | FUN_00a89dd0 thiscall(level floor object, ...): sets a floor quadrant |
+| FloorSetCall0 | 0x00AA0ADB | CallersOf(FloorSet, 4) | - |  |
+| FloorRemove | 0x00A893A0 | Sig | `53 55 56 57 8B F9 83 BF 64 02 00 00 00 75 ?? 6A 00 6A 00 6A 00 6A 00 68` +0<br>alt: `57 8B F9 83 BF 64 02 00 00 00 75 ?? 6A 00` +-3 | FUN_00a893a0 thiscall(level floor object, ...): removes one |
+| FloorRemoveCall | 0x00AA05C7 | CallersOf(FloorRemove, 1) | - |  |
+| LevelVtable | 0x01062680 | Sig | `E8 ?? ?? ?? ?? C7 06 ?? ?? ?? ?? 88 9E 10 02 00 00 89 9E 14 02 00 00` dword at +7<br>alt: `80 BE 10 02 00 00 00 C7 06 ?? ?? ?? ?? 74` dword at +9 | vtable of the level floor object (ctor FUN_00a88790) |
+| LevelCtorCall | 0x00AA179E | Sig | `83 C4 30 85 C0 74 0B 8B C8 E8 ?? ?? ?? ?? 8B F8` +9<br>alt: `68 50 03 00 00 ?? ?? ?? E8 ?? ?? ?? ?? 83 C4 30 85 C0 74 0B 8B C8 E8` +22 | the only CALL of that ctor (after "new 0x350"): every level floor object is made there |
+| LevelCtor | 0x00A88790 | Target(LevelCtorCall) | - | FUN_00a88790 thiscall(object), returns it, plain ret |
+| LodChoice | 0x0069E710 | Sig | `8B 11 8B 82 88 00 00 00 56 8B B2 84 02 00 00 3B C6 7E` +0<br>alt: `8B 82 88 00 00 00 56 8B B2 84 02 00 00 3B C6` +-2 | FUN_0069e710 fastcall(room): the lighting LOD class a room should have (high only on the camera's story) |
+| LodChoiceCall0 | 0x0069E82E | CallersOf(LodChoice, 4) | - |  |
+| LodMax | 0x01158B00 | Deref(LodChoice, 0x4C) | - | the int it returns for the camera's story (0x01158B00) |
+| RoomSolveStartCall | 0x006A3D0B | Sig | `8B CE DD D8 E8 ?? ?? ?? ?? 88 9E 38 06 00 00 C7 86 EC 00 00 00 01 00 00 00` +4<br>alt: `E8 ?? ?? ?? ?? 88 9E 38 06 00 00 C7 86 EC 00 00 00 01` +0 | the CALL of state 0 of the room solve in FUN_006a3c90 |
+| RoomSolveStart | 0x006A18B0 | Target(RoomSolveStartCall) | - | FUN_006a18b0 thiscall(room): ambient colour, normalisation and ambient ramp of an indoor room |
+| WallPassCall | 0x006A3D4C | Sig | `D9 1C 24 57 8B CE E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 88 9E 38 06 00 00 C7 86 EC 00 00 00 03` +6<br>alt: `57 8B CE E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 88 9E 38 06 00 00 C7 86 EC 00 00 00 03` +3 | the CALL of the wall texel pass (state 2) in FUN_006a3c90 |
+| WallPass | 0x006A3A30 | Target(WallPassCall) | - | FUN_006a3a30 thiscall(room, int, float) ret 8 |
+| WallSamplesCall | 0x006A3AF5 | InRange(WallPass, 0x150) | `68 C8 8A 15 01 52 50 8B CF E8` +9<br>alt: `52 50 8B CF E8` +4 | its CALL of FUN_006ac070 thiscall(wall, piece, class, batch) ret 0xC: the samples of one piece of a wall |
+| WallSamples | 0x006AC070 | Target(WallSamplesCall) | - |  |
+| WallBlurCall | 0x006A3B62 | InRange(WallPass, 0x150) | `8B CE E8 ?? ?? ?? ?? 5F 5E 5D B0 01` +2<br>alt: `E8 ?? ?? ?? ?? 5F 5E 5D B0 01 5B` +0 | its CALL of FUN_0069f650 fastcall(room): the wall atlas blur (LOD class 2) |
+| WallBlur | 0x0069F650 | Target(WallBlurCall) | - |  |
+| WallBlurPasses | 0x01158B1C | Deref(WallBlur, 0x20) | - | the dword of blur passes (0x01158B1C) |
+| WallBlurMode | 0x011D02E4 | Deref(WallBlur, 0x88) | - | the byte of blur mode (0x011D02E4; 0 = [1 2 1] per axis) |
+| WallSolveCall | 0x006A3B0A | InRange(WallPass, 0x150) | `53 68 C8 8A 15 01 8B CE E8` +8<br>alt: `68 C8 8A 15 01 8B CE E8` +7 | its CALL of FUN_006a31d0 thiscall(room, batch, {base, pitch}, flags, sampler, char) ret 0x14 for one piece |
+| WallSolve | 0x006A31D0 | Target(WallSolveCall) | - |  |
+| RoomAmbient | 0x006A0F50 | Sig | `55 8B EC 83 E4 F0 81 EC 04 01 00 00 53 56 8B F1 8B 86 C8 00 00 00 3B 86 CC 00 00 00 57 75` +0<br>alt: `8B 86 C8 00 00 00 3B 86 CC 00 00 00 57 75 ?? 8B 56 14` +-16 | FUN_006a0f50 fastcall(room): the room's ambient (state 0 of the room solve) |
+| UnlitColourA | 0x006A0F95 | InRange(RoomAmbient, 0x80) | `84 C0 B9 ?? ?? ?? ?? 75 05 B9 ?? ?? ?? ?? E8` +3<br>alt: `B9 ?? ?? ?? ?? 75 05 B9` +1 | in it: imm32 of "mov ecx, 0x011D0B60" (the colour of a room with no lamp, on some lots) |
+| UnlitColourB | 0x006A0F9C | InRange(RoomAmbient, 0x80) | `84 C0 B9 ?? ?? ?? ?? 75 05 B9 ?? ?? ?? ?? E8` +10<br>alt: `B9 ?? ?? ?? ?? 75 05 B9` +8 | in it: imm32 of "mov ecx, 0x011D0B40" (the same, other lots) |
+| DimAmbient | 0x006A00A0 | Sig | `55 8B EC 83 E4 F0 83 EC 3C 8B C1 8B 50 14 8B 40 10 8B 0D` +0<br>alt: `83 EC 3C 8B C1 8B 50 14 8B 40 10 8B 0D` +-6 | FUN_006a00a0: a dim room's ambient topped up with that colour |
+| DimColourA | 0x006A00C2 | InRange(DimAmbient, 0x40) | `84 C0 B9 ?? ?? ?? ?? 75 05 B9 ?? ?? ?? ?? E8` +3<br>alt: `B9 ?? ?? ?? ?? 75 05 B9` +1 | in it: the same two imm32 |
+| DimColourB | 0x006A00C9 | InRange(DimAmbient, 0x40) | `84 C0 B9 ?? ?? ?? ?? 75 05 B9 ?? ?? ?? ?? E8` +10<br>alt: `B9 ?? ?? ?? ?? 75 05 B9` +8 |  |
+| DimAmbientCall0 | 0x006A13F0 | CallersOf(DimAmbient, 2) | - |  |
+| FillGate | 0x006BA57E | Sig | `80 3D ?? ?? ?? ?? 00 74 26 8B CF E8` +2<br>alt: `84 9F 24 02 00 00 74 2F 80 3D ?? ?? ?? ?? 00` +10 | imm32 of "cmp byte [0x01158D5C], 0" in FUN_006ba340: the fill light added to object rigs |
+| FillColour | 0x006B816D | Sig | `0F 28 15 ?? ?? ?? ?? 0F 58 C1 0F 59 C5 0F 57 C9` +3<br>alt: `0F 28 15 ?? ?? ?? ?? 0F 58 C1 0F 59 C5` +3 | imm32 of "movaps xmm2, [0x011D0E10]" in FUN_006b7e70: the fill light's colour (0.8, 0.8, 1, 0.8) |
+| RoomPriorityCall | 0x006A81DF | Sig | `8B CF E8 ?? ?? ?? ?? 51 D9 1C 24 57 8D 4C 24 20 E8` +2 | the only CALL of the room priority (in FUN_006a8190) |
+| RoomPriority | 0x0069E770 | Target(RoomPriorityCall) | `83 EC 0C 56 8B F1 57 8B 3E 85 FF 75 08 D9 EE` +0 | FUN_0069e770 fastcall(room) -> float in ST0 |
+| LodStepSite | 0x0069EAA2 | Sig | `85 FF 75 0A BF 01 00 00 00 8D 5F 01 EB 0C` +4 | "mov edi,1; lea ebx,[edi+1]" in FUN_0069ea70: class 0 -> 1 after a solve |
+| KeepClassA | 0x0069EF58 | Sig | `83 F9 04 74 0F 3B C8 7C 0B 5F 89 86 F4 00 00 00` +7 | "jl" in FUN_0069eed0: an invalidated room restarts at class 0 when shown < LodChoice |
+| KeepClassB | 0x0069F1C5 | Sig | `83 F9 04 74 06 3B C8 7C 02 8B F8 89 BE F4 00 00 00` +7 | the same "jl" in FUN_0069f160 |
+| InvalidateFlag | 0x0069F160 | Sig | `8A 44 24 04 56 8B F1 3A 46 19 74 ?? 8B 0E 85 C9 88 46 19` +0 | FUN_0069f160 thiscall(room, char flag) ret 4: invalidates a room when its +0x19 flag changes (from 0x006A5E00) |
+| RoomPickJump | 0x006C5E39 | Sig | `8B CE 5E E9 ?? ?? ?? ?? CC CC 8B 4C 24 04` +3 | "jmp FUN_006c5c20" at the end of FUN_006c5e20 (the per-frame light tree update) |
+| RoomPick | 0x006C5C20 | Sig | `81 EC 14 04 00 00 55 8B E9 83 7D 74 00 0F 85` +0 | FUN_006c5c20 fastcall(tree): makes the best pending room current |
+| RoomSolveStep | 0x006A3F80 | Sig | `83 B9 F0 00 00 00 03 75 12` +0 | FUN_006a3f80 thiscall(room, stopwatch*, float budget) ret 8: the budgeted solve of a room in state 3 |
+| StopwatchCtor | 0x004F35B0 | Sig | `6A 04 8D 4C 24 18 8D 6C 10 C0 E8 ?? ?? ?? ?? 8D 4C 24 10 E8` call at +10 | FUN_004f35b0 thiscall(sw, kind, char start) ret 8 (kind 4 = ms) |
+| StopwatchStart | 0x00408700 | Sig | `6A 04 8D 4C 24 18 8D 6C 10 C0 E8 ?? ?? ?? ?? 8D 4C 24 10 E8` call at +19 | FUN_00408700 thiscall(sw) |
+| StopwatchElapsed | 0x004F33C0 | Sig | `8D 4C 24 14 E8 ?? ?? ?? ?? D9 44 24 10 D9 C9` call at +4 | FUN_004f33c0 thiscall(sw) -> ST0 |
+| PriorityLotObject | 0x006FDE10 | Sig | `40 4C 50 51 E8 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ?? 84 C0` call at +4 | FUN_006fde10: mov eax,[SceneObjectManager]; ret |
+| PriorityLotTest | 0x006FDC80 | Sig | `40 4C 50 51 E8 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ?? 84 C0` call at +11 | FUN_006fdc80 thiscall(som, lotLo, lotHi) ret 8 -> al: one of the two priority lots |
+| BakeColourSite | 0x00C2950F | Sig | `E8 ?? ?? ?? ?? 0F 28 87 F0 00 00 00 0F 29 86 20 01 00 00 8B 17 0F 28 47 10` +5<br>alt: `0F 28 87 F0 00 00 00 0F 29 86 20 01 00 00 8B 17` +0 | movaps xmm0,[edi+0F0h] in the terrain bake FUN_00c292b0: the lamp colour copied to its shader parameter |
+| SunlightScale | 0x011D0918 | Sig | `B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? F3 0F 10 00 0F 28 8E 00 08 00 00` dword at +1<br>alt: `B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? F3 0F 10 00 0F 28 8E ?? ?? 00 00 8D 8E` dword at +1 | the "Sunlight Scale" float FUN_00c11ad0 multiplies the sun / moon colour by (mov ecx,imm32 at 0x00C11B01) |
+| CasTriSort | 0x005D1960 | Sig | `55 8B EC 83 E4 F0 81 EC A4 00 00 00 33 C0 89 44 24 08 89 44 24 0C 53 8D 44 24 0C 8B C8 89 44 24 0C 33 C0 56 57 89 44 24 20 89 44 24 24 89 44 24 28 8D 54 24 20 52 B8 AB AA AA AA F7 65 10` +0 | FUN_005d1960 cdecl(u16* indices, u8* vertices, u32 indexCount, u32 vertexCount, u16 stride, u8 offset): "CAS/ModelBuilder/TriangleSortDataList" (`features/cas_tri_sort.h`) |
+| AllocGlobal | 0x011CB864 | Sig | `8B 44 24 0C 8B 4C 24 04 50 51 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? C3` dword at +12 | the global general allocator pointer 0x011CB864 (operator new FUN_004e3f90: mov ecx,[global]) |
+| AllocMmapFreeCall | 0x004E5306 | Sig | `29 9F 8C 04 00 00 83 87 88 04 00 00 FF 51 FF 15 ?? ?? ?? ??` +14 | "call [VirtualFree]" in the allocator's FreeInternal FUN_004e51b0 (0x004E5306): releases a big block |
+| RecordCrc | 0x004FA4C0 | Sig | `8B 4C 24 04 8B 44 24 08 8D 14 01 3B CA 8B 44 24 0C 73 1F 56 57 0F B6 39 8B F0 C1 EE 18 33 F7 C1 E0 08 33 04 B5 ?? ?? ?? ?? 83 C1 01 3B CA 72 E5 5F 5E 80 7C 24 10 00 74 02 F7 D0 C3` +0 | FUN_004fa4c0 cdecl(bytes, length, crc, bool invert): MSB-first table CRC-32 of the cache records |
+| RecordCrcTable | 0x0114D330 | Deref(RecordCrc, 0x25) | - | its 256-entry table (0x0114D330) |
+| TexCreateCall | 0x0060E1DC | Sig | `8B 45 DC 50 8B 4D F4 51 8B 55 08 52 E8 ?? ?? ?? ?? 83 C4 24` +12 | call FUN_0060cea0 (0x0060E1DC): creates the D3D texture (cdecl, 9 args) |
+| TexCreate | 0x0060CEA0 | Target(TexCreateCall) | - |  |
+| TexFillCall | 0x0060E1FF | Sig | `8A 4D FB 51 8B 55 10 52 8B 45 0C 50 8B 4D 08 51 E8 ?? ?? ?? ?? 83 C4 10` +16 | call FUN_0060d290 (0x0060E1FF): copies every mip level into it (cdecl, 4 args) |
+| TexFill | 0x0060D290 | Target(TexFillCall) | - |  |
+| UiServiceGetter | 0x0050AB70 | Sig | `56 57 E8 ?? ?? ?? ?? 8B F8 E8 ?? ?? ?? ?? 85 C0 74 ?? 8B 10 8B C8 8B 42 04 FF D0 8B F0 85 F6` call at +9 | UIManager_GetMainWindowImpl calls this read-only root-service getter |
 
-```
-perl S3SS-dev\research\port169\sigcheck.pl [exe] [game_addresses.cpp]
-```
+Ids filled by a `Multi`, `CallersOf` or `SlotsOf` row (in address order after the first id of their row):
+SetColourCall1..6 (0x006C051D, 0x006C05C1, 0x006C1251, 0x006C15D1, 0x006C1891, 0x006C1B11), AddWorldLightsCall1
+(0x006C7094), LevelGatherCall1 (0x006C6B2D), SolvePointCall1..2 (0x006A126F, 0x006A3336), FloorSetCall1..3 (0x00AA0CCC,
+0x00AA0E4A, 0x00AA0F72), LodChoiceCall1..3 (0x0069EA86, 0x0069EF46, 0x0069F1B3), DimAmbientCall1 (0x006A1410),
+ResFindProviderSlot1 (0x00FFE290), ResSetDbPrioritySlot1 (0x00FFE28C), ResDbChangedSlot1 (0x00FFE29C).
 
-Read-only. It parses `kInfo` and `kTable` (keep one entry per line in their current shape), runs the resolution rules
-over the Steam exe and prints, per id, the match counts of both signatures and `ok` / `MISMATCH` against the fixed Steam
-address. A change to the table is only done when it prints `101 ok, 0 mismatch`. The per-address context used to write
-the signatures comes from `research\engine_map\full.asm` (dumpbin disassembly of `TS3W.exe`).
+## See also
+
+- [Architecture: game-code patching helpers](../architecture.md#45-game-code-patching-helpers).
+- [Light objects and rigs](light-objects-and-rigs.md), [Room light maps](room-light-maps.md), [Terrain and light bake](terrain-and-light-bake.md): what the Night Lighting ids point at.
+- [Performance](../features/performance/README.md): the performance ids.
+- [Workflow: diagnosing](../workflow.md#5-diagnosing-a-problem).

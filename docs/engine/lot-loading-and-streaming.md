@@ -1,6 +1,16 @@
 # Lot loading and streaming
 
-## Purpose
+This page documents how `TS3W.exe` streams lots around the camera: LOD scoring, the object build, the LotRenderer load stages and lot room lighting, the lot impostor builder, the terrain and world update that runs in the same pass, the world cache and the resource I/O underneath. The loaded-world gate, Lot Lighting While Moving, Faster Game File Lookups, Night Lighting's terrain relight and the Frame Profiler depend on it.
+
+## Scope
+
+| | |
+|---|---|
+| Game build | Steam 1.67.2 (`TS3W.exe`, image base 0x00400000) unless stated |
+| Used by | [Architecture: loaded-world gate](../architecture.md#12-loaded-world-gate-and-start-note) (`features/world_session.h`), [Depth Blur](../features/depth-blur.md), [Performance](../features/performance/README.md), [Terrain relight](../features/night-lighting/terrain-relight.md), [Frame Profiler](../features/frame-profiler.md) |
+| Evidence | Disassembly (`engine_map`), Ghidra `re/out/fn_00aea680.c`, combined-build patch headers, `features/world_session.h`; items marked *(inferred)* are static only |
+
+## Overview
 
 This page covers how TS3W.exe (1.67.2 Steam) streams lots around the camera:
 - LOD scoring and promotion to "detailed view";
@@ -15,6 +25,13 @@ It also records exactly what S3SS's **Lot Streaming Optimizations** (LSO) patch 
 Smooth Streaming was designed to sit next to it. Smooth Streaming was removed from the standalone on 2026-09-28; see
 [../removed-features.md](../removed-features.md#smooth-streaming).
 
+Addresses are image base 0x00400000, no ASLR. Anything marked *(inferred)* was read from static disassembly and not
+confirmed at runtime.
+
+## Details
+
+### Sources
+
 Sources:
 - `patches/smooth_streaming_patch.cpp` (header notes 1-5);
 - `patches/lot_streaming_optimizations_patch.cpp` (S3SS);
@@ -23,66 +40,9 @@ Sources:
 - Ghidra `re/out/fn_00aea680.c`;
 - NOTAS-ILUMINACAO.md "Desempenho: mapa do motor (28/09)".
 
-Addresses are image base 0x00400000, no ASLR. Anything marked *(inferred)* was read from static disassembly and not
-confirmed at runtime.
+### Data structures
 
-Related pages:
-- main loop, services and threads: [main-loop-and-services.md](main-loop-and-services.md);
-- terrain chunks and the light bake: [terrain-and-light-bake.md](terrain-and-light-bake.md);
-- room light maps: [room-light-maps.md](room-light-maps.md);
-- clocks and stopwatches: [timers-and-sleeps.md](timers-and-sleeps.md).
-
-## Address table
-
-| Address | Name / role | Evidence |
-|---|---|---|
-| 0x011ECBC4 | WorldManager singleton pointer | stored by the WorldManager ctor at 0x00C67883; operand checks in Smooth Streaming and GC Scheduler |
-| 0x00C7E3C0 | WorldManager service update (main thread; vtable 0x0107A358 +0x1C). Runs only while [WorldManager+0x41] != 0 (0xC7E3CA..0xC7E3DD) | engine_map disassembly, `svc_vt.txt`, Frame Budget pattern |
-| 0x00C7E300 | WorldManager service, simulation side (vtable +0x20) | `svc_vt.txt` |
-| 0x00C6D570 | `WorldManager::Update` thiscall(float, float), RET 8, called at 0xC7E403 | `f_C6D570.asm`; LSO detours it |
-| 0x00C845C0 | Terrain update, thiscall(terrain, float* camera, char), RET 8, called at 0xC6D68F | Smooth Streaming site, profiler |
-| 0x00C6C290 | Lot LOD scoring, thiscall(4), RET 0x10, called at 0xC6D6E4 (skipped while WorldManager+0x258 != 0) | `f_C6D570.asm`, profiler |
-| 0x00C62D80 | Lot distance/visibility metric (RET 0xC), called from 0xC6C5D7 | `calls.tsv`, disassembly |
-| 0x00C63015 | `je` in 0xC62D80 that skips `metric -= [WorldManager+0xE0]` when `FUN_00AB1860(lot)` (= lot+0xC1) is 0. LSO patches it to `jmp` | disassembly; LSO `lotVisibilityCameraBiasJZ` |
-| 0x00C69FF0 | Blocks the next promotion while a promoted lot is still loading (LoD throttle) | Smooth Streaming note 2 |
-| 0x00C6C695 | `cmp byte [0x011ECBC0],0`: the "Throttle Lot LoD Transitions" test in the scoring | `full.asm` |
-| 0x00AC20E0 | Lot detail request, thiscall(1), RET 4. If lot+0xC1 != arg and lot+0xC9 == 0, stores the flag and posts AddLotObjectsToScene (arg 1) or the demotion (arg 0) through PostRemoteMethodCall. Callers 0xC6A0F9, 0xC6C7C3, 0xC6C7CE, 0xAE61A7 | profiler header |
-| 0x00AC1130 | `Lot::AddLotObjectsToScene` thiscall(lot, char initialLoad, char alwaysVisibleOnly), RET 8. Called from 0xACE1E2 | LSO pattern, PLANO §3, `calls.tsv` |
-| 0x00ABFAC0 | `Lot::UpdateObjectSceneNode` thiscall(lot, obj, char, char), RET 0xC, per object | LSO pattern, profiler |
-| 0x00ABE9C0 | `PostRemoteMethodCall` cdecl(thread, lot, func, a4, char, char): allocates a RemoteMethodCall (vtable 0x010650C4, built at 0xABEA0A) and posts it cross-thread. Runs inline when posted from the target thread itself | LSO comment, profiler |
-| 0x007D2DB0 / 0x007D2DF0 | `ScriptMessageScope` ctor(scope, beginMsg, endMsg, lot) / dtor | LSO patterns; bytes confirmed in `full.asm` |
-| 0x00B088C0 | `IsObjectLargeOrFlora` cdecl(obj): reads Object+0x18 (resource key) and CTProductObject flag bits (building shells, exterior geometry) | LSO pattern; bytes confirmed |
-| 0x00C7CEA0 | Lot renderer pass thiscall(worldRenderer, float dt), RET 4. ECX = [0x011ECE58], called at 0xC7E419 | Smooth Streaming site, disassembly |
-| 0x00AEB2E0 | Lot renderer update thiscall(1), RET 4. Callers 0xC7CEDF, 0xAEB3F9, 0xAEB41C. Calls 0xAEA680 at 0xAEB306 while +0x1E and +0x1F are 0, then `FUN_00AE4CB0` (room lighting) | profiler, Smooth Streaming |
-| 0x00AEA680 | LotRenderer load stages, thiscall(lotRenderer), RET, returns AL | Smooth Streaming site; `re/out/fn_00aea680.c` |
-| 0x00AEA6AC / 0xAEA6D0 / 0xAEA6E9 | The three budget movs: 20 / 35 (priority lot) / 2000 (tool mode) ms | Smooth Streaming |
-| 0x006FDC80 | "Priority lot" test thiscall(sceneObjMgr, lo, hi), RET 8: lot id == SceneObjectManager+0x10D0 or +0x10E0 | Smooth Streaming |
-| 0x006FDE10 | SceneObjectManager getter `mov eax,[0x011D1CF8]; ret` | bytes checked |
-| 0x00ADB120 | Lot lighting budget (ECX = lot lighting manager, ST0): 5 ms; 10 while loading (+0x4F); 15/30 for priority lots; 1000 in tool mode. Only caller: the CALL at 0x00ADB95D in 0x00ADB8F0 | Smooth Streaming; Lot Lighting While Moving redirects that CALL ([../features/performance.md](../features/performance.md)) |
-| 0x00AE4CB0 → 0x00ADB8F0 → 0x006A8BA0 | Budgeted per-frame room lighting of a lot (`FUN_00ADB8F0` only caller 0xAE4D2A) | profiler, Smooth Streaming note 5 |
-| 0x00ADBAD0 → 0x006A80E0 → 0x006A3EC0 | Synchronous room light solve (while room+0xF0 == 3, 60000 ms budget), used by the impostor builder | Smooth Streaming note 3 |
-| 0x00AD9E30 | Lot LOD switch ("World/LotImpostor/LODOverrideHook"): calls 0xAEB3F0 (two renderer updates + 0xADBAD0). Caller 0xADAEBC | profiler, `fnstrings.tsv` |
-| 0x00AD97E0 | Lot impostor wait loop: pumps the services (0x588E00 at 0xAD985C) until the job is done, with no Present | profiler, `profiler_targets.tsv` |
-| 0x00ADAF40 | Jump table of the impostor builder states (state 2 → `FUN_00ADAF60`) | Smooth Streaming note 3 |
-| 0x00ACB9A9 | "Error during construction of imposter for lot %I64u" | Smooth Streaming note 3, `fnstrings.tsv` (fn 0x00ACB8A0) |
-| 0x00C6D970 / 0x00C5FE40 | Load world (sets WorldManager+0x1B4 = 1) / sets 3 ("saveInGameMode") or 2 ("editInGameMode") | Smooth Streaming note 1 |
-| 0x00C6CF80 (0xC6D430) / 0x00C6B780 | Sets WorldManager+0x41 at the end of a world load / clears it on shutdown | Smooth Streaming note 1, Frame Budget |
-| 0x007F1760 | `GameUtils_SwapLoadScreen` posts a UI callback (the loading screen is script driven) | Smooth Streaming note 1 |
-| 0x00C0FD60 | Empty stub (`ret`), the body of `GameUtils_Begin/End/ResetLoadEvent` | Smooth Streaming note 1 |
-| 0x0073E060 | `Camera_IsMapViewModeEnabled` (reads camera+0x8B9) | LSO pattern, NOTAS (Mapa (M)) |
-| 0x004DB850 / 0x004DB8E0 | `FileStream::Read` (ReadFile) / `Flush` (FlushFileBuffers) | profiler targets |
-| 0x004EC010 | RefPack stream read, stdcall(5), RET 0x14 → 0x004EB3B0 decompress | profiler targets, NOTAS |
-| 0x004EB3B0 | RefPack decompressor (replaced entirely by S3SS's "RefPack Decompressor Optimization") | S3SS `refpack_decompressor_patch.cpp`, PLANO §3 |
-| 0x007377F0 → 0x00737560 → 0x0072A730 | ResourceSystem service → `Update(budgetMs)` (at least 250 ms while +0x1F0) → deferred callback queue | Frame Budget, `profiler_targets.tsv` |
-| 0x0072A4F0 / 0x007297C0 | Async resource read job (JobThread workers, mask 2) / finalize job (main thread, mask 1; created at 0x00729C5B) | Frame Budget header |
-| 0x00733D20 → 0x00733AA0 | ResourceChangeMonitor: synchronous reload per pending key, no budget | `profiler_targets.tsv` |
-| 0x005BB4D0 | Builds the `WorldCaches\` path (call sites 0x5EBA38 in 0x5EB9C0, 0x6CC005 in 0x6CBF90) | `fnstrings.tsv`, `calls.tsv` |
-| 0x005BC8B4 | WorldCache size check `jb 0x005BCA49` (0F 82 8F 01 00 00) in 0x005BC6D0 | S3SS "WorldCache Size Uncap" pattern `0F 82 ?? ?? ?? ?? 8B 0F E8`, matched in `full.asm` |
-| 0x006CC570 | Opens a cache for "CAS/Compositor/Cache" unless the command-line option `IgnoreWorldCache` is present (0x0058B100 lookup at 0x6CC58C) *(inferred)* | `fnstrings.tsv`, disassembly |
-
-## Data structures
-
-### WorldManager ([0x011ECBC4])
+#### WorldManager ([0x011ECBC4])
 
 | Offset | Meaning | Evidence |
 |---|---|---|
@@ -114,7 +74,7 @@ The live settings are registered in the WorldManager constructor (0xC6763C..0xC6
 
 "World Stats" (0x01079400) is also registered.
 
-### Lot (`Sims3::World::Lot`)
+#### Lot (`Sims3::World::Lot`)
 
 | Offset | Meaning | Evidence |
 |---|---|---|
@@ -124,7 +84,7 @@ The live settings are registered in the WorldManager constructor (0xC6763C..0xC6
 | +0xC9 | Bulldozing (AddLotObjectsToScene early-out) | LSO |
 | +0x364, +0x408 == 1, +0x40C == 'P' | Used by `Lot::SetActiveImpl`'s one-shot apartment-shell fixups, which never retry if the shell has no scene presence yet | LSO comment |
 
-### LotRenderer (argument of 0xAEA680)
+#### LotRenderer (argument of 0xAEA680)
 
 | Offset | Meaning |
 |---|---|
@@ -166,20 +126,20 @@ Load stages of `FUN_00AEA680` (from `re/out/fn_00aea680.c`; allocator tag string
 The budget stopwatch is unit 4 (ms), started once before the loop, and checked after each stage. A failed stage sets
 +0x1F and calls `FUN_00AE1A90(1)`.
 
-### Lot lighting manager
+#### Lot lighting manager
 - +0x14: lot.
 - +0x4F: loading (set at stage 1, cleared at stage 0x14). This is the flag `FUN_00ADB120` reads.
 
-### SceneObjectManager ([0x011D1CF8])
+#### SceneObjectManager ([0x011D1CF8])
 - +0x10D0 / +0x10E0: the two lot ids that `FUN_006FDC80` treats as "priority". The same test gives a lot the larger
   lighting budget in `FUN_00ADB120`. Most likely the active or focused lot *(not proven)*.
 
-### Terrain (WorldManager+0x58)
+#### Terrain (WorldManager+0x58)
 - +0xB0/+0xB4: chunk vector. Chunk +0x0C/+0x10 are int x/z; +0x54 re-renders the four composited textures; +0x55
   relights.
 - +0x110: camera copy. See [terrain-and-light-bake.md](terrain-and-light-bake.md).
 
-## Call flow (render thread = main thread)
+### Call flow (render thread = main thread)
 
 ```
 main loop 0xECA960
@@ -210,7 +170,8 @@ main loop 0xECA960
 - **Thread.** `WorldManager::Update`, the lot pass and the terrain update all run on the render thread (the thread that
   calls Present). Night Terrain Relight calls 0xC845C0 from its Present hook on the same thread.
 
-## Resource system I/O
+### Resource system I/O
+
 - **Package I/O is synchronous on the thread that asks for it** (NOTAS 28/09): `FileStream::Read` 0x4DB850 calls
   `ReadFile` directly. RefPack-compressed resources are read and decompressed by 0x4EC010 → 0x4EB3B0, in the requesting
   thread.
@@ -225,7 +186,8 @@ main loop 0xECA960
 - **S3SS patches here:** RefPack Decompressor Optimization (replaces 0x4EB3B0 with AVX2/SSE2 code), Mimalloc (CRT
   allocator), WorldCache Size Uncap.
 
-## World cache
+### World cache
+
 Evidence is limited to strings and one S3SS patch:
 - `WorldCaches\` (0x00FE2508) is used by 0x5BB4D0 (path builder; callers 0x5EB9C0 and 0x6CBF90).
 - S3SS's "WorldCache Size Uncap" (`patches/worldcache_uncap_patch.cpp`) turns a `jb` into a `jmp` to remove a 512 MB
@@ -238,7 +200,8 @@ Evidence is limited to strings and one S3SS patch:
 
 How the world cache interacts with streaming (what is cached, when it is read) was **not studied**.
 
-## What S3SS Lot Streaming Optimizations touches
+### What S3SS Lot Streaming Optimizations touches
+
 (`patches/lot_streaming_optimizations_patch.cpp`, S3SS, all versions; the Steam addresses are from PLANO-SEPARACAO.md
 §3 and the 2026-09-28 log.) Each sub-feature is independent. A resolve failure logs and skips it.
 
@@ -257,23 +220,83 @@ LSO's install log lines, as seen on 28/09:
 - `Set 'Max Active Lot Threshold' = 12`
 - `Set 'Camera speed threshold' = 5.00`
 
-## Which Apex features depend on what
+### Which Apex features depend on what
 
 | Item | Used by |
 |---|---|
 | 0xC7CEA0, 0xAEA680 (+ budget movs), 0x6FDC80, 0x6FDE10, 0xADB120, 0xC845C0 (+ arming loop 0xC84C3C), 0xC6D68C | Smooth Streaming (combined build only; removed, see [../removed-features.md](../removed-features.md#smooth-streaming)) |
-| Terrain grid / chunk flags, `SmoothStreamingRelightTerrainRects` | Night Lighting terrain relight ([../features/night-lighting/terrain-relight.md](../features/night-lighting/terrain-relight.md)). The function lives in `smooth_streaming_patch.cpp` in the combined build and must move into Night Lighting in the standalone |
+| Terrain grid / chunk flags, `SmoothStreamingRelightTerrainRects` | Night Lighting terrain relight ([../features/night-lighting/terrain-relight.md](../features/night-lighting/terrain-relight.md)). In the combined build the function lived in `smooth_streaming_patch.cpp`; Apex Radiance keeps the logic in the Night Lighting module, and the local terrain relight is `features/terrain_chunk_relight.cpp` ([terrain-and-light-bake.md](terrain-and-light-bake.md#how-apex-drives-and-patches-the-bake)) |
+| `[0x011ECBC4]` (WorldManagerPtr), WorldManager+0x41 (active) and +0x1B4 (mode 1..3), plus the loading window (id `0x95947678`, created at `0x00EC7DB9`, removed at `0x00EC7A60`, looked up through UiServiceGetter `0x0050AB70`, the service's vtable +4 root getter and the root's vtable +0xF4 child lookup) | Loaded-world gate `features/world_session.h` (read only, SEH-guarded, never latched across loads): the menu's start note and Depth Blur, which also waits 3 s after the world becomes active (`WorldSession::Settled`). See [../architecture.md](../architecture.md#12-loaded-world-gate-and-start-note) |
 | WorldManager+0x41 | Smooth Streaming (indirectly, through the lot-pass gap) and Service Frame Budget, both removed ([../removed-features.md](../removed-features.md)) |
 | WorldManager+0x3A0, camera chain 0x11D1860+0x24+0x60, WorldManager ctor store 0xC67883 | Script GC Scheduler (removed, see [../removed-features.md](../removed-features.md#script-gc-scheduler)) |
 | 0xC6C290, 0xAC20E0, 0xAEB2E0, call 0xAEB306, 0xAD9E30, 0xADBAD0, 0x6A80E0, 0xADB8F0, call 0xC6D68F, 0xABFAC0 (optional), 0xAD97E0, 0x4DB850/8E0, 0x4EC010 | [Frame Profiler](../features/frame-profiler.md) (timing only) |
 | 0x73E060 | `map_view.cpp` (Depth Blur off in map view), LSO |
-| CALL 0xADB95D (-> 0xADB120), camera eye read 0xC6D5BD (0x6E8330 / 0x6E8400, +0x60) | Lot Lighting While Moving ([../features/performance.md](../features/performance.md)): the budget is scaled while the camera moves |
-| 0x4AFFC0 FindProvider and the resource manager's list methods (0x4B2D00, 0x736A70, 0x4B2EC0, 0x4B0960) | Faster Game File Lookups ([../features/performance.md](../features/performance.md)) |
+| CALL 0xADB95D (-> 0xADB120), camera eye read 0xC6D5BD (0x6E8330 / 0x6E8400, +0x60) | Lot Lighting While Moving ([../features/performance/lot-lighting-motion.md](../features/performance/lot-lighting-motion.md)): the budget is scaled while the camera moves |
+| 0x4AFFC0 FindProvider and the resource manager's list methods (0x4B2D00, 0x736A70, 0x4B2EC0, 0x4B0960) | Faster Game File Lookups ([../features/performance/resource-lookup-cache.md](../features/performance/resource-lookup-cache.md)) |
 
-## Open questions
+### Open questions
+
 - The meaning of the "priority" lots (SceneObjectManager+0x10D0/+0x10E0).
 - The default of "Throttle Lot LoD Transitions" (0x011ECBC0 is presumably zero-initialized) and whether the live-setting
   registry loads saved values over the constructor's defaults.
 - What exactly 0xC62D80 measures (it is some distance squared, scaled), and whether LSO's JZ→JMP removes a hysteresis
   (static reading) or a view-angle bias (LSO's description).
 - The world cache's role in streaming.
+
+## Address reference
+
+| Address | Name / role | Evidence |
+|---|---|---|
+| 0x011ECBC4 | WorldManager singleton pointer | stored by the WorldManager ctor at 0x00C67883; operand checks in Smooth Streaming and GC Scheduler |
+| 0x00C7E3C0 | WorldManager service update (main thread; vtable 0x0107A358 +0x1C). Runs only while [WorldManager+0x41] != 0 (0xC7E3CA..0xC7E3DD) | engine_map disassembly, `svc_vt.txt`, Frame Budget pattern |
+| 0x00C7E300 | WorldManager service, simulation side (vtable +0x20) | `svc_vt.txt` |
+| 0x00C6D570 | `WorldManager::Update` thiscall(float, float), RET 8, called at 0xC7E403 | `f_C6D570.asm`; LSO detours it |
+| 0x00C845C0 | Terrain update, thiscall(terrain, float* camera, char), RET 8, called at 0xC6D68F | Smooth Streaming site, profiler |
+| 0x00C6C290 | Lot LOD scoring, thiscall(4), RET 0x10, called at 0xC6D6E4 (skipped while WorldManager+0x258 != 0) | `f_C6D570.asm`, profiler |
+| 0x00C62D80 | Lot distance/visibility metric (RET 0xC), called from 0xC6C5D7 | `calls.tsv`, disassembly |
+| 0x00C63015 | `je` in 0xC62D80 that skips `metric -= [WorldManager+0xE0]` when `FUN_00AB1860(lot)` (= lot+0xC1) is 0. LSO patches it to `jmp` | disassembly; LSO `lotVisibilityCameraBiasJZ` |
+| 0x00C69FF0 | Blocks the next promotion while a promoted lot is still loading (LoD throttle) | Smooth Streaming note 2 |
+| 0x00C6C695 | `cmp byte [0x011ECBC0],0`: the "Throttle Lot LoD Transitions" test in the scoring | `full.asm` |
+| 0x00AC20E0 | Lot detail request, thiscall(1), RET 4. If lot+0xC1 != arg and lot+0xC9 == 0, stores the flag and posts AddLotObjectsToScene (arg 1) or the demotion (arg 0) through PostRemoteMethodCall. Callers 0xC6A0F9, 0xC6C7C3, 0xC6C7CE, 0xAE61A7 | profiler header |
+| 0x00AC1130 | `Lot::AddLotObjectsToScene` thiscall(lot, char initialLoad, char alwaysVisibleOnly), RET 8. Called from 0xACE1E2 | LSO pattern, PLANO §3, `calls.tsv` |
+| 0x00ABFAC0 | `Lot::UpdateObjectSceneNode` thiscall(lot, obj, char, char), RET 0xC, per object | LSO pattern, profiler |
+| 0x00ABE9C0 | `PostRemoteMethodCall` cdecl(thread, lot, func, a4, char, char): allocates a RemoteMethodCall (vtable 0x010650C4, built at 0xABEA0A) and posts it cross-thread. Runs inline when posted from the target thread itself | LSO comment, profiler |
+| 0x007D2DB0 / 0x007D2DF0 | `ScriptMessageScope` ctor(scope, beginMsg, endMsg, lot) / dtor | LSO patterns; bytes confirmed in `full.asm` |
+| 0x00B088C0 | `IsObjectLargeOrFlora` cdecl(obj): reads Object+0x18 (resource key) and CTProductObject flag bits (building shells, exterior geometry) | LSO pattern; bytes confirmed |
+| 0x00C7CEA0 | Lot renderer pass thiscall(worldRenderer, float dt), RET 4. ECX = [0x011ECE58], called at 0xC7E419 | Smooth Streaming site, disassembly |
+| 0x00AEB2E0 | Lot renderer update thiscall(1), RET 4. Callers 0xC7CEDF, 0xAEB3F9, 0xAEB41C. Calls 0xAEA680 at 0xAEB306 while +0x1E and +0x1F are 0, then `FUN_00AE4CB0` (room lighting) | profiler, Smooth Streaming |
+| 0x00AEA680 | LotRenderer load stages, thiscall(lotRenderer), RET, returns AL | Smooth Streaming site; `re/out/fn_00aea680.c` |
+| 0x00AEA6AC / 0xAEA6D0 / 0xAEA6E9 | The three budget movs: 20 / 35 (priority lot) / 2000 (tool mode) ms | Smooth Streaming |
+| 0x006FDC80 | "Priority lot" test thiscall(sceneObjMgr, lo, hi), RET 8: lot id == SceneObjectManager+0x10D0 or +0x10E0 | Smooth Streaming |
+| 0x006FDE10 | SceneObjectManager getter `mov eax,[0x011D1CF8]; ret` | bytes checked |
+| 0x00ADB120 | Lot lighting budget (ECX = lot lighting manager, ST0): 5 ms; 10 while loading (+0x4F); 15/30 for priority lots; 1000 in tool mode. Only caller: the CALL at 0x00ADB95D in 0x00ADB8F0 | Smooth Streaming; Lot Lighting While Moving redirects that CALL ([../features/performance/README.md](../features/performance/README.md)) |
+| 0x00AE4CB0 → 0x00ADB8F0 → 0x006A8BA0 | Budgeted per-frame room lighting of a lot (`FUN_00ADB8F0` only caller 0xAE4D2A) | profiler, Smooth Streaming note 5 |
+| 0x00ADBAD0 → 0x006A80E0 → 0x006A3EC0 | Synchronous room light solve (while room+0xF0 == 3, 60000 ms budget), used by the impostor builder | Smooth Streaming note 3 |
+| 0x00AD9E30 | Lot LOD switch ("World/LotImpostor/LODOverrideHook"): calls 0xAEB3F0 (two renderer updates + 0xADBAD0). Caller 0xADAEBC | profiler, `fnstrings.tsv` |
+| 0x00AD97E0 | Lot impostor wait loop: pumps the services (0x588E00 at 0xAD985C) until the job is done, with no Present | profiler, `profiler_targets.tsv` |
+| 0x00ADAF40 | Jump table of the impostor builder states (state 2 → `FUN_00ADAF60`) | Smooth Streaming note 3 |
+| 0x00ACB9A9 | "Error during construction of imposter for lot %I64u" | Smooth Streaming note 3, `fnstrings.tsv` (fn 0x00ACB8A0) |
+| 0x00C6D970 / 0x00C5FE40 | Load world (sets WorldManager+0x1B4 = 1) / sets 3 ("saveInGameMode") or 2 ("editInGameMode") | Smooth Streaming note 1 |
+| 0x00C6CF80 (0xC6D430) / 0x00C6B780 | Sets WorldManager+0x41 at the end of a world load / clears it on shutdown | Smooth Streaming note 1, Frame Budget |
+| 0x007F1760 | `GameUtils_SwapLoadScreen` posts a UI callback (the loading screen is script driven) | Smooth Streaming note 1 |
+| 0x00C0FD60 | Empty stub (`ret`), the body of `GameUtils_Begin/End/ResetLoadEvent` | Smooth Streaming note 1 |
+| 0x0073E060 | `Camera_IsMapViewModeEnabled` (reads camera+0x8B9) | LSO pattern, NOTAS (Mapa (M)) |
+| 0x004DB850 / 0x004DB8E0 | `FileStream::Read` (ReadFile) / `Flush` (FlushFileBuffers) | profiler targets |
+| 0x004EC010 | RefPack stream read, stdcall(5), RET 0x14 → 0x004EB3B0 decompress | profiler targets, NOTAS |
+| 0x004EB3B0 | RefPack decompressor (replaced entirely by S3SS's "RefPack Decompressor Optimization") | S3SS `refpack_decompressor_patch.cpp`, PLANO §3 |
+| 0x007377F0 → 0x00737560 → 0x0072A730 | ResourceSystem service → `Update(budgetMs)` (at least 250 ms while +0x1F0) → deferred callback queue | Frame Budget, `profiler_targets.tsv` |
+| 0x0072A4F0 / 0x007297C0 | Async resource read job (JobThread workers, mask 2) / finalize job (main thread, mask 1; created at 0x00729C5B) | Frame Budget header |
+| 0x00733D20 → 0x00733AA0 | ResourceChangeMonitor: synchronous reload per pending key, no budget | `profiler_targets.tsv` |
+| 0x005BB4D0 | Builds the `WorldCaches\` path (call sites 0x5EBA38 in 0x5EB9C0, 0x6CC005 in 0x6CBF90) | `fnstrings.tsv`, `calls.tsv` |
+| 0x005BC8B4 | WorldCache size check `jb 0x005BCA49` (0F 82 8F 01 00 00) in 0x005BC6D0 | S3SS "WorldCache Size Uncap" pattern `0F 82 ?? ?? ?? ?? 8B 0F E8`, matched in `full.asm` |
+| 0x00EC7DB9 / 0x00EC7A60 | Create / remove the startup and loading window (UI child id `0x95947678`) | `features/world_session.h` comment; `tools/loading_gate_test` |
+| 0x0050AB70 | UI root-service getter (`mov eax,[global]; ret`, bytes `A1 imm32 ... C3`), called by `UIManager_GetMainWindowImpl`; the service's vtable +4 returns the UI root, whose vtable +0xF4 looks up a child by id | `framework/game_addresses` id `UiServiceGetter`; `features/world_session.h` |
+| 0x006CC570 | Opens a cache for "CAS/Compositor/Cache" unless the command-line option `IgnoreWorldCache` is present (0x0058B100 lookup at 0x6CC58C) *(inferred)* | `fnstrings.tsv`, disassembly |
+
+## See also
+
+- [Main loop, services and threads](main-loop-and-services.md).
+- [Terrain chunks and the light bake](terrain-and-light-bake.md).
+- [Room light maps](room-light-maps.md).
+- [Clock, sleeps and frame limiter](timers-and-sleeps.md).
+- [Removed features: Smooth Streaming](../removed-features.md#smooth-streaming).

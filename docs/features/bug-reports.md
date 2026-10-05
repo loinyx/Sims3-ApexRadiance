@@ -1,161 +1,193 @@
-# Report a problem: captures for bug reports
+# Report a problem and screenshots
 
-> Since 30/09 (after 2.4.0) the lighting recorder (F6), the light probe (F7) and the light diagnostics (F8), which were
-> development-build tools, are in both builds, renamed for players, and gathered on one menu page, **System › Report a
-> problem**, with plain explanations. Every capture goes into its own dated folder that is never overwritten; capture
-> sessions gather several captures in one folder; the page lists the saved captures with Open and Delete. Code:
-> `features/captures.{h,cpp}` (folders, notes, sessions, list), `apex_gui.cpp` (`ReportPage`, `CaptureNote`).
+The **Report a problem** page gathers what a player needs to send a useful bug report: a report (log and settings), a
+few seconds of lighting recording, a light capture at one spot, and a lighting snapshot. Each capture goes into its own
+dated folder that is never overwritten, can carry a screenshot, and gets a title and optional description after saving.
+A capture session groups several captures into one folder. The page lists saved captures with Open and Delete. A
+separate screenshot shortcut saves one filtered PNG, with all Apex effects, to the game's own Screenshots folder.
 
-## Published since 2.5.5: restored capture page
+## Status
 
-**Follow-up user request:** retain the restored page and offer optional title/description after saving. A small post-save form has Title (optional), Description (optional), Keep automatic details, and rightmost primary Save capture. Blank fields keep automatic diagnostic metadata. Dismissing the form never cancels the already-saved capture. During a collection the prompt waits until the collection is finished. Older captures do not trigger prompts when the page opens. Names and notes live in `User notes.txt`; dated directories are not renamed, so pending screenshots, session entries and retry paths remain valid. The existing compact list shows a custom title in its existing label position. Generic details record the capture type, version and game information, never speculate about the user's problem. New standalone captures and completed collections get fallback metadata even if the form is never opened. Existing notes remain intact.
+| | |
+|---|---|
+| Availability | Report a problem: Released in 2.5.0. Post-save title and description: Released in 2.5.5 (title optional); required title and Cancel that deletes the new capture: In development (PR #2). Filtered player screenshots: In development (PR #2) |
+| Default | Capture screenshots on (`[ui] capture_screenshot`); screenshot shortcut on, key `F8` (the game's own C is untouched), saved to the game's Screenshots folder, game UI hidden |
+| Menu | System > Report a problem. Settings > Menu > Screenshot capture. Settings > Shortcuts > Report a problem |
+| Configuration | `[ui] capture_screenshot`, `screenshot_folder`, `screenshot_key`, `screenshot_hide_game_ui`, `recorder_key`, `probe_key`, `diagnostics_key` (see [ui.md](../ui.md#shortcuts)) |
+| Source | [`features/captures.h`](../../features/captures.h), [`features/captures.cpp`](../../features/captures.cpp), [`apex_gui.cpp`](../../apex_gui.cpp) (`ReportPage`, `CaptureNote`, `ScreenshotCaptureCard`) |
 
-At the user's request, the Report page and its capture library use the layout from the actual `v2.5.3` tag again: Capture session, Save a capture, Your captures, and How to report a problem. Capture controls are always present. The Capture/Saved files tabs, guided stages, compulsory title/description editor, completion receipt, and informational dialogs from today's redesign are removed. Developer capture tools reuse the restored session/capture/library helpers.
+## The problem
 
-This was a scoped GUI restoration, not a whole-file checkout. Developer mode, lighting fixes, loading gates, centered notices, screenshot threading and capture storage are retained. Display/fluency was subsequently removed before publication. Existing User notes.txt files are preserved. No saved capture is deleted during migration. The v2.5.3 two-click Delete/Delete all actions are restored (permanent deletion when explicitly confirmed); `.Removed` folders from earlier tests remain excluded. Busy guards prevent deleting files or starting/ending sessions while capture output is pending. A failed save retains Retry saving.
+A lighting bug described in words ("the room goes dark") is rarely reproducible. The evidence that explains it, the
+log, the settings, what the lighting modules decided and what the GPU drew, lives in files and internal state that
+players cannot find. The game's own screenshot key also saves the image without Apex Radiance's post-processing, so it
+does not show what the player saw.
 
-The old redesign fixture tests superseded state fields. Use `tools/report_check/menu_253_check.cpp` for the restored page; backend report/recorder checks remain applicable. Native checks and compilation do not replace gameplay validation. Nothing is installed or published automatically.
+## How Apex Radiance solves it
 
-Validation for `2.5.4-rc-display-report253`: unified Release x86 compilation passed without reported warnings/errors; 40 native UI cases passed across EN/PT/ES/FR and two widths/font scales, covering idle, recording, pending save, failure/retry and the optional notes form. Existing descriptions were preserved, and unnamed standalone captures and completed sessions received factual automatic metadata. The existing real-storage suite passed 52 checks, including screenshot completion, failure/retry and file-operation protections. Display/developer shared action helpers were retained after the dependency audit. Gameplay capture flows still need validation; no installation or publication occurred.
+The developer instruments that explain lighting problems are available to every player, renamed and explained in plain
+language:
 
-## Superseded local test: visible stages and saved files
+| Player name | Tool | Shortcut action (Letters / Numbers / F keys) |
+|---|---|---|
+| Recording | [Recorder](dev-tools/recorder.md) | Recorder (`X` / `6` / `F6`) |
+| Light capture | [Light Probe](dev-tools/light-probe.md) | Probe (`V` / `4` / `F7`) |
+| Lighting snapshot | [Light Diag](dev-tools/light-diag.md) | Diagnostics (`B` / `5` / `F8`) |
+| Report | Log, settings and crash file only | None |
 
-**Version `2.5.4-test-report-library`, not published or installed automatically.** Implements the approved “Visible stages” prototype (option 2), building on the previous inline-description test. The description modal remains removed. The released 2.5.4 keeps its earlier layout; historical sections below describe its development. The same Report page is compiled in player and private builds; Developer remains private.
+Every capture is complete on its own: log, settings, crash file and an explanation of how to zip and send it. While a
+recording runs, the lighting modules write their detailed log lines even in normal mode (`Recorder::Verbose()`); only
+log lines change, no lighting behaviour depends on them.
 
-### One workspace, four visible stages
+The screenshot shortcut reads the game's final back buffer after Ambient Occlusion, Edge Smoothing, Depth Blur and
+Picture have rendered, with the Apex menu and notices suppressed and, by default, the game's interface hidden for one
+frame.
 
-The stage strip shows **Prepare → Record → Describe → Completed**. It reflects progress without adding navigation or allowing stages to be skipped. It wraps to two columns for narrow panels or large text.
+## Settings
 
-1. **Prepare:** keep the problem visible in the game, then Start recording. Capture options are hidden until recording begins. Starting keeps the panel open. The recording collects diagnostic data, not video, for up to 20 seconds.
-2. **Record:** one card holds progress, point capture, lighting snapshot, general report, screenshot preference and collapsed collection/comparison options. These actions wait only for a pending capture/write or debounce, not for the whole recording. **Return to game** optionally closes the panel; reopen it while recording to access the same controls. Point selection temporarily hides it and returns after one click and capture completion. Comparison keeps the panel open, and Restore Apex effects remains available after recording and on Saved files. Point/snapshot measurements require Night Lights; recording still saves available diagnostics when those effects are off. **Stop and continue** requests a stop and proceeds to details after writes finish; it does not claim the report is complete yet. Cancel recording remains idempotent and creates no recording folder; it does not remove any extra captures already saved.
-3. **Describe:** the recording workspace is replaced by saving status, then the inline **Problem details** card. Title is optional; description is required. **Cancel** and **Save capture** align right, Save last, stacking on narrow panels. Blank/whitespace descriptions cannot complete the report. Cancel preserves captured files and leaves the report pending; cancelling an edit preserves the previously saved description. Failed atomic note replacement preserves the old file and keeps the draft for retry. Pending or failed receipts remain at this stage.
-4. **Completed:** successful files plus a saved description show the receipt, folder and sharing guidance. Nothing is uploaded automatically. An open collection must still be finished before How to send becomes available.
+### Report a problem page (in order)
 
-After saving the description, its card is replaced by a single receipt card: expandable Your description, What was saved and How to send sections, with New recording and Open its folder actions aligned right. How to send requires a saved description and a finished collection. New recording returns to the initial card. An unfinished collection can be finished from the receipt. UTF-8 `User notes.txt` lives at the direct capture/collection root; diagnostic measurements are not rewritten by editing it. Captures created with shortcuts also use the details state when the page is next opened.
+| Card | Controls |
+|---|---|
+| Capture session | Bug icon, three numbered steps, "Start a session". While open: elapsed time and count, the last 6 captures with check marks ("... and N more"), "End and save the session", "Open its folder" |
+| Save a capture | Save a report (Save); Record a few seconds (Start / Stop, shows its key); Capture the light at a spot (key chip only: close the menu, point and press the key); Lighting snapshot (Save, shows its key); note "The recording and the two lighting captures need Night Lights on" when Night Lights is off; switch "Include a screenshot" |
+| Your captures | Newest first, count and total size; each row shows the title (or date, time and kind), size, Open and Delete; "Open the captures folder"; "Delete all" |
+| How to report a problem | Three steps (make it happen, save a capture, zip the folder and send it on Nexus Mods or GitHub), a Compare tip with its key, and a warning when `ApexRadiance_Crash.txt` is less than 7 days old |
 
-### Saved files
+Buttons are disabled while the game is loading, while files are being saved, while a light capture is running or while
+a recording runs (except Stop). After a failed save the page shows "Some files could not be saved" and "Retry saving".
 
-Capture / Saved files remain horizontal tabs. Saved folders are newest first with size, grouped capture count and a visible reminder when a description is missing. Open and Contents use the real files. Add or edit description uses the same replacement card. How to send is disabled without a description or while a collection is open. Refresh scans run at most every two seconds while the library is visible; the default Capture page does not enumerate the library. Paths, filenames and user notes are not translated.
+Delete asks for a second click within 4 seconds ("Click again to delete") and deletes permanently; "Delete all" works
+the same way. The open session cannot be deleted. The list is read again every 2 seconds while the page is open.
 
-Remove and Remove all ask for confirmation, then move folders into `Captures/.Removed` rather than permanently deleting them. Undo restores the last successful removal/batch in this game session; name collisions never overwrite either folder. Active writes and the open collection are protected. The recovery folder remains on disk across game restarts and is excluded from the library and totals.
+### Capture saved form
 
-### Startup availability and performance diagnosis
+After a capture finishes (and no session or recording is running), a 500-unit-wide modal "Capture saved" ("Give it a
+name to find it more easily") asks for **Title (required)** and **Description (optional)**.
 
-All Apex panel opening, notices and diagnostic shortcuts are withheld until a loaded game session is active and remains ready for three seconds. With Night Lights enabled this additionally requires its existing world-terrain-drawn/world-live signal; the first loading screen and main menu cannot open the panel. Returning to an inactive/unloaded session closes it. With lighting off/refused the fallback reads the documented WorldManager active flag (+0x41) and loaded/edit/save modes (+0x1B4) through the resolved global. This is read-only, checked every 200 ms on the render thread; the window thread sees only the cached atomic result. Actual EA/Steam loading transitions and the lighting-off fallback still need gameplay validation.
+| Button | Effect |
+|---|---|
+| Cancel | Deletes the new capture folder (`Captures::Delete`) and closes the form; on failure shows "Could not delete the capture. Check folder access and try again." |
+| Save capture | Enabled once the title has a non-blank character. Writes `User notes.txt` (`Title: <title>`, a blank line, then the text); a blank description keeps the automatic text |
 
-The overlay clock now samples every game frame, including frames where it draws nothing. Reopening after a long closed interval does not feed that whole interval into ImGui's FPS average or animation delta. This fixes a counter error; it does not claim to fix a genuine low-FPS frame. Real stalls are not clamped away. A slow visible panel logs lock wait, backend preparation, UI build, DX9 submission and game-frame delta at most once per ten seconds, under `[Overlay] Slow panel`. The trace does not measure GPU execution time or work elsewhere in the game.
+Captures saved before the page was opened do not trigger the form.
 
-The user subsequently reported smooth operation again after a separate system/GPU-memory investigation. The exact cause of the earlier system-wide slowdown was **not established**, and this UI revision does not claim a performance fix. One earlier Picture summary recorded 117 passes in a minute, consistent with approximately 2 FPS, so it cannot be dismissed as only the averaging error. The point-in-time system sample had ample free physical memory and no aggregate CPU saturation; that does not rule out transient CPU, driver or GPU stalls. No graphics DLL, game settings or lighting solver was changed for this UI revision.
+### Screenshot settings
 
-### Sharing, selection and failures
+| Control | TOML (`[ui]`) | Default | Notes |
+|---|---|---|---|
+| Include a screenshot (Report page) | `capture_screenshot` | true | Adds `Screenshot.png` to every capture |
+| Save screenshots to | `screenshot_folder` | `game` | `game`: Documents > Electronic Arts > The Sims 3 > Screenshots; `apex`: the Apex Radiance folder > Screenshots |
+| Screenshot key | `screenshot_key` | `F8` | Custom only, not part of the presets; a saved bare letter or digit (e.g. `C`) falls back to the default with a log line |
+| Hide game UI in screenshots | `screenshot_hide_game_ui` | true | Hides the game's interface for the shot, then restores it |
 
-How to send explains creating a ZIP manually in Explorer and attaching it to a Nexus Mods bug report or GitHub issue. Review images, description, log and settings before sharing. Nothing is uploaded automatically. Opening/managing files in Explorer remains possible while a report is pending.
+## Compatibility and interactions
 
-Point selection keeps its centered target, disappears after one click and returns to Report after probe and PNG completion. Esc, focus loss or reopening the menu cancel aiming. Startup/capture/recording/comparison pills use the existing top-center anchor and icon pack. Other Report dialogs (contents/share/removal) retain right-aligned actions. Page defaults restore the screenshot preference, not recordings, notes or files.
+- Bare F10 always reaches the game (its interface toggle); Compare uses its own key, not bare F10.
+- Hiding the game UI posts F10 with `Overlay::PostGameKeyPress`, which bypasses Apex shortcut handling. Apex tracks F10
+  presses it sees after its window hook starts; it cannot know an interface state toggled before that.
+- The screenshot is the back buffer, not the game's `SceneCaptureManager` photo path, whose handling of
+  post-processing is not established.
+- Shortcuts do not fire while the game's cheat console is open (Ctrl+Shift+C until Enter or Esc); the bare screenshot
+  key passes through while a menu text field is active.
+- Captures need a loaded world: the menu and its shortcuts become available only after the world is loaded and settled
+  ([ui.md](../ui.md#startup-and-notices)).
 
-Main diagnostic text and metadata writes are retained for explicit retry; PNG completion is acknowledged by the WIC worker, not assumed on queueing. Retry does not repeat the measurement. A failed image retry takes the **current frame again**. A failed collection manifest keeps the collection open and does not double-count children. Only the latest receipt owns retry; retained text is not durable across game exit. Auxiliary probe shader/texture diagnostics are preserved but are not regenerated by this retry. Explorer remains on its separate COM thread.
+## Limitations
 
-### Validation
+- Screenshots are read only from 8-bit `X8R8G8B8` / `A8R8G8B8` back buffers (multisampled ones are resolved first);
+  otherwise the capture has no `Screenshot.png` and the log says "No screenshot: the screen format could not be read".
+- With the menu open, a capture's screenshot is taken before the menu draws.
+- If the game does not process the posted F10 within 2 seconds, the player screenshot is cancelled.
+- Captures may contain local paths and session details; nothing is uploaded automatically. Zipping and sending is
+  manual.
+- The light capture and the lighting snapshot need Night Lights on; the recording saves what is available without it.
 
-The storage harness passed 52 checks, including UTF-8 descriptions, required body validation, atomic edit preservation, collisions/Undo, collections and real WIC failure/retry. Ten production recording request/cancel/auto-save scenarios passed. Fifteen clock/startup-gate checks exercise real ImGui averaging after 70 seconds without a drawn menu, preservation of genuine 500 ms frames and simulated load/unload states; they access no real game memory or files.
+## Technical reference
 
-The current native Report code rendered 312 frames in EN/PT/ES/FR at normal/narrow sizes, with no missing translations or ImGui assertions. Assertions verify options are hidden before recording, shown during recording, and replaced by inline details, with no description popup. Eighteen native interaction checks click the actual Violet buttons and exercise panel visibility at start/comparison, optional return, point aiming, recording cancellation, stop-to-details, restoring effects after recording, blank/whitespace validation, pending cancellation, saving, preserving a cancelled edit returning to preparation, and expanding saved contents and sharing guidance without informational popups. An additional 120 native notice regression cases cover four languages, three viewport widths and two font sizes, including recovery from a previously narrow window. Recording/probe game APIs are inert in this UI fixture; the description files are real temporary files. CPU PNG rendering checks spacing; it does not validate the DX9 driver or GPU performance. Gameplay validation remains required for loading gates, all capture/recording/cancel flows, languages/scales, GPU screenshots and the reported slowdown.
+### Capture folders (`features/captures.cpp`)
 
-### Grouping and compatibility
-
-Additional captures retain their existing storage behavior: each has its own dated folder unless the user starts an optional collection. A collection groups subsequent recording/point/snapshot/report files under its root; it is not started automatically. No ZIP is generated automatically, no files are sent, and no lighting solver or game-memory hook changes in this redesign. Public and private test builds share this page; only the private build contains Developer tools.
-
-## Files
-
-`Documents\Electronic Arts\The Sims 3\Apex Radiance\Captures\`:
+Root: `Documents\Electronic Arts\The Sims 3\Apex Radiance\Captures\`.
 
 | Capture | Folder | Main file |
 |---|---|---|
-| Report | `YYYY-MM-DD HH-MM-SS Report\` | (only the copies below) |
-| Recording | `... Recording\` | `Recording.txt` (as before: the lines sorted by clock time, the toml at the start) |
-| Light capture | `... Light capture\` (the automatic follow-ups after a floor change: `... Light capture (automatic)\`) | `Light capture.txt` + the textures (BMP) and shaders |
+| Report | `YYYY-MM-DD HH-MM-SS Report\` | Only the copies below |
+| Recording | `... Recording\` | `Recording.txt`, `Wall seams.csv` |
+| Light capture | `... Light capture\`; automatic follow-ups after a floor change: `... Light capture (automatic)\` | `Light capture.txt`, textures and shaders |
 | Lighting snapshot | `... Lighting snapshot\` | `Lighting snapshot.txt` |
 | Session | `... Session\` holding `HH-MM-SS <kind>\` folders | `About this session.txt` (the list) |
 
-Every capture folder also gets, when it is complete (`Captures::Finish`): a copy of `ApexRadiance_LOG.txt`,
-`ApexRadiance.toml`, `ApexRadiance_Crash.txt` when present, and `About this capture.txt` (version, game build, time, what
-it is, how to zip and send it). A session gets the same copies when it ends. A name already taken gets " (2)", " (3)"...
-Nothing is deleted or overwritten by itself (the light probe's old 20-capture pruning and the "latest" copies
-`ApexRadiance_LightProbe.txt` / `ApexRadiance_LightDiag.txt` are gone). Delete removes only direct children of
-`Captures\`, never the open session.
+- `NewFolder` / `MakeFolder`: a taken name gets " (2)", " (3)" and so on; a folder is never reused.
+- `Finish` copies `ApexRadiance_LOG.txt`, `ApexRadiance.toml` and `ApexRadiance_Crash.txt` when present, writes
+  `About this capture.txt` (version, game build, time, what it is, how to zip and send it) and `User notes.txt` when a
+  title or description exists, then shows the saved notice. A session gets the same copies when it ends.
+- Nothing is deleted or overwritten by itself. `Delete` removes only direct children of `Captures\` (never the open
+  session, never while saving) and logs `[Captures] Deleted from the menu: Captures\<folder>`. `DeleteAll` skips the
+  open session and `.Removed`.
+- Reversible removal (`.Removed` and Undo) remains in the API but the menu uses Delete; `.Removed` folders are excluded
+  from the list.
+- Text that fails to write is retained for `RetrySave` without repeating the measurement; a failed screenshot is taken
+  again from the current frame.
+- Opening folders runs Explorer on a short-lived thread with COM (`ShowInExplorer`), never inside the menu frame.
 
-## Detail in the public build
+### Capture screenshots
 
-The recording reads detailed log lines that the lighting modules used to write in the development build only (the solve
-journal of `level_light_share.cpp`, the lot lamp change details of `lot_light_bridge.cpp`, the lamp change decisions of
-`night_terrain_relight_patch.cpp`, the furniture tracer). They now test `Recorder::Verbose()` (= development build, or a
-recording running), so a player's recording has them too and the public log stays quiet otherwise. Only log lines changed:
-no lighting behaviour depends on them.
+`Finish` queues `Screenshot.png` when `[ui] capture_screenshot` is on. The next frame is read:
 
-## Shortcuts
+- Menu closed: at Present (`D3D9Hooks::Priority::First`, hook `CapturesScreenshot`), the frame as shown with Picture
+  included; capture notices are not drawn that frame (`ScreenshotPending`).
+- Menu open: at `RenderCallbacks::filteredSceneBeforeOverlay`, after Picture and before the Apex menu.
 
-`hotkeys.cpp`: the public build now takes Recorder, Probe and Diagnostics (Frame Capture stays development-only). Action
-names for players: "Recording", "Light capture", "Lighting snapshot".
+Back buffer -> resolve if multisampled -> `GetRenderTargetData` into SYSTEMMEM -> BGR 24-bit (alpha dropped: it is the
+bloom mask) -> PNG with WIC on a short-lived thread. The save receipt waits for the PNG.
 
-## Historical revision (30/09, after the first test)
+### Player screenshot (`RequestPlayerScreenshot`)
 
-- **Crash fixed:** Open / Open the captures folder called ShellExecuteW inside the menu frame; it pumped the game window's
-  messages, the overlay's window procedure ran again inside the frame and its std::mutex threw (resource deadlock,
-  crash report 22:10:22, `Overlay::ApexWndProc` -> `std::_Throw_Cpp_error`). Explorer is now opened on a short-lived
-  thread with COM (`ShowInExplorer`), like the Profiles folder button. Never call ShellExecute from the menu frame.
-- **Layout (user: sessions higher, clearer, a nicer look):** the page is now Session (a violet-edged card of its own:
-  big icon, three numbered steps and "Start a session"; while open, a pulsing dot with its time and count, the captures
-  so far with check marks, "End and save the session" and "Open its folder") -> Save a capture -> Your captures -> How
-  to report a problem.
-- **Screenshots:** every capture also gets `Screenshot.png` (switch "Include a screenshot", `[ui] capture_screenshot`,
-  default on). Taken on the next frame: menu closed = at Present (the picture as shown, Color filters included; the
-  capture notes are not drawn that frame), menu open = at `endSceneBeforeOverlay` (before the Apex menu; the Color pass
-  comes after the menu, so it is not in that one). Back buffer -> SYSTEMMEM (GetRenderTargetData, a resolve first if it
-  were multisampled), BGR 24-bit, encoded with WIC on a short-lived thread. 8-bit back buffers only.
+1. Dispatched from `RunShortcuts` on the `Screenshot` action.
+2. File: `<GameDocuments>\Screenshots\Screenshot_YYYY-MM-DD_HH-MM-SS_mmm.png` (" (2)" on collision). Folder failures
+   notify "Could not create the screenshots folder".
+3. `QueuePlayerPhoto`: hides the overlay, suppresses capture notices, posts F10 when hiding the UI and it is not already
+   hidden (failure: "Could not hide the game interface; screenshot was not taken"), queues the shot with one Present
+   skipped. Log `[Captures] Filtered screenshot requested: <file>`.
+4. `TakeShots` waits until the posted F10 is observed (`ObserveGameUiKey`); after 2 seconds it logs
+   `[Captures] Screenshot cancelled: the UI hide key was not processed in time` and restores.
+5. After writing, `RestorePlayerPhoto` posts F10 again if it hid the UI and restores the overlay. Notice
+   "Screenshot saved" (Camera icon) or "The screenshot could not be saved" (warning).
 
-## Player screenshots
+### Notices
 
-For new or missing screenshot-key settings, Settings > Shortcuts enables the player screenshot shortcut on C,
-replacing the game's native screenshot key while the option is enabled. Apex consumes that key and writes one filtered PNG to the game's standard Documents
-`Screenshots` folder; it does not also invoke the game's unfiltered screenshot. Existing saved screenshot keys remain
-unchanged. Bare F10 remains available for the game's UI toggle, which the mod uses internally only while hiding the
-interface for the shot. Apex only runs Compare on the exact Ctrl+Shift+F10 chord; the synthetic bare F10 bypasses Apex
-shortcut interception.
-It reads the game's final back buffer at Present, after Ambient Occlusion, Edge Smoothing, Depth Blur and Picture have
-rendered, and writes a timestamped PNG to the game's standard `Screenshots` folder in Documents. This differs from `SceneCaptureManager`'s
-off-screen photo/thumbnail path, whose inclusion of post-processing is not established. Apex's overlay is suppressed
-for the shot. By default, the mod sends F10 for a single frame to hide the game's UI, captures the frame, then restores
-the prior tracked F10 state. It tracks F10 key presses seen after the overlay hook starts; it cannot infer an earlier
-UI state if F10 was pressed before that hook was installed. The player can disable UI hiding or rebind the screenshot
-to a bare key or modifier chord in Settings. Compile and offline checks cannot validate the game message-pump timing,
-F10 behavior, CC/game visuals, or screenshot output in a running game; test those in game before release.
+Each capture start and completion shows a top-center notice (`Captures::Notify`, kinds Info, Success, Warning, Saving,
+Screenshot, Probe): for example "Recording saved. Open Report a problem to find your files", "Light capture saved. Open
+Report a problem to find your files", "Lighting snapshot saved. Open Report a problem to find your files". Layout and
+priority are in [ui.md](../ui.md#startup-and-notices).
 
-## Guided capture (local preview, 2026-10-02)
-The public and private Report page now starts with four plain-language choices: lighting, an object's appearance, a crash, or another/unknown problem. Selecting one starts or reuses a capture session. The guide presents only the relevant action; all existing capture tools, session controls, help and the capture library remain available in collapsed sections. Finishing explicitly ends the session and opens its folder. ZIP creation remains manual; no automatic upload is performed.
-The appearance action arms a one-shot light probe and closes the menu. A Violet target follows the mouse and the top-left capture note displays the actual configured probe chord and Esc cancellation. Opening the menu also cancels selection. The marker is visual only, does not identify an object, and does not run scene searches. A guided capture does not schedule automatic floor-change follow-ups; the direct shortcut retains that diagnostic behavior. No target is drawn in capture screenshots. Selection is transient and not saved to TOML. The guide, hint and controls are translated into EN/PT/ES/FR. Gameplay validation of pointer alignment and capture completion remains necessary.
+### Files and functions
 
-## One-click selection and centered notices (private, 2026-10-02)
-This supersedes the guided selection instructions above. A left click while the target is active confirms that client-area pixel, hides the target and instruction immediately, and consumes both mouse down and mouse up so the game does not also select or place an object. The clicked coordinates are queued atomically; only the render thread starts the GPU probe. The existing probe shortcut also confirms selection. Esc, losing focus or reopening the menu cancels selection. This selects a screen pixel, not an object identity.
-After a confirmed selection, the Report page reopens once the probe and pending screenshot are complete. It does not open over the captured frame. An idle open capture session no longer keeps a permanent on-screen chip; the session remains available on the Report page. Capture/save acknowledgments remain transient.
-Startup, capture, recording and comparison pills share one top-center anchor, 20 scaled pixels below the viewport top, with consistent padding, rounding, background and border. Only one routine pill is displayed there at a time: capture/recording takes precedence over comparison, which takes precedence over the startup hint. Compatibility warnings and first-start interactive notes use the same anchor and suppress routine pills. Captures suppress routine notices and the target in their screenshot. Updated location and click instructions are translated into EN/PT/ES/FR. Build checks do not replace an in-game click/cancel and scaling test.
+| File | Symbol | Role |
+|---|---|---|
+| `features/captures.h/.cpp` | `Root`, `NewFolder`, `Finish`, `WriteText`, `SaveReport`, `RecentCrash` | Folders and completion |
+| | `BeginSession`, `EndSession`, `SessionActive`, `SessionItems`, `SessionFolder` | Sessions |
+| | `List`, `Open`, `OpenFolder`, `Delete`, `DeleteAll` | Library |
+| | `ReadDescription`, `SaveFolderDescription`, `LastSave`, `RetrySave` | Notes and receipts |
+| | `QueueShot`, `TakeShots`, `RequestPlayerScreenshot`, `ObserveGameUiKey` | Screenshots |
+| | `Notify`, `CurrentNote` | Notices |
+| `apex_gui.cpp` | `ReportPage`, `SessionHeroCard`, `ReportCaptureCard`, `ReportListCard`, `ReportHowCard`, `ReportOptionalNotes`, `ScreenshotCaptureCard`, `RunShortcuts` | UI |
+| `framework/overlay.cpp` | `PostGameKeyPress`, `SetCaptureSuppressed` | Key passthrough and notice suppression |
 
-### 2.5.4 public hotfix scope
+## Rejected approaches
 
-The shared Report changes above, page defaults and centered notices are included in the public build. Developer-only diagnostics and profiler controls are excluded. The one-click capture regression checks and English/Portuguese/Spanish/French translation checks passed. The separate simpler recording/saving design remains a prototype; no automatic ZIP generation or upload was added.
+- Guided problem choices and a one-click target as the page's first step
+  ([history](../history/bug-reports.md#2026-10-02-guided-capture-preview)).
+- A four-stage workspace with a required description
+  ([history](../history/bug-reports.md#2026-10-02-visible-stages-and-saved-files-test)).
+- Reversible removal into `.Removed` with Undo in the menu
+  ([history](../history/bug-reports.md#2026-10-02-restored-capture-page)).
+- Opening Explorer from the menu frame
+  ([history](../history/bug-reports.md#2026-09-30-explorer-crash-and-layout)).
 
-### Local test results
+## See also
 
-See the current local-test validation section above and tools/report_check/README.md. The description modal revision was superseded by the inline workflow; its old previews/build files are not this candidate.
-
-## Local completion review update
-The completed receipt keeps user title, folder and right-aligned New recording/Open its folder actions in one card. Your description, What was saved and How to send are expandable sections. Capture contents are scanned only on first expansion per receipt; note text is cached from its initial read or explicit edit, not reread every frame. Sharing remains disabled until required notes and collection completion are satisfied. Library informational views use inline cards; only removal keeps a confirmation popup. The editor remains an inline replacement. Central text pills set content-measured width before Begin to prevent the narrow vertical-strip feedback between wrapping and auto-sizing; they use Lucide icons and the entry logo. All previous lifetime/input/startup behavior remains.
-
-### Saved capture library redesign (local test, 2026-10-02)
-
-Each entry leads with the user title and full description, followed by date/time. Untitled older captures use translated plain names by capture type; missing descriptions have an explicit prompt. Open its folder and Add or edit description remain visible. Files and more actions expands the technical folder name, size, actual contents, sending guidance and confirmed removal. Bulk removal is under Manage saved captures; Undo remains available there. All new labels support EN/PT/ES/FR. Notes are returned by the existing bounded ReadDescription during the two-second visible-library scan, rather than adding per-frame disk reads or an extra read per entry. Names on disk and stored notes remain unchanged. The native fixture checks stored title/body visibility data and collapsed destructive/technical controls in all languages and both sizes. Gameplay validation remains pending.
-
-## Local development: required capture title
-
-The post-save form now requires a non-whitespace title and keeps Description optional. Save capture remains disabled until a title is entered; the automatic-details bypass is removed. An empty description retains diagnostic details. This requirement completes metadata after capture files are saved and never deletes those files or overwrites existing notes.
-
-The naming modal has fixed responsive width and automatic height. Cancel explicitly deletes only the newly captured folder through Captures::Delete, with existing root/session/busy guards; failure leaves the form open with an error. Save still requires a title and keeps the description optional.
+- [Validation](../validation/bug-reports.md)
+- [History](../history/bug-reports.md)
+- [Menu reference](../ui.md), [Recorder](dev-tools/recorder.md), [Light Probe](dev-tools/light-probe.md),
+  [Light Diag](dev-tools/light-diag.md)

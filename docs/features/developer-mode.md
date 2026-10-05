@@ -1,31 +1,128 @@
-# Optional developer mode — unified build
+# Developer mode
 
-## User flow
+Apex Radiance ships as one ASI. Developer mode is an optional setting that, after a restart, adds the Developer page,
+the developer-only tools (Frame Capture, the frame profiler, census and false colour, light probe texture replacement,
+debug views) and extra checks and log detail. It is off by default; normal play never runs developer instruments. The
+Report a problem tools stay available to every player in both modes.
 
-Settings > Menu contains Enable developer mode. Default false; stored as `[ui] developer_mode` in ApexRadiance.toml. Enabling opens a confirmation with Cancel on the left and Enable on the right. It explains temporary diagnostic visuals, performance costs of measurements/extra checks, local paths and session details in reports, and that nothing is uploaded automatically. Cancel leaves the setting unchanged. Both enabling and disabling require restarting the game; a note distinguishes requested mode from the current session.
+## Status
 
-All code ships in one `Release/ApexRadiance.asi`. The old ApexPublic build property has no effect. Developer mode is loaded before constructing features and before starting developer instruments. The legacy kPublicBuild is an atomic runtime flag (true = normal mode). The Developer sidebar item, feature developer UIs, additional checks/logs, address-space monitor, profiler activation and Frame Capture follow it. The ordinary Report a problem tools remain available to all users. Debug views of edge smoothing/depth blur are ignored in normal mode even when an old configuration retains their values.
+| | |
+|---|---|
+| Availability | Released in 2.5.5 |
+| Default | Off (`[ui] developer_mode = false`) |
+| Menu | Settings > Menu > Settings and maintenance > Enable developer mode. Developer page in the sidebar (System group) while active |
+| Configuration | `[ui] developer_mode` and the `[developer]` table in `ApexRadiance.toml`; optional Developer part in profiles |
+| Source | [`build_flavor.h`](../../build_flavor.h), [`apex_config.cpp`](../../apex_config.cpp) (`LoadDeveloperMode`, `ApplyDeveloperPreferences`), [`apex_gui.cpp`](../../apex_gui.cpp) (`DeveloperModeRow`, `DeveloperConfirmation`, `DeveloperPage`) |
 
-## Profiles
+## The problem
 
-Development is a new optional profile part (bit 8; previous bits unchanged). The save checkbox is hidden unless developer mode is requested/active. Profiles containing it expose it when selecting what to load, even in normal mode. It is unchecked by default on import. Loading Development that requests activation opens the same confirmation before any profile part is applied. Cancelling applies nothing.
+Investigating lighting and performance needs instruments that cost frame time, change the image temporarily or write
+local paths into files. Players should never pay for them or meet them by accident, and maintaining a separate developer
+build doubled the release work and let the two drift apart.
 
-The section stores mode choice, feature preference snapshots (without feature enabled flags), lighting diagnostic views/sample preferences, compression/cache/index verification frequencies, texture-worker settings, scene-node budgets, wall-shading wait and profiler tuning/sampling preferences. Imported preferences are deferred until startup if required. Mode activation never follows an ordinary profile that lacks this section.
+## How Apex Radiance solves it
 
-Recordings, frame captures, running profilers, one-shot census/rebuild operations, temporary verify-all timers and accumulated measurements are actions/session results and are not restarted by profiles. Profiler enabled is explicitly false in the exported profile. A diagnostic view may be restored in developer mode; the confirmation warns about temporary image changes.
+All code ships in `Release\ApexRadiance.asi`; the legacy `ApexPublic` build property has no effect. At startup
+`ApexConfig::LoadDeveloperMode()` reads `[ui] developer_mode` before `PatchManager::CreateAll()` constructs any feature,
+and stores the result in the atomic `kPublicBuild` (legacy name: true means developer mode is off). Every developer-only
+path checks that flag. Changing the setting takes effect only after restarting the game, in both directions, so no
+feature changes mode while running. The log records `[Main] Unified build: normal mode` or
+`[Main] Unified build: developer mode`, and crash reports name the mode.
 
-## Navigation
+## Settings
 
-FXAA (recommended) is the first method, followed by SMAA. Reordering does not change stored enum values or the chosen method. Anti-aliasing is the first Display tab, Window the second.
+| Control | TOML | Default | Notes |
+|---|---|---|---|
+| Enable developer mode | `[ui] developer_mode` | false | Turning it on opens a confirmation; turning it off saves at once. Restart required both ways |
+| Developer part of a profile | `[developer]` in the profile | Unchecked | See Profiles below |
 
-## Validation
+Enabling opens the confirmation "Enable developer mode?" ("Use these tools only when you need to investigate a
+problem") with three notes: diagnostic views can temporarily change the image and measurements can reduce performance;
+captures and reports may contain settings, local paths and session details, and nothing is sent automatically; restart
+the game after confirming, and measurements and recordings do not start when a profile is loaded. Buttons: Cancel on
+the left, "Enable developer mode" (Wrench icon, primary) on the right. Cancel leaves the setting unchanged. While the
+requested mode differs from the running one, the row shows "Restart the game to apply the developer mode change". The
+About version line reads "Version X - Developer mode" while active.
 
-Compile the unified configuration, check that the legacy ApexPublic property selects the same output and definitions, test profile part filtering/old masks, default-off startup gating, cancellation and confirmation policy, and developer preference round trips. Offline checks do not validate actual game performance or UI layout; verify these in game before releasing. No installation or publication is part of this change.
+### Profiles
 
-Offline profile checks passed: default-off UI setting/runtime gate, unchanged old bit positions, developer-only/normal/empty filtering and old profiles without the new part. The unified Release build passed. In-game confirmation layout, restart behavior, profile round trips and performance remain to be verified.
+Development is profile part bit 8 (`kPartDeveloper = 256`; earlier bits unchanged, bit 4 unused). Its save checkbox is
+shown only when developer mode is requested or active. A profile that contains it shows it when choosing what to apply,
+even in normal mode; it starts unchecked. Applying a Developer part that requests activation opens the same
+confirmation before any part is applied; Cancel applies nothing. Activation never follows a profile without this part.
 
-## Approved Developer redesign (local development)
+The `[developer]` section holds:
 
-The five existing tabs remain Lighting, Performance, Captures, Visual effects and Translations. Lighting now uses evidence, comparison, refresh and inspection cards, with provider/surface readouts, terrain events, texture probes and original individual tests retained in expandable groups. Performance keeps live profiler results visible and groups measurement setup and collected timing details; validation tools retain their current feature gates and settings. Captures retains real sessions, report/light capture actions and the library, with frame operations and their file/shortcut details separated. Visual effects retain every diagnostic view and capture action, while camera, focus, shader and rendering readouts are expandable. Translations separates collection/actions, missing text and placeholder checks, using the actual language selector and real collected errors.
+| Key | Content |
+|---|---|
+| `enabled` | The requested mode |
+| `controls` | `DeveloperSettings::Capture()`: tables `fast_dxt`, `fast_refpack`, `fast_cas`, `resource_cache`, `object_index`, `scene_budget`, `lot_lighting_motion` (verification frequencies, texture workers, scene-node budgets, wall-shading wait), plus `keep_room_light`, `story_samples`, `false_color` |
+| `patches` | Each feature's preferences without its `enabled` flag (Frame Capture excluded) |
+| `frame_profiler` | Profiler tuning and sampling preferences, always with `enabled = false` |
 
-The HTML preview used example state only. The native implementation uses the existing game diagnostics; no mock numbers or unsupported temporal controls are introduced. Existing hooks, action functions, setting keys/defaults, diagnostic persistence, activation/restart rules and profile behavior are unchanged. Compact tool controls and primary collection actions use shared geometry. Build and shared native UI checks do not establish full visual or diagnostic validation inside the game.
+Recordings, frame captures, running profilers, one-shot census or rebuild operations, temporary verify-all timers and
+accumulated measurements are actions or session results; profiles never restore them. A diagnostic view may be
+restored in developer mode, which the confirmation warns about.
+
+## Compatibility and interactions
+
+Gated by developer mode (normal mode skips or ignores them):
+
+| Area | Normal-mode behaviour |
+|---|---|
+| Developer page | Hidden from the sidebar; a stored Developer page selection falls back to Overview |
+| Frame Capture | `Install` fails with "Enable developer mode and restart the game first"; `[patches.FrameCapture]` is not loaded; its shortcut is skipped |
+| Frame profiler | Cannot start; `[qol.frame_profiler]` is kept but not rewritten |
+| Address-space monitor | Not started (`AddressSpace::Start`) |
+| Translation missing-text collection | Off (`ui/i18n.cpp`) |
+| Edge Smoothing, Depth Blur and other debug views | Ignored even when an old configuration keeps them on |
+| Census, false colour, refused-shader dump | Pass-through ([census](dev-tools/census.md)) |
+| Hook timing and per-feature counters | Not collected (`framework/d3d9_hooks.cpp` and feature files) |
+| `[developer]` preferences | `ApplyDeveloperPreferences` returns at once; an imported section is kept and written back unchanged |
+| Lighting modules' detailed log lines | Written only while a recording runs (`Recorder::Verbose()`) |
+
+## Limitations
+
+- A restart is required to change mode.
+- Developer preferences imported in normal mode are stored and applied only after restarting in developer mode.
+
+## Technical reference
+
+### Startup order (`apex_main.cpp`)
+
+`ApexConfig::LoadDeveloperMode()` -> `PatchManager::Get().CreateAll()` -> `EnsureMigrated()` -> `LoadSettings()` ->
+`AddressSpace::Start()` (developer mode only) -> log line. `LoadFeatures` applies `[developer]` after the feature tables
+and defaults.
+
+### Persistence (`apex_config.cpp`)
+
+- `LoadSettings` keeps `[developer]` as `g_importedDeveloper` and always loads the profiler with `enabled = false`.
+- Saving in developer mode writes `[developer] controls`; in normal mode it writes back the imported table untouched.
+- `CaptureFeatureState` (profiles) writes `enabled`, and in developer mode `controls`, `patches` and `frame_profiler`.
+- `ApplyFeatureState` applies a `[developer]` table only when it deactivates or developer mode is already confirmed.
+
+### Developer page
+
+Five tabs. The Developer page shows the existing game diagnostics only, without example values.
+
+| Tab | Cards |
+|---|---|
+| Lighting | Collect lighting evidence (Save light diagnostics, Record story light samples, False colour, Census); Compare lighting paths (keep room light, soft lot edges, GPU smoothing, Compare GPU vs CPU, water highlights); Refresh lighting; Inspect lighting state, with advanced groups Surface and provider state, Rebuild events and terrain tests, Light probe textures, Individual options (for tests), Technical reference from the current code |
+| Performance | Frame times and stutters (frame profiler); Shader preparation; File searches and remembered answers; Find objects faster; Lighting while the camera moves; Wall shading; Objects spread across frames; Texture compression and processor cores; Compressed game data |
+| Captures | Capture session; Save a capture; Capture two drawn frames ([Frame Capture](dev-tools/frame-capture.md)); Your captures |
+| Visual effects | Edge smoothing, Depth blur, Ambient shadows, Gradient correction coverage, Image adjustments (debug views and readouts) |
+| Translations | Review translations (language, missing count, Clear, Write the list to the log); Missing text (filter); Placeholder checks |
+
+Developer switches are excluded from the menu's undo history (`SetChangeReporting(false)`).
+
+## Rejected approaches
+
+- A separate developer build (`ApexPublic`, `S3SS_PUBLIC`)
+  ([history](../history/developer-mode.md#2026-10-02-one-unified-build)).
+
+## See also
+
+- [Validation](../validation/developer-mode.md)
+- [History](../history/developer-mode.md)
+- [Menu reference](../ui.md), [Report a problem](bug-reports.md), [dev tools](dev-tools/light-probe.md)

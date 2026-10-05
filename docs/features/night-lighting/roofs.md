@@ -1,181 +1,173 @@
 # Roofs and roof snow
 
-> **Status in the standalone:** in the v0.1.0 baseline (b84d5f1) exactly as described (`roof_ps.hlsl` is byte-identical);
-> v0.1.0 has no HDR gain on `c52.x` and compiles the replacements at the first draw (no `PrecreatePs`). Since 2026-09-28
-> both replacements are compiled at start-up on a background thread and only created at the first draw
-> (`framework/shader_cache.h`, [architecture 4.6](../../architecture.md#shader-precompile)); not tested in game yet.
+At night, roof tiles near street lamps and outdoor lot lamps catch the lamps' warm light instead of staying black next
+to a lit wall. Roof shadows from the sun and moon are softer. In winter, the snow lying on roofs is lit around lamps in
+the same way. Part of [Night Lighting](README.md).
 
-> The game's roof shader has no lamp term at all (sun/moon + sky only), so roofs stay black next to a lit wall at night.
-> Night Lighting replaces the summer roof pixel shader with an HLSL copy that adds the 16 most relevant outdoor lamps (and
-> 16-tap shadows), and draws an additive lamp pass over snowy roofs. The snowy-roof pixel shader is also used by snow on
-> stair tops; those draws are routed to the snow-relief fix instead. Status: working (summer roofs confirmed 24/09 after
-> the strength and flicker fixes; snowy roofs installed 25/09, position fix m29). Both build flavours.
+## Status
 
-Related: [README](README.md), [snow.md](snow.md) (snow lying on objects), [fences.md](fences.md),
-[water.md](water.md) (shares the lamp list and radius rule), [objects-and-rigs.md](objects-and-rigs.md) (the newer
-per-pixel lamp law), [../../engine/shaders.md](../../engine/shaders.md).
+| | |
+|---|---|
+| Availability | Released in 1.0.0 |
+| Default | On |
+| Menu | Lighting > Buildings > *Buildings* card, ROOFS group |
+| Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
+| Source | [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawRoof`, `DrawRoofSnow`, `SelectLamps`), [`shaders/roof_ps.hlsl`](../../../shaders/roof_ps.hlsl), [`shaders/roof_snow_lamps_ps.hlsl`](../../../shaders/roof_snow_lamps_ps.hlsl) |
 
-## Purpose
+## The problem
 
-- `LightProbe-telhado` (draw #652, DIP, 2776 triangles): `PS_278ED708` (ps_3_0) + `VS_278F5B10`. Light = sun/moon `c0` with
-  a 4-tap shadow (`s5`), specular (pow 90), ambient cube `s1 x c6.x`, a 64x64 L8 mask (`s6`, uv `v5`) multiplying sun and
-  sky, sky reflection cube `s0`. No lamp term, no lot/terrain light map, no rig lights. User: the roof "has no reaction to
-  light", black next to a sconce that lights the wall. Second roof `LightProbe-telhado2`: same PS (hash 42e2c20d).
-- Snowy roof (m23, `LightProbe-telhado-neve`): `PS_2793C3E8` (ps_3_0, 4992 bytes, 4 `rep` loops of noise for the snow
-  normal) + `VS_27944BD8` (1344 bytes). Light = `sat(N.L) x c0 x shadow(s5, 4 taps, lrp v2.x) + texCUBE(s0, N) x c5.x`,
-  times the mask `r6.w` (s7) and the snowy albedo `r6`; fog with v4. No lamps.
+The game's roof pixel shader has no lamp term at all. It lights roofs with the sun or moon (with a 4-tap shadow), an
+ambient cube, a sky reflection cube and a mask; there is no lot or terrain light map and no rig light. At night a roof
+stays black even when a wall sconce lights the wall right below it. The snowy roof shader has the same gap. See
+[engine/shaders.md](../../engine/shaders.md).
 
-## User-facing settings
+## How Apex Radiance solves it
 
-Saved in `[patches.NightTerrainRelight]` of `Documents\Electronic Arts\The Sims 3\S3SS\S3SS.toml`.
+Summer roofs are drawn with a replacement pixel shader that reproduces the game's lighting and adds up to 16 nearby lamps
+and a 16-tap shadow. Snowy roofs are drawn by the game unchanged, then a second additive pass on the same geometry adds
+the lamps on the game's snowy albedo.
 
-| UI label | TOML key | Type | Default | Range | Notes |
+1. **Lamp list.** Every 20 frames the lit street lamps and outdoor lot lamps are read from the game's light list, with a
+   visual radius and the lamp's current colour.
+2. **Lamp choice per roof piece.** Up to 16 lamps are chosen from the roof piece's world position, never from the
+   camera, so zooming and rotating do not change which lamps light a roof.
+3. **Summer roofs:** the replacement shader adds the lamp term to the diffuse light before the mask.
+4. **Snowy roofs:** an additive pass recomputes the snowy albedo and adds `mask x albedo x lamps`.
+5. **Stair snow:** the snowy-roof pixel shader is also used for snow on stair tops; those draws are recognised by their
+   vertex shader and handled by the stair snow fix in [snow.md](snow.md) instead.
+
+## Settings
+
+| Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| Roofs receive lamp light | `telhadosComLuz` | bool | `true` | - | Main options. Summer roofs and snowy roofs. Read live every frame (`LotLightBridge::SetRoofFix`). |
-| Roof light strength | `forcaNosTelhados` | float | `0.6` | 0.05-2.0 | Advanced > Walls and roofs (disabled when roofs are off). `lampParams.x` (PS c52.x). |
+| Lamps light roofs | `telhadosComLuz` | bool | on | | Lamp light on summer and snowy roofs, and the softer 16-tap roof shadow |
+| Brightness (ROOFS) | `forcaNosTelhados` | float | 60% | 5 to 200% | Lamp strength on roofs (PS `c52.x`); shown when the switch is on |
 
-Roof lamps work without "Street lamps light inside lots": the roof branches run before that gate in `OnDrawInner`.
-Combined build only: the roof strength was multiplied by the HDR lamp gain; see
-[../../removed-features.md](../../removed-features.md).
+Both apply live every frame (`LotLightBridge::SetRoofFix`). The Lighting balance styles set `forcaNosTelhados` to 40.5%
+(Subtle), 45% (Soft) or 60% (Natural). Roof lamps work without *Street lamps light lots*: the roof branches run before
+that gate in the draw dispatch.
 
-## How it works
+## Compatibility and interactions
 
-### Lamp list (shared with water)
+- [water.md](water.md) and outdoor objects ([objects-and-rigs.md](objects-and-rigs.md)) share the lamp list and the lamp
+  choice.
+- The roof lamp law (`(1 - d^2/R^2)^2` x wrap) is not the bake-matched law used for per-pixel lamps on objects
+  (`W = 0.4 x range`, `min(1, W cos / d^2)`).
+- Lamp colour: roofs read the tinted base colour of each lamp ([lamp-colour.md](lamp-colour.md)).
+- No game code is patched; recognition is by exact shader identity and, for stair snow, by vertex shader pattern.
 
-- Every 20 frames (`LotLightBridge::OnPresent`), when roofs, water or per-pixel object lamps are on, `UpdateLampList`
-  enumerates all lights (`FUN_006acf70` with a visitor; 15-byte prologue check) into `g_allLamps`: lights alive (`+0x100 &
-  0x01`) and lit (`& 0x20`) that are street lamps (type `+0xB0 == 0xB`) or outdoor (`& 0x04` and room `+0x08 == 0`).
-- Per lamp: head `+0x120`; visual radius `R = clamp(1.2 x sqrt(range), 2, 25)` with range = `+0x130` (97, 40, 100...; about
-  7-12 m); colour = `F0(+0xF0) x intensity(+0x10) x fade(+0x20)`.
-- `SelectLamps(x, z, maxScore)`: score = horizontal distance to the lamp - R; lamps with score > maxScore are ignored; keeps
-  the 64 best candidates, then the 16 lowest scores into `g_lampData`: `[0..15]` = (head, R), `[16..31]` = (colour, 0),
-  `[32]` = params. Roofs use `maxScore = 80` m, at the roof piece's world translation (VS `c8.w`, `c10.w`), so the choice
-  never depends on the camera.
-- Standalone, 2026-09-29 (not tested in game yet): the list is built by `ReadEnumeratedLamps` (the old `UpdateLampList`,
-  now in the same pass as the lot lamp tracking), and `SelectLamps` is memoized: 512 direct-mapped entries keyed on the
-  exact float bits of (x, z, maxScore), holding the 32 rows, the count and the candidate number the scan produced. The
-  memo is valid only while `g_allLamps` stays the same bit for bit (a refresh that changes it starts a new generation),
-  so a hit is exactly the scan's result. Developer "Roofs" line: "lamp choice memo: N reused, M computed".
+## Limitations
+
+- At most 16 lamps per roof piece, chosen within 80 m of the piece's origin.
+- Lamps are not occluded: a lamp behind a chimney still lights the roof.
+- Only the exact roof vertex and pixel shaders are handled; any other roof variant keeps the game's lighting (none has
+  been reported).
+- The snowy roof pass is additive, so it cannot darken, and it relies on a re-implementation of the game's snowy albedo.
+  A change to the game's winter roof shader would need a check.
+
+## Technical reference
+
+### Lamp list (shared with water and outdoor objects)
+
+- Every 20 frames `LotLightBridge::OnPresent` enumerates all lights (`FUN_006ACF70` with a visitor; 15-byte prologue
+  check) and `ReadEnumeratedLamps` rebuilds `g_allLamps` with `ReadLamp`:
+  - alive (`+0x100 & 0x01`) and lit (`& 0x20`);
+  - a lot-owned lamp (lot id `+0xC0`/`+0xC4` non-zero) must also be enabled (`& 0x40`), so a switched-off lot lamp leaves
+    the list at once rather than when its fade reaches zero;
+  - a street lamp (type `+0xB0 == 0xB`) or an outdoor lamp (`& 0x04` and room `+0x08 == 0`);
+  - range `+0x130` must be above 0.01.
+- Per lamp: head `+0x120`; visual radius `R = clamp(1.2 x sqrt(range), 2, 25)` (range values 97, 40, 100 give about 7 to
+  12 m); colour = base colour `+0xF0` x intensity `+0x10` x fade `+0x20`.
+- `SelectLamps(x, z, maxScore)`: score = horizontal distance to the lamp - `R`; lamps with score > `maxScore` are
+  ignored; the 64 best candidates are kept, then the 16 lowest scores go to `g_lampData`: rows 0 to 15 = (head, `R`),
+  rows 16 to 31 = (colour, 0), row 32 = parameters.
+- `SelectLamps` is memoised: 512 direct-mapped entries keyed on the exact float bits of (x, z, maxScore), holding the 32
+  rows, the count and the candidate number. A rebuild that changes `g_allLamps` by even one bit starts a new generation,
+  so a hit is exactly the scan's result.
 
 ### Summer roofs (`DrawRoof`)
 
-- Recognition by exact ids (`shader_ids.h`): PS `kRoofPs` {1136 bytes, FNV-1a `0x6EC87E3B`} (`PsClass::Roof`) AND VS
-  `kRoofVs` {1192, `0x1F851ECB`} (VS class 1). The ids replaced the older `roof_ref.h` byte arrays (the game's bytecode is
-  no longer embedded).
-- The VS gives: world normal in TEXCOORD0, shadow position TEXCOORD1, fade COLOR1, fog TEXCOORD3, texture uv + world
-  xz x 0.5 in TEXCOORD4 (`.xy`, `.zw`), mask uv + world y in TEXCOORD5 (`.xy`, `.w`), view vector TEXCOORD6, top-texture uv
-  in COLOR0, camera in VS c11.
-- Replacement `roof_ps.hlsl` (embedded as `kRoofHlsl` in `roof_ps_hlsl.h`, compiled at runtime as ps_3_0 with
-  `d3dcompiler_47.dll` `D3DCompile` in `CompilePs`, about 353 instructions per the notes) = the game's lighting
-  reproduced, plus:
-  - 16-tap shadow (4x4 at offsets `(x - 1.5) x c2.y`) instead of 4, faded to 1 by COLOR1;
-  - lamps: `p = (uv.z x 2, maskUv.w, uv.w x 2)`; per lamp `w = sat(1 - d^2/(R^2 + 1e-3))`,
-    `wrap = sat((N.l/|l| + 0.5) / 1.5)`, `lamps += colour x w^2 x wrap`; `lamps x= c52.x`;
+- Recognition by exact identity (`shaders/shader_ids.h`): PS `kRoofPs` {1136 bytes, FNV-1a `0x6EC87E3B`}
+  (`PsClass::Roof`) and VS `kRoofVs` {1192, `0x1F851ECB`} (VS class 1).
+- The game's VS provides: world normal in TEXCOORD0, shadow position TEXCOORD1, fade COLOR1, fog TEXCOORD3, texture UV and
+  world xz x 0.5 in TEXCOORD4 (`.xy`, `.zw`), mask UV and world y in TEXCOORD5 (`.xy`, `.w`), view vector TEXCOORD6,
+  top-texture UV in COLOR0, camera in VS `c11`.
+- Lamp choice: `SelectLamps(c8.w, c10.w, 80)` from the roof piece's world translation.
+- Replacement `roof_ps.hlsl` (`kRoofHlsl` in `roof_ps_hlsl.h`, `ps_3_0`, about 353 instructions) = the game's lighting
+  plus:
+  - 16-tap shadow (4x4 at offsets `(x - 1.5) x c2.y`) instead of 4 taps, faded to 1 by COLOR1;
+  - lamps at `p = (uv.z x 2, maskUv.w, uv.w x 2)`: per lamp `w = sat(1 - d^2/(R^2 + 1e-3))`,
+    `wrap = sat((N.l/|l| + 0.5) / 1.5)`, `lamps += colour x w^2 x wrap`; then `lamps x= c52.x`;
   - `diffuse = (ambient cube x c6.x + sat(N.L) x c0 x shadow + lamps) x mask(s6)`; the rest (albedo `s4 top x s2 x c3`,
-    reflection with fresnel `sat((1-N.V)^3 + c7.x)`, specular mask `s3 x c4`, fog lerp and `x c8.x`, alpha
+    reflection with Fresnel `sat((1 - N.V)^3 + c7.x)`, specular mask `s3 x c4`, fog lerp and `x c8.x`, alpha
     `sat(lum - c5.x)`) as the game.
-- Constants: `c20..c35` lampPos (xyz head, w radius), `c36..c51` lampCol, `c52` (x strength, y count). `DrawRoof` saves
-  PS c20..c52 (33 registers), sets the replacement PS and constants, draws, restores.
-- Precreated when the game creates the roof PS (`PrecreatePs`).
+- `DrawRoof` saves PS `c20..c52` (33 registers), sets the replacement and constants, draws, and restores.
 
 ### Snowy roofs (`DrawRoofSnow`)
 
-- Recognition: PS `kRoofSnowPs` {4992, `0x3CEB025E`} (`PsClass::RoofSnow`), no VS id check, but NOT when the VS is the
-  snow-relief class 9 (stair snow, below).
-- The game's roof is drawn unchanged, then (if at least one lamp was selected and `|VS c15.x| > 1e-6`) a second pass on the
-  same geometry with `roof_snow_lamps_ps.hlsl` (`kRoofSnowLampsHlsl`, ps_3_0): blend ONE/ONE add, `ZWRITEENABLE` off,
-  alpha test off, colour write RGB (0x7), separate alpha off. PS constants c20..c53 (34 registers) saved/restored.
-- The pass recomputes the game's snowy albedo (first ~20 instructions of the game shader):
+- Recognition: PS `kRoofSnowPs` {4992 bytes, `0x3CEB025E`} (`PsClass::RoofSnow`), no VS identity check, but never when the
+  VS is the snow-relief class 9 (stair snow).
+- The game's roof is drawn unchanged. Then, if at least one lamp was selected and `|VS c15.x| > 1e-6`, a second pass on
+  the same geometry with `roof_snow_lamps_ps.hlsl` (`kRoofSnowLampsHlsl`, `ps_3_0`): blend ONE/ONE, BLENDOP ADD,
+  `ZWRITEENABLE` off, alpha test off, colour write RGB (`0x7`), separate alpha off. PS `c20..c53` (34 registers) and the 8
+  render states are saved and restored.
+- The pass recomputes the game's snowy albedo (its first ~20 instructions):
   `snow = sat(2 c6.z)`, `cover = sat(1.4 snow)`, `a = albedo(s4) x c3 x top(s6, N.y >= 0 ? COLOR0 : 0)`,
-  `b = sat((a.r a.g a.b x 500 + 0.2)(snow + 1) + a)`, `s = snow texture(s3, TEXCOORD2.zw)`, `c = lerp(min(s, b), s, snow)`,
-  `albedo = sat((1 - n.w)(c - a) + a)`, `mask = lerp(s7.x, 1, cover)`; output
-  `mask x albedo x lamps x c52.x x c8.x x (1 - fog.w)`, same per-lamp law as the summer roof.
-- **Position fix (m29).** The first version used TEXCOORD4.zw (world xz x VS `c19.x`); on some roofs `c19 = (0,0,0,0)`, so
-  every pixel sat at the world origin while the lamps (PS c20+) were near the roof. Now xz = `COLOR0 x c53.x` where the VS
-  writes `COLOR0 = world xz / VS c15.x` (`rcp r0.w, c15.x; mul o9.xy, r2.xzzw, r0.w`, used by the game for the top
-  texture) and the C++ copies VS `c15.x` into PS `c53.x`; y = TEXCOORD5.w.
+  `b = sat((a.r a.g a.b x 500 + 0.2)(snow + 1) + a)`, `s = snow texture(s3, TEXCOORD2.zw)`,
+  `c = lerp(min(s, b), s, snow)`, `albedo = sat((1 - n.w)(c - a) + a)`, `mask = lerp(s7.x, 1, cover)`. Output:
+  `mask x albedo x lamps x c52.x x c8.x x (1 - fog.w)`, with the same per-lamp law as summer roofs.
+- **Position:** xz = `COLOR0 x c53.x`, where the VS writes `COLOR0 = world xz / VS c15.x` (`rcp r0.w, c15.x;
+  mul o9.xy, r2.xzzw, r0.w`, used by the game for the top texture) and the C++ copies VS `c15.x` into PS `c53.x`;
+  y = TEXCOORD5.w.
 
 ### Stair snow routing
 
-The snow on stair tops (m50/m51, `LightProbe-neve-escada`: `VS_2E036438` / `PS_2E036820`, 500 triangles, 4 `rep` loops of
-3D noise with `s1` permutation 256x256 and `s2` gradient 256x1) uses byte-for-byte the SAME pixel shader as snowy roofs
-(`PS_2E036820 = PS_2793C3E8 = PS_27D4DAE0 = kRoofSnowPs`, 4992 bytes). Because the PS class was tested before the VS
-classes, stair snow went to `DrawRoofSnow`, which reads the lamp positions from the roof VS constants and was wrong on
-stairs (first test 25/09 10:43). Now:
+The snow on stair tops (`VS_2E036438` / `PS_2E036820`) uses byte for byte the same pixel shader as snowy roofs
+(`PS_2E036820 = PS_2793C3E8 = PS_27D4DAE0 = kRoofSnowPs`). `OnDrawInner` sends `RoofSnow` to `DrawRoofSnow` only when
+`!g_curVsIsSnowRelief`; class 9 draws go to `DrawSnowRelief` ([snow.md](snow.md)).
 
-- `ShaderPatches::IsSnowReliefVs` (VS class 9): TEXCOORD4 output with `.zw` written by `mul oT4.zw, rW.xyxz, cD.x` where
-  `cD.x` is a def equal to 0.5 and `rW.x/.z` come from dp4 with `c8`/`c10`, AND an input `TEXCOORD2` (the snow's base
-  position; roofs of the same family have none). Offline: only `VS_2E036438` matched among 161 VS.
-- `OnDrawInner`: `if (RoofSnow && !g_curVsIsSnowRelief) DrawRoofSnow` ... later `if (g_curVsIsSnowRelief) DrawSnowRelief`.
-- `DrawSnowRelief` patches the PS (`PatchSnowRelief`: after the single `mad rL.xyz, rCube(s0), cK.x, rS` outside any loop,
-  add `atlas(v.zw x 2 x cA.xy + cA.zw) x cB.x`), with the fence option/strength; details in [snow.md](snow.md).
-
-## Files and functions
-
-| File | Function / symbol | Role |
-|---|---|---|
-| `lot_light_bridge.cpp` | `EnsureRoof`, `DrawRoof`, `EnsureRoofSnow`, `DrawRoofSnow`, `SelectLamps`, `ReadLamp`, `EnumerateLights`, `ReadEnumeratedLamps` (29/09, was `UpdateLampList`), `OnDrawInner` (order), `RoofStatus`, `SetRoofFix`, `PrecreatePs` | dispatch and constants |
-| `roof_ps.hlsl` / `roof_ps_hlsl.h` (`kRoofHlsl`) | `main` | summer roof replacement |
-| `roof_snow_lamps_ps.hlsl` / `roof_snow_lamps_hlsl.h` (`kRoofSnowLampsHlsl`) | `main` | snowy roof additive pass |
-| `shader_ids.h` | `kRoofPs`, `kRoofVs`, `kRoofSnowPs` | exact ids (size + FNV-1a over DWORDs) |
-| `shader_patches.cpp` | `IsSnowReliefVs`, `PatchSnowRelief` | stair snow |
-
-The `*_hlsl.h` files are generated from the `.hlsl` files ("// Generated from roof_ps.hlsl", raw string `R"RAW(...)RAW"`);
-only the first comment line differs (it names `shader_ids.h` instead of the old `roof_ref.h` / `roof_snow_ref.h`). The
-`.hlsl` files are not in the vcxproj; the build uses only the header strings (compiled at runtime). No generator script was
-found in the tree: keep the two in sync by hand.
-
-## Game addresses and patterns
-
-No game code is patched. Recognition is by exact shader id (roof PS/VS, snowy roof PS) and by VS pattern (stair snow).
-Lamp enumeration: `FUN_006acf70` (`0x006ACF70`, stdcall(visitor), prologue `E8 2B 36 00 00 8B 4C 24 04 51 68 40 CF 6A 00`).
-
-## Shader details
+### Registers
 
 | Register | Summer roof (replacement) | Snowy roof pass |
 |---|---|---|
-| c0..c8 | game: sun colour, sun dir, shadow size, albedo tint, spec tint, alpha ref, ambient scale, fresnel bias, fog mix | c3 albedo tint, c6.z snow amount, c8.x output scale |
-| c20..c35 | lamp head + radius | same |
-| c36..c51 | lamp colour | same |
-| c52 | x strength, y count | x strength |
-| c53 | - | x = VS c15.x |
-| samplers | s0 env cube, s1 ambient cube, s2 albedo, s3 spec mask, s4 top, s5 shadow, s6 mask | s3 snow, s4 albedo, s6 top, s7 mask |
+| `c0..c8` | Game: sun colour, sun direction, shadow size, albedo tint, specular tint, alpha reference, ambient scale, Fresnel bias, fog mix | `c3` albedo tint, `c6.z` snow amount, `c8.x` output scale |
+| `c20..c35` | Lamp head + radius | Same |
+| `c36..c51` | Lamp colour | Same |
+| `c52` | x strength, y count | x strength |
+| `c53` | | x = VS `c15.x` |
+| Samplers | `s0` environment cube, `s1` ambient cube, `s2` albedo, `s3` specular mask, `s4` top, `s5` shadow, `s6` mask | `s3` snow, `s4` albedo, `s6` top, `s7` mask |
 
-## Interactions
+### Shader compilation
 
-- Water uses the same lamp list and radius rule ([water.md](water.md)).
-- The lamp law here (radius `clamp(1.2 sqrt(range), 2, 25)`, `(1 - d^2/R^2)^2` x wrap) is NOT the bake-matched law used on
-  objects and fences (`W = 0.4 x range`, `min(1, W cos/d^2)`); roadmap phase 3 plans one lamp model for all surfaces.
-- Lamp colour: reads the tinted `F0` ([lamp-colour.md](lamp-colour.md)).
+Both replacements are compiled at start-up on a background thread by `framework/shader_cache` (see
+[architecture.md](../../architecture.md), section 4.6) and created as D3D9 shader objects at their first draw. The
+`*_hlsl.h` headers are what the build uses (raw string literals generated from the `.hlsl` files, which are not in the
+project); keep each pair in sync by hand.
 
-## Known limitations
+### Files
 
-- 16 lamps per roof piece, chosen within 80 m of the piece's origin.
-- No wall occlusion for lamps (a lamp behind a chimney still lights the roof).
-- Only the exact roof VS/PS ids are handled; other roof variants (if any) stay vanilla (none reported).
-- Snowy roof pass is additive: it cannot darken, and lamps are multiplied by the mask and albedo of the game's formula as
-  re-implemented (verify if the game's winter roof changes).
+| File | Symbols | Role |
+|---|---|---|
+| `features/lot_light_bridge.cpp` | `DrawRoof`, `DrawRoofSnow`, `SelectLamps`, `SelectLampsScan`, `ReadLamp`, `ReadEnumeratedLamps`, `OnDrawInner`, `RoofStatus`, `SetRoofFix`, `CompilePs` | Dispatch and constants |
+| `shaders/roof_ps.hlsl`, `shaders/roof_ps_hlsl.h` (`kRoofHlsl`) | `main` | Summer roof replacement |
+| `shaders/roof_snow_lamps_ps.hlsl`, `shaders/roof_snow_lamps_hlsl.h` (`kRoofSnowLampsHlsl`) | `main` | Snowy roof additive pass |
+| `shaders/shader_ids.h` | `kRoofPs`, `kRoofVs`, `kRoofSnowPs` | Exact identities (size + FNV-1a over DWORDs) |
+| `features/shader_patches.cpp` | `IsSnowReliefVs`, `PatchSnowRelief` | Stair snow |
 
-## Pitfalls and failed approaches
+Lamp enumeration: `FUN_006ACF70` (`0x006ACF70`, `stdcall(visitor)`, prologue
+`E8 2B 36 00 00 8B 4C 24 04 51 68 40 CF 6A 00`), Steam 1.67.2.
 
-- First test with strength 1: roof almost white. A dedicated strength was added (first default 0.35, 0.05-2).
-- Radius from the light bounds (`+0x134`, ~50 m) plus two lights per street lamp at the same place (`+0x130` = 97 and 40):
-  roofs (and the lake) blew out to pinkish white. Fixed with the visual radius from `sqrt(range)`; the roof default then
-  rose to 0.6.
-- Choosing the 16 lamps nearest to the CAMERA every 20 frames made roofs flicker when zooming; selection is now per draw
-  by the roof position (limit 80 m).
-- Snowy roof position from TEXCOORD4.zw (VS c19 = 0 on some roofs): m29.
-- PS class before VS class sent stair snow to the roof pass (10:43 test).
+## Rejected approaches
 
-## Testing in game
+- Strength 1 by default: roofs almost white. Details in [history](../../history/night-lighting-roofs.md).
+- Radius from the light bounds (`+0x134`, about 50 m): roofs blew out to pinkish white.
+- Choosing the 16 lamps nearest the camera: roofs flickered when zooming.
+- Snowy roof position from TEXCOORD4.zw: `c19` is zero on some roofs.
+- Classifying by pixel shader before vertex shader: stair snow went to the roof pass.
 
-- At night, a house with outdoor wall lamps and street lamps nearby: roof tiles near lamps lit, no flicker when zooming or
-  rotating. Winter: snow on the roof lit around lamps.
-- Status (dev): `Roofs: roofs: fixed | lamps on: N | draws fixed: N | with snow: N` ("waiting" until the first roof draw).
-- Log: `[LotLightBridge] Telhados: ativo`, `[LotLightBridge] Telhados com neve: ativo` (or the compile error text).
-- F7 on the roof (dev): PS c20+ should hold lamp positions near the roof; for snowy roofs check VS c15.x != 0.
+## See also
 
-## Open items
-
-- Move roofs to the single lamp law (roadmap phase 3: "Telhados: passam para a mesma lei").
-- Occlusion of roof lamps.
+- [Validation](../../validation/night-lighting-roofs.md)
+- [History](../../history/night-lighting-roofs.md)
+- [Snow](snow.md), [Water](water.md), [Objects and rigs](objects-and-rigs.md)
+- [Engine: shaders](../../engine/shaders.md)

@@ -550,6 +550,14 @@ bool Install(std::string& error) {
         g_baseReady = base;
     }
     if (!g_baseReady) LOG_WARNING("[UnlitRooms] Base under the lamps: the game code differs; lit rooms keep the game's top-up");
+    // S3SS applies its saved room colour when it starts. Recognise that exact value from the start (read-only), so
+    // Rooms at Night uses the game's own blue as its base instead of the saved grey; S3SS.toml is not touched.
+    if (const auto saved = S3SSDetect::SavedRoomAmbientOverride()) {
+        g_compat.found = true;
+        g_compat.rgb = *saved;
+        LOG_INFO(std::format("[UnlitRooms] S3SS saves a room colour ({:.3f} {:.3f} {:.3f}); Rooms at Night uses the game's blue as its base",
+                             (*saved)[0], (*saved)[1], (*saved)[2]));
+    }
     g_ready = true;
     LOG_INFO(std::format("[UnlitRooms] Ready: unlit-room colours at {:#x} ({:.3f} {:.3f} {:.3f}{}) and {:#x} ({:.3f} {:.3f} {:.3f}{}), fill gate {:#x}, fill colour {:#x}",
                          g_orig[ColourA], g_base[0].v[0], g_base[0].v[1], g_base[0].v[2], g_baseDefault[0] ? ", not set yet: default" : "", g_orig[ColourB],

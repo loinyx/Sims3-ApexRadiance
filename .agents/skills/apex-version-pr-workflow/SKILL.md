@@ -19,7 +19,7 @@ Before switching branches, inspect dirty files and preserve work. Do not reset, 
 
 ## Work and checkpoints
 
-Commit when a coherent change is complete and its appropriate checks have passed: behavior and necessary tests/docs together. Do not commit every file or tool action separately. Use the project's commit convention and maintainer identity. Inspect the staged diff and filenames; include only this task's changes. Exclude binaries, logs, caches, captures, temporary scripts, secrets and game assets unless the repository explicitly tracks that deliverable. Do not rewrite published history to tidy progress.
+Commit when a coherent change is complete and its appropriate checks have passed: behavior and necessary tests/docs together. Do not update `docs/` on every commit: documentation is brought up to date once, before the release, by `$apex-review-pr-release` using `$apex-docs`. During development, record test results (harness, result, tested SHA) and open checks in the commit message or the PR description's handoff section, so the release pass can move them into the validation pages. Do not commit every file or tool action separately. Use the project's commit convention and maintainer identity. Inspect the staged diff and filenames; include only this task's changes. Exclude binaries, logs, caches, captures, temporary scripts, secrets and game assets unless the repository explicitly tracks that deliverable. Do not rewrite published history to tidy progress.
 
 Use `$apex-compile-project` at `../apex-compile-project/SKILL.md` when available for builds; reuse its validated target and dependency paths. Run only checks relevant to new changes or unresolved failures. Compilation does not establish gameplay visuals or performance.
 

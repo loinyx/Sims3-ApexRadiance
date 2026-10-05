@@ -47,7 +47,8 @@ struct UiSettings {
     KeyChord peekKey{VK_MENU, false, false, false}; // hold to peek through the menu ([ui] peek_key)
     KeyChord pictureCompareKey{'B', false, false, false}; // hold to bypass Picture while over the menu ([ui] picture_compare_key)
     bool screenshotShortcutEnabled = true; // intercept a configurable key for filtered screenshots ([ui] screenshot_shortcut_enabled)
-    KeyChord screenshotKey{'C', false, false, false}; // C takes a filtered screenshot; cheat-console typing passes through
+    KeyChord screenshotKey{VK_F8, false, false, false}; // F8 alone: an extra filtered screenshot (Ctrl+Shift+F8 is the lighting snapshot); the game's own C stays untouched
+    bool screenshotToApexFolder = false; // [ui] screenshot_folder: "game" (Documents\...\The Sims 3\Screenshots) or "apex" (Apex Radiance\Screenshots)
     bool screenshotHideGameUi = true; // temporarily toggle the game's F10 UI visibility only while taking the screenshot
     int minePresetBase = 0; // the preset the "mine" keys started from (its keys for the tools) ([ui] mine_base)
     bool sidebarCollapsed = false; // the sidebar is the icon-only rail ([ui] sidebar_collapsed)
@@ -95,7 +96,7 @@ void CaptureFeatureState(toml::table& out, bool profileFeaturesOnly = false);
 // settings and on / off through ApexPatch::ApplyTableLive, Picture through SetParams); sections the table does not have stay as they are. Marks unsaved changes and requests a save.
 void ApplyFeatureState(const toml::table& state);
 // Every feature at its defaults, as a CaptureFeatureState table: each setting's default and its default on / off, and
-// Color at its defaults. The window mode and the menu's own preferences (language, key, text size) are not included.
+// Color at its defaults. The menu's own preferences (language, key, text size) are not included.
 void DefaultFeatureState(toml::table& out);
 
 // ---- profiles: Documents\...\Apex Radiance\Profiles\<name>.toml ----

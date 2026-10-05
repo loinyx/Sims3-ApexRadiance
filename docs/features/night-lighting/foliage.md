@@ -1,73 +1,110 @@
 # Foliage: bushes, trees and plants
 
-> **Status in the standalone:** in the v0.1.0 baseline (b84d5f1) as described, except the early creation of the patched
-> foliage vertex shaders at `CreateVertexShader` (`PrecreateVs`, the 64-entry pool and its log line), which is
-> post-0.1.0: v0.1.0 creates the copy at the first draw. The HDR gain variant of `PatchFoliageVs` never existed there.
+At night, bushes, hedges, trees and small plants near lamps are lit on every side the lamp can reach. The side of a
+planter in moon shadow keeps its lamp light, and the back of a bush facing away from a lamp is dim rather than black. The
+same fixes apply to the snowy winter variants and to the fences that share the bush shader. Part of
+[Night Lighting](README.md).
 
-> Bushes, hedges, trees and small plants (summer and winter), and the vs_2_0 instanced fences that share their shader, are
-> lit per vertex by the per-instance rig (sun + 3 lamps). Night Lighting fixes three things: the lamp light was multiplied
-> by the moon shadow (dark side of a planter), the back side of a bush away from a lamp was black (N.L clamped at 0), and
-> lot lamps barely reached them (rig gather). Status: working for the known variants (moon-shadow fix confirmed "ficou
-> perfeito" 24/09; wrap lighting and winter variants installed 25/09); summer plants still darker than the lit ground
-> (open). Both build flavours.
+## Status
 
-Related: [objects-and-rigs.md](objects-and-rigs.md) (rig boost that feeds the per-instance lamp colours),
-[fences.md](fences.md), [lamp-colour.md](lamp-colour.md), [../../engine/shaders.md](../../engine/shaders.md).
+| | |
+|---|---|
+| Availability | Released in 1.0.0 |
+| Default | On |
+| Menu | Lighting > Objects > *Objects* card |
+| Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
+| Source | [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawObjectRig`, `FoliageVsFor`, `DrawLeafShadow`), [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`PatchFoliageVs`, `PatchLeafShadow`) |
 
-## Purpose
+## The problem
 
-- Plants in the plaza planters looked dark on one side (24/09): `LightProbe-conjunto`, `LightProbe-arbusto2`.
-- The back half of winter bushes was black ("arbusto pela metade", m22, print 43).
-- Winter bushes stayed dark although lamp colours arrived (m21, m63/m64).
-- Plants on lots got almost no lamp light: per-instance lamp colours `c54..c80` zero or 0.10 (m38, m40) while correct
-  vegetation had 0.42-0.58 (m41): lot lamp classes were not boosted (fixed on the CPU, see
-  [objects-and-rigs.md](objects-and-rigs.md)).
+Foliage is lit per vertex by a per-instance rig: the sun and the three strongest lamps. Three defects make it dark at
+night:
 
-## User-facing settings
+- **Moon shadow on lamp light.** The pixel shader multiplies the whole light, lamps included, by the sun or moon shadow.
+  Wherever the moon shadow falls (the side of a hedge or a planter wall), lamp light disappears.
+- **Black back sides.** The vertex shader clamps each lamp's `N.L` at 0, so the half of a bush facing away from a lamp gets
+  nothing.
+- **Missing lot lamps.** The rig gather barely reached lot lamp classes, so plants on lots had almost no lamp colour.
 
-Saved in `[patches.NightTerrainRelight]` of `Documents\Electronic Arts\The Sims 3\S3SS\S3SS.toml`.
+See [engine/light-objects-and-rigs.md](../../engine/light-objects-and-rigs.md).
 
-| UI label | TOML key | Type | Default | Range | Notes |
+## How Apex Radiance solves it
+
+Three shader fixes, plus the CPU rig boost described in [objects-and-rigs.md](objects-and-rigs.md):
+
+1. **Moon shadow on summer instanced objects.** The game's 600-byte object-rig pixel shader is replaced by an HLSL copy
+   that lifts the shadow towards 1 by the night level: `shadow = lerp(shadow, 1, night)`.
+2. **Wrap lighting for lamps.** Foliage vertex shaders are patched so each lamp weight becomes `max(N.L/1.5 + 1/3, 0)`:
+   light passing through leaves. The back of a bush gets a third of the facing side. The sun keeps its plain clamp.
+3. **Moon shadow in other foliage pixel shaders** (winter bushes and other variants): the shadow fade is lifted towards
+   1 by the night level with a two-instruction bytecode patch.
+
+Fixes 1 and 3 act only at night (night level above 0.01). Fix 2 is applied whenever the option is on.
+
+## Settings
+
+| Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| Lamps light nearby objects | `postesNosObjetos` | bool | `true` | - | Turns on everything on this page: the rig boost (`ObjectLightBridge`), the moon-shadow HLSL (`DrawObjectRig`), the foliage wrap-light VS (`FoliageVsFor`) and the winter leaf-shadow patch (`DrawLeafShadow`) (`g_objectFix`). Live. |
-| Object light strength | `forcaNosObjetos` | float | `1.0` | 0.25-3.0 | Advanced > Objects. Scales the rig boost that fills the per-instance lamp colours. |
+| Lamps light objects | `postesNosObjetos` | bool | on | | Turns on the rig boost, the moon-shadow replacement, the wrap-light vertex shaders and the winter leaf-shadow patch. Live |
+| Brightness (Objects card) | `forcaNosObjetos` | float | 100% | 25 to 300% | Scales the rig boost that fills the per-instance lamp colours |
 
-No foliage-specific strength exists. The fixes act only at night (`g_night > 0.01`, night level = `lightMgr+0xF0`,
-passed by `LotLightBridge::SetNightLevel`), except the wrap-light VS which is swapped whenever the option is on.
+There is no foliage-specific strength. The Lighting balance styles set `forcaNosObjetos` to 67.5% (Subtle), 75% (Soft) or
+100% (Natural). The night level is the game's `lightMgr+0xF0`, passed by `LotLightBridge::SetNightLevel`.
 
-## How it works
+## Compatibility and interactions
 
-### The shaders
+- Fences of the `vs_2_0` instanced family use the same shaders as bushes and get all three fixes
+  ([fences.md](fences.md) covers the `vs_3_0` fence family).
+- Winter foliage vertex and pixel shaders are covered by fixes 2 and 3; ground snow is in [snow.md](snow.md).
+- Lamp colour: per-instance colours read the tinted lamp colour ([lamp-colour.md](lamp-colour.md)).
+- The rig boost and cap change of `ObjectLightBridge` fill the per-instance lamp colours `c54..c56[i]`
+  ([objects-and-rigs.md](objects-and-rigs.md)).
+- No game code is patched for the shader fixes; they are D3D9-level shader swaps by class.
+
+## Limitations
+
+- Foliage receives no ground light: summer plants and flowers stay darker than the atlas-lit ground next to them.
+- The summer 600-byte object-rig shader is replaced only for the moon shadow: no ground light and no per-pixel lamps.
+- A plant whose pixel shader multiplies all lamp light by a texture (`texld s2` on TEXCOORD3, a 128x128 DXT1 texture,
+  capture m65) stays dark even with the patched shaders.
+- Foliage with a 4-light matrix (`VS_4375A3EE` / `EAB58655`, `PS_936D7C02`; `max r0, r0, c31.w`, directions `c8..c10`,
+  colours `c11..c13`) is not recognised (no `c27[a0]` read); which of its lights is the sun is unknown.
+- Large SpeedTree trees use another path (`TreeLightColors` / `TreeLightDirections`); the captured trees did not use it.
+- The wrap-light patch inserts `def c255` unconditionally. Whether any relative-addressed per-instance array can reach
+  `c255` is not checked in code (`vs_2_0` guarantees 256 constants).
+
+## Technical reference
+
+### Captured shaders
 
 | Capture | VS | PS | Notes |
 |---|---|---|---|
-| bushes/fences summer (`LightProbe-arbusto` #103, `-cerca` #106) | `VS_2BC7F188` (vs_2_0, instanced, `a0.z`) | `PS_2BC82F40` (ps_2_0) = `kObjectRigPs` {600 bytes, FNV `0x0A2D0BE4`} (notes hash e9be1ab5) | lamps dir `c27/c28/c29[i]`, colour `c54/c55/c56[i]`, sun `c137/c138` |
-| planter bushes (`-conjunto`, `-arbusto2`) | `VS_2BEA1650` | same 600-byte PS | lamp colours 0.8-0.99 per instance after the rig boost |
-| tree (`-arvore` #252) | `VS_2BC70BD8` | `PS_2BC72CA8` (ps_2_0, no shadow) | sun `c124/c125` |
-| tree 2 (`-arvore2` #107) | `VS_2BC6D848` (triangle strip) | `PS_2BC6CD58` | lamp 1 in `oD0`, lamps 2-3 in `oT4`; `max` with `def c117 = 0` |
-| winter bush (m21 `-arbusto-neve`, m22) | `VS_2C55DC50` | `PS_2C565BA8` (ps_2_0, 1016 bytes) | lamps in `oT2` = sun*c147 + 3 lamps; PS `lrp_pp r3.w, t5.x, c8.y, r1.w` then `mad_pp r0.xyz, t2, r3.w, r0` |
-| winter tree (m28 `-arvore-neve`) | `VS_2A839190` (1448 bytes) | `PS_2A83D588` (ps_2_0, 672 bytes) | no shadow map: light = ambient cube(t0)*c0.w + t2 |
-| winter bush (m63/m64) | `VS_32779B38` (vs_2_0) | `PS_3277A240` (ps_2_0, 872 bytes) | `max r0, r0, c131.x` with `def c131 = 0`; shadow `lrp r2.w, t6.x, c6.y, r1.w` |
-| summer bush (m78) | (foliage VS, patched) | `PS_32DDB220` (ps_2_0) | lamps `t1.w*v0 + t4` x shadow `lrp r1.w, t6.x, c3.z, r2.w` (`def c3 = 0.5, 0.25, 1, 0`) |
-| flower on a log wall (m79) | patched VS/PS (addresses 1201...) | | rig 0.62 / 0.55 / 0.49, still darker than the ground |
+| Bushes and fences, summer (`LightProbe-arbusto` #103, `-cerca` #106) | `VS_2BC7F188` (`vs_2_0`, instanced, `a0.z`) | `PS_2BC82F40` (`ps_2_0`) = `kObjectRigPs` {600 bytes, FNV `0x0A2D0BE4`} | Lamp directions `c27/c28/c29[i]`, colours `c54/c55/c56[i]`, sun `c137/c138` |
+| Planter bushes (`-conjunto`, `-arbusto2`) | `VS_2BEA1650` | Same 600-byte PS | Lamp colours 0.8 to 0.99 per instance after the rig boost |
+| Tree (`-arvore` #252) | `VS_2BC70BD8` | `PS_2BC72CA8` (`ps_2_0`, no shadow) | Sun `c124/c125` |
+| Tree 2 (`-arvore2` #107) | `VS_2BC6D848` (triangle strip) | `PS_2BC6CD58` | Lamp 1 in `oD0`, lamps 2 and 3 in `oT4`; `max` with `def c117 = 0` |
+| Winter bush (m21 `-arbusto-neve`, m22) | `VS_2C55DC50` | `PS_2C565BA8` (`ps_2_0`, 1016 bytes) | Lamps in `oT2` = sun x `c147` + 3 lamps; PS `lrp_pp r3.w, t5.x, c8.y, r1.w` then `mad_pp r0.xyz, t2, r3.w, r0` |
+| Winter tree (m28 `-arvore-neve`) | `VS_2A839190` (1448 bytes) | `PS_2A83D588` (`ps_2_0`, 672 bytes) | No shadow map: light = ambient cube(`t0`) x `c0.w` + `t2` |
+| Winter bush (m63/m64) | `VS_32779B38` (`vs_2_0`) | `PS_3277A240` (`ps_2_0`, 872 bytes) | `max r0, r0, c131.x` with `def c131 = 0`; shadow `lrp r2.w, t6.x, c6.y, r1.w` |
+| Summer bush (m78) | Foliage VS (patched) | `PS_32DDB220` (`ps_2_0`) | Lamps `t1.w x v0 + t4` x shadow `lrp r1.w, t6.x, c3.z, r2.w` (`def c3 = 0.5, 0.25, 1, 0`) |
 
-In the VS, `r0.x` = sun N.L and `r0.yzw` = the 3 lamps' N.L; `max r0, r0, cK.w` clamps them at 0; each lamp weight then
-scales its per-instance colour `cN[a0.c]`. In the PS, lamp light and sun share the moon-shadow multiply.
+In the vertex shader `r0.x` is the sun's `N.L` and `r0.yzw` the three lamps' `N.L`; `max r0, r0, cK.w` clamps them at 0,
+and each lamp weight then scales its per-instance colour `cN[a0.c]`. In the pixel shader lamp light and sun share the
+moon-shadow multiply.
 
 ### Fix 1: moon shadow on summer instanced objects (`DrawObjectRig`)
 
-The 600-byte PS (`PsClass::ObjectRig`, exact id `kObjectRigPs`) computes `light = (t2 x shadow + sky x c1.w) x t1.z`: the
-lamp light (inside t2 with the sun) vanishes wherever the moon shadow falls (the side of a hedge or planter wall). It is
-replaced by `kObjectRigHlsl` (in `lot_light_bridge.cpp`, compiled as ps_2_0 with `d3dcompiler_47` `D3DCompile`; since 2026-09-28 at start-up on a background thread, `framework/shader_cache.h`), identical
-except `shadow = lerp(shadow, 1, c3.x)`; `DrawObjectRig` sets PS `c3 = (night, 0, 0, 0)` for the draw and restores it. By
-day nothing changes. Checked first in `OnDrawInner` (before any VS class), only with `postesNosObjetos` on and night > 0.01.
-Precreated when the game creates that PS (`PrecreatePs`).
+The 600-byte PS (`PsClass::ObjectRig`, exact identity `kObjectRigPs`) computes `light = (t2 x shadow + sky x c1.w) x t1.z`.
+It is replaced by `kObjectRigHlsl` (in `lot_light_bridge.cpp`, `ps_2_0`, compiled at start-up by `framework/shader_cache`
+and created at the first draw), identical except `shadow = lerp(shadow, 1, c3.x)`. `DrawObjectRig` sets PS
+`c3 = (night, 0, 0, 0)` for the draw and restores it. It is checked first in `OnDrawInner`, before any vertex shader class.
 
-### Fix 2: wrap lighting for lamps (`ShaderPatches::PatchFoliageVs`, VS class 6)
+### Fix 2: wrap lighting (`ShaderPatches::PatchFoliageVs`, VS class 6)
 
-Recognition: any VS (vs_2_0 or vs_3_0 token) that reads the per-instance lamp array `c27[a0.x]` (relative addressing on
-c27), with a `max r0, r0, cK.s` (full mask, no relative) where `cK.w` is a runtime constant, or `cK.s` is a replicated
-component of a shader-defined constant equal to 0 (winter bush m63 `c131.x`, tree 2 `c117`). Patch:
+Recognition: any vertex shader (`vs_2_0` or `vs_3_0`) that reads the per-instance lamp array `c27[a0.x]` (relative
+addressing on `c27`), with a `max r0, r0, cK.s` (full mask, no relative addressing) where `cK.w` is a runtime constant or
+`cK.s` is a replicated component of a shader-defined constant equal to 0 (winter bush m63 `c131.x`, tree 2 `c117`).
+Patch:
 
 ```
 def c255, 1/1.5, 0.5/1.5, 0, 0          ; inserted at the top
@@ -76,109 +113,58 @@ mad r0.yzw, r0, c255.x, c255.y          ; lamps: N.L / 1.5 + 1/3
 max r0.yzw, r0, cK.s                    ; ... clamped at 0
 ```
 
-So each lamp weight becomes `max(N.L/1.5 + 1/3, 0)`: light passing through leaves; the back side of a bush now gets a
-third of the facing side. Tested offline on `2BC7F188`, `2BEA1650`, `2C55DC50`, `2A839190`, later `32779B38` and
-`2BC6D848` (VS count 6 -> 8 after accepting def-zero clamps, test7.cpp on 77 VS / 99 PS). The road VS is correctly refused.
+`ClassifyVs` tests the foliage pattern after the road, instanced-structure, snow and floor classes; the road vertex shader
+is refused. The patched bytecode is stored in the shader's `VsInfo`, and `FoliageVsFor` creates the D3D9 shader at the
+first draw. In `OnDrawTracked`, when the VS is class 6 and the option is on, the patched copy is bound around the whole
+draw handling; then the pixel side runs (`OnDrawInner`: the object-rig replacement or the leaf-shadow patch). If no pixel
+branch draws, the game's pixel shader draws with the patched vertex shader. The game's vertex shader is restored
+afterwards.
 
-Dispatch: in `OnDrawTracked`, when the VS is class 6 and `postesNosObjetos` is on, the patched copy is bound around the
-whole draw handling (`FoliageVsFor`), then the PS side runs (`OnDrawInner`: ObjectRig replacement or leaf-shadow patch);
-if no PS branch draws, the game's PS draws with the patched VS; the game's VS is restored afterwards. Patched VS copies are
-created early: when the game creates a VS that `PatchFoliageVs` accepts, `PrecreateVs` builds the copy and parks it in a
-pool keyed by the patched bytecode (max 64 waiting, `kMaxPendingVs`) until the first draw asks for it. Log line:
-`foliage vertex shader copies made at shader load: N new, N total, N used`.
+### Fix 3: moon shadow in other foliage pixel shaders (`ShaderPatches::PatchLeafShadow`, `DrawLeafShadow`)
 
-Combined build only: an HDR lamp gain was folded into the same `c255` wrap constants (a second VS copy per gain, only where
-the lamp weights just scale the per-instance colours); not in the standalone, see
-[../../removed-features.md](../../removed-features.md).
-
-### Fix 3: moon shadow in winter/other foliage PS (`ShaderPatches::PatchLeafShadow`, `DrawLeafShadow`)
-
-For any PS drawn with a foliage VS (class 6) that is not the exact 600-byte one. Recognition: `lrp rD.w, tN.x, cK.s, rS.w`
-(the shadow fade; `t5.x` in the 24/09 bushes, `t6.x` in m63/m78), with `cK.s` = runtime `cK.y`, or a replicated
-component of a def equal to 1 (m78 `c3.z`). Patch right after it (two instructions, because ps_2_0 allows only one constant
-register per instruction):
+For any pixel shader drawn with a class 6 vertex shader that is not the 600-byte one. Recognition:
+`lrp rD.w, tN.x, cK.s, rS.w` (the shadow fade; `t5.x` in the summer bushes, `t6.x` in m63/m78), with `cK.s` the runtime
+`cK.y` or a replicated component of a `def` equal to exactly 1 (m78 `c3.z`). Right after it (two instructions, because
+`ps_2_0` allows one constant register per instruction):
 
 ```
 add rT.w, cK.s, -rD.w
 mad rD.w, rT.w, cN.x, rD.w              ; rD.w = lerp(rD.w, 1, night)
 ```
 
-`cN = maxConst + 1` (refused if >= 32 or temp >= 12, ps_2_0 limits). `DrawLeafShadow` sets `cN = (night, 0, 0, 0)` for the
-draw; only at night.
+`cN = maxConst + 1` (refused if it would be 32 or more, or the temp 12 or more: `ps_2_0` limits). `DrawLeafShadow` sets
+`cN = (night, 0, 0, 0)` for the draw.
 
-### Rig side (CPU)
-
-The per-instance lamp colours `c54..c56[i]` come from the object rigs, so the 9-class rig boost and the cap change of
-`ObjectLightBridge` apply (see [objects-and-rigs.md](objects-and-rigs.md)). Before the boost reached lot lamp classes,
-lot plants had 0-0.10 per-instance colours.
-
-## Files and functions
-
-| File | Function | Role |
-|---|---|---|
-| `lot_light_bridge.cpp` | `kObjectRigHlsl`, `EnsureObjectReplacement`, `DrawObjectRig` | fix 1 |
-| | `ClassifyVsCode` (class 6), `FoliageVsFor`, `CreateFoliageVs`, `PoolFoliageVs`, `ClearVsPool`, `PrecreateVs`, `OnDrawTracked` | fix 2 dispatch |
-| | `DrawLeafShadow`, `g_leafPs` | fix 3 |
-| | `ObjectStatus` | status line |
-| `shader_patches.cpp/.h` | `PatchFoliageVs(t, lampGain = 1)`, `PatchLeafShadow(t, nightConst)` | bytecode patches |
-| `shader_ids.h` | `kObjectRigPs` {600, `0x0A2D0BE4`} | exact id of the summer PS |
-
-## Game addresses and patterns
-
-No game code is patched for foliage; everything is D3D9-level (shader swap by class). Patterns:
+### Patterns
 
 | Pattern | Used by |
 |---|---|
-| relative read of `c27` (`c27[a0.x]`) | foliage VS detection |
-| `max r0, r0, cK.w` (runtime) or `max r0, r0, cK.s` with `def cK.s = 0` | wrap light site |
-| `lrp rD.w, tN.x, cK.s, rS.w` with runtime `cK.y` or `def cK.s = 1` | leaf shadow site |
-| PS size 600 + FNV-1a `0x0A2D0BE4` | summer object-rig PS |
+| Relative read of `c27` (`c27[a0.x]`) | Foliage VS detection |
+| `max r0, r0, cK.w` (runtime) or `max r0, r0, cK.s` with `def cK.s = 0` | Wrap-light site |
+| `lrp rD.w, tN.x, cK.s, rS.w` with runtime `cK.y` or `def cK.s = 1` | Leaf-shadow site |
+| PS size 600 + FNV-1a `0x0A2D0BE4` | Summer object-rig PS |
 
-## Interactions
+### Files
 
-- Fences of the vs_2_0 instanced family get all three fixes too (same shaders as bushes).
-- Snow: winter foliage VS/PS are covered by fixes 2 and 3; see [snow.md](snow.md) for ground snow.
-- Lamp colour: per-instance colours were pink (0.77/0.58/0.61 in m21) before [lamp-colour.md](lamp-colour.md).
-- The `def c255` is inserted unconditionally; the notes planned to check that no relative-addressed per-instance array
-  reaches c255, which is not verified in the code (vs_2_0 guarantees 256 constants).
+| File | Symbols | Role |
+|---|---|---|
+| `features/lot_light_bridge.cpp` | `kObjectRigHlsl`, `EnsureObjectReplacement`, `DrawObjectRig` | Fix 1 |
+| | `ClassifyVs` (class 6), `FoliageVsFor`, `OnDrawTracked` | Fix 2 dispatch |
+| | `DrawLeafShadow`, `g_leafPs` | Fix 3 |
+| | `ObjectStatus` | Status line |
+| `features/shader_patches.cpp/.h` | `PatchFoliageVs(t)`, `PatchLeafShadow(t, nightConst)` | Bytecode patches |
+| `shaders/shader_ids.h` | `kObjectRigPs` {600, `0x0A2D0BE4`} | Exact identity of the summer PS |
 
-## Known limitations
+## Rejected approaches
 
-- No ground light on foliage: summer plants and flowers stay darker than the atlas-lit ground next to them (m79; roadmap
-  1.1: export the atlas uv from the vs_2_0 VS through a free constant `c254` and `max(light, atlas)` in the ps_2_0 PS, two
-  formats: `add r3, r3, t4` in the bush, `mad r0, t2, shadow, sky` in the flower).
-- **Summer object HLSL gap:** the summer 600-byte PS goes to `kObjectRigHlsl` (moon shadow only): no ground light and no
-  per-pixel lamps (roadmap 1.5).
-- Plant 2 (m65): already drawn with the patched shaders but dark; its PS multiplies all lamp light by `texld s2` (TEXCOORD3,
-  a 128x128 DXT1 texture, while plant 1 has an 8x8 white one). Not resolved; a new F7 on that plant was requested (the F7
-  capture now decodes DXT1/3/5).
-- Foliage with a 4-light matrix (`VS_4375A3EE` / `EAB58655`, `PS_936D7C02`, 46 draws in the census; `max r0, r0, c31.w`;
-  directions `c8..c10`, colours `c11..c13`): not recognised (no `c27[a0]`); which light is the sun is unknown.
-- Large SpeedTree trees use another path (`TreeLightColors` / `TreeLightDirections`); the captured trees did not use it.
+- Blaming the room-mode rig gather for the dark planters: measurements showed lamps arriving; the moon shadow was the
+  cause. Details in [history](../../history/night-lighting-foliage.md).
+- `lrp` with two constant registers in `PatchLeafShadow`: invalid on native D3D9.
+- Accepting only a runtime `cK.w` clamp and `t5.x` / runtime `cK.y` shadow sites: missed the winter and m78 variants.
 
-## Pitfalls and failed approaches
+## See also
 
-- The planter darkness was first attributed to the room-mode gather (objects inside the plaza "room"); the measurement
-  (`-conjunto`, `-arbusto2`) showed lamps arriving at 0.8-0.99 and the cause was the moon shadow multiplying lamp light.
-- `PatchLeafShadow` first emitted `lrp` with two constant registers: accepted by DXVK, invalid on native D3D9 (review
-  25/09 ~03:30 item 5). Now add + mad.
-- `PatchFoliageVs` initially accepted only a runtime `cK.w`; the winter bush m63 (`def c131 = 0`) was never classed as
-  foliage. `PatchLeafShadow` initially required `t5.x` and runtime `cK.y`; m63 uses `t6.x`, m78 `def c3.z = 1`.
-- When `cK` is a def in `PatchLeafShadow`, its value must be exactly 1 (the "no shadow" end), added in the 25/09 review.
-
-## Testing in game
-
-- At night, walk around a planter with hedges and a street lamp: both sides of the planter lit; the back of a bush facing
-  away from the lamp should be dim, not black. Winter: same with snowy bushes.
-- Status (dev, Developer > Status): `Shadow: moon shadow on objects: fixed | draws fixed: N | foliage (wrap light): N |
-  winter foliage without shadow: N`.
-- F7 on a bush: VS `c54..c62` per-instance colours should be well above 0.1 near lamps; the VS/PS addresses of the patched
-  copies differ from the game's (e.g. m65 "8C8E...", sizes +60 / +36 bytes).
-- Log: `[LotLightBridge] Sombra dos objetos: ativo`; batched `Folhagem: shader de vertice corrigido x N`,
-  `Folhagem (sombra da lua): corrigido x N`.
-
-## Open items
-
-- Ground light on foliage (roadmap 1.1) and on summer `kObjectRigHlsl` objects (1.5).
-- 4-light foliage VS (1.3).
-- Plant 2 texture multiply (m65).
+- [Validation](../../validation/night-lighting-foliage.md)
+- [History](../../history/night-lighting-foliage.md)
+- [Objects and rigs](objects-and-rigs.md), [Fences](fences.md)
+- [Engine: light objects and rigs](../../engine/light-objects-and-rigs.md), [Engine: shaders](../../engine/shaders.md)

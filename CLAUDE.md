@@ -1,4 +1,4 @@
-> Published version 2.5.6: Optimize rendering defaults on (`[ui] performance_mode`); explicit saved off choices remain off. Current development PR #2 removes that switch and its mode-dependent paths; the published binary is unchanged. World-owned type-11 lamp edits reconcile terrain and native rigs; the player confirmed the test-scene colour response, not a latency/FPS benchmark. Read docs/features/night-lighting/world-lamp-response.md and docs/features/performance.md before changing these paths. One unified ASI; optional developer mode; no Apex window/V-Sync/FPS controls.
+> Published version 2.5.6: Optimize rendering defaults on (`[ui] performance_mode`); explicit saved off choices remain off. Current development PR #2 removes that switch and its mode-dependent paths; the published binary is unchanged. World-owned type-11 lamp edits reconcile terrain and native rigs; the player confirmed the test-scene colour response, not a latency/FPS benchmark. Read docs/features/night-lighting/world-lamp-response.md and docs/features/performance/README.md before changing these paths. One unified ASI; optional developer mode; no Apex window/V-Sync/FPS controls.
 
 # CLAUDE.md: Apex Radiance
 
@@ -16,7 +16,7 @@ fences, snow; key `NightTerrainRelight`), Every-Story Ground Light (`SplitLevelG
 light the ground; part of Night Lighting), Reflections, Picture filters (SDR), Edge Smoothing
 (SMAA/FXAA), Depth Blur, Performance (12 individually adjustable switches, enabled by default when no saved choice
 exists; none marked experimental; grouped behind one Performance switch in Overview and included in its All effects
-switch; offline tests in `tools\dxt_test` and `tools\refpack_test`; `docs/features/performance.md`), Frame Profiler (developer mode only), plus dev tools (Light Probe
+switch; offline tests in `tools\dxt_test` and `tools\refpack_test`; `docs/features/performance/README.md`), Frame Profiler (developer mode only), plus dev tools (Light Probe
 Ctrl+Shift+F7, Light Diag Ctrl+Shift+F8, Frame Capture Ctrl+Shift+F9, Lot Map Probe, census). Menu: Violet UI
 (sidebar plus feature cards), hotkey Ctrl+Shift+F11. Smooth Streaming, Script GC Scheduler and Service Frame Budget
 were removed (see below).
@@ -33,11 +33,12 @@ were removed (see below).
 - Current source paths refer to this repository. Explicitly historical sections retain combined-tree references.
 
 ## Read before touching anything
-- Reusable workflows live in the repository: `.agents/skills/apex-version-pr-workflow`, `.agents/skills/apex-compile-project`, `.agents/skills/apex-review-pr-release`; menu guidance and its audit live in `.agents/skills/apex-menu` (portable discovery) and `.claude/skills/apex-menu` (Claude Code discovery). Keep those two UI skill copies synchronized. Read the relevant skill when its task applies. Keep these paths relative so contributors on other machines can use them. New versions/features use a branch, small coherent commits and a draft PR. Coordinate simultaneous work in separate worktrees; merging and releasing remain explicit actions.
+- Documentation follows `docs/DOCUMENTATION-STANDARD.md` (feature, validation and history pages) and the `apex-docs` skill; docs are updated once per release, in the pre-release review, not on every commit.
+- Reusable workflows live in the repository: `.agents/skills/apex-docs`, `.agents/skills/apex-version-pr-workflow`, `.agents/skills/apex-compile-project`, `.agents/skills/apex-review-pr-release`; menu guidance and its audit live in `.agents/skills/apex-menu` (portable discovery) and `.claude/skills/apex-menu` (Claude Code discovery). Keep those two UI skill copies synchronized. Read the relevant skill when its task applies. Keep these paths relative so contributors on other machines can use them. New versions/features use a branch, small coherent commits and a draft PR. Coordinate simultaneous work in separate worktrees; merging and releasing remain explicit actions.
 - `docs/README.md`: index. Then `docs/architecture.md` and `docs/workflow.md`.
 - Before any lighting change: `docs/features/night-lighting/README.md`, the sub-part doc, and the engine docs
-  (`docs/engine/`). Each feature doc has a "Pitfalls and failed approaches" section. Do not retry what is listed there
-  without new evidence.
+  (`docs/engine/`). Each feature doc has a "Rejected approaches" section linking to its history page. Do not retry what is
+  listed there without new evidence.
 - Raw sources, in Portuguese and chronological (later entries win): `S3SS-dev\NOTAS-ILUMINACAO.md`, `PASSO3-PLANO.md`,
   `ROADMAP-NIGHT-REMAKE.md`. Decompile: `S3SS-dev\re\out`. Game shaders: `Game\Bin\Shaders_Win32.precomp` (read-only).
 
@@ -73,7 +74,7 @@ See `docs/features/developer-mode.md` for persistence and verification details.
    First start without `ApexRadiance.toml`: copies the previous standalone's `...\S3SS\Apex\Apex.toml` as it is (old
    folder left in place; its `apex_imgui.ini` is not copied), else migrates from `...\S3SS\S3SS.toml` (backup
    `S3SS.toml.pre-split.bak` in the new folder). Official S3SS keeps `...\S3SS\` (`S3SS.toml`, `S3SS_LOG.txt`); Apex
-   Radiance writes there only to remove the backed-up saved room-ambient RGB override when Rooms at Night is enabled.
+   Radiance writes there only when the player presses **Back up and correct**, to remove the backed-up saved room-ambient RGB override.
 
 ## Rules from the user (always)
 - **Back up before modifying** any game, mod, config or source file, into `Backups Sims 3\<numbered folder>`, never
@@ -129,10 +130,11 @@ and needs the user's explicit OK.
   share, patch system, TOML, logger, flavours, threads, standalone split.
 - `docs/engine/*.md`: TS3W.exe RE with address tables (main loop, streaming, terrain light bake, room light maps,
   light objects and rigs, shaders, camera/map view, Mono GC, timers).
-- `docs/features/**/*.md`: one per feature and per Night Lighting sub-part: settings (TOML keys, defaults), how it
-  works, files, addresses and patterns, interactions, pitfalls, in-game tests.
+- `docs/features/**/*.md`: one per feature (Night Lighting and Performance are groups with one page per part): what it
+  is, the problem, how it is solved, settings, limitations, technical reference. Tests are in `docs/validation/`,
+  dated investigations and rejected approaches in `docs/history/`.
 - `docs/ui.md`: the Violet menu (pages, widgets, startup banners).
-- `docs/features/performance.md`: the resource lookup cache (FindProvider, package list, database classes), the lot
+- `docs/features/performance/`: the resource lookup cache (FindProvider, package list, database classes), the lot
   lighting budget while moving, the DXT encoders (0x006152F0 / 0x006154B0, reverse-engineered step by step) and the
   RefPack stream (compressor, decompressor, callers), the scene pending-node drain (0x006E4130) and the object tree
   walk behind the lookup by ID (0x00C62D40); `framework/slot_chain.h` shares vtable slots, `framework/entry_chain.h`
@@ -143,4 +145,4 @@ and needs the user's explicit OK.
 ## Local UI attribution decision (2026-10-02)
 The user requested less Sims3SettingsSetter prominence. Do not restore its global footer detection label or the long promotional About paragraph. About leads with @loinyx and keeps only a compact sims3fiend framework-design credit. Compatibility detection remains in its own page; project historical attribution and licenses are retained.
 
-Compatibility exception: with Rooms at Night enabled, Apex backs up S3SS.toml in the Apex Radiance folder and removes only the saved `settings.BradyBunchBlue RGB` override. All other settings and patch switches are preserved.
+Compatibility exception: when official S3SS is loaded, the explicit **Back up and correct** action (Rooms at Night) backs up S3SS.toml in the Apex Radiance folder and removes only the saved `settings.BradyBunchBlue RGB` override. Enabling Rooms at Night alone writes nothing to S3SS. All other settings and patch switches are preserved.

@@ -473,7 +473,7 @@ class FrameCapturePatch : public ApexPatch {
 
         g.active = true;
         isEnabled = true;
-        LOG_INFO("[FrameCapture] Installed (press the button or Ctrl+Shift+F9 to capture)");
+        LOG_INFO("[FrameCapture] Installed (press the button or " + ApexConfig::KeyChordText(Hotkeys::Key(Hotkeys::Action::FrameCapture)) + " to capture)");
         return true;
     }
 
@@ -515,7 +515,7 @@ class FrameCapturePatch : public ApexPatch {
 
 #include "build_flavor.h"
 APEX_REGISTER_FEATURE(FrameCapturePatch, {.displayName = "Frame Capture (developer)",
-                                      .description = "Diagnostic: dumps the draw calls of 2 frames to ApexRadiance_FrameCapture.txt (Ctrl+Shift+F9)."
+                                      .description = "Diagnostic: dumps the draw calls of 2 frames to ApexRadiance_FrameCapture.txt (shortcut in Settings > Shortcuts)."
                                                      " Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
                                       .category = "Experimental",
                                       .experimental = true,

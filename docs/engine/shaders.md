@@ -1,13 +1,23 @@
 # The game's shaders and how Apex identifies them (TS3W.exe)
 
-> Engine reference for TS3W.exe 1.67.2 Steam (image base 0x00400000). Sources: F7 Light Probe captures
-> (`Documents\...\S3SS\LightProbe-*`, disassembled with `D3DDisassemble`), the census of 25/09, the offline scans of
-> `Shaders_Win32.precomp`, and the combined build's `shader_ids.h`, `shader_patches.cpp`, `lot_light_bridge.cpp`,
-> `wall_lamp_table.h`, `floor_atlas_table.h` (tag `combined-final`). Shader names like `PS_2669DA40` are the capture's
-> **pointer** at that session, not a stable id; the stable ids are size + hash (section 6). *(unverified)* = not
-> confirmed.
+This page documents the game's shader set as Apex Radiance sees it: the `Shaders_Win32.precomp` file, the shader parameters the engine registers, register conventions, lamp terms per surface, and the machinery Apex uses to recognise a game shader by bytecode. Every Night Lighting sub-part and the Light Probe depend on it.
 
-## 1. Purpose
+## Scope
+
+| | |
+|---|---|
+| Game build | Steam 1.67.2 (`TS3W.exe`, image base 0x00400000) unless stated |
+| Used by | [Night Lighting](../features/night-lighting/README.md) and its sub-parts, [Light Probe](../features/dev-tools/light-probe.md), [Architecture: shader precompile](../architecture.md#44-shader-precompile) |
+| Evidence | F7 Light Probe captures (disassembled with `D3DDisassemble`), the census of 25/09, offline scans of `Shaders_Win32.precomp`, combined-build `shader_ids.h`, `shader_patches.cpp`, `lot_light_bridge.cpp`, `wall_lamp_table.h`, `floor_atlas_table.h` |
+
+## Overview
+
+Engine reference for TS3W.exe 1.67.2 Steam (image base 0x00400000). Sources: F7 Light Probe captures
+(`Documents\...\S3SS\LightProbe-*`, disassembled with `D3DDisassemble`), the census of 25/09, the offline scans of
+`Shaders_Win32.precomp`, and the combined build's `shader_ids.h`, `shader_patches.cpp`, `lot_light_bridge.cpp`,
+`wall_lamp_table.h`, `floor_atlas_table.h` (tag `combined-final`). Shader names like `PS_2669DA40` are the capture's
+**pointer** at that session, not a stable id; the stable ids are size + hash ([How Apex identifies a game shader](#how-apex-identifies-a-game-shader)). *(unverified)* = not
+confirmed.
 
 Every Night Lighting sub-part works by recognising one of the game's shaders and then either changing a constant around
 the draw, drawing with a patched copy, or adding a pass. This page collects what is known about the game's shader set,
@@ -15,7 +25,9 @@ its register conventions and lamp terms, and the machinery Apex uses to recognis
 handled without re-deriving it. The per-surface fixes are in the feature docs
 ([../features/night-lighting/README.md](../features/night-lighting/README.md) and its sub-pages).
 
-## 2. `Shaders_Win32.precomp`
+## Details
+
+### `Shaders_Win32.precomp`
 
 - Path: `C:\Games\Hydra\The Sims 3\Game\Bin\Shaders_Win32.precomp` (read-only reference; never modify it).
 - It holds **every** shader of the game, grouped by **technique name** (ExteriorWall, InteriorFloor, Counters...), plus
@@ -31,7 +43,7 @@ handled without re-deriving it. The per-surface fixes are in the feature docs
 | Shader blobs | 15,689 = 7,671 `"VSHD"` + 8,018 `"PSHD"`. Each: 4-byte tag, dword size, 0..4 header bytes *(meaning unverified)*, then the D3D9 bytecode, whose version token (`0xFFFE....` VS / `0xFFFF....` PS) is found at byte 8..12 of the blob; trim at the end token `0x0000FFFF`. Blob index = order in the file (0-based). `shdlist.pl` walks all of them with 0 failures |
 | Techniques | From about offset 36.2 MB: `"TECH"` + name hash + pass count; per pass `"PASS"` + 2 dwords *(unverified)* + VS index + PS index (**1-based** blob indices, 0 = none), then `"PARM"` blocks (id, count, count × 12-byte entries: name hash + 4 × u16, *register mapping unverified*), then render states (count + pairs), one dword, texture bindings (index, name hash) |
 | Names | `"KNM "` table near the end (offset 92,578,576): size, 1, count, then records `{hash, 0, length, chars}`; 1,281 names extracted to `knm.tsv` |
-| Name hash | **FNV-1** 32-bit (multiply by `0x01000193`, then xor the byte) over the **lowercase** name, basis `0x811C9DC5`. Checked: `LightingTweaks` = `039b656e`, `ExteriorWall` = `0ddcaefb`, `StaticTerrainLightmap` = `86a5dfa4`. Note this is FNV-1 on names; Apex's shader ids (section 6) use FNV-1a over bytecode DWORDs |
+| Name hash | **FNV-1** 32-bit (multiply by `0x01000193`, then xor the byte) over the **lowercase** name, basis `0x811C9DC5`. Checked: `LightingTweaks` = `039b656e`, `ExteriorWall` = `0ddcaefb`, `StaticTerrainLightmap` = `86a5dfa4`. Note this is FNV-1 on names; Apex's shader ids ([How Apex identifies a game shader](#how-apex-identifies-a-game-shader)) use FNV-1a over bytecode DWORDs |
 
   Offline tools (read-only): `techof.pl <precomp> <knm.tsv> <bin>...` maps captured `.bin` files to technique names by
   MD5 (e.g. `scratchpad\censo_tech.txt`); `techps.pl <precomp> <knm.tsv> <outdir> <regex>` dumps the distinct PS/VS of
@@ -55,20 +67,7 @@ light), TerrainLow (distant terrain, light map in s3), TerrainFog, Pick* (select
 GlassFor* (glass), **Night** (the HD mode: 6 per-pixel lamps, position in TEXCOORD2, lamps in c0..cN, falloff
 `saturate(w/d^2)`; needs no fix), OutdoorProp, SingleObject, InstancedObject, Rug, FloorThickness, Ceiling.
 
-## 3. Shader parameters the engine registers
-
-Parameters are registered by name through `0x0079A160(name, a, b)` into handles kept in globals; the binder of a draw
-writes pointers into the shader parameter table `*0x011D7530`, and the effect pass uploads them right before the draw,
-in the same call tree, on the render thread ([light-objects-and-rigs.md](light-objects-and-rigs.md), rig binder).
-
-| Registered at | Names | Meaning |
-|---|---|---|
-| `0x006A4700` (lot lighting) | `LightMap`, `SpilloverLightMap`, `WorldToLotTransform`, `LightmapSizeParameters`, `LotSizeParameters`, `LightBasisMap0..3`, `CounterLightingConfig` | room / lot light maps and their mapping ([room-light-maps.md](room-light-maps.md)); `CounterLightingConfig` = (2, 0, 0, 5) or (2, 0.85, 1, 1) chosen by `lotMgr+0x288` |
-| rig binder `0x006B8B30` | `LightDirections` / `LightColors` (rig `+0x10` / `+0x50`, 4 each: sun + 3 lamps), `VertexLightDirections` / `VertexLightColors` (rig `+0x90` / `+0xD0`), `HDLight*` (rig `+0x08`), `TreeLightColors` / `TreeLightDirections` (SpeedTree path) | per-object light rig ([light-objects-and-rigs.md](light-objects-and-rigs.md)) |
-| precomp parameter names | `InteriorBuildingAmbientColor` (c2 in InteriorWall, c4 in InteriorFloor), `LightingTweaks` (c1 or c2), `ExteriorLightData` (sun, c8/c9 in objects) | captures + precomp |
-| `0x00C292B0` terrain bake | `staticTerrainLightmap` technique; params `Lighting/RenderLightmap/NormalMap`, `Lighting/RenderLightmap/HeightMap` | [terrain-and-light-bake.md](terrain-and-light-bake.md) |
-
-## 4. Register conventions (from captures)
+### Register conventions (from captures)
 
 Vertex shaders:
 
@@ -94,14 +93,14 @@ Pixel shaders:
 | `c2.x` or `c3.x` | lamp scale of ExteriorWall (per variant; in 24 variants `c3.x` is the **bloom threshold**, not the lamp scale) | walls |
 | `c4.x` | lamp scale of the snowy lot pass and winter roads | winter |
 | `c7.x` | scale of the chunk light map in the world terrain shader | terrain |
-| `LightingTweaks` = (0.65, 1, 4.2, 0.25) | interior floors' tone curve (section 5) | InteriorFloor & co |
+| `LightingTweaks` = (0.65, 1, 4.2, 0.25) | interior floors' tone curve ([Lamp terms by surface](#lamp-terms-by-surface)) | InteriorFloor & co |
 
 Samplers:
 
 | Sampler | Content |
 |---|---|
 | `s0`, `s1` | sky cubes (ambient, reflection) |
-| `s5` | sun / moon shadow map (4096^2 at the user's settings; 4 taps, 16 in Apex's roof copy) |
+| `s5` | sun / moon shadow map (4096^2 at the tested settings; 4 taps, 16 in Apex's roof copy) |
 | `s8` | chunk terrain light map (256^2 DXT5, 4 mips) in the world terrain shader; `s7` in the 3-layer variant `PS_294418E0`; `s11` / `s12` in winter; `s3` in TerrainLow |
 | `s1` | lot light map (room 0 `LightMap`) in the lot light pass |
 | `s2` | room / wall light map (per-floor atlas 256x128 .. 1024x512, A8R8G8B8, managed) in walls and floors |
@@ -111,7 +110,7 @@ Samplers:
 Output alpha of walls, objects and roofs is a **bloom mask**: `saturate(luminance - cK.x)`, so more lamp light widens the
 bloom.
 
-## 5. Lamp terms by surface
+### Lamp terms by surface
 
 | Surface | Shader (capture) | Lamp term | Apex handling |
 |---|---|---|---|
@@ -139,7 +138,7 @@ room maps), so a gain must be applied in the shader after the fetch; and the gam
 usually read by exactly one instruction, which is what makes "scale `cK.x` around the draw" safe
 (`ShaderPatches::LightMapScaleConst` checks this).
 
-### The interior floors' tone curve (`LightingTweaks`)
+#### The interior floors' tone curve (`LightingTweaks`)
 
 InteriorFloor, FloorTileCeiling, FloorWith* and Hideable (104 pixel shaders) apply, with `L = dot(rgb, 1/3)`:
 `rgb x tanh(k L / 2) / L`, `k = LightingTweaks.z = 4.2`, as the sequence
@@ -153,7 +152,7 @@ the standalone) described it as `tanh(kL/2)` and computed its rule-T tangent wit
 have been off by a factor ln 2 *(unverified at runtime)*. Anyone re-deriving this curve should start from the
 instruction sequence, not from that comment. `.x`, `.y`, `.w` of `LightingTweaks` are of unknown meaning.
 
-## 6. How Apex identifies a game shader
+### How Apex identifies a game shader
 
 Three levels, from strict to general (combined build files; the standalone keeps the modules):
 
@@ -205,7 +204,7 @@ WorldCandidate (declares `s6` or higher: terrain), LotLight, ObjectRig, Roof, La
 FloorAtlas. A draw is dispatched by the pair; details in
 [../features/night-lighting/README.md](../features/night-lighting/README.md).
 
-### 6.1 Vertex-shader class tests, in order (`ClassifyVsCode`)
+#### Vertex-shader class tests, in order (`ClassifyVsCode`)
 
 | Order | Class | Test |
 |---|---|---|
@@ -228,7 +227,7 @@ floor table (`FloorAtlas`), then `WorldCandidate` = any PS declaring a sampler �
 10). A WorldCandidate is a terrain chunk only if `RecordWorldChunk` passes at draw time (VS c15 = (1/256, 1/256, 0.5,
 0.5) and a 2D 256×256 texture with ≤ 5 levels, not Q8W8V8U8, in s15..s1).
 
-### 6.2 Draw dispatch (`OnDrawInner`, first match wins)
+#### Draw dispatch (`OnDrawInner`, first match wins)
 
 1. ObjectRig PS → `DrawObjectRig`; 2. Roof PS → `DrawRoof`; 3. RoofSnow PS, unless the VS is class 9 → `DrawRoofSnow`;
 4. Lake PS → `DrawLake`; 5. foliage VS → `DrawLeafShadow`; 6. WallGain PS → `DrawWallGain`; 7. if the lot light bridge
@@ -239,7 +238,7 @@ also matches some roof and snow VS); 15. LotLightSnow PS → `DrawLotSnow`; 16. 
 smoothed-map swap, or `DrawSnowFloor` when it is not a chunk; 17. LotLight PS → the replacement lot pass; otherwise the
 snow-floor VS draws not claimed by any PS class.
 
-### 6.3 Pattern matchers (`shader_patches.cpp`)
+#### Pattern matchers (`shader_patches.cpp`)
 
 | Function | Finds | Inserts |
 |---|---|---|
@@ -255,7 +254,7 @@ snow-floor VS draws not claimed by any PS class.
 | `PatchObjectLampVs` | one world triple `dp4 rW.x/y/z` with consecutive cK..cK+2 (open-triple tracking; with several, the one from POSITION, else the root) | `dcl_texcoord8 oN.xyz` + `mov oN.xyz, rW.xzy` (floors: first free TEXCOORD from 7) |
 | `PatchObjectLampPs` | shapes A (sky mad + chain ending `mad rD.xyz, rS.w, c7, rD`, optional `add vC`), B (chain without cube), C (no lamps; `max rX, vC, rY`) | 8 per-pixel lamps (`colour·min(1, W·sat(N·l)/d²)`, W = 0.4 × range) and ground `atlas·(0.5 + 0.5 N.y)·cB.x`, combined by `max` with the game's rig + vertex lights |
 
-### 6.4 Offline coverage results
+#### Offline coverage results
 
 | Check | Result | Where |
 |---|---|---|
@@ -269,7 +268,7 @@ snow-floor VS draws not claimed by any PS class.
 | Floor table | 261 accepted of 571 ExteriorFloors (235 ps_2_0); 0 of 58 InteriorFloor | `snowcover\test13.cpp` |
 | In-game census (dev) | 84 VS/PS pairs with baked light or an outdoor rig, 49 unfixed at 25/09 17:05 | `censo_tech.txt` |
 
-### 6.5 Constant ranges of Apex's own replacement shaders
+#### Constant ranges of Apex's own replacement shaders
 
 Must stay clear of game registers and of each other.
 
@@ -283,7 +282,7 @@ Must stay clear of game registers and of each other.
 | Object / fence patches | `atlasConst`, `strengthConst`, `lampParamConst` (0, strength, 0, 1e-4) + 2 × 8 lamp blocks, all taken from the first free constant of each shader; objects use TEXCOORD8 |
 | Planned per-pixel walls/floors (PASSO3-PLANO.md 3.4) | c64..c149, **never built** |
 
-## 7. Validation and limits
+### Validation and limits
 
 - Every patch is tested offline over all captured shaders and, where possible, over the whole technique in the precomp,
   and every output is disassembled with `D3DDisassemble` (harnesses in the scratchpad; see
@@ -292,20 +291,20 @@ Must stay clear of game registers and of each other.
 - ps_3_0 allows 512 instruction slots on native D3D9 (DXVK reports 32768; the combined build logs the device limits at
   startup), and at most 10 input registers. ps_2_0 has tighter rules: `lrp` with two constant sources is invalid on
   native D3D9 even though DXVK accepts it (bug found and fixed on 25/09).
-- The dev build saves every refused shader (`ShadersRecusados\`, named by content hash, at most 300 per session) and the
+- In developer mode, Apex saves every refused shader (`ShadersRecusados\`, named by content hash, at most 300 per session) and the
   census lists every outdoor VS/PS pair that no fix took, with its refusal reason.
 
-## 8. Which Apex features depend on what
+### Which Apex features depend on what
 
 | Item | Apex users |
 |---|---|
-| Exact ids (section 6, item 1) | Night Lighting: lot pass, snowy lot pass, roofs, lake, snowy roofs, instanced objects' moon shadow |
+| Exact ids ([How Apex identifies a game shader](#how-apex-identifies-a-game-shader), item 1) | Night Lighting: lot pass, snowy lot pass, roofs, lake, snowy roofs, instanced objects' moon shadow |
 | Wall / floor tables | Night Lighting: walls, outdoor floors |
 | Pattern recognisers | Night Lighting: roads, floors, snow, fences, foliage, objects |
 | `c8.w` / `c10.w` keys, `c15` terrain mapping | Night Lighting: chunk map recording (`RecordWorldChunk`), roofs, lake lamp choice |
 | `c40..c43` and the projection shape | PostScene camera vote (dev profiler fallback); Reflections uses the water VS WVP instead |
 
-## 9. Pitfalls
+### Pitfalls
 
 - Capture names (`PS_xxxxxxxx`) are pointers of one session: identify shaders by size + hash or by pattern.
 - Do not assume a constant is the lamp scale because it multiplies a map: in 24 ExteriorWall variants `c3.x` is the
@@ -316,8 +315,29 @@ Must stay clear of game registers and of each other.
 - The water pass disables Z and unbinds depth: mark such passes `DepthShare::SetInternalPass` or the post-scene trigger
   fires mid-frame ([../architecture.md](../architecture.md), post-scene chain).
 
-## 10. Open items
+### Open items
 
 - The precomp container format (only known through the scratchpad scripts).
 - Exact counts per technique for InteriorWall, and the full technique list.
 - Why some variants keep the lamp scale in `c2` and others in `c3` (per-material build options, *unverified*).
+
+## Address reference
+
+Parameters are registered by name through `0x0079A160(name, a, b)` into handles kept in globals; the binder of a draw
+writes pointers into the shader parameter table `*0x011D7530`, and the effect pass uploads them right before the draw,
+in the same call tree, on the render thread ([light-objects-and-rigs.md](light-objects-and-rigs.md), rig binder).
+
+| Registered at | Names | Meaning |
+|---|---|---|
+| `0x006A4700` (lot lighting) | `LightMap`, `SpilloverLightMap`, `WorldToLotTransform`, `LightmapSizeParameters`, `LotSizeParameters`, `LightBasisMap0..3`, `CounterLightingConfig` | room / lot light maps and their mapping ([room-light-maps.md](room-light-maps.md)); `CounterLightingConfig` = (2, 0, 0, 5) or (2, 0.85, 1, 1) chosen by `lotMgr+0x288` |
+| rig binder `0x006B8B30` | `LightDirections` / `LightColors` (rig `+0x10` / `+0x50`, 4 each: sun + 3 lamps), `VertexLightDirections` / `VertexLightColors` (rig `+0x90` / `+0xD0`), `HDLight*` (rig `+0x08`), `TreeLightColors` / `TreeLightDirections` (SpeedTree path) | per-object light rig ([light-objects-and-rigs.md](light-objects-and-rigs.md)) |
+| precomp parameter names | `InteriorBuildingAmbientColor` (c2 in InteriorWall, c4 in InteriorFloor), `LightingTweaks` (c1 or c2), `ExteriorLightData` (sun, c8/c9 in objects) | captures + precomp |
+| `0x00C292B0` terrain bake | `staticTerrainLightmap` technique; params `Lighting/RenderLightmap/NormalMap`, `Lighting/RenderLightmap/HeightMap` | [terrain-and-light-bake.md](terrain-and-light-bake.md) |
+
+## See also
+
+- [Light objects and rigs](light-objects-and-rigs.md): the rig binder.
+- [Room light maps](room-light-maps.md).
+- [Terrain and light bake](terrain-and-light-bake.md).
+- [Camera and map view](camera-and-map-view.md): projection constants.
+- [Night Lighting](../features/night-lighting/README.md).

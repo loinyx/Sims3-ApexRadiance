@@ -1,6 +1,16 @@
 # Mono / Boehm GC and the simulation thread
 
-## Purpose
+This page documents the Mono runtime embedded in `TS3W.exe`, its Boehm-Demers-Weiser collector in incremental mode, and the simulation thread on which `MonoScriptHost` runs sim ticks, script tasks, a time-boxed GC slice and a finalizer batch. The Frame Profiler's "Script GC" category depends on it; it is also the background for the removed Script GC Scheduler and for S3SS's GC patches.
+
+## Scope
+
+| | |
+|---|---|
+| Game build | Steam 1.67.2 (`TS3W.exe`, image base 0x00400000) unless stated |
+| Used by | [Frame Profiler](../features/frame-profiler.md); historically the Script GC Scheduler ([removed](../removed-features.md#script-gc-scheduler)) |
+| Evidence | Combined-build `gc_scheduler_patch.cpp` header (from `dumpbin /disasm`), S3SS GC patch files, `engine_map` `f_D81840.asm`, `full.asm`, `dwords.txt`, `iat.map`, `fnstrings.tsv`; items marked *(inferred)* are static only |
+
+## Overview
 
 TS3W.exe embeds Mono with the Boehm-Demers-Weiser conservative collector, compiled in incremental mode. The game's script
 host (`MonoScriptHost`) runs on its own **simulation thread**. That thread executes the sim ticks, the script tasks
@@ -12,13 +22,6 @@ This page maps those functions and globals. It is the background for:
 - the Frame Profiler's "Script GC" category;
 - S3SS's three GC patches (GCTryToCollect, GCFinalizeThrottle, GCStopWorld).
 
-Sources:
-- `patches/gc_scheduler_patch.cpp` header (read from the raw exe with `dumpbin /disasm`);
-- the S3SS GC patch files;
-- engine_map `f_D81840.asm`, `full.asm`, `dwords.txt`, `iat.map`, `fnstrings.tsv`;
-- `frame_profiler.cpp`;
-- `patches/smooth_patch_precise.cpp`.
-
 TS3W.exe 1.67.2 Steam, image base 0x00400000. Items marked *(inferred)* come from static reading only.
 
 Threads, per NOTAS-ILUMINACAO.md "Desempenho: mapa do motor (28/09)":
@@ -29,7 +32,84 @@ Threads, per NOTAS-ILUMINACAO.md "Desempenho: mapa do motor (28/09)":
 So GC work on the simulation thread shows up in the frame only indirectly: through sim tick rate, UI responsiveness,
 and locks shared with the render thread. See [main-loop-and-services.md](main-loop-and-services.md).
 
-## Address table
+## Details
+
+### Sources
+
+Sources:
+- `patches/gc_scheduler_patch.cpp` header (read from the raw exe with `dumpbin /disasm`);
+- the S3SS GC patch files;
+- engine_map `f_D81840.asm`, `full.asm`, `dwords.txt`, `iat.map`, `fnstrings.tsv`;
+- `frame_profiler.cpp`;
+- `patches/smooth_patch_precise.cpp`.
+
+### How a Simulate pass collects
+
+1. Get the start time from the µs stopwatch 0x011EE530 and store it at 0x011EE524.
+2. Call `GC_try_to_collect(0x00D717B0)`. Every incremental step polls the stop callback, which aborts once more than
+   [0x011922A4] µs (500-1500, initially 1000) have passed since step 1. Effect: **the game collects continuously**, one
+   time-boxed slice per Simulate pass. With Smooth Patch Precise, passes run up to the configured tick rate (the test
+   log of 2026-09-28 14:20 shows 960 TPS).
+3. Not time-boxed, so these are the long spikes:
+   - `GC_finish_collection`;
+   - the forced finish after 40 aborted attempts;
+   - any blocking collection that an allocation starts (`GC_collect_or_expand` → 0xD70800 → 0xE4A320). That path is
+     taken when no free heap block is left, which is why the GC Scheduler keeps a free-heap watermark.
+4. Adapt the budget by ±100 µs based on the counter [0x011F2F98] (see the table).
+5. Run the finalizer batch (0xE697F0). Sustained pressure (at least 50 finalizers per call for 200 passes in a row)
+   triggers a blocking "run until none left" loop. S3SS's GCFinalizeThrottle targets this.
+
+**Measured** (Frame Profiler "Script GC" = the time inside 0xE4A050, simulation thread; `S3SS_Hitches.txt` reports of
+2026-09-28, GC Scheduler on but, per the 14:20 log, not postponing):
+
+| Report | Average per call | Worst per hitch |
+|---|---|---|
+| 11:34 | 1.54 ms | 3.15 ms |
+| 12:00 | 1.65 ms | 3.47 ms |
+| 13:19 | 1.26 ms | 3.94 ms |
+
+The 14:20 session's longest call was 3.83 ms. The averages exceed the nominal 1 ms budget, because the budget is only
+checked between steps.
+
+### S3SS's GC patches (upstream S3SS; they stay in S3SS after the split)
+
+| Patch (name, display name) | Bytes | Effect and notes |
+|---|---|---|
+| `GCTryToCollect`, "Chunky Patch - Disable GC_try_to_collect()" | NOPs the 5-byte `call` at 0xD819AA (pattern `68 ?? ?? ?? ?? A3 ?? ?? ?? ?? E8 ?? ?? ?? ?? A1 ?? ?? ?? ?? 83 C4 04`, +10; `expectedBytes {E8}`) | No explicit collections at all. Collection then happens only through allocation pressure, which means **blocking full collections** on the allocating thread (0xD70800 → 0xE4A320). In the combined build it refuses while GcScheduler is on, and vice versa (see [../removed-features.md](../removed-features.md#script-gc-scheduler)). Upstream only checks `E8`, so it would NOP over Apex's redirect (PLANO-SEPARACAO.md §3) |
+| `GCFinalizeThrottle`, "GC Finalizer Throttle" | `cmp eax,0C8h` → `cmp eax,7FFFh` at 0xD81A1D (pattern `03 C5 3D C8 00 00 00 A3 ?? ?? ?? ?? 75`, +2); `jnz` (75 F7) → `90 90` at 0xD81A37 (pattern `E8 ?? ?? ?? ?? 85 C0 75 F7 89 1D`, +7). PLANO §3 lists the pattern starts 0xD81A1B / 0xD81A30 | The blocking loop triggers after 32767 pressured passes instead of 200, and then runs one extra batch instead of looping until none are left. Finalizers can pile up in long sessions (upstream note: "May slightly increase memory usage") |
+| `GCStopWorld`, "GC_stop_world() Optimization" | At 0xE511F5 (Retail 0xE514E5, EA 0xE51245), `3D 00 01 00 00 7C 05` → `85 C0 74 7D 90 90 90` (`test eax,eax; jz 0xE51276; nop x3`) | Upstream intent: skip the thread loop when the count is 0. **Static finding:** the patch also removes the `jl` that skipped `mov eax,0FFh` (0xE511FC), so whenever the count is non-zero the loop bound becomes 255 on every iteration. The loop then visits all 256 slots instead of count+1. Empty slots are skipped cheaply, so the effect is small either way *(not measured)*. Upstream calls it "very minor" |
+
+The combined build's GC Scheduler redirected the same `call` as GCTryToCollect. It combined with the other two because
+the bytes differ. The standalone ships no GC patch, so these three stay S3SS-only.
+
+### The simulation thread and Smooth Patch
+
+- The simulation thread is the one that calls `GC_try_to_collect`. The Frame Profiler identifies it that way
+  (`Hook_ScriptGC` stores `g_simTid`).
+- IdleSimulationCycle (0x7694B0), the job pump (0xD81FDA) and the finalizer loop run on it. Smooth Patch Precise's
+  thread boost labels it "simulation thread" when its hook first runs there. See
+  [timers-and-sleeps.md](timers-and-sleeps.md).
+- A pass is: sim services (0x59ED70) → ticks → script tasks (0xD7FE80, 0xD74800, 0xD7F8B0) → GC slice → finalizers →
+  stats → job pump → IdleSimulationCycle. This order is from `f_D81840.asm`; the GC slice sits near the top of the loop
+  body at 0xD819AA, after `0xD7FC60` and the stopwatch reads.
+
+### Which Apex features depend on what
+
+| Item | Used by |
+|---|---|
+| Call 0xD819AA, target 0xE4A050 and its prologue, budget 0x011922A4 (display), 0xE69670 and the heap globals 0x012225A0/B4 | Script GC Scheduler (combined build only; removed, see [../removed-features.md](../removed-features.md#script-gc-scheduler)) |
+| 0xE4A050 (entry Detour, "Script GC"), the call-site text for 0xD819AA | [Frame Profiler](../features/frame-profiler.md) |
+| 0xD81FDE, host+0xC08, host+0xA60 | S3SS Smooth Patch Precise (not Apex in the standalone) |
+
+### Open questions
+
+- What increments [0x011F2F98] (the budget adaptation counter)?
+- Whether [0x011EE528] can be 0 in normal play. If it were, the stop callback would never abort, and every slice would
+  run to completion.
+- How often allocator-triggered blocking collections happen in practice (not instrumented; the profiler times only
+  0xE4A050).
+
+## Address reference
 
 ### MonoScriptHost::Simulate (simulation thread)
 
@@ -97,66 +177,8 @@ and locks shared with the render thread. See [main-loop-and-services.md](main-lo
 | 0x00E69690 | Heap size, 64-bit (`call 0xE4DD30; xor edx,edx`), probably `mono_gc_get_heap_size` *(name inferred)* | `full.asm` |
 | 0x00E697F0 | `mono_gc_invoke_finalizers`: `call 0xE4B3E0`; if non-zero, `jmp 0xE4B3F0`; else return 0. Probably GC_should_invoke_finalizers / GC_invoke_finalizers *(names inferred)* | `full.asm`; GC Scheduler header names the loop |
 
-## How a Simulate pass collects
+## See also
 
-1. Get the start time from the µs stopwatch 0x011EE530 and store it at 0x011EE524.
-2. Call `GC_try_to_collect(0x00D717B0)`. Every incremental step polls the stop callback, which aborts once more than
-   [0x011922A4] µs (500-1500, initially 1000) have passed since step 1. Effect: **the game collects continuously**, one
-   time-boxed slice per Simulate pass. With Smooth Patch Precise, passes run up to the configured tick rate (the user's
-   log of 2026-09-28 14:20 shows 960 TPS).
-3. Not time-boxed, so these are the long spikes:
-   - `GC_finish_collection`;
-   - the forced finish after 40 aborted attempts;
-   - any blocking collection that an allocation starts (`GC_collect_or_expand` → 0xD70800 → 0xE4A320). That path is
-     taken when no free heap block is left, which is why the GC Scheduler keeps a free-heap watermark.
-4. Adapt the budget by ±100 µs based on the counter [0x011F2F98] (see the table).
-5. Run the finalizer batch (0xE697F0). Sustained pressure (at least 50 finalizers per call for 200 passes in a row)
-   triggers a blocking "run until none left" loop. S3SS's GCFinalizeThrottle targets this.
-
-**Measured** (Frame Profiler "Script GC" = the time inside 0xE4A050, simulation thread; `S3SS_Hitches.txt` reports of
-2026-09-28, GC Scheduler on but, per the 14:20 log, not postponing):
-
-| Report | Average per call | Worst per hitch |
-|---|---|---|
-| 11:34 | 1.54 ms | 3.15 ms |
-| 12:00 | 1.65 ms | 3.47 ms |
-| 13:19 | 1.26 ms | 3.94 ms |
-
-The 14:20 session's longest call was 3.83 ms. The averages exceed the nominal 1 ms budget, because the budget is only
-checked between steps.
-
-## S3SS's GC patches (upstream S3SS; they stay in S3SS after the split)
-
-| Patch (name, display name) | Bytes | Effect and notes |
-|---|---|---|
-| `GCTryToCollect`, "Chunky Patch - Disable GC_try_to_collect()" | NOPs the 5-byte `call` at 0xD819AA (pattern `68 ?? ?? ?? ?? A3 ?? ?? ?? ?? E8 ?? ?? ?? ?? A1 ?? ?? ?? ?? 83 C4 04`, +10; `expectedBytes {E8}`) | No explicit collections at all. Collection then happens only through allocation pressure, which means **blocking full collections** on the allocating thread (0xD70800 → 0xE4A320). In the combined build it refuses while GcScheduler is on, and vice versa (see [../removed-features.md](../removed-features.md#script-gc-scheduler)). Upstream only checks `E8`, so it would NOP over Apex's redirect (PLANO-SEPARACAO.md §3) |
-| `GCFinalizeThrottle`, "GC Finalizer Throttle" | `cmp eax,0C8h` → `cmp eax,7FFFh` at 0xD81A1D (pattern `03 C5 3D C8 00 00 00 A3 ?? ?? ?? ?? 75`, +2); `jnz` (75 F7) → `90 90` at 0xD81A37 (pattern `E8 ?? ?? ?? ?? 85 C0 75 F7 89 1D`, +7). PLANO §3 lists the pattern starts 0xD81A1B / 0xD81A30 | The blocking loop triggers after 32767 pressured passes instead of 200, and then runs one extra batch instead of looping until none are left. Finalizers can pile up in long sessions (upstream note: "May slightly increase memory usage") |
-| `GCStopWorld`, "GC_stop_world() Optimization" | At 0xE511F5 (Retail 0xE514E5, EA 0xE51245), `3D 00 01 00 00 7C 05` → `85 C0 74 7D 90 90 90` (`test eax,eax; jz 0xE51276; nop x3`) | Upstream intent: skip the thread loop when the count is 0. **Static finding:** the patch also removes the `jl` that skipped `mov eax,0FFh` (0xE511FC), so whenever the count is non-zero the loop bound becomes 255 on every iteration. The loop then visits all 256 slots instead of count+1. Empty slots are skipped cheaply, so the effect is small either way *(not measured)*. Upstream calls it "very minor" |
-
-The combined build's GC Scheduler redirected the same `call` as GCTryToCollect. It combined with the other two because
-the bytes differ. The standalone ships no GC patch, so these three stay S3SS-only.
-
-## The simulation thread and Smooth Patch
-- The simulation thread is the one that calls `GC_try_to_collect`. The Frame Profiler identifies it that way
-  (`Hook_ScriptGC` stores `g_simTid`).
-- IdleSimulationCycle (0x7694B0), the job pump (0xD81FDA) and the finalizer loop run on it. Smooth Patch Precise's
-  thread boost labels it "simulation thread" when its hook first runs there. See
-  [timers-and-sleeps.md](timers-and-sleeps.md).
-- A pass is: sim services (0x59ED70) → ticks → script tasks (0xD7FE80, 0xD74800, 0xD7F8B0) → GC slice → finalizers →
-  stats → job pump → IdleSimulationCycle. This order is from `f_D81840.asm`; the GC slice sits near the top of the loop
-  body at 0xD819AA, after `0xD7FC60` and the stopwatch reads.
-
-## Which Apex features depend on what
-
-| Item | Used by |
-|---|---|
-| Call 0xD819AA, target 0xE4A050 and its prologue, budget 0x011922A4 (display), 0xE69670 and the heap globals 0x012225A0/B4 | Script GC Scheduler (combined build only; removed, see [../removed-features.md](../removed-features.md#script-gc-scheduler)) |
-| 0xE4A050 (entry Detour, "Script GC"), the call-site text for 0xD819AA | [Frame Profiler](../features/frame-profiler.md) |
-| 0xD81FDE, host+0xC08, host+0xA60 | S3SS Smooth Patch Precise (not Apex in the standalone) |
-
-## Open questions
-- What increments [0x011F2F98] (the budget adaptation counter)?
-- Whether [0x011EE528] can be 0 in normal play. If it were, the stop callback would never abort, and every slice would
-  run to completion.
-- How often allocator-triggered blocking collections happen in practice (not instrumented; the profiler times only
-  0xE4A050).
+- [Main loop, services and threads](main-loop-and-services.md).
+- [Clock, sleeps and frame limiter](timers-and-sleeps.md): the Smooth Patch sites.
+- [Removed features: Script GC Scheduler](../removed-features.md#script-gc-scheduler).

@@ -277,6 +277,16 @@ bool ParseKeyChord(const std::string& text, KeyChord& out) {
     return true;
 }
 
+// A bare letter, digit or Space would fire while typing Sim, lot or save names: older saves stored a bare C.
+static KeyChord AcceptScreenshotKey(const KeyChord& c) {
+    const bool bare = !c.ctrl && !c.shift && !c.alt &&
+                      ((c.vk >= 'A' && c.vk <= 'Z') || (c.vk >= '0' && c.vk <= '9') || c.vk == VK_SPACE);
+    if (!bare) return c;
+    const KeyChord fallback = UiSettings{}.screenshotKey;
+    LOG_INFO("[Config] screenshot_key " + KeyChordText(c) + " is a bare typing key; using " + KeyChordText(fallback));
+    return fallback;
+}
+
 UiSettings GetUi() {
     std::lock_guard<std::mutex> lock(g_uiLock);
     return g_ui;
@@ -356,9 +366,10 @@ void LoadSettings() {
         if (ParseKeyChord((*ui)["search_key"].value_or(std::string()), own)) u.searchKey = own;
         if (ParseKeyChord((*ui)["peek_key"].value_or(std::string()), own)) u.peekKey = own;
         if (ParseKeyChord((*ui)["picture_compare_key"].value_or(std::string()), own)) u.pictureCompareKey = own;
-        u.screenshotShortcutEnabled = (*ui)["screenshot_shortcut_enabled"].value_or(true);
-        if (ParseKeyChord((*ui)["screenshot_key"].value_or(std::string("C")), own)) u.screenshotKey = own;
+        // screenshot_shortcut_enabled is no longer shown in the menu; a saved false would hide the shortcut for good
+        if (ParseKeyChord((*ui)["screenshot_key"].value_or(std::string()), own)) u.screenshotKey = AcceptScreenshotKey(own);
         u.screenshotHideGameUi = (*ui)["screenshot_hide_game_ui"].value_or(true);
+        u.screenshotToApexFolder = (*ui)["screenshot_folder"].value_or(std::string("game")) == "apex";
         u.sidebarCollapsed = (*ui)["sidebar_collapsed"].value_or(false);
         const std::string lang = (*ui)["language"].value_or(std::string("auto"));
         u.language = lang == "en" ? 0 : lang == "pt" ? 1 : lang == "es" ? 2 : lang == "fr" ? 3 : -1;
@@ -437,6 +448,7 @@ bool Save(std::string* error) {
         ui.insert("screenshot_shortcut_enabled", u.screenshotShortcutEnabled);
         ui.insert("screenshot_key", KeyChordText(u.screenshotKey));
         ui.insert("screenshot_hide_game_ui", u.screenshotHideGameUi);
+        ui.insert("screenshot_folder", std::string(u.screenshotToApexFolder ? "apex" : "game"));
         ui.insert("sidebar_collapsed", u.sidebarCollapsed);
         static constexpr const char* kLanguageKeys[] = {"en", "pt", "es", "fr"};
         ui.insert("language", u.language >= 0 && u.language < 4 ? kLanguageKeys[u.language] : "auto");
@@ -632,9 +644,9 @@ void ApplyFeatureState(const toml::table& state) {
         if (ParseKeyChord((*sc)["search_key"].value_or(std::string()), k)) u.searchKey = k;
         if (ParseKeyChord((*sc)["peek_key"].value_or(std::string()), k)) u.peekKey = k;
         if (ParseKeyChord((*sc)["picture_compare_key"].value_or(std::string()), k)) u.pictureCompareKey = k;
-        u.screenshotShortcutEnabled = (*sc)["screenshot_shortcut_enabled"].value_or(u.screenshotShortcutEnabled);
-        if (ParseKeyChord((*sc)["screenshot_key"].value_or(std::string()), k)) u.screenshotKey = k;
+        if (ParseKeyChord((*sc)["screenshot_key"].value_or(std::string()), k)) u.screenshotKey = AcceptScreenshotKey(k);
         u.screenshotHideGameUi = (*sc)["screenshot_hide_game_ui"].value_or(u.screenshotHideGameUi);
+        if (auto f = (*sc)["screenshot_folder"].value<std::string>()) u.screenshotToApexFolder = *f == "apex";
         u.keyChosen = true;
         SetUi(u);
         LOG_INFO("[Config] Shortcuts taken from the profile: menu key " + KeyChordText(u.toggle));
@@ -790,6 +802,7 @@ bool SaveProfile(const std::string& name, unsigned parts, std::string* error, co
             sc.insert("screenshot_shortcut_enabled", u.screenshotShortcutEnabled);
             sc.insert("screenshot_key", KeyChordText(u.screenshotKey));
             sc.insert("screenshot_hide_game_ui", u.screenshotHideGameUi);
+            sc.insert("screenshot_folder", std::string(u.screenshotToApexFolder ? "apex" : "game"));
             root.insert_or_assign("shortcuts", std::move(sc));
         }
         KeepProfileParts(root, parts);

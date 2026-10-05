@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 // Official Sims3SettingsSetter (S3SS), the old combined build (S3SS with Apex inside, named S3SSApex.asi) and the
 // previous standalone build (also S3SSApex.asi), as seen from Apex Radiance. None exports anything, so they are
 // recognised by strings in their read-only data:
@@ -54,6 +55,10 @@ struct RoomAmbientCorrection {
     std::array<float, 3> rgb{};
 };
 RoomAmbientCorrection CorrectRoomAmbientOverride();
+// Read-only: official S3SS is loaded and S3SS.toml saves a supported room-ambient override (the exact entry
+// CorrectRoomAmbientOverride would remove). Nothing is written. The file is read again at most every 3 s (the menu asks
+// every frame), or now with fresh = true.
+std::optional<std::array<float, 3>> SavedRoomAmbientOverride(bool fresh = false);
 // S3SS's "Split-Level Lighting Fix" is in place: enabled in S3SS.toml, or GetLotID (0x6BC020 on Steam, found by signature
 // elsewhere: game_addresses.h) no longer holds its original bytes. Apex's own equivalent (patches/split_level_ground_light_patch.cpp) then stays out of the way.
 // Call it before Apex writes its own patch there (the byte test cannot tell the two apart).

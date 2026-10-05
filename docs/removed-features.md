@@ -1,13 +1,22 @@
-# Removed features and historical implementations
+# Removed features
 
-> This is a historical reference, not the current feature list. Standalone GTAO was reintroduced on 2026-09-30; see [Ambient Occlusion](features/ambient-occlusion.md). The Ambient Occlusion section below describes the earlier removed implementation.
+Archive of features that were removed from Apex Radiance or replaced by a different implementation. Each entry has the
+same structure: **What it was**, **Why removed**, and **Revival notes** (where the code lives, settings, the findings and
+pitfalls worth keeping, and what a revival would need). Nothing here describes current behaviour; current features are
+listed in [README.md](README.md).
 
-Features that existed in the combined build (S3SS + Apex in one ASI, git tag `combined-final`, commit 45e36e2, tree
-`%USERPROFILE%\Desktop\S3SS-dev\Sims3SettingsSetter\`) and are **not** carried into the standalone Apex Radiance. This
-file keeps what was learned so a future session can revive them without re-deriving anything. The code at that tag is
-the ground truth; file paths below are relative to that tree.
+The removed code is in the combined build (S3SS and Apex in one ASI, git tag `combined-final`, commit 45e36e2, tree
+`%USERPROFILE%\Desktop\S3SS-dev\Sims3SettingsSetter\`), which is the ground truth; file paths below are relative to
+that tree. Scope rule: these features are not restored without an explicit request.
 
----
+| Feature | Removed | Replaced by |
+|---|---|---|
+| [HDR output](#hdr-output) | 2026-09-28, standalone scope decision | Picture filters, SDR only ([features/picture-filters.md](features/picture-filters.md)) |
+| [Native HDR](#native-hdr) | 2026-09-28, with HDR output | Nothing |
+| [Ambient Occlusion (HBAO, combined build)](#ambient-occlusion-hbao-combined-build) | 2026-09-28 | Standalone GTAO since 2.1.0 ([features/ambient-occlusion.md](features/ambient-occlusion.md)) |
+| [Smooth Streaming](#smooth-streaming) | 2026-09-28, no perceptible gain | Localized terrain relight moved into Night Lighting |
+| [Script GC Scheduler](#script-gc-scheduler) | 2026-09-28, no perceptible gain | Nothing |
+| [Service Frame Budget](#service-frame-budget) | 2026-09-28, no perceptible gain | Nothing |
 
 ## HDR output
 
@@ -22,7 +31,7 @@ peak calibration pattern, developer diagnostics (`HDR_Diag_N`). UI: Display tab 
 monitor luminance) and could be overridden.
 
 ### Why removed
-User decision, 28/09/2026: the standalone keeps only the Picture filters (SDR, see
+Scope decision of 28/09/2026: the standalone keeps only the Picture filters (SDR, see
 [features/picture-filters.md](features/picture-filters.md)). HDR output and Native HDR are dropped with everything that
 exists only for them.
 
@@ -30,7 +39,9 @@ Status at removal: the first version was run in game (diagnostics HDR_Diag_1/2, 
 there was fixed; the later additions (sky, glow, limiter, gamut, calibration, Native HDR) have no in-game test result
 recorded in the notes (unverified).
 
-### Where the code lives (tag `combined-final`)
+### Revival notes
+
+#### Where the code lives (tag `combined-final`)
 
 | File | What |
 |---|---|
@@ -43,7 +54,7 @@ recorded in the notes (unverified).
 | `lot_light_bridge.cpp`, `shader_patches.cpp` (`PatchFoliageVs(t, lampGain)`), `water_lamps_ps.hlsl` (`params.z`) | lamp gain consumers (Native HDR section) |
 | `d3d9_extra_hooks` | `RawGet/RawSetDepthStencilSurface` used to unbind the INTZ depth while the sky boost samples it |
 
-### Settings (`[qol.hdr]`, for revival)
+#### Settings (`[qol.hdr]`, for revival)
 
 | UI label | key | default | UI range / mapping |
 |---|---|---|---|
@@ -64,9 +75,9 @@ recorded in the notes (unverified).
 | Game gamma | `gamma` | 0 | 0 = 2.2, 1 = sRGB piecewise |
 
 Before the Picture split, `[qol.hdr]` also held the grade keys; the Picture loader still migrates them (see
-[features/picture-filters.md](features/picture-filters.md#migration-from-qolhdr-hdroutputloadfromtoml-readgrade)).
+[features/picture-filters.md, Technical reference](features/picture-filters.md#technical-reference) ("Configuration migration")).
 
-### Key findings worth keeping
+#### Key findings worth keeping
 1. **The game clamps at 1.0.** HDR_Diag_1/2 (28/09): nothing above white in the game's output, gamma ramp identity, no
    sRGB-on-write draws into the back buffer, the input was *not* quantised to 8 bits (0.7-0.8% of mid-tones exactly on
    8-bit levels). So a 16-bit back buffer alone gives no highlights: HDR content must come from the mod (the lamp gain of
@@ -128,7 +139,7 @@ Before the Picture split, `[qol.hdr]` also held the grade keys; the Picture load
     EndScene and draw its menu twice); `BeforeOverlay` replaced by the same end-of-scene test at Present. Borderless
     (S3SS) and the FP16 format touch different `D3DPRESENT_PARAMETERS` fields, so both CreateDevice hook orders work.
 
-### Pitfalls (do not repeat)
+#### Pitfalls (do not repeat)
 - **HDR-mod DXVK fork.** On 28/09 the fork "HDR-mod" (Lilium/EndlesslyFlowering, v3.1-HDR-mod-v0.3.4) was installed in
   place of what was believed to be "DXVK 2.0" (backup folder `Backups Sims 3\10-DXVK 2.0 original`). That was a misread:
   the game's `d3d9.dll` was already the official DXVK 3.1.1 (hash identical to the release), and the backup is 3.1.1.
@@ -140,8 +151,6 @@ Before the Picture split, `[qol.hdr]` also held the grade keys; the Picture load
 - First-depth-off scene copy -> 98.7% UI (above). Hooks below `Priority::First` miss draws lot_light_bridge skips.
 - The combined README still describes the grade controls under HDR > Advanced (stale since the Picture split).
 
----
-
 ## Native HDR
 
 ### What it was
@@ -152,12 +161,20 @@ updated each frame in `OnEndScene`; 1 when HDR is inactive). Two parts:
   was multiplied by `LampGain()`.
 - **`hdr_native.cpp`:** the game's own shaders no other part of the mod touches (interiors), patched by pattern rules.
 
-Why removed: same user decision, 28/09/2026 (it only makes sense with HDR output). Code: `hdr_native.cpp/.h`, the
+### Why removed
+
+It only makes sense with HDR output and was removed with it by the 2026-09-28 scope decision.
+
+### Revival notes
+
+#### Where the code lives
+
+Code: `hdr_native.cpp/.h`, the
 `LampGain()` call sites below, `PatchFoliageVs(t, lampGain)` in `shader_patches.cpp`, `params.z` in
 `water_lamps_ps.hlsl`, `g_lampGainOn` in `lot_light_bridge.cpp` (`OnPresent` keeps the bridge hooks on for the gain alone).
-The standalone must replace these calls with 1 or remove them.
+The standalone replaced these calls with 1 or removed them.
 
-### Lamp gain paths (Stage B, NOTAS "HDR nativo e saida HDR")
+#### Lamp gain paths (Stage B, NOTAS "HDR nativo e saida HDR")
 
 | Surface | Where the gain went | Source |
 |---|---|---|
@@ -176,7 +193,7 @@ The `ConstGain` helper scales `cK.x` for one draw and restores it; it does nothi
 `0x011D0BA8`, includes the sun, so a lamp gain there is capped back or brightens the sun too); the winter bush
 (`PatchFoliageVs` refuses: its VS passes r0.y to TEXCOORD1.w and its PS saturates it, so the gain would not be lamp-only).
 
-### Interiors (`hdr_native.cpp`)
+#### Interiors (`hdr_native.cpp`)
 - **The room light map is not lamp-only.** The CPU room solve (LightPointWithAllLights `0x0069FD60`, texels written by
   `FUN_006a31d0`) stores `rgb = min(sum of every light in the room list x room normalisation room+0x160, 1)` and
   `alpha` = an ambient weight. The room list also holds window lights (vtable `0x00FF43A8` "type 7" and `0x00FF4408`
@@ -216,27 +233,35 @@ The `ConstGain` helper scales `cK.x` for one draw and restores it; it does nothi
   shaders: ... room light, ... objects, ... tone curve, ... lot pass, ... refused | draws last frame: n". Log prefix
   `[HdrNative]`, batched to one line per second.
 
-### Pitfalls
+#### Pitfalls
 - Treating the room light map as lamp light brightens daylight through windows: weight by the night level.
 - Scaling the game's rigs (cap includes the sun) and the winter bush (PS saturation) was rejected, see Skipped paths.
 - Do not assume the tanh curve is in many families: only the 6 interior-floor techniques (104 PS).
 
----
+## Ambient Occlusion (HBAO, combined build)
 
-## Ambient Occlusion
+### What it was
 
-**What it was.** Screen-space ambient occlusion computed from the scene depth and applied to the finished 3D scene
+Screen-space ambient occlusion computed from the scene depth and applied to the finished 3D scene
 before the UI: soft shading under furniture, in corners, around houses and trees. Patch name `AmbientOcclusion`,
 Apex tab, settings `[patches.AmbientOcclusion]` (`intensidade` 1.0 [0-3], `raioM` 2.0 m [0.5-4], `protegerLuz` 0.5 [0-1],
 `visualizar` 0 Normal / 1 Shading only), flagged experimental. The last version was installed 27/09 23:52 ("not tested in
 game" in the notes); the log of the 28/09 14:20 session shows it running in game (`[AO] Installed`, `[AO] Resources
-ready (3840x2160, pyramid 3840x2304)`, later `[AO] Uninstalled`), which is when the user judged it.
+ready (3840x2160, pyramid 3840x2304)`, later `[AO] Uninstalled`), which is when it was judged in play.
 
-**Why removed.** User decision, 28/09/2026: the deterministic AO was **not good enough** for the user, and AO (together
-with HDR output and Native HDR) is not carried into the standalone. An earlier SSAO line had already been removed on the
-user's request on 27/09 ("remove it completely, it doesn't work") after repeated twinkling complaints.
+### Why removed
 
-**Where the code lives.** Combined build, git tag `combined-final`, commit 45e36e2:
+Decision of 28/09/2026: the deterministic AO was judged **not good enough** in play, and AO (together
+with HDR output and Native HDR) is not carried into the standalone. An earlier SSAO line had already been removed
+on 27/09 after repeated twinkling complaints; maintainer feedback was that it did not work and should be removed completely.
+
+### Revival notes
+
+The standalone GTAO ([features/ambient-occlusion.md](features/ambient-occlusion.md)) replaced this implementation in 2.1.0; its study is in [history/ambient-occlusion.md](history/ambient-occlusion.md). These notes are kept for the HBAO design and the earlier SSAO line.
+
+#### Where the code lives
+
+Combined build, git tag `combined-final`, commit 45e36e2:
 - `patches/ambient_occlusion_patch.cpp` (the deterministic AO, 710 lines): shader `kShaderSource` (lines 57-193:
   `LinearizePS`, `DownPS`, `AoPS`, `BlurPS`, `CompositePS`, compiled with `DIRS = 8`, `STEPS = 8`), `InitResources`
   (283-347), `RunAo` (472-569), `AoEffect` (572-583), patch class and UI (607-710).
@@ -247,14 +272,14 @@ user's request on 27/09 ("remove it completely, it doesn't work") after repeated
   Depth Blur off.
 - The older SSAO/GTAO/HBIL line: `patches/ssao_patch.cpp` exists in commit b84d5f1 ("Night Remake alpha", the two-scale
   GTAO + HBIL version, 838 lines) and was deleted in f18cca8 (v0.2.0-alpha). The temporal versions exist only in the
-  user's backups: `Backups\9-S3SS compilado anterior\*.antes-remover-ssao`, `Sims3SettingsSetter.asi.ssao-folhas` (full
+  maintainer's backups: `Backups\9-S3SS compilado anterior\*.antes-remover-ssao`, `Sims3SettingsSetter.asi.ssao-folhas` (full
   source with the motion recorder and temporal v3), `ssao_patch.cpp.pre-folhas`.
 - Offline labs (session scratchpad `ao\`): `lab.cpp` (aolab: seams / normals / sao / gtao / probe / gi), `motion.cpp`
   (analysis of in-game motion recordings), `msao.cpp` (deterministic study: still / shift / motion). Study data in the
   S3SS documents folder: `Profundidade\` (depth dumps `profundidade_N_WxH.f32`, `cor_N.bmp`, `info_N.txt`) and
   `Movimento_1..3\` (motion recordings).
 
-### History and why each version failed
+#### History and why each version failed
 
 Note: the notebook's date labels are inconsistent (some entries say 28/09 but precede "27/09, night" entries; the lab
 files are all dated 27/09 17:39-23:52). The order below is the notebook's file order.
@@ -270,7 +295,7 @@ files are all dated 27/09 17:39-23:52). The order below is the notebook's file o
    2.2, quantisation tolerance z'^2 x 1.2e-7, 2-px normal base, Jimenez multi-bounce).
 3. **Two scales + HBIL (27/09).** Vertical stripes on a hill: the half-res pixel centre fell exactly between two depth
    texels and point sampling picked either (invisible in the lab, which read exact texels). Fix: snap every read to a
-   texel centre, pixel centre `floor(uv*W - 0.25)`. The user asked for "less dirty, more intense, more on trees": contact
+   texel centre, pixel centre `floor(uv*W - 0.25)`. Maintainer feedback asked for less dirty, more intense shade with more on trees: contact
    GTAO (r 3.5) + volume GTAO (r 20) + horizon-based indirect light (HBIL), MRT A16B16G16R16F x2, 1572/2750/4022 slots.
 4. **Camera stability (28/09 label).** Complaint: blurry and "moving" when the camera moves. Cause 1: radius in near
    units while near varies 0.2-0.3 with zoom, so the shading grew and shrank; fixed with the per-frame near vote
@@ -291,17 +316,17 @@ files are all dated 27/09 17:39-23:52). The order below is the notebook's file o
    right; the twinkling came from tree canopies: leaves sway, the depth test dropped the history at leaf edges and the raw
    frame showed through. v3 (4 point taps with a 5% depth test, bilinear fallback, age capped at 8) cut still-camera
    pixels jumping >6 levels from 1.2% to 0.24%, moving ~2% to ~1%. Not tested in game.
-8. **SSAO removed (27/09 night)** on the user's request.
+8. **SSAO removed (27/09 night)** at the maintainer's request.
 9. **Deterministic AO, lab study (27/09 night, `msao.cpp`).** **Root cause of every "micro dots" / twinkling report:
    half resolution takes 1 of the 4 depth pixels of each 2x2; a 1-pixel camera move picks another one.** Even raw depth
    changed 1.7 levels (6% of pixels >2) on odd shifts, 0 on even; half-res AO 2.5-3.7 levels, 11-15% >6. Full resolution
    removes it. The "shift" test (move the image 1-4 px, compare with the shifted original, ideal 0) became the metric.
    A fixed spiral sum drew copies of outlines (discarded). A first HBAO candidate (16 fixed directions, 10 geometric
-   steps, R 2.5 m, 5x5 tent) gave zero change with a still camera and 0.27-0.47 levels on shifts; the user then found
-   interiors "strange, looks noisy", which led to the final interleave below.
-10. **Deterministic AO shipped (27/09 23:52), tried in game 28/09, removed 28/09** (user: not good enough).
+   steps, R 2.5 m, 5x5 tent) gave zero change with a still camera and 0.27-0.47 levels on shifts; maintainer feedback then found
+   interiors strange and noisy, which led to the final interleave below.
+10. **Deterministic AO shipped (27/09 23:52), tried in game 28/09, removed 28/09** (judged not good enough in play).
 
-### The final design (ambient_occlusion_patch.cpp), worth reviving as is
+#### The final design (ambient_occlusion_patch.cpp), worth reviving as is
 
 - Full resolution, no per-frame noise, no accumulation: identical output for identical depth (still camera = zero change).
 - Passes per frame: scene depth -> 1/z (level 0), 8 downsample passes, the AO pass, 4 blur passes (box H, box V, tent H,
@@ -323,7 +348,7 @@ files are all dated 27/09 17:39-23:52). The order below is the notebook's file o
   pattern does not cancel on leaves). Remaining: faint bands parallel to walls in close-ups (discrete horizon steps).
   fxc slots: AoPS about 257, BlurPS 105, DownPS 25, CompositePS 15, LinearizePS 8.
 
-### Facts it relied on (still valid, see engine/camera-and-map-view.md)
+#### Facts it relied on (still valid, see engine/camera-and-map-view.md)
 
 - `d = A - near*A/z`, A = 1.00008 (LightProbe-m80), near 0.2-0.3 per frame, voted from VS blocks c0/c4/c40/c180/c192/c216;
   camera view-projection in VS c40..c43; tanX/tanY = 1/|row0.xyz|, 1/|row1.xyz| (0.41421 / 0.23300 at 16:9; fallback
@@ -334,22 +359,22 @@ files are all dated 27/09 17:39-23:52). The order below is the notebook's file o
   the notes).
 - Idea left open in the notes: check whether the backbuffer alpha is free, to separate ambient light from lamp light.
 
-### What reviving would need
+#### What reviving would need
 
-1. Only with the user asking for it (CLAUDE.md scope rule). Start from `ambient_occlusion_patch.cpp` at `combined-final`
+1. Only on an explicit request (scope rule in CLAUDE.md). Superseded in practice by the GTAO of 2.1.0. Start from `ambient_occlusion_patch.cpp` at `combined-final`
    and from the lab (`msao.cpp`), not from the SSAO line.
 2. Restore in the standalone's post-scene code: the camera votes (`CameraNear`, `CameraViewProj`, `CameraDepthA`) and
    the order slot 10; keep `DepthShare::Request` (the INTZ swap must run with Depth Blur off).
 3. Add a fifth `preReset` user only after raising `RenderCallbacks::kSlots` (4 slots; with AO, Depth Blur, Edge
    Smoothing, Lot Map Probe and Night Lighting all on, one callback is silently dropped, see
    [features/depth-blur.md](features/depth-blur.md)).
-4. Decide first what "good enough" means with the user (strength, radius, foliage behaviour), and measure with the
+4. Agree first on what "good enough" means (strength, radius, foliage behaviour), and measure with the
    shift test and a still-camera test before any in-game build. The known weak spots are foliage (pattern does not
    cancel on leaves) and faint bands near walls in close-ups.
 
-## Performance features: Smooth Streaming, Script GC Scheduler, Service Frame Budget
+## Shared evidence for the performance removals
 
-**Why removed (all three).** User decision 2026-09-28: no perceptible gain in game. The measurements agree with that:
+Smooth Streaming, Script GC Scheduler and Service Frame Budget were removed together by the decision of 2026-09-28: no perceptible gain in game. The measurements agree with that:
 - the 28/09 engine study found that limiting lot building and lot lighting did not reduce the spikes (NOTAS "Desempenho:
   mapa do motor");
 - in the last profiler session (`S3SS_Hitches.txt`, session 2026-09-28 14:20:59), the render-thread services in the
@@ -362,86 +387,52 @@ Code for all three: combined build, tag `combined-final`. Engine background:
 [engine/main-loop-and-services.md](engine/main-loop-and-services.md), [engine/lot-loading-and-streaming.md](engine/lot-loading-and-streaming.md),
 [engine/mono-gc.md](engine/mono-gc.md).
 
-### Smooth Streaming (`patches/smooth_streaming_patch.cpp`, 1248 lines, `[patches.SmoothStreaming]`, Steam only)
+Smooth Streaming, Script GC Scheduler and Service Frame Budget were measured with the frame profiler and gave no perceptible gain in play; some made lights and lots appear later. They were removed from the standalone. Code: combined build tag `combined-final` (`patches/smooth_streaming_patch.cpp`, `patches/gc_scheduler_patch.cpp`, `patches/frame_budget_patch.cpp`). The engine knowledge behind them is in `engine/` and in `S3SS-dev\SIMS3-PERFORMANCE-KNOWLEDGE.md`. Each entry below keeps the full feature documentation written before the removal, with headings demoted.
 
-- **What it did:** spread the per-lot build work of lot streaming over several frames. It had four parts:
-  1. A shared per-frame gate for lot load stages (`frameBudget` true, `frameBudgetMs` 6 ms).
-  2. Shorter slices per lot (`shortSlices` true, `sliceMs` 4 instead of the game's 20, `slicePriorityMs` 7 instead of 35).
-  3. A cap on the room lighting of loading lots (`lightingCap` / `lightingMs` 5, game 10), plus a cap on the current
-     lot's lighting while the camera moves (`currentLotLightingMs` 6, game 15).
-  4. Spreading of the terrain light rebuild (`spreadTerrain`, `terrainChunksPerFrame` 2).
-- **Findings that motivated it:**
-  - `FUN_00AEA680` runs lot load stages with a budget of **20 ms per lot** (mov at `0x00AEA6AC`), **35 ms for the
-    current lot** (`0x00AEA6D0`, if `FUN_006FDC80(sceneObjMgr, lotId)`), and 2000 ms at `0x00AEA6E9` while loading. N
-    loading lots cost N budgets in one frame.
-  - The lot lighting budget comes from `FUN_00ADB120` (10 ms loading / 30 ms current lot).
-  - The terrain light rebuild `FUN_00C845C0`, armed at `0xC84C3C`, flags every chunk at once.
-  - Install verified every site byte for byte and required it to be unique in the exe: the getter `0x006FDE10`, scene
-    object manager `0x011D1CF8`, WorldManager `0x011ECBC4`, and the immediates 20 / 35.
-- **Result:** it worked mechanically, but gave no measured benefit. In the user's last session its slice and lighting
-  values equalled the game's own, so only the 16 ms gate and the terrain queue were active.
-- **Must survive the removal:** `SmoothStreamingRelightTerrainRects` (smooth_streaming_patch.cpp, section from :822, entry at
-  :946). Night Lighting calls it (`night_terrain_relight_patch.cpp:70` declaration, `:592` call) for its localized
-  terrain relight. The standalone must move that function into Night Lighting, or Night Lighting loses the local relight.
-- **Reviving:** re-validate the sites, then measure with the profiler before and after in a streaming-heavy scene. The
-  premise (lot builds cause the hitches) was not confirmed.
+## Smooth Streaming
 
-### Script GC Scheduler (`patches/gc_scheduler_patch.cpp`, 589 lines, `[patches.GcScheduler]`)
+### What it was
 
-- **What it did:** took over the explicit Mono/Boehm slice that the simulation thread runs on every
-  `MonoScriptHost::Simulate` pass (`call GC_try_to_collect` at `0x00D819AA`; target `0x00E4A050`, prologue-checked;
-  budget variable `0x011922A4`; heap globals `0x012225A0` / `0x012225B4`).
-  - It postponed the GC slice while the camera moved and let it run when the camera was still.
-  - The postponement was bounded by `maxPostponeSeconds` 3.0, `minFreeHeapMB` 64, `minFreeAddressSpaceMB` 384 and
-    `catchUpMs` 250.
-  - Motion detection used `cameraSpeedThreshold` 0.25 m/s and `stillHoldMs` 300.
-  - It refused to install while S3SS's "GCTryToCollect" NOP patch was on.
-- **Findings:**
-  - The game collects continuously, one time-boxed slice (0.5-1.5 ms) per Simulate pass on the simulation thread.
-  - The render thread does not wait for the simulation thread each frame, so GC time reaches the frame only indirectly.
-  - The long non-interruptible parts of a collection (`GC_finish_collection`, the forced finish, allocator-triggered
-    collections) cannot be split by this patch.
-- **Result:** it was inert in the logged session: "GC calls run 47608, postponed 0, forced after the time limit 0,
-  forced by memory 240, longest 3.83 ms". Every time the camera moved, the 64 MB free-heap watermark forced the collection.
-- **Reviving:** it would need evidence first that GC slices line up with visible hitches (profiler sampling of the
-  simulation thread), and a heap watermark that actually allows postponing.
+Patch `patches/smooth_streaming_patch.cpp` (1248 lines), settings `[patches.SmoothStreaming]`, Steam only.
 
-### Service Frame Budget (`patches/frame_budget_patch.cpp`, 850 lines, `[patches.FrameBudget]`)
+spread the per-lot build work of lot streaming over several frames. It had four parts:
+1. A shared per-frame gate for lot load stages (`frameBudget` true, `frameBudgetMs` 6 ms).
+2. Shorter slices per lot (`shortSlices` true, `sliceMs` 4 instead of the game's 20, `slicePriorityMs` 7 instead of 35).
+3. A cap on the room lighting of loading lots (`lightingCap` / `lightingMs` 5, game 10), plus a cap on the current
+   lot's lighting while the camera moves (`currentLotLightingMs` 6, game 15).
+4. Spreading of the terrain light rebuild (`spreadTerrain`, `terrainChunksPerFrame` 2).
 
-- **What it did:** gave the four time-sliced render-thread services one shared budget per frame (`totalMs` 4, minimum
-  slice `minSliceMs` 0.5). The per-service caps were `capJobsMs` 2.5, `capResourcesMs` 1, `capCompositorMs` 1.5 and
-  `capSimBuildsMs` 2. It also deferred the Sim build step (`deferSimBuilds`, `maxSimDefers` 3) and forced Sim slicing
-  (`forceSimSlicing`). While a world was loading, and for `graceSec` 10 s after, every service got the game's own budget.
-- **Findings (static RE, dumpbin of the raw exe):**
-  - `ServiceManager::Update 0x00588E00` calls `0x0059ED20`, which calls each service's vtable +0x1C in registration
-    order. Four services have their own **5 ms** slice, checked only after each work item, so the slices add up
-    (10-20 ms when several have work).
-  - The four services:
-    - JobManager: `0x00599A10`, budget `[svc+0xCC]`, arm at `0x00599A20`.
-    - CAS SimService: `0x005F0E50`, `+0x2C` = 5 ms, `+0x139` = slicing on.
-    - TextureCompositor: `0x00608630`, loop `0x00608270`.
-    - ResourceSystem: `0x007377F0`, at least 250 ms while its flag `+0x1F0` is set.
-  - Budget timers are EA stopwatches: ctor `0x004F35B0`, arm `0x004F34F0`, unit 4 = ms, unit 3 = µs. The patch switched
-    units to µs for finer budgets.
-  - **SimService phase B at `0x005F129D`** always runs at least one full build step (ModelBuilder `0x005DC800`, texture
-    composite `0x005CED00`), even with the slice used up. So a slice-limited frame costs the slice plus one build step:
-    the 9-15 ms frames measured were that, and the 40-147 ms frames were single build steps. The patch's `SimGateStub`
-    (jump at `0x005F127D`) could skip phase B for a frame.
-  - The **async resource loader's finalize job `0x007297C0`** runs on the main thread (affinity mask 1, created at
-    `0x00729C5B`; its read job `0x0072A4F0` runs on the worker threads). Resource construction (parse, decompress, GPU
-    object creation) therefore happens on the render thread, one resource per job, inside the JobManager slice.
-  - World-load flag: WorldManager `[0x011ECBC4]+0x41`.
-- **Result:** no perceptible gain. Single build steps and finalize jobs cannot be split by a budget, and the rest were
-  already small.
-- **Reviving:** the only lever with real potential is what a budget cannot cut: the phase B build step and the
-  per-resource finalize. That needs moving or splitting work, not budgets. The profiler integration still keys services
-  by vtable entry, so it keeps working with or without these detours.
+### Why removed
 
-## Appendix: full docs of the removed performance features (as written before removal)
+See [Shared evidence for the performance removals](#shared-evidence-for-the-performance-removals) It worked mechanically, but gave no measured benefit. In the last logged session its slice and lighting
+values equalled the game's own, so only the 16 ms gate and the terrain queue were active.
 
-Smooth Streaming, Script GC Scheduler and Service Frame Budget were measured with the frame profiler and gave no perceptible gain for the user; some made lights and lots appear later. They were removed from the standalone. Code: combined build tag `combined-final` (`patches/smooth_streaming_patch.cpp`, `patches/gc_scheduler_patch.cpp`, `patches/frame_budget_patch.cpp`). The engine knowledge behind them is in `engine/` and in `S3SS-dev\SIMS3-PERFORMANCE-KNOWLEDGE.md`. The full feature docs written before the removal follow, with headings demoted.
+### Revival notes
 
-### Smooth Streaming
+#### Findings that motivated it
+
+- `FUN_00AEA680` runs lot load stages with a budget of **20 ms per lot** (mov at `0x00AEA6AC`), **35 ms for the
+  current lot** (`0x00AEA6D0`, if `FUN_006FDC80(sceneObjMgr, lotId)`), and 2000 ms at `0x00AEA6E9` while loading. N
+  loading lots cost N budgets in one frame.
+- The lot lighting budget comes from `FUN_00ADB120` (10 ms loading / 30 ms current lot).
+- The terrain light rebuild `FUN_00C845C0`, armed at `0xC84C3C`, flags every chunk at once.
+- Install verified every site byte for byte and required it to be unique in the exe: the getter `0x006FDE10`, scene
+  object manager `0x011D1CF8`, WorldManager `0x011ECBC4`, and the immediates 20 / 35.
+
+#### Must survive the removal
+
+`SmoothStreamingRelightTerrainRects` (smooth_streaming_patch.cpp, section from :822, entry at
+:946). Night Lighting calls it (`night_terrain_relight_patch.cpp:70` declaration, `:592` call) for its localized
+terrain relight. The standalone must move that function into Night Lighting, or Night Lighting loses the local relight.
+
+Done: the standalone sets `chunk+0x55` on the chunks under a changed lamp from Night Lighting itself ([features/night-lighting/terrain-relight.md](features/night-lighting/terrain-relight.md), `features/terrain_chunk_relight.cpp`).
+
+#### What a revival would need
+
+re-validate the sites, then measure with the profiler before and after in a streaming-heavy scene. The
+premise (lot builds cause the hitches) was not confirmed.
+
+#### Full feature documentation (as written before removal)
 
 > Spreads the per-lot build work of lot streaming over several frames. It covers four kinds of work: the lot renderer's
 > load stages, the room lighting of loading lots, the room lighting of the current lot while the camera moves, and the
@@ -457,7 +448,7 @@ Smooth Streaming, Script GC Scheduler and Service Frame Budget were measured wit
 > Lighting depends on its localized terrain relight, and the terrain spreading is harmless. Read "Pitfalls" before
 > tuning it again.
 
-#### Purpose
+##### Purpose
 
 When lots stream in (camera moves, a lot is promoted to detailed view), the game does a lot of per-lot work in one frame:
 - **Lot load stages.** `FUN_00AEA680` runs floors, walls, roofs, etc. with a 20 ms budget per lot per call, or 35 ms for
@@ -470,12 +461,12 @@ When lots stream in (camera moves, a lot is promoted to detailed view), the game
 Lot Streaming Optimizations (an S3SS patch) decides **when** lots load. Smooth Streaming limits **how much** of the
 per-lot build runs in each frame. See the header comment of the source, lines 1-6.
 
-#### User-facing settings
+##### User-facing settings
 
 UI location: Apex tab > "Performance" > "Smooth Streaming" (collapsing header, open by default; `gui.cpp`
 `RenderApexFeature("SmoothStreaming", "Smooth Streaming")`). Settings are saved in `S3SS.toml` under
 `[patches.SmoothStreaming]` (plus `enabled`), through `OptimizationPatch::SaveToToml`. The standalone saves them in its
-own config (see [../architecture.md](architecture.md)). The source says: "Keys are the TOML names of saved configs:
+own config (see [architecture.md](architecture.md)). The source says: "Keys are the TOML names of saved configs:
 never rename them."
 
 | UI label | TOML key | Type | Default | Range (registered / UI) | Notes |
@@ -500,13 +491,13 @@ never rename them."
 shortSlices || lighting wanted), slices, lighting (`WantLight()` = lightingCap || currentLotLightingCap), and terrain
 spread (`PartsMatchInstalled`).
 
-**Values seen in the user's config.** The session log of 2026-09-28 14:20 (`S3SS_LOG.txt`) has "frame budget true / 16 ms,
+**Values seen in the maintainer's config.** The session log of 2026-09-28 14:20 (`S3SS_LOG.txt`) has "frame budget true / 16 ms,
 slices true / 20-35 ms, lighting cap true / 10 ms, terrain spread true / 64 per frame". Those slice and lighting values
 equal the game's own, so in that session only the 16 ms shared frame gate and the terrain queue were doing anything.
 
-#### How it works
+##### How it works
 
-##### Install (validate everything, then write)
+###### Install (validate everything, then write)
 1. `g_gameVersion != Steam`: fail.
 2. For the lot parts, `VerifySite` checks each site. The pattern must match at the Steam address, and a scan of the
    whole module must find it there and nowhere else. The scan runs once per site per session and is cached. The sites
@@ -534,11 +525,11 @@ equal the game's own, so in that session only the 16 ms shared frame gate and th
 
 Any failure after the first write calls `Rollback`, which restores the bytes, removes the hooks and sets `lastError`.
 
-##### Per frame: the lot pass (render thread)
+###### Per frame: the lot pass (render thread)
 The chain is: WorldManager service `FUN_00C7E3C0` (runs only while WorldManager+0x41 != 0) → `WorldManager::Update`
 0xC6D570 → lot pass `FUN_00C7CEA0(worldRenderer=[0x011ECE58], dt)` → for each lot renderer `FUN_00AEB2E0(node+8)` →
 `FUN_00AEA680` while `+0x1E` (done) and `+0x1F` (failed) are both 0. See
-[../engine/lot-loading-and-streaming.md](engine/lot-loading-and-streaming.md).
+[engine/lot-loading-and-streaming.md](engine/lot-loading-and-streaming.md).
 
 `Hook_LotPass` (0xC7CEA0) wraps the original between `BeginPass` and `EndPass`. It records the pass thread and sets
 `g_inPass`. The other hooks act only inside the pass and on that thread.
@@ -559,7 +550,7 @@ The chain is: WorldManager service `FUN_00C7E3C0` (runs only while WorldManager+
 4. **Anti-starvation.** It picks `g_guaranteed`: of the lots that asked last frame and were held back, the one that has
    waited longest. Slots not seen for 600 frames are pruned.
 
-##### Part 1a: per-call slices (0xAEA6AC / 0xAEA6D0)
+###### Part 1a: per-call slices (0xAEA6AC / 0xAEA6D0)
 `FUN_00AEA680` sets its budget local `[esp+14h]` with three movs:
 - 20 at 0xAEA6AC;
 - 35 at 0xAEA6D0, if `FUN_006FDC80(sceneObjMgr, lotId)` is true;
@@ -570,10 +561,10 @@ address shifts the offset by 4). EAX is dead at both sites, and `mov` does not t
 touched.
 
 The budget is in milliseconds of an EA stopwatch: unit 4, QPC scale `[0x011CB8FC]` = 1000/QPF (see
-[../engine/timers-and-sleeps.md](engine/timers-and-sleeps.md)). It is cumulative for one call and checked after each
+[engine/timers-and-sleeps.md](engine/timers-and-sleeps.md)). It is cumulative for one call and checked after each
 stage (0xAEB102..0xAEB126), so one stage always runs and a slow stage overshoots.
 
-##### Part 1b: the shared frame gate (`Hook_LoadStages`, 0xAEA680)
+###### Part 1b: the shared frame gate (`Hook_LoadStages`, 0xAEA680)
 - A lot with work (`+0x1C` ready, `+0x1E` done == 0, `+0x1F` failed == 0) counts as loading.
 - If the gate is off, or during a burst, or in tool mode, the original runs, timed.
 - Otherwise the lot is served when any of these holds:
@@ -585,7 +576,7 @@ stage (0xAEB102..0xAEB126), so one stage always runs and a slow stage overshoots
   returns 0 when `TryEnterCriticalSection((LotRenderer+0x18)+0xD0)` fails (0xAEA783 → 0xAEB271), with no state
   changed. The caller `FUN_00AEB2E0` ignores the return value, so the lot continues on a later call.
 
-##### Part 2: room lighting budget (`Hook_LightBudget`, 0xADB120)
+###### Part 2: room lighting budget (`Hook_LightBudget`, 0xADB120)
 The game values of `FUN_00ADB120` (ECX = lot lighting manager, result in ST0):
 - ordinary lot: 5 ms, or 10 ms while loading (manager+0x4F);
 - priority lot: 15 ms, or 30 ms while loading;
@@ -601,7 +592,7 @@ The budget is consumed by `FUN_00ADB8F0` (from `FUN_00AE4CB0` at the end of `FUN
 least one room (the elapsed check comes after `FUN_006A8BA0`). It passes the budget down to `FUN_006A3C90`, which
 returns once elapsed >= budget while room+0x164 is set, and resumes from room+0xEC on the next call.
 
-##### Part 3: terrain light rebuild spread (0xC84C43 + `Hook_TerrainUpdate`, 0xC845C0)
+###### Part 3: terrain light rebuild spread (0xC84C43 + `Hook_TerrainUpdate`, 0xC845C0)
 - **The game's behaviour.** In `FUN_00C845C0`, when the light countdown fires (consumed by `FUN_006B5770` at 0xC84C3E),
   the loop at 0xC84C43..0xC84C5E sets chunk+0x55 on every chunk of the vector terrain+0xB0/+0xB4. The per-chunk loop
   then rebuilds all of them in the same call (0xC85058..0xC850B5: `FUN_00C834F0`/`FUN_00C80E50`, `FUN_00C83060`,
@@ -631,9 +622,9 @@ returns once elapsed >= budget while room+0x164 is set, and resumes from room+0x
   fewer chunks (the localized relight below) makes the whole rebuild shorter.
 - **Arming test in live mode.** The test is "cells+0x3C == 0" (0xC84C14..0xC84C2B, BL = WorldManager+0x1B4 != 0),
   with no night condition. The +0x38 countdown alone (light register, remove or move) never triggers it. Details in
-  [../engine/terrain-and-light-bake.md](engine/terrain-and-light-bake.md).
+  [engine/terrain-and-light-bake.md](engine/terrain-and-light-bake.md).
 
-##### Part 4: localized terrain relight for Night Lighting
+###### Part 4: localized terrain relight for Night Lighting
 `int SmoothStreamingRelightTerrainRects(const float* rects, int count, float maxFraction)` is exported to
 `patches/night_terrain_relight_patch.cpp`, whose `Reconcile()` calls it with `kMaxLocalFraction = 0.4`.
 - `rects` holds 4 floats per rect {minX, minZ, maxX, maxZ}, the same layout as light+0x134.
@@ -655,7 +646,7 @@ returns once elapsed >= budget while room+0x164 is set, and resumes from room+0x
   those chunks.
 - The counters "local relights: N (M chunks)" are shown in the UI.
 
-#### Files and functions
+##### Files and functions
 
 | File / function | Role |
 |---|---|
@@ -672,7 +663,7 @@ returns once elapsed >= budget while room+0x164 is set, and resumes from room+0x
 | `patches/night_terrain_relight_patch.cpp` `Reconcile()` (approx. 564-619) | Only caller of the localized relight |
 | `gui.cpp` `IsApexPatch`, `RenderApexFeature` | Keeps it out of the Patches tab and draws it in the Apex tab |
 
-#### Game addresses and patterns
+##### Game addresses and patterns
 
 All addresses are TS3W.exe 1.67.2 Steam. Every pattern must match at the Steam address and be unique in the module
 (`VerifySite`).
@@ -714,10 +705,10 @@ All addresses are TS3W.exe 1.67.2 Steam. Every pattern must match at the Steam a
 | Chunk | +0x54 / +0x55 | re-render textures / relight |
 | SceneObjectManager | +0x10D0 / +0x10E0 | the two "priority" lot ids (most likely the active or focused lot; not proven) |
 
-#### Shader details
+##### Shader details
 None.
 
-#### Interactions
+##### Interactions
 
 - **S3SS Lot Streaming Optimizations** (`patches/lot_streaming_optimizations_patch.cpp`, S3SS, all versions). The two
   are complementary, with no byte overlap (PLANO-SEPARACAO.md §3). LSO:
@@ -731,7 +722,7 @@ None.
   (`FUN_00C69FF0` blocks the next while a promoted lot is still loading). Smooth Streaming adds nothing there. Its frame
   gate is what keeps a burst cheap when that throttle is off. Smooth Streaming reads the bytes at 0xC6D68C (inside
   WorldManager::Update's body, not its prologue), so LSO's detour of 0xC6D570 does not disturb it. Details:
-  [../engine/lot-loading-and-streaming.md](engine/lot-loading-and-streaming.md).
+  [engine/lot-loading-and-streaming.md](engine/lot-loading-and-streaming.md).
 - **Night Lighting** (`night_terrain_relight_patch.cpp`):
   - It uses `SmoothStreamingRelightTerrainRects` for local relights.
   - Its dusk and lamp "kicks" arm the game's countdown, and the resulting full rebuild goes through the queue when the
@@ -746,12 +737,12 @@ None.
     installs while the profiler is on. The current `ResolveWorldGlobals` accepts a call target outside TS3W, so this no
     longer happens. The code wins.
 - **Service Frame Budget:** independent. The lot pass runs inside the WorldManager service (0xC7E3C0), which is not one
-  of the four services Frame Budget limits. See [Service Frame Budget](#service-frame-budget-full-doc).
+  of the four services Frame Budget limits. See [Service Frame Budget](#service-frame-budget).
 - **Script GC Scheduler:** independent (simulation thread).
 - **Standalone split:** PLANO-SEPARACAO.md §3 policy is "cooperate": defer the install until S3SS's startup patches are
   in, and byte-verify every site at install (already done by `VerifySite`).
 
-#### Known limitations
+##### Known limitations
 - One load stage always runs per call, and a single stage (a big roof, walls) can take longer than any budget.
 - The lot the game treats as current is never held back by the frame gate, and its load-stage slice keeps 35 ms unless
   `shortSlices` lowers it.
@@ -768,7 +759,7 @@ None.
   - the loading screen is script driven (`GameUtils_SwapLoadScreen` → 0x7F1760 posts a UI callback);
   - `GameUtils_Begin/End/ResetLoadEvent` are empty stubs (0xC0FD60 = `ret`).
 
-#### Pitfalls and failed approaches
+##### Pitfalls and failed approaches
 - **Measured: no spike reduction.** NOTAS-ILUMINACAO.md, section "Desempenho: mapa do motor (28/09)":
   - about 5 ms per frame is "unattributed" (outside the render);
   - spikes above 50 ms create about 16 textures;
@@ -784,7 +775,7 @@ None.
 
   In the 13:19 report, the dominant hitch cost is "Services (self)" (13.64 per hitch, worst 134.51), mostly CAS
   SimService, CAS TextureCompositor and main-thread resource jobs (job 0x7297C0). That led to
-  [Service Frame Budget](#service-frame-budget-full-doc). The Smooth Streaming settings active in those sessions were not recorded.
+  [Service Frame Budget](#service-frame-budget). The Smooth Streaming settings active in those sessions were not recorded.
 - **Tool-mode 2000 ms and 1000 ms budgets are not the loading screen.** WorldManager+0x1B4 == 0 is the engine's tool
   mode, never normal play. Do not "speed up loading" through them.
 - **Releasing the whole terrain queue on a stall** re-creates the original one-frame rebuild. Release one chunk per
@@ -796,7 +787,7 @@ None.
 - **SEH only in functions without C++ objects** (a file-wide rule, see the helper comment). The `__try` helpers are
   separate small functions for that reason.
 
-#### Testing in game
+##### Testing in game
 - **Status line** (menu, under the header):
   - normal: "Status: N lots loading | lot building up to X ms/frame | N waits/s | terrain queue N";
   - during a burst: "Status: world loading, full speed (N lots loading)".
@@ -827,7 +818,7 @@ None.
   "Terrain update" per hitch with the feature on and off, camera moving across a neighbourhood. "lots promoted" per hitch
   is in the hitch file.
 
-#### Open items
+##### Open items
 - Decide whether parts 1-2 stay: no measured benefit so far. An A/B run with the profiler, same route, on/off, is
   missing.
 - Prove what SceneObjectManager+0x10D0/+0x10E0 are.
@@ -835,7 +826,41 @@ None.
   directly: both could share one definition.
 - Update the Frame Profiler's outdated comment about the terrain flush.
 
-### Script GC Scheduler
+## Script GC Scheduler
+
+### What it was
+
+Patch `patches/gc_scheduler_patch.cpp` (589 lines), settings `[patches.GcScheduler]`.
+
+took over the explicit Mono/Boehm slice that the simulation thread runs on every
+`MonoScriptHost::Simulate` pass (`call GC_try_to_collect` at `0x00D819AA`; target `0x00E4A050`, prologue-checked;
+budget variable `0x011922A4`; heap globals `0x012225A0` / `0x012225B4`).
+- It postponed the GC slice while the camera moved and let it run when the camera was still.
+- The postponement was bounded by `maxPostponeSeconds` 3.0, `minFreeHeapMB` 64, `minFreeAddressSpaceMB` 384 and
+  `catchUpMs` 250.
+- Motion detection used `cameraSpeedThreshold` 0.25 m/s and `stillHoldMs` 300.
+- It refused to install while S3SS's "GCTryToCollect" NOP patch was on.
+
+### Why removed
+
+See [Shared evidence for the performance removals](#shared-evidence-for-the-performance-removals). it was inert in the logged session: "GC calls run 47608, postponed 0, forced after the time limit 0,
+forced by memory 240, longest 3.83 ms". Every time the camera moved, the 64 MB free-heap watermark forced the collection.
+
+### Revival notes
+
+#### Findings
+
+- The game collects continuously, one time-boxed slice (0.5-1.5 ms) per Simulate pass on the simulation thread.
+- The render thread does not wait for the simulation thread each frame, so GC time reaches the frame only indirectly.
+- The long non-interruptible parts of a collection (`GC_finish_collection`, the forced finish, allocator-triggered
+  collections) cannot be split by this patch.
+
+#### What a revival would need
+
+it would need evidence first that GC slices line up with visible hitches (profiler sampling of the
+simulation thread), and a heap watermark that actually allows postponing.
+
+#### Full feature documentation (as written before removal)
 
 > Takes over the explicit Mono/Boehm garbage-collection slice that the simulation thread runs on every
 > `MonoScriptHost::Simulate` pass (the `call GC_try_to_collect` at 0x00D819AA). While the camera moves, it postpones
@@ -852,10 +877,10 @@ None.
 > - With the default 64 MB free-heap watermark, the Boehm heap never had enough free space for a postponement: every
 >   time the camera moved, the memory limit forced the collection.
 
-#### Purpose
+##### Purpose
 
 The game collects continuously: one time-boxed slice (0.5-1.5 ms budget) per Simulate pass on the simulation thread
-(details in [../engine/mono-gc.md](engine/mono-gc.md)). The idea is to move that work away from camera motion, when
+(details in [engine/mono-gc.md](engine/mono-gc.md)). The idea is to move that work away from camera motion, when
 hitches are most visible, and to catch up when the camera rests.
 
 Two facts limit what this can achieve:
@@ -864,7 +889,7 @@ Two facts limit what this can achieve:
 - The long, non-interruptible parts of a collection (`GC_finish_collection`, the forced finish after 40 aborted
   attempts, allocator-triggered blocking collections) are not time-boxed by the game, and this patch cannot split them.
 
-#### User-facing settings
+##### User-facing settings
 
 UI: Apex tab > "Performance" > "Script GC Scheduler" (collapsed by default). Saved in `S3SS.toml` `[patches.GcScheduler]`
 (plus `enabled`). The simulation thread reads every value live. `Update()` only clears `pendingReinstall`, so there is
@@ -881,9 +906,9 @@ never a reinstall.
 
 "Reset to defaults" (Advanced) restores the `Settings{}` defaults. "Reset counters" clears the statistics.
 
-#### How it works
+##### How it works
 
-##### Install
+###### Install
 1. **Refuse if the S3SS NOP patch is on.** If the patch "GCTryToCollect" is enabled, fail with: *Turn off "Chunky
    Patch - Disable GC_try_to_collect()" first: both patches take over the same GC_try_to_collect call.*
 2. **`Resolve()`** (every failure sets `lastError`):
@@ -912,7 +937,7 @@ never a reinstall.
    `[GcScheduler] Installed at 0x00d819aa (GC_try_to_collect 0x00e4a050); heap globals 0x012225a0/0x012225b4;
    WorldManager 0x011ecbc4+0x3a0; camera [0x011d1860]+0x24+0x60` (exact line from the 14:20 log).
 
-##### Every Simulate pass (simulation thread): `HookedGcTryToCollect(stopFunc)`
+###### Every Simulate pass (simulation thread): `HookedGcTryToCollect(stopFunc)`
 It is cdecl with one argument. The caller pops it (`add esp,4` at 0x00D819B4), and the return value is discarded (EAX
 is overwritten at 0x00D819AF).
 1. `UpdateCameraMotion(now)`, at most every 50 ms:
@@ -936,13 +961,13 @@ is overwritten at 0x00D819AF).
 - the process's free virtual address space < `minFreeAddressSpaceMB`, re-checked at most every 500 ms (the game is
   32-bit).
 
-##### Uninstall
+###### Uninstall
 1. Restore the original rel32 first.
 2. Then clear `active`: a simulation thread already inside the hook simply collects.
 3. Log the totals: `[GcScheduler] Uninstalled. GC calls run N, postponed N, forced after the time limit N, forced by
    memory N, longest X ms`.
 
-#### Files and functions
+##### Files and functions
 
 | File / function | Role |
 |---|---|
@@ -956,9 +981,9 @@ is overwritten at 0x00D819AF).
 | `patches/gc_try_to_collect_patch.cpp` `Install` (approx. 33-37) | S3SS's NOP patch, with Apex's reverse refusal added in the combined build |
 | `frame_profiler.cpp` `GcCallSiteText` (approx. 2825-2847), target `GC_try_to_collect (FUN_00E4A050)` | Profiler report of the call site and GC timing |
 
-#### Game addresses and patterns
+##### Game addresses and patterns
 
-All TS3W.exe 1.67.2 Steam. Full GC background in [../engine/mono-gc.md](engine/mono-gc.md).
+All TS3W.exe 1.67.2 Steam. Full GC background in [engine/mono-gc.md](engine/mono-gc.md).
 
 | Address | What | How found / verified |
 |---|---|---|
@@ -986,10 +1011,10 @@ over 10 samples (+0x310) as its own "Camera speed" and compares it with "Camera 
 `WorldManager::Update` skips that call while WorldManager+0x258 is set, which LSO's map-view blocker does in map view.
 That is why the second camera source exists.
 
-#### Shader details
+##### Shader details
 None.
 
-#### Interactions
+##### Interactions
 
 - **S3SS "Chunky Patch - Disable GC_try_to_collect()"** (`GCTryToCollect`, `patches/gc_try_to_collect_patch.cpp`). It
   NOPs the **same 5 bytes** at 0x00D819AA. The two refuse each other in the combined build:
@@ -1002,7 +1027,7 @@ None.
   `cmp eax,0C8h` at 0x00D81A1D (200 → 32767) and the `jnz` at 0x00D81A37 (NOPed). PLANO lists the pattern starts
   0xD81A1B / 0xD81A30; the bytes actually written are at +2 and +7. Different bytes: they combine.
 - **S3SS "GC_stop_world() Optimization"** (`GCStopWorld`). It patches 0x00E511F5 inside `GC_stop_world`. They combine.
-  See [../engine/mono-gc.md](engine/mono-gc.md) for what that patch really does.
+  See [engine/mono-gc.md](engine/mono-gc.md) for what that patch really does.
 - **Frame Profiler.** It Detours the **entry** of 0x00E4A050 ("Script GC" category) at its first frame boundary after
   being turned on, and reports the call site ("GC call site: redirected to 0x... by another patch (e.g. Script GC
   Scheduler); timed whenever it calls GC_try_to_collect", seen in every `S3SS_Hitches.txt` report of 28/09).
@@ -1025,7 +1050,7 @@ None.
 
   See the common `ApexConflictGuard` design in PLANO §3.
 
-#### Known limitations
+##### Known limitations
 - It only affects the explicit slice at 0x00D819AA. It does not affect:
   - allocator-triggered collections. An allocation that finds no free block goes `GC_allocobj` (0x00E4A2F9) →
     `GC_collect_or_expand` 0x00E4A120 → 0x00D70800 → 0x00E4A320: a blocking full collection on the allocating thread,
@@ -1038,7 +1063,7 @@ None.
 - A postponement returns 0 on every pass. The game's counter [0x011F2F98] and the budget adaptation still run after the
   call *(what the counter counts is unverified)*.
 
-#### Pitfalls and failed approaches
+##### Pitfalls and failed approaches
 - **Do not NOP the call** (what Chunky Patch does). The game then relies on allocator-triggered collections, which are
   blocking full collections: the long stalls the scheduler tries to avoid. The scheduler returns "not collected" instead
   and keeps the limits.
@@ -1053,9 +1078,9 @@ None.
   | 2026-09-28 13:19 | 51469.2 ms | 40874 | 1.26 ms | 1.42 / 3.94 ms |
 
   The 14:20 log's "longest 3.83 ms" matches. These are small next to the render-thread service spikes (see
-  [Service Frame Budget](#service-frame-budget-full-doc)). Moving GC work around is unlikely to fix render hitches on its own.
+  [Service Frame Budget](#service-frame-budget)). Moving GC work around is unlikely to fix render hitches on its own.
 
-#### Testing in game
+##### Testing in game
 - **Status lines:**
   - "Status: postponing (camera moving)" / "collecting (limit reached, catching up)" / "collecting (camera still)";
   - "Camera speed: X m/s";
@@ -1069,7 +1094,7 @@ None.
   Failures in `Resolve` appear as the menu error text and `LOG_WARNING` lines for dropped camera sources.
 - **Frame Profiler:** "Script GC" per hitch (simulation-thread column), and the "GC call site:" line in the report.
 
-#### Open items
+##### Open items
 - Find a heap watermark that actually allows postponement without triggering allocator collections. Measure free bytes
   over a session first.
 - Implement the standalone conflict guard and watchdog (PLANO §3).
@@ -1077,14 +1102,59 @@ None.
   simulation thread.
 - Identify what [0x011F2F98] counts. The budget adaptation depends on it.
 
-### Service Frame Budget (patches/frame_budget_patch.cpp)
+## Service Frame Budget
+
+### What it was
+
+Patch `patches/frame_budget_patch.cpp` (850 lines), settings `[patches.FrameBudget]`.
+
+gave the four time-sliced render-thread services one shared budget per frame (`totalMs` 4, minimum
+slice `minSliceMs` 0.5). The per-service caps were `capJobsMs` 2.5, `capResourcesMs` 1, `capCompositorMs` 1.5 and
+`capSimBuildsMs` 2. It also deferred the Sim build step (`deferSimBuilds`, `maxSimDefers` 3) and forced Sim slicing
+(`forceSimSlicing`). While a world was loading, and for `graceSec` 10 s after, every service got the game's own budget.
+
+### Why removed
+
+See [Shared evidence for the performance removals](#shared-evidence-for-the-performance-removals). no perceptible gain. Single build steps and finalize jobs cannot be split by a budget, and the rest were
+already small.
+
+### Revival notes
+
+#### Findings (static RE, dumpbin of the raw exe)
+
+- `ServiceManager::Update 0x00588E00` calls `0x0059ED20`, which calls each service's vtable +0x1C in registration
+  order. Four services have their own **5 ms** slice, checked only after each work item, so the slices add up
+  (10-20 ms when several have work).
+- The four services:
+  - JobManager: `0x00599A10`, budget `[svc+0xCC]`, arm at `0x00599A20`.
+  - CAS SimService: `0x005F0E50`, `+0x2C` = 5 ms, `+0x139` = slicing on.
+  - TextureCompositor: `0x00608630`, loop `0x00608270`.
+  - ResourceSystem: `0x007377F0`, at least 250 ms while its flag `+0x1F0` is set.
+- Budget timers are EA stopwatches: ctor `0x004F35B0`, arm `0x004F34F0`, unit 4 = ms, unit 3 = µs. The patch switched
+  units to µs for finer budgets.
+- **SimService phase B at `0x005F129D`** always runs at least one full build step (ModelBuilder `0x005DC800`, texture
+  composite `0x005CED00`), even with the slice used up. So a slice-limited frame costs the slice plus one build step:
+  the 9-15 ms frames measured were that, and the 40-147 ms frames were single build steps. The patch's `SimGateStub`
+  (jump at `0x005F127D`) could skip phase B for a frame.
+- The **async resource loader's finalize job `0x007297C0`** runs on the main thread (affinity mask 1, created at
+  `0x00729C5B`; its read job `0x0072A4F0` runs on the worker threads). Resource construction (parse, decompress, GPU
+  object creation) therefore happens on the render thread, one resource per job, inside the JobManager slice.
+- World-load flag: WorldManager `[0x011ECBC4]+0x41`.
+
+#### What a revival would need
+
+the only lever with real potential is what a budget cannot cut: the phase B build step and the
+per-resource finalize. That needs moving or splitting work, not budgets. The profiler integration still keys services
+by vtable entry, so it keeps working with or without these detours.
+
+#### Summary written at removal
 
 - Purpose: stop the render-thread services' 5 ms slices from adding up in one frame. One shared budget (default `totalMs` 4, `minSliceMs` 0.5) split among JobManager `[svc+0xCC]` (int ms, read at 0x599A20), ResourceSystem `[svc+0x14]` (int ms, floor 250 ms while +0x1F0 is set), CAS TextureCompositor `[+0x18]` (unit byte at 0x60829D switched 4 -> 3 = µs) and CAS SimService `[+0x2C]` with slicing forced via `[+0x139]` (0x5F0EBF rewritten). Detours on the four update entries 0x599A10, 0x5F0E50, 0x608630, 0x7377F0; a "pass" restarts when a service runs a second time.
 - SimService phase B: when the slice is used up, phase A (checked at 0x5F1262) jumps to phase B at 0x5F129D, which always runs one full build step before checking time at 0x5F139A. The patch replaced 0x5F127D (32 bytes) with a stub that could jump to the tail 0x5F13C6 instead, at most `maxSimDefers` (3) times in a row.
 - Full game values while WorldManager+0x41 is off and for `graceSec` (10 s) after it turns on.
 - Result: single work items (one Sim build step, one resource finalize job 0x7297C0, one composite 0x5FDEF0) still overshoot; no perceptible gain. Removed.
 
-### Service Frame Budget (full doc)
+#### Full feature documentation (as written before removal)
 
 > Makes four time-sliced engine services share **one** small time budget per frame, instead of 5 ms each. All four run
 > every frame on the render thread:
@@ -1107,7 +1177,7 @@ For the main loop, the ServiceManager, the service list and the thread model, se
 [engine/main-loop-and-services.md](engine/main-loop-and-services.md). This page covers only what this patch
 changes.
 
-#### Purpose
+##### Purpose
 
 `ServiceManager::Update` (0x00588E00 → loop 0x0059ED20) calls each service's vtable +0x1C, in registration order, on the
 render thread (the main thread). Four of the services time-slice their work, each with its own 5 ms slice, and each
@@ -1125,7 +1195,7 @@ NOTAS-ILUMINACAO.md, "Desempenho: mapa do motor (28/09)": "Services on the rende
 each (checked only between items) ... Several in the same frame add up to 10-20 ms = typical spikes." ObjectDesigner
 0xB3A960 has no budget and is not handled.
 
-#### User-facing settings
+##### User-facing settings
 
 UI: Apex tab > "Performance" > "Service Frame Budget" (collapsed by default). Saved in `S3SS.toml`
 `[patches.FrameBudget]` (plus `enabled`). The source says: "Keys are the TOML names of saved configs: never rename them."
@@ -1147,9 +1217,9 @@ The render thread reads every value live. `Update()` only clears `pendingReinsta
 
 "Reset to defaults" restores `Settings{}`. "Reset counters" clears the statistics.
 
-#### How it works
+##### How it works
 
-##### Budget units
+###### Budget units
 The game's budget timers are EA stopwatches (`ctor 0x004F35B0(this, unit, 0)`; arm `0x004F34F0(this, value, flag)`,
 deadline = now + value / scale). The value is read as an **unsigned** 32-bit integer, and 0xFFFFFFFF means unlimited.
 - Unit 4 = milliseconds, scale `[0x011CB8FC]` = 1000/QPF.
@@ -1158,7 +1228,7 @@ deadline = now + value / scale). The value is read as an **unsigned** 32-bit int
 The patch switches three of the services to **microseconds**, so budgets below 1 ms are possible. Timer details:
 [engine/timers-and-sleeps.md](engine/timers-and-sleeps.md).
 
-##### Install
+###### Install
 1. Steam only.
 2. `Validate()`:
    - every site in the table below: the pattern matches at the Steam address and is unique in the module;
@@ -1181,7 +1251,7 @@ The patch switches three of the services to **microseconds**, so budgets below 1
 6. `FlushInstructionCache`, pass-through off, then log `[FrameBudget] Installed (total X ms, minimum slice X ms, caps
    a/b/c/d ms, Sim build deferral on/off (max N), forced Sim slicing on/off, game budgets while loading on/off + N s)`.
 
-##### Per service call (render thread): `RunService(i, ...)`
+###### Per service call (render thread): `RunService(i, ...)`
 The call passes through unchanged when:
 - `g_passThrough` is set;
 - the object is null;
@@ -1210,7 +1280,7 @@ Otherwise:
    was not deferred, the consecutive-defer counter resets.
 5. **`Account(i, ticks)`:** adds the service's time to the pass total, and records last, average (EMA 0.02) and maximum.
 
-##### The Sim phase-B gate (`SimGateStub`, jumped to from 0x005F127D)
+###### The Sim phase-B gate (`SimGateStub`, jumped to from 0x005F127D)
 Entry state: EDX:EAX = deadline - now; EDI = the service. Only EDI and the stack are live at the three targets.
 
 The stub reproduces the original test exactly:
@@ -1228,7 +1298,7 @@ When time is up, it calls `SimDeferBuild()` (preserving EAX/ECX/EDX):
 `SimDeferBuild` returns 0 when the gate is not armed. When `maxSimDefers` consecutive defers are reached, it returns 0,
 counts a "forced" run and resets the counter.
 
-##### Uninstall (order matters)
+###### Uninstall (order matters)
 1. Pass-through on, gate disarmed, `SetGameBudgets()`. The two patched loads now hold the game's values: the Sim budget
    from +0x139/+0x2C in µs, the job budget 5000 µs until the original load is back.
 2. Restore the code bytes (job, Sim budget, Sim gate).
@@ -1240,7 +1310,7 @@ counts a "forced" run and resets the counter.
 
 Any failure during install goes through `Rollback` (the same order).
 
-#### Files and functions
+##### Files and functions
 
 | File / function | Role |
 |---|---|
@@ -1253,7 +1323,7 @@ Any failure during install goes through `Rollback` (the same order).
 | `FrameBudgetPatch::RenderCustomUI` | Status, per-service table, settings |
 | `frame_profiler.cpp` `kServiceNames` (approx. 606-622) | Per-service names in the profiler (keyed by the update function) |
 
-#### Game addresses and patterns
+##### Game addresses and patterns
 
 TS3W.exe 1.67.2 Steam. Every pattern must match at the address and be unique in the module.
 
@@ -1285,10 +1355,10 @@ runs on the "JobThread" workers (affinity mask 2), and a finalize job 0x007297C0
 created at 0x00729C5B). Resource construction (factory parse, decompression through the stream, GPU object creation)
 therefore happens on the render thread, one resource per job, inside the JobManager service.
 
-#### Shader details
+##### Shader details
 None.
 
-#### Interactions
+##### Interactions
 
 - **Frame Profiler.**
   - It replaces the ServiceManager loop body 0x0059ED20 with an identical C++ walk that calls vtable +0x1C, so its calls
@@ -1308,7 +1378,7 @@ None.
 - **World loading.** WorldManager+0x41 is set at the end of a world load (`FUN_00C6CF80`, 0xC6D430) and cleared on
   shutdown (`FUN_00C6B780`). Game budgets apply while it is off, and for `graceSec` after it turns on.
 
-#### Known limitations
+##### Known limitations
 - One work item cannot be split: one resource finalize job, one Sim build step (after `maxSimDefers` frames), one
   compose step. The minimum slice guarantees progress, not a cap.
 - The ResourceSystem timer counts whole milliseconds (so at least 1 ms). While the resource system's flag +0x1F0 is set,
@@ -1317,7 +1387,7 @@ None.
   (0x00AD97E0) start new passes, so their time is not charged to the enclosing frame's budget.
 - ObjectDesigner (0x00B3A960) and the other render-thread services (Swarm VFX, Scene service, ...) are not limited.
 
-#### Pitfalls and failed approaches
+##### Pitfalls and failed approaches
 - **Motivating data.** Frame Profiler report 2026-09-28 13:19 (`S3SS_Hitches.txt`, Documents\Electronic Arts\The Sims
   3\S3SS):
   - "Services (self)" is the largest hitch category (13.64 ms per hitch, worst 134.51 ms).
@@ -1337,7 +1407,7 @@ None.
 - Not tested in game: every item above is from static analysis. Expect surprises in Create a Sim and while Sims arrive
   (outfit builds).
 
-#### Testing in game
+##### Testing in game
 - **Status line:** "Status: limiting (shared budget active)" / "world loading, game budgets" / "world loaded, game
   budgets for N s more" / "no world, game budgets".
 - **Per frame:** "Last frame: X ms | average X ms | longest X ms | frames over 2x budget: N / N".
@@ -1358,11 +1428,8 @@ None.
 - **Frame Profiler:** compare "Services (self)" and the per-service lines of the hitch file, on and off, with Sims
   arriving on a lot and during Create a Sim.
 
-#### Open items
+##### Open items
 - The first in-game run: check Create a Sim responsiveness, Sim arrival pop-in and the loading time after a world load
   (grace period).
 - Decide whether ObjectDesigner (no budget) needs handling.
 - Consider sharing the "world loading" definition with Smooth Streaming, which uses a lot-pass gap heuristic.
-
----
-

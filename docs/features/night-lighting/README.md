@@ -1,419 +1,437 @@
 # Night Lighting
 
-> Current release 2.5.6 includes the later lighting work described in the feature guides. See [world lamp response](world-lamp-response.md) for current terrain/rig reconciliation and validation limits. The original split baseline below is historical, not a list of missing current features.
+Night Lighting (menu name **Night Lights**) rebuilds The Sims 3's lamp light while the game draws. Street-lamp light no
+longer stops in a straight line at lot borders, lamps on lots light the world grass and roads around them, and walls,
+floors, every story of a house, objects, fences, foliage, roofs, ponds and snow all receive the light of nearby lamps.
+The light on the ground is smooth instead of blocky, and it follows lamps that are placed, moved, recoloured or switched
+in Build mode and at dusk. By day, lamps that the game keeps lit add a subdued glow instead of their full night strength.
 
-## Historical standalone baseline
+## Status
 
-> **Status at the original split:** the standalone's Night Lighting starts from **v0.1.0** (commit b84d5f1, 27/09), not from
-> `combined-final`. Everything below that came after v0.1.0 is **not** in the standalone yet and is re-added one change at
-> a time after a user test, fences first: the story gate 0xC294D9 and the relight reconciliation / local relight
-> ([terrain-relight.md](terrain-relight.md); v0.1.0 has fixed triggers instead), the bake-matched per-pixel law
-> `W = 0.4 x range` with `SelectPixelLamps`, the rule `max(rig + vertex lights, per-pixel, ground)`, the ground facing
-> factor `sat(N.y + 1)` with strength `max(1, forcaNosObjetos)` ([objects-and-rigs.md](objects-and-rigs.md)), per-pixel
-> lamps on fences (user-approved, the first to come back, [fences.md](fences.md)), shader pre-creation at
-> `CreatePixelShader`/`CreateVertexShader` (`PrecreatePs/Vs`, foliage VS pool, `OwnCreate*`, `CodeBytes`), the batched
-> shader log (`FlushShaderLog`), and the English status/log strings (v0.1.0 still has Portuguese ones; the standalone must
-> be English). v0.1.0 has no HDR code at all. Unchanged since v0.1.0 (in the standalone as described): lot pass, smoothed
-> maps and atlas, walls, floors, roads, snow, level light share, lamp colour, CPU rig boost, foliage, roofs, water.
+| | |
+|---|---|
+| Availability | Released (standalone since 0.1.0; current published version 2.5.6). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: in development (PR #2) |
+| Default | On (`enabledByDefault = true`; the feature metadata keeps `experimental = true`) |
+| Menu | Lighting page (tabs Overview, Ground, Objects, Buildings, Stories); World > Water & Snow page (Lamp Glow, Water Reflections, Snow); developer options under Developer > Lighting |
+| Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
+| Game build | Steam 1.67.2 (`supportedVersions = VERSION_STEAM`); every patch site is byte-checked. Other builds resolve addresses by signature, see [engine/game-versions.md](../../engine/game-versions.md) |
+| Source | [`patches/night_terrain_relight_patch.cpp`](../../../patches/night_terrain_relight_patch.cpp), [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) and the modules listed under *Module map* |
 
-> Rebuilds The Sims 3's night lamp lighting while the game draws: street-lamp light no longer stops in a straight
-> line at lot borders, lot lamps light the world ground, roads and every storey, and walls, floors, snow, objects,
-> fences, foliage, roofs and ponds all get lamp light. One patch, `NightTerrainRelight` (UI name "Night Lighting",
-> Apex tab), made of several modules. Status: **working**, marked `experimental` in its metadata and **off by default**
-> (`enabledByDefault` is not set in `APEX_REGISTER_FEATURE`). It exists in both build flavours; the "Developer" subsection,
-> F7/F8 and the census exist only in the dev build. Steam 1.67.2 only (`supportedVersions = VERSION_STEAM`).
+Older names in notes and code: "Night Remake", "Iluminacao melhorada", "Lot Edge Lighting" (a dev-only predecessor,
+`patches/lot_edge_lighting_patch.cpp`, never shipped).
 
-Old names you will meet in notes and code: "Night Remake", "Iluminacao melhorada", "Lot Edge Lighting" (a dev-only
-predecessor patch, `patches/lot_edge_lighting_patch.cpp`, never shipped).
+## The problem
 
-## Purpose
-
-How the game lights the night (measured with Light Probe captures, see [NOTAS-ILUMINACAO.md section 1]):
+The game lights the night through several unrelated paths, measured with Light Probe captures (Ctrl+Shift+F7):
 
 | Surface | Where its lamp light comes from in the stock game | Defect |
 |---|---|---|
 | World grass (terrain chunks) | Per-chunk 256x256 DXT5 light map ("StaticTerrainLightmap"), baked by `FUN_00C292B0` from world lights only | Blocky 1 texel/m circles, RGB565 colour specks, cut at 256 m chunk borders (bake defect), lot lamps absent |
-| Lot grass | CPU room solve of room 0 (`FUN_006be020`), 1/d^2 from the lamp head, drawn by a modulate2x light pass | Street lamps arrive very faint: **straight cut at the lot border** |
+| Lot grass | CPU room solve of room 0 (`FUN_006be020`), 1/d^2 from the lamp head, drawn by a modulate2x light pass | Street lamps arrive very faint: straight cut at the lot border |
 | Roads, sidewalks | Their own copy of the chunk light map, without the lamps | Dark roads next to lit grass |
-| Walls, floors | Per-storey room light maps (atlas per level) | Only the lamps of that storey: cut at the floor line; walls much dimmer than objects |
-| Objects, fences, foliage | Per-object "rig": sun + 3 strongest lamps at the object centre | Many objects get nothing (flag, cut-off 0.1, vertex-light slots empty); moon shadow kills lamp light; modular pieces differ |
+| Walls, floors | Per-story room light maps (atlas per level) | Only the lamps of that story: cut at the floor line; walls much dimmer than objects |
+| Objects, fences, foliage | Per-object "rig": sun + 3 strongest lamps at the object centre | Many objects get nothing (flag, cut-off 0.1, vertex-light slots empty); moon shadow removes lamp light; modular pieces differ |
 | Roofs, lake water | No lamp term at all | Black roofs and ponds at night |
 | Snow variants | Separate shaders (snow lot pass, snow on floors, fence tops, stair tops) | Each misses lamp light in its own way |
 
-Night Lighting fixes each path at the point where the game computes it: game-code byte patches for the bakes and light
-gathering, and D3D9 draw interception that swaps in patched copies of the game's own shaders (pattern-patched
-bytecode or small HLSL replacements), with textures/constants bound for one draw and restored.
+The game also never rebuilds the terrain light when lamps switch on at dusk, so a save loaded by day keeps a
+"lamps off" ground until something else forces a rebuild. Background: [engine/terrain-and-light-bake.md](../../engine/terrain-and-light-bake.md),
+[engine/room-light-maps.md](../../engine/room-light-maps.md), [engine/light-objects-and-rigs.md](../../engine/light-objects-and-rigs.md).
 
-## User-facing settings
+## How Apex Radiance solves it
 
-All settings are registered in the `NightTerrainRelightPatch` constructor (`patches/night_terrain_relight_patch.cpp`)
-with `RegisterBoolSetting` / `RegisterFloatSetting`. They are saved by `OptimizationPatch::SaveToToml`
-(`optimization.h`) under **`[patches.NightTerrainRelight]`** in `S3SS.toml` (combined build), together with
-`enabled = true|false`. On load, `FloatSetting::LoadFromToml` (`patch_settings.h`) clamps floats to [min, max]. The code
-comment says: "The setting keys ... are the TOML keys of saved configs: never rename them." All settings exist in both
-builds (the public build still loads/saves the dev-only ones; it just shows no control for them).
+Night Lighting fixes each path where the game computes it, with two kinds of change:
 
-UI location codes: **Main** = directly under the Night Lighting header; **Adv/x** = collapsed "Advanced" tree, section x;
-**Dev** = "Developer" tree (dev build only); **Refl** = the separate "Reflections" header of the Apex tab
-(`ApexRenderReflectionsUI`, same patch, same TOML table).
+- **Game-code patches** (byte-checked) for the terrain bake, light gathering and rebuild triggers: lot lamps enter the
+  world terrain bake, the terrain is rebuilt at dusk and after lamp edits, and lamps are shared between stories.
+- **D3D9 draw interception** that swaps in patched copies of the game's own shaders (pattern-patched bytecode or small
+  HLSL replacements) for one draw, binds extra textures and constants, draws, and restores the device state.
 
-| UI label | TOML key | Type | Default | Range | UI | Applied | Sub-doc |
-|---|---|---|---|---|---|---|---|
-| Street lamps light inside lots | `luzDoPosteNaGramaDoLote` | bool | true | | Main | live (`ApplyLive` -> `LotLightBridge::SetEnabled`) | [lot-light-pass](lot-light-pass.md) |
-| Lot lights light the ground outside the lot | `luzDoLoteNaGrama` | bool | true | | Main (its own switch since 1.5.0; before, it also set `automaticoAoAnoitecer`) | live since 28/09 (read at run time by the always-installed predicates; one rebuild at night) | [terrain-relight](terrain-relight.md) |
-| Outdoor lights reach every story | `luzExternaEntreAndares` | bool | true | | Main | live (`LevelLightShare::Install/Uninstall`) | [level-light-share](level-light-share.md) |
-| Indoor light between floors (Lighting > Stories, under "Outdoor light between floors"; Experimental) | `luzInternaEntreAndares` | bool | true | | Main, disabled while `luzExternaEntreAndares` is off | live (`LevelLightShare::SetIndoor` per frame; the rooms near stair openings gather again) | [level-light-share](level-light-share.md#part-4-indoor-lamps-through-stair-openings) |
-| Lamps light nearby objects | `postesNosObjetos` | bool | true | | Main | live (`ObjectLightBridge::Install/Uninstall`, `SetObjectShadowFix`) | [objects-and-rigs](objects-and-rigs.md), [foliage](foliage.md) |
-| Roofs receive lamp light | `telhadosComLuz` | bool | true | | Main | live (per frame) | [roofs](roofs.md) |
-| Lamp colour (street lamps; also lot lamps unless they have their own) | `luzDasLampadasNatural` | float | 1.0 | 0..1 | Lamps | live since 1.5.0 (on slider release: stock lamps re-coloured, one terrain rebuild, lots re-solved; `ObjectLightBridge::RetintLamps`) | [lamp-colour](lamp-colour.md) |
-| Own color for lot lamps | `corPropriaNoLote` | bool | false | | Lamps | live (as the lamp colour) | [lamp-colour](lamp-colour.md) |
-| Lot lamp colour | `corDasLampadasDoLote` | float | 1.0 | 0..1 | Lamps (when the switch above is on) | live (as the lamp colour) | [lamp-colour](lamp-colour.md) |
-| Moonlight | `luar` | float | 1.0 | 0..2 | Lamps | live: the "Sunlight Scale" float 0x011D0918 = its value x lerp(1, luar, night level) every frame; object rigs regather on release | this file, "Brightness controls" |
-| Smooth indoor light | `bordasDosMapasDeLuz` | bool | true | | Objects > INDOORS (Experimental) | live: instanced objects and stairs read the 4 directional room light maps with a bicubic filter averaged over the house (alpha) texels only (ShaderPatches::PatchBasisSmooth); indoor rig objects (rig mode 0) get those maps per pixel instead of the lamps of their per-object rig diffuse, their unlit-room rig lights kept (PatchIndoorBasis diffuseConst since 30/09, read at the basis maps' own scale, IndoorBasisScale; 64x64 basis maps only; RoomMapPadding remembers which directional maps go with each room light map while the game holds them). The game's textures are never written (an earlier CPU padding flickered while the game rewrote them) | room_map_padding.cpp, shader_patches.cpp |
-| Ground brightness | `brilhoNoChao` | float | 1.0 | 0.25..3 | Ground (needs the bridge) | live (lamp scale constant of the terrain chunk, lot pass c3, snowy lot pass c4, floors; night-weighted) | this file, "Brightness controls" |
-| Roads and sidewalks | `brilhoNasRuas` | float | 1.0 | 0.25..3 | Ground (needs the bridge) | live (x the ground brightness, the road lamp scale `RoadPatch.scaleConst`) | [roads](roads.md) |
-| Street lamps (on the ground) | `forcaDosPostes` | float | 1.0 | 0.25..3 | Ground | terrain rebuild on slider release (`BakeColourStub` at 0xC2950F) | this file, "Brightness controls" |
-| Lot lamps (on the ground) | `forcaDasLampadasDoLote` | float | 1.0 | 0.25..3 | Ground | bake: terrain rebuild on release; lot grass: live (lot pass c31.x on the lot map) | this file, "Brightness controls" |
-| Object light strength | `forcaNosObjetos` | float | 1.0 | 0.25..3 | Adv/Objects | live | [objects-and-rigs](objects-and-rigs.md) |
-| Include stairs, railings and columns | `lampadasEmTodosObjetos` | bool | true | | Adv/Objects | rigs created later (world load) | [objects-and-rigs](objects-and-rigs.md) |
-| Doors, windows and counters get the ground light | `objetosDeForaComLuzDoChao` | bool | true | | Adv/Objects (disabled unless bridge + smooth maps) | live (`RigTracker::Install/Uninstall`) | [objects-and-rigs](objects-and-rigs.md) |
-| Seamless lamp light on outdoor objects | `luzPorPixelNosObjetos` | bool | true | | Adv/Objects (same gate) | live | [objects-and-rigs](objects-and-rigs.md) |
-| Object lamp light strength | `forcaLuzPorPixelNosObjetos` | float | 1.0 | 0.25..3 | Adv/Objects | live | [objects-and-rigs](objects-and-rigs.md) |
-| Fences, railings and stairs get the ground light | `cercasComLuzDoChao` | bool | true | | Adv/Objects (same gate) | live | [fences](fences.md), [snow](snow.md) |
-| Fence light strength | `forcaNasCercas` | float | 1.0 | 0.25..2 | Adv/Objects | live | [fences](fences.md), [snow](snow.md) |
-| Lamps light walls | `paredesComLuz` | bool | true | | Buildings (off = wall gain 1, the game) | live | [walls](walls.md) |
-| Lamp light on outside walls | `forcaNasParedes` | float | 2.0 | 0.25..4 (`SetWallGain` clamps 0.25..8) | Adv/Walls and roofs | live | [walls](walls.md) |
-| Roof light strength | `forcaNosTelhados` | float | 0.6 | 0.05..2 | Adv/Walls and roofs | live | [roofs](roofs.md) |
-| Darker unlit rooms | `comodosEscurosSemLuz` | bool | true | | Buildings > Rooms at Night | live (patches on/off; every room lights again) | [unlit-rooms](unlit-rooms.md) |
-| Brightness (unlit rooms: walls, floors and furniture) | `luzQueSobraNosComodos` | float | 0.35 | 0..1 | Buildings > Rooms at Night | live (relight 0.6 s after the last change) | [unlit-rooms](unlit-rooms.md) |
-| Blue tint (walls, floors and furniture at night) | `azulNosComodos` | float | 0.2 | 0..1 | Buildings > Rooms at Night | live | [unlit-rooms](unlit-rooms.md) |
-| Smooth light on the ground | `mapaDeLuzSuavizado` | bool | true | | Adv/Ground and snow | live | [world-atlas-and-smoothed-maps](world-atlas-and-smoothed-maps.md) |
-| Smooth the ground light maps on the GPU (A/B) | `mapaDeLuzSuavizadoNaGpu` | bool | true | | Dev only (registered in the dev build; public = always GPU when available) | live (next Present: switching drops the smoothed maps, the new path rebuilds them) | [world-atlas-and-smoothed-maps](world-atlas-and-smoothed-maps.md) "GPU path" |
-| Trodden snow on sidewalks | `calcadaComNevePisada` | float | 0.5 | 0..1 | Adv/Ground and snow (needs bridge) | live | [roads](roads.md) |
-| Update automatically at dusk | `automaticoAoAnoitecer` | bool | true | | Ground > Updates (own switch since 1.5.0) | live | [terrain-relight](terrain-relight.md) |
-| Delay after dusk | `atrasoSegundos` | float | 2.0 s | 0.5..10 | Ground > Updates | live | [terrain-relight](terrain-relight.md) |
-| Relight only around changed lamps | `relightLocal` | bool | true | | Adv/Dusk | live | [terrain-relight](terrain-relight.md) |
-| Street lamps count as lit in lot light solves | `postesAcesosNoCalculo` | bool | false | | Dev (experimental) | reinstall (0x6BE18C) | [terrain-relight](terrain-relight.md), [lot-light-pass](lot-light-pass.md) |
-| High lighting quality on every lot | `qualidadeAltaEmTodosOsLotes` | bool | false | | Dev (experimental) | reinstall; lots loaded afterwards | [lot-light-pass](lot-light-pass.md) |
-| Soft lot edges (A/B) | `bordaSuaveLote` | bool | true | | Dev only (registered in the dev build; public = always on) | live (per frame) | [lot-light-pass](lot-light-pass.md) "Soft lot edges" |
-| Lot grass keeps the lot's own light | `gramaDoLoteUsaLuzDoLote` | bool | false | | Dev (experimental) | reinstall (0xC7F87D) | [lot-light-pass](lot-light-pass.md) |
-| Recalculate every lot at dusk | `recalcularLotesAoAnoitecer` | bool | false | | Dev (experimental) | live | [terrain-relight](terrain-relight.md) |
-| Ponds reflect lamps | `lagosRefletemLampadas` | bool | true | | Refl | live | [water](water.md), [../reflections.md](../reflections.md) |
-| Lamp glow on water | `brilhoNaAgua` | float | 1.0 | 0.1..3 | Refl/Advanced | live | [water](water.md) |
-| Shore reflection | `reflexoNoLago` | float | 1.0 | 0..3 | Refl/Advanced | live | [water](water.md) |
+The common data source is the terrain light: the game's chunk light maps are smoothed and copied into one **world light
+atlas** that any surface knowing its world position can sample. Each sub-part below uses it or its own fix.
 
-Notes on the table:
-- "Reset to defaults" in Advanced (`ResetDefaults`) restores every value above except the three pond settings, which have
-  their own reset in the Reflections section (`ResetReflectionDefaults`).
-- Dependency gates in the UI (`BeginDisabled`): `groundLight = g_bridge && g_smoothMaps` gates the three
-  ground-light object/fence options (they read the world atlas, which exists only with both on); the strengths are
-  greyed out when their parent is off; "Trodden snow on sidewalks" needs the bridge.
-- **Reinstall vs live.** `Update()` (message-loop thread) schedules a reinstall only when `postesAcesosNoCalculo`,
+### Sub-parts
+
+| Part | One line | Page |
+|---|---|---|
+| Lot light pass | Lot grass draws `max(lot map, terrain light)`, with a 3 m soft edge, so street-lamp light has no cut at lot borders | [lot-light-pass.md](lot-light-pass.md) |
+| World atlas and smoothed maps | Chunk light maps upscaled 4x and cleaned of DXT noise; one world atlas for every consumer; daytime terrain composition | [world-atlas-and-smoothed-maps.md](world-atlas-and-smoothed-maps.md) |
+| Terrain relight | Lot lamps in the terrain bake, dusk and daylight rebuilds, local per-lamp relights and paced sweeps | [terrain-relight.md](terrain-relight.md) |
+| World lamp response | Edits of world-owned street lamps reach the terrain and native object rigs | [world-lamp-response.md](world-lamp-response.md) |
+| Level light share | Outdoor and indoor lamps light every story, with the game's wall test | [level-light-share.md](level-light-share.md) |
+| Walls | Exterior walls get a configurable lamp gain, also by day | [walls.md](walls.md) |
+| Floors | Outdoor floors read the world atlas | [floors.md](floors.md) |
+| Roads | Roads and sidewalks read the smoothed terrain light | [roads.md](roads.md) |
+| Snow | Snowy lot pass, floors, sills, stair tops and fence tops get lamp light | [snow.md](snow.md) |
+| Objects and rigs | Per-pixel lamps on outdoor objects, bake-matched falloff, rig boosts | [objects-and-rigs.md](objects-and-rigs.md) |
+| Fences | Fences, railings and stairs read the ground light | [fences.md](fences.md) |
+| Foliage | Bushes and trees keep lamp light in moon shadow | [foliage.md](foliage.md) |
+| Roofs | Roofs and roof snow receive lamp light | [roofs.md](roofs.md) |
+| Water | Ponds glow and reflect lamps | [water.md](water.md), [../reflections.md](../reflections.md) |
+| Lamp colour | Stock pink lamps re-coloured towards warm white | [lamp-colour.md](lamp-colour.md) |
+| Unlit rooms | Rooms at Night: the background light of rooms with lamps off | [unlit-rooms.md](unlit-rooms.md) |
+| Every-Story Ground Light | Separate patch `SplitLevelGroundLight`: lamps on any story light the ground | [level-light-share.md](level-light-share.md) |
+
+## Settings
+
+All keys live under `[patches.NightTerrainRelight]` together with `enabled`. They are registered in the
+`NightTerrainRelightPatch` constructor with `RegisterBoolSetting` / `RegisterFloatSetting`; floats are clamped to their
+range on load. The keys are the TOML names of saved configurations and are never renamed. Settings marked *developer*
+are registered only when developer mode is on at startup (`kPublicBuild` false); otherwise they keep the default shown.
+Menu labels without a page prefix are on the Lighting page; the water and snow rows are on the World > Water & Snow page.
+*Individual options* means the setting has no card in the normal menu and is reachable only through Developer >
+Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
+
+| Menu label | TOML key | Type | Default | Range | Effect |
+|---|---|---|---|---|---|
+| Ground > Street lamps light lots | `luzDoPosteNaGramaDoLote` | bool | on | | Lot light pass and every draw handler after it ([lot-light-pass](lot-light-pass.md)) |
+| Ground > Lot lamps light the street | `luzDoLoteNaGrama` | bool | on | | Outdoor lot lamps in the terrain bake ([terrain-relight](terrain-relight.md)) |
+| Ground > Smooth ground light | `mapaDeLuzSuavizado` | bool | on | | Smoothed chunk maps and the world atlas ([world-atlas](world-atlas-and-smoothed-maps.md)) |
+| Ground > Updates > Update at dusk | `automaticoAoAnoitecer` | bool | on | | Rebuild the terrain light at the settled day and night endpoints |
+| Ground > Updates > Delay after dusk | `atrasoSegundos` | float | 2.0 s | 0.5 to 10 s | Wait before the endpoint rebuild (none while Build mode editing) |
+| Ground intensity > Ground brightness | `brilhoNoChao` | float | 100% | 25 to 300% | Lamp scale on terrain, lot grass, snowy lot grass and floors; needs *Street lamps light lots* |
+| Ground intensity > Roads and sidewalks | `brilhoNasRuas` | float | 100% | 25 to 300% | Road lamp scale, multiplied by the ground brightness ([roads](roads.md)) |
+| Ground intensity > Street lamp brightness | `forcaDosPostes` | float | 100% | 25 to 300% | Street-lamp colour in the terrain bake; one terrain rebuild on slider release |
+| Ground intensity > Lot lamp brightness | `forcaDasLampadasDoLote` | float | 100% | 25 to 300% | Lot-lamp colour in the terrain bake (rebuild on release) and the lot's own light map on its grass (live) |
+| Objects > Lamps light objects | `postesNosObjetos` | bool | on | | Rig lamp boost and moon-shadow fix ([objects-and-rigs](objects-and-rigs.md), [foliage](foliage.md)) |
+| Objects > Brightness | `forcaNosObjetos` | float | 100% | 25 to 300% | Strength of lamps on objects |
+| Objects > Light stairs, railings, columns | `lampadasEmTodosObjetos` | bool | on | | Objects the game leaves without lamp light; applies when a world loads ("Reload save" badge) |
+| Doors, counters and fences > Doors and windows stay lit | `objetosDeForaComLuzDoChao` | bool | on | | Outdoor rig objects get at least the ground light (`RigTracker`); needs the ground light |
+| Doors, counters and fences > Seamless light on pieces | `luzPorPixelNosObjetos` | bool | on | | Per-pixel world lamps on outdoor rig objects; needs the ground light |
+| Doors, counters and fences > Seamless light brightness | `forcaLuzPorPixelNosObjetos` | float | 100% | 25 to 300% | Strength of those per-pixel lamps |
+| Doors, counters and fences > Fences and stairs catch light | `cercasComLuzDoChao` | bool | on | | Fences, railings, stairs and their snow read the atlas ([fences](fences.md), [snow](snow.md)); needs the ground light |
+| Doors, counters and fences > Fence brightness | `forcaNasCercas` | float | 100% | 25 to 200% | Strength on fences, railings, stairs and their snow |
+| Indoor objects > Smooth indoor light (Experimental) | `bordasDosMapasDeLuz` | bool | on | | Indoor objects and stairs read the room's directional light maps smoothly (see *Smooth indoor light*) |
+| Buildings > Lamps light walls | `paredesComLuz` | bool | on | | Exterior wall lamp gain by day and night; off keeps the native draw ([walls](walls.md)) |
+| Buildings > Brightness (walls) | `forcaNasParedes` | float | 200% | 25 to 400% | Wall lamp RGB multiplier (`SetWallGain` clamps 0.25 to 8) |
+| Buildings > Lamps light roofs | `telhadosComLuz` | bool | on | | Roof lamp pass ([roofs](roofs.md)) |
+| Buildings > Brightness (roofs) | `forcaNosTelhados` | float | 60% | 5 to 200% | Roof lamp strength |
+| Rooms at Night > Adjust the background light | `comodosEscurosSemLuz` | bool | on | | Rooms with lamps off keep the light set below ([unlit-rooms](unlit-rooms.md)) |
+| Rooms at Night > Brightness | `luzQueSobraNosComodos` | float | 35% | 10 to 80% | How much of the game's unlit-room light stays |
+| Rooms at Night > Blue tint | `azulNosComodos` | float | 0% | 0 to 100% | 0% neutral grey, 100% the game's blue |
+| Stories > Outdoor light between floors | `luzExternaEntreAndares` | bool | on | | Outdoor lamps light every story ([level-light-share](level-light-share.md)) |
+| Stories > Indoor light between floors | `luzInternaEntreAndares` | bool | on | | Indoor lamps through stairwells and open floors; needs the switch above |
+| Stories > Floor detail > Seamless walls between floors | `paredesSemEmendaEntreAndares` | bool | on | | Walls lit at the heights the game draws their light; needs outdoor light between floors |
+| Stories > Floor detail > Every floor in full detail | `todosOsAndaresEmDetalhe` | bool | on | | Every floor of the active lot solved in full detail |
+| Water & Snow > Lamp Glow > Lamps glow on ponds | `lagosRefletemLampadas` | bool | on | | Pond lamp pass ([water](water.md)) |
+| Water & Snow > Lamp Glow > Glow brightness | `brilhoNaAgua` | float | 40% | 10 to 40% | Lamp glow and sparkles on ponds |
+| Water & Snow > Water Reflections > Reflection brightness | `reflexoNoLago` | float | 100% | 0 to 300% (slider from 5%) | Shore reflection; needs Depth Blur ([../reflections.md](../reflections.md)) |
+| Water & Snow > Snow > Sidewalk visibility | `calcadaComNevePisada` | float | 50% | 0 to 100% | Sidewalk concrete showing through trodden snow; needs *Street lamps light lots* ([roads](roads.md)) |
+| Individual options | `luzDasLampadasNatural` | float | 1.0 | 0 to 1 | Stock lamp colour: 0 pink (game), 1 warm white; applied on release ([lamp-colour](lamp-colour.md)) |
+| Individual options | `corPropriaNoLote` | bool | off | | Lot lamps get their own colour |
+| Individual options | `corDasLampadasDoLote` | float | 1.0 | 0 to 1 | That lot lamp colour |
+| Individual options | `luar` | float | 1.0 | 0 to 2 | Moonlight at night (see *Brightness controls*) |
+| Individual options | `postesAcesosNoCalculo` | bool | off | | Experimental: street lamps count as lit in lot light solves (0x6BE18C); reinstall |
+| Individual options | `qualidadeAltaEmTodosOsLotes` | bool | off | | Experimental: every lot at the active lot's quality; reinstall; lots loaded afterwards |
+| Individual options | `gramaDoLoteUsaLuzDoLote` | bool | off | | Experimental: lot pass keeps "no terrain lightmap" (0xC7F87D); reinstall |
+| Individual options | `recalcularLotesAoAnoitecer` | bool | off | | Experimental: re-solve room 0 of every lot after the dusk rebuild |
+| Developer > Water highlights | `waterSpecularFilter` | bool | on | | Stabilise lamp sparkles on water (A/B) |
+| Developer > Water highlights | `waterPreserveLampColors` | bool | on | | Preserve bright lamp colours on water (A/B) |
+| Developer: Soft lot edges (A/B) | `bordaSuaveLote` | bool | on | | Developer only; off = plain max of lot and ground light |
+| Developer: Smooth the ground light maps on the GPU (A/B) | `mapaDeLuzSuavizadoNaGpu` | bool | on | | Developer only; off = CPU worker path |
+| Developer: Relight only nearby terrain | `relightNearbyChunks` | bool | off | | Developer only; automatic lamp changes also take the local relight |
+| Developer: Paced terrain sweep | `relightPacedSweep` | bool | on | | Developer only (registration); the default is active in normal mode too |
+
+Notes:
+
+- **Lighting balance** (Lighting > Overview): *Subtle*, *Soft*, *Natural* and *Custom* set nine brightness values at
+  once (order: ground, roads, street lamps, lot lamps, objects, pieces, fences, walls, roofs). Water, moonlight, lamp
+  colours and room background light are not part of a style. *Undo choice* restores the previous values.
+
+  | Style | Ground | Roads | Street | Lot | Objects | Pieces | Fences | Walls | Roofs |
+  |---|---|---|---|---|---|---|---|---|---|
+  | Subtle | 0.675 | 1.0 | 0.72 | 0.72 | 0.675 | 0.675 | 0.675 | 1.35 | 0.405 |
+  | Soft | 0.75 | 1.0 | 0.8 | 0.8 | 0.75 | 0.75 | 0.75 | 1.5 | 0.45 |
+  | Natural (defaults) | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 2.0 | 0.6 |
+
+- **Dependencies** (`BeginDisabled`): `groundLight = g_bridge && g_smoothMaps` gates the three Doors, counters and
+  fences options (they read the world atlas, which exists only with both on; a button turns both on). Ground and road
+  brightness and *Sidewalk visibility* need *Street lamps light lots*. Street and lot lamp brightness need the bake stub
+  (`g_bakeGainInstalled`). Strength sliders are hidden while their switch is off.
+- **Live vs reinstall.** Every menu edit goes through `Edit()`: `ApplyLive` installs or removes the parts that follow
+  their switch (`LotLightBridge::SetEnabled`, `ObjectLightBridge::Install/Uninstall`, `LevelLightShare::Install/Uninstall`,
+  `RigTracker::Install/Uninstall`), the configuration is saved and an automatic lighting refresh runs 1 s after the last
+  change (`RequestAutoRefresh`). `Update()` schedules a reinstall only when `postesAcesosNoCalculo`,
   `qualidadeAltaEmTodosOsLotes` or `gramaDoLoteUsaLuzDoLote` changed (they change code bytes), or when `luzDoLoteNaGrama`
-  is on but its code could not be installed (28/09: it is otherwise live). The reinstall keeps the world state and the
-  ground light maps (`LotLightBridge::Shutdown(true)`, `g_lastCells` kept).
-  The reinstall itself (`ReinstallNow`) runs on the render thread through `DeferredReinstall`, registered in
-  `RenderCallbacks::endSceneBeforeOverlay` (a crash fix, see Pitfalls). Everything else is pushed every frame from the
-  Present hook or applied by `ApplyLive`.
-- The combined build's HDR lamp gain (`HdrOutput::LampGain()` multiplied into several constants) is not a Night
-  Lighting setting and is gone from the standalone; see [../../removed-features.md](../../removed-features.md).
+  is on but its code could not be installed. `ReinstallNow` runs on the render thread through `DeferredReinstall`
+  (`RenderCallbacks::endSceneBeforeOverlay`) and keeps the world state and ground light maps
+  (`LotLightBridge::Shutdown(true)`). Profiles, looks and undo apply through `ApplyTableLive` the same way.
+- `ResetDefaults` in `night_terrain_relight_patch.cpp` still lists the defaults above but has no caller: there is no
+  reset button for Night Lighting, its pages or its cards (including water).
+
+### Refresh controls
+
+| Where | Control | Action |
+|---|---|---|
+| Lighting > Overview, Refresh lighting card (also Developer > Lighting) | Refresh terrain / Refresh lots / Refresh lights | Arm a terrain rebuild (`g_kickRequested`); queue room 0 of every loaded lot story; `NightLighting::RefreshAll`: terrain, lots, every room and the object rigs |
+| Buildings > Rooms at Night | Refresh the lighting (with its shortcut chip) | `RefreshAll("button")` |
+| Hotkey | Refresh the lighting | Same as above |
 
 ### Status lines
 
-| Where | Text source | Values |
+| Where | Source | Values |
 |---|---|---|
-| Main, first line `Status:` | `g_status` in `OnPresent` (night_terrain_relight_patch.cpp) | "Waiting for the game to load a world", "Rebuild pending: the game only rebuilds the terrain light at night (or in Build mode)" (stale wording: in normal play the game rebuilds day or night once cells+0x3C reaches 0; this line only means `+0x38 == 0` by day, the idle state; see [terrain-relight.md](terrain-relight.md)), "Rebuilding in N frames", "Night: OK", "Day: OK" |
-| Adv/Dusk (3 grey lines) | reconciliation state | "Lot lamps on the ground: N up to date \| M waiting[ \| waiting for the lots to load \| waiting for the first full rebuild]", "Local relights: N (C chunks) \| full rebuilds: K", "Last check: ..." |
-| Dev/Status "Diagnostic" | `LightDiag::Status()` | "Saved S3SS_LightDiag.txt: ..." |
-| Dev/Status "Street lamps on lots" | `LotLightBridge::Status()` | bridge state ("Off", "Waiting for the first draw", "Active", "Failed: ...", "Off after an internal error (see S3SS_LOG.txt)") + chunk count + per-path draw counters + "without terrain texture" |
-| Dev/Status "Objects" | `ObjectLightBridge::Status()` | classes patched N/9, boosted lights, forced rigs, fenced-area rigs |
-| Dev/Status "Shadow" | `LotLightBridge::ObjectStatus()` | moon-shadow fix, foliage counters |
-| Dev/Status "Walls" | `LotLightBridge::WallStatus()` | "outside walls: strength S \| draws: N \| variants seen: M" |
-| Dev/Status "Roofs", "Water" | `RoofStatus()`, `WaterStatus()` | |
-| Dev/Status "Smoothed map" | `LightmapSmooth::Status()` | GPU path: "GPU (F intermediates) \| chunks smoothed: R of N \| waiting \| built (in view, out of view, borders) \| GPU time per chunk \| changes seen \| world map ... \| GPU vs CPU: ..."; CPU path: "CPU \| chunks smoothed: R of N \| queued \| uploaded \| unreadable \| world map: WxH chunks (C copies)". Below it (dev): the GPU A/B checkbox and "Compare GPU vs CPU (one chunk)" |
-| Dev/Status "Lamp colour" | `ObjectLightBridge::LampColourStatus()` | |
-| Dev/Status "Stories" | `LevelLightShare::Status()` | |
-| Dev/Status counters | `RenderDeveloperUI` | last event, night level + countdowns +0x38/+0x3C, terrain armed/rebuilt/local relights, lot relights, "Street lamps counted as lit", lot-lamp arms/baked/off, story-gate counters |
+| Developer > Lighting > Inspect lighting state | `g_status` (`OnPresent`) | "Waiting for the game to load a world", "World loading: ...", "World loaded: rebuilding ...", "Rebuild pending: the game only rebuilds the terrain at night (or in Build mode)" (stale wording, see [terrain-relight.md](terrain-relight.md)), "Rebuild in N frames", "Night: ok", "Day: ok" |
+| Surface and provider state | `LightDiag::Status`, `LotLightBridge::Status`, `LotEdgeStatus`, `ObjectLightBridge::Status`, `ObjectStatus`, `WallStatus`, `GroundBrightnessStatus`, `RoomMapPadding::Status`, `IndoorSmoothStatus`, terrain bake gains and moonlight, `RoofStatus`, `WaterStatus`, `LightmapSmooth::Status` and `CompareStatus`, `LampColourStatus`, `LevelLightShare::Status`, `UnlitRooms::Status` | One line each |
+| Rebuild events and terrain tests | `RenderDeveloperUI` | Last event, night level and countdowns +0x38/+0x3C, terrain armed / rebuilt, world load, lamp changes, lamp change decisions, chunk re-render notices, local relight and sweep counters, `ChunkRelight::Status`, lot relights, "Street lamps counted as lit", lot-lamp arms / baked / off |
 
-## How it works
+## Compatibility and interactions
 
-### Per frame (render thread = main thread)
+- **Every-Story Ground Light** (`SplitLevelGroundLight`, Lighting > Stories > "Upper floors light the ground") zeroes
+  `GetLotID` (0x006BC020) for the terrain bake so lot lamps on any story enter it. When the official Sims3SettingsSetter
+  already applies its Split-Level Lighting Fix, the row shows on and locked. Inferred from the decompile of
+  `FUN_00C292B0` (`re/out/fn_00c292b0.c` line 114: `GetLotID() == 0 || light+0xD0 == 0`): with lot id 0 every lamp the
+  visitor accepts passes the bake's lot/story test, including basement lot lamps, which the lamp tracking does not model.
+- **Depth Blur**: the lake pass reads its INTZ depth and marks its own pass as internal; Water Reflections need Depth
+  Blur ([water](water.md)).
+- **Picture filters, Edge Smoothing, Ambient Occlusion**: post-scene effects, no interaction with the draw hooks.
+- **D3D9 hook order**: the bridge's draw hooks return Skip after drawing, which ends the hook chain for that draw. The
+  handlers' own state calls go straight to the device below Apex's detours (`D3D9Hooks::CallOriginal*`); the replaced
+  draw itself is re-issued through the device, so the Frame Profiler, Light Probe, Frame Capture and post-scene trigger
+  counts see it.
+- **Compare with the game** (shortcut) turns Night Lighting off together with the post-scene effects.
+- **Hardware**: pixel shader 3.0 for the replacements; the GPU smoothing path needs float render targets and falls back
+  to the CPU path otherwise.
 
-The patch registers one Present callback (`D3D9Hooks::RegisterPresent("NightTerrainRelight", ..., Priority::Last)`)
-that runs, in this order:
+## Limitations
+
+- Ground light (atlas) has no height and no wall occlusion, and the terrain stamp itself has no wall occlusion
+  (inferred), so `max(lot, terrain)` can show street-lamp light through lot walls.
+- Paths still drawn only by the game: multi-pass world terrain light passes other than the exact captured summer pair
+  (PS 756 B / `EC3141AB`, VS 656 B / `5882F972`); the winter lot light pass with VS 436BB272/1348 (needs the exact `kSnowLotVs`); TerrainLow distant terrain;
+  Sims.
+- Walls get a gain, not per-pixel lamps; per-pixel lamps on walls and floors are not implemented.
+- Lamp colour, lot lamp colour and moonlight have no card in the normal menu.
+- There is no single control for night darkness or lamp range (see the history).
+- The daytime lamp response is visual tuning, not a physical model.
+
+## Technical reference
+
+### Module map
+
+| File | Role |
+|---|---|
+| [`patches/night_terrain_relight_patch.cpp`](../../../patches/night_terrain_relight_patch.cpp) | The patch class, all settings, the menu pieces (`DrawGroundCard`, `DrawObjectsCard`, `DrawBuildingsCard`, `DrawRoomsCard`, `DrawStoriesCard`, `DrawWaterCard`, `DrawSnowCard`, `DrawLightingBalance`, `DrawRefreshCard`, `RenderDeveloperUI`), terrain bake patches, dusk and daylight rebuilds, lamp change decisions, Present driver, `APEX_REGISTER_FEATURE` (`displayName = "Night Lights"`, category Graphics, `gameCodeGroup = "NightLights"`) |
+| [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) | D3D9 draw interception: classification, dispatch, every `Draw*` handler, HLSL replacements (`kReplacementHlsl`, `kObjectRigHlsl`), lamp enumeration and selection (`g_allLamps`, `SelectLamps`, `SelectPixelLamps`), lamp tracking and bake snapshots, census and false colour, `DescribeDraw` for F7 |
+| [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) | Pure functions on D3D9 bytecode: recognisers (`IsRoadVs`, `IsFloorVs`, `IsSnowFloorVs`, `IsSnowCoverVs`, `IsSnowReliefVs`, `IsInstancedStructureVs`) and patchers (`PatchRoad`, `PatchFloor`, `PatchSnowFloor`, `PatchBakedAtlasPs`, `PatchSnowCover`, `PatchSnowRelief`, `PatchInstancedLamps`, `PatchObjectLampVs/Ps`, `PatchFoliageVs`, `PatchLeafShadow`, `PatchBasisSmooth`, `PatchIndoorBasis`, `PatchTerrainNativeAlpha`, `PatchTerrainDaylightRange`), `LightMapScaleConst`, `CodeBytes`. Testable offline |
+| [`features/terrain_lighting_policy.h`](../../../features/terrain_lighting_policy.h) | Day/night lamp scales (`DayLampScale`, `SurfaceLampGain`, `WallLampScale`, `LampScale`), day-edit deferral, phase cycle |
+| [`features/lightmap_smooth.cpp`](../../../features/lightmap_smooth.cpp) | Smoothed 1024x1024 chunk light maps and the world light atlas |
+| [`features/terrain_chunk_relight.cpp`](../../../features/terrain_chunk_relight.cpp) | Local terrain relight and paced sweep (`ChunkRelight`) |
+| [`features/world_lamp_policy.h`](../../../features/world_lamp_policy.h) | World-owned lamp eligibility and priority edits |
+| [`features/level_light_share.cpp`](../../../features/level_light_share.cpp) | Lamps shared across stories, cross-story wall test |
+| [`features/object_light_bridge.cpp`](../../../features/object_light_bridge.cpp) | Rig lamp boost for all light classes, lamp colour, stairs/railings rig flag, fenced-area gather, rig refresh |
+| [`features/rig_tracker.cpp`](../../../features/rig_tracker.cpp) | Which rig (mode 0/1/2, centre) lit the current draw |
+| [`features/room_map_padding.cpp`](../../../features/room_map_padding.cpp) | Remembers the directional basis maps of each room light map (smooth indoor light) |
+| [`features/unlit_rooms.cpp`](../../../features/unlit_rooms.cpp) | Rooms at Night |
+| [`shaders/shader_ids.h`](../../../shaders/shader_ids.h) | Size + FNV-1a of the exact-match game shaders (never the bytecode) |
+| [`shaders/wall_lamp_table.h`](../../../shaders/wall_lamp_table.h) | 58 ExteriorWall PS: size, FNV-1a, lamp constant K |
+| [`shaders/floor_atlas_table.h`](../../../shaders/floor_atlas_table.h) | 261 ExteriorFloors PS accepted by `PatchBakedAtlasPs` |
+| `shaders/roof_ps.hlsl`, `roof_snow_lamps_ps.hlsl`, `water_lamps_ps.hlsl`, `lightmap_smooth_ps.hlsl` (+ `_hlsl.h`) | HLSL sources embedded as generated headers |
+| `features/light_probe.cpp`, `features/light_diag.cpp` | Dev tools F7 / F8 ([../dev-tools/light-probe.md](../dev-tools/light-probe.md), [../dev-tools/light-diag.md](../dev-tools/light-diag.md)) |
+| `framework/render_callbacks.h` | `endSceneBeforeOverlay` (deferred reinstall) and `preReset` (`LightmapSmooth::OnPreReset`) |
+| `framework/shader_cache.h` | Start-up background compile of the HLSL replacements ([architecture](../../architecture.md#44-shader-precompile)) |
+| `framework/d3d9_extra_hooks.h`, `features/depth_share.h` | Raw depth-stencil get/set and the INTZ depth used by the lake pass |
+| `build_flavor.h` | `kPublicBuild` (runtime: true while developer mode is off) |
+
+### Per frame (Present, render thread = the game's main thread)
+
+The patch registers one Present callback (`D3D9Hooks::RegisterPresent("NightTerrainRelight", ..., Priority::Last)`):
+
 1. once: logs `[NightTerrainRelight] Shader limits: PS 3.0 N instruction slots, VS 3.0 M, PS version X` (D3DCAPS9);
-2. `OnPresent()` of the patch: world detection, dusk rebuild, relight reconciliation, lot relight, status
-   ([terrain-relight.md](terrain-relight.md)); dev only: `LightDiag::OnPresent` (Ctrl+Shift+F8);
-3. dev only: `LightProbe::OnPresent` (Ctrl+Shift+F7);
+2. `OnPresent()` of the patch: `LightDiag::OnPresent`, `Recorder::OnPresent`, world detection, load / dusk / daylight
+   rebuilds, lamp change decisions, arriving lots, `ChunkRelight::OnPresent`, lot relight, moonlight, status
+   ([terrain-relight.md](terrain-relight.md));
+3. developer mode: `LightProbe::OnPresent` (Ctrl+Shift+F7);
 4. `ObjectLightBridge::SetStrength/SetAllObjects/OnPresent`, `LevelLightShare::OnPresent`;
 5. `LotLightBridge::SetNightLevel(lightMgr+0xF0)`, `SetRoofFix`, `SetWaterFix`, `LotLightBridge::OnPresent` (shader log
-   flush, every 20 frames the light enumeration `FUN_006ACF70` that feeds the lamp lists);
+   flush; every 20 frames, or earlier on request, the light enumeration `FUN_006ACF70` that feeds the lamp lists);
 6. `LightmapSmooth::SetEnabled`, the remaining setters (`SetSidewalkClear`, `SetLampTint`, `SetFenceGroundLight`,
-   `SetWallGain`, `SetObjectPixelLamps(g_objPixel && RigTracker::IsInstalled(), g_objStrength)`,
-   `SetObjectPixelLights`), `LightmapSmooth::SetGpuPreferred`, then `LightmapSmooth::OnPresent(device)` (GPU path: timings, fallback hash checks, atlas growth; CPU path: reads changed chunk maps, queues smoothing jobs,
-   uploads one finished map).
+   `SetWallGain(g_wallStrength, g_walls)`, `SetObjectPixelLamps(g_objPixel && RigTracker::IsInstalled(), ...)`,
+   `SetObjectPixelLights`), `LightmapSmooth::SetGpuPreferred`, then `LightmapSmooth::OnPresent(device)`.
 
-### Per draw (lot_light_bridge.cpp)
+### Per draw (`lot_light_bridge.cpp`)
 
 `LotLightBridge::UpdateHooks` registers `SetPixelShader`, `SetVertexShader`, `DrawIndexedPrimitive`, `DrawPrimitive`
-and (Priority::Last) `CreatePixelShader` / `CreateVertexShader` hooks under the name `LotLightBridge`, whenever any of
-bridge / object fix / roof fix / water fix / wall gain != 1 is on (the combined build also counted the HDR gain).
+and (Priority::Last) `CreatePixelShader` / `CreateVertexShader` hooks named `LotLightBridge` whenever the bridge, the
+object fix, the roof fix, the water fix or the wall gain (`g_wallEnabled`) is on.
 
-- **Classification**, cached per shader pointer; every classified shader is AddRef'd into `g_pinned` until `Shutdown`
-  (pointer reuse would give a new shader an old class).
-  - Pixel shader class (`ClassifyPsCode`, enum `PsClass`): exact size+FNV-1a matches from `shader_ids.h`
-    (`LotLight` 568 B, `ObjectRig` 600, `Roof` 1136, `Lake` 1344, `LotLightSnow` 1852, `RoofSnow` 4992), then
-    `WallGain` (58-entry `wall_lamp_table.h`), `FloorAtlas` (261-entry `floor_atlas_table.h`), then `WorldCandidate` =
-    any PS that declares a sampler s6 or higher, else `Other`.
-  - Vertex shader class (`ClassifyVsCode`, `g_vsCache`): exact `kRoofVs`=1, `kLakeVs`=2, `kSnowLotVs`=3, `kFloorVs`=5;
-    then by pattern, in this order: `IsRoadVs`=4, `IsInstancedStructureVs`=7, `IsSnowCoverVs`=8, `IsSnowReliefVs`=9,
-    `IsFloorVs`=5, `PatchFoliageVs`=6, `PatchObjectLampVs`=10, `IsSnowFloorVs`=11 (last on purpose), else 0.
-- **Dispatch** (`OnDrawTracked` -> `OnDrawInner`, first match wins; each handler returns Skip after drawing itself, or
-  falls through to Continue = the game draws unchanged):
+**Classification**, cached per shader pointer; every classified shader is AddRef'd into `g_pinned` until `Shutdown`
+(pointer reuse would give a new shader an old class).
 
-| Order | Condition | Handler | Doc |
+- Pixel shader (`ClassifyPsCode`, `PsClass`): exact size + FNV-1a from `shader_ids.h` (`LotLight` 568 B, `ObjectRig`
+  600, `Roof` 1136, `Lake` 1344, `LotLightSnow` 1852, `RoofSnow` 4992, `WorldMultiLight` 756 / `EC3141AB`,
+  `WorldCompact` 1296 / `73376C6A`), then `WallGain` (58-entry table), `FloorAtlas` (261-entry table), then
+  `WorldCandidate` = any PS that declares a sampler s6 or higher, else `Other`.
+- Vertex shader (`ClassifyVs`, one `VsInfo` per shader): exact `kRoofVs` = 1, `kLakeVs` = 2, `kSnowLotVs` = 3,
+  `kFloorVs` = 5, plus flags `worldMultiLight` (`kWorldMultiLightVs` 656 / `5882F972`), `worldCompact`
+  (`kWorldCompactVs` 744 / `34E1F1B7`) and `contractedLotUv` (`kLotLightVs` 680 / `0C8CC5E8`); then by pattern, in this
+  order: `IsRoadVs` = 4, `IsInstancedStructureVs` = 7, `IsSnowCoverVs` = 8, `IsSnowReliefVs` = 9, `IsFloorVs` = 5,
+  `PatchFoliageVs` = 6, `PatchObjectLampVs` = 10, `IsSnowFloorVs` = 11 (last on purpose), else 0.
+
+**Dispatch** (`OnDrawInnerCore`, first match wins; a handler returns Skip after drawing, or Continue so the game draws
+unchanged):
+
+| Order | Condition | Handler | Page |
 |---|---|---|---|
 | 0 | VS class 6 and object fix on | patched foliage VS bound around everything below | [foliage](foliage.md) |
-| 1 | PS `ObjectRig` | `DrawObjectRig` (moon-shadow-free HLSL, c3.x = night) | [foliage](foliage.md) |
-| 2 | PS `Roof` | `DrawRoof` | [roofs](roofs.md) |
-| 3 | PS `RoofSnow` and VS not class 9 | `DrawRoofSnow` (additive pass) | [roofs](roofs.md) |
-| 4 | PS `Lake` | `DrawLake` (additive pass) | [water](water.md) |
-| 5 | VS class 6 | `DrawLeafShadow` | [foliage](foliage.md) |
-| 6 | PS `WallGain` | `DrawWallGain` | [walls](walls.md) |
-| - | bridge off (`luzDoPosteNaGramaDoLote` false) | stop here (combined build: HDR gain only) | |
-| 7 | VS class 4 | `DrawRoad` | [roads](roads.md) |
-| 8 | VS class 5 | `DrawFloor` | [floors](floors.md), [snow](snow.md) |
-| 9 | PS `FloorAtlas` and VS not class 11 | `DrawFloorAtlas` | [floors](floors.md) |
-| 10 | VS class 7 | `DrawInstanced` | [fences](fences.md) |
-| 11 | VS class 8 | `DrawSnowCover` | [snow](snow.md) |
-| 12 | VS class 9 | `DrawSnowRelief` | [snow](snow.md) |
-| 13 | VS class 10 and the object patch applies | `DrawObjectLamp` (falls through otherwise) | [objects-and-rigs](objects-and-rigs.md) |
-| 14 | PS `LotLightSnow` | `DrawLotSnow` | [snow](snow.md), [lot-light-pass](lot-light-pass.md) |
-| 15 | PS `WorldCandidate` | `RecordWorldChunk` + smoothed-map swap; if not a chunk and VS class 11: `DrawSnowFloor` | [world-atlas](world-atlas-and-smoothed-maps.md), [snow](snow.md) |
-| 16 | PS not `LotLight` | VS class 11: `DrawSnowFloor`; else game | [snow](snow.md) |
-| 17 | PS `LotLight` | the lot light pass replacement | [lot-light-pass](lot-light-pass.md) |
+| 1 | PS reads room basis maps, not fence / snow relief / rig object | `DrawBasisSmooth` (smooth indoor light) | this page |
+| 2 | PS `ObjectRig` | `DrawObjectRig` (moon-shadow-free HLSL, c3.x = night) | [foliage](foliage.md) |
+| 3 | PS `Roof` | `DrawRoof` | [roofs](roofs.md) |
+| 4 | PS `RoofSnow` and VS not class 9 | `DrawRoofSnow` (additive pass) | [roofs](roofs.md) |
+| 5 | PS `Lake` | `DrawLake` (additive pass) | [water](water.md) |
+| 6 | VS class 6 | `DrawLeafShadow` | [foliage](foliage.md) |
+| 7 | PS `WallGain` | `DrawWallGain` | [walls](walls.md) |
+| - | bridge off (`luzDoPosteNaGramaDoLote` false) | stop here | |
+| 8 | VS class 4 | `DrawRoad` | [roads](roads.md) |
+| 9 | VS class 5 | `DrawFloor` | [floors](floors.md), [snow](snow.md) |
+| 10 | PS `FloorAtlas` and VS not class 11 | `DrawFloorAtlas` | [floors](floors.md) |
+| 11 | VS class 7 | `DrawInstanced` | [fences](fences.md) |
+| 12 | VS class 8 | `DrawSnowCover` | [snow](snow.md) |
+| 13 | VS class 9 | `DrawSnowRelief` | [snow](snow.md) |
+| 14 | VS class 10 | `DrawIndoorObject`, then `DrawObjectLamp` (falls through otherwise) | [objects-and-rigs](objects-and-rigs.md) |
+| 15 | PS `LotLightSnow` | `DrawLotSnow` | [snow](snow.md), [lot-light-pass](lot-light-pass.md) |
+| 16 | PS `WorldCandidate`, `WorldMultiLight` (with its VS) or `WorldCompact` (with its VS) | `RecordWorldChunk` + world terrain draw; if not a chunk and VS class 11: `DrawSnowFloor` | [world-atlas](world-atlas-and-smoothed-maps.md), [snow](snow.md) |
+| 17 | PS not `LotLight` | VS class 11: `DrawSnowFloor`; else game | [snow](snow.md) |
+| 18 | PS `LotLight` | the lot light pass replacement | [lot-light-pass](lot-light-pass.md) |
 
-- **Own draws** set `g_inOwnCall` so the hooks ignore the mod's own `SetPixelShader`/`Draw*` calls; shaders the module
-  creates go through `OwnCreatePs/OwnCreateVs` (thread-local `t_ownCreate`) so the create hooks do not classify them.
-- **Pre-creation** (`PrecreatePs/PrecreateVs`): when the game creates one of the exact-match shaders (lot pass, snow
-  lot pass, object rig, roof, snowy roof, lake) the replacement is compiled then (usually during loading), so DXVK does
-  not compile it in the frame the object first appears. (Combined build. The standalone, 2026-09-28, instead compiles
-  the five HLSL replacements of `lot_light_bridge.cpp` and the eight world-light smoothing shaders of
-  `lightmap_smooth.cpp` at start-up on a background thread, `framework/shader_cache.h`, see
-  [architecture 4.6](../../architecture.md#shader-precompile); the draw hooks only create the objects from the bytecode.) Foliage VS copies are pooled (`g_vsPool`, max 64). Pattern
-  patches (roads, floors, fences, objects...) stay lazy (made at first draw), because which patch applies depends on
-  the VS it is drawn with.
-- **Robustness** (review 25/09): hooks catch C++ exceptions (`HookFailed` switches everything off until restart, log
-  "Excecao dentro do gancho de desenho ..."); `g_stateUnknown` reads the bound VS/PS from the device at the first draw
-  after hooks are registered; `UpdateHooks` has a mutex; `Shutdown` clears every fix flag before `SetEnabled(false)` so
-  hooks are unregistered before shaders are released.
-- **Own cost (standalone, 2026-09-29; `research\perf2\apexcost\report.md` items P3-P9; written, not compiled or tested in
-  game yet).** Same pixels, less CPU per replaced draw:
-  - the handlers' own `SetPixelShader` / `SetVertexShader` / `SetTexture` / `Set*ShaderConstantF` go straight to the
-    device below Apex's detours (`D3D9Hooks::CallOriginal*`, wrappers `SetPs` / `SetVs` / `SetTex` / `SetPsConst` /
-    `SetVsConst`): before, each re-entered Apex's own chains, where only the bridge's own tracking (which skips them,
-    `g_inOwnCall`) and the profiler's state counts looked at them. The replaced draw itself is still re-issued through
-    the device, so Post-scene / Picture trigger counts, Light Probe, Frame Capture and the profiler see it as before.
-    `SetSamplerState` / `SetRenderState` are not in the registry: plain device calls, as before;
-  - `SamplerBind` (and the lot pass s2 / snowy lot pass s12 bindings, which now use it) sets and restores only the
-    sampler states and texture that differ from what is bound;
-  - `TrackPs` / `TrackVs` do nothing when the game sets the same shader again; everything known about a vertex shader
-    is one `VsInfo` entry (class, road uv constant, snow-floor TEXCOORD, patched foliage / object copy, outdoor-floor
-    copy) with a pointer to the current one, instead of six maps looked up per draw;
-  - `SelectLamps` results are memoized per (x, z, maxScore) (exact float bits) until the lamp list changes; the 20-frame
-    lamp refresh reads the enumeration once (`ReadEnumeratedLamps`), tracks lot lamps in two reused sorted vectors
-    instead of a std::map, and rebuilds the bake snapshot's lamps only when a lamp changed (see
-    [lot-light-pass](lot-light-pass.md) "Lot lamp change tracking", [roofs](roofs.md)); the Frame Profiler shows it as
-    "Lamp refresh (mod)";
-  - `RecordWorldChunk` hands back the chunk's `g_chunks` entry (no second lookup); world light smoothing keeps its
-    chunks-by-use order between calls ([world-atlas](world-atlas-and-smoothed-maps.md)).
+- **Own draws** set `g_inOwnCall` so the hooks ignore the mod's own calls; shaders the module creates go through
+  `OwnCreatePs/OwnCreateVs` (thread-local `t_ownCreate`) so the create hooks do not classify them.
+- **Pre-compilation**: the five HLSL replacements of `lot_light_bridge.cpp` (lot pass ps_3_0, object rig ps_2_0, roofs,
+  lake water, snowy roofs) and the eight smoothing shaders of `lightmap_smooth.cpp` are compiled at start-up on a
+  background thread (`framework/shader_cache.h`); the draw hooks only create the objects from the bytecode. Foliage VS
+  copies are pooled (`g_vsPool`, max 64). Pattern patches stay lazy (made at first draw) because which patch applies
+  depends on the VS a shader is drawn with.
+- **Robustness**: hooks catch C++ exceptions (`HookFailed` switches everything off until restart);
+  `g_stateUnknown` reads the bound VS/PS from the device at the first draw after the hooks register; `UpdateHooks` holds
+  a mutex; `Shutdown` clears every fix flag before `SetEnabled(false)` so hooks are unregistered before shaders are
+  released.
+- **CPU cost per replaced draw**: the handlers' own `SetPixelShader` / `SetVertexShader` / `SetTexture` /
+  `Set*ShaderConstantF` use the wrappers `SetPs` / `SetVs` / `SetTex` / `SetPsConst` / `SetVsConst` over
+  `D3D9Hooks::CallOriginal*`; `SetSamplerState` / `SetRenderState` are plain device calls. `SamplerBind` sets and
+  restores only the sampler states and texture that differ. `TrackPs` / `TrackVs` do nothing when the game sets the same
+  shader again. `SelectLamps` results are memoized per (x, z, maxScore) bit pattern in a 512-entry direct-mapped table
+  (`g_lampMemo`) until the lamp list changes. `RecordWorldChunk` hands back the chunk's `g_chunks` entry. The lamp
+  refresh appears in the Frame Profiler as "Lamp refresh (mod)".
+
+### Daylight policy (`terrain_lighting_policy.h`)
+
+At night level n (lightMgr+0xF0, 0 day to 1 night) and a configured gain g:
+
+| Function | Formula | Used by |
+|---|---|---|
+| `NightWeighted(g)` (lot_light_bridge.cpp) | `1 + (g - 1) n` | Ground, road and lot-map gains |
+| `DayLampScale(n, g)` | `(1 - n) g` | Lot pass terrain term (c31.y), terrain lamp scale |
+| `SurfaceLampGain(n, g)` | `d + (g - d) n`, `d = min(g, 1) x 0.08` (`kDaySurfaceResponse`) | Fences and stairs, snow on objects, per-pixel object lamps |
+| `WallLampScale(K, n, g)` | `K g + DayLampScale(n, min(g, 1) x 0.08)` | Exterior wall cK.x |
+| `LampScale(K, n, g, squared)` | linear: `K w + (1 - n) g`; squared: `sqrt(K^2 w + (1 - n) g)`; `w = 1 + (g - 1) n`; at n = 1 exactly `K w` or `K sqrt(w)` | World terrain lamp constant ([world-atlas](world-atlas-and-smoothed-maps.md)) |
+
+Native solar and sky constants are never raised.
+
+### Brightness controls
+
+- **Ground brightness / Roads and sidewalks** (live): for one draw, the game's lamp scale constant of a light-map term is
+  scaled: the terrain chunk PS (`TerrainLampConst` via `ShaderPatches::LightMapScaleConst`, c7 in the captured single
+  pass chunks, c3 squared in the summer multi-pass, a squared c4.x in the recognised winter multi-pass layout; -1 = that
+  shader keeps the game's brightness), the lot pass c3.x, the snowy lot pass c4.x, the floors' `FloorPatch.scaleConst`
+  and the roads' `RoadPatch.scaleConst` (x the road factor). Only while *Street lamps light lots* is on.
+- **Street lamp / Lot lamp brightness** (on the ground): `BakeColourStub` replaces `movaps xmm0,[edi+0F0h]`
+  (`0F 28 87 F0 00 00 00`) at 0x00C2950F in the terrain bake: the colour copied to the bake's shader parameter is
+  multiplied by `g_bakeStreetMul` (lot id +0xC0/+0xC4 = 0) or `g_bakeLotMul`. Lamp objects, rigs, room solves and the
+  lamp tracking keep the real colour. A change applies on slider release as one forced terrain update (`NoteEdit` switch
+  path). Lot lamps also scale the lot's own light map on its grass (lot pass c31.x, live), because lot grass is
+  `max(lot map, terrain)` and the bake alone cannot dim a lot's own lamps there. Objects, walls and roofs use their own
+  sliders.
+- **Lamp colour, own colour for lot lamps**: the colour thunks record every stock-pink light (pink + written colour); on
+  release `RetintLamps` rewrites those that still hold the written colour through `FUN_006bc3e0` (+0xF0 / +0xE0), then
+  the rigs regather, one terrain update and one lot re-solve (room 0). Street lamp = class 0xB with lot id 0. Interiors
+  re-solve when the game next solves them. Stock lamps are pruned every 30 s. See [lamp-colour.md](lamp-colour.md).
+- **Moonlight**: the "Sunlight Scale" float at 0x011D0918 (only reader `FUN_00c11ad0` at 0x00C11B01,
+  `mov ecx,011D0918h; call`, which multiplies the sun / moon colour before SetSun: ExteriorLightData, read by 88
+  techniques including Sims) is written every frame as its base value x `lerp(1, luar, night level)`; restored on
+  uninstall. A value written by another mod (Sims3SettingsSetter's "Sunlight brightness") becomes the new base. Rigs
+  copy the sun colour when they gather, so they are refreshed on slider release. Things in moon shadow do not change:
+  this is the moon, not the night ambient.
+
+### Smooth indoor light (`bordasDosMapasDeLuz`)
+
+Instanced objects and stairs read the four directional room light maps with a bicubic filter averaged over the house
+(alpha) texels only (`ShaderPatches::PatchBasisSmooth`, `DrawBasisSmooth`). Indoor rig objects (rig mode 0,
+`DrawIndoorObject` + `PatchIndoorBasis`) get those maps per pixel instead of the lamps of their per-object rig diffuse:
+the diffuse becomes the rig's unlit-room lights (lamps zeroed, `diffuseConst`) + basis x strength, vertex lights zeroed.
+The basis maps are read at their own scale: `IndoorBasisScale` sets the size constant's .xy to
+`coverage_m x basis texels / 64`, the coverage taken from the VS constants that build the uv
+(`ShaderPatches::UvRowConsts`, the light-map uv semantic recorded by `PatchIndoorBasis`), else room light map size / 4.
+Only 64x64 basis maps (the only size captured) use it. The room light map covers the lot's power-of-two size at
+4 texels/m; the basis maps always cover 64 x 64 m (game basis VS: uv = lot half-metres x 1/128). `RoomMapPadding` keeps
+the directional maps of each room light map while the game holds both (reference count checked every 300 frames); the
+30-frame look is per (+X basis map, shader). The game's textures are never written. Details of the room maps:
+[engine/room-light-maps.md](../../engine/room-light-maps.md).
 
 ### Game-code side
 
-| Module | What it changes | Doc |
+| Module | What it changes | Page |
 |---|---|---|
-| night_terrain_relight_patch.cpp | terrain bake visitor 0xC29626, arm sites 0x6B6516/0x6B60D3/0x6B6618, story gate 0xC294D9; experimental 0x6BE18C, 0xADB66B/0xADB884, 0xC7F87D | [terrain-relight](terrain-relight.md) |
-| level_light_share.cpp | room-0 gather 0x6C5816/0x6C7094, cascade jcc 0x6C73B1, solve-point calls, light vfunc+0x4C of the 9 classes | [level-light-share](level-light-share.md) |
-| object_light_bridge.cpp | light-colour vfunc+0x10 of the light classes, rig brightness cap read 0x6B9418, rig ctor calls in `FUN_006f7880`, room gather thunk 0x6BBE70, lamp colour 0x6B0BDE + creation sites | [objects-and-rigs](objects-and-rigs.md), [lamp-colour](lamp-colour.md) |
-| rig_tracker.cpp | binder call 0x6F68C5, Detours on `FUN_006f6250` and `FUN_006cf920` | [objects-and-rigs](objects-and-rigs.md) |
+| night_terrain_relight_patch.cpp | Terrain bake visitor 0xC29626, arm sites 0x6B6516 / 0x6B60D3 / 0x6B6618, chunk render call 0xC8504C, bake colour 0xC2950F, sunlight scale 0x011D0918; experimental 0x6BE18C, 0xADB66B / 0xADB884, 0xC7F87D | [terrain-relight](terrain-relight.md), [lot-light-pass](lot-light-pass.md) |
+| split_level_ground_light_patch.cpp | `GetLotID` 0x006BC020 zeroed; gather call 0x006B635D kept vanilla | [level-light-share](level-light-share.md) |
+| level_light_share.cpp | Room-0 gather 0x6C5816 / 0x6C7094, cascade jcc 0x6C73B1, solve-point calls, light vfunc+0x4C of the 9 classes | [level-light-share](level-light-share.md) |
+| object_light_bridge.cpp | Light-colour vfunc+0x10 of the light classes, rig brightness cap read 0x6B9418, rig constructor calls in `FUN_006f7880`, room gather thunk 0x6BBE70, lamp colour 0x6B0BDE + creation sites | [objects-and-rigs](objects-and-rigs.md), [lamp-colour](lamp-colour.md) |
+| rig_tracker.cpp | Binder call 0x6F68C5, Detours on `FUN_006f6250` and `FUN_006cf920` | [objects-and-rigs](objects-and-rigs.md) |
 
-### Brightness controls (1.5.0, untested in game)
-
-- **Light style** (Lamps tab): Soft / Natural / Bright set ten brightness values at once (ground, roads, street lamps,
-  lot lamps, objects, pieces, fences, walls, roofs, water); "Natural" is the defaults; any other mix shows no style
-  selected. Moonlight and colours are not part of a style.
-- **Ground brightness / Roads and sidewalks** (live): `ConstGain` in lot_light_bridge.cpp multiplies, for one draw, the
-  game's lamp scale constant of a light map term: the terrain chunk PS (`TerrainLampConst` = `ShaderPatches::
-  LightMapScaleConst`, c7 in the captured chunks, -1 = that shader keeps the game's brightness), the lot pass c3.x
-  (kReplacementHlsl), the snowy lot pass c4.x, the floors' `FloorPatch.scaleConst` and the roads' `RoadPatch.scaleConst`
-  (x the road factor). Weighted by the night level (the lot maps also hold window light by day). Only while "Street lamps
-  light lots" is on (those draws are the bridge's). Ported from the combined build's HDR lamp gain.
-- **Street lamps / Lot lamps** (on the ground): `BakeColourStub` replaces `movaps xmm0,[edi+0F0h]` at 0xC2950F in the
-  terrain bake: the colour copied to the bake's shader parameter is multiplied by the gain of the lamp's kind (lot id 0 =
-  street lamp). The lamp objects, rigs, room solves and the lamp change tracking keep the real colour. A change applies
-  on slider release with one forced terrain rebuild (`NoteEdit` switch path). Lot lamps also scale the lot's own light
-  map on its grass (lot pass c31.x, live), because lot grass is max(lot map, terrain) and the bake alone could not dim
-  a lot's own lamps there. Objects, walls and roofs are not changed by these two (use their own sliders).
-- **Lamp colour live, own colour for lot lamps**: the colour thunks record every stock-pink light (pink + written
-  colour); on slider release `RetintLamps` rewrites the ones that still have the written colour through FUN_006bc3e0
-  (+0xF0 / +0xE0), then the rigs regather, one terrain rebuild and one lot re-solve (room 0). Street = class 0xB with
-  lot id 0 (creation: the class's constructor call site). Interiors re-solve when the game next solves them.
-- **Moonlight**: the "Sunlight Scale" float at 0x011D0918 (only reader FUN_00c11ad0 at 0x00C11B01, which multiplies
-  the sun / moon colour before SetSun: ExteriorLightData, read by 88 techniques incl. Sims) = its original value x
-  lerp(1, luar, night level), written every frame; restored on uninstall. Rigs copy the sun colour when they gather, so
-  they are dirtied on slider release. Things in moon shadow do not change: this is the moon, not the night ambient.
-- **Night darkness (not done)**: no single engine value. The ambient comes from the exterior diffuse probe cube and
-  terrainLightProbeMap, both built from the AmbientDome curves (sky +0x760 / +0x770, written every frame by
-  0x00C14860); whether the async probe capture follows a scaled dome is unverified (lightMgr+0xB0 state machine). A
-  post-process night filter would also dim lamp light. Measure with F7 captures first.
-- **Light range**: not done. Range +0x130 is a brightness weight on 1/d^2 (not a radius) read by the bake, room solve,
-  rigs and our kernels; the only consistent change is scaling +0x130 on the light objects and recomputing the rect
-  (vfunc+0x50), plus a full rebuild and all rooms re-solved. See the 29/09 research notes in this section's history.
-
-## Files and functions
-
-| File (combined tree) | Role |
-|---|---|
-| `patches/night_terrain_relight_patch.cpp` | The patch class (`NightTerrainRelightPatch`), all settings, the whole UI (`RenderCustomUI`, `RenderDeveloperUI`, `ApexRenderReflectionsUI`), terrain bake patches, dusk rebuild, relight reconciliation, Present driver, `APEX_REGISTER_FEATURE` metadata (`displayName = "Night Lighting"`, category Graphics) |
-| `lot_light_bridge.cpp/.h` | D3D9 draw interception: classification, dispatch, every `Draw*` handler, HLSL replacements (`kReplacementHlsl`, `kObjectRigHlsl`), lamp enumeration and selection (`g_allLamps`, `SelectLamps`, `SelectPixelLamps`), outdoor lot lamp list for the reconciliation (`ForEachOutdoorLotLamp`), census/false colour, `DescribeDraw` for F7 |
-| `shader_patches.cpp/.h` | Pure functions on D3D9 bytecode: recognisers (`IsRoadVs`, `IsFloorVs`, `IsSnowFloorVs`, `IsSnowCoverVs`, `IsSnowReliefVs`, `IsInstancedStructureVs`) and patchers (`PatchRoad`, `PatchFloor`, `PatchSnowFloor`, `PatchBakedAtlasPs`, `PatchSnowCover`, `PatchSnowRelief`, `PatchInstancedLamps`, `PatchObjectLampVs/Ps`, `PatchFoliageVs`, `PatchLeafShadow`), `LightMapScaleConst`, `CodeBytes`. Testable offline on captured shaders |
-| `lightmap_smooth.cpp/.h` | Smoothed 1024x1024 chunk light maps and the world light atlas |
-| `level_light_share.cpp/.h` | Outdoor lamps shared across storeys, cross-storey wall test |
-| `object_light_bridge.cpp/.h` | Rig lamp boost for all light classes, lamp colour, stairs/railings rig flag, fenced-area gather |
-| `rig_tracker.cpp/.h` | Which rig (mode 0/1/2, centre) lit the current draw |
-| `shader_ids.h` | Size + FNV-1a of the exact-match game shaders (never the bytecode) |
-| `wall_lamp_table.h` | 58 ExteriorWall PS: size, FNV-1a, lamp constant K |
-| `floor_atlas_table.h` | 261 ExteriorFloors PS accepted by `PatchBakedAtlasPs` |
-| `roof_ps.hlsl` / `roof_ps_hlsl.h`, `roof_snow_lamps_ps.hlsl` / `_hlsl.h`, `water_lamps_ps.hlsl` / `_hlsl.h` | HLSL sources embedded as generated headers |
-| `patches/smooth_streaming_patch.cpp` | `SmoothStreamingRelightTerrainRects`, the localized terrain relight used by the reconciliation |
-| `light_probe.cpp`, `light_diag.cpp` | Dev tools F7 / F8 ([../dev-tools/light-probe.md](../dev-tools/light-probe.md), [../dev-tools/light-diag.md](../dev-tools/light-diag.md)) |
-| `render_callbacks.h` | `endSceneBeforeOverlay` (deferred reinstall) and `preReset` (`LightmapSmooth::OnPreReset`) slots |
-| `d3d9_extra_hooks.h`, `depth_share.h` | Raw depth-stencil get/set and the INTZ depth used by the lake pass |
-| `build_flavor.h` | `kPublicBuild`: hides Developer UI, F7, F8 |
-
-## Game addresses and patterns
-
-Only the addresses owned by the patch file itself; each sub-doc has its own table.
+### Game addresses owned by the patch file
 
 | Address | What | Verification |
 |---|---|---|
-| 0x006E97B0 | root getter: `A1 <imm32> 85 C0 75 01 C3 8B 80 C0 01 00 00`; imm32 = address of the root pointer; lightMgr = *(root+0x1C0) | `Install` compares the bytes with the imm32 masked; Fail "Light manager code differs at 0x6E97B0" |
-| lightMgr+0xF0 | night level (0 day .. 1 night); "night" = > 0.99 | read every frame |
-| lightMgr+0x104 | light cells; +0x38 / +0x3C countdowns | read every frame |
-| 0x00C29626 | terrain bake light visitor (in 0xC29620, vtable 0x010768A0) | bytes `8B 07 8B 50 20 8B F1 8B CF FF D2` |
-| 0x006B6516, 0x006B60D3, 0x006B6618 | light register / remove / move-toggle arm tests | bytes `8B 17 8B 42 20 8B CF FF D0` |
-| 0x00C294D9 | story gate of the bake `FUN_00C292B0` | 7 bytes + context before/after (optional; warning if absent) |
-| 0x006C7160 | room queue `FUN_006c7160` thiscall(treeLevel, roomId) | bytes `83 EC 2C 53 55 56 33 DB 8B F1` (Fail otherwise) |
-| 0x006BE18C | street lamp colour in the lot solve (experimental) | `0F 28 86 E0 00 00 00` |
-| 0x00ADB66B, 0x00ADB884 | lot quality byte (experimental) | `C6 44 24 0C 00` -> `... 01`. The technical-details text says 0xADB66F/0xADB888 (the immediate byte); the patched instruction starts 4 bytes earlier |
-| 0x00C7F87D | lot pass terrain lightmap bind (experimental) | 8 bytes + 16 bytes context + 9 bytes at 0xC7F8B7 |
-| 0x006ACF70 | light enumeration (lot_light_bridge.cpp `EnumerateLights`) | `E8 2B 36 00 00 8B 4C 24 04 51 68 40 CF 6A 00` |
+| 0x006E97B0 | Root getter `A1 <imm32> 85 C0 75 01 C3 8B 80 C0 01 00 00`; imm32 = address of the root pointer (0x011D1860); lightMgr = *(root+0x1C0) | Bytes compared with imm32 masked; Fail "Light manager code differs at 0x6E97B0" |
+| lightMgr+0xF0 | Night level (0 day to 1 night); "night" = > 0.99, "day" = < 0.01 | Read every frame |
+| lightMgr+0x104 | Light cells; +0x38 / +0x3C countdowns | Read every frame |
+| 0x00C29626 | Terrain bake light visitor (in 0xC29620, vtable 0x010768A0) | `8B 07 8B 50 20 8B F1 8B CF FF D2` |
+| 0x006B6516, 0x006B60D3, 0x006B6618 | Light register / remove / move-toggle arm tests | `8B 17 8B 42 20 8B CF FF D0` |
+| 0x00C8504C | Chunk texture render call in the terrain sweep | 15 bytes at 0x00C85047 |
+| 0x00C2950F | Bake colour copy (`BakeColourStub`) | `0F 28 87 F0 00 00 00` |
+| 0x011D0918 | Sunlight scale float | Reader at 0x00C11B01 `B9 18 09 1D 01 E8` |
+| 0x006C7160 | Room queue `FUN_006c7160` thiscall(treeLevel, roomId) | `83 EC 2C 53 55 56 33 DB 8B F1` (Fail otherwise) |
+| 0x006BE18C | Street lamp colour in the lot solve (experimental) | `0F 28 86 E0 00 00 00` |
+| 0x00ADB66B, 0x00ADB884 | Lot quality byte (experimental) | `C6 44 24 0C 00` -> `... 01`. The feature's technical-details text names 0xADB66F / 0xADB888 (the immediate byte); the patched instruction starts 4 bytes earlier |
+| 0x00C7F87D | Lot pass terrain lightmap bind (experimental) | 8 bytes + 16 bytes context + 9 bytes at 0xC7F8B7 |
+| 0x006ACF70 | Light enumeration (`EnumerateLights`) | `E8 2B 36 00 00 8B 4C 24 04 51 68 40 CF 6A 00` |
 
-## Shader details
+### Shader patch conventions
 
-See the sub-docs. Common conventions of all pattern patches (`shader_patches.cpp` header): extra sampler = highest
-declared sampler + 1, temporary = highest temp + 1, new constant = highest constant + 1 (refuse if >= 224 or no room);
-the patch fails and leaves the shader alone when its pattern is absent; world position comes either from the VS
-constants c8/c10 (world matrix rows, `.w` = translation) or from a TEXCOORD the game already writes.
+Common to all pattern patches (`shader_patches.cpp` header): extra sampler = highest declared sampler + 1, temporary =
+highest temp + 1, new constant = highest constant + 1 (refused if >= 224 or no room); a patch fails and leaves the
+shader alone when its pattern is absent; world position comes either from the VS constants c8/c10 (world matrix rows,
+`.w` = translation) or from a TEXCOORD the game already writes. Every patch follows native D3D9 validation rules, not
+only DXVK's.
 
-## Interactions
+### Diagnostics
 
-- **Split-Level Lighting Fix** (S3SS patch `SplitLevelLightingFix`, rewrites `BaseLight::GetLotID` at 0x006BC020 to
-  return 0): with it on, type-11 lot lights enter every storey's room-0 list through the world-light gather; Night
-  Lighting's level share was designed alongside it (level_light_share.cpp header). The combined build no longer compiles
-  it (`patches/split_level_lighting_fix_patch.cpp` is not in the vcxproj since v0.2.0), but the **official S3SS that runs
-  next to the standalone still has it**. Inferred from the decompile of `FUN_00C292B0` (`re/out/fn_00c292b0.c` line
-  114: `GetLotID() == 0 || light+0xD0 == 0`): with it on, every light the visitor accepts passes the bake's lot/storey
-  test, so `BakeLevelStub` is never reached (story-gate counters stay 0) and basement lot lamps are baked too, which the
-  reconciliation's `Bakeable` model does not track (their changes get no local relight). Unverified in game; see
-  [terrain-relight.md](terrain-relight.md).
-- **Smooth Streaming**: the reconciliation's local relight goes through its terrain queue when that part is on, else
-  flags chunks directly ([terrain-relight](terrain-relight.md)).
-- **Depth Blur**: the lake pass reads its INTZ depth and marks its own pass as internal ([water](water.md)).
-- **Picture filters / Edge Smoothing**: post-scene, no interaction with the draw hooks.
-- **D3D9 hook order**: the bridge's draw hooks return Skip after drawing, which cuts the hook chain for that draw.
-  In the combined build the HDR hooks registered at `Priority::First` for this reason.
-
-## Known limitations
-
-- Game version must be Steam 1.67.2; every patch site is byte-checked.
-- Ground light (atlas) has no height and no wall occlusion; the terrain stamp itself has no wall occlusion (inferred,
-  ground_report.md section 5), so `max(lot, terrain)` can show street-lamp light through lot walls.
-- Paths still drawn only by the game (ground_report.md section 4, re-checked against the code): summer multi-pass
-  terrain light pass 475E594D/756 (declares only s0, s1, s2, s5: never `WorldCandidate`); winter lot light pass with VS
-  436BB272/1348 (needs exact `kSnowLotVs`); TerrainLow distant terrain; Sims.
-- Per-pixel lamp light on walls/floors (PASSO3 plan) was never implemented; walls only get a gain.
-
-## Pitfalls and failed approaches
-
-Global ones (details in each sub-doc):
-- Reinstalling on the message-loop thread crashed (textures released while drawn) -> `DeferredReinstall` on the
-  render thread (review 25/09 item 6).
-- `Uninstall` called `DirtyAllRigs` off the render thread -> deferred to `OnPresent` (item 3).
-- `PatchLeafShadow` once emitted an `lrp` with two constant sources: DXVK accepts it, native D3D9 refuses (item 5). All
-  patches must follow native D3D9 rules.
-- Caches keyed by shader pointer without AddRef gave stale classes when addresses were reused -> `g_pinned`.
-- Any menu change used to switch off `automaticoAoAnoitecer` when `luzDoLoteNaGrama` was off (fixed 25/09 10:40).
-- Furniture dark after floor switches (30/09, multi-agent study of F6 015204, F7 087/091/092, F8 01:51): the indoor
-  object path (DrawIndoorObject + PatchIndoorBasis) read the 64x64 directional basis maps with the room light map's uv
-  and texel = uv x basis size. The room light map covers the lot's power-of-two size at 4 texels/m (lot CF2DEA20: 128 x
-  256 = 32 x 64 m, VS uv rows c15 / c16 with |xz| = 1/32, 1/64), the basis maps always 64 x 64 m (the game's basis VS:
-  uv = lot half-metres x 1/128). So x was read at twice the object's position, outside the house plan (alpha 0): basis
-  light 0, and since the path replaces the rig diffuse and zeroes the vertex lights, only the ambient cube was left
-  (091: 0.051 grey; 087: pixel 0.012 with the red lamp at 1.79 in rig slot 0). Fixed: `IndoorBasisScale` sets the size
-  constant's .xy to coverage_m x basis texels / 64, the coverage from the VS constants that make the uv
-  (`ShaderPatches::UvRowConsts`, the lm uv semantic recorded by PatchIndoorBasis), else room light map size / 4. Offline:
-  4 of 12 captured vs_3_0 give TEXCOORD0.xy from two dp4 (c15/c16, one c195/c196); 091's VS gives (32, 64, 1/64, 1/64).
-  Why it followed floor switches: RoomMapPadding released a light map's set after 600 frames (~3 s) without a draw, so a
-  floor out of view lost it and its furniture moved between the game's shader (lit) and the Apex path (dark) as sets were
-  re-learned. Sets are now kept while the game holds the room light map and basis map (reference count checked every
-  300 frames), and the 30-frame look is per (+X basis map, shader), so the floor draws of a story no longer starve its
-  object-map draws (the +X basis map is shared by a story's light maps: the sweep compares with the references Apex holds
-  on it). The verifiers of that study added: with the lamps off the basis maps are ~0 (they hold lamp light only), and the
-  path replaced the rig diffuse, which for furniture carries the moon / fill slots with the Rooms at Night fill, and zeroed
-  the vertex lights, so path A stayed darker than the game's shader; the diffuse is the rig's unlit-room lights (lamps zeroed, diffuseConst) + basis x strength, vertex lights zeroed as
-  before (max(rig, basis) was tried and rejected: it brought the per-object lamp back; see unlit-rooms.md). The new
-  scale is used only with 64x64 basis maps (the only size captured). Offline: PatchIndoorBasis valid on every captured
-  PS it matches. Not tested in game yet.
-
-## Testing in game
-
-- `S3SS_LOG.txt`: `[NightTerrainRelight] Installed (at dusk=..., lot lights on the ground=..., delay=...s, root=0x...)`,
-  the story-gate warning if 0xC294D9 differs, `[LotLightBridge] Active` (lot pass compiled) or `Failed: ...`, and the
-  batched line `[LotLightBridge] Shaders at their first draw: <kind>: corrigido xN (...)` /
-  `<kind>: sem o padrao esperado, fica como o jogo xN (...)` (the combined code still logs these kinds in Portuguese).
-- Dev build: `S3SS\ShadersRecusados\<fix>_PS_<hash>.bin` holds every shader a pattern patch refused (max 300/session).
-- Ctrl+Shift+F7 over a pixel: `S3SS_LightProbe.txt` lists the draws covering it; the `mod:` line
+- `ApexRadiance_LOG.txt`: `[NightTerrainRelight] Installed (...)`, `[LotLightBridge] Active` (lot pass created) or
+  `Failed: ...`, and the batched line `[LotLightBridge] Shaders at their first draw: <kind>: ...` (some kinds still log
+  Portuguese words).
+- Developer mode: `ShadersRecusados\<fix>_PS_<hash>.bin` holds every shader a pattern patch refused (max 300 per session).
+- Ctrl+Shift+F7 over a pixel: `ApexRadiance_LightProbe.txt` lists the draws covering it; the `mod:` line
   (`LotLightBridge::DescribeDraw`) says whether the mod redrew it and with which class.
-- Ctrl+Shift+F8: `S3SS_LightDiag.txt` (all lights, lots, storeys, rooms, the "LUZ POR PIXEL" section).
-- Developer > "False colour: magenta ..." paints lamp-lit draws no fix claimed; "Census" writes `S3SS_Censo.txt`
-  ([../dev-tools/census.md](../dev-tools/census.md)).
+- Ctrl+Shift+F8: `ApexRadiance_LightDiag.txt` (all lights, lots, stories, rooms, the "LUZ POR PIXEL" section).
+- Developer > Lighting: "False colour: magenta = gets lamp light but no fix claimed it" and the census
+  (`ApexRadiance_Censo.txt`, [../dev-tools/census.md](../dev-tools/census.md)).
 
-## Open items
+## Rejected approaches
 
-From `ROADMAP-NIGHT-REMAKE.md` (phases) and the notes' last entries:
-- Phase 1: plants with ground light (m79), OutdoorProp shaders (C0C6E0FF, 2BE88B48), 4-light-matrix foliage
-  (VS 4375A3EE), instanced SingleObject, 34 object shaders with no free input.
-- Phase 2: per-pixel lamps on walls and floors (PASSO3-PLANO.md, with its 8 MUST-FIX items); terrain stamp re-rendered
-  at 4 texels/m.
-- Phase 3: one lamp model for every surface (today: rig bounds radius, sqrt(range) radius for roofs/water, W = 0.4 x
-  range for per-pixel objects, wall gain).
-- Terrain bake: the 28/09 capture showed even story-0 lot lamps missing from the atlas; the story-gate counters were
-  added to find where they are lost ([terrain-relight](terrain-relight.md)).
+- Reinstalling on the message-loop thread: crashed (textures released while drawn).
+- Calling `DirtyAllRigs` off the render thread from `Uninstall`.
+- Shader caches keyed by pointer without AddRef: stale classes after address reuse.
+- An `lrp` with two constant sources: accepted by DXVK, refused by native D3D9.
+- Reading 64x64 basis maps with the room light map's uv: furniture dark after floor switches.
+- `max(rig, basis)` for indoor objects: brought the per-object lamp back.
+- A single night-darkness control and a lamp range control: no consistent engine value; not implemented.
 
-## Sub-documents
+Details in [history](../../history/night-lighting-overview.md).
 
-Part 1: [lot-light-pass.md](lot-light-pass.md), [world-atlas-and-smoothed-maps.md](world-atlas-and-smoothed-maps.md),
-[walls.md](walls.md), [floors.md](floors.md), [roads.md](roads.md), [snow.md](snow.md),
-[terrain-relight.md](terrain-relight.md).
-Part 2: [level-light-share.md](level-light-share.md), [foliage.md](foliage.md),
-[objects-and-rigs.md](objects-and-rigs.md), [fences.md](fences.md), [lamp-colour.md](lamp-colour.md),
-[roofs.md](roofs.md), [water.md](water.md), [../reflections.md](../reflections.md).
-Engine background: [../../engine/terrain-and-light-bake.md](../../engine/terrain-and-light-bake.md),
-[../../engine/room-light-maps.md](../../engine/room-light-maps.md),
-[../../engine/light-objects-and-rigs.md](../../engine/light-objects-and-rigs.md),
-[../../engine/shaders.md](../../engine/shaders.md).
+## See also
 
-## Local menu hierarchy refinement
-
-Lighting keeps its Overview/Ground/Objects/Buildings/Stories tabs. Ground now uses behavior and intensity cards; dusk timing stays under Updates beside the behavior controls. Objects uses separate outdoor, connected-piece and indoor cards. Stories moves seam handling and all-floor detail under Floor detail. All original setting bindings, ranges, defaults, preset ratios, dependencies and application paths remain unchanged; only presentation and translated descriptions change.
+- [Validation](../../validation/night-lighting-overview.md)
+- [History](../../history/night-lighting-overview.md)
+- [Architecture: hooks, registry priorities, shader precompile](../../architecture.md)
+- [changes-since-0.1.0.md](../../history/changes-since-0.1.0.md), [removed-features.md](../../removed-features.md)
+- Engine: [terrain-and-light-bake](../../engine/terrain-and-light-bake.md), [room-light-maps](../../engine/room-light-maps.md),
+  [light-objects-and-rigs](../../engine/light-objects-and-rigs.md), [shaders](../../engine/shaders.md)

@@ -1125,13 +1125,13 @@ class DepthBlurPatch : public ApexPatch {
 
         if (g.p.autoFocus) {
             static const char* const kAreas[] = {"Small", "Medium", "Large"};
-            static const char* const kAreaTips[] = {"Only the focus stays sharp", "The default", "A wide sharp zone around the focus"};
+            static const char* const kAreaTips[] = {"Only the focus stays sharp", "Some space around the focus stays sharp", "The default; a wide sharp zone around the focus"};
             changed |= ApexUi::SegmentedRow("Sharp area", "How much around the focus stays sharp", "##SharpArea", &g.p.sharpArea, kAreas, 3, kAreaTips, nullptr,
                                             kDefaults.sharpArea);
         } else {
             // Distance: named steps, then fine-tuning (shown as 0-100% of its 0..0.5 range)
             static const char* const kDistances[] = {"Near", "Medium", "Far"};
-            static const char* const kDistanceTips[] = {"The blur starts close to the camera", "The default", "Only the far background blurs"};
+            static const char* const kDistanceTips[] = {"The blur starts close to the camera", "The blur starts at a middle distance", "Only the far background blurs"};
             static constexpr float kDistanceValues[] = {0.25f, 0.349f, 0.45f};
             int distance = -1; // a fine-tuned value matches none of the steps
             for (int i = 0; i < 3; i++)
@@ -1164,7 +1164,7 @@ class DepthBlurPatch : public ApexPatch {
         if (ApexUi::BeginAdvanced("Advanced##DepthBlur")) {
             changed |= ApexUi::SliderPercent("Strength", &g.p.strength, 0.0f, 1.0f, "Scales the blur everywhere; 100% is the default", kDefaults.strength);
             static const char* const kQualities[] = {"Low", "Medium", "High", "Ultra"};
-            static const char* const kQualityTips[] = {"Fastest", "Smoother", "The default", "Smoothest large blur; costs the most"};
+            static const char* const kQualityTips[] = {"Fastest", "The default; smoother", "Smoother still", "Smoothest large blur; costs the most"};
             changed |= ApexUi::SegmentedRow("Quality", "Higher is smoother and costs a bit more", "##Quality", &g.p.quality, kQualities, 4, kQualityTips, nullptr, kDefaults.quality);
             if (g.p.autoFocus) {
                 ApexUi::SliderOptions o;

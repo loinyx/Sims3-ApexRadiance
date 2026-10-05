@@ -1,104 +1,112 @@
-> Published 2.5.6: Optimize rendering defaults on unless explicitly saved off; world-lamp colour response reconciles terrain and native rigs. Published 2.5.5 introduced the unified ASI, optional developer mode, restored capture layout and spatial-only Edge Smoothing. Apex window/pacing controls are removed. Older RC sections below are history, not the current release.
+# Apex Radiance documentation
 
-# Apex Radiance: developer documentation
+Apex Radiance is a native mod for The Sims 3 (Steam 1.67.2, `TS3W.exe`, 32-bit), loaded by Ultimate ASI Loader as
+`ApexRadiance.asi`. It hooks Direct3D 9 and patches game code in memory to rebuild night lighting, add image effects
+(ambient occlusion, edge smoothing, depth blur, colour filters) and remove stutters. It can run beside an unmodified
+Sims3SettingsSetter.
 
-Apex Radiance is a native ASI mod for The Sims 3, loaded by Ultimate ASI Loader. It hooks Direct3D 9 and patches game code in memory. Supported executable details are in [engine/game-versions.md](engine/game-versions.md); compatibility is documented in the repository README.
-Its files live in `Documents\Electronic Arts\The Sims 3\Apex Radiance\` (`ApexRadiance.toml`, `ApexRadiance_LOG.txt`).
+Settings, logs and captures live in `Documents\Electronic Arts\The Sims 3\Apex Radiance\`.
 
-These documents are written for future maintainers, especially Claude sessions. With them you should not need to
-re-derive anything from the long Portuguese notes. Start with [../CLAUDE.md](../CLAUDE.md), then
-[architecture.md](architecture.md) and [workflow.md](workflow.md).
+## How these documents are organised
 
-**Code baseline.** Current behavior is defined by this repository. Older reverse-engineering sections refer to the frozen combined build (`combined-final`, commit 45e36e2); treat dated findings as history, not current feature availability. Game addresses are for Steam `TS3W.exe` 1.67.2, image base 0x00400000, unless stated otherwise. Unverified findings are not runtime confirmations.
+Every feature has up to three pages, following the [documentation standard](DOCUMENTATION-STANDARD.md):
 
-**Scope.** HDR output and Native HDR remain removed. The earlier Ambient Occlusion implementation is historical; current standalone GTAO is documented in [features/ambient-occlusion.md](features/ambient-occlusion.md).
-
-## Contents
-
-### Current release (2.5.6)
-
-The current development PR removes the optional Optimize rendering switch and restores its original rendering paths;
-this does not change the already published 2.5.6 build.
-
-- [Performance](features/performance.md): rendering paths, lookup caches, lighting budgets, compression, scene-node scheduling, object indexing and validation limits.
-- [World lamp response](features/night-lighting/world-lamp-response.md): captured evidence, terrain/rig reconciliation, failed approaches and player acceptance.
-- [Roads](features/night-lighting/roads.md): alpha-blended sidewalk shader recognition.
-- [Frame profiler](features/frame-profiler.md): optional timing of draw and state callbacks.
-- [Developer mode](features/developer-mode.md) and [reports](features/bug-reports.md): published unified build and optional post-save descriptions.
-
-### General
-| Document | What it covers |
+| Folder | Content |
 |---|---|
-| [features/bug-reports.md](features/bug-reports.md) | Published since 2.5.5: restored session/capture/list/help page, optional notes after saving, storage guards and retry. Superseded redesign notes remain historical. |
-| [architecture.md](architecture.md) | Loading, D3D9 device hooks, hook registry (priorities, Skip), extra hooks, render callbacks, post-scene trigger chain, INTZ depth share, patch system and TOML settings, logger, build flavours, per-frame flow, threads, the standalone split |
-| [workflow.md](workflow.md) | Build commands, install, the user's standing rules, diagnosis with F7/F8/profiler, release process |
-| [removed-features.md](removed-features.md) | Removed implementations and their reverse-engineering findings; current GTAO is documented separately |
+| [`features/`](features/) | What the feature does, the problem in the game, how the mod solves it, settings, limitations, technical reference |
+| [`validation/`](validation/) | Test harnesses, latest results, in-game test plan, open checks |
+| [`history/`](history/) | Dated investigations, rejected approaches, superseded designs |
+| [`engine/`](engine/) | Reverse engineering of `TS3W.exe` |
+| [`releases/`](releases/README.md) | Release notes per version |
 
-### Engine reverse engineering (TS3W.exe)
-| Document | What it covers |
+When a document and the code disagree, the code is correct and the document must be fixed. Game addresses are for
+Steam 1.67.2 (image base 0x00400000) unless stated otherwise.
+
+## Getting started
+
+| Document | Covers |
 |---|---|
-| [engine/main-loop-and-services.md](engine/main-loop-and-services.md) | Main loop 0xECA960, ServiceManager, JobManager, ResourceSystem, SimService, TextureCompositor, thread model |
-| [engine/lot-loading-and-streaming.md](engine/lot-loading-and-streaming.md) | Lot loading, LOD, world streaming, package IO |
-| [engine/terrain-and-light-bake.md](engine/terrain-and-light-bake.md) | Terrain chunks, the light bake FUN_00C292B0, story gate 0xC294D9, flags and countdowns, world atlas |
-| [engine/room-light-maps.md](engine/room-light-maps.md) | Room light maps and the lot light solve |
-| [engine/light-objects-and-rigs.md](engine/light-objects-and-rigs.md) | Light object layout and classes, light manager, object rigs |
-| [engine/shaders.md](engine/shaders.md) | Shaders_Win32.precomp, shader families, constants, LightingTweaks tanh, how Apex identifies shaders |
-| [engine/camera-and-map-view.md](engine/camera-and-map-view.md) | Camera, projection, map view 0x73E060 |
-| [engine/mono-gc.md](engine/mono-gc.md) | Mono / Boehm GC and the simulation thread |
-| [engine/timers-and-sleeps.md](engine/timers-and-sleeps.md) | Clock, sleeps, frame limiter, Smooth Patch sites |
-| [engine/game-versions.md](engine/game-versions.md) | Game builds (Steam 1.67.2, EA app 1.69.47), the encrypted EA .text, the signature table of every Night Lights address and how it is resolved at run time |
+| [architecture.md](architecture.md) | Loading, D3D9 hooks, hook registry, post-scene chain, INTZ depth share, patch system, configuration, logger, threads |
+| [workflow.md](workflow.md) | Build, install, testing harnesses, diagnosis with captures, release process, repository skills |
+| [ui.md](ui.md) | The Violet menu: pages, cards, widgets, shortcuts, profiles, notices, languages |
+| [DOCUMENTATION-STANDARD.md](DOCUMENTATION-STANDARD.md) | How to write and update these documents ([templates](templates/)) |
 
-### Features
-| Document | Feature |
+## Features
+
+### Lighting
+
+| Feature | Status |
 |---|---|
-| [features/night-lighting/README.md](features/night-lighting/README.md) | **Night Lighting** (`[patches.NightTerrainRelight]`): overview, all settings, module map |
-| [features/night-lighting/lot-light-pass.md](features/night-lighting/lot-light-pass.md) | Lot light pass: max(lot map, atlas) on the ground |
-| [features/night-lighting/world-atlas-and-smoothed-maps.md](features/night-lighting/world-atlas-and-smoothed-maps.md) | World atlas and smoothed light maps |
-| [features/night-lighting/terrain-relight.md](features/night-lighting/terrain-relight.md) | Story gate patch, dusk rebuild, automatic terrain relight reconciliation |
-| [features/night-lighting/level-light-share.md](features/night-lighting/level-light-share.md) | Outdoor lamps on every floor, lamp-floor wall test |
-| [features/night-lighting/walls.md](features/night-lighting/walls.md) | Exterior walls |
-| [features/night-lighting/floors.md](features/night-lighting/floors.md) | Floors |
-| [features/night-lighting/roads.md](features/night-lighting/roads.md) | Roads and sidewalks |
-| [features/night-lighting/roofs.md](features/night-lighting/roofs.md) | Roofs and roof snow |
-| [features/night-lighting/water.md](features/night-lighting/water.md) | Lakes, ponds, ocean, pools |
-| [features/night-lighting/foliage.md](features/night-lighting/foliage.md) | Bushes, trees, plants |
-| [features/night-lighting/objects-and-rigs.md](features/night-lighting/objects-and-rigs.md) | Objects and rigs: per-pixel lamps, bake-matched falloff, max rule |
-| [features/night-lighting/fences.md](features/night-lighting/fences.md) | Fences and railings, per-pixel |
-| [features/night-lighting/snow.md](features/night-lighting/snow.md) | Snow on ground, floors, sills, stairs, fence tops |
-| [features/night-lighting/lamp-colour.md](features/night-lighting/lamp-colour.md) | Lamp colour |
-| [features/reflections.md](features/reflections.md) | Reflections |
-| [features/picture-filters.md](features/picture-filters.md) | Picture filters (SDR colour and image controls) |
-| [features/edge-smoothing.md](features/edge-smoothing.md) | Edge Smoothing: SMAA 1x and FXAA |
-| [features/ambient-occlusion.md](features/ambient-occlusion.md) | Ambient Occlusion (GTAO) |
-| [features/banding-fix.md](features/banding-fix.md) | Banding Fix: dither of the scene pixel shaders |
-| [features/depth-blur.md](features/depth-blur.md) | Depth Blur (off in map view) |
-| [features/frame-profiler.md](features/frame-profiler.md) | Frame Profiler (developer mode only): sampling, per-service and per-hook timing, hitches |
-| [features/performance.md](features/performance.md) | Rendering paths, lookup caches, lighting budgets, compression, scene-node scheduling, object indexing and offline validation |
-| [changes-since-0.1.0.md](changes-since-0.1.0.md) | Lighting changes after v0.1.0 and the re-add order (fences first) |
+| [Night Lighting](features/night-lighting/README.md): lamps that really light the world at night | Released |
+| [Lot light pass](features/night-lighting/lot-light-pass.md): lot and street lamps on lot grass | Released |
+| [World atlas and smoothed maps](features/night-lighting/world-atlas-and-smoothed-maps.md): smooth terrain light maps | Released |
+| [Terrain relight](features/night-lighting/terrain-relight.md): rebuilding terrain lighting at dusk and after edits | Released |
+| [World lamp response](features/night-lighting/world-lamp-response.md): terrain and rigs follow lamp edits | Released in 2.5.6 |
+| [Every-story light](features/night-lighting/level-light-share.md): lamps on any floor light the ground and the rooms they reach | Released |
+| [Rooms at Night](features/night-lighting/unlit-rooms.md): ambient light and tint of unlit rooms | Released |
+| [Walls](features/night-lighting/walls.md), [Floors](features/night-lighting/floors.md), [Roofs](features/night-lighting/roofs.md), [Roads](features/night-lighting/roads.md) | Released |
+| [Objects and rigs](features/night-lighting/objects-and-rigs.md), [Fences](features/night-lighting/fences.md), [Foliage](features/night-lighting/foliage.md) | Released |
+| [Water](features/night-lighting/water.md), [Snow](features/night-lighting/snow.md), [Lamp colour](features/night-lighting/lamp-colour.md) | Released |
 
-### Developer tools (developer mode only)
-| Document | Tool |
+### Image
+
+| Feature | Status |
 |---|---|
-| [features/dev-tools/light-probe.md](features/dev-tools/light-probe.md) | Light Probe, Ctrl+Shift+F7 |
-| [features/dev-tools/light-diag.md](features/dev-tools/light-diag.md) | Light Diag, Ctrl+Shift+F8 |
-| [features/dev-tools/frame-capture.md](features/dev-tools/frame-capture.md) | Frame Capture, Ctrl+Shift+F9 |
-| [features/dev-tools/lot-map-probe.md](features/dev-tools/lot-map-probe.md) | Lot Map Probe |
-| [features/dev-tools/census.md](features/dev-tools/census.md) | Shader census, false colour, offline coverage tests |
+| [Ambient Occlusion](features/ambient-occlusion.md): contact shade where surfaces meet | Released in 2.1.0 |
+| [Sim Occlusion](features/sim-occlusion.md): separate shade controls for Sims and hair | In development (PR #2) |
+| [Reflections](features/reflections.md): water reflections and lamp glow | Released |
+| [Picture filters](features/picture-filters.md): colour and image controls, filtered screenshots | Released |
+| [Edge Smoothing](features/edge-smoothing.md): SMAA and FXAA | Released |
+| [Depth Blur](features/depth-blur.md): depth of field | Released |
+| [Banding Fix](features/banding-fix.md): dither against colour banding | Released |
 
-## Primary sources behind these docs
+### Performance
 
-- Code: this repository; the frozen combined tree for explicitly historical sections.
-- `%USERPROFILE%\Desktop\S3SS-dev\NOTAS-ILUMINACAO.md`: chronological lab notebook in Portuguese, every capture and
-  root cause. Later entries supersede earlier ones.
-- `PASSO3-PLANO.md` (per-pixel lamp plan and critique), `ROADMAP-NIGHT-REMAKE.md`, `PLANO-SEPARACAO.md` (standalone split).
-- Static RE of TS3W.exe: `re\out` (Ghidra decompile) and the session scratchpad `engine_map\` (call graph, strings,
-  service tables, profiler targets).
-- `README.md` of the combined build (user-facing feature list).
+| Feature | Status |
+|---|---|
+| [Performance](features/performance/README.md): twelve switches against stutters (file lookups, lot lighting, texture and cache compression, object lookups, scene scheduling) | Released |
 
-When these docs and the code disagree, the code is right; fix the doc.
+### Reports and diagnostics
 
-## Historical notes
+| Feature | Status |
+|---|---|
+| [Report a problem](features/bug-reports.md): sessions, captures and notes for bug reports | Released in 2.5.0 |
+| [Developer mode](features/developer-mode.md): optional diagnostic tools in the unified build | Released in 2.5.5 |
+| [Frame Profiler](features/frame-profiler.md): per-service and per-hook timing, hitches | Developer mode |
+| [Light Probe](features/dev-tools/light-probe.md), [Light Diag](features/dev-tools/light-diag.md), [Recorder](features/dev-tools/recorder.md) | Released (player captures) |
+| [Frame Capture](features/dev-tools/frame-capture.md), [Census](features/dev-tools/census.md) | Developer mode |
 
-Release-specific investigations and superseded candidates remain in their feature guides, where their evidence and limitations are useful: [lighting](features/night-lighting/terrain-relight.md), [reports](features/bug-reports.md), and [Edge Smoothing](features/edge-smoothing.md).
+### Removed
 
-- [Game anti-aliasing compatibility](ui-aa-compatibility.md): affected effects and inline help.
+| Feature | Notes |
+|---|---|
+| [Display fluency](features/display-fluency.md), [Presentation](features/presentation.md), [Lot Map Probe](features/dev-tools/lot-map-probe.md) | Never published or combined-build only |
+| HDR output, Native HDR, Smooth Streaming, Script GC Scheduler, Service Frame Budget, earlier AO | See [removed-features.md](removed-features.md) |
+
+## Engine reference (TS3W.exe)
+
+| Document | Covers |
+|---|---|
+| [main-loop-and-services.md](engine/main-loop-and-services.md) | Main loop, services, jobs, resources, thread model |
+| [lot-loading-and-streaming.md](engine/lot-loading-and-streaming.md) | Lot loading, LOD, world streaming, loaded-world gate |
+| [terrain-and-light-bake.md](engine/terrain-and-light-bake.md) | Terrain chunks and the light bake |
+| [room-light-maps.md](engine/room-light-maps.md) | Room light maps and the lot light solve |
+| [light-objects-and-rigs.md](engine/light-objects-and-rigs.md) | Light objects, light manager, object rigs |
+| [shaders.md](engine/shaders.md) | Shader packages, families, constants, shader identification |
+| [camera-and-map-view.md](engine/camera-and-map-view.md) | Camera, projection, map view |
+| [mono-gc.md](engine/mono-gc.md) | Mono and Boehm GC, simulation thread |
+| [timers-and-sleeps.md](engine/timers-and-sleeps.md) | Clock, sleeps, frame limiter |
+| [game-versions.md](engine/game-versions.md) | Game builds and the runtime signature table |
+
+## History
+
+Project-wide history: [architecture](history/architecture.md), [workflow](history/workflow.md), [UI](history/ui.md),
+[lighting changes since 0.1.0](history/changes-since-0.1.0.md). Feature history is linked from each feature page.
+
+## Primary sources
+
+- The code in this repository; the frozen combined build (`combined-final`, commit 45e36e2) for explicitly historical
+  sections.
+- `%USERPROFILE%\Desktop\S3SS-dev\NOTAS-ILUMINACAO.md`: chronological lighting notebook (Portuguese); later entries
+  supersede earlier ones. Also `PASSO3-PLANO.md`, `ROADMAP-NIGHT-REMAKE.md` and `PLANO-SEPARACAO.md`.
+- Static reverse engineering of `TS3W.exe`: `S3SS-dev\re\out` (Ghidra decompile).

@@ -6,6 +6,7 @@
 #include "apex_paths.h"
 #include "apex_util.h"
 #include "apex_version.h"
+#include "apex_config.h"
 #include "game_version.h"
 #include "ui/i18n.h"
 #include "render_callbacks.h"
@@ -171,7 +172,7 @@ void WritePng(ShotJob job, std::vector<BYTE> bgr, UINT w, UINT h) {
         if (stream) stream->Release();
         if (factory) factory->Release();
         if (SUCCEEDED(com)) CoUninitialize();
-        if (!ok) LOG_WARNING("[Captures] The screenshot could not be written: " + file.string());
+        if (!ok) LOG_WARNING("[Captures] The screenshot could not be written: " + ApexUtil::ToUtf8(file.wstring()));
         if (job.report) CompleteShot(job.reportFolder, ok);
         else Notify(I18n::Tr(ok ? "Screenshot saved" : "The screenshot could not be saved"), 4,
                     ok ? NoteKind::Screenshot : NoteKind::Warning);
@@ -579,10 +580,15 @@ void ObserveGameUiKey(WPARAM vk, bool repeat) {
     if (vk == VK_F10 && !repeat) g_gameUiHidden.store(!g_gameUiHidden.load());
 }
 
+void OnWorldSessionChanged() {
+    if (!g_playerPhoto.active) g_gameUiHidden.store(false); // a loaded world starts with the game's UI shown
+}
+
 bool RequestPlayerScreenshot(bool hideGameUi) {
     if (g_playerPhoto.active) return false;
     std::error_code ec;
-    const std::wstring& gameDir = ApexPaths::GameDocumentsDirectory();
+    const bool toApex = ApexConfig::GetUi().screenshotToApexFolder;
+    const std::wstring& gameDir = toApex ? ApexPaths::ApexDirectory() : ApexPaths::GameDocumentsDirectory();
     if (gameDir.empty()) {
         Notify(I18n::Tr("Could not create the screenshots folder"), 5, NoteKind::Warning);
         return false;
@@ -608,7 +614,7 @@ bool RequestPlayerScreenshot(bool hideGameUi) {
         Notify(I18n::Tr("Could not hide the game interface; screenshot was not taken"), 5, NoteKind::Warning);
         return false;
     }
-    LOG_INFO("[Captures] Filtered screenshot requested: " + file.string());
+    LOG_INFO("[Captures] Filtered screenshot requested: " + ApexUtil::ToUtf8(file.wstring()));
     return true;
 }
 

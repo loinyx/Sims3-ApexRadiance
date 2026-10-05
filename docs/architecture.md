@@ -1,821 +1,690 @@
-> Current standalone update (2026-10-02): one unified ASI now includes optional developer tools, off by default and selected at startup. The compile-time flavor descriptions below are historical. See [developer-mode.md](features/developer-mode.md).
+# Architecture: how Apex Radiance hooks the game and Direct3D 9
 
-# Architecture: how Apex Radiance hooks the game and D3D9
+Apex Radiance is one Win32 DLL renamed `ApexRadiance.asi`, loaded into `TS3W.exe` by an ASI loader. It gets onto the
+game's Direct3D 9 device through Microsoft Detours, dispatches the device calls it needs to its features through a
+priority-ordered hook registry, patches game code in memory at addresses resolved per game build, and draws its own
+ImGui menu. It runs alone or next to an unmodified official Sims3SettingsSetter (S3SS).
 
-> Historical architecture baseline: the following covers the **frozen combined build**: Apex inside a fork of Sims3SettingsSetter, tag `combined-final`, commit
-> 45e36e2, tree `%USERPROFILE%\Desktop\S3SS-dev\Sims3SettingsSetter\`. File paths below are relative to that tree.
-> The **standalone** ASI, **Apex Radiance** (`ApexRadiance.asi`; project folder still `S3SSApex\`), is **in progress**.
-> Its design is summarised in
-> [section 12](#12-the-standalone-split-planned--in-progress). Where the standalone differs (HDR, Native HDR and Ambient
-> Occlusion removed; Smooth Streaming, Script GC Scheduler and Service Frame Budget removed; Frame Profiler dev-only;
-> Picture filters in their own SDR module; framework rewritten from scratch; Night Lighting restarted from v0.1.0), this
-> document says so, and section 12.0 lists the decisions. Anything marked "(unverified)" or
-> "(inferred ...)" was not confirmed at runtime.
->
-> Game addresses are for TS3W.exe Steam 1.67.2.024037 (PE TimeDateStamp `0x52DEC247`, image base 0x00400000, no ASLR).
+This page describes the framework as it is in the code. The frozen combined build (Apex inside a fork of S3SS, tag
+`combined-final`) and the plan that produced the standalone are kept in [history/architecture.md](history/architecture.md).
 
-Related docs: [workflow.md](workflow.md) (build, install, test), [engine/main-loop-and-services.md](engine/main-loop-and-services.md)
-(main loop, services, threads), [removed-features.md](removed-features.md) (HDR / Native HDR / AO).
+## Overview
+
+| Part | Source | Section |
+|---|---|---|
+| Start-up, settle wait, update pump, shutdown | [apex_main.cpp](../apex_main.cpp) | [1](#1-start-up-and-shutdown) |
+| Device bootstrap (Direct3DCreate9, CreateDevice, EndScene, Reset) | [framework/d3d9_bootstrap.cpp](../framework/d3d9_bootstrap.cpp) | [2](#2-getting-onto-the-device) |
+| Hook registry (15 device methods, priorities, Skip / Block) | [framework/d3d9_hooks.cpp](../framework/d3d9_hooks.cpp) | [3](#3-the-hook-registry-d3d9hooks) |
+| Extra hooks, render callbacks, post-scene chain, depth share, shader precompile, game-code chains | `framework/`, `features/post_scene.cpp` | [4](#4-other-hook-plumbing) |
+| Features, settings, config file | [framework/patch_base.h](../framework/patch_base.h), [apex_config.cpp](../apex_config.cpp) | [5](#5-features-and-settings) |
+| Logger, crash report | [framework/apex_log.cpp](../framework/apex_log.cpp), [framework/crash_report.cpp](../framework/crash_report.cpp) | [6](#6-logger-and-crash-report) |
+| Developer mode | [build_flavor.h](../build_flavor.h) | [7](#7-developer-mode) |
+| Per-frame and per-event flows | | [8](#8-one-frame), [9](#9-per-event-flows) |
+| Threads and synchronisation | | [10](#10-threads-and-synchronisation) |
+| Coexistence with official S3SS | [framework/s3ss_detect.cpp](../framework/s3ss_detect.cpp) | [11](#11-coexisting-with-official-s3ss) |
+| Loaded-world gate (menu, start note, Depth Blur) | [features/world_session.h](../features/world_session.h) | [12](#12-loaded-world-gate-and-start-note) |
+| Report storage | [features/captures.cpp](../features/captures.cpp) | [13](#13-report-storage) |
+| Adding a feature | | [14](#14-how-to-add-a-new-feature) |
+
+Game addresses are for `TS3W.exe` Steam 1.67.2.024037 (PE `TimeDateStamp` `0x52DEC247`, image base `0x00400000`, no
+ASLR) unless stated. Other builds are resolved by signature ([engine/game-versions.md](engine/game-versions.md)).
+Anything marked *Unverified* was not confirmed at run time.
+
+Related pages: [workflow.md](workflow.md) (build, test, install, release),
+[engine/main-loop-and-services.md](engine/main-loop-and-services.md) (the game's main loop and threads),
+[ui.md](ui.md) (the menu), [removed-features.md](removed-features.md) (removed features).
 
 ---
 
-## 1. Load and initialisation
+## 1. Start-up and shutdown
 
 ### 1.1 How the ASI gets loaded
-- The mod is a Win32 DLL renamed `.asi` (`Sims3SettingsSetter.vcxproj`: `TargetName` = `S3SSApex`, `TargetExt` = `.asi`).
-  An ASI loader in `Game\Bin` loads every `*.asi` in that folder. README "Installation" lists dxwrapper or Ultimate ASI
-  Loader. The user's `Game\Bin` holds `wininet.dll`, `S3SSApex.asi`, `MonoPatcher.asi` and `Sims3Performance.asi`.
-  That `wininet.dll` is the UAL build: README names `wininet.dll` as the Win32 UAL file (inferred, not hashed).
-- The loader loads ASIs in folder enumeration order (PLANO-SEPARACAO section 4, "Output name"). `S3SSApex.asi` sorts before
-  `Sims3SettingsSetter.asi`.
-- **Never keep two copies of the mod in `Bin`.** The combined build is a whole S3SS. The old name was
-  `Sims3SettingsSetter.asi`.
 
-### 1.2 `DllMain` (`dllmain.cpp`, `DLL_PROCESS_ATTACH`)
-These steps run in order, under the loader lock:
+- The DLL is built as `ApexRadiance.asi` (solution `ApexRadiance.sln`, project `ApexRadiance.vcxproj`). An ASI loader
+  in `Game\Bin` loads every `*.asi` in that folder. The test machine uses Ultimate ASI Loader as `wininet.dll`
+  (inferred from the loader's README, not checked by hash).
+- The loader loads ASIs in folder enumeration order. `ApexRadiance.asi` sorts before `S3SSApex.asi` and
+  `Sims3SettingsSetter.asi` (*Unverified* for every loader version).
+- `TS3W.exe` imports `d3d9.dll` statically (IAT slot `0x00F95A58` = `d3d9.dll!Direct3DCreate9`,
+  `research\engine_map\iat.map`), so `d3d9.dll` is loaded before any ASI. On the test machine `d3d9.dll` is the official
+  DXVK 3.1.1.
+
+### 1.2 `DllMain` (`DLL_PROCESS_ATTACH`)
+
+Under the loader lock, in order:
+
 1. `DisableThreadLibraryCalls`.
-2. `InitializeAllocatorHooks()` (`allocator_hook.cpp`). This is S3SS's mimalloc hook of `MSVCR80.dll`. It does nothing
-   unless the config enables it.
-3. **Process check.** `GetModuleFileNameA(NULL)`. If the file name is neither `TS3.exe` nor `TS3W.exe`, it logs
-   `LOG_CRITICAL` (this only reaches `OutputDebugString`, because the logger does not exist yet) and returns `FALSE`.
-4. **CPUID topology fix**, only on Intel hybrid CPUs (`IsIntelHybridCPU`: vendor `GenuineIntel`, and CPUID.07H EDX bit 15
-   or family 6 model >= 0x97). It patches two `SAR` to `SHR` in the game's topology detector (`FUN_006135e0`):
-   - pattern `B8 04 00 00 00 33 C9 0F A2 89 44 24 ?? 8B 44 24 ?? C1 F8 1A`, +18: `F8` becomes `E8`;
-   - pattern `51 C1 FA 18 F6 D0 22 D0`, +2: `FA` becomes `EA`.
+2. **Process check.** If the executable is neither `TS3W.exe` nor `TS3.exe`, return `FALSE` (the launcher and other
+   tools do not load the mod at all).
+3. **Instance mutexes** (`S3SSDetect::AcquireInstanceMutex`):
+   - `Local\ApexRadiance.<pid>` already held: another copy of Apex Radiance runs. This copy stays idle (returns `TRUE`,
+     no hooks, no menu) and writes only to `OutputDebugString`.
+   - `Local\S3SSApex.<pid>` already held: an older `S3SSApex.asi` loaded first and runs. This copy stays idle; a short
+     thread opens the log and writes one error line asking to delete the old file.
+   - Otherwise this copy owns both names, so an `S3SSApex.asi` that loads later finds its name taken and idles by its
+     own duplicate check.
+4. `Overlay::SetClient(&ApexGui::Client())`.
+5. `ApexD3D::InstallFromDllMain()` detours the `Direct3DCreate9` export of the loaded `d3d9.dll`
+   ([section 2](#2-getting-onto-the-device)). If `d3d9.dll` is not loaded yet, the init thread retries.
+6. Creates the stop event and the **init thread**.
 
-   It writes through `PatchHelper::WriteBytes` with an expected-byte check. The messages are held in
-   `g_deferredTopologyLog` and replayed once the logger exists. The comment warns: do not bring back the old
-   `CALL -> MOV EAX,1` "fix".
-5. `CreateThread(HookThread)`. If that fails, `DllMain` returns `FALSE`.
+Lines logged before the log file opens are queued and written first.
 
-### 1.3 `HookThread` (`dllmain.cpp`): the init sequence and the Update pump
-The step numbers match the comments in the code:
-1. `ConfigPaths::EnsureDirectoryExists()`. Then `Logger::Handler::Initialize(ConfigPaths::GetLogPath())`. If that
-   fails, it falls back to `Game\Bin\S3SS_LOG.txt`. `SetDebugMode(true)` is set only in `_DEBUG` builds. The deferred
-   CPUID lines are replayed here.
-2. **D3D9 hooks, as early as possible.** `UISettings::PeekDisableOverlayEarly()` and
-   `BorderlessWindow::PeekEnabledEarly()` parse the TOML directly, before the full load. The branches:
-   - Overlay off and borderless off: no D3D hooks at all (headless).
-   - Otherwise: `InitializeD3D9Hook(!disableOverlay)`.
+### 1.3 Init thread
 
-   A failure here is not fatal.
-3. `DetectGameVersion()` (`patch_system.h`) reads the PE `TimeDateStamp` of the exe. Known values:
-   - Retail `0x52D872DA`
-   - Steam `0x52DEC247`
-   - EA 1.69.47 `0x6707155C`
-   - EA 1.69.43 `0x568D4BAC`
+1. Opens `ApexRadiance_LOG.txt` in the Apex Radiance folder (fallback: next to the game executable, never
+   `S3SS_LOG.txt`). Logs the product, version, executable and folder.
+2. `DetectGameVersion()` reads the PE `TimeDateStamp` (table in [engine/game-versions.md](engine/game-versions.md)). An
+   unknown build is logged; game-code features then start only where their code is found by signature.
+3. `LogEnvironment()`: the ASIs and wrapper DLLs in `Game\Bin` (`*.asi`, `d3d9.dll`, `dxgi.dll`, `dinput8.dll`,
+   `wininet.dll`, `version.dll`, `dsound.dll`, `winmm.dll`, `d3d11.dll`, `dxvk.conf`, `*.ini`) with size, date and file
+   version, and the game's `Options.ini`.
+4. `ShaderCache::Start()` precompiles Apex's HLSL on a background thread ([4.4](#44-shader-precompile)).
+5. `S3SSDetect::Scan()`, then `ApexD3D::EnsureInstalled()` (only acts when the DllMain install could not happen).
+6. `ApexConfig::LoadDeveloperMode()` (developer mode is fixed before any feature exists), `PatchManager::CreateAll()`
+   (constructs every registered feature), `ApexConfig::EnsureMigrated()` (one-time migration,
+   [5.3](#53-config-file-apexradiancetoml)) and `ApexConfig::LoadSettings()` (menu, Picture, profiler preferences).
+7. `AddressSpace::Start()` (developer mode only).
+8. **Settle wait** (`WaitForSettle`): until the first Present has passed through Apex's hooks and 1 s has elapsed
+   (`kSettleAfterPresentMs`), so official S3SS has loaded its own patches from its hook thread first. If no Present
+   arrives within 20 s (`kSettleTimeoutMs`), the features are installed anyway (logged).
+9. `S3SSDetect::Rescan()`. An older standalone sets a menu notice. **The old combined build loaded too**: features stay
+   off, the startup state becomes `RefusedOldBuild` and a banner asks to delete it.
+10. Otherwise `GameAddr::Resolve()` resolves every game-code address (fixed on Steam 1.67.2, signature scan elsewhere;
+    on the EA app build `.text` is decrypted only in memory, which is long done by now), then `ApexConfig::LoadFeatures()`
+    applies `[patches.*]` and installs the enabled features. Startup state `Running`.
+11. `CrashReport::Install()`, after the game's own start-up (which may set its own filter).
+12. **Pump loop** every 10 ms (`kPumpIntervalMs`) until the stop event:
+    - `PatchManager::UpdateAll()` while `Running` (each feature's `Update()`: debounced reinstalls, work scheduled off the
+      render thread);
+    - `ApexConfig::PumpAutosave()`;
+    - once a second: `ConflictGuard::Tick()` (interface only, [11.4](#114-game-code-sites-and-the-conflict-guard)),
+      `CrashReport::Refresh()` and the crash report's list of enabled features.
 
-   The result goes to `g_gameVersion` and `g_exeTimeDateStamp`.
-4. `CPUFeatures::Get()` (logs SSE4.1, AVX2 and FMA).
-5. `Migration::CheckAndMigrate()`: the old `Game\Bin\S3SS.ini` is converted to TOML when the TOML does not exist yet.
-6. `OptimizationManager::Get()`. The first call runs `PatchRegistry::InstantiateAll`, which **constructs every patch**. It
-   logs "Registered N patches". Patch constructors run here, on the hook thread.
-7. `ConfigStore::LoadAll()`: `[settings]`, `[config]` and `[qol.*]`, but **not** `[patches]`.
-8. `g_hookManager.Initialize()`: S3SS's settings hooks. This is skipped when `[qol.ui].disable_hooks` is set. Details:
-   - `VTableManager` finds a vtable through the constructor pattern `56 8B F1 C7 06 ?? ?? ?? ?? 33 C9 89 4E 0C`.
-   - It detours slot `0x3C` (VariableRegistry) and slot `0x44` (CustomDebugVar).
-   - `ConfigRetrievalHook` finds its function by the pattern
-     `83 EC 2C 8B 44 24 ?? 53 55 56 57 33 DB 8B F1 BF ?? ?? ?? ?? 50 8D 4C 24 ?? 89 5C 24 ?? ...` and checks that the
-     string at +16 is `"Services/ConfigRegistry"`.
-9. `ConfigStore::LoadPatches()` calls `OptimizationManager::LoadFromToml`. For each `[patches.<Name>]` table it loads the
-   settings, then `enabled`, then calls `Install()` or `Uninstall()`. **Startup installs happen here, on the hook thread.**
-10. `EnsureEnabledByDefaultPatchesAreEnabled()` installs patches that have `enabledByDefault` and no `enabled` key in the
-    TOML.
+Startup feature installs therefore run on the init thread, after the device exists and after the first Present.
 
-The thread then logs "Starting message loop" and loops forever:
-- `PeekMessage(PM_REMOVE)`. On `WM_QUIT` it returns.
-- When there is no message:
-  - `MemoryMonitor::Get().Update()`;
-  - `patch->Update()` for **every** registered patch (enabled or not);
-  - `Sleep(10)`.
+### 1.4 Shutdown
 
-**The `Update()` pump is the only periodic tick on this thread.** The base `OptimizationPatch::Update()`
-(`optimization.h`) does the debounced reinstall after a setting change:
-- `NotifySettingChanged()` records the time and sets `pendingReinstall`.
-- Once `SETTING_CHANGE_DEBOUNCE` (2 s) has passed, `Update()` calls `Uninstall()` and then `Install()`, **on the hook thread**.
+Nothing runs at process exit (`DLL_PROCESS_DETACH` with `lpReserved != NULL`): the loader may hold other threads'
+locks. The logger's queued lines are flushed by the process-exit path. On `FreeLibrary` only:
 
-Apex patches override this. See [section 5.3](#53-how-a-patch-declares-and-uses-settings).
+1. Signal the stop event (never waited for inside `DllMain`).
+2. `ShaderCache::Shutdown()` (the worker stops between two compiles).
+3. `FrameProfiler::Shutdown()` (before the device hooks go: it unregisters its hooks and detaches game-function hooks).
+4. `AddressSpace::Stop()`.
+5. `PatchManager::UninstallAll()`.
+6. `ApexD3D::Shutdown()`: restores the window procedure, uninstalls the registry detours, detaches EndScene, Reset,
+   CreateDevice and Direct3DCreate9.
+7. `ApexLog::Close()`.
 
-**Evidence of the real order** comes from `Documents\...\S3SS\S3SS_LOG.txt` of a 28/09 session:
-- "Starting message loop" is logged **before** "[CreateDevice] Device created (type=1)". All startup patches were installed
-  before the game created its device.
-- The registry initialises only at the first EndScene: "[D3D9Hooks] Hook registry initialized successfully" comes after
-  "[EndScene] ImGui initialized".
-- Patches that register registry callbacks at install time are therefore only storing callbacks in vectors. The callbacks
-  start firing once the detours exist.
-- This ordering is timing, not a guarantee (unverified that the device is always created later).
-
-The `DetectGameVersion` step runs **after** `InitializeD3D9Hook`. The D3D hooks do not depend on the version.
-
-### 1.4 Shutdown (`DllMain`, `DLL_PROCESS_DETACH`)
-Nothing runs at process exit (`lpReserved != NULL`), apart from static destructors. The logger's `ExitFlush` writes any
-pending lines with `try_lock` (`logger.cpp`).
-
-On `FreeLibrary` (`lpReserved == NULL`) the order is:
-1. `Uninstall()` of every enabled patch.
-2. `PostThreadMessage(WM_QUIT)` to the hook thread, then `WaitForSingleObject(..., 5000)`.
-3. `FrameProfiler::Shutdown()`. This must come before the D3D hooks are removed: it unregisters its registry hooks and
-   detaches its game-function hooks.
-4. `CleanupD3D9Hook()`:
-   - `D3D9Hooks::Internal::Cleanup()` (detaches the 15 registry detours);
-   - restores the WndProc;
-   - detaches CreateDevice, EndScene and Reset.
-5. `g_hookManager.Cleanup()` (the settings hooks).
-6. `Logger::Handler::Close()`.
-
-UAL never unloads, so in practice this path never runs (PLANO-SEPARACAO 2a.6, 2b hazard 2).
+Ultimate ASI Loader never unloads ASIs, so in practice this path does not run.
 
 ---
 
-## 2. D3D9 device hooks (`d3d9_hook.cpp` / `d3d9_hook.h`)
+## 2. Getting onto the device
 
-The game renders through its own `d3d9.dll`, which is the official DXVK 3.1.1 (user setup memory, sha256 `265888c3...`).
-Every detour below patches **function bodies inside DXVK's d3d9.dll** with Microsoft Detours. The vtables are never
-written.
+All device hooks are Microsoft Detours inline hooks on **function bodies inside `d3d9.dll`** (DXVK). Vtables are never
+written. Each attach logs the target and what its prologue already holds (`HookChain::DescribePrologue`: "clean (...)",
+"E9 -> Sims3SettingsSetter.asi+0x1234", ...), so the order of Detours chains with other mods is visible in the log.
+One mutex serialises this module's Detours transactions.
 
-| Hook | Where installed | Vtable slot | Function |
+| Hook | Installed | Slot | Detour |
 |---|---|---|---|
-| `IDirect3D9::CreateDevice` | `InitializeD3D9Hook`, hook thread, step 2 | IDirect3D9[16] | `HookedCreateDevice` |
-| `IDirect3DDevice9::EndScene` | `AttachDeviceHooks`, inside `HookedCreateDevice` | device[42] | `HookedEndScene` |
-| `IDirect3DDevice9::Reset` | same | device[16] | `HookedReset` |
-| 15 more device methods | `D3D9Hooks::Internal::Initialize`, first EndScene | see section 3 | `Hooked_*` in `d3d9_hook_registry.cpp` |
-| 6 more device methods | `ExtraHooks::EnsureInstalled`, on first use | see section 4.1 | `d3d9_extra_hooks.cpp` |
+| `d3d9!Direct3DCreate9` | DllMain (or init thread, late path) | export | `Hooked_Direct3DCreate9` |
+| `IDirect3D9::CreateDevice` | inside the first `Direct3DCreate9` call (`call_once`, on the caller's thread) | IDirect3D9[16] | `Hooked_CreateDevice` |
+| `IDirect3DDevice9::EndScene` | after the first HAL device is created | device[42] | `Hooked_EndScene` |
+| `IDirect3DDevice9::Reset` | same | device[16] | `Hooked_Reset` |
+| 15 device methods | first EndScene | [3.1](#31-hooked-device-methods) | `framework/d3d9_hooks.cpp` |
+| 6 device methods | first use (`ExtraHooks::EnsureInstalled`) | [4.1](#41-extra-device-hooks) | `framework/d3d9_extra_hooks.cpp` |
 
-`Present` (device[17]) is hooked **only by the registry** (`Hooked_Present`). `hooks.cpp` contains an older
-`Present_Hook` and a global `Original_Present`. That code is dead: nothing attaches it.
+### 2.1 `Direct3DCreate9` and `CreateDevice`
 
-### 2.1 `InitializeD3D9Hook(enableOverlay)`
-- `Direct3DCreate9(D3D_SDK_VERSION)` creates a throwaway IDirect3D9 (a DXVK object). The code reads vtable[16] from it,
-  releases the object, and detours `CreateDevice` in one Detours transaction.
-- No dummy device is created. The comment says this avoids loading a HAL driver just to throw it away.
-- This works only if it runs before the game creates its device (see 1.3).
-- `g_overlayEnabled = enableOverlay`. With `false`, the device hooks are still installed (borderless needs them), but no
-  ImGui context and no WndProc are created.
+- `Hooked_Direct3DCreate9` first calls `VulkanDriverGuard::BeforeDirect3DCreate()` (before DXVK loads the Vulkan
+  loader), then the original. The first caller that gets an `IDirect3D9` installs the `CreateDevice` detour, once, on
+  its own thread, before returning. Every later hook on `CreateDevice` (S3SS's, its Resolution Spoofer's) is therefore
+  installed after Apex's, in sequence: two Detours transactions never touch the same prologue at once.
+- **Late path** (`EnsureInstalled`, `d3d9.dll` not loaded at DllMain): wait up to 30 s for `d3d9.dll`. If S3SS is
+  loaded, probe the `CreateDevice` prologue for up to about 3 s until it is an `E9` into S3SS, then hook
+  `Direct3DCreate9` (logged as a warning: a device created before this is not seen).
+- `Hooked_CreateDevice` calls the original with the game's **unchanged** present parameters. Apex never edits
+  `D3DPRESENT_PARAMETERS`. On a successful HAL device it logs the size, windowed or exclusive mode, back-buffer format,
+  multisample type, behaviour flags, the adapter description, vendor and device IDs, the driver version, the adapter
+  count and whether `amdvlk32.dll` is loaded; then it detours EndScene and Reset of that device and records the window
+  (`hDeviceWindow`, else the focus window).
+- A second HAL device is logged and ignored: Apex stays on the first. Non-HAL devices pass through untouched.
 
-### 2.2 `HookedCreateDevice`
-1. For `D3DDEVTYPE_HAL` only: `EnforceBorderlessWindowedParams(pp, "CreateDevice")`. When a borderless mode is set, it
-   forces `Windowed = TRUE`, `FullScreen_RefreshRateInHz = 0` and `SwapEffect = DISCARD`, and strips
-   `D3DPRESENTFLAG_LOCKABLE_BACKBUFFER`.
-2. **HDR back buffer (combined build only):** `HdrOutput::Get().BeforeCreateDevice(pD3D, hFocusWindow, pp)`
-   (`hdr_output.cpp`).
-   - If the config is not loaded yet, it parses `[qol]` itself.
-   - It returns false (no change) when any of these holds: HDR is off; Windows HDR is off on the game's monitor;
-     `IDirect3D9::QueryInterface(ID3D9VkExtInterface)` fails ("needs DXVK 2.3 or newer").
-   - Otherwise it calls `ext->UnlockAdditionalFormats()`, saves `pp->BackBufferFormat` and sets it to
-     `D3DFMT_A16B16G16R16F`.
-3. It calls the original.
-   - If HDR changed the format and the call failed: `HdrOutput::CreateDeviceFailed(pp)` restores the format and the call
-     is **retried once**.
-   - On success with HDR: `AfterCreateDevice`, then `ApplyColorSpace`, which calls
-     `ID3D9VkExtSwapchain::SetColorSpace(EXTENDED_SRGB_LINEAR)` (scRGB) and logs the EDID luminance.
-4. On success, for HAL only: `AttachDeviceHooks(device)` detours EndScene (vtable[42]) and Reset (vtable[16]) once
-   (`g_deviceHooksAttached`).
-   - A later device whose EndScene pointer differs only gets a warning ("overlay may not render").
-   - If a Detours transaction fails, the flag is cleared so the next device retries.
-5. If a borderless mode is set, the window is handed to `BorderlessWindow::SetWindowHandle` straight away, before the game
-   shows or sizes it.
+### 2.2 `Hooked_EndScene`
 
-**Non-HAL devices** (`D3DDEVTYPE_REF`, `D3DDEVTYPE_NULLREF`, `D3DDEVTYPE_SW`) pass through untouched: no borderless
-change, no HDR change, no hooks attached. The only device in the log is "Device created (type=1)" (HAL). Nothing shows the
-game creating a NULLREF device (unverified; no evidence either way).
+Per call, with a thread-local re-entry guard:
 
-### 2.3 `HookedEndScene`: overlay, first-call init and fire points
-Per call:
-1. Re-entry guard `g_inEndScene`.
-2. `TestCooperativeLevel`. If the device is lost (any failure other than `D3DERR_DEVICENOTRESET`), it passes straight
-   through to the original.
-3. **First call only** (`g_deviceInitDone` / `g_deviceInitializing` CAS):
-   - Set `g_pd3dDevice = pDevice`. This is the global device pointer that Apex modules use (`extern` in `d3d9_hook.h`).
-   - Find the window from `GetCreationParameters().hFocusWindow`, falling back to the swap chain's `hDeviceWindow`.
-     Store it in `g_hookedWindow`.
-   - `BorderlessWindow::SetWindowHandle`.
-   - If the overlay is on:
-     - `ImGui::CreateContext` with `NavEnableKeyboard`, `NavEnableGamepad` and `NoMouseCursorChange`;
-     - the default font at 13 px x `FONT_OVERSAMPLE` (3);
-     - `SetWindowLongPtr(GWLP_WNDPROC, HookedWndProc)`, then a check that it took;
-     - `ImGui_ImplWin32_Init` and `ImGui_ImplDX9_Init`.
-   - `D3D9Hooks::Internal::Initialize(pDevice)` installs the registry detours (section 3).
-4. `BorderlessWindow::TickReapply()`.
-5. **`RenderCallbacks::Fire(endSceneBeforeOverlay)`**. This is the end of the game's frame, before any overlay. Users:
-   - `frame_capture_patch.cpp` `OnEndScene`;
-   - `night_terrain_relight_patch.cpp` `DeferredReinstall` (added in the patch constructor).
-6. `HdrOutput::Get().BeforeOverlay(dev)`. If the frame ended on the scene (no game UI), the scene copy is taken now.
-7. ImGui frame (only when initialised):
-   - `NewFrame`;
-   - display size and style scale are overridden from the back buffer in borderless mode (resolution spoofing): scale =
-     height / 1080, clamped to 0.75 .. 3;
-   - `SettingsGui::Render()`, which draws the whole S3SS window including the Apex and Display tabs;
-   - `Render` and `ImGui_ImplDX9_RenderDrawData`.
-8. **`HdrOutput::Get().OnEndScene(dev)`** (combined build):
-   - sets the lamp gain for the next frame;
-   - `HdrNative::Update`;
-   - the full-screen HDR and/or Picture pass. It runs on the finished frame, after the overlay; the UI is told apart by the
-     scene copy.
-9. The original `EndScene`.
+1. **First call only** (`FrameInit`, render thread): store the device (`ApexD3D::Device()`), find the window
+   (creation parameters' focus window, else the swap chain's `hDeviceWindow`), `D3D9Hooks::Install(device)` (the
+   registry detours), register the `ApexCore` Present hook at priority -2000 (first of all), `Overlay::Init`.
+2. If `TestCooperativeLevel` succeeds:
+   1. `RenderCallbacks::endSceneBeforeOverlay` (post-scene fallback, Frame Capture, Night Lighting deferred reinstall);
+   2. `Picture::BeforeOverlay` (scene copy when the frame ended on the scene);
+   3. if a Report screenshot is pending with the menu open, `Picture::OnEndScene` now so the photo is graded without
+      the menu (Picture then does not grade twice);
+   4. `RenderCallbacks::filteredSceneBeforeOverlay` (Report screenshots of the graded frame);
+   5. `Overlay::Frame` once per frame (the Present hook clears the flag; every EndScene if the registry is missing);
+   6. `Picture::OnEndScene` (the SDR Picture pass).
+3. The original `EndScene`.
 
-### 2.4 `HookedReset`
-1. `ImGui_ImplDX9_InvalidateDeviceObjects`, if ImGui is up.
-2. `EnforceBorderlessWindowedParams(pp, "Reset")`.
-3. **`RenderCallbacks::Fire(preReset)`**: patches release their `D3DPOOL_DEFAULT` resources.
-4. `HdrOutput::BeforeReset(pp)` releases the HDR resources and forces `A16B16G16R16F` into `pp` again, because the game
-   asks for its own format.
-5. The original `Reset`.
-6. On success:
-   - `HdrOutput::AfterReset` (colour space again);
-   - **`RenderCallbacks::Fire(postReset)`**;
-   - borderless is re-applied;
-   - `ImGui_ImplDX9_CreateDeviceObjects`.
+### 2.3 `Hooked_Reset`
 
-### 2.5 `HookedWndProc`
-- Mouse messages are scaled from window space to back-buffer space (`ScaleMouseCoords`, borderless / resolution spoofer
-  only). They then go to `ImGui_ImplWin32_WndProcHandler`.
-- The toggle key (`[qol.ui].toggle_key`, default `VK_INSERT`) flips `SettingsGui::m_visible`. It is a bare
-  `wParam == key` test that ignores modifiers.
-- While the menu is visible, mouse, keyboard and char messages are **eaten** (return 0). The comment says this "doesn't
-  fully work".
-- Everything else goes to `CallWindowProc(original_WndProc)`.
-- The WndProc runs on the thread that pumps the game window. That is the render thread: the Input service `0x00598660`
-  pumps messages through `0x00410890` inside ServiceManager on the render thread (engine_map `profiler_targets.tsv`;
-  inferred for WndProc).
-- Apex dev hotkeys (Ctrl+Shift+F7 light probe, F8 light diag, F9 frame capture; F10 is the dead call_trace) do **not**
-  use the WndProc. They are polled with `GetAsyncKeyState` from Present hooks (`light_probe.cpp`, `light_diag.cpp`,
-  `patches/frame_capture_patch.cpp`).
+1. `Overlay::BeforeReset()`.
+2. `RenderCallbacks::preReset`: features release their `D3DPOOL_DEFAULT` resources.
+3. `Picture::BeforeReset()`.
+4. The original `Reset` with the game's unchanged parameters.
+5. On success: log size and mode, `RenderCallbacks::postReset`, `Overlay::AfterReset()`. On failure: log the HRESULT.
+
+### 2.4 First Present (`ApexCore`, priority -2000)
+
+Clears the overlay-drawn flag every frame. On the first Present only: records the tick (used by the settle wait),
+`Overlay::InstallWndProc()` (after S3SS subclassed the window in its first EndScene, so Apex sees messages first) and
+`S3SSDetect::Rescan()` (every ASI is loaded by now).
+
+### 2.5 Overlay and input
+
+The overlay ([framework/overlay.cpp](../framework/overlay.cpp)) has its own ImGui context (separate from S3SS's, which
+lives in its own DLL), its own layout file `apex_radiance_imgui.ini` and its own window-procedure subclass.
+
+- **Input policy (capture only).** While the Apex menu is open, messages are fed to Apex's ImGui and eaten only when
+  that ImGui wants them (mouse over an Apex window, a text field being edited) or when they are Apex's toggle chord.
+  Everything else goes on to S3SS's menu and the game. With the menu closed nothing is fed or eaten, except Apex's
+  other shortcuts (`Client::HotkeyDown`), which are eaten with their key-up and character.
+- The client may claim single keys while the mouse is over the menu (`Client::CaptureKey`: Alt to peek, B to compare);
+  their key-up and character are eaten too. The game's cheat console owns all keys while it is open. Alt+Tab is handled
+  by Windows before any window sees it.
+- Mouse coordinates and the display size are scaled whenever the back buffer differs from the window's client area
+  (borderless fullscreen, resolution spoofing).
+- The toggle chord defaults to Ctrl+Shift+F11 (`[ui] toggle_key`); S3SS toggles on a bare Insert and ignores modifiers.
+- A monotonic frame clock (`framework/overlay_clock.h`) is sampled every game frame, even when nothing is drawn, so
+  reopening the menu does not feed the closed time into ImGui's animations; real long frames are preserved. A
+  "Slow panel" warning (more than 50 ms in the panel, or a frame delta over 50 ms, with the menu visible) is logged at
+  most once every 10 s; it is CPU timing, not GPU timing.
+- The menu can only open while the loaded-world gate is open ([section 12](#12-loaded-world-gate-and-start-note)).
 
 ---
 
-## 3. The hook registry (`d3d9_hook_registry.cpp` / `.h`)
+## 3. The hook registry (`D3D9Hooks`)
 
-This is S3SS's "D3D9Hooks" system. The Apex changes to it: a `std::recursive_mutex`, the extra `CallOriginal*`
-functions, and per-hook profiler timing.
+### 3.1 Hooked device methods
 
-### 3.1 Hooked device methods (installed by `Internal::Initialize`, first EndScene, one Detours transaction)
-| Method | Vtable index | Callback type | Per-hook timing |
-|---|---|---|---|
-| Present | 17 | `PresentHook` | no |
-| CreateTexture | 23 | `CreateTextureHook` | no |
-| CreateRenderTarget | 28 | `CreateRenderTargetHook` | no |
-| SetRenderTarget | 37 | `SetRenderTargetHook` | no |
-| BeginScene | 41 | `BeginSceneHook` | no |
-| SetViewport | 47 | `SetViewportHook` | no |
-| SetTexture | 65 | `SetTextureHook` | no |
-| DrawPrimitive | 81 | `DrawPrimitiveHook` | **yes** |
-| DrawIndexedPrimitive | 82 | `DrawIndexedPrimitiveHook` | **yes** |
-| CreateVertexShader | 91 | `CreateVertexShaderHook` | no |
-| SetVertexShader | 92 | `SetVertexShaderHook` | no |
-| SetVertexShaderConstantF | 94 | `SetVertexShaderConstantFHook` | no |
-| CreatePixelShader | 106 | `CreatePixelShaderHook` | no |
-| SetPixelShader | 107 | `SetPixelShaderHook` | no |
-| SetPixelShaderConstantF | 109 | `SetPixelShaderConstantFHook` | no |
+Installed by `D3D9Hooks::Install` at the first EndScene, in one Detours transaction, whether or not anything is
+registered:
 
-The registry installs all 15 unconditionally, even when nothing is registered.
+| Method | Vtable index | Dispatch |
+|---|---|---|
+| Present | 17 | locked |
+| CreateTexture | 23 | locked |
+| CreateRenderTarget | 28 | locked |
+| SetRenderTarget | 37 | lock-free on the render thread |
+| BeginScene | 41 | locked |
+| SetViewport | 47 | lock-free on the render thread |
+| SetTexture | 65 | lock-free on the render thread |
+| DrawPrimitive | 81 | lock-free on the render thread |
+| DrawIndexedPrimitive | 82 | lock-free on the render thread |
+| CreateVertexShader | 91 | locked |
+| SetVertexShader | 92 | lock-free on the render thread |
+| SetVertexShaderConstantF | 94 | lock-free on the render thread |
+| CreatePixelShader | 106 | locked |
+| SetPixelShader | 107 | lock-free on the render thread |
+| SetPixelShaderConstantF | 109 | lock-free on the render thread |
 
 ### 3.2 Registration, order and results
-- **Register:** `D3D9Hooks::Register<Method>(name, std::function, Priority = Normal)`. The call takes the registry mutex,
-  does `push_back`, then `std::sort` by `static_cast<int>(priority)`. `UnregisterAll(name)` removes every entry with that
-  name from all 15 vectors.
-  - Convention: one name per module (`kHookName`, e.g. `"LotLightBridge"`, `"PostScene"`, `"NightTerrainRelight"`).
-  - A module can register several callbacks of the same type under one name. The profiler registers two Present hooks
-    under `"FrameProfiler"`.
-- **Priority** is a plain `enum class Priority { First = 0, Early = 25, Normal = 50, Late = 75, Last = 100 }`. Lower runs
-  first. Any int can be cast in: the Frame Profiler uses `-1000` (start) and `+1000` (end) (`frame_profiler.cpp`
-  `kPrioStart` / `kPrioEnd`).
-- **Equal priorities have no defined order.** `std::sort` is not stable (`SortHooks`; PLANO-SEPARACAO 2d). Several
-  modules sit at `Priority::First` on Present and on the draws. None of them may depend on running before another
-  `First` hook.
-- **Dispatch** (`Execute*Hooks`): hold the registry mutex, then call each callback in order.
-  - `HookAction::Continue`: go on to the next callback.
-  - `HookAction::Skip`: stop the chain; the original is **not** called and the method returns `S_OK`.
-  - `HookAction::Block`: stop the chain; the method returns `E_FAIL`.
 
-  The mutex is released before `Hooked_*` calls the original.
-- `DeviceContext { device, skipOriginal, overrideResult }` is created per call on the stack of `Hooked_*`.
-- **`CallOriginal*`** calls the saved trampoline directly and runs no callback: `CreateRenderTarget`, `SetRenderTarget`,
-  `SetViewport`, and the Apex-added `DrawIndexedPrimitive`, `DrawPrimitive` and `SetVertexShaderConstantF`. Use these to
-  issue a call that must not be seen by any module.
+- **Register:** `D3D9Hooks::Register<Method>(name, std::function, Priority = Normal)`. `UnregisterAll(name)` removes
+  every callback with that name from all chains. Convention: one name per module (`kHookName`, for example
+  `"LotLightBridge"`, `"PostScene"`, `"NightTerrainRelight"`). A module may register several callbacks of one type under
+  one name.
+- **Priority:** `enum class Priority { First = 0, Early = 25, Normal = 50, Late = 75, Last = 100 }`; any int may be
+  cast in. Lower runs first. **Equal priorities run in registration order** (stable).
+- **Results:** `HookAction::Continue` goes on; `Skip` stops the chain, the device call is not made and `S_OK` is
+  returned to the game; `Block` stops the chain and returns `E_FAIL`.
+- `DeviceContext { device }` is passed to every callback.
+- **Nesting:** a callback may call the device (a nested dispatch on the same thread) or register and unregister
+  callbacks; a chain being run keeps the list it started with until it returns.
+- **`CallOriginal*`** calls the next hook in the Detours chain (or the driver) without any Apex callback. It exists for
+  CreateRenderTarget, SetRenderTarget, SetViewport, DrawIndexedPrimitive, DrawPrimitive, SetVertexShaderConstantF,
+  SetPixelShaderConstantF, SetPixelShader, CreatePixelShader, CreateVertexShader, SetVertexShader and SetTexture. Before
+  `Install` they call through the device's vtable. A module that detoured the same DXVK function **before** Apex
+  (inner) still sees these calls; one that detoured it **after** Apex (outer) does not. Official S3SS registers nothing
+  on these chains, so either order is harmless; a proxy `d3d9.dll` (ReShade) sees every call, being below the detours.
 
-### 3.3 Skip in practice: the draw-replacement pattern
-Night Lighting's `lot_light_bridge.cpp` (`UpdateHooks`, `OnDraw` / `OnDrawTracked` / `OnDrawInner`) registers DIP and DP
-at the default `Normal` priority. For a draw it handles:
-1. It sets its own shader and constants (`g_inOwnCall = true`).
-2. It **re-issues the draw through the device** (`ctx.device->DrawIndexedPrimitive(...)`). That call goes through
-   `Hooked_DrawIndexedPrimitive` again, a **nested dispatch on the same thread**. This is why the mutex is recursive.
-3. In the nested dispatch, `OnDrawTracked` returns `Continue` at once because `g_inOwnCall` is set, and the nested call
-   reaches the real DXVK function.
-4. It restores state, then returns **`Skip`** for the outer call. The game's original draw is never issued, and the outer
-   chain stops at `Normal`.
+### 3.3 Dispatch and locking
 
-What this means for other modules (inferred from the code):
-- `First` hooks (PostScene, HDR, Lot Map Probe) see a replaced draw **twice**: once as the original and once as the
-  re-issue.
-- `Late` and `Last` hooks (HdrNative, Light Probe, Frame Capture) and the profiler's end hook see **only the re-issued
-  draw**, with the mod's shader bound.
-- `hdr_native.cpp` relies on this. Its header comment says a draw the bridge replaces "ends there (Skip), and its own
-  re-issued draw has its shader bound, which matches none of the rules". HdrNative (`Late`) and Light Probe (`Last`) use
-  the same re-issue-and-Skip pattern themselves.
-- The profiler recognises a dispatch cut short by Skip or Block by its `DeviceContext` address and drops it
-  (`frame_profiler.cpp` header, "D3D9").
+- **Lock-free chains.** DrawIndexedPrimitive, DrawPrimitive, SetRenderTarget, SetViewport, SetPixelShader,
+  SetVertexShader, SetTexture and Set{Pixel,Vertex}ShaderConstantF publish an immutable list through an atomic pointer
+  (`Chain::list`). On the render thread (the thread of the first EndScene) they are dispatched with no lock: one relaxed
+  count test, one acquire load, the callbacks. A chain with no callback ends at the count test.
+- **Locked chains.** Present, BeginScene and the four Create* chains, and any chain called from **another thread**, run
+  under one recursive registration lock. Off-thread dispatches of the lock-free chains are counted
+  (`D3D9Hooks::OffThreadDispatches()`, shown by the Frame Profiler); the first one per method is logged
+  `[D3D9Hooks] <method> called from thread N (render thread M): dispatched under the lock`. Callbacks of the lock-free
+  chains are not serialised against callbacks running on other threads; that matters only if that counter grows.
+- **Publishing.** Register and UnregisterAll build a new list under the lock and publish it. Older lists are kept until
+  a safe point: Present on the render thread when it is outside every lock-free dispatch and no locked dispatch is
+  running (the lock is only tried, never waited for), or `Uninstall` (skipped when its wait for the render thread timed
+  out). A dispatch still reading an older list reads valid memory.
+- **Unregistering from another thread.** `UnregisterAll` from the render thread returns at once. From another thread it
+  publishes, drops the lock, calls `FlushProcessWriteBuffers` and waits until the render thread has left any lock-free
+  dispatch that may still run the removed callback (`g_renderInside` / `g_renderExits`, written only by the render
+  thread). The wait is bounded at 1 s and logged when it expires
+  (`[D3D9Hooks] UnregisterAll("X") from thread N: the render thread did not leave its draw hook within 1 s; continuing`):
+  a caller holding a lock that a draw or state callback takes (for example `PostScene::Remove` holding its effect
+  mutex) would otherwise deadlock. **Rule:** do not free what a draw or state callback uses from another thread without
+  unregistering first, and prefer the render thread.
+- **Profiler counters (developer mode).** The detours of SetTexture, Set{Vertex,Pixel}Shader,
+  Set{Vertex,Pixel}ShaderConstantF and SetRenderTarget count their calls with plain per-method counters
+  (`ReadStateCallCounts`). The outermost dispatch on a thread (all chains but Present) is booked as the profiler's
+  "D3D hooks (mod)" (`FrameProfiler::BeginModTime` / `EndModTime`, keyed by the dispatch's stack address), also when a
+  callback returns Skip or Block; a nested dispatch is part of the outer one. Every Present callback is timed by name
+  while the profiler is on (`"<name> (Present)"`); draw and state callbacks are timed per hook only with Advanced >
+  "Per-hook registry timing", separated by method ([features/frame-profiler.md](features/frame-profiler.md)).
 
-**Rule (inferred):** a callback may register or unregister callbacks of **another** method type, but never of the type
-being dispatched. The `std::vector` is being iterated, and the recursive mutex lets the same thread in.
-- Example: NTR's Present hook calls `LotLightBridge` setters, which may register or unregister DIP, DP, Set*Shader and
-  Create*Shader hooks. `LotLightBridge` registers no Present hook, so `UnregisterAll` leaves `g_presentHooks` unchanged.
+### 3.4 Skip in practice: the draw-replacement pattern
 
-### 3.4 Current registrations (combined tree)
-| Method | -1000 | First (0) | Normal (50) | Late (75) | Last (100) | +1000 |
-|---|---|---|---|---|---|---|
-| Present | Profiler start (frame boundary) | PostScene, HdrOutput, DepthBlur*, AmbientOcclusion, EdgeSmoothing, LotMapProbe | | | NightTerrainRelight (Night Lighting per-frame dispatcher), FrameCapture | Profiler end |
-| DIP / DP | Profiler start | PostScene, HdrOutput, LotMapProbe | **LotLightBridge (Skip)** | **HdrNative (Skip)** | LightProbe (Skip when it re-draws), FrameCapture | Profiler end |
-| SetRenderTarget | Profiler (optional) | PostScene, HdrOutput, LotMapProbe | | | FrameCapture | |
-| SetPixelShader | Profiler (optional) | | LotLightBridge | | HdrNative | |
-| SetVertexShader | Profiler (optional) | | LotLightBridge | | | |
-| CreatePixelShader | Profiler | | | | LotLightBridge (precreate), HdrNative (precreate) | |
-| CreateVertexShader | Profiler | | | | LotLightBridge (precreate) | |
-| BeginScene | | | | | FrameCapture | |
-| CreateTexture, CreateRenderTarget | Profiler | | | | | |
-| Set*ShaderConstantF, SetTexture | Profiler (optional) | | | | | |
+Night Lighting's `features/lot_light_bridge.cpp` registers DrawIndexedPrimitive and DrawPrimitive at `Normal`. For a
+draw it handles:
 
-\* `DepthBlur` registers its Present hook while the INTZ depth swap is active (`StartDepth`), even with the blur itself
-off.
+1. It changes state for its own shader and constants through `CallOriginal*`, so its state changes never re-enter
+   Apex's chains.
+2. It re-issues the draw through the device (`ctx.device->DrawIndexedPrimitive(...)`), a nested dispatch on the same
+   thread. In the nested dispatch its own callback returns `Continue` at once (own-call flag), and the call reaches the
+   driver.
+3. It restores state and returns `Skip` for the outer call. The game's original draw is never issued and the outer chain
+   stops at `Normal`.
 
-Not compiled (not in the vcxproj): `call_trace_patch`, `light_diag_patch`, `lot_edge_lighting_patch`. They also register
-hooks.
+Consequences: hooks before `Normal` (PostScene, Picture, Ambient Occlusion's receiver replay) see a replaced draw twice,
+once as the original and once as the re-issue. Hooks after `Normal` (Light Probe, Frame Capture, Banding Fix) see only
+the re-issued draw, with the mod's shader bound. Light Probe uses the same re-issue-and-Skip pattern. The profiler
+recognises a dispatch cut short by Skip or Block by its stack address.
 
-### 3.5 Per-hook timing for the profiler
-- `ExecuteDrawIndexedPrimitiveHooks` and `ExecuteDrawPrimitiveHooks` only check `FrameProfiler::RegistryHookTimingActive()`.
-  This is a relaxed atomic load, true only while the profiler is on and Advanced > "Per-hook registry timing" is checked.
-- When it is true, they wrap each `entry.hook(...)` in `FrameProfiler::Ticks()` and call
-  `AddRegistryHookTime(entry.name, ticks)` with the registry mutex held.
-- The other 13 executors are **not** timed per hook.
-- The total mod D3D-hook time per draw and per Present comes from the -1000 and +1000 bracket hooks (see
-  [features/frame-profiler.md](features/frame-profiler.md)).
+**Rule:** a callback may register or unregister callbacks of any type; the running chain keeps its list. Still, prefer
+registering in `Install` and unregistering in `Uninstall`.
 
-### 3.6 The standalone registry (`framework/d3d9_hooks.{h,cpp}`, own-cost work of 2026-09-29)
-Written, not compiled or tested in game yet. Analysis: `research\perf2\apexcost\report.md` (items P1, P2, P3, M1, M3).
-The standalone registry was rewritten from scratch (12.0): same 15 detours, same priorities / Skip / Block, stable order
-for equal priorities. What differs from 3.1-3.5:
-- **Lock-free dispatch of the draw and state chains.** Each chain publishes an immutable list through an atomic pointer
-  (`Chain::list`). DrawIndexedPrimitive, DrawPrimitive, SetRenderTarget, SetViewport, SetPixelShader, SetVertexShader,
-  SetTexture and Set{Pixel,Vertex}ShaderConstantF are dispatched **without any lock on the render thread** (the thread
-  of the first EndScene, recorded by `Install`): one relaxed count test, one acquire load, the callbacks. Before, every
-  dispatch took the `std::recursive_mutex` and copied a `shared_ptr` (two lock operations and two interlocked reference
-  count changes).
-  - Present, BeginScene and the four Create* chains keep the recursive lock; so does any chain called from **another
-    thread** (counted: `D3D9Hooks::OffThreadDispatches()`, Frame Profiler Advanced and report; the first one per method is
-    logged `[D3D9Hooks] <method> called from thread N (render thread M): dispatched under the lock`). Callbacks of the
-    lock-free chains are therefore no longer serialised against callbacks running on other threads; that matters only if
-    that counter grows.
-  - Register / UnregisterAll build the new list under the lock and publish it; **older lists are kept until a safe point**: Present on
-    the render thread when it is outside every lock-free dispatch and no locked dispatch is running (the lock is only
-    tried, never waited for), or `Uninstall` (skipped when its wait for the render thread timed out). A dispatch still
-    reading an older list (the render thread, or a callback that registers during its own dispatch) reads valid memory.
-  - `UnregisterAll` from the render thread returns at once (as before, a chain being run keeps its list until it
-    returns). From **another thread** it publishes, drops the lock, calls `FlushProcessWriteBuffers` (so a later render
-    dispatch sees the new list, or its "inside" flag is visible) and waits until the render thread has left the lock-free
-    dispatch that may still run the removed callback (`g_renderInside` / `g_renderExits`, written only by the render
-    thread with plain stores). Bounded at 1 s (logged `[D3D9Hooks] UnregisterAll("X") from thread N: the render thread
-    did not leave its draw hook within 1 s; continuing`): a caller holding a lock that a draw / state callback takes
-    (e.g. `PostScene::Remove` holds its effect mutex, which the trigger takes) would otherwise deadlock. Rule: do not free
-    what a draw / state callback uses from another thread without unregistering first, and prefer the render thread.
-- **`CallOriginal*`** now also exists for SetPixelShader, SetVertexShader, SetTexture and SetPixelShaderConstantF. Night
-  Lighting's draw handlers use them for their own state changes around a replaced draw ([night-lighting
-  README](features/night-lighting/README.md) "Own cost"); the re-issued draw itself still goes through the device. A
-  `CallOriginal*` call runs the trampoline: a module that detoured the same DXVK function **before** Apex (inner) still
-  sees it, one that detoured it **after** Apex (outer) does not. Official S3SS's registry registers nothing on these
-  chains (12.2), so either order is harmless; a proxy `d3d9.dll` (ReShade) sees every call, being below the detours.
-- **Profiler instrumentation (development build only, `if constexpr (!kPublicBuild)`):**
-  - the detours of SetTexture, Set{Vertex,Pixel}Shader, Set{Vertex,Pixel}ShaderConstantF and SetRenderTarget count their
-    calls with plain per-method counters (`ReadStateCallCounts`), replacing six counting callbacks that made every state
-    call of the game run a full dispatch (P1);
-  - `Run` books its **outermost** dispatch on a thread (all chains but Present) as the profiler's "D3D hooks (mod)"
-    (`FrameProfiler::BeginModTime` / `EndModTime`, keyed by the dispatch's stack address), also when a callback returns
-    Skip / Block (M1). A nested dispatch (a replaced draw's re-issue) is part of the outer one;
-  - every Present callback is timed by name while the profiler is on and reported as `"<name> (Present)"` (M3); the draw
-    callbacks still only with Advanced > "Per-hook registry timing".
-- 3.4's table for the standalone: Present -2000 ApexCore, -1000 / +1000 Frame Profiler (dev), First PostScene / Picture
-  / Edge Smoothing / Depth Blur (while its depth swap is active), Normal LotLightingMotion (camera sample, while on), Last
-  NightTerrainRelight / FrameCapture (dev); DIP / DP: -1000 Frame Profiler counting hook (dev; no +1000 hook since
-  2026-09-29), First PostScene, 10 Picture, Normal LotLightBridge (Skip), Last Light Probe (Skip when it re-draws) /
-  FrameCapture (dev); SetRenderTarget:
-  PostScene, Picture, FrameCapture (dev); Set{Pixel,Vertex}Shader: LotLightBridge; BeginScene: FrameCapture (dev);
-  Create*: Frame Profiler counters (dev). SetTexture, Set*ShaderConstantF and SetViewport have no callback in either build,
-  so their dispatch ends at the count test.
+### 3.5 Current registrations
+
+| Method | -2000 | -1000 | First (0) | 10 | Early (25) | Normal (50) | Last (100) | +1000 |
+|---|---|---|---|---|---|---|---|---|
+| Present | ApexCore | Frame Profiler start (dev) | PostScene, Picture, Depth Blur (while its depth swap runs), Ambient Occlusion, Edge Smoothing, Banding Fix, CapturesScreenshot | | | LotLightingMotion (camera sample), RoomLightQueue (render-thread id) | NightTerrainRelight (Night Lighting per-frame dispatcher), Frame Capture (dev) | Frame Profiler end (dev) |
+| DrawIndexedPrimitive / DrawPrimitive | | Frame Profiler counter (dev) | PostScene | Picture | Ambient Occlusion (Sim receiver replay) | **LotLightBridge (Skip)** | Light Probe (Skip when it re-draws), Frame Capture (dev) | Banding Fix (binds its copies after every observer) |
+| SetRenderTarget | | | PostScene, Picture | | | | Frame Capture (dev) | |
+| SetPixelShader | | | | | Ambient Occlusion (Sim receiver test) | LotLightBridge | | |
+| SetVertexShader | | | | | | LotLightBridge | | |
+| CreatePixelShader / CreateVertexShader | | Frame Profiler counter (dev) | | | | | | Banding Fix (creates the game shader, then its copy; Skip) |
+| BeginScene | | | | | | | Frame Capture (dev) | |
+| CreateTexture / CreateRenderTarget | | Frame Profiler counter (dev) | | | | | | |
+| SetTexture, Set*ShaderConstantF, SetViewport | | | | | | | | |
+
+Picture registers its draw hooks at 10 so its scene copy already contains the post-scene effects that fire inside
+PostScene's `First` callback, and before any feature that may Skip a draw (`features/picture.cpp`). The Banding Fix
+registers at 1000 so every observer has seen the draw before it binds its shader copies (`features/scene_dither.cpp`).
+Priorities -1000 and +1000 are reserved for the Frame Profiler, -2000 for the framework.
 
 ---
 
 ## 4. Other hook plumbing
 
-### 4.1 `d3d9_extra_hooks.*` (`ExtraHooks`, Apex-owned)
-- Detours for methods the registry does not cover:
+### 4.1 Extra device hooks
 
-  | Method | Vtable index |
-  |---|---|
-  | StretchRect | 34 |
-  | SetDepthStencilSurface | 39 |
-  | GetDepthStencilSurface | 40 |
-  | Clear | 43 |
-  | DrawPrimitiveUP | 83 |
-  | DrawIndexedPrimitiveUP | 84 |
-- Installed **once, on first use**, by `EnsureInstalled(dev)` (Depth Blur `SetupResources`, Frame Capture `EnsureDetours`).
-  They stay for the life of the process.
-- **Guard:** if any of those slots shares a code address with a slot already owned by `d3d9_hook.cpp` or the registry
-  (`16, 17, 23, 28, 37, 41, 42, 47, 65, 81, 82, 91, 92, 94, 106, 107, 109`), it logs an error and does not install. This
+`ExtraHooks` ([framework/d3d9_extra_hooks.cpp](../framework/d3d9_extra_hooks.cpp)) detours methods the registry does not
+cover:
+
+| Method | Vtable index |
+|---|---|
+| StretchRect | 34 |
+| SetDepthStencilSurface | 39 |
+| GetDepthStencilSurface | 40 |
+| Clear | 43 |
+| DrawPrimitiveUP | 83 |
+| DrawIndexedPrimitiveUP | 84 |
+
+- Installed once, on first use (`EnsureInstalled(dev)`: Depth Blur's resource setup, Frame Capture), and kept for the
+  life of the process. With no callback set they only cost an atomic load.
+- **Guard:** if any of those slots shares a code address with a slot already owned by the bootstrap or the registry
+  (16, 17, 23, 28, 37, 41, 42, 47, 65, 81, 82, 91, 92, 94, 106, 107, 109), it logs an error and does not install. This
   protects against DXVK folding identical functions together.
-- **Observer slots**, one each, atomic function pointers, owned by Frame Capture: Clear, SetDepthStencil, StretchRect and
+- **Observer slots** (one each, atomic function pointers, used by Frame Capture): Clear, SetDepthStencil, StretchRect,
   DrawUP.
-- **Depth substitution** (single owner, Depth Blur), set with `SetDepthSubstitution(substitute, report)`:
-  - `substitute` maps the surface the game binds to the surface actually bound;
-  - `report` maps back for `GetDepthStencilSurface`, so the game never sees the swap.
-- `RawSet/GetDepthStencilSurface` bypass the substitution. Before `EnsureInstalled` they fall back to the device methods.
-- Post-scene effects draw with **DrawPrimitiveUP**. The registry does not hook it, so the effects never re-trigger the
-  post-scene trigger. The DrawUP observer only reports these draws.
+- **Depth substitution** (single owner, Depth Blur), `SetDepthSubstitution(substitute, report)`: `substitute` maps the
+  surface the game binds to the surface actually bound; `report` maps back for `GetDepthStencilSurface`, so the game never
+  sees the swap. `RawSet/GetDepthStencilSurface` bypass it; before `EnsureInstalled` they call the device methods.
+- Post-scene effects draw with DrawPrimitiveUP. The registry does not hook it, so the effects never re-trigger the
+  post-scene trigger; the DrawUP observer only reports them.
 
-### 4.2 `render_callbacks.h` (Apex-owned)
-- Three lists of `std::atomic<DeviceFn>`: `endSceneBeforeOverlay`, `preReset` and `postReset`.
-- **Each list has only `kSlots = 4` entries.**
-- `Add` is idempotent. It CAS-es into the first empty slot and **silently drops the callback when all four are full**.
-  `Fire` calls every non-null slot.
-- Users in the combined tree:
-  - `preReset`: AO, Depth Blur, Edge Smoothing, Lot Map Probe, Night Lighting (`LightmapSmooth::OnPreReset`). That is
-    **five possible users for four slots**. With all five enabled (Lot Map Probe is dev-only), the last one to register
-    loses its preReset call (inferred from the code; not seen at runtime). The standalone drops AO, which leaves four.
-  - `postReset`: AO, Depth Blur, Edge Smoothing.
-  - `endSceneBeforeOverlay`: Frame Capture, Night Lighting `DeferredReinstall`.
-- If a new module needs a slot, raise `kSlots` first.
+### 4.2 Render callbacks
 
-### 4.3 `vtable_manager.*` and `pattern_scan.*` (S3SS framework, used only by the settings hooks)
-- `VTableManager::Initialize` finds the constructor pattern `56 8B F1 C7 06 ?? ?? ?? ?? 33 C9 89 4E 0C` and reads the
-  vtable immediate at +5.
-  - It validates the first 8 entries: they must be executable and inside the main module.
-  - `GetFunctionAddress(name, offset)` also checks, for offset 0x3C, that the function references
-    `"Debug/VariableRegistry/Variable"` (or `"Debug/VarMan"`) near its prologue.
-- `Pattern::Scan` / `ScanModule` is a byte-wildcard scanner (`??`) over the main module. Apex code uses
-  `PatchHelper::ScanPattern` instead (next section).
+`RenderCallbacks` ([framework/render_callbacks.h](../framework/render_callbacks.h)) are lists of plain
+`void(*)(IDirect3DDevice9*)` fired by the bootstrap at points the registry does not cover. The lists grow as needed;
+`Add` ignores a duplicate; `Fire` copies the list first, so a callback may add or remove; callbacks run in the order
+added.
 
-### 4.4 `patch_helpers.h` (S3SS framework, used by every game-code patch)
-- **Memory writes**, all through `WriteProtectedMemory` (VirtualProtect, optional original-byte tracking, read-back check):
-
-  | Helper | What it does |
-  |---|---|
-  | `WriteByte` / `WriteBytes` / `WriteWORD` / `WriteDWORD` | Write; each takes an optional `expectedOld` checked before writing |
-  | `WriteNOP` | Fills with 0x90 |
-  | `RestoreAll(tracker)` | Restores every tracked location |
-  | `BeginTransaction` / `CommitTransaction` / `RollbackTransaction` | All-or-nothing groups |
-- **Call and jump stubs:**
-  - `CalculateRelativeOffset(from, to, size = 5)`;
-  - `WriteRelativeJump`, which writes `E9 rel32`;
-  - `WriteRelativeCall`, which writes `E8 rel32`.
-
-  Apex patches that redirect a `CALL` use these, or build the bytes themselves. `night_terrain_relight_patch.cpp` `CallPatch`
-  builds prefix bytes + `E8` rel32 + NOP padding up to the site length, then calls `FlushInstructionCache`.
-- **`ScanPattern(start, size, "8B ?? ?F F? ..")`** supports nibble wildcards: `??` any byte, `?F` low nibble, `F?` high
-  nibble.
-- **`AddressInfo`** is `{name, addresses{GameVersion, addr}, pattern, patternOffset, expectedBytes}`. `Resolve()` works
-  like this:
-  - known version with an address: use it, or fail if `expectedBytes` does not match;
-  - otherwise: pattern scan, then validate.
-  - Note: after a pattern hit it logs "Pattern matched on unknown version" **even on a known version that has no address
-    entry**. The 28/09 log shows this for LotStreamingOptimizations on Steam. The wording is misleading, not an error.
-- **`DetourHelper::InstallHooks` / `RemoveHooks`**: a vector of `{originalPtr, hookFunc}` in one Detours transaction.
-- **Also present:** `IATHookHelper::Hook`, `LiveSetting::*` (S3SS game-variable access by name), and `D3D9Helper::*`
-  (back-buffer size, present params, caps, format names, shader bytecode dump). `SAFE_IMGUI_BEGIN()` returns if there is
-  no ImGui context.
-- `OptimizationPatch` (`optimization.h`) also provides `AddMaintainedWrite` / `ClearMaintainedWrites` /
-  `OnSettingsRefired`. These re-assert data writes after the game re-runs its variable registration. The
-  VariableRegistry hook calls `OptimizationManager::OnSettingsRefired()` when it sees `"MT Time Step"`.
-
-### 4.5 The post-scene trigger chain (`post_scene.*`) and the INTZ depth share (`depth_share.h`)
-This is one shared trigger for effects that work on the finished 3D scene, before any game UI. Details are in
-[features/depth-blur.md](features/depth-blur.md), [features/edge-smoothing.md](features/edge-smoothing.md) and
-[features/ambient-occlusion.md](features/ambient-occlusion.md) (the chain is Ambient Occlusion 10, Edge Smoothing 20, Depth Blur 30).
-
-- `PostScene::Add(order, fn)` sorts the effects with `stable_sort` on `order`: `kAmbientOcclusion = 10`, `kEdgeSmoothing = 20`,
-  `kDepthBlur = 30`. `PostScene::WantCamera` (reference counted, AO) turns on the camera votes: near, A and the
-  view-projection from the vertex constants of the first 24 scene draws of each frame (`CameraNear`, `CameraDepthA`,
-  `CameraViewProj`).
-  - The first `Add` registers the hooks under `"PostScene"`: Present, SetRenderTarget, DIP and DP, all at `First`.
-  - `Remove` of the last effect unregisters them.
-- **Trigger:**
-  1. Count back-buffer draws (RT0 == back buffer) with `ZENABLE != FALSE`.
-  2. Normally, the first back-buffer draw with `ZENABLE == FALSE`, after at least `kMinSceneDraws = 20` depth-tested
-     draws, fires every effect **once** (`g_done`) inside that draw's DIP/DP callback, before the game's draw executes.
-  3. If no qualifying depth-off draw happened (for example, when the game UI is hidden), `endSceneBeforeOverlay` checks
-     that at least 20 scene draws occurred and RT0 is still the back buffer, then runs the same ordered chain once before
-     Picture's scene copy and Apex's overlay.
-  4. Draws marked with `DepthShare::SetInternalPass(true)` are ignored. The lake-lamp pass in `lot_light_bridge.cpp`
-     turns Z off and must not look like the UI.
-  5. The Present hook resets the counters at the frame boundary. The fallback does not change the existing behavior in
-     interiors where a depth-off backbuffer draw occurs mid-scene; validate those scenes separately.
-- **Camera for the effects (combined build only):** `CameraNear()`, `CameraViewProj()` and `CameraDepthA()` (near vote
-  over VS blocks `c0`, `c4`, `c40`, `c180`, `c192`, `c216`; view-projection `c40..c43`) existed for Ambient Occlusion.
-  The standalone's `post_scene.cpp` is the v0.1.0 one and has none of them; Depth Blur's Auto focus uses depth ratios
-  (A = 1.00008 as a constant, the near plane cancels). Recipe: [engine/camera-and-map-view.md](engine/camera-and-map-view.md).
-- **INTZ swap (`DepthShare`, implemented in `patches/depth_blur_patch.cpp`):**
-  - The game's auto depth-stencil (D24S8 or D24X8, same size as the back buffer, not multisampled) is swapped for an INTZ
-    texture with `D3DUSAGE_DEPTHSTENCIL`, through the ExtraHooks substitution.
-  - `DepthShare::Texture()` and `Surface()` are null unless the swap is ready.
-  - `Request(bool)` is reference-counted. The swap runs while Depth Blur is on **or** `requests > 0` (`UpdateDepth`).
-  - Requesters in the combined tree: Ambient Occlusion (`Install`) and HDR sky boost (`HdrOutput::OnEndScene`, when
-    `skyBoost > 0.001`).
-  - Edge Smoothing does **not** use or request depth: `edge_smoothing_patch.cpp` has no `DepthShare` reference.
-  - `lot_light_bridge.cpp`'s pond reflection reads `DepthShare::Texture()` when it happens to exist, and does not request
-    it. This is why the Reflections tooltip says "with Depth Blur on, also the scenery on the shore".
-  - A multisampled back buffer means the game's Edge Smoothing (MSAA) is on. The swap then refuses, with the status "turn
-    it off in Options > Graphics".
-
-### 4.6 Shader precompile (`framework/shader_cache.*`, standalone, 2026-09-28)
-<a id="shader-precompile"></a>
-Apex's own HLSL pixel shaders are never compiled on the render thread. Written 2026-09-28, not compiled or tested in
-game yet (anti-stutter plan `research\perf2\plan.md`, items 7 and C5: `d3dcompiler_47.dll` was 8.5% of the samples of
-"Render frame" hitches, one-time hitches of 10-100+ ms at the first lamp / roof / water / SMAA / Depth Blur frame).
-- **Registration:** each feature adds every variant it can use (all qualities and modes) with `ShaderCache::Add`, from
-  namespace-scope initialisers in its own .cpp (so the list is complete before the init thread runs). A `Desc` keeps the
-  exact `D3DCompile` inputs the feature used before (source, source name, entry, target, flags, macros), so the bytecode
-  is the same; `priority` 0 = the feature's default quality / mode, compiled first.
-- **Compile:** `ShaderCache::Start()` (init thread, right after the log opens, before the device exists) starts one
-  worker thread (below-normal priority) that runs `D3DCompile` for every variant and keeps the bytecode for the session
-  (the source string is freed after its compile). Log: `[ShaderCache] Precompiling N Apex shaders on a background
-  thread`, then `[ShaderCache] Precompiled N Apex shaders in X ms on a background thread (F failed; slowest: ...)`; a
-  failure logs `[ShaderCache] <tag> did not compile: <message>` (the feature logs its own error text at first use too).
-- **Use:** where a feature called `D3DCompile` + `CreatePixelShader`, it now calls `ShaderCache::CreatePixelShader(dev,
-  id, &ps, &msg)`: the render thread only creates the D3D9 object from the bytecode (at the feature's first use, as
-  before). If the worker has not reached that variant yet, it becomes the worker's next job and the caller waits
-  (logged as a warning `waited for the precompile`, counted; the worker is raised to normal priority); with no worker
-  left (thread creation failed, or FreeLibrary) the variant is compiled on the calling thread as a last resort (logged).
-- **Device Reset / release:** D3D9 shader objects survive `Reset`; the features that release them (Uninstall, Shutdown,
-  `ReleaseShaders`) recreate them from the kept bytecode, never compiling again.
-- **Status:** `ShaderCache::StatusText()`: Developer > Profiler tab (under the Frame Profiler card) and the profiler
-  report (`Apex shaders: ...`).
-- **Registered variants (36):** Night Lighting (`lot_light_bridge.cpp`, entry `main`, flags 0 as before): lot light pass
-  (ps_3_0), object rig moon-shadow fix (ps_2_0), roofs, lake water, snowy roofs (ps_3_0); world light smoothing
-  (`lightmap_smooth.cpp`): GatherPS, HBlurPS, VBlurPS, HUpYAPS, HUpChromaPS, VUpPS, DownPS, CopyPS; Depth Blur: FocusPS,
-  PrepPS, CompositePS, BlurPS x 4 qualities (TAPS 4 / 6 / 8 / 12); Edge Smoothing: FXAA x 3 qualities, SMAA x 4 presets
-  x 3 passes (edge detection, blending weights, neighbourhood blending); Picture: PicturePS. All with
-  `D3DCOMPILE_OPTIMIZATION_LEVEL3` except the Night Lighting ones (flags 0).
-- **Not affected:** the game-shader copies patched in bytecode (`shader_patches.cpp`: roads, floors, snow, fences,
-  foliage and object vertex shaders, ...) are created with `CreatePixelShader` / `CreateVertexShader` at their first
-  draw from the game's own bytecode (no HLSL, no `D3DCompile`); they depend on which game shader is drawn, so they stay
-  lazy. `light_probe.cpp` uses `D3DDisassemble` (developer tool, on demand).
-
-### 4.7 Layered vtable-slot hooks and suspended code writes (standalone, 2026-09-29)
-- `framework/slot_chain.{h,cpp}` (`SlotChain`): several Apex modules may wrap one game function that is reached only
-  through vtable slots. Each wrapper is a layer with a fixed position (lower = outer; since round 3: 0 = Gate, the wall
-  shading gate, which must be outermost; 1 = Frame Profiler; 2 = Resource cache; 3 = FastCompress);
-  the slots hold the outermost installed layer's hook and every hook calls `SlotChain::Next(site, layer)`. Install /
-  Remove swap the slots (interlocked compare-exchange, expected value checked) or re-point the outer layer's next
-  pointer; a removed hook keeps its next pointer. Sites: FindProvider (profiler + cache) and the resource manager's
-  RegisterDatabase (base and derived), SetDatabasePriority and DatabaseChanged (cache only); RefPackCompress (the RefPack
-  stream write slot 0x00FB901C: profiler + the fast compressor); round 3: WallAoStep (the wall AO step slot 0x00FF05B0:
-  gate + profiler), KeyListBase / KeyListDerived (GetKeyList slots 0x00FB2DC0 / 0x00FFE270: profiler + the file list
-  cache). The write epochs of "Remember missing files" swap their database-class slots directly (only Apex module on
-  them; `InstallClassHooks` in features/resource_cache.cpp, same compare-exchange). See
-  [features/performance.md](features/performance.md).
-- `framework/entry_chain.{h,cpp}` (`EntryChain`, 2026-09-29): the same layering for functions reached by direct CALLs from
-  several threads. The entry's relocation-free prologue is copied to a trampoline (+ JMP back) and a 5-byte JMP to the
-  outermost layer's hook is written with `MemPatch::WriteCodeSuspended`; each hook calls `EntryChain::Next(site, layer)`
-  (the next inner layer or the trampoline); removing the last layer writes the original bytes back. Sites: the CPU DXT1 /
-  DXT5 encoders 0x006152F0 / 0x006154B0 (layer 0 Frame Profiler, layer 1 the fast DXT encoder); round 3: the DPF's
-  direct record write 0x004A7FC0 (layer 2, the resource cache's write epochs; prologue 83 EC 28 53 56); the object
-  lookup by ID 0x00C62D40 (8-byte prologue; layer 0 Frame Profiler, layer 3 `ObjectIndex` = Faster Object Lookups);
-  the scene node destructor 0x006FD930, the scene AddNode 0x006E6480 and the holder teardown 0x006E4DE0 (layer 4
-  `SceneBudget`: the node lifetime guard of Spread New Objects Over Frames). Layers: 0 FrameProfiler, 1 FastDxt,
-  2 ResourceCache, 3 ObjectIndex, 4 SceneBudget (each module layer is used on its own sites only).
-- `framework/call_chain.{h,cpp}` (`CallChain`, 2026-09-29): the same layering on one CALL instruction (E8 rel32): the CALL
-  targets the outermost layer's hook, written with `MemPatch::WriteCodeSuspended`; each hook calls
-  `CallChain::Next(site, layer)` (the next inner layer or the original callee); removing the last layer writes the
-  original CALL back. Site: Scene::BeginFrame's CALL 0x006EBC49 of the pending-node drain 0x006E4130 (layer 0 Frame
-  Profiler "Scene pending nodes", layer 1 `SceneBudget` = Spread New Objects Over Frames).
-- `MemPatch::WriteCodeSuspended(address, bytes, n)`: writes up to 16 code bytes with every other thread suspended and none
-  stopped inside them (retried for ~100 ms), for CALL rewrites that several threads may run (Lot Lighting While Moving's
-  CALL at 0x00ADB95D). The Frame Profiler keeps its own copy (`WriteCallSuspended`).
-
----
-
-## 5. Patch system and settings
-
-### 5.1 Classes and registration (`patch_system.h`, `optimization.*`)
-- `OptimizationPatch` is the base class of every patch. Its members:
-
-  | Member | Purpose |
-  |---|---|
-  | `Install()` / `Uninstall()` | Pure virtual |
-  | `Update()` | Hook-thread tick; debounced reinstall by default |
-  | `RenderCustomUI()` | Default: draws the registered settings |
-  | `SaveToToml` / `LoadFromToml` | Serialisation |
-  | `OnSettingsRefired()` | Re-asserts maintained writes |
-  | `isEnabled` (atomic), `lastError`, `Fail(msg)` | `Fail` sets the error, logs it and returns false |
-  | `patchName` | The TOML table name and the `IsApexPatch` key |
-- **Registration macros:**
-  - `APEX_REGISTER_FEATURE(Class, FeatureInfo{...})` creates a static `PatchRegistrar`, which calls `PatchRegistry::Register`
-    (a factory lambda plus the metadata) during static init;
-  - `REGISTER_CUSTOM_PATCH(Name, Class, ...)` is the same, with a different registrar name.
-  - `PatchRegistry::InstantiateAll` (called from the first `OptimizationManager::Get()`) constructs each patch, attaches
-    the metadata and calls `RegisterPatch`, which rejects duplicate names.
-- **`FeatureInfo`**: `displayName`, `description` (the combined build put "Part of Sims3 Settings Setter Apex Edition.
-  Credits: @loinyx" at its end; the standalone writes "Part of " `APEX_PRODUCT_NAME` = "Apex Radiance"), `category`, `experimental`, `enabledByDefault`, `supportedVersions` (`VERSION_STEAM`,
-  `VERSION_EA`, `VERSION_RETAIL`, `VERSION_ALL`), `technicalDetails`, `gameCodeGroup` (standalone).
-  - `IsCompatibleWithCurrentVersion()` checks `supportedVersions` against `g_gameVersion`. An unknown version means
-    incompatible, unless the feature names a `gameCodeGroup` ("NightLights", "SplitLevel") whose addresses the
-    signature scan found on this build (`framework/game_addresses.h`, [engine/game-versions.md](engine/game-versions.md));
-    `UnavailableReason()` gives "Not available on <version>: missing <addresses>".
-- `patches/_TEMPLATE.cpp` is **not compiled**. It uses `.targetVersion`, which no longer exists: use
-  `.supportedVersions`. The `SaveState` / `LoadState` INI examples in `patches/README.md` are also stale, because
-  persistence is TOML now.
-
-### 5.2 Config files and TOML layout (`config/`)
-- **`config_paths`:**
-  - `GetS3SSDirectory()` returns `Documents\Electronic Arts\<localized game folder>\S3SS\`.
-  - The folder name comes from the exe's string table (`ResolveLocalizedGameFolder`). Blocks of 100 from id 1000 to 3599:
-    base+0 is the locale code, base+2 the folder name. It matches the user locale, then the language prefix, and falls
-    back to `"The Sims 3"`.
-  - Files: `S3SS.toml`, `S3SS_defaults.toml`, `S3SS_LOG.txt`.
-  - `AtomicWriteToml` writes `<file>.tmp`, then `MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH)`.
-  - `GetLegacyINIPath` is `Game\Bin\S3SS.ini`.
-- **`config_store`** (`ConfigStore`, one mutex):
-  - `SaveAll` builds the **whole file from scratch**: `[meta] version = 1`, `SettingsManager` (`[settings.'<game
-    variable>'] value`), `ConfigValueManager` (`[config]`), `OptimizationManager` (`[patches.<Name>]`), then one `[qol]`
-    table filled by `UISettings` (`[qol.ui]`), `MemoryMonitor` (`[qol.memory_monitor]`), `BorderlessWindow`
-    (`[qol.borderless_window]`), `HdrOutput` (`[qol.hdr]`, `[qol.picture]`) and `FrameProfiler` (`[qol.frame_profiler]`).
-  - `LoadAll` distributes everything except patches. `LoadPatches` loads `[patches]` only (step 9).
-  - `SaveDefaults` / `LoadDefaults` handle `S3SS_defaults.toml`.
-- **`config_value_manager`:** GraphicsRules config values (`[config]`), with stable `wchar_t` buffers the game reads.
-- **`migration`:** INI to TOML, once, with a popup (`Migration::RenderMigrationPopup`).
-- **Patch table layout:** `[patches.<patchName>]` holds `enabled = bool` plus one key per registered setting, named by the
-  setting's `name` argument.
-  - Some Night Lighting keys are Portuguese identifiers (`luzDoPosteNaGramaDoLote`, `postesNosObjetos`,
-    `cercasComLuzDoChao` and more).
-  - Depth Blur keys are also Portuguese: `distancia`, `transicao`, `forca`, `tamanho` (legacy, unused), `qualidade`,
-    and since 2026-09-28 `focoAuto`, `quantidade`, `areaNitida`, `velocidadeFoco`, `realceLuzes`.
-  - **Never rename a key.** Saved configs use them (comment in the `NightTerrainRelightPatch` constructor).
-- **When things are saved:**
-  - Patch enable state and patch settings are saved **only by File > Save Settings**. The window title shows "Unsaved
-    Changes".
-  - `UISettings`, `BorderlessWindow`, `MemoryMonitor`, `HdrOutput::SetParams` / `SetPicture` and the Frame Profiler call
-    `ConfigStore::SaveAll()` themselves on change.
-- **The menu's "Load Settings" item** calls `LoadAll` only, so it does not reload `[patches]` (observed in `gui.cpp`).
-- **Early readers** parse the TOML before `LoadAll`: `PeekDisableOverlayEarly`, `BorderlessWindow::PeekEnabledEarly`,
-  and `HdrOutput::BeforeCreateDevice` when `!m_loaded`.
-
-### 5.3 How a patch declares and uses settings
-- **Declare in the constructor.** `RegisterFloatSetting(ptr, key, SettingWidget, default, min, max, desc, presets)`,
-  `RegisterIntSetting`, `RegisterBoolSetting` and `RegisterEnumSetting` (`patch_settings.h`: `FloatSetting`,
-  `IntSetting`, `BoolSetting`, `EnumSetting`).
-  - The setting writes its default into `*ptr` at construction.
-  - `LoadFromToml` clamps to min and max, and writes to a bound address if `BindSettingToAddress` was used.
-  - Each setting's changed-callback calls `NotifySettingChanged()`.
-- **Load order in `OptimizationPatch::LoadFromToml`:** settings first, then `enabled`. So `Install()` sees the loaded
-  values.
-- **Reinstall policy.** The base `Update()` does Uninstall + Install on the **hook thread** 2 s after a change. Apex
-  patches avoid this:
-  - **Read live:** AO, Depth Blur, Edge Smoothing, Frame Budget and GC Scheduler override
-    `Update() { pendingReinstall = false; }`. Their settings are read every frame or call.
-  - **Reinstall only when code bytes must change:** `SmoothStreamingPatch::Update` calls the base only when a part is
-    switched on or off (`PartsMatchInstalled`).
-  - **Reinstall on the render thread:** `NightTerrainRelightPatch::Update` does not reinstall itself. It sets
-    `g_reinstallDue`, and `DeferredReinstall` (`endSceneBeforeOverlay`) runs `ReinstallNow()` on the render thread,
-    because Uninstall frees textures and shaders that the draw hooks use. Options that can change live are applied
-    immediately by `ApplyLive`.
-- Apex feature UIs call `ImGui` widgets on their own globals, then `NotifySettingChanged()` when something changed.
-
-### 5.4 Menu organisation (`gui.cpp`, `SettingsGui::RenderUI`)
-The window is "Sims3 Settings Setter Apex Edition (v1.6.3)" (`version.h`), with window ID `###S3SSWindow`. Tabs, in order:
-**Settings, Patches, Apex, Display, Config Values, Other/QoL, Debug**. The user asked for Apex and Display right after
-Patches.
-
-- **`IsApexPatch(name)`** lists `NightTerrainRelight`, `AmbientOcclusion`, `EdgeSmoothing`, `DepthBlur`, `FrameCapture`,
-  `LotMapProbe`, `SmoothStreaming`, `GcScheduler` and `FrameBudget`. The Patches tab skips these. **A new Apex patch must
-  be added to this list**, or it also shows in Patches.
-- **`RenderApexFeature(patchName, title, open)`** draws, for each feature:
-  - a collapsing header with the metadata description as a hover tooltip;
-  - an "Enabled" checkbox that calls `Install()` / `Uninstall()` directly (on the render thread, because this is inside
-    EndScene) and marks unsaved;
-  - a disabled state with "(not supported on <version>)" when the game version is incompatible;
-  - the error in red;
-  - `RenderCustomUI()` while enabled.
-- **Apex tab:**
-  - Night Lighting.
-  - Reflections (`ApexRenderReflectionsUI`, declared in `apex_ui.h` and implemented in
-    `night_terrain_relight_patch.cpp`).
-  - AO and Depth Blur, followed by a note about the game's Edge Smoothing.
-  - "Performance": Smooth Streaming; Script GC Scheduler and Service Frame Budget (collapsed); Frame Profiler
-    (`FrameProfiler::RenderUI`).
-  - In non-public builds only: a "Developer tools" header with Frame Capture and Lot Map Probe.
-- **Display tab:** HDR (`HdrOutput::RenderUI`), Picture (`RenderPictureUI`), Edge Smoothing, Borderless Window (moved here
-  from QoL).
-- **Inside each feature** (convention from the user; see memory "Apex Edition UI conventions"):
-  - status line and main controls visible;
-  - `ImGui::TreeNode("Advanced##<Feature>")`, collapsed, for tuning;
-  - `if constexpr (!kPublicBuild) ImGui::TreeNode("Developer##<Feature>")` for diagnostics;
-  - English text only; a `Hint()` tooltip on every control;
-  - "Credits: @loinyx" only at the end of the metadata description.
-
-### 5.5 `qol.*` (S3SS framework)
-| Class | TOML table | Contents |
+| List | Fired | Users |
 |---|---|---|
-| `UISettings` | `[qol.ui]` | `toggle_key` (default `VK_INSERT`), `disable_hooks`, `disable_overlay`, `font_scale` |
-| `BorderlessWindow` | `[qol.borderless_window]` | `mode`: Disabled, Decorations Only, Maximized, Fullscreen. `Apply`, `TickReapply` and `SetWindowHandle` are driven from the D3D hooks |
-| `MemoryMonitor` | `[qol.memory_monitor]` | `enabled`, `warning_threshold`, `warning_style`. `Update()` runs from the hook thread's loop |
+| `endSceneBeforeOverlay` | EndScene, before Picture and the overlay | PostScene fallback trigger, Night Lighting `DeferredReinstall`, Frame Capture (dev) |
+| `filteredSceneBeforeOverlay` | EndScene, before the overlay; after Picture's grade when a screenshot is pending with the menu open | Report screenshots with the menu open (`Captures`); with the menu closed the screenshot is taken in a `First` Present hook |
+| `preReset` | before `Reset` | PostScene, Depth Blur, Ambient Occlusion, Edge Smoothing, Banding Fix, Night Lighting (`LightmapSmooth::OnPreReset`) |
+| `postReset` | after a successful `Reset` | Depth Blur, Ambient Occlusion, Edge Smoothing |
+
+### 4.3 Post-scene chain and the INTZ depth share
+
+One shared trigger runs effects on the finished 3D scene, before any game UI
+([features/post_scene.cpp](../features/post_scene.cpp)).
+
+- **Order:** `PostScene::Add(order, fn)` keeps effects sorted: Ambient Occlusion 10 (`kAmbientOcclusion`), Edge
+  Smoothing 20 (`kEdgeSmoothing`), Depth Blur 30 (`kDepthBlur`). The first `Add` registers the hooks under
+  `"PostScene"` (Present, SetRenderTarget, DIP, DP, all `First`) and the `endSceneBeforeOverlay` / `preReset` callbacks;
+  `Remove` of the last effect unregisters them.
+- **Trigger:**
+  1. Count back-buffer draws (RT0 is the back buffer) with `ZENABLE != FALSE`.
+  2. The first back-buffer draw with `ZENABLE == FALSE` after at least `kMinSceneDraws = 20` depth-tested draws fires
+     every effect once, inside that draw's DIP/DP callback, before the game's draw executes. If a shared scene depth
+     exists, an incompatible bound surface rejects the boundary without consuming the effects; only resumed depth-tested
+     scene draws unlock another boundary.
+  3. If no qualifying depth-off draw happened (game UI hidden), `endSceneBeforeOverlay` checks that at least 20 scene
+     draws occurred and RT0 is still the back buffer, then runs the same chain once, before Picture's scene copy and the
+     overlay. EndScene never retries over a rejected UI boundary.
+  4. Draws marked with `DepthShare::SetInternalPass(true)` are ignored. The lake-lamp pass in `lot_light_bridge.cpp`
+     turns Z off and unbinds the depth-stencil, which would otherwise look like the first UI draw.
+  5. The Present hook resets the counters at the frame boundary.
+- **Known limitation:** interiors can have depth-off back-buffer draws in the middle of the scene, so the first such
+  draw can precede the finished scene (Picture re-copies at every depth-on to depth-off transition for that reason). The
+  EndScene fallback does not change that.
+- **Camera:** while an effect asks for it (`PostScene::WantCamera`, reference counted; Ambient Occlusion), the scene
+  draws' vertex constants vote for the near plane (`CameraNear`, 0.2 to 0.3 m with zoom and height), the view-projection
+  (`CameraViewProj`, rows `c40..c43`) and A of the projection (`CameraDepthA`; device depth `d = A - near * A / z`,
+  A = 1.00008 measured, far plane about 3 km). Recipe: [engine/camera-and-map-view.md](engine/camera-and-map-view.md).
+- **INTZ swap (`DepthShare`, owned by `patches/depth_blur_patch.cpp`):** the game's auto depth-stencil (D24S8 or D24X8,
+  back-buffer size, not multisampled) is swapped for an INTZ texture with `D3DUSAGE_DEPTHSTENCIL` through the ExtraHooks
+  substitution. `DepthShare::Texture()` / `Surface()` are null unless the swap is ready; `Status()` says why.
+  `Request(bool)` is reference counted; the swap runs while Depth Blur is on or any request is held. Requesters: Ambient
+  Occlusion (while installed) and Edge Smoothing (while its depth edges are on and the game's own edge smoothing is
+  off). Night Lighting's pond reflection reads the texture when it exists and does not request it. A multisampled back
+  buffer means the game's Edge Smoothing (MSAA) is on: the swap then refuses, with the status "turn it off in Options >
+  Graphics".
+
+### 4.4 Shader precompile
+
+<a id="shader-precompile"></a>
+Apex's own HLSL pixel shaders are never compiled on the render thread
+([framework/shader_cache.cpp](../framework/shader_cache.cpp)).
+
+- **Registration:** each feature adds every variant it can use (all qualities and modes) with `ShaderCache::Add` from
+  namespace-scope initialisers in its own `.cpp`, so the list is complete before the init thread runs. A `Desc` keeps
+  the exact `D3DCompile` inputs (source, source name, entry, target, flags, macros), so the bytecode is what the feature
+  would compile; `priority` 0 is the feature's default quality or mode, compiled first.
+- **Compile:** `ShaderCache::Start()` (init thread, right after the log opens, before the device exists) starts one
+  below-normal-priority worker that compiles every variant and keeps the bytecode for the session (the source string is
+  freed after its compile). Log: `[ShaderCache] Precompiling N Apex shaders on a background thread`, then
+  `[ShaderCache] Precompiled N Apex shaders in X ms on a background thread (F failed; slowest: ...)`; a failure logs
+  `[ShaderCache] <tag> did not compile: <message>`.
+- **Use:** `ShaderCache::CreatePixelShader(dev, id, &ps, &msg)` only creates the D3D9 object from the bytecode. If the
+  worker has not reached that variant yet, it becomes the worker's next job and the caller waits (logged as a warning
+  `waited for the precompile`, counted; the worker is raised to normal priority). With no worker left (thread creation
+  failed, or FreeLibrary) the variant is compiled on the calling thread as a last resort (logged).
+  `PrecompileComplete()` is a non-blocking readiness probe.
+- **Reset and release:** D3D9 shader objects survive `Reset`. Features that release them (Uninstall, Shutdown) recreate
+  them from the kept bytecode, never compiling again.
+- **Status:** `ShaderCache::StatusText()` on the Developer page and in the profiler report (`Apex shaders: ...`).
+- **Not covered:** game-shader copies patched in bytecode (`features/shader_patches.cpp`: roads, floors, snow, fences,
+  foliage, object vertex shaders, Banding Fix and Ambient Occlusion receiver copies) are created from the game's own
+  bytecode (no HLSL, no `D3DCompile`) when the game shader is created or first drawn. `light_probe.cpp` uses
+  `D3DDisassemble` on demand.
+
+### 4.5 Game-code patching helpers
+
+[framework/memory_patch.h](../framework/memory_patch.h):
+
+| Helper | What it does |
+|---|---|
+| `MemPatch::ReadBytes` / `ValidateBytes` | Guarded read; compare with expected bytes |
+| `MemPatch::WriteBytes` / `WriteDWORD` | Write code or data (protection lifted, instruction cache flushed); with `expected`, nothing is written unless the current bytes match; `undo` receives the old bytes |
+| `MemPatch::RestoreAll(undo)` | Restores every recorded write, newest first; keeps what could not be restored |
+| `MemPatch::WriteCodeSuspended(address, bytes, n)` | Writes 1 to 16 code bytes with every other thread suspended and none stopped inside them (retried for about 100 ms), for CALL rewrites that several threads may run. Nothing is allocated and no lock is taken while threads are suspended |
+| `MemPatch::CalculateRelativeOffset(from, to, length)` | rel32 for a JMP or CALL |
+| `MemPatch::ScanPattern(base, size, "8B 4E ?? E8")` | First match of an IDA-style pattern; unreadable memory skipped |
+| `DetourBatch::InstallHooks` / `RemoveHooks` | Several Detours hooks in one all-or-nothing transaction |
+| `GameAddress::Resolve()` | The verified address for this build, else a pattern scan of `TS3W.exe`; checked against `expectedBytes` either way |
+
+Game-code addresses shared by Night Lighting, Every-Story Ground Light, the Performance features and the Frame Profiler
+are resolved once by `GameAddr::Resolve()` ([framework/game_addresses.h](../framework/game_addresses.h)): fixed on Steam
+1.67.2, found by masked signature elsewhere. An address counts only when its signature matches once (or every match gives
+the same value). Every signature is logged (`[Addr] name: N matches at ... (Steam 0x...)`, with 16 bytes around each
+match on non-Steam builds). A feature whose required addresses are missing stays off with "Not available on <version>:
+<missing>" and writes nothing ([engine/game-versions.md](engine/game-versions.md)).
+
+### 4.6 Layered game-function hooks
+
+Several Apex modules may wrap one game function. Each wrapper is a layer with a fixed position (lower = outer); each
+hook calls `Next(site, layer)` to reach the next inner layer or the original. Removing a layer re-points its outer
+neighbour; removing the last restores the original.
+
+**`SlotChain`** ([framework/slot_chain.h](../framework/slot_chain.h)): functions reached only through vtable slots.
+Install and Remove swap the slots with an interlocked compare-exchange (expected value checked); a removed hook keeps its
+next pointer. Layers: 0 Gate (the wall shading gate, which must be outermost because it recognises its caller by its own
+return address), 1 Frame Profiler, 2 Resource cache, 3 FastCompress.
+
+| Site | Function | Slots | Layers used |
+|---|---|---|---|
+| FindProvider | `ResourceMgr::FindProvider` `0x004AFFC0` | +0x40 of both resource-manager vtables | Frame Profiler, Resource cache |
+| RegisterDb | `ResourceMgr::RegisterDatabase` `0x004B2D00` | +0x34 of base vtable `0x00FB2DA0` | Resource cache |
+| RegisterDbDerived | ResourceSystem override `0x00736A70` | +0x34 of derived vtable `0x00FFE250` | Resource cache |
+| SetDbPriority | `0x004B2EC0` | +0x3C of both vtables | Resource cache |
+| DbChanged | `0x004B0960` | +0x4C of both vtables | Resource cache |
+| RefPackCompress | RefPack stream write `0x004EC200` | +4 of stream vtable `0x00FB9018` (`0x00FB901C`) | Frame Profiler, FastCompress |
+| WallAoStep | wall AO solver step `0x0068B810` | +0x1C of solver vtable `0x00FF0594` (`0x00FF05B0`) | Gate, Frame Profiler |
+| KeyListBase | `ResourceMgr::GetKeyList` `0x004B1AE0` | +0x20 of base vtable (`0x00FB2DC0`) | Frame Profiler, Resource cache |
+| KeyListDerived | `ResourceSystem::GetKeyList` `0x00736660` | +0x20 of derived vtable (`0x00FFE270`) | Frame Profiler, Resource cache |
+
+The write epochs of "Remember missing files" swap their database-class slots directly (the only Apex module on them;
+`InstallClassHooks` in `features/resource_cache.cpp`, same compare-exchange).
+
+**`EntryChain`** ([framework/entry_chain.h](../framework/entry_chain.h)): functions reached by direct CALLs from several
+threads. The entry's relocation-free prologue is copied to a trampoline (plus a JMP back) and a 5-byte JMP to the
+outermost layer's hook is written with `MemPatch::WriteCodeSuspended`. Layers: 0 Frame Profiler, 1 FastDxt,
+2 ResourceCache, 3 ObjectIndex, 4 SceneBudget, 5 LevelLightShare, 6 FastCas, 7 FastCrc; each module layer is used on its
+own sites only.
+
+| Site | Address | Prologue | Users |
+|---|---|---|---|
+| DxtEncode1 / DxtEncode5 | `0x006152F0` / `0x006154B0` cdecl(Dst*, Src*) | `55 8B EC 83 E4 F0` | Frame Profiler, fast DXT encoder |
+| DpfWriteDirect | `0x004A7FC0` thiscall(5 args), ret 0x14 | `83 EC 28 53 56` | Resource cache write epochs |
+| ObjectById | `0x00C62D40` thiscall(idLo, idHi, int* visited), ret 0xC | `8B 44 24 0C 8B 54 24 08` | Frame Profiler, Faster Object Lookups |
+| SceneNodeDtor | `0x006FD930` | `55 8B EC 83 E4 F0` | Spread New Objects Over Frames (node lifetime guard) |
+| SceneAddNode | `0x006E6480` thiscall(node, group), ret 8 | `56 8B 74 24 08` | same |
+| SceneHolderTeardown | `0x006E4DE0` | `53 55 56 57 8B F9` | same |
+| RoomInvalidate | `0x0069EED0` thiscall(room, char full, char keep), ret 8 | `56 8B F1 8B 0E` | Night Lighting level light share |
+| RoomInvalidateFlag | `0x0069F160` thiscall(room, char flag), ret 4 | `8A 44 24 04 56` | same |
+| CasTriSort | `0x005D1960` cdecl(6 args) | `55 8B EC 83 E4 F0` | Fast CAS sort |
+| RecordCrc | `0x004FA4C0` cdecl(bytes, length, crc, bool invert) | `8B 4C 24 04 8B 44 24 08` | Fast CRC |
+
+**`CallChain`** ([framework/call_chain.h](../framework/call_chain.h)): one CALL instruction (E8 rel32). The CALL targets
+the outermost layer's hook, written with `WriteCodeSuspended`; removing the last layer writes the original CALL back.
+Site: `Scene::BeginFrame` (`0x006EBB70`)'s CALL at `0x006EBC49` of the pending-node drain `0x006E4130`; layers 0 Frame
+Profiler ("Scene pending nodes"), 1 SceneBudget (Spread New Objects Over Frames).
+
+Lot Lighting While Moving rewrites its CALL at `0x00ADB95D` with `WriteCodeSuspended`; the Frame Profiler keeps its own
+copy of that routine (`WriteCallSuspended`). Details of the performance sites: [features/performance/README.md](features/performance/README.md).
 
 ---
 
-## 6. Logger (`logger.cpp` / `logger.h`)
-- **File:** `Documents\Electronic Arts\<localized>\S3SS\S3SS_LOG.txt`, truncated at each start. The fallback is
-  `Game\Bin\S3SS_LOG.txt`. The header is "S3SS Log - Started at <date time>".
-- **Levels:** `Debug < Info < Warning < Error < Critical`.
-  - **Debug never reaches the file**, in any build. It goes only to `OutputDebugStringA`: use DebugView.
-  - `LOG_DEBUG` is compiled in Release too. `SetDebugMode` exists but `Log` does not use it.
-  - Debug, Error and Critical lines carry `(file:line)`.
-  - Every line also goes to `OutputDebugStringA`.
-- **Buffering** (Apex rewrite):
-  - `Log` appends to `g_pending` under the mutex.
-  - A Win32 flush thread (`FlushThread`) writes and flushes at most every `kFlushIntervalMs = 1000`.
-  - Warning and above flush at once, together with everything before them, so a crash report still follows its lead-in
-    lines.
-  - Above `kMaxPendingBytes = 64 KB`, the logging thread writes itself.
-  - Without a flush thread, every line is written at once.
-  - `Close()` signals the thread without waiting (DllMain deadlock) and writes what is left. `ExitFlush`'s static
-    destructor writes at process exit with `try_lock`.
+## 5. Features and settings
+
+### 5.1 Feature classes and registration
+
+Every feature ("patch") derives from `ApexPatch` ([framework/patch_base.h](../framework/patch_base.h)):
+
+| Member | Purpose |
+|---|---|
+| `Install()` / `Uninstall()` | Do the work; `Fail(msg)` records the reason shown in the menu and logs it |
+| `Update()` | Pump thread, every ~10 ms; by default reinstalls 2 s (`SETTING_CHANGE_DEBOUNCE`) after a setting changed |
+| `RenderCustomUI()` | The feature's controls while it is on (default: its registered settings) |
+| `RenderDeveloperUI()` | Developer-page lines (developer mode only) |
+| `SaveToToml` / `LoadFromToml` | `[patches.<Name>]` serialisation |
+| `ApplyTableLive(table)` | Applies a table while the game runs (profiles, looks, Undo; render thread): settings that differ, then `enabled` (Install / Uninstall when it differs); missing keys stay as they are |
+| `DefaultsToToml` | Every setting at its default |
+| `GpuCostMs()` | GPU time per frame from timestamp queries (< 0 = not measured) |
+| `OverviewSummary()` | Cheap read-only summary for the Overview page |
+| `NotifySettingChanged()` | Schedules the debounced reinstall and marks the config dirty |
+
+- **Registration:** `APEX_REGISTER_FEATURE(Class, {.displayName, .description, .category, .experimental,
+  .enabledByDefault, .supportedVersions, .technicalDetails, .gameCodeGroup})` creates a static registration.
+  `PatchManager::CreateAll()` instantiates every registration once on the init thread.
+- **`FeatureInfo.description`** is the hover text of the feature; it ends with "Part of " `APEX_PRODUCT_NAME` ".
+  Credits: @loinyx".
+- **Version gating:** `IsCompatibleWithCurrentVersion()` checks `supportedVersions` (`VERSION_STEAM`, `VERSION_EA`,
+  `VERSION_RETAIL`, `VERSION_ALL`) against the detected build. An unknown build is incompatible unless the feature names
+  a `gameCodeGroup` (for example `"NightLights"`, `"SplitLevel"`) whose addresses the signature scan found.
+  `UnavailableReason()` gives "Not available on <version>[: missing <addresses>]".
+- **Registered features:** NightTerrainRelight (Night Lighting), SplitLevelGroundLight (Every-Story Ground Light),
+  EdgeSmoothing, DepthBlur, AmbientOcclusion, SceneDither (Banding Fix), the Performance switches in
+  `patches/performance_patches.cpp` (resource lookup cache, lookup misses, file list cache, wall shading while moving,
+  lot lighting while moving, fast texture compression, fast cache compression, fast CAS sort, fast memory, scene node
+  budget, object lookup index, room light queue) and FrameCapture (developer). Picture and the Frame Profiler are
+  modules with their own settings tables.
+
+### 5.2 Declaring and using settings
+
+- **Declare in the constructor:** `RegisterFloatSetting(ptr, key, SettingWidget, default, min, max, desc, presets)`,
+  `RegisterIntSetting`, `RegisterBoolSetting`, `RegisterEnumSetting`. The setting writes its default into `*ptr` at
+  construction; `Load` clamps to the range.
+- **Load order:** settings first, then `enabled`, so `Install()` sees the loaded values.
+- **Reinstall policy:** the base `Update()` uninstalls and reinstalls on the pump thread 2 s after a change. Features
+  avoid this where possible:
+  - **Read live:** settings read every frame or call; `Update()` clears `pendingReinstall`.
+  - **Reinstall on the render thread:** Night Lighting does not reinstall itself from the pump. It sets a flag and its
+    `DeferredReinstall` (`endSceneBeforeOverlay`) reinstalls on the render thread, because Uninstall frees textures and
+    shaders the draw hooks use. Options that can change live are applied at once (`ApplyLive`).
+- **Never rename a TOML key.** Saved configs and profiles use them. Some keys are Portuguese identifiers kept from the
+  combined build (Night Lighting: `luzDoPosteNaGramaDoLote`, `postesNosObjetos`, `cercasComLuzDoChao`, ...; Depth Blur:
+  `distancia`, `transicao`, `forca`, `tamanho` (unused), `qualidade`, `focoAuto`, `quantidade`, `areaNitida`,
+  `velocidadeFoco`, `realceLuzes`).
+
+### 5.3 Config file (`ApexRadiance.toml`)
+
+Location: `Documents\Electronic Arts\<localized game folder>\Apex Radiance\` ([framework/apex_paths.h](../framework/apex_paths.h)).
+The localized folder name is resolved from the game executable's string table, with `"The Sims 3"` as fallback.
+
+| Table | Contents |
+|---|---|
+| `[meta]` | `version`, `written_by` (product and version), migration record |
+| `[ui]` | `toggle_key`, `developer_mode`, `font_scale` (0.5 to 3), `recommend_s3ss`, `start_note`, `capture_screenshot`, `hotkey_preset`, `mine_base`, `compare_key`, `refresh_key`, `probe_key`, `diagnostics_key`, `recorder_key`, `frame_capture_key`, `search_key`, `peek_key`, `picture_compare_key`, `screenshot_folder`, `screenshot_key`, `screenshot_hide_game_ui`, `sidebar_collapsed`, `language`; legacy `welcome_done`, `key_chosen` kept for compatibility |
+| `[qol.picture]` | Picture filters |
+| `[qol.frame_profiler]` | Frame Profiler preferences (developer mode; never saved as running) |
+| `[developer]` | Developer preferences imported with a profile |
+| `[patches.<Name>]` | One table per feature: `enabled` plus one key per registered setting |
+
+- **Writes** are atomic (temporary file, then replace) and debounced: `RequestSave` marks the file dirty and the pump
+  thread writes it about a second later (`PumpAutosave`). Menu changes are therefore saved automatically.
+- **Profiles:** `Profiles\<name>.toml` in the same folder, with the same feature tables ([ui.md](ui.md)).
+- **One-time migration** (`ApexConfig::EnsureMigrated`, only while `ApexRadiance.toml` is missing; the log line
+  `[Config] Migration path: ...` and Settings > Status say which path ran):
+  1. The previous standalone's `...\S3SS\Apex\Apex.toml` exists: copy it byte for byte. Its `apex_imgui.ini` is not
+     copied (the menu's scale changed). The old folder is left in place. If it cannot be read or written, nothing is
+     written and the next start tries again.
+  2. Else, `S3SS.toml` exists: back up its raw bytes to `Apex Radiance\S3SS.toml.pre-split.bak` and copy only the Apex
+     tables (`[qol.picture]`, or Picture keys from `[qol.hdr]` as a fallback; `[qol.frame_profiler]`; the Apex
+     `[patches.*]` tables, keeping only registered keys). NightTerrainRelight's object and fence strengths
+     (`forcaNosObjetos`, `forcaLuzPorPixelNosObjetos`, `forcaNasCercas`) are reset to 0.57 / 1.0 / 1.0.
+  3. Else (or S3SS already dropped the tables): defaults, logged.
+- Tables no longer read (features removed): `[qol.hdr]` (except the Picture fallback), `[patches.SmoothStreaming]`,
+  `[patches.GcScheduler]`, `[patches.FrameBudget]`. Ambient Occlusion uses `[patches.AmbientOcclusion]` again.
+- **S3SS.toml** is read-only, with one exception: the explicit Rooms at Night compatibility action
+  ([section 11.3](#113-s3sstoml)).
+
+### 5.4 Menu
+
+The menu is one window titled "Apex Radiance" (`APEX_PRODUCT_NAME`) in the Violet layout: a sidebar of pages, feature
+cards, Advanced areas for tuning, a Developer page in developer mode. Pages, widgets, banners, profiles and shortcuts
+are documented in [ui.md](ui.md). Menu changes follow the [apex-menu](../.agents/skills/apex-menu/SKILL.md) skill.
+
+---
+
+## 6. Logger and crash report
+
+**Log** ([framework/apex_log.cpp](../framework/apex_log.cpp)): `ApexRadiance_LOG.txt`, truncated at each start, header
+"Apex Radiance Log". Levels `Debug < Info < Warning < Error < Critical` (`LOG_DEBUG` ... `LOG_CRITICAL`).
+
+- Lines are queued in memory and written by a writer thread at most every 0.5 s (`kWriteIntervalMs = 500`). Warnings
+  and errors are written at once, together with everything queued before them, so a crash report ends right after the
+  lines that led to it.
+- Lines logged before `Open()` (DllMain, early init) are kept and written first.
+- Debug lines go only to `OutputDebugString` (use DebugView) unless verbose logging is on (`ApexLog::SetVerbose`).
+- `Close()` (FreeLibrary only) writes what is queued and stops the writer; process exit flushes by itself.
 - **Rule for render-thread code:** do not log per draw or per frame. `lot_light_bridge.cpp` counts notes per kind and
   writes one line at most about once a second.
-- **Other Apex output files** also go to `GetS3SSDirectory()`: `S3SS_Hitches.txt` (profiler writer thread),
-  `S3SS_FrameCapture.txt`, `S3SS_LightDiag.txt`, `S3SS_LightProbe.txt` plus `LightProbe*\` folders, `Censo\`
-  (S3SS_Censo.txt), and `HDR_Diag_*`.
+
+**Crash report** ([framework/crash_report.h](../framework/crash_report.h)): an unhandled exception writes
+`ApexRadiance_Crash.txt` (exception, registers, module and offset of the faulting address and of every stack value that
+points into a module's code, the enabled Apex features) and a small minidump `ApexRadiance_Crash.dmp`, then passes the
+exception on (to the game's filter, else Windows Error Reporting). Both files are overwritten by the next crash. The
+filter uses no heap, only stack buffers and Win32 calls. The pump thread takes the filter back once a second if another
+module replaced it (that one then runs after the report).
+
+**Other outputs** in the same folder: `ApexRadiance_Hitches.txt` (profiler writer thread), `ApexRadiance_FrameCapture.txt`,
+`ApexRadiance_LightDiag.txt`, `ApexRadiance_LightProbe.txt` and `LightProbe\`, `ApexRadiance_Censo.txt` and `Censo\`,
+`ShadersRecusados\`, `Captures\` (Report a problem), `Profiles\`.
 
 ---
 
-## 7. Build flavours
-- **`build_flavor.h`:**
-  - `S3SS_PUBLIC` is defined only for the public build. `inline constexpr bool kPublicBuild` follows it.
-  - `S3SS_TR(pt, en)` now expands to `en`. The code is English-only since 28/09; the macro stays so old call sites still
-    compile.
-- **Dev-only code** is guarded by `if constexpr (!kPublicBuild)`: Light Probe / Light Diag calls in NTR's Present hook,
-  "Developer" tree nodes, the "Developer tools" header, census and false colour (`lot_light_bridge.cpp` `OnDraw`).
-  - The files are still compiled in both flavours. Frame Capture and Lot Map Probe stay registered as patches in the
-    public build, but they are not reachable in its UI (inferred from `gui.cpp`).
-- **`Sims3SettingsSetter.vcxproj`:**
-  - MSBuild property `S3SSPublic=true` sets `S3SSFlavorDefines=S3SS_PUBLIC` (added to the Release
-    `PreprocessorDefinitions`), `OutDir=$(ProjectDir)Public\` and `IntDir=$(ProjectDir)Public\obj\`.
-  - Outputs: **`Release\S3SSApex.asi`** (dev, the default) and **`Public\S3SSApex.asi`** (public). Both folders also hold
-    an old `Sims3SettingsSetter.asi`.
-- **Toolchain:** v143, Win32, C++20, static CRT (`MultiThreaded`), vcpkg triplet `x86-windows-static`. Libs: `imgui.lib`,
-  `detours.lib`, `d3d9.lib`, `dxguid.lib`, `psapi.lib`, plus `d3dcompiler.lib` via `#pragma`. Always build with
-  `/p:VcpkgEnableManifest=false`. Commands are in [workflow.md](workflow.md).
-- **Files on disk but not in the project:** `patches/_TEMPLATE.cpp`, `call_trace_patch.cpp`, `light_diag_patch.cpp`,
-  `lot_edge_lighting_patch.cpp`, `split_level_lighting_fix_patch.cpp`. **Do not add or commit** `call_trace`,
-  `light_diag_patch`, `lot_edge_lighting` or `trace_targets.h` (dev leftovers).
+## 7. Developer mode
+
+There is one binary ([features/developer-mode.md](features/developer-mode.md)). `build_flavor.h` keeps the legacy name
+`kPublicBuild`, now an `std::atomic<bool>` meaning "developer mode is off". `ApexConfig::LoadDeveloperMode()` sets it
+from `[ui] developer_mode` on the init thread before any feature is constructed; it is atomic because D3D callbacks
+may already run. Developer instruments, threads and checks (Frame Profiler, Address Space monitor, Light Probe, Light
+Diag, Frame Capture, census, false colour, Developer page) are compiled in and gated at run time by
+`if (!kPublicBuild)`. Changing the mode requires a confirmation and a game restart. `S3SS_TR(pt, en)` expands to `en`;
+it remains so old call sites compile.
 
 ---
 
-## 8. Per-frame flow (combined build)
+## 8. One frame
 
-### 8.1 One frame on the render thread
-Sources: `engine_map\f_ECA960.asm`, the `frame_profiler.cpp` header comment, `profiler_targets.tsv`, and the code
-above. Game addresses are Steam.
+Game addresses are Steam. Sources: `engine_map\f_ECA960.asm`, the `frame_profiler.cpp` header, `profiler_targets.tsv`.
 
 ```
 Game main loop FUN_00ECA960 (render thread = main thread), one iteration:
   0x00EC6C30  app state update
   0x00588E00  ServiceManager::Update -> 0x0059ED20: each service's vfunc+0x1C (indirect call at 0x0059ED57)
-     |- Input service 0x00598660 -> message pump 0x00410890 -> HookedWndProc -> ImGui input      [mod: WndProc]
-     |- JobManager 0x00599A10, ResourceSystem 0x007377F0, CAS SimService 0x005F0E50,
-     |  TextureCompositor 0x00608630 (5 ms slices each)                         [mod: Service Frame Budget]
+     |- Input service 0x00598660 -> message pump 0x00410890 -> Apex window procedure (overlay input, shortcuts)
+     |- JobManager 0x00599A10, ResourceSystem 0x007377F0, CAS SimService 0x005F0E50, TextureCompositor 0x00608630
      |- WorldManager service 0x00C7E3C0 -> WorldManager::Update 0x00C6D570
-     |     -> terrain update 0x00C845C0 (called at 0x00C6D68F)                [mod: Smooth Streaming, NTR state]
-     |     -> lot renderer pass 0x00C7CEA0 -> 0x00AEB2E0 -> lot load stages 0x00AEA680   [mod: Smooth Streaming]
-     |        (room lighting 0x006A80E0 -> solve 0x006A3EC0 inside lot lighting)  [mod: level_light_share etc.]
+     |     -> terrain update 0x00C845C0 (called at 0x00C6D68F)                    [Night Lighting terrain state]
+     |     -> lot renderer pass 0x00C7CEA0 -> 0x00AEB2E0 -> lot load stages 0x00AEA680
+     |        (room lighting 0x006A80E0 -> solve 0x006A3EC0)                      [level light share, room queue]
   0x009DE140  SceneCaptureManager
-  0x006EBB70  Scene::BeginFrame
+  0x006EBB70  Scene::BeginFrame (CALL 0x006EBC49 -> pending-node drain 0x006E4130) [Spread New Objects]
   0x00EC9F00  render frame (only if [0x011D1530] != 0):
-     0x00611620 BeginFrame -> device vtable+0xA4 BeginScene
-         -> registry BeginScene hooks (Frame Capture, Last)
+     0x00611620 BeginFrame -> device BeginScene -> registry BeginScene (Frame Capture)
      scene draws: every DIP/DP -> registry chain
-         -1000 profiler start
-         First: PostScene.OnGameDraw (count depth-tested back-buffer draws; camera near/VP vote)
-                HdrOutput.OnGameDraw (count; scene copy at depth-tested -> depth-off transitions)
-                LotMapProbe
-         Normal: LotLightBridge.OnDraw -> may bind a patched shader, re-issue the draw (nested chain) and return Skip
-         Late:  HdrNative (lamp gain / tone rules) -> may re-issue + Skip
-         Last:  LightProbe (dev), FrameCapture (dev)
-         +1000 profiler end -> DXVK DrawIndexedPrimitive
-     first back-buffer draw with ZENABLE=FALSE after >= 20 scene draws (bloom composite, then UI):
-         PostScene fires inside that callback, before the draw: AO (10) -> Edge Smoothing (20) -> Depth Blur (30)
-         (each draws with DrawPrimitiveUP and restores the state it touched)
-     game UI draws (Z off)                                                (counted as UI by HdrOutput)
+         -1000 profiler counter
+         First:  PostScene (count depth-tested back-buffer draws; camera vote)
+         10:     Picture (scene copy at depth-on -> depth-off transitions)
+         Early:  Ambient Occlusion Sim receiver replay
+         Normal: LotLightBridge -> may bind a patched shader, re-issue the draw (nested chain) and Skip
+         Last:   Light Probe (dev), Frame Capture (dev)
+         +1000:  Banding Fix (bind dithered copies for the draw) -> DXVK
+     first back-buffer draw with ZENABLE = FALSE after >= 20 scene draws (bloom composite, then UI):
+         PostScene fires inside that callback, before the draw:
+         Ambient Occlusion (10) -> Edge Smoothing (20) -> Depth Blur (30), each drawing with DrawPrimitiveUP
+     game UI draws (Z off)
      0x00611760 -> 0x00611680 end frame:
-         device vtable+0xA8 EndScene -> HookedEndScene:
-             [first call: ImGui + WndProc + registry detours]
-             BorderlessWindow::TickReapply
-             RenderCallbacks endSceneBeforeOverlay: FrameCapture.OnEndScene, NTR DeferredReinstall
-             HdrOutput::BeforeOverlay (scene copy if the frame ended on the scene)
-             ImGui NewFrame -> SettingsGui::Render (Apex/Display tabs; Install/Uninstall from checkboxes) -> RenderDrawData
-             HdrOutput::OnEndScene: lamp gain, HdrNative::Update, HDR (scRGB) and/or Picture full-screen pass
-             original EndScene
-         device vtable+0x44 Present -> registry Present chain:
-             -1000 profiler start = frame boundary (attach pending timed functions, sampler bookkeeping)
-             First: PostScene / HdrOutput / DepthBlur / AO / EdgeSmoothing / LotMapProbe frame-boundary resets
-             Last:  NightTerrainRelight: LightDiag (dev, F8), OnPresent (world change, dusk, reconcile/relight),
-                    LightProbe (dev, F7), ObjectLightBridge, LevelLightShare, LotLightBridge setters + OnPresent,
-                    LightmapSmooth::OnPresent
-                    FrameCapture (dev, F9)
+         device EndScene -> Hooked_EndScene:
+             [first call: registry detours, ApexCore Present hook, overlay]
+             endSceneBeforeOverlay: PostScene fallback, Night Lighting DeferredReinstall, Frame Capture
+             Picture::BeforeOverlay (scene copy if the frame ended on the scene)
+             filteredSceneBeforeOverlay (Report screenshot)
+             Overlay::Frame (menu, notices) -> Picture::OnEndScene (SDR grade) -> original EndScene
+         device Present -> registry Present chain:
+             -2000 ApexCore (first-Present work, overlay flag)
+             -1000 profiler frame boundary
+             First: PostScene / Picture / Depth Blur / AO / Edge Smoothing / Banding Fix resets, Report screenshot
+             Normal: LotLightingMotion camera sample, RoomLightQueue
+             Last:  NightTerrainRelight: Light Diag (dev), world change, dusk, reconcile and relight, Light Probe (dev),
+                    object light bridge, level light share, LotLightBridge setters, LightmapSmooth; Frame Capture (dev)
              +1000 profiler end
              DXVK Present (GPU back-pressure, vsync)
      +0xBA: frame limiter (Smooth Patch's call at 0x00EC9FBA, or the game's ~30 ms sleep when inactive)
@@ -823,505 +692,295 @@ Game main loop FUN_00ECA960 (render thread = main thread), one iteration:
   0x005943F0  game clock tick
 ```
 
-The frame profiler's category split follows the same boundaries:
-- 0x611680 counts as "EndScene + overlays" until the Present boundary and as "Present (driver)" after it.
-- The rest of 0xEC9F00 after that is "Frame limiter".
-- Details: [features/frame-profiler.md](features/frame-profiler.md).
-
-### 8.2 The same frame in the standalone (planned)
-HDR output, Native HDR and Ambient Occlusion are **removed** (see [removed-features.md](removed-features.md)).
-
-| Area | Combined build | Standalone |
-|---|---|---|
-| Back buffer | `A16B16G16R16F` when HDR is on | Never changed. No `UnlockAdditionalFormats`, no scRGB colour space |
-| CreateDevice / Reset | HDR edits `pp`, restores it and retries | No `D3DPRESENT_PARAMETERS` edits. Borderless stays in official S3SS |
-| End-of-frame pass | `HdrOutput::OnEndScene` (HDR + Picture) | No HDR pass anywhere, at EndScene or Present. **Picture** is its own SDR-only module, config `[qol.picture]`. It still needs a scene/UI split (the scene copy), so the game UI and menus keep their colours. The exact hook point is up to the standalone code; PLANO 2d.2 says SDR Picture is correct at Apex's EndScene in either hook order |
-| Registry draw hooks | HdrOutput `First`, HdrNative `Late` | Neither exists. LotLightBridge `Normal` and the dev tools remain |
-| Post-scene chain | AO 10, Edge 20, Depth Blur 30 | **Edge Smoothing (20), then Depth Blur (30)** |
-| INTZ depth swap | Depth Blur, AO, HDR sky boost | **Only Depth Blur** turns it on (owner). Edge Smoothing never uses depth. The pond reflection only reads it when present |
+The Frame Profiler's categories follow the same boundaries: `0x611680` counts as "EndScene + overlays" until the Present
+boundary and "Present (driver)" after it; the rest of `0xEC9F00` is "Frame limiter"
+([features/frame-profiler.md](features/frame-profiler.md)).
 
 ---
 
 ## 9. Per-event flows
 
-### 9.1 Device creation (game start)
-1. The hook thread installs the CreateDevice detour.
-2. The game calls `IDirect3D9::CreateDevice`, which reaches `HookedCreateDevice`. See 2.2 for borderless, HDR format and
-   retry.
-3. EndScene and Reset are attached.
-4. The first EndScene initialises ImGui, the WndProc and the registry detours.
-5. Callbacks registered earlier by startup `Install()` calls (on the hook thread) start firing.
-6. Modules create their D3D resources lazily on the render thread, on the first frame that needs them. Log lines:
-   "[DepthBlur] Resources ready (WxH, INTZ depth swapped in)", "[EdgeSmoothing] Resources ready", "[HDR] Resources ready".
+### 9.1 Game start
+
+1. DllMain hooks `Direct3DCreate9`; the init thread opens the log, precompiles shaders, creates the features and loads
+   settings.
+2. The game calls `Direct3DCreate9`: Apex hooks `CreateDevice` on that thread.
+3. The game creates its HAL device: Apex detours EndScene and Reset.
+4. First EndScene: registry detours, the `ApexCore` Present hook, the overlay.
+5. First Present: window procedure subclass, S3SS rescan; one second later the init thread resolves game addresses and
+   installs the enabled features.
+6. Features create their D3D resources lazily on the render thread at the first frame that needs them (log lines such as
+   `[DepthBlur] Resources ready (WxH, INTZ depth swapped in)`).
 
 ### 9.2 Device reset (alt-tab from exclusive mode, resolution change)
-1. `HookedReset`: ImGui invalidate; borderless params.
-2. **`preReset`** callbacks release every `D3DPOOL_DEFAULT` object:
-   - AO, Depth Blur (this also unbinds the INTZ surface and puts back the game's DS), Edge Smoothing, Lot Map Probe,
-     `LightmapSmooth`.
-   - `HdrOutput::BeforeReset` releases the HDR targets and re-requests FP16.
+
+1. `Overlay::BeforeReset`.
+2. `preReset`: every `D3DPOOL_DEFAULT` object is released (Depth Blur also unbinds the INTZ surface and puts back the
+   game's depth-stencil); `Picture::BeforeReset`.
 3. The real `Reset`.
-4. On success: `HdrOutput::AfterReset` (scRGB again); **`postReset`** (AO, Depth Blur, Edge Smoothing reset their state
-   and back-buffer identity); borderless re-applied; ImGui objects recreated.
-5. The resources are rebuilt lazily on the next frame, with the status "Recreating after a video change...".
+4. On success: `postReset` (Depth Blur, Ambient Occlusion and Edge Smoothing reset their state and back-buffer identity);
+   `Overlay::AfterReset`.
+5. Resources are rebuilt lazily on the next frame (status "Recreating after a video change...").
 
-**Rule:** any module that owns a `D3DPOOL_DEFAULT` resource **must** register `preReset`. Otherwise `Reset` fails with
-`D3DERR_INVALIDCALL`, which is standard D3D9 behaviour. Mind the four-slot limit (4.2).
+**Rule:** any module that owns a `D3DPOOL_DEFAULT` resource must register `preReset`, or `Reset` fails with
+`D3DERR_INVALIDCALL` (standard D3D9 behaviour).
 
-### 9.3 Lot and world load (Apex view; engine details in [engine/lot-loading-and-streaming.md](engine/lot-loading-and-streaming.md))
-- **Shader creation** during a load reaches the registry `CreatePixelShader` / `CreateVertexShader` hooks (Last).
-  `LotLightBridge::PrecreatePs` / `PrecreateVs` and HdrNative's precreate build the patched copies now, so DXVK
-  translates them during the load and not in the frame where a room first appears (`hdr_native.cpp` header;
-  `lot_light_bridge.cpp` `UpdateHooks`).
-- **Lot streaming** (render thread, inside WorldManager and the lot renderer pass):
-  - `0x00AEA680` (lot load stages, budget 20 ms) and room lighting under `0x00ADBAD0` / `0x00ADB8F0` are sliced and capped
-    by Smooth Streaming in the combined build (removed from the standalone, see [removed-features.md](removed-features.md)).
-  - Level-light-share and object-bridge code runs inside the game's light calls where they are detoured
-    ([features/night-lighting/level-light-share.md](features/night-lighting/level-light-share.md)).
-- **World change** is detected in NTR's Present hook (`OnPresent`): the light-cells pointer changes. Then:
-  1. log "[NightTerrainRelight] World loaded (...)";
-  2. `LotLightBridge::OnWorldChanged()` drops the chunk maps, smoothed maps and atlas;
-  3. `LevelLightShare::OnWorldChanged()`;
-  4. `Settle` waits 5 to 60 s for the lot lamps, then arms one full terrain rebuild;
-  5. "Terrain rebuilt" is logged when the countdown at cells+0x38 reaches -1.
+### 9.3 Lot and world load
 
-  After that, `Reconcile` about once a second relights only the chunks whose bake rect overlaps a changed lamp. See
-  [features/night-lighting/terrain-relight.md](features/night-lighting/terrain-relight.md).
-- A typical log sequence (28/09):
-  - "World loaded (night level 1.00)"
-  - "Rebuild armed: world loaded"
-  - "[SmoothStreaming] Lot pass resumed ..."
-  - "Terrain rebuilt (world loaded; ...)"
-  - "Rebuild armed: dusk"
-  - "Local relight: 103 lamps changed, 13 terrain chunks relit"
-  - "Terrain rebuilt (dusk; ...)"
-  - "[LotLightBridge] Active"
+Engine details: [engine/lot-loading-and-streaming.md](engine/lot-loading-and-streaming.md).
+
+- **Shader creation** during a load reaches the registry's `CreatePixelShader` / `CreateVertexShader` chains. The Banding
+  Fix creates its copies there, so DXVK translates them during the load and not in the frame where a room first appears.
+- **Night Lighting** code runs inside the game's light calls where they are detoured
+  ([features/night-lighting/level-light-share.md](features/night-lighting/level-light-share.md)).
+- **World change** is detected in Night Lighting's Present hook when the light-cells pointer changes. Then: log
+  `[NightTerrainRelight] World loaded (...)`; `LotLightBridge::OnWorldChanged()` drops chunk maps, smoothed maps and the
+  atlas; `LevelLightShare::OnWorldChanged()`; `Settle` waits 5 to 60 s for the lot lamps, then arms one full terrain
+  rebuild; "Terrain rebuilt" is logged when the countdown at `cells+0x38` reaches -1. After that, reconciliation relights
+  only the chunks whose bake rectangle overlaps a changed lamp
+  ([features/night-lighting/terrain-relight.md](features/night-lighting/terrain-relight.md)).
+- The menu, the start note and Depth Blur wait for the loaded-world gate ([section 12](#12-loaded-world-gate-and-start-note)).
 
 ### 9.4 A setting change in the menu
-- **UI code:** on the render thread inside EndScene. It changes globals and calls `NotifySettingChanged()`.
-- **Read-live patches:** the next frame or call picks the value up.
-- **Base patches:** the hook thread reinstalls after 2 s.
-- **NTR:** the hook thread schedules; the next EndScene reinstalls on the render thread.
-- **Enable checkbox:** `Install()` / `Uninstall()` run immediately on the render thread.
+
+- Menu code runs on the render thread inside EndScene. It changes the feature's values and calls
+  `NotifySettingChanged()`; the config is written by the pump about a second later.
+- Read-live features pick the value up on the next frame or call. Base features reinstall on the pump thread after 2 s.
+  Night Lighting schedules, and the next EndScene reinstalls on the render thread.
+- A feature switch calls `Install()` / `Uninstall()` immediately on the render thread. Profiles, looks and Undo apply
+  whole tables with `ApplyTableLive`.
 
 ---
 
 ## 10. Threads and synchronisation
 
-### 10.1 The game's threads (engine side; full map in [engine/main-loop-and-services.md](engine/main-loop-and-services.md))
+### 10.1 The game's threads
+
+Full map in [engine/main-loop-and-services.md](engine/main-loop-and-services.md).
+
 | Thread | What runs there | Evidence |
 |---|---|---|
-| **Render thread = main thread** | Main loop `0x00ECA960`: ServiceManager main services, WorldManager and lot streaming, terrain update `0x00C845C0`, the whole D3D9 frame (BeginScene .. Present), the window message pump | NOTAS-ILUMINACAO "Desempenho: mapa do motor"; `profiler_targets.tsv` (thread = render); `frame_profiler.cpp` header ("The render thread is the main thread") |
-| **Simulation (Mono) thread** | `MonoScriptHost::Simulate` (the GC call at `0x00D819AA`, IdleSimulationCycle call at `0x00D81FDE`, sim job pump `ProcessJobs` called at `0x00D81FDA`), ServiceManager sim services `0x0059ED70`, script tasks `0x00D7FE80`, animation ticks. **The game UI runs here**, and the render thread does not wait for it each frame | Notes (same section); `gc_scheduler_patch.cpp` header; `profiler_targets.tsv` |
-| Job workers ("JobThread", affinity mask 2) | `ExecuteJob 0x00599720` on any thread, e.g. resource read jobs `0x0072A4F0`; their mask-1 follow-ups run on the render thread | `frame_budget_patch.cpp` header; `profiler_targets.tsv` |
-| Other game threads | Light tree gather (see `level_light_share.cpp` `g_gatherThread`, which may differ from the render thread) | `level_light_share.cpp` (it counts calls "on another thread") |
-
-The 28/09 log shows different ids for the two main threads: SmoothPatchPrecise logged "simulation thread (id 23944)" and
-"render thread (id 14128)".
+| **Render thread = main thread** | Main loop `0x00ECA960`: ServiceManager main services, WorldManager and lot streaming, terrain update `0x00C845C0`, the whole D3D9 frame (BeginScene to Present), the window message pump | NOTAS-ILUMINACAO "Desempenho: mapa do motor"; `profiler_targets.tsv`; `frame_profiler.cpp` header |
+| **Simulation (Mono) thread** | `MonoScriptHost::Simulate` (GC call at `0x00D819AA`, IdleSimulationCycle call at `0x00D81FDE`, sim job pump `ProcessJobs` called at `0x00D81FDA`), ServiceManager sim services `0x0059ED70`, script tasks `0x00D7FE80`, animation ticks. **The game UI runs here**; the render thread does not wait for it each frame | Notes; `profiler_targets.tsv` |
+| Job workers ("JobThread", affinity mask 2) | `ExecuteJob 0x00599720`, for example resource read jobs `0x0072A4F0`; their mask-1 follow-ups run on the render thread | `profiler_targets.tsv` |
+| Other game threads | Light tree gather (`level_light_share.cpp` counts calls "on another thread") | `level_light_share.cpp` |
 
 ### 10.2 The mod's own threads
+
 | Thread | Created by | Runs |
 |---|---|---|
-| Loader thread (DllMain) | UAL | Process check, CPUID fix, allocator hooks, `CreateThread` |
-| **Hook thread** (`HookThread`) | `DllMain` | The whole init sequence (1.3), including **startup `Install()` of every enabled patch**; then the message loop with `MemoryMonitor::Update` and **`patch->Update()` every ~10 ms** (base debounced reinstalls, NTR scheduling, Smooth Streaming reinstalls) |
-| Logger flush thread | `Logger::Handler::Initialize` | Writes pending log lines once a second |
-| Frame Profiler sampler | Profiler, when sampling is on (Advanced) | Suspends the render and/or sim thread at `g_sampleHz` (default 2000) and copies 4 KB of stack |
-| Frame Profiler writer | Profiler | Appends hitches to `S3SS_Hitches.txt` at most once a second |
-| DXT workers ("Apex DXT worker", up to min(logical processors - 2, 6)) | `DxtCodec::Parallel` (`features/dxt_codec.cpp`), at Faster Texture Compression's start with "Use several cores" on, or at the first large texture | Sleep on an event; encode rows of blocks of a large texture while the game's calling thread (which also encodes) waits in the DXT hook; normal priority, 256 KB stack reservation, never destroyed ([features/performance.md](features/performance.md), "Several cores") |
+| Loader thread (DllMain) | the ASI loader | Process check, instance mutexes, `Direct3DCreate9` detour, `CreateThread` |
+| **Init / pump thread** | DllMain | Start-up (section 1.3), including startup `Install()` of every enabled feature; then `Update()` of every feature every 10 ms, autosave, crash-report refresh |
+| Log writer | `ApexLog::Open` | Writes queued lines at most every 0.5 s |
+| Shader precompile worker | `ShaderCache::Start` | `D3DCompile` of every registered variant, below normal priority |
+| Frame Profiler sampler (developer) | Profiler, when sampling is on | Suspends the render and/or sim thread at `g_sampleHz` (default 2000) and copies 4 KB of stack |
+| Frame Profiler writer (developer) | Profiler | Appends hitches to `ApexRadiance_Hitches.txt` at most once a second |
+| Address Space monitor (developer) | `AddressSpace::Start` | Walks the address space with `VirtualQuery` every 10 s |
+| DXT, RefPack and CAS workers | `features/dxt_codec.cpp`, `fast_refpack.cpp`, `fast_cas.cpp` | Split one large job across cores while the game's calling thread also works and waits; normal priority, 256 KB stack reservation, never destroyed ([features/performance/README.md](features/performance/README.md)) |
+| Fast memory worker | `features/fast_memory.cpp` | Returns big blocks to Windows in the background |
+| Light map smoothing worker | `features/lightmap_smooth.cpp` | Detached worker that decodes and prepares terrain light maps for the world light smoothing |
+| Short-lived helper threads | `features/captures.cpp`, `apex_gui.cpp`, `features/frame_profiler.cpp` | WIC PNG encoding of capture screenshots and folder work; opening folders in Explorer (COM) and URLs; profiler report file appends |
 
 ### 10.3 Which Apex code runs on which thread
+
 | Code | Thread |
 |---|---|
-| All registry callbacks, `HookedEndScene` / `HookedReset`, RenderCallbacks, PostScene effects, HDR / Picture pass, Night Lighting draw hooks and Present dispatcher, dev hotkeys (GetAsyncKeyState) | Render |
-| All menu code (`SettingsGui::Render`, `RenderCustomUI`, checkboxes calling `Install` / `Uninstall`, `ConfigStore::SaveAll` from the UI) | Render (inside EndScene) |
-| Startup `Install()` (`LoadPatches`, `EnsureEnabledByDefault`), patch constructors, `Update()` | Hook thread |
-| NTR terrain / light logic, `ObjectLightBridge` / `LevelLightShare` refreshes, Smooth Streaming frame gate, Frame Budget service detours, profiler timed calls on the render thread | Render (the game calls them there, or NTR's Present hook drives them) |
-| GC Scheduler (the redirected CALL at `0x00D819AA`) | Simulation |
-| Game-function detours in general | Whatever thread the game calls them on. Check `GetCurrentThreadId()` against a recorded thread when it matters, as `level_light_share.cpp`, `object_light_bridge.cpp`, `smooth_streaming_patch.cpp` (`g_passThread`) and `rig_tracker.cpp` (`g_drawThread`) do |
-| `CreatePixelShader` / `CreateVertexShader` hooks | Usually render. `lot_light_bridge.cpp` notes the setters may be reached "from another thread (Ensure*, even at shader creation)" (unverified which) |
+| Registry callbacks, `Hooked_EndScene` / `Hooked_Reset`, render callbacks, post-scene effects, Picture, Night Lighting draw hooks and Present dispatcher, overlay drawing | Render |
+| Menu code (`RenderCustomUI`, switches calling `Install` / `Uninstall`, `ApplyTableLive`) | Render (inside EndScene) |
+| Window procedure (input, shortcuts) | The thread that pumps the game window, the render thread (inferred: the Input service pumps messages inside ServiceManager) |
+| Startup `Install()`, feature constructors, `Update()`, autosave | Init / pump thread |
+| Night Lighting terrain and light logic, object light bridge and level light share refreshes | Render (the game calls them there, or Night Lighting's Present hook drives them) |
+| Game-function detours in general | Whatever thread the game calls them on. Check `GetCurrentThreadId()` against a recorded thread when it matters, as `level_light_share.cpp`, `object_light_bridge.cpp`, `rig_tracker.cpp` (`g_drawThread`) and Ambient Occlusion (`simRenderThread`) do |
+| `CreatePixelShader` / `CreateVertexShader` hooks | Usually render (*Unverified* which thread calls them during loads) |
 
-### 10.4 Synchronisation rules (as practised in the code)
-1. **Game state is touched only on the render thread.** `object_light_bridge.cpp`: "the game's light system may only be
-   touched from the render thread". Requests from elsewhere set a flag (`g_refreshRequested`) that the next `OnPresent`
-   handles (`object_light_bridge.cpp`, `level_light_share.cpp`).
-2. **Anything that frees D3D resources used by draw hooks, or rewrites code the render thread runs, happens on the render
-   thread.** NTR's `DeferredReinstall` pattern (5.3). Profiler attach runs at the frame boundary: "so the call-site writes
-   never race the render thread executing them".
-3. **Registry state** is guarded by one recursive mutex. It is held during each dispatch and each (un)registration, and
-   released before the original call. (Standalone since 2026-09-29: the draw and state chains run without it on the render
-   thread, and `UnregisterAll` from another thread waits for the render thread instead; see 3.6.)
-   - Registration from the hook thread (startup, debounced reinstall) blocks while the render thread dispatches.
-   - Do not wait, from inside a registry callback, on a lock that another thread holds while it registers. The profiler
-     uses `try_lock` on `g_ctrlMutex` in its Present hook for this reason.
+### 10.4 Synchronisation rules
+
+1. **Game state is touched only on the render thread.** Requests from elsewhere set a flag that the next Present handles
+   (`object_light_bridge.cpp` `g_refreshRequested`, `level_light_share.cpp`).
+2. **Freeing D3D resources used by draw hooks, or rewriting code the render thread runs, happens on the render thread**
+   (Night Lighting's `DeferredReinstall`), or uses `WriteCodeSuspended` / the layered chains (section 4.6).
+3. **Registry state:** see section 3.3. Do not wait, inside a registry callback, on a lock that another thread holds
+   while it registers; the profiler uses `try_lock` in its Present hook for this reason.
 4. **Settings read by hooks** are plain globals or `std::atomic` with relaxed loads. A torn read of a float slider is
-   accepted. Module-level `std::mutex` only where Install and hooks can overlap (`lot_light_bridge.cpp` `UpdateHooks`:
-   "Install runs off the render thread at startup while Present may call the setters"; `PostScene` `g_mutex`).
-5. **Callback slots** (`RenderCallbacks`, `ExtraHooks` observers, depth substitution) are lock-free atomics.
-6. **No file I/O on the render thread** in hot paths. The logger is buffered; the profiler uses a writer thread.
-   `ConfigStore::SaveAll` from a UI click is the accepted exception.
-7. **Detours transactions:**
-   - `DetourUpdateThread(GetCurrentThread())` only. Other threads are not suspended, so installing a detour on a function
-     that another thread is executing is a race.
-   - The profiler hooks hot multi-thread functions "by hand with all other threads suspended and checked" (`AttachSafe`).
-   - Game-code byte patches are written from whichever thread installs.
+   accepted. A module-level mutex is used only where Install and hooks can overlap (for example `lot_light_bridge.cpp`
+   `UpdateHooks`, `PostScene`'s effect mutex).
+5. **Callback slots** (`ExtraHooks` observers, depth substitution) are lock-free atomics; render-callback lists copy
+   under a short mutex.
+6. **No file I/O on the render thread** in hot paths. The logger and the profiler use writer threads; config saves run on
+   the pump; Report PNG encoding runs on its own threads.
+7. **Detours transactions** call `DetourUpdateThread(GetCurrentThread())` only; other threads are not suspended, so
+   detouring a function another thread is executing is a race. Hot multi-thread game functions are hooked with
+   `WriteCodeSuspended` or the profiler's `AttachSafe` (all other threads suspended and checked).
 
 ---
 
-## 11. Apex-owned vs inherited files (combined tree)
+## 11. Coexisting with official S3SS
 
-From PLANO-SEPARACAO section 1a / 1b. `git diff 5eb2c65` is the merge-base with upstream.
+### 11.1 Detection
 
-**Apex-owned (new files):**
-- HDR and post: `hdr_output.*`, `hdr_native.*`, `post_scene.*`, `depth_share.h`.
-- Hook plumbing: `d3d9_extra_hooks.*`, `render_callbacks.h`.
-- Tools: `frame_profiler.*`, `map_view.*`, `rig_tracker.*`, `light_probe.*`, `light_diag.*`.
-- Night Lighting: `lot_light_bridge.*`, `shader_patches.*`, `lightmap_smooth.*`, `level_light_share.*`,
-  `object_light_bridge.*`.
-- Headers and tables: `apex_ui.h`, `build_flavor.h`, `shader_ids.h`, `*_hlsl.h`, `*.hlsl`, `wall_lamp_table.h`,
-  `floor_atlas_table.h`.
-- Patches: `ambient_occlusion`, `edge_smoothing`, `depth_blur`, `frame_capture`, `lot_map_probe`, `night_terrain_relight`,
-  `smooth_streaming`, `gc_scheduler`, `frame_budget` (written after the plan).
-- Third party: `third_party/smaa` (MIT), `third_party/dxvk/d3d9_vk_ext.h` (zlib).
+`S3SSDetect` ([framework/s3ss_detect.h](../framework/s3ss_detect.h)) recognises modules by strings in their read-only
+data (none exports anything). The needles are stored encoded so that Apex itself never matches them.
 
-**Apex edits to upstream files:**
+| Module | Recognised by | Result |
+|---|---|---|
+| Official S3SS | its log header `"S3SS Log - Started at "` and ImGui window ID `"###S3SSWindow"` | `s3ssLoaded`; module range recorded (`IsInS3SS`) |
+| Old combined build | the same two strings plus `"Sims3 Settings Setter Apex Edition"` | `oldCombinedBuild`: Apex Radiance keeps its features off and shows a banner |
+| Previous standalone | the old product name without S3SS's strings, or the file name `S3SSApex.asi` | `oldStandalone`: banner "An older S3SSApex.asi is also installed; delete it from Game\Bin" |
 
-| File | Apex change |
-|---|---|
-| `d3d9_hook.cpp` | RenderCallbacks fire points; HdrOutput calls in CreateDevice, EndScene and Reset |
-| `d3d9_hook_registry.*` | recursive mutex, `CallOriginal*` additions, DIP/DP per-hook timing |
-| `config/config_store.cpp` | HdrOutput and FrameProfiler save/load |
-| `gui.cpp` | `IsApexPatch`, `RenderApexFeature`, Apex and Display tabs, Borderless moved, title |
-| `dllmain.cpp` | `FrameProfiler::Shutdown` |
-| `logger.cpp` | Buffered rewrite |
-| `patches/gc_try_to_collect_patch.cpp` | Refuses while GcScheduler is on |
-| `patches/smooth_patch_precise.cpp` | Timer resolution, MMCSS, WaitOnAddress |
-| vcxproj | `TargetName` S3SSApex, `S3SSPublic` |
+`Scan()` runs on the init thread; `Rescan()` runs at the first Present and before installing features. `Summary()` gives
+one line for the log and the compatibility page.
 
-**Inherited S3SS framework used by Apex:** `patch_system.h`, `optimization.*`, `patch_settings.h`, `patch_helpers.h`,
-`logger.*`, `utils.h`, `version.h`, `config_paths` / `config_store`, the D3D bootstrap (`d3d9_hook.cpp`), the registry,
-`gui.cpp` / `settings_gui.h`, and `qol.*` (font scale, toggle key).
+### 11.2 Two Detours chains and two overlays
 
-**Not used by Apex:** `pattern_scan.*`, `vtable_manager.*`, `hooks.cpp`, `settings.*`, `config_value_manager.*`,
-`migration.*`, `memory_statistics.*`, `cpu_optimization.*`, `allocator_hook.*`.
-
----
-
-## 12. The standalone split (planned / in progress)
-
-> **Status (2026-09-28):** in progress in `S3SSApex\`. Nothing in this section describes the frozen code. The source is
-> `S3SS-dev\PLANO-SEPARACAO.md` (written against HEAD `f18cca8` plus the working tree), amended by the **user decisions
-> of 2026-09-28** in 12.0. Where the plan and those decisions disagree, the decisions win. Check the standalone's own
-> code and `CLAUDE.md` for the final names.
-
-### 12.0 Decisions of 2026-09-28 (they override the plan)
-- **Content baseline = v0.1.0.** Night Lighting, Depth Blur and Edge Smoothing in the standalone start from **v0.1.0**:
-  combined-tree commit `b84d5f1` ("Night Remake alpha: rebuilt night lighting and post-processing effects", released as
-  `nightremake-v0.1.0-alpha`). Three later pieces are kept on top of it:
-  - **Picture** filters, SDR only (`[qol.picture]`, [features/picture-filters.md](features/picture-filters.md));
-  - **SMAA 1x** inside Edge Smoothing ([features/edge-smoothing.md](features/edge-smoothing.md));
-  - the **Depth Blur fade in map view** (`MapView::IsOpen`, `0x0073E060`,
-    [engine/camera-and-map-view.md](engine/camera-and-map-view.md)).
-- **Post-0.1.0 lighting changes come back one at a time,** each only after the user has tested it, **fences first**.
-  The list, the order and the state of each one: [changes-since-0.1.0.md](changes-since-0.1.0.md) (being written).
-  Until a change is re-added, the feature docs (written against `combined-final`) describe the target, not necessarily
-  what the standalone does.
-- **Removed** (findings in [removed-features.md](removed-features.md)): HDR output, Native HDR (lamp gain), Ambient
-  Occlusion, and the three performance patches **Smooth Streaming, Script GC Scheduler and Service Frame Budget** (no
-  perceptible gain for the user; the engine knowledge they produced is kept in `docs/engine/`). Smooth Patch Precise
-  improvements stay out too (upstream PR candidate).
-- **Frame Profiler stays, dev build only** ([features/frame-profiler.md](features/frame-profiler.md)).
-- **Localized terrain relight lives in Night Lighting.** In the combined build Night Lighting asked Smooth Streaming
-  (`SmoothStreamingRelightTerrainRects`) to flag the terrain chunks under a changed lamp. In the standalone the Night
-  Lighting module sets `chunk+0x55` on the overlapping chunks itself, with no queue
-  ([engine/terrain-and-light-bake.md](engine/terrain-and-light-bake.md)).
-- **Framework rewritten from scratch.** No S3SS source is copied (upstream has no licence). The standalone keeps the
-  concepts of sections 2-7 (a D3D9 hook registry with priorities and Skip, extra hooks, render callbacks, patch objects
-  with TOML settings, a buffered logger), with two deliberate differences from the combined framework:
-  - **stable hook order**: hooks of equal priority run in registration order (the combined registry uses `std::sort`,
-    3.2);
-  - **growable callback lists** instead of `RenderCallbacks::kSlots = 4` fixed slots (4.2).
-  Section-level names (`D3D9Hooks`, `ExtraHooks`, `RenderCallbacks`, `PostScene`, `DepthShare`) are kept where they
-  still fit; read the standalone code for the final API.
-- **Snapshot of the tree (28/09, about 14:45; it changes quickly):** `framework/` had `apex_log.*` (new buffered logger,
-  writer thread every 0.5 s, warnings flushed at once), `apex_util.*`, `game_version.*` (PE timestamp table, Steam value
-  checked against `re\TS3W.exe`), plus `d3d9_extra_hooks.*` and `render_callbacks.h` still identical to the combined
-  files. `features/*.cpp` and `patches/*.cpp` were byte-identical to `combined-final`, not yet reset to v0.1.0, and
-  `patches/` still held `smooth_streaming_patch.cpp`, `gc_scheduler_patch.cpp` and `frame_budget_patch.cpp`. Check the
-  tree before assuming either state.
-- **UI** (standalone `CLAUDE.md`): new menu, Violet theme, sidebar plus feature cards, own hotkey Ctrl+Shift+F11.
-
-### 12.1 Why a separate ASI
-- Official S3SS's `SaveAll` rebuilds `S3SS.toml` from its own sections only, and its `LoadFromToml` skips unknown patch
-  names. **Every Apex key in `S3SS.toml` is lost the first time official S3SS saves.**
-- Both mods would write `S3SS_LOG.txt` (truncate) and `imgui.ini` in `Game\Bin`.
-- Upstream has no LICENSE. Decision: the framework is rewritten rather than carried (12.0); ask sims3fiend before
-  publishing anyway, and credit "based on Sims3SettingsSetter by sims3fiend".
-
-### 12.2 Coexisting with official S3SS on one device
-**Two Detours chains:**
 - Each DLL links its own Detours and patches the same DXVK function bodies. Detours relocates an existing `E9` into the
-  new trampoline, so chains compose in either order, and **the mod installed last runs first** (outermost).
-- **Hazard: two threads detouring the same prologue at once.** This can happen on `CreateDevice`, when both hook threads
-  race. The planned fix:
-  1. In DllMain, detour the `Direct3DCreate9` export of the loaded `d3d9.dll`. `TS3W.exe` imports it statically: IAT
-     slot `0x00F95A58` = `d3d9.dll!Direct3DCreate9` (`research\engine_map\iat.map`; spike 1d answered for the import,
-     not yet for the moment of the call).
-  2. Install Apex's CreateDevice detour lazily, inside the first `Direct3DCreate9` call (call_once).
-  3. Fallback: detect S3SS and wait up to about 3 s for its `E9`.
-- Never detach at process exit.
-- S3SS's registry is pass-through (it registers nothing). Apex's raw "call original" paths may pass through S3SS's empty
-  dispatch when S3SS is inner. This is harmless today.
-- Log, at each attach, whether the prologue was clean or already an `E9`, and into which module it jumps.
+  new trampoline, so chains compose in either order, and **the module installed last runs first** (outermost).
+- `CreateDevice` is installed from inside the first `Direct3DCreate9` call, so Apex's and S3SS's transactions never race
+  on its prologue (section 2.1). Apex never detaches at process exit.
+- S3SS's registry registers nothing; Apex's `CallOriginal*` paths may pass through S3SS's empty dispatch when S3SS is
+  inner. This is harmless.
+- Apex makes no present-parameter changes, so S3SS's borderless window and Resolution Spoofer have no conflict.
+  Borderless stays in S3SS.
+- The Picture pass runs at Apex's EndScene. For SDR either order is correct: with Apex outer, S3SS's menu draws after
+  the filters; with Apex inner, the menu counts as UI through the scene copy. Calling `EndScene` from a pass would
+  re-enter S3SS's hook and draw its menu twice: never do it.
+- Each DLL has its own ImGui context. Apex uses `apex_radiance_imgui.ini`, window ID `###ApexWindow` and
+  `NoMouseCursorChange`. S3SS's window procedure eats all input while its menu is open; Apex subclasses at its first
+  Present so it is outer, and passes on everything its ImGui does not want (section 2.5).
+- S3SS does not hook Set/GetDepthStencilSurface, so the Depth Blur swap has no competitor. ImGui's DX9 state blocks do
+  not include the depth-stencil binding.
 
-**CreateDevice parameter conflicts (plan 2c): superseded.**
-- The plan analysed S3SS borderless (Windowed, SwapEffect, LOCKABLE) against Apex's FP16 back buffer.
-- The standalone makes **no** parameter changes at all, so there is no conflict. Borderless stays in S3SS.
+### 11.3 S3SS.toml
 
-**HDR pass placement (plan 2d, "HDR pass moved to Present at priority -500", and migration step 6): superseded.**
-- There is no HDR pass. What remains is the Picture SDR pass, at Apex's own EndScene.
-- For SDR, the plan notes either EndScene order is correct:
-  - Apex outer: S3SS's menu draws after the filters.
-  - Apex inner: the menu counts as UI via the scene copy.
-- Calling `EndScene` from a pass would re-enter S3SS's hook and draw its menu twice: never do it.
+Apex reads `S3SS.toml` read-only for S3SS's intent (`[patches.<name>].enabled`, overlay disabled) and for the
+migration. One exception: the player may explicitly choose the Rooms at Night compatibility action
+(`S3SSDetect::CorrectRoomAmbientOverride`). Only that action backs up `S3SS.toml` into the Apex Radiance folder and
+removes the saved `settings.BradyBunchBlue` RGB override, so S3SS no longer applies it. Enabling Rooms at Night alone never
+writes `S3SS.toml`. All other settings and patch switches are preserved.
 
-**Two ImGui contexts (plan 2e):**
-- Each DLL has its own static ImGui, so the contexts are separate.
-- Set `io.IniFilename` to `...\Apex Radiance\apex_radiance_imgui.ini` (the previous standalone used
-  `...\S3SS\Apex\apex_imgui.ini`) and use window ID `###ApexWindow`.
-- S3SS's WndProc eats all input while its menu is open. The plan:
-  - subclass at Apex's first Present, so Apex is outer;
-  - eat only what Apex's ImGui wants (`WantCaptureMouse` / `WantCaptureKeyboard`) or Apex's toggle key;
-  - pass everything else down.
-- **Hotkey Ctrl+Shift+F11.** S3SS toggles on bare Insert and ignores modifiers. Make the Apex key rebindable, stored in
-  `ApexRadiance.toml [ui]`.
-- Set `NoMouseCursorChange`.
+`S3SSDetect::SplitLevelFixActive()` reports S3SS's Split-Level Lighting Fix (enabled in `S3SS.toml`, or `GetLotID`
+`0x6BC020` no longer holds its original bytes); Apex's Every-Story Ground Light then stays out of the way.
 
-**INTZ vs S3SS (plan 2f):**
-- S3SS does not hook Set/GetDepthStencilSurface, so the Depth Blur swap has no competitor.
-- ImGui's DX9 state blocks do not include the depth-stencil binding.
-- Keep the ExtraHooks vtable-sharing guard.
+### 11.4 Game-code sites and the conflict guard
 
-**Detecting S3SS (plan 2g):**
-- Scan every other module's read-only data for `"S3SS Log - Started at "` and `"###S3SSWindow"`.
-- If the module also contains `"Sims3 Settings Setter Apex Edition"`, it is **the old combined build**: refuse to start
-  and tell the user to delete it.
-- A module with that old product name but without S3SS's two strings (or named `S3SSApex.asi`) is **the previous
-  standalone build**: `Info::oldStandalone`, banner "An older S3SSApex.asi is also installed; delete it from Game\Bin".
-- Named mutexes (implemented, `S3SSDetect::AcquireInstanceMutex`, called from DllMain): `Local\ApexRadiance.<pid>`
-  against a second copy of Apex Radiance, and the previous standalone's `Local\S3SSApex.<pid>`. If the second one is
-  already held, an old `S3SSApex.asi` loaded first and runs: Apex Radiance stays idle and writes only an error line to
-  its log. Otherwise Apex Radiance takes it too, so an `S3SSApex.asi` loading later finds it held and idles by its own
-  duplicate check (UAL normally loads `ApexRadiance.asi` before `S3SSApex.asi`, alphabetical order; unverified for this
-  UAL version).
-- Read S3SS's intent read-only from `S3SS.toml` (`[patches.X].enabled`, `[qol.ui].disable_overlay`,
-  `[qol.borderless_window].mode`).
-- Record S3SS's module range.
-
-### 12.3 Game-code patch conflicts (plan section 3, updated for the removals)
 | Apex feature | Overlap with S3SS | Policy |
 |---|---|---|
-| ~~Script GC Scheduler~~ (CALL redirect at `0x00D819AA`) | **Removed from the standalone.** If ever revived: same 5 bytes as S3SS GCTryToCollect, which NOPs them after checking only `E8` | Revival rule: refuse both ways, 1 s watchdog on the E8 target, never restore over foreign bytes ([removed-features.md](removed-features.md)) |
-| ~~Smooth Streaming~~ (`0xAEA680`, `0xAEA6AC`, `0xC7CEA0`, `0xADB120`, `0xC845C0`, `0xC84C3C`) | **Removed.** No byte overlap with LotStreamingOptimizations | - |
-| ~~Service Frame Budget~~ (detours on `0x599A10`, `0x7377F0`, `0x608630`, `0x5F0E50`; bytes at `0x599A20`, `0x5F0EBF`, `0x5F127D`, `0x60829D`) | **Removed** | - |
-| Frame Profiler (dev build only; many entry detours and hand hooks) | Avoids LSO's sites; skips any target whose bytes differ | Cooperate. Label "owned by S3SS" in its hook table |
-| Night Lighting `level_light_share` (CALL redirects to LPWAL at `0x6A1187` / `0x6A126F` / `0x6A3336`, return-address test `0x69FE19`) | S3SS LightingQuality detours LPWAL's entry `0x69FD60` and calls it N times: no byte overlap, but Apex's tests run N times | Cooperate. Measure the cost at 16 and 32 samples; show "S3SS Lighting Quality active" |
-| Night Lighting terrain bake sites (visitor `0xC29626`, story gate `0xC294D9`, arm sites `0x6B6516` / `0x6B60D3` / `0x6B6618`, lot pass `0xC7F87D`, street lamp colour `0x6BE18C`) and the localized relight (writes `chunk+0x55`) | None found. S3SS's LSO detours `WorldManager::Update` (`0xC6D570`), which calls the terrain update; Apex never patches that function | Cooperate |
-| Other Night Lighting sites (rig tracker, object light bridge, lamp colour), `map_view` (calls `0x73E060`, the same getter LSO uses) | None found | Cooperate |
-| Apex's improved Smooth Patch Precise (`0xD81FDE`, `0xEC9FBA`) | Head-on collision with S3SS's Smooth Patch | **Not shipped** in the standalone; upstream PR instead |
+| Frame Profiler (developer; many entry detours and hand hooks) | Avoids S3SS LotStreamingOptimizations' sites; skips any target whose bytes differ | Cooperate; label "owned by S3SS" in its hook table |
+| Night Lighting level light share (CALL redirects to LPWAL at `0x6A1187` / `0x6A126F` / `0x6A3336`, return-address test `0x69FE19`) | S3SS LightingQuality detours LPWAL's entry `0x69FD60` and calls it N times: no byte overlap, but Apex's tests run N times | Cooperate |
+| Night Lighting terrain bake sites (visitor `0xC29626`, story gate `0xC294D9`, arm sites `0x6B6516` / `0x6B60D3` / `0x6B6618`, lot pass `0xC7F87D`, street lamp colour `0x6BE18C`) and the localized relight (writes `chunk+0x55`) | None found. S3SS's LotStreamingOptimizations detours `WorldManager::Update` (`0xC6D570`), which calls the terrain update; Apex never patches that function | Cooperate |
+| Other Night Lighting sites (rig tracker, object light bridge, lamp colour), map view (calls `0x73E060`, the getter S3SS also uses) | None found | Cooperate |
+| Every-Story Ground Light (`GetLotID` `0x6BC020`) | S3SS's Split-Level Lighting Fix patches the same function | Apex stays off while S3SS's fix is active |
 
-**`ApexConflictGuard`** keeps one table of `{site, length, vanillaBytes, owner}` and works in four stages:
-1. **Defer:** install after S3SS's startup patch load (first Present plus about 1 s, or S3SS absent).
-2. **Intent:** read `S3SS.toml`.
-3. **Truth:** compare bytes at install, and follow E8/E9 targets to a module.
-4. **Watchdog:** re-check every 1 s; never restore over foreign bytes.
-
-With the performance patches gone, the guard mainly protects Night Lighting's game-code sites and the dev-only profiler.
-
-### 12.4 Standalone layout, files and config
-- **Folders:**
-  - `framework/`: bootstrap, registry, extra hooks, render callbacks, patch objects and settings, byte-patch and detour
-    helpers, logger, utils, config, conflict guard, S3SS detection, all **newly written** (12.0);
-  - `features/` and `patches/`;
-  - `shaders/`;
-  - `third_party/` (smaa with its MIT `LICENSE.txt`; the dxvk header only if a DXVK extension is still used; HDR was its
-    only user);
-  - `apex_gui.cpp`, `apex_main.cpp`.
-- **Not rebuilt** (no Apex use): S3SS's `pattern_scan`, `vtable_manager`, `hooks.cpp`, settings hooks, config values,
-  INI migration, memory stats, CPU optimisation, allocator hook and mimalloc, `qol.*`, the CPUID topology fix.
-- **`apex_main.cpp`:** process check, game version detection, config load and migration, patch instantiation, its **own
-  `Update()` pump every 10 ms**, and the profiler shut down first.
-- **Output name `ApexRadiance.asi`** (rename of 2026-09-28; before it the plan kept `S3SSApex.asi`). Solution
-  `ApexRadiance.sln`, project `ApexRadiance.vcxproj`. It sorts before `Sims3SettingsSetter.asi` and `S3SSApex.asi`.
-  The old `S3SSApex.asi` must be deleted from `Bin`; the official `Sims3SettingsSetter.asi` stays beside it.
-  - MSBuild flavour property: `/p:ApexPublic=true`, which defines `S3SS_PUBLIC` and writes to `Public\`.
-- **Files go to `Documents\Electronic Arts\<localized>\Apex Radiance\`** (`framework/apex_paths.*`; the localized
-  folder is resolved as before):
-  - `ApexRadiance.toml`;
-  - `ApexRadiance_LOG.txt` (header "Apex Radiance Log");
-  - `apex_radiance_imgui.ini`;
-  - dev outputs: `ApexRadiance_Hitches.txt`, `ApexRadiance_FrameCapture.txt`, `ApexRadiance_LightDiag.txt`,
-    `ApexRadiance_LightProbe.txt`, `LightProbe\`, `ApexRadiance_Censo.txt`, `Censo\`, `ShadersRecusados\`.
-  - It only writes `S3SS.toml` for the backed-up room-ambient RGB correction; it never writes `S3SS_LOG.txt` or anything in the previous standalone's `...\S3SS\Apex\` folder.
-- **Schema:** the table names are kept, so settings carry over:
-  - `[qol.picture]`; `[qol.frame_profiler]` (dev);
-  - `[patches.<Name>]` for NightTerrainRelight, EdgeSmoothing, DepthBlur, FrameCapture (dev) and LotMapProbe (dev);
-  - new `[ui]` (toggle_key, font_scale, recommend_s3ss, welcome_done, sidebar_collapsed; see ui.md) and `[meta]` (version, migrated_from_s3ss).
-  - Menu profiles: `Profiles\<name>.toml` in the same folder, the same feature tables (see ui.md "Profiles").
-  - Not read any more (features removed): `[qol.hdr]` (except the Picture grade keys as a migration fallback, see
-    picture-filters.md), `[patches.AmbientOcclusion]`, `[patches.SmoothStreaming]`, `[patches.GcScheduler]`,
-    `[patches.FrameBudget]`.
-  - Night Lighting keys added after v0.1.0 appear only when their change is re-added (12.0).
-- **One-time migration** (`ApexConfig::EnsureMigrated`, call_once in the init thread), only while `ApexRadiance.toml`
-  is missing; the log line `[Config] Migration path: ...` and Settings > Status > Settings say which path ran:
-  1. If the previous standalone's `...\S3SS\Apex\Apex.toml` exists: copy it byte for byte (same schema, every key).
-     Its `apex_imgui.ini` is not copied (the menu's scale changed; the new default size applies). The old folder is
-     left in place. If it cannot be read or written, nothing is written and the next start tries again.
-  2. Else, if `S3SS.toml` exists: back up the raw bytes to `Apex Radiance\S3SS.toml.pre-split.bak`, copy only the Apex
-     tables (NightTerrainRelight strengths reset to v0.1.0's 0.57 / 1.0 / 1.0).
-  3. Else (or if S3SS already dropped the tables): defaults, logged.
-- **Menu:** one window, "Apex Radiance" (`APEX_PRODUCT_NAME`), in the Violet layout (sidebar: Lighting, Image,
-  Display, Developer in the dev build, Settings; see [ui.md](ui.md)).
-  - A Settings/About page: S3SS detected, conflict status, credits ("based on Sims3SettingsSetter by sims3fiend").
-
-### 12.5 Migration steps and test plan (plan sections 5 and 6, condensed and updated)
-**Steps:**
-0. Freeze. Done: tag `combined-final`.
-1. Spikes:
-   - a. DXVK drawing at Present. This mattered for HDR; for the Picture pass it is only relevant if it moves to Present.
-   - b. Two Detours chains in both load orders.
-   - c. Two ImGui overlays and WndProc chaining.
-   - d. When the game calls `Direct3DCreate9` (the static import itself is confirmed, 12.2).
-2. Skeleton that loads next to S3SS.
-3. **Framework rewrite** (was "carve-out" in the plan).
-4. D3D bootstrap (Direct3DCreate9 export detour, lazy CreateDevice, EndScene, Reset). No device parameter changes.
-5. Bring in the v0.1.0 modules plus Picture, SMAA and the map-view fade; rename the output files.
-6. HDR relocation. **Superseded**: only the Picture SDR pass remains to place (Apex's EndScene).
-7. Menu.
-8. Coexistence layer.
-9. Config migration.
-10. Re-add the post-0.1.0 lighting changes one at a time, fences first, each after a user test
-    ([changes-since-0.1.0.md](changes-since-0.1.0.md)).
-11. Test matrix.
-12. Docs and release.
-
-**Test variants:**
-- A: Apex alone.
-- B: S3SS alone.
-- C: both, Apex first.
-- D: both, S3SS first (rename to `0_Sims3SettingsSetter.asi`).
-- E: C and D with S3SS headless.
-- F: S3SS borderless plus Resolution Spoofer.
-- G: old combined build present (must refuse).
-
-**Check in each variant:**
-- separate logs and chain-position lines;
-- both menus usable, with S3SS's menu open too;
-- Edge Smoothing and Depth Blur before any UI in both orders, and INTZ surviving Reset;
-- Night Lighting with LightingQuality at 16 and 32 samples;
-- Night Lighting's localized terrain relight with S3SS's LSO on (map view blocker active);
-- profiler skip labels (dev build);
-- config migration cases;
-- public vs dev flavour.
+`ConflictGuard` ([framework/conflict_guard.h](../framework/conflict_guard.h)) declares the intended four-stage guard:
+defer game-code installs until S3SS has loaded its patches (implemented by the settle wait, section 1.3), refuse known
+same-byte pairs from `S3SS.toml`, byte-compare every site at install and name the module a foreign E8/E9 lands in, and
+re-verify every second without restoring over foreign bytes. Only the interface exists: `MayInstall` always allows,
+`Query` reports no conflict and `Tick` does nothing. Features rely on their own byte checks at install.
 
 ---
 
-## 13. How to add a new feature (checklist)
+## 12. Loaded-world gate and start note
 
-1. **Study first.** Read the relevant docs in `docs/engine/` and the feature docs' "Pitfalls" sections. Get evidence:
-   F7 / F8 captures, decompile in `S3SS-dev\re\out`, engine_map. Do not guess addresses or constants.
-2. **New patch file.** Put it in `patches/<name>_patch.cpp` (or a module `.cpp/.h` pair plus a thin patch) and **add it
-   to the vcxproj** `ClCompile` list. Files on disk that are not in the project are silently not built.
-3. **Class and registration:**
-   - `class XPatch : public OptimizationPatch`, with `XPatch() : OptimizationPatch("XName", nullptr)`. `"XName"` becomes
-     the TOML table `[patches.XName]`, so choose it once and never rename it.
-   - `APEX_REGISTER_FEATURE(XPatch, {.displayName, .description = "... Part of " APEX_PRODUCT_NAME ". Credits:
-     @loinyx", .category, .experimental, .enabledByDefault, .supportedVersions = VERSION_STEAM (unless verified on
-     others), .technicalDetails = {addresses, patterns}})`.
-4. **Install / Uninstall:**
-   - Both idempotent (`if (isEnabled) return true;`), with `lastError.clear()`, `Fail(msg)` on errors, and
-     `isEnabled = true/false` at the end.
-   - Resolve game addresses with `AddressInfo` (Steam address plus a pattern plus `expectedBytes`), or `ScanPattern`
-     with a byte check.
-   - Write through `PatchHelper::Write*` with an `expectedOld` and a tracker. Restore with `RestoreAll`.
-   - Detours through `DetourHelper`.
-   - Remember that startup `Install()` runs on the **hook thread**, before the D3D device exists.
-5. **Settings:**
-   - Register in the constructor, with English descriptions and sane defaults.
-   - Choose the reinstall policy:
-     - read live and override `Update() { pendingReinstall = false; }`; or
-     - reinstall only when code bytes change (like Smooth Streaming); or
-     - defer to the render thread (NTR `DeferredReinstall`) if Uninstall frees D3D objects or rewrites code the render
-       thread runs.
-6. **D3D hooks:**
-   - Register in `Install`, and `UnregisterAll(kHookName)` in `Uninstall`.
-   - Priority:
-     - `First` for observers and frame-boundary resets that must see every original draw;
-     - `Normal` for draw replacement (lot_light_bridge's slot);
-     - `Late` for a second replacement layer (HdrNative in the combined build);
-     - `Last` for probes and captures;
-     - never ±1000, which is reserved for the profiler.
-   - Return `Skip` only when you issued the draw yourself. Guard the re-issue with an own-call flag.
-   - Use `CallOriginal*` when no module may see the call.
-   - Never (un)register the method type you are being dispatched from.
-   - Post-scene effects: `PostScene::Add(order, fn)` with a new order value, drawing with DrawPrimitiveUP.
-   - Readable depth: `DepthShare::Request(true)` / `Request(false)`, and handle `Texture() == nullptr` with
-     `DepthShare::Status()`.
-   - `D3DPOOL_DEFAULT` resources: `RenderCallbacks::Add(preReset / postReset)`. Check the four-slot limit.
-7. **Threads:**
-   - Touch game objects only on the render thread; queue from elsewhere.
-   - No blocking I/O or per-draw logging on the render thread.
-   - Use atomics for values that the UI writes and hooks read.
-8. **UI:**
-   - Add the name to `IsApexPatch` (`gui.cpp`).
-   - Place it with `RenderApexFeature("XName", "Title", defaultOpen)` in the Apex tab (lighting and effects, or the
-     "Performance" section) or the Display tab (image and window).
-   - In `RenderCustomUI`:
-     - `SAFE_IMGUI_BEGIN()`, a status line, the main controls with `Hint()` tooltips;
-     - `TreeNode("Advanced##XName")` for tuning;
-     - `if constexpr (!kPublicBuild) TreeNode("Developer##XName")` for diagnostics;
-     - English only; no visible credit lines.
-9. **Logging:** use a `[XName]` prefix. Log install success with the resolved addresses (the log is the first thing read
-   when diagnosing). Use Warning for "pattern not found / bytes differ" and Info for state changes. Remember that
-   `LOG_DEBUG` never reaches the file.
-10. **Build both flavours** (dev and public) and test in game. See [workflow.md](workflow.md).
-11. **Docs:**
-    - Add `docs/features/<name>.md` following the template in the brief: settings table with TOML keys, addresses table,
-      pitfalls, testing.
-    - Link it from `docs/README.md`.
-    - Update this file's registry table (3.4) and thread table (10.3) if the feature adds hooks or threads.
-    - Record what failed in the feature doc's "Pitfalls" section.
+The menu, the start note and Depth Blur wait until a world is really playable, so they never appear or run over a
+loading screen.
+
+- **World active** (`WorldSession::IsActive`, [features/world_session.h](../features/world_session.h), read-only): the
+  WorldManager global (`GameAddr` `WorldManagerPtr`, `0x011ECBC4` on Steam) is non-null, its active byte `+0x41` is set,
+  its mode `+0x1B4` is 1 to 3, and the native startup/loading window is absent. Fields:
+  [engine/lot-loading-and-streaming.md](engine/lot-loading-and-streaming.md).
+- **Loading window:** the window with ID `0x95947678` is created by `0x00EC7DB9` and removed by `0x00EC7A60`.
+  `LoaderDismissed()` resolves the UI-service getter (`GameAddr` `UiServiceGetter`, `0x0050AB70` on Steam), checks that
+  its code is `A1 <global> ... C3`, reads the service, calls its root getter (vtable +4) and the root's child lookup
+  (vtable +0xF4) for that ID. A missing getter, service or root, or an exception, fails closed (the world counts as not
+  active). A world-loaded flag alone is not enough, because the world can be active behind the loading screen.
+- **Menu availability** (`apex_gui.cpp` `UpdateMenuAvailability`, render thread, at most every 200 ms): the startup state
+  is `Running` (or `RefusedOldBuild`, so the banner can show), the world is active, and, when Night Lighting is on, its
+  world-live signal is set; then 3 continuous seconds must pass. The result is cached in an atomic
+  (`g_menuAvailable`); the window thread never reads game memory (`Client::CanOpen`). While it is false the menu is
+  closed and cannot open, and shortcuts do not run.
+- **Start note:** the "Apex Radiance is ready, press <key>" note starts once per process, only when the menu first
+  becomes available (first Present alone does not start it), if `[ui] start_note` is on and the menu is not already
+  open. It lasts 8 s (`kHintMs`). A later load hides and pauses a running note; returning does not restart its lifetime.
+  Opening the menu ends it.
+- **Depth Blur** keeps its own settling state (`WorldSession::Settled`: 3 s of continuous activity, reset whenever the
+  world is not active), updated at the Present frame boundary and checked again before blurring. While it is not ready,
+  every blur and debug GPU pass is skipped, the autofocus snaps on return, the map-view fade resets, and the shared depth
+  is not released ([features/depth-blur.md](features/depth-blur.md)).
+- No game writes or hooks are involved. Validation: [tools/loading_gate_test](../tools/loading_gate_test/) and the
+  Depth Blur validation page.
 
 ---
 
-## 14. Known gaps in this document
-- Whether the game ever creates a non-HAL device (for example NULLREF) was not checked. The log only shows one HAL device.
+## 13. Report storage
+
+Report a problem ([features/bug-reports.md](features/bug-reports.md)) keeps its controls on the overlay (render)
+thread and adds no game-memory hook or light polling.
+
+- `Captures::WriteText` serialises completed diagnostics; failed writes are kept for an explicit retry.
+- Capture receipt, description, session and PNG job state share one lock (`g_lock`). WIC threads only write the supplied
+  image and mark their own folder complete under the lock; translation and completion notices are handled on the render
+  thread. `Saving()` includes queued and encoding PNG work; `ScreenshotPending()` only suppresses overlays before the
+  picture is read at the next Present.
+- Last-save polling performs no file-system scan. The post-save description card reads its target folder once when
+  opened. Saves use atomic replacement (`ApexUtil::WriteFileAtomic`), so a failed replacement keeps the previous note.
+  `ReadDescription` rejects reparse files and reads at most 4 KB.
+- Library scanning is limited to the visible page; file contents are read on request; reparse directories are not
+  followed. Menu removal renames capture folders into `.Removed` (collision-safe), with an explicit Undo. Explorer runs
+  on a separate COM thread.
+
+---
+
+## 14. How to add a new feature
+
+1. **Study first.** Read the relevant [engine pages](engine/) and the feature pages' *Rejected approaches* and history.
+   Get evidence: Light Probe and Light Diag captures, the decompile in `S3SS-dev\re\out`, engine_map. Do not guess
+   addresses or constants.
+2. **Files.** Put the feature in `patches/<name>_patch.cpp` (or a `features/<name>.cpp/.h` module plus a thin patch) and
+   add it to `ApexRadiance.vcxproj`'s `ClCompile` list.
+3. **Class and registration:** `class XPatch : public ApexPatch` with `XPatch() : ApexPatch("XName")`. `"XName"` is the
+   TOML table `[patches.XName]`: choose it once, never rename it. Register with `APEX_REGISTER_FEATURE(XPatch,
+   {.displayName, .description = "... Part of " APEX_PRODUCT_NAME ". Credits: @loinyx", .category, .experimental,
+   .enabledByDefault, .supportedVersions = VERSION_STEAM (unless verified elsewhere) or a .gameCodeGroup,
+   .technicalDetails})`.
+4. **Install / Uninstall:** idempotent (`if (isEnabled) return true;`), `lastError.clear()`, `Fail(msg)` on errors,
+   `isEnabled` set at the end. Resolve game addresses through `GameAddr` (add the address and its signature to
+   `framework/game_addresses.*`) or `GameAddress`. Write through `MemPatch::Write*` with `expected` bytes and an undo
+   list; restore with `RestoreAll`. Use `DetourBatch`, or the layered chains when another module may hook the same
+   function. Startup `Install()` runs on the init thread, after the first Present.
+5. **Settings:** register in the constructor with English descriptions and defaults. Choose the reinstall policy: read
+   live; or defer to the render thread when Uninstall frees D3D objects or rewrites code the render thread runs. Add the
+   setting to the menu's reset and profile handling ([ui.md](ui.md)).
+6. **D3D hooks:** register in `Install`, `UnregisterAll(kHookName)` in `Uninstall`. Priority: `First` for observers and
+   frame-boundary resets that must see every original draw; `Early` for work that must precede draw replacement;
+   `Normal` for draw replacement; `Last` for probes and captures; never -2000, -1000 or +1000. Return `Skip` only when
+   you issued the draw yourself, guarded by an own-call flag. Use `CallOriginal*` for state changes no module may see.
+   Post-scene effects: `PostScene::Add(order, fn)` with a new order value, drawing with DrawPrimitiveUP. Readable depth:
+   `DepthShare::Request(true/false)`, handling `Texture() == nullptr` with `DepthShare::Status()`. `D3DPOOL_DEFAULT`
+   resources: `RenderCallbacks::Add(preReset / postReset)`. HLSL: register every variant with `ShaderCache::Add`.
+7. **Threads:** touch game objects only on the render thread; queue from elsewhere. No blocking I/O or per-draw logging
+   on the render thread. Atomics for values the UI writes and hooks read.
+8. **UI:** follow the [apex-menu](../.agents/skills/apex-menu/SKILL.md) skill: main controls on the card with hints,
+   tuning under Advanced, developer diagnostics in `RenderDeveloperUI`, English source text with translations in
+   `i18n/tr_*.cpp`, no visible credit lines. Run the audit.
+9. **Logging:** a `[XName]` prefix. Log install success with the resolved addresses. Warning for "pattern not found /
+   bytes differ", Info for state changes. `LOG_DEBUG` does not reach the file unless verbose logging is on.
+10. **Test:** offline harness in `tools/` where possible ([workflow.md, Testing](workflow.md#4-testing)), then in game.
+11. **Docs:** write `docs/features/<name>.md`, `docs/validation/<name>.md` and, when there is history,
+    `docs/history/<name>.md` from [templates/](templates/), following [DOCUMENTATION-STANDARD.md](DOCUMENTATION-STANDARD.md).
+    Update this page's registration table (3.5) and thread tables (10.2, 10.3) when the feature adds hooks or threads.
+
+---
+
+## 15. Known gaps
+
+- Whether the game ever creates a non-HAL device (for example NULLREF) was not checked; logs show one HAL device.
 - Which thread calls `CreatePixelShader` / `CreateVertexShader` during loads was not measured.
-- The `preReset` five-users / four-slots overflow comes from reading the code and was never seen at runtime.
-- The ASI loader DLL name (`wininet.dll` = Ultimate ASI Loader) is inferred from README, not checked by hash or version.
-- The standalone's file names and MSBuild property are settled (12.4); its Picture hook point must be read from the
-  standalone code.
+- The ASI loader DLL name (`wininet.dll` = Ultimate ASI Loader) is inferred from its README, not checked by hash.
+- The conflict guard is an interface only (section 11.4).
+- The loaded-world gate's behaviour across every loading transition (travel, save load, main menu return) needs in-game
+  validation; the mock checks and compilation do not show loading screens.
 
-## Local Report storage/UI revision (`2.5.4-test-report-review`, unreleased)
+## See also
 
-Report controls remain on the overlay/render thread. `Captures::WriteText` serializes completed diagnostics, retaining failed writes for an explicit retry; no polling of lights or new game-memory hook was added. Capture receipt, description, session and PNG job state share `g_lock`. WIC threads only write the supplied image and mark their own folder complete under the lock; translation and completion notices are handled on the render thread. `Saving()` includes queued/encoding PNG work, whereas `ScreenshotPending()` only suppresses overlays before the picture is read. Last-save polling performs no filesystem scan. The required inline post-save description card reads its target folder once when opened; explicit saves use atomic replacement through `ApexUtil::WriteFileAtomic`, preserving the previous annotation if replacement fails. `ReadDescription` rejects reparse files and bounds reads to 4 KB; its non-empty body controls the UI send guidance. The legacy receipt-note API remains for retry compatibility; current inline edits target a guarded direct capture/collection folder. Library scanning is limited to its visible page; file contents are read on request, and reparse directories are not followed. Menu removal renames direct capture folders into `.Removed`, with collision-safe explicit Undo. Explorer remains a separate COM thread. Public builds share Report tools but continue to omit Developer UI. See `docs/features/bug-reports.md` for failure/undo limits and validation.
-
-The local overlay revision (`framework/overlay_clock.h`, `framework/overlay.cpp`) samples a monotonic frame delta even when no menu/notice is drawn; the Win32 backend's idle-gap delta is overridden before ImGui::NewFrame. It preserves real long frames. A slow-panel phase warning is capped at one per 10 seconds and is not GPU timing. `GuiClient::CanOpen` exposes only atomic readiness; the render-thread 200 ms check requires an active loaded WorldManager and, when Night Lights is on, the world-live signal, followed by 3 seconds. The fallback offsets are documented in docs/engine/lot-loading-and-streaming.md; no additional game hook/write is introduced. The generic fallback and actual loading transitions need in-game validation.
-
-The approved stage-based presentation adds no hooks, timers, threads or persisted setting keys. `ReportStages` reflects recording, pending receipt, description editing and successful completion; it is not navigation. `ReportCaptureTools` draws only while recording and shares the recording card. Start and comparison no longer hide the overlay; Return to game and point aiming do so explicitly. Point return behavior remains owned by the existing probe completion path. Library contents and sharing guidance are inline cards; only removal uses a confirmation dialog. Receipt notes are cached from reading/editing and contents are enumerated on first expansion, with separate cache identity from library details. Restoring comparison remains available after capture controls disappear.
-
-Private RC temporal candidate, 2026-10-02: `2.5.4-rc-temporal-pool-test` retains the report-library RC UI and adds targeted pool jitter protection and phase-aware temporal reprojection. Gameplay validation is pending; not installed or published. See [features/edge-smoothing.md](features/edge-smoothing.md) for evidence, fallback scope, quality tradeoff and checks.
-
-Compatibility exception: the player may explicitly choose the Rooms at Night compatibility action. Only that action backs up S3SS.toml in the Apex Radiance folder and removes the saved `settings.BradyBunchBlue RGB` override so S3SS no longer applies it. Enabling Rooms at Night alone never writes S3SS.toml. All other settings and patch switches are preserved.
-## Startup notice timing (PR #2)
-
-The ready hint starts once per process only after `g_menuAvailable` becomes true:
-an active loaded world, the enabled Night Lights world-live gate, and three
-continuous seconds. First Present alone no longer starts it. Further loads hide
-and pause a running hint; returning does not restart its eight-second lifetime.
-The saved start-note preference and the existing notice design remain intact.
-Depth Blur separately uses the same read-only world fields and a three-second
-settling guard, checked at Present and again before blur. No new game writes or
-hooks are introduced. Mock checks and compilation are not loading-screen visual
-validation.
-
-The startup/Depth Blur gate also checks that the native startup/loading window `0x95947678` is absent. The UI-service getter is resolved through GameAddr and validated before querying the root; missing UI state fails closed. A world-loaded flag alone is insufficient because the world can be active behind the loading screen. See the Depth Blur validation note for remaining gameplay checks.
+- [history/architecture.md](history/architecture.md): the combined build, the standalone split plan and decisions,
+  release-candidate notes.
+- [workflow.md](workflow.md), [ui.md](ui.md), [engine/](engine/), [removed-features.md](removed-features.md).

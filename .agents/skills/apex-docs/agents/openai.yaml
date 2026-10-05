@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apex: documentação"
+  short_description: "Escreve e atualiza as docs no padrão do projeto"
+  default_prompt: "Use $apex-docs para atualizar a documentação das features alteradas nesta mudança."
