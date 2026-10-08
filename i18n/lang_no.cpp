@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Norwegian (Bokmal)}
 const I18n::Pair kPairs[] = {
+    {"Removed Temporal smoothing and Thin object detail from Ambient Occlusion","Tidsutjevning og detaljer for tynne objekter er fjernet fra omgivelsesokklusjon"},
+    {"Ambient Occlusion and Sim Occlusion remain available","Omgivelsesokklusjon og Sim-okklusjon er fortsatt tilgjengelige"},
     {"Brightness, contrast, saturation, temperature and sharpness", "Lysstyrke, kontrast, metning, temperatur og skarphet"},
     {"Midtones, shadows, highlights and blacks", "Mellomtoner, skygger, høylys og svarttoner"},
     {"Tint, vibrance, film tones and color mixer", "Fargetone, livlighet, filmtoner og fargeblanding"},

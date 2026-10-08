@@ -11,6 +11,8 @@ namespace {
 
 // {English (exactly as in the code), Portuguese (Brazil), Spanish, French}
 const I18n::Entry kEntries[] = {
+    {"Removed Temporal smoothing and Thin object detail from Ambient Occlusion","Removidas Suavização temporal e Detalhe de objetos finos da Oclusão de Ambiente","Se eliminaron Suavizado temporal y Detalle de objetos finos de la oclusión ambiental","Lissage temporel et Détail des objets fins retirés de l’occlusion ambiante"},
+    {"Ambient Occlusion and Sim Occlusion remain available","Oclusão de Ambiente e Oclusão dos Sims continuam disponíveis","La oclusión ambiental y la oclusión de los Sims siguen disponibles","L’occlusion ambiante et celle des Sims restent disponibles"},
     {"Apply", "Aplicar", "Aplicar", "Appliquer"},
     {"Choose what to apply", "Escolha o que aplicar", "Elige qué aplicar", "Choisissez quoi appliquer"},
     {"Deletes this new capture and closes the form", "Exclui esta nova captura e fecha o formulário", "Elimina esta nueva captura y cierra el formulario", "Supprime cette nouvelle capture et ferme le formulaire"},

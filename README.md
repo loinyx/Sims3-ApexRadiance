@@ -92,7 +92,7 @@ Use the before/after controls to compare your adjustments with the game's origin
 
 ### Ambient Occlusion and Sims
 
-Ambient Occlusion adds soft contact shadows under furniture, in corners, around buildings and where surfaces meet. Choose one of five quality levels, then adjust its strength and distance. Temporal smoothing helps keep the shadows steady as you move the camera, while Thin Object Detail helps them show up around legs, rails and other narrow objects. AO also works in map view.
+Ambient Occlusion adds soft contact shadows under furniture, in corners, around buildings and where surfaces meet. Choose one of five quality levels, then adjust its strength and distance. AO also works in map view.
 
 **Sim Occlusion** has separate controls for the body and hair. You can limit how dark the added shading gets and enable support for compatible transparent hair, softening shadows on Sims while keeping the room's contact shadows.
 

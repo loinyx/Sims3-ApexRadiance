@@ -399,3 +399,5 @@ notices, detection, the recommendation card, Credits and the settings migration.
 - [Validation](validation/ui.md)
 - [History](history/ui.md)
 - [Report a problem](features/bug-reports.md), [Developer mode](features/developer-mode.md)
+
+Ambient Occlusion no longer exposes Temporal smoothing, Thin object detail or Object thickness. Strength, Distance, Quality, map-view shading, Reach, lamp protection and Sim controls remain available.

@@ -53,7 +53,7 @@ Steam 1.67.2 (image base 0x00400000) unless stated otherwise.
 
 | Feature | Status |
 |---|---|
-| [Ambient Occlusion](features/ambient-occlusion.md): contact shade where surfaces meet | Released in 2.1.0 |
+| [Ambient Occlusion](features/ambient-occlusion.md): contact shade where surfaces meet | Released in 2.1.0; simplified controls in 2.11.1 |
 | [Sim Occlusion](features/sim-occlusion.md): separate shade controls for Sims and hair | Released in 2.6.0 |
 | [Reflections](features/reflections.md): water reflections and lamp glow | Released |
 | [Picture filters](features/picture-filters.md): colour and image controls, 26 stackable filters, LUT files | Released (Filters tab: 2.7.0) |

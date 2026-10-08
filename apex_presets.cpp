@@ -23,9 +23,6 @@ simControls = false
 simMaxShade = 0.23517785966396332
 simStrength = 0.30582213401794434
 transparentHair = true
-temporal = true
-thinDetail = false
-thickness = 0.75
 
 [patches.DepthBlur]
 areaNitida = 2
@@ -198,9 +195,6 @@ simControls = true
 simMaxShade = 0.11
 simStrength = 0.4
 transparentHair = true
-temporal = true
-thinDetail = false
-thickness = 0.75
 
 [patches.DepthBlur]
 areaNitida = 2
@@ -373,9 +367,6 @@ simControls = true
 simMaxShade = 0.11
 simStrength = 0.4
 transparentHair = true
-temporal = true
-thinDetail = true
-thickness = 0.75
 
 [patches.DepthBlur]
 areaNitida = 2

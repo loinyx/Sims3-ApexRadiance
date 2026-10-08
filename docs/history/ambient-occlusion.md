@@ -65,3 +65,7 @@ ambient light. The back-buffer alpha cannot be used because bloom reads it.
 foliage.
 
 Sim-specific work continues in [sim-occlusion.md](sim-occlusion.md).
+
+## 2.11.1: deterministic AO only
+
+Temporal smoothing and visibility-bitmask detail are removed, including their shader variants, reprojection logic, history textures and settings. AO keeps the existing full-resolution horizon path, spatial blur and Sim controls. Legacy temporal/thinDetail/thickness keys no longer participate in settings registration or built-in profiles.
