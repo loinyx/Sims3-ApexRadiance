@@ -674,7 +674,8 @@ const I18n::Entry kEntries[] = {
     // Filters added 06/10: LUT, Auto exposure, Adaptive sharpening, Color-blind mode
     {"LUT", "LUT", "LUT", "LUT"},
     {"A ready-made color look from a LUT file, like Lightroom or ReShade LUT packs", "Um visual de cor pronto, vindo de um arquivo LUT, como os pacotes do Lightroom ou do ReShade", "Un aspecto de color listo, desde un archivo LUT, como los paquetes de Lightroom o ReShade", "Un rendu de couleur tout prêt, depuis un fichier LUT, comme les packs Lightroom ou ReShade"},
-    {"Put LUT files in the LUTs folder: PNG strips such as 1024x32 or 4096x64", "Coloque arquivos LUT na pasta LUTs: faixas PNG como 1024x32 ou 4096x64", "Pon archivos LUT en la carpeta LUTs: tiras PNG como 1024x32 o 4096x64", "Mettez des fichiers LUT dans le dossier LUTs : bandes PNG comme 1024x32 ou 4096x64"},
+    {"Put LUT files in the LUTs folder: 3D .cube files (up to 65) or PNG strips", "Coloque arquivos LUT na pasta LUTs: arquivos .cube 3D (até 65) ou faixas PNG", "Pon archivos LUT en la carpeta LUTs: archivos .cube 3D (hasta 65) o tiras PNG", "Placez les LUT dans le dossier LUTs : fichiers .cube 3D (jusqu’à 65) ou bandes PNG"},
+    {"Could not load this 3D LUT; see ApexRadiance_LOG.txt", "Não foi possível carregar esta LUT 3D; veja ApexRadiance_LOG.txt", "No se pudo cargar esta LUT 3D; consulta ApexRadiance_LOG.txt", "Impossible de charger cette LUT 3D ; consultez ApexRadiance_LOG.txt"},
     {"File", "Arquivo", "Archivo", "Fichier"},
     {"The LUT that gives the look", "A LUT que dá o visual", "La LUT que da el aspecto", "La LUT qui donne le rendu"},
     {"Open the LUTs folder", "Abrir a pasta LUTs", "Abrir la carpeta LUTs", "Ouvrir le dossier LUTs"},

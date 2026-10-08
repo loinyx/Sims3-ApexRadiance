@@ -10,7 +10,7 @@
 #ifdef APEX_F10_STUDY
 #define APEX_VERSION_STRING APEX_VERSION_NUMBER "-f10-study"
 #else
-#define APEX_VERSION_STRING APEX_VERSION_NUMBER
+#define APEX_VERSION_STRING APEX_VERSION_NUMBER "-cube-test"
 #endif
 
 // Visible product name (menu header, credits, feature descriptions, log). Internal identifiers keep "Apex"; files are
