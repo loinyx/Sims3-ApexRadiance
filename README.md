@@ -1,8 +1,8 @@
 <p align="center"><img src="docs/images/logo-256.png" width="140" alt="Apex Radiance logo"></p>
 
-# Apex Radiance for The Sims 3
+<p align="center"># Apex Radiance for The Sims 3
 
-**A brighter world. A night worth looking at.**
+<p align="center">**A brighter world. A night worth looking at.**
 
 Bring your Sims' neighbourhoods to life after dark. Apex Radiance changes how The Sims 3 calculates lamp lighting, helping light reach nearby roads and terrain, walls, upper floors and objects. Streetlights can cast light across lot borders, balcony lights can reach the ground below, and supported water and snow respond to nearby lamps. The in-game menu also brings together lighting controls, colour adjustments, film-inspired filters, softer shadows, camera effects and optional performance tweaks.
 
