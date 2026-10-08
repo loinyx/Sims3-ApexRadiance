@@ -145,18 +145,22 @@ void TakeFromDiskLocked(Registry& r, Job& j) {
 void SaveDisk(Registry& r) {
     const std::wstring path = DiskFile();
     if (path.empty() || !ApexPaths::EnsureApexDirectory()) return;
-    std::vector<std::pair<uint64_t, std::vector<DWORD>>> all;
+    // Done jobs and their bytecode are immutable and live for the process lifetime.
+    // Snapshot pointers instead of duplicating every shader while writing the cache.
+    std::vector<const Job*> all;
     {
         std::lock_guard<std::mutex> lk(r.m);
         for (const auto& j : r.jobs)
-            if (j->state == Job::Done && PlausibleCode(j->code)) all.emplace_back(j->key, j->code);
+            if (j->state == Job::Done && PlausibleCode(j->code)) all.push_back(j.get());
     }
     const std::wstring tmp = path + L".tmp";
     FILE* f = nullptr;
     if (_wfopen_s(&f, tmp.c_str(), L"wb") != 0 || !f) return;
     const uint32_t head[3] = {kDiskMagic, kDiskVersion, static_cast<uint32_t>(all.size())};
     bool ok = std::fwrite(head, sizeof head, 1, f) == 1;
-    for (const auto& [key, code] : all) {
+    for (const Job* j : all) {
+        const uint64_t key = j->key;
+        const auto& code = j->code;
         const uint32_t words = static_cast<uint32_t>(code.size());
         ok = ok && std::fwrite(&key, sizeof key, 1, f) == 1 && std::fwrite(&words, sizeof words, 1, f) == 1 &&
              std::fwrite(code.data(), sizeof(DWORD), words, f) == words;

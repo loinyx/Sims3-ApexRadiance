@@ -1397,10 +1397,10 @@ bool Picture::InitResources(IDirect3DDevice9* dev) {
     };
     bool ok = make(bd.Width, bd.Height, &gpu.frameTex, &gpu.frameSurf) && make(bd.Width, bd.Height, &gpu.sceneTex, &gpu.sceneSurf);
     UINT cw = bd.Width, ch = bd.Height;
-    for (int i = 0; ok && i < Gpu::kChain; i++) {
+    // Keep the same dimensions in shader constants even before an effect needs the copies.
+    for (int i = 0; i < Gpu::kChain; i++) {
         cw = std::max(1u, (cw + 1) / 2);
         ch = std::max(1u, (ch + 1) / 2);
-        ok = make(cw, ch, &gpu.chainTex[i], &gpu.chainSurf[i]);
     }
     if (!ok) {
         ReleaseResources();
@@ -1434,6 +1434,35 @@ bool Picture::InitResources(IDirect3DDevice9* dev) {
     }
     gpu.ready = true;
     LOG_INFO(std::format("[Picture] Resources ready ({}x{}, format {})", bd.Width, bd.Height, static_cast<int>(bd.Format)));
+    return true;
+}
+
+bool Picture::EnsureReducedScene(IDirect3DDevice9* dev) {
+    if (gpu.chainTex[Gpu::kChain - 1]) return true;
+    IDirect3DTexture9* textures[Gpu::kChain] = {};
+    IDirect3DSurface9* surfaces[Gpu::kChain] = {};
+    UINT w = gpu.width, h = gpu.height;
+    HRESULT hr = S_OK;
+    for (int i = 0; i < Gpu::kChain; i++) {
+        w = std::max(1u, (w + 1) / 2);
+        h = std::max(1u, (h + 1) / 2);
+        hr = dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, gpu.format, D3DPOOL_DEFAULT, &textures[i], nullptr);
+        if (SUCCEEDED(hr) && textures[i]) hr = textures[i]->GetSurfaceLevel(0, &surfaces[i]);
+        if (FAILED(hr) || !textures[i] || !surfaces[i]) {
+            for (int j = 0; j < Gpu::kChain; j++) {
+                SafeRelease(surfaces[j]);
+                SafeRelease(textures[j]);
+            }
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_resourceError = std::format("its reduced scene copies could not be created (0x{:08X})", static_cast<unsigned>(hr));
+            return false;
+        }
+    }
+    for (int i = 0; i < Gpu::kChain; i++) {
+        gpu.chainTex[i] = textures[i];
+        gpu.chainSurf[i] = surfaces[i];
+    }
+    // Retain the copies until Reset, avoiding allocation churn when toggling effects.
     return true;
 }
 
@@ -1564,6 +1593,17 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
         bb->Release();
         return;
     }
+    const auto needsCopy = [](bool enabled, float amount) { return enabled && std::fabs(amount) > 0.001f; };
+    const bool needsReducedScene = std::fabs(q.clarity) > 0.001f || needsCopy(q.glow, q.glowAmount) ||
+        needsCopy(q.halation, q.halationAmount) || needsCopy(q.dreamy, q.dreamyAmount) ||
+        needsCopy(q.tiltShift, q.tiltAmount) || needsCopy(q.fakeHdr, q.hdrAmount) ||
+        (needsCopy(q.autoExposure, q.autoAmount) && gpu.adaptTex[0] && gpu.adaptTex[1]);
+    if (needsReducedScene && !EnsureReducedScene(dev)) {
+        m_skip.store(kSkipResources);
+        bb->Release();
+        return;
+    }
+
     if (g_atBoundary) g_boundaryDone = true;
     m_skip.store(kSkipNone);
     m_lastApplied.store(now);

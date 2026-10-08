@@ -184,6 +184,7 @@ class Picture {
     Picture() = default;
     void ReleaseResources();
     bool InitResources(IDirect3DDevice9* dev);
+    bool EnsureReducedScene(IDirect3DDevice9* dev);
 
     mutable std::mutex m_mutex;
     PictureParams m_p;

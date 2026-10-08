@@ -230,3 +230,7 @@ differences reported in gameplay remain unresolved, and no lighting solver is ch
 ## Hidden UI colour-write states
 
 The initial snapshot/ALWAYS candidate was superseded after live GPU traces did not confirm its boundary. A learned point-filtered first-tile copy is used instead. Six later bounded events recorded complete masks 7 and 15 with depth enabled, no depth writes and LESSEQUAL. Rejecting 15 delayed the effect chain until EndScene. Both complete masks are now accepted; unsupported layouts, partial masks and unlearned targets retain the conservative fallback. Effect formulas are unchanged. Final-image equivalence across all backends remains unverified.
+
+## Optional reduced-scene allocation candidate
+
+The performance test branch creates the existing half-, quarter- and eighth-size scene copies only on the first frame that needs Clarity, Glow, Halation, Dreamy, Tilt-shift, Fake HDR or Auto exposure. It preserves dimensions, format, shader source and sampling, retaining the copies until Reset. Allocation failure stops the pass and reports a resource failure rather than using missing inputs. Tests cover odd dimensions, partial failures, cleanup, retries and reuse. Gameplay parity and first-use allocation latency remain unverified.
