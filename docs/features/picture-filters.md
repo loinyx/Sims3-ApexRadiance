@@ -42,7 +42,7 @@ If a session starts with UI hidden and the target has not been learned, the old 
    depth-off drawing (after at least 4 scene draws) it copies the back buffer; the last copy of the frame wins, except
    that after a first copy a run of fewer than 4 depth-tested draws is treated as UI.
    When the switch is the game's bloom composite (a 2-primitive triangle strip right after the scene), the copy is taken
-   after the bloom. While Atmospheric fog or Emphasize is on, the scene depth is copied at the same moment.
+   after the bloom. While Emphasize is on, the scene depth is copied at the same moment.
 2. **End of frame.** If the frame ended on the scene (no game UI after it), the copy is taken just before the Apex
    overlay.
 3. **The pass** normally runs at the post-scene boundary, before UI, only while a world is loaded. The masked
@@ -180,7 +180,7 @@ early test builds; a saved value outside 0 to 2 is reset to the default when loa
   neighbour range.
 - 8-bit output: Brightness and Highlights pushed above white clip at the encode.
 - With Picture on and every slider neutral, the image still changes slightly (the fixed dither).
-- Atmospheric fog and Emphasize need the shared scene depth (off while the game's Edge Smoothing is on).
+- Emphasize needs the shared scene depth (off while the game's Edge Smoothing is on).
 - LUT: only PNG strips with height 8 to 128 and width equal to the height squared are read.
 
 ## Technical reference
@@ -216,7 +216,7 @@ back buffer, outside a loaded world (`WorldSession::InWorld`), or (Picture off, 
 1. Read previous timestamps; begin a new set (4 rotating sets, `ms = 0.9 ms + 0.1 v`).
 2. `StretchRect(backbuffer -> frameSurf, D3DTEXF_NONE)`.
 3. Work out the effective filters (switch on and amount above 0.001); load the LUT when its file changed.
-4. If clarity, Glow, Halation, Dreamy, Tilt-shift, Fake HDR, Atmospheric fog or Auto exposure is on: build the 1/2, 1/4,
+4. If clarity, Glow, Halation, Dreamy, Tilt-shift, Fake HDR or Auto exposure is on: build the 1/2, 1/4,
    1/8 chain with linear `StretchRect`s from `sceneSurf` (or `frameSurf` without a copy).
 5. Save 12 render states, 8 samplers x 6 sampler states and textures, PS, VS, declaration / FVF, stream 0, PS constants
    c0..c56 and the viewport. Neutral state (Z, blend, alpha test, stencil, scissor, fog, sRGB write, clip planes off; cull
@@ -271,7 +271,7 @@ Emphasize), s4 1/2 scene and s5 1/4 scene (bilinear), s6 LUT strip (bilinear), s
     while it is on; `g = max(lerp(L, g, sat), 0)`. `MixerSaturation`: hue 0..6 on gamma-2.2 values, six triangular bands
     of width 1 whose weights sum to 1; greys (sat < 1e-5) get 1. The mixer is on when any value differs from 1 by more
     than 0.001.
-14. **Atmospheric fog**, then the **colour looks** (`ColorLooks`, in this order: Technicolor 1, Technicolor 2, DPX
+14. **Colour looks** (`ColorLooks`, in this order: Technicolor 1, Technicolor 2, DPX
     Cineon, Colorfulness, Night Mode, Vintage, Cross-process, Black and white, Filmic pass, Tint, Levels, LUT,
     Color-blind mode), then **Emphasize**, then the **light filters** (`LightFilters`: Glow, Halation, Dreamy).
 15. **Vignette:** `q = (uv - 0.5) x (W/H, 1)`, `r = |q| / |(W/H, 1) x 0.5|`, `v = smoothstep(size, 1, r)`,
@@ -304,8 +304,8 @@ Emphasize), s4 1/2 scene and s5 1/4 scene (bilinear), s6 LUT strip (bilinear), s
 The filters use c13..c54 and `AdaptPS` c56. The on flags are c13 `cFlagA` (Technicolor 1, Technicolor 2, DPX,
 Colorfulness), c14 `cFlagB` (Night Mode, Vintage, Cross-process, Black and white), c15 `cFlagC` (Glow, Halation,
 Dreamy), c16 `cFlagD` (Emphasize, Tilt-shift, Prism, Film grain), c17 `cFlagE` (3DFX, CRT, Levels, Filmic pass), c44
-`cFlagF` (Tint, Fake HDR), c46 `cFlagG` (Auto exposure, Adaptive sharpening, Color-blind mode, Atmospheric fog) and
-c47.z (LUT). The per-filter amounts, colours and camera values (near plane and depth scale for fog and Emphasize) fill
+`cFlagF` (Tint, Fake HDR), c46 `cFlagG` (Auto exposure, Adaptive sharpening, Color-blind mode) and
+c47.z (LUT). The per-filter amounts, colours and camera values (near plane and depth scale for Emphasize) fill
 the other registers; their layout is commented in the shader source in `picture.cpp`.
 
 **Diagnostics.** When Picture is on but not applied for 2 s, the card and the log give the reason (`Picture::Problem`):

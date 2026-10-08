@@ -1939,7 +1939,7 @@ const I18n::Pair kPairs[] = {
     {"Lighting colors, brightness, shadows and reach are unchanged", "光の色、明るさ、影、届く範囲は変わりません"},
     {"Color groups have their own switches and keep your adjustments", "色の各グループに個別のスイッチがあり、調整値は保持されます"},
     {"Right-click a filter to assign an optional keyboard shortcut", "フィルターを右クリックすると任意のキーボードショートカットを設定できます"},
-    {"Hidden-interface effects recognize both recorded color-write states", "UI非表示時のエフェクトが記録された両方のカラー書き込み状態を認識します"},
+    {"Corrected screen-effect timing when hiding the game interface", "ゲームUI非表示時の画面エフェクトの適用タイミングを修正"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Japanese, kPairs, std::size(kPairs));

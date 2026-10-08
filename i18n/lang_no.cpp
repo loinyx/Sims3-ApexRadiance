@@ -1939,7 +1939,7 @@ const I18n::Pair kPairs[] = {
     {"Lighting colors, brightness, shadows and reach are unchanged", "Lysets farger, styrke, skygger og rekkevidde er uendret"},
     {"Color groups have their own switches and keep your adjustments", "Fargegrupper har egne brytere og beholder justeringene dine"},
     {"Right-click a filter to assign an optional keyboard shortcut", "Høyreklikk på et filter for å tilordne en valgfri hurtigtast"},
-    {"Hidden-interface effects recognize both recorded color-write states", "Effekter med skjult grensesnitt gjenkjenner begge registrerte fargeskrivetilstander"},
+    {"Corrected screen-effect timing when hiding the game interface", "Tidspunktet for skjermeffekter når spillgrensesnittet skjules er korrigert"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Norwegian, kPairs, std::size(kPairs));

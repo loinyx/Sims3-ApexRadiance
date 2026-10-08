@@ -1939,7 +1939,7 @@ const I18n::Pair kPairs[] = {
     {"Lighting colors, brightness, shadows and reach are unchanged", "Farben, Helligkeit, Schatten und Reichweite der Beleuchtung bleiben unverändert"},
     {"Color groups have their own switches and keep your adjustments", "Farbgruppen haben eigene Schalter und behalten Ihre Einstellungen"},
     {"Right-click a filter to assign an optional keyboard shortcut", "Rechtsklicken Sie auf einen Filter, um eine optionale Tastenkombination zuzuweisen"},
-    {"Hidden-interface effects recognize both recorded color-write states", "Effekte bei ausgeblendeter Oberfläche erkennen beide aufgezeichneten Farbschreibzustände"},
+    {"Corrected screen-effect timing when hiding the game interface", "Zeitpunkt der Bildeffekte beim Ausblenden der Spieloberfläche korrigiert"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::German, kPairs, std::size(kPairs));

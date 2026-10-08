@@ -12,7 +12,7 @@ constexpr const char* k2110Added[] = {
     nullptr};
 constexpr const char* k2110Improved[] = {nullptr};
 constexpr const char* k2110Fixed[] = {
-    "Hidden-interface effects recognize both recorded color-write states",
+    "Corrected screen-effect timing when hiding the game interface",
     nullptr};
 
 constexpr const char* k2101Added[] = {nullptr};

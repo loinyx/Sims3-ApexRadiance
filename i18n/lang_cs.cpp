@@ -1939,7 +1939,7 @@ const I18n::Pair kPairs[] = {
     {"Lighting colors, brightness, shadows and reach are unchanged", "Barvy, jas, stíny a dosah osvětlení zůstávají stejné"},
     {"Color groups have their own switches and keep your adjustments", "Skupiny barev mají vlastní přepínače a zachovávají vaše nastavení"},
     {"Right-click a filter to assign an optional keyboard shortcut", "Klikněte pravým tlačítkem na filtr a přiřaďte volitelnou klávesovou zkratku"},
-    {"Hidden-interface effects recognize both recorded color-write states", "Efekty se skrytým rozhraním rozpoznávají oba zaznamenané stavy zápisu barev"},
+    {"Corrected screen-effect timing when hiding the game interface", "Opraveno načasování obrazových efektů při skrytí herního rozhraní"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Czech, kPairs, std::size(kPairs));

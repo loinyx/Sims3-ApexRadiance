@@ -1939,7 +1939,7 @@ const I18n::Pair kPairs[] = {
     {"Lighting colors, brightness, shadows and reach are unchanged", "A fények színe, erőssége, árnyéka és hatótávolsága változatlan"},
     {"Color groups have their own switches and keep your adjustments", "A színcsoportok saját kapcsolókkal rendelkeznek és megőrzik a beállításokat"},
     {"Right-click a filter to assign an optional keyboard shortcut", "Kattints jobb gombbal egy szűrőre egy választható billentyűparancs megadásához"},
-    {"Hidden-interface effects recognize both recorded color-write states", "A rejtett felület effektjei felismerik mindkét rögzített színírási állapotot"},
+    {"Corrected screen-effect timing when hiding the game interface", "Javítva a képernyőeffektek időzítése a játékfelület elrejtésekor"},
     {nullptr, nullptr},
 };
 const I18n::LangTable kTable(I18n::Lang::Hungarian, kPairs, std::size(kPairs));

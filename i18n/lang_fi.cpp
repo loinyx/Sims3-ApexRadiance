@@ -1939,7 +1939,7 @@ const I18n::Pair kPairs[] = {
     {"Lighting colors, brightness, shadows and reach are unchanged", "Valaistuksen värit, kirkkaus, varjot ja kantama pysyvät ennallaan"},
     {"Color groups have their own switches and keep your adjustments", "Väriryhmillä on omat kytkimet ja säädöt säilyvät"},
     {"Right-click a filter to assign an optional keyboard shortcut", "Napsauta suodatinta hiiren oikealla painikkeella ja määritä valinnainen pikanäppäin"},
-    {"Hidden-interface effects recognize both recorded color-write states", "Piilotetun käyttöliittymän tehosteet tunnistavat molemmat tallennetut värinkirjoitustilat"},
+    {"Corrected screen-effect timing when hiding the game interface", "Korjattu ruututehosteiden ajoitus pelin käyttöliittymää piilotettaessa"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Finnish, kPairs, std::size(kPairs));

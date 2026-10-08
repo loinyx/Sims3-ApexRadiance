@@ -1939,7 +1939,7 @@ const I18n::Pair kPairs[] = {
     {"Lighting colors, brightness, shadows and reach are unchanged", "สี ความสว่าง เงา และระยะของแสงยังเหมือนเดิม"},
     {"Color groups have their own switches and keep your adjustments", "กลุ่มสีมีสวิตช์แยกและเก็บค่าที่ปรับไว้"},
     {"Right-click a filter to assign an optional keyboard shortcut", "คลิกขวาที่ฟิลเตอร์เพื่อกำหนดปุ่มลัดแป้นพิมพ์ได้ตามต้องการ"},
-    {"Hidden-interface effects recognize both recorded color-write states", "เอฟเฟกต์เมื่อซ่อนอินเทอร์เฟซรองรับสถานะการเขียนสีที่บันทึกไว้ทั้งสองแบบ"},
+    {"Corrected screen-effect timing when hiding the game interface", "แก้ไขจังหวะการใช้เอฟเฟกต์เมื่อซ่อนอินเทอร์เฟซเกม"},
     {nullptr, nullptr},
 };
 const I18n::LangTable kTable(I18n::Lang::Thai, kPairs, std::size(kPairs));

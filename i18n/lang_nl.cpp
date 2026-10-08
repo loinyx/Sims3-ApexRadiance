@@ -1939,7 +1939,7 @@ const I18n::Pair kPairs[] = {
     {"Lighting colors, brightness, shadows and reach are unchanged", "Kleuren, helderheid, schaduwen en bereik van de verlichting blijven gelijk"},
     {"Color groups have their own switches and keep your adjustments", "Kleurgroepen hebben eigen schakelaars en bewaren je aanpassingen"},
     {"Right-click a filter to assign an optional keyboard shortcut", "Klik met rechts op een filter om een optionele sneltoets toe te wijzen"},
-    {"Hidden-interface effects recognize both recorded color-write states", "Effecten met verborgen interface herkennen beide vastgelegde kleurschrijfstatussen"},
+    {"Corrected screen-effect timing when hiding the game interface", "Timing van beeldeffecten bij het verbergen van de spelinterface gecorrigeerd"},
     {nullptr, nullptr},
 };
 const I18n::LangTable kTable(I18n::Lang::Dutch, kPairs, std::size(kPairs));

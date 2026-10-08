@@ -46,7 +46,7 @@ in game and writes to the log.
 10. Game's Edge Smoothing on. **Expected:** after 2 s the menus-tinted note; menus are graded too.
 11. Filters tab: turn on each filter in turn at its default. **Expected:** the look described on its card; the pie menu,
     tooltips and the Apex menu keep their colours; no box around the pie menu and no grey square at its Sim portrait.
-12. Atmospheric fog and Emphasize with the game's Edge Smoothing on. **Expected:** the card note "Needs the scene
+12. Emphasize with the game's Edge Smoothing on. **Expected:** the card note "Needs the scene
     depth" and no effect.
 13. LUT: open the LUTs folder from the card, copy a 1024x32 PNG strip, pick it. **Expected:** the card shows its size
     and the look applies; a strip of another shape shows why it was refused.
@@ -65,8 +65,7 @@ in game and writes to the log.
   the scratch identity, the deliberately conservative EndScene fallback remains. No universal pixel-equivalence
   or performance improvement is established by these records.
 
-- Filters tab (2.7.0): each filter in game, the GPU cost of several stacked filters, and Auto exposure, Atmospheric fog
-  and Emphasize on Steam and under DXVK.
+- Filters tab (2.7.0): each filter in game, the GPU cost of several stacked filters, and Auto exposure and Emphasize on Steam and under DXVK.
 - An SDR diagnostic (dump the frame, the scene copy and the share of pixels treated as UI).
 - The game's native screenshot (with the Apex shortcut disabled): whether it contains the grade.
 - GPU cost at 1080p, 1440p and 4K.

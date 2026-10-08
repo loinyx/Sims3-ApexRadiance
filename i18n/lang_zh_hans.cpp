@@ -1939,7 +1939,7 @@ const I18n::Pair kPairs[] = {
     {"Lighting colors, brightness, shadows and reach are unchanged", "照明的颜色、亮度、阴影和范围保持不变"},
     {"Color groups have their own switches and keep your adjustments", "颜色分组拥有独立开关并保留调整值"},
     {"Right-click a filter to assign an optional keyboard shortcut", "右键点击滤镜可设置可选的键盘快捷键"},
-    {"Hidden-interface effects recognize both recorded color-write states", "隐藏界面时的效果可识别两种已记录的颜色写入状态"},
+    {"Corrected screen-effect timing when hiding the game interface", "修正隐藏游戏界面时屏幕效果的应用时机"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::ChineseSimplified, kPairs, std::size(kPairs));

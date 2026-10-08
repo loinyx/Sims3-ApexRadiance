@@ -1939,7 +1939,7 @@ const I18n::Pair kPairs[] = {
     {"Lighting colors, brightness, shadows and reach are unchanged", "조명의 색, 밝기, 그림자와 도달 범위는 그대로예요"},
     {"Color groups have their own switches and keep your adjustments", "색상 그룹에 개별 스위치가 추가되며 조정값은 유지됩니다"},
     {"Right-click a filter to assign an optional keyboard shortcut", "필터를 오른쪽 클릭하여 선택적으로 키보드 단축키를 지정하세요"},
-    {"Hidden-interface effects recognize both recorded color-write states", "인터페이스를 숨겼을 때 효과가 기록된 두 가지 색상 쓰기 상태를 인식합니다"},
+    {"Corrected screen-effect timing when hiding the game interface", "게임 인터페이스를 숨길 때 화면 효과 적용 타이밍 수정"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Korean, kPairs, std::size(kPairs));

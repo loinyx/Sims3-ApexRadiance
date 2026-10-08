@@ -1939,7 +1939,7 @@ const I18n::Pair kPairs[] = {
     {"Lighting colors, brightness, shadows and reach are unchanged", "Τα χρώματα, η φωτεινότητα, οι σκιές και η εμβέλεια του φωτός παραμένουν ίδια"},
     {"Color groups have their own switches and keep your adjustments", "Οι ομάδες χρώματος έχουν δικούς τους διακόπτες και διατηρούν τις ρυθμίσεις σας"},
     {"Right-click a filter to assign an optional keyboard shortcut", "Κάντε δεξί κλικ σε φίλτρο για να ορίσετε προαιρετική συντόμευση πληκτρολογίου"},
-    {"Hidden-interface effects recognize both recorded color-write states", "Τα εφέ με κρυφή διεπαφή αναγνωρίζουν και τις δύο καταγεγραμμένες καταστάσεις εγγραφής χρώματος"},
+    {"Corrected screen-effect timing when hiding the game interface", "Διορθώθηκε ο χρονισμός των εφέ κατά την απόκρυψη της διεπαφής του παιχνιδιού"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Greek, kPairs, std::size(kPairs));

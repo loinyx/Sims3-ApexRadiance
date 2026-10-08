@@ -1939,7 +1939,7 @@ const I18n::Pair kPairs[] = {
     {"Lighting colors, brightness, shadows and reach are unchanged", "Ljusets färger, styrka, skuggor och räckvidd är oförändrade"},
     {"Color groups have their own switches and keep your adjustments", "Färggrupper har egna reglage och behåller dina inställningar"},
     {"Right-click a filter to assign an optional keyboard shortcut", "Högerklicka på ett filter för att tilldela en valfri tangentkombination"},
-    {"Hidden-interface effects recognize both recorded color-write states", "Effekter med dolt gränssnitt känner igen båda registrerade färgskrivningslägena"},
+    {"Corrected screen-effect timing when hiding the game interface", "Tidpunkten för bildeffekter när spelgränssnittet döljs har korrigerats"},
     {nullptr, nullptr},
 };
 const I18n::LangTable kTable(I18n::Lang::Swedish, kPairs, std::size(kPairs));
