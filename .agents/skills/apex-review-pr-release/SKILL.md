@@ -52,3 +52,5 @@ Every release also updates the changelog the player opens by clicking the versio
 - Bump `apex_version.h` so that `APEX_VERSION_NUMBER` matches the newest entry. Then check that the footer shows the new version and that the dot appears once.
 
 Only merge/publish when separately authorized. After publication, verify version and artifact identity against the reviewed build and the project's existing release checks. Do not claim that publication validates gameplay. Report the review result plainly: validated, material limitations remaining, or blocked by a specific unresolved requirement. Ask for missing evidence only when needed to resolve that requirement, after completing independent work.
+
+Verify every new in-game changelog line across all 21 supported menu languages, including the language pair tables. Confirm the newest version/date and unread-version indicator against the exact release build before publication. This is a release-blocking checklist item; release notes on GitHub alone do not satisfy it.

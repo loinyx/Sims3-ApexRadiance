@@ -6,6 +6,13 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k2111Added[] = {nullptr};
+constexpr const char* k2111Improved[] = {
+    "Removed Temporal smoothing and Thin object detail from Ambient Occlusion",
+    "Ambient Occlusion and Sim Occlusion remain available",
+    nullptr};
+constexpr const char* k2111Fixed[] = {nullptr};
+
 constexpr const char* k2110Added[] = {
     "Color groups have their own switches and keep your adjustments",
     "Right-click a filter to assign an optional keyboard shortcut",
@@ -163,6 +170,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"2.11.1", "2026-10-08", k2111Added, k2111Improved, k2111Fixed},
     {"2.11.0", "2026-10-07", k2110Added, k2110Improved, k2110Fixed},
     {"2.10.1", "2026-10-07", k2101Added, k2101Improved, k2101Fixed},
     {"2.10.0", "2026-10-07", k2100Added, k2100Improved, k2100Fixed},

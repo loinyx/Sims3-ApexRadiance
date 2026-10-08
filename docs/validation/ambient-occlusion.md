@@ -18,6 +18,7 @@ Sim Occlusion has its own page: [validation/sim-occlusion.md](sim-occlusion.md).
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-08 | 28eb532 | Retained full-resolution AO shader equivalence and native device creation | 41 checks passed; stripped instructions identical to the previous modes with temporal and thin-object detail disabled | Native D3D9 |
 | 2026-10-04 | PR #2 | Post-scene chain | 12 passed | None |
 | 2026-09-30 | 2.1.0 | GPU shader against the CPU reference (`gpucheck.cpp`, four saved frames) | Raw AO within 0.08 to 0.11 of 255 levels, composite within 0.06 to 0.09; repeat run bit-identical | Native D3D9 |
 
@@ -49,3 +50,7 @@ bytecode identical to the pre-reconstruction full-resolution baseline and create
 Existing full-resolution uniforms retain pixel size 1 and base pyramid level 0. Runtime/preset reduction keys,
 upsample shader registration and extra full-size upsample resources are removed. Old files must retain unrelated values
 and cannot reactivate the removed path. Gameplay and native/DXVK timing remain required; no residual F10 fix is claimed.
+
+### AO option removal validation
+
+The public Win32 Release build at 28eb532 compiled without warnings. Translation checks cover all 21 menu languages (1932 keys); the newest in-game changelog entry and version are 2.11.1. The existing unread indicator compares against that newest entry and marks it read when opened. No gameplay or Proton/DXVK parity is established by these checks. Removing previously enabled temporal blending or thin-object detail intentionally changes that AO result.

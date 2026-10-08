@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Simplified, mainland China)}
 const I18n::Pair kPairs[] = {
+    {"Removed Temporal smoothing and Thin object detail from Ambient Occlusion","从环境光遮蔽中移除了时间平滑和细小物体细节"},
+    {"Ambient Occlusion and Sim Occlusion remain available","环境光遮蔽和模拟市民遮蔽仍然可用"},
     {"Brightness, contrast, saturation, temperature and sharpness", "亮度、对比度、饱和度、色温和锐度"},
     {"Midtones, shadows, highlights and blacks", "中间调、阴影、高光和黑色"},
     {"Tint, vibrance, film tones and color mixer", "色调、自然饱和度、电影色调和色彩混合"},

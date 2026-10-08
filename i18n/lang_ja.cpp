@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Japanese}
 const I18n::Pair kPairs[] = {
+    {"Removed Temporal smoothing and Thin object detail from Ambient Occlusion","アンビエントオクルージョンから時間的平滑化と細いオブジェクトの詳細を削除"},
+    {"Ambient Occlusion and Sim Occlusion remain available","アンビエントオクルージョンとシムのオクルージョンは引き続き利用できます"},
     {"Brightness, contrast, saturation, temperature and sharpness", "明るさ、コントラスト、彩度、色温度、シャープネス"},
     {"Midtones, shadows, highlights and blacks", "中間調、シャドウ、ハイライト、黒レベル"},
     {"Tint, vibrance, film tones and color mixer", "色かぶり、自然な彩度、フィルム調、カラーミキサー"},

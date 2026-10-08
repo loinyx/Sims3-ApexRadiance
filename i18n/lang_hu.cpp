@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Hungarian}
 const I18n::Pair kPairs[] = {
+    {"Removed Temporal smoothing and Thin object detail from Ambient Occlusion","Az időbeli simítás és a vékony tárgyak részletei eltávolítva a környezeti árnyékolásból"},
+    {"Ambient Occlusion and Sim Occlusion remain available","A környezeti és a Sim-árnyékolás továbbra is elérhető"},
     {"Brightness, contrast, saturation, temperature and sharpness", "Fényerő, kontraszt, telítettség, hőmérséklet és élesség"},
     {"Midtones, shadows, highlights and blacks", "Középtónusok, árnyékok, csúcsfények és feketék"},
     {"Tint, vibrance, film tones and color mixer", "Árnyalat, élénkség, filmes tónusok és színkeverő"},

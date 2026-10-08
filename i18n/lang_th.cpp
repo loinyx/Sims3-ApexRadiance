@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Thai}
 const I18n::Pair kPairs[] = {
+    {"Removed Temporal smoothing and Thin object detail from Ambient Occlusion","นำการปรับให้เรียบตามเวลาและรายละเอียดวัตถุบางออกจากเงาสัมผัส"},
+    {"Ambient Occlusion and Sim Occlusion remain available","เงาสัมผัสของสภาพแวดล้อมและซิมยังคงใช้งานได้"},
     {"Brightness, contrast, saturation, temperature and sharpness", "ความสว่าง คอนทราสต์ ความอิ่มสี อุณหภูมิสี และความคมชัด"},
     {"Midtones, shadows, highlights and blacks", "โทนกลาง เงา ไฮไลต์ และสีดำ"},
     {"Tint, vibrance, film tones and color mixer", "สีอ่อน ความสดใส โทนฟิล์ม และการผสมสี"},

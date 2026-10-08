@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Greek}
 const I18n::Pair kPairs[] = {
+    {"Removed Temporal smoothing and Thin object detail from Ambient Occlusion","Αφαιρέθηκαν η χρονική εξομάλυνση και η λεπτομέρεια λεπτών αντικειμένων από την απόκρυψη περιβάλλοντος"},
+    {"Ambient Occlusion and Sim Occlusion remain available","Η απόκρυψη περιβάλλοντος και των Sims παραμένουν διαθέσιμες"},
     {"Brightness, contrast, saturation, temperature and sharpness", "Φωτεινότητα, αντίθεση, κορεσμός, θερμοκρασία και ευκρίνεια"},
     {"Midtones, shadows, highlights and blacks", "Μεσαίοι τόνοι, σκιές, φωτεινά σημεία και μαύρα"},
     {"Tint, vibrance, film tones and color mixer", "Απόχρωση, ζωντάνια, κινηματογραφικοί τόνοι και μίξη χρωμάτων"},

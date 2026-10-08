@@ -5,6 +5,8 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [2.11.1](2.11.1.md): simplified Ambient Occlusion.
+
 ## Format
 
 Every release page uses these sections, in this order. Omit a section that would be empty; never add other top-level
@@ -28,6 +30,7 @@ tests, publication) is in [workflow.md](../workflow.md#6-release).
 
 | Version | Published | Headline |
 |---|---|---|
+| [2.11.1](2.11.1.md) | 2026-10-08 | Ambient Occlusion cleanup |
 | [2.11.0](2.11.0.md) | 2026-10-07 | Color groups, optional filter shortcuts and hidden-interface effect timing |
 | [2.10.1](2.10.1.md) | 2026-10-07 | Faster exterior lighting updates in Build/Buy |
 | [2.10.0](2.10.0.md) | 2026-10-07 | Upper-floor and balcony lighting, doors and windows on foundations, smaller captures |
