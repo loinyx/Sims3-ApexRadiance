@@ -2285,7 +2285,7 @@ void Picture::RenderFiltersUI() {
         }
         if(shortened) tag+="…";
         const float chipW=tag.empty() ? 0.0f : ApexUi::ChipSize(tag.c_str()).x+gap;
-        // Keep the switch and its tag as one right-aligned cluster, including narrow layouts.
+        // Right-aligned cluster: shortcut tag, disclosure, actions, switch; retained in narrow layouts.
         const float controlsW=(24.0f+24.0f)*u+switchSize.x+gap*2+chipW;
         const ImVec2 rowStart=ImGui::GetCursorScreenPos();
         const bool visible=ApexUi::BeginControlRow(name,what,controlsW,icon,30.0f*u);
@@ -2293,6 +2293,11 @@ void Picture::RenderFiltersUI() {
             bool expanded=ImGui::GetStateStorage()->GetBool(ImGui::GetID("Expanded"),false);
             const float centerY=ImGui::GetCursorScreenPos().y+15.0f*u;
             auto center=[&](float h){ImGui::SetCursorPosY(centerY-ImGui::GetWindowPos().y+ImGui::GetScrollY()-h*0.5f);};
+            if(!key.empty()) {
+                center(ApexUi::ChipSize(tag.c_str()).y); ApexUi::Chip(tag.c_str());
+                if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",key.c_str());
+                ImGui::SameLine(0,gap);
+            }
             center(24*u);
             if(ApexUi::IconButton("##Adjust",expanded?IconId::ChevronUp:IconId::ChevronDown,"Adjust this filter",expanded)) {
                 expanded=!expanded; ImGui::GetStateStorage()->SetBool(ImGui::GetID("Expanded"),expanded);
@@ -2300,11 +2305,6 @@ void Picture::RenderFiltersUI() {
             ImGui::SameLine(0,gap); center(24*u);
             if(ApexUi::IconButton("##Shortcuts",IconId::Ellipsis,"Filter shortcuts")) ImGui::OpenPopup("Filter actions");
             ImGui::SameLine(0,gap);
-            if(!key.empty()) {
-                center(ApexUi::ChipSize(tag.c_str()).y); ApexUi::Chip(tag.c_str());
-                if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",key.c_str());
-                ImGui::SameLine(0,gap);
-            }
             center(switchSize.y);
             ImGui::BeginDisabled(!q.enabled || !q.filtersEnabled);
             if(ApexUi::ToggleSwitch("##On",on)) {changed=save=true;ApexUi::ReportChange(name);}
