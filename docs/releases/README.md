@@ -30,11 +30,13 @@ tests, publication) is in [workflow.md](../workflow.md#6-release).
 |---|---|---|
 | [2.11.0](2.11.0.md) | 2026-10-07 | Color groups, optional filter shortcuts and hidden-interface effect timing |
 | [2.10.1](2.10.1.md) | 2026-10-07 | Faster exterior lighting updates in Build/Buy |
+| [2.10.0](2.10.0.md) | 2026-10-07 | Upper-floor and balcony lighting, doors and windows on foundations, smaller captures |
+| [2.9.1](2.9.1.md) | 2026-10-07 | Sold lamps no longer leave stray wall light; softer walls and smoother edits |
+| [2.9.0](2.9.0.md) | 2026-10-07 | 21 languages, steadier game, better lamp light |
 | [2.8.2](2.8.2.md) | 2026-10-07 | What's new lists the last 8 versions with a scroll bar |
 | [2.8.1](2.8.1.md) | 2026-10-07 | Doors keep their side's light; snow under rugs; Banding Fix defaults in every profile |
 | [2.8.0](2.8.0.md) | 2026-10-07 | Light through doors and windows; lamp colours stay near lamps; sharp indoor light with High; wall lamps at the right height |
-| [2.7.1](2.7.1.md) | 2026-10-06 | 2.7.0 without the false antivirus alert |
-| [2.7.0](2.7.0.md) | 2026-10-06 | Filters, lamp switches in one frame and lot streaming |
+| [2.7.1](2.7.1.md) | 2026-10-06 | Filters, lighting and performance updates from 2.7.0, with the antivirus false positive fixed |
 | [2.6.0](2.6.0.md) | 2026-10-05 | Sim Occlusion, a welcome screen and a cleaner menu |
 | [2.5.6](2.5.6.md) | 2026-10-03 | Responsive World Lights and Rendering Optimizations |
 | [2.5.5](2.5.5.md) | 2026-10-03 | Clearer lighting controls and simpler captures |
@@ -64,6 +66,7 @@ tests, publication) is in [workflow.md](../workflow.md#6-release).
 | [1.1.0](1.1.0.md) | 2026-09-28 | Depth Blur, rebuilt |
 | [1.0.0](1.0.0.md) | 2026-09-28 | First standalone release of Apex Radiance |
 
+The changes first prepared as version 2.7.0 were included in 2.7.1; 2.7.0 was not published as a separate GitHub release.
 Versions 1.4.5 and 1.4.7 were installed for local testing only and never published.
 
 ## Before Apex Radiance

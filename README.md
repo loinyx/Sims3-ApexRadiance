@@ -68,47 +68,63 @@ Choose **Subtle**, **Soft** or **Natural**, then fine-tune brightness for the gr
 
 [Read how the lighting works →](docs/features/night-lighting/README.md)
 
-## Water and reflections
+## Water, reflections and snow
 
-Bring the shoreline into the picture. Trees and buildings reflect in supported ponds, lakes and world water, while nearby lamps add glow after dark. Adjust the look from **Water & Snow**.
+Night lighting continues onto water and winter surfaces. Lamps add glow to ponds and lakes, while supported shores reflect nearby trees and buildings. Reflections are also restored on world water in Twinbrook, Bridgeport and Moonlight Falls. Walked-on sidewalks show through snow. **Water & Snow** keeps these controls together.
 
-## Shape the image
+## Colour and image effects
 
-Lighting is the centre of Apex Radiance; the image tools let you build a look around it.
+The image tools let you tune the finished scene to match the atmosphere you want. Each area has its own controls and can be switched separately.
 
-| Tool | What you can adjust |
-|---|---|
-| **Color** | Brightness, contrast, saturation, temperature, tones, a six-colour mixer, clarity, sharpness and vignette |
-| **25 stackable filters** | Film looks, colour moods, glow, camera effects, retro screens, LUTs and colour-blind adjustments; each has its own switch and strength |
-| **Ambient Occlusion** | Contact shade around objects and buildings, with five quality levels, temporal smoothing and thin-object detail |
-| **Sim Occlusion** | Separate AO strengths for Sims and hair, with a maximum-darkening limit and compatible transparent-hair support |
-| **Depth Blur** | Background blur with focus controls; fades out in map view |
-| **Edge Smoothing** | SMAA or FXAA for cleaner edges, with optional sharpening |
-| **Banding Fix** | Fine grain and optional gradient smoothing to reduce visible colour steps |
+### Color
 
-**Color has its own Overview.** Basic, Tones, Color, Detail and Filters can be switched independently. The main Image switch disables all colour groups while preserving your adjustments. Compare your look with the game's image using the comparison controls.
+Start from **Overview** to see the image groups at a glance. The main Image switch turns off all colour adjustments together; each group's switch can also be used on its own, without erasing its saved values.
 
-**Your filters, your shortcuts.** Right-click a filter to assign an optional on/off key combination. None are assigned by default. A small tag appears to the left of the expand arrow; open the row to adjust the filter. PNG LUT files can be placed in the mod's `LUTs` folder and selected from the LUT filter.
+- **Basic:** brightness, contrast, saturation, temperature and sharpness.
+- **Tones:** control midtones, shadows, highlights and black levels.
+- **Color:** shape the mood with split tones, a six-colour mixer and a vignette.
+- **Detail:** adjust clarity, sharpness and darker corners.
+- **Filters:** layer 25 looks such as Technicolor, DPX Cineon, Vintage, Cross-process, black and white, Night Mode, LUT, Auto exposure, Glow, Halation, Film grain, CRT and colour-blind mode. Each has a separate switch, strength and expandable controls.
 
-Choose the effects that suit your game. Each has its own controls, so you can balance your preferred look with performance.
+Filters are off by default. Right-click any filter to assign an optional keyboard combination to turn it on or off. The shortcut tag sits to the left of its expand arrow. Shortcuts are never assigned automatically. You can also load PNG LUTs from the Apex `LUTs` folder.
 
-For the best compatibility with Apex effects, turn off the game's own **Edge Smoothing** in **Options > Graphics** and use Apex's version instead. The menu helps you identify settings that need attention.
+Use the before/after controls to compare your adjustments with the game's original image.
+
+### Ambient Occlusion and Sims
+
+Ambient Occlusion adds soft contact shade beneath furniture, in corners, around buildings and where surfaces meet. Choose among five quality levels and tune its strength, reach and distance. Temporal smoothing steadies the shade as the view moves, and Thin object detail helps it appear around legs, rails and other narrow objects. AO also works in map view.
+
+**Sim Occlusion** controls how that shade appears on Sims: tune the body and hair separately, limit how dark Sims can become, and enable support for compatible transparent hair. That lets you soften facial and hair shadows while keeping the room's contact shade.
+
+### Depth Blur, Edge Smoothing and Banding Fix
+
+- **Depth Blur** softens distant scenery while keeping the area in focus clear. Adjust focus to get the look you want; the effect fades out in map view.
+- **Edge Smoothing** offers FXAA and SMAA to clean up jagged roof, fence, wall and furniture edges. Optional sharpening restores fine texture detail.
+- **Banding Fix** helps smooth visible steps in gradual light and shadow, with an optional setting for smoother sky gradients.
+
+For the best compatibility with depth-based effects, turn off the game's own **Edge Smoothing** in **Options > Graphics** and use Apex's version. The menu explains when a combination needs attention.
+
+## Performance options
+
+Alongside the visual features, Apex provides **15 individual performance controls** for small pauses that can interrupt play:
+
+- **Camera and lighting:** room lights settle sooner, lot and wall updates spread out while the camera moves, and new objects appear in smaller batches.
+- **Files and objects:** fewer repeated searches for game files, missing files and objects; faster file lists.
+- **Textures and Sims:** faster texture and cache compression, plus faster sorting while Sims are created.
+- **Memory:** quicker memory handling and **Room to save**, which reserves space for saving when memory runs low.
+- **Game and scripts:** fewer window redraws and faster selected script operations.
+
+Each control can be switched individually. Keep the options that help your game and turn off any that do not suit your setup.
+
+Options marked experimental are identified in the menu. **Lot Streaming**, off by default, keeps more lots detailed farther from the camera and offers controls for detail distance and how lots appear as you move.
+
+[Explore the performance options →](docs/features/performance/README.md)
 
 ## Screenshots and the in-game menu
 
-Open the menu with **Ctrl+Shift+F11** after loading a world. Search for a setting, save a profile, choose which parts of a profile to apply, undo a change or restore an individual control to its default. Hold **Alt** over the menu to temporarily hide it. Click the version at the bottom for **What's new**.
+Open the menu with **Ctrl+Shift+F11** after loading a world. Search the settings, apply or save profiles, choose which profile sections to use, undo a change or restore a control to its default. Hold **Alt** over the menu to look at the game behind it. Click the version at the bottom to read **What's new**.
 
-Press **F8** to save a screenshot with Apex effects. You can hide the game's interface for the photo and choose the screenshot destination in Settings. **F10** hides the game interface during play.
-
-## Targeted performance improvements
-
-Move around your neighbourhood, load lots and customise Sims with options designed to reduce small, repeated pauses. Apex's **15 performance controls** target lighting updates, loading, textures, Create a Sim and other everyday game work. You can enable or disable each one from the menu.
-
-These changes preserve the finished scene's detail. Results depend on your world, hardware and other mods; heavier visual effects still have their own performance cost.
-
-**Lot Streaming** lets you keep more lots in full detail farther from the camera. It is experimental and off by default. Experimental memory and script options are also labelled in the menu.
-
-[Explore the performance options →](docs/features/performance/README.md)
+Press **F8** to save a screenshot with Apex effects applied. Choose whether to hide the game's interface in the photo and where to save it. **F10** hides the game interface during play.
 
 ## Installation
 
