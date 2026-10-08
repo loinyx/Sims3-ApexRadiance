@@ -23,6 +23,7 @@ in game and writes to the log.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-07 | 2.11.0 release work | `post_scene_test` | 49 passed | Native D3D9 |
 | 2026-10-04 | PR #2 | `post_scene_test` | 12 passed | Native D3D9 |
 | 2026-09-28 | combined build | Log check | Back buffer `D3DFMT_A8R8G8B8` (21): `[HDR] Resources ready (3840x2160, format 21)` with HDR off | DXVK |
 
@@ -58,6 +59,12 @@ in game and writes to the log.
 
 ## Open checks
 
+- F10/F8 visual parity: confirm the same paused scene with UI visible, hidden and hidden for a photo,
+  including native D3D9, DXVK, loading, resets, interiors and bloom. Recorded hidden frames use complete RGB
+  or RGBA write masks; both now pass the learned first-tile boundary guard. Before a visible frame has taught
+  the scratch identity, the deliberately conservative EndScene fallback remains. No universal pixel-equivalence
+  or performance improvement is established by these records.
+
 - Filters tab (2.7.0): each filter in game, the GPU cost of several stacked filters, and Auto exposure, Atmospheric fog
   and Emphasize on Steam and under DXVK.
 - An SDR diagnostic (dump the frame, the scene copy and the share of pixels treated as UI).
@@ -65,3 +72,22 @@ in game and writes to the log.
 - GPU cost at 1080p, 1440p and 4K.
 - Behaviour with the game's own Edge Smoothing on, beyond the menus-tinted note.
 - Whether the game ever ends more than one scene per frame with the back buffer bound.
+
+
+## Current release evidence
+
+- Six bounded GPU events from 2026-10-07 23:15 confirm the actual learned first-tile copy state. Hidden events
+  with COLORWRITEENABLE=15 fell through the earlier RGB-only guard and ran the chain at EndScene; paired visible
+  events had the same scene draw/write counts (2533/2189) and ran before composition. The guard now accepts 7 or 15,
+  while retaining shared-depth, layout, target identity, scene readiness and UI protections.
+- 49 native post-scene checks pass: ordered AO/AA/Depth Blur/Color, one execution, both recorded masks, rejection
+  of partial masks and incompatible depths/copies, readiness, UI protection and reset invalidation.
+- 127 extracted-production checks cover group neutralization, retained settings, filter branches, config/profile
+  round trips and shortcut persistence/matching.
+- 44,653 native ImGui checks cover production filter/group layout, disabled child controls, preserved preferences,
+  modal state restoration and three languages at multiple widths/scales. Icon painting and GPU effects are not
+  exercised by this CPU geometry fixture.
+- The optional APEX_F10_STUDY diagnostic has 4,118 native checks. It is disabled in the public release.
+- In-game testing of the complete release remains open for shortcut assignment/removal, typing and game-command
+  overlap, stacking, existing profiles, multiple resolutions and DXVK. Recorded copy-state evidence confirms the
+  boundary defect; it does not establish universal final-image equality.

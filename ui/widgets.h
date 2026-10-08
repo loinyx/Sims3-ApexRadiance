@@ -135,6 +135,7 @@ bool DiagnosticIntRow(const char* label, int* value, int min, int max, const cha
 
 // iOS-style switch (violet when on). True on the frame it was clicked (*v is already flipped).
 bool ToggleSwitch(const char* id, bool* v);
+ImVec2 ToggleSwitchSize(); // Shared geometry for custom right-aligned action clusters.
 // A row: label on the left with its description (a short sentence, always visible, muted and smaller) under it, the
 // switch on the right. The parameter keeps its old name: the text is the description, not a hover tooltip. True when *v
 // changed (also by its Reset button). def = the default (changed dot + Reset). icon is supported but the menu's rows

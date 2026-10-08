@@ -2,7 +2,9 @@
 
 # Apex Radiance for The Sims 3
 
-A lighting, visuals and performance mod for The Sims 3. At night, street lamps and lot lamps really light the world around them: the ground, lots, objects, fences, walls, roofs, ponds and snow. It also goes after the game's small, frequent stutters, especially while you move the camera and while lots, Sims and textures load, without changing how the game looks. On top of that come a full color editor with 26 stackable filters, soft ambient occlusion with separate control for Sims, clean anti-aliasing, a soft depth blur and filtered screenshots, all from one in-game menu.
+A lighting, visuals and performance mod for The Sims 3. At night, street lamps and lot lamps really light the world around them: the ground, lots, objects, fences, walls, roofs, ponds and snow. It also goes after the game's small, frequent stutters, especially while you move the camera and while lots, Sims and textures load, without changing how the game looks. On top of that come a full color editor with 25 stackable filters, soft ambient occlusion with separate control for Sims, clean anti-aliasing, a soft depth blur and filtered screenshots, all from one in-game menu.
+
+**Supported menu languages (21):** English, Portuguese, Spanish, French, German, Italian, Dutch, Swedish, Norwegian, Danish, Finnish, Czech, Polish, Hungarian, Greek, Russian, Japanese, Korean, Thai, Simplified Chinese and Traditional Chinese. Choose a language in Settings; automatic selection follows Windows.
 
 
 <div align="center">
@@ -58,7 +60,7 @@ In the base game, lamps glow but barely light anything around them. Apex Radianc
 
 ### Ambient Occlusion
 
-Soft shade where things meet: under furniture, in corners, where walls meet the floor and around houses and trees. Lamp-lit and bright surfaces keep their light and color. Temporal smoothing keeps it clean and steady, Half resolution makes it lighter on the graphics card, and Thin object detail lets the shade pass behind legs and rails. Five quality levels, adjustable strength, reach and distance, and it also works in map view.
+Soft shade where things meet: under furniture, in corners, where walls meet the floor and around houses and trees. Lamp-lit and bright surfaces keep their light and color. AO always runs at full resolution; the former Half resolution option is removed, so players who used it may see a higher GPU cost. Temporal smoothing keeps it clean and steady, and Thin object detail lets the shade pass behind legs and rails. Five quality levels, adjustable strength, reach and distance, and it also works in map view.
 
 ### Sim Occlusion
 
@@ -68,10 +70,12 @@ Contact shade that suits furniture can look heavy on faces and hair. Sim Occlusi
 
 A full picture editor for the 3D world; menus and text keep their normal look.
 
+- **Overview and group switches:** Basic, Tones, Color, Detail and Filters can be enabled separately. The main Image switch disables every color group without discarding your adjustments.
 - Brightness, contrast, saturation, warmth and sharpness.
 - Film-style tones, a six-color mixer and a vignette.
 - A before/after switch and a hold-to-compare key.
-- **Filters:** 26 looks you can stack, each with its own strength: Technicolor 1 and 2, DPX Cineon, Vintage, Cross-process, Filmic pass, Black and white, Tint, Colorfulness, Night Mode, Levels, LUT, Atmospheric fog, Auto exposure, Adaptive sharpening, Glow, Halation, Dreamy, Fake HDR, Emphasize, Tilt-shift, Prism, Film grain, 3DFX, CRT and Color-blind mode. All start off.
+- **Filters:** 25 looks you can stack, each with its own strength: Technicolor 1 and 2, DPX Cineon, Vintage, Cross-process, Filmic pass, Black and white, Tint, Colorfulness, Night Mode, Levels, LUT, Auto exposure, Adaptive sharpening, Glow, Halation, Dreamy, Fake HDR, Emphasize, Tilt-shift, Prism, Film grain, 3DFX, CRT and Color-blind mode. All start off.
+- **Optional filter shortcuts:** right-click a filter to assign or remove your own key combination for on/off. No filter shortcut is assigned by default; assigned keys appear beside its switch. Filters are grouped in compact rows with expandable adjustments.
 - **LUT files:** put PNG look-up tables (Lightroom, Photoshop or ReShade LUT packs) in the LUTs folder of Apex Radiance and pick one in the LUT filter.
 
 ### Banding Fix

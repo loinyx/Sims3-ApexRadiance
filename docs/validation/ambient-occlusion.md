@@ -40,3 +40,12 @@ Sim Occlusion has its own page: [validation/sim-occlusion.md](sim-occlusion.md).
 - Foliage in wind, water, thin railings and daytime scenes (the reference frames were night scenes).
 - Scene-boundary detection: the Picture colour-difference UI heuristic and frames with an early depth-off draw still
   need controlled gameplay captures. The post-scene tests establish ordering, not visual equivalence.
+
+### Local full-resolution-only candidate, 2026-10-07
+
+Half resolution and the unreleased reconstruction candidate were removed at the user's request. The local native D3D9
+fixture passed 65 checks: the six retained non-GTAO entrypoints and all ten GTAO quality/thickness variants compile to
+bytecode identical to the pre-reconstruction full-resolution baseline and create successfully on the native device.
+Existing full-resolution uniforms retain pixel size 1 and base pyramid level 0. Runtime/preset reduction keys,
+upsample shader registration and extra full-size upsample resources are removed. Old files must retain unrelated values
+and cannot reactivate the removed path. Gameplay and native/DXVK timing remain required; no residual F10 fix is claimed.

@@ -16,6 +16,7 @@
 #include <atomic>
 #include <mutex>
 #include <string>
+#include "filter_shortcut.h"
 
 namespace toml {
 inline namespace v3 {
@@ -25,6 +26,15 @@ class table;
 
 struct PictureParams {
     bool enabled = false;
+    // Missing group keys keep all existing settings active. Disabling a group never resets its stored values.
+    bool basicEnabled = true, tonesEnabled = true, colorEnabled = true, detailEnabled = true, filtersEnabled = true;
+    static constexpr size_t kFilterCount = 25;
+    std::array<FilterShortcut, kFilterCount> filterShortcuts{}; // optional; saved with the picture/profile
+    bool& Group(int tab) {
+        switch (tab) { case 1: return tonesEnabled; case 2: return colorEnabled; case 3: return detailEnabled;
+                       case 4: return filtersEnabled; default: return basicEnabled; }
+    }
+    bool Group(int tab) const { auto& self = const_cast<PictureParams&>(*this); return self.Group(tab); }
     float exposure = 0.0f;    // scene brightness in stops (EV)
     float contrast = 1.0f;    // around mid grey (0.18 of white)
     float midtones = 1.0f;    // > 1 brighter midtones (black and white stay)
@@ -149,13 +159,16 @@ class Picture {
     // Keys of [qol.picture] this build reads (config migration copies only these)
     static const char* const* Keys(size_t& count);
 
-    // Tabs of the Color page (menu: Image > Color), in order
-    enum Tab : int { TabBasic, TabTones, TabColor, TabDetail, TabFilters, TabCount };
-    // The Filters tab: one card per filter (its switch in the header, its own controls under it), in four sections
+    // Stable tab values; Overview is displayed first without moving the existing search indices.
+    enum Tab : int { TabBasic, TabTones, TabColor, TabDetail, TabFilters, TabOverview, TabCount };
+    // The Filters tab: compact rows in six family panels, with independent adjustment disclosures and shortcuts.
     void RenderFiltersUI();
-    // The rows of one tab of the Color page (inside a card the menu opens), then "Reset Picture". The menu draws the
-    // Picture card header with the on/off switch ([qol.picture] enabled) and the before / after button (compare) above
-    // the tabs itself. The rows stay visible, greyed out, while Picture is off.
+    // Window-thread input, queued for the render thread. No work or allocation when no shortcuts are assigned.
+    bool FilterKeyDown(WPARAM vk, bool repeat);
+    static bool RecordingFilterShortcut();
+    void ProcessFilterKeys();
+    // Rows of one Color tab. The overview owns the global Picture switch and comparison tools;
+    // each settings tab has its own group switch. Off groups retain their settings, shown disabled.
     void RenderUI(int tab);
     // Developer page > Debug views: the 8-bit / dither note and the GPU cost
     void RenderDeveloperUI();
@@ -174,11 +187,12 @@ class Picture {
 
     mutable std::mutex m_mutex;
     PictureParams m_p;
+    std::atomic<bool> m_filterKeysPresent{false};
     float m_gpuMs = -1.0f;
     std::atomic<unsigned long long> m_holdUntil{0}; // GetTickCount64 until which the pass is skipped (hold to compare)
     // Diagnostics (Problem): when it was turned on, when the game's EndScene last reached it, when the pass last ran,
     // why it last returned early (Skip in picture.cpp), what the resource creation failed on
-    std::atomic<unsigned long long> m_enabledAt{0}, m_lastEndScene{0}, m_lastApplied{0}, m_lastSceneCopy{0};
+    std::atomic<unsigned long long> m_enabledAt{0}, m_lastEndScene{0}, m_lastApplied{0}, m_lastSceneCopy{0}, m_lastSceneBoundary{0};
     bool m_menusTintedLogged = false; // render thread
     std::atomic<int> m_checkPasses{0};  // passes left whose state is read back (SetParams: the next 3)
     std::string m_lastCheck;            // render thread: the last check's result (logged when it changes)

@@ -9,6 +9,22 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), German}
 const I18n::Pair kPairs[] = {
+    {"Brightness, contrast, saturation, temperature and sharpness", "Helligkeit, Kontrast, Sättigung, Temperatur und Schärfe"},
+    {"Midtones, shadows, highlights and blacks", "Mitteltöne, Schatten, Lichter und Schwarz"},
+    {"Tint, vibrance, film tones and color mixer", "Farbton, Dynamik, Filmtöne und Farbmischer"},
+    {"Clarity and darker corners", "Klarheit und dunklere Ecken"},
+    {"Film looks, light, camera and retro effects", "Filmlooks, Licht-, Kamera- und Retroeffekte"},
+    {"Color is off; your adjustments are kept", "Farbe ist aus; deine Einstellungen bleiben erhalten"},
+    {"Adjust this filter", "Diesen Filter einstellen"},
+    {"Filter shortcuts", "Filter-Tastenkürzel"},
+    {"Assign shortcut", "Tastenkürzel zuweisen"},
+    {"Change shortcut", "Tastenkürzel ändern"},
+    {"Remove shortcut", "Tastenkürzel entfernen"},
+    {"Filter shortcut", "Filter-Tastenkürzel"},
+    {"Press the keys together, then choose Save", "Drücke die Tasten zusammen und wähle Speichern"},
+    {"Waiting for keys", "Warte auf Tasten"},
+    {"This shortcut is already in use", "Dieses Tastenkürzel wird bereits verwendet"},
+
     {"See what is in use; click a resource to open its settings", "Sieh, was aktiv ist; klicke auf eine Funktion, um ihre Einstellungen zu öffnen"},
     {"Performance and screen", "Leistung und Bildschirm"},
     {"Waiting for game settings", "Warte auf Spieleinstellungen"},
@@ -1580,8 +1596,6 @@ const I18n::Pair kPairs[] = {
     {"Blends the last frames, each with other sample angles: a smooth shade even at low quality", "Mischt die letzten Frames, jeweils mit anderen Sample-Winkeln: weicher Schatten auch bei niedriger Qualität"},
     {"Thin object detail", "Details dünner Objekte"},
     {"Objects get thickness: no shade halo behind legs and rails. Costs more GPU", "Objekte erhalten Dicke: kein Schattenhof hinter Beinen und Geländern. Kostet mehr GPU"},
-    {"Half resolution", "Halbe Auflösung"},
-    {"A quarter of the pixels: much lighter, a bit softer. Best with Temporal smoothing", "Ein Viertel der Pixel: viel leichter, etwas weicher. Am besten mit zeitlicher Glättung"},
     {"Object thickness", "Objektdicke"},
     {"How deep objects are taken to be for Thin object detail: less shows more light behind thin things", "Wie tief Objekte für Details dünner Objekte angenommen werden: weniger zeigt mehr Licht hinter dünnen Dingen"},
     {"Reset Ambient Occlusion", "Umgebungsverdeckung zurücksetzen"},
@@ -1913,6 +1927,19 @@ const I18n::Pair kPairs[] = {
     {"official Sims3SettingsSetter not loaded", "offizieller Sims3SettingsSetter nicht geladen"},
     {"; OLD COMBINED BUILD loaded ({}): Apex Radiance's features stay off", "; ALTER KOMBINIERTER BUILD geladen ({}): Die Funktionen von Apex Radiance bleiben aus"},
     {"; an older {} is also installed (idle): delete it from Game\\Bin", "; eine ältere {} ist ebenfalls installiert (inaktiv): Lösche sie aus Game\\Bin"},
+    {"The menu now supports all 21 game languages", "Das Menü unterstützt jetzt alle 21 Sprachen des Spiels"},
+    {"Apex catches its own errors instead of closing the game", "Apex fängt eigene Fehler ab, statt das Spiel zu schließen"},
+    {"Lamp cones and foundation lighting are more accurate", "Lichtkegel und die Beleuchtung von Fundamenten sind genauer"},
+    {"All Lighting options are enabled in the starting profiles", "Alle Beleuchtungsoptionen sind in den Startprofilen aktiviert"},
+    {"Ground lamps light upper-story walls with smoother falloff", "Lampen am Boden beleuchten obere Stockwerke mit sanfterem Lichtabfall"},
+    {"Light behind balconies: softer light and shadows on walls above", "Licht hinter Balkonen: sanfteres Licht und weichere Schatten an den Wänden darüber"},
+    {"Doors and windows on foundations receive lamp light; walls keep it out of enclosed yards", "Türen und Fenster auf Fundamenten erhalten Lampenlicht; Wände halten es aus geschlossenen Höfen fern"},
+    {"Captures use less storage, and editing lamps takes less repeated work", "Aufnahmen brauchen weniger Speicher und Lampenänderungen weniger wiederholte Arbeit"},
+    {"Placing and moving outdoor lamps updates wall lighting faster, especially on multi-story lots", "Außenlampen aufzustellen und zu bewegen aktualisiert das Wandlicht schneller, besonders auf mehrstöckigen Grundstücken"},
+    {"Lighting colors, brightness, shadows and reach are unchanged", "Farben, Helligkeit, Schatten und Reichweite der Beleuchtung bleiben unverändert"},
+    {"Color groups have their own switches and keep your adjustments", "Farbgruppen haben eigene Schalter und behalten Ihre Einstellungen"},
+    {"Right-click a filter to assign an optional keyboard shortcut", "Rechtsklicken Sie auf einen Filter, um eine optionale Tastenkombination zuzuweisen"},
+    {"Hidden-interface effects recognize both recorded color-write states", "Effekte bei ausgeblendeter Oberfläche erkennen beide aufgezeichneten Farbschreibzustände"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::German, kPairs, std::size(kPairs));

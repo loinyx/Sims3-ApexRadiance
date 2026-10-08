@@ -8,6 +8,8 @@
 #include "depth_share.h"
 #include "d3d9_extra_hooks.h"
 #include "render_callbacks.h"
+#include "apex_log.h"
+#include "world_session.h"
 #include "hook_guard.h"
 #include <algorithm>
 #include <atomic>
@@ -16,6 +18,7 @@
 #include <mutex>
 #include <utility>
 #include <vector>
+#include "f10_study.h"
 
 namespace {
 
@@ -36,6 +39,8 @@ int g_sceneDraws = 0;
 int g_depthWrites = 0; // of those, the ones that write depth (the drawn world; a frozen screen such as the save screen has almost none)
 int g_lastDepthWrites = 0; // the count of the last complete frame (read at any time of the next frame: InWorld)
 bool g_done = false;
+bool g_tileBoundary = false;
+IDirect3DSurface9* g_knownTileTarget = nullptr; // identity only, learned with UI visible; cleared at Reset
 bool g_rejectedBoundary = false; // no late composite over UI already drawn after an invalid boundary
 
 bool SceneDepthReady(IDirect3DDevice9* dev) {
@@ -55,6 +60,17 @@ bool SceneDepthReady(IDirect3DDevice9* dev) {
 // from then on; the others keep running
 HookGuard::OffList<16> g_failedEffects;
 void RunEffects(IDirect3DDevice9* dev, bool depthOk) {
+#ifdef APEX_F10_STUDY
+    if (F10Study::active) {
+        F10Study::Note("chain begin | " + PostScene::DiagText() + " depthValid=" + std::to_string(depthOk));
+        IDirect3DSurface9* actual = nullptr;
+        ExtraHooks::RawGetDepthStencilSurface(dev, &actual);
+        F10Study::Note("rawDS=" + std::to_string(reinterpret_cast<uintptr_t>(actual)) +
+                       " sharedDS=" + std::to_string(reinterpret_cast<uintptr_t>(DepthShare::Surface())));
+        if (actual) actual->Release();
+        F10Study::Sample(dev, "before-effects");
+    }
+#endif
     std::vector<std::pair<int, PostScene::Effect>> run;
     try {
         std::lock_guard<std::mutex> lock(g_mutex);
@@ -70,12 +86,65 @@ void RunEffects(IDirect3DDevice9* dev, bool depthOk) {
         if (g_failedEffects.Has(fn)) continue;
         try {
             e.second(dev);
+#ifdef APEX_F10_STUDY
+            F10Study::Sample(dev, "after-order-" + std::to_string(e.first));
+#endif
         } catch (...) {
             g_failedEffects.Add(fn);
             HookGuard::NoteAt("PostScene effect", fn);
         }
     }
     g_depthValid = true;
+}
+
+
+// 07/10 actual copy diagnostics: the game's colour transform copies a 256x256 tile,
+// starting at (0,0), into its 2048x1024 scratch target. With UI the ordered effects
+// have already run; with F10 they otherwise wait until after this transform.
+// Learn the scratch identity only from an already-applied, UI-visible frame; hidden
+// frames may use that same identity and layout, never any arbitrary partial copy.
+bool FirstColourTile(const RECT* src, const RECT* dst) {
+    return src && dst && src->left == 0 && src->top == 0 && src->right == 256 && src->bottom == 256 &&
+           dst->left == 0 && dst->top == 0 && dst->right == 256 && dst->bottom == 256;
+}
+
+void BeforeColourTile(IDirect3DDevice9* dev, IDirect3DSurface9* src, const RECT* srcRect,
+                      IDirect3DSurface9* dst, const RECT* dstRect, D3DTEXTUREFILTERTYPE filter) {
+#ifdef APEX_F10_STUDY
+    if (dev && src == g_backBuffer) F10Study::Copy(dev, srcRect, dstRect, filter, dst, g_done, g_uiDrawSeen, dst == g_knownTileTarget);
+#endif
+    if (!dev || !src || !dst || filter != D3DTEXF_POINT || !FirstColourTile(srcRect, dstRect) ||
+        g_rejectedBoundary || g_sceneDraws < kMinSceneDraws || !g_backBuffer || src != g_backBuffer ||
+        g_curRT0 != g_backBuffer || (g_done && (!g_uiDrawSeen || g_knownTileTarget)) ||
+        DepthShare::InternalPass() || !ShaderCache::PrecompileComplete()) return;
+    // A hidden frame must use the scratch target observed in the correct UI path.
+    if (!g_done && (g_uiDrawSeen || !g_knownTileTarget || dst != g_knownTileTarget)) return;
+    if (!WorldSession::InWorld()) return;
+    D3DSURFACE_DESC a{}, b{};
+    if (FAILED(src->GetDesc(&a)) || FAILED(dst->GetDesc(&b)) ||
+        a.Format != D3DFMT_A8R8G8B8 || b.Format != a.Format ||
+        a.MultiSampleType != D3DMULTISAMPLE_NONE || b.MultiSampleType != D3DMULTISAMPLE_NONE ||
+        !(b.Usage & D3DUSAGE_RENDERTARGET) || b.Width != 2048 || b.Height != 1024 ||
+        a.Width < 256 || a.Height < 256) return;
+    if (g_done) {
+        g_knownTileTarget = dst;
+        LOG_INFO("[PostScene] Learned the game's colour-tile copy from the UI-visible frame");
+        return;
+    }
+    DWORD z = D3DZB_FALSE, write = TRUE, func = D3DCMP_ALWAYS, colour = 0;
+    if (FAILED(dev->GetRenderState(D3DRS_ZENABLE, &z)) || z == D3DZB_FALSE ||
+        FAILED(dev->GetRenderState(D3DRS_ZWRITEENABLE, &write)) || write ||
+        FAILED(dev->GetRenderState(D3DRS_ZFUNC, &func)) || func != D3DCMP_LESSEQUAL ||
+        FAILED(dev->GetRenderState(D3DRS_COLORWRITEENABLE, &colour)) || (colour != 7 && colour != 15) ||
+        !g_sceneOnSharedDepth || !SceneDepthReady(dev)) return;
+    g_done = true; // before nested effect copies; the complete ordered chain runs once
+    g_tileBoundary = true;
+    RunEffects(dev, true);
+    static int notes = 0;
+    if (notes < 3) {
+        ++notes;
+        LOG_INFO("[PostScene] Effects applied before the game's colour-tile copy (hidden UI)");
+    }
 }
 
 // ---- camera (combined build's post_scene.cpp, tag combined-final) ----
@@ -163,6 +232,11 @@ void VoteCamera(IDirect3DDevice9* dev) {
 }
 
 void OnFrameBoundary(IDirect3DDevice9* dev) {
+#ifdef APEX_F10_STUDY
+    F10Study::Advance();
+#endif
+    ExtraHooks::EnsureInstalled(dev);
+    g_tileBoundary = false;
     IDirect3DSurface9* s = nullptr;
     if (SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &s)) && s) {
         g_backBuffer = s;
@@ -224,6 +298,10 @@ void OnGameDraw(D3D9Hooks::DeviceContext& ctx) {
 // ordered effects at the game's EndScene, before Apex's overlay and Picture's scene copy. Keep the draw-triggered path
 // above for frames that do have a depth-off boundary (including its existing interior behavior).
 void AtEndSceneBeforeOverlay(IDirect3DDevice9* dev) {
+#ifdef APEX_F10_STUDY
+    F10Study::Note("game EndScene | " + PostScene::DiagText());
+    F10Study::Sample(dev, "game-end-scene");
+#endif
     if (g_uiDrawSeen) return; // the UI is already drawn: never run the effects over it (06/10)
     if (!ShaderCache::PrecompileComplete()) return;
     if (!dev || g_done || g_rejectedBoundary || g_sceneDraws < kMinSceneDraws || !g_backBuffer || g_curRT0 != g_backBuffer) return;
@@ -241,6 +319,8 @@ void AtEndSceneBeforeOverlay(IDirect3DDevice9* dev) {
 // A Reset replaces the back buffer and sets render target 0 to it without a SetRenderTarget call: both are read again at
 // the next frame boundary
 void OnPreReset(IDirect3DDevice9*) {
+    g_knownTileTarget = nullptr;
+    g_tileBoundary = false;
     g_curRT0 = nullptr;
     g_backBuffer = nullptr;
     g_done = true;
@@ -249,6 +329,7 @@ void OnPreReset(IDirect3DDevice9*) {
 
 void RegisterHooks() {
     using namespace D3D9Hooks;
+    ExtraHooks::SetBeforeStretchRect(BeforeColourTile);
     RenderCallbacks::Add(RenderCallbacks::endSceneBeforeOverlay, AtEndSceneBeforeOverlay);
     RenderCallbacks::Add(RenderCallbacks::preReset, OnPreReset);
     RegisterPresent(kHookName, [](DeviceContext& ctx, const RECT*, const RECT*, HWND, const RGNDATA*) {
@@ -299,6 +380,8 @@ void Remove(Effect fn) {
         D3D9Hooks::UnregisterAll(kHookName);
         RenderCallbacks::Remove(RenderCallbacks::endSceneBeforeOverlay, AtEndSceneBeforeOverlay);
         RenderCallbacks::Remove(RenderCallbacks::preReset, OnPreReset);
+        ExtraHooks::SetBeforeStretchRect(nullptr);
+        g_knownTileTarget = nullptr;
     }
 }
 
@@ -316,6 +399,7 @@ bool SceneDepthValid() { return g_depthValid; }
 std::string DiagText() {
     return "scene draws " + std::to_string(g_sceneDraws) + " (depth writes " + std::to_string(g_depthWrites) + ", last frame " + std::to_string(g_lastDepthWrites) +
            "), boundary " + (g_done ? "done" : "not yet") + (g_rejectedBoundary ? ", rejected" : "") + (g_sceneOnSharedDepth ? ", scene on the shared depth" : ", scene not on the shared depth") + (DepthShare::Surface() ? "" : " (no depth swap)") + (g_uiDrawSeen ? ", UI seen" : "") +
+           (g_tileBoundary ? ", before colour tile" : "") +
            ", RT0 " + (!g_curRT0 ? "unknown" : g_curRT0 == g_backBuffer ? "back buffer" : "other") + ", effects " + std::to_string(g_effects.size()) +
            (g_hooks ? "" : ", hooks off");
 }

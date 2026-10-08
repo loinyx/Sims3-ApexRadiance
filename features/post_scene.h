@@ -1,13 +1,16 @@
 #pragma once
 #include <string>
 // Shared trigger for effects that work on the finished 3D scene, before the game draws any UI: normally the first
-// backbuffer draw with ZENABLE = FALSE after at least 20 depth-tested draws. If hidden game UI means that boundary never
+// backbuffer draw with ZENABLE = FALSE after at least 4 depth-tested draws. If hidden game UI means that boundary never
 // draws, EndSceneBeforeOverlay is the fallback. Effects run once in fixed order (ambient occlusion, edge smoothing,
 // then Depth Blur); each saves and restores what it touches.
 // Effects draw with DrawPrimitiveUP, which is not hooked, so they never re-trigger it.
 // Its draw hooks run at Priority::First; Picture's scene copy runs after them (picture.cpp) so it contains the effects.
 // If a shared scene depth exists, an incompatible bound surface rejects the boundary without consuming the effects.
 // Only resumed depth-tested scene draws unlock another boundary. EndScene never retries over a rejected UI boundary.
+//
+// A colour-tile scratch target learned from a UI-visible frame can also mark the boundary before the
+// game transforms the hidden-UI picture. Unknown targets/layouts keep the EndScene fallback. Reset drops the identity.
 //
 // Existing limitation: interiors can have depth-off backbuffer draws in the middle of the scene, so the first such draw
 // can precede the finished scene (Picture re-copies at every depth-on -> depth-off transition for that reason). The

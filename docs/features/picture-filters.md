@@ -1,11 +1,11 @@
 # Picture filters
 
 Picture filters adjust how the game world looks: brightness, contrast, saturation, colour temperature, tone zones,
-film-style split toning, a per-colour mixer, sharpness, clarity and a vignette, plus a **Filters** tab of 26 stackable
+film-style split toning, a per-colour mixer, sharpness, clarity and a vignette, plus a **Filters** tab of 25 stackable
 looks (film stocks, colour moods, glow and haze, camera effects, retro screens and a colour-blind mode), each with its
 own strength. Only the 3D scene is graded; the game's menus, pie menus, tooltips, the HUD and the Apex menu keep their
 own colours. Grading adds no banding of its own. A before / after split and a hold-to-compare button show the difference
-at any time. In the menu the feature is the *Picture* card of the **Color** page.
+at any time. In the menu the **Color > Overview** tab owns the *Picture* master switch and comparison tools. Each adjustment tab has its own switch.
 
 ## Status
 
@@ -13,7 +13,7 @@ at any time. In the menu the feature is the *Picture* card of the **Color** page
 |---|---|
 | Availability | Released in 2.1.0 or earlier (present in the first version in this repository). Filters tab and LUT files: Released in 2.7.0 |
 | Default | Off; every filter off |
-| Menu | Image > Color (tabs Basic, Tones, Color, Detail, Filters); *Smooth gradients* on the Image > Banding Fix page; Overview > Image > Picture |
+| Menu | Image > Color (tabs Overview, Basic, Tones, Color, Detail, Filters); *Smooth gradients* on the Image > Banding Fix page; Overview > Image > Picture |
 | Configuration | `[qol.picture]` and `[qol.picture.filters]` in `ApexRadiance.toml`; compare key `[ui] picture_compare_key`; LUT files in `Documents\Electronic Arts\The Sims 3\Apex Radiance\LUTs\` |
 | Source | [`features/picture.cpp`](../../features/picture.cpp), [`features/picture.h`](../../features/picture.h), [`framework/d3d9_bootstrap.cpp`](../../framework/d3d9_bootstrap.cpp) (fire points), [`apex_gui.cpp`](../../apex_gui.cpp) (`ColorPage`, `BandingPage`) |
 
@@ -25,21 +25,28 @@ the game's own DXT textures (5 to 6-bit colour endpoints) and 8-bit light maps a
 
 ## How Apex Radiance solves it
 
-Apex Radiance copies the back buffer at the moment the game switches from drawing the 3D scene to drawing its
-interface. At the end of the frame it grades the back buffer in one full-screen pass and keeps every pixel that differs
-clearly from that scene copy (the interface) unchanged. The grade and the filters run in linear light and are
-re-quantised to 8 bits with a fixed dither below one step.
+Apex Radiance grades the finished scene as the last effect in the shared post-scene chain, before the game draws its
+interface. The grade and the filters run in linear light and are re-quantised to 8 bits with a fixed dither below one
+step. The end-of-frame scene-copy mask is a fallback, not the normal colour path.
+
+The hidden-UI boundary learns the game's scratch-target identity from an already-filtered UI-visible
+frame. It recognises the actual point-filtered 256x256 first-tile rectangles into the 2048x1024 A8R8G8B8 target.
+With UI hidden, that same target/layout, no UI already drawn, matching shared depth, no multisampling, no depth write,
+LESSEQUAL depth test and complete RGB or RGBA write mask allow the ordered chain to run before the first tile is copied.
+The visible boundary and unknown-layout EndScene fallback are unchanged; Reset drops the learned identity.
+No strength, colour parameter, shader or lighting solver is changed. Visual parity still requires gameplay testing.
+If a session starts with UI hidden and the target has not been learned, the old fallback remains until a visible frame.
 
 1. **Find the end of the scene.** Picture counts depth-tested draws into the back buffer. A draw with the depth test on
    but `D3DCMP_ALWAYS` and no depth write uses no depth and counts as depth-off. At every switch from depth-tested to
-   depth-off drawing (after at least 20 scene draws) it copies the back buffer; the last copy of the frame wins, except
-   that after a first copy a run of fewer than 20 depth-tested draws (the pie menu's 3D Sim portrait) is treated as UI.
+   depth-off drawing (after at least 4 scene draws) it copies the back buffer; the last copy of the frame wins, except
+   that after a first copy a run of fewer than 4 depth-tested draws is treated as UI.
    When the switch is the game's bloom composite (a 2-primitive triangle strip right after the scene), the copy is taken
    after the bloom. While Atmospheric fog or Emphasize is on, the scene depth is copied at the same moment.
 2. **End of frame.** If the frame ended on the scene (no game UI after it), the copy is taken just before the Apex
    overlay.
-3. **The pass** runs at the game's EndScene, after the overlay, only while a world is loaded: copy the finished frame,
-   then one shader decodes, grades, filters and encodes each scene pixel and writes UI pixels back unchanged.
+3. **The pass** normally runs at the post-scene boundary, before UI, only while a world is loaded. The masked
+   end-of-frame path runs only if the boundary did not apply it and a scene copy is available.
 
 **Filters.** Every filter of the Filters tab is a branch of the same pass, skipped when its switch is off, so a filter
 that is off costs nothing. The filters add up: any number can be on at once, in a fixed order (see *Technical
@@ -81,8 +88,9 @@ dragging and save when released. Missing keys keep their defaults.
 
 ### Filters
 
-The Filters tab shows one card per filter in six sections. The card header holds the filter's switch; its controls
-appear under it while it is on, with fine tuning under *Advanced*. Every switch is a bool, off by default. Sliders
+The Filters tab groups all 25 existing filters into six compact family panels. Each row has its own switch and
+adjustment disclosure; controls are available when expanded, and disabled while that filter, its group or Picture is off.
+Fine tuning remains under *Advanced*. Every switch is a bool, off by default. Sliders
 shown as a percentage store a fraction (100% = 1.0); signed sliders show -100 to +100 and store -1 to 1; colour sliders
 store a hue in degrees (0 to 360). A filter runs when its switch is on and its Amount is not 0.
 
@@ -103,7 +111,6 @@ store a hue in degrees (0 to 360). A filter runs when its switch is on and its A
 | Levels | `levels` | Black point `levels_black` 16 (0 to 255, stored /255); White point `levels_white` 235 (0 to 255) | The black point goes to black and the white point to white. The white point stays at least 0.02 above the black point. Runs when black > 0 or white < 255 |
 | LUT | `lut` | File `lut_file` (a PNG in the LUTs folder; empty = none; while the filter is on and the saved file is not in the folder, the first file is picked); Amount `lut_amount` 100%; *Open the LUTs folder* button | A ready-made look from a colour look-up table: a PNG strip of N slices of N x N (height 8 to 128, width = height squared, for example 1024x32 or 4096x64), as in Lightroom, Photoshop or ReShade LUT packs. The folder is created when the button is used and re-read at most every 2 s; the card shows the loaded size or why a file was refused |
 | **Light and detail** | | | |
-| Atmospheric fog | `fog` | Amount `fog_amount` 50%; Start distance `fog_start` 30 m (0 to 300 m); Density `fog_density` 35%; Color `fog_hue` 215; Color strength `fog_tint` 25% | A haze that grows with distance from the camera and takes the brightness of the light around it (dark at night, lit near lamps). Needs the scene depth |
 | Auto exposure | `auto_exposure` | Amount `auto_exposure_amount` 70%; Target brightness `auto_exposure_target` 50%; Speed `auto_exposure_speed` 40%; Range `auto_exposure_range` 50% | The picture slowly adapts toward a target brightness from the scene's average, like the eye |
 | Adaptive sharpening | `cas` | Sharpness `cas_amount` 50% | Contrast-adaptive sharpening: strong on soft detail, none on hard edges (no halos). Runs whenever its switch is on |
 | Glow | `glow` | Amount `glow_amount` 40%; Threshold `glow_threshold` 60% (0 to 95%); Size `glow_size` 50%; Advanced: Warmth `glow_warmth` 0 (Cooler to Warmer) | A soft halo from the bright parts of a blurred copy of the scene: lamps, windows, sky |
@@ -340,3 +347,45 @@ Details in [history](../history/picture-filters.md).
 - [History](../history/picture-filters.md)
 - [Banding Fix](banding-fix.md)
 - [Removed features: HDR output](../removed-features.md)
+
+## Local Color UI candidate (2026-10-07)
+
+This is a test candidate, not a released version. Overview presents the existing master switch, GPU cost and
+comparison tools once, followed by five clickable group rows. There are no profiles in this overview. Per-tab
+headers control only their group; the global master still gates all Color processing. Stored values are not reset
+when a group is disabled. Basic, Tones, Color and Detail neutralise only their respective shader inputs; Filters
+disables the 25 filter branches. Banding Fix's deband continues independently of these switches.
+
+| Menu label | TOML key in `[qol.picture]` | Default | Behaviour |
+|---|---|---|---|
+| Basic | `basic_enabled` | true | Brightness, contrast, saturation, temperature and sharpness |
+| Tones | `tones_enabled` | true | Midtones, shadows, highlights and blacks |
+| Color | `color_enabled` | true | Tint, vibrance, split toning and mixer |
+| Detail | `detail_enabled` | true | Clarity and vignette |
+| Filters | `filters_enabled` | true | All filter branches, retaining individual switches and parameters |
+| Filter shortcut | `filter_shortcuts.<stable filter key>` | absent | Array of canonical Windows virtual-key integers; only on/off, never intensity |
+
+Group keys absent from older files default to true, preserving their existing appearance. Shortcut arrays are
+optional, empty by default, and saved with Picture settings in config, Color profiles and undo snapshots.
+Malformed arrays and modifier-only bindings are ignored. Right-clicking a filter, or its ellipsis button, offers
+Assign/Change and Remove shortcut. The editor records simultaneously held keys, including letter chords such as
+A+S and optional Ctrl/Shift/Alt. Save commits; Cancel or Esc leaves the previous binding intact. Duplicate bindings
+and existing Apex actions are refused. Native F10 remains the game's UI command. No shortcut is supplied by default.
+Key-down events are queued for the render thread, repeats do not toggle again, and typing in Apex text fields or the
+recognised cheat console is protected. A shortcut never enables Picture or the Filters group automatically.
+Single letters can also be game commands; choose combinations accordingly. The first key of a multiple-letter
+chord may reach the game before the complete chord is recognised; Windows-level shortcuts also remain Windows-owned.
+
+Tags use the native switch geometry, an 8-unit gap and matching vertical centres. Very long chords shorten the
+visible tag at token boundaries, with the full chord on hover. Expanded sliders retain every existing label,
+range, default, reset and setter. Search traverses collapsed filter controls without opening them.
+
+The menus-tinted diagnostic now also accepts a successful pre-UI Color boundary as evidence of scene isolation,
+and does not diagnose the main menu as an active-world colour failure. The warning is retained for the actual
+missing-isolation fallback; it is shown once on Overview, not repeated on every adjustment tab.
+
+The Overview card uses the tab's title and remains the master Color switch. While it is off, overview/group-header
+switches display off and are disabled; saved group preferences are not overwritten, and return when the master is on.
+Filter disclosure buttons point down when closed and up when open. The shortcut editor uses the native modal card
+header, identifies the chosen filter, shows keys in a full-width read-only field and aligns Cancel then Save on the
+right. Its width is constrained across frames; Cancel, the close icon and Esc retain the previous shortcut.

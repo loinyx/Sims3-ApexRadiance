@@ -6,12 +6,43 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k2110Added[] = {
+    "Color groups have their own switches and keep your adjustments",
+    "Right-click a filter to assign an optional keyboard shortcut",
+    nullptr};
+constexpr const char* k2110Improved[] = {nullptr};
+constexpr const char* k2110Fixed[] = {
+    "Hidden-interface effects recognize both recorded color-write states",
+    nullptr};
+
 constexpr const char* k2101Added[] = {nullptr};
 constexpr const char* k2101Improved[] = {
     "Placing and moving outdoor lamps updates wall lighting faster, especially on multi-story lots",
     "Lighting colors, brightness, shadows and reach are unchanged",
     nullptr};
 constexpr const char* k2101Fixed[] = {nullptr};
+
+constexpr const char* k2100Added[] = {
+    "Light behind balconies: softer light and shadows on walls above",
+    nullptr};
+constexpr const char* k2100Improved[] = {
+    "Captures use less storage, and editing lamps takes less repeated work",
+    nullptr};
+constexpr const char* k2100Fixed[] = {
+    "Ground lamps light upper-story walls with smoother falloff",
+    "Doors and windows on foundations receive lamp light; walls keep it out of enclosed yards",
+    nullptr};
+
+constexpr const char* k290Added[] = {
+    "The menu now supports all 21 game languages",
+    nullptr};
+constexpr const char* k290Improved[] = {
+    "Lamp cones and foundation lighting are more accurate",
+    "All Lighting options are enabled in the starting profiles",
+    nullptr};
+constexpr const char* k290Fixed[] = {
+    "Apex catches its own errors instead of closing the game",
+    nullptr};
 
 constexpr const char* k282Added[] = {nullptr};
 constexpr const char* k282Improved[] = {
@@ -132,7 +163,10 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"2.11.0", "2026-10-07", k2110Added, k2110Improved, k2110Fixed},
     {"2.10.1", "2026-10-07", k2101Added, k2101Improved, k2101Fixed},
+    {"2.10.0", "2026-10-07", k2100Added, k2100Improved, k2100Fixed},
+    {"2.9.0", "2026-10-07", k290Added, k290Improved, k290Fixed},
     {"2.8.2", "2026-10-07", k282Added, k282Improved, k282Fixed},
     {"2.8.1", "2026-10-07", k281Added, k281Improved, k281Fixed},
     {"2.8.0", "2026-10-07", k280Added, k280Improved, k280Fixed},

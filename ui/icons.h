@@ -130,6 +130,8 @@ enum class IconId : int {
     WandSparkles, // wand-sparkles
     PanelLeftClose, // panel-left-close
     PanelLeftOpen, // panel-left-open
+    Ellipsis, // ellipsis
+    ChevronUp, // chevron-up
     Count,
     None = Count, // "no icon" for widgets that take an optional one
 };

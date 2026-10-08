@@ -622,6 +622,8 @@ void Gap(float units) {
 
 // ---- controls ----
 
+ImVec2 ToggleSwitchSize() { return ImVec2(kSwitchW * Unit(), kSwitchH * Unit()); }
+
 bool ToggleSwitch(const char* id, bool* v) {
     const float u = Unit();
     const ImVec2 size(kSwitchW * u, kSwitchH * u);

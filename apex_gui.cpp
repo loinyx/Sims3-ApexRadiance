@@ -73,7 +73,7 @@ enum LightingTab : int { LightingLamps, LightingGround, LightingObjects, Lightin
 enum SettingsTab : int { SettingsMenu, SettingsShortcuts, SettingsProfiles, SettingsCompatibility, SettingsAbout };
 int g_page = PageOverview;
 int g_lightingTab = LightingLamps;
-int g_colorTab = Picture::TabBasic;
+int g_colorTab = Picture::TabOverview;
 int g_settingsTab = SettingsMenu;
 
 // ---- menu state (render thread, inside the overlay's ImGui frame) ----
@@ -654,7 +654,7 @@ void PictureHeaderCard() {
         extra.holdTooltip = "Hold to compare: the game without Picture while you hold it (or hold B over the menu)";
         char chipBuf[24];
         const char* chip = p.enabled ? CostChip(Picture::Get().GpuMs(), chipBuf) : nullptr;
-        const bool switched = ApexUi::CardHeader(IconId::Palette, "Picture", "Brightness, contrast, color and sharpness", kPictureDescription, &on, true, &extra, chip);
+        const bool switched = ApexUi::CardHeader(IconId::Palette, "Overview", "Brightness, contrast, color and sharpness", kPictureDescription, &on, true, &extra, chip);
         if (extra.held) g_holdCompare = true;
         if (switched || extra.clicked) {
             p.enabled = on;
@@ -707,17 +707,50 @@ void BandingPage() {
     BandingTabContent();
 }
 
+const char* const kColorGroupNames[]={"Basic","Tones","Color","Detail","Filters"};
+const char* const kColorGroupDescriptions[]={"Brightness, contrast, saturation, temperature and sharpness",
+    "Midtones, shadows, highlights and blacks","Tint, vibrance, film tones and color mixer",
+    "Clarity and darker corners","Film looks, light, camera and retro effects"};
+const IconId kColorGroupIcons[]={IconId::SunMedium,IconId::Contrast,IconId::Palette,IconId::Gem,IconId::Layers};
+void ColorGroupHeader(int tab) {
+    auto p=Picture::Get().GetParams();
+    bool on=p.enabled && p.Group(tab);
+    ImGui::PushID(tab);
+    if(ApexUi::BeginCard("##ColorGroup")) {
+        ImGui::BeginDisabled(!p.enabled);
+        if(ApexUi::CardHeader(kColorGroupIcons[tab],kColorGroupNames[tab],kColorGroupDescriptions[tab],nullptr,&on)) {
+            p.Group(tab)=on;Picture::Get().SetParams(p,true);
+        }
+        ImGui::EndDisabled();
+        if(!p.enabled) ApexUi::IconNote(IconId::Info,"Color is off; your adjustments are kept");
+    }
+    ApexUi::EndCard();ImGui::PopID();
+}
+void ColorOverview() {
+    PictureHeaderCard();
+    auto p=Picture::Get().GetParams();bool changed=false;
+    if(ApexUi::BeginCard("##ColorOverview")) {
+        ImGui::BeginDisabled(!p.enabled);
+        for(int tab=0;tab<Picture::TabOverview;++tab) {
+            bool on=p.enabled && p.Group(tab),clicked=false;
+            if(ApexUi::OverviewRow(kColorGroupNames[tab],kColorGroupIcons[tab],kColorGroupNames[tab],kColorGroupDescriptions[tab],
+                nullptr,&on,true,nullptr,&clicked)) {p.Group(tab)=on;changed=true;}
+            if(clicked) g_colorTab=tab;
+        }
+        ImGui::EndDisabled();
+    }
+    ApexUi::EndCard();if(changed) Picture::Get().SetParams(p,true);
+}
 void ColorPage() {
     ApexUi::PageTitle("Color", "How the game's picture looks");
-    static const char* const kTabs[] = {"Basic", "Tones", "Color", "Detail", "Filters"};
-    static_assert(IM_COUNTOF(kTabs) == Picture::TabCount, "one tab name per Picture tab");
-    if (g_colorTab < 0 || g_colorTab >= Picture::TabCount) g_colorTab = Picture::TabBasic; // the old Banding tab is its own page now
-    ApexUi::TabBar("##ColorTabs", &g_colorTab, kTabs, IM_COUNTOF(kTabs));
-    PictureHeaderCard();
-    if (g_colorTab == Picture::TabFilters) {
-        Picture::Get().RenderFiltersUI();
-        return;
-    }
+    static const char* const kTabs[] = {"Overview","Basic", "Tones", "Color", "Detail", "Filters"};
+    if (g_colorTab < 0 || g_colorTab >= Picture::TabCount) g_colorTab = Picture::TabOverview;
+    int selected=g_colorTab==Picture::TabOverview ? 0 : g_colorTab+1;
+    ApexUi::TabBar("##ColorTabs", &selected, kTabs, IM_COUNTOF(kTabs));
+    g_colorTab=selected==0 ? Picture::TabOverview : selected-1;
+    if(g_colorTab==Picture::TabOverview) {ColorOverview();return;}
+    ColorGroupHeader(g_colorTab);
+    if (g_colorTab == Picture::TabFilters) {Picture::Get().RenderFiltersUI();return;}
     PictureRows(g_colorTab);
 }
 
@@ -2351,7 +2384,7 @@ const SearchPart* SearchParts(int& count) {
         {"Lighting", "Stories", PageLighting, &g_lightingTab, LightingStories, StoriesTabContent},
         {"Water & Snow", nullptr, PageWaterSnow, nullptr, 0, WaterSnowContent},
         {"Banding Fix", nullptr, PageBanding, nullptr, 0, BandingTabContent},
-        {"Color", nullptr, PageColor, nullptr, 0, PictureHeaderCard},
+        {"Color", "Overview", PageColor, &g_colorTab, Picture::TabOverview, ColorOverview},
         {"Color", "Filters", PageColor, &g_colorTab, Picture::TabFilters, [] { Picture::Get().RenderFiltersUI(); }},
         {"Color", "Basic", PageColor, &g_colorTab, Picture::TabBasic, [] { PictureRows(Picture::TabBasic); }},
         {"Color", "Tones", PageColor, &g_colorTab, Picture::TabTones, [] { PictureRows(Picture::TabTones); }},
@@ -2569,8 +2602,8 @@ void Sidebar(bool collapsed) {
         {PageBanding, IconId::Blend, "Banding Fix", nullptr},
         {PageAmbientOcclusion, IconId::Contrast, "Ambient Occlusion", nullptr},
         {PageDepthBlur, IconId::Aperture, "Depth Blur", nullptr},
-        {PageEdgeSmoothing, IconId::Spline, "Edge Smoothing", "SYSTEM"},
-        {PagePerformance, IconId::Gauge, "Performance", nullptr},
+        {PageEdgeSmoothing, IconId::Spline, "Edge Smoothing", nullptr},
+        {PagePerformance, IconId::Gauge, "Performance", "SYSTEM"},
         {PageLotStreaming, IconId::Layers, "Lot Streaming", nullptr},
         {PageConflicts, IconId::TriangleAlert, "Attention", nullptr},
         {PageReport, IconId::Bug, "Report a problem", nullptr},
@@ -3351,7 +3384,8 @@ void Banner() {
 // menu key in light violet, in a dark rounded pill with a faint violet border, top-center, at every start (never
 // takes input; fades out). Starts only after the loaded-world/menu gate settles. Each frame counts at most 100 ms
 // so a loading stall does not use up the note; opening the menu ends it. ----
-constexpr int kHintMs = 4000; // 4 s (user 06/10)
+constexpr int kHintMs = 4000;
+ // 4 s (user 06/10)
 int g_hintLeftMs = 0;                  // time on screen left (render thread)
 bool g_hintStarted = false;            // started once this start
 unsigned long long g_hintLastDraw = 0; // the previous Hint() frame
@@ -4010,7 +4044,7 @@ class GuiClient final : public Overlay::Client {
 
     bool IsToggleKey(WPARAM vk) override {
         if (CheatConsoleOpen()) return false; // the game's cheat console owns all keys until Enter, Esc or Ctrl+Shift+C
-        if (g_recRow >= 0) return false; // being recorded as a shortcut
+        if (g_recRow >= 0 || Picture::RecordingFilterShortcut()) return false; // being recorded as a shortcut
         const ApexConfig::KeyChord c = ApexConfig::GetUi().toggle;
         if (vk != c.vk) return false;
         const bool ctrl = GetKeyState(VK_CONTROL) < 0, shift = GetKeyState(VK_SHIFT) < 0, alt = GetKeyState(VK_MENU) < 0;
@@ -4074,6 +4108,7 @@ class GuiClient final : public Overlay::Client {
     // While a shortcut records, every key press is eaten (no shortcut fires, the game sees nothing)
     bool HotkeyDown(WPARAM vk, bool repeat) override {
         if (!g_menuAvailable.load()) return false;
+        if(Picture::RecordingFilterShortcut()) return Picture::Get().FilterKeyDown(vk,repeat);
         if (CheatConsoleOpen()) return false; // don't steal letters from a cheat being typed
         if (vk == VK_ESCAPE && LightProbe::Aiming()) { LightProbe::CancelAim(); return true; }
         const auto ui = ApexConfig::GetUi();
@@ -4088,7 +4123,8 @@ class GuiClient final : public Overlay::Client {
             !screenshot.ctrl && !screenshot.shift && !screenshot.alt)
             return false; // let ImGui handle typing; its keyboard capture still keeps the key from reaching the game
         const bool aiming = LightProbe::Aiming();
-        const bool handled = g_recRow >= 0 || Hotkeys::OnKeyDown(vk, repeat);
+        const bool handled = g_recRow >= 0 || Hotkeys::OnKeyDown(vk, repeat) ||
+            ((!Overlay::IsVisible() || !g_menuTextInput.load()) && Picture::Get().FilterKeyDown(vk,repeat));
         if (aiming && handled && vk == Hotkeys::Key(Hotkeys::Action::Probe).vk) g_returnFromProbe.store(true);
         return handled;
     }

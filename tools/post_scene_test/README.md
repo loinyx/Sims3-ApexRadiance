@@ -1,13 +1,8 @@
-# Post-scene boundary regression check
+# Native post-scene boundary check
 
-Run in an x86 Visual Studio developer prompt, from the repository root. Choose a scratch directory for all outputs:
-
-```bat
-cl /nologo /std:c++20 /EHsc /MT /I. /Iframework /Ifeatures tools/post_scene_test/post_scene_check.cpp /Fo<scratch>/post_scene_check.obj /Fe<scratch>/post_scene_check.exe /link d3d9.lib user32.lib
-<scratch>/post_scene_check.exe
-```
-
-The fixture includes the production dispatcher and creates a hidden native D3D9 device. Hook registration is inert.
-It checks effect order and single execution, hidden-UI fallback, invalid depth without consuming effects, refusal to
-retry over already drawn UI, recovery after real scene draws resume, short scenes, internal draws and device reset.
-It does not validate the game's actual draw sequence, visual equivalence or DXVK behavior.
+The fixture uses a native D3D9 device, the production post_scene.cpp and a 2048x1024 scratch render target.
+It writes no game files. 49 checks cover four-effect ordering (AO, smoothing, blur, Color), normal/hidden fallback,
+once-per-frame execution, depth rejection/recovery, short-scene/internal/reset guards and actual colour tile recognition.
+The correct UI-visible boundary learns a scratch identity; only its first origin-256 tile can start the hidden chain.
+Unknown targets/layouts keep the original paths. The actual WorldSession unknown-world readiness gate is exercised.
+This is not gameplay/DXVK, pixel parity, real Picture shader or FPS validation.

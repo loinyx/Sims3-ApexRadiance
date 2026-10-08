@@ -1,5 +1,6 @@
 #include "d3d9_extra_hooks.h"
 #include "memory_patch.h"
+#include "hook_guard.h"
 #include "apex_log.h"
 #include <atomic>
 #include <format>
@@ -26,6 +27,7 @@ std::atomic<ClearObserver> g_clearObs{nullptr};
 std::atomic<BeforeClear> g_beforeClear{nullptr};
 std::atomic<SetDepthStencilObserver> g_setDsObs{nullptr};
 std::atomic<StretchRectObserver> g_stretchObs{nullptr};
+std::atomic<BeforeStretchRect> g_beforeStretch{nullptr};
 std::atomic<DrawUPObserver> g_drawUpObs{nullptr};
 std::atomic<DepthSubstitute> g_substitute{nullptr};
 std::atomic<DepthReport> g_report{nullptr};
@@ -62,6 +64,8 @@ HRESULT __stdcall HookedGetDepthStencilSurface(IDirect3DDevice9* dev, IDirect3DS
 }
 
 HRESULT __stdcall HookedStretchRect(IDirect3DDevice9* dev, IDirect3DSurface9* src, const RECT* srcRect, IDirect3DSurface9* dst, const RECT* dstRect, D3DTEXTUREFILTERTYPE filter) {
+    if (auto before = g_beforeStretch.load())
+        HookGuard::Try("PostScene before scene copy", [&] { before(dev, src, srcRect, dst, dstRect, filter); });
     if (auto obs = g_stretchObs.load()) obs(dev, src, dst, filter);
     return oStretchRect(dev, src, srcRect, dst, dstRect, filter);
 }
@@ -129,6 +133,7 @@ void SetClearObserver(ClearObserver fn) { g_clearObs.store(fn); }
 void SetBeforeClear(BeforeClear fn) { g_beforeClear.store(fn); }
 void SetSetDepthStencilObserver(SetDepthStencilObserver fn) { g_setDsObs.store(fn); }
 void SetStretchRectObserver(StretchRectObserver fn) { g_stretchObs.store(fn); }
+void SetBeforeStretchRect(BeforeStretchRect fn) { g_beforeStretch.store(fn); }
 void SetDrawUPObserver(DrawUPObserver fn) { g_drawUpObs.store(fn); }
 
 void SetDepthSubstitution(DepthSubstitute substitute, DepthReport report) {

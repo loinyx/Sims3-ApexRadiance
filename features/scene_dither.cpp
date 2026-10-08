@@ -30,6 +30,7 @@
 #include "render_callbacks.h"
 #include "shader_patches.h"
 #include "scene_dither.h"
+#include "f10_study.h"
 #include "shader_lookup_cache.h"
 #include "imgui.h"
 #include "ui/violet_theme.h"
@@ -299,7 +300,12 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
             useDither = false;
         }
     }
-    if (!useDither && !useJitter) return D3D9Hooks::HookAction::Continue;
+    if (!useDither && !useJitter) {
+#ifdef APEX_F10_STUDY
+        F10Study::CompositionShader(dev, ps, ps, vs, false);
+#endif
+        return D3D9Hooks::HookAction::Continue;
+    }
     float before[4] = {};
     if (useDither) {
         D3DVIEWPORT9 vp{};
@@ -313,6 +319,9 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
     }
     if (useJitter) D3D9Hooks::CallOriginalSetVertexShaderConstantF(dev, kJitterConst, g_jitter, 1); // no game shader reads c252
     if (vsCopy) D3D9Hooks::CallOriginalSetVertexShader(dev, vsCopy);
+#ifdef APEX_F10_STUDY
+    F10Study::CompositionShader(dev, ps, useDither ? copy.ps : ps, vsCopy ? vsCopy : vs, useDither);
+#endif
     draw();
     if (vsCopy) D3D9Hooks::CallOriginalSetVertexShader(dev, vs);
     if (useDither) {

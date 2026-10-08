@@ -24,7 +24,6 @@ simMaxShade = 0.23517785966396332
 simStrength = 0.30582213401794434
 transparentHair = true
 temporal = true
-halfRes = true
 thinDetail = false
 thickness = 0.75
 
@@ -200,7 +199,6 @@ simMaxShade = 0.11
 simStrength = 0.4
 transparentHair = true
 temporal = true
-halfRes = false
 thinDetail = false
 thickness = 0.75
 
@@ -376,7 +374,6 @@ simMaxShade = 0.11
 simStrength = 0.4
 transparentHair = true
 temporal = true
-halfRes = false
 thinDetail = true
 thickness = 0.75
 

@@ -1,3 +1,5 @@
+> Release 2.11.0 adds independent Color groups and optional filter shortcuts, removes half-resolution AO and recognizes both recorded hidden-UI colour-write states. See the current feature and validation pages; final-image parity across every backend is not established.
+
 > Current release 2.10.1: exterior wall lighting reuses the existing per-point floor lookup. The reported Build/Buy scene updates faster; no numerical latency/FPS gain is claimed. Lighting parameters and solve policies are preserved. Release assets use `ApexFlavorDefines=APEX_NO_DEV_TOOLS`; developer builds remain local. Read the affected feature/validation/history pages before further lighting changes.
 
 # CLAUDE.md: Apex Radiance

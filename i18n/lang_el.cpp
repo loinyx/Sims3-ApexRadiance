@@ -9,6 +9,22 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Greek}
 const I18n::Pair kPairs[] = {
+    {"Brightness, contrast, saturation, temperature and sharpness", "Φωτεινότητα, αντίθεση, κορεσμός, θερμοκρασία και ευκρίνεια"},
+    {"Midtones, shadows, highlights and blacks", "Μεσαίοι τόνοι, σκιές, φωτεινά σημεία και μαύρα"},
+    {"Tint, vibrance, film tones and color mixer", "Απόχρωση, ζωντάνια, κινηματογραφικοί τόνοι και μίξη χρωμάτων"},
+    {"Clarity and darker corners", "Καθαρότητα και πιο σκοτεινές γωνίες"},
+    {"Film looks, light, camera and retro effects", "Κινηματογραφικά στυλ, φως, κάμερα και ρετρό εφέ"},
+    {"Color is off; your adjustments are kept", "Το Χρώμα είναι κλειστό· οι ρυθμίσεις διατηρούνται"},
+    {"Adjust this filter", "Ρύθμιση φίλτρου"},
+    {"Filter shortcuts", "Συντομεύσεις φίλτρου"},
+    {"Assign shortcut", "Ορισμός συντόμευσης"},
+    {"Change shortcut", "Αλλαγή συντόμευσης"},
+    {"Remove shortcut", "Αφαίρεση συντόμευσης"},
+    {"Filter shortcut", "Συντόμευση φίλτρου"},
+    {"Press the keys together, then choose Save", "Πατήστε τα πλήκτρα μαζί και επιλέξτε Αποθήκευση"},
+    {"Waiting for keys", "Αναμονή πλήκτρων"},
+    {"This shortcut is already in use", "Αυτή η συντόμευση χρησιμοποιείται ήδη"},
+
     {"See what is in use; click a resource to open its settings", "Δες τι χρησιμοποιείται· κάνε κλικ σε μια λειτουργία για τις ρυθμίσεις της"},
     {"Performance and screen", "Επιδόσεις και οθόνη"},
     {"Waiting for game settings", "Αναμονή για τις ρυθμίσεις του παιχνιδιού"},
@@ -1580,8 +1596,6 @@ const I18n::Pair kPairs[] = {
     {"Blends the last frames, each with other sample angles: a smooth shade even at low quality", "Αναμειγνύει τα τελευταία καρέ, το καθένα με άλλες γωνίες δειγμάτων: ομαλή σκιά ακόμη και σε χαμηλή ποιότητα"},
     {"Thin object detail", "Λεπτομέρεια λεπτών αντικειμένων"},
     {"Objects get thickness: no shade halo behind legs and rails. Costs more GPU", "Τα αντικείμενα αποκτούν πάχος: χωρίς άλω σκιάς πίσω από πόδια και κάγκελα. Κοστίζει περισσότερη GPU"},
-    {"Half resolution", "Μισή ανάλυση"},
-    {"A quarter of the pixels: much lighter, a bit softer. Best with Temporal smoothing", "Το ένα τέταρτο των pixel: πολύ πιο ελαφρύ, λίγο πιο απαλό. Καλύτερο με Χρονική εξομάλυνση"},
     {"Object thickness", "Πάχος αντικειμένων"},
     {"How deep objects are taken to be for Thin object detail: less shows more light behind thin things", "Πόσο βαθιά θεωρούνται τα αντικείμενα για τη Λεπτομέρεια λεπτών αντικειμένων: λιγότερο δείχνει περισσότερο φως πίσω από λεπτά πράγματα"},
     {"Reset Ambient Occlusion", "Επαναφορά Ambient Occlusion"},
@@ -1913,6 +1927,19 @@ const I18n::Pair kPairs[] = {
     {"official Sims3SettingsSetter not loaded", "το επίσημο Sims3SettingsSetter δεν φορτώθηκε"},
     {"; OLD COMBINED BUILD loaded ({}): Apex Radiance's features stay off", "· ΠΑΛΙΑ ΣΥΝΔΥΑΣΜΕΝΗ ΕΚΔΟΣΗ φορτώθηκε ({}): οι λειτουργίες του Apex Radiance μένουν ανενεργές"},
     {"; an older {} is also installed (idle): delete it from Game\\Bin", "· είναι εγκατεστημένο και ένα παλιότερο {} (αδρανές): διάγραψέ το από το Game\\Bin"},
+    {"The menu now supports all 21 game languages", "Το μενού υποστηρίζει πλέον και τις 21 γλώσσες του παιχνιδιού"},
+    {"Apex catches its own errors instead of closing the game", "Το Apex χειρίζεται τα δικά του σφάλματα αντί να κλείνει το παιχνίδι"},
+    {"Lamp cones and foundation lighting are more accurate", "Οι κώνοι φωτός και ο φωτισμός των θεμελίων είναι πιο ακριβείς"},
+    {"All Lighting options are enabled in the starting profiles", "Όλες οι επιλογές Φωτισμού είναι ενεργές στα αρχικά προφίλ"},
+    {"Ground lamps light upper-story walls with smoother falloff", "Οι λάμπες στο έδαφος φωτίζουν τους τοίχους των πάνω ορόφων με πιο ομαλή εξασθένηση"},
+    {"Light behind balconies: softer light and shadows on walls above", "Φως πίσω από μπαλκόνια: πιο απαλό φως και σκιές στους τοίχους από πάνω"},
+    {"Doors and windows on foundations receive lamp light; walls keep it out of enclosed yards", "Πόρτες και παράθυρα σε θεμέλια δέχονται φως· οι τοίχοι το εμποδίζουν στις κλειστές αυλές"},
+    {"Captures use less storage, and editing lamps takes less repeated work", "Οι καταγραφές πιάνουν λιγότερο χώρο και οι αλλαγές στις λάμπες απαιτούν λιγότερους επαναλαμβανόμενους υπολογισμούς"},
+    {"Placing and moving outdoor lamps updates wall lighting faster, especially on multi-story lots", "Η τοποθέτηση και μετακίνηση εξωτερικών λαμπών ενημερώνει πιο γρήγορα το φως στους τοίχους, κυρίως σε πολυώροφα οικόπεδα"},
+    {"Lighting colors, brightness, shadows and reach are unchanged", "Τα χρώματα, η φωτεινότητα, οι σκιές και η εμβέλεια του φωτός παραμένουν ίδια"},
+    {"Color groups have their own switches and keep your adjustments", "Οι ομάδες χρώματος έχουν δικούς τους διακόπτες και διατηρούν τις ρυθμίσεις σας"},
+    {"Right-click a filter to assign an optional keyboard shortcut", "Κάντε δεξί κλικ σε φίλτρο για να ορίσετε προαιρετική συντόμευση πληκτρολογίου"},
+    {"Hidden-interface effects recognize both recorded color-write states", "Τα εφέ με κρυφή διεπαφή αναγνωρίζουν και τις δύο καταγεγραμμένες καταστάσεις εγγραφής χρώματος"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Greek, kPairs, std::size(kPairs));

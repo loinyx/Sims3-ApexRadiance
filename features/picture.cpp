@@ -17,6 +17,7 @@
 #define NOMINMAX
 #endif
 #include "picture.h"
+#include "hotkeys.h"
 #include "apex_config.h"
 #include "apex_log.h"
 #include "hook_guard.h"
@@ -1216,6 +1217,73 @@ const FilterBoolKey kFilterBools[] = {
     {"filmic_pass", &PictureParams::filmic}, {"tint_filter", &PictureParams::tintFilter}, {"levels", &PictureParams::levels},
     {"lut", &PictureParams::lut}, {"auto_exposure", &PictureParams::autoExposure}, {"cas", &PictureParams::cas},
     {"daltonize", &PictureParams::daltonize}, {"daltonize_simulate", &PictureParams::daltonSimulate}, {"grain_animated", &PictureParams::grainAnimated}};
+// Exclude auxiliary mode switches (auto focus, simulation and animated grain).
+const FilterBoolKey kToggleFilters[] = {
+    {"technicolor1", &PictureParams::tech1},
+    {"technicolor2", &PictureParams::tech2},
+    {"dpx", &PictureParams::dpx},
+    {"colourfulness", &PictureParams::colourful},
+    {"night_mode", &PictureParams::night},
+    {"vintage", &PictureParams::vintage},
+    {"cross_process", &PictureParams::crossProcess},
+    {"black_and_white", &PictureParams::bw},
+    {"glow", &PictureParams::glow},
+    {"halation", &PictureParams::halation},
+    {"dreamy", &PictureParams::dreamy},
+    {"fake_hdr", &PictureParams::fakeHdr},
+    {"emphasize", &PictureParams::emphasize},
+    {"tilt_shift", &PictureParams::tiltShift},
+    {"prism", &PictureParams::prism},
+    {"grain", &PictureParams::grain},
+    {"retro_3dfx", &PictureParams::retro3dfx},
+    {"crt", &PictureParams::crt},
+    {"filmic_pass", &PictureParams::filmic},
+    {"tint_filter", &PictureParams::tintFilter},
+    {"levels", &PictureParams::levels},
+    {"lut", &PictureParams::lut},
+    {"auto_exposure", &PictureParams::autoExposure},
+    {"cas", &PictureParams::cas},
+    {"daltonize", &PictureParams::daltonize},
+ };
+static_assert(std::size(kToggleFilters) == PictureParams::kFilterCount);
+std::atomic<int> g_filterRecording{-1};
+std::string g_filterRecordingName; // render-thread UI label of the filter being edited
+std::atomic<unsigned> g_filterRequests{0};
+std::mutex g_filterCaptureMutex;
+FilterShortcut g_filterCaptured;
+std::atomic<bool> g_filterCaptureCancelled{false};
+
+FilterShortcut HeldFilterKeys() {
+    FilterShortcut b;
+    for (unsigned k=7; k<256; ++k) {
+        if (k>=VK_LSHIFT && k<=VK_RMENU) continue;
+        if (GetKeyState(k)<0) b.Add(k);
+    }
+    return b;
+}
+std::string FilterKeyText(const FilterShortcut& b) {
+    std::string text;
+    auto append=[&](unsigned k) { if (!text.empty()) text += "+"; text += ApexConfig::KeyName(k); };
+    for (unsigned k : {unsigned(VK_CONTROL),unsigned(VK_SHIFT),unsigned(VK_MENU)}) if (b.Has(k)) append(k);
+    for (unsigned k=7;k<256;++k) if (k!=VK_CONTROL && k!=VK_SHIFT && k!=VK_MENU && b.Has(k)) append(k);
+    return text;
+}
+FilterShortcut SingleChord(const ApexConfig::KeyChord& k) {
+    FilterShortcut b; if (!k.vk) return b;
+    b.Add(k.vk); if(k.ctrl)b.Add(VK_CONTROL); if(k.shift)b.Add(VK_SHIFT); if(k.alt)b.Add(VK_MENU); return b;
+}
+bool ReservedFilterKeys(const FilterShortcut& b) {
+    if(b.Empty()) return false;
+    const auto ui=ApexConfig::GetUi();
+    if (b==SingleChord(ui.toggle) || b==SingleChord(ui.searchKey) || b==SingleChord(ui.peekKey) ||
+        b==SingleChord(ui.pictureCompareKey) || b==SingleChord({VK_F10,false,false,false})) return true;
+    for (int i=0;i<int(Hotkeys::Action::Count);++i) {
+        if (i==int(Hotkeys::Action::Screenshot) && !ui.screenshotShortcutEnabled) continue;
+        if (b==SingleChord(Hotkeys::Key(Hotkeys::Action(i)))) return true;
+    }
+    return false;
+}
+
 const FilterFloatKey kFilterFloats[] = {
     {"technicolor1_amount", &PictureParams::tech1Amount}, {"technicolor1_cyan", &PictureParams::tech1Cyan},
     {"technicolor1_saturation", &PictureParams::tech1Saturation}, {"technicolor2_amount", &PictureParams::tech2Amount},
@@ -1262,7 +1330,7 @@ const FilterArrayKey kFilterArrays[] = {{"technicolor2_dye", &PictureParams::tec
                                         {"filmic_curve", &PictureParams::filmicCurve}};
 
 const char* const kKeys[] = {"enabled", "exposure", "contrast", "midtones", "shadows", "highlights", "blacks", "temperature", "tint", "saturation", "vibrance",
-                             "shadow_hue", "shadow_tint", "highlight_hue", "highlight_tint", "mixer", "deband", "sharpen", "clarity", "vignette", "vignette_size"};
+                             "shadow_hue", "shadow_tint", "highlight_hue", "highlight_tint", "mixer", "deband", "sharpen", "clarity", "vignette", "vignette_size", "basic_enabled", "tones_enabled", "color_enabled", "detail_enabled", "filters_enabled", "filters", "filter_shortcuts"};
 
 } // namespace
 
@@ -1376,6 +1444,18 @@ bool Picture::InitResources(IDirect3DDevice9* dev) {
 // Fix is on. That smoothing-only pass is skipped in a frame without a copy of the scene (it would smooth the game's menus).
 static PictureParams Effective(const PictureParams& q) {
     PictureParams e = q.enabled ? q : PictureParams{};
+    const PictureParams neutral{};
+    if (!q.basicEnabled) {
+        e.exposure=neutral.exposure; e.contrast=neutral.contrast; e.saturation=neutral.saturation;
+        e.temperature=neutral.temperature; e.sharpen=neutral.sharpen;
+    }
+    if (!q.tonesEnabled) { e.midtones=neutral.midtones; e.shadows=neutral.shadows; e.highlights=neutral.highlights; e.blacks=neutral.blacks; }
+    if (!q.colorEnabled) {
+        e.tint=neutral.tint; e.vibrance=neutral.vibrance; e.shadowTint=neutral.shadowTint; e.highlightTint=neutral.highlightTint;
+        std::copy(std::begin(neutral.mixer),std::end(neutral.mixer),std::begin(e.mixer));
+    }
+    if (!q.detailEnabled) { e.clarity=neutral.clarity; e.vignette=neutral.vignette; }
+    if (!q.filtersEnabled) for (const auto& f : kToggleFilters) e.*f.field=false;
     e.deband = SceneDither::On() ? q.deband : 0.0f;
     e.enabled = q.enabled || e.deband > 0.001f;
     if (!q.enabled) e.compare = false;
@@ -1417,6 +1497,7 @@ static void LogGates(IDirect3DDevice9* dev, int skip) {
 }
 
 void Picture::OnEndScene(IDirect3DDevice9* dev) {
+    ProcessFilterKeys();
     const PictureParams raw = GetParams(), q = Effective(raw);
     if (!g_atBoundary && raw.enabled) LogGates(dev, m_skip.load());
     if (!dev || !q.enabled) {
@@ -1787,7 +1868,8 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
     }
     const float x1 = W - 0.5f, y1 = H - 0.5f;
     const QuadVertex v[4] = {{-0.5f, -0.5f, 0, 1, 0, 0}, {x1, -0.5f, 0, 1, 1, 0}, {-0.5f, y1, 0, 1, 0, 1}, {x1, y1, 0, 1, 1, 1}};
-    dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(QuadVertex));
+    const HRESULT drawResult=dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(QuadVertex));
+    if (g_atBoundary && SUCCEEDED(drawResult)) m_lastSceneBoundary.store(now);
 
     for (size_t i = 0; i < std::size(kRS); i++) dev->SetRenderState(kRS[i], rs[i]);
     for (DWORD s = 0; s < kSamplers; s++) {
@@ -1824,6 +1906,7 @@ void Picture::SetParams(const PictureParams& p, bool save) {
         std::lock_guard<std::mutex> lock(m_mutex);
         switched = m_p.enabled != p.enabled;
         m_p = p;
+        m_filterKeysPresent.store(std::any_of(p.filterShortcuts.begin(),p.filterShortcuts.end(),[](const auto& b){return !b.Empty();}));
     }
     m_checkPasses.store(3, std::memory_order_relaxed);
     if (save) LOG_INFO("[Picture] Settings saved: " + ParamsText(p));
@@ -1838,9 +1921,9 @@ void Picture::SetParams(const PictureParams& p, bool save) {
 void Picture::HoldBypass() { m_holdUntil.store(GetTickCount64() + 150); }
 
 bool Picture::MenusTinted() const {
-    if (!GetParams().enabled) return false;
+    if (!GetParams().enabled || !WorldSession::InWorld()) return false;
     const unsigned long long now = GetTickCount64();
-    const unsigned long long since = std::max(m_enabledAt.load(), m_lastSceneCopy.load());
+    const unsigned long long since = std::max({m_enabledAt.load(), m_lastSceneCopy.load(), m_lastSceneBoundary.load()});
     return now - m_lastApplied.load() < kProblemAfterMs && now - since >= kProblemAfterMs;
 }
 
@@ -1895,6 +1978,15 @@ void Picture::SaveToToml(toml::table& qolTable) const {
 void Picture::ParamsToToml(const PictureParams& q, toml::table& qolTable) {
     toml::table pt;
     pt.insert("enabled", q.enabled);
+    pt.insert("basic_enabled",q.basicEnabled); pt.insert("tones_enabled",q.tonesEnabled);
+    pt.insert("color_enabled",q.colorEnabled); pt.insert("detail_enabled",q.detailEnabled); pt.insert("filters_enabled",q.filtersEnabled);
+    toml::table shortcuts;
+    for (size_t i=0;i<std::size(kToggleFilters);++i) if (!q.filterShortcuts[i].Empty()) {
+        toml::array keys;
+        for (unsigned k=7;k<256;++k) if(q.filterShortcuts[i].Has(k)) keys.push_back(int(k));
+        shortcuts.insert(kToggleFilters[i].key,std::move(keys));
+    }
+    pt.insert("filter_shortcuts",std::move(shortcuts));
     pt.insert("exposure", static_cast<double>(q.exposure));
     pt.insert("contrast", static_cast<double>(q.contrast));
     pt.insert("midtones", static_cast<double>(q.midtones));
@@ -1938,6 +2030,7 @@ void Picture::LoadFromToml(const toml::table& qolTable) {
     if (!ParamsFromToml(qolTable, q)) return;
     std::lock_guard<std::mutex> lock(m_mutex);
     m_p = q;
+    m_filterKeysPresent.store(std::any_of(q.filterShortcuts.begin(),q.filterShortcuts.end(),[](const auto& b){return !b.Empty();}));
 }
 
 bool Picture::ParamsFromToml(const toml::table& qolTable, PictureParams& out) {
@@ -1947,6 +2040,15 @@ bool Picture::ParamsFromToml(const toml::table& qolTable, PictureParams& out) {
     PictureParams q;
     auto f = [&](const char* key, float& v) { v = static_cast<float>(t[key].value_or(static_cast<double>(v))); };
     q.enabled = t["enabled"].value_or(false);
+    q.basicEnabled=t["basic_enabled"].value_or(true); q.tonesEnabled=t["tones_enabled"].value_or(true);
+    q.colorEnabled=t["color_enabled"].value_or(true); q.detailEnabled=t["detail_enabled"].value_or(true); q.filtersEnabled=t["filters_enabled"].value_or(true);
+    if (const auto* keys=t["filter_shortcuts"].as_table()) for (size_t i=0;i<std::size(kToggleFilters);++i) {
+        if (const auto* a=(*keys)[kToggleFilters[i].key].as_array()) {
+            FilterShortcut b; bool valid=true;
+            for (const auto& node:*a) { const auto k=node.value<int>(); if(!k || *k<7 || *k>255) {valid=false;break;} b.Add(unsigned(*k)); }
+            if(valid && b.HasMainKey()) q.filterShortcuts[i]=b;
+        }
+    }
     f("exposure", q.exposure);
     f("contrast", q.contrast);
     f("midtones", q.midtones);
@@ -2037,7 +2139,8 @@ void Picture::RenderUI(int tab) {
         slide(label, v, 0.0f, 360.0f, o);
     };
 
-    if (!q.enabled) ImGui::BeginDisabled(); // visible but greyed out while Picture is off
+    const bool disabled=!q.enabled || !q.Group(tab);
+    if (disabled) ImGui::BeginDisabled(); // visible but greyed out while Picture is off
     switch (tab) {
     case TabTones:
         percent("Midtones", &q.midtones, 0.6f, 1.6f, "Brighten or darken the middle tones; great for dark rooms", kDef.midtones);
@@ -2102,7 +2205,7 @@ void Picture::RenderUI(int tab) {
     }
     }
 
-    if (!q.enabled) ImGui::EndDisabled();
+    if (disabled) ImGui::EndDisabled();
     if (changed) SetParams(q, save);
 }
 
@@ -2150,20 +2253,79 @@ void Picture::RenderFiltersUI() {
             save = true;
         }
     };
-    // A filter's card: icon, name and what it does in the header, with its switch; the controls only while it is on
+    // One panel per family; every filter keeps its complete controls behind an independent disclosure.
+    bool familyOpen=false, familyVisible=false;
+    int requestEditor=-1;
+    auto family=[&](const char* label) {
+        if(familyOpen) ApexUi::EndCard();
+        ApexUi::SectionLabel(label);
+        familyVisible=ApexUi::BeginCard(label); familyOpen=true;
+    };
     auto card = [&](const char* id, IconId icon, const char* name, const char* what, bool* on, auto&& controls) {
+        if(!familyVisible) return;
         ImGui::PushID(id);
-        if (ApexUi::BeginCard("##Card")) {
-            if (ApexUi::CardHeader(icon, name, what, nullptr, on, q.enabled)) {
-                changed = true;
-                save = true;
+        if(ApexUi::FilterActive()) {
+            if(ApexUi::CardHeader(icon,name,what,nullptr,on,q.enabled && q.filtersEnabled)) changed=save=true;
+            ImGui::BeginDisabled(!q.enabled || !q.filtersEnabled || !*on);
+            controls(); ImGui::EndDisabled(); ImGui::PopID(); return;
+        }
+        int index=-1;
+        for(size_t i=0;i<std::size(kToggleFilters);++i) if(&(q.*kToggleFilters[i].field)==on) index=int(i);
+        const std::string key=index>=0 ? FilterKeyText(q.filterShortcuts[index]) : "";
+        const float u=ApexUi::Unit(), gap=ApexUi::kSpace2*u;
+        const ImVec2 switchSize=ApexUi::ToggleSwitchSize();
+        const float rowWidth=ImGui::GetContentRegionAvail().x;
+        std::string tag=key;
+        const float tagBudget=std::max(18.0f*u,rowWidth-(24.0f+24.0f)*u-switchSize.x-gap*3);
+        bool shortened=false;
+        while(!tag.empty() && ApexUi::ChipSize((tag+(shortened?"…":"")).c_str()).x>tagBudget) {
+            const auto cut=tag.find_last_of('+');
+            tag=cut==std::string::npos ? std::string() : tag.substr(0,cut);
+            shortened=true;
+        }
+        if(shortened) tag+="…";
+        const float chipW=tag.empty() ? 0.0f : ApexUi::ChipSize(tag.c_str()).x+gap;
+        // Keep the switch and its tag as one right-aligned cluster, including narrow layouts.
+        const float controlsW=(24.0f+24.0f)*u+switchSize.x+gap*2+chipW;
+        const ImVec2 rowStart=ImGui::GetCursorScreenPos();
+        const bool visible=ApexUi::BeginControlRow(name,what,controlsW,icon,30.0f*u);
+        if(visible) {
+            bool expanded=ImGui::GetStateStorage()->GetBool(ImGui::GetID("Expanded"),false);
+            const float centerY=ImGui::GetCursorScreenPos().y+15.0f*u;
+            auto center=[&](float h){ImGui::SetCursorPosY(centerY-ImGui::GetWindowPos().y+ImGui::GetScrollY()-h*0.5f);};
+            center(24*u);
+            if(ApexUi::IconButton("##Adjust",expanded?IconId::ChevronUp:IconId::ChevronDown,"Adjust this filter",expanded)) {
+                expanded=!expanded; ImGui::GetStateStorage()->SetBool(ImGui::GetID("Expanded"),expanded);
             }
-            if (*on) {
-                ApexUi::CardDivider();
+            ImGui::SameLine(0,gap); center(24*u);
+            if(ApexUi::IconButton("##Shortcuts",IconId::Ellipsis,"Filter shortcuts")) ImGui::OpenPopup("Filter actions");
+            ImGui::SameLine(0,gap);
+            if(!key.empty()) {
+                center(ApexUi::ChipSize(tag.c_str()).y); ApexUi::Chip(tag.c_str());
+                if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",key.c_str());
+                ImGui::SameLine(0,gap);
+            }
+            center(switchSize.y);
+            ImGui::BeginDisabled(!q.enabled || !q.filtersEnabled);
+            if(ApexUi::ToggleSwitch("##On",on)) {changed=save=true;ApexUi::ReportChange(name);}
+            ImGui::EndDisabled();
+            ApexUi::EndControlRow();
+            const ImVec2 rowEnd(rowStart.x+rowWidth,ImGui::GetCursorScreenPos().y);
+            if(ImGui::IsMouseHoveringRect(rowStart,rowEnd) && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("Filter actions");
+            if(ImGui::BeginPopup("Filter actions")) {
+                if(ImGui::MenuItem(I18n::Tr(key.empty()?"Assign shortcut":"Change shortcut"))) {
+                    requestEditor=index; g_filterRecordingName=I18n::Tr(name);
+                }
+                if(ImGui::MenuItem(I18n::Tr("Remove shortcut"),nullptr,false,!key.empty())) {q.filterShortcuts[index]={};changed=save=true;}
+                ImGui::EndPopup();
+            }
+            if(expanded) {
+                ApexUi::Gap(ApexUi::kSpace3);
+                ImGui::BeginDisabled(!q.enabled || !q.filtersEnabled || !*on);
                 controls();
+                ImGui::EndDisabled();
             }
         }
-        ApexUi::EndCard();
         ImGui::PopID();
     };
     // "Reset this filter": the given settings of the card back to their defaults (its switch stays as it is)
@@ -2184,10 +2346,9 @@ void Picture::RenderFiltersUI() {
             ApexUi::IconNote(IconId::Info, "Needs the scene depth: turn off the game's Edge Smoothing (Options \xE2\x80\xBA Graphics)");
     };
 
-    if (!q.enabled) ImGui::BeginDisabled();
-    ApexUi::IconNote(IconId::Info, "Filters add up: switch on as many as you like, each with its own strength");
 
-    ApexUi::SectionLabel("FILM LOOKS");
+
+    family("FILM LOOKS");
     card("Technicolor1", IconId::Palette, "Technicolor 1", "Classic two-strip film: everything turns red or cyan", &q.tech1, [&] {
         percent("Amount", &q.tech1Amount, 0.0f, 1.0f, "How much of the look is mixed in", kDef.tech1Amount);
         signedAmount("Cyan side", &q.tech1Cyan, kDef.tech1Cyan, "What the cyan half of the picture leans to", "Greener", "Bluer");
@@ -2270,7 +2431,7 @@ void Picture::RenderFiltersUI() {
                      "Shadows", "Highlights");
         resetFilter(&P::tintFilterAmount, &P::tintFilterHue, &P::tintPreserve, &P::tintBalance);
     });
-    ApexUi::SectionLabel("COLOR AND MOOD");
+    family("COLOR AND MOOD");
     card("Colourfulness", IconId::Rainbow, "Colorfulness", "Livelier colors without blowing out the bright ones", &q.colourful, [&] {
         signedAmount("Amount", &q.colourfulAmount, kDef.colourfulAmount, "More vivid, or more muted", "Muted", "Vivid");
         if (ApexUi::BeginAdvanced("ColourfulnessAdvanced")) {
@@ -2342,7 +2503,7 @@ void Picture::RenderFiltersUI() {
         if (ApexUi::IconTextButton("Open the LUTs folder", IconId::ExternalLink, "Opens Apex Radiance\\LUTs in Explorer (created if needed)")) ShowLutFolder();
     });
 
-    ApexUi::SectionLabel("LIGHT AND DETAIL");
+    family("LIGHT AND DETAIL");
     card("AutoExposure", IconId::SunMedium, "Auto exposure", "The picture slowly adapts to dark and bright views, like your eyes", &q.autoExposure, [&] {
         percent("Amount", &q.autoAmount, 0.0f, 1.0f, "How much the brightness follows the view", kDef.autoAmount);
         percent("Target brightness", &q.autoTarget, 0.0f, 1.0f, "The brightness the picture adapts toward", kDef.autoTarget);
@@ -2398,7 +2559,7 @@ void Picture::RenderFiltersUI() {
         resetFilter(&P::hdrAmount, &P::hdrRadius, &P::hdrShadows, &P::hdrHighlights, &P::hdrHalo, &P::hdrSaturation);
     });
 
-    ApexUi::SectionLabel("CAMERA");
+    family("CAMERA");
     card("Emphasize", IconId::Crosshair, "Emphasize", "Full color on what you look at, the rest fades to grey", &q.emphasize, [&] {
         percent("Amount", &q.emphAmount, 0.0f, 1.0f, "How strong the effect is", kDef.emphAmount);
         percent("Focus depth", &q.emphWidth, 0.0f, 2.0f, "How deep the colorful zone is, compared with its distance", kDef.emphWidth);
@@ -2454,7 +2615,7 @@ void Picture::RenderFiltersUI() {
         resetFilter(&P::grainAmount, &P::grainSize, &P::grainAnimated, &P::grainShadows, &P::grainColor);
     });
 
-    ApexUi::SectionLabel("RETRO AND STYLE");
+    family("RETRO AND STYLE");
     card("3DFX", IconId::Gamepad2, "3DFX", "Late-90s 3D card: 16-bit color, dithering and fine lines", &q.retro3dfx, [&] {
         percent("Amount", &q.fxAmount, 0.0f, 1.0f, "How much of the look is mixed in", kDef.fxAmount);
         {
@@ -2487,7 +2648,7 @@ void Picture::RenderFiltersUI() {
         }
         resetFilter(&P::crtAmount, &P::crtCurvature, &P::crtMask, &P::crtScanlines, &P::crtEdges);
     });
-    ApexUi::SectionLabel("ACCESSIBILITY");
+    family("ACCESSIBILITY");
     card("ColorBlind", IconId::Eye, "Color-blind mode", "Moves the colors you cannot tell apart into ones you can", &q.daltonize, [&] {
         static const char* const kTypes[] = {"Red (protanopia)", "Green (deuteranopia)", "Blue (tritanopia)"};
         int type = static_cast<int>(std::lround(std::clamp(q.daltonType, 0.0f, 2.0f)));
@@ -2499,7 +2660,58 @@ void Picture::RenderFiltersUI() {
         toggle("Simulate", &q.daltonSimulate, "Shows the picture as seen with this color blindness, to check it", kDef.daltonSimulate);
         resetFilter(&P::daltonType, &P::daltonAmount, &P::daltonSimulate);
     });
-    if (!q.enabled) ImGui::EndDisabled();
+    if(familyOpen) ApexUi::EndCard();
+    if(requestEditor>=0) {
+        {std::lock_guard<std::mutex> lock(g_filterCaptureMutex);g_filterCaptured={};}
+        g_filterCaptureCancelled=false; g_filterRecording=requestEditor;
+        ImGui::OpenPopup(I18n::Tr("Filter shortcut"));
+    }
+    bool editorOpen=true;
+    const float modalWidth=std::max(1.0f,std::min(480*ApexUi::Unit(),ImGui::GetIO().DisplaySize.x-32.0f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(modalWidth,0),ImVec2(modalWidth,FLT_MAX));
+    ImGui::SetNextWindowSize(ImVec2(modalWidth,0),ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),ImGuiCond_Appearing,ImVec2(.5f,.5f));
+    if(ImGui::BeginPopupModal(I18n::Tr("Filter shortcut"),&editorOpen,ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_AlwaysAutoResize)) {
+        {
+            ApexUi::ControlSizeScope size(ApexUi::ControlSize::Primary);
+            bool close=false;
+            ApexUi::HeaderExtra extra; extra.iconOff=extra.iconOn=IconId::X; extra.value=&close; extra.tooltip="Cancel";
+            ApexUi::CardHeader(IconId::Keyboard,"Filter shortcut",g_filterRecordingName.c_str(),nullptr,nullptr,true,&extra);
+            ApexUi::CardDivider();
+            ApexUi::MutedText(I18n::Tr("Press the keys together, then choose Save"));
+            ApexUi::Gap(ApexUi::kSpace2);
+            FilterShortcut binding;
+            {std::lock_guard<std::mutex> lock(g_filterCaptureMutex);binding=g_filterCaptured;}
+            const auto text=FilterKeyText(binding);
+            std::string shown=text.empty()?I18n::Tr("Waiting for keys"):text;
+            ImGui::SetNextItemWidth(-1);
+            ImGui::InputText("##RecordedKeys",shown.data(),shown.size()+1,ImGuiInputTextFlags_ReadOnly);
+            if(ImGui::IsItemHovered()&&!text.empty()) ImGui::SetTooltip("%s",text.c_str());
+            const int recording=g_filterRecording.load();
+            bool conflict=ReservedFilterKeys(binding);
+            for(size_t i=0;i<q.filterShortcuts.size();++i) if(int(i)!=recording && !binding.Empty() && binding==q.filterShortcuts[i]) conflict=true;
+            if(conflict) ApexUi::IconNote(IconId::TriangleAlert,"This shortcut is already in use");
+            ApexUi::Gap(ApexUi::kSpace3);
+            ApexUi::CardDivider();
+            const float available=ImGui::GetContentRegionAvail().x;
+            const float cancelWidth=ApexUi::ButtonWidth("Cancel",false),saveWidth=ApexUi::ButtonWidth("Save",false);
+            const float total=cancelWidth+ImGui::GetStyle().ItemSpacing.x+saveWidth;
+            const bool oneRow=total<=available;
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX()+std::max(0.0f,available-(oneRow?total:cancelWidth)));
+            if(ApexUi::TextButton("Cancel") || close || !editorOpen || g_filterCaptureCancelled.exchange(false)) {
+                g_filterRecording=-1; ImGui::CloseCurrentPopup();
+            }
+            if(oneRow) ImGui::SameLine();
+            else ImGui::SetCursorPosX(ImGui::GetCursorPosX()+std::max(0.0f,ImGui::GetContentRegionAvail().x-saveWidth));
+            ImGui::BeginDisabled(recording<0 || g_filterRecording.load()!=recording || !binding.HasMainKey() || conflict);
+            if(ApexUi::TextButton("Save",nullptr,ApexUi::ButtonKind::Primary)) {
+                q.filterShortcuts[recording]=binding; changed=save=true;
+                g_filterRecording=-1;ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndDisabled();
+        }
+        ImGui::EndPopup();
+    } else if(g_filterRecording>=0) g_filterRecording=-1;
     if (changed) SetParams(q, save);
 }
 
@@ -2507,4 +2719,28 @@ void Picture::RenderDeveloperUI() {
     ImGui::TextDisabled("Runs on the 8-bit image with a fixed dither: the grading adds no banding.");
     if (m_gpuMs >= 0) ImGui::TextDisabled("GPU cost: %.2f ms per frame", m_gpuMs);
     else ImGui::TextDisabled("GPU cost: not measured yet (Picture off, or no frame drawn)");
+}
+
+bool Picture::RecordingFilterShortcut() { return g_filterRecording.load()>=0; }
+bool Picture::FilterKeyDown(WPARAM vk,bool repeat) {
+    if(g_filterRecording.load()>=0) {
+        if(vk==VK_ESCAPE) g_filterCaptureCancelled=true;
+        else if(!repeat) {auto b=HeldFilterKeys();b.Add(unsigned(vk));if(b.HasMainKey()) {std::lock_guard<std::mutex> lock(g_filterCaptureMutex);g_filterCaptured=b;}}
+        return true;
+    }
+    if(!m_filterKeysPresent.load()) return false;
+    const auto q=GetParams();
+    int chosen=-1; unsigned count=0;
+    for(size_t i=0;i<q.filterShortcuts.size();++i) {
+        const auto& b=q.filterShortcuts[i];
+        if(b.Matches(unsigned(vk),[](unsigned key){return GetKeyState(key)<0;}) && b.Count()>count && !ReservedFilterKeys(b)) {chosen=int(i);count=b.Count();}
+    }
+    if(chosen<0) return false;
+    if(!repeat) g_filterRequests.fetch_xor(1u<<chosen); return true;
+}
+void Picture::ProcessFilterKeys() {
+    const unsigned requests=g_filterRequests.exchange(0); if(!requests) return;
+    auto q=GetParams();
+    for(size_t i=0;i<std::size(kToggleFilters);++i) if(requests&(1u<<i)) q.*kToggleFilters[i].field=!(q.*kToggleFilters[i].field);
+    SetParams(q,true);
 }

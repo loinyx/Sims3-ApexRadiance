@@ -166,3 +166,67 @@ screen-space shadows. Lights were placed at the world point under the screen's c
 **Context:** commit 410e521 gave the Banding Fix its own page.
 
 **Outcome:** *Smooth gradients* moved with it, and its default changed from 100% to 0% (off).
+
+### 2026-10-07: F10 changes the placement of screen effects
+
+**Evidence:** screenshots show brighter lamps and snow with the UI hidden. F7 probes retain the terrain shader and
+gain. Saved frame traces have identical world draw records through draw 1390; UI-visible effects precede 135
+point-filtered back-buffer copy/redraw operations, while hidden-UI effects follow them at EndScene. All four passes
+are present; a filter simply switching off is not supported by the logs.
+
+**Candidate:** recognise the game's reduced full-surface point snapshot before it executes, using a separate
+ExtraHooks callback that preserves the frame diagnostic observer. Keep the regular UI boundary and unknown-layout
+fallback. Values, lighting code and shaders remain unchanged. The 25-check native fixture passes; actual F10
+equivalence and the snapshot's unrecorded render states still need in-game validation.
+
+
+### 2026-10-07: first F10 candidate did not resolve the issue
+
+The installed ASI matches the first candidate SHA-256 BA6470FF70C792DAE03D0D523A412B0D3601775297A762BFAB1EE881881579DF.
+The player reported a more noticeable difference, also when using the F8 photo shortcut. The latest saved images at
+20:12:07 and 20:12:09 confirm brighter, warmer snow and walls without UI. The tested log contains no
+"before scene snapshot" marker; do not claim that this candidate changed effect placement in those frames.
+F8 player photos temporarily use F10 to hide the UI (features/captures.cpp).
+
+The new local 2.10.1-f10-diagnostic removes the candidate boundary. Its bounded copy observer logs the actual source
+and destination rectangles, depth/write/function, colour mask, sRGB states and shared-depth binding. A following
+ALWAYS/no-write redraw logs the sampler states, constants and shader bytecode. This observation invokes no effects,
+changes no D3D states and leaves the existing visible boundary and hidden EndScene fallback in place.
+At most four samples per applied/pending phase are collected, only after the world gate opens. After the sample
+budget the observer has no surface/state queries. 22 native fixture checks pass, including unchanged depth states,
+no effect invocation, preserved old boundaries and budget termination. Compilation is not proof of visual parity.
+
+
+### 2026-10-07: actual tile-copy evidence and second colour candidate
+
+The user clarified that all Color-page controls are affected, while lighting corrections work normally. The first
+image is the correct UI-visible reference. The installed diagnostic's hash is 4A4125BA5D6DEC0C5C51DA328F2142BA891C2192CBC460A6A48396DCB69CDEB3.
+Its saved 20:43 copy/redraw log reveals 256x256 source/destination rectangles at origin, not full-surface copies.
+At the hidden copy, depth is enabled / no write / LESSEQUAL and colour writes are RGB-only. The earlier candidate
+incorrectly required null rectangles and ALWAYS at the copy, so it never matched. The following redraw is ALWAYS.
+
+The captured redraw shader is identical in both phases. It samples s0 and computes RGB x*(1+c0)/(x+c0), with c0=0.4;
+this nonlinear transform does not commute with Color's exposure/contrast/temperature. With UI, the grade preceded
+that transform; without UI, the grade followed it. This supports an ordering cause for the observed discrepancy,
+not a lighting-solver regression or the controls switching off.
+
+Local candidate 2.10.1-f10-color-test2 learns the tile scratch identity only from an already-applied UI-visible frame.
+It runs the same ordered chain before the first hidden-UI tile only with the observed layout/states and shared depth.
+Unknown targets, arbitrary rectangles, linear copies, internal passes, depth mismatches, short scenes, reset and UI
+already drawn retain the existing paths. The callback marks completion before nested effect copies. Diagnostic shader
+bytecode dumping is removed. 34 native D3D9 fixture checks cover the four-effect order and acceptance/exclusion.
+Visual parity, cost and wrapper compatibility still require gameplay validation; no lighting source was edited.
+
+### Local Color controls candidate, 2026-10-07
+
+User approved the compact-list artifact: add Overview without profiles, independent switches for all five adjustment
+groups, complete filter controls behind disclosures, no default shortcuts, right-click assignment and a small tag
+left of each switch. The native implementation retains all 25 filter rows and their previous controls. Edge Smoothing
+moves to IMAGE. The successful-boundary timestamp corrects the repeated isolation warning without deleting its
+confirmed-failure condition. This is integrated with the existing F10 candidate; residual slight Color/Depth Blur
+differences reported in gameplay remain unresolved, and no lighting solver is changed.
+
+
+## Hidden UI colour-write states
+
+The initial snapshot/ALWAYS candidate was superseded after live GPU traces did not confirm its boundary. A learned point-filtered first-tile copy is used instead. Six later bounded events recorded complete masks 7 and 15 with depth enabled, no depth writes and LESSEQUAL. Rejecting 15 delayed the effect chain until EndScene. Both complete masks are now accepted; unsupported layouts, partial masks and unlearned targets retain the conservative fallback. Effect formulas are unchanged. Final-image equivalence across all backends remains unverified.
