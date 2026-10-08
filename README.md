@@ -4,7 +4,7 @@
 
 **A brighter world. A night worth looking at.**
 
-Give The Sims 3 a more beautiful, atmospheric look with Apex Radiance. Watch street lamps light the neighbourhood, houses glow after dark and nearby lights bring out the detail in gardens, buildings and water. Shape your own style with rich colour controls, film-inspired filters, softer shadows and cleaner edges, then capture it in screenshots. Alongside its visual improvements, Apex includes options designed to reduce everyday stutters—all brought together in a customisable in-game menu.
+Apex Radiance is more than an image filter. It works in The Sims 3’s lighting itself, correcting how lamp light is calculated and where it reaches: across terrain and lot borders, onto walls and upper floors, and around objects in the world. See neighbourhoods, homes and gardens come alive after dark, with reflections and lighting that respond to the scene. Colour controls, film-inspired filters, softer shadows and camera effects let you shape the final look, while optional performance improvements help reduce everyday stutters—all from one in-game menu.
 
 **Supported menu languages (21):** English, Portuguese, Spanish, French, German, Italian, Dutch, Swedish, Norwegian, Danish, Finnish, Czech, Polish, Hungarian, Greek, Russian, Japanese, Korean, Thai, Simplified Chinese and Traditional Chinese. Select a language in Settings or let the menu follow your Windows language.
 
