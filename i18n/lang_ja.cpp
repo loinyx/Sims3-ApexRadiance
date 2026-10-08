@@ -9,6 +9,22 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Japanese}
 const I18n::Pair kPairs[] = {
+    {"Brightness, contrast, saturation, temperature and sharpness", "明るさ、コントラスト、彩度、色温度、シャープネス"},
+    {"Midtones, shadows, highlights and blacks", "中間調、シャドウ、ハイライト、黒レベル"},
+    {"Tint, vibrance, film tones and color mixer", "色かぶり、自然な彩度、フィルム調、カラーミキサー"},
+    {"Clarity and darker corners", "明瞭度と周辺減光"},
+    {"Film looks, light, camera and retro effects", "フィルム調、光、カメラ、レトロ効果"},
+    {"Color is off; your adjustments are kept", "カラーはオフです。設定は保持されます"},
+    {"Adjust this filter", "このフィルターを調整"},
+    {"Filter shortcuts", "フィルターのショートカット"},
+    {"Assign shortcut", "ショートカットを設定"},
+    {"Change shortcut", "ショートカットを変更"},
+    {"Remove shortcut", "ショートカットを削除"},
+    {"Filter shortcut", "フィルターのショートカット"},
+    {"Press the keys together, then choose Save", "キーを同時に押してから「保存」を選んでください"},
+    {"Waiting for keys", "キー入力待ち"},
+    {"This shortcut is already in use", "このショートカットは使用中です"},
+
     {"See what is in use; click a resource to open its settings", "使用中のものを確認。リソースをクリックすると設定が開きます"},
     {"Performance and screen", "パフォーマンスと画面"},
     {"Waiting for game settings", "ゲーム設定を待っています"},
@@ -1580,8 +1596,6 @@ const I18n::Pair kPairs[] = {
     {"Blends the last frames, each with other sample angles: a smooth shade even at low quality", "直近のフレームを別のサンプル角度で混ぜ合わせます: 低品質でも滑らかな陰影に"},
     {"Thin object detail", "細いオブジェクトの詳細"},
     {"Objects get thickness: no shade halo behind legs and rails. Costs more GPU", "オブジェクトに厚みを持たせます: 脚や手すりの後ろに陰影のハローが出ません。GPU負荷が増えます"},
-    {"Half resolution", "半解像度"},
-    {"A quarter of the pixels: much lighter, a bit softer. Best with Temporal smoothing", "ピクセル数が4分の1: とても軽く、少しやわらかめ。時間方向のスムージングとの併用がおすすめ"},
     {"Object thickness", "オブジェクトの厚み"},
     {"How deep objects are taken to be for Thin object detail: less shows more light behind thin things", "「細いオブジェクトの詳細」で想定するオブジェクトの奥行き。小さいほど細い物の後ろに光が多く見えます"},
     {"Reset Ambient Occlusion", "アンビエントオクルージョンをリセット"},
@@ -1913,6 +1927,19 @@ const I18n::Pair kPairs[] = {
     {"official Sims3SettingsSetter not loaded", "公式Sims3SettingsSetterは読み込まれていません"},
     {"; OLD COMBINED BUILD loaded ({}): Apex Radiance's features stay off", "; 古い統合ビルドを読み込み済み（{}）: Apex Radianceの機能はオフのままです"},
     {"; an older {} is also installed (idle): delete it from Game\\Bin", "; 古い{}もインストールされています（待機中）: Game\\Binから削除してください"},
+    {"The menu now supports all 21 game languages", "メニューがゲームの全21言語に対応しました"},
+    {"Apex catches its own errors instead of closing the game", "Apex自身のエラーを処理し、ゲームの終了を防ぎます"},
+    {"Lamp cones and foundation lighting are more accurate", "光の円すいと土台の照明がより正確になりました"},
+    {"All Lighting options are enabled in the starting profiles", "初期プロフィールでは照明の全設定が有効です"},
+    {"Ground lamps light upper-story walls with smoother falloff", "地面のランプが上階の壁を照らし、光がよりなめらかに弱まります"},
+    {"Light behind balconies: softer light and shadows on walls above", "バルコニーの奥の光：上の壁に柔らかな光と影を加えます"},
+    {"Doors and windows on foundations receive lamp light; walls keep it out of enclosed yards", "土台上のドアと窓にランプの光が届き、囲まれた庭では壁が光を遮ります"},
+    {"Captures use less storage, and editing lamps takes less repeated work", "記録の容量が減り、ランプの編集時に繰り返す計算も減りました"},
+    {"Placing and moving outdoor lamps updates wall lighting faster, especially on multi-story lots", "屋外ランプの配置や移動で壁の照明がより速く更新されます。特に複数階の区画で効果があります"},
+    {"Lighting colors, brightness, shadows and reach are unchanged", "光の色、明るさ、影、届く範囲は変わりません"},
+    {"Color groups have their own switches and keep your adjustments", "色の各グループに個別のスイッチがあり、調整値は保持されます"},
+    {"Right-click a filter to assign an optional keyboard shortcut", "フィルターを右クリックすると任意のキーボードショートカットを設定できます"},
+    {"Corrected screen-effect timing when hiding the game interface", "ゲームUI非表示時の画面エフェクトの適用タイミングを修正"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Japanese, kPairs, std::size(kPairs));

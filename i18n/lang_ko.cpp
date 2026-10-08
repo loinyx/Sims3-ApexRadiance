@@ -9,6 +9,22 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Korean}
 const I18n::Pair kPairs[] = {
+    {"Brightness, contrast, saturation, temperature and sharpness", "밝기, 대비, 채도, 색온도 및 선명도"},
+    {"Midtones, shadows, highlights and blacks", "중간 톤, 그림자, 밝은 영역 및 검정"},
+    {"Tint, vibrance, film tones and color mixer", "색조, 생동감, 필름 톤 및 색상 혼합"},
+    {"Clarity and darker corners", "명료도 및 모서리 어둡게"},
+    {"Film looks, light, camera and retro effects", "필름 스타일, 조명, 카메라 및 레트로 효과"},
+    {"Color is off; your adjustments are kept", "색상이 꺼져 있습니다. 설정은 유지됩니다"},
+    {"Adjust this filter", "이 필터 조정"},
+    {"Filter shortcuts", "필터 단축키"},
+    {"Assign shortcut", "단축키 지정"},
+    {"Change shortcut", "단축키 변경"},
+    {"Remove shortcut", "단축키 제거"},
+    {"Filter shortcut", "필터 단축키"},
+    {"Press the keys together, then choose Save", "키를 함께 누른 다음 저장을 선택하세요"},
+    {"Waiting for keys", "키 입력 대기 중"},
+    {"This shortcut is already in use", "이 단축키는 이미 사용 중입니다"},
+
     {"See what is in use; click a resource to open its settings", "사용 중인 기능을 확인하세요. 항목을 클릭하면 설정이 열려요"},
     {"Performance and screen", "성능 및 화면"},
     {"Waiting for game settings", "게임 설정을 기다리는 중"},
@@ -1580,8 +1596,6 @@ const I18n::Pair kPairs[] = {
     {"Blends the last frames, each with other sample angles: a smooth shade even at low quality", "최근 프레임을 각기 다른 샘플 각도로 섞어요: 낮은 품질에서도 부드러운 그늘"},
     {"Thin object detail", "얇은 오브젝트 디테일"},
     {"Objects get thickness: no shade halo behind legs and rails. Costs more GPU", "오브젝트에 두께를 줘요: 다리와 난간 뒤에 그늘 후광이 없어요. GPU 비용이 더 들어요"},
-    {"Half resolution", "절반 해상도"},
-    {"A quarter of the pixels: much lighter, a bit softer. Best with Temporal smoothing", "픽셀의 4분의 1: 훨씬 가볍고 조금 더 부드러워요. 시간적 다듬기와 함께 쓰면 좋아요"},
     {"Object thickness", "오브젝트 두께"},
     {"How deep objects are taken to be for Thin object detail: less shows more light behind thin things", "얇은 오브젝트 디테일에서 가정하는 오브젝트 깊이. 줄이면 얇은 물체 뒤에 빛이 더 보여요"},
     {"Reset Ambient Occlusion", "앰비언트 오클루전 초기화"},
@@ -1913,6 +1927,19 @@ const I18n::Pair kPairs[] = {
     {"official Sims3SettingsSetter not loaded", "공식 Sims3SettingsSetter 로드 안 됨"},
     {"; OLD COMBINED BUILD loaded ({}): Apex Radiance's features stay off", "; 이전 통합 빌드 로드됨({}): Apex Radiance 기능은 꺼진 상태로 유지돼요"},
     {"; an older {} is also installed (idle): delete it from Game\\Bin", "; 이전 {}도 설치되어 있음(작동 안 함): Game\\Bin에서 삭제하세요"},
+    {"The menu now supports all 21 game languages", "메뉴가 이제 게임의 21개 언어를 모두 지원해요"},
+    {"Apex catches its own errors instead of closing the game", "Apex 자체 오류로 게임이 종료되지 않도록 오류를 처리해요"},
+    {"Lamp cones and foundation lighting are more accurate", "원뿔형 빛과 토대의 조명이 더 정확해졌어요"},
+    {"All Lighting options are enabled in the starting profiles", "시작 프로필에서는 모든 조명 설정이 켜져 있어요"},
+    {"Ground lamps light upper-story walls with smoother falloff", "지면의 램프가 위층 벽을 비추며 빛이 더 부드럽게 약해져요"},
+    {"Light behind balconies: softer light and shadows on walls above", "발코니 뒤쪽의 빛: 위쪽 벽에 더 부드러운 빛과 그림자를 만들어요"},
+    {"Doors and windows on foundations receive lamp light; walls keep it out of enclosed yards", "토대 위의 문과 창문에 램프 빛이 닿으며, 벽은 둘러싸인 마당으로 빛이 들어오는 것을 막아요"},
+    {"Captures use less storage, and editing lamps takes less repeated work", "기록이 차지하는 공간이 줄고 램프 편집 시 반복 계산도 줄었어요"},
+    {"Placing and moving outdoor lamps updates wall lighting faster, especially on multi-story lots", "실외 램프를 놓거나 옮길 때 벽 조명이 더 빠르게 갱신돼요. 특히 여러 층이 있는 부지에서 효과가 있어요"},
+    {"Lighting colors, brightness, shadows and reach are unchanged", "조명의 색, 밝기, 그림자와 도달 범위는 그대로예요"},
+    {"Color groups have their own switches and keep your adjustments", "색상 그룹에 개별 스위치가 추가되며 조정값은 유지됩니다"},
+    {"Right-click a filter to assign an optional keyboard shortcut", "필터를 오른쪽 클릭하여 선택적으로 키보드 단축키를 지정하세요"},
+    {"Corrected screen-effect timing when hiding the game interface", "게임 인터페이스를 숨길 때 화면 효과 적용 타이밍 수정"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Korean, kPairs, std::size(kPairs));

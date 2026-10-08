@@ -9,6 +9,22 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Finnish}
 const I18n::Pair kPairs[] = {
+    {"Brightness, contrast, saturation, temperature and sharpness", "Kirkkaus, kontrasti, kylläisyys, lämpötila ja terävyys"},
+    {"Midtones, shadows, highlights and blacks", "Keskisävyt, varjot, huippuvalot ja mustat"},
+    {"Tint, vibrance, film tones and color mixer", "Sävy, eloisuus, filmisävyt ja värisekoitin"},
+    {"Clarity and darker corners", "Selkeys ja tummemmat kulmat"},
+    {"Film looks, light, camera and retro effects", "Filmityylit, valo-, kamera- ja retroefektit"},
+    {"Color is off; your adjustments are kept", "Väri on pois käytöstä; asetuksesi säilyvät"},
+    {"Adjust this filter", "Säädä tätä suodatinta"},
+    {"Filter shortcuts", "Suodattimen pikanäppäimet"},
+    {"Assign shortcut", "Määritä pikanäppäin"},
+    {"Change shortcut", "Muuta pikanäppäintä"},
+    {"Remove shortcut", "Poista pikanäppäin"},
+    {"Filter shortcut", "Suodattimen pikanäppäin"},
+    {"Press the keys together, then choose Save", "Paina näppäimiä yhdessä ja valitse Tallenna"},
+    {"Waiting for keys", "Odotetaan näppäimiä"},
+    {"This shortcut is already in use", "Tämä pikanäppäin on jo käytössä"},
+
     {"See what is in use; click a resource to open its settings", "Näe, mitä on käytössä; avaa asetukset napsauttamalla"},
     {"Performance and screen", "Suorituskyky ja näyttö"},
     {"Waiting for game settings", "Odotetaan pelin asetuksia"},
@@ -1580,8 +1596,6 @@ const I18n::Pair kPairs[] = {
     {"Blends the last frames, each with other sample angles: a smooth shade even at low quality", "Sekoittaa viimeisimmät ruudut, kukin eri näytekulmilla: tasainen varjo matalallakin laadulla"},
     {"Thin object detail", "Ohuiden esineiden yksityiskohdat"},
     {"Objects get thickness: no shade halo behind legs and rails. Costs more GPU", "Esineet saavat paksuuden: ei varjokehää jalkojen ja kaiteiden takana. Kuormittaa näytönohjainta enemmän"},
-    {"Half resolution", "Puolikas resoluutio"},
-    {"A quarter of the pixels: much lighter, a bit softer. Best with Temporal smoothing", "Neljäsosa pikseleistä: paljon kevyempi, hieman pehmeämpi. Paras ajallisen pehmennyksen kanssa"},
     {"Object thickness", "Esineiden paksuus"},
     {"How deep objects are taken to be for Thin object detail: less shows more light behind thin things", "Kuinka syviksi esineet oletetaan ohuiden esineiden yksityiskohdissa: pienempi näyttää enemmän valoa ohuiden asioiden takana"},
     {"Reset Ambient Occlusion", "Palauta Ambient Occlusion"},
@@ -1913,6 +1927,19 @@ const I18n::Pair kPairs[] = {
     {"official Sims3SettingsSetter not loaded", "virallista Sims3SettingsSetteriä ei ole ladattu"},
     {"; OLD COMBINED BUILD loaded ({}): Apex Radiance's features stay off", "; VANHA YHDISTETTY VERSIO ladattu ({}): Apex Radiancen ominaisuudet pysyvät pois päältä"},
     {"; an older {} is also installed (idle): delete it from Game\\Bin", "; myös vanhempi {} on asennettu (käyttämättä): poista se kansiosta Game\\Bin"},
+    {"The menu now supports all 21 game languages", "Valikko tukee nyt kaikkia pelin 21 kieltä"},
+    {"Apex catches its own errors instead of closing the game", "Apex käsittelee omat virheensä pelin sulkemisen sijaan"},
+    {"Lamp cones and foundation lighting are more accurate", "Valokeilat ja perustusten valaistus ovat tarkempia"},
+    {"All Lighting options are enabled in the starting profiles", "Kaikki valaistusasetukset ovat käytössä aloitusprofiileissa"},
+    {"Ground lamps light upper-story walls with smoother falloff", "Maassa olevat lamput valaisevat ylempien kerrosten seiniä pehmeämmin vaimenevalla valolla"},
+    {"Light behind balconies: softer light and shadows on walls above", "Valo parvekkeiden takana: pehmeämpää valoa ja varjoja niiden yläpuolisilla seinillä"},
+    {"Doors and windows on foundations receive lamp light; walls keep it out of enclosed yards", "Perustuksilla olevat ovet ja ikkunat saavat lampun valoa; seinät estävät sen pääsyn suljetuille pihoille"},
+    {"Captures use less storage, and editing lamps takes less repeated work", "Tallenteet vievät vähemmän tilaa, ja lamppujen muokkaus vaatii vähemmän toistuvia laskelmia"},
+    {"Placing and moving outdoor lamps updates wall lighting faster, especially on multi-story lots", "Ulkolamppujen sijoittaminen ja siirtäminen päivittää seinien valon nopeammin, etenkin monikerroksisilla tonteilla"},
+    {"Lighting colors, brightness, shadows and reach are unchanged", "Valaistuksen värit, kirkkaus, varjot ja kantama pysyvät ennallaan"},
+    {"Color groups have their own switches and keep your adjustments", "Väriryhmillä on omat kytkimet ja säädöt säilyvät"},
+    {"Right-click a filter to assign an optional keyboard shortcut", "Napsauta suodatinta hiiren oikealla painikkeella ja määritä valinnainen pikanäppäin"},
+    {"Corrected screen-effect timing when hiding the game interface", "Korjattu ruututehosteiden ajoitus pelin käyttöliittymää piilotettaessa"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Finnish, kPairs, std::size(kPairs));

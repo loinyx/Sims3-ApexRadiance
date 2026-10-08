@@ -49,13 +49,12 @@ Each frame:
 | Quality | `qualidade` | enum | High | Very Low, Low, Medium, High, Ultra | Directions per pixel: 2, 4, 6, 8, 12. Stored as 4, 0, 1, 2, 3 for compatibility with 2.1.0 |
 | Temporal smoothing | `temporal` | bool | on | | Shifts the sample pattern every frame and blends about the last 8 frames, reprojected with the camera; see [Temporal smoothing](#temporal-smoothing) |
 | Thin object detail | `thinDetail` | bool | off (on in the Quality profile) | | Visibility bitmask: objects have a thickness, so shade passes behind legs and rails and leaves no halo. About twice the cost of the AO pass |
-| Half resolution | `halfRes` | bool | off (on in the Performance profile) | | The AO pass and blur on a quarter of the pixels, scaled up by depth |
 | Also in map view | `noMapa` | bool | on | | Shades the map view with radii sized for houses and trees (contact 4 m, large 15 m, no distance fade) |
 | Advanced > Reach | `alcance` | float | 130% | 50 to 200% | Scales all radii |
 | Advanced > Keep lamp light | `protegerLuz` | float | 38% | 0 to 100% | Share of light that bright and lamp-lit pixels keep |
 | Advanced > Object thickness | `thickness` | float | 0.75 m | 0.1 to 3 m | Thin object detail only: how deep an object is taken to be |
 | Advanced > Show the shade alone | (not saved) | bool | off | | Shows only the shade, in grey |
-| (none) | `revisao` | int | 10 | | Settings revision. Older files keep every saved value and only gain missing keys |
+| (none) | `revisao` | int | 12 | | Settings revision. Older files keep every saved value and only gain missing keys |
 
 All settings apply immediately. Keys from the old combined build (`intensidade`, `raioM`, `visualizar`) are not read.
 
@@ -91,7 +90,6 @@ All settings apply immediately. Keys from the old combined build (`intensidade`,
 | Downsample x8 | `DownPS` | 2x2 average of 1/z (sky excluded) per level |
 | GTAO | `GtaoPS` (SLICES 2/4/6/8/12, VBM 0/1) | G16R16F: R = visibility, G = 1/z; second target A8R8G8B8: view normal xy |
 | Blur x4 | `BlurPS` | Box (H, V) then tent, taps on the same surface (depth and normal) |
-| Upsample | `UpsamplePS` | Half resolution only: back to W x H, 4 taps weighted by distance and depth |
 | Temporal | `TemporalPS` | Temporal smoothing only: blended with the reprojected history (G16R16F x2, ping-pong) |
 | Composite | `CompositePS` | Over the copy, RGB write |
 
@@ -111,12 +109,12 @@ that count only within 5% of the expected 1/z, clamps it to this frame's 3x3 nei
 blends with weight 1/8. Where the history is dropped (new surfaces, moving objects, the first frame after a gap) the
 frame shows as it is without the option. No camera block: no history and no shift.
 
-### Half resolution
+### Full-resolution rendering
 
-The AO pass and blur run at W/2 x H/2. Each AO pixel is the centre of a 2x2 block and reads the pyramid's level 1 (the
-block average), never one of its four depth pixels, which was the cause of the old half-resolution "micro dots". The
-interleave is on the half-pixel grid. `UpsamplePS` returns to full size from the 4 nearest half pixels weighted by
-bilinear distance and 1/z match (fallback: the closest in depth).
+The AO pass, normal target and blur always use W x H. Half resolution and the unreleased reconstruction option are removed. Old `halfRes` and `reconstruct` keys are ignored,
+including when an old profile is applied. Remaining saved settings take precedence as before; built-in presets no
+longer request reduced resolution. A player previously using Half resolution will now pay the full-resolution GPU
+cost. No horizon, blur, temporal, lamp-protection or composite formula was changed for the existing full-resolution path.
 
 ### Thin object detail
 
@@ -141,9 +139,8 @@ scene draws). Fallback: near 0.25, A 1.00008, `tanY = 1/4.293`. See
 [engine/camera-and-map-view.md](../engine/camera-and-map-view.md).
 
 **Resources.** R32F pyramid (3840x2304 with 9 levels at 4K) plus 8 one-level targets, two G16R16F targets and one
-A8R8G8B8 normal target at the AO size (screen, or half of it), a colour copy, with Half resolution one G16R16F screen
-target for the scaled-up shade, and with Temporal smoothing two G16R16F screen targets for the history (made and
-released with the option). Switching Half resolution rebuilds the targets on the next frame. Everything is released on
+A8R8G8B8 normal target at full screen size, a colour copy, and with Temporal smoothing two G16R16F screen targets for
+the history (made and released with the option). Everything is released on
 device reset and rebuilt on the next frame.
 
 **Cost** at 3840x2160, native D3D9, RTX 4070 Ti SUPER:
@@ -160,8 +157,7 @@ About 0.55 ms is fixed (copy and pyramid 0.26, blur 0.2, composite 0.09).
 
 ## Rejected approaches
 
-- Half-resolution AO reading one of the four depth pixels: caused the "micro dots" reports. The current Half resolution
-  option reads the 2x2 average instead.
+- Half-resolution AO reading one of the four depth pixels: caused the "micro dots" reports. The later reduction path read the 2x2 average instead; both reduction and upsampling are removed in local revision 12.
 - Per-frame noise with temporal accumulation as the only filter: twinkling on foliage. The current Temporal smoothing
   option keeps the full spatial filter and falls back to it wherever the history is dropped.
 - Radii in near-plane units: shade breathing with zoom.
@@ -177,3 +173,9 @@ Details in [history](../history/ambient-occlusion.md) and [removed-features.md](
 - [Validation](../validation/ambient-occlusion.md)
 - [History](../history/ambient-occlusion.md)
 - [Architecture: post-scene chain and INTZ depth share](../architecture.md)
+
+## Alternative AO study
+
+HBAO is a separate estimator being studied as an optional future method. It is not included in the release.
+The current full-resolution GTAO remains the only scene AO method and the default. No CACAO/FSR implementation is
+integrated. The removed reconstruction experiment was an upsampling method, not an alternative AO algorithm.

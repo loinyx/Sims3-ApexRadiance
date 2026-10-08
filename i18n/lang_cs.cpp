@@ -9,6 +9,22 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Czech}
 const I18n::Pair kPairs[] = {
+    {"Brightness, contrast, saturation, temperature and sharpness", "Jas, kontrast, sytost, teplota a ostrost"},
+    {"Midtones, shadows, highlights and blacks", "Střední tóny, stíny, světla a černá"},
+    {"Tint, vibrance, film tones and color mixer", "Odstín, živost, filmové tóny a míchání barev"},
+    {"Clarity and darker corners", "Zřetelnost a tmavší rohy"},
+    {"Film looks, light, camera and retro effects", "Filmové styly, světlo, kamera a retro efekty"},
+    {"Color is off; your adjustments are kept", "Barva je vypnutá; nastavení zůstává zachováno"},
+    {"Adjust this filter", "Upravit tento filtr"},
+    {"Filter shortcuts", "Zkratky filtru"},
+    {"Assign shortcut", "Přiřadit zkratku"},
+    {"Change shortcut", "Změnit zkratku"},
+    {"Remove shortcut", "Odstranit zkratku"},
+    {"Filter shortcut", "Zkratka filtru"},
+    {"Press the keys together, then choose Save", "Stiskněte klávesy současně a zvolte Uložit"},
+    {"Waiting for keys", "Čekání na klávesy"},
+    {"This shortcut is already in use", "Tato zkratka se již používá"},
+
     {"See what is in use; click a resource to open its settings", "Podívej se, co je zapnuté; kliknutím na funkci otevřeš její nastavení"},
     {"Performance and screen", "Výkon a obrazovka"},
     {"Waiting for game settings", "Čekám na nastavení hry"},
@@ -1580,8 +1596,6 @@ const I18n::Pair kPairs[] = {
     {"Blends the last frames, each with other sample angles: a smooth shade even at low quality", "Prolne poslední snímky, každý s jinými úhly vzorků: hladký stín i při nízké kvalitě"},
     {"Thin object detail", "Detail tenkých objektů"},
     {"Objects get thickness: no shade halo behind legs and rails. Costs more GPU", "Objekty dostanou tloušťku: žádná stínová svatozář za nohami a zábradlím. Víc zatěžuje GPU"},
-    {"Half resolution", "Poloviční rozlišení"},
-    {"A quarter of the pixels: much lighter, a bit softer. Best with Temporal smoothing", "Čtvrtina pixelů: mnohem lehčí, o něco měkčí. Nejlepší s Časovým vyhlazením"},
     {"Object thickness", "Tloušťka objektů"},
     {"How deep objects are taken to be for Thin object detail: less shows more light behind thin things", "Jak hluboké se objekty berou pro Detail tenkých objektů: méně ukáže víc světla za tenkými věcmi"},
     {"Reset Ambient Occlusion", "Obnovit Ambientní okluzi"},
@@ -1913,6 +1927,19 @@ const I18n::Pair kPairs[] = {
     {"official Sims3SettingsSetter not loaded", "oficiální Sims3SettingsSetter není načten"},
     {"; OLD COMBINED BUILD loaded ({}): Apex Radiance's features stay off", "; STARÉ KOMBINOVANÉ SESTAVENÍ načteno ({}): funkce Apex Radiance zůstávají vypnuté"},
     {"; an older {} is also installed (idle): delete it from Game\\Bin", "; je nainstalovaná i starší {} (nečinná): smaž ji z Game\\Bin"},
+    {"The menu now supports all 21 game languages", "Menu nyní podporuje všech 21 jazyků hry"},
+    {"Apex catches its own errors instead of closing the game", "Apex zachytí vlastní chyby místo ukončení hry"},
+    {"Lamp cones and foundation lighting are more accurate", "Světelné kužely a osvětlení základů jsou přesnější"},
+    {"All Lighting options are enabled in the starting profiles", "V počátečních profilech jsou zapnuté všechny možnosti Osvětlení"},
+    {"Ground lamps light upper-story walls with smoother falloff", "Lampy na zemi osvětlují stěny vyšších podlaží s plynulejším úbytkem světla"},
+    {"Light behind balconies: softer light and shadows on walls above", "Světlo za balkony: měkčí světlo a stíny na stěnách nad nimi"},
+    {"Doors and windows on foundations receive lamp light; walls keep it out of enclosed yards", "Dveře a okna na základech přijímají světlo; stěny ho blokují v uzavřených dvorech"},
+    {"Captures use less storage, and editing lamps takes less repeated work", "Záznamy zabírají méně místa a úpravy lamp vyžadují méně opakovaných výpočtů"},
+    {"Placing and moving outdoor lamps updates wall lighting faster, especially on multi-story lots", "Umístění a přesouvání venkovních lamp aktualizuje světlo na stěnách rychleji, zvlášť na vícepodlažních pozemcích"},
+    {"Lighting colors, brightness, shadows and reach are unchanged", "Barvy, jas, stíny a dosah osvětlení zůstávají stejné"},
+    {"Color groups have their own switches and keep your adjustments", "Skupiny barev mají vlastní přepínače a zachovávají vaše nastavení"},
+    {"Right-click a filter to assign an optional keyboard shortcut", "Klikněte pravým tlačítkem na filtr a přiřaďte volitelnou klávesovou zkratku"},
+    {"Corrected screen-effect timing when hiding the game interface", "Opraveno načasování obrazových efektů při skrytí herního rozhraní"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Czech, kPairs, std::size(kPairs));

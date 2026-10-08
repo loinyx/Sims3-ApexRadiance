@@ -763,6 +763,11 @@ inline constexpr Element kPanelLeftOpen[] = {
     {Kind::Path, "m14 9 3 3-3 3", {}, false},
 };
 
+inline constexpr Element kEllipsis[] = {
+    {Kind::Circle,nullptr,{12,12,1},false}, {Kind::Circle,nullptr,{19,12,1},false}, {Kind::Circle,nullptr,{5,12,1},false},
+};
+// chevron-up.svg
+inline constexpr Element kChevronUp[] = {{Kind::Path, "m18 15-6-6-6 6", {}, false}};
 inline constexpr IconData kIcons[] = {
     {"activity", kActivity, static_cast<int>(sizeof(kActivity) / sizeof(kActivity[0]))},
     {"aperture", kAperture, static_cast<int>(sizeof(kAperture) / sizeof(kAperture[0]))},
@@ -878,6 +883,8 @@ inline constexpr IconData kIcons[] = {
     {"wand-sparkles", kWandSparkles, static_cast<int>(sizeof(kWandSparkles) / sizeof(kWandSparkles[0]))},
     {"panel-left-close", kPanelLeftClose, static_cast<int>(sizeof(kPanelLeftClose) / sizeof(kPanelLeftClose[0]))},
     {"panel-left-open", kPanelLeftOpen, static_cast<int>(sizeof(kPanelLeftOpen) / sizeof(kPanelLeftOpen[0]))},
+    {"ellipsis",kEllipsis,static_cast<int>(sizeof(kEllipsis)/sizeof(kEllipsis[0]))},
+    {"chevron-up",kChevronUp,static_cast<int>(sizeof(kChevronUp)/sizeof(kChevronUp[0]))},
 };
 
 } // namespace ApexUi::LucideData

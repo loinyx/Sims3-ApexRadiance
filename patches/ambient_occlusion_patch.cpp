@@ -21,7 +21,7 @@
 //    keep more light and their colour, no grey film), and lamp-lit / bright pixels keep part of their light.
 // Passes per frame: depth -> 1/z, 8 downsamples, the AO pass, 4 blur passes (box H/V, tent H/V), one composite over a
 // copy of the scene (colour write RGB only).
-// 06/10 (user: grain and ghost shade below Ultra, not perfect on Ultra), four additions:
+// 06/10 (user: grain and ghost shade below Ultra, not perfect on Ultra), retained additions:
 //  - Blur on the same surface: the AO pass also writes its normal (second target) and the blur weighs taps by depth and
 //    direction; a box tap on another surface is replaced by the pixel 4 further on (same interleave offset), so the 4x4
 //    cancel holds behind rails and at corners. Always on (depth only without two render targets). The pyramid keeps the
@@ -31,8 +31,6 @@
 //    frame's neighbourhood, so where it is dropped the frame shows as it is without the option. The design above was
 //    deterministic on purpose; this reverses it only while the option is on (docs/removed-features.md: the old temporal
 //    lines and why they failed).
-//  - Half resolution (option, off): the AO pass and the blur on the 2x2 blocks of the pyramid's level 1 (never one of
-//    the four depth pixels, the old "micro dots" cause), scaled up by depth.
 //  - Thin object detail (option, off): visibility bitmask (8 sectors per side) with an object thickness.
 
 #include "patch_base.h"
@@ -134,14 +132,13 @@ float4 cDepth : register(c10); // x = A, y = 1 / (near A)   (1/z = (A - d) / (ne
 float4 cSim : register(c11); // body strength, opaque mask available, hair strength, maximum shade
 float4 cSimView : register(c12); // mask preview, transparent hair mask available
 float4 cJit : register(c13); // x, y = this frame's offset of the slice angle / step interleave (0 without Temporal smoothing),
-                             // z = AO pixel size in screen pixels (1, 2 at half resolution), w = its pyramid level (0, 1)
+                             // z = fixed full-resolution pixel size (1), w = base pyramid level (0). Retained constant layout.
 float4 cVbm : register(c14); // x = object thickness (m, Thin object detail), y = normal weight power of the blur, z = 1 normals there
 float4 cM0 : register(c15);  // reprojection: previous view-projection x inverse of this one, rows (Temporal smoothing)
 float4 cM1 : register(c16);
 float4 cM2 : register(c17);
 float4 cM3 : register(c18);
 float4 cTmp : register(c19); // x = 1 history usable, y = weight of this frame, z = clamp margin, w = depth tolerance (of 1/z)
-float4 cHalf : register(c20); // AO target size (xy) and 1 / size (zw): the upsample reads the half-resolution shade
 
 static const float PI = 3.14159265;
 
@@ -171,8 +168,7 @@ float4 DownPS(float2 uv : TEXCOORD0) : COLOR0
 }
 
 float3 PosF(float2 p, float z) { return z * float3(p * cPos.xy + cPos.zw, 1); }
-// the AO pass's 1/z at a screen position, from the pyramid level of the AO pixels (level 1 at half resolution: the
-// 2x2 average centred on the half pixel, never one of its four depth pixels, which a 1-pixel camera move would swap)
+// The AO pass's 1/z at a full-resolution screen position; cJit.w is fixed to level zero.
 float WAt(float2 p) { return tex2Dlod(sZ, float4(p / cSize.zw, 0, cJit.w)).r; }
 float Bayer2(float a, float b) { return 2.0 * abs(a - b) + b; }
 float Bayer4(float2 q) { float2 lo = fmod(q, 2.0), hi = floor(fmod(q, 4.0) * 0.5); return 4.0 * Bayer2(lo.x, lo.y) + Bayer2(hi.x, hi.y); }
@@ -182,8 +178,7 @@ float4 ACos4(float4 x) { return acos(clamp(x, -1, 1)); }
 )HLSL" R"HLSL(
 // GTAO: SLICES slices (angle (s + b1) pi / SLICES) x STEPS geometric steps per side (offset from b2 plus a golden-ratio
 // phase per half-slice), contact + large horizon per side from the same samples. Out: R = visibility, G = 1/z (blur);
-// COLOR1 = the surface normal for the blur (view x, y * 0.5 + 0.5). All positions in screen pixels: at half resolution
-// an AO pixel is the centre of a 2x2 block (cJit.z = 2) and reads the pyramid level of that block (cJit.w = 1).
+// COLOR1 = the surface normal for the blur (view x, y * 0.5 + 0.5). All positions are full-resolution screen pixels.
 struct GtaoOut { float4 ao : COLOR0; float4 nrm : COLOR1; };
 GtaoOut Gtao(float v, float w0, float3 n)
 {
@@ -371,28 +366,6 @@ float4 BlurPS(float2 uv : TEXCOORD0) : COLOR0
     return float4(ws > 0 ? sum / ws : c0.x, c0.y, 0, 0);
 }
 
-// Half resolution: the shade back to full resolution, from the 4 nearest half pixels weighted by distance and by how
-// close their depth is to this pixel's (an edge takes the side it belongs to; none close: the closest in depth)
-float4 UpsamplePS(float2 uv : TEXCOORD0) : COLOR0
-{
-    float wF = tex2Dlod(sZ, float4(uv * cSize.xy / cSize.zw, 0, 0)).r;
-    [branch] if (wF <= 0.0) return float4(1, 0, 0, 0);
-    float2 t = uv * cHalf.xy - 0.5, t0 = floor(t), f = t - t0;
-    const float2 O[4] = { float2(0, 0), float2(1, 0), float2(0, 1), float2(1, 1) };
-    float sum = 0, ws = 0, best = 1, bestErr = 1e9;
-    [unroll] for (int k = 0; k < 4; k++)
-    {
-        float2 v = tex2Dlod(sAo, float4((t0 + O[k] + 0.5) * cHalf.zw, 0, 0)).rg;
-        float err = v.y > 0 ? abs(v.y / wF - 1.0) : 1e9;
-        float2 bw = lerp(1 - f, f, O[k]);
-        float w = bw.x * bw.y * saturate(1.0 - err / cK.w);
-        sum += v.x * w;
-        ws += w;
-        if (err < bestErr) { bestErr = err; best = v.x; }
-    }
-    return float4(ws > 1e-3 ? sum / ws : best, wF, 0, 0);
-}
-
 // Temporal smoothing: this frame's shade blended into the last frames' (reprojected with the camera of both frames).
 // The history is dropped where its depth does not match (moved objects, newly seen surfaces) and held within the
 // shade of this frame's neighbourhood plus a margin, so a moving Sim leaves no trail; where it is dropped the frame
@@ -512,7 +485,6 @@ const ShaderCache::Id kLinearPsId = AddShader("AO LinearizePS", "LinearizePS", 0
 const ShaderCache::Id kDownPsId = AddShader("AO DownPS", "DownPS", 0);
 const ShaderCache::Id kBlurPsId = AddShader("AO BlurPS", "BlurPS", 0);
 const ShaderCache::Id kCompositePsId = AddShader("AO CompositePS", "CompositePS", 0);
-const ShaderCache::Id kUpsamplePsId = AddShader("AO UpsamplePS (Half resolution)", "UpsamplePS", 1);
 const ShaderCache::Id kTemporalPsId = AddShader("AO TemporalPS (Temporal smoothing)", "TemporalPS", 0);
 const ShaderCache::Id kDepthPsId = AddShader("AO DepthPS (Developer capture)", "DepthPS", 1);
 // [0] the horizon form, [1] Thin object detail (visibility bitmask)
@@ -541,7 +513,6 @@ struct Params {
     bool transparentHair = true;
     // 06/10 (user: grain and ghosts below Ultra): each one a switch
     bool temporal = true;    // Temporal smoothing: the last frames blended in (each frame with other angles)
-    bool halfRes = false;    // Half resolution: the shade computed on a quarter of the pixels, then scaled up by depth
     bool thinDetail = false; // Thin object detail: visibility bitmask, things have a thickness (costs about twice the AO pass)
     float thickness = 0.75f; // its object thickness, metres
 
@@ -558,12 +529,11 @@ struct State {
     IDirect3DSurface9* zLevel[kLevels] = {};
     IDirect3DTexture9* tmp[kLevels] = {}; // one-level targets for levels 1.., copied into zTex
     IDirect3DSurface9* tmpSurf[kLevels] = {};
-    // aoA, aoB, nrm: the AO pass and its blur, at the AO size (aoW x aoH: the screen, or half of it); aoFull: the half-
-    // resolution shade scaled up; hist: Temporal smoothing's two frames (screen size, made while it is on)
+    // aoA, aoB, nrm: the AO pass and its blur, always at the full screen size.
     UINT aoW = 0, aoH = 0;
-    bool halfBuilt = false, mrt = false;
-    IDirect3DTexture9 *aoA = nullptr, *aoB = nullptr, *colorTex = nullptr, *nrm = nullptr, *aoFull = nullptr;
-    IDirect3DSurface9 *aoASurf = nullptr, *aoBSurf = nullptr, *colorSurf = nullptr, *nrmSurf = nullptr, *aoFullSurf = nullptr;
+    bool mrt = false;
+    IDirect3DTexture9 *aoA = nullptr, *aoB = nullptr, *colorTex = nullptr, *nrm = nullptr;
+    IDirect3DSurface9 *aoASurf = nullptr, *aoBSurf = nullptr, *colorSurf = nullptr, *nrmSurf = nullptr;
     IDirect3DTexture9* hist[2] = {};
     IDirect3DSurface9* histSurf[2] = {};
     int histCur = 0;
@@ -572,8 +542,8 @@ struct State {
     float prevVp[4][4] = {};
     bool prevVpValid = false;
     IDirect3DPixelShader9 *psLinear = nullptr, *psDown = nullptr, *psBlur = nullptr, *psComposite = nullptr, *psDepth = nullptr;
-    IDirect3DPixelShader9 *psUpsample = nullptr, *psTemporal = nullptr;
-    bool upTried = false, temporalTried = false;
+    IDirect3DPixelShader9* psTemporal = nullptr;
+    bool temporalTried = false;
     IDirect3DPixelShader9* psGtao[2][kQualityCount] = {};
     // GPU cost (timestamp queries, read a few frames later)
     static constexpr int kQ = 4;
@@ -805,12 +775,10 @@ void ReleaseResources() {
     SafeRelease(g.aoBSurf);
     SafeRelease(g.colorSurf);
     SafeRelease(g.nrmSurf);
-    SafeRelease(g.aoFullSurf);
     SafeRelease(g.aoA);
     SafeRelease(g.aoB);
     SafeRelease(g.colorTex);
     SafeRelease(g.nrm);
-    SafeRelease(g.aoFull);
     for (int i = 0; i < State::kQ; i++) {
         SafeRelease(g.qDisjoint[i]);
         SafeRelease(g.qBegin[i]);
@@ -826,9 +794,8 @@ void ReleaseShaders() {
     SafeRelease(g.psBlur);
     SafeRelease(g.psComposite);
     SafeRelease(g.psDepth);
-    SafeRelease(g.psUpsample);
     SafeRelease(g.psTemporal);
-    g.upTried = g.temporalTried = false;
+    g.temporalTried = false;
     for (int v = 0; v < 2; v++)
         for (int q = 0; q < kQualityCount; q++) {
             SafeRelease(g.psGtao[v][q]);
@@ -865,10 +832,6 @@ IDirect3DPixelShader9* GtaoShader(IDirect3DDevice9* dev, int q) {
     return g.psGtao[v][q];
 }
 // the optional passes, created on first use; null: the option is skipped (the failure is logged once)
-IDirect3DPixelShader9* UpsampleShader(IDirect3DDevice9* dev) {
-    if (!g.psUpsample && !g.upTried) { g.upTried = true; g.psUpsample = CreateShader(dev, kUpsamplePsId, "UpsamplePS"); }
-    return g.psUpsample;
-}
 IDirect3DPixelShader9* TemporalShader(IDirect3DDevice9* dev) {
     if (!g.psTemporal && !g.temporalTried) { g.temporalTried = true; g.psTemporal = CreateShader(dev, kTemporalPsId, "TemporalPS"); }
     return g.psTemporal;
@@ -931,13 +894,10 @@ bool InitResources(IDirect3DDevice9* dev) {
         return SUCCEEDED(dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, tex, nullptr)) && *tex &&
                SUCCEEDED((*tex)->GetSurfaceLevel(0, surf)) && *surf;
     };
-    // Half resolution: the AO pass and its blur on the 2x2 blocks of the pyramid's level 1, then scaled up into aoFull
-    g.halfBuilt = g.p.halfRes;
-    g.aoW = g.halfBuilt ? g.width / 2 : g.width;
-    g.aoH = g.halfBuilt ? g.height / 2 : g.height;
+    g.aoW = g.width;
+    g.aoH = g.height;
     ok = ok && make(&g.aoA, &g.aoASurf, D3DFMT_G16R16F, g.aoW, g.aoH) && make(&g.aoB, &g.aoBSurf, D3DFMT_G16R16F, g.aoW, g.aoH) &&
-         make(&g.colorTex, &g.colorSurf, bd.Format, g.width, g.height) &&
-         (!g.halfBuilt || make(&g.aoFull, &g.aoFullSurf, D3DFMT_G16R16F, g.width, g.height));
+         make(&g.colorTex, &g.colorSurf, bd.Format, g.width, g.height);
     // the normals for the blur come from the AO pass as a second target (same 32 bits per pixel as G16R16F); without
     // two render targets the blur compares depth only, as before 06/10
     D3DCAPS9 caps{};
@@ -982,7 +942,7 @@ constexpr D3DSAMPLERSTATETYPE kSamplerStates[] = {D3DSAMP_MINFILTER, D3DSAMP_MAG
 constexpr int kRS = static_cast<int>(sizeof(kRenderStates) / sizeof(kRenderStates[0]));
 constexpr int kSS = static_cast<int>(sizeof(kSamplerStates) / sizeof(kSamplerStates[0]));
 constexpr DWORD kSamplers = 9; // s5 opaque Sims, s6 transparent hair, s7 normals, s8 history
-constexpr UINT kPSConsts = 21; // c0..c20
+constexpr UINT kPSConsts = 20; // c0..c19
 
 struct SavedState {
     IDirect3DSurface9 *rt0 = nullptr, *ds = nullptr;
@@ -1061,7 +1021,7 @@ void SetPassStates(IDirect3DDevice9* dev) {
         const bool march = s == 2; // sZt: the march's prefiltered reads, bilinear within the nearest level
         dev->SetSamplerState(s, D3DSAMP_MINFILTER, march ? D3DTEXF_LINEAR : D3DTEXF_POINT);
         dev->SetSamplerState(s, D3DSAMP_MAGFILTER, march ? D3DTEXF_LINEAR : D3DTEXF_POINT);
-        // sZ (s1) also by level: the AO pass reads level 1 at half resolution
+        // sZ (s1) uses the pyramid levels for the full-resolution AO march.
         dev->SetSamplerState(s, D3DSAMP_MIPFILTER, march || s == 1 ? D3DTEXF_POINT : D3DTEXF_NONE);
         dev->SetSamplerState(s, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
         dev->SetSamplerState(s, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
@@ -1268,9 +1228,7 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
     const bool map = g.p.inMapView && MapView::IsOpen();
     const float distance = std::clamp(g.p.distance, 25.0f, 1000.0f);
     const float fadeStart = distance * (kFade0 / kFade1);
-    const bool half = g.halfBuilt;
     const float aw = static_cast<float>(g.aoW), ah = static_cast<float>(g.aoH);
-    IDirect3DPixelShader9* psUp = half ? UpsampleShader(dev) : nullptr;
 
     // Temporal smoothing: the history is usable when it was written on the frame right before and the camera block was
     // found in both frames; the reprojection maps this frame's (ndc, device depth) onto the previous screen
@@ -1313,14 +1271,13 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         {std::clamp(g.p.simStrength, 0.0f, 1.0f), WantSimMask() && simMask.cleared && !simMask.failed ? 1.0f : 0.0f,
          std::clamp(g.p.hairStrength, 0.0f, 1.0f), std::clamp(g.p.simMaxShade, 0.0f, 1.0f)},
         {g.p.simControls && g.showSimMask ? 1.0f : 0.0f, WantSimMask() && simMask.hairCleared && !simMask.failed ? 1.0f : 0.0f, 0, 0},
-        {jit[0], jit[1], half ? 2.0f : 1.0f, half ? 1.0f : 0.0f},
+        {jit[0], jit[1], 1.0f, 0.0f},
         {std::clamp(g.p.thickness, 0.1f, 3.0f), kNormalPower, g.mrt ? 1.0f : 0.0f, 0},
         {reproj[0][0], reproj[0][1], reproj[0][2], reproj[0][3]},
         {reproj[1][0], reproj[1][1], reproj[1][2], reproj[1][3]},
         {reproj[2][0], reproj[2][1], reproj[2][2], reproj[2][3]},
         {reproj[3][0], reproj[3][1], reproj[3][2], reproj[3][3]},
-        {histOk ? 1.0f : 0.0f, kTemporalWeight, kTemporalMargin, kTemporalDepthTolerance},
-        {aw, ah, 1.0f / aw, 1.0f / ah}};
+        {histOk ? 1.0f : 0.0f, kTemporalWeight, kTemporalMargin, kTemporalDepthTolerance}};
     dev->SetPixelShaderConstantF(0, &c[0][0], kPSConsts);
 
     if (!kPublicBuild)
@@ -1373,20 +1330,7 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
     dev->SetTexture(7, nullptr);
     IDirect3DTexture9* shade = g.aoA;
 
-    // 5. Half resolution: back to the screen size, edges by depth
-    if (half) {
-        dev->SetRenderTarget(0, g.aoFullSurf);
-        if (psUp) {
-            dev->SetTexture(3, g.aoA);
-            dev->SetPixelShader(psUp);
-            DrawQuad(dev, g.width, g.height);
-        } else {
-            dev->StretchRect(g.aoASurf, nullptr, g.aoFullSurf, nullptr, D3DTEXF_LINEAR); // the shader failed: a plain scale
-        }
-        shade = g.aoFull;
-    }
-
-    // 6. Temporal smoothing: blended with the reprojected last frames into the other history target
+    // 5. Temporal smoothing: blended with the reprojected last frames into the other history target
     if (temporal) {
         const int next = g.histCur ^ 1;
         dev->SetRenderTarget(0, g.histSurf[next]);
@@ -1403,7 +1347,7 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
     if (g.lastCamera) std::memcpy(g.prevVp, vp, sizeof vp);
     g.prevVpValid = g.lastCamera;
 
-    // 7. composite over the scene copy
+    // 6. composite over the scene copy
     dev->SetRenderTarget(0, bb);
     dev->SetTexture(3, shade);
     dev->SetTexture(4, g.colorTex);
@@ -1436,14 +1380,14 @@ void AoEffect(IDirect3DDevice9* dev) {
     if (FAILED(dev->GetRenderTarget(0, &bb)) || !bb) return;
     D3DSURFACE_DESC bd{};
     bb->GetDesc(&bd);
-    // the back buffer changed without a Reset, or Half resolution was switched (other target sizes): rebuild next frame
-    if (bd.Width != g.width || bd.Height != g.height || g.p.halfRes != g.halfBuilt) {
+    // The back buffer changed without a Reset: rebuild the full-resolution targets next frame.
+    if (bd.Width != g.width || bd.Height != g.height) {
         bb->Release();
         ReleaseResources();
         g.retryCountdown = 0;
         return;
     }
-    const int key = g.p.quality + (g.p.halfRes ? 8 : 0) + (g.p.thinDetail ? 16 : 0) + (g.p.temporal ? 32 : 0); // GPU cost per setup
+    const int key = g.p.quality + (g.p.thinDetail ? 16 : 0) + (g.p.temporal ? 32 : 0); // GPU cost per setup
     if (key != g.qKey) {
         g.qKey = key;
         g.gpuMs = -1.0f;
@@ -1572,7 +1516,6 @@ class AmbientOcclusionPatch : public ApexPatch {
         RegisterFloatSetting(&g.p.simMaxShade, "simMaxShade", SettingWidget::Slider, Params{}.simMaxShade, 0.0f, 1.0f, "Limit the maximum added shade on Sims and hair");
         RegisterBoolSetting(&g.p.transparentHair, "transparentHair", true, "Also adjust supported transparent hair strands");
         RegisterBoolSetting(&g.p.temporal, "temporal", Params{}.temporal, "Blend the last frames for a smoother shade at any quality");
-        RegisterBoolSetting(&g.p.halfRes, "halfRes", Params{}.halfRes, "Compute the shade on a quarter of the pixels, then scale it up by depth");
         RegisterBoolSetting(&g.p.thinDetail, "thinDetail", Params{}.thinDetail, "Give objects a thickness: shade passes behind thin things and leaves no halo around them");
         RegisterFloatSetting(&g.p.thickness, "thickness", SettingWidget::Slider, Params{}.thickness, 0.1f, 3.0f, "Object thickness for Thin object detail");
     }
@@ -1683,9 +1626,6 @@ class AmbientOcclusionPatch : public ApexPatch {
         changed |= ApexUi::SwitchRow("Thin object detail", &g.p.thinDetail,
                                      "Objects get thickness: no shade halo behind legs and rails. Costs more GPU",
                                      kDefaults.thinDetail);
-        changed |= ApexUi::SwitchRow("Half resolution", &g.p.halfRes,
-                                     "A quarter of the pixels: much lighter, a bit softer. Best with Temporal smoothing",
-                                     kDefaults.halfRes);
         changed |= ApexUi::SwitchRow("Also in map view", &g.p.inMapView, "Soft shade around houses and trees when the map view is open", kDefaults.inMapView);
         if (ApexUi::BeginAdvanced("Advanced##AmbientOcclusion")) {
             changed |= ApexUi::SliderPercent("Reach", &g.p.reach, 0.5f, 2.0f, "How far the shade spreads from where things meet", kDefaults.reach);
@@ -1707,8 +1647,9 @@ class AmbientOcclusionPatch : public ApexPatch {
     // (the composite grain follows the Banding Fix, only where the shade changed the pixel); 6 = distance and Sim receivers;
     // 7 = independent hair, transparency coverage and a separate Sim card; 8 = Sim Occlusion defaults off;
     // 9 = user-approved default configuration for scene and Sim controls; 10 = 06/10 Temporal smoothing (on), Half
-    // resolution, Thin object detail (off) and its thickness.
-    static constexpr int kSettingsRevision = 10;
+    // resolution (removed in local revision 12), Thin object detail (off) and its thickness.
+    // 11 = local reconstruction candidate; 12 = full-resolution AO only. Legacy reduction keys are ignored.
+    static constexpr int kSettingsRevision = 12;
     static constexpr const char* kRevisionKey = "revisao";
     static int Revision(const toml::table& table) { return static_cast<int>(table[kRevisionKey].value<int64_t>().value_or(1)); }
     // Start from current defaults, then overlay every value that was explicitly saved.
@@ -1740,7 +1681,7 @@ class AmbientOcclusionPatch : public ApexPatch {
                             simMask.lastDraws, simMask.refused, simMask.copies.size(), simMask.failed ? " (unavailable)" : "");
         if (g.ready) {
             if (g.gpuMs >= 0) ImGui::TextDisabled("GPU cost: %.2f ms per frame (%d slices)", g.gpuMs, kQualitySlices[std::clamp(g.p.quality, 0, kQualityCount - 1)]);
-            ImGui::TextDisabled("AO pass %ux%u%s | blur normals %s | temporal %s | thin detail %s", g.aoW, g.aoH, g.halfBuilt ? " (half)" : "",
+            ImGui::TextDisabled("AO pass %ux%u | blur normals %s | temporal %s | thin detail %s", g.aoW, g.aoH,
                                 g.mrt ? "yes" : "no (one render target)",
                                 !g.p.temporal ? "off" : g.histFailed ? "unavailable" : g.histAt + 1 >= g.presents && g.histAt ? "blending" : "waiting",
                                 g.p.thinDetail ? "on" : "off");
@@ -1762,7 +1703,7 @@ APEX_REGISTER_FEATURE(AmbientOcclusionPatch,
                        .enabledByDefault = true,
                        .supportedVersions = VERSION_ALL,
                        .technicalDetails = {"Reads the INTZ scene depth shared by the Depth Blur module (kept running even with Depth Blur off).",
-                                            "GTAO at full resolution (or on the 2x2 blocks with Half resolution): 2 to 12 slices (quality) x 4 geometric "
+                                            "GTAO at full resolution: 2 to 12 slices (quality) x 4 geometric "
                                             "steps per side over a 9-level 1/z pyramid read bilinearly within the nearest level, contact and large horizons "
                                             "(or an 8-sector visibility bitmask with an object thickness: Thin object detail), 4x4 Bayer interleave "
                                             "cancelled by a 4x4 box, then a tent, both on the same surface by depth and normal.",

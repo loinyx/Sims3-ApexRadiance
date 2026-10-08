@@ -28,6 +28,7 @@ tests, publication) is in [workflow.md](../workflow.md#6-release).
 
 | Version | Published | Headline |
 |---|---|---|
+| [2.11.0](2.11.0.md) | 2026-10-07 | Color groups, optional filter shortcuts and hidden-interface effect timing |
 | [2.10.1](2.10.1.md) | 2026-10-07 | Faster exterior lighting updates in Build/Buy |
 | [2.8.2](2.8.2.md) | 2026-10-07 | What's new lists the last 8 versions with a scroll bar |
 | [2.8.1](2.8.1.md) | 2026-10-07 | Doors keep their side's light; snow under rugs; Banding Fix defaults in every profile |

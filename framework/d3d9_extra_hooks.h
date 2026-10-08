@@ -26,6 +26,10 @@ using BeforeClear = void (*)(IDirect3DDevice9* device, DWORD count, const D3DREC
 void SetBeforeClear(BeforeClear fn);
 void SetSetDepthStencilObserver(SetDepthStencilObserver fn);
 void SetStretchRectObserver(StretchRectObserver fn);
+// Separate from the diagnostic observer: run before the game's scene snapshot is copied.
+using BeforeStretchRect = void (*)(IDirect3DDevice9* device, IDirect3DSurface9* src, const RECT* srcRect,
+                                  IDirect3DSurface9* dst, const RECT* dstRect, D3DTEXTUREFILTERTYPE filter);
+void SetBeforeStretchRect(BeforeStretchRect fn);
 void SetDrawUPObserver(DrawUPObserver fn);
 void SetDepthSubstitution(DepthSubstitute substitute, DepthReport report);
 

@@ -13,6 +13,7 @@
 #include "render_callbacks.h"
 #include "d3d9_hooks.h"
 #include "overlay.h"
+#include "f10_study.h"
 #include <windows.h>
 #include <shellapi.h>
 #include <wincodec.h>
@@ -307,6 +308,9 @@ void TakeShots(IDirect3DDevice9* dev) {
         if (hasPlayerPhoto) RestorePlayerPhoto();
         return;
     }
+#ifdef APEX_F10_STUDY
+    if (hasPlayerPhoto) F10Study::PhotoReceipt(d.Width, d.Height, g_playerPhoto.toggledGameUi);
+#endif
     for (size_t i = 0; i < jobs.size(); i++) WritePng(std::move(jobs[i]), i + 1 < jobs.size() ? bgr : std::move(bgr), d.Width, d.Height);
     if (hasPlayerPhoto) RestorePlayerPhoto();
 }
@@ -757,7 +761,12 @@ bool ScreenshotPending() {
 }
 
 void ObserveGameUiKey(WPARAM vk, bool repeat) {
-    if (vk == VK_F10 && !repeat) g_gameUiHidden.store(!g_gameUiHidden.load());
+    if (vk == VK_F10 && !repeat) {
+        g_gameUiHidden.store(!g_gameUiHidden.load());
+#ifdef APEX_F10_STUDY
+        F10Study::Request(g_gameUiHidden.load());
+#endif
+    }
 }
 
 void OnWorldSessionChanged() {

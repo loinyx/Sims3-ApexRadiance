@@ -9,6 +9,22 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Danish}
 const I18n::Pair kPairs[] = {
+    {"Brightness, contrast, saturation, temperature and sharpness", "Lysstyrke, kontrast, mætning, temperatur og skarphed"},
+    {"Midtones, shadows, highlights and blacks", "Mellemtoner, skygger, højlys og sorte toner"},
+    {"Tint, vibrance, film tones and color mixer", "Farvetone, livlighed, filmtoner og farveblanding"},
+    {"Clarity and darker corners", "Klarhed og mørkere hjørner"},
+    {"Film looks, light, camera and retro effects", "Filmstile, lys-, kamera- og retroeffekter"},
+    {"Color is off; your adjustments are kept", "Farve er slået fra; dine indstillinger bevares"},
+    {"Adjust this filter", "Juster dette filter"},
+    {"Filter shortcuts", "Filtergenveje"},
+    {"Assign shortcut", "Tildel genvej"},
+    {"Change shortcut", "Skift genvej"},
+    {"Remove shortcut", "Fjern genvej"},
+    {"Filter shortcut", "Filtergenvej"},
+    {"Press the keys together, then choose Save", "Tryk tasterne sammen, og vælg Gem"},
+    {"Waiting for keys", "Venter på taster"},
+    {"This shortcut is already in use", "Denne genvej er allerede i brug"},
+
     {"See what is in use; click a resource to open its settings", "Se, hvad der er i brug; klik på en funktion for at åbne dens indstillinger"},
     {"Performance and screen", "Ydeevne og skærm"},
     {"Waiting for game settings", "Venter på spillets indstillinger"},
@@ -1580,8 +1596,6 @@ const I18n::Pair kPairs[] = {
     {"Blends the last frames, each with other sample angles: a smooth shade even at low quality", "Blander de seneste billeder, hver med andre samplevinkler: en jævn skygge selv ved lav kvalitet"},
     {"Thin object detail", "Detaljer for tynde objekter"},
     {"Objects get thickness: no shade halo behind legs and rails. Costs more GPU", "Objekter får tykkelse: ingen skyggeglorie bag ben og gelændere. Koster mere GPU"},
-    {"Half resolution", "Halv opløsning"},
-    {"A quarter of the pixels: much lighter, a bit softer. Best with Temporal smoothing", "En fjerdedel af pixelene: meget lettere, lidt blødere. Bedst med Tidsmæssig udjævning"},
     {"Object thickness", "Objekttykkelse"},
     {"How deep objects are taken to be for Thin object detail: less shows more light behind thin things", "Hvor dybe objekter antages at være for Detaljer for tynde objekter: mindre viser mere lys bag tynde ting"},
     {"Reset Ambient Occlusion", "Nulstil Ambient Occlusion"},
@@ -1913,6 +1927,19 @@ const I18n::Pair kPairs[] = {
     {"official Sims3SettingsSetter not loaded", "officiel Sims3SettingsSetter ikke indlæst"},
     {"; OLD COMBINED BUILD loaded ({}): Apex Radiance's features stay off", "; GAMMEL KOMBINERET BUILD indlæst ({}): Apex Radiances funktioner forbliver slået fra"},
     {"; an older {} is also installed (idle): delete it from Game\\Bin", "; en ældre {} er også installeret (inaktiv): slet den fra Game\\Bin"},
+    {"The menu now supports all 21 game languages", "Menuen understøtter nu alle spillets 21 sprog"},
+    {"Apex catches its own errors instead of closing the game", "Apex håndterer egne fejl i stedet for at lukke spillet"},
+    {"Lamp cones and foundation lighting are more accurate", "Lyskegler og belysning af fundamenter er mere præcise"},
+    {"All Lighting options are enabled in the starting profiles", "Alle belysningsindstillinger er slået til i startprofilerne"},
+    {"Ground lamps light upper-story walls with smoother falloff", "Lamper på jorden oplyser vægge på øvre etager med blødere lysaftagning"},
+    {"Light behind balconies: softer light and shadows on walls above", "Lys bag altaner: blødere lys og skygger på væggene ovenover"},
+    {"Doors and windows on foundations receive lamp light; walls keep it out of enclosed yards", "Døre og vinduer på fundamenter får lampelys; vægge blokerer det i lukkede gårde"},
+    {"Captures use less storage, and editing lamps takes less repeated work", "Optagelser fylder mindre, og lampeændringer kræver færre gentagne beregninger"},
+    {"Placing and moving outdoor lamps updates wall lighting faster, especially on multi-story lots", "Placering og flytning af udendørslamper opdaterer væggenes lys hurtigere, især på grunde med flere etager"},
+    {"Lighting colors, brightness, shadows and reach are unchanged", "Lysets farver, styrke, skygger og rækkevidde er uændrede"},
+    {"Color groups have their own switches and keep your adjustments", "Farvegrupper har egne kontakter og bevarer dine justeringer"},
+    {"Right-click a filter to assign an optional keyboard shortcut", "Højreklik på et filter for at tildele en valgfri tastaturgenvej"},
+    {"Corrected screen-effect timing when hiding the game interface", "Tidspunktet for skærmeffekter, når spillets brugerflade skjules, er rettet"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Danish, kPairs, std::size(kPairs));

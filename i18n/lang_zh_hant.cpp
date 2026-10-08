@@ -9,6 +9,22 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Traditional, Taiwan / Hong Kong)}
 const I18n::Pair kPairs[] = {
+    {"Brightness, contrast, saturation, temperature and sharpness", "亮度、對比、飽和度、色溫和銳利度"},
+    {"Midtones, shadows, highlights and blacks", "中間調、陰影、亮部和黑色"},
+    {"Tint, vibrance, film tones and color mixer", "色調、自然飽和度、電影色調和色彩混合"},
+    {"Clarity and darker corners", "清晰度和暗角"},
+    {"Film looks, light, camera and retro effects", "電影風格、光線、鏡頭和復古效果"},
+    {"Color is off; your adjustments are kept", "色彩已關閉；保留你的設定"},
+    {"Adjust this filter", "調整此濾鏡"},
+    {"Filter shortcuts", "濾鏡快捷鍵"},
+    {"Assign shortcut", "設定快捷鍵"},
+    {"Change shortcut", "更改快捷鍵"},
+    {"Remove shortcut", "移除快捷鍵"},
+    {"Filter shortcut", "濾鏡快捷鍵"},
+    {"Press the keys together, then choose Save", "同時按下組合鍵，然後選擇儲存"},
+    {"Waiting for keys", "等待按鍵"},
+    {"This shortcut is already in use", "此快捷鍵已被使用"},
+
     {"See what is in use; click a resource to open its settings", "查看目前使用的功能；點選一項即可開啟其設定"},
     {"Performance and screen", "效能與螢幕"},
     {"Waiting for game settings", "正在等待遊戲設定"},
@@ -1580,8 +1596,6 @@ const I18n::Pair kPairs[] = {
     {"Blends the last frames, each with other sample angles: a smooth shade even at low quality", "混合最近的影格，每個影格使用不同的取樣角度：即使品質低，陰影也很平滑"},
     {"Thin object detail", "細物件細節"},
     {"Objects get thickness: no shade halo behind legs and rails. Costs more GPU", "物件具有厚度：桌腳與欄杆後方不會出現陰影光暈。GPU 負擔較大"},
-    {"Half resolution", "半解析度"},
-    {"A quarter of the pixels: much lighter, a bit softer. Best with Temporal smoothing", "四分之一的像素：負擔輕很多，稍微柔和一些。最好搭配「時間平滑」"},
     {"Object thickness", "物件厚度"},
     {"How deep objects are taken to be for Thin object detail: less shows more light behind thin things", "「細物件細節」所假設的物件深度：越小，細物件後方顯示越多光線"},
     {"Reset Ambient Occlusion", "重設環境光遮蔽"},
@@ -1913,6 +1927,19 @@ const I18n::Pair kPairs[] = {
     {"official Sims3SettingsSetter not loaded", "未載入官方 Sims3SettingsSetter"},
     {"; OLD COMBINED BUILD loaded ({}): Apex Radiance's features stay off", "；已載入舊的合併版本（{}）：Apex Radiance 的功能保持關閉"},
     {"; an older {} is also installed (idle): delete it from Game\\Bin", "；另外還安裝了較舊的 {}（閒置中）：請從 Game\\Bin 刪除"},
+    {"The menu now supports all 21 game languages", "選單現已支援遊戲的全部21種語言"},
+    {"Apex catches its own errors instead of closing the game", "Apex會處理自身錯誤，避免遊戲因此關閉"},
+    {"Lamp cones and foundation lighting are more accurate", "燈光錐體與地基照明更加準確"},
+    {"All Lighting options are enabled in the starting profiles", "初始設定組已啟用所有照明選項"},
+    {"Ground lamps light upper-story walls with smoother falloff", "地面燈具照亮上層牆壁，光線衰減更加柔和"},
+    {"Light behind balconies: softer light and shadows on walls above", "陽台後方照明：上方牆壁的光線與陰影更加柔和"},
+    {"Doors and windows on foundations receive lamp light; walls keep it out of enclosed yards", "地基上的門窗能接收燈光；牆壁會阻擋光線進入封閉庭院"},
+    {"Captures use less storage, and editing lamps takes less repeated work", "擷取檔案占用空間更少，編輯燈具時的重複計算也更少"},
+    {"Placing and moving outdoor lamps updates wall lighting faster, especially on multi-story lots", "放置與移動室外燈具時，牆壁照明更新更快，多層地段尤其明顯"},
+    {"Lighting colors, brightness, shadows and reach are unchanged", "照明的顏色、亮度、陰影與範圍維持不變"},
+    {"Color groups have their own switches and keep your adjustments", "色彩群組擁有獨立開關並保留調整值"},
+    {"Right-click a filter to assign an optional keyboard shortcut", "右鍵點擊濾鏡可設定選用的鍵盤快捷鍵"},
+    {"Corrected screen-effect timing when hiding the game interface", "修正隱藏遊戲介面時畫面效果的套用時機"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::ChineseTraditional, kPairs, std::size(kPairs));

@@ -39,11 +39,11 @@ Sims 3"); internal names keep "Apex". Visible text uses `APEX_PRODUCT_NAME`, nev
 | Overview (layout-dashboard) | Recommendation card "Recommended for Apex Radiance" (DXVK and Sims3SettingsSetter, only the missing ones, while `[ui] recommend_s3ss` is true; Download, "Don't show again"). **All effects** card: one switch with "All effects are on / Some effects are on / All effects are off"; it controls Night Lights, Ambient Occlusion, Banding Fix, Depth Blur, Edge Smoothing, Picture, Water Reflections and the Performance group. **Lighting** card: Night Lights, Water Reflections. **Image** card: Picture, Ambient Occlusion, Banding Fix, Depth Blur, Edge Smoothing. **Performance** card: one switch for all 15 performance options. Clicking a name opens its page. Rows blocked by the game's anti-aliasing show "Waiting for game settings"; GPU cost chips show measured time only |
 | WORLD > Lighting (moon-star) | Tabs **Overview** (Night Lights card; lighting balance Subtle / Soft / Natural / Custom with Undo choice; Refresh lighting card), **Ground**, **Objects**, **Buildings** (Buildings card, Rooms at Night card), **Stories** (Upper floors light the ground and the floor-sharing options). While Night Lights is off, the other tabs show a note and "Turn on Night Lights". See [Night Lighting](features/night-lighting/README.md) |
 | WORLD > Water & Snow (waves-horizontal) | Lamp Glow, Water Reflections (with "Turn on Night Lights" / "Turn on Depth Blur"), Snow. See [reflections](features/reflections.md) |
-| IMAGE > Color (palette) | Picture header card (switch, GPU cost, hold to compare, before/after) and tabs Basic, Tones, Color (Film tones and Color mixer expandable), Detail, Filters (one card per filter in six sections: Film looks, Color and mood, Light and detail, Camera, Retro and style, Accessibility). Rows and filter cards stay visible, greyed, while Picture is off. See [picture-filters.md](features/picture-filters.md) |
+| IMAGE > Color (palette) | Overview owns the Color master switch, measured GPU cost and comparison tools; its card title matches the tab. Clickable overview rows lead to Basic, Tones, Color, Detail and Filters, each with an independent group switch. Master off disables and visually turns off dependent switches without clearing saved group preferences. Filters has six compact family panels, down/up adjustment disclosures, right-click/ellipsis shortcut actions and an optional tag left of the disclosure arrow. The shortcut modal uses the native card header and right-aligned actions. No profiles on this overview. See [picture-filters.md](features/picture-filters.md) |
 | IMAGE > Banding Fix (blend) | "Still being tested" note and the Banding Fix card with Strength, Moving grain and Smooth gradients. See [banding-fix.md](features/banding-fix.md) |
-| IMAGE > Ambient Occlusion (contrast) | Scene AO card and Sim Occlusion card. See [ambient-occlusion.md](features/ambient-occlusion.md), [sim-occlusion.md](features/sim-occlusion.md) |
+| IMAGE > Ambient Occlusion (contrast) | Scene AO card and Sim Occlusion card. Scene AO runs at full resolution; the reduced-resolution and reconstruction controls were removed at the user's request. See [ambient-occlusion.md](features/ambient-occlusion.md), [sim-occlusion.md](features/sim-occlusion.md) |
 | IMAGE > Depth Blur (aperture) | Depth Blur card; mode-specific rows are drawn and searchable only in their mode. See [depth-blur.md](features/depth-blur.md) |
-| SYSTEM > Edge Smoothing (spline) | FXAA / SMAA controls and the game-MSAA notice. See [edge-smoothing.md](features/edge-smoothing.md) |
+| IMAGE > Edge Smoothing (spline) | FXAA / SMAA controls and the game-MSAA notice. See [edge-smoothing.md](features/edge-smoothing.md) |
 | SYSTEM > Performance (gauge) | Five cards with the 15 performance switches: Camera and lighting, Files and objects, Textures and Sims, Memory handling, Game and scripts. See [Performance](features/performance/README.md) |
 | SYSTEM > Lot Streaming (layers) | Cards Lot detail streaming (Extended lot detail with its distance and lot count, Smooth lot streaming, Keep lot visibility stable, Pause lot streaming in map view) and Object streaming (Spread lot objects while loading). See [lot-streaming.md](features/performance/lot-streaming.md) |
 | SYSTEM > Attention (triangle-alert) | Only while something outside Apex blocks an effect (the game's own anti-aliasing with an affected feature enabled, a room colour saved in Sims3SettingsSetter) |
@@ -297,6 +297,14 @@ separator, a 14-unit gap and an 18-unit right inset. They enter over 140 ms with
 - An older standalone `S3SSApex.asi` is loaded too (`ApexGui::SetOldStandaloneNotice`): "An older <module> is also
   installed. Delete it from Game\Bin." (warning colour); features keep running. When the old copy loaded first, Apex
   Radiance idles (no menu, no banner) and only writes an error line to `ApexRadiance_LOG.txt`.
+
+## What's new
+
+Click the version in the menu footer to open the latest eight releases, newest first, in a scrollable list.
+The release heading comes from `apex_changelog.cpp`; the footer comes from `apex_version.h`. Keep the newest
+release entry aligned with the build version, and include intervening releases rather than skipping their history.
+Each player-facing bullet must be translated in all 21 languages, including the seventeen single-language tables.
+Regenerate `i18n/keys.tsv` and run the translation checker after adding or updating a release entry.
 
 ## Languages
 
