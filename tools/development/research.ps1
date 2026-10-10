@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory=$true)][string]$GameBin,
     [string]$GhidraRoot = '',
     [switch]$Analyze,
-    [switch]$Export
+    [switch]$Export,
+    [ValidateRange(2,64)][int]$MaxMemoryGB = 8
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -43,6 +44,7 @@ if ($Analyze -or $Export) {
     $name = 'Steam-' + (Get-FileHash -LiteralPath $steam -Algorithm SHA256).Hash.Substring(0,12)
     $headless = Join-Path $GhidraRoot 'support/analyzeHeadless.bat'
     if (-not (Test-Path $headless)) { throw 'Ghidra analyzeHeadless was not found.' }
+    $env:GHIDRA_HEADLESS_MAXMEM = "$($MaxMemoryGB)G"
     if ($Analyze) {
         if (Test-Path (Join-Path $projects ($name + '.gpr'))) { throw 'This executable is already imported; open the existing project instead of overwriting it.' }
         & $headless $projects $name -import $steam -max-cpu 4 -analysisTimeoutPerFile 600 -log (Join-Path $out 'analysis.log')
