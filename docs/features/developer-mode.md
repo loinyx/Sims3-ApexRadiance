@@ -23,12 +23,7 @@ build doubled the release work and let the two drift apart.
 
 ## How Apex Radiance solves it
 
-All code ships in `Release\ApexRadiance.asi`; the legacy `ApexPublic` build property has no effect. At startup
-`ApexConfig::LoadDeveloperMode()` reads `[ui] developer_mode` before `PatchManager::CreateAll()` constructs any feature,
-and stores the result in the atomic `kPublicBuild` (legacy name: true means developer mode is off). Every developer-only
-path checks that flag. Changing the setting takes effect only after restarting the game, in both directions, so no
-feature changes mode while running. The log records `[Main] Unified build: normal mode` or
-`[Main] Unified build: developer mode`, and crash reports name the mode.
+The public asset is compiled with `APEX_NO_DEV_TOOLS` and cannot activate developer mode. The local developer build includes the instruments, disabled by default. `LoadDeveloperMode()` runs before feature construction; its requested mode takes effect only after restarting the game. The legacy `ApexPublic` property has no effect; the compile-time flavor and runtime gate are separate.
 
 ## Settings
 
@@ -48,8 +43,7 @@ About version line reads "Version X - Developer mode" while active.
 ### Profiles
 
 Development is profile part bit 8 (`kPartDeveloper = 256`; earlier bits unchanged, bit 4 unused). Its save checkbox is
-shown only when developer mode is requested or active. A profile that contains it shows it when choosing what to apply,
-even in normal mode; it starts unchecked. Applying a Developer part that requests activation opens the same
+shown only when developer mode is requested or active. In the developer build, a preset containing it shows it when choosing what to apply, even when developer mode is off; it starts unchecked. Public builds hide and ignore this category. Applying a Developer part that requests activation opens the same
 confirmation before any part is applied; Cancel applies nothing. Activation never follows a profile without this part.
 
 The `[developer]` section holds:

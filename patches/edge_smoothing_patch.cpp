@@ -627,6 +627,7 @@ bool RunDepthPass(IDirect3DDevice9* dev) {
     DWORD rs[kRS], ss[kSS];
     float oldConst[4];
     D3DVIEWPORT9 oldVp{};
+    RECT oldScissor{};
     dev->GetRenderTarget(0, &oldRt);
     dev->GetPixelShader(&oldPs);
     dev->GetVertexShader(&oldVs);
@@ -638,6 +639,7 @@ bool RunDepthPass(IDirect3DDevice9* dev) {
     for (int i = 0; i < kSS; i++) dev->GetSamplerState(0, kSamplerStates[i], &ss[i]);
     dev->GetPixelShaderConstantF(2, oldConst, 1);
     dev->GetViewport(&oldVp);
+    dev->GetScissorRect(&oldScissor);
 
     dev->SetRenderTarget(0, g.depthLogSurf);
     dev->SetVertexShader(nullptr);
@@ -682,6 +684,7 @@ bool RunDepthPass(IDirect3DDevice9* dev) {
     else dev->SetFVF(oldFvf);
     dev->SetStreamSource(0, oldStream, oldOffset, oldStride); // DrawPrimitiveUP clears stream 0
     dev->SetViewport(&oldVp);
+    dev->SetScissorRect(&oldScissor);
     SafeRelease(oldRt);
     SafeRelease(oldTex);
     SafeRelease(oldPs);
@@ -740,6 +743,7 @@ void RunFxaa(IDirect3DDevice9* dev, bool useDepth) {
     DWORD rs[kRS], ss[kSS];
     float oldConst[kPSConsts * 4];
     D3DVIEWPORT9 oldVp{};
+    RECT oldScissor{};
     dev->GetPixelShader(&oldPs);
     dev->GetVertexShader(&oldVs);
     dev->GetVertexDeclaration(&oldDecl);
@@ -750,6 +754,7 @@ void RunFxaa(IDirect3DDevice9* dev, bool useDepth) {
     for (int i = 0; i < kSS; i++) dev->GetSamplerState(0, kSamplerStates[i], &ss[i]);
     dev->GetPixelShaderConstantF(0, oldConst, kPSConsts);
     dev->GetViewport(&oldVp);
+    dev->GetScissorRect(&oldScissor);
 
     // pass: copy -> backbuffer (the render target is already the backbuffer)
     const D3DVIEWPORT9 vp{0, 0, g.width, g.height, 0.0f, 1.0f};
@@ -797,6 +802,7 @@ void RunFxaa(IDirect3DDevice9* dev, bool useDepth) {
     else dev->SetFVF(oldFvf);
     dev->SetStreamSource(0, oldStream, oldOffset, oldStride); // DrawPrimitiveUP clears stream 0
     dev->SetViewport(&oldVp);
+    dev->SetScissorRect(&oldScissor);
     SafeRelease(oldTex);
     SafeRelease(oldPs);
     SafeRelease(oldVs);
@@ -846,6 +852,7 @@ void RunSmaa(IDirect3DDevice9* dev, bool useDepth, const float subsample[4]) {
     DWORD rs[kRS], ss[kSamplers][kSS];
     float oldConst[kPSConsts * 4];
     D3DVIEWPORT9 oldVp{};
+    RECT oldScissor{};
     dev->GetRenderTarget(0, &oldRt);
     dev->GetPixelShader(&oldPs);
     dev->GetVertexShader(&oldVs);
@@ -859,6 +866,7 @@ void RunSmaa(IDirect3DDevice9* dev, bool useDepth, const float subsample[4]) {
     for (int i = 0; i < kRS; i++) dev->GetRenderState(kRenderStates[i], &rs[i]);
     dev->GetPixelShaderConstantF(0, oldConst, kPSConsts);
     dev->GetViewport(&oldVp);
+    dev->GetScissorRect(&oldScissor);
 
     dev->SetRenderState(D3DRS_MULTISAMPLEANTIALIAS, TRUE);
     dev->SetRenderState(D3DRS_MULTISAMPLEMASK, 0xFFFFFFFF);
@@ -932,6 +940,7 @@ void RunSmaa(IDirect3DDevice9* dev, bool useDepth, const float subsample[4]) {
     else dev->SetFVF(oldFvf);
     dev->SetStreamSource(0, oldStream, oldOffset, oldStride); // DrawPrimitiveUP clears stream 0
     dev->SetViewport(&oldVp);
+    dev->SetScissorRect(&oldScissor);
     SafeRelease(oldRt);
     SafeRelease(oldPs);
     SafeRelease(oldVs);
@@ -1019,6 +1028,13 @@ void OnPostReset(IDirect3DDevice9*) {
     g.retryCountdown = 0;
 }
 
+void RestartEffects(IDirect3DDevice9* dev) {
+    OnPreReset(dev);
+    ReleaseShaders();
+    OnPostReset(dev);
+}
+
+
 } // namespace
 
 class EdgeSmoothingPatch : public ApexPatch {
@@ -1055,6 +1071,7 @@ class EdgeSmoothingPatch : public ApexPatch {
         }, Priority::First);
         RenderCallbacks::Add(RenderCallbacks::preReset, OnPreReset);
         RenderCallbacks::Add(RenderCallbacks::postReset, OnPostReset);
+        RenderCallbacks::Add(RenderCallbacks::restartEffects, RestartEffects);
         PostScene::Add(PostScene::kEdgeSmoothing, FxaaEffect);
         g.active = true;
         g.retryCountdown = 0;
@@ -1074,6 +1091,7 @@ class EdgeSmoothingPatch : public ApexPatch {
         D3D9Hooks::UnregisterAll(kHookName);
         RenderCallbacks::Remove(RenderCallbacks::preReset, OnPreReset);
         RenderCallbacks::Remove(RenderCallbacks::postReset, OnPostReset);
+        RenderCallbacks::Remove(RenderCallbacks::restartEffects, RestartEffects);
         ReleaseResources();
         ReleaseShaders();
         g.status = "Off";

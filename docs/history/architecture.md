@@ -1243,7 +1243,6 @@ With the performance patches gone, the guard mainly protects Night Lighting's ga
   - `apex_radiance_imgui.ini`;
   - dev outputs: `ApexRadiance_Hitches.txt`, `ApexRadiance_FrameCapture.txt`, `ApexRadiance_LightDiag.txt`,
     `ApexRadiance_LightProbe.txt`, `LightProbe\`, `ApexRadiance_Censo.txt`, `Censo\`, `ShadersRecusados\`.
-  - It only writes `S3SS.toml` for the backed-up room-ambient RGB correction; it never writes `S3SS_LOG.txt` or anything in the previous standalone's `...\S3SS\Apex\` folder.
 - **Schema:** the table names are kept, so settings carry over:
   - `[qol.picture]`; `[qol.frame_profiler]` (dev);
   - `[patches.<Name>]` for NightTerrainRelight, EdgeSmoothing, DepthBlur, FrameCapture (dev) and LotMapProbe (dev);
@@ -1398,16 +1397,6 @@ its validation page.
 
 **Outcome:** one binary; `kPublicBuild` became an atomic meaning "developer mode off"
 ([features/developer-mode.md](../features/developer-mode.md)).
-
-### 2026-10-04: S3SS room-ambient correction made explicit
-
-**Context:** enabling Rooms at Night used to back up `S3SS.toml` and remove its saved `settings.BradyBunchBlue` RGB
-override automatically.
-
-**Finding:** the correction changes another mod's saved settings, so it belongs to an explicit player action.
-
-**Outcome:** the correction runs only when the player chooses the Rooms at Night compatibility action (commit
-`f0b8d54`, pull request #2); enabling Rooms at Night alone never writes `S3SS.toml`.
 
 ### 2026-10-05: start note and Depth Blur wait for the loading window
 

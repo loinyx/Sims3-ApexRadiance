@@ -85,6 +85,7 @@ bool EnsureApexDirectory() {
 }
 
 std::wstring ConfigFile() { return ApexDirectory() + L"ApexRadiance.toml"; }
+std::wstring DiagnosticsDirectory() { return ApexDirectory() + L"Diagnostics\\"; }
 std::wstring LogFile() { return ApexDirectory() + L"ApexRadiance_LOG.txt"; }
 std::wstring S3SSConfigFile() { return S3SSDirectory() + L"S3SS.toml"; }
 std::wstring MigrationBackup() { return ApexDirectory() + L"S3SS.toml.pre-split.bak"; }

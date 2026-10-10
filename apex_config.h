@@ -10,6 +10,7 @@
 #include <windows.h>
 #include <string>
 #include <vector>
+#include <toml++/toml.hpp>
 
 namespace toml {
 inline namespace v3 {
@@ -127,9 +128,20 @@ inline constexpr unsigned kProfilePartsAll = ((1u << kProfilePartCount) - 1) & ~
 const char* ProfilePartName(int index); // English, for the menu ("Night Lights")
 unsigned ProfilePartsOf(const toml::table& state);         // the parts a profile table has
 void KeepProfileParts(toml::table& state, unsigned parts); // removes the other parts from a profile table
+void CaptureProfileState(toml::table& out); // current feature state plus optional shortcut categories
 bool SaveProfile(const std::string& name, unsigned parts = kProfilePartsAll, std::string* error = nullptr, const std::string& icon = "bookmark");
 // Parses the profile (does not apply it: see ApplyFeatureState)
 bool ReadProfile(const std::string& name, toml::table& out, std::string* error = nullptr);
+struct ProfileImport {
+    toml::table state;
+    std::string lutName, lutBytes;
+};
+// Sharing retains the legacy TOML schema; ZIP adds its referenced LUT as a separate payload.
+bool ProfileUsesLut(const toml::table& state);
+bool ExportProfileFile(const std::wstring& path, const toml::table& state, std::string* error = nullptr);
+bool ReadProfileImport(const std::wstring& path, ProfileImport& out, std::string* error = nullptr);
+bool SaveImportedProfile(const std::string& name, const ProfileImport& input, unsigned parts, const std::string& icon,
+                         std::string* error = nullptr);
 bool DeleteProfile(const std::string& name, std::string* error = nullptr);
 std::wstring ProfilesFolder();  // the Profiles folder inside the Apex Radiance folder (trailing backslash)
 bool EnsureProfilesDirectory(); // creates it if needed

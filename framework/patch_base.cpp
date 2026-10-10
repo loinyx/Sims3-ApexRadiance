@@ -5,6 +5,7 @@
 #include "ui/i18n.h"
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <format>
 #include <mutex>
 
@@ -35,7 +36,9 @@ class FloatOption final : public PatchSetting {
     void Save(toml::table& t) const override { t.insert_or_assign(key_, static_cast<double>(*v_)); }
     void SaveDefault(toml::table& t) const override { t.insert_or_assign(key_, static_cast<double>(def_)); }
     void Load(const toml::table& t) override {
-        if (auto d = t[key_].value<double>()) *v_ = Clamp(static_cast<float>(*d), lo_, hi_);
+        if (auto d = t[key_].value<double>()) {
+            if (std::isfinite(*d)) *v_ = static_cast<float>(Clamp(*d, static_cast<double>(lo_), static_cast<double>(hi_)));
+        }
     }
     bool Draw() override {
         bool changed = false;
@@ -233,14 +236,14 @@ void ApexPatch::RegisterEnumSetting(int* value, const std::string& key, int def,
 }
 
 void ApexPatch::NotifySettingChanged() {
-    lastSettingChange = std::chrono::steady_clock::now();
+    lastSettingChange.store(std::chrono::steady_clock::now());
     pendingReinstall = true;
     PatchManager::Get().SetUnsavedChanges(true);
 }
 
 void ApexPatch::Update() {
     if (!pendingReinstall || !isEnabled.load()) return;
-    if (std::chrono::steady_clock::now() - lastSettingChange < SETTING_CHANGE_DEBOUNCE) return;
+    if (std::chrono::steady_clock::now() - lastSettingChange.load() < SETTING_CHANGE_DEBOUNCE) return;
     pendingReinstall = false;
     LOG_INFO("[" + patchName + "] Reinstalling after a setting change");
     if (Uninstall()) Install();

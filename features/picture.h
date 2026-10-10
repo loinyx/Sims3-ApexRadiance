@@ -133,6 +133,7 @@ class Picture {
 
     // D3D9 bootstrap: around IDirect3DDevice9::Reset (the pass's D3DPOOL_DEFAULT targets are recreated lazily)
     void BeforeReset();
+    void RestartGraphics();
     // End of the frame, before the Apex overlay: when the frame ended on the scene (no game UI after it), the scene copy
     // is taken now.
     void BeforeOverlay(IDirect3DDevice9* dev);
@@ -160,9 +161,9 @@ class Picture {
     static const char* const* Keys(size_t& count);
 
     // Stable tab values; Overview is displayed first without moving the existing search indices.
-    enum Tab : int { TabBasic, TabTones, TabColor, TabDetail, TabFilters, TabOverview, TabCount };
+    enum Tab : int { TabBasic, TabTones, TabColor, TabDetail, TabFilters, TabOverview, TabLuts, TabCount };
     // The Filters tab: compact rows in six family panels, with independent adjustment disclosures and shortcuts.
-    void RenderFiltersUI();
+    void RenderFiltersUI(bool lutOnly = false);
     // Window-thread input, queued for the render thread. No work or allocation when no shortcuts are assigned.
     bool FilterKeyDown(WPARAM vk, bool repeat);
     static bool RecordingFilterShortcut();
@@ -184,6 +185,7 @@ class Picture {
     Picture() = default;
     void ReleaseResources();
     bool InitResources(IDirect3DDevice9* dev);
+    bool EnsureReducedScene(IDirect3DDevice9* dev);
 
     mutable std::mutex m_mutex;
     PictureParams m_p;

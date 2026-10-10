@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [2.12.0](2.12.0.md): LUTs, presets and graphics improvements.
 - [2.11.1](2.11.1.md): simplified Ambient Occlusion.
 
 ## Format
@@ -30,6 +31,7 @@ tests, publication) is in [workflow.md](../workflow.md#6-release).
 
 | Version | Published | Headline |
 |---|---|---|
+| [2.12.0](2.12.0.md) | 2026-10-09 | LUTs, presets and graphics improvements |
 | [2.11.1](2.11.1.md) | 2026-10-08 | Ambient Occlusion cleanup |
 | [2.11.0](2.11.0.md) | 2026-10-07 | Color groups, optional filter shortcuts and hidden-interface effect timing |
 | [2.10.1](2.10.1.md) | 2026-10-07 | Faster exterior lighting updates in Build/Buy |

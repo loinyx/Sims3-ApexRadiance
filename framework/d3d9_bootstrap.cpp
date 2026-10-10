@@ -44,6 +44,7 @@ std::once_flag g_createDeviceOnce;
 std::atomic<IDirect3DDevice9*> g_device{nullptr};
 std::atomic<HWND> g_window{nullptr};
 std::atomic<bool> g_frameInit{false};
+std::atomic<bool> g_restartEffects{false};
 std::atomic<bool> g_presentSeen{false};
 std::atomic<unsigned long long> g_firstPresentTick{0};
 std::atomic<bool> g_overlayDrawnThisFrame{false};
@@ -71,7 +72,14 @@ bool Attach(void** target, void* detour, const char* what) {
 
 // ---- per frame ----
 
-void OnPresent(IDirect3DDevice9*) {
+void OnPresent(IDirect3DDevice9* dev) {
+    // Consume after scene/overlay draws on the render thread, never during a UI callback.
+    if (g_restartEffects.load() && dev && SUCCEEDED(dev->TestCooperativeLevel())) {
+        g_restartEffects.store(false);
+        RenderCallbacks::Fire(RenderCallbacks::restartEffects, dev);
+        HookGuard::Try("Manual Picture recovery", [] { Picture::Get().RestartGraphics(); });
+        LOG_INFO("[Recovery] Apex screen resources invalidated; settings retained; recreation follows on demand");
+    }
     g_overlayDrawnThisFrame.store(false);
     HookGuard::ReportPending(); // exceptions caught since the last frame reach the log here, outside any catch block
     if (g_presentSeen.exchange(true)) return;
@@ -285,5 +293,8 @@ IDirect3DDevice9* Device() { return g_device.load(); }
 HWND Window() { return g_window.load(); }
 bool PresentSeen() { return g_presentSeen.load(); }
 unsigned long long FirstPresentTick() { return g_firstPresentTick.load(); }
+
+void RequestEffectsRestart() { g_restartEffects.store(true); }
+bool EffectsRestartPending() { return g_restartEffects.load(); }
 
 } // namespace ApexD3D

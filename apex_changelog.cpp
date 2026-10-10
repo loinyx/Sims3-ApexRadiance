@@ -6,6 +6,16 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k2120Added[] = {
+    "3D CUBE LUTs with adjustable strength",
+    "Presets have their own page and can be shared as TOML or ZIP",
+    "Restart Apex graphics without losing your settings",
+    nullptr};
+constexpr const char* k2120Improved[] = {nullptr};
+constexpr const char* k2120Fixed[] = {
+    "Screen effects preserve transparency and restore graphics state",
+    nullptr};
+
 constexpr const char* k2111Added[] = {nullptr};
 constexpr const char* k2111Improved[] = {
     "Removed Temporal smoothing and Thin object detail from Ambient Occlusion",
@@ -170,6 +180,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"2.12.0", "2026-10-09", k2120Added, k2120Improved, k2120Fixed},
     {"2.11.1", "2026-10-08", k2111Added, k2111Improved, k2111Fixed},
     {"2.11.0", "2026-10-07", k2110Added, k2110Improved, k2110Fixed},
     {"2.10.1", "2026-10-07", k2101Added, k2101Improved, k2101Fixed},

@@ -11,6 +11,49 @@ namespace {
 
 // {English (exactly as in the code), Portuguese (Brazil), Spanish, French}
 const I18n::Entry kEntries[] = {
+    {"Restarts graphics resources while keeping your settings", "Reinicia os recursos gráficos mantendo seus ajustes", "Reinicia los recursos gráficos conservando tus ajustes", "Redémarre les ressources graphiques en conservant vos réglages"},
+
+    {"Recovery", "Recuperação", "Recuperación", "Récupération"},
+    {"Restarts graphics resources while keeping your settings. This does not uninstall Apex.", "Reinicia os recursos gráficos mantendo seus ajustes. Isso não desinstala o Apex.", "Reinicia los recursos gráficos conservando tus ajustes. No desinstala Apex.", "Redémarre les ressources graphiques en conservant vos réglages. Cela ne désinstalle pas Apex."},
+    {"Restart Apex", "Reiniciar Apex", "Reiniciar Apex", "Redémarrer Apex"},
+    {"Restart pending", "Reinicialização pendente", "Reinicio pendiente", "Redémarrage en attente"},
+
+    {"Customize content", "Personalizar conteúdo", "Personalizar contenido", "Personnaliser le contenu"},
+    {"Create a preset with your current settings", "Crie um preset com seus ajustes atuais", "Crea un preajuste con tus ajustes actuales", "Créez un préréglage avec vos réglages actuels"},
+    {"Open a shared TOML or ZIP preset", "Abra um preset compartilhado em TOML ou ZIP", "Abre un preajuste compartido en TOML o ZIP", "Ouvrez un préréglage TOML ou ZIP partagé"},
+    {"Share your preset with other players", "Compartilhe seu preset com outros jogadores", "Comparte tu preajuste con otros jugadores", "Partagez votre préréglage avec d’autres joueurs"},
+
+    {"Current settings", "Configurações atuais", "Ajustes actuales", "Réglages actuels"},
+    {"Presets", "Presets", "Preajustes", "Préréglages"},
+    {"My presets", "Meus presets", "Mis preajustes", "Mes préréglages"},
+    {"Apex presets", "Presets do Apex", "Preajustes de Apex", "Préréglages Apex"},
+    {"Save current", "Salvar atual", "Guardar actual", "Enregistrer les réglages actuels"},
+    {"Import", "Importar", "Importar", "Importer"},
+    {"Export", "Exportar", "Exportar", "Exporter"},
+    {"Save preset", "Salvar preset", "Guardar preajuste", "Enregistrer un préréglage"},
+    {"Import preset", "Importar preset", "Importar preajuste", "Importer un préréglage"},
+    {"Export preset", "Exportar preset", "Exportar preajuste", "Exporter un préréglage"},
+    {"Apply preset", "Aplicar preset", "Aplicar preajuste", "Appliquer un préréglage"},
+    {"Choose file", "Escolher arquivo", "Elegir archivo", "Choisir un fichier"},
+    {"Preset name", "Nome do preset", "Nombre del preajuste", "Nom du préréglage"},
+    {"Choose the settings to include", "Escolha os ajustes a incluir", "Elige los ajustes que incluir", "Choisissez les réglages à inclure"},
+    {"Apply after import", "Aplicar após importar", "Aplicar tras importar", "Appliquer après l’importation"},
+    {"No saved presets yet", "Nenhum preset salvo ainda", "Aún no hay preajustes guardados", "Aucun préréglage enregistré"},
+    {"Open the presets folder", "Abrir a pasta de presets", "Abrir la carpeta de preajustes", "Ouvrir le dossier des préréglages"},
+    {"Delete this preset?", "Excluir este preset?", "¿Eliminar este preajuste?", "Supprimer ce préréglage ?"},
+    {"Choose a new preset name", "Escolha outro nome para o preset", "Elige otro nombre para el preajuste", "Choisissez un autre nom de préréglage"},
+    {"LUTs", "LUTs", "LUTs", "LUTs"},
+    {"Applies a color treatment defined in a file", "Aplica um tratamento de cor definido em um arquivo", "Aplica un tratamiento de color definido en un archivo", "Applique un traitement des couleurs défini dans un fichier"},
+    {"About LUTs", "Sobre LUTs", "Acerca de las LUT", "À propos des LUT"},
+    {"Preset exported", "Preset exportado", "Preajuste exportado", "Préréglage exporté"},
+    {"Could not open the file dialog", "Não foi possível abrir a janela de arquivos", "No se pudo abrir la ventana de archivos", "Impossible d’ouvrir la fenêtre de fichiers"},
+    {"Could not save the imported preset", "Não foi possível salvar o preset importado", "No se pudo guardar el preajuste importado", "Impossible d’enregistrer le préréglage importé"},
+    {"Menu, compatibility and credits", "Menu, compatibilidade e créditos", "Menú, compatibilidad y créditos", "Menu, compatibilité et crédits"},
+    {"This preset is exported as a TOML file.", "Este preset é exportado como um arquivo TOML.", "Este preajuste se exporta como un archivo TOML.", "Ce préréglage est exporté dans un fichier TOML."},
+    {"The preset and its LUT are exported together as one ZIP file.", "O preset e sua LUT são exportados juntos em um único ZIP.", "El preajuste y su LUT se exportan juntos en un único ZIP.", "Le préréglage et sa LUT sont exportés ensemble dans un seul ZIP."},
+    {"A LUT remaps colors to create a particular look. Put a 3D CUBE or PNG LUT in the LUTs folder, choose it here, then adjust Amount.", "Uma LUT transforma as cores para criar um visual. Coloque uma LUT CUBE 3D ou PNG na pasta LUTs, escolha aqui e ajuste a Intensidade.", "Una LUT transforma los colores para crear un aspecto. Pon una LUT CUBE 3D o PNG en la carpeta LUTs, elígela aquí y ajusta la Intensidad.", "Une LUT transforme les couleurs pour créer un rendu. Placez une LUT CUBE 3D ou PNG dans le dossier LUTs, sélectionnez-la ici, puis réglez l’Intensité."},
+    {"Could not export the preset. Check the selected LUT and folder access.", "Não foi possível exportar o preset. Confira a LUT escolhida e o acesso à pasta.", "No se pudo exportar el preajuste. Comprueba la LUT seleccionada y el acceso a la carpeta.", "Impossible d’exporter le préréglage. Vérifiez la LUT choisie et l’accès au dossier."},
+    {"Could not import the preset. Choose a TOML file or the original ZIP exported by Apex.", "Não foi possível importar o preset. Escolha um TOML ou o ZIP original exportado pelo Apex.", "No se pudo importar el preajuste. Elige un TOML o el ZIP original exportado por Apex.", "Impossible d’importer le préréglage. Choisissez un TOML ou le ZIP original exporté par Apex."},
     {"Removed Temporal smoothing and Thin object detail from Ambient Occlusion","Removidas Suavização temporal e Detalhe de objetos finos da Oclusão de Ambiente","Se eliminaron Suavizado temporal y Detalle de objetos finos de la oclusión ambiental","Lissage temporel et Détail des objets fins retirés de l’occlusion ambiante"},
     {"Ambient Occlusion and Sim Occlusion remain available","Oclusão de Ambiente e Oclusão dos Sims continuam disponíveis","La oclusión ambiental y la oclusión de los Sims siguen disponibles","L’occlusion ambiante et celle des Sims restent disponibles"},
     {"Apply", "Aplicar", "Aplicar", "Appliquer"},
@@ -1251,6 +1294,14 @@ const I18n::Table kRefreshLightingCardTable(kRefreshLightingCardEntries, std::si
 // The footer and What's new (apex_changelog.cpp)
 namespace {
 const I18n::Entry kWhatsNewEntries[] = {
+    {"Screen effects preserve transparency and restore graphics state", "Efeitos de tela preservam a transparência e restauram o estado gráfico", "Los efectos de pantalla conservan la transparencia y restauran el estado gráfico", "Les effets préservent la transparence et restaurent l’état graphique"},
+
+    {"Restart Apex graphics without losing your settings", "Reinicie os gráficos do Apex sem perder seus ajustes", "Reinicia los gráficos de Apex sin perder tus ajustes", "Redémarrez les graphismes Apex sans perdre vos réglages"},
+
+    {"Presets have their own page and can be shared as TOML or ZIP", "Presets têm sua própria página e podem ser compartilhados em TOML ou ZIP", "Los preajustes tienen su propia página y se comparten en TOML o ZIP", "Les préréglages ont leur propre page et se partagent en TOML ou ZIP"},
+
+    {"3D CUBE LUTs with adjustable strength", "LUTs CUBE 3D com intensidade ajustável", "LUT CUBE 3D con intensidad ajustable", "LUT CUBE 3D à intensité réglable"},
+
     {"Color groups have their own switches and keep your adjustments", "Os grupos de Cor têm seus próprios interruptores e mantêm seus ajustes", "Los grupos de Color tienen sus propios interruptores y conservan tus ajustes", "Les groupes Couleur ont leurs propres interrupteurs et conservent vos réglages"},
     {"Right-click a filter to assign an optional keyboard shortcut", "Clique com o botão direito em um filtro para definir um atalho de teclado opcional", "Haz clic derecho en un filtro para asignar un atajo de teclado opcional", "Faites un clic droit sur un filtre pour attribuer un raccourci clavier facultatif"},
     {"Corrected screen-effect timing when hiding the game interface", "Corrigido o momento de aplicação dos efeitos ao ocultar a interface do jogo", "Corregido el momento de aplicación de los efectos al ocultar la interfaz del juego", "Correction du moment d’application des effets lorsque l’interface du jeu est masquée"},

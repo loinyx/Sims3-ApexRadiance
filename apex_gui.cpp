@@ -37,6 +37,7 @@
 #include <toml++/toml.hpp>
 #include <objbase.h>
 #include <shellapi.h>
+#include <shobjidl.h>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -45,6 +46,7 @@
 #include <cstring>
 #include <format>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <cctype>
@@ -53,6 +55,7 @@
 #include <vector>
 
 #pragma comment(lib, "ole32.lib") // CoInitializeEx for ShellExecuteW (shell32.lib is linked by apex_paths.cpp)
+#pragma comment(lib, "uuid.lib")
 
 namespace ApexGui {
 namespace {
@@ -68,7 +71,7 @@ std::atomic<bool> g_oldStandalone{false}; // an older S3SSApex.asi is loaded too
 std::string g_oldStandaloneModule;        // under g_detailLock
 
 // Sidebar pages and the tabs of each page. The selected page and tabs are kept while the game runs (not saved).
-enum Page : int { PageOverview, PageLighting, PageWaterSnow, PageColor, PageAmbientOcclusion, PageDepthBlur, PageEdgeSmoothing, PagePerformance, PageDeveloper, PageSettings, PageReport, PageConflicts, PageBanding, PageLotStreaming };
+enum Page : int { PageOverview, PageLighting, PageWaterSnow, PageColor, PageAmbientOcclusion, PageDepthBlur, PageEdgeSmoothing, PagePerformance, PageDeveloper, PageSettings, PageReport, PageConflicts, PageBanding, PageLotStreaming, PageProfiles };
 enum LightingTab : int { LightingLamps, LightingGround, LightingObjects, LightingBuildings, LightingStories };
 enum SettingsTab : int { SettingsMenu, SettingsShortcuts, SettingsProfiles, SettingsCompatibility, SettingsAbout };
 int g_page = PageOverview;
@@ -737,18 +740,22 @@ void ColorOverview() {
                 nullptr,&on,true,nullptr,&clicked)) {p.Group(tab)=on;changed=true;}
             if(clicked) g_colorTab=tab;
         }
+        bool on=p.enabled && p.lut,clicked=false;
+        if(ApexUi::OverviewRow("LUTs",IconId::Layers,"LUTs","Applies a color treatment defined in a file",nullptr,&on,true,nullptr,&clicked)) {p.lut=on;changed=true;}
+        if(clicked) g_colorTab=Picture::TabLuts;
         ImGui::EndDisabled();
     }
     ApexUi::EndCard();if(changed) Picture::Get().SetParams(p,true);
 }
 void ColorPage() {
     ApexUi::PageTitle("Color", "How the game's picture looks");
-    static const char* const kTabs[] = {"Overview","Basic", "Tones", "Color", "Detail", "Filters"};
+    static const char* const kTabs[] = {"Overview","Basic", "Tones", "Color", "Detail", "Filters", "LUTs"};
     if (g_colorTab < 0 || g_colorTab >= Picture::TabCount) g_colorTab = Picture::TabOverview;
-    int selected=g_colorTab==Picture::TabOverview ? 0 : g_colorTab+1;
+    int selected=g_colorTab==Picture::TabOverview ? 0 : g_colorTab==Picture::TabLuts ? 6 : g_colorTab+1;
     ApexUi::TabBar("##ColorTabs", &selected, kTabs, IM_COUNTOF(kTabs));
-    g_colorTab=selected==0 ? Picture::TabOverview : selected-1;
+    g_colorTab=selected==0 ? Picture::TabOverview : selected==6 ? Picture::TabLuts : selected-1;
     if(g_colorTab==Picture::TabOverview) {ColorOverview();return;}
+    if(g_colorTab==Picture::TabLuts) {Picture::Get().RenderFiltersUI(true);return;}
     ColorGroupHeader(g_colorTab);
     if (g_colorTab == Picture::TabFilters) {Picture::Get().RenderFiltersUI();return;}
     PictureRows(g_colorTab);
@@ -805,41 +812,7 @@ bool GameAaBlocksEffects() {
 bool S3SSRoomColourSaved(bool recheck = false) { return S3SSDetect::SavedRoomAmbientOverride(recheck).has_value(); }
 
 // The Attention page and its sidebar entry exist only while one of its items applies
-bool HasAttentionItems() { return GameAaBlocksEffects() || S3SSRoomColourSaved() || g_oldStandalone.load(); }
-
-void S3SSRoomColourItem() {
-    static const char* result = nullptr; // the last correction's outcome, kept while the page is open
-    if (!S3SSRoomColourSaved() && !result) return;
-    ImGui::PushID("AttentionS3SS");
-    if (ApexUi::BeginCard("##Card")) {
-        ApexUi::CardHeader(IconId::Puzzle, "Saved S3SS room color",
-                           "S3SS keeps a fixed color for the background light in rooms (BradyBunchBlue RGB)", nullptr, nullptr);
-        ApexUi::CardDivider();
-        if (S3SSRoomColourSaved()) {
-            if (ApexUi::BeginControlRow("Remove the saved color", "Copies S3SS.toml to the Apex Radiance folder and removes only that color; the rest of S3SS stays as it is",
-                                        ApexUi::ButtonWidth("Back up and correct##S3SSFix", true))) {
-                if (ApexUi::IconTextButton("Back up and correct##S3SSFix", IconId::Save, nullptr, ButtonKind::Primary)) {
-                    switch (UnlitRooms::CorrectS3SSConflict().status) {
-                    case S3SSDetect::RoomAmbientCorrectionStatus::S3SSNotLoaded: result = "Sims3SettingsSetter is not loaded. No changes were made."; break;
-                    case S3SSDetect::RoomAmbientCorrectionStatus::ConfigUnavailable: result = "Could not read S3SS.toml. No changes were made."; break;
-                    case S3SSDetect::RoomAmbientCorrectionStatus::NoOverride: result = "No supported saved room-light color override was found. S3SS was not changed."; break;
-                    case S3SSDetect::RoomAmbientCorrectionStatus::BackupFailed: result = "Apex could not verify the backup. S3SS was not changed."; break;
-                    case S3SSDetect::RoomAmbientCorrectionStatus::ConfigChanged: result = "S3SS.toml changed during correction. No changes were written; try again."; break;
-                    case S3SSDetect::RoomAmbientCorrectionStatus::WriteFailed: result = "Apex could not save the correction. Check the Apex log; the backup is preserved."; break;
-                    case S3SSDetect::RoomAmbientCorrectionStatus::Saved: result = "Correction complete. The backup is in the Apex Radiance folder; restart the game for S3SS to keep the change."; break;
-                    }
-                    S3SSRoomColourSaved(true);
-                }
-                ApexUi::EndControlRow();
-            }
-            ApexUi::MutedText("Rooms at Night already uses the game's blue in its place; removing the color also restores it while Rooms at Night is off");
-        }
-        if (result) ApexUi::IconNote(S3SSRoomColourSaved() ? IconId::TriangleAlert : IconId::CircleCheck, result,
-                                     S3SSRoomColourSaved() ? VioletTheme::kWarning : VioletTheme::kSuccess);
-    }
-    ApexUi::EndCard();
-    ImGui::PopID();
-}
+bool HasAttentionItems() { return GameAaBlocksEffects() || g_oldStandalone.load(); }
 
 void OldStandaloneItem() {
     if (!g_oldStandalone.load()) return;
@@ -862,7 +835,7 @@ void OldStandaloneItem() {
 void ConflictsPage() {
     ApexUi::PageTitle("Attention", "Settings outside Apex that need a look");
     if (!HasAttentionItems()) ApexUi::IconNote(IconId::CircleCheck, "Nothing to fix");
-    S3SSRoomColourItem();
+
     OldStandaloneItem();
 }
 
@@ -1885,7 +1858,7 @@ void MenuTab() {
     ImGui::PopID();
 }
 
-// ---- Settings > Profiles ----
+// ---- Presets: library, portable sharing and native dialogs ----
 
 struct ProfileItem {
     std::string name;
@@ -1907,8 +1880,59 @@ struct ProfilesState {
     std::string loading;        // a profile whose parts are being picked before "Load"
     unsigned loadParts = 0;
     double applyOpenedAt = 0.0;
+    enum Dialog { None, Save, Import, Export, Apply } dialog = None;
+    bool openDialog = false, applyAfterImport = false;
+    ApexConfig::ProfileImport imported;
+    toml::table exportState;
+    std::wstring importPath;
+    unsigned available = 0;
+    ProfileItem selected;
+    int exportSource = 0;
 };
 ProfilesState g_profiles;
+struct ProfilePickerResult { bool save=false; std::wstring path; HRESULT status=S_OK; };
+std::mutex g_profilePickerLock;
+std::optional<ProfilePickerResult> g_profilePickerResult;
+std::atomic<bool> g_profilePickerBusy{false};
+
+void PickProfileFile(bool save, bool withLut, std::string name) {
+    if(g_profilePickerBusy.exchange(true)) return;
+    if(!HookGuard::StartDetached("Profiles: file dialog", [save,withLut,name=std::move(name)] {
+        ProfilePickerResult result; result.save=save;
+        struct Finish {
+            ProfilePickerResult& result;
+            ~Finish() {std::lock_guard<std::mutex> lock(g_profilePickerLock); g_profilePickerResult=std::move(result); g_profilePickerBusy=false;}
+        } finish{result};
+        result.status=E_FAIL;
+        const HRESULT com=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
+        if(SUCCEEDED(com)) {
+            IFileDialog* dialog=nullptr;
+            result.status=CoCreateInstance(save?CLSID_FileSaveDialog:CLSID_FileOpenDialog,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&dialog));
+            if(SUCCEEDED(result.status)) {
+                const auto label=ApexUtil::ToWide(I18n::Tr("Presets"));
+                const COMDLG_FILTERSPEC types[]={{label.c_str(),save?(withLut?L"*.zip":L"*.toml"):L"*.zip;*.toml"}};
+                dialog->SetFileTypes(1,types);
+                DWORD options=0; dialog->GetOptions(&options);
+                dialog->SetOptions(options|FOS_FORCEFILESYSTEM|FOS_NOCHANGEDIR|(save?(FOS_OVERWRITEPROMPT|FOS_STRICTFILETYPES):FOS_FILEMUSTEXIST));
+                if(save) {
+                    dialog->SetDefaultExtension(withLut?L"zip":L"toml");
+                    const auto file=ApexUtil::ToWide(name)+(withLut?L".zip":L".toml"); dialog->SetFileName(file.c_str());
+                }
+                result.status=dialog->Show(nullptr);
+                if(SUCCEEDED(result.status)) {
+                    IShellItem* item=nullptr;
+                    result.status=dialog->GetResult(&item);
+                    if(SUCCEEDED(result.status)) {
+                        PWSTR path=nullptr; result.status=item->GetDisplayName(SIGDN_FILESYSPATH,&path);
+                        if(SUCCEEDED(result.status)) {result.path=path; CoTaskMemFree(path);} item->Release();
+                    }
+                }
+                dialog->Release();
+            }
+            CoUninitialize();
+        } else result.status=com;
+    })) g_profilePickerBusy=false;
+}
 
 // ---- Welcome page: a new installation's first menu open offers a built-in profile to start with. Shown once: the first
 // draw sets [ui] start_profile_done; it stays on screen this session until answered or another page is opened. When an
@@ -2124,181 +2148,248 @@ void ProfileIconPicker(IconId& selected) {
     }
 }
 
-void ProfilesTab() {
-    ProfilesState& s = g_profiles;
-    if (s.listDirty) {
-        s.list.clear();
-        for (const std::string& name : ApexConfig::ListProfiles()) {
-            ProfileItem item{name, IconId::Bookmark, 0};
-            toml::table state;
-            if (ApexConfig::ReadProfile(name, state)) {
-                item.parts = ApexConfig::ProfilePartsOf(state);
-                item.icon = ApexUi::IconFromName(state["meta"]["icon"].value_or(std::string("bookmark")));
-            }
-            s.list.push_back(std::move(item));
-        }
-        for (int i = 0; i < ApexPresets::kCount; ++i) { // after the player's own, the built-in profiles in the welcome page's order
-            const ApexPresets::Preset& preset = ApexPresets::Get(i);
-            ProfileItem item{preset.name, ApexUi::IconFromName(preset.icon), 0, i};
-            toml::table state;
-            if (ApexPresets::Read(i, state)) item.parts = ApexConfig::ProfilePartsOf(state);
-            s.list.push_back(std::move(item));
-        }
-        s.listDirty = false;
+void StartPresetDialog(ProfilesState::Dialog dialog, const ProfileItem* item=nullptr) {
+    auto& s=g_profiles;
+    s.dialog=dialog; s.openDialog=true; s.message.clear(); s.confirmReplace.clear();
+    s.applyAfterImport=false; s.importPath.clear(); s.imported={};
+    s.exportSource=0;
+    if(item) {
+        s.selected=*item;
+        for(size_t i=0;i<s.list.size();++i) if(s.list[i].Key()==item->Key()) s.exportSource=int(i)+1;
     }
-    const float u = ApexUi::Unit();
-    ImGui::PushID("Profiles");
-    if (ApexUi::BeginCard("##Card")) {
-        ApexUi::CardHeader(IconId::Bookmark, "Profiles", "Save your setup and switch between them", nullptr, nullptr);
-        ApexUi::CardDivider();
-        ApexUi::MutedText("Choose the settings to include in this profile.");
-        const unsigned saveAvailable = ApexConfig::kProfilePartsAll & (ApexConfig::GetUi().developerMode ? ~0u : ~ApexConfig::kPartDeveloper);
-        s.saveParts &= saveAvailable;
-        if (!ApexUi::FilterActive()) ProfilePartChecks("SaveParts", &s.saveParts, saveAvailable);
-        ApexUi::Gap(ApexUi::kSpace3);
-        {
-            const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Primary);
-            const float saveW = ApexUi::ButtonWidth("Save##Profile", true);
-            const float gap = ImGui::GetStyle().ItemSpacing.x;
-            const bool inlineSave = ImGui::GetContentRegionAvail().x >= 72.0f * u + 80.0f * u + saveW + 2.0f * gap;
-            ProfileIconPicker(s.icon);
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(std::fmax(ImGui::GetContentRegionAvail().x - (inlineSave ? saveW + gap : 0.0f), 80.0f * u));
-            const bool enter = ImGui::InputTextWithHint("##ProfileName", I18n::Tr("Profile name"), s.name, sizeof s.name,
-                                                        ImGuiInputTextFlags_CallbackCharFilter | ImGuiInputTextFlags_EnterReturnsTrue, ProfileNameFilter);
-            if (inlineSave) ImGui::SameLine();
-            const std::string clean = ApexConfig::SanitizeProfileName(s.name);
-            const bool canSave = !clean.empty() && s.saveParts != 0 && !Loading();
-            ImGui::BeginDisabled(!canSave);
-            const bool save = ApexUi::IconTextButton("Save##Profile", IconId::Save, s.saveParts == 0 ? "Pick at least one part to save" : nullptr, ButtonKind::Primary);
-            ImGui::EndDisabled();
-            if ((save || (enter && !clean.empty())) && canSave) {
-                if (ApexConfig::ProfileExists(clean) && s.confirmReplace != clean) s.confirmReplace = clean;
-                else SaveProfileNow(clean);
+    s.available=ApexConfig::kProfilePartsAll & (ApexConfig::GetUi().developerMode ? ~0u : ~ApexConfig::kPartDeveloper);
+    s.saveParts=s.available & ~(ApexConfig::kPartShortcuts|ApexConfig::kPartDeveloper);
+    if(dialog==ProfilesState::Apply || dialog==ProfilesState::Export) {
+        toml::table state;
+        if(item) {
+            if(item->builtin>=0) ApexPresets::Read(item->builtin,state);
+            else ApexConfig::ReadProfile(item->name,state);
+            std::snprintf(s.name,sizeof s.name,"%s",item->name.c_str()); s.icon=item->icon;
+        } else {ApexConfig::CaptureProfileState(state);std::snprintf(s.name,sizeof s.name,"Preset");s.icon=IconId::Bookmark;}
+        s.exportState=std::move(state); s.available=ApexConfig::ProfilePartsOf(s.exportState);
+        if(!kDevToolsBuild) s.available&=~ApexConfig::kPartDeveloper;
+        s.saveParts=s.available & ~(ApexConfig::kPartShortcuts|ApexConfig::kPartDeveloper);
+    } else {s.name[0]=0; s.icon=IconId::Bookmark;}
+}
+
+void PresetDialog() {
+    auto& s=g_profiles;
+    std::optional<ProfilePickerResult> picked;
+    {std::lock_guard<std::mutex> lock(g_profilePickerLock); picked=std::move(g_profilePickerResult); g_profilePickerResult.reset();}
+    if(picked && !picked->path.empty()) {
+        std::string error;
+        if(picked->save) {
+            auto state=s.exportState; ApexConfig::KeepProfileParts(state,s.saveParts);
+            toml::table meta;
+            meta.insert("profile",ApexConfig::SanitizeProfileName(s.name)); meta.insert("icon",ApexUi::IconName(s.icon));
+            meta.insert("written_by",APEX_PRODUCT_NAME " " APEX_VERSION_STRING);
+            state.insert_or_assign("meta",std::move(meta));
+            const std::wstring extension=ApexConfig::ProfileUsesLut(state)?L".zip":L".toml";
+            const auto& path=picked->path;
+            // Never change the destination after Windows has confirmed replacement.
+            const bool matchingExtension=path.size()>=extension.size() &&
+                _wcsicmp(path.substr(path.size()-extension.size()).c_str(),extension.c_str())==0;
+            if(matchingExtension && ApexConfig::ExportProfileFile(path,state,&error)) {
+                ProfileMessage(I18n::Tr("Preset exported"),false); s.dialog=ProfilesState::None;
+            } else {LOG_ERROR("[Profiles] Export: "+error); ProfileMessage(I18n::Tr("Could not export the preset. Check the selected LUT and folder access."),true);}
+        } else if(ApexConfig::ReadProfileImport(picked->path,s.imported,&error)) {
+            s.importPath=picked->path;
+            s.available=ApexConfig::ProfilePartsOf(s.imported.state);
+            if(!kDevToolsBuild) s.available&=~ApexConfig::kPartDeveloper;
+            s.saveParts=s.available & ~(ApexConfig::kPartShortcuts|ApexConfig::kPartDeveloper);
+            auto name=ApexConfig::SanitizeProfileName(s.imported.state["meta"]["profile"].value_or(std::string()));
+            if(name.empty()) name="Imported";
+            const auto base=name;
+            for(unsigned n=1;ApexConfig::ProfileExists(name);++n) {
+                const auto suffix=" "+std::to_string(n); name=base.substr(0,ApexConfig::kProfileNameMax-suffix.size())+suffix;
             }
-        } // primary profile form
-        ApexUi::Gap(ApexUi::kSpace1);
-        ApexUi::MutedText("Shortcuts are optional and start unchecked.");
-        if (!s.confirmReplace.empty()) {
-            const std::string q = I18n::Trf("\"{}\" already exists; replace it?", s.confirmReplace);
-            ApexUi::IconNote(IconId::TriangleAlert, q.c_str(), VioletTheme::kWarning);
-            ApexUi::Gap(ApexUi::kSpace1);
-            if (ApexUi::TextButton("Replace##Profile", nullptr, ButtonKind::Primary)) SaveProfileNow(s.confirmReplace);
-            ImGui::SameLine();
-            if (ApexUi::TextButton("Cancel##Replace")) s.confirmReplace.clear();
+            std::snprintf(s.name,sizeof s.name,"%s",name.c_str());
+            s.icon=ApexUi::IconFromName(s.imported.state["meta"]["icon"].value_or(std::string("bookmark")));
+        } else {LOG_ERROR("[Profiles] Import: "+error); ProfileMessage(I18n::Tr("Could not import the preset. Choose a TOML file or the original ZIP exported by Apex."),true);}
+    } else if(picked && FAILED(picked->status) && picked->status!=HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+        ProfileMessage(I18n::Tr("Could not open the file dialog"),true);
+    }
+    if(s.openDialog) {ImGui::OpenPopup("PresetDialog"); s.openDialog=false;}
+    const float width=std::max(1.0f,std::min(500.0f*ApexUi::Unit(),ImGui::GetIO().DisplaySize.x-32.0f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(width,0),ImVec2(width,std::max(1.0f,ImGui::GetIO().DisplaySize.y-32.0f)));
+    ImGui::SetNextWindowSize(ImVec2(width,0),ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),ImGuiCond_Appearing,ImVec2(.5f,.5f));
+    if(ImGui::BeginPopupModal("PresetDialog",nullptr,ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_AlwaysAutoResize)) {
+        if(s.dialog==ProfilesState::None) ImGui::CloseCurrentPopup();
+        else {
+            const bool importing=s.dialog==ProfilesState::Import, exporting=s.dialog==ProfilesState::Export, applying=s.dialog==ProfilesState::Apply;
+            const char* title=importing?"Import preset":exporting?"Export preset":applying?"Apply preset":"Save preset";
+            ApexUi::CardHeader(importing?IconId::Download:exporting?IconId::ExternalLink:IconId::Bookmark,title,
+                importing?"Open a shared TOML or ZIP preset":exporting?"Share your preset with other players":applying?"Choose the settings to include":"Create a preset with your current settings",nullptr,nullptr);
+            ApexUi::CardDivider();
+            {
+                const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+                ImGui::BeginDisabled(g_profilePickerBusy);
+                if(exporting) {
+                    std::vector<const char*> sources{I18n::Tr("Current settings")};
+                    for(const auto& item:s.list) sources.push_back(item.builtin>=0?I18n::Tr(item.name.c_str()):item.name.c_str());
+                    int chosen=s.exportSource;
+                    const bool sourceChanged=ApexUi::SelectRow("Presets",nullptr,"##ExportSource",&chosen,sources.data(),int(sources.size()),220.0f,ApexUi::kNoDefaultIndex,true);
+                    if(!sourceChanged) chosen=-1;
+                    if(chosen>=0) {
+                        toml::table state; std::string error;
+                        const ProfileItem* item=chosen>0 ? &s.list[size_t(chosen-1)] : nullptr;
+                        const bool ok=!item || (item->builtin>=0 ? ApexPresets::Read(item->builtin,state,&error) : ApexConfig::ReadProfile(item->name,state,&error));
+                        if(ok) {
+                            if(!item) ApexConfig::CaptureProfileState(state);
+                            s.exportSource=chosen; s.exportState=std::move(state);
+                            s.available=ApexConfig::ProfilePartsOf(s.exportState);
+                            if(!kDevToolsBuild) s.available&=~ApexConfig::kPartDeveloper;
+                            s.saveParts=s.available & ~(ApexConfig::kPartShortcuts|ApexConfig::kPartDeveloper);
+                            std::snprintf(s.name,sizeof s.name,"%s",item?item->name.c_str():"Preset"); s.icon=item?item->icon:IconId::Bookmark;
+                        } else {LOG_ERROR("[Profiles] Export source: "+error);ProfileMessage(I18n::Tr("Could not export the preset. Check the selected LUT and folder access."),true);}
+                    }
+                    ApexUi::Gap(ApexUi::kSpace2);
+                }
+                if(importing) {
+                    if(ApexUi::IconTextButton("Choose file",IconId::Download)) PickProfileFile(false,false,{});
+                    if(!s.importPath.empty()) {const auto path=ApexUtil::ToUtf8(s.importPath); const auto filename=ApexUtil::ToUtf8(std::filesystem::path(s.importPath).filename().wstring()); ImGui::TextWrapped("%s",filename.c_str()); if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",path.c_str());}
+                    ApexUi::Gap(ApexUi::kSpace2);
+                }
+                if(!applying && (!importing || !s.importPath.empty())) {
+                    ImGui::TextUnformatted(I18n::Tr("Preset name"));
+                    ApexUi::Gap(ApexUi::kSpace1);
+                    ProfileIconPicker(s.icon); ImGui::SameLine(0,ApexUi::kSpace3*ApexUi::Unit()); ImGui::SetNextItemWidth(-1);
+                    ImGui::InputTextWithHint("##Name",I18n::Tr("Preset name"),s.name,sizeof s.name,ImGuiInputTextFlags_CallbackCharFilter,ProfileNameFilter);
+                    ApexUi::Gap(ApexUi::kSpace3);
+                }
+                if(!importing || !s.importPath.empty()) {
+                    ApexUi::MutedText("Choose the settings to include");
+                    ApexUi::Gap(ApexUi::kSpace1);
+                    {const ApexUi::ControlSizeScope grid(ApexUi::ControlSize::Compact); ProfilePartChecks("Parts",&s.saveParts,s.available);}
+                    ApexUi::Gap(ApexUi::kSpace2);
+                    ApexUi::MutedText("Shortcuts are optional and start unchecked.");
+                    if(exporting) {
+                        auto state=s.exportState; ApexConfig::KeepProfileParts(state,s.saveParts);
+                        ApexUi::IconNote(IconId::Info,ApexConfig::ProfileUsesLut(state)?"The preset and its LUT are exported together as one ZIP file.":"This preset is exported as a TOML file.");
+                    }
+                    if(importing) ApexUi::Checkbox(I18n::Tr("Apply after import"),&s.applyAfterImport);
+                }
+                if(importing && !s.importPath.empty() && ApexConfig::ProfileExists(ApexConfig::SanitizeProfileName(s.name))) ApexUi::IconNote(IconId::Info,"Choose a new preset name");
+                if(!s.confirmReplace.empty() && s.confirmReplace!=ApexConfig::SanitizeProfileName(s.name)) s.confirmReplace.clear();
+                if(!s.confirmReplace.empty()) ApexUi::IconNote(IconId::TriangleAlert,I18n::Trf("\"{}\" already exists; replace it?",s.confirmReplace).c_str());
+                if(!s.message.empty()) ApexUi::IconNote(s.messageError?IconId::TriangleAlert:IconId::CircleCheck,s.message.c_str());
+                ApexUi::CardDivider();
+                const char* action=importing?"Import":exporting?"Export":applying?"Apply":s.confirmReplace.empty()?"Save":"Replace";
+                const bool row=ReportDialogActions("Cancel",false,action,true);
+                if(ApexUi::TextButton("Cancel")) {s.dialog=ProfilesState::None;ImGui::CloseCurrentPopup();}
+                ReportDialogLastAction(action,true,row);
+                const auto name=ApexConfig::SanitizeProfileName(s.name);
+                const bool valid=s.saveParts && !Loading() && (applying || (!name.empty() && (!importing || (!s.importPath.empty() && !ApexConfig::ProfileExists(name)))));
+                ImGui::BeginDisabled(!valid);
+                if(ApexUi::IconTextButton(action,exporting?IconId::ExternalLink:importing||applying?IconId::Download:IconId::Save,nullptr,ButtonKind::Primary)) {
+                    if(exporting) {auto state=s.exportState;ApexConfig::KeepProfileParts(state,s.saveParts);PickProfileFile(true,ApexConfig::ProfileUsesLut(state),s.name);}
+                    else if(applying) {LoadProfileItem(s.selected,s.saveParts);s.dialog=ProfilesState::None;ImGui::CloseCurrentPopup();}
+                    else if(importing) {
+                        std::string error;
+                        if(ApexConfig::SaveImportedProfile(name,s.imported,s.saveParts,ApexUi::IconName(s.icon),&error)) {
+                            if(s.applyAfterImport) LoadProfileNow(name,s.saveParts);
+                            else ProfileMessage(I18n::Trf("Saved \"{}\"",name),false);
+                            s.listDirty=true; s.dialog=ProfilesState::None; ImGui::CloseCurrentPopup();
+                        } else {LOG_ERROR("[Profiles] Import save: "+error);ProfileMessage(I18n::Tr("Could not save the imported preset"),true);}
+                    } else if(ApexConfig::ProfileExists(name) && s.confirmReplace!=name) s.confirmReplace=name;
+                    else {SaveProfileNow(name);if(!s.messageError){s.dialog=ProfilesState::None;ImGui::CloseCurrentPopup();}}
+                }
+                ImGui::EndDisabled(); ImGui::EndDisabled();
+            }
         }
-        if (!s.message.empty()) {
-            ApexUi::Gap(ApexUi::kSpace1);
-            ApexUi::IconNote(s.messageError ? IconId::TriangleAlert : IconId::CircleCheck, s.message.c_str(), s.messageError ? VioletTheme::kError : VioletTheme::kTextMuted);
+        ImGui::EndPopup();
+    }
+}
+
+void ProfilesTab() {
+    auto& s=g_profiles;
+    if(s.listDirty) {
+        s.list.clear();
+        for(const auto& name:ApexConfig::ListProfiles()) {
+            ProfileItem item{name,IconId::Bookmark,0}; toml::table state;
+            if(ApexConfig::ReadProfile(name,state)) {item.parts=ApexConfig::ProfilePartsOf(state);item.icon=ApexUi::IconFromName(state["meta"]["icon"].value_or(std::string("bookmark")));}
+            s.list.push_back(std::move(item));
         }
+        for(int i=0;i<ApexPresets::kCount;++i) {
+            const auto& preset=ApexPresets::Get(i); toml::table state; ApexPresets::Read(i,state);
+            s.list.push_back({preset.name,ApexUi::IconFromName(preset.icon),ApexConfig::ProfilePartsOf(state),i});
+        }
+        s.listDirty=false;
+    }
+    ImGui::PushID("Profiles");
+    {
+        const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+        const auto action=[&](const char* label,IconId icon,ProfilesState::Dialog mode,ButtonKind kind,bool inlineNext) {
+            if(inlineNext && ImGui::GetItemRectMax().x+ImGui::GetStyle().ItemSpacing.x+ApexUi::ButtonWidth(label,true)<=ImGui::GetWindowPos().x+ImGui::GetWindowContentRegionMax().x) ImGui::SameLine();
+            if(ApexUi::IconTextButton(label,icon,nullptr,kind)) StartPresetDialog(mode);
+        };
+        action("Save current",IconId::Save,ProfilesState::Save,ButtonKind::Primary,false);
+        action("Import",IconId::Download,ProfilesState::Import,ButtonKind::Secondary,true);
+        action("Export",IconId::ExternalLink,ProfilesState::Export,ButtonKind::Secondary,true);
+    }
+    if(!s.message.empty() && s.dialog==ProfilesState::None) ApexUi::IconNote(s.messageError?IconId::TriangleAlert:IconId::CircleCheck,s.message.c_str());
+    ApexUi::Gap(ApexUi::kSpace2);
+    for(int group=0;group<2;++group) {
+        ApexUi::SectionLabel(group?"Apex presets":"My presets");
+        if(ApexUi::BeginCard(group?"##ApexPresets":"##MyPresets")) {
+            bool any=false;
+            for(const auto& item:s.list) {
+                const bool builtin=item.builtin>=0; if(builtin!=(group==1)) continue; any=true;
+                const auto key=item.Key(); ImGui::PushID(key.c_str());
+                const float gap=ImGui::GetStyle().ItemSpacing.x;
+                const float actions=ApexUi::ButtonWidth("Apply",true)+gap+24.0f*ApexUi::Unit();
+                const auto description=builtin?std::string(ApexPresets::Get(item.builtin).description):ProfilePartsText(item.parts);
+                if(!builtin) ApexUi::SetNextRowUntranslated();
+                if(ApexUi::BeginControlRow(item.name.c_str(),builtin?description.c_str():nullptr,actions,item.icon)) {
+                    const ImVec2 applyPos=ImGui::GetCursorScreenPos();
+                    ImGui::SetCursorScreenPos(ImVec2(applyPos.x,applyPos.y+(ImGui::GetFrameHeight()-24.0f*ApexUi::Unit())*0.5f));
+                    if(ApexUi::IconButton("##More",IconId::Ellipsis,"More options")) ImGui::OpenPopup("Actions");
+                    ImGui::SameLine();
+                    ImGui::SetCursorScreenPos(ImVec2(applyPos.x+24.0f*ApexUi::Unit()+gap,applyPos.y));
+                    ImGui::BeginDisabled(Loading() || !item.parts);
+                    if(ApexUi::IconTextButton("Apply",IconId::Download)) StartPresetDialog(ProfilesState::Apply,&item);
+                    ImGui::EndDisabled();
+                    if(ApexUi::BeginActionMenu("Actions",builtin?I18n::Tr(item.name.c_str()):item.name.c_str())) {
+                        {const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+                            if(ApexUi::ActionMenuItem("Export",IconId::ExternalLink)) {StartPresetDialog(ProfilesState::Export,&item);ImGui::CloseCurrentPopup();}
+                            if(!builtin && ApexUi::ActionMenuItem("Delete",IconId::Trash2)) {s.confirmDelete=key;ImGui::CloseCurrentPopup();}
+                        } ApexUi::EndActionMenu();
+                    }
+                    ApexUi::EndControlRow();
+                    if(s.confirmDelete==key) {
+                        ApexUi::MutedText("Delete this preset?");
+                        if(ApexUi::TextButton("Cancel")) s.confirmDelete.clear(); ImGui::SameLine();
+                        if(ApexUi::IconTextButton("Delete##Confirm",IconId::Trash2,nullptr,ButtonKind::Primary)) {
+                            std::string error;
+                            if(ApexConfig::DeleteProfile(item.name,&error)) ProfileMessage(I18n::Trf("Deleted \"{}\"",item.name),false);
+                            else ProfileMessage(I18n::Trf("Could not delete \"{}\": {}",item.name,error),true);
+                            s.confirmDelete.clear();s.listDirty=true;
+                        }
+                    }
+                } ImGui::PopID();
+            }
+            if(!any) ApexUi::MutedText("No saved presets yet");
+        } ApexUi::EndCard();
+    }
+    {const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+        if(ApexUi::IconTextButton("Open the presets folder",IconId::ExternalLink)) OpenProfilesFolder();
+    }
+    PresetDialog(); ImGui::PopID();
+}
+
+void RecoveryCard() {
+    if (ApexUi::BeginCard("##Recovery")) {
+        ApexUi::CardHeader(IconId::RotateCcw, "Recovery", "Restarts graphics resources while keeping your settings", nullptr, nullptr);
+        ApexUi::CardDivider();
+        ApexUi::MutedText("Restarts graphics resources while keeping your settings. This does not uninstall Apex.");
+        const bool pending = ApexD3D::EffectsRestartPending();
+        ImGui::BeginDisabled(Loading() || !ApexD3D::Device() || pending);
+        if (ApexUi::IconTextButton(pending ? "Restart pending" : "Restart Apex", IconId::RotateCcw)) ApexD3D::RequestEffectsRestart();
+        ImGui::EndDisabled();
 
     }
     ApexUi::EndCard();
-    if (ApexUi::BeginCard("##SavedProfiles")) {
-        const float gap = ImGui::GetStyle().ItemSpacing.x;
-        ApexUi::CardHeader(IconId::Layers, "Saved profiles", "Choose which saved settings to apply", nullptr, nullptr);
-        ApexUi::CardDivider();
-        const bool ownProfiles = s.list.size() > static_cast<size_t>(ApexPresets::kCount); // the player's files first, then the built-in ones
-        for (const ProfileItem& item : s.list) {
-            const std::string& name = item.name;
-            const std::string key = item.Key();
-            const bool builtin = item.builtin >= 0;
-            if (ownProfiles && &item == &s.list.front()) ApexUi::GroupLabel("YOUR PROFILES");
-            if (ownProfiles && item.builtin == 0) ApexUi::GroupLabel("BUILT-IN");
-            ImGui::PushID(key.c_str());
-            const bool confirming = !builtin && s.confirmDelete == key;
-            const bool picking = s.loading == key;
-            const float loadW = ApexUi::ButtonWidth("Apply", true), delW = ApexUi::ButtonWidth("Delete", true);
-            const float controlsW = picking ? 0.0f : builtin ? loadW : delW + gap + loadW;
-            const std::string partsText = item.parts ? ProfilePartsText(item.parts) : std::string(I18n::Tr("Nothing this version can load"));
-            const char* description = confirming ? "Delete this profile?" : picking ? "Choose what to apply"
-                                    : builtin ? ApexPresets::Get(item.builtin).description : partsText.c_str();
-            if (!builtin) ApexUi::SetNextRowUntranslated(); // the name is the user's; built-in names and descriptions are translated
-            if (ApexUi::BeginControlRow(name.c_str(), description, controlsW, item.icon)) {
-                if (confirming) {
-                    if (ApexUi::IconTextButton("Delete##Confirm", IconId::Trash2, "Deletes the profile file", ButtonKind::Primary)) {
-                        std::string err;
-                        if (ApexConfig::DeleteProfile(name, &err)) ProfileMessage(I18n::Trf("Deleted \"{}\"", name), false);
-                        else ProfileMessage(I18n::Trf("Could not delete \"{}\": {}", name, err), true);
-                        s.confirmDelete.clear();
-                        s.listDirty = true;
-                    }
-                    ImGui::SameLine();
-                    if (ApexUi::TextButton("Cancel", nullptr, ButtonKind::Secondary, loadW)) s.confirmDelete.clear();
-                } else if (!picking) {
-                    if (!builtin) {
-                        if (ApexUi::IconTextButton("Delete", IconId::Trash2)) {
-                            s.confirmDelete = key;
-                            s.loading.clear();
-                        }
-                        ImGui::SameLine();
-                    }
-                    ImGui::BeginDisabled(Loading() || item.parts == 0);
-                    if (ApexUi::IconTextButton("Apply", IconId::Download, "Pick which parts of this profile to apply")) {
-                        s.loading = key;
-                        s.applyOpenedAt = ImGui::GetTime();
-                        s.loadParts = item.parts & ~(ApexConfig::kPartShortcuts | ApexConfig::kPartDeveloper); // shortcuts only when picked (they belong to the keyboard)
-                        s.confirmDelete.clear();
-                    }
-                    ImGui::EndDisabled();
-                }
-                ApexUi::EndControlRow();
-                if (picking) {
-                    ApexUi::Gap(ApexUi::kSpace2);
-                    const float reveal = std::clamp(static_cast<float>((ImGui::GetTime() - s.applyOpenedAt) / 0.14), 0.0f, 1.0f);
-                    const float easedReveal = reveal * reveal * (3.0f - 2.0f * reveal);
-                    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * (0.25f + 0.75f * easedReveal));
-                    if (ApexUi::BeginCard("##ApplySelection")) {
-                        unsigned selected = 0, total = 0;
-                        for (int part : {0, 1, 7, 2, 3, 5, 6, 8}) {
-                            const unsigned bit = 1u << part;
-                            if (item.parts & bit) { ++total; if (s.loadParts & bit) ++selected; }
-                        }
-                        const std::string count = I18n::Trf("{} of {} selected", selected, total);
-                        ImGui::TextUnformatted(I18n::Tr("Settings to apply"));
-                        ImGui::SameLine();
-                        ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - ImGui::CalcTextSize(count.c_str()).x);
-                        ImGui::TextDisabled("%s", count.c_str());
-                        ApexUi::CardDivider();
-                        {
-                            ApexUi::ControlSizeScope gridSize(ApexUi::ControlSize::Compact);
-                            ProfilePartChecks("LoadParts", &s.loadParts, item.parts);
-                        }
-                        ApexUi::CardDivider();
-                        {
-                            ApexUi::ControlSizeScope footerSize(ApexUi::ControlSize::Compact);
-                            const float actionsW = ApexUi::ButtonWidth("Cancel", false) + gap + ApexUi::ButtonWidth("Apply", true);
-                            const float footerHeight = ImGui::GetFrameHeight();
-                            ImGui::PushFont(VioletTheme::RegularFont(), VioletTheme::BaseFontSize() * ApexUi::kSmallScale); // same regular face and scale as secondary descriptions
-                            ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kTextMuted));
-                            const bool footerVisible = ApexUi::BeginControlRow("Unchecked settings stay as they are", nullptr, actionsW, IconId::None, footerHeight);
-                            ImGui::PopStyleColor();
-                            ImGui::PopFont();
-                            if (footerVisible) {
-                                if (ApexUi::TextButton("Cancel##Load")) s.loading.clear();
-                                ImGui::SameLine();
-                                ImGui::BeginDisabled(Loading() || s.loadParts == 0);
-                                if (ApexUi::IconTextButton("Apply##Picked", IconId::Download, "Apply the checked parts; Undo puts your settings back", ButtonKind::Primary)) {
-                                    LoadProfileItem(item, s.loadParts);
-                                    s.loading.clear();
-                                }
-                                ImGui::EndDisabled();
-                                ApexUi::EndControlRow();
-                            }
-                        }
-                    }
-                    ApexUi::EndCard();
-                    ImGui::PopStyleVar();
-                }
-            }
-            ImGui::PopID();
-        }
-        ApexUi::Gap(ApexUi::kSpace2);
-        if (ApexUi::IconTextButton("Open the Profiles folder", IconId::ExternalLink, "Copy profile files from there to share them or to use them on another PC"))
-            OpenProfilesFolder();
-    }
-    ApexUi::EndCard();
-    ImGui::PopID();
 }
 
 void CompatibilityTab() {
@@ -2326,6 +2417,7 @@ void CompatibilityTab() {
         }
     }
     ApexUi::EndCard();
+    RecoveryCard();
     ImGui::PopID();
 }
 
@@ -2350,9 +2442,12 @@ void AboutTab() {
 }
 
 void SettingsPage() {
-    ApexUi::PageTitle("Settings", "Menu, profiles, compatibility and credits");
-    static const char* const kTabs[] = {"Menu", "Shortcuts", "Profiles", "Compatibility", "About"};
-    if (ApexUi::TabBar("##SettingsTabs", &g_settingsTab, kTabs, IM_COUNTOF(kTabs)) && g_settingsTab == SettingsProfiles) g_profiles.listDirty = true;
+    ApexUi::PageTitle("Settings", "Menu, compatibility and credits");
+    static const char* const kTabs[] = {"Menu", "Shortcuts", "Compatibility", "About"};
+    int visibleTab=g_settingsTab>SettingsProfiles?g_settingsTab-1:g_settingsTab;
+    if(g_settingsTab==SettingsProfiles) visibleTab=0;
+    ApexUi::TabBar("##SettingsTabs", &visibleTab, kTabs, IM_COUNTOF(kTabs));
+    g_settingsTab=visibleTab>=SettingsProfiles?visibleTab+1:visibleTab;
     switch (g_settingsTab) {
     case SettingsShortcuts: ShortcutsTab(); break;
     case SettingsProfiles: ProfilesTab(); break;
@@ -2385,6 +2480,8 @@ const SearchPart* SearchParts(int& count) {
         {"Water & Snow", nullptr, PageWaterSnow, nullptr, 0, WaterSnowContent},
         {"Banding Fix", nullptr, PageBanding, nullptr, 0, BandingTabContent},
         {"Color", "Overview", PageColor, &g_colorTab, Picture::TabOverview, ColorOverview},
+        {"Color", "LUTs", PageColor, &g_colorTab, Picture::TabLuts, [] { Picture::Get().RenderFiltersUI(true); }},
+        {"Presets", "Presets", PageProfiles, nullptr, 0, ProfilesTab},
         {"Color", "Filters", PageColor, &g_colorTab, Picture::TabFilters, [] { Picture::Get().RenderFiltersUI(); }},
         {"Color", "Basic", PageColor, &g_colorTab, Picture::TabBasic, [] { PictureRows(Picture::TabBasic); }},
         {"Color", "Tones", PageColor, &g_colorTab, Picture::TabTones, [] { PictureRows(Picture::TabTones); }},
@@ -2596,6 +2693,7 @@ void Sidebar(bool collapsed) {
     };
     static const Item items[] = {
         {PageOverview, IconId::LayoutDashboard, "Overview", nullptr},
+        {PageProfiles, IconId::Bookmark, "Presets", nullptr},
         {PageLighting, IconId::MoonStar, "Lighting", "WORLD"},
         {PageWaterSnow, IconId::WavesHorizontal, "Water & Snow", nullptr},
         {PageColor, IconId::Palette, "Color", "IMAGE"},
@@ -2785,7 +2883,7 @@ void WelcomeAttentionStep() {
     ApexUi::PageTitle("Before you play", "Some game settings stop a few effects; fix them now or later in Attention");
     ImGui::PushID("WelcomeAttention");
     GameAaCompatibilityNotice(true);
-    S3SSRoomColourItem();
+
     OldStandaloneItem();
     const bool pending = HasAttentionItems();
     if (!pending) ApexUi::IconNote(IconId::CircleCheck, "Done: nothing is blocking the effects any more", VioletTheme::kSuccess);
@@ -2839,6 +2937,7 @@ void DrawPage() {
             ApexUi::SetChangeReporting(true);
         }
         break;
+    case PageProfiles: ApexUi::PageTitle("Presets", "Save your setup and switch between them"); ProfilesTab(); break;
     case PageSettings: SettingsPage(); break;
     case PageReport: ReportPage(); break;
     default: OverviewPage(); break;

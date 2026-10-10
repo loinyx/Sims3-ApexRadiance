@@ -78,6 +78,8 @@ inline CallbackList endSceneBeforeOverlay{"endSceneBeforeOverlay"};
 inline CallbackList filteredSceneBeforeOverlay{"filteredSceneBeforeOverlay"};
 inline CallbackList preReset{"preReset", false};
 inline CallbackList postReset{"postReset", false};
+// Manual recovery releases only Apex screen effects, never game lighting or hooks.
+inline CallbackList restartEffects{"restartEffects", false};
 
 inline void Add(CallbackList& list, DeviceFn fn) { list.Add(fn); }
 inline void Remove(CallbackList& list, DeviceFn fn) { list.Remove(fn); }

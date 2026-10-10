@@ -7,7 +7,7 @@
 //  - the old combined build: the same two plus the old "Apex Edition" product name;
 //  - the previous standalone build: the old product name alone (or its file name S3SSApex.asi).
 // The needles are kept encoded in this binary so that Apex itself (or a second copy of it) never matches them.
-// Also: the per-process instance mutexes, and S3SS's settings read from S3SS.toml (read-only except the backed-up room-ambient correction).
+// Also: the per-process instance mutexes, and settings read from S3SS.toml (read-only).
 #include <windows.h>
 #include <cstdint>
 #include <string>
@@ -49,7 +49,7 @@ bool S3SSPatchEnabled(const char* patchName);
 // defaultValue is used (matching S3SS settings that default to on).
 bool S3SSPatchBoolSettingEnabled(const char* patchName, const char* settingName, bool defaultValue = true);
 bool S3SSOverlayDisabled();
-// Narrow compatibility exception: on explicit user action, back up and remove the saved room-ambient RGB override.
+// Read-only compatibility data; no S3SS configuration is written.
 enum class RoomAmbientCorrectionStatus { S3SSNotLoaded, ConfigUnavailable, NoOverride, BackupFailed, ConfigChanged, WriteFailed, Saved };
 struct RoomAmbientCorrection {
     RoomAmbientCorrectionStatus status = RoomAmbientCorrectionStatus::S3SSNotLoaded;
@@ -57,9 +57,8 @@ struct RoomAmbientCorrection {
     bool saved = false;
     std::array<float, 3> rgb{};
 };
-RoomAmbientCorrection CorrectRoomAmbientOverride();
 // Read-only: official S3SS is loaded and S3SS.toml saves a supported room-ambient override (the exact entry
-// CorrectRoomAmbientOverride would remove). Nothing is written. The file is read again at most every 3 s (the menu asks
+// supported room-ambient setting). Nothing is written. The file is read again at most every 3 s (the menu asks
 // every frame), or now with fresh = true.
 std::optional<std::array<float, 3>> SavedRoomAmbientOverride(bool fresh = false);
 // S3SS's "Split-Level Lighting Fix" is in place: enabled in S3SS.toml, or GetLotID (0x6BC020 on Steam, found by signature

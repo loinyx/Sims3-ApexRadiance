@@ -659,25 +659,41 @@ struct SavedState {
     DWORD ss[kSamplers][kSS] = {};
     float psConst[kPSConsts * 4] = {};
     D3DVIEWPORT9 viewport{};
+    RECT scissor{};
 
-    void Capture(IDirect3DDevice9* dev) {
-        dev->GetRenderTarget(0, &rt0);
-        ExtraHooks::RawGetDepthStencilSurface(dev, &ds);
-        dev->GetPixelShader(&ps);
-        dev->GetVertexShader(&vs);
-        dev->GetVertexDeclaration(&decl);
-        dev->GetFVF(&fvf);
-        dev->GetStreamSource(0, &stream0, &stream0Offset, &stream0Stride);
+    IDirect3DDevice9* capturedDevice = nullptr;
+    SavedState() = default;
+    SavedState(const SavedState&) = delete;
+    SavedState& operator=(const SavedState&) = delete;
+    ~SavedState() {
+        if (capturedDevice) Restore(capturedDevice);
+        else Release();
+    }
+
+    bool Capture(IDirect3DDevice9* dev) {
+        bool ok = SUCCEEDED(dev->GetRenderTarget(0, &rt0)) && rt0;
+        const HRESULT depthResult = ExtraHooks::RawGetDepthStencilSurface(dev, &ds);
+        ok &= SUCCEEDED(depthResult) || (depthResult == D3DERR_NOTFOUND && !ds);
+        ok &= SUCCEEDED(dev->GetPixelShader(&ps));
+        ok &= SUCCEEDED(dev->GetVertexShader(&vs));
+        ok &= SUCCEEDED(dev->GetVertexDeclaration(&decl));
+        ok &= SUCCEEDED(dev->GetFVF(&fvf));
+        ok &= SUCCEEDED(dev->GetStreamSource(0, &stream0, &stream0Offset, &stream0Stride));
         for (DWORD s = 0; s < kSamplers; s++) {
-            dev->GetTexture(s, &tex[s]);
-            for (int i = 0; i < kSS; i++) dev->GetSamplerState(s, kSamplerStates[i], &ss[s][i]);
+            ok &= SUCCEEDED(dev->GetTexture(s, &tex[s]));
+            for (int i = 0; i < kSS; i++) ok &= SUCCEEDED(dev->GetSamplerState(s, kSamplerStates[i], &ss[s][i]));
         }
-        for (int i = 0; i < kRS; i++) dev->GetRenderState(kRenderStates[i], &rs[i]);
-        dev->GetPixelShaderConstantF(0, psConst, kPSConsts);
-        dev->GetViewport(&viewport);
+        for (int i = 0; i < kRS; i++) ok &= SUCCEEDED(dev->GetRenderState(kRenderStates[i], &rs[i]));
+        ok &= SUCCEEDED(dev->GetPixelShaderConstantF(0, psConst, kPSConsts));
+        ok &= SUCCEEDED(dev->GetViewport(&viewport));
+        ok &= SUCCEEDED(dev->GetScissorRect(&scissor));
+        if (!ok) { Release(); return false; }
+        capturedDevice = dev;
+        return true;
     }
 
     void Restore(IDirect3DDevice9* dev) {
+        capturedDevice = nullptr;
         dev->SetRenderTarget(0, rt0); // resets the viewport, so it goes first
         ExtraHooks::RawSetDepthStencilSurface(dev, ds);
         for (DWORD s = 0; s < kSamplers; s++) {
@@ -696,6 +712,7 @@ struct SavedState {
         // DrawPrimitiveUP clears stream 0, the game's next draw needs it back
         dev->SetStreamSource(0, stream0, stream0Offset, stream0Stride);
         dev->SetViewport(&viewport);
+        dev->SetScissorRect(&scissor);
         Release();
     }
 
@@ -795,15 +812,23 @@ void RunBlur(IDirect3DDevice9* dev, float dt) {
     IDirect3DSurface9* bb = nullptr;
     if (FAILED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb) return;
 
+    struct BackbufferGuard {
+        IDirect3DSurface9* surface;
+        ~BackbufferGuard() { surface->Release(); }
+    } backbufferGuard{bb};
+
     // 1. Backbuffer -> full-res copy (Prep reads its 2x2 blocks)
     if (FAILED(dev->StretchRect(bb, nullptr, g.fullSurf, nullptr, D3DTEXF_NONE))) {
-        bb->Release();
         return;
     }
 
-    g.inBlur = true;
     SavedState saved;
-    saved.Capture(dev);
+    if (!saved.Capture(dev)) return;
+    struct BlurFlagGuard {
+        bool& flag;
+        ~BlurFlagGuard() { flag = false; }
+    } blurFlagGuard{g.inBlur};
+    g.inBlur = true;
 
     const UINT hw = (g.width + 1) / 2;
     const UINT hh = (g.height + 1) / 2;
@@ -884,8 +909,6 @@ void RunBlur(IDirect3DDevice9* dev, float dt) {
     DrawQuad(dev, g.width, g.height);
 
     saved.Restore(dev);
-    bb->Release();
-    g.inBlur = false;
     g.framesBlurred++;
 }
 
@@ -1049,6 +1072,13 @@ void OnPostReset(IDirect3DDevice9*) {
     g.curRT0 = nullptr;
 }
 
+void RestartEffects(IDirect3DDevice9* dev) {
+    OnPreReset(dev);
+    ReleaseShaders();
+    OnPostReset(dev);
+}
+
+
 // The depth swap runs while Depth Blur is on or another effect asked for the depth (DepthShare::Request).
 void StartDepth() {
     if (g.active) return;
@@ -1058,6 +1088,7 @@ void StartDepth() {
     }, D3D9Hooks::Priority::First);
     RenderCallbacks::Add(RenderCallbacks::preReset, OnPreReset);
     RenderCallbacks::Add(RenderCallbacks::postReset, OnPostReset);
+        RenderCallbacks::Add(RenderCallbacks::restartEffects, RestartEffects);
     g.active = true;
     g.retryCountdown = 0;
     g.status = "Waiting for the game...";
@@ -1070,6 +1101,7 @@ void StopDepth() {
     D3D9Hooks::UnregisterAll(kHookName);
     RenderCallbacks::Remove(RenderCallbacks::preReset, OnPreReset);
     RenderCallbacks::Remove(RenderCallbacks::postReset, OnPostReset);
+        RenderCallbacks::Remove(RenderCallbacks::restartEffects, RestartEffects);
     ReleaseResources(ApexD3D::Device());
     g.gameAaOn = false;
 }

@@ -187,8 +187,9 @@ bool SegmentedRow(const char* label, const char* description, const char* id, in
                   const char* const* tooltips = nullptr, const IconId* icons = nullptr, int defaultIndex = kNoDefaultIndex);
 // Standard single-choice row: label and description on the left, a dropdown on the right, with the same changed
 // marker, hover Reset and search behavior as other setting rows. defaultIndex = the default choice.
+// stacked puts the same selector below its label at full width for file and preset dialogs.
 bool SelectRow(const char* label, const char* description, const char* id, int* current, const char* const* labels, int count,
-               float controlWidth = 220.0f, int defaultIndex = kNoDefaultIndex);
+               float controlWidth = 220.0f, int defaultIndex = kNoDefaultIndex, bool stacked = false);
 // Whether the last SelectRow's dropdown list was open this frame (the language row merges every script's font then)
 bool SelectRowOpen();
 
@@ -272,4 +273,8 @@ bool CostChipText(float ms, char* buf, int size);
 
 namespace ApexUi {
 bool ProfileChoiceRow(const char* id, IconId icon, const char* name, const char* description, bool selected);
+// Identified action popup. Title is already translated (or a player-entered name).
+bool BeginActionMenu(const char* id, const char* title, float minimumWidth = 210.0f);
+bool ActionMenuItem(const char* label, IconId icon, bool enabled = true);
+void EndActionMenu();
 }

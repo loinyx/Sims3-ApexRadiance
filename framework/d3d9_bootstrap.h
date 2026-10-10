@@ -24,6 +24,8 @@ void Shutdown();           // FreeLibrary only (never at process exit)
 
 IDirect3DDevice9* Device(); // the game's HAL device (null before its first EndScene)
 HWND Window();
+void RequestEffectsRestart();
+bool EffectsRestartPending();
 bool PresentSeen();                // the first Present went through Apex's hooks
 unsigned long long FirstPresentTick(); // GetTickCount64 at that first Present (0 before)
 

@@ -51,7 +51,7 @@ Each frame:
 | Advanced > Reach | `alcance` | float | 130% | 50 to 200% | Scales all radii |
 | Advanced > Keep lamp light | `protegerLuz` | float | 38% | 0 to 100% | Share of light that bright and lamp-lit pixels keep |
 | Advanced > Show the shade alone | (not saved) | bool | off | | Shows only the shade, in grey |
-| (none) | `revisao` | int | 13 | | Settings revision. Older files keep every saved value and only gain missing keys |
+| (none) | `revisao` | int | 9 | | Settings revision. Older files keep every saved value and only gain missing keys |
 
 All settings apply immediately. Keys from the old combined build (`intensidade`, `raioM`, `visualizar`) are not read.
 
@@ -85,20 +85,15 @@ All settings apply immediately. Keys from the old combined build (`intensidade`,
 | Copy | `StretchRect` | Colour copy |
 | Linearise | `LinearizePS` | Level 0 of an R32F pyramid of 1/z in 1/m, padded to a multiple of 256 |
 | Downsample x8 | `DownPS` | 2x2 average of 1/z (sky excluded) per level |
-| GTAO | `GtaoPS` (SLICES 2/4/6/8/12, horizon form) | G16R16F: R = visibility, G = 1/z; second target A8R8G8B8: view normal xy |
-| Blur x4 | `BlurPS` | Box (H, V) then tent, taps on the same surface (depth and normal) |
+| GTAO | `GtaoPS` (SLICES 2/4/6/8/12, horizon form) | G16R16F: R = visibility, G = 1/z |
+| Blur x4 | `BlurPS` | Box (H, V) then tent, weighted by depth agreement |
 | Composite | `CompositePS` | Over the copy, RGB write |
 
-**Same-surface blur.** The AO pass writes its normal as a second render target; blur taps weigh
-`depth match x max(0, n0 . n)^8`. In the box passes a tap that fails (a rail in front of the wall, the other side of a
-corner) is replaced by the pixel 4 further on, which has the same interleave offset, so the 4x4 cancel still holds. The
-pyramid's downsample keeps the farthest 1/z when the four texels differ by more than 10%, so a thin leg does not leave
-an averaged surface that is not there at the coarse levels (it cast a blurred "ghost" shade around legs). Without two
-render targets (`NumSimultaneousRTs < 2`) the blur compares depth only.
+**Depth-aware blur.** Spatial taps are weighted by relative depth agreement. The restored baseline uses a single AO output and does not allocate or sample a separate normal target. There is no temporal history or thin-object thickness pass.
 
 ### Full-resolution rendering
 
-The AO pass, normal target and blur always use W x H. Half resolution and the unreleased reconstruction option are removed. Old `halfRes` and `reconstruct` keys are ignored,
+The AO pass and blur always use W x H. Half resolution and the unreleased reconstruction option are removed. Old `halfRes` and `reconstruct` keys are ignored,
 including when an old profile is applied. Remaining saved settings take precedence as before; built-in presets no
 longer request reduced resolution. A player previously using Half resolution will now pay the full-resolution GPU
 cost. The horizon, spatial blur, lamp-protection and composite formulas retain their existing full-resolution behavior.
@@ -117,8 +112,7 @@ Isolated pixels (leaf edges, thin rails) fade out. Off-screen samples count as s
 scene draws). Fallback: near 0.25, A 1.00008, `tanY = 1/4.293`. See
 [engine/camera-and-map-view.md](../engine/camera-and-map-view.md).
 
-**Resources.** R32F pyramid (3840x2304 with 9 levels at 4K) plus 8 one-level targets, two G16R16F targets and one
-A8R8G8B8 normal target at full screen size, a colour copy. No temporal history targets are allocated. Everything is released on
+**Resources.** R32F pyramid (3840x2304 with 9 levels at 4K) plus 8 one-level targets, two G16R16F targets at full screen size and a colour copy. No temporal history targets are allocated. Everything is released on
 device reset and rebuilt on the next frame.
 
 **Cost** at 3840x2160, native D3D9, RTX 4070 Ti SUPER:

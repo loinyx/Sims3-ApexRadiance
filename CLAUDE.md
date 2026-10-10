@@ -1,3 +1,5 @@
+> Release 2.12.0 adds 3D CUBE LUTs, portable preset packages and graphics-resource restart. Public assets omit developer tools; legacy TOML presets remain supported. See the feature and validation pages.
+
 > Release 2.11.0 adds independent Color groups and optional filter shortcuts, removes half-resolution AO and recognizes both recorded hidden-UI colour-write states. See the current feature and validation pages; final-image parity across every backend is not established.
 
 > Current release 2.10.1: exterior wall lighting reuses the existing per-point floor lookup. The reported Build/Buy scene updates faster; no numerical latency/FPS gain is claimed. Lighting parameters and solve policies are preserved. Release assets use `ApexFlavorDefines=APEX_NO_DEV_TOOLS`; developer builds remain local. Read the affected feature/validation/history pages before further lighting changes.
@@ -77,7 +79,7 @@ See `docs/features/developer-mode.md` for persistence and verification details.
    First start without `ApexRadiance.toml`: copies the previous standalone's `...\S3SS\Apex\Apex.toml` as it is (old
    folder left in place; its `apex_imgui.ini` is not copied), else migrates from `...\S3SS\S3SS.toml` (backup
    `S3SS.toml.pre-split.bak` in the new folder). Official S3SS keeps `...\S3SS\` (`S3SS.toml`, `S3SS_LOG.txt`); Apex
-   Radiance writes there only when the player presses **Back up and correct**, to remove the backed-up saved room-ambient RGB override.
+   Radiance reads its configuration without modifying it.
 
 ## Rules from the user (always)
 - **Back up before modifying** any game, mod, config or source file, into `Backups Sims 3\<numbered folder>`, never
@@ -145,5 +147,3 @@ verify the published artifact's identity and the workflow result. The previous c
 
 ## Local UI attribution decision (2026-10-02)
 The user requested less Sims3SettingsSetter prominence. Do not restore its global footer detection label or the long promotional About paragraph. About leads with @loinyx and keeps only a compact sims3fiend framework-design credit. Compatibility detection remains in its own page; project historical attribution and licenses are retained.
-
-Compatibility exception: when official S3SS is loaded, the explicit **Back up and correct** action (Rooms at Night) backs up S3SS.toml in the Apex Radiance folder and removes only the saved `settings.BradyBunchBlue RGB` override. Enabling Rooms at Night alone writes nothing to S3SS. All other settings and patch switches are preserved.

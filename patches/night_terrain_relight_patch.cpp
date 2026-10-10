@@ -2177,7 +2177,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             pendingReinstall = false;
             return;
         }
-        if (std::chrono::steady_clock::now() - lastSettingChange < SETTING_CHANGE_DEBOUNCE) return;
+        if (std::chrono::steady_clock::now() - lastSettingChange.load() < SETTING_CHANGE_DEBOUNCE) return;
         pendingReinstall = false;
         g_reinstallDue = true;
     }
@@ -2233,11 +2233,11 @@ class NightTerrainRelightPatch : public ApexPatch {
     // installed or removed live, like a change in the menu
     void ApplyTableLive(const toml::table& table) override {
         const bool wasEnabled = isEnabled.load();
-        const auto changedBefore = lastSettingChange;
+        const auto changedBefore = lastSettingChange.load();
         const bool bridgeBefore = g_bridge, objBefore = g_objLamps, shareBefore = g_levelShare, objPixelBefore = g_objPixel;
         ApexPatch::ApplyTableLive(table);
         if (wasEnabled && isEnabled.load()) ApplyLive(bridgeBefore, objBefore, shareBefore, objPixelBefore);
-        if (wasEnabled && isEnabled.load() && lastSettingChange != changedBefore) RequestAutoRefresh(); // a profile, look or undo
+        if (wasEnabled && isEnabled.load() && lastSettingChange.load() != changedBefore) RequestAutoRefresh(); // a profile, look or undo
     }
 
     static void ResetDefaults() {

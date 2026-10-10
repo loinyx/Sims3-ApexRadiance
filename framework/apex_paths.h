@@ -15,6 +15,8 @@ const std::wstring& S3SSDirectory();
 const std::wstring& ApexDirectory();
 // Creates ...\Apex Radiance\ if needed.
 bool EnsureApexDirectory();
+// Development-only output is grouped here. Legacy diagnostic folders remain untouched.
+std::wstring DiagnosticsDirectory();
 
 std::wstring ConfigFile();       // ApexRadiance.toml
 std::wstring LogFile();          // ApexRadiance_LOG.txt

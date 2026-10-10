@@ -105,19 +105,13 @@ Startup feature installs therefore run on the init thread, after the device exis
 
 ### 1.4 Shutdown
 
-Nothing runs at process exit (`DLL_PROCESS_DETACH` with `lpReserved != NULL`): the loader may hold other threads'
-locks. The logger's queued lines are flushed by the process-exit path. On `FreeLibrary` only:
+Before starting hooks or workers, Apex pins its module with `GetModuleHandleExW` and
+`GET_MODULE_HANDLE_EX_FLAG_PIN`. The module remains mapped until the game process exits, including if a loader
+calls `FreeLibrary`. If pinning fails, attachment fails before starting hooks or threads.
 
-1. Signal the stop event (never waited for inside `DllMain`).
-2. `ShaderCache::Shutdown()` (the worker stops between two compiles).
-3. `FrameProfiler::Shutdown()` (before the device hooks go: it unregisters its hooks and detaches game-function hooks).
-4. `AddressSpace::Stop()`.
-5. `PatchManager::UninstallAll()`.
-6. `ApexD3D::Shutdown()`: restores the window procedure, uninstalls the registry detours, detaches EndScene, Reset,
-   CreateDevice and Direct3DCreate9.
-7. `ApexLog::Close()`.
-
-Ultimate ASI Loader never unloads ASIs, so in practice this path does not run.
+The detach handler performs no shutdown work under the loader lock. Windows releases the process resources on
+exit. Removing or replacing the ASI therefore requires closing the game. The in-menu graphics restart keeps the
+module and hooks loaded and recreates only the supported effect resources.
 
 ---
 
@@ -865,10 +859,7 @@ one line for the log and the compatibility page.
 ### 11.3 S3SS.toml
 
 Apex reads `S3SS.toml` read-only for S3SS's intent (`[patches.<name>].enabled`, overlay disabled) and for the
-migration. One exception: the player may explicitly choose the Rooms at Night compatibility action
-(`S3SSDetect::CorrectRoomAmbientOverride`). Only that action backs up `S3SS.toml` into the Apex Radiance folder and
-removes the saved `settings.BradyBunchBlue` RGB override, so S3SS no longer applies it. Enabling Rooms at Night alone never
-writes `S3SS.toml`. All other settings and patch switches are preserved.
+migration.
 
 `S3SSDetect::SplitLevelFixActive()` reports S3SS's Split-Level Lighting Fix (enabled in `S3SS.toml`, or `GetLotID`
 `0x6BC020` no longer holds its original bytes); Apex's Every-Story Ground Light then stays out of the way.

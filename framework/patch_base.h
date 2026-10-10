@@ -119,7 +119,7 @@ class ApexPatch {
     std::atomic<bool> isEnabled{false};
     std::string lastError;
     std::atomic<bool> pendingReinstall{false};
-    std::chrono::steady_clock::time_point lastSettingChange{};
+    std::atomic<std::chrono::steady_clock::time_point> lastSettingChange{};
     std::vector<std::unique_ptr<PatchSetting>> settings;
 
   private:

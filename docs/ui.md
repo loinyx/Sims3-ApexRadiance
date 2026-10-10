@@ -36,6 +36,7 @@ Sims 3"); internal names keep "Apex". Visible text uses `APEX_PRODUCT_NAME`, nev
 
 | Page (sidebar icon) | Content |
 |---|---|
+| Presets (bookmark; below Overview) | My presets, then Apex presets; Save current, Import and Export dialogs |
 | Overview (layout-dashboard) | Recommendation card "Recommended for Apex Radiance" (DXVK and Sims3SettingsSetter, only the missing ones, while `[ui] recommend_s3ss` is true; Download, "Don't show again"). **All effects** card: one switch with "All effects are on / Some effects are on / All effects are off"; it controls Night Lights, Ambient Occlusion, Banding Fix, Depth Blur, Edge Smoothing, Picture, Water Reflections and the Performance group. **Lighting** card: Night Lights, Water Reflections. **Image** card: Picture, Ambient Occlusion, Banding Fix, Depth Blur, Edge Smoothing. **Performance** card: one switch for all 15 performance options. Clicking a name opens its page. Rows blocked by the game's anti-aliasing show "Waiting for game settings"; GPU cost chips show measured time only |
 | WORLD > Lighting (moon-star) | Tabs **Overview** (Night Lights card; lighting balance Subtle / Soft / Natural / Custom with Undo choice; Refresh lighting card), **Ground**, **Objects**, **Buildings** (Buildings card, Rooms at Night card), **Stories** (Upper floors light the ground and the floor-sharing options). While Night Lights is off, the other tabs show a note and "Turn on Night Lights". See [Night Lighting](features/night-lighting/README.md) |
 | WORLD > Water & Snow (waves-horizontal) | Lamp Glow, Water Reflections (with "Turn on Night Lights" / "Turn on Depth Blur"), Snow. See [reflections](features/reflections.md) |
@@ -49,7 +50,7 @@ Sims 3"); internal names keep "Apex". Visible text uses `APEX_PRODUCT_NAME`, nev
 | SYSTEM > Attention (triangle-alert) | Only while something outside Apex blocks an effect (the game's own anti-aliasing with an affected feature enabled, a room colour saved in Sims3SettingsSetter) |
 | SYSTEM > Report a problem (bug) | Capture session, Save a capture, Your captures, How to report a problem. See [bug-reports.md](features/bug-reports.md) |
 | SYSTEM > Developer (wrench) | Developer mode only: tabs Lighting, Performance, Captures, Visual effects, Translations. See [developer-mode.md](features/developer-mode.md) |
-| SYSTEM > Settings (settings) | Tabs **Menu**, **Shortcuts**, **Profiles**, **Compatibility**, **About** (below) |
+| SYSTEM > Settings (settings) | Tabs **Menu**, **Shortcuts**, **Compatibility**, **About** (below) |
 
 ### Settings tabs
 
@@ -57,7 +58,6 @@ Sims 3"); internal names keep "Apex". Visible text uses `APEX_PRODUCT_NAME`, nev
 |---|---|
 | Menu | **Menu**: Language (select, 220 units), Text size (- / value / + / Reset; 80, 90, 100, 115, 130, 150, 175, 200%), Startup menu hint (`[ui] start_note`). **Screenshot capture**: Use Apex screenshot shortcut, its key, Hide game UI in screenshots, destination note. **Settings and maintenance**: Save now ("Changes also save by themselves after a second"), Enable developer mode, Reset all settings (inline confirmation and Undo; restores features, Picture and every `[ui]` preference; captures, reports and profiles stay) |
 | Shortcuts | **Shortcuts**: preset (Letters / Numbers / F keys / Custom, 180 units), Open the menu, Compare with the game, Refresh the lighting, Take a filtered screenshot (disabled while the screenshot shortcut is off), note "F10 always hides the game interface". **Report a problem**: Recording, Light capture, Lighting snapshot, and Frame Capture in developer mode. **While Apex is open**: Search the settings, Peek at the game behind the menu, Compare the picture without its filters. **Personalize**: "Show the startup hint next time" |
-| Profiles | Profiles card (save) and Saved profiles card (below) |
 | Compatibility | Game version; Sims3SettingsSetter and DXVK Installed / Not installed; Features Running / Starting… / Off (old combined build found); RECOMMENDED group while one is missing; Details (the raw S3SS summary and the settings migration note) |
 | About | "Apex Radiance for The Sims 3", "Version X" (or "Version X - Developer mode"), CREDITS |
 
@@ -125,6 +125,8 @@ the overlay scales the style by `0.9 * pow(h / 1080, 0.8)` and the text size). N
   fit); `current = -1` = none selected.
 - `BeginAdvanced` / `EndAdvanced`: hairline (reused when right after `CardDivider`), accent chevron and "Advanced",
   collapsed by default, contents not indented. `AdvancedNode` stays for the frame profiler.
+- `SectionLabel` and `GroupLabel` share the Overview Lighting heading style above cards: regular Segoe UI at the
+  base size, muted text color, no tracking, and identical shared spacing above/below. Card titles retain their hierarchy.
 - `GroupLabel("WALLS")`; `IconNote(icon, text, rgb)`: info (Info, muted), warning (TriangleAlert, amber), error
   (TriangleAlert, red), in a 10% tinted box.
 - Buttons: `IconTextButton(label, icon, tooltip, ButtonKind)`, `TextButton(label, tooltip, kind, minWidth)`;
@@ -147,7 +149,7 @@ autosave works as usual.
   card headers with a switch become searchable switch rows; collapsed Advanced content is searched; feature bodies are
   searched while the feature is off. Searched, in order: the Lighting tabs, Water & Snow, Color (Banding, header, Basic,
   Tones, Color, Detail), Ambient Occlusion, Depth Blur, Edge Smoothing, Performance, Settings > Menu and Shortcuts.
-  Not searched: Overview, Developer, Profiles, Compatibility, About, Report.
+  Presets and LUTs have searchable entries. Not searched: Overview, Developer, Compatibility, About, Report.
 - **Changed markers and per-setting Reset:** a dot after the label while the value differs from its default ("Changed
   from the default"); hovering shows a Reset button that restores that one setting through the row's normal change
   path. Sliders compare with a tolerance of 1/10000 of their range. Reset buttons are not keyboard stops.
@@ -218,9 +220,9 @@ Passthrough: bare F10 down and up always reach the game, even with the menu open
 cheat console, no Apex shortcut fires until Enter, Esc or Ctrl+Shift+C closes it; the guess also ends on focus loss,
 when the Apex menu opens, on a world change or after 30 s without typing. The game's own C screenshot is never intercepted.
 
-## Profiles
+## Presets
 
-Settings > Profiles saves and applies parts of the setup as `Documents\...\Apex Radiance\Profiles\<name>.toml`.
+The Presets sidebar page sits immediately below Overview. My presets precede Apex presets. It saves parts of the setup as `Documents\...\Apex Radiance\Profiles\<name>.toml`.
 
 | Bit | Part | Contents | Default when saving |
 |---|---|---|---|
@@ -238,19 +240,39 @@ Parts are shown in the order Lighting, Color, Ambient Occlusion, Depth Blur, Edg
 Developer, in a two-column grid (icon and label left, 20-unit checkbox right) that falls back to one column when
 translated labels do not fit.
 
-- **Profiles card:** "Choose the settings to include in this profile.", the grid, a 30-icon Lucide picker, the name
-  field (letters, digits, space, `-` and `_`; at most 32 characters; Enter saves) and Save. An existing name asks
-  "\"<name>\" already exists; replace it?" with Replace / Cancel. The icon is stored by name in `[meta].icon`; unknown
-  or missing names show Bookmark; applying ignores it.
-- **Saved profiles card:** one row per profile (icon, untranslated name, the parts it contains) with Delete then Apply.
-  Delete asks "Delete this profile?" inline. Apply opens a nested selection card (140 ms smoothstep fade) with "Settings
-  to apply", "N of M selected", the grid and a footer "Unchecked settings stay as they are" with Cancel and Apply.
-  Shortcuts and Developer start unchecked. A Developer part that requests activation opens the developer confirmation
-  first. "Open the Profiles folder" opens Explorer.
+- A simple toolbar contains Save current, Import and Export, without an enclosing card or repeated descriptions.
+  It wraps buttons when the available width is narrow. Save current is violet. All preset
+  buttons, including modal footers and the folder action, use the compact 30-unit size, matching Apply.
+- Save current, Import, Export and Apply use native Violet modals: the existing card header, Lucide icon picker,
+  name field, category grid, notes and footer buttons. Shortcuts and Developer start unchecked. Names keep their
+  original spelling. Save asks before replacing an existing preset; Import requires a new name.
+- Export keeps the source, name and category checklist visible in the original single form. Label-to-field and
+  section spacing use shared tokens; the icon selector, name input and footer retain the compact shared size.
+  Export uses current settings or an existing preset. If the selected Color part references a LUT, the output is one
+  ZIP containing `profile.toml` and `LUTs/<filename>`, including a currently disabled LUT. Otherwise it is a `.toml`.
+  There is no separate inclusion checkbox. The native file picker runs outside the render thread.
+- Import accepts legacy `.toml` or an unchanged ZIP exported by Apex. The ZIP uses stored entries, not compression;
+  imports reject other archive layouts, traversal, unsupported entries and failed checksums. The preset is saved in
+  `Profiles`, the LUT in `LUTs`. Identical LUT bytes reuse the existing file; a different file with the same name gets
+  a numbered suffix and the preset reference changes with it. Existing presets are never overwritten by import.
+- Ellipsis menus share the identified action popup: the preset/filter name appears in a muted header above a divider;
+  actions are full-width compact rows with aligned Lucide icons and text, without individual button borders.
+  Presets and filter shortcut menus use the same component, including disabled actions and keyboard navigation.
+- Each library row has Apply and an ellipsis menu for Export and Delete. Apply opens the category modal. Import can
+  optionally apply the imported settings after saving. Developer activation still requires its existing confirmation.
 - Applying = `ReadProfile` + `KeepProfileParts` + `ApplyFeatureState` (live, autosaved), log
   `[Menu] Profile loaded: <name> (parts 0x..)`, and the undo toast "Profile loaded". Names are sanitised
   (`SanitizeProfileName`: allowed characters only, no leading, double or trailing spaces, Windows device names refused);
   files whose names do not survive it are not listed. Retired `[display]` sections are ignored.
+
+## Generated folders
+
+`Profiles`, `LUTs`, `Captures` and `Screenshots` keep their existing paths; internal profile keys and part bits are
+unchanged. Player settings and logs stay at the root so older builds and report tools remain compatible.
+Development-only shader rejection, shader census and depth captures now use `Diagnostics/RejectedShaders`,
+`Diagnostics/ShaderCensus` and `Diagnostics/DepthCaptures`. Public builds do not create rejected-shader dumps.
+Legacy diagnostic folders are left intact; their existing filenames are checked where needed to avoid duplicate dumps
+or capture-number reuse. No user files are moved or deleted.
 
 ## Startup and notices
 
@@ -401,3 +423,7 @@ notices, detection, the recommendation card, Credits and the settings migration.
 - [Report a problem](features/bug-reports.md), [Developer mode](features/developer-mode.md)
 
 Ambient Occlusion no longer exposes Temporal smoothing, Thin object detail or Object thickness. Strength, Distance, Quality, map-view shading, Reach, lamp protection and Sim controls remain available.
+
+## Graphics recovery
+
+Settings > Compatibility > Recovery uses the existing card header and compact action button. Restart Apex queues resource recreation on the graphics thread while retaining settings; the pending label is visible until Present consumes it. This action does not uninstall the mod. See [graphics recovery](features/graphics-recovery.md).

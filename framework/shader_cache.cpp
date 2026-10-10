@@ -17,6 +17,10 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
+#include <atomic>
+#include <io.h>
+#include <fcntl.h>
 
 #pragma comment(lib, "d3dcompiler.lib")
 
@@ -114,18 +118,34 @@ void LoadDisk(Registry& r) {
     if (path.empty()) return;
     FILE* f = nullptr;
     if (_wfopen_s(&f, path.c_str(), L"rb") != 0 || !f) return;
-    uint32_t head[3] = {};
-    if (std::fread(head, sizeof head, 1, f) == 1 && head[0] == kDiskMagic && head[1] == kDiskVersion && head[2] < 4096) {
+    const std::unique_ptr<FILE, decltype(&std::fclose)> file(f, &std::fclose);
+    constexpr long long maxBytes = 32LL * 1024 * 1024;
+    if (_fseeki64(f, 0, SEEK_END) != 0) return;
+    const auto fileBytes = _ftelli64(f);
+    if (fileBytes < 12 || fileBytes > maxBytes || _fseeki64(f, 0, SEEK_SET) != 0) return;
+    try {
+        std::unordered_set<uint64_t> wanted;
+        for (const auto& job : r.jobs) wanted.insert(job->key);
+        uint32_t head[3] = {};
+        if (std::fread(head, sizeof head, 1, f) != 1 || head[0] != kDiskMagic || head[1] != kDiskVersion || head[2] >= 4096) return;
         for (uint32_t i = 0; i < head[2]; i++) {
             uint64_t key = 0;
             uint32_t words = 0;
-            if (std::fread(&key, sizeof key, 1, f) != 1 || std::fread(&words, sizeof words, 1, f) != 1 || words == 0 || words > (1u << 18)) break;
+            if (std::fread(&key, sizeof key, 1, f) != 1 || std::fread(&words, sizeof words, 1, f) != 1 || words < 2 || words > (1u << 18)) break;
+            const auto position = _ftelli64(f);
+            const auto bytes = static_cast<long long>(words) * sizeof(DWORD);
+            if (position < 0 || position > fileBytes || bytes > fileBytes - position) break;
+            if (!wanted.contains(key) || r.disk.contains(key)) {
+                if (_fseeki64(f, bytes, SEEK_CUR) != 0) break;
+                continue;
+            }
             std::vector<DWORD> code(words);
             if (std::fread(code.data(), sizeof(DWORD), words, f) != words) break;
-            if (PlausibleCode(code)) r.disk[key] = std::move(code);
+            if (PlausibleCode(code)) r.disk.emplace(key, std::move(code));
         }
+    } catch (...) {
+        r.disk.clear(); // optional cache failure must not prevent ordinary shader compilation
     }
-    std::fclose(f);
 }
 
 // Lock held: a queued job found in the disk cache is done
@@ -145,18 +165,33 @@ void TakeFromDiskLocked(Registry& r, Job& j) {
 void SaveDisk(Registry& r) {
     const std::wstring path = DiskFile();
     if (path.empty() || !ApexPaths::EnsureApexDirectory()) return;
-    std::vector<std::pair<uint64_t, std::vector<DWORD>>> all;
+    // Done jobs and their bytecode are immutable and live for the process lifetime.
+    // Snapshot pointers instead of duplicating every shader while writing the cache.
+    std::vector<const Job*> all;
     {
         std::lock_guard<std::mutex> lk(r.m);
         for (const auto& j : r.jobs)
-            if (j->state == Job::Done && PlausibleCode(j->code)) all.emplace_back(j->key, j->code);
+            if (j->state == Job::Done && PlausibleCode(j->code)) all.push_back(j.get());
     }
-    const std::wstring tmp = path + L".tmp";
-    FILE* f = nullptr;
-    if (_wfopen_s(&f, tmp.c_str(), L"wb") != 0 || !f) return;
+    static std::atomic<unsigned long long> sequence{0};
+    std::wstring tmp;
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    for (unsigned attempt = 0; attempt < 128; ++attempt) {
+        tmp = path + L".tmp-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
+            std::to_wstring(GetTickCount64()) + L"-" + std::to_wstring(sequence.fetch_add(1));
+        handle = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (handle != INVALID_HANDLE_VALUE || GetLastError() != ERROR_FILE_EXISTS) break;
+    }
+    if (handle == INVALID_HANDLE_VALUE) return;
+    const int fd = _open_osfhandle(reinterpret_cast<intptr_t>(handle), _O_BINARY | _O_WRONLY);
+    if (fd < 0) { CloseHandle(handle); DeleteFileW(tmp.c_str()); return; }
+    FILE* f = _fdopen(fd, "wb");
+    if (!f) { _close(fd); DeleteFileW(tmp.c_str()); return; }
     const uint32_t head[3] = {kDiskMagic, kDiskVersion, static_cast<uint32_t>(all.size())};
     bool ok = std::fwrite(head, sizeof head, 1, f) == 1;
-    for (const auto& [key, code] : all) {
+    for (const Job* j : all) {
+        const uint64_t key = j->key;
+        const auto& code = j->code;
         const uint32_t words = static_cast<uint32_t>(code.size());
         ok = ok && std::fwrite(&key, sizeof key, 1, f) == 1 && std::fwrite(&words, sizeof words, 1, f) == 1 &&
              std::fwrite(code.data(), sizeof(DWORD), words, f) == words;
@@ -400,11 +435,12 @@ namespace {
 bool SameFunction(IDirect3DPixelShader9* ps, const std::vector<DWORD>& code, UINT* heldBytes) {
     UINT size = 0;
     *heldBytes = 0;
-    if (FAILED(ps->GetFunction(nullptr, &size)) || size == 0) return true; // cannot tell: trust it
+    if (FAILED(ps->GetFunction(nullptr, &size)) || size == 0) return false;
     *heldBytes = size;
     if (size != code.size() * sizeof(DWORD)) return false;
     std::vector<DWORD> held(size / sizeof(DWORD));
-    return SUCCEEDED(ps->GetFunction(held.data(), &size)) && std::memcmp(held.data(), code.data(), size) == 0;
+    return SUCCEEDED(ps->GetFunction(held.data(), &size)) && size == code.size() * sizeof(DWORD) &&
+           std::memcmp(held.data(), code.data(), code.size() * sizeof(DWORD)) == 0;
 }
 } // namespace
 
@@ -416,35 +452,47 @@ Result CreatePixelShader(IDirect3DDevice9* dev, Id id, IDirect3DPixelShader9** o
         return Result::CompileFailed;
     }
     if (!dev || FAILED(dev->CreatePixelShader(j->code.data(), out)) || !*out) {
+        if (*out) (*out)->Release();
         *out = nullptr;
         return Result::CreateFailed;
     }
     UINT held = 0;
-    if (!SameFunction(*out, j->code, &held)) {
-        // Replaced on the way: try once more with the same program plus a comment token after the version token (the
-        // device ignores comments; a replacer matching the bytecode no longer recognises it)
-        LOG_WARNING(std::format("[ShaderCache] {}: the device returned another pixel shader than Apex's ({} bytes instead of {}): another mod replaced it; "
-                                "retrying with a marked copy",
-                                j->d.tag, held, j->code.size() * sizeof(DWORD)));
-        std::vector<DWORD> marked;
-        marked.reserve(j->code.size() + 2);
-        marked.push_back(j->code[0]);             // ps_3_0 version token
-        marked.push_back(0x0000FFFE | (1u << 16)); // comment token, 1 DWORD long
-        marked.push_back(0x58455041);              // "APEX"
-        marked.insert(marked.end(), j->code.begin() + 1, j->code.end());
-        IDirect3DPixelShader9* again = nullptr;
-        if (SUCCEEDED(dev->CreatePixelShader(marked.data(), &again)) && again) {
-            UINT heldAgain = 0;
-            if (SameFunction(again, marked, &heldAgain)) {
-                (*out)->Release();
-                *out = again;
-                LOG_INFO(std::format("[ShaderCache] {}: the marked copy is Apex's own shader", j->d.tag));
+    const auto releaseShader = [](IDirect3DPixelShader9* shader) { if (shader) shader->Release(); };
+    std::unique_ptr<IDirect3DPixelShader9, decltype(releaseShader)> shader(*out, releaseShader);
+    *out = nullptr;
+    try {
+        if (!SameFunction(shader.get(), j->code, &held)) {
+            shader.reset();
+            // Replaced on the way: try once more with the same program plus a comment token after the version token (the
+            // device ignores comments; a replacer matching the bytecode no longer recognises it)
+            LOG_WARNING(std::format("[ShaderCache] {}: pixel shader verification failed ({} bytes reported, {} expected); "
+                                    "retrying with a marked copy",
+                                    j->d.tag, held, j->code.size() * sizeof(DWORD)));
+            std::vector<DWORD> marked;
+            marked.reserve(j->code.size() + 2);
+            marked.push_back(j->code[0]);             // ps_3_0 version token
+            marked.push_back(0x0000FFFE | (1u << 16)); // comment token, 1 DWORD long
+            marked.push_back(0x58455041);              // "APEX"
+            marked.insert(marked.end(), j->code.begin() + 1, j->code.end());
+            IDirect3DPixelShader9* again = nullptr;
+            const HRESULT created = dev->CreatePixelShader(marked.data(), &again);
+            shader.reset(again);
+            if (SUCCEEDED(created) && shader) {
+                UINT heldAgain = 0;
+                if (SameFunction(shader.get(), marked, &heldAgain)) {
+                    LOG_INFO(std::format("[ShaderCache] {}: the marked copy is Apex's own shader", j->d.tag));
+                } else {
+                    LOG_WARNING(std::format("[ShaderCache] {}: replacement could not be verified ({} bytes); effect disabled", j->d.tag, heldAgain));
+                    return Result::CreateFailed;
+                }
             } else {
-                again->Release();
-                LOG_WARNING(std::format("[ShaderCache] {}: replaced again ({} bytes); the effect may look wrong until that mod is removed", j->d.tag, heldAgain));
+                return Result::CreateFailed;
             }
         }
+    } catch (const std::bad_alloc&) {
+        return Result::CreateFailed;
     }
+    *out = shader.release();
     return Result::Ok;
 }
 
