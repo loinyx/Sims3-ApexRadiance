@@ -1,0 +1,40 @@
+name: Windows build and CPU checks
+on:
+  pull_request:
+  push:
+    branches: [main, 'codex/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      VCPKG_DISABLE_METRICS: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Prepare pinned x86 static dependencies
+        shell: pwsh
+        run: ./tools/development/setup.ps1
+      - name: Build public ASI
+        shell: pwsh
+        run: ./tools/development/build.ps1 -Flavor Public
+      - name: Check codecs and CAS sorting
+        shell: pwsh
+        run: ./tools/development/check.ps1 -Suite Smoke
+      - name: Preserve public build and check logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ApexRadiance-public-${{ github.sha }}
+          path: |
+            Public/ApexRadiance.asi
+            outputs/checks/*.txt
+            .agents/skills/apex-compile-project/cache/*/*.log
+          if-no-files-found: warn
+          retention-days: 14
+
