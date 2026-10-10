@@ -26,4 +26,3 @@ try {
     $artifact = Join-Path $output 'ApexRadiance.asi'
     Get-FileHash -LiteralPath $artifact -Algorithm SHA256
 } finally { Pop-Location }
-

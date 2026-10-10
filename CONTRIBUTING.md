@@ -32,3 +32,13 @@ Use coherent commits, maintain one draft PR for the task and update its handoff 
 Keep the local corpus under an ignored output directory or another private research folder. Identify executables and shader archives by SHA256 and build/version. Prefer the existing engine documentation and recover old research before recreating it. Work from the local Steam executable and read-only shader archive; preserve the project's decision not to dump the decrypted EA executable.
 
 Use a reproducible scene and diagnostic captures before proposing a patch. Confirm calling conventions, register/state ownership and expected original bytes. Resolve non-Steam locations by validated signatures. Keep unknown facts explicitly unverified. Run the affected offline harnesses, then compare native D3D9 and DXVK in game when the change touches rendering.
+
+Install the official Ghidra release and its required JDK 21. Set `JAVA_HOME` to that JDK if Ghidra cannot discover it. The following recipes keep generated game data under the ignored `outputs/research` directory:
+
+```powershell
+./tools/development/research.ps1 -GameBin 'C:\path\to\The Sims 3\Game\Bin'
+./tools/development/research.ps1 -GameBin 'C:\path\to\The Sims 3\Game\Bin' -GhidraRoot 'C:\path\to\ghidra' -Analyze
+./tools/development/research.ps1 -GameBin 'C:\path\to\The Sims 3\Game\Bin' -GhidraRoot 'C:\path\to\ghidra' -Export
+```
+
+Analyze imports the verified Steam 1.67.2 executable without modifying it; repeating an import refuses to overwrite the existing project. Export reopens the completed project read-only, writes a function index and decompiles 15 documented engine entry points. Generated names, types and control flow require manual verification; this is a replacement research baseline, not recovery of previous analyst annotations.

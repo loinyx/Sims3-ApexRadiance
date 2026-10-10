@@ -22,4 +22,3 @@ try {
     }
 } finally { Pop-Location }
 Write-Output "CPU $Suite suite passed. Gameplay and D3D9/DXVK validation remain separate."
-

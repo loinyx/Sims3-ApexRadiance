@@ -24,4 +24,3 @@ try {
     & (Join-Path $VcpkgRoot 'vcpkg.exe') install --triplet x86-windows-static --disable-metrics
     if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
 } finally { Pop-Location }
-

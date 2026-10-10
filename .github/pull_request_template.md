@@ -17,4 +17,3 @@ Describe the concrete problem and resulting behavior.
 - Active owner / integrator:
 
 Read AGENTS.md, CLAUDE.md and CONTRIBUTING.md before continuing. Fetch the branch and verify the current head before editing. Simultaneous agents use separate worktrees. Merge and release require explicit authorization.
-

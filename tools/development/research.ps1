@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$GameBin,
     [string]$GhidraRoot = '',
-    [switch]$Analyze
+    [switch]$Analyze,
+    [switch]$Export
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -31,17 +32,26 @@ $files = foreach ($name in @('TS3W.exe','TS3.exe','Shaders_Win32.precomp','ApexR
     }
 }
 $files | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $out 'inventory.json') -Encoding utf8
-if ($Analyze) {
+if ($Analyze -or $Export) {
     if (-not $GhidraRoot) { throw 'Supply the official extracted Ghidra directory with -GhidraRoot.' }
     $steam = Join-Path $GameBin 'TS3W.exe'
     if (-not (Test-Path -LiteralPath $steam)) { throw 'This analysis recipe requires the local Steam TS3W.exe; EA decrypted dumps are excluded.' }
+    $steamEntry = $files | Where-Object { $_.name -eq 'TS3W.exe' }
+    if ($steamEntry.peTimestamp -ne '0x52DEC247') { throw 'The selected address export is only defined for Steam 1.67.2.024037.' }
     $projects = Join-Path $out 'ghidra-projects'
     New-Item -ItemType Directory -Path $projects -Force | Out-Null
     $name = 'Steam-' + (Get-FileHash -LiteralPath $steam -Algorithm SHA256).Hash.Substring(0,12)
-    if (Test-Path (Join-Path $projects ($name + '.gpr'))) { throw 'This executable is already imported; open the existing project instead of overwriting it.' }
     $headless = Join-Path $GhidraRoot 'support/analyzeHeadless.bat'
     if (-not (Test-Path $headless)) { throw 'Ghidra analyzeHeadless was not found.' }
-    & $headless $projects $name -import $steam -max-cpu 4 -analysisTimeoutPerFile 600 -log (Join-Path $out 'analysis.log')
-    if ($LASTEXITCODE -ne 0) { throw 'Ghidra analysis failed; inspect outputs/research/analysis.log.' }
+    if ($Analyze) {
+        if (Test-Path (Join-Path $projects ($name + '.gpr'))) { throw 'This executable is already imported; open the existing project instead of overwriting it.' }
+        & $headless $projects $name -import $steam -max-cpu 4 -analysisTimeoutPerFile 600 -log (Join-Path $out 'analysis.log')
+        if ($LASTEXITCODE -ne 0) { throw 'Ghidra analysis failed; inspect outputs/research/analysis.log.' }
+    }
+    if ($Export) {
+        if (-not (Test-Path (Join-Path $projects ($name + '.gpr')))) { throw 'Run -Analyze before exporting.' }
+        & $headless $projects $name -process TS3W.exe -noanalysis -readOnly -scriptPath (Join-Path $PSScriptRoot 'ghidra') -postScript ApexResearchExport.java (Join-Path $out 'decompile') -log (Join-Path $out 'export.log')
+        if ($LASTEXITCODE -ne 0) { throw 'Ghidra export failed; inspect outputs/research/export.log.' }
+    }
 }
 Write-Output "Private inventory: $out/inventory.json"
