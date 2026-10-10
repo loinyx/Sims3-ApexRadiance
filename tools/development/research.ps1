@@ -3,7 +3,7 @@ param(
     [string]$GhidraRoot = '',
     [switch]$Analyze,
     [switch]$Export,
-    [ValidateRange(2,64)][int]$MaxMemoryGB = 8
+    [ValidateRange(2,64)][int]$MaxMemoryGB = 24
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -47,8 +47,9 @@ if ($Analyze -or $Export) {
     $env:GHIDRA_HEADLESS_MAXMEM = "$($MaxMemoryGB)G"
     if ($Analyze) {
         if (Test-Path (Join-Path $projects ($name + '.gpr'))) { throw 'This executable is already imported; open the existing project instead of overwriting it.' }
-        & $headless $projects $name -import $steam -max-cpu 4 -analysisTimeoutPerFile 600 -log (Join-Path $out 'analysis.log')
+        & $headless $projects $name -import $steam -scriptPath (Join-Path $PSScriptRoot 'ghidra') -preScript ApexAnalysisSetup.java -max-cpu 4 -analysisTimeoutPerFile 600 -log (Join-Path $out 'analysis.log')
         if ($LASTEXITCODE -ne 0) { throw 'Ghidra analysis failed; inspect outputs/research/analysis.log.' }
+        if (Select-String -LiteralPath (Join-Path $out 'analysis.log') -Pattern 'OutOfMemoryError|REPORT: Import failed' -Quiet) { throw 'Ghidra reported an incomplete import; inspect outputs/research/analysis.log before exporting.' }
     }
     if ($Export) {
         if (-not (Test-Path (Join-Path $projects ($name + '.gpr')))) { throw 'Run -Analyze before exporting.' }
