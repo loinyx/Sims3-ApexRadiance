@@ -8,16 +8,28 @@ public class ApexAnalysisSetup extends GhidraScript {
     @Override
     public void run() throws Exception {
         Options options = currentProgram.getOptions(Program.ANALYSIS_PROPERTIES);
-        int disabled = 0;
+        boolean foundX86ConstantReferences = false;
+        boolean foundStackAnalyzer = false;
+        boolean foundSwitchAnalyzer = false;
         for (String name : options.getOptionNames()) {
-            if (name.endsWith(" Constant Reference Analyzer")) {
+            if (name.equals("Decompiler Switch Analysis")) {
                 options.setBoolean(name, false);
                 println("Disabled memory-intensive initial analyzer: " + name);
-                disabled++;
+                foundSwitchAnalyzer = true;
+            }
+            else if (name.equals("Stack")) {
+                options.setBoolean(name, false);
+                println("Disabled memory-intensive initial analyzer: " + name);
+                foundStackAnalyzer = true;
+            }
+            else if (name.endsWith(" Constant Reference Analyzer")) {
+                options.setBoolean(name, false);
+                println("Disabled memory-intensive initial analyzer: " + name);
+                foundX86ConstantReferences = true;
             }
         }
-        if (disabled == 0) {
-            throw new IllegalStateException("Constant reference analyzer option was not found; review the Ghidra version.");
+        if (!foundX86ConstantReferences || !foundStackAnalyzer || !foundSwitchAnalyzer) {
+            throw new IllegalStateException("Expected Ghidra analyzers were not found; review the Ghidra version.");
         }
     }
 }

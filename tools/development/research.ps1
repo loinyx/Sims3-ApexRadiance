@@ -3,7 +3,7 @@ param(
     [string]$GhidraRoot = '',
     [switch]$Analyze,
     [switch]$Export,
-    [ValidateRange(2,64)][int]$MaxMemoryGB = 24
+    [ValidateRange(2,64)][int]$MaxMemoryGB = 8
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
