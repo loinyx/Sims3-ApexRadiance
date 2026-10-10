@@ -10,9 +10,9 @@ Production AO/Depth saved-state code was extracted into a separate Win32 HAL tes
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
-| 2026-10-09 | d8ce878 plus release integration | State/failure/reset fixture | 124,883 checks, zero failures on each backend | Native D3D9 and explicit DXVK 3.1.1 |
-| 2026-10-09 | Same source | Actual RunBlur entry fixture | Three cases passed: failed capture, next successful frame, failed copy | Mock entry dependencies |
-| 2026-10-09 | Same source | Production shader verifier | 14 checks passed | Controlled replacements |
+| 2026-10-09 | 7ddaa214 (release source) | State/failure/reset fixture | 124,883 checks, zero failures on each backend | Native D3D9 and explicit DXVK 3.1.1 |
+| 2026-10-09 | 7ddaa214 | Actual RunBlur entry fixture | Three cases passed: failed capture, next successful frame, failed copy | Mock entry dependencies |
+| 2026-10-09 | 7ddaa214 | Production shader verifier | 14 checks passed | Controlled replacements |
 
 After warm-up, handles remained stable at 402 on native and 405 on DXVK. Private bytes increased by 61,440 and 3,047,424 respectively; this short host does not prove absence of leaks in full gameplay. Final device references reached zero.
 
@@ -30,3 +30,5 @@ The maintainer reported that the test build had been tested in game. This does n
 
 - Long gameplay, all allocation failures, real device-loss transitions and Proton/Linux.
 - A separate generated lifetime DLL fixture was refused at load with error 5. The reason remains unknown; no Windows security setting was changed. Module retention follows the Windows process-lifetime pin contract, but that worker/unload fixture did not run.
+
+Release provenance: the combined code was independently reviewed at `7ddaa214a6678cdbc0c9554082c779ffc485fa13`. Subsequent documentation-only edits do not change these code paths. The published release tag records the final source commit.

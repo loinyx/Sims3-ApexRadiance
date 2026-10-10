@@ -13,8 +13,8 @@
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
-| 2026-10-09 | d8ce878 plus release integration | Production package/backend fixture | 3,869 checks passed | Windows files |
-| 2026-10-09 | Same source | Public developer-mode fixture | Passed | Win32 public |
+| 2026-10-09 | 7ddaa214 (release source) | Production package/backend fixture | 3,869 checks passed | Windows files |
+| 2026-10-09 | 7ddaa214 | Public developer-mode fixture | Passed | Win32 public |
 
 ## In-game test plan
 
@@ -30,3 +30,5 @@ The maintainer reported completion of the test-build gameplay check before relea
 
 - Native dialog overwrite confirmation and ZIP transfer on a separate computer.
 - Extended preset switching and all language layouts.
+
+Release provenance: the combined code was independently reviewed at `7ddaa214a6678cdbc0c9554082c779ffc485fa13`. Subsequent documentation-only edits do not change these code paths. The published release tag records the final source commit.
