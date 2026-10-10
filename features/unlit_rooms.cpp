@@ -600,18 +600,6 @@ void Set(bool on, float light, float blue) {
     Retarget();
 }
 
-S3SSDetect::RoomAmbientCorrection CorrectS3SSConflict() {
-    auto result = S3SSDetect::CorrectRoomAmbientOverride();
-    if (result.saved) {
-        g_compat = result;
-        if (g_on) {
-            Compute();
-            Retarget();
-        }
-    }
-    return result;
-}
-
 void OnPresent() {
     if (!g_ready) return;
     const DWORD now = GetTickCount();

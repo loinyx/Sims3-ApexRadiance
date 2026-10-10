@@ -9,6 +9,7 @@
 #include "picture.h"
 #include "frame_profiler.h"
 #include "performance.h"
+#include "profile_package.h"
 #include "ui/i18n.h"
 #include <toml++/toml.hpp>
 #include <algorithm>
@@ -779,14 +780,7 @@ bool ProfileExists(const std::string& name) {
     return !clean.empty() && ApexUtil::FileExists(ProfileFile(clean));
 }
 
-bool SaveProfile(const std::string& name, unsigned parts, std::string* error, const std::string& icon) {
-    const std::string clean = SanitizeProfileName(name);
-    if (clean.empty() || clean != name) {
-        if (error) *error = "invalid name";
-        return false;
-    }
-    try {
-        toml::table root;
+void CaptureProfileState(toml::table& root) {
         CaptureFeatureState(root, true);
         { // the shortcuts (the menu's [ui] keys), removed below unless picked
             const UiSettings u = GetUi();
@@ -810,6 +804,17 @@ bool SaveProfile(const std::string& name, unsigned parts, std::string* error, co
             sc.insert("screenshot_folder", std::string(u.screenshotToApexFolder ? "apex" : "game"));
             root.insert_or_assign("shortcuts", std::move(sc));
         }
+}
+
+bool SaveProfile(const std::string& name, unsigned parts, std::string* error, const std::string& icon) {
+    const std::string clean = SanitizeProfileName(name);
+    if (clean.empty() || clean != name) {
+        if (error) *error = "invalid name";
+        return false;
+    }
+    try {
+        toml::table root;
+        CaptureProfileState(root);
         KeepProfileParts(root, parts);
         toml::table meta;
         meta.insert("written_by", APEX_PRODUCT_NAME " " APEX_VERSION_STRING);
@@ -852,6 +857,109 @@ bool ReadProfile(const std::string& name, toml::table& out, std::string* error) 
         return false;
     }
     return true;
+}
+
+namespace {
+std::string LutName(const toml::table& state) {
+    return state["qol"]["picture"]["filters"]["lut_file"].value_or(std::string());
+}
+bool ValidLutName(const std::string& name) {
+    if(!ProfilePackage::SafeName(name) || name.find('/')!=name.npos || name.find_first_of("<>\"|?*")!=name.npos || name.back()=='.' || name.back()==' ') return false;
+    const size_t dot=name.rfind('.'); if(dot==name.npos || !dot || IsReservedName(name.substr(0,name.find('.')))) return false;
+    for(unsigned char c:name) if(c<32) return false;
+    std::string ext=name.substr(dot);
+    std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});
+    return ext==".cube" || ext==".png";
+}
+std::string ReadBounded(const std::wstring& path, size_t maximum) {
+    WIN32_FILE_ATTRIBUTE_DATA info{};
+    if(!GetFileAttributesExW(path.c_str(),GetFileExInfoStandard,&info) || (info.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY) || info.nFileSizeHigh || info.nFileSizeLow>maximum)
+        throw std::runtime_error("The file is missing or too large");
+    std::string bytes;
+    if(!ApexUtil::ReadFileBytes(path,bytes) || bytes.size()>maximum) throw std::runtime_error("The file could not be read");
+    return bytes;
+}
+}
+
+bool ProfileUsesLut(const toml::table& state) {
+    // Include a selected LUT even when its switch is temporarily off: the saved look remains portable.
+    return (ProfilePartsOf(state)&kPartColor) && !LutName(state).empty();
+}
+bool ExportProfileFile(const std::wstring& path, const toml::table& state, std::string* error) {
+    try {
+        std::string bytes=Serialize(state);
+        if(ProfileUsesLut(state)) {
+            const auto name=LutName(state);
+            if(!ValidLutName(name)) throw std::runtime_error("The selected LUT filename is invalid");
+            const auto lut=ReadBounded(ApexPaths::ApexDirectory()+L"LUTs\\"+ApexUtil::ToWide(name),32u*1024u*1024u);
+            bytes=ProfilePackage::Write({{"profile.toml",std::move(bytes)},{"LUTs/"+name,lut}});
+        }
+        return ApexUtil::WriteFileAtomic(path,bytes,error);
+    } catch(const std::exception& e) {if(error) *error=e.what(); return false;}
+}
+bool ReadProfileImport(const std::wstring& path, ProfileImport& out, std::string* error) {
+    try {
+        ProfileImport result;
+        const auto bytes=ReadBounded(path,ProfilePackage::kLimit);
+        if(bytes.size()>=4 && bytes.compare(0,4,"PK\003\004")==0) {
+            const auto entries=ProfilePackage::Read(bytes);
+            bool found=false;
+            for(const auto& entry:entries) {
+                if(entry.name=="profile.toml") {if(entry.bytes.size()>2u*1024u*1024u) throw std::runtime_error("The preset is too large"); result.state=toml::parse(entry.bytes); found=true;}
+                else if(entry.name.starts_with("LUTs/") && ValidLutName(entry.name.substr(5))) {
+                    if(!result.lutName.empty()) throw std::runtime_error("Invalid profile package");
+                    result.lutName=entry.name.substr(5); result.lutBytes=entry.bytes;
+                } else throw std::runtime_error("Invalid profile package");
+            }
+            if(!found || result.lutName.empty() || LutName(result.state)!=result.lutName) throw std::runtime_error("Invalid profile package");
+        } else {if(bytes.size()>2u*1024u*1024u) throw std::runtime_error("The preset is too large"); result.state=toml::parse(bytes);}
+        if(!ProfilePartsOf(result.state)) throw std::runtime_error("No supported settings in this profile");
+        out=std::move(result); return true;
+    } catch(const std::exception& e) {if(error) *error=e.what(); return false;}
+}
+bool SaveImportedProfile(const std::string& name, const ProfileImport& input, unsigned parts, const std::string& icon, std::string* error) {
+    std::wstring createdLut, temporaryProfile;
+    try {
+        if(name.empty() || SanitizeProfileName(name)!=name || ProfileExists(name)) throw std::runtime_error("Choose a new profile name");
+        auto state=input.state; KeepProfileParts(state,parts);
+        if(!ProfilePartsOf(state)) throw std::runtime_error("Choose at least one setting");
+        if((parts&kPartColor) && !input.lutName.empty()) {
+            if(!ValidLutName(input.lutName) || input.lutBytes.size()>32u*1024u*1024u) throw std::runtime_error("Invalid profile package");
+            const auto dir=ApexPaths::ApexDirectory()+L"LUTs\\";
+            if(!ApexPaths::EnsureApexDirectory() || (!CreateDirectoryW(dir.c_str(),nullptr) && GetLastError()!=ERROR_ALREADY_EXISTS)) throw std::runtime_error("The LUTs folder could not be created");
+            const auto dot=input.lutName.rfind('.'); std::string chosen; bool ready=false;
+            for(unsigned n=0;n<10000;++n) {
+                chosen=n ? input.lutName.substr(0,dot)+"-"+std::to_string(n)+input.lutName.substr(dot) : input.lutName;
+                if(chosen.size()>255) throw std::runtime_error("The LUT filename is too long");
+                const auto target=dir+ApexUtil::ToWide(chosen);
+                if(ApexUtil::FileExists(target)) {
+                    try {if(ReadBounded(target,32u*1024u*1024u)==input.lutBytes) {ready=true;break;}} catch(const std::exception&) {}
+                    continue;
+                }
+                HANDLE file=CreateFileW(target.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+                if(file==INVALID_HANDLE_VALUE) {if(GetLastError()==ERROR_FILE_EXISTS) continue; throw std::runtime_error("The LUT could not be saved");}
+                createdLut=target; DWORD written=0;
+                const bool ok=WriteFile(file,input.lutBytes.data(),DWORD(input.lutBytes.size()),&written,nullptr) && written==input.lutBytes.size();
+                CloseHandle(file); if(!ok) throw std::runtime_error("The LUT could not be saved");
+                ready=true; break;
+            }
+            if(!ready || chosen.empty() || (!ApexUtil::FileExists(dir+ApexUtil::ToWide(chosen)))) throw std::runtime_error("The LUT could not be saved");
+            auto* qol=state.get_as<toml::table>("qol");
+            auto* picture=qol ? qol->get_as<toml::table>("picture") : nullptr;
+            auto* filters=picture ? picture->get_as<toml::table>("filters") : nullptr;
+            if(!filters) throw std::runtime_error("Invalid LUT settings");
+            filters->insert_or_assign("lut_file",chosen);
+        }
+        toml::table meta;
+        meta.insert("profile",name); meta.insert("icon",icon); meta.insert("written_by",APEX_PRODUCT_NAME " " APEX_VERSION_STRING);
+        state.insert_or_assign("meta",std::move(meta));
+        if(!EnsureProfilesDirectory()) throw std::runtime_error("The Profiles folder could not be created");
+        std::string err;
+        temporaryProfile=ProfileFile(name)+L".import-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64());
+        if(!ApexUtil::WriteFileAtomic(temporaryProfile,Serialize(state),&err)) throw std::runtime_error(err.empty()?"The profile could not be saved":err);
+        if(!MoveFileExW(temporaryProfile.c_str(),ProfileFile(name).c_str(),MOVEFILE_WRITE_THROUGH)) throw std::runtime_error("The preset already exists or could not be saved");
+        return true;
+    } catch(const std::exception& e) {if(!temporaryProfile.empty()) DeleteFileW(temporaryProfile.c_str()); if(!createdLut.empty()) DeleteFileW(createdLut.c_str()); if(error) *error=e.what(); return false;}
 }
 
 std::wstring ProfilesFolder() { return ProfilesDirectory(); }

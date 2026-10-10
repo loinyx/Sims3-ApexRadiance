@@ -21,11 +21,6 @@
 //    keep more light and their colour, no grey film), and lamp-lit / bright pixels keep part of their light.
 // Passes per frame: depth -> 1/z, 8 downsamples, the AO pass, 4 blur passes (box H/V, tent H/V), one composite over a
 // copy of the scene (colour write RGB only).
-// 06/10 (user: grain and ghost shade below Ultra, not perfect on Ultra), retained additions:
-//  - Blur on the same surface: the AO pass also writes its normal (second target) and the blur weighs taps by depth and
-//    direction; a box tap on another surface is replaced by the pixel 4 further on (same interleave offset), so the 4x4
-//    cancel holds behind rails and at corners. Always on (depth only without two render targets). The pyramid keeps the
-//    farthest depth across an edge, so a thin leg leaves no averaged "ghost" surface at the coarse levels.
 
 #include "patch_base.h"
 #include "apex_version.h"
@@ -85,7 +80,6 @@ constexpr float kFirstStep4K = 2.0f, kMipOffset = 2.0f, kMaxRadius = 0.30f;    /
 constexpr float kIsoK = 1.0f, kIsoT = 0.01f;                                    // isolated-pixel fade
 constexpr float kBlurTolerance = 0.03f;                                         // of z
 constexpr float kDeadZone = 0.05f;                                              // composite: faint shade dropped
-constexpr float kNormalPower = 8.0f;                                            // blur: normal agreement ^ this (cos 30 deg -> 0.32)
 // Quality by stored index (the saved "qualidade": 0 Low, 1 Medium, 2 High as in 2.1.0, then 3 Ultra, 4 Very Low) and the
 // order the menu shows them in
 constexpr int kQualityCount = 5;
@@ -98,13 +92,12 @@ const char* kShaderSource = R"HLSL(
 #endif
 #define STEPS 4
 sampler2D sDepth : register(s0); // INTZ scene depth, point
-sampler2D sZ     : register(s1); // 1/z pyramid (1/m, 0 = sky), point (exact texel reads; mip point, level by lod)
+sampler2D sZ     : register(s1); // 1/z pyramid (1/m, 0 = sky), point (exact texel reads)
 sampler2D sZt    : register(s2); // the same pyramid, bilinear within the nearest level (the march)
 sampler2D sAo    : register(s3); // AO + 1/z (G16R16F), point
 sampler2D sColor : register(s4); // copy of the finished scene, point
 sampler2D sSim : register(s5); // Sim receiver device-depth mask, point
 sampler2D sHair : register(s6); // blended Sim body/hair: signed device depth and source coverage
-sampler2D sNrm : register(s7); // surface normal of the AO pass (view xy * 0.5 + 0.5, A8R8G8B8), point
 float4 cView  : register(c0);  // x = tanX, y = tanY, z = H / (2 tanY) (pixels per metre times z), w = max radius (px)
 float4 cSize  : register(c1);  // xy = screen size, zw = pyramid level-0 size (padded)
 float4 cMarch : register(c2);  // x = first step (px), y = mip offset, z = (1 + thin)^2, w = 1 / (fade1 - fade0)
@@ -118,8 +111,6 @@ float4 cRot   : register(c9);  // x = cos(pi / SLICES), y = sin(pi / SLICES)
 float4 cDepth : register(c10); // x = A, y = 1 / (near A)   (1/z = (A - d) / (near A)), z = composite grain (Banding Fix strength / 255, 0 = off), w = its grain phase
 float4 cSim : register(c11); // body strength, opaque mask available, hair strength, maximum shade
 float4 cSimView : register(c12); // mask preview, transparent hair mask available
-float4 cJit : register(c13); // fixed full-resolution pixel size and pyramid base level
-float4 cVbm : register(c14); // y = normal weight power of the blur, z = normals available
 
 static const float PI = 3.14159265;
 
@@ -149,44 +140,30 @@ float4 DownPS(float2 uv : TEXCOORD0) : COLOR0
 }
 
 float3 PosF(float2 p, float z) { return z * float3(p * cPos.xy + cPos.zw, 1); }
-// The AO pass's 1/z at a full-resolution screen position; cJit.w is fixed to level zero.
-float WAt(float2 p) { return tex2Dlod(sZ, float4(p / cSize.zw, 0, cJit.w)).r; }
+float WAt(float2 p) { return tex2Dlod(sZ, float4(p / cSize.zw, 0, 0)).r; }
 float Bayer2(float a, float b) { return 2.0 * abs(a - b) + b; }
 float Bayer4(float2 q) { float2 lo = fmod(q, 2.0), hi = floor(fmod(q, 4.0) * 0.5); return 4.0 * Bayer2(lo.x, lo.y) + Bayer2(hi.x, hi.y); }
 float ACos(float x) { return acos(clamp(x, -1, 1)); }  // exact: the fast fit biased the shade by 0.5% (lab check)
 float4 ACos4(float4 x) { return acos(clamp(x, -1, 1)); }
 
-)HLSL" R"HLSL(
 // GTAO: SLICES slices (angle (s + b1) pi / SLICES) x STEPS geometric steps per side (offset from b2 plus a golden-ratio
-// phase per half-slice), contact + large horizon per side from the same samples. Out: R = visibility, G = 1/z (blur);
-// COLOR1 = the surface normal for the blur (view x, y * 0.5 + 0.5). All positions are full-resolution screen pixels.
-struct GtaoOut { float4 ao : COLOR0; float4 nrm : COLOR1; };
-GtaoOut Gtao(float v, float w0, float3 n)
+// phase per half-slice), contact + large horizon per side from the same samples. Out: R = visibility, G = 1/z (blur).
+float4 GtaoPS(float2 uv : TEXCOORD0) : COLOR0
 {
-    GtaoOut o;
-    o.ao = float4(v, w0, 0, 0);
-    o.nrm = float4(n.xy * 0.5 + 0.5, 0, 1);
-    return o;
-}
-
-GtaoOut GtaoPS(float2 uv : TEXCOORD0)
-{
-    const float3 nNone = float3(0, 0, -1);
     float2 pix = uv * cSize.xy;
     float w0 = WAt(pix);
-    [branch] if (w0 <= 0.0) return Gtao(1, 0, nNone);
+    [branch] if (w0 <= 0.0) return float4(1, 0, 0, 0);
     float z = 1.0 / w0;
-    [branch] if (z >= cRad.w) return Gtao(1, w0, nNone);
+    [branch] if (z >= cRad.w) return float4(1, w0, 0, 0);
     float3 c = PosF(pix, z);
-    // normal from the neighbour with the smaller depth difference on each axis (one AO pixel away)
-    float st = cJit.z;
-    float zr = 1.0 / max(WAt(pix + float2(st, 0)), 1e-9), zl = 1.0 / max(WAt(pix - float2(st, 0)), 1e-9);
-    float zd = 1.0 / max(WAt(pix + float2(0, st)), 1e-9), zu = 1.0 / max(WAt(pix - float2(0, st)), 1e-9);
-    float3 dx = abs(zr - z) < abs(zl - z) ? PosF(pix + float2(st, 0), zr) - c : c - PosF(pix - float2(st, 0), zl);
-    float3 dy = abs(zd - z) < abs(zu - z) ? PosF(pix + float2(0, st), zd) - c : c - PosF(pix - float2(0, st), zu);
+    // normal from the neighbour with the smaller depth difference on each axis
+    float zr = 1.0 / max(WAt(pix + float2(1, 0)), 1e-9), zl = 1.0 / max(WAt(pix - float2(1, 0)), 1e-9);
+    float zd = 1.0 / max(WAt(pix + float2(0, 1)), 1e-9), zu = 1.0 / max(WAt(pix - float2(0, 1)), 1e-9);
+    float3 dx = abs(zr - z) < abs(zl - z) ? PosF(pix + float2(1, 0), zr) - c : c - PosF(pix - float2(1, 0), zl);
+    float3 dy = abs(zd - z) < abs(zu - z) ? PosF(pix + float2(0, 1), zd) - c : c - PosF(pix - float2(0, 1), zu);
     float3 n = cross(dx, dy);
     float nl = length(n);
-    [branch] if (nl < 1e-12) return Gtao(1, w0, nNone);
+    [branch] if (nl < 1e-12) return float4(1, w0, 0, 0);
     n /= nl;
     n = dot(n, c) > 0 ? -n : n;
     float iso = max(min(abs(zr - z), abs(zl - z)), min(abs(zd - z), abs(zu - z))) * w0;
@@ -194,12 +171,11 @@ GtaoOut GtaoPS(float2 uv : TEXCOORD0)
     float fz = saturate((z - cBlend.x) * cBlend.y);
     float Rl = lerp(cRad.y, cRad.z, fz), kl = lerp(cK.y, cK.z, fz);
     float rMax = min(Rl * cView.z * w0, cView.w);
-    [branch] if (rMax < 1.5 * cMarch.x) return Gtao(1, w0, n);
+    [branch] if (rMax < 1.5 * cMarch.x) return float4(1, w0, 0, 0);
     float lg = log2(rMax / cMarch.x) / STEPS;
     float lodAdd = log2(1.0 - exp2(-lg)) - cMarch.y + log2(cMarch.x);
-    // Fixed 4x4 Bayer interleave, cancelled by the spatial box blur.
-    float2 q = floor(pix / st);
-    float b1 = frac((Bayer4(q) + 0.5) / 16.0 + cJit.x), b2 = frac((Bayer4(q.yx + float2(1, 2)) + 0.5) / 16.0 + cJit.y);
+    float2 q = floor(pix);
+    float b1 = (Bayer4(q) + 0.5) / 16.0, b2 = (Bayer4(q.yx + float2(1, 2)) + 0.5) / 16.0;
     float2 fMul = float2(-1.0 / (0.615 * cRad.x), -1.0 / (0.615 * Rl));
     const float fAdd = 0.385 / 0.615 + 1.0;
     float2 om;
@@ -217,17 +193,14 @@ GtaoOut GtaoPS(float2 uv : TEXCOORD0)
         float nA = sgn * ACos(cosN), sn = sgn * sqrt(1 - cosN * cosN);
         float4 low = float4(-sn, -sn, sn, sn);                  // (contact, large) side 0, (contact, large) side 1
         float4 hz = low;
-
         float ph0 = frac(b2 + (2 * s) * 0.618034), ph1 = frac(b2 + (2 * s + 1) * 0.618034);
         [unroll] for (int j = 0; j < STEPS; j++)
-
         {
             float2 lr = (j + float2(ph0, ph1)) * lg;
             float2 r = cMarch.x * exp2(lr);
             float4 sp = pix.xyxy + float4(om * r.x, -om * r.y);
-            float2 lod = max(lr + lodAdd, cJit.w);
-            float2 ws = float2(tex2Dlod(sZt, float4(sp.xy / cSize.zw, 0, lod.x)).r,
-                               tex2Dlod(sZt, float4(sp.zw / cSize.zw, 0, lod.y)).r);
+            float2 ws = float2(tex2Dlod(sZt, float4(sp.xy / cSize.zw, 0, lr.x + lodAdd)).r,
+                               tex2Dlod(sZt, float4(sp.zw / cSize.zw, 0, lr.y + lodAdd)).r);
             // off-screen samples count as sky (no occlusion), like the lab
             ws *= float2(all(sp.xy >= 0) && all(sp.xy < cSize.xy), all(sp.zw >= 0) && all(sp.zw < cSize.xy));
             float3 d0 = PosF(sp.xy, 1.0 / max(ws.x, 1e-9)) - c, d1 = PosF(sp.zw, 1.0 / max(ws.y, 1e-9)) - c;
@@ -235,7 +208,6 @@ GtaoOut GtaoPS(float2 uv : TEXCOORD0)
             float2 dt = sqrt(float2(dot(d0.xy, d0.xy), dot(d1.xy, d1.xy)) + float2(d0.z * d0.z, d1.z * d1.z) * cMarch.z);
             float4 w = saturate(dt.xxyy * fMul.xyxy + fAdd);
             hz = max(hz, low + (cc.xxyy - low) * w);
-
         }
         // arcs for the 4 horizons: h0 = -acos(side 1), h1 = acos(side 0); cos(2h - n) by the double angle
         float4 hcs = hz.zwxy;                                   // (h0 contact, h0 large, h1 contact, h1 large) cosines
@@ -245,61 +217,33 @@ GtaoOut GtaoPS(float2 uv : TEXCOORD0)
         float4 c2 = (2 * hcs * hcs - 1) * cosN + (2 * sh * hcs) * sn;
         float4 arc = (cosN + 2 * h * sn - c2) * 0.25;
         acc += projLen * float3(arc.x + arc.z, arc.y + arc.w, cosN + nA * sn);
-
         om = float2(om.x * cRot.x - om.y * cRot.y, om.x * cRot.y + om.y * cRot.x);
     }
     float oC = saturate(1 - acc.x / max(acc.z, 1e-6)), oL = saturate(1 - acc.y / max(acc.z, 1e-6));
     float occ = cK.x * oC + kl * max(0, oL - oC);
     occ *= saturate((cRad.w - z) * cMarch.w);
     occ *= 1 - cBlend.z * saturate((iso - cBlend.w) / cBlend.w);
-    return Gtao(saturate(1 - occ), w0, n);
+    return float4(saturate(1 - occ), w0, 0, 0);
 }
 
-)HLSL" R"HLSL(
 // separable depth-aware filter: box (0.5 1 1 1 0.5: one of each interleave offset) or tent (1 2 3 2 1)
 static const float BX[5] = { 0.5, 1.0, 1.0, 1.0, 0.5 };
 static const float TT[5] = { 1.0, 2.0, 3.0, 2.0, 1.0 };
-float3 NrmAt(float2 uv)
-{
-    float2 e = tex2Dlod(sNrm, float4(uv, 0, 0)).xy * 2 - 1;
-    return float3(e, -sqrt(saturate(1 - dot(e, e))));
-}
-// a tap counts when it is on the same surface: the same depth (within cK.w of z) and, with the normals there, facing
-// the same way (06/10: a corner's floor shade no longer bleeds up the wall)
-float TapWeight(float w0, float3 n0, float2 v, float2 uv)
-{
-    float dw = saturate(1.0 - abs(w0 / max(v.y, 1e-9) - 1.0) / cK.w);
-    [branch] if (cVbm.z > 0.5 && dw > 0) dw *= pow(saturate(dot(n0, NrmAt(uv))), cVbm.y);
-    return dw;
-}
 float4 BlurPS(float2 uv : TEXCOORD0) : COLOR0
 {
     float2 c0 = tex2Dlod(sAo, float4(uv, 0, 0)).rg;
     [branch] if (c0.y <= 0.0) return float4(1, 0, 0, 0);
-    float3 n0 = cVbm.z > 0.5 ? NrmAt(uv) : float3(0, 0, -1);
     float sum = 0, ws = 0;
     [unroll] for (int t = -2; t <= 2; t++)
     {
-        float2 tuv = uv + cDir.xy * t;
-        float2 v = tex2Dlod(sAo, float4(tuv, 0, 0)).rg;
-        float dw = TapWeight(c0.y, n0, v, tuv);
-        // box pass: a tap on another surface (a rail in front of the wall, the other side of a corner) breaks the
-        // interleave cancel and leaves the 4x4 dots; the pixel 4 AO pixels further on has the same interleave offset
-        [branch] if (cDir.z < 0.5 && t != 0 && dw < 0.5)
-        {
-            float2 auv = uv + cDir.xy * (abs(t) == 1 ? -3 * t : 3 * t);
-            float2 a = tex2Dlod(sAo, float4(auv, 0, 0)).rg;
-            float da = TapWeight(c0.y, n0, a, auv);
-            if (da > dw) { v = a; dw = da; }
-        }
-        float w = (cDir.z > 0.5 ? TT[t + 2] : BX[t + 2]) * dw;
+        float2 v = tex2Dlod(sAo, float4(uv + cDir.xy * t, 0, 0)).rg;
+        float w = (cDir.z > 0.5 ? TT[t + 2] : BX[t + 2]) * saturate(1.0 - abs(c0.y / max(v.y, 1e-9) - 1.0) / cK.w);
         sum += v.x * w;
         ws += w;
     }
     return float4(ws > 0 ? sum / ws : c0.x, c0.y, 0, 0);
 }
 
-)HLSL" R"HLSL(
 // Triangular noise in (-1, 1) of the pixel position (the Banding Fix's grain): the composite rounds to 8 bits again
 float TriNoise(float2 p, float phase)
 {
@@ -379,10 +323,9 @@ const ShaderCache::Id kDownPsId = AddShader("AO DownPS", "DownPS", 0);
 const ShaderCache::Id kBlurPsId = AddShader("AO BlurPS", "BlurPS", 0);
 const ShaderCache::Id kCompositePsId = AddShader("AO CompositePS", "CompositePS", 0);
 const ShaderCache::Id kDepthPsId = AddShader("AO DepthPS (Developer capture)", "DepthPS", 1);
-const ShaderCache::Id kGtaoPsId[kQualityCount] = {
-    AddShader("AO GtaoPS (Low, SLICES 4)", "GtaoPS", 1, "4"), AddShader("AO GtaoPS (Medium, SLICES 6)", "GtaoPS", 1, "6"),
-    AddShader("AO GtaoPS (High, SLICES 8)", "GtaoPS", 0, "8"), AddShader("AO GtaoPS (Ultra, SLICES 12)", "GtaoPS", 1, "12"),
-    AddShader("AO GtaoPS (Very Low, SLICES 2)", "GtaoPS", 1, "2")};
+const ShaderCache::Id kGtaoPsId[kQualityCount] = {AddShader("AO GtaoPS (Low, SLICES 4)", "GtaoPS", 1, "4"), AddShader("AO GtaoPS (Medium, SLICES 6)", "GtaoPS", 1, "6"),
+                                                  AddShader("AO GtaoPS (High, SLICES 8)", "GtaoPS", 0, "8"), AddShader("AO GtaoPS (Ultra, SLICES 12)", "GtaoPS", 1, "12"),
+                                                  AddShader("AO GtaoPS (Very Low, SLICES 2)", "GtaoPS", 1, "2")};
 static_assert(kQualitySlices[0] == 4 && kQualitySlices[1] == 6 && kQualitySlices[2] == 8 && kQualitySlices[3] == 12 && kQualitySlices[4] == 2,
               "kGtaoPsId lists the SLICES of kQualitySlices");
 
@@ -413,11 +356,8 @@ struct State {
     IDirect3DSurface9* zLevel[kLevels] = {};
     IDirect3DTexture9* tmp[kLevels] = {}; // one-level targets for levels 1.., copied into zTex
     IDirect3DSurface9* tmpSurf[kLevels] = {};
-    // aoA, aoB, nrm: the AO pass and its blur, always at the full screen size.
-    UINT aoW = 0, aoH = 0;
-    bool mrt = false;
-    IDirect3DTexture9 *aoA = nullptr, *aoB = nullptr, *colorTex = nullptr, *nrm = nullptr;
-    IDirect3DSurface9 *aoASurf = nullptr, *aoBSurf = nullptr, *colorSurf = nullptr, *nrmSurf = nullptr;
+    IDirect3DTexture9 *aoA = nullptr, *aoB = nullptr, *colorTex = nullptr;
+    IDirect3DSurface9 *aoASurf = nullptr, *aoBSurf = nullptr, *colorSurf = nullptr;
     IDirect3DPixelShader9 *psLinear = nullptr, *psDown = nullptr, *psBlur = nullptr, *psComposite = nullptr, *psDepth = nullptr;
     IDirect3DPixelShader9* psGtao[kQualityCount] = {};
     // GPU cost (timestamp queries, read a few frames later)
@@ -639,11 +579,9 @@ void ReleaseResources() {
     SafeRelease(g.aoASurf);
     SafeRelease(g.aoBSurf);
     SafeRelease(g.colorSurf);
-    SafeRelease(g.nrmSurf);
     SafeRelease(g.aoA);
     SafeRelease(g.aoB);
     SafeRelease(g.colorTex);
-    SafeRelease(g.nrm);
     for (int i = 0; i < State::kQ; i++) {
         SafeRelease(g.qDisjoint[i]);
         SafeRelease(g.qBegin[i]);
@@ -692,6 +630,7 @@ IDirect3DPixelShader9* GtaoShader(IDirect3DDevice9* dev, int q) {
     if (!g.psGtao[q]) g.status = "ERROR: the shader did not compile (see ApexRadiance_LOG.txt)";
     return g.psGtao[q];
 }
+
 bool EnsureShaders(IDirect3DDevice9* dev) {
     const bool fixedOk = g.psLinear && g.psDown && g.psBlur && g.psComposite;
     if (!fixedOk && g.fixedTried) return false; // failed once: logged, not retried every frame
@@ -745,20 +684,11 @@ bool InitResources(IDirect3DDevice9* dev) {
     for (int i = 1; ok && i < kLevels; i++)
         ok = SUCCEEDED(dev->CreateTexture(g.padW >> i, g.padH >> i, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R32F, D3DPOOL_DEFAULT, &g.tmp[i], nullptr)) && g.tmp[i] &&
              SUCCEEDED(g.tmp[i]->GetSurfaceLevel(0, &g.tmpSurf[i])) && g.tmpSurf[i];
-    auto make = [&](IDirect3DTexture9** tex, IDirect3DSurface9** surf, D3DFORMAT fmt, UINT w, UINT h) {
-        return SUCCEEDED(dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, tex, nullptr)) && *tex &&
+    auto make = [&](IDirect3DTexture9** tex, IDirect3DSurface9** surf, D3DFORMAT fmt) {
+        return SUCCEEDED(dev->CreateTexture(g.width, g.height, 1, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, tex, nullptr)) && *tex &&
                SUCCEEDED((*tex)->GetSurfaceLevel(0, surf)) && *surf;
     };
-    g.aoW = g.width;
-    g.aoH = g.height;
-    ok = ok && make(&g.aoA, &g.aoASurf, D3DFMT_G16R16F, g.aoW, g.aoH) && make(&g.aoB, &g.aoBSurf, D3DFMT_G16R16F, g.aoW, g.aoH) &&
-         make(&g.colorTex, &g.colorSurf, bd.Format, g.width, g.height);
-    // the normals for the blur come from the AO pass as a second target (same 32 bits per pixel as G16R16F); without
-    // two render targets the blur compares depth only, as before 06/10
-    D3DCAPS9 caps{};
-    g.mrt = ok && SUCCEEDED(dev->GetDeviceCaps(&caps)) && caps.NumSimultaneousRTs >= 2 && FormatSupported(dev, D3DFMT_A8R8G8B8, false) &&
-            make(&g.nrm, &g.nrmSurf, D3DFMT_A8R8G8B8, g.aoW, g.aoH);
-    if (!g.mrt) { SafeRelease(g.nrmSurf); SafeRelease(g.nrm); }
+    ok = ok && make(&g.aoA, &g.aoASurf, D3DFMT_G16R16F) && make(&g.aoB, &g.aoBSurf, D3DFMT_G16R16F) && make(&g.colorTex, &g.colorSurf, bd.Format);
     if (!ok) {
         ReleaseResources();
         g.status = "ERROR: not enough video memory for the shade textures";
@@ -773,8 +703,7 @@ bool InitResources(IDirect3DDevice9* dev) {
     }
     g.ready = true;
     g.status = "Active";
-    LOG_INFO(std::format("[AO] Resources ready ({}x{}, pyramid {}x{}, AO pass {}x{}{})", g.width, g.height, g.padW, g.padH, g.aoW, g.aoH,
-                         g.mrt ? ", normals for the blur" : ", no second render target: the blur compares depth only"));
+    LOG_INFO(std::format("[AO] Resources ready ({}x{}, pyramid {}x{})", g.width, g.height, g.padW, g.padH));
     return true;
 }
 
@@ -791,13 +720,13 @@ void DrawQuad(IDirect3DDevice9* dev, UINT w, UINT h) {
 // ---- minimal state save/restore (only what the passes touch) ----
 constexpr D3DRENDERSTATETYPE kRenderStates[] = {D3DRS_ZENABLE, D3DRS_ZWRITEENABLE, D3DRS_ALPHABLENDENABLE, D3DRS_SEPARATEALPHABLENDENABLE, D3DRS_ALPHATESTENABLE,
                                                 D3DRS_STENCILENABLE, D3DRS_CULLMODE, D3DRS_SCISSORTESTENABLE, D3DRS_FOGENABLE, D3DRS_SRGBWRITEENABLE,
-                                                D3DRS_CLIPPLANEENABLE, D3DRS_COLORWRITEENABLE, D3DRS_COLORWRITEENABLE1};
+                                                D3DRS_CLIPPLANEENABLE, D3DRS_COLORWRITEENABLE};
 constexpr D3DSAMPLERSTATETYPE kSamplerStates[] = {D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_SRGBTEXTURE,
                                                   D3DSAMP_MAXMIPLEVEL, D3DSAMP_MIPMAPLODBIAS};
 constexpr int kRS = static_cast<int>(sizeof(kRenderStates) / sizeof(kRenderStates[0]));
 constexpr int kSS = static_cast<int>(sizeof(kSamplerStates) / sizeof(kSamplerStates[0]));
-constexpr DWORD kSamplers = 8; // s5 opaque Sims, s6 transparent hair, s7 normals
-constexpr UINT kPSConsts = 15; // c0..c14
+constexpr DWORD kSamplers = 7; // s5 opaque Sims, s6 transparent hair
+constexpr UINT kPSConsts = 13; // c0..c12
 
 struct SavedState {
     IDirect3DSurface9 *rt0 = nullptr, *ds = nullptr;
@@ -812,25 +741,41 @@ struct SavedState {
     DWORD ss[kSamplers][kSS] = {};
     float psConst[kPSConsts * 4] = {};
     D3DVIEWPORT9 viewport{};
+    RECT scissor{};
 
-    void Capture(IDirect3DDevice9* dev) {
-        dev->GetRenderTarget(0, &rt0);
-        ExtraHooks::RawGetDepthStencilSurface(dev, &ds);
-        dev->GetPixelShader(&ps);
-        dev->GetVertexShader(&vs);
-        dev->GetVertexDeclaration(&decl);
-        dev->GetFVF(&fvf);
-        dev->GetStreamSource(0, &stream0, &stream0Offset, &stream0Stride);
+    IDirect3DDevice9* capturedDevice = nullptr;
+    SavedState() = default;
+    SavedState(const SavedState&) = delete;
+    SavedState& operator=(const SavedState&) = delete;
+    ~SavedState() {
+        if (capturedDevice) Restore(capturedDevice);
+        else Release();
+    }
+
+    bool Capture(IDirect3DDevice9* dev) {
+        bool ok = SUCCEEDED(dev->GetRenderTarget(0, &rt0)) && rt0;
+        const HRESULT depthResult = ExtraHooks::RawGetDepthStencilSurface(dev, &ds);
+        ok &= SUCCEEDED(depthResult) || (depthResult == D3DERR_NOTFOUND && !ds);
+        ok &= SUCCEEDED(dev->GetPixelShader(&ps));
+        ok &= SUCCEEDED(dev->GetVertexShader(&vs));
+        ok &= SUCCEEDED(dev->GetVertexDeclaration(&decl));
+        ok &= SUCCEEDED(dev->GetFVF(&fvf));
+        ok &= SUCCEEDED(dev->GetStreamSource(0, &stream0, &stream0Offset, &stream0Stride));
         for (DWORD s = 0; s < kSamplers; s++) {
-            dev->GetTexture(s, &tex[s]);
-            for (int i = 0; i < kSS; i++) dev->GetSamplerState(s, kSamplerStates[i], &ss[s][i]);
+            ok &= SUCCEEDED(dev->GetTexture(s, &tex[s]));
+            for (int i = 0; i < kSS; i++) ok &= SUCCEEDED(dev->GetSamplerState(s, kSamplerStates[i], &ss[s][i]));
         }
-        for (int i = 0; i < kRS; i++) dev->GetRenderState(kRenderStates[i], &rs[i]);
-        dev->GetPixelShaderConstantF(0, psConst, kPSConsts);
-        dev->GetViewport(&viewport);
+        for (int i = 0; i < kRS; i++) ok &= SUCCEEDED(dev->GetRenderState(kRenderStates[i], &rs[i]));
+        ok &= SUCCEEDED(dev->GetPixelShaderConstantF(0, psConst, kPSConsts));
+        ok &= SUCCEEDED(dev->GetViewport(&viewport));
+        ok &= SUCCEEDED(dev->GetScissorRect(&scissor));
+        if (!ok) { Release(); return false; }
+        capturedDevice = dev;
+        return true;
     }
 
     void Restore(IDirect3DDevice9* dev) {
+        capturedDevice = nullptr;
         dev->SetRenderTarget(0, rt0); // resets the viewport, so it goes first
         ExtraHooks::RawSetDepthStencilSurface(dev, ds);
         for (DWORD s = 0; s < kSamplers; s++) {
@@ -845,6 +790,11 @@ struct SavedState {
         else dev->SetFVF(fvf);
         dev->SetStreamSource(0, stream0, stream0Offset, stream0Stride); // DrawPrimitiveUP clears stream 0
         dev->SetViewport(&viewport);
+        dev->SetScissorRect(&scissor);
+        Release();
+    }
+
+    void Release() {
         SafeRelease(rt0);
         SafeRelease(ds);
         SafeRelease(ps);
@@ -871,13 +821,11 @@ void SetPassStates(IDirect3DDevice9* dev) {
     dev->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE);
     dev->SetRenderState(D3DRS_CLIPPLANEENABLE, 0);
     dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0xF);
-    dev->SetRenderState(D3DRS_COLORWRITEENABLE1, 0xF); // the AO pass's normals (second target)
     for (DWORD s = 0; s < kSamplers; s++) {
         const bool march = s == 2; // sZt: the march's prefiltered reads, bilinear within the nearest level
         dev->SetSamplerState(s, D3DSAMP_MINFILTER, march ? D3DTEXF_LINEAR : D3DTEXF_POINT);
         dev->SetSamplerState(s, D3DSAMP_MAGFILTER, march ? D3DTEXF_LINEAR : D3DTEXF_POINT);
-        // sZ (s1) uses the pyramid levels for the full-resolution AO march.
-        dev->SetSamplerState(s, D3DSAMP_MIPFILTER, march || s == 1 ? D3DTEXF_POINT : D3DTEXF_NONE);
+        dev->SetSamplerState(s, D3DSAMP_MIPFILTER, march ? D3DTEXF_POINT : D3DTEXF_NONE);
         dev->SetSamplerState(s, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
         dev->SetSamplerState(s, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
         dev->SetSamplerState(s, D3DSAMP_SRGBTEXTURE, 0);
@@ -910,7 +858,6 @@ void ReadTimings() {
 int NextCaptureNumber(const std::filesystem::path& dir) {
     int best = 0;
     std::error_code ec;
-    // error_code increments and a UTF-8 name (07/10, players' Runtime Error: the range-for's ++ and path::string() can throw)
     for (auto it = std::filesystem::directory_iterator(dir, ec); !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
         const auto& e = *it;
         const std::string n = ApexUtil::ToUtf8(e.path().filename().wstring());
@@ -1014,11 +961,10 @@ void CaptureFrame(IDirect3DDevice9* dev, IDirect3DTexture9* depth, float nearZ, 
     LOG_INFO("[AO] " + g.captureNote);
 }
 
-// Full-resolution horizon AO with spatial filtering and the existing scene composite.
 void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* bb, IDirect3DPixelShader9* psGtao) {
     SavedState saved;
-    saved.Capture(dev);
-    dev->StretchRect(bb, nullptr, g.colorSurf, nullptr, D3DTEXF_NONE);
+    if (!saved.Capture(dev)) return;
+    if (FAILED(dev->StretchRect(bb, nullptr, g.colorSurf, nullptr, D3DTEXF_NONE))) return;
     SetPassStates(dev);
 
     const float W = static_cast<float>(g.width), H = static_cast<float>(g.height);
@@ -1043,8 +989,6 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
     const bool map = g.p.inMapView && MapView::IsOpen();
     const float distance = std::clamp(g.p.distance, 25.0f, 1000.0f);
     const float fadeStart = distance * (kFade0 / kFade1);
-    const float aw = static_cast<float>(g.aoW), ah = static_cast<float>(g.aoH);
-
     const float c[kPSConsts][4] = {
         {tanX, tanY, H / (2.0f * tanY), kMaxRadius * H},
         {W, H, static_cast<float>(g.padW), static_cast<float>(g.padH)},
@@ -1059,9 +1003,7 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         {A, 1.0f / (nearZ * A), SceneDither::On() ? SceneDither::Strength() / 255.0f : 0.0f, SceneDither::GrainPhase()},
         {std::clamp(g.p.simStrength, 0.0f, 1.0f), WantSimMask() && simMask.cleared && !simMask.failed ? 1.0f : 0.0f,
          std::clamp(g.p.hairStrength, 0.0f, 1.0f), std::clamp(g.p.simMaxShade, 0.0f, 1.0f)},
-        {g.p.simControls && g.showSimMask ? 1.0f : 0.0f, WantSimMask() && simMask.hairCleared && !simMask.failed ? 1.0f : 0.0f, 0, 0},
-        {0, 0, 1.0f, 0.0f},
-        {0, kNormalPower, g.mrt ? 1.0f : 0.0f, 0}};
+        {g.p.simControls && g.showSimMask ? 1.0f : 0.0f, WantSimMask() && simMask.hairCleared && !simMask.failed ? 1.0f : 0.0f, 0, 0}};
     dev->SetPixelShaderConstantF(0, &c[0][0], kPSConsts);
 
     if (!kPublicBuild)
@@ -1090,33 +1032,27 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         dev->StretchRect(g.tmpSurf[i], nullptr, g.zLevel[i], nullptr, D3DTEXF_NONE);
     }
 
-    // 3. GTAO at the AO size -> aoA (R = visibility, G = 1/z), the normals -> nrm (second target)
+    // 3. GTAO at full resolution -> aoA (R = visibility, G = 1/z)
     dev->SetRenderTarget(0, g.aoASurf);
-    if (g.mrt) dev->SetRenderTarget(1, g.nrmSurf);
     dev->SetTexture(1, g.zTex);
     dev->SetTexture(2, g.zTex);
     dev->SetPixelShader(psGtao);
-    DrawQuad(dev, g.aoW, g.aoH);
-    if (g.mrt) dev->SetRenderTarget(1, nullptr);
+    DrawQuad(dev, g.width, g.height);
     dev->SetTexture(2, nullptr);
 
-    // 4. filter: box H, box V (cancels the 4x4 interleave), tent H, tent V; a -> b -> a -> b -> a (taps on the same
-    // surface: depth and, with the normals, direction)
+    // 4. filter: box H, box V (cancels the 4x4 interleave), tent H, tent V; a -> b -> a -> b -> a
     dev->SetPixelShader(g.psBlur);
-    dev->SetTexture(7, g.nrm);
     for (int pass = 0; pass < 4; pass++) {
-        const float dir[4] = {pass & 1 ? 0.0f : 1.0f / aw, pass & 1 ? 1.0f / ah : 0.0f, pass < 2 ? 0.0f : 1.0f, 0};
+        const float dir[4] = {pass & 1 ? 0.0f : 1.0f / W, pass & 1 ? 1.0f / H : 0.0f, pass < 2 ? 0.0f : 1.0f, 0};
         dev->SetPixelShaderConstantF(6, dir, 1);
         dev->SetRenderTarget(0, pass & 1 ? g.aoASurf : g.aoBSurf);
         dev->SetTexture(3, pass & 1 ? g.aoB : g.aoA);
-        DrawQuad(dev, g.aoW, g.aoH);
+        DrawQuad(dev, g.width, g.height);
     }
-    dev->SetTexture(7, nullptr);
-    IDirect3DTexture9* shade = g.aoA;
 
     // 5. composite over the scene copy
     dev->SetRenderTarget(0, bb);
-    dev->SetTexture(3, shade);
+    dev->SetTexture(3, g.aoA);
     dev->SetTexture(4, g.colorTex);
     dev->SetTexture(0, depth);
     dev->SetTexture(5, simMask.texture);
@@ -1147,14 +1083,13 @@ void AoEffect(IDirect3DDevice9* dev) {
     if (FAILED(dev->GetRenderTarget(0, &bb)) || !bb) return;
     D3DSURFACE_DESC bd{};
     bb->GetDesc(&bd);
-    // The back buffer changed without a Reset: rebuild the full-resolution targets next frame.
-    if (bd.Width != g.width || bd.Height != g.height) {
+    if (bd.Width != g.width || bd.Height != g.height) { // the back buffer changed without a Reset: rebuild next frame
         bb->Release();
         ReleaseResources();
         g.retryCountdown = 0;
         return;
     }
-    const int key = g.p.quality; // GPU cost per setup
+    const int key = g.p.quality;
     if (key != g.qKey) {
         g.qKey = key;
         g.gpuMs = -1.0f;
@@ -1227,6 +1162,12 @@ void OnPreReset(IDirect3DDevice9*) {
 
 void OnPostReset(IDirect3DDevice9*) {
     if (g.active) g.retryCountdown = 0;
+}
+
+void RestartEffects(IDirect3DDevice9* dev) {
+    OnPreReset(dev);
+    ReleaseShaders();
+    OnPostReset(dev);
 }
 
 } // namespace
@@ -1314,6 +1255,7 @@ class AmbientOcclusionPatch : public ApexPatch {
         }, D3D9Hooks::Priority::First);
         RenderCallbacks::Add(RenderCallbacks::preReset, OnPreReset);
         RenderCallbacks::Add(RenderCallbacks::postReset, OnPostReset);
+        RenderCallbacks::Add(RenderCallbacks::restartEffects, RestartEffects);
         PostScene::Add(PostScene::kAmbientOcclusion, AoEffect);
         g.active = true;
         g.retryCountdown = 0;
@@ -1331,6 +1273,7 @@ class AmbientOcclusionPatch : public ApexPatch {
         D3D9Hooks::UnregisterAll(kHookName);
         RenderCallbacks::Remove(RenderCallbacks::preReset, OnPreReset);
         RenderCallbacks::Remove(RenderCallbacks::postReset, OnPostReset);
+        RenderCallbacks::Remove(RenderCallbacks::restartEffects, RestartEffects);
         ReleaseResources();
         ReleaseShaders();
         PostScene::WantCamera(false);
@@ -1399,8 +1342,8 @@ class AmbientOcclusionPatch : public ApexPatch {
     // qualities, shade preview), 3 = 30/09 evening (grain in the composite), 4 = 30/09 night (the map view), 5 = 30/09 night
     // (the composite grain follows the Banding Fix, only where the shade changed the pixel); 6 = distance and Sim receivers;
     // 7 = independent hair, transparency coverage and a separate Sim card; 8 = Sim Occlusion defaults off;
-    // 13 = temporal accumulation and visibility-bitmask options removed; legacy keys are ignored.
-    static constexpr int kSettingsRevision = 13;
+    // 9 = user-approved default configuration for scene and Sim controls.
+    static constexpr int kSettingsRevision = 9;
     static constexpr const char* kRevisionKey = "revisao";
     static int Revision(const toml::table& table) { return static_cast<int>(table[kRevisionKey].value<int64_t>().value_or(1)); }
     // Start from current defaults, then overlay every value that was explicitly saved.
@@ -1432,8 +1375,6 @@ class AmbientOcclusionPatch : public ApexPatch {
                             simMask.lastDraws, simMask.refused, simMask.copies.size(), simMask.failed ? " (unavailable)" : "");
         if (g.ready) {
             if (g.gpuMs >= 0) ImGui::TextDisabled("GPU cost: %.2f ms per frame (%d slices)", g.gpuMs, kQualitySlices[std::clamp(g.p.quality, 0, kQualityCount - 1)]);
-            ImGui::TextDisabled("AO pass %ux%u | blur normals %s", g.aoW, g.aoH,
-                                g.mrt ? "yes" : "no (one render target)");
             ImGui::TextDisabled("Frames shaded: %u  |  screen %ux%u, depth pyramid %ux%u (%d levels)", g.frames, g.width, g.height, g.padW, g.padH, kLevels);
             ImGui::TextDisabled("Camera: near %.3f m, A %.6f, tan %.4f x %.4f (%s)", g.lastNear, g.lastA, g.lastTanX, g.lastTanY,
                                 g.lastCamera ? "read this frame" : "fallback");
@@ -1452,9 +1393,8 @@ APEX_REGISTER_FEATURE(AmbientOcclusionPatch,
                        .enabledByDefault = true,
                        .supportedVersions = VERSION_ALL,
                        .technicalDetails = {"Reads the INTZ scene depth shared by the Depth Blur module (kept running even with Depth Blur off).",
-                                            "GTAO at full resolution: 2 to 12 slices (quality) x 4 geometric "
-                                            "steps per side over a 9-level 1/z pyramid read bilinearly within the nearest level, contact and large horizons "
-                                            "4x4 Bayer interleave "
-                                            "cancelled by a 4x4 box, then a tent, both on the same surface by depth and normal.",
+                                            "GTAO at full resolution, deterministic: 2 to 12 slices (quality) x 4 geometric steps per side over a 9-level "
+                                            "1/z pyramid read bilinearly within the nearest level, contact and large horizons, 4x4 Bayer interleave "
+                                            "cancelled by a 4x4 box, then a tent.",
                                             "Composite: dead zone, Jimenez multi-bounce per channel, lamp-lit pixels keep part of their light.",
                                             "Runs first in the PostScene chain (before edge smoothing and Depth Blur); saves/restores only the states it touches."}})

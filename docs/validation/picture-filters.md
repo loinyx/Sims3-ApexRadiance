@@ -16,7 +16,7 @@ The feature is described in [features/picture-filters.md](../features/picture-fi
 |---|---|---|---|
 | [`tools/post_scene_test`](../../tools/post_scene_test/README.md) | Post-scene chain order and the EndScene fallback before Picture's scene copy | See the harness README | Hidden native D3D9 device |
 
-No harness renders the Picture shader. The pass check (constants and shader read back after each settings change) runs
+The CUBE fixture compiles the production Picture shader and checks LUT parsing and native pixel sampling; it does not validate the full image in TS3. The pass check (constants and shader read back after each settings change) runs
 in game and writes to the log.
 
 ## Latest results
@@ -90,3 +90,7 @@ in game and writes to the log.
 - In-game testing of the complete release remains open for shortcut assignment/removal, typing and game-command
   overlap, stacking, existing profiles, multiple resolutions and DXVK. Recorded copy-state evidence confirms the
   boundary defect; it does not establish universal final-image equality.
+
+## 2.12.0 release validation
+
+Production CUBE and shader fixture: 9,322 checks passed on 2026-10-09 against the release integration. Numeric import fixture: 25 checks passed for nonfinite and oversized values. The separate shader compile retains X3571 at a guarded positive-luminance power expression; no formula was changed. Final scene parity across all graphics backends remains open. See [graphics recovery validation](graphics-recovery.md) for state handling and reset evidence.

@@ -18,4 +18,4 @@ Path(sys.argv[1]).with_name('startup_gate_under_test.inc').write_text(source[gat
 
 # Real profile picker for the multi-frame control sizing/style-stack regression fixture.
 Path(sys.argv[1]).with_name("profile_picker_under_test.inc").write_text(
-    source[source.index("void ProfileIconPicker("):source.index("void ProfilesTab()")], encoding="utf-8")
+    source[source.index("void ProfileIconPicker("):source.index("void StartPresetDialog(")], encoding="utf-8")

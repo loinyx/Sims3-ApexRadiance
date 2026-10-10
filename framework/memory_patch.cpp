@@ -109,6 +109,13 @@ bool WriteBytes(uintptr_t address, const std::vector<BYTE>& bytes, std::vector<P
             return false;
         }
     }
+    // Allocate rollback storage before changing process memory.
+    if (undo && undo->size() == undo->capacity()) {
+        const size_t capacity = undo->capacity();
+        const size_t next = capacity == 0 ? 1 : (capacity <= undo->max_size() / 2 ? capacity * 2 : undo->max_size());
+        if (undo->size() == undo->max_size()) return false;
+        undo->reserve(next);
+    }
     if (!ProtectedWrite(address, bytes.data(), bytes.size())) {
         LOG_ERROR(std::format("[MemPatch] {:#010x}: write failed", address));
         return false;

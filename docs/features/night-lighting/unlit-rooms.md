@@ -10,7 +10,7 @@ tone. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released (present since 2.1.0, the first version in this repository). The 10 to 80% Brightness range, the 0% Blue tint default, the structure-change recovery and the *S3SS compatibility* correction: Released in 2.6.0 |
+| Availability | Released (present since 2.1.0, the first version in this repository). The 10 to 80% Brightness range, the 0% Blue tint default, the structure-change recovery: Released in 2.6.0 |
 | Default | On; Brightness 35%; Blue tint 0% |
 | Menu | Lighting > Buildings > Rooms at Night |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -49,7 +49,6 @@ walls and floors on the next frame, without a new light solve where possible.
 | Brightness | `luzQueSobraNosComodos` | float | 35% | 10 to 80% | Share of the game's unlit-room light kept on walls, floors and furniture |
 | Blue tint | `azulNosComodos` | float | 0% | 0 to 100% | 0% is neutral grey of the same luminance, 100% the game's blue, on walls and furniture |
 | Refresh the lighting (button, with its shortcut chip) | (not saved) | action | | | Relights terrain, lot stories, every room of every loaded lot (basements too) and object rigs now and 2 s later (`NightLighting::RefreshAll`) |
-| S3SS compatibility > Back up and correct (shown only while official Sims3SettingsSetter is loaded) | (not saved) | action | | | Backs up `S3SS.toml` and removes only its saved `BradyBunchBlue RGB` override (see *Compatibility*) |
 
 Values outside 10 to 80% saved by older versions or profiles are clamped on load; the keys are unchanged. Reset sets the
 defaults above. All settings apply live (`UnlitRooms::Set` every frame). Any Night Lighting setting change also triggers
@@ -61,23 +60,8 @@ the automatic *Refresh the lighting* 1 s after the last change.
   whatever S3SS set applies again. If S3SS patched the same six reads after Apex started, Apex's patch fails (the bytes
   are not what Apex saw) and the log says so. Apex reads the game's colours through the original pointers every 2 s, so a
   colour another mod writes there becomes the base the controls scale.
-- **S3SS saved room-light colour.** S3SS can save `[settings.'BradyBunchBlue RGB']` independently of
-  `[patches.BradyBunchBegone].enabled`; S3SS applies saved settings when it registers them, so turning *Brady Bunch
-  BEGONE* off does not restore the blue. A dark saved grey such as (0.01, 0.01, 0.01) then becomes the base, and the
-  controls cannot brighten past it or restore blue. The *Back up and correct* action:
-  - runs only when the player presses it, and only while official S3SS is loaded; enabling Rooms at Night never edits S3SS;
-  - writes a content-specific backup `S3SS.toml.before-room-ambient-fix.<FNV-1a 64 hash>.bak` in the Apex Radiance folder
-    (an existing backup is reused only if identical);
-  - removes only that saved entry when it holds exactly three values in 0 to 1; invalid or unsupported values are left
-    alone. The ordinary standalone section is cut out with comments and layout kept; other layouts are rewritten with a
-    semantic TOML formatter, and the result is checked to parse to the same document minus that entry;
-  - aborts if the file changed after it was read, and writes atomically;
-  - after a successful save, while Rooms at Night is on, uses the standard blue (0.15, 0.15, 0.30) as the base of the
-    second colour family whenever the game's current colour exactly matches the removed override, for the rest of the
-    session. The first family's legitimate grey, the alpha and the native globals are not changed. S3SS uses its default
-    colour after the game restarts.
-  The card reports each outcome: S3SS not loaded, config unreadable, no supported override, backup failed, config changed
-  during correction, write failed, or saved.
+- **S3SS saved room-light colour.** Apex reads the saved override without modifying the file.
+  When the second colour family matches a supported saved override, the controls use the standard blue base.
 - **Light between stories** ([level-light-share.md](level-light-share.md)): a room whose own lamps are off but which
   takes lamps through an opening has lamps in its list, so it is lit by them and topped up by this colour. The atrium
   ambient merge works on the colour produced here, and slider changes move whole atrium groups together.

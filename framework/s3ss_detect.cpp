@@ -13,6 +13,7 @@
 #include <array>
 #include <cstring>
 #include <format>
+#include <filesystem>
 #include <mutex>
 #include <optional>
 #include <vector>
@@ -243,46 +244,6 @@ std::optional<std::array<float, 3>> SavedRoomAmbientOverride(bool fresh) {
     if (!ApexUtil::ReadFileBytes(ApexPaths::S3SSConfigFile(), text)) return saved;
     if (const auto correction = S3SSAmbientPolicy::Prepare(text)) saved = correction->rgb;
     return saved;
-}
-
-RoomAmbientCorrection CorrectRoomAmbientOverride() {
-    RoomAmbientCorrection result;
-    if (!Scan().s3ssLoaded) return result;
-    result.status = RoomAmbientCorrectionStatus::ConfigUnavailable;
-    const auto path = ApexPaths::S3SSConfigFile();
-    std::string original;
-    if (!ApexUtil::ReadFileBytes(path, original)) return result;
-    const auto correction = S3SSAmbientPolicy::Prepare(original);
-    if (!correction) { result.status = RoomAmbientCorrectionStatus::NoOverride; return result; }
-    result.found = true;
-    result.rgb = correction->rgb;
-    result.status = RoomAmbientCorrectionStatus::BackupFailed;
-    if (!ApexPaths::EnsureApexDirectory()) return result;
-    // Content-specific, immutable backup. An existing backup must match before it is reused.
-    uint64_t hash = 14695981039346656037ull;
-    for (unsigned char byte : original) { hash ^= byte; hash *= 1099511628211ull; }
-    const auto backup = ApexPaths::ApexDirectory() + L"\\S3SS.toml.before-room-ambient-fix." + std::to_wstring(hash) + L".bak";
-    if (!CopyFileW(path.c_str(), backup.c_str(), TRUE)) {
-        std::string existing;
-        if (!ApexUtil::ReadFileBytes(backup, existing) || existing != original) {
-            LOG_WARNING("[UnlitRooms] Could not back up S3SS room-ambient override; configuration unchanged");
-            return result;
-        }
-    }
-    std::string current, error;
-    result.status = RoomAmbientCorrectionStatus::ConfigChanged;
-    if (!ApexUtil::ReadFileBytes(path, current) || current != original) {
-        LOG_WARNING("[UnlitRooms] S3SS configuration changed during correction; configuration unchanged");
-        return result;
-    }
-    result.status = RoomAmbientCorrectionStatus::WriteFailed;
-    result.saved = ApexUtil::WriteFileAtomic(path, correction->text, &error);
-    if (result.saved) {
-        result.status = RoomAmbientCorrectionStatus::Saved;
-        LOG_INFO("[UnlitRooms] Removed S3SS saved BradyBunchBlue RGB override; original backed up in Apex Radiance folder");
-    }
-    else LOG_WARNING("[UnlitRooms] Could not remove S3SS saved room-ambient override: " + error);
-    return result;
 }
 
 // The menu's line (Settings > Compatibility > Details): SummaryLocked's text in the menu language (the log keeps the

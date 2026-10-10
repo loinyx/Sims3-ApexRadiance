@@ -17,9 +17,11 @@
 #define NOMINMAX
 #endif
 #include "picture.h"
+#include "picture_output.h"
 #include "cube_lut.h"
 #include <filesystem>
 #include <fstream>
+#include <cfloat>
 #include "hotkeys.h"
 #include "apex_config.h"
 #include "apex_log.h"
@@ -916,6 +918,8 @@ void CopyDepth(IDirect3DDevice9* dev) {
     dev->GetFVF(&fvf);
     dev->GetTexture(0, &tex0);
     dev->GetStreamSource(0, &stream, &streamOffset, &streamStride);
+    RECT oldScissor{};
+    dev->GetScissorRect(&oldScissor);
     dev->GetViewport(&vp);
     for (size_t i = 0; i < std::size(kStates); i++) dev->GetRenderState(kStates[i], &rs[i]);
     for (size_t i = 0; i < std::size(kSamp); i++) dev->GetSamplerState(0, kSamp[i], &ss[i]);
@@ -945,6 +949,7 @@ void CopyDepth(IDirect3DDevice9* dev) {
     for (size_t i = 0; i < std::size(kStates); i++) dev->SetRenderState(kStates[i], rs[i]);
     for (size_t i = 0; i < std::size(kSamp); i++) dev->SetSamplerState(0, kSamp[i], ss[i]);
     dev->SetViewport(&vp);
+    dev->SetScissorRect(&oldScissor);
     SafeRelease(rt);
     SafeRelease(ds);
     SafeRelease(ps);
@@ -988,6 +993,9 @@ void OnGameDraw(D3D9Hooks::DeviceContext& ctx, bool isStripOfTwo) {
     const int run = gpu.runDraws;
     gpu.runDraws = 0;
     if (gpu.sceneDraws < kMinSceneDraws) return;
+    // After the copy there is nothing to do for ordinary UI draws. Only query
+    // colour writes for a possible boundary or a pending post-strip copy.
+    if (!gpu.lastWasScene && !gpu.copyAfterStrip) return;
     if (gpu.lastWasScene) { // depth-tested -> depth-off: possibly the end of the scene
         gpu.lastWasScene = false;
         // After the first copy, a short depth-tested run is part of the UI, not more scene: the Sim portrait of the pie
@@ -1456,6 +1464,19 @@ void Picture::ReleaseResources() {
 // A Reset replaces the back buffer and sets render target 0 to it without a SetRenderTarget call: the remembered render
 // target must be read again (it was: Picture on from the start stayed on the loading screen's back buffer after the game's
 // Reset, never saw the scene on the back buffer, and changed nothing)
+void Picture::RestartGraphics() {
+    ReleaseResources();
+    SafeRelease(gpu.ps);
+    SafeRelease(gpu.adaptPs);
+    SafeRelease(gpu.depthPs);
+    const bool hooks = gpu.hooks;
+    gpu = Gpu{};
+    gpu.hooks = hooks;
+    gpu.frameReady = false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_resourceError.clear();
+}
+
 void Picture::BeforeReset() {
     ReleaseResources();
     gpu.curRT0 = nullptr;
@@ -1484,10 +1505,10 @@ bool Picture::InitResources(IDirect3DDevice9* dev) {
     };
     bool ok = make(bd.Width, bd.Height, &gpu.frameTex, &gpu.frameSurf) && make(bd.Width, bd.Height, &gpu.sceneTex, &gpu.sceneSurf);
     UINT cw = bd.Width, ch = bd.Height;
-    for (int i = 0; ok && i < Gpu::kChain; i++) {
+    // Keep the same dimensions in shader constants even before an effect needs the copies.
+    for (int i = 0; i < Gpu::kChain; i++) {
         cw = std::max(1u, (cw + 1) / 2);
         ch = std::max(1u, (ch + 1) / 2);
-        ok = make(cw, ch, &gpu.chainTex[i], &gpu.chainSurf[i]);
     }
     if (!ok) {
         ReleaseResources();
@@ -1524,6 +1545,35 @@ bool Picture::InitResources(IDirect3DDevice9* dev) {
     return true;
 }
 
+bool Picture::EnsureReducedScene(IDirect3DDevice9* dev) {
+    if (gpu.chainTex[Gpu::kChain - 1]) return true;
+    IDirect3DTexture9* textures[Gpu::kChain] = {};
+    IDirect3DSurface9* surfaces[Gpu::kChain] = {};
+    UINT w = gpu.width, h = gpu.height;
+    HRESULT hr = S_OK;
+    for (int i = 0; i < Gpu::kChain; i++) {
+        w = std::max(1u, (w + 1) / 2);
+        h = std::max(1u, (h + 1) / 2);
+        hr = dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, gpu.format, D3DPOOL_DEFAULT, &textures[i], nullptr);
+        if (SUCCEEDED(hr) && textures[i]) hr = textures[i]->GetSurfaceLevel(0, &surfaces[i]);
+        if (FAILED(hr) || !textures[i] || !surfaces[i]) {
+            for (int j = 0; j < Gpu::kChain; j++) {
+                SafeRelease(surfaces[j]);
+                SafeRelease(textures[j]);
+            }
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_resourceError = std::format("its reduced scene copies could not be created (0x{:08X})", static_cast<unsigned>(hr));
+            return false;
+        }
+    }
+    for (int i = 0; i < Gpu::kChain; i++) {
+        gpu.chainTex[i] = textures[i];
+        gpu.chainSurf[i] = surfaces[i];
+    }
+    // Retain the copies until Reset, avoiding allocation churn when toggling effects.
+    return true;
+}
+
 // ---- end of frame ----
 
 // Smooth gradients (deband) is on the Banding Fix page (a Color tab from 30/09, its own page since 06/10) and follows the Banding Fix's switch, not
@@ -1542,7 +1592,7 @@ static PictureParams Effective(const PictureParams& q) {
         std::copy(std::begin(neutral.mixer),std::end(neutral.mixer),std::begin(e.mixer));
     }
     if (!q.detailEnabled) { e.clarity=neutral.clarity; e.vignette=neutral.vignette; }
-    if (!q.filtersEnabled) for (const auto& f : kToggleFilters) e.*f.field=false;
+    if (!q.filtersEnabled) for (const auto& f : kToggleFilters) if(f.field!=&PictureParams::lut) e.*f.field=false;
     e.deband = SceneDither::On() ? q.deband : 0.0f;
     e.enabled = q.enabled || e.deband > 0.001f;
     if (!q.enabled) e.compare = false;
@@ -1651,6 +1701,17 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
         bb->Release();
         return;
     }
+    const auto needsCopy = [](bool enabled, float amount) { return enabled && std::fabs(amount) > 0.001f; };
+    const bool needsReducedScene = std::fabs(q.clarity) > 0.001f || needsCopy(q.glow, q.glowAmount) ||
+        needsCopy(q.halation, q.halationAmount) || needsCopy(q.dreamy, q.dreamyAmount) ||
+        needsCopy(q.tiltShift, q.tiltAmount) || needsCopy(q.fakeHdr, q.hdrAmount) ||
+        (needsCopy(q.autoExposure, q.autoAmount) && gpu.adaptTex[0] && gpu.adaptTex[1]);
+    if (needsReducedScene && !EnsureReducedScene(dev)) {
+        m_skip.store(kSkipResources);
+        bb->Release();
+        return;
+    }
+
     if (g_atBoundary) g_boundaryDone = true;
     m_skip.store(kSkipNone);
     m_lastApplied.store(now);
@@ -1743,6 +1804,7 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
     DWORD oldFvf = 0;
     float oldConst[kConsts * 4];
     D3DVIEWPORT9 oldVp{};
+    RECT oldScissor{};
     for (size_t i = 0; i < std::size(kRS); i++) dev->GetRenderState(kRS[i], &rs[i]);
     for (DWORD s = 0; s < kSamplers; s++) {
         dev->GetTexture(s, &oldTex[s]);
@@ -1755,6 +1817,7 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
     dev->GetStreamSource(0, &oldStream, &oldOffset, &oldStride);
     dev->GetPixelShaderConstantF(0, oldConst, kConsts);
     dev->GetViewport(&oldVp);
+    dev->GetScissorRect(&oldScissor);
 
     const D3DVIEWPORT9 vp{0, 0, gpu.width, gpu.height, 0.0f, 1.0f};
     dev->SetViewport(&vp);
@@ -1955,7 +2018,8 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
     }
     const float x1 = W - 0.5f, y1 = H - 0.5f;
     const QuadVertex v[4] = {{-0.5f, -0.5f, 0, 1, 0, 0}, {x1, -0.5f, 0, 1, 1, 0}, {-0.5f, y1, 0, 1, 0, 1}, {x1, y1, 0, 1, 1, 1}};
-    const HRESULT drawResult=dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(QuadVertex));
+    const HRESULT maskResult = PictureOutput::SetSceneWriteMask(dev);
+    const HRESULT drawResult = FAILED(maskResult) ? maskResult : dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(QuadVertex));
     if (g_atBoundary && SUCCEEDED(drawResult)) m_lastSceneBoundary.store(now);
 
     for (size_t i = 0; i < std::size(kRS); i++) dev->SetRenderState(kRS[i], rs[i]);
@@ -1971,6 +2035,7 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
     else dev->SetFVF(oldFvf);
     dev->SetStreamSource(0, oldStream, oldOffset, oldStride); // DrawPrimitiveUP clears stream 0
     dev->SetViewport(&oldVp);
+    dev->SetScissorRect(&oldScissor);
     SafeRelease(oldPs);
     SafeRelease(oldVs);
     SafeRelease(oldDecl);
@@ -2125,7 +2190,10 @@ bool Picture::ParamsFromToml(const toml::table& qolTable, PictureParams& out) {
     if (!pic) return false;
     const toml::table& t = *pic;
     PictureParams q;
-    auto f = [&](const char* key, float& v) { v = static_cast<float>(t[key].value_or(static_cast<double>(v))); };
+    const auto finiteFloat = [](double value, float fallback) {
+        return std::isfinite(value) && value >= -FLT_MAX && value <= FLT_MAX ? static_cast<float>(value) : fallback;
+    };
+    auto f = [&](const char* key, float& v) { v = finiteFloat(t[key].value_or(static_cast<double>(v)), v); };
     q.enabled = t["enabled"].value_or(false);
     q.basicEnabled=t["basic_enabled"].value_or(true); q.tonesEnabled=t["tones_enabled"].value_or(true);
     q.colorEnabled=t["color_enabled"].value_or(true); q.detailEnabled=t["detail_enabled"].value_or(true); q.filtersEnabled=t["filters_enabled"].value_or(true);
@@ -2156,15 +2224,15 @@ bool Picture::ParamsFromToml(const toml::table& qolTable, PictureParams& out) {
     f("vignette", q.vignette);
     f("vignette_size", q.vignetteSize);
     if (auto a = t["mixer"].as_array())
-        for (size_t i = 0; i < 6 && i < a->size(); i++) q.mixer[i] = static_cast<float>((*a)[i].value_or(1.0));
+        for (size_t i = 0; i < 6 && i < a->size(); i++) q.mixer[i] = finiteFloat((*a)[i].value_or(1.0), q.mixer[i]);
     if (const toml::table* ft = t["filters"].as_table()) {
         const toml::table& x = *ft;
         for (const auto& k : kFilterBools) q.*k.field = x[k.key].value_or(q.*k.field);
         if (auto s = x["lut_file"].value<std::string>()) q.lutFile = *s;
-        for (const auto& k : kFilterFloats) q.*k.field = static_cast<float>(x[k.key].value_or(static_cast<double>(q.*k.field)));
+        for (const auto& k : kFilterFloats) q.*k.field = finiteFloat(x[k.key].value_or(static_cast<double>(q.*k.field)), q.*k.field);
         for (const auto& k : kFilterArrays)
             if (auto a = x[k.key].as_array())
-                for (size_t i = 0; i < 3 && i < a->size(); i++) (q.*k.field)[i] = static_cast<float>((*a)[i].value_or(static_cast<double>((q.*k.field)[i])));
+                for (size_t i = 0; i < 3 && i < a->size(); i++) (q.*k.field)[i] = finiteFloat((*a)[i].value_or(static_cast<double>((q.*k.field)[i])), (q.*k.field)[i]);
         // Emphasize's zone depth was in metres in the first test builds (now a fraction of the focus distance, 0 .. 2):
         // an old value past the slider's range goes back to the default
         if (!(q.emphWidth >= 0.0f && q.emphWidth <= 2.0f)) q.emphWidth = PictureParams{}.emphWidth;
@@ -2298,11 +2366,12 @@ void Picture::RenderUI(int tab) {
 
 // Color > Filters: one card per filter, its switch in the header and its own controls under it while it is on (fine
 // tuning under Advanced), in four sections. Cards stay visible, greyed out, while Picture is off.
-void Picture::RenderFiltersUI() {
+void Picture::RenderFiltersUI(bool lutOnly) {
     using ApexUi::IconId;
     static const PictureParams kDef{};
     PictureParams q = GetParams();
     bool changed = false, save = false;
+    const bool groupEnabled=lutOnly || q.filtersEnabled;
     auto slide = [&](const char* label, float* v, float lo, float hi, const ApexUi::SliderOptions& o) {
         if (ApexUi::Slider(label, v, lo, hi, o)) changed = true;
         save |= ApexUi::SliderCommitted();
@@ -2344,16 +2413,17 @@ void Picture::RenderFiltersUI() {
     bool familyOpen=false, familyVisible=false;
     int requestEditor=-1;
     auto family=[&](const char* label) {
+        if(lutOnly) {if(!familyOpen) {familyVisible=ApexUi::BeginCard("##Luts");familyOpen=true;} return;}
         if(familyOpen) ApexUi::EndCard();
         ApexUi::SectionLabel(label);
         familyVisible=ApexUi::BeginCard(label); familyOpen=true;
     };
     auto card = [&](const char* id, IconId icon, const char* name, const char* what, bool* on, auto&& controls) {
-        if(!familyVisible) return;
+        if(!familyVisible || (lutOnly != (on==&q.lut))) return;
         ImGui::PushID(id);
         if(ApexUi::FilterActive()) {
-            if(ApexUi::CardHeader(icon,name,what,nullptr,on,q.enabled && q.filtersEnabled)) changed=save=true;
-            ImGui::BeginDisabled(!q.enabled || !q.filtersEnabled || !*on);
+            if(ApexUi::CardHeader(icon,name,what,nullptr,on,q.enabled && groupEnabled)) changed=save=true;
+            ImGui::BeginDisabled(!q.enabled || !groupEnabled || !*on);
             controls(); ImGui::EndDisabled(); ImGui::PopID(); return;
         }
         int index=-1;
@@ -2377,7 +2447,7 @@ void Picture::RenderFiltersUI() {
         const ImVec2 rowStart=ImGui::GetCursorScreenPos();
         const bool visible=ApexUi::BeginControlRow(name,what,controlsW,icon,30.0f*u);
         if(visible) {
-            bool expanded=ImGui::GetStateStorage()->GetBool(ImGui::GetID("Expanded"),false);
+            bool expanded=ImGui::GetStateStorage()->GetBool(ImGui::GetID("Expanded"),lutOnly);
             const float centerY=ImGui::GetCursorScreenPos().y+15.0f*u;
             auto center=[&](float h){ImGui::SetCursorPosY(centerY-ImGui::GetWindowPos().y+ImGui::GetScrollY()-h*0.5f);};
             if(!key.empty()) {
@@ -2393,22 +2463,22 @@ void Picture::RenderFiltersUI() {
             if(ApexUi::IconButton("##Shortcuts",IconId::Ellipsis,"Filter shortcuts")) ImGui::OpenPopup("Filter actions");
             ImGui::SameLine(0,gap);
             center(switchSize.y);
-            ImGui::BeginDisabled(!q.enabled || !q.filtersEnabled);
+            ImGui::BeginDisabled(!q.enabled || !groupEnabled);
             if(ApexUi::ToggleSwitch("##On",on)) {changed=save=true;ApexUi::ReportChange(name);}
             ImGui::EndDisabled();
             ApexUi::EndControlRow();
             const ImVec2 rowEnd(rowStart.x+rowWidth,ImGui::GetCursorScreenPos().y);
             if(ImGui::IsMouseHoveringRect(rowStart,rowEnd) && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("Filter actions");
-            if(ImGui::BeginPopup("Filter actions")) {
-                if(ImGui::MenuItem(I18n::Tr(key.empty()?"Assign shortcut":"Change shortcut"))) {
+            if(ApexUi::BeginActionMenu("Filter actions",I18n::Tr(name))) {
+                if(ApexUi::ActionMenuItem(key.empty()?"Assign shortcut":"Change shortcut",IconId::Keyboard)) {
                     requestEditor=index; g_filterRecordingName=I18n::Tr(name);
                 }
-                if(ImGui::MenuItem(I18n::Tr("Remove shortcut"),nullptr,false,!key.empty())) {q.filterShortcuts[index]={};changed=save=true;}
-                ImGui::EndPopup();
+                if(ApexUi::ActionMenuItem("Remove shortcut",IconId::Trash2,!key.empty())) {q.filterShortcuts[index]={};changed=save=true;}
+                ApexUi::EndActionMenu();
             }
             if(expanded) {
                 ApexUi::Gap(ApexUi::kSpace3);
-                ImGui::BeginDisabled(!q.enabled || !q.filtersEnabled || !*on);
+                ImGui::BeginDisabled(!q.enabled || !groupEnabled || !*on);
                 controls();
                 ImGui::EndDisabled();
             }
@@ -2555,7 +2625,7 @@ void Picture::RenderFiltersUI() {
         }
         resetFilter(&P::levelsBlack, &P::levelsWhite, &P::levelsGamma);
     });
-    card("Lut", IconId::Layers, "LUT", "A ready-made color look from a LUT file, like Lightroom or ReShade LUT packs", &q.lut, [&] {
+    card("Lut", IconId::Layers, "LUT", "Applies a color treatment defined in a file", &q.lut, [&] {
         static std::vector<std::string> files;
         static double listedAt = -10.0;
         if (ImGui::GetTime() - listedAt > 2.0) { // the folder is read at most every 2 s
@@ -2566,17 +2636,19 @@ void Picture::RenderFiltersUI() {
             ApexUi::IconNote(IconId::Info, "Put LUT files in the LUTs folder: 3D .cube files (up to 65) or PNG strips");
         } else {
             std::vector<const char*> names;
-            int cur = 0;
+
             for (size_t i = 0; i < files.size(); i++) {
                 names.push_back(files[i].c_str());
-                if (files[i] == q.lutFile) cur = static_cast<int>(i);
+
             }
-            if (ApexUi::SelectRow("File", "The LUT that gives the look", "LutFile", &cur, names.data(), static_cast<int>(names.size()))) {
-                q.lutFile = files[static_cast<size_t>(cur)];
-                changed = save = true;
-            } else if (std::find(files.begin(), files.end(), q.lutFile) == files.end()) { // none chosen yet, or the file is gone
-                q.lutFile = files.front();
-                changed = save = true;
+            const bool missing=std::find(files.begin(),files.end(),q.lutFile)==files.end();
+            if(missing) names.insert(names.begin(),q.lutFile.empty()?I18n::Tr("Choose file"):q.lutFile.c_str());
+            int selected=missing?0:int(std::find(files.begin(),files.end(),q.lutFile)-files.begin());
+            {
+                const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+                if(ApexUi::SelectRow("File","The LUT that gives the look","##LutFile",&selected,names.data(),int(names.size()),220.0f,ApexUi::kNoDefaultIndex,true)) {
+                    if(!missing || selected>0) {q.lutFile=files[size_t(selected)-(missing?1:0)];changed=save=true;}
+                }
             }
             percent("Amount", &q.lutAmount, 0.0f, 1.0f, "How much of the look is mixed in", kDef.lutAmount);
             resetFilter(&P::lutAmount);
@@ -2585,7 +2657,11 @@ void Picture::RenderFiltersUI() {
                 std::lock_guard<std::mutex> lock(g_lutMutex);
                 status = g_lutStatus;
             }
-            if (!status.empty()) ApexUi::IconNote(IconId::Info, status.c_str());
+            if(ApexUi::BeginAdvanced("LutHelp","About LUTs")) {
+                ApexUi::MutedText("A LUT remaps colors to create a particular look. Put a 3D CUBE or PNG LUT in the LUTs folder, choose it here, then adjust Amount.");
+                if (!status.empty()) ApexUi::IconNote(IconId::Info, status.c_str());
+                ApexUi::EndAdvanced();
+            }
         }
         if (ApexUi::IconTextButton("Open the LUTs folder", IconId::ExternalLink, "Opens Apex Radiance\\LUTs in Explorer (created if needed)")) ShowLutFolder();
     });

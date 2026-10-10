@@ -185,18 +185,7 @@ a tick, failing above about 24.9 days of uptime.
 **Finding:** S3SS's saved `BradyBunchBlue RGB` (.01, .01, .01) applies independently of `BradyBunchBegone.enabled`, and
 Apex inherited it as the base of both families.
 
-**Outcome:** on explicit request, only that saved table was removed from the local S3SS TOML (backup folder
-`336-disable-s3ss-ambient-rgb`), with every other parsed setting verified unchanged and no live memory changed. The
-running session kept the applied RGB until restart.
 
-### 2026-10-03: controls and S3SS compatibility (`b4f9da2`)
+### 2026-10-03: controls (`b4f9da2`)
 
-**Outcome:** Brightness range 10 to 80% (default 35% kept); Blue tint default 0%; legacy values clamped on load. The first
-compatibility version checked and corrected the S3SS override automatically the first time Rooms at Night was turned on.
-
-### 2026-10-04: correction made an explicit action (`f0b8d54`)
-
-**Context:** the first version edited another mod's configuration as a side effect of turning Rooms at Night on.
-
-**Outcome:** the correction runs only from the *Back up and correct* action in the card's *S3SS compatibility* section,
-shown while official S3SS is loaded. The effective-base substitution applies only after a successful correction.
+**Outcome:** Brightness range 10 to 80% (default 35% kept); Blue tint default 0%; legacy values clamped on load.

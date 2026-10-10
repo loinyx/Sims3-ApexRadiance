@@ -86,9 +86,15 @@ Start from **Overview** to see the image groups at a glance. The main Image swit
 - **Detail:** adjust clarity, sharpness and darker corners.
 - **Filters:** layer 25 looks such as Technicolor, DPX Cineon, Vintage, Cross-process, black and white, Night Mode, LUT, Auto exposure, Glow, Halation, Film grain, CRT and colour-blind mode. Each has a separate switch, strength and expandable controls.
 
-Filters are off by default. To set a shortcut, right-click a filter and choose the key combination you want to use to toggle it. Shortcuts are never assigned automatically; once set, yours appears beside the filter. You can also load PNG LUTs from the Apex `LUTs` folder.
+Filters are off by default. To set a shortcut, right-click a filter and choose the key combination you want to use to toggle it. Shortcuts are never assigned automatically; once set, yours appears beside the filter. The dedicated **LUTs** area loads PNG and 3D CUBE LUTs from the Apex `LUTs` folder, with an adjustable strength.
 
 Use the before/after controls to compare your adjustments with the game's original image.
+
+### Presets and sharing
+
+The **Presets** sidebar page keeps your saved looks above the built-in Apex presets. Save your current adjustments, choose which settings to apply, or share a preset as TOML. A preset with a selected LUT exports as one ZIP containing both files; Apex imports that ZIP directly. Existing TOML presets remain supported.
+
+[More about presets →](docs/features/presets.md)
 
 ### Ambient Occlusion and Sims
 
@@ -146,7 +152,9 @@ Updating Apex won't remove your settings. Settings, profiles, LUTs and reports a
 Documents\Electronic Arts\The Sims 3\Apex Radiance\
 ```
 
-The main settings file is `ApexRadiance.toml`.
+The main settings file is `ApexRadiance.toml`. Saved presets remain in `Profiles`, and color tables in `LUTs`; the folders stay separate so older versions can still find your files.
+
+**Settings → Compatibility → Recovery → Restart Apex** recreates the image-effect resources while keeping your settings. It does not uninstall the mod or reset lighting hooks. Close the game before replacing or removing the ASI.
 
 **Upgrading from an older combined build?** Remove the old combined ASI or `S3SSApex.asi` from `Game\Bin`. Keep the official standalone `Sims3SettingsSetter.asi` if you use it. Apex imports recognised legacy settings on its first start.
 

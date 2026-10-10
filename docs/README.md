@@ -114,3 +114,9 @@ Project-wide history: [architecture](history/architecture.md), [workflow](histor
 - `%USERPROFILE%\Desktop\S3SS-dev\NOTAS-ILUMINACAO.md`: chronological lighting notebook (Portuguese); later entries
   supersede earlier ones. Also `PASSO3-PLANO.md`, `ROADMAP-NIGHT-REMAKE.md` and `PLANO-SEPARACAO.md`.
 - Static reverse engineering of `TS3W.exe`: `S3SS-dev\re\out` (Ghidra decompile).
+
+## Presets and recovery
+
+- [Presets](features/presets.md): saved settings and portable ZIP packages with a LUT.
+- [Graphics recovery](features/graphics-recovery.md): restart image-effect resources without resetting settings.
+- [2.12.0](releases/2.12.0.md): LUTs, presets and graphics improvements.

@@ -361,10 +361,7 @@ on for missing settings while explicit saved off choices stayed off; its row res
 
 **Outcome:** a new installation starts with the feature defaults and Ctrl+Shift+F11; the startup hint is the only
 first-run element and the legacy `welcome_done` / `key_chosen` flags no longer gate anything. Settings > Compatibility
-keeps the optional DXVK and Sims3SettingsSetter recommendations, which no longer interrupt startup. Lighting > Buildings
-> Rooms at Night shows the Sims3SettingsSetter compatibility card only when official S3SS is loaded; "Back up and
-correct" backs up `S3SS.toml` and disables only the saved room-light RGB override, and enabling Rooms at Night never
-writes `S3SS.toml` (commits b99786c, f0b8d54). The language row became a standard select (`SelectRow`, 220 units).
+keeps the optional DXVK and Sims3SettingsSetter recommendations, which no longer interrupt startup. The language row became a standard select (`SelectRow`, 220 units).
 
 ### 2026-10-05: startup notice after the world loads
 

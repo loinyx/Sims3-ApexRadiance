@@ -1,7 +1,7 @@
 # Picture filters
 
 Picture filters adjust how the game world looks: brightness, contrast, saturation, colour temperature, tone zones,
-film-style split toning, a per-colour mixer, sharpness, clarity and a vignette, plus a **Filters** tab of 25 stackable
+film-style split toning, a per-colour mixer, sharpness, clarity and a vignette, plus a **Filters** tab of stackable
 looks (film stocks, colour moods, glow and haze, camera effects, retro screens and a colour-blind mode), each with its
 own strength. Only the 3D scene is graded; the game's menus, pie menus, tooltips, the HUD and the Apex menu keep their
 own colours. Grading adds no banding of its own. A before / after split and a hold-to-compare button show the difference
@@ -13,7 +13,7 @@ at any time. In the menu the **Color > Overview** tab owns the *Picture* master 
 |---|---|
 | Availability | Released in 2.1.0 or earlier (present in the first version in this repository). Filters tab and LUT files: Released in 2.7.0 |
 | Default | Off; every filter off |
-| Menu | Image > Color (tabs Overview, Basic, Tones, Color, Detail, Filters); *Smooth gradients* on the Image > Banding Fix page; Overview > Image > Picture |
+| Menu | Image > Color (tabs Overview, Basic, Tones, Color, Detail, Filters, LUTs); *Smooth gradients* on the Image > Banding Fix page; Overview > Image > Picture |
 | Configuration | `[qol.picture]` and `[qol.picture.filters]` in `ApexRadiance.toml`; compare key `[ui] picture_compare_key`; LUT files in `Documents\Electronic Arts\The Sims 3\Apex Radiance\LUTs\` |
 | Source | [`features/picture.cpp`](../../features/picture.cpp), [`features/picture.h`](../../features/picture.h), [`framework/d3d9_bootstrap.cpp`](../../framework/d3d9_bootstrap.cpp) (fire points), [`apex_gui.cpp`](../../apex_gui.cpp) (`ColorPage`, `BandingPage`) |
 
@@ -52,6 +52,18 @@ If a session starts with UI hidden and the target has not been learned, the old 
 that is off costs nothing. The filters add up: any number can be on at once, in a fixed order (see *Technical
 reference*). Filters that look around the pixel (prism, sharpening, CRT, 3DFX) read the scene copy, so a button or a
 panel is never pulled into the world. They apply only while the Picture card is on.
+
+## LUTs
+
+Color > LUTs has its own switch and a single file selector, Amount control, reset action, folder button and About LUTs
+explanation. It follows the Color master switch independently of the Filters group. A missing saved filename remains
+visible until the player chooses another file; Apex does not silently substitute a different look. Long filenames use
+the shared full-text tooltip; the selected name is not repeated below the selector.
+
+Supported files are PNG strips (height 8–128, width equal to height squared) and 3D CUBE tables with side length 2–65,
+red channel varying fastest, and supported `DOMAIN_MIN`/`DOMAIN_MAX`. A 1D LUT or combined shaper/3D LUT is refused
+with a status message. A preset export bundles the selected LUT automatically when Color is included; see
+[Presets](../ui.md#presets). Folder locations and legacy TOML references stay compatible.
 
 ## Settings
 
@@ -109,7 +121,6 @@ store a hue in degrees (0 to 360). A filter runs when its switch is on and its A
 | Colorfulness | `colourfulness` | Amount `colourfulness_amount` +40 (Muted to Vivid); Advanced: Protect bright colors `colourfulness_protect` 70% | More chroma, less for colours that are already strong or bright |
 | Night Mode | `night_mode` | Amount `night_amount` 60%; Darkness `night_darkness` 44% (0 to 100%, stored 0.35 of 0 to 0.8); Blue tint `night_blue` 50%; Keep lamp light `night_keep_lamps` 60% | Darker, bluer and less colourful; lamp-lit and bright areas keep their own colour |
 | Levels | `levels` | Black point `levels_black` 16 (0 to 255, stored /255); White point `levels_white` 235 (0 to 255) | The black point goes to black and the white point to white. The white point stays at least 0.02 above the black point. Runs when black > 0 or white < 255 |
-| LUT | `lut` | File `lut_file` (a PNG in the LUTs folder; empty = none; while the filter is on and the saved file is not in the folder, the first file is picked); Amount `lut_amount` 100%; *Open the LUTs folder* button | A ready-made look from a colour look-up table: a PNG strip of N slices of N x N (height 8 to 128, width = height squared, for example 1024x32 or 4096x64), as in Lightroom, Photoshop or ReShade LUT packs. The folder is created when the button is used and re-read at most every 2 s; the card shows the loaded size or why a file was refused |
 | **Light and detail** | | | |
 | Auto exposure | `auto_exposure` | Amount `auto_exposure_amount` 70%; Target brightness `auto_exposure_target` 50%; Speed `auto_exposure_speed` 40%; Range `auto_exposure_range` 50% | The picture slowly adapts toward a target brightness from the scene's average, like the eye |
 | Adaptive sharpening | `cas` | Sharpness `cas_amount` 50% | Contrast-adaptive sharpening: strong on soft detail, none on hard edges (no halos). Runs whenever its switch is on |
@@ -181,7 +192,7 @@ early test builds; a saved value outside 0 to 2 is reset to the default when loa
 - 8-bit output: Brightness and Highlights pushed above white clip at the encode.
 - With Picture on and every slider neutral, the image still changes slightly (the fixed dither).
 - Emphasize needs the shared scene depth (off while the game's Edge Smoothing is on).
-- LUT: only PNG strips with height 8 to 128 and width equal to the height squared are read.
+- LUTs accept PNG strips and 3D CUBE files. 1D and combined shaper/3D CUBE files are refused.
 
 ## Technical reference
 

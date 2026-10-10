@@ -11,7 +11,7 @@
 //               old combined build and an older S3SSApex.asi, resolves the game-code addresses (game_addresses.h:
 //               fixed on Steam 1.67.2, signature scan elsewhere), installs the enabled features, and becomes the pump:
 //               every 10 ms each feature's Update() and the config autosave.
-//  Shutdown     only on FreeLibrary (never at process exit, where the loader may hold other threads' locks).
+//  Lifetime     pinned before any hook or worker starts; released by Windows at process exit.
 #include <windows.h>
 #include "apex_config.h"
 #include "apex_gui.h"
@@ -28,6 +28,7 @@
 #include "game_addresses.h"
 #include "game_version.h"
 #include "hook_guard.h"
+#include "module_lifetime.h"
 #include "load_timing.h"
 #include "overlay.h"
 #include "patch_base.h"
@@ -41,7 +42,7 @@
 namespace {
 
 HMODULE g_module = nullptr;
-HANDLE g_stop = nullptr; // set on FreeLibrary: the init / pump thread ends
+HANDLE g_stop = nullptr; // process-lifetime pump; retained for stop-aware startup waits
 HANDLE g_thread = nullptr;
 
 constexpr DWORD kPumpIntervalMs = 10;
@@ -245,6 +246,10 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID reserved) {
         DisableThreadLibraryCalls(module);
         g_module = module;
         if (!IsGameProcess()) return FALSE; // the launcher and other tools: not loaded at all
+        if (!ModuleLifetime::Pin(module)) {
+            OutputDebugStringA("[" APEX_PRODUCT_NAME "] Could not retain the module for process lifetime; no hooks or workers started\n");
+            return FALSE;
+        }
         switch (S3SSDetect::AcquireInstanceMutex()) {
         case S3SSDetect::Instance::DuplicateSelf:
             OutputDebugStringA("[" APEX_PRODUCT_NAME "] Another copy of ApexRadiance.asi is already running in this process: this one stays idle\n");
@@ -265,16 +270,8 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID reserved) {
         break;
     }
     case DLL_PROCESS_DETACH:
-        if (!reserved && g_thread) { // FreeLibrary (not process exit)
-            SetEvent(g_stop);        // never waited for inside DllMain
-            ShaderCache::Shutdown(); // the precompile worker stops between two compiles
-            FrameProfiler::Shutdown();
-            AddressSpace::Stop();
-            PatchManager::Get().UninstallAll();
-            ApexD3D::Shutdown();
-            CrashReport::Shutdown();
-            ApexLog::Close();
-        }
+        // Successful attachment is pinned: no live unload. At process exit do not
+        // acquire other threads' locks or recreate/release graphics resources.
         break;
     default:
         break;

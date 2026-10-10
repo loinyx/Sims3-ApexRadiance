@@ -268,6 +268,7 @@
     <ClInclude Include="framework\call_chain.h" />
     <ClInclude Include="framework\crash_report.h" />
     <ClInclude Include="framework\hook_guard.h" />
+    <ClInclude Include="framework\module_lifetime.h" />
     <ClInclude Include="framework\load_timing.h" />
     <ClInclude Include="framework\conflict_guard.h" />
     <ClInclude Include="framework\d3d9_bootstrap.h" />

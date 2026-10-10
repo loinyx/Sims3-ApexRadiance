@@ -34,6 +34,46 @@ Automatic ({})	tr_widgets.cpp:kEntries	Automático ({})	Automático ({})	Automat
 Language	tr_widgets.cpp:kEntries	Idioma	Idioma	Langue	
 The language of this menu	tr_widgets.cpp:kEntries	O idioma deste menu	El idioma de este menú	La langue de ce menu	
 Language, menu key, text size and saving	tr_widgets.cpp:kEntries	Idioma, tecla do menu, tamanho do texto e salvamento	Idioma, tecla del menú, tamaño del texto y guardado	Langue, touche du menu, taille du texte et sauvegarde	
+Restarts graphics resources while keeping your settings	tr_menu.cpp:kEntries	Reinicia os recursos gráficos mantendo seus ajustes	Reinicia los recursos gráficos conservando tus ajustes	Redémarre les ressources graphiques en conservant vos réglages	
+Recovery	tr_menu.cpp:kEntries	Recuperação	Recuperación	Récupération	
+Restarts graphics resources while keeping your settings. This does not uninstall Apex.	tr_menu.cpp:kEntries	Reinicia os recursos gráficos mantendo seus ajustes. Isso não desinstala o Apex.	Reinicia los recursos gráficos conservando tus ajustes. No desinstala Apex.	Redémarre les ressources graphiques en conservant vos réglages. Cela ne désinstalle pas Apex.	
+Restart Apex	tr_menu.cpp:kEntries	Reiniciar Apex	Reiniciar Apex	Redémarrer Apex	
+Restart pending	tr_menu.cpp:kEntries	Reinicialização pendente	Reinicio pendiente	Redémarrage en attente	
+Customize content	tr_menu.cpp:kEntries	Personalizar conteúdo	Personalizar contenido	Personnaliser le contenu	
+Create a preset with your current settings	tr_menu.cpp:kEntries	Crie um preset com seus ajustes atuais	Crea un preajuste con tus ajustes actuales	Créez un préréglage avec vos réglages actuels	
+Open a shared TOML or ZIP preset	tr_menu.cpp:kEntries	Abra um preset compartilhado em TOML ou ZIP	Abre un preajuste compartido en TOML o ZIP	Ouvrez un préréglage TOML ou ZIP partagé	
+Share your preset with other players	tr_menu.cpp:kEntries	Compartilhe seu preset com outros jogadores	Comparte tu preajuste con otros jugadores	Partagez votre préréglage avec d’autres joueurs	
+Current settings	tr_menu.cpp:kEntries	Configurações atuais	Ajustes actuales	Réglages actuels	
+Presets	tr_menu.cpp:kEntries	Presets	Preajustes	Préréglages	
+My presets	tr_menu.cpp:kEntries	Meus presets	Mis preajustes	Mes préréglages	
+Apex presets	tr_menu.cpp:kEntries	Presets do Apex	Preajustes de Apex	Préréglages Apex	
+Save current	tr_menu.cpp:kEntries	Salvar atual	Guardar actual	Enregistrer les réglages actuels	
+Import	tr_menu.cpp:kEntries	Importar	Importar	Importer	
+Export	tr_menu.cpp:kEntries	Exportar	Exportar	Exporter	
+Save preset	tr_menu.cpp:kEntries	Salvar preset	Guardar preajuste	Enregistrer un préréglage	
+Import preset	tr_menu.cpp:kEntries	Importar preset	Importar preajuste	Importer un préréglage	
+Export preset	tr_menu.cpp:kEntries	Exportar preset	Exportar preajuste	Exporter un préréglage	
+Apply preset	tr_menu.cpp:kEntries	Aplicar preset	Aplicar preajuste	Appliquer un préréglage	
+Choose file	tr_menu.cpp:kEntries	Escolher arquivo	Elegir archivo	Choisir un fichier	
+Preset name	tr_menu.cpp:kEntries	Nome do preset	Nombre del preajuste	Nom du préréglage	
+Choose the settings to include	tr_menu.cpp:kEntries	Escolha os ajustes a incluir	Elige los ajustes que incluir	Choisissez les réglages à inclure	
+Apply after import	tr_menu.cpp:kEntries	Aplicar após importar	Aplicar tras importar	Appliquer après l’importation	
+No saved presets yet	tr_menu.cpp:kEntries	Nenhum preset salvo ainda	Aún no hay preajustes guardados	Aucun préréglage enregistré	
+Open the presets folder	tr_menu.cpp:kEntries	Abrir a pasta de presets	Abrir la carpeta de preajustes	Ouvrir le dossier des préréglages	
+Delete this preset?	tr_menu.cpp:kEntries	Excluir este preset?	¿Eliminar este preajuste?	Supprimer ce préréglage ?	
+Choose a new preset name	tr_menu.cpp:kEntries	Escolha outro nome para o preset	Elige otro nombre para el preajuste	Choisissez un autre nom de préréglage	
+LUTs	tr_menu.cpp:kEntries	LUTs	LUTs	LUTs	
+Applies a color treatment defined in a file	tr_menu.cpp:kEntries	Aplica um tratamento de cor definido em um arquivo	Aplica un tratamiento de color definido en un archivo	Applique un traitement des couleurs défini dans un fichier	
+About LUTs	tr_menu.cpp:kEntries	Sobre LUTs	Acerca de las LUT	À propos des LUT	
+Preset exported	tr_menu.cpp:kEntries	Preset exportado	Preajuste exportado	Préréglage exporté	
+Could not open the file dialog	tr_menu.cpp:kEntries	Não foi possível abrir a janela de arquivos	No se pudo abrir la ventana de archivos	Impossible d’ouvrir la fenêtre de fichiers	
+Could not save the imported preset	tr_menu.cpp:kEntries	Não foi possível salvar o preset importado	No se pudo guardar el preajuste importado	Impossible d’enregistrer le préréglage importé	
+Menu, compatibility and credits	tr_menu.cpp:kEntries	Menu, compatibilidade e créditos	Menú, compatibilidad y créditos	Menu, compatibilité et crédits	
+This preset is exported as a TOML file.	tr_menu.cpp:kEntries	Este preset é exportado como um arquivo TOML.	Este preajuste se exporta como un archivo TOML.	Ce préréglage est exporté dans un fichier TOML.	
+The preset and its LUT are exported together as one ZIP file.	tr_menu.cpp:kEntries	O preset e sua LUT são exportados juntos em um único ZIP.	El preajuste y su LUT se exportan juntos en un único ZIP.	Le préréglage et sa LUT sont exportés ensemble dans un seul ZIP.	
+A LUT remaps colors to create a particular look. Put a 3D CUBE or PNG LUT in the LUTs folder, choose it here, then adjust Amount.	tr_menu.cpp:kEntries	Uma LUT transforma as cores para criar um visual. Coloque uma LUT CUBE 3D ou PNG na pasta LUTs, escolha aqui e ajuste a Intensidade.	Una LUT transforma los colores para crear un aspecto. Pon una LUT CUBE 3D o PNG en la carpeta LUTs, elígela aquí y ajusta la Intensidad.	Une LUT transforme les couleurs pour créer un rendu. Placez une LUT CUBE 3D ou PNG dans le dossier LUTs, sélectionnez-la ici, puis réglez l’Intensité.	
+Could not export the preset. Check the selected LUT and folder access.	tr_menu.cpp:kEntries	Não foi possível exportar o preset. Confira a LUT escolhida e o acesso à pasta.	No se pudo exportar el preajuste. Comprueba la LUT seleccionada y el acceso a la carpeta.	Impossible d’exporter le préréglage. Vérifiez la LUT choisie et l’accès au dossier.	
+Could not import the preset. Choose a TOML file or the original ZIP exported by Apex.	tr_menu.cpp:kEntries	Não foi possível importar o preset. Escolha um TOML ou o ZIP original exportado pelo Apex.	No se pudo importar el preajuste. Elige un TOML o el ZIP original exportado por Apex.	Impossible d’importer le préréglage. Choisissez un TOML ou le ZIP original exporté par Apex.	
 Removed Temporal smoothing and Thin object detail from Ambient Occlusion	tr_menu.cpp:kEntries	Removidas Suavização temporal e Detalhe de objetos finos da Oclusão de Ambiente	Se eliminaron Suavizado temporal y Detalle de objetos finos de la oclusión ambiental	Lissage temporel et Détail des objets fins retirés de l’occlusion ambiante	
 Ambient Occlusion and Sim Occlusion remain available	tr_menu.cpp:kEntries	Oclusão de Ambiente e Oclusão dos Sims continuam disponíveis	La oclusión ambiental y la oclusión de los Sims siguen disponibles	L’occlusion ambiante et celle des Sims restent disponibles	
 Apply	tr_menu.cpp:kEntries	Aplicar	Aplicar	Appliquer	
@@ -1095,6 +1135,10 @@ Terrain and lots	tr_menu.cpp:kRefreshLightingCardEntries	Terreno e lotes	Terreno
 Use when light on the ground or a lot looks incorrect or has not updated	tr_menu.cpp:kRefreshLightingCardEntries	Use se a luz no terreno ou em um lote parecer errada ou não tiver atualizado	Úsalo si la luz en el terreno o en un solar se ve mal o no se ha actualizado	Utilisez si l’éclairage du terrain ou d’une parcelle semble incorrect ou ne s’est pas actualisé	
 Refresh terrain	tr_menu.cpp:kRefreshLightingCardEntries	Atualizar terreno	Actualizar terreno	Actualiser le terrain	
 Refresh lots	tr_menu.cpp:kRefreshLightingCardEntries	Atualizar lotes	Actualizar solares	Actualiser les parcelles	
+Screen effects preserve transparency and restore graphics state	tr_menu.cpp:kWhatsNewEntries	Efeitos de tela preservam a transparência e restauram o estado gráfico	Los efectos de pantalla conservan la transparencia y restauran el estado gráfico	Les effets préservent la transparence et restaurent l’état graphique	
+Restart Apex graphics without losing your settings	tr_menu.cpp:kWhatsNewEntries	Reinicie os gráficos do Apex sem perder seus ajustes	Reinicia los gráficos de Apex sin perder tus ajustes	Redémarrez les graphismes Apex sans perdre vos réglages	
+Presets have their own page and can be shared as TOML or ZIP	tr_menu.cpp:kWhatsNewEntries	Presets têm sua própria página e podem ser compartilhados em TOML ou ZIP	Los preajustes tienen su propia página y se comparten en TOML o ZIP	Les préréglages ont leur propre page et se partagent en TOML ou ZIP	
+3D CUBE LUTs with adjustable strength	tr_menu.cpp:kWhatsNewEntries	LUTs CUBE 3D com intensidade ajustável	LUT CUBE 3D con intensidad ajustable	LUT CUBE 3D à intensité réglable	
 Color groups have their own switches and keep your adjustments	tr_menu.cpp:kWhatsNewEntries	Os grupos de Cor têm seus próprios interruptores e mantêm seus ajustes	Los grupos de Color tienen sus propios interruptores y conservan tus ajustes	Les groupes Couleur ont leurs propres interrupteurs et conservent vos réglages	
 Right-click a filter to assign an optional keyboard shortcut	tr_menu.cpp:kWhatsNewEntries	Clique com o botão direito em um filtro para definir um atalho de teclado opcional	Haz clic derecho en un filtro para asignar un atajo de teclado opcional	Faites un clic droit sur un filtre pour attribuer un raccourci clavier facultatif	
 Corrected screen-effect timing when hiding the game interface	tr_menu.cpp:kWhatsNewEntries	Corrigido o momento de aplicação dos efeitos ao ocultar a interface do jogo	Corregido el momento de aplicación de los efectos al ocultar la interfaz del juego	Correction du moment d’application des effets lorsque l’interface du jeu est masquée	

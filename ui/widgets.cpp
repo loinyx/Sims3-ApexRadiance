@@ -574,10 +574,8 @@ void MutedText(const char* text) {
 }
 
 void SectionLabel(const char* text) {
-    if (Hidden()) return;
-    PushSized(VioletTheme::BoldFont(), 1.0f);
-    ImGui::TextWrapped("%s", T(text));
-    ImGui::PopFont();
+    // Headings above cards share the Overview / Lighting group treatment.
+    GroupLabel(text);
 }
 
 void GroupLabel(const char* text) {
@@ -603,13 +601,22 @@ void IconNote(IconId icon, const char* text, unsigned rgb) {
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(p, ImVec2(p.x + width, p.y + h), U32(rgb, 0.10f), 6.0f * u);
-    DrawIcon(dl, icon, ImVec2(p.x + padX, p.y + padY + (lineH - s) * 0.5f), s, U32(rgb));
-    ImGui::SetCursorPos(ImVec2(startX + padX + s + gap, startY + padY));
-    ImGui::PushTextWrapPos(startX + width - padX);
-    ImGui::PushStyleColor(ImGuiCol_Text, Col(rgb));
-    ImGui::TextWrapped("%s", text);
-    ImGui::PopStyleColor();
-    ImGui::PopTextWrapPos();
+    if(ts.y <= lineH + 0.5f) {
+        const float cy=p.y+h*0.5f;
+        DrawIcon(dl,icon,ImVec2(p.x+padX,cy-s*0.5f),s,U32(rgb));
+        dl->AddText(ImVec2(p.x+padX+s+gap,CenteredTextY(text,cy)),U32(rgb),text);
+    } else {
+        DrawIcon(dl, icon, ImVec2(p.x + padX, p.y + padY + (lineH - s) * 0.5f), s, U32(rgb));
+        ImGui::SetCursorPos(ImVec2(startX + padX + s + gap, startY + padY));
+        // Multiline notes keep normal line spacing and their own text baseline.
+        ImGui::BeginGroup();
+        ImGui::PushTextWrapPos(startX + width - padX);
+        ImGui::PushStyleColor(ImGuiCol_Text, Col(rgb));
+        ImGui::TextWrapped("%s", text);
+        ImGui::PopStyleColor();
+        ImGui::PopTextWrapPos();
+        ImGui::EndGroup();
+    }
     // The whole box is the item (hover it for a tooltip)
     ImGui::SetCursorPos(ImVec2(startX, startY));
     ImGui::Dummy(ImVec2(width, h));
@@ -923,12 +930,71 @@ bool DrawButton(const char* label, IconId icon, const char* tooltip, ButtonKind 
         DrawIcon(dl, icon, ImVec2(x, cy - is * 0.5f), is, iconCol);
         x += is + gap;
     }
-    const float textY = CenteredTextY(shown, cy);
+    // Align Latin action labels by their cap height. Per-label ink bounds move the
+    // baseline upward for descenders (Import/Export) and accents, making adjacent
+    // actions look uneven even when their bounding boxes are centred.
+    bool latin = !shown.empty();
+    for (const char* at=shown.data(), *end=at+shown.size(); at<end;) {
+        unsigned cp=0; const int bytes=ImTextCharFromUtf8(&cp,at,end);
+        if(bytes<=0) break;
+        at+=bytes;
+        if(cp>=0x370 && cp!=0x2026) {latin=false;break;}
+    }
+    const float textY = CenteredTextY(latin ? std::string_view("H") : shown, cy);
     dl->AddText(ImVec2(x, std::round(textY)), textCol, shown.data(), shown.data() + shown.size());
     ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
     return clicked;
 }
 } // namespace
+
+bool BeginActionMenu(const char* id, const char* title, float minimumWidth) {
+    ImGui::SetNextWindowSizeConstraints(ImVec2(minimumWidth*Unit(),0),ImVec2(FLT_MAX,FLT_MAX));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(kSpace2*Unit(),kSpace2*Unit()));
+    const bool open=ImGui::BeginPopup(id);
+    ImGui::PopStyleVar();
+    if(open) {
+        // Keep spacing scoped to the popup body, rather than restoring the
+        // page's row spacing immediately after BeginPopup.
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,ImVec2(0,0));
+        const float u=Unit(), inset=10*u;
+        const float width=ImGui::GetContentRegionAvail().x;
+        const float wrap=std::max(1.0f,width-2*inset);
+        const auto textSize=ImGui::CalcTextSize(title,nullptr,false,wrap);
+        const float height=std::max(36*u,textSize.y+16*u);
+        const ImVec2 p=ImGui::GetCursorScreenPos();
+        ImGui::Dummy(ImVec2(width,height));
+        const float y=textSize.y>ImGui::GetTextLineHeight()+1 ? p.y+(height-textSize.y)*.5f : CenteredTextY(title,p.y+height*.5f);
+        ImGui::GetWindowDrawList()->AddText(ImGui::GetFont(),ImGui::GetFontSize(),ImVec2(p.x+inset,y),U32(VioletTheme::kTextMuted),title,nullptr,wrap);
+        ImGui::Separator();
+        Gap(kSpace1);
+    }
+    return open;
+}
+
+bool ActionMenuItem(const char* label, IconId icon, bool enabled) {
+    const auto shown=I18n::TrLabel(label);
+    const float u=Unit(), is=VioletTheme::kControlIcon*u, gap=VioletTheme::kControlIconGap*u;
+    const float width=std::max(ImGui::GetContentRegionAvail().x,ImGui::CalcTextSize(shown.data(),shown.data()+shown.size()).x+is+gap+20*u);
+    const float height=std::max(36*u,ImGui::GetTextLineHeight()+12*u);
+    const ImVec2 p=ImGui::GetCursorScreenPos();
+    ImGui::PushID(label);
+    ImGui::BeginDisabled(!enabled);
+    const bool clicked=ImGui::Selectable("##Action",false,ImGuiSelectableFlags_None,ImVec2(width,height));
+    const float cy=(ImGui::GetItemRectMin().y+ImGui::GetItemRectMax().y)*0.5f;
+    auto* draw=ImGui::GetWindowDrawList();
+    DrawIcon(draw,icon,ImVec2(p.x+10*u,cy-is*.5f),is,U32(VioletTheme::kAccent));
+    bool latin=true;
+    for(const char* at=shown.data(),*end=at+shown.size();at<end;) {
+        unsigned cp=0;const int bytes=ImTextCharFromUtf8(&cp,at,end);if(bytes<=0)break;at+=bytes;
+        if(cp>=0x370 && cp!=0x2026){latin=false;break;}
+    }
+    draw->AddText(ImVec2(p.x+10*u+is+gap,CenteredTextY(latin?std::string_view("H"):shown,cy)),ImGui::GetColorU32(ImGuiCol_Text),shown.data(),shown.data()+shown.size());
+    ImGui::EndDisabled();
+    ImGui::PopID();
+    return clicked;
+}
+
+void EndActionMenu() {ImGui::PopStyleVar();ImGui::EndPopup();}
 
 bool IconTextButton(const char* label, IconId icon, const char* tooltip, ButtonKind kind) { return DrawButton(label, icon, tooltip, kind, 0.0f); }
 
@@ -1192,7 +1258,7 @@ bool g_selectOpen = false; // SelectRowOpen
 bool SelectRowOpen() { return g_selectOpen; }
 
 bool SelectRow(const char* label, const char* description, const char* id, int* current, const char* const* labels, int count,
-               float controlWidth, int defaultIndex) {
+               float controlWidth, int defaultIndex, bool stacked) {
     g_selectOpen = false;
     RowDecor d = TakeDecor();
     if (!RowVisible(label, description)) return false;
@@ -1204,12 +1270,13 @@ bool SelectRow(const char* label, const char* description, const char* id, int* 
     const float startX = ImGui::GetCursorPosX();
     const float width = ImGui::GetContentRegionAvail().x;
     const float top = RowTop();
-    const float comboWidth = std::fmin(controlWidth * u, std::fmax(120.0f * u, width * 0.5f));
-    const float wrapX = startX + width - comboWidth - kSpace3 * u;
+    const float comboWidth = stacked ? width : std::fmin(controlWidth * u, std::fmax(120.0f * u, width * 0.5f));
+    const float wrapX = stacked ? startX + width : startX + width - comboWidth - kSpace3 * u;
     ImGui::SetCursorPos(ImVec2(startX, top));
     LabelInfo li;
-    const float rowH = std::fmax(RowText(label, description, wrapX, std::fmax(wrapX - DecorWidth(d), startX + 40.0f * u), &li), ImGui::GetFrameHeight());
-    const float comboY = top + (rowH - ImGui::GetFrameHeight()) * 0.5f;
+    const float textH = RowText(label, description, wrapX, std::fmax(wrapX - DecorWidth(d), startX + 40.0f * u), &li);
+    const float rowH = stacked ? textH + kSpace2 * u + ImGui::GetFrameHeight() : std::fmax(textH, ImGui::GetFrameHeight());
+    const float comboY = stacked ? top + textH + kSpace2 * u : top + (rowH - ImGui::GetFrameHeight()) * 0.5f;
     ImGui::SetCursorPos(ImVec2(startX + width - comboWidth, comboY));
     ImGui::SetNextItemWidth(comboWidth);
     const ImVec2 comboPos = ImGui::GetCursorScreenPos();
