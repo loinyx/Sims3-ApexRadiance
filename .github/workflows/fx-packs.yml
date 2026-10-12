@@ -1,4 +1,4 @@
-name: ReShade FX packs report
+name: FX shader packs report
 # Report only: compiles the effects of popular public ReShade shader packs to shader model 3 with the vendored compiler
 # and D3DCompile, the way the game runs them. Never fails the build; the report is in the job log and the artifact.
 on:
@@ -8,11 +8,11 @@ on:
       - 'third_party/reshadefx/**'
       - 'features/reshade_fx_compile.*'
       - 'tools/reshade_fx_test/**'
-      - '.github/workflows/reshade-packs.yml'
+      - '.github/workflows/fx-packs.yml'
 permissions:
   contents: read
 concurrency:
-  group: reshade-packs-${{ github.ref }}
+  group: fx-packs-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   packs:
@@ -53,7 +53,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: reshade-fx-packs-${{ github.sha }}
+          name: fx-packs-${{ github.sha }}
           path: outputs/checks/fx-packs.txt
           if-no-files-found: warn
           retention-days: 14
