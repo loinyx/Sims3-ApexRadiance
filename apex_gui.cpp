@@ -484,7 +484,7 @@ void OverviewPage() {
         OverviewPatchRow("SceneDither", IconId::Blend, "Banding Fix", "No color steps in light and shadows", PageBanding);
         OverviewPatchRow("DepthBlur", IconId::Aperture, "Depth Blur", "Softly blurs the distant background", PageDepthBlur);
         OverviewPatchRow("EdgeSmoothing", IconId::Spline, "Edge Smoothing", "Clean, smooth edges on the world", PageEdgeSmoothing);
-        OverviewPatchRow("ReShade", IconId::Paintbrush, "ReShade", "ReShade effects under the game's interface, no install needed", PageColor, &g_colorTab, Picture::TabReShade);
+        OverviewPatchRow("ReShade", IconId::Paintbrush, "FX effects", "Shader effects from .fx files, under the game's interface", PageColor, &g_colorTab, Picture::TabReShade);
     }
     ApexUi::EndCard();
     ApexUi::GroupLabel("Performance");
@@ -747,19 +747,19 @@ void ColorOverview() {
         if(ApexUi::OverviewRow("LUTs",IconId::Layers,"LUTs","Applies a color treatment defined in a file",nullptr,&on,true,nullptr,&clicked)) {p.lut=on;changed=true;}
         if(clicked) g_colorTab=Picture::TabLuts;
         ImGui::EndDisabled();
-        // ReShade has its own switch: Color's master switch does not turn it off (the effects run without Apex's Color too)
-        OverviewPatchRow("ReShade", IconId::Paintbrush, "ReShade", "ReShade effects under the game's interface, no install needed", PageColor, &g_colorTab, Picture::TabReShade);
+        // FX effects have their own switch: Color's master switch does not turn them off (the effects run without Apex's Color too)
+        OverviewPatchRow("ReShade", IconId::Paintbrush, "FX effects", "Shader effects from .fx files, under the game's interface", PageColor, &g_colorTab, Picture::TabReShade);
     }
     ApexUi::EndCard();if(changed) Picture::Get().SetParams(p,true);
 }
-// Color > ReShade: the ReShade card, then one panel per effect file
+// Color > FX: the FX effects card, then one panel per effect file
 void ReShadeTab() {
-    FeatureCard("ReShade", IconId::Paintbrush, "ReShade", "ReShade effects under the game's interface, no install needed");
+    FeatureCard("ReShade", IconId::Paintbrush, "FX effects", "Shader effects from .fx files, under the game's interface");
     ReShadeUi::EffectPanels();
 }
 void ColorPage() {
     ApexUi::PageTitle("Color", "How the game's picture looks");
-    static const char* const kTabs[] = {"Overview","Basic", "Tones", "Color", "Detail", "Filters", "LUTs", "ReShade"};
+    static const char* const kTabs[] = {"Overview","Basic", "Tones", "Color", "Detail", "Filters", "LUTs", "FX"};
     if (g_colorTab < 0 || g_colorTab >= Picture::TabCount) g_colorTab = Picture::TabOverview;
     int selected=g_colorTab==Picture::TabOverview ? 0 : g_colorTab==Picture::TabLuts ? 6 : g_colorTab==Picture::TabReShade ? 7 : g_colorTab+1;
     ApexUi::TabBar("##ColorTabs", &selected, kTabs, IM_COUNTOF(kTabs));
@@ -2687,7 +2687,7 @@ const SearchPart* SearchParts(int& count) {
         {"Banding Fix", nullptr, PageBanding, nullptr, 0, BandingTabContent},
         {"Color", "Overview", PageColor, &g_colorTab, Picture::TabOverview, ColorOverview},
         {"Color", "LUTs", PageColor, &g_colorTab, Picture::TabLuts, [] { Picture::Get().RenderFiltersUI(true); }},
-        {"Color", "ReShade", PageColor, &g_colorTab, Picture::TabReShade, ReShadeTab},
+        {"Color", "FX effects", PageColor, &g_colorTab, Picture::TabReShade, ReShadeTab},
         {"Presets", "Presets", PageProfiles, nullptr, 0, ProfilesTab},
         {"Color", "Filters", PageColor, &g_colorTab, Picture::TabFilters, [] { Picture::Get().RenderFiltersUI(); }},
         {"Color", "Basic", PageColor, &g_colorTab, Picture::TabBasic, [] { PictureRows(Picture::TabBasic); }},

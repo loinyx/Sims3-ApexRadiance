@@ -1,10 +1,12 @@
-# ReShade effects
+# FX effects
 
-Apex Radiance runs ReShade effects (`.fx` files) on the game's picture by itself, without ReShade installed. The
-effects draw on the finished scene before the game draws its interface, so menus, plumbobs, speech bubbles and text
-keep their colours while the world gets the effect's look. Depth-based effects (depth of field, ambient occlusion,
-fog) read the game's exact depth from Apex Radiance. The Color > ReShade tab adds effect files, presets or whole shader
-packs, switches and adjusts each effect, and picks the preset.
+Apex Radiance runs shader effects from `.fx` files on the game's picture by itself, with nothing else installed. The
+files use the ReShade FX format, so existing shader packs work as they are. Player-facing text names the file format
+(FX, `.fx`) rather than ReShade; ReShade is named only in Settings > Credits. The effects draw on the finished scene
+before the game draws its interface, so menus, plumbobs, speech bubbles and text keep their colours while the world gets
+the effect's look. Depth-based effects (depth of field, ambient occlusion, fog) read the game's exact depth from Apex
+Radiance. The Color > FX tab adds effect files, presets or whole shader packs, switches and adjusts each effect, and
+picks the preset.
 
 ## Status
 
@@ -12,7 +14,7 @@ packs, switches and adjusts each effect, and picks the preset.
 |---|---|
 | Availability | In development (this branch); Experimental badge |
 | Default | On (does nothing until effect files are added) |
-| Menu | Color > ReShade (card ReShade and one panel per effect file); Overview > Image and Color > Overview rows |
+| Menu | Color > FX (card FX effects and one panel per effect file); Overview > Image and Color > Overview rows |
 | Configuration | `[patches.ReShade]` in `ApexRadiance.toml` (switch and preset name); the effects' values live in the preset `.ini` |
 | Source | [`features/reshade_fx.cpp`](../../features/reshade_fx.cpp) (runtime), [`features/reshade_fx_compile.cpp`](../../features/reshade_fx_compile.cpp) (compiler front end), [`features/reshade_fx_files.cpp`](../../features/reshade_fx_files.cpp) (files, packs, images, cache), [`patches/reshade_patch.cpp`](../../patches/reshade_patch.cpp) (menu) |
 
@@ -28,16 +30,16 @@ buffer holds the scene.
 
 Apex Radiance embeds ReShade's open-source FX compiler and implements the Direct3D 9 side of ReShade's effect runtime.
 
-1. **Files.** Effects live in `Apex Radiance\ReShade\Shaders`, textures in `Textures`, presets in `Presets` (all below
+1. **Files.** Effects live in `Apex Radiance\FX\Shaders`, textures in `Textures`, presets in `Presets` (all below
    the Apex Radiance documents folder). **Add effects** copies `.fx` / `.fxh` files, images and `.ini` presets, or
    extracts a `.zip` pack (stored or deflate; folders below `Shaders/` and `Textures/` are kept). Apex Radiance writes
-   its own `ReShade.fxh` and a `ReShadeUI.fxh` replacement to `ReShade\Internal`, searched last, so packs that rely on
+   its own `ReShade.fxh` and a `ReShadeUI.fxh` replacement to `FX\Internal`, searched last, so packs that rely on
    them load and a pack's own copies win.
 2. **Compile.** A worker thread preprocesses and parses every `.fx` (ReShade's predefined macros: `__RESHADE__` 60600,
    `__RENDERER__` 0x9000, `BUFFER_WIDTH` / `BUFFER_HEIGHT` of the back buffer, the preset's
    `PreprocessorDefinitions`, plus `RESHADE_DEPTH_INPUT_IS_REVERSED=0` because the game's depth is not reversed). The
    compiler generates shader model 3 HLSL; only effects that are on are compiled with `D3DCompile` (`vs_3_0` /
-   `ps_3_0`), and the bytecode is cached in `ReShade\Cache` by a hash of the code.
+   `ps_3_0`), and the bytecode is cached in `FX\Cache` by a hash of the code.
 3. **Objects.** The render thread creates the textures (render targets, or images decoded with Windows Imaging
    Component and scaled to the declared size), shaders and a shared depth-stencil. Textures with the same name in
    several effects are shared, as in ReShade.
@@ -56,12 +58,12 @@ Apex Radiance embeds ReShade's open-source FX compiler and implements the Direct
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| ReShade (card switch) | `enabled` | bool | true | | Runs the effects; off releases every effect object |
-| ReShade preset | `preset` | string | `Default.ini` | `.ini` files in `Apex Radiance\ReShade\Presets` | The preset whose effects and values are used; created when first saved |
+| FX effects (card switch) | `enabled` | bool | true | | Runs the effects; off releases every effect object |
+| Effects preset | `preset` | string | `Default.ini` | `.ini` files in `Apex Radiance\FX\Presets` | The preset whose effects and values are used; created when first saved |
 | Effect switches and settings | (preset `.ini`) | | | from the shader's `ui_*` annotations | Saved in the current preset when an edit is committed |
 
 Presets of Apex Radiance carry the feature's switch and the preset name in the Color part; the effects' values belong to
-the ReShade preset.
+the preset `.ini`.
 
 ## Compatibility and interactions
 

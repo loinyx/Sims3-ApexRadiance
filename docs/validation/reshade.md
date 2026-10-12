@@ -1,8 +1,8 @@
-# ReShade effects: validation
+# FX effects: validation
 
-ReShade `.fx` effects must compile and run without ReShade installed, render on the finished scene before the game's
+`.fx` effects (ReShade FX format) must compile and run with nothing else installed, render on the finished scene before the game's
 interface (never over menus and text), read Apex Radiance's depth as `DEPTH`, and keep their switches and values in a
-ReShade preset. Files added in the menu must load. The feature is described in [features/reshade.md](../features/reshade.md).
+preset `.ini`. Files added in the menu must load. The feature is described in [features/reshade.md](../features/reshade.md).
 
 ## Automated tests
 
@@ -20,7 +20,7 @@ ReShade preset. Files added in the menu must load. The feature is described in [
 ## In-game test plan
 
 1. No ReShade installed, feature on, add a `.zip` pack (for example SweetFX) and turn on a colour effect. **Expected:**
-   files under `Apex Radiance\ReShade`, the effect listed with its settings, the world graded and the game's menus,
+   files under `Apex Radiance\FX`, the effect listed with its settings, the world graded and the game's menus,
    plumbobs and text not; no error in the log.
 2. A depth effect (MXAO, ADOF, a fog). **Expected:** depth follows the world, not the interface; the Developer page shows
    "Scene depth requested: yes" only while it is on.

@@ -1,7 +1,7 @@
 // ReShade effects (Apex Radiance): ReShade's .fx effects run by Apex itself (no ReShade install) on the finished scene,
 // after Color and before the game draws its interface, with Apex's scene depth. The menu (Color > ReShade) switches and
 // adjusts the effects of the current preset, picks the preset and adds effect files or shader packs to
-// Apex Radiance\ReShade\. The engine lives in features/reshade_fx.cpp; docs/features/reshade.md.
+// Apex Radiance\FX\. The engine lives in features/reshade_fx.cpp; docs/features/reshade.md.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -134,7 +134,7 @@ std::atomic<bool> g_addBusy{false};
 
 void PickAndAddFiles() {
     if (g_addBusy.exchange(true)) return;
-    const std::wstring label = ApexUtil::ToWide(I18n::Tr("ReShade effects"));
+    const std::wstring label = ApexUtil::ToWide(I18n::Tr("FX effects"));
     if (!HookGuard::StartDetached("ReShade: add effects", [label] {
             AddResult result;
             result.cancelled = true;
@@ -276,7 +276,7 @@ class ReShadePatch : public ApexPatch {
         }
     }
 
-    // The ReShade card's body (Color > ReShade): state, preset and Add effects
+    // The FX effects card's body (Color > FX): state, preset and Add effects
     void RenderCustomUI() override {
         SAFE_IMGUI_BEGIN();
         using ApexUi::IconId;
@@ -301,7 +301,7 @@ class ReShadePatch : public ApexPatch {
         }
         ApexUi::Gap(ApexUi::kSpace1);
 
-        // Preset: the .ini files in ReShade\Presets (ReShade's own format)
+        // Preset: the .ini files in FX\Presets (ReShade's own format)
         {
             const auto presets = ReShadeFx::PresetFiles();
             const std::string current = ReShadeFx::CurrentPreset();
@@ -314,7 +314,7 @@ class ReShadePatch : public ApexPatch {
             if (!labels.empty()) {
                 const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
                 int choice = std::max(selected, 0);
-                if (ApexUi::SelectRow("ReShade preset", "Which effects are on and how they're set", "##ReShadePreset", &choice,
+                if (ApexUi::SelectRow("Effects preset", "Which effects are on and how they're set", "##ReShadePreset", &choice,
                                       labels.data(), static_cast<int>(labels.size())) &&
                     choice != selected) {
                     ReShadeFx::SetPreset(presets[static_cast<size_t>(choice)]);
@@ -332,11 +332,11 @@ class ReShadePatch : public ApexPatch {
             const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
             if (ApexUi::BeginControlRow("Your effects", "Effect files (.fx), textures, presets (.ini) or a .zip pack", w)) {
                 ImGui::BeginDisabled(g_addBusy.load());
-                if (ApexUi::IconTextButton(addLabel, IconId::Plus, "Copies them to Apex Radiance\\ReShade and loads them", ApexUi::ButtonKind::Primary))
+                if (ApexUi::IconTextButton(addLabel, IconId::Plus, "Copies them to Apex Radiance\\FX and loads them", ApexUi::ButtonKind::Primary))
                     PickAndAddFiles();
                 ImGui::EndDisabled();
                 ImGui::SameLine(0.0f, gap);
-                if (ApexUi::IconTextButton(folderLabel, IconId::ExternalLink, "Opens Apex Radiance\\ReShade in Explorer (created if needed)"))
+                if (ApexUi::IconTextButton(folderLabel, IconId::ExternalLink, "Opens Apex Radiance\\FX in Explorer (created if needed)"))
                     OpenInShell(ReShadeFx::EffectsFolder(), true);
                 ApexUi::EndControlRow();
             }
@@ -357,20 +357,20 @@ class ReShadePatch : public ApexPatch {
     }
 };
 
-APEX_REGISTER_FEATURE(ReShadePatch, {.displayName = "ReShade effects",
-                                     .description = "Runs ReShade effects (.fx) on the game's picture without installing ReShade, while menus, plumbobs and "
-                                                    "text keep their colors; effects that blur by distance see exactly how far things are. Part of " APEX_PRODUCT_NAME
+APEX_REGISTER_FEATURE(ReShadePatch, {.displayName = "FX effects",
+                                     .description = "Runs shader effects from .fx files on the game's picture, with nothing else to install, while menus, plumbobs "
+                                                    "and text keep their colors; effects that blur by distance see exactly how far things are. Part of " APEX_PRODUCT_NAME
                                                     ". Credits: @loinyx",
                                      .category = "Graphics",
                                      .experimental = true,
                                      .enabledByDefault = true,
                                      .supportedVersions = VERSION_ALL,
-                                     .technicalDetails = {"Embeds ReShade's FX compiler (BSD-3); .fx files become shader model 3 code, compiled with D3DCompile on a worker thread and cached.",
+                                     .technicalDetails = {"Embeds the ReShade FX compiler (BSD-3); .fx files become shader model 3 code, compiled with D3DCompile on a worker thread and cached.",
                                                           "Runs the enabled techniques at the PostScene boundary (after Color), so effects never land on the interface.",
                                                           "COLOR is a copy of the back buffer; DEPTH is Apex's INTZ scene depth, requested only while an enabled effect reads it.",
-                                                          "Effects, textures and presets live in Apex Radiance\\ReShade\\{Shaders,Textures,Presets}; presets use ReShade's .ini format."}})
+                                                          "Effects, textures and presets live in Apex Radiance\\FX\\{Shaders,Textures,Presets}; presets use the ReShade .ini format."}})
 
-// ---- Color > ReShade: one panel per effect file, the filter rows' look (see Picture's Filters tab) ----
+// ---- Color > FX: one panel per effect file, the filter rows' look (see Picture's Filters tab) ----
 namespace ReShadeUi {
 
 void EffectPanels() {
@@ -404,7 +404,7 @@ void EffectPanels() {
         if (visible) {
             if (info != files.end() && !info->error.empty()) {
                 ApexUi::IconNote(IconId::TriangleAlert, I18n::Trf("This effect could not load: {}", info->error).c_str(), VioletTheme::kWarning);
-                if (ApexUi::IconTextButton("Remove this effect", IconId::Trash2, "Deletes this effect's file from Apex Radiance\\ReShade"))
+                if (ApexUi::IconTextButton("Remove this effect", IconId::Trash2, "Deletes this effect's file from Apex Radiance\\FX"))
                     ReShadeFx::RemoveEffect(effect);
             } else if (info != files.end() && info->loading && std::none_of(techniques.begin(), techniques.end(),
                                                                              [&](const ReShadeFx::Technique& t) { return t.effect == effect; })) {
@@ -434,7 +434,7 @@ void EffectPanels() {
                     bool on = t.enabled;
                     if (ApexUi::ToggleSwitch("##On", &on)) {
                         ReShadeFx::SetTechnique(t.key, on);
-                        ApexUi::ReportChange(on ? "ReShade effect turned on" : "ReShade effect turned off");
+                        ApexUi::ReportChange(on ? "Effect turned on" : "Effect turned off");
                     }
                     ApexUi::EndControlRow();
                     if (expanded) {
@@ -539,7 +539,7 @@ void EffectSettings(const std::string& effect, bool removable) {
     }
     if (removable) {
         if (!uniforms.empty()) ImGui::SameLine(0.0f, ApexUi::kSpace3 * ApexUi::Unit());
-        if (ApexUi::IconTextButton("Remove this effect", IconId::Trash2, "Deletes this effect's file from Apex Radiance\\ReShade"))
+        if (ApexUi::IconTextButton("Remove this effect", IconId::Trash2, "Deletes this effect's file from Apex Radiance\\FX"))
             ReShadeFx::RemoveEffect(effect);
     }
     if (committed) ReShadeFx::SavePreset();

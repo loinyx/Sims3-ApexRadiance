@@ -1,9 +1,9 @@
 #pragma once
 // ReShade FX effects inside Apex Radiance (Color > ReShade): runs ReShade's .fx effects itself, no ReShade install.
 //
-// The effects come from Apex Radiance\ReShade\Shaders (Textures, Presets beside it). A worker thread preprocesses and
+// The effects come from Apex Radiance\FX\Shaders (Textures, Presets beside it). A worker thread preprocesses and
 // parses every .fx with the ReShade FX compiler (features/reshade_fx_compile.cpp) and compiles the shaders of the effects
-// that are on (bytecode cached in ReShade\Cache). The render thread creates the Direct3D 9 objects and runs the enabled
+// that are on (bytecode cached in FX\Cache). The render thread creates the Direct3D 9 objects and runs the enabled
 // techniques at Apex's post-scene boundary (PostScene::kReShade: after Color, before the game's interface), with Apex's
 // scene depth as DEPTH and a copy of the picture as COLOR. Which effects are on and their settings live in a ReShade
 // preset .ini (ReShade's own format, so presets move both ways).
@@ -76,18 +76,18 @@ void SetUniform(const Uniform& u); // the preset is saved by SavePreset (when an
 void ResetUniform(const Uniform& u);
 void SavePreset();
 
-// Presets: the .ini files in ReShade\Presets (file names); the current one (created when first saved)
+// Presets: the .ini files in FX\Presets (file names); the current one (created when first saved)
 std::vector<std::string> PresetFiles();
 std::string CurrentPreset();
 void SetPreset(const std::string& fileName); // loads it (saves the current one first)
 
-// Apex Radiance\ReShade\ (Shaders, Textures, Presets below it), created on demand
+// Apex Radiance\FX\ (Shaders, Textures, Presets below it), created on demand
 std::wstring EffectsFolder();
 // Copies the chosen files (.fx, .fxh, textures, .ini presets) or extracts a .zip shader pack into the folder above. File
 // work only (any thread); the render thread then calls Reload(). Returns how many files were added; error (English, for
 // the log) names the file that failed.
 int AddFiles(const std::vector<std::wstring>& paths, std::string& error);
-bool RemoveEffect(const std::string& fileName); // deletes the .fx from ReShade\Shaders; reloads
+bool RemoveEffect(const std::string& fileName); // deletes the .fx from FX\Shaders; reloads
 void Reload(); // reads every effect file again
 
 } // namespace ReShadeFx

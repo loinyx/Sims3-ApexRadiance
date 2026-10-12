@@ -340,7 +340,7 @@ void WriteCache(uint64_t hash, const std::string& bytecode) {
 
 using namespace Detail;
 
-std::wstring EffectsFolder() { return ApexPaths::ApexDirectory() + L"ReShade\\"; }
+std::wstring EffectsFolder() { return ApexPaths::ApexDirectory() + L"FX\\"; }
 
 int AddFiles(const std::vector<std::wstring>& paths, std::string& error) {
     int added = 0;

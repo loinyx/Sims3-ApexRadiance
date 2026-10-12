@@ -11,7 +11,7 @@ std::wstring Sub(const wchar_t* name);  // EffectsFolder() + name + "\" (Shaders
 std::wstring LowerW(std::wstring s);
 std::string Lower(std::string s);
 
-// Writes ReShade\Internal\ReShade.fxh and ReShadeUI.fxh (the headers most effects include) when missing or outdated.
+// Writes FX\Internal\ReShade.fxh and ReShadeUI.fxh (the headers most effects include) when missing or outdated.
 // Searched last, so a pack's own copies win.
 bool EnsureInternalHeaders(std::string& error);
 // The .fx files below Shaders (the first one of each name, sorted by name)
@@ -29,7 +29,7 @@ struct Image {
 };
 bool LoadImageFile(const std::filesystem::path& path, uint32_t width, uint32_t height, Image& out, std::string& error);
 
-// Compiled shader cache (ReShade\Cache\<hash>.cso)
+// Compiled shader cache (FX\Cache\<hash>.cso)
 bool ReadCache(uint64_t hash, std::string& bytecode);
 void WriteCache(uint64_t hash, const std::string& bytecode);
 uint64_t Hash64(const std::string& a, const std::string& b, const std::string& c);

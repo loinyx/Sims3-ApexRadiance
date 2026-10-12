@@ -1,4 +1,4 @@
-# ReShade effects: history
+# FX effects: history
 
 Chronological record of investigations and design decisions. Newest entries at the bottom. The current behaviour is
 described in [features/reshade.md](../features/reshade.md).
