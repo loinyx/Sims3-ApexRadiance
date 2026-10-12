@@ -159,7 +159,8 @@ class Picture {
     static const char* const* Keys(size_t& count);
 
     // Stable tab values; Overview is displayed first without moving the existing search indices.
-    enum Tab : int { TabBasic, TabTones, TabColor, TabDetail, TabFilters, TabOverview, TabLuts, TabCount };
+    // TabReShade is drawn by the ReShade effects feature (patches/reshade_patch.cpp), not by Picture.
+    enum Tab : int { TabBasic, TabTones, TabColor, TabDetail, TabFilters, TabOverview, TabLuts, TabReShade, TabCount };
     // The Filters tab: compact rows in six family panels, with independent adjustment disclosures.
     void RenderFiltersUI(bool lutOnly = false);
     // Rows of one Color tab. The overview owns the global Picture switch and comparison tools;

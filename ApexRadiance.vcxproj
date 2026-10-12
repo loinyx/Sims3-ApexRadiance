@@ -140,6 +140,12 @@
     <ClCompile Include="features\object_index.cpp" />
     <ClCompile Include="features\object_light_bridge.cpp" />
     <ClCompile Include="features\picture.cpp" />
+    <ClCompile Include="features\reshade_bridge.cpp" />
+    <ClCompile Include="patches\reshade_patch.cpp" />
+    <ClCompile Include="third_party\puff\puff.c">
+      <SDLCheck>false</SDLCheck>
+      <WarningLevel>Level3</WarningLevel>
+    </ClCompile>
     <ClCompile Include="features\post_scene.cpp" />
     <ClCompile Include="features\refpack_codec.cpp" />
     <ClCompile Include="features\resource_cache.cpp" />
@@ -255,6 +261,9 @@
     <ClInclude Include="features\object_index.h" />
     <ClInclude Include="features\object_light_bridge.h" />
     <ClInclude Include="features\picture.h" />
+    <ClInclude Include="features\reshade_bridge.h" />
+    <ClInclude Include="patches\reshade_patch.h" />
+    <ClInclude Include="third_party\puff\puff.h" />
     <ClInclude Include="features\post_scene.h" />
     <ClInclude Include="features\refpack_codec.h" />
     <ClInclude Include="features\resource_cache.h" />
@@ -314,6 +323,7 @@
     <None Include="third_party\smaa\SMAA.hlsl" />
     <None Include="third_party\smaa\LICENSE.txt" />
     <None Include="third_party\lucide\LICENSE" />
+    <None Include="third_party\reshade\LICENSE.md" />
     <None Include="vcpkg.json" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

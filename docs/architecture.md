@@ -306,7 +306,7 @@ registering in `Install` and unregistering in `Uninstall`.
 
 | Method | -2000 | -1000 | First (0) | 10 | Early (25) | Normal (50) | Last (100) | +1000 |
 |---|---|---|---|---|---|---|---|---|
-| Present | ApexCore | Frame Profiler start (dev) | PostScene, Picture, Depth Blur (while its depth swap runs), Ambient Occlusion, Edge Smoothing, Banding Fix, CapturesScreenshot | | | LotLightingMotion (camera sample), RoomLightQueue (render-thread id) | NightTerrainRelight (Night Lighting per-frame dispatcher), Frame Capture (dev) | Frame Profiler end (dev) |
+| Present | ApexCore | Frame Profiler start (dev) | PostScene, Picture, Depth Blur (while its depth swap runs), Ambient Occlusion, Edge Smoothing, Banding Fix, CapturesScreenshot | | | LotLightingMotion (camera sample), RoomLightQueue (render-thread id) | NightTerrainRelight (Night Lighting per-frame dispatcher), Frame Capture (dev), ReShade (frame skip and connection) | Frame Profiler end (dev) |
 | DrawIndexedPrimitive / DrawPrimitive | | Frame Profiler counter (dev) | PostScene | Picture | Ambient Occlusion (Sim receiver replay) | **LotLightBridge (Skip)** | Light Probe (Skip when it re-draws), Frame Capture (dev) | Banding Fix (binds its copies after every observer) |
 | SetRenderTarget | | | PostScene, Picture | | | | Frame Capture (dev) | |
 | SetPixelShader | | | | | Ambient Occlusion (Sim receiver test) | LotLightBridge | | |
@@ -320,6 +320,8 @@ Picture registers its draw hooks at 10 so its scene copy already contains the po
 PostScene's `First` callback, and before any feature that may Skip a draw (`features/picture.cpp`). The Banding Fix
 registers at 1000 so every observer has seen the draw before it binds its shader copies (`features/scene_dither.cpp`).
 Priorities -1000 and +1000 are reserved for the Frame Profiler, -2000 for the framework.
+The PostScene effect order is Ambient Occlusion 10, Edge Smoothing 20, Depth Blur 30, Color 40, ReShade 50
+(`features/post_scene.h`); ReShade's Present hook runs at `Last`, still before a proxy `d3d9.dll` ReShade sees the frame.
 
 ---
 

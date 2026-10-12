@@ -19,7 +19,7 @@
 
 namespace PostScene {
 using Effect = void (*)(IDirect3DDevice9*);
-enum Order : int { kAmbientOcclusion = 10, kEdgeSmoothing = 20, kDepthBlur = 30, kPicture = 40 };
+enum Order : int { kAmbientOcclusion = 10, kEdgeSmoothing = 20, kDepthBlur = 30, kPicture = 40, kReShade = 50 };
 // registers the draw hooks with the first effect. needsDepth = false: an effect that also runs when the scene was drawn with
 // another depth-stencil than the shared INTZ one (Picture: Color needs the depth only for Emphasize, see SceneDepthValid)
 void Add(int order, Effect fn, bool needsDepth = true);

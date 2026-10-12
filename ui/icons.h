@@ -132,6 +132,8 @@ enum class IconId : int {
     PanelLeftOpen, // panel-left-open
     Ellipsis, // ellipsis
     ChevronUp, // chevron-up
+    Paintbrush, // paintbrush
+    Plus, // plus
     Count,
     None = Count, // "no icon" for widgets that take an optional one
 };

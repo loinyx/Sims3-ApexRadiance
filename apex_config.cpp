@@ -560,6 +560,7 @@ unsigned FeaturePart(const std::string& name) {
     if (name == "NightTerrainRelight" || name == "SplitLevelGroundLight") return kPartNightLights;
     if (name == "AmbientOcclusion") return kPartAmbientOcclusion;
     if (name == "SceneDither") return kPartColor; // the Color page's Banding Fix
+    if (name == "ReShade") return kPartColor;     // Color > ReShade (its switch and depth option; the effects stay in ReShade's preset)
     if (name == "DepthBlur") return kPartDepthBlur;
     if (name == "EdgeSmoothing") return kPartEdgeSmoothing;
     for (const char* p : {Performance::kResourceCacheName, Performance::kLookupMissesName, Performance::kFileListName, Performance::kLotLightingName,

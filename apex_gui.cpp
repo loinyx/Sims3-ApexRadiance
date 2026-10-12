@@ -19,6 +19,7 @@
 #include "patch_base.h"
 #include "performance.h"
 #include "picture.h"
+#include "reshade_patch.h"
 #include "recorder.h"
 #include "captures.h"
 #include "light_diag.h"
@@ -365,7 +366,7 @@ constexpr const char* kOverviewPerformancePatches[] = {
 };
 
 constexpr const char* kOverviewMainPatches[] = {
-    kNightLighting, "AmbientOcclusion", "SceneDither", "DepthBlur", "EdgeSmoothing",
+    kNightLighting, "AmbientOcclusion", "SceneDither", "DepthBlur", "EdgeSmoothing", "ReShade",
 };
 
 // An option this game version does not have counts neither as on nor as off: the group switch works with the others
@@ -483,6 +484,7 @@ void OverviewPage() {
         OverviewPatchRow("SceneDither", IconId::Blend, "Banding Fix", "No color steps in light and shadows", PageBanding);
         OverviewPatchRow("DepthBlur", IconId::Aperture, "Depth Blur", "Softly blurs the distant background", PageDepthBlur);
         OverviewPatchRow("EdgeSmoothing", IconId::Spline, "Edge Smoothing", "Clean, smooth edges on the world", PageEdgeSmoothing);
+        OverviewPatchRow("ReShade", IconId::Paintbrush, "ReShade", "Your ReShade effects, under the game's interface", PageColor, &g_colorTab, Picture::TabReShade);
     }
     ApexUi::EndCard();
     ApexUi::GroupLabel("Performance");
@@ -745,18 +747,26 @@ void ColorOverview() {
         if(ApexUi::OverviewRow("LUTs",IconId::Layers,"LUTs","Applies a color treatment defined in a file",nullptr,&on,true,nullptr,&clicked)) {p.lut=on;changed=true;}
         if(clicked) g_colorTab=Picture::TabLuts;
         ImGui::EndDisabled();
+        // ReShade has its own switch: Color's master switch does not turn it off (ReShade runs without Apex's Color too)
+        OverviewPatchRow("ReShade", IconId::Paintbrush, "ReShade", "Your ReShade effects, under the game's interface", PageColor, &g_colorTab, Picture::TabReShade);
     }
     ApexUi::EndCard();if(changed) Picture::Get().SetParams(p,true);
 }
+// Color > ReShade: the ReShade card, then one panel per effect file
+void ReShadeTab() {
+    FeatureCard("ReShade", IconId::Paintbrush, "ReShade", "Your ReShade effects, under the game's interface");
+    ReShadeUi::EffectPanels();
+}
 void ColorPage() {
     ApexUi::PageTitle("Color", "How the game's picture looks");
-    static const char* const kTabs[] = {"Overview","Basic", "Tones", "Color", "Detail", "Filters", "LUTs"};
+    static const char* const kTabs[] = {"Overview","Basic", "Tones", "Color", "Detail", "Filters", "LUTs", "ReShade"};
     if (g_colorTab < 0 || g_colorTab >= Picture::TabCount) g_colorTab = Picture::TabOverview;
-    int selected=g_colorTab==Picture::TabOverview ? 0 : g_colorTab==Picture::TabLuts ? 6 : g_colorTab+1;
+    int selected=g_colorTab==Picture::TabOverview ? 0 : g_colorTab==Picture::TabLuts ? 6 : g_colorTab==Picture::TabReShade ? 7 : g_colorTab+1;
     ApexUi::TabBar("##ColorTabs", &selected, kTabs, IM_COUNTOF(kTabs));
-    g_colorTab=selected==0 ? Picture::TabOverview : selected==6 ? Picture::TabLuts : selected-1;
+    g_colorTab=selected==0 ? Picture::TabOverview : selected==6 ? Picture::TabLuts : selected==7 ? Picture::TabReShade : selected-1;
     if(g_colorTab==Picture::TabOverview) {ColorOverview();return;}
     if(g_colorTab==Picture::TabLuts) {Picture::Get().RenderFiltersUI(true);return;}
+    if(g_colorTab==Picture::TabReShade) {ReShadeTab();return;}
     ColorGroupHeader(g_colorTab);
     if (g_colorTab == Picture::TabFilters) {Picture::Get().RenderFiltersUI();return;}
     PictureRows(g_colorTab);
@@ -2631,7 +2641,7 @@ void AboutTab() {
         CreditLine("Upper-floor ground light: Arro's technique, adapted in Apex Radiance.");
         CreditLine("Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.");
         CreditLine("Thanks to @boringbones for testing every build.");
-        CreditLine("Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).");
+        CreditLine("Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC), ReShade add-on headers - Patrick Mours (BSD-3-Clause), puff - Mark Adler (zlib).");
     }
     ApexUi::EndCard();
     ImGui::PopID();
@@ -2677,6 +2687,7 @@ const SearchPart* SearchParts(int& count) {
         {"Banding Fix", nullptr, PageBanding, nullptr, 0, BandingTabContent},
         {"Color", "Overview", PageColor, &g_colorTab, Picture::TabOverview, ColorOverview},
         {"Color", "LUTs", PageColor, &g_colorTab, Picture::TabLuts, [] { Picture::Get().RenderFiltersUI(true); }},
+        {"Color", "ReShade", PageColor, &g_colorTab, Picture::TabReShade, ReShadeTab},
         {"Presets", "Presets", PageProfiles, nullptr, 0, ProfilesTab},
         {"Color", "Filters", PageColor, &g_colorTab, Picture::TabFilters, [] { Picture::Get().RenderFiltersUI(); }},
         {"Color", "Basic", PageColor, &g_colorTab, Picture::TabBasic, [] { PictureRows(Picture::TabBasic); }},
