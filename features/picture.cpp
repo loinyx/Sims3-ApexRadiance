@@ -2148,7 +2148,7 @@ bool Picture::ParamsFromToml(const toml::table& qolTable, PictureParams& out) {
     q.enabled = t["enabled"].value_or(false);
     q.basicEnabled=t["basic_enabled"].value_or(true); q.tonesEnabled=t["tones_enabled"].value_or(true);
     q.colorEnabled=t["color_enabled"].value_or(true); q.detailEnabled=t["detail_enabled"].value_or(true); q.filtersEnabled=t["filters_enabled"].value_or(true);
-    // 2.11.0 to 2.12.1 filter shortcuts moved to presets (user, 2026-10-12): older keys are ignored, then dropped on save
+    // Filter shortcuts (2.11.0 to 2.12.1) became preset shortcuts: the old keys are ignored, then dropped on save
     if (const auto* keys=t["filter_shortcuts"].as_table(); keys && !keys->empty()) {
         static std::atomic<bool> logged{false};
         if (!logged.exchange(true)) LOG_INFO("[Picture] Filter shortcuts from an older version are ignored: assign shortcuts to presets instead");
