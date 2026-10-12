@@ -57,7 +57,7 @@ Steam 1.67.2 (image base 0x00400000) unless stated otherwise.
 | [Sim Occlusion](features/sim-occlusion.md): separate shade controls for Sims and hair | Released in 2.6.0 |
 | [Reflections](features/reflections.md): water reflections and lamp glow | Released |
 | [Picture filters](features/picture-filters.md): colour and image controls, 26 stackable filters, LUT files | Released (Filters tab: 2.7.0) |
-| [ReShade effects](features/reshade.md): an installed ReShade rendered before the game interface, with Apex depth; add effects and packs in the menu | In development |
+| [ReShade effects](features/reshade.md): ReShade `.fx` effects run by Apex itself (no ReShade install) before the game interface, with Apex depth; add effects and packs in the menu | In development |
 | [Edge Smoothing](features/edge-smoothing.md): SMAA and FXAA | Released |
 | [Depth Blur](features/depth-blur.md): depth of field | Released |
 | [Banding Fix](features/banding-fix.md): dither against colour banding | Experimental (released in 2.2.0) |

@@ -321,7 +321,7 @@ PostScene's `First` callback, and before any feature that may Skip a draw (`feat
 registers at 1000 so every observer has seen the draw before it binds its shader copies (`features/scene_dither.cpp`).
 Priorities -1000 and +1000 are reserved for the Frame Profiler, -2000 for the framework.
 The PostScene effect order is Ambient Occlusion 10, Edge Smoothing 20, Depth Blur 30, Color 40, ReShade 50
-(`features/post_scene.h`); ReShade's Present hook runs at `Last`, still before a proxy `d3d9.dll` ReShade sees the frame.
+(`features/post_scene.h`); ReShade's Present hook (effect loading, timers, toggle keys) runs at `Last`.
 
 ---
 

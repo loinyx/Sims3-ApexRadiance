@@ -140,7 +140,44 @@
     <ClCompile Include="features\object_index.cpp" />
     <ClCompile Include="features\object_light_bridge.cpp" />
     <ClCompile Include="features\picture.cpp" />
-    <ClCompile Include="features\reshade_bridge.cpp" />
+    <ClCompile Include="features\reshade_fx.cpp" />
+    <ClCompile Include="features\reshade_fx_compile.cpp" />
+    <ClCompile Include="features\reshade_fx_files.cpp" />
+    <ClCompile Include="third_party\reshadefx\effect_codegen_hlsl.cpp">
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <SDLCheck>false</SDLCheck>
+      <WarningLevel>Level3</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="third_party\reshadefx\effect_expression.cpp">
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <SDLCheck>false</SDLCheck>
+      <WarningLevel>Level3</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="third_party\reshadefx\effect_lexer.cpp">
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <SDLCheck>false</SDLCheck>
+      <WarningLevel>Level3</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="third_party\reshadefx\effect_parser_exp.cpp">
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <SDLCheck>false</SDLCheck>
+      <WarningLevel>Level3</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="third_party\reshadefx\effect_parser_stmt.cpp">
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <SDLCheck>false</SDLCheck>
+      <WarningLevel>Level3</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="third_party\reshadefx\effect_preprocessor.cpp">
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <SDLCheck>false</SDLCheck>
+      <WarningLevel>Level3</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="third_party\reshadefx\effect_symbol_table.cpp">
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <SDLCheck>false</SDLCheck>
+      <WarningLevel>Level3</WarningLevel>
+    </ClCompile>
     <ClCompile Include="patches\reshade_patch.cpp" />
     <ClCompile Include="third_party\puff\puff.c">
       <SDLCheck>false</SDLCheck>
@@ -261,7 +298,17 @@
     <ClInclude Include="features\object_index.h" />
     <ClInclude Include="features\object_light_bridge.h" />
     <ClInclude Include="features\picture.h" />
-    <ClInclude Include="features\reshade_bridge.h" />
+    <ClInclude Include="features\reshade_fx.h" />
+    <ClInclude Include="features\reshade_fx_compile.h" />
+    <ClInclude Include="features\reshade_fx_internal.h" />
+    <ClInclude Include="third_party\reshadefx\effect_codegen.hpp" />
+    <ClInclude Include="third_party\reshadefx\effect_expression.hpp" />
+    <ClInclude Include="third_party\reshadefx\effect_lexer.hpp" />
+    <ClInclude Include="third_party\reshadefx\effect_module.hpp" />
+    <ClInclude Include="third_party\reshadefx\effect_parser.hpp" />
+    <ClInclude Include="third_party\reshadefx\effect_preprocessor.hpp" />
+    <ClInclude Include="third_party\reshadefx\effect_symbol_table.hpp" />
+    <ClInclude Include="third_party\reshadefx\effect_token.hpp" />
     <ClInclude Include="patches\reshade_patch.h" />
     <ClInclude Include="third_party\puff\puff.h" />
     <ClInclude Include="features\post_scene.h" />
@@ -323,7 +370,9 @@
     <None Include="third_party\smaa\SMAA.hlsl" />
     <None Include="third_party\smaa\LICENSE.txt" />
     <None Include="third_party\lucide\LICENSE" />
-    <None Include="third_party\reshade\LICENSE.md" />
+    <None Include="third_party\reshadefx\LICENSE.md" />
+    <None Include="third_party\reshadefx\effect_symbol_table_intrinsics.inl" />
+    <None Include="features\reshade_fx_reshade_fxh.inc" />
     <None Include="vcpkg.json" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

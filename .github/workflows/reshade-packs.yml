@@ -1,0 +1,59 @@
+name: ReShade FX packs report
+# Report only: compiles the effects of popular public ReShade shader packs to shader model 3 with the vendored compiler
+# and D3DCompile, the way the game runs them. Never fails the build; the report is in the job log and the artifact.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'third_party/reshadefx/**'
+      - 'features/reshade_fx_compile.*'
+      - 'tools/reshade_fx_test/**'
+      - '.github/workflows/reshade-packs.yml'
+permissions:
+  contents: read
+concurrency:
+  group: reshade-packs-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  packs:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Fetch shader packs
+        shell: pwsh
+        run: |
+          $packs = @(
+            @{ Name='reshade-shaders'; Url='https://github.com/crosire/reshade-shaders'; Branch='slim' },
+            @{ Name='SweetFX'; Url='https://github.com/CeeJayDK/SweetFX' },
+            @{ Name='prod80'; Url='https://github.com/prod80/prod80-ReShade-Repository' },
+            @{ Name='qUINT'; Url='https://github.com/martymcmodding/qUINT' },
+            @{ Name='AstrayFX'; Url='https://github.com/BlueSkyDefender/AstrayFX' },
+            @{ Name='Depth3D'; Url='https://github.com/BlueSkyDefender/Depth3D' },
+            @{ Name='fubax'; Url='https://github.com/Fubaxiusz/fubax-shaders' }
+          )
+          New-Item -ItemType Directory -Path packs -Force | Out-Null
+          foreach ($p in $packs) {
+            $branch = if ($p.Branch) { @('--branch', $p.Branch) } else { @() }
+            git clone --depth 1 @branch $p.Url (Join-Path 'packs' $p.Name)
+            if ($LASTEXITCODE -ne 0) { Write-Warning "Could not clone $($p.Name)" }
+          }
+      - name: Build the checker
+        shell: pwsh
+        run: ./tools/development/check.ps1 -Suite Smoke
+      - name: Compile every pack effect (report only)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $include = 'packs/reshade-shaders/Shaders'
+          $roots = Get-ChildItem packs -Directory | ForEach-Object { $_.FullName }
+          & ./outputs/checks/fx-check.exe --include $include @roots 2>&1 | Tee-Object -FilePath outputs/checks/fx-packs.txt
+          exit 0
+      - name: Preserve the report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: reshade-fx-packs-${{ github.sha }}
+          path: outputs/checks/fx-packs.txt
+          if-no-files-found: warn
+          retention-days: 14

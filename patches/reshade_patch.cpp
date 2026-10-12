@@ -1,7 +1,7 @@
-// ReShade effects (Apex Radiance): an installed ReShade's effects rendered on the finished scene, after Color and before
-// the game draws its interface, with Apex's scene depth. The menu (Color > ReShade) switches and adjusts the effects of
-// the current ReShade preset, picks the preset and adds effect files or shader packs to Apex Radiance\ReShade\.
-// The ReShade side lives in features/reshade_bridge.cpp; docs/features/reshade.md.
+// ReShade effects (Apex Radiance): ReShade's .fx effects run by Apex itself (no ReShade install) on the finished scene,
+// after Color and before the game draws its interface, with Apex's scene depth. The menu (Color > ReShade) switches and
+// adjusts the effects of the current preset, picks the preset and adds effect files or shader packs to
+// Apex Radiance\ReShade\. The engine lives in features/reshade_fx.cpp; docs/features/reshade.md.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -14,7 +14,7 @@
 #include "hook_guard.h"
 #include "post_scene.h"
 #include "render_callbacks.h"
-#include "reshade_bridge.h"
+#include "reshade_fx.h"
 #include "imgui.h"
 #include "ui/i18n.h"
 #include "ui/violet_theme.h"
@@ -35,14 +35,9 @@
 namespace {
 
 constexpr const char* kHookName = "ReShade";
-constexpr const wchar_t* kReShadeUrl = L"https://reshade.me";
-
-struct Params {
-    bool apexDepth = true; // bind Apex's scene depth as ReShade's DEPTH
-};
+constexpr const char* kPresetKey = "preset";
 
 struct State {
-    Params p;
     bool active = false;
     // GPU cost of render_effects, timestamp queries (render thread)
     static constexpr int kQ = 4;
@@ -91,7 +86,7 @@ void ReadTimings() {
 
 // PostScene effect (order kReShade): after Color, before the game's interface
 void ReShadeEffect(IDirect3DDevice9* dev) {
-    if (!g.active || ReShadeBridge::GetState() != ReShadeBridge::State::Connected) return;
+    if (!g.active) return;
     if (!g.qCreated) {
         g.qCreated = true;
         for (int i = 0; i < State::kQ; i++) {
@@ -108,7 +103,7 @@ void ReShadeEffect(IDirect3DDevice9* dev) {
         g.qDisjoint[qi]->Issue(D3DISSUE_BEGIN);
         g.qBegin[qi]->Issue(D3DISSUE_END);
     }
-    ReShadeBridge::RenderBeforeInterface(dev);
+    ReShadeFx::Render(dev);
     if (timed) {
         g.qEnd[qi]->Issue(D3DISSUE_END);
         g.qFreq[qi]->Issue(D3DISSUE_END);
@@ -120,14 +115,14 @@ void ReShadeEffect(IDirect3DDevice9* dev) {
 
 void OnPreReset(IDirect3DDevice9*) {
     if (!g.active) return;
-    ReShadeBridge::BeforeReset();
+    ReShadeFx::BeforeReset();
     ReleaseQueries();
 }
 
 void RestartEffects(IDirect3DDevice9* dev) { OnPreReset(dev); }
 
 // ---- Add effects: a multi-select file dialog on its own thread (COM; the menu frame must not pump the game window's
-// messages), the files copied there too; the render thread then adds the search paths and reloads (TakeAddResult) ----
+// messages), the files copied there too; the render thread then reloads the effects (TakeAddResult) ----
 struct AddResult {
     int added = 0;
     std::string error;
@@ -177,7 +172,7 @@ void PickAndAddFiles() {
             }
             if (!paths.empty()) {
                 result.cancelled = false;
-                result.added = ReShadeBridge::AddFiles(paths, result.error);
+                result.added = ReShadeFx::AddFiles(paths, result.error);
             }
             std::lock_guard<std::mutex> lock(g_addLock);
             g_addResult = std::move(result);
@@ -208,41 +203,31 @@ void TakeAddResult() {
         g_addResult.reset();
     }
     if (!r || r->cancelled) return;
-    if (r->added > 0) {
-        ReShadeBridge::EnsureSearchPaths();
-        ReShadeBridge::Reload();
-    }
+    if (r->added > 0) ReShadeFx::Reload();
     g_addMessageError = !r->error.empty();
     g_addMessage = g_addMessageError ? I18n::Trf("Could not add {}", r->error.substr(0, r->error.find(':')))
-                                     : I18n::Trf("Added {} files; ReShade is loading them", r->added);
+                                     : I18n::Trf("Added {} files; loading them", r->added);
     g_addMessageUntil = ImGui::GetTime() + 8.0;
 }
-
-std::string FileName(const std::wstring& path) { return ApexUtil::ToUtf8(std::filesystem::path(path).filename().wstring()); }
 
 } // namespace
 
 class ReShadePatch : public ApexPatch {
   public:
-    ReShadePatch() : ApexPatch("ReShade", nullptr) {
-        RegisterBoolSetting(&g.p.apexDepth, "apexDepth", Params{}.apexDepth,
-                            "Blur and shading effects know exactly how far things are");
-    }
+    ReShadePatch() : ApexPatch("ReShade", nullptr) {}
 
     bool Install() override {
         if (isEnabled) return true;
         lastError.clear();
         using namespace D3D9Hooks;
-        // Last: after the other features' Present work, still before ReShade's own Present (a proxy d3d9.dll below the detours)
         RegisterPresent(kHookName, [](DeviceContext& ctx, const RECT*, const RECT*, HWND, const RGNDATA*) {
-            ReShadeBridge::AtPresent(ctx.device);
-            ReShadeBridge::UseApexDepth(g.active && g.p.apexDepth && ReShadeBridge::GetState() == ReShadeBridge::State::Connected);
+            ReShadeFx::AtPresent(ctx.device);
             return HookAction::Continue;
         }, Priority::Last);
         RenderCallbacks::Add(RenderCallbacks::preReset, OnPreReset);
         RenderCallbacks::Add(RenderCallbacks::restartEffects, RestartEffects);
         PostScene::Add(PostScene::kReShade, ReShadeEffect, false);
-        ReShadeBridge::Start();
+        ReShadeFx::Start();
         g.active = true;
         isEnabled = true;
         LOG_INFO("[ReShade] Installed");
@@ -256,7 +241,7 @@ class ReShadePatch : public ApexPatch {
         D3D9Hooks::UnregisterAll(kHookName);
         RenderCallbacks::Remove(RenderCallbacks::preReset, OnPreReset);
         RenderCallbacks::Remove(RenderCallbacks::restartEffects, RestartEffects);
-        ReShadeBridge::Stop();
+        ReShadeFx::Stop();
         ReleaseQueries();
         g.active = false;
         isEnabled = false;
@@ -267,81 +252,74 @@ class ReShadePatch : public ApexPatch {
     // Settings are read every frame
     void Update() override { pendingReinstall = false; }
 
-    float GpuCostMs() const override {
-        return (isEnabled.load() && ReShadeBridge::GetState() == ReShadeBridge::State::Connected && g.gpuMs >= 0.0f) ? g.gpuMs : -1.0f;
+    // The current preset's file name (the effects and their values live in that .ini, ReShade's format)
+    void SaveToToml(toml::table& table) const override {
+        ApexPatch::SaveToToml(table);
+        table.insert_or_assign(kPresetKey, ReShadeFx::CurrentPreset());
     }
+    bool LoadFromToml(const toml::table& table) override {
+        const bool ok = ApexPatch::LoadFromToml(table);
+        if (const auto name = table[kPresetKey].value<std::string>()) ReShadeFx::SetPreset(*name);
+        return ok;
+    }
+    void ApplyTableLive(const toml::table& table) override {
+        ApexPatch::ApplyTableLive(table);
+        if (const auto name = table[kPresetKey].value<std::string>(); name && *name != ReShadeFx::CurrentPreset()) ReShadeFx::SetPreset(*name);
+    }
+
+    float GpuCostMs() const override { return (isEnabled.load() && g.gpuMs >= 0.0f) ? g.gpuMs : -1.0f; }
     const char* OverviewSummary() const override {
-        switch (ReShadeBridge::GetState()) {
-        case ReShadeBridge::State::NotFound: return "Not installed";
-        case ReShadeBridge::State::TooOld: return "Update ReShade";
-        case ReShadeBridge::State::OtherApi: return "Over the interface (DXVK)";
+        switch (ReShadeFx::GetState()) {
+        case ReShadeFx::State::Empty: return "No effects yet";
+        case ReShadeFx::State::Loading: return "Loading effects";
         default: return nullptr;
         }
     }
 
-    // The ReShade card's body (Color > ReShade): state, depth, preset and Add effects
+    // The ReShade card's body (Color > ReShade): state, preset and Add effects
     void RenderCustomUI() override {
         SAFE_IMGUI_BEGIN();
         using ApexUi::IconId;
-        static const Params kDefaults{};
         TakeAddResult();
-        bool changed = false;
-        const auto state = ReShadeBridge::GetState();
-        switch (state) {
-        case ReShadeBridge::State::NotFound:
-            ApexUi::IconNote(IconId::Info, "ReShade isn't installed; install it for TS3W.exe with Direct3D 9 and restart");
-            if (ApexUi::IconTextButton("Download ReShade", IconId::Download, "Opens reshade.me in your browser", ApexUi::ButtonKind::Primary))
-                OpenInShell(kReShadeUrl, false);
-            return;
-        case ReShadeBridge::State::TooOld:
-            ApexUi::IconNote(IconId::TriangleAlert, I18n::Trf("ReShade {} is too old; update to 6.3 or newer", ReShadeBridge::Version()).c_str(),
-                             VioletTheme::kWarning);
-            if (ApexUi::IconTextButton("Download ReShade", IconId::Download, "Opens reshade.me in your browser", ApexUi::ButtonKind::Primary))
-                OpenInShell(kReShadeUrl, false);
-            return;
-        case ReShadeBridge::State::Registering:
-        case ReShadeBridge::State::Off:
-            ApexUi::IconNote(IconId::Info, "Connecting to ReShade…");
-            return;
-        case ReShadeBridge::State::OtherApi:
-            ApexUi::IconNote(IconId::TriangleAlert,
-                             "ReShade runs through DXVK, so its effects can't stay under the interface",
-                             VioletTheme::kWarning);
-            return;
-        case ReShadeBridge::State::Connected:
+        switch (ReShadeFx::GetState()) {
+        case ReShadeFx::State::Off: break;
+        case ReShadeFx::State::Empty:
+            ApexUi::IconNote(IconId::Info, "Add effects to start: .fx files or a .zip shader pack");
+            break;
+        case ReShadeFx::State::Loading: {
+            const int n = ReShadeFx::EffectsLoading();
+            ApexUi::IconNote(IconId::Info, n > 0 ? I18n::Trf("Loading {} effects…", n).c_str() : I18n::Tr("Loading effects…"));
             break;
         }
-        const auto techniques = ReShadeBridge::Techniques();
-        int effectsOn = 0;
-        for (const auto& t : techniques) effectsOn += t.enabled ? 1 : 0;
-        ApexUi::IconNote(IconId::CircleCheck,
-                         I18n::Trf("ReShade {} · {} of {} effects on", ReShadeBridge::Version(), effectsOn, techniques.size()).c_str(),
-                         VioletTheme::kSuccess);
-        if (ReShadeBridge::Multisampled())
-            ApexUi::IconNote(IconId::Info, "Turn off the game's Edge Smoothing (Options › Graphics) to keep effects off menus");
+        case ReShadeFx::State::Ready: {
+            const auto techniques = ReShadeFx::Techniques();
+            int on = 0;
+            for (const auto& t : techniques) on += t.enabled ? 1 : 0;
+            ApexUi::IconNote(IconId::CircleCheck, I18n::Trf("{} of {} effects on", on, techniques.size()).c_str(), VioletTheme::kSuccess);
+            break;
+        }
+        }
         ApexUi::Gap(ApexUi::kSpace1);
-        changed |= ApexUi::SwitchRow("Accurate distance for effects", &g.p.apexDepth, "Blur and shading effects know exactly how far things are",
-                                     kDefaults.apexDepth);
 
-        // Preset: ReShade's own .ini files and the ones added here
+        // Preset: the .ini files in ReShade\Presets (ReShade's own format)
         {
-            const auto presets = ReShadeBridge::PresetFiles();
-            const std::wstring current = ReShadeBridge::CurrentPreset();
-            std::vector<std::string> names;
+            const auto presets = ReShadeFx::PresetFiles();
+            const std::string current = ReShadeFx::CurrentPreset();
             int selected = -1;
+            std::vector<const char*> labels;
             for (size_t i = 0; i < presets.size(); i++) {
-                names.push_back(FileName(presets[i]));
-                if (_wcsicmp(presets[i].c_str(), current.c_str()) == 0) selected = static_cast<int>(i);
+                labels.push_back(presets[i].c_str());
+                if (_stricmp(presets[i].c_str(), current.c_str()) == 0) selected = static_cast<int>(i);
             }
-            if (!names.empty()) {
-                std::vector<const char*> labels;
-                for (const auto& n : names) labels.push_back(n.c_str());
+            if (!labels.empty()) {
                 const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
                 int choice = std::max(selected, 0);
                 if (ApexUi::SelectRow("ReShade preset", "Which effects are on and how they're set", "##ReShadePreset", &choice,
                                       labels.data(), static_cast<int>(labels.size())) &&
-                    choice != selected)
-                    ReShadeBridge::SetPreset(presets[static_cast<size_t>(choice)]);
+                    choice != selected) {
+                    ReShadeFx::SetPreset(presets[static_cast<size_t>(choice)]);
+                    NotifySettingChanged();
+                }
             }
         }
 
@@ -359,38 +337,38 @@ class ReShadePatch : public ApexPatch {
                 ImGui::EndDisabled();
                 ImGui::SameLine(0.0f, gap);
                 if (ApexUi::IconTextButton(folderLabel, IconId::ExternalLink, "Opens Apex Radiance\\ReShade in Explorer (created if needed)"))
-                    OpenInShell(ReShadeBridge::EffectsFolder(), true);
+                    OpenInShell(ReShadeFx::EffectsFolder(), true);
                 ApexUi::EndControlRow();
             }
             if (!g_addMessage.empty() && ImGui::GetTime() < g_addMessageUntil)
                 ApexUi::IconNote(g_addMessageError ? IconId::TriangleAlert : IconId::CircleCheck, g_addMessage.c_str(),
                                  g_addMessageError ? VioletTheme::kWarning : VioletTheme::kSuccess);
         }
-        if (changed) NotifySettingChanged();
     }
 
     void RenderDeveloperUI() override {
         SAFE_IMGUI_BEGIN();
-        static const char* const kStates[] = {"Off", "Not found", "Too old", "Registering", "Other API (DXVK)", "Connected"};
-        ImGui::TextDisabled("State: %s; ReShade %s", kStates[static_cast<int>(ReShadeBridge::GetState())], ReShadeBridge::Version().c_str());
-        ImGui::TextDisabled("Rendered before the interface: %d frames in the last second", ReShadeBridge::FramesRenderedLastSecond());
+        static const char* const kStates[] = {"Off", "Empty", "Loading", "Ready"};
+        ImGui::TextDisabled("State: %s; %d effect files, %d loading", kStates[static_cast<int>(ReShadeFx::GetState())],
+                            static_cast<int>(ReShadeFx::Effects().size()), ReShadeFx::EffectsLoading());
+        ImGui::TextDisabled("Rendered before the interface: %d frames in the last second", ReShadeFx::FramesRenderedLastSecond());
+        ImGui::TextDisabled("Scene depth requested: %s", ReShadeFx::WantsDepth() ? "yes" : "no");
         if (g.gpuMs >= 0) ImGui::TextDisabled("GPU cost: %.2f ms per frame", g.gpuMs);
     }
 };
 
 APEX_REGISTER_FEATURE(ReShadePatch, {.displayName = "ReShade effects",
-                                     .description = "Runs your ReShade effects on the game's picture while menus, plumbobs and text keep their colors, "
-                                                    "and blur effects see exactly how far things are. Needs ReShade 6.3 or newer for Direct3D 9. Part of " APEX_PRODUCT_NAME
+                                     .description = "Runs ReShade effects (.fx) on the game's picture without installing ReShade, while menus, plumbobs and "
+                                                    "text keep their colors; effects that blur by distance see exactly how far things are. Part of " APEX_PRODUCT_NAME
                                                     ". Credits: @loinyx",
                                      .category = "Graphics",
                                      .experimental = true,
                                      .enabledByDefault = true,
                                      .supportedVersions = VERSION_ALL,
-                                     .technicalDetails = {"Registers with an installed ReShade as an add-on (API 14, ReShade 6.3+); Apex never loads ReShade.",
-                                                          "Calls effect_runtime::render_effects at the PostScene boundary (after Color), so ReShade skips its Present pass.",
-                                                          "Frames without the boundary call it with no target, so effects never land on the interface.",
-                                                          "Binds Apex's INTZ scene depth as DEPTH in reshade_begin_effects, after ReShade's own depth add-on.",
-                                                          "Added files go to Apex Radiance\\ReShade\\{Shaders,Textures,Presets}, added to ReShade's search paths."}})
+                                     .technicalDetails = {"Embeds ReShade's FX compiler (BSD-3); .fx files become shader model 3 code, compiled with D3DCompile on a worker thread and cached.",
+                                                          "Runs the enabled techniques at the PostScene boundary (after Color), so effects never land on the interface.",
+                                                          "COLOR is a copy of the back buffer; DEPTH is Apex's INTZ scene depth, requested only while an enabled effect reads it.",
+                                                          "Effects, textures and presets live in Apex Radiance\\ReShade\\{Shaders,Textures,Presets}; presets use ReShade's .ini format."}})
 
 // ---- Color > ReShade: one panel per effect file, the filter rows' look (see Picture's Filters tab) ----
 namespace ReShadeUi {
@@ -398,35 +376,44 @@ namespace ReShadeUi {
 void EffectPanels() {
     using ApexUi::IconId;
     ApexPatch* patch = PatchManager::Get().Find("ReShade");
-    if (!patch || !patch->IsEnabled() || ReShadeBridge::GetState() != ReShadeBridge::State::Connected) return;
+    if (!patch || !patch->IsEnabled()) return;
+    const auto state = ReShadeFx::GetState();
+    if (state == ReShadeFx::State::Off || state == ReShadeFx::State::Empty) return;
     if (ApexUi::FilterActive()) return; // effect names and settings come from the shaders: not part of the menu's search
-    const auto techniques = ReShadeBridge::Techniques();
-    if (techniques.empty()) {
-        ApexUi::IconNote(IconId::Info, "No effects loaded yet; add some above or wait while ReShade loads them");
-        return;
-    }
-    const auto added = ReShadeBridge::AddedEffects();
-    auto isAdded = [&](const std::string& effect) {
-        const std::wstring w = ApexUtil::ToWide(effect);
-        return std::any_of(added.begin(), added.end(), [&](const std::wstring& a) { return _wcsicmp(a.c_str(), w.c_str()) == 0; });
-    };
-    // effect files in ReShade's order (the first technique of each)
+    const auto techniques = ReShadeFx::Techniques();
+    const auto files = ReShadeFx::Effects();
+    // effect files in render order (the first technique of each), then the ones without a technique to show (failed, loading)
     std::vector<std::string> effects;
     for (const auto& t : techniques)
         if (std::find(effects.begin(), effects.end(), t.effect) == effects.end()) effects.push_back(t.effect);
+    for (const auto& f : files)
+        if ((!f.error.empty() || f.loading) && std::find(effects.begin(), effects.end(), f.file) == effects.end()) effects.push_back(f.file);
+    if (effects.empty()) {
+        ApexUi::IconNote(IconId::Info, state == ReShadeFx::State::Loading ? "Loading effects…" : "These files have no effects to show");
+        return;
+    }
 
     const float u = ApexUi::Unit(), gap = ApexUi::kSpace2 * u;
     const ImVec2 switchSize = ApexUi::ToggleSwitchSize();
     const float controlsW = 24.0f * u + switchSize.x + gap; // disclosure + switch, as the filter rows
     for (const std::string& effect : effects) {
+        const auto info = std::find_if(files.begin(), files.end(), [&](const ReShadeFx::EffectInfo& f) { return f.file == effect; });
         ImGui::PushID(effect.c_str());
         ApexUi::SectionLabel(effect.c_str()); // a file name: shown as it is (no translation entry)
         const bool visible = ApexUi::BeginCard("##Effect");
         if (visible) {
+            if (info != files.end() && !info->error.empty()) {
+                ApexUi::IconNote(IconId::TriangleAlert, I18n::Trf("This effect could not load: {}", info->error).c_str(), VioletTheme::kWarning);
+                if (ApexUi::IconTextButton("Remove this effect", IconId::Trash2, "Deletes this effect's file from Apex Radiance\\ReShade"))
+                    ReShadeFx::RemoveEffect(effect);
+            } else if (info != files.end() && info->loading && std::none_of(techniques.begin(), techniques.end(),
+                                                                             [&](const ReShadeFx::Technique& t) { return t.effect == effect; })) {
+                ApexUi::MutedText("Loading…");
+            }
             bool first = true;
             for (const auto& t : techniques) {
                 if (t.effect != effect) continue;
-                ImGui::PushID(t.name.c_str()); // by name: the disclosure stays open across ReShade reloads
+                ImGui::PushID(t.name.c_str()); // by name: the disclosure stays open across reloads
                 ApexUi::SetNextRowUntranslated();
                 if (ApexUi::BeginControlRow(t.name.c_str(), t.tooltip.empty() ? nullptr : t.tooltip.c_str(), controlsW, IconId::None, 30.0f * u)) {
                     const ImGuiID openId = ImGui::GetID("Expanded");
@@ -446,13 +433,13 @@ void EffectPanels() {
                     center(switchSize.y);
                     bool on = t.enabled;
                     if (ApexUi::ToggleSwitch("##On", &on)) {
-                        ReShadeBridge::SetTechnique(t.handle, on);
+                        ReShadeFx::SetTechnique(t.key, on);
                         ApexUi::ReportChange(on ? "ReShade effect turned on" : "ReShade effect turned off");
                     }
                     ApexUi::EndControlRow();
                     if (expanded) {
                         ApexUi::Gap(ApexUi::kSpace3);
-                        EffectSettings(effect, isAdded(effect));
+                        EffectSettings(effect, true);
                     }
                 }
                 first = false;
@@ -466,7 +453,7 @@ void EffectPanels() {
 
 void EffectSettings(const std::string& effect, bool removable) {
     using ApexUi::IconId;
-    auto uniforms = ReShadeBridge::Uniforms(effect);
+    auto uniforms = ReShadeFx::Uniforms(effect);
     if (uniforms.empty()) ApexUi::MutedText("This effect has no settings");
     std::string category;
     bool committed = false;
@@ -479,7 +466,7 @@ void EffectSettings(const std::string& effect, bool removable) {
         const char* desc = v.tooltip.empty() ? nullptr : v.tooltip.c_str();
         bool edited = false;
         switch (v.kind) {
-        case ReShadeBridge::UniformKind::Bool: {
+        case ReShadeFx::UniformKind::Bool: {
             bool b = v.value[0] != 0.0f;
             ApexUi::SetNextRowUntranslated();
             if (ApexUi::SwitchRow(v.label.c_str(), &b, desc)) {
@@ -488,7 +475,7 @@ void EffectSettings(const std::string& effect, bool removable) {
             }
             break;
         }
-        case ReShadeBridge::UniformKind::Combo: {
+        case ReShadeFx::UniformKind::Combo: {
             std::vector<const char*> items;
             for (const auto& item : v.items) items.push_back(item.c_str());
             int current = std::clamp(static_cast<int>(std::lround(v.value[0])), 0, static_cast<int>(items.size()) - 1);
@@ -500,7 +487,7 @@ void EffectSettings(const std::string& effect, bool removable) {
             }
             break;
         }
-        case ReShadeBridge::UniformKind::Color: {
+        case ReShadeFx::UniformKind::Color: {
             const float w = 120.0f * ApexUi::Unit();
             ApexUi::SetNextRowUntranslated();
             if (ApexUi::BeginControlRow(v.label.c_str(), desc, w)) {
@@ -527,7 +514,7 @@ void EffectSettings(const std::string& effect, bool removable) {
                 const std::string label = v.components > 1 ? v.label + kAxis[c] : v.label;
                 ApexUi::SliderOptions o;
                 o.tooltip = desc;
-                const bool isInt = v.kind == ReShadeBridge::UniformKind::Int;
+                const bool isInt = v.kind == ReShadeFx::UniformKind::Int;
                 o.format = isInt ? "%.0f" : (v.step >= 0.1f || hi - lo >= 10.0f ? "%.1f" : (v.step >= 0.01f || hi - lo >= 1.0f ? "%.2f" : "%.3f"));
                 ApexUi::SetNextRowUntranslated();
                 if (ApexUi::Slider(label.c_str(), &v.value[c], lo, hi, o)) {
@@ -541,21 +528,21 @@ void EffectSettings(const std::string& effect, bool removable) {
             break;
         }
         }
-        if (edited) ReShadeBridge::SetUniform(v);
+        if (edited) ReShadeFx::SetUniform(v);
         ImGui::PopID();
     }
     ApexUi::Gap(ApexUi::kSpace2);
     if (!uniforms.empty() && ApexUi::IconTextButton("Reset this effect", IconId::RotateCcw, "Puts this effect's settings back to their defaults")) {
-        for (const auto& v : uniforms) ReShadeBridge::ResetUniform(v);
+        for (const auto& v : uniforms) ReShadeFx::ResetUniform(v);
         committed = true;
         ApexUi::ReportChange("Effect reset");
     }
     if (removable) {
         if (!uniforms.empty()) ImGui::SameLine(0.0f, ApexUi::kSpace3 * ApexUi::Unit());
         if (ApexUi::IconTextButton("Remove this effect", IconId::Trash2, "Deletes this effect's file from Apex Radiance\\ReShade"))
-            ReShadeBridge::RemoveEffect(ApexUtil::ToWide(effect));
+            ReShadeFx::RemoveEffect(effect);
     }
-    if (committed) ReShadeBridge::SavePreset();
+    if (committed) ReShadeFx::SavePreset();
 }
 
 } // namespace ReShadeUi

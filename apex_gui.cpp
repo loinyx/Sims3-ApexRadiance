@@ -484,7 +484,7 @@ void OverviewPage() {
         OverviewPatchRow("SceneDither", IconId::Blend, "Banding Fix", "No color steps in light and shadows", PageBanding);
         OverviewPatchRow("DepthBlur", IconId::Aperture, "Depth Blur", "Softly blurs the distant background", PageDepthBlur);
         OverviewPatchRow("EdgeSmoothing", IconId::Spline, "Edge Smoothing", "Clean, smooth edges on the world", PageEdgeSmoothing);
-        OverviewPatchRow("ReShade", IconId::Paintbrush, "ReShade", "Your ReShade effects, under the game's interface", PageColor, &g_colorTab, Picture::TabReShade);
+        OverviewPatchRow("ReShade", IconId::Paintbrush, "ReShade", "ReShade effects under the game's interface, no install needed", PageColor, &g_colorTab, Picture::TabReShade);
     }
     ApexUi::EndCard();
     ApexUi::GroupLabel("Performance");
@@ -747,14 +747,14 @@ void ColorOverview() {
         if(ApexUi::OverviewRow("LUTs",IconId::Layers,"LUTs","Applies a color treatment defined in a file",nullptr,&on,true,nullptr,&clicked)) {p.lut=on;changed=true;}
         if(clicked) g_colorTab=Picture::TabLuts;
         ImGui::EndDisabled();
-        // ReShade has its own switch: Color's master switch does not turn it off (ReShade runs without Apex's Color too)
-        OverviewPatchRow("ReShade", IconId::Paintbrush, "ReShade", "Your ReShade effects, under the game's interface", PageColor, &g_colorTab, Picture::TabReShade);
+        // ReShade has its own switch: Color's master switch does not turn it off (the effects run without Apex's Color too)
+        OverviewPatchRow("ReShade", IconId::Paintbrush, "ReShade", "ReShade effects under the game's interface, no install needed", PageColor, &g_colorTab, Picture::TabReShade);
     }
     ApexUi::EndCard();if(changed) Picture::Get().SetParams(p,true);
 }
 // Color > ReShade: the ReShade card, then one panel per effect file
 void ReShadeTab() {
-    FeatureCard("ReShade", IconId::Paintbrush, "ReShade", "Your ReShade effects, under the game's interface");
+    FeatureCard("ReShade", IconId::Paintbrush, "ReShade", "ReShade effects under the game's interface, no install needed");
     ReShadeUi::EffectPanels();
 }
 void ColorPage() {
@@ -2641,7 +2641,7 @@ void AboutTab() {
         CreditLine("Upper-floor ground light: Arro's technique, adapted in Apex Radiance.");
         CreditLine("Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.");
         CreditLine("Thanks to @boringbones for testing every build.");
-        CreditLine("Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC), ReShade add-on headers - Patrick Mours (BSD-3-Clause), puff - Mark Adler (zlib).");
+        CreditLine("Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC), ReShade FX compiler - Patrick Mours (BSD-3-Clause), ReShade.fxh (CC0), puff - Mark Adler (zlib).");
     }
     ApexUi::EndCard();
     ImGui::PopID();

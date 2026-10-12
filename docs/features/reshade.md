@@ -1,92 +1,108 @@
 # ReShade effects
 
-Apex Radiance runs the effects of an installed ReShade on the game's picture before the game draws its interface, so
-menus, plumbobs, speech bubbles and text keep their colours while the world gets the ReShade look. Depth-based effects
-(depth of field, ambient occlusion, fog) read the game's exact depth from Apex Radiance. The Color > ReShade tab switches
-and adjusts the effects of the current ReShade preset, picks the preset, and adds effect files, presets or whole
-shader packs without leaving the game.
+Apex Radiance runs ReShade effects (`.fx` files) on the game's picture by itself, without ReShade installed. The
+effects draw on the finished scene before the game draws its interface, so menus, plumbobs, speech bubbles and text
+keep their colours while the world gets the effect's look. Depth-based effects (depth of field, ambient occlusion,
+fog) read the game's exact depth from Apex Radiance. The Color > ReShade tab adds effect files, presets or whole shader
+packs, switches and adjusts each effect, and picks the preset.
 
 ## Status
 
 | | |
 |---|---|
 | Availability | In development (this branch); Experimental badge |
-| Default | On (does nothing until ReShade 6.3 or newer is installed) |
+| Default | On (does nothing until effect files are added) |
 | Menu | Color > ReShade (card ReShade and one panel per effect file); Overview > Image and Color > Overview rows |
-| Configuration | `[patches.ReShade]` in `ApexRadiance.toml`; the effects, their values and the preset stay in ReShade's own files |
-| Source | [`features/reshade_bridge.cpp`](../../features/reshade_bridge.cpp), [`patches/reshade_patch.cpp`](../../patches/reshade_patch.cpp) |
+| Configuration | `[patches.ReShade]` in `ApexRadiance.toml` (switch and preset name); the effects' values live in the preset `.ini` |
+| Source | [`features/reshade_fx.cpp`](../../features/reshade_fx.cpp) (runtime), [`features/reshade_fx_compile.cpp`](../../features/reshade_fx_compile.cpp) (compiler front end), [`features/reshade_fx_files.cpp`](../../features/reshade_fx_files.cpp) (files, packs, images, cache), [`patches/reshade_patch.cpp`](../../patches/reshade_patch.cpp) (menu) |
 
 ## The problem
 
-ReShade applies its effects when the game presents the frame, after the game has drawn its interface. Colour grading,
-sharpening, bloom and depth of field therefore also change the game's menus and text, and a depth of field blurs the
-interface. ReShade's generic depth detection must guess which of the game's depth buffers holds the scene. Shader packs
-are installed by copying files next to the game and editing `ReShade.ini`.
+ReShade's effects library (SweetFX, qUINT, prod80, AstrayFX and many others) is written in ReShade FX, a shading
+language that only ReShade itself can run. Installing ReShade puts a proxy `d3d9.dll` next to the game, and ReShade
+applies its effects when the game presents the frame, after the interface is drawn: colour grading, sharpening, bloom
+and depth of field also change the game's menus and text, and its generic depth detection has to guess which depth
+buffer holds the scene.
 
 ## How Apex Radiance solves it
 
-Apex Radiance registers itself with ReShade as an add-on and renders ReShade's effects at its own post-scene boundary,
-the point where the game moves from the finished 3D scene to its interface (see
-[architecture](../architecture.md), post-scene chain). ReShade then skips its own pass at Present.
+Apex Radiance embeds ReShade's open-source FX compiler and implements the Direct3D 9 side of ReShade's effect runtime.
 
-1. While the feature is on and ReShade is not connected, the Present hook looks for a loaded module exporting
-   `ReShadeRegisterAddon` every 2 s and registers with API version 14 (ReShade 6.3).
-2. The `reshade_present` event hands over the Direct3D 9 effect runtime. A runtime on another API (ReShade on Vulkan
-   through DXVK) is reported and left alone.
-3. At the post-scene boundary, after Color (order 50), `render_effects` draws the enabled techniques into the back
-   buffer. ReShade captures and restores the device state around it.
-4. In `reshade_begin_effects`, registered after ReShade's own depth add-on, Apex Radiance binds its shared INTZ scene
-   depth as `DEPTH` when **Accurate distance for effects** is on.
-5. A frame where the boundary did not run (loading screens, a frame with no scene) calls `render_effects` with no render
-   target, which marks the frame as rendered: ReShade draws nothing over the interface in that frame.
-6. **Add effects** copies `.fx` / `.fxh` files, textures and `.ini` presets, or extracts a `.zip` pack (stored or
-   deflate; folders below `Shaders/` and `Textures/` are kept), into `Apex Radiance\ReShade\{Shaders,Textures,Presets}`.
-   The two folders are appended (with `\**`) to ReShade's `EffectSearchPaths` and `TextureSearchPaths`, then ReShade
-   reloads its effects.
+1. **Files.** Effects live in `Apex Radiance\ReShade\Shaders`, textures in `Textures`, presets in `Presets` (all below
+   the Apex Radiance documents folder). **Add effects** copies `.fx` / `.fxh` files, images and `.ini` presets, or
+   extracts a `.zip` pack (stored or deflate; folders below `Shaders/` and `Textures/` are kept). Apex Radiance writes
+   its own `ReShade.fxh` and a `ReShadeUI.fxh` replacement to `ReShade\Internal`, searched last, so packs that rely on
+   them load and a pack's own copies win.
+2. **Compile.** A worker thread preprocesses and parses every `.fx` (ReShade's predefined macros: `__RESHADE__` 60600,
+   `__RENDERER__` 0x9000, `BUFFER_WIDTH` / `BUFFER_HEIGHT` of the back buffer, the preset's
+   `PreprocessorDefinitions`, plus `RESHADE_DEPTH_INPUT_IS_REVERSED=0` because the game's depth is not reversed). The
+   compiler generates shader model 3 HLSL; only effects that are on are compiled with `D3DCompile` (`vs_3_0` /
+   `ps_3_0`), and the bytecode is cached in `ReShade\Cache` by a hash of the code.
+3. **Objects.** The render thread creates the textures (render targets, or images decoded with Windows Imaging
+   Component and scaled to the declared size), shaders and a shared depth-stencil. Textures with the same name in
+   several effects are shared, as in ReShade.
+4. **Render.** At the post-scene boundary, after Color (order 50), the enabled techniques run in the preset's order.
+   `COLOR` is a copy of the back buffer, refreshed after any pass that wrote to it; `DEPTH` is Apex Radiance's INTZ scene
+   depth, requested only while an enabled effect reads it. Each pass sets its render targets, blend, stencil and
+   sampler states, draws a full-screen triangle list, and the device state is restored afterwards (state block plus
+   render targets and depth-stencil).
+5. **Uniforms.** Values from the menu and the preset go to constant registers; the special sources `frametime`,
+   `framecount`, `timer`, `date`, `random`, `pingpong`, `key`, `mousepoint` and `overlay_open` are filled every frame.
+   Technique annotations `enabled`, `timeout`, `toggle` and `hidden` behave as in ReShade.
+6. **Presets.** The current preset is a ReShade `.ini` (`Techniques`, `TechniqueSorting`, `PreprocessorDefinitions`,
+   one section per effect file), so presets move between Apex Radiance and ReShade in both directions.
 
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| ReShade (card switch) | `enabled` | bool | true | | Apex Radiance drives ReShade's rendering point; off returns ReShade to its default point |
-| Accurate distance for effects | `apexDepth` | bool | true | | Binds Apex Radiance's scene depth as ReShade's `DEPTH`; keeps the shared depth running |
-| ReShade preset | (ReShade's `PresetPath`) | file | ReShade's current | `.ini` presets in ReShade's folder and `Apex Radiance\ReShade\Presets` | Switches ReShade's preset |
-| Effect switches and settings | (ReShade preset) | | | from the shader's `ui_*` annotations | Saved by ReShade in the current preset |
+| ReShade (card switch) | `enabled` | bool | true | | Runs the effects; off releases every effect object |
+| ReShade preset | `preset` | string | `Default.ini` | `.ini` files in `Apex Radiance\ReShade\Presets` | The preset whose effects and values are used; created when first saved |
+| Effect switches and settings | (preset `.ini`) | | | from the shader's `ui_*` annotations | Saved in the current preset when an edit is committed |
 
-Presets of Apex Radiance carry the feature's switch and **Accurate distance for effects** in the Color part; the
-effects themselves belong to the ReShade preset.
+Presets of Apex Radiance carry the feature's switch and the preset name in the Color part; the effects' values belong to
+the ReShade preset.
 
 ## Compatibility and interactions
 
-- Needs ReShade 6.3 or newer installed for Direct3D 9 (`d3d9.dll` next to `TS3W.exe`). Both the normal and the add-on
-  build of ReShade accept the registration; the events used are allowed for external add-ons in the normal build.
-- With DXVK, ReShade normally runs on Vulkan: the tab says so and ReShade keeps its default point.
-- The game's own Edge Smoothing makes the back buffer multisampled. ReShade cannot render into it outside Present, so
-  its effects stay at the default point (over the interface) and the tab shows a note.
-- **Accurate distance for effects** keeps the shared INTZ depth swap running, as Depth Blur and Ambient Occlusion do.
-- Turning the feature off unbinds the depth and asks ReShade to reload its effects, so its own depth add-on binds its
-  choice again.
+- Needs nothing else installed. An installed ReShade keeps working on its own; running both applies the effects twice.
+- Uses plain Direct3D 9 calls, so it also runs under DXVK (*unverified*).
+- With the game's Edge Smoothing on, the multisampled back buffer is resolved with `StretchRect` into `COLOR`
+  (*unverified*).
+- While an enabled effect reads `DEPTH`, the shared INTZ depth swap runs, as for Depth Blur and Ambient Occlusion.
 
 ## Limitations
 
-- Effects added through the tab are read from `Apex Radiance\ReShade`; the first addition writes the two search paths
-  into ReShade's configuration.
+- Direct3D 9 limits apply as in ReShade on Direct3D 9: no compute shaders, no 3D textures, at most 4 render targets per
+  pass and 224 constant registers. An effect beyond them shows its error in its panel and can be removed there.
+- Settings that are arrays or matrices are not shown in the menu (their preset values are still read).
+- The `mousedelta`, `mousebutton` and `mousewheel` sources read as zero.
 - ZIP64 and encrypted packs are refused. Add-ons (`.addon`), DLLs and other executables inside a pack are skipped.
-- Arrays and matrix settings of an effect are only adjustable in ReShade's own menu, as is the order of the effects.
-- *Unverified in game:* the rendering point, the depth binding, the frame skip, preset switching and pack loading
-  (see [validation](../validation/reshade.md)).
+- `ReShade.fxh` uses its default far plane (1000) to linearise depth.
+- *Unverified in game:* everything on this page beyond compilation (see [validation](../validation/reshade.md)).
 
 ## Technical reference
 
-- Registration uses the exported `ReShade*` functions directly; only the type headers are vendored
-  ([third_party/reshade](../../third_party/reshade/README.md)). The `effect_runtime` method order and the
-  `addon_event` values used are identical in the 6.0, 6.3, 6.6 and current headers.
-- The PostScene effect is registered with `needsDepth = false`; its GPU cost is measured with timestamp queries around
-  `render_effects`.
+- Compiler: [third_party/reshadefx](../../third_party/reshadefx/LICENSE.md), ReShade FX by Patrick Mours (BSD-3-Clause),
+  from crosire/reshade at commit 7bf9de8, built as C++17 (its `u8string` use predates C++20). `ReShade.fxh` comes from
+  crosire/reshade-shaders (CC0) and is embedded as
+  [reshade_fx_reshade_fxh.inc](../../features/reshade_fx_reshade_fxh.inc).
+- Shader model 3 layout: each uniform takes float registers from `c(offset / 16)`; booleans and integers are stored as
+  floats. The vertex shader's `c255` holds the half-texel offset, and each semantic texture's pixel size sits in the
+  register the code generator names. The vertex id comes from a `FLOAT1 TEXCOORD0` stream.
+- The PostScene effect is registered with `needsDepth = false`; `DEPTH` is bound only when `PostScene::SceneDepthValid()`.
+  Its GPU cost is measured with timestamp queries around the run.
 - Packs are inflated with `puff` (zlib contrib, [third_party/puff](../../third_party/puff/puff.h)); entry names are
   checked for absolute paths, drive letters and `..` before writing.
+- Offline check: [tools/reshade_fx_test](../../tools/reshade_fx_test/fx_check.cpp) parses every `.fx` below the given
+  folders and, on Windows, compiles them to shader model 3.
+
+## Rejected approaches
+
+- Driving an installed ReShade as an add-on (render point moved before the interface, Apex depth bound as `DEPTH`): it
+  required players to install ReShade. See [history](../history/reshade.md).
 
 ## See also
 
-- [Validation](../validation/reshade.md)
+- [Validation](../validation/reshade.md), [History](../history/reshade.md)
 - [Picture filters](picture-filters.md), [Presets](presets.md)
