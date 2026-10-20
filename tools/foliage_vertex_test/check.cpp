@@ -134,7 +134,7 @@ int main(int argc, char** argv) {
     }
     set(B + 54 + I, cn.c.x, cn.c.y, cn.c.z, 1 / cn.rh);
     set(B + 55 + I, 1 / cn.rv, cn.kappa / std::log(2.f), 0, 0);
-    set(B + 56 + I, L[0].cap, L[1].cap, L[2].cap, 0);
+    set(B + 56 + I, L[0].cap, L[1].cap, L[2].cap, FoliageVertexLamps::kTransmitOverReflect);
     set(B + 81, FoliageVertexLamps::kTransmitOverReflect, FoliageVertexLamps::kGroundHalfAlbedo, 0, 1);
     const int n = 2000;
     std::vector<float> vb(n * 24);
@@ -193,6 +193,47 @@ int main(int argc, char** argv) {
     Check(capped, "the cap is exercised (some vertices are brighter than the colour's point)");
     Check(samePos, "the position is unchanged");
     Check(sameRest, "the colour and texture coordinate outputs other than the lamp term are unchanged");
+
+    // A neutral instance (lamps that could not be confirmed: lot_light_bridge FoliageVertexConstants) gives the old light:
+    // instance 2 (a0.w = 6), its lamps 1 km away along the slot directions, no crown, no bounce, no transmission
+    {
+        const int J = 6;
+        set(J + 1, 1, 0, 0, 0);
+        set(J + 2, 1, 0, 0, 0);
+        const V3 dirs[3] = {{0.6f, 0.3f, 0.74f}, {-0.2f, 0.95f, 0.24f}, {0.1f, -0.4f, -0.91f}};
+        for (int k = 0; k < 3; k++) {
+            const float dl = std::sqrt(Dot(dirs[k], dirs[k]));
+            set(27 + J + k, dirs[k].x, dirs[k].y, dirs[k].z, 0);
+            set(54 + J + k, 0.3f + 0.2f * k, 0.5f, 0.2f, 0);
+            set(B + J + k, dirs[k].x / dl * 1000.0f, dirs[k].y / dl * 1000.0f, dirs[k].z / dl * 1000.0f, 1e12f);
+            set(B + 27 + J + k, 0, 1e6f * dl, kMinD2, 0);
+        }
+        set(B + 54 + J, 0, 0, 0, 1);
+        set(B + 55 + J, 1, 0, 0, 0);
+        set(B + 56 + J, 1e30f, 1e30f, 1e30f, 0);
+        for (int i = 0; i < n; i++) vb[i * 24 + 23] = J / 3.f;
+        src->Lock(0, 0, &pv, 0);
+        std::memcpy(pv, vb.data(), n * 96);
+        src->Unlock();
+        dv->SetVertexShaderConstantF(0, C.data(), 256);
+        dv->SetVertexShader(vsP);
+        dv->ProcessVertices(0, 0, n, outP, nullptr, 0);
+        dv->SetVertexShader(vsO);
+        dv->ProcessVertices(0, 0, n, outO, nullptr, 0);
+        outP->Lock(0, 0, &a, 0);
+        outO->Lock(0, 0, &b, 0);
+        float worst = 0, peak = 0;
+        for (int i = 0; i < n; i++) {
+            const float* p = reinterpret_cast<const float*>(static_cast<const char*>(a) + i * 60);
+            const float* o = reinterpret_cast<const float*>(static_cast<const char*>(b) + i * 60);
+            for (int k = 12; k < 15; k++) worst = std::max(worst, std::fabs(p[k] - o[k])), peak = std::max(peak, std::fabs(o[k]));
+        }
+        outP->Unlock();
+        outO->Unlock();
+        worst /= std::max(peak, 1e-6f);
+        std::printf("Neutral instance: worst difference from the old shader %.2e of its brightest light\n", worst);
+        Check(worst < 0.01f, "a neutral instance draws the old per-instance light (within 1%)");
+    }
     std::printf("Foliage vertex lamps: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

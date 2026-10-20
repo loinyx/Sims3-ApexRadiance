@@ -172,7 +172,7 @@ bool Patch(std::vector<uint32_t>& t, int& base) {
         E(kMad, {d(Sc, 0x2), r(Sc, X), cf(cWrap, X), cf(cWrap, Y)});
         E(kMax, {d(Sc, 0x2), r(Sc, Y), zero});                            // the wrap constants (c255)
         E(kMax, {d(Sc, 0x4), nr(Sc, X), zero});
-        E(kMad, {d(Sc, 0x2), r(Sc, Z), cf(cG, X), r(Sc, Y)});             // + tau/rho x max(-N.l, 0)
+        E(kMad, {d(Sc, 0x2), r(Sc, Z), ci(B + 56, W), r(Sc, Y)});         // + tau/rho x max(-N.l, 0) (per instance: 0 = none)
         law(Dir, W, Q, Cp, k * 0x55, true);
         // Beer-Lambert along the vertex -> lamp segment inside the crown ellipsoid (in its unit-sphere space)
         E(kMul, {d(K, 0x7), r(Dir), r(Sv)});

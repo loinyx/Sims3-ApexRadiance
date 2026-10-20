@@ -23,7 +23,7 @@
 //   c[B + 27 + 3i + k]  x = 1/R^2, y = scale (0: lamp unused), z = minimum d^2, w = head height over the instance's ground
 //   c[B + 54 + 3i]      crown centre, camera-relative; w = 1 / horizontal semi-axis
 //   c[B + 55 + 3i]      x = 1 / vertical semi-axis, y = extinction x leaf area density / ln 2 (exp is base 2)
-//   c[B + 56 + 3i]      x, y, z = the cap of lamps 0, 1, 2 (1 / the brightest channel of the colour)
+//   c[B + 56 + 3i]      x, y, z = the cap of lamps 0, 1, 2 (1 / the brightest channel of the colour); w = tau/rho (0: none)
 //   c[B + 81]           x = tau/rho, y = rho_g / 2, w = 1
 // The draw sets every one of them or does not use the patched copy. Credits: @loinyx
 #include <cstdint>
