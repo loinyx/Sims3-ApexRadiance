@@ -24,6 +24,8 @@ namespace FastMemory {
 bool Start(std::string* error);
 void Stop();
 bool Running();
+// Drain blocks already released by the game before entering its native world save.
+uint32_t PrepareForSave();
 
 struct Stats {
     uint32_t spinBefore = 0, spinNow = 0; // the allocator lock's spin count (0 = not read)

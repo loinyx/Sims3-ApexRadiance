@@ -348,6 +348,34 @@ struct FpScope {
 // Returns the number of failures
 uint64_t ParallelTests(Rng& rng, uint64_t seed) {
     uint64_t fails = 0;
+    {
+        Compare repeated;
+        Fallback repeatedFallback;
+        for(uint32_t w:{16u,32u,48u,65u})for(uint32_t h:{4u,8u,9u})for(int changed=0;changed<3;++changed){
+            std::vector<uint32_t> img(static_cast<size_t>(w)*h);
+            for(uint32_t y=0;y<h;++y){for(uint32_t x=0;x<std::min(w,16u);++x)img[y*w+x]=rng.Next();for(uint32_t x=16;x<w;++x)img[y*w+x]=img[y*w+(x%16)];}
+            if(w>31&&changed)img[31]^=changed==1?0x00000100u:0x80000000u;
+            for(bool dxt5:{false,true})Run(dxt5,img,w,h,repeated,repeatedFallback,nullptr,0,nullptr);
+        }
+        fails+=repeated.diffs;
+        std::printf("Repeated strips and changed RGB/alpha: %llu blocks, %llu different\n",static_cast<unsigned long long>(repeated.blocks),static_cast<unsigned long long>(repeated.diffs));
+    }
+
+    // A cold two-chunk image needs one helper, not the requested maximum pool.
+    {
+        Fallback fb;
+        uint32_t pixels[32];for(auto& pixel:pixels) pixel=rng.Next();
+        uint8_t encoded[16]{},reference[16]{};
+        Src src{reinterpret_cast<const uint8_t*>(pixels),0,0,16,0x3D};
+        Dst dst{encoded,4,8,8,0},ref{reference,4,8,8,0};
+        Parallel::Options options;options.workers=6;options.minPixels=0;options.minBlocksPerChunk=1;
+        FastCounters counters;
+        const auto result=Parallel::Encode(false,&dst,&src,&RefBlock,&fb,&counters,options);
+        Fast::EncodeDxt1(&ref,&src,&RefBlock,&fb,nullptr);
+        if(!result.parallel || result.chunks!=2 || Parallel::WorkersCreated()!=1 || std::memcmp(encoded,reference,sizeof encoded)!=0) {
+            ++fails;std::printf("FAIL: useful worker sizing on cold pool\n");
+        }
+    }
     std::printf("Several cores: %u worker threads by default on this machine (logical processors - 2, at most %u)\n", Parallel::DefaultWorkers(), Parallel::kMaxWorkers);
     // ---- sizes x formats x workers x FP modes ----
     static const uint32_t kSizes[][2] = {{256, 256}, {257, 255}, {255, 257}, {300, 301}, {513, 130}, {1024, 1024}, {1023, 769}, {1025, 1026}, {258, 257}, {259, 259},
@@ -360,6 +388,13 @@ uint64_t ParallelTests(Rng& rng, uint64_t seed) {
         const double t0 = NowMs();
         {
             FpScope scope(m);
+            {
+                Image repeated=MakeImage(rng,65,65,8);
+                for(uint32_t y=0;y<repeated.h;++y)for(uint32_t x=16;x<repeated.w;++x)
+                    std::memcpy(repeated.bytes.data()+y*repeated.pitch+x*4,repeated.bytes.data()+y*repeated.pitch+(x%16)*4,4);
+                Parallel::Options o;o.workers=6;o.minPixels=0;o.minBlocksPerChunk=1;
+                for(bool dxt5:{false,true})CheckParallel(dxt5,repeated,8,o,true,st);
+            }
             for (const auto& sz : kSizes) {
                 const uint32_t w = sz[0], h = sz[1];
                 const bool odd = ((w | h) & 3) != 0;

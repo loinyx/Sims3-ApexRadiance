@@ -30,6 +30,7 @@
 #include "depth_share.h"
 #include "d3d9_extra_hooks.h"
 #include "post_scene.h"
+#include "gpu_timing_policy.h"
 #include "world_session.h"
 #include "night_lighting.h"
 #include "map_view.h"
@@ -358,6 +359,7 @@ struct BlurState {
     static constexpr int kQ = 4;
     IDirect3DQuery9 *qDisjoint[kQ] = {}, *qBegin[kQ] = {}, *qEnd[kQ] = {}, *qFreq[kQ] = {};
     bool qIssued[kQ] = {};
+    uint64_t nextTiming = 0;
     int qNext = 0, qKey = -1;
     float gpuMs = -1.0f;
 
@@ -1002,7 +1004,7 @@ void BlurEffect(IDirect3DDevice9* dev) {
     }
     ReadTimings();
     const int qi = g.qNext;
-    const bool timed = !g.qIssued[qi] && g.qDisjoint[qi] && g.qBegin[qi] && g.qEnd[qi] && g.qFreq[qi];
+    const bool timed = !g.qIssued[qi] && g.qDisjoint[qi] && g.qBegin[qi] && g.qEnd[qi] && g.qFreq[qi] && GpuTiming::Due(GetTickCount64(),g.nextTiming,kPublicBuild);
     if (timed) {
         g.qDisjoint[qi]->Issue(D3DISSUE_BEGIN);
         g.qBegin[qi]->Issue(D3DISSUE_END);

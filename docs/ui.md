@@ -429,3 +429,13 @@ Ambient Occlusion no longer exposes Temporal smoothing, Thin object detail or Ob
 ## Graphics recovery
 
 Settings > Compatibility > Recovery uses the existing card header and compact action button. Restart Apex queues resource recreation on the graphics thread while retaining settings; the pending label is visible until Present consumes it. This action does not uninstall the mod. See [graphics recovery](features/graphics-recovery.md).
+
+## Public test instructions
+
+Numbered public experiments show the full version and translated test name in the footer. Once the menu becomes
+available, an unacknowledged test opens the menu and its instructions modal automatically. Continue records the full
+version in `[ui] test_build_seen`; a restart of the same build does not repeat the notice. A newer test version shows
+its own notice. Reset all settings preserves this acknowledgment. The version button reopens the test instructions;
+stable release notes keep their existing behaviour in other builds. Captures and startup conflict banners defer the
+automatic notice. Instructions use a scrollable body and a fixed primary Continue action at all supported text sizes.
+Instructions name the current checks, including stair openings and closed floors in the lighting-guard revision.

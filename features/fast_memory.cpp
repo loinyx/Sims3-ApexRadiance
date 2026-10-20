@@ -3,6 +3,8 @@
 //
 // Part of Apex Radiance. Credits: @loinyx
 #include "fast_memory.h"
+#include "memory_telemetry.h"
+#include <intrin.h>
 #include "game_addresses.h"
 #include "memory_patch.h"
 #include "apex_log.h"
@@ -108,7 +110,7 @@ DWORD WINAPI WorkerProc(LPVOID) {
 // The allocator ignores the result. TryAcquire: at process exit the worker may have been ended inside the queue lock.
 BOOL WINAPI Stub_Free(LPVOID address, SIZE_T size, DWORD type) {
     if (type == MEM_RELEASE && size == 0 && address && TryAcquireSRWLockExclusive(&g_qLock)) {
-        if (g_workerAlive && g_queued < kQueueCap) {
+        if (g_workerAlive && !(kMemoryOptimizationsEnabled && MemoryTelemetry::saveDepth.load(std::memory_order_acquire)) && g_queued < kQueueCap) {
             g_queue[g_queued++] = address;
             const uint32_t q = g_queued;
             ReleaseSRWLockExclusive(&g_qLock);
@@ -128,7 +130,15 @@ BOOL WINAPI Stub_Free(LPVOID address, SIZE_T size, DWORD type) {
 LPVOID WINAPI Stub_Alloc(LPVOID address, SIZE_T size, DWORD type, DWORD protect) {
     const AllocFn alloc = RealAlloc();
     const uint32_t gen = g_releasedGen.load(std::memory_order_acquire);
-    LPVOID r = alloc(address, size, type, protect);
+    const uintptr_t caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    auto observed = [&]() {
+        LPVOID result = alloc(address, size, type, protect);
+        const DWORD lastError = GetLastError();
+        MemoryTelemetry::Attempt(size, result != nullptr, caller, result ? 0 : lastError, type);
+        SetLastError(lastError);
+        return result;
+    };
+    LPVOID r = observed();
     if (r) return r;
     const DWORD err = GetLastError();
     // ReleaseQueued waits for a drain in progress; a drain that ended since before the call also counts
@@ -137,7 +147,7 @@ LPVOID WINAPI Stub_Alloc(LPVOID address, SIZE_T size, DWORD type, DWORD protect)
         return r;
     }
     c_retries.fetch_add(1, std::memory_order_relaxed);
-    r = alloc(address, size, type, protect);
+    r = observed();
     if (!r) c_retryFailed.fetch_add(1, std::memory_order_relaxed);
     return r;
 }
@@ -329,6 +339,7 @@ bool Start(std::string* error) {
     g_spinBefore = static_cast<uint32_t>(SetCriticalSectionSpinCount(g_cs, kSpin)) & 0x00FFFFFFu;
     g_spinSet = true;
     g_on.store(true, std::memory_order_release);
+    MemoryTelemetry::active.store(true, std::memory_order_relaxed);
     g_started = true;
     LOG_INFO(std::format("[FastMemory] On: allocator {:#010x}, lock spin {} -> {}; big-block release {:#010x} queued to a helper thread; {} VirtualAlloc calls "
                          "retry after releasing the queue",
@@ -340,6 +351,7 @@ void Stop() {
     std::lock_guard<std::mutex> lock(g_ctrl);
     if (!g_started) return;
     g_on.store(false, std::memory_order_release);
+    MemoryTelemetry::active.store(false, std::memory_order_relaxed);
     if (g_spinSet) SetCriticalSectionSpinCount(g_cs, g_spinBefore);
     g_spinSet = false;
     const bool restored = StopDeferral();
@@ -351,6 +363,13 @@ void Stop() {
 }
 
 bool Running() { return g_on.load(std::memory_order_acquire); }
+
+uint32_t PrepareForSave() {
+    if (!Running()) return 0;
+    const auto released = ReleaseQueued();
+    c_direct.fetch_add(released, std::memory_order_relaxed);
+    return released;
+}
 
 Stats GetStats() {
     Stats s;

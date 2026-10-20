@@ -8,7 +8,7 @@ blocks at once, optionally on several processor cores, and produces exactly the 
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier; on by default since 2.5.5 |
+| Availability | Exact repeated-strip reuse and bounded verification storage: Released in 2.14.0. Released in 2.1.0 or earlier; on by default since 2.5.5 |
 | Default | On; *Use several cores* on |
 | Menu | System > Performance > Textures and Sims > *Faster texture compression* |
 | Configuration | `[patches.FastTextureCompression]` in `ApexRadiance.toml` |
@@ -32,6 +32,9 @@ In the Frame Profiler, "DXT encode" is a dominant counter of the largest hitches
    thread and up to six worker threads, each running with the caller's floating-point state. The call still returns the
    finished texture.
 4. **Checked.** The first 16 textures of every session are also encoded by the game and compared.
+
+The parallel encoder caps new helper creation by useful chunks before creating threads. A cold two-chunk image needs
+one helper. Existing startup prewarming remains unchanged, so this does not imply a steady-state gameplay FPS gain.
 
 ## Settings
 
@@ -217,6 +220,10 @@ chunk time minus wall time; it slightly overstates when the cores slow each othe
 another texture had the workers, FP state mismatches (must be 0).
 
 ### Rules for maintainers
+
+The gameplay candidate reuses the preceding complete 16x4 strip only after all 256 source bytes match, including
+alpha. The cache holds pointers and classification counters on the current chunk's stack. Partial blocks and groups
+needing native fallback cannot seed it. Source/edge behaviour, floating-point operations and output format remain.
 
 - `dxt_codec.cpp` must be built with legacy SSE (`/arch:SSE2`, the x86 default; it refuses `/arch:AVX`) and without
   `/fp:fast` (it forces `float_control(precise)` and `fp_contract(off)`). Do not reorder its arithmetic, replace

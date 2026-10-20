@@ -9,6 +9,14 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Japanese}
 const I18n::Pair kPairs[] = {
+    {"Room to save releases idle buffers earlier during saving", "保存用の空き領域は保存中に未使用のバッファをより早く解放します"},
+    {"Screen effects avoid unused image copies and repeated timing work", "画面効果で未使用の画像コピーや時間計測の繰り返しを省きます"},
+    {"Object and compression caches reduce repeated work with bounded memory", "オブジェクトと圧縮のキャッシュはメモリを制限して重複処理を減らします"},
+    {"Night Lights improves lamp blocking near stairs and closed floors", "夜間照明は階段や閉じた床の近くでランプ光の遮断を改善します"},
+    {"RAM and gameplay test", "RAMとゲームの滑らかさのテスト"},
+    {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "10分間いくつかの区画を訪れ、最初の区画に戻って少し待ち、セーブしてからそのセーブを読み直してください。"},
+    {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "前のバージョンと比べて、カクつき、区画の読み込み、RAM使用量を確認してください。エラー12が出た場合は直前の状況を記録してください。"},
+    {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "階段付近や、開口部のない床の向こう側の照明を確認してください。詳細なデータ収集は無効です。"},
     {"The latest lighting features also work on the EA app version 1.69", "最新の照明機能は EA アプリ版 1.69 でも動作します"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "壁が区画の外の芝生・道路・歩道でもランプの光を遮ります"},
     {"Garden walls and fences shade lamp light on the ground by their height", "塀やフェンスが高さに応じて地面のランプの光を遮ります"},

@@ -96,6 +96,7 @@
 #include "recorder.h"
 #include "game_addresses.h"
 #include "memory_patch.h"
+#include "mesh_occlusion.h"
 #include "apex_log.h"
 #include "hook_guard.h"
 #include "load_timing.h"
@@ -9139,6 +9140,7 @@ bool FindSame(const RoomInfo& info, uintptr_t light);                           
 float OpenLampPass(const RoomInfo& info, void* light, const float* pointW, float* lampW, GridWhy& why); // below (a roofed room's lamp through its openings)
 bool FindInner(const RoomInfo& info, uintptr_t light);                                                   // below (indoor light through openings)
 float InnerPass(const RoomInfo& info, void* light, const float* pointW, float* lampW, GridWhy& why);    // below
+float InnerNormScaleAt(const RoomInfo& info, void* light, const BYTE* room); // below
 // The time Apex's own tests take inside the game's room solves (LightEvalHook, this hook; ApexSolveMs)
 std::atomic<uint64_t> g_apexSolveCycles{0};
 void __fastcall BasisLightHook(BYTE* room, void*, const float* pos, void* light, float* acc) {
@@ -9193,13 +9195,16 @@ void __fastcall BasisLightHook(BYTE* room, void*, const float* pos, void* light,
                 (inner ? g_innerBasisBlocked : g_roofedBasisBlocked).fetch_add(1, std::memory_order_relaxed);
                 return; // behind a wall or the roof: this lamp adds nothing to the texel
             }
+            // The floor solve already compensates source/recipient normalisation. The directional
+            // maps need the same relative lamp weights, including gains above one, at an arch.
+            if(kMemoryOptimizationsEnabled&&inner)openShare*=InnerNormScaleAt(*info,light,room);
         }
     // one daytime curve (12/10): an outdoor lamp in a roofed room's directional maps (the window glass and the objects of
     // the room read them) x the solve's factor, as in its light maps (RoofedDay)
     if (g_installed.load(std::memory_order_relaxed) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
         if (BYTE* roofed = RoofedRoom(room); roofed && OutdoorLamp(light)) {
             const float scale = g_roomLampDay.load(std::memory_order_relaxed);
-            if (scale >= 1.0f && openShare >= 1.0f) { // night: the game's own accumulation, bit for bit; the room is noted when the lamp is lit
+            if (scale >= 1.0f && openShare == 1.0f) { // night: the game's own accumulation, bit for bit; the room is noted when the lamp is lit
                 if (LampLit(light)) NoteDayRoom(roofed, scale);
                 reinterpret_cast<BasisLight_t>(kBasisLight)(pos, light, acc);
                 return;
@@ -9216,7 +9221,7 @@ void __fastcall BasisLightHook(BYTE* room, void*, const float* pos, void* light,
             for (int i = 0; i < 16; ++i) acc[i] += contribution[i] * k;
             return;
         }
-    if (openShare < 1.0f) { // (an opening lamp is an outdoor lamp of a roofed room: the branch above; kept for safety)
+    if (openShare != 1.0f) { // Keep earlier lamps unchanged when an imported lamp needs a different weight.
         alignas(16) float contribution[16] = {};
         reinterpret_cast<BasisLight_t>(kBasisLight)(pos, light, contribution);
         for (int i = 0; i < 16; ++i) acc[i] += contribution[i] * openShare;
@@ -9694,6 +9699,7 @@ float InnerDownGate(const RoomInfo& info, const float* lampW, const float* point
     }
 }
 float InnerPass(const RoomInfo& info, void* light, const float* pointW, float* lampW, GridWhy& why) {
+    if(kMemoryOptimizationsEnabled){LampPos(light,lampW);if(MeshOcclusion::Blocked(lampW,pointW)){why.wall=true;return 0.0f;}}
     if (!std::binary_search(info.innerUp.begin(), info.innerUp.end(), reinterpret_cast<uintptr_t>(light)))
         return YardPass(info.innerGrid[0].get(), info.innerGrid[1].get(), light, pointW, lampW, why);
     float pass = YardPass(info.upGrid[0].get(), info.upGrid[1].get(), light, pointW, lampW, why);
@@ -10025,20 +10031,14 @@ void CrossFloorShadow(const RoomInfo& info, void* light, const float* sample, fl
 // 4.: a lamp of another story reaches the point only through openings in every intervening floor, and
 // past the walls of its own room (from the lamp to where the ray crosses that floor). Share of the light, 0 = none;
 // why: 1 = a floor is in the way, 2 = a wall of the lamp's room.
-float IndoorBoundaryPass(const RoomInfo& info, uintptr_t floorLevel, int B, void* light, const float* sample, float& crossing, int& why) {
+float IndoorBoundaryPass(const RoomInfo& info, uintptr_t floorLevel, int B, const float* P, const float* Q, float& crossing, int& why) {
     const auto blocked = [&why](int reason) {
         why = reason;
         return 0.0f;
     };
     if (!kPublicBuild) g_passDbg = PassDebug{};
-    alignas(16) float pos[4];
-    LampPos(light, pos);
     const uintptr_t mgrB = StoryManager(info.tracker, B), mgrBelow = StoryManager(info.tracker, B - 1);
-    Xform xf;
-    if (!mgrB || LevelManager(floorLevel) != mgrB || !ReadXform(info.mgr, xf)) return blocked(1);
-    float P[3], Q[3];
-    ToLocal(xf, pos, P);
-    ToLocal(xf, sample, Q);
+    if (!mgrB || LevelManager(floorLevel) != mgrB) return blocked(1);
     const float dy = Q[1] - P[1];
     float h = *reinterpret_cast<const float*>(mgrB + 0x98) - *reinterpret_cast<const float*>(mgrB + 0xD4); // the story's lowest floor, lot space
     if (!(std::fabs(h) < 1000.0f) || std::fabs(dy) < 1e-4f) return blocked(1);
@@ -10089,6 +10089,29 @@ float IndoorPassImpl(const RoomInfo& info, const Cross& c, void* light, const fl
     const PartTimer timer(kTpIndoor);
     const auto blocked = [&why](int reason) { why = reason; return 0.0f; };
     if (info.level < 0 || info.level > 7 || c.floor < 0 || c.floor > 7 || info.level == c.floor) return blocked(1);
+    alignas(16) float pos[4];
+    LampPos(light,pos);
+    Xform xf;
+    if (!ReadXform(info.mgr,xf)) return blocked(1);
+    float localLamp[3],localSample[3];
+    ToLocal(xf,pos,localLamp);
+    ToLocal(xf,sample,localSample);
+    if(kMemoryOptimizationsEnabled&&g_ghostSolve){
+        // Blur support rows outside a wall do not represent a visible surface on the other
+        // side of a placed slab. Otherwise a lower lamp can enter an upper wall through its
+        // below-floor support rows even when every visible sample correctly rejects it.
+        const int boundary=c.floor<info.level?info.level:info.level+1;
+        const uintptr_t manager=StoryManager(info.tracker,boundary);
+        const int x=static_cast<int>(std::floor(localSample[0])),z=static_cast<int>(std::floor(localSample[2]));
+        const uintptr_t tile=manager?LightTile(manager,x,z):0;
+        const uintptr_t level=manager?LevelForPoint(manager):0;
+        if(tile&&level&&LevelManager(level)==manager){
+            const float plane=*reinterpret_cast<const float*>(tile+0x78);
+            const bool beyond=c.floor<info.level?localSample[1]<plane-.01f:localSample[1]>plane+.01f;
+            if(std::isfinite(plane)&&beyond&&FloorAt(level,x,z,Quadrant(localSample[0]-x,localSample[2]-z))!=0)return blocked(1);
+        }
+    }
+    const bool nativeWalls=g_ctx.flags && g_ctx.flags[0];
     const int direction = info.level > c.floor ? 1 : -1;
     struct RaySegment { int story; float begin, end; };
     RaySegment raySegments[8] = {};
@@ -10100,7 +10123,7 @@ float IndoorPassImpl(const RoomInfo& info, const Cross& c, void* light, const fl
         const uintptr_t manager = StoryManager(info.tracker, boundary);
         const uintptr_t floor = boundary == std::max(info.level, c.floor) ? c.level : (manager ? LevelForPoint(manager) : 0);
         float t = -1.0f;
-        if (!floor || IndoorBoundaryPass(info, floor, boundary, light, sample, t, why) <= 0.0f) return blocked(1);
+        if (!floor || IndoorBoundaryPass(info, floor, boundary, localLamp, localSample, t, why) <= 0.0f) return blocked(1);
         if (t > 0.0f) {
             if (t <= previous) return blocked(1);
             raySegments[count++] = RaySegment{currentStory, previous, t};
@@ -10111,19 +10134,16 @@ float IndoorPassImpl(const RoomInfo& info, const Cross& c, void* light, const fl
     // Ghost rows and split-level samples need not cross every nominal story
     // plane. Test only intersected floors; retain the wall segment of the story
     // containing the ray's endpoint when it is outside the recipient's story.
-    if (currentStory != info.level || g_ctx.basis) raySegments[count++] = RaySegment{currentStory, previous, 1.0f};
-    if (!(g_ctx.flags && g_ctx.flags[0])) return 1.0f;
-    alignas(16) float pos[4];
-    LampPos(light, pos);
-    Xform xf;
-    if (!ReadXform(info.mgr, xf)) return blocked(1);
+    // A native batch can omit its own wall test. That exemption does not cover
+    // borrowed lamps: their source, intermediate and recipient segments still need walls.
+    if (currentStory != info.level || g_ctx.basis || !nativeWalls) raySegments[count++] = RaySegment{currentStory, previous, 1.0f};
     // Where the ray enters the solving room's story: its last floor crossing. The game's own 2D wall test of the solving
     // room, which follows in the point solve (0x69FE93), tests the ray from there (GameWallTest) instead of from the lamp:
     // this story's walls stand on that floor, and a lamp of another story that lies behind one of them only in plan (under
     // a ledge, a set-back upper wall, a recess) shines past it. Measured 05/10, atrium house, wall seams capture: the
     // sconces of the lower west wall, 1 m behind the upper story's west wall, lit the upper walls nowhere (0.08-0.16 less
     // at the floor line all along the opposite wall than the lower room's top row at the same points).
-    if (entry && !g_ctx.basis && count > 0 && currentStory == info.level) {
+    if (entry && nativeWalls && !g_ctx.basis && count > 0 && currentStory == info.level) {
         entry->valid = true;
         for (int k = 0; k < 3; ++k) {
             entry->lamp[k] = pos[k];
@@ -10167,13 +10187,7 @@ float IndoorPassImpl(const RoomInfo& info, const Cross& c, void* light, const fl
             roomId = TileRoom(tile, Quadrant(local[0] - x, local[2] - z));
         }
         BYTE* home = static_cast<BYTE*>(RoomByIdCached(reinterpret_cast<void*>(manager), roomId));
-        if (!home) {
-            if (!g_ctx.basis && std::abs(c.floor - info.level) == 1) { // unchanged native-solve adjacent fallback: the game's
-                if (entry) entry->valid = false;                       // wall test keeps the whole ray
-                return 1.0f;
-            }
-            return blocked(2);
-        }
+        if (!home) return blocked(2);
         alignas(16) float from[4], to[12];
         std::memcpy(from, pos, sizeof from);
         std::memcpy(to, sample, sizeof to);
@@ -10192,6 +10206,7 @@ float IndoorPassImpl(const RoomInfo& info, const Cross& c, void* light, const fl
         transmission *= std::clamp(keep, 0.0f, 1.0f);
         if (transmission <= 0.0f) return blocked(2);
     }
+    if(kMemoryOptimizationsEnabled && MeshOcclusion::Blocked(pos,sample))return blocked(2);
     return transmission;
 }
 
@@ -10318,15 +10333,16 @@ bool RoomOutdoorFlag(const BYTE* room) { // POD only (SEH): room+0x18 (the game 
         return true;
     }
 }
-float InnerNormScale(const RoomInfo& info, void* light) {
-    if (!t_solveRoom) return 1.0f;
+float InnerNormScaleAt(const RoomInfo& info, void* light, const BYTE* room) {
+    if (!room) return 1.0f;
     const auto it = std::lower_bound(info.innerSrc.begin(), info.innerSrc.end(), std::make_pair(reinterpret_cast<uintptr_t>(light), static_cast<const BYTE*>(nullptr)));
     if (it == info.innerSrc.end() || it->first != reinterpret_cast<uintptr_t>(light)) return 1.0f;
-    const bool outdoor = RoomOutdoorFlag(t_solveRoom);
-    const float k = InnerLight::NormScale(RoomNormOf(it->second), outdoor ? 1.0f : RoomNormOf(t_solveRoom), outdoor);
+    const bool outdoor = RoomOutdoorFlag(room);
+    const float k = InnerLight::NormScale(RoomNormOf(it->second), outdoor ? 1.0f : RoomNormOf(room), outdoor);
     if (k != 1.0f) g_innerNormScaled.fetch_add(1, std::memory_order_relaxed);
     return k;
 }
+float InnerNormScale(const RoomInfo& info, void* light) {return InnerNormScaleAt(info,light,t_solveRoom);}
 
 // Indoor light through openings: a lamp of a roofed room taken through an opening (ShareInnerLamps), tested like a yard's
 // (InnerPass); the game's own wall test that follows for it is skipped (GameWallTest)
@@ -12383,6 +12399,10 @@ namespace {
 void PublishVisSnap(); // below, with LampVisibilityShared
 } // namespace
 void OnPresent() {
+    if(kMemoryOptimizationsEnabled){
+        static uint32_t geometry=0;const auto now=MeshOcclusion::generation.load(std::memory_order_acquire);
+        if(now!=geometry){geometry=now;g_indoorGen.fetch_add(1,std::memory_order_relaxed);}
+    }
     g_presentFrame.fetch_add(1, std::memory_order_relaxed); // (the grid memo's frame)
     // Lamp drags (drag_lite.h): the sends left out go once the lamp is still; the re-pick throttle's priority call
     HookGuard::Run("DragLite flush", [] { DragLite::OnPresent(); });
@@ -12441,6 +12461,7 @@ void OnPresent() {
         }
         g_structureRefreshAt = structureNow ? structureNow : 1;
         g_roomRefsDirty = true;
+        if(kMemoryOptimizationsEnabled&&!rooms.empty())MeshOcclusion::Reset();
         for (uintptr_t room : rooms) UnlitRooms::OnRoomChanged(room);
     }
     if (g_groupRigsPending.exchange(false, std::memory_order_relaxed)) ObjectLightBridge::RequestRigRefresh();
@@ -12481,6 +12502,7 @@ void OnPresent() {
             g_dirtyReady = true;
             g_floorRefreshes.fetch_add(1, std::memory_order_relaxed);
             g_floorEditGen.fetch_add(1, std::memory_order_relaxed); // the grids cap their walls at the new floors (CapLowerWalls)
+            if(kMemoryOptimizationsEnabled)MeshOcclusion::Reset();
             for (uintptr_t m : g_dirtyMgrs) BumpGeoGen(m);
         }
     }
@@ -12494,6 +12516,7 @@ void OnPresent() {
 }
 
 void OnWorldChanged() {
+    MeshOcclusion::Reset();
     OutdoorDelta::OnWorldChanged(); // (Instant: the kept parts belong to the old world; nothing is kept while Classic)
     // the daytime curve's notes are kept: rooms noted during the load must still be swept (a note of a gone story matches no
     // loaded lot and is dropped by a sweep a minute after the change); only the last-noted shortcut starts again

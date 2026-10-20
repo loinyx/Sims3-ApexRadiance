@@ -1,4 +1,4 @@
-param([ValidateSet('Public','Developer')][string]$Flavor = 'Public')
+param([ValidateSet('Public','Developer')][string]$Flavor = 'Public', [switch]$MemoryTest, [switch]$DevelopmentVersion)
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
@@ -13,6 +13,9 @@ $relativeOutput = if ($Flavor -eq 'Public') { 'Public' } else { 'Release' }
 $output = Join-Path $repo $relativeOutput
 $intermediate = Join-Path $repo "obj/$Flavor"
 $argsList = @((Join-Path $repo 'ApexRadiance.sln'), '/m', '/p:Configuration=Release', '/p:Platform=x86', '/p:PlatformToolset=v143', '/p:VcpkgEnableManifest=false', "/p:ApexVcpkgRoot=$dependencies\", "/p:OutDir=$output\", "/p:IntDir=$intermediate\")
+if ($MemoryTest -and $Flavor -ne 'Public') { throw 'MemoryTest requires the Public flavour.' }
+if ($MemoryTest) { $argsList += '/p:ApexStudyDefines=APEX_MEMORY_TEST' }
+elseif ($DevelopmentVersion) { $argsList += '/p:ApexStudyDefines=APEX_DEVELOPMENT_BUILD_FLAVOR' }
 if ($Flavor -eq 'Public') { $argsList += '/p:ApexFlavorDefines=APEX_NO_DEV_TOOLS' }
 else { $argsList += '/p:ApexFlavorDefines=' }
 New-Item -ItemType Directory -Path (Join-Path $repo 'outputs/build') -Force | Out-Null

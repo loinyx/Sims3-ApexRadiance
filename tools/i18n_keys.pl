@@ -14,6 +14,7 @@ use strict;
 use warnings;
 use File::Basename qw(dirname basename);
 use File::Spec;
+use File::Glob qw(bsd_glob);
 
 my $root = File::Spec->rel2abs(File::Spec->catdir(dirname(__FILE__), '..'));
 my $i18n = "$root/i18n";
@@ -28,7 +29,7 @@ close $vh;
 
 # The tables in link order (ApexRadiance.vcxproj lists them in this order; the order only groups the output)
 my @files = grep { -f "$i18n/$_" } qw(tr_widgets.cpp tr_menu.cpp tr_image.cpp tr_lighting.cpp tr_features.cpp);
-for my $f (sort map { basename($_) } glob("$i18n/tr_*.cpp")) {
+for my $f (sort map { basename($_) } bsd_glob("$i18n/tr_*.cpp")) {
     push @files, $f unless grep { $_ eq $f } @files;
 }
 

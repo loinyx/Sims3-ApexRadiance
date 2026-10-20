@@ -81,6 +81,10 @@ and the indices are written back.
 |---|---|---|
 | CasTriSort | 0x005D1960 | Sig (entry) |
 
+Before allocating sort scratch, the sorter checks whether counts are already non-increasing. Such a list
+already has the required stable order and is copied only when output differs from input. Other lists keep the same
+sort. This changes no triangle counts or tie ordering.
+
 ## Rejected approaches
 
 - Attributing the CAS hitches to FUN_005d1010 from sampler data: the sampler's function-start guess booked FUN_005d1960's

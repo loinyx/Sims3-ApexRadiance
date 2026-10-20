@@ -30,6 +30,9 @@
 #include "wall_lamp_table.h"
 #include "floor_atlas_table.h"
 #include "shader_patches.h"
+#include "mesh_occlusion.h"
+#include "mesh_budget_policy.h"
+#include <wrl/client.h>
 #include "lightmap_smooth.h"
 #include "terrain_chunk_relight.h"
 #include "room_map_padding.h"
@@ -1169,6 +1172,179 @@ bool MeshBox(const BYTE* p, UINT count, UINT stride, const FenceLayout& L, float
         return false;
     }
 }
+// Opaque instanced structures retain their triangles, rather than becoming a filled ramp or box.
+// Collection is bounded and reuses the declaration/packing checked for instanced garden walls.
+struct SolidGroup {std::vector<MeshOcclusion::Triangle> triangles;DWORD read=0,seen=0;double priority=0;};
+std::unordered_map<uint64_t,SolidGroup> g_solidGroups;
+std::unordered_map<uint64_t,uint64_t> g_solidGeometry;
+std::unordered_map<uint64_t,DWORD> g_solidAttempts;
+std::unordered_map<IDirect3DPixelShader9*,bool> g_solidPs;
+constexpr size_t kSolidTriangleLimit=8192;
+size_t g_solidTriangles=0;
+DWORD g_solidDirty=0,g_solidPublished=0;
+uint32_t g_solidReset=0;
+unsigned g_solidReadBudget=1;
+unsigned g_solidNotes=0;
+unsigned g_solidReplaced=0,g_solidRejected=0;
+DWORD g_solidNextScan=0;
+bool g_solidScanning=false;
+template<class T> struct SolidRead {
+    T* buffer;void* data=nullptr;
+    explicit SolidRead(T* b):buffer(b){}
+    bool Lock(UINT offset,UINT bytes){return SUCCEEDED(buffer->Lock(offset,bytes,&data,D3DLOCK_READONLY))&&data;}
+    ~SolidRead(){if(data)buffer->Unlock();}
+};
+UINT SolidElementBytes(BYTE type){
+    switch(type){case D3DDECLTYPE_FLOAT3:return 12;case D3DDECLTYPE_FLOAT4:return 16;
+    case D3DDECLTYPE_SHORT4:case D3DDECLTYPE_SHORT4N:case D3DDECLTYPE_FLOAT16_4:return 8;default:return 0;}
+}
+bool SolidPixelShader(){
+    if(!g_curPs)return false;
+    if(auto i=g_solidPs.find(g_curPs);i!=g_solidPs.end())return i->second;
+    bool opaque=true;UINT bytes=0;std::vector<DWORD> code;
+    if(FAILED(g_curPs->GetFunction(nullptr,&bytes))||bytes<8||bytes>65536||bytes%4)opaque=false;
+    else{code.resize(bytes/4);if(FAILED(g_curPs->GetFunction(code.data(),&bytes)))opaque=false;}
+    for(size_t at=1;opaque&&at<code.size();){
+        const auto op=code[at]&0xFFFFu;if(op==0xFFFFu)break;
+        const size_t count=op==0xFFFEu?1+((code[at]>>16)&0x7FFFu):1+((code[at]>>24)&15u);
+        if(op==0x41u||!count||at+count>code.size()){opaque=false;break;}at+=count;
+    }
+    if(g_solidPs.size()<512)g_solidPs.emplace(g_curPs,opaque);return opaque;
+}
+void NoteSolidMeshImpl(IDirect3DDevice9* dev,D3DPRIMITIVETYPE type,INT baseVertex,UINT minVertex,UINT vertices,UINT start,UINT primitives,bool instanced){
+    if(!kMemoryOptimizationsEnabled||g_inOwnCall||!g_solidReadBudget||!instanced||type!=D3DPT_TRIANGLELIST||!vertices||vertices>4096||!primitives||primitives>4096)return;
+    DWORD blend=0,alpha=0,depth=0;UINT frequency=0,step=0;
+    if(FAILED(dev->GetRenderState(D3DRS_ALPHABLENDENABLE,&blend))||FAILED(dev->GetRenderState(D3DRS_ALPHATESTENABLE,&alpha))||
+       FAILED(dev->GetRenderState(D3DRS_ZWRITEENABLE,&depth))||blend||alpha||!depth)return;
+    if(FAILED(dev->GetStreamSourceFreq(0,&frequency))||!(frequency&D3DSTREAMSOURCE_INDEXEDDATA)||
+       FAILED(dev->GetStreamSourceFreq(1,&step))||step!=(D3DSTREAMSOURCE_INSTANCEDATA|1u))return;
+    const UINT instances=frequency&0x3FFFFFFFu;if(!instances||static_cast<uint64_t>(instances)*primitives>4096)return;
+    using Microsoft::WRL::ComPtr;
+    ComPtr<IDirect3DVertexBuffer9> vb,instanceBuffer;ComPtr<IDirect3DIndexBuffer9> indices;
+    UINT offset=0,stride=0,instanceOffset=0,instanceStride=0;
+    if(FAILED(dev->GetStreamSource(0,vb.GetAddressOf(),&offset,&stride))||!vb||
+       FAILED(dev->GetStreamSource(1,instanceBuffer.GetAddressOf(),&instanceOffset,&instanceStride))||!instanceBuffer||
+       FAILED(dev->GetIndices(indices.GetAddressOf()))||!indices)return;
+    uint64_t key=1469598103934665603ull;
+    for(uint64_t v:{static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb.Get())),static_cast<uint64_t>(reinterpret_cast<uintptr_t>(instanceBuffer.Get())),
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(indices.Get())),static_cast<uint64_t>(offset),static_cast<uint64_t>(instanceOffset),
+        static_cast<uint64_t>(static_cast<uint32_t>(baseVertex)),static_cast<uint64_t>(minVertex),static_cast<uint64_t>(vertices),static_cast<uint64_t>(start),static_cast<uint64_t>(primitives),
+        static_cast<uint64_t>(stride),static_cast<uint64_t>(instanceStride),static_cast<uint64_t>(instances),static_cast<uint64_t>(reinterpret_cast<uintptr_t>(g_curPs))})key=(key^v)*1099511628211ull;
+    const DWORD now=GetTickCount();
+    auto found=g_solidGroups.find(key);
+    if(found!=g_solidGroups.end()){found->second.seen=now;if(now-found->second.read<5000)return;}
+    // Rejected meshes also yield the next frame's read slot to later draws.
+    if(auto attempt=g_solidAttempts.find(key);attempt!=g_solidAttempts.end()&&now-attempt->second<5000)return;
+    if(!g_solidReadBudget)return;--g_solidReadBudget;
+    if(g_solidAttempts.size()>=512&&!g_solidAttempts.contains(key)){
+        auto oldest=g_solidAttempts.begin();
+        for(auto it=g_solidAttempts.begin();it!=g_solidAttempts.end();++it)if(now-it->second>now-oldest->second)oldest=it;
+        g_solidAttempts.erase(oldest);
+    }
+    g_solidAttempts[key]=now;
+    if(!SolidPixelShader())return;
+    const auto layout=ReadFenceLayout(dev);
+    const UINT positionBytes=SolidElementBytes(layout.posType),placeBytes=SolidElementBytes(layout.placeType),turnBytes=SolidElementBytes(layout.turnType);
+    if(!layout.ok||!positionBytes||!placeBytes||!turnBytes||!stride||stride>256||!instanceStride||instanceStride>256||
+       layout.posOff+positionBytes>stride||layout.placeOff+placeBytes>instanceStride||layout.turnOff+turnBytes>instanceStride)return;
+    D3DVERTEXBUFFER_DESC vd{},id{};D3DINDEXBUFFER_DESC indexDesc{};
+    if(FAILED(vb->GetDesc(&vd))||FAILED(instanceBuffer->GetDesc(&id))||FAILED(indices->GetDesc(&indexDesc)))return;
+    const UINT indexBytes=indexDesc.Format==D3DFMT_INDEX16?2:indexDesc.Format==D3DFMT_INDEX32?4:0;
+    const int64_t first=static_cast<int64_t>(baseVertex)+minVertex;
+    if(!indexBytes||first<0)return;
+    const uint64_t vertexAt=offset+static_cast<uint64_t>(first)*stride,vertexBytes=static_cast<uint64_t>(vertices)*stride;
+    const uint64_t indexAt=static_cast<uint64_t>(start)*indexBytes,indexSize=static_cast<uint64_t>(primitives)*3*indexBytes;
+    const uint64_t instanceBytes=static_cast<uint64_t>(instances)*instanceStride;
+    if(vertexAt+vertexBytes>vd.Size||indexAt+indexSize>indexDesc.Size||instanceOffset+instanceBytes>id.Size)return;
+    SolidRead vr(vb.Get());if(!vr.Lock(static_cast<UINT>(vertexAt),static_cast<UINT>(vertexBytes)))return;
+    float lo[3],hi[3];
+    if(!MeshBox(static_cast<const BYTE*>(vr.data),vertices,stride,layout,lo,hi))return;
+    SolidRead ir(indices.Get());SolidRead sr(instanceBuffer.Get());
+    if(!ir.Lock(static_cast<UINT>(indexAt),static_cast<UINT>(indexSize))||!sr.Lock(instanceOffset,static_cast<UINT>(instanceBytes)))return;
+    std::vector<MeshOcclusion::Triangle> triangles;triangles.reserve(static_cast<size_t>(instances)*primitives);
+    std::vector<MeshOcclusion::Vec> points(vertices);
+    float placementLow=1e30f,placementHigh=-1e30f;
+    for(UINT instance=0;instance<instances;++instance){
+        const auto* instanceData=static_cast<const BYTE*>(sr.data)+instance*instanceStride;float place[4],turn[4];
+        if(!ReadElement(instanceData+layout.placeOff,layout.placeType,place)||!ReadElement(instanceData+layout.turnOff,layout.turnType,turn))return;
+        placementLow=std::min(placementLow,place[1]);placementHigh=std::max(placementHigh,place[1]);
+        for(UINT i=0;i<vertices;++i){float p[4];
+            if(!ReadElement(static_cast<const BYTE*>(vr.data)+i*stride+layout.posOff,layout.posType,p)||!MeshOcclusion::Decode(p,place,turn,points[i]))return;
+        }
+        for(UINT i=0;i<primitives;++i){UINT index[3];
+            for(UINT k=0;k<3;++k){const UINT raw=indexBytes==2?static_cast<const uint16_t*>(ir.data)[3*i+k]:static_cast<const uint32_t*>(ir.data)[3*i+k];
+                if(raw<minVertex||raw-minVertex>=vertices)return;index[k]=raw-minVertex;}
+            triangles.push_back({points[index[0]],points[index[1]],points[index[2]]});
+        }
+    }
+    uint64_t geometry=1469598103934665603ull;
+    const auto* bytes=reinterpret_cast<const BYTE*>(triangles.data());
+    for(size_t i=0;i<triangles.size()*sizeof(triangles[0]);++i)geometry=(geometry^bytes[i])*1099511628211ull;
+    if(auto same=g_solidGeometry.find(geometry);same!=g_solidGeometry.end()&&same->second!=key){
+        auto prior=g_solidGroups.find(same->second);
+        if(prior!=g_solidGroups.end()&&prior->second.triangles.size()==triangles.size()&&
+           !std::memcmp(prior->second.triangles.data(),triangles.data(),triangles.size()*sizeof(triangles[0]))){
+            prior->second.seen=now;
+            if(found!=g_solidGroups.end()){g_solidTriangles-=found->second.triangles.size();g_solidGroups.erase(found);g_solidDirty=now|1;std::erase_if(g_solidGeometry,[key](const auto& p){return p.second==key;});}
+            return;
+        }
+    }
+    const bool firstGroup=found==g_solidGroups.end();
+    const size_t oldSize=firstGroup?0:found->second.triangles.size();
+    const double priority=MeshBudget::Priority(triangles,placementHigh-placementLow);
+    std::array<MeshBudget::Entry,128> entries{};size_t entryCount=0;
+    for(const auto& [existing,group]:g_solidGroups)if(existing!=key){
+        if(entryCount==entries.size())return;
+        entries[entryCount++]={existing,group.triangles.size(),group.priority};
+    }
+    std::vector<uint64_t> victims;
+    if(!MeshBudget::Plan(std::span(entries.data(),entryCount),g_solidTriangles-oldSize,triangles.size(),priority,kSolidTriangleLimit,128,victims)){
+        if(g_solidRejected++<20)LOG_INFO(std::format("[MeshOcclusion] Budget deferred {} triangles, {} instances; coverage priority {:.6f}, placement rise {:.2f}; {} of {} triangles retained",
+            triangles.size(),instances,priority,placementHigh-placementLow,g_solidTriangles,kSolidTriangleLimit));
+        if(!firstGroup){g_solidTriangles-=oldSize;g_solidGroups.erase(found);g_solidDirty=now|1;std::erase_if(g_solidGeometry,[key](const auto& p){return p.second==key;});}
+        return;
+    }
+    for(uint64_t victim:victims){
+        const auto old=g_solidGroups.find(victim);if(old==g_solidGroups.end())continue;
+        g_solidTriangles-=old->second.triangles.size();g_solidGroups.erase(old);
+        std::erase_if(g_solidGeometry,[victim](const auto& p){return p.second==victim;});g_solidDirty=now|1;
+    }
+    if(!victims.empty()&&g_solidReplaced++<20)LOG_INFO(std::format("[MeshOcclusion] Budget replaced {} lower-coverage groups for {} triangles, {} instances; priority {:.6f}, placement rise {:.2f}",
+        victims.size(),triangles.size(),instances,priority,placementHigh-placementLow));
+    auto& group=g_solidGroups[key];group.read=group.seen=now;
+    group.priority=priority;
+    if(triangles.size()==group.triangles.size()&&(triangles.empty()||!std::memcmp(triangles.data(),group.triangles.data(),triangles.size()*sizeof(triangles[0]))))return;
+    g_solidTriangles=g_solidTriangles-group.triangles.size()+triangles.size();group.triangles=std::move(triangles);g_solidDirty=now|1;
+    std::erase_if(g_solidGeometry,[key](const auto& p){return p.second==key;});g_solidGeometry[geometry]=key;
+    if(firstGroup&&g_solidNotes<20&&!group.triangles.empty()){
+        ++g_solidNotes;const auto p=group.triangles.front().a;
+        LOG_INFO(std::format("[MeshOcclusion] Accepted {} triangles, {} instances near ({:.2f}, {:.2f}, {:.2f}); local horizontal spans {:.3f}/{:.3f}, vertex usage {:#x}, instance stride {}",
+            group.triangles.size(),instances,p.x,p.y,p.z,hi[0]-lo[0],hi[2]-lo[2],vd.Usage,instanceStride));
+    }
+}
+void NoteSolidMesh(IDirect3DDevice9* dev,D3DPRIMITIVETYPE type,INT base,UINT min,UINT vertices,UINT start,UINT primitives,bool instanced){
+    try{NoteSolidMeshImpl(dev,type,base,min,vertices,start,primitives,instanced);}catch(...){/* A failed optional read keeps the existing floor/wall tests. */}
+}
+void PumpSolidMeshes(){
+    if(!kMemoryOptimizationsEnabled)return;
+    const DWORD now=GetTickCount();
+    const auto reset=MeshOcclusion::reset.load(std::memory_order_acquire);
+    if(reset!=g_solidReset){g_solidGroups.clear();g_solidGeometry.clear();g_solidAttempts.clear();g_solidPs.clear();g_solidTriangles=0;g_solidDirty=0;g_solidReset=reset;g_solidNextScan=0;g_solidScanning=false;g_solidReplaced=g_solidRejected=0;}
+    // Once every visible group is cached, discovery need not query device state on every frame.
+    if(g_solidScanning)g_solidNextScan=now+(g_solidReadBudget==1?100:25);
+    g_solidReadBudget=!g_solidNextScan||static_cast<int32_t>(now-g_solidNextScan)>=0?1:0;
+    g_solidScanning=g_solidReadBudget!=0;
+    bool retired=false;
+    for(auto it=g_solidGroups.begin();it!=g_solidGroups.end();)if(now-it->second.seen>300000){g_solidTriangles-=it->second.triangles.size();it=g_solidGroups.erase(it);g_solidDirty=now|1;retired=true;}else ++it;
+    if(retired)std::erase_if(g_solidGeometry,[](const auto& p){return !g_solidGroups.contains(p.second);});
+    if(!g_solidDirty||now-g_solidDirty<500||now-g_solidPublished<2000)return;
+    try{
+        std::vector<MeshOcclusion::Triangle> triangles;triangles.reserve(g_solidTriangles);
+        for(const auto& [key,group]:g_solidGroups){(void)key;triangles.insert(triangles.end(),group.triangles.begin(),group.triangles.end());}
+        MeshOcclusion::Publish(std::move(triangles));g_solidPublished=now;g_solidDirty=0;
+        LOG_INFO(std::format("[MeshOcclusion] Published {} triangles from {} opaque instanced groups; open gaps retain no triangles",g_solidTriangles,g_solidGroups.size()));
+    }catch(...){g_solidPublished=now;}
+}
 // POD only (SEH): one wall per piece of the group
 bool FencePieceWalls(const BYTE* p, UINT count, UINT stride, const FenceLayout& L, const float lo[3], const float hi[3], FenceGroup& g) {
     __try {
@@ -1871,6 +2047,7 @@ bool g_curVsIsObject = false;
 // the same pointer, each looked up per draw). Entries are only added (ClassifyVs) and all dropped together (Shutdown),
 // so a pointer to the current one stays valid while that shader is tracked (unordered_map keeps element addresses).
 struct VsInfo {
+    bool packedRoomFloor = false;
     bool worldMultiLight = false; // exact captured summer multi-pass light VS
     bool worldCompact = false; // exact captured single-layer WORLD VS (not an object rig)
     bool contractedLotUv = false; // exact regular lot VS; CPU floor samples use uncontracted local xz
@@ -1942,6 +2119,7 @@ VsInfo* ClassifyVs(IDirect3DVertexShader9* vs) {
             else {
                 std::vector<DWORD> t(size / 4);
                 std::memcpy(t.data(), code.data(), t.size() * 4);
+                info.packedRoomFloor = ShaderPatches::IsPackedRoomFloorVs(t);
                 DWORD mapConst = 0;
                 if (ShaderPatches::IsRoadVs(t, mapConst)) {
                     info.roadMap = mapConst; // c16 in winter, c14 in summer
@@ -4449,7 +4627,7 @@ template <typename DrawFn> bool DrawBasisSmooth(IDirect3DDevice9* dev, DrawFn dr
     // a room-lit shader that also reads the basis maps (the richest InteriorFloor variants): both reads smooth in one copy
     if (g_curPsRoomMap && g_roomMapSmooth.load(std::memory_order_relaxed)) {
         PatchedPs& q = PatchedFor(dev, g_basisRoomPs, "Indoor light and room map (smooth)", [](std::vector<DWORD>& t, PatchedPs& pp) {
-            return ShaderPatches::PatchBasisSmooth(t, pp.smooth) && ShaderPatches::PatchRoomMapSmooth(t, pp.room);
+            return ShaderPatches::PatchBasisSmooth(t, pp.smooth,kMemoryOptimizationsEnabled) && ShaderPatches::PatchRoomMapSmooth(t, pp.room);
         });
         float bsize[4], rsize[4], band[4], oldB[4] = {};
         bool wall = false;
@@ -4471,7 +4649,7 @@ template <typename DrawFn> bool DrawBasisSmooth(IDirect3DDevice9* dev, DrawFn dr
             return true;
         }
     }
-    PatchedPs& p = PatchedFor(dev, g_basisSmoothPs, "Indoor light (smooth)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchBasisSmooth(t, pp.smooth); });
+    PatchedPs& p = PatchedFor(dev, g_basisSmoothPs, "Indoor light (smooth)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchBasisSmooth(t, pp.smooth,kMemoryOptimizationsEnabled); });
     if (!p.ps) return false;
     float size[4], oldSize[4] = {};
     IDirect3DBaseTexture9* map = nullptr;
@@ -5193,7 +5371,8 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
     if (g_curPsBasis) RoomMapPadding::NoteDraw(dev, g_curPs); // note the room light maps it binds (edge padding)
     // (not for fences / snow relief / rig objects: those draws keep their own fixes)
     if (g_curPsBasis && !g_curVsIsInstanced && !g_curVsIsSnowRelief && !g_curVsIsObject && DrawBasisSmooth(dev, draw)) return NoteClaim(ClaimSource::IndoorBasisSmooth);
-    if (g_curPsRoomMap && !g_curVsIsInstanced && !g_curVsIsSnowRelief && !g_curVsIsObject && DrawRoomMapSmooth(dev, draw)) return NoteClaim(ClaimSource::RoomMapSmooth);
+    const bool roomFloor=kMemoryOptimizationsEnabled && g_curVsInfo && g_curVsInfo->packedRoomFloor;
+    if (g_curPsRoomMap && !g_curVsIsInstanced && !g_curVsIsSnowRelief && (!g_curVsIsObject || roomFloor) && DrawRoomMapSmooth(dev, draw)) return NoteClaim(ClaimSource::RoomMapSmooth);
     if (g_curClass == PsClass::ObjectRig) return DrawObjectRig(dev, draw) ? NoteClaim(ClaimSource::ObjectRigNightFix) : kContinue;
     if (g_curClass == PsClass::Roof) return DrawRoof(dev, draw) ? NoteClaim(ClaimSource::RoofLampFix) : kContinue;
     // The snowy roof pixel shader is also the one of snow on stair tops (same bytes, LightProbe-neve-escada); the vertex
@@ -6476,6 +6655,7 @@ void UpdateHooks() {
                 try {
                     g_curPrims = prims;
                     g_curDipBase = static_cast<UINT>(bvi), g_curDipMin = minV, g_curDipNum = numV;
+                    NoteSolidMesh(ctx.device,type,bvi,minV,numV,start,prims,g_curVsIsInstanced);
                     return OnDraw(ctx.device, [&]() {
                         drawn = true;
                         D3D9Hooks::ReissueScope reissue; // only the observers of re-issued draws run for it (d3d9_hooks.h)
@@ -6714,6 +6894,7 @@ void RequestExteriorCapture() {
 std::string ExteriorCaptureStatus() { return g_exteriorPending ? "capturing..." : "ready"; }
 
 void OnPresent() {
+    PumpSolidMeshes();
     ++g_roomMapFrame; // (the room map size memo is per frame)
     g_lotDrawTick = GetTickCount();
     // the furniture's lamp edit episode is over once no switch, edit hold or trailing room remains (2.13.1: one log line)
@@ -7051,6 +7232,8 @@ std::string ObjectStatus() {
 }
 
 void Shutdown(bool keepChunkMaps) {
+    MeshOcclusion::Reset();
+    g_solidGroups.clear();g_solidGeometry.clear();g_solidAttempts.clear();g_solidPs.clear();g_solidTriangles=0;g_solidDirty=0;g_solidNotes=0;g_solidNextScan=0;g_solidScanning=false;
     g_keepChunks = keepChunkMaps;
     g_objectFix = false;
     g_wallGain = 1.0f;

@@ -8,7 +8,8 @@ The feature is described in [features/performance/room-to-save.md](../features/p
 
 ## Automated tests
 
-None offline.
+The production [memory-budget harness](memory-budget.md) checks reserve exclusion during native saves, failure-path
+scope cleanup and pre-save buffer ownership without modifying the game.
 
 ## Latest results
 

@@ -22,6 +22,12 @@ or shimmering, and fade a lamp at the light cut without lighting anything the ga
 
 ## In-game test plan
 
+2026-10-19: `tools/basis_shadow_check/run.ps1` passes 142 native D3D9 checks. All 56 matching precomp basis copies
+create as pixel shaders. The unguarded patch exactly reproduces one distinct captured shader. Black/red boundary
+fixtures show 320 and 448 spill channels before the guard and zero after it; a flat fixture differs by zero LSB.
+Fixtures include an alpha-zero edge. These are filter tests, not proof that the stair scene is corrected.
+The existing room-map regression passes 962 checks, including one captured match created natively.
+
 1. A room at night with a ceiling lamp, *Smooth light maps* off then on. **Expected:** on, the floor and walls show no
    texel steps or diamond pattern; shadow edges of walls and furniture keep their place.
 2. A lamp's circle on a large floor. **Expected:** no ring where the light ends; a fine grain at most, not visible at a
@@ -37,6 +43,15 @@ or shimmering, and fade a lamp at the light cut without lighting anything the ga
 - Nothing yet.
 
 ## Open checks
+
+- 2026-10-19: `tools/room_surface_check/run.ps1` passes 212 checks. Seven native packed floor vertex shaders match,
+  all confined to the floor techniques; changed packing constants are rejected. The captured arch floor shader
+  matches the existing room-map patch and all three captured copies create natively. Forty-five precomp vertex
+  shaders expose wall matrices. The captured wall resolves clip c0..c3 and world c4..c6, rather than the probe's older
+  fixed c4/c8 assumption. The routing change and arch brightness continuity remain unverified in game.
+  Relocated matrix rows are recovered, and a missing position row is rejected.
+  The room-map regression passes 967 checks with both captured room-map shader families created natively; the basis
+  shadow regression remains at 142 checks with zero failures.
 
 - *Unverified:* every wall block starts on the 3n + 1 grid (the developer status counts the pieces off it).
 - *Unverified:* the light between wall blocks packed side by side and at the edge of a room's floor area (1/6 bleed).

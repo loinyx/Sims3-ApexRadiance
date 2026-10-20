@@ -9,6 +9,14 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Greek}
 const I18n::Pair kPairs[] = {
+    {"Room to save releases idle buffers earlier during saving", "Ο χώρος αποθήκευσης ελευθερώνει νωρίτερα τα ανενεργά προσωρινά δεδομένα κατά την αποθήκευση"},
+    {"Screen effects avoid unused image copies and repeated timing work", "Τα εφέ οθόνης αποφεύγουν άχρηστα αντίγραφα εικόνας και επαναλαμβανόμενες μετρήσεις χρόνου"},
+    {"Object and compression caches reduce repeated work with bounded memory", "Οι κρυφές μνήμες αντικειμένων και συμπίεσης μειώνουν την επαναλαμβανόμενη εργασία με περιορισμένη μνήμη"},
+    {"Night Lights improves lamp blocking near stairs and closed floors", "Ο νυχτερινός φωτισμός βελτιώνει το μπλοκάρισμα φωτός κοντά σε σκάλες και κλειστά δάπεδα"},
+    {"RAM and gameplay test", "Δοκιμή RAM και ομαλότητας"},
+    {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Επισκεφθείτε διάφορα οικόπεδα για 10 λεπτά, επιστρέψτε στο πρώτο, περιμένετε, αποθηκεύστε και φορτώστε ξανά την αποθήκευση."},
+    {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Συγκρίνετε κολλήματα, φόρτωση οικοπέδων και χρήση RAM με την προηγούμενη έκδοση. Σημειώστε κάθε σφάλμα 12 και τι προηγήθηκε."},
+    {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Ελέγξτε το φως των λαμπών κοντά σε σκάλες και πίσω από κλειστά δάπεδα. Η λεπτομερής συλλογή δεδομένων είναι απενεργοποιημένη."},
     {"The latest lighting features also work on the EA app version 1.69", "Οι νεότερες λειτουργίες φωτισμού λειτουργούν και στην έκδοση 1.69 της εφαρμογής EA"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "Οι τοίχοι ρίχνουν σκιά στο φως των λαμπτήρων και σε γρασίδι, δρόμους και πεζοδρόμια έξω από το οικόπεδο"},
     {"Garden walls and fences shade lamp light on the ground by their height", "Οι μάντρες και οι φράχτες ρίχνουν σκιά στο φως των λαμπτήρων στο έδαφος ανάλογα με το ύψος τους"},

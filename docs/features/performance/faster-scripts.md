@@ -53,6 +53,11 @@ profile leaves it as it is.
 
 ## Limitations
 
+The gameplay candidate adds a per-thread last-result cache using the same domain/type/generation key as the shared
+table. A domain free or restart invalidates both levels; cacheable results still come from the game and retain the
+startup checks. Shared fields are atomic under the existing sequence protocol. No managed allocation, GC budget or
+collection frequency changes. This adds 16 bytes per participating thread on the 32-bit build.
+
 - The gain depends on how much script work a household runs; it has not been measured in frames.
 - If the type cache finds a difference it turns itself off for the session and the game's answer is used (logged).
 

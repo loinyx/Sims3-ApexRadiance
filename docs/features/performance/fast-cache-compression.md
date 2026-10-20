@@ -9,7 +9,7 @@ computes the texture compositor cache's record checksums eight bytes per step, w
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier; record checksums since 2.4.0; on by default since 2.5.5 |
+| Availability | Bounded storage and repeated-prefix comparisons: Released in 2.14.0. Released in 2.1.0 or earlier; record checksums since 2.4.0; on by default since 2.5.5 |
 | Default | On |
 | Menu | System > Performance > Textures and Sims > *Faster cache compression* |
 | Configuration | `[patches.FastCacheCompression]` in `ApexRadiance.toml` |
@@ -193,3 +193,16 @@ fit, temporary contexts, checks (game's decoder), the comparison with the game's
 - [Performance overview](README.md)
 - [Validation](../../validation/performance-fast-cache-compression.md)
 - [History](../../history/performance-fast-cache-compression.md)
+
+## Public RAM and gameplay test
+
+The experiment sizes the initial parallel pool by useful pieces before creating workers. A stream of three pieces
+needs at most two workers and three token arrays, rather than creating the maximum worker count and a full round of
+token arrays. Later larger streams grow the pool as needed. Pieces are still parsed and emitted in the same order;
+compression flags, effort and stream bytes are unchanged. Existing fallback and count/write pairing remain intact.
+The existing SSE2 prefix comparison is unchanged. No service loop, lot finalization dependency or lighting algorithm
+is rescheduled by this change. See the [memory budget experiment](../memory-budget.md) for its buffer lifetime policy.
+
+Copied writes defer context acquisition until verification needs it. Small streams acquire a hash context without
+segmented token storage. Active counting copies have a shared admission budget in the memory experiment; exhausting
+it falls back to count-only compression and a later write rather than retaining another copy.

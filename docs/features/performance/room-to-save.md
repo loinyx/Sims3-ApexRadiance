@@ -17,11 +17,11 @@ is not using. Nothing on screen changes.
 
 ## The problem
 
-`TS3W.exe` has a 4 GB address space. Over a long session it fragments, and what runs out first is not memory but one
-large contiguous free block. The world save writes large streams; when its allocation fails, the world save
-(0x00C6D460) returns false and its caller (0x00AAC110) returns 12, the "Error 12" the player sees. The game also keeps
-up to about 200 MB of idle files in its resource cache ("Resources/CacheBudget"), which it frees only on its own
-schedule.
+The large-address-aware 32-bit executable has up to 4 GiB of user address space on 64-bit Windows. A long session can
+exhaust that space or fragment it so a large allocation fails despite free bytes elsewhere. The native world save
+(0x00C6D460) returns a success flag; its caller maps false to result 12. This return path does not identify the failed
+allocation or prove that every Error 12 has the same cause. The game also retains idle resource files, which its own
+cache trim can release.
 
 ## How Apex Radiance solves it
 
@@ -34,7 +34,8 @@ schedule.
    the thread of their per-frame update); under 160 MB the reserve is released too. Once a free block of 640 MB is back
    (the reserve plus 512 MB) and 30 s have passed, the reserve is taken again.
 
-Only idle resources are dropped; the game reads them again when it needs them.
+Only idle resources are dropped; the game reads them again when it needs them. The reserve cannot be retaken while
+the native save hook is active. The numbered public test adds [save-phase buffer cleanup](../memory-budget.md#save-preparation).
 
 ## Settings
 
@@ -60,8 +61,8 @@ profile leaves it as it is.
 - It cannot create memory: a save that needs more than the reserve plus what is free still fails.
 - The resource caches are only shrunk from the thread of their own update; a save made on another thread skips the
   shrink and only releases the reserve.
-- The size of the idle cache read for the log (`+0x98` of each cache) is inferred from the game's trim, not verified in
-  game.
+- The idle-cache size in the log (`+0x98` of each cache) is native accounting, not physical RAM returned to Windows.
+- The hook begins at the native world save; earlier serialization and total save peak remain unmeasured.
 
 ## Technical reference
 

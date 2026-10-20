@@ -27,6 +27,11 @@ and the constants the game actually uploaded, and compare them with a pixel that
 
 ## How Apex Radiance solves it
 
+Wall geometry recording identifies the clip and world matrix registers from the wall vertex shader's consecutive
+position `dp4` operations and static wall-map UV scale. Unknown layouts skip the wall-position diagnostic rather than
+interpreting unrelated constants as transforms. Geometry reads occur only during a requested capture. This supports
+both the c0/c4 and c4/c8 matrix layouts when their shader patterns match.
+
 The probe tests each draw of one frame against a 1x1 scissor rectangle at the chosen pixel with an occlusion query, so
 only the draws that really reach that pixel are reported.
 

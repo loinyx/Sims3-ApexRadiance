@@ -9,6 +9,14 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Italian}
 const I18n::Pair kPairs[] = {
+    {"Room to save releases idle buffers earlier during saving", "Spazio per salvare libera prima i buffer inattivi durante il salvataggio"},
+    {"Screen effects avoid unused image copies and repeated timing work", "Gli effetti evitano copie inutilizzate delle immagini e misurazioni ripetute"},
+    {"Object and compression caches reduce repeated work with bounded memory", "Le cache di oggetti e compressione riducono il lavoro ripetuto con memoria limitata"},
+    {"Night Lights improves lamp blocking near stairs and closed floors", "Luci notturne migliora il blocco della luce vicino a scale e pavimenti chiusi"},
+    {"RAM and gameplay test", "Test RAM e fluidità"},
+    {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Visita diversi lotti per 10 minuti, torna al primo, attendi, poi salva e ricarica quel salvataggio."},
+    {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Confronta scatti, caricamento dei lotti e uso della RAM con la versione precedente. Annota ogni errore 12 e cosa è successo prima."},
+    {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Controlla la luce delle lampade vicino alle scale e oltre i pavimenti chiusi. La raccolta dettagliata dei dati è disattivata."},
     {"The latest lighting features also work on the EA app version 1.69", "Le funzioni di illuminazione più recenti funzionano anche nella versione 1.69 dell'app EA"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "I muri fanno ombra alla luce delle lampade anche su prato, strade e marciapiedi fuori dal lotto"},
     {"Garden walls and fences shade lamp light on the ground by their height", "Muretti e recinzioni fanno ombra alla luce delle lampade a terra in base alla loro altezza"},

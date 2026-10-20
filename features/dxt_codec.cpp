@@ -947,6 +947,9 @@ template <bool DXT5> void FastEncodeRows(const Dst* dst, const Src* src, uint32_
     const uint32_t pad = dst->pitch - ((width + 3) & ~3u) * 4; // [esp+3Ch] of the DXT5 driver
     Group g;
     int n = 0;
+    const uint8_t* previousPixels=nullptr;
+    const uint8_t* previousOutput=nullptr;
+    uint32_t previousSolid=0,previousPower=0;
     // the same addresses the serial walk reaches by adding pitch * 4 (source) and dst->pitch (output) once per row of
     // blocks (32-bit wrap-around arithmetic either way)
     const uint8_t* srow = src->ptr + static_cast<intptr_t>(pitch) * 4 * static_cast<intptr_t>(rowBegin);
@@ -964,7 +967,21 @@ template <bool DXT5> void FastEncodeRows(const Dst* dst, const Src* src, uint32_
             j.height = height;
             j.pad = pad;
             if (n == 4) {
-                FlushGroup<DXT5>(g, 4, pitch, src->format, fb, ctx, cnt);
+                // Repeated complete 16x4 strips have identical encoder inputs, including alpha.
+                // Partial blocks retain the native edge/driver-local path.
+                const bool complete=rows==4&&g.job[0].cols==4&&g.job[3].cols==4&&g.job[0].y==y;
+                bool repeated=complete&&previousPixels&&Load32(g.job[0].src)==Load32(previousPixels);
+                for(int r=0;repeated&&r<4;++r)repeated=std::memcmp(g.job[0].src+static_cast<intptr_t>(pitch)*r,previousPixels+static_cast<intptr_t>(pitch)*r,64)==0;
+                bool reusable=complete;
+                if(repeated){std::memmove(g.job[0].out,previousOutput,4*bs);cnt.blocks+=4;cnt.solid+=previousSolid;cnt.powerAxis+=previousPower;}
+                else{
+                    const auto solid=cnt.solid,power=cnt.powerAxis,delegated=cnt.delegated;
+                    FlushGroup<DXT5>(g, 4, pitch, src->format, fb, ctx, cnt);
+                    previousSolid=cnt.solid-solid;previousPower=cnt.powerAxis-power;
+                    reusable=reusable&&cnt.delegated==delegated;
+                }
+                previousPixels=reusable?g.job[0].src:nullptr;
+                previousOutput=reusable?g.job[0].out:nullptr;
                 n = 0;
             }
         }
@@ -1259,8 +1276,8 @@ Result Encode(bool dxt5, const Dst* dst, const Src* src, BlockFallback fallback,
         r.busy = true;
         return serial();
     }
-    uint32_t k = p.EnsureWorkers(workers);
-    if (k > chunks - 1) k = chunks - 1;
+    const uint32_t usefulWorkers=std::min(workers,chunks-1);
+    uint32_t k = p.EnsureWorkers(usefulWorkers);
     if (!k) {
         p.inUse.store(false, std::memory_order_release);
         return serial();

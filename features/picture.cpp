@@ -29,6 +29,8 @@
 #include "depth_share.h"
 #include "d3d9_extra_hooks.h"
 #include "post_scene.h"
+#include "gpu_timing_policy.h"
+#include "build_flavor.h"
 #include "world_session.h"
 #include "shader_cache.h"
 #include "imgui.h"
@@ -827,6 +829,7 @@ struct Gpu {
     static constexpr int kQ = 4;
     IDirect3DQuery9 *qDisjoint[kQ] = {}, *qBegin[kQ] = {}, *qEnd[kQ] = {}, *qFreq[kQ] = {};
     bool qIssued[kQ] = {};
+    uint64_t nextTiming = 0;
     int qNext = 0;
     // frame state (render thread)
     bool hooks = false;
@@ -959,8 +962,20 @@ void CopyDepth(IDirect3DDevice9* dev) {
 }
 
 // Copies the back buffer as "the scene" (see the frame flow above); with Emphasize on, the depth too.
+bool EnsureSceneCopy(IDirect3DDevice9* dev) {
+    if (gpu.sceneTex && gpu.sceneSurf) return true;
+    IDirect3DTexture9* texture = nullptr;
+    IDirect3DSurface9* surface = nullptr;
+    const bool ok = SUCCEEDED(dev->CreateTexture(gpu.width, gpu.height, 1, D3DUSAGE_RENDERTARGET, gpu.format,
+        D3DPOOL_DEFAULT, &texture, nullptr)) && texture && SUCCEEDED(texture->GetSurfaceLevel(0, &surface)) && surface;
+    if (!ok) { SafeRelease(surface); SafeRelease(texture); return false; }
+    gpu.sceneTex = texture;
+    gpu.sceneSurf = surface;
+    return true;
+}
 void CopyScene(IDirect3DDevice9* dev) {
     if (!gpu.ready) return;
+    if (!EnsureSceneCopy(dev)) { gpu.sceneCopied = false; return; }
     IDirect3DSurface9* bb = nullptr;
     if (SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb) {
         gpu.sceneCopied = SUCCEEDED(dev->StretchRect(bb, nullptr, gpu.sceneSurf, nullptr, D3DTEXF_NONE));
@@ -1465,7 +1480,7 @@ bool Picture::InitResources(IDirect3DDevice9* dev) {
         lastHr = dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, bd.Format, D3DPOOL_DEFAULT, t, nullptr);
         return SUCCEEDED(lastHr) && *t && SUCCEEDED((*t)->GetSurfaceLevel(0, s)) && *s;
     };
-    bool ok = make(bd.Width, bd.Height, &gpu.frameTex, &gpu.frameSurf) && make(bd.Width, bd.Height, &gpu.sceneTex, &gpu.sceneSurf);
+    bool ok = make(bd.Width, bd.Height, &gpu.frameTex, &gpu.frameSurf);
     UINT cw = bd.Width, ch = bd.Height;
     // Keep the same dimensions in shader constants even before an effect needs the copies.
     for (int i = 0; i < Gpu::kChain; i++) {
@@ -1704,7 +1719,7 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
 
     ReadTimings(m_gpuMs);
     const int qi = gpu.qNext;
-    const bool timed = !gpu.qIssued[qi] && gpu.qDisjoint[qi] && gpu.qBegin[qi] && gpu.qEnd[qi] && gpu.qFreq[qi];
+    const bool timed = !gpu.qIssued[qi] && gpu.qDisjoint[qi] && gpu.qBegin[qi] && gpu.qEnd[qi] && gpu.qFreq[qi] && GpuTiming::Due(GetTickCount64(),gpu.nextTiming,kPublicBuild);
     if (timed) {
         gpu.qDisjoint[qi]->Issue(D3DISSUE_BEGIN);
         gpu.qBegin[qi]->Issue(D3DISSUE_END);
@@ -1806,7 +1821,7 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
         dev->SetSamplerState(s, D3DSAMP_SRGBTEXTURE, 0);
     }
     dev->SetTexture(0, gpu.frameTex);
-    dev->SetTexture(1, gpu.sceneTex);
+    dev->SetTexture(1, gpu.sceneCopied ? gpu.sceneTex : gpu.frameTex);
     dev->SetTexture(2, gpu.chainTex[Gpu::kChain - 1]);
     dev->SetTexture(3, fEmph ? depth : nullptr);
     dev->SetTexture(4, gpu.chainTex[0]);

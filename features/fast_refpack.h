@@ -33,6 +33,8 @@ void Stop();
 bool Running();
 // Pump thread: removes the layer after Stop once the last counting run is 2 s old
 void Tick();
+// Save thread: releases only inactive Apex-owned compression storage, without waiting for active callers.
+uint64_t PrepareForSave();
 
 // Developer mode preferences (saved; optionally included in Development profiles)
 void SetVerifyEvery(int n); // 1 stream in n is decompressed and compared (0 = only the first 16 of the session)

@@ -12,6 +12,7 @@
 #include "world_session.h"
 #include "hook_guard.h"
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -71,19 +72,24 @@ void RunEffects(IDirect3DDevice9* dev, bool depthOk) {
         F10Study::Sample(dev, "before-effects");
     }
 #endif
-    std::vector<std::pair<int, PostScene::Effect>> run;
+    std::array<std::pair<int, PostScene::Effect>,16> run{};
+    size_t count=0;
+    std::vector<std::pair<int, PostScene::Effect>> overflow;
     try {
         std::lock_guard<std::mutex> lock(g_mutex);
         for (const auto& e : g_effects)
-            if (depthOk || std::find(g_noDepth.begin(), g_noDepth.end(), e.second) != g_noDepth.end()) run.push_back(e);
+            if (depthOk || std::find(g_noDepth.begin(), g_noDepth.end(), e.second) != g_noDepth.end()) {
+                if (count<run.size()) run[count++]=e;
+                else overflow.push_back(e);
+            }
     } catch (...) {
         HookGuard::Note("PostScene effect list");
         return;
     }
     g_depthValid = depthOk;
-    for (const auto& e : run) {
+    const auto invoke = [&](const auto& e) {
         const void* fn = reinterpret_cast<const void*>(e.second);
-        if (g_failedEffects.Has(fn)) continue;
+        if (g_failedEffects.Has(fn)) return;
         try {
             e.second(dev);
 #ifdef APEX_F10_STUDY
@@ -93,7 +99,9 @@ void RunEffects(IDirect3DDevice9* dev, bool depthOk) {
             g_failedEffects.Add(fn);
             HookGuard::NoteAt("PostScene effect", fn);
         }
-    }
+    };
+    for (size_t i=0;i<count;++i) invoke(run[i]);
+    for (const auto& e:overflow) invoke(e);
     g_depthValid = true;
 }
 

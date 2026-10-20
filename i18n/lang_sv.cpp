@@ -9,6 +9,14 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Swedish}
 const I18n::Pair kPairs[] = {
+    {"Room to save releases idle buffers earlier during saving", "Utrymme för att spara frigör oanvända buffertar tidigare under sparandet"},
+    {"Screen effects avoid unused image copies and repeated timing work", "Bildeffekter undviker oanvända bildkopior och upprepade tidsmätningar"},
+    {"Object and compression caches reduce repeated work with bounded memory", "Objekt- och komprimeringscache minskar upprepat arbete med begränsat minne"},
+    {"Night Lights improves lamp blocking near stairs and closed floors", "Nattljus förbättrar blockering av lampljus vid trappor och slutna våningsgolv"},
+    {"RAM and gameplay test", "Test av RAM och spelflyt"},
+    {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Besök flera tomter under 10 minuter, återvänd till den första, vänta, spara och läs sedan in den sparfilen igen."},
+    {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Jämför hack, tomtladdning och RAM-användning med föregående version. Anteckna varje fel 12 och vad som hände före det."},
+    {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Kontrollera lampljus vid trappor och bakom slutna golv. Detaljerad datainsamling är avstängd."},
     {"The latest lighting features also work on the EA app version 1.69", "De senaste belysningsfunktionerna fungerar även i EA-appens version 1.69"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "Väggar skuggar lampljuset även på gräs, gator och trottoarer utanför tomten"},
     {"Garden walls and fences shade lamp light on the ground by their height", "Trädgårdsmurar och staket skuggar lampljuset på marken efter sin höjd"},

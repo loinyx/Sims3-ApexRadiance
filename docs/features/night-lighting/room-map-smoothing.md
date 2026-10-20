@@ -72,6 +72,20 @@ texels per metre by lighting class (twice that with *Light detail* High). Three 
 
 ## Technical reference
 
+The public gameplay experiment admits packed interior-floor vertex shaders even when the generic object detector
+also recognises them. `IsPackedRoomFloorVs` requires static 1/32767 room-map UVs, the native packing constants and
+the packed height reconstruction. The pixel shader must independently match the room-map read. This changes only
+selection of the existing smoothing path; it does not change room-to-room light gathering or smooth across separate
+room maps. A brightness discontinuity between those maps can remain.
+
+The public memory/gameplay experiment also guards directional basis-map smoothing used by instanced structures.
+Each smoothed RGB sample is bounded by its alpha-normalised original bilinear sample. Flat regions retain their
+values while wider filtering cannot add light beyond that original sample. The guard adds four ALU instructions per
+map, with no extra texture fetch or temporary register. It applies only to `PatchBasisSmooth`, including its combined
+room-map variant; room wall-atlas filtering and `PatchIndoorBasis` keep their existing paths. This is a filter bound,
+not geometry reconstruction: light already present in the native sample remains. Native stair occlusion remains
+unverified in game.
+
 | Site | What | Source |
 |---|---|---|
 | `0x006A34DB` (Steam 1.67.2) | CALL of the texel pack `0x0060CD10` in the batch solve `0x006A31D0`; redirected to `PackThunk`, which reads the texel's (x, y) from `edi` (its address) and the map's `{base, pitch}` at `[ebp+0Ch]`, adds the offset and calls the game's pack | `room_map_dither.cpp` |

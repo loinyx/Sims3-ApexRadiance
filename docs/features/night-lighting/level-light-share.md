@@ -10,7 +10,7 @@ their own story. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0: outdoor light through openings into roofed rooms (garden lamps of the story below included), indoor light through openings, *Doors block light*, lamp light through openings in the outside walls' copies (objects, fences, windows, lot ground) and room 0's own wall test, *Walls shade lamp light near the ground*, *Buildings block lamp light on trees and objects* (was *Buildings block light on objects*), *Shadow softness* (penumbra), walls ending at a floor above (colonnades on a foundation). Released in 2.12.3: placed floors of balconies and upper stories block a lamp below them (walls, floors, windows, objects, fences) and *Buildings block light on objects* (was *Walls block light on objects*). Released in 2.12.1: lighting corrections.  Outdoor and indoor light between stories: released (present since 2.1.0, the first version in this repository). Indoor light through openings across more than one floor, the raised-room wall veto, structure-change refresh and the *Wall seams.csv* recording: Released in 2.6.0. Walls block light on floors and objects, indoor objects lit by lamps of another story and an atrium's stories changing together, and the lit story's wall test from where an outdoor lamp's ray enters it (upper half walls): Released in 2.7.0 |
+| Availability | Opaque mesh collection and closed-floor support-row guards: Released in 2.14.0. Released in 2.13.0: outdoor light through openings into roofed rooms (garden lamps of the story below included), indoor light through openings, *Doors block light*, lamp light through openings in the outside walls' copies (objects, fences, windows, lot ground) and room 0's own wall test, *Walls shade lamp light near the ground*, *Buildings block lamp light on trees and objects* (was *Buildings block light on objects*), *Shadow softness* (penumbra), walls ending at a floor above (colonnades on a foundation). Released in 2.12.3: placed floors of balconies and upper stories block a lamp below them (walls, floors, windows, objects, fences) and *Buildings block light on objects* (was *Walls block light on objects*). Released in 2.12.1: lighting corrections.  Outdoor and indoor light between stories: released (present since 2.1.0, the first version in this repository). Indoor light through openings across more than one floor, the raised-room wall veto, structure-change refresh and the *Wall seams.csv* recording: Released in 2.6.0. Walls block light on floors and objects, indoor objects lit by lamps of another story and an atrium's stories changing together, and the lit story's wall test from where an outdoor lamp's ray enters it (upper half walls): Released in 2.7.0 |
 | Default | On (every switch except *Light through doors and windows*, which is off) |
 | Menu | Lighting > Stories (*Seamless walls between floors* and *Every floor in full detail* under Advanced > *Floor detail*); Lighting > Buildings > Rooms at Night, group LAMP LIGHT (*Outdoor light through openings*, *Indoor light through openings*, *Doors block light*, *Shadow softness*, *Smooth light maps*); Lighting > Objects (*Buildings block lamp light on trees and objects*); Lighting > Ground (*Walls shade lamp light near the ground*) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -48,6 +48,9 @@ test. The light solve itself, lamp ranges and attenuation are the game's.
 4. **Indoor openings.** An indoor room near a removed floor takes the lamps of rooms on other stories that are near the
    same opening. Every point of the light map is lit by such a lamp only when the real ray from the lamp passes through an
    opening in every floor it crosses, then past the walls of the lamp's room and of the stories in between.
+   Borrowed lamps retain wall tests even when a native batch omits its own test; the receiving segment is then tested
+   by Apex as well. An unreadable room rejects the borrowed contribution, including adjacent stories. Lamp and sample
+   coordinates are transformed once per ray and reused at every floor boundary.
 5. **Detail and ambient.** Rooms seen through an opening get the camera story's lighting detail. Rooms joined by removed
    floors into an atrium share one ambient colour and normalisation.
 6. **Seamless walls.** Wall samples are lit at the height the wall mesh draws them, and atrium walls are blurred across
@@ -963,6 +966,50 @@ above), and per gather of a roofed room of a story with openings a scan of the s
 per door for each room 0 lamp in reach. A story with no opening noted builds nothing. Diagnostic sample recording exists only in developer mode and runs only while armed. Every
 floor in full detail adds solve work once when entering a lot. In-game cost has not been measured (see
 [validation](../../validation/night-lighting-level-light-share.md)).
+
+## Public gameplay experiment: mesh blockers and directional weights
+
+The public gameplay experiment supplements imported indoor lamp rays with triangles from opaque instanced
+meshes. The collector decodes the native instanced vertex packing, including rotation and shear, and keeps indexed
+triangles in world space. A BVH tests both sides of each triangle. Empty spaces between treads remain empty; neither
+the mesh bounding box nor a physics ramp becomes an occluder. The same test guards cross-story and opening-imported
+lamp contributions, including directional basis maps. Native floor and wall tests remain authoritative when no mesh
+is collected. Lamp range, colour and falloff are unchanged.
+
+Collection reads at most one eligible buffer group per frame, at least 25 ms apart, keeps at most 128 groups and 8192 triangles, and
+throttles repeated reads of accepted and rejected groups for five seconds. Rejected meshes cannot consume the
+read slot every frame. Discovery pauses for 100 ms when all visible groups are cached. A changed immutable scene
+refreshes the existing opening-room generation. World and settled
+floor/room-structure edits clear the scene. Meshes not seen for five minutes expire. Alpha-tested, blended, shader-discarded geometry
+and unrecognised layouts are excluded. Readable dynamic buffers and narrow tread groups are admitted; buffer usage
+and horizontal width alone do not determine whether triangles block light. Geometry must first be drawn, and
+collection/publication is delayed. Hidden geometry, unreadable buffers and custom layouts remain uncovered.
+Material-only changes and pointer reuse are not fully validated. The first twenty accepted groups log their count,
+position, local spans, usage and instance stride to distinguish actual stair coverage from unrelated geometry.
+Identical triangles from separate transient buffers share one scene group after a byte comparison, so rotating
+buffer identities cannot fill the triangle budget with copies of one staircase.
+
+When the group or triangle budget is full, a newly read group can replace groups with lower geometric coverage
+priority. Priority uses horizontal projected area plus five percent of total surface area per triangle, weighted by
+the rise between instance placements (capped at three metres). This favours broad blocking surfaces and stepped
+batches over densely triangulated narrow details; it does not identify an asset as a staircase. All required removals
+are planned before any eviction. Equal or higher-priority groups are retained, and accepted/replaced/rejected groups
+still obey the same 128-group and 8192-triangle limits. Discovery continues at capacity. The first twenty replacements
+and budget deferrals per scene reset are logged with triangle count, instance count, priority and placement rise.
+This is a bounded coverage heuristic, not complete collection of every opaque object in a large world.
+
+Wall-blur support rows outside a story cannot borrow a lamp through a placed slab merely because the synthetic row
+lies on the lamp's side of that slab. A lower support row of an upper wall tests the recipient floor; an upper support
+row of a lower wall tests the floor above. Open floor quadrants retain their previous continuity. This supplements
+the ordinary ray tests without changing visible sample positions, light colours or filter weights.
+
+Opening-imported directional contributions also take the source-to-recipient normalisation ratio already used by
+the floor/wall solve. Gains above one accumulate into a temporary contribution before joining earlier lamps, as do
+fractional shares. This corrects inconsistent relative lamp weights between the two paths. It does not merge room
+ambient colours or separate room maps. Visual correction of an arch seam remains unverified.
+
+Source: `features/mesh_occlusion.h`, `lot_light_bridge.cpp` mesh collection, and `level_light_share.cpp`
+`InnerNormScaleAt`, `BasisLightHook`, `InnerPass` and `IndoorPassImpl`.
 
 ## Rejected approaches
 

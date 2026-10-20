@@ -1,5 +1,14 @@
 # Light between stories: history
 
+### 2026-10-19: replace lower-coverage geometry at the collection limit
+
+**Finding:** the fixed scene filled with 8186 triangles from 23 groups, leaving insufficient capacity for an
+1088-triangle stair draw recorded in an earlier capture. A published BVH did not establish coverage of that stair.
+
+**Outcome:** bounded replacement ranks geometric coverage per triangle and stepped instance placements. It preserves
+the original scene limits and exact triangle/gap tests. The native fixture reproduces saturation and replacement;
+visual correction remains unverified. Raising the global triangle limit alone is not used.
+
 Chronological record of investigations and design decisions. Newest entries at the bottom. The current behaviour is
 described in [features/night-lighting/level-light-share.md](../features/night-lighting/level-light-share.md). Dates before
 2026-09-28 refer to the combined build (Apex inside a fork of Sims3SettingsSetter); the standalone started from its v0.1.0

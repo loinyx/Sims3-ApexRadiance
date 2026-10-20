@@ -9,6 +9,14 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Thai}
 const I18n::Pair kPairs[] = {
+    {"Room to save releases idle buffers earlier during saving", "พื้นที่สำหรับบันทึกคืนบัฟเฟอร์ที่ไม่ได้ใช้งานเร็วขึ้นระหว่างการบันทึก"},
+    {"Screen effects avoid unused image copies and repeated timing work", "เอฟเฟกต์หน้าจอหลีกเลี่ยงสำเนาภาพที่ไม่ได้ใช้และการวัดเวลาซ้ำ"},
+    {"Object and compression caches reduce repeated work with bounded memory", "แคชวัตถุและการบีบอัดลดงานซ้ำโดยจำกัดการใช้หน่วยความจำ"},
+    {"Night Lights improves lamp blocking near stairs and closed floors", "แสงกลางคืนปรับปรุงการบังแสงโคมไฟใกล้บันไดและพื้นที่ปิดทึบ"},
+    {"RAM and gameplay test", "ทดสอบ RAM และความลื่นไหล"},
+    {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "เยี่ยมชมหลายพื้นที่เป็นเวลา 10 นาที กลับไปยังพื้นที่แรก รอสักครู่ จากนั้นบันทึกและโหลดเซฟนั้นอีกครั้ง"},
+    {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "เปรียบเทียบอาการกระตุก การโหลดพื้นที่ และการใช้ RAM กับรุ่นก่อน หากเกิดข้อผิดพลาด 12 ให้จดสิ่งที่เกิดขึ้นก่อนหน้านั้น"},
+    {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "ตรวจสอบแสงโคมไฟใกล้บันไดและอีกด้านของพื้นที่ไม่มีช่องเปิด ปิดการเก็บข้อมูลแบบละเอียดแล้ว"},
     {"The latest lighting features also work on the EA app version 1.69", "ฟีเจอร์แสงสว่างล่าสุดใช้ได้กับเวอร์ชัน 1.69 ของแอป EA ด้วย"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "ผนังบังแสงโคมไฟบนหญ้า ถนน และทางเท้านอกที่ดินด้วย"},
     {"Garden walls and fences shade lamp light on the ground by their height", "กำแพงสวนและรั้วบังแสงโคมไฟบนพื้นตามความสูงของมัน"},

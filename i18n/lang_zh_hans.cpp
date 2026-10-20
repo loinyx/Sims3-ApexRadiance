@@ -9,6 +9,14 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Simplified, mainland China)}
 const I18n::Pair kPairs[] = {
+    {"Room to save releases idle buffers earlier during saving", "保存空间在保存过程中更早释放空闲缓冲区"},
+    {"Screen effects avoid unused image copies and repeated timing work", "屏幕效果避免未使用的图像副本和重复计时"},
+    {"Object and compression caches reduce repeated work with bounded memory", "对象和压缩缓存以有限内存减少重复工作"},
+    {"Night Lights improves lamp blocking near stairs and closed floors", "夜间灯光改进楼梯和封闭楼板附近的灯光遮挡"},
+    {"RAM and gameplay test", "RAM与游戏流畅度测试"},
+    {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "在10分钟内访问多个地段，返回第一个地段，稍等片刻，然后保存并重新载入该存档。"},
+    {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "与上一版本比较卡顿、地段载入和RAM使用情况。如果出现错误12，请记录出现前的情况。"},
+    {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "检查楼梯附近及封闭楼板另一侧的灯光。详细数据收集已禁用。"},
     {"The latest lighting features also work on the EA app version 1.69", "最新的照明功能也适用于 EA app 版本 1.69"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "墙壁也会在地块外的草地、街道和人行道上遮挡灯光"},
     {"Garden walls and fences shade lamp light on the ground by their height", "围墙和栅栏会按高度在地面上遮挡灯光"},

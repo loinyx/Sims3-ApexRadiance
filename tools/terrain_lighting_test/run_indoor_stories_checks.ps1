@@ -8,16 +8,16 @@ if ($start -lt 0 -or $end -lt $start) { throw 'Production indoor pass not found'
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $extracted = $source.Substring($start, $end-$start)
 $basisStart = $source.IndexOf('void __fastcall BasisLightHook(')
-$basisEnd = $source.IndexOf('// Walls of room 0', $basisStart)
+$basisEnd = $source.IndexOf('// The share of a lamp of another story', $basisStart)
 if ($basisStart -lt 0 -or $basisEnd -lt $basisStart) { throw 'Production basis light hook not found' }
 $extracted += $source.Substring($basisStart, $basisEnd-$basisStart)
 $defines = @()
 if ($ReferenceSource) {
     $reference = Get-Content -LiteralPath $ReferenceSource -Raw
-    $referenceStart = $reference.IndexOf('float IndoorPassImpl(')
+    $referenceStart = $reference.IndexOf('float IndoorBoundaryPass(')
     $referenceEnd = $reference.IndexOf('float IndoorPass(', $referenceStart)
     if ($referenceStart -lt 0 -or $referenceEnd -lt $referenceStart) { throw 'Reference indoor pass not found' }
-    $extracted += $reference.Substring($referenceStart, $referenceEnd-$referenceStart).Replace('IndoorPassImpl(', 'ReferenceIndoorPass(')
+    $extracted += $reference.Substring($referenceStart, $referenceEnd-$referenceStart).Replace('IndoorPassImpl(', 'ReferenceIndoorPass(').Replace('IndoorBoundaryPass(', 'ReferenceIndoorBoundaryPass(')
     $defines = @('/DAPEX_INDOOR_REFERENCE')
 }
 Set-Content -LiteralPath (Join-Path $OutDir 'extracted_indoor_stories.h') -Value $extracted -Encoding UTF8
