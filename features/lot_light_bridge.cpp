@@ -33,6 +33,11 @@
 #include "mesh_occlusion.h"
 #include "mesh_budget_policy.h"
 #include "dev_switches.h"
+#include "foliage_canopy.h"
+#include "foliage_vertex_lamps.h"
+#include "lot_lighting_motion.h"
+#include "hook_guard.h"
+#include <tuple>
 #include <array>
 #include <wrl/client.h>
 #include "lightmap_smooth.h"
@@ -667,6 +672,7 @@ struct ExtSrc { // one lot's shade over the world grass, for a chunk build (shar
     std::shared_ptr<const ExtData> v;
     float x0 = 0, z0 = 0, x1 = 0, z1 = 0;
 };
+void CrownsIn(float x0, float z0, float x1, float z1, std::vector<Canopy::Ellipsoid>& out); // canopy_ground_shadow (below)
 struct ShadeTask {
     bool chunk = false;
     uint32_t epoch = 0;
@@ -677,6 +683,7 @@ struct ShadeTask {
     std::vector<GroundShadow::Lamp> lamps;
     std::vector<GroundShadow::Wall> walls;
     std::vector<WallOpenings::Patch> patches;
+    std::vector<Canopy::Ellipsoid> crowns; // tree and bush crowns (canopy_ground_shadow)
     // a chunk
     std::pair<int, int> chunkKey{};
     std::vector<ExtSrc> srcs;
@@ -828,7 +835,7 @@ private:
                 } else {
                     r.lot = t.lot, r.key = t.key, r.w = t.w, r.h = t.h, r.ox = t.ox, r.oz = t.oz, r.grid = t.grid;
                     GroundShadow::ShadeJob job;
-                    job.Init(t.grid, std::move(t.lamps), std::move(t.walls), std::move(t.patches));
+                    job.Init(t.grid, std::move(t.lamps), std::move(t.walls), std::move(t.patches), std::move(t.crowns));
                     job.Step([this] { return !stop_; });
                     r.res = job.Result();
                     r.den = job.StampWeight();
@@ -1579,6 +1586,14 @@ uint64_t ShadeKey(const LotRect& r, int w, int h) {
         }
         mix(sum);
         mix(walls.size());
+        if (DevSwitches::CanopyGroundShadow()) { // the crowns over the lot (sorted by CrownsIn: the same set gives the same key)
+            static std::vector<Canopy::Ellipsoid> crowns;
+            crowns.clear();
+            CrownsIn(x0, z0, x1, z1, crowns);
+            for (const Canopy::Ellipsoid& e : crowns)
+                for (float f : {e.cx, e.cy, e.cz, e.rx, e.ry, e.lad}) mixf(f, 10.0f);
+            mix(crowns.size());
+        }
     }
     return s | 1;
 }
@@ -1609,10 +1624,11 @@ void ShadeTick() {
         float x0, z0, x1, z1;
         ShadeBox(want.rect, t.lamps, x0, z0, x1, z1);
         if (!t.lamps.empty()) ShadeWalls(x0, z0, x1, z1, t.walls, t.patches, &g_shadeLastFences);
+        if (!t.lamps.empty() && DevSwitches::CanopyGroundShadow()) CrownsIn(x0, z0, x1, z1, t.crowns);
         g_shadeLastLamps = static_cast<int>(t.lamps.size());
         g_shadeLastWalls = static_cast<int>(t.walls.size());
         g_shadeLastPatches = static_cast<int>(t.patches.size());
-        if (t.walls.empty()) t.lamps.clear(); // nothing shades: 255 everywhere at once
+        if (t.walls.empty() && t.crowns.empty()) t.lamps.clear(); // nothing shades: 255 everywhere at once
         t.lot = want.lot, t.key = want.key, t.w = want.w, t.h = want.h;
         g_shadeWorker.Submit(std::move(t));
         g_lotsInFlight++;
@@ -2108,6 +2124,9 @@ struct FoliageVs { // the patched copy (ShaderPatches::PatchFoliageVs / PatchObj
     bool tried = false;
     int worldK = -1; // objects: first VS constant of the world triple (c[K..K+2].w = the object position)
     int vertexLight = -1; // objects: first colour constant of the rig's 4 vertex lights (COLOR0), -1 if not found
+    IDirect3DVertexShader9* perVertex = nullptr; // foliage: the per-vertex lamp copy (FoliageVertexLamps::Patch), development builds
+    bool perVertexTried = false;
+    int perVertexBase = -1;
 };
 // Outdoor floors lit only by their baked floor map (summer; floor_atlas_table.h): the patched copy of the vertex shader
 // (see DrawFloorAtlas)
@@ -4217,6 +4236,267 @@ bool ObjectLampColourAtImpl(const void* light, const float* centre, float rgb[3]
     return std::isfinite(rgb[0]) && std::isfinite(rgb[1]) && std::isfinite(rgb[2]);
 }
 
+// ---- Per-vertex lamp light on instanced foliage (numbered development builds, switch foliage_vertex_lamps;
+// foliage_vertex_lamps.h) and the crowns as porous occluders of lamp light on lot ground (switch canopy_ground_shadow;
+// foliage_canopy.h). The foliage vertex shader's instance constants (VS_9A10A3A8, the captured family): c0[3i] the
+// instance's position relative to the camera, c2[3i].x its scale, c27..c29[3i] the rig's lamp directions, c54..c56[3i] its
+// lamp colours (taken by ObjectLampColourAt at the rig box's point nearest each lamp). Each lit slot is matched to an
+// outdoor lamp of g_allLamps by direction (from the crown's centre) and confirmed by recomputing its colour there; a draw
+// with a slot that cannot be matched draws as before. ----
+struct FoliageCrown {
+    float lo[3] = {}, hi[3] = {}; // the mesh's local box (positions / w), read once per mesh
+    int instances = 9;            // 1 + the largest instance index in the mesh (TEXCOORD3.w, a0.w = 3 x it)
+    bool ok = false;
+};
+std::unordered_map<uint64_t, FoliageCrown> g_foliageMeshes;
+struct FoliageInstance { // world space, so a moving camera reuses it; the colour terms are recomputed every draw
+    float centre[3] = {}, rx = 0, ry = 0;
+    size_t lamp[3] = {SIZE_MAX, SIZE_MAX, SIZE_MAX}; // the matched g_allLamps entry of each lit slot
+    bool shaped = false, matched = false;
+    DWORD seen = 0;
+};
+std::unordered_map<uint64_t, FoliageInstance> g_foliageInstances;
+std::atomic<long> g_foliageVertexDrawn{0}, g_foliageVertexRefused{0}, g_foliageVertexUnmatched{0};
+// Crowns seen by foliage draws (world space) for the ground shade, kept while they are within kCrownKeep of the camera:
+// not by view (a crown turned out of view still shades the ground), one entry per crown (merged by place, so the camera's
+// small offsets never make two of the same tree). Render thread.
+struct CrownSeen {
+    Canopy::Ellipsoid e{};
+    DWORD first = 0;
+};
+std::vector<CrownSeen> g_crowns;
+std::atomic<long> g_crownCount{0};
+constexpr float kCrownKeep = 250.0f; // m from the camera
+constexpr size_t kMaxCrowns = 8192;
+
+// Instance count and the local box of the current foliage mesh (stream 0, its draw range), read once per mesh
+bool FoliageMeshBox(IDirect3DDevice9* dev, FoliageCrown& out) {
+    IDirect3DVertexDeclaration9* decl = nullptr;
+    if (FAILED(dev->GetVertexDeclaration(&decl)) || !decl) return false;
+    D3DVERTEXELEMENT9 el[MAXD3DDECLLENGTH + 1];
+    UINT n = MAXD3DDECLLENGTH + 1;
+    FenceLayout L;
+    bool pos = false, idx = false;
+    WORD idxOff = 0;
+    BYTE idxType = 0;
+    if (SUCCEEDED(decl->GetDeclaration(el, &n)))
+        for (UINT i = 0; i < n && el[i].Stream != 0xFF; i++) {
+            if (el[i].Stream != 0) continue;
+            if (el[i].Usage == D3DDECLUSAGE_POSITION && el[i].UsageIndex == 0) L.posOff = el[i].Offset, L.posType = el[i].Type, pos = true;
+            if (el[i].Usage == D3DDECLUSAGE_TEXCOORD && el[i].UsageIndex == 3) idxOff = el[i].Offset, idxType = el[i].Type, idx = true;
+        }
+    decl->Release();
+    if (!pos) return false;
+    IDirect3DVertexBuffer9* vb = nullptr;
+    UINT off = 0, stride = 0;
+    if (FAILED(dev->GetStreamSource(0, &vb, &off, &stride)) || !vb) return false;
+    const UINT first = g_curDipBase + g_curDipMin, count = g_curDipNum;
+    const uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb)) << 32) ^ (static_cast<uint64_t>(off + first * stride) << 8) ^ count ^
+                         (static_cast<uint64_t>(stride) << 56) ^ (static_cast<uint64_t>(L.posType) << 50) ^ L.posOff;
+    auto it = g_foliageMeshes.find(key);
+    if (it == g_foliageMeshes.end()) {
+        if (g_foliageMeshes.size() > 4096) g_foliageMeshes.clear();
+        FoliageCrown c;
+        D3DVERTEXBUFFER_DESC vd{};
+        void* p = nullptr;
+        // a static buffer, read once per mesh
+        if (count && count <= 65536 && stride >= 12 && stride <= 256 && SUCCEEDED(vb->GetDesc(&vd)) &&
+            static_cast<uint64_t>(off) + (static_cast<uint64_t>(first) + count) * stride <= vd.Size &&
+            SUCCEEDED(vb->Lock(off + first * stride, count * stride, &p, D3DLOCK_READONLY)) && p) {
+            c.ok = MeshBox(static_cast<const BYTE*>(p), count, stride, L, c.lo, c.hi);
+            if (c.ok && idx) {
+                float top = -1.0f;
+                for (UINT i = 0; i < count && c.ok; i++) {
+                    float v[4];
+                    if (!ReadElement(static_cast<const BYTE*>(p) + static_cast<size_t>(i) * stride + idxOff, idxType, v) || !std::isfinite(v[3])) break;
+                    top = std::max(top, v[3]);
+                }
+                if (top >= 0.0f && top < 9.0f) c.instances = static_cast<int>(top + 0.5f) + 1;
+            }
+        }
+        if (p) vb->Unlock();
+        it = g_foliageMeshes.emplace(key, c).first;
+    }
+    vb->Release();
+    out = it->second;
+    return out.ok;
+}
+
+// The colour ObjectLampColourAt gives lamp j at `point` with box half extents `ext`, the unclamped brightest channel and
+// the law without its gain there
+bool FoliageLampColour(size_t j, const float* point, const float* ext, float rgb[3], float& unclamped, float& lawAtPoint) {
+    if (j >= g_allLamps.size() || j >= g_allCones.size()) return false;
+    const auto& v = g_allLamps[j];
+    const LampCone& cone = g_allCones[j];
+    float nearPt[3];
+    for (int k = 0; k < 3; k++) nearPt[k] = std::clamp(v[k], point[k] - ext[k], point[k] + ext[k]);
+    const float dx = v[0] - nearPt[0], dy = v[1] - nearPt[1], dz = v[2] - nearPt[2], d2 = dx * dx + dy * dy + dz * dz;
+    if (!std::isfinite(d2)) return false;
+    const float night = g_night.load(std::memory_order_relaxed);
+    const float law = LampReach::PixelLaw(d2, cone.w, cone.entries);
+    const float scale = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), night, g_wallEnabled.load(std::memory_order_relaxed), g_wallGain.load(std::memory_order_relaxed),
+                                                              g_objPixelLampStrength.load(std::memory_order_relaxed) / kPixelLampTrimUnit);
+    const float k = law * scale * LampConeAt(cone, v.data(), nearPt);
+    unclamped = 0.0f;
+    for (int c = 0; c < 3; c++) rgb[c] = std::clamp(v[4 + c] * k, 0.0f, 1.0f), unclamped = std::max(unclamped, v[4 + c] * k);
+    const float gain = LampReach::Gain(cone.w, cone.entries);
+    lawAtPoint = gain > 0.0f ? law / gain : 0.0f;
+    return std::isfinite(unclamped) && lawAtPoint > 0.0f;
+}
+
+// The crown of one instance from its mesh box: the leaves, not the trunk under them. A plant taller than 2.5 m keeps its
+// upper 65% as the crown (a tree's clear trunk); smaller plants are leaves from the ground up. The box's centre over the
+// instance (upright foliage, modelled around its trunk) and its widest horizontal half extent both ways (no yaw needed).
+bool CrownShape(const float* inst, float scale, const float eye[3], const FoliageCrown& mesh, FoliageInstance& f) {
+    if (!(scale > 0.01f && scale < 100.0f)) return false;
+    float lo = mesh.lo[1], hi = mesh.hi[1];
+    if ((hi - lo) * scale > 2.5f) lo += 0.35f * (hi - lo);
+    f.centre[0] = inst[0] + eye[0];
+    f.centre[1] = inst[1] + eye[1] + 0.5f * (lo + hi) * scale;
+    f.centre[2] = inst[2] + eye[2];
+    f.rx = std::max(0.5f * (mesh.hi[0] - mesh.lo[0]), 0.5f * (mesh.hi[2] - mesh.lo[2])) * scale;
+    f.ry = 0.5f * (hi - lo) * scale;
+    return f.rx > 0.1f && f.ry > 0.15f && f.rx < 30.0f && f.ry < 30.0f && std::isfinite(f.centre[0] + f.centre[1] + f.centre[2]);
+}
+
+// Each lit slot's lamp, by direction from the crown's centre (the rig's centre differs a little: 16 degrees at most)
+bool MatchLamps(const float (*dirs)[4], const float (*cols)[4], FoliageInstance& f) {
+    for (int k = 0; k < 3; k++) {
+        f.lamp[k] = SIZE_MAX;
+        if (!(std::max({cols[k][0], cols[k][1], cols[k][2]}) > 1.0f / 512.0f)) continue; // unused slot
+        const float dl = std::sqrt(dirs[k][0] * dirs[k][0] + dirs[k][1] * dirs[k][1] + dirs[k][2] * dirs[k][2]);
+        if (!(dl > 0.5f)) return false;
+        float best = 0.96f;
+        for (size_t j = 0; j < g_allLamps.size(); j++) {
+            const auto& v = g_allLamps[j];
+            const float lx = v[0] - f.centre[0], ly = v[1] - f.centre[1], lz = v[2] - f.centre[2], l2 = lx * lx + ly * ly + lz * lz;
+            if (!(l2 > 1e-4f) || l2 > 40.0f * 40.0f) continue;
+            const float c = (lx * dirs[k][0] + ly * dirs[k][1] + lz * dirs[k][2]) / (std::sqrt(l2) * dl);
+            if (c > best) best = c, f.lamp[k] = j;
+        }
+        if (f.lamp[k] == SIZE_MAX) return false;
+    }
+    return true;
+}
+
+// One crown into g_crowns: merged with a crown already there within 0.25 m and 15% of its size
+void NoteCrown(const FoliageInstance& f) {
+    for (CrownSeen& c : g_crowns) {
+        const float dx = c.e.cx - f.centre[0], dy = c.e.cy - f.centre[1], dz = c.e.cz - f.centre[2];
+        if (dx * dx + dy * dy + dz * dz < 0.25f * 0.25f && std::fabs(c.e.rx - f.rx) < 0.15f * f.rx && std::fabs(c.e.ry - f.ry) < 0.15f * f.ry) return;
+    }
+    if (g_crowns.size() >= kMaxCrowns) return;
+    CrownSeen c;
+    c.e = {f.centre[0], f.centre[1], f.centre[2], f.rx, f.ry, f.rx, 1.0f, 0.0f, Canopy::LadFor(2.0f * f.ry)};
+    c.first = GetTickCount() | 1;
+    g_crowns.push_back(c);
+    g_crownCount.store(static_cast<long>(g_crowns.size()), std::memory_order_relaxed);
+}
+
+// Fills c[B .. B+81] for the draw (perVertex) and notes the crowns (ground shade). false: a lit slot could not be matched
+// or confirmed (the draw keeps the old shader)
+bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<float>& out) {
+    float eye[3];
+    if (!LotLightingMotion::CameraEye(eye)) return false;
+    FoliageCrown mesh;
+    if (!FoliageMeshBox(dev, mesh)) return false;
+    const int count = std::clamp(mesh.instances, 1, 9);
+    float c[81][4];
+    if (FAILED(dev->GetVertexShaderConstantF(0, &c[0][0], perVertex ? 81 : 3 * count))) return false;
+    static uint32_t s_gen = 0;
+    if (s_gen != g_lampMemoGen || g_foliageInstances.size() > 8192) {
+        g_foliageInstances.clear(); // the lamp list changed (indices) or too many instances
+        s_gen = g_lampMemoGen;
+    }
+    if (perVertex) out.assign(82 * 4, 0.0f);
+    const DWORD now = GetTickCount() | 1;
+    bool all = true;
+    for (int i = 0; i < count; i++) {
+        const float* inst = c[3 * i];
+        const float scale = c[3 * i + 2][0];
+        if (!std::isfinite(inst[0] + inst[1] + inst[2])) return false;
+        // the instance: its place (1 cm), scale and the mesh; its lamps' directions only when matching (not the colours,
+        // which follow the night level every frame)
+        uint64_t key = 1469598103934665603ull;
+        const auto mix = [&key](uint64_t v) { key = (key ^ v) * 1099511628211ull; };
+        for (int k = 0; k < 3; k++) mix(static_cast<uint64_t>(std::llround((inst[k] + eye[k]) * 100.0f)));
+        mix(static_cast<uint64_t>(std::llround(scale * 1000.0f)));
+        for (int k = 0; k < 6; k++) mix(static_cast<uint64_t>(std::llround((k < 3 ? mesh.lo[k] : mesh.hi[k - 3]) * 100.0f)));
+        if (perVertex)
+            for (int k = 0; k < 3; k++)
+                for (int ch = 0; ch < 3; ch++) mix(static_cast<uint64_t>(std::llround(c[27 + 3 * i + k][ch] * 256.0f)));
+        FoliageInstance& f = g_foliageInstances[key];
+        if (!f.seen) {
+            f.shaped = CrownShape(inst, scale, eye, mesh, f);
+            f.matched = perVertex && f.shaped && MatchLamps(&c[27 + 3 * i], &c[54 + 3 * i], f);
+            if (f.shaped && DevSwitches::CanopyGroundShadow()) NoteCrown(f);
+        }
+        f.seen = now;
+        if (!perVertex) continue;
+        if (!f.matched) {
+            if (f.shaped) g_foliageVertexUnmatched.fetch_add(1, std::memory_order_relaxed);
+            all = false;
+            continue;
+        }
+        const float ext[3] = {f.rx, f.ry, f.rx};
+        for (int k = 0; k < 3; k++) {
+            const float* col = c[54 + 3 * i + k];
+            const float m = std::max({col[0], col[1], col[2]});
+            if (f.lamp[k] == SIZE_MAX || !(m > 1.0f / 512.0f)) continue; // an unused slot: its colour is zero, it adds nothing, as before
+            float rgb[3], unclamped = 0.0f, lawAt = 0.0f;
+            if (!FoliageLampColour(f.lamp[k], f.centre, ext, rgb, unclamped, lawAt)) return false;
+            const float em = std::max({rgb[0], rgb[1], rgb[2]});
+            if (!(em > 0.0f) || !(std::fabs(em - m) <= 0.4f * std::max(em, m))) return false; // not the light the rig took: the old path
+            const auto& v = g_allLamps[f.lamp[k]];
+            float r0, R;
+            LampReach::Radii(g_allCones[f.lamp[k]].w, r0, R);
+            float* lp = &out[(3 * i + k) * 4];
+            lp[0] = v[0] - eye[0], lp[1] = v[1] - eye[1], lp[2] = v[2] - eye[2], lp[3] = r0 * r0;
+            // at the crown's point the vertex light is m x unclamped / em: the old colour where it was not capped, more only
+            // where the old colour was capped (and then at most 1 per channel, c[B+56])
+            float* law = &out[(27 + 3 * i + k) * 4];
+            law[0] = 1.0f / (R * R), law[1] = unclamped / em / lawAt, law[2] = 1e-4f, law[3] = std::max(v[1] - (inst[1] + eye[1]), 0.0f);
+            out[(56 + 3 * i) * 4 + k] = 1.0f / m;
+        }
+        float* cr = &out[(54 + 3 * i) * 4];
+        cr[0] = f.centre[0] - eye[0], cr[1] = f.centre[1] - eye[1], cr[2] = f.centre[2] - eye[2], cr[3] = 1.0f / f.rx;
+        float* cr2 = &out[(55 + 3 * i) * 4];
+        cr2[0] = 1.0f / f.ry, cr2[1] = Canopy::Extinction() * Canopy::LadFor(2.0f * f.ry) / std::log(2.0f);
+    }
+    if (perVertex) {
+        float* g = &out[81 * 4];
+        g[0] = FoliageVertexLamps::kTransmitOverReflect, g[1] = FoliageVertexLamps::kGroundHalfAlbedo, g[3] = 1.0f;
+    }
+    // instances not seen for a minute go (render thread, at most once a second)
+    static DWORD s_swept = 0;
+    if (now - s_swept > 1000) {
+        s_swept = now;
+        std::erase_if(g_foliageInstances, [now](const auto& p) { return now - p.second.seen > 60000; });
+    }
+    return all;
+}
+
+// The crowns over a lot's box for its ground shade, sorted (the same set gives the same key); crowns far from the camera
+// go (render thread)
+void CrownsIn(float x0, float z0, float x1, float z1, std::vector<Canopy::Ellipsoid>& out) {
+    float eye[3];
+    if (LotLightingMotion::CameraEye(eye)) {
+        const size_t before = g_crowns.size();
+        std::erase_if(g_crowns, [&](const CrownSeen& c) {
+            const float dx = c.e.cx - eye[0], dz = c.e.cz - eye[2];
+            return dx * dx + dz * dz > kCrownKeep * kCrownKeep;
+        });
+        if (g_crowns.size() != before) g_crownCount.store(static_cast<long>(g_crowns.size()), std::memory_order_relaxed);
+    }
+    for (const CrownSeen& c : g_crowns) {
+        const Canopy::Ellipsoid& e = c.e;
+        if (!(e.cx + e.rx < x0 || e.cx - e.rx > x1 || e.cz + e.rz < z0 || e.cz - e.rz > z1)) out.push_back(e);
+    }
+    std::sort(out.begin(), out.end(), [](const Canopy::Ellipsoid& a, const Canopy::Ellipsoid& b) {
+        return std::tie(a.cx, a.cz, a.cy, a.rx, a.ry) < std::tie(b.cx, b.cz, b.cy, b.rx, b.ry);
+    });
+}
+
 // Windows take outdoor light: the point a wall object picks its lamps at. A window's origin is a corner of its tile, on
 // one side of the wall or the other as it is turned (F7 capture, 06/10: the same window turned took other lamps
 // and another ground share, a slightly different tone); the tile's centre, origin + (local X - local Z) / 2, is on the
@@ -5218,6 +5498,24 @@ IDirect3DVertexShader9* FoliageVsFor(IDirect3DDevice9* dev, IDirect3DVertexShade
     }
     return f.vs;
 }
+// The per-vertex lamp copy of the current foliage vertex shader (switch foliage_vertex_lamps), made from the wrap copy
+IDirect3DVertexShader9* FoliageVertexVsFor(IDirect3DDevice9* dev, IDirect3DVertexShader9* vs, int& base) {
+    base = -1;
+    if (!g_curVsInfo || g_curVsInfo->cls != 6) return nullptr;
+    FoliageVs& f = g_curVsInfo->patched;
+    if (!f.perVertexTried) {
+        f.perVertexTried = true;
+        std::vector<DWORD> code = PatchedVsCode(vs, g_curVsInfo->cls);
+        std::vector<uint32_t> t(code.begin(), code.end());
+        int b = -1;
+        if (!code.empty() && FoliageVertexLamps::Patch(t, b) && SUCCEEDED(dev->CreateVertexShader(reinterpret_cast<const DWORD*>(t.data()), &f.perVertex))) f.perVertexBase = b;
+        else f.perVertex = nullptr;
+        LOG_INFO(std::format("[LotLightBridge] Foliage per-vertex lamps: vertex shader {:08X} {}", reinterpret_cast<uintptr_t>(vs),
+                             f.perVertex ? std::format("patched (constants c{}..c{})", b, b + 81) : std::string("not of the captured family: left as before")));
+    }
+    base = f.perVertexBase;
+    return f.perVertex;
+}
 
 template <typename DrawFn> bool DrawLeafShadow(IDirect3DDevice9* dev, DrawFn draw) {
     const float night = g_night.load(std::memory_order_relaxed);
@@ -6166,8 +6464,36 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawTracked(IDirect3DDevice9*
     if (reachLaw) g_foliageReachLaw.fetch_add(1, std::memory_order_relaxed);
     float oldWrap[4] = {};
     const bool wrapSaved = SUCCEEDED(dev->GetVertexShaderConstantF(ShaderPatches::kFoliageWrapConst, oldWrap, 1));
+    // Development builds: per-vertex lamps (foliage_vertex_lamps) and the crowns for the ground shade (canopy_ground_shadow),
+    // at night on reach-law rigs. A draw whose lamps cannot all be matched keeps the copy above.
+    IDirect3DVertexShader9* drawVs = foliage;
+    static std::vector<float> s_pvSaved(82 * 4);
+    int pvBase = -1; // set: c[pvBase .. +81] were replaced for this draw and are put back after it
+    if ((DevSwitches::FoliageVertexLamps() || DevSwitches::CanopyGroundShadow()) && reachLaw && g_night.load(std::memory_order_relaxed) > 0.01f) {
+        int base = -1;
+        IDirect3DVertexShader9* perVertex = DevSwitches::FoliageVertexLamps() ? FoliageVertexVsFor(dev, g_curVs, base) : nullptr;
+        static std::vector<float> s_pv;
+        const bool want = perVertex && base > 0;
+        const bool matched = HookGuard::Run("Foliage per-vertex lamps", false, [&] { return FoliageVertexConstants(dev, want, s_pv); });
+        if (want && matched && SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(base), s_pvSaved.data(), 82))) {
+            g_inOwnCall = true;
+            SetVsConst(dev, static_cast<UINT>(base), s_pv.data(), 82);
+            g_inOwnCall = false;
+            pvBase = base;
+            drawVs = perVertex;
+            g_foliageVertexDrawn.fetch_add(1, std::memory_order_relaxed);
+        } else if (perVertex) {
+            g_foliageVertexRefused.fetch_add(1, std::memory_order_relaxed);
+        }
+        static DWORD s_logged = 0;
+        if (const DWORD now = GetTickCount(); now - s_logged > 30000) {
+            s_logged = now;
+            LOG_INFO(std::format("[Foliage] Per-vertex lamps: {} draws, {} kept the old path (a lamp not matched: {} instances); crowns for the ground shade: {}",
+                                 g_foliageVertexDrawn.load(), g_foliageVertexRefused.load(), g_foliageVertexUnmatched.load(), g_crownCount.load()));
+        }
+    }
     g_inOwnCall = true;
-    SetVs(dev, foliage);
+    SetVs(dev, drawVs);
     SetVsConst(dev, ShaderPatches::kFoliageWrapConst, wrap, 1);
     g_inOwnCall = false;
     if (dayScaled) g_foliageDayScaled.fetch_add(1, std::memory_order_relaxed);
@@ -6179,6 +6505,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawTracked(IDirect3DDevice9*
     g_inOwnCall = true;
     SetVs(dev, original);
     if (wrapSaved) SetVsConst(dev, ShaderPatches::kFoliageWrapConst, oldWrap, 1);
+    if (pvBase > 0) SetVsConst(dev, static_cast<UINT>(pvBase), s_pvSaved.data(), 82); // the game's values of c[base .. base+81] again
     g_inOwnCall = false;
     g_foliageDrawn.fetch_add(1, std::memory_order_relaxed);
     MarkClaimSource(ClaimSource::FoliageVertex);

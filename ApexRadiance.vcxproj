@@ -116,6 +116,7 @@
     <ClCompile Include="features\dev_switches.cpp" />
     <ClCompile Include="features\game_alloc_categories.cpp" />
     <ClCompile Include="features\allocator_tuning.cpp" />
+    <ClCompile Include="features\foliage_vertex_lamps.cpp" />
     <ClCompile Include="features\frame_profiler.cpp" />
     <ClCompile Include="features\level_light_share.cpp" />
     <ClCompile Include="features\outdoor_delta.cpp" />
@@ -244,6 +245,8 @@
     <ClInclude Include="features\dev_switches.h" />
     <ClInclude Include="features\game_alloc_categories.h" />
     <ClInclude Include="features\allocator_tuning.h" />
+    <ClInclude Include="features\foliage_vertex_lamps.h" />
+    <ClInclude Include="features\foliage_canopy.h" />
     <ClInclude Include="features\frame_profiler.h" />
     <ClInclude Include="features\perf_toggles.h" />
     <ClInclude Include="features\level_light_share.h" />

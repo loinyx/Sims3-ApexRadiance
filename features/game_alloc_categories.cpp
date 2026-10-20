@@ -181,7 +181,10 @@ bool Install() {
     const HMODULE exe = GetModuleHandleW(nullptr);
     BYTE* base = nullptr;
     size_t size = 0;
-    if (!MemPatch::GetModuleInfo(exe, &base, &size) || reinterpret_cast<uintptr_t>(base) != 0x00400000 || size < 0x01000000) return false;
+    if (!MemPatch::GetModuleInfo(exe, &base, &size) || reinterpret_cast<uintptr_t>(base) != 0x00400000 || size < kAlloc + 0x100 - 0x00400000) {
+        LOG_INFO("[GameAllocCategories] Not the Steam 1.67.2 executable: off");
+        return false;
+    }
     if (!MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kAlloc), kAllocPrologue, sizeof kAllocPrologue) ||
         !MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kAllocAligned), kAlignedPrologue, sizeof kAlignedPrologue) ||
         !MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kFree), kFreePrologue, sizeof kFreePrologue)) {

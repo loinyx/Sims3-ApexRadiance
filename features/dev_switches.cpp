@@ -19,10 +19,12 @@ void Load() {
     roomDrainBudget.store(get("room_drain_budget"));
     allocatorTrim.store(get("allocator_trim"));
     allocatorTopDown.store(get("allocator_top_down"));
+    foliageVertexLamps.store(get("foliage_vertex_lamps"));
+    canopyGroundShadow.store(get("canopy_ground_shadow"));
     const auto on = [](const std::atomic<bool>& b) { return b.load() ? "on" : "off"; };
     LOG_INFO(std::format("[DevBuild] Switches ([dev_build] in ApexRadiance.toml): measurements {}, draw_reads_nowait {}, occlusion_relight {}, "
-                         "room_drain_budget {}, allocator_trim {}, allocator_top_down {}",
-                         on(measurements), on(drawReadsNoWait), on(occlusionRelight), on(roomDrainBudget), on(allocatorTrim), on(allocatorTopDown)));
+                         "room_drain_budget {}, allocator_trim {}, allocator_top_down {}, foliage_vertex_lamps {}, canopy_ground_shadow {}",
+                         on(measurements), on(drawReadsNoWait), on(occlusionRelight), on(roomDrainBudget), on(allocatorTrim), on(allocatorTopDown), on(foliageVertexLamps), on(canopyGroundShadow)));
 }
 
 } // namespace DevSwitches

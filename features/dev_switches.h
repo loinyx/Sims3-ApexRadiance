@@ -9,6 +9,9 @@
 //   room_drain_budget   the extra room solves inside the game's room pick never start a step the budget cannot hold
 //   allocator_trim      the game allocator's own trim every 30 s and before saves
 //   allocator_top_down  the game allocator's large blocks from the top of the address space
+//   foliage_vertex_lamps  lamp light on instanced foliage per vertex: distance, height, direction, leaf transmission, the crown's
+//                         own leaves, ground bounce (foliage_vertex_lamps.h); a draw whose lamps cannot be matched keeps the old path
+//   canopy_ground_shadow  tree and bush crowns as porous occluders of lamp light on lot ground (foliage_canopy.h)
 #include <atomic>
 
 namespace DevSwitches {
@@ -25,6 +28,8 @@ inline std::atomic<bool> occlusionRelight{false};
 inline std::atomic<bool> roomDrainBudget{false};
 inline std::atomic<bool> allocatorTrim{false};
 inline std::atomic<bool> allocatorTopDown{false};
+inline std::atomic<bool> foliageVertexLamps{false};
+inline std::atomic<bool> canopyGroundShadow{false};
 
 void Load(); // init thread, before the features start; logs the values
 
@@ -34,5 +39,7 @@ inline bool OcclusionRelight() { return kCompiled && occlusionRelight.load(std::
 inline bool RoomDrainBudget() { return kCompiled && roomDrainBudget.load(std::memory_order_relaxed); }
 inline bool AllocatorTrim() { return kCompiled && allocatorTrim.load(std::memory_order_relaxed); }
 inline bool AllocatorTopDown() { return kCompiled && allocatorTopDown.load(std::memory_order_relaxed); }
+inline bool FoliageVertexLamps() { return kCompiled && foliageVertexLamps.load(std::memory_order_relaxed); }
+inline bool CanopyGroundShadow() { return kCompiled && canopyGroundShadow.load(std::memory_order_relaxed); }
 
 } // namespace DevSwitches
