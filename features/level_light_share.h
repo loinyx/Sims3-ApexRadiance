@@ -196,6 +196,10 @@ void NoteLampMark(uintptr_t treeLevel, int room, bool user, bool pure);
 bool HoldLampMark(uintptr_t treeLevel, int room, bool user);
 // Scheduler factor of a room (RoomLightQueue's priority hook): 1, or above any other room's for a lamp edit's rooms
 float LampUrgency(const void* room);
+// (development builds, auto_light_priority) an automatic switch-on's own room first in the room queue: no edit, no hold, no
+// extra budget; dusk: only on the story the camera shows
+void NoteQuietMark(uintptr_t treeLevel, int room, bool dusk);
+long QuietMarks();
 // A lamp edit's room that is a member of an atrium (rooms joined through removed floors): the scheduler solves it right
 // after the lamp's own room whatever its story, so the atrium's stories change together
 bool StackedWithEdit(const void* room);

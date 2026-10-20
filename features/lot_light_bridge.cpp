@@ -4395,14 +4395,58 @@ void NoteCrown(const FoliageInstance& f) {
 
 // Fills c[B .. B+81] for the draw (perVertex) and notes the crowns (ground shade). false: a lit slot could not be matched
 // or confirmed (the draw keeps the old shader)
-bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<float>& out) {
+// The space of the instance positions c0[3i]: 1 = relative to the camera eye, 2 = world; 0 while unknown. Found by
+// matching instances' lamp slots to the outdoor lamps both ways (at least 8 matches one way and at most 1 the other);
+// nothing (no crown, no per-vertex draw) uses a position before.
+std::atomic<int> g_foliageOrigin{0};
+int g_originVotes[3] = {};
+bool FoliageOriginFound(float origin[3]) {
     float eye[3];
-    if (!LotLightingMotion::CameraEye(eye)) return false;
+    const bool haveEye = LotLightingMotion::CameraEye(eye);
+    const int mode = g_foliageOrigin.load(std::memory_order_relaxed);
+    if (mode == 2) return origin[0] = origin[1] = origin[2] = 0.0f, true;
+    if (mode == 1 && haveEye) return std::memcpy(origin, eye, sizeof eye), true;
+    return false;
+}
+void VoteFoliageOrigin(const float (*c)[4], int count, const FoliageCrown& mesh) {
+    if (g_foliageOrigin.load(std::memory_order_relaxed)) return;
+    float eye[3];
+    const bool haveEye = LotLightingMotion::CameraEye(eye);
+    const float zero[3] = {};
+    for (int i = 0; i < count; i++) {
+        bool lit = false;
+        for (int k = 0; k < 3; k++) lit = lit || std::max({c[54 + 3 * i + k][0], c[54 + 3 * i + k][1], c[54 + 3 * i + k][2]}) > 0.05f;
+        if (!lit) continue;
+        for (int m = 1; m <= 2; m++) {
+            if (m == 1 && !haveEye) continue;
+            FoliageInstance f;
+            if (CrownShape(c[3 * i], c[3 * i + 2][0], m == 1 ? eye : zero, mesh, f) && MatchLamps(&c[27 + 3 * i], &c[54 + 3 * i], f)) g_originVotes[m]++;
+        }
+    }
+    for (int m = 1; m <= 2; m++)
+        if (g_originVotes[m] >= 8 && g_originVotes[3 - m] <= 1) {
+            g_foliageOrigin.store(m, std::memory_order_relaxed);
+            LOG_INFO(std::format("[Foliage] Instance positions are {} ({} matches, {} the other way)", m == 1 ? "relative to the camera" : "world positions",
+                                 g_originVotes[m], g_originVotes[3 - m]));
+        }
+    if (g_originVotes[1] + g_originVotes[2] > 200 && !g_foliageOrigin.load(std::memory_order_relaxed)) { // undecided: start over
+        static int s_noted = 0;
+        if (s_noted++ < 3) LOG_INFO(std::format("[Foliage] Instance position space undecided ({} / {} matches): per-vertex lamps and crowns wait", g_originVotes[1], g_originVotes[2]));
+        g_originVotes[1] = g_originVotes[2] = 0;
+    }
+}
+
+bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<float>& out) {
     FoliageCrown mesh;
     if (!FoliageMeshBox(dev, mesh)) return false;
     const int count = std::clamp(mesh.instances, 1, 9);
     float c[81][4];
-    if (FAILED(dev->GetVertexShaderConstantF(0, &c[0][0], perVertex ? 81 : 3 * count))) return false;
+    if (FAILED(dev->GetVertexShaderConstantF(0, &c[0][0], 81))) return false;
+    float eye[3]; // the origin of c0 (named eye below: the camera eye, or 0 for world positions)
+    if (!FoliageOriginFound(eye)) {
+        VoteFoliageOrigin(c, count, mesh);
+        return false;
+    }
     static uint32_t s_gen = 0;
     if (s_gen != g_lampMemoGen || g_foliageInstances.size() > 8192) {
         g_foliageInstances.clear(); // the lamp list changed (indices) or too many instances

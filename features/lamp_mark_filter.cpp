@@ -33,6 +33,7 @@
 #include "unlit_rooms.h"
 #include "room_ambient_policy.h"
 #include "drag_lite.h"
+#include "dev_switches.h"
 #include <windows.h>
 #include <algorithm>
 #include <atomic>
@@ -82,7 +83,9 @@ struct LampState {
     int events = 0;
     float editable[5] = {}; // base RGB, intensity, enabled; excludes animated fade
     DWORD editUntil = 0;    // an edit (move, switch, colour) is going on until then: its next changes are part of it
+    DWORD lastAuto = 0;     // (auto_light_priority) its latest quiet mark: at most one every 5 s
 };
+std::atomic<long> g_autoSelfOn{0}, g_autoDuskOn{0}; // automatic switch-ons left out of the lamp edits (counters)
 constexpr DWORD kEditHoldMs = 2000;
 std::unordered_map<Key, LampState, KeyHash> g_sig; // (tree level, light) -> the lamp at its last mark
 // The story (tree level) each lamp marked last: a first mark on another story of the same lot is the lamp moved between
@@ -386,6 +389,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
     // same room, on or off as before (a move or a value change): a solve in progress keeps going, the mark is held;
     // `stayed` = the same room (switched too): the lamp is registered there, its rooms gather at once
     bool same = false, edit = false, user = false, pure = false, stayed = false;
+    bool autoSelf = false, switchedOn = false; // a light switching itself on (no edit); switched on in place (dusk below)
     {
         std::lock_guard<std::mutex> lk(g_mx);
         if (g_sig.size() > 65536) g_sig.clear();
@@ -441,6 +445,11 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             // ... unless several different lights switch together: the player's "all the lights", however often (NoteSwitch)
             const bool burst = was.on != on && NoteSwitch(light, tick);
             const bool selfSwitching = was.on != on && ++was.events > kSelfMax && !burst;
+            switchedOn = on && !was.on && !moved && was.room == room;
+            if (selfSwitching && switchedOn && tick - was.lastAuto > 5000) {
+                autoSelf = true;
+                was.lastAuto = tick | 1;
+            }
             if (was.on != on && !selfSwitching && !moved && was.room == room) NoteUserSwitch(tick); // the room queue's quick pass
             if (!selfSwitching) g_lampEvents.fetch_add(1, std::memory_order_relaxed);
             if (!selfSwitching) Recorder::NoteLampEdit(tl, on, was.on == on); // the recording's light update summary
@@ -488,7 +497,25 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
     }
     // dusk and dawn switch every lamp of every lot: those switches go through the game's own pace (an edit's rooms are solved
     // all at once, which here would be every lit room of the lot in one pause)
-    if (const float night = g_nightLevel.load(std::memory_order_relaxed); edit && !pure && stayed && night > 0.02f && night < 0.98f) edit = false;
+    bool autoDusk = false;
+    if (const float night = g_nightLevel.load(std::memory_order_relaxed); edit && !pure && stayed && night > 0.02f && night < 0.98f) {
+        edit = false;
+        autoDusk = switchedOn;
+    }
+    // (development builds, auto_light_priority) those automatic switch-ons put the lamp's own room first in the room queue
+    // (no edit, no hold, no extra budget: LevelLightShare::NoteQuietMark); counted either way
+    if (autoSelf) g_autoSelfOn.fetch_add(1, std::memory_order_relaxed);
+    if (autoDusk) g_autoDuskOn.fetch_add(1, std::memory_order_relaxed);
+    if ((autoSelf || autoDusk) && DevSwitches::AutoLightPriority())
+        HookGuard::Run("LampMarkFilter quiet mark", [&] { LevelLightShare::NoteQuietMark(tl, room, autoDusk); });
+    if (autoSelf || autoDusk) {
+        static std::atomic<DWORD> s_logged{0};
+        const DWORD tick = GetTickCount();
+        DWORD last = s_logged.load(std::memory_order_relaxed);
+        if (tick - last > 60000 && s_logged.compare_exchange_strong(last, tick))
+            LOG_INFO(std::format("[LampMarkFilter] Automatic switch-ons (not lamp edits): {} by lights toggling often, {} at dusk or dawn; {} rooms put first (auto_light_priority)",
+                                 g_autoSelfOn.load(), g_autoDuskOn.load(), LevelLightShare::QuietMarks()));
+    }
     if (same) {
         if (!g_on.load(std::memory_order_relaxed)) { // off: every mark goes through (the values are still followed)
             g_off.fetch_add(1, std::memory_order_relaxed);

@@ -456,7 +456,8 @@ void Drain(BYTE* tree, BYTE* before) {
         // started only when the running average of a step's cost still fits. Each room's light is still the game's own
         // complete solve; only the frame a room finishes in can move.
         // Lamp edits keep the old pacing (their light must follow the lamp; a slower edit drain was rejected before).
-        const bool predict = DevSwitches::RoomDrainBudget() && !lampEdit && !AtriumHold::EditHolding();
+        // nor an urgent room (an automatic switch-on put first: auto_light_priority), which keeps the whole budget
+        const bool predict = DevSwitches::RoomDrainBudget() && !lampEdit && !AtriumHold::EditHolding() && !(LevelLightShare::LampUrgency(room) > 1.0f);
         static float s_stepMs = 0.0f; // running average of one solve step (render thread only)
         if (lampEdit) g_drainUrgent.fetch_add(1, std::memory_order_relaxed);
         alignas(16) BYTE sw[32] = {};

@@ -7,11 +7,13 @@
 //                       answers); opaque instanced meshes read each vertex once
 //   occlusion_relight   an occlusion scene identical to the last published one is not published again (no relight)
 //   room_drain_budget   the extra room solves inside the game's room pick never start a step the budget cannot hold
-//   allocator_trim      the game allocator's own trim every 30 s and before saves
+//   allocator_trim      the game allocator's own trim every 60 s and before saves
 //   allocator_top_down  the game allocator's large blocks from the top of the address space
 //   foliage_vertex_lamps  lamp light on instanced foliage per vertex: distance, height, direction, leaf transmission, the crown's
 //                         own leaves, ground bounce (foliage_vertex_lamps.h); a draw whose lamps cannot be matched keeps the old path
 //   canopy_ground_shadow  tree and bush crowns as porous occluders of lamp light on lot ground (foliage_canopy.h)
+//   auto_light_priority   a lamp switched on automatically (dusk, dawn, a light toggled often) puts its own room first in the
+//                         room queue, with no extra budget and no hold (LevelLightShare::NoteQuietMark)
 #include <atomic>
 
 namespace DevSwitches {
@@ -30,6 +32,7 @@ inline std::atomic<bool> allocatorTrim{false};
 inline std::atomic<bool> allocatorTopDown{false};
 inline std::atomic<bool> foliageVertexLamps{false};
 inline std::atomic<bool> canopyGroundShadow{false};
+inline std::atomic<bool> autoLightPriority{false};
 
 void Load(); // init thread, before the features start; logs the values
 
@@ -41,5 +44,6 @@ inline bool AllocatorTrim() { return kCompiled && allocatorTrim.load(std::memory
 inline bool AllocatorTopDown() { return kCompiled && allocatorTopDown.load(std::memory_order_relaxed); }
 inline bool FoliageVertexLamps() { return kCompiled && foliageVertexLamps.load(std::memory_order_relaxed); }
 inline bool CanopyGroundShadow() { return kCompiled && canopyGroundShadow.load(std::memory_order_relaxed); }
+inline bool AutoLightPriority() { return kCompiled && autoLightPriority.load(std::memory_order_relaxed); }
 
 } // namespace DevSwitches

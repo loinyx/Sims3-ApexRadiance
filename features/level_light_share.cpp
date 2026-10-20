@@ -538,6 +538,7 @@ struct UrgentRoom {
     unsigned long serial = 0;  // LampMarkFilter::EditSerial at the latest mark: a solve begun after it ends its wait
     bool expiredPending = false; // reached the 8 s cap while still waiting (counted once)
     bool kept = false;           // outlived its deadline while waiting (counted once)
+    bool quiet = false;          // an automatic switch-on's own room (NoteQuietMark): first in the queue, not an edit
 };
 std::mutex g_urgentMx;
 std::vector<UrgentRoom> g_urgent; // the rooms of the lamps edited in the last kUrgentMs (a handful; a big lot's net: more)
@@ -633,6 +634,7 @@ void MarkUrgent(void* room, int tier, bool soon) {
         it->marked = now;
         it->serial = serial;
         it->expiredPending = it->kept = false;
+        it->quiet = false; // an edit's mark: a full lamp edit now
     }
     if (tier == 0) { // the lamp's own story: never held by the edit hold (OnEditStory)
         std::erase_if(g_editStories, [now](const EditStory& s) { return now - s.at >= kEditStoryMs; });
@@ -13942,6 +13944,34 @@ float LampUrgency(const void* room) {
     return tier < 0 ? 1.0f : (tier == 0 ? 1.0e6f : tier == 1 ? 1.0e5f : 1.0e4f) * CameraStoryFactor(room); // tier 2: the safety net's (12/10)
 }
 
+// (development builds, auto_light_priority) A lamp switched on automatically (dusk, dawn, a light toggled often: no lamp edit)
+// puts its own room first in the room queue (tier 0: LampUrgency, Prioritise), and nothing else: no edit, no hold, no
+// larger drain budget, so the frame time is the game's. At dusk and dawn every lamp of every lot switches: only the rooms
+// of the story the camera shows. The room's light is the game's own solve; only its turn in the queue moves.
+std::atomic<long> g_quietMarks{0};
+void NoteQuietMark(uintptr_t tl, int room, bool dusk) {
+    if (!g_installed.load(std::memory_order_relaxed) || !g_indoorReady || !tl) return;
+    void* r = const_cast<void*>(RoomOfTreeLevel(reinterpret_cast<const BYTE*>(tl), room));
+    uintptr_t mgr = 0;
+    int id = 0;
+    if (!r || !RoomKey(r, mgr, id)) return;
+    if (dusk && CameraStoryFactor(r) < 4.0f) return;
+    const DWORD now = GetTickCount();
+    const unsigned long serial = LampMarkFilter::EditSerial();
+    std::lock_guard<std::mutex> lk(g_urgentMx);
+    std::erase_if(g_urgent, [now](UrgentRoom& u) { return !UrgentLive(u, now); });
+    if (std::any_of(g_urgent.begin(), g_urgent.end(), [r](const UrgentRoom& u) { return u.room == reinterpret_cast<uintptr_t>(r); })) return; // already urgent
+    if (g_urgent.size() >= kUrgentMax) return; // full of edits: the game's order
+    UrgentRoom u{reinterpret_cast<uintptr_t>(r), mgr, id, 0, now + kUrgentMs, false};
+    u.marked = now;
+    u.serial = serial;
+    u.quiet = true;
+    g_urgent.push_back(u);
+    g_urgentSize.store(static_cast<int>(g_urgent.size()), std::memory_order_relaxed);
+    g_quietMarks.fetch_add(1, std::memory_order_relaxed);
+}
+long QuietMarks() { return g_quietMarks.load(std::memory_order_relaxed); }
+
 bool SettlingAfterLoad() {
     const DWORD live = g_worldLiveAt.load(std::memory_order_relaxed);
     return live && GetTickCount() - live < kSettleAfterLoadMs;
@@ -14074,7 +14104,7 @@ int OwnRoomsPending(int* total) {
         const DWORD now = GetTickCount();
         std::lock_guard<std::mutex> lk(g_urgentMx);
         for (UrgentRoom& u : g_urgent)
-            if (u.tier == 0 && n < static_cast<int>(std::size(rooms)) && UrgentLive(u, now)) rooms[n++] = Entry{u.room, u.mgr, u.id, u.serial};
+            if (u.tier == 0 && !u.quiet && n < static_cast<int>(std::size(rooms)) && UrgentLive(u, now)) rooms[n++] = Entry{u.room, u.mgr, u.id, u.serial};
     }
     int pending = 0, counted = 0;
     for (int k = 0; k < n; k++) {
@@ -14127,7 +14157,7 @@ bool LampEditPending() {
         const DWORD now = GetTickCount();
         std::lock_guard<std::mutex> lk(g_urgentMx);
         for (UrgentRoom& u : g_urgent)
-            if (n < static_cast<int>(std::size(rooms)) && UrgentLive(u, now)) rooms[n++] = u.room;
+            if (n < static_cast<int>(std::size(rooms)) && !u.quiet && UrgentLive(u, now)) rooms[n++] = u.room; // a quiet mark is no edit
     }
     for (int k = 0; k < n; k++) {
         uintptr_t mgr = 0;
