@@ -195,9 +195,12 @@ bool NearFromBlock(const float m[4][4], float& nearZ) {
 }
 
 void VoteCamera(IDirect3DDevice9* dev) {
+    float cameraBlock[4][4];
+    const bool haveCameraBlock = SUCCEEDED(dev->GetVertexShaderConstantF(40, &cameraBlock[0][0], 4));
     {
         float m[4][4], n;
-        if (SUCCEEDED(dev->GetVertexShaderConstantF(40, &m[0][0], 4)) && NearFromBlock(m, n)) {
+        if (haveCameraBlock) std::memcpy(m, cameraBlock, sizeof m);
+        if (haveCameraBlock && NearFromBlock(m, n)) {
             bool found = false;
             for (auto& v : g_vpVotes)
                 if (std::memcmp(v.m, m, sizeof m) == 0) {
@@ -212,7 +215,11 @@ void VoteCamera(IDirect3DDevice9* dev) {
     }
     for (UINT base : kNearBlocks) {
         float m[4][4], n;
-        if (FAILED(dev->GetVertexShaderConstantF(base, &m[0][0], 4)) || !NearFromBlock(m, n)) continue;
+        // No device state is changed between the two votes. Reuse the successful
+        // camera read; retain the original retry when the first read failed.
+        if (base == 40 && haveCameraBlock) std::memcpy(m, cameraBlock, sizeof m);
+        else if (FAILED(dev->GetVertexShaderConstantF(base, &m[0][0], 4))) continue;
+        if (!NearFromBlock(m, n)) continue;
         bool found = false;
         for (auto& v : g_nearVotes)
             if (std::fabs(v.first - n) < 1e-3f * n) {
