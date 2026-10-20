@@ -1,5 +1,9 @@
 # Native post-scene boundary check
 
+Run `powershell -File tools/post_scene_test/run.ps1 -OutDir <scratch-folder>` with the x86 MSVC toolchain installed.
+The companion lazy-copy fixture extracts `EnsureSceneCopy` from the production Picture implementation and checks
+native D3D9 creation, reuse, exact copied pixels, failed-creation cleanup and size recreation.
+
 The fixture uses a native D3D9 device, the production post_scene.cpp and a 2048x1024 scratch render target.
 It writes no game files. 49 checks cover four-effect ordering (AO, smoothing, blur, Color), normal/hidden fallback,
 once-per-frame execution, depth rejection/recovery, short-scene/internal/reset guards and actual colour tile recognition.

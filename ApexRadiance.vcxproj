@@ -161,6 +161,7 @@
     <ClCompile Include="framework\crash_report.cpp" />
     <ClCompile Include="framework\hook_guard.cpp" />
     <ClCompile Include="framework\load_timing.cpp" />
+    <ClCompile Include="features\lot_load_analysis.cpp" />
     <ClCompile Include="framework\d3d9_bootstrap.cpp" />
     <ClCompile Include="framework\d3d9_extra_hooks.cpp" />
     <ClCompile Include="framework\d3d9_hooks.cpp" />
@@ -297,6 +298,7 @@
     <ClInclude Include="framework\hook_guard.h" />
     <ClInclude Include="framework\module_lifetime.h" />
     <ClInclude Include="framework\load_timing.h" />
+    <ClInclude Include="features\lot_load_analysis.h" />
     <ClInclude Include="framework\conflict_guard.h" />
     <ClInclude Include="framework\d3d9_bootstrap.h" />
     <ClInclude Include="framework\d3d9_extra_hooks.h" />

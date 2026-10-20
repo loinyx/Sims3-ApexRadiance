@@ -1931,9 +1931,16 @@ std::vector<DWORD> BicubicSetup(DWORD uvType, DWORD uvNum, DWORD cS, DWORD cK, D
 // outside and alpha 1 inside (Light Probe captures of 29/09), so the filtered rgb / filtered alpha is the mean of the
 // inside texels under the filter; the edge no longer pulls towards black, without touching the game's textures.
 // (Taps in T+6..T+9, weights in T+10; T+2, T+3, T+4 as scratch; cH.z = the smallest alpha divided by.)
-std::vector<DWORD> BicubicTaps(DWORD S, DWORD dst, DWORD T, DWORD cH) {
+std::vector<DWORD> BicubicTaps(DWORD S, DWORD dst, DWORD T, DWORD cH, bool preserveShadows=false) {
     const DWORD R = T + 2, Acc = T + 3, Inv = T + 4, Wt = T + 10;
     std::vector<DWORD> v;
+    if (preserveShadows) {
+        // The original texld remains before these taps. Normalize its house-plan
+        // mask just like the smooth read, then keep it as a per-channel ceiling.
+        v.insert(v.end(), {Op(kMax,3),Dst(kTemp,Inv,0x8),Src(kTemp,dst,Sw(3,3,3,3)),Src(kConst,cH,Sw(2,2,2,2)),
+                           Op(kRcp,2),Dst(kTemp,Inv,0x8),Src(kTemp,Inv,Sw(3,3,3,3)),
+                           Op(kMul,3),Dst(kTemp,Inv,0x7),Src(kTemp,dst),Src(kTemp,Inv,Sw(3,3,3,3))});
+    }
     for (int k = 0; k < 4; k++) {
         v.insert(v.end(), {Op(kTexld, 3), Dst(kTemp, R), Src(kTemp, T + 6 + static_cast<DWORD>(k)), Src(kSampler, S)});
         if (k == 0) v.insert(v.end(), {Op(kMul, 3), Dst(kTemp, Acc), Src(kTemp, R), Src(kTemp, Wt, Sw(0, 0, 0, 0))});
@@ -1942,6 +1949,7 @@ std::vector<DWORD> BicubicTaps(DWORD S, DWORD dst, DWORD T, DWORD cH) {
     v.insert(v.end(), {Op(kMax, 3), Dst(kTemp, Inv, 0x8), Src(kTemp, Acc, Sw(3, 3, 3, 3)), Src(kConst, cH, Sw(2, 2, 2, 2)),
                        Op(kRcp, 2), Dst(kTemp, Inv, 0x8), Src(kTemp, Inv, Sw(3, 3, 3, 3)),
                        Op(kMul, 3), Dst(kTemp, dst, 0x7), Src(kTemp, Acc), Src(kTemp, Inv, Sw(3, 3, 3, 3))});
+    if (preserveShadows) v.insert(v.end(),{Op(kMin,3),Dst(kTemp,dst,0x7),Src(kTemp,dst),Src(kTemp,Inv)});
     return v;
 }
 
@@ -2048,7 +2056,7 @@ bool BasisSamplers(const std::vector<DWORD>& t, int samplers[4]) {
     return true;
 }
 
-bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out) {
+bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out, bool preserveShadows) {
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto ins = Parse(t);
     if (ins.empty()) return false;
@@ -2067,7 +2075,7 @@ bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out) {
     edits.push_back({ins[static_cast<size_t>(first)].at, BicubicSetup(static_cast<DWORD>(r.uvType), static_cast<DWORD>(r.uvNum), cS, cK, cH, T)});
     for (int d = 0; d < 4; d++) {
         const Ins& x = ins[static_cast<size_t>(r.texld[d])];
-        edits.push_back({End(x), BicubicTaps(static_cast<DWORD>(r.sampler[d]), Num(t[x.at + 1]), T, cH)});
+        edits.push_back({End(x), BicubicTaps(static_cast<DWORD>(r.sampler[d]), Num(t[x.at + 1]), T, cH,preserveShadows)});
     }
     Apply(t, std::move(edits));
     return true;
@@ -2531,6 +2539,56 @@ bool RoomMapUvScale(const std::vector<DWORD>& vs, RoomMapUv& out) {
             out.defined = true;
         }
     return true;
+}
+
+bool IsPackedRoomFloorVs(const std::vector<DWORD>& vs) {
+    RoomMapUv uv;
+    if (vs.empty() || vs[0]!=0xFFFE0300 || !RoomMapUvScale(vs,uv) || !uv.defined || uv.comp!=2 ||
+        std::fabs(uv.value*32767.0f-1.0f)>1e-5f) return false;
+    const auto ins=Parse(vs);
+    bool packedConstants=false;
+    for(const auto& x:ins) if(x.op==kDef && IsReg(vs[x.at+1],kConst,static_cast<DWORD>(uv.constReg))) {
+        float values[4];std::memcpy(values,&vs[x.at+2],sizeof values);
+        packedConstants=values[0]==1.0f/256.0f && values[1]==-128.0f && values[3]==0.5f;
+    }
+    if(!packedConstants) return false;
+    // Height combines the packed position's z and w before subtracting the packing bias.
+    int height=-1;bool unpacked=false;
+    for(const auto& x:ins) {
+        if(x.op==kMad && Type(vs[x.at+1])==kTemp && WMask(vs[x.at+1])==8 &&
+           IsReg(vs[x.at+2],kInput,0) && Swz(vs[x.at+2])==Sw(2,2,2,2) &&
+           IsReg(vs[x.at+3],kConst,static_cast<DWORD>(uv.constReg)) && Swz(vs[x.at+3])==kSwzX &&
+           IsReg(vs[x.at+4],kInput,0) && Swz(vs[x.at+4])==kSwzW) height=static_cast<int>(Num(vs[x.at+1]));
+        if(height>=0 && x.op==kAdd && Type(vs[x.at+1])==kTemp && WMask(vs[x.at+1])==2 &&
+           IsReg(vs[x.at+2],kTemp,static_cast<DWORD>(height)) && Swz(vs[x.at+2])==kSwzW &&
+           IsReg(vs[x.at+3],kConst,static_cast<DWORD>(uv.constReg)) && Swz(vs[x.at+3])==kSwzY) unpacked=true;
+    }
+    return unpacked;
+}
+
+bool FindWallMatrices(const std::vector<DWORD>& vs, WallMatrices& out) {
+    out={};RoomMapUv uv;
+    if(!RoomMapUvScale(vs,uv) || !uv.defined || std::fabs(uv.value*4096.0f-1.0f)>1e-5f) return false;
+    const auto ins=Parse(vs);
+    int matches=0;
+    for(const auto& seed:ins) {
+        if(seed.op!=kDp4 || Type(vs[seed.at+2])!=kTemp || Type(vs[seed.at+3])!=kConst) continue;
+        const DWORD position=vs[seed.at+2],first=Num(vs[seed.at+3]);
+        if(first>249) continue;
+        unsigned found=0;int worldTemp=-1;bool valid=true;
+        for(const auto& x:ins) {
+            if(x.op!=kDp4 || vs[x.at+2]!=position || Type(vs[x.at+3])!=kConst) continue;
+            const DWORD k=Num(vs[x.at+3]);if(k<first || k>first+6) continue;
+            const auto bit=1u<<(k-first);if(found&bit){valid=false;break;}found|=bit;
+            if(k>=first+4) {
+                if(Type(vs[x.at+1])!=kTemp || WMask(vs[x.at+1])!=(1u<<(k-first-4))) {valid=false;break;}
+                const int reg=static_cast<int>(Num(vs[x.at+1]));
+                if(worldTemp>=0 && worldTemp!=reg){valid=false;break;}worldTemp=reg;
+            }
+        }
+        if(valid && found==127){out.clip=static_cast<int>(first);out.world=out.clip+4;++matches;}
+    }
+    if(matches!=1){out={};return false;}return true;
 }
 
 // ---- Windows take outdoor light (experimental, see the header) ----

@@ -81,6 +81,26 @@ research and code by idavidveiga): [lot-streaming.md](lot-streaming.md). They ar
 One related change has no switch: the [Vulkan driver guard](vulkan-driver-guard.md) keeps an unused AMD Vulkan driver
 out of the game's address space on hybrid-GPU PCs.
 
+## Bounded gameplay work
+
+The gameplay paths avoid compression and bookkeeping work without changing simulation timing or shader
+quality. Complete repeated 16x4 texture strips reuse their preceding encoded bytes only after exact pixel comparison;
+partial blocks and native fallbacks retain their normal path. Already ordered CAS triangle counts skip sorting and
+temporary buffers. RefPack compares long prefixes in two bounded SSE2 blocks per loop. The script type cache retains
+one generation-checked result per thread, while shared entry fields use atomic loads/stores. Object-index lookups omit
+unused public-mode timing reads. Mesh-occluder discovery pauses for 100 ms after a scan finds all visible groups cached.
+
+Numbered public test builds also include an automatic frame-interval summary using a fixed 8 KB histogram, not the developer profiler. It records foreground,
+loaded-world play with the Apex panel closed after a three-second warm-up, then logs mean, p50/p95/p99, worst interval
+and counts above 33.3/50 ms once per minute. Percentiles round upward in half-millisecond bins; overflow percentiles
+use the observed maximum. Intervals include presentation and frame limiting, so this does not identify CPU/GPU causes.
+Menu, focus and world changes discard the current window. Source: `features/frame_pacing.h`, `framework/overlay.cpp`.
+
+The previous GC scheduler and global service budgets remain removed. Historical GC totals aggregate simulation-thread
+calls and do not establish a render stall; shifting those calls cannot be justified as an FPS fix by that evidence.
+The implementation retains existing bounded workers and synchronous ownership of texture/cache data. Gameplay FPS gains
+and long-session stability remain unverified; isolated codec timings are not a frame-rate prediction.
+
 ## Lamp lighting card
 
 The first card of System > Performance chooses how lot lamps update after one is switched, recoloured or moved. Its

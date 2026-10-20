@@ -65,3 +65,11 @@ Native checks are geometric evidence; they do not replace inspecting every page 
 - Notice priority and the 140 / 120 ms animation at high text sizes.
 - The "Reset all settings" description still mentions "window mode"; there is no window mode any more (code text to
   update).
+
+## Public test notice
+
+`tools/public_test_notice_test/run.ps1` extracts the production modal and uses real Violet widgets, fonts, icons and
+translation tables with in-memory settings. It checks window/button bounds, style-stack restoration, multi-frame
+stability, actual Continue clicks, versioned acknowledgment and full version labels in 21 languages at two widths and
+two scales. The translation checker verifies all table keys and placeholders. Native headless geometry does not verify
+live game input capture, saved-config persistence after process exit or gameplay rendering.

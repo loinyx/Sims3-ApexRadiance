@@ -1912,6 +1912,7 @@ void ResetAllRow() {
             ApexConfig::UiSettings uiDefaults;
             uiDefaults.startProfileDone = previousUi.startProfileDone; // the welcome is not repeated
             uiDefaults.changelogSeen = previousUi.changelogSeen; // nor the What's new dot
+            uiDefaults.testBuildSeen = previousUi.testBuildSeen;
             ApexConfig::SetUi(uiDefaults);
             LOG_INFO("[Menu] All settings reset to their defaults");
             ShowToast(I18n::Tr("All settings reset"), std::move(before), "All settings reset");
@@ -3359,13 +3360,64 @@ void DrawPage() {
 float StatusBarHeight() { return 30.0f * ApexUi::Unit(); }
 
 // The newest What's new version; the version button shows a dot until the player opens it once
-bool ChangelogUnseen() { return ApexConfig::GetUi().changelogSeen != ApexChangelog::Get(0).version; }
+bool ChangelogUnseen() {
+    if (kMemoryOptimizationTest) return ApexConfig::GetUi().testBuildSeen != APEX_VERSION_STRING;
+    return ApexConfig::GetUi().changelogSeen != ApexChangelog::Get(0).version;
+}
+
+
+// The test notice is versioned independently of stable release notes.
+bool PublicTestPending() {
+    return kMemoryOptimizationTest && ApexConfig::GetUi().testBuildSeen != APEX_VERSION_STRING;
+}
+void PublicTestInstructions() {
+    ApexUi::MutedText("Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.");
+    ApexUi::Gap(ApexUi::kSpace2);
+    ApexUi::MutedText("Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.");
+    ApexUi::Gap(ApexUi::kSpace2);
+    ApexUi::MutedText("Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.");
+}
+void PublicTestWelcome() {
+    if (!kMemoryOptimizationTest) return;
+    if (PublicTestPending() && !ImGui::IsPopupOpen("##PublicTestWelcome")) ImGui::OpenPopup("##PublicTestWelcome");
+    const auto* vp=ImGui::GetMainViewport();
+    const float u=ApexUi::Unit();
+    const ImVec2 size(std::max(1.f,std::min(560.f*u,vp->Size.x-32.f*u)),
+                      std::max(1.f,std::min(440.f*u,vp->Size.y-32.f*u)));
+    ImGui::SetNextWindowSize(size,ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImVec2(vp->Pos.x+(vp->Size.x-size.x)*.5f,vp->Pos.y+(vp->Size.y-size.y)*.5f),ImGuiCond_Always);
+    if (ImGui::BeginPopupModal("##PublicTestWelcome",nullptr,ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoSavedSettings)) {
+        ApexUi::CardHeader(IconId::FlaskConical,"RAM and gameplay test",nullptr,nullptr,nullptr);
+        ImGui::TextDisabled("%s",APEX_VERSION_STRING);
+        ApexUi::CardDivider();
+        const float instructionsHeight=std::max(1.f,ImGui::GetContentRegionAvail().y-52.f*u);
+        if (ImGui::BeginChild("##PublicTestInstructions",ImVec2(0,instructionsHeight))) PublicTestInstructions();
+        ImGui::EndChild();
+        ApexUi::Gap(ApexUi::kSpace2);
+        {
+            const ApexUi::ControlSizeScope controls(ApexUi::ControlSize::Primary);
+            if (ApexUi::IconTextButton("Continue",IconId::Check,nullptr,ButtonKind::Primary)) {
+                auto ui=ApexConfig::GetUi();ui.testBuildSeen=APEX_VERSION_STRING;ApexConfig::SetUi(ui);
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::EndPopup();
+    }
+}
+std::string VisibleVersionLabel(float maxTextWidth=FLT_MAX) {
+    const std::string version=std::string("v")+APEX_VERSION_STRING;
+    if (kMemoryOptimizationTest) {
+        const std::string named=version+" · "+std::string(I18n::Tr("RAM and gameplay test"));
+        if (maxTextWidth==FLT_MAX || ImGui::CalcTextSize(named.c_str()).x<=maxTextWidth) return named;
+    }
+    return version;
+}
 
 // The version button: a violet dot while What's new is unread, then "v2.6.0". Opens the What's new popover.
 void VersionButton(float x, float y, float h) {
     const float u = ApexUi::Unit();
     ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
-    const std::string label = std::string("v") + APEX_VERSION_NUMBER;
+    const std::string label = VisibleVersionLabel(std::max(1.f,ImGui::GetWindowWidth()-128.f*u));
     const bool unseen = ChangelogUnseen();
     const float dot = 6.0f * u, padX = ApexUi::kSpace3 * u;
     const ImVec2 ts = ImGui::CalcTextSize(label.c_str());
@@ -3387,11 +3439,11 @@ void VersionButton(float x, float y, float h) {
     }
     dl->AddText(ImVec2(cx, p.y + std::floor((h - ts.y) * 0.5f)), ImGui::GetColorU32(Col(hovered || open ? VioletTheme::kText : VioletTheme::kTextMuted)), label.c_str());
     ImGui::PopFont();
-    const std::string tip = std::string(I18n::Tr("What's new")) + " \xC2\xB7 " APEX_PRODUCT_NAME " " APEX_VERSION_STRING;
+    const std::string tip = std::string(I18n::Tr(kMemoryOptimizationTest ? "RAM and gameplay test" : "What's new")) + " \xC2\xB7 " APEX_PRODUCT_NAME " " APEX_VERSION_STRING;
     if (!open) ApexUi::Tooltip(tip.c_str());
     if (clicked) {
-        ImGui::OpenPopup("##WhatsNew");
-        if (unseen) {
+        ImGui::OpenPopup(kMemoryOptimizationTest ? "##PublicTestWelcome" : "##WhatsNew");
+        if (unseen && !kMemoryOptimizationTest) {
             ApexConfig::UiSettings ui = ApexConfig::GetUi();
             ui.changelogSeen = ApexChangelog::Get(0).version; // [ui] changelog_seen
             ApexConfig::SetUi(ui);
@@ -3461,7 +3513,7 @@ void VersionButton(float x, float y, float h) {
 float VersionButtonWidth() {
     const float u = ApexUi::Unit();
     ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
-    const float w = ApexUi::kSpace3 * u * 2.0f + (ChangelogUnseen() ? 12.0f * u : 0.0f) + ImGui::CalcTextSize("v" APEX_VERSION_NUMBER).x;
+    const float w = ApexUi::kSpace3 * u * 2.0f + (ChangelogUnseen() ? 12.0f * u : 0.0f) + ImGui::CalcTextSize(VisibleVersionLabel(std::max(1.f,ImGui::GetWindowWidth()-128.f*u)).c_str()).x;
     ImGui::PopFont();
     return std::floor(w);
 }
@@ -3674,6 +3726,7 @@ void MainWindow() {
         DrawToast(footerTop);
         DeveloperConfirmation();
         ImGui::EndDisabled();
+        PublicTestWelcome();
 
         // Hold to compare: the eye button, or the configured key while the pointer is over the menu.
         const bool holdKey = g_menuHovered && !peek && !io.WantTextInput && HoldShortcutDown(uiKeys.pictureCompareKey);
@@ -4579,6 +4632,7 @@ class GuiClient final : public Overlay::Client {
         UpdateMenuAvailability();
         UpdateHint();
         if (!g_menuAvailable.load()) { Overlay::SetVisible(false); return HintVisible(); }
+        if (PublicTestPending() && !BannerNeeded() && !Captures::ScreenshotPending()) Overlay::SetVisible(true);
         RunShortcuts();
         // the capture notes (recording, saved, an open session) show with the menu closed too
         return BannerNeeded() || HintVisible() || PresetPillVisible() || g_comparing || Recorder::SecondsRecorded() >= 0 || Captures::CurrentNote().visible ||

@@ -1,5 +1,10 @@
 # Picture filters
 
+The fallback scene-copy target is created only when a scene copy is requested. The ordinary post-scene boundary uses
+the current frame texture for both inputs while scene masking is off. This avoids retaining a second full-resolution
+target in sessions that never need the fallback. A fallback copy retains its target until device reset; the format,
+resolution, shader and filter settings are unchanged. Public effect timings are sampled at most four times per second.
+
 Picture filters adjust how the game world looks: brightness, contrast, saturation, colour temperature, tone zones,
 film-style split toning, a per-colour mixer, sharpness, clarity and a vignette, plus a **Filters** tab of stackable
 looks (film stocks, colour moods, glow and haze, camera effects, retro screens and a colour-blind mode), each with its

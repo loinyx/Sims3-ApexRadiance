@@ -307,6 +307,11 @@ bool Build(uint32_t mgr, uint32_t obj, Entry& e) {
 
 // ---- table ----
 bool Find(uint32_t mgr, uint32_t lo, uint32_t hi, uint32_t gen, Entry& out) {
+    // The caller still validates every remembered parent/child and ID against the live tree.
+    // Consecutive lookups of one lot need not acquire the shared table lock again.
+    static thread_local Entry last{};
+    static thread_local uint32_t lastGen=0;
+    if(lastGen==gen&&last.mgr==mgr&&last.idLo==lo&&last.idHi==hi&&GetTickCount()-last.tick<=kMaxAgeMs){out=last;return true;}
     bool found = false;
     AcquireSRWLockShared(&g_lock);
     if (g_table && g_stampGen == gen) {
@@ -322,6 +327,7 @@ bool Find(uint32_t mgr, uint32_t lo, uint32_t hi, uint32_t gen, Entry& out) {
         }
     }
     ReleaseSRWLockShared(&g_lock);
+    if(found){last=out;lastGen=gen;}
     return found;
 }
 
@@ -370,7 +376,8 @@ void Restart() {
 bool CheckThisOne() {
     const uint64_t n = g_hitSerial.fetch_add(1, std::memory_order_relaxed);
     if (n < kFirstChecks) return true;
-    if (GetTickCount64() < g_verifyAllUntil.load(std::memory_order_relaxed)) return true;
+    const auto until=g_verifyAllUntil.load(std::memory_order_relaxed);
+    if (until&&GetTickCount64()<until) return true;
     const int every = g_verifyEvery.load(std::memory_order_relaxed);
     return every > 0 && n % static_cast<uint64_t>(every) == 0;
 }
@@ -397,7 +404,7 @@ uint32_t __fastcall Hook_ObjectById(void* self, void* edx, uint32_t idLo, uint32
     t_note.seen = true;
     c_lookups.Add();
     const uint32_t mgr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(self));
-    const int64_t t0 = Qpc();
+    const int64_t t0 = kPublicBuild ? 0 : Qpc();
     const uint32_t gen = g_gen.load(std::memory_order_acquire);
     Entry e;
     if (Find(mgr, idLo, idHi, gen, e)) {
@@ -434,7 +441,7 @@ uint32_t __fastcall Hook_ObjectById(void* self, void* edx, uint32_t idLo, uint32
     }
     // the game's own walk
     const uint32_t gen0 = g_gen.load(std::memory_order_acquire);
-    const int64_t w0 = Qpc();
+    const int64_t w0 = kPublicBuild ? 0 : Qpc();
     const uint32_t r = next(self, edx, idLo, idHi, 0);
     if (!kPublicBuild) g_walkTicks.fetch_add(static_cast<uint64_t>(Qpc() - w0), std::memory_order_relaxed);
     c_walks.Add();

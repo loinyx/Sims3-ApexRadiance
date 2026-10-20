@@ -5,6 +5,8 @@
 //
 // Part of Apex Radiance. Credits: @loinyx
 #include "fast_refpack.h"
+#include "memory_policy.h"
+#include "memory_telemetry.h"
 #include "refpack_codec.h"
 #include "dxt_codec.h"
 #include "slot_chain.h"
@@ -36,7 +38,8 @@ constexpr uint64_t kPairGraceMs = 2000;
 
 struct Slot {
     std::atomic<bool> busy{false};
-    void* mem = nullptr; // RefPackCodec::ContextBytes(), allocated on first use, never freed
+    uint64_t lastUsed = 0; // guarded by busy
+    void* mem = nullptr; // RefPackCodec::ContextBytes(), guarded by busy
     RefPackCodec::Context ctx;
     uint8_t* scratch = nullptr;
     uint32_t scratchSize = 0;
@@ -76,22 +79,21 @@ uint64_t Qpc() {
     return static_cast<uint64_t>(q.QuadPart);
 }
 
-// The context and the token buffer of a large stream together: a slot that has one has both, so a counting run and its
-// write always use the same compressor (a slot that cannot get them is not used: the game's compressor answers)
-bool InitSlot(Slot& s) {
-    if (s.mem && s.tokens) return true;
-    if (!s.mem) s.mem = VirtualAlloc(nullptr, RefPackCodec::ContextBytes(), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+// Large-stream compression needs both context and tokens. Small streams and verification need no token array.
+bool InitSlot(Slot& s, bool needTokens=true) {
+    if (s.mem && (!needTokens || s.tokens)) return true;
+    if (!s.mem) s.mem = VirtualAlloc(nullptr, RefPackCodec::ContextBytes(), MEM_COMMIT | MEM_RESERVE | (kMemoryOptimizationsEnabled ? MEM_TOP_DOWN : 0), PAGE_READWRITE);
     if (!s.mem) return false;
-    if (!s.tokens) s.tokens = static_cast<RefPackCodec::Token*>(VirtualAlloc(nullptr, RefPackCodec::kMaxSegmentTokens * sizeof(RefPackCodec::Token), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
-    if (!s.tokens) return false;
+    if (needTokens && !s.tokens) s.tokens = static_cast<RefPackCodec::Token*>(VirtualAlloc(nullptr, RefPackCodec::kMaxSegmentTokens * sizeof(RefPackCodec::Token), MEM_COMMIT | MEM_RESERVE | (kMemoryOptimizationsEnabled ? MEM_TOP_DOWN : 0), PAGE_READWRITE));
+    if (needTokens && !s.tokens) return false;
     if (!s.ctx.head) RefPackCodec::InitContext(s.ctx, s.mem);
     return true;
 }
 
-Slot* Acquire() {
+Slot* Acquire(bool needTokens=true) {
     for (Slot& s : g_pool) {
         if (s.busy.exchange(true, std::memory_order_acquire)) continue;
-        if (InitSlot(s)) return &s;
+        if (InitSlot(s,needTokens)) return &s;
         s.busy.store(false, std::memory_order_release);
         return nullptr;
     }
@@ -129,7 +131,7 @@ void RunPieces(Round& r, RefPackCodec::Context& ctx, bool worker) {
     }
 }
 
-// Created on the first large stream, never destroyed (the threads sleep until the process ends). The hand-off is the one
+// Pool threads live until process exit; idle worker contexts can be retired under pressure. The hand-off is the one
 // of the texture encoder's pool (features/dxt_codec.cpp): the caller owns the pool (inUse), writes the round while it is
 // closed, opens it, wakes k workers, parses pieces too, closes it, then waits until no thread is checked in; a worker
 // wakes, checks in, parses pieces only if the round is open, checks out; the one whose check-out makes the count 0 while
@@ -149,6 +151,7 @@ struct ParPool {
     } workers[kMaxWorkers];
     RefPackCodec::Token* tokens[kRoundMax] = {}; // guarded by inUse
     Round round;
+    std::atomic<uint64_t> lastUsed{0};
 
     ParPool() { done = CreateEventW(nullptr, FALSE, FALSE, nullptr); }
 
@@ -161,7 +164,9 @@ struct ParPool {
                 continue;
             }
             const uint32_t s = pool.state.fetch_add(1, std::memory_order_acq_rel);
-            if (!(s & kClosed)) RunPieces(pool.round, w.ctx, true);
+            // A late wake from an older, wider round can arrive after a smaller
+            // round opens. Retired helpers outside that round's prefix have no context.
+            if (!(s & kClosed) && w.mem) RunPieces(pool.round, w.ctx, true);
             if (pool.state.fetch_sub(1, std::memory_order_acq_rel) == (kClosed | 1u)) SetEvent(pool.done);
         }
     }
@@ -170,16 +175,27 @@ struct ParPool {
     uint32_t EnsureWorkers(uint32_t n) {
         if (n > kMaxWorkers) n = kMaxWorkers;
         uint32_t have = created.load(std::memory_order_acquire);
-        if (have >= n) return n;
+        bool ready=have>=n;
+        if (ready) for(uint32_t i=0;i<n;++i) ready=ready && workers[i].mem;
+        if (ready) return n;
         std::lock_guard<std::mutex> lock(createLock);
         have = created.load(std::memory_order_relaxed);
+        // The pool owner restores retired contexts before opening any round.
+        for(uint32_t i=0;i<std::min(have,n);++i) {
+            auto& w=workers[i];
+            if (!w.mem) {
+                w.mem=VirtualAlloc(nullptr,RefPackCodec::ContextBytes(),MEM_COMMIT|MEM_RESERVE|(kMemoryOptimizationsEnabled?MEM_TOP_DOWN:0),PAGE_READWRITE);
+                if (!w.mem) return i;
+                RefPackCodec::InitContext(w.ctx,w.mem);
+            }
+        }
         if (!done) createFailed = true;
         using SetDescription = HRESULT(WINAPI*)(HANDLE, PCWSTR);
         static const auto setDescription = reinterpret_cast<SetDescription>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "SetThreadDescription"));
         while (have < n && !createFailed) {
             Worker& w = workers[have];
             w.pool = this;
-            w.mem = VirtualAlloc(nullptr, RefPackCodec::ContextBytes(), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+            w.mem = VirtualAlloc(nullptr, RefPackCodec::ContextBytes(), MEM_COMMIT | MEM_RESERVE | (kMemoryOptimizationsEnabled ? MEM_TOP_DOWN : 0), PAGE_READWRITE);
             w.wake = w.mem ? CreateEventW(nullptr, FALSE, FALSE, nullptr) : nullptr;
             if (!w.wake) {
                 if (w.mem) VirtualFree(w.mem, 0, MEM_RELEASE);
@@ -211,15 +227,16 @@ struct ParPool {
     bool EnsureTokens(uint32_t k) {
         for (uint32_t i = 0; i < k; i++)
             if (!tokens[i]) {
-                tokens[i] = static_cast<RefPackCodec::Token*>(VirtualAlloc(nullptr, RefPackCodec::kMaxSegmentTokens * sizeof(RefPackCodec::Token), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+                tokens[i] = static_cast<RefPackCodec::Token*>(VirtualAlloc(nullptr, RefPackCodec::kMaxSegmentTokens * sizeof(RefPackCodec::Token), MEM_COMMIT | MEM_RESERVE | (kMemoryOptimizationsEnabled ? MEM_TOP_DOWN : 0), PAGE_READWRITE));
                 if (!tokens[i]) return false;
             }
         return true;
     }
 };
 
+std::atomic<ParPool*> g_existingPool{nullptr};
 ParPool& ThePool() {
-    static ParPool* const pool = new ParPool(); // intentionally leaked (see ParPool)
+    static ParPool* const pool = [] { auto* p=new ParPool(); g_existingPool.store(p,std::memory_order_release); return p; }(); // intentionally leaked (see ParPool)
     return *pool;
 }
 
@@ -231,7 +248,7 @@ uint32_t CompressLarge(Slot& slot, const uint8_t* src, uint32_t size, uint8_t* d
     c_large.fetch_add(1, std::memory_order_relaxed);
     c_pieces.fetch_add(pieces, std::memory_order_relaxed);
     auto alone = [&]() -> uint32_t {
-        if (!slot.tokens) slot.tokens = static_cast<RefPackCodec::Token*>(VirtualAlloc(nullptr, RefPackCodec::kMaxSegmentTokens * sizeof(RefPackCodec::Token), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+        if (!slot.tokens) slot.tokens = static_cast<RefPackCodec::Token*>(VirtualAlloc(nullptr, RefPackCodec::kMaxSegmentTokens * sizeof(RefPackCodec::Token), MEM_COMMIT | MEM_RESERVE | (kMemoryOptimizationsEnabled ? MEM_TOP_DOWN : 0), PAGE_READWRITE));
         // out of memory: the plain compressor (a write whose count was segmented may then not fit: -1, the data is stored
         // uncompressed)
         if (!slot.tokens) return RefPackCodec::Compress(slot.ctx, src, size, dst, capacity, flags, effort);
@@ -244,10 +261,12 @@ uint32_t CompressLarge(Slot& slot, const uint8_t* src, uint32_t size, uint8_t* d
         c_largeBusy.fetch_add(1, std::memory_order_relaxed);
         return alone();
     }
-    uint32_t k = p.EnsureWorkers(want < kMaxWorkers ? want : kMaxWorkers);
-    if (k > pieces - 1) k = pieces - 1;
+    const uint32_t usefulWorkers = std::min(want,std::min(kMaxWorkers,pieces-1));
+    uint32_t k = p.EnsureWorkers(usefulWorkers);
     const uint32_t perRound = kPiecesPerThread * (k + 1);
-    if (!k || !p.EnsureTokens(perRound)) {
+    const uint32_t usefulPieces=std::min(perRound,pieces);
+    if (!k || !p.EnsureTokens(usefulPieces)) {
+        p.lastUsed.store(GetTickCount64(),std::memory_order_relaxed);
         p.inUse.store(false, std::memory_order_release);
         return alone();
     }
@@ -278,6 +297,7 @@ uint32_t CompressLarge(Slot& slot, const uint8_t* src, uint32_t size, uint8_t* d
         byWorkers += r.byWorkers.load(std::memory_order_relaxed);
         for (uint32_t i = 0; i < r.count; i++) enc.Add(r.tokens[i], r.counts[i]);
     }
+    p.lastUsed.store(GetTickCount64(),std::memory_order_relaxed);
     p.inUse.store(false, std::memory_order_release);
     c_largeParallel.fetch_add(1, std::memory_order_relaxed);
     c_piecesByWorkers.fetch_add(byWorkers, std::memory_order_relaxed);
@@ -295,7 +315,7 @@ uint32_t CompressAny(Slot& slot, const uint8_t* src, uint32_t size, uint8_t* dst
 // The package writer measures a stream (no destination), allocates, then writes it: the same compression twice. The
 // counting run now writes into a buffer of this thread and its write copies it, when the source still has the same CRC-32C
 // (checked with the SSE4.2 instruction; without it, or when anything differs, the write compresses again as before).
-constexpr uint32_t kMinHeld = 1u << 20;  // the smallest buffer allocated
+constexpr uint32_t kMinHeld = kMemoryOptimizationsEnabled ? 64u<<10 : 1u<<20;
 constexpr uint32_t kKeepHeld = 8u << 20; // buffers up to 8 MB stay allocated per thread (a 5.5 MB Sim cache: 6.9 MB), so the next
                                          // large stream does not allocate and fault its pages in again
 constexpr uint32_t kKeepHeldTotal = 12u << 20; // ... and all threads together keep at most this much (a 32-bit game's address space:
@@ -308,13 +328,26 @@ struct Held {
     bool valid = false;
     void Free() {
         if (!buf) return;
-        VirtualFree(buf, 0, MEM_RELEASE);
+        if (!VirtualFree(buf, 0, MEM_RELEASE)) return;
         g_heldBytes.fetch_sub(cap, std::memory_order_relaxed);
         buf = nullptr;
         cap = 0;
     }
     void Alloc(uint32_t want) {
-        buf = static_cast<uint8_t*>(VirtualAlloc(nullptr, want, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+        if constexpr (kMemoryOptimizationsEnabled) {
+            // Includes active count/write copies, not just retained idle buffers.
+            const uint32_t limit=MemoryTelemetry::saveDepth.load(std::memory_order_acquire) ? 8u<<20 :
+                MemoryTelemetry::pressure.load(std::memory_order_relaxed) ? 32u<<20 : 64u<<20;
+            auto previous=g_heldBytes.load(std::memory_order_relaxed);
+            do {
+                if (want>limit || previous>limit-want) return;
+            } while (!g_heldBytes.compare_exchange_weak(previous,previous+want,std::memory_order_relaxed));
+            buf=static_cast<uint8_t*>(VirtualAlloc(nullptr,want,MEM_COMMIT|MEM_RESERVE|MEM_TOP_DOWN,PAGE_READWRITE));
+            cap=buf ? want : 0;
+            if (!buf) g_heldBytes.fetch_sub(want,std::memory_order_relaxed);
+            return;
+        }
+        buf = static_cast<uint8_t*>(VirtualAlloc(nullptr, want, MEM_COMMIT | MEM_RESERVE | (kMemoryOptimizationsEnabled ? MEM_TOP_DOWN : 0), PAGE_READWRITE));
         cap = buf ? want : 0;
         g_heldBytes.fetch_add(cap, std::memory_order_relaxed);
     }
@@ -351,7 +384,9 @@ uint32_t SourceCrc(const uint8_t* p, uint32_t n) {
 void DropHeld() {
     Held& h = t_held;
     h.valid = false;
-    if (h.buf && (h.cap > kKeepHeld || g_heldBytes.load(std::memory_order_relaxed) > kKeepHeldTotal)) h.Free();
+    const bool saving=kMemoryOptimizationsEnabled && MemoryTelemetry::saveDepth.load(std::memory_order_acquire);
+    if (h.buf && (h.cap > kKeepHeld || g_heldBytes.load(std::memory_order_relaxed) > kKeepHeldTotal ||
+        (saving && h.cap>64u*1024) || (kMemoryOptimizationsEnabled && MemoryTelemetry::pressure.load(std::memory_order_relaxed)))) h.Free();
 }
 
 // Decompresses the stream with the game's decoder and compares it with the source. False only on a real difference.
@@ -362,12 +397,12 @@ bool Check(Slot& slot, const uint8_t* stream, uint32_t streamSize, const uint8_t
         if (!slot.scratch || slot.scratchSize < size) {
             if (slot.scratch) VirtualFree(slot.scratch, 0, MEM_RELEASE);
             const uint32_t want = size < 0x10000 ? 0x10000 : ((size + 0xFFFF) & ~0xFFFFu);
-            slot.scratch = static_cast<uint8_t*>(VirtualAlloc(nullptr, want, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+            slot.scratch = static_cast<uint8_t*>(VirtualAlloc(nullptr, want, MEM_COMMIT | MEM_RESERVE | (kMemoryOptimizationsEnabled ? MEM_TOP_DOWN : 0), PAGE_READWRITE));
             slot.scratchSize = slot.scratch ? want : 0;
         }
         buf = slot.scratch;
     } else {
-        buf = static_cast<uint8_t*>(VirtualAlloc(nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+        buf = static_cast<uint8_t*>(VirtualAlloc(nullptr, size, MEM_COMMIT | MEM_RESERVE | (kMemoryOptimizationsEnabled ? MEM_TOP_DOWN : 0), PAGE_READWRITE));
         own = true;
     }
     if (!buf) {
@@ -418,26 +453,36 @@ uint64_t __fastcall Hook_StreamWrite(void* self, void* edx, uint32_t src, uint32
         return next(self, edx, src, size, dst, capacity, flags);
     }
     Slot temp;
-    Slot* slot = Acquire();
-    if (!slot) { // all pooled contexts busy: a temporary one (rare)
-        if (!InitSlot(temp)) {
-            if (temp.mem) VirtualFree(temp.mem, 0, MEM_RELEASE); // half made: nothing kept
-            if (counting || capacity == 0 || capacity >= RefPackCodec::SizeBound(size)) {
-                if (counting) pr = Pair{src, size, flags, 0, false, true};
-                c_passed.fetch_add(1, std::memory_order_relaxed);
-                return next(self, edx, src, size, dst, capacity, flags);
-            }
-            return RefPackCodec::kFailed;
+    Slot* slot = nullptr;
+    auto ensureSlot = [&](bool compressing) {
+        if (slot) return true;
+        const bool tokens=compressing && size>RefPackCodec::kSegmentBytes;
+        slot=Acquire(tokens);
+        if (slot) return true;
+        if (!InitSlot(temp,tokens)) {
+            if (temp.mem) {VirtualFree(temp.mem,0,MEM_RELEASE);temp.mem=nullptr;}
+            return false;
         }
-        c_temp.fetch_add(1, std::memory_order_relaxed);
-        slot = &temp;
-    }
+        c_temp.fetch_add(1,std::memory_order_relaxed);
+        slot=&temp;
+        return true;
+    };
+    auto fallback = [&]() -> uint64_t {
+        if (counting || capacity==0 || capacity>=RefPackCodec::SizeBound(size)) {
+            if (counting) pr=Pair{src,size,flags,0,false,true};
+            c_passed.fetch_add(1,std::memory_order_relaxed);
+            return next(self,edx,src,size,dst,capacity,flags);
+        }
+        return RefPackCodec::kFailed;
+    };
     auto finish = [&] {
+        if (!slot) return;
         if (slot == &temp) {
             VirtualFree(temp.mem, 0, MEM_RELEASE);
             if (temp.scratch) VirtualFree(temp.scratch, 0, MEM_RELEASE);
             if (temp.tokens) VirtualFree(temp.tokens, 0, MEM_RELEASE);
         } else {
+            slot->lastUsed=GetTickCount64();
             slot->busy.store(false, std::memory_order_release);
         }
     };
@@ -452,6 +497,7 @@ uint64_t __fastcall Hook_StreamWrite(void* self, void* edx, uint32_t src, uint32
     bool reused = false;
     Held& h = t_held;
     if (counting) { // compress into this thread's buffer, kept for the write (else count only, as before)
+        if (!ensureSlot(true)) return fallback();
         h.valid = false;
         const uint32_t bound = RefPackCodec::SizeBound(size);
         if (CpuHasCrc32() && bound > size) {
@@ -481,7 +527,10 @@ uint64_t __fastcall Hook_StreamWrite(void* self, void* edx, uint32_t src, uint32
             }
             DropHeld();
         }
-        if (!reused) r = CompressAny(*slot, s, size, d, capacity, useFlags, effort);
+        if (!reused) {
+            if (!ensureSlot(true)) return fallback();
+            r = CompressAny(*slot, s, size, d, capacity, useFlags, effort);
+        }
     }
     const uint64_t t1 = Qpc();
     if (counting) {
@@ -502,9 +551,9 @@ uint64_t __fastcall Hook_StreamWrite(void* self, void* edx, uint32_t src, uint32
     c_out.fetch_add(r, std::memory_order_relaxed);
     g_ticks.fetch_add(t1 - t0, std::memory_order_relaxed);
     const uint32_t seq = g_seq.fetch_add(1, std::memory_order_relaxed);
-    const int ve = g_verifyEvery.load(std::memory_order_relaxed);
+    const int ve = !kPublicBuild ? g_verifyEvery.load(std::memory_order_relaxed) : 0;
     if (seq < kStartupChecks || (ve > 0 && seq % static_cast<uint32_t>(ve) == 0)) {
-        const uint8_t* s = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(src));
+        if (!ensureSlot(false)) {c_notCheckable.fetch_add(1,std::memory_order_relaxed);return r;}
         if (!Check(*slot, reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(dst)), r, s, size)) {
             c_mismatch.fetch_add(1, std::memory_order_relaxed);
             g_selfDisabled.store(true);
@@ -529,6 +578,52 @@ uint64_t __fastcall Hook_StreamWrite(void* self, void* edx, uint32_t src, uint32
     return r;
 }
 
+
+// Only Apex-owned storage is retired. Slots have no retained references between
+// calls; the count/write pairing keeps flags and bytes in thread-local Held.
+uint64_t RetireIdleStorage(uint64_t now=GetTickCount64(),bool preparingSave=false) {
+    if constexpr (!kMemoryOptimizationsEnabled) return 0;
+    static std::atomic<uint64_t> last{0};
+    auto previous=last.load(std::memory_order_relaxed);
+    if (!preparingSave && (now-previous<5000 || !last.compare_exchange_strong(previous,now,std::memory_order_relaxed))) return 0;
+    if (preparingSave) last.store(now,std::memory_order_relaxed);
+    uint64_t freed=0;
+    for (Slot& s:g_pool) {
+        if (s.busy.exchange(true,std::memory_order_acquire)) continue;
+        if (preparingSave || MemoryPolicy::Expired(now,s.lastUsed,120000)) {
+            if (s.mem && VirtualFree(s.mem,0,MEM_RELEASE)) { s.mem=nullptr; s.ctx={}; freed+=RefPackCodec::ContextBytes(); }
+            if (s.tokens && VirtualFree(s.tokens,0,MEM_RELEASE)) { s.tokens=nullptr; freed+=RefPackCodec::kMaxSegmentTokens*sizeof(RefPackCodec::Token); }
+            if (s.scratch && VirtualFree(s.scratch,0,MEM_RELEASE)) { s.scratch=nullptr; freed+=s.scratchSize; s.scratchSize=0; }
+            s.lastUsed=now;
+        }
+        s.busy.store(false,std::memory_order_release);
+    }
+    if (auto* p=g_existingPool.load(std::memory_order_acquire)) {
+        if (!p->inUse.exchange(true,std::memory_order_acquire)) {
+            // Closed late wakes do not inspect contexts or token pointers.
+            if (p->state.load(std::memory_order_acquire)==kClosed &&
+                (preparingSave || MemoryPolicy::Expired(now,p->lastUsed.load(),120000))) {
+                for (auto& token:p->tokens)
+                    if (token && VirtualFree(token,0,MEM_RELEASE)) {
+                        token=nullptr; freed+=RefPackCodec::kMaxSegmentTokens*sizeof(RefPackCodec::Token);
+                    }
+                if (preparingSave || MemoryTelemetry::pressure.load(std::memory_order_relaxed))
+                    for(auto& worker:p->workers)
+                        if (worker.mem && VirtualFree(worker.mem,0,MEM_RELEASE)) {
+                            worker.mem=nullptr;worker.ctx={};freed+=RefPackCodec::ContextBytes();
+                        }
+                p->lastUsed.store(now);
+            }
+            p->inUse.store(false,std::memory_order_release);
+        }
+    }
+    if (preparingSave) {
+        auto& held=t_held;
+        if(!held.valid && held.buf){const auto before=held.cap;held.Free();if(!held.buf)freed+=before;}
+    } else if (freed) LOG_INFO(std::format("[MemoryBudget] Retired {} KiB of idle Apex RefPack storage after 120 s",freed>>10));
+    return freed;
+}
+
 void RemoveLayerLocked() {
     if (!g_installed.load()) return;
     SlotChain::Remove(Site::RefPackCompress, Layer::FastCompress);
@@ -536,6 +631,8 @@ void RemoveLayerLocked() {
 }
 
 } // namespace
+
+uint64_t PrepareForSave() {return RetireIdleStorage(GetTickCount64(),true);}
 
 bool Start(std::string* error) {
     std::lock_guard<std::mutex> lock(g_ctrl);
@@ -581,6 +678,7 @@ void Stop() {
 bool Running() { return g_on.load(std::memory_order_acquire); }
 
 void Tick() {
+    RetireIdleStorage();
     if (g_on.load(std::memory_order_relaxed)) return;
     if (GetTickCount64() - g_lastFastCountTick.load(std::memory_order_relaxed) <= kPairGraceMs) return;
     if (!g_installed.load(std::memory_order_relaxed)) return;

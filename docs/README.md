@@ -24,6 +24,9 @@ Steam 1.67.2 (image base 0x00400000) unless stated otherwise.
 
 ## Getting started
 
+Developer-mode memory captures (Released in 2.14.0, off by default) are described in [Memory analysis](features/memory-analysis.md).
+Per-lot loading events (Released in 2.14.0, developer mode only) are described in [Lot loading analysis](features/lot-load-analysis.md).
+
 | Document | Covers |
 |---|---|
 | [architecture.md](architecture.md) | Loading, D3D9 hooks, hook registry, post-scene chain, INTZ depth share, patch system, configuration, logger, threads |
@@ -129,3 +132,5 @@ Project-wide history: [architecture](history/architecture.md), [workflow](histor
 - [2.12.2](releases/2.12.2.md): Released in 2.12.2; keyboard shortcuts for presets.
 - [2.12.1](releases/2.12.1.md): Released in 2.12.1; outdoor lighting corrections.
 - [2.12.0](releases/2.12.0.md): LUTs, presets and graphics improvements.
+
+- [Public memory budget experiment](features/memory-budget.md)

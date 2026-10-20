@@ -16,3 +16,12 @@ inline constexpr bool kDevToolsBuild = true;
 // Light through doors and windows (LevelLightShare::SetRealisticOpenings): on by default (the realistic
 // result was preferred in testing); the setting can still turn it off
 inline constexpr bool kRealisticOpeningsDefault = true;
+
+// Bounded memory and geometry policies ship independently of test notices and developer collectors.
+inline constexpr bool kMemoryOptimizationsEnabled = true;
+// Numbered test version and first-run test notice only.
+#ifdef APEX_MEMORY_TEST
+inline constexpr bool kMemoryOptimizationTest = true;
+#else
+inline constexpr bool kMemoryOptimizationTest = false;
+#endif

@@ -65,6 +65,12 @@ float Lane(__m128 v, int k) {
 // when its count is larger, unsigned), then the indices written back in that order
 void SortAndWrite(const Input& in, const uint32_t* counts, uint16_t* out) {
     const uint32_t n = Triangles(in);
+    bool ordered=true;
+    for(uint32_t k=1;k<n;++k)if(counts[k]>counts[k-1]){ordered=false;break;}
+    if(ordered){
+        if(n&&out!=in.indices)std::memmove(out,in.indices,3*static_cast<size_t>(n)*sizeof(uint16_t));
+        return;
+    }
     std::vector<uint32_t> order(n);
     std::iota(order.begin(), order.end(), 0u);
     std::stable_sort(order.begin(), order.end(), [counts](uint32_t a, uint32_t b) { return counts[a] > counts[b]; });

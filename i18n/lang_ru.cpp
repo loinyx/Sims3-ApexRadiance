@@ -9,6 +9,14 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Russian}
 const I18n::Pair kPairs[] = {
+    {"Room to save releases idle buffers earlier during saving", "Резерв для сохранения раньше освобождает неиспользуемые буферы при сохранении"},
+    {"Screen effects avoid unused image copies and repeated timing work", "Экранные эффекты избегают ненужных копий изображения и повторных замеров времени"},
+    {"Object and compression caches reduce repeated work with bounded memory", "Кеши объектов и сжатия уменьшают повторную работу с ограниченным расходом памяти"},
+    {"Night Lights improves lamp blocking near stairs and closed floors", "Ночное освещение лучше блокирует свет ламп у лестниц и сплошных перекрытий"},
+    {"RAM and gameplay test", "Тест ОЗУ и плавности"},
+    {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Посещайте разные участки в течение 10 минут, вернитесь на первый, подождите, сохраните игру и загрузите это сохранение."},
+    {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Сравните подтормаживания, загрузку участков и расход ОЗУ с предыдущей версией. Запишите каждую ошибку 12 и события перед ней."},
+    {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Проверьте свет ламп у лестниц и за сплошными перекрытиями. Подробный сбор данных отключён."},
     {"The latest lighting features also work on the EA app version 1.69", "Новейшие функции освещения работают и в версии 1.69 из приложения EA"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "Стены отбрасывают тень от света ламп и на траву, улицы и тротуары за участком"},
     {"Garden walls and fences shade lamp light on the ground by their height", "Садовые ограды и заборы отбрасывают тень от света ламп на землю по своей высоте"},

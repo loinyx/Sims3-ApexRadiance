@@ -208,7 +208,9 @@ struct BasisSmoothPatch {
     DWORD sizeSampler = 0; // a basis map sampler (to read that size)
 };
 bool BasisSamplers(const std::vector<DWORD>& t, int samplers[4]);
-bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out);
+// preserveShadows caps each smoothed channel by the normalized native bilinear read.
+// It prevents the wider filter adding colour, but cannot reconstruct geometry missing from the map.
+bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out, bool preserveShadows = false);
 bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& out, bool capToFloorMap = true);
 // Smooth light maps (2.12.4): the room light map read of the room-lit pixel shaders. The pattern (docs/features/night-
 // lighting/room-map-smoothing.md; offline over every precomp pixel shader it matches InteriorFloor, InteriorWall and their
@@ -238,6 +240,11 @@ struct RoomMapUv {
     float value = 0.0f;
 };
 bool RoomMapUvScale(const std::vector<DWORD>& vs, RoomMapUv& out);
+// Packed interior-floor positions and static room UVs; these can also match the generic object VS detector.
+bool IsPackedRoomFloorVs(const std::vector<DWORD>& vs);
+struct WallMatrices { int clip = -1, world = -1; };
+// Consecutive clip/world dp4 rows over the same position in a wall-map vertex shader.
+bool FindWallMatrices(const std::vector<DWORD>& vs, WallMatrices& out);
 // An object shader lit by the rig (Rooms at Night, lot_light_bridge): whether its diffuse sums the four rig light colours
 // c4..c7 (room-mode rigs have no sun: c4 = the strongest room light), and the constant whose .w weights its ambient cube (-1 = none)
 struct RigPsInfo {

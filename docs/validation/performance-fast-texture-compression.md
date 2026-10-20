@@ -10,6 +10,13 @@ The feature is described in
 
 ## Automated tests
 
+Repeated-strip cases compare complete strips, RGB/alpha changes and partial row/column boundaries against the literal
+reference. Repeated images also run serially and in chunks under every existing floating-point mode, with padded
+destinations. Reuse is local to one chunk, retains classification counters and excludes groups needing native fallback.
+
+The cold-pool case requests six workers for a two-chunk image and checks that exactly one helper is created, with
+byte-identical output. The usual source/edge/parallel/FP-state and contention checks remain in the same executable.
+
 | Harness | Covers | Run | Needs |
 |---|---|---|---|
 | [`tools/dxt_test/dxt_test.cpp`](../../tools/dxt_test/dxt_test.cpp) | `Fast` against `Ref` (the literal translation) on random and edge blocks; serial against parallel over the whole destination buffer; timing | See below | x86 MSVC; console only, no files written |

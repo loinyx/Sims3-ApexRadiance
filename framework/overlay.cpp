@@ -9,6 +9,9 @@
 #include "imgui_impl_win32.h"
 #include "ui/logo.h"
 #include "ui/violet_theme.h"
+#include "build_flavor.h"
+#include "frame_pacing.h"
+#include "world_session.h"
 #include <atomic>
 #include <cmath>
 #include <format>
@@ -257,6 +260,19 @@ void DrawFrame(IDirect3DDevice9* device) {
     static FrameClock frameClock;
     const auto frameStart = FrameClock::Clock::now();
     const float frameDelta = frameClock.Step(frameStart);
+    if constexpr(kMemoryOptimizationTest){
+        static FramePacing::Session pacing;
+        static auto gateAt=FrameClock::Clock::time_point{};
+        static bool world=false;
+        if(frameStart>=gateAt){world=WorldSession::InWorld();gateAt=frameStart+std::chrono::milliseconds(250);}
+        const bool ready=world&&!g_visible.load(std::memory_order_relaxed)&&g_window&&GetForegroundWindow()==g_window;
+        if(pacing.Step(frameDelta*1000.,ready)){
+            const auto& p=pacing.frames;
+            LOG_INFO(std::format("[FramePacing] Foreground gameplay: {} frames, mean {:.2f} ms ({:.1f} fps), p50/p95/p99 {:.1f}/{:.1f}/{:.1f} ms, max {:.1f} ms, over 33.3 ms {}, over 50 ms {}; intervals include presentation/limiting, percentiles rounded upward",
+                p.count,p.total/p.count,1000.*p.count/p.total,p.Percentile(50),p.Percentile(95),p.Percentile(99),p.maximum,p.over33,p.over50));
+            pacing.NextWindow();
+        }
+    }
     IDirect3DSurface9* bb = nullptr;
     D3DSURFACE_DESC desc{};
     if (SUCCEEDED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb) {

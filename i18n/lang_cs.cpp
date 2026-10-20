@@ -9,6 +9,14 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Czech}
 const I18n::Pair kPairs[] = {
+    {"Room to save releases idle buffers earlier during saving", "Místo pro uložení uvolňuje nečinné vyrovnávací paměti dříve při ukládání"},
+    {"Screen effects avoid unused image copies and repeated timing work", "Obrazové efekty vynechávají nevyužité kopie obrazu a opakované měření času"},
+    {"Object and compression caches reduce repeated work with bounded memory", "Mezipaměti objektů a komprese omezují opakovanou práci s omezenou pamětí"},
+    {"Night Lights improves lamp blocking near stairs and closed floors", "Noční osvětlení lépe blokuje světlo u schodů a uzavřených podlah"},
+    {"RAM and gameplay test", "Test RAM a plynulosti"},
+    {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Navštěvujte různé pozemky po dobu 10 minut, vraťte se na první, počkejte, uložte hru a toto uložení znovu načtěte."},
+    {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Porovnejte záseky, načítání pozemků a využití RAM s předchozí verzí. Poznamenejte si každou chybu 12 a co jí předcházelo."},
+    {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Zkontrolujte světlo lamp u schodů a za uzavřenými podlahami. Podrobný sběr dat je vypnutý."},
     {"The latest lighting features also work on the EA app version 1.69", "Nejnovější funkce osvětlení fungují i ve verzi 1.69 z aplikace EA"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "Stěny stíní světlo lamp i na trávě, ulicích a chodnících mimo pozemek"},
     {"Garden walls and fences shade lamp light on the ground by their height", "Zídky a ploty stíní světlo lamp na zemi podle své výšky"},

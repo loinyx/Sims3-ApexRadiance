@@ -27,6 +27,11 @@ game's compressor go into the report.
 
 ## Latest results
 
+2026-10-19: 525,825 prefix comparisons against the previous helper pass with buffers ending at inaccessible pages.
+The RefPack quick suite passes round trips, capacity checks and serial/threaded segmented byte equality. The long
+prefix loop is unrolled without changing matching, flags, output ownership or stream lifetime. In-game hitch reduction
+from this revision remains unverified.
+
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
 | 2026-09-30 | | `refpack_test`, 5.6 MB buffers, flags 2 | Segmented stream size within ±0.13% of `Compress`; one thread 10 to 20% slower than `Compress` (the window fill per piece); 7 threads 3.8x faster than one (thread start included), same bytes; about 3,000 segmented streams round-tripped through the game's decoder translation, piece-boundary sizes included | CPU |

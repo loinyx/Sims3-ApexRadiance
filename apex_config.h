@@ -63,6 +63,7 @@ struct UiSettings {
     bool screenshotHideGameUi = true; // temporarily toggle the game's F10 UI visibility only while taking the screenshot
     int minePresetBase = 0; // the preset the "mine" keys started from (its keys for the tools) ([ui] mine_base)
     bool sidebarCollapsed = false; // the sidebar is the icon-only rail ([ui] sidebar_collapsed)
+    std::string testBuildSeen; // acknowledged public test version ([ui] test_build_seen)
     std::string changelogSeen; // the newest What's new version opened; the version button shows a dot until then ([ui] changelog_seen)
     int language = -1;             // menu language: -1 = Windows' display language, else I18n::Lang ([ui] language = "auto" or I18n::Code: "en", "pt", ..., "zh_hant", "th")
     std::vector<ProfileShortcut> profileShortcuts; // optional, none by default ([ui.profile_shortcuts]); Presets page

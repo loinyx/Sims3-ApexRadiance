@@ -9,6 +9,14 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Finnish}
 const I18n::Pair kPairs[] = {
+    {"Room to save releases idle buffers earlier during saving", "Tallennustila vapauttaa käyttämättömät puskurit aiemmin tallennuksen aikana"},
+    {"Screen effects avoid unused image copies and repeated timing work", "Kuvatehosteet välttävät käyttämättömät kuvakopiot ja toistuvat aikamittaukset"},
+    {"Object and compression caches reduce repeated work with bounded memory", "Objekti- ja pakkausvälimuistit vähentävät toistuvaa työtä rajatulla muistilla"},
+    {"Night Lights improves lamp blocking near stairs and closed floors", "Yövalot estää lamppujen valoa paremmin portaiden ja umpinaisten lattioiden lähellä"},
+    {"RAM and gameplay test", "RAM- ja sujuvuustesti"},
+    {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Käy eri tonteilla 10 minuutin ajan, palaa ensimmäiselle, odota, tallenna ja lataa sitten sama tallennus uudelleen."},
+    {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Vertaa nykimistä, tonttien lataamista ja RAM-käyttöä edelliseen versioon. Kirjaa jokainen virhe 12 ja sitä edeltäneet tapahtumat."},
+    {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Tarkista lamppujen valo portaiden lähellä ja umpinaisten lattioiden takana. Tarkka tiedonkeruu on pois käytöstä."},
     {"The latest lighting features also work on the EA app version 1.69", "Uusimmat valaistusominaisuudet toimivat myös EA-sovelluksen versiossa 1.69"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "Seinät varjostavat lamppujen valoa myös nurmella, kaduilla ja jalkakäytävillä tontin ulkopuolella"},
     {"Garden walls and fences shade lamp light on the ground by their height", "Puutarhamuurit ja aidat varjostavat lamppujen valoa maassa korkeutensa mukaan"},

@@ -9,9 +9,15 @@ The feature is described in [features/performance/faster-scripts.md](../features
 
 ## Automated tests
 
-None offline.
+`tools/gameplay_stability_test/run.ps1` extracts the production type-cache lookup, store and hooks with native-call
+mocks. It checks the local/shared paths, generation changes, startup verification, TypeBuilder exclusion, mismatch
+fallback and 400,000 concurrent operations. The separate policy executable checks CAS ordering against an independent
+stable sort, zero allocations for ordered lists, and frame histogram/session boundaries.
 
 ## Latest results
+
+2026-10-19: 10,010 type-cache checks and 400,000 concurrent operations pass; 3,008 CAS-ordering/frame-interval checks
+pass. These verify native-call contracts with mocks, not live Mono behaviour or an FPS gain.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
@@ -33,3 +39,6 @@ None offline.
 
 - The effect on simulation time (Frame Profiler, simulation thread).
 - The EA app build in game.
+
+The same harness also passes 10,006 object-cache checks, including repeated lookup lock avoidance, live path mutations and generation invalidation. Native calls are mocked; gameplay performance remains unmeasured.
+

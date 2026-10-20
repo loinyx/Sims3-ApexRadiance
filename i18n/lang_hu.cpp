@@ -9,6 +9,14 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Hungarian}
 const I18n::Pair kPairs[] = {
+    {"Room to save releases idle buffers earlier during saving", "A mentési tartalék mentés közben korábban felszabadítja a tétlen puffereket"},
+    {"Screen effects avoid unused image copies and repeated timing work", "A képernyőeffektek elkerülik a nem használt képmásolatokat és az ismételt időmérést"},
+    {"Object and compression caches reduce repeated work with bounded memory", "Az objektum- és tömörítési gyorsítótárak korlátozott memóriával csökkentik az ismételt munkát"},
+    {"Night Lights improves lamp blocking near stairs and closed floors", "Az éjszakai fények jobban blokkolják a lámpafényt lépcsők és zárt padlók közelében"},
+    {"RAM and gameplay test", "RAM- és játékmenetteszt"},
+    {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Látogass meg több telket 10 percen át, térj vissza az elsőre, várj, majd ments, és töltsd be újra ezt a mentést."},
+    {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Hasonlítsd össze az akadásokat, a telkek betöltését és a RAM-használatot az előző verzióval. Jegyezz fel minden 12-es hibát és az előzményeit."},
+    {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Ellenőrizd a lámpafényt a lépcsőknél és a zárt padlókon túl. A részletes adatgyűjtés ki van kapcsolva."},
     {"The latest lighting features also work on the EA app version 1.69", "A legújabb világítási funkciók az EA app 1.69-es verzióján is működnek"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "A falak a telken kívüli füvön, utcákon és járdákon is árnyékot vetnek a lámpafényre"},
     {"Garden walls and fences shade lamp light on the ground by their height", "A kerítésfalak és kerítések magasságuk szerint vetnek árnyékot a lámpafényre a talajon"},

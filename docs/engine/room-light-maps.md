@@ -86,9 +86,10 @@ is level 1 (F8 of the house lot C49C001BCF2DEA20, notebook "Andares, segunda rod
 | +0x00 | ptr | Owning manager | level_light_share `ShareOutdoorLights` |
 | +0x04 | ptr | LODParams* | lighting_quality_patch.cpp |
 | +0x0C | int | Room id (0 = outside of the story) | `fn_006c6ab0.c`; level_light_share |
-| +0x10 | vector | 3D blockers (objects) of this story | notebook "Andares, segunda rodada" |
+| +0x10 / +0x14 | uint64 | Lot id | Live room inspection and manager lot id comparison |
 | +0x18 | byte | Roofless / outdoor flag ("externo" in F8). Fences or railings that close an area make a roofless room with +0x18 = 1. In `0x006A31D0` a room with +0x18 == 0 gets the normalisation and ambient alpha; +0x18 != 0 stores the raw sum | light_diag; notebook "Cerca em area cercada"; `fn_006a31d0.c` |
 | +0x30 / +0x34 | vector<int> | 2D blockers: the walls of this story's room (built by `0x006A1DE0`) | level_light_share `CulledWalls` |
+| +0x40 / +0x44 | vector | 64-byte 3D broad-phase records, including centre/radius and a vector of blocker pointers at record+0x30 | `0x0069FCE0` uses room+0x30 as the container; `0x0069D910` indexes container+0x10 with a 64-byte stride |
 | +0xC0 / +0xC4 | int | Lot size (inferred: `0x006C6AB0` gathers world lights at `(C0 × 0.5, 0, C4 × 0.5)` transformed by +0xF8, i.e. the lot centre) | `fn_006c6ab0.c`; dwords `0x00F9A5AC` = 0.5 |
 | +0xC8 / +0xCC | Light** | **Room light list** begin / end | `fn_0069fd60.c`; light_diag |
 | +0xD8 / +0xDC | vector | LightingWall list (source of +0x30) | notebook "Andares, segunda rodada" |
@@ -129,7 +130,8 @@ written at `Y × pitch + X × 4`).
    - Only for room 0: world lights around the lot centre, `0x006B66B0` (±2 cells of 32 m), added with `0x006A2060`.
      The per-cell filter keeps lights with `GetLotID() == 0` (world lights). With the Split-Level Lighting Fix
      (`GetLotID` → 0) lot lights of type 11 also enter here, on every story.
-2. 3D blockers: `0x006C6A20` + `0x0069E5E0` (room+0x10), own story only.
+2. 3D blockers: `0x006C6A20` + `0x0069E5E0`, own story only. The container starts at room+0x30;
+   its 3D vector is container+0x10, therefore room+0x40.
 
 Measured consequence (F8, notebook "Andares"): before Apex, upper stories never saw the ground story's type-3 lamps and the
 ground story never saw upper-story lamps; only type 11 (via world lights) reached every story. The EA cascade in
@@ -337,7 +339,7 @@ solve).
 | `0x006C6AB0` | `AddWorldLightsToLot`: thiscall(treeLevel, room) ret 4. Room light list = own-floor lot lights (`0x006C6990(room, 1)`); for room 0 of level 0 once more (`0x006C6990(room, 0)`); for room 0 also world lights around the lot (`0x006B66B0`) | `fn_006c6ab0.c`; level_light_share.cpp header; lot_edge_lighting pattern `55 8B EC 83 E4 F0 83 EC 34 53 56 33 DB F6 05 ?? ?? ?? ?? 01 57 8B F9 75 30 83 0D` |
 | `0x006C6B08`, `0x006C6B2D` | The two calls of `0x006C6990` inside it; the level-0 test is `cmp [edi+0x1A0],0 / jnz` at `0x006C6B16` | level_light_share `kLevelGatherCalls`; notebook "Andares" |
 | `0x006C5816`, `0x006C7094` | Callers of `0x006C6AB0`: room creation / room update | level_light_share `kGatherCalls` |
-| `0x006C7010` | Room gather entry: `0x006C6AB0` + 3D blockers (`0x006C6A20` + `0x0069E5E0`, room+0x10) | notebook "Andares, segunda rodada" |
+| `0x006C7010` | Room gather entry: `0x006C6AB0` + 3D blockers (`0x006C6A20` + `0x0069E5E0`, container at room+0x30) | notebook "Andares, segunda rodada"; container offset checked in native disassembly |
 | `0x006C6990` | Walks a tree level's light registry (+0x90: buckets +0x98, count +0x9C) and offers each light to `0x006C7820` | `fn_006c6990.c` |
 | `0x006C7820` | Per-light filter for the room list: lit, type > 2, entry room id == room (entry+0x1C) | notebook "Andares" |
 | `0x006B66B0` | `GatherWorldLightsNearPoint`: world lights in ±2 light cells (32 m) around a point; lights added with `0x006A2060` | lot_edge_lighting pattern `8B 54 24 04 83 EC 10 53 55 56 8B E9 8D 44 24 14 50 8D 4C 24 1C 51 52 8B CD E8`, `kRadiusOffsets` |

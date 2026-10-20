@@ -5,10 +5,21 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
+#include <intrin.h>
+#include "../../features/mesh_occlusion.h"
 using BYTE = unsigned char;
 constexpr bool kPublicBuild = true;
-struct Cross { uintptr_t light=0; int floor=0, room=0; uintptr_t level=0; };
-struct RoomInfo { uintptr_t mgr=0, tracker=0; int level=0, id=0; bool indoor=true; std::vector<Cross> cross; };
+constexpr bool kMemoryOptimizationsEnabled = true;
+bool g_ghostSolve=false;
+struct Cross { uintptr_t light=0; int floor=0, room=0; uintptr_t level=0; bool outdoor=false; };
+struct RayEntry {bool valid=false;float lamp[3]{},at[3]{};};
+enum {kTpIndoor};
+struct PartTimer {explicit PartTimer(int){}};
+namespace OutdoorDelta {bool Enabled(){return false;}void NoteDirectional(void*){}}
+unsigned g_pointGen=0;
+std::atomic<uint64_t> g_apexSolveCycles{0};
+struct RoomInfo { uintptr_t mgr=0, tracker=0; int level=0, id=0; bool indoor=true; std::vector<Cross> cross; bool openings=false; };
+struct GridWhy {bool wall=false;};
 struct PassDebug { int cx=-1,cz=-1,cq=-1,belowRoom=-2; uint32_t keyHi=0,keyLo=0; float ch=0,ct=-1; } g_passDbg;
 struct Xform {};
 using LightPos_t = void(__thiscall*)(void*,float*);
@@ -27,6 +38,7 @@ std::vector<Segment> wallSegments;
 uintptr_t StoryManager(uintptr_t,int s) {return s>=0&&s<8 ? reinterpret_cast<uintptr_t>(managers[s]) : 0;}
 uintptr_t LevelFor(uintptr_t m) {for(int s=0;s<8;++s)if(m==StoryManager(0,s))return missing[s]?0:reinterpret_cast<uintptr_t>(&floors[s]);return 0;}
 uintptr_t LevelManager(uintptr_t f) {return reinterpret_cast<Floor*>(f)->manager;}
+uintptr_t LevelForPoint(uintptr_t m) {return LevelFor(m);}
 bool ReadXform(uintptr_t,Xform&) {return true;}
 void ToLocal(const Xform&,const float* p,float* q) {std::memcpy(q,p,3*sizeof(float));}
 uintptr_t LightTile(uintptr_t m,int x,int z) {if(x<0||x>=8||z<0||z>=8)return 0;for(int s=0;s<8;++s)if(m==StoryManager(0,s))return reinterpret_cast<uintptr_t>(tiles[s]);return 0;}
@@ -45,6 +57,9 @@ struct RoomMock {bool Wall(void*,const float* from,const void* target,float* kee
 }};
 template<class T> uintptr_t Address(T p) {static_assert(sizeof p==sizeof(uintptr_t));uintptr_t result;std::memcpy(&result,&p,sizeof result);return result;}
 uintptr_t kLightPos=Address(&Light::Get), kRoomById=Address(&ManagerMock::Find), kWallTest=Address(&RoomMock::Wall);
+unsigned lampPositionReads=0;
+void LampPos(void* p,float* out){++lampPositionReads;static_cast<Light*>(p)->Get(out);}
+void* RoomByIdCached(void* m,int id){return static_cast<ManagerMock*>(m)->Find(id);}
 std::atomic<bool> g_installed{true}; bool g_indoorReady=true;
 std::atomic<unsigned long> g_gatherThread{7}; unsigned long ThreadId(){return 7;}
 std::atomic<long> g_basisTests{0},g_basisBlocked{0};
@@ -56,14 +71,30 @@ int nativeBasisCalls=0;
 void __stdcall NativeBasis(const float*,void*,float* acc){++nativeBasisCalls;for(int i=0;i<16;++i)acc[i]+=float(i+1);}
 uintptr_t kBasisLight=reinterpret_cast<uintptr_t>(&NativeBasis);
 void IndoorShadow(const RoomInfo&,void*,const float*,float*);
+bool innerBasisLamp=false;
+float innerBasisPass=1,innerBasisNorm=1;
+bool FindSame(const RoomInfo&,uintptr_t){return false;}
+bool FindInner(const RoomInfo&,uintptr_t){return innerBasisLamp;}
+float InnerPass(const RoomInfo&,void*,const float*,float*,GridWhy&){return innerBasisPass;}
+float OpenLampPass(const RoomInfo&,void*,const float*,float*,GridWhy&){return 1;}
+float InnerNormScaleAt(const RoomInfo&,void*,const BYTE*){return innerBasisNorm;}
+std::atomic<long> g_innerBasisTests{0},g_roofedBasisTests{0},g_innerBasisBlocked{0},g_roofedBasisBlocked{0},g_dayScaled{0};
+std::atomic<float> g_roomLampDay{1};
+BYTE* RoofedRoom(BYTE*){return nullptr;}
+bool OutdoorLamp(void*){return false;}
+bool LampLit(void*){return true;}
+void NoteDayRoom(BYTE*,float){}
 #include "extracted_indoor_stories.h"
 void IndoorShadow(const RoomInfo& info,void* light,const float* sample,float* colour) {
     const auto* c=FindCross(info,reinterpret_cast<uintptr_t>(light));int why=0;
-    const float pass=c?IndoorPassImpl(info,*c,light,sample,why):1;
+    const float pass=c?IndoorPassImpl(info,*c,light,sample,why,nullptr):1;
     for(int i=0;i<4;++i)colour[i]*=pass;
 }
 void Check(bool ok,const char* what) {++checks;if(!ok){++failures;std::printf("FAIL: %s\n",what);}}
 void Reset() {
+    g_ghostSolve=false;
+    innerBasisLamp=false;innerBasisPass=innerBasisNorm=1;
+    lampPositionReads=0;
     wallSegments.clear();wallBlocked=attenuated=raisedWallStory=-1;g_ctx=SolveCtx{};basisInfo=nullptr;nativeBasisCalls=0;
     for(int s=0;s<8;++s) {
         std::memset(managers[s],0,sizeof managers[s]);std::memset(tiles[s],0,sizeof tiles[s]);std::memset(rooms[s],0,sizeof rooms[s]);
@@ -79,13 +110,42 @@ float Evaluate(int from,int to,int& why,float x=2.25f,bool reference=false,float
     Cross c{reinterpret_cast<uintptr_t>(&light),from,1,LevelFor(StoryManager(0,std::max(from,to)))};
     why=0;
 #ifdef APEX_INDOOR_REFERENCE
-    if(reference)return ReferenceIndoorPass(info,c,&light,sample,why);
+    if(reference)return ReferenceIndoorPass(info,c,&light,sample,why,nullptr);
 #else
     (void)reference;
 #endif
-    return IndoorPassImpl(info,c,&light,sample,why);
+    return IndoorPassImpl(info,c,&light,sample,why,nullptr);
 }
 int main() {
+    {
+        Reset();int why=0;g_ghostSolve=true;floors[1].closed=true;
+        Check(Evaluate(0,1,why,2.25f,false,-.05f)==0&&why==1,"upper wall support row below a closed slab cannot import lower lamp light");
+        floors[1].closed=false;Check(Evaluate(0,1,why,2.25f,false,-.05f)==1,"support row below a real floor opening keeps continuity");
+        Reset();g_ghostSolve=true;floors[1].closed=true;
+        Check(Evaluate(1,0,why,2.25f,false,3.05f)==0&&why==1,"lower wall support row above a closed slab cannot import upper lamp light");
+        floors[1].closed=false;Check(Evaluate(1,0,why,2.25f,false,3.05f)==1,"upper support row through a real floor opening remains valid");
+    }
+    for(float share:{0.f,.25f,1.f})for(float norm:{.5f,1.f,1.5f,3.f}){
+        Reset();Light light{{2.25f,1.5f,2.25f,1}};float point[4]={2.25f,1.5f,2.25f,1},acc[16];std::fill_n(acc,16,100.f);
+        RoomInfo info{StoryManager(0,0),1,0,1,true,{}};basisInfo=&info;
+        innerBasisLamp=true;innerBasisPass=share;innerBasisNorm=norm;
+        BasisLightHook(rooms[0],nullptr,point,&light,acc);
+        for(int i=0;i<16;++i)Check(acc[i]==100.f+float(i+1)*share*norm,"opening basis preserves earlier lamps and source normalisation above/below one");
+        Check(nativeBasisCalls==(share>0?1:0),"blocked opening basis never evaluates native lamp");
+    }
+    {
+        Reset();int why=0;
+        MeshOcclusion::Publish({{{1,3,1},{4,3,1},{4,3,4}},{{1,3,1},{4,3,4},{1,3,4}}});
+        Check(Evaluate(0,1,why)==0&&why==2,"real mesh blocks an otherwise open story boundary");
+        MeshOcclusion::Reset();Check(Evaluate(0,1,why)==1,"empty tread gap retains native opening transmission");
+        floors[1].closed=true;Check(Evaluate(0,1,why)==0,"native slab still blocks without collected mesh");
+        MeshOcclusion::Publish({{{1,3,1},{4,3,1},{4,3,4}},{{1,3,1},{4,3,4},{1,3,4}}});
+        Reset();Light light{{2.25f,1.5f,2.25f,1}};float point[4]={2.25f,4.5f,2.25f,1},acc[16]{};
+        RoomInfo info{StoryManager(0,1),1,1,1,true,{{reinterpret_cast<uintptr_t>(&light),0,1,LevelFor(StoryManager(0,1))}}};
+        basisInfo=&info;BasisLightHook(rooms[1],nullptr,point,&light,acc);
+        Check(nativeBasisCalls==0,"directional basis rejects the same mesh-blocked imported lamp");
+        MeshOcclusion::Reset();
+    }
     for(int from=0;from<8;++from)for(int to=0;to<8;++to)if(from!=to) {
         Reset();int why=0;Check(Evaluate(from,to,why)==1&&why==0,"open atrium passes in both directions");
         Check(wallSegments.size()==size_t(std::abs(from-to)),"one wall segment per foreign story");
@@ -103,7 +163,7 @@ int main() {
             Check(rooms[story][0x639]==7&&!g_swapAt,"wall mode restored after refusal");
             Reset();attenuated=story;Check(Evaluate(from,to,why)==.5f,"wall transmission is preserved");
         }
-        Reset();g_ctx.flags=nullptr;Check(Evaluate(from,to,why)==1&&wallSegments.empty(),"no native wall flag skips only walls");
+        Reset();g_ctx.flags=nullptr;Check(Evaluate(from,to,why)==1&&wallSegments.size()==size_t(std::abs(from-to)+1),"borrowed lamp keeps wall tests without native flag");
         floors[std::max(from,to)].closed=true;Check(Evaluate(from,to,why)==0&&why==1,"floor test remains enabled without wall flag");
         Reset();Check(Evaluate(from,to,why,20)==0&&why==1,"ray outside floor grid fails closed");
         Reset();floors[std::max(from,to)].manager=0;Check(Evaluate(from,to,why)==0&&why==1,"stale floor ownership fails closed");
@@ -182,6 +242,17 @@ int main() {
         BasisLightHook(rooms[0],nullptr,pos,&light,acc);
         Check(nativeBasisCalls==0,"raised intermediate wall blocks basis outside the nominal story segment");
         Check(std::all_of(acc,acc+16,[](float v){return v==0;}),"isolated raised room adds no red to recipient basis map");
+    }
+    {
+        int why=0;
+        Reset();g_ctx.flags=nullptr;wallBlocked=0;
+        Check(Evaluate(0,1,why)==0&&why==2,"borrowed lamp tests source walls when native batch omits them");
+        Reset();g_ctx.flags=nullptr;wallBlocked=1;
+        Check(Evaluate(0,1,why)==0&&why==2,"borrowed lamp tests recipient walls when native batch omits them");
+        Reset();missingRooms[0]=true;
+        Check(Evaluate(0,1,why)==0&&why==2,"missing source room fails closed for adjacent stories");
+        Reset();Check(Evaluate(0,7,why)==1,"all-story shaft remains open");
+        Check(lampPositionReads==1,"one lamp-position read for every boundary in a point solve");
     }
     std::printf("Indoor stories and basis: %d checks, %d failures\n",checks,failures);return failures?1:0;
 }

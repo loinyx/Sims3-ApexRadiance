@@ -6,6 +6,16 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k2140Added[] = {nullptr};
+constexpr const char* k2140Improved[] = {
+    "Room to save releases idle buffers earlier during saving",
+    "Screen effects avoid unused image copies and repeated timing work",
+    "Object and compression caches reduce repeated work with bounded memory",
+    nullptr};
+constexpr const char* k2140Fixed[] = {
+    "Night Lights improves lamp blocking near stairs and closed floors",
+    nullptr};
+
 constexpr const char* k2132Improved[] = {
     "The latest lighting features also work on the EA app version 1.69",
     nullptr};
@@ -249,6 +259,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"2.14.0", "2026-10-19", k2140Added, k2140Improved, k2140Fixed},
     {"2.13.2", "2026-10-15", k2132Added, k2132Improved, k2132Fixed},
     {"2.13.1", "2026-10-15", k2131Added, k2131Improved, k2131Fixed},
     {"2.13.0", "2026-10-14", k2130Added, k2130Improved, k2130Fixed},

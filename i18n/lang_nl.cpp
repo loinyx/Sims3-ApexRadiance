@@ -9,6 +9,14 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Dutch}
 const I18n::Pair kPairs[] = {
+    {"Room to save releases idle buffers earlier during saving", "Ruimte om op te slaan geeft ongebruikte buffers eerder vrij tijdens het opslaan"},
+    {"Screen effects avoid unused image copies and repeated timing work", "Schermeffecten vermijden ongebruikte beeldkopieën en herhaalde tijdmetingen"},
+    {"Object and compression caches reduce repeated work with bounded memory", "Object- en compressiecaches beperken herhaald werk met begrensd geheugengebruik"},
+    {"Night Lights improves lamp blocking near stairs and closed floors", "Nachtverlichting blokkeert lamplicht bij trappen en gesloten vloeren beter"},
+    {"RAM and gameplay test", "RAM- en spelverlooptest"},
+    {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Bezoek 10 minuten lang verschillende kavels, keer terug naar de eerste, wacht, sla op en laad dat opgeslagen spel opnieuw."},
+    {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Vergelijk haperingen, het laden van kavels en RAM-gebruik met de vorige versie. Noteer elke fout 12 en wat eraan voorafging."},
+    {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Controleer lamplicht bij trappen en achter gesloten vloeren. Gedetailleerde gegevensverzameling is uitgeschakeld."},
     {"The latest lighting features also work on the EA app version 1.69", "De nieuwste verlichtingsfuncties werken ook in de EA-app-versie 1.69"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "Muren werpen ook schaduw van lamplicht op gras, straten en stoepen buiten het perceel"},
     {"Garden walls and fences shade lamp light on the ground by their height", "Tuinmuren en hekken werpen schaduw van lamplicht op de grond naar hun hoogte"},
