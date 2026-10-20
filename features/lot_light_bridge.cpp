@@ -3091,7 +3091,33 @@ float PickedLampVisibility(int k, const float* pr, const float* p, float nearSki
         const float v = LevelLightShare::ExitLampVisibility(reinterpret_cast<const void*>(light), pr, p, nearSkip);
         return v < 0.0f ? 0.0f : v; // (not listed any more: dark)
     }
-    return LevelLightShare::LampVisibility(pr, p, nearSkip);
+    // (development builds, lamp_visibility_memo) objects are drawn at the same place frame after frame and lamps change
+    // every 20 frames at most: the wall and slab test of a lamp and a point is kept, keyed by the exact float bits and by
+    // everything else it reads (LampVisibilityState), so a hit returns exactly the value it would compute
+    if (!DevSwitches::LampVisibilityMemo() || LevelLightShare::VisibilityDiagArmed()) return LevelLightShare::LampVisibility(pr, p, nearSkip);
+    struct VisMemo {
+        uint32_t k[7];
+        uint64_t state;
+        float v;
+        bool used;
+    };
+    static VisMemo s_vis[4096];
+    const uint64_t state = LevelLightShare::LampVisibilityState();
+    uint32_t key[7];
+    std::memcpy(&key[0], pr, 12);
+    std::memcpy(&key[3], p, 12);
+    std::memcpy(&key[6], &nearSkip, 4);
+    uint32_t h = 2166136261u;
+    for (uint32_t x : key) h = (h ^ x) * 16777619u;
+    h ^= static_cast<uint32_t>(state) ^ static_cast<uint32_t>(state >> 32);
+    VisMemo& e = s_vis[(h * 2654435761u) >> 20];
+    if (e.used && e.state == state && std::memcmp(e.k, key, sizeof key) == 0) return e.v;
+    const float v = LevelLightShare::LampVisibility(pr, p, nearSkip);
+    std::memcpy(e.k, key, sizeof key);
+    e.state = LevelLightShare::LampVisibilityState(); // (the call may have rebuilt a grid: keyed by what it read)
+    e.v = v;
+    e.used = e.state == state;
+    return v;
 }
 bool g_lampConeLogged = false, g_fenceConeLogged = false; // render thread
 
@@ -4494,7 +4520,11 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
             lp[3] = 1e12f;
             law[0] = 0.0f, law[1] = kFar * kFar * dl, law[2] = 1e-4f, law[3] = 0.0f; // x |direction|: the old N.l's length
         };
-        const float ext[3] = {f.rx, f.ry, f.rx};
+        // the colour is compared on the whole mesh box, trunk included: a lamp at the foot of a tree is near the trunk, not
+        // near the crown above it (unverified: that the game's rig box is the whole mesh)
+        const float hx = 0.5f * std::max(mesh.hi[0] - mesh.lo[0], mesh.hi[2] - mesh.lo[2]) * scale;
+        const float boxC[3] = {inst[0] + eye[0], inst[1] + eye[1] + 0.5f * (mesh.lo[1] + mesh.hi[1]) * scale, inst[2] + eye[2]};
+        const float ext[3] = {hx, 0.5f * (mesh.hi[1] - mesh.lo[1]) * scale, hx};
         for (int k = 0; k < 3; k++) {
             const float* col = c[54 + 3 * i + k];
             const float m = std::max({col[0], col[1], col[2]});
@@ -4503,10 +4533,10 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
                 continue;
             }
             float rgb[3], unclamped = 0.0f, lawAt = 0.0f;
-            const bool ok = f.matched && f.lamp[k] != SIZE_MAX && FoliageLampColour(f.lamp[k], f.centre, ext, rgb, unclamped, lawAt);
+            const bool ok = f.matched && f.lamp[k] != SIZE_MAX && FoliageLampColour(f.lamp[k], boxC, ext, rgb, unclamped, lawAt);
             const float em = ok ? std::max({rgb[0], rgb[1], rgb[2]}) : 0.0f;
             // only a gross mismatch refuses the lamp (the rig's colour also carries wall shade, the object strength and its cap;
-            // the vertex law starts from the rig's own colour at the crown's point, so the level is the old one there anyway)
+            // the vertex law starts from the rig's own colour at the mesh box's nearest point, so the level is the old one there anyway)
             if (!ok || !(em > 0.0f) || em > 4.0f * m || m > 4.0f * em) {
                 static int s_told = 0;
                 if (s_told < 12) {
@@ -4525,7 +4555,7 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
             LampReach::Radii(g_allCones[f.lamp[k]].w, r0, R);
             float* lp = &out[(3 * i + k) * 4];
             lp[0] = v[0] - eye[0], lp[1] = v[1] - eye[1], lp[2] = v[2] - eye[2], lp[3] = r0 * r0;
-            // at the crown's point the vertex light is m x unclamped / em: the old colour where it was not capped, more only
+            // at the mesh box's nearest point the vertex light is m x unclamped / em: the old colour where it was not capped, more only
             // where the old colour was capped (and then at most 1 per channel, c[B+56])
             float* law = &out[(27 + 3 * i + k) * 4];
             law[0] = 1.0f / (R * R), law[1] = unclamped / em / lawAt * dl, law[2] = 1e-4f, law[3] = std::max(v[1] - (inst[1] + eye[1]), 0.0f);

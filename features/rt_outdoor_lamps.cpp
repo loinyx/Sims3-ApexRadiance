@@ -1455,7 +1455,10 @@ void Frame(IDirect3DDevice9* dev) {
                 uint32_t drawable = 0;
                 for (int S = 0; S <= 7; S++)
                     if (rooms[S] && RtLampModel::Drawn(r.f, rns[S].lot)) drawable |= 1u << S;
-                const uint32_t missNow = on ? (e.mask & ~m & drawable) : 0;
+                // a lamp listed on some stories is expected on every story where it is drawable (a new or moved lamp the game
+                // has listed on its own story only: the other stories' room 0s never gathered it)
+                const uint32_t expect = m ? (e.mask | drawable) : e.mask;
+                const uint32_t missNow = on ? (expect & ~m & drawable) : 0;
                 const uint32_t missing = missNow & e.missed;
                 e.missed = missNow;
                 if (missing) {
@@ -1470,7 +1473,7 @@ void Frame(IDirect3DDevice9* dev) {
                         e.sent |= fresh;
                         e.sentAt = checkNow;
                         c_repairs.fetch_add(sent);
-                        LOG_INFO(std::format("[RtOutdoorLamps] Consistency: GPU lamp {:08X} is on but no longer listed on stories {} where it was drawn: their room 0s "
+                        LOG_INFO(std::format("[RtOutdoorLamps] Consistency: GPU lamp {:08X} is on but missing from stories {} where it is drawable: their room 0s "
                                              "gather again ({} sent)", L, list, sent));
                     } else if (!e.given && checkNow - e.sentAt >= kRepairWaitMs) {
                         e.given = true;
@@ -1786,18 +1789,34 @@ void Frame(IDirect3DDevice9* dev) {
     bool full = allReady && stories > 0;
     for (const auto& s : g_slots) full = full && (!s->used || (s->ok && s->relit));
     {
+        // (14/10) not a lamp a covering slot keeps baked in its base (kept when it was not drawn): its edits must reach the
+        // game's solve, the GPU does not draw it there
+        // nor a lamp missing from the list of a story where it is drawable: the GPU does not draw it there either
+        std::vector<uintptr_t> covered;
+        covered.reserve(lamps.size());
+        uint32_t storyBits = 0;
+        for (int S = 0; S <= 7; S++)
+            if (rooms[S]) storyBits |= 1u << S;
+        for (const GpuLamp& g : lamps) {
+            bool baked = false;
+            for (const auto& s : g_slots) baked = baked || (s->used && s->kept.count(g.light) && !s->drawn.count(g.light));
+            uint32_t listed = 0;
+            for (int S = 0; S <= 7; S++)
+                if (g.mult[S]) listed |= 1u << S;
+            if (!baked && (listed & storyBits) != storyBits) {
+                LampRead r;
+                if (!ReadLamp(g.light, r)) baked = true;
+                for (int S = 0; S <= 7 && !baked; S++)
+                    if ((storyBits & ~listed) >> S & 1) baked = RtLampModel::Drawn(r.f, rns[S].lot);
+            }
+            if (!baked) covered.push_back(g.light);
+        }
         std::lock_guard<std::mutex> lk(g_coverMx);
         g_cover.tracker = tracker;
         g_cover.full = full;
         g_cover.at = GetTickCount();
         g_cover.lamps.clear();
-        // (14/10) not a lamp a covering slot keeps baked in its base (kept when it was not drawn): its edits must reach the
-        // game's solve, the GPU does not draw it there
-        for (const GpuLamp& g : lamps) {
-            bool baked = false;
-            for (const auto& s : g_slots) baked = baked || (s->used && s->kept.count(g.light) && !s->drawn.count(g.light));
-            if (!baked) g_cover.lamps.insert(g.light);
-        }
+        g_cover.lamps.insert(covered.begin(), covered.end());
     }
     // the coverage, logged when it changes (lamp edits mark no room only while every story is covered)
     if (static_cast<int>(full) != g_coverLogged) {

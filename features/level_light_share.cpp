@@ -10931,12 +10931,15 @@ int CollectStoryRooms(uintptr_t tracker, int level, RoomRef* out, int max) {
         if (!mgr) return 0;
         const int w = *reinterpret_cast<const int*>(mgr + 0x264), h = *reinterpret_cast<const int*>(mgr + 0x268);
         if (w <= 0 || h <= 0 || w > 1024 || h > 1024) return 0;
+        int lastId = 0; // neighbouring quadrants are nearly always the same room: already in out (same list, same order)
         for (int iz = 0; iz < h; iz++)
             for (int ix = 0; ix < w; ix++)
                 if (const uintptr_t tile = LightTile(mgr, ix, iz))
                     for (int q = 0; q < 4; q++) {
                         const int id = TileRoom(tile, q);
                         if (id <= 0 || n >= max) continue;
+                        if (id == lastId) continue;
+                        lastId = id;
                         bool known = false;
                         for (int k = 0; k < n && !known; k++) known = out[k].id == id;
                         if (!known) out[n++] = RoomRef{tracker, level, id};
@@ -12883,6 +12886,21 @@ float LampVisibility(const float lamp[3], const float point[3], float nearSkip) 
     if (v < 1.0f) g_visRim.fetch_add(1, std::memory_order_relaxed);
     return v;
 }
+
+// Everything LampVisibility reads besides its arguments (render thread): the walls' and the floors' copies (their
+// generations: the grids are rebuilt from them), the switches and the penumbra. Equal state and equal arguments give the
+// same value (the memo in LotLightBridge::PickedLampVisibility, development switch lamp_visibility_memo).
+uint64_t LampVisibilityState() {
+    const float r = Penumbra::g_radius.load(std::memory_order_relaxed);
+    uint32_t rb;
+    std::memcpy(&rb, &r, 4);
+    uint64_t s = (uint64_t(g_wallSnapGen.load(std::memory_order_relaxed)) * 1099511628211ull) ^ (uint64_t(g_floorSnapGen.load(std::memory_order_relaxed)) << 21) ^
+                 (uint64_t(rb) << 7);
+    s ^= (g_objectWallsOn.load(std::memory_order_relaxed) ? 1u : 0u) | (g_installed.load(std::memory_order_relaxed) ? 2u : 0u) |
+         (Penumbra::g_on.load(std::memory_order_relaxed) ? 4u : 0u);
+    return s;
+}
+bool VisibilityDiagArmed() { return g_diagArmed.load(std::memory_order_relaxed); } // F8 records each test: no memo then
 
 // ---- The same test from any thread (the object rigs' gather, ObjectLightBridge): an immutable copy of the render thread's
 // wall grid and slab groups, published by OnPresent when either changed (PublishVisSnap). A query takes the current copy

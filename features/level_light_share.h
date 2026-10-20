@@ -119,6 +119,9 @@ bool WallBlocks(const float lamp[3], const float point[3], float nearSkip = 0.2f
 // room 0 is solved). Rays going down are not tested (1). The point is one point: an object standing on a slab is tested
 // where the caller puts it (on the slab's plane it is tested 5 cm toward the lamp).
 float LampVisibility(const float lamp[3], const float point[3], float nearSkip = 0.2f);
+// Everything LampVisibility reads besides its arguments, as one key (render thread), and whether F8 records its tests
+uint64_t LampVisibilityState();
+bool VisibilityDiagArmed();
 // The same share from any thread (the object rigs' gather): tested against an immutable copy of the walls and slabs that
 // OnPresent publishes when they change (up to a frame old). 1 while the option is off or before the first copy.
 float LampVisibilityShared(const float lamp[3], const float point[3], float nearSkip = 0.2f);

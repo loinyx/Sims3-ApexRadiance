@@ -482,12 +482,30 @@ void SetBakeGains(float street, float lot) {
 
 // "Moonlight": the game multiplies the sun / moon colour by the "Sunlight Scale" float every frame (FUN_00c11ad0,
 // "mov ecx,011D0918h; call getter; movss xmm0,[eax]" at 0x00C11B01, its only reader) before it hands it to the light
-// manager (+0x130 = ExteriorLightData, read by terrain, roads, walls, floors, roofs, objects, Sims and ponds). Written
-// as its original value x lerp(1, moonlight, night level): by day it is the game's. Plain data, no code patched.
+// manager (+0x130 = ExteriorLightData, read by terrain, roads, walls, floors, roofs, objects, Sims and ponds).
+// That one call (to a shared "mov eax,ecx; ret" getter) is pointed at SunScaleGetter, which returns the game's value
+// x lerp(1, moonlight, night level): the variable itself is never written, so a blend that starts from its current
+// value, or Sims3SettingsSetter's "Sunlight brightness", is scaled once and never stacks. When the call cannot be
+// redirected the value is written instead (older behaviour).
 uintptr_t kSunlightScale = 0; // 0x011D0918
 float g_sunlightBase = -1.0f;  // its value when first seen (< 0 = not read yet / not usable)
 float g_moonWritten = -1.0f;
 float g_moonSeen = 1.0f;       // moonlight value the object rigs gathered with
+uintptr_t g_sunCall = 0;       // the redirected "call getter" (0 = not redirected)
+BYTE g_sunCallOrig[5] = {};
+bool g_sunCallTried = false;
+float g_sunFactor = 1.0f;      // what SunScaleGetter multiplies by (render thread)
+float g_sunScaled = 0.0f;
+
+__declspec(naked) void SunScaleGetter() {
+    __asm {
+        movss xmm0, dword ptr [ecx]
+        mulss xmm0, dword ptr [g_sunFactor]
+        movss dword ptr [g_sunScaled], xmm0
+        mov eax, offset g_sunScaled
+        ret
+    }
+}
 
 bool ReadFloat(uintptr_t at, float& v) {
     __try {
@@ -506,6 +524,37 @@ bool WriteFloat(uintptr_t at, float v) {
     }
 }
 
+// Finds "mov ecx,<scale>; call <mov eax,ecx; ret>; movss xmm0,[eax]" in the game image and points that call at
+// SunScaleGetter (xmm0 is reloaded right after the call, eax is its result). Tried once per install.
+void RedirectSunCall() {
+    if (g_sunCallTried || !kSunlightScale) return;
+    g_sunCallTried = true;
+    BYTE* base = nullptr;
+    size_t size = 0;
+    if (!MemPatch::GetModuleInfo(GetModuleHandleW(nullptr), &base, &size)) return;
+    const uint32_t v = static_cast<uint32_t>(kSunlightScale);
+    const std::string pat = std::format("B9 {:02X} {:02X} {:02X} {:02X} E8 ?? ?? ?? ?? F3 0F 10 00", v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, v >> 24);
+    const uintptr_t site = MemPatch::ScanPattern(base, size, pat.c_str());
+    BYTE orig[5] = {};
+    int32_t rel = 0;
+    static const BYTE kGetter[] = {0x8B, 0xC1, 0xC3}; // mov eax,ecx; ret
+    if (!site || !MemPatch::ReadBytes(site + 5, orig, 5) || orig[0] != 0xE8 ||
+        (std::memcpy(&rel, orig + 1, 4), !MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(site + 10 + rel), kGetter, sizeof(kGetter)))) {
+        LOG_WARNING("[NightTerrainRelight] Moonlight: the sunlight scale reader is not the expected code; the value is written instead");
+        return;
+    }
+    BYTE patch[5] = {0xE8};
+    const int32_t to = MemPatch::CalculateRelativeOffset(site + 5, reinterpret_cast<uintptr_t>(&SunScaleGetter));
+    std::memcpy(patch + 1, &to, 4);
+    if (!MemPatch::WriteCodeSuspended(site + 5, patch, 5)) {
+        LOG_WARNING("[NightTerrainRelight] Moonlight: the sunlight scale reader could not be redirected; the value is written instead");
+        return;
+    }
+    std::memcpy(g_sunCallOrig, orig, 5);
+    g_sunCall = site + 5;
+    if (!kPublicBuild) LOG_INFO(std::format("[NightTerrainRelight] Moonlight: sunlight scale reader at {:#x} redirected (the variable is no longer written)", g_sunCall));
+}
+
 // Every frame (render thread): the scale for the current night level. False when not available.
 bool ApplyMoonlight(float level) {
     if (!kSunlightScale) return false;
@@ -518,6 +567,15 @@ bool ApplyMoonlight(float level) {
         }
         g_sunlightBase = v;
         LOG_INFO(std::format("[NightTerrainRelight] Moonlight: sunlight scale {:.3f} at {:#x}", v, kSunlightScale));
+        RedirectSunCall();
+    }
+    const float factor = 1.0f + (g_moonlight - 1.0f) * level;
+    if (g_sunCall) {
+        float game = 0.0f;
+        if (ReadFloat(kSunlightScale, game) && game > 0.0f && game < 100.0f) g_sunlightBase = game;
+        g_sunFactor = factor;
+        g_moonWritten = g_sunlightBase * factor; // what the game now reads (status line)
+        return true;
     }
     // Someone else wrote it since (Sims3SettingsSetter's "Sunlight brightness" edits the same variable): that is the new
     // base, so the moonlight scales the user's own choice and never stacks on itself
@@ -527,7 +585,7 @@ bool ApplyMoonlight(float level) {
         g_sunlightBase = now;
         LOG_INFO(std::format("[NightTerrainRelight] Moonlight: sunlight scale changed elsewhere to {:.3f} (new base)", now));
     }
-    const float want = g_sunlightBase * (1.0f + (g_moonlight - 1.0f) * level);
+    const float want = g_sunlightBase * factor;
     if (want == now) {
         g_moonWritten = want;
         return true;
@@ -538,7 +596,23 @@ bool ApplyMoonlight(float level) {
 }
 
 void RestoreMoonlight() {
-    if (kSunlightScale && g_sunlightBase >= 0.0f && g_moonWritten >= 0.0f) WriteFloat(kSunlightScale, g_sunlightBase);
+    if (g_sunCall) {
+        g_sunFactor = 1.0f;
+        // only while the site still holds our call (another mod may have patched it since: then it is left alone)
+        BYTE ours[5] = {0xE8};
+        const int32_t to = MemPatch::CalculateRelativeOffset(g_sunCall, reinterpret_cast<uintptr_t>(&SunScaleGetter));
+        std::memcpy(ours + 1, &to, 4);
+        if (!MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(g_sunCall), ours, 5)) {
+            LOG_WARNING("[NightTerrainRelight] Moonlight: the sunlight scale reader was changed by someone else; left as it is");
+            g_sunCall = 0;
+        } else if (MemPatch::WriteCodeSuspended(g_sunCall, g_sunCallOrig, 5)) {
+            g_sunCall = 0;
+            g_sunCallTried = false;
+            g_sunlightBase = -1.0f; // read and redirect again on the next install
+        }
+    } else if (kSunlightScale && g_sunlightBase >= 0.0f && g_moonWritten >= 0.0f) {
+        WriteFloat(kSunlightScale, g_sunlightBase);
+    }
     g_moonWritten = -1.0f;
 }
 

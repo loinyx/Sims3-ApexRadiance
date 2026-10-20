@@ -14,6 +14,7 @@
 //   canopy_ground_shadow  tree and bush crowns as porous occluders of lamp light on lot ground (foliage_canopy.h)
 //   auto_light_priority   a lamp switched on automatically (dusk, dawn, a light toggled often) puts its own room first in the
 //                         room queue, with no extra budget and no hold (LevelLightShare::NoteQuietMark)
+//   lamp_visibility_memo  the wall / slab test of a lamp and a point is kept while nothing it reads changed (same values)
 #include <atomic>
 
 namespace DevSwitches {
@@ -33,6 +34,7 @@ inline std::atomic<bool> allocatorTopDown{false};
 inline std::atomic<bool> foliageVertexLamps{false};
 inline std::atomic<bool> canopyGroundShadow{false};
 inline std::atomic<bool> autoLightPriority{false};
+inline std::atomic<bool> lampVisibilityMemo{false};
 
 void Load(); // init thread, before the features start; logs the values
 
@@ -45,5 +47,6 @@ inline bool AllocatorTopDown() { return kCompiled && allocatorTopDown.load(std::
 inline bool FoliageVertexLamps() { return kCompiled && foliageVertexLamps.load(std::memory_order_relaxed); }
 inline bool CanopyGroundShadow() { return kCompiled && canopyGroundShadow.load(std::memory_order_relaxed); }
 inline bool AutoLightPriority() { return kCompiled && autoLightPriority.load(std::memory_order_relaxed); }
+inline bool LampVisibilityMemo() { return kCompiled && lampVisibilityMemo.load(std::memory_order_relaxed); }
 
 } // namespace DevSwitches
