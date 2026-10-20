@@ -55,7 +55,7 @@ bool Patch(std::vector<uint32_t>& t, int& base) {
     const auto ins = Parse(t);
     if (ins.empty()) return false;
     int maxTemp = -1, maxConst = -1;
-    long dirAt[3] = {-1, -1, -1}, colAt[3] = {-1, -1, -1};
+    long dirAt[3] = {-1, -1, -1}, lastPos = -1;
     DWORD addrTok = 0, normal = ~0u, world = ~0u, lampTemp = ~0u;
     for (size_t n = 0; n < ins.size(); n++) {
         const Ins& x = ins[n];
@@ -69,33 +69,59 @@ bool Patch(std::vector<uint32_t>& t, int& base) {
             if (Type(t[i]) == kTemp) maxTemp = std::max<int>(maxTemp, static_cast<int>(Num(t[i])));
             if (Type(t[i]) == kConst && Num(t[i]) != 255 && !(t[i] & 0x2000u)) maxConst = std::max<int>(maxConst, static_cast<int>(Num(t[i])));
         }
-        // dp3 rL.c, c27+k[a0.s], rN: the per-instance lamp directions
-        if (x.op == kDp3 && o.size() == 3 && Type(t[o[1]]) == kConst && (t[o[1]] & 0x2000u) && Num(t[o[1]]) >= 27 && Num(t[o[1]]) <= 29 && Type(t[o[2]]) == kTemp) {
-            dirAt[Num(t[o[1]]) - 27] = static_cast<long>(n);
-            addrTok = t[o[1] + 1];
-            normal = Num(t[o[2]]);
-            lampTemp = Num(t[o[0]]);
+        // dp3 rL.c, c27+k[a0.s], rN (either operand order): the per-instance lamp directions
+        if (x.op == kDp3 && o.size() == 3 && Type(t[o[0]]) == kTemp) {
+            for (int s = 1; s <= 2; s++) {
+                const DWORD c = t[o[s]], other = t[o[3 - s]];
+                if (Type(c) == kConst && (c & 0x2000u) && Num(c) >= 27 && Num(c) <= 29 && Type(other) == kTemp && !(other & 0x2000u)) {
+                    const int k = static_cast<int>(Num(c)) - 27;
+                    if (dirAt[k] >= 0) return false;
+                    dirAt[k] = static_cast<long>(n);
+                    addrTok = t[o[s] + 1];
+                    normal = Num(other);
+                    if (lampTemp != ~0u && lampTemp != Num(t[o[0]])) return false;
+                    lampTemp = Num(t[o[0]]);
+                    // lamp k is written to component k + 1 (y, z, w), as in every captured shader
+                    if (WMask(t[o[0]]) != (2u << k)) return false;
+                }
+            }
         }
-        // the lamp colours c54+k[a0.s] (mul for k = 0, mad for 1 and 2)
-        if ((x.op == kMul || x.op == kMad) && o.size() >= 3 && Type(t[o[2]]) == kConst && (t[o[2]] & 0x2000u) && Num(t[o[2]]) >= 54 && Num(t[o[2]]) <= 56)
-            colAt[Num(t[o[2]]) - 54] = static_cast<long>(n);
-        // dp4 oPos.x, rW, cK: the camera-relative world position
-        if (x.op == kDp4 && Type(t[o[0]]) == kOutput && Num(t[o[0]]) == 0 && WMask(t[o[0]]) == 0x1 && Type(t[o[1]]) == kTemp) world = Num(t[o[1]]);
+        // dp4 oPos.c, rW, cK: the (camera-relative) world position
+        if (x.op == kDp4 && Type(t[o[0]]) == kOutput && Num(t[o[0]]) == 0 && Type(t[o[1]]) == kTemp) {
+            if (world != ~0u && world != Num(t[o[1]])) return false;
+            world = Num(t[o[1]]);
+            lastPos = static_cast<long>(n);
+        }
     }
     for (int k = 0; k < 3; k++)
-        if (dirAt[k] < 0 || colAt[k] < 0) return false;
-    if (world == ~0u || normal == ~0u || maxTemp < 0 || maxTemp + 6 > 11) return false; // 6 new temps; vs_2_0 has r0..r11
-    if (!(ins[colAt[0]].op == kMul && ins[colAt[1]].op == kMad && ins[colAt[2]].op == kMad)) return false;
-    const long first = std::min({dirAt[0], dirAt[1], dirAt[2]});
-    // the world temp must still hold the position where the block goes (before the first lamp dp3)
-    bool seenPos = false;
-    for (long i = 0; i < first; i++) {
-        if (ins[i].op == kDef || ins[i].op == kDcl) continue;
-        const auto o = Operands(t, ins[i]);
-        if (ins[i].op == kDp4 && Type(t[o[0]]) == kOutput) seenPos = true;
-        else if (seenPos && Type(t[o[0]]) == kTemp && Num(t[o[0]]) == world && (WMask(t[o[0]]) & 0x7)) return false;
+        if (dirAt[k] < 0) return false;
+    if (world == ~0u || normal == ~0u || lampTemp == ~0u || lastPos < 0 || maxTemp < 0 || maxTemp + 6 > 11) return false; // 6 new temps
+    const long first = std::min({dirAt[0], dirAt[1], dirAt[2]}), last = std::max({dirAt[0], dirAt[1], dirAt[2]});
+    if (lastPos > first) return false; // the position is computed before the lamps
+    // The wrap on the lamp terms (PatchFoliageVs: mad rL.yzw, rL, c255.x, c255.y; max rL.yzw, rL, cZ), right after the dp3s
+    long wrapMad = -1, wrapMax = -1;
+    for (long i = last + 1; i < static_cast<long>(ins.size()) && (wrapMad < 0 || wrapMax < 0); i++) {
+        const Ins& x = ins[i];
+        if (x.op == kDcl || x.op == kDef) continue;
+        const auto o = Operands(t, x);
+        const bool toLamps = !o.empty() && Type(t[o[0]]) == kTemp && Num(t[o[0]]) == lampTemp && (WMask(t[o[0]]) & 0xE);
+        if (toLamps && x.op == kMad && wrapMad < 0 && WMask(t[o[0]]) == 0xE) wrapMad = i;
+        else if (toLamps && x.op == kMax && wrapMad >= 0 && WMask(t[o[0]]) == 0xE) wrapMax = i;
+        else if (toLamps) return false; // something else writes the lamp terms first
     }
-    if (!seenPos) return false;
+    if (wrapMad < 0 || wrapMax < 0) return false;
+    // nothing reads the lamp terms between the dp3s and the wrap but the wrap
+    for (long i = first; i < wrapMax; i++) {
+        if (i == dirAt[0] || i == dirAt[1] || i == dirAt[2] || i == wrapMad) continue;
+        const auto o = Operands(t, ins[i]);
+        const DWORD op = ins[i].op;
+        // a per-component op writing only the lamp term's x (the sun) reads only its x
+        if (!o.empty() && Type(t[o[0]]) == kTemp && Num(t[o[0]]) == lampTemp && !(WMask(t[o[0]]) & 0xE) &&
+            (op == kMov || op == kAdd || op == kMul || op == kMad || op == kMin || op == kMax))
+            continue;
+        for (size_t k = 1; k < o.size(); k++)
+            if (Type(t[o[k]]) == kTemp && Num(t[o[k]]) == lampTemp) return false;
+    }
     // above the per-instance arrays the shader reads relatively (c0..c80: c54 + 3 x 8 + 2), whatever its direct reads
     const DWORD B = static_cast<DWORD>(std::max(maxConst + 1, 81));
     if (B + 82 > 254) return false;
@@ -114,7 +140,7 @@ bool Patch(std::vector<uint32_t>& t, int& base) {
         pre = {Op(kDef, 5), Dst(kConst, B + 82), 0xBF800000u /*-1*/, 0u, 0u, 0u};
         cM1 = B + 82, sM1 = X, cZ = B + 82, sZ = Y;
     }
-    const DWORD Acc = maxTemp + 1, Dir = Acc + 1, Sc = Acc + 2, P = Acc + 3, K = Acc + 4, Sv = Acc + 5;
+    const DWORD Pos = maxTemp + 1, Dir = Pos + 1, Sc = Pos + 2, P = Pos + 3, K = Pos + 4, Sv = Pos + 5;
     std::vector<DWORD> c;
     struct O {
         DWORD tok;
@@ -136,8 +162,10 @@ bool Patch(std::vector<uint32_t>& t, int& base) {
     const auto cf = [](DWORD n, DWORD s = XYZW) { return O{Src(kConst, n, s), false}; }; // c[n]
     const O one = {Neg(Src(kConst, cM1, sM1)), false}, zero = {Src(kConst, cZ, sZ), false};
     const DWORD cG = B + 81, cWrap = 255;
+    // the position, kept right after oPos (shaders reuse its register before the lamps)
+    const std::vector<DWORD> keep = {Op(kMov, 2), Dst(kTemp, Pos, 0x7), Src(kTemp, world)};
     // per instance: P = (pos - C) / semi-axes, P.w = |P|^2 - 1; Sv = 1 / semi-axes; Sv.w = rho_g / 2 x (1 - n.y)
-    E(kAdd, {d(P, 0x7), r(world), O{Neg(Src(kConst, B + 54)), true}});
+    E(kAdd, {d(P, 0x7), r(Pos), O{Neg(Src(kConst, B + 54)), true}});
     E(kMul, {d(P, 0x5), r(P), ci(B + 54, W)});
     E(kMul, {d(P, 0x2), r(P), ci(B + 55, X)});
     E(kDp3, {d(P, 0x8), r(P), r(P)});
@@ -146,8 +174,7 @@ bool Patch(std::vector<uint32_t>& t, int& base) {
     E(kMov, {d(Sv, 0x2), ci(B + 55, X)});
     E(kAdd, {d(Sv, 0x8), nr(normal, Y), one});
     E(kMul, {d(Sv, 0x8), r(Sv, W), cf(cG, Y)});
-    E(kMov, {d(Acc, 0x7), zero});
-    // law(d^2 = r[src].comp) relative to the law at the colour's point -> Sc.z (scratch K.w); capCopy: capped (direct light)
+    // law(d^2 = r[src].comp) relative to the law at the colour's point -> Sc.z (scratch K.w); capped: the direct light
     const auto law = [&](DWORD src, DWORD comp, DWORD Q, DWORD Cp, DWORD capComp, bool capped) {
         E(kMul, {d(Sc, 0x4), r(src, comp), ci(Q, X)});
         E(kMad, {d(Sc, 0x4), nr(Sc, Z), r(Sc, Z), one});
@@ -162,8 +189,8 @@ bool Patch(std::vector<uint32_t>& t, int& base) {
         if (capped) E(kMin, {d(Sc, 0x4), r(Sc, Z), ci(B + 56, capComp)});
     };
     for (DWORD k = 0; k < 3; k++) {
-        const DWORD Cp = B + k, Q = B + 27 + k, Col = 54 + k;
-        E(kAdd, {d(Dir, 0x7), ci(Cp), nr(world)});
+        const DWORD Cp = B + k, Q = B + 27 + k, out = 2u << k; // the lamp term's component: y, z, w
+        E(kAdd, {d(Dir, 0x7), ci(Cp), nr(Pos)});
         E(kDp3, {d(Dir, 0x8), r(Dir), r(Dir)});
         E(kMax, {d(Dir, 0x8), r(Dir, W), ci(Q, Z)});
         E(kRsq, {d(Sc, 0x8), r(Dir, W)});
@@ -195,8 +222,7 @@ bool Patch(std::vector<uint32_t>& t, int& base) {
         E(kMul, {d(K, 0x1), r(K, X), O{Neg(Src(kConst, B + 55, Y)), true}});
         E(kExp, {d(K, 0x1), r(K, X)});
         E(kMul, {d(Sc, 0x4), r(Sc, Z), r(K, X)});
-        E(kMul, {d(Sc, 0x2), r(Sc, Y), r(Sc, Z)});
-        E(kMad, {d(Acc, 0x7), r(Sc, Y), ci(Col), r(Acc)});
+        E(kMul, {d(lampTemp, out), r(Sc, Y), r(Sc, Z)});                  // the lamp's weight: its colour is applied as before
         if (k != 0) continue;
         // the ground's light under the vertex: law(dg^2) h / dg, x rho_g / 2 (1 - n.y) (strongest lamp only)
         E(kMad, {d(K, 0x1), nr(Dir, Y), r(Dir, Y), one});
@@ -207,29 +233,20 @@ bool Patch(std::vector<uint32_t>& t, int& base) {
         E(kRsq, {d(K, 0x2), r(K, X)});
         E(kMul, {d(Sc, 0x4), r(Sc, Z), r(K, Y)});
         E(kMul, {d(Sc, 0x4), r(Sc, Z), ci(Q, W)});
-        E(kMul, {d(Sc, 0x4), r(Sc, Z), r(Sv, W)});
-        E(kMad, {d(Acc, 0x7), r(Sc, Z), ci(Col), r(Acc)});
+        E(kMad, {d(lampTemp, out), r(Sc, Z), r(Sv, W), r(lampTemp, Y)});  // + the ground's light
     }
-    // The 3 dp3 c27..29 and the wrap on their result go; the colour products become movs (Acc enters once, at k = 0).
+    // Edits: the 3 dp3s and the wrap go; the block computes the three weights where the first dp3 was; the position is
+    // kept after the last oPos write.
     struct Edit {
         size_t at, n;
         std::vector<DWORD> code;
     };
     std::vector<Edit> ed;
     for (int k = 0; k < 3; k++) ed.push_back({ins[dirAt[k]].at, ins[dirAt[k]].len + 1, {}});
-    for (long i = first; i < colAt[0]; i++) {
-        const Ins& x = ins[i];
-        if ((x.op == kMad || x.op == kMax) && Type(t[x.at + 1]) == kTemp && Num(t[x.at + 1]) == lampTemp && WMask(t[x.at + 1]) == 0xE)
-            ed.push_back({x.at, x.len + 1, {}});
-    }
-    for (int k = 0; k < 3; k++) {
-        const Ins& x = ins[colAt[k]];
-        const auto o = Operands(t, x);
-        if (k == 0) ed.push_back({x.at, x.len + 1, {Op(kMov, 2), t[o[0]], Src(kTemp, Acc)}});
-        else if (o.size() >= 4) ed.push_back({x.at, x.len + 1, {Op(kMov, 2), t[o[0]], t[o[3]]}}); // mad dD, rL, cCol, rS -> mov dD, rS
-        else return false;
-    }
+    ed.push_back({ins[wrapMad].at, ins[wrapMad].len + 1, {}});
+    ed.push_back({ins[wrapMax].at, ins[wrapMax].len + 1, {}});
     ed.push_back({ins[first].at, 0, c});
+    ed.push_back({ins[lastPos].at + ins[lastPos].len + 1, 0, keep});
     if (!pre.empty()) ed.push_back({1, 0, pre});
     std::sort(ed.begin(), ed.end(), [](const Edit& a, const Edit& b) { return a.at > b.at || (a.at == b.at && a.n > b.n); });
     for (const Edit& e : ed) {

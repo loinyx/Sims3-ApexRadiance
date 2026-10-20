@@ -72,6 +72,94 @@ static void Check(bool ok, const char* what) {
     }
 }
 
+// Any foliage variant: patched with neutral lamps (1 km along the slot directions, no crown, no bounce, no transmission)
+// gives every output of the original shader, the lamp terms within 1% of the brightest. v5: the instance index input.
+static bool NeutralMatches(IDirect3DDevice9* dv, const std::vector<uint32_t>& original, const char* name, const float v5[4]) {
+    std::vector<uint32_t> patched = original;
+    int B = -1;
+    if (!FoliageVertexLamps::Patch(patched, B)) {
+        std::printf("FAIL: %s not patched\n", name);
+        return false;
+    }
+    IDirect3DVertexShader9 *vsP = nullptr, *vsO = nullptr;
+    if (FAILED(dv->CreateVertexShader(reinterpret_cast<const DWORD*>(patched.data()), &vsP)) ||
+        FAILED(dv->CreateVertexShader(reinterpret_cast<const DWORD*>(original.data()), &vsO))) {
+        std::printf("FAIL: %s patched shader rejected by D3D9\n", name);
+        return false;
+    }
+    std::vector<float> C(256 * 4, 0.f);
+    const auto set = [&](int r, float x, float y, float z, float ww) { C[r * 4] = x, C[r * 4 + 1] = y, C[r * 4 + 2] = z, C[r * 4 + 3] = ww; };
+    const int I = 3; // instance 1
+    set(I + 1, 1, 0, 0, 1);
+    set(I + 2, 1, 0.5f, 0, 0);
+    for (int r = 100; r < 130; r++) set(r, r % 4 == 1, r % 4 == 2, r % 4 == 3, r % 4 == 0); // view rows, sun, fog: anything fixed
+    set(255, 1, 0, 0, 0);
+    const V3 dirs[3] = {{0.6f, 0.3f, 0.74f}, {-0.2f, 0.95f, 0.24f}, {0.1f, -0.4f, -0.91f}};
+    for (int k = 0; k < 3; k++) {
+        const float dl = std::sqrt(Dot(dirs[k], dirs[k]));
+        set(27 + I + k, dirs[k].x, dirs[k].y, dirs[k].z, 0);
+        set(54 + I + k, 0.3f + 0.2f * k, 0.5f, 0.2f, 0);
+        set(B + I + k, dirs[k].x / dl * 1000.0f, dirs[k].y / dl * 1000.0f, dirs[k].z / dl * 1000.0f, 1e12f);
+        set(B + 27 + I + k, 0, 1e6f * dl, kMinD2, 0);
+    }
+    set(B + 54 + I, 0, 0, 0, 1);
+    set(B + 55 + I, 1, 0, 0, 0);
+    set(B + 56 + I, 1e30f, 1e30f, 1e30f, 0);
+    const D3DVERTEXELEMENT9 in[] = {{0, 0, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_POSITION, 0}, {0, 16, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_NORMAL, 0},
+                                    {0, 32, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_TEXCOORD, 0}, {0, 48, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_TEXCOORD, 1},
+                                    {0, 64, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_TEXCOORD, 2}, {0, 80, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_TEXCOORD, 3},
+                                    D3DDECL_END()};
+    IDirect3DVertexDeclaration9* di = nullptr;
+    dv->CreateVertexDeclaration(in, &di);
+    const int n = 1000;
+    std::vector<float> vb(n * 24);
+    srand(11);
+    const auto rnd = [] { return rand() / static_cast<float>(RAND_MAX); };
+    for (int i = 0; i < n; i++) {
+        float* v = &vb[i * 24];
+        v[0] = (rnd() * 2 - 1) * 1.4f, v[1] = 0.3f + rnd() * 3.4f, v[2] = (rnd() * 2 - 1) * 1.4f, v[3] = 1;
+        for (int k = 4; k < 7; k++) v[k] = rnd() * 254;
+        v[7] = 127;
+        for (int j = 8; j < 20; j++) v[j] = 1;
+        for (int j = 0; j < 4; j++) v[20 + j] = v5[j];
+    }
+    // every output: position, two colours, five 4-component texture coordinates
+    const DWORD fvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_SPECULAR | D3DFVF_TEX5 | D3DFVF_TEXCOORDSIZE4(0) | D3DFVF_TEXCOORDSIZE4(1) |
+                      D3DFVF_TEXCOORDSIZE4(2) | D3DFVF_TEXCOORDSIZE4(3) | D3DFVF_TEXCOORDSIZE4(4);
+    const UINT stride = 16 + 4 + 4 + 5 * 16;
+    IDirect3DVertexBuffer9 *src = nullptr, *outP = nullptr, *outO = nullptr;
+    dv->CreateVertexBuffer(n * 96, 0, 0, D3DPOOL_SYSTEMMEM, &src, nullptr);
+    dv->CreateVertexBuffer(n * stride, 0, fvf, D3DPOOL_SYSTEMMEM, &outP, nullptr);
+    dv->CreateVertexBuffer(n * stride, 0, fvf, D3DPOOL_SYSTEMMEM, &outO, nullptr);
+    void* pv = nullptr;
+    src->Lock(0, 0, &pv, 0);
+    std::memcpy(pv, vb.data(), n * 96);
+    src->Unlock();
+    dv->SetVertexDeclaration(di);
+    dv->SetVertexShaderConstantF(0, C.data(), 256);
+    dv->SetStreamSource(0, src, 0, 96);
+    dv->SetVertexShader(vsP);
+    const bool okP = SUCCEEDED(dv->ProcessVertices(0, 0, n, outP, nullptr, 0));
+    dv->SetVertexShader(vsO);
+    const bool okO = SUCCEEDED(dv->ProcessVertices(0, 0, n, outO, nullptr, 0));
+    void *a = nullptr, *b = nullptr;
+    outP->Lock(0, 0, &a, 0);
+    outO->Lock(0, 0, &b, 0);
+    float worst = 0, peak = 0;
+    bool samePos = true;
+    for (int i = 0; i < n; i++) {
+        const float* p = reinterpret_cast<const float*>(static_cast<const char*>(a) + i * stride);
+        const float* o = reinterpret_cast<const float*>(static_cast<const char*>(b) + i * stride);
+        for (int k = 0; k < 4; k++) samePos = samePos && p[k] == o[k];
+        for (int k = 6; k < 26; k++) worst = std::max(worst, std::fabs(p[k] - o[k])), peak = std::max(peak, std::fabs(o[k]));
+    }
+    outP->Unlock();
+    outO->Unlock();
+    worst /= std::max(peak, 1e-6f);
+    std::printf("%s: patched (constants c%d..), neutral instance worst difference %.2e of the largest output\n", name, B, worst);
+    return okP && okO && samePos && worst < 0.01f;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) return 2;
     std::ifstream f(argv[1], std::ios::binary);
@@ -233,6 +321,18 @@ int main(int argc, char** argv) {
         worst /= std::max(peak, 1e-6f);
         std::printf("Neutral instance: worst difference from the old shader %.2e of its brightest light\n", worst);
         Check(worst < 0.01f, "a neutral instance draws the old per-instance light (within 1%)");
+    }
+    {
+        const float v5Canopy[4] = {0, 0, 0, 1}; // a0.w = 3 v5.w
+        Check(NeutralMatches(dv, original, "Canopy variant", v5Canopy), "canopy variant: a neutral instance gives every output of the original");
+    }
+    if (argc > 2) { // the trunk and branch variant ("tree 2"): a0.x = v5.z, a0.z = v5.w, a0.w = 3 v5.y
+        std::ifstream g(argv[2], std::ios::binary);
+        std::vector<char> rawTrunk((std::istreambuf_iterator<char>(g)), {});
+        std::vector<uint32_t> trunk(rawTrunk.size() / 4);
+        std::memcpy(trunk.data(), rawTrunk.data(), trunk.size() * 4);
+        const float v5Trunk[4] = {0, 1, 3, 3};
+        Check(trunk.size() > 2 && NeutralMatches(dv, trunk, "Trunk variant", v5Trunk), "trunk variant: patched, loads, and a neutral instance gives every output of the original");
     }
     std::printf("Foliage vertex lamps: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
