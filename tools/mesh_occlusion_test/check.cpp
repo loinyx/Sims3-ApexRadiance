@@ -5,6 +5,7 @@
 #include "features/mesh_occlusion.h"
 #include "features/mesh_budget_policy.h"
 #include "build_flavor.h"
+#include "features/dev_switches.h"
 #include <wrl/client.h>
 #include <unordered_map>
 #include <array>
@@ -91,6 +92,8 @@ void Collect(IDirect3DDevice9* dev,bool gap,bool index32=false,bool badIndex=fal
 }
 int main(int argc,char** argv){
     if(argc<3)return 2;
+    // Built with /DAPEX_DEVELOPMENT_BUILD_FLAVOR the development switches are on: the same checks then cover their paths.
+    if constexpr(DevSwitches::kCompiled){DevSwitches::drawReadsNoWait=true;DevSwitches::occlusionRelight=true;}
     std::vector<MeshBudget::Entry> entries={{1,4093,.001},{2,4093,.001}};
     std::vector<uint64_t> victims;
     Check(MeshBudget::Plan(entries,8186,1088,.1,8192,128,victims)&&victims==std::vector<uint64_t>{1},"captured 1088-triangle draw can replace lower coverage at 8186 occupancy");

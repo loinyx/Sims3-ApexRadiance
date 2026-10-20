@@ -6,6 +6,7 @@
 #include <iostream>
 #include <thread>
 namespace ApexLog { void Write(Level,const std::string&,const std::source_location&) noexcept {} }
+namespace AllocatorTuning { unsigned TrimNow(const char*) { return 0; } } // development-build allocator trim: off here
 uint32_t g_exeTimestamp=0x52DEC247;
 namespace GameAddr {
 bool IsFixed(){return true;} uintptr_t Get(Id){return 0;}

@@ -1,4 +1,5 @@
 #include "memory_telemetry.h"
+#include "allocator_tuning.h"
 #include "memory_policy.h"
 #include "fast_refpack.h"
 #include "fast_memory.h"
@@ -311,6 +312,7 @@ int __fastcall SaveDispatchHook(void* owner,void*,void* a,void* b) {
     const uint64_t before=PrivateBytes();
     const auto queued=FastMemory::PrepareForSave();
     const auto released=FastRefPack::PrepareForSave();
+    AllocatorTuning::TrimNow("save"); // numbered development builds, allocator_trim: the allocator's own trim of free core tops
     const bool reserve=LetReserveGo();
     char line[256];
     std::snprintf(line,sizeof line,"[MemoryBudget] Early save preparation: %llu KiB of inactive Apex storage released, %u queued releases, reserve %s; private entry %llu KiB",

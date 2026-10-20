@@ -9,6 +9,8 @@
 #include "apex_paths.h"
 #include "apex_version.h"
 #include "high_alloc.h"
+#include "va_ledger.h"
+#include "game_alloc_categories.h"
 #include <windows.h>
 #include <psapi.h>
 #include <cstdio>
@@ -92,9 +94,14 @@ Snapshot Take() {
     std::vector<Block> frees;
     std::vector<Image> images;
     uintptr_t allocBase = 0, allocType = 0;
-    uint64_t allocSize = 0;
+    uint64_t allocSize = 0, allocCommit = 0, allocReserve = 0;
+    bool allocGuard = false;
+    VaLedger::BeginScan();
     auto closeAlloc = [&] {
         if (!allocBase) return;
+        VaLedger::Account(allocBase, static_cast<DWORD>(allocType), allocCommit, allocReserve, allocGuard);
+        allocCommit = allocReserve = 0;
+        allocGuard = false;
         s.allocations++;
         if (allocType == MEM_PRIVATE) {
             const int c = ClassOf(allocSize);
@@ -137,9 +144,12 @@ Snapshot Take() {
             const int k = m.Type == MEM_IMAGE ? 0 : m.Type == MEM_MAPPED ? 1 : 2;
             if (m.State == MEM_COMMIT) {
                 s.committed[k] += size;
+                allocCommit += size;
+                if (m.Protect & PAGE_GUARD) allocGuard = true;
                 if (k == 2 && m.Protect == PAGE_EXECUTE_READWRITE) s.privateExec += size;
             } else {
                 s.reserved[k] += size;
+                allocReserve += size;
             }
         }
         a = end;
@@ -147,6 +157,7 @@ Snapshot Take() {
     s.scanComplete = a >= hi;
     s.queryEnd = hi;
     closeAlloc();
+    VaLedger::EndScan(s.sampledAt);
     std::sort(frees.begin(), frees.end(), [](const Block& x, const Block& y) { return x.size > y.size; });
     for (size_t i = 0; i < 5 && i < frees.size(); i++) s.top[i] = frees[i];
     std::sort(images.begin(), images.end(), [](const Image& x, const Image& y) { return x.size > y.size; });
@@ -305,6 +316,7 @@ DWORD WINAPI Proc(LPVOID) {
         }
         WriteMemorySample(s);
         WriteGameplayTelemetry(s);
+        if (n % kLogEvery == 0) GameAllocCategories::Report(s.sampledAt);
         if (n++ % kLogEvery == 0) {
             LOG_INFO("[AddressSpace] " + LineOf(s));
             LOG_INFO(std::format("[MemoryAnalysis] {} | private {:.0f} MiB, working set {:.0f} MiB, system available physical {:.0f} MiB | scan {} in {} ms | Apex high allocator {:.1f} MiB (not all Apex memory)",
@@ -318,7 +330,7 @@ DWORD WINAPI Proc(LPVOID) {
 } // namespace
 
 void Start() {
-    if (!kDevToolsBuild || kPublicBuild) return;
+    if (!kDevToolsBuild || (kPublicBuild && !VaLedger::Enabled())) return; // the owner ledger needs the scan even with developer mode off
     if (g_thread) return;
     g_stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (g_stop) g_thread = CreateThread(nullptr, 64 * 1024, Proc, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
@@ -334,8 +346,8 @@ void Stop() {
 std::string ReportText() {
     std::lock_guard<std::mutex> lk(g_lock);
     if (!g_haveLast) return "";
-    return std::format("Address space (VirtualQuery every 10 s; the game is 32-bit, 4 GB):\n   latest ({}):\n{}   session minimum of the largest free block ({}):\n{}", g_last.when,
-                       TableOf(g_last), g_min.when, TableOf(g_min));
+    return std::format("Address space (VirtualQuery every 10 s; the game is 32-bit, 4 GB):\n   latest ({}):\n{}   session minimum of the largest free block ({}):\n{}{}", g_last.when,
+                       TableOf(g_last), g_min.when, TableOf(g_min), VaLedger::ReportText() + GameAllocCategories::ReportText());
 }
 
 } // namespace AddressSpace

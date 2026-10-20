@@ -20,6 +20,10 @@
 #include "apex_util.h"
 #include "apex_version.h"
 #include "address_space.h"
+#include "va_ledger.h"
+#include "dev_switches.h"
+#include "game_alloc_categories.h"
+#include "allocator_tuning.h"
 #include "build_flavor.h"
 #include "conflict_guard.h"
 #include "crash_report.h"
@@ -167,6 +171,9 @@ DWORD InitBody() {
 
     try {
         ApexConfig::LoadDeveloperMode();
+        DevSwitches::Load();             // numbered development builds: [dev_build] measurement and fix switches
+        VaLedger::InstallEarly();        // measurements on: who reserves the address space
+        GameAllocCategories::Install();  // measurements on: the game heap by EA memory category
         PatchManager::Get().CreateAll();
         ApexConfig::EnsureMigrated();
         ApexConfig::LoadSettings();
@@ -195,6 +202,7 @@ DWORD InitBody() {
             LOG_ERROR(std::string("[Main] Features could not be started: ") + e.what());
         }
         ApexGui::SetStartup(ApexGui::Startup::Running);
+        AllocatorTuning::Install(); // numbered development builds: allocator_trim / allocator_top_down (the allocator exists by now)
         LOG_INFO("[Main] Features started");
         LoadTiming::NoteFeaturesStarted();
     }
@@ -207,6 +215,7 @@ DWORD InitBody() {
         if (ApexGui::GetStartup() == ApexGui::Startup::Running) HookGuard::Try("Pump: features' periodic work", [] { PatchManager::Get().UpdateAll(); });
         HookGuard::Try("Pump: settings autosave", [] { ApexConfig::PumpAutosave(); });
         HookGuard::Try("Pump: load timing", [] { LoadTiming::Pump(); }); // log lines only ([LoadTiming])
+        HookGuard::Try("Pump: allocator trim", [] { AllocatorTuning::Pump(); }); // numbered development builds, allocator_trim
         if constexpr (kDevToolsBuild) if(!kPublicBuild) HookGuard::Try("Pump: lot loading analysis", [] { LotLoadAnalysis::Pump(); });
         const ULONGLONG now = GetTickCount64();
         if (now - lastGuardTick >= 1000) {

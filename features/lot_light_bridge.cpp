@@ -32,6 +32,8 @@
 #include "shader_patches.h"
 #include "mesh_occlusion.h"
 #include "mesh_budget_policy.h"
+#include "dev_switches.h"
+#include <array>
 #include <wrl/client.h>
 #include "lightmap_smooth.h"
 #include "terrain_chunk_relight.h"
@@ -1055,6 +1057,7 @@ struct FenceGroup {
     DWORD read = 0, seen = 0;
 };
 std::unordered_map<uint64_t, FenceGroup> g_fenceGroups;
+std::unordered_map<uint64_t, uint8_t> g_fenceBusy; // draw_reads_nowait: busy answers per fence group since its last read
 // mesh boxes by buffer, range and layout (a buffer address can be reused: emptied with the lots and on a world change)
 std::unordered_map<uint64_t, std::array<float, 7>> g_meshBoxes;
 std::atomic<long> g_fenceGroupReads{0}, g_fenceWalls{0};
@@ -1188,12 +1191,28 @@ unsigned g_solidNotes=0;
 unsigned g_solidReplaced=0,g_solidRejected=0;
 DWORD g_solidNextScan=0;
 bool g_solidScanning=false;
+// Dev switch draw_reads_nowait: a buffer the GPU still uses is not waited for inside the draw hook; the read is retried on
+// a later scan frame, and after three busy answers it waits as before (every group is still read, so the result is the same).
+std::unordered_map<uint64_t,uint8_t> g_solidBusy;
+bool g_solidSawBusy=false;
 template<class T> struct SolidRead {
-    T* buffer;void* data=nullptr;
-    explicit SolidRead(T* b):buffer(b){}
-    bool Lock(UINT offset,UINT bytes){return SUCCEEDED(buffer->Lock(offset,bytes,&data,D3DLOCK_READONLY))&&data;}
+    T* buffer;void* data=nullptr;bool noWait=false;
+    explicit SolidRead(T* b,bool nowait=false):buffer(b),noWait(nowait){}
+    bool Lock(UINT offset,UINT bytes){
+        const HRESULT hr=buffer->Lock(offset,bytes,&data,D3DLOCK_READONLY|(noWait?D3DLOCK_DONOTWAIT:0));
+        if(hr==D3DERR_WASSTILLDRAWING){data=nullptr;g_solidSawBusy=true;return false;}
+        return SUCCEEDED(hr)&&data;
+    }
     ~SolidRead(){if(data)buffer->Unlock();}
 };
+// FNV-1a over 64-bit words (the byte-wise loop hashed up to 147 KB per group on the render thread); only a lookup key:
+// equality is still confirmed with memcmp.
+uint64_t SolidGeometryHash(const void* data,size_t bytes){
+    uint64_t h=1469598103934665603ull;const auto* p=static_cast<const BYTE*>(data);size_t i=0;
+    for(;i+8<=bytes;i+=8){uint64_t w;std::memcpy(&w,p+i,8);h=(h^w)*1099511628211ull;}
+    for(;i<bytes;++i)h=(h^p[i])*1099511628211ull;
+    return h;
+}
 UINT SolidElementBytes(BYTE type){
     switch(type){case D3DDECLTYPE_FLOAT3:return 12;case D3DDECLTYPE_FLOAT4:return 16;
     case D3DDECLTYPE_SHORT4:case D3DDECLTYPE_SHORT4N:case D3DDECLTYPE_FLOAT16_4:return 8;default:return 0;}
@@ -1256,19 +1275,40 @@ void NoteSolidMeshImpl(IDirect3DDevice9* dev,D3DPRIMITIVETYPE type,INT baseVerte
     const uint64_t indexAt=static_cast<uint64_t>(start)*indexBytes,indexSize=static_cast<uint64_t>(primitives)*3*indexBytes;
     const uint64_t instanceBytes=static_cast<uint64_t>(instances)*instanceStride;
     if(vertexAt+vertexBytes>vd.Size||indexAt+indexSize>indexDesc.Size||instanceOffset+instanceBytes>id.Size)return;
-    SolidRead vr(vb.Get());if(!vr.Lock(static_cast<UINT>(vertexAt),static_cast<UINT>(vertexBytes)))return;
+    const bool nowait=DevSwitches::DrawReadsNoWait();
+    // A full busy table (groups no longer drawn keep their entries until a reset) waits as before: a group whose count can
+    // no longer grow would otherwise never be read
+    const bool busyFull=g_solidBusy.size()>=1024&&!g_solidBusy.contains(key);
+    const bool tryNoWait=nowait&&!busyFull&&!(g_solidBusy.contains(key)&&g_solidBusy[key]>=3);
+    g_solidSawBusy=false;
+    const auto busy=[&]{
+        if(!g_solidSawBusy)return;
+        g_solidAttempts.erase(key); // retried on the next scan frame, not in 5 s
+        ++g_solidBusy[key]; // only reached with tryNoWait, so the table is below 1024 or already holds the key
+    };
+    SolidRead vr(vb.Get(),tryNoWait);if(!vr.Lock(static_cast<UINT>(vertexAt),static_cast<UINT>(vertexBytes))){busy();return;}
     float lo[3],hi[3];
     if(!MeshBox(static_cast<const BYTE*>(vr.data),vertices,stride,layout,lo,hi))return;
-    SolidRead ir(indices.Get());SolidRead sr(instanceBuffer.Get());
-    if(!ir.Lock(static_cast<UINT>(indexAt),static_cast<UINT>(indexSize))||!sr.Lock(instanceOffset,static_cast<UINT>(instanceBytes)))return;
+    SolidRead ir(indices.Get(),tryNoWait);SolidRead sr(instanceBuffer.Get(),tryNoWait);
+    if(!ir.Lock(static_cast<UINT>(indexAt),static_cast<UINT>(indexSize))||!sr.Lock(instanceOffset,static_cast<UINT>(instanceBytes))){busy();return;}
+    if(nowait)g_solidBusy.erase(key);
     std::vector<MeshOcclusion::Triangle> triangles;triangles.reserve(static_cast<size_t>(instances)*primitives);
     std::vector<MeshOcclusion::Vec> points(vertices);
+    // draw_reads_nowait: each vertex is read once, not once per instance (ReadElement is instance-independent; Decode
+    // gets the very same inputs, so the triangles are bit-identical)
+    std::vector<std::array<float,4>> positions;
+    if(nowait){
+        positions.resize(vertices);
+        for(UINT i=0;i<vertices;++i)if(!ReadElement(static_cast<const BYTE*>(vr.data)+i*stride+layout.posOff,layout.posType,positions[i].data()))return;
+    }
     float placementLow=1e30f,placementHigh=-1e30f;
     for(UINT instance=0;instance<instances;++instance){
         const auto* instanceData=static_cast<const BYTE*>(sr.data)+instance*instanceStride;float place[4],turn[4];
         if(!ReadElement(instanceData+layout.placeOff,layout.placeType,place)||!ReadElement(instanceData+layout.turnOff,layout.turnType,turn))return;
         placementLow=std::min(placementLow,place[1]);placementHigh=std::max(placementHigh,place[1]);
-        for(UINT i=0;i<vertices;++i){float p[4];
+        if(nowait){
+            for(UINT i=0;i<vertices;++i)if(!MeshOcclusion::Decode(positions[i].data(),place,turn,points[i]))return;
+        }else for(UINT i=0;i<vertices;++i){float p[4];
             if(!ReadElement(static_cast<const BYTE*>(vr.data)+i*stride+layout.posOff,layout.posType,p)||!MeshOcclusion::Decode(p,place,turn,points[i]))return;
         }
         for(UINT i=0;i<primitives;++i){UINT index[3];
@@ -1278,8 +1318,9 @@ void NoteSolidMeshImpl(IDirect3DDevice9* dev,D3DPRIMITIVETYPE type,INT baseVerte
         }
     }
     uint64_t geometry=1469598103934665603ull;
-    const auto* bytes=reinterpret_cast<const BYTE*>(triangles.data());
-    for(size_t i=0;i<triangles.size()*sizeof(triangles[0]);++i)geometry=(geometry^bytes[i])*1099511628211ull;
+    if(nowait)geometry=SolidGeometryHash(triangles.data(),triangles.size()*sizeof(triangles[0]));
+    else{const auto* bytes=reinterpret_cast<const BYTE*>(triangles.data());
+        for(size_t i=0;i<triangles.size()*sizeof(triangles[0]);++i)geometry=(geometry^bytes[i])*1099511628211ull;}
     if(auto same=g_solidGeometry.find(geometry);same!=g_solidGeometry.end()&&same->second!=key){
         auto prior=g_solidGroups.find(same->second);
         if(prior!=g_solidGroups.end()&&prior->second.triangles.size()==triangles.size()&&
@@ -1329,7 +1370,7 @@ void PumpSolidMeshes(){
     if(!kMemoryOptimizationsEnabled)return;
     const DWORD now=GetTickCount();
     const auto reset=MeshOcclusion::reset.load(std::memory_order_acquire);
-    if(reset!=g_solidReset){g_solidGroups.clear();g_solidGeometry.clear();g_solidAttempts.clear();g_solidPs.clear();g_solidTriangles=0;g_solidDirty=0;g_solidReset=reset;g_solidNextScan=0;g_solidScanning=false;g_solidReplaced=g_solidRejected=0;}
+    if(reset!=g_solidReset){g_solidGroups.clear();g_solidGeometry.clear();g_solidAttempts.clear();g_solidBusy.clear();g_solidPs.clear();g_solidTriangles=0;g_solidDirty=0;g_solidReset=reset;g_solidNextScan=0;g_solidScanning=false;g_solidReplaced=g_solidRejected=0;}
     // Once every visible group is cached, discovery need not query device state on every frame.
     if(g_solidScanning)g_solidNextScan=now+(g_solidReadBudget==1?100:25);
     g_solidReadBudget=!g_solidNextScan||static_cast<int32_t>(now-g_solidNextScan)>=0?1:0;
@@ -1340,7 +1381,24 @@ void PumpSolidMeshes(){
     if(!g_solidDirty||now-g_solidDirty<500||now-g_solidPublished<2000)return;
     try{
         std::vector<MeshOcclusion::Triangle> triangles;triangles.reserve(g_solidTriangles);
-        for(const auto& [key,group]:g_solidGroups){(void)key;triangles.insert(triangles.end(),group.triangles.begin(),group.triangles.end());}
+        if(DevSwitches::OcclusionRelight()){
+            // occlusion_relight: groups in key order, so the same set always gives the same array; an unchanged set is not
+            // published again (a publish bumps the occlusion generation, which relights every lot's indoor light)
+            std::vector<uint64_t> keys;keys.reserve(g_solidGroups.size());
+            for(const auto& [key,group]:g_solidGroups){(void)group;keys.push_back(key);}
+            std::sort(keys.begin(),keys.end());
+            for(uint64_t key:keys){const auto& group=g_solidGroups[key];triangles.insert(triangles.end(),group.triangles.begin(),group.triangles.end());}
+            static std::vector<MeshOcclusion::Triangle> s_lastPublished;
+            static uint32_t s_lastReset=0;
+            if(s_lastReset==g_solidReset&&triangles.size()==s_lastPublished.size()&&
+               (triangles.empty()||!std::memcmp(triangles.data(),s_lastPublished.data(),triangles.size()*sizeof(triangles[0])))){
+                g_solidPublished=now;g_solidDirty=0;
+                static unsigned s_skips=0;
+                if(s_skips++<20)LOG_INFO(std::format("[MeshOcclusion] Unchanged set of {} triangles from {} groups not published again (no relight)",triangles.size(),g_solidGroups.size()));
+                return;
+            }
+            s_lastPublished=triangles;s_lastReset=g_solidReset;
+        }else for(const auto& [key,group]:g_solidGroups){(void)key;triangles.insert(triangles.end(),group.triangles.begin(),group.triangles.end());}
         MeshOcclusion::Publish(std::move(triangles));g_solidPublished=now;g_solidDirty=0;
         LOG_INFO(std::format("[MeshOcclusion] Published {} triangles from {} opaque instanced groups; open gaps retain no triangles",g_solidTriangles,g_solidGroups.size()));
     }catch(...){g_solidPublished=now;}
@@ -1401,6 +1459,23 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
     FenceGroup& g = g_fenceGroups[key];
     g.seen = now ? now : 1;
     if (!g.read || now - g.read > 60000) {
+        // draw_reads_nowait: the 60 s refresh of a group already read does not wait for the GPU; while its instance buffer is
+        // busy the walls read last time stay in use and the next draw tries again (three busy answers: it waits, as before)
+        if (DevSwitches::DrawReadsNoWait() && g.read && !g.walls.empty() && stride1 >= 12 && stride1 <= 256 && g_fenceBusy.size() < 4096) {
+            uint8_t& busy = g_fenceBusy[key];
+            if (busy < 3) {
+                void* probe = nullptr;
+                const HRESULT hr = vb1->Lock(off1, count * stride1, &probe, D3DLOCK_READONLY | D3DLOCK_DONOTWAIT);
+                if (probe) vb1->Unlock();
+                if (hr == D3DERR_WASSTILLDRAWING) {
+                    ++busy;
+                    vb0->Release();
+                    vb1->Release();
+                    return;
+                }
+            }
+            busy = 0;
+        }
         g.read = now ? now : 1;
         g_fenceGroupReads.fetch_add(1, std::memory_order_relaxed);
         const FenceLayout L = ReadFenceLayout(dev);
@@ -3692,6 +3767,7 @@ bool ReadInstancePositions(const BYTE* p, UINT count, UINT stride, GroupCentre& 
         return false;
     }
 }
+std::unordered_map<uint64_t, uint8_t> g_centreBusy; // draw_reads_nowait: busy answers per group since its last read
 const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
     UINT freq = 0;
     if (FAILED(dev->GetStreamSourceFreq(0, &freq)) || !(freq & D3DSTREAMSOURCE_INDEXEDDATA)) return nullptr;
@@ -3701,14 +3777,26 @@ const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
     if (FAILED(dev->GetStreamSource(1, &vb, &off, &stride)) || !vb) return nullptr;
     const GroupCentre* result = nullptr;
     if (count > 0 && count <= 4096 && stride >= 12 && stride <= 256) {
-        if (g_groupCentres.size() > 4096) g_groupCentres.clear(); // groups come and go with lots
+        if (g_groupCentres.size() > 4096) g_groupCentres.clear(), g_centreBusy.clear(); // groups come and go with lots
         const uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb)) << 32) ^ (static_cast<uint64_t>(off) << 12) ^ (static_cast<uint64_t>(count) << 1) ^ stride;
         GroupCentre& g = g_groupCentres[key];
         const DWORD now = GetTickCount();
         if (!g.at || now - g.at > 5000) {
-            g.at = now ? now : 1;
+            // draw_reads_nowait: a refresh of a group already read does not wait for the GPU; while the buffer is busy the
+            // last positions stay in use and the next draw tries again (three busy answers: it waits, as before)
+            uint8_t* busy = nullptr;
+            if (DevSwitches::DrawReadsNoWait() && g.at && g.ok) busy = &g_centreBusy[key];
+            const bool nowait = busy && *busy < 3;
             void* p = nullptr;
-            g.ok = SUCCEEDED(vb->Lock(off, count * stride, &p, D3DLOCK_READONLY)) && p && ReadInstancePositions(static_cast<const BYTE*>(p), count, stride, g);
+            const HRESULT hr = vb->Lock(off, count * stride, &p, D3DLOCK_READONLY | (nowait ? D3DLOCK_DONOTWAIT : 0));
+            if (nowait && hr == D3DERR_WASSTILLDRAWING) {
+                ++*busy;
+                p = nullptr;
+            } else {
+                g.at = now ? now : 1;
+                if (busy) *busy = 0;
+                g.ok = SUCCEEDED(hr) && p && ReadInstancePositions(static_cast<const BYTE*>(p), count, stride, g);
+            }
             if (p) vb->Unlock();
         }
         if (g.ok) result = &g;
@@ -6764,6 +6852,7 @@ void OnWorldChanged() {
     g_haveLastEdgeRect = false;
     g_shadeQueue.clear(); // the lamp shades waiting or building belong to the previous world's lots
     g_fenceGroups.clear(); // (garden walls of the old world)
+    g_fenceBusy.clear();
     g_fenceGen++;
     g_meshBoxes.clear();
     g_fenceWalls = 0;
@@ -6776,6 +6865,7 @@ void OnWorldChanged() {
         if (m.tex) m.tex->Release();
     g_lotMasks.clear();
     g_groupCentres.clear();
+    g_centreBusy.clear();
 }
 
 void SetSoftLotEdges(bool on) { g_softEdges = on; }
@@ -7233,7 +7323,7 @@ std::string ObjectStatus() {
 
 void Shutdown(bool keepChunkMaps) {
     MeshOcclusion::Reset();
-    g_solidGroups.clear();g_solidGeometry.clear();g_solidAttempts.clear();g_solidPs.clear();g_solidTriangles=0;g_solidDirty=0;g_solidNotes=0;g_solidNextScan=0;g_solidScanning=false;
+    g_solidGroups.clear();g_solidGeometry.clear();g_solidAttempts.clear();g_solidBusy.clear();g_solidPs.clear();g_solidTriangles=0;g_solidDirty=0;g_solidNotes=0;g_solidNextScan=0;g_solidScanning=false;
     g_keepChunks = keepChunkMaps;
     g_objectFix = false;
     g_wallGain = 1.0f;
@@ -7250,6 +7340,7 @@ void Shutdown(bool keepChunkMaps) {
     g_shadeWorker.Stop();
     ReleaseLotMasks();
     g_fenceGroups.clear();
+    g_fenceBusy.clear();
     g_fenceGen++;
     g_meshBoxes.clear();
     g_fenceWalls = 0;

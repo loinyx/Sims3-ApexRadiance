@@ -11,6 +11,15 @@ const std::wstring& ApexDirectory() {
 }
 }
 namespace GameAddr { bool Resolved() { return false; } uintptr_t Get(Id) { return 0; } }
+// The development-build ledgers are observed separately; here they stay off.
+namespace VaLedger {
+bool Enabled() { return false; }
+void BeginScan() {}
+void Account(uintptr_t, DWORD, uint64_t, uint64_t, bool) {}
+void EndScan(uint64_t) {}
+std::string ReportText() { return {}; }
+}
+namespace GameAllocCategories { void Report(unsigned long long) {} std::string ReportText() { return {}; } }
 
 int main() {
     kPublicBuild=false;
