@@ -22,6 +22,7 @@ const I18n::Pair kPairs[] = {
     {"A lot placed in Edit Town no longer stays on Processing", "Ein in Stadt bearbeiten platziertes Grundstück bleibt nicht mehr bei Verarbeitung hängen"},
     {"Area lights of a lot light the ground past the lot's border", "Flächenlichter eines Grundstücks beleuchten den Boden über die Grundstücksgrenze hinaus"},
     {"Lamps hidden behind objects no longer reflect on water", "Hinter Objekten verdeckte Lampen spiegeln sich nicht mehr im Wasser"},
+    {"Lamps placed on the ground light the lawn around them", "Auf den Boden gestellte Lampen beleuchten den Rasen um sie herum"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Der Mond beleuchtet die Stadt von weiter oben: keine dunklen Streifen mehr auf den Straßen bei Nacht"},
     {"Moonlight is softer by default and in every preset", "Das Mondlicht ist standardmäßig und in jeder Voreinstellung sanfter"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "Grundstücke laden flüssiger: die zusätzliche Lichtberechnung richtet sich nach deiner Bildrate"},

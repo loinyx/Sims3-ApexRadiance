@@ -22,6 +22,7 @@ const I18n::Pair kPairs[] = {
     {"A lot placed in Edit Town no longer stays on Processing", "Kaupungin muokkauksessa sijoitettu tontti ei enää jää Käsitellään-tilaan"},
     {"Area lights of a lot light the ground past the lot's border", "Tontin pintavalot valaisevat maata myös tontin rajan yli"},
     {"Lamps hidden behind objects no longer reflect on water", "Esineiden taakse piiloutuvat lamput eivät enää heijastu veteen"},
+    {"Lamps placed on the ground light the lawn around them", "Maahan asetetut lamput valaisevat ympäröivää nurmikkoa"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Kuu valaisee kaupunkia korkeammalta: teillä ei enää ole tummia raitoja yöllä"},
     {"Moonlight is softer by default and in every preset", "Kuunvalo on oletuksena ja kaikissa esiasetuksissa pehmeämpi"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "Tonttien lataus on sujuvampaa: ylimääräinen valaistuslaskenta mukautuu kuvanopeuteesi"},

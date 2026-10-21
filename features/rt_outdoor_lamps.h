@@ -29,6 +29,10 @@ namespace RtOutdoorLamps {
 
 // Render thread, every frame (Night Lighting's Present): the Instant lamp lighting, and Quick outdoor lamp edits keeping parts
 void SetEnabled(bool on);
+// (2.15.1) Lamps lying on the lot's ground light the lawn from at least 40 cm (developer A/B and how many times it applied)
+bool LowLampLift();
+void SetLowLampLift(bool on);
+long LowLampLifted();
 bool Enabled();
 bool Watching(); // any thread: on, or copies still to drop
 // Render thread, every frame: installs the callbacks once (EndScene pass, SetTexture swap, device reset)

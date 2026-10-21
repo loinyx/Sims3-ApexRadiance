@@ -22,6 +22,7 @@ const I18n::Pair kPairs[] = {
     {"A lot placed in Edit Town no longer stays on Processing", "在编辑城镇中放置的地块不再卡在“处理中”"},
     {"Area lights of a lot light the ground past the lot's border", "地块的区域灯光会照亮地块边界以外的地面"},
     {"Lamps hidden behind objects no longer reflect on water", "被物体挡住的灯不再在水面上反射"},
+    {"Lamps placed on the ground light the lawn around them", "放在地上的灯会照亮周围的草坪"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "月亮从更高处照亮城镇：夜晚道路上不再出现暗色条纹"},
     {"Moonlight is softer by default and in every preset", "月光默认更柔和，所有预设中也是如此"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "加载地块更流畅：额外的照明计算会根据你的帧率进行"},

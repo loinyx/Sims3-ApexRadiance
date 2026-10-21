@@ -15,6 +15,7 @@ constexpr const char* k2151Fixed[] = {
     "A lot placed in Edit Town no longer stays on Processing",
     "Area lights of a lot light the ground past the lot's border",
     "Lamps hidden behind objects no longer reflect on water",
+    "Lamps placed on the ground light the lawn around them",
     "The moon lights the town from higher up: no more dark stripes on roads at night",
     nullptr};
 constexpr const char* k2150Added[] = {

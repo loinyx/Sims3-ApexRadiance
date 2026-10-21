@@ -3068,6 +3068,10 @@ class NightTerrainRelightPatch : public ApexPatch {
         }
         if (ApexUi::Checkbox("Soft lot edges (A/B: off = plain max of lot and ground light)", &g_softLotEdges)) NotifySettingChanged();
         if (ApexUi::Checkbox("Moon height at night (A/B: off = the game's moon on the horizon)", &g_moonLift)) ObjectLightBridge::RequestRigRefresh();
+        bool lowLamp = RtOutdoorLamps::LowLampLift();
+        if (ApexUi::Checkbox("Lamps on the ground light the lawn from 40 cm (A/B: off = from their real 5 cm, Instant only)", &lowLamp)) RtOutdoorLamps::SetLowLampLift(lowLamp);
+        ImGui::SameLine();
+        ImGui::TextDisabled("%ld lamp draws lifted", RtOutdoorLamps::LowLampLifted());
         if (g_moonLift) {
             ImGui::SetNextItemWidth(220.0f);
             if (ImGui::SliderFloat("Least moon height (degrees)##MoonHeight", &g_moonHeightDeg, 5.0f, 60.0f, "%.0f") && !ApexUi::SliderDragging())

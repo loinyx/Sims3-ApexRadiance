@@ -22,6 +22,7 @@ const I18n::Pair kPairs[] = {
     {"A lot placed in Edit Town no longer stays on Processing", "A Város szerkesztésében lerakott telek már nem marad a Feldolgozás képernyőn"},
     {"Area lights of a lot light the ground past the lot's border", "Egy telek felületi fényei a telek határán túl is megvilágítják a talajt"},
     {"Lamps hidden behind objects no longer reflect on water", "A tárgyak mögé rejtett lámpák már nem tükröződnek a vízen"},
+    {"Lamps placed on the ground light the lawn around them", "A földre tett lámpák megvilágítják a körülöttük lévő gyepet"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "A hold magasabbról világítja meg a várost: éjjel már nincsenek sötét csíkok az utakon"},
     {"Moonlight is softer by default and in every preset", "A holdfény alapból és minden előbeállításban lágyabb"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "A telkek betöltése simább: a többlet világításszámítás a képkockasebességhez igazodik"},

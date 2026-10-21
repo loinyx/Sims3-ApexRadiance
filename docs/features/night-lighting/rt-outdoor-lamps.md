@@ -57,6 +57,11 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    A map the game writes again and again (its room solves, for instance while a lot stays loading) is relit for those
    writes at most every 0.5 s; a single write after a rest is relit at once (since 2.15.1; 21/10: 105 writes in 10 s,
    each relight 45 ms of floor mask with 28 lamps, logged as "relights for repeated game writes moved later").
+   On story 0's floor map, a lamp whose light stands less than 40 cm over the lot's ground (its base `+0xD4` taken into
+   lot space) is drawn from 40 cm (since 2.15.1): a lamp lying on the lawn, its light 5 cm up, lit a tree above it and
+   left the lawn dark, the law's light falling with its angle of incidence (21/10 F8 17-26-36). Walls, ceilings, objects
+   and trees keep its real place; Lamp lighting Classic and the world grass keep the game's. Developer A/B: Lighting >
+   Developer > *Lamps on the ground light the lawn from 40 cm*.
    Under DXVK the floor mask buffer is written in two copies, alternately: each write fills the one the last draws did not
    read and then becomes the drawn one, since a lock of a buffer the GPU may still read waits there (native D3D9 copies
    a managed buffer at its lock, with one copy as before).

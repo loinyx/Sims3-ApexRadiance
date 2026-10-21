@@ -22,6 +22,7 @@ const I18n::Pair kPairs[] = {
     {"A lot placed in Edit Town no longer stays on Processing", "En tomt som placeras i Redigera stad fastnar inte längre på Bearbetar"},
     {"Area lights of a lot light the ground past the lot's border", "En tomts ytljus lyser upp marken bortom tomtens kant"},
     {"Lamps hidden behind objects no longer reflect on water", "Lampor dolda bakom föremål speglas inte längre i vattnet"},
+    {"Lamps placed on the ground light the lawn around them", "Lampor som står på marken lyser upp gräsmattan runt dem"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Månen lyser upp staden högre uppifrån: inga mörka ränder på vägarna på natten"},
     {"Moonlight is softer by default and in every preset", "Månljuset är mjukare som standard och i alla förinställningar"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "Tomter laddas smidigare: det extra ljusarbetet följer din bildfrekvens"},
