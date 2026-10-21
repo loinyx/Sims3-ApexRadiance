@@ -30,6 +30,8 @@
 #include "apex_log.h"
 #include "game_addresses.h"
 #include "hook_guard.h"
+#include "dev_switches.h"
+#include "apex_memory.h"
 #include <bit>
 #include <windows.h>
 #include <algorithm>
@@ -79,6 +81,9 @@ std::atomic<const void*> g_deltaRoom{nullptr};
 std::atomic<long> c_deltas{0}, c_texels{0}, c_batches{0}, c_captures{0}, c_captureFails{0}, c_full{0}, c_checks{0}, c_checkBad{0};
 std::atomic<long> c_checkMax{-1}, c_records{0};
 std::atomic<long> c_gpuSkips{0}; // deltas left out because Real-time outdoor lamps draws every changed light
+std::atomic<long> c_leftLotDrops{0}; // (left_lot_release) records of rooms whose lot left, given back
+std::atomic<size_t> c_leftLotBytes{0};
+std::atomic<long> c_budgetDrops{0}; // records the memory budget dropped (the oldest unpinned first)
 std::atomic<size_t> g_bytes{0};
 std::atomic<float> g_lastMs{0.0f}, g_maxMs{0.0f};
 
@@ -149,6 +154,7 @@ struct Record {
     std::vector<DrawnSum, ApexMem::HighAllocator<DrawnSum>> drawnSum; // by texel, while lamps are collapsed (else empty)
     DWORD used = 0;
     size_t bytes = 0;
+    uint8_t gone = 0; // (left_lot_release) liveness sweeps in a row that found no loaded lot holding its story manager
 };
 std::recursive_mutex g_mx; // g_records (the light tree thread uses them, the render thread clears them)
 std::unordered_map<uint64_t, std::unique_ptr<Record>> g_records;
@@ -1633,6 +1639,7 @@ void SolveEnd(unsigned char* room) {
                                      oldest->second->story, oldest->second->cls, static_cast<double>(oldest->second->bytes) / (1 << 20),
                                      static_cast<double>(g_bytes.load()) / (1 << 20), g_records.size(), kMaxBytes >> 20));
                 NoteReason("memory budget");
+                c_budgetDrops.fetch_add(1, std::memory_order_relaxed);
                 EraseLocked(oldest->first);
             }
             // tight: logged once each time the kept parts pass kTightBytes, with what fills them
@@ -1885,8 +1892,48 @@ void ReplaySample(const void* sample, const float* out, bool masked, float visLu
     o.set = true;
 }
 
+// (left_lot_release) The kept parts of a room whose story manager no loaded lot holds any more (its lot left the game's lot
+// list, or the lot's lighting was built again with new managers). ValidateBasic accepts a record only for a room whose
+// manager is the record's (the room changed otherwise), so such a record can never serve a delta again: it only held its
+// share of kMaxBytes, and the budget then dropped the parts of live rooms first by age. Every kSweepMs in a live world (never
+// while one loads, nor when the lot list was not read in full); a record goes at the second sweep in a row that misses its
+// manager (LivenessPrune), so a lot streaming in keeps its parts.
+static void SweepLeftLots(DWORD now) {
+    constexpr DWORD kSweepMs = 10000;
+    static DWORD s_at = 0;
+    if (!DevSwitches::LeftLotRelease() || (s_at && now - s_at < kSweepMs)) return;
+    s_at = now | 1;
+    LivenessPrune::LiveSet mgrs;
+    if (!LevelLightShare::LiveStoryManagers(mgrs) || !mgrs.Size()) return;
+    size_t bytes = 0, rooms = 0, left = 0;
+    {
+        // (a worker copying an export holds g_mx for tens of ms: the render thread never waits for it; tried again next frame)
+        std::unique_lock<std::recursive_mutex> lk(g_mx, std::try_to_lock);
+        if (!lk.owns_lock()) {
+            s_at = 0;
+            return;
+        }
+        rooms = LivenessPrune::PruneInPlace(
+            g_records, [&mgrs](uint64_t, const std::unique_ptr<Record>& r) { return mgrs.Contains(r->mgr); },
+            [](std::unique_ptr<Record>& r) -> uint8_t& { return r->gone; },
+            [&bytes](uint64_t, std::unique_ptr<Record>& r) {
+                bytes += r->bytes;
+                g_bytes.fetch_sub(std::min(g_bytes.load(), r->bytes));
+            });
+        c_records.store(static_cast<long>(g_records.size()));
+        left = g_records.size();
+    }
+    if (!rooms) return;
+    c_leftLotDrops.fetch_add(static_cast<long>(rooms), std::memory_order_relaxed);
+    c_leftLotBytes.fetch_add(bytes, std::memory_order_relaxed);
+    ApexMemory::NoteReleased("Quick outdoor lamp edits: kept parts of rooms whose lot left", bytes);
+    LOG_INFO(std::format("[OutdoorDelta] Kept parts of {} rooms whose lot is no longer loaded given back ({:.1f} MB; {:.1f} MB kept in {} rooms)", rooms,
+                         static_cast<double>(bytes) / (1 << 20), static_cast<double>(g_bytes.load()) / (1 << 20), left));
+}
+
 void OnPresent() {
     const DWORD now = GetTickCount();
+    HookGuard::Run("OutdoorDelta left lot sweep", [now] { SweepLeftLots(now); });
     std::vector<const void*> due;
     std::vector<std::pair<uint64_t, LotEdit>> done;
     {
@@ -1966,6 +2013,24 @@ long PinRooms(const void* const* rooms, int n) {
     return c_pinnedDrops.load();
 }
 size_t KeptBytes() { return g_bytes.load(); }
+std::string MemoryText() {
+    size_t samples = 0, texels = 0, baked = 0, drawn = 0, sums = 0, other = 0, n = 0;
+    {
+        std::unique_lock<std::recursive_mutex> lk(g_mx, std::try_to_lock); // (the render thread never waits for a worker's export copy)
+        if (!lk.owns_lock()) return std::format("{:.1f} MB (the records were busy)", static_cast<double>(g_bytes.load()) / (1 << 20));
+        for (const auto& [k, rec] : g_records) {
+            samples += rec->samples.capacity(), texels += rec->texels.capacity() * sizeof(TexelRec);
+            baked += PartsBytes(*rec, false), drawn += PartsBytes(*rec, true), sums += rec->drawnSum.capacity() * sizeof(DrawnSum);
+            other += rec->batches.capacity() * sizeof(BatchRec) + rec->blocks.capacity() * sizeof(BlockRec) + rec->preblur.capacity() * 4;
+        }
+        n = g_records.size();
+    }
+    const auto mb = [](size_t b) { return static_cast<double>(b) / (1 << 20); };
+    return std::format("{:.1f} MB in {} rooms (samples {:.1f}, texels {:.1f}, baked lights' parts {:.1f}, drawn lamps' parts {:.1f}, drawn sums {:.1f}, batches and "
+                       "wall blocks {:.1f}); dropped by the budget {}, given back after their lot left {} ({:.1f} MB)",
+                       mb(g_bytes.load()), n, mb(samples), mb(texels), mb(baked), mb(drawn), mb(sums), mb(other), c_budgetDrops.load(), c_leftLotDrops.load(),
+                       mb(c_leftLotBytes.load()));
+}
 size_t PinnedBudgetBytes() { return kMaxPinnedBytes; }
 int KeptRooms() { return static_cast<int>(c_records.load()); }
 

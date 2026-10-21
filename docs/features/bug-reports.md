@@ -3,7 +3,7 @@
 The **Report a problem** page gathers what a player needs to send a useful bug report: a report (log and settings), a
 few seconds of lighting recording, a light capture at one spot, and a lighting snapshot. Each capture goes into its own
 dated folder that is never overwritten, can carry a screenshot, and gets a title and optional description after saving.
-A capture session groups several captures into one folder. The page lists saved captures with Open and Delete. A
+The oldest capture folders are removed automatically once the folder passes its size or count limit. A capture session groups several captures into one folder. The page lists saved captures with Open and Delete. A
 separate screenshot shortcut saves one filtered PNG, with all Apex effects, to the game's own Screenshots folder.
 
 ## Status
@@ -13,7 +13,7 @@ separate screenshot shortcut saves one filtered PNG, with all Apex effects, to t
 | Availability | Report a problem: Released in 2.5.0. Post-save title and description: Released in 2.5.5 (title optional); required title and Cancel that deletes the new capture: Released in 2.6.0. Filtered player screenshots: Released in 2.6.0. Light update trace in recordings: Released in 2.7.0 |
 | Default | Capture screenshots on (`[ui] capture_screenshot`); screenshot shortcut on, key `F8` (the game's own C is untouched), saved to the game's Screenshots folder, game UI hidden |
 | Menu | System > Report a problem. Settings > Menu > Screenshot capture. Settings > Shortcuts > Report a problem |
-| Configuration | `[ui] capture_screenshot`, `screenshot_folder`, `screenshot_key`, `screenshot_hide_game_ui`, `recorder_key`, `probe_key`, `diagnostics_key` (see [ui.md](../ui.md#shortcuts)) |
+| Configuration | `[ui] capture_screenshot`, `capture_max_mb`, `capture_max_folders`, `screenshot_folder`, `screenshot_key`, `screenshot_hide_game_ui`, `recorder_key`, `probe_key`, `diagnostics_key` (see [ui.md](../ui.md#shortcuts)) |
 | Source | [`features/captures.h`](../../features/captures.h), [`features/captures.cpp`](../../features/captures.cpp), [`apex_gui.cpp`](../../apex_gui.cpp) (`ReportPage`, `CaptureNote`, `ScreenshotCaptureCard`) |
 
 ## The problem
@@ -72,6 +72,15 @@ name to find it more easily") asks for **Title (required)** and **Description (o
 
 Captures saved before the page was opened do not trigger the form.
 
+### Capture folder limits
+
+Set in `ApexRadiance.toml` only; the menu has no control for them.
+
+| TOML (`[ui]`) | Type | Default | Range | Effect |
+|---|---|---|---|---|
+| `capture_max_mb` | int | 2048 | 0 to 1,000,000 | Above this total size of `Captures\`, the oldest capture folders are removed. 0 = no size limit |
+| `capture_max_folders` | int | 30 | 0 to 100,000 | Above this many capture folders, the oldest are removed. A session folder counts as one. 0 = no count limit |
+
 ### Screenshot settings
 
 | Control | TOML (`[ui]`) | Default | Notes |
@@ -101,7 +110,10 @@ Captures saved before the page was opened do not trigger the form.
 - If the game does not process the posted F10 within 2 seconds, the player screenshot is cancelled.
 - Captures may contain local paths and session details; nothing is uploaded automatically. Zipping and sending is
   manual.
-- The light capture and the lighting snapshot need Night Lights on; the recording saves what is available without it.
+- The recording, the light capture and the lighting snapshot need Night Lights on. The recording and the light capture
+  run from its Present hook, so with Night Lights off they never start.
+- Past 30 capture folders or 2,048 MB in `Captures\`, the oldest capture folders are deleted automatically. Raise the
+  [limits](#capture-folder-limits), or set them to 0, to keep older captures.
 
 ## Technical reference
 
@@ -113,7 +125,7 @@ Root: `Documents\Electronic Arts\The Sims 3\Apex Radiance\Captures\`.
 |---|---|---|
 | Report | `YYYY-MM-DD HH-MM-SS Report\` | Only the copies below |
 | Recording | `... Recording\` | `Recording.txt`, `Wall seams.csv` |
-| Light capture | `... Light capture\`; automatic follow-ups after a floor change: `... Light capture (automatic)\` | `Light capture.txt`, textures and shaders |
+| Light capture | `... Light capture\` | `Light capture.txt`, textures and shaders |
 | Lighting snapshot | `... Lighting snapshot\` | `Lighting snapshot.txt` |
 | Session | `... Session\` holding `HH-MM-SS <kind>\` folders | `About this session.txt` (the list) |
 
@@ -121,7 +133,11 @@ Root: `Documents\Electronic Arts\The Sims 3\Apex Radiance\Captures\`.
 - `Finish` copies `ApexRadiance_LOG.txt`, `ApexRadiance.toml` and `ApexRadiance_Crash.txt` when present, writes
   `About this capture.txt` (version, game build, time, what it is, how to zip and send it) and `User notes.txt` when a
   title or description exists, then shows the saved notice. A session gets the same copies when it ends.
-- Nothing is deleted or overwritten by itself. `Delete` removes only direct children of `Captures\` (never the open
+- Nothing is overwritten. `Prune` keeps `Captures\` within `[ui] capture_max_mb` and `capture_max_folders` on a
+  background thread, at game start and after every capture (including its screenshot and texture dumps). It counts
+  only direct children named `YYYY-MM-DD HH-MM-SS <kind>`, removes the oldest first, never removes the open session or a
+  capture still being written, and logs `[Captures] Cleanup: removed the N oldest capture folders ...`.
+- `Delete` removes only direct children of `Captures\` (never the open
   session, never while saving) and logs `[Captures] Deleted from the menu: Captures\<folder>`. `DeleteAll` skips the
   open session and `.Removed`.
 - Reversible removal (`.Removed` and Undo) remains in the API but the menu uses Delete; `.Removed` folders are excluded
@@ -167,7 +183,7 @@ priority are in [ui.md](../ui.md#startup-and-notices).
 |---|---|---|
 | `features/captures.h/.cpp` | `Root`, `NewFolder`, `Finish`, `WriteText`, `SaveReport`, `RecentCrash` | Folders and completion |
 | | `BeginSession`, `EndSession`, `SessionActive`, `SessionItems`, `SessionFolder` | Sessions |
-| | `List`, `Open`, `OpenFolder`, `Delete`, `DeleteAll` | Library |
+| | `List`, `Open`, `OpenFolder`, `Delete`, `DeleteAll`, `Prune` | Library and automatic cleanup |
 | | `ReadDescription`, `SaveFolderDescription`, `LastSave`, `RetrySave` | Notes and receipts |
 | | `QueueShot`, `TakeShots`, `RequestPlayerScreenshot`, `ObserveGameUiKey` | Screenshots |
 | | `Notify`, `CurrentNote` | Notices |

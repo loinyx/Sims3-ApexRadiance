@@ -175,6 +175,7 @@
     <ClCompile Include="framework\entry_chain.cpp" />
     <ClCompile Include="framework\game_addresses.cpp" />
     <ClCompile Include="framework\game_version.cpp" />
+    <ClCompile Include="framework\platform.cpp" />
     <ClCompile Include="framework\hook_chain.cpp" />
     <ClCompile Include="framework\memory_patch.cpp" />
     <ClCompile Include="framework\overlay.cpp" />
@@ -323,6 +324,7 @@
     <ClInclude Include="framework\entry_chain.h" />
     <ClInclude Include="framework\game_addresses.h" />
     <ClInclude Include="framework\game_version.h" />
+    <ClInclude Include="framework\platform.h" />
     <ClInclude Include="framework\hook_chain.h" />
     <ClInclude Include="framework\memory_patch.h" />
     <ClInclude Include="framework\overlay.h" />

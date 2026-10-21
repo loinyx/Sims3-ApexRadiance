@@ -91,7 +91,14 @@ Several 2.14.0 behaviours also have no switch of their own; they follow the swit
 - the early save preparation in front of sims3-modernization's save detour, with *Room to save*
   ([room-to-save.md](room-to-save.md#compatibility-and-interactions));
 - lamp-visibility memo, liveness pruning and buffer reads without waiting for the GPU, with Night Lights
-  ([level-light-share.md](../night-lighting/level-light-share.md#cost)).
+  ([level-light-share.md](../night-lighting/level-light-share.md#cost));
+- memory given back once only a lot that is no longer loaded could use it, with Night Lights: the kept parts of
+  [Quick outdoor lamp edits](../night-lighting/outdoor-lamp-delta.md) for rooms whose story manager no loaded lot holds
+  (dropped at the second 10 s sweep in a row that misses it, never while a world loads), the CPU copy of
+  [Real-time outdoor lamps](../night-lighting/rt-outdoor-lamps.md)' occluders once they are uploaded, and the lot mask
+  texture of a lot not drawn for 2 minutes, made again from its kept masks at its next draw with the same texels
+  (`SweepLeftLots` in [`outdoor_delta.cpp`](../../../features/outdoor_delta.cpp), `ReleaseIdleMaskTextures` in
+  [`lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp)).
 
 Their maintainer-side switches are listed in [workflow.md](../../workflow.md#development-switches-dev_build).
 
@@ -123,7 +130,7 @@ one row, *Lamp updates*, has two modes:
 | Mode | Row description | What runs |
 |---|---|---|
 | *Instant (GPU)* (default) | "Your graphics card updates outdoor lamp light instantly; moving lamps may dip FPS a little" | [Real-time outdoor lamps](../night-lighting/rt-outdoor-lamps.md) draws the active lot's outdoor lamps and their shadows on the graphics card, on the kept parts of [Quick outdoor lamp edits](../night-lighting/outdoor-lamp-delta.md); indoor lamps use the game's calculation |
-| *Classic* | "Lighter: lamp light updates after you release or change a lamp" | The game's room solves with every correction; a dragged lamp's rooms are solved once after the release ([lamp drags](../night-lighting/lamp-drags.md#classic-relight-only-after-release)) and an edit's stories change together ([Faster room lighting](room-light-queue.md#classic-show-all-floors-together)) |
+| *Classic* | "Easier on the graphics card; light updates once you let go of a lamp" | The game's room solves with every correction; a dragged lamp's rooms are solved once after the release ([lamp drags](../night-lighting/lamp-drags.md#classic-relight-only-after-release)) and an edit's stories change together ([Faster room lighting](room-light-queue.md#classic-show-all-floors-together)) |
 
 A warning note under the row says why Instant cannot run on the device (another game version than Steam 1.67.2, a
 graphics card that cannot draw the shadows, or shaders that could not start); the lamps then work as Classic, and once
@@ -146,7 +153,8 @@ Each switch's settings are documented once, on its own page. The group-level con
 | Overview > All effects | (none) | bool | | | Also turns the Performance group on or off |
 | (row switch on each page) | `[patches.<Name>] enabled` | bool | on | | A missing key reads as on; an explicit `false` stays off |
 
-Room to save, Lighter window updates and Faster scripts show an Experimental badge. Each row's hover text is the
+Room to save, Lighter window updates, Faster scripts and the two sub-rows of *Faster room lighting* (*Lamp edits all
+at once* and *Quick update for lamp switches*) show an Experimental badge. Each row's hover text is the
 switch's description, ending with the credit.
 
 ## Compatibility and interactions

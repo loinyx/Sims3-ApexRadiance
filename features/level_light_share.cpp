@@ -142,6 +142,10 @@
 
 #pragma intrinsic(_ReturnAddress)
 
+namespace LevelLightShare {
+float CameraStoryFactor(const void* room); // below: 4 on the camera's story, 2 below it, 1 above
+}
+
 namespace {
 
 // Addresses: the fixed Steam 1.67.2 ones (in the comments), or found by signature on other builds (game_addresses.h).
@@ -909,6 +913,7 @@ void FloorOutdoorLights(uintptr_t tracker, uintptr_t tl, int floor, std::vector<
 }
 
 std::atomic<long> g_indoorGen{1}; // bumped when every lot's rooms near openings must gather again (4.: option switched, install)
+std::atomic<long> g_editGen{1};   // bumped once a lamp edit is quiet: the edited lot's rooms near openings gather again (not PhysicsKey)
 
 // What an indoor room saw, at its last gather, of the lamps of the other stories' rooms near the openings between them
 // (ShareIndoorLights; light tree thread): each lamp with where it was and whether it was taken. AuditTakers compares it with
@@ -3442,17 +3447,16 @@ bool InstallCutoutCapture() {
     g_cutReady = true;
     return true;
 }
-// Uninstall: the game's bytes back, and what was noted forgotten (cuts made while it is out would be missed: a closed room
-// stays closed rather than lit through a door that is gone)
+// Uninstall: the game's bytes back. The cuts noted so far are kept (by lot id; a new world's lots have other ids, and the
+// table is bounded): the game posts a lot's doors, windows and arches only when the lot loads, so forgetting them when Night
+// Lights was switched off and on again left every arch and door of the loaded lots closed to light until a save was loaded
+// again. A cut made while it is out (Build mode with Night Lights off) is missed until the lot loads again.
 void UninstallCutoutCapture() {
     MemPatch::RestoreAll(g_cutPatches);
     g_cutPatches.clear();
     g_cutReady = false;
     std::lock_guard<std::mutex> lk(g_cutMx);
-    g_cuts.clear();
-    g_cutAlias.clear();
-    g_cutLotPtr.clear();
-    g_cutLotLogged.clear();
+    g_cutLotPtr.clear(); // (lot objects may be gone by the next install)
     g_cutDirty.clear();
     g_cutRoomZero.clear();
 }
@@ -7168,6 +7172,8 @@ void ShareIndoorLights(BYTE* treeLevel, BYTE* room) {
         }
         // (development builds, indoor_lamp_walls) story U's walls, for the stretch of each of its lamps' rays up to the opening
         if (info && !cands.empty() && DevSwitches::IndoorLampWalls() && !info->lampGrid[U]) info->lampGrid[U] = EnsureStoryGrid(StoryManager(tracker, U));
+        // ... and this room's own story's walls, for the stretch from the opening to the point (IndoorPassImpl)
+        if (info && !cands.empty() && DevSwitches::IndoorLampWalls() && S >= 0 && S < 8 && !info->lampGrid[S]) info->lampGrid[S] = EnsureStoryGrid(StoryManager(tracker, S));
         if (log) {
             std::string rs;
             for (int r : rooms) rs += std::format(" {}", r);
@@ -7351,8 +7357,17 @@ int ChangedRooms(const BYTE* tl, int* ids, int max) {
 // objects were known then. A lot loads its rooms and gathers them before (or while) its floors are set, so the count is
 // checked every 2 s: when it grows, the rooms near openings gather again (in-game test: after a restart the light
 // through the stairwell was gone until a floor was edited).
+bool ActiveLot(uintptr_t mgr); // below: the lot of that story manager uses the high lighting quality
+// The lot being played (the game's priority lot; +0x288 is set on every detailed lot with high quality on every lot),
+// else, without the game's helper, the high-quality lot
+bool PlayedLotMgr(uintptr_t mgr) {
+    bool known = false;
+    const bool played = RoomLightQueue::PlayedLot(mgr, &known);
+    return known ? played : ActiveLot(mgr);
+}
 struct LotState {
     long gen = 0;
+    long editGen = 0; // g_editGen when its rooms near openings were last sent for a lamp edit (the high-quality lot only)
     int floorsKnown = 0, openings = -1;
     DWORD nextCheck = 0;
     DWORD settleAt = 0; // once more, after the lot's first solves settled: at the latest then (0 = not due)
@@ -7457,10 +7472,21 @@ int RecheckWindowEntry(uintptr_t entry, uintptr_t tl, const WindowFlip* last, Wi
             after = now;
             return 1;
         }
+        // The update marks the window's room changed whatever it found (a recheck that changed nothing still had every window
+        // room of the lot solved again, at every story change and lamp edit): its marks are kept back and made only when what
+        // the room's gather reads of the light changed (its room, lit bit, lit colour +0xE0, intensity +0x10)
+        float litBefore[3], intensityBefore;
+        std::memcpy(litBefore, reinterpret_cast<const void*>(light + 0xE0), sizeof litBefore);
+        std::memcpy(&intensityBefore, reinterpret_cast<const void*>(light + 0x10), sizeof intensityBefore);
+        LampMarkFilter::BeginDeferMarks();
         reinterpret_cast<void(__thiscall*)(void*)>(kLightEntryUpdate)(reinterpret_cast<void*>(entry));
         after = WindowState{*reinterpret_cast<const int*>(entry + 0x1C), static_cast<BYTE>(*reinterpret_cast<const BYTE*>(light + 0x100) & 0x20)};
+        LampMarkFilter::EndDeferMarks(!(after == now) || std::memcmp(litBefore, reinterpret_cast<const void*>(light + 0xE0), sizeof litBefore) != 0 ||
+                                          std::memcmp(&intensityBefore, reinterpret_cast<const void*>(light + 0x10), sizeof intensityBefore) != 0,
+                                      entry);
         return 1;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
+        LampMarkFilter::EndDeferMarks(true); // (a fault inside the update: the marks it made go through; nothing stays kept back)
         g_faults.fetch_add(1, std::memory_order_relaxed);
         return -1;
     }
@@ -7480,6 +7506,7 @@ void RecheckLotWindows(uintptr_t tracker, unsigned pass) {
     const DWORD tick = GetTickCount();
     if (g_windowFlips.size() > 16384) g_windowFlips.clear();
     int checked = 0, changed = 0, takenBack = 0;
+    const long dropped0 = LampMarkFilter::DeferredMarksDropped();
     for (const auto& [entry, tl] : entries) {
         const auto flip = g_windowFlips.find(entry);
         const WindowFlip* last = flip != g_windowFlips.end() && tick - flip->second.at < kWindowFlipMs ? &flip->second : nullptr;
@@ -7498,8 +7525,8 @@ void RecheckLotWindows(uintptr_t tracker, unsigned pass) {
     }
     g_windowsTakenBack.fetch_add(takenBack, std::memory_order_relaxed);
     if (!kPublicBuild)
-        LOG_INFO(std::format("[LevelLightShare] Window activation recheck: lot {:08X}, pass {}, {} evaluated, {} changed{}", LotIdPart(tracker, 0x90), pass + 1,
-                             checked, changed, takenBack ? std::format(", {} left as the game took them back", takenBack) : std::string()));
+        LOG_INFO(std::format("[LevelLightShare] Window activation recheck: lot {:08X}, pass {}, {} evaluated, {} changed, {} room marks of unchanged windows dropped{}",
+                             LotIdPart(tracker, 0x90), pass + 1, checked, changed, LampMarkFilter::DeferredMarksDropped() - dropped0, takenBack ? std::format(", {} left as the game took them back", takenBack) : std::string()));
 }
 
 // A member whose own state 0 is still to come (waiting for its gather or its solve, or picked and not started: sub-step
@@ -7622,6 +7649,13 @@ void BeforeRoomUpdate(BYTE* tl) {
         }
         if (lot.gen != gen) {
             lot.gen = gen;
+            due = true;
+        }
+        // (steady_indoor_light) a lamp edit's resend of the rooms near openings (every lot, as before: a Sim's switch on a lot
+        // the camera is not on needs it too), no longer through g_indoorGen, which PhysicsKey reads (each edit made every
+        // story's room 0 lose its kept parts: "the lighting options changed", a full solve of each)
+        if (const long editGen = g_editGen.load(std::memory_order_relaxed); lot.editGen != editGen) {
+            lot.editGen = editGen;
             due = true;
         }
         const DWORD now = GetTickCount();
@@ -7941,6 +7975,8 @@ bool DepWaitsFor(uintptr_t tracker) {
     return std::any_of(g_depWait.begin(), g_depWait.end(), [&](const auto& kv) { return kv.first.tracker == tracker; });
 }
 
+bool WorldLiveSeen(); // below: the world went live (OnWorldLive) since the load
+bool SettlingAfterWorldLoad(); // below
 void AfterChangedWalk(BYTE* tl) {
     if (!*reinterpret_cast<const uintptr_t*>(tl)) return;
     const uintptr_t tracker = *reinterpret_cast<const uintptr_t*>(tl + 4);
@@ -8129,14 +8165,19 @@ void AfterChangedWalk(BYTE* tl) {
     own.erase(std::unique(own.begin(), own.end()), own.end());
     // 12/10: a lamp added or removed runs no lamp mark of LampMarkFilter's when it is deleted: the edit hold (AtriumHold)
     // starts here, before the rooms are marked (their marks carry the new edit serial). Not while the loaded lots settle,
-    // when every lamp registers.
-    if (lampAddedOrRemoved && !own.empty() && !LevelLightShare::SettlingAfterLoad() && !gpuTail) LampMarkFilter::NoteEdit();
+    // when every lamp registers, nor before the world is live (the load screen's lamps registering made a 16 s "edit"),
+    // nor on a lot the camera is not on (a neighbour's lamps added by the game started holds that waited on its rooms)
+    const uintptr_t walkMgr = *reinterpret_cast<const uintptr_t*>(tl);
+    if (lampAddedOrRemoved && !own.empty() && WorldLiveSeen() && !SettlingAfterWorldLoad() && !gpuTail && walkMgr && PlayedLotMgr(walkMgr))
+        LampMarkFilter::NoteEdit();
     for (int id : own)
         if (void* room = RoomOfTreeLevel(tl, id)) {
             if (gpuTail) continue; // (Instant: a GPU edit's tail, solved by the game's walk with no urgency)
             const LampMarkNote* note = noteOf(id);
             const bool soon = std::find(ownSoon.begin(), ownSoon.end(), id) != ownSoon.end() && std::find(ownLate.begin(), ownLate.end(), id) == ownLate.end();
-            MarkUrgent(room, note || id == 0 ? 0 : 1, soon);
+            // tier 0: the lamp's own room, and room 0 of the camera's story; room 0 of another story comes with the other rooms
+            // (tier 1, by story): it went before the camera story's rooms (a lot entry spent 4 s on other stories' rooms 0)
+            MarkUrgent(room, note || (id == 0 && LevelLightShare::CameraStoryFactor(room) >= 4.0f) ? 0 : 1, soon);
             if (soon) GatherSoon(room);
         }
     // Room 0 of this story changed (07/10 review): this story's roofless rooms mask their floors with room 0's lamps
@@ -11502,6 +11543,26 @@ float IndoorPassImpl(const RoomInfo& info, const Cross& c, void* light, const fl
             entry->at[k] = pos[k] + previous * (sample[k] - pos[k]);
         }
     }
+    // (indoor_lamp_walls) The receiving story, from where the ray enters it through the opening to the point: the game's 2D
+    // test that follows covers only the solving room's own walls, softly, so a lamp over an atrium lit a room of the story
+    // below through the walls of the room under the opening and of its neighbour (a light capture: a 2.6 m wedge of a
+    // story-1 lamp on a story-0 floor behind two full walls, then brought up x1.8 by the partial adaptation). That stretch is
+    // tested on the story's own grid (GridWallHitHard: every wall at its height, doors, windows and arches open): a ray it
+    // finds crossing a wall is stopped. A veto only; every other ray keeps the game's answer.
+    if (nativeWalls && !g_ctx.basis && count > 0 && currentStory == info.level && c.floor != info.level && info.level >= 0 && info.level < 8 &&
+        info.lampGrid[info.level] && info.lampGrid[info.level]->cutGen != 0 && DevSwitches::IndoorLampWalls()) {
+        // (a story with no cuts noted, as a lot loaded before Night Lights was installed this session, would take its doors,
+        // windows and arches for walls: no veto there, as before)
+        const StoryGrid& grid = *info.lampGrid[info.level];
+        float entryW[3], A[3], B[3];
+        for (int k = 0; k < 3; ++k) entryW[k] = pos[k] + previous * (sample[k] - pos[k]);
+        ToLocal(grid.xf, entryW, A);
+        ToLocal(grid.xf, sample, B);
+        if (GridWallHitHard(grid, A, B, std::max(A[1], B[1]))) {
+            g_indoorLampWallVetoes.fetch_add(1, std::memory_order_relaxed);
+            return blocked(PassWhy::StoryWall, PassStage::LampStoryGrid, info.level);
+        }
+    }
     float transmission = 1.0f;
     if (g_ctx.basis) {
         // A raised room's walls can lie beyond the nominal story interval.
@@ -12280,9 +12341,20 @@ int RequeueStory(uintptr_t tracker, int level, DWORD changed = 0, int* skipped =
 // (the reason for that refresh, 30/09: a room solved before the other stories' lamps were registered), so it keeps that
 // solve (running, waiting or finished), like a lamp edit's safety net keeps a fresh one
 std::atomic<DWORD> g_worldLiveAt{0};
+bool WorldLiveSeen() { return g_worldLiveAt.load(std::memory_order_relaxed) != 0; }
 // The rooms solve with a larger share of the frame for this long after the world goes live (SettlingAfterLoad; the log
 // above: 4.4 ms of solving a frame at 80 fps while the lots corrected themselves)
 constexpr DWORD kSettleAfterLoadMs = 15000;
+// The world load's settle window alone (SettlingAfterLoad also counts a lot entry, for the drain budget only)
+bool SettlingAfterWorldLoad() {
+    const DWORD live = g_worldLiveAt.load(std::memory_order_relaxed);
+    return live && GetTickCount() - live < kSettleAfterLoadMs;
+}
+// The same after the camera enters a lot (OnPresent): its rooms are solved within about 10 s at the settle budget (a logged
+// entry took 10-17 s at the 4 ms one, 1 ms while the camera moved)
+std::atomic<DWORD> g_lotEnteredAt{0};
+std::atomic<long> g_lotEntries{0};
+constexpr DWORD kSettleAfterEntryMs = 10000;
 void RequeueAllRooms(const char* why) {
     const DragLite::WhyScope liteWhy(DragLite::Why::RelightAll);
     uintptr_t trackers[256];
@@ -13648,9 +13720,15 @@ bool Install(std::string& error) {
     // Light through doors and windows: the wall cutouts posted from now on (doors, windows, arches; lot loads included),
     // whatever the option, so lots loaded while it is off know their openings when it is turned on
     const bool cuts = InstallCutoutCapture();
+    size_t keptStories = 0;
+    {
+        std::lock_guard<std::mutex> lk(g_cutMx);
+        keptStories = g_cuts.size();
+    }
     LOG_INFO(std::string("[LevelLightShare] Openings of walls (light through doors and windows): ") +
              (!cuts ? "not available (code differs)"
-                    : LoadedLots() > 0 ? "noted from now on (the lots already loaded know theirs once the save loads again)" : "noted from now on"));
+              : keptStories ? std::format("noted from now on; the {} lot stories noted before are kept", keptStories)
+              : LoadedLots() > 0 ? "noted from now on (the lots already loaded know theirs once the save loads again)" : "noted from now on"));
     g_indoorGen.fetch_add(1);
     FlushInstructionCache(GetCurrentProcess(), nullptr, 0);
     g_installed = true;
@@ -13828,6 +13906,31 @@ void PublishVisSnap(); // below, with LampVisibilityShared
 } // namespace
 void OnPresent() {
     if (DevSwitches::kCompiled) MeasureRenderMemory(); // development builds (memory_owners): this file's containers, every 10 s
+    // A lot that becomes the high-quality lot (the camera enters it, or comes back) solves all its rooms at once, as after a
+    // load: the same settle window (SettlingAfterLoad), checked every 250 ms
+    {
+        static DWORD s_checked = 0;
+        static uintptr_t s_active = 0;
+        const DWORD now = GetTickCount();
+        if (g_indoorReady && now - s_checked >= 250) {
+            s_checked = now;
+            uintptr_t trackers[4] = {};
+            // the played lot among the high-quality ones (every detailed lot is one with high quality on every lot)
+            const int na = ActiveLotTrackers(trackers, 4);
+            uintptr_t active = na > 0 ? trackers[0] : 0;
+            for (int i = 0; i < na; i++)
+                if (const uintptr_t g = StoryManager(trackers[i], 0); g && PlayedLotMgr(g)) {
+                    active = trackers[i];
+                    break;
+                }
+            if (active && active != s_active && g_worldLiveAt.load(std::memory_order_relaxed)) {
+                g_lotEnteredAt.store(now | 1, std::memory_order_relaxed);
+                g_lotEntries.fetch_add(1, std::memory_order_relaxed);
+                LOG_INFO(std::format("[LevelLightShare] Lot {:08X} entered: its rooms solve at the settle budget for {} s", active, kSettleAfterEntryMs / 1000));
+            }
+            s_active = active;
+        }
+    }
     // (steady_indoor_light) Every publish of the mesh set used to send every lot's rooms near openings again, every 1-2 s while
     // the camera moved (a recording: 504 invalidations in 13 s, no lamp edited); that also hid a hole in the
     // sends of a lamp edit: a sconce switched off over a stair opening left its light on the story below.
@@ -13838,7 +13941,7 @@ void OnPresent() {
         const DWORD edit = g_lampEditAt.load(std::memory_order_relaxed);
         if (edit && edit != s_edit && GetTickCount() - edit >= kEditRelightQuietMs) {
             s_edit = edit;
-            g_indoorGen.fetch_add(1, std::memory_order_relaxed);
+            g_editGen.fetch_add(1, std::memory_order_relaxed);
             g_editRelights.fetch_add(1, std::memory_order_relaxed);
         }
     }
@@ -13961,6 +14064,9 @@ void OnPresent() {
 
 void OnWorldChanged() {
     MeshOcclusion::Reset();
+    // a new world is not live until OnWorldLive again: its load's lamps are no edit, and no lot is entered meanwhile
+    g_worldLiveAt.store(0, std::memory_order_relaxed);
+    g_lotEnteredAt.store(0, std::memory_order_relaxed);
     OutdoorDelta::OnWorldChanged(); // (Instant: the kept parts belong to the old world; nothing is kept while Classic)
     // the daytime curve's notes are kept: rooms noted during the load must still be swept (a note of a gone story matches no
     // loaded lot and is dropped by a sweep a minute after the change); only the last-noted shortcut starts again
@@ -15439,8 +15545,9 @@ void NoteQuietMark(uintptr_t tl, int room, bool dusk) {
 long QuietMarks() { return g_quietMarks.load(std::memory_order_relaxed); }
 
 bool SettlingAfterLoad() {
-    const DWORD live = g_worldLiveAt.load(std::memory_order_relaxed);
-    return live && GetTickCount() - live < kSettleAfterLoadMs;
+    const DWORD live = g_worldLiveAt.load(std::memory_order_relaxed), entered = g_lotEnteredAt.load(std::memory_order_relaxed);
+    const DWORD now = GetTickCount();
+    return (live && now - live < kSettleAfterLoadMs) || (entered && now - entered < kSettleAfterEntryMs);
 }
 
 // The other members of a room's atrium group (false: not in one)
@@ -15630,7 +15737,9 @@ bool LampEditPending() {
         int id = 0;
         const void* room = reinterpret_cast<const void*>(rooms[k]);
         const int state = RoomKey(room, mgr, id) ? RoomState(room) : -1;
-        if (state >= 1 && state <= 3) return true;
+        // (only the high-quality lot's rooms: the game switching lamps of a lot the camera is not on kept the drain's edit
+        // pacing and the edit bursts going for 16 s while the played lot waited)
+        if (state >= 1 && state <= 3 && PlayedLotMgr(mgr)) return true;
     }
     return false;
 }
@@ -16714,6 +16823,10 @@ bool ExportLotProxy(uintptr_t tracker, RtLampProxy::Lot& out, std::string& why) 
         return false;
     }
     return true;
+}
+bool LiveStoryManagers(LivenessPrune::LiveSet& mgrs) {
+    if (!g_liveSweeps.load(std::memory_order_relaxed)) return false; // (a world loading: its lot list is not settled)
+    return LiveStorySets(mgrs, nullptr);
 }
 bool TrackerLive(uintptr_t tracker) {
     if (!tracker) return false;

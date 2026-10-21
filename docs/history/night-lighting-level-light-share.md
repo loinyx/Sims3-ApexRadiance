@@ -726,3 +726,16 @@ set is dropped once. After each lamp edit the rooms near openings are sent again
 for 400 ms, which restores an update of the story below that the periodic relight had been providing by accident.
 The hard shadow of stair treads is lost. Details of the arch side are in
 [night-lighting-arches.md](night-lighting-arches.md).
+
+### 2026-10-21: receiving-story wall veto
+
+**Context:** a light capture of room 7 on story 0 showed a story-1 lamp over an atrium lighting a 2.6 m wedge of the
+story-0 floor through two full walls: the walls of the room under the opening and of its neighbour. The partial
+adaptation then raised room 7 by x1.785.
+
+**Finding:** the game's 2D wall test that follows Apex's checks in the point solve covers only the solving room's own
+walls, and softly. Nothing tested the other walls of the receiving story between the opening and the point.
+
+**Outcome:** the stretch from where the ray enters the receiving story through the opening to the point is tested on
+that story's wall grid (`GridWallHitHard`, under `indoor_lamp_walls`) in `IndoorPassImpl`. It is a veto only: a ray
+that crosses a wall is stopped, and every other ray keeps the game's answer. Visual confirmation in game is open.

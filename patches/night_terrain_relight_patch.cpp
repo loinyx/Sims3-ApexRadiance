@@ -2632,7 +2632,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                 changed |= ApexUi::SwitchRow("Indoor light between floors", &g_indoorShare, "Lamps inside shine through stairwells and open floors; light bounces up the stairs", true);
                 // The game solves rooms one after the other (after a load, a change or a lamp switched), so
                 // a room can show its old light for a moment; switching floors solves the rooms shown again
-                if (g_indoorShare) ApexUi::IconNote(ApexUi::IconId::Info, "Rooms may take a few seconds to update; if one lags, change floors");
+                if (g_indoorShare) ApexUi::IconNote(ApexUi::IconId::Info, "If a room looks wrong, use Refresh lights (Overview tab)");
                 changed |= ApexUi::SwitchRow("Walls block light on floors", &g_floorWalls, "Decks and yards without a roof stay dark behind a wall", true);
                 ImGui::BeginDisabled(!g_floorWalls); // its floors rely on the walls' mask
                 changed |= ApexUi::SwitchRow("Light through doors and windows", &g_realisticOpenings, "Lamps light walled yards only through openings or over the walls",
@@ -2725,9 +2725,9 @@ class NightTerrainRelightPatch : public ApexPatch {
             ApexUi::CardHeader(IconId::Armchair, "Objects", "Lamp light on plants and outdoor furniture", nullptr, nullptr);
             ApexUi::CardDivider();
             Edit([] {
-                bool changed = ApexUi::SwitchRow("Lamps light objects", &g_objLamps, "Outdoor objects get lamp light, even in the shade of walls", true);
+                bool changed = ApexUi::SwitchRow("Lamps light objects", &g_objLamps, "Trees, bushes and outdoor objects take lamp light, even in moon shadow", true);
                 if (g_objLamps)
-                    changed |= ApexUi::SliderPercent("Brightness##Objects", &g_objStrength, 0.25f, 3.0f, "Raise it if objects look dark next to lamps", 0.75f);
+                    changed |= ApexUi::SliderPercent("Brightness##Objects", &g_objStrength, 0.25f, 3.0f, "Ground light on outdoor objects; lamps follow the walls' brightness", 0.75f);
                 changed |= ApexUi::SwitchRow("Buildings block lamp light on trees and objects", &g_objectWalls, "Trees, objects and fences behind a wall or balcony get no lamp light", true);
                 return changed;
             });
@@ -2758,7 +2758,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                     ImGui::EndDisabled();
                     changed |= ApexUi::SwitchRow("Seamless light on pieces", &g_objPixelLights, "Counters and modular pieces outside show no color steps", true);
                     if (g_objPixelLights)
-                        changed |= ApexUi::SliderPercent("Seamless light brightness", &g_objPixelLightStrength, 0.25f, 3.0f, "Intensity on counters and modular pieces", 0.75f);
+                        changed |= ApexUi::SliderPercent("Seamless light brightness", &g_objPixelLightStrength, 0.25f, 3.0f, "Lamp light on outdoor objects and trees, over the walls' brightness", 0.75f);
                     changed |= ApexUi::SwitchRow("Fences and stairs catch light", &g_fenceGround, "Fences, posts, stairs and their snow match the lit ground", true);
                     if (g_fenceGround)
                         changed |= ApexUi::SliderPercent("Fence brightness", &g_fenceGroundStrength, 0.25f, 2.0f, "Balance fences against the surrounding ground", 0.75f);
@@ -2783,7 +2783,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                 ApexUi::GroupLabel("WALLS");
                 bool changed = ApexUi::SwitchRow("Lamps light walls", &g_walls, "Outside walls near lamps get brighter; off keeps the game's dim walls", true);
                 if (g_walls)
-                    changed |= ApexUi::SliderPercent("Brightness##Walls", &g_wallStrength, 0.25f, 4.0f, "Intensity of lamp light on outside walls, by day and night", 0.30f);
+                    changed |= ApexUi::SliderPercent("Brightness##Walls", &g_wallStrength, 0.25f, 4.0f, "Lamp light on outside walls; trees and objects too with Realistic lamp reach", 0.30f);
                 ApexUi::GroupLabel("ROOFS");
                 changed |= ApexUi::SwitchRow("Lamps light roofs", &g_roofs, "Roofs no longer stay black at night; softer roof shadows too", true);
                 if (g_roofs)
@@ -2833,7 +2833,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             });
             // S3SS's saved room colour: Rooms at Night already uses the game's blue in its place; removing it is on the Attention page
             if (g_unlitOn && S3SSDetect::SavedRoomAmbientOverride())
-                ApexUi::IconNote(ApexUi::IconId::Puzzle, "S3SS saves its own room color; Rooms at Night replaces it (see Attention)");
+                ApexUi::IconNote(ApexUi::IconId::Puzzle, "Sims3SettingsSetter saves its own room color; this replaces it (Attention page)");
             // 14/10, the approved player structure: lamp light through openings and its look. Each switch is one setting; the
             // parts inside them (roofed rooms taking the story below's lamps; the fade at the light cut, the dither and the
             // smooth reads) stay switchable only on Developer > Tester, on by default.

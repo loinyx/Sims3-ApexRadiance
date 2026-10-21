@@ -62,7 +62,9 @@ adds no light that the lamps below do not send.
    10 s, so the fill follows a lamp that is switched off.
 8. **Partial adaptation.** In a room lit only from another story, the normalisation is
    sqrt(1 / the brightest texel measured in its last solve), kept between the game's value capped at 1 and x2. A room
-   that receives 5% of full light becomes twice as bright, not twenty times.
+   that receives 5% of full light becomes twice as bright, not twenty times. A room whose brightest texel takes under 1%
+   is brought up less, and not at all under 0.2% (`kAdaptNoneTook`, `kAdaptFullTook`): the faint residue of a far lamp
+   stays dark, as the eye sees it.
 
 Steps 7 and 8 apply only to rooms whose lamps all come from another story. Rooms lit through doors and windows keep
 the game's behaviour, so the shape of the light through those openings is preserved.

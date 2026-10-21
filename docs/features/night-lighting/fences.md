@@ -11,7 +11,7 @@ same switch and strength. By day the lamp term fades to 3% of its night strength
 |---|---|
 | Availability | Released in 2.13.0: the lot's ground lamp shade on pieces near the ground (*Walls shade lamp light near the ground*), upper-story railing and parapet tops without a ground lamp's pool, lamps tested from the piece nearest them. Released in 2.12.3: the outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and tops above the lamp heads without ground light. Released in 2.12.1: lighting corrections.  Released in 1.0.0. Subdued daytime lamp response: Released in 2.6.0. Per-pixel lamps, walls blocking them and the game's own lighting in full daylight: Released in 2.7.0 |
 | Default | On |
-| Menu | Lighting > Objects > *Doors, counters and fences* card |
+| Menu | Lighting > Objects > Objects card > Game fixes (folded) > *Fences and stairs catch light*, *Fence brightness* |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`IsInstancedStructureVs`, `PatchInstancedLamps`, `AppendGroundShade`), [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawInstanced`, `FindLotAt`, `FloorShadeBind`), [`features/ground_lamp_shadow.h`](../../../features/ground_lamp_shadow.h) (`FloorShadeRows`), [`features/terrain_lighting_policy.h`](../../../features/terrain_lighting_policy.h) (`SurfaceLampGain`) |
 
@@ -77,8 +77,9 @@ This page covers the `vs_3_0` instanced structure family.
 | Fences and stairs catch light | `cercasComLuzDoChao` | bool | on | | Ground light on fences, railings, posts and stairs, and on snow lying on objects and stair tops ([snow.md](snow.md)) |
 | Fence brightness | `forcaNasCercas` | float | 75% | 25 to 200% | Multiplies the atlas term and the per-pixel lamps; 100% = the same light as the ground. With *Realistic lamp reach* on, the per-pixel lamps take the outdoor walls' scale and this value (with *Seamless light brightness*) is a trim over its 75% default. Shown when the switch is on |
 
-Both apply live (`LotLightBridge::SetFenceGroundLight`, every frame). The card disables these rows unless *Street lamps
-light lots* and *Smooth ground light* are both on (the atlas exists only with both) and offers a button to turn them on.
+Both apply live (`LotLightBridge::SetFenceGroundLight`, every frame). The Game fixes section disables these rows unless
+*Street lamps light lots* and *Smooth ground light* (Ground tab) are both on (the atlas exists only with both) and offers
+a button to turn them on.
 The Lighting balance styles set `forcaNasCercas` to 67.5% (Subtle), 75% (Soft) or 100% (Natural).
 
 ## Compatibility and interactions
@@ -90,7 +91,7 @@ The Lighting balance styles set `forcaNasCercas` to 67.5% (Subtle), 75% (Soft) o
 - `PS_2673D758`, a fence and railing pixel shader, also matches the outdoor object patch; the instanced structure class is
   dispatched first.
 - Per-pixel lamps follow *Seamless light on pieces* (`luzPorPixelNosObjetos`) and its brightness
-  (`forcaLuzPorPixelNosObjetos`) on the same card ([objects-and-rigs.md](objects-and-rigs.md)); walls, and the placed
+  (`forcaLuzPorPixelNosObjetos`) in the same Game fixes section ([objects-and-rigs.md](objects-and-rigs.md)); walls, and the placed
   floors of upper stories above a lamp, block them only while Lighting > Objects > *Buildings block lamp light on trees and objects* is
   on ([level-light-share.md](level-light-share.md)).
 - No game code is patched for the shader part; recognition is by instruction shape.

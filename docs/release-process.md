@@ -54,6 +54,10 @@ The changelog opened from the version in the menu footer (`apex_changelog.cpp`):
 
 ## 4. Build and publish
 
+0. Refresh the built-in shaders: start the release build once on Windows with no `ApexRadiance_ShaderCache.bin` in the
+   Apex Radiance folder, then copy the file it writes to `resources/ApexRadiance_ShaderCache.bin` and build again; the
+   next start must log `N Apex shaders taken from the ones built into the ASI` and `0 to compile`. When the start writes
+   no file, every shader was already built in and the resource is current ([steam-deck.md](features/steam-deck.md)).
 1. Build the standard flavor (with the developer tools, no `APEX_NO_DEV_TOOLS`) once from the reviewed commit
    ([workflow.md](workflow.md#1-build)); run `tools/i18n_check` and `perl tools/menu_audit.pl .`. Since 2.13.1 the release
    asset is this build: developer mode ships off (`developer_mode = false`, enabling it asks for confirmation), and while it

@@ -13,7 +13,7 @@ same fixes apply to the snowy winter variants and to the fences that share the b
 |---|---|
 | Availability | Released in 1.0.0. The daytime curve on foliage lamp colours and garden lamps blocked by buildings: Released in 2.13.0. Per-vertex lamps and crown shade on lot ground: Released in 2.14.0 |
 | Default | On |
-| Menu | Lighting > Objects > *Objects* card |
+| Menu | Lighting > Objects > *Objects* card; the reach law also needs *Realistic lamp reach* (Lighting > Overview) and *Outdoor light between floors* (Lighting > Stories) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawObjectRig`, `FoliageVsFor`, `FoliageVertexVsFor`, `DrawLeafShadow`, `NoteCrown`, `CrownsIn`), [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`PatchFoliageVs`, `PatchLeafShadow`), [`features/foliage_vertex_lamps.h`](../../../features/foliage_vertex_lamps.h), [`features/foliage_canopy.h`](../../../features/foliage_canopy.h) |
 
@@ -65,7 +65,8 @@ Study (F7/Full captures, 2026-10-13 `16-12-45 Full capture` draw #279, VS `A0E8E
   differ in shape (tree 2 strip, winter, m63). A per-vertex lamp list would need a world position recovered per variant
   and free constants. That was not done: no night foliage draw is in the current captures to verify it.
 
-What changed, with *Seamless light on pieces* (per-pixel lamps) and *Realistic lamp reach* on:
+What changed, with *Doors and windows stay lit*, *Seamless light on pieces* (per-pixel lamps), *Realistic lamp reach* and
+*Outdoor light between floors* on (`LotLightBridge::ObjectReachLawScale`):
 
 1. **Rig records by the reach law** (`ObjectLightBridge::ReachLawRec`). Each outdoor lamp's record for a rig (street lamp,
    or lit and enabled room-0 lamp of type 3..6, `BoostRec`'s rule) is set to `ObjectLampColourAt` at the rig's centre: the
@@ -78,7 +79,7 @@ What changed, with *Seamless light on pieces* (per-pixel lamps) and *Realistic l
    lamp's weight is `max(N.L, 0)`, as on every per-pixel lamp. Leaves turned away from a lamp take none of it, and the game's
    sky (moon) term stays as drawn. The colours already carry the daytime curve, so no second factor is applied.
 
-With either option off, the earlier boost and wrap stay. Status: Objects *outdoor lamps on rigs by the reach law: N*;
+With any of these options off, the earlier boost and wrap stay. Status: Objects *outdoor lamps on rigs by the reach law: N*;
 foliage *Lambert on reach-law rigs: N*. Offline: `FoliageReachChecks` in `tools/terrain_lighting_test`.
 
 At night on reach-law rigs, the per-vertex lamps below replace the rig-centre evaluation; a slot whose lamp cannot be
@@ -180,11 +181,11 @@ shadow is soft and partial. The mask is built off the render thread ([lot-light-
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Lamps light objects | `postesNosObjetos` | bool | on | | Turns on the rig boost, the moon-shadow replacement, the wrap-light vertex shaders and the winter leaf-shadow patch. Live |
-| Brightness (Objects card) | `forcaNosObjetos` | float | 75% | 25 to 300% | Scales the rig boost that fills the per-instance lamp colours |
-| No setting | | | | | Per-vertex lamps: on whenever *Lamps light objects*, *Seamless light on pieces* and *Realistic lamp reach* are on, at night. Crown shade: also needs *Walls shade lamp light near the ground* |
+| Brightness (Objects card) | `forcaNosObjetos` | float | 75% | 25 to 300% | Scales the rig boost that fills the per-instance lamp colours. On the reach law (below) the rig's outdoor lamps take no boost: their colours follow the walls' brightness x *Seamless light brightness* |
+| No setting | | | | | Per-vertex lamps: at night, on rigs on the reach law (`LotLightBridge::ObjectReachLawScale` >= 0), which needs *Lamps light objects*, *Doors and windows stay lit*, *Seamless light on pieces*, *Realistic lamp reach* and *Outdoor light between floors* (the reach law runs in `LevelLightShare`). Crown shade: the crowns are noted only in those draws, so it needs the same reach law, and also *Walls shade lamp light near the ground* |
 
-There is no foliage-specific strength. The Lighting balance styles set `forcaNosObjetos` to 67.5% (Subtle), 75% (Soft) or
-100% (Natural). The night level is the game's `lightMgr+0xF0`, passed by `LotLightBridge::SetNightLevel`.
+There is no foliage-specific strength. The Lighting balance styles set `forcaNosObjetos` to 67.5% (Subtle), 75% (Soft,
+the default) or 100% (Natural). The night level is the game's `lightMgr+0xF0`, passed by `LotLightBridge::SetNightLevel`.
 
 ## Compatibility and interactions
 

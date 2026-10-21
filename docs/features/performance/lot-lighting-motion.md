@@ -8,7 +8,7 @@ the game's own pace as soon as the camera stops.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lot build slice while moving, the lamp edit and after-load budgets and the refinement cap: Released in 2.7.0 |
+| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lot build slice while moving, the lamp edit and after-load budgets and the refinement cap: Released in 2.7.0. A lamp edit's room while moving: Released in 2.12.3. Spread cap after a drag: Released in 2.13.0. Settle window after entering a lot: In development (2.15.0) |
 | Default | On, 3 ms |
 | Menu | System > Performance > Camera and lighting > *Spread lot lighting while moving* |
 | Configuration | `[patches.LotLightingMotion]` in `ApexRadiance.toml` |
@@ -39,8 +39,18 @@ The same hook also adjusts the budget around lamp edits and loads (budgets of 15
 the lot being played):
 
 - **A lamp just switched:** the game's own budget is kept for a moment, even while the camera moves (`Boost`).
-- **After a load:** for 15 s after the world goes live (`LevelLightShare::SettlingAfterLoad`), the lot being played keeps
-  the game's budget while the camera moves and gets 25 ms with it still, so a lot corrects its lighting in one round.
+- **After a load or entering a lot:** for 15 s after the world goes live, and for 10 s after the camera enters a lot
+  (`LevelLightShare::SettlingAfterLoad`), the lot being played keeps the game's budget while the camera moves and gets
+  25 ms with it still, so a lot corrects its lighting in one round.
+- **A lamp edit's room while moving:** while the room being solved is an edit's urgent room
+  (`RoomLightQueue::CurrentRoomUrgent`), the lot being played gets the game's budget up to 6 ms (`kEditMovingMs`)
+  instead of the scaled one, so an edit made while panning does not wait for 3 ms slices. Which lot a budget call serves
+  is not read, so a neighbouring lot's pass is not raised.
+- **After a drag stops:** while the rooms that waited for a dragged lamp to stop are solved (at most 15 s), the frame's
+  room solves stay under the spread cap of 3.5 ms (`DragLite::SolveCapMs`): the lot being played gets what *Faster room
+  lighting*'s drain left of it, the other lots 0.25 ms, with no edit boost. While the lamp's own rooms still wait there
+  is no cap, and the other lots keep 0.25 ms ([lamp drags](../night-lighting/lamp-drags.md)). Tester switch *Spread the
+  update after the stop* (`drag_spread_cap`, on).
 - **A lamp edited in Build mode:** while its rooms wait for or are in their solve, the lot being played gets 25 ms with
   the camera still once the lamp is let go; while it is dragged the game's 15 ms stays.
 - **Refinement after a quick pass:** while the rooms of a lamp switch that already show their quick pass are refined
@@ -119,7 +129,9 @@ lot). While the camera moves Apex lowers that slice to 6 ms; the loading screen'
   instruction reads ST0 (`D9` / `DD`).
 - `float __fastcall Hook_LotLightBudget(mgr, edx)` calls 0x00ADB120 (a float return is ST0 in every x86 convention; the
   caller's x87 stack is empty at the call), samples the camera, and applies the rules above. The minimum is 0.25 ms
-  (`kMinMs`); the lamp edit and after-load budget is `kLampEditMs` (25 ms), the refinement cap `kRefineMs` (6 ms).
+  (`kMinMs`); the lamp edit and after-load budget is `kLampEditMs` (25 ms), the refinement cap `kRefineMs` (6 ms), the edit room's budget while moving `kEditMovingMs` (6 ms; a room counts as
+  urgent when `LevelLightShare::LampUrgency` of the queue's current room is above 1). The drag spread cap is checked
+  first, before the switch's own rules, and is `DragLite::kSpreadCapMs` (3.5 ms) for at most `kSettleMs` (15 s).
 - **Lot build slice** (optional part; skipped with a warning when the code differs): 0x00AEA680 stores its slice budget
   at `[esp+14h]` (20 ms, 35 for a priority lot), then tests `[[0x011ECBC4]+0x1B4]` for the loading screen's 2000 ms. The
   5-byte `mov eax,[0x011ECBC4]` at 0x00AEA6D8, right after the budget is chosen, becomes a CALL of `LotBuildStub`: it

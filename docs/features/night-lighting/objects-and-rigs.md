@@ -11,7 +11,7 @@ shadows. Part of [Night Lighting](README.md).
 |---|---|
 | Availability | Released in 2.13.0: *Buildings block lamp light on trees and objects* on rigs (trees, bushes, rig objects), indoor and outdoor lamps through openings on objects, a lamp through an arch on objects inside it, disabled lamps no longer lighting objects. Released in 2.12.3: the outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and the ground-light height gate. Released in 2.12.1: lighting corrections.  Released (present since 2.1.0, the first version in this repository). Daytime response of the per-pixel terms: Released in 2.6.0. Walls blocking per-pixel lamps outdoors, indoor objects lit by lamps of another story, furniture keeping its light until its room changes at a lamp switch, and the game's own lighting in full daylight: Released in 2.7.0 |
 | Default | On (all switches), Brightness 75%, Seamless light brightness 75% (the Soft light style) |
-| Menu | Lighting > Objects (cards *Objects* and *Doors, counters and fences*) |
+| Menu | Lighting > Objects > *Objects* card (its folded *Game fixes* holds the stairs, doors, windows, pieces, fences and indoor rows); *Realistic lamp reach* on Lighting > Overview |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/object_light_bridge.cpp`](../../../features/object_light_bridge.cpp), [`features/rig_tracker.cpp`](../../../features/rig_tracker.cpp), [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`PatchObjectLampVs`, `PatchObjectLampPs`), [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawObjectLamp`), [`features/terrain_lighting_policy.h`](../../../features/terrain_lighting_policy.h) |
 
@@ -60,18 +60,18 @@ above every lamp head around takes no ground light: it fades over the first 1.5 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Objects > Lamps light objects | `postesNosObjetos` | bool | on | | Installs `ObjectLightBridge` (rig boost, cap, rig opening, fenced-yard gather) and turns on the moon-shadow and foliage fixes (`LotLightBridge::SetObjectShadowFix`) |
-| Objects > Brightness | `forcaNosObjetos` | float | 75% | 25 to 300% | Scales the rig boost, raises the rig cap to `cap x max(1, s)`, and sets the ground-light strength on patched objects. A change re-gathers all rigs (`FUN_006b58f0`) |
-| Objects > Light stairs, railings, columns | `lampadasEmTodosObjetos` | bool | on | | Opens rigs the game created closed to lamps; applies to rigs created afterwards (world load; the row carries a reload badge). Also gates the fenced-yard gather |
-| Doors, counters and fences > Doors and windows stay lit | `objetosDeForaComLuzDoChao` | bool | on | | Installs `RigTracker` and enables the per-pixel object patch (`DrawObjectLamp`). Disabled unless *Street lamps light lots* and *Smooth ground light* are on (the card offers a button to turn them on) |
-| Doors, counters and fences > Windows take outdoor light | `janelasLuzDeFora` | bool | on | | Faces of a room-lit window part that look out of the house take the outdoor ground light and per-pixel lamps (`DrawWindowOutdoor`, `PatchWindowOutdoor`); outdoor objects also pass the wall they sit in (0.75 m instead of 0.2 m). Needs *Doors and windows stay lit*. Released in 2.7.2; see *Windows lit by the room* below |
-| Doors, counters and fences > Seamless light on pieces | `luzPorPixelNosObjetos` | bool | on | | Per-pixel world lamps on objects (and on fences). Off: the lamp blocks are zero and only the ground term remains |
-| Doors, counters and fences > Seamless light brightness | `forcaLuzPorPixelNosObjetos` | float | 75% | 25 to 300% | Strength of the per-pixel lamps (`cS.y`); with *Realistic lamp reach* on, a trim over the outdoor walls' scale (75% = the walls' light, see *Realistic reach on objects, fences and windows*) |
+| Objects > Brightness | `forcaNosObjetos` | float | 75% | 25 to 300% | The ground light floor on patched objects (*Doors and windows stay lit*); also scales the rig boost and raises the rig cap to `cap x max(1, s)`. A change re-gathers all rigs (`FUN_006b58f0`). With *Realistic lamp reach* on (and *Doors and windows stay lit* and *Seamless light on pieces*), the lamps on objects follow the walls' brightness x *Seamless light brightness* instead: the rigs' outdoor lamps take the reach law (`ReachLawRec`, no boost) and the per-pixel lamps the walls' scale (`LotLightBridge::ObjectReachLawScale`) |
+| Objects > Game fixes > Light stairs, railings, columns | `lampadasEmTodosObjetos` | bool | on | | Opens rigs the game created closed to lamps; applies to rigs created afterwards (world load; the row carries a reload badge). Also gates the fenced-yard gather |
+| Objects > Game fixes > Doors and windows stay lit | `objetosDeForaComLuzDoChao` | bool | on | | Installs `RigTracker` and enables the per-pixel object patch (`DrawObjectLamp`). Disabled unless *Street lamps light lots* and *Smooth ground light* are on (the fold offers a button to turn them on) |
+| Objects > Game fixes > Windows take outdoor light | `janelasLuzDeFora` | bool | on | | Faces of a room-lit window part that look out of the house take the outdoor ground light and per-pixel lamps (`DrawWindowOutdoor`, `PatchWindowOutdoor`); outdoor objects also pass the wall they sit in (0.75 m instead of 0.2 m). Needs *Doors and windows stay lit*. Released in 2.7.2; see *Windows lit by the room* below |
+| Objects > Game fixes > Seamless light on pieces | `luzPorPixelNosObjetos` | bool | on | | Per-pixel world lamps on objects (and on fences). Off: the lamp blocks are zero and only the ground term remains |
+| Objects > Game fixes > Seamless light brightness | `forcaLuzPorPixelNosObjetos` | float | 75% | 25 to 300% | Strength of the per-pixel lamps (`cS.y`); with *Realistic lamp reach* on, a trim over the outdoor walls' scale (75% = the walls' light, see *Realistic reach on objects, fences and windows*) |
 
 All apply live. Every frame the Present hook calls `ObjectLightBridge::SetStrength(forcaNosObjetos)`,
 `SetAllObjects(lampadasEmTodosObjetos)`, `LotLightBridge::SetObjectPixelLamps(objetosDeForaComLuzDoChao &&
 RigTracker::IsInstalled(), forcaNosObjetos)` and `SetObjectPixelLights(luzPorPixelNosObjetos,
-forcaLuzPorPixelNosObjetos)`. The *Fences and stairs catch light* rows of the same card are documented in
-[fences.md](fences.md); *Smooth indoor light* (Indoor objects card) in
+forcaLuzPorPixelNosObjetos)`. The *Fences and stairs catch light* rows of the same fold are documented in
+[fences.md](fences.md); *Smooth indoor light* (last row of the fold) in
 [world-atlas-and-smoothed-maps.md](world-atlas-and-smoothed-maps.md).
 
 ## Compatibility and interactions

@@ -319,8 +319,26 @@ uintptr_t TrackerOf(uintptr_t tl) {
     }
 }
 
+// Marks deferred by BeginDeferMarks on this thread (LevelLightShare's window activation recheck): kept back, then made as
+// the game makes them (EndDeferMarks) only when the entry's update changed what the room's gather reads
+thread_local int t_deferMarks = 0;
+struct DeferredMark {
+    uintptr_t tl;
+    int room;
+    uintptr_t entry; // the light entry whose update made it
+};
+thread_local std::vector<DeferredMark> t_deferred;
+std::atomic<long> g_deferredDropped{0}, g_deferredReplayed{0};
+
 // true = mark the room (the game's call), false = keep its solve
 bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
+    if (t_deferMarks) {
+        if (t_deferred.size() < 64) {
+            t_deferred.push_back(DeferredMark{tl, room, entry});
+            return false;
+        }
+        return true; // (too many to keep: the rest as the game makes them)
+    }
     uint64_t h = 0;
     int type = 0;
     bool on = false;
@@ -770,6 +788,19 @@ bool MassSwitchActive() {
 }
 void SetEnabled(bool on) { g_on.store(on, std::memory_order_relaxed); }
 bool Enabled() { return g_on.load(std::memory_order_relaxed); }
+void BeginDeferMarks() {
+    if (!t_deferMarks++) t_deferred.clear();
+}
+void EndDeferMarks(bool replay, uintptr_t entry) {
+    if (!t_deferMarks || --t_deferMarks) return;
+    for (const DeferredMark& m : t_deferred) {
+        const bool make = replay || m.entry != entry; // (a mark of another entry the update touched goes through)
+        if (make) reinterpret_cast<void(__thiscall*)(void*, int)>(g_markTarget)(reinterpret_cast<void*>(m.tl), m.room); // the game's mark
+        (make ? g_deferredReplayed : g_deferredDropped).fetch_add(1, std::memory_order_relaxed);
+    }
+    t_deferred.clear();
+}
+long DeferredMarksDropped() { return g_deferredDropped.load(std::memory_order_relaxed); }
 bool HandledLately(uintptr_t light, unsigned long withinMs) {
     if (!light) return false;
     const DWORD now = GetTickCount();

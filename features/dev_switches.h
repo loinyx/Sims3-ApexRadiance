@@ -76,10 +76,16 @@ inline constexpr bool kShipped = true;
 //   release_debug_buffers  buffers of the developer tools are given back once they are no longer needed: the Light Probe's draw
 //                          records and occlusion queries after a capture, a recording's lines and tracer states after it is saved,
 //                          the F8 light records when their recording is switched off. Nothing that is lit reads them
+//   left_lot_release       (2.14.0-dev.47) what only a lot that left the game's lot list can use is given back: Quick outdoor
+//                          lamp edits' kept parts of rooms whose story manager no loaded lot holds (two 10 s sweeps in a row),
+//                          Real-time outdoor lamps' CPU copy of the occluders once uploaded, and the lot mask texture of a lot
+//                          not drawn for 2 minutes (made again from its kept masks at its next draw, the same texels)
 inline std::atomic<bool> memoryOwners{false};
 inline std::atomic<bool> releaseDebugBuffers{false};
+inline std::atomic<bool> leftLotRelease{false};
 inline bool MemoryOwners() { return kCompiled && memoryOwners.load(std::memory_order_relaxed); }
 inline bool ReleaseDebugBuffers() { return kCompiled ? releaseDebugBuffers.load(std::memory_order_relaxed) : kShipped; }
+inline bool LeftLotRelease() { return kCompiled ? leftLotRelease.load(std::memory_order_relaxed) : kShipped; }
 
 inline std::atomic<bool> measurements{false};
 inline std::atomic<bool> drawReadsNoWait{false};

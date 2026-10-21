@@ -10,7 +10,7 @@ in Build mode and at dusk. By day, lamps that the game keeps lit add a subdued g
 
 | | |
 |---|---|
-| Availability | Released (standalone since 0.1.0). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: Released in 2.6.0. Light detail (Experimental), walls blocking lamp light outdoors, lamp switches in one frame, weather variants of the lot and terrain passes, and idavidveiga's daytime bloom fixes: Released in 2.7.0. Lamp lighting (Instant (GPU) with real-time outdoor lamps and quick outdoor lamp edits; Classic with lamp drags and floors shown together), outdoor and indoor light through openings, doors block light, walls shade lamp light near the ground, buildings block lamp light on trees and objects, shadow softness and smooth light maps: Released in 2.13.0. Light through stairwells, stairs on the directional maps, light through arches and doorways, foliage lit per vertex with crown shade on lot ground, and moonlight scaled at its reader: Released in 2.14.0 |
+| Availability | Released (standalone since 0.1.0). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: Released in 2.6.0. Light detail, walls blocking lamp light outdoors, lamp switches in one frame, weather variants of the lot and terrain passes, and idavidveiga's daytime bloom fixes: Released in 2.7.0. Lamp lighting (Instant (GPU) with real-time outdoor lamps and quick outdoor lamp edits; Classic with lamp drags and floors shown together), outdoor and indoor light through openings, doors block light, walls shade lamp light near the ground, buildings block lamp light on trees and objects, shadow softness and smooth light maps: Released in 2.13.0. Light through stairwells, stairs on the directional maps, light through arches and doorways, foliage lit per vertex with crown shade on lot ground, and moonlight scaled at its reader: Released in 2.14.0 |
 | Default | On (`enabledByDefault = true`; the feature metadata keeps `experimental = true`) |
 | Menu | Lighting page (tabs Overview, Ground, Objects, Buildings, Stories); World > Water & Snow page (Lamp Glow, Water Reflections, Snow); developer options under Developer > Lighting |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -91,35 +91,35 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| Ground > Street lamps light lots | `luzDoPosteNaGramaDoLote` | bool | on | | Lot light pass and every draw handler after it ([lot-light-pass](lot-light-pass.md)) |
+| Ground > Game fixes > Street lamps light lots | `luzDoPosteNaGramaDoLote` | bool | on | | Lot light pass and every draw handler after it ([lot-light-pass](lot-light-pass.md)) |
 | Ground > Lot lamps light the street | `luzDoLoteNaGrama` | bool | on | | Outdoor lot lamps in the terrain bake ([terrain-relight](terrain-relight.md)) |
-| Ground > Lamp colors stay near lamps | `reflexosNeutrosANoite` | bool | on | | At night the game's light probes (the sky light cube that outdoor floors, roofs, sims and glossy objects sample) lose the lamps' hue right after the game writes them (`features/probe_neutral.cpp`, hooks 0x006B4720 / 0x006B4B10): brightness kept, nothing by day. A coloured lamp tinted every outdoor floor and a far glossy rug before |
+| Ground > Game fixes > Lamp colors stay near lamps | `reflexosNeutrosANoite` | bool | on | | At night the game's light probes (the sky light cube that outdoor floors, roofs, sims and glossy objects sample) lose the lamps' hue right after the game writes them (`features/probe_neutral.cpp`, hooks 0x006B4720 / 0x006B4B10): brightness kept, nothing by day. A coloured lamp tinted every outdoor floor and a far glossy rug before |
 | Ground > Walls shade lamp light near the ground | `paredesSombreiamOChao` | bool | on | | Lot grass, paths, decks, curbs, stairs and low fences behind an outside wall keep no lamp light: the lot's ground lamp shade (`LotLightBridge`, `GroundShadow`), soft edges at wall ends and tops included; same wall copy as *Buildings block lamp light on trees and objects*. Developer > Tester: *Walls shade ground and curbs* and *Soft ground shade* are its sub-parts |
 | (Developer) Lamp colour removal strength | `forcaReflexosNeutros` | float | 1 | 0..1 | How much of the hue leaves the night probe |
-| Ground > Smooth ground light | `mapaDeLuzSuavizado` | bool | on | | Smoothed chunk maps and the world atlas ([world-atlas](world-atlas-and-smoothed-maps.md)) |
-| Ground > Updates > Update at dusk | `automaticoAoAnoitecer` | bool | on | | Rebuild the terrain light at the settled day and night endpoints |
-| Ground > Updates > Delay after dusk | `atrasoSegundos` | float | 2.0 s | 0.5 to 10 s | Wait before the endpoint rebuild (none while Build mode editing) |
+| Ground > Game fixes > Smooth ground light | `mapaDeLuzSuavizado` | bool | on | | Smoothed chunk maps and the world atlas ([world-atlas](world-atlas-and-smoothed-maps.md)) |
+| Ground > Game fixes > Update at dusk | `automaticoAoAnoitecer` | bool | on | | Rebuild the terrain light at the settled day and night endpoints |
+| Ground > Game fixes > Delay after dusk | `atrasoSegundos` | float | 2.0 s | 0.5 to 10 s | Wait before the endpoint rebuild (none while Build mode editing) |
 | Ground intensity > Ground brightness | `brilhoNoChao` | float | 75% | 25 to 300% | Lamp scale on terrain, lot grass, snowy lot grass and floors; needs *Street lamps light lots* |
 | Ground intensity > Roads and sidewalks | `brilhoNasRuas` | float | 100% | 25 to 300% | Road lamp scale, multiplied by the ground brightness ([roads](roads.md)) |
 | Ground intensity > Street lamp brightness | `forcaDosPostes` | float | 80% | 25 to 300% | Street-lamp colour in the terrain bake; one terrain rebuild on slider release |
 | Ground intensity > Lot lamp brightness | `forcaDasLampadasDoLote` | float | 80% | 25 to 300% | Lot-lamp colour in the terrain bake (rebuild on release) and the lot's own light map on its grass (live) |
 | Objects > Lamps light objects | `postesNosObjetos` | bool | on | | Rig lamp boost and moon-shadow fix ([objects-and-rigs](objects-and-rigs.md), [foliage](foliage.md)) |
-| Objects > Brightness | `forcaNosObjetos` | float | 75% | 25 to 300% | Strength of lamps on objects |
-| Objects > Light stairs, railings, columns | `lampadasEmTodosObjetos` | bool | on | | Objects the game leaves without lamp light; applies when a world loads ("Reload save" badge) |
+| Objects > Brightness | `forcaNosObjetos` | float | 75% | 25 to 300% | Strength of the ground light floor on outdoor objects (*Doors and windows stay lit*) and of the rig lamp boost. With *Realistic lamp reach* (and *Doors and windows stay lit* and *Seamless light on pieces* on) the lamps on objects follow the walls' brightness x *Seamless light brightness* instead (`LotLightBridge::ObjectReachLawScale`, `ObjectLightBridge` `ReachLawRec`) |
+| Objects > Game fixes > Light stairs, railings, columns | `lampadasEmTodosObjetos` | bool | on | | Objects the game leaves without lamp light; applies when a world loads ("Reload save" badge) |
 | Objects > Buildings block lamp light on trees and objects | `paredesBloqueiamLuzNosObjetos` | bool | on | | Outdoor objects, windows and fences drop per-pixel lamps with an outside wall or, for a lamp below them, a placed floor of an upper story in between (a lamp seen past a slab's edge is dimmed), their ground light is scaled by the unblocked share, and trees, bushes and rig objects behind a building take no garden lamp ([level-light-share](level-light-share.md)); was *Stories > Buildings block light on objects*. Developer > Tester: *Buildings block light on trees and objects* is its rig sub-part |
-| Doors, counters and fences > Doors and windows stay lit | `objetosDeForaComLuzDoChao` | bool | on | | Outdoor rig objects get at least the ground light (`RigTracker`); needs the ground light |
-| Doors, counters and fences > Windows take outdoor light | `janelasLuzDeFora` | bool | on | | The outer side of room-lit windows takes the outdoor light; see [objects-and-rigs.md](objects-and-rigs.md) |
-| Doors, counters and fences > Seamless light on pieces | `luzPorPixelNosObjetos` | bool | on | | Per-pixel world lamps on outdoor rig objects; needs the ground light |
-| Doors, counters and fences > Seamless light brightness | `forcaLuzPorPixelNosObjetos` | float | 75% | 25 to 300% | Strength of those per-pixel lamps |
-| Doors, counters and fences > Fences and stairs catch light | `cercasComLuzDoChao` | bool | on | | Fences, railings, stairs and their snow read the atlas ([fences](fences.md), [snow](snow.md)); needs the ground light |
-| Doors, counters and fences > Fence brightness | `forcaNasCercas` | float | 75% | 25 to 200% | Strength on fences, railings, stairs and their snow |
-| Indoor objects > Smooth indoor light (Experimental) | `bordasDosMapasDeLuz` | bool | on | | Indoor objects and stairs read the room's directional light maps smoothly (see *Smooth indoor light*) |
+| Objects > Game fixes > Doors and windows stay lit | `objetosDeForaComLuzDoChao` | bool | on | | Outdoor rig objects get at least the ground light (`RigTracker`); needs the ground light |
+| Objects > Game fixes > Windows take outdoor light | `janelasLuzDeFora` | bool | on | | The outer side of room-lit windows takes the outdoor light; see [objects-and-rigs.md](objects-and-rigs.md) |
+| Objects > Game fixes > Seamless light on pieces | `luzPorPixelNosObjetos` | bool | on | | Per-pixel world lamps on outdoor rig objects; needs the ground light |
+| Objects > Game fixes > Seamless light brightness | `forcaLuzPorPixelNosObjetos` | float | 75% | 25 to 300% | Strength of those per-pixel lamps; with *Realistic lamp reach* a trim over the walls' brightness (75% = x1) |
+| Objects > Game fixes > Fences and stairs catch light | `cercasComLuzDoChao` | bool | on | | Fences, railings, stairs and their snow read the atlas ([fences](fences.md), [snow](snow.md)); needs the ground light |
+| Objects > Game fixes > Fence brightness | `forcaNasCercas` | float | 75% | 25 to 200% | Strength on fences, railings, stairs and their snow |
+| Objects > Game fixes > Smooth indoor light | `bordasDosMapasDeLuz` | bool | on | | Indoor objects and stairs read the room's directional light maps smoothly (see *Smooth indoor light*) |
 | Buildings > Lamps light walls | `paredesComLuz` | bool | on | | Exterior wall lamp gain by day and night; off keeps the native draw ([walls](walls.md)) |
 | Buildings > Brightness (walls) | `forcaNasParedes` | float | 30% | 25 to 400% | Wall lamp RGB multiplier (`SetWallGain` clamps 0.25 to 8) |
-| Buildings > Realistic lamp reach | `alcanceRealistaDasLampadas` | bool | on | | Lamp light on outside walls fades with distance like the ground ([walls](walls.md); relights rooms); outdoor objects, fences and windows then take the same law and the walls' scale, the two per-pixel sliders becoming trims over their 75% default ([objects](objects-and-rigs.md#realistic-reach-on-objects-fences-and-windows)) |
+| Overview > Lighting balance > Realistic lamp reach | `alcanceRealistaDasLampadas` | bool | on | | Lamp light on outside walls fades with distance like the ground ([walls](walls.md); relights rooms); outdoor objects, fences and windows then take the same law and the walls' scale, the two per-pixel sliders becoming trims over their 75% default ([objects](objects-and-rigs.md#realistic-reach-on-objects-fences-and-windows)) |
 | Buildings > Lamps light roofs | `telhadosComLuz` | bool | on | | Roof lamp pass ([roofs](roofs.md)) |
 | Buildings > Brightness (roofs) | `forcaNosTelhados` | float | 45% | 5 to 200% | Roof lamp strength |
-| Light detail > Detail (Experimental) | `detalheDaLuz` | enum | Game | Game, High | High doubles the game's lighting texels per metre on walls and floors (`features/light_detail.cpp`: texels per tile `0x00FF36AC` {1, 2, 4} -> {2, 4, 8}, wall atlases `0x00FF36DC` / `0x00FF36E8` doubled per LOD class). Written once at startup before any lot is lit, Steam 1.67.2 only, left alone when another mod changed those tables; a change takes effect after a restart. Rooms take about four times longer to solve and their maps use four times the memory |
+| Buildings > Light detail > Detail | `detalheDaLuz` | enum | Game | Game, High | High doubles the game's lighting texels per metre on walls and floors (`features/light_detail.cpp`: texels per tile `0x00FF36AC` {1, 2, 4} -> {2, 4, 8}, wall atlases `0x00FF36DC` / `0x00FF36E8` doubled per LOD class). Written once at startup before any lot is lit, Steam 1.67.2 only, left alone when another mod changed those tables; a change takes effect after a restart. Rooms take about four times longer to solve and their maps use four times the memory |
 | Rooms at Night > Adjust the background light | `comodosEscurosSemLuz` | bool | on | | Rooms with lamps off keep the light set below ([unlit-rooms](unlit-rooms.md)) |
 | Rooms at Night > Brightness | `luzQueSobraNosComodos` | float | 35% | 10 to 80% | How much of the game's unlit-room light stays |
 | Rooms at Night > Blue tint | `azulNosComodos` | float | 0% | 0 to 100% | 0% neutral grey, 100% the game's blue |
@@ -127,28 +127,28 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 | Rooms at Night > Indoor light through openings | `luzInternaPelasAberturas` | bool | on | | Lit rooms shine through their arches and windows onto the garden, the terraces, the outside walls and the objects outside, and into a roofed room next door, only through those openings; one opening only ([level-light-share](level-light-share.md)) |
 | Rooms at Night > Doors block light | `portasBloqueiamLuz` | bool | on | | Doors and gates count as closed for lamp light (the game keeps them closed except while they open); arches, windows and doors with glass let it through. Applies to *Light through doors and windows* and both *light through openings* options; a change lights again only the stories with doors ([level-light-share](level-light-share.md)) |
 | Rooms at Night > Shadow softness | `suavidadeDasSombras` | float | 0.15 (15 cm) | 0.02 .. 0.5 | A lamp's size in metres: light through an opening, past a wall's end or top and a balcony's edge keeps a sharp edge next to it and a softer one farther behind; at least 1.5 texels on the lighting maps ([level-light-share](level-light-share.md)); Tester sub-part *Soft edges from the lamp's size* |
-| Rooms at Night > Smooth light maps | `mapasDosComodosSuaves` | bool | on | | Room light maps read as a B-spline, their texels dithered and lamps faded at the light cut; relights every room when changed ([room-map-smoothing](room-map-smoothing.md)); the three parts are Tester sub-parts only |
+| Rooms at Night > Game fixes > Smooth light maps | `mapasDosComodosSuaves` | bool | on | | Room light maps read as a B-spline, their texels dithered and lamps faded at the light cut; relights every room when changed ([room-map-smoothing](room-map-smoothing.md)); the three parts are Tester sub-parts only |
 | Stories > Outdoor light between floors | `luzExternaEntreAndares` | bool | on | | Outdoor lamps light every story ([level-light-share](level-light-share.md)) |
 | Stories > Indoor light between floors | `luzInternaEntreAndares` | bool | on | | Indoor lamps through stairwells and open floors; needs the switch above |
 | Stories > Walls block light on floors | `paredesBloqueiamLuzNosPisos` | bool | on | | Outdoor floors (decks, yards without a roof) lose the ground light blocked by walls; relights every room when changed |
-| Stories > Light through doors and windows (Experimental) | `luzRealistaPorAberturas` | bool | off | | Walled yards, light wells and decks without a roof take their story's outdoor lamps only through doors, windows and arches or over lower walls ([level-light-share](level-light-share.md)); needs *Walls block light on floors* |
-| Stories > Wall lamps at the right height | `paredesExternasNaAlturaDesenhada` | bool | on | | Two vanilla bugs fixed (`features/level_light_share.cpp`). 1: the game's wall setup FUN_006ab280 takes an indoor face's light base from the floor tile (+0x78) but an outdoor face's from story x 3.0 (0x006AB32C): on a house on a foundation outside walls were lit 2 m off; base = foundation + 3 (story - 1) (`OutdoorWallBase` / `IndoorWallBase`). 2: every wall is lit over 3 m (0x006ABE08) but its light block is drawn from the drawn foot to the drawn top (light-UV writer 0x00C38530 can only shorten it): walls running up to the roof showed the light stretched, higher the higher the lamp; the UV writer's calls (0x00C387B5 / 0x00C387CC) note each drawn cell's height and the samples spread over it (`WallUvHook`, `StretchTallWall`); walls drawn after their solve relight their room once. Walls are set up when a lot is built: reload the lot after switching it |
-| Stories > Floor detail > Seamless walls between floors | `paredesSemEmendaEntreAndares` | bool | on | | Walls lit at the heights the game draws their light; needs outdoor light between floors |
-| Stories > Floor detail > Every floor in full detail | `todosOsAndaresEmDetalhe` | bool | on | | Every floor of the active lot solved in full detail |
+| Stories > Light through doors and windows | `luzRealistaPorAberturas` | bool | on (`kRealisticOpeningsDefault`) | | Walled yards, light wells and decks without a roof take their story's outdoor lamps only through doors, windows and arches or over lower walls ([level-light-share](level-light-share.md)); needs *Walls block light on floors* |
+| Stories > Game fixes > Wall lamps at the right height | `paredesExternasNaAlturaDesenhada` | bool | on | | Two vanilla bugs fixed (`features/level_light_share.cpp`). 1: the game's wall setup FUN_006ab280 takes an indoor face's light base from the floor tile (+0x78) but an outdoor face's from story x 3.0 (0x006AB32C): on a house on a foundation outside walls were lit 2 m off; base = foundation + 3 (story - 1) (`OutdoorWallBase` / `IndoorWallBase`). 2: every wall is lit over 3 m (0x006ABE08) but its light block is drawn from the drawn foot to the drawn top (light-UV writer 0x00C38530 can only shorten it): walls running up to the roof showed the light stretched, higher the higher the lamp; the UV writer's calls (0x00C387B5 / 0x00C387CC) note each drawn cell's height and the samples spread over it (`WallUvHook`, `StretchTallWall`); walls drawn after their solve relight their room once. Walls are set up when a lot is built: reload the lot after switching it |
+| Stories > Game fixes > Seamless walls between floors | `paredesSemEmendaEntreAndares` | bool | on | | Walls lit at the heights the game draws their light; needs outdoor light between floors |
+| Stories > Game fixes > Every floor in full detail | `todosOsAndaresEmDetalhe` | bool | on | | Every floor of the active lot solved in full detail |
 | Performance > Lamp lighting > Lamp updates | `lampLightingMode` | string | `"instant"` | `"classic"`, `"instant"` | Instant: [Real-time outdoor lamps](rt-outdoor-lamps.md) on the parts of [Quick outdoor lamp edits](outdoor-lamp-delta.md); Classic: every room solved by the game, a dragged lamp's rooms once after the release ([lamp-drags](lamp-drags.md)) and an edit's stories shown together. A saved value is kept; a file without the key starts on Instant. Instant on a device that cannot run it shows a warning and works as Classic |
 | Developer > Compare lighting paths > Check quick lamp edits | `outdoorLampDeltaCheck` | bool | off | | Developer only, with Instant: each room 0 a delta brought up to date is solved in full again and compared ([outdoor-lamp-delta](outdoor-lamp-delta.md)) |
 | Water & Snow > Lamp Glow > Lamps glow on ponds | `lagosRefletemLampadas` | bool | on | | Pond lamp pass ([water](water.md)) |
 | Water & Snow > Lamp Glow > Glow brightness | `brilhoNaAgua` | float | 40% | 10 to 40% | Lamp glow and sparkles on ponds |
-| Water & Snow > Water Reflections > Reflection brightness | `reflexoNoLago` | float | 100% | 0 to 300% (slider from 5%) | Shore reflection; needs Depth Blur ([../reflections.md](../reflections.md)) |
+| Water & Snow > Water Reflections > Reflection brightness | `reflexoNoLago` | float | 156% | 0 to 300% (slider from 5%) | Shore reflection; needs Depth Blur ([../reflections.md](../reflections.md)) |
 | Water & Snow > Snow > Sidewalk visibility | `calcadaComNevePisada` | float | 50% | 0 to 100% | Sidewalk concrete showing through trodden snow; needs *Street lamps light lots* ([roads](roads.md)) |
 | Individual options | `luzDasLampadasNatural` | float | 1.0 | 0 to 1 | Stock lamp colour: 0 pink (game), 1 warm white; applied on release ([lamp-colour](lamp-colour.md)) |
 | Individual options | `corPropriaNoLote` | bool | off | | Lot lamps get their own colour |
 | Individual options | `corDasLampadasDoLote` | float | 1.0 | 0 to 1 | That lot lamp colour |
 | Individual options | `luar` | float | 1.0 | 0 to 2 | Moonlight at night (see *Brightness controls*) |
-| Individual options | `postesAcesosNoCalculo` | bool | off | | Experimental: street lamps count as lit in lot light solves (0x6BE18C); reinstall |
+| Individual options | `postesAcesosNoCalculo` | bool | on | | Street lamps count as lit in lot light solves (0x6BE18C); reinstall |
 | Individual options | `qualidadeAltaEmTodosOsLotes` | bool | off | | Experimental: every lot at the active lot's quality; reinstall; lots loaded afterwards |
-| Individual options | `gramaDoLoteUsaLuzDoLote` | bool | off | | Experimental: lot pass keeps "no terrain lightmap" (0xC7F87D); reinstall |
-| Individual options | `recalcularLotesAoAnoitecer` | bool | off | | Experimental: re-solve room 0 of every lot after the dusk rebuild |
+| Individual options | `gramaDoLoteUsaLuzDoLote` | bool | on | | Lot pass keeps "no terrain lightmap" (0xC7F87D), so lot grass keeps the lot's own light after a terrain rebuild; reinstall |
+| Individual options | `recalcularLotesAoAnoitecer` | bool | on | | Re-solve room 0 of every lot after the dusk rebuild |
 | Developer > Water highlights | `waterSpecularFilter` | bool | on | | Stabilise lamp sparkles on water (A/B) |
 | Developer > Water highlights | `waterPreserveLampColors` | bool | on | | Preserve bright lamp colours on water (A/B) |
 | Developer: Soft lot edges (A/B) | `bordaSuaveLote` | bool | on | | Developer only; off = plain max of lot and ground light |
@@ -160,16 +160,18 @@ Notes:
 
 - **Lighting balance** (Lighting > Overview): *Subtle*, *Soft*, *Natural* and *Custom* set nine brightness values at
   once (order: ground, roads, street lamps, lot lamps, objects, pieces, fences, walls, roofs). Water, moonlight, lamp
-  colours and room background light are not part of a style. *Undo choice* restores the previous values.
+  colours and room background light are not part of a style. *Custom* is shown selected when the values match no
+  style. *Undo choice* restores the previous values. The same card holds *Realistic lamp reach* (`kStyles` and
+  `DrawLightingBalance` in `night_terrain_relight_patch.cpp`).
 
   | Style | Ground | Roads | Street | Lot | Objects | Pieces | Fences | Walls | Roofs |
   |---|---|---|---|---|---|---|---|---|---|
-  | Subtle | 0.675 | 1.0 | 0.72 | 0.72 | 0.675 | 0.675 | 0.675 | 1.35 | 0.405 |
-  | Soft | 0.75 | 1.0 | 0.8 | 0.8 | 0.75 | 0.75 | 0.75 | 1.5 | 0.45 |
-  | Natural (defaults) | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 2.0 | 0.6 |
+  | Subtle | 0.675 | 1.0 | 0.72 | 0.72 | 0.675 | 0.675 | 0.675 | 0.27 | 0.405 |
+  | Soft (defaults) | 0.75 | 1.0 | 0.8 | 0.8 | 0.75 | 0.75 | 0.75 | 0.30 | 0.45 |
+  | Natural | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 0.56 | 0.6 |
 
-- **Dependencies** (`BeginDisabled`): `groundLight = g_bridge && g_smoothMaps` gates the three Doors, counters and
-  fences options (they read the world atlas, which exists only with both on; a button turns both on). Ground and road
+- **Dependencies** (`BeginDisabled`): `groundLight = g_bridge && g_smoothMaps` gates the Objects > Game fixes options
+  from *Doors and windows stay lit* to *Fence brightness* (they read the world atlas, which exists only with both on; a button turns both on). Ground and road
   brightness and *Sidewalk visibility* need *Street lamps light lots*. Street and lot lamp brightness need the bake stub
   (`g_bakeGainInstalled`). Strength sliders are hidden while their switch is off.
 - **Live vs reinstall.** Every menu edit goes through `Edit()`: `ApplyLive` installs or removes the parts that follow

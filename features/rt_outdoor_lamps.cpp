@@ -16,6 +16,7 @@
 
 #include "rt_outdoor_lamps.h"
 #include "rt_lamp_gpu.h"
+#include "platform.h"
 #include "rt_lamp_model.h"
 #include "rt_lamp_proxy.h"
 #include "rt_lamps_hlsl.h"
@@ -28,6 +29,8 @@
 #include "lamp_mark_filter.h"
 #include "apex_log.h"
 #include "hook_guard.h"
+#include "dev_switches.h"
+#include "apex_memory.h"
 #include "game_addresses.h"
 #include "d3d9_hooks.h"
 #include "d3d9_extra_hooks.h"
@@ -375,6 +378,7 @@ struct Slot {
     IDirect3DTexture9* game = nullptr; // the room's own map (AddRef'd while kept)
     IDirect3DTexture9* copy = nullptr; // DEFAULT render target: what the draws read instead
     IDirect3DVertexBuffer9 *vb = nullptr, *dyn = nullptr;
+    IDirect3DVertexBuffer9* dynNext = nullptr; // the other floor mask buffer: a write fills the one the last draws did not read
     IDirect3DTexture9* preblur = nullptr;
     RtLampGpu::Map map;
     uint32_t version = 0;
@@ -489,6 +493,7 @@ void ReleaseSlot(Slot& s) {
     if (s.copy) s.copy->Release(), s.copy = nullptr;
     if (s.vb) s.vb->Release(), s.vb = nullptr;
     if (s.dyn) s.dyn->Release(), s.dyn = nullptr;
+    if (s.dynNext) s.dynNext->Release(), s.dynNext = nullptr;
     if (s.preblur) s.preblur->Release(), s.preblur = nullptr;
     if (s.game) s.game->Release(), s.game = nullptr;
     s.map = RtLampGpu::Map{};
@@ -768,6 +773,7 @@ bool UploadSlot(IDirect3DDevice9* dev, Slot& s, const Job& j, Prepared& p) {
     s.drawn = std::unordered_set<uintptr_t>(j.drawn.begin(), j.drawn.end());
     if (s.vb) s.vb->Release(), s.vb = nullptr;
     if (s.dyn) s.dyn->Release(), s.dyn = nullptr;
+    if (s.dynNext) s.dynNext->Release(), s.dynNext = nullptr;
     if (s.preblur) s.preblur->Release(), s.preblur = nullptr;
     s.masked.clear(), s.maskedPos.clear(), s.gated.clear(), s.under.clear(), s.uA.clear(), s.uU.clear(), s.uSnap.clear(), s.uIds.clear();
     s.underSig = 0, s.underExact = false, s.underDirty = false, s.uJob.reset();
@@ -804,6 +810,10 @@ bool UploadSlot(IDirect3DDevice9* dev, Slot& s, const Job& j, Prepared& p) {
     if (!s.masked.empty()) {
         std::vector<RtLampGpu::TexelDyn> z(p.v.size(), RtLampGpu::TexelDyn{{0, -1, 0, 0}});
         if (!RtLampGpu::Engine::MakeDyn(dev, z.data(), static_cast<UINT>(z.size()), &s.dyn)) return retryLater("its floor mask buffer could not be made");
+        // (both start from the same zeros, and every write fills all the masked texels, so either one is complete; a lock
+        // of the one the GPU may still read waits for it under DXVK: the writes alternate. Without the second, as before)
+        // (DXVK only: native D3D9 copies a MANAGED buffer at its lock without waiting, and the copy costs RAM)
+        if (Platform::DxvkD3D9() && !RtLampGpu::Engine::MakeDyn(dev, z.data(), static_cast<UINT>(z.size()), &s.dynNext)) s.dynNext = nullptr;
         s.map.dyn = s.dyn;
     }
     if (p.blur) {
@@ -1069,6 +1079,14 @@ void Frame(IDirect3DDevice9* dev) {
         g_atlasKey = 0;
         LOG_INFO(std::format("[RtOutdoorLamps] Occluders of lot {:08X}: {} triangles ({} walls with {} openings, {} roof and {} slab triangles), generation {}", tracker,
                              g_mesh.tris.size(), g_mesh.walls, g_mesh.openings, g_mesh.roofTris, g_mesh.slabTris, proxy->gen));
+        // (left_lot_release) the triangles are in the proxy vertex buffer now (SetProxy copies them) and nothing else reads this
+        // copy; the next Build starts from an empty mesh anyway (RtLampProxy::Build: m = Mesh{})
+        if (DevSwitches::LeftLotRelease()) {
+            const uint64_t bytes = ApexMemory::Est::Vec(g_mesh.tris) + ApexMemory::Est::Vec(g_mesh.cellStart) + ApexMemory::Est::Vec(g_mesh.cellTris) +
+                                   ApexMemory::Est::Vec(g_mesh.kind) + ApexMemory::Est::Vec(g_mesh.story);
+            g_mesh = RtLampProxy::Mesh{};
+            ApexMemory::NoteReleased("Real-time outdoor lamps: the occluders' CPU copy once uploaded", bytes);
+        }
     }
     // the rules every relit texel follows (a change relights every map)
     const GameConsts gc = ReadConsts();
@@ -1704,7 +1722,8 @@ void Frame(IDirect3DDevice9* dev) {
             // lamp to be still, the last values stay meanwhile)
             if (dragging && !maskGpu) write = false;
             void* q = nullptr;
-            if (!maskWait && write && SUCCEEDED(s.dyn->Lock(0, 0, &q, 0)) && q) {
+            IDirect3DVertexBuffer9* const target = s.dynNext ? s.dynNext : s.dyn; // (the draws keep the current one until this one is filled)
+            if (!maskWait && write && SUCCEEDED(target->Lock(0, 0, &q, 0)) && q) {
                 auto* dyn = static_cast<RtLampGpu::TexelDyn*>(q);
                 for (size_t i = 0; i < s.masked.size(); i++) {
                     float vis = 0, all = 0;
@@ -1712,7 +1731,11 @@ void Frame(IDirect3DDevice9* dev) {
                         for (const auto& l : mine) RtLampModel::AddMask(l, &s.maskedPos[i * 6], 1.0f, s.thr, vis, all);
                     dyn[s.masked[i]] = RtLampGpu::TexelDyn{{all, s.under[i], 0, 0}};
                 }
-                s.dyn->Unlock();
+                target->Unlock();
+                if (s.dynNext) {
+                    std::swap(s.dyn, s.dynNext);
+                    s.map.dyn = s.dyn;
+                }
                 s.dynCurrent = maskGpu;
             }
         }

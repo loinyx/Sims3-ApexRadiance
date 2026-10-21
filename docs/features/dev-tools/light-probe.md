@@ -42,8 +42,7 @@ only the draws that really reach that pixel are reported.
    depth writes off and a 1x1 scissor, runs inside an occlusion query.
 3. **Finish.** At the following Present the queries are read; draws with samples > 0 are written to
    `Light capture.txt` with their shaders and textures, in a new dated capture folder.
-4. **Follow-ups.** After a capture by shortcut, the same pixel is captured again 1 s and 3 s after any loaded lot
-   changes the story it shows, up to 6 automatic captures within 2 minutes (for floor-switch problems).
+4. **One capture per request.** No capture is taken automatically: a floor change does not start another one.
 5. **Compare.** Two consecutive captures (piece A, then piece B) end with a register-by-register comparison of the
    object draw chosen at each pixel.
 
@@ -128,18 +127,15 @@ render target, then `GetRenderTargetData`). Writes the report, dumps shaders and
 calls `Captures::Finish(folder, ..., CaptureKind::LightCapture)`. Status line:
 `Measured: N draws cover pixel (x, y), M textures saved in Captures\<folder>.`, also logged as `[LightProbe] ...`.
 
-### Automatic follow-ups after a floor change
+### No automatic captures
 
-`Watch` state: after a shortcut capture (not a click), the pixel, `ShownStories()` (from
-`LevelLightShare::DisplayLevels`: the story each loaded lot shows) and a 120 s deadline are kept, with 6 captures left.
-When a lot's shown story changes, captures are queued 1 s and 3 s later with the reason
-`automatic, 1 s after the floor change (lot XXXXXXXX story a -> b)`; the recorder gets a `[probe] floor change` line.
-Automatic captures go into `... Light capture (automatic)\` folders. Keep the camera still so the pixel stays on the same
-object. A watch armed inside a capture session ends with that session, so no automatic capture lands in a later session;
-outside a session the watch is unchanged.
+`OnPresent` clears the `Watch` state on every capture request and nothing arms it, so the floor-change follow-ups
+(`ShownStories`, the 1 s and 3 s re-captures, `Light capture (automatic)` folders) never run.
+
+### Capture buffers
 
 In development builds with `release_debug_buffers` on, the reserve of draw records (up to 4,000) and the occlusion
-queries are given back after each capture when no automatic capture is pending
+queries are given back after each capture
 ([memory-analysis.md](../memory-analysis.md#development-flavour-measurements)).
 
 ### Texture replacement (developer mode)
@@ -159,8 +155,9 @@ differ (relative tolerance 1e-4).
 ### Output files
 
 One folder per capture: `Documents\Electronic Arts\The Sims 3\Apex Radiance\Captures\<YYYY-MM-DD HH-MM-SS> Light capture\`
-(or `Light capture (automatic)`; inside a session, `<session>\<HH-MM-SS> Light capture\`). See
-[bug-reports.md](../bug-reports.md#technical-reference) for the files every capture gets.
+(inside a session, `<session>\<HH-MM-SS> Light capture\`). The oldest capture folders are removed automatically past
+`[ui] capture_max_mb` / `capture_max_folders`. See [bug-reports.md](../bug-reports.md#technical-reference) for the
+files every capture gets and the cleanup.
 
 | File | Content |
 |---|---|
@@ -202,7 +199,7 @@ T1 2D 256x128 A8R8G8B8 MANAGED/SYS mips=1: salva T1_256x128_A8R8G8B8.bmp; media 
 | `tela WxH` | back-buffer size (the probe's pixel space) |
 | `desenhos na tela` | screen-sized draws recorded in the frame (not only the covering ones) |
 | `sem resposta` | queries still pending after 1.5 s (their draws are dropped) |
-| `Capture:` | why the capture was taken (shortcut, guided click, or automatic follow-up) |
+| `Capture:` | why the capture was taken (shortcut or guided click) |
 | `DESENHO #i DIP/DP` | index among recorded draws; DrawIndexedPrimitive or DrawPrimitive |
 | `tipo` | `D3DPRIMITIVETYPE` (4 = triangle list, 5 = strip) |
 | `amostras` | occlusion samples at the pixel (1 without MSAA, 8 with 8x MSAA) |
@@ -244,7 +241,7 @@ Projection layout: row2 = A x row3 + (0, 0, 0, -near), A = 1.00008; near is abou
 | File | Symbol | Role |
 |---|---|---|
 | `light_probe.h` | `OnPresent`, `RenderUI`, `Shutdown`, `Capturing`, `Busy`, `Aim`, `Aiming`, `CancelAim`, `ConfirmAim` | API |
-| `light_probe.cpp` | `OnPresent` | shortcut, pixel mapping, state machine, follow-ups |
+| `light_probe.cpp` | `OnPresent` | shortcut, pixel mapping, state machine |
 | | `OnDraw<DrawFn>` | per-draw recording, occlusion copy, texture replacement |
 | | `RegisterHooks` / `UnregisterHooks` | draw hooks |
 | | `FinishCapture`, `StartCaptureFolder` | query collection, report, pick, comparison, capture folder |
@@ -263,6 +260,8 @@ No game addresses: the probe works only at the D3D9 level.
 - Naming shaders by pointer as an identity: pointers are reused across sessions. [History](../../history/dev-tools-light-probe.md)
 - Three significant digits for constants: produced a wrong "near = 1.0" reading. [History](../../history/dev-tools-light-probe.md)
 - One shared `LightProbe\` folder overwritten by every capture: mixed stale files; replaced by one folder per capture. [History](../../history/dev-tools-light-probe.md)
+- Automatic re-captures 1 s and 3 s after a floor change: they filled capture sessions with unrequested captures and
+  relit the lot each time. [History](../../history/dev-tools-light-probe.md#2026-10-21-automatic-re-captures-after-a-floor-change-removed)
 
 ## See also
 

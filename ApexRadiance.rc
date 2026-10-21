@@ -33,3 +33,7 @@ BEGIN
         VALUE "Translation", 0x409, 1200
     END
 END
+
+// Apex's own shaders, compiled with Microsoft's d3dcompiler_47 (framework/shader_cache.cpp, LoadEmbedded): used where the
+// player's cache lacks them, so Wine / Proton never needs its builtin compiler for them
+APEX_RC_SHADER_CACHE RCDATA "resources/ApexRadiance_ShaderCache.bin"

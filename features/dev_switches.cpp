@@ -15,7 +15,8 @@ void Load() {
     const auto get = [&](const char* key) { return t ? (*t)[key].value_or(true) : true; };
     memoryOwners.store(get("memory_owners"));
     releaseDebugBuffers.store(get("release_debug_buffers"));
-    LOG_INFO(std::format("[DevBuild] Memory switches: memory_owners {}, release_debug_buffers {}", memoryOwners.load() ? "on" : "off", releaseDebugBuffers.load() ? "on" : "off"));
+    leftLotRelease.store(get("left_lot_release"));
+    LOG_INFO(std::format("[DevBuild] Memory switches: memory_owners {}, release_debug_buffers {}, left_lot_release {}", memoryOwners.load() ? "on" : "off", releaseDebugBuffers.load() ? "on" : "off", leftLotRelease.load() ? "on" : "off"));
     measurements.store(get("measurements"));
     drawReadsNoWait.store(get("draw_reads_nowait"));
     occlusionRelight.store(get("occlusion_relight"));

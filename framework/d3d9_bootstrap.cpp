@@ -5,6 +5,7 @@
 #include "hook_guard.h"
 #include "memory_patch.h"
 #include "overlay.h"
+#include "platform.h"
 #include "render_callbacks.h"
 #include "s3ss_detect.h"
 #include "picture.h"
@@ -190,6 +191,9 @@ HRESULT STDMETHODCALLTYPE Hooked_CreateDevice(IDirect3D9* self, UINT adapter, D3
         }
         LOG_INFO(std::format("[D3D] Adapter {} of {}; AMD Vulkan driver in the game: {}", adapter, self->GetAdapterCount(),
                              GetModuleHandleW(L"amdvlk32.dll") ? "loaded" : "not loaded"));
+        // (under DXVK the card name is not the real one: DXVK reports Sims 3 as a GeForce GTX 580, its own fix for the
+        // game's shadows on unknown AMD cards)
+        LOG_INFO("[D3D] Platform: " + Platform::Summary());
         HookDevice(*out);
         const HWND w = pp && pp->hDeviceWindow ? pp->hDeviceWindow : focus;
         if (w) g_window.store(w);

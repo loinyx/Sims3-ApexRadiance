@@ -54,6 +54,9 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    estimate (`AccFastPS`), at most one relight every 200 ms, no map is uploaded, and the floor mask's under-floor share is
    computed on a worker thread (the map keeps its last copy until it arrives); once the lamp stays put every map is relit
    with the full estimate. Each frame starts maps only while its relight work stays under about 2 ms of CPU.
+   Under DXVK the floor mask buffer is written in two copies, alternately: each write fills the one the last draws did not
+   read and then becomes the drawn one, since a lock of a buffer the GPU may still read waits there (native D3D9 copies
+   a managed buffer at its lock, with one copy as before).
 7. **Rebuilds.** A story's maps are built again only when its base changes (`OutdoorDelta` `BaseHash`). The export and
    the texel streams are prepared on a worker thread; the render thread uploads one map a frame, and the old copy stays
    bound meanwhile. An upload that fails waits 1 s, 2 s ... 32 s; an export that fails waits 0.25 s ... 8 s.

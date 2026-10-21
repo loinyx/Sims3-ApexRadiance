@@ -606,7 +606,7 @@ void Stop() {
                "read scale\n";
         out << "[room] = an indoor room of a loaded lot, once at the start and again when its ambient (+0x110, the colour its walls take; "
                "+0x120), normalisation, solve state, LOD class (solving / shown), light count or shown story changes (checked every 100 ms)\n";
-        out << "[probe] = a Light Probe (F7) capture, also the automatic ones taken 1 s and 3 s after any lot changes the story it shows\n";
+        out << "[probe] = a Light capture\n";
         out << "[edit] = a lamp the player switched, moved or changed; [solve] ... E = a room's solve ended: it shows its new light from the next "
                "frame (during a recording every room is noted)\n";
         out << "[ground] = a terrain chunk's smoothed light map (also what lots, floors and fences read) shows new light from this frame\n\n";

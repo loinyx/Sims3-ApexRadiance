@@ -19,26 +19,26 @@ Sims 3"); internal names keep "Apex". Visible text uses `APEX_PRODUCT_NAME`, nev
 ## Layout
 
 - **Header:** the logo (`ui/logo.h`: `ui/apex_logo.png` as a 128x128 texture with mips from `ui/logo_data.h`; a violet
-  tile with `APEX_LOGO_LETTER` if the texture cannot be made), name and tagline, the search field (110 to 220 units
-  wide), a Night/Day pill (moon or sun), a frame-time pill (`ms · fps`) and Close (tooltip "Close (Esc); <key> opens it
-  again"). Narrow windows drop the Night/Day pill, then the frame-time pill, to keep the search field at least 110
-  units wide.
+  tile with `APEX_LOGO_LETTER` if the texture cannot be made), the name, the search field (the room left of the pills,
+  at most 280 units wide), a Night/Day pill (moon or sun), a frame-time pill (`ms · fps`) and Close (tooltip "Close
+  (Esc); <key> opens it again"). Narrow windows drop the Night/Day pill, then the frame-time pill, to keep the search
+  field at least 120 units wide; below 60 units the field is not drawn.
 - **Sidebar:** 170 units wide, or a 44-unit icon rail when collapsed (`[ui] sidebar_collapsed`); group labels; the
   collapse button and the version at the bottom. Collapsed items show their name as a tooltip and group labels become
   short hairlines.
 - **Page:** a scrolling child with the page title, an optional underline tab bar and cards. The selected page and each
   page's tab live while the game runs and are not saved (`Go(page, &tab, n)` opens a page on a tab).
 - **Footer:** "All changes saved" (CircleCheck, muted green) or "Saving…" (Save icon) while `ApexConfig::SavePending()`,
-  and "Hold Alt to peek" on the right when there is room. Sims3SettingsSetter detection lives in Settings >
+  and "Hold <peek key> to hide the menu" on the right when there is room. Sims3SettingsSetter detection lives in Settings >
   Compatibility.
 
 ## Pages
 
 | Page (sidebar icon) | Content |
 |---|---|
-| Presets (bookmark; below Overview) | My presets, then Apex presets; Save current, Import and Export dialogs |
+| Presets (bookmark; below Overview) | My presets, then Apex presets; Save current, Import and Export dialogs; Open the presets folder ([Presets](#presets)) |
 | Overview (layout-dashboard) | Recommendation card "Recommended for Apex Radiance" (DXVK and Sims3SettingsSetter, only the missing ones, while `[ui] recommend_s3ss` is true; Download, "Don't show again"). **All effects** card: one switch with "All effects are on / Some effects are on / All effects are off"; it controls Night Lights, Ambient Occlusion, Banding Fix, Depth Blur, Edge Smoothing, Picture, Water Reflections and the Performance group. **Lighting** card: Night Lights, Water Reflections. **Image** card: Picture, Ambient Occlusion, Banding Fix, Depth Blur, Edge Smoothing. **Performance** card: one switch for all 15 performance options. Clicking a name opens its page. Rows blocked by the game's anti-aliasing show "Waiting for game settings"; GPU cost chips show measured time only |
-| WORLD > Lighting (moon-star) | Tabs **Overview** (Night Lights card; lighting balance Subtle / Soft / Natural / Custom with Undo choice, then *Realistic lamp reach*; Refresh lighting card), **Ground** (Ground & Lots card: *Lot lamps light the street*, *Walls shade lamp light near the ground*, folded **Game fixes** with *Street lamps light lots*, *Lamp colors stay near lamps*, *Smooth ground light*, *Update at dusk* and its delay; Ground intensity card), **Objects** (Objects card: *Lamps light objects* and its brightness, *Buildings block lamp light on trees and objects*, folded **Game fixes** with *Light stairs, railings, columns*, the doors, windows, counters and fences rows with their brightness, and *Smooth indoor light*), **Buildings** (Buildings card: walls and roofs with their brightness; Rooms at Night card: groups BACKGROUND LIGHT and LAMP LIGHT, the latter *Outdoor light through openings*, *Indoor light through openings*, *Doors block light*, disabled with a note while *Outdoor light between floors* is off, *Shadow softness* (cm), folded **Game fixes** with *Smooth light maps*, then Refresh the lighting; Light detail card, no badge), **Stories** (Upper floors light the ground and the floor-sharing options, folded **Game fixes** with *Wall lamps at the right height*, *Seamless walls between floors*, *Every floor in full detail*). 2.13.1: the game's fixes are folded (on by default, still switchable); only the choices that change the look stay visible. While Night Lights is off, the other tabs show a note and "Turn on Night Lights". See [Night Lighting](features/night-lighting/README.md) |
+| WORLD > Lighting (moon-star) | Tabs **Overview** (Night Lights card; lighting balance Subtle / Soft / Natural / Custom with Undo choice, then *Realistic lamp reach*; Refresh lighting card), **Ground** (Ground & Lots card: *Lot lamps light the street*, *Walls shade lamp light near the ground*, folded **Game fixes** with *Street lamps light lots*, *Lamp colors stay near lamps*, *Smooth ground light*, *Update at dusk* and its delay; Ground intensity card), **Objects** (Objects card: *Lamps light objects* and its brightness, *Buildings block lamp light on trees and objects*, folded **Game fixes** with *Light stairs, railings, columns*, *Doors and windows stay lit*, *Windows take outdoor light*, *Seamless light on pieces* with *Seamless light brightness*, *Fences and stairs catch light* with *Fence brightness*, and *Smooth indoor light*), **Buildings** (Buildings card: walls and roofs with their brightness; Rooms at Night card: groups BACKGROUND LIGHT and LAMP LIGHT, the latter *Outdoor light through openings*, *Indoor light through openings*, *Doors block light*, disabled with a note while *Outdoor light between floors* is off, *Shadow softness* (cm), folded **Game fixes** with *Smooth light maps*, then Refresh the lighting; Light detail card, no badge), **Stories** (Stories card: *Upper floors light the ground*, *Outdoor light between floors*, then *Indoor light between floors*, *Walls block light on floors* and *Light through doors and windows* (the last also needs *Walls block light on floors*), disabled with a note while *Outdoor light between floors* is off; folded **Game fixes** with *Wall lamps at the right height*, *Seamless walls between floors*, *Every floor in full detail*). The **Game fixes** sections hold corrections of game bugs: they are on by default and still switchable, so only the choices that change the look stay visible. While Night Lights is off, the other tabs show a note and "Turn on Night Lights". See [Night Lighting](features/night-lighting/README.md) |
 | WORLD > Water & Snow (waves-horizontal) | Lamp Glow, Water Reflections (with "Turn on Night Lights" / "Turn on Depth Blur"), Snow. See [reflections](features/reflections.md) |
 | IMAGE > Color (palette) | Overview owns the Color master switch, measured GPU cost and comparison tools; its card title matches the tab. Clickable overview rows lead to Basic, Tones, Color, Detail and Filters, each with an independent group switch. Master off disables and visually turns off dependent switches without clearing saved group preferences. Filters has six compact family panels with down/up adjustment disclosures and switches; shortcuts belong to presets. No profiles on this overview. See [picture-filters.md](features/picture-filters.md) |
 | IMAGE > Banding Fix (blend) | "Still being tested" note and the Banding Fix card with Strength, Moving grain and Smooth gradients. See [banding-fix.md](features/banding-fix.md) |
@@ -56,9 +56,9 @@ Sims 3"); internal names keep "Apex". Visible text uses `APEX_PRODUCT_NAME`, nev
 
 | Tab | Cards |
 |---|---|
-| Menu | **Menu**: Language (select, 220 units), Text size (- / value / + / Reset; 80, 90, 100, 115, 130, 150, 175, 200%), Startup menu hint (`[ui] start_note`). **Screenshot capture**: Use Apex screenshot shortcut, its key, Hide game UI in screenshots, destination note. **Settings and maintenance**: Save now ("Changes also save by themselves after a second"), Enable developer mode, Reset all settings (inline confirmation and Undo; restores features, Picture and every `[ui]` preference; captures, reports and profiles stay) |
-| Shortcuts | **Shortcuts**: preset (Letters / Numbers / F keys / Custom, 180 units), Open the menu, Compare with the game, Refresh the lighting, Take a filtered screenshot (disabled while the screenshot shortcut is off), note "F10 always hides the game interface". **Report a problem**: Recording, Light capture, Lighting snapshot, and Frame Capture in developer mode. **While Apex is open**: Search the settings, Peek at the game behind the menu, Compare the picture without its filters. **Personalize**: "Show the startup hint next time" |
-| Compatibility | Game version; Sims3SettingsSetter and DXVK Installed / Not installed; Features Running / Starting… / Off (old combined build found); RECOMMENDED group while one is missing; Details (the raw S3SS summary and the settings migration note) |
+| Menu | **Menu**: Language (select, 220 units), Text size (- / value / + / Reset; 80, 90, 100, 115, 130, 150, 175, 200%), Startup menu hint (`[ui] start_note`). **Screenshot capture** ("Save the finished game image with Apex's active effects"): Save screenshots to (Game's Screenshots folder / Apex Radiance folder), the screenshot key, Hide game UI in screenshots. The card has no on/off switch: the shortcut is always on, and `[ui] screenshot_shortcut_enabled` is still written but no longer read. **Settings and maintenance**: Save now ("Changes also save by themselves after a second"), Enable developer mode, Reset all settings (inline confirmation and Undo; restores features, Picture and every `[ui]` preference; captures, reports and presets stay) |
+| Shortcuts | **Shortcuts**: Shortcut preset (Letters / Numbers / F keys / Custom, 180 units), Open the menu, Compare with the game, Refresh the lighting, Take a filtered screenshot, note "F10 always hides the game interface". **Report a problem**: Recording, Light capture, Lighting snapshot, and Frame Capture in developer mode. **While Apex is open**: Search the settings, Peek at the game behind the menu, Compare the picture without its filters. **Personalize**: "Show the startup hint next time" |
+| Compatibility | **Compatibility** card: Game version; Platform (Windows, Steam Deck (Proton), Linux (Proton), macOS (Wine) or Wine); Sims3SettingsSetter Installed / Not installed; DXVK Installed / Not in use (WineD3D) (under Wine without DXVK) / Not installed; Features Running / Starting… / Off (old combined build found); on a Steam Deck, a STEAM DECK group with a note and **Load Performance**, which loads the Performance preset without its lighting part; RECOMMENDED group while one is missing; Details (the raw S3SS summary and the settings migration note). **Recovery** card: Restart Apex ([Graphics recovery](#graphics-recovery)) |
 | About | "Apex Radiance for The Sims 3", "Version X" (or "Version X - Developer mode"), CREDITS |
 
 There is no per-page or per-card reset. Each row with a default shows a changed dot and, on hover, its own Reset
@@ -147,9 +147,10 @@ autosave works as usual.
   has keyboard focus. Every word of the query (case-insensitive) must appear in a row's label or description, in
   English or the shown language. Results are the live controls, each after a breadcrumb link ("Lighting › Ground");
   card headers with a switch become searchable switch rows; collapsed Advanced content is searched; feature bodies are
-  searched while the feature is off. Searched, in order: the Lighting tabs, Water & Snow, Color (Banding, header, Basic,
-  Tones, Color, Detail), Ambient Occlusion, Depth Blur, Edge Smoothing, Performance, Settings > Menu and Shortcuts.
-  Presets and LUTs have searchable entries. Not searched: Overview, Developer, Compatibility, About, Report.
+  searched while the feature is off. Searched, in order (`SearchParts`): the five Lighting tabs, Water & Snow, Banding
+  Fix, Color Overview, Color LUTs, Presets, Color Filters, Basic, Tones, Color and Detail, Ambient Occlusion, Depth
+  Blur, Edge Smoothing, Performance, Lot Streaming, Settings > Menu and Settings > Shortcuts. Not searched: Overview,
+  Developer, Compatibility, About, Report a problem.
 - **Changed markers and per-setting Reset:** a dot after the label while the value differs from its default ("Changed
   from the default"); hovering shows a Reset button that restores that one setting through the row's normal change
   path. Sliders compare with a tolerance of 1/10000 of their range. Reset buttons are not keyboard stops.
@@ -159,9 +160,9 @@ autosave works as usual.
   toast at the bottom right with Undo, for 4 s (paused while hovered). Undo applies only sections that differ through
   `ApexConfig::ApplyFeatureState`. Only the last change is undoable. Menu preferences (language, text size, keys,
   sidebar) and the Developer page do not report.
-- **Peek:** holding the peek key (default Alt, `[ui] peek_key`) while the pointer is over the menu makes it nearly
-  transparent (window 0.2, contents about 0.1) and inert; not while typing or dragging. While a slider is dragged the
-  window fades to 0.35 and the active row stays opaque.
+- **Peek:** holding the peek key (default Alt, `[ui] peek_key`) while the pointer is over the menu hides it (opacity
+  eased to 0 over about 0.1 s) and makes it inert; the window stays under the pointer, so releasing the key brings it
+  back. Not while typing or dragging. While a slider is dragged the window fades to 0.35 and the active row stays opaque.
 - **Hold to compare (Color):** the eye button in the Picture header, or holding the picture-compare key (default `B`,
   `[ui] picture_compare_key`) over the menu, calls `Picture::HoldBypass()`; Picture is skipped for 0.15 s after the
   last call and returns by itself.
@@ -182,9 +183,9 @@ autosave works as usual.
 
 ## Shortcuts
 
-All Apex shortcuts are intercepted by the overlay before the game sees them. Presets (`[ui] hotkey_preset`: `letters`,
-`numbers`, `fkeys`, `mine`; shown as Letters, Numbers, F keys, Custom). A missing preset means F keys. Selecting a
-preset is explicit and clears per-action overrides; opening Settings never changes a saved key. Recording a key on a row
+All Apex shortcuts are intercepted by the overlay before the game sees them. Shortcut presets switch the main keys
+together and are separate from the settings presets on the Presets page (`[ui] hotkey_preset`: `letters`, `numbers`,
+`fkeys`, `mine`; shown as Letters, Numbers, F keys, Custom). A missing preset means F keys. Selecting a preset is explicit and clears per-action overrides; opening Settings never changes a saved key. Recording a key on a row
 switches the preset to Custom, which keeps the previous preset (`[ui] mine_base`) as the fallback for unchanged actions.
 
 | Action | TOML (`[ui]`) | Letters | Numbers | F keys |
@@ -222,7 +223,11 @@ when the Apex menu opens, on a world change or after 30 s without typing. The ga
 
 ## Presets
 
-The Presets sidebar page sits immediately below Overview. My presets precede Apex presets. It saves parts of the setup as `Documents\...\Apex Radiance\Profiles\<name>.toml`.
+The Presets sidebar page ("Save your setup and switch between them") sits immediately below Overview. My presets
+(saved by the player) precede Apex presets (built in, `apex_presets.cpp`; no file, no Delete). The menu says
+"preset" everywhere; the folder, the files, the `[ui] profile_shortcuts` key, the log lines, the "Profile loaded" toast
+and the code (`SaveProfile`, `ReadProfile`) keep the older name "profile". A preset holds parts of the setup in
+`Documents\...\Apex Radiance\Profiles\<name>.toml`.
 
 | Bit | Part | Contents | Default when saving |
 |---|---|---|---|
@@ -232,7 +237,7 @@ The Presets sidebar page sits immediately below Overview. My presets precede Ape
 | 3 | Edge Smoothing | `EdgeSmoothing` | Checked |
 | 4 | Reserved | Former window mode; unused so later bits do not shift | - |
 | 5 | Performance | The performance features | Checked |
-| 6 | Shortcuts | `[shortcuts]` (menu and action keys, search, peek, picture compare) | Unchecked |
+| 6 | Shortcuts | `[shortcuts]` (menu key, shortcut preset and its Custom base, action keys, search, peek, picture compare, and the screenshot key, its folder and Hide game UI) | Unchecked |
 | 7 | Ambient Occlusion | `AmbientOcclusion` | Checked |
 | 8 | Developer | `[developer]` ([developer-mode.md](features/developer-mode.md#profiles)) | Unchecked; shown only when developer mode is requested or active |
 
@@ -292,9 +297,16 @@ Returning to a loading screen closes the gate again. Depth Blur also defers its 
 
 **Startup hint.** Once the menu is available, a top-center pill shows the logo and "Apex Radiance is ready · press <menu
 key>" for 8 s on screen (each frame counts at most 100 ms, so a stall does not use it up); opening the menu ends it.
-`[ui] start_note` (Settings > Menu > Startup menu hint, or "Show the startup hint next time") turns it on or off. No
-key choice, tour or install prompt is shown at first start; legacy `[ui] welcome_done` and `key_chosen` are kept but
-unused.
+`[ui] start_note` (Settings > Menu > Startup menu hint, or "Show the startup hint next time") turns it on or off.
+
+**Welcome page.** On a new installation (no `[ui]` table yet), the first menu open shows "Welcome to Apex Radiance"
+in place of the page: a **Starting profile** card lists the Apex presets (with a Steam Deck recommendation for
+Performance there). Clicking one applies it at once, without its Shortcuts and Developer parts, so the game behind
+the menu shows it; **Keep my settings** puts back the earlier settings, **Continue** keeps the choice with an Undo
+toast. When an Attention item applies, a second step, "Before you play", lists it with **Back**, **Fix later** (opens
+the Attention page) and **Start playing**. The first draw sets `[ui] start_profile_done` (a `[ui]` table without the key
+counts as done), so the page is shown once; opening another page from the sidebar ends it and keeps a previewed preset with
+Undo. Legacy `[ui] welcome_done` and `key_chosen` are kept but unused.
 
 **Notices.** Capture, recording, comparison and startup pills share one top-center anchor 20 scaled units below the top,
 one at a time: capture or recording first, then compare, then the startup hint. Startup banners suppress routine
@@ -413,18 +425,11 @@ credited in Settings > About.
 
 "Apex Radiance by @loinyx."; "Sims3SettingsSetter by sims3fiend: project origin and framework reference."; "FXAA 3.11:
 Timothy Lottes (NVIDIA)."; "FidelityFX CAS: AMD (MIT)."; "Upper-floor ground light: Arro's technique, adapted in Apex
-Radiance."; "Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et
+Radiance."; "Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga."; "Thanks to @boringbones
+for testing every build."; "Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et
 al. (MIT), Lucide icons (ISC)." Arro's technique is also credited in the README. Functional notices about official
 S3SS's own fix ("Already handled by Sims3SettingsSetter (its Split-Level Lighting Fix is on)") are shown where relevant;
 Sims3SettingsSetter also appears in compatibility notices, detection, the recommendation card and the settings migration.
-
-## See also
-
-- [Validation](validation/ui.md)
-- [History](history/ui.md)
-- [Report a problem](features/bug-reports.md), [Developer mode](features/developer-mode.md)
-
-Ambient Occlusion no longer exposes Temporal smoothing, Thin object detail or Object thickness. Strength, Distance, Quality, map-view shading, Reach, lamp protection and Sim controls remain available.
 
 ## Graphics recovery
 
@@ -439,3 +444,9 @@ its own notice. Reset all settings preserves this acknowledgment. The version bu
 stable release notes keep their existing behaviour in other builds. Captures and startup conflict banners defer the
 automatic notice. Instructions use a scrollable body and a fixed primary Continue action at all supported text sizes.
 Instructions name the current checks, including stair openings and closed floors in the lighting-guard revision.
+
+## See also
+
+- [Validation](validation/ui.md)
+- [History](history/ui.md)
+- [Report a problem](features/bug-reports.md), [Developer mode](features/developer-mode.md)

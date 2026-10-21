@@ -17,6 +17,7 @@
 
 void ApexLog::Write(Level, const std::string& text, const std::source_location&) noexcept { std::printf("  log: %s\n", text.c_str()); }
 size_t OutdoorDelta::KeptBytes() { return 0; }
+std::string OutdoorDelta::MemoryText() { return "(test)"; }
 
 namespace {
 int g_checks = 0, g_failures = 0;
@@ -76,9 +77,26 @@ void HeapChecks() {
         for (size_t at = report.find("ApexRadiance.asi+0x"); at != std::string::npos; at = report.find("ApexRadiance.asi+0x", at + 1)) sites++;
         Check(sites >= 2, "two calling sites listed");
         Check(report.find("0.286 MiB") != std::string::npos && report.find("0.191 MiB") != std::string::npos, "each site with its bytes");
+        // blocks of 64 KB or more: by call stack, the frames being return addresses into this module after a call
+        const size_t big = report.find("Blocks of 64 KB or more by call stack");
+        Check(big != std::string::npos, "big blocks listed by stack");
+        const size_t line = report.find("MiB", big + 40);
+        Check(line != std::string::npos && report.find("ApexRadiance.asi+0x", line) != std::string::npos && report.find("(no stack)", big) > report.find("ApexRadiance.asi+0x", line),
+              "a big block's stack has frames");
+    }
+    {
+        const ApexMemory::HeapTotals hb = ApexMemory::Heap();
+        const bool counted = hb.bytes - h0.bytes == 500000;
+        Check(counted, "big blocks counted like the others");
     }
     ::operator delete(a);
     ::operator delete(b);
+    {
+        int64_t bigLive = 0;
+        for (const auto& g : g_big) bigLive += g.bytes.load();
+        const bool back = bigLive == 0 && ApexMemory::Heap().bytes == h0.bytes; // (before the message string is made)
+        Check(back, "big blocks given back: their stacks and the heap back to before");
+    }
     // ImGui's allocations: counted apart and in the total
     void* g = ApexMemory::ImGuiAlloc(5000, nullptr);
     { const int64_t d = ApexMemory::Heap().bytes - h0.bytes; Check(d == 5000, "ImGui block counted"); }

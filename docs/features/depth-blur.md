@@ -3,8 +3,8 @@
 Depth Blur softens the distant background, like a camera lens focused on the scene in front of it. The blur grows
 smoothly with distance, lamps in the blurred background stay bright, and pie menus, tooltips, plumbobs and panels stay
 sharp because the blur is applied before the game draws its interface. It fades out while the map view is open and
-pauses during loading screens and over a frozen picture such as the save screen. The feature also owns the shared depth buffer that Ambient Occlusion, Edge Smoothing and
-Water Reflections read.
+pauses during loading screens and over a frozen picture such as the save screen. The feature also owns the shared depth buffer that Ambient Occlusion, Edge Smoothing,
+Color's *Emphasize* and Water Reflections read.
 
 ## Status
 
@@ -66,9 +66,6 @@ All settings are read live every frame. Rows that belong to one focus mode are d
 search finds them only then. Configurations written before the Auto focus existed keep their Fixed keys and gain the new
 keys with their defaults.
 
-The tooltips of three segmented rows still describe older defaults: *Medium* is labelled "The default" for Sharp area,
-*High* for Quality and *Medium* for Distance, while the registered defaults are Large, Medium and 0.318.
-
 ## Compatibility and interactions
 
 - **The game's Edge Smoothing (MSAA)** must be off: a multisampled depth buffer cannot be sampled in Direct3D 9. The
@@ -77,8 +74,8 @@ The tooltips of three segmented rows still describe older defaults: *Medium* is 
   [edge-smoothing.md](edge-smoothing.md#compatibility-and-interactions)).
 - **Post-scene order:** Ambient Occlusion (10), Edge Smoothing (20), then Depth Blur (30), so the blur works on the
   shaded, anti-aliased image.
-- **Depth share consumers:** Ambient Occlusion and Edge Smoothing (*Edges from depth*) request the depth swap, so it
-  keeps running with Depth Blur off. Water Reflections uses it when it exists but never requests it; its card asks for
+- **Depth share consumers:** Ambient Occlusion, Edge Smoothing (*Edges from depth*) and Color's *Emphasize* request
+  the depth swap, so it keeps running with Depth Blur off. Water Reflections uses it when it exists but never requests it; its card asks for
   Depth Blur ([reflections.md](reflections.md)).
 - **Picture filters** copy the scene after the post-scene effects, so the blur is graded with the scene.
 - **Hidden game UI:** with no depth-off interface draw after the scene, the chain runs at the end of the frame instead.

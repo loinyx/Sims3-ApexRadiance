@@ -50,7 +50,7 @@ Each frame:
 | Also in map view | `noMapa` | bool | on | | Shades the map view with radii sized for houses and trees (contact 4 m, large 15 m, no distance fade) |
 | Advanced > Reach | `alcance` | float | 130% | 50 to 200% | Scales all radii |
 | Advanced > Keep lamp light | `protegerLuz` | float | 38% | 0 to 100% | Share of light that bright and lamp-lit pixels keep |
-| Advanced > Show the shade alone | (not saved) | bool | off | | Shows only the shade, in grey |
+| Developer > Visual effects > Ambient shadows > Show the shade alone | (not saved) | bool | off | | Shows only the shade, in grey (developer mode) |
 | (none) | `revisao` | int | 9 | | Settings revision. Older files keep every saved value and only gain missing keys |
 
 All settings apply immediately. Keys from the old combined build (`intensidade`, `raioM`, `visualizar`) are not read.
@@ -59,8 +59,8 @@ All settings apply immediately. Keys from the old combined build (`intensidade`,
 
 - **Post-scene order:** Ambient Occlusion runs first (order 10), before Edge Smoothing (20) and Depth Blur (30). See
   [architecture.md](../architecture.md).
-- **Shared depth:** Depth Blur and Reflections read the same INTZ depth copy; the depth swap stays on while any of them
-  needs it.
+- **Shared depth:** Depth Blur, Reflections, Edge Smoothing (*depth edges*) and Color's *Emphasize* read the same INTZ
+  depth copy; the depth swap stays on while any of them needs it.
 - **Picture filters** are applied after the shade, so colour filters also affect it.
 - **Compare with the game** (shortcut) turns Ambient Occlusion off together with Night Lighting, Depth Blur and Edge
   Smoothing.

@@ -43,7 +43,9 @@ Two further changes to the same allocator have no setting and are on in every ga
 
 - **Trim.** Every 60 s and before every world save, Apex calls the allocator's own trim (`0x004E4F90`, thiscall
   `(allocator, pad)`), which decommits the free tops of its cores while keeping a 1 MB pad each (the allocator's own
-  pad is 64 KB), so fewer pages are committed again soon after.
+  pad is 64 KB), so fewer pages are committed again soon after. The trim before a save runs from the early save
+  preparation of [Room to save](room-to-save.md#how-apex-radiance-solves-it) (`SaveDispatchHook`), so it needs *Room to
+  save* on and that hook installed; with *Room to save* off only the 60 s trim runs.
 - **Top-down large blocks.** The allocator's flag at `+0x498` is set to 1, so its large blocks are reserved from the top
   of the address space, away from the smaller allocations at the bottom.
 

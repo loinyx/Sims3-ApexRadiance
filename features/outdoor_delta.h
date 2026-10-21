@@ -127,6 +127,8 @@ bool ExportRoom0(const void* room, int cls, Room0Export& out);
 // solves the budget has not kept so far (logged with their sizes)
 long PinRooms(const void* const* rooms, int n);
 size_t KeptBytes();
+// What the kept parts are made of, and what the budget and the left-lot sweep dropped (the memory report and its log line)
+std::string MemoryText();
 size_t PinnedBudgetBytes(); // the active lot's ceiling (Developer > Tester readout)
 int KeptRooms();
 // The last time a story's room 0 of that class lost its kept parts or had none kept, and why ("" when none was noted)

@@ -50,7 +50,7 @@ is fixed per pixel, so nothing flickers. The alpha channel, which the game uses 
 | Banding Fix (card switch) | `enabled` | bool | on | | Turns the grain on |
 | Strength | `forca` | float | 100% | 0 to 100% | Peak of the triangular grain in 8-bit steps (100% = plus or minus one step, the full TPDF). 0% adds nothing |
 | Moving grain | `graoEmMovimento` | bool | off | | A new grain pattern every frame. High frame rates average it away; at low frame rates it shows as a faint shimmer |
-| Smooth gradients | `[qol.picture] deband` | float | 8% (since 07/10; also in every built-in profile) | 0 to 200% | Deband filter of the Picture pass (threshold `deband x 6/255`). Runs only while the Banding Fix is on |
+| Smooth gradients | `[qol.picture] deband` | float | 8% (also in every built-in profile) | 0 to 200% | Deband filter of the Picture pass (threshold `deband x 6/255`). Runs only while the Banding Fix is on |
 | Developer > Show covered surfaces | (not saved) | bool | off | | Replaces the grain with a coarse 24-step grain on every covered surface |
 
 Settings apply live. The Developer page also shows the shader coverage counters (under *Shader coverage*).
@@ -65,7 +65,9 @@ Settings apply live. The Developer page also shows the shader coverage counters 
 - **Picture filters:** the Picture pass applies its own fixed dither when it grades; Smooth gradients lives in that
   pass.
 - **Compare with the game** (shortcut) turns the Banding Fix off with the other effects until it is pressed again.
-- **Profiles:** the Banding Fix belongs to the Color part of a profile. The three built-in profiles leave it as it is.
+- **Profiles:** the Banding Fix belongs to the Color part of a profile. The three built-in profiles set it
+  (`[patches.SceneDither]` on, Strength 100%, Moving grain off) and Smooth gradients at 8%
+  ([apex_presets.cpp](../../apex_presets.cpp)).
 - **Other Apex passes:** any new Apex pass that draws into the back buffer with the depth test on receives the grain.
 
 ## Limitations

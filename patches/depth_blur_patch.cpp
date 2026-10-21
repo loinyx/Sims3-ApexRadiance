@@ -535,6 +535,12 @@ bool InitResources(IDirect3DDevice9* dev) {
     if (dd.Width != bd.Width || dd.Height != bd.Height || dd.MultiSampleType != D3DMULTISAMPLE_NONE || (dd.Format != D3DFMT_D24S8 && dd.Format != D3DFMT_D24X8)) {
         ds->Release();
         g.status = "Waiting for the game (depth buffer is not the screen's)";
+        static D3DFORMAT s_logged = D3DFMT_UNKNOWN; // (once per format: the reason the depth is not shared, for bug reports)
+        if (s_logged != dd.Format) {
+            s_logged = dd.Format;
+            LOG_WARNING(std::format("[DepthBlur] Depth buffer not shared: {}x{} format {} multisample {} (screen {}x{}); Depth Blur and Ambient Occlusion wait",
+                                    dd.Width, dd.Height, static_cast<int>(dd.Format), static_cast<int>(dd.MultiSampleType), bd.Width, bd.Height));
+        }
         return false;
     }
 
@@ -549,6 +555,7 @@ bool InitResources(IDirect3DDevice9* dev) {
     if (!ok) {
         ReleaseResources(dev);
         g.status = "ERROR: the graphics card/driver does not support INTZ depth textures";
+        LOG_ERROR(std::format("[DepthBlur] INTZ depth texture {}x{} could not be created: Depth Blur and Ambient Occlusion stay off", g.width, g.height));
         return false;
     }
     if (!CreateRT(dev, g.width, g.height, bd.Format, &g.fullTex, &g.fullSurf)) {
@@ -1212,7 +1219,7 @@ class DepthBlurPatch : public ApexPatch {
             int distance = -1; // a fine-tuned value matches none of the steps
             for (int i = 0; i < 3; i++)
                 if (std::fabs(g.p.start - kDistanceValues[i]) < 0.0005f) distance = i;
-            if (ApexUi::SegmentedRow("Distance", "Where the blur begins", "##Distance", &distance, kDistances, 3, kDistanceTips, nullptr, 1) && distance >= 0) {
+            if (ApexUi::SegmentedRow("Distance", "Where the blur begins", "##Distance", &distance, kDistances, 3, kDistanceTips, nullptr, ApexUi::kNoDefaultIndex) && distance >= 0) {
                 g.p.start = kDistanceValues[distance];
                 changed = true;
             }

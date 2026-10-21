@@ -180,7 +180,19 @@ int main() {
     Check(SurfaceKind(NAN, 0.95f, 0.0f) == Surface::Floor, "a floor needs only its upward part");
     // borrowed_light_adapt: the square root of 1 / the light the texels took, between the capped game value and x2
     Check(BorrowedAdapt(3.0f, 0.25f) == 2.0f && std::fabs(BorrowedAdapt(3.0f, 0.5f) - std::sqrt(2.0f)) < 1e-6f, "took 0.25: x2, took 0.5: x1.41 (the square root of what it lacks)");
-    Check(BorrowedAdapt(3.0f, 1e-6f) == kBorrowedAdaptMax && BorrowedAdapt(INFINITY, 0.01f) == kBorrowedAdaptMax, "a faint measure: capped (x2)");
+    Check(BorrowedAdapt(3.0f, 0.02f) == kBorrowedAdaptMax && BorrowedAdapt(INFINITY, 0.01f) == kBorrowedAdaptMax, "a faint measure: capped (x2)");
+    Check(BorrowedAdapt(3.0f, 1e-6f) == 1.0f && BorrowedAdapt(3.0f, 0.002f) == 1.0f, "almost nothing taken: no adaptation (the game value capped at 1)");
+    Check(std::fabs(BorrowedAdapt(3.0f, 0.006f) - 1.5f) < 1e-5f, "halfway in the fade (0.006): halfway to the cap");
+    {
+        float last = 0.0f;
+        bool rising = true;
+        for (float t = 0.0005f; t <= 0.02f; t += 0.0005f) {
+            const float a = BorrowedAdapt(3.0f, t);
+            rising = rising && a >= last - 1e-6f;
+            last = a;
+        }
+        Check(rising, "the fade never steps down as the light taken grows (up to 0.02)");
+    }
     Check(BorrowedAdapt(3.0f, 2.0f) == 1.0f, "a bright measure: never under the game value capped at 1");
     Check(BorrowedAdapt(0.2f, 4.0f) == 0.5f && BorrowedAdapt(0.2f, 100.0f) == 0.2f, "a game value under 1 is the floor");
     Check(BorrowedAdapt(3.0f, 0.0f) == 1.0f && BorrowedAdapt(0.5f, 0.0f) == 0.5f, "no measure (0): the game value capped at 1");

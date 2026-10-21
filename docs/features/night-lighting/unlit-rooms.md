@@ -29,7 +29,9 @@ lamps are dim, so turning the last lamp off changes the whole room's tone.
 
 Apex Radiance points the game's reads of the unlit-room colours at its own values, scaled by *Brightness* and moved
 towards a grey of the same luminance by *Blue tint*. The same colour is added as a base under the lamps of lit rooms.
-Furniture draws in such rooms get the same treatment on the game's unlit-room rig lights and ambient cube. Changes reach
+Furniture draws in such rooms get the same treatment on the game's unlit-room rig lights and ambient cube. In a lit room
+the rig's fill light takes the hue of the room's own ambient (`+0x110`, the colour its walls take; each channel at most
+x1.5, at the same luminance) instead of grey, so a coloured lamp tints its furniture with its walls. Changes reach
 walls and floors on the next frame, without a new light solve where possible.
 
 1. **Colours.** For each of the game's two colour families, `colour = Brightness x (grey + Blue x (game - grey))`, with

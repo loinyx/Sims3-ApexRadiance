@@ -11,7 +11,7 @@ a time, so the game does not freeze for a full terrain rebuild. Part of [Night L
 |---|---|
 | Availability | Released (visitor patch, arm sites and dusk rebuild since 0.1.0; paced sweep default since 2.5.3; local relight of user and visible-lot edits since 2.5.4; world-owned type-11 lamps since 2.5.6; day/night endpoint rebuilds, Build-mode phase response, priority re-queue of in-flight chunks and the world-lamp rig request on early completion since 2.6.0). Changed in 2.7.0: the world-load and Refresh terrain rebuilds run one chunk per frame, nearest first; a lamp switch's ground changes in one frame; urgent chunks go back to back |
 | Default | On |
-| Menu | Lighting > Ground > Ground & Lots > *Lot lamps light the street*; Lighting > Ground > Updates (*Update at dusk*, *Delay after dusk*); Lighting > Overview > Refresh lighting |
+| Menu | Lighting > Ground > Ground & Lots > *Lot lamps light the street*; Lighting > Ground > Ground & Lots > *Game fixes* (folded: *Update at dusk*, *Delay after dusk*); Lighting > Overview > Refresh lighting |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` (keys below) |
 | Source | [`patches/night_terrain_relight_patch.cpp`](../../../patches/night_terrain_relight_patch.cpp), [`features/terrain_chunk_relight.cpp`](../../../features/terrain_chunk_relight.cpp), [`features/terrain_lighting_policy.h`](../../../features/terrain_lighting_policy.h), lamp tracking in [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) |
 
@@ -63,12 +63,12 @@ Reverse-engineering summary (Steam 1.67.2.024037; details in
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Ground > Lot lamps light the street | `luzDoLoteNaGrama` | bool | on | | Outdoor lot lamps in the terrain bake. Live: the predicates read it at run time; a switch is one rebuild (a "switch" edit). Reinstall only when its code could not be installed |
-| Ground > Updates > Update at dusk | `automaticoAoAnoitecer` | bool | on | | Rebuild at each settled endpoint (night above 0.99, day below 0.01) |
-| Ground > Updates > Delay after dusk | `atrasoSegundos` | float | 2.0 s | 0.5 to 10 s | Wait before an endpoint rebuild; 0 while Build mode editing (`WorldManager+0x1B4 == 2`) |
+| Ground > Game fixes > Update at dusk | `automaticoAoAnoitecer` | bool | on | | Rebuild at each settled endpoint (night above 0.99, day below 0.01) |
+| Ground > Game fixes > Delay after dusk | `atrasoSegundos` | float | 2.0 s | 0.5 to 10 s | Wait before an endpoint rebuild; 0 while Build mode editing (`WorldManager+0x1B4 == 2`) |
 | Developer: Relight only nearby terrain | `relightNearbyChunks` | bool | off | | Developer mode only. Automatic lamp changes also try the local relight (user-driven edits always do) |
 | Developer: Paced terrain sweep | `relightPacedSweep` | bool | on | | Registered in developer mode only; the default is active in every mode. Endpoint, lamp-change and stuck-countdown rebuilds become a paced sweep, and the world-load and button rebuilds run one chunk per frame |
-| Individual options | `recalcularLotesAoAnoitecer` | bool | off | | Experimental: re-solve room 0 of every lot 3 s after a dusk rebuild (not after a load rebuild); fallback 6 s after the dusk endpoint |
-| Individual options | `postesAcesosNoCalculo` | bool | off | | Experimental: street lamps count as lit in lot light solves (0x6BE18C, [lot-light-pass](lot-light-pass.md)); reinstall |
+| Individual options | `recalcularLotesAoAnoitecer` | bool | on | | Re-solve room 0 of every lot 3 s after a dusk rebuild (not after a load rebuild); fallback 6 s after the dusk endpoint |
+| Individual options | `postesAcesosNoCalculo` | bool | on | | Street lamps count as lit in lot light solves (0x6BE18C, [lot-light-pass](lot-light-pass.md)); reinstall |
 
 Buttons (Lighting > Overview > Refresh lighting, also Developer > Lighting; enabled once the world is live): *Refresh
 terrain* (`g_kickRequested`: the paced full rebuild, one chunk per frame; when it cannot start, both countdowns are
@@ -126,7 +126,7 @@ armed like a lamp pick-up, a full rebuild, day or night) and *Refresh lots*
    is on; otherwise a warning and the option cannot be turned on (`installedLotLampCode = false`). Written whatever the
    option: visitor `mov esi,ecx; push edi; call TerrainLightTest; nop x3` (11 bytes); each arm site `push edi; call
    ArmTest; nop x3` (9 bytes).
-3. Room queue prologue (Steam: exact bytes; other builds: signature). Experimental patches
+3. Room queue prologue (Steam: exact bytes; other builds: signature). The game patches of Individual options
    (`postesAcesosNoCalculo`, `qualidadeAltaEmTodosOsLotes`, `gramaDoLoteUsaLuzDoLote`, see [lot-light-pass](lot-light-pass.md)),
    the bake colour stub at 0xC2950F (optional), the chunk render redirect at 0x00C8504C (optional), the Present hook and
    the other modules ([README](README.md)).

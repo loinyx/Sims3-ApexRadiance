@@ -11,7 +11,7 @@ own pages (see [See also](#see-also)). Part of [Night Lighting](README.md).
 |---|---|
 | Availability | Released in 1.0.0. Subdued daytime response on snow on objects and *Ground brightness* on the squared terrain variant: Released in 2.6.0. The melting-snow lot pass, the daytime lamp term on snowy lots, the wet world pass left to the game in snow and the game's own snow on objects in full daylight: Released in 2.7.0 |
 | Default | On (with Night Lighting and *Street lamps light lots*) |
-| Menu | No snow-specific switch. Uses Lighting > Ground (*Street lamps light lots*, *Smooth ground light*, *Ground brightness*) and Lighting > Objects > *Doors, counters and fences* |
+| Menu | No snow-specific switch; World > Water & Snow > Snow holds *Sidewalk visibility*. Uses Lighting > Ground > Ground & Lots > Game fixes (*Street lamps light lots*, *Smooth ground light*), Lighting > Ground > Ground intensity (*Ground brightness*) and Lighting > Objects > Objects > Game fixes (*Fences and stairs catch light*, *Fence brightness*) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawLotSnow`, `DrawLotMelt`, `DrawSnowFloor`, `DrawSnowOnObject`), [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`PatchSnowFloor`, `PatchSnowCover`, `PatchSnowRelief`) |
 

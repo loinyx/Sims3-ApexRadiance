@@ -35,7 +35,22 @@ cache trim can release.
    (the reserve plus 512 MB) and 30 s have passed, the reserve is taken again.
 
 Only idle resources are dropped; the game reads them again when it needs them. The reserve cannot be retaken while
-the native save hook is active. The numbered public test adds [save-phase buffer cleanup](../memory-budget.md#save-preparation).
+the native save hook is active.
+
+Every build adds three steps (`kMemoryOptimizationsEnabled` in [`build_flavor.h`](../../../build_flavor.h); details in
+[Bounded memory handling](../memory-budget.md)):
+
+- **Partial idle-cache steps.** After three stressed scans in a row (largest free block under 320 MB, under 512 MB
+  free in total, a recent failed allocation, or private memory of 2 GiB with little room in the lower 2 GiB), the
+  resource system's update asks each cache to drop up to 16 MiB of idle entries, keeping 64 MiB idle. Steps are at
+  least 120 s apart; one that frees under 1 MiB or takes over 8 ms waits 10 minutes. Steam 1.67.2 only, after the
+  native trim at `0x00732E90` and its call are checked; never during a save.
+- **Save-phase buffer cleanup.** Before the world save, queued block releases of *Faster memory handling* are drained
+  and inactive Apex compression buffers are given back ([save preparation](../memory-budget.md#save-preparation)).
+- **Early save preparation.** On Steam 1.67.2 the save dispatch call (`0x00AB12AF` to `0x00AAC110`) also goes through
+  Apex: the same buffer cleanup, the game allocator's own trim
+  ([fast-memory.md](fast-memory.md#allocator-trim-and-top-down-large-blocks)) and the release of the reserve run
+  before the dispatch, ahead of the world-save hook.
 
 ## Settings
 

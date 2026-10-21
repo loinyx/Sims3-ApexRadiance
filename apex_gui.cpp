@@ -30,6 +30,8 @@
 #include "light_probe.h"
 #include "hotkeys.h"
 #include "s3ss_detect.h"
+#include "platform.h"
+#include "depth_share.h"
 #include "unlit_rooms.h"
 #include "shader_cache.h"
 #include "sim_occlusion.h"
@@ -134,10 +136,10 @@ void Go(int page, int* tabOfPage = nullptr, int tab = 0) {
 }
 
 // Descriptions (hover) of the cards that are not ApexPatch features (the patches carry theirs in their metadata)
-constexpr const char* kPictureDescription = "Fine-tune how the world looks: brightness, contrast, color, sharpness and smoother skies, plus film-style "
-                                            "tones and a vignette. Menus and text keep their normal look. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx";
+constexpr const char* kPictureDescription = "Fine-tune how the world looks: brightness, contrast, color and detail, plus film looks, filters "
+                                            "and LUT files. Menus and text keep their normal look. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx";
 constexpr const char* kShoreDescription = "Ponds and lakes mirror the trees, houses and lamps along their shore, on top of the game's sky reflection. "
-                                          "Needs Night Lights and Depth Blur, with the game's own Edge Smoothing off. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx";
+                                          "Needs Night Lights, plus Depth Blur or Ambient Occlusion, with the game's own Edge Smoothing off. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx";
 constexpr const char* kProfilerDescription = "Measures every frame and breaks down each hitch. Writes ApexRadiance_Hitches.txt. Development build only. Part of "
                                              APEX_PRODUCT_NAME ". Credits: @loinyx";
 
@@ -267,13 +269,20 @@ bool S3SSMissing() {
     return info.scanned && !info.s3ssLoaded && !info.oldCombinedBuild;
 }
 
-// Whether the game draws through DXVK: the d3d9.dll it loaded is not Windows' own and names DXVK inside (checked once)
+// Whether the game draws through DXVK (checked once): DXVK's own export (Platform::DxvkD3D9; Proton loads its DXVK from
+// the prefix's system folder, which looked like Windows' own), else a d3d9.dll that is not Windows' own and names DXVK
+// inside (a DXVK build without that export)
 bool DxvkLoaded() {
     static int cached = -1;
     if (cached >= 0) return cached == 1;
     const HMODULE m = GetModuleHandleW(L"d3d9.dll");
     if (!m) return false; // not loaded yet: ask again later
     cached = 0;
+    if (Platform::DxvkD3D9()) {
+        cached = 1;
+        LOG_INFO("[Menu] d3d9.dll: DXVK (by its export)");
+        return true;
+    }
     wchar_t path[MAX_PATH] = {}, windows[MAX_PATH] = {};
     if (!GetModuleFileNameW(m, path, MAX_PATH)) return false;
     const UINT wl = GetWindowsDirectoryW(windows, MAX_PATH);
@@ -285,7 +294,8 @@ bool DxvkLoaded() {
     LOG_INFO(std::format("[Menu] d3d9.dll: {} ({})", ApexUtil::ToUtf8(path), cached ? "DXVK" : "not DXVK"));
     return cached == 1;
 }
-bool DxvkMissing() { return g_startup.load() != Startup::Loading && !DxvkLoaded(); }
+// (under Wine / Proton never: Proton ships its DXVK, and a d3d9.dll put in Game\Bin there needs a DLL override)
+bool DxvkMissing() { return g_startup.load() != Startup::Loading && !Platform::UnderWine() && !DxvkLoaded(); }
 bool AnythingRecommended() { return S3SSMissing() || DxvkMissing(); }
 
 // Opens a page in the default browser, on a short-lived thread (ShellExecute can take a moment and wants COM on its
@@ -463,7 +473,7 @@ void OverviewPage() {
         OverviewPatchRow(kNightLighting, IconId::MoonStar, "Night Lights", "Lamps light up your neighborhood at night", PageLighting, &g_lightingTab, LightingLamps);
         if (ApexPatch* ntr = Find(kNightLighting)) {
             ApexPatch* blur = Find("DepthBlur");
-            const char* phrase = !ntr->IsEnabled() ? "Needs Night Lights" : (blur && !blur->IsEnabled()) ? "Needs Depth Blur" : "Ponds mirror their shore";
+            const char* phrase = !ntr->IsEnabled() ? "Needs Night Lights" : (blur && !blur->IsEnabled() && !DepthShare::Texture()) ? "Needs Depth Blur or Ambient Occlusion" : "Ponds mirror their shore";
             bool on = ShoreOn();
             if (ApexUi::OverviewRow("WaterReflections", IconId::MirrorRound, "Water Reflections", phrase, kShoreDescription, &on, !Loading(), nullptr, &nameClicked, nullptr, on && g_menuGameAaOn ? "Waiting for game settings" : nullptr, on && g_menuGameAaOn))
                 SetShore(on);
@@ -479,7 +489,7 @@ void OverviewPage() {
             bool on = p.enabled;
             char chipBuf[24];
             const char* chip = p.enabled ? CostChip(Picture::Get().GpuMs(), chipBuf) : nullptr;
-            if (ApexUi::OverviewRow("Picture", IconId::Palette, "Picture", "Brightness, color and sharpness", kPictureDescription, &on, true, nullptr, &nameClicked, chip)) {
+            if (ApexUi::OverviewRow("Picture", IconId::Palette, "Color", "Adjustments, filters and LUTs", kPictureDescription, &on, true, nullptr, &nameClicked, chip)) {
                 p.enabled = on;
                 Picture::Get().SetParams(p, true);
             }
@@ -494,7 +504,7 @@ void OverviewPage() {
     ApexUi::GroupLabel("Performance");
     if (ApexUi::BeginCard("##PerformanceScreen")) {
         bool on = PerformanceGroupEnabled(), nameClicked = false;
-        if (ApexUi::OverviewRow("PerformanceGroup", IconId::Gauge, "Performance", "One switch for all 15 performance options",
+        if (ApexUi::OverviewRow("PerformanceGroup", IconId::Gauge, "Performance", "One switch for every option on the Performance page",
                                 nullptr, &on, PerformanceGroupSwitchable(), nullptr, &nameClicked))
             SetPerformanceGroup(on);
         if (nameClicked) Go(PagePerformance);
@@ -592,22 +602,23 @@ void WaterReflectionsCard() {
     if (ApexUi::BeginCard("##Card")) {
         bool on = ShoreOn();
         if (ApexUi::CardHeader(IconId::MirrorRound, "Water Reflections", "Ponds mirror trees, houses and lamps", kShoreDescription, &on, !Loading())) SetShore(on);
-        // The reflection is drawn by Night Lights' water pass and reads Depth Blur's scene depth
-        const bool needLights = !ntr->IsEnabled(), needBlur = blur && !blur->IsEnabled();
+        // The reflection is drawn by Night Lights' water pass and reads the shared scene depth (Depth Blur, Ambient Occlusion
+        // or Edge Smoothing's depth edges keep it)
+        const bool needLights = !ntr->IsEnabled(), needBlur = blur && !blur->IsEnabled() && !DepthShare::Texture();
         if (needLights || needBlur || on) ApexUi::CardDivider();
         if (needLights) {
             CardNote("Needs Night Lights (Lighting page)");
             TurnOnButton(ntr, "Turn on Night Lights", IconId::MoonStar, "Night Lights turned on");
         }
         if (needBlur) {
-            CardNote("Needs Depth Blur (Depth Blur page)");
+            CardNote("Needs Depth Blur or Ambient Occlusion");
             TurnOnButton(blur, "Turn on Depth Blur", IconId::Aperture, "Depth Blur turned on");
         }
         // The reflection reads the scene depth, which the game's own (multisampled) Edge Smoothing does not give
         if (on) GameEdgeSmoothingNote("Water Reflections");
         if (on) {
             float v = NightLighting::ShoreReflection();
-            if (ApexUi::SliderPercent("Reflection brightness", &v, 0.05f, 3.0f, "How strong the reflection is; 156% is the default", kShoreDefault)) {
+            if (ApexUi::SliderPercent("Reflection brightness", &v, 0.05f, 3.0f, "How strongly ponds mirror their shore", kShoreDefault)) {
                 NightLighting::SetShoreReflection(v);
                 g_lastShore = v;
             }
@@ -659,9 +670,9 @@ void PictureHeaderCard() {
         extra.iconOn = IconId::Columns2;
         extra.value = &compare;
         extra.enabled = p.enabled;
-        extra.tooltip = "Before and after: the left half of the screen without Picture, the right half with it (not saved)";
+        extra.tooltip = "Before and after: the left half of the screen without Color, the right half with it (not saved)";
         extra.holdIcon = IconId::Eye;
-        extra.holdTooltip = "Hold to compare: the game without Picture while you hold it (or hold B over the menu)";
+        extra.holdTooltip = "Hold to compare: the game without Color while you hold it";
         char chipBuf[24];
         const char* chip = p.enabled ? CostChip(Picture::Get().GpuMs(), chipBuf) : nullptr;
         const bool switched = ApexUi::CardHeader(IconId::Palette, "Overview", "Brightness, contrast, color and sharpness", kPictureDescription, &on, true, &extra, chip);
@@ -732,7 +743,7 @@ void ColorGroupHeader(int tab) {
             p.Group(tab)=on;Picture::Get().SetParams(p,true);
         }
         ImGui::EndDisabled();
-        if(!p.enabled) ApexUi::IconNote(IconId::Info,"Color is off; your adjustments are kept");
+        if(!p.enabled) ApexUi::IconNote(IconId::Info,"Color is off (Overview tab); your adjustments are kept");
     }
     ApexUi::EndCard();ImGui::PopID();
 }
@@ -898,7 +909,7 @@ void LampLightingCard() {
         // (the search reads the label and description: there it names both modes)
         const char* description = ApexUi::FilterActive() ? "Classic or Instant (GPU): how lot lamps relight after you edit one"
                                   : mode == kInstant     ? "Your graphics card updates outdoor lamp light instantly; moving lamps may dip FPS a little"
-                                                         : "Lighter: lamp light updates after you release or change a lamp";
+                                                         : "Easier on the graphics card; light updates once you let go of a lamp";
         // Instant (GPU) is the default (14/10; a saved lampLightingMode keeps its choice). Instant cannot be chosen on a device
         // that cannot run it (it stays selectable back to Classic if it was chosen before, or by default; the note says why)
         ImGui::BeginDisabled(!unavailable.empty() && mode != kInstant);
@@ -934,7 +945,7 @@ void PerformanceCard() {
         if (FeatureSwitchRow(Performance::kRoomLightQueueName, "Faster room lighting", "Rooms light up sooner when you enter a lot or change floors")) {
             bool together = Performance::RoomAllAtOnce();
             ApexUi::SetNextRowBadge("Experimental", "Still being tested: if anything looks wrong or the game crashes, turn it off");
-            if (ApexUi::SwitchRow("Lamp edits all at once", &together, "The lamp's own floor updates at once, the other floors change together when ready", true))
+            if (ApexUi::SwitchRow("Lamp edits all at once", &together, "After a lamp edit, floors change together instead of one by one", true))
                 Performance::SetRoomAllAtOnce(together);
             if (!together) { // the other way: an approximate light first, refined room by room
                 bool quick = Performance::RoomQuickPass();
@@ -948,15 +959,15 @@ void PerformanceCard() {
             char value[16];
             std::snprintf(value, sizeof value, "%d ms", Performance::LotLightingBudgetMs());
             ApexUi::SliderOptions o;
-            o.tooltip = "The current lot's time per frame while moving; 3 ms is the default";
+            o.tooltip = "Time the current lot gets each frame while the camera moves; 15 ms is the game's";
             o.valueText = value;
             o.leftLabel = "Smoother";
             o.rightLabel = "Lights sooner";
             o.defaultValue = static_cast<float>(Performance::kLotLightingBudgetDefault);
             if (ApexUi::Slider("Lot lighting time while moving", &ms, 1.0f, 15.0f, o)) Performance::SetLotLightingBudgetMs(static_cast<int>(std::lround(ms)));
         }
-        FeatureSwitchRow(Performance::kWallShadingName, "Wall shading waits while moving", "Walls of new lots get their shading when you stop");
-        FeatureSwitchRow(Performance::kSceneBudgetName, "Spread new objects over frames", "Fewer hitches when a lot streams in while the camera moves");
+        FeatureSwitchRow(Performance::kWallShadingName, "Wall shading waits while moving", "New lots' walls get their shading when you stop (at most 2 s)");
+        FeatureSwitchRow(Performance::kSceneBudgetName, "Spread new objects over frames", "Fewer hitches while a lot streams in; objects may appear a frame later");
     }
     ApexUi::EndCard();
     ImGui::PopID();
@@ -988,10 +999,10 @@ void PerformanceCard() {
     ImGui::PopID();
     ImGui::PushID("PerformanceMemory");
     if (ApexUi::BeginCard("##Card")) {
-        ApexUi::CardHeader(IconId::Activity, "Memory handling", "Less overhead when the game creates temporary data", nullptr, nullptr);
+        ApexUi::CardHeader(IconId::Activity, "Memory handling", "Less waiting on memory, and room left for saving in long sessions", nullptr, nullptr);
         ApexUi::CardDivider();
         FeatureSwitchRow(Performance::kFastMemoryName, "Faster memory handling", "Less waiting when the game hands out and frees memory");
-        FeatureSwitchRow(Performance::kMemoryGuardName, "Room to save", "Keeps free memory for saving (Error 12) and drops unused game files when memory runs low", true);
+        FeatureSwitchRow(Performance::kMemoryGuardName, "Room to save", "Keeps memory free for saving (Error 12); clears the game's idle cache when low", true);
     }
     ApexUi::EndCard();
     ImGui::PopID();
@@ -999,7 +1010,7 @@ void PerformanceCard() {
     if (ApexUi::BeginCard("##Card")) {
         ApexUi::CardHeader(IconId::Monitor, "Game and scripts", "Less work for the game every frame", nullptr, nullptr);
         ApexUi::CardDivider();
-        FeatureSwitchRow(Performance::kWindowRepaintName, "Lighter window updates", "The game stops repainting its own window every frame", true);
+        FeatureSwitchRow(Performance::kWindowRepaintName, "Lighter window updates", "Less work for the game each frame; nothing on screen changes", true);
         FeatureSwitchRow(Performance::kScriptMathName, "Faster scripts", "The game's scripts compare numbers and look up types with less work", true);
     }
     ApexUi::EndCard();
@@ -1015,7 +1026,7 @@ void LotStreamingCards() {
         ApexUi::CardDivider();
 
         const bool rangeOn = FeatureSwitchRow(Performance::kLotDetailRangeName, "Extended lot detail",
-                                              "More lots in full detail, farther away, than the game's 70 / 8", true);
+                                              "More lots in full detail, and farther away; uses more memory", true);
         if (rangeOn) {
             float distance = static_cast<float>(Performance::LotDetailDistance());
             char distanceValue[24];
@@ -1369,7 +1380,7 @@ void ReportListCard() {
             }
         }
         if (!g_report.list.empty()) ImGui::EndDisabled();
-        ApexUi::MutedText("Captures are never overwritten or deleted by themselves; delete the ones you no longer need here.");
+        ApexUi::MutedText("Apex keeps your last 30 captures (up to 2 GB) and deletes older ones at game start; delete others here.");
     }
     ApexUi::EndCard();
     ImGui::PopID();
@@ -2811,13 +2822,29 @@ void CompatibilityTab() {
         ApexUi::CardDivider();
         const Startup startup = g_startup.load();
         InfoRow("Game", GetGameVersionName());
+        const std::string& host = Platform::Get().host; // (wine_get_host_version: "Linux ...", "Darwin ..." for macOS)
+        InfoRow("Platform", Platform::SteamDeck()               ? "Steam Deck (Proton)"
+                            : !Platform::UnderWine()            ? "Windows"
+                            : host.starts_with("Linux")         ? "Linux (Proton)"
+                            : host.starts_with("Darwin")        ? "macOS (Wine)"
+                                                                : "Wine");
         // Detected: a violet check before the value; missing: a muted info mark
         const bool s3ssLoaded = S3SSDetect::Scan().s3ssLoaded;
         InfoRow("Sims3SettingsSetter", s3ssLoaded ? "Installed" : "Not installed", s3ssLoaded ? IconId::CircleCheck : IconId::Info,
                 s3ssLoaded ? VioletTheme::kAccent : VioletTheme::kTextMuted);
         const bool dxvk = DxvkLoaded();
-        InfoRow("DXVK", dxvk ? "Installed" : "Not installed", dxvk ? IconId::CircleCheck : IconId::Info, dxvk ? VioletTheme::kAccent : VioletTheme::kTextMuted);
+        InfoRow("DXVK", dxvk ? "Installed" : Platform::UnderWine() ? "Not in use (WineD3D)" : "Not installed", dxvk ? IconId::CircleCheck : IconId::Info,
+                dxvk ? VioletTheme::kAccent : VioletTheme::kTextMuted);
         InfoRow("Features", startup == Startup::Running ? "Running" : startup == Startup::Loading ? "Starting\xE2\x80\xA6" : "Off (old combined build found)");
+        if (Platform::SteamDeck()) { // the Deck's graphics share its memory bandwidth: the screen effects cost the most there
+            ApexUi::GroupLabel("STEAM DECK");
+            ApexUi::MutedText("The Performance preset turns off Ambient Occlusion, Depth Blur and the picture filters, which cost the most on "
+                              "the Steam Deck. Night Lights stays as it is.");
+            if (ApexUi::IconTextButton("Load Performance##Deck", IconId::SlidersHorizontal, "Loads the Performance preset, without its lighting part"))
+                LoadBuiltinProfileNow(0, ApexConfig::kPartColor | ApexConfig::kPartDepthBlur | ApexConfig::kPartEdgeSmoothing |
+                                             ApexConfig::kPartPerformance | ApexConfig::kPartAmbientOcclusion);
+            ApexUi::Gap(ApexUi::kSpace2);
+        }
         if (AnythingRecommended()) { // shown even after the Overview card and the start note were dismissed
             ApexUi::GroupLabel("RECOMMENDED");
             RecommendedItems();
@@ -3231,9 +3258,10 @@ void WelcomeProfileStep() {
     ApexUi::PageTitle("Welcome to " APEX_PRODUCT_NAME, "Choose how you want to start");
     ImGui::PushID("Welcome");
     if (ApexUi::BeginCard("##Card")) {
-        ApexUi::CardHeader(IconId::None, "Starting profile", "Click a profile to see it right away; change it later in Settings \xE2\x80\xBA Profiles",
+        ApexUi::CardHeader(IconId::None, "Starting preset", "Click a preset to see it right away; change it later on the Presets page",
                            nullptr, nullptr);
         ApexUi::CardDivider();
+        if (Platform::SteamDeck()) ApexUi::MutedText("Steam Deck: the Performance preset is recommended, for a steadier frame rate.");
         ImGui::BeginDisabled(Loading());
         for (int i = 0; i < ApexPresets::kCount; ++i) {
             const ApexPresets::Preset& preset = ApexPresets::Get(i);
@@ -4333,7 +4361,7 @@ void ScreenshotCaptureCard() {
             ApexUi::IconNote(IconId::Keyboard, g_recNote.empty() ? I18n::Tr("Press the new combination now; Esc cancels") : g_recNote.c_str(),
                              g_recNote.empty() ? VioletTheme::kAccent : VioletTheme::kWarning);
         if (ApexUi::SwitchRow("Hide game UI in screenshots", &ui.screenshotHideGameUi,
-                              "Hides the game interface for the photo, then restores it; turn off to include it")) ApexConfig::SetUi(ui);
+                              "Hides the game interface for the photo, then restores it; turn off to include it", true)) ApexConfig::SetUi(ui);
     }
     ApexUi::EndCard();
 
