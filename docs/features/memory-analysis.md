@@ -100,4 +100,5 @@ add three measurements. Public builds compile none of them.
 - **Debug buffers given back** (switch `release_debug_buffers`): the Light Probe's draw records and occlusion queries
   after a capture, a recording's lines and tracer states after it is saved, and the F8 light records when their
   recording is switched off ([light-probe.md](dev-tools/light-probe.md), [recorder.md](dev-tools/recorder.md)). The F8
-  section lists what each gave back.
+  section lists what each gave back. Unlike the measurements, this switch is on in released builds too (the recorder ships
+  with *Report a problem*).

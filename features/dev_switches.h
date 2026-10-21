@@ -2,7 +2,7 @@
 // Switches of the numbered development builds (APEX_DEVELOPMENT_BUILD_FLAVOR), read once at start-up from the
 // [dev_build] table of ApexRadiance.toml (kept by Save, which preserves tables it does not write). Every switch defaults
 // to on, so a development build can turn each one off to compare. Released builds (2.14 on) have every switch that changes
-// the game on (kShipped) and the diagnostics off (measurements, daylight_log, memory_owners, release_debug_buffers), with foliage_sun_shadow (unfinished) off.
+// the game on (kShipped) and the diagnostics off (measurements, daylight_log, memory_owners), with foliage_sun_shadow (unfinished) off.
 //   measurements        address-space owners, game allocation categories and the memory CSVs
 //   draw_reads_nowait   buffer reads inside draw hooks never wait for the GPU (retried, then waited for after three busy
 //                       answers); opaque instanced meshes read each vertex once
@@ -79,7 +79,7 @@ inline constexpr bool kShipped = true;
 inline std::atomic<bool> memoryOwners{false};
 inline std::atomic<bool> releaseDebugBuffers{false};
 inline bool MemoryOwners() { return kCompiled && memoryOwners.load(std::memory_order_relaxed); }
-inline bool ReleaseDebugBuffers() { return kCompiled && releaseDebugBuffers.load(std::memory_order_relaxed); }
+inline bool ReleaseDebugBuffers() { return kCompiled ? releaseDebugBuffers.load(std::memory_order_relaxed) : kShipped; }
 
 inline std::atomic<bool> measurements{false};
 inline std::atomic<bool> drawReadsNoWait{false};

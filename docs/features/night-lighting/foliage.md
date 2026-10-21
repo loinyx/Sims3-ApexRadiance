@@ -112,12 +112,16 @@ cone x walls' share) and restores them afterwards; each vertex then takes colour
 colour's brightest channel), so no channel passes 1 and the hue is kept (a warm lamp no longer turns white near a leaf).
 The trees read their own lamp list (`ReadFoliageLamps`) at every lamp refresh, also while the per-pixel lamps keep theirs
 for a lamp switch or a drag (`AtriumHold`, `DragLite`: 5.5 to 9 s in game, 20/10 21:18, waiting for the rooms of a house,
-which trees outside never need); the list notes where it changed (each lamp's place before and after). An instance picks
-at once when a changed lamp is within 20 m of its box, else it only takes the new generation. Instances also pick again
-every 1.5 s (the walls and floors of a lot arrive after its first frames;
-a pick made before them kept a wrong wall share until the lamp list changed), at most 96 per 8 ms, keeping their older
+which trees outside never need), with the indoor lamps shining out read from their own list while those are held; the list
+notes where it changed (each lamp's place before and after), by everything but the colour. An instance picks at once when
+a changed lamp is within 20 m of its box, else it only takes the new generation. A lamp whose colour alone changed (a
+fade at dusk, a recolour) keeps its place in each pick: the instance takes its new colour, times the cone and walls'
+share of its pick, at its next draw; a lamp going to black or coming out of it counts as a change. Instances also pick
+again every 1.5 s when what a pick reads changed since (the walls and floors, which arrive after a lot's first frames;
+the lamps' colours, which set the ranking; or with indoor lamps shining out), at most 96 per 8 ms, keeping their older
 pick meanwhile; an instance's first pick is never put off, so no draw falls back to the old light. When the instance map
-passes 16,384 (grass and flowers are instances too), the ones not drawn for 3 s go, never the ones in view. The log counts
+passes 16,384 (grass and flowers are instances too), the ones not drawn for 3 s go, then the ones not drawn for 250 ms;
+the map is cleared only past 32,768. The log counts
 the picks made again that changed the light and the ones that kept it.
 
 **The camera the game drew with** (`FoliageVertexLamps::EyeAnchors`). The instance positions are relative to the eye the

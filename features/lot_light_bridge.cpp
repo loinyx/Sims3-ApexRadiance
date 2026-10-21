@@ -2687,29 +2687,62 @@ uint64_t FoliageRowKey(const std::array<float, 8>& v, const LampCone& c) {
     mix(&c, sizeof c);
     return h;
 }
-void ReadFoliageLamps() {
+// The same without the colour (v[4..6]: F0 x intensity x fade): a lamp that only fades or changes colour keeps this key
+uint64_t FoliageShapeKey(const std::array<float, 8>& v, const LampCone& c) {
+    std::array<float, 8> s = v;
+    s[4] = std::max({v[4], v[5], v[6]}) > 0.0f ? 1.0f : 0.0f; // (a lamp coming out of black or going to it picks again)
+    s[5] = s[6] = 0.0f;
+    return FoliageRowKey(s, c);
+}
+// The colour of each lamp of the list by its shape key, and a generation whenever a colour changed with no lamp moved,
+// added or removed (as at dusk, every lamp fading): an instance then takes its lamps' new colours by their keys at its
+// next draw, with no new pick (a pick tests every lamp against the walls)
+std::unordered_map<uint64_t, std::array<float, 3>> g_foliageColour;
+uint32_t g_foliageColourGen = 1;
+// `rebuilt`: ReadEnumeratedLamps just rebuilt g_allLamps and the exit rows from this enumeration, which are then taken as
+// they are; while those are held, the same rows are read here (the indoor lamps shining out too, from a list of their own)
+void ReadFoliageLamps(bool rebuilt) {
     static std::vector<std::array<float, 8>> previous;
     static std::vector<LampCone> previousCones;
+    static std::vector<uintptr_t> exitList;
     previous.swap(g_foliageLamps);
     previousCones.swap(g_foliageCones);
     g_foliageLamps.clear();
     g_foliageCones.clear();
-    for (uintptr_t L : g_enumLights) {
-        std::array<float, 8> v;
-        LampCone cone;
-        if (ReadLamp(L, v.data(), cone)) g_foliageLamps.push_back(v), g_foliageCones.push_back(cone);
+    if (rebuilt) {
+        g_foliageLamps = g_allLamps;
+        g_foliageCones = g_allCones;
+        g_foliageLamps.insert(g_foliageLamps.end(), g_exitLampRows.begin(), g_exitLampRows.end());
+        g_foliageCones.insert(g_foliageCones.end(), g_exitCones.begin(), g_exitCones.end());
+    } else {
+        LevelLightShare::ExitLamps(exitList);
+        std::vector<std::array<float, 8>> exitRows;
+        std::vector<LampCone> exitCones;
+        for (uintptr_t L : g_enumLights) {
+            std::array<float, 8> v;
+            LampCone cone;
+            if (ReadLamp(L, v.data(), cone)) g_foliageLamps.push_back(v), g_foliageCones.push_back(cone);
+            else if (!exitList.empty() && std::binary_search(exitList.begin(), exitList.end(), L) && exitRows.size() < 256 && ReadExitLamp(L, v.data(), cone))
+                exitRows.push_back(v), exitCones.push_back(cone);
+        }
+        g_foliageLamps.insert(g_foliageLamps.end(), exitRows.begin(), exitRows.end());
+        g_foliageCones.insert(g_foliageCones.end(), exitCones.begin(), exitCones.end());
     }
-    g_foliageLamps.insert(g_foliageLamps.end(), g_exitLampRows.begin(), g_exitLampRows.end());
-    g_foliageCones.insert(g_foliageCones.end(), g_exitCones.begin(), g_exitCones.end());
     if (g_foliageLamps.size() == previous.size() && g_foliageCones.size() == previousCones.size() &&
         (g_foliageLamps.empty() || std::memcmp(g_foliageLamps.data(), previous.data(), g_foliageLamps.size() * sizeof(g_foliageLamps[0])) == 0) &&
         (g_foliageCones.empty() || std::memcmp(g_foliageCones.data(), previousCones.data(), g_foliageCones.size() * sizeof(LampCone)) == 0))
         return;
-    g_foliageLampGen++;
-    // the rows in one list and not the other (a lamp moved, switched, recoloured, added or removed), by their exact bits
+    g_foliageColour.clear();
+    for (size_t i = 0; i < g_foliageLamps.size(); i++)
+        g_foliageColour.try_emplace(FoliageShapeKey(g_foliageLamps[i], g_foliageCones[i]), std::array<float, 3>{g_foliageLamps[i][4], g_foliageLamps[i][5], g_foliageLamps[i][6]});
+    g_foliageColourGen++;
+    // the rows in one list and not the other by everything but the colour (a lamp moved, switched, added or removed, its
+    // reach or cone changed), by their exact bits; a colour alone goes by g_foliageColourGen
     std::unordered_map<uint64_t, int> count;
-    for (size_t i = 0; i < previous.size() && i < previousCones.size(); i++) count[FoliageRowKey(previous[i], previousCones[i])]--;
-    for (size_t i = 0; i < g_foliageLamps.size(); i++) count[FoliageRowKey(g_foliageLamps[i], g_foliageCones[i])]++;
+    for (size_t i = 0; i < previous.size() && i < previousCones.size(); i++) count[FoliageShapeKey(previous[i], previousCones[i])]--;
+    for (size_t i = 0; i < g_foliageLamps.size(); i++) count[FoliageShapeKey(g_foliageLamps[i], g_foliageCones[i])]++;
+    if (std::all_of(count.begin(), count.end(), [](const auto& p) { return p.second == 0; })) return;
+    g_foliageLampGen++;
     const auto note = [](const std::array<float, 8>& v) {
         if (g_foliageChanges.size() >= 512) { // the oldest generations go: their instances pick again whole
             g_foliageChangesFrom = g_foliageChanges[g_foliageChanges.size() / 2].gen;
@@ -2718,9 +2751,9 @@ void ReadFoliageLamps() {
         g_foliageChanges.push_back({g_foliageLampGen, {v[0], v[1], v[2]}});
     };
     for (size_t i = 0; i < previous.size() && i < previousCones.size(); i++)
-        if (count[FoliageRowKey(previous[i], previousCones[i])] < 0) note(previous[i]);
+        if (count[FoliageShapeKey(previous[i], previousCones[i])] < 0) note(previous[i]);
     for (size_t i = 0; i < g_foliageLamps.size(); i++)
-        if (count[FoliageRowKey(g_foliageLamps[i], g_foliageCones[i])] > 0) note(g_foliageLamps[i]);
+        if (count[FoliageShapeKey(g_foliageLamps[i], g_foliageCones[i])] > 0) note(g_foliageLamps[i]);
 }
 // Whether a lamp of the list changed within reach (20 m, the reach law's longest) of the box since generation `since`
 // (true also when that is older than what g_foliageChanges keeps)
@@ -4368,6 +4401,8 @@ struct FoliageInstance { // world space, so a moving camera reuses it; the colou
     int owned = 0;
     uint32_t pickGen = 0; // the trees' lamp list (g_foliageLampGen) the lamps were picked from
     DWORD pickTick = 0;   // when
+    uint64_t pickState = 0;                        // the walls and floors it read (LevelLightShare::LampVisibilityState)
+    uint32_t pickColourGen = 0, colourGen = 0;     // the colours it was picked with, and the ones its lamps carry
     bool shaped = false, picked = false, counted = false;
     DWORD seen = 0;
 };
@@ -4474,6 +4509,7 @@ int PickFoliageLamps(const float* mid, const float* boxC, const float* ext, Foli
         LampReach::Radii(cone.w, r0, R);
         for (int a = 0; a < 3; a++) l.pos[a] = pr[a], l.colour[a] = col[a] * cn * v;
         l.r0sq = R * R, l.invR2 = 1.0f / (R * R), l.gain = LampReach::Gain(cone.w, cone.entries), l.score = luma * v;
+        l.key = FoliageShapeKey(g_foliageLamps[k], cone), l.share = cn * v;
         kept = FoliageVertexLamps::KeepBrightest(l, out, kept);
     }
     return kept;
@@ -4677,14 +4713,17 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
         const float ext[3] = {hx, 0.5f * (mesh.hi[1] - mesh.lo[1]) * scale, hx};
         // Picked at once the first time and when a lamp within reach of its box changed (a drag shows on the tree in the
         // same refresh, 20/10: it waited for the hold, 5 to 9 s); a new list that changed nothing near it only moves its
-        // generation. Picked again every 1.5 s within the budget (the walls and floors of a lot arrive after its first
-        // frames: a pick made before them kept a wrong wall share).
+        // generation. Picked again every 1.5 s within the budget when what a pick reads changed since: the walls and floors
+        // (they arrive after a lot's first frames: a pick made before them kept a wrong wall share), the lamps' colours (the
+        // ranking), or with indoor lamps shining out (their openings). A colour alone is taken at once below, with no pick.
         bool urgent = !f.picked;
         if (f.picked && f.pickGen != g_foliageLampGen) {
             if (FoliageLampsChangedNear(f.pickGen, boxC, ext)) urgent = true;
             else f.pickGen = g_foliageLampGen;
         }
-        if (urgent || (now - f.pickTick > 1500 && s_budget > 0)) {
+        const uint64_t visState = LevelLightShare::LampVisibilityState();
+        const bool stale = f.pickState != visState || f.pickColourGen != g_foliageColourGen || !g_exitLampRows.empty();
+        if (urgent || (stale && now - f.pickTick > 1500 && s_budget > 0)) {
             {
                 if (!urgent) s_budget--;
                 FoliageVertexLamps::OwnLamp before[3];
@@ -4698,7 +4737,8 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
                             changed = std::fabs(f.own[k].pos[a] - before[k].pos[a]) > 1e-3f || std::fabs(f.own[k].colour[a] - before[k].colour[a]) > 1.0f / 512.0f;
                     (changed ? g_foliageRepickChanged : g_foliageRepickSame).fetch_add(1, std::memory_order_relaxed);
                 }
-                f.pickGen = g_foliageLampGen, f.pickTick = now;
+                f.pickGen = g_foliageLampGen, f.pickTick = now, f.pickState = visState;
+                f.pickColourGen = f.colourGen = g_foliageColourGen;
                 if (!f.counted) {
                     f.counted = true;
                     g_foliageOwned[std::clamp(f.owned, 0, 3)].fetch_add(1, std::memory_order_relaxed);
@@ -4706,6 +4746,12 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
                 }
                 f.picked = true;
             }
+        }
+        if (f.colourGen != g_foliageColourGen) { // the lamps' new colours (a fade, a recolour), each times its share
+            f.colourGen = g_foliageColourGen;
+            for (int k = 0; k < f.owned; k++)
+                if (const auto it = g_foliageColour.find(f.own[k].key); it != g_foliageColour.end())
+                    for (int a = 0; a < 3; a++) f.own[k].colour[a] = it->second[a] * f.own[k].share;
         }
         const float groundY = inst[1] + eye[1];
         for (int k = 0; k < 3; k++) {
@@ -6210,7 +6256,8 @@ void LogTreeShadow() {
 // (log) a draw into the shadow map, one frame in 120; each vertex shader drawing into it is named once (with whether it
 // reads per-instance constants c0[a0]: an instanced caster such as trees)
 void NoteShadowPassDraw(IDirect3DDevice9* dev) {
-    if (!g_sunShadowMap || (g_roomMapFrame % 120) != 0) return;
+    // (only a map seen bound this frame or the last: an older pointer may be a texture the game released)
+    if (!g_sunShadowMap || (g_roomMapFrame % 120) != 0 || g_roomMapFrame - g_sunShadowFrame > 1) return;
     static IDirect3DBaseTexture9* s_for = nullptr;
     static IDirect3DSurface9* s_surf = nullptr; // compared by address only (the game owns it)
     if (s_for != g_sunShadowMap) {
@@ -8164,7 +8211,7 @@ void OnPresent() {
     const bool held = AtriumHold::SwitchHolding() || dragHeld; // (a classic drag: until the release)
     if (held && wantLamps && enumerated) g_lampsHeldForSwitch = true;
     ReadEnumeratedLamps(wantLamps && enumerated && !held);
-    if (wantLamps && enumerated) ReadFoliageLamps(); // (the trees never wait on a hold)
+    if (wantLamps && enumerated) ReadFoliageLamps(!held); // (the trees never wait on a hold)
     TrackLotLampEdits();
 }
 

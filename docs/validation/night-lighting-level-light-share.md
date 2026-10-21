@@ -190,7 +190,7 @@ topology mutation inside a point is not reproduced. This release does not promis
 
 ## Open checks
 
-- Release review of `3e0b6ad`: the second solve of a room (fill or normalisation resend, at most 5 per room in 10 s) is queued urgent, so after a load it skips the step prediction of `room_drain_budget` and joins another lamp's edit hold. Measure the frame time of the first seconds after loading a lot with stairwells and arches.
+- The second solve of a room (fill or normalisation resend) is urgent only while a lamp edit is pending; after a load it queues as before. Expected: a placed lamp shows its final light without the 1-2 s step, and no 15-21 ms frames in the first seconds after loading a lot with stairwells and arches.
 - 2.14.0: indoor light through openings and between stories with the mesh blockers retired: no periodic room
   invalidations in a recording while the camera moves, and no hard tread shadow under stairs.
 - 2.14.0, Instant (GPU): place or move an outdoor lamp on a multi-story house. **Expected:** every story takes its

@@ -223,10 +223,13 @@ bool Patch(std::vector<uint32_t>& t, int& base) {
         E(kAdd, {d(K, 0x1), nr(Sc, W), r(K, X)});                         // exit
         E(kMul, {d(K, 0x3), r(K), r(K, W)});
         E(kMax, {d(K, 0x3), r(K), zero});
-        E(kAdd, {d(K, 0x1), r(K, X), nr(K, Y)});                          // the path inside, ahead of the vertex
         E(kRsq, {d(K, 0x4), r(Dir, W)});
         E(kRcp, {d(K, 0x4), r(K, Z)});                                    // the distance to the lamp
-        E(kMin, {d(K, 0x1), r(K, X), r(K, Z)});                           // a lamp inside the crown: only the leaves before it
+        // the path inside between the vertex and the lamp only: max(0, min(exit, d) - min(entry, d)) (a lamp inside the crown,
+        // or between a vertex outside it and the crown, crosses only the leaves before it)
+        E(kMin, {d(K, 0x3), r(K), r(K, Z)});
+        E(kAdd, {d(K, 0x1), r(K, X), nr(K, Y)});
+        E(kMax, {d(K, 0x1), r(K, X), zero});
         E(kMul, {d(K, 0x1), r(K, X), O{Neg(Src(kConst, B + 55, Y)), true}});
         E(kExp, {d(K, 0x1), r(K, X)});
         E(kMul, {d(Sc, 0x4), r(Sc, Z), r(K, X)});

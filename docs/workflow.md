@@ -56,8 +56,8 @@ A development build (`/p:ApexStudyDefines=APEX_DEVELOPMENT_BUILD_FLAVOR`, which 
 start-up (`DevSwitches::Load`) and logs every value. A missing key reads as on; Save keeps the table because it
 preserves tables it does not write. Each switch can be turned off to compare against the previous behaviour.
 
-In every other build the accessors return `kShipped` (true) for the 26 switches that change the game, and false for the
-4 diagnostics and the unfinished `foliage_sun_shadow`. A switch therefore never needs a menu option to ship; a shipped behaviour
+In every other build the accessors return `kShipped` (true) for the 27 switches that change the game or free memory, and false for the
+3 diagnostics and the unfinished `foliage_sun_shadow`. A switch therefore never needs a menu option to ship; a shipped behaviour
 follows the setting named on its page.
 
 | Key | Public build | Effect | Page |
@@ -65,7 +65,7 @@ follows the setting named on its page.
 | `measurements` | Developer only | Address-space owners, game allocation categories and the memory CSVs | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
 | `daylight_log` | Developer only | Logs the sky state that sets outdoor darkness every 5 s and adds an F8 section; no lighting change | [light-diag.md](features/dev-tools/light-diag.md#file-sections) |
 | `memory_owners` | Developer only | Apex's own memory by owner (`[ApexMemory]`, F8) | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
-| `release_debug_buffers` | Developer only | Gives back F7, F6 and F8 buffers once they are no longer needed | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
+| `release_debug_buffers` | Shipped | Gives back F7, F6 and F8 buffers once they are no longer needed | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
 | `draw_reads_nowait` | Shipped | Buffer reads in draw hooks never wait for the GPU (three busy answers, then wait) | [lot-light-pass.md](features/night-lighting/lot-light-pass.md#lamp-shade-on-lot-ground-groundshadow) |
 | `occlusion_relight` | Shipped | An unchanged mesh occlusion scene is not published again | [level-light-share.md](features/night-lighting/level-light-share.md#closed-floor-guards-directional-weights-and-the-retired-mesh-blockers) |
 | `room_drain_budget` | Shipped | Extra room solves never start a step the budget cannot hold | [room-light-queue.md](features/performance/room-light-queue.md#automatic-lamps-first-and-the-step-budget) |

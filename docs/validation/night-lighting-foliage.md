@@ -52,10 +52,11 @@ No repository harness covers `PatchFoliageVs` and `PatchLeafShadow`.
 - Moon-shadow fix on planter hedges (combined build, 2026-09-24).
 - Wrap lighting and the winter variants installed (combined build, 2026-09-25).
 - Street lamps light the side of nearby crowns facing them, and lamp edits reach the trees without the earlier 1-2 s wait (2.14.0 public test build, 2026-10-20). Log: 5,583 picks made again in 4 minutes at night, about 20 to 60 per second.
+- 2.14.0 release candidate (public build after the release review, 2026-10-20): lamps on nearby trees, dusk, a window lamp beside a tree, indoor lamp edits, loading a lot with stairs and arches, and a Report a problem recording, all approved by the maintainer in game.
 
 ## Open checks
 
-- Release review of `3e0b6ad`: during a lamp edit hold the trees take the outdoor lamps at once, but an indoor lamp shining out of a window reaches them only after the hold (its rows are rebuilt with the hold); every instance also picks again every 1.5 s at night within the budget.
+- A lamp switched on indoors next to a window, with a tree outside: the tree takes its light at once, not after the rooms of the house (the trees now read the lamps shining out themselves during a hold).
 - Summer plants and flowers remain darker than the lit ground next to them (m79: rig 0.62 / 0.55 / 0.49).
 - Plant 2 (m65): a new F7 on that plant is needed to study its texture multiply (F7 now decodes DXT1/3/5).
 - Per-vertex lamps in game: whether a crown with a lamp at its foot looks darker than before, and the trunk near the lamp.
@@ -67,7 +68,7 @@ No repository harness covers `PatchFoliageVs` and `PatchLeafShadow`.
   the lower crown facing the lamp, fading upwards, the top dark. Log `[Foliage] ... instances by their own lamps: N with
   none, N with 1, N with 2, N with 3 (N without a crown shape); lamps left out by walls: N`, and any `not of the captured
   family (reason)` line with its `Censo\foliage_VS_*.bin`.
-- Dusk with many trees in view: no hitch while every crown picks its lamps again (96 per 8 ms). Release review: a lamp whose colour or intensity changes (dusk fade, an animated fire) makes every instance within 20 m pick again at once, outside that budget; measure the picks per second and the frame time at dusk before changing it.
+- Dusk with many trees in view: no hitch while every crown picks its lamps again (96 per 8 ms). A fading lamp now changes only the colour of the picks (no new pick); expect the log's picks made again to stay near the night's rate (about 20 to 60 per second) through dusk.
 - Day, sun low: trees beside a house and trees side by side. **Expected:** the house's and the neighbour's shadow on the
   crown, the far side of a crown darker than the sunny side, never black (the floor 0.25); no speckle on the leaves (if
   there is: the depth bias); FPS within noise of `foliage_sun_shadow = false`. Log `[Foliage] Sun shadow map seen: NxN`,

@@ -7597,9 +7597,11 @@ void BeforeRoomUpdate(BYTE* tl) {
             }
             // urgent, as the sends of a lamp edit (tier 1, soon): this second solve finishes what the edit's first one could not
             // measure yet (the room's fill, its normalisation), so it must not wait behind the queue (a placed lamp showed the
-            // first solve's light for 1-2 s before this one). Bounded per room by kNormResends / kFillResends in 10 s.
+            // first solve's light for 1-2 s before this one). Bounded per room by kNormResends / kFillResends in 10 s. With no lamp
+            // edit pending (the resends after a load) they queue as before, so the load's drain keeps its step budget.
+            const bool edit = LevelLightShare::LampEditPending();
             for (const DepKey& k : again)
-                if (QueueRoom(tracker, k.level, k.room, true, 1, true)) g_normResent.fetch_add(1, std::memory_order_relaxed);
+                if (edit ? QueueRoom(tracker, k.level, k.room, true, 1, true) : QueueRoom(tracker, k.level, k.room, true)) g_normResent.fetch_add(1, std::memory_order_relaxed);
         }
         FlushDeferred(tracker);
         FlushDepWaits(tracker);

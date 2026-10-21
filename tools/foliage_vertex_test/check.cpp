@@ -52,7 +52,9 @@ static V3 Ref(V3 P, V3 N, const Lamp* L, const Crown& cn) {
         const float ratio = std::min(LawNoGain(d2, l.w, kMinD2) * l.scale, l.cap);
         const V3 q{u.x * s.x, u.y * s.y, u.z * s.z};
         const float a = Dot(q, q), b = Dot(p, q), sq = std::sqrt(std::max(b * b - a * cc, 0.f));
-        const float t = std::min(std::max((-b + sq) / a, 0.f) - std::max((-b - sq) / a, 0.f), std::sqrt(d2)), tr = std::exp(-t * cn.kappa);
+        // the leaves between the vertex and the lamp only: max(0, min(exit, d) - min(entry, d))
+        const float dist = std::sqrt(d2), exitT = std::max((-b + sq) / a, 0.f), entryT = std::max((-b - sq) / a, 0.f);
+        const float t = std::max(std::min(exitT, dist) - std::min(entryT, dist), 0.f), tr = std::exp(-t * cn.kappa);
         const float f = e * ratio * tr;
         out.x += f * l.col.x, out.y += f * l.col.y, out.z += f * l.col.z;
         if (k) continue;
@@ -334,8 +336,12 @@ int main(int argc, char** argv) {
     std::vector<V3> P(n), N(n);
     srand(7);
     const auto rnd = [] { return rand() / static_cast<float>(RAND_MAX); };
+    // the last 4: outside the crown, lamp 2 (0, 1, -6) between them and the crown (its entry beyond the lamp): no leaf on
+    // the way, the light must not be attenuated (the 2.14.0 review: min(exit - entry, d) took 1.5 m of leaves there)
+    const V3 beyondLamp[4] = {{0, 1, -7.5f}, {0.2f, 1.1f, -8}, {-0.2f, 0.9f, -7}, {0, 1.2f, -6.6f}};
     for (int i = 0; i < n; i++) {
         P[i] = {(rnd() * 2 - 1) * 1.4f, 0.3f + rnd() * 3.4f, (rnd() * 2 - 1) * 1.4f};
+        if (i >= n - 4) P[i] = beyondLamp[i - (n - 4)];
         V3 nn{rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1};
         const float l = std::sqrt(Dot(nn, nn)) + 1e-6f;
         nn = {nn.x / l, nn.y / l, nn.z / l};
@@ -365,7 +371,7 @@ int main(int argc, char** argv) {
     void *a = nullptr, *b = nullptr;
     outP->Lock(0, 0, &a, 0);
     outO->Lock(0, 0, &b, 0);
-    float maxErr = 0, maxRef = 0;
+    float maxErr = 0, maxRef = 0, beyondErr = 0;
     bool samePos = true, sameRest = true, capped = false;
     for (int i = 0; i < n; i++) {
         const float* p = reinterpret_cast<const float*>(static_cast<const char*>(a) + i * 60);
@@ -378,9 +384,23 @@ int main(int argc, char** argv) {
         // oD0 (dword) and oT0 / oT1 are unchanged; oT2 is the lamp term
         sameRest = sameRest && std::memcmp(p + 4, o + 4, 4) == 0 && std::memcmp(p + 5, o + 5, 7 * 4) == 0;
         for (int k = 0; k < 3; k++) capped = capped || LawNoGain(Dot(L[k].p - P[i], L[k].p - P[i]), L[k].w, kMinD2) * L[k].scale > L[k].cap;
+        if (i >= n - 4) beyondErr = std::max(beyondErr, e);
     }
     outP->Unlock();
     outO->Unlock();
+    {   // the case is exercised: the old path min(exit - entry, d) would have crossed leaves there (the reference crosses none)
+        const V3 s{1 / cn.rh, 1 / cn.rv, 1 / cn.rh};
+        float oldPath = 0;
+        for (int i = n - 4; i < n; i++) {
+            const V3 d = L[2].p - P[i], p{(P[i].x - cn.c.x) * s.x, (P[i].y - cn.c.y) * s.y, (P[i].z - cn.c.z) * s.z};
+            const float dist = std::sqrt(Dot(d, d));
+            const V3 q{d.x / dist * s.x, d.y / dist * s.y, d.z / dist * s.z};
+            const float qa = Dot(q, q), qb = Dot(p, q), sq = std::sqrt(std::max(qb * qb - qa * (Dot(p, p) - 1), 0.f));
+            oldPath = std::max(oldPath, std::min(std::max((-qb + sq) / qa, 0.f) - std::max((-qb - sq) / qa, 0.f), dist));
+        }
+        std::printf("Lamp between a vertex outside the crown and the crown: the old path crossed %.2f m of leaves, now none; shader error %.2e\n", oldPath, beyondErr);
+        Check(oldPath > 0.5f && beyondErr < 1e-3f, "a lamp between the vertex and the crown: no leaf on the way, as the reference");
+    }
     std::printf("Per-vertex foliage lamps: constants c%d.., %d vertices, max relative error %.2e (largest reference %.3f)\n", B, n, maxErr, maxRef);
     Check(maxErr < 1e-3f, "lamp light matches the reference (law, Lambert, transmission, crown, ground bounce, cap)");
     Check(capped, "the cap is exercised (some vertices are brighter than the colour's point)");
@@ -416,7 +436,7 @@ int main(int argc, char** argv) {
         outP->Lock(0, 0, &a, 0);
         outO->Lock(0, 0, &b, 0);
         float worst = 0, peak = 0;
-        for (int i = 0; i < n; i++) {
+        for (int i = 0; i < n - 4; i++) { // (not the 4 placed 7 to 8 m out: a lamp 1 km away changes by 1.6% over 8 m)
             const float* p = reinterpret_cast<const float*>(static_cast<const char*>(a) + i * 60);
             const float* o = reinterpret_cast<const float*>(static_cast<const char*>(b) + i * 60);
             for (int k = 12; k < 15; k++) worst = std::max(worst, std::fabs(p[k] - o[k])), peak = std::max(peak, std::fabs(o[k]));

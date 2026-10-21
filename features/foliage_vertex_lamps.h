@@ -90,6 +90,8 @@ inline float BoxDistance2(const float* p, const float* centre, const float* ext)
 struct OwnLamp {
     float pos[3] = {}, colour[3] = {};
     float r0sq = 0.0f, invR2 = 0.0f, gain = 0.0f, score = 0.0f;
+    uint64_t key = 0;   // the lamp's row without its colour (place, reach, cone), to take a new colour without a new pick
+    float share = 0.0f; // the cone and the walls' share the colour was multiplied by
 };
 // Keeps the three brightest lamps (score) in out[0..2], brightest first (the ground bounce takes slot 0). Returns the count.
 inline int KeepBrightest(const OwnLamp& l, OwnLamp* out, int n) {
