@@ -39,7 +39,7 @@ tests, publication) is in [workflow.md](../workflow.md#6-release).
 | Version | Published | Headline |
 |---|---|---|
 | [2.15.0](2.15.0.md) | Pending | Faster indoor light, furniture with its floor and room colour, less memory, Steam Deck support |
-| [2.14.0](2.14.0.md) | Pending | Light through stairwells, stairs and arches, trees lit leaf by leaf, steady moonlight, memory and save fixes |
+| [2.14.0](2.14.0.md) | 2026-10-20 | Light through stairwells, stairs and arches, trees lit leaf by leaf, steady moonlight, memory and save fixes |
 | [2.13.2](2.13.2.md) | 2026-10-15 | The latest lighting features on the EA app version of the game (1.69) |
 | [2.13.1](2.13.1.md) | 2026-10-15 | Wall and garden wall shadows that continue past the lot, smoother lamp light on the ground, and trees lit by distance |
 | [2.13.0](2.13.0.md) | 2026-10-14 | Instant lamp lighting on the graphics card, and lamp light through doors, windows and arches |
