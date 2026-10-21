@@ -3841,6 +3841,16 @@ PatchedPs& PatchedFor(IDirect3DDevice9* dev, std::unordered_map<IDirect3DPixelSh
     return p;
 }
 
+// (2.15.1) Road pieces laid over the terrain (snowy roads and sidewalks) are drawn in three passes: a stencil mark with a
+// small depth bias, a depth pass with no bias where the piece lies under the terrain (zfunc GREATER, depth written), then
+// the colour with the bias again. The colour's vertex shader is not the depth pass's, and where the road and the terrain
+// stand at almost the same height its depth came out a hair behind the one the piece had just written: the colour was
+// refused there and the terrain's snow showed through in the shape of the piece (F7 of 21/10 14-43-46: #89 and #90 pass,
+// #101 refused; the same in the game without Apex). The colour pass takes kRoadBiasScale times its own bias.
+std::atomic<bool> g_roadBiasFix{true};   // developer A/B (road_depth_bias)
+std::atomic<float> g_roadBiasScale{4.0f}; // developer slider
+std::atomic<long> g_roadBiasRaised{0};
+
 template <typename DrawFn> bool DrawRoad(IDirect3DDevice9* dev, DrawFn draw) {
     PatchedPs& p = PatchedFor(dev, g_roadPs, "Road", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchRoad(t, pp.road); });
     if (!p.ps) return false;
@@ -3880,7 +3890,20 @@ template <typename DrawFn> bool DrawRoad(IDirect3DDevice9* dev, DrawFn draw) {
         if (sidewalk) SetPsConst(dev, p.road.sidewalkConst, c, 1);
         SetPs(dev, useShade ? shaded->ps : p.ps);
         ConstGain lampGain(dev, p.road.scaleConst, RoadDayGain()); // the road's lamp scale, after the max with the terrain
+        // a piece drawn with the game's depth bias (toward the camera, negative) takes more of it, so it wins over its own depth pass
+        DWORD biasBits = 0;
+        float bias = 0.0f;
+        if (g_roadBiasFix.load(std::memory_order_relaxed) && SUCCEEDED(dev->GetRenderState(D3DRS_DEPTHBIAS, &biasBits))) std::memcpy(&bias, &biasBits, 4);
+        const bool raise = bias < 0.0f && bias > -1e-3f && std::isfinite(bias);
+        if (raise) {
+            const float more = bias * std::clamp(g_roadBiasScale.load(std::memory_order_relaxed), 1.0f, 64.0f);
+            DWORD moreBits = 0;
+            std::memcpy(&moreBits, &more, 4);
+            dev->SetRenderState(D3DRS_DEPTHBIAS, moreBits);
+            g_roadBiasRaised.fetch_add(1, std::memory_order_relaxed);
+        }
         draw();
+        if (raise) dev->SetRenderState(D3DRS_DEPTHBIAS, biasBits);
         SetPs(dev, original);
         if (sidewalk) SetPsConst(dev, p.road.sidewalkConst, oldC, 1);
         if (smooth) SetTex(dev, p.road.lightSampler, oldLight);
@@ -8030,6 +8053,11 @@ void SetWaterFix(bool on, float strength, float reflection, bool filter, bool pr
 }
 
 void SetSidewalkClear(float amount) { g_sidewalkClear = amount < 0 ? 0.0f : (amount > 1 ? 1.0f : amount); }
+bool RoadBiasFix() { return g_roadBiasFix.load(std::memory_order_relaxed); }
+void SetRoadBiasFix(bool on) { g_roadBiasFix.store(on, std::memory_order_relaxed); }
+float RoadBiasScale() { return g_roadBiasScale.load(std::memory_order_relaxed); }
+void SetRoadBiasScale(float scale) { g_roadBiasScale.store(std::clamp(scale, 1.0f, 64.0f), std::memory_order_relaxed); }
+long RoadBiasRaised() { return g_roadBiasRaised.load(std::memory_order_relaxed); }
 
 void OnWorldChanged() {
     ClearChunks();

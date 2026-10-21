@@ -7,6 +7,7 @@ namespace ApexChangelog {
 namespace {
 
 constexpr const char* k2151Improved[] = {
+    "Moonlight is softer by default and in every preset",
     "Instant lamp lighting does less work while a lot keeps relighting",
     nullptr};
 constexpr const char* k2151Fixed[] = {
@@ -14,6 +15,7 @@ constexpr const char* k2151Fixed[] = {
     "Area lights of a lot light the ground past the lot's border",
     "Lamps hidden behind objects no longer reflect on water",
     "The moon lights the town from higher up: no more dark stripes on roads at night",
+    "Snowy roads and sidewalks no longer show holes in the shape of road pieces",
     nullptr};
 constexpr const char* k2150Added[] = {
     "Steam Deck and Linux: Proton is detected, effects need no shader compiler, and the Deck suggests the Performance preset",

@@ -23,6 +23,8 @@ const I18n::Pair kPairs[] = {
     {"Area lights of a lot light the ground past the lot's border", "地块的区域灯光会照亮地块边界以外的地面"},
     {"Lamps hidden behind objects no longer reflect on water", "被物体挡住的灯不再在水面上反射"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "月亮从更高处照亮城镇：夜晚道路上不再出现暗色条纹"},
+    {"Snowy roads and sidewalks no longer show holes in the shape of road pieces", "积雪的道路和人行道不再出现道路块形状的破洞"},
+    {"Moonlight is softer by default and in every preset", "月光默认更柔和，所有预设中也是如此"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "地块反复重新照明时，即时灯光的工作量更少"},
     {"Options on by default for several versions no longer show an Experimental badge", "多个版本以来默认开启的选项不再显示“实验性”标记"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "环境光遮蔽和景深模糊会显示暂停的原因"},

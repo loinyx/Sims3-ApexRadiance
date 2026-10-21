@@ -144,7 +144,7 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 | Individual options | `luzDasLampadasNatural` | float | 1.0 | 0 to 1 | Stock lamp colour: 0 pink (game), 1 warm white; applied on release ([lamp-colour](lamp-colour.md)) |
 | Individual options | `corPropriaNoLote` | bool | off | | Lot lamps get their own colour |
 | Individual options | `corDasLampadasDoLote` | float | 1.0 | 0 to 1 | That lot lamp colour |
-| Individual options | `luar` | float | 1.0 | 0 to 2 | Moonlight at night (see *Brightness controls*) |
+| Individual options | `luar` | float | 0.277 (1.0 until 2.15.1) | 0 to 2 | Moonlight at night (see *Brightness controls*); 0.277 in the Performance, Balanced and Quality presets too (1.817 until 2.15.1) |
 | Individual options | `postesAcesosNoCalculo` | bool | on | | Street lamps count as lit in lot light solves (0x6BE18C); reinstall |
 | Individual options | `qualidadeAltaEmTodosOsLotes` | bool | off | | Experimental: every lot at the active lot's quality; reinstall; lots loaded afterwards |
 | Individual options | `gramaDoLoteUsaLuzDoLote` | bool | on | | Lot pass keeps "no terrain lightmap" (0xC7F87D), so lot grass keeps the lot's own light after a terrain rebuild; reinstall |

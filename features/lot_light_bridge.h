@@ -92,6 +92,12 @@ void SetWaterFix(bool on, float strength, float reflection, bool filter = true, 
 std::string WaterStatus();
 // Sidewalks under snow: 0 = like the game (fully snow-covered), 1 = concrete fully visible.
 void SetSidewalkClear(float amount);
+// (2.15.1) Road pieces over the terrain: the colour pass takes more of its own depth bias (developer A/B and scale)
+bool RoadBiasFix();
+void SetRoadBiasFix(bool on);
+float RoadBiasScale();
+void SetRoadBiasScale(float scale);
+long RoadBiasRaised();
 // Fences, railings and stairs lit per pixel from the ground light (world light atlas) instead of the game's rig.
 void SetFenceGroundLight(bool on, float strength);
 // Development: paint lamp-lit draws no fix claimed in magenta; record them for ApexRadiance_Censo.txt (3 frames).

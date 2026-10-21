@@ -137,7 +137,15 @@ Patched PS sizes seen in captures: 130C52EF/1284 and E7A8295D/1364.
 5. If `LightmapSmooth::Find` returns the smoothed map, it also replaces the road's own copy in `sL`.
 6. Sidewalk constant `cS.x` = `g_sidewalkClear` when the shader has the blend.
 7. `ConstGain` multiplies `cK.x` (`scaleConst`) by `RoadGain() = 1 + (ground x road - 1) x night`.
-8. Swap the pixel shader, draw, restore every touched state. Counter: "roads: N" in the developer status line.
+8. (2.15.1) A piece drawn with the game's depth bias (negative, toward the camera) takes 4 times it during the draw
+   (`g_roadBiasScale`, developer slider 1 to 32), then the bias is put back. The game lays a road piece over the terrain
+   in three passes: a stencil mark with the bias, a depth pass with no bias where the piece lies under the terrain
+   (zfunc GREATER, depth written) and the colour with the bias. The colour's vertex shader is not the depth pass's, so
+   where road and terrain stand at almost the same height its depth came out a hair behind the depth just written: the
+   colour was refused and the terrain's snow showed through in the shape of the piece (F7 of 21/10 14-43-46: #89 and
+   #90 pass, #101 refused; the same in the game without Apex). Developer A/B: Lighting > Developer > *Road pieces win
+   over their own depth pass*.
+9. Swap the pixel shader, draw, restore every touched state. Counter: "roads: N" in the developer status line.
 
 ### Registers
 

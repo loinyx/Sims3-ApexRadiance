@@ -233,7 +233,7 @@ float g_groundBrightness = 0.75f;
 float g_roadBrightness = 1.0f;  // x the ground brightness
 float g_streetLampGain = 0.8f;  // street lamps on the ground (terrain bake)
 float g_lotLampGain = 0.8f;     // lot lamps on the ground (terrain bake + the lot's own light map)
-float g_moonlight = 1.0f;       // the moon's light at night
+float g_moonlight = 0.277f;     // the moon's light at night
 bool g_edgePad = true;          // pad the room light maps' edges (RoomMapPadding): no dark side on things along walls
 bool g_lotTintOwn = false;      // lot lamps have their own colour
 float g_lotLampTint = 1.0f;     // their colour (0 = pink, 1 = warm white)
@@ -2056,7 +2056,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             "How strongly street lamps light the ground (1 = the default; the ground light is rebuilt when it changes).");
         RegisterFloatSetting(&g_lotLampGain, "forcaDasLampadasDoLote", SettingWidget::Slider, 0.8f, 0.25f, 3.0f,
             "How strongly outdoor lot lamps light the ground (1 = the default; the ground light is rebuilt when it changes).");
-        RegisterFloatSetting(&g_moonlight, "luar", SettingWidget::Slider, 1.0f, 0.0f, 2.0f,
+        RegisterFloatSetting(&g_moonlight, "luar", SettingWidget::Slider, 0.277f, 0.0f, 2.0f,
             "How strong the moonlight is at night (1 = the game; 0 = no moonlight, only lamps and the sky's glow).");
         RegisterBoolSetting(&g_edgePad, "bordasDosMapasDeLuz", true,
             "Stairs, curtains and furniture indoors get smooth light from the game's room light maps: no dark side along outer walls, no steps between neighbouring objects.");
@@ -2583,7 +2583,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_roadBrightness = 1.0f;
         g_streetLampGain = 0.8f;
         g_lotLampGain = 0.8f;
-        g_moonlight = 1.0f;
+        g_moonlight = 0.277f;
         g_objLamps = true;
         g_objStrength = 0.75f;
         g_objAll = true;
@@ -3068,6 +3068,16 @@ class NightTerrainRelightPatch : public ApexPatch {
         }
         if (ApexUi::Checkbox("Soft lot edges (A/B: off = plain max of lot and ground light)", &g_softLotEdges)) NotifySettingChanged();
         if (ApexUi::Checkbox("Moon height at night (A/B: off = the game's moon on the horizon)", &g_moonLift)) ObjectLightBridge::RequestRigRefresh();
+        bool roadBias = LotLightBridge::RoadBiasFix();
+        if (ApexUi::Checkbox("Road pieces win over their own depth pass (A/B: off = the terrain's snow shows through in their shape)", &roadBias))
+            LotLightBridge::SetRoadBiasFix(roadBias);
+        if (roadBias) {
+            float scale = LotLightBridge::RoadBiasScale();
+            ImGui::SetNextItemWidth(220.0f);
+            if (ImGui::SliderFloat("Road depth bias scale##RoadBias", &scale, 1.0f, 32.0f, "x%.0f")) LotLightBridge::SetRoadBiasScale(scale);
+            ImGui::SameLine();
+            ImGui::TextDisabled("%ld road draws raised", LotLightBridge::RoadBiasRaised());
+        }
         if (g_moonLift) {
             ImGui::SetNextItemWidth(220.0f);
             if (ImGui::SliderFloat("Least moon height (degrees)##MoonHeight", &g_moonHeightDeg, 5.0f, 60.0f, "%.0f") && !ApexUi::SliderDragging())
