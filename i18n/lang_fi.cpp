@@ -18,6 +18,8 @@ const I18n::Pair kPairs[] = {
     {"Presets set every Performance option, including the lamp lighting mode; Default is now Balanced", "Esiasetukset asettavat jokaisen Suorituskyky-valinnan, myös lamppujen valon tilan; Default on nyt Tasapainoinen"},
     {"Rooms lit through arches and stairwells are balanced, never darker than an empty room", "Kaarien ja portaikkojen kautta valaistut huoneet ovat tasapainossa, eivät koskaan tyhjää huonetta tummempia"},
     {"Turning all effects off keeps Room to save on", "Kaikkien tehosteiden sammuttaminen jättää Tilaa tallentamiselle päälle"},
+    {"Rooms at Night: the background light is 20% by default and in every preset", "Huoneet yöllä: taustavalo on oletuksena ja kaikissa esiasetuksissa 20%"},
+    {"Options on by default for several versions no longer show an Experimental badge", "Useiden versioiden ajan oletuksena päällä olleissa valinnoissa ei enää ole Kokeellinen-merkkiä"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "Ambient Occlusion ja Syvyyssumennus kertovat, miksi ne ovat tauolla"},
     {"Light keeps passing through arches after Night Lights is turned off and on", "Valo kulkee yhä kaarien läpi, kun Yövalot on sammutettu ja sytytetty uudelleen"},
     {"Rooms that take almost no light stay dark, without a doubled glow", "Huoneet, jotka saavat tuskin valoa, pysyvät pimeinä ilman kaksinkertaista hehkua"},

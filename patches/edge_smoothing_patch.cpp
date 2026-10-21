@@ -1187,7 +1187,7 @@ APEX_REGISTER_FEATURE(EdgeSmoothingPatch, {.displayName = "Edge Smoothing (SMAA 
                                     .description = "Smooths the jagged edges of the world while menus and text stay sharp. Works with the game's own "
                                                    "Edge Smoothing turned off. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
                                     .category = "Graphics",
-                                    .experimental = true,
+                                    .experimental = false,
                                              .enabledByDefault = true,
                                     .supportedVersions = VERSION_ALL,
                                     .technicalDetails = {"Runs before the first ZENABLE=FALSE backbuffer draw after the scene (bloom composite / UI start), like Depth Blur.",

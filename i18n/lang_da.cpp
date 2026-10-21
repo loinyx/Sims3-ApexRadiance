@@ -18,6 +18,8 @@ const I18n::Pair kPairs[] = {
     {"Presets set every Performance option, including the lamp lighting mode; Default is now Balanced", "Forudindstillinger sætter alle Ydeevne-indstillinger, også lampelystilstanden; Default hedder nu Balanceret"},
     {"Rooms lit through arches and stairwells are balanced, never darker than an empty room", "Rum, der får lys gennem buer og trappeopgange, er afbalancerede og aldrig mørkere end et tomt rum"},
     {"Turning all effects off keeps Room to save on", "Når alle effekter slås fra, forbliver Plads til at gemme slået til"},
+    {"Rooms at Night: the background light is 20% by default and in every preset", "Rum om natten: baggrundslyset er 20% som standard og i alle forudindstillinger"},
+    {"Options on by default for several versions no longer show an Experimental badge", "Indstillinger, der har været slået til som standard i flere versioner, viser ikke længere mærket Eksperimentel"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "Ambient Occlusion og Dybdesløring viser, hvorfor de er sat på pause"},
     {"Light keeps passing through arches after Night Lights is turned off and on", "Lys passerer stadig gennem buer, efter Natlys er slået fra og til igen"},
     {"Rooms that take almost no light stay dark, without a doubled glow", "Rum, der næsten intet lys får, forbliver mørke uden et fordoblet skær"},

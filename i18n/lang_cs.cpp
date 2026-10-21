@@ -18,6 +18,8 @@ const I18n::Pair kPairs[] = {
     {"Presets set every Performance option, including the lamp lighting mode; Default is now Balanced", "Předvolby nastaví všechny možnosti Výkon včetně režimu světla lamp; Default se nyní jmenuje Vyvážené"},
     {"Rooms lit through arches and stairwells are balanced, never darker than an empty room", "Místnosti osvětlené oblouky a schodišti jsou vyvážené, nikdy tmavší než prázdná místnost"},
     {"Turning all effects off keeps Room to save on", "Vypnutí všech efektů ponechá Místo pro uložení zapnuté"},
+    {"Rooms at Night: the background light is 20% by default and in every preset", "Místnosti v noci: světlo pozadí je ve výchozím stavu i ve všech předvolbách na 20%"},
+    {"Options on by default for several versions no longer show an Experimental badge", "Možnosti zapnuté ve výchozím stavu už několik verzí nemají štítek Experimentální"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "Ambientní okluze a Rozostření hloubky ukazují, proč jsou pozastaveny"},
     {"Light keeps passing through arches after Night Lights is turned off and on", "Světlo dál prochází oblouky po vypnutí a zapnutí Nočních světel"},
     {"Rooms that take almost no light stay dark, without a doubled glow", "Místnosti, do kterých skoro nedopadá světlo, zůstávají tmavé, bez zdvojené záře"},

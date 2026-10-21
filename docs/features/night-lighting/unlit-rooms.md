@@ -11,7 +11,7 @@ tone. Part of [Night Lighting](README.md).
 | | |
 |---|---|
 | Availability | Released (present since 2.1.0, the first version in this repository). The 10 to 80% Brightness range, the 0% Blue tint default, the structure-change recovery: Released in 2.6.0. The card's *Background light* and *Lamp light* groups: Released in 2.13.0 |
-| Default | On; Brightness 35%; Blue tint 0% |
+| Default | On; Brightness 20% (35% until 2.15.0); Blue tint 0%; the same in the Performance, Balanced and Quality presets |
 | Menu | Lighting > Buildings > Rooms at Night |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/unlit_rooms.cpp`](../../../features/unlit_rooms.cpp), [`features/room_ambient_policy.h`](../../../features/room_ambient_policy.h), [`framework/s3ss_detect.cpp`](../../../framework/s3ss_detect.cpp), [`framework/s3ss_ambient_policy.h`](../../../framework/s3ss_ambient_policy.h); furniture side in [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) and [`features/shader_patches.cpp`](../../../features/shader_patches.cpp); card in [`patches/night_terrain_relight_patch.cpp`](../../../patches/night_terrain_relight_patch.cpp) (`DrawRoomsCard`) |
@@ -48,7 +48,7 @@ walls and floors on the next frame, without a new light solve where possible.
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Adjust the background light | `comodosEscurosSemLuz` | bool | on | | Off restores the game's colours (all patches removed) |
-| Brightness | `luzQueSobraNosComodos` | float | 35% | 10 to 80% | Share of the game's unlit-room light kept on walls, floors and furniture |
+| Brightness | `luzQueSobraNosComodos` | float | 20% | 10 to 80% | Share of the game's unlit-room light kept on walls, floors and furniture |
 | Blue tint | `azulNosComodos` | float | 0% | 0 to 100% | 0% is neutral grey of the same luminance, 100% the game's blue, on walls and furniture |
 | LAMP LIGHT group: Outdoor light through openings, Indoor light through openings, Doors block light, Shadow softness, Smooth light maps | see [level-light-share](level-light-share.md#settings) and [room-map-smoothing](room-map-smoothing.md) | | on / 15 cm | | The same card shows the lamp light through openings and its look; documented on those pages |
 | Refresh the lighting (button, with its shortcut chip) | (not saved) | action | | | Relights terrain, lot stories, every room of every loaded lot (basements too) and object rigs now and 2 s later (`NightLighting::RefreshAll`) |

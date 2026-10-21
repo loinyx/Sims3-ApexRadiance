@@ -10,7 +10,7 @@ the grain cannot reach (the sky and some other surfaces).
 
 | | |
 |---|---|
-| Availability | Experimental: released in 2.2.0; the page shows a "Still being tested" note. Its own page, Smooth gradients off by default and copies made at a shader's first scene draw: Released in 2.7.0 |
+| Availability | Released in 2.2.0 (Experimental, with a "Still being tested" note on its page, until 2.15.0). Its own page, Smooth gradients off by default and copies made at a shader's first scene draw: Released in 2.7.0 |
 | Default | On for new configurations |
 | Menu | Image > Banding Fix (card *Banding Fix*, with *Smooth gradients*); Overview > Image > Banding Fix |
 | Configuration | `[patches.SceneDither]` in `ApexRadiance.toml` (Smooth gradients: `[qol.picture] deband`) |

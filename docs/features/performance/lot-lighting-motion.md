@@ -8,7 +8,7 @@ the game's own pace as soon as the camera stops.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lot build slice while moving, the lamp edit and after-load budgets and the refinement cap: Released in 2.7.0. A lamp edit's room while moving: Released in 2.12.3. Spread cap after a drag: Released in 2.13.0. Settle window after entering a lot: In development (2.15.0) |
+| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lot build slice while moving, the lamp edit and after-load budgets and the refinement cap: Released in 2.7.0. A lamp edit's room while moving: Released in 2.12.3. Spread cap after a drag: Released in 2.13.0. Settle window after entering a lot: Released in 2.15.0 |
 | Default | On, 3 ms |
 | Menu | System > Performance > Camera and lighting > *Spread lot lighting while moving* |
 | Configuration | `[patches.LotLightingMotion]` in `ApexRadiance.toml` |

@@ -9,9 +9,9 @@ is not using. Nothing on screen changes.
 
 | | |
 |---|---|
-| Availability | Experimental: Released in 2.7.0. Earlier buffer release during saving and compatibility with sims3-modernization: Released in 2.14.0 |
+| Availability | Released in 2.7.0 (Experimental until 2.15.0). Earlier buffer release during saving and compatibility with sims3-modernization: Released in 2.14.0 |
 | Default | On |
-| Menu | System > Performance > Memory handling > *Room to save* (Experimental badge) |
+| Menu | System > Performance > Memory handling > *Room to save* |
 | Configuration | `[patches.MemoryGuard]` in `ApexRadiance.toml` |
 | Source | [`features/memory_guard.{h,cpp}`](../../../features/memory_guard.cpp), [`patches/performance_patches.cpp`](../../../patches/performance_patches.cpp) (`MemoryGuardPatch`) |
 

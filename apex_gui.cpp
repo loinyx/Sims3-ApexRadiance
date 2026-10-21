@@ -712,8 +712,6 @@ void PictureRows(int tab) {
 // Image > Banding Fix (everything against color steps in one place, on its own page): the Banding Fix card (scene_dither.cpp:
 // switch, grain Strength) with Picture's Smooth gradients (the deband), which follows the Banding Fix's switch
 void BandingTabContent() {
-    ApexUi::IconNote(IconId::Info, "Still being tested: if anything looks wrong or the game crashes, turn it off");
-    ApexUi::Gap(ApexUi::kSpace1);
     FeatureCardWith("SceneDither", IconId::Blend, "Banding Fix", "Smooth light, with no color steps", [](ApexPatch* p) {
         p->RenderCustomUI();
         static const PictureParams kDef{};
@@ -949,12 +947,10 @@ void PerformanceCard() {
         ApexUi::CardDivider();
         if (FeatureSwitchRow(Performance::kRoomLightQueueName, "Faster room lighting", "Rooms light up sooner when you enter a lot or change floors")) {
             bool together = Performance::RoomAllAtOnce();
-            ApexUi::SetNextRowBadge("Experimental", "Still being tested: if anything looks wrong or the game crashes, turn it off");
             if (ApexUi::SwitchRow("Lamp edits all at once", &together, "After a lamp edit, floors change together instead of one by one", true))
                 Performance::SetRoomAllAtOnce(together);
             if (!together) { // the other way: an approximate light first, refined room by room
                 bool quick = Performance::RoomQuickPass();
-                ApexUi::SetNextRowBadge("Experimental", "Still being tested: if anything looks wrong or the game crashes, turn it off");
                 if (ApexUi::SwitchRow("Quick update for lamp switches", &quick, "Switching a lamp shows its new light at once, then refines it", true))
                     Performance::SetRoomQuickPass(quick);
             }
@@ -1007,7 +1003,7 @@ void PerformanceCard() {
         ApexUi::CardHeader(IconId::Activity, "Memory handling", "Less waiting on memory, and room left for saving in long sessions", nullptr, nullptr);
         ApexUi::CardDivider();
         FeatureSwitchRow(Performance::kFastMemoryName, "Faster memory handling", "Less waiting when the game hands out and frees memory");
-        FeatureSwitchRow(Performance::kMemoryGuardName, "Room to save", "Keeps memory free for saving (Error 12); clears the game's idle cache when low", true);
+        FeatureSwitchRow(Performance::kMemoryGuardName, "Room to save", "Keeps memory free for saving (Error 12); clears the game's idle cache when low");
     }
     ApexUi::EndCard();
     ImGui::PopID();
@@ -1015,8 +1011,8 @@ void PerformanceCard() {
     if (ApexUi::BeginCard("##Card")) {
         ApexUi::CardHeader(IconId::Monitor, "Game and scripts", "Less work for the game every frame", nullptr, nullptr);
         ApexUi::CardDivider();
-        FeatureSwitchRow(Performance::kWindowRepaintName, "Lighter window updates", "Less work for the game each frame; nothing on screen changes", true);
-        FeatureSwitchRow(Performance::kScriptMathName, "Faster scripts", "The game's scripts compare numbers and look up types with less work", true);
+        FeatureSwitchRow(Performance::kWindowRepaintName, "Lighter window updates", "Less work for the game each frame; nothing on screen changes");
+        FeatureSwitchRow(Performance::kScriptMathName, "Faster scripts", "The game's scripts compare numbers and look up types with less work");
     }
     ApexUi::EndCard();
     ImGui::PopID();

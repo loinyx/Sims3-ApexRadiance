@@ -18,6 +18,8 @@ const I18n::Pair kPairs[] = {
     {"Presets set every Performance option, including the lamp lighting mode; Default is now Balanced", "Ustawienia wstępne ustawiają każdą opcję Wydajność, w tym tryb światła lamp; Default nazywa się teraz Zrównoważona"},
     {"Rooms lit through arches and stairwells are balanced, never darker than an empty room", "Pokoje oświetlone przez łuki i klatki schodowe są zrównoważone, nigdy ciemniejsze niż pusty pokój"},
     {"Turning all effects off keeps Room to save on", "Wyłączenie wszystkich efektów pozostawia włączone Miejsce na zapis"},
+    {"Rooms at Night: the background light is 20% by default and in every preset", "Pokoje nocą: światło tła ma domyślnie 20%, także w każdym ustawieniu wstępnym"},
+    {"Options on by default for several versions no longer show an Experimental badge", "Opcje włączone domyślnie od kilku wersji nie mają już oznaczenia Eksperymentalne"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "Okluzja otoczenia i Rozmycie głębi pokazują, dlaczego są wstrzymane"},
     {"Light keeps passing through arches after Night Lights is turned off and on", "Światło nadal przechodzi przez łuki po wyłączeniu i ponownym włączeniu Świateł nocnych"},
     {"Rooms that take almost no light stay dark, without a doubled glow", "Pokoje, do których prawie nie dociera światło, pozostają ciemne, bez podwójnej poświaty"},

@@ -8,7 +8,7 @@ lighter Performance profile on the Deck.
 
 | | |
 |---|---|
-| Availability | Unreleased (development branch) |
+| Availability | Released in 2.15.0 |
 | Menu | Settings > Compatibility: Platform and DXVK rows, Steam Deck group; welcome page note |
 | Configuration | No setting |
 | Source | `framework/platform.{h,cpp}`, `framework/shader_cache.cpp` (`LoadEmbedded`), `apex_gui.cpp`, `ApexRadiance.rc`, `resources/ApexRadiance_ShaderCache.bin` |

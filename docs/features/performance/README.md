@@ -11,7 +11,7 @@ frames while the camera moves.
 
 | | |
 |---|---|
-| Availability | Released. The individual switches were introduced between 2.1.0 and 2.7.0 (see the table below); the first twelve are on by default since 2.5.5. The single Overview switch for the group: Released in 2.6.0, covering fifteen switches since 2.7.0. Room to save, Lighter window updates and Faster scripts: Experimental, released in 2.7.0. Lamp lighting card: Released in 2.13.0 |
+| Availability | Released. The individual switches were introduced between 2.1.0 and 2.7.0 (see the table below); the first twelve are on by default since 2.5.5. The single Overview switch for the group: Released in 2.6.0, covering fifteen switches since 2.7.0. Room to save, Lighter window updates and Faster scripts: Released in 2.7.0 (Experimental until 2.15.0). Lamp lighting card: Released in 2.13.0 |
 | Default | All fifteen on when no saved choice exists. An explicit saved off choice stays off. The Lot Streaming switches are off by default |
 | Menu | System > Performance (cards *Lamp lighting*, *Camera and lighting*, *Files and objects*, *Textures and Sims*, *Memory handling*, *Game and scripts*); System > Lot Streaming; Overview > Performance (one switch for the fifteen) |
 | Configuration | One `[patches.<Name>]` table per switch in `ApexRadiance.toml` |
@@ -70,9 +70,9 @@ Every switch works at the exact game function behind one measured cost, and foll
 | Faster cache compression (includes record checksums) | Textures and Sims | 2.1.0 or earlier; checksums 2.4.0 | [fast-cache-compression.md](fast-cache-compression.md) |
 | Faster Sim building | Textures and Sims | 2.3.0 | [fast-cas-sort.md](fast-cas-sort.md) |
 | Faster memory handling | Memory handling | 2.4.0 | [fast-memory.md](fast-memory.md) |
-| Room to save (Experimental) | Memory handling | 2.7.0 | [room-to-save.md](room-to-save.md) |
-| Lighter window updates (Experimental) | Game and scripts | 2.7.0 | [lighter-window-updates.md](lighter-window-updates.md) |
-| Faster scripts (Experimental) | Game and scripts | 2.7.0 | [faster-scripts.md](faster-scripts.md) |
+| Room to save | Memory handling | 2.7.0 | [room-to-save.md](room-to-save.md) |
+| Lighter window updates | Game and scripts | 2.7.0 | [lighter-window-updates.md](lighter-window-updates.md) |
+| Faster scripts | Game and scripts | 2.7.0 | [faster-scripts.md](faster-scripts.md) |
 
 The System > Lot Streaming page holds five more switches, off by default (Extended lot detail, Smooth lot streaming,
 Keep lot visibility stable, Pause lot streaming in map view, Spread lot objects while loading; Experimental, 2.7.0,
@@ -154,8 +154,8 @@ Each switch's settings are documented once, on its own page. The group-level con
 | Overview > All effects | (none) | bool | | | Also turns the Performance group on or off; turning everything off leaves Room to save on (it protects saves and changes nothing on screen) |
 | (row switch on each page) | `[patches.<Name>] enabled` | bool | on | | A missing key reads as on; an explicit `false` stays off |
 
-Room to save, Lighter window updates, Faster scripts and the two sub-rows of *Faster room lighting* (*Lamp edits all
-at once* and *Quick update for lamp switches*) show an Experimental badge. Each row's hover text is the
+No row of this page shows an Experimental badge: Room to save, Lighter window updates, Faster scripts and the two
+sub-rows of *Faster room lighting*, on by default since 2.7.0, lost it in 2.15.0. Each row's hover text is the
 switch's description, ending with the credit.
 
 ## Compatibility and interactions

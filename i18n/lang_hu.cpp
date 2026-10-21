@@ -18,6 +18,8 @@ const I18n::Pair kPairs[] = {
     {"Presets set every Performance option, including the lamp lighting mode; Default is now Balanced", "Az előbeállítások minden Teljesítmény opciót beállítanak, a lámpafény módját is; a Default neve most Kiegyensúlyozott"},
     {"Rooms lit through arches and stairwells are balanced, never darker than an empty room", "Az íveken és lépcsőházakon át megvilágított szobák kiegyensúlyozottak, soha nem sötétebbek egy üres szobánál"},
     {"Turning all effects off keeps Room to save on", "Az összes effekt kikapcsolása bekapcsolva hagyja a Hely a mentéshez opciót"},
+    {"Rooms at Night: the background light is 20% by default and in every preset", "Szobák éjjel: a háttérfény alapból és minden előbeállításban 20%"},
+    {"Options on by default for several versions no longer show an Experimental badge", "A több verzió óta alapból bekapcsolt opciók már nem viselik a Kísérleti jelzést"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "A Környezeti takarás és a Mélységi elmosás megmutatja, miért szünetel"},
     {"Light keeps passing through arches after Night Lights is turned off and on", "A fény továbbra is átjut az íveken az Éjszakai fények ki- és bekapcsolása után"},
     {"Rooms that take almost no light stay dark, without a doubled glow", "A szinte fényt nem kapó szobák sötétek maradnak, kétszeres derengés nélkül"},

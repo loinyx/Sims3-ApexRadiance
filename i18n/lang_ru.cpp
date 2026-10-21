@@ -18,6 +18,8 @@ const I18n::Pair kPairs[] = {
     {"Presets set every Performance option, including the lamp lighting mode; Default is now Balanced", "Пресеты задают все параметры «Производительность», включая режим света ламп; Default теперь называется «Баланс»"},
     {"Rooms lit through arches and stairwells are balanced, never darker than an empty room", "Комнаты, освещённые через арки и лестницы, сбалансированы и никогда не темнее пустой комнаты"},
     {"Turning all effects off keeps Room to save on", "Выключение всех эффектов оставляет «Место для сохранения» включённым"},
+    {"Rooms at Night: the background light is 20% by default and in every preset", "Комнаты ночью: фоновый свет по умолчанию и во всех пресетах равен 20%"},
+    {"Options on by default for several versions no longer show an Experimental badge", "Параметры, включённые по умолчанию уже несколько версий, больше не помечены как «Экспериментально»"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "Фоновое затенение и размытие глубины показывают, почему они приостановлены"},
     {"Light keeps passing through arches after Night Lights is turned off and on", "Свет продолжает проходить через арки после выключения и включения Ночного света"},
     {"Rooms that take almost no light stay dark, without a doubled glow", "Комнаты, куда почти не попадает свет, остаются тёмными, без удвоенного свечения"},

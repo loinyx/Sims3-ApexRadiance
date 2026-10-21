@@ -18,6 +18,8 @@ const I18n::Pair kPairs[] = {
     {"Presets set every Performance option, including the lamp lighting mode; Default is now Balanced", "Οι προεπιλογές ρυθμίζουν κάθε επιλογή Επιδόσεων, μαζί με τη λειτουργία φωτός λαμπών· το Default λέγεται πλέον Ισορροπημένη"},
     {"Rooms lit through arches and stairwells are balanced, never darker than an empty room", "Τα δωμάτια που φωτίζονται από καμάρες και σκάλες είναι ισορροπημένα, ποτέ πιο σκοτεινά από ένα άδειο δωμάτιο"},
     {"Turning all effects off keeps Room to save on", "Το κλείσιμο όλων των εφέ αφήνει ενεργό τον Χώρο για αποθήκευση"},
+    {"Rooms at Night: the background light is 20% by default and in every preset", "Δωμάτια τη Νύχτα: το φως φόντου είναι 20% από προεπιλογή και σε κάθε προεπιλογή ρυθμίσεων"},
+    {"Options on by default for several versions no longer show an Experimental badge", "Οι επιλογές που είναι ενεργές από προεπιλογή εδώ και αρκετές εκδόσεις δεν δείχνουν πια την ένδειξη Πειραματικό"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "Το Ambient Occlusion και η Θόλωση Βάθους δείχνουν γιατί είναι σε παύση"},
     {"Light keeps passing through arches after Night Lights is turned off and on", "Το φως συνεχίζει να περνά από τις καμάρες αφού κλείσεις και ανοίξεις ξανά τα Νυχτερινά Φώτα"},
     {"Rooms that take almost no light stay dark, without a doubled glow", "Τα δωμάτια που δεν παίρνουν σχεδόν καθόλου φως μένουν σκοτεινά, χωρίς διπλή λάμψη"},

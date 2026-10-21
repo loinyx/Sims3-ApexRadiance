@@ -18,6 +18,8 @@ const I18n::Pair kPairs[] = {
     {"Presets set every Performance option, including the lamp lighting mode; Default is now Balanced", "预设会设置所有性能选项，包括灯具照明模式；Default 现在叫均衡"},
     {"Rooms lit through arches and stairwells are balanced, never darker than an empty room", "通过拱门和楼梯采光的房间会保持均衡，绝不会比空房间更暗"},
     {"Turning all effects off keeps Room to save on", "关闭所有效果时，保留存档空间仍保持开启"},
+    {"Rooms at Night: the background light is 20% by default and in every preset", "夜间房间：背景光默认为 20%，所有预设中也是如此"},
+    {"Options on by default for several versions no longer show an Experimental badge", "多个版本以来默认开启的选项不再显示“实验性”标记"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "环境光遮蔽和景深模糊会显示暂停的原因"},
     {"Light keeps passing through arches after Night Lights is turned off and on", "关闭再开启夜间灯光后，光线仍能穿过拱门"},
     {"Rooms that take almost no light stay dark, without a doubled glow", "几乎照不到光的房间保持黑暗，不再出现加倍的光晕"},

@@ -8,9 +8,9 @@ window only when it needs to, when the window is uncovered or resized. Nothing o
 
 | | |
 |---|---|
-| Availability | Experimental: Released in 2.7.0 |
+| Availability | Released in 2.7.0 (Experimental until 2.15.0) |
 | Default | On |
-| Menu | System > Performance > Game and scripts > *Lighter window updates* (Experimental badge) |
+| Menu | System > Performance > Game and scripts > *Lighter window updates* |
 | Configuration | `[patches.WindowRepaint]` in `ApexRadiance.toml` |
 | Source | [`features/window_repaint.{h,cpp}`](../../../features/window_repaint.cpp), [`patches/performance_patches.cpp`](../../../patches/performance_patches.cpp) (`WindowRepaintPatch`) |
 

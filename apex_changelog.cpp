@@ -18,6 +18,8 @@ constexpr const char* k2150Improved[] = {
     "Presets set every Performance option, including the lamp lighting mode; Default is now Balanced",
     "Rooms lit through arches and stairwells are balanced, never darker than an empty room",
     "Turning all effects off keeps Room to save on",
+    "Rooms at Night: the background light is 20% by default and in every preset",
+    "Options on by default for several versions no longer show an Experimental badge",
     "Ambient Occlusion and Depth Blur show why they are not running",
     nullptr};
 constexpr const char* k2150Fixed[] = {

@@ -9,7 +9,7 @@ frame, once the new light is ready. The final lighting is the game's own.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lamp switches all at once and Quick update for lamp switches (both Experimental), an atrium's stories changing together and the quick return of empty light object removals: Released in 2.7.0. Lamp edits all at once (was *Lamp switches all at once*; every lamp edit, the lamp's own story shown first) and shorter waits for an edit's rooms: Released in 2.12.3. Classic: show all floors together (Lamp lighting Classic): Released in 2.13.0. Automatic lamps first and the step budget of the extra solves: Released in 2.14.0 |
+| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lamp switches all at once and Quick update for lamp switches (Experimental until 2.15.0), an atrium's stories changing together and the quick return of empty light object removals: Released in 2.7.0. Lamp edits all at once (was *Lamp switches all at once*; every lamp edit, the lamp's own story shown first) and shorter waits for an edit's rooms: Released in 2.12.3. Classic: show all floors together (Lamp lighting Classic): Released in 2.13.0. Automatic lamps first and the step budget of the extra solves: Released in 2.14.0 |
 | Default | On |
 | Menu | System > Performance > Camera and lighting > *Faster room lighting* |
 | Configuration | `[patches.RoomLightQueue]` in `ApexRadiance.toml` |
@@ -45,8 +45,8 @@ the stories of an atrium (a double-height room is one room per story) always cha
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Faster room lighting | `[patches.RoomLightQueue] enabled` | bool | on | | Turns all six changes and the lamp switch parts on. A missing key reads as on |
-| Lamp edits all at once (Experimental; was *Lamp switches all at once*) | `[patches.RoomLightQueue] switchAllAtOnce` | bool | on | | After any lamp edit the lamp's own story shows its new light when solved, and the other stories change in one frame once their final light is ready (see "Lamp edits all at once" below); the quick pass is not used meanwhile. With Lamp lighting Classic every story, the lamp's own included, changes in the same frame ("Classic: show all floors together" below). Needs the solve hooks of Night Lights' *Outdoor light between floors* |
-| Quick update for lamp switches (Experimental; shown only while the row above is off) | `[patches.RoomLightQueue] quickPass` | bool | on | | An approximate light first, refined room by room |
+| Lamp edits all at once (was *Lamp switches all at once*) | `[patches.RoomLightQueue] switchAllAtOnce` | bool | on | | After any lamp edit the lamp's own story shows its new light when solved, and the other stories change in one frame once their final light is ready (see "Lamp edits all at once" below); the quick pass is not used meanwhile. With Lamp lighting Classic every story, the lamp's own included, changes in the same frame ("Classic: show all floors together" below). Needs the solve hooks of Night Lights' *Outdoor light between floors* |
+| Quick update for lamp switches (shown only while the row above is off) | `[patches.RoomLightQueue] quickPass` | bool | on | | An approximate light first, refined room by room |
 
 ### Lamp edits all at once
 

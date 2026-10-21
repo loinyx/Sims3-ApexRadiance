@@ -18,6 +18,8 @@ const I18n::Pair kPairs[] = {
     {"Presets set every Performance option, including the lamp lighting mode; Default is now Balanced", "Le preimpostazioni regolano ogni opzione di Prestazioni, compresa la modalità della luce delle lampade; Default ora si chiama Bilanciata"},
     {"Rooms lit through arches and stairwells are balanced, never darker than an empty room", "Le stanze illuminate da archi e scale sono bilanciate, mai più scure di una stanza vuota"},
     {"Turning all effects off keeps Room to save on", "Spegnere tutti gli effetti lascia attivo Spazio per salvare"},
+    {"Rooms at Night: the background light is 20% by default and in every preset", "Stanze di notte: la luce di fondo è al 20% per impostazione predefinita e in ogni preimpostazione"},
+    {"Options on by default for several versions no longer show an Experimental badge", "Le opzioni attive per impostazione predefinita da diverse versioni non mostrano più l'etichetta Sperimentale"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "L'occlusione ambientale e la sfocatura di profondità indicano perché sono in pausa"},
     {"Light keeps passing through arches after Night Lights is turned off and on", "La luce continua a passare dagli archi dopo aver spento e riacceso le Luci Notturne"},
     {"Rooms that take almost no light stay dark, without a doubled glow", "Le stanze che ricevono pochissima luce restano buie, senza un bagliore raddoppiato"},

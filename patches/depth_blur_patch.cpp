@@ -1312,7 +1312,7 @@ APEX_REGISTER_FEATURE(DepthBlurPatch, {.displayName = "Depth Blur",
                                    .description = "Softly blurs the background behind what the camera looks at, like a real camera lens, while menus stay sharp. "
                                                   "Works with the game's own Edge Smoothing turned off. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
                                    .category = "Graphics",
-                                   .experimental = true,
+                                   .experimental = false,
                                              .enabledByDefault = true,
                                    .supportedVersions = VERSION_ALL,
                                    .technicalDetails = {"Swaps the auto depth-stencil for an INTZ texture via Set/GetDepthStencilSurface detours (transparent to the game).",

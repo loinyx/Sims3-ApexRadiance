@@ -204,7 +204,7 @@ bool g_groundShade = true;      // (14/10) walls shade lamp light on lot ground,
 bool g_smoothRoomMaps = true;   // (2.12.4) room light maps: soft light cut, dither, B-spline reads (LevelLightShare::SetSoftLightCut, RoomMapDither, ShaderPatches)
 int g_lightDetail = 0;          // lighting texels per metre on walls and floors: 0 the game's, 1 twice (LightDetail; read at startup)
 bool g_unlitOn = true;           // rooms with every lamp off: Apex's light instead of the game's blue glow (UnlitRooms)
-float g_unlitLight = 0.35f;      // how much of the game's unlit-room light stays
+float g_unlitLight = 0.20f;      // how much of the game's unlit-room light stays
 float g_unlitBlue = 0.0f;        // how much of its blue tint (0 = grey)
 bool g_objPixel = true;
 bool g_objPixelLights = true;          // outdoor rig objects: world lamps per pixel (seamless modular pieces)
@@ -1950,7 +1950,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             S3SS_TR("Forca da luz das lampadas nos telhados.", "How strongly lamps light roofs."));
         RegisterBoolSetting(&g_unlitOn, "comodosEscurosSemLuz", true,
             "Rooms with every lamp off keep only a little light (set below) instead of the game's blue glow.");
-        RegisterFloatSetting(&g_unlitLight, "luzQueSobraNosComodos", SettingWidget::Slider, 0.35f, 0.1f, 0.8f,
+        RegisterFloatSetting(&g_unlitLight, "luzQueSobraNosComodos", SettingWidget::Slider, 0.20f, 0.1f, 0.8f,
             "How much of the game's light stays in a room with every lamp off, on walls, floors and furniture.");
         RegisterFloatSetting(&g_unlitBlue, "azulNosComodos", SettingWidget::Slider, 0.0f, 0.0f, 1.0f,
             "How blue the light left in rooms is, on walls, floors and furniture (1 = the game's blue, 0 = grey).");
@@ -2483,7 +2483,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_neutralProbeStrength = 1.0f;
         g_lightDetail = 0;
         g_unlitOn = true;
-        g_unlitLight = 0.35f;
+        g_unlitLight = 0.20f;
         g_unlitBlue = 0.0f;
         g_smoothMaps = true;
         g_smoothMapsGpu = true;
@@ -2826,7 +2826,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                 ApexUi::GroupLabel("BACKGROUND LIGHT");
                 bool changed = ApexUi::SwitchRow("Adjust the background light", &g_unlitOn, "Set the ambient glow indoors, with lamps on or off", true);
                 if (g_unlitOn) {
-                    changed |= ApexUi::SliderPercent("Brightness##Unlit", &g_unlitLight, 0.1f, 0.8f, "How bright that background light is, on walls and furniture", 0.35f);
+                    changed |= ApexUi::SliderPercent("Brightness##Unlit", &g_unlitLight, 0.1f, 0.8f, "How bright that background light is, on walls and furniture", 0.20f);
                     changed |= ApexUi::SliderPercent("Blue tint##Unlit", &g_unlitBlue, 0.0f, 1.0f, "0% is neutral grey, 100% is the game's blue, on walls and furniture", 0.0f);
                 }
                 return changed;
@@ -3121,7 +3121,7 @@ APEX_REGISTER_FEATURE(NightTerrainRelightPatch, {.displayName = "Night Lights",
                                                             "snow around them with smooth, warm light and no hard edges at lot borders. Part of "
                                                             APEX_PRODUCT_NAME ". Credits: @loinyx",
                                              .category = "Graphics",
-                                             .experimental = true,
+                                             .experimental = false,
                                              .enabledByDefault = true,
                                              .supportedVersions = VERSION_STEAM,
                                              .technicalDetails = NightRemakeDetails(),

@@ -18,6 +18,8 @@ const I18n::Pair kPairs[] = {
     {"Presets set every Performance option, including the lamp lighting mode; Default is now Balanced", "プリセットがランプの照明モードを含むパフォーマンスのすべてのオプションを設定します。Default は「バランス」になりました"},
     {"Rooms lit through arches and stairwells are balanced, never darker than an empty room", "アーチや階段から光が入る部屋はバランスがとれ、空の部屋より暗くなりません"},
     {"Turning all effects off keeps Room to save on", "すべてのエフェクトをオフにしてもセーブ用の余裕はオンのままです"},
+    {"Rooms at Night: the background light is 20% by default and in every preset", "夜の部屋：背景の光が既定でもすべてのプリセットでも 20% になりました"},
+    {"Options on by default for several versions no longer show an Experimental badge", "何バージョンも前から既定でオンのオプションに「実験的」バッジが表示されなくなりました"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "アンビエントオクルージョンと深度ぼかしが、停止中の理由を表示します"},
     {"Light keeps passing through arches after Night Lights is turned off and on", "ナイトライトをオフにしてオンに戻しても、アーチから光が通ります"},
     {"Rooms that take almost no light stay dark, without a doubled glow", "ほとんど光が届かない部屋は、2倍の明るさにならず暗いままです"},
