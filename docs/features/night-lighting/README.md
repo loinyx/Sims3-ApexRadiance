@@ -384,7 +384,7 @@ Native solar and sky constants are never raised.
   (ExteriorLightData, read by 88 techniques including Sims). Its only reader, `FUN_00c11ad0`, loads it with
   `mov ecx,011D0918h; call <mov eax,ecx; ret>; movss xmm0,[eax]` at 0x00C11B01. Apex points that call (0x00C11B06) at
   its own getter, which returns the game's value x `lerp(1, luar, night level)`; the variable itself is never written.
-- **Moon height** (2.16, in development): the game's light direction (`0x00C14F2E..0x00C150F5`, every frame) is the sun's
+- **Moon height** (2.15.1): the game's light direction (`0x00C14F2E..0x00C150F5`, every frame) is the sun's
   with its height scaled by `[obj+0x9B4]` and held at a minimum `[obj+0x9B8]` (`y = max(y k, min)`, then normalised); at
   night the sun is below the horizon, so the moon (the same direction, x mirrored) stands at `atan(min / horizontal part)`:
   0.7 degrees after dusk (min 0.0122), a few degrees later. At that height every bump of a road's normal map and every road

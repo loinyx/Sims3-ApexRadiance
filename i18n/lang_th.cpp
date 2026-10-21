@@ -22,6 +22,7 @@ const I18n::Pair kPairs[] = {
     {"A lot placed in Edit Town no longer stays on Processing", "ล็อตที่วางในโหมดแก้ไขเมืองไม่ค้างที่กำลังประมวลผลอีกต่อไป"},
     {"Area lights of a lot light the ground past the lot's border", "ไฟพื้นที่ของล็อตส่องพื้นดินเลยขอบล็อตออกไป"},
     {"Lamps hidden behind objects no longer reflect on water", "โคมไฟที่ถูกวัตถุบังไม่สะท้อนบนน้ำอีกต่อไป"},
+    {"The moon lights the town from higher up: no more dark stripes on roads at night", "ดวงจันทร์ส่องเมืองจากที่สูงขึ้น: ไม่มีแถบมืดบนถนนตอนกลางคืนอีกต่อไป"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "แสงโคมไฟแบบทันทีทำงานน้อยลงขณะที่ล็อตถูกคำนวณแสงซ้ำไปมา"},
     {"Options on by default for several versions no longer show an Experimental badge", "ตัวเลือกที่เปิดเป็นค่าเริ่มต้นมาหลายเวอร์ชันจะไม่แสดงป้ายทดลองอีกต่อไป"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "Ambient Occlusion และเบลอระยะลึกแสดงเหตุผลที่หยุดชั่วคราว"},

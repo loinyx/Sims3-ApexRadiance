@@ -22,6 +22,7 @@ const I18n::Pair kPairs[] = {
     {"A lot placed in Edit Town no longer stays on Processing", "Een kavel geplaatst in Stad bewerken blijft niet meer op Verwerken staan"},
     {"Area lights of a lot light the ground past the lot's border", "Vlakverlichting van een kavel verlicht de grond voorbij de kavelrand"},
     {"Lamps hidden behind objects no longer reflect on water", "Lampen achter objecten weerspiegelen niet meer in het water"},
+    {"The moon lights the town from higher up: no more dark stripes on roads at night", "De maan verlicht de stad van hoger: geen donkere strepen meer op de wegen 's nachts"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Direct lamplicht doet minder werk terwijl een kavel steeds opnieuw wordt verlicht"},
     {"Options on by default for several versions no longer show an Experimental badge", "Opties die al meerdere versies standaard aan staan, tonen geen Experimenteel-label meer"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "Ambient Occlusion en Dieptevervaging laten zien waarom ze gepauzeerd zijn"},

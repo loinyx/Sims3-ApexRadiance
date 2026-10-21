@@ -22,6 +22,7 @@ const I18n::Pair kPairs[] = {
     {"A lot placed in Edit Town no longer stays on Processing", "Un lotto posizionato in Modifica città non resta più su Elaborazione"},
     {"Area lights of a lot light the ground past the lot's border", "Le luci d'area di un lotto illuminano il terreno oltre il bordo del lotto"},
     {"Lamps hidden behind objects no longer reflect on water", "Le lampade nascoste dietro gli oggetti non si riflettono più sull'acqua"},
+    {"The moon lights the town from higher up: no more dark stripes on roads at night", "La luna illumina la città dall'alto: niente più strisce scure sulle strade di notte"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "La luce Istantanea delle lampade lavora meno mentre un lotto viene illuminato di continuo"},
     {"Options on by default for several versions no longer show an Experimental badge", "Le opzioni attive per impostazione predefinita da diverse versioni non mostrano più l'etichetta Sperimentale"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "L'occlusione ambientale e la sfocatura di profondità indicano perché sono in pausa"},

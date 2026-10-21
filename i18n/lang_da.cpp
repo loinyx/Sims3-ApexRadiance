@@ -22,6 +22,7 @@ const I18n::Pair kPairs[] = {
     {"A lot placed in Edit Town no longer stays on Processing", "En grund placeret i Rediger by bliver ikke længere hængende på Behandler"},
     {"Area lights of a lot light the ground past the lot's border", "En grunds områdelys oplyser jorden ud over grundens kant"},
     {"Lamps hidden behind objects no longer reflect on water", "Lamper skjult bag genstande spejler sig ikke længere i vandet"},
+    {"The moon lights the town from higher up: no more dark stripes on roads at night", "Månen lyser byen op højere oppefra: ingen mørke striber på vejene om natten"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Øjeblikkeligt lampelys arbejder mindre, mens en grund belyses igen og igen"},
     {"Options on by default for several versions no longer show an Experimental badge", "Indstillinger, der har været slået til som standard i flere versioner, viser ikke længere mærket Eksperimentel"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "Ambient Occlusion og Dybdesløring viser, hvorfor de er sat på pause"},

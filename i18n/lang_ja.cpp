@@ -22,6 +22,7 @@ const I18n::Pair kPairs[] = {
     {"A lot placed in Edit Town no longer stays on Processing", "街の編集で配置した区画が「処理中」のまま止まらなくなりました"},
     {"Area lights of a lot light the ground past the lot's border", "区画のエリアライトが区画の境界の外の地面も照らします"},
     {"Lamps hidden behind objects no longer reflect on water", "物の陰に隠れたランプが水面に映らなくなりました"},
+    {"The moon lights the town from higher up: no more dark stripes on roads at night", "月がより高い位置から街を照らし、夜の道路に暗い縞が出なくなりました"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "区画の照明が繰り返し再計算される間、インスタントのランプ照明の負荷が減りました"},
     {"Options on by default for several versions no longer show an Experimental badge", "何バージョンも前から既定でオンのオプションに「実験的」バッジが表示されなくなりました"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "アンビエントオクルージョンと深度ぼかしが、停止中の理由を表示します"},

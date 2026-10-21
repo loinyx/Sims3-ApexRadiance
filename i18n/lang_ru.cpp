@@ -22,6 +22,7 @@ const I18n::Pair kPairs[] = {
     {"A lot placed in Edit Town no longer stays on Processing", "Участок, размещённый в режиме «Редактировать город», больше не зависает на «Обработке»"},
     {"Area lights of a lot light the ground past the lot's border", "Площадные светильники участка освещают землю за его границей"},
     {"Lamps hidden behind objects no longer reflect on water", "Лампы, скрытые за объектами, больше не отражаются в воде"},
+    {"The moon lights the town from higher up: no more dark stripes on roads at night", "Луна освещает город сверху: ночью на дорогах больше нет тёмных полос"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Мгновенный свет ламп работает меньше, пока участок снова и снова перерасчитывает свет"},
     {"Options on by default for several versions no longer show an Experimental badge", "Параметры, включённые по умолчанию уже несколько версий, больше не помечены как «Экспериментально»"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "Фоновое затенение и размытие глубины показывают, почему они приостановлены"},

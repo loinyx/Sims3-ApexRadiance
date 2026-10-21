@@ -22,6 +22,7 @@ const I18n::Pair kPairs[] = {
     {"A lot placed in Edit Town no longer stays on Processing", "A Város szerkesztésében lerakott telek már nem marad a Feldolgozás képernyőn"},
     {"Area lights of a lot light the ground past the lot's border", "Egy telek felületi fényei a telek határán túl is megvilágítják a talajt"},
     {"Lamps hidden behind objects no longer reflect on water", "A tárgyak mögé rejtett lámpák már nem tükröződnek a vízen"},
+    {"The moon lights the town from higher up: no more dark stripes on roads at night", "A hold magasabbról világítja meg a várost: éjjel már nincsenek sötét csíkok az utakon"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Az Azonnali lámpafény kevesebbet dolgozik, amíg egy telek újra és újra megvilágítódik"},
     {"Options on by default for several versions no longer show an Experimental badge", "A több verzió óta alapból bekapcsolt opciók már nem viselik a Kísérleti jelzést"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "A Környezeti takarás és a Mélységi elmosás megmutatja, miért szünetel"},

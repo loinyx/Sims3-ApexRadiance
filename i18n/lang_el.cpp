@@ -22,6 +22,7 @@ const I18n::Pair kPairs[] = {
     {"A lot placed in Edit Town no longer stays on Processing", "Ένα οικόπεδο που τοποθετείται στην Επεξεργασία Πόλης δεν μένει πια στην Επεξεργασία"},
     {"Area lights of a lot light the ground past the lot's border", "Τα φώτα επιφάνειας ενός οικοπέδου φωτίζουν το έδαφος πέρα από το όριό του"},
     {"Lamps hidden behind objects no longer reflect on water", "Οι λάμπες πίσω από αντικείμενα δεν καθρεφτίζονται πια στο νερό"},
+    {"The moon lights the town from higher up: no more dark stripes on roads at night", "Το φεγγάρι φωτίζει την πόλη από ψηλότερα: τέλος οι σκούρες λωρίδες στους δρόμους τη νύχτα"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Το Άμεσο φως λαμπών κάνει λιγότερη δουλειά όσο ένα οικόπεδο φωτίζεται ξανά και ξανά"},
     {"Options on by default for several versions no longer show an Experimental badge", "Οι επιλογές που είναι ενεργές από προεπιλογή εδώ και αρκετές εκδόσεις δεν δείχνουν πια την ένδειξη Πειραματικό"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "Το Ambient Occlusion και η Θόλωση Βάθους δείχνουν γιατί είναι σε παύση"},
