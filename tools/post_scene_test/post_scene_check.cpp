@@ -51,6 +51,15 @@ int main() {
     IDirect3DDevice9* dev=nullptr;
     if (FAILED(d3d->CreateDevice(D3DADAPTER_DEFAULT,D3DDEVTYPE_HAL,window,D3DCREATE_SOFTWARE_VERTEXPROCESSING,&pp,&dev))) return 2;
     dev->GetDepthStencilSurface(&expectedDepth);
+    float projection[4][4]={{1,0,0,0},{0,1,0,0},{0,0,1,-0.25f},{0,0,1,0}};
+    for (UINT base : kNearBlocks)
+        Check(SUCCEEDED(dev->SetVertexShaderConstantF(base,&projection[0][0],4)),"camera fixture constants");
+    g_nearVotes.clear();g_vpVotes.clear();g_nearDraws=0;
+    VoteCamera(dev);
+    Check(g_vpValid && g_near==0.25f && std::memcmp(g_vp,projection,sizeof projection)==0,"camera projection preserved");
+    Check(g_nearVotes.size()==1 && g_nearVotes[0].second==6 && g_vpVotes[0].count==1,"camera block still participates once in each vote");
+    VoteCamera(dev);
+    Check(g_nearVotes[0].second==12 && g_vpVotes[0].count==2,"repeated camera votes preserve weighting");
     IDirect3DSurface9* other=nullptr;
     Check(SUCCEEDED(dev->CreateDepthStencilSurface(512,512,D3DFMT_D16,D3DMULTISAMPLE_NONE,0,TRUE,&other,nullptr)),"alternate depth surface");
     g_effects={{10,Ao},{20,Aa},{30,Blur},{40,Colour}};

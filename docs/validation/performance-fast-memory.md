@@ -31,3 +31,6 @@ None offline.
 ## Open checks
 
 - The measured effect on hitches.
+- 2.14.0: the allocator trim and top-down large blocks in game: the `[AllocatorTuning]` log lines, the megabytes
+  decommitted per trim, the largest free block over a long session, and whether a crash recurs in the game's audio
+  decoder (if it does, test with both off in a development build).

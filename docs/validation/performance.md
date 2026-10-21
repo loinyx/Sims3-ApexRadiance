@@ -3,8 +3,8 @@
 Group-level checks for the Performance switches. Each switch has its own validation page (linked below); the group is
 described in [features/performance/README.md](../features/performance/README.md). The group must:
 
-- Load all twelve switches on when no saved choice exists, and keep an explicit saved `enabled = false`.
-- Toggle all twelve from Overview > Performance, enabling *Faster game file lookups* before *Remember missing files* and
+- Load all fifteen switches on when no saved choice exists, and keep an explicit saved `enabled = false`.
+- Toggle all fifteen from Overview > Performance, enabling *Faster game file lookups* before *Remember missing files* and
   disabling in the reverse order.
 - Load a configuration that still contains `[ui] performance_mode`, ignore the key and drop it at the next save.
 - Resolve every performance address on Steam 1.67.2 and refuse cleanly elsewhere.
@@ -29,9 +29,9 @@ Per-switch harnesses (`tools/dxt_test`, `tools/refpack_test`, `tools/cas_sort_te
 
 ## In-game test plan
 
-1. Delete the twelve `[patches.*]` tables of the switches, start the game. **Expected:** all twelve rows on.
+1. Delete the fifteen `[patches.*]` tables of the switches, start the game. **Expected:** all fifteen rows on.
 2. Set one switch off, restart. **Expected:** it stays off; Overview > Performance shows off.
-3. Overview > Performance off, then on. **Expected:** all twelve follow; no error notes under the rows.
+3. Overview > Performance off, then on. **Expected:** all fifteen follow; no error notes under the rows.
 4. Start with a 2.5.6 configuration that has `[ui] performance_mode`. **Expected:** loads; the key is gone after the
    next save.
 5. Turn the Frame Profiler on and off with all switches on (either order). **Expected:** every switch keeps working; the

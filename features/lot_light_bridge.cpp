@@ -30,6 +30,16 @@
 #include "wall_lamp_table.h"
 #include "floor_atlas_table.h"
 #include "shader_patches.h"
+#include "mesh_occlusion.h"
+#include "mesh_budget_policy.h"
+#include "dev_switches.h"
+#include "foliage_canopy.h"
+#include "foliage_vertex_lamps.h"
+#include "lot_lighting_motion.h"
+#include "hook_guard.h"
+#include <tuple>
+#include <array>
+#include <wrl/client.h>
 #include "lightmap_smooth.h"
 #include "terrain_chunk_relight.h"
 #include "room_map_padding.h"
@@ -45,6 +55,7 @@
 #include "atrium_hold.h"
 #include "recorder.h"
 #include "depth_share.h"
+#include "render_callbacks.h"
 #include "d3d9_extra_hooks.h"
 #include "d3d9_hooks.h"
 #include "shader_cache.h"
@@ -56,6 +67,7 @@
 #include "apex_paths.h"
 #include "apex_log.h"
 #include "apex_version.h"
+#include "apex_memory.h"
 #include <windows.h>
 #include <d3dcommon.h>
 #include <algorithm>
@@ -662,6 +674,7 @@ struct ExtSrc { // one lot's shade over the world grass, for a chunk build (shar
     std::shared_ptr<const ExtData> v;
     float x0 = 0, z0 = 0, x1 = 0, z1 = 0;
 };
+void CrownsIn(float x0, float z0, float x1, float z1, std::vector<Canopy::Ellipsoid>& out); // canopy_ground_shadow (below)
 struct ShadeTask {
     bool chunk = false;
     uint32_t epoch = 0;
@@ -672,6 +685,7 @@ struct ShadeTask {
     std::vector<GroundShadow::Lamp> lamps;
     std::vector<GroundShadow::Wall> walls;
     std::vector<WallOpenings::Patch> patches;
+    std::vector<Canopy::Ellipsoid> crowns; // tree and bush crowns (canopy_ground_shadow)
     // a chunk
     std::pair<int, int> chunkKey{};
     std::vector<ExtSrc> srcs;
@@ -823,7 +837,7 @@ private:
                 } else {
                     r.lot = t.lot, r.key = t.key, r.w = t.w, r.h = t.h, r.ox = t.ox, r.oz = t.oz, r.grid = t.grid;
                     GroundShadow::ShadeJob job;
-                    job.Init(t.grid, std::move(t.lamps), std::move(t.walls), std::move(t.patches));
+                    job.Init(t.grid, std::move(t.lamps), std::move(t.walls), std::move(t.patches), std::move(t.crowns));
                     job.Step([this] { return !stop_; });
                     r.res = job.Result();
                     r.den = job.StampWeight();
@@ -1052,6 +1066,7 @@ struct FenceGroup {
     DWORD read = 0, seen = 0;
 };
 std::unordered_map<uint64_t, FenceGroup> g_fenceGroups;
+std::unordered_map<uint64_t, uint8_t> g_fenceBusy; // draw_reads_nowait: busy answers per fence group since its last read
 // mesh boxes by buffer, range and layout (a buffer address can be reused: emptied with the lots and on a world change)
 std::unordered_map<uint64_t, std::array<float, 7>> g_meshBoxes;
 std::atomic<long> g_fenceGroupReads{0}, g_fenceWalls{0};
@@ -1169,6 +1184,248 @@ bool MeshBox(const BYTE* p, UINT count, UINT stride, const FenceLayout& L, float
         return false;
     }
 }
+// Opaque instanced structures retain their triangles, rather than becoming a filled ramp or box.
+// Collection is bounded and reuses the declaration/packing checked for instanced garden walls.
+struct SolidGroup {std::vector<MeshOcclusion::Triangle> triangles;DWORD read=0,seen=0;double priority=0;};
+std::unordered_map<uint64_t,SolidGroup> g_solidGroups;
+std::unordered_map<uint64_t,uint64_t> g_solidGeometry;
+std::unordered_map<uint64_t,DWORD> g_solidAttempts;
+std::unordered_map<IDirect3DPixelShader9*,bool> g_solidPs;
+constexpr size_t kSolidTriangleLimit=8192;
+size_t g_solidTriangles=0;
+DWORD g_solidDirty=0,g_solidPublished=0;
+uint32_t g_solidReset=0;
+unsigned g_solidReadBudget=1;
+unsigned g_solidNotes=0;
+unsigned g_solidReplaced=0,g_solidRejected=0;
+DWORD g_solidNextScan=0;
+bool g_solidScanning=false;
+bool g_solidSteadyCleared=false; // (steady_indoor_light) the set was dropped since the switch went on (PumpSolidMeshes)
+std::vector<MeshOcclusion::Triangle> g_solidLastPublished; // occlusion_relight: the last set published (PumpSolidMeshes)
+// Dev switch draw_reads_nowait: a buffer the GPU still uses is not waited for inside the draw hook; the read is retried on
+// a later scan frame, and after three busy answers it waits as before (every group is still read, so the result is the same).
+std::unordered_map<uint64_t,uint8_t> g_solidBusy;
+bool g_solidSawBusy=false;
+template<class T> struct SolidRead {
+    T* buffer;void* data=nullptr;bool noWait=false;
+    explicit SolidRead(T* b,bool nowait=false):buffer(b),noWait(nowait){}
+    bool Lock(UINT offset,UINT bytes){
+        const HRESULT hr=buffer->Lock(offset,bytes,&data,D3DLOCK_READONLY|(noWait?D3DLOCK_DONOTWAIT:0));
+        if(hr==D3DERR_WASSTILLDRAWING){data=nullptr;g_solidSawBusy=true;return false;}
+        return SUCCEEDED(hr)&&data;
+    }
+    ~SolidRead(){if(data)buffer->Unlock();}
+};
+// FNV-1a over 64-bit words (the byte-wise loop hashed up to 147 KB per group on the render thread); only a lookup key:
+// equality is still confirmed with memcmp.
+uint64_t SolidGeometryHash(const void* data,size_t bytes){
+    uint64_t h=1469598103934665603ull;const auto* p=static_cast<const BYTE*>(data);size_t i=0;
+    for(;i+8<=bytes;i+=8){uint64_t w;std::memcpy(&w,p+i,8);h=(h^w)*1099511628211ull;}
+    for(;i<bytes;++i)h=(h^p[i])*1099511628211ull;
+    return h;
+}
+UINT SolidElementBytes(BYTE type){
+    switch(type){case D3DDECLTYPE_FLOAT3:return 12;case D3DDECLTYPE_FLOAT4:return 16;
+    case D3DDECLTYPE_SHORT4:case D3DDECLTYPE_SHORT4N:case D3DDECLTYPE_FLOAT16_4:return 8;default:return 0;}
+}
+bool SolidPixelShader(){
+    if(!g_curPs)return false;
+    if(auto i=g_solidPs.find(g_curPs);i!=g_solidPs.end())return i->second;
+    bool opaque=true;UINT bytes=0;std::vector<DWORD> code;
+    if(FAILED(g_curPs->GetFunction(nullptr,&bytes))||bytes<8||bytes>65536||bytes%4)opaque=false;
+    else{code.resize(bytes/4);if(FAILED(g_curPs->GetFunction(code.data(),&bytes)))opaque=false;}
+    for(size_t at=1;opaque&&at<code.size();){
+        const auto op=code[at]&0xFFFFu;if(op==0xFFFFu)break;
+        const size_t count=op==0xFFFEu?1+((code[at]>>16)&0x7FFFu):1+((code[at]>>24)&15u);
+        if(op==0x41u||!count||at+count>code.size()){opaque=false;break;}at+=count;
+    }
+    if(g_solidPs.size()<512)g_solidPs.emplace(g_curPs,opaque);return opaque;
+}
+void NoteSolidMeshImpl(IDirect3DDevice9* dev,D3DPRIMITIVETYPE type,INT baseVertex,UINT minVertex,UINT vertices,UINT start,UINT primitives,bool instanced){
+    if(!kMemoryOptimizationsEnabled||g_inOwnCall||!g_solidReadBudget||!instanced||type!=D3DPT_TRIANGLELIST||!vertices||vertices>4096||!primitives||primitives>4096)return;
+    DWORD blend=0,alpha=0,depth=0;UINT frequency=0,step=0;
+    if(FAILED(dev->GetRenderState(D3DRS_ALPHABLENDENABLE,&blend))||FAILED(dev->GetRenderState(D3DRS_ALPHATESTENABLE,&alpha))||
+       FAILED(dev->GetRenderState(D3DRS_ZWRITEENABLE,&depth))||blend||alpha||!depth)return;
+    if(FAILED(dev->GetStreamSourceFreq(0,&frequency))||!(frequency&D3DSTREAMSOURCE_INDEXEDDATA)||
+       FAILED(dev->GetStreamSourceFreq(1,&step))||step!=(D3DSTREAMSOURCE_INSTANCEDATA|1u))return;
+    const UINT instances=frequency&0x3FFFFFFFu;if(!instances||static_cast<uint64_t>(instances)*primitives>4096)return;
+    using Microsoft::WRL::ComPtr;
+    ComPtr<IDirect3DVertexBuffer9> vb,instanceBuffer;ComPtr<IDirect3DIndexBuffer9> indices;
+    UINT offset=0,stride=0,instanceOffset=0,instanceStride=0;
+    if(FAILED(dev->GetStreamSource(0,vb.GetAddressOf(),&offset,&stride))||!vb||
+       FAILED(dev->GetStreamSource(1,instanceBuffer.GetAddressOf(),&instanceOffset,&instanceStride))||!instanceBuffer||
+       FAILED(dev->GetIndices(indices.GetAddressOf()))||!indices)return;
+    uint64_t key=1469598103934665603ull;
+    for(uint64_t v:{static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb.Get())),static_cast<uint64_t>(reinterpret_cast<uintptr_t>(instanceBuffer.Get())),
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(indices.Get())),static_cast<uint64_t>(offset),static_cast<uint64_t>(instanceOffset),
+        static_cast<uint64_t>(static_cast<uint32_t>(baseVertex)),static_cast<uint64_t>(minVertex),static_cast<uint64_t>(vertices),static_cast<uint64_t>(start),static_cast<uint64_t>(primitives),
+        static_cast<uint64_t>(stride),static_cast<uint64_t>(instanceStride),static_cast<uint64_t>(instances),static_cast<uint64_t>(reinterpret_cast<uintptr_t>(g_curPs))})key=(key^v)*1099511628211ull;
+    const DWORD now=GetTickCount();
+    auto found=g_solidGroups.find(key);
+    if(found!=g_solidGroups.end()){found->second.seen=now;if(now-found->second.read<5000)return;}
+    // Rejected meshes also yield the next frame's read slot to later draws.
+    if(auto attempt=g_solidAttempts.find(key);attempt!=g_solidAttempts.end()&&now-attempt->second<5000)return;
+    if(!g_solidReadBudget)return;--g_solidReadBudget;
+    if(g_solidAttempts.size()>=512&&!g_solidAttempts.contains(key)){
+        auto oldest=g_solidAttempts.begin();
+        for(auto it=g_solidAttempts.begin();it!=g_solidAttempts.end();++it)if(now-it->second>now-oldest->second)oldest=it;
+        g_solidAttempts.erase(oldest);
+    }
+    g_solidAttempts[key]=now;
+    if(!SolidPixelShader())return;
+    const auto layout=ReadFenceLayout(dev);
+    const UINT positionBytes=SolidElementBytes(layout.posType),placeBytes=SolidElementBytes(layout.placeType),turnBytes=SolidElementBytes(layout.turnType);
+    if(!layout.ok||!positionBytes||!placeBytes||!turnBytes||!stride||stride>256||!instanceStride||instanceStride>256||
+       layout.posOff+positionBytes>stride||layout.placeOff+placeBytes>instanceStride||layout.turnOff+turnBytes>instanceStride)return;
+    D3DVERTEXBUFFER_DESC vd{},id{};D3DINDEXBUFFER_DESC indexDesc{};
+    if(FAILED(vb->GetDesc(&vd))||FAILED(instanceBuffer->GetDesc(&id))||FAILED(indices->GetDesc(&indexDesc)))return;
+    const UINT indexBytes=indexDesc.Format==D3DFMT_INDEX16?2:indexDesc.Format==D3DFMT_INDEX32?4:0;
+    const int64_t first=static_cast<int64_t>(baseVertex)+minVertex;
+    if(!indexBytes||first<0)return;
+    const uint64_t vertexAt=offset+static_cast<uint64_t>(first)*stride,vertexBytes=static_cast<uint64_t>(vertices)*stride;
+    const uint64_t indexAt=static_cast<uint64_t>(start)*indexBytes,indexSize=static_cast<uint64_t>(primitives)*3*indexBytes;
+    const uint64_t instanceBytes=static_cast<uint64_t>(instances)*instanceStride;
+    if(vertexAt+vertexBytes>vd.Size||indexAt+indexSize>indexDesc.Size||instanceOffset+instanceBytes>id.Size)return;
+    const bool nowait=DevSwitches::DrawReadsNoWait();
+    // A full busy table (groups no longer drawn keep their entries until a reset) waits as before: a group whose count can
+    // no longer grow would otherwise never be read
+    const bool busyFull=g_solidBusy.size()>=1024&&!g_solidBusy.contains(key);
+    const bool tryNoWait=nowait&&!busyFull&&!(g_solidBusy.contains(key)&&g_solidBusy[key]>=3);
+    g_solidSawBusy=false;
+    const auto busy=[&]{
+        if(!g_solidSawBusy)return;
+        g_solidAttempts.erase(key); // retried on the next scan frame, not in 5 s
+        ++g_solidBusy[key]; // only reached with tryNoWait, so the table is below 1024 or already holds the key
+    };
+    SolidRead vr(vb.Get(),tryNoWait);if(!vr.Lock(static_cast<UINT>(vertexAt),static_cast<UINT>(vertexBytes))){busy();return;}
+    float lo[3],hi[3];
+    if(!MeshBox(static_cast<const BYTE*>(vr.data),vertices,stride,layout,lo,hi))return;
+    SolidRead ir(indices.Get(),tryNoWait);SolidRead sr(instanceBuffer.Get(),tryNoWait);
+    if(!ir.Lock(static_cast<UINT>(indexAt),static_cast<UINT>(indexSize))||!sr.Lock(instanceOffset,static_cast<UINT>(instanceBytes))){busy();return;}
+    if(nowait)g_solidBusy.erase(key);
+    std::vector<MeshOcclusion::Triangle> triangles;triangles.reserve(static_cast<size_t>(instances)*primitives);
+    std::vector<MeshOcclusion::Vec> points(vertices);
+    // draw_reads_nowait: each vertex is read once, not once per instance (ReadElement is instance-independent; Decode
+    // gets the very same inputs, so the triangles are bit-identical)
+    std::vector<std::array<float,4>> positions;
+    if(nowait){
+        positions.resize(vertices);
+        for(UINT i=0;i<vertices;++i)if(!ReadElement(static_cast<const BYTE*>(vr.data)+i*stride+layout.posOff,layout.posType,positions[i].data()))return;
+    }
+    float placementLow=1e30f,placementHigh=-1e30f;
+    for(UINT instance=0;instance<instances;++instance){
+        const auto* instanceData=static_cast<const BYTE*>(sr.data)+instance*instanceStride;float place[4],turn[4];
+        if(!ReadElement(instanceData+layout.placeOff,layout.placeType,place)||!ReadElement(instanceData+layout.turnOff,layout.turnType,turn))return;
+        placementLow=std::min(placementLow,place[1]);placementHigh=std::max(placementHigh,place[1]);
+        if(nowait){
+            for(UINT i=0;i<vertices;++i)if(!MeshOcclusion::Decode(positions[i].data(),place,turn,points[i]))return;
+        }else for(UINT i=0;i<vertices;++i){float p[4];
+            if(!ReadElement(static_cast<const BYTE*>(vr.data)+i*stride+layout.posOff,layout.posType,p)||!MeshOcclusion::Decode(p,place,turn,points[i]))return;
+        }
+        for(UINT i=0;i<primitives;++i){UINT index[3];
+            for(UINT k=0;k<3;++k){const UINT raw=indexBytes==2?static_cast<const uint16_t*>(ir.data)[3*i+k]:static_cast<const uint32_t*>(ir.data)[3*i+k];
+                if(raw<minVertex||raw-minVertex>=vertices)return;index[k]=raw-minVertex;}
+            triangles.push_back({points[index[0]],points[index[1]],points[index[2]]});
+        }
+    }
+    uint64_t geometry=1469598103934665603ull;
+    if(nowait)geometry=SolidGeometryHash(triangles.data(),triangles.size()*sizeof(triangles[0]));
+    else{const auto* bytes=reinterpret_cast<const BYTE*>(triangles.data());
+        for(size_t i=0;i<triangles.size()*sizeof(triangles[0]);++i)geometry=(geometry^bytes[i])*1099511628211ull;}
+    if(auto same=g_solidGeometry.find(geometry);same!=g_solidGeometry.end()&&same->second!=key){
+        auto prior=g_solidGroups.find(same->second);
+        if(prior!=g_solidGroups.end()&&prior->second.triangles.size()==triangles.size()&&
+           !std::memcmp(prior->second.triangles.data(),triangles.data(),triangles.size()*sizeof(triangles[0]))){
+            prior->second.seen=now;
+            if(found!=g_solidGroups.end()){g_solidTriangles-=found->second.triangles.size();g_solidGroups.erase(found);g_solidDirty=now|1;std::erase_if(g_solidGeometry,[key](const auto& p){return p.second==key;});}
+            return;
+        }
+    }
+    const bool firstGroup=found==g_solidGroups.end();
+    const size_t oldSize=firstGroup?0:found->second.triangles.size();
+    const double priority=MeshBudget::Priority(triangles,placementHigh-placementLow);
+    std::array<MeshBudget::Entry,128> entries{};size_t entryCount=0;
+    for(const auto& [existing,group]:g_solidGroups)if(existing!=key){
+        if(entryCount==entries.size())return;
+        entries[entryCount++]={existing,group.triangles.size(),group.priority};
+    }
+    std::vector<uint64_t> victims;
+    if(!MeshBudget::Plan(std::span(entries.data(),entryCount),g_solidTriangles-oldSize,triangles.size(),priority,kSolidTriangleLimit,128,victims)){
+        if(g_solidRejected++<20)LOG_INFO(std::format("[MeshOcclusion] Budget deferred {} triangles, {} instances; coverage priority {:.6f}, placement rise {:.2f}; {} of {} triangles retained",
+            triangles.size(),instances,priority,placementHigh-placementLow,g_solidTriangles,kSolidTriangleLimit));
+        if(!firstGroup){g_solidTriangles-=oldSize;g_solidGroups.erase(found);g_solidDirty=now|1;std::erase_if(g_solidGeometry,[key](const auto& p){return p.second==key;});}
+        return;
+    }
+    for(uint64_t victim:victims){
+        const auto old=g_solidGroups.find(victim);if(old==g_solidGroups.end())continue;
+        g_solidTriangles-=old->second.triangles.size();g_solidGroups.erase(old);
+        std::erase_if(g_solidGeometry,[victim](const auto& p){return p.second==victim;});g_solidDirty=now|1;
+    }
+    if(!victims.empty()&&g_solidReplaced++<20)LOG_INFO(std::format("[MeshOcclusion] Budget replaced {} lower-coverage groups for {} triangles, {} instances; priority {:.6f}, placement rise {:.2f}",
+        victims.size(),triangles.size(),instances,priority,placementHigh-placementLow));
+    auto& group=g_solidGroups[key];group.read=group.seen=now;
+    group.priority=priority;
+    if(triangles.size()==group.triangles.size()&&(triangles.empty()||!std::memcmp(triangles.data(),group.triangles.data(),triangles.size()*sizeof(triangles[0]))))return;
+    g_solidTriangles=g_solidTriangles-group.triangles.size()+triangles.size();group.triangles=std::move(triangles);g_solidDirty=now|1;
+    std::erase_if(g_solidGeometry,[key](const auto& p){return p.second==key;});g_solidGeometry[geometry]=key;
+    if(firstGroup&&g_solidNotes<20&&!group.triangles.empty()){
+        ++g_solidNotes;const auto p=group.triangles.front().a;
+        LOG_INFO(std::format("[MeshOcclusion] Accepted {} triangles, {} instances near ({:.2f}, {:.2f}, {:.2f}); local horizontal spans {:.3f}/{:.3f}, vertex usage {:#x}, instance stride {}",
+            group.triangles.size(),instances,p.x,p.y,p.z,hi[0]-lo[0],hi[2]-lo[2],vd.Usage,instanceStride));
+    }
+}
+void NoteSolidMesh(IDirect3DDevice9* dev,D3DPRIMITIVETYPE type,INT base,UINT min,UINT vertices,UINT start,UINT primitives,bool instanced){
+    try{NoteSolidMeshImpl(dev,type,base,min,vertices,start,primitives,instanced);}catch(...){/* A failed optional read keeps the existing floor/wall tests. */}
+}
+void PumpSolidMeshes(){
+    if(!kMemoryOptimizationsEnabled)return;
+    const DWORD now=GetTickCount();
+    const auto reset=MeshOcclusion::reset.load(std::memory_order_acquire);
+    if(reset!=g_solidReset){g_solidGroups.clear();g_solidGeometry.clear();g_solidAttempts.clear();g_solidBusy.clear();g_solidPs.clear();g_solidTriangles=0;g_solidDirty=0;g_solidReset=reset;g_solidNextScan=0;g_solidScanning=false;g_solidReplaced=g_solidRejected=0;}
+    // (steady_indoor_light) No indoor pass reads the mesh set (MeshOcclusion::Blocked) and no publish relights: nothing is
+    // read in the draw hooks (budget 0: NoteSolidMeshImpl returns at once) and nothing is published. On the switch the set is
+    // dropped once (the reset above clears the groups on the next pump); switched off again, discovery starts over.
+    if(DevSwitches::SteadyIndoorLight()){
+        g_solidReadBudget=0;g_solidScanning=false;
+        if(!g_solidSteadyCleared){
+            MeshOcclusion::Reset();
+            g_solidLastPublished.clear();g_solidLastPublished.shrink_to_fit();
+            g_solidSteadyCleared=true;
+        }
+        return;
+    }
+    g_solidSteadyCleared=false;
+    // Once every visible group is cached, discovery need not query device state on every frame.
+    if(g_solidScanning)g_solidNextScan=now+(g_solidReadBudget==1?100:25);
+    g_solidReadBudget=!g_solidNextScan||static_cast<int32_t>(now-g_solidNextScan)>=0?1:0;
+    g_solidScanning=g_solidReadBudget!=0;
+    bool retired=false;
+    for(auto it=g_solidGroups.begin();it!=g_solidGroups.end();)if(now-it->second.seen>300000){g_solidTriangles-=it->second.triangles.size();it=g_solidGroups.erase(it);g_solidDirty=now|1;retired=true;}else ++it;
+    if(retired)std::erase_if(g_solidGeometry,[](const auto& p){return !g_solidGroups.contains(p.second);});
+    if(!g_solidDirty||now-g_solidDirty<500||now-g_solidPublished<2000)return;
+    try{
+        std::vector<MeshOcclusion::Triangle> triangles;triangles.reserve(g_solidTriangles);
+        if(DevSwitches::OcclusionRelight()){
+            // occlusion_relight: groups in key order, so the same set always gives the same array; an unchanged set is not
+            // published again (a publish bumps the occlusion generation, which relights every lot's indoor light)
+            std::vector<uint64_t> keys;keys.reserve(g_solidGroups.size());
+            for(const auto& [key,group]:g_solidGroups){(void)group;keys.push_back(key);}
+            std::sort(keys.begin(),keys.end());
+            for(uint64_t key:keys){const auto& group=g_solidGroups[key];triangles.insert(triangles.end(),group.triangles.begin(),group.triangles.end());}
+            static uint32_t s_lastReset=0;
+            if(s_lastReset==g_solidReset&&triangles.size()==g_solidLastPublished.size()&&
+               (triangles.empty()||!std::memcmp(triangles.data(),g_solidLastPublished.data(),triangles.size()*sizeof(triangles[0])))){
+                g_solidPublished=now;g_solidDirty=0;
+                static unsigned s_skips=0;
+                if(s_skips++<20)LOG_INFO(std::format("[MeshOcclusion] Unchanged set of {} triangles from {} groups not published again (no relight)",triangles.size(),g_solidGroups.size()));
+                return;
+            }
+            g_solidLastPublished=triangles;s_lastReset=g_solidReset;
+        }else for(const auto& [key,group]:g_solidGroups){(void)key;triangles.insert(triangles.end(),group.triangles.begin(),group.triangles.end());}
+        MeshOcclusion::Publish(std::move(triangles));g_solidPublished=now;g_solidDirty=0;
+        LOG_INFO(std::format("[MeshOcclusion] Published {} triangles from {} opaque instanced groups; open gaps retain no triangles",g_solidTriangles,g_solidGroups.size()));
+    }catch(...){g_solidPublished=now;}
+}
 // POD only (SEH): one wall per piece of the group
 bool FencePieceWalls(const BYTE* p, UINT count, UINT stride, const FenceLayout& L, const float lo[3], const float hi[3], FenceGroup& g) {
     __try {
@@ -1225,6 +1482,23 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
     FenceGroup& g = g_fenceGroups[key];
     g.seen = now ? now : 1;
     if (!g.read || now - g.read > 60000) {
+        // draw_reads_nowait: the 60 s refresh of a group already read does not wait for the GPU; while its instance buffer is
+        // busy the walls read last time stay in use and the next draw tries again (three busy answers: it waits, as before)
+        if (DevSwitches::DrawReadsNoWait() && g.read && !g.walls.empty() && stride1 >= 12 && stride1 <= 256 && g_fenceBusy.size() < 4096) {
+            uint8_t& busy = g_fenceBusy[key];
+            if (busy < 3) {
+                void* probe = nullptr;
+                const HRESULT hr = vb1->Lock(off1, count * stride1, &probe, D3DLOCK_READONLY | D3DLOCK_DONOTWAIT);
+                if (probe) vb1->Unlock();
+                if (hr == D3DERR_WASSTILLDRAWING) {
+                    ++busy;
+                    vb0->Release();
+                    vb1->Release();
+                    return;
+                }
+            }
+            busy = 0;
+        }
         g.read = now ? now : 1;
         g_fenceGroupReads.fetch_add(1, std::memory_order_relaxed);
         const FenceLayout L = ReadFenceLayout(dev);
@@ -1328,6 +1602,14 @@ uint64_t ShadeKey(const LotRect& r, int w, int h) {
         }
         mix(sum);
         mix(walls.size());
+        if (DevSwitches::CanopyGroundShadow()) { // the crowns over the lot (sorted by CrownsIn: the same set gives the same key)
+            static std::vector<Canopy::Ellipsoid> crowns;
+            crowns.clear();
+            CrownsIn(x0, z0, x1, z1, crowns);
+            for (const Canopy::Ellipsoid& e : crowns)
+                for (float f : {e.cx, e.cy, e.cz, e.rx, e.ry, e.lad}) mixf(f, 10.0f);
+            mix(crowns.size());
+        }
     }
     return s | 1;
 }
@@ -1358,10 +1640,11 @@ void ShadeTick() {
         float x0, z0, x1, z1;
         ShadeBox(want.rect, t.lamps, x0, z0, x1, z1);
         if (!t.lamps.empty()) ShadeWalls(x0, z0, x1, z1, t.walls, t.patches, &g_shadeLastFences);
+        if (!t.lamps.empty() && DevSwitches::CanopyGroundShadow()) CrownsIn(x0, z0, x1, z1, t.crowns);
         g_shadeLastLamps = static_cast<int>(t.lamps.size());
         g_shadeLastWalls = static_cast<int>(t.walls.size());
         g_shadeLastPatches = static_cast<int>(t.patches.size());
-        if (t.walls.empty()) t.lamps.clear(); // nothing shades: 255 everywhere at once
+        if (t.walls.empty() && t.crowns.empty()) t.lamps.clear(); // nothing shades: 255 everywhere at once
         t.lot = want.lot, t.key = want.key, t.w = want.w, t.h = want.h;
         g_shadeWorker.Submit(std::move(t));
         g_lotsInFlight++;
@@ -1857,6 +2140,9 @@ struct FoliageVs { // the patched copy (ShaderPatches::PatchFoliageVs / PatchObj
     bool tried = false;
     int worldK = -1; // objects: first VS constant of the world triple (c[K..K+2].w = the object position)
     int vertexLight = -1; // objects: first colour constant of the rig's 4 vertex lights (COLOR0), -1 if not found
+    IDirect3DVertexShader9* perVertex = nullptr; // foliage: the per-vertex lamp copy (FoliageVertexLamps::Patch), development builds
+    bool perVertexTried = false;
+    int perVertexBase = -1;
 };
 // Outdoor floors lit only by their baked floor map (summer; floor_atlas_table.h): the patched copy of the vertex shader
 // (see DrawFloorAtlas)
@@ -1871,6 +2157,7 @@ bool g_curVsIsObject = false;
 // the same pointer, each looked up per draw). Entries are only added (ClassifyVs) and all dropped together (Shutdown),
 // so a pointer to the current one stays valid while that shader is tracked (unordered_map keeps element addresses).
 struct VsInfo {
+    bool packedRoomFloor = false;
     bool worldMultiLight = false; // exact captured summer multi-pass light VS
     bool worldCompact = false; // exact captured single-layer WORLD VS (not an object rig)
     bool contractedLotUv = false; // exact regular lot VS; CPU floor samples use uncontracted local xz
@@ -1942,6 +2229,7 @@ VsInfo* ClassifyVs(IDirect3DVertexShader9* vs) {
             else {
                 std::vector<DWORD> t(size / 4);
                 std::memcpy(t.data(), code.data(), t.size() * 4);
+                info.packedRoomFloor = ShaderPatches::IsPackedRoomFloorVs(t);
                 DWORD mapConst = 0;
                 if (ShaderPatches::IsRoadVs(t, mapConst)) {
                     info.roadMap = mapConst; // c16 in winter, c14 in summer
@@ -2373,6 +2661,107 @@ void TrackLampSwitches() {
     }
     g_lampSwitchPrev.swap(cur);
     if (switched) g_lampSwitches.fetch_add(1, std::memory_order_relaxed);
+}
+
+// The trees' own lamp list: read at every refresh, also while the per-pixel lamps keep theirs for a lamp switch or a
+// drag (AtriumHold, DragLite: up to 6 to 9 s in game, for the rooms of a house to show the new light, which
+// trees outside never wait on). The outdoor lamps as g_allLamps reads them, then the indoor lamps shining out as listed.
+std::vector<std::array<float, 8>> g_foliageLamps;
+std::vector<LampCone> g_foliageCones;
+uint32_t g_foliageLampGen = 1; // a new generation whenever the list is not the same bit for bit
+// Where the list changed (a lamp's place before and after, per generation; the last 512): an instance picks again at once
+// only when a changed lamp is within reach of its box, else it just takes the new generation
+struct FoliageLampChange {
+    uint32_t gen;
+    float pos[3];
+};
+std::vector<FoliageLampChange> g_foliageChanges;
+uint32_t g_foliageChangesFrom = 1; // the oldest generation g_foliageChanges still describes completely
+uint64_t FoliageRowKey(const std::array<float, 8>& v, const LampCone& c) {
+    uint64_t h = 1469598103934665603ull;
+    const auto mix = [&h](const void* p, size_t n) {
+        const auto* b = static_cast<const unsigned char*>(p);
+        for (size_t i = 0; i < n; i++) h = (h ^ b[i]) * 1099511628211ull;
+    };
+    mix(v.data(), sizeof(float) * 8);
+    mix(&c, sizeof c);
+    return h;
+}
+// The same without the colour (v[4..6]: F0 x intensity x fade): a lamp that only fades or changes colour keeps this key
+uint64_t FoliageShapeKey(const std::array<float, 8>& v, const LampCone& c) {
+    std::array<float, 8> s = v;
+    s[4] = std::max({v[4], v[5], v[6]}) > 0.0f ? 1.0f : 0.0f; // (a lamp coming out of black or going to it picks again)
+    s[5] = s[6] = 0.0f;
+    return FoliageRowKey(s, c);
+}
+// The colour of each lamp of the list by its shape key, and a generation whenever a colour changed with no lamp moved,
+// added or removed (as at dusk, every lamp fading): an instance then takes its lamps' new colours by their keys at its
+// next draw, with no new pick (a pick tests every lamp against the walls)
+std::unordered_map<uint64_t, std::array<float, 3>> g_foliageColour;
+uint32_t g_foliageColourGen = 1;
+// `rebuilt`: ReadEnumeratedLamps just rebuilt g_allLamps and the exit rows from this enumeration, which are then taken as
+// they are; while those are held, the same rows are read here (the indoor lamps shining out too, from a list of their own)
+void ReadFoliageLamps(bool rebuilt) {
+    static std::vector<std::array<float, 8>> previous;
+    static std::vector<LampCone> previousCones;
+    static std::vector<uintptr_t> exitList;
+    previous.swap(g_foliageLamps);
+    previousCones.swap(g_foliageCones);
+    g_foliageLamps.clear();
+    g_foliageCones.clear();
+    if (rebuilt) {
+        g_foliageLamps = g_allLamps;
+        g_foliageCones = g_allCones;
+        g_foliageLamps.insert(g_foliageLamps.end(), g_exitLampRows.begin(), g_exitLampRows.end());
+        g_foliageCones.insert(g_foliageCones.end(), g_exitCones.begin(), g_exitCones.end());
+    } else {
+        LevelLightShare::ExitLamps(exitList);
+        std::vector<std::array<float, 8>> exitRows;
+        std::vector<LampCone> exitCones;
+        for (uintptr_t L : g_enumLights) {
+            std::array<float, 8> v;
+            LampCone cone;
+            if (ReadLamp(L, v.data(), cone)) g_foliageLamps.push_back(v), g_foliageCones.push_back(cone);
+            else if (!exitList.empty() && std::binary_search(exitList.begin(), exitList.end(), L) && exitRows.size() < 256 && ReadExitLamp(L, v.data(), cone))
+                exitRows.push_back(v), exitCones.push_back(cone);
+        }
+        g_foliageLamps.insert(g_foliageLamps.end(), exitRows.begin(), exitRows.end());
+        g_foliageCones.insert(g_foliageCones.end(), exitCones.begin(), exitCones.end());
+    }
+    if (g_foliageLamps.size() == previous.size() && g_foliageCones.size() == previousCones.size() &&
+        (g_foliageLamps.empty() || std::memcmp(g_foliageLamps.data(), previous.data(), g_foliageLamps.size() * sizeof(g_foliageLamps[0])) == 0) &&
+        (g_foliageCones.empty() || std::memcmp(g_foliageCones.data(), previousCones.data(), g_foliageCones.size() * sizeof(LampCone)) == 0))
+        return;
+    g_foliageColour.clear();
+    for (size_t i = 0; i < g_foliageLamps.size(); i++)
+        g_foliageColour.try_emplace(FoliageShapeKey(g_foliageLamps[i], g_foliageCones[i]), std::array<float, 3>{g_foliageLamps[i][4], g_foliageLamps[i][5], g_foliageLamps[i][6]});
+    g_foliageColourGen++;
+    // the rows in one list and not the other by everything but the colour (a lamp moved, switched, added or removed, its
+    // reach or cone changed), by their exact bits; a colour alone goes by g_foliageColourGen
+    std::unordered_map<uint64_t, int> count;
+    for (size_t i = 0; i < previous.size() && i < previousCones.size(); i++) count[FoliageShapeKey(previous[i], previousCones[i])]--;
+    for (size_t i = 0; i < g_foliageLamps.size(); i++) count[FoliageShapeKey(g_foliageLamps[i], g_foliageCones[i])]++;
+    if (std::all_of(count.begin(), count.end(), [](const auto& p) { return p.second == 0; })) return;
+    g_foliageLampGen++;
+    const auto note = [](const std::array<float, 8>& v) {
+        if (g_foliageChanges.size() >= 512) { // the oldest generations go: their instances pick again whole
+            g_foliageChangesFrom = g_foliageChanges[g_foliageChanges.size() / 2].gen;
+            g_foliageChanges.erase(g_foliageChanges.begin(), g_foliageChanges.begin() + static_cast<long>(g_foliageChanges.size() / 2));
+        }
+        g_foliageChanges.push_back({g_foliageLampGen, {v[0], v[1], v[2]}});
+    };
+    for (size_t i = 0; i < previous.size() && i < previousCones.size(); i++)
+        if (count[FoliageShapeKey(previous[i], previousCones[i])] < 0) note(previous[i]);
+    for (size_t i = 0; i < g_foliageLamps.size(); i++)
+        if (count[FoliageShapeKey(g_foliageLamps[i], g_foliageCones[i])] > 0) note(g_foliageLamps[i]);
+}
+// Whether a lamp of the list changed within reach (20 m, the reach law's longest) of the box since generation `since`
+// (true also when that is older than what g_foliageChanges keeps)
+bool FoliageLampsChangedNear(uint32_t since, const float* boxC, const float* ext) {
+    if (since < g_foliageChangesFrom) return true;
+    for (const FoliageLampChange& c : g_foliageChanges)
+        if (c.gen > since && FoliageVertexLamps::BoxDistance2(c.pos, boxC, ext) < 20.0f * 20.0f) return true;
+    return false;
 }
 
 void ReadEnumeratedLamps(bool rebuildAll) {
@@ -2814,12 +3203,40 @@ bool HasCone(const LampCone& c) { return c.spill < 1.0f || c.c1[3] != 1.0f || c.
 // The share of picked lamp k (g_lampData[k], g_lampCone[k]) reaching p: an indoor lamp shining out of a house through an
 // opening is tested past the walls of its story through the openings (LevelLightShare::ExitLampVisibility), any other lamp
 // by the outside walls and slabs (LampVisibility)
-float PickedLampVisibility(int k, const float* pr, const float* p, float nearSkip = 0.2f) {
-    if (const uintptr_t light = g_lampCone[k].light) {
+float LampConeVisibility(const LampCone& cone, const float* pr, const float* p, float nearSkip);
+float PickedLampVisibility(int k, const float* pr, const float* p, float nearSkip = 0.2f) { return LampConeVisibility(g_lampCone[k], pr, p, nearSkip); }
+float LampConeVisibility(const LampCone& cone, const float* pr, const float* p, float nearSkip) {
+    if (const uintptr_t light = cone.light) {
         const float v = LevelLightShare::ExitLampVisibility(reinterpret_cast<const void*>(light), pr, p, nearSkip);
         return v < 0.0f ? 0.0f : v; // (not listed any more: dark)
     }
-    return LevelLightShare::LampVisibility(pr, p, nearSkip);
+    // (development builds, lamp_visibility_memo) objects are drawn at the same place frame after frame and lamps change
+    // every 20 frames at most: the wall and slab test of a lamp and a point is kept, keyed by the exact float bits and by
+    // everything else it reads (LampVisibilityState), so a hit returns exactly the value it would compute
+    if (!DevSwitches::LampVisibilityMemo() || LevelLightShare::VisibilityDiagArmed()) return LevelLightShare::LampVisibility(pr, p, nearSkip);
+    struct VisMemo {
+        uint32_t k[7];
+        uint64_t state;
+        float v;
+        bool used;
+    };
+    static VisMemo s_vis[4096];
+    const uint64_t state = LevelLightShare::LampVisibilityState();
+    uint32_t key[7];
+    std::memcpy(&key[0], pr, 12);
+    std::memcpy(&key[3], p, 12);
+    std::memcpy(&key[6], &nearSkip, 4);
+    uint32_t h = 2166136261u;
+    for (uint32_t x : key) h = (h ^ x) * 16777619u;
+    h ^= static_cast<uint32_t>(state) ^ static_cast<uint32_t>(state >> 32);
+    VisMemo& e = s_vis[(h * 2654435761u) >> 20];
+    if (e.used && e.state == state && std::memcmp(e.k, key, sizeof key) == 0) return e.v;
+    const float v = LevelLightShare::LampVisibility(pr, p, nearSkip);
+    std::memcpy(e.k, key, sizeof key);
+    e.state = LevelLightShare::LampVisibilityState(); // (the call may have rebuilt a grid: keyed by what it read)
+    e.v = v;
+    e.used = e.state == state;
+    return v;
 }
 bool g_lampConeLogged = false, g_fenceConeLogged = false; // render thread
 
@@ -3514,6 +3931,7 @@ bool ReadInstancePositions(const BYTE* p, UINT count, UINT stride, GroupCentre& 
         return false;
     }
 }
+std::unordered_map<uint64_t, uint8_t> g_centreBusy; // draw_reads_nowait: busy answers per group since its last read
 const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
     UINT freq = 0;
     if (FAILED(dev->GetStreamSourceFreq(0, &freq)) || !(freq & D3DSTREAMSOURCE_INDEXEDDATA)) return nullptr;
@@ -3523,14 +3941,26 @@ const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
     if (FAILED(dev->GetStreamSource(1, &vb, &off, &stride)) || !vb) return nullptr;
     const GroupCentre* result = nullptr;
     if (count > 0 && count <= 4096 && stride >= 12 && stride <= 256) {
-        if (g_groupCentres.size() > 4096) g_groupCentres.clear(); // groups come and go with lots
+        if (g_groupCentres.size() > 4096) g_groupCentres.clear(), g_centreBusy.clear(); // groups come and go with lots
         const uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb)) << 32) ^ (static_cast<uint64_t>(off) << 12) ^ (static_cast<uint64_t>(count) << 1) ^ stride;
         GroupCentre& g = g_groupCentres[key];
         const DWORD now = GetTickCount();
         if (!g.at || now - g.at > 5000) {
-            g.at = now ? now : 1;
+            // draw_reads_nowait: a refresh of a group already read does not wait for the GPU; while the buffer is busy the
+            // last positions stay in use and the next draw tries again (three busy answers: it waits, as before)
+            uint8_t* busy = nullptr;
+            if (DevSwitches::DrawReadsNoWait() && g.at && g.ok) busy = &g_centreBusy[key];
+            const bool nowait = busy && *busy < 3;
             void* p = nullptr;
-            g.ok = SUCCEEDED(vb->Lock(off, count * stride, &p, D3DLOCK_READONLY)) && p && ReadInstancePositions(static_cast<const BYTE*>(p), count, stride, g);
+            const HRESULT hr = vb->Lock(off, count * stride, &p, D3DLOCK_READONLY | (nowait ? D3DLOCK_DONOTWAIT : 0));
+            if (nowait && hr == D3DERR_WASSTILLDRAWING) {
+                ++*busy;
+                p = nullptr;
+            } else {
+                g.at = now ? now : 1;
+                if (busy) *busy = 0;
+                g.ok = SUCCEEDED(hr) && p && ReadInstancePositions(static_cast<const BYTE*>(p), count, stride, g);
+            }
             if (p) vb->Unlock();
         }
         if (g.ok) result = &g;
@@ -3951,6 +4381,440 @@ bool ObjectLampColourAtImpl(const void* light, const float* centre, float rgb[3]
     return std::isfinite(rgb[0]) && std::isfinite(rgb[1]) && std::isfinite(rgb[2]);
 }
 
+// ---- Per-vertex lamp light on instanced foliage (numbered development builds, switch foliage_vertex_lamps;
+// foliage_vertex_lamps.h) and the crowns as porous occluders of lamp light on lot ground (switch canopy_ground_shadow;
+// foliage_canopy.h). The foliage vertex shader's instance constants (VS_9A10A3A8, the captured family): c0[3i] the
+// instance's position relative to the camera, c2[3i].x its scale, c27..c29[3i] the rig's lamp directions, c54..c56[3i] its
+// lamp colours (taken by ObjectLampColourAt at the rig box's point nearest each lamp). Each instance picks its own three
+// lamps (PickFoliageLamps, the per-pixel lamps' rule) and the draw replaces c54..c80 with their colours; the rig's lamp
+// directions only find the space of c0 (MatchLamps, both ways). ----
+struct FoliageCrown {
+    float lo[3] = {}, hi[3] = {}; // the mesh's local box (positions / w), read once per mesh
+    int instances = 9;            // 1 + the largest instance index in the mesh (TEXCOORD3.w, a0.w = 3 x it)
+    bool ok = false;
+};
+std::unordered_map<uint64_t, FoliageCrown> g_foliageMeshes;
+struct FoliageInstance { // world space, so a moving camera reuses it; the colour terms are recomputed every draw
+    float centre[3] = {}, rx = 0, ry = 0;
+    size_t lamp[3] = {SIZE_MAX, SIZE_MAX, SIZE_MAX}; // the matched g_allLamps entry of each lit slot (finding the origin of c0)
+    FoliageVertexLamps::OwnLamp own[3];              // the instance's own lamps (PickFoliageLamps), brightest first
+    int owned = 0;
+    uint32_t pickGen = 0; // the trees' lamp list (g_foliageLampGen) the lamps were picked from
+    DWORD pickTick = 0;   // when
+    uint64_t pickState = 0;                        // the walls and floors it read (LevelLightShare::LampVisibilityState)
+    uint32_t pickColourGen = 0, colourGen = 0;     // the colours it was picked with, and the ones its lamps carry
+    bool shaped = false, picked = false, counted = false;
+    DWORD seen = 0;
+};
+std::unordered_map<uint64_t, FoliageInstance> g_foliageInstances;
+std::atomic<long> g_foliageVertexDrawn{0}, g_foliageVertexRefused{0};
+// lit slots of new instances: no lamp found by direction, no law (cone), drawn by the law alone (the rig's colour brighter
+// than the law at the mesh box), drawn by the law with the rig's shade
+// new instances by their own lamps (0, 1, 2, 3), lamps left out by the walls, instances without a crown shape
+std::atomic<long> g_foliageOwned[4] = {}, g_foliageWallOut{0}, g_foliageNoShape{0};
+std::atomic<long> g_foliageRepickChanged{0}, g_foliageRepickSame{0}; // picks made again: the light changed / stayed
+// Crowns seen by foliage draws (world space) for the ground shade, kept while they are within kCrownKeep of the camera:
+// not by view (a crown turned out of view still shades the ground), one entry per crown (merged by place, so the camera's
+// small offsets never make two of the same tree). Render thread.
+struct CrownSeen {
+    Canopy::Ellipsoid e{};
+    DWORD first = 0;
+};
+std::vector<CrownSeen> g_crowns;
+std::atomic<long> g_crownCount{0};
+constexpr float kCrownKeep = 250.0f; // m from the camera
+constexpr size_t kMaxCrowns = 8192;
+
+// Instance count and the local box of the current foliage mesh (stream 0, its draw range), read once per mesh
+bool FoliageMeshBox(IDirect3DDevice9* dev, FoliageCrown& out) {
+    IDirect3DVertexDeclaration9* decl = nullptr;
+    if (FAILED(dev->GetVertexDeclaration(&decl)) || !decl) return false;
+    D3DVERTEXELEMENT9 el[MAXD3DDECLLENGTH + 1];
+    UINT n = MAXD3DDECLLENGTH + 1;
+    FenceLayout L;
+    bool pos = false, idx = false;
+    WORD idxOff = 0;
+    BYTE idxType = 0;
+    if (SUCCEEDED(decl->GetDeclaration(el, &n)))
+        for (UINT i = 0; i < n && el[i].Stream != 0xFF; i++) {
+            if (el[i].Stream != 0) continue;
+            if (el[i].Usage == D3DDECLUSAGE_POSITION && el[i].UsageIndex == 0) L.posOff = el[i].Offset, L.posType = el[i].Type, pos = true;
+            if (el[i].Usage == D3DDECLUSAGE_TEXCOORD && el[i].UsageIndex == 3) idxOff = el[i].Offset, idxType = el[i].Type, idx = true;
+        }
+    decl->Release();
+    if (!pos) return false;
+    IDirect3DVertexBuffer9* vb = nullptr;
+    UINT off = 0, stride = 0;
+    if (FAILED(dev->GetStreamSource(0, &vb, &off, &stride)) || !vb) return false;
+    const UINT first = g_curDipBase + g_curDipMin, count = g_curDipNum;
+    const uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb)) << 32) ^ (static_cast<uint64_t>(off + first * stride) << 8) ^ count ^
+                         (static_cast<uint64_t>(stride) << 56) ^ (static_cast<uint64_t>(L.posType) << 50) ^ L.posOff;
+    auto it = g_foliageMeshes.find(key);
+    if (it == g_foliageMeshes.end()) {
+        if (g_foliageMeshes.size() > 4096) g_foliageMeshes.clear();
+        FoliageCrown c;
+        D3DVERTEXBUFFER_DESC vd{};
+        void* p = nullptr;
+        // a static buffer, read once per mesh
+        if (count && count <= 65536 && stride >= 12 && stride <= 256 && SUCCEEDED(vb->GetDesc(&vd)) &&
+            static_cast<uint64_t>(off) + (static_cast<uint64_t>(first) + count) * stride <= vd.Size &&
+            SUCCEEDED(vb->Lock(off + first * stride, count * stride, &p, D3DLOCK_READONLY)) && p) {
+            c.ok = MeshBox(static_cast<const BYTE*>(p), count, stride, L, c.lo, c.hi);
+            if (c.ok && idx) {
+                float top = -1.0f;
+                for (UINT i = 0; i < count && c.ok; i++) {
+                    float v[4];
+                    if (!ReadElement(static_cast<const BYTE*>(p) + static_cast<size_t>(i) * stride + idxOff, idxType, v) || !std::isfinite(v[3])) break;
+                    top = std::max(top, v[3]);
+                }
+                if (top >= 0.0f && top < 9.0f) c.instances = static_cast<int>(top + 0.5f) + 1;
+            }
+        }
+        if (p) vb->Unlock();
+        it = g_foliageMeshes.emplace(key, c).first;
+    }
+    vb->Release();
+    out = it->second;
+    return out.ok;
+}
+
+// The lamps of one foliage instance, by the per-pixel lamps' own rule instead of the rig's three slots: the lamps
+// within reach of the crown's middle (SelectLamps, with the indoor lamps shining out of a house), each with its cones and
+// its share past the outside walls and slabs at that middle (PickedLampVisibility), ranked by the light the reach law gives
+// at the mesh box's point nearest the lamp (trunk included); a lamp whose reach ends before the box is left out. The rig's
+// slots matched under 2% of the lit slots in game (log 20:34:32, public 2.14: 7,870 by the law against 483,925 without a
+// lamp), and an unmatched slot lit the whole crown with one colour. Render thread (SelectLamps' memo, g_lampData).
+int PickFoliageLamps(const float* mid, const float* boxC, const float* ext, FoliageVertexLamps::OwnLamp* out) {
+    // the trees' own list (ReadFoliageLamps: never held for a switch or a drag); a lamp whose reach ends before the mesh box
+    // gives none (the law is 0 past R, 20 m at most), so only the near ones are tested past the walls
+    int kept = 0;
+    for (size_t k = 0; k < g_foliageLamps.size() && k < g_foliageCones.size(); k++) {
+        const float* pr = g_foliageLamps[k].data();
+        const float* col = pr + 4;
+        const LampCone& cone = g_foliageCones[k];
+        const float d2 = FoliageVertexLamps::BoxDistance2(pr, boxC, ext);
+        if (!(d2 < 20.0f * 20.0f)) continue;
+        const float law = FoliageVertexLamps::FoliageLaw(d2, cone.w, cone.entries); // (inverse square, faded near R)
+        if (!(law > 0.0f)) continue;
+        const float cn = LampConeAt(cone, pr, mid);
+        const float luma = (col[0] * 0.2126f + col[1] * 0.7152f + col[2] * 0.0722f) * cn * law;
+        if (!(luma > 1e-5f) || !std::isfinite(luma)) continue;
+        const float v = LampConeVisibility(cone, pr, mid, 0.2f);
+        if (v < 0.01f) {
+            g_foliageWallOut.fetch_add(1, std::memory_order_relaxed);
+            continue;
+        }
+        FoliageVertexLamps::OwnLamp l;
+        float r0, R;
+        LampReach::Radii(cone.w, r0, R);
+        for (int a = 0; a < 3; a++) l.pos[a] = pr[a], l.colour[a] = col[a] * cn * v;
+        l.r0sq = R * R, l.invR2 = 1.0f / (R * R), l.gain = LampReach::Gain(cone.w, cone.entries), l.score = luma * v;
+        l.key = FoliageShapeKey(g_foliageLamps[k], cone), l.share = cn * v;
+        kept = FoliageVertexLamps::KeepBrightest(l, out, kept);
+    }
+    return kept;
+}
+
+// The crown of one instance from its mesh box: the leaves, not the trunk under them. A plant taller than 2.5 m keeps its
+// upper 65% as the crown (a tree's clear trunk); smaller plants are leaves from the ground up. The box's centre over the
+// instance (upright foliage, modelled around its trunk) and its widest horizontal half extent both ways (no yaw needed).
+bool CrownShape(const float* inst, float scale, const float eye[3], const FoliageCrown& mesh, FoliageInstance& f) {
+    if (!(scale > 0.01f && scale < 100.0f)) return false;
+    float lo = mesh.lo[1], hi = mesh.hi[1];
+    if ((hi - lo) * scale > 2.5f) lo += 0.35f * (hi - lo);
+    f.centre[0] = inst[0] + eye[0];
+    f.centre[1] = inst[1] + eye[1] + 0.5f * (lo + hi) * scale;
+    f.centre[2] = inst[2] + eye[2];
+    f.rx = std::max(0.5f * (mesh.hi[0] - mesh.lo[0]), 0.5f * (mesh.hi[2] - mesh.lo[2])) * scale;
+    f.ry = 0.5f * (hi - lo) * scale;
+    return f.rx > 0.1f && f.ry > 0.15f && f.rx < 30.0f && f.ry < 30.0f && std::isfinite(f.centre[0] + f.centre[1] + f.centre[2]);
+}
+
+// Each lit slot's lamp, by direction from the crown's centre (the rig's centre differs a little: 16 degrees at most)
+// (each slot on its own: a slot that matches no lamp keeps lamp SIZE_MAX; true when one matched)
+bool MatchLamps(const float (*dirs)[4], const float (*cols)[4], FoliageInstance& f) {
+    bool any = false;
+    for (int k = 0; k < 3; k++) {
+        f.lamp[k] = SIZE_MAX;
+        if (!(std::max({cols[k][0], cols[k][1], cols[k][2]}) > 1.0f / 512.0f)) continue; // unused slot
+        const float dl = std::sqrt(dirs[k][0] * dirs[k][0] + dirs[k][1] * dirs[k][1] + dirs[k][2] * dirs[k][2]);
+        if (!(dl > 0.5f)) continue;
+        float best = 0.90f; // the rig's centre (its whole box) and ours (the crown) differ: about 25 degrees at most
+        for (size_t j = 0; j < g_allLamps.size(); j++) {
+            const auto& v = g_allLamps[j];
+            const float lx = v[0] - f.centre[0], ly = v[1] - f.centre[1], lz = v[2] - f.centre[2], l2 = lx * lx + ly * ly + lz * lz;
+            if (!(l2 > 1e-4f) || l2 > 40.0f * 40.0f) continue;
+            const float c = (lx * dirs[k][0] + ly * dirs[k][1] + lz * dirs[k][2]) / (std::sqrt(l2) * dl);
+            if (c > best) best = c, f.lamp[k] = j;
+        }
+        any = any || f.lamp[k] != SIZE_MAX;
+    }
+    return any;
+}
+
+// One crown into g_crowns: merged with a crown already there within 0.25 m and 15% of its size
+void NoteCrown(const FoliageInstance& f) {
+    for (CrownSeen& c : g_crowns) {
+        const float dx = c.e.cx - f.centre[0], dy = c.e.cy - f.centre[1], dz = c.e.cz - f.centre[2];
+        if (dx * dx + dy * dy + dz * dz < 0.25f * 0.25f && std::fabs(c.e.rx - f.rx) < 0.15f * f.rx && std::fabs(c.e.ry - f.ry) < 0.15f * f.ry) return;
+    }
+    if (g_crowns.size() >= kMaxCrowns) return;
+    CrownSeen c;
+    c.e = {f.centre[0], f.centre[1], f.centre[2], f.rx, f.ry, f.rx, 1.0f, 0.0f, Canopy::LadFor(2.0f * f.ry)};
+    c.first = GetTickCount() | 1;
+    g_crowns.push_back(c);
+    g_crownCount.store(static_cast<long>(g_crowns.size()), std::memory_order_relaxed);
+}
+
+// Fills c[B .. B+81] for the draw (perVertex) and notes the crowns (ground shade). false: a lit slot could not be matched
+// or confirmed (the draw keeps the old shader)
+// The space of the instance positions c0[3i]: 1 = relative to the camera eye, 2 = world; 0 while unknown. Found by
+// matching instances' lamp slots to the outdoor lamps both ways (at least 8 matches one way and at most 1 the other);
+// nothing (no crown, no per-vertex draw) uses a position before.
+std::atomic<int> g_foliageOrigin{0};
+int g_originVotes[3] = {};
+bool FoliageOriginFound(float origin[3]) {
+    float eye[3];
+    const bool haveEye = LotLightingMotion::CameraEye(eye);
+    const int mode = g_foliageOrigin.load(std::memory_order_relaxed);
+    if (mode == 2) return origin[0] = origin[1] = origin[2] = 0.0f, true;
+    if (mode == 1 && haveEye) return std::memcpy(origin, eye, sizeof eye), true;
+    return false;
+}
+void VoteFoliageOrigin(const float (*c)[4], int count, const FoliageCrown& mesh) {
+    if (g_foliageOrigin.load(std::memory_order_relaxed)) return;
+    float eye[3];
+    const bool haveEye = LotLightingMotion::CameraEye(eye);
+    const float zero[3] = {};
+    for (int i = 0; i < count; i++) {
+        bool lit = false;
+        for (int k = 0; k < 3; k++) lit = lit || std::max({c[54 + 3 * i + k][0], c[54 + 3 * i + k][1], c[54 + 3 * i + k][2]}) > 0.05f;
+        if (!lit) continue;
+        for (int m = 1; m <= 2; m++) {
+            if (m == 1 && !haveEye) continue;
+            FoliageInstance f;
+            if (CrownShape(c[3 * i], c[3 * i + 2][0], m == 1 ? eye : zero, mesh, f) && MatchLamps(&c[27 + 3 * i], &c[54 + 3 * i], f)) g_originVotes[m]++;
+        }
+    }
+    for (int m = 1; m <= 2; m++)
+        if (g_originVotes[m] >= 8 && g_originVotes[3 - m] <= 1) {
+            g_foliageOrigin.store(m, std::memory_order_relaxed);
+            LOG_INFO(std::format("[Foliage] Instance positions are {} ({} matches, {} the other way)", m == 1 ? "relative to the camera" : "world positions",
+                                 g_originVotes[m], g_originVotes[3 - m]));
+        }
+    if (g_originVotes[1] + g_originVotes[2] > 200 && !g_foliageOrigin.load(std::memory_order_relaxed)) { // undecided: start over
+        static int s_noted = 0;
+        if (s_noted++ < 3) LOG_INFO(std::format("[Foliage] Instance position space undecided ({} / {} matches): per-vertex lamps and crowns wait", g_originVotes[1], g_originVotes[2]));
+        g_originVotes[1] = g_originVotes[2] = 0;
+    }
+}
+
+// The eye the game drew a foliage draw with (FoliageVertexLamps::EyeAnchors): while the eye read from the game's camera has
+// not changed for half a second, both agree and the draw's instances are learned as fixed places; while it moves, the
+// offset that puts the instances back on those places is added to it (one offset per eye read, reused by the draws that
+// follow with the same read; the last one found when a draw knows no place yet). Render thread.
+extern uint32_t g_roomMapFrame; // (below: OnPresent counts frames)
+FoliageVertexLamps::EyeAnchors g_eyeAnchors;
+float g_eyeLast[3] = {}, g_eyeOffset[3] = {}, g_eyeOffsetFor[3] = {1e30f, 0, 0};
+DWORD g_eyeChanged = 0;
+std::atomic<float> g_eyeDriftMax{0.0f}; // the largest correction since the last log line (m)
+uint32_t FoliageMeshId(const FoliageCrown& mesh) {
+    uint32_t h = 2166136261u;
+    for (int k = 0; k < 3; k++) h = (h ^ static_cast<uint32_t>(std::lround(mesh.lo[k] * 100.0f))) * 16777619u, h = (h ^ static_cast<uint32_t>(std::lround(mesh.hi[k] * 100.0f))) * 16777619u;
+    return (h ^ static_cast<uint32_t>(mesh.instances)) * 16777619u;
+}
+void CorrectFoliageEye(const float (*c)[4], int count, const FoliageCrown& mesh, float eye[3], DWORD now) {
+    if (std::fabs(eye[0] - g_eyeLast[0]) + std::fabs(eye[1] - g_eyeLast[1]) + std::fabs(eye[2] - g_eyeLast[2]) > 1e-3f) {
+        std::memcpy(g_eyeLast, eye, sizeof g_eyeLast);
+        g_eyeChanged = now;
+    }
+    const uint32_t meshId = FoliageMeshId(mesh);
+    float rel[9][3], scales[9];
+    for (int i = 0; i < count; i++) {
+        for (int k = 0; k < 3; k++) rel[i][k] = c[3 * i][k];
+        scales[i] = c[3 * i + 2][0];
+    }
+    if (now - g_eyeChanged >= 300) { // still: the read eye is the game's; learn the places, no offset
+        for (int i = 0; i < count; i++) {
+            const float w[3] = {rel[i][0] + eye[0], rel[i][1] + eye[1], rel[i][2] + eye[2]};
+            if (std::isfinite(w[0] + w[1] + w[2])) g_eyeAnchors.Learn(meshId, scales[i], w);
+        }
+        g_eyeOffset[0] = g_eyeOffset[1] = g_eyeOffset[2] = 0.0f;
+        std::memcpy(g_eyeOffsetFor, eye, sizeof g_eyeOffsetFor);
+        return;
+    }
+    // once per frame (the game's eye can move while the read one stays, as the camera settles): the offset this frame's
+    // first draw with learned places finds (else the last one)
+    static uint32_t s_frame = 0;
+    if (s_frame != g_roomMapFrame) {
+        float o[3];
+        if (g_eyeAnchors.Offset(meshId, scales, rel, count, eye, o)) {
+            s_frame = g_roomMapFrame;
+            std::memcpy(g_eyeOffset, o, sizeof o);
+            std::memcpy(g_eyeOffsetFor, eye, sizeof g_eyeOffsetFor);
+            const float len = std::sqrt(o[0] * o[0] + o[1] * o[1] + o[2] * o[2]);
+            if (len > g_eyeDriftMax.load(std::memory_order_relaxed)) g_eyeDriftMax.store(len, std::memory_order_relaxed);
+        }
+    }
+    for (int k = 0; k < 3; k++) eye[k] += g_eyeOffset[k];
+}
+
+bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<float>& out) {
+    FoliageCrown mesh;
+    if (!FoliageMeshBox(dev, mesh)) return false;
+    const int count = std::clamp(mesh.instances, 1, 9);
+    float c[81][4];
+    if (FAILED(dev->GetVertexShaderConstantF(0, &c[0][0], 81))) return false;
+    float eye[3]; // the origin of c0 (named eye below: the camera eye, or 0 for world positions)
+    if (!FoliageOriginFound(eye)) {
+        VoteFoliageOrigin(c, count, mesh);
+        return false;
+    }
+    // c[B .. B+81], then the colours that replace c54..c80 for the draw
+    if (perVertex) out.assign((82 + 27) * 4, 0.0f);
+    const DWORD now = GetTickCount() | 1;
+    // too many instances (grass and flowers are instances too): the ones not drawn for 3 s go, never the ones in view (a
+    // cleared map made every crown in view pick again in the same frame)
+    if (g_foliageInstances.size() > 16384) {
+        std::erase_if(g_foliageInstances, [now](const auto& p) { return now - p.second.seen > 3000; });
+        // still over: the ones not drawn for 250 ms go (a cleared map on every draw made each instance pick again urgently)
+        if (g_foliageInstances.size() > 16384) std::erase_if(g_foliageInstances, [now](const auto& p) { return now - p.second.seen > 250; });
+        if (g_foliageInstances.size() > 32768) g_foliageInstances.clear();
+    }
+    if (g_foliageOrigin.load(std::memory_order_relaxed) == 1) CorrectFoliageEye(c, count, mesh, eye, now);
+    // At most 96 instances pick their lamps again per 8 ms (a new lamp list, as at dusk, re-picks every crown in view) and
+    // keep their older pick meanwhile; an instance's first pick is never put off (no draw falls back to the old light)
+    static DWORD s_budgetAt = 0;
+    static int s_budget = 0;
+    if (now - s_budgetAt >= 8) s_budgetAt = now, s_budget = 96;
+    const float lawScale = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), g_night.load(std::memory_order_relaxed), g_wallEnabled.load(std::memory_order_relaxed),
+                                                                 g_wallGain.load(std::memory_order_relaxed), g_objPixelLampStrength.load(std::memory_order_relaxed) / kPixelLampTrimUnit);
+    for (int i = 0; i < count; i++) {
+        const float* inst = c[3 * i];
+        const float scale = c[3 * i + 2][0];
+        if (!std::isfinite(inst[0] + inst[1] + inst[2])) return false;
+        // the instance: its place (10 cm), scale and the mesh (its lamps are its own, picked again with each lamp list)
+        uint64_t key = 1469598103934665603ull;
+        const auto mix = [&key](uint64_t v) { key = (key ^ v) * 1099511628211ull; };
+        for (int k = 0; k < 3; k++) mix(static_cast<uint64_t>(std::llround((inst[k] + eye[k]) * 10.0f))); // 10 cm: a corrected eye is not exact to the cm
+        mix(static_cast<uint64_t>(std::llround(scale * 1000.0f)));
+        for (int k = 0; k < 6; k++) mix(static_cast<uint64_t>(std::llround((k < 3 ? mesh.lo[k] : mesh.hi[k - 3]) * 100.0f)));
+        FoliageInstance& f = g_foliageInstances[key];
+        if (!f.seen) {
+            f.shaped = CrownShape(inst, scale, eye, mesh, f);
+            if (f.shaped && DevSwitches::CanopyGroundShadow()) NoteCrown(f);
+        }
+        f.seen = now;
+        if (!perVertex) continue;
+        // the whole mesh box (trunk included: a lamp at the foot of a tree lights its trunk) and the crown's middle (or the
+        // box's, without a crown shape), where the cones and the walls' share are taken
+        const float hx = 0.5f * std::max(mesh.hi[0] - mesh.lo[0], mesh.hi[2] - mesh.lo[2]) * scale;
+        const float boxC[3] = {inst[0] + eye[0], inst[1] + eye[1] + 0.5f * (mesh.lo[1] + mesh.hi[1]) * scale, inst[2] + eye[2]};
+        const float ext[3] = {hx, 0.5f * (mesh.hi[1] - mesh.lo[1]) * scale, hx};
+        // Picked at once the first time and when a lamp within reach of its box changed (a drag shows on the tree in the
+        // same refresh: it waited for the hold, 5 to 9 s); a new list that changed nothing near it only moves its
+        // generation. Picked again every 1.5 s within the budget when what a pick reads changed since: the walls and floors
+        // (they arrive after a lot's first frames: a pick made before them kept a wrong wall share), the lamps' colours (the
+        // ranking), or with indoor lamps shining out (their openings). A colour alone is taken at once below, with no pick.
+        bool urgent = !f.picked;
+        if (f.picked && f.pickGen != g_foliageLampGen) {
+            if (FoliageLampsChangedNear(f.pickGen, boxC, ext)) urgent = true;
+            else f.pickGen = g_foliageLampGen;
+        }
+        const uint64_t visState = LevelLightShare::LampVisibilityState();
+        const bool stale = f.pickState != visState || f.pickColourGen != g_foliageColourGen || !g_exitLampRows.empty();
+        if (urgent || (stale && now - f.pickTick > 1500 && s_budget > 0)) {
+            {
+                if (!urgent) s_budget--;
+                FoliageVertexLamps::OwnLamp before[3];
+                const int ownedBefore = f.owned;
+                std::copy(f.own, f.own + 3, before);
+                f.owned = PickFoliageLamps(f.shaped ? f.centre : boxC, boxC, ext, f.own);
+                if (f.picked) {
+                    bool changed = f.owned != ownedBefore;
+                    for (int k = 0; k < f.owned && !changed; k++)
+                        for (int a = 0; a < 3 && !changed; a++)
+                            changed = std::fabs(f.own[k].pos[a] - before[k].pos[a]) > 1e-3f || std::fabs(f.own[k].colour[a] - before[k].colour[a]) > 1.0f / 512.0f;
+                    (changed ? g_foliageRepickChanged : g_foliageRepickSame).fetch_add(1, std::memory_order_relaxed);
+                }
+                f.pickGen = g_foliageLampGen, f.pickTick = now, f.pickState = visState;
+                f.pickColourGen = f.colourGen = g_foliageColourGen;
+                if (!f.counted) {
+                    f.counted = true;
+                    g_foliageOwned[std::clamp(f.owned, 0, 3)].fetch_add(1, std::memory_order_relaxed);
+                    if (!f.shaped) g_foliageNoShape.fetch_add(1, std::memory_order_relaxed);
+                }
+                f.picked = true;
+            }
+        }
+        if (f.colourGen != g_foliageColourGen) { // the lamps' new colours (a fade, a recolour), each times its share
+            f.colourGen = g_foliageColourGen;
+            for (int k = 0; k < f.owned; k++)
+                if (const auto it = g_foliageColour.find(f.own[k].key); it != g_foliageColour.end())
+                    for (int a = 0; a < 3; a++) f.own[k].colour[a] = it->second[a] * f.own[k].share;
+        }
+        const float groundY = inst[1] + eye[1];
+        for (int k = 0; k < 3; k++) {
+            float* lp = &out[(3 * i + k) * 4];
+            float* law = &out[(27 + 3 * i + k) * 4];
+            float* rgb = &out[(82 + 3 * i + k) * 4];
+            rgb[3] = c[54 + 3 * i + k][3]; // the game's w
+            if (k >= f.owned) { // no lamp: colour 0, far away (adds nothing)
+                lp[0] = inst[0], lp[1] = inst[1] + 1000.0f, lp[2] = inst[2], lp[3] = 1.0f;
+                law[0] = 0.0f, law[1] = 0.0f, law[2] = 1e-4f, law[3] = 0.0f;
+                out[(56 + 3 * i) * 4 + k] = 1e30f;
+                rgb[0] = rgb[1] = rgb[2] = 0.0f;
+                continue;
+            }
+            FoliageVertexLamps::SlotConstants(f.own[k], eye, groundY, lawScale, lp, law, out[(56 + 3 * i) * 4 + k]);
+            for (int a = 0; a < 3; a++) rgb[a] = f.own[k].colour[a];
+        }
+        float* cr = &out[(54 + 3 * i) * 4];
+        float* cr2 = &out[(55 + 3 * i) * 4];
+        if (f.shaped) { // the crown's own leaves on the way, and the light through the leaves
+            cr[0] = f.centre[0] - eye[0], cr[1] = f.centre[1] - eye[1], cr[2] = f.centre[2] - eye[2], cr[3] = 1.0f / f.rx;
+            cr2[0] = 1.0f / f.ry, cr2[1] = Canopy::Extinction() * Canopy::LadFor(2.0f * f.ry) / std::log(2.0f);
+            out[(56 + 3 * i) * 4 + 3] = FoliageVertexLamps::kTransmitOverReflect;
+        } else {
+            cr[0] = inst[0], cr[1] = inst[1], cr[2] = inst[2], cr[3] = 1.0f;
+            cr2[0] = 1.0f, cr2[1] = 0.0f; // no extinction
+            out[(56 + 3 * i) * 4 + 3] = 0.0f;
+        }
+    }
+    if (perVertex) {
+        float* g = &out[81 * 4];
+        g[0] = FoliageVertexLamps::kTransmitOverReflect, g[1] = FoliageVertexLamps::kGroundHalfAlbedo, g[3] = 1.0f;
+    }
+    // instances not seen for a minute go (render thread, at most once a second)
+    static DWORD s_swept = 0;
+    if (now - s_swept > 1000) {
+        s_swept = now;
+        std::erase_if(g_foliageInstances, [now](const auto& p) { return now - p.second.seen > 60000; });
+    }
+    return true;
+}
+
+// The crowns over a lot's box for its ground shade, sorted (the same set gives the same key); crowns far from the camera
+// go (render thread)
+void CrownsIn(float x0, float z0, float x1, float z1, std::vector<Canopy::Ellipsoid>& out) {
+    float eye[3];
+    if (LotLightingMotion::CameraEye(eye)) {
+        const size_t before = g_crowns.size();
+        std::erase_if(g_crowns, [&](const CrownSeen& c) {
+            const float dx = c.e.cx - eye[0], dz = c.e.cz - eye[2];
+            return dx * dx + dz * dz > kCrownKeep * kCrownKeep;
+        });
+        if (g_crowns.size() != before) g_crownCount.store(static_cast<long>(g_crowns.size()), std::memory_order_relaxed);
+    }
+    for (const CrownSeen& c : g_crowns) {
+        const Canopy::Ellipsoid& e = c.e;
+        if (!(e.cx + e.rx < x0 || e.cx - e.rx > x1 || e.cz + e.rz < z0 || e.cz - e.rz > z1)) out.push_back(e);
+    }
+    std::sort(out.begin(), out.end(), [](const Canopy::Ellipsoid& a, const Canopy::Ellipsoid& b) {
+        return std::tie(a.cx, a.cz, a.cy, a.rx, a.ry) < std::tie(b.cx, b.cz, b.cy, b.rx, b.ry);
+    });
+}
+
 // Windows take outdoor light: the point a wall object picks its lamps at. A window's origin is a corner of its tile, on
 // one side of the wall or the other as it is turned (F7 capture, 06/10: the same window turned took other lamps
 // and another ground share, a slightly different tone); the tile's centre, origin + (local X - local Z) / 2, is on the
@@ -4332,6 +5196,8 @@ struct RoomMapSizeMemo {
 RoomMapSizeMemo g_roomMapSizes[64]; // render thread; valid for g_roomMapFrame only (OnPresent counts frames)
 uint32_t g_roomMapFrame = 1;
 std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_roomMapSmoothPs, g_basisRoomPs;
+// (arch_ambient) the same copies with the arch block, bound only for a floor draw of a room with arches (DrawWithRoomMap)
+std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_roomMapSmoothArchPs, g_basisRoomArchPs, g_basisRoomWallArchPs;
 std::unordered_map<IDirect3DVertexShader9*, ShaderPatches::RoomMapUv> g_roomUvVs; // (pinned by ClassifyVs)
 std::atomic<long> g_roomWallDrawn{0}, g_roomFloorDrawn{0}, g_roomCapsRefused{0}, g_roomUnknownVs{0}, g_roomBandsOff{0}, g_roomPointFilter{0};
 IDirect3DDevice9* g_capsDev = nullptr;
@@ -4412,57 +5278,271 @@ bool RoomMapConsts(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& p, 
     band[0] = 1.0f / S, band[1] = S, band[2] = 0.5f, band[3] = S - 1.0f;
     return true;
 }
+// (development builds, arch_ambient) The arch rows of a draw for the copy with the arch block (room.archConst): the room's
+// arches and its neighbours' ambient, on floor maps only (one block: S = 65536). Returns how many cells hold something; 0 for
+// the wall atlas and a room with no arch, whose zero rows change nothing (the copy without the block then draws, pixel for
+// pixel the same, without the block's ~106 ALU per pixel). basisTex: one of the draw's directional maps, 0 = none bound.
+constexpr UINT kArchRows = 2 * ShaderPatches::kArchCells;
+std::atomic<long> g_archCopyDraws{0}, g_archPlainDraws{0};
+int ArchRowsFor(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& room, const float band[4], uintptr_t basisTex, float* rows) {
+    if (room.archConst < 0 || room.ambConst < 0 || !(band[1] > 60000.0f)) return 0;
+    float own[4] = {};
+    if (FAILED(dev->GetPixelShaderConstantF(static_cast<UINT>(room.ambConst), own, 1))) return 0;
+    IDirect3DBaseTexture9* map = nullptr; // the room light map: its story tells rooms with the same ambient apart
+    dev->GetTexture(room.sampler, &map);
+    const uintptr_t mapTex = reinterpret_cast<uintptr_t>(map);
+    if (map) map->Release();
+    return LevelLightShare::ArchAmbientConsts(own, mapTex, basisTex, rows, static_cast<int>(ShaderPatches::kArchCells));
+}
+// (arch_ambient) The arch copy of a room-map copy just made: none where it has no arch block (ps_2_x, no ambient constant),
+// since it would draw exactly as the copy without it
+PatchedPs* ArchCopyOrNull(PatchedPs& a) {
+    if (a.ps && a.room.archConst < 0) {
+        a.ps->Release();
+        a.ps = nullptr;
+    }
+    return a.ps ? &a : nullptr;
+}
+// rows: the arch rows (kArchRows) for a copy with the arch block, nullptr for a copy without it
 template <typename DrawFn> void DrawWithRoomMap(IDirect3DDevice9* dev, IDirect3DPixelShader9* copy, const ShaderPatches::RoomMapPatch& p, const float size[4],
-                                                const float band[4], DrawFn draw) {
-    float oldSize[4] = {}, oldBand[4] = {};
+                                                const float band[4], const float* rows, DrawFn draw) {
+    float oldSize[4] = {}, oldBand[4] = {}, oldArch[kArchRows * 4] = {};
     dev->GetPixelShaderConstantF(p.sizeConst, oldSize, 1);
     dev->GetPixelShaderConstantF(p.bandConst, oldBand, 1);
+    const bool arch = rows && p.archConst >= 0;
+    if (arch) dev->GetPixelShaderConstantF(static_cast<UINT>(p.archConst), oldArch, kArchRows);
     IDirect3DPixelShader9* original = g_curPs;
     g_inOwnCall = true;
     SetPsConst(dev, p.sizeConst, size, 1);
     SetPsConst(dev, p.bandConst, band, 1);
+    if (arch) SetPsConst(dev, static_cast<UINT>(p.archConst), rows, kArchRows);
     SetPs(dev, copy);
     draw();
     SetPs(dev, original);
+    if (arch) SetPsConst(dev, static_cast<UINT>(p.archConst), oldArch, kArchRows);
     SetPsConst(dev, p.bandConst, oldBand, 1);
     SetPsConst(dev, p.sizeConst, oldSize, 1);
     g_inOwnCall = false;
+    (arch ? g_archCopyDraws : g_archPlainDraws).fetch_add(1, std::memory_order_relaxed);
 }
 template <typename DrawFn> bool DrawRoomMapSmooth(IDirect3DDevice9* dev, DrawFn draw) {
     if (!g_roomMapSmooth.load(std::memory_order_relaxed)) return false;
-    PatchedPs& p = PatchedFor(dev, g_roomMapSmoothPs, "Smooth light maps", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchRoomMapSmooth(t, pp.room); });
-    if (!p.ps) return false;
-    if (!RoomMapCapsOk(dev, p.room)) {
-        g_roomCapsRefused.fetch_add(1, std::memory_order_relaxed);
+    PatchedPs& p = PatchedFor(dev, g_roomMapSmoothPs, "Smooth light maps", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchRoomMapSmooth(t, pp.room, false); });
+    PatchedPs* a = DevSwitches::ArchAmbient() ? ArchCopyOrNull(PatchedFor(dev, g_roomMapSmoothArchPs, "Smooth light maps (arches)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchRoomMapSmooth(t, pp.room, true); }, true))
+                                              : nullptr;
+    const bool plainOk = p.ps && RoomMapCapsOk(dev, p.room);
+    if (a && !RoomMapCapsOk(dev, a->room)) a = nullptr;
+    if (!plainOk && !a) {
+        if (p.ps) g_roomCapsRefused.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
     float size[4], band[4];
     bool wall = false;
-    if (!RoomMapConsts(dev, p.room, size, band, wall)) return false;
-    DrawWithRoomMap(dev, p.ps, p.room, size, band, draw);
+    if (!RoomMapConsts(dev, plainOk ? p.room : a->room, size, band, wall)) return false;
+    float rows[kArchRows * 4] = {};
+    const int cells = a ? ArchRowsFor(dev, a->room, band, 0, rows) : 0;
+    if (a && (cells > 0 || !plainOk)) DrawWithRoomMap(dev, a->ps, a->room, size, band, rows, draw);
+    else DrawWithRoomMap(dev, p.ps, p.room, size, band, nullptr, draw);
     (wall ? g_roomWallDrawn : g_roomFloorDrawn).fetch_add(1, std::memory_order_relaxed);
     return true;
 }
 
+// ---- Walls in the directional maps (development builds, basis_wall_filter) ----
+// The draw's directional maps name their story (LevelLightShare::WallMaskFor); its wall mask is kept here as a 64 x 64
+// texture (managed pool), uploaded again when the story's walls change, and bound at the patch's mask sampler (point, clamp)
+// for the wall-aware copy of the shader (ShaderPatches::PatchBasisSmooth wallMask). No mask known: the plain copy draws.
+std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_basisSmoothWallPs, g_basisRoomWallPs, g_basisSmoothFillPs;
+struct WallMaskTex {
+    IDirect3DTexture9* tex = nullptr;
+    uint32_t gen = 0;
+};
+std::unordered_map<uintptr_t, WallMaskTex> g_wallMaskTex; // by the directional map's D3D texture
+IDirect3DDevice9* g_wallMaskDev = nullptr;
+std::atomic<long> g_wallMaskDraws{0};
+// (development builds, stair_room_fill) the story's ambient per tile (LevelLightShare::AmbientMapFor), 64 x 64 A32B32G32R32F in the
+// managed pool by the directional map's texture, written again when the rooms' ambients change; point-sampled
+struct AmbMapTex {
+    IDirect3DTexture9* tex = nullptr;
+    uint64_t sig = 0;
+};
+std::unordered_map<uintptr_t, AmbMapTex> g_ambMapTex;
+std::atomic<long> g_ambFillDraws{0};
+void ReleaseWallMasks() {
+    for (auto& [k, m] : g_wallMaskTex)
+        if (m.tex) m.tex->Release();
+    g_wallMaskTex.clear();
+    for (auto& [k, m] : g_ambMapTex)
+        if (m.tex) m.tex->Release();
+    g_ambMapTex.clear();
+}
+IDirect3DTexture9* WallMaskTexture(IDirect3DDevice9* dev, DWORD basisSampler) {
+    if (!DevSwitches::BasisWallFilter()) return nullptr;
+    IDirect3DBaseTexture9* b = nullptr;
+    if (FAILED(dev->GetTexture(basisSampler, &b)) || !b) return nullptr;
+    const uintptr_t key = reinterpret_cast<uintptr_t>(b);
+    b->Release();
+    if (dev != g_wallMaskDev) {
+        ReleaseWallMasks();
+        g_wallMaskDev = dev;
+    }
+    if (g_wallMaskTex.size() > 256) ReleaseWallMasks();
+    WallMaskTex& m = g_wallMaskTex[key];
+    static uint8_t px[64 * 64 * 4];
+    uint32_t gen = 0;
+    if (!LevelLightShare::WallMaskFor(key, m.tex ? m.gen : 0, gen, px)) return nullptr;
+    if (!m.tex) {
+        if (FAILED(dev->CreateTexture(64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &m.tex, nullptr)) || !m.tex) return nullptr;
+        m.gen = 0;
+    }
+    if (gen != m.gen) {
+        D3DLOCKED_RECT lock{};
+        if (FAILED(m.tex->LockRect(0, &lock, nullptr, 0)) || !lock.pBits) return nullptr;
+        for (int y = 0; y < 64; y++) std::memcpy(static_cast<BYTE*>(lock.pBits) + y * lock.Pitch, px + y * 64 * 4, 64 * 4);
+        m.tex->UnlockRect(0);
+        m.gen = gen;
+    }
+    return m.tex;
+}
+// Binds the mask at `sampler` (point filter, clamp, linear read: no sRGB decode) for one draw and puts the stage back after it
+struct WallMaskBind {
+    static constexpr int kCount = 6;
+    IDirect3DDevice9* dev;
+    DWORD s;
+    IDirect3DBaseTexture9* old = nullptr;
+    DWORD st[kCount] = {};
+    static constexpr D3DSAMPLERSTATETYPE kStates[kCount] = {D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_SRGBTEXTURE};
+    WallMaskBind(IDirect3DDevice9* d, DWORD sampler, IDirect3DTexture9* mask) : dev(d), s(sampler) {
+        dev->GetTexture(s, &old);
+        for (int i = 0; i < kCount; i++) dev->GetSamplerState(s, kStates[i], &st[i]);
+        const DWORD want[kCount] = {D3DTEXF_POINT, D3DTEXF_POINT, D3DTEXF_NONE, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, FALSE};
+        SetTex(dev, s, mask);
+        for (int i = 0; i < kCount; i++) dev->SetSamplerState(s, kStates[i], want[i]);
+    }
+    ~WallMaskBind() {
+        SetTex(dev, s, old);
+        if (old) old->Release();
+        for (int i = 0; i < kCount; i++) dev->SetSamplerState(s, kStates[i], st[i]);
+    }
+};
+
+IDirect3DTexture9* AmbientMapTextureFor(IDirect3DDevice9* dev, uintptr_t key) {
+    if (!DevSwitches::StairRoomFill() || dev != g_wallMaskDev || !key) return nullptr; // (WallMaskTexture set the device for this draw)
+    if (g_ambMapTex.size() > 256) {
+        for (auto& [k, m] : g_ambMapTex)
+            if (m.tex) m.tex->Release();
+        g_ambMapTex.clear();
+    }
+    AmbMapTex& m = g_ambMapTex[key];
+    static float rgba[64 * 64 * 4];
+    uint64_t sig = 0;
+    if (!LevelLightShare::AmbientMapFor(key, m.tex ? m.sig : 0, sig, rgba)) return nullptr;
+    if (!m.tex) {
+        if (FAILED(dev->CreateTexture(64, 64, 1, 0, D3DFMT_A32B32G32R32F, D3DPOOL_MANAGED, &m.tex, nullptr)) || !m.tex) return nullptr;
+        m.sig = 0;
+    }
+    if (sig != m.sig) {
+        D3DLOCKED_RECT lock{};
+        if (FAILED(m.tex->LockRect(0, &lock, nullptr, 0)) || !lock.pBits) return nullptr;
+        for (int y = 0; y < 64; y++) { // A32B32G32R32F: r, g, b, a floats in memory
+            float* row = reinterpret_cast<float*>(static_cast<BYTE*>(lock.pBits) + y * lock.Pitch);
+            std::memcpy(row, rgba + y * 64 * 4, 64 * 4 * sizeof(float));
+        }
+        m.tex->UnlockRect(0);
+        m.sig = sig;
+    }
+    return m.tex;
+}
+IDirect3DTexture9* AmbientMapTexture(IDirect3DDevice9* dev, DWORD basisSampler) {
+    IDirect3DBaseTexture9* b = nullptr;
+    if (FAILED(dev->GetTexture(basisSampler, &b)) || !b) return nullptr;
+    const uintptr_t key = reinterpret_cast<uintptr_t>(b);
+    b->Release();
+    return AmbientMapTextureFor(dev, key);
+}
+// (development builds, stair_story_blend) whether the current VS passes the world height in TEXCOORD2.w (by shader, render thread)
+std::unordered_map<IDirect3DVertexShader9*, bool> g_vsWorldY;
+bool CurVsPassesWorldY() {
+    if (!g_curVs) return false;
+    if (const auto it = g_vsWorldY.find(g_curVs); it != g_vsWorldY.end()) return it->second;
+    UINT size = 0;
+    bool yes = false;
+    if (SUCCEEDED(g_curVs->GetFunction(nullptr, &size)) && size >= 8 && size <= 65536 && size % 4 == 0) {
+        std::vector<DWORD> code(size / 4);
+        if (SUCCEEDED(g_curVs->GetFunction(code.data(), &size))) yes = ShaderPatches::VsPassesWorldY(code);
+    }
+    if (g_vsWorldY.size() > 1024) g_vsWorldY.clear();
+    g_vsWorldY[g_curVs] = yes;
+    return yes;
+}
+
+// Every smooth basis copy caps its bicubic reads by the native bilinear read (BasisSmoothOptions::preserveShadows)
+constexpr bool kBasisPreserveShadows = true;
+
 template <typename DrawFn> bool DrawBasisSmooth(IDirect3DDevice9* dev, DrawFn draw) {
     if (!g_indoorSmooth.load(std::memory_order_relaxed)) return false;
+    // (development builds, basis_wall_filter) the story's wall mask for the maps this draw binds, if known
+    IDirect3DTexture9* wallMask = nullptr;
+    if (DevSwitches::BasisWallFilter()) {
+        // a basis sampler of this shader: the plain copy's sizeSampler (any of the four maps names the story)
+        PatchedPs& probe = PatchedFor(dev, g_basisSmoothPs, "Indoor light (smooth)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchBasisSmooth(t, pp.smooth, {.preserveShadows = kBasisPreserveShadows}); });
+        if (probe.ps) wallMask = WallMaskTexture(dev, probe.smooth.sizeSampler);
+    }
     // a room-lit shader that also reads the basis maps (the richest InteriorFloor variants): both reads smooth in one copy
     if (g_curPsRoomMap && g_roomMapSmooth.load(std::memory_order_relaxed)) {
-        PatchedPs& q = PatchedFor(dev, g_basisRoomPs, "Indoor light and room map (smooth)", [](std::vector<DWORD>& t, PatchedPs& pp) {
-            return ShaderPatches::PatchBasisSmooth(t, pp.smooth) && ShaderPatches::PatchRoomMapSmooth(t, pp.room);
+        // (the copy with the wall mask needs more registers: where it cannot be made, the copy without it, never the basis-only
+        // path below, which leaves the room map unsmoothed)
+        PatchedPs* qw = wallMask ? &PatchedFor(dev, g_basisRoomWallPs, "Indoor light and room map (smooth, walls)", [](std::vector<DWORD>& t, PatchedPs& pp) {
+                                       return ShaderPatches::PatchBasisSmooth(t, pp.smooth, {.preserveShadows = kBasisPreserveShadows, .wallMask = true}) && ShaderPatches::PatchRoomMapSmooth(t, pp.room, false);
+                                   })
+                                 : nullptr;
+        if (qw && (!qw->ps || qw->smooth.maskSampler < 0)) qw = nullptr, wallMask = nullptr;
+        // (arch_ambient) the same copy with the arch block, bound only for a floor of a room with arches (ArchRowsFor). Where the
+        // copy with both the walls and the arches cannot be made, neither draw takes the walls (as when one copy held both)
+        PatchedPs* qa = nullptr;
+        if (DevSwitches::ArchAmbient()) {
+            if (qw) {
+                PatchedPs& aw = PatchedFor(dev, g_basisRoomWallArchPs, "Indoor light and room map (smooth, walls, arches)", [](std::vector<DWORD>& t, PatchedPs& pp) {
+                    return ShaderPatches::PatchBasisSmooth(t, pp.smooth, {.preserveShadows = kBasisPreserveShadows, .wallMask = true}) && ShaderPatches::PatchRoomMapSmooth(t, pp.room, true);
+                }, true);
+                if (!aw.ps || aw.smooth.maskSampler < 0) qw = nullptr, wallMask = nullptr;
+                else qa = ArchCopyOrNull(aw);
+            }
+            if (!qw)
+                qa = ArchCopyOrNull(PatchedFor(dev, g_basisRoomArchPs, "Indoor light and room map (smooth, arches)", [](std::vector<DWORD>& t, PatchedPs& pp) {
+                    return ShaderPatches::PatchBasisSmooth(t, pp.smooth, {.preserveShadows = kBasisPreserveShadows}) && ShaderPatches::PatchRoomMapSmooth(t, pp.room, true);
+                }, true));
+            if (qa && !RoomMapCapsOk(dev, qa->room)) qa = nullptr;
+        }
+        PatchedPs& qp = qw ? *qw : PatchedFor(dev, g_basisRoomPs, "Indoor light and room map (smooth)", [](std::vector<DWORD>& t, PatchedPs& pp) {
+            return ShaderPatches::PatchBasisSmooth(t, pp.smooth, {.preserveShadows = kBasisPreserveShadows}) && ShaderPatches::PatchRoomMapSmooth(t, pp.room, false);
         });
+        const bool plainOk = qp.ps && RoomMapCapsOk(dev, qp.room);
         float bsize[4], rsize[4], band[4], oldB[4] = {};
         bool wall = false;
         IDirect3DBaseTexture9* bmap = nullptr;
-        const bool ok = q.ps && RoomMapCapsOk(dev, q.room) && SUCCEEDED(dev->GetTexture(q.smooth.sizeSampler, &bmap)) && MapSize(bmap, bsize) &&
-                        RoomMapConsts(dev, q.room, rsize, band, wall);
+        const PatchedPs* any = plainOk ? &qp : qa;
+        const bool ok = any && SUCCEEDED(dev->GetTexture(any->smooth.sizeSampler, &bmap)) && MapSize(bmap, bsize) && RoomMapConsts(dev, any->room, rsize, band, wall);
+        const uintptr_t basisTex = reinterpret_cast<uintptr_t>(bmap); // (one of the draw's directional maps: its story, for the arches)
         if (bmap) bmap->Release();
         if (ok) {
+            float rows[kArchRows * 4] = {};
+            const int cells = qa ? ArchRowsFor(dev, qa->room, band, basisTex, rows) : 0;
+            const bool useArch = qa && (cells > 0 || !plainOk);
+            const PatchedPs& q = useArch ? *qa : qp;
             dev->GetPixelShaderConstantF(q.smooth.sizeConst, oldB, 1);
             g_inOwnCall = true;
             SetPsConst(dev, q.smooth.sizeConst, bsize, 1);
             g_inOwnCall = false;
-            DrawWithRoomMap(dev, q.ps, q.room, rsize, band, draw);
+            if (wallMask && q.smooth.maskSampler >= 0) {
+                g_inOwnCall = true;
+                const WallMaskBind bind(dev, static_cast<DWORD>(q.smooth.maskSampler), wallMask);
+                g_inOwnCall = false;
+                DrawWithRoomMap(dev, q.ps, q.room, rsize, band, useArch ? rows : nullptr, draw);
+                g_inOwnCall = true; // (the bind's restore, at its end of scope)
+                g_wallMaskDraws.fetch_add(1, std::memory_order_relaxed);
+            } else
+                DrawWithRoomMap(dev, q.ps, q.room, rsize, band, useArch ? rows : nullptr, draw);
+            g_inOwnCall = false;
             g_inOwnCall = true;
             SetPsConst(dev, q.smooth.sizeConst, oldB, 1);
             g_inOwnCall = false;
@@ -4471,7 +5551,20 @@ template <typename DrawFn> bool DrawBasisSmooth(IDirect3DDevice9* dev, DrawFn dr
             return true;
         }
     }
-    PatchedPs& p = PatchedFor(dev, g_basisSmoothPs, "Indoor light (smooth)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchBasisSmooth(t, pp.smooth); });
+    PatchedPs* pw = wallMask ? &PatchedFor(dev, g_basisSmoothWallPs, "Indoor light (smooth, walls)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchBasisSmooth(t, pp.smooth, {.preserveShadows = kBasisPreserveShadows, .wallMask = true, .floorWall = true}); }) : nullptr;
+    if (pw && (!pw->ps || pw->smooth.maskSampler < 0)) pw = nullptr;
+    // (stair_room_fill) the copy whose fill is the room's ambient, where the story's ambient map is known
+    IDirect3DTexture9* ambMap = pw ? AmbientMapTexture(dev, pw->smooth.sizeSampler) : nullptr;
+    if (ambMap) {
+        PatchedPs& pf = PatchedFor(dev, g_basisSmoothFillPs, "Indoor light (smooth, walls, room fill)",
+                                   [](std::vector<DWORD>& t, PatchedPs& pp) {
+                                       return ShaderPatches::PatchBasisSmooth(t, pp.smooth, {.preserveShadows = kBasisPreserveShadows, .wallMask = true, .floorWall = true, .stairRoomFill = true,
+                                                                                             .floorTone = DevSwitches::StairFloorTone(), .storyBlend = DevSwitches::StairStoryBlend()});
+                                   });
+        if (pf.ps && pf.smooth.maskSampler >= 0 && pf.smooth.ambSampler >= 0) pw = &pf;
+        else ambMap = nullptr;
+    }
+    PatchedPs& p = pw ? *pw : PatchedFor(dev, g_basisSmoothPs, "Indoor light (smooth)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchBasisSmooth(t, pp.smooth, {.preserveShadows = kBasisPreserveShadows}); });
     if (!p.ps) return false;
     float size[4], oldSize[4] = {};
     IDirect3DBaseTexture9* map = nullptr;
@@ -4483,7 +5576,69 @@ template <typename DrawFn> bool DrawBasisSmooth(IDirect3DDevice9* dev, DrawFn dr
     g_inOwnCall = true;
     SetPsConst(dev, p.smooth.sizeConst, size, 1);
     SetPs(dev, p.ps);
-    draw();
+    if (pw) {
+        // the floor light map read (a stair's top step): floor uv = basis uv x (64 m at 4 texels per metre / its size); its
+        // check in the shader (the draw's own zw) turns it off where the VS made it otherwise
+        float fsize[4], floorK[4] = {0, 0, 0, 0}, oldFloor[4] = {};
+        IDirect3DBaseTexture9* fmap = nullptr;
+        if (p.smooth.floorConst >= 0) {
+            if (SUCCEEDED(dev->GetTexture(static_cast<DWORD>(p.smooth.floorSampler), &fmap)) && MapSize(fmap, fsize))
+                floorK[0] = 4.0f * size[0] / fsize[0], floorK[1] = 4.0f * size[1] / fsize[1], floorK[2] = 1.0f;
+            if (fmap) fmap->Release();
+            dev->GetPixelShaderConstantF(static_cast<UINT>(p.smooth.floorConst), oldFloor, 1);
+            SetPsConst(dev, static_cast<DWORD>(p.smooth.floorConst), floorK, 1);
+        }
+        if (ambMap) {
+            const WallMaskBind bind(dev, static_cast<DWORD>(p.smooth.maskSampler), wallMask);
+            const WallMaskBind fill(dev, static_cast<DWORD>(p.smooth.ambSampler), ambMap); // (point, clamp)
+            // (stair_story_blend) the story above's maps by direction, its ambient map and the two floors' heights; off (const .z = 0)
+            // when not known or the VS does not pass the height (the samplers then hold this story's own, unused)
+            float storyK[4] = {0, 0, 0, 0}, oldStory[4] = {};
+            IDirect3DBaseTexture9* upTex[5] = {};
+            if (p.smooth.storyConst >= 0) {
+                uintptr_t cur[4] = {}, up[4] = {};
+                for (int d = 0; d < 4; d++) {
+                    IDirect3DBaseTexture9* c = nullptr;
+                    if (SUCCEEDED(dev->GetTexture(static_cast<DWORD>(p.smooth.basisSampler[d]), &c)) && c) {
+                        cur[d] = reinterpret_cast<uintptr_t>(c);
+                        c->Release();
+                    }
+                }
+                float yLow = 0, yUp = 0;
+                IDirect3DTexture9* upAmb = nullptr;
+                if (CurVsPassesWorldY() && LevelLightShare::StoryAboveFor(cur, up, yLow, yUp) && (upAmb = AmbientMapTextureFor(dev, up[0])) != nullptr) {
+                    storyK[0] = yLow + 0.5f, storyK[1] = 1.0f / (yUp - yLow), storyK[2] = 1.0f;
+                    for (int d = 0; d < 4; d++) upTex[d] = reinterpret_cast<IDirect3DBaseTexture9*>(up[d]);
+                    upTex[4] = upAmb;
+                } else {
+                    for (int d = 0; d < 4; d++) upTex[d] = reinterpret_cast<IDirect3DBaseTexture9*>(cur[d]);
+                    upTex[4] = ambMap;
+                }
+                dev->GetPixelShaderConstantF(static_cast<UINT>(p.smooth.storyConst), oldStory, 1);
+                SetPsConst(dev, static_cast<DWORD>(p.smooth.storyConst), storyK, 1);
+            }
+            const bool blend = p.smooth.storyConst >= 0 && upTex[0];
+            std::optional<SamplerBind> u0, u1, u2, u3;
+            std::optional<WallMaskBind> uA;
+            if (blend) {
+                const DWORD b = static_cast<DWORD>(p.smooth.upSampler);
+                u0.emplace(dev, b, upTex[0], D3DTEXF_NONE), u1.emplace(dev, b + 1, upTex[1], D3DTEXF_NONE), u2.emplace(dev, b + 2, upTex[2], D3DTEXF_NONE), u3.emplace(dev, b + 3, upTex[3], D3DTEXF_NONE);
+                uA.emplace(dev, static_cast<DWORD>(p.smooth.upAmbSampler), static_cast<IDirect3DTexture9*>(upTex[4]));
+            }
+            draw();
+            if (blend) {
+                u0.reset(), u1.reset(), u2.reset(), u3.reset(), uA.reset();
+                SetPsConst(dev, static_cast<DWORD>(p.smooth.storyConst), oldStory, 1);
+            }
+            g_ambFillDraws.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            const WallMaskBind bind(dev, static_cast<DWORD>(p.smooth.maskSampler), wallMask);
+            draw(); // (as the plain copy: within the own-call span)
+        }
+        if (p.smooth.floorConst >= 0) SetPsConst(dev, static_cast<DWORD>(p.smooth.floorConst), oldFloor, 1);
+        g_wallMaskDraws.fetch_add(1, std::memory_order_relaxed);
+    } else
+        draw();
     SetPs(dev, original);
     SetPsConst(dev, p.smooth.sizeConst, oldSize, 1);
     g_inOwnCall = false;
@@ -4952,6 +6107,42 @@ IDirect3DVertexShader9* FoliageVsFor(IDirect3DDevice9* dev, IDirect3DVertexShade
     }
     return f.vs;
 }
+// The per-vertex lamp copy of the current foliage vertex shader (switch foliage_vertex_lamps), made from the wrap copy
+IDirect3DVertexShader9* FoliageVertexVsFor(IDirect3DDevice9* dev, IDirect3DVertexShader9* vs, int& base) {
+    base = -1;
+    if (!g_curVsInfo || g_curVsInfo->cls != 6) return nullptr;
+    FoliageVs& f = g_curVsInfo->patched;
+    if (!f.perVertexTried) {
+        f.perVertexTried = true;
+        std::vector<DWORD> code = PatchedVsCode(vs, g_curVsInfo->cls);
+        std::vector<uint32_t> t(code.begin(), code.end());
+        int b = -1;
+        if (!code.empty() && FoliageVertexLamps::Patch(t, b) && SUCCEEDED(dev->CreateVertexShader(reinterpret_cast<const DWORD*>(t.data()), &f.perVertex))) f.perVertexBase = b;
+        else f.perVertex = nullptr;
+        // a refused shader (the wrap copy the patch read: FNV-1a, size), kept once in Apex Radiance\Censo as a fixture for the
+        // offline check (tools/foliage_vertex_test); development builds only
+        std::string refused;
+        if (!f.perVertex) {
+            uint32_t h = 2166136261u;
+            for (DWORD d : code) h = (h ^ d) * 16777619u;
+            const size_t bytes = code.size() * sizeof(DWORD);
+            refused = std::format("not of the captured family ({}): left as before; code VS_{:08X} ({} bytes)", code.empty() ? "no wrap copy" : FoliageVertexLamps::LastRefusal(), h, bytes);
+            if (DevSwitches::kCompiled) try {
+                const std::filesystem::path dir = std::filesystem::path(ApexPaths::ApexDirectory()) / L"Censo";
+                const std::filesystem::path file = dir / std::format("foliage_VS_{:08X}.bin", h);
+                if (!code.empty() && !std::filesystem::exists(file)) {
+                    std::filesystem::create_directories(dir);
+                    std::ofstream(file, std::ios::binary).write(reinterpret_cast<const char*>(code.data()), static_cast<std::streamsize>(bytes));
+                }
+            } catch (...) {
+            }
+        }
+        LOG_INFO(std::format("[LotLightBridge] Foliage per-vertex lamps: vertex shader {:08X} {}", reinterpret_cast<uintptr_t>(vs),
+                             f.perVertex ? std::format("patched (constants c{}..c{})", b, b + 81) : refused));
+    }
+    base = f.perVertexBase;
+    return f.perVertex;
+}
 
 template <typename DrawFn> bool DrawLeafShadow(IDirect3DDevice9* dev, DrawFn draw) {
     const float night = g_night.load(std::memory_order_relaxed);
@@ -5036,6 +6227,165 @@ template <typename DrawFn> bool DrawObjectRig(IDirect3DDevice9* dev, DrawFn draw
     SetPs(dev, original);
     g_inOwnCall = false;
     g_objectDrawn.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+
+// ---- The sun's (and moon's) shadow on trees (switch foliage_sun_shadow; FoliageVertexLamps::PatchTreeSunShadow).
+// The frame's shadow map is the depth texture on s5 of the draws whose pixel shader reads it (bushes, roofs, the lot pass,
+// water, the game's shadowed tree variants); it is used only in the frame it was seen in or the next one, and forgotten
+// before a Reset (render thread; the game owns it, no reference is kept).
+IDirect3DBaseTexture9* g_sunShadowMap = nullptr;
+UINT g_sunShadowSize = 0;
+uint32_t g_sunShadowFrame = 0;
+std::atomic<long> g_treeShadowDrawn{0};
+// foliage draws that kept the game's pixel shader, by cause (log): no shadow map seen yet, none in this frame or the last,
+// a vertex shader without oT5 / oT6.x, a pixel shader the patch refused (most: not a tree, or one already shadowed)
+std::atomic<long> g_treeShadowNoMap{0}, g_treeShadowStale{0}, g_treeShadowNoVsOut{0}, g_treeShadowNotPatched{0};
+// (log) draws into the shadow map, sampled one frame in 120: all of them, and the instanced foliage ones (class 6)
+std::atomic<long> g_shadowPassDraws{0}, g_shadowPassFoliage{0};
+void LogTreeShadow() {
+    static DWORD s_logged = 0;
+    const DWORD now = GetTickCount();
+    if (now - s_logged < 30000) return;
+    s_logged = now;
+    LOG_INFO(std::format("[Foliage] Sun shadow on trees: {} draws with it; kept the game's: {} no shadow map seen, {} not seen this frame, {} vertex shader "
+                         "without oT5/oT6, {} pixel shader not patched; shadow map {}x{}; draws into it (one frame in 120): {} ({} instanced foliage)",
+                         g_treeShadowDrawn.load(), g_treeShadowNoMap.load(), g_treeShadowStale.load(), g_treeShadowNoVsOut.load(), g_treeShadowNotPatched.load(),
+                         g_sunShadowSize, g_sunShadowSize, g_shadowPassDraws.load(), g_shadowPassFoliage.load()));
+}
+// (log) a draw into the shadow map, one frame in 120; each vertex shader drawing into it is named once (with whether it
+// reads per-instance constants c0[a0]: an instanced caster such as trees)
+void NoteShadowPassDraw(IDirect3DDevice9* dev) {
+    // (only a map seen bound this frame or the last: an older pointer may be a texture the game released)
+    if (!g_sunShadowMap || (g_roomMapFrame % 120) != 0 || g_roomMapFrame - g_sunShadowFrame > 1) return;
+    static IDirect3DBaseTexture9* s_for = nullptr;
+    static IDirect3DSurface9* s_surf = nullptr; // compared by address only (the game owns it)
+    if (s_for != g_sunShadowMap) {
+        s_for = g_sunShadowMap, s_surf = nullptr;
+        IDirect3DSurface9* s = nullptr;
+        if (SUCCEEDED(static_cast<IDirect3DTexture9*>(g_sunShadowMap)->GetSurfaceLevel(0, &s)) && s) s_surf = s, s->Release();
+    }
+    IDirect3DSurface9* ds = nullptr;
+    if (!s_surf || FAILED(dev->GetDepthStencilSurface(&ds)) || !ds) return;
+    const bool shadowPass = ds == s_surf;
+    ds->Release();
+    if (!shadowPass) return;
+    g_shadowPassDraws.fetch_add(1, std::memory_order_relaxed);
+    if (g_curVsIsFoliage) g_shadowPassFoliage.fetch_add(1, std::memory_order_relaxed);
+    static std::unordered_map<IDirect3DVertexShader9*, bool> s_seen;
+    if (!g_curVs || s_seen.size() > 64 || s_seen.count(g_curVs)) return;
+    UINT size = 0;
+    std::vector<DWORD> t;
+    if (SUCCEEDED(g_curVs->GetFunction(nullptr, &size)) && size >= 8 && size <= 65536 && size % 4 == 0) {
+        t.resize(size / 4);
+        if (FAILED(g_curVs->GetFunction(t.data(), &size))) t.clear();
+    }
+    bool instanced = false; // a constant source with relative addressing (0x2000) on c0..c2
+    for (size_t i = 1; i < t.size() && !instanced; i++) {
+        const DWORD d = t[i];
+        instanced = (d & 0x80000000u) && (d & 0x2000u) && (((d >> 28) & 7) | (((d >> 11) & 3) << 3)) == 2 && (d & 0x7FF) <= 2;
+    }
+    uint32_t h = 2166136261u;
+    for (DWORD v : t) h = (h ^ v) * 16777619u;
+    s_seen.emplace(g_curVs, instanced);
+    LOG_INFO(std::format("[Foliage] Shadow pass vertex shader VS_{:08X} ({} bytes){}{}", h, size, instanced ? ": instanced (c0[a0])" : "", g_curVsIsFoliage ? ", foliage" : ""));
+}
+void ForgetSunShadow(IDirect3DDevice9*) { g_sunShadowMap = nullptr; }
+void NoteSunShadow(IDirect3DDevice9* dev) {
+    static const bool s_registered = (RenderCallbacks::preReset.Add(ForgetSunShadow), true);
+    (void)s_registered;
+    IDirect3DBaseTexture9* t = nullptr;
+    if (FAILED(dev->GetTexture(5, &t)) || !t) return;
+    if (t != g_sunShadowMap && t->GetType() == D3DRTYPE_TEXTURE) {
+        D3DSURFACE_DESC d{};
+        const bool depth = SUCCEEDED(static_cast<IDirect3DTexture9*>(t)->GetLevelDesc(0, &d)) &&
+                           (d.Format == D3DFMT_D24S8 || d.Format == D3DFMT_D24X8 || d.Format == D3DFMT_D16 || d.Format == D3DFMT_D24FS8 || d.Format == D3DFMT_D32);
+        if (depth && d.Width >= 256 && d.Width == d.Height) {
+            if (!g_sunShadowMap) LOG_INFO(std::format("[Foliage] Sun shadow map seen: {}x{} (format {})", d.Width, d.Height, static_cast<int>(d.Format)));
+            g_sunShadowMap = t, g_sunShadowSize = d.Width;
+        }
+    }
+    if (t == g_sunShadowMap) g_sunShadowFrame = g_roomMapFrame;
+    t->Release();
+}
+struct TreeShadowPs {
+    IDirect3DPixelShader9* ps = nullptr;
+    int base = -1;
+    bool tried = false;
+};
+std::unordered_map<IDirect3DPixelShader9*, TreeShadowPs> g_treeShadowPs;
+// Whether a vertex shader writes the shadow position oT5 (xyzw) and the edge fade oT6.x the patched pixel shader reads
+// (VS_2C4FA3E0 does; the per-vertex lamp family VS_9A10A3A8 does not: such a pair keeps the game's pixel shader)
+std::unordered_map<IDirect3DVertexShader9*, bool> g_vsWritesShadow;
+bool VsWritesShadow(IDirect3DVertexShader9* vs) {
+    if (!vs) return false;
+    const auto it = g_vsWritesShadow.find(vs);
+    if (it != g_vsWritesShadow.end()) return it->second;
+    UINT size = 0;
+    std::vector<DWORD> t;
+    if (SUCCEEDED(vs->GetFunction(nullptr, &size)) && size >= 8 && size <= 65536 && size % 4 == 0) {
+        t.resize(size / 4);
+        if (FAILED(vs->GetFunction(t.data(), &size))) t.clear();
+    }
+    DWORD masks[2] = {};
+    for (size_t i = 1; i < t.size();) { // the destination token of every instruction (an oTn: register type 6)
+        const DWORD op = t[i] & 0xFFFF;
+        if (op == 0xFFFF) break;
+        const DWORD len = op == 0xFFFE ? (t[i] >> 16) & 0x7FFF : (t[i] >> 24) & 0xF;
+        if (op != 0xFFFE && op != 0x1F && op != 0x51 && len >= 1 && i + 1 < t.size()) {
+            const DWORD d = t[i + 1], type = ((d >> 28) & 7) | (((d >> 11) & 3) << 3), num = d & 0x7FF;
+            if (type == 6 && (num == 5 || num == 6)) masks[num - 5] |= (d >> 16) & 0xF;
+        }
+        i += 1 + len;
+    }
+    const bool ok = masks[0] == 0xF && (masks[1] & 0x1);
+    g_vsWritesShadow.emplace(vs, ok);
+    return ok;
+}
+// Draws a tree whose pixel shader reads no shadow with the patched copy, the frame's shadow map on s5; false: as before
+template <typename DrawFn> bool DrawTreeSunShadow(IDirect3DDevice9* dev, DrawFn draw) {
+    if (!DevSwitches::FoliageSunShadow() || !g_curPs) return false;
+    LogTreeShadow();
+    if (!g_sunShadowMap) return g_treeShadowNoMap.fetch_add(1, std::memory_order_relaxed), false;
+    if (g_roomMapFrame - g_sunShadowFrame > 1) return g_treeShadowStale.fetch_add(1, std::memory_order_relaxed), false;
+    if (!VsWritesShadow(g_curVs)) return g_treeShadowNoVsOut.fetch_add(1, std::memory_order_relaxed), false;
+    TreeShadowPs& e = g_treeShadowPs[g_curPs];
+    if (!e.tried) {
+        e.tried = true;
+        UINT size = 0;
+        std::vector<uint32_t> t;
+        if (SUCCEEDED(g_curPs->GetFunction(nullptr, &size)) && size >= 8 && size <= 65536 && size % 4 == 0) {
+            t.resize(size / 4);
+            if (FAILED(g_curPs->GetFunction(t.data(), &size))) t.clear();
+        }
+        int b = -1;
+        if (!t.empty() && FoliageVertexLamps::PatchTreeSunShadow(t, b) && SUCCEEDED(dev->CreatePixelShader(reinterpret_cast<const DWORD*>(t.data()), &e.ps))) e.base = b;
+        else e.ps = nullptr;
+        // (only the tree family is logged: other foliage pixel shaders are refused for having no sun term)
+        if (e.ps || std::strcmp(FoliageVertexLamps::LastRefusal(), "no sun term (mov_sat t1.wzyx, mad .y c0)") != 0)
+            LOG_INFO(std::format("[Foliage] Tree pixel shader {:08X}: {}", reinterpret_cast<uintptr_t>(g_curPs),
+                                 e.ps ? std::format("reads the sun shadow (constants c{}..c{})", e.base, e.base + 4) : std::format("left as before ({})", FoliageVertexLamps::LastRefusal())));
+    }
+    if (!e.ps) return g_treeShadowNotPatched.fetch_add(1, std::memory_order_relaxed), false;
+    const UINT base = static_cast<UINT>(e.base);
+    float saved[5][4] = {};
+    if (FAILED(dev->GetPixelShaderConstantF(base, &saved[0][0], 5))) return false;
+    // half a texel; a depth bias of 1/2048 of the map's depth (about 0.1 m at the captured scale, against leaves shading
+    // themselves); a floor for the light through a crown
+    const float o = 0.5f / static_cast<float>(std::max<UINT>(g_sunShadowSize, 1)), bias = 1.0f / 2048.0f, fl = FoliageVertexLamps::kTreeShadowFloor;
+    const float k[5][4] = {{-o, -o, -bias, 0.0f}, {o, -o, -bias, 0.0f}, {-o, o, -bias, 0.0f}, {o, o, -bias, 0.0f}, {0.25f, 1.0f, 1.0f - fl, fl}};
+    IDirect3DPixelShader9* original = g_curPs;
+    g_inOwnCall = true;
+    {
+        SamplerBind bind(dev, 5, g_sunShadowMap, D3DTEXF_NONE);
+        SetPs(dev, e.ps);
+        SetPsConst(dev, base, &k[0][0], 5);
+        draw();
+        SetPsConst(dev, base, &saved[0][0], 5);
+        SetPs(dev, original);
+    }
+    g_inOwnCall = false;
+    g_treeShadowDrawn.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
 
@@ -5191,9 +6541,13 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
     constexpr auto kSkip = D3D9Hooks::HookAction::Skip;
     constexpr auto kContinue = D3D9Hooks::HookAction::Continue;
     if (g_curPsBasis) RoomMapPadding::NoteDraw(dev, g_curPs); // note the room light maps it binds (edge padding)
+    // the frame's sun shadow map, from the draws that read it (the trees' shadow, DrawTreeSunShadow)
+    if (DevSwitches::FoliageSunShadow() && (g_curClass == PsClass::ObjectRig || g_curClass == PsClass::Roof || g_curClass == PsClass::LotLight || g_curClass == PsClass::Lake))
+        NoteSunShadow(dev);
     // (not for fences / snow relief / rig objects: those draws keep their own fixes)
     if (g_curPsBasis && !g_curVsIsInstanced && !g_curVsIsSnowRelief && !g_curVsIsObject && DrawBasisSmooth(dev, draw)) return NoteClaim(ClaimSource::IndoorBasisSmooth);
-    if (g_curPsRoomMap && !g_curVsIsInstanced && !g_curVsIsSnowRelief && !g_curVsIsObject && DrawRoomMapSmooth(dev, draw)) return NoteClaim(ClaimSource::RoomMapSmooth);
+    const bool roomFloor=kMemoryOptimizationsEnabled && g_curVsInfo && g_curVsInfo->packedRoomFloor;
+    if (g_curPsRoomMap && !g_curVsIsInstanced && !g_curVsIsSnowRelief && (!g_curVsIsObject || roomFloor) && DrawRoomMapSmooth(dev, draw)) return NoteClaim(ClaimSource::RoomMapSmooth);
     if (g_curClass == PsClass::ObjectRig) return DrawObjectRig(dev, draw) ? NoteClaim(ClaimSource::ObjectRigNightFix) : kContinue;
     if (g_curClass == PsClass::Roof) return DrawRoof(dev, draw) ? NoteClaim(ClaimSource::RoofLampFix) : kContinue;
     // The snowy roof pixel shader is also the one of snow on stair tops (same bytes, LightProbe-neve-escada); the vertex
@@ -5202,7 +6556,11 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
     if (g_curClass == PsClass::Lake) return DrawLake(dev, draw) ? NoteClaim(ClaimSource::LakeLampFix) : kContinue;
     if (g_curClass == PsClass::Sea) return DrawLake(dev, draw, true) ? NoteClaim(ClaimSource::LakeLampFix) : kContinue;
     if (g_curClass == PsClass::LakeWeather) return DrawLake(dev, draw, false, true) ? NoteClaim(ClaimSource::LakeLampFix) : kContinue;
-    if (g_curVsIsFoliage) return DrawLeafShadow(dev, draw) ? NoteClaim(ClaimSource::FoliageMoonShadowPS) : kContinue;
+    if (g_curVsIsFoliage) {
+        if (DevSwitches::FoliageSunShadow()) NoteSunShadow(dev); // (the game's shadowed foliage variants bind it too)
+        if (DrawLeafShadow(dev, draw)) return NoteClaim(ClaimSource::FoliageMoonShadowPS);
+        return DrawTreeSunShadow(dev, draw) ? NoteClaim(ClaimSource::FoliageMoonShadowPS) : kContinue; // (the same claim: foliage shadow)
+    }
     if (g_curClass == PsClass::WallGain) {
         return DrawWallGain(dev, draw) ? NoteClaim(ClaimSource::ExteriorWallGain) : kContinue;
     }
@@ -5680,6 +7038,13 @@ struct RigSnap {
 std::unordered_map<uint64_t, RigSnap> g_rigSnaps; // (rig, vertex-light register) -> its lights before a switch (render thread)
 std::atomic<long> g_rigHeldDraws{0};
 constexpr DWORD kRigSnapFreshMs = 2000;
+// g_rigSnaps bounds: past kRigSnapsMax entries they are all dropped, past kRigSnapsEpisodeMax during an episode (whose
+// pre-episode snapshots a drop would lose). Outside an episode, OnPresent drops every kRigSnapSweepMs the parts not drawn
+// for kRigSnapKeepMs: HoldRig uses a snapshot only up to kRigSnapFreshMs + 4000 ms before the episode or the switch.
+constexpr size_t kRigSnapsMax = 16384, kRigSnapsEpisodeMax = 32768;
+constexpr DWORD kRigSnapKeepMs = 30000, kRigSnapSweepMs = 5000;
+static_assert(kRigSnapKeepMs > kRigSnapFreshMs + 4000);
+DWORD g_rigSweepAt = 0;
 // The current episode (render thread): a switch or an edit hold seen since g_rigEpisodeFrame; ended by OnPresent
 bool g_rigEpisodeOn = false;
 uint32_t g_rigEpisodeFrame = 0;
@@ -5751,7 +7116,7 @@ void HoldRig(IDirect3DDevice9* dev, float (*rig)[4], RigHeld& h) {
     }
     if (!wait) { // the lights as the game set them, for the next switch (not just after one: the rig may hold its new lights)
         if (lastSwitch && now - lastSwitch < 100) return;
-        if (g_rigSnaps.size() > 16384) g_rigSnaps.clear();
+        if (g_rigSnaps.size() > (g_rigEpisodeOn ? kRigSnapsEpisodeMax : kRigSnapsMax)) g_rigSnaps.clear();
         RigSnap& s = g_rigSnaps[key];
         if (withRoom && g_rigEpisodeOn && s.tick && static_cast<int32_t>(s.frame - g_rigEpisodeFrame) < 0 && s.preEpisode != g_rigEpisodeFrame) {
             std::memcpy(s.prePs, s.ps, sizeof s.prePs); // (the lights from before the episode, once per episode)
@@ -5882,6 +7247,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawTracked(IDirect3DDevice9*
         if (vs) vs->Release();
         g_stateUnknown = false;
     }
+    if (DevSwitches::FoliageSunShadow()) NoteShadowPassDraw(dev); // (log only, one frame in 120)
     IDirect3DVertexShader9* foliage = g_curVsIsFoliage && g_objectFix.load(std::memory_order_relaxed) ? FoliageVsFor(dev, g_curVs) : nullptr;
     if (!foliage) return OnDrawInner(dev, draw);
     IDirect3DVertexShader9* original = g_curVs;
@@ -5899,8 +7265,41 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawTracked(IDirect3DDevice9*
     if (reachLaw) g_foliageReachLaw.fetch_add(1, std::memory_order_relaxed);
     float oldWrap[4] = {};
     const bool wrapSaved = SUCCEEDED(dev->GetVertexShaderConstantF(ShaderPatches::kFoliageWrapConst, oldWrap, 1));
+    // Development builds: per-vertex lamps (foliage_vertex_lamps) and the crowns for the ground shade (canopy_ground_shadow),
+    // at night on reach-law rigs. A draw whose lamps cannot all be matched keeps the copy above.
+    IDirect3DVertexShader9* drawVs = foliage;
+    static std::vector<float> s_pvSaved(82 * 4);
+    static float s_colSaved[27][4]; // the game's c54..c80 (lamp colours), put back after a per-vertex draw
+    int pvBase = -1; // set: c[pvBase .. +81] were replaced for this draw and are put back after it
+    if ((DevSwitches::FoliageVertexLamps() || DevSwitches::CanopyGroundShadow()) && reachLaw && g_night.load(std::memory_order_relaxed) > 0.01f) {
+        int base = -1;
+        IDirect3DVertexShader9* perVertex = DevSwitches::FoliageVertexLamps() ? FoliageVertexVsFor(dev, g_curVs, base) : nullptr;
+        static std::vector<float> s_pv;
+        const bool want = perVertex && base > 0;
+        const bool matched = HookGuard::Run("Foliage per-vertex lamps", false, [&] { return FoliageVertexConstants(dev, want, s_pv); });
+        if (want && matched && SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(base), s_pvSaved.data(), 82)) &&
+            SUCCEEDED(dev->GetVertexShaderConstantF(54, &s_colSaved[0][0], 27))) {
+            g_inOwnCall = true;
+            SetVsConst(dev, static_cast<UINT>(base), s_pv.data(), 82);
+            SetVsConst(dev, 54, s_pv.data() + 82 * 4, 27); // the instances' own lamp colours
+            g_inOwnCall = false;
+            pvBase = base;
+            drawVs = perVertex;
+            g_foliageVertexDrawn.fetch_add(1, std::memory_order_relaxed);
+        } else if (perVertex) {
+            g_foliageVertexRefused.fetch_add(1, std::memory_order_relaxed);
+        }
+        static DWORD s_logged = 0;
+        if (const DWORD now = GetTickCount(); now - s_logged > 30000) {
+            s_logged = now;
+            LOG_INFO(std::format("[Foliage] Per-vertex lamps: {} draws, {} kept the old path; instances by their own lamps: {} with none, {} with 1, {} with 2, {} with 3 "
+                                 "({} without a crown shape); lamps left out by walls: {}; crowns for the ground shade: {}; camera drift corrected: up to {:.2f} m (places learned {}); tree draws with the sun shadow: {}; picks made again: {} changed the light, {} kept it",
+                                 g_foliageVertexDrawn.load(), g_foliageVertexRefused.load(), g_foliageOwned[0].load(), g_foliageOwned[1].load(), g_foliageOwned[2].load(),
+                                 g_foliageOwned[3].load(), g_foliageNoShape.load(), g_foliageWallOut.load(), g_crownCount.load(), g_eyeDriftMax.exchange(0.0f), g_eyeAnchors.Count(), g_treeShadowDrawn.load(), g_foliageRepickChanged.load(), g_foliageRepickSame.load()));
+        }
+    }
     g_inOwnCall = true;
-    SetVs(dev, foliage);
+    SetVs(dev, drawVs);
     SetVsConst(dev, ShaderPatches::kFoliageWrapConst, wrap, 1);
     g_inOwnCall = false;
     if (dayScaled) g_foliageDayScaled.fetch_add(1, std::memory_order_relaxed);
@@ -5912,6 +7311,10 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawTracked(IDirect3DDevice9*
     g_inOwnCall = true;
     SetVs(dev, original);
     if (wrapSaved) SetVsConst(dev, ShaderPatches::kFoliageWrapConst, oldWrap, 1);
+    if (pvBase > 0) {
+        SetVsConst(dev, static_cast<UINT>(pvBase), s_pvSaved.data(), 82); // the game's values of c[base .. base+81] again
+        SetVsConst(dev, 54, &s_colSaved[0][0], 27);                       // and of its lamp colours
+    }
     g_inOwnCall = false;
     g_foliageDrawn.fetch_add(1, std::memory_order_relaxed);
     MarkClaimSource(ClaimSource::FoliageVertex);
@@ -6476,6 +7879,7 @@ void UpdateHooks() {
                 try {
                     g_curPrims = prims;
                     g_curDipBase = static_cast<UINT>(bvi), g_curDipMin = minV, g_curDipNum = numV;
+                    NoteSolidMesh(ctx.device,type,bvi,minV,numV,start,prims,g_curVsIsInstanced);
                     return OnDraw(ctx.device, [&]() {
                         drawn = true;
                         D3D9Hooks::ReissueScope reissue; // only the observers of re-issued draws run for it (d3d9_hooks.h)
@@ -6555,6 +7959,7 @@ void SetSidewalkClear(float amount) { g_sidewalkClear = amount < 0 ? 0.0f : (amo
 void OnWorldChanged() {
     ClearChunks();
     RoomMapPadding::Clear();
+    g_rigRoomWaits.clear(); // (keyed by the old world's room addresses)
     // A direct lamp pool/memo belongs to this world too. Never illuminate new
     // geometry with old-world rows while waiting for a successful enumeration.
     g_allLamps.clear();
@@ -6584,6 +7989,7 @@ void OnWorldChanged() {
     g_haveLastEdgeRect = false;
     g_shadeQueue.clear(); // the lamp shades waiting or building belong to the previous world's lots
     g_fenceGroups.clear(); // (garden walls of the old world)
+    g_fenceBusy.clear();
     g_fenceGen++;
     g_meshBoxes.clear();
     g_fenceWalls = 0;
@@ -6596,6 +8002,7 @@ void OnWorldChanged() {
         if (m.tex) m.tex->Release();
     g_lotMasks.clear();
     g_groupCentres.clear();
+    g_centreBusy.clear();
 }
 
 void SetSoftLotEdges(bool on) { g_softEdges = on; }
@@ -6604,9 +8011,9 @@ void SetIndoorSmooth(bool on) { g_indoorSmooth = on; }
 void SetSmoothRoomMaps(bool on) { g_roomMapSmooth = on; }
 std::string RoomMapSmoothStatus() {
     return std::format("B-spline reads {}: {} room-lit shaders, walls {} draws, floors {} draws | left to the game: caps {}, unknown vertex shader {}, wall blocks off the grid {}, "
-                       "point filter {}",
+                       "point filter {} | draws with the arch copy {}, with the copy without arches {}",
                        g_roomMapSmooth.load() ? "on" : "off", g_roomMapPs.size(), g_roomWallDrawn.load(), g_roomFloorDrawn.load(), g_roomCapsRefused.load(),
-                       g_roomUnknownVs.load(), g_roomBandsOff.load(), g_roomPointFilter.load());
+                       g_roomUnknownVs.load(), g_roomBandsOff.load(), g_roomPointFilter.load(), g_archCopyDraws.load(), g_archPlainDraws.load());
 }
 
 std::string IndoorSmoothStatus() {
@@ -6714,6 +8121,8 @@ void RequestExteriorCapture() {
 std::string ExteriorCaptureStatus() { return g_exteriorPending ? "capturing..." : "ready"; }
 
 void OnPresent() {
+    if (DevSwitches::kCompiled) MeasureMemory(); // development builds (memory_owners)
+    PumpSolidMeshes();
     ++g_roomMapFrame; // (the room map size memo is per frame)
     g_lotDrawTick = GetTickCount();
     // the furniture's lamp edit episode is over once no switch, edit hold or trailing room remains (2.13.1: one log line)
@@ -6729,6 +8138,11 @@ void OnPresent() {
             if (Recorder::Active()) Recorder::Note("[switch] " + text);
         }
         g_rigEpisodeParts.clear();
+    }
+    if (const DWORD now = GetTickCount(); now - g_rigSweepAt >= kRigSnapSweepMs) {
+        g_rigSweepAt = now;
+        if (!g_rigEpisodeOn && !RigEpisodeWanted())
+            std::erase_if(g_rigSnaps, [now](const auto& kv) { return now - kv.second.tick > kRigSnapKeepMs; });
     }
     ReportHookFailure();
     // the lamp shade on lot ground follows "Walls shade lamp light near the ground" (14/10; the same wall copy as "Buildings
@@ -6797,6 +8211,7 @@ void OnPresent() {
     const bool held = AtriumHold::SwitchHolding() || dragHeld; // (a classic drag: until the release)
     if (held && wantLamps && enumerated) g_lampsHeldForSwitch = true;
     ReadEnumeratedLamps(wantLamps && enumerated && !held);
+    if (wantLamps && enumerated) ReadFoliageLamps(!held); // (the trees never wait on a hold)
     TrackLotLampEdits();
 }
 
@@ -7028,6 +8443,11 @@ std::string DescribeDraw() {
 }
 
 void FurnitureTraceReset() { g_traceLast.clear(); }
+uint64_t FurnitureTraceRelease() {
+    const uint64_t bytes = ApexMemory::Est::Hash(g_traceLast, [](const auto& kv) { return ApexMemory::Est::Vec(kv.second.states); });
+    std::unordered_map<uint64_t, TraceSeen>().swap(g_traceLast);
+    return bytes;
+}
 
 // Development build (F6 recorder): room-mode furniture draws since the last call (the render thread)
 std::string FurnitureDiag() {
@@ -7051,6 +8471,8 @@ std::string ObjectStatus() {
 }
 
 void Shutdown(bool keepChunkMaps) {
+    MeshOcclusion::Reset();
+    g_solidGroups.clear();g_solidGeometry.clear();g_solidAttempts.clear();g_solidBusy.clear();g_solidPs.clear();g_solidTriangles=0;g_solidDirty=0;g_solidNotes=0;g_solidNextScan=0;g_solidScanning=false;
     g_keepChunks = keepChunkMaps;
     g_objectFix = false;
     g_wallGain = 1.0f;
@@ -7067,6 +8489,7 @@ void Shutdown(bool keepChunkMaps) {
     g_shadeWorker.Stop();
     ReleaseLotMasks();
     g_fenceGroups.clear();
+    g_fenceBusy.clear();
     g_fenceGen++;
     g_meshBoxes.clear();
     g_fenceWalls = 0;
@@ -7085,7 +8508,7 @@ void Shutdown(bool keepChunkMaps) {
         g_meltPs = nullptr;
     }
     g_meltTried = false;
-    for (auto* cache : {&g_terrainAlphaPs, &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_cubeTintPs, &g_windowPs,
+    for (auto* cache : {&g_terrainAlphaPs, &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs, &g_windowPs,
                         &g_objLampPsReach, &g_fencePsReach, &g_windowPsReach}) {
         for (auto& [k, p] : *cache)
             if (p.ps) p.ps->Release();
@@ -7095,6 +8518,8 @@ void Shutdown(bool keepChunkMaps) {
         for (auto& [k, p] : cache)
             if (p.ps) p.ps->Release();
     g_indoorPs.clear();
+    ReleaseWallMasks(); // (development builds, basis_wall_filter)
+    g_wallMaskDev = nullptr;
     for (auto& [k, info] : g_vsInfo) { // patched copies: foliage / objects, and the outdoor floors of summer
         if (info.patched.vs) info.patched.vs->Release();
         if (info.floor.vs) info.floor.vs->Release();
@@ -7184,4 +8609,71 @@ void Shutdown(bool keepChunkMaps) {
     g_keepChunks = false;
 }
 
+} // namespace LotLightBridge
+
+// ---- Development builds (memory_owners): this file's containers by owner (apex_memory.h), measured on the render thread
+// (OnPresent) that owns them, at most every 10 s and after an F8. Only sizes and capacities are read. The Direct3D textures
+// and shader copies themselves are counted where they are created (D3D9Hooks); here the CPU side. ----
+namespace {
+using namespace ApexMemory::Est;
+void MeasureMemoryImpl() {
+    using ApexMemory::Register;
+    using ApexMemory::Set;
+    constexpr const char* G = "LotLightBridge";
+    static auto* sPatched = Register(G, "patched shader copies (records by game shader)");
+    static auto* sShaderFacts = Register(G, "shader facts (pixel and vertex shader classes)");
+    static auto* sLotMasks = Register(G, "g_lotMasks: lot room masks and lamp shades");
+    static auto* sChunkShade = Register(G, "chunk shades (results waiting, queue)");
+    static auto* sSolid = Register(G, "solid mesh groups (instanced triangles)");
+    static auto* sFence = Register(G, "fence groups, walls and cells; mesh boxes");
+    static auto* sFoliage = Register(G, "foliage meshes, instances and crowns");
+    static auto* sWallMask = Register(G, "wall-mask textures (records)");
+    static auto* sOther = Register(G, "lamps, lots, chunks and developer notes");
+    uint64_t patched = 0;
+    size_t patchedItems = 0;
+    const auto ps = [&](const std::unordered_map<IDirect3DPixelShader9*, PatchedPs>& m) { patched += Hash(m), patchedItems += m.size(); };
+    for (const auto* m : {&g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_terrainAlphaPs,
+                          &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_objLampPsReach, &g_fencePsReach, &g_windowPs, &g_windowPsReach,
+                          &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs})
+        ps(*m);
+    for (const auto* t : {&g_floorShadePs, &g_indoorPs, &g_floorAtlasPs}) {
+        patched += Tree(*t);
+        for (const auto& [k, m] : *t) ps(m);
+    }
+    Set(sPatched, patched, patchedItems);
+    Set(sShaderFacts,
+        Hash(g_classCache) + Hash(g_basisPs) + Hash(g_psFacts) + Hash(g_roomMapPs) + Hash(g_worldSamplers) + Hash(g_wetLotPs) + Hash(g_vsInfo) + Hash(g_roomUvVs) +
+            Hash(g_terrainLampConst) + Hash(g_rigPsInfo) + Hash(g_solidPs) + Hash(g_psIs3) + Hash(g_wallConst) + Hash(g_cinemaMarqueeDayPs) + Hash(g_cinemaMarqueePanelDayPs) + Vec(g_pinned),
+        g_classCache.size() + g_psFacts.size() + g_vsInfo.size());
+    Set(sLotMasks, Hash(g_lotMasks, [](const auto& kv) {
+            const LotMask& m = kv.second;
+            return Vec(m.room) + Vec(m.shade) + (m.ext ? Shared<ExtData>() + Vec(m.ext->v) + Vec(m.ext->w) : 0);
+        }), g_lotMasks.size());
+    Set(sChunkShade, Tree(g_chunkShades) + Tree(g_chunkReady, [](const auto& kv) { return Vec(kv.second.res) + Vec(kv.second.den); }) + Vec(g_shadeQueue),
+        g_chunkShades.size() + g_chunkReady.size());
+    Set(sSolid, Hash(g_solidGroups, [](const auto& kv) { return Vec(kv.second.triangles); }) + Hash(g_solidGeometry) + Hash(g_solidAttempts) + Hash(g_solidBusy),
+        g_solidTriangles);
+    Set(sFence,
+        Hash(g_fenceGroups, [](const auto& kv) { return Vec(kv.second.walls); }) + Hash(g_fenceBusy) + Hash(g_meshBoxes) + Vec(g_fenceAll) +
+            Hash(g_fenceCells, [](const auto& kv) { return Vec(kv.second); }) + Hash(g_groupCentres) + Hash(g_centreBusy),
+        g_fenceGroups.size() + g_meshBoxes.size() + g_groupCentres.size());
+    Set(sFoliage, Hash(g_foliageMeshes) + Hash(g_foliageInstances) + Vec(g_crowns), g_foliageMeshes.size() + g_foliageInstances.size() + g_crowns.size());
+    Set(sWallMask, Hash(g_wallMaskTex), g_wallMaskTex.size());
+    Set(sOther,
+        Tree(g_chunks) + Hash(g_chunkOfTexture) + Vec(g_lotRects) + Hash(g_lotDrawSeen) + Hash(g_lotArrivals) + Vec(g_enumLights) + Vec(g_allLamps) + Vec(g_allCones) +
+            Vec(g_exitLampRows) + Vec(g_exitCones) + Vec(g_exitList) + Vec(g_lotLampSig) + Vec(g_lotLampCur) + Vec(g_lotsNow) + Tree(g_lotSeen) + Tree(g_quietLogAt) +
+            Vec(g_lastUserLots) + Hash(g_lampSwitchPrev) + Vec(g_disabledLots) + Hash(g_traceLast, [](const auto& kv) { return Vec(kv.second.states); }) + Hash(g_rigSnaps) +
+            Hash(g_rigEpisodeParts) + Hash(g_rigRoomWaits) + Tree(g_census) + Tree(g_lightingBloom) + Tree(g_exterior) + Str(g_objDrawInfo),
+        g_chunks.size() + g_allLamps.size() + g_census.size() + g_traceLast.size() + g_rigSnaps.size());
+}
+} // namespace
+namespace LotLightBridge {
+void MeasureMemory() {
+    static ApexMemory::Cadence cadence;
+    if (!cadence.Due()) return;
+    try {
+        MeasureMemoryImpl();
+    } catch (...) {
+    }
+}
 } // namespace LotLightBridge

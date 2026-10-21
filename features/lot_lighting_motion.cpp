@@ -607,6 +607,8 @@ int BudgetMs() { return g_budgetMs.load(); }
 
 bool CameraMoving() { return (Running() || WallAoRunning()) && MovingAt(GetTickCount64()); }
 
+bool CameraEye(float out[3]) { return EnsureCamera() && ReadEye(out); }
+
 bool SampleCameraMoving() {
     if (!EnsureCamera()) return false;
     const uint64_t now = GetTickCount64();

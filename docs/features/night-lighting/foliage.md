@@ -1,6 +1,8 @@
 # Foliage: bushes, trees and plants
 
-At night, bushes, hedges, trees and small plants near lamps are lit on every side the lamp can reach. The side of a
+At night, bushes, hedges, trees and small plants near lamps are lit on every side the lamp can reach. Each leaf takes
+the light of its own distance, height and side towards each lamp, so a small lamp at the foot of a tree lights the trunk
+and the lower leaves while the top of the crown stays dim, and tree crowns shade the lamp light on the lot's ground. The side of a
 planter in moon shadow keeps its lamp light, and the back of a bush facing away from a lamp is dim rather than black. The
 same fixes apply to the snowy winter variants and to the fences that share the bush shader. Part of
 [Night Lighting](README.md).
@@ -9,11 +11,11 @@ same fixes apply to the snowy winter variants and to the fences that share the b
 
 | | |
 |---|---|
-| Availability | Released in 1.0.0. The daytime curve on foliage lamp colours and garden lamps blocked by buildings: Released in 2.13.0 |
+| Availability | Released in 1.0.0. The daytime curve on foliage lamp colours and garden lamps blocked by buildings: Released in 2.13.0. Per-vertex lamps and crown shade on lot ground: Released in 2.14.0 |
 | Default | On |
 | Menu | Lighting > Objects > *Objects* card |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
-| Source | [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawObjectRig`, `FoliageVsFor`, `DrawLeafShadow`), [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`PatchFoliageVs`, `PatchLeafShadow`) |
+| Source | [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawObjectRig`, `FoliageVsFor`, `FoliageVertexVsFor`, `DrawLeafShadow`, `NoteCrown`, `CrownsIn`), [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`PatchFoliageVs`, `PatchLeafShadow`), [`features/foliage_vertex_lamps.h`](../../../features/foliage_vertex_lamps.h), [`features/foliage_canopy.h`](../../../features/foliage_canopy.h) |
 
 ## The problem
 
@@ -79,8 +81,99 @@ What changed, with *Seamless light on pieces* (per-pixel lamps) and *Realistic l
 With either option off, the earlier boost and wrap stay. Status: Objects *outdoor lamps on rigs by the reach law: N*;
 foliage *Lambert on reach-law rigs: N*. Offline: `FoliageReachChecks` in `tools/terrain_lighting_test`.
 
-Limits: distance is evaluated at each instance's rig centre, not per leaf, so inside one large canopy the falloff comes only
-from N.L. Height in the canopy is not used (the vertex shaders carry no canopy bounds). UNVERIFIED in game.
+At night on reach-law rigs, the per-vertex lamps below replace the rig-centre evaluation; a slot whose lamp cannot be
+confirmed keeps it.
+
+### Per-vertex lamps and crown shade
+
+With the rig law above on, at night, each foliage draw uses a further copy of its vertex shader
+(`FoliageVertexLamps::Patch`) and per-instance constants for its three lamps:
+
+1. **Lamps per vertex.** The real direction and distance from each vertex to the lamp's head, Lambert with the wrap
+   constants, and the lamp's law at the vertex, with the instance's own lamps (below). No channel passes 1, and the hue
+   is kept. The law is the plain inverse square, Gain / d^2 (the base of the game's ground law), faded smoothly near the
+   lamp's reach R (`FoliageVertexLamps::FoliageLaw`: the walls' law with r0 = R). The outdoor walls' law keeps r0^2 / d^2,
+   which falls as 1 / d^4 past r0: with it a street lamp lit the pavement under it and left the crowns 5 m away dark (F8
+   2026-10-20 21-27-17; offline: 0.094 against 0.425 now, 0.042 at 9 m, 0 past R).
+2. **Leaf transmission.** Light from behind a leaf passes through it as tau / rho x max(-N.l, 0), with tau / rho = 0.83
+   for a green leaf at 550 nm, tinted by the leaf's colour in the pixel shader.
+3. **The crown's own leaves.** Beer-Lambert along the vertex-to-lamp segment inside the crown's ellipsoid
+   (`foliage_canopy.h`: k = G x clumping x sqrt(1 - leaf albedo), about 0.37; leaf area density 1 for trees, 2.5 for
+   bushes).
+4. **Ground bounce** from the strongest lamp: the ground's irradiance x rho_g / 2 x (1 - n.y), with grass reflectance 0.15.
+
+**Each instance picks its own lamps** (`PickFoliageLamps`), by the rule of the per-pixel lamps of outdoor objects
+instead of the rig's three slots: the lamps within reach of the crown's middle (`SelectLamps`, with the indoor lamps
+shining out of a house), each with its cones and its share past the outside walls and slabs at that middle
+(`PickedLampVisibility`), ranked by the light the reach law gives at the mesh box's point nearest the lamp (trunk
+included). The three brightest are kept, brightest first (slot 0 takes the ground bounce); a lamp whose reach ends before
+the box is left out. The draw replaces the per-instance colours `c54..c80` with their colours (F0 x intensity x fade x
+cone x walls' share) and restores them afterwards; each vertex then takes colour x min(law x gain x scale, 1 / the
+colour's brightest channel), so no channel passes 1 and the hue is kept (a warm lamp no longer turns white near a leaf).
+The trees read their own lamp list (`ReadFoliageLamps`) at every lamp refresh, also while the per-pixel lamps keep theirs
+for a lamp switch or a drag (`AtriumHold`, `DragLite`: 5.5 to 9 s in game, 20/10 21:18, waiting for the rooms of a house,
+which trees outside never need), with the indoor lamps shining out read from their own list while those are held; the list
+notes where it changed (each lamp's place before and after), by everything but the colour. An instance picks at once when
+a changed lamp is within 20 m of its box, else it only takes the new generation. A lamp whose colour alone changed (a
+fade at dusk, a recolour) keeps its place in each pick: the instance takes its new colour, times the cone and walls'
+share of its pick, at its next draw; a lamp going to black or coming out of it counts as a change. Instances also pick
+again every 1.5 s when what a pick reads changed since (the walls and floors, which arrive after a lot's first frames;
+the lamps' colours, which set the ranking; or with indoor lamps shining out), at most 96 per 8 ms, keeping their older
+pick meanwhile; an instance's first pick is never put off, so no draw falls back to the old light. When the instance map
+passes 16,384 (grass and flowers are instances too), the ones not drawn for 3 s go, then the ones not drawn for 250 ms;
+the map is cleared only past 32,768. The log counts
+the picks made again that changed the light and the ones that kept it.
+
+**The camera the game drew with** (`FoliageVertexLamps::EyeAnchors`). The instance positions are relative to the eye the
+game built the frame with, while the eye Apex reads from the game's camera can differ from it while the camera moves (in
+game: lamp light on trees moved with the camera, and crowns blinked as their instances got new keys and fell back to the
+old light). While the read eye has not changed for half a second, the instances of each draw are learned as fixed places
+(2 m cells, by mesh and scale); while it moves, the offset that puts a draw's instances back on their places (median per
+axis, within 0.3 m of each other, at most 2.5 m) is added to the eye, found again every frame (the game's eye keeps
+moving for a moment after the read one stops; an offset kept per eye read shifted the light for half a second after
+the camera stopped). The camera counts as still after 0.3 s. The log reports the largest
+correction (`camera drift corrected: up to N m`).
+
+Before 20/10 each rig slot had to be matched to an outdoor lamp by direction and confirmed by colour, and an unmatched
+slot lit the whole crown with the rig's colour. In game under 2% of the lit slots matched (public 2.14 log: 9,058 by the
+law against 607,905 without a lamp): a red garden lantern of 6.3 m reach lit a whole bare crown red 15 m away, and a red
+cube lamp (range 70: R 13.6 m) lit a leafy crown in patches to its top. The rig's lamp directions now only find whether
+the instance positions are camera-relative or in world space (once per session, by matching instances to outdoor lamps
+both ways); crowns and per-vertex lamps wait until it is known. The trunk and branch variant is patched as well. A
+vertex shader the patch refuses is named in the log with the reason, and its code is kept once in
+`Apex Radiance\Censo\foliage_VS_<FNV>.bin` for the offline check.
+
+### The sun's shadow on trees
+
+Study: F7 `2026-10-20 16-42-39` draw #678 and every pixel shader of `Shaders_Win32.precomp`. The game has 16 tree pixel
+shaders (`ps_2_0`, sun = `sat(t1.z) x c0`, three lamps, ambient cube). Eight read the sun shadow map (four `texldp s5`
+taps at `t5`, faded by `t6.x`); the other eight never do, although the foliage vertex shader writes the shadow position in
+`oT5` (the shadow matrix `c105..c108`, the same as the draws that sample `s5` in that frame) and the edge fade in `oT6.x`.
+Trees drawn with those took sunlight with no shadow: no tree shaded another, no house shaded a tree, and no crown shaded
+itself. Both kinds are drawn in the same session (the log patches the moon shadow of some foliage shaders and not others).
+
+`FoliageVertexLamps::PatchTreeSunShadow` patches the eight without a shadow (pattern: `mov_sat rW.xy, t1.wzyx`, then
+`mad rS.xyz, rW.y, c0, rX`): before the sun term it reads the shadow map at four taps half a texel around `t5` (as the
+game's shadowed variants do; each tap its own constant, since `ps_2_0` has no free swizzle), fades it to 1 by `t6.x` and
+keeps a floor of 0.25 for the light that passes a crown, then multiplies only the sun's weight: sun x (0.25 + 0.75 x
+shadow). Lamps and the ambient are untouched. `DrawTreeSunShadow` binds the frame's shadow map to `s5` (the depth
+texture on `s5` of the bushes, roofs, lot pass and water draws, used only in the frame it was seen in or the next, and
+forgotten before a Reset), sets the five constants and restores everything. A draw whose vertex shader writes no `oT5` /
+`oT6.x` (the per-vertex lamp family `VS_9A10A3A8`) keeps the game's pixel shader. Development switch `foliage_sun_shadow`
+(developer only: off in released builds until trees cast into the shadow map). Offline: `tools/foliage_vertex_test` with `-Precomp`: the eight patched shaders load in D3D9; the eight
+shadowed ones are left alone. Not confirmed in game: the depth bias (1/2048 of the map's depth) against leaves shading
+themselves, and the cost. The first public build drew no tree with it (log `tree draws with the sun shadow: 0`, at
+night); the log now gives every 30 s the draws with it and, for the others, why (no shadow map seen, none this frame, a
+vertex shader without `oT5` / `oT6.x`, a pixel shader not patched), and names once each vertex shader that draws into the
+shadow map (sampled one frame in 120), with whether it is an instanced caster, to see whether trees cast at all. A
+daytime F8 (`2026-10-20 21-18-03`) shows a house's shadow on the lawn and none under the tree beside it: trees likely do
+not draw into the shadow map, so no tree can shade another through it; receiving it gives trees the shadows of houses
+and other casters only. UNVERIFIED until the shadow pass log above.
+
+**Crown shade on lot ground.** Tree and bush crowns seen in those draws are recorded as ellipsoids (merged by place, kept
+while near the camera, starting above a tree's clear trunk). With *Walls shade lamp light near the ground*, the lot
+ground's lamp shade mask treats them as porous occluders: a ray through a crown keeps exp(-k u s) of its light, so the
+shadow is soft and partial. The mask is built off the render thread ([lot-light-pass.md](lot-light-pass.md)).
 
 ## Settings
 
@@ -88,6 +181,7 @@ from N.L. Height in the canopy is not used (the vertex shaders carry no canopy b
 |---|---|---|---|---|---|
 | Lamps light objects | `postesNosObjetos` | bool | on | | Turns on the rig boost, the moon-shadow replacement, the wrap-light vertex shaders and the winter leaf-shadow patch. Live |
 | Brightness (Objects card) | `forcaNosObjetos` | float | 75% | 25 to 300% | Scales the rig boost that fills the per-instance lamp colours |
+| No setting | | | | | Per-vertex lamps: on whenever *Lamps light objects*, *Seamless light on pieces* and *Realistic lamp reach* are on, at night. Crown shade: also needs *Walls shade lamp light near the ground* |
 
 There is no foliage-specific strength. The Lighting balance styles set `forcaNosObjetos` to 67.5% (Subtle), 75% (Soft) or
 100% (Natural). The night level is the game's `lightMgr+0xF0`, passed by `LotLightBridge::SetNightLevel`.
@@ -105,6 +199,9 @@ There is no foliage-specific strength. The Lighting balance styles set `forcaNos
 ## Limitations
 
 - Foliage receives no ground light: summer plants and flowers stay darker than the atlas-lit ground next to them.
+- Per-vertex lamps and crown shade are not confirmed in game. A crown with a lamp at its foot may look darker than
+  with the rig-centre light, because the crown's own leaves now attenuate the lamp.
+- Foliage variants outside the captured family keep the rig-centre light.
 - The summer 600-byte object-rig shader is replaced only for the moon shadow: no ground light and no per-pixel lamps.
 - A plant whose pixel shader multiplies all lamp light by a texture (`texld s2` on TEXCOORD3, a 128x128 DXT1 texture,
   capture m65) stays dark even with the patched shaders.
@@ -205,6 +302,13 @@ mad rD.w, rT.w, cN.x, rD.w              ; rD.w = lerp(rD.w, 1, night)
   cause. Details in [history](../../history/night-lighting-foliage.md).
 - `lrp` with two constant registers in `PatchLeafShadow`: invalid on native D3D9.
 - Accepting only a runtime `cK.w` clamp and `t5.x` / runtime `cK.y` shadow sites: missed the winter and m78 variants.
+- Sending a whole draw back to the old shader when one lamp could not be matched: almost no draw kept per-vertex light.
+- Confirming a lamp by colour over the crown only: a lamp at the foot of a tree was refused and the tree stayed neutral.
+- Refusing a lamp found by direction when its colour differs from the rig's (no light at the mesh box, or more than 4x
+  apart): the slot fell back to one colour for the whole crown, taken at the rig box's point nearest the lamp, and 99.7%
+  of instances drew that way.
+- Following the rig's three lamp slots at all (matching each to a lamp by direction, keeping the slot's direction when
+  it did not match): even with the colour test removed, under 2% of the lit slots found their lamp in game.
 
 ## See also
 

@@ -21,6 +21,12 @@ in game and writes to the log.
 
 ## Latest results
 
+2026-10-19: the native post-scene fixture passes all 49 checks after replacing the ordinary effect-list allocation
+with stack storage and an overflow fallback. The extracted production lazy-copy helper passes creation/reuse, exact
+readback of 1,024 copied pixels, failed-creation cleanup and recreation at a different size. The timing policy passes
+the 250 ms cadence and unrestricted development mode in the 3,111-check gameplay-policy fixture. Shader output in a
+real game session, driver memory attribution and an FPS gain remain unverified.
+
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
 | 2026-10-07 | 2.11.0 release work | `post_scene_test` | 49 passed | Native D3D9 |

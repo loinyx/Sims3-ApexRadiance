@@ -204,6 +204,17 @@ in how many room-0 lists it appears. Fields: `#index` (or `-`), vt, type, pos +0
 Spotlights (type 4) typically have axis about (0, -1, 0), offset -0.32 and scale 4.9. Without a lot tree the section
 prints `(sem arvore de lotes)`.
 
+**Cross-story, stairwell and memory sections.** The story-light records keep lamps of another story up to 20 m (at most 60 points per
+metre, floors and walls apart) with the stage that stopped each ray (`PassStage`: under the slab, crossing order, the
+floor or tile, no indoor room below, floor at the crossing, outside wall, the lamp story's grid, the game's wall test,
+nothing transmitted), and a per-metre summary. The lighting status lists the stairwell, arch and stair counters
+([stairwells](../night-lighting/stairwells.md), [arches](../night-lighting/arches.md),
+[stairs](../night-lighting/stairs.md)), including the last unmatched arch draws, and each room's current ambients
+([unlit-rooms](../night-lighting/unlit-rooms.md)). Development builds add a DAYLIGHT section (sky state, sun height, the
+night and manmade levels, and per light class the game's fade `+0x20`; switch `daylight_log`) and an APEX RADIANCE
+MEMORY section at the end ([memory-analysis.md](../memory-analysis.md#development-flavour-measurements)). With
+`release_debug_buffers` on, the light records are given back when *Record story light samples* is switched off.
+
 **6. Footer:** `End: <N> lights, <M> lot stories, <R> rooms`.
 
 ### Game addresses and patterns

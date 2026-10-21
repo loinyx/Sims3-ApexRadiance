@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <vector>
 #include "wall_openings.h"
+#include "foliage_canopy.h"
 
 namespace GroundShadow {
 
@@ -207,11 +208,15 @@ inline void MarkFreeEnds(std::vector<Wall>& walls) {
 // done (true). Result(): w x h bytes, 255 = every nearby lamp reaches the texel.
 class ShadeJob {
 public:
-    void Init(const Grid& g, std::vector<Lamp> lamps, std::vector<Wall> walls, std::vector<WallOpenings::Patch> patches = {}) {
+    void Init(const Grid& g, std::vector<Lamp> lamps, std::vector<Wall> walls, std::vector<WallOpenings::Patch> patches = {},
+              std::vector<Canopy::Ellipsoid> canopies = {}) {
         grid_ = g;
         lamps_ = std::move(lamps);
         walls_ = std::move(walls);
         patches_ = std::move(patches);
+        canopies_ = std::move(canopies);
+        canopy_ = 0;
+        canopyTests_ = 0;
         for (Wall& w : walls_) // (a wall whose patches are not all in the list is whole)
             if (static_cast<uint64_t>(w.p0) + w.pn > patches_.size()) w.pn = 0;
         if (g.soft) MarkFreeEnds(walls_);
@@ -247,6 +252,16 @@ public:
                     wall_++;
                     continue;
                 }
+                phase_ = 2;
+                continue;
+            }
+            if (phase_ == 2) { // the crowns in the lamp's reach: porous occluders in series with the walls (foliage_canopy.h)
+                if (canopy_ < canopies_.size()) {
+                    CanopyOf(L, canopies_[canopy_]);
+                    canopy_++;
+                    continue;
+                }
+                canopy_ = 0;
                 phase_ = 1;
                 continue;
             }
@@ -263,9 +278,38 @@ public:
     const std::vector<float>& StampWeight() const { return den_; }
     long long Tests() const { return tests_; }
     long long Through() const { return through_; } // texel tests that crossed a wall with patches and kept some light
+    long long CanopyTests() const { return canopyTests_; } // texel tests against a crown
     const Grid& GetGrid() const { return grid_; }
 
 private:
+    // The share of the lamp's light that passes the crown, per texel of its shadow box (vis_ multiplies: walls and crowns
+    // are transmissions in series on the same ray, in any order)
+    void CanopyOf(const Lamp& L, const Canopy::Ellipsoid& e) {
+        if (!(reach_ > 0.0f)) return;
+        float x0, z0, x1, z1;
+        if (!Canopy::ShadowBox(e, L.x, L.y, L.z, grid_.ty, reach_, x0, z0, x1, z1)) return;
+        float i0 = 1e30f, i1 = -1e30f, j0 = 1e30f, j1 = -1e30f; // the four corners: the lot grid can be turned
+        for (const float px : {x0, x1})
+            for (const float pz : {z0, z1}) {
+                float fi, fj;
+                if (!WorldTexel(grid_, px, pz, fi, fj)) return;
+                i0 = std::min(i0, fi), i1 = std::max(i1, fi), j0 = std::min(j0, fj), j1 = std::max(j1, fj);
+            }
+        const int a0 = std::max(0, static_cast<int>(std::floor(i0))), a1 = std::min(grid_.w - 1, static_cast<int>(std::ceil(i1)));
+        const int b0 = std::max(0, static_cast<int>(std::floor(j0))), b1 = std::min(grid_.h - 1, static_cast<int>(std::ceil(j1)));
+        const float r2 = reach_ * reach_;
+        for (int j = b0; j <= b1; j++)
+            for (int i = a0; i <= a1; i++) {
+                const size_t at = static_cast<size_t>(j) * grid_.w + i;
+                if (!(vis_[at] > 0.0f)) continue; // already behind a wall
+                float x, z;
+                TexelWorld(grid_, i, j, x, z);
+                const float dx = x - L.x, dz = z - L.z;
+                if (dx * dx + dz * dz >= r2) continue;
+                canopyTests_++;
+                vis_[at] *= Canopy::Transmission(e, L.x, L.y, L.z, x, grid_.ty, z);
+            }
+    }
     void ShadowOf(const Lamp& L, const Wall& w) {
         if (!(reach_ > 0.0f) || !(w.y0 < L.y) || !(w.y1 > grid_.ty - 2.0f)) return; // a wall over the head or under the ground
         // the wall's distance from the head (xz): past the reach it shades nothing that weighs
@@ -376,6 +420,9 @@ private:
     std::vector<Lamp> lamps_;
     std::vector<Wall> walls_;
     std::vector<WallOpenings::Patch> patches_;
+    std::vector<Canopy::Ellipsoid> canopies_;
+    size_t canopy_ = 0;
+    long long canopyTests_ = 0;
     std::vector<float> num_, den_, vis_; // vis_: the current lamp's share past the walls tested so far, per texel
     std::vector<uint8_t> out_;
     size_t lamp_ = 0, wall_ = 0;

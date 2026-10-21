@@ -164,6 +164,9 @@ The main settings file is `ApexRadiance.toml`. Saved presets remain in `Profiles
 - **Sims 3 Performance Patch:** can run alongside Apex; the mods target different game operations.
 - **DXVK:** supported, though results can vary between graphics backends. If you report a visual issue, let us know which backend you use.
 
+Bounded compression storage and save preparation release eligible idle buffers while protecting pending writes.
+These safeguards do not guarantee prevention of Error 12 or a particular FPS improvement.
+
 ## Reporting a problem
 
 If something looks wrong, open **Report a problem** in the Apex menu. You can save a report, record a short reproduction, capture lighting on a surface, or save a lighting snapshot. Add a title and description to a capture if you like.

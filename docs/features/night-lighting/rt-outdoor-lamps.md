@@ -99,7 +99,9 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
 - **Self-measure.** Every 10 s while the option is on: the average and largest cost a frame on the render thread, the
   relights and why the maps were relit.
 - **Coverage.** Lamp edits mark no room only while every story's maps are relit; the log says when that starts and
-  stops (`Every story covered` / `Not every story covered (...)`).
+  stops (`Every story covered` / `Not every story covered (...)`). A lamp drawn on the GPU that is still missing from a
+  story's light list where it can be drawn does not count as covered: its edit also goes to the game's solve, and the
+  consistency check asks those stories to gather their lights again.
 - **GPU passes**, in the `EndScene` pass before the overlay, with the device state saved: shadow atlas 1536 × 4096
   G16R16F with D24X8 depth, 16 lamps an atlas, near 0.005 m, far 64 m; the relight accumulates 16 lamps a draw into an
   A32B32G32R32F target at each texel, then composes and packs into the copy; the wall blur runs on the GPU with the

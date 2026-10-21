@@ -73,3 +73,56 @@ per gain).
 
 **Outcome:** `kObjectRigHlsl` is compiled at start-up by `framework/shader_cache`. The early vertex shader pool and the
 HDR variant are not in Apex Radiance (HDR: see [removed-features.md](../removed-features.md)).
+
+### 2026-10-20: per-vertex lamps and crown shade (2.14.0 development builds)
+
+**Context:** foliage took each lamp at one point of its rig (the box point nearest the lamp), so a small lamp at the
+foot of a tree lit the whole crown like a street lamp. The work went in over five commits (`9e07077`, `f096e31`,
+`7859a8c`, `1a6930a`, `c22e8d7`).
+
+**Finding:**
+
+- First build (`9e07077`): per-vertex lamps almost never applied (3,428 draws against about 377,000 sent back to the old
+  shader), and the count of new instances kept growing: the space of the instance positions was wrong.
+- `f096e31`: the space (camera-relative or world) is found by matching instances to outdoor lamps both ways; crowns
+  and per-vertex lamps wait until it is known. Constants are restored after the draw; crowns are merged by place and
+  start above a tree's clear trunk.
+- `7859a8c`: sending a whole draw back when one lamp slot could not be confirmed lost per-vertex light on most trees.
+  A slot that cannot be confirmed now keeps the old light for that lamp only.
+- `1a6930a`: the trunk and branch variant is patched by replacing the three lamp weights and keeping each variant's own
+  colour sums. Lamps are confirmed by direction; the rig colour carries wall shade and caps, so colour refuses only gross
+  mismatches.
+- `c22e8d7`: a lamp at the foot of a tree was still refused because its colour was compared on the crown only. It is
+  compared over the whole mesh box, trunk included.
+
+**Outcome:** kept and shipped on in 2.14.0. Offline checks: `tools/foliage_vertex_test` and `tools/canopy_test`. Not
+confirmed in game; the crown may look darker than in earlier builds with a lamp at its foot.
+
+### 2026-10-20: a small lantern lit a whole crown red (2.14.0 development builds)
+
+**Context:** in a snowy park lot a red garden lantern (type 3, range 15, intensity 1, colour (1, 0, 0), 5 cm above the
+snow; reach law r0 2 m, R 6.3 m) lit the whole crown of a large bare tree strongly red, up to its top about 15 m away,
+while the snow 2 m from the lantern stayed dark (F8 `2026-10-20 19-45-21` and `19-46-11`).
+
+**Finding:**
+
+- The log counted 1,500 instances with every lamp confirmed against 475,290 with a neutral lamp: almost every foliage
+  instance drew its lamps by the old per-instance light (one colour and one direction for the whole instance).
+- That colour is the reach law at the rig box's point nearest the lamp. The rig's box is the whole model's world box,
+  down to the ground and widened by the yaw; the lantern was within about 2 m of it, so the colour clamped to (1, 0, 0).
+- The slot went neutral because the colour recomputed on the mesh box (no yaw) found no light there ("colour not
+  computed"), exactly for lamps at the edge of their reach.
+
+**First outcome:** a lamp found by its direction was always drawn by its law at each vertex, the rig's colour only
+dimming it. Installed as the public 2.14 build, its log showed that this was not enough: 9,058 lit slots by the law
+against 607,905 with no lamp found in their direction at all, and a second capture (`20-36-15`: a red cube lamp, type 3,
+range 70, 0.2 m above the grass, 4 to 5 m from a leafy tree; reach law r0 3.2 m, R 13.6 m) lit the crown in red patches
+up to its top, where the law gives about 19% at 6 m, 3.5% at 9 m and nothing past 13.6 m.
+
+**Outcome:** each foliage instance picks its own three lamps by the per-pixel lamps' rule (`PickFoliageLamps`: lamps
+within reach, indoor lamps shining out, cones and walls' share at the crown's middle, ranked by the law at the mesh box)
+and the draw replaces the per-instance colours `c54..c80` with theirs; the rig's slots are no longer used for light.
+Colour x min(law, 1 / brightest channel) keeps the hue. Offline: 19 checks (red lantern crown 0; a warm post next to a
+leaf capped at its own hue). The log counts instances by their own lamps (0 to 3), lamps left out by walls and
+instances without a crown shape, and names why a foliage vertex shader is refused (its code kept in `Censo`). Not
+confirmed in game.

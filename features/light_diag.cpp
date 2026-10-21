@@ -15,6 +15,8 @@
 #include "d3d9_hooks.h"
 #include "apex_paths.h"
 #include "level_light_share.h"
+#include "daylight_probe.h"
+#include "apex_memory.h"
 #include "captures.h"
 #include "ui/i18n.h"
 #include "imgui.h"
@@ -253,6 +255,11 @@ void WriteDiag() {
                         out << std::format("   comodo {} ({:08X}) estado={} classe={} x100={} externo={} no_hash24={} luzes={} (postes da rua {} / acesos {}, outras {}):{}\n", roomId, room,
                             Rd<int>(room + 0xF0), Rd<int>(room + 0xF4), Rd<int>(room + 0x100), static_cast<int>(Rd<BYTE>(room + 0x18)), Rd<int>(rn + 0x24), n, nStreet, nStreetOn,
                             nLot, ids);
+                        // the ambient the room holds now (what its walls and floors are drawn with): +0x110 (InteriorBuildingAmbientColor),
+                        // +0x120 (objects), +0x650 (the sampler copy) and the normalisation +0x160
+                        out << std::format("      ambient now: +110 ({:.4f} {:.4f} {:.4f}) +120 ({:.4f} {:.4f} {:.4f}) +650 ({:.4f} {:.4f} {:.4f}) norm {:.3f}\n",
+                            Rd<float>(room + 0x110), Rd<float>(room + 0x114), Rd<float>(room + 0x118), Rd<float>(room + 0x120), Rd<float>(room + 0x124),
+                            Rd<float>(room + 0x128), Rd<float>(room + 0x650), Rd<float>(room + 0x654), Rd<float>(room + 0x658), Rd<float>(room + 0x160));
                     }
                 }
             }
@@ -263,6 +270,9 @@ void WriteDiag() {
     }
     out << LevelLightShare::DiagText();
     out << PixelLampDiag(index);
+    out << DaylightProbe::SnapshotText(lightMgr, g_lights); // development builds with daylight_log only
+    out << ApexMemory::ReportText();                           // development builds with memory_owners only
+    ApexMemory::RequestNow();                                  // (every owner measured again at its next chance, for the next one)
     out << std::format("\nEnd: {} lights, {} lot stories, {} rooms\n", g_lights.size(), managers, rooms);
     g_status = std::format("Saved: {} lights, {} lot stories, {} rooms", g_lights.size(), managers, rooms);
     LOG_INFO("[LightDiag] " + g_status);

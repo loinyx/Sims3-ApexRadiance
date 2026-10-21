@@ -72,6 +72,20 @@ texels per metre by lighting class (twice that with *Light detail* High). Three 
 
 ## Technical reference
 
+The public gameplay experiment admits packed interior-floor vertex shaders even when the generic object detector
+also recognises them. `IsPackedRoomFloorVs` requires static 1/32767 room-map UVs, the native packing constants and
+the packed height reconstruction. The pixel shader must independently match the room-map read. This changes only
+selection of the existing smoothing path; it does not change room-to-room light gathering or smooth across separate
+room maps. A brightness discontinuity between those maps can remain.
+
+The public memory/gameplay experiment also guards directional basis-map smoothing used by instanced structures.
+Each smoothed RGB sample is bounded by its alpha-normalised original bilinear sample. Flat regions retain their
+values while wider filtering cannot add light beyond that original sample. The guard adds four ALU instructions per
+map, with no extra texture fetch or temporary register. It applies only to `PatchBasisSmooth`, including its combined
+room-map variant; room wall-atlas filtering and `PatchIndoorBasis` keep their existing paths. This is a filter bound,
+not geometry reconstruction: light already present in the native sample remains. Native stair occlusion remains
+unverified in game.
+
 | Site | What | Source |
 |---|---|---|
 | `0x006A34DB` (Steam 1.67.2) | CALL of the texel pack `0x0060CD10` in the batch solve `0x006A31D0`; redirected to `PackThunk`, which reads the texel's (x, y) from `edi` (its address) and the map's `{base, pitch}` at `[ebp+0Ch]`, adds the offset and calls the game's pack | `room_map_dither.cpp` |
@@ -79,6 +93,12 @@ texels per metre by lighting class (twice that with *Light detail* High). Three 
 | Pixel shaders | `texld rL, <TEXCOORD1>, sM` then (after at most one `mul rL, rS.c, rL`) `mad rD.xyz, rL.w, cA, rL`, `cA` not defined: replaced by the B-spline; constants size `(w, h, 1/w, 1/h)` and band `(1/S, S, 0.5, S - 1)` per draw | `shader_patches.cpp` `PatchRoomMapSmooth` |
 | Vertex shaders | `mul o<TEXCOORD1>.xy, v#, cK.c`: 1/4096 wall atlas, 1/32767 floor maps | `shader_patches.cpp` `RoomMapUvScale` |
 | Wall blocks | `wall + cls*0x20 + 0x58` `{x0, y0, x1, y1}`; `y0 % rows` checked for every piece laid out | `level_light_share.cpp` `NoteWallBand` |
+
+**Arch variant.** Floor copies also come in a variant that adds the neighbour's ambient near arches
+([arches.md](arches.md)): up to 6 segments (`kArchCells`), each two constant rows (a.x, a.z, e.x, e.z) and
+(D.rgb, 1 / |e|^2), placed after the smoothing constants. When a floor also reads the directional maps and the variant
+with the wall mask does not fit the registers, the combined variant without the mask is used, never one that drops the
+room map's smoothing.
 
 Cost: the reads add about 45 ALU and 3 texture instructions per room-lit pixel; the dither one call per texel solved; the
 soft cut a list walk per solved point and a multiply per lamp kept.
@@ -95,3 +115,4 @@ soft cut a list walk per solved point and a multiply per lamp kept.
 - [Validation](../../validation/night-lighting-room-map-smoothing.md)
 - [History](../../history/night-lighting-room-map-smoothing.md)
 - [Room light maps](../../engine/room-light-maps.md)
+- [Light through arches and doorways](arches.md), [Stairs on the directional maps](stairs.md)

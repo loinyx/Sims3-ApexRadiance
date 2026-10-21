@@ -5,6 +5,9 @@
 //
 // Part of Apex Radiance. Credits: @loinyx
 #include "fast_dxt.h"
+#include "high_alloc.h"
+#include "scratch_budget.h"
+#include <type_traits>
 #include "dxt_codec.h"
 #include "entry_chain.h"
 #include "game_addresses.h"
@@ -136,8 +139,10 @@ void Checked(bool dxt5, const DxtCodec::Dst* d, const DxtCodec::Src* s, FnCdecl2
     const uint32_t bx = (d->width >> 2) + ((d->width & 3) ? 1u : 0u), by = (d->height >> 2) + ((d->height & 3) ? 1u : 0u);
     const uint64_t rowBytes = static_cast<uint64_t>(bx) * bs;
     const uint64_t total = static_cast<uint64_t>(d->pitch) * by;
-    std::vector<uint8_t> scratch;
-    bool can = bx && by && d->pitch >= rowBytes && total <= kMaxCheckBytes;
+    using ScratchAllocator=std::conditional_t<kMemoryOptimizationsEnabled,ApexMem::HighAllocator<uint8_t>,std::allocator<uint8_t>>;
+    ScratchBudget::Lease lease(total,kMemoryOptimizationsEnabled);
+    std::vector<uint8_t,ScratchAllocator> scratch;
+    bool can = bx && by && d->pitch >= rowBytes && total <= kMaxCheckBytes && (!kMemoryOptimizationsEnabled || lease.bytes==total);
     if (can) {
         try {
             scratch.resize(static_cast<size_t>(total));

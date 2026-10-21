@@ -393,6 +393,10 @@ whose wall texel there is not at its clamp (about 3/255 at most).
 
 ### Indoor objects (directional maps)
 
+Stairs and objects drawn with the directional maps follow the game's object rule,
+`max(directional, ambient cube x 0.25, floor map on up faces)`, with no tone curve; how Apex keeps them from reading
+light through walls and gives them the floor's colour is in [stairs.md](stairs.md).
+
 Apex's indoor-object shader (`PatchIndoorBasis`) normally caps the basis light at `min(basis, 2 x room light map)` per
 channel (`kBasisCap`). While the light-between-stories directional-map guard is installed and ready
 (`LevelLightShare::BasisFloorGuardReady`), a separate cached variant without the cap is used (`g_indoorPs` keys sampler

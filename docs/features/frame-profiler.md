@@ -417,11 +417,11 @@ Symbolisation:
 
 ### Address space
 
-[`features/address_space.{h,cpp}`](../../features/address_space.cpp), started by the init thread in developer mode
+[`features/address_space.{h,cpp}`](../../features/address_space.cpp), started by the init thread in builds with development tools
 whether the profiler is on or not: a below-normal thread (64 KB stack) walks the address space with `VirtualQuery` every
 10 s (about 1 to 3 ms, off the game's threads). It keeps the free total and largest free block (below and above 2 GB),
 the five largest free blocks, committed and reserved-only memory by kind (images, mapped views, private; committed
-private `PAGE_EXECUTE_READWRITE` = the script GC heap), private allocations by size class, the 8 largest images and the
+private `PAGE_EXECUTE_READWRITE` has unknown ownership), private allocations by size class, the 8 largest images and the
 game allocator's own big blocks (`[[0x011CB864]+0x488 / +0x48C]`), and the snapshot with the session's smallest
 largest-free-block. One `[AddressSpace]` log line a minute; both snapshots are in the profiler report. The number to
 watch is the largest free block: big allocations, the save's Error 12, DXVK's texture views and the script heap's 8 MB

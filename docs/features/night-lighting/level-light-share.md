@@ -10,7 +10,7 @@ their own story. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0: outdoor light through openings into roofed rooms (garden lamps of the story below included), indoor light through openings, *Doors block light*, lamp light through openings in the outside walls' copies (objects, fences, windows, lot ground) and room 0's own wall test, *Walls shade lamp light near the ground*, *Buildings block lamp light on trees and objects* (was *Buildings block light on objects*), *Shadow softness* (penumbra), walls ending at a floor above (colonnades on a foundation). Released in 2.12.3: placed floors of balconies and upper stories block a lamp below them (walls, floors, windows, objects, fences) and *Buildings block light on objects* (was *Walls block light on objects*). Released in 2.12.1: lighting corrections.  Outdoor and indoor light between stories: released (present since 2.1.0, the first version in this repository). Indoor light through openings across more than one floor, the raised-room wall veto, structure-change refresh and the *Wall seams.csv* recording: Released in 2.6.0. Walls block light on floors and objects, indoor objects lit by lamps of another story and an atrium's stories changing together, and the lit story's wall test from where an outdoor lamp's ray enters it (upper half walls): Released in 2.7.0 |
+| Availability | Released in 2.14.0: closed-floor support-row guards, walls of the lamp's own story for light through floor openings, hard wall tops under a ceiling, floor-level sills without a soft rim, and indoor light independent of the camera ([stairwells](stairwells.md), [arches](arches.md)). Released in 2.13.0: outdoor light through openings into roofed rooms (garden lamps of the story below included), indoor light through openings, *Doors block light*, lamp light through openings in the outside walls' copies (objects, fences, windows, lot ground) and room 0's own wall test, *Walls shade lamp light near the ground*, *Buildings block lamp light on trees and objects* (was *Buildings block light on objects*), *Shadow softness* (penumbra), walls ending at a floor above (colonnades on a foundation). Released in 2.12.3: placed floors of balconies and upper stories block a lamp below them (walls, floors, windows, objects, fences) and *Buildings block light on objects* (was *Walls block light on objects*). Released in 2.12.1: lighting corrections.  Outdoor and indoor light between stories: released (present since 2.1.0, the first version in this repository). Indoor light through openings across more than one floor, the raised-room wall veto, structure-change refresh and the *Wall seams.csv* recording: Released in 2.6.0. Walls block light on floors and objects, indoor objects lit by lamps of another story and an atrium's stories changing together, and the lit story's wall test from where an outdoor lamp's ray enters it (upper half walls): Released in 2.7.0 |
 | Default | On (every switch except *Light through doors and windows*, which is off) |
 | Menu | Lighting > Stories (*Seamless walls between floors* and *Every floor in full detail* under Advanced > *Floor detail*); Lighting > Buildings > Rooms at Night, group LAMP LIGHT (*Outdoor light through openings*, *Indoor light through openings*, *Doors block light*, *Shadow softness*, *Smooth light maps*); Lighting > Objects (*Buildings block lamp light on trees and objects*); Lighting > Ground (*Walls shade lamp light near the ground*) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -48,6 +48,9 @@ test. The light solve itself, lamp ranges and attenuation are the game's.
 4. **Indoor openings.** An indoor room near a removed floor takes the lamps of rooms on other stories that are near the
    same opening. Every point of the light map is lit by such a lamp only when the real ray from the lamp passes through an
    opening in every floor it crosses, then past the walls of the lamp's room and of the stories in between.
+   Borrowed lamps retain wall tests even when a native batch omits its own test; the receiving segment is then tested
+   by Apex as well. An unreadable room rejects the borrowed contribution, including adjacent stories. Lamp and sample
+   coordinates are transformed once per ray and reused at every floor boundary.
 5. **Detail and ambient.** Rooms seen through an opening get the camera story's lighting detail. Rooms joined by removed
    floors into an atrium share one ambient colour and normalisation.
 6. **Seamless walls.** Wall samples are lit at the height the wall mesh draws them, and atrium walls are blurred across
@@ -63,6 +66,11 @@ test. The light solve itself, lamp ranges and attenuation are the game's.
    story below, for a house on a foundation), onto its roofless yards, onto the objects and fences outside, and into a
    roofed room next door through an opening between them. Each point is lit only through the opening's hole and past every
    wall of the story; one opening only.
+
+Stairwells, stairs and arches have their own pages: [Light through stairwells](stairwells.md) (the lamp's own walls,
+soft slab edges, bounce light and partial adaptation), [Stairs on the directional maps](stairs.md) and
+[Light through arches and doorways](arches.md) (arch ambient, floor-level sills, normalisation settling, soft cone
+edges and steady indoor light).
 
 ## Settings
 
@@ -960,14 +968,47 @@ The point solve runs for every texel of a room light map. The hooks read the thr
 rooms without borrowed lamps. Outdoor light through openings adds, per texel of a roofed room that took such lamps, one
 grid walk per lamp (about one step per metre between the lamp and the texel, two grids for a ray that reaches the story
 above), and per gather of a roofed room of a story with openings a scan of the story's tiles for its outline and 9 rays
-per door for each room 0 lamp in reach. A story with no opening noted builds nothing. Diagnostic sample recording exists only in developer mode and runs only while armed. Every
+per door for each room 0 lamp in reach. A story with no opening noted builds nothing. The wall and slab test of a lamp
+and a point for objects is kept while every input it reads is unchanged (same float bits and the same wall, floor and
+penumbra state), so a repeated query returns the value it would compute. Caches keyed by a story manager or lot (the
+outside walls' and slabs' copies `g_wallSnap` and `g_floorSnap`, the story grid caches) are pruned once their key has
+been missing from the loaded lots in two sweeps in a row (`liveness_prune.h`). Diagnostic sample recording exists only in developer mode and runs only while armed. Every
 floor in full detail adds solve work once when entering a lot. In-game cost has not been measured (see
 [validation](../../validation/night-lighting-level-light-share.md)).
+
+## Closed-floor guards, directional weights and the retired mesh blockers
+
+Wall-blur support rows outside a story cannot borrow a lamp through a placed slab merely because the synthetic row
+lies on the lamp's side of that slab. A lower support row of an upper wall tests the recipient floor; an upper support
+row of a lower wall tests the floor above. Open floor quadrants retain their previous continuity. This supplements
+the ordinary ray tests without changing visible sample positions, light colours or filter weights.
+
+Opening-imported directional contributions also take the source-to-recipient normalisation ratio already used by
+the floor/wall solve. Gains above one accumulate into a temporary contribution before joining earlier lamps, as do
+fractional shares. The receiving room's normalisation is the one its last solve ended with
+([arches.md](arches.md)).
+
+**Mesh blockers (retired).** Indoor light through openings and between stories no longer tests triangles of opaque
+instanced meshes (stairs, railings) collected from the screen. That set followed the camera (a triangle budget by
+on-screen coverage) and its test was hard, so the light changed with the view and every publication relit the rooms
+near openings ([arches.md](arches.md), step 6). With the shipped behaviour, the draw hooks read no mesh buffers, the
+collected set is dropped once and nothing is published. The collector (`features/mesh_occlusion.h`,
+`lot_light_bridge.cpp` `NoteSolidMesh` and `PumpSolidMeshes`) remains for comparison in development builds, where two
+refinements apply: an occlusion scene identical to the last published one is not published again, and buffer reads
+inside draw hooks never wait for the GPU (a busy buffer is retried, then waited for after three busy answers; the same
+rule applies to the fence groups of the lot ground shade).
+
+Source: `level_light_share.cpp` `InnerNormScaleAt`, `BasisLightHook`, `InnerPass` and `IndoorPassImpl`.
 
 ## Rejected approaches
 
 - Sharing lamps without a wall test: lower side walls near corners became brighter than the upper ones. Details in
   [history](../../history/night-lighting-level-light-share.md).
+- Testing indoor light against opaque meshes collected from the screen: the light followed the camera and every
+  publication relit the lots ([history](../../history/night-lighting-level-light-share.md)).
+- Replacing lower-coverage geometry when the mesh budget filled: it did not make the collected set complete.
+- Only the game's soft 2D wall test for the lamp's own story: lamps leaked through walls that meet the slab
+  ([stairwells](stairwells.md)).
 - Re-queueing other stories by a light-list signature: could re-enter a story whose pending set was being walked.
 - Reading the story from the tree level passed in: the lot-load path gathers every story through level 0.
 - Testing another story's walls without swapping the wall-mode byte `+0x639`.
@@ -1007,3 +1048,5 @@ floor in full detail adds solve work once when entering a lot. In-game cost has 
 - [Room light maps](../../engine/room-light-maps.md), [Light objects and rigs](../../engine/light-objects-and-rigs.md)
 - [Walls](walls.md), [Floors](floors.md), [Objects and rigs](objects-and-rigs.md), [Rooms at Night](unlit-rooms.md),
   [Lot light pass](lot-light-pass.md)
+- [Light through stairwells](stairwells.md), [Stairs on the directional maps](stairs.md),
+  [Light through arches and doorways](arches.md)

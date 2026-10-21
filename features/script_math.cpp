@@ -130,11 +130,13 @@ constexpr uint32_t kReflectionInfoOff = 0xB0;
 
 struct TypeEntry {
     std::atomic<uint32_t> seq{0};
-    void* domain = nullptr;
-    void* type = nullptr;
-    void* result = nullptr;
-    uint32_t gen = 0;
+    std::atomic<void*> domain{nullptr};
+    std::atomic<void*> type{nullptr};
+    std::atomic<void*> result{nullptr};
+    std::atomic<uint32_t> gen{0};
 };
+struct TypeLast {void* domain=nullptr;void* type=nullptr;void* result=nullptr;uint32_t gen=0;};
+thread_local TypeLast t_typeLast;
 TypeEntry g_types[kTypeSlots];
 std::atomic<uint32_t> g_typeGen{1};
 std::atomic<bool> g_typeOn{false}, g_typeSelfDisabled{false};
@@ -149,27 +151,30 @@ uint32_t TypeSlot(const void* domain, const void* type) {
 }
 
 void* LookupType(void* domain, void* type, uint32_t gen) {
+    if(t_typeLast.domain==domain&&t_typeLast.type==type&&t_typeLast.gen==gen)return t_typeLast.result;
     TypeEntry& e = g_types[TypeSlot(domain, type)];
     const uint32_t s1 = e.seq.load(std::memory_order_acquire);
     if (s1 & 1) return nullptr;
-    void* const d = e.domain;
-    void* const t = e.type;
-    void* const r = e.result;
-    const uint32_t g = e.gen;
+    void* const d = e.domain.load(std::memory_order_relaxed);
+    void* const t = e.type.load(std::memory_order_relaxed);
+    void* const r = e.result.load(std::memory_order_relaxed);
+    const uint32_t g = e.gen.load(std::memory_order_relaxed);
     std::atomic_thread_fence(std::memory_order_acquire);
     if (e.seq.load(std::memory_order_relaxed) != s1) return nullptr;
-    return d == domain && t == type && g == gen ? r : nullptr;
+    if(d!=domain||t!=type||g!=gen)return nullptr;
+    t_typeLast={d,t,r,g};return r;
 }
 
 void StoreType(void* domain, void* type, void* result, uint32_t gen) {
     TypeEntry& e = g_types[TypeSlot(domain, type)];
     uint32_t s = e.seq.load(std::memory_order_relaxed);
     if ((s & 1) || !e.seq.compare_exchange_strong(s, s + 1, std::memory_order_acquire)) return; // another writer: skip
-    e.domain = domain;
-    e.type = type;
-    e.result = result;
-    e.gen = gen;
+    e.domain.store(domain,std::memory_order_relaxed);
+    e.type.store(type,std::memory_order_relaxed);
+    e.result.store(result,std::memory_order_relaxed);
+    e.gen.store(gen,std::memory_order_relaxed);
     e.seq.store(s + 2, std::memory_order_release);
+    t_typeLast={domain,type,result,gen};
 }
 
 // SEH only: klass->reflection_info of the type's class (1 when unreadable: never equal to an object, so nothing stored)

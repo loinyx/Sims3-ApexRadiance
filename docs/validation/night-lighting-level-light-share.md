@@ -22,12 +22,72 @@ It must:
 | [`tools/room_structure_test/run.ps1`](../../tools/room_structure_test/run.ps1) (`check.cpp`) | Extracts `NoteRoomStructure`: a new room schedules a refresh, LOD or repeated gathers do not, roof and wall changes do, repeated changes coalesce | `run.ps1` | MSVC x86 |
 | [`tools/roofed_openings_test/run.ps1`](../../tools/roofed_openings_test/run.ps1) (`check.cpp`) | Extracts the story grid, its ray walk (`GridPassImpl`) and the roofed rooms' doors (`RoofedDoors`, `DoorSig`, `DoorSeen`) and runs them on synthetic grids: a roofed room with a two-cell arch, a lamp in front sees it, one behind or beside does not; the lit floor patch through the arch is bounded by the jambs with no seam between the cells; a ray over the wall's top meets the room's roof; a closed room has no door and stays dark; a window's sill; an arch into another roofed room is no door, into a roofless room it is; the signature follows the doors | `run.ps1` | MSVC x86 |
 | [`tools/room_ambient_test`](../../tools/room_ambient_test/README.md) (`room_ambient_test.cpp`) | Room ambient and scheduling policy (`room_ambient_policy.h`): group deadlines, first dispatch, overdue updates, tick wrap, window recheck timing (0 / 2 s / 6 s, bounded, wrap), lamp refresh delay (120 / 200 ms), safety-net gap (2 s / 500 ms), edit urgency (8 s cap) and edit hold decision, gather ordering, floor priority, structure and floor-edit timing | `run.ps1` | MSVC x86 |
+| `tools/mesh_occlusion_test/` | The retired mesh blockers' collector, BVH and replacement policy, in the standard and development configurations | `run.ps1 -OpaqueShader <ps.bin> -CutoutShader <ps.bin> -Standard` or `-Development` | MSVC x86, two captured pixel shaders |
+| `tools/liveness_prune_test/` | `liveness_prune.h`: an entry survives one miss and is erased after two sweeps in a row without its key; key 0 is never live | `run.ps1` | MSVC x86 |
 | [`tools/basis_test/basis_test.cpp`](../../tools/basis_test/basis_test.cpp) | `PatchBasisSmooth` / `PatchIndoorBasis` on a captured pixel shader, disassembled with d3dcompiler_47 | `basis_test <ps.bin> [lmSampler]` | d3dcompiler_47, a captured shader |
 
 These harnesses do not validate the game's room topology, lamp falloff, visual convergence or performance. They read
 only the repository and print to the console.
 
 ## Latest results
+
+| Date | Commit | Harness | Result | Backend |
+|---|---|---|---|---|
+| 2026-10-20 | Working tree on `c22e8d7` | `tools/mesh_occlusion_test/` | Standard: 20,017 checks passed; development: 20,119 checks passed | None |
+| 2026-10-20 | Working tree on `c22e8d7` | `tools/liveness_prune_test/` | 27 checks passed | None (pure) |
+| 2026-10-20 | Working tree on `c22e8d7` | `tools/roofed_openings_test/` | 196 checks passed, including the stairwell veto, floor-level sill, hard wall top and arch cone cases | None (pure) |
+| 2026-10-20 | Working tree on `c22e8d7` | `tools/room_structure_test/` | 11 checks passed | None |
+
+The mesh blockers are no longer tested by shipped indoor light; the results below describe the collector itself.
+
+2026-10-19, public test 11 candidate: a read-only test 10 snapshot contains 23 groups and 8186 triangles, mainly narrow
+fence/post batches. The earlier captured stair draw has 136 primitives and eight instances (1088 triangles), which
+cannot fit in the remaining six slots. This demonstrates a coverage limit; it does not prove that every missing group
+was rejected only by that limit or that the scene remained unchanged between observations.
+The mesh fixture reproduces 8186 occupied slots and admits a 136-primitive, eight-instance, 28-byte-layout synthetic
+stair batch by replacing lower-coverage groups. The resulting scene has 7850 triangles; solid treads block and open
+gaps remain clear. It also checks no partial removals on a failed plan, oversized/higher-priority protection,
+group-cap replacement, buffer deduplication and the previous ray/BVH tests: 20,117 checks pass. Captured shaders are
+used with synthetic buffers; actual mesh coverage, visual convergence and runtime cost remain unverified.
+
+2026-10-19, public test 9 candidate: test 8 captures still show the coloured upper-wall patch. Read-only inspection
+of its collector finds four 380-triangle groups outside the stair area, rather than the stair instances recorded by
+the probe. Presence of a published BVH is therefore not evidence that the staircase was collected. The candidate
+removes width and dynamic-usage exclusions and tests narrow/dynamic geometry with eight rotated instances using the
+captured 28-byte FLOAT3/FLOAT4 instance layout. Identical geometry in distinct transient buffers does not consume
+additional scene groups or triangle budget. The mesh fixture passes 20,100 checks. The fixture retains synthetic vertex/index data; actual scene coverage
+still requires the accepted-group log and in-game validation.
+
+The indoor fixture also covers blur support rows below/above a closed slab: imported light is rejected in both
+directions, while true openings keep their prior transmission (19,209 indoor/basis checks pass). This closes a separate path by which support rows
+could seed light into an otherwise blocked visible wall. Ordinary ghost/shaft and native wall/floor fixtures remain.
+Correcting these paths does not establish complete visual convergence of the reported arch or every stair asset.
+
+2026-10-19, public test 8 candidate: `tools/mesh_occlusion_test` passes 20,067 checks. The extracted production
+collector runs against native D3D9 buffers, captured opaque/cutout shaders, both index formats, nonzero base/minimum
+vertices, closed treads and open gaps. Rejected early thin geometry yields later frames to subsequent meshes.
+The BVH agrees with a triangle sweep over 20,000 rays; endpoint self-intersection and concurrent scene replacement
+are covered. Vertex/index data in this fixture is synthetic; the captured shaders do not establish actual scene
+geometry coverage.
+
+The refreshed indoor fixture extracts the complete production basis hook and passes 19,205 checks. Mesh blockers
+reject both ordinary cross-story rays and their directional contribution; removing the mesh restores the opening,
+while a native slab still blocks it. Opening shares and source normalisation above/below one preserve previous
+lamp contributions. Native game functions and room metadata remain mocked.
+
+Read-only scene inspection confirms source-room normalisation 1.5 and recipient normalisation 1.0 beside an arch.
+The copied native opening grid admits rays to both sampled floor positions, so a closed arch classification is not
+established as the cause of the visible cut. Room ambient colours also differ. The directional-weight inconsistency
+is corrected in code; visual convergence, wall-filter leakage, actual tread collection and gameplay cost remain
+unverified. No reduction of RAM or additional FPS gain is established by these checks.
+
+2026-10-18, public test candidate: the indoor fixture is refreshed for the current entry, lookup and timing helpers.
+It extracts the imported-indoor branch of BasisLightHook; unrelated opening/daytime branches are excluded from this
+fixture. Before the guard change, four added checks fail: omitted source/recipient wall tests, adjacent missing-room
+fallback, and repeated lamp-position reads. Afterward 30,897 checks pass, including the prior implementation's adjacent
+wall/ghost sample results, closed intermediate floors, open shafts, partial transmission and context restoration.
+Scene captures identify a red kitchen lamp imported into upper rooms, but do not establish which guard caused the
+visible patch. Visual correction in that scene remains unverified; the fixture is not an in-game ray trace.
 
 Release preparation: the public x86 build passes with zero warnings. Exact release commit identity is recorded in the release PR; final artifact gameplay and menu-footer validation remain open. Gameplay evidence applies to the final development candidate ASI (`26CAA132F3D4DD6921E7E3CFFA8BEFA09B3F73868AEA3A917B92B7873D1D8C0D` SHA-256), with wall updates, fence lighting and gate faces visually accepted. This does not establish general FPS gains or exhaustive scene coverage.
 
@@ -130,6 +190,13 @@ topology mutation inside a point is not reproduced. This release does not promis
 
 ## Open checks
 
+- The second solve of a room (fill or normalisation resend) is urgent only while a lamp edit is pending; after a load it queues as before. Expected: a placed lamp shows its final light without the 1-2 s step, and no 15-21 ms frames in the first seconds after loading a lot with stairwells and arches.
+- 2.14.0: indoor light through openings and between stories with the mesh blockers retired: no periodic room
+  invalidations in a recording while the camera moves, and no hard tread shadow under stairs.
+- 2.14.0, Instant (GPU): place or move an outdoor lamp on a multi-story house. **Expected:** every story takes its
+  light, including stories whose light list did not hold the new lamp yet ([rt-outdoor-lamps.md](../features/night-lighting/rt-outdoor-lamps.md)).
+- 2.14.0: the lamp-visibility memo and the liveness pruning in a long session (lots streaming in and out, world
+  changes), with no change of light.
 - 2.13.0 build, in game: outdoor light through openings (lot `B1280029950F0CA0`, story 0, the colonnade's room 48
   and the garden post in front of its arches), developer mode:
   - the log has `[RoofedLamps] Room solve: story 0 room 48: N outdoor lights through its openings: L...` with the post

@@ -27,6 +27,7 @@ int DisplayLevels(uint32_t* lots, int* stories, int max);
 // Development tools (F6 recorder, render thread): "[room]" lines for the indoor rooms whose ambient, state, class or light
 // count changed since the last call (reset: every room again)
 std::vector<std::string> TraceRooms(bool reset);
+uint64_t TraceRoomsRelease(); // render thread, after a recording: its room states given back (bytes, estimated)
 // Indoor lamps also light the story above or below through stair openings (the rooms near them gather again on a change)
 void SetIndoor(bool on);
 // Walls are lit at the heights the game draws their light at, so the walls of two stories meet the floor line on the same
@@ -119,6 +120,9 @@ bool WallBlocks(const float lamp[3], const float point[3], float nearSkip = 0.2f
 // room 0 is solved). Rays going down are not tested (1). The point is one point: an object standing on a slab is tested
 // where the caller puts it (on the slab's plane it is tested 5 cm toward the lamp).
 float LampVisibility(const float lamp[3], const float point[3], float nearSkip = 0.2f);
+// Everything LampVisibility reads besides its arguments, as one key (render thread), and whether F8 records its tests
+uint64_t LampVisibilityState();
+bool VisibilityDiagArmed();
 // The same share from any thread (the object rigs' gather): tested against an immutable copy of the walls and slabs that
 // OnPresent publishes when they change (up to a frame old). 1 while the option is off or before the first copy.
 float LampVisibilityShared(const float lamp[3], const float point[3], float nearSkip = 0.2f);
@@ -141,6 +145,25 @@ bool OnWallLine(const float point[3], float dirX, float dirZ, float maxDist);
 // F7 light capture: the wall piece a screen ray (world origin, direction) meets, as the solve laid it out (base, rows, the
 // heights its rows were lit at, the atlas texel the pixel reads) and the lamps of its room; a note when none
 std::string WallNotesOnRay(const float origin[3], const float dir[3], float* hitOut = nullptr);
+// (development builds, arch_ambient) A floor draw of a room whose ambient colour is `own` (the draw's constant): its arches into
+// other roofed rooms, one row pair each (ShaderPatches::PatchRoomMapSmooth archAmb): (a.x, a.z, e.x, e.z) in lot metres and
+// (the neighbour's ambient over own, 0 where lower; 1 / |e|^2). Returns how many were written (at most maxCells); 0 when the
+// room is not known. mapTex = the room light map the draw binds, basisTex = one of its directional maps (0 = none bound): they
+// name the draw's story, and only rooms of that story give their arches (together when they share the ambient); with no story
+// known, only matches all on one story of one lot do. Render thread.
+int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, float* rows, int maxCells);
+std::string ArchAmbientStatus();
+// (development builds, basis_wall_filter) The wall mask (64 x 64 A8R8G8B8, the directional maps' layout: r -x, g +x, b -z, a +z
+// walled) of the story whose directional maps include the D3D texture basisTex (render thread). gen = the mask's version;
+// px (16384 bytes) is written when it differs from knownGen. False: no mask known for that story.
+bool WallMaskFor(uintptr_t basisTex, uint32_t knownGen, uint32_t& gen, uint8_t* px);
+// (development builds, stair_room_fill) the story's ambient per tile (64 x 64 x 4 floats; its room's +0x110), for the draw's
+// directional maps; sig changes with the values. False: no story or an unreadable room.
+bool AmbientMapFor(uintptr_t basisTex, uint64_t knownSig, uint64_t& sig, float* rgba);
+// (development builds, stair_story_blend) the story above's directional maps for a draw's (cur by direction, up in the same order) and the
+// two stories' floor heights (world y); false: unknown story or none above
+bool StoryAboveFor(const uintptr_t cur[4], uintptr_t up[4], float& yLow, float& yUp);
+std::string WallMaskStatus();
 // F7 light capture, the whole scene: every noted wall piece with the wall-shader vertices on its line (world positions of the
 // frame's wall draws): the base its light uses against where it is drawn, per draw, and a summary per story
 struct SurveyPoint {
@@ -196,6 +219,10 @@ void NoteLampMark(uintptr_t treeLevel, int room, bool user, bool pure);
 bool HoldLampMark(uintptr_t treeLevel, int room, bool user);
 // Scheduler factor of a room (RoomLightQueue's priority hook): 1, or above any other room's for a lamp edit's rooms
 float LampUrgency(const void* room);
+// (development builds, auto_light_priority) an automatic switch-on's own room first in the room queue: no edit, no hold, no
+// extra budget; dusk: only on the story the camera shows
+void NoteQuietMark(uintptr_t treeLevel, int room, bool dusk);
+long QuietMarks();
 // A lamp edit's room that is a member of an atrium (rooms joined through removed floors): the scheduler solves it right
 // after the lamp's own room whatever its story, so the atrium's stories change together
 bool StackedWithEdit(const void* room);

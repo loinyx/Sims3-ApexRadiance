@@ -606,6 +606,7 @@ The localized folder name is resolved from the game executable's string table, w
 | `[qol.frame_profiler]` | Frame Profiler preferences (developer mode; never saved as running) |
 | `[developer]` | Developer preferences imported with a profile |
 | `[patches.<Name>]` | One table per feature: `enabled` plus one key per registered setting |
+| `[dev_build]` | Development builds only: the development switches, read once at start-up by `DevSwitches::Load` and kept by Save, which preserves tables it does not write ([workflow.md](workflow.md#development-switches-dev_build)) |
 
 - **Writes** are atomic (temporary file, then replace) and debounced: `RequestSave` marks the file dirty and the pump
   thread writes it about a second later (`PumpAutosave`). Menu changes are therefore saved automatically.

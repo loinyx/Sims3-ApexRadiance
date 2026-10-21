@@ -20,6 +20,10 @@
 #include "apex_util.h"
 #include "apex_version.h"
 #include "address_space.h"
+#include "va_ledger.h"
+#include "dev_switches.h"
+#include "game_alloc_categories.h"
+#include "allocator_tuning.h"
 #include "build_flavor.h"
 #include "conflict_guard.h"
 #include "crash_report.h"
@@ -30,6 +34,7 @@
 #include "hook_guard.h"
 #include "module_lifetime.h"
 #include "load_timing.h"
+#include "lot_load_analysis.h"
 #include "overlay.h"
 #include "patch_base.h"
 #include "s3ss_detect.h"
@@ -166,6 +171,9 @@ DWORD InitBody() {
 
     try {
         ApexConfig::LoadDeveloperMode();
+        DevSwitches::Load();             // numbered development builds: [dev_build] measurement and fix switches
+        VaLedger::InstallEarly();        // measurements on: who reserves the address space
+        GameAllocCategories::Install();  // measurements on: the game heap by EA memory category
         PatchManager::Get().CreateAll();
         ApexConfig::EnsureMigrated();
         ApexConfig::LoadSettings();
@@ -173,7 +181,7 @@ DWORD InitBody() {
         LOG_ERROR(std::string("[Main] Settings could not be loaded: ") + e.what());
     }
 
-    AddressSpace::Start(); // starts only in developer mode, after settings have been loaded
+    AddressSpace::Start(); // detailed memory observer only while developer mode is enabled
     LOG_INFO(kPublicBuild ? "[Main] Unified build: normal mode" : "[Main] Unified build: developer mode");
     if (!WaitForSettle()) return 0;
     const S3SSDetect::Info& s3ss = S3SSDetect::Rescan();
@@ -194,6 +202,7 @@ DWORD InitBody() {
             LOG_ERROR(std::string("[Main] Features could not be started: ") + e.what());
         }
         ApexGui::SetStartup(ApexGui::Startup::Running);
+        AllocatorTuning::Install(); // allocator_trim / allocator_top_down (the allocator exists by now)
         LOG_INFO("[Main] Features started");
         LoadTiming::NoteFeaturesStarted();
     }
@@ -206,6 +215,8 @@ DWORD InitBody() {
         if (ApexGui::GetStartup() == ApexGui::Startup::Running) HookGuard::Try("Pump: features' periodic work", [] { PatchManager::Get().UpdateAll(); });
         HookGuard::Try("Pump: settings autosave", [] { ApexConfig::PumpAutosave(); });
         HookGuard::Try("Pump: load timing", [] { LoadTiming::Pump(); }); // log lines only ([LoadTiming])
+        HookGuard::Try("Pump: allocator trim", [] { AllocatorTuning::Pump(); }); // allocator_trim
+        if constexpr (kDevToolsBuild) if(!kPublicBuild) HookGuard::Try("Pump: lot loading analysis", [] { LotLoadAnalysis::Pump(); });
         const ULONGLONG now = GetTickCount64();
         if (now - lastGuardTick >= 1000) {
             lastGuardTick = now;

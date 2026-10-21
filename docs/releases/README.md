@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [2.14.0](2.14.0.md): light through stairwells, stairs and arches, trees lit leaf by leaf, steady moonlight.
 - [2.13.2](2.13.2.md): the latest lighting features on the EA app version 1.69.
 - [2.13.1](2.13.1.md): wall and garden wall shadows past the lot, smoother ground light, trees lit by distance.
 - [2.13.0](2.13.0.md): Instant lamp lighting and lamp light through doors, windows and arches.
@@ -36,6 +37,7 @@ tests, publication) is in [workflow.md](../workflow.md#6-release).
 
 | Version | Published | Headline |
 |---|---|---|
+| [2.14.0](2.14.0.md) | Pending | Light through stairwells, stairs and arches, trees lit leaf by leaf, steady moonlight, memory and save fixes |
 | [2.13.2](2.13.2.md) | 2026-10-15 | The latest lighting features on the EA app version of the game (1.69) |
 | [2.13.1](2.13.1.md) | 2026-10-15 | Wall and garden wall shadows that continue past the lot, smoother lamp light on the ground, and trees lit by distance |
 | [2.13.0](2.13.0.md) | 2026-10-14 | Instant lamp lighting on the graphics card, and lamp light through doors, windows and arches |

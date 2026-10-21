@@ -36,6 +36,8 @@ bool CameraMoving();
 // > 5 mm between two samples, or within 100 ms for slow pans, held 300 ms); its samples also feed the lot budget and the
 // wall shading gate when those are on.
 bool SampleCameraMoving();
+// The camera eye now (world); false while its location in the game's data is unknown. Any thread.
+bool CameraEye(float out[3]);
 
 // The flush after a lamp drag (DragLite::SolveCapMs): Faster room lighting's drain takes what it needs up to the spread cap
 // (DrainBudget) and books what it spent (NoteDrainSpent, 0 at each pick); the lot being played gets the rest of the cap

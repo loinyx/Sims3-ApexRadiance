@@ -27,6 +27,11 @@ and the constants the game actually uploaded, and compare them with a pixel that
 
 ## How Apex Radiance solves it
 
+Wall geometry recording identifies the clip and world matrix registers from the wall vertex shader's consecutive
+position `dp4` operations and static wall-map UV scale. Unknown layouts skip the wall-position diagnostic rather than
+interpreting unrelated constants as transforms. Geometry reads occur only during a requested capture. This supports
+both the c0/c4 and c4/c8 matrix layouts when their shader patterns match.
+
 The probe tests each draw of one frame against a 1x1 scissor rectangle at the chosen pixel with an occlusion query, so
 only the draws that really reach that pixel are reported.
 
@@ -130,7 +135,12 @@ calls `Captures::Finish(folder, ..., CaptureKind::LightCapture)`. Status line:
 When a lot's shown story changes, captures are queued 1 s and 3 s later with the reason
 `automatic, 1 s after the floor change (lot XXXXXXXX story a -> b)`; the recorder gets a `[probe] floor change` line.
 Automatic captures go into `... Light capture (automatic)\` folders. Keep the camera still so the pixel stays on the same
-object.
+object. A watch armed inside a capture session ends with that session, so no automatic capture lands in a later session;
+outside a session the watch is unchanged.
+
+In development builds with `release_debug_buffers` on, the reserve of draw records (up to 4,000) and the occlusion
+queries are given back after each capture when no automatic capture is pending
+([memory-analysis.md](../memory-analysis.md#development-flavour-measurements)).
 
 ### Texture replacement (developer mode)
 

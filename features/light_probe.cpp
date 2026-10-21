@@ -10,11 +10,13 @@
 #include "hotkeys.h"
 #include "lot_light_bridge.h"
 #include "level_light_share.h"
+#include "shader_patches.h"
 #include "recorder.h"
 #include "d3d9_hooks.h"
 #include "apex_log.h"
 #include "apex_util.h"
 #include "apex_paths.h"
+#include "apex_memory.h"
 #include "imgui.h"
 #include <windows.h>
 #include <algorithm>
@@ -58,6 +60,7 @@ struct DrawRec {
     IDirect3DPixelShader9* ps = nullptr;
     DWORD rs[14] = {};
     ConstList psc, vsc;
+    ShaderPatches::WallMatrices wallMatrices;
     std::string bridge; // LotLightBridge::DescribeDraw
     std::string instances; // instanced draws: the per-instance data (read while the draw is recorded)
     std::vector<std::array<float, 4>> verts; // the draw's vertex positions as stored (stream POSITION, raw), for the wall block (WallUnderPixel)
@@ -121,7 +124,8 @@ bool g_inProbeCall = false;
 POINT g_pixel{};
 std::string g_captureWhy = "requested";  // why this capture was taken (the shortcut, or automatic after a floor change)
 // After a capture by the shortcut: the same pixel is measured again 1 s and 3 s after each change of the camera's story
-// (up to 6 automatic captures within 2 minutes), for a before / after of the same object across floor switches
+// (up to 6 automatic captures within 2 minutes), for a before / after of the same object across floor switches. A watch
+// armed inside a capture session ends with that session, so no automatic capture follows a finished report.
 struct Watch {
     bool on = false;
     POINT pixel{};
@@ -129,6 +133,7 @@ struct Watch {
     DWORD until = 0;
     int left = 0;
     std::vector<std::pair<DWORD, std::string>> due; // tick, why
+    std::string session;                             // Captures::SessionFolder() when armed ("" outside a session)
 } g_watch;
 std::map<uint32_t, int> ShownStories() {
     uint32_t lots[256];
@@ -543,10 +548,15 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(IDirect3DDevice9* dev, c
                 if (tmp[i][0] != 0 || tmp[i][1] != 0 || tmp[i][2] != 0 || tmp[i][3] != 0) r.vsc.push_back({i, {tmp[i][0], tmp[i][1], tmp[i][2], tmp[i][3]}});
             r.bridge = LotLightBridge::DescribeDraw();
             if (std::strcmp(kind, "DIP") == 0) r.instances = ReadInstances(dev);
-            // a wall shader's draw (local -> world rows c8..c10 a rotation): its vertices, for the wall block
+            // Read wall geometry only when the shader identifies its clip/world matrices.
             if (vertexCount) {
-                bool rigid = true;
-                for (int k = 8; k <= 10 && rigid; k++) {
+                UINT codeBytes=0;std::vector<DWORD> wallCode;
+                if(r.vs && SUCCEEDED(r.vs->GetFunction(nullptr,&codeBytes)) && codeBytes>=8 && codeBytes<=65536 && !(codeBytes%4)) {
+                    wallCode.resize(codeBytes/4);
+                    if(FAILED(r.vs->GetFunction(wallCode.data(),&codeBytes))) wallCode.clear();
+                }
+                bool rigid=ShaderPatches::FindWallMatrices(wallCode,r.wallMatrices);
+                for (int k = r.wallMatrices.world; k < r.wallMatrices.world+3 && rigid; k++) {
                     const float l = std::sqrt(tmp[k][0] * tmp[k][0] + tmp[k][1] * tmp[k][1] + tmp[k][2] * tmp[k][2]);
                     rigid = l > 0.99f && l < 1.01f;
                 }
@@ -666,6 +676,33 @@ void ReleaseDraws() {
     }
     g_draws.clear();
 }
+// (development builds, release_debug_buffers) Between captures the room reserved for kMaxDraws records (about 1.7 MB, kept by
+// clear()) and the occlusion queries of the last capture are given back; the next capture reserves and creates them again.
+// A watch's automatic captures keep them until it ends. A capture only reads the frame: nothing that is lit depends on this.
+void ReleaseCaptureBuffers() {
+    if (!g_draws.capacity() && g_queryPool.empty()) return;
+    ReleaseDraws();
+    const uint64_t bytes = ApexMemory::Est::Vec(g_draws) + ApexMemory::Est::Vec(g_queryPool);
+    const size_t queries = g_queryPool.size();
+    std::vector<DrawRec>().swap(g_draws);
+    for (auto* q : g_queryPool)
+        if (q) q->Release();
+    std::vector<IDirect3DQuery9*>().swap(g_queryPool);
+    ApexMemory::NoteReleased("Light Probe (F7): the draw records' reserve and the occlusion queries after a capture", bytes);
+    LOG_INFO(std::format("[LightProbe] Capture buffers given back: {:.2f} MiB of draw records, {} occlusion queries", bytes / 1048576.0, queries));
+}
+void MeasureMemory() {
+    static ApexMemory::Cadence cadence;
+    if (!cadence.Due()) return;
+    using namespace ApexMemory::Est;
+    static auto* sDraws = ApexMemory::Register("LightProbe", "draw records of a capture (F7) and its queries");
+    static auto* sTex = ApexMemory::Register("LightProbe", "textures listed for the menu (references to game textures)");
+    ApexMemory::Set(sDraws,
+                    Vec(g_draws, [](const DrawRec& d) { return Vec(d.psc) + Vec(d.vsc) + Str(d.bridge) + Str(d.instances) + Vec(d.verts); }) + Vec(g_queryPool) +
+                        Vec(g_prevPick.psc) + Vec(g_prevPick.vsc) + Str(g_prevPick.bridge),
+                    g_draws.size() + g_queryPool.size());
+    ApexMemory::Set(sTex, Vec(g_textures, [](const TexInfo& t) { return Str(t.desc) + Str(t.file); }), g_textures.size());
+}
 
 using D3DDisassemble_t = HRESULT(WINAPI*)(LPCVOID, SIZE_T, UINT, LPCSTR, ID3DBlob**);
 
@@ -762,24 +799,26 @@ void WriteComparison(std::ostream& out, const Pick& a, const Pick& b) {
 // draw whose vertex shader has local -> clip in c4..c7 and local -> world in c8..c10 (the game's wall shader), handed to
 // LevelLightShare::WallNotesOnRay. Empty when the draw has no such matrices.
 std::string WallUnderPixel(const DrawRec& d) {
-    float m[11][4] = {};
-    bool have[11] = {};
+    const int clipBase=d.wallMatrices.clip,worldBase=d.wallMatrices.world;
+    if(clipBase<0 || worldBase<0 || clipBase+3>=kVsConsts || worldBase+2>=kVsConsts) return {};
+    float m[kVsConsts][4] = {};
+    bool have[kVsConsts] = {};
     for (const auto& [i, v] : d.vsc)
-        if (i >= 4 && i <= 10) {
+        if (i >= 0 && i < kVsConsts) {
             std::memcpy(m[i], v.data(), sizeof m[i]);
             have[i] = true;
         }
-    for (int i = 4; i <= 10; i++)
-        if (!have[i] && i != 9) return {}; // c9 may be (0 1 0 y): never all zero, but keep the test simple
+    for (int i=clipBase;i<clipBase+4;++i) if(!have[i]) return {};
+    for (int i=worldBase;i<worldBase+3;++i) if(!have[i]) return {};
     // local -> world must be a rotation (the lot's) plus a translation
-    for (int r = 8; r <= 10; r++) {
+    for (int r = worldBase; r < worldBase+3; r++) {
         const float l = std::sqrt(m[r][0] * m[r][0] + m[r][1] * m[r][1] + m[r][2] * m[r][2]);
         if (!(l > 0.99f && l < 1.01f)) return {};
     }
-    // inverse of local -> clip (rows c4..c7), Gauss-Jordan
+    // Inverse of the shader's local-to-clip rows, Gauss-Jordan.
     double a[4][8] = {};
     for (int r = 0; r < 4; r++) {
-        for (int c = 0; c < 4; c++) a[r][c] = m[4 + r][c];
+        for (int c = 0; c < 4; c++) a[r][c] = m[clipBase + r][c];
         a[r][4 + r] = 1;
     }
     for (int c = 0; c < 4; c++) {
@@ -805,7 +844,7 @@ std::string WallUnderPixel(const DrawRec& d) {
             for (int c = 0; c < 4; c++) l[r] += a[r][4 + c] * clip[c];
         if (std::fabs(l[3]) < 1e-12) return {};
         const double lp[4] = {l[0] / l[3], l[1] / l[3], l[2] / l[3], 1.0};
-        for (int r = 0; r < 3; r++) pw[z][r] = static_cast<float>(m[8 + r][0] * lp[0] + m[8 + r][1] * lp[1] + m[8 + r][2] * lp[2] + m[8 + r][3]);
+        for (int r = 0; r < 3; r++) pw[z][r] = static_cast<float>(m[worldBase + r][0] * lp[0] + m[worldBase + r][1] * lp[1] + m[worldBase + r][2] * lp[2] + m[worldBase + r][3]);
     }
     const float dir[3] = {pw[1][0] - pw[0][0], pw[1][1] - pw[0][1], pw[1][2] - pw[0][2]};
     float hit[3] = {1e30f, 0, 0};
@@ -817,7 +856,7 @@ std::string WallUnderPixel(const DrawRec& d) {
         for (const auto& v : d.verts) {
             const float l[3] = {v[0] / 256.0f, v[1] / 256.0f, v[2] / 256.0f};
             float wp[3];
-            for (int r = 0; r < 3; r++) wp[r] = m[8 + r][0] * l[0] + m[8 + r][1] * l[1] + m[8 + r][2] * l[2] + m[8 + r][3];
+            for (int r = 0; r < 3; r++) wp[r] = m[worldBase + r][0] * l[0] + m[worldBase + r][1] * l[1] + m[worldBase + r][2] * l[2] + m[worldBase + r][3];
             const float dx = wp[0] - hit[0], dz = wp[2] - hit[2];
             if (dx * dx + dz * dz > 0.6f * 0.6f) continue;
             nNear++;
@@ -924,16 +963,18 @@ void FinishCapture(IDirect3DDevice9* dev) {
         out << std::format("== PAREDE (desenho #{}): ", it->index) << wall << "\n";
         break;
     }
-    // the whole scene: every wall draw's vertices (the wall shader: lot space = stored / 256, local -> world rows c8..c10)
+    // The whole scene: wall vertices transformed by the matrix rows identified in each shader.
     {
         std::vector<LevelLightShare::SurveyPoint> pts;
         for (const auto& d : g_draws) {
             if (d.verts.empty()) continue;
+            const int worldBase=d.wallMatrices.world;
+            if(worldBase<0) continue;
             float m[3][4] = {};
             int have = 0;
             for (const auto& [i, v] : d.vsc)
-                if (i >= 8 && i <= 10) {
-                    std::memcpy(m[i - 8], v.data(), sizeof m[0]);
+                if (i >= worldBase && i < worldBase+3) {
+                    std::memcpy(m[i - worldBase], v.data(), sizeof m[0]);
                     have++;
                 }
             if (have < 2) continue; // c9 may be (0 1 0 y) only: a row is never all zero, but two are enough to know it was set
@@ -998,6 +1039,8 @@ void OnPresent(IDirect3DDevice9* dev) {
             g_state = State::Idle; // no memory for the capture: skip it
         }
     }
+    if (DevSwitches::ReleaseDebugBuffers() && g_state == State::Idle && !g_watch.on) ReleaseCaptureBuffers();
+    if (DevSwitches::kCompiled) MeasureMemory(); // development builds (memory_owners)
 
     // Its shortcut (Hotkeys: Ctrl+Shift+V, 4 or F7 by preset), eaten before the game sees it
     const bool pressed = Hotkeys::Take(Hotkeys::Action::Probe);
@@ -1046,13 +1089,18 @@ void OnPresent(IDirect3DDevice9* dev) {
         const bool guided = g_aiming.exchange(false) || click != 0;
         start(pixel, guided ? "guided one-shot capture under the mouse" : "requested by the shortcut; the same pixel is measured again 1 s and 3 s after any lot changes the story it shows, for 2 minutes");
         Captures::Notify(I18n::Tr("Capturing the light under the mouse\xE2\x80\xA6"), 3, Captures::NoteKind::Probe);
-        g_watch = guided ? Watch{} : Watch{true, pixel, ShownStories(), now + 120000, 6, {}};
+        g_watch = guided ? Watch{} : Watch{true, pixel, ShownStories(), now + 120000, 6, {}, Captures::SessionFolder()};
         return;
     }
     // The automatic captures after a floor change
     if (!g_watch.on) return;
     if (static_cast<int32_t>(now - g_watch.until) >= 0 || g_watch.left <= 0) {
         g_watch.on = false;
+        return;
+    }
+    if (g_watch.session != Captures::SessionFolder()) { // its session ended (or another began): no more automatic captures
+        Recorder::Note("[probe] capture session ended: automatic captures after floor changes stopped");
+        g_watch = Watch{};
         return;
     }
     const std::map<uint32_t, int> shown = ShownStories();

@@ -29,6 +29,8 @@
 #include "unlit_rooms.h"
 #include "lamp_mark_filter.h"
 #include "screen_watch.h"
+#include "apex_memory.h"
+#include "dev_switches.h"
 #include <windows.h>
 #include <algorithm>
 #include <atomic>
@@ -55,7 +57,7 @@ struct Line {
     std::string text;
 };
 std::vector<Line> g_lines;
-std::string g_lastStatusText[8];
+std::string g_lastStatusText[9];
 std::string g_settingsAtStart; // ApexRadiance.toml as it was when the recording started
 size_t g_notes = 0;            // lines added by other modules (Note: furniture, probe), capped
 constexpr size_t kMaxNotes = 40000;
@@ -99,6 +101,42 @@ struct GroundShown {
     bool together;
 };
 std::vector<GroundShown> g_ground;
+
+// (development builds, release_debug_buffers) Once a recording is saved or cancelled its lines (up to 60000 strings), views,
+// ground notes, lamp edits and the settings copy are given back; before, they stayed until the next recording started.
+// Nothing reads them between recordings (Note and the trackers only add while one runs).
+void ReleaseBuffers() {
+    if (!DevSwitches::ReleaseDebugBuffers() || g_on) return;
+    using namespace ApexMemory::Est;
+    uint64_t bytes = Vec(g_lines, [](const Line& l) { return Str(l.text); }) + Vec(g_views, [](const ViewSnap& v) { return Tree(v.stories); }) + Vec(g_ground) +
+                     Str(g_settingsAtStart);
+    std::vector<Line>().swap(g_lines);
+    std::vector<ViewSnap>().swap(g_views);
+    std::vector<GroundShown>().swap(g_ground);
+    std::string().swap(g_settingsAtStart);
+    {
+        std::lock_guard<std::mutex> lk(g_editMx);
+        bytes += Vec(g_edits);
+        std::vector<Edit>().swap(g_edits);
+    }
+    // the tracers' last states: a new recording empties them at its start (FurnitureTraceReset, TraceRooms(true)) and nothing
+    // else reads them, so they need not wait for it
+    bytes += LotLightBridge::FurnitureTraceRelease() + LevelLightShare::TraceRoomsRelease();
+    if (bytes) ApexMemory::NoteReleased("Recorder (F6): the recording's lines after it was saved or cancelled", bytes);
+}
+void MeasureMemory() {
+    static ApexMemory::Cadence cadence;
+    if (!cadence.Due()) return;
+    using namespace ApexMemory::Est;
+    static auto* sLines = ApexMemory::Register("Recorder", "recording lines, views and notes (F6)");
+    uint64_t bytes = Vec(g_lines, [](const Line& l) { return Str(l.text); }) + Vec(g_views, [](const ViewSnap& v) { return Tree(v.stories); }) + Vec(g_ground) +
+                     Str(g_settingsAtStart);
+    {
+        std::lock_guard<std::mutex> lk(g_editMx);
+        bytes += Vec(g_edits);
+    }
+    ApexMemory::Set(sLines, bytes, g_lines.size());
+}
 std::string Clock(DWORD tick);
 
 std::string Seconds(DWORD from, DWORD at) { return std::format("{:+.2f} s", static_cast<int32_t>(at - from) / 1000.0); }
@@ -469,11 +507,13 @@ std::string CameraLine(DWORD now) {
 }
 
 void Status(DWORD now) {
-    const std::string texts[8] = {"Indoor light between stories: " + LevelLightShare::Status(), "Rooms at Night: " + UnlitRooms::Status(),
+    const std::string texts[9] = {"Indoor light between stories: " + LevelLightShare::Status(), "Rooms at Night: " + UnlitRooms::Status(),
                                   "Faster Room Lighting: " + RoomLightQueue::StatusText(), "Indoor object maps: " + RoomMapPadding::Status(), FurnitureLine(),
                                   CameraLine(now), "Rooms at Night sliders: " + UnlitRooms::SettingsText(),
-                                  "Rooms keep their light: " + LampMarkFilter::Status()};
-    for (int i = 0; i < 8; i++)
+                                  "Rooms keep their light: " + LampMarkFilter::Status(),
+                                  // (development builds, arch_ambient) the arches' floor draws: matched or not, and why
+                                  DevSwitches::ArchAmbient() ? LevelLightShare::ArchAmbientStatus() : std::string()};
+    for (int i = 0; i < 9; i++)
         if (texts[i] != g_lastStatusText[i]) {
             g_lastStatusText[i] = texts[i];
             g_lines.push_back({now, "[status] " + texts[i]});
@@ -583,6 +623,7 @@ void Stop() {
     Captures::Finish(folder, std::format("a recording of {:.0f} s of the lighting", (end - g_startTick) / 1000.0), Captures::CaptureKind::Recording);
     g_saved = name;
     g_savedAt = GetTickCount();
+    ReleaseBuffers();
 }
 
 } // namespace
@@ -611,6 +652,7 @@ void RequestStop() { g_stopRequest = true; }
 void RequestCancel() { g_cancelRequest = true; }
 const char* JustSaved() { return !g_saved.empty() && GetTickCount() - g_savedAt < 4000 ? g_saved.c_str() : ""; }
 void OnPresent() {
+    if (DevSwitches::kCompiled) MeasureMemory(); // development builds (memory_owners)
     const bool requested = g_toggleRequest.exchange(false);
     const bool pressed = Hotkeys::Take(Hotkeys::Action::Recorder) || requested;
     const bool stop = g_stopRequest.exchange(false);
@@ -622,6 +664,7 @@ void OnPresent() {
             g_settingsAtStart.clear();
             g_saved.clear();
             g_notes = g_roomNotes = 0;
+            ReleaseBuffers();
             LOG_INFO("[Recorder] Cancelled: no capture folder created");
             Captures::Notify(I18n::Tr("Recording cancelled. No capture was saved"));
         }

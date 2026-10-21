@@ -114,3 +114,16 @@ under *Floor detail*. Rooms at Night brightness range became 10 to 80% (was 0 to
 (was 20%). The exterior wall switch now means "wall lamp light by day and night" rather than "gain 1 when off".
 
 **Outcome:** current settings table in the feature page. Other bindings, defaults and dependencies unchanged.
+
+### 2026-10-20: outdoor lamps by real daylight (researched, not implemented)
+
+**Context:** outdoor lamps follow one value, the game's night level (`lightMgr+0xF0`), so they ignore weather.
+
+**Finding:** the night level depends only on the clock and changes in steps of 0.2. The game also keeps a weather-aware
+manmade light level (`lightMgr+0xF4`, `ManmadeLightIntensity` per sky type) and the sun's direction (`sky+0x6B0`). A
+proposal estimated outdoor illuminance from the sun's height and the weather, mapped 400 lx to 3 lx onto a lamp level
+with hysteresis, and kept the game's night level for the moonlight and lamp switching.
+
+**Outcome:** not implemented. Several offsets are unverified at runtime, and on a stormy day walls and ground could lose
+lamp light (the game's daytime lamp constant is 0). A first phase that only logs the sky state exists in development
+builds (`daylight_log`, `features/daylight_probe.cpp`); it changes no light.

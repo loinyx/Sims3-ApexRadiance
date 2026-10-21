@@ -183,6 +183,14 @@ script binding name in `.rdata` and its `{function, name}` table, on any build; 
 keeps its own Steam targets (address plus pattern), except the targets that name a table id (the performance hooks and
 the texture load calls above), which take the resolved address and, for a CALL site, check its callee; shader patches match game shaders by bytecode, not game code.
 
+### Byte checks added in 2.14.0
+
+| Site | Check | Fallback |
+|---|---|---|
+| Sunlight Scale reader `0x00C11B01` | `mov ecx,<scale>; call <getter>; movss xmm0,[eax]` found by pattern, getter bytes `8B C1 C3` | The moonlight factor is written into the variable every frame, as before |
+| Allocator trim `0x004E4F90` | Image base `0x00400000` and prologue `83 EC 10 53 55 56 8B E9` | Trim and top-down blocks stay off (*Not the Steam 1.67.2 allocator*) |
+| Save dispatch entry `0x00AAC110` | The game's bytes, or a `jmp rel32` into a loaded `ts3native.asi`; the call at `0x00AB12AF` checked as before | The early save preparation stays off; the rest of Room to Save runs |
+
 ### What is uncertain on EA 1.69.47
 
 - **Nothing here has run on EA yet.** The signatures are unique on Steam; whether they match on the EA build is only

@@ -37,6 +37,7 @@
 //   counts are 0 nothing can be found: the entry hook (framework/entry_chain.h, layer RoomLightQueue) returns at once.
 // Every write goes through MemPatch::WriteCodeSuspended (no thread inside the bytes) and is put back by Stop.
 #include "room_light_queue.h"
+#include "dev_switches.h"
 #include "apex_log.h"
 #include "hook_guard.h"
 #include "build_flavor.h"
@@ -449,7 +450,15 @@ void Drain(BYTE* tree, BYTE* before) {
         const float budget = LotLightingMotion::DrainBudget(LotLightingMotion::SampleCameraMoving() ? 1.0f
                              : AtriumHold::EditHolding() && !LevelLightShare::LampDragging() ? 16.0f
                              : lampEdit ? (g_refining ? 4.0f : LevelLightShare::LampDragging() ? 6.0f : 12.0f)
-                                        : LevelLightShare::SettlingAfterLoad() ? 12.0f : 4.0f);
+                                        : LevelLightShare::SettlingAfterLoad() ? (DevSwitches::RoomDrainBudget() ? 6.0f : 12.0f) : 4.0f);
+        // room_drain_budget (numbered development builds): the stopwatch is only checked between game steps, and one step
+        // can take several milliseconds, so "elapsed < 0.8 budget" still started steps that ran 15-21 ms frames. A step is
+        // started only when the running average of a step's cost still fits. Each room's light is still the game's own
+        // complete solve; only the frame a room finishes in can move.
+        // Lamp edits keep the old pacing (their light must follow the lamp; a slower edit drain was rejected before).
+        // nor an urgent room (an automatic switch-on put first: auto_light_priority), which keeps the whole budget
+        const bool predict = DevSwitches::RoomDrainBudget() && !lampEdit && !AtriumHold::EditHolding() && !(LevelLightShare::LampUrgency(room) > 1.0f);
+        static float s_stepMs = 0.0f; // running average of one solve step (render thread only)
         if (lampEdit) g_drainUrgent.fetch_add(1, std::memory_order_relaxed);
         alignas(16) BYTE sw[32] = {};
         reinterpret_cast<SwCtor_t>(kSwCtor)(sw, 4, 0);
@@ -458,8 +467,14 @@ void Drain(BYTE* tree, BYTE* before) {
         const auto solve = reinterpret_cast<SolveStep_t>(kSolveStep);
         g_drainFrames.fetch_add(1, std::memory_order_relaxed);
         for (int n = 0; n < 16 && room; n++) {
-            if (elapsed(sw) >= budget * 0.8f) break;
+            const float at = elapsed(sw);
+            if (at >= budget * 0.8f) break;
+            if (predict && n > 0 && at + s_stepMs > budget) break; // the first step always runs, as before: the queue still advances
             solve(room, sw, budget);
+            if (predict) {
+                const float step = elapsed(sw) - at;
+                s_stepMs = s_stepMs <= 0.0f ? step : s_stepMs * 0.8f + step * 0.2f;
+            }
             g_drainSolves.fetch_add(1, std::memory_order_relaxed);
             if (CurrentRoom(tree) == room) break; // the budget ran out inside it: the lot pass goes on next frame
             g_drainFinished.fetch_add(1, std::memory_order_relaxed);

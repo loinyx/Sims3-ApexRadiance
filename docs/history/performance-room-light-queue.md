@@ -202,3 +202,16 @@ to 6 ms of the lot budget while the camera moves, a move's safety net comes afte
 500 ms for a relocation or many lamps (2 s for switches), and only a relocation resends every room (the F8 bug of
 2026-10-05); other whole-lot refreshes keep their fresh solves. The gather countdown of an added or removed lamp
 (`f65626e`) is unchanged. The menu row became *Lamp edits all at once* (same `switchAllAtOnce` key).
+
+### 2026-10-20: automatic lamps first and a step budget (2.14.0)
+
+**Context:** in a development measurement, frames of 15 to 21 ms occurred while the extra solves drained the queue: the
+stopwatch is checked only between the game's steps, so "elapsed under 80% of the budget" still started long steps.
+Lamps switched on automatically waited behind the rest of the queue.
+
+**Finding:** one solve step can take several milliseconds; an edit's pacing must still follow the lamp.
+
+**Outcome:** a step starts only while the running average of a step's cost fits (lamp edits, held edits and urgent
+rooms excluded), and the after-load budget is 6 ms instead of 12 ms (`room_drain_budget`). An automatic switch-on puts
+its own room first with no extra budget and no hold (`auto_light_priority`). Both are on in 2.14.0 with no setting.
+Frame times in game are not yet measured.

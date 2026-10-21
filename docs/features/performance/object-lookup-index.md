@@ -10,7 +10,7 @@ the game's own.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier; on by default since 2.5.5. Object service ID index: Released in 2.7.0 |
+| Availability | Expiring local lookup caching: Released in 2.14.0. Released in 2.1.0 or earlier; on by default since 2.5.5. Object service ID index: Released in 2.7.0 |
 | Default | On |
 | Menu | System > Performance > Files and objects > *Faster object lookups* |
 | Configuration | `[patches.ObjectLookupIndex]` in `ApexRadiance.toml` |
@@ -187,3 +187,8 @@ through, stored / not stored, entries, table restarts, container / object classe
 - [Performance overview](README.md)
 - [Validation](../../validation/performance-object-lookup-index.md)
 - [History](../../history/performance-object-lookup-index.md)
+
+### Consecutive lookup reuse
+
+A thread-local last entry (88 bytes on x86) avoids another shared lock and hash lookup for the same manager, object ID and generation. The local fast path expires with the shared entry, so a newly stored shared answer can replace it. Each answer still passes the existing age limit, live path validation and generation check. Invalidations discard the local answer. Public builds also omit unused timing reads.
+

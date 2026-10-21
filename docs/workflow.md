@@ -49,6 +49,52 @@ In PowerShell use the call operator: `& "C:\Program Files (x86)\...\MSBuild.exe"
 - `tools/development/build.ps1` runs the build through `tools/development/build_runner.mjs`, which checks the expected
   artifact and keeps the recipe and full log under the ignored `outputs/build/`.
 
+### Development switches (`[dev_build]`)
+
+A development build (`/p:ApexStudyDefines=APEX_DEVELOPMENT_BUILD_FLAVOR`, which defines `kCompiled` in
+[`features/dev_switches.h`](../features/dev_switches.h)) reads the `[dev_build]` table of `ApexRadiance.toml` once at
+start-up (`DevSwitches::Load`) and logs every value. A missing key reads as on; Save keeps the table because it
+preserves tables it does not write. Each switch can be turned off to compare against the previous behaviour.
+
+In every other build the accessors return `kShipped` (true) for the 27 switches that change the game or free memory, and false for the
+3 diagnostics and the unfinished `foliage_sun_shadow`. A switch therefore never needs a menu option to ship; a shipped behaviour
+follows the setting named on its page.
+
+| Key | Public build | Effect | Page |
+|---|---|---|---|
+| `measurements` | Developer only | Address-space owners, game allocation categories and the memory CSVs | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
+| `daylight_log` | Developer only | Logs the sky state that sets outdoor darkness every 5 s and adds an F8 section; no lighting change | [light-diag.md](features/dev-tools/light-diag.md#file-sections) |
+| `memory_owners` | Developer only | Apex's own memory by owner (`[ApexMemory]`, F8) | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
+| `release_debug_buffers` | Shipped | Gives back F7, F6 and F8 buffers once they are no longer needed | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
+| `draw_reads_nowait` | Shipped | Buffer reads in draw hooks never wait for the GPU (three busy answers, then wait) | [lot-light-pass.md](features/night-lighting/lot-light-pass.md#lamp-shade-on-lot-ground-groundshadow) |
+| `occlusion_relight` | Shipped | An unchanged mesh occlusion scene is not published again | [level-light-share.md](features/night-lighting/level-light-share.md#closed-floor-guards-directional-weights-and-the-retired-mesh-blockers) |
+| `room_drain_budget` | Shipped | Extra room solves never start a step the budget cannot hold | [room-light-queue.md](features/performance/room-light-queue.md#automatic-lamps-first-and-the-step-budget) |
+| `allocator_trim` | Shipped | The game allocator's own trim every 60 s and before saves | [fast-memory.md](features/performance/fast-memory.md#allocator-trim-and-top-down-large-blocks) |
+| `allocator_top_down` | Shipped | The game allocator's large blocks from the top of the address space | [fast-memory.md](features/performance/fast-memory.md#allocator-trim-and-top-down-large-blocks) |
+| `foliage_vertex_lamps` | Shipped | Lamp light on instanced foliage per vertex | [foliage.md](features/night-lighting/foliage.md#per-vertex-lamps-and-crown-shade) |
+| `canopy_ground_shadow` | Shipped | Tree and bush crowns as porous occluders on lot ground | [foliage.md](features/night-lighting/foliage.md#per-vertex-lamps-and-crown-shade) |
+| `foliage_sun_shadow` | Developer only | The sun and moon shadow on the tree shaders that read none | [foliage.md](features/night-lighting/foliage.md#the-suns-shadow-on-trees) |
+| `auto_light_priority` | Shipped | A lamp switched on automatically puts its own room first | [room-light-queue.md](features/performance/room-light-queue.md#automatic-lamps-first-and-the-step-budget) |
+| `lamp_visibility_memo` | Shipped | A lamp's wall and slab test is kept while its inputs are unchanged | [level-light-share.md](features/night-lighting/level-light-share.md#cost) |
+| `indoor_lamp_walls` | Shipped | A lamp taken through a floor opening is also stopped by its own story's walls | [stairwells.md](features/night-lighting/stairwells.md) |
+| `arch_ambient` | Shipped | A floor near an arch takes the neighbour's higher ambient, fading over 1.5 m | [arches.md](features/night-lighting/arches.md) |
+| `basis_wall_filter` | Shipped | Directional maps read without blending across a wall | [stairs.md](features/night-lighting/stairs.md) |
+| `hard_wall_tops` | Shipped | A full wall under a ceiling has a hard top in the grid walk | [arches.md](features/night-lighting/arches.md) |
+| `stair_height_light` | Shipped | A lamp of the story above lights the stairwell tiles from 1.5 m higher | [stairwells.md](features/night-lighting/stairwells.md) |
+| `steady_indoor_light` | Shipped | Indoor light no longer tests the screen-collected meshes; one resend per lamp edit | [arches.md](features/night-lighting/arches.md) |
+| `inner_norm_settle` | Shipped | Same-story imports use the receiving room's settled normalisation | [arches.md](features/night-lighting/arches.md) |
+| `soft_opening_edges` | Shipped | A lamp cone through an arch or door spreads its edge over 0.3 m | [arches.md](features/night-lighting/arches.md) |
+| `stair_room_fill` | Shipped | Stairs take their tile's room ambient as fill | [stairs.md](features/night-lighting/stairs.md) |
+| `opening_bounce` | Shipped | A share of the other room's ambient through a stairwell opening | [stairwells.md](features/night-lighting/stairwells.md) |
+| `stair_floor_tone` | Shipped | Stairs take the floor's tone curve | [stairs.md](features/night-lighting/stairs.md) |
+| `stair_story_blend` | Shipped | Stairs blend with the story above by height | [stairs.md](features/night-lighting/stairs.md) |
+| `no_opening_band` | Shipped | No band of the lower room's ambient beside a stairwell opening | [stairwells.md](features/night-lighting/stairwells.md) |
+| `stairwell_bounce` | Shipped | Second bounce on the walls above and ceiling bounce onto the floor above | [stairwells.md](features/night-lighting/stairwells.md) |
+| `borrowed_light_adapt` | Shipped | Partial adaptation (square root, at most x2) of rooms lit only from another story | [stairwells.md](features/night-lighting/stairwells.md) |
+| `soft_slab_edges` | Shipped | Penumbra of a 0.25 m lamp disc at a floor opening's edge | [stairwells.md](features/night-lighting/stairwells.md) |
+| `room_fill` | Shipped | Rooms lit only from another story take back their own reflected light | [stairwells.md](features/night-lighting/stairwells.md) |
+
+
 ---
 
 ## 2. Install
@@ -122,17 +168,36 @@ It does **not** prove what the player sees in game, frame times, or behaviour on
 does not model. Record a harness result in the validation page with its date, commit, harness, result and backend, and
 keep in-game confirmation as a separate item.
 
+### Suites
+
+`tools/development/check.ps1 -Suite <name>` runs a group of harnesses that need no game files and throws on the first
+failure; CI runs `Smoke` and `Lighting`.
+
+| Suite | Runs |
+|---|---|
+| `Smoke` / `Full` | DXT and RefPack codecs, CAS triangle sort (`Full`: the long variants) |
+| `Lighting` | `tools/stairwell_bounce_test/`, `tools/opening_bounce_test/`, `tools/arch_ambient_test/` (pure lighting helpers, no captures) |
+
 ### Harnesses
 
 | Harness | Covers |
 |---|---|
 | `tools/ao_receiver_test/` | Sim receiver shader copies for Ambient Occlusion, composite rendering, extracted production replay order (`run_runtime_checks.ps1`) |
+| `tools/arch_ambient_test/` | Room ambient through arches (`features/arch_ambient.h`, `run.ps1`) |
+| `tools/basis_shadow_check/` | Stairs on the directional maps: wall mask, floor-map read, room fill, floor tone and story blend on the game's stair and object shaders (`run.ps1 -Precomp <Shaders_Win32.precomp> -Captures <folder>`, native D3D9) |
+| `tools/canopy_test/` | Crowns as porous occluders (`features/foliage_canopy.h`, `run.ps1`) |
 | `tools/basis_test/` | Smooth room light patches (`PatchBasisSmooth`, `PatchIndoorBasis`) on captured shaders, with disassembly |
 | `tools/cas_sort_test/` | Fast CAS triangle sort against the translation of `0x005D1960` |
 | `tools/developer_mode_check/` | Developer-mode persistence and profile handling (`prepare.py` builds the fixture) |
+| `tools/foliage_vertex_test/` | Per-vertex foliage lamps on the captured foliage and trunk vertex shaders against a CPU reference (`run.ps1 -Shader <vs.bin> -Trunk <vs.bin>`, native D3D9) |
+| `tools/game_alloc_categories_test/` | The development flavour's game allocation category tables under concurrency (`run.ps1`) |
 | `tools/dxt_test/` | Fast DXT1 / DXT5 encoder against the translation of `0x006152F0` / `0x006154B0` |
 | `tools/i18n_check/` | Translation tables: conflicts, missing languages, placeholder and `##id` mismatches; coverage and stale keys of the other languages; `i18n/keys.tsv` up to date (`tools/i18n_keys.pl` writes it) |
+| `tools/liveness_prune_test/` | Pruning of per-story caches by live story managers (`features/liveness_prune.h`, `run.ps1`) |
 | `tools/loading_gate_test/` | Loaded-world reader and the extracted start-notice and Depth Blur loading guards (`run.ps1`) |
+| `tools/memory_owners_test/` | Apex memory by owner: `operator new` counts, container estimates, Direct3D resources on a real device (`run.ps1`, native D3D9 and DXVK) |
+| `tools/mesh_occlusion_test/` | The mesh blockers' collector, BVH and replacement policy (`run.ps1 -OpaqueShader <ps.bin> -CutoutShader <ps.bin> -Standard` or `-Development`) |
+| `tools/opening_bounce_test/` | Bounce light through floor openings (`features/opening_bounce.h`, `run.ps1`) |
 | `tools/post_scene_test/` | Post-scene boundary on a native D3D9 device |
 | `tools/refpack_test/` | Fast RefPack compressor against the game's decompressor and compressor |
 | `tools/report_check/` | Report a problem: capture storage, recorder, overlay clock and loading gate, menu rendering in four languages |
@@ -141,6 +206,7 @@ keep in-game confirmation as a separate item.
 | `tools/room_map_smooth_check/` | Smooth light maps: the room-lit shader pattern over the precomp and captures, the copies (disassembly, native creation under the device's caps), the paired vertex shaders' uv scale, GPU pixels against a CPU B-spline with the wall band clamp, the dither offset (`run.ps1 -Precomp <Shaders_Win32.precomp> [-Captures <folder>]`) |
 | `tools/roofed_openings_test/` | Outdoor and indoor light through openings: story grid walk, roofed rooms' doors, openings into roofed rooms, foundation sides (`run.ps1`) |
 | `tools/spatial_aa_check/` | Spatial SMAA compilation and rendering |
+| `tools/stairwell_bounce_test/` | Second bounce through a stairwell opening, room fill, borrowed-light normalisation, slab edge penumbra (`features/stairwell_bounce.h`, `features/penumbra.h`, `run.ps1`) |
 | `tools/temporal_check/` | Temporal jitter refusal and reprojection for Edge Smoothing |
 | `tools/terrain_lighting_test/` | Terrain lighting policies, shader patches, sampler guard, queue, resources, lamp state, dispatch, world pool, indoor stories, lot UV, ground scale (`run.ps1` and `run_*.ps1`) |
 | `tools/water_lamp_check/` | Water lamp shader equivalence and highlights |

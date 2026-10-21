@@ -193,6 +193,7 @@
 #define NOMINMAX
 #endif
 #include "frame_profiler.h"
+#include "lot_load_analysis.h"
 #include "d3d9_hooks.h"
 #include "game_addresses.h"
 #include "post_scene.h"
@@ -990,7 +991,10 @@ uint64_t __fastcall Hook_LotLodScoring(void* self, void* edx, uint32_t dt, uint3
 uint64_t __fastcall Hook_LotDetailRequest(void* self, void* edx, uint32_t want) {
     const uint8_t* lot = static_cast<const uint8_t*>(self);
     const uint8_t w = static_cast<uint8_t>(want & 0xFF);
-    if (lot[0xC1] != w && lot[0xC9] == 0) (w ? g_lotsPromoted : g_lotsDemoted).fetch_add(1, std::memory_order_relaxed);
+    if (lot[0xC1] != w && lot[0xC9] == 0) {
+        (w ? g_lotsPromoted : g_lotsDemoted).fetch_add(1, std::memory_order_relaxed);
+        LotLoadAnalysis::Request(self, w != 0);
+    }
     Scope sc(kLotDetailRequest);
     return Orig<T_LotDetailRequest, FnThis1>()(self, edx, want);
 }
@@ -1002,7 +1006,12 @@ uint64_t __fastcall Hook_LotRendererUpdate(void* self, void* edx, uint32_t a) {
 
 uint64_t __fastcall Hook_LotLoadStages(void* self, void* edx) {
     Scope sc(kLotLoadStages);
-    return Orig<T_LotLoadStages, FnThis0>()(self, edx);
+    const auto before = LotLoadAnalysis::ReadRenderer(self);
+    const uint64_t started = LotLoadAnalysis::Clock();
+    const auto result = Orig<T_LotLoadStages, FnThis0>()(self, edx);
+    const uint64_t ended = LotLoadAnalysis::Clock();
+    LotLoadAnalysis::Sample(before, LotLoadAnalysis::ReadRenderer(self), started, ended);
+    return result;
 }
 
 uint64_t __fastcall Hook_LotViewSwitch(void* self, void* edx, uint32_t a) {
@@ -4834,6 +4843,7 @@ void SetEnabled(bool on) {
     if (kPublicBuild && on) return;
     std::lock_guard<std::mutex> lk(g_ctrlMutex);
     if (on == g_enabled.load()) return;
+    LotLoadAnalysis::Reset();
     if (on) {
         std::call_once(g_clockOnce, InitClock);
         g_needBaseline.store(true);

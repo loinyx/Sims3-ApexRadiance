@@ -252,6 +252,19 @@ The HDR lamp gain that the combined build applied to rig colours and shaders exi
 - `DirtyAllRigs` from the message-loop thread (on uninstall) was unsafe: rig work only on the render thread.
 - Room-mode rigs are not refreshed at dusk by the game; the extra cell gather would keep daytime lamps unless re-gathered.
 
+### Sky, night level and sunlight scale (2.14.0 findings)
+
+| Item | Where | Status |
+|---|---|---|
+| Sky object | `*(lightMgr+0xD0) - 0x210`, accepted only when `*(sky+0x1F4) == lightMgr` | Verified in the executable's bytes; read at runtime by the development daylight log |
+| Night level | `lightMgr+0xF0`: follows the clock only (the season moves sunrise and sunset; weather does not change it), in steps of 0.2 | Observed at runtime |
+| Manmade light intensity | `lightMgr+0xF4`, from `ManmadeLightIntensity` per sky type, weighted by the weather | *Unverified*: the daylight log recomputes it to check the offsets |
+| Sun direction | `sky+0x6B0` | *Unverified* |
+| Smooth night | `sky+0x780` | *Unverified* |
+| Weather object | `*(*(sky+0x21C)+0x74)+0x10` (`FUN_00580430` = `lea eax,[ecx+10h]; ret`) | Verified in the executable's bytes |
+| Time of day | `*(*(sky+0x30)+0x1C)+0x370 / 3600` | Verified in the executable's bytes |
+| Sunlight Scale | float `0x011D0918`; single reader `FUN_00c11ad0`, `mov ecx,011D0918h; call` at `0x00C11B01`, the call at `0x00C11B06` reaching the shared getter `mov eax,ecx; ret` | Verified in the executable's bytes; Apex redirects that call ([README](../features/night-lighting/README.md#brightness-controls)) |
+
 ### Open items / unverified
 
 - The meaning of the constructor flag bits and of rig+0x225; k3 and g in the street-lamp rig formula.

@@ -25,6 +25,15 @@ inline uint32_t Hash4(uint32_t v) { return (v * 2654435761u) >> (32 - kHashBits)
 // Length of the common prefix of a and b (the first 4 bytes are known to be equal), at most maxLen
 inline uint32_t MatchLen(const uint8_t* a, const uint8_t* b, uint32_t maxLen) {
     uint32_t n = 4;
+    while(n+32<=maxLen){
+        const unsigned first=static_cast<unsigned>(_mm_movemask_epi8(_mm_cmpeq_epi8(
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(a+n)),_mm_loadu_si128(reinterpret_cast<const __m128i*>(b+n)))))^0xFFFFu;
+        if(first){unsigned long z;_BitScanForward(&z,first);return n+z;}
+        const unsigned second=static_cast<unsigned>(_mm_movemask_epi8(_mm_cmpeq_epi8(
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(a+n+16)),_mm_loadu_si128(reinterpret_cast<const __m128i*>(b+n+16)))))^0xFFFFu;
+        if(second){unsigned long z;_BitScanForward(&z,second);return n+16+z;}
+        n+=32;
+    }
     while (n + 16 <= maxLen) {
         const __m128i x = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a + n));
         const __m128i y = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b + n));

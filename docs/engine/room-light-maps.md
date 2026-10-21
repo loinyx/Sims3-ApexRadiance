@@ -86,9 +86,10 @@ is level 1 (F8 of the house lot C49C001BCF2DEA20, notebook "Andares, segunda rod
 | +0x00 | ptr | Owning manager | level_light_share `ShareOutdoorLights` |
 | +0x04 | ptr | LODParams* | lighting_quality_patch.cpp |
 | +0x0C | int | Room id (0 = outside of the story) | `fn_006c6ab0.c`; level_light_share |
-| +0x10 | vector | 3D blockers (objects) of this story | notebook "Andares, segunda rodada" |
+| +0x10 / +0x14 | uint64 | Lot id | Live room inspection and manager lot id comparison |
 | +0x18 | byte | Roofless / outdoor flag ("externo" in F8). Fences or railings that close an area make a roofless room with +0x18 = 1. In `0x006A31D0` a room with +0x18 == 0 gets the normalisation and ambient alpha; +0x18 != 0 stores the raw sum | light_diag; notebook "Cerca em area cercada"; `fn_006a31d0.c` |
 | +0x30 / +0x34 | vector<int> | 2D blockers: the walls of this story's room (built by `0x006A1DE0`) | level_light_share `CulledWalls` |
+| +0x40 / +0x44 | vector | 64-byte 3D broad-phase records, including centre/radius and a vector of blocker pointers at record+0x30 | `0x0069FCE0` uses room+0x30 as the container; `0x0069D910` indexes container+0x10 with a 64-byte stride |
 | +0xC0 / +0xC4 | int | Lot size (inferred: `0x006C6AB0` gathers world lights at `(C0 × 0.5, 0, C4 × 0.5)` transformed by +0xF8, i.e. the lot centre) | `fn_006c6ab0.c`; dwords `0x00F9A5AC` = 0.5 |
 | +0xC8 / +0xCC | Light** | **Room light list** begin / end | `fn_0069fd60.c`; light_diag |
 | +0xD8 / +0xDC | vector | LightingWall list (source of +0x30) | notebook "Andares, segunda rodada" |
@@ -129,7 +130,8 @@ written at `Y × pitch + X × 4`).
    - Only for room 0: world lights around the lot centre, `0x006B66B0` (±2 cells of 32 m), added with `0x006A2060`.
      The per-cell filter keeps lights with `GetLotID() == 0` (world lights). With the Split-Level Lighting Fix
      (`GetLotID` → 0) lot lights of type 11 also enter here, on every story.
-2. 3D blockers: `0x006C6A20` + `0x0069E5E0` (room+0x10), own story only.
+2. 3D blockers: `0x006C6A20` + `0x0069E5E0`, own story only. The container starts at room+0x30;
+   its 3D vector is container+0x10, therefore room+0x40.
 
 Measured consequence (F8, notebook "Andares"): before Apex, upper stories never saw the ground story's type-3 lamps and the
 ground story never saw upper-story lamps; only type 11 (via world lights) reached every story. The EA cascade in
@@ -323,6 +325,28 @@ solve).
 - The planned per-pixel wall/floor lamp term (the per-pixel plan, "Design A") was never implemented; its facts (threshold,
   blur, matrix, constants) are recorded above.
 
+### Normalisation, solve end and map sets (2.14.0 findings)
+
+- **Normalisation.** `0x006A0230` sets `room+0x160` from the brightest of the room's samples and lamps. A lamp of
+  another story that the room borrows counts at full strength (1.0) even when the slab blocks almost all of its light,
+  so a room lit only from another story is not adapted (observed in F8 records of the 2.14.0 development builds).
+- **When it is set.** `room+0x160` is written at the end of the solve; samples taken during the solve read the value of
+  the previous one. Light imported from another room scaled by source over receiver therefore depends on the order of
+  solves unless the receiver's last value is kept ([arches.md](../features/night-lighting/arches.md)).
+- **Solve end.** `0x006A0E00` (`FinalizePrime`) is called at `0x006A3E65`; Apex's end-of-solve hook there runs the room
+  fill check and the outdoor delta.
+- **Inside the batch solve.** `this` (the room) is in `ebx` from `0x006A31E8`; the sample list (0x30-byte entries) is
+  at `[ebp+8]` and the current sample's offset at `[esp+0Ch]` (read in the native disassembly).
+- **Floor switch.** When the camera changes stories, the game invalidates rooms from the caller `0x006C7451` and solves
+  the shown story again at class 2 (the most detailed).
+- **Map sets.** A manager's room light maps are at `+0x16C` + class x 64, four maps each (*unverified* in game). Its
+  directional basis maps are at `+0x220` with the same layout; the texture is the wrapper's `+0x30`, confirmed in game
+  when the stair wall masks matched their story.
+- **Resolutions.** The directional maps are 64 x 64 at 1 texel per metre, sampled 0.5 m above the floor; the floor
+  light map is 4 texels per metre.
+- **Ambients.** `+0x110` is the ambient the floor and wall shaders draw (`c4`), `+0x120` the copy objects use, and
+  `+0x650` the ambient sampler's copy. Rooms without a lamp of their own can hold exactly the same ambient.
+
 ### Open items / unverified
 
 - `0x0069EC40`, `0x006AB210`, `0x00963DD0` in the normalisation/ambient step; room+0x100, +0x280.
@@ -337,7 +361,7 @@ solve).
 | `0x006C6AB0` | `AddWorldLightsToLot`: thiscall(treeLevel, room) ret 4. Room light list = own-floor lot lights (`0x006C6990(room, 1)`); for room 0 of level 0 once more (`0x006C6990(room, 0)`); for room 0 also world lights around the lot (`0x006B66B0`) | `fn_006c6ab0.c`; level_light_share.cpp header; lot_edge_lighting pattern `55 8B EC 83 E4 F0 83 EC 34 53 56 33 DB F6 05 ?? ?? ?? ?? 01 57 8B F9 75 30 83 0D` |
 | `0x006C6B08`, `0x006C6B2D` | The two calls of `0x006C6990` inside it; the level-0 test is `cmp [edi+0x1A0],0 / jnz` at `0x006C6B16` | level_light_share `kLevelGatherCalls`; notebook "Andares" |
 | `0x006C5816`, `0x006C7094` | Callers of `0x006C6AB0`: room creation / room update | level_light_share `kGatherCalls` |
-| `0x006C7010` | Room gather entry: `0x006C6AB0` + 3D blockers (`0x006C6A20` + `0x0069E5E0`, room+0x10) | notebook "Andares, segunda rodada" |
+| `0x006C7010` | Room gather entry: `0x006C6AB0` + 3D blockers (`0x006C6A20` + `0x0069E5E0`, container at room+0x30) | notebook "Andares, segunda rodada"; container offset checked in native disassembly |
 | `0x006C6990` | Walks a tree level's light registry (+0x90: buckets +0x98, count +0x9C) and offers each light to `0x006C7820` | `fn_006c6990.c` |
 | `0x006C7820` | Per-light filter for the room list: lit, type > 2, entry room id == room (entry+0x1C) | notebook "Andares" |
 | `0x006B66B0` | `GatherWorldLightsNearPoint`: world lights in ±2 light cells (32 m) around a point; lights added with `0x006A2060` | lot_edge_lighting pattern `8B 54 24 04 83 EC 10 53 55 56 8B E9 8D 44 24 14 50 8D 4C 24 1C 51 52 8B CD E8`, `kRadiusOffsets` |
@@ -385,6 +409,10 @@ solve).
 | `0x00AE4CB0 → 0x00ADB8F0 → 0x006A8BA0 → 0x006A88B0 → 0x006A3F80 → 0x006A3C90` | Budgeted room solve during normal lot loading; `0x00ADB8F0` calls `0x006A8BA0` once per level object of the lot (deque at manager+0x24..0x40) with one shared stopwatch and stops when elapsed > budget; `0x006A3C90` returns when the budget is spent while room+0x164 is set and resumes from room+0xEC (state machine, 9 = done) | smooth_streaming note 5; verified 2026-09-29 ([../features/performance/README.md](../features/performance/README.md)) |
 | `0x00ADBAD0 → 0x006A80E0 → 0x006A3EC0` | Synchronous solve (while room+0xF0 == 3, 60000 ms budget) used only by the lot impostor builder | smooth_streaming note 3 |
 | `0x006ADD60` | Night-level setter (lightMgr+0xF0) | night_terrain_relight header |
+| `0x006A0230` | Room normalisation from the brightest sample or lamp, written to room+0x160 at the solve's end | level_light_share `RoomNormHook`; F8 records |
+| `0x006A3E65` | Call of `0x006A0E00` at the end of a room solve | level_light_share `FinalizeHook` |
+| `0x006A31E8` | From here the batch solve keeps the room in `ebx` | native disassembly; level_light_share texel hook |
+| `0x006C7451` | Caller that invalidates rooms on a camera story change | recordings of the 2.14.0 development builds |
 | `0x006AC560` | `IsNight`: lightMgr+0xF0 > 0.99 and byte `[0x011D08C0] == 0` | full.asm |
 
 ## See also

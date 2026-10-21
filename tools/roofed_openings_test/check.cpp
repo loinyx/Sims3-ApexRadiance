@@ -769,7 +769,186 @@ void GroundGateChecks() {
     Check(std::fabs(edge.Value() - 0.4f) < 1e-5f, "ground share: a slab's edge (penumbra) keeps its share");
 }
 
+// A lamp of a lower story taken by a room above through a stairwell (IndoorPassImpl, indoor_lamp_walls): the stretch from the
+// bulb to where its ray crosses the floor above is walked on the lamp story's grid. Lamp room x 0..4, stair room x 4..8 with
+// the opening over tiles x 5..6, z 1..2 (no ceiling there); wall x = 4 between them with an open passage in its cell z 0..1.
+void StairwellChecks() {
+    Builder b(10, 6);
+    b.Room(0, 0, 4, 4, 8, true);
+    b.Room(4, 0, 8, 4, 4, true);
+    for (int z = 1; z < 3; z++)
+        for (int x = 5; x < 7; x++) b.g.flags[static_cast<size_t>(z) * b.g.w + x] &= 0x0F; // the opening: no ceiling
+    for (int z = 0; z < 4; z++) {
+        const int32_t w = b.Wall(false, 4, z);
+        if (z == 0) b.Open(w, kCutArch, 0.0f, 2.1f, 0.05f, 0.95f);
+    }
+    const auto hit = [&](float ax, float ay, float az, float bx, float by, float bz) {
+        const float A[3] = {ax, ay, az}, B[3] = {bx, by, bz};
+        return GridWallHitHard(b.g, A, B);
+    };
+    // red lamp of the neighbouring room, 0.8 m under the floor above, to the middle of the opening: crosses the wall at 2.66 m
+    Check(hit(2.0f, 2.2f, 2.0f, 5.5f, 3.0f, 2.0f), "stairwell: a lamp behind the wall beside the opening is stopped");
+    Check(hit(3.6f, 2.2f, 1.2f, 5.2f, 3.0f, 1.3f), "stairwell: also from right behind the wall");
+    // the case the soft walk let through (a capture): the wall crossed 6 cm under its top, where the floor above begins
+    Check(hit(3.4f, 2.2f, 2.0f, 4.05f, 3.0f, 2.0f), "stairwell: a ray crossing the wall just under its top is stopped");
+    // the stair room's own lamp: nothing in the way, the light goes up
+    Check(!hit(6.5f, 2.2f, 3.5f, 5.5f, 3.0f, 2.0f), "stairwell: a lamp of the room under the opening keeps its light");
+    // through the passage at 1.44 m (head 2.1 m): the light goes on
+    Check(!hit(3.0f, 1.0f, 0.5f, 7.5f, 3.0f, 0.5f), "stairwell: a ray through a real passage keeps its light");
+    // the same passage, a ray over its head: stopped
+    Check(hit(2.0f, 2.2f, 0.5f, 5.5f, 3.0f, 0.5f), "stairwell: a ray over the passage's head is stopped");
+    // a full wall drawn 1 cm short of the floor above (a capture): a ray 4 mm under that floor is still stopped when the
+    // stretch's end is on it (capY); without capY it would pass over the drawn top
+    Builder s(10, 6);
+    s.Room(0, 0, 8, 4, 4, true);
+    for (int z = 0; z < 4; z++) {
+        const int32_t w = s.Wall(false, 4, z);
+        GridEdge& e = s.g.edges[static_cast<size_t>(w)];
+        e.topL = e.topM = e.topR = 2.99f;
+    }
+    const float g0[3] = {0.0f, 2.2f, 2.0f}, g1[3] = {4.02f, 3.0f, 2.0f};
+    Check(!GridWallHitHard(s.g, g0, g1), "stairwell: (the drawn top alone lets a ray 4 mm under the floor above over the wall)");
+    Check(GridWallHitHard(s.g, g0, g1, 3.0f), "stairwell: a full wall counts up to the floor above: that ray is stopped");
+    // a half wall (top 1 m): a ray over it keeps its light, one under its top is stopped
+    Builder h(10, 6);
+    h.Room(0, 0, 8, 4, 4, true);
+    for (int z = 0; z < 4; z++) {
+        const int32_t w = h.Wall(false, 4, z);
+        GridEdge& e = h.g.edges[static_cast<size_t>(w)];
+        e.topL = e.topM = e.topR = 1.0f, e.half = true;
+    }
+    const float o0[3] = {2.0f, 2.2f, 2.0f}, o1[3] = {5.5f, 3.0f, 2.0f}, u0[3] = {2.0f, 0.5f, 2.0f}, u1[3] = {5.5f, 0.6f, 2.0f};
+    Check(!GridWallHitHard(h.g, o0, o1), "stairwell: a ray over a half wall keeps its light");
+    Check(!GridWallHitHard(h.g, o0, o1, 3.0f), "stairwell: also with the floor above given (a half wall keeps its own top)");
+    Check(GridWallHitHard(h.g, u0, u1), "stairwell: a ray under a half wall's top is stopped");
+}
+
+// A wall the slab stands on (hard_wall_tops): a lamp of the room beside a stairwell, 0.8 m under the slab, and a point of the
+// stairwell's ceiling just past the wall (a capture: 6 to 36 % through the wall's soft top, the map texel's
+// spread). Lamp room x 0..4 under a ceiling at 3 m; wall x = 4 drawn to 2.99 m; the stairwell tile beyond has no ceiling.
+void HardTopChecks() {
+    Builder b(10, 6);
+    b.Room(0, 0, 4, 4, 3, true);
+    b.Room(4, 0, 8, 4, 4, false);
+    for (int z = 0; z < 4; z++) {
+        GridEdge& e = b.g.edges[static_cast<size_t>(b.Wall(false, 4, z))];
+        e.topL = e.topM = e.topR = 2.99f;
+    }
+    t_mapAA = 0.75f * 0.25f;
+    g_hardWallTops.store(false);
+    const float soft = Pass(b.g, 2.0f, 2.2f, 2.0f, 4.12f, 2.99f, 1.6f);
+    g_hardWallTops.store(true);
+    GridWhy why{};
+    const float hard = Pass(b.g, 2.0f, 2.2f, 2.0f, 4.12f, 2.99f, 1.6f, &why);
+    std::printf("hard tops: through the soft top %.3f, with the slab on the wall %.3f\n", soft, hard);
+    Check(soft > 0.05f, "hard tops: the soft top lets the light through the slab's edge (reproduced)");
+    Check(hard == 0.0f && why.wall, "hard tops: a full wall under the lamp side's ceiling stops it");
+    // over a half wall the soft top stays; and a lamp in a roofless yard keeps the soft top of a full wall
+    Builder h(10, 6);
+    h.Room(0, 0, 4, 4, 3, true);
+    h.Room(4, 0, 8, 4, 4, false);
+    for (int z = 0; z < 4; z++) {
+        GridEdge& e = h.g.edges[static_cast<size_t>(h.Wall(false, 4, z))];
+        e.topL = e.topM = e.topR = 1.0f, e.half = true;
+    }
+    Check(Pass(h.g, 2.0f, 0.95f, 2.0f, 6.0f, 1.05f, 2.0f) > 0.0f, "hard tops: a half wall keeps its soft top");
+    Builder y(10, 6);
+    y.Room(0, 0, 4, 4, 3, false);
+    for (int z = 0; z < 4; z++) {
+        GridEdge& e = y.g.edges[static_cast<size_t>(y.Wall(false, 4, z))];
+        e.topL = e.topM = e.topR = 2.99f;
+    }
+    Check(Pass(y.g, 2.0f, 2.2f, 2.0f, 4.12f, 2.99f, 1.6f) > 0.05f, "hard tops: from a roofless tile the soft top stays");
+    g_hardWallTops.store(false);
+    t_mapAA = 0.0f;
+}
+
+// An arch whose sill is the floor (a capture: the light map of the room past an arch fell 25 % at its line,
+// only at the camera story's class, where the map texel's spread t_mapAA widens every rim): a lamp 2.2 m up, 2 m before
+// the arch, and points of the floor just past it. Room x 0..4 and 4..8 roofed; wall x = 4 with an arch over all of z 1..3.
+void FloorSillChecks() {
+    Builder b(10, 6);
+    b.Room(0, 0, 4, 6, 3, true);
+    b.Room(4, 0, 8, 6, 4, true);
+    for (int z = 0; z < 6; z++) {
+        const int32_t w = b.Wall(false, 4, z);
+        if (z == 1) b.Open(w, kCutArch, 0.0f, 2.4f, 0.03f, 1.0f);
+        if (z == 2) b.Open(w, kCutArch, 0.0f, 2.4f, 0.0f, 0.97f);
+    }
+    t_mapAA = 0.75f * 0.25f; // class 2
+    float worst = 1.0f;
+    for (float x : {4.02f, 4.06f, 4.125f, 4.25f, 4.5f}) worst = std::min(worst, Pass(b.g, 2.0f, 2.2f, 2.0f, x, 0.0f, 2.0f));
+    std::printf("floor sill: the floor just past the arch keeps at least %.3f of the lamp\n", worst);
+    Check(worst >= 0.99f, "floor sill: light through an arch onto the floor right past it is not shaded by a sill at floor level");
+    // the head and the jambs keep their soft rims
+    const float head = Pass(b.g, 2.0f, 2.2f, 2.0f, 6.0f, 2.6f, 2.0f);
+    Check(head < 0.99f, "floor sill: the head keeps its soft rim");
+    const float jamb = Pass(b.g, 2.0f, 1.0f, 1.0f, 6.0f, 1.0f, 1.16f); // crosses the wall at z 1.08, 5 cm from the jamb
+    Check(jamb > 0.0f && jamb < 1.0f, "floor sill: a jamb keeps its soft rim");
+    // a window's sill above the floor stays soft
+    Builder wdw(10, 6);
+    wdw.Room(0, 0, 4, 6, 3, true);
+    wdw.Room(4, 0, 8, 6, 4, true);
+    for (int z = 0; z < 6; z++) {
+        const int32_t w = wdw.Wall(false, 4, z);
+        if (z == 2) wdw.Open(w, kCutWindow, 0.9f, 2.1f, 0.1f, 0.9f);
+    }
+    const float sill = Pass(wdw.g, 2.0f, 2.2f, 2.5f, 6.0f, -0.4f, 2.5f);
+    Check(sill > 0.0f && sill < 1.0f, "floor sill: a window's raised sill keeps its soft rim");
+    t_mapAA = 0.0f;
+}
+
+// The cone of a lamp's light through an arch onto the next room's floor (a capture: arch (4..6, 25), the green
+// lamp 3 m behind it at 2.18 m, the floor map's 0.25 m texels): its edge from the jambs. Returns the largest step between
+// texel centres 0.25 m apart across the edge, on the line 1 m and 2 m past the arch, at class 2 (t_mapAA).
+float ArchConeStep(const Builder& b, float minSpread, bool print) {
+    t_mapAA = 0.75f * 0.25f;
+    t_gridMinSpread = minSpread;
+    float worst = 0.0f;
+    for (float past : {1.0f, 2.0f}) {
+        float prev = -1.0f;
+        char row[512] = {};
+        size_t used = 0;
+        for (int i = 0; i <= 24; i++) {
+            const float z = -0.875f + 0.25f * static_cast<float>(i); // texel centres
+            const float p = Pass(b.g, 1.0f, 2.18f, 2.0f, 4.0f + past, 0.0f, z);
+            if (prev >= 0.0f) worst = std::max(worst, std::fabs(p - prev));
+            prev = p;
+            used += static_cast<size_t>(std::snprintf(row + used, sizeof row - used, " %.2f", p));
+        }
+        if (print) std::printf("arch cone, spread %.2f, %.0f m past: %s\n", minSpread, past, row);
+    }
+    t_gridMinSpread = 0.0f;
+    t_mapAA = 0.0f;
+    return worst;
+}
+void ArchConeChecks() {
+    Builder b(10, 8);
+    b.Room(0, 0, 4, 8, 3, true);
+    b.Room(4, 0, 8, 8, 4, true);
+    for (int z = 0; z < 8; z++) {
+        const int32_t w = b.Wall(false, 4, z);
+        if (z == 2) b.Open(w, kCutArch, 0.0f, 2.4f, 0.03f, 1.0f);
+        if (z == 3) b.Open(w, kCutArch, 0.0f, 2.4f, 0.0f, 0.97f);
+    }
+    const float hard = ArchConeStep(b, 0.0f, true), soft = ArchConeStep(b, kInnerSoftSpread, true);
+    std::printf("arch cone: largest step between floor texels %.3f (lamp radius %.2f), %.3f (soft opening edges, spread %.2f)\n", hard, Penumbra::Radius(), soft,
+                kInnerSoftSpread);
+    Check(hard > 0.3f, "arch cone: the edge from the jambs is a hard step at the lamp's own radius (reproduced)");
+    Check(soft < 0.75f * hard, "arch cone: soft opening edges take a third of the step off (no texel stair)");
+    Check(kInnerSoftSpread <= 0.3f, "arch cone: the spread stays narrow enough to keep the shape of the arch or window");
+    // the middle of the cone keeps the whole light
+    t_gridMinSpread = kInnerSoftSpread;
+    const float mid = Pass(b.g, 1.0f, 2.18f, 2.0f, 5.0f, 0.0f, 3.0f);
+    t_gridMinSpread = 0.0f;
+    Check(mid >= 0.99f, "arch cone: the middle of the cone keeps the whole light");
+}
+
 int main() {
+    ArchConeChecks();
+    FloorSillChecks();
+    StairwellChecks();
+    HardTopChecks();
     GroundGateChecks();
     PenumbraChecks();
     GroundSoftChecks();

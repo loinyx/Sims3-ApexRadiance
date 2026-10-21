@@ -1,10 +1,18 @@
-param([ValidateSet('Smoke','Full')][string]$Suite = 'Smoke')
+param([ValidateSet('Smoke','Full','Lighting')][string]$Suite = 'Smoke')
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 . (Join-Path $repo 'tools/terrain_lighting_test/compiler_env.ps1')
 Initialize-TerrainCompiler
 $out = Join-Path $repo 'outputs/checks'
 New-Item -ItemType Directory -Path $out -Force | Out-Null
+if ($Suite -eq 'Lighting') {
+    # Pure lighting harnesses: no captures, no shader package. Each runner compiles its harness and throws on a failure.
+    foreach ($name in @('stairwell_bounce_test', 'opening_bounce_test', 'arch_ambient_test')) {
+        & (Join-Path $repo "tools/$name/run.ps1") -OutDir (Join-Path $out $name) | Tee-Object -FilePath (Join-Path $out ($name + '.txt'))
+    }
+    Write-Output 'CPU Lighting suite passed. Gameplay validation remains separate.'
+    return
+}
 $cases = @(
     @{ Name='dxt'; Source='tools/dxt_test/dxt_test.cpp'; Implementation='features/dxt_codec.cpp'; Args=@('--blocks','100000') },
     @{ Name='refpack'; Source='tools/refpack_test/refpack_test.cpp'; Implementation='features/refpack_codec.cpp'; Args=@('--quick') },

@@ -16,3 +16,16 @@ inline constexpr bool kDevToolsBuild = true;
 // Light through doors and windows (LevelLightShare::SetRealisticOpenings): on by default (the realistic
 // result was preferred in testing); the setting can still turn it off
 inline constexpr bool kRealisticOpeningsDefault = true;
+
+// Bounded memory and geometry policies ship independently of test notices and developer collectors.
+// It also gates lighting paths, so turning it off changes the light: the inner-room share scale (level_light_share
+// BasisLightHook, InnerNormScaleAt), the mesh occlusion test of indoor lamps and its publish and resets (InnerPass,
+// IndoorPassImpl, OnPresent), the ghost solve (IndoorPassImpl), the solid mesh collection that feeds that test
+// (lot_light_bridge NoteSolidMeshImpl, PumpSolidMeshes) and the smooth room map on packed room floors (OnDrawInnerCore).
+inline constexpr bool kMemoryOptimizationsEnabled = true;
+// Numbered test version and first-run test notice only.
+#ifdef APEX_MEMORY_TEST
+inline constexpr bool kMemoryOptimizationTest = true;
+#else
+inline constexpr bool kMemoryOptimizationTest = false;
+#endif

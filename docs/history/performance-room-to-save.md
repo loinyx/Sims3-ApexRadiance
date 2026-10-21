@@ -30,3 +30,17 @@ encrypted on disk, so the signatures there are confirmed by the startup scan's l
 **Context:** commit `7232c3b`.
 
 **Outcome:** marked Experimental in the menu, still on by default. Released in 2.7.0.
+
+### 2026-10-20: compatibility with sims3-modernization's ts3native
+
+**Context:** with sims3-modernization 0.1.4 installed, `ts3native.log` showed its detour of the package save at
+`0x00AAC110` (through its route gate, also with its own save write option off), and Apex logged *Early save sites
+differ; existing world-save preparation retained*: the early save preparation was off. The rest of Room to Save stayed
+on.
+
+**Finding:** both mods only rewrite the call while it still points at `0x00AAC110`; the entry itself starts with a
+`jmp rel32` into `ts3native.asi`.
+
+**Outcome:** a first build accepted any `jmp` at the entry; the kept version accepts it only when `ts3native.asi` is
+loaded and the jump lands inside it. The call site `0x00AB12AF` is still verified, and Apex's wrapper reaches the game
+through ts3native's detour. Not yet confirmed with a save in game.

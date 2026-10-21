@@ -36,6 +36,10 @@ not identified.
 
 ## Open checks
 
+- 2.14.0: an automatic switch-on at dusk puts the lamp's own room first, without a pause; the step budget removes
+  15 to 21 ms frames during the drain after a load (frame times not yet measured).
+- Room 0 of the ground story of a lot with many lights is restarted repeatedly by the game (caller `0x006C7451`); how
+  often its solve finishes is not counted yet.
 - 2.12.3 public build: the *Lamp edits all at once* scenarios below remain to be run in game.
 - Its status line has no menu location in the current menu (no Developer card calls `RenderDeveloperUI`).
 - Lamp switches all at once on other game builds (the solve end hook is Steam 1.67.2 only; elsewhere switches change

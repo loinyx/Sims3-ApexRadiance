@@ -10,7 +10,7 @@ in Build mode and at dusk. By day, lamps that the game keeps lit add a subdued g
 
 | | |
 |---|---|
-| Availability | Released (standalone since 0.1.0). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: Released in 2.6.0. Light detail (Experimental), walls blocking lamp light outdoors, lamp switches in one frame, weather variants of the lot and terrain passes, and idavidveiga's daytime bloom fixes: Released in 2.7.0. Lamp lighting (Instant (GPU) with real-time outdoor lamps and quick outdoor lamp edits; Classic with lamp drags and floors shown together), outdoor and indoor light through openings, doors block light, walls shade lamp light near the ground, buildings block lamp light on trees and objects, shadow softness and smooth light maps: Released in 2.13.0 |
+| Availability | Released (standalone since 0.1.0). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: Released in 2.6.0. Light detail (Experimental), walls blocking lamp light outdoors, lamp switches in one frame, weather variants of the lot and terrain passes, and idavidveiga's daytime bloom fixes: Released in 2.7.0. Lamp lighting (Instant (GPU) with real-time outdoor lamps and quick outdoor lamp edits; Classic with lamp drags and floors shown together), outdoor and indoor light through openings, doors block light, walls shade lamp light near the ground, buildings block lamp light on trees and objects, shadow softness and smooth light maps: Released in 2.13.0. Light through stairwells, stairs on the directional maps, light through arches and doorways, foliage lit per vertex with crown shade on lot ground, and moonlight scaled at its reader: Released in 2.14.0 |
 | Default | On (`enabledByDefault = true`; the feature metadata keeps `experimental = true`) |
 | Menu | Lighting page (tabs Overview, Ground, Objects, Buildings, Stories); World > Water & Snow page (Lamp Glow, Water Reflections, Snow); developer options under Developer > Lighting |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -74,6 +74,9 @@ atlas** that any surface knowing its world position can sample. Each sub-part be
 | Water | Ponds glow and reflect lamps | [water.md](water.md), [../reflections.md](../reflections.md) |
 | Lamp colour | Stock pink lamps re-coloured towards warm white | [lamp-colour.md](lamp-colour.md) |
 | Unlit rooms | Rooms at Night: the background light of rooms with lamps off | [unlit-rooms.md](unlit-rooms.md) |
+| Light through stairwells | Lamps light the walls above a stairwell with a soft edge; bounce light and partial adaptation for rooms lit from another story | [stairwells.md](stairwells.md) |
+| Stairs on the directional maps | Stairs and objects against walls take no light from behind the wall, the floor's colour and the light of the story above at their top | [stairs.md](stairs.md) |
+| Light through arches and doorways | No colour step on an arch's line; soft cone edges that keep the opening's shape; light through openings independent of the camera | [arches.md](arches.md) |
 | Every-Story Ground Light | Separate patch `SplitLevelGroundLight`: lamps on any story light the ground | [level-light-share.md](level-light-share.md) |
 
 ## Settings
@@ -244,6 +247,11 @@ Notes:
 | [`features/rig_tracker.cpp`](../../../features/rig_tracker.cpp) | Which rig (mode 0/1/2, centre) lit the current draw |
 | [`features/room_map_padding.cpp`](../../../features/room_map_padding.cpp) | Remembers the directional basis maps of each room light map (smooth indoor light) |
 | [`features/unlit_rooms.cpp`](../../../features/unlit_rooms.cpp) | Rooms at Night |
+| [`features/arch_ambient.h`](../../../features/arch_ambient.h) | Room ambient through arches ([arches.md](arches.md)) |
+| [`features/opening_bounce.h`](../../../features/opening_bounce.h), [`features/stairwell_bounce.h`](../../../features/stairwell_bounce.h), [`features/penumbra.h`](../../../features/penumbra.h) | Shared ambient, bounce light, adaptation and slab penumbra around stairwells ([stairwells.md](stairwells.md)) |
+| [`features/liveness_prune.h`](../../../features/liveness_prune.h) | Drops per-story caches of story managers that no longer exist ([level-light-share.md](level-light-share.md#cost)) |
+| [`features/foliage_vertex_lamps.h`](../../../features/foliage_vertex_lamps.h), [`features/foliage_canopy.h`](../../../features/foliage_canopy.h) | Per-vertex lamps on foliage and crowns as porous occluders ([foliage.md](foliage.md)) |
+| [`features/daylight_probe.cpp`](../../../features/daylight_probe.cpp) | Developer flavour only: logs the sky state that sets outdoor darkness; changes no light |
 | [`shaders/shader_ids.h`](../../../shaders/shader_ids.h) | Size + FNV-1a of the exact-match game shaders (never the bytecode) |
 | [`shaders/wall_lamp_table.h`](../../../shaders/wall_lamp_table.h) | 58 ExteriorWall PS: size, FNV-1a, lamp constant K |
 | [`shaders/floor_atlas_table.h`](../../../shaders/floor_atlas_table.h) | 261 ExteriorFloors PS accepted by `PatchBakedAtlasPs` |
@@ -370,12 +378,14 @@ Native solar and sky constants are never raised.
   release `RetintLamps` rewrites those that still hold the written colour through `FUN_006bc3e0` (+0xF0 / +0xE0), then
   the rigs regather, one terrain update and one lot re-solve (room 0). Street lamp = class 0xB with lot id 0. Interiors
   re-solve when the game next solves them. Stock lamps are pruned every 30 s. See [lamp-colour.md](lamp-colour.md).
-- **Moonlight**: the "Sunlight Scale" float at 0x011D0918 (only reader `FUN_00c11ad0` at 0x00C11B01,
-  `mov ecx,011D0918h; call`, which multiplies the sun / moon colour before SetSun: ExteriorLightData, read by 88
-  techniques including Sims) is written every frame as its base value x `lerp(1, luar, night level)`; restored on
-  uninstall. A value written by another mod (Sims3SettingsSetter's "Sunlight brightness") becomes the new base. Rigs
-  copy the sun colour when they gather, so they are refreshed on slider release. Things in moon shadow do not change:
-  this is the moon, not the night ambient.
+- **Moonlight**: the game multiplies the sun / moon colour by the "Sunlight Scale" float at 0x011D0918 before SetSun
+  (ExteriorLightData, read by 88 techniques including Sims). Its only reader, `FUN_00c11ad0`, loads it with
+  `mov ecx,011D0918h; call <mov eax,ecx; ret>; movss xmm0,[eax]` at 0x00C11B01. Apex points that call (0x00C11B06) at
+  its own getter, which returns the game's value x `lerp(1, luar, night level)`; the variable itself is never written.
+  A blend that starts from the current value, or another mod's "Sunlight brightness", is therefore scaled once and
+  never stacks. When the bytes differ (another game build), the value is written every frame as before, and a value
+  written by another mod becomes the new base. Rigs copy the sun colour when they gather, so they are refreshed on
+  slider release. Things in moon shadow do not change: this is the moon, not the night ambient.
 
 ### Smooth indoor light (`bordasDosMapasDeLuz`)
 
@@ -413,7 +423,7 @@ the directional maps of each room light map while the game holds both (reference
 | 0x006B6516, 0x006B60D3, 0x006B6618 | Light register / remove / move-toggle arm tests | `8B 17 8B 42 20 8B CF FF D0` |
 | 0x00C8504C | Chunk texture render call in the terrain sweep | 15 bytes at 0x00C85047 |
 | 0x00C2950F | Bake colour copy (`BakeColourStub`) | `0F 28 87 F0 00 00 00` |
-| 0x011D0918 | Sunlight scale float | Reader at 0x00C11B01 `B9 18 09 1D 01 E8` |
+| 0x011D0918 | Sunlight scale float | Reader at 0x00C11B01 `B9 18 09 1D 01 E8`; its call at 0x00C11B06 must reach `8B C1 C3` (`mov eax,ecx; ret`) to be redirected |
 | 0x006C7160 | Room queue `FUN_006c7160` thiscall(treeLevel, roomId) | `83 EC 2C 53 55 56 33 DB 8B F1` (Fail otherwise) |
 | 0x006BE18C | Street lamp colour in the lot solve (experimental) | `0F 28 86 E0 00 00 00` |
 | 0x00ADB66B, 0x00ADB884 | Lot quality byte (experimental) | `C6 44 24 0C 00` -> `... 01`. The feature's technical-details text names 0xADB66F / 0xADB888 (the immediate byte); the patched instruction starts 4 bytes earlier |
@@ -449,6 +459,8 @@ only DXVK's.
 - Reading 64x64 basis maps with the room light map's uv: furniture dark after floor switches.
 - `max(rig, basis)` for indoor objects: brought the per-object lamp back.
 - A single night-darkness control and a lamp range control: no consistent engine value; not implemented.
+- Writing the moonlight factor into the Sunlight Scale variable: game blends started from the scaled value, and the
+  night came out about 35% brighter, varying between loads.
 
 Details in [history](../../history/night-lighting-overview.md).
 
