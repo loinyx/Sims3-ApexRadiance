@@ -46,9 +46,9 @@ bool Patch(std::vector<uint32_t>& tokens, int& base);
 // Why the last Patch or PatchTreeSunShadow refused (log only; "" after a patch). Render thread.
 const char* LastRefusal();
 
-// The sun's shadow on trees (20/10). The game's tree pixel shaders (8 in Shaders_Win32.precomp, ps_2_0: sun = sat(t1.z)
+// The sun's shadow on trees . The game's tree pixel shaders (8 in Shaders_Win32.precomp, ps_2_0: sun = sat(t1.z)
 // x c0, lamps, ambient cube) never read the sun shadow map, although the foliage vertex shader writes the shadow position
-// in t5 and the shadow map's edge fade in t6.x (F7 2026-10-20 16-42-39 draw #678: VS c105..c108 = the shadow matrix of the
+// in t5 and the shadow map's edge fade in t6.x (a captured draw: VS c105..c108 = the shadow matrix of the
 // draws that sample s5 in the same frame; the probe saw no s5 on the tree): no tree is shaded by another tree, a house or
 // itself. The patch (before the sun term "mad rS.xyz, rW.y, c0, rX", rW from "mov_sat rW.xy, t1.wzyx") reads the shadow
 // map on s5 at four taps half a texel around t5 (texldp: the hardware depth compare, as the game's bushes do), fades it to
@@ -60,7 +60,7 @@ const char* LastRefusal();
 bool PatchTreeSunShadow(std::vector<uint32_t>& tokens, int& base);
 constexpr float kTreeShadowFloor = 0.25f; // light through a crown in its own or another's shadow (gap fraction 0.1 to 0.35)
 
-// The law of a lamp on foliage (20/10, in game: a street lamp lit the pavement and planters under it and left the trees a
+// The law of a lamp on foliage (in game: a street lamp lit the pavement and planters under it and left the trees a
 // few metres away dark): plain inverse square, Gain / d^2 (the base of the game's own ground law, 0.25 w per list entry
 // over d^2), faded out smoothly near the lamp's reach R only: min(1, R^2 / d^2 x (1 - (d / R)^4)^2), 1 up to about 0.7 R and
 // 0 from R on. The outdoor walls' law (LampReach::PixelLaw) keeps r0^2 / d^2 in that min, which falls as 1 / d^4 past r0
@@ -84,7 +84,7 @@ inline float BoxDistance2(const float* p, const float* centre, const float* ext)
     return d2;
 }
 
-// One lamp of a foliage instance (20/10: the instance picks its own lamps, as the per-pixel lamps of outdoor objects do,
+// One lamp of a foliage instance (the instance picks its own lamps, as the per-pixel lamps of outdoor objects do,
 // instead of following the rig's three slots): head, colour (F0 x intensity x fade x the cone and the walls' share at the
 // crown's middle), the reach law's r0^2, 1/R^2 and gain (LampReach), and the light it gives at the mesh box (rank only).
 struct OwnLamp {
@@ -114,7 +114,7 @@ inline void SlotConstants(const OwnLamp& l, const float* eye, float groundY, flo
     cap = top > 0.0f ? 1.0f / top : 1e30f;
 }
 
-// The camera the game drew an instanced foliage draw with (20/10, in game: lamp light on trees moved with the camera and
+// The camera the game drew an instanced foliage draw with (in game: lamp light on trees moved with the camera and
 // crowns blinked). The instance positions c0[3i] are relative to the eye the game built the frame with; the eye Apex reads
 // from the game's camera (LotLightingMotion::CameraEye) can differ from it while the camera moves, which shifted every
 // lamp against the leaves by that difference and changed the instances' keys (new picks every frame). Trees do not move:

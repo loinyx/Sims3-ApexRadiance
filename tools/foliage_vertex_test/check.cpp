@@ -186,7 +186,7 @@ static FoliageVertexLamps::OwnLamp MakeLamp(V3 p, V3 col, float w, float entries
     return l;
 }
 
-// The instance's own lamps (20/10). The case of a lighting snapshot: a red garden lantern (type 3, range 15, intensity 1:
+// The instance's own lamps. The case of a lighting snapshot: a red garden lantern (type 3, range 15, intensity 1:
 // w 15, a story-0 lot lamp, 2 entries; r0 2 m, R 6.3 m) 5 cm above the snow, 13.7 m from the trunk of a bare tree whose
 // crown (8 m across each way, 5 m up and down, centre 10 m up) the old rig colour lit whole and saturated.
 static void OwnLampChecks() {
@@ -207,7 +207,7 @@ static void OwnLampChecks() {
     std::printf("Red lantern on a bare crown: brightest crown light %.5f (was the rig colour, 1, on every vertex)\n", brightest);
     Check(brightest <= 1.0f / 255.0f && worst < 1e-4f, "a 6.3 m lantern 13.7 m from the trunk leaves the crown unlit (the foliage law)");
     // a street lamp (world lamp, range 42.5, intensity 1: one list entry; r0 2.5 m, R 10.6 m) 5 m from the near side of a
-    // crown (F8 2026-10-20 21-27-17: the pavement under it lit, the trees beside it dark): the inverse square, not 1 / d^4
+    // crown (a lighting snapshot: the pavement under it lit, the trees beside it dark): the inverse square, not 1 / d^4
     {
         const float ws = 42.5f, d2 = 25.0f;
         const auto street = MakeLamp({0, 4, 0}, {1, 0.92f, 0.63f}, ws, 1.0f);
@@ -236,7 +236,7 @@ static void OwnLampChecks() {
     Check(FoliageVertexLamps::BoxDistance2(in, c, e) == 0.0f && std::fabs(FoliageVertexLamps::BoxDistance2(outP, c, e) - 9.0f) < 1e-5f, "distance to the mesh box");
 }
 
-// The eye correction (20/10, in game: lamp light on trees moved with the camera and crowns blinked): places learned with
+// The eye correction (in game: lamp light on trees moved with the camera and crowns blinked): places learned with
 // the camera still; with the camera moving, the read eye ahead of the game's by a drift; the draw's instances (relative to
 // the game's eye) must give back the game's eye
 static void EyeAnchorChecks() {

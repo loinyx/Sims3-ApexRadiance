@@ -2663,8 +2663,8 @@ void TrackLampSwitches() {
     if (switched) g_lampSwitches.fetch_add(1, std::memory_order_relaxed);
 }
 
-// The trees' own lamp list (20/10): read at every refresh, also while the per-pixel lamps keep theirs for a lamp switch or a
-// drag (AtriumHold, DragLite: up to 6 to 9 s in game, 20/10 21:18, for the rooms of a house to show the new light, which
+// The trees' own lamp list: read at every refresh, also while the per-pixel lamps keep theirs for a lamp switch or a
+// drag (AtriumHold, DragLite: up to 6 to 9 s in game, for the rooms of a house to show the new light, which
 // trees outside never wait on). The outdoor lamps as g_allLamps reads them, then the indoor lamps shining out as listed.
 std::vector<std::array<float, 8>> g_foliageLamps;
 std::vector<LampCone> g_foliageCones;
@@ -4478,7 +4478,7 @@ bool FoliageMeshBox(IDirect3DDevice9* dev, FoliageCrown& out) {
     return out.ok;
 }
 
-// The lamps of one foliage instance (20/10), by the per-pixel lamps' own rule instead of the rig's three slots: the lamps
+// The lamps of one foliage instance, by the per-pixel lamps' own rule instead of the rig's three slots: the lamps
 // within reach of the crown's middle (SelectLamps, with the indoor lamps shining out of a house), each with its cones and
 // its share past the outside walls and slabs at that middle (PickedLampVisibility), ranked by the light the reach law gives
 // at the mesh box's point nearest the lamp (trunk included); a lamp whose reach ends before the box is left out. The rig's
@@ -4712,7 +4712,7 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
         const float boxC[3] = {inst[0] + eye[0], inst[1] + eye[1] + 0.5f * (mesh.lo[1] + mesh.hi[1]) * scale, inst[2] + eye[2]};
         const float ext[3] = {hx, 0.5f * (mesh.hi[1] - mesh.lo[1]) * scale, hx};
         // Picked at once the first time and when a lamp within reach of its box changed (a drag shows on the tree in the
-        // same refresh, 20/10: it waited for the hold, 5 to 9 s); a new list that changed nothing near it only moves its
+        // same refresh: it waited for the hold, 5 to 9 s); a new list that changed nothing near it only moves its
         // generation. Picked again every 1.5 s within the budget when what a pick reads changed since: the walls and floors
         // (they arrive after a lot's first frames: a pick made before them kept a wrong wall share), the lamps' colours (the
         // ranking), or with indoor lamps shining out (their openings). A colour alone is taken at once below, with no pick.
@@ -6230,7 +6230,7 @@ template <typename DrawFn> bool DrawObjectRig(IDirect3DDevice9* dev, DrawFn draw
     return true;
 }
 
-// ---- The sun's (and moon's) shadow on trees (20/10, switch foliage_sun_shadow; FoliageVertexLamps::PatchTreeSunShadow).
+// ---- The sun's (and moon's) shadow on trees (switch foliage_sun_shadow; FoliageVertexLamps::PatchTreeSunShadow).
 // The frame's shadow map is the depth texture on s5 of the draws whose pixel shader reads it (bushes, roofs, the lot pass,
 // water, the game's shadowed tree variants); it is used only in the frame it was seen in or the next one, and forgotten
 // before a Reset (render thread; the game owns it, no reference is kept).
