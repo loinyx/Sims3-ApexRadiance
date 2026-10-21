@@ -36,6 +36,9 @@ blends premultiplied over the game's water, so the game's own shader and states 
 4. **Build world-to-clip** from the water vertex shader's matrices, so rotated lots project correctly.
 5. **Read the scene depth** from Depth Blur's INTZ copy when it is bound, and march the reflected ray against it.
 6. **Draw the pass** with premultiplied blending: `reflection x alpha + lamps`.
+7. **Hide lamps behind things** (2.15.1, with scene depth): where the reflected ray meets the scene nearer than a lamp
+   (a tent or a wall between the water and the lamp), that lamp's reflection is taken out; the glow on the water around
+   the lamp stays.
 
 The lamp highlight filter widens highlights that are thinner than a pixel, so lamp sparkles do not shimmer on moving
 waves. The colour preservation scales very bright highlights as a whole instead of clipping each channel, so lamp colours
@@ -80,6 +83,9 @@ settings. The two Developer switches are for A/B comparison; with both off the l
 - The reflection is screen space: anything off screen or hidden is not reflected; the game's sky reflection remains
   there.
 - Lamp glints use the visual-radius law, not the bake-matched law of objects.
+- A lamp's reflection is hidden by what the scenery reflection's ray meets (one ray per pixel, along the flattened wave
+  normal), not by a ray toward each lamp: without scene depth, or where that ray leaves the screen, lamps are never
+  hidden.
 - With the colour preservation on, very strong highlights look softer and slightly dimmer.
 
 ## Technical reference
@@ -145,9 +151,11 @@ v = normalize(c1 - pos); fres = 0.25 + 0.75 (1 - sat(n.v))^5; fogKeep = 1 - sat(
 ;   march t = 0.4, then t = 1.15 t + 0.3, up to 48 steps; stop off screen or behind the camera (clip.w <= 0.05)
 ;   hit when 0 < clip.w - sceneW < 1.5 + 0.3 t; 5 bisection steps; colour = scene copy s6 at the hit
 ;   cover = edgeFade(uv) x match x sat(1.5 - t_hit/60); no hit keeps the game's sky reflection
+;   block = edgeFade(uv) x match at the hit (0 with no hit or no depth)
 alpha = sat(fres x c58.x) x cover x fogKeep
 ; 16 lamps: l = lampPos - pos, rr = R^2 + 1e-3
 ;   spec += colour x pow(sat(n.h), exponent) x 2 peakScale / (1 + d^2 / (16 rr))
+;           x (1 - block x sat(d - t_hit - 0.5))     ; a lamp behind what the reflected ray met
 ;   glow += colour x sat(1 - d^2/rr)^2
 lamps = (spec x fres + glow x 0.08) x c52.x x fogKeep
 ; colour preservation (params.w): peak = max(r, g, b); above 0.7 the whole RGB is scaled so that
@@ -155,7 +163,7 @@ lamps = (spec x fres + glow x 0.08) x c52.x x fogKeep
 return (refl x alpha + lamps, alpha)
 ```
 
-The filtered version costs about 700 instruction slots (about 670 without it). Wave samples run before the depth
+The filtered version costs about 800 instruction slots (700 before the lamp occlusion of 2.15.1). Wave samples run before the depth
 rejection, so occluded pixels also sample the waves. No render pass, texture or ray step is added by the filter.
 
 ### Registers

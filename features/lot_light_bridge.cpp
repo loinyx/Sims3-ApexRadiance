@@ -21,6 +21,7 @@
 #define NOMINMAX
 #endif
 #include "lot_light_bridge.h"
+#include "terrain_bake_rule.h"
 #include "rt_outdoor_lamps.h"
 #include "game_addresses.h"
 #include "shader_ids.h"
@@ -2530,7 +2531,7 @@ constexpr auto kAnimatedWindow = std::chrono::seconds(60);
 constexpr auto kAnimatedExpire = std::chrono::seconds(120); // an animated lamp with no automatic change for this long is a plain lamp again
 constexpr auto kQuietLogEvery = std::chrono::seconds(60);
 
-bool IsPlainType(int type) { return type >= 3 && type <= 6; }
+bool IsPlainType(int type) { return TerrainBakeRule::LotLampType(type); } // (2.15.1: and the area lights 9, 10)
 
 // A captured session toggles 0x40 on ordinary lot lamps (types 3..6).
 // Do not confuse that discrete enable switch with an animated colour/intensity.

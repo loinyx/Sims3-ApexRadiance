@@ -1,4 +1,5 @@
 #include "../../features/world_lamp_policy.h"
+#include <cmath>
 #include <cstdio>
 #include <initializer_list>
 
@@ -27,8 +28,13 @@ int main() {
         for (int type = 0; type < 32; ++type)
             for (int room = -1; room <= 1; ++room) {
                 check(Eligible(0, type, flags, room) == (type == 11 && (flags & 1)));
-                check(Eligible(7, type, flags, room) == ((flags & 1) && (flags & 4) && room == 0 && (type == 11 || (type >= 3 && type <= 6))));
+                check(Eligible(7, type, flags, room) == ((flags & 1) && (flags & 4) && room == 0 && (type == 11 || (type >= 3 && type <= 6) || type == 9 || type == 10)));
             }
+    // area lights (2.15.1): the share of the ground below they face
+    check(TerrainBakeRule::AreaGroundShare(1.0f) == 1.0f && TerrainBakeRule::AreaGroundShare(0.0f) == 0.5f &&
+          TerrainBakeRule::AreaGroundShare(-1.0f) == 0.0f && TerrainBakeRule::AreaGroundShare(2.0f) == 1.0f);
+    check(TerrainBakeRule::AreaGroundShare(std::nanf("")) == 0.0f);
+    check(TerrainBakeRule::AreaType(9) && TerrainBakeRule::AreaType(10) && !TerrainBakeRule::AreaType(7) && !TerrainBakeRule::AreaType(11));
     std::printf("World lamp policy: %d checks, %d failures\n", checks, failed);
     return failed ? 1 : 0;
 }

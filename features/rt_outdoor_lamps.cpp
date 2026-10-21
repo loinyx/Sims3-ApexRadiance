@@ -15,6 +15,7 @@
 // Part of Apex Radiance. Credits: @loinyx
 
 #include "rt_outdoor_lamps.h"
+#include "terrain_bake_rule.h"
 #include "rt_lamp_gpu.h"
 #include "platform.h"
 #include "rt_lamp_model.h"
@@ -70,6 +71,7 @@ constexpr DWORD kCheckEveryMs = 2000;    // the consistency check of the GPU lam
 constexpr DWORD kRepairWaitMs = 4000;    // a story sent to gather a lamp is checked again after this
 constexpr DWORD kDragRelightMs = 200;    // while dragged: at most one relight start this often (14/10, drag solves: was 66; 5 a second,
                                          // the exact relight once the drag ends; a recording: 1-13 ms of CPU a relight)
+constexpr uint64_t kGameWriteGapMs = 500; // a relight made only for a game write: at most this often per map
 constexpr double kFrameCpuMs = 2.0;      // a frame's relight work stops starting maps past this (the rest next frame)
 constexpr double kFrameWork = 1.0e6;     // ... or past this many units (texel x lamp: 7 exact, 1 dragged; about 2 ns of GPU each, tools/rt_lamps_test)
 
@@ -204,6 +206,7 @@ struct LampRead {
     float pos[3] = {}, colour[3] = {}, f0[3] = {}, range = 0.0f, intensity = 0.0f;
     float axis4[3] = {}, off4 = 0.0f, scale4 = 0.0f;
     float a1[3] = {}, a2[3] = {}, o1 = 1.0f, o2 = 1.0f, S[3] = {};
+    float areaShare = 1.0f; // an area light (9, 10): the share of the ground it faces (TerrainBakeRule)
 };
 bool ReadLamp(uintptr_t L, LampRead& r) {
     if (!L) return false;
@@ -234,6 +237,8 @@ bool ReadLamp(uintptr_t L, LampRead& r) {
             r.o1 = *reinterpret_cast<const float*>(p + 0x174);
             r.o2 = *reinterpret_cast<const float*>(p + 0x170);
             r.f.unmodelled = !RtLampModel::ShadedModelled(r.a1, r.a2, r.o1, r.o2);
+        } else if (TerrainBakeRule::AreaType(r.f.type)) {
+            r.areaShare = TerrainBakeRule::AreaGroundShare(*reinterpret_cast<const float*>(p + TerrainBakeRule::kAreaAxisYOffset));
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -246,7 +251,7 @@ bool ReadLamp(uintptr_t L, LampRead& r) {
 bool InTerrainBake(const LampRead& r) {
     const bool lot = r.f.lot != 0;
     if (r.f.type == 11) return !(lot && (r.f.flags & 0x04) && r.f.room == 0 && (r.f.flags & 0x61) != 0x61);
-    return lot && r.f.type >= 3 && r.f.type <= 6 && (r.f.flags & 0x65) == 0x65 && r.f.room == 0;
+    return lot && TerrainBakeRule::LotLampType(r.f.type) && (r.f.flags & 0x65) == 0x65 && r.f.room == 0;
 }
 struct GameConsts {
     float k1 = 1.0f, k2 = 0.075f, cmax = 2.0f, street = 3.3333f, s5 = 5.0f;
@@ -397,6 +402,7 @@ struct Slot {
     int watch = -1;
     bool fast = false;              // relit with the dragged lamp's cheaper shadows (relit exactly once the drag ends)
     bool pendingWrite = false;      // the game wrote its map (a solve, an unlock) since it was relit
+    uint64_t relitTick = 0;         // GetTickCount64 of its last relight
     uint64_t lampsSig = 0, paramsSig = 0; // what its last relight took (the reasons logged)
     uint32_t meshGen = 0, relitVersion = 0;
     // the masked texels' share of the bake under the floor (-1 none): exact from a worker thread (UnderShare's float sums),
@@ -440,7 +446,7 @@ int g_roundMaps = 0, g_roundFrames = 0, g_roundTiles = 0;
 std::vector<int> g_roundStories;
 // What made maps relit, and the frame's own cost, over the last 10 s (the self-measure line; render thread)
 struct Why {
-    long first = 0, lamp = 0, base = 0, params = 0, occluders = 0, gameWrite = 0, exact = 0, build = 0;
+    long first = 0, lamp = 0, base = 0, params = 0, occluders = 0, gameWrite = 0, exact = 0, build = 0, writeGap = 0;
     long relights = 0;
     double frameMs = 0, frameMax = 0;
     long frames = 0;
@@ -923,9 +929,9 @@ void OnEndScene(IDirect3DDevice9* dev) {
             const Why& w = g_why;
             LOG_INFO(std::format("[RtOutdoorLamps] Cost over {:.0f} s: {:.3f} ms a frame on average (largest {:.2f} ms) on the render thread; {} relights, maps relit "
                                  "because: first {}, a lamp within reach changed {}, the kept base changed {}, the game wrote the map {}, exact after a drag {}, "
-                                 "options {}, occluders {}; {} story maps prepared ({:.1f} ms on a worker thread){}",
+                                 "options {}, occluders {}; {} relights for repeated game writes moved later; {} story maps prepared ({:.1f} ms on a worker thread){}",
                                  (now - w.since) / 1000.0, w.frames ? w.frameMs / static_cast<double>(w.frames) : 0.0, w.frameMax, w.relights, w.first, w.lamp,
-                                 w.base, w.gameWrite, w.exact, w.params, w.occluders, w.build, g_buildMs,
+                                 w.base, w.gameWrite, w.exact, w.params, w.occluders, w.writeGap, w.build, g_buildMs,
                                  g_inactive.empty() ? std::string() : " | inactive: " + g_inactive));
         }
         g_why = Why{};
@@ -1345,6 +1351,7 @@ void Frame(IDirect3DDevice9* dev) {
                 b.range = r.range, b.intensity = r.intensity;
                 const bool spill = coneSpill && r.f.type == 5;
                 for (int k = 0; k < 3; k++) b.colour += std::max(r.f0[k], 0.0f) * (spill ? std::clamp(r.S[k], 0.0f, 1.0f) : 1.0f);
+                b.colour *= r.areaShare;
                 bake[S].push_back(b);
                 bakeLights[S].push_back(L);
             }
@@ -1649,6 +1656,15 @@ void Frame(IDirect3DDevice9* dev) {
         const bool exactUnder = s.underDirty;
         const bool dirty = !s.relit || !s.copy || sig != s.sig || paramsChanged || (s.fast && !dragging) || s.pendingWrite || s.underDirty;
         if (!dirty) continue;
+        // (2.15.1) the game writing the map again and again (a lot that stays loading, 21/10: 105 writes in 10 s, each relight
+        // 45 ms of floor mask with 28 lamps): a relight made only for a game write waits kGameWriteGapMs after the last one; a
+        // single write after a rest is relit at once, as before
+        const bool onlyWrite = s.relit && s.copy && sig == s.sig && !paramsChanged && !(s.fast && !dragging) && !s.underDirty;
+        if (onlyWrite && GetTickCount64() - s.relitTick < kGameWriteGapMs) {
+            left++; // (it keeps its last copy until its turn)
+            g_why.writeGap++;
+            continue;
+        }
         uint64_t lampsSig = 1469598103934665603ull;
         for (const auto& l : mine) Mix(lampsSig, &l, sizeof l);
         if (!s.masked.empty()) Mix(lampsSig, &bakeSig[s.story], 8);
@@ -1793,6 +1809,7 @@ void Frame(IDirect3DDevice9* dev) {
         s.sig = sig;
         s.fast = dragging;
         s.pendingWrite = false;
+        s.relitTick = GetTickCount64();
         relit++;
         LARGE_INTEGER td{};
         QueryPerformanceCounter(&td);

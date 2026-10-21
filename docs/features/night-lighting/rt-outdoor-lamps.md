@@ -12,7 +12,7 @@ that cannot run it, none of it runs.
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)) |
+| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s: In development (2.15.1) |
 | Default | On (Lamp lighting: Instant (GPU); a saved `lampLightingMode` keeps its choice) |
 | Menu | System > Performance > Lamp lighting > Lamp updates: Instant (GPU) |
 | Configuration | `lampLightingMode = "instant"` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -54,6 +54,9 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    estimate (`AccFastPS`), at most one relight every 200 ms, no map is uploaded, and the floor mask's under-floor share is
    computed on a worker thread (the map keeps its last copy until it arrives); once the lamp stays put every map is relit
    with the full estimate. Each frame starts maps only while its relight work stays under about 2 ms of CPU.
+   A map the game writes again and again (its room solves, for instance while a lot stays loading) is relit for those
+   writes at most every 0.5 s; a single write after a rest is relit at once (since 2.15.1; 21/10: 105 writes in 10 s,
+   each relight 45 ms of floor mask with 28 lamps, logged as "relights for repeated game writes moved later").
    Under DXVK the floor mask buffer is written in two copies, alternately: each write fills the one the last draws did not
    read and then becomes the drawn one, since a lock of a buffer the GPU may still read waits there (native D3D9 copies
    a managed buffer at its lock, with one copy as before).

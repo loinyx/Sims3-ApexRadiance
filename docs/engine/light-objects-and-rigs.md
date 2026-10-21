@@ -64,7 +64,11 @@ Vfunc slot addresses (vtable + 0x10) as patched by Apex: `0xFF42B0, 0xFF4308, 0x
 
 Type usage in practice (notebook, F8 dumps): lot lamps placed in Build mode are types 3..6 (garden lamps 3, spots/floods 4,
 wall sconces 5); street lamps are type 11 with lot id 0 (world lights); type 11 can also be placed on a lot; window lights
-are 7/8 and take part in room solves. "Lamp types" for Apex = 3..6 plus 11.
+are 7/8 and take part in room solves. "Lamp types" for Apex = 3..6 plus 11; the terrain bake also takes a lot's area lights
+9 and 10 since 2.15.1 (a park lot had three rectangle area lights of 100 m range, intensity 1). Area light room law
+(`0x006BFBA0` / `0x006BFDC0` -> `0x006BFAF0`): distance to the rectangle or disc (third axis +0x180 clamped to 0, half
+extents +0x1A0), `E = colour x sat(dir.z) x min(range x intensity x k2 / (d^2 x k1), cap)`; the area lights the side its
+third axis points away from.
 
 Light vtable functions used by the engine and Apex:
 

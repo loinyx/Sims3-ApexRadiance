@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [2.15.1](2.15.1.md): Edit Town lots no longer stuck on Processing, lot area lights past the border, lamp reflections behind objects.
 - [2.15.0](2.15.0.md): faster indoor light, furniture with its floor and room colour, less memory, Steam Deck support.
 - [2.14.0](2.14.0.md): light through stairwells, stairs and arches, trees lit leaf by leaf, steady moonlight.
 - [2.13.2](2.13.2.md): the latest lighting features on the EA app version 1.69.
@@ -38,6 +39,7 @@ tests, publication) is in [workflow.md](../workflow.md#6-release).
 
 | Version | Published | Headline |
 |---|---|---|
+| [2.15.1](2.15.1.md) | Pending | Edit Town lots no longer stuck on Processing, lot area lights past the lot border, no lamp reflections from behind objects |
 | [2.15.0](2.15.0.md) | 2026-10-21 | Faster indoor light, furniture with its floor and room colour, less memory, Steam Deck support |
 | [2.14.0](2.14.0.md) | 2026-10-20 | Light through stairwells, stairs and arches, trees lit leaf by leaf, steady moonlight, memory and save fixes |
 | [2.13.2](2.13.2.md) | 2026-10-15 | The latest lighting features on the EA app version of the game (1.69) |

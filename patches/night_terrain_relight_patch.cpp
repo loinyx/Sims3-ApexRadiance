@@ -37,6 +37,7 @@
 #include "light_probe.h"
 #include "screen_watch.h"
 #include "lot_light_bridge.h"
+#include "terrain_bake_rule.h"
 #include "bloom_alpha_probe.h"
 #include "lightmap_smooth.h"
 #include "terrain_chunk_relight.h"
@@ -444,6 +445,8 @@ const std::vector<BYTE> kBakeColourOrig = {0x0F, 0x28, 0x87, 0xF0, 0x00, 0x00, 0
 // stamps type-5 lot lamps at their spill. The pool right under the lamp comes from the room-solve map, which has the cones.
 // The upper-floor gate mirrors it (LevelLightShare::SetBakeConeSpill).
 volatile bool g_bakeConeSpill = true;
+// (2.15.1) area lights (types 9, 10) at the share of the ground below they face (TerrainBakeRule::AreaGroundShare)
+const float g_areaHalf = 0.5f, g_areaZero = 0.0f, g_areaOne = 1.0f;
 bool g_bakeGainInstalled = false;
 float g_bakeGainSeen[2] = {1.0f, 1.0f}; // street / lot gains the multipliers hold
 float g_tintSeen[2] = {1.0f, 1.0f};     // street / lot lamp colours the stock lamps were last re-coloured with
@@ -458,12 +461,30 @@ __declspec(naked) void BakeColourStub() {
         ret
     lot:
         mulps xmm0, xmmword ptr [g_bakeLotMul]
+        mov eax, dword ptr [edi+0xB0]
+        cmp eax, 9                            // area lights: the share of the ground below they face
+        je area
+        cmp eax, 10
+        je area
         cmp byte ptr [g_bakeConeSpill], 0
         je done
-        cmp dword ptr [edi+0xB0], 5           // type 5: a lamp with cones
+        cmp eax, 5                            // type 5: a lamp with cones
         jne done
         mulps xmm0, xmmword ptr [edi+0x150]   // its spill, per channel
     done:
+        ret
+    area:
+        sub esp, 16
+        movups xmmword ptr [esp], xmm1        // (xmm1 kept for the game)
+        movss xmm1, dword ptr [edi+0x184]     // its third axis' y (TerrainBakeRule::kAreaAxisYOffset)
+        mulss xmm1, dword ptr [g_areaHalf]
+        addss xmm1, dword ptr [g_areaHalf]
+        maxss xmm1, dword ptr [g_areaZero]
+        minss xmm1, dword ptr [g_areaOne]
+        shufps xmm1, xmm1, 0
+        mulps xmm0, xmm1
+        movups xmm1, xmmword ptr [esp]
+        add esp, 16
         ret
     }
 }
@@ -690,14 +711,14 @@ bool OriginalWorldLightTest(void* light) {
     return reinterpret_cast<BoolVfn>(vtable[0x20 / 4])(light);
 }
 
-// Lamp that belongs to a lot, is an ordinary lamp type, is alive/enabled and sits outdoors (room 0).
+// Lamp that belongs to a lot, is a lamp class (TerrainBakeRule::LotLampType), is alive/enabled and sits outdoors (room 0).
 bool IsOutdoorLotLamp(const BYTE* L) {
     __try {
         const uint32_t lotLo = *reinterpret_cast<const uint32_t*>(L + 0xC0);
         const uint32_t lotHi = *reinterpret_cast<const uint32_t*>(L + 0xC4);
         if ((lotLo | lotHi) == 0) return false;
         const int type = *reinterpret_cast<const int*>(L + 0xB0);
-        if (type < 3 || type > 6) return false;
+        if (!TerrainBakeRule::LotLampType(type)) return false;
         const BYTE f = L[0x100];
         if (!(f & 0x01) || !(f & 0x40) || !(f & 0x04)) return false; // alive, enabled, room known
         return *reinterpret_cast<const int*>(L + 0x08) == 0;           // room 0 = outdoors
@@ -1039,7 +1060,7 @@ bool ArrivalFootprint(const std::vector<LotLightBridge::BakeLamp>& old, const st
                       bool plain, std::vector<ChunkRelight::Lamp>& footprints, std::vector<LotLightBridge::BakeChange>& changes) {
     for (int pass = 0; pass < 2; ++pass)
         for (const auto& b : pass == 0 ? old : current) {
-            if (!plain && b.type >= 3 && b.type <= 6) continue;
+            if (!plain && TerrainBakeRule::LotLampType(b.type)) continue;
             const auto* r = b.rect;
             for (int k = 0; k < 4; ++k) if (!std::isfinite(r[k])) return false;
             if (!(r[0] < r[2] && r[1] < r[3])) {

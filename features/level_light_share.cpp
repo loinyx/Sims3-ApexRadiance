@@ -83,6 +83,7 @@
 #define NOMINMAX
 #endif
 #include "level_light_share.h"
+#include "terrain_bake_rule.h"
 #include "lamp_visibility.h"
 #include "lamp_reach.h"
 #include "wall_heights.h"
@@ -10049,7 +10050,7 @@ bool InTerrainBake(const BYTE* L) {
     const int room = *reinterpret_cast<const int*>(L + 0x08);
     const bool lot = (*reinterpret_cast<const uint32_t*>(L + 0xC0) | *reinterpret_cast<const uint32_t*>(L + 0xC4)) != 0;
     if (type == 11) return !(lot && (f & 0x04) && room == 0 && (f & 0x61) != 0x61);
-    return lot && type >= 3 && type <= 6 && (f & 0x65) == 0x65 && room == 0;
+    return lot && TerrainBakeRule::LotLampType(type) && (f & 0x65) == 0x65 && room == 0;
 }
 // The share (0..1) of the ground atlas at the floor point s that the baked lamps of room0's list put there from under the
 // point's plane; -1 when none of them reaches it or the list cannot be read. POD only (SEH)
@@ -10073,9 +10074,12 @@ float UnderFloorShare(const BYTE* room0, const float* s, float base) {
             if (stamp > 1.0f) stamp = 1.0f; // saturated next to the lamp
             // a lamp with cones (type 5) is stamped at its spill +0x150 when the bake stub does it (SetBakeConeSpill, 07/10)
             const float *col = reinterpret_cast<const float*>(L + 0xF0), *S = reinterpret_cast<const float*>(L + 0x150);
-            const bool spill = g_bakeConeSpill.load(std::memory_order_relaxed) && *reinterpret_cast<const int*>(L + 0xB0) == 5;
+            const int type = *reinterpret_cast<const int*>(L + 0xB0);
+            const bool spill = g_bakeConeSpill.load(std::memory_order_relaxed) && type == 5;
             float v = 0.0f;
             for (int i = 0; i < 3; i++) v += std::max(col[i], 0.0f) * (spill ? std::clamp(S[i], 0.0f, 1.0f) : 1.0f);
+            // an area light at the share of the ground it faces, as the bake stub
+            if (TerrainBakeRule::AreaType(type)) v *= TerrainBakeRule::AreaGroundShare(*reinterpret_cast<const float*>(L + TerrainBakeRule::kAreaAxisYOffset));
             v *= stamp;
             if (!(v > 0.0f)) continue;
             all += v;
