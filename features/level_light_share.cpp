@@ -10383,7 +10383,10 @@ float RoomNormHookImpl(BYTE* room, float took, AdaptNote& note, bool& storyOnly)
             if (const RoomInfo* info = SolveInfo(room); info && info->indoor && CrossOnly(room, *info)) {
                 const float game = finite ? norm : std::numeric_limits<float>::infinity();
                 storyOnly = want && CrossStoryOnly(room, *info); // (room_fill) only a room lit through a floor opening
-                const float keep = DevSwitches::BorrowedLightAdapt() && storyOnly ? StairwellBounce::BorrowedAdapt(game, took) : std::min(game, 1.0f);
+                // the partial adaptation: one rule for every room lit only by borrowed light, through a floor opening or
+                // through an arch or a door of its own story (the arch rooms were kept at x1 while the floor-opening ones
+                // went up to x2, so rooms of the stories above looked brighter for the same light)
+                const float keep = DevSwitches::BorrowedLightAdapt() ? StairwellBounce::BorrowedAdapt(game, took) : std::min(game, 1.0f);
                 if (game > 1.0f || keep != game) {
                     note = AdaptNote{info->level, info->id, game, took, keep};
                     if (game > 1.0f) g_normCrossOnly.fetch_add(1, std::memory_order_relaxed);

@@ -143,7 +143,9 @@ colour ...` (*not set yet: default* while still zero).
 
 The two top-up calls go through `BaseHook<0>` / `BaseHook<1>` while Rooms at Night is on, for indoor rooms that are not
 roofless. The unlit colour C (family by the lot test `FUN_00c63140` on the room's lot id `+0x10/+0x14`, times the scalar
-`[0x011D0B88]`) is always added to the lamps' ambient instead of only topping it up. The lamps' share is recovered from
+`[0x011D0B88]`) is always added to the lamps' ambient instead of only topping it up, and the result is never below C on any
+channel: a room whose listed lamps are all blocked came out at about a third of C, darker than an empty room beside it.
+The lamps' share is recovered from
 the game's result (sums over x, y, z with weight 1.0 `[0x0107A538]`; a top-up happened iff sum(out) < sum(C), then
 sum(lamp) = (sum(out) - sum(C)^2) / (1 - sum(C))). Each room's C and results are kept (`g_baseRooms`, keyed by room
 address with manager and id), so a slider change moves lit rooms at once (`MoveBase`: value + new C - old C, only while

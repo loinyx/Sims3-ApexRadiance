@@ -15,6 +15,9 @@ const I18n::Pair kPairs[] = {
     {"Furniture takes the colour of its room's lamps, like the walls", "家具会像墙壁一样带上房间灯光的颜色"},
     {"Objects and their floor show a lamp's new light together", "物体和地板会同时显示灯的新光照"},
     {"Apex frees the memory of lots you have left", "Apex 会释放你已离开地块的内存"},
+    {"Presets set every Performance option, including the lamp lighting mode; Default is now Balanced", "预设会设置所有性能选项，包括灯具照明模式；Default 现在叫均衡"},
+    {"Rooms lit through arches and stairwells are balanced, never darker than an empty room", "通过拱门和楼梯采光的房间会保持均衡，绝不会比空房间更暗"},
+    {"Turning all effects off keeps Room to save on", "关闭所有效果时，保留存档空间仍保持开启"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "环境光遮蔽和景深模糊会显示暂停的原因"},
     {"Light keeps passing through arches after Night Lights is turned off and on", "关闭再开启夜间灯光后，光线仍能穿过拱门"},
     {"Rooms that take almost no light stay dark, without a doubled glow", "几乎照不到光的房间保持黑暗，不再出现加倍的光晕"},
@@ -664,6 +667,7 @@ const I18n::Pair kPairs[] = {
     {"Installed", "已安装"},
     {"Not installed", "未安装"},
     {"Features", "功能"},
+    {"Turn all effects on or off together; Room to save stays on", "ä¸æ¬¡å¼å¯æå³é­ææææï¼âä¿çå­æ¡£ç©ºé´âä¿æå¼å¯"},
     {"One switch for every option on the Performance page", "一个开关控制“性能”页面的所有选项"},
     {"Easier on the graphics card; light updates once you let go of a lamp", "显卡负担更轻；松开灯具后光照才会更新"},
     {"After a lamp edit, floors change together instead of one by one", "调整灯具后，各楼层会一起变化，而不是逐层变化"},

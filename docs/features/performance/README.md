@@ -140,7 +140,8 @@ the card shows *Needs Night Lights (Lighting page)* and a button to turn it on. 
 once. The GPU time of the last lamp edit is on Developer > [Tester](../dev-tools/tester.md).
 
 Setting: `lampLightingMode` (`"classic"` or `"instant"`, default `"instant"`) under `[patches.NightTerrainRelight]`; a
-saved value is kept, and a file without the key starts on Instant. Source: `LampLightingCard` in
+saved value is kept, and a file without the key starts on Instant. Presets carry it in the Performance part (the key is
+taken out of Night Lights' table for a Lighting-only preset). Source: `LampLightingCard` in
 [`apex_gui.cpp`](../../../apex_gui.cpp).
 
 ## Settings
@@ -150,7 +151,7 @@ Each switch's settings are documented once, on its own page. The group-level con
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Overview > Performance | (none: sets the fifteen `enabled` keys) | bool | on when all fifteen are on | | Turns all fifteen on or off; a switch the game version does not have counts neither as on nor as off. Turning on enables *Faster game file lookups* before *Remember missing files*; turning off stops them in the reverse order. Not switchable while the game is loading |
-| Overview > All effects | (none) | bool | | | Also turns the Performance group on or off |
+| Overview > All effects | (none) | bool | | | Also turns the Performance group on or off; turning everything off leaves Room to save on (it protects saves and changes nothing on screen) |
 | (row switch on each page) | `[patches.<Name>] enabled` | bool | on | | A missing key reads as on; an explicit `false` stays off |
 
 Room to save, Lighter window updates, Faster scripts and the two sub-rows of *Faster room lighting* (*Lamp edits all

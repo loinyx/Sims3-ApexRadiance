@@ -394,9 +394,11 @@ bool PerformanceGroupEnabled() {
     return true;
 }
 
-bool PerformanceGroupAnyEnabled() {
+// (exceptSaveGuard: Room to save is left out, as All effects keeps it)
+bool PerformanceGroupAnyEnabled(bool exceptSaveGuard = false) {
     for (const char* name : kOverviewPerformancePatches)
-        if (const ApexPatch* patch = Find(name); patch && patch->IsEnabled()) return true;
+        if (exceptSaveGuard && std::string_view(name) == Performance::kMemoryGuardName) continue;
+        else if (const ApexPatch* patch = Find(name); patch && patch->IsEnabled()) return true;
     return false;
 }
 
@@ -407,7 +409,9 @@ bool PerformanceGroupSwitchable() {
     return true;
 }
 
-void SetPerformanceGroup(bool on) {
+// keepSaveGuard: turning everything off leaves Room to save on (it protects saves from Error 12; it changes nothing on
+// screen); its own switch on the Performance page still turns it off
+void SetPerformanceGroup(bool on, bool keepSaveGuard = false) {
     if (on) {
         // Enable Faster Game File Lookups before its Remember Missing Files extension.
         for (const char* name : kOverviewPerformancePatches)
@@ -415,7 +419,8 @@ void SetPerformanceGroup(bool on) {
     } else {
         // Stop the dependent negative cache before turning off its parent.
         for (auto it = std::rbegin(kOverviewPerformancePatches); it != std::rend(kOverviewPerformancePatches); ++it)
-            if (ApexPatch* patch = Find(*it); patch && Switchable(patch) && patch->IsEnabled()) SetPatch(patch, false);
+            if (ApexPatch* patch = Find(*it); patch && Switchable(patch) && patch->IsEnabled() && !(keepSaveGuard && std::string_view(*it) == Performance::kMemoryGuardName))
+                SetPatch(patch, false);
     }
 }
 
@@ -430,7 +435,7 @@ bool AllOverviewEffectsEnabled() {
 bool AnyOverviewEffectEnabled() {
     for (const char* name : kOverviewMainPatches)
         if (const ApexPatch* patch = Find(name); patch && patch->IsEnabled()) return true;
-    return Picture::Get().GetParams().enabled || ShoreOn() || PerformanceGroupAnyEnabled();
+    return Picture::Get().GetParams().enabled || ShoreOn() || PerformanceGroupAnyEnabled(true);
 }
 
 bool AllOverviewEffectsSwitchable() {
@@ -450,7 +455,7 @@ void SetAllOverviewEffects(bool on) {
         picture.enabled = on;
         Picture::Get().SetParams(picture, true);
     }
-    SetPerformanceGroup(on);
+    SetPerformanceGroup(on, true);
     if (on) SetShore(true); // Night Lights and Depth Blur are enabled above.
 }
 
@@ -462,7 +467,7 @@ void OverviewPage() {
         const bool anyEffectOn = AnyOverviewEffectEnabled();
         const char* state = AllOverviewEffectsEnabled() ? "All effects are on" : anyEffectOn ? "Some effects are on" : "All effects are off";
         bool allEffects = AllOverviewEffectsEnabled();
-        if (ApexUi::CardHeader(IconId::ListChecks, "All effects", state, "Turn all effects on or off together", &allEffects,
+        if (ApexUi::CardHeader(IconId::ListChecks, "All effects", state, "Turn all effects on or off together; Room to save stays on", &allEffects,
                                AllOverviewEffectsSwitchable()))
             SetAllOverviewEffects(allEffects);
     }

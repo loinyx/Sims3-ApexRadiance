@@ -60,9 +60,11 @@ adds no light that the lamps below do not send.
 7. **Room fill.** A room lit only from another story takes back, on its floor and walls, albedo x the mean light its
    texels received in its last solve. The room is solved again when that mean moves by more than 25%, at most twice in
    10 s, so the fill follows a lamp that is switched off.
-8. **Partial adaptation.** In a room lit only from another story, the normalisation is
-   sqrt(1 / the brightest texel measured in its last solve), kept between the game's value capped at 1 and x2. A room
-   that receives 5% of full light becomes twice as bright, not twenty times. A room whose brightest texel takes under 1%
+8. **Partial adaptation.** In a room lit only by borrowed light (from another story through a floor opening, or through
+   an arch or a door of its own story: one rule for both), the normalisation is sqrt(1 / the brightest texel measured in
+   its last solve), kept between the game's value capped at 1 and x1.4. A room that receives 5% of full light becomes 1.4
+   times as bright, not twenty times; at x2, rooms of the stories above looked brighter than their arch neighbours for
+   the same light. A room whose brightest texel takes under 1%
    is brought up less, and not at all under 0.2% (`kAdaptNoneTook`, `kAdaptFullTook`): the faint residue of a far lamp
    stays dark, as the eye sees it.
 
@@ -112,7 +114,7 @@ the game's behaviour, so the shape of the light through those openings is preser
 | `kStairSampleUp` | 1.5 m |
 | `kAlbedo` | 0.4 |
 | `kWellLift` | 1.5 m |
-| `kBorrowedAdaptMax` | 2 |
+| `kBorrowedAdaptMax` | 1.4 |
 
 For walls more than 2 m from a tile of the opening, the whole tile is one source instead of four quadrants, and the
 line below is walked in 0.5 m steps. The developer F8 snapshot counts rooms, texels seen and lit, the time spent, the

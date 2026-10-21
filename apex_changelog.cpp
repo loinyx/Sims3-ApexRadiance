@@ -15,6 +15,9 @@ constexpr const char* k2150Improved[] = {
     "Furniture takes the color of its room's lamps, like the walls",
     "Objects and their floor show a lamp's new light together",
     "Apex frees the memory of lots you have left",
+    "Presets set every Performance option, including the lamp lighting mode; Default is now Balanced",
+    "Rooms lit through arches and stairwells are balanced, never darker than an empty room",
+    "Turning all effects off keeps Room to save on",
     "Ambient Occlusion and Depth Blur show why they are not running",
     nullptr};
 constexpr const char* k2150Fixed[] = {

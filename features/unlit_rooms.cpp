@@ -196,6 +196,9 @@ bool AddBase(BYTE* room, float* r, int& slot, float* ce) {
             t = std::fmax(sumC - sumL, 0.0f);
         }
         for (int k = 0; k < 4; k++) r[k] += (1.0f - t) * ce[k]; // lamp' + C
+        // never darker than a room with no lamp: a room whose listed lamps are all blocked (or give almost nothing) came out
+        // at about a third of the unlit colour (a snapshot: 0.0068 against 0.0193 in the empty room beside it)
+        for (int k = 0; k < 3; k++) r[k] = std::fmax(r[k], ce[k]);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;

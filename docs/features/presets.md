@@ -1,6 +1,6 @@
 # Presets
 
-Presets save a chosen set of Apex settings so it can be applied again or shared. The sidebar page lists personal presets first, followed by the built-in Apex presets. Save, import and export use the same modal controls as the rest of the menu.
+Presets save a chosen set of Apex settings so it can be applied again or shared. The sidebar page lists personal presets first, followed by the built-in Apex presets: Performance, Balanced (a balance of looks and speed; not the code defaults, which each row's Reset restores) and Quality. The Performance part carries every switch of the Performance page and the lamp lighting mode. Save, import and export use the same modal controls as the rest of the menu.
 
 ## Status
 

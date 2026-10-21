@@ -561,6 +561,9 @@ bool SavePending() { return g_saveRequested.load() || PatchManager::Get().HasUns
 namespace {
 
 // The features a profile carries (their looks and options); developer tools stay out of profiles
+// The lamp lighting mode's key, in Night Lights' table, carried by the Performance part (KeepProfileParts)
+constexpr const char* kLampModeFeature = "NightTerrainRelight";
+constexpr const char* kLampModeKey = "lampLightingMode";
 // The profile part a feature belongs to (0 = not part of profiles)
 unsigned FeaturePart(const std::string& name) {
     if (name == "NightTerrainRelight" || name == "SplitLevelGroundLight") return kPartNightLights;
@@ -570,7 +573,8 @@ unsigned FeaturePart(const std::string& name) {
     if (name == "EdgeSmoothing") return kPartEdgeSmoothing;
     for (const char* p : {Performance::kResourceCacheName, Performance::kLookupMissesName, Performance::kFileListName, Performance::kLotLightingName,
                           Performance::kWallShadingName, Performance::kFastTextureName, Performance::kFastCacheName, Performance::kSceneBudgetName,
-                          Performance::kObjectIndexName})
+                          Performance::kObjectIndexName, Performance::kRoomLightQueueName, Performance::kFastCasName, Performance::kFastMemoryName,
+                          Performance::kMemoryGuardName, Performance::kWindowRepaintName, Performance::kScriptMathName})
         if (name == p) return kPartPerformance;
     return 0;
 }
@@ -734,7 +738,14 @@ const char* ProfilePartName(int index) {
 unsigned ProfilePartsOf(const toml::table& state) {
     unsigned parts = 0;
     if (const toml::table* patches = state["patches"].as_table())
-        for (auto&& [key, value] : *patches) parts |= FeaturePart(std::string(key.str()));
+        for (auto&& [key, value] : *patches) {
+            const std::string name(key.str());
+            const toml::table* t = value.as_table();
+            // Night Lights' table holding only the lamp lighting mode belongs to the Performance part (KeepProfileParts)
+            const bool lampMode = name == kLampModeFeature && t && t->contains(kLampModeKey);
+            if (lampMode) parts |= kPartPerformance;
+            if (!(lampMode && t->size() == 1)) parts |= FeaturePart(name);
+        }
     if (const toml::table* qol = state["qol"].as_table(); qol && !qol->empty()) parts |= kPartColor;
     if (state["shortcuts"].as_table()) parts |= kPartShortcuts;
     if (state["developer"].as_table()) parts |= kPartDeveloper;
@@ -743,9 +754,24 @@ unsigned ProfilePartsOf(const toml::table& state) {
 
 void KeepProfileParts(toml::table& state, unsigned parts) {
     if (toml::table* patches = state["patches"].as_table()) {
+        // The lamp lighting mode (Instant / Classic) is set on the Performance page but saved in Night Lights' table: it
+        // goes with the Performance part. A Performance-only preset keeps that one key of the table; a Lighting-only
+        // preset leaves the mode as it is.
+        if (toml::table* ntr = (*patches)[kLampModeFeature].as_table()) {
+            if (!(parts & kPartPerformance)) ntr->erase(kLampModeKey);
+            else if (!(parts & kPartNightLights)) {
+                toml::table only;
+                if (const toml::node* mode = ntr->get(kLampModeKey)) only.insert(kLampModeKey, *mode);
+                ntr->clear();
+                for (auto&& [k, v] : only) ntr->insert(k, v);
+            }
+        }
         std::vector<std::string> drop;
         for (auto&& [key, value] : *patches)
-            if (!(FeaturePart(std::string(key.str())) & parts)) drop.emplace_back(key.str());
+            if (!(FeaturePart(std::string(key.str())) & parts)) {
+                const toml::table* vt = value.as_table();
+                if (!(key.str() == kLampModeFeature && (parts & kPartPerformance) && vt && !vt->empty())) drop.emplace_back(key.str());
+            }
         for (const std::string& k : drop) patches->erase(k);
     }
     if (!(parts & kPartColor)) state.erase("qol");

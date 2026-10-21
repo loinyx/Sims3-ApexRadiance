@@ -105,7 +105,8 @@ inline Surface SurfaceKind(float nx, float ny, float nz) {
 // the capped game value. A room that takes almost nothing (brightest texel under kAdaptFullTook) is brought up less, down to
 // none at kAdaptNoneTook: the adaptation doubled the faint residue of a far lamp (a pure blue lamp 100 m in reach gave the
 // rooms of the stories around it a blue cast at x2), where an eye sees a dark room.
-constexpr float kBorrowedAdaptMax = 2.0f;
+// x1.4 at most: at x2 a room lit only from another story, or through an arch, looked brighter than its neighbours
+constexpr float kBorrowedAdaptMax = 1.4f;
 constexpr float kAdaptNoneTook = 0.002f, kAdaptFullTook = 0.01f;
 inline float BorrowedAdapt(float game, float took) {
     const float keep = std::min(game, 1.0f);
