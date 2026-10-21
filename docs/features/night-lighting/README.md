@@ -384,6 +384,17 @@ Native solar and sky constants are never raised.
   (ExteriorLightData, read by 88 techniques including Sims). Its only reader, `FUN_00c11ad0`, loads it with
   `mov ecx,011D0918h; call <mov eax,ecx; ret>; movss xmm0,[eax]` at 0x00C11B01. Apex points that call (0x00C11B06) at
   its own getter, which returns the game's value x `lerp(1, luar, night level)`; the variable itself is never written.
+- **Moon height** (2.16, in development): the game's light direction (`0x00C14F2E..0x00C150F5`, every frame) is the sun's
+  with its height scaled by `[obj+0x9B4]` and held at a minimum `[obj+0x9B8]` (`y = max(y k, min)`, then normalised); at
+  night the sun is below the horizon, so the moon (the same direction, x mirrored) stands at `atan(min / horizontal part)`:
+  0.7 degrees after dusk (min 0.0122), a few degrees later. At that height every bump of a road's normal map and every road
+  piece's slight tilt switched the moon on or off and curbs cast shadows tens of metres long (F7 and F8 of 21/10: dark
+  bands on roads 40 % under the snow beside them, moonlight x1.82). At full night (night level 0.9 to 1 brings it in) the
+  sun scale getter, called by `FUN_00C11AD0` with ESI = that object, raises the minimum so the moon stands at least 20
+  degrees high (`min = r tan H`, r = the direction's horizontal part); its horizontal direction still turns as the game
+  moves it. By day and through dusk the game's minimum is put back, and on uninstall. A fade of the moon's light below
+  6 degrees was tried first and removed: with the game's moon that low all night it turned the moon off for the whole night.
+  Developer: Lighting > Developer > *Moon height at night* (A/B) and *Least moon height (degrees)*, 5 to 60, 20.
   A blend that starts from the current value, or another mod's "Sunlight brightness", is therefore scaled once and
   never stacks. When the bytes differ (another game build), the value is written every frame as before, and a value
   written by another mod becomes the new base. Rigs copy the sun colour when they gather, so they are refreshed on

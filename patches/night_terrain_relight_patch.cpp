@@ -519,12 +519,73 @@ bool g_sunCallTried = false;
 float g_sunFactor = 1.0f;      // what SunScaleGetter multiplies by (render thread)
 float g_sunScaled = 0.0f;
 
+// (2.16) Moon height. The game's light direction (0x00C14F2E..0x00C150F5, every frame) is the sun's from the time of day
+// with its height scaled by [obj+0x9B4] and held at a minimum [obj+0x9B8] (y = max(y k, min), then normalised); at night
+// the sun is below the horizon, so y is that minimum and the moon (the same direction, x mirrored) sits at atan(min / its
+// horizontal part): 0.7 degrees after dusk (min 0.0122), a few degrees at most later. At that height every bump of a road's
+// normal map and every road piece's slight tilt switched the moon on or off and curbs cast shadows tens of metres long
+// (21/10: dark bands on roads 40 % under the snow beside them, with moonlight x1.82). At full night the minimum is raised so
+// the moon stands at least kMoonHeightDeg high; its horizontal direction still turns as the game moves it. FUN_00C11AD0
+// calls this getter with ESI = that object (light direction +0x7F0, read for SetSun 0x006ACDF0 right after), so the new
+// minimum shapes the next frame's direction. By day and through dusk the game's minimum is put back.
+bool g_moonLift = true;          // developer A/B (moon_height)
+float g_moonHeightDeg = 20.0f;   // developer slider: the least height of the moon at night
+float g_liftWeight = 0.0f;       // night weight (render thread): 0 by day and at dusk, 1 at full night
+uintptr_t g_liftObj = 0;         // the object whose minimum is managed
+float g_liftGameMin = -1.0f;     // its own minimum (< 0 = not read)
+float g_liftWritten = -1.0f;     // the minimum last written (< 0 = none)
+float g_moonHeightNow = 0.0f;    // the light's height now, degrees (status line)
+void LiftMoon(BYTE* obj) {
+    __try {
+        float& minRef = *reinterpret_cast<float*>(obj + 0x9B8);
+        const float* n = reinterpret_cast<const float*>(obj + 0x7F0);
+        if (g_liftObj != reinterpret_cast<uintptr_t>(obj)) { // a new world's sky: its own minimum
+            g_liftObj = reinterpret_cast<uintptr_t>(obj);
+            g_liftGameMin = minRef;
+            g_liftWritten = -1.0f;
+        } else if (g_liftWritten >= 0.0f && minRef != g_liftWritten) {
+            g_liftGameMin = minRef; // the game set its minimum again (a new sky setting): that is the base now
+        }
+        const float base = g_liftGameMin;
+        if (!(base > 0.0f && base < 1.0f) || !std::isfinite(n[0]) || !std::isfinite(n[1]) || !std::isfinite(n[2])) return;
+        g_moonHeightNow = std::asin(std::clamp(n[1], -1.0f, 1.0f)) * 57.2957795f;
+        float want = base;
+        const float w = g_moonLift ? g_liftWeight : 0.0f;
+        const float hor = std::sqrt(n[0] * n[0] + n[2] * n[2]);
+        if (w > 0.0f && n[1] > 0.0f && hor > 1e-4f) {
+            // n was normalised from (x, used, z): its horizontal part r = used x hor / n.y; the height H needs min = r tan H
+            const float used = g_liftWritten >= 0.0f ? g_liftWritten : base;
+            const float r = used * hor / n[1];
+            const float target = std::max(base, r * std::tan(std::clamp(g_moonHeightDeg, 0.0f, 60.0f) * 0.0174532925f));
+            want = base + w * (target - base);
+        }
+        if (minRef != want) minRef = want;
+        g_liftWritten = want;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_liftObj = 0;
+    }
+}
+void RestoreMoonHeight() {
+    if (!g_liftObj || !(g_liftGameMin > 0.0f) || g_liftWritten < 0.0f) return;
+    __try {
+        *reinterpret_cast<float*>(g_liftObj + 0x9B8) = g_liftGameMin;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+    g_liftWritten = -1.0f;
+}
+float* __cdecl ScaledSun(const float* scale, BYTE* obj) {
+    if (obj) LiftMoon(obj);
+    g_sunScaled = *scale * g_sunFactor;
+    return &g_sunScaled;
+}
+
+// (the game reloads xmm0 and ecx right after the call and keeps nothing in xmm or edx across it; esi and edi are kept)
 __declspec(naked) void SunScaleGetter() {
     __asm {
-        movss xmm0, dword ptr [ecx]
-        mulss xmm0, dword ptr [g_sunFactor]
-        movss dword ptr [g_sunScaled], xmm0
-        mov eax, offset g_sunScaled
+        push esi
+        push ecx
+        call ScaledSun
+        add esp, 8
         ret
     }
 }
@@ -592,6 +653,8 @@ bool ApplyMoonlight(float level) {
         RedirectSunCall();
     }
     const float factor = 1.0f + (g_moonlight - 1.0f) * level;
+    // the moon height at full night only (night level 0.9 to 1 brings it in): by day and through dusk the sun is the game's
+    g_liftWeight = level > 0.9f ? std::min((level - 0.9f) * 10.0f, 1.0f) : 0.0f;
     if (g_sunCall) {
         float game = 0.0f;
         if (ReadFloat(kSunlightScale, game) && game > 0.0f && game < 100.0f) g_sunlightBase = game;
@@ -618,6 +681,7 @@ bool ApplyMoonlight(float level) {
 }
 
 void RestoreMoonlight() {
+    RestoreMoonHeight();
     if (g_sunCall) {
         g_sunFactor = 1.0f;
         // only while the site still holds our call (another mod may have patched it since: then it is left alone)
@@ -3003,6 +3067,12 @@ class NightTerrainRelightPatch : public ApexPatch {
             ImGui::TextWrapped("%s", LampMarkFilter::Status().c_str());
         }
         if (ApexUi::Checkbox("Soft lot edges (A/B: off = plain max of lot and ground light)", &g_softLotEdges)) NotifySettingChanged();
+        if (ApexUi::Checkbox("Moon height at night (A/B: off = the game's moon on the horizon)", &g_moonLift)) ObjectLightBridge::RequestRigRefresh();
+        if (g_moonLift) {
+            ImGui::SetNextItemWidth(220.0f);
+            if (ImGui::SliderFloat("Least moon height (degrees)##MoonHeight", &g_moonHeightDeg, 5.0f, 60.0f, "%.0f") && !ApexUi::SliderDragging())
+                ObjectLightBridge::RequestRigRefresh();
+        }
         // Lamp lighting is chosen on the Performance page (Lamp lighting card); read-only here
         ImGui::TextWrapped("Lamp lighting: %s (Performance > Lamp lighting)", g_lampMode == kLampInstant ? "Instant (Real-time outdoor lamps on Quick outdoor lamp edits' parts)" : "Classic");
         if (g_lampMode == kLampInstant && ApexUi::SwitchRow("Check quick lamp edits", &g_outdoorDeltaCheck,
@@ -3037,7 +3107,8 @@ class NightTerrainRelightPatch : public ApexPatch {
         ImGui::TextWrapped("Windows take outdoor light: %s", LotLightBridge::WindowOutdoorStatus().c_str());
         ImGui::TextWrapped("Terrain bake: %s | moonlight: %s", g_bakeGainInstalled ? std::format("street lamps x{:.2f}, lot lamps x{:.2f}", g_bakeStreetMul[0], g_bakeLotMul[0]).c_str() : "not installed",
                            g_sunlightBase < 0.0f ? (kSunlightScale ? "waiting for a world" : "not available")
-                                                 : std::format("sunlight scale {:.3f} (base {:.3f}, moonlight x{:.2f})", g_moonWritten, g_sunlightBase, g_moonlight).c_str());
+                                                 : std::format("sunlight scale {:.3f} (base {:.3f}, moonlight x{:.2f}; light height {:.1f} deg, moon height {})", g_moonWritten, g_sunlightBase, g_moonlight,
+                                                             g_moonHeightNow, g_moonLift ? std::format("at least {:.0f} deg at night", g_moonHeightDeg) : std::string("the game's")).c_str());
         ImGui::TextWrapped("Roofs: %s", LotLightBridge::RoofStatus().c_str());
         ImGui::TextWrapped("Water: %s", LotLightBridge::WaterStatus().c_str());
         ImGui::TextWrapped("Smoothed light map: %s", LightmapSmooth::Status().c_str());
