@@ -436,6 +436,7 @@ the directional maps of each room light map while the game holds both (reference
 | 0x006B6516, 0x006B60D3, 0x006B6618 | Light register / remove / move-toggle arm tests | `8B 17 8B 42 20 8B CF FF D0` |
 | 0x00C8504C | Chunk texture render call in the terrain sweep | 15 bytes at 0x00C85047 |
 | 0x00C2950F | Bake colour copy (`BakeColourStub`) | `0F 28 87 F0 00 00 00` |
+| 0x00C294F7 | Bake position copy (`BakePosStub`, low lamps from 40 cm; colour site - 0x18) | `0F 28 00 0F 29 86 10 01 00 00` |
 | 0x011D0918 | Sunlight scale float | Reader at 0x00C11B01 `B9 18 09 1D 01 E8`; its call at 0x00C11B06 must reach `8B C1 C3` (`mov eax,ecx; ret`) to be redirected |
 | 0x006C7160 | Room queue `FUN_006c7160` thiscall(treeLevel, roomId) | `83 EC 2C 53 55 56 33 DB 8B F1` (Fail otherwise) |
 | 0x006BE18C | Street lamp colour in the lot solve (experimental) | `0F 28 86 E0 00 00 00` |

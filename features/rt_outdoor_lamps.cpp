@@ -75,9 +75,8 @@ constexpr uint64_t kGameWriteGapMs = 500; // a relight made only for a game writ
 // (2.15.1) A lamp lying on the lot's ground (its light 5 cm over the lawn, 21/10 F8 17-26-36) lit a tree above it and left the
 // lawn dark: the law's light falls with its angle of incidence, and from 5 cm the lawn 2 m away takes about 1 % of what it
 // would from above. On story 0's floor map a lamp whose light stands lower than kLowLampLift over the lot's ground is
-// drawn from that height, as a fixture's glow would spread; walls, ceilings, objects and trees keep its real place.
-constexpr float kLowLampLift = 0.4f;
-std::atomic<bool> g_lowLampLift{true}; // developer A/B
+// drawn from that height, as a fixture's glow would spread; walls, ceilings, objects and trees keep its real place. The
+// terrain bake stamps it from the same height (TerrainBakeRule::StampHeight), so the lawn beyond the lot and the atlas agree.
 std::atomic<long> g_lowLampLifted{0};
 constexpr double kFrameCpuMs = 2.0;      // a frame's relight work stops starting maps past this (the rest next frame)
 constexpr double kFrameWork = 1.0e6;     // ... or past this many units (texel x lamp: 7 exact, 1 dragged; about 2 ns of GPU each, tools/rt_lamps_test)
@@ -603,6 +602,8 @@ struct UnderJob {
 uint64_t UnderSig(uint64_t bakeSig, float base) {
     uint64_t h = bakeSig;
     Mix(h, &base, sizeof base);
+    const bool lift = TerrainBakeRule::LowLampLift(); // the stamps' heights (BakeStamp)
+    Mix(h, &lift, sizeof lift);
     return h;
 }
 // The keys of a story's baked lamps: the light and its place among that light's entries (a lamp listed twice stamps twice)
@@ -858,8 +859,8 @@ struct BakeLampW {
 
 } // namespace
 
-bool LowLampLift() { return g_lowLampLift.load(std::memory_order_relaxed); }
-void SetLowLampLift(bool on) { g_lowLampLift.store(on, std::memory_order_relaxed); }
+bool LowLampLift() { return TerrainBakeRule::LowLampLift(); }
+void SetLowLampLift(bool on) { TerrainBakeRule::g_lowLampLift.store(on, std::memory_order_relaxed); }
 long LowLampLifted() { return g_lowLampLifted.load(std::memory_order_relaxed); }
 
 void SetEnabled(bool on) {
@@ -1619,13 +1620,13 @@ void Frame(IDirect3DDevice9* dev) {
             }
             RtLampModel::Lamp l = g.lamp;
             l.mult = static_cast<float>(g.mult[s.story]);
-            if (s.story == 0 && s.m == 1 && g_lowLampLift.load(std::memory_order_relaxed)) {
+            if (s.story == 0 && s.m == 1 && TerrainBakeRule::LowLampLift()) {
                 // the lot's ground in lot space (its base is world y; lots turn about y only)
                 const float base[3] = {0.0f, rns[0].lotBase, 0.0f};
                 float baseLot[3];
                 ToLot(rns[0].xf, base, baseLot);
-                const float least = baseLot[1] + kLowLampLift;
-                if (std::isfinite(least) && l.law.pos[1] < least && l.law.pos[1] > baseLot[1] - 0.5f) {
+                const float least = baseLot[1] + TerrainBakeRule::kLowLampLift;
+                if (std::isfinite(least) && l.law.pos[1] < least && l.law.pos[1] > baseLot[1] - TerrainBakeRule::kLowLampBelow) {
                     l.law.pos[1] = least;
                     g_lowLampLifted.fetch_add(1, std::memory_order_relaxed);
                 }

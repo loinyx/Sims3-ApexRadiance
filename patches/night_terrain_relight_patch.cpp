@@ -489,6 +489,73 @@ __declspec(naked) void BakeColourStub() {
     }
 }
 
+// (2.15.1) Low lamps on the ground: the bake copies each light's position (vfunc+0x24) into its shader parameter at 0xC294F7
+// ("movaps xmm0,[eax]; movaps [esi+110h],xmm0", EAX = the position, EDI = the light, ESI = the bake). The stub copies it and,
+// for a lot lamp whose light stands lower than TerrainBakeRule::kLowLampLift over its lot's ground, stamps it from that height
+// (TerrainBakeRule::StampHeight; the lot's ground from LotLightBridge::LotGroundY): a lamp lying on the lawn (light 5 cm up)
+// lit only a tree above it, the lawn 2 m away took about 1 % of what a lamp 40 cm up gives it. The world grass, the lot edges,
+// snow and the atlas then agree with the lot's own floor map (RtOutdoorLamps). EAX, ECX, EDX and the flags are dead there
+// (written at 0xC29501, 0xC29508, 0xC2951D); xmm0 is loaded again at 0xC2950F; xmm1..7 are kept for the game.
+uintptr_t kBakePosSite = 0; // 0x00C294F7 = BakeColourSite - 0x18
+constexpr uintptr_t kBakePosBeforeColour = 0x18;
+const std::vector<BYTE> kBakePosOrig = {0x0F, 0x28, 0x00, 0x0F, 0x29, 0x86, 0x10, 0x01, 0x00, 0x00};
+bool g_bakePosInstalled = false;
+bool g_lowLiftSeen = true; // TerrainBakeRule::LowLampLift() as the last rebuild had it
+std::atomic<long> g_bakeLowLifted{0};
+bool ReadLightLot(const BYTE* light, int& type, uint64_t& lot) {
+    __try {
+        type = *reinterpret_cast<const int*>(light + 0xB0);
+        lot = *reinterpret_cast<const uint32_t*>(light + 0xC0) | static_cast<uint64_t>(*reinterpret_cast<const uint32_t*>(light + 0xC4)) << 32;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+void __cdecl BakeLiftHead(const BYTE* light, float* head) {
+    int type = 0;
+    uint64_t lot = 0;
+    if (!TerrainBakeRule::LowLampLift() || !ReadLightLot(light, type, lot) || !lot || !TerrainBakeRule::LotLampType(type)) return;
+    float ground = 0.0f;
+    if (!LotLightBridge::LotGroundY(lot, ground)) return;
+    const float h = head[1] - ground, s = TerrainBakeRule::StampHeight(h);
+    if (std::isfinite(s) && s != h) {
+        head[1] = ground + s;
+        g_bakeLowLifted.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+__declspec(naked) void BakePosStub() {
+    __asm {
+        movaps xmm0, xmmword ptr [eax]
+        movaps xmmword ptr [esi+0x110], xmm0
+        mov edx, dword ptr [edi+0xC0]
+        or edx, dword ptr [edi+0xC4]
+        jz street                              // a street lamp: as the game
+        sub esp, 112
+        movups xmmword ptr [esp], xmm1
+        movups xmmword ptr [esp+16], xmm2
+        movups xmmword ptr [esp+32], xmm3
+        movups xmmword ptr [esp+48], xmm4
+        movups xmmword ptr [esp+64], xmm5
+        movups xmmword ptr [esp+80], xmm6
+        movups xmmword ptr [esp+96], xmm7
+        lea eax, [esi+0x110]
+        push eax
+        push edi
+        call BakeLiftHead
+        add esp, 8
+        movups xmm1, xmmword ptr [esp]
+        movups xmm2, xmmword ptr [esp+16]
+        movups xmm3, xmmword ptr [esp+32]
+        movups xmm4, xmmword ptr [esp+48]
+        movups xmm5, xmmword ptr [esp+64]
+        movups xmm6, xmmword ptr [esp+80]
+        movups xmm7, xmmword ptr [esp+96]
+        add esp, 112
+    street:
+        ret
+    }
+}
+
 // A menu slider is being dragged right now (then the values that cost a rebuild wait for its release). Safe from the
 // Present hook: false without an ImGui context or with the menu hidden (its frame count stops while it is hidden).
 bool MenuSliderHeld() { return ImGui::GetCurrentContext() && Overlay::IsVisible() && ApexUi::SliderDragging(); }
@@ -1655,6 +1722,10 @@ void OnPresent() {
         SetBakeGains(g_streetLampGain, g_lotLampGain);
         NoteEdit(now, true, true, "lamp brightness on the ground changed", true);
     }
+    if (g_bakePosInstalled && TerrainBakeRule::LowLampLift() != g_lowLiftSeen) {
+        g_lowLiftSeen = TerrainBakeRule::LowLampLift();
+        NoteEdit(now, true, true, "height of lamps on the ground changed", true);
+    }
     const float tintLot = g_lotTintOwn ? g_lotLampTint : g_lampTint;
     if (!dragging && (g_lampTint != g_tintSeen[0] || tintLot != g_tintSeen[1])) {
         g_tintSeen[0] = g_lampTint;
@@ -2212,6 +2283,18 @@ class NightTerrainRelightPatch : public ApexPatch {
             g_bakeGainInstalled = MemPatch::WriteBytes(kBakeColourSite, bakeBytes, &patchedLocations, &kBakeColourOrig);
             if (g_bakeGainInstalled) FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(kBakeColourSite), kBakeColourOrig.size());
         }
+        // Low lamps on the ground (optional: without it the bake stamps them from their real height)
+        g_bakePosInstalled = false;
+        kBakePosSite = kBakeColourSite ? kBakeColourSite - kBakePosBeforeColour : 0;
+        if (g_bakeGainInstalled && MemPatch::ValidateBytes(reinterpret_cast<LPVOID>(kBakePosSite), kBakePosOrig.data(), kBakePosOrig.size())) {
+            // call BakePosStub; nop x5
+            const auto posBytes = CallPatch(kBakePosSite, 0, {}, reinterpret_cast<void*>(&BakePosStub), kBakePosOrig.size());
+            g_bakePosInstalled = MemPatch::WriteBytes(kBakePosSite, posBytes, &patchedLocations, &kBakePosOrig);
+            if (g_bakePosInstalled) FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(kBakePosSite), kBakePosOrig.size());
+        }
+        g_lowLiftSeen = TerrainBakeRule::LowLampLift();
+        if (g_bakePosInstalled) LOG_INFO("[NightTerrainRelight] Terrain bake: lot lamps on the ground are stamped from 40 cm over their lot's ground");
+        else LOG_WARNING("[NightTerrainRelight] Terrain bake position code differs or was not found: lamps on the ground light the lawn from their real height");
         LevelLightShare::SetBakeConeSpill(g_bakeGainInstalled && g_bakeConeSpill);
         if (g_bakeGainInstalled && g_bakeConeSpill) LOG_INFO("[NightTerrainRelight] Terrain bake: lamps with cones (type 5) are stamped at their spill");
         if (!g_bakeGainInstalled) LOG_WARNING("[NightTerrainRelight] Terrain bake colour code differs or was not found: street / lot lamp brightness on the ground not available");
@@ -2442,6 +2525,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         patchedLocations.clear();
         g_chunkHookInstalled = false;
         g_bakeGainInstalled = false;
+        g_bakePosInstalled = false;
         LevelLightShare::SetBakeConeSpill(false);
         // The chunk re-render call is the game's own again: a local relight in progress is dropped (the chunk in flight, if
         // any, is rendered by the game at its next update). Its lamps were never marked as baked: the change is decided
@@ -3069,9 +3153,10 @@ class NightTerrainRelightPatch : public ApexPatch {
         if (ApexUi::Checkbox("Soft lot edges (A/B: off = plain max of lot and ground light)", &g_softLotEdges)) NotifySettingChanged();
         if (ApexUi::Checkbox("Moon height at night (A/B: off = the game's moon on the horizon)", &g_moonLift)) ObjectLightBridge::RequestRigRefresh();
         bool lowLamp = RtOutdoorLamps::LowLampLift();
-        if (ApexUi::Checkbox("Lamps on the ground light the lawn from 40 cm (A/B: off = from their real 5 cm, Instant only)", &lowLamp)) RtOutdoorLamps::SetLowLampLift(lowLamp);
+        if (ApexUi::Checkbox("Lamps on the ground light the lawn from 40 cm (A/B: off = from their real 5 cm)", &lowLamp)) RtOutdoorLamps::SetLowLampLift(lowLamp);
         ImGui::SameLine();
-        ImGui::TextDisabled("%ld lamp draws lifted", RtOutdoorLamps::LowLampLifted());
+        ImGui::TextDisabled("%ld Instant draws, %ld terrain stamps lifted%s", RtOutdoorLamps::LowLampLifted(), g_bakeLowLifted.load(std::memory_order_relaxed),
+                            g_bakePosInstalled ? "" : " (terrain bake: not installed)");
         if (g_moonLift) {
             ImGui::SetNextItemWidth(220.0f);
             if (ImGui::SliderFloat("Least moon height (degrees)##MoonHeight", &g_moonHeightDeg, 5.0f, 60.0f, "%.0f") && !ApexUi::SliderDragging())

@@ -14,6 +14,7 @@
 #include <vector>
 #include "wall_openings.h"
 #include "foliage_canopy.h"
+#include "terrain_bake_rule.h"
 
 namespace GroundShadow {
 
@@ -102,7 +103,7 @@ inline bool FloorShadeRows(const Grid& g, float xzScale, bool on, float rows[12]
 
 // The stamp's weight of a lamp at a ground point (x, groundY, z)
 inline float Weight(const Lamp& L, float x, float groundY, float z) {
-    const float h = std::max(L.y - groundY, kMinHead);
+    const float h = std::max(TerrainBakeRule::StampHeight(L.y - groundY), kMinHead); // a lamp on the lawn: as the bake stamps it
     const float dx = L.x - x, dz = L.z - z;
     const float d2 = dx * dx + dz * dz + h * h;
     const float cosv = h / std::sqrt(d2);
@@ -111,7 +112,7 @@ inline float Weight(const Lamp& L, float x, float groundY, float z) {
 
 // How far (horizontal metres) the lamp's stamp weighs at least kMinWeight: k h / d^3 >= kMinWeight
 inline float Reach(const Lamp& L, float groundY) {
-    const float h = std::max(L.y - groundY, kMinHead);
+    const float h = std::max(TerrainBakeRule::StampHeight(L.y - groundY), kMinHead);
     if (!(L.k > 0.0f) || !std::isfinite(L.k)) return 0.0f;
     return std::min(std::cbrt(L.k * h / kMinWeight), kMaxReach);
 }

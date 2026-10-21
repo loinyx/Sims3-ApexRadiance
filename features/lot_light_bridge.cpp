@@ -460,6 +460,7 @@ struct LotRect {
     uint32_t lotLo, lotHi;
     float m2 = 0, m10 = 1;  // the rotation's other terms (world.z = m2 lx + m10 lz + tz; VS c10.x, c10.z)
     float ty = 0;           // the lot's origin height (m13): its ground for the lamp shade (GroundShadow)
+    float base = 0;         // the lot base (its story's manager +0xD4, world y): the ground low lamps are measured from
 };
 std::vector<LotRect> g_lotRects;
 std::atomic<bool> g_softEdges{true};
@@ -542,6 +543,8 @@ int ReadLotRects(LotRect* out, int max) {
                 r.m2 = m[2];
                 r.m10 = m[10];
                 r.ty = m[13];
+                r.base = *reinterpret_cast<const float*>(mgr + 0xD4);
+                if (!std::isfinite(r.base)) r.base = r.ty;
                 if (std::isfinite(r.tx) && std::isfinite(r.tz) && std::isfinite(r.m0) && std::isfinite(r.m8) && std::isfinite(r.m2) && std::isfinite(r.m10) && std::isfinite(r.ty)) n++;
                 break; // one story per lot is enough
             }
@@ -8304,6 +8307,23 @@ std::string LotLampStatus() {
 }
 
 const BakeSnapshot& CurrentBakeLamps() { return g_bakeSnap; }
+bool LotGroundY(uint64_t lot, float& y) {
+    auto find = [&]() {
+        for (const LotRect& r : g_lotRects)
+            if ((static_cast<uint64_t>(r.lotHi) << 32 | r.lotLo) == lot) {
+                y = r.base;
+                return true;
+            }
+        return false;
+    };
+    if (!lot || find()) return lot != 0;
+    // a lot the table does not hold yet (it streamed in since the last refresh): read the lots again, once a frame
+    static DWORD missTick = ~0u;
+    if (missTick == g_lotDrawTick.load()) return false;
+    missTick = g_lotDrawTick;
+    RefreshLotRects();
+    return find();
+}
 int LampEnumerations() { return g_lampEnumerations; }
 const std::vector<uint64_t>& LastUserChangeLots() { return g_lastUserLots; }
 void RequestLampRefresh() { g_lampRefreshNow = true; }

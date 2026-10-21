@@ -105,6 +105,18 @@ points away from, and the bake stamps a light all round from its position, so `B
 The floor gate (`LevelLightShare::InTerrainBake`) and the GPU lamps' under-floor share (`RtOutdoorLamps`) use the same rule
 (`features/terrain_bake_rule.h`). The stamp keeps the bake's point law (distance to the light's position, not to its area).
 
+**Low lamps (2.15.1).** A lamp lying on the lawn (its light 5 cm up, F8 of 21/10 20-39-09: Build mode, the game's own lot
+map) lit only a tree above it: the stamp's law `2 w cos / d^2` gives the lawn 2 m away about 1 % of what a lamp 40 cm up
+gives it. `BakePosStub` replaces the copy of the light's position into its shader parameter at `0x00C294F7`
+(`0F 28 00 0F 29 86 10 01 00 00`, `movaps xmm0,[eax]; movaps [esi+110h],xmm0`, 0x18 bytes before the colour site, checked
+at install) with `call BakePosStub; nop x5`: it makes the same copy and, for a lot lamp (lot id != 0, types 3..6, 9, 10)
+whose light stands less than 40 cm over its lot's ground and not 0.5 m under it, stamps it from 40 cm
+(`TerrainBakeRule::StampHeight`; the ground is the lot base, manager `+0xD4`, from the soft lot edges' table,
+`LotLightBridge::LotGroundY`, read again once a frame for a lot it lacks). EAX, ECX, EDX and the flags are dead there; xmm1..7
+are kept. The world grass, the atlas, snow (atlas x 4), the soft lot edge and Classic then agree with Instant's lifted floor
+map. Optional (a warning if the bytes differ); the developer A/B is a switch edit (one rebuild). Shows after the next
+terrain rebuild of the lamp's chunks (placing or moving a lamp rebuilds them).
+
 ## Limitations
 
 - Basement lamps and lot lights other than outdoor lamps (types 3..6, the area lights 9 and 10 since 2.15.1, and lot-owned

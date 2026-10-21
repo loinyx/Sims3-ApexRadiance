@@ -393,7 +393,7 @@ refused". If "on the ground" grows while "lot lamps" stays 0, lamps are lost bet
 | `0x00C29480..0x00C294C8` | Bake: per light, rect `light->vfunc2C()` (= light+0x134) tested against the chunk bake rect | full.asm |
 | `0x006BC020` | `BaseLight::GetLotID()`: returns `+0xC0/+0xC4` (64-bit lot id) | re/out report.txt; split_level_lighting_fix pattern `8B 81 C0 00 00 00 8B 91 C4 00 00 00 C3` |
 | `0x00C294D9` | **Story gate**: `cmp dword [edi+0D0h],0` (7 bytes) followed by `jnz 0x00C295BC` at `0x00C294E0`; reached only when lot id != 0 (`or eax,edx; je 0x00C294E6` at `0x00C294D5`) | full.asm; night_terrain_relight `kBakeLevelOrig`, `kBakeLevelBefore` (at `0xC294CE`), `kBakeLevelAfter` |
-| `0x00C294F5` | Light position (vfunc+0x24) → bake+0x110 → shader parameter bake+0xF0 | full.asm |
+| `0x00C294F5` | Light position (vfunc+0x24) → bake+0x110 → shader parameter bake+0xF0. The copy at `0x00C294F7` (`movaps xmm0,[eax]; movaps [esi+110h],xmm0`) is Apex's `BakePosStub` since 2.15.1 (low lamps) | objdump of TS3W.exe 1.67.2 |
 | `0x00C2950F..0x00C29533` | Light colour `+0xF0` → bake+0x120; `.w = vfunc+0x28() (= +0x130 range) × intensity.x (+0x10) × [0x00FAA20C]` | full.asm; `0x00FAA20C` = `3E4CCCCD` = 0.2 (dwords.txt) |
 | `0x0079A300` | Draw call of one light pass (after `0x00799CF0` set parameter bake+0xF4) | full.asm `00C295B7` |
 | `0x006BDDF0` | Sets the light rect `+0x134..+0x140` = position `+0x120`/`+0x128` ± `sqrt(+0x130 / (k1 × [0x011D1180].x))`, k1 read from `0x011D0A60` through the tweakable getter `0x00F626F0` | full.asm `006BDDF0..DE8A` |

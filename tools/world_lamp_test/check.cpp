@@ -34,6 +34,12 @@ int main() {
     check(TerrainBakeRule::AreaGroundShare(1.0f) == 1.0f && TerrainBakeRule::AreaGroundShare(0.0f) == 0.5f &&
           TerrainBakeRule::AreaGroundShare(-1.0f) == 0.0f && TerrainBakeRule::AreaGroundShare(2.0f) == 1.0f);
     check(TerrainBakeRule::AreaGroundShare(std::nanf("")) == 0.0f);
+    // (2.15.1) low lamps: stamped from 40 cm over their lot's ground, not under it past 0.5 m, unchanged with the A/B off
+    check(TerrainBakeRule::StampHeight(0.05f) == 0.4f && TerrainBakeRule::StampHeight(-0.2f) == 0.4f && TerrainBakeRule::StampHeight(0.4f) == 0.4f);
+    check(TerrainBakeRule::StampHeight(1.8f) == 1.8f && TerrainBakeRule::StampHeight(-0.6f) == -0.6f && std::isnan(TerrainBakeRule::StampHeight(std::nanf(""))));
+    TerrainBakeRule::g_lowLampLift = false;
+    check(TerrainBakeRule::StampHeight(0.05f) == 0.05f);
+    TerrainBakeRule::g_lowLampLift = true;
     check(TerrainBakeRule::AreaType(9) && TerrainBakeRule::AreaType(10) && !TerrainBakeRule::AreaType(7) && !TerrainBakeRule::AreaType(11));
     std::printf("World lamp policy: %d checks, %d failures\n", checks, failed);
     return failed ? 1 : 0;

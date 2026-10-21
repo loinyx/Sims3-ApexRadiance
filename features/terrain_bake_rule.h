@@ -3,6 +3,7 @@
 // mirrors LevelLightShare::InTerrainBake, RtOutdoorLamps InTerrainBake, LotLightBridge's lamp list) and how much of an area
 // light reaches the ground (BakeColourStub and the same mirrors). One rule, so the ground, the floor gate and the GPU lamps'
 // under-floor share agree.
+#include <atomic>
 
 namespace TerrainBakeRule {
 
@@ -21,5 +22,17 @@ inline float AreaGroundShare(float axisY) {
     return s > 0.0f ? (s < 1.0f ? s : 1.0f) : 0.0f; // (a NaN axis gives 0)
 }
 constexpr int kAreaAxisYOffset = 0x184; // +0x180 is the third axis (x, y, z)
+
+// (2.15.1) Low lamps. A lamp lying on the lawn (its light 5 cm over the grass, 21/10 F8 17-26-36) lit a tree above it and left
+// the lawn dark: the stamp's law (2 w cos / d^2) and the room law fall with the angle of incidence, and from 5 cm the lawn 2 m
+// away takes about 1 % of what it would from above. A lot lamp whose light stands less than kLowLampLift over its lot's ground
+// (and not kLowLampBelow under it: a lamp in a basement) is stamped from kLowLampLift: the terrain bake (BakePosStub), its
+// mirrors (LevelLightShare::UnderFloorShare, RtLampModel::BakeStamp, GroundShadow::Weight) and Instant's story-0 floor map
+// (RtOutdoorLamps). Walls, ceilings, objects and trees keep its real place. Developer A/B: off = the real height everywhere.
+constexpr float kLowLampLift = 0.4f, kLowLampBelow = 0.5f;
+inline std::atomic<bool> g_lowLampLift{true};
+inline bool LowLampLift() { return g_lowLampLift.load(std::memory_order_relaxed); }
+// The height over its lot's ground (h, metres) a lot lamp's light is stamped from
+inline float StampHeight(float h) { return h < kLowLampLift && h > -kLowLampBelow && LowLampLift() ? kLowLampLift : h; }
 
 } // namespace TerrainBakeRule

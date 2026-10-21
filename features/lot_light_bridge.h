@@ -41,6 +41,8 @@ struct BakeSnapshot {
     std::vector<uint64_t> lots;        // every lot with a tracked lamp (sorted)
 };
 const BakeSnapshot& CurrentBakeLamps();
+// (2.15.1) The ground (lot base, world y) of a lot the soft lot edges' table holds; render thread (the terrain bake's low lamps)
+bool LotGroundY(uint64_t lot, float& y);
 // What differs in the bake between two snapshots: only on lots settled in `now` that were already in `baked` (lots that
 // streamed in later were never baked, and streaming never rebuilds). Lamps are matched by type and place (5 cm), not by
 // pointer. Light changes under 5 % per channel are noise; animated lamps are counted apart and never make Any() true.
