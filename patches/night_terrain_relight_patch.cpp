@@ -3068,16 +3068,11 @@ class NightTerrainRelightPatch : public ApexPatch {
         }
         if (ApexUi::Checkbox("Soft lot edges (A/B: off = plain max of lot and ground light)", &g_softLotEdges)) NotifySettingChanged();
         if (ApexUi::Checkbox("Moon height at night (A/B: off = the game's moon on the horizon)", &g_moonLift)) ObjectLightBridge::RequestRigRefresh();
-        bool roadBias = LotLightBridge::RoadBiasFix();
-        if (ApexUi::Checkbox("Road pieces win over their own depth pass (A/B: off = the terrain's snow shows through in their shape)", &roadBias))
-            LotLightBridge::SetRoadBiasFix(roadBias);
-        if (roadBias) {
-            float scale = LotLightBridge::RoadBiasScale();
-            ImGui::SetNextItemWidth(220.0f);
-            if (ImGui::SliderFloat("Road depth bias scale##RoadBias", &scale, 1.0f, 32.0f, "x%.0f")) LotLightBridge::SetRoadBiasScale(scale);
-            ImGui::SameLine();
-            ImGui::TextDisabled("%ld road draws raised", LotLightBridge::RoadBiasRaised());
-        }
+        bool roadSnow = LotLightBridge::RoadSnowDepth();
+        if (ApexUi::Checkbox("Snowy road pieces keep their shape (A/B: off = the terrain's snow shows through in holes)", &roadSnow))
+            LotLightBridge::SetRoadSnowDepth(roadSnow);
+        ImGui::SameLine();
+        ImGui::TextDisabled("%ld draws", LotLightBridge::RoadSnowDepthDrawn());
         if (g_moonLift) {
             ImGui::SetNextItemWidth(220.0f);
             if (ImGui::SliderFloat("Least moon height (degrees)##MoonHeight", &g_moonHeightDeg, 5.0f, 60.0f, "%.0f") && !ApexUi::SliderDragging())

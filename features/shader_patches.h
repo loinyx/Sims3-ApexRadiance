@@ -23,6 +23,12 @@ struct RoadPatch {
 };
 // shade (15/10): also "texld rT, v1, s<E+1>; mul rX.xyz, rX, rT.x" after the max, the walls' shade on the lamp light around lots
 bool PatchRoad(std::vector<DWORD>& t, RoadPatch& out, bool shade = false);
+// (2.15.1) Snowy road pieces over the terrain: the game's depth pass lifts every vertex by the snow height, the colour pass
+// lifts each one by that height times its own weight ("mad rY.y, rS.w, rF.w, rP.y", the snow thinning toward a piece's
+// edges), so where the weight is under 1 the colour lay under the depth just written and was refused: holes in the shape
+// of the weights. In the colour vertex shader the position keeps its shape on screen and its depth is taken from the
+// higher of the lifted vertex and the uniformly lifted one (rP.y + rS.w), as the depth pass has it.
+bool PatchRoadSnowDepthVs(std::vector<DWORD>& t);
 
 // World terrain chunks: an exclusive cK.x lamp-map multiplier, either linear or
 // squared through a scalar temporary. Unknown/shared layouts return -1.
