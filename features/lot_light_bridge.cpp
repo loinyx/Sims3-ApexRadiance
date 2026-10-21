@@ -4641,7 +4641,9 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
     // cleared map made every crown in view pick again in the same frame)
     if (g_foliageInstances.size() > 16384) {
         std::erase_if(g_foliageInstances, [now](const auto& p) { return now - p.second.seen > 3000; });
-        if (g_foliageInstances.size() > 16384) g_foliageInstances.clear();
+        // still over: the ones not drawn for 250 ms go (a cleared map on every draw made each instance pick again urgently)
+        if (g_foliageInstances.size() > 16384) std::erase_if(g_foliageInstances, [now](const auto& p) { return now - p.second.seen > 250; });
+        if (g_foliageInstances.size() > 32768) g_foliageInstances.clear();
     }
     if (g_foliageOrigin.load(std::memory_order_relaxed) == 1) CorrectFoliageEye(c, count, mesh, eye, now);
     // At most 96 instances pick their lamps again per 8 ms (a new lamp list, as at dusk, re-picks every crown in view) and
@@ -6072,14 +6074,14 @@ IDirect3DVertexShader9* FoliageVertexVsFor(IDirect3DDevice9* dev, IDirect3DVerte
         if (!code.empty() && FoliageVertexLamps::Patch(t, b) && SUCCEEDED(dev->CreateVertexShader(reinterpret_cast<const DWORD*>(t.data()), &f.perVertex))) f.perVertexBase = b;
         else f.perVertex = nullptr;
         // a refused shader (the wrap copy the patch read: FNV-1a, size), kept once in Apex Radiance\Censo as a fixture for the
-        // offline check (tools/foliage_vertex_test)
+        // offline check (tools/foliage_vertex_test); development builds only
         std::string refused;
         if (!f.perVertex) {
             uint32_t h = 2166136261u;
             for (DWORD d : code) h = (h ^ d) * 16777619u;
             const size_t bytes = code.size() * sizeof(DWORD);
             refused = std::format("not of the captured family ({}): left as before; code VS_{:08X} ({} bytes)", code.empty() ? "no wrap copy" : FoliageVertexLamps::LastRefusal(), h, bytes);
-            try {
+            if (DevSwitches::kCompiled) try {
                 const std::filesystem::path dir = std::filesystem::path(ApexPaths::ApexDirectory()) / L"Censo";
                 const std::filesystem::path file = dir / std::format("foliage_VS_{:08X}.bin", h);
                 if (!code.empty() && !std::filesystem::exists(file)) {

@@ -26,6 +26,7 @@ No repository harness covers `PatchFoliageVs` and `PatchLeafShadow`.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-20 | Working tree on `c22e8d7`, foliage code as in `3e0b6ad` | `tools/foliage_vertex_test/` | 28 checks passed; the trees' own lamps by the inverse square: a street lamp 5 m from a crown gives 0.425, 9 m 0.042, 11 m 0; the red lantern's crown stays 0 | Native D3D9 |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/foliage_vertex_test/` with `-Precomp` | 26 checks passed; `PatchTreeSunShadow` over the 8,011 pixel shaders of `Shaders_Win32.precomp`: 16 tree shaders, the 8 without a shadow patched and loading in D3D9, the 8 with one left alone, nothing else touched | Native D3D9 |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/foliage_vertex_test/` | 24 checks passed; adds `EyeAnchors`: a drift of (0.8, -0.1, -0.6) m between the read and the game's eye comes back within 1 mm; another mesh, a place 9 m away and instances that disagree give no offset | Native D3D9 |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/foliage_vertex_test/` | 19 checks passed; own lamps (`SlotConstants`, `KeepBrightest`, `BoxDistance2`): a red lantern of 6.3 m reach 13.7 m from a bare crown leaves it unlit (brightest 0) and equals the per-pixel lamps' law; a warm post (intensity 3.4) next to a leaf gives (1, 0.81, 0.56), hue kept; the three brightest kept in order; per-vertex max relative error 2.75e-07 | Native D3D9 |
@@ -50,9 +51,11 @@ No repository harness covers `PatchFoliageVs` and `PatchLeafShadow`.
 
 - Moon-shadow fix on planter hedges (combined build, 2026-09-24).
 - Wrap lighting and the winter variants installed (combined build, 2026-09-25).
+- Street lamps light the side of nearby crowns facing them, and lamp edits reach the trees without the earlier 1-2 s wait (2.14.0 public test build, 2026-10-20). Log: 5,583 picks made again in 4 minutes at night, about 20 to 60 per second.
 
 ## Open checks
 
+- Release review of `3e0b6ad`: during a lamp edit hold the trees take the outdoor lamps at once, but an indoor lamp shining out of a window reaches them only after the hold (its rows are rebuilt with the hold); every instance also picks again every 1.5 s at night within the budget.
 - Summer plants and flowers remain darker than the lit ground next to them (m79: rig 0.62 / 0.55 / 0.49).
 - Plant 2 (m65): a new F7 on that plant is needed to study its texture multiply (F7 now decodes DXT1/3/5).
 - Per-vertex lamps in game: whether a crown with a lamp at its foot looks darker than before, and the trunk near the lamp.
@@ -64,7 +67,7 @@ No repository harness covers `PatchFoliageVs` and `PatchLeafShadow`.
   the lower crown facing the lamp, fading upwards, the top dark. Log `[Foliage] ... instances by their own lamps: N with
   none, N with 1, N with 2, N with 3 (N without a crown shape); lamps left out by walls: N`, and any `not of the captured
   family (reason)` line with its `Censo\foliage_VS_*.bin`.
-- Dusk with many trees in view: no hitch while every crown picks its lamps again (96 per 8 ms).
+- Dusk with many trees in view: no hitch while every crown picks its lamps again (96 per 8 ms). Release review: a lamp whose colour or intensity changes (dusk fade, an animated fire) makes every instance within 20 m pick again at once, outside that budget; measure the picks per second and the frame time at dusk before changing it.
 - Day, sun low: trees beside a house and trees side by side. **Expected:** the house's and the neighbour's shadow on the
   crown, the far side of a crown darker than the sunny side, never black (the floor 0.25); no speckle on the leaves (if
   there is: the depth bias); FPS within noise of `foliage_sun_shadow = false`. Log `[Foliage] Sun shadow map seen: NxN`,

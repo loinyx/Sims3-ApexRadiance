@@ -10320,6 +10320,8 @@ void ClearRoomMeasures() { // MaybeClearRooms (a new world): gather thread
     g_normEnd.clear();
     g_normUsed.clear();
     t_normUsedRoom = nullptr;
+    std::lock_guard<std::mutex> lk(g_normResendMx); // resends of the rooms of the world that left (a reused tracker address)
+    g_normResend.clear();
 }
 // A value that is not finite becomes 1; for borrowed_light_adapt and room_fill such a room counts as one whose game value is
 // over 1 (inf: the lamps all blocked), so it still takes the adapted value and the fill. Without either switch a value of at
