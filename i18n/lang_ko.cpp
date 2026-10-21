@@ -23,7 +23,6 @@ const I18n::Pair kPairs[] = {
     {"Area lights of a lot light the ground past the lot's border", "부지의 영역 조명이 부지 경계 밖의 땅도 비춥니다"},
     {"Lamps hidden behind objects no longer reflect on water", "물체 뒤에 가려진 램프가 더 이상 물에 비치지 않습니다"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "달이 더 높은 곳에서 마을을 비춰 밤에 도로에 어두운 줄무늬가 더 이상 생기지 않습니다"},
-    {"Snowy roads and sidewalks no longer show holes in the shape of road pieces", "눈 덮인 도로와 인도에 더 이상 도로 조각 모양의 구멍이 생기지 않습니다"},
     {"Moonlight is softer by default and in every preset", "달빛이 기본값과 모든 프리셋에서 더 부드러워졌습니다"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "부지 조명이 계속 다시 계산되는 동안 즉시 램프 조명의 작업이 줄었습니다"},
     {"Options on by default for several versions no longer show an Experimental badge", "여러 버전 동안 기본으로 켜져 있던 옵션에 더 이상 실험적 배지가 표시되지 않습니다"},

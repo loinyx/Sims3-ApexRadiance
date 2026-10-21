@@ -23,7 +23,6 @@ const I18n::Pair kPairs[] = {
     {"Area lights of a lot light the ground past the lot's border", "Vlakverlichting van een kavel verlicht de grond voorbij de kavelrand"},
     {"Lamps hidden behind objects no longer reflect on water", "Lampen achter objecten weerspiegelen niet meer in het water"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "De maan verlicht de stad van hoger: geen donkere strepen meer op de wegen 's nachts"},
-    {"Snowy roads and sidewalks no longer show holes in the shape of road pieces", "Besneeuwde wegen en stoepen tonen geen gaten meer in de vorm van wegstukken"},
     {"Moonlight is softer by default and in every preset", "Maanlicht is standaard en in elke voorinstelling zachter"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Direct lamplicht doet minder werk terwijl een kavel steeds opnieuw wordt verlicht"},
     {"Options on by default for several versions no longer show an Experimental badge", "Opties die al meerdere versies standaard aan staan, tonen geen Experimenteel-label meer"},

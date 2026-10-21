@@ -23,7 +23,6 @@ const I18n::Pair kPairs[] = {
     {"Area lights of a lot light the ground past the lot's border", "Le luci d'area di un lotto illuminano il terreno oltre il bordo del lotto"},
     {"Lamps hidden behind objects no longer reflect on water", "Le lampade nascoste dietro gli oggetti non si riflettono più sull'acqua"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "La luna illumina la città dall'alto: niente più strisce scure sulle strade di notte"},
-    {"Snowy roads and sidewalks no longer show holes in the shape of road pieces", "Strade e marciapiedi innevati non mostrano più buchi a forma di tratti di strada"},
     {"Moonlight is softer by default and in every preset", "La luce della luna è più tenue per impostazione predefinita e in ogni preimpostazione"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "La luce Istantanea delle lampade lavora meno mentre un lotto viene illuminato di continuo"},
     {"Options on by default for several versions no longer show an Experimental badge", "Le opzioni attive per impostazione predefinita da diverse versioni non mostrano più l'etichetta Sperimentale"},

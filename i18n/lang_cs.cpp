@@ -23,7 +23,6 @@ const I18n::Pair kPairs[] = {
     {"Area lights of a lot light the ground past the lot's border", "Plošná světla pozemku osvětlují zem i za hranicí pozemku"},
     {"Lamps hidden behind objects no longer reflect on water", "Lampy skryté za předměty se už neodrážejí ve vodě"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Měsíc osvětluje město z větší výšky: v noci už na silnicích nejsou tmavé pruhy"},
-    {"Snowy roads and sidewalks no longer show holes in the shape of road pieces", "Zasněžené silnice a chodníky už nemají díry ve tvaru kusů silnice"},
     {"Moonlight is softer by default and in every preset", "Měsíční světlo je ve výchozím stavu i ve všech předvolbách jemnější"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Okamžité světlo lamp pracuje méně, když se pozemek stále znovu osvětluje"},
     {"Options on by default for several versions no longer show an Experimental badge", "Možnosti zapnuté ve výchozím stavu už několik verzí nemají štítek Experimentální"},

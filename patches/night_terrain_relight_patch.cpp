@@ -3068,11 +3068,6 @@ class NightTerrainRelightPatch : public ApexPatch {
         }
         if (ApexUi::Checkbox("Soft lot edges (A/B: off = plain max of lot and ground light)", &g_softLotEdges)) NotifySettingChanged();
         if (ApexUi::Checkbox("Moon height at night (A/B: off = the game's moon on the horizon)", &g_moonLift)) ObjectLightBridge::RequestRigRefresh();
-        bool roadSnow = LotLightBridge::RoadSnowDepth();
-        if (ApexUi::Checkbox("Snowy road pieces keep their shape (A/B: off = the terrain's snow shows through in holes)", &roadSnow))
-            LotLightBridge::SetRoadSnowDepth(roadSnow);
-        ImGui::SameLine();
-        ImGui::TextDisabled("%ld draws", LotLightBridge::RoadSnowDepthDrawn());
         if (g_moonLift) {
             ImGui::SetNextItemWidth(220.0f);
             if (ImGui::SliderFloat("Least moon height (degrees)##MoonHeight", &g_moonHeightDeg, 5.0f, 60.0f, "%.0f") && !ApexUi::SliderDragging())

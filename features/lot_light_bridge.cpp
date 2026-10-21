@@ -2192,7 +2192,6 @@ struct VsInfo {
     ShaderPatches::WorldY worldY; // cls 5 and 11: the output it writes world y to (the floors' ground lamp shade), texcoord -1 = none
     FoliageVs patched;    // cls 6: foliage copy (wrap light); cls 10: object copy (+ world xzy in TEXCOORD8, PatchObjectLampVs)
     FloorVs floor;        // copy for the outdoor floors of summer (any class; made at the first such draw)
-    FloorVs roadSnow;     // cls 4: copy with the snow depth of its depth pass (ShaderPatches::PatchRoadSnowDepthVs)
     int lmSem = -1;       // DrawIndoorObject: the semantic (usage << 4 | index) lmRow was found for, -1 = not looked yet
     int lmRow[2] = {-1, -1}; // the VS constants whose dp4 with the position make the room light map uv .x / .y (-1: not found)
     int winSem = -1;      // DrawWindowOutdoor: the semantic winRows was looked for (usage << 4 | index), -1 = not looked yet
@@ -3842,16 +3841,6 @@ PatchedPs& PatchedFor(IDirect3DDevice9* dev, std::unordered_map<IDirect3DPixelSh
     return p;
 }
 
-// (2.15.1) Snowy road pieces laid over the terrain are drawn in three passes: a stencil mark, a depth pass where the piece
-// lies under the terrain (zfunc GREATER, depth written) and the colour. The depth pass lifts every vertex by the snow height
-// (0.175 m in the captures), the colour pass by that height times the vertex's own weight (the snow thinning toward the
-// piece's edges): where the weight is under 1 the colour lay under the depth just written and was refused, and the
-// terrain's snow showed through in the shape of the weights (F7 of 21/10 14-43-46: #89 and #90 pass, #101 refused; the same
-// in the game without Apex). The colour pass gets a vertex shader copy whose depth is the depth pass's
-// (ShaderPatches::PatchRoadSnowDepthVs); a vertex shader without the snow lift is left as it is.
-std::atomic<bool> g_roadSnowDepth{true}; // developer A/B
-std::atomic<long> g_roadSnowDepthDrawn{0};
-
 template <typename DrawFn> bool DrawRoad(IDirect3DDevice9* dev, DrawFn draw) {
     PatchedPs& p = PatchedFor(dev, g_roadPs, "Road", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchRoad(t, pp.road); });
     if (!p.ps) return false;
@@ -3891,31 +3880,7 @@ template <typename DrawFn> bool DrawRoad(IDirect3DDevice9* dev, DrawFn draw) {
         if (sidewalk) SetPsConst(dev, p.road.sidewalkConst, c, 1);
         SetPs(dev, useShade ? shaded->ps : p.ps);
         ConstGain lampGain(dev, p.road.scaleConst, RoadDayGain()); // the road's lamp scale, after the max with the terrain
-        // snowy pieces: the colour's depth as the depth pass has it (the vertex shader copy, made at its first draw)
-        IDirect3DVertexShader9* const originalVs = g_curVs;
-        IDirect3DVertexShader9* snowVs = nullptr;
-        if (g_roadSnowDepth.load(std::memory_order_relaxed) && g_curVs && g_curVsInfo) {
-            FloorVs& rv = g_curVsInfo->roadSnow;
-            if (!rv.tried) {
-                rv.tried = true;
-                UINT size = 0;
-                std::vector<DWORD> code;
-                if (SUCCEEDED(g_curVs->GetFunction(nullptr, &size)) && size >= 8 && size <= 65536) {
-                    code.resize(size / 4);
-                    if (FAILED(g_curVs->GetFunction(code.data(), &size)) || !ShaderPatches::PatchRoadSnowDepthVs(code) || FAILED(dev->CreateVertexShader(code.data(), &rv.vs)))
-                        rv.vs = nullptr;
-                }
-                LOG_INFO(std::format("[LotLightBridge] Road: vertex shader {:08X} {}", reinterpret_cast<uintptr_t>(g_curVs),
-                                     rv.vs ? "gets the snow depth of its depth pass" : "has no snow lift (left as it is)"));
-            }
-            snowVs = rv.vs;
-        }
-        if (snowVs) {
-            SetVs(dev, snowVs);
-            g_roadSnowDepthDrawn.fetch_add(1, std::memory_order_relaxed);
-        }
         draw();
-        if (snowVs) SetVs(dev, originalVs);
         SetPs(dev, original);
         if (sidewalk) SetPsConst(dev, p.road.sidewalkConst, oldC, 1);
         if (smooth) SetTex(dev, p.road.lightSampler, oldLight);
@@ -8065,9 +8030,6 @@ void SetWaterFix(bool on, float strength, float reflection, bool filter, bool pr
 }
 
 void SetSidewalkClear(float amount) { g_sidewalkClear = amount < 0 ? 0.0f : (amount > 1 ? 1.0f : amount); }
-bool RoadSnowDepth() { return g_roadSnowDepth.load(std::memory_order_relaxed); }
-void SetRoadSnowDepth(bool on) { g_roadSnowDepth.store(on, std::memory_order_relaxed); }
-long RoadSnowDepthDrawn() { return g_roadSnowDepthDrawn.load(std::memory_order_relaxed); }
 
 void OnWorldChanged() {
     ClearChunks();

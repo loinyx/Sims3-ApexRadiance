@@ -23,7 +23,6 @@ const I18n::Pair kPairs[] = {
     {"Area lights of a lot light the ground past the lot's border", "Τα φώτα επιφάνειας ενός οικοπέδου φωτίζουν το έδαφος πέρα από το όριό του"},
     {"Lamps hidden behind objects no longer reflect on water", "Οι λάμπες πίσω από αντικείμενα δεν καθρεφτίζονται πια στο νερό"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Το φεγγάρι φωτίζει την πόλη από ψηλότερα: τέλος οι σκούρες λωρίδες στους δρόμους τη νύχτα"},
-    {"Snowy roads and sidewalks no longer show holes in the shape of road pieces", "Οι χιονισμένοι δρόμοι και τα πεζοδρόμια δεν δείχνουν πια τρύπες σε σχήμα κομματιών δρόμου"},
     {"Moonlight is softer by default and in every preset", "Το φως του φεγγαριού είναι πιο απαλό από προεπιλογή και σε κάθε προεπιλογή ρυθμίσεων"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Το Άμεσο φως λαμπών κάνει λιγότερη δουλειά όσο ένα οικόπεδο φωτίζεται ξανά και ξανά"},
     {"Options on by default for several versions no longer show an Experimental badge", "Οι επιλογές που είναι ενεργές από προεπιλογή εδώ και αρκετές εκδόσεις δεν δείχνουν πια την ένδειξη Πειραματικό"},

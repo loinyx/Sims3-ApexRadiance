@@ -23,7 +23,6 @@ const I18n::Pair kPairs[] = {
     {"Area lights of a lot light the ground past the lot's border", "Tontin pintavalot valaisevat maata myös tontin rajan yli"},
     {"Lamps hidden behind objects no longer reflect on water", "Esineiden taakse piiloutuvat lamput eivät enää heijastu veteen"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Kuu valaisee kaupunkia korkeammalta: teillä ei enää ole tummia raitoja yöllä"},
-    {"Snowy roads and sidewalks no longer show holes in the shape of road pieces", "Lumisissa teissä ja jalkakäytävissä ei enää näy tienpalan muotoisia aukkoja"},
     {"Moonlight is softer by default and in every preset", "Kuunvalo on oletuksena ja kaikissa esiasetuksissa pehmeämpi"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Välitön lamppujen valo tekee vähemmän työtä, kun tonttia valaistaan yhä uudelleen"},
     {"Options on by default for several versions no longer show an Experimental badge", "Useiden versioiden ajan oletuksena päällä olleissa valinnoissa ei enää ole Kokeellinen-merkkiä"},

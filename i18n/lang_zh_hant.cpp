@@ -23,7 +23,6 @@ const I18n::Pair kPairs[] = {
     {"Area lights of a lot light the ground past the lot's border", "地塊的區域燈光會照亮地塊邊界以外的地面"},
     {"Lamps hidden behind objects no longer reflect on water", "被物件擋住的燈不再在水面上反射"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "月亮從更高處照亮城鎮：夜晚道路上不再出現暗色條紋"},
-    {"Snowy roads and sidewalks no longer show holes in the shape of road pieces", "積雪的道路和人行道不再出現道路塊形狀的破洞"},
     {"Moonlight is softer by default and in every preset", "月光預設更柔和，所有預設中也是如此"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "地塊反覆重新照明時，即時燈光的工作量更少"},
     {"Options on by default for several versions no longer show an Experimental badge", "多個版本以來預設開啟的選項不再顯示「實驗性」標記"},

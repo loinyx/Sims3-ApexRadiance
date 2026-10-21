@@ -137,20 +137,7 @@ Patched PS sizes seen in captures: 130C52EF/1284 and E7A8295D/1364.
 5. If `LightmapSmooth::Find` returns the smoothed map, it also replaces the road's own copy in `sL`.
 6. Sidewalk constant `cS.x` = `g_sidewalkClear` when the shader has the blend.
 7. `ConstGain` multiplies `cK.x` (`scaleConst`) by `RoadGain() = 1 + (ground x road - 1) x night`.
-8. (2.15.1) Snowy pieces: the vertex shader is swapped for a copy whose depth is the depth pass's
-   (`ShaderPatches::PatchRoadSnowDepthVs`, made at the piece's first draw, kept in its `VsInfo`). The game lays a snowy
-   road piece over the terrain in three passes: a stencil mark (`VS_2BC6D610`), a depth pass where the piece lies under
-   the terrain (`VS_2BC6D6D8`, zfunc GREATER, depth written) and the colour (`VS_285F90B8`). The depth pass lifts every
-   vertex by the snow height, `c4.x x clamp(c6.x c5.z + c6.y, c6.z, c6.w)` = 0.175 m; the colour pass lifts each by that
-   height times its own weight, `r3.w = c18.z v3.z / v3.w` (`mad r1.y, r0.w, r3.w, r2.y`), the snow thinning toward the
-   piece's edges. Where the weight is under 1 the colour lay under the depth just written and was refused, and the
-   terrain's snow showed through in holes shaped by the weights (F7 of 21/10 14-43-46: #89 and #90 pass, #101 refused;
-   the same in the game without Apex). The copy keeps the vertex where it is on screen and writes the depth of the
-   higher of the vertex and the uniformly lifted one (`max(r2.y + r0.w, r1.y)`, z / w rescaled to the vertex's w): 10
-   instructions more. A vertex shader without that lift (summer roads) is left as it is. Developer A/B: Lighting >
-   Developer > *Snowy road pieces keep their shape*. A depth bias of 4 times the game's on the colour pass was tried first
-   and did not close the holes (the gap is centimetres, not rounding).
-9. Swap the pixel shader, draw, restore every touched state. Counter: "roads: N" in the developer status line.
+8. Swap the pixel shader, draw, restore every touched state. Counter: "roads: N" in the developer status line.
 
 ### Registers
 
