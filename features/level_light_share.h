@@ -2,6 +2,7 @@
 // Outdoor lot lamps light the walls and floors of every floor, not only their own, and indoor lamps light the story above
 // or below through stair openings (see level_light_share.cpp).
 #include "ground_lamp_shadow.h"
+#include "liveness_prune.h"
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -350,6 +351,9 @@ bool ExportLotProxy(uintptr_t tracker, RtLampProxy::Lot& out, std::string& why);
 int ActiveLotTrackers(uintptr_t* out, int max);
 // Any thread: the game still has this lot (its tracker is in the light manager's lot list)
 bool TrackerLive(uintptr_t tracker);
+// Any thread, in a live world: the story managers (stories -4..7) of every loaded lot. False while a world loads or when the
+// lot list could not be read in full (the caller then drops nothing; see liveness_prune.h)
+bool LiveStoryManagers(LivenessPrune::LiveSet& mgrs);
 std::string Status();
 std::string DiagText(); // F8: samples near the active lot's lights, the game's wall test and ours (empties the record; arms the recording)
 // Development build: the samples above are recorded only while armed (Developer checkbox, or the first F8 dump arms it)

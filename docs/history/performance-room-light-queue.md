@@ -215,3 +215,32 @@ Lamps switched on automatically waited behind the rest of the queue.
 rooms excluded), and the after-load budget is 6 ms instead of 12 ms (`room_drain_budget`). An automatic switch-on puts
 its own room first with no extra budget and no hold (`auto_light_priority`). Both are on in 2.14.0 with no setting.
 Frame times in game are not yet measured.
+
+## 2026-10-20: lot entry and other lots' urgency
+
+**Evidence:** a 20-minute log on a 36-room, 6-story house at 3840x2160, 58 fps. Over 159 lamp-edit bursts the wall time
+was 352 s and the solving 110.7 s; in the 31 bursts of 2 s or more, 299 s against 99 s. 199 of 326 outdoor lamp edits
+were on other lots (lamps the game disabled or enabled, lamps moved into another room by the game), whose rooms took the
+urgent tiers (x1e4 to x1e6) on any lot and became the world's current room before the played lot's. 38 of 134 atrium
+holds timed out with every room still waiting. Entering the lot took 10 s and, coming back, 17 s, with the 4 ms drain
+(1 ms while the camera moved): the settle window only followed a world load.
+
+**Outcome:** an edit's room on another lot keeps an urgency of at most 1000 (below the played lot's camera story and the
+stories under it), and entering a lot opens the settle window for 10 s. Rejected for now, without more evidence: not
+resending rooms 0 when RtOutdoorLamps drops a lot's maps (their maps may lack the lamp edits the GPU stood in for), and
+keeping the stairwell bounce context for a whole solve (a solve continued on another thread would keep a lamp's earlier
+light).
+
+## 2026-10-21: a recording with the lot-entry changes
+
+**Evidence:** a 20 s recording on the same house (29 rooms, 6 stories). The cap on other lots' urgency acted (492
+times), and other lots no longer went first. Remaining causes: the window activation recheck ran 9 passes that evaluated
+144 windows and changed none, yet each pass marked the same 13 window rooms changed (about 117 invalidations in 20 s),
+the main source of rooms solved twice or thrown away mid-solve; room 0 of the stories below the camera took the first
+tier and went before the camera story's rooms (4.1 s of a lot entry); the game switching lamps on other lots kept the
+edit pacing and the edit hold busy for 16 s; the load screen's lamps registering counted as a 16 s lamp edit.
+
+**Outcome:** the recheck's room marks are dropped when the window did not change; room 0 takes the first tier only on
+the camera's story; a pending lamp edit counts only the high-quality lot's rooms; lamps registering before the world is
+live are no edit. Not changed: the atrium's stories keep their shared first place (they are shown together), and
+OutdoorDelta's full solves after `steady_indoor_light`'s generation bump (`PhysicsKey`) need their own study.

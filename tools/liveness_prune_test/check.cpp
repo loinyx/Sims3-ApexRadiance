@@ -120,6 +120,35 @@ int main() {
         Check(Gone(empty, 8, after, 12, out) == 0, "a first sight (no managers before): none gone");
         Check(Gone(before, 8, empty, 8, out) == 3, "every old manager gone when the lot holds none");
     }
+    {
+        // the miss count kept in the value (OutdoorDelta's records, keyed by room and class): a record whose story manager no
+        // loaded lot holds goes at the second sweep in a row, with its bytes given back by onErase; a live one keeps its count at 0
+        struct Rec {
+            uintptr_t mgr;
+            size_t bytes;
+            uint8_t gone = 0;
+        };
+        std::unordered_map<uint64_t, std::unique_ptr<Rec>> recs;
+        recs[(uint64_t{0x1000} << 2) | 2] = std::make_unique<Rec>(Rec{0xA0, 100});
+        recs[(uint64_t{0x1000} << 2) | 0] = std::make_unique<Rec>(Rec{0xA0, 10});
+        recs[(uint64_t{0x2000} << 2) | 2] = std::make_unique<Rec>(Rec{0xB0, 300});
+        size_t bytes = 410, erasedBytes = 0;
+        const auto missesOf = [](std::unique_ptr<Rec>& r) -> uint8_t& { return r->gone; };
+        const auto onErase = [&](uint64_t, std::unique_ptr<Rec>& r) { erasedBytes += r->bytes, bytes -= r->bytes; };
+        LiveSet mgrs = Live({0xA0});
+        const auto live = [&](uint64_t, const std::unique_ptr<Rec>& r) { return mgrs.Contains(r->mgr); };
+        Check(PruneInPlace(recs, live, missesOf, onErase) == 0 && recs.size() == 3, "in place: a missing record is kept after one sweep");
+        Check(recs.at((uint64_t{0x2000} << 2) | 2)->gone == 1, "in place: its count is 1");
+        mgrs = Live({0xA0, 0xB0}); // (the lot was streaming: back in the list)
+        Check(PruneInPlace(recs, live, missesOf, onErase) == 0 && recs.at((uint64_t{0x2000} << 2) | 2)->gone == 0, "in place: seen again, its count starts over");
+        mgrs = Live({0xA0});
+        Check(PruneInPlace(recs, live, missesOf, onErase) == 0, "in place: one miss again");
+        Check(PruneInPlace(recs, live, missesOf, onErase) == 1 && erasedBytes == 300 && bytes == 110, "in place: erased at the second miss in a row, its bytes given back");
+        Check(recs.size() == 2 && recs.contains((uint64_t{0x1000} << 2) | 2) && recs.contains((uint64_t{0x1000} << 2) | 0), "in place: both classes of the live room stay");
+        mgrs = Live({});
+        Check(PruneInPlace(recs, live, missesOf, onErase) == 0 && PruneInPlace(recs, live, missesOf, onErase) == 2 && recs.empty() && bytes == 0,
+              "in place: every record of a lot that left goes after two sweeps");
+    }
     std::printf("liveness prune: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

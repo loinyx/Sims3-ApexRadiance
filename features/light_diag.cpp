@@ -184,6 +184,8 @@ void WriteDiag() {
     }
     // its own folder in Captures\ (never overwritten), with the log and settings (features/captures.h)
     const std::filesystem::path folder = Captures::NewFolder("Lighting snapshot");
+    // (memory_owners) measured before the snapshot's own text is built, so its section shows what the game holds, not this report
+    const std::string memory = ApexMemory::ReportText();
     std::ostringstream out;
     const uintptr_t cells = Rd<uintptr_t>(lightMgr + 0x104);
     out << std::format("Apex Radiance lighting snapshot\nnight level={:.2f} lightMgr={:08X} cells={:08X} counter={} / {}\n\n", Rd<float>(lightMgr + 0xF0), lightMgr, cells,
@@ -271,7 +273,7 @@ void WriteDiag() {
     out << LevelLightShare::DiagText();
     out << PixelLampDiag(index);
     out << DaylightProbe::SnapshotText(lightMgr, g_lights); // development builds with daylight_log only
-    out << ApexMemory::ReportText();                           // development builds with memory_owners only
+    out << memory;                                             // development builds with memory_owners only (taken above)
     ApexMemory::RequestNow();                                  // (every owner measured again at its next chance, for the next one)
     out << std::format("\nEnd: {} lights, {} lot stories, {} rooms\n", g_lights.size(), managers, rooms);
     g_status = std::format("Saved: {} lights, {} lot stories, {} rooms", g_lights.size(), managers, rooms);

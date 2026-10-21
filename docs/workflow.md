@@ -56,7 +56,7 @@ A development build (`/p:ApexStudyDefines=APEX_DEVELOPMENT_BUILD_FLAVOR`, which 
 start-up (`DevSwitches::Load`) and logs every value. A missing key reads as on; Save keeps the table because it
 preserves tables it does not write. Each switch can be turned off to compare against the previous behaviour.
 
-In every other build the accessors return `kShipped` (true) for the 27 switches that change the game or free memory, and false for the
+In every other build the accessors return `kShipped` (true) for the 28 switches that change the game or free memory, and false for the
 3 diagnostics and the unfinished `foliage_sun_shadow`. A switch therefore never needs a menu option to ship; a shipped behaviour
 follows the setting named on its page.
 
@@ -66,6 +66,7 @@ follows the setting named on its page.
 | `daylight_log` | Developer only | Logs the sky state that sets outdoor darkness every 5 s and adds an F8 section; no lighting change | [light-diag.md](features/dev-tools/light-diag.md#file-sections) |
 | `memory_owners` | Developer only | Apex's own memory by owner (`[ApexMemory]`, F8) | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
 | `release_debug_buffers` | Shipped | Gives back F7, F6 and F8 buffers once they are no longer needed | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
+| `left_lot_release` | Shipped | Gives back Quick outdoor lamp edits' kept parts of rooms no loaded lot holds (two 10 s sweeps in a row), Real-time outdoor lamps' CPU copy of the occluders once uploaded, and the mask texture of a lot not drawn for 2 minutes (made again at its next draw) | [performance/README.md](features/performance/README.md#the-switches) |
 | `draw_reads_nowait` | Shipped | Buffer reads in draw hooks never wait for the GPU (three busy answers, then wait) | [lot-light-pass.md](features/night-lighting/lot-light-pass.md#lamp-shade-on-lot-ground-groundshadow) |
 | `occlusion_relight` | Shipped | An unchanged mesh occlusion scene is not published again | [level-light-share.md](features/night-lighting/level-light-share.md#closed-floor-guards-directional-weights-and-the-retired-mesh-blockers) |
 | `room_drain_budget` | Shipped | Extra room solves never start a step the budget cannot hold | [room-light-queue.md](features/performance/room-light-queue.md#automatic-lamps-first-and-the-step-budget) |
@@ -76,7 +77,7 @@ follows the setting named on its page.
 | `foliage_sun_shadow` | Developer only | The sun and moon shadow on the tree shaders that read none | [foliage.md](features/night-lighting/foliage.md#the-suns-shadow-on-trees) |
 | `auto_light_priority` | Shipped | A lamp switched on automatically puts its own room first | [room-light-queue.md](features/performance/room-light-queue.md#automatic-lamps-first-and-the-step-budget) |
 | `lamp_visibility_memo` | Shipped | A lamp's wall and slab test is kept while its inputs are unchanged | [level-light-share.md](features/night-lighting/level-light-share.md#cost) |
-| `indoor_lamp_walls` | Shipped | A lamp taken through a floor opening is also stopped by its own story's walls | [stairwells.md](features/night-lighting/stairwells.md) |
+| `indoor_lamp_walls` | Shipped | A lamp taken through a floor opening is also stopped by the walls of its own story and of the receiving story | [stairwells.md](features/night-lighting/stairwells.md), [level-light-share.md](features/night-lighting/level-light-share.md) |
 | `arch_ambient` | Shipped | A floor near an arch takes the neighbour's higher ambient, fading over 1.5 m | [arches.md](features/night-lighting/arches.md) |
 | `basis_wall_filter` | Shipped | Directional maps read without blending across a wall | [stairs.md](features/night-lighting/stairs.md) |
 | `hard_wall_tops` | Shipped | A full wall under a ceiling has a hard top in the grid walk | [arches.md](features/night-lighting/arches.md) |

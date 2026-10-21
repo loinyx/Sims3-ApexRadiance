@@ -1087,9 +1087,11 @@ void OnPresent(IDirect3DDevice9* dev) {
         pixel.x = std::clamp<LONG>(static_cast<LONG>(static_cast<double>(p.x) * bd.Width / cw), 0, static_cast<LONG>(bd.Width) - 1);
         pixel.y = std::clamp<LONG>(static_cast<LONG>(static_cast<double>(p.y) * bd.Height / ch), 0, static_cast<LONG>(bd.Height) - 1);
         const bool guided = g_aiming.exchange(false) || click != 0;
-        start(pixel, guided ? "guided one-shot capture under the mouse" : "requested by the shortcut; the same pixel is measured again 1 s and 3 s after any lot changes the story it shows, for 2 minutes");
+        start(pixel, guided ? "guided one-shot capture under the mouse" : "requested by the shortcut");
         Captures::Notify(I18n::Tr("Capturing the light under the mouse\xE2\x80\xA6"), 3, Captures::NoteKind::Probe);
-        g_watch = guided ? Watch{} : Watch{true, pixel, ShownStories(), now + 120000, 6, {}, Captures::SessionFolder()};
+        // (one capture: the automatic re-measures 1 s and 3 s after each floor change are off; they filled sessions with
+        // captures nobody asked for, and each one relit the lot)
+        g_watch = Watch{};
         return;
     }
     // The automatic captures after a floor change

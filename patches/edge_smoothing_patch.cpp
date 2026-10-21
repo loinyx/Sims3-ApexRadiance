@@ -1124,10 +1124,10 @@ class EdgeSmoothingPatch : public ApexPatch {
         if (g.status.rfind("ERROR: ", 0) == 0) ApexUi::IconNote(IconId::TriangleAlert, g.status.c_str() + 7, VioletTheme::kError);
 
         // Method: FXAA first; UI order matches the stored method values.
-        static const char* const kMethods[] = {"FXAA (recommended)", "SMAA"};
+        static const char* const kMethods[] = {"FXAA", "SMAA"};
         static const char* const kMethodTips[] = {"Lighter on your graphics card, a little blurrier", "Clean, smooth edges while textures stay sharp"};
         int method = g.p.method == 1 ? 1 : 0;
-        if (ApexUi::SegmentedRow("Method", "FXAA is recommended for lower GPU cost; SMAA is an alternative", "##Method", &method, kMethods, 2, kMethodTips, nullptr, kDefaults.method)) {
+        if (ApexUi::SegmentedRow("Method", "SMAA keeps textures sharper; FXAA is lighter on the graphics card", "##Method", &method, kMethods, 2, kMethodTips, nullptr, kDefaults.method)) {
             g.p.method = method;
             changed = true;
         }
@@ -1153,7 +1153,7 @@ class EdgeSmoothingPatch : public ApexPatch {
         // both methods (30/09): object edges from the scene depth, and texture sharpening where nothing was smoothed
         changed |= ApexUi::SwitchRow("Edges from depth", &g.p.depthEdges, "Also smooths faint edges of objects, while textures stay sharp", kDefaults.depthEdges);
         if (g.p.depthEdges && g.ready && g.framesSmoothed > 60 && !g.depthUsed)
-            ApexUi::IconNote(IconId::Info, "The scene depth is not available right now: edges come from colour only");
+            ApexUi::IconNote(IconId::Info, "The scene depth is not available right now: edges use color only");
         changed |= ApexUi::SliderPercent("Sharpen textures", &g.p.sharpen, 0.0f, 1.0f, "Crisper textures; the smoothed edges stay smooth. 0% is off", kDefaults.sharpen);
         // At 1080p the game still looks jagged with this on: at 1200 lines or fewer, the driver's
         // own supersampling (render at a higher resolution, shown on the same screen) smooths what no post-process AA can
@@ -1187,7 +1187,7 @@ APEX_REGISTER_FEATURE(EdgeSmoothingPatch, {.displayName = "Edge Smoothing (SMAA 
                                     .description = "Smooths the jagged edges of the world while menus and text stay sharp. Works with the game's own "
                                                    "Edge Smoothing turned off. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
                                     .category = "Graphics",
-                                    .experimental = true,
+                                    .experimental = false,
                                              .enabledByDefault = true,
                                     .supportedVersions = VERSION_ALL,
                                     .technicalDetails = {"Runs before the first ZENABLE=FALSE backbuffer draw after the scene (bloom composite / UI start), like Depth Blur.",

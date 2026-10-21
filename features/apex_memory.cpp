@@ -53,13 +53,84 @@ uint16_t SiteOf(uintptr_t ret) {
     return kSiteFull;
 }
 
+// Blocks of kBigFrom bytes or more also carry a short call stack (the first kBigFrames return addresses into the ASI found on
+// the stack above operator new; the build keeps no frame pointers): the calling site alone is often a shared template (std::format's
+// growth, a vector of one element type used in many places), the stack names the owner. 8 more bytes before the header (the big stack's index); tag kTagBig.
+constexpr size_t kBigFrom = size_t{64} << 10;
+constexpr uint16_t kTagBig = 0xA9E6;
+constexpr int kBigFrames = 8;
+constexpr unsigned kBigStacks = 256; // power of two; 0 = the table was full
+struct BigStack {
+    std::atomic<uint32_t> hash{0};
+    uintptr_t frames[kBigFrames] = {};
+    std::atomic<int> ready{0};
+    std::atomic<int64_t> bytes{0};
+    std::atomic<int32_t> blocks{0};
+};
+BigStack g_big[kBigStacks];
+uintptr_t g_codeLo = 0, g_codeHi = 0; // the ASI's image (set at the first big block; GetModuleHandleEx and the PE header)
+bool LooksReturn(uintptr_t a) noexcept { // a is just after a call: E8 rel32, FF /2 with a register, [reg], [reg+disp8], [disp32]
+    if (a < g_codeLo + 8 || a >= g_codeHi) return false;
+    const BYTE* p = reinterpret_cast<const BYTE*>(a);
+    if (p[-5] == 0xE8) return true;
+    if (p[-2] == 0xFF && (p[-1] & 0x38) == 0x10 && (p[-1] & 0xC0) != 0x80) return true; // call reg / [reg]
+    if (p[-3] == 0xFF && (p[-2] & 0x38) == 0x10 && (p[-2] & 0xC0) == 0x40) return true; // call [reg+disp8]
+    if (p[-6] == 0xFF && (p[-5] & 0x38) == 0x10) return true;                            // call [disp32] / [reg+disp32]
+    return false;
+}
+uint32_t BigOf() noexcept {
+    if (!g_codeLo) {
+        HMODULE mod = nullptr;
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(&LooksReturn), &mod)) return 0;
+        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(mod);
+        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(reinterpret_cast<const BYTE*>(mod) + dos->e_lfanew);
+        g_codeHi = reinterpret_cast<uintptr_t>(mod) + nt->OptionalHeader.BaseOfCode + nt->OptionalHeader.SizeOfCode;
+        g_codeLo = reinterpret_cast<uintptr_t>(mod) + nt->OptionalHeader.BaseOfCode;
+    }
+    // the return addresses into the ASI's code on the stack above this frame (the build omits frame pointers: no chain to follow)
+    uintptr_t frames[kBigFrames] = {};
+    int got = 0;
+    const NT_TIB* tib = reinterpret_cast<const NT_TIB*>(__readfsdword(0x18));
+    const uintptr_t top = reinterpret_cast<uintptr_t>(tib->StackBase);
+    for (uintptr_t sp = reinterpret_cast<uintptr_t>(_AddressOfReturnAddress()); sp + 4 <= top && sp < reinterpret_cast<uintptr_t>(_AddressOfReturnAddress()) + 8192 && got < kBigFrames;
+         sp += 4) {
+        const uintptr_t v = *reinterpret_cast<const uintptr_t*>(sp);
+        if (LooksReturn(v)) frames[got++] = v;
+    }
+    if (!got) return 0;
+    uint32_t hash = 2166136261u;
+    for (int i = 0; i < got; i++) hash = (hash ^ static_cast<uint32_t>(frames[i])) * 16777619u;
+    if (!hash) hash = 1;
+    unsigned h = (hash * 2654435761u >> 24) & (kBigStacks - 1);
+    for (unsigned probe = 0; probe < 32; probe++, h = (h + 1) & (kBigStacks - 1)) {
+        if (h == 0) continue;
+        uint32_t cur = g_big[h].hash.load(std::memory_order_acquire);
+        if (cur == hash) return h;
+        if (cur == 0 && g_big[h].hash.compare_exchange_strong(cur, hash, std::memory_order_acq_rel)) {
+            for (int i = 0; i < kBigFrames; i++) g_big[h].frames[i] = frames[i];
+            g_big[h].ready.store(1, std::memory_order_release);
+            return h;
+        }
+        if (cur == hash) return h;
+    }
+    return 0;
+}
+
 void* TaggedAlloc(size_t n, uint16_t site) noexcept {
-    if (n > 0xFFFFFFF0u - sizeof(Header)) return nullptr;
-    auto* h = static_cast<Header*>(std::malloc(n + sizeof(Header)));
-    if (!h) return nullptr;
+    if (n > 0xFFFFFFF0u - 2 * sizeof(Header)) return nullptr;
+    const bool big = n >= kBigFrom && site != kSiteImGui;
+    BYTE* raw = static_cast<BYTE*>(std::malloc(n + (big ? 2 : 1) * sizeof(Header)));
+    if (!raw) return nullptr;
+    auto* h = reinterpret_cast<Header*>(big ? raw + sizeof(Header) : raw);
     h->size = static_cast<uint32_t>(n);
     h->site = site;
-    h->tag = kTag;
+    h->tag = big ? kTagBig : kTag;
+    if (big) {
+        const uint32_t b = BigOf();
+        *reinterpret_cast<uint32_t*>(raw) = b;
+        g_big[b].bytes.fetch_add(static_cast<int64_t>(n), std::memory_order_relaxed);
+        g_big[b].blocks.fetch_add(1, std::memory_order_relaxed);
+    }
     SiteRec& s = g_sites[site];
     s.bytes.fetch_add(static_cast<int64_t>(n), std::memory_order_relaxed);
     s.blocks.fetch_add(1, std::memory_order_relaxed);
@@ -73,15 +144,23 @@ void* TaggedAlloc(size_t n, uint16_t site) noexcept {
 void TaggedFree(void* p) noexcept {
     if (!p) return;
     Header* h = static_cast<Header*>(p) - 1;
-    if (h->tag == kTag) {
+    void* raw = h;
+    if (h->tag == kTag || h->tag == kTagBig) {
         SiteRec& s = g_sites[h->site < kSites ? h->site : kSiteFull];
         s.bytes.fetch_sub(static_cast<int64_t>(h->size), std::memory_order_relaxed);
         s.blocks.fetch_sub(1, std::memory_order_relaxed);
         g_heapBytes.fetch_sub(static_cast<int64_t>(h->size), std::memory_order_relaxed);
         g_heapBlocks.fetch_sub(1, std::memory_order_relaxed);
+        if (h->tag == kTagBig) {
+            raw = reinterpret_cast<BYTE*>(h) - sizeof(Header);
+            const uint32_t b = *static_cast<uint32_t*>(raw);
+            BigStack& g = g_big[b < kBigStacks ? b : 0];
+            g.bytes.fetch_sub(static_cast<int64_t>(h->size), std::memory_order_relaxed);
+            g.blocks.fetch_sub(1, std::memory_order_relaxed);
+        }
         h->tag = 0;
     }
-    std::free(h);
+    std::free(raw);
 }
 
 // ---- named owners ----
@@ -421,6 +500,23 @@ std::string ReportText() {
                          sites[i].index == kSiteImGui ? std::string("ImGui (menu, fonts)") : sites[i].index == kSiteFull ? std::string("(site table full)") : Where(sites[i].ret));
 
     // Direct3D
+    // big blocks by stack
+    {
+        std::vector<std::pair<int64_t, unsigned>> bigs;
+        for (unsigned i = 0; i < kBigStacks; i++)
+            if (g_big[i].bytes.load(std::memory_order_relaxed) > 0) bigs.emplace_back(g_big[i].bytes.load(), i);
+        std::sort(bigs.begin(), bigs.end(), std::greater<>());
+        s += std::format("\nBlocks of 64 KB or more by call stack (live; the return addresses into the ASI above operator new, innermost first; "
+                         "{} stacks; 0 = table full):\n", bigs.size());
+        for (size_t k = 0; k < bigs.size() && k < 24; k++) {
+            const BigStack& b = g_big[bigs[k].second];
+            std::string chain;
+            if (bigs[k].second && b.ready.load(std::memory_order_acquire))
+                for (int i = 0; i < kBigFrames && b.frames[i]; i++) chain += (i ? " <- " : "") + Where(b.frames[i]);
+            s += std::format("   {:9.3f} MiB  {:>5} blocks  {}\n", MiB(bigs[k].first), b.blocks.load(), chain.empty() ? std::string("(no stack)") : chain);
+        }
+    }
+    s += "\nQuick outdoor lamp edits (kept parts): " + OutdoorDelta::MemoryText() + "\n";
     s += std::format("\nDirect3D resources the ASI created (textures, render targets; live; {} created since the start, {} not trackable):\n", g_d3dCreated.load(),
                      g_d3dUntracked.load());
     for (int p = 0; p < kPools; p++)
@@ -463,6 +559,18 @@ void LogLine() {
                          MiB(h.bytes), h.blocks, MiB(h.peakBytes), MiB(g_sites[kSiteImGui].bytes.load()), MiB(static_cast<int64_t>(named)),
                          MiB(static_cast<int64_t>(ApexMem::g_highBytes.load())), MiB(d3d), MiB(g_d3dBytes[1].load()), MiB(g_d3dBytes[0].load()), MiB(g_d3dBytes[4].load()),
                          MiB(static_cast<int64_t>(released)), top));
+    LOG_INFO("[ApexMemory] Quick outdoor lamp edits: " + OutdoorDelta::MemoryText());
+    // the three largest live blocks' stacks (64 KB or more), to name what holds the heap
+    std::vector<std::pair<int64_t, unsigned>> bigs;
+    for (unsigned i = 1; i < kBigStacks; i++)
+        if (g_big[i].bytes.load(std::memory_order_relaxed) > 0 && g_big[i].ready.load(std::memory_order_acquire)) bigs.emplace_back(g_big[i].bytes.load(), i);
+    std::sort(bigs.begin(), bigs.end(), std::greater<>());
+    std::string chains;
+    for (size_t k = 0; k < bigs.size() && k < 3; k++) {
+        chains += std::format("{}{:.1f} MiB in {} blocks at", k ? "; " : "", MiB(bigs[k].first), g_big[bigs[k].second].blocks.load());
+        for (int i = 0; i < kBigFrames && g_big[bigs[k].second].frames[i]; i++) chains += " " + Where(g_big[bigs[k].second].frames[i]);
+    }
+    if (!chains.empty()) LOG_INFO("[ApexMemory] Largest blocks by stack: " + chains);
 }
 void LogLineEvery(DWORD ms) {
     static std::atomic<DWORD> s_last{0};

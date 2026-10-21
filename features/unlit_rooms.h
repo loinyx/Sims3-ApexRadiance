@@ -27,8 +27,9 @@ void FurnitureCubeColour(float* rgb);
 // three [NoLight] lights (by direction dir: PS c0..c3 for colours c4..c7, VS vl-4.. for the vertex lights). No direction:
 // false. Room-mode rigs have no sun: slot 0 is the strongest room light.
 bool IsUnlitLight(const float* colour, const float* dir);
-// Such a light turned the way the walls are (Brightness and Blue tint); false: left as it was
-bool FurnitureColour(float* rgb, const float* dir);
+// Such a light turned the way the walls are (Brightness and Blue tint); false: left as it was. chroma (luma 1, or null):
+// in a lit room the hue of the room's own ambient (its walls' colour), taken instead of grey at the same brightness
+bool FurnitureColour(float* rgb, const float* dir, const float* chroma = nullptr);
 // Render thread, every frame: the game's night level (0 = day, 1 = night); the furniture part acts by it (none by day)
 void SetNightLevel(float level);
 // Render thread, per furniture draw (the guard, reset after the draw): the rig holds a [NoLight] light (IsDarkRoomLight),

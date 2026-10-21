@@ -41,6 +41,13 @@ void SetEnabled(bool on);
 bool Enabled();
 // Any thread: an edit of that light was taken by the GPU (Lamp lighting: Instant, Real-time outdoor lamps) within withinMs
 bool HandledLately(uintptr_t light, unsigned long withinMs);
+// The calling thread's room marks from lamp entry updates are kept back from BeginDeferMarks to the matching
+// EndDeferMarks, then made as the game makes them (replay) or, for the marks of `entry`, dropped (its update changed
+// nothing the rooms read: LevelLightShare's window activation recheck); marks of other entries always go through. Nests;
+// the light tree thread.
+void BeginDeferMarks();
+void EndDeferMarks(bool replay, uintptr_t entry = 0);
+long DeferredMarksDropped();
 // Development tools (F6 recorder, Developer page): marks let through / kept back, and which light-manager messages flagged
 // light entries (dev build)
 std::string Status();

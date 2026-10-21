@@ -269,6 +269,22 @@ void QuickPassRoom(BYTE* room) {
     }
 }
 
+// The priority-lot helpers' bytes were checked (Start, or EnsureDragThrottle when Faster room lighting is off)
+std::atomic<bool> g_prioLotOk{false};
+// A room of the lot being played (the priority lot); false when unreadable or the helpers are missing or differ
+bool OnPlayedLot(const BYTE* room) {
+    if (!kSomGet || !kPrioLot || !g_prioLotOk.load(std::memory_order_relaxed)) return false;
+    __try {
+        const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(room);
+        return mgr && PriorityLot(mgr);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+// An edit's room on another lot than the played one: its urgency at most this (see Prioritise)
+constexpr float kOffLotUrgency = 1000.0f;
+std::atomic<long> g_prioOffLotCapped{0};
+
 // The priority Apex gives a room the game scored p (PriorityHook)
 float Prioritise(BYTE* room, float p) {
     if (!(p > 0.0f)) return Stranded(room) ? 1.0f : p;
@@ -282,23 +298,19 @@ float Prioritise(BYTE* room, float p) {
         g_prioStacked.fetch_add(1, std::memory_order_relaxed);
         return p * 4000.0f * 4.0e6f;
     }
+    // An edit's room on another lot (a lamp the game disabled or enabled there, a Sim's switch, a neighbour's dusk) comes
+    // after the played lot's camera story and the stories below it (4000, 2000), still before everything else: the urgency
+    // of a lot the player is not on had every room of the played lot wait behind it (in a logged lot entry, two thirds of
+    // its 10 s had no solve running). The played lot's own edits keep their whole urgency.
+    if (urgency > 1.0f && g_prioLotOk.load(std::memory_order_relaxed) && !OnPlayedLot(room)) {
+        g_prioOffLotCapped.fetch_add(1, std::memory_order_relaxed);
+        return p * std::min(urgency, kOffLotUrgency);
+    }
     return p * Factor(room) * urgency;
 }
 
 // 07/10, players' Runtime Error: Apex's parts around the game's priority call are caught on their own (HookGuard); on a C++
 // exception the room keeps the game's own priority and that part stays off
-// The priority-lot helpers' bytes were checked (Start, or EnsureDragThrottle when Faster room lighting is off)
-std::atomic<bool> g_prioLotOk{false};
-// A room of the lot being played (the priority lot); false when unreadable or the helpers are missing or differ
-bool OnPlayedLot(const BYTE* room) {
-    if (!kSomGet || !kPrioLot || !g_prioLotOk.load(std::memory_order_relaxed)) return false;
-    __try {
-        const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(room);
-        return mgr && PriorityLot(mgr);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
-}
 
 float __fastcall PriorityHook(BYTE* room) {
     if (room && g_prioOn) HookGuard::Run("RoomLightQueue quick pass", [room] { QuickPassRoom(room); });
@@ -570,6 +582,17 @@ void RestoreAll() {
 
 namespace RoomLightQueue {
 
+bool PlayedLot(uintptr_t mgr, bool* known) {
+    *known = kSomGet && kPrioLot && g_prioLotOk.load(std::memory_order_relaxed);
+    if (!*known || !mgr) return false;
+    __try {
+        return PriorityLot(mgr);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *known = false;
+        return false;
+    }
+}
+
 bool Start(std::string* error) {
     std::lock_guard<std::mutex> lk(g_ctrl);
     if (g_running) return true;
@@ -762,10 +785,10 @@ std::string StatusText() {
     if (!Running()) return "Off";
     const long frames = g_drainFrames.load(), solves = g_drainSolves.load();
     return std::format("On | viewed lot first {} ({} of {} priorities raised; a lamp edit's rooms first {}, its atrium stories with the lamp's room {}), no middle step {}, requeues keep the class {}, several rooms per frame {} ({} frames, "
-                       "{} extra solves, {} finished, {:.1f} ms in all; {} frames with a lamp edit's rooms waiting, {} edit rooms drained outside the priority lot), empty removals skipped {} ({} of {}), "
+                       "{} extra solves, {} finished, {:.1f} ms in all; {} frames with a lamp edit's rooms waiting, {} edit rooms drained outside the priority lot, {} edit priorities of other lots kept below the played lot's), empty removals skipped {} ({} of {}), "
                        "quick pass for lamp switches {} ({} rooms){}",
                        g_prioOn ? "on" : "off", g_prioBoosted.load(), g_prioCalls.load(), g_prioUrgent.load(), g_prioStacked.load(), g_stepOn ? "on" : "off", g_keepOn ? "on" : "off",
-                       g_drainOn ? "on" : "off", frames, solves, g_drainFinished.load(), g_drainMicros.load() / 1000.0, g_drainUrgent.load(), g_drainOffLot.load(), g_emptyOn ? "on" : "off", g_emptySkipped.load(),
+                       g_drainOn ? "on" : "off", frames, solves, g_drainFinished.load(), g_drainMicros.load() / 1000.0, g_drainUrgent.load(), g_drainOffLot.load(), g_prioOffLotCapped.load(), g_emptyOn ? "on" : "off", g_emptySkipped.load(),
                        g_emptyCalls.load(), g_quickPass.load() ? "on" : "off", g_quickRooms.load(), SolveTimes()) +
            " | an atrium's stories together: " + AtriumHold::Status();
 }

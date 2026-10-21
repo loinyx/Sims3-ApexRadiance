@@ -18,10 +18,14 @@ inline bool AfterLoadRefreshReady(std::uint32_t now, std::uint32_t started, bool
 inline bool GroupWaitExpired(std::uint32_t now, std::uint32_t armed) {
     return static_cast<std::uint32_t>(now - armed) >= 1500;
 }
+// The played lot first, its camera's story first. With every floor detailed the stories above the camera come after the
+// camera's and the ones below (1000 instead of 4000: a logged edit spent 84% of its solves on hidden stories, interleaved
+// with the camera's), still before every other lot's rooms; each is still solved at its own class.
 inline float FloorPriorityFactor(bool priorityLot, bool allFloors, int level, int camera) {
     if (!priorityLot) return 1.0f;
-    if (allFloors) return 4000.0f;
-    return level > camera ? 1.0f : level == camera ? 4000.0f : 2000.0f;
+    if (level == camera) return 4000.0f;
+    if (level < camera) return 2000.0f;
+    return allFloors ? 1000.0f : 1.0f;
 }
 inline bool RetainFreshSolve(int state) { return state == 2 || state == 3 || state == 5; }
 inline bool AmbientMapsCompatible(float norm, float nextNorm, float base, float nextBase) {

@@ -66,7 +66,7 @@ the Overview turns the shore reflection off first and back on last, after Night 
   request, so the reflection can appear with Depth Blur off in that case. See [depth-blur.md](depth-blur.md).
 - **The game's Edge Smoothing (MSAA)** must be off. A multisampled back buffer has no shareable depth. While it is on
   and Water Reflections is enabled, the Overview row shows *Waiting for game settings* and an amber card *Turn off the
-  game's Edge Smoothing* appears on the Overview, the Conflicts page and the Water & Snow page; see
+  game's Edge Smoothing* appears on the Overview, the Attention page and the Water & Snow page; see
   [edge-smoothing.md](edge-smoothing.md#compatibility-and-interactions). Lamp glow alone does not trigger the notice.
 - **Depth Blur trigger:** the pond pass marks itself as an internal pass (`DepthShare::SetInternalPass`), so its
   depth-off draw does not fire the post-scene effects mid-frame.

@@ -131,6 +131,7 @@ Project-wide history: [architecture](history/architecture.md), [workflow](histor
 
 - [Presets](features/presets.md): saved settings, portable ZIP packages with a LUT and keyboard shortcuts (Released in 2.12.2).
 - [Graphics recovery](features/graphics-recovery.md): restart image-effect resources without resetting settings.
+- [Steam Deck and Proton](features/steam-deck.md): Proton, Steam Deck and DXVK detection, built-in shaders, installing on Linux.
 - [2.14.0](releases/2.14.0.md): Released in 2.14.0 (pending publication); light through stairwells, stairs and arches, trees lit leaf by leaf, steady moonlight.
 - [2.13.0](releases/2.13.0.md): Released in 2.13.0; Instant lamp lighting and lamp light through doors, windows and arches.
 - [2.12.3](releases/2.12.3.md): Released in 2.12.3; realistic lamp reach, balconies blocking lamps below and faster lamp edits.

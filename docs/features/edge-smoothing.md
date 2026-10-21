@@ -11,7 +11,7 @@ menu stay perfectly sharp. Two methods are offered: **FXAA** (recommended, light
 |---|---|
 | Availability | Released in 2.1.0 or earlier (present in the first version in this repository). The wait for the drawn world (never on the main menu or load screens): Released in 2.7.0 |
 | Default | On for new configurations; method SMAA, quality High |
-| Menu | System > Edge Smoothing; Overview > Image > Edge Smoothing |
+| Menu | Image > Edge Smoothing; Overview > Image > Edge Smoothing |
 | Configuration | `[patches.EdgeSmoothing]` in `ApexRadiance.toml` |
 | Source | [`patches/edge_smoothing_patch.cpp`](../../patches/edge_smoothing_patch.cpp), [`third_party/smaa/`](../../third_party/smaa/) |
 
@@ -94,13 +94,14 @@ can be longer than Ultra's reach (32 steps of 2 pixels per side).
 - **Game anti-aliasing notice.** While the menu is open (after startup loading), it reads the real back-buffer
   multisample type. If it is multisampled and a conflicting effect is enabled (Edge Smoothing, Depth Blur, Ambient
   Occlusion, or Water Reflections with Night Lights on and a shore strength above zero), an amber card *Turn off the
-  game's Edge Smoothing* lists the affected effects. It appears above the Overview, the Conflicts page and the page of
+  game's Edge Smoothing* lists the affected effects. It appears above the Overview, the Attention page and the page of
   each affected effect; lamp glow alone does not trigger it. Its single action, *How to turn it off*, expands the steps
   inline (Options > Graphics > Edge Smoothing Off). There is no popup, dismissal, stored preference or automatic change
   to game settings; Apex settings are kept. The condition is recomputed every time the menu draws, so the card persists
   across reopening and restarts while the conflict exists and disappears once the back buffer is single-sampled or the
-  effects are off. A failed or unknown query shows no warning. The sidebar's Conflicts page appears only while a
-  conflict exists, and affected Overview rows show *Waiting for game settings*. Texts are translated (EN/PT/ES/FR).
+  effects are off. A failed or unknown query shows no warning. The sidebar's Attention page (System group) appears
+  only while a conflict exists, and affected Overview rows show *Waiting for game settings*. The texts are translated
+  into the menu's 21 languages.
 - **Post-scene order:** Ambient Occlusion (10), Edge Smoothing (20), Depth Blur (30). Depth Blur blurs the smoothed
   image.
 - **Depth share:** with *Edges from depth* on (and the game's MSAA off), Edge Smoothing requests the INTZ depth swap, so

@@ -107,7 +107,7 @@ luzDoPosteNaGramaDoLote = true
 luzExternaEntreAndares = true
 luzInternaEntreAndares = true
 luzPorPixelNosObjetos = true
-luzQueSobraNosComodos = 0.1200592890381813
+luzQueSobraNosComodos = 0.2
 mapaDeLuzSuavizado = true
 objetosDeForaComLuzDoChao = true
 paredesComLuz = true
@@ -284,7 +284,7 @@ luzDoPosteNaGramaDoLote = true
 luzExternaEntreAndares = true
 luzInternaEntreAndares = true
 luzPorPixelNosObjetos = true
-luzQueSobraNosComodos = 0.1877470314502716
+luzQueSobraNosComodos = 0.2
 mapaDeLuzSuavizado = true
 objetosDeForaComLuzDoChao = true
 paredesComLuz = true
@@ -461,7 +461,7 @@ luzDoPosteNaGramaDoLote = true
 luzExternaEntreAndares = true
 luzInternaEntreAndares = true
 luzPorPixelNosObjetos = true
-luzQueSobraNosComodos = 0.1200592890381813
+luzQueSobraNosComodos = 0.2
 mapaDeLuzSuavizado = true
 objetosDeForaComLuzDoChao = true
 paredesComLuz = true
@@ -540,7 +540,7 @@ vignette_size = 0.5
 
 const Preset kPresets[kCount] = {
     {"Performance", "More FPS with lighter effects", "rocket", kPerformance},
-    {"Default", "A balance of looks and speed", "sun-medium", kDefaultPreset},
+    {"Balanced", "A balance of looks and speed", "sun-medium", kDefaultPreset},
     {"Quality", "The best look, for stronger PCs", "aperture", kQuality},
 };
 

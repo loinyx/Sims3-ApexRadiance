@@ -9,6 +9,8 @@
 #include "hook_guard.h"
 #include "apex_paths.h"
 #include "perf_toggles.h"
+#include "platform.h"
+#include "apex_version.h"
 #include <windows.h>
 #include <d3dcompiler.h>
 #include <condition_variable>
@@ -114,9 +116,47 @@ std::wstring DiskFile() {
     return dir.empty() ? std::wstring() : dir + L"ApexRadiance_ShaderCache.bin";
 }
 
-// Reads the file into r.disk (any damage: the rest is ignored, those variants compile)
-void LoadDisk(Registry& r) {
-    const std::wstring path = DiskFile();
+// The same file built into the ASI (resource APEX_RC_SHADER_CACHE, resources/ApexRadiance_ShaderCache.bin), compiled
+// with Microsoft's d3dcompiler_47: under Wine / Proton the builtin compiler may refuse some ps_3_0 shaders, and a variant
+// found here is never compiled there. Read before the player's own file (which adds the variants it lacks); a variant whose
+// source changed since the file was made misses it and compiles as before.
+void LoadEmbedded(Registry& r) {
+    HMODULE self = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(&LoadEmbedded), &self))
+        return;
+    const HRSRC res = FindResourceW(self, MAKEINTRESOURCEW(APEX_RC_SHADER_CACHE), MAKEINTRESOURCEW(10)); // RT_RCDATA
+    const HGLOBAL data = res ? LoadResource(self, res) : nullptr;
+    const auto* p = data ? static_cast<const unsigned char*>(LockResource(data)) : nullptr;
+    const size_t size = res ? SizeofResource(self, res) : 0;
+    if (!p || size < 12) return;
+    std::unordered_set<uint64_t> wanted;
+    for (const auto& job : r.jobs) wanted.insert(job->key);
+    size_t at = 0;
+    const auto take = [&](void* out, size_t n) {
+        if (n > size - at) return false;
+        std::memcpy(out, p + at, n);
+        at += n;
+        return true;
+    };
+    uint32_t head[3] = {};
+    if (!take(head, sizeof head) || head[0] != kDiskMagic || head[1] != kDiskVersion || head[2] >= 4096) return;
+    for (uint32_t i = 0; i < head[2]; i++) {
+        uint64_t key = 0;
+        uint32_t words = 0;
+        if (!take(&key, sizeof key) || !take(&words, sizeof words) || words < 2 || words > (1u << 18)) break;
+        const size_t bytes = static_cast<size_t>(words) * sizeof(DWORD);
+        if (bytes > size - at) break;
+        if (wanted.contains(key) && !r.disk.contains(key)) {
+            std::vector<DWORD> code(words);
+            std::memcpy(code.data(), p + at, bytes);
+            if (PlausibleCode(code)) r.disk.emplace(key, std::move(code));
+        }
+        at += bytes;
+    }
+}
+
+// Reads the file into r.disk (any damage: the rest is ignored, those variants compile); variants already read are kept
+void LoadDisk(Registry& r, const std::wstring& path) {
     if (path.empty()) return;
     FILE* f = nullptr;
     if (_wfopen_s(&f, path.c_str(), L"rb") != 0 || !f) return;
@@ -146,7 +186,8 @@ void LoadDisk(Registry& r) {
             if (PlausibleCode(code)) r.disk.emplace(key, std::move(code));
         }
     } catch (...) {
-        r.disk.clear(); // optional cache failure must not prevent ordinary shader compilation
+        // optional cache failure must not prevent ordinary shader compilation; the variants read so far (the built-in ones
+        // included) are whole and stay
     }
 }
 
@@ -290,6 +331,12 @@ DWORD WorkerBody(Job*& current) {
         if (!j->error.empty()) {
             failed++;
             LOG_ERROR(std::format("[ShaderCache] {} did not compile: {}", j->d.tag, j->error));
+            static bool s_hinted = false; // (once: Wine's builtin d3dcompiler_47 is not Microsoft's)
+            if (!s_hinted && Platform::UnderWine()) {
+                s_hinted = true;
+                LOG_WARNING("[ShaderCache] Under Wine / Proton the builtin compiler refused a shader the ASI does not carry compiled: "
+                            "install Microsoft's d3dcompiler_47 in the prefix (protontricks 47890 d3dcompiler_47)");
+            }
         } else {
             LOG_DEBUG(std::format("[ShaderCache] {}: {:.1f} ms, {} bytes", j->d.tag, j->ms, j->code.size() * 4));
         }
@@ -412,7 +459,12 @@ void Start() {
     std::lock_guard<std::mutex> lk(r.m);
     if (r.started) return;
     r.started = true;
-    LoadDisk(r);
+    // the built-in shaders first (Microsoft's compiler): under Wine a player's file may hold the builtin compiler's output
+    // of the same source, which would otherwise shadow them; on Windows both are the same bytecode
+    LoadEmbedded(r);
+    const size_t embedded = r.disk.size();
+    LoadDisk(r, DiskFile());
+    if (embedded) LOG_INFO(std::format("[ShaderCache] {} Apex shaders taken from the ones built into the ASI", embedded));
     size_t left = 0;
     for (auto& j : r.jobs) {
         TakeFromDiskLocked(r, *j);

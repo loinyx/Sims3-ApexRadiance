@@ -64,6 +64,29 @@ size_t PruneByLiveness(Map& map, const LiveSet& live, Misses& misses, uint8_t li
     return PruneByLivenessIf(map, [&live](const auto& key, const auto&) { return live.Contains(static_cast<uintptr_t>(key)); }, misses, limit);
 }
 
+// The same rule with the miss count kept in each value (`misses(value)` gives a uint8_t&), for maps whose keys are not a
+// pointer (OutdoorDelta's records: room and class). onErase(key, value) runs just before an entry is erased. Returns how many.
+template <class Map, class IsLive, class MissesOf, class OnErase>
+size_t PruneInPlace(Map& map, IsLive&& isLive, MissesOf&& misses, OnErase&& onErase, uint8_t limit = kMissesToErase) {
+    size_t erased = 0;
+    for (auto it = map.begin(); it != map.end();) {
+        uint8_t& m = misses(it->second);
+        if (isLive(it->first, it->second)) {
+            m = 0;
+            ++it;
+            continue;
+        }
+        if (m < 0xFF) ++m;
+        if (m >= limit) {
+            onErase(it->first, it->second);
+            it = map.erase(it);
+            ++erased;
+        } else
+            ++it;
+    }
+    return erased;
+}
+
 // A key written again (its cache entry refreshed from a live source): its miss count starts over
 inline void Touch(Misses& misses, uintptr_t key) {
     if (!misses.empty()) misses.erase(key);

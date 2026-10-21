@@ -11,7 +11,7 @@ tone. Part of [Night Lighting](README.md).
 | | |
 |---|---|
 | Availability | Released (present since 2.1.0, the first version in this repository). The 10 to 80% Brightness range, the 0% Blue tint default, the structure-change recovery: Released in 2.6.0. The card's *Background light* and *Lamp light* groups: Released in 2.13.0 |
-| Default | On; Brightness 35%; Blue tint 0% |
+| Default | On; Brightness 20% (35% until 2.15.0); Blue tint 0%; the same in the Performance, Balanced and Quality presets |
 | Menu | Lighting > Buildings > Rooms at Night |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/unlit_rooms.cpp`](../../../features/unlit_rooms.cpp), [`features/room_ambient_policy.h`](../../../features/room_ambient_policy.h), [`framework/s3ss_detect.cpp`](../../../framework/s3ss_detect.cpp), [`framework/s3ss_ambient_policy.h`](../../../framework/s3ss_ambient_policy.h); furniture side in [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) and [`features/shader_patches.cpp`](../../../features/shader_patches.cpp); card in [`patches/night_terrain_relight_patch.cpp`](../../../patches/night_terrain_relight_patch.cpp) (`DrawRoomsCard`) |
@@ -29,7 +29,9 @@ lamps are dim, so turning the last lamp off changes the whole room's tone.
 
 Apex Radiance points the game's reads of the unlit-room colours at its own values, scaled by *Brightness* and moved
 towards a grey of the same luminance by *Blue tint*. The same colour is added as a base under the lamps of lit rooms.
-Furniture draws in such rooms get the same treatment on the game's unlit-room rig lights and ambient cube. Changes reach
+Furniture draws in such rooms get the same treatment on the game's unlit-room rig lights and ambient cube. In a lit room
+the rig's fill light takes the hue of the room's own ambient (`+0x110`, the colour its walls take; each channel at most
+x1.5, at the same luminance) instead of grey, so a coloured lamp tints its furniture with its walls. Changes reach
 walls and floors on the next frame, without a new light solve where possible.
 
 1. **Colours.** For each of the game's two colour families, `colour = Brightness x (grey + Blue x (game - grey))`, with
@@ -46,7 +48,7 @@ walls and floors on the next frame, without a new light solve where possible.
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Adjust the background light | `comodosEscurosSemLuz` | bool | on | | Off restores the game's colours (all patches removed) |
-| Brightness | `luzQueSobraNosComodos` | float | 35% | 10 to 80% | Share of the game's unlit-room light kept on walls, floors and furniture |
+| Brightness | `luzQueSobraNosComodos` | float | 20% | 10 to 80% | Share of the game's unlit-room light kept on walls, floors and furniture |
 | Blue tint | `azulNosComodos` | float | 0% | 0 to 100% | 0% is neutral grey of the same luminance, 100% the game's blue, on walls and furniture |
 | LAMP LIGHT group: Outdoor light through openings, Indoor light through openings, Doors block light, Shadow softness, Smooth light maps | see [level-light-share](level-light-share.md#settings) and [room-map-smoothing](room-map-smoothing.md) | | on / 15 cm | | The same card shows the lamp light through openings and its look; documented on those pages |
 | Refresh the lighting (button, with its shortcut chip) | (not saved) | action | | | Relights terrain, lot stories, every room of every loaded lot (basements too) and object rigs now and 2 s later (`NightLighting::RefreshAll`) |
@@ -141,7 +143,9 @@ colour ...` (*not set yet: default* while still zero).
 
 The two top-up calls go through `BaseHook<0>` / `BaseHook<1>` while Rooms at Night is on, for indoor rooms that are not
 roofless. The unlit colour C (family by the lot test `FUN_00c63140` on the room's lot id `+0x10/+0x14`, times the scalar
-`[0x011D0B88]`) is always added to the lamps' ambient instead of only topping it up. The lamps' share is recovered from
+`[0x011D0B88]`) is always added to the lamps' ambient instead of only topping it up, and the result is never below C on any
+channel: a room whose listed lamps are all blocked came out at about a third of C, darker than an empty room beside it.
+The lamps' share is recovered from
 the game's result (sums over x, y, z with weight 1.0 `[0x0107A538]`; a top-up happened iff sum(out) < sum(C), then
 sum(lamp) = (sum(out) - sum(C)^2) / (1 - sum(C))). Each room's C and results are kept (`g_baseRooms`, keyed by room
 address with manager and id), so a slider change moves lit rooms at once (`MoveBase`: value + new C - old C, only while

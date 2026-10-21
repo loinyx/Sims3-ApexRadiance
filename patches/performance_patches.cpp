@@ -1078,7 +1078,7 @@ APEX_REGISTER_FEATURE(MemoryGuardPatch,
                                       "memory gets tight it empties the game's cache of files it is not using. Nothing you see changes. Part of " APEX_PRODUCT_NAME
                                       ". Credits: @loinyx",
                        .category = "Performance",
-                        .experimental = true,
+                        .experimental = false,
                        .enabledByDefault = true,
                        .supportedVersions = VERSION_STEAM,
                        .technicalDetails = {"A 128 MB reserve of address space (MEM_RESERVE only, top-down) is released right before the world save (its call at "
@@ -1095,7 +1095,7 @@ APEX_REGISTER_FEATURE(WindowRepaintPatch,
                                       "a repaint message went through every window handler each frame for nothing. Now Windows repaints it only when it "
                                       "needs to (when the window is uncovered or resized). Nothing you see changes. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
                        .category = "Performance",
-                        .experimental = true,
+                        .experimental = false,
                        .enabledByDefault = true,
                        .supportedVersions = VERSION_STEAM,
                        .technicalDetails = {"The window message pump (0x00410890) calls InvalidateRect(hwnd, 0, 0) before every pump; the short jump over that "
@@ -1110,7 +1110,7 @@ APEX_REGISTER_FEATURE(ScriptMathPatch,
                                       "The check is now done right where the comparison is, and type information already found is remembered, with the same "
                                       "results, so scripts (Sim decisions, routing, timers) do less work. Nothing you see changes. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
                        .category = "Performance",
-                        .experimental = true,
+                        .experimental = false,
                        .enabledByDefault = true,
                        .supportedVersions = VERSION_STEAM | VERSION_EA,
                        .technicalDetails = {"The Mono interpreter's 25 floating-point compare and branch handlers (0x00E54D1B..0x00E58304 on Steam) called "

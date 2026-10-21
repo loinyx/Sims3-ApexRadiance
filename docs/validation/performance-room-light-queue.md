@@ -36,6 +36,11 @@ not identified.
 
 ## Open checks
 
+- Lot entry and floor change on a large lot (36 rooms, 6 stories). **Expected:** every room of the camera's story shows
+  its final light well within 10 s of `[LevelLightShare] Lot <tracker> entered`, fewer `ended: urgency expired` lines and
+  AtriumHold time-outs than before, and the status line's "edit priorities of other lots kept below the played lot's"
+  above 0 when a neighbour's lamps change.
+
 - 2.14.0: an automatic switch-on at dusk puts the lamp's own room first, without a pause; the step budget removes
   15 to 21 ms frames during the drain after a load (frame times not yet measured).
 - Room 0 of the ground story of a lot with many lights is restarted repeatedly by the game (caller `0x006C7451`); how

@@ -15,7 +15,10 @@ fragmentation can leave no sufficiently large free block even while physical RAM
 ## How Apex Radiance solves it
 
 The existing address-space worker collects a sample every 10 seconds at below-normal thread priority, independent
-of rendering in builds containing development tools, only when developer mode is enabled at startup. No rendering hook performs the scan.
+of rendering. It runs only in builds containing development tools: when developer mode is enabled at startup, or in a
+numbered development-flavour build (`APEX_DEVELOPMENT_BUILD_FLAVOR`) whose `measurements` switch is on, which also
+installs the address-space owner ledger and the game allocation categories. Those two measurements exist only in
+development-flavour builds. Players' builds never start the worker. No rendering hook performs the scan.
 Each session writes `MemoryAnalysis-<pid>-<date>-<time>.csv` in the Apex Radiance documents folder. Files stop growing
 at 16 MiB per session; log and profiler snapshots continue. Previous sessions remain available for comparison.
 
@@ -26,7 +29,10 @@ tracked Apex high-allocator bytes, net private growth from baseline, scan durati
 
 ## Settings
 
-There is no new menu control. Builds without development tools do not start the observer. Logs identify the full
+There is no menu control. Builds without development tools do not start the observer. In development-flavour builds,
+`measurements` in the `[dev_build]` table of `ApexRadiance.toml` (bool, default on in those builds, off and not
+compiled in released builds) turns the owner ledger, the allocation categories and the observer on without developer
+mode; see [workflow.md](../workflow.md). Logs identify the full
 development version; `tools/development/build-test.ps1` creates numbered artifacts and increments the development
 suffix when the corresponding artifact already exists. The menu uses the same version string.
 

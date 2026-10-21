@@ -1790,6 +1790,28 @@ IDirect3DTexture9* LotMaskForImpl(IDirect3DDevice9* dev, const float k[4], const
     return LotMaskTexture(dev, *r);
 }
 // The lot's mask texture (room mask, lamp shade in alpha), checked again every 500 ms; white while it has none
+// (left_lot_release) The texture of a lot no draw asked for in kIdleMaskMs (managed: a copy in RAM besides video memory) is
+// given back; its room mask and lamp shade stay, so its next draw makes the same texels again at once (LotMaskTexture:
+// dirty -> MakeMaskTexture from m.room and m.shade, in that same draw) and the shade on the world grass (m.ext) is untouched.
+// Render thread, every 10 s.
+void ReleaseIdleMaskTextures() {
+    constexpr DWORD kIdleMaskMs = 120000;
+    static DWORD s_at = 0;
+    const DWORD now = GetTickCount();
+    if (!DevSwitches::LeftLotRelease() || (s_at && now - s_at < 10000)) return;
+    s_at = now | 1;
+    uint64_t bytes = 0;
+    int n = 0;
+    for (auto& [lot, m] : g_lotMasks)
+        if (m.tex && now - m.lastUse > kIdleMaskMs) {
+            m.tex->Release();
+            m.tex = nullptr;
+            m.dirty = true;
+            bytes += static_cast<uint64_t>(m.w) * m.h * 4;
+            n++;
+        }
+    if (n) ApexMemory::NoteReleased("Lot shade: mask textures of lots not drawn for 2 minutes (made again at their next draw)", bytes);
+}
 IDirect3DTexture9* LotMaskTexture(IDirect3DDevice9* dev, const LotRect& rect) {
     const LotRect* const r = &rect;
     const uint64_t lot = (static_cast<uint64_t>(r->lotHi) << 32) | r->lotLo;
@@ -6857,9 +6879,33 @@ const ShaderPatches::RigPsInfo& RigPsInfoFor(IDirect3DPixelShader9* ps) {
 }
 // Development build: what happened to room-mode furniture draws (for the F6 recorder, FurnitureDiag)
 std::atomic<long> g_fdMode0{0}, g_fdInactive{0}, g_fdNoChain{0}, g_fdUnlitSlots{0}, g_fdLampSlots{0};
+// The hue of a room's ambient (+0x110, the colour its walls and floors take as c4), at luma 1: each channel at most
+// kFurnitureChromaMax (a far pure-blue lamp gave x3.6 blue), by bringing the hue towards white at the same luma (never
+// darker); false when the room is unknown, unreadable or its ambient has no light. It replaces the Blue tint in a lit
+// room: the tint is the unlit-room colour's
+constexpr float kFurnitureChromaMax = 1.5f;
+bool RoomAmbientChroma(const void* room, float* chroma) {
+    if (!room) return false;
+    float c[3];
+    __try {
+        std::memcpy(c, static_cast<const BYTE*>(room) + 0x110, sizeof c);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    const float luma = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+    if (!(luma > 1e-5f) || !std::isfinite(luma)) return false;
+    // the hue at luma 1, then brought towards white until no channel passes the cap (1 + s (chroma - 1) keeps luma 1)
+    float top = 0.0f;
+    for (int k = 0; k < 3; k++) top = std::max(top, chroma[k] = std::max(c[k], 0.0f) / luma);
+    if (top > kFurnitureChromaMax) {
+        const float s = (kFurnitureChromaMax - 1.0f) / (top - 1.0f);
+        for (int k = 0; k < 3; k++) chroma[k] = 1.0f + s * (chroma[k] - 1.0f);
+    }
+    return std::isfinite(chroma[0] + chroma[1] + chroma[2]);
+}
 // The furniture draw with the rig's unlit-room lights, the vertex lights and the cube weight turned (rig = PS c0..c7 or
-// null when the shader has no rig chain)
-template <typename DrawFn> D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice9* dev, DrawFn draw, const ShaderPatches::RigPsInfo& info, const float (*rig)[4]) {
+// null when the shader has no rig chain; chroma: the room's ambient hue for the fill, or null)
+template <typename DrawFn> D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice9* dev, DrawFn draw, const ShaderPatches::RigPsInfo& info, const float (*rig)[4], const float* chroma) {
     float psOld[4][4] = {}, vsOld[4][4] = {}, cubeOld[4] = {}, t[4][4], cube[4];
     bool psSet = false, vsSet = false, cubeSet = false;
     // PS c0..c3 = the slots' directions, c4..c7 their colours (each slot tested with its direction: fill and [NoLight]
@@ -6868,7 +6914,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice
         std::memcpy(psOld, rig[4], sizeof psOld);
         std::memcpy(t, psOld, sizeof t);
         for (int k = 0; k < 4; k++) {
-            const bool turned = UnlitRooms::FurnitureColour(t[k], rig[k]);
+            const bool turned = UnlitRooms::FurnitureColour(t[k], rig[k], chroma);
             psSet |= turned;
             if (!kPublicBuild)
                 if (psOld[k][0] + psOld[k][1] + psOld[k][2] > 1e-6f) (turned ? g_fdUnlitSlots : g_fdLampSlots).fetch_add(1, std::memory_order_relaxed);
@@ -6882,7 +6928,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice
     if (vl >= 4 && SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(vl - 4), &vsDir[0][0], 4)) &&
         SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(vl), &vsOld[0][0], 4))) {
         std::memcpy(t, vsOld, sizeof t);
-        for (int k = 0; k < 4; k++) vsSet |= UnlitRooms::FurnitureColour(t[k], vsDir[k]);
+        for (int k = 0; k < 4; k++) vsSet |= UnlitRooms::FurnitureColour(t[k], vsDir[k], chroma);
         if (vsSet) SetVsConst(dev, static_cast<UINT>(vl), &t[0][0], 4);
     }
     if (info.cubeWeightConst >= 0 && SUCCEEDED(dev->GetPixelShaderConstantF(static_cast<UINT>(info.cubeWeightConst), cubeOld, 1))) {
@@ -7038,6 +7084,16 @@ struct RigSnap {
 std::unordered_map<uint64_t, RigSnap> g_rigSnaps; // (rig, vertex-light register) -> its lights before a switch (render thread)
 std::atomic<long> g_rigHeldDraws{0};
 constexpr DWORD kRigSnapFreshMs = 2000;
+// (HoldRig) the time a part waits from an edit's start for its room to be marked
+constexpr DWORD kRigMarkGraceMs = 400;
+std::atomic<long> g_rigGraceHeld{0};
+// LevelLightShare::LampEditPending, read once a frame (it takes the urgent list's lock; HoldRig runs per draw)
+bool EditPendingThisFrame() {
+    static uint32_t s_frame = ~0u;
+    static bool s_pending = false;
+    if (s_frame != g_roomMapFrame) s_frame = g_roomMapFrame, s_pending = LevelLightShare::LampEditPending();
+    return s_pending;
+}
 // g_rigSnaps bounds: past kRigSnapsMax entries they are all dropped, past kRigSnapsEpisodeMax during an episode (whose
 // pre-episode snapshots a drop would lose). Outside an episode, OnPresent drops every kRigSnapSweepMs the parts not drawn
 // for kRigSnapKeepMs: HoldRig uses a snapshot only up to kRigSnapFreshMs + 4000 ms before the episode or the switch.
@@ -7082,11 +7138,13 @@ struct RigHeld {
     float psGame[8][4];
     float vsGame[8][4];
 };
+// rig: the pixel shader's rig lights c0..c7, or null for a part whose shader has no rig chain (its vertex lights alone)
 void HoldRig(IDirect3DDevice9* dev, float (*rig)[4], RigHeld& h) {
     const uintptr_t rp = RigTracker::CurrentRig();
     if (!rp) return;
     const int vl = g_curVsInfo ? g_curVsInfo->patched.vertexLight : -1;
-    const uint64_t key = (static_cast<uint64_t>(rp) << 8) ^ static_cast<uint64_t>(vl & 0xFF);
+    // (a part without a rig chain has a snapshot of its own: one with a chain of the same rig must never restore its zeros)
+    const uint64_t key = ((static_cast<uint64_t>(rp) << 8) ^ static_cast<uint64_t>(vl & 0xFF)) | (rig ? 0 : 1ull << 63);
     const DWORD now = GetTickCount();
     const unsigned long lastSwitch = LampMarkFilter::SwitchLastTick();
     const bool withRoom = TesterToggles::furnitureWithRoom.load(std::memory_order_relaxed);
@@ -7104,6 +7162,14 @@ void HoldRig(IDirect3DDevice9* dev, float (*rig)[4], RigHeld& h) {
     if (withRoom) {
         const void* room = episode ? ObjectLightBridge::RigRoom(rp) : nullptr;
         wait = room && (AtriumHold::AllAtOnce() ? RoomShowsOldLightCached(room) : RoomLightQueue::AwaitingSwitchLight(room));
+        // The game updates a rig at once, while its room is marked only when LevelLightShare sends it (about 140 ms after the
+        // edit): for kRigMarkGraceMs from the episode's start, while a lamp edit is pending, a part waits as if its room
+        // were marked. A part whose room the edit does not change shows the same lights either way; after the grace a room
+        // still not marked shows the new lights, as before.
+        if (!wait && room && g_rigEpisodeOn && now - g_rigEpisodeTick < kRigMarkGraceMs && EditPendingThisFrame()) {
+            wait = true;
+            g_rigGraceHeld.fetch_add(1, std::memory_order_relaxed);
+        }
     } else { // (2.13.0: switches only)
         const void* room = LampMarkFilter::SwitchActive() || AtriumHold::SwitchHolding() ? ObjectLightBridge::RigRoom(rp) : nullptr;
         // switches all at once: until the whole switch is released with the rooms' maps (AtriumHold); else until its own room ends.
@@ -7125,7 +7191,8 @@ void HoldRig(IDirect3DDevice9* dev, float (*rig)[4], RigHeld& h) {
             s.preTick = s.tick;
             s.preEpisode = g_rigEpisodeFrame;
         }
-        std::memcpy(s.ps, rig, sizeof s.ps);
+        if (rig) std::memcpy(s.ps, rig, sizeof s.ps);
+        else std::memset(s.ps, 0, sizeof s.ps);
         s.haveVs = vl >= 4 && SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(vl - 4), &s.vs[0][0], 8));
         if (s.preEpisode == g_rigEpisodeFrame && g_rigEpisodeOn &&
             (std::memcmp(s.ps, s.prePs, sizeof s.ps) != 0 || (s.haveVs && std::memcmp(s.vs, s.preVs, sizeof s.vs) != 0)))
@@ -7158,7 +7225,7 @@ void HoldRig(IDirect3DDevice9* dev, float (*rig)[4], RigHeld& h) {
             snapTick = s.preTick;
         }
         if (static_cast<int32_t>(g_rigEpisodeTick - snapTick) > static_cast<int32_t>(kRigSnapFreshMs + 4000)) return; // (long before the edit)
-        const uint64_t game = RigHash(rig);
+        const uint64_t game = rig ? RigHash(rig) : 1;
         if (game != s.heldGame) { // the game's lights of this part changed while held: a change not shown
             if (s.heldGame) g_rigEpisodeChanges++;
             s.heldGame = game;
@@ -7167,10 +7234,12 @@ void HoldRig(IDirect3DDevice9* dev, float (*rig)[4], RigHeld& h) {
         g_rigEpisodeLastHeld = now;
     } else if (static_cast<int32_t>(s.tick - lastSwitch) >= 0 || lastSwitch - s.tick > kRigSnapFreshMs + 4000)
         return; // taken before the latest switch (the hold covers every switch since its first), and not long before it
-    std::memcpy(h.psGame, rig, sizeof h.psGame);
-    SetPsConst(dev, 0, &snapPs[0][0], 8);
-    std::memcpy(rig, snapPs, sizeof s.ps);
-    h.ps = true;
+    if (rig) {
+        std::memcpy(h.psGame, rig, sizeof h.psGame);
+        SetPsConst(dev, 0, &snapPs[0][0], 8);
+        std::memcpy(rig, snapPs, sizeof s.ps);
+        h.ps = true;
+    } else if (!snapHaveVs) return; // (nothing of it to hold)
     if (snapHaveVs && vl >= 4 && SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(vl - 4), &h.vsGame[0][0], 8))) {
         SetVsConst(dev, static_cast<UINT>(vl - 4), &snapVs[0][0], 8);
         h.vs = true;
@@ -7196,6 +7265,9 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInner(IDirect3DDevice9* d
     const bool haveRig = info.rigLights && SUCCEEDED(dev->GetPixelShaderConstantF(0, &rig[0][0], 8));
     RigHeld held;
     if (haveRig) HoldRig(dev, rig, held); // a lamp switch's furniture: the lights from before it until its room shows the new light
+    // a part whose shader has no rig chain is lit by its vertex lights alone (about a quarter of the room-mode draws): those
+    // are held the same way, or the part led its room by up to a third of a second
+    else if (!info.rigLights && g_curVsInfo && g_curVsInfo->patched.vertexLight >= 4) HoldRig(dev, nullptr, held);
     bool dark = false;
     for (int k = 0; k < 4 && haveRig && !dark; k++) dark = UnlitRooms::IsDarkRoomLight(rig[4 + k], rig[k]);
     UnlitRooms::SetDrawDark(dark);
@@ -7210,7 +7282,9 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInner(IDirect3DDevice9* d
     const bool active = UnlitRooms::FurnitureActive();
     const float tint = active ? UnlitRooms::FurnitureTint() : 1.0f, ambient = active ? UnlitRooms::FurnitureAmbient() : 1.0f;
     D3D9Hooks::HookAction r;
-    if (active) r = OnDrawFurniture(dev, draw, info, haveRig ? rig : nullptr);
+    float chroma[3];
+    const bool hued = active && !dark && RoomAmbientChroma(ObjectLightBridge::RigRoom(RigTracker::CurrentRig()), chroma);
+    if (active) r = OnDrawFurniture(dev, draw, info, haveRig ? rig : nullptr, hued ? chroma : nullptr);
     else {
         if (!kPublicBuild) g_fdInactive.fetch_add(1, std::memory_order_relaxed);
         r = OnDrawInnerCore(dev, draw);
@@ -7219,7 +7293,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInner(IDirect3DDevice9* d
         const int path = static_cast<long>(g_indoorDrawn.load()) != aBefore ? 1 : g_nightFurniture.load() != bBefore ? 2 : 0;
         TraceFurniture(dev, haveRig ? rig : nullptr, info.rigLights, path, dark, active, tint, cubeGame, cubeGame >= 0.0f ? cubeGame * ambient : cubeGame);
     }
-    if (held.ps) {
+    if (held.ps || held.vs) {
         if (r == D3D9Hooks::HookAction::Continue) { // the game's own draw, made here while its lights are held
             g_inOwnCall = true;
             draw();
@@ -8123,6 +8197,7 @@ std::string ExteriorCaptureStatus() { return g_exteriorPending ? "capturing..." 
 void OnPresent() {
     if (DevSwitches::kCompiled) MeasureMemory(); // development builds (memory_owners)
     PumpSolidMeshes();
+    ReleaseIdleMaskTextures(); // (left_lot_release, every 10 s)
     ++g_roomMapFrame; // (the room map size memo is per frame)
     g_lotDrawTick = GetTickCount();
     // the furniture's lamp edit episode is over once no switch, edit hold or trailing room remains (2.13.1: one log line)
@@ -8131,9 +8206,10 @@ void OnPresent() {
         g_rigEpisodeOn = false;
         if (!g_rigEpisodeParts.empty() || g_rigEpisodeLate > 0) {
             const std::string text = std::format("Lamp edit furniture: {} object parts kept their lights until their room showed the new light, shown with it {} ms after the edit "
-                                                 "({} light changes of theirs not shown; {} parts had shown new lights before their room waited, left as they were)",
+                                                 "({} light changes of theirs not shown; {} parts had shown new lights before their room waited, left as they were; "
+                                                 "{} draws held before their room was marked)",
                                                  g_rigEpisodeParts.size(), g_rigEpisodeLastHeld ? g_rigEpisodeLastHeld - g_rigEpisodeTick : 0, g_rigEpisodeChanges,
-                                                 g_rigEpisodeLate);
+                                                 g_rigEpisodeLate, g_rigGraceHeld.exchange(0));
             LOG_INFO("[LotLightBridge] " + text);
             if (Recorder::Active()) Recorder::Note("[switch] " + text);
         }

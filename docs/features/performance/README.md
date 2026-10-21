@@ -11,7 +11,7 @@ frames while the camera moves.
 
 | | |
 |---|---|
-| Availability | Released. The individual switches were introduced between 2.1.0 and 2.7.0 (see the table below); the first twelve are on by default since 2.5.5. The single Overview switch for the group: Released in 2.6.0, covering fifteen switches since 2.7.0. Room to save, Lighter window updates and Faster scripts: Experimental, released in 2.7.0. Lamp lighting card: Released in 2.13.0 |
+| Availability | Released. The individual switches were introduced between 2.1.0 and 2.7.0 (see the table below); the first twelve are on by default since 2.5.5. The single Overview switch for the group: Released in 2.6.0, covering fifteen switches since 2.7.0. Room to save, Lighter window updates and Faster scripts: Released in 2.7.0 (Experimental until 2.15.0). Lamp lighting card: Released in 2.13.0 |
 | Default | All fifteen on when no saved choice exists. An explicit saved off choice stays off. The Lot Streaming switches are off by default |
 | Menu | System > Performance (cards *Lamp lighting*, *Camera and lighting*, *Files and objects*, *Textures and Sims*, *Memory handling*, *Game and scripts*); System > Lot Streaming; Overview > Performance (one switch for the fifteen) |
 | Configuration | One `[patches.<Name>]` table per switch in `ApexRadiance.toml` |
@@ -70,9 +70,9 @@ Every switch works at the exact game function behind one measured cost, and foll
 | Faster cache compression (includes record checksums) | Textures and Sims | 2.1.0 or earlier; checksums 2.4.0 | [fast-cache-compression.md](fast-cache-compression.md) |
 | Faster Sim building | Textures and Sims | 2.3.0 | [fast-cas-sort.md](fast-cas-sort.md) |
 | Faster memory handling | Memory handling | 2.4.0 | [fast-memory.md](fast-memory.md) |
-| Room to save (Experimental) | Memory handling | 2.7.0 | [room-to-save.md](room-to-save.md) |
-| Lighter window updates (Experimental) | Game and scripts | 2.7.0 | [lighter-window-updates.md](lighter-window-updates.md) |
-| Faster scripts (Experimental) | Game and scripts | 2.7.0 | [faster-scripts.md](faster-scripts.md) |
+| Room to save | Memory handling | 2.7.0 | [room-to-save.md](room-to-save.md) |
+| Lighter window updates | Game and scripts | 2.7.0 | [lighter-window-updates.md](lighter-window-updates.md) |
+| Faster scripts | Game and scripts | 2.7.0 | [faster-scripts.md](faster-scripts.md) |
 
 The System > Lot Streaming page holds five more switches, off by default (Extended lot detail, Smooth lot streaming,
 Keep lot visibility stable, Pause lot streaming in map view, Spread lot objects while loading; Experimental, 2.7.0,
@@ -91,7 +91,14 @@ Several 2.14.0 behaviours also have no switch of their own; they follow the swit
 - the early save preparation in front of sims3-modernization's save detour, with *Room to save*
   ([room-to-save.md](room-to-save.md#compatibility-and-interactions));
 - lamp-visibility memo, liveness pruning and buffer reads without waiting for the GPU, with Night Lights
-  ([level-light-share.md](../night-lighting/level-light-share.md#cost)).
+  ([level-light-share.md](../night-lighting/level-light-share.md#cost));
+- memory given back once only a lot that is no longer loaded could use it, with Night Lights: the kept parts of
+  [Quick outdoor lamp edits](../night-lighting/outdoor-lamp-delta.md) for rooms whose story manager no loaded lot holds
+  (dropped at the second 10 s sweep in a row that misses it, never while a world loads), the CPU copy of
+  [Real-time outdoor lamps](../night-lighting/rt-outdoor-lamps.md)' occluders once they are uploaded, and the lot mask
+  texture of a lot not drawn for 2 minutes, made again from its kept masks at its next draw with the same texels
+  (`SweepLeftLots` in [`outdoor_delta.cpp`](../../../features/outdoor_delta.cpp), `ReleaseIdleMaskTextures` in
+  [`lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp)).
 
 Their maintainer-side switches are listed in [workflow.md](../../workflow.md#development-switches-dev_build).
 
@@ -123,7 +130,7 @@ one row, *Lamp updates*, has two modes:
 | Mode | Row description | What runs |
 |---|---|---|
 | *Instant (GPU)* (default) | "Your graphics card updates outdoor lamp light instantly; moving lamps may dip FPS a little" | [Real-time outdoor lamps](../night-lighting/rt-outdoor-lamps.md) draws the active lot's outdoor lamps and their shadows on the graphics card, on the kept parts of [Quick outdoor lamp edits](../night-lighting/outdoor-lamp-delta.md); indoor lamps use the game's calculation |
-| *Classic* | "Lighter: lamp light updates after you release or change a lamp" | The game's room solves with every correction; a dragged lamp's rooms are solved once after the release ([lamp drags](../night-lighting/lamp-drags.md#classic-relight-only-after-release)) and an edit's stories change together ([Faster room lighting](room-light-queue.md#classic-show-all-floors-together)) |
+| *Classic* | "Easier on the graphics card; light updates once you let go of a lamp" | The game's room solves with every correction; a dragged lamp's rooms are solved once after the release ([lamp drags](../night-lighting/lamp-drags.md#classic-relight-only-after-release)) and an edit's stories change together ([Faster room lighting](room-light-queue.md#classic-show-all-floors-together)) |
 
 A warning note under the row says why Instant cannot run on the device (another game version than Steam 1.67.2, a
 graphics card that cannot draw the shadows, or shaders that could not start); the lamps then work as Classic, and once
@@ -133,7 +140,8 @@ the card shows *Needs Night Lights (Lighting page)* and a button to turn it on. 
 once. The GPU time of the last lamp edit is on Developer > [Tester](../dev-tools/tester.md).
 
 Setting: `lampLightingMode` (`"classic"` or `"instant"`, default `"instant"`) under `[patches.NightTerrainRelight]`; a
-saved value is kept, and a file without the key starts on Instant. Source: `LampLightingCard` in
+saved value is kept, and a file without the key starts on Instant. Presets carry it in the Performance part (the key is
+taken out of Night Lights' table for a Lighting-only preset). Source: `LampLightingCard` in
 [`apex_gui.cpp`](../../../apex_gui.cpp).
 
 ## Settings
@@ -143,10 +151,11 @@ Each switch's settings are documented once, on its own page. The group-level con
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Overview > Performance | (none: sets the fifteen `enabled` keys) | bool | on when all fifteen are on | | Turns all fifteen on or off; a switch the game version does not have counts neither as on nor as off. Turning on enables *Faster game file lookups* before *Remember missing files*; turning off stops them in the reverse order. Not switchable while the game is loading |
-| Overview > All effects | (none) | bool | | | Also turns the Performance group on or off |
+| Overview > All effects | (none) | bool | | | Also turns the Performance group on or off; turning everything off leaves Room to save on (it protects saves and changes nothing on screen) |
 | (row switch on each page) | `[patches.<Name>] enabled` | bool | on | | A missing key reads as on; an explicit `false` stays off |
 
-Room to save, Lighter window updates and Faster scripts show an Experimental badge. Each row's hover text is the
+No row of this page shows an Experimental badge: Room to save, Lighter window updates, Faster scripts and the two
+sub-rows of *Faster room lighting*, on by default since 2.7.0, lost it in 2.15.0. Each row's hover text is the
 switch's description, ending with the credit.
 
 ## Compatibility and interactions

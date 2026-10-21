@@ -9,7 +9,7 @@ frame, once the new light is ready. The final lighting is the game's own.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lamp switches all at once and Quick update for lamp switches (both Experimental), an atrium's stories changing together and the quick return of empty light object removals: Released in 2.7.0. Lamp edits all at once (was *Lamp switches all at once*; every lamp edit, the lamp's own story shown first) and shorter waits for an edit's rooms: Released in 2.12.3. Classic: show all floors together (Lamp lighting Classic): Released in 2.13.0. Automatic lamps first and the step budget of the extra solves: Released in 2.14.0 |
+| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lamp switches all at once and Quick update for lamp switches (Experimental until 2.15.0), an atrium's stories changing together and the quick return of empty light object removals: Released in 2.7.0. Lamp edits all at once (was *Lamp switches all at once*; every lamp edit, the lamp's own story shown first) and shorter waits for an edit's rooms: Released in 2.12.3. Classic: show all floors together (Lamp lighting Classic): Released in 2.13.0. Automatic lamps first and the step budget of the extra solves: Released in 2.14.0 |
 | Default | On |
 | Menu | System > Performance > Camera and lighting > *Faster room lighting* |
 | Configuration | `[patches.RoomLightQueue]` in `ApexRadiance.toml` |
@@ -45,8 +45,8 @@ the stories of an atrium (a double-height room is one room per story) always cha
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Faster room lighting | `[patches.RoomLightQueue] enabled` | bool | on | | Turns all six changes and the lamp switch parts on. A missing key reads as on |
-| Lamp edits all at once (Experimental; was *Lamp switches all at once*) | `[patches.RoomLightQueue] switchAllAtOnce` | bool | on | | After any lamp edit the lamp's own story shows its new light when solved, and the other stories change in one frame once their final light is ready (see "Lamp edits all at once" below); the quick pass is not used meanwhile |
-| Quick update for lamp switches (Experimental; shown only while the row above is off) | `[patches.RoomLightQueue] quickPass` | bool | on | | An approximate light first, refined room by room |
+| Lamp edits all at once (was *Lamp switches all at once*) | `[patches.RoomLightQueue] switchAllAtOnce` | bool | on | | After any lamp edit the lamp's own story shows its new light when solved, and the other stories change in one frame once their final light is ready (see "Lamp edits all at once" below); the quick pass is not used meanwhile. With Lamp lighting Classic every story, the lamp's own included, changes in the same frame ("Classic: show all floors together" below). Needs the solve hooks of Night Lights' *Outdoor light between floors* |
+| Quick update for lamp switches (shown only while the row above is off) | `[patches.RoomLightQueue] quickPass` | bool | on | | An approximate light first, refined room by room |
 
 ### Lamp edits all at once
 
@@ -81,8 +81,10 @@ the lamp's own story too; moves and value edits then showed the stories one at a
 - Log, one line per hold: `[AtriumHold] Lamp edit: own story shown N ms, others released together M ms (K maps, B MB;
   complete|timeout|cap)`. Recordings note `[switch] lamp edit shown all at once, N ms ...`. The status line counts holds,
   timeouts, cap releases and the most maps one hold kept.
-- It needs both solve hooks (the end `0x006A3E65`, Steam 1.67.2 only, and the lock step): without them every story
-  changes as it is solved, as with the option off (`AtriumHold::AllAtOnce`). Turning Faster Room Lighting off ends any
+- It needs both solve hooks (the end `0x006A3E65`, Steam 1.67.2 only, and the lock step), which
+  `LevelLightShare::InstallIndoor` installs with Night Lights' *Outdoor light between floors*
+  (`luzExternaEntreAndares`; `LevelLightShare::SolveHooksReady`): with Night Lights or that option off, or without the
+  hooks, every story changes as it is solved, as with the option off (`AtriumHold::AllAtOnce`). Turning Faster Room Lighting off ends any
   hold and stops new ones (`AtriumHold::Clear`); a world change clears the urgent rooms, so the hold releases at once.
 
 ### Classic: show all floors together
@@ -122,10 +124,23 @@ one change for every floor, shown once it is final, is the intended result.
 - An urgent room stays urgent while it still waits for or is in its solve (states 1 to 3), at most 8 s after its latest
   mark (`RoomAmbientPolicy::UrgencyKept`); the "settled" log line ends with `ended: complete` or `ended: urgency expired`.
 - A move's safety net comes 200 ms after it (was 300 ms), the drag's quiet time.
+- An edit's room on another lot than the one being played (a lamp the game disables or enables there, a Sim's switch, a
+  neighbour's dusk) keeps an urgency of at most 1000: after the played lot's camera story (x4000) and the stories below
+  it (x2000), before every other room. Its urgency on any lot had every room of the played lot wait behind it. The
+  played lot's own edits keep their whole urgency. The status line counts these as "edit priorities of other lots kept
+  below the played lot's".
+- A lamp edit is pending (`LevelLightShare::LampEditPending`: the drain's edit pacing, the edit hold, the drag settle)
+  only while a room of the high-quality lot waits; the game switching lamps of another lot no longer keeps them going.
+- Room 0 takes the first tier only on the camera's story (or when the edited lamp is its own); room 0 of another story
+  takes the second, ordered by story with the other rooms.
+- Lamps registering before the world is live (the load screen) are not a lamp edit.
+- Furniture of an edit (*Lamp edits all at once*): for 400 ms from the edit's start, while it is pending, a part waits as
+  if its room were marked (the game updates the rig at once, the room is marked about 140 ms later), and parts lit only by
+  their vertex lights (no rig chain in their pixel shader) are held too, so an object and its floor change together.
 
 ### Quick update for lamp switches
 
-Used only while *Lamp switches all at once* is off (`quickPass`, once per room and switch). After a player's switch
+Used only while *Lamp edits all at once* is off (`quickPass`, once per room and switch). After a player's switch
 (`LampMarkFilter::SwitchActive`: a lamp switched on or off where it is, not a light switching itself, not at dusk or
 dawn; switches less than 1.5 s apart are one event, `SwitchEventId`), the priority hook puts a lamp edit's room that is
 still waiting (state 2) at a class above 0 back to class 0 before the game reads its priority. Class 0 is the game's own
@@ -179,6 +194,11 @@ and feeds this queue.
   budget; the first step of a frame always runs, so the queue still advances. Lamp edits, held edits and urgent rooms
   keep the earlier pacing. The budget in the first seconds after a load is 6 ms (was 12 ms). Each room's light is still
   the game's complete solve; only the frame in which a room finishes can move.
+- **Lot entry.** The settle window (`LevelLightShare::SettlingAfterLoad`: 15 s after the world goes live) also opens for
+  10 s when another lot becomes the high-quality lot, the camera entering it or coming back
+  (`[LevelLightShare] Lot <tracker> entered`): the extra solves take the settle budget instead of 4 ms (1 ms while the
+  camera moves), and the played lot keeps the game's budget while the camera moves. Lamps the lot adds or removes then are
+  not lamp edits, as after a load.
 
 ## Compatibility and interactions
 

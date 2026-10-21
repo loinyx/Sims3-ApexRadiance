@@ -204,7 +204,7 @@ bool g_groundShade = true;      // (14/10) walls shade lamp light on lot ground,
 bool g_smoothRoomMaps = true;   // (2.12.4) room light maps: soft light cut, dither, B-spline reads (LevelLightShare::SetSoftLightCut, RoomMapDither, ShaderPatches)
 int g_lightDetail = 0;          // lighting texels per metre on walls and floors: 0 the game's, 1 twice (LightDetail; read at startup)
 bool g_unlitOn = true;           // rooms with every lamp off: Apex's light instead of the game's blue glow (UnlitRooms)
-float g_unlitLight = 0.35f;      // how much of the game's unlit-room light stays
+float g_unlitLight = 0.20f;      // how much of the game's unlit-room light stays
 float g_unlitBlue = 0.0f;        // how much of its blue tint (0 = grey)
 bool g_objPixel = true;
 bool g_objPixelLights = true;          // outdoor rig objects: world lamps per pixel (seamless modular pieces)
@@ -1950,7 +1950,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             S3SS_TR("Forca da luz das lampadas nos telhados.", "How strongly lamps light roofs."));
         RegisterBoolSetting(&g_unlitOn, "comodosEscurosSemLuz", true,
             "Rooms with every lamp off keep only a little light (set below) instead of the game's blue glow.");
-        RegisterFloatSetting(&g_unlitLight, "luzQueSobraNosComodos", SettingWidget::Slider, 0.35f, 0.1f, 0.8f,
+        RegisterFloatSetting(&g_unlitLight, "luzQueSobraNosComodos", SettingWidget::Slider, 0.20f, 0.1f, 0.8f,
             "How much of the game's light stays in a room with every lamp off, on walls, floors and furniture.");
         RegisterFloatSetting(&g_unlitBlue, "azulNosComodos", SettingWidget::Slider, 0.0f, 0.0f, 1.0f,
             "How blue the light left in rooms is, on walls, floors and furniture (1 = the game's blue, 0 = grey).");
@@ -2483,7 +2483,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_neutralProbeStrength = 1.0f;
         g_lightDetail = 0;
         g_unlitOn = true;
-        g_unlitLight = 0.35f;
+        g_unlitLight = 0.20f;
         g_unlitBlue = 0.0f;
         g_smoothMaps = true;
         g_smoothMapsGpu = true;
@@ -2632,7 +2632,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                 changed |= ApexUi::SwitchRow("Indoor light between floors", &g_indoorShare, "Lamps inside shine through stairwells and open floors; light bounces up the stairs", true);
                 // The game solves rooms one after the other (after a load, a change or a lamp switched), so
                 // a room can show its old light for a moment; switching floors solves the rooms shown again
-                if (g_indoorShare) ApexUi::IconNote(ApexUi::IconId::Info, "Rooms may take a few seconds to update; if one lags, change floors");
+                if (g_indoorShare) ApexUi::IconNote(ApexUi::IconId::Info, "If a room looks wrong, use Refresh lights (Overview tab)");
                 changed |= ApexUi::SwitchRow("Walls block light on floors", &g_floorWalls, "Decks and yards without a roof stay dark behind a wall", true);
                 ImGui::BeginDisabled(!g_floorWalls); // its floors rely on the walls' mask
                 changed |= ApexUi::SwitchRow("Light through doors and windows", &g_realisticOpenings, "Lamps light walled yards only through openings or over the walls",
@@ -2725,9 +2725,9 @@ class NightTerrainRelightPatch : public ApexPatch {
             ApexUi::CardHeader(IconId::Armchair, "Objects", "Lamp light on plants and outdoor furniture", nullptr, nullptr);
             ApexUi::CardDivider();
             Edit([] {
-                bool changed = ApexUi::SwitchRow("Lamps light objects", &g_objLamps, "Outdoor objects get lamp light, even in the shade of walls", true);
+                bool changed = ApexUi::SwitchRow("Lamps light objects", &g_objLamps, "Trees, bushes and outdoor objects take lamp light, even in moon shadow", true);
                 if (g_objLamps)
-                    changed |= ApexUi::SliderPercent("Brightness##Objects", &g_objStrength, 0.25f, 3.0f, "Raise it if objects look dark next to lamps", 0.75f);
+                    changed |= ApexUi::SliderPercent("Brightness##Objects", &g_objStrength, 0.25f, 3.0f, "Ground light on outdoor objects; lamps follow the walls' brightness", 0.75f);
                 changed |= ApexUi::SwitchRow("Buildings block lamp light on trees and objects", &g_objectWalls, "Trees, objects and fences behind a wall or balcony get no lamp light", true);
                 return changed;
             });
@@ -2758,7 +2758,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                     ImGui::EndDisabled();
                     changed |= ApexUi::SwitchRow("Seamless light on pieces", &g_objPixelLights, "Counters and modular pieces outside show no color steps", true);
                     if (g_objPixelLights)
-                        changed |= ApexUi::SliderPercent("Seamless light brightness", &g_objPixelLightStrength, 0.25f, 3.0f, "Intensity on counters and modular pieces", 0.75f);
+                        changed |= ApexUi::SliderPercent("Seamless light brightness", &g_objPixelLightStrength, 0.25f, 3.0f, "Lamp light on outdoor objects and trees, over the walls' brightness", 0.75f);
                     changed |= ApexUi::SwitchRow("Fences and stairs catch light", &g_fenceGround, "Fences, posts, stairs and their snow match the lit ground", true);
                     if (g_fenceGround)
                         changed |= ApexUi::SliderPercent("Fence brightness", &g_fenceGroundStrength, 0.25f, 2.0f, "Balance fences against the surrounding ground", 0.75f);
@@ -2783,7 +2783,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                 ApexUi::GroupLabel("WALLS");
                 bool changed = ApexUi::SwitchRow("Lamps light walls", &g_walls, "Outside walls near lamps get brighter; off keeps the game's dim walls", true);
                 if (g_walls)
-                    changed |= ApexUi::SliderPercent("Brightness##Walls", &g_wallStrength, 0.25f, 4.0f, "Intensity of lamp light on outside walls, by day and night", 0.30f);
+                    changed |= ApexUi::SliderPercent("Brightness##Walls", &g_wallStrength, 0.25f, 4.0f, "Lamp light on outside walls; trees and objects too with Realistic lamp reach", 0.30f);
                 ApexUi::GroupLabel("ROOFS");
                 changed |= ApexUi::SwitchRow("Lamps light roofs", &g_roofs, "Roofs no longer stay black at night; softer roof shadows too", true);
                 if (g_roofs)
@@ -2826,14 +2826,14 @@ class NightTerrainRelightPatch : public ApexPatch {
                 ApexUi::GroupLabel("BACKGROUND LIGHT");
                 bool changed = ApexUi::SwitchRow("Adjust the background light", &g_unlitOn, "Set the ambient glow indoors, with lamps on or off", true);
                 if (g_unlitOn) {
-                    changed |= ApexUi::SliderPercent("Brightness##Unlit", &g_unlitLight, 0.1f, 0.8f, "How bright that background light is, on walls and furniture", 0.35f);
+                    changed |= ApexUi::SliderPercent("Brightness##Unlit", &g_unlitLight, 0.1f, 0.8f, "How bright that background light is, on walls and furniture", 0.20f);
                     changed |= ApexUi::SliderPercent("Blue tint##Unlit", &g_unlitBlue, 0.0f, 1.0f, "0% is neutral grey, 100% is the game's blue, on walls and furniture", 0.0f);
                 }
                 return changed;
             });
             // S3SS's saved room colour: Rooms at Night already uses the game's blue in its place; removing it is on the Attention page
             if (g_unlitOn && S3SSDetect::SavedRoomAmbientOverride())
-                ApexUi::IconNote(ApexUi::IconId::Puzzle, "S3SS saves its own room color; Rooms at Night replaces it (see Attention)");
+                ApexUi::IconNote(ApexUi::IconId::Puzzle, "Sims3SettingsSetter saves its own room color; this replaces it (Attention page)");
             // 14/10, the approved player structure: lamp light through openings and its look. Each switch is one setting; the
             // parts inside them (roofed rooms taking the story below's lamps; the fade at the light cut, the dither and the
             // smooth reads) stay switchable only on Developer > Tester, on by default.
@@ -3121,7 +3121,7 @@ APEX_REGISTER_FEATURE(NightTerrainRelightPatch, {.displayName = "Night Lights",
                                                             "snow around them with smooth, warm light and no hard edges at lot borders. Part of "
                                                             APEX_PRODUCT_NAME ". Credits: @loinyx",
                                              .category = "Graphics",
-                                             .experimental = true,
+                                             .experimental = false,
                                              .enabledByDefault = true,
                                              .supportedVersions = VERSION_STEAM,
                                              .technicalDetails = NightRemakeDetails(),

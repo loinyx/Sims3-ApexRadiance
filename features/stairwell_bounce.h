@@ -102,12 +102,18 @@ inline Surface SurfaceKind(float nx, float ny, float nz) {
 // texel lacks: sqrt(1 / took) (took: the brightest light its texels took in its last solve), at least the game's value capped
 // at 1 (game; +inf when its lamps are all blocked), at most kBorrowedAdaptMax. A full 1 / took up to x4 made a room lit by a
 // sliver of a lamp on another story look lit by a lamp of its own. A measure that is not a positive finite number leaves
-// the capped game value.
-constexpr float kBorrowedAdaptMax = 2.0f;
+// the capped game value. A room that takes almost nothing (brightest texel under kAdaptFullTook) is brought up less, down to
+// none at kAdaptNoneTook: the adaptation doubled the faint residue of a far lamp (a pure blue lamp 100 m in reach gave the
+// rooms of the stories around it a blue cast at x2), where an eye sees a dark room.
+// x1.4 at most: at x2 a room lit only from another story, or through an arch, looked brighter than its neighbours
+constexpr float kBorrowedAdaptMax = 1.4f;
+constexpr float kAdaptNoneTook = 0.002f, kAdaptFullTook = 0.01f;
 inline float BorrowedAdapt(float game, float took) {
     const float keep = std::min(game, 1.0f);
-    if (took > 0.0f && std::isfinite(took)) return std::clamp(std::sqrt(1.0f / took), keep, kBorrowedAdaptMax);
-    return keep;
+    if (!(took > 0.0f) || !std::isfinite(took)) return keep;
+    const float adapt = std::clamp(std::sqrt(1.0f / took), keep, kBorrowedAdaptMax);
+    const float w = std::clamp((took - kAdaptNoneTook) / (kAdaptFullTook - kAdaptNoneTook), 0.0f, 1.0f);
+    return keep + w * (adapt - keep);
 }
 // Where a line of sight below the opening ends (Follow): the point, its surface's normal, whether it is a wall, and whether it
 // is the stair in a well with no floor (kWellLift)

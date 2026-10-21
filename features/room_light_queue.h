@@ -17,6 +17,7 @@
 //   4. More than one room per frame: the scheduler's tail jump (0x006C5E39) goes through Apex, which, on the render
 //      thread, solves the new current room at once when it belongs to the priority lot and picks the next one, until a
 //      small budget of its own is spent (4 ms, 1 ms while the camera moves).
+#include <cstdint>
 #include <string>
 
 namespace RoomLightQueue {
@@ -62,6 +63,9 @@ bool CurrentRoomUrgent();
 // Render thread: that room is being solved at a higher class than the one on screen (the quick pass's refinement): the
 // maps it writes are not the ones shown, and hold the room's light from before the edit
 bool SolveRefiningUp();
+// The lot being played (the game's priority lot), by a story manager: known = false when the game's helpers are missing or
+// differ (then the caller falls back to its own test). Any thread.
+bool PlayedLot(uintptr_t mgr, bool* known);
 // Development build: status lines
 void RenderDeveloperUI();
 }

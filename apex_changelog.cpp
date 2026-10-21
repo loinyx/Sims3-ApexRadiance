@@ -6,6 +6,28 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k2150Added[] = {
+    "Steam Deck and Linux: Proton is detected, effects need no shader compiler, and the Deck suggests the Performance preset",
+    nullptr};
+constexpr const char* k2150Improved[] = {
+    "Indoor lights update sooner when you enter a lot or change floors",
+    "Lamps on other lots no longer delay the lights of the lot you play",
+    "Furniture takes the color of its room's lamps, like the walls",
+    "Objects and their floor show a lamp's new light together",
+    "Apex frees the memory of lots you have left",
+    "Presets set every Performance option, including the lamp lighting mode; Default is now Balanced",
+    "Rooms lit through arches and stairwells are balanced, never darker than an empty room",
+    "Turning all effects off keeps Room to save on",
+    "Rooms at Night: the background light is 20% by default and in every preset",
+    "Options on by default for several versions no longer show an Experimental badge",
+    "Ambient Occlusion and Depth Blur show why they are not running",
+    nullptr};
+constexpr const char* k2150Fixed[] = {
+    "Lamp light from another floor no longer passes through the walls under an opening",
+    "Light keeps passing through arches and doors after Night Lights is turned off and on",
+    "Rooms that take almost no light stay dark, without a doubled glow",
+    nullptr};
+
 constexpr const char* k2140Added[] = {
     "Indoor light between floors: light bounces up stairwells onto the walls and floors above",
     "Realistic lamp reach lights trees and bushes from each lamp's side, through the leaves",
@@ -275,6 +297,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"2.15.0", "2026-10-21", k2150Added, k2150Improved, k2150Fixed},
     {"2.14.0", "2026-10-20", k2140Added, k2140Improved, k2140Fixed},
     {"2.13.2", "2026-10-15", k2132Added, k2132Improved, k2132Fixed},
     {"2.13.1", "2026-10-15", k2131Added, k2131Improved, k2131Fixed},

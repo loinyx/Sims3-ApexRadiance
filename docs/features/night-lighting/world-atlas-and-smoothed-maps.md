@@ -12,7 +12,7 @@ game's own sunlight and shadows untouched. Part of [Night Lighting](README.md).
 |---|---|
 | Availability | Released (part of Night Lighting since 0.1.0; GPU path default). Native solar alpha, daylight range and squared terrain lamp scales: Released in 2.6.0. A lamp switch's ground in one frame, and *Smooth ground light* switched without relighting: Released in 2.7.0 |
 | Default | On |
-| Menu | Lighting > Ground > Ground & Lots > *Smooth ground light* |
+| Menu | Lighting > Ground > Ground & Lots > Game fixes (folded) > *Smooth ground light* |
 | Configuration | `[patches.NightTerrainRelight]` `mapaDeLuzSuavizado` in `ApexRadiance.toml` |
 | Source | [`features/lightmap_smooth.cpp`](../../../features/lightmap_smooth.cpp), [`shaders/lightmap_smooth_ps.hlsl`](../../../shaders/lightmap_smooth_ps.hlsl), world terrain draw in [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) |
 
@@ -49,7 +49,7 @@ the automatic fallback.
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| Smooth ground light | `mapaDeLuzSuavizado` | bool | on | | Pushed every frame (`LightmapSmooth::SetEnabled`); off calls `Clear()` (everything released). A change only switches the draw paths between the smoothed and raw maps: it does not refresh the lighting or re-solve terrain, lots, rooms or rigs. The Doors, counters and fences options are disabled without it (no atlas) |
+| Smooth ground light | `mapaDeLuzSuavizado` | bool | on | | Pushed every frame (`LightmapSmooth::SetEnabled`); off calls `Clear()` (everything released). A change only switches the draw paths between the smoothed and raw maps: it does not refresh the lighting or re-solve terrain, lots, rooms or rigs. The ground-light rows of Lighting > Objects > Game fixes (*Doors and windows stay lit* to *Fence brightness*) are disabled without it (no atlas) |
 | Ground brightness | `brilhoNoChao` | float | 75% | 25 to 300% | Terrain lamp scale constant (see *World terrain draw*) |
 | Developer: Smooth the ground light maps on the GPU (A/B) | `mapaDeLuzSuavizadoNaGpu` | bool | on | | Registered only in developer mode; pushed every frame (`SetGpuPreferred`), applied at the next Present: a switch calls `Clear()` and the new path rebuilds every map. Normal mode always prefers the GPU and falls back to the CPU by itself |
 

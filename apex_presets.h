@@ -1,5 +1,5 @@
 #pragma once
-// Built-in profiles: Performance, Default and Quality, shipped with the mod (no file in the Profiles folder).
+// Built-in presets: Performance, Balanced and Quality, shipped with the mod (no file in the Profiles folder).
 // They are offered on the first menu open (the welcome page, [ui] start_profile_done) and in Settings > Profiles >
 // Saved profiles, where they cannot be deleted. Each one is a profile table like the files ApexConfig::SaveProfile
 // writes (feature parts only: never shortcuts or developer settings); applying goes through ApexConfig::ApplyFeatureState.
@@ -18,9 +18,9 @@ struct Preset {
 };
 
 inline constexpr int kCount = 3;
-inline constexpr int kDefault = 1; // the welcome page starts with Default selected (listed second)
+inline constexpr int kDefault = 1; // Balanced (listed second)
 
-const Preset& Get(int index); // 0 = Performance, 1 = Default, 2 = Quality
+const Preset& Get(int index); // 0 = Performance, 1 = Balanced, 2 = Quality
 bool Read(int index, toml::table& out, std::string* error = nullptr);
 
 } // namespace ApexPresets

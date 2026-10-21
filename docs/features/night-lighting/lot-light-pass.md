@@ -10,9 +10,9 @@ border. Near the border the two sides blend over 3 m, so a lamp standing next to
 |---|---|
 | Availability | Released (part of Night Lighting since 0.1.0). Lot UV alignment, daylight terrain term and the constant-read guard: Released in 2.6.0. Rain and other weather variants recognised (exact rain variant and by structure): Released in 2.7.0. Lamp shade on lot ground (*Walls shade lamp light near the ground*) and lamps through the outside walls' openings: Released in 2.13.0. Crown shade from trees and bushes: Released in 2.14.0 |
 | Default | On |
-| Menu | Lighting > Ground > Ground & Lots > *Street lamps light lots* |
+| Menu | Lighting > Ground > Ground & Lots > *Game fixes* (folded) > *Street lamps light lots* |
 | Configuration | `[patches.NightTerrainRelight]` `luzDoPosteNaGramaDoLote` in `ApexRadiance.toml` |
-| Source | [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`kReplacementHlsl`, lot branch of `OnDrawInnerCore`), [`patches/night_terrain_relight_patch.cpp`](../../../patches/night_terrain_relight_patch.cpp) (experimental game patches) |
+| Source | [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`kReplacementHlsl`, lot branch of `OnDrawInnerCore`), [`patches/night_terrain_relight_patch.cpp`](../../../patches/night_terrain_relight_patch.cpp) (game patches in Individual options) |
 
 ## The problem
 
@@ -70,9 +70,9 @@ kept, never the game's bytecode. The snowy and melting-snow lot passes are separ
 | Ground brightness | `brilhoNoChao` | float | 75% | 25 to 300% | Night-weighted scale of c3.x |
 | Lot lamp brightness | `forcaDasLampadasDoLote` | float | 80% | 25 to 300% | Night-weighted scale of the lot's own map (c31.x) |
 | Developer: Soft lot edges (A/B) | `bordaSuaveLote` | bool | on | | Registered only in developer mode (always on otherwise); pushed every frame (`SetSoftLotEdges`) |
-| Individual options | `gramaDoLoteUsaLuzDoLote` | bool | off | | Experimental; see *Experimental game patches* |
+| Individual options | `gramaDoLoteUsaLuzDoLote` | bool | on | | See *Game patches in Individual options* |
 | Individual options | `qualidadeAltaEmTodosOsLotes` | bool | off | | Experimental |
-| Individual options | `postesAcesosNoCalculo` | bool | off | | Experimental |
+| Individual options | `postesAcesosNoCalculo` | bool | on | | See *Game patches in Individual options* |
 
 The full table is in the [Night Lighting overview](README.md#settings).
 
@@ -258,13 +258,15 @@ CPU-solved lot map. When VS c12.x is finite, in (0, 1] and equal to c12.y, c31.z
 `lotUv x 64/63 - c12 x 16/63 = local xz x c12`. Light intensity and texture read count are unchanged; the world atlas and
 the CPU light map are untouched. Other VS layouts get c31.zw = 0 (native coordinates).
 
-### Experimental game patches (Individual options, off by default)
+### Game patches in Individual options
 
-Each was one of the failed attempts recorded in the history and is kept as a switch.
+Each started as one of the attempts recorded in the history and is kept as a switch. `postesAcesosNoCalculo` and
+`gramaDoLoteUsaLuzDoLote` are on by default; `qualidadeAltaEmTodosOsLotes` is off and stays experimental. A change of
+any of them reinstalls the patch.
 
 | Key | Site | What it does |
 |---|---|---|
-| `postesAcesosNoCalculo` | 0x006BE18C `movaps xmm0,[esi+0E0h]` (`0F 28 86 E0 00 00 00`) in `FUN_006be020` (street-lamp class light evaluation, vfunc+0x4C, reads effective colour +0xE0) | `StreetLampColourStub`: for a light with the lit flag (+0x100 & 0x20) clear, type +0xB0 == 0xB and lot id (+0xC0 or +0xC4) == 0, returns colour +0xF0 x intensity +0x10 instead of +0xE0 (0 while off), so a lot solved by day still gets street lamps. Counter "Street lamps counted as lit". The per-pixel plan (private notes) F-J6: any future lamp packer must copy this rule |
+| `postesAcesosNoCalculo` | 0x006BE18C `movaps xmm0,[esi+0E0h]` (`0F 28 86 E0 00 00 00`) in `FUN_006be020` (street-lamp class light evaluation, vfunc+0x4C, reads effective colour +0xE0) | `StreetLampColourStub`: for a light with the lit flag (+0x100 & 0x20) clear, type +0xB0 == 0xB and lot id (+0xC0 or +0xC4) == 0, returns colour +0xF0 x intensity +0x10 instead of +0xE0 (0 while off), so a lot solved by day still gets street lamps. Counter "Street lamps counted as lit". Any future lamp packer must copy this rule |
 | `gramaDoLoteUsaLuzDoLote` | 0x00C7F87D `mov eax,[edi+0D8h]; test eax,eax` (`8B 87 D8 00 00 00 85 C0`); context `F3 0F 10 05 38 A5 07 01 F3 0F 11 44 24 18 74 13`; null-bind path at 0x00C7F8B7 (`A1 80 CE 1E 01 6A 00 6A 00`) | `LotPassStub` keeps the lot pass of `FUN_00c7f750` (per-chunk light/fog pass; lot pass when `[ebp+0Ch]` = 1) on "no terrain lightmap" after a full rebuild, because the rebuilt chunk+0xD8 has no street-lamp light inside lot footprints. Float at 0x0107A538 stored at `[esp+18h]`. The world pass is untouched |
 | `qualidadeAltaEmTodosOsLotes` | 0x00ADB66B, 0x00ADB884 `mov byte [esp+0Ch],0` (`C6 44 24 0C 00`) in `FUN_00adb5a0` / `FUN_00adb850` | The quality flag passed to `FUN_006a5ef0` (active lot or Build mode) becomes 1: every lot solved at the active lot's quality. Lots loaded afterwards |
 
@@ -281,13 +283,13 @@ Each was one of the failed attempts recorded in the history and is kept as a swi
 | | `LotLightBridge::SetEnabled`, `Status`, `OnWorldChanged` (`ClearChunks`), `Shutdown(keepChunkMaps)`, `ChunkCount` | Lifecycle |
 | shader_ids.h | `kLotLightPs` {568, 0xFDAD274B}, `kLotLightVs` {680, 0x0C8CC5E8} | Exact gates |
 | lightmap_smooth.cpp | `LightmapSmooth::Atlas`, `Find`, `Get` | Terrain light source |
-| night_terrain_relight_patch.cpp | `LotPassStub`, `StreetLampColourStub`, `kQualitySites` | Experimental game patches |
+| night_terrain_relight_patch.cpp | `LotPassStub`, `StreetLampColourStub`, `kQualitySites` | Game patches in Individual options |
 
 ## Rejected approaches
 
 - Changing the world light collection radius, re-solving room 0, rebuilding the type-5 terrain textures: no effect.
 - High quality on every lot, the null terrain bind in the lot layer, street lamps counted as lit: no fix alone (kept as
-  experimental switches).
+  switches in Individual options).
 - Home-chunk sampling with CLAMP: stretched the chunk's last row at a chunk border (m76); the atlas is used instead.
 - Lot size from the lot map uv rect, or a coverage signal in the lot map, or vertex-buffer bounds: not reliable.
 

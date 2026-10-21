@@ -1200,7 +1200,7 @@ void SimOcclusion::RenderUI(ApexPatch* patch) {
             changed |= ApexUi::SliderPercent("Hair intensity", &g.p.hairStrength, 0.0f, 1.0f,
                                             "Shade on recognized hair; 0% removes it, 100% keeps the original", defaults.hairStrength);
             changed |= ApexUi::SliderPercent("Maximum darkening", &g.p.simMaxShade, 0.0f, 1.0f,
-                                            "Limit the maximum added shade on Sims and hair", defaults.simMaxShade);
+                                            "Caps how dark Sims and hair can get", defaults.simMaxShade);
             if (ApexUi::BeginAdvanced("Advanced##SimOcclusion")) {
                 changed |= ApexUi::SwitchRow("Transparent hair", &g.p.transparentHair,
                                             "Also adjust supported transparent hair strands", defaults.transparentHair);
@@ -1224,11 +1224,11 @@ class AmbientOcclusionPatch : public ApexPatch {
         RegisterFloatSetting(&g.p.protect, "protegerLuz", SettingWidget::Slider, Params{}.protect, 0.0f, 1.0f, "Lamp-lit and bright spots keep this share of their light");
         RegisterEnumSetting(&g.p.quality, "qualidade", Params{}.quality, "Directions per pixel: higher is smoother and costs more GPU", {"Low", "Medium", "High", "Ultra", "Very Low"});
         RegisterBoolSetting(&g.p.inMapView, "noMapa", true, "Also shade the map view (radii for houses and trees seen from far away)");
-        RegisterFloatSetting(&g.p.distance, "distance", SettingWidget::Slider, Params{}.distance, 25.0f, 1000.0f, "Distance at which the shade fades out outside map view");
+        RegisterFloatSetting(&g.p.distance, "distance", SettingWidget::Slider, Params{}.distance, 25.0f, 1000.0f, "The shade fades out beyond this distance; not used in map view");
         RegisterFloatSetting(&g.p.simStrength, "simStrength", SettingWidget::Slider, Params{}.simStrength, 0.0f, 1.0f, "Shade on supported Sim materials; 0% removes it, 100% keeps the original");
         RegisterBoolSetting(&g.p.simControls, "simControls", Params{}.simControls, "Adjust occlusion on Sims separately from the scene");
         RegisterFloatSetting(&g.p.hairStrength, "hairStrength", SettingWidget::Slider, Params{}.hairStrength, 0.0f, 1.0f, "Shade on recognized hair; 0% removes it, 100% keeps the original");
-        RegisterFloatSetting(&g.p.simMaxShade, "simMaxShade", SettingWidget::Slider, Params{}.simMaxShade, 0.0f, 1.0f, "Limit the maximum added shade on Sims and hair");
+        RegisterFloatSetting(&g.p.simMaxShade, "simMaxShade", SettingWidget::Slider, Params{}.simMaxShade, 0.0f, 1.0f, "Caps how dark Sims and hair can get");
         RegisterBoolSetting(&g.p.transparentHair, "transparentHair", true, "Also adjust supported transparent hair strands");
     }
 
@@ -1321,12 +1321,15 @@ class AmbientOcclusionPatch : public ApexPatch {
         using ApexUi::IconId;
         static const Params kDefaults{};
         bool changed = false;
+        // its own error, or the shared depth's (Depth Blur's resources, which Ambient Occlusion needs even with Depth Blur off)
+        static constexpr std::string_view kDepthError = "Waiting for the scene depth: ERROR: ";
         if (g.status.rfind("ERROR: ", 0) == 0) ApexUi::IconNote(IconId::TriangleAlert, g.status.c_str() + 7, VioletTheme::kError);
+        else if (g.status.rfind(kDepthError, 0) == 0) ApexUi::IconNote(IconId::TriangleAlert, g.status.c_str() + kDepthError.size(), VioletTheme::kError);
 
         changed |= ApexUi::SliderPercent("Strength", &g.p.strength, 0.0f, 2.0f, "How dark the shade gets where things meet",
                                          kDefaults.strength);
         changed |= ApexUi::Slider("Distance", &g.p.distance, 25.0f, 1000.0f,
-                                 {.format = "%.0f m", .tooltip = "Distance at which the shade fades out outside map view", .defaultValue = kDefaults.distance});
+                                 {.format = "%.0f m", .tooltip = "The shade fades out beyond this distance; not used in map view", .defaultValue = kDefaults.distance});
         // Quality: shown from the lightest to the smoothest; the saved value keeps 2.1.0's indices (kQualityShown)
         static const char* const kQualities[] = {"Very Low", "Low", "Medium", "High", "Ultra"};
         static const char* const kQualityTips[] = {"Lightest; a little more shimmer while the camera moves", "Light", "Balanced",

@@ -39,6 +39,7 @@
 #include "patch_base.h"
 #include "s3ss_detect.h"
 #include "shader_cache.h"
+#include "platform.h"
 #include <format>
 #include <string>
 
@@ -160,6 +161,7 @@ DWORD InitBody() {
     LOG_INFO("[Main] Files: " + ApexUtil::ToUtf8(ApexPaths::ApexDirectory()));
     if (DetectGameVersion()) LOG_INFO(std::format("[Main] Game: {} [0x{:08X}]", GetGameVersionName(), g_exeTimestamp));
     else LOG_WARNING(std::format("[Main] Unknown game build [0x{:08X}]: game-code features start only where their code is found by signature", g_exeTimestamp));
+    LOG_INFO("[Main] Platform: " + Platform::Summary());
     LogEnvironment();
     // Apex's HLSL shaders (every quality and mode) compile now on a background thread, so the render thread never runs
     // D3DCompile: the features only create the shader objects from the bytecode (shader_cache.h).

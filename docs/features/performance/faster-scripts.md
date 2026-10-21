@@ -9,9 +9,9 @@ are the same; scripts simply do less work. Nothing on screen changes.
 
 | | |
 |---|---|
-| Availability | Experimental: Released in 2.7.0 |
+| Availability | Released in 2.7.0 (Experimental until 2.15.0) |
 | Default | On |
-| Menu | System > Performance > Game and scripts > *Faster scripts* (Experimental badge) |
+| Menu | System > Performance > Game and scripts > *Faster scripts* |
 | Configuration | `[patches.ScriptMath]` in `ApexRadiance.toml` |
 | Source | [`features/script_math.{h,cpp}`](../../../features/script_math.cpp), [`patches/performance_patches.cpp`](../../../patches/performance_patches.cpp) (`ScriptMathPatch`) |
 

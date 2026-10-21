@@ -105,7 +105,7 @@ dragging and save when released. Missing keys keep their defaults.
 
 ### Filters
 
-The Filters tab groups all 25 existing filters into six compact family panels. Each row has its own switch and
+The Filters tab groups 24 filters into six compact family panels; the LUT has its own tab (see *LUTs*). Each row has its own switch and
 adjustment disclosure; controls are available when expanded, and disabled while that filter, its group or Picture is off.
 Fine tuning remains under *Advanced*. Every switch is a bool, off by default. Sliders
 shown as a percentage store a fraction (100% = 1.0); signed sliders show -100 to +100 and store -1 to 1; colour sliders
@@ -114,38 +114,71 @@ store a hue in degrees (0 to 360). A filter runs when its switch is on and its A
 | Card | Switch key | Controls: menu label `key` default (range) | What it does |
 |---|---|---|---|
 | **Film looks** | | | |
-| Technicolor 1 | `technicolor1` | Amount `technicolor1_amount` 60%; Cyan side `technicolor1_cyan` 0 (Greener -100 to Bluer +100); Saturation `technicolor1_saturation` 100% (0 to 200%) | Classic two-strip film: every colour becomes a red or a cyan record |
+| Technicolor 1 | `technicolor1` | Amount `technicolor1_amount` 60%; Cyan side `technicolor1_cyan` 0 (Greener -100 to Bluer +100); Saturation `technicolor1_saturation` 100% (0 to 200%); Brightness `technicolor1_brightness` 0 (Darker to Brighter); Contrast `technicolor1_contrast` 100% (50 to 150%) | Classic two-strip film: every colour becomes a red or a cyan record |
 | Technicolor 2 | `technicolor2` | Amount `technicolor2_amount` 50%; Saturation `technicolor2_saturation` 100% (0 to 200%); Brightness `technicolor2_brightness` 0 (Darker to Brighter); Advanced > Dyes: Red, Green, Blue dye `technicolor2_dye` [100%, 100%, 100%] (0 to 200%) | Three-strip dye transfer: each dye subtracts its complement, dense pure primaries |
 | DPX Cineon | `dpx` | Amount `dpx_amount` 50%; Contrast `dpx_contrast` 50%; Saturation `dpx_saturation` 100% (0 to 200%); Advanced > Color curves: Red, Green, Blue curve `dpx_curve` [100%, 100%, 100%] (50 to 150%) | Cinema negative: a film S curve per channel, black and white kept |
-| Vintage | `vintage` | Amount `vintage_amount` 70%; Fade `vintage_fade` 50%; Warmth `vintage_warmth` +50 (Cooler to Warmer); Faded colors `vintage_colors` 40% | A faded print: lifted blacks, softer whites, warm cast, washed-out colours |
-| Cross-process | `cross_process` | Amount `cross_amount` 50%; Contrast `cross_contrast` 50% | Slide film in negative chemistry: green-cyan shadows, yellow highlights, more contrast |
+| Vintage | `vintage` | Amount `vintage_amount` 70%; Fade `vintage_fade` 50%; Warmth `vintage_warmth` +50 (Cooler to Warmer); Faded colors `vintage_colors` 40%; Vignette `vintage_vignette` 0% | A faded print: lifted blacks, softer whites, warm cast, washed-out colours |
+| Cross-process | `cross_process` | Amount `cross_amount` 50%; Contrast `cross_contrast` 50%; Color cast `cross_hue` 180; Saturation `cross_saturation` 100% (0 to 200%) | Slide film in negative chemistry: green-cyan shadows, yellow highlights, more contrast |
 | Filmic pass | `filmic_pass` | Amount `filmic_amount` 85%; Fade `filmic_fade` 40%; Contrast `filmic_contrast` 100% (0 to 200%); Bleach `filmic_bleach` 0%; Saturation `filmic_saturation` -15 (Muted to Vivid); Advanced > Color curves: `filmic_curve` [100%, 100%, 100%] (50 to 150%) | A filmic grade on the encoded picture: S-curve contrast, a brightness curve per channel, bleach bypass, saturation and fade |
-| Black and white | `black_and_white` | Amount `bw_amount` 100%; Filter color `bw_filter_hue` 30; Filter strength `bw_filter` 50%; Contrast `bw_contrast` 0 (Softer to Punchier); Advanced > Toning: Tone color `bw_tone_hue` 35, Tone amount `bw_tone` 0% | Luminance through a coloured lens filter (red darkens skies, green lightens leaves), contrast, then an optional toning |
-| Tint | `tint_filter` | Amount `tint_filter_amount` 58%; Color `tint_filter_hue` 35 | The picture's grey in one colour (sepia by default), mixed in |
+| Black and white | `black_and_white` | Amount `bw_amount` 100%; Filter color `bw_filter_hue` 30; Filter strength `bw_filter` 50%; Contrast `bw_contrast` 0 (Softer to Punchier); Brightness `bw_brightness` 0 (Darker to Brighter); Advanced > Toning: Tone color `bw_tone_hue` 35, Tone amount `bw_tone` 0% | Luminance through a coloured lens filter (red darkens skies, green lightens leaves), contrast, then an optional toning |
+| Tint | `tint_filter` | Amount `tint_filter_amount` 58%; Color `tint_filter_hue` 35; Preserve brightness `tint_filter_preserve` 100%; Shadows / highlights `tint_filter_balance` 0 (Shadows to Highlights) | The picture's grey in one colour (sepia by default), mixed in |
 | **Color and mood** | | | |
 | Colorfulness | `colourfulness` | Amount `colourfulness_amount` +40 (Muted to Vivid); Advanced: Protect bright colors `colourfulness_protect` 70% | More chroma, less for colours that are already strong or bright |
 | Night Mode | `night_mode` | Amount `night_amount` 60%; Darkness `night_darkness` 44% (0 to 100%, stored 0.35 of 0 to 0.8); Blue tint `night_blue` 50%; Keep lamp light `night_keep_lamps` 60% | Darker, bluer and less colourful; lamp-lit and bright areas keep their own colour |
-| Levels | `levels` | Black point `levels_black` 16 (0 to 255, stored /255); White point `levels_white` 235 (0 to 255) | The black point goes to black and the white point to white. The white point stays at least 0.02 above the black point. Runs when black > 0 or white < 255 |
+| Levels | `levels` | Black point `levels_black` 16 (0 to 255, stored /255); White point `levels_white` 235 (0 to 255); Gamma `levels_gamma` 1.00 (0.5 to 2, above 1 brightens the midtones) | The black point goes to black and the white point to white. The white point stays at least 0.02 above the black point. Runs when black > 0 or white < 255 |
 | **Light and detail** | | | |
 | Auto exposure | `auto_exposure` | Amount `auto_exposure_amount` 70%; Target brightness `auto_exposure_target` 50%; Speed `auto_exposure_speed` 40%; Range `auto_exposure_range` 50% | The picture slowly adapts toward a target brightness from the scene's average, like the eye |
 | Adaptive sharpening | `cas` | Sharpness `cas_amount` 50% | Contrast-adaptive sharpening: strong on soft detail, none on hard edges (no halos). Runs whenever its switch is on |
-| Glow | `glow` | Amount `glow_amount` 40%; Threshold `glow_threshold` 60% (0 to 95%); Size `glow_size` 50%; Advanced: Warmth `glow_warmth` 0 (Cooler to Warmer) | A soft halo from the bright parts of a blurred copy of the scene: lamps, windows, sky |
-| Halation | `halation` | Amount `halation_amount` 40%; Threshold `halation_threshold` 70% (0 to 95%); Advanced: Halo color `halation_hue` 15 | Film's tight reddish halo around the strongest light |
+| Glow | `glow` | Amount `glow_amount` 40%; Threshold `glow_threshold` 40% (0 to 95%); Size `glow_size` 50%; Advanced: Warmth `glow_warmth` 0 (Cooler to Warmer), Color `glow_hue` 40, Color strength `glow_color` 0% (0% keeps the light's own colour) | A soft halo from the bright parts of a blurred copy of the scene: lamps, windows, sky |
+| Halation | `halation` | Amount `halation_amount` 40%; Threshold `halation_threshold` 70% (0 to 95%); Size `halation_size` 31% (stored 8/26); Advanced: Halo color `halation_hue` 15 | Film's tight reddish halo around the strongest light |
 | Dreamy | `dreamy` | Amount `dreamy_amount` 40%; Softness `dreamy_softness` 60%; Saturation `dreamy_saturation` 30% | Orton effect: the picture screened with a soft blurred copy, a little more colour |
 | Fake HDR | `fake_hdr` | Amount `fake_hdr_amount` 50%; Shadows `fake_hdr_shadows` 40%; Highlights `fake_hdr_highlights` 40%; Radius `fake_hdr_radius` 50%; Advanced: Halo protection `fake_hdr_halo` 60%, Saturation `fake_hdr_saturation` 10% | Local contrast in log luminance: shadows lifted, highlights pulled down, detail boosted, held back at strong edges so no halos form |
 | **Camera** | | | |
 | Emphasize | `emphasize` | Amount `emphasize_amount` 80%; Focus depth `emphasize_width` 50% (0 to 200% of the focus distance); Grey amount `emphasize_grey` 50%; Advanced: Automatic focus `emphasize_auto` on, Focus distance `emphasize_distance` 30 m (1 to 300 m, shown while automatic focus is off), Edge softness `emphasize_softness` 50% (5 to 100%) | Full colour in a band of distance around the focus (the centre of the screen, or a set distance), grey outside it. Needs the scene depth |
-| Tilt-shift | `tilt_shift` | Amount `tilt_amount` 70%; Position `tilt_center` 55% (0% top, 100% bottom); Sharp band `tilt_width` 25%; Advanced: Toy colors `tilt_saturation` 25% | Miniature effect: a sharp horizontal band, the picture blurring more and more above and below it |
+| Tilt-shift | `tilt_shift` | Amount `tilt_amount` 70%; Position `tilt_center` 55% (0% top, 100% bottom); Sharp band `tilt_width` 25%; Blur strength `tilt_blur` 100% (100 to 200%); Advanced: Toy colors `tilt_saturation` 25% | Miniature effect: a sharp horizontal band, the picture blurring more and more above and below it |
 | Prism | `prism` | Amount `prism_amount` 35%; Edge start `prism_start` 35% (0 to 95%); Advanced: Quality `prism_quality` 0.5 (Low, Medium, High) | Chromatic aberration growing toward the edges, several taps across a small spectrum |
-| Film grain | `grain` | Amount `grain_amount` 30%; Grain size `grain_size` 30%; Advanced: More in the shadows `grain_shadows` 50% | Smooth value noise in two sizes multiplying the brightness, strongest in the midtones, the same pattern every frame |
+| Film grain | `grain` | Amount `grain_amount` 30%; Grain size `grain_size` 30%; Animated `grain_animated` off (a new pattern every frame); Advanced: More in the shadows `grain_shadows` 50%, Color grain `grain_color` 0% | Smooth value noise in two sizes multiplying the brightness, strongest in the midtones, the same pattern every frame unless Animated is on |
 | **Retro and style** | | | |
 | 3DFX | `retro_3dfx` | Amount `3dfx_amount` 100%; Color depth `3dfx_color_depth` 0.5 (shown as 16, 13 or 10-bit); Scanlines `3dfx_scanlines` 30%; Advanced: Dithering `3dfx_dither` 60%, Soft pixels `3dfx_soft_pixels` 30%, Gamma `3dfx_gamma` 100% (50 to 200%) | A late-90s 3D card: fewer colour levels with a 4x4 ordered dither, scanlines, a slight horizontal blur |
 | CRT | `crt` | Amount `crt_amount` 100%; Curvature `crt_curvature` 30%; Phosphor mask `crt_mask` 40%; Scanlines `crt_scanlines` 40%; Advanced: Dark edges `crt_edges` 40% | An old TV: curved glass (black outside it), aperture-grille stripes, scanlines, darker edges |
 | **Accessibility** | | | |
-| Color-blind mode | `daltonize` | Type `daltonize_type` 1 = Green (deuteranopia) (0 = Red (protanopia), 2 = Blue (tritanopia)); Amount `daltonize_amount` 100% | Simulates the chosen colour deficiency and moves the colours that cannot be told apart into channels that can |
+| Color-blind mode | `daltonize` | Type `daltonize_type` 1 = Green (deuteranopia) (0 = Red (protanopia), 2 = Blue (tritanopia)); Amount `daltonize_amount` 100%; Simulate `daltonize_simulate` off (shows the simulated deficiency instead of the correction) | Simulates the chosen colour deficiency and moves the colours that cannot be told apart into channels that can |
 
-Unless a range is given, a percentage slider runs from 0 to 100%. Emphasize's Focus depth was a distance in metres in
-early test builds; a saved value outside 0 to 2 is reset to the default when loaded.
+Unless a range is given, a percentage slider runs from 0 to 100%. A saved Emphasize Focus depth outside 0 to 2 (an
+older value in metres) is reset to the default when loaded.
+
+### Color groups
+
+The Overview tab presents the master switch, GPU cost and
+comparison tools once, followed by five clickable group rows. There are no profiles in this overview. Per-tab
+headers control only their group; the global master still gates all Color processing. Stored values are not reset
+when a group is disabled. Basic, Tones, Color and Detail neutralise only their respective shader inputs; Filters
+disables the 24 filter branches (not the LUT). Banding Fix's deband continues independently of these switches.
+
+| Menu label | TOML key in `[qol.picture]` | Default | Behaviour |
+|---|---|---|---|
+| Basic | `basic_enabled` | true | Brightness, contrast, saturation, temperature and sharpness |
+| Tones | `tones_enabled` | true | Midtones, shadows, highlights and blacks |
+| Color | `color_enabled` | true | Tint, vibrance, split toning and mixer |
+| Detail | `detail_enabled` | true | Clarity and vignette |
+| Filters | `filters_enabled` | true | All filter branches, retaining individual switches and parameters |
+
+Group keys absent from older files default to true, preserving their existing appearance. The per-filter
+shortcuts of 2.11.0 to 2.12.1 (`filter_shortcuts`) moved to presets ([presets.md](presets.md#shortcuts)): a preset
+that saves only Color reproduces one filter, and a key switches the whole look. Older `filter_shortcuts` tables
+are ignored with one log line and dropped at the next save.
+
+Each filter row keeps its disclosure arrow and switch on the right, with the native switch geometry and an 8-unit gap.
+Expanded sliders retain every existing label, range, default, reset and setter. Search traverses collapsed filter
+controls without opening them.
+
+The menus-tinted diagnostic also accepts a successful pre-UI Color boundary as evidence of scene isolation,
+and does not diagnose the main menu as an active-world colour failure. The warning is retained for the actual
+missing-isolation fallback; it is shown once on Overview, not repeated on every adjustment tab.
+
+The Overview card uses the tab's title and remains the master Color switch. While it is off, overview/group-header
+switches display off and are disabled; saved group preferences are not overwritten, and return when the master is on.
+Filter disclosure buttons point down when closed and up when open.
 
 ## Compatibility and interactions
 
@@ -158,11 +191,11 @@ early test builds; a saved value outside 0 to 2 is reset to the default when loa
   so it cannot smooth the game's menus.
 - **The game's Edge Smoothing (MSAA):** when the game does not draw its scene straight into the back buffer, there is no
   scene copy. The whole picture, menus included, is then graded, and after 2 s the card shows: "Color also tints the
-  game's menus here ... turning off the game's own Edge Smoothing (Options > Graphics) usually fixes it". Atmospheric
-  fog and Emphasize also need the shared scene depth; without it their cards show "Needs the scene depth: turn off the
-  game's Edge Smoothing (Options > Graphics)" and they do nothing.
+  game's menus here ... turning off the game's own Edge Smoothing (Options > Graphics) usually fixes it". Emphasize
+  also needs the shared scene depth; without it its card shows "Needs the scene depth: turn off the
+  game's Edge Smoothing (Options > Graphics)" and it does nothing.
 - **Pie menu:** its translucent backing box is a faint veil, filtered with the scene and applied again (see the UI mask
-  below); its 3D Sim portrait is UI, and fog and Emphasize read the depth copied with the scene, not the live depth whose
+  below); its 3D Sim portrait is UI, and Emphasize reads the depth copied with the scene, not the live depth whose
   square the portrait clears.
 - **Night Lighting** replaces some draws and returns `Skip`; Picture's draw hooks run before any feature that may skip a
   draw (`Normal` priority), so they see every scene draw. Re-issued draws are counted twice (harmless). The pond pass is
@@ -248,12 +281,12 @@ After each settings change the next 3 passes read the constants and bound shader
 **Resources** (`InitResources`, `D3DPOOL_DEFAULT` render targets in the back buffer's format, normally
 `D3DFMT_A8R8G8B8`): `frameTex`, `sceneTex` (back-buffer size), `chainTex[0..2]` (ceil halvings); `adaptTex[0..1]` (1x1
 `D3DFMT_A16B16G16R16F`, optional: without them Auto exposure does nothing); `depthTex` (R32F copy of the scene depth,
-created while fog or Emphasize asks for it); `lutTex` (`D3DPOOL_MANAGED` A8R8G8B8, decoded with WIC). Shaders
+created while Emphasize asks for it); `lutTex` (`D3DPOOL_MANAGED` A8R8G8B8, decoded with WIC). Shaders
 `PicturePS` ("picture.hlsl"), `DepthCopyPS` and `AdaptPS`, ps_3_0, `D3DCOMPILE_OPTIMIZATION_LEVEL3`, compiled at
 start-up on a background thread (`framework/shader_cache.h`); creation failure is permanent until restart. Log:
 `[Picture] Resources ready (WxH, format N)`, `[Picture] LUT loaded: <file> (N cells per side)`.
 
-**Samplers:** s0 frame (point), s1 scene copy (point), s2 1/8 scene (bilinear), s3 scene depth (point, only for fog and
+**Samplers:** s0 frame (point), s1 scene copy (point), s2 1/8 scene (bilinear), s3 scene depth (point, only for
 Emphasize), s4 1/2 scene and s5 1/4 scene (bilinear), s6 LUT strip (bilinear), s7 the adapted luminance (1x1).
 
 **Shader** (`PicturePS`), per pixel:
@@ -363,36 +396,3 @@ Details in [history](../history/picture-filters.md).
 - [History](../history/picture-filters.md)
 - [Banding Fix](banding-fix.md)
 - [Removed features: HDR output](../removed-features.md)
-
-## Local Color UI candidate (2026-10-07)
-
-This is a test candidate, not a released version. Overview presents the existing master switch, GPU cost and
-comparison tools once, followed by five clickable group rows. There are no profiles in this overview. Per-tab
-headers control only their group; the global master still gates all Color processing. Stored values are not reset
-when a group is disabled. Basic, Tones, Color and Detail neutralise only their respective shader inputs; Filters
-disables the 25 filter branches. Banding Fix's deband continues independently of these switches.
-
-| Menu label | TOML key in `[qol.picture]` | Default | Behaviour |
-|---|---|---|---|
-| Basic | `basic_enabled` | true | Brightness, contrast, saturation, temperature and sharpness |
-| Tones | `tones_enabled` | true | Midtones, shadows, highlights and blacks |
-| Color | `color_enabled` | true | Tint, vibrance, split toning and mixer |
-| Detail | `detail_enabled` | true | Clarity and vignette |
-| Filters | `filters_enabled` | true | All filter branches, retaining individual switches and parameters |
-
-Group keys absent from older files default to true, preserving their existing appearance. The per-filter
-shortcuts of 2.11.0 to 2.12.1 (`filter_shortcuts`) moved to presets ([presets.md](presets.md#shortcuts)): a preset
-that saves only Color reproduces one filter, and a key now switches the whole look. Older `filter_shortcuts` tables
-are ignored with one log line and dropped at the next save.
-
-Each filter row keeps its disclosure arrow and switch on the right, with the native switch geometry and an 8-unit gap.
-Expanded sliders retain every existing label, range, default, reset and setter. Search traverses collapsed filter
-controls without opening them.
-
-The menus-tinted diagnostic now also accepts a successful pre-UI Color boundary as evidence of scene isolation,
-and does not diagnose the main menu as an active-world colour failure. The warning is retained for the actual
-missing-isolation fallback; it is shown once on Overview, not repeated on every adjustment tab.
-
-The Overview card uses the tab's title and remains the master Color switch. While it is off, overview/group-header
-switches display off and are disabled; saved group preferences are not overwritten, and return when the master is on.
-Filter disclosure buttons point down when closed and up when open.

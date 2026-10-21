@@ -451,6 +451,10 @@ Apex's own HLSL pixel shaders are never compiled on the render thread
   first compile the DLL is checked (`CompilerAvailable`); without it, shaders missing from the cache stay off (`[ShaderCache] d3dcompiler_47.dll not found: ...`). Log:
   `[ShaderCache] N Apex shaders: X from ApexRadiance_ShaderCache.bin, Y to compile` and `[ShaderCache] Saved N compiled
   Apex shaders ...`.
+- **Built-in cache:** the ASI carries the same file as resource `APEX_RC_SHADER_CACHE`
+  (`resources/ApexRadiance_ShaderCache.bin`, compiled with Microsoft's compiler), read before the player's file, which adds the
+  variants it lacks (`LoadEmbedded`), so a first start, and Wine / Proton with its builtin compiler, need no compile for
+  them ([steam-deck.md](features/steam-deck.md)). Log: `[ShaderCache] N Apex shaders taken from the ones built into the ASI`.
 - **Use:** `ShaderCache::CreatePixelShader(dev, id, &ps, &msg)` only creates the D3D9 object from the bytecode. If the
   worker has not reached that variant yet, it becomes the worker's next job and the caller waits (logged as a warning
   `waited for the precompile`, counted; the worker is raised to normal priority). With no worker left (thread creation

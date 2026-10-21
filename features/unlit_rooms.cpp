@@ -196,6 +196,9 @@ bool AddBase(BYTE* room, float* r, int& slot, float* ce) {
             t = std::fmax(sumC - sumL, 0.0f);
         }
         for (int k = 0; k < 4; k++) r[k] += (1.0f - t) * ce[k]; // lamp' + C
+        // never darker than a room with no lamp: a room whose listed lamps are all blocked (or give almost nothing) came out
+        // at about a third of the unlit colour (a snapshot: 0.0068 against 0.0193 in the empty room beside it)
+        for (int k = 0; k < 3; k++) r[k] = std::fmax(r[k], ce[k]);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -718,11 +721,16 @@ bool IsDarkRoomLight(const float* colour, const float* dir) {
         noLight |= std::fabs(dir[0] - d[0]) < 1e-3f && std::fabs(dir[1] - d[1]) < 1e-3f && std::fabs(dir[2] - d[2]) < 1e-3f;
     return noLight && 0.2126f * colour[0] + 0.7152f * colour[1] + 0.0722f * colour[2] > 0.01f;
 }
-bool FurnitureColour(float* rgb, const float* dir) {
+bool FurnitureColour(float* rgb, const float* dir, const float* chroma) {
     if (!FurnitureActive() || !IsUnlitLight(rgb, dir)) return false; // a lamp: its own colour and strength
     const float grey = 0.2126f * rgb[0] + 0.7152f * rgb[1] + 0.0722f * rgb[2];
     const float share = FurnitureShareNow(), tint = FurnitureTintNow();
-    for (int k = 0; k < 3; k++) rgb[k] = share * (grey + tint * (rgb[k] - grey));
+    // a lit room: its ambient's hue (a red lamp's room tints its walls red; the fill, blue-white by the game and greyed here,
+    // left its furniture grey beside them), same luma: never darker
+    if (chroma)
+        for (int k = 0; k < 3; k++) rgb[k] = share * grey * chroma[k];
+    else
+        for (int k = 0; k < 3; k++) rgb[k] = share * (grey + tint * (rgb[k] - grey));
     return true;
 }
 

@@ -173,3 +173,14 @@ schedule no floor-change follow-ups. The target is a screen pixel, not an object
 
 **Outcome:** the API and overlay handling remain, but the restored 2.5.3 Report layout (2.5.5) has no control that calls
 `Aim`; captures start from the shortcut.
+
+### 2026-10-21: automatic re-captures after a floor change removed
+
+**Context:** after each shortcut capture, a floor-change watch queued captures 1 s and 3 s after any loaded lot changed
+the story it shows (up to 6 within 2 minutes, see 2026-09-30).
+
+**Finding:** the follow-ups filled capture sessions with captures nobody had asked for, and every one of them relit the
+lot, so the scene under study changed between captures.
+
+**Outcome:** removed. `LightProbe::OnPresent` clears the `Watch` state on each capture request and nothing arms it, so a
+shortcut press gives exactly one capture and no `Light capture (automatic)` folder is made.

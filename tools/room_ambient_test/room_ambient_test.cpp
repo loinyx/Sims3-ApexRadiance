@@ -70,6 +70,13 @@ int main() {
     check(LampRefreshDelay(true) == 120, "switch is reconciled after a short batch");
     check(LampRefreshDelay(false) == 200, "moving a lamp waits the drag's quiet time (the edit itself sends its rooms at once)");
     check(LampLotGap(true) == 500 && LampLotGap(false) == 2000, "relocated lamps refresh again sooner than switches");
+    check(FloorPriorityFactor(false, true, 2, 2) == 1.0f && FloorPriorityFactor(false, false, 0, 2) == 1.0f, "another lot: no floor priority");
+    check(FloorPriorityFactor(true, false, 2, 2) == 4000.0f && FloorPriorityFactor(true, false, 1, 2) == 2000.0f &&
+              FloorPriorityFactor(true, false, 3, 2) == 1.0f,
+          "one floor detailed: camera story, below, above");
+    check(FloorPriorityFactor(true, true, 2, 2) == 4000.0f && FloorPriorityFactor(true, true, 0, 2) == 2000.0f &&
+              FloorPriorityFactor(true, true, 5, 2) == 1000.0f,
+          "every floor detailed: the camera story first, then below, then above (still before other lots)");
     check(UrgencyKept(1000, 2000, 0, 4), "urgent before its deadline");
     check(UrgencyKept(2500, 2000, 0, 3) && UrgencyKept(2500, 2000, 0, 1), "a room still waiting keeps its urgency");
     check(!UrgencyKept(2500, 2000, 0, 4) && !UrgencyKept(2500, 2000, 0, 0), "a solved room's urgency ends");
