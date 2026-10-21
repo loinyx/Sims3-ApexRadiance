@@ -152,6 +152,19 @@ the standalone) described it as `tanh(kL/2)` and computed its rule-T tangent wit
 have been off by a factor ln 2 *(unverified at runtime)*. Anyone re-deriving this curve should start from the
 instruction sequence, not from that comment. `.x`, `.y`, `.w` of `LightingTweaks` are of unknown meaning.
 
+#### Floors, stairs and walls near arches and stairwells (2.14.0 captures)
+
+- Floor PS `2BEB2548`: `mad r2.xyz, r0.w, c4, r0`, that is `map.rgb + map.a x c4`, with `c4` the room's own ambient
+  (`room+0x110`). Two rooms sharing one light map across an arch differ only in `c4`.
+- InteriorFloor PS `2D8D0100` ends with the tone curve above; the base of its `exp` is 2.
+- Stair object PS `2D8D5628`: `max(directional, ambient cube x 0.25, floor map on up faces)` and no tone curve. The
+  cube is the world's, without the room's tint.
+- Apex's wall copy PS `2C4D27F0` (four bicubic reads of the atlas plus `map.a x c4`) is the draw seen in the blue
+  bathroom capture ([unlit-rooms.md](../features/night-lighting/unlit-rooms.md)).
+- On the wall atlas the uv does not give the lot position, so a per-pixel lot-space term cannot be added to walls.
+- Of the game's 56 stair and object variants, all accept the wall-aware copy; 10 accept the story blend, 28 lack a free
+  sampler and 18 the normal ([stairs.md](../features/night-lighting/stairs.md)).
+
 ### How Apex identifies a game shader
 
 Three levels, from strict to general (combined build files; the standalone keeps the modules):

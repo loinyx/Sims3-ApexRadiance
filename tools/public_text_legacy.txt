@@ -1,0 +1,672 @@
+# Lines accepted by tools/public_text_check.py although they match a rule added later (date, stamp, the
+# unaccented Portuguese tokens): path<TAB>rule<TAB>the line, stripped. Temporary: an entry goes when its line is
+# rewritten; no entry is added for new text.
+apex_config.h	date	// comparison is never saved (review 30/09, H2). Empty = none.
+apex_gui.cpp	date	// (07/10, players' Runtime Error: started and run under HookGuard::StartDetached, so neither can end the game)
+apex_gui.cpp	date	// (14/10: a header and one row; the GPU time of the last edit is on Developer > Tester)
+apex_gui.cpp	date	// Instant (GPU) is the default (14/10; a saved lampLightingMode keeps its choice). Instant cannot be chosen on a device
+apex_gui.cpp	date	// ---- System > Lot Streaming (06/10, its own page) ----
+apex_gui.cpp	date	// Lot detail and object streaming: research and code by idavidveiga's fork (02-04/10, docs/features/lot-streaming.md)
+apex_gui.cpp	date	// ---- System > Report a problem (30/09): the captures players send with a bug report (features/captures.h) ----
+apex_gui.cpp	date	return WorldSession::InWorld(); // the world drawn, not a load screen (06/10: the start note showed on Twinbrook's load screen)
+apex_gui.cpp	date	// not while the editor is not on screen, nor while another window has the keyboard (review 30/09, M1)
+apex_main.cpp	date	// each step caught on its own (07/10, players' Runtime Error): one that throws is noted and the pump goes on
+apex_main.cpp	date	// 07/10, players' Runtime Error: a C++ exception left in start-up or in the pump ends this thread (noted), never the game
+docs/engine/light-objects-and-rigs.md	portuguese	| +0x100 | byte | Flags: 0x01 alive, 0x02 registered in the light cells, 0x04 room known, 0x20 lit, 0x40 enabled | light_diag `LightLine` ("viva", "celulas", "comodo-conhecido", "ACESA", "habilitada"); lot_light_bridge.h |
+docs/features/dev-tools/light-diag.md	portuguese	#0 L7F022780 vt=00FF43A8 tipo=7 lote=6C11001BCDB06290 comodo=0 d0=1 flags=90[apagada desabilitada] pos=(964.5 92.1 722.5) raio=0.00 intens=(1.00 1.00 1.00 1.00) cor=(1.00 1.00 1.00 1.00) efetiva=(0.00 0.00 0.00 0.00)
+docs/features/dev-tools/light-diag.md	portuguese	| comodo | +0x08 (int) | Room id (0 = outdoors) |
+docs/features/dev-tools/light-diag.md	portuguese	| flags | +0x100 (byte) | 0x01 `viva` (alive), 0x02 `celulas` (in the cells), 0x04 `comodo-conhecido` (room known), 0x20 `ACESA`/`apagada` (on/off), 0x40 `habilitada`/`desabilitada` (enabled). 0x08/0x10/0x80 printed in hex only |
+docs/features/dev-tools/light-diag.md	portuguese	`-- LOTE <id> andar <a> (nivel da arvore <L>) gerenciador=<mgr> sistema=ok|DIFERENTE flag280=<b> qualidade288=<q>`
+docs/features/dev-tools/light-diag.md	portuguese	| andar | mgr+0x88 | The manager's real story (lot load recollects room 0 of all stories with the level-0 tree level; see [level-light-share.md](../night-lighting/level-light-share.md)) |
+docs/features/dev-tools/light-diag.md	portuguese	`   comodo <id> (<ptr>) estado=<s> classe=<c> x100=<x> externo=<e> no_hash24=<h> luzes=<n> (postes da rua a / acesos b, outras c): #i #j L<ptr> ...`
+docs/features/dev-tools/light-diag.md	portuguese	de {} vistos`; a per light/story summary (`-- resumo por luz e andar --`), then `-- pontos --` with: story of the
+docs/features/dev-tools/light-diag.md	portuguese	not tested), `lote` (batch flag), `filtro` (culled list), `comodo`, and for crossing points `cruza=(x,z,q) h t chave
+docs/features/dev-tools/light-diag.md	portuguese	baixo=comodo motivo`.
+docs/features/dev-tools/light-diag.md	portuguese	-- lote 4522001BE6BBCA40 andar 0 comodo0=3DDFE700 classe=0 limiar[+0x63C]=0.0235294 matriz[+0xF8]=(0.9397 0 0.342 0 0 1 0 0 -0.342 0 0.9397 0 896.7 60.53 1232 1)
+docs/features/dev-tools/light-diag.md	portuguese	-- luzes nas listas do comodo 0 (64): alcance +0x130, forca +0x10.x, cores E0/F0, cone
+docs/history/dev-tools-light-diag.md	portuguese	lot stories, R rooms`; a missing world wrote `Nenhum mundo carregado.` to the file. Archived copy: `S3SS_LightDiag-1.txt`.
+docs/history/dev-tools-light-probe.md	portuguese	**Finding:** with an A16B16G16R16F back buffer, `ReadScreenPixel` wrote `COR NA TELA NO PIXEL: (nao lida)` (cause
+docs/history/night-lighting-level-light-share.md	portuguese	in v0.1.0, for example "Luz entre andares nao confere").
+features/atrium_hold.cpp	date	// ---- Lamp edits all at once (12/10; was "lamp switches all at once", 06/10) ----
+features/atrium_hold.cpp	date	//     show as soon as its rooms are solved, and follow a dragged lamp live. Holding it too was the rejected 05/10 "every
+features/atrium_hold.cpp	date	// ---- Classic: show all floors together (14/10, Tester switch classicTogether, on; Classic lamp lighting only) ----
+features/atrium_hold.cpp	date	// 2.13.1, own room at once (Tester switch ownRoomAtOnce, on). A recording (14/10, an indoor lamp dragged on story 2): the
+features/atrium_hold.cpp	date	bool sw = false;       // waits for a lamp edit shown all at once (12/10: any edit, was switches; not for its atrium)
+features/atrium_hold.cpp	date	// 07/10, players' Runtime Error: g_mx is never held across the game's own LockRect (another layer's hook may call back into
+features/atrium_hold.cpp	date	// thread locks meanwhile (06/10 review). An edit's room is kept from the very frame of the edit, before the next
+features/atrium_hold.cpp	date	// Present starts the hold (review, H2). 12/10: never a map of the lamp's own story (OnEditStory) while an edit is
+features/atrium_hold.cpp	date	// 12/10: a map of the edit not kept would show alone: the hold releases everything at once instead ("cap")
+features/atrium_hold.cpp	date	// stories. 12/10: the lamp's own story never waits while an edit is held (OnEditStory).
+features/atrium_hold.cpp	date	// Only the texture code of a d3d9.dll (DXVK, Windows' own) is patched: a wrapper's (dxwrapper.dll, 06/10: a player's
+features/atrium_hold.cpp	date	// (14/10, drag solves) a dragged lamp's hold ends once its own story's rooms show: the rooms that waited for the stop
+features/atrium_hold.cpp	date	// 06/10: a switch after Faster Room Lighting went off kept capturing maps nobody released)
+features/atrium_hold.h	date	// Lamp edits all at once ([patches.RoomLightQueue] switchAllAtOnce, default on; 12/10: every edit, was switches only):
+features/atrium_hold.h	date	// 14/10, Classic: show all floors together (Tester switch, on; Classic lamp lighting only): the lamp's own story is held
+features/bloom_alpha_probe.cpp	date	// (07/10, players' Runtime Error: started and run under HookGuard::StartDetached, so neither can end the game)
+features/captures.cpp	date	// Explorer on a folder, on a short-lived thread with COM (30/09: called from the menu frame, ShellExecuteW pumped the
+features/captures.cpp	date	// (07/10, players' Runtime Error: started and run under HookGuard::StartDetached, so neither can end the game)
+features/captures.cpp	date	// ---- Automatic cleanup (07/10: Captures\ reached 19 GB in 3 days) ----
+features/captures.cpp	date	// error_code overloads only (07/10, players' Runtime Error): the range-for's ++ throws on a folder that cannot be read
+features/captures.h	stamp	std::vector<std::string> SessionItems(); // the captures saved in it so far, oldest first ("22-10-06 Recording")
+features/captures.h	stamp	std::string folder; // the folder's name ("2026-09-30 21-50-12 Recording")
+features/cas_tri_sort.h	date	//               Triangles x vertices steps of divps + rsqrtps: the "CAS SimService" hitches (30/09: 38 in 10 minutes,
+features/compositor_readback.h	date	// the "CAS TextureCompositor" hitches (sampling 30/09: 56% of their excess time waiting in ntdll).
+features/drag_lite.h	date	// Classic: relight only after release (14/10, Tester switch classicAfterRelease, on; Lamp lighting Classic, or Instant on a
+features/drag_lite.h	date	// drag's stop: 9 s over 810 frames at 5 ms a frame, log 14/10), and in Instant an indoor lamp, which the game still solves,
+features/drag_lite.h	date	// LevelLightShare::LampDragging 200 ms more for the edit hold (a recording, 14/10: the lamp's own room shown 0.8 s after the
+features/fast_cas.h	date	// division and a reciprocal square root each time. The frame profiler's sampler (30/09) found it in 83% of the "CAS
+features/fast_crc.h	date	// lookup per byte (table 0x0114D330). The loading RE of 30/09 found it in the compositor's cache hitches (6-10% of a
+features/fast_memory.h	date	// single critical section (allocator+0x4E8, pointer at +0x4E4). The loading RE of 30/09 (research notes loadre\memory.md)
+features/fast_refpack.cpp	date	std::atomic<int> g_verifyEvery{kPublicBuild ? 0 : 8}; // dev: 1 in 8 after the first 16 (every stream until 30/09: its decode was 19% of the compression hitches)
+features/fast_refpack.cpp	date	// up to 8 MB per thread was kept before 30/09)
+features/fast_refpack.h	date	// Since 30/09: a counting run keeps its stream (per thread, with the source's CRC-32C) and its write copies it instead
+features/frame_profiler.cpp	date	constexpr size_t kStackCopy = 4096; // 512 until 30/09: DXVK / driver / kernel frames hid the game's in ~24% of the hitch samples
+features/frame_profiler.cpp	date	// appended across sessions: past 16 MB it becomes ApexRadiance_Hitches.old.txt (replacing the previous one), 07/10
+features/frame_profiler.cpp	date	HookGuard::StartDetached("FrameProfiler: hitch file writer", [path, t = std::move(text)] { AppendFile(path, t); }); // (07/10: cannot end the game)
+features/gpu_lamp_law.h	date	// The law is the room solve's evaluation of a lamp (Steam 1.67.2, read 13/10 with dumpbin): bare bulb FUN_006bde90 and street
+features/gpu_lamp_law.h	date	// ---- An indoor texel (a room with +0x18 clear; FUN_006a31d0, read 13/10 and replayed by room_bounce_model.h) ----
+features/ground_lamp_shadow.h	date	// soft edges (14/10: the shade's edges on grass drew in steps of the mask's texels): every wall's free end, top and opening
+features/ground_lamp_shadow.h	date	// Outdoor floors of story 0 take the same shade (13/10, F7 2026-10-13 08-16-00: a paved path behind a free-standing wall was
+features/ground_lamp_shadow.h	stamp	// Outdoor floors of story 0 take the same shade (13/10, F7 2026-10-13 08-16-00: a paved path behind a free-standing wall was
+features/inner_retry.h	date	// room needs to send it again (13/10 in game: the lamp put down came back in room 0, the next room stayed dark). Such a room
+features/lamp_mark_filter.cpp	date	// ambient, light counts and normalisation as before. Two studies (30/09):
+features/lamp_mark_filter.cpp	date	std::atomic<bool> g_on{false}; // (15/10: off by default, the maintainer's tested setting for 2.13.1; Developer page "Rooms keep their light...")
+features/lamp_mark_filter.cpp	date	// stories (05/10, F8: nothing sent its lot again, and the rooms that gathered while the game registered it missed it)
+features/lamp_mark_filter.cpp	date	// story, or many lamps, 12/10); never while dusk/dawn switches every lamp at once.
+features/lamp_mark_filter.cpp	date	// Since 05/10 the rooms that take an edited lamp are sent at once by the edit itself (LevelLightShare, "Lamp edits first"),
+features/lamp_mark_filter.cpp	date	bool relocated = false; // (07/10) a lamp into another room, or moved and switched: its rooms are sent (RelightLampSwitch), none kept
+features/lamp_mark_filter.cpp	date	// lamps switched where they are (06/10): only the rooms they can reach (LevelLightShare::RelightLampSwitch)
+features/lamp_mark_filter.cpp	date	// Every switch is counted here, the light's own self-switching test aside (06/10 capture: after testing "all the lights"
+features/lamp_mark_filter.cpp	date	// 12/10, lamp edits all at once (AtriumHold): every player edit (switch, value, move, drag step, a lamp added or removed)
+features/lamp_mark_filter.cpp	date	// ---- Lamp lighting: Instant (2.12.3 + RT). The occluder mark of a GPU-handled lamp's own object (14/10 review, in-game) ----
+features/lamp_mark_filter.cpp	date	// dumpbin 14/10) and marks it at 0x006C7939 ("mov ecx,[esi+14h]; push eax; mov [esi+1Ch],eax; call 0x006C7160") on every
+features/lamp_mark_filter.cpp	date	// (14/10 review) a player's edit: a move, or a colour, intensity or enable change (a switch by a Sim or a
+features/lamp_mark_filter.cpp	date	// Lamp edits first (05/10, LevelLightShare): an edit (moved, recoloured, dimmed, switched) marks its room as urgent;
+features/lamp_mark_filter.cpp	date	// 12/10: marked as a relocation, so its safety net keeps the full resend (changedAt 0, the F8 bug
+features/lamp_mark_filter.cpp	date	if (switchOnly || !pure) { // switched, moved and switched, or into another room (07/10: those rooms, not the whole lot)
+features/lamp_mark_filter.cpp	date	// 12/10: every edit that reaches its rooms (switch, value, move, drag step) starts or extends the edit hold, before the
+features/lamp_mark_filter.cpp	date	// 07/10, players' Runtime Error: MarkDecideImpl allocates (its maps) inside the game's lamp code. A C++ exception is caught, the
+features/lamp_mark_filter.cpp	date	// refreshed a moment ago: once more when the gap is over (12/10: 500 ms for a relocation or many lamps, 2 s for switches)
+features/lamp_mark_filter.cpp	date	// 12/10: only a relocation (a lamp into another room or story) resends every room (the F8
+features/lamp_mark_filter.h	date	// 12/10, lamp edits all at once (AtriumHold): GetTickCount of the latest player edit (switch, value, move or drag step, a
+features/lamp_mark_filter.h	date	// (12/10: a move's refresh comes 200 ms after it, after the hold's first check). Render thread.
+features/lamp_reach.h	date	// Realistic lamp reach (12/10, option "alcanceRealistaDasLampadas"): the distance law of a lamp on an outdoor wall texel,
+features/lamp_reach.h	date	// sqrt(w / 85): 3.5 m and 15 m for the garden post of the 12/10 captures (range 42.5 x intensity 2), within 2..5 m and
+features/lamp_reach.h	date	// Entries() = how many entries the lamp has. Fitted on 12/10 F7 wall atlas columns of one garden post (type 11, range 42.5,
+features/lamp_reach.h	stamp	// (20-31-19 / 20-31-21, within 2/255). UNVERIFIED: that the 3.333 applies to every wall sample, and to lamp types other than
+features/lamp_reach.h	date	// Entries of a lamp in the outdoor rooms' (room 0) light lists, on every story (12/10, review: the walls weigh only the
+features/lamp_reach.h	stamp	//    other stories' room 0 story 0's lamps twice (level_light_share.cpp OutdoorGather, "times"); F7 20-31-19 lists the
+features/lamp_reach.h	stamp	//    story-0 post (d0 0 in F8 20-32-07) twice for an upper story's wall, F8 20-32-07 evaluates it twice per story-3 sample;
+features/lamp_reach.h	stamp	//  - a world lamp (lot id 0, the street lamps): 1, from the world lights around the lot (0x006B66B0); F7 03-03-20 lists the
+features/lamp_visibility.h	date	// Slabs between a lamp and a point (12/10, F7 captures of the wall behind a balcony with a ground post under it: the wall
+features/lamp_visibility.h	date	// exactly 1 and one with no piece over open air exactly 0 (12/10 review: the pieces of an open segment summed in float
+features/level_light_share.cpp	date	//     JL): the F8 of 29/09 (invalidate callers) showed room 0 of stories 1-3 of one lot restarted ~140 times each in 70 s
+features/level_light_share.cpp	date	//       object's room; since 06/10 ObjectLightBridge also gives a room-mode rig the lamps of that list that reach its
+features/level_light_share.cpp	date	//     wherever the light changes with height (a sconce near the line: 1.9x at class 2). F8 of 29/09 (atrium: lower top
+features/level_light_share.cpp	date	// ---- The time of each of Apex's own tests inside the room solves (07/10, wall speed; light tree thread only) ----
+features/level_light_share.cpp	date	// 12/10: tier 2 = a room the edit's safety net sent (RelightLot / RelightLampSwitch from LampMarkFilter): after the
+features/level_light_share.cpp	date	// 12/10: a whole lot's safety net ("all the lights" of a big lot) tags more rooms than the 64 kept before
+features/level_light_share.cpp	date	// 12/10: the stories of the lamps' own rooms (tier 0, AfterChangedWalk): the edit hold never holds them (the lamp's own
+features/level_light_share.cpp	date	// 12/10: an urgent entry is live until its deadline, and after it while its room still waits for or is in its solve
+features/level_light_share.cpp	date	// that would throw its solve away (0x69EED0 -> 0x6C4870, 0x69E950(0): nothing committed, 29/09 study); it is sent again
+features/level_light_share.cpp	date	// The outdoor rooms of floors 0..7: room 0, and the roofless rooms when the room update hooks send them (05/10)
+features/level_light_share.cpp	date	info.yard = false; // a roofless room's record left at a reused address (review 07/10)
+features/level_light_share.cpp	date	// the lamps of the other stories' roofless rooms (05/10), with their own weight: once
+features/level_light_share.cpp	date	// and a new story manager made at the same address made an old floor match it (in-game 30/09: a double-height room whose
+features/level_light_share.cpp	date	// says where story L's floor is open (in-game 30/09: the double-height room of lot 8C41002E4010A180 was paired with its
+features/level_light_share.cpp	date	// 07/10, players' Runtime Error: the note allocates (its lists) inside the game's floor code: a C++ exception is caught and
+features/level_light_share.cpp	date	if (level) HookGuard::Run("LevelLightShare new floor note", [level] { NoteLevelMade(level); }); // caught, as NoteLevel (07/10)
+features/level_light_share.cpp	date	// The lamps of other stories that have lit a room, at any point of any of its solves since its story was built (05/10,
+features/level_light_share.cpp	date	// 07/10, players' Runtime Error: NoteLit allocates (its map) inside the game's light evaluation; caught there, then off
+features/level_light_share.cpp	date	// 07/10 snapshots, a type-11 lamp post): the game's own gather still takes it for its own story,
+features/level_light_share.cpp	date	// first (its priority lot) gets every story at the top class (05/10 memory study: every story of up to 8 lots held all
+features/level_light_share.cpp	date	// The quick pass lights a room the way its refinement will (06/10). Class 0 is not only coarser: the game's per-class
+features/level_light_share.cpp	date	// 07/10, players' Runtime Error: each of Apex's steps after the game's state 0 is caught on its own (HookGuard), then off
+features/level_light_share.cpp	date	// ---- Wall light laid out where the wall is drawn (06/10, wall_heights.h). The game lays a wall's light rows out from wall
+features/level_light_share.cpp	date	std::atomic<bool> g_foundationWallsOn{false}; // the option (SetFoundationWalls): off = the game's heights, as before 06/10
+features/level_light_share.cpp	date	// ---- Walls taller than a story (07/10, vanilla: the game lights every wall face over 3 m from its base, constant 3.0 at
+features/level_light_share.cpp	date	// mode 1 writes the second UV set of the same vertices; the note allocates: caught, then off (07/10, players' Runtime Error)
+features/level_light_share.cpp	date	// that lot under the manager's id, which the grids of a lot streamed in after the world never asked for (in game 13/10,
+features/level_light_share.cpp	date	// (glass doors, 13/10: the balcony door of a capture was past the first 10 posts of its lot) the posts of doors, gates and
+features/level_light_share.cpp	date	// 07/10, players' Runtime Error: the note allocates (maps, the log line) inside the game's object placement: a C++ exception
+features/level_light_share.cpp	date	// a closed wall stays closed until a post carries one of them). In game 13/10 (lots 7975270033346670 / B128002B8215A110 and
+features/level_light_share.cpp	date	// The soft edges of the walls (2.12.4): the lamp's penumbra at each crossing (penumbra.h; 07/10: a tower patch above a
+features/level_light_share.cpp	date	// balcony parapet ended in a hard straight cut, 13/10: the light through an arch into the next room had a hard edge). While
+features/level_light_share.cpp	date	// carries daylight into the room behind (read in the base game's packages, 13/10: the French, patio, modern and arched
+features/level_light_share.cpp	date	// ---- Walls that end at a floor of the story above (13/10, in game: the colonnade of a house on a foundation, a garden
+features/level_light_share.cpp	date	// (14/10) a roofed quadrant's ceiling at floor + 3 m passed through the story above where that story's floor lies lower: a
+features/level_light_share.cpp	date	// the lot, and the rooms that gathered while only part of them was posted saw too few doors; 13/10, lot
+features/level_light_share.cpp	date	// A grid built before its story's walls were readable (in game 13/10, lot B1280029950F0CA0 streaming in: stories 1..4 built
+features/level_light_share.cpp	date	// (14/10, lot B1280029950F0CA0 on the switch to Live mode: a story's walls arrive over several gathers; a grid with some
+features/level_light_share.cpp	date	// (14/10, steady-state cost) The grid a story manager got in this frame, while no cut, wall top, floor edit or the doors
+features/level_light_share.cpp	date	// posts on story 0 (in game 13/10, lot B1280029950F0CA0: the colonnade rooms 4, 7, 11 and 16 of story 1 found 13 to 16
+features/level_light_share.cpp	date	// its room's registry until it is put down, and nothing else sends the rooms that took it then (13/10 in game)
+features/level_light_share.cpp	date	const std::vector<int>& lost = here ? r.lost : r.upLost; // (a room that lost its lamps is not in took: 13/10)
+features/level_light_share.cpp	date	// outside walls lit where they are drawn: only with the option (the first, unconditional version of 06/10 evening broke the
+features/level_light_share.cpp	date	// 07/10, players' Runtime Error: Apex's part (notes, maps) is caught (HookGuard) and then off; the game's layout stands
+features/level_light_share.cpp	date	// ---- The wall base from the house's foundation (06/10, the wall self-check against every wall on screen): the
+features/level_light_share.cpp	date	// 07/10, players' Runtime Error: Apex's part after the game's solve allocates (the recording's line, the ghost rows'
+features/level_light_share.cpp	date	// 07/10, players' Runtime Error: BlurWalls runs inside the game's wall pass, so nothing in it may throw. Everything it
+features/level_light_share.cpp	date	// the caller in the journal (29/09: an outdoor room was solved again every ~60 ms for 4.5 s, never shown, and nothing of
+features/level_light_share.cpp	date	// The end of a room's solve (06/10, light update trace): FUN_006a0e00, step 8 of the budgeted solve (its call at
+features/level_light_share.cpp	date	// 07/10, players' Runtime Error: each step caught on its own (HookGuard), then off; the game's finalize has run
+features/level_light_share.cpp	date	// Step 1 of a room's solve (06/10 review): FUN_0069fa40 binds the room's texture set and locks its maps (0x00618DF0, the
+features/level_light_share.cpp	date	// A window the game takes back (06/10, every load of the atrium house since the morning: "144 evaluated, 50 changed" two or
+features/level_light_share.cpp	date	// +0xEC still 0): it merges with the group's target then, so the ambient pass does not send it again (06/10, recording
+features/level_light_share.cpp	date	// 29/09: the fixed 6 s came 2.5 s after the last solve of the first round; the lot looked right only then).
+features/level_light_share.cpp	date	// enabled: a sold or deleted lot lamp stays registered, lit, disabled (07/10 snapshots): like a lamp removed
+features/level_light_share.cpp	date	// and that ends as it was still changes this, so they gather again (05/10, see AuditTakers)
+features/level_light_share.cpp	date	// (Instant only; 14/10, in game: a dragged street lamp the GPU draws is registered again at every step; its rooms came here
+features/level_light_share.cpp	date	// The outdoor rooms of the other stories (room 0 and the roofless rooms, 05/10): they take this story's outdoor lamps
+features/level_light_share.cpp	date	// Light through doors and windows (08/10): this story's roofless rooms that take (or may now take) the changed outdoor
+features/level_light_share.cpp	date	// 12/10: a lamp added or removed runs no lamp mark of LampMarkFilter's when it is deleted: the edit hold (AtriumHold)
+features/level_light_share.cpp	date	// Room 0 of this story changed (07/10 review): this story's roofless rooms mask their floors with room 0's lamps
+features/level_light_share.cpp	date	// (bit 0x40 clear), also after a save load (07/10 snapshots: lamp post L3BEA4030, type 11, flags B5,
+features/level_light_share.cpp	date	// One daytime curve (12/10): the solving room is roofed (an indoor room, room+0x18 == 0) and its outdoor lamps take
+features/level_light_share.cpp	date	// ---- One daytime curve on the outdoor lamps of roofed rooms (12/10; a red garden post by day lit the story-2 window
+features/level_light_share.cpp	date	// The entries in use (07/10, wall-perf): a new batch only resets this count, so the walls' index buffers are reused instead
+features/level_light_share.cpp	date	// Focus of the records (07/10): the wall point of the last F7 (light capture) on a noted wall. Points within 1 m of it are
+features/level_light_share.cpp	date	// 14/10 (solve speed): the lookup of the last two rooms is kept while no entry can have been erased (g_roomsGen) or added
+features/level_light_share.cpp	date	// ---- Outside walls: their base from the floor they stand on (06/10, reverse engineered after the F7 wall survey). The
+features/level_light_share.cpp	date	// Slabs for the render thread (12/10, F7: a window frame behind a balcony showed a ground post's red through the slab;
+features/level_light_share.cpp	date	// off (HookGuard) and empties it once (12/10 review: the last copy stayed in use, so a slab added or removed afterwards was
+features/level_light_share.cpp	date	// batches the mask tests (05/10). With no list FUN_0069d4c0 tests every wall of the story (room+0x78), for every lamp and
+features/level_light_share.cpp	date	// 07/10, players' Runtime Error: this runs inside the game's room solve, where a bad_alloc would end the game. The pool is
+features/level_light_share.cpp	date	std::atomic<bool> g_bakeConeSpill{false}; // the terrain bake stamps type-5 lamps at their spill (SetBakeConeSpill, 07/10)
+features/level_light_share.cpp	date	// a lamp with cones (type 5) is stamped at its spill +0x150 when the bake stub does it (SetBakeConeSpill, 07/10)
+features/level_light_share.cpp	date	// Roofless rooms (07/10 review: a railed deck, a half-walled terrace and a closed yard are all rooms with an id) keep the
+features/level_light_share.cpp	date	// ---- The 4 directional basis maps get the floor test too (30/09, a third study; F7 128 / F8: a TV in a closed
+features/level_light_share.cpp	date	// one daytime curve (12/10): an outdoor lamp in a roofed room's directional maps (the window glass and the objects of
+features/level_light_share.cpp	date	// A wall of a lower story the ray passes over (07/10, capture 08-43-10: a lamp post on the grass 0.95 m from a foundation
+features/level_light_share.cpp	stamp	// A wall of a lower story the ray passes over (07/10, capture 08-43-10: a lamp post on the grass 0.95 m from a foundation
+features/level_light_share.cpp	date	// (07/10, F7 point 1032.05 61.02 1273.70: a ground post left the tower's story-3 piers black; every sample had our share 0
+features/level_light_share.cpp	date	// homeRoom: the lamp's room on its story (0, or a roofless room: its own walls close it, 05/10)
+features/level_light_share.cpp	date	// off (07/10, players' Runtime Error). Not inlined, as NoteLitSafe.
+features/level_light_share.cpp	date	// Slabs block lamps below them (12/10, F7 captures of the wall behind a balcony with a ground post under it: the wall kept a
+features/level_light_share.cpp	date	// (SnapView): 12/10 review, PlacedFloorAt's "floor" there stopped a ray from a lamp off the lot (a street lamp) crossing
+features/level_light_share.cpp	date	// this story's plane beside it, and darkened the part of a lantern band reaching past the lot's edge (before 12/10 such a
+features/level_light_share.cpp	date	// The floors of the stories between the lamp's and this one (07/10, a band on story 3: a lower balcony's slab, a room's
+features/level_light_share.cpp	date	// (12/10, F7 20-31-19 / 20-31-21 at the red garden post, intensity 3.40) With realistic reach on it is 1 in the outdoor
+features/level_light_share.cpp	stamp	// (12/10, F7 20-31-19 / 20-31-21 at the red garden post, intensity 3.40) With realistic reach on it is 1 in the outdoor
+features/level_light_share.cpp	date	// Distance falloff of a lower story's lamp on an upper story (07/10, doors6: once the false blocking of WallPass was gone,
+features/level_light_share.cpp	date	// Realistic lamp reach (12/10, F7 captures of a garden post, range 42.5 x intensity 2): the game's wall law
+features/level_light_share.cpp	date	// every lamp by 9/85 at all distances: the near walls went nearly black next to the lit ground; 12/10 screenshot.)
+features/level_light_share.cpp	date	// (12/10) The law lives in lamp_reach.h, shared with the per-pixel lamps of outdoor objects, fences and windows
+features/level_light_share.cpp	date	// the texel's real normal (0x006BE020, room-light-maps.md), so the texel's own solve adds no zeroing (12/10). Counted to
+features/level_light_share.cpp	date	// lamp alike (12/10 review): the copy with the walls tested returns through OutdoorFloorVisibility below (walls only)
+features/level_light_share.cpp	date	// (07/10, balcony4: bands of a ground post on the tower's story 3, behind the balcony) A batch with no 2D wall
+features/level_light_share.cpp	date	// through the floors in between. The floors and this story's slab still stop it here (12/10: no share is left
+features/level_light_share.cpp	date	// (12/10) the share a slab's edge leaves (LampVis::SlabGate). Only that: the steep-ray dimming of the
+features/level_light_share.cpp	date	// batches with a wall test (UpwardShare) stays out of this batch, as before (12/10 review: added here it
+features/level_light_share.cpp	date	// the lamp's own story stops stays dark (12/10: the balcony share tested such a ray to the slab's edge and gave the
+features/level_light_share.cpp	date	// a ledge, a set-back upper wall, a recess) shines past it. Measured 05/10, atrium house, wall seams capture: the
+features/level_light_share.cpp	date	// The brightness a lamp shining out of a roofed room keeps (13/10 in game: the balcony floor outside a window took half the
+features/level_light_share.cpp	date	// outdoor lamp of a lower story that penumbra darkened the upper wall beside a balcony's corner (06/10). A fault in the
+features/level_light_share.cpp	date	// (06/10, "all the lights" of a big lot: the safety net sent such rooms again, a second invalidation for nothing)
+features/level_light_share.cpp	date	if (!b && !e) return false; // an empty list (no lamp reaches the room): holds none (07/10)
+features/level_light_share.cpp	date	// urgentTier >= 0 (12/10, a lamp edit's safety net): the rooms sent, and the fresh solves kept that are still running, are
+features/level_light_share.cpp	date	// -4..-1; 30/09: "Refresh the lighting" left them out).
+features/level_light_share.cpp	date	// (the reason for that refresh, 30/09: a room solved before the other stories' lamps were registered), so it keeps that
+features/level_light_share.cpp	date	LoadAddresses(); // also when the light between stories never installed (Rooms at Night alone; review 30/09, M4)
+features/level_light_share.cpp	date	// a freed lot is ever written or sent (review 30/09, H1)
+features/level_light_share.cpp	date	// ---- Rooms still lit by a lamp switched off (30/09) ----
+features/level_light_share.cpp	date	// where its ray enters that room's story (05/10); development build: its result recorded for F8. Optional: without it
+features/level_light_share.cpp	date	g_editStories.clear(); // (12/10) the edit hold then has nothing to wait for and releases what it held
+features/level_light_share.cpp	date	// Whole-world relights asked in a burst (install, options, sliders) run once, 250 ms after the last ask (29/09: 59 + 83 rooms
+features/level_light_share.cpp	date	// A wall crossed within 20 cm of the point is the wall the object sits in (code review 05/10: windows, doors, wall
+features/level_light_share.cpp	date	// by lot and matrix (12/10 review): a lot unloaded without a world change keeps its copies, and a lot loaded later
+features/level_light_share.cpp	date	// 30/09). Render thread. Returns the rooms sent, -1 when the lot is no longer loaded. With lamps (05/10: lamps that only
+features/level_light_share.cpp	date	// targeted refresh left such a room lit through the closed walls around it until every room of the lot lit again (06/10,
+features/level_light_share.cpp	date	// A switched lamp's home (06/10 evening): its room id (light+8, what the object rigs' gather compares, FUN_006bb270) on the
+features/level_light_share.cpp	date	for (int level = -4; level <= 7; level++) // (12/10: tagged tier 2, the edit hold waits for them too)
+features/level_light_share.cpp	date	return tier < 0 ? 1.0f : (tier == 0 ? 1.0e6f : tier == 1 ? 1.0e5f : 1.0e4f) * CameraStoryFactor(room); // tier 2: the safety net's (12/10)
+features/level_light_share.cpp	date	// 12/10: lamp edits all at once. The switch hold waited only for the rooms on stories the camera shows
+features/level_light_share.cpp	date	// A lamp moved or a value dragged within the last kDragQuietMs (05/10; RoomLightQueue no longer solves an edit's rooms in
+features/level_light_share.cpp	date	// (14/10, drag solves) also every other step of a lamp drag (DragLite: a lamp the lamp list sees move, a type-11 light
+features/level_light_share.cpp	portuguese	s += "Colunas: andar do ponto | luz, tipo, andar da luz (-1 = do proprio andar ou do mundo) | ponto | normal | soma da cor | teste do jogo (1 passou, 0 bloqueou, "
+features/level_light_share.cpp	portuguese	"-1 nao rodou) e fator | nosso fator (-1 = nao testado) | lote de pontos | lista filtrada\n";
+features/level_light_share.cpp	portuguese	s += "\n-- resumo por luz e andar --\n";
+features/level_light_share.cpp	portuguese	s += std::format("L{:08X} andar {}: {} pontos | jogo: {} passou, {} bloqueou, {} sem teste | nosso: {} testados, {} bloqueados\n", k.first, k.second, m.n, m.gamePass,
+features/level_light_share.cpp	portuguese	s += std::format("A{} L{:08X} tipo{} casa{} luz({:.2f} {:.2f} {:.2f}) p({:.2f} {:.2f} {:.2f}) n({:.2f} {:.2f} {:.2f}) cor={:.3f} jogo={} t={:.2f} nosso={:.2f} lote={} filtro={} comodo={}{}\n",
+features/level_light_share.cpp	portuguese	r.why < 0 ? std::string() : std::format(" | cruza=({},{},q{}) h={:.2f} t={:.3f} chave={:08X}:{:08X} baixo=comodo{} motivo={} stage={} seg_story={}", r.cx, r.cz, r.cq, r.ch, r.ct, r.keyHi, r.keyLo, r.belowRoom, PassWhyText(r.why), PassStageText(r.stage), r.segStory));
+features/level_light_share.cpp	date	// ---- Ground light mask of a lot (lot_light_bridge.cpp, 07/10: the terrain light of a lamp outside reached the grass inside
+features/level_light_share.cpp	date	// lamp dragged), which gives the same cells a new generation (14/10 in game); the same cells give the same value here
+features/level_light_share.h	date	// "Walls shade lamp light near the ground" (option "paredesSombreiamOChao", default on; 14/10, was part of the option above):
+features/level_light_share.h	date	// editNet (12/10): a lamp edit's safety net (LampMarkFilter): the rooms sent are tagged urgent (tier 2) and the lamp edit
+features/level_light_share.h	date	// in Build mode (07/10): no lamp entry update runs, so neither LampMarkFilter nor AfterChangedWalk's cross-story sends
+features/level_light_share.h	date	// Lamp edits all at once (AtriumHold, render thread; 12/10, was SwitchRoomsPending): of the rooms lamp edits marked (the urgent
+features/level_light_share.h	date	// holds its maps (12/10). Any thread.
+features/level_light_share.h	date	// (05/10, option A) was taken out the same day: 300-1300 ms frames while moving lamps in Build mode (log). False once the
+features/light_diag.cpp	portuguese	return std::format("L{:08X} vt={:08X} tipo={} lote={:08X}{:08X} comodo={} d0={} flags={:02X}[{}{}{}{}{}] pos=({:.1f} {:.1f} {:.1f}) raio={:.2f} intens={} cor={} efetiva={}", L, vt, type,
+features/light_diag.cpp	portuguese	lotHi, lotLo, room, Rd<int>(L + 0xD0), f, (f & 1) ? "viva " : "", (f & 2) ? "celulas " : "", (f & 4) ? "comodo-conhecido " : "", (f & 0x20) ? "ACESA " : "apagada ",
+features/light_diag.cpp	portuguese	o += "(constantes globais: nao encontradas nesta versao)\n";
+features/light_diag.cpp	portuguese	o += std::format("-- lote {:08X}{:08X} andar {} comodo0={:08X} classe={} limiar[+0x63C]={:.6g} matriz[+0xF8]={}\n", Rd<uint32_t>(mgr + 0x94), Rd<uint32_t>(mgr + 0x90),
+features/light_diag.cpp	portuguese	o += std::format("\n-- luzes nas listas do comodo 0 ({}): alcance +0x130, forca +0x10.x, cores E0/F0, cone\n", outdoor.size());
+features/light_diag.cpp	portuguese	out << std::format("\n-- LOTE {:08X}{:08X} andar {} (nivel da arvore {}) gerenciador={:08X} sistema={} flag280={} qualidade288={}\n", Rd<uint32_t>(mgr + 0x94),
+features/light_diag.cpp	portuguese	out << std::format("   comodo {} ({:08X}) estado={} classe={} x100={} externo={} no_hash24={} luzes={} (postes da rua {} / acesos {}, outras {}):{}\n", roomId, room,
+features/light_probe.cpp	date	// PNG when it varies), encoded on the capture writer thread, and returns a stats line. Developer mode only (07/10: these
+features/light_probe.cpp	date	// pass 1: the stats (and the scale); pass 2 writes the 8-bit pixels directly (07/10: no float copies of a 5632x5632 map)
+features/light_probe.cpp	date	std::error_code dirError; // (07/10: the throwing overload could end the game; a failed folder just fails the writes below)
+features/light_probe.cpp	date	// lossless PNG on the capture writer thread (07/10: the BMPs were ~121 MB each); the same 8-bit pixels the BMP had
+features/light_probe.cpp	portuguese	if (!shader) return "nenhum";
+features/light_probe.cpp	date	// The wall under the pixel (06/10: the light of an outside sconce sat well below it on its wall): the pixel's ray from a
+features/lightmap_smooth.cpp	date	// Correct first (28/09): when the game re-renders a chunk map (dusk, a lamp edit, a rebuild) the smoothed map of the OLD
+features/lightmap_smooth.cpp	date	// GPU path (default since 28/09, CPU above kept as the fallback): the same smoothing done with pixel shaders
+features/lightmap_smooth.cpp	date	// its start and its body under HookGuard (07/10, players' Runtime Error): an exception ends the worker (noted), not the game
+features/lightmap_smooth.cpp	date	// (review 25/09, winter seam m73/m74): Get/Find already refuse it (hash != doneHash); its texture goes to the pool.
+features/lot_light_bridge.cpp	date	// Soft lot edges (28/09, research\borda2 + borda3): the lot map saturates at 1.0 within ~2.5 m of a street lamp while
+features/lot_light_bridge.cpp	date	// c31.x = "Lot lamps" brightness on the lot's own light map (night-weighted; 1 = the game). c31.y = 0 (12/10: before full
+features/lot_light_bridge.cpp	date	// Classify's answers per pixel shader in one entry (14/10: TrackPs made two hash lookups per shader change), with the
+features/lot_light_bridge.cpp	date	// RigTracker::CurrentMode for the draw being handled (14/10: read 2-3 times a draw, each under SEH). Valid while
+features/lot_light_bridge.cpp	date	// Roads and outdoor floors keep the game's own lamp factor (cK.x x the gain) and take the daytime curve on top of it (12/10):
+features/lot_light_bridge.cpp	date	std::atomic<DWORD> g_lotDrawTick{0}; // (14/10: atomic, NativeWallScale reads it from any thread)
+features/lot_light_bridge.cpp	date	// Lamp shade on the lot ground (13/10: a free-standing wall next to a garden post left the grass behind it fully lit; the
+features/lot_light_bridge.cpp	date	// Built a slice at a time on the render thread (ShadeTick, on a worker thread since 15/10) from copies: the outside walls (the copy
+features/lot_light_bridge.cpp	date	// A lot's shade over the world grass (15/10): the share per texel and the lamps' stamp weight it is a share of, so the lots
+features/lot_light_bridge.cpp	date	// (15/10) the shade on the grid it was built on: the lot and the world grass around it its lamps reach (ShadeGrid), for
+features/lot_light_bridge.cpp	date	// ---- The builds run on a worker thread (15/10: they ran 1 ms a frame on the render thread, so a lot's shade took up to a
+features/lot_light_bridge.cpp	date	// ---- The shade on the world grass around lots (15/10). The world terrain pass lights the grass outside lots with the
+features/lot_light_bridge.cpp	date	// The grid the shade is built on (15/10, F8/F7 2026-10-14 23-27: a wall's shadow stopped at the lot's edge and the lamp light
+features/lot_light_bridge.cpp	date	// ---- Garden walls and fences shade the ground too (15/10: a brick garden wall let the post's light over the grass
+features/lot_light_bridge.cpp	stamp	// turn; the vertex shader's world = (px c - pz s, py + px k, px s + pz c) + place, VS_21C41B90 of F7 2026-10-13 11-50-47)
+features/lot_light_bridge.cpp	date	// (15/10) an 8 m grid of the fence walls, made again only when a group changed (each lot's check walked every group)
+features/lot_light_bridge.cpp	date	// the mesh's box, read once per mesh (15/10: a locked buffer the GPU draws from makes the CPU wait)
+features/lot_light_bridge.cpp	date	// (15/10: the ground took minutes to change after a fence was removed) a new group replaces at once the groups over the
+features/lot_light_bridge.cpp	date	// (14/10) applied also when its inputs changed again meanwhile (a newer build is queued then)
+features/lot_light_bridge.cpp	date	// (14/10: the built key is set when the build is applied, the queued one apart, so a dropped or cancelled build is asked
+features/lot_light_bridge.cpp	date	// (14/10) more than kMaxLotMasks lots: the ones no draw asked for in the last 30 s go, oldest first (before, every lot's
+features/lot_light_bridge.cpp	date	static DWORD s_evictedAt = 0; // (14/10 review: at most once a frame; each call sorts every lot)
+features/lot_light_bridge.cpp	date	// (14/10: every 500 ms; a lot with no texture yet every 100 ms, not at every draw: its ground mask is a walk of the
+features/lot_light_bridge.cpp	date	// ---- The same shade on the outdoor floors of story 0 (13/10, F7 2026-10-13 08-16-00: a paved path behind a free-standing
+features/lot_light_bridge.cpp	stamp	// ---- The same shade on the outdoor floors of story 0 (13/10, F7 2026-10-13 08-16-00: a paved path behind a free-standing
+features/lot_light_bridge.cpp	date	// copy (review 25/09).
+features/lot_light_bridge.cpp	date	// (A size-only "possible weather variant" log was tried on 05/10 and removed: dozens of unrelated game shaders share
+features/lot_light_bridge.cpp	date	// (12/10) range +0x130 x intensity +0x10, the w of the outdoor walls' reach law (lamp_reach.h): the per-pixel lamps of
+features/lot_light_bridge.cpp	date	// (12/10, review) the lamp's entries in the outdoor rooms' light lists (LampReach::Entries: 2 for a story-0 lot lamp,
+features/lot_light_bridge.cpp	date	// created (05/10: ClassifyVs kept it for every classified shader, drawn or not, until Shutdown). Empty when it cannot be.
+features/lot_light_bridge.cpp	date	//    takes (window lights 7/8, type 9, disabled or unlit lamps) never count. 29/09 (ApexRadiance_LOG + LightDiag): the
+features/lot_light_bridge.cpp	date	//    rebuild made for any other reason; after 2 min with no automatic change it is a plain lamp again (30/09);
+features/lot_light_bridge.cpp	date	//    Confirmed ordinary enable switches and type-11 edits bypass that filter (private 02/10 follow-up).
+features/lot_light_bridge.cpp	date	//    all switches of one lot (30/09: a town square's 57 lamps); confirmed value-only edits also bypass bulk suppression;
+features/lot_light_bridge.cpp	date	// Additions, removals and moves are "user-driven" (Build mode: in the 28-29/09 logs no lamp was ever added or removed
+features/lot_light_bridge.cpp	date	// or flickering lamps) is ignored from then on, so it cannot keep the boost on (review 29/09).
+features/lot_light_bridge.cpp	date	// (14/10, drag solves) type-11 lights added in this enumeration: one removed on the same lot within 0.5 m is the same lamp
+features/lot_light_bridge.cpp	date	// a lot lamp disabled (sold or deleted in Build mode: it stays registered and lit, 07/10): every room of its lot
+features/lot_light_bridge.cpp	date	if (s.animated && now - s.lastAuto > kAnimatedExpire) { // quiet long enough: a switch again (30/09: lamps toggled while testing stayed ignored)
+features/lot_light_bridge.cpp	date	// every room of the lot lights again (07/10, a deleted lamp post kept lighting its wall): a deleted lamp runs no lamp
+features/lot_light_bridge.cpp	date	// added or removed) of ONE lot: a lot's own lamps switched together (30/09: a town square's 57 lamps were ignored here,
+features/lot_light_bridge.cpp	date	g_lampData[32][0] = g_roofStrength.load(std::memory_order_relaxed) * TerrainLightingPolicy::LampDay(g_night.load(std::memory_order_relaxed)); // x the daytime curve (12/10)
+features/lot_light_bridge.cpp	date	g_lampData[32][0] = g_waterStrength.load(std::memory_order_relaxed) * TerrainLightingPolicy::LampDay(g_night.load(std::memory_order_relaxed)); // x the daytime curve (12/10)
+features/lot_light_bridge.cpp	date	// With mask (room mask, 07/10): also "mad r6.x/y" (mask uv from v7 with PS c200 / c201), "texld r6, r6, s<new+1>" and
+features/lot_light_bridge.cpp	date	// the lamp shade (13/10, the mask's alpha, 1 with no wall between): x the whole lamp term, after the max
+features/lot_light_bridge.cpp	date	// the daytime lamp term, not this pass: snowy lots lost the street-lamp pool at dusk, a cut at the lot edge, 06/10).
+features/lot_light_bridge.cpp	date	// Buildings block light on objects (12/10; LevelLightShare::LampVisibility), render thread only (plain counters, read by
+features/lot_light_bridge.cpp	date	// (DrawObjectLamp, 12/10), render thread
+features/lot_light_bridge.cpp	date	// Realistic lamp reach on objects, fences and windows (12/10, F7 20-31-19 / 20-31-21 at a red garden post: a balcony band
+features/lot_light_bridge.cpp	stamp	// Realistic lamp reach on objects, fences and windows (12/10, F7 20-31-19 / 20-31-21 at a red garden post: a balcony band
+features/lot_light_bridge.cpp	stamp	// The game's lamp scale of the outdoor walls (the native cK.x DrawWallGain reads; F7 20-31-19 at night drew c3.x 0.309124 =
+features/lot_light_bridge.cpp	date	// 10:28:03, validation page). (12/10 review: a value kept from the day left every reach object, fence and window without
+features/lot_light_bridge.cpp	stamp	// was read (g_lotDrawTick, the Present tick), else takes the daytime curve's value LampDay(night), 1 at night (F7 20-31-19).
+features/lot_light_bridge.cpp	date	// (12/10, one daytime curve: the fallback was 1 at any level, so at dusk with no wall drawn the columns took the night
+features/lot_light_bridge.cpp	date	std::atomic<float> g_nativeWallScale{1.0f}; // (14/10: atomics, read by ObjectLampColourAt on the light tree thread too)
+features/lot_light_bridge.cpp	date	// Patched copy of the current pixel shader, made once per shader with `patch`. variant (12/10, realistic reach): a second
+features/lot_light_bridge.cpp	date	// (15/10) the walls' shade on the lamp light around lots, as on the world grass next to the road (ChunkShadeTexture): the
+features/lot_light_bridge.cpp	date	// (12/10, F7 18-17-00 #393: the centre of an L-shaped balcony band of 33 pieces stood in open air, 3.6 m from the nearest
+features/lot_light_bridge.cpp	stamp	// (12/10, F7 18-17-00 #393: the centre of an L-shaped balcony band of 33 pieces stood in open air, 3.6 m from the nearest
+features/lot_light_bridge.cpp	date	// (12/10, one daytime curve) No full-daylight gate any more: the pass runs at every level with its ground and lamp
+features/lot_light_bridge.cpp	date	// no lamp (option off, or a group that cannot be read) keeps the first law's lighter copy (12/10 review)
+features/lot_light_bridge.cpp	date	// realistic reach (12/10): the copy with the outdoor walls' law, made only from a shader the first law takes; refused
+features/lot_light_bridge.cpp	date	// out of a house is not in the atlas and does not count (14/10: an upper story's indoor lamp raised the gate of the
+features/lot_light_bridge.cpp	date	// loses it, one that only runs past a wall keeps it. The placed floors of upper stories count too (12/10, the
+features/lot_light_bridge.cpp	date	// a railing on a balcony loses a lamp under the slab and keeps one in front of it. (12/10, F7 18-17-00 #393: the
+features/lot_light_bridge.cpp	stamp	// a railing on a balcony loses a lamp under the slab and keeps one in front of it. (12/10, F7 18-17-00 #393: the
+features/lot_light_bridge.cpp	date	// its cones (07/10): the fence face 47 deg or more off a sconce's axis takes only its spill, as in the game
+features/lot_light_bridge.cpp	date	// (12/10, screenshot with a red garden post: the top of a story-4 balustrade, 8 m above the post, glowed with the
+features/lot_light_bridge.cpp	date	// data). Ground fences and curbs, below the heads, keep it all. (14/10) The atlas has no walls or slabs either: the
+features/lot_light_bridge.cpp	date	// Light probe (12/10 review: fence and balcony band draws showed only "mod draw (another fix)", so their law could not be
+features/lot_light_bridge.cpp	date	// The lot ground's lamp shade (13/10, F7 2026-10-13 09-31-30 #268: the curbs of a flowerbed behind a free-standing
+features/lot_light_bridge.cpp	stamp	// The lot ground's lamp shade (13/10, F7 2026-10-13 09-31-30 #268: the curbs of a flowerbed behind a free-standing
+features/lot_light_bridge.cpp	date	// Light probe detail of the per-pixel lamps' law (12/10): the reach law's scale and each lamp's r0 (its R is the radius the
+features/lot_light_bridge.cpp	date	// 0.5 m), or with a placed floor of an upper story between it and a middle above it (12/10, F7 18-38-41: a window frame
+features/lot_light_bridge.cpp	stamp	// 0.5 m), or with a placed floor of an upper story between it and a middle above it (12/10, F7 18-38-41: a window frame
+features/lot_light_bridge.cpp	date	// the shader evaluates each cone per pixel; otherwise colour uses the origin cone. With reachRows (realistic reach, 12/10):
+features/lot_light_bridge.cpp	date	// the lamp's cones at the object's middle (07/10): one factor per object, as the game's own rule gives it
+features/lot_light_bridge.cpp	date	// one side of the wall or the other as it is turned (F7 capture, 06/10: the same window turned took other lamps
+features/lot_light_bridge.cpp	date	// rig modes 2 (outdoors) and 1 (roofless fenced areas) both draw with the exterior technique (rig report 25/09)
+features/lot_light_bridge.cpp	date	// (12/10, one daytime curve; a red garden post by day: salmon columns and window frames) No full-daylight gate any more:
+features/lot_light_bridge.cpp	date	// (F7 capture, 06/10: the turned window's frame got 0 of 19 lamps and no ground light). Off: the 0.2 m as before.
+features/lot_light_bridge.cpp	date	// loose objects keep 0.2 m, so a wall 0.4 m behind an armchair still blocks the next room's lamp (F7 capture, 07/10)
+features/lot_light_bridge.cpp	date	// (12/10, F7 18-38-41: a window frame on story 2 stands 2.5 m above the only lamp head around, a red post's; how much of
+features/lot_light_bridge.cpp	stamp	// (12/10, F7 18-38-41: a window frame on story 2 stands 2.5 m above the only lamp head around, a red post's; how much of
+features/lot_light_bridge.cpp	date	// c5..c7 and VS vertex light colours zeroed above; rgb only) x LampDay(night) for this draw (12/10). The sun is not
+features/lot_light_bridge.cpp	date	// ---- Windows take outdoor light (experimental, "janelasLuzDeFora", off by default). F7 capture (06/10):
+features/lot_light_bridge.cpp	date	// (12/10, one daytime curve) runs at every level; its outdoor terms take x LampDay(night)
+features/lot_light_bridge.cpp	date	// the ground gate of DrawObjectLamp (12/10): the sash's ground term (atlas x (0.5 + 0.5 N.y) on every face,
+features/lot_light_bridge.cpp	date	// are replaced by the basis light, its unlit-room lights kept (diffuseConst, 30/09), its specular kept, its per-object
+features/lot_light_bridge.cpp	date	// position, outside the house plan (alpha 0), so the basis light was exactly 0 and furniture went dark (F7 091, 30/09:
+features/lot_light_bridge.cpp	date	// 14/10 (draw cost): only the samplers the shader declares (a texture left bound elsewhere is not its room map), the
+features/lot_light_bridge.cpp	date	// behind the wall into the faces on this side (F7 capture, 07/10: a sconce's room at ~41% on the dark room's door frame).
+features/lot_light_bridge.cpp	date	// (found and validated by idavidveiga's fork, 04/10: a white bloom wash over lit walls and foundations).
+features/lot_light_bridge.cpp	date	// Light through doors and windows (08/10): the winter floors weight the atlas by 1 - the floor map's alpha too, as the summer
+features/lot_light_bridge.cpp	date	consts[32][0] = g_roofStrength.load(std::memory_order_relaxed) * TerrainLightingPolicy::LampDay(g_night.load(std::memory_order_relaxed)); // x the daytime curve (12/10)
+features/lot_light_bridge.cpp	date	// (15/10) the walls' shade on the lamp light of the world grass around lots (ChunkShadeTexture); with no smoothed map
+features/lot_light_bridge.cpp	date	// Before full night (12/10, one daytime curve): c3.x = ground gain x LampDay(n) for the terrain and the lot map alike,
+features/lot_light_bridge.cpp	date	// frame: a state seen less than kTraceRecentMs ago is not written again. A state that comes back later is (06/10: lights
+features/lot_light_bridge.cpp	date	// 2.13.1 (Tester switch furnitureWithRoom, on): every lamp edit, not only switches. A recording (14/10, an indoor lamp
+features/lot_light_bridge.cpp	date	// 12/10: the lamp's own story is never held (its maps show once solved): its furniture waits for its own room's solve
+features/lot_light_bridge.cpp	date	// (14/10, Classic: show all floors together: the own story is held too, so its furniture waits for the release)
+features/lot_light_bridge.cpp	date	// hooks, so read them from the device once (review 25/09)
+features/lot_light_bridge.cpp	date	// The wrap constants (VS c255, PatchFoliageVs runtimeWrap) carry the daytime curve (13/10): the per-instance lamp colours
+features/lot_light_bridge.cpp	date	// A C++ exception inside a hook would unwind into the game: turn the whole bridge off instead (review 25/09). Called from catch
+features/lot_light_bridge.cpp	date	// blocks, so it only sets flags (07/10, players' Runtime Error: an allocation there, perhaps with no memory left, could throw
+features/lot_light_bridge.cpp	date	bool drawn = false; // the game's draw made by OnDraw: after an exception it is not made a second time (07/10)
+features/lot_light_bridge.cpp	date	// (14/10) the rest of the old world: the lamps leaving roofed rooms (rows, cones, lights), the lots' masks and shades
+features/lot_light_bridge.cpp	date	// the lamp shade on lot ground follows "Walls shade lamp light near the ground" (14/10; the same wall copy as "Buildings
+features/lot_light_bridge.cpp	date	// a lamp edited: about every other frame; (14/10, drag solves) while a lamp is dragged 4 times a second (each read re-lights
+features/lot_light_bridge.cpp	date	// (14/10, Classic: relight only after release) while dragged the list is still read at that pace, for the drag's own
+features/lot_lighting_motion.cpp	date	constexpr float kEditMovingMs = 6.0f;      // (12/10) a lamp edit's room is current while the camera moves: at most this
+features/lot_lighting_motion.cpp	date	// ---- Lot build slice while moving (05/10) ----
+features/lot_lighting_motion.cpp	date	// (14/10, drag solves) the flush once a dragged lamp is still (the rooms that waited for the stop, the sends left out):
+features/lot_lighting_motion.cpp	date	// 12/10: a lamp edit's room is the current room (RoomLightQueue::CurrentRoomUrgent): the lot being played keeps the
+features/lot_lighting_motion.cpp	date	// Many lamps switched at once whose rooms already show their quick pass (06/10, RoomLightQueue::Refining): the refinement
+features/lot_object_throttle.cpp	date	// copies: Stop on another thread may clear the pointers while the posts below run (06/10 review)
+features/memory_guard.cpp	date	// Steam 1.67.2 (research\engine_map\full.asm, 05/10)
+features/memory_guard.cpp	date	// 07/10, players' Runtime Error: these lines are written when address space is short, inside the game's calls or on the watch
+features/memory_guard.h	date	// false); it writes large streams, and a big allocation needs one contiguous free block (memory study 30/09, Backups
+features/object_id_map.cpp	date	// 07/10, players' Runtime Error: this runs inside the game's object lookups, sometimes under g_lock. The index goes off first;
+features/object_id_map.cpp	date	HookGuard::Try("ObjectIdMap index note", [&] { // under g_lock, inside the game's lookup: the line may not throw (07/10)
+features/object_id_map.h	date	// per node). Its functions (05/10):
+features/object_light_bridge.cpp	date	// the candidate (0x006BB3B7: [0x01158D24] -= 0x30; decompiled 13/10). So such a lamp goes through the game's per-light test
+features/object_light_bridge.cpp	date	// 07/10, players' Runtime Error: Apex's part allocates (maps, sets); a C++ exception there is caught and that part stays
+features/object_light_bridge.cpp	date	// Buildings block lamp light on rig objects (13/10: cypress trees behind a manor took a garden post's light through the
+features/object_light_bridge.cpp	date	// A lamp taken through a roofed room's openings (13/10, in game: the columns inside an arcade, lit by a garden post through
+features/object_light_bridge.cpp	date	// (15/10, the player's report: a big tree next to a post took no light, its centre being metres from the lamp while its
+features/object_light_bridge.cpp	date	// A lamp through a roofed room's openings keeps its light under the game's luminance cut (14/10, F7 in game: a column inside an
+features/object_light_bridge.cpp	date	// 07/10, players' Runtime Error: the colour setters run inside the game's lamp code. A C++ exception in the tint (its map)
+features/outdoor_delta.cpp	date	// ---- The game side (Steam 1.67.2, read with dumpbin 13/10) ----
+features/outdoor_delta.cpp	date	// (14/10: 160 MB, 256 MB pinned; with the game's saves failing on a fragmented address space below 2 GB, the parts are
+features/outdoor_delta.cpp	date	// past kMaxBytes only the pinned rooms (Real-time outdoor lamps' active lot) are left. 14/10: 160 MB, with the drawn lamps'
+features/outdoor_delta.cpp	date	// (14/10) its parts are only in the record's drawn sum (CollapseDrawn): a delta that needs them solves in full
+features/outdoor_delta.cpp	date	// (14/10) The drawn lamps' parts of a room Real-time outdoor lamps relights, as one sum per texel: the GPU draws those lamps
+features/outdoor_delta.cpp	date	// (14/10) a kept lamp whose "drawn" changed since its parts were kept (moved into or out of an indoor room still
+features/outdoor_delta.cpp	date	// 14/10: the replay runs in the lock step, in one piece (13 deltas of 44-73 ms and 193-252 ms ones in the logs): while a
+features/outdoor_delta.cpp	date	// (14/10 review: the edit's tail, no urgency, each room once, under the spread budget)
+features/outdoor_delta.cpp	date	if (rr.lot != ActiveLot()) return; // (14/10: parts of every lot's room 0 took 206 MB; edits elsewhere solve in full)
+features/outdoor_delta.cpp	date	// (14/10: the vectors at the size this room and class kept last time, so they grow once)
+features/outdoor_delta.cpp	date	// (14/10 review: only when the records are free; a sizing hint is not worth a wait)
+features/outdoor_delta.cpp	date	// (14/10) a room of the active lot Real-time outdoor lamps relights keeps its drawn lamps as one sum (the base is
+features/outdoor_delta.cpp	date	// (14/10) render thread, every frame: never waits for a worker's export copy holding g_mx (tens of ms); the pins of the
+features/outdoor_delta.cpp	date	// (14/10) a room kept before it was pinned (a solve at the load, before the lot was the active one) takes the drawn
+features/outdoor_delta.cpp	date	// (14/10) a record is the room's only while the room still has its manager and story (a room 0 made again at a freed
+features/outdoor_delta.cpp	date	// (14/10) the render thread asks every frame: a worker's export copy holding g_mx (tens of ms) gets the last answer
+features/picture.cpp	date	constexpr int kMinSceneDraws = 4; // depth-tested back buffer draws before the UI can start (as PostScene; 20 until 06/10, 8 until 06/10 night)
+features/picture.cpp	date	// Glow (06/10: it read only the pixel's own blurred colour, so no halo spread past a lamp and averaging dimmed small
+features/picture.cpp	date	// The depth test on but passing everything with no depth write uses no depth: not scene (06/10, frame capture with
+features/picture.cpp	date	// copy waits for them, or every pixel they change reads as UI and keeps the game's colours (06/10: Color did nothing)
+features/picture.cpp	date	// Color at the end of the scene (06/10 evening): the pass runs as the last post-scene effect, on the finished scene before the
+features/picture.cpp	date	// pumps the game window's messages and re-enters the overlay (captures.cpp, 30/09 crash)
+features/picture.cpp	date	// (07/10, players' Runtime Error: started and run under HookGuard::StartDetached, so neither can end the game)
+features/picture.cpp	date	// Smooth gradients (deband) is on the Banding Fix page (a Color tab from 30/09, its own page since 06/10) and follows the Banding Fix's switch, not
+features/post_scene.cpp	date	constexpr int kMinSceneDraws = 4; // backbuffer draws with depth test before the UI can start (8 until 06/10 night: an empty Edit in Game world drew 7, the bare terrain; 20 until 06/10: a CAW world in edit-in-game mode draws 13 scene draws at some angles, so the effects never ran there and Color came and went with the camera; the UI glass passes no longer count, see OnGameDraw)
+features/post_scene.cpp	date	// 07/10, players' Runtime Error: an effect that throws is caught (the game's draw or EndScene goes on), noted, and skipped
+features/post_scene.cpp	date	// 07/10 actual copy diagnostics: the game's colour transform copies a 256x256 tile,
+features/post_scene.cpp	date	// A depth test that passes everything with no depth write uses no depth: neither scene nor the end of it (06/10: the
+features/post_scene.cpp	date	if (g_uiDrawSeen) return; // the UI is already drawn: never run the effects over it (06/10)
+features/post_scene.cpp	date	// does not copy the scene before them (06/10: since Picture took a depth test with ALWAYS and no depth write for the end of
+features/probe_neutral.cpp	date	// 07/10 review: a plain grey also took the moonlight blue away)
+features/recorder.cpp	date	// Report a problem page, 30/09 evening: features/captures.h).
+features/recorder.cpp	date	// [room] lines have their own cap (30/09, F6 capture: a Brightness drag filled the shared cap with [furniture] lines in 4 s
+features/recorder.cpp	date	// every room once, as it is now (30/09: these lines used to be dropped, so a recording showed rooms only once they changed)
+features/resource_cache.cpp	date	// The last whole-list "every read-only package answers for sure" of this thread (05/10: every lookup that reaches the
+features/resource_cache.cpp	date	// game ran the walk over the ~300 packages before its probe, and Remember ran it again; sampled hot on 10/02). Reliability
+features/resource_cache.cpp	date	if (!g_unhookedLogged.exchange(true)) // inside the game's lookup: building the line may not throw into it (07/10)
+features/resource_cache.cpp	date	// the game's answer is returned whatever happens to the report (07/10, players' Runtime Error)
+features/resource_cache.cpp	date	// 07/10, players' Runtime Error: these run inside the game's GetKeyList on any thread. The locks are scoped and the copies
+features/resource_cache.cpp	date	} catch (...) { // no memory for the copy: not remembered (07/10)
+features/resource_cache.cpp	date	// 07/10, players' Runtime Error: a C++ exception in the cache's loop (a copy, the verification's sort or text) must not
+features/room_ambient_policy.h	date	// 12/10: a move waits 200 ms, the same quiet time that ends a drag (LevelLightShare kDragQuietMs), not 300
+features/room_ambient_policy.h	date	// 12/10: the safety net of a lamp moved into another room or story, or of many lamps, may run again after 500 ms (the
+features/room_ambient_policy.h	date	// 12/10: an edit's room stays urgent while it still waits for or is in its solve (states 1-3), at most 8 s after its
+features/room_ambient_policy.h	date	// 12/10, lamp edits all at once (AtriumHold): 0 = keep holding, 1 = complete (every other story solved since the edit and
+features/room_ambient_policy.h	date	// 14/10, Classic: show all floors together (AtriumHold): every room of the edit, the lamp's own story's too, is counted in
+features/room_light_queue.cpp	date	// ---- The game side (Steam 1.67.2, TS3W.exe; research\engine_map\full.asm; study of 29/09, re\out) ----
+features/room_light_queue.cpp	date	//   Empty removal (05/10): 0x006C7610, thiscall(levelLights; idLo, idHi), ret 8, takes an object out of the level's five
+features/room_light_queue.cpp	date	// Per room of the burst: whether its class-0 solve is shown (06/10 capture: the switch's safety net invalidated a room
+features/room_light_queue.cpp	date	// (render thread; 12/10, was the switch serial): lamp edits all at once wait for a solve that began after the edit (SolvedSince; a solve running at
+features/room_light_queue.cpp	date	// often picked in the same light tree update) compared before it, and its switch waited the whole kSwitchHoldMs (review 06/10)
+features/room_light_queue.cpp	date	// When every room of the burst shows its quick solve (06/10): the time is logged ("showed its new light"), and the rest of
+features/room_light_queue.cpp	date	// 06/10 fade held the changed maps meanwhile, AtriumHold now waits only for an atrium's own stories)
+features/room_light_queue.cpp	date	// 07/10, players' Runtime Error: Apex's parts around the game's priority call are caught on their own (HookGuard); on a C++
+features/room_light_queue.cpp	date	// (14/10, Classic: relight only after release) while a lamp is dragged no room of the drag's edit or of the lot being
+features/room_light_queue.cpp	date	// (14/10, drag solves) while a lamp is dragged a room solved moments ago is not picked again yet (drag_lite.h): it keeps
+features/room_light_queue.cpp	date	// 12/10: a lamp edit's room (LampUrgency > 1) is drained on any lot, not only the priority lot's (an edit on a neighbouring
+features/room_light_queue.cpp	date	// A lamp edit's rooms from the first waiting one to the last solved (05/10, to tune "Lamp edits first"): the time, the
+features/room_light_queue.cpp	date	long expired = 0; // LevelLightShare::UrgentExpiredPending at the start (12/10: "ended: urgency expired")
+features/room_light_queue.cpp	date	// by test (07/10, wall speed): ms and calls of each since the edit began
+features/room_light_queue.cpp	date	// 12/10: "complete" = every urgent room solved; "urgency expired" = a room reached the 8 s cap still waiting (a paused lot)
+features/room_light_queue.cpp	date	// a lamp edit held all at once (12/10: switches, values, moves; not while dragged) gets the 16 ms too
+features/room_light_queue.cpp	date	// (14/10, drag solves) the flush once a dragged lamp is still: the spread cap, no boost (LotLightingMotion::DrainBudget)
+features/room_light_queue.cpp	date	// 07/10, players' Runtime Error: Apex's parts around the game's pick are caught (HookGuard): on a C++ exception the edit
+features/room_light_queue.cpp	date	// (14/10, drag solves) the priority CALL alone, also while this feature is off: the re-pick throttle of a lamp drag
+features/room_light_queue.cpp	date	// a room of the lamp edit (06/10: other rooms solving meanwhile, even of other lots, filled the 128 kept maps)
+features/room_light_queue.cpp	date	// 12/10: stamped with LampMarkFilter::EditSerial (every edit, not only switches): the edit hold waits for a solve begun after
+features/room_light_queue.cpp	date	// The game's own cumulative solve time per class (0x011D1200/04/08, ms; 0x006C2380 adds each finished solve)
+features/room_light_queue.h	date	// before any upgrade of the viewed story (1000 / 100). Measured 29/09: 12-36 s from entering a lot to the last solve,
+features/room_light_queue.h	date	// (14/10, drag solves) The room priority CALL goes through Apex even while this feature is off, for the re-pick throttle of a
+features/room_light_queue.h	date	// Quick pass after a player's lamp switch (06/10; one lamp or many): while LampMarkFilter::SwitchActive, a lamp edit's room still waiting for
+features/room_light_queue.h	date	// its solves ended since the switch began, so it still shows its light from before the switch (06/10: the furniture of
+features/room_light_queue.h	date	// Render thread: the room's last finished solve began after the edit whose LampMarkFilter::EditSerial is `since` (12/10: was
+features/room_map_dither.cpp	date	// ---- The game side (Steam 1.67.2, TS3W.exe; read with dumpbin, 13/10) ----
+features/room_map_padding.cpp	date	// captures of 29/09: the basis maps' alpha is 255 on exactly the house and 0 outside, where the colour is black), which
+features/room_map_padding.cpp	date	// 30/09 (floor switches, a study): sets used to be released after 600 frames (~3 s) without a draw. A floor out
+features/rt_lamp_gpu.cpp	date	// (14/10) MANAGED: only sampled, so it survives a device reset (Real-time outdoor lamps no longer rebuilds every story's
+features/rt_lamp_model.h	date	// +0x170) finite. Another one stays baked (14/10: the law fell back to a bare bulb's sphere for it)
+features/rt_lamp_proxy.h	date	// floor lies lower (14/10, Full captures: a raised house's ground story stands on its foundation, story 1, with its floor at
+features/rt_outdoor_lamps.cpp	date	// ---- The game side (Steam 1.67.2, read with dumpbin 13/10) ----
+features/rt_outdoor_lamps.cpp	date	constexpr DWORD kDragRelightMs = 200;    // while dragged: at most one relight start this often (14/10, drag solves: was 66; 5 a second,
+features/rt_outdoor_lamps.cpp	date	// (15/10) the lot's ground on story 0 (turned up, within 1 m of the lot's ground, not a masked floor): bit 4, no wall
+features/rt_outdoor_lamps.cpp	date	// (14/10) a buffer that could not be made (device memory, a lost device): the slot is built again later, with a backoff
+features/rt_outdoor_lamps.cpp	date	s->relit = false; // (14/10: its preblur texture is a MANAGED one: kept, and the slot stays built; only the copy is made again)
+features/rt_outdoor_lamps.cpp	date	// (14/10, drag solves) while a lamp is dragged no slot is uploaded (a slot upload makes its buffers and textures on this
+features/rt_outdoor_lamps.cpp	date	slot->retries = 0, slot->retryAt = 0; // (14/10 review: the backoff was the old room's or class's)
+features/rt_outdoor_lamps.cpp	date	const auto back = g_exportBackoff.find(room); // (14/10: a failed export waits before the next one)
+features/rt_outdoor_lamps.cpp	date	// (14/10) a list that cannot be read this frame: the story keeps the last one read (its lamps were dropped for one frame,
+features/rt_outdoor_lamps.cpp	date	// begin is set, and for the same tracker, manager and room (14/10 review)
+features/rt_outdoor_lamps.cpp	date	uint32_t missed = 0;   // the stories it was missing from at the last check (14/10: a repair needs two checks in a row)
+features/rt_outdoor_lamps.cpp	date	// what it was when first seen (14/10: another light at a freed lamp's address starts again; a lamp moved to another
+features/rt_outdoor_lamps.cpp	date	// (14/10) only the stories where it is still a lamp the GPU draws (one that left them legitimately, e.g. moved
+features/rt_outdoor_lamps.cpp	date	// the under-floor share from a worker (exact, UnderShare's sums): once no lamp is dragged, and (14/10) while one is,
+features/rt_outdoor_lamps.cpp	date	// (14/10, drag solves) never the whole share on this thread while a lamp is dragged (10-30 ms a relight in a
+features/rt_outdoor_lamps.cpp	date	// (14/10) not a lamp a covering slot keeps baked in its base (kept when it was not drawn): its edits must reach the
+features/rt_outdoor_lamps.cpp	date	g_sendDue.clear(); // (14/10: trackers of the old world)
+features/rt_outdoor_lamps.cpp	date	// (14/10 review: as the tail of the edit, with no urgency and under the spread budget; the stories of a lot due together
+features/rt_outdoor_lamps.h	date	// Real-time outdoor lamps (Performance > Lamp lighting > Instant, "lampLightingMode", Instant by default since 14/10;
+features/scene_budget.cpp	date	//   grows every frame (x2, x4 ... x64, doubling every kGrowStepMs) instead of the whole backlog at once (05/10: the forced full
+features/scene_budget.cpp	date	// the first failure; these run inside the game's scene code, so a failure to build or log it stays here (07/10, players'
+features/scene_budget.cpp	date	// 07/10, players' Runtime Error: the records of the nodes left need memory, taken before anything goes back to the
+features/scene_dither.cpp	date	//  - ps_3_0 (ShaderPatches::AddDither): the pixel position is vPos. ps_2_0 / ps_2_x (AddDither2, 30/09 evening: in game
+features/scene_dither.cpp	date	//  - Copies are made at a shader's first draw in the 3D scene (05/10: before, every shader the game created got one at
+features/scene_dither.cpp	date	// Offline checks (30/09, Shaders_Win32.precomp): ps_3_0 4907 / 4907 and ps_2_0 2996 / 3104 patched, vertex shaders
+features/scene_dither.cpp	date	// Render-thread front caches checked without the lock (14/10: two mutexes on every scene draw): direct-mapped, valid
+features/scene_dither.cpp	date	// render target 0, followed through SetRenderTarget as PostScene and Picture do (05/10: GetRenderTarget + Release on every
+features/scene_dither.cpp	date	// ---- the shared scene-draw binder (30/09): the Banding Fix's pixel copies and the temporal anti-aliasing's jittered vertex
+features/scene_dither.cpp	date	constexpr int kJitterConst = 252; // no game vertex shader uses a constant above c241 (Shaders_Win32.precomp, 30/09)
+features/scene_dither.h	date	// its switch since 30/09 (the Banding Fix page holds both).
+features/scene_dither.h	date	// The scene-draw binder shared with the temporal anti-aliasing (30/09): one final draw hook (after every other module)
+features/script_math.cpp	date	// inserted only there, on a miss, and never replaced or removed (05/10: no other insert into domain +0x40 among the 24
+features/script_math.h	date	// Steam 1.67.2, 05/10), each
+features/script_math.h	date	// targets the inside of a block (scanned 05/10 on Steam 1.67.2). The sites are found by pattern in .text, so the EA
+features/shader_patches.cpp	date	//  - reach (12/10, F7 20-31-19 / 20-31-21: a band and a column 5.5-9.8 m from a red post went black at R = 7.82 m while the
+features/shader_patches.cpp	stamp	//  - reach (12/10, F7 20-31-19 / 20-31-21: a band and a column 5.5-9.8 m from a red post went black at R = 7.82 m while the
+features/shader_patches.cpp	date	//    ReachShareImpl's "1 up to r0" only just inside r0, by at most 1 - (1 - (r0/R)^4)^2: 0.6% for the 12/10 garden post
+features/shader_patches.cpp	date	//    where the wall texel need not be at its clamp (12/10 review: 0.98 against 1, about 3/255 at most).
+features/shader_patches.cpp	date	// q = d^2 / R^2 (two steps: one constant per instruction, final review 30/09)
+features/shader_patches.cpp	date	// Ground lamp shade of story-0 outdoor floors (13/10, F7 2026-10-13 08-16-00: a paved path behind a free-standing wall was
+features/shader_patches.cpp	stamp	// Ground lamp shade of story-0 outdoor floors (13/10, F7 2026-10-13 08-16-00: a paved path behind a free-standing wall was
+features/shader_patches.cpp	date	// "mad oN.xy, rX, cK, cK.zwzw" (review 25/09: 5 captured terrain/water VS have it, the snow floors do not).
+features/shader_patches.cpp	date	// Surfaces lit only by a baked light map (summer outdoor floors, ExteriorFloors technique; census 25/09): the single
+features/shader_patches.cpp	date	// lrp rD.w, tN.x, cK.y, rS.w: the shadow fade is t5.x in the bushes of 24/09, t6.x in the winter bush of
+features/shader_patches.cpp	date	// lrp rD.w, tN.x, cK.s, rS.w: cK.y at runtime in the bushes of 24/09; a shader-defined 1 in any component in the
+features/shader_patches.cpp	date	// The ground lamp shade (13/10, F7 2026-10-13 09-31-30 #268: the wooden curbs of a flowerbed behind a free-standing wall
+features/shader_patches.cpp	stamp	// The ground lamp shade (13/10, F7 2026-10-13 09-31-30 #268: the wooden curbs of a flowerbed behind a free-standing wall
+features/shader_patches.cpp	date	// from 7 (census 25/09: many ExteriorFloors vertex shaders already write TEXCOORD7).
+features/shader_patches.cpp	date	// Several consecutive-constant triples (census 25/09, Phong VS_E3A718D3: world c19..c21, then a view triple
+features/shader_patches.cpp	date	// The rig's 4 vertex lights (every Counters/Phong vs_3_0, 25/09): "dp3_sat rS.s, cD, rN" (either order) then
+features/shader_patches.cpp	date	// Everything this patch reads and inserts must come before the first flow-control instruction (census 25/09: the
+features/shader_patches.cpp	date	// 4-light ones (PS_2D041628: c0..c3 directions, c4..c7 colours), c13 in Phong (census 25/09)
+features/shader_patches.cpp	date	// l = lamp - pixel, d^2, sat(N.l) and the falloff, one constant register per instruction (final review 30/09: a
+features/shader_patches.cpp	date	// p = uv*size - 0.5, in two steps: native D3D9 takes one constant register per instruction (30/09 review)
+features/shader_patches.cpp	date	// outside and alpha 1 inside (Light Probe captures of 29/09), so the filtered rgb / filtered alpha is the mean of the
+features/shader_patches.cpp	date	// r0.xyz, r0.w, c4, r0 / ..."): followed through the accumulator instead. Strict (30/09 review): the colour an
+features/shader_patches.cpp	date	// Normal-mapped furniture (30/09, the sofa of F7 093: "texld r0, v8, s6" ... "nrm_pp r4.xyz, r0" ... "texld_pp r0, r4,
+features/shader_patches.cpp	date	// The specular chain keeps reading c4..c7 (lamp highlights as before). 30/09, a second study: replacing the
+features/shader_patches.cpp	date	// The basis light never above kBasisCap x the room light map at the same place (30/09, F7 128 + F8: a TV in a closed
+features/shader_patches.h	date	// shade (15/10): also "texld rT, v1, s<E+1>; mul rX.xyz, rX, rT.x" after the max, the walls' shade on the lamp light around lots
+features/shader_patches.h	date	// Walls' shade on the lamp light of the world grass around lots (15/10): right after the single light-map read
+features/shader_patches.h	date	// The ground lamp shade of story-0 floors (13/10): max(map, atlas) is multiplied by 1 + gate (M - 1), M = the lot mask's
+features/shader_patches.h	date	// is gated by its cones (07/10): x S + (1 - S) sat(max(l.k1 + k1.w, l.k2 + k2.w)), S = colour .w, k1 / k2 at coneConst.
+features/shader_patches.h	date	// reach (realistic lamp reach, 12/10): the per-pixel lamps follow the law of an outdoor wall texel (level_light_share
+features/shader_patches.h	date	// groundShade (13/10): with the per-pixel lamps, the sum max(lamps, atlas x sat(N.y) x cB.x) is multiplied by the lot ground's
+features/terrain_chunk_relight.cpp	date	// Evidence (TS3W.exe Steam 1.67.2; research\perf2\chunkrelight.md, the disassembly re-read on 29/09 for this file):
+features/terrain_chunk_relight.cpp	date	// A chunk render that took long (06/10, a session: 44 ms a chunk while the game's whole frames took 72-164 ms; the same
+features/terrain_chunk_relight.cpp	date	//    Urgent work (a player's lamp edit) after such a cheap render goes back to back, one chunk a frame (06/10: a lamp
+features/terrain_chunk_relight.h	date	// Paced full rebuild (item 13b, 05/10): the game's own full rebuild (chunk+0x55: geometry, light map bake, road mark, the
+features/terrain_lighting_policy.h	date	// Realistic lamp reach (12/10): the per-pixel lamps of objects, fences and windows then hold an outdoor wall texel's light
+features/tester_toggles.h	date	// Classic lamp lighting (14/10; Instant (GPU) is unchanged by both):
+features/unlit_rooms.cpp	date	// tint"), the fill colour and its gate stay the game's (furniture is turned per draw instead: FurnitureColour, since 30/09). The
+features/unlit_rooms.cpp	date	// Furniture (30/09, a second study): its unlit-room light is the game's [NoLight] rig lights (CustomLightRigging.ini,
+features/unlit_rooms.cpp	date	// 07/10, players' Runtime Error: the note allocates (its map) inside the game's solve: caught, then off (HookGuard)
+features/unlit_rooms.cpp	date	// 30/09 (F6 capture): only a room without lamps is matched by its colour. Near Brightness 0 a lit room's value (its lamps'
+features/unlit_rooms.cpp	date	// with the others by FurnitureColour (review 30/09, M2: it was turned twice at night and dimmed by day)
+features/unlit_rooms.cpp	date	// Exact tests only (final review, 30/09): a colour test ("dim and bluish") also took blue, purple and dim cool-white lamps,
+features/vulkan_driver_guard.h	date	// address-space study of 30/09, loadre\addrspace.md). Right before the game's first Direct3DCreate9 (the loader is not
+features/wall_heights.cpp	date	// the memory first (07/10, players' Runtime Error): a throw while the game's buffer is locked would leave it locked
+features/wall_heights.cpp	date	// (14/10: the bound shader as the registry follows it, no GetVertexShader + Release per draw; the device holds it)
+features/wall_heights.h	date	// Where the game draws its walls (06/10, the whole-scene wall survey of the F7 capture: on a house on a foundation the
+features/window_repaint.h	date	// of that id anywhere in TS3W.exe, 05/10). The picture comes from the D3D swap chain, not from WM_PAINT. The short jump
+features/world_session.h	date	// 06/10 (Twinbrook load screen): the interactive load screen draws about 100 depth-writing draws for tens of seconds and
+features/world_session.h	date	// 150 was tried on 06/10 and never opened in close views (fewer draws than that): 48 again, with the settled signal now
+features/world_session.h	date	// the after-load refresh ("load settled") until 06/10: effects came 3 .. 10 s after the map showed
+features/world_session.h	date	// the last complete frame's count (06/10: Night Lighting asks at Present, after the count was reset for the next
+framework/apex_log.cpp	date	// 07/10, players' Runtime Error: logging runs inside game hooks and when memory is low; a line that cannot be built or
+framework/apex_log.h	date	// Never throws (07/10, players' Runtime Error): a log line that cannot be built (no memory, ...) is dropped, it must not
+framework/apex_util.h	date	// Scoped SRW locks (07/10, players' Runtime Error): a C++ exception inside a locked section must not leave the lock held,
+framework/crash_report.cpp	date	// Apex's own image (07/10, players' Runtime Error): tells whether a C++ exception was thrown by Apex's code
+framework/crash_report.cpp	date	// 07/10, players' Runtime Error: name the C++ exception (the thrown type, and whether Apex's code threw it)
+framework/crash_report.cpp	date	// ---- Apex's own runtime aborts (07/10, players: "Microsoft Visual C++ Runtime Library: Runtime Error! ... terminate it in an
+framework/crash_report.cpp	date	// abort(), which would add a "Runtime Error!" dialog this case never showed before (07/10)
+framework/crash_report.cpp	date	// (07/10, players' Runtime Error) instead of as a plain abort(). Before Install it is set by Install's own thread only.
+framework/d3d9_bootstrap.cpp	date	// 07/10, players' Runtime Error: nothing Apex does here may throw into the game's EndScene. Each step is caught on its
+framework/d3d9_bootstrap.cpp	date	// 07/10, players' Runtime Error: each step around the game's Reset is caught on its own and runs again at the next
+framework/d3d9_hooks.cpp	date	// Set when the callback threw (07/10, players' Runtime Error): it is skipped from then on. Shared by every copy of the
+framework/d3d9_hooks.cpp	date	// whether it had already issued the game's call itself; then the device call is not made a second time (07/10).
+framework/d3d9_hooks.cpp	date	// 14/10 (dispatch cost): one outermost dispatch in kModSample is timed and booked kModSample times (the profiler scales
+framework/d3d9_hooks.cpp	date	// 07/10, players' Runtime Error: a callback's C++ exception would unwind into the game's device call and end the game. It is
+framework/d3d9_hooks.cpp	date	// 14/10 (dispatch cost): one exception frame around the whole list instead of one per callback (re-entered after a
+framework/d3d9_hooks.h	date	// dispatch (05/10: each read its own every draw, ~2,000 draws a frame). Valid for this dispatch only; a callback that
+framework/d3d9_hooks.h	date	// A registered callback: a plain function pointer and its object, called with one indirect call per dispatch (14/10:
+framework/d3d9_hooks.h	date	// already ran for the game's call of the same draw with the same state, and their nested run changed nothing (14/10). In the development build the driver's time for a re-issued draw is booked
+framework/d3d9_hooks.h	date	// them without a device call (14/10: the Banding Fix read both back on every scene draw). Read back from the device, and
+framework/entry_chain.cpp	date	// mono_type_get_object and mono_domain_free (05/10): register-only prologues; no branch in TS3W.exe lands on
+framework/entry_chain.cpp	date	// The object service's map find / insert / erase (05/10): register-only prologues; no branch lands on 0x00939101..07,
+framework/entry_chain.cpp	date	// The light object removal 0x006C7610 (05/10): register-only prologue; no branch lands on 0x006C7611..16 (same scan).
+framework/game_addresses.cpp	date	// Steam 1.67.2 addresses found offline in TS3W.exe with the fork's EA signatures (06/10, each unique; PostRemoteMethodCall: the
+framework/game_addresses.cpp	date	//      the world save call before "mov eax,0Ch" (Error 12); every signature unique on Steam (checked on TS3W.exe 05/10) ----
+framework/high_alloc.h	date	// Large buffers above the game's 2 GB line (14/10). TS3W.exe is large-address aware: on 64-bit Windows a 32-bit process of
+framework/hook_guard.h	date	// Exception safety nets where the game or the D3D9 runtime calls into Apex (07/10, players' "Microsoft Visual C++ Runtime
+framework/load_timing.h	date	// Load-phase timing for the log ([LoadTiming], 07/10): logging only, no behaviour change. Hooks and features note events
+framework/memory_patch.h	date	// One Detours transaction at a time in the whole process (06/10: the depth hooks, installed on the render thread, failed
+framework/overlay.cpp	date	// (07/10, players' Runtime Error), so an exception in Apex's part never skips or doubles the game's handling.
+framework/overlay.cpp	date	// 07/10, players' Runtime Error: the menu's frame runs inside the game's EndScene. An exception there is caught and the
+framework/render_callbacks.h	date	// 07/10, players' Runtime Error: never throws into the game's EndScene / Reset. The copy goes to the stack (no heap for
+framework/shader_cache.cpp	date	// 07/10, players' Runtime Error: an exception in the loop (a log line, the disk cache) ends this thread, not the game. The job it
+framework/shader_cache.cpp	date	// (called on every draw: once every job is done, the answer is kept until a job is added; 14/10, 150-400 us a frame)
+i18n/tr_image.cpp	date	// Filters added 06/10: Filmic pass, Tint, Levels
+i18n/tr_image.cpp	date	// Filters added 06/10: LUT, Auto exposure, Adaptive sharpening, Color-blind mode
+i18n/tr_image.cpp	date	// Filter controls added 06/10 (second pass): per-card reset, new sliders, color-blind simulation
+i18n/tr_menu.cpp	date	// the menu's lot streaming texts (06/10, simpler than the fork's originals below)
+i18n/tr_menu.cpp	date	// ---- Report a problem (30/09) ----
+patches/ambient_occlusion_patch.cpp	date	// Designed offline on saved frames of the game (lab gtaolab.cpp, 30/09; docs/features/ambient-occlusion.md) after the
+patches/ambient_occlusion_patch.cpp	date	//    nearest level: trilinear cost twice as much for the same look (30/09, 4K: 2.4 vs 4.5 ms, image 0.04 levels apart).
+patches/ambient_occlusion_patch.cpp	date	// Map view (30/09, lab on 3 captures of the map: view 950-1800 m, one depth step 5-20 cm with near ~1 m): radii for
+patches/ambient_occlusion_patch.cpp	date	// ---- Developer capture (the lab's input, 30/09: AO in the map view) ----
+patches/ambient_occlusion_patch.cpp	date	// Bump with every change of the AO's look or options. 1 = 2.1.0 (saved no key), 2 = 30/09 (bilinear march, five
+patches/ambient_occlusion_patch.cpp	date	// qualities, shade preview), 3 = 30/09 evening (grain in the composite), 4 = 30/09 night (the map view), 5 = 30/09 night
+patches/edge_smoothing_patch.cpp	date	// ---- Edges found by depth too (30/09): the scene depth (INTZ, shared by Depth Blur / AO) turned into log2 of the view
+patches/edge_smoothing_patch.cpp	date	// Extreme (30/09, beyond the reference presets, within its ranges): at 4K one step of a nearly horizontal edge (a roof, a
+patches/edge_smoothing_patch.cpp	date	// both methods (30/09): object edges from the scene depth, and texture sharpening where nothing was smoothed
+patches/night_lighting.h	date	// The mode (lampLightingMode): 0 Classic (the game's room solves with every correction), 1 Instant (the default since 14/10; the
+patches/night_terrain_relight_patch.cpp	date	int g_lampMode = kLampInstant; // (14/10: Instant by default; a saved lampLightingMode keeps its choice)
+patches/night_terrain_relight_patch.cpp	date	bool g_foundationWalls = true; // (07/10) wall lamp light at the height the game draws the wall (LevelLightShare::SetFoundationWalls)
+patches/night_terrain_relight_patch.cpp	date	bool g_realisticOpenings = kRealisticOpeningsDefault; // (08/10, experimental) walled yards lit only through doors, windows and over walls (LevelLightShare::SetRealisticOpenings)
+patches/night_terrain_relight_patch.cpp	date	bool g_groundShade = true;      // (14/10) walls shade lamp light on lot ground, paths, decks, curbs and low fences (LevelLightShare::SetGroundShade)
+patches/night_terrain_relight_patch.cpp	date	bool g_neutralProbe = true;            // (07/10) at night the game's sky light keeps its brightness, loses the lamps' colour (ProbeNeutral)
+patches/night_terrain_relight_patch.cpp	date	// (12/10) "Light behind balconies" (luzSobSacadas, forcaSobSacadas) is gone: a placed floor blocks a lamp below it
+patches/night_terrain_relight_patch.cpp	date	bool g_realisticReach = true;     // (12/10) lamp light on outdoor walls fades with distance like on the ground (LevelLightShare::SetRealisticReach)
+patches/night_terrain_relight_patch.cpp	date	// Developer toggles (29/09, not yet tested in game; the public build never registers them: always off there):
+patches/night_terrain_relight_patch.cpp	date	// A world session that ended (main menu) re-arms the new-world handling: the next world may reuse the cells pointer (06/10:
+patches/night_terrain_relight_patch.cpp	date	// 29/09 (terrain-relight.md "Lamp change decisions"; research\perf2\round3.md 5: each full rebuild is a ~240 ms frame):
+patches/night_terrain_relight_patch.cpp	date	bool g_pendingLoad = false; // the armed rebuild is the world load's (29/09: no lot relight after it, see below)
+patches/night_terrain_relight_patch.cpp	date	// (14/10, drag solves) The game's own countdown armed by a lamp drag is put back to idle (-1, what the game writes when it
+patches/night_terrain_relight_patch.cpp	date	// batch is re-rendered, then changes in one frame (06/10, "the ground as perfect as the walls"). Not for drags or
+patches/night_terrain_relight_patch.cpp	date	// Off since 06/10: in game the nearest chunk (3,4) kept its +0x55 for 600 frames (the chunk loop has states before the
+patches/night_terrain_relight_patch.cpp	date	// mode: since 05/10 a move reads the lamp list again within 33 ms, so the steps never leave a quiet gap, and the 500 ms of
+patches/night_terrain_relight_patch.cpp	date	// (14/10, drag solves) while a lamp is dragged every 250 ms (4 a second); the one 50 ms after the last step is the exact one
+patches/night_terrain_relight_patch.cpp	date	// (14/10, Classic: relight only after release) a dragged lamp's ground waits for the release, then relights once
+patches/night_terrain_relight_patch.cpp	date	// ~240 ms rebuild every 5 s; review 29/09)
+patches/night_terrain_relight_patch.cpp	date	// (14/10, drag solves) the countdown a lamp drag armed: idle again while the local path is there (CancelCountdown)
+patches/night_terrain_relight_patch.cpp	date	// With the bridge on, its terrain draws are the signal: a load screen longer than 30 s (29/09: 54 s) must not count
+patches/night_terrain_relight_patch.cpp	date	// 30/09: the fallback also needs a loaded lot (a session that sat 2 minutes at the main menu went "live" there: the
+patches/night_terrain_relight_patch.cpp	date	// This rebuild bakes the lamps as they are now: a lamp change still waiting is taken by it (29/09: the game's own
+patches/night_terrain_relight_patch.cpp	date	// Not after a world loaded at night: the game has just solved every lot with its night lamps (29/09: the relight 3 s later
+patches/night_terrain_relight_patch.cpp	date	// those), looked at most every 15 s, and since 29/09 it is an AUTOMATIC lamp change like the others: rebuilt only if
+patches/night_terrain_relight_patch.cpp	date	// outdoor lamp edits (the default since 14/10); Classic = the game's room solves (with the drag and floor holds of lamp-drags.md)
+patches/night_terrain_relight_patch.cpp	portuguese	S3SS_TR("Luminarias externas iluminam as paredes e pisos de todos os andares (a luz nao corta mais na linha do piso).",
+patches/night_terrain_relight_patch.cpp	portuguese	S3SS_TR("A grama do lote continua usando a luz do proprio lote mesmo depois de refazer o terreno (a luz dos postes nao some dentro do lote).",
+patches/night_terrain_relight_patch.cpp	portuguese	if (g_lotLamps) return Fail(std::format(S3SS_TR("Teste de luz nao confere em {:#x}: {}", "Light test differs at {:#x}: {}"), s.addr, s.name));
+patches/night_terrain_relight_patch.cpp	portuguese	return Fail(std::format(S3SS_TR("Qualidade do lote nao confere em {:#x}", "Lot quality code differs at {:#x}"), site));
+patches/night_terrain_relight_patch.cpp	date	// 07/10, players' Runtime Error: each part's frame update is caught on its own (HookGuard), so one that throws is
+patches/night_terrain_relight_patch.cpp	date	// Instant chosen and able to run (14/10: Instant is the default, so a device that cannot run it must not get
+patches/night_terrain_relight_patch.cpp	date	// Smooth ground light only chooses which map the draws read (idavidveiga's fork, 04/10): no lighting refresh, no
+patches/night_terrain_relight_patch.cpp	date	// 14/10, the approved player structure: lamp light through openings and its look. Each switch is one setting; the
+patches/night_terrain_relight_patch.cpp	date	// idavidveiga's fork (04/10): which draw families Apex modifies by day / twilight / night, and the scene's bloom mask
+patches/night_terrain_relight_patch.cpp	date	// Rooms keep their light when their lamps did not change (lamp_mark_filter.cpp; 30/09, on by default, A/B here)
+patches/performance.h	date	// "Lamp edits all at once" under Faster room lighting ([patches.RoomLightQueue] switchAllAtOnce, default on; 12/10: every
+patches/performance_patches.cpp	date	// CompositorReadback (features/compositor_readback.h) is not started: in game (05/10) it made textures slower, since each
+patches/performance_patches.cpp	date	// "lightFade" (Smooth light changes indoors, 06/10) was removed: the light changes at once (an old key is ignored)
+patches/performance_patches.cpp	date	.enabledByDefault = false, // 06/10: lamps arrive one by one and every arrival relit the rooms (7 s to settle)
+shaders/rt_lamps_hlsl.h	date	// (15/10) the lot's ground (bit 4): no wall test, as the game's own solve of ground texels; the lot passes shade it with the
+tools/roofed_openings_test/check.cpp	date	// A colonnade on a foundation (13/10 in game): story 1 stands on the foundation's top (0.74), a garden post on the terrain
+tools/roofed_openings_test/check.cpp	date	// A neighbour that lost a lifted lamp (13/10 in game: room 56 gathered while the lamp of room 1 was lifted and stayed dark
+tools/roofed_openings_test/check.cpp	date	// The columns inside an arcade take a garden post through its arches by the outdoor objects' per-pixel law (13/10 in game:
+tools/roofed_openings_test/check.cpp	date	const float w = 85.0f, entries = 2.0f; // the 12/10 garden post: range 42.5 x intensity 2, a story-0 lot lamp
+tools/roofed_openings_test/check.cpp	date	// 14/10 in game (F7): a column inside an arcade, behind the arch from the garden post, drew black. Its record, the law at
+tools/roofed_openings_test/check.cpp	date	// A lamp shining out of a roofed room keeps the room's normalisation (13/10 in game: the balcony floor outside a window took
+tools/roofed_openings_test/check.cpp	date	// The lot ground shade's soft edges (ground_lamp_shadow.h, Grid::soft; 14/10: its edges on grass stepped with the mask's 4
+tools/roofed_openings_test/check.cpp	date	// The ground light (atlas) on fence tops and outdoor objects (ground_light_gate.h; 14/10, F8 20-50-03: a red post under an
+tools/roofed_openings_test/check.cpp	stamp	// The ground light (atlas) on fence tops and outdoor objects (ground_light_gate.h; 14/10, F8 20-50-03: a red post under an
+tools/terrain_lighting_test/check.cpp	date	// One daytime curve (12/10): LampDay(n) = 0.03 + 0.97 smoothstep(0, 1, n), 1 exactly at night, monotonic, the same
+tools/terrain_lighting_test/check.cpp	stamp	if (name == "PS_8D0F5300.bin") { // 2026-10-14 23-27-59 F7: the multi-pass world shader as drawn (native alpha in, s2)
+tools/terrain_lighting_test/check.cpp	date	// The lamp shade (13/10, the mask's alpha): 0 leaves exactly the pass without lamps (the lot map, the atlas and the soft
+tools/terrain_lighting_test/check.cpp	date	// ---- Per-pixel lamp law of outdoor objects, fences and windows (12/10, realistic reach). ----
+tools/terrain_lighting_test/check.cpp	date	// fences without the ground lamp shade (13/10): the FIRST hashes stay those of the law alone (the shade has
+tools/terrain_lighting_test/check.cpp	date	// Walls shade lamp light on lot ground (13/10, GroundShadow): the production shade job on synthetic lots
+tools/terrain_lighting_test/check.cpp	date	// Foliage wrap with the daytime curve (13/10): the runtime variant is the defined one without its def (c255 set per draw)
+tools/terrain_lighting_test/check.cpp	date	// the law against the footprint boost on the 12/10 garden post (w = 85, a story-0 lot lamp: 2 entries; bounds half-width
+tools/terrain_lighting_test/ground_scale_check.cpp	stamp	for(const auto item : {std::pair{L"15-34-01 Light capture/PS_8FD18290.bin",7u},std::pair{L"15-34-05 Light capture/PS_937EA020.bin",11u}}) {
+tools/terrain_lighting_test/resource_paths_fixture.cpp	date	// realistic reach (12/10): the fixture's PatchedFor returns objectPatch for the first law and reachPatch (reachConst set,
+tools/terrain_lighting_test/resource_paths_fixture.cpp	date	int visCalls=0;float firstVis[3]{}; // the first point a draw tests (fences: the piece nearest the lamp, 12/10)
+tools/terrain_lighting_test/resource_paths_fixture.cpp	date	// the ground lamp shade of fences (13/10): the production FloorShadeBind (not extracted) binds the lot mask and 3 rows for the
+tools/terrain_lighting_test/resource_paths_fixture.cpp	date	// one daytime curve (12/10): before full night c3.x = ground gain x LampDay, c31.x = the lot map's night gain, c31.y = 0;
+tools/terrain_lighting_test/resource_paths_fixture.cpp	date	// the rig: zeroed with per-pixel lamps placed; kept without, its lamp colours (rgb) x the curve for the draw (12/10)
+tools/terrain_lighting_test/resource_paths_fixture.cpp	date	Check(claimed&&calls==1,"object draws at every level (no full-daylight gate, 12/10)");
+tools/terrain_lighting_test/resource_paths_fixture.cpp	date	Check(claimed&&calls==1,"instanced surface draws at every level (no full-daylight gate, 12/10)");
+tools/terrain_lighting_test/resource_paths_fixture.cpp	date	// the ground lamp shade (13/10): a copy with it binds its rows for the draw with the lot under the group's centre, and
+tools/terrain_lighting_test/resource_paths_fixture.cpp	date	// Realistic reach (12/10): the reach variant gets the walls' scale x the slider trims, R and the lamp's weight in its rows
+tools/terrain_lighting_test/resource_paths_fixture.cpp	date	// fences test each lamp from the piece nearest it (12/10, F7 18-17-00 #393), the centre only with no piece read
+tools/terrain_lighting_test/resource_paths_fixture.cpp	stamp	// fences test each lamp from the piece nearest it (12/10, F7 18-17-00 #393), the centre only with no piece read
+tools/terrain_lighting_test/resource_paths_fixture.cpp	date	// (12/10 review) the lamp's list entries: 0.25 w each, 2 for a story-0 lot lamp (the fitted 0.5 w, bit for bit), else 1
+tools/terrain_lighting_test/resource_paths_fixture.cpp	date	g_night=0;Check(NativeWallScale()==TerrainLightingPolicy::kLampDayFloor,"read over 2 s ago by day: the daytime curve's 3%, not the night value (12/10)");
+tools/terrain_lighting_test/resource_paths_fixture.cpp	date	// fences take the reach copy only when they place lamps (12/10 review): per-pixel lamps off, or no group read -> first law
+tools/terrain_lighting_test/resource_paths_fixture.cpp	date	// F7 on a fence draw describes it (12/10 review), and the text does not outlive the draw
+ui/violet_theme.cpp	date	// Candidates per script, best first (Windows 10/11 names; the later ones are older Windows' or optional fonts)

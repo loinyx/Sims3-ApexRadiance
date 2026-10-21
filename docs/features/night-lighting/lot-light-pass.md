@@ -8,7 +8,7 @@ border. Near the border the two sides blend over 3 m, so a lamp standing next to
 
 | | |
 |---|---|
-| Availability | Released (part of Night Lighting since 0.1.0). Lot UV alignment, daylight terrain term and the constant-read guard: Released in 2.6.0. Rain and other weather variants recognised (exact rain variant and by structure): Released in 2.7.0. Lamp shade on lot ground (*Walls shade lamp light near the ground*) and lamps through the outside walls' openings: Released in 2.13.0 |
+| Availability | Released (part of Night Lighting since 0.1.0). Lot UV alignment, daylight terrain term and the constant-read guard: Released in 2.6.0. Rain and other weather variants recognised (exact rain variant and by structure): Released in 2.7.0. Lamp shade on lot ground (*Walls shade lamp light near the ground*) and lamps through the outside walls' openings: Released in 2.13.0. Crown shade from trees and bushes: Released in 2.14.0 |
 | Default | On |
 | Menu | Lighting > Ground > Ground & Lots > *Street lamps light lots* |
 | Configuration | `[patches.NightTerrainRelight]` `luzDoPosteNaGramaDoLote` in `ApexRadiance.toml` |
@@ -210,7 +210,13 @@ instance, its place (POSITION1) and turn (POSITION2 = cos, slope, sin; world = (
 VS_21C41B90 of F7 2026-10-13 11-50-47). Each piece becomes a wall along its longer side from its base to its top, so the
 shade follows each wall's own height (the lamp is tested over every wall's top). Posts (under 0.3 m both ways) and thick
 pieces (over 0.6 m deep: stairs, decks) are left out; a railing with gaps shades as a solid wall (unverified look).
-`ShadeWalls` gives the job both lists.
+`ShadeWalls` gives the job both lists. A fence group's buffers are read without waiting for the GPU: a busy buffer is
+retried on a later draw and waited for after three busy answers.
+
+**Tree and bush crowns** (2.14.0). The crowns seen in the night foliage draws are porous occluders of the same mask: a
+lamp's ray through a crown keeps exp(-k u s) of its light, so the shade under a tree is soft and partial
+([foliage.md](foliage.md#per-vertex-lamps-and-crown-shade)). The crown set is part of the lot's input key, so a lot
+is built again when its crowns change.
 
 **Worker thread** (2.13.1). The lot builds (`GroundShadow::ShadeJob`) and the chunk textures' texels and mips run on one
 worker thread (`ShadeWorker`, below-normal priority); the render thread makes the inputs, uploads and applies. Before, a

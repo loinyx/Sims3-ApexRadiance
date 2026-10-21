@@ -45,14 +45,17 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 | [World atlas and smoothed maps](features/night-lighting/world-atlas-and-smoothed-maps.md): smooth terrain light maps | Released |
 | [Terrain relight](features/night-lighting/terrain-relight.md): rebuilding terrain lighting at dusk and after edits | Released |
 | [World lamp response](features/night-lighting/world-lamp-response.md): terrain and rigs follow lamp edits | Released in 2.5.6 |
-| [Every-story light](features/night-lighting/level-light-share.md): lamps on any floor light the ground and the rooms they reach; walls and balcony floors block lamp light outdoors | Released (walls blocking light outdoors: 2.7.0); Released in 2.12.1: update corrections; Released in 2.12.3: balcony and upper floors block lamps below them; Released in 2.13.0: light through openings, doors block light, ground lamp shade, shadow softness |
-| [Real-time outdoor lamps](features/night-lighting/rt-outdoor-lamps.md) (Lamp lighting: Instant (GPU), the default): the active lot's outdoor lamps drawn on the graphics card with shadows | Released in 2.13.0 |
+| [Every-story light](features/night-lighting/level-light-share.md): lamps on any floor light the ground and the rooms they reach; walls and balcony floors block lamp light outdoors | Released (walls blocking light outdoors: 2.7.0); Released in 2.12.1: update corrections; Released in 2.12.3: balcony and upper floors block lamps below them; Released in 2.13.0: light through openings, doors block light, ground lamp shade, shadow softness; Released in 2.14.0: the lamp's own walls through floor openings, hard wall tops, floor-level sills, steady indoor light |
+| [Light through stairwells](features/night-lighting/stairwells.md): lamps light the walls above a stairwell with a soft edge; bounce light and partial adaptation upstairs | Released in 2.14.0 |
+| [Stairs on the directional maps](features/night-lighting/stairs.md): stairs take no light through walls, the floor's colour and the light of the floor above | Released in 2.14.0 |
+| [Light through arches and doorways](features/night-lighting/arches.md): no colour step at arches, soft cone edges, indoor light independent of the camera | Released in 2.14.0 |
+| [Real-time outdoor lamps](features/night-lighting/rt-outdoor-lamps.md) (Lamp lighting: Instant (GPU), the default): the active lot's outdoor lamps drawn on the graphics card with shadows | Released in 2.13.0; Released in 2.14.0: lamps not yet listed on a floor still reach it |
 | [Quick outdoor lamp edits](features/night-lighting/outdoor-lamp-delta.md): every story's outside updated from each lamp's kept part, with Instant | Released in 2.13.0 |
 | [Lamp drags](features/night-lighting/lamp-drags.md): room solves of a dragged lamp kept to its rooms; in Classic, relit after the release | Released in 2.13.0 |
 | [Smooth light maps](features/night-lighting/room-map-smoothing.md): room lamp light without blocks, bands or rings | Released in 2.13.0 |
 | [Rooms at Night](features/night-lighting/unlit-rooms.md): ambient light and tint of unlit rooms | Released; Released in 2.13.0: *Background light* and *Lamp light* groups |
 | [Walls](features/night-lighting/walls.md), [Floors](features/night-lighting/floors.md), [Roofs](features/night-lighting/roofs.md), [Roads](features/night-lighting/roads.md) | Released; Realistic lamp reach on walls: Released in 2.12.3; Released in 2.13.0: ground lamp shade on story-0 floors, soft edges by the lamp's size |
-| [Objects and rigs](features/night-lighting/objects-and-rigs.md), [Fences](features/night-lighting/fences.md), [Foliage](features/night-lighting/foliage.md) | Released; Objects and Fences corrections: Released in 2.12.1; the walls' lamp law and the height gate on objects, fences and windows: Released in 2.12.3; Released in 2.13.0: buildings block lamp light on trees and objects, disabled lamps, foliage by day, colonnades on foundations, arcade columns and upper-story railing tops fixed; Released in 2.13.1: realistic lamp reach on trees and bushes |
+| [Objects and rigs](features/night-lighting/objects-and-rigs.md), [Fences](features/night-lighting/fences.md), [Foliage](features/night-lighting/foliage.md) | Released; Objects and Fences corrections: Released in 2.12.1; the walls' lamp law and the height gate on objects, fences and windows: Released in 2.12.3; Released in 2.13.0: buildings block lamp light on trees and objects, disabled lamps, foliage by day, colonnades on foundations, arcade columns and upper-story railing tops fixed; Released in 2.13.1: realistic lamp reach on trees and bushes; Released in 2.14.0: foliage lit per vertex and crown shade on lot ground |
 | [Daytime bloom and wall bloom fixes](features/night-lighting/day-bloom-fixes.md): the game's daylight look and bloom kept (idavidveiga) | Released in 2.7.0 |
 | Light detail (Lighting option, in [Night Lighting](features/night-lighting/README.md#settings)): sharper lamp light on walls and floors | Experimental (released in 2.7.0) |
 
@@ -73,8 +76,9 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 | Feature | Status |
 |---|---|
 | [Performance](features/performance/README.md): fifteen switches against stutters (file lookups, lot lighting, texture and cache compression, object lookups, scene scheduling, memory, scripts) | Released; Released in 2.13.0: the Lamp lighting card (Instant (GPU) or Classic) and cheaper D3D9 dispatch |
-| [Faster room lighting](features/performance/room-light-queue.md) with *Lamp edits all at once* (was *Lamp switches all at once*): the lamp's own story at once, the other stories together in a single frame | Released (lamp switches all at once: Experimental, 2.7.0); Released in 2.12.3: every lamp edit, own story first; Released in 2.13.0: Classic shows all floors together |
-| [Room to save](features/performance/room-to-save.md), [Lighter window updates](features/performance/lighter-window-updates.md), [Faster scripts](features/performance/faster-scripts.md) | Experimental (released in 2.7.0) |
+| [Faster room lighting](features/performance/room-light-queue.md) with *Lamp edits all at once* (was *Lamp switches all at once*): the lamp's own story at once, the other stories together in a single frame | Released (lamp switches all at once: Experimental, 2.7.0); Released in 2.12.3: every lamp edit, own story first; Released in 2.13.0: Classic shows all floors together; Released in 2.14.0: automatic lamps first, step budget after loads |
+| [Room to save](features/performance/room-to-save.md), [Lighter window updates](features/performance/lighter-window-updates.md), [Faster scripts](features/performance/faster-scripts.md) | Experimental (released in 2.7.0); Room to save: Released in 2.14.0: earlier buffer release and compatibility with sims3-modernization |
+| [Faster memory handling](features/performance/fast-memory.md): allocator spin and background release | Released in 2.4.0; Released in 2.14.0: allocator trim and top-down large blocks |
 | [Lot Streaming](features/performance/lot-streaming.md): lot detail farther away and smoother lot streaming (idavidveiga), off by default | Experimental (released in 2.7.0) |
 
 ### Reports and diagnostics
@@ -127,6 +131,7 @@ Project-wide history: [architecture](history/architecture.md), [workflow](histor
 
 - [Presets](features/presets.md): saved settings, portable ZIP packages with a LUT and keyboard shortcuts (Released in 2.12.2).
 - [Graphics recovery](features/graphics-recovery.md): restart image-effect resources without resetting settings.
+- [2.14.0](releases/2.14.0.md): Released in 2.14.0 (pending publication); light through stairwells, stairs and arches, trees lit leaf by leaf, steady moonlight.
 - [2.13.0](releases/2.13.0.md): Released in 2.13.0; Instant lamp lighting and lamp light through doors, windows and arches.
 - [2.12.3](releases/2.12.3.md): Released in 2.12.3; realistic lamp reach, balconies blocking lamps below and faster lamp edits.
 - [2.12.2](releases/2.12.2.md): Released in 2.12.2; keyboard shortcuts for presets.

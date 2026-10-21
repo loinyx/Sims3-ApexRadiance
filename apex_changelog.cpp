@@ -6,14 +6,30 @@ namespace ApexChangelog {
 
 namespace {
 
-constexpr const char* k2140Added[] = {nullptr};
+constexpr const char* k2140Added[] = {
+    "Indoor light between floors: light bounces up stairwells onto the walls and floors above",
+    "Realistic lamp reach lights trees and bushes from each lamp's side, through the leaves",
+    "Trees and bushes shade lamp light on the ground, like walls",
+    nullptr};
 constexpr const char* k2140Improved[] = {
     "Room to save releases idle buffers earlier during saving",
     "Screen effects avoid unused image copies and repeated timing work",
     "Object and compression caches reduce repeated work with bounded memory",
+    "Rooms lit only through a stairwell look brighter, as eyes adjust to the dark",
+    "Light through stairwell openings has soft edges and stops at the walls in its way",
+    "Stairs take their room's light and color and blend into the floor above",
+    "Floors beside an arch blend into the next room's light, with soft edges",
+    "Lamps that turn on by themselves update their own room first",
+    "A small lamp lights only the nearby branches of a big tree, not its whole crown",
+    "Lighting updates repeat less work and avoid waiting on the graphics card",
+    "The game trims its unused memory every minute and before saving (Steam)",
     nullptr};
 constexpr const char* k2140Fixed[] = {
     "Night Lights improves lamp blocking near stairs and closed floors",
+    "Indoor light no longer changes as the camera moves",
+    "A lamp switched off over a stairwell no longer leaves its light below",
+    "The floor beside a stairwell opening no longer shows a lit strip",
+    "Room to save prepares saves with sims3-modernization installed too",
     nullptr};
 
 constexpr const char* k2132Improved[] = {
@@ -259,7 +275,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
-    {"2.14.0", "2026-10-19", k2140Added, k2140Improved, k2140Fixed},
+    {"2.14.0", "2026-10-20", k2140Added, k2140Improved, k2140Fixed},
     {"2.13.2", "2026-10-15", k2132Added, k2132Improved, k2132Fixed},
     {"2.13.1", "2026-10-15", k2131Added, k2131Improved, k2131Fixed},
     {"2.13.0", "2026-10-14", k2130Added, k2130Improved, k2130Fixed},

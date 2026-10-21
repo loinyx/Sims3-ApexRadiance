@@ -16,6 +16,7 @@
 #include "apex_log.h"
 #include "apex_util.h"
 #include "apex_paths.h"
+#include "apex_memory.h"
 #include "imgui.h"
 #include <windows.h>
 #include <algorithm>
@@ -123,7 +124,8 @@ bool g_inProbeCall = false;
 POINT g_pixel{};
 std::string g_captureWhy = "requested";  // why this capture was taken (the shortcut, or automatic after a floor change)
 // After a capture by the shortcut: the same pixel is measured again 1 s and 3 s after each change of the camera's story
-// (up to 6 automatic captures within 2 minutes), for a before / after of the same object across floor switches
+// (up to 6 automatic captures within 2 minutes), for a before / after of the same object across floor switches. A watch
+// armed inside a capture session ends with that session, so no automatic capture follows a finished report.
 struct Watch {
     bool on = false;
     POINT pixel{};
@@ -131,6 +133,7 @@ struct Watch {
     DWORD until = 0;
     int left = 0;
     std::vector<std::pair<DWORD, std::string>> due; // tick, why
+    std::string session;                             // Captures::SessionFolder() when armed ("" outside a session)
 } g_watch;
 std::map<uint32_t, int> ShownStories() {
     uint32_t lots[256];
@@ -673,6 +676,33 @@ void ReleaseDraws() {
     }
     g_draws.clear();
 }
+// (development builds, release_debug_buffers) Between captures the room reserved for kMaxDraws records (about 1.7 MB, kept by
+// clear()) and the occlusion queries of the last capture are given back; the next capture reserves and creates them again.
+// A watch's automatic captures keep them until it ends. A capture only reads the frame: nothing that is lit depends on this.
+void ReleaseCaptureBuffers() {
+    if (!g_draws.capacity() && g_queryPool.empty()) return;
+    ReleaseDraws();
+    const uint64_t bytes = ApexMemory::Est::Vec(g_draws) + ApexMemory::Est::Vec(g_queryPool);
+    const size_t queries = g_queryPool.size();
+    std::vector<DrawRec>().swap(g_draws);
+    for (auto* q : g_queryPool)
+        if (q) q->Release();
+    std::vector<IDirect3DQuery9*>().swap(g_queryPool);
+    ApexMemory::NoteReleased("Light Probe (F7): the draw records' reserve and the occlusion queries after a capture", bytes);
+    LOG_INFO(std::format("[LightProbe] Capture buffers given back: {:.2f} MiB of draw records, {} occlusion queries", bytes / 1048576.0, queries));
+}
+void MeasureMemory() {
+    static ApexMemory::Cadence cadence;
+    if (!cadence.Due()) return;
+    using namespace ApexMemory::Est;
+    static auto* sDraws = ApexMemory::Register("LightProbe", "draw records of a capture (F7) and its queries");
+    static auto* sTex = ApexMemory::Register("LightProbe", "textures listed for the menu (references to game textures)");
+    ApexMemory::Set(sDraws,
+                    Vec(g_draws, [](const DrawRec& d) { return Vec(d.psc) + Vec(d.vsc) + Str(d.bridge) + Str(d.instances) + Vec(d.verts); }) + Vec(g_queryPool) +
+                        Vec(g_prevPick.psc) + Vec(g_prevPick.vsc) + Str(g_prevPick.bridge),
+                    g_draws.size() + g_queryPool.size());
+    ApexMemory::Set(sTex, Vec(g_textures, [](const TexInfo& t) { return Str(t.desc) + Str(t.file); }), g_textures.size());
+}
 
 using D3DDisassemble_t = HRESULT(WINAPI*)(LPCVOID, SIZE_T, UINT, LPCSTR, ID3DBlob**);
 
@@ -1009,6 +1039,8 @@ void OnPresent(IDirect3DDevice9* dev) {
             g_state = State::Idle; // no memory for the capture: skip it
         }
     }
+    if (DevSwitches::ReleaseDebugBuffers() && g_state == State::Idle && !g_watch.on) ReleaseCaptureBuffers();
+    if (DevSwitches::kCompiled) MeasureMemory(); // development builds (memory_owners)
 
     // Its shortcut (Hotkeys: Ctrl+Shift+V, 4 or F7 by preset), eaten before the game sees it
     const bool pressed = Hotkeys::Take(Hotkeys::Action::Probe);
@@ -1057,13 +1089,18 @@ void OnPresent(IDirect3DDevice9* dev) {
         const bool guided = g_aiming.exchange(false) || click != 0;
         start(pixel, guided ? "guided one-shot capture under the mouse" : "requested by the shortcut; the same pixel is measured again 1 s and 3 s after any lot changes the story it shows, for 2 minutes");
         Captures::Notify(I18n::Tr("Capturing the light under the mouse\xE2\x80\xA6"), 3, Captures::NoteKind::Probe);
-        g_watch = guided ? Watch{} : Watch{true, pixel, ShownStories(), now + 120000, 6, {}};
+        g_watch = guided ? Watch{} : Watch{true, pixel, ShownStories(), now + 120000, 6, {}, Captures::SessionFolder()};
         return;
     }
     // The automatic captures after a floor change
     if (!g_watch.on) return;
     if (static_cast<int32_t>(now - g_watch.until) >= 0 || g_watch.left <= 0) {
         g_watch.on = false;
+        return;
+    }
+    if (g_watch.session != Captures::SessionFolder()) { // its session ended (or another began): no more automatic captures
+        Recorder::Note("[probe] capture session ended: automatic captures after floor changes stopped");
+        g_watch = Watch{};
         return;
     }
     const std::map<uint32_t, int> shown = ShownStories();

@@ -16,6 +16,7 @@ or shimmering, and fade a lamp at the light cut without lighting anything the ga
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-20 | Working tree on `c22e8d7` | `tools/room_map_smooth_check -Precomp` | 1084 checks passed; includes the 120 floor and wall copies with the arch variant (6 segments) created natively and a pixel within 1 LSB of the CPU formula | native D3D9 |
 | 2026-10-14 | `release/2.13.0` (`2aefeb7`) | `tools/room_map_smooth_check -Precomp` (the game's Shaders_Win32.precomp) | 957 checks, 0 failures; pixels within 1 LSB of the CPU B-spline | native D3D9 |
 | 2026-10-14 | feature/v2.12.3-rt | `tools/room_map_smooth_check` | 957 checks, 0 failures | native D3D9 |
 | 2026-10-13 | smooth light maps commits on release/2.12.4-arriscada | `tools/room_map_smooth_check` | 972 checks, 0 failures: 186 of 8016 precomp pixel shaders match (InteriorFloor 48/58, InteriorWall 21/21, InteriorWallWith\* 33/33, FloorWith\* 104/104, Hideable 40/42, FloorTileCeiling 12/40; ExteriorWall, Ceiling, TerrainLight_Indoor\* 0), all 186 created natively; 24 paired vertex shaders (9 walls, 15 floors); pixels within 1 LSB of the CPU B-spline in both modes; 3 of 64 captured pixel shaders match | native D3D9 (PS 3.0, PS20Caps 32 temps, 512 slots) |

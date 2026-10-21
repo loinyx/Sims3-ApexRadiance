@@ -9,7 +9,7 @@ is not using. Nothing on screen changes.
 
 | | |
 |---|---|
-| Availability | Experimental: Released in 2.7.0 |
+| Availability | Experimental: Released in 2.7.0. Earlier buffer release during saving and compatibility with sims3-modernization: Released in 2.14.0 |
 | Default | On |
 | Menu | System > Performance > Memory handling > *Room to save* (Experimental badge) |
 | Configuration | `[patches.MemoryGuard]` in `ApexRadiance.toml` |
@@ -53,6 +53,11 @@ profile leaves it as it is.
 - **Lot Streaming** ([lot-streaming.md](lot-streaming.md)) with more detailed lots uses more address space.
 - **Vulkan driver guard** ([vulkan-driver-guard.md](vulkan-driver-guard.md)) keeps an unused driver out of the same
   address space.
+- **sims3-modernization:** its `ts3native.asi` can detour the save dispatch entry `0x00AAC110` with a `jmp rel32`.
+  The early save preparation accepts that entry only when the jump lands inside a loaded `ts3native.asi`; the call at
+  `0x00AB12AF` is still verified byte for byte, and Apex's wrapper calls the entry as before, so the save passes through
+  both. The log says *The world save's entry is ts3native's detour (sims3-modernization); the early save preparation
+  goes in front of it*.
 - **Game build:** Steam 1.67.2 with fixed addresses and byte checks; other builds (the EA app's 1.69) through signatures
   of the same five sites, checking that the calls reach their targets.
 
@@ -85,7 +90,8 @@ current menu.
 
 ## Rejected approaches
 
-None recorded.
+- Accepting any `jmp` at the save dispatch entry: only a jump into a loaded `ts3native.asi` is a known detour
+  ([history](../../history/performance-room-to-save.md)).
 
 ## See also
 

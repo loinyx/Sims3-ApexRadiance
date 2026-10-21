@@ -9,7 +9,7 @@ frame, once the new light is ready. The final lighting is the game's own.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lamp switches all at once and Quick update for lamp switches (both Experimental), an atrium's stories changing together and the quick return of empty light object removals: Released in 2.7.0. Lamp edits all at once (was *Lamp switches all at once*; every lamp edit, the lamp's own story shown first) and shorter waits for an edit's rooms: Released in 2.12.3. Classic: show all floors together (Lamp lighting Classic): Released in 2.13.0 |
+| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lamp switches all at once and Quick update for lamp switches (both Experimental), an atrium's stories changing together and the quick return of empty light object removals: Released in 2.7.0. Lamp edits all at once (was *Lamp switches all at once*; every lamp edit, the lamp's own story shown first) and shorter waits for an edit's rooms: Released in 2.12.3. Classic: show all floors together (Lamp lighting Classic): Released in 2.13.0. Automatic lamps first and the step budget of the extra solves: Released in 2.14.0 |
 | Default | On |
 | Menu | System > Performance > Camera and lighting > *Faster room lighting* |
 | Configuration | `[patches.RoomLightQueue]` in `ApexRadiance.toml` |
@@ -165,6 +165,21 @@ not while a lamp is dragged), then show in the same frame. At the game's `LockRe
 is put back first, so the game never builds on what is shown. Each member's ambient is taken at the merge with the
 game's own step, so an atrium is solved in one round ([level-light-share.md](../night-lighting/level-light-share.md)).
 
+### Automatic lamps first and the step budget
+
+These two behaviours have no setting. The step budget is part of *Faster room lighting*; automatic lamps first comes
+from Night Lights' lamp mark filter ([level-light-share.md](../night-lighting/level-light-share.md#floor-switches-lamp-mark-filter))
+and feeds this queue.
+
+- **Automatic lamps first.** A lamp the game switches on by itself (at dusk or dawn, or a light toggled often) puts its
+  own room first in the room queue (`LampMarkFilter` calls `LevelLightShare::NoteQuietMark`). The room gets no extra
+  budget and no hold: it is not treated as an edit, so dusk does not solve every lit room of a lot in one pause.
+- **Step budget.** The stopwatch of the extra solves is checked only between the game's solve steps, and one step can
+  take several milliseconds. A step now starts only while the running average of a step's cost still fits in the
+  budget; the first step of a frame always runs, so the queue still advances. Lamp edits, held edits and urgent rooms
+  keep the earlier pacing. The budget in the first seconds after a load is 6 ms (was 12 ms). Each room's light is still
+  the game's complete solve; only the frame in which a room finishes can move.
+
 ## Compatibility and interactions
 
 - **Night Lighting:** its requeues (`QueueRoom`) and the full-detail-all-floors policy of level light share
@@ -180,6 +195,8 @@ game's own step, so an atrium is solved in one round ([level-light-share.md](../
 - Native priority differences still apply within the boosted floors; other lots and rooms with zero native priority are
   unchanged.
 - The extra solves run only on the render thread and only for the priority lot.
+- The rooms of a lot just loaded can finish a little later than before, because the extra solves after a load take
+  6 ms a frame instead of 12 ms.
 
 ## Technical reference
 

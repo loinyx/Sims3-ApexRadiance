@@ -1,7 +1,8 @@
-# path-glob<TAB>rule-id   (rule ids: local-path, personal, conversation, assistant, clock-time, security-product, portuguese)
+# path-glob<TAB>rule-id   (rule ids: local-path, personal, conversation, assistant, clock-time, security-product, portuguese; source files also date, stamp)
 docs/PUBLIC-TEXT-POLICY.md	*
 tools/public_text_check.py	*
 tools/public_text_allow.txt	*
+tools/public_text_legacy.txt	*
 third_party/**	*
 i18n/**	portuguese
 docs/releases/**	security-product

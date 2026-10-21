@@ -160,7 +160,112 @@ static bool NeutralMatches(IDirect3DDevice9* dv, const std::vector<uint32_t>& or
     return okP && okO && samePos && worst < 0.01f;
 }
 
+struct OwnLampOut {
+    float r, g, b;
+};
+// A picked lamp's constants (FoliageVertexLamps::SlotConstants) as the patched shader reads them: per channel, colour x
+// min(law(d) x Q.y, cap)
+static OwnLampOut ShaderLight(const FoliageVertexLamps::OwnLamp& l, float w, V3 p) {
+    float lp[4], law[4], cap;
+    const float eye[3] = {0, 0, 0};
+    FoliageVertexLamps::SlotConstants(l, eye, 0.0f, 1.0f, lp, law, cap);
+    const V3 d{lp[0] - p.x, lp[1] - p.y, lp[2] - p.z};
+    const float d2 = std::max(Dot(d, d), kMinD2), q = d2 * law[0], win = std::clamp(1 - q * q, 0.f, 1.f); // the shader's law with its own r0^2 (lp.w)
+    const float ratio = std::min(1 / d2 * std::min(1.f, lp[3] / d2 * win * win) * law[1], cap);
+    (void)w;
+    return {l.colour[0] * ratio, l.colour[1] * ratio, l.colour[2] * ratio};
+}
+static FoliageVertexLamps::OwnLamp MakeLamp(V3 p, V3 col, float w, float entries) {
+    FoliageVertexLamps::OwnLamp l;
+    float r0, R;
+    LampReach::Radii(w, r0, R);
+    l.pos[0] = p.x, l.pos[1] = p.y, l.pos[2] = p.z, l.colour[0] = col.x, l.colour[1] = col.y, l.colour[2] = col.z;
+    l.r0sq = R * R, l.invR2 = 1 / (R * R), l.gain = LampReach::Gain(w, entries); // (foliage: r0 = R, FoliageLaw)
+    return l;
+}
+
+// The instance's own lamps (20/10). The case of a lighting snapshot: a red garden lantern (type 3, range 15, intensity 1:
+// w 15, a story-0 lot lamp, 2 entries; r0 2 m, R 6.3 m) 5 cm above the snow, 13.7 m from the trunk of a bare tree whose
+// crown (8 m across each way, 5 m up and down, centre 10 m up) the old rig colour lit whole and saturated.
+static void OwnLampChecks() {
+    const float w = 15.0f, entries = 2.0f;
+    const auto red = MakeLamp({0, 0.05f, 0}, {1, 0, 0}, w, entries);
+    srand(7);
+    const auto rnd = [] { return rand() / static_cast<float>(RAND_MAX); };
+    float brightest = 0.0f, worst = 0.0f;
+    for (int i = 0; i < 20000; i++) {
+        float x, y, z;
+        do x = rnd() * 2 - 1, y = rnd() * 2 - 1, z = rnd() * 2 - 1; while (x * x + y * y + z * z > 1);
+        const V3 p{9.7f + 8 * x, 10 + 5 * y, -9.7f + 8 * z};
+        const OwnLampOut o = ShaderLight(red, w, p);
+        brightest = std::max(brightest, o.r);
+        const float d2 = Dot(p - V3{0, 0.05f, 0}, p - V3{0, 0.05f, 0}), law = std::min(FoliageVertexLamps::FoliageLaw(d2, w, entries, kMinD2), 1.0f);
+        worst = std::max(worst, std::fabs(o.r - law) / std::max(law, 1e-6f));
+    }
+    std::printf("Red lantern on a bare crown: brightest crown light %.5f (was the rig colour, 1, on every vertex)\n", brightest);
+    Check(brightest <= 1.0f / 255.0f && worst < 1e-4f, "a 6.3 m lantern 13.7 m from the trunk leaves the crown unlit (the foliage law)");
+    // a street lamp (world lamp, range 42.5, intensity 1: one list entry; r0 2.5 m, R 10.6 m) 5 m from the near side of a
+    // crown (F8 2026-10-20 21-27-17: the pavement under it lit, the trees beside it dark): the inverse square, not 1 / d^4
+    {
+        const float ws = 42.5f, d2 = 25.0f;
+        const auto street = MakeLamp({0, 4, 0}, {1, 0.92f, 0.63f}, ws, 1.0f);
+        const float lit = ShaderLight(street, ws, {5, 4, 0}).r, walls = LampReach::PixelLaw(d2, ws, 1.0f);
+        std::printf("Street lamp on a crown 5 m away: %.3f (the walls' law %.3f); 9 m: %.3f; 11 m: %.4f\n", lit, walls, ShaderLight(street, ws, {9, 4, 0}).r,
+                    ShaderLight(street, ws, {11, 4, 0}).r);
+        Check(lit > 0.3f && lit > 3.0f * walls, "a street lamp lights a crown 5 m away by the inverse square (visible)");
+        Check(ShaderLight(street, ws, {11, 4, 0}).r == 0.0f, "nothing past the lamp's reach (no whole-crown glow)");
+    }
+    // a warm garden post (F0 x intensity 3.4) next to a leaf: no channel above 1, the hue kept
+    const auto warm = MakeLamp({0, 1, 0}, {3.4f, 3.4f * 0.81f, 3.4f * 0.56f}, 42.5f * 3.4f, 2.0f);
+    const OwnLampOut n = ShaderLight(warm, 42.5f * 3.4f, {0.3f, 1.2f, 0});
+    Check(std::fabs(n.r - 1) < 1e-5f && std::fabs(n.g - 0.81f) < 1e-5f && std::fabs(n.b - 0.56f) < 1e-5f, "a bright lamp next to a leaf: capped at 1, the hue kept (no whitening)");
+    const OwnLampOut f = ShaderLight(warm, 42.5f * 3.4f, {9, 1, 0});
+    Check(f.r < 1 && std::fabs(f.g / f.r - 0.81f) < 1e-4f && std::fabs(f.b / f.r - 0.56f) < 1e-4f, "farther from it: dimmer, the same hue");
+    // the three brightest, brightest first (the ground bounce takes slot 0)
+    FoliageVertexLamps::OwnLamp out[3];
+    int kept = 0;
+    for (float s : {0.2f, 0.9f, 0.0f, 0.1f, 0.5f, 0.3f}) {
+        FoliageVertexLamps::OwnLamp l;
+        l.score = s;
+        kept = FoliageVertexLamps::KeepBrightest(l, out, kept);
+    }
+    Check(kept == 3 && out[0].score == 0.9f && out[1].score == 0.5f && out[2].score == 0.3f, "the three brightest lamps kept, brightest first; a lamp without light never");
+    const float c[3] = {0, 5, 0}, e[3] = {2, 5, 2}, in[3] = {1, 3, -1}, outP[3] = {5, 0, 0};
+    Check(FoliageVertexLamps::BoxDistance2(in, c, e) == 0.0f && std::fabs(FoliageVertexLamps::BoxDistance2(outP, c, e) - 9.0f) < 1e-5f, "distance to the mesh box");
+}
+
+// The eye correction (20/10, in game: lamp light on trees moved with the camera and crowns blinked): places learned with
+// the camera still; with the camera moving, the read eye ahead of the game's by a drift; the draw's instances (relative to
+// the game's eye) must give back the game's eye
+static void EyeAnchorChecks() {
+    FoliageVertexLamps::EyeAnchors a;
+    const float trees[4][3] = {{440.0f, 17.5f, 525.0f}, {452.3f, 17.6f, 531.8f}, {447.1f, 17.4f, 540.2f}, {449.0f, 17.5f, 527.5f}};
+    const float scales[4] = {1.2f, 1.0f, 0.9f, 1.1f};
+    for (int i = 0; i < 4; i++) a.Learn(7, scales[i], trees[i]);
+    a.Learn(7, scales[0], trees[0]); // seen again: kept once
+    Check(a.Count() == 4, "a place learned twice is kept once");
+    const float gameEye[3] = {470.3f, 40.2f, 560.9f}, drift[3] = {0.8f, -0.1f, -0.6f};
+    const float readEye[3] = {gameEye[0] + drift[0], gameEye[1] + drift[1], gameEye[2] + drift[2]};
+    float rel[4][3];
+    for (int i = 0; i < 4; i++)
+        for (int k = 0; k < 3; k++) rel[i][k] = trees[i][k] - gameEye[k];
+    float o[3] = {};
+    const bool ok = a.Offset(7, scales, rel, 4, readEye, o);
+    float err = 0.0f;
+    for (int k = 0; k < 3; k++) err = std::max(err, std::fabs(readEye[k] + o[k] - gameEye[k]));
+    Check(ok && err < 1e-3f, "a moving camera: the game's eye comes back from the learned places");
+    Check(!a.Offset(8, scales, rel, 4, readEye, o), "another mesh never matches");
+    float away[1][3] = {{rel[0][0] + 9.0f, rel[0][1], rel[0][2]}};
+    Check(!a.Offset(7, scales, away, 1, readEye, o), "a place farther than the largest drift is not matched");
+    // two instances that disagree (a moved object): no offset
+    float bad[2][3] = {{rel[0][0], rel[0][1], rel[0][2]}, {rel[1][0] + 1.0f, rel[1][1], rel[1][2]}};
+    const float s2[2] = {scales[0], scales[1]};
+    Check(!a.Offset(7, s2, bad, 2, readEye, o), "instances that disagree give no offset");
+}
+
 int main(int argc, char** argv) {
+    OwnLampChecks();
+    EyeAnchorChecks();
     if (argc < 2) return 2;
     std::ifstream f(argv[1], std::ios::binary);
     std::vector<char> raw((std::istreambuf_iterator<char>(f)), {});
@@ -333,6 +438,57 @@ int main(int argc, char** argv) {
         std::memcpy(trunk.data(), rawTrunk.data(), trunk.size() * 4);
         const float v5Trunk[4] = {0, 1, 3, 3};
         Check(trunk.size() > 2 && NeutralMatches(dv, trunk, "Trunk variant", v5Trunk), "trunk variant: patched, loads, and a neutral instance gives every output of the original");
+    }
+    if (argc > 3) { // the sun's shadow on trees over every pixel shader of the game's Shaders_Win32.precomp
+        std::ifstream g(argv[3], std::ios::binary);
+        std::vector<unsigned char> d((std::istreambuf_iterator<char>(g)), {});
+        int shaders = 0, treePatched = 0, loaded = 0, treeLike = 0, originalsLoaded = 0, alreadyShadowed = 0;
+        for (size_t i = 0; i + 8 <= d.size(); i++) {
+            uint32_t v;
+            std::memcpy(&v, &d[i], 4);
+            if (v != 0xFFFF0200u && v != 0xFFFF0300u) continue;
+            size_t j = i + 4;
+            bool ok = false;
+            while (j + 4 <= d.size() && j - i < 65536) {
+                uint32_t tok;
+                std::memcpy(&tok, &d[j], 4);
+                if (tok == 0x0000FFFFu) { ok = true; j += 4; break; }
+                if ((tok & 0xFFFF) == 0xFFFE) j += 4 + 4 * ((tok >> 16) & 0x7FFF);
+                else if (tok & 0x80000000u) break;
+                else j += 4 + 4 * ((tok >> 24) & 0x0F);
+            }
+            if (!ok) continue;
+            shaders++;
+            std::vector<uint32_t> ps((j - i) / 4);
+            std::memcpy(ps.data(), &d[i], j - i);
+            // a tree shader: reads t1.wzyx with _sat into .xy (the lamp 0 weight and the sun's N.l)
+            bool tree = false;
+            for (size_t k = 1; k + 2 < ps.size() && !tree; k++)
+                tree = (ps[k] & 0xFFFF) == 1 && (ps[k + 1] & 0x00100000u) && ((ps[k + 1] >> 16) & 0xF) == 0x3 && (ps[k + 2] & 0x7FF) == 1 &&
+                       ((ps[k + 2] >> 28) & 7) == 3 && ((ps[k + 2] >> 16) & 0xFF) == 0x1B; // t1 (texture register type 3)
+            treeLike += tree ? 1 : 0;
+            if (tree) { // the game's own shader must load on this device, or the check below says nothing
+                IDirect3DPixelShader9* s = nullptr;
+                if (SUCCEEDED(dv->CreatePixelShader(reinterpret_cast<const DWORD*>(ps.data()), &s)) && s) originalsLoaded++, s->Release();
+            }
+            int base = -1;
+            if (!FoliageVertexLamps::PatchTreeSunShadow(ps, base)) {
+                if (tree && std::strcmp(FoliageVertexLamps::LastRefusal(), "t5, t6 or s5 already declared") == 0) alreadyShadowed++;
+                else if (tree) std::printf("tree shader at offset %zu (%zu bytes) refused: %s\n", i, j - i, FoliageVertexLamps::LastRefusal());
+                i = j - 1;
+                continue;
+            }
+            treePatched++;
+            IDirect3DPixelShader9* s = nullptr;
+            if (SUCCEEDED(dv->CreatePixelShader(reinterpret_cast<const DWORD*>(ps.data()), &s)) && s) loaded++, s->Release();
+            else std::printf("FAIL: patched tree shader at offset %zu rejected by D3D9\n", i);
+            i = j - 1;
+        }
+        std::printf("Tree sun shadow: %d pixel shaders in the precomp, %d of the tree family, %d patched, %d load in D3D9 (the game's own: %d of %d load)\n", shaders, treeLike, treePatched, loaded,
+                    originalsLoaded, treeLike);
+        std::printf("Tree sun shadow: %d tree shaders already read the shadow map (left as they are)\n", alreadyShadowed);
+        Check(treePatched + alreadyShadowed == treeLike && treePatched >= 8, "every tree pixel shader of the game without a shadow is patched (and nothing else)");
+        Check(loaded == treePatched, "every patched tree pixel shader loads in D3D9");
     }
     std::printf("Foliage vertex lamps: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

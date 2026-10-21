@@ -206,11 +206,42 @@ bool UvRowConsts(const std::vector<DWORD>& vs, int usage, int index, int& cX, in
 struct BasisSmoothPatch {
     DWORD sizeConst = 0;   // set per draw: (w, h, 1/w, 1/h) of the basis maps
     DWORD sizeSampler = 0; // a basis map sampler (to read that size)
+    int maskSampler = -1;  // wallMask: bind the story's wall mask here (point filter, clamp), -1 = none
+    int floorSampler = -1; // floorWall: the floor light map read through the uv's zw, -1 = none (no such read, or no room)
+    int floorConst = -1;   // floorWall: set per draw: (sx, sy, on, 0); floor uv = basis uv x sxy; on 0 = the game's read
+    int ambSampler = -1;   // stairRoomFill: bind the story's ambient per tile here (A32B32G32R32F 64 x 64, point, clamp), -1 = none
+    bool floorTone = false; // floorTone: the floors' tone curve was put on the colour (InteriorFloor's, about x1.46 in the dark)
+    int upSampler = -1;     // storyBlend: the story above's directional map for direction d (+X -X +Z -Z) at upSampler + d
+    int upAmbSampler = -1;  // storyBlend: the story above's ambient map (as ambSampler's)
+    int storyConst = -1;    // storyBlend: set per draw: (yLow + 0.5, 1 / (yUp - yLow), on, 0), heights in world metres
+    int basisSampler[4] = {-1, -1, -1, -1}; // this story's directional map samplers by direction (to find the story above's)
+    int blendRefused = 0;   // storyBlend not made: 1 no sampler or constant room, 2 no normal input (nrm of an input), 3 no light max after the floor read, 4 no dcl
 };
 bool BasisSamplers(const std::vector<DWORD>& t, int samplers[4]);
 // preserveShadows caps each smoothed channel by the normalized native bilinear read.
 // It prevents the wider filter adding colour, but cannot reconstruct geometry missing from the map.
-bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out, bool preserveShadows = false);
+// wallMask (development builds, basis_wall_filter): every basis read, the native ones too, takes a uv that never blends
+// towards a texel across a wall (BasisWallUv; the mask at maskSampler: r -x, g +x, b -z, a +z walled, the maps' layout).
+// floorWall (with wallMask): the floor light map read through the same uv's zw (a stair's top step) keeps to its own tile
+// at a walled side too (half a floor texel inside it; the lower texel in the wall's thickness).
+// stairRoomFill (with floorWall): the ambient cube fill becomes the tile's room ambient x the floor map's alpha, and the floor read
+// takes map.rgb + map.a x ambient (the floor's own law), so a stair has the colour of the floor and walls around it.
+// floorTone (with stairRoomFill): the floor shaders' tone curve on the final colour (f = (2 / (1 + exp(-4.2 l)) - 1) / l, l = rgb / 3 summed),
+// which the object shaders a stair is drawn with lack: the same texture under the same light looks as it does on the floor.
+// storyBlend (with stairRoomFill): the light blended by the pixel's height (the w of its normal input) with the story above's maps.
+// All options off (the default) = the plain bicubic copy.
+struct BasisSmoothOptions {
+    bool preserveShadows = false;
+    bool wallMask = false;
+    bool floorWall = false;     // takes effect with wallMask
+    bool stairRoomFill = false; // takes effect with floorWall (stair_room_fill)
+    bool floorTone = false;     // takes effect with stairRoomFill
+    bool storyBlend = false;    // takes effect with stairRoomFill
+};
+bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out, const BasisSmoothOptions& options = {});
+// Whether the vertex shader passes the world height in its TEXCOORD2.w ("mov oN.w, rX.y" after "mov oM.zw, rX.xyxz", oN the
+// TEXCOORD2 output): the stair VSs (22EA00C8, 23C16560)
+bool VsPassesWorldY(const std::vector<DWORD>& vs);
 bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& out, bool capToFloorMap = true);
 // Smooth light maps (2.12.4): the room light map read of the room-lit pixel shaders. The pattern (docs/features/night-
 // lighting/room-map-smoothing.md; offline over every precomp pixel shader it matches InteriorFloor, InteriorWall and their
@@ -228,9 +259,15 @@ struct RoomMapPatch {
     int temps = 0; // temps the copy uses (r0 .. r(temps - 1))
     int slots = 0; // its instructions (no dcl, no def)
     bool ps2x = false;
+    int archConst = -1; // archAmb: kArchCells x 2 rows set per draw: (a.x, a.z, e.x, e.z), (D.rgb, 1 / |e|^2); -1 = none
+    int ambConst = -1;  // archAmb: the constant holding the room's ambient colour (cA)
 };
 bool IsRoomMapPs(const std::vector<DWORD>& t);
-bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out);
+// archAmb (development builds, arch_ambient): after the read, the share of the neighbours' ambient near the room's arches
+// (lot position from the floor map uv, 4 texels a metre; arch_ambient.h's law), from archConst; all D = 0: no change
+constexpr unsigned kArchCells = 6; // (6 since dev.31: the edges of a floor opening go with the arches, opening_bounce)
+constexpr float kArchReach = 1.5f; // = ArchAmbient::kReach
+bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb = false);
 // The scale of the room map uv a vertex shader writes: "mul o<TEXCOORD1>.xy, v#, cK.c" (either order), the only write of
 // that output's xy. The game's room-lit vertex shaders: 1/4096 for the wall atlas, 1/32767 for the floor maps (a def in
 // vs_3_0, a constant it may set in vs_2_0: read it at the draw when not defined).

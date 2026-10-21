@@ -33,6 +33,17 @@ inline float Cover(float x, float h) {
 // The weight of the stretch [a, b] in a spot of half width h centred at c
 inline float Weight(float c, float h, float a, float b) { return Cover(c - a, h) - Cover(c - b, h); }
 
+// The penumbra of a slab's edge (soft_slab_edges), unlike Cover() not a smooth ramp across one straight edge at a known
+// distance but a count over an opening known only as open or closed per point: the lamp's disk of `radius` seen from a point
+// crosses the slab's plane within (1 - t) x radius of the ray's crossing (t: the crossing's place from the lamp, 0..1); the
+// share of the lamp passing is the share of 5 points there (the crossing and 4 around it) that open(x, z) finds open (lot
+// space). Tested in tools/stairwell_bounce_test.
+template <class Open> float PenumbraShare(float x, float z, float t, float radius, Open open) {
+    const float r = radius * (1.0f - t);
+    const int n = (open(x, z) ? 1 : 0) + (open(x + r, z) ? 1 : 0) + (open(x - r, z) ? 1 : 0) + (open(x, z + r) ? 1 : 0) + (open(x, z - r) ? 1 : 0);
+    return static_cast<float>(n) / 5.0f;
+}
+
 // The half width of the lamp's disc across the ray at t (0 lamp, 1 point). aa: the receiver's own half texel when it is a
 // light map (0 otherwise): a map stores the light at its texel centres, so an edge sharper than a texel or two draws as
 // texel stairs; aa t is the width at the occluder that spreads the edge over aa at the point.

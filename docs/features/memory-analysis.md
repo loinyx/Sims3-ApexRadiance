@@ -79,3 +79,25 @@ attribute native allocations to textures, Sims or script objects. A successful a
 operations on the same region. Cross-thread cumulative counters are approximate concurrent observations.
 
 Normal mode omits these development collectors and uses the separate [bounded memory controller](memory-budget.md).
+
+## Development flavour measurements
+
+Builds of the development flavour (`APEX_DEVELOPMENT_BUILD_FLAVOR`, [workflow.md](../workflow.md#development-switches-dev_build))
+add three measurements. Public builds compile none of them.
+
+- **Address-space owners and game allocation categories** (switch `measurements`). An address-space ledger
+  (`features/va_ledger.cpp`) attributes reservations to their owners, and the game's named allocation entries
+  (`0x004E3F90`, `0x004E3FB0`, free `0x004E3F70`) are counted by category (`features/game_alloc_categories.cpp`,
+  Steam executable only). Only part of the game's allocations pass through those named entries; the rest of the
+  allocator is called directly and is not attributed. These measurements cost frame time; like every switch they are on unless `[dev_build]` sets them to false.
+- **Apex memory by owner** (switch `memory_owners`, `features/apex_memory.{h,cpp}`). Every `operator new` / `delete` of
+  the ASI is counted with an 8-byte header (live bytes, blocks, session peak and the 40 largest calling sites, ImGui
+  apart). The large containers of the lighting code are estimated from their capacity and the MSVC layout by the thread
+  that owns them, at most every 10 s and right after an F8. Direct3D textures, render targets and shaders the ASI creates
+  are counted at creation and subtracted when Direct3D destroys them, by pool. Results appear in an `[ApexMemory]` log
+  line every minute and in the APEX RADIANCE MEMORY section at the end of the F8 lighting snapshot. Measuring never
+  changes what the lighting computes. Driver and DXVK memory is not visible.
+- **Debug buffers given back** (switch `release_debug_buffers`): the Light Probe's draw records and occlusion queries
+  after a capture, a recording's lines and tracer states after it is saved, and the F8 light records when their
+  recording is switched off ([light-probe.md](dev-tools/light-probe.md), [recorder.md](dev-tools/recorder.md)). The F8
+  section lists what each gave back.

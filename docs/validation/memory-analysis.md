@@ -24,3 +24,14 @@ The production-header harness checks size buckets, successful and failed attempt
 last-error preservation, bounded queue overflow and draining, and writes the gameplay CSV. Runtime coverage,
 thread overhead, save peaks between markers, and allocation ownership remain open checks. No automatic cache
 policy is enabled by this instrumentation.
+
+## Development flavour measurements
+
+| Date | Commit | Harness | Result | Backend |
+|---|---|---|---|---|
+| 2026-10-20 | Working tree on `c22e8d7` | `tools/memory_owners_test/run.ps1` | 41 checks passed: exact `operator new` counts (`new[]`, `nothrow`, ImGui), separate calling sites, container estimates within 35 bytes of the real count, report cadence, textures and render targets counted at creation and subtracted at destruction on a real device | Native D3D9 and DXVK |
+| 2026-10-20 | Working tree on `c22e8d7` | `tools/game_alloc_categories_test/run.ps1` | 21 checks passed under concurrency (103 bucket overflows counted) | None |
+| 2026-10-20 | Working tree on `c22e8d7` | `tools/memory_analysis_test/run.ps1` | Passed | None |
+
+The public binary contains none of the accounting. In game, the owner table, the largest calling sites, the Direct3D
+memory by pool and the amounts given back by `release_debug_buffers` are not yet measured.

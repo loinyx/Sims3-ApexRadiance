@@ -26,6 +26,9 @@ jobs:
       - name: Check codecs and CAS sorting
         shell: pwsh
         run: ./tools/development/check.ps1 -Suite Smoke
+      - name: Check lighting helpers
+        shell: pwsh
+        run: ./tools/development/check.ps1 -Suite Lighting
       - name: Preserve public build and check logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

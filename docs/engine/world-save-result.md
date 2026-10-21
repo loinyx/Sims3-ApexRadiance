@@ -30,6 +30,9 @@ the peak. The public experiment additionally wraps the direct dispatch call at `
 the caller pushes two arguments and loads ECX. This dispatch returns an integer result with `ret 8`; the wrapper
 preserves that result, keeps a nested save scope and releases only the reserve, already-deferred frees and inactive
 Apex compression storage. It does not invoke native cache trimming from an unverified thread.
+When sims3-modernization's `ts3native.asi` is loaded, the entry at `0x00AAC110` can start with a `jmp rel32` into that
+module (its detour). Apex accepts that form only when the target lies inside the loaded module; the call bytes at
+`0x00AB12AF` are checked as before ([room-to-save.md](../features/performance/room-to-save.md)).
 Calls at `0x00C6D529`, `0x00C6D537` and `0x00C6D544` report the three stage outcomes with unchanged thiscall arguments
 and boolean returns. Stage memory endpoints remain distinct from a peak measurement.
 Replacing serialization with streaming requires establishing the stream format and seek/backpatch requirements.

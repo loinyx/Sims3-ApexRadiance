@@ -189,3 +189,16 @@ Apex inherited it as the base of both families.
 ### 2026-10-03: controls (`b4f9da2`)
 
 **Outcome:** Brightness range 10 to 80% (default 35% kept); Blue tint default 0%; legacy values clamped on load.
+
+### 2026-10-20: blue bathrooms (2.14.0 development builds)
+
+**Context:** a bathroom on the second story looked blue (F7 pixel 0.349 0.341 0.537).
+
+**Finding:** the wall was drawn with c4 = c5 = c6 = (0.15, 0.15, 0.30), exactly the game's native family-1 colour, while
+the room's solve recorded Apex's grey (0.007) and the lot is of family 0 (0.010). With *Blue tint* at 0.5, Apex's colour
+for that family would not be exactly this value, so the blue came from the game or from a write without Apex's tint.
+The solve record does not show the value the room holds now.
+
+**Outcome:** no change to the light. The developer F8 snapshot lists the room's `+0x110`, `+0x120`, `+0x650` and
+normalisation, and counts native-blue `WriteAmbient` calls with their caller. The cause stays open
+([validation](../validation/night-lighting-unlit-rooms.md#open-checks)).

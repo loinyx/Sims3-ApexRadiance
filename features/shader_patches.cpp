@@ -2056,26 +2056,325 @@ bool BasisSamplers(const std::vector<DWORD>& t, int samplers[4]) {
     return true;
 }
 
-bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out, bool preserveShadows) {
+// Walls in the directional maps (development builds, basis_wall_filter): the maps hold one texel per metre, each the light of
+// its own tile, and the game's bilinear read blends the texel of the tile beyond a wall into a surface standing against it
+// (a capture: the top step of a stair beside the wall of a lit room took that room's red lamp, with every Apex lamp
+// share off). The block below moves the basis uv, before every basis read, so that it never blends towards a neighbour
+// across a wall: in texels, d = the uv's offset from its own texel's centre (-0.5 .. 0.5 per axis); towards a side the mask
+// marks walled, d becomes 0 (the texel's own value there). Mask (sampler maskSampler, the maps' layout, read at the texel's
+// centre): r = a wall on its -x side, g = +x, b = -z, a = +z (0 or 1). Temps U (the moved uv), P, F, M.
+// A point within kWallBand texels of a walled side of its own texel lies in the wall's thickness (a wall's faces stand 5 cm
+// or more off its line): which room's surface it is cannot be told there (a capture: the top step of a stair
+// ends on the wall's line, its last millimetres in the next room's texel, a red sliver; a millimetre the other way it is in
+// its own). Such a point takes the lower of the two texels, channel by channel: after the block, P.xy = the uv of the texel
+// beyond that side and P.z = 1 in the band (else 0), and every native basis read is followed by BasisWallMin.
+// cB = (0.5 - kWallBand, -1, 1, 0).
+// 6 cm: the top step of a stair ends 4 to 5 cm past the wall line, its lip at the slab (a capture:
+// lot z 24.95 to 24.96, the wall at 25, the red room's texel), so a 3 cm band missed it.
+constexpr float kWallBand = 0.06f;
+std::vector<DWORD> BasisWallMin(DWORD S, DWORD D, DWORD P, DWORD R2) {
+    constexpr DWORD kMinOp = 0x0A;
+    return {Op(kTexld, 3), Dst(kTemp, R2), Src(kTemp, P), Src(kSampler, S),
+            Op(kMinOp, 3), Dst(kTemp, R2), Src(kTemp, R2), Src(kTemp, D),
+            Op(kAdd, 3), Dst(kTemp, R2), Src(kTemp, R2), Neg(Src(kTemp, D)),                  // min - D (lrp may not write a source)
+            Op(kMad, 4), Dst(kTemp, D), Src(kTemp, P, Sw(2, 2, 2, 2)), Src(kTemp, R2), Src(kTemp, D)}; // D + band x (min - D)
+}
+// The floor light map read through the same uv's zw (the stair's top step and other upward faces: "texld r0, v1.zwzw, s1",
+// a capture, PS 2CB7BD58; it is 4 texels per metre, the walls on its 1 m tile edges): the same rule at that
+// map's resolution. Towards a walled side the point stays at least half a floor texel (kFloorHalf m) inside its own tile, so
+// the bilinear read never blends the texel beyond the wall; in the wall's thickness it takes the lower of its own texel and
+// the first one beyond. The floor uv = the basis uv x cG.xy (set per draw from the two maps' sizes); where the draw's
+// own zw is not that (cG.z = 0, or a VS that makes it otherwise) the read is the game's. After the block: G = the floor
+// read's uv, H.xy = the uv beyond, H.z = in the band (0 when off). cF = (0.5 - kFloorHalf, 0.5 + kFloorHalf, 1e-4, 0).
+struct FloorWallRegs {
+    DWORD G, H, cF, cG;
+};
+constexpr float kFloorHalf = 0.125f;
+std::vector<DWORD> BasisWallUv(DWORD uvType, DWORD uvNum, DWORD cS, DWORD cK, DWORD cB, DWORD mask, DWORD U, DWORD P, DWORD Fm, DWORD M,
+                               const FloorWallRegs* fl = nullptr) {
+    constexpr DWORD kCmp = 0x58;
+    constexpr DWORD kAbsMod = 0x0B000000u;
+    const DWORD Z = Sw(2, 2, 2, 2);
+    const DWORD One = Sw(3, 3, 3, 3); // cK.w = 1: the zw of the uvs read (a texld reads all four; the uv input declares xy only)
+    std::vector<DWORD> floorAtWalls, floorAtSign, floorAtEnd;
+    if (fl) {
+        const DWORD G = fl->G, H = fl->H, cF = fl->cF, cG = fl->cG;
+        const DWORD XY = Sw(0, 1, 0, 1), ZW = Sw(2, 3, 2, 3);
+        floorAtWalls = { // P.xy = the texel's centre, Fm.xy = d, P.zw = walled on d's side
+            Op(kMin, 3), Dst(kTemp, G, 0x3), Src(kTemp, Fm), Src(kConst, cF, Sw(0, 0, 0, 0)),
+            Op(kMax, 3), Dst(kTemp, G, 0x3), Src(kTemp, G), Neg(Src(kConst, cF, Sw(0, 0, 0, 0))), // d clamped to the inner part
+            Op(kAdd, 3), Dst(kTemp, G, 0x3), Src(kTemp, G), Neg(Src(kTemp, Fm)),
+            Op(kMad, 4), Dst(kTemp, G, 0x3), Src(kTemp, G), Src(kTemp, P, ZW), Src(kTemp, Fm),   // walled side: clamped, else d
+            Op(kAdd, 3), Dst(kTemp, G, 0x3), Src(kTemp, G), Src(kTemp, P)};                      // the floor point (texels)
+        floorAtSign = { // M.xy = in the band per axis, M.zw = sign(d)
+            Op(kMul, 3), Dst(kTemp, H, 0x3), Src(kTemp, M, ZW), Src(kTemp, M),
+            Op(kMad, 4), Dst(kTemp, H, 0x3), Src(kTemp, H), Src(kConst, cF, Sw(1, 1, 1, 1)), Src(kTemp, P)}; // the first floor texel beyond
+        floorAtEnd = { // M.x = in the band
+            Op(kMul, 3), Dst(kTemp, G, 0x3), Src(kTemp, G), Src(kConst, cS, ZW),
+            Op(kMul, 3), Dst(kTemp, H, 0x3), Src(kTemp, H), Src(kConst, cS, ZW),
+            Op(kMul, 3), Dst(kTemp, G, 0x3), Src(kTemp, G), Src(kConst, cG),
+            Op(kMul, 3), Dst(kTemp, H, 0x3), Src(kTemp, H), Src(kConst, cG),
+            // on = cG.z where the draw's zw is the basis uv x cG.xy, else 0
+            Op(kMad, 4), Dst(kTemp, G, 0xC), Neg(Src(uvType, uvNum, XY)), Src(kConst, cG, XY), Src(uvType, uvNum, ZW),
+            Op(kMax, 3), Dst(kTemp, G, 0x4), Src(kTemp, G, Z) | kAbsMod, Src(kTemp, G, Sw(3, 3, 3, 3)) | kAbsMod,
+            Op(kAdd, 3), Dst(kTemp, G, 0x4), Src(kTemp, G, Z), Neg(Src(kConst, cF, Z)),
+            Op(kCmp, 4), Dst(kTemp, G, 0x4), Src(kTemp, G, Z), Src(kConst, cB, Sw(3, 3, 3, 3)), Src(kConst, cB, Z), // (one constant per instruction)
+            Op(kMul, 3), Dst(kTemp, G, 0x4), Src(kTemp, G, Z), Src(kConst, cG, Z),
+            Op(kAdd, 3), Dst(kTemp, G, 0x3), Src(kTemp, G), Neg(Src(uvType, uvNum, ZW)),
+            Op(kMad, 4), Dst(kTemp, G, 0x3), Src(kTemp, G), Src(kTemp, G, Z), Src(uvType, uvNum, ZW), // off: the game's own uv
+            Op(kMul, 3), Dst(kTemp, H, 0x4), Src(kTemp, M, Sw(0, 0, 0, 0)), Src(kTemp, G, Z),
+            Op(kMov, 2), Dst(kTemp, H, 0x8), Src(kConst, cK, One)};
+    }
+    std::vector<DWORD> code = {
+        Op(kMov, 2), Dst(kTemp, U, 0x3), Src(uvType, uvNum),
+        Op(kMov, 2), Dst(kTemp, U, 0xC), Src(kConst, cK, One),
+        Op(kMov, 2), Dst(kTemp, M, 0xC), Src(kConst, cK, One),
+        Op(kMul, 3), Dst(kTemp, P, 0x3), Src(uvType, uvNum), Src(kConst, cS, Sw(0, 1, 0, 1)), // s = uv x size
+        Op(kFrc, 2), Dst(kTemp, Fm, 0x3), Src(kTemp, P),                                       // fr
+        Op(kAdd, 3), Dst(kTemp, P, 0x3), Src(kTemp, P), Neg(Src(kTemp, Fm)),                    // its texel
+        Op(kAdd, 3), Dst(kTemp, P, 0x3), Src(kTemp, P), Src(kConst, cK, Z),                     // its centre (+0.5)
+        Op(kMul, 3), Dst(kTemp, M, 0x3), Src(kTemp, P), Src(kConst, cS, Sw(2, 3, 2, 3)),        // the centre's uv
+        Op(kTexld, 3), Dst(kTemp, M), Src(kTemp, M), Src(kSampler, mask),
+        Op(kAdd, 3), Dst(kTemp, Fm, 0x3), Src(kTemp, Fm), Neg(Src(kConst, cK, Z)),              // d = fr - 0.5
+        Op(kCmp, 4), Dst(kTemp, P, 0x4), Src(kTemp, Fm, Sw(0, 0, 0, 0)), Src(kTemp, M, Sw(1, 1, 1, 1)), Src(kTemp, M, Sw(0, 0, 0, 0)), // d.x >= 0 ? +x : -x
+        Op(kCmp, 4), Dst(kTemp, P, 0x8), Src(kTemp, Fm, Sw(1, 1, 1, 1)), Src(kTemp, M, Sw(3, 3, 3, 3)), Src(kTemp, M, Sw(2, 2, 2, 2)), // d.y >= 0 ? +z : -z
+    };
+    code.insert(code.end(), floorAtWalls.begin(), floorAtWalls.end());
+    const std::vector<DWORD> band = {
+        // in the wall's thickness: |d| >= 0.5 - band on a walled side (M.xy = 1, else 0); M.zw = sign(d)
+        Op(kAdd, 3), Dst(kTemp, M, 0x3), Src(kTemp, Fm) | kAbsMod, Neg(Src(kConst, cB, Sw(0, 0, 0, 0))),
+        Op(kCmp, 4), Dst(kTemp, M, 0x3), Src(kTemp, M), Src(kConst, cB, Sw(2, 2, 2, 2)), Src(kConst, cB, Sw(3, 3, 3, 3)),
+        Op(kMul, 3), Dst(kTemp, M, 0x3), Src(kTemp, M), Src(kTemp, P, Sw(2, 3, 2, 3)),
+        Op(kCmp, 4), Dst(kTemp, M, 0xC), Src(kTemp, Fm, Sw(0, 1, 0, 1)), Src(kConst, cB, Sw(2, 2, 2, 2)), Src(kConst, cB, Sw(1, 1, 1, 1)),
+    };
+    code.insert(code.end(), band.begin(), band.end());
+    code.insert(code.end(), floorAtSign.begin(), floorAtSign.end());
+    const std::vector<DWORD> rest = {
+        Op(kMad, 4), Dst(kTemp, Fm, 0x3), Neg(Src(kTemp, Fm)), Src(kTemp, P, Sw(2, 3, 2, 3)), Src(kTemp, Fm), // d (1 - wall)
+        Op(kMad, 4), Dst(kTemp, M, 0xC), Src(kTemp, M), Src(kTemp, M, Sw(0, 1, 0, 1)), Src(kTemp, P, Sw(0, 1, 0, 1)), // beyond: centre + sign in the band
+        Op(kMax, 3), Dst(kTemp, M, 0x1), Src(kTemp, M, Sw(0, 0, 0, 0)), Src(kTemp, M, Sw(1, 1, 1, 1)),   // in the band (either axis)
+        Op(kAdd, 3), Dst(kTemp, P, 0x3), Src(kTemp, P), Src(kTemp, Fm),
+        Op(kMul, 3), Dst(kTemp, U, 0x3), Src(kTemp, P), Src(kConst, cS, Sw(2, 3, 2, 3)),
+        Op(kMul, 3), Dst(kTemp, P, 0x3), Src(kTemp, M, Sw(2, 3, 2, 3)), Src(kConst, cS, Sw(2, 3, 2, 3)), // P.xy = the uv beyond
+        Op(kMov, 2), Dst(kTemp, P, 0x4), Src(kTemp, M, Sw(0, 0, 0, 0)),                                     // P.z = in the band
+    };
+    code.insert(code.end(), rest.begin(), rest.end());
+    code.insert(code.end(), floorAtEnd.begin(), floorAtEnd.end());
+    return code;
+}
+// After the floor read (dest D, write mask Wm): in the band, the lower of it and the texel beyond (H, FloorWallRegs)
+std::vector<DWORD> FloorWallMin(DWORD S, DWORD D, DWORD Wm, DWORD H, DWORD R) {
+    return {Op(kTexld, 3), Dst(kTemp, R), Src(kTemp, H), Src(kSampler, S),
+            Op(kMin, 3), Dst(kTemp, R, Wm), Src(kTemp, R), Src(kTemp, D),
+            Op(kAdd, 3), Dst(kTemp, R, Wm), Src(kTemp, R), Neg(Src(kTemp, D)),
+            Op(kMad, 4), Dst(kTemp, D, Wm), Src(kTemp, H, Sw(2, 2, 2, 2)), Src(kTemp, R), Src(kTemp, D)};
+}
+
+int CubeWeightRead(const std::vector<DWORD>& t, const std::vector<Ins>& ins, int& weightConst); // below
+bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out, const BasisSmoothOptions& options) {
+    const bool preserveShadows = options.preserveShadows, wallMask = options.wallMask, floorWall = options.floorWall;
+    const bool stairRoomFill = options.stairRoomFill, floorTone = options.floorTone, storyBlend = options.storyBlend;
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto ins = Parse(t);
     if (ins.empty()) return false;
     BasisReads r;
     if (!FindBasisReads(t, ins, r) || (r.uvType != static_cast<int>(kInput) && r.uvType != static_cast<int>(kTexture))) return false;
     const Usage u = Scan(t, ins);
-    if (u.maxTemp + 12 >= 32 || u.maxConst + 3 >= 224) return false;
+    if (u.maxTemp + (wallMask ? 17 : 12) >= 32 || u.maxConst + (wallMask ? 4 : 3) >= 224) return false;
+    if (wallMask && (u.maxSampler + 1 >= 16 || !u.afterLastSamplerDcl)) return false;
     const DWORD T = static_cast<DWORD>(u.maxTemp + 1), cS = static_cast<DWORD>(u.maxConst + 1), cK = cS + 1, cH = cS + 2;
     out.sizeConst = cS;
     out.sizeSampler = static_cast<DWORD>(r.sampler[0]);
+    out.maskSampler = wallMask ? u.maxSampler + 1 : -1;
+    out.floorSampler = out.floorConst = -1;
+    out.ambSampler = -1;
     int first = r.texld[0];
     for (int d = 1; d < 4; d++) first = std::min(first, r.texld[d]);
+    // (floorWall) the floor light map read through the uv's zw after the basis reads (FloorWallRegs): where it fits
+    int floorRead = -1;
+    if (wallMask && floorWall && u.maxTemp + 19 < 32 && u.maxConst + 6 < 224)
+        for (size_t i = static_cast<size_t>(first) + 1; i < ins.size(); i++) {
+            const Ins& x = ins[i];
+            if (x.op != kTexld || x.len != 3 || Type(t[x.at + 1]) != kTemp || Type(t[x.at + 3]) != kSampler) continue;
+            const DWORD uv = t[x.at + 2];
+            if (Type(uv) != static_cast<DWORD>(r.uvType) || Num(uv) != static_cast<DWORD>(r.uvNum) || Swz(uv) != kSwzZWZW || (uv & 0x0F000000u)) continue;
+            const int s = static_cast<int>(Num(t[x.at + 3]));
+            if (s == r.sampler[0] || s == r.sampler[1] || s == r.sampler[2] || s == r.sampler[3]) continue;
+            floorRead = static_cast<int>(i);
+            break;
+        }
+    // (stairRoomFill) the ambient cube's weighted read ("mul rC.xyz, rC, cW.w" right after the cube texld, after the first basis read):
+    // its result becomes the room's ambient x the floor map's alpha (the fill floors and walls take); the floor read gets it too
+    int cubeMul = -1;
+    if (stairRoomFill && floorRead >= 0 && u.maxTemp + 21 < 32 && u.maxSampler + 2 < 16) {
+        int w = -1;
+        const int c = CubeWeightRead(t, ins, w);
+        if (c > first && w >= 0) {
+            const DWORD C = Num(t[ins[static_cast<size_t>(c)].at + 1]);
+            for (size_t i = static_cast<size_t>(c) + 1; i < ins.size(); i++) {
+                const Ins& x = ins[i];
+                if (x.op == kMul && x.len == 3 && Type(t[x.at + 1]) == kTemp && IsReg(t[x.at + 2], kTemp, C) && Type(t[x.at + 3]) == kConst &&
+                    Num(t[x.at + 3]) == static_cast<DWORD>(w) && Swz(t[x.at + 3]) == kSwzW) {
+                    cubeMul = static_cast<int>(i);
+                    break;
+                }
+                if (x.len >= 1 && x.op != kDcl && IsReg(t[x.at + 1], kTemp, C)) break;
+            }
+        }
+    }
+    DWORD uvType = static_cast<DWORD>(r.uvType), uvNum = static_cast<DWORD>(r.uvNum);
+    std::vector<DWORD> wallUv;
+    FloorWallRegs fl{T + 16, T + 17, cS + 4, cS + 5};
+    if (wallMask) {
+        const DWORD U = T + 11;
+        const DWORD cB = cS + 3;
+        wallUv = BasisWallUv(uvType, uvNum, cS, cK, cB, static_cast<DWORD>(out.maskSampler), U, T + 12, T + 13, T + 14, floorRead >= 0 ? &fl : nullptr);
+        // the game's own reads (kept: the guard's reference) read the moved uv too (same length: before the inserts)
+        for (int d = 0; d < 4; d++) t[ins[static_cast<size_t>(r.texld[d])].at + 2] = Src(kTemp, U);
+        if (floorRead >= 0) {
+            const Ins& x = ins[static_cast<size_t>(floorRead)];
+            out.floorSampler = static_cast<int>(Num(t[x.at + 3]));
+            out.floorConst = static_cast<int>(fl.cG);
+            t[x.at + 2] = Src(kTemp, fl.G);
+        }
+        if (cubeMul >= 0) { // A = the tile's room ambient x the floor map's alpha at the floor read's uv
+            const DWORD A = T + 18, FL = T + 19;
+            out.ambSampler = u.maxSampler + 2;
+            const std::vector<DWORD> fill = {Op(kTexld, 3), Dst(kTemp, A), Src(kTemp, U), Src(kSampler, static_cast<DWORD>(out.ambSampler)),
+                                             Op(kTexld, 3), Dst(kTemp, FL), Src(kTemp, fl.G), Src(kSampler, static_cast<DWORD>(out.floorSampler)),
+                                             Op(kMul, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, FL, Sw(3, 3, 3, 3))};
+            wallUv.insert(wallUv.end(), fill.begin(), fill.end());
+        }
+        uvType = kTemp, uvNum = U;
+    }
     std::vector<Edit> edits;
     edits.push_back({1, {Op(kDef, 5), Dst(kConst, cK), F(1.0f / 6.0f), F(2.0f / 3.0f), F(0.5f), F(1.0f),
                          Op(kDef, 5), Dst(kConst, cH), F(-0.5f), F(1.5f), F(1.0f / 64.0f), F(0.0f)}});
-    edits.push_back({ins[static_cast<size_t>(first)].at, BicubicSetup(static_cast<DWORD>(r.uvType), static_cast<DWORD>(r.uvNum), cS, cK, cH, T)});
+    if (wallMask) edits.push_back({1, {Op(kDef, 5), Dst(kConst, cS + 3), F(0.5f - kWallBand), F(-1.0f), F(1.0f), F(0.0f)}}); // cB (BasisWallUv)
+    if (floorRead >= 0) edits.push_back({1, {Op(kDef, 5), Dst(kConst, fl.cF), F(0.5f - kFloorHalf), F(0.5f + kFloorHalf), F(1e-4f), F(0.0f)}});
+    edits.push_back({ins[static_cast<size_t>(first)].at, BicubicSetup(uvType, uvNum, cS, cK, cH, T)});
+    if (wallMask) {
+        // edits at one position land in the reverse order of this list: the uv block before the setup, and the mask's dcl
+        // (its position can be that same one, the first basis read right after the last dcl) before both
+        edits.push_back({ins[static_cast<size_t>(first)].at, wallUv});
+        edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, static_cast<DWORD>(out.maskSampler))}});
+        if (out.ambSampler >= 0) edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, static_cast<DWORD>(out.ambSampler))}});
+    }
     for (int d = 0; d < 4; d++) {
         const Ins& x = ins[static_cast<size_t>(r.texld[d])];
         edits.push_back({End(x), BicubicTaps(static_cast<DWORD>(r.sampler[d]), Num(t[x.at + 1]), T, cH,preserveShadows)});
+        if (wallMask) edits.push_back({End(x), BasisWallMin(static_cast<DWORD>(r.sampler[d]), Num(t[x.at + 1]), T + 12, T + 15)}); // (before the taps: their reference)
+    }
+    if (floorRead >= 0) {
+        const Ins& x = ins[static_cast<size_t>(floorRead)];
+        if (out.ambSampler >= 0) // (pushed first: lands after the min) the floor's law: map.rgb + map.a x ambient
+            edits.push_back({End(x), {Op(kAdd, 3), Dst(kTemp, Num(t[x.at + 1]), WMask(t[x.at + 1]) & 0x7u), Src(kTemp, Num(t[x.at + 1])), Src(kTemp, T + 18)}});
+        edits.push_back({End(x), FloorWallMin(Num(t[x.at + 3]), Num(t[x.at + 1]), WMask(t[x.at + 1]), fl.H, T + 15)});
+    }
+    if (out.ambSampler >= 0) { // the cube fill: the room's ambient x alpha instead
+        const Ins& x = ins[static_cast<size_t>(cubeMul)];
+        edits.push_back({End(x), {Op(kMov, 2), Dst(kTemp, Num(t[x.at + 1]), WMask(t[x.at + 1])), Src(kTemp, T + 18)}});
+    }
+    // (floorTone, with stairRoomFill) the floors' own tone curve on the colour (InteriorFloor PS, an F7 capture: "dp3 l, c, 0.333;
+    // f = (2 / (1 + exp(-4.2 l)) - 1) / l; c x f", about x1.46 in the dark: D3D exp is 2^x); the object shaders a stair is drawn with have none,
+    // so the same texture under the same light was half as bright on the steps as on the floor beside them. The last colour
+    // write to oC0 goes to a temp, then oC0.rgb = it x f. cT = (0.333, 2, -1, 4.2), cT1 = (1, 1e-4, 0, 0).
+    if (floorTone && out.ambSampler >= 0 && u.maxTemp + 23 < 32 && u.maxConst + 8 < 224) {
+        int last = -1;
+        for (size_t i = 0; i < ins.size(); i++)
+            if (ins[i].len >= 1 && ins[i].op != kDcl && ins[i].op != kDef && IsReg(t[ins[i].at + 1], kColorOut, 0) && (WMask(t[ins[i].at + 1]) & 0x7))
+                last = static_cast<int>(i);
+        if (last >= 0) {
+            constexpr DWORD kExp = 0x0E;
+            const DWORD TC = T + 21, TT = T + 22, cT = cS + 6, cT1 = cS + 7;
+            const Ins& x = ins[static_cast<size_t>(last)];
+            const DWORD old = t[x.at + 1], full = WMask(old), mask = full & 0x7;
+            t[x.at + 1] = Dst(kTemp, TC, full) | (old & 0x00F00000u);
+            const DWORD X = Sw(0, 0, 0, 0), Y = Sw(1, 1, 1, 1), Z = Sw(2, 2, 2, 2), W = Sw(3, 3, 3, 3);
+            edits.push_back({1, {Op(kDef, 5), Dst(kConst, cT), F(0.333f), F(2.0f), F(-1.0f), F(4.2f), Op(kDef, 5), Dst(kConst, cT1), F(1.0f), F(1e-4f), F(0.0f), F(0.0f)}});
+            edits.push_back({End(x), {Op(kDp3, 3), Dst(kTemp, TT, 0x8), Src(kTemp, TC), Src(kConst, cT, X),
+                                      Op(kMax, 3), Dst(kTemp, TT, 0x8), Src(kTemp, TT, W), Src(kConst, cT1, Y),
+                                      Op(kMul, 3), Dst(kTemp, TT, 0x4), Neg(Src(kTemp, TT, W)), Src(kConst, cT, W),
+                                      Op(kExp, 2), Dst(kTemp, TT, 0x4), Src(kTemp, TT, Z),
+                                      Op(kAdd, 3), Dst(kTemp, TT, 0x4), Src(kTemp, TT, Z), Src(kConst, cT1, X),
+                                      Op(kRcp, 2), Dst(kTemp, TT, 0x4), Src(kTemp, TT, Z),
+                                      Op(kRcp, 2), Dst(kTemp, TT, 0x2), Src(kTemp, TT, W),
+                                      Op(kMad, 4), Dst(kTemp, TT, 0x4), Src(kConst, cT, Y), Src(kTemp, TT, Z), Src(kConst, cT, Z),
+                                      Op(kMul, 3), Dst(kTemp, TT, 0x4), Src(kTemp, TT, Y), Src(kTemp, TT, Z),
+                                      Op(kMul, 3), Dst(kColorOut, 0, mask), Src(kTemp, TC), Src(kTemp, TT, Z)}});
+            if (full & 0x8) edits.push_back({End(x), {Op(kMov, 2), Dst(kColorOut, 0, 0x8), Src(kTemp, TC, W)}}); // (pushed after: lands before the rgb, any order)
+            out.floorTone = true;
+        }
+    }
+    // (storyBlend, with stairRoomFill) A stair is lit by its own story's maps at every height, but it climbs to the next floor: its
+    // top steps took the light of 0.5 m over the floor below (F7: the top steps in tile z 30, under the floor of
+    // the lit story above, black: that texel's point is under the slab; F7: the other way, a lamp below lit the steps up
+    // to the dark landing). The light L (the max that ends the lighting, after the floor read) is blended by the pixel's height
+    // with the story above's: its 4 directional maps (samplers upSampler + d, d = +X -X +Z -Z, the same directions) weighted by
+    // the pixel's normal as the game weights them (sat(+-0.8944 n.x|z + 0.4472 n.y)), maxed with its ambient fill (its ambient
+    // map x the floor's alpha). t = smoothstep(sat((y - (yLow + 0.5)) / (yUp - yLow))): the two maps' own sample heights. y is
+    // the world height the stair VS passes in its normal's w (VS 22EA00C8 "mov o5.w, r0.y"; checked per draw, storyConst.z = 0
+    // otherwise). storyConst = (yLow + 0.5, 1 / (yUp - yLow), on, 0); cD = (0.8944, 0.4472, -0.8944, 0), cE = (3, -2, 0, 0).
+    if (storyBlend && out.ambSampler >= 0 && floorRead >= 0 && !(u.maxConst + 11 < 224 && u.maxSampler + 7 < 16)) out.blendRefused = 1;
+    if (storyBlend && out.ambSampler >= 0 && floorRead >= 0 && u.maxConst + 11 < 224 && u.maxSampler + 7 < 16) {
+        int nrmAt = -1, normalIn = -1, lAt = -1;
+        for (size_t i = 0; i < ins.size(); i++)
+            if (ins[i].op == kNrm && ins[i].len == 2 && Type(t[ins[i].at + 2]) == kInput) {
+                nrmAt = static_cast<int>(i);
+                normalIn = static_cast<int>(Num(t[ins[i].at + 2]));
+                break;
+            }
+        for (size_t i = static_cast<size_t>(floorRead) + 1; i < ins.size(); i++)
+            if (ins[i].op == kMax && ins[i].len == 3 && Type(t[ins[i].at + 1]) == kTemp && (WMask(t[ins[i].at + 1]) & 0x7) == 0x7) {
+                lAt = static_cast<int>(i);
+                break;
+            }
+        int dclAt = -1;
+        for (size_t i = 0; i < ins.size() && normalIn >= 0; i++)
+            if (ins[i].op == kDcl && ins[i].len == 2 && IsReg(t[ins[i].at + 2], kInput, static_cast<DWORD>(normalIn))) dclAt = static_cast<int>(i);
+        out.blendRefused = nrmAt < 0 ? 2 : lAt < 0 ? 3 : dclAt < 0 ? 4 : 0;
+        if (nrmAt >= 0 && lAt >= 0 && dclAt >= 0) {
+            // (temps: the bicubic taps' T .. T+3, free once the last directional read is done; U and FL are still live)
+            const DWORD N = T, Wt = T + 1, B = T + 2, Lu = T + 3, U = T + 11, FL = T + 19;
+            const DWORD cD = cS + 8, cE = cS + 9, cY = cS + 10, L = Num(t[ins[static_cast<size_t>(lAt)].at + 1]), V = static_cast<DWORD>(normalIn);
+            const DWORD upBase = static_cast<DWORD>(u.maxSampler + 3), upAmb = upBase + 4;
+            t[ins[static_cast<size_t>(dclAt)].at + 2] = (t[ins[static_cast<size_t>(dclAt)].at + 2] & ~0x000F0000u) | 0x000F0000u; // its w too
+            const DWORD X = Sw(0, 0, 0, 0), Y = Sw(1, 1, 1, 1), Z = Sw(2, 2, 2, 2), W = Sw(3, 3, 3, 3);
+            edits.push_back({1, {Op(kDef, 5), Dst(kConst, cD), F(0.8944f), F(0.4472f), F(-0.8944f), F(0.0f), Op(kDef, 5), Dst(kConst, cE), F(3.0f), F(-2.0f), F(0.0f), F(0.0f)}});
+            std::vector<DWORD> blend = {
+                Op(kNrm, 2), Dst(kTemp, N, 0x7), Src(kInput, V),
+                Op(kDp2add, 4), Dst(kTemp, Wt, 0x1, true), Src(kTemp, N, Sw(0, 1, 0, 1)), Src(kConst, cD, Sw(0, 1, 0, 1)), Src(kConst, cD, W), // +X
+                Op(kDp2add, 4), Dst(kTemp, Wt, 0x2, true), Src(kTemp, N, Sw(0, 1, 0, 1)), Src(kConst, cD, Sw(2, 1, 2, 1)), Src(kConst, cD, W), // -X
+                Op(kDp2add, 4), Dst(kTemp, Wt, 0x4, true), Src(kTemp, N, Sw(2, 1, 2, 1)), Src(kConst, cD, Sw(0, 1, 0, 1)), Src(kConst, cD, W), // +Z
+                Op(kDp2add, 4), Dst(kTemp, Wt, 0x8, true), Src(kTemp, N, Sw(2, 1, 2, 1)), Src(kConst, cD, Sw(2, 1, 2, 1)), Src(kConst, cD, W), // -Z
+            };
+            const DWORD wSw[4] = {X, Y, Z, W};
+            for (DWORD d = 0; d < 4; d++) {
+                blend.insert(blend.end(), {Op(kTexld, 3), Dst(kTemp, B), Src(kTemp, U), Src(kSampler, upBase + d)});
+                if (d == 0) blend.insert(blend.end(), {Op(kMul, 3), Dst(kTemp, Lu, 0x7), Src(kTemp, B), Src(kTemp, Wt, wSw[d])});
+                else blend.insert(blend.end(), {Op(kMad, 4), Dst(kTemp, Lu, 0x7), Src(kTemp, B), Src(kTemp, Wt, wSw[d]), Src(kTemp, Lu)});
+            }
+            const std::vector<DWORD> rest = {
+                Op(kTexld, 3), Dst(kTemp, B), Src(kTemp, U), Src(kSampler, upAmb),                              // the story above's ambient
+                Op(kMul, 3), Dst(kTemp, B, 0x7), Src(kTemp, B), Src(kTemp, FL, W),                               // x the floor's alpha
+                Op(kMax, 3), Dst(kTemp, Lu, 0x7), Src(kTemp, Lu), Src(kTemp, B),
+                Op(kAdd, 3), Dst(kTemp, Wt, 0x1), Src(kInput, V, W), Neg(Src(kConst, cY, X)),                    // y - (yLow + 0.5)
+                Op(kMul, 3), Dst(kTemp, Wt, 0x1, true), Src(kTemp, Wt, X), Src(kConst, cY, Y),                   // s
+                Op(kMad, 4), Dst(kTemp, Wt, 0x2), Src(kTemp, Wt, X), Src(kConst, cE, Y), Src(kConst, cE, X),      // 3 - 2 s
+                Op(kMul, 3), Dst(kTemp, Wt, 0x2), Src(kTemp, Wt, Y), Src(kTemp, Wt, X),
+                Op(kMul, 3), Dst(kTemp, Wt, 0x2), Src(kTemp, Wt, Y), Src(kTemp, Wt, X),                          // s^2 (3 - 2 s)
+                Op(kMul, 3), Dst(kTemp, Wt, 0x2), Src(kTemp, Wt, Y), Src(kConst, cY, Z),                         // x on
+                Op(kAdd, 3), Dst(kTemp, Lu, 0x7), Src(kTemp, Lu), Neg(Src(kTemp, L)),
+                Op(kMad, 4), Dst(kTemp, L, 0x7), Src(kTemp, Lu), Src(kTemp, Wt, Y), Src(kTemp, L),               // L + t (Lup - L)
+            };
+            blend.insert(blend.end(), rest.begin(), rest.end());
+            edits.push_back({End(ins[static_cast<size_t>(lAt)]), blend});
+            for (DWORD s = upBase; s <= upAmb; s++) edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, s)}});
+            out.upSampler = static_cast<int>(upBase);
+            out.upAmbSampler = static_cast<int>(upAmb);
+            out.storyConst = static_cast<int>(cY);
+            for (int d = 0; d < 4; d++) out.basisSampler[d] = r.sampler[d];
+        }
     }
     Apply(t, std::move(edits));
     return true;
@@ -2385,6 +2684,7 @@ struct RoomMapRead {
     int texld = -1;              // index in ins
     DWORD L = 0, S = 0;          // its destination temp and sampler
     DWORD uvType = 0, uvNum = 0; // TEXCOORD1: t1 (ps_2_0) or the v# declared texcoord1 (ps_3_0)
+    int ambConst = -1;           // cA of "mad rD.xyz, rL.w, cA, rL" (the room's ambient colour)
 };
 bool Replicated(DWORD src) {
     const DWORD sw = Swz(src);
@@ -2436,6 +2736,7 @@ bool FindRoomMapRead(const std::vector<DWORD>& t, const std::vector<Ins>& ins, R
                 bool defined = false;
                 for (const Ins& z : ins) defined |= z.op == kDef && IsReg(t[z.at + 1], kConst, cA);
                 ok = !defined;
+                if (ok) out.ambConst = static_cast<int>(cA);
             }
             break;
         }
@@ -2451,13 +2752,74 @@ bool FindRoomMapRead(const std::vector<DWORD>& t, const std::vector<Ins>& ins, R
 }
 } // namespace
 
+bool VsPassesWorldY(const std::vector<DWORD>& vs) {
+    if (vs.empty() || vs[0] != 0xFFFE0300) return false; // vs_3_0
+    const auto ins = Parse(vs);
+    int tc2 = -1;
+    for (const Ins& x : ins) // dcl_texcoord2 oN: usage 5 (TEXCOORD), index 2
+        if (x.op == kDcl && x.len == 2 && (vs[x.at + 1] & 0x1F) == 5 && ((vs[x.at + 1] >> 16) & 0xF) == 2 && Type(vs[x.at + 2]) == kOutput) tc2 = static_cast<int>(Num(vs[x.at + 2]));
+    if (tc2 < 0) return false;
+    int yFrom = -1;
+    for (const Ins& x : ins) // mov oN.w, rX.y
+        if (x.op == kMov && x.len == 2 && IsReg(vs[x.at + 1], kOutput, static_cast<DWORD>(tc2)) && WMask(vs[x.at + 1]) == 0x8 && Type(vs[x.at + 2]) == kTemp &&
+            Swz(vs[x.at + 2]) == kSwzY)
+            yFrom = static_cast<int>(Num(vs[x.at + 2]));
+    if (yFrom < 0) return false;
+    for (const Ins& x : ins) // the same temp's x and z are the world position the room maps are read at (mov oM.zw, rX.xyxz)
+        if (x.op == kMov && x.len == 2 && Type(vs[x.at + 1]) == kOutput && WMask(vs[x.at + 1]) == 0xC && IsReg(vs[x.at + 2], kTemp, static_cast<DWORD>(yFrom)) &&
+            Swz(vs[x.at + 2]) == kSwzXYXZ)
+            return true;
+    return false;
+}
+
 bool IsRoomMapPs(const std::vector<DWORD>& t) {
     const auto ins = Parse(t);
     RoomMapRead r;
     return !ins.empty() && FindRoomMapRead(t, ins, r);
 }
 
-bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out) {
+// Room ambient through arches (development builds, arch_ambient; arch_ambient.h has the same law on the CPU, for the
+// tests). After the room map read rL (alpha = the ambient weight the shader multiplies the room's ambient cA by): the
+// pixel's lot position from the map uv (floor maps: 4 texels a metre, p = uv x size / 4), and for each of kArchCells arch
+// cells the draw passes, seg = (a.x, a.z, e.x, e.z) (e = b - a) and D = (the neighbour's ambient over cA, 0 where lower;
+// 1 / |e|^2): w = 1 - smoothstep(dist(p, segment) / kReach), add = max over the cells of D w, rL.xyz += rL.w add. Unused
+// cells hold D = 0. Temps: the three given (free after the read). cP = (3, -2, 1, 0.25), cQ = (1e-8, 1 / kReach, 0, 0).
+std::vector<DWORD> ArchAmbientCode(DWORD uvType, DWORD uvNum, DWORD cS, DWORD cP, DWORD cQ, DWORD cArch, DWORD L, DWORD Pp, DWORD Q, DWORD Acc) {
+    constexpr DWORD kRsq = 0x07;
+    const DWORD X = Sw(0, 0, 0, 0), Y = Sw(1, 1, 1, 1), Z = Sw(2, 2, 2, 2), W = Sw(3, 3, 3, 3);
+    std::vector<DWORD> v = {
+        Op(kMul, 3), Dst(kTemp, Pp, 0x3), Src(uvType, uvNum), Src(kConst, cS, Sw(0, 1, 0, 1)), // texels
+        Op(kMul, 3), Dst(kTemp, Pp, 0x3), Src(kTemp, Pp), Src(kConst, cP, W),                  // metres (lot)
+        Op(kMov, 2), Dst(kTemp, Acc, 0x7), Src(kConst, cQ, Z),                                  // 0
+    };
+    for (DWORD i = 0; i < kArchCells; i++) {
+        const DWORD cSeg = cArch + 2 * i, cD = cSeg + 1;
+        const std::vector<DWORD> cell = {
+            Op(kAdd, 3), Dst(kTemp, Q, 0x3), Src(kTemp, Pp), Neg(Src(kConst, cSeg, Sw(0, 1, 0, 1))),   // p - a
+            Op(kMul, 3), Dst(kTemp, Q, 0x4), Src(kTemp, Q, X), Src(kConst, cSeg, Z),
+            Op(kMad, 4), Dst(kTemp, Q, 0x4), Src(kTemp, Q, Y), Src(kConst, cSeg, W), Src(kTemp, Q, Z),     // (p - a).e
+            Op(kMul, 3), Dst(kTemp, Q, 0x4, true), Src(kTemp, Q, Z), Src(kConst, cD, W),                   // t = sat(/ |e|^2)
+            Op(kMad, 4), Dst(kTemp, Q, 0x3), Src(kConst, cSeg, Sw(2, 3, 2, 3)), Src(kTemp, Q, Z), Neg(Src(kTemp, Q)), // a + t e - p
+            Op(kMul, 3), Dst(kTemp, Q, 0x4), Src(kTemp, Q, X), Src(kTemp, Q, X),
+            Op(kMad, 4), Dst(kTemp, Q, 0x4), Src(kTemp, Q, Y), Src(kTemp, Q, Y), Src(kTemp, Q, Z),         // dist^2
+            Op(kMax, 3), Dst(kTemp, Q, 0x4), Src(kTemp, Q, Z), Src(kConst, cQ, X),
+            Op(kRsq, 2), Dst(kTemp, Q, 0x8), Src(kTemp, Q, Z),
+            Op(kMul, 3), Dst(kTemp, Q, 0x4), Src(kTemp, Q, Z), Src(kTemp, Q, W),                           // dist
+            Op(kMul, 3), Dst(kTemp, Q, 0x4, true), Src(kTemp, Q, Z), Src(kConst, cQ, Y),                   // s = sat(dist / reach)
+            Op(kMad, 4), Dst(kTemp, Q, 0x8), Src(kTemp, Q, Z), Src(kConst, cP, Y), Src(kConst, cP, X),      // 3 - 2 s
+            Op(kMul, 3), Dst(kTemp, Q, 0x8), Src(kTemp, Q, W), Src(kTemp, Q, Z),
+            Op(kMul, 3), Dst(kTemp, Q, 0x8), Src(kTemp, Q, W), Src(kTemp, Q, Z),                           // s^2 (3 - 2 s)
+            Op(kAdd, 3), Dst(kTemp, Q, 0x8), Neg(Src(kTemp, Q, W)), Src(kConst, cP, Z),                    // w
+            Op(kMul, 3), Dst(kTemp, Q, 0x7), Src(kConst, cD), Src(kTemp, Q, W),
+            Op(kMax, 3), Dst(kTemp, Acc, 0x7), Src(kTemp, Acc), Src(kTemp, Q),
+        };
+        v.insert(v.end(), cell.begin(), cell.end());
+    }
+    v.insert(v.end(), {Op(kMad, 4), Dst(kTemp, L, 0x7), Src(kTemp, L, W), Src(kTemp, Acc), Src(kTemp, L)});
+    return v;
+}
+
+bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) {
     out = RoomMapPatch{};
     auto ins = Parse(t);
     RoomMapRead r;
@@ -2491,11 +2853,22 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out) {
         if (k == 0) body.insert(body.end(), {Op(kMul, 3), Dst(kTemp, r.L), Src(kTemp, R), Src(kTemp, Wt, X)});
         else body.insert(body.end(), {Op(kMad, 4), Dst(kTemp, r.L), Src(kTemp, R), Src(kTemp, Wt, Sw(c, c, c, c)), Src(kTemp, r.L)});
     }
+    // (development builds, arch_ambient) the neighbours' ambient near the room's arches, right after the read (ps_3_0 only;
+    // a copy that cannot hold it is made without it)
+    std::vector<DWORD> defs = {Op(kDef, 5), Dst(kConst, cK), F(1.0f / 6.0f), F(2.0f / 3.0f), F(0.5f), F(1.0f),
+                               Op(kDef, 5), Dst(kConst, cH), F(-0.5f), F(1.5f), F(0.0f), F(0.0f)};
+    if (archAmb && ps3 && r.ambConst >= 0 && u.maxConst + 6 + 2 * static_cast<int>(kArchCells) < constLimit) {
+        const DWORD cP = cS + 4, cQ = cS + 5, cArch = cS + 6;
+        const std::vector<DWORD> code = ArchAmbientCode(r.uvType, r.uvNum, cS, cP, cQ, cArch, r.L, T, T + 1, T + 2);
+        body.insert(body.end(), code.begin(), code.end());
+        defs.insert(defs.end(), {Op(kDef, 5), Dst(kConst, cP), F(3.0f), F(-2.0f), F(1.0f), F(0.25f),
+                                 Op(kDef, 5), Dst(kConst, cQ), F(1e-8f), F(1.0f / kArchReach), F(0.0f), F(0.0f)});
+        out.archConst = static_cast<int>(cArch);
+        out.ambConst = r.ambConst;
+    }
     const Ins x = ins[static_cast<size_t>(r.texld)];
     t.erase(t.begin() + static_cast<ptrdiff_t>(x.at), t.begin() + static_cast<ptrdiff_t>(End(x))); // the game's read goes
-    Apply(t, {{1, {Op(kDef, 5), Dst(kConst, cK), F(1.0f / 6.0f), F(2.0f / 3.0f), F(0.5f), F(1.0f),
-                   Op(kDef, 5), Dst(kConst, cH), F(-0.5f), F(1.5f), F(0.0f), F(0.0f)}},
-              {x.at, body}});
+    Apply(t, {{1, defs}, {x.at, body}});
     if (!ps3) t[0] = 0xFFFF0201; // ps_2_x: more temps and instruction slots than ps_2_0, arbitrary swizzles
     out.sampler = r.S;
     out.sizeConst = cS;

@@ -78,6 +78,9 @@ check and the deadline (`kMaxMs = 20000`, `kStatusEveryMs = 100`).
   `[Recorder] Cancelled: no capture folder created` and shows "Recording cancelled. No capture was saved".
   `RequestStop` and `RequestCancel` exist in the API and are exercised by the offline check; no menu control calls them.
 
+In development builds with `release_debug_buffers` on, a recording's lines, views, notes, edits, the settings copy and
+the furniture and room tracer states are given back when it is saved or cancelled, instead of at the next start.
+
 ### `Recording.txt`
 
 Header `Apex Radiance recording: <start> to <end> (<s> s), <N> lines`, the legend, cap notices, then one line per event,

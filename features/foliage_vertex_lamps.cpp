@@ -49,11 +49,19 @@ std::vector<size_t> Operands(const std::vector<DWORD>& t, const Ins& x) {
 
 } // namespace
 
+const char* g_refusal = "";
+bool Refuse(const char* why) {
+    g_refusal = why;
+    return false;
+}
+const char* LastRefusal() { return g_refusal; }
+
 bool Patch(std::vector<uint32_t>& t, int& base) {
+    g_refusal = "";
     base = -1;
-    if (t.size() < 2 || t[0] != 0xFFFE0200u) return false; // vs_2_0 only (the captured family)
+    if (t.size() < 2 || t[0] != 0xFFFE0200u) return Refuse("not vs_2_0"); // vs_2_0 only (the captured family)
     const auto ins = Parse(t);
-    if (ins.empty()) return false;
+    if (ins.empty()) return Refuse("unreadable");
     int maxTemp = -1, maxConst = -1;
     long dirAt[3] = {-1, -1, -1}, lastPos = -1;
     DWORD addrTok = 0, normal = ~0u, world = ~0u, lampTemp = ~0u;
@@ -75,29 +83,29 @@ bool Patch(std::vector<uint32_t>& t, int& base) {
                 const DWORD c = t[o[s]], other = t[o[3 - s]];
                 if (Type(c) == kConst && (c & 0x2000u) && Num(c) >= 27 && Num(c) <= 29 && Type(other) == kTemp && !(other & 0x2000u)) {
                     const int k = static_cast<int>(Num(c)) - 27;
-                    if (dirAt[k] >= 0) return false;
+                    if (dirAt[k] >= 0) return Refuse("a lamp direction read twice");
                     dirAt[k] = static_cast<long>(n);
                     addrTok = t[o[s] + 1];
                     normal = Num(other);
-                    if (lampTemp != ~0u && lampTemp != Num(t[o[0]])) return false;
+                    if (lampTemp != ~0u && lampTemp != Num(t[o[0]])) return Refuse("lamp terms in two registers");
                     lampTemp = Num(t[o[0]]);
                     // lamp k is written to component k + 1 (y, z, w), as in every captured shader
-                    if (WMask(t[o[0]]) != (2u << k)) return false;
+                    if (WMask(t[o[0]]) != (2u << k)) return Refuse("lamp terms not in y, z, w");
                 }
             }
         }
         // dp4 oPos.c, rW, cK: the (camera-relative) world position
         if (x.op == kDp4 && Type(t[o[0]]) == kOutput && Num(t[o[0]]) == 0 && Type(t[o[1]]) == kTemp) {
-            if (world != ~0u && world != Num(t[o[1]])) return false;
+            if (world != ~0u && world != Num(t[o[1]])) return Refuse("position in two registers");
             world = Num(t[o[1]]);
             lastPos = static_cast<long>(n);
         }
     }
     for (int k = 0; k < 3; k++)
-        if (dirAt[k] < 0) return false;
-    if (world == ~0u || normal == ~0u || lampTemp == ~0u || lastPos < 0 || maxTemp < 0 || maxTemp + 6 > 11) return false; // 6 new temps
+        if (dirAt[k] < 0) return Refuse("no dp3 with c27..c29");
+    if (world == ~0u || normal == ~0u || lampTemp == ~0u || lastPos < 0 || maxTemp < 0 || maxTemp + 6 > 11) return Refuse("no position, normal or free temps"); // 6 new temps
     const long first = std::min({dirAt[0], dirAt[1], dirAt[2]}), last = std::max({dirAt[0], dirAt[1], dirAt[2]});
-    if (lastPos > first) return false; // the position is computed before the lamps
+    if (lastPos > first) return Refuse("position after the lamps"); // the position is computed before the lamps
     // The wrap on the lamp terms (PatchFoliageVs: mad rL.yzw, rL, c255.x, c255.y; max rL.yzw, rL, cZ), right after the dp3s
     long wrapMad = -1, wrapMax = -1;
     for (long i = last + 1; i < static_cast<long>(ins.size()) && (wrapMad < 0 || wrapMax < 0); i++) {
@@ -107,9 +115,9 @@ bool Patch(std::vector<uint32_t>& t, int& base) {
         const bool toLamps = !o.empty() && Type(t[o[0]]) == kTemp && Num(t[o[0]]) == lampTemp && (WMask(t[o[0]]) & 0xE);
         if (toLamps && x.op == kMad && wrapMad < 0 && WMask(t[o[0]]) == 0xE) wrapMad = i;
         else if (toLamps && x.op == kMax && wrapMad >= 0 && WMask(t[o[0]]) == 0xE) wrapMax = i;
-        else if (toLamps) return false; // something else writes the lamp terms first
+        else if (toLamps) return Refuse("lamp terms written before the wrap"); // something else writes the lamp terms first
     }
-    if (wrapMad < 0 || wrapMax < 0) return false;
+    if (wrapMad < 0 || wrapMax < 0) return Refuse("no wrap");
     // nothing reads the lamp terms between the dp3s and the wrap but the wrap
     for (long i = first; i < wrapMax; i++) {
         if (i == dirAt[0] || i == dirAt[1] || i == dirAt[2] || i == wrapMad) continue;
@@ -120,11 +128,11 @@ bool Patch(std::vector<uint32_t>& t, int& base) {
             (op == kMov || op == kAdd || op == kMul || op == kMad || op == kMin || op == kMax))
             continue;
         for (size_t k = 1; k < o.size(); k++)
-            if (Type(t[o[k]]) == kTemp && Num(t[o[k]]) == lampTemp) return false;
+            if (Type(t[o[k]]) == kTemp && Num(t[o[k]]) == lampTemp) return Refuse("lamp terms read before the wrap");
     }
     // above the per-instance arrays the shader reads relatively (c0..c80: c54 + 3 x 8 + 2), whatever its direct reads
     const DWORD B = static_cast<DWORD>(std::max(maxConst + 1, 81));
-    if (B + 82 > 254) return false;
+    if (B + 82 > 254) return Refuse("no free constants");
     // -1 and 0 from the shader's own defs, else a def at B + 82
     DWORD cM1 = ~0u, sM1 = 0, cZ = ~0u, sZ = 0;
     for (const Ins& x : ins)
@@ -253,6 +261,100 @@ bool Patch(std::vector<uint32_t>& t, int& base) {
         t.erase(t.begin() + static_cast<long>(e.at), t.begin() + static_cast<long>(e.at + e.n));
         t.insert(t.begin() + static_cast<long>(e.at), e.code.begin(), e.code.end());
     }
+    base = static_cast<int>(B);
+    return true;
+}
+
+bool PatchTreeSunShadow(std::vector<uint32_t>& t, int& base) {
+    g_refusal = "";
+    base = -1;
+    constexpr DWORD kTexture = 3, kSampler = 10, kLrp = 0x12, kTexld = 0x42, kSat = 1u << 20;
+    if (t.size() < 2 || t[0] != 0xFFFF0200u) return Refuse("not ps_2_0");
+    const auto ins = Parse(t);
+    if (ins.empty()) return Refuse("unreadable");
+    int maxTemp = -1, maxConst = -1;
+    long weightAt = -1, sunAt = -1, lastDcl = -1;
+    DWORD weightReg = ~0u;
+    size_t texDcl = 0, samplerDcl = 0;
+    for (size_t n = 0; n < ins.size(); n++) {
+        const Ins& x = ins[n];
+        if (x.op == kDef) {
+            maxConst = std::max<int>(maxConst, static_cast<int>(Num(t[x.at + 1])));
+            continue;
+        }
+        if (x.op == kDcl) {
+            lastDcl = static_cast<long>(n);
+            const DWORD r = t[x.at + 2];
+            if ((Type(r) == kTexture && (Num(r) == 5 || Num(r) == 6)) || (Type(r) == kSampler && Num(r) == 5)) return Refuse("t5, t6 or s5 already declared");
+            if (Type(r) == kTexture && Num(r) == 1 && WMask(r) == 0xF) texDcl = x.at;
+            if (Type(r) == kSampler && !samplerDcl && ((t[x.at + 1] >> 27) & 0xF) == 2) samplerDcl = x.at; // a 2D sampler's
+            continue;
+        }
+        const auto o = Operands(t, x);
+        for (size_t i : o) {
+            if (Type(t[i]) == kTemp) maxTemp = std::max<int>(maxTemp, static_cast<int>(Num(t[i])));
+            if (Type(t[i]) == kConst) maxConst = std::max<int>(maxConst, static_cast<int>(Num(t[i])));
+        }
+        // mov_sat rW.xy, t1.wzyx: the lamp 0 weight in rW.x and the sun's N.l in rW.y
+        if (x.op == kMov && o.size() == 2 && Type(t[o[0]]) == kTemp && WMask(t[o[0]]) == 0x3 && (t[o[0]] & kSat) && Type(t[o[1]]) == kTexture && Num(t[o[1]]) == 1 &&
+            ((t[o[1]] >> 16) & 0xFF) == 0x1B) {
+            if (weightAt >= 0) return Refuse("two sun weights");
+            weightAt = static_cast<long>(n), weightReg = Num(t[o[0]]);
+        }
+        // mad rS.xyz, rW.y, c0, rX: the sun's colour x its weight
+        if (x.op == kMad && weightAt >= 0 && o.size() == 4 && Type(t[o[1]]) == kTemp && Num(t[o[1]]) == weightReg && ((t[o[1]] >> 16) & 0xFF) == Y &&
+            !(t[o[1]] & 0x0F000000u) && Type(t[o[2]]) == kConst && Num(t[o[2]]) == 0 && !(t[o[2]] & 0x2000u)) {
+            if (sunAt >= 0) return Refuse("two sun terms");
+            sunAt = static_cast<long>(n);
+        }
+    }
+    if (sunAt < 0) return Refuse("no sun term (mov_sat t1.wzyx, mad .y c0)");
+    if (!texDcl || !samplerDcl || lastDcl < 0) return Refuse("no t1 or sampler declaration to copy");
+    const DWORD B = static_cast<DWORD>(maxConst + 1);
+    if (B + 4 > 31) return Refuse("no free constants");
+    if (maxTemp + 5 > 11) return Refuse("no free temps");
+    const DWORD N0 = maxTemp + 1, N1 = N0 + 1, N2 = N0 + 2, N3 = N0 + 3, N4 = N0 + 4;
+    const auto dclCopy = [&](size_t at, DWORD num) {
+        std::vector<DWORD> d = {t[at], t[at + 1], (t[at + 2] & ~0x7FFu) | num};
+        return d;
+    };
+    std::vector<DWORD> dcl;
+    for (DWORD v : dclCopy(texDcl, 5)) dcl.push_back(v);
+    for (DWORD v : dclCopy(texDcl, 6)) dcl.push_back(v);
+    for (DWORD v : dclCopy(samplerDcl, 5)) dcl.push_back(v);
+    std::vector<DWORD> c;
+    const auto I = [&](DWORD op, std::initializer_list<DWORD> ops, DWORD ctrl = 0) {
+        c.push_back(Op(op, static_cast<DWORD>(ops.size())) | (ctrl << 16));
+        for (DWORD v : ops) c.push_back(v);
+    };
+    const DWORD t5 = Src(kTexture, 5), s5 = Src(kSampler, 5);
+    // four taps half a texel around the shadow position (c[B] = (o, -o, -bias, 0)), hardware compare (texldp on the depth map)
+    // (as the game's own shadowed tree shader: a texldp never writes the register it reads its position from; ps_2_0
+    // allows no arbitrary swizzle, so each tap has its own constant)
+    I(kAdd, {Dst(kTemp, N0), t5, Src(kConst, B)});      // (-o, -o)
+    I(kAdd, {Dst(kTemp, N1), t5, Src(kConst, B + 1)});  // (+o, -o)
+    I(kTexld, {Dst(kTemp, N2), Src(kTemp, N0), s5}, 1); // texldp
+    I(kTexld, {Dst(kTemp, N3), Src(kTemp, N1), s5}, 1);
+    I(kAdd, {Dst(kTemp, N0), t5, Src(kConst, B + 2)});  // (-o, +o)
+    I(kAdd, {Dst(kTemp, N1), t5, Src(kConst, B + 3)});  // (+o, +o)
+    I(kTexld, {Dst(kTemp, N4), Src(kTemp, N0), s5}, 1);
+    I(kTexld, {Dst(kTemp, N0), Src(kTemp, N1), s5}, 1);
+    I(kAdd, {Dst(kTemp, N2, 0x1), Src(kTemp, N2, X), Src(kTemp, N3, X)});
+    I(kAdd, {Dst(kTemp, N2, 0x1), Src(kTemp, N2, X), Src(kTemp, N4, X)});
+    I(kAdd, {Dst(kTemp, N2, 0x1), Src(kTemp, N2, X), Src(kTemp, N0, X)});
+    // c[B + 4] = (1/4, 1, 1 - floor, floor): the average, faded to 1 at the shadow map's edge (t6.x), above the crown's floor
+    I(kMul, {Dst(kTemp, N2, 0x1), Src(kTemp, N2, X), Src(kConst, B + 4, X)});
+    I(kLrp, {Dst(kTemp, N1, 0x1), Src(kTexture, 6, X), Src(kConst, B + 4, Y), Src(kTemp, N2, X)}); // (lrp: dst not a source)
+    I(kMad, {Dst(kTemp, N0, 0x1), Src(kTemp, N1, X), Src(kConst, B + 4, Z), Src(kConst, B + 4, W)});
+    I(kMul, {Dst(kTemp, N4, 0x1), Src(kTemp, weightReg, Y), Src(kTemp, N0, X)});
+    // the sun term reads the shadowed weight
+    const Ins& sun = ins[sunAt];
+    const size_t src0 = sun.at + 2;
+    t[src0] = Src(kTemp, N4, X) | (t[src0] & 0x0F000000u);
+    // insert (from the back so the indices stay valid): the code before the sun term, the declarations after the last one
+    t.insert(t.begin() + static_cast<long>(sun.at), c.begin(), c.end());
+    const Ins& d = ins[lastDcl];
+    t.insert(t.begin() + static_cast<long>(d.at + d.len + 1), dcl.begin(), dcl.end());
     base = static_cast<int>(B);
     return true;
 }

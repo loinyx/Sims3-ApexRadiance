@@ -38,7 +38,6 @@ bool SteamBytes() {
 } // namespace
 
 void Install() {
-    if (!DevSwitches::kCompiled) return;
     const bool trim = DevSwitches::AllocatorTrim(), topDown = DevSwitches::AllocatorTopDown();
     if (!trim && !topDown) return;
     if (!SteamBytes()) {

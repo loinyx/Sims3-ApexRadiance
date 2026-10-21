@@ -114,6 +114,8 @@
     <ClCompile Include="features\address_space.cpp" />
     <ClCompile Include="features\va_ledger.cpp" />
     <ClCompile Include="features\dev_switches.cpp" />
+    <ClCompile Include="features\apex_memory.cpp" />
+    <ClCompile Include="features\daylight_probe.cpp" />
     <ClCompile Include="features\game_alloc_categories.cpp" />
     <ClCompile Include="features\allocator_tuning.cpp" />
     <ClCompile Include="features\foliage_vertex_lamps.cpp" />
@@ -243,6 +245,10 @@
     <ClInclude Include="features\address_space.h" />
     <ClInclude Include="features\va_ledger.h" />
     <ClInclude Include="features\dev_switches.h" />
+    <ClInclude Include="features\apex_memory.h" />
+    <ClInclude Include="features\daylight_probe.h" />
+    <ClInclude Include="features\arch_ambient.h" />
+    <ClInclude Include="features\liveness_prune.h" />
     <ClInclude Include="features\game_alloc_categories.h" />
     <ClInclude Include="features\allocator_tuning.h" />
     <ClInclude Include="features\foliage_vertex_lamps.h" />

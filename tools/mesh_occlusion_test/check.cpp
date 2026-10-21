@@ -93,7 +93,8 @@ void Collect(IDirect3DDevice9* dev,bool gap,bool index32=false,bool badIndex=fal
 int main(int argc,char** argv){
     if(argc<3)return 2;
     // Built with /DAPEX_DEVELOPMENT_BUILD_FLAVOR the development switches are on: the same checks then cover their paths.
-    if constexpr(DevSwitches::kCompiled){DevSwitches::drawReadsNoWait=true;DevSwitches::occlusionRelight=true;}
+    // steady_indoor_light (on in the public build) turns the collector off; the development build turns it off to cover the collector.
+    if constexpr(DevSwitches::kCompiled){DevSwitches::drawReadsNoWait=true;DevSwitches::occlusionRelight=true;DevSwitches::steadyIndoorLight=false;}
     std::vector<MeshBudget::Entry> entries={{1,4093,.001},{2,4093,.001}};
     std::vector<uint64_t> victims;
     Check(MeshBudget::Plan(entries,8186,1088,.1,8192,128,victims)&&victims==std::vector<uint64_t>{1},"captured 1088-triangle draw can replace lower coverage at 8186 occupancy");
@@ -121,10 +122,23 @@ int main(int argc,char** argv){
     ComPtr<IDirect3DPixelShader9> opaque,cutout;auto code=ReadShader(argv[1]);auto alpha=ReadShader(argv[2]);
     Check(SUCCEEDED(gpu.dev->CreatePixelShader(code.data(),opaque.GetAddressOf())),"captured opaque shader");
     Check(SUCCEEDED(gpu.dev->CreatePixelShader(alpha.data(),cutout.GetAddressOf())),"captured cutout shader");
+    if(DevSwitches::SteadyIndoorLight()){
+        // no indoor pass reads the mesh set: nothing is read in the draw hooks and nothing is published
+        PumpSolidMeshes();PumpSolidMeshes();
+        Check(g_solidReadBudget==0&&g_solidGroups.empty()&&g_solidTriangles==0&&!snapshot.load(),"steady_indoor_light: no buffer reads, no mesh set");
+    }else{
     g_curPs=opaque.Get();Collect(gpu.dev,false);Collect(gpu.dev,true);Collect(gpu.dev,true,true);Collect(gpu.dev,false,false,true);Collect(gpu.dev,false,false,false,true);
     Collect(gpu.dev,false,false,false,false,false,true);Collect(gpu.dev,true,false,false,false,true,true);
     Collect(gpu.dev,true,false,false,false,true,true,true);
     Collect(gpu.dev,true,false,false,false,true,true,true,true);
     g_curPs=cutout.Get();Collect(gpu.dev,false);g_curPs=nullptr;
+    if constexpr(DevSwitches::kCompiled){ // switched on: the set is dropped once and the reads stop
+
+        DevSwitches::steadyIndoorLight=true;PumpSolidMeshes();PumpSolidMeshes();
+        Check(g_solidReadBudget==0&&g_solidGroups.empty()&&g_solidLastPublished.empty()&&!snapshot.load(),"steady_indoor_light switched on: mesh set dropped, no reads");
+        DevSwitches::steadyIndoorLight=false;PumpSolidMeshes();
+        Check(g_solidReadBudget==1,"steady_indoor_light switched off: discovery starts over");
+    }
+    }
     std::printf("Mesh occlusion: %d checks, %d failures\n",g_checks,g_failures);return g_failures?1:0;
 }

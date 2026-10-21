@@ -22,12 +22,23 @@ It must:
 | [`tools/room_structure_test/run.ps1`](../../tools/room_structure_test/run.ps1) (`check.cpp`) | Extracts `NoteRoomStructure`: a new room schedules a refresh, LOD or repeated gathers do not, roof and wall changes do, repeated changes coalesce | `run.ps1` | MSVC x86 |
 | [`tools/roofed_openings_test/run.ps1`](../../tools/roofed_openings_test/run.ps1) (`check.cpp`) | Extracts the story grid, its ray walk (`GridPassImpl`) and the roofed rooms' doors (`RoofedDoors`, `DoorSig`, `DoorSeen`) and runs them on synthetic grids: a roofed room with a two-cell arch, a lamp in front sees it, one behind or beside does not; the lit floor patch through the arch is bounded by the jambs with no seam between the cells; a ray over the wall's top meets the room's roof; a closed room has no door and stays dark; a window's sill; an arch into another roofed room is no door, into a roofless room it is; the signature follows the doors | `run.ps1` | MSVC x86 |
 | [`tools/room_ambient_test`](../../tools/room_ambient_test/README.md) (`room_ambient_test.cpp`) | Room ambient and scheduling policy (`room_ambient_policy.h`): group deadlines, first dispatch, overdue updates, tick wrap, window recheck timing (0 / 2 s / 6 s, bounded, wrap), lamp refresh delay (120 / 200 ms), safety-net gap (2 s / 500 ms), edit urgency (8 s cap) and edit hold decision, gather ordering, floor priority, structure and floor-edit timing | `run.ps1` | MSVC x86 |
+| `tools/mesh_occlusion_test/` | The retired mesh blockers' collector, BVH and replacement policy, in the standard and development configurations | `run.ps1 -OpaqueShader <ps.bin> -CutoutShader <ps.bin> -Standard` or `-Development` | MSVC x86, two captured pixel shaders |
+| `tools/liveness_prune_test/` | `liveness_prune.h`: an entry survives one miss and is erased after two sweeps in a row without its key; key 0 is never live | `run.ps1` | MSVC x86 |
 | [`tools/basis_test/basis_test.cpp`](../../tools/basis_test/basis_test.cpp) | `PatchBasisSmooth` / `PatchIndoorBasis` on a captured pixel shader, disassembled with d3dcompiler_47 | `basis_test <ps.bin> [lmSampler]` | d3dcompiler_47, a captured shader |
 
 These harnesses do not validate the game's room topology, lamp falloff, visual convergence or performance. They read
 only the repository and print to the console.
 
 ## Latest results
+
+| Date | Commit | Harness | Result | Backend |
+|---|---|---|---|---|
+| 2026-10-20 | Working tree on `c22e8d7` | `tools/mesh_occlusion_test/` | Standard: 20,017 checks passed; development: 20,119 checks passed | None |
+| 2026-10-20 | Working tree on `c22e8d7` | `tools/liveness_prune_test/` | 27 checks passed | None (pure) |
+| 2026-10-20 | Working tree on `c22e8d7` | `tools/roofed_openings_test/` | 196 checks passed, including the stairwell veto, floor-level sill, hard wall top and arch cone cases | None (pure) |
+| 2026-10-20 | Working tree on `c22e8d7` | `tools/room_structure_test/` | 11 checks passed | None |
+
+The mesh blockers are no longer tested by shipped indoor light; the results below describe the collector itself.
 
 2026-10-19, public test 11 candidate: a read-only test 10 snapshot contains 23 groups and 8186 triangles, mainly narrow
 fence/post batches. The earlier captured stair draw has 136 primitives and eight instances (1088 triangles), which
@@ -179,6 +190,12 @@ topology mutation inside a point is not reproduced. This release does not promis
 
 ## Open checks
 
+- 2.14.0: indoor light through openings and between stories with the mesh blockers retired: no periodic room
+  invalidations in a recording while the camera moves, and no hard tread shadow under stairs.
+- 2.14.0, Instant (GPU): place or move an outdoor lamp on a multi-story house. **Expected:** every story takes its
+  light, including stories whose light list did not hold the new lamp yet ([rt-outdoor-lamps.md](../features/night-lighting/rt-outdoor-lamps.md)).
+- 2.14.0: the lamp-visibility memo and the liveness pruning in a long session (lots streaming in and out, world
+  changes), with no change of light.
 - 2.13.0 build, in game: outdoor light through openings (lot `B1280029950F0CA0`, story 0, the colonnade's room 48
   and the garden post in front of its arches), developer mode:
   - the log has `[RoofedLamps] Room solve: story 0 room 48: N outdoor lights through its openings: L...` with the post

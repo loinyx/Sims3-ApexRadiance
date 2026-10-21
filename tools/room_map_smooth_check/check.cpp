@@ -20,6 +20,7 @@
 #include <d3dcompiler.h>
 #include "../../features/shader_patches.h"
 #include "../../features/room_map_dither.h"
+#include "../../features/arch_ambient.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -224,7 +225,7 @@ std::vector<DWORD> Compile(const char* src, const char* profile) {
 }
 
 struct PatchStats {
-    int matched = 0, patched = 0, disasmOk = 0, created = 0, capsRefused = 0, texldOk = 0, combined = 0, combinedCreated = 0;
+    int matched = 0, patched = 0, disasmOk = 0, created = 0, capsRefused = 0, texldOk = 0, combined = 0, combinedCreated = 0, arch = 0, archCreated = 0;
 };
 // one match: patch it and check the copy
 void CheckPatch(const std::vector<DWORD>& code, Gpu& gpu, PatchStats& st, const char* where) {
@@ -259,6 +260,29 @@ void CheckPatch(const std::vector<DWORD>& code, Gpu& gpu, PatchStats& st, const 
             const bool made = gpu.AcceptsPs(both);
             st.combinedCreated += made;
             Check(made, "native D3D9 creates the combined copy");
+        }
+    }
+    // (arch_ambient) the copy with the neighbours' ambient near arches, alone and with the basis maps: native too (ps_3_0)
+    if (code[0] == 0xFFFF0300 && gpu.dev) {
+        std::vector<DWORD> a = code;
+        ShaderPatches::RoomMapPatch ap;
+        if (ShaderPatches::PatchRoomMapSmooth(a, ap, true) && ap.archConst >= 0) {
+            st.arch++;
+            const bool made = gpu.AcceptsPs(a);
+            st.archCreated += made;
+            Check(made, "native D3D9 creates the copy with the arch ambient");
+        }
+        int bs[4];
+        if (ShaderPatches::BasisSamplers(code, bs)) {
+            std::vector<DWORD> both = code;
+            ShaderPatches::BasisSmoothPatch bp;
+            ShaderPatches::RoomMapPatch rp;
+            if (ShaderPatches::PatchBasisSmooth(both, bp, {.preserveShadows = true}) && ShaderPatches::PatchRoomMapSmooth(both, rp, true) && rp.archConst >= 0) {
+                st.arch++;
+                const bool made = gpu.AcceptsPs(both);
+                st.archCreated += made;
+                Check(made, "native D3D9 creates the combined copy with the arch ambient");
+            }
         }
     }
     if (gpu.dev) {
@@ -389,6 +413,89 @@ void PixelCheck(Gpu& gpu) {
     Release(ps);
 }
 
+// The arch ambient (arch_ambient): a floor map of 64 x 64 texels = 16 x 16 m, black with full ambient weight, the room's
+// ambient 0.1 grey, an arch on the line x = 8 m whose room's ambient is 0.2 more red: the GPU adds alpha x 0.2 x w(d) to red,
+// w the CPU's ArchAmbient::Weight, and nothing to green and blue
+void ArchPixelCheck(Gpu& gpu) {
+    if (!gpu.dev) return;
+    // the game's pattern in ps_3_0 (the HLSL compiler writes that mad straight to oC0): assembled
+    const char* asmSrc = "ps_3_0\ndcl_texcoord1 v0.xy\ndcl_2d s0\ntexld r0, v0, s0\nmad r0.xyz, r0.w, c0, r0\nmov oC0, r0\n";
+    std::vector<DWORD> code;
+    {
+        using Assemble = HRESULT(WINAPI*)(LPCVOID, SIZE_T, LPCSTR, const D3D_SHADER_MACRO*, ID3DInclude*, UINT, ID3DBlob**, ID3DBlob**);
+        const auto lib = LoadLibraryW(L"d3dcompiler_47.dll");
+        const auto assemble = lib ? reinterpret_cast<Assemble>(GetProcAddress(lib, "D3DAssemble")) : nullptr;
+        ID3DBlob *blob = nullptr, *err = nullptr;
+        if (assemble && SUCCEEDED(assemble(asmSrc, std::strlen(asmSrc), nullptr, nullptr, nullptr, 0, &blob, &err)) && blob) {
+            code.resize(blob->GetBufferSize() / 4);
+            std::memcpy(code.data(), blob->GetBufferPointer(), blob->GetBufferSize());
+        }
+        Release(blob);
+        Release(err);
+        if (lib) FreeLibrary(lib);
+    }
+    std::vector<DWORD> t = code;
+    ShaderPatches::RoomMapPatch p;
+    if (code.empty() || !ShaderPatches::PatchRoomMapSmooth(t, p, true) || p.archConst < 0 || p.ambConst != 0) {
+        Check(false, "the synthetic ps_3_0 shader is patched with the arch ambient (cA = c0)");
+        std::printf("  (archConst %d, ambConst %d)\n%s\n", p.archConst, p.ambConst, Disasm(code).c_str());
+        return;
+    }
+    IDirect3DPixelShader9* ps = nullptr;
+    Check(SUCCEEDED(gpu.dev->CreatePixelShader(t.data(), &ps)), "the arch copy is created");
+    IDirect3DTexture9* tex = nullptr;
+    gpu.dev->CreateTexture(64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, nullptr);
+    if (!ps || !tex) {
+        Release(ps);
+        Release(tex);
+        return;
+    }
+    D3DLOCKED_RECT lr{};
+    if (SUCCEEDED(tex->LockRect(0, &lr, nullptr, 0))) {
+        for (int y = 0; y < 64; y++)
+            for (int x = 0; x < 64; x++) reinterpret_cast<DWORD*>(static_cast<char*>(lr.pBits) + y * lr.Pitch)[x] = 0xFF000000u;
+        tex->UnlockRect(0);
+    }
+    gpu.dev->SetTexture(p.sampler, tex);
+    gpu.dev->SetSamplerState(p.sampler, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+    gpu.dev->SetSamplerState(p.sampler, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+    gpu.dev->SetSamplerState(p.sampler, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+    gpu.dev->SetSamplerState(p.sampler, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+    const float amb[4] = {0.1f, 0.1f, 0.1f, 0.0f}, size[4] = {64, 64, 1.0f / 64, 1.0f / 64}, band[4] = {1.0f / 65536, 65536, 0.5f, 65535};
+    gpu.dev->SetPixelShaderConstantF(0, amb, 1);
+    gpu.dev->SetPixelShaderConstantF(p.sizeConst, size, 1);
+    gpu.dev->SetPixelShaderConstantF(p.bandConst, band, 1);
+    float arch[2 * ShaderPatches::kArchCells * 4] = {};
+    // the arch from (8, 2) to (8, 14): seg (a.x, a.z, e.x, e.z), D (0.2, 0, 0, 1 / |e|^2)
+    arch[0] = 8.0f, arch[1] = 2.0f, arch[2] = 0.0f, arch[3] = 12.0f;
+    arch[4] = 0.2f, arch[5] = 0.0f, arch[6] = 0.0f, arch[7] = 1.0f / 144.0f;
+    gpu.dev->SetPixelShaderConstantF(static_cast<UINT>(p.archConst), arch, 2 * ShaderPatches::kArchCells);
+    const std::vector<DWORD> px = gpu.Render(ps);
+    int worst = 0, gb = 0;
+    for (int y = 0; y < 64; y++)
+        for (int x = 0; x < 64; x++) {
+            const float lx = (x + 0.5f) / 64.0f * 16.0f, lz = (y + 0.5f) / 64.0f * 16.0f;
+            const float w = ArchAmbient::Weight(ArchAmbient::SegDist(lx, lz, 8.0f, 2.0f, 8.0f, 14.0f));
+            const float ref = (0.1f + 0.2f * w) * 255.0f;
+            const DWORD v = px[static_cast<size_t>(y) * 64 + x];
+            worst = std::max(worst, static_cast<int>(std::lround(std::fabs(static_cast<float>((v >> 16) & 0xFF) - ref))));
+            gb = std::max({gb, std::abs(static_cast<int>((v >> 8) & 0xFF) - 26), std::abs(static_cast<int>(v & 0xFF) - 26)});
+        }
+    std::printf("  arch ambient pixel check: red against the CPU law %d LSB, green and blue off the room's own %d LSB\n", worst, gb);
+    Check(worst <= 2, "GPU arch ambient = CPU law (2 LSB)");
+    Check(gb <= 1, "only the channel the neighbour has more of is raised");
+    // nothing passed (all D = 0): the room's own ambient alone
+    std::fill(std::begin(arch), std::end(arch), 0.0f);
+    gpu.dev->SetPixelShaderConstantF(static_cast<UINT>(p.archConst), arch, 2 * ShaderPatches::kArchCells);
+    const std::vector<DWORD> none = gpu.Render(ps);
+    int off = 0;
+    for (DWORD v : none) off = std::max({off, std::abs(static_cast<int>((v >> 16) & 0xFF) - 26), std::abs(static_cast<int>((v >> 8) & 0xFF) - 26)});
+    Check(off <= 1, "no arch passed: the room's own ambient, unchanged");
+    gpu.dev->SetTexture(p.sampler, nullptr);
+    Release(tex);
+    Release(ps);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -454,6 +561,8 @@ int main(int argc, char** argv) {
     std::printf("Precomp: %d pixel shaders, %d match (%d patched, %d disassemble, %d with 4 taps, %d created natively, %d left to the game by the caps)\n", total, st.matched,
                 st.patched, st.disasmOk, st.texldOk, st.created, st.capsRefused);
     std::printf("  with the basis maps too: %d (both reads in one copy, %d created natively)\n", st.combined, st.combinedCreated);
+    std::printf("  with the arch ambient (ps_3_0): %d copies, %d created natively\n", st.arch, st.archCreated);
+    Check(st.arch > 0 && st.arch == st.archCreated, "every copy with the arch ambient is created natively");
     for (const auto& [n, c] : perTech) std::printf("  %-38s %3d of %3d\n", n.c_str(), c.first, c.second);
     Check(outside == 0, "no match outside the room-lit techniques");
     Check(perTech["InteriorWall"].first == perTech["InteriorWall"].second && perTech["InteriorWall"].second > 0, "every InteriorWall shader matches");
@@ -482,6 +591,7 @@ int main(int argc, char** argv) {
     Check(other == 0, "no paired vertex shader has another defined uv scale");
     // 4: pixels
     PixelCheck(gpu);
+    ArchPixelCheck(gpu);
     // 5: captures
     std::set<std::vector<DWORD>> seen;
     int capPs = 0, capMatched = 0;

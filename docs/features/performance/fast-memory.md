@@ -9,7 +9,7 @@ big blocks back to Windows in the background. Nothing the game allocates changes
 
 | | |
 |---|---|
-| Availability | Released in 2.4.0; on by default since 2.5.5 |
+| Availability | Released in 2.4.0; on by default since 2.5.5. Allocator trim and top-down large blocks: Released in 2.14.0 |
 | Default | On |
 | Menu | System > Performance > Memory handling > *Faster memory handling* |
 | Configuration | `[patches.FastMemory]` in `ApexRadiance.toml` |
@@ -36,6 +36,20 @@ allocator lock is held, so every other allocating thread waits for that system c
 The allocator's state and every value it reads are the same; the spin only changes how long a waiting thread spins
 before it sleeps, and the address range of a freed big block goes back to Windows microseconds later.
 
+### Allocator trim and top-down large blocks
+
+Two further changes to the same allocator have no setting and are on in every game session on Steam 1.67.2
+(`features/allocator_tuning.cpp`), independently of *Faster memory handling*:
+
+- **Trim.** Every 60 s and before every world save, Apex calls the allocator's own trim (`0x004E4F90`, thiscall
+  `(allocator, pad)`), which decommits the free tops of its cores while keeping a 1 MB pad each (the allocator's own
+  pad is 64 KB), so fewer pages are committed again soon after.
+- **Top-down large blocks.** The allocator's flag at `+0x498` is set to 1, so its large blocks are reserved from the top
+  of the address space, away from the smaller allocations at the bottom.
+
+Both require the Steam image base `0x00400000` and the trim's prologue bytes `83 EC 10 53 55 56 8B E9`; otherwise the
+log says *Not the Steam 1.67.2 allocator: off*. The log lists the first trims and any trim that freed 1 MB or more.
+
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
@@ -58,6 +72,9 @@ before it sleeps, and the address range of a freed big block goes back to Window
 - When the queue is full (32 entries), when stopping, or for anything other than a plain release, `VirtualFree` runs on
   the calling thread as before.
 - If exactly five `VirtualAlloc` calls are not found next to the release call, the feature stays off.
+- The allocator trim and top-down blocks are not measured in game. In one development session every trim freed 0 MB,
+  because the game already returns the tops of its cores when it frees them.
+- The allocator trim and top-down blocks cannot be switched off from the menu.
 
 ## Technical reference
 
@@ -98,7 +115,8 @@ A/B with the Frame Profiler's sampling run: the "system code called from" rows 0
 
 ## Rejected approaches
 
-None recorded.
+None recorded. The trim freed nothing in one development session; it is kept until measured in game
+([history](../../history/performance-fast-memory.md)).
 
 ## See also
 

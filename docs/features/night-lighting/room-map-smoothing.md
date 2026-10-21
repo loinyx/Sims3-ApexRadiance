@@ -94,6 +94,12 @@ unverified in game.
 | Vertex shaders | `mul o<TEXCOORD1>.xy, v#, cK.c`: 1/4096 wall atlas, 1/32767 floor maps | `shader_patches.cpp` `RoomMapUvScale` |
 | Wall blocks | `wall + cls*0x20 + 0x58` `{x0, y0, x1, y1}`; `y0 % rows` checked for every piece laid out | `level_light_share.cpp` `NoteWallBand` |
 
+**Arch variant.** Floor copies also come in a variant that adds the neighbour's ambient near arches
+([arches.md](arches.md)): up to 6 segments (`kArchCells`), each two constant rows (a.x, a.z, e.x, e.z) and
+(D.rgb, 1 / |e|^2), placed after the smoothing constants. When a floor also reads the directional maps and the variant
+with the wall mask does not fit the registers, the combined variant without the mask is used, never one that drops the
+room map's smoothing.
+
 Cost: the reads add about 45 ALU and 3 texture instructions per room-lit pixel; the dither one call per texel solved; the
 soft cut a list walk per solved point and a multiply per lamp kept.
 
@@ -109,3 +115,4 @@ soft cut a list walk per solved point and a multiply per lamp kept.
 - [Validation](../../validation/night-lighting-room-map-smoothing.md)
 - [History](../../history/night-lighting-room-map-smoothing.md)
 - [Room light maps](../../engine/room-light-maps.md)
+- [Light through arches and doorways](arches.md), [Stairs on the directional maps](stairs.md)

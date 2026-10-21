@@ -145,7 +145,7 @@ struct Record {
     std::vector<BatchRec> batches;
     std::vector<LampRec> lamps;
     std::vector<BlockRec> blocks;
-    std::vector<uint32_t> preblur;
+    std::vector<uint32_t, ApexMem::HighAllocator<uint32_t>> preblur;
     std::vector<DrawnSum, ApexMem::HighAllocator<DrawnSum>> drawnSum; // by texel, while lamps are collapsed (else empty)
     DWORD used = 0;
     size_t bytes = 0;
@@ -161,6 +161,32 @@ size_t BytesOf(const Record& r) {
                r.blocks.capacity() * sizeof(BlockRec) + r.preblur.capacity() * 4 + r.drawnSum.capacity() * sizeof(DrawnSum);
     for (const LampRec& l : r.lamps) b += sizeof(LampRec) + l.parts.capacity() * sizeof(Contrib);
     return b;
+}
+// A record's buffers at their exact size (BytesOf counts capacity, and growth leaves up to half a buffer unused). A buffer
+// HighAllocator keeps above 2 GB stays where it is when its exact size would fall under kHighFrom: it would move to the heap
+// below 2 GB, which the game's saves need.
+template <class T> bool WouldLeaveHigh(const std::vector<T, ApexMem::HighAllocator<T>>& v, size_t n) {
+    return v.capacity() * sizeof(T) >= ApexMem::kHighFrom && n * sizeof(T) < ApexMem::kHighFrom;
+}
+template <class T> bool WouldLeaveHigh(const std::vector<T>&, size_t) { return false; }
+template <class V> void ShrinkExact(V& v) noexcept {
+    if (v.capacity() == v.size() || WouldLeaveHigh(v, v.size())) return;
+    try {
+        v.shrink_to_fit();
+    } catch (...) {
+        // (no memory for the exact copy: the buffer stays as it is)
+    }
+}
+// A new solve's record before it is kept: every buffer but the drawn lamps' parts, which CollapseDrawn weighs by their
+// capacity first (ShrinkDrawnParts after it)
+void ShrinkRecord(Record& r) {
+    ShrinkExact(r.samples), ShrinkExact(r.texels), ShrinkExact(r.batches), ShrinkExact(r.blocks), ShrinkExact(r.preblur);
+    for (LampRec& l : r.lamps)
+        if (!l.drawn) ShrinkExact(l.parts);
+}
+void ShrinkDrawnParts(Record& r) {
+    for (LampRec& l : r.lamps)
+        if (l.drawn) ShrinkExact(l.parts);
 }
 // (14/10) The drawn lamps' parts of a room Real-time outdoor lamps relights, as one sum per texel: the GPU draws those lamps
 // and reads only the base (the sum less them), and a delta of only such lamps changes nothing kept (RtOutdoorLamps covers the
@@ -858,7 +884,12 @@ Delta ComputeDelta(BYTE* room, const RoomRead& rr, Record& r, const char*& why, 
             l->light = c.light;
             l->drawn = DrawnLight(c.light, r.lot);
         }
-        l->parts.assign(fresh[ci].begin(), fresh[ci].end());
+        // at its exact size (assign keeps a larger buffer, or grows by half), unless that moves it under 2 GB (ShrinkExact)
+        if (WouldLeaveHigh(l->parts, fresh[ci].size())) l->parts.assign(fresh[ci].begin(), fresh[ci].end());
+        else {
+            decltype(l->parts) exact(fresh[ci].begin(), fresh[ci].end());
+            l->parts.swap(exact);
+        }
         std::vector<OutdoorDeltaModel::Contrib>().swap(fresh[ci]);
         l->mult = c.mult;
         l->sig = c.now.sig;
@@ -1549,6 +1580,7 @@ void SolveEnd(unsigned char* room) {
         r.version = g_version.fetch_add(1, std::memory_order_relaxed) + 1;
         r.baseVersion = r.version;
         if (RtOutdoorLamps::Watching()) r.baseHash = BaseHash(r);
+        ShrinkRecord(r); // (outside g_mx: the copies take a while on a large room)
         const uint64_t key = KeyOf(room, r.cls);
         const int story = r.story, cls = r.cls;
         {
@@ -1558,6 +1590,7 @@ void SolveEnd(unsigned char* room) {
             const bool pinnedNew = PinnedLocked(reinterpret_cast<uintptr_t>(room));
             const size_t drawnBefore = PartsBytes(r, true);
             if (pinnedNew && RtOutdoorLamps::Watching()) CollapseDrawn(r);
+            ShrinkDrawnParts(r); // (the collapsed ones are empty)
             r.bytes = BytesOf(r);
             {
                 // the same base as the room's last kept solve: its version stays (the relit maps stand)
@@ -2007,7 +2040,7 @@ bool ExportRoom0(const void* room, int cls, Room0Export& out) {
             }
         }
         for (const BlockRec& b : r.blocks) out.blocks.push_back(Room0Export::Block{b.x0, b.y0, b.x1, b.y1, b.ok, b.off});
-        out.preblur = r.preblur;
+        out.preblur.assign(r.preblur.begin(), r.preblur.end());
     } catch (...) {
         out = Room0Export{};
         return false;

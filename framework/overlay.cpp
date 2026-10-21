@@ -12,6 +12,7 @@
 #include "build_flavor.h"
 #include "frame_pacing.h"
 #include "world_session.h"
+#include "apex_memory.h"
 #include <atomic>
 #include <cmath>
 #include <format>
@@ -206,6 +207,8 @@ void Init(IDirect3DDevice9* device, HWND window) {
     if (g_ready.load() || !device || !window) return;
     std::lock_guard<std::mutex> lock(g_imguiLock);
     IMGUI_CHECKVERSION();
+    // development builds (memory_owners): the menu's and fonts' memory counted apart (every ImGui block goes through these)
+    if constexpr (DevSwitches::kCompiled) ImGui::SetAllocatorFunctions(&ApexMemory::ImGuiAlloc, &ApexMemory::ImGuiFree, nullptr);
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = ApexPaths::ImGuiIniFileUtf8(); // never the default imgui.ini in Game\Bin (S3SS's)

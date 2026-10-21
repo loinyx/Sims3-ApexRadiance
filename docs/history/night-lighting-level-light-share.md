@@ -708,3 +708,21 @@ the ground; a joint or a corner keeps the shadow whole and the base stays hard. 
 tests per texel, no frame cost beyond the slice budget). Offline: the edge 3 m behind a free end is 0.32 m wide (10-90%)
 instead of hard, monotonic, no light through a joint (`tools/roofed_openings_test`). Developer Tester switch *Soft ground
 shade*. Not yet checked in game.
+
+### 2026-10-20: mesh blockers retired from indoor light
+
+**Context:** in the 2.14.0 development builds the arch seam came back a few seconds after it looked right, and stairs
+changed colour by themselves. A recording showed every room of the lots solved again every one to two seconds (504
+invalidations in 13 s) with no lamp change.
+
+**Finding:** the opaque mesh set collected from the screen followed the camera: its budget is by on-screen coverage, and
+each of its 54 publications relit every room near an opening. Its test was hard, so a stair cut the light where it
+entered the set and stopped cutting when it left. The sample points of the stair's tiles (0.5 m and 2.0 m over the
+floor) also lie under the stair's own treads, which blocked a sconce above.
+
+**Outcome:** indoor light through openings and between stories no longer tests the set, and its publications relight
+nothing (`steady_indoor_light`, shipped on in 2.14.0). With that behaviour the draw hooks read no mesh buffers and the
+set is dropped once. After each lamp edit the rooms near openings are sent again once, after the lamps have been still
+for 400 ms, which restores an update of the story below that the periodic relight had been providing by accident.
+The hard shadow of stair treads is lost. Details of the arch side are in
+[night-lighting-arches.md](night-lighting-arches.md).

@@ -32,6 +32,14 @@ Every release is reviewed on its exact commit before publication.
 - `docs/releases/<version>.md` follows [releases/README.md](releases/README.md) and is added to its index; released
   features are marked "Released in <version>" in their Status tables and in [README.md](README.md).
 
+### Promoting a development switch
+
+Before tagging, list every use of `DevSwitches::` in the release diff and record a decision for each switch in the
+release PR: shipped on (`kShipped`), kept developer-only, or removed. A shipped switch needs its feature page to
+describe it (with "No setting" in the Settings table when it has no menu option), its validation page to list its
+open checks, and its known blockers either settled or stated in the release notes' known limitations. The table of
+switches in [workflow.md](workflow.md#development-switches-dev_build) is updated in the same change.
+
 ## 3. In-game What's new
 
 The changelog opened from the version in the menu footer (`apex_changelog.cpp`):

@@ -325,6 +325,28 @@ solve).
 - The planned per-pixel wall/floor lamp term (the per-pixel plan, "Design A") was never implemented; its facts (threshold,
   blur, matrix, constants) are recorded above.
 
+### Normalisation, solve end and map sets (2.14.0 findings)
+
+- **Normalisation.** `0x006A0230` sets `room+0x160` from the brightest of the room's samples and lamps. A lamp of
+  another story that the room borrows counts at full strength (1.0) even when the slab blocks almost all of its light,
+  so a room lit only from another story is not adapted (observed in F8 records of the 2.14.0 development builds).
+- **When it is set.** `room+0x160` is written at the end of the solve; samples taken during the solve read the value of
+  the previous one. Light imported from another room scaled by source over receiver therefore depends on the order of
+  solves unless the receiver's last value is kept ([arches.md](../features/night-lighting/arches.md)).
+- **Solve end.** `0x006A0E00` (`FinalizePrime`) is called at `0x006A3E65`; Apex's end-of-solve hook there runs the room
+  fill check and the outdoor delta.
+- **Inside the batch solve.** `this` (the room) is in `ebx` from `0x006A31E8`; the sample list (0x30-byte entries) is
+  at `[ebp+8]` and the current sample's offset at `[esp+0Ch]` (read in the native disassembly).
+- **Floor switch.** When the camera changes stories, the game invalidates rooms from the caller `0x006C7451` and solves
+  the shown story again at class 2 (the most detailed).
+- **Map sets.** A manager's room light maps are at `+0x16C` + class x 64, four maps each (*unverified* in game). Its
+  directional basis maps are at `+0x220` with the same layout; the texture is the wrapper's `+0x30`, confirmed in game
+  when the stair wall masks matched their story.
+- **Resolutions.** The directional maps are 64 x 64 at 1 texel per metre, sampled 0.5 m above the floor; the floor
+  light map is 4 texels per metre.
+- **Ambients.** `+0x110` is the ambient the floor and wall shaders draw (`c4`), `+0x120` the copy objects use, and
+  `+0x650` the ambient sampler's copy. Rooms without a lamp of their own can hold exactly the same ambient.
+
 ### Open items / unverified
 
 - `0x0069EC40`, `0x006AB210`, `0x00963DD0` in the normalisation/ambient step; room+0x100, +0x280.
@@ -387,6 +409,10 @@ solve).
 | `0x00AE4CB0 → 0x00ADB8F0 → 0x006A8BA0 → 0x006A88B0 → 0x006A3F80 → 0x006A3C90` | Budgeted room solve during normal lot loading; `0x00ADB8F0` calls `0x006A8BA0` once per level object of the lot (deque at manager+0x24..0x40) with one shared stopwatch and stops when elapsed > budget; `0x006A3C90` returns when the budget is spent while room+0x164 is set and resumes from room+0xEC (state machine, 9 = done) | smooth_streaming note 5; verified 2026-09-29 ([../features/performance/README.md](../features/performance/README.md)) |
 | `0x00ADBAD0 → 0x006A80E0 → 0x006A3EC0` | Synchronous solve (while room+0xF0 == 3, 60000 ms budget) used only by the lot impostor builder | smooth_streaming note 3 |
 | `0x006ADD60` | Night-level setter (lightMgr+0xF0) | night_terrain_relight header |
+| `0x006A0230` | Room normalisation from the brightest sample or lamp, written to room+0x160 at the solve's end | level_light_share `RoomNormHook`; F8 records |
+| `0x006A3E65` | Call of `0x006A0E00` at the end of a room solve | level_light_share `FinalizeHook` |
+| `0x006A31E8` | From here the batch solve keeps the room in `ebx` | native disassembly; level_light_share texel hook |
+| `0x006C7451` | Caller that invalidates rooms on a camera story change | recordings of the 2.14.0 development builds |
 | `0x006AC560` | `IsNight`: lightMgr+0xF0 > 0.99 and byte `[0x011D08C0] == 0` | full.asm |
 
 ## See also

@@ -91,6 +91,9 @@ std::atomic<uint64_t> g_freedBytes{0};
 std::atomic<bool> g_autoTrimWanted{false};
 std::atomic<uint64_t> g_nextAutoTrim{0}, g_pressureAt{0};
 std::atomic<bool> g_pressure{false};
+// Steam 1.67.2: the cache trim TrimIdleStepRaw calls (thiscall: budget, 0, force), used only after its prologue and the call
+// sequence beside kShrinkBoth+13 are checked (Start)
+constexpr uintptr_t kCacheTrimSteam = 0x00732E90;
 uintptr_t g_partialTrim = 0; // derived from the verified native call, Steam test only
 MemoryPolicy::Space ScanSpace() {
     MemoryPolicy::Space s;
@@ -312,7 +315,7 @@ int __fastcall SaveDispatchHook(void* owner,void*,void* a,void* b) {
     const uint64_t before=PrivateBytes();
     const auto queued=FastMemory::PrepareForSave();
     const auto released=FastRefPack::PrepareForSave();
-    AllocatorTuning::TrimNow("save"); // numbered development builds, allocator_trim: the allocator's own trim of free core tops
+    AllocatorTuning::TrimNow("save"); // allocator_trim: the allocator's own trim of free core tops
     const bool reserve=LetReserveGo();
     char line[256];
     std::snprintf(line,sizeof line,"[MemoryBudget] Early save preparation: %llu KiB of inactive Apex storage released, %u queued releases, reserve %s; private entry %llu KiB",
@@ -424,9 +427,23 @@ bool Start(std::string* error) {
     if (kMemoryOptimizationsEnabled && g_exeTimestamp==0x52DEC247) {
         const BYTE dispatchBefore[]={0x6A,0x01,0x56,0x8B,0xCB,0xC6,0x45,0x45,0x01};
         const BYTE dispatchEntry[]={0x81,0xEC,0x30,0x04,0x00,0x00};
+        // the save's entry is the game's, or sims3-modernization's detour of it (ts3native.asi routes it through its route
+        // gate with a jmp rel32): accepted only while that plugin is loaded and the jmp lands inside it; the call
+        // site still calls the entry, and the hook calls it the same way
+        bool detoured=false;
+        BYTE jmp[5]={};
+        if(const HMODULE ts3native=GetModuleHandleW(L"ts3native.asi"); ts3native && MemPatch::ReadBytes(kDispatch,jmp,sizeof jmp) && jmp[0]==0xE9) {
+            MODULEINFO mi{};
+            int32_t rel=0;
+            std::memcpy(&rel,jmp+1,sizeof rel);
+            const uintptr_t to=kDispatch+5+static_cast<uintptr_t>(rel);
+            detoured=GetModuleInformation(GetCurrentProcess(),ts3native,&mi,sizeof mi) &&
+                     to>=reinterpret_cast<uintptr_t>(mi.lpBaseOfDll) && to<reinterpret_cast<uintptr_t>(mi.lpBaseOfDll)+mi.SizeOfImage;
+        }
         bool valid=CallsTo(kDispatchCall,kDispatch) &&
             MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kDispatchCall-sizeof dispatchBefore),dispatchBefore,sizeof dispatchBefore) &&
-            MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kDispatch),dispatchEntry,sizeof dispatchEntry);
+            (detoured || MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kDispatch),dispatchEntry,sizeof dispatchEntry));
+        if(detoured) LOG_INFO("[MemoryBudget] The world save's entry is ts3native's detour (sims3-modernization); the early save preparation goes in front of it");
         for(unsigned i=0;i<3;++i) valid=valid && CallsTo(kStageCalls[i],kStageTargets[i]);
         const void* hooks[]={reinterpret_cast<const void*>(&SaveStageHook<0>),reinterpret_cast<const void*>(&SaveStageHook<1>),reinterpret_cast<const void*>(&SaveStageHook<2>)};
         auto redirectSave=[&](uintptr_t site,uintptr_t target,const void* hook) {
@@ -443,9 +460,9 @@ bool Start(std::string* error) {
                        : "[MemoryBudget] Early save sites differ; existing world-save preparation retained");
         const BYTE native[] = {0x81,0xEC,0x48,0x02,0x00,0x00,0x53,0x55,0x56};
         const BYTE call[] = {0x8B,0x81,0x8C,0x00,0x00,0x00,0x6A,0x01,0x6A,0x00,0x50,0xE8};
-        if (MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(0x00732E90),native,sizeof native) &&
-            MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kShrinkBoth+13),call,sizeof call)) g_partialTrim=0x00732E90;
-        LOG_INFO(g_partialTrim ? "[MemoryBudget] Public test: lower/upper pressure policy; native idle-cache steps enabled, at least 120 s apart with 10 min no-benefit/slow-call backoff"
+        if (MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kCacheTrimSteam),native,sizeof native) &&
+            MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kShrinkBoth+13),call,sizeof call)) g_partialTrim=kCacheTrimSteam;
+        LOG_INFO(g_partialTrim ? "[MemoryBudget] Native idle-cache steps enabled under the lower/upper pressure policy: at least 120 s apart, 10 min after a step that frees under 1 MB or takes over 8 ms"
                               : "[MemoryBudget] Native cache step not validated; experiment inactive");
     }
     TakeReserve();

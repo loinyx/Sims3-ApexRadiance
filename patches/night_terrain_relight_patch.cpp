@@ -31,6 +31,7 @@
 #include "d3d9_hooks.h"
 #include "depth_share.h"
 #include "light_diag.h"
+#include "daylight_probe.h"
 #include "recorder.h"
 #include "hotkeys.h"
 #include "light_probe.h"
@@ -1290,6 +1291,7 @@ void OnPresent() {
         g_menuLevel.store(-1.0f);
         return;
     }
+    DaylightProbe::OnPresent(s.lightMgr); // development builds only (daylight_log): logs the sky state, changes nothing
     const auto now = Clock::now();
     const bool night = s.level > 0.99f;
     int c38 = 0, c3C = 0;
@@ -2607,7 +2609,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             }
             // (2.13.1) it shapes walls, trees and bushes, not only buildings: here, beside the balance
             ApexUi::CardDivider();
-            changed |= ApexUi::SwitchRow("Realistic lamp reach", &g_realisticReach, "Lamp light on outside walls, trees and bushes fades with distance like on the ground", true);
+            changed |= ApexUi::SwitchRow("Realistic lamp reach", &g_realisticReach, "Lamp light on outside walls, trees and bushes fades with distance, from each lamp's side", true);
             return changed;
         });
     }
@@ -2627,7 +2629,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                 if (!g_levelShare) ApexUi::IconNote(ApexUi::IconId::Info, "Needs \"Outdoor light between floors\"");
                 ImGui::BeginDisabled(!g_levelShare);
 
-                changed |= ApexUi::SwitchRow("Indoor light between floors", &g_indoorShare, "Lamps inside shine through stairwells and open floors", true);
+                changed |= ApexUi::SwitchRow("Indoor light between floors", &g_indoorShare, "Lamps inside shine through stairwells and open floors; light bounces up the stairs", true);
                 // The game solves rooms one after the other (after a load, a change or a lamp switched), so
                 // a room can show its old light for a moment; switching floors solves the rooms shown again
                 if (g_indoorShare) ApexUi::IconNote(ApexUi::IconId::Info, "Rooms may take a few seconds to update; if one lags, change floors");
@@ -2659,7 +2661,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             ApexUi::CardDivider();
             Edit([] {
                 bool changed = ApexUi::SwitchRow("Lot lamps light the street", &g_lotLamps, "Outdoor lot lamps also light the grass and street nearby", true);
-                changed |= ApexUi::SwitchRow("Walls shade lamp light near the ground", &g_groundShade, "Walls and garden walls shade lamp light on grass, paths and streets, also past the lot", true);
+                changed |= ApexUi::SwitchRow("Walls shade lamp light near the ground", &g_groundShade, "Walls, garden walls, trees and bushes shade lamp light on the ground, also past the lot", true);
                 return changed;
             });
             // (2.13.1) the game's fixes and the dusk update: on by default, kept switchable in one folded block
@@ -2761,7 +2763,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                     if (g_fenceGround)
                         changed |= ApexUi::SliderPercent("Fence brightness", &g_fenceGroundStrength, 0.25f, 2.0f, "Balance fences against the surrounding ground", 0.75f);
                     ImGui::EndDisabled();
-                    changed |= ApexUi::SwitchRow("Smooth indoor light", &g_edgePad, "Light changes smoothly on stairs, curtains and furniture; no dark sides", true);
+                    changed |= ApexUi::SwitchRow("Smooth indoor light", &g_edgePad, "Stairs, curtains and furniture take their room's light and color smoothly; no dark sides", true);
                     return changed;
                 });
                 ApexUi::EndAdvanced();
@@ -2861,7 +2863,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             }
             if (ApexUi::BeginAdvanced("RoomFixes##NightRooms", "Game fixes")) {
                 ImGui::BeginDisabled(!g_levelShare);
-                Edit([] { return ApexUi::SwitchRow("Smooth light maps", &g_smoothRoomMaps, "Lamp light in rooms without blocks, bands or rings", true); });
+                Edit([] { return ApexUi::SwitchRow("Smooth light maps", &g_smoothRoomMaps, "Lamp light in rooms without blocks, bands or rings; floors blend across arches", true); });
                 ImGui::EndDisabled();
                 ApexUi::EndAdvanced();
             }

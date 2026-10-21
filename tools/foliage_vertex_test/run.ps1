@@ -1,4 +1,4 @@
-param([string]$Shader = '', [string]$Trunk = '', [string]$OutDir = (Join-Path $env:TEMP 'ApexFoliageVertexChecks'))
+param([string]$Shader = '', [string]$Trunk = '', [string]$Precomp = '', [string]$OutDir = (Join-Path $env:TEMP 'ApexFoliageVertexChecks'))
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 if (-not $Shader) {
@@ -12,6 +12,7 @@ Push-Location -LiteralPath $OutDir
 try {
     & cl.exe /nologo /std:c++20 /EHsc /W4 /O2 /MT ('/I' + $repo) ('/I' + (Join-Path $repo 'features')) /Fefoliage_vertex_checks.exe (Join-Path $PSScriptRoot 'check.cpp') (Join-Path $repo 'features/foliage_vertex_lamps.cpp') d3d9.lib user32.lib
     if ($LASTEXITCODE -ne 0) { throw 'Foliage vertex check compilation failed' }
-    if ($Trunk) { & '.\foliage_vertex_checks.exe' $Shader $Trunk } else { & '.\foliage_vertex_checks.exe' $Shader }
+    # -Precomp: the game's Shaders_Win32.precomp (Game\Bin), for the trees' sun shadow over every pixel shader
+    if ($Trunk -and $Precomp) { & '.\foliage_vertex_checks.exe' $Shader $Trunk $Precomp } elseif ($Trunk) { & '.\foliage_vertex_checks.exe' $Shader $Trunk } else { & '.\foliage_vertex_checks.exe' $Shader }
     if ($LASTEXITCODE -ne 0) { throw 'Foliage vertex checks failed' }
 } finally { Pop-Location }

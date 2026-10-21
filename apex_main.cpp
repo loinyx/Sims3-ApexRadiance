@@ -202,7 +202,7 @@ DWORD InitBody() {
             LOG_ERROR(std::string("[Main] Features could not be started: ") + e.what());
         }
         ApexGui::SetStartup(ApexGui::Startup::Running);
-        AllocatorTuning::Install(); // numbered development builds: allocator_trim / allocator_top_down (the allocator exists by now)
+        AllocatorTuning::Install(); // allocator_trim / allocator_top_down (the allocator exists by now)
         LOG_INFO("[Main] Features started");
         LoadTiming::NoteFeaturesStarted();
     }
@@ -215,7 +215,7 @@ DWORD InitBody() {
         if (ApexGui::GetStartup() == ApexGui::Startup::Running) HookGuard::Try("Pump: features' periodic work", [] { PatchManager::Get().UpdateAll(); });
         HookGuard::Try("Pump: settings autosave", [] { ApexConfig::PumpAutosave(); });
         HookGuard::Try("Pump: load timing", [] { LoadTiming::Pump(); }); // log lines only ([LoadTiming])
-        HookGuard::Try("Pump: allocator trim", [] { AllocatorTuning::Pump(); }); // numbered development builds, allocator_trim
+        HookGuard::Try("Pump: allocator trim", [] { AllocatorTuning::Pump(); }); // allocator_trim
         if constexpr (kDevToolsBuild) if(!kPublicBuild) HookGuard::Try("Pump: lot loading analysis", [] { LotLoadAnalysis::Pump(); });
         const ULONGLONG now = GetTickCount64();
         if (now - lastGuardTick >= 1000) {

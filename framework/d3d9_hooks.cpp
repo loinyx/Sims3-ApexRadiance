@@ -6,6 +6,7 @@
 #include "frame_profiler.h"
 #include "hook_guard.h"
 #include "perf_toggles.h"
+#include "apex_memory.h"
 #include <detours/detours.h>
 #include <intrin.h>
 #include <algorithm>
@@ -579,12 +580,17 @@ HRESULT STDMETHODCALLTYPE H_BeginScene(IDirect3DDevice9* d) {
 HRESULT STDMETHODCALLTYPE H_CreateTexture(IDirect3DDevice9* d, UINT w, UINT h, UINT l, DWORD u, D3DFORMAT f, D3DPOOL p, IDirect3DTexture9** t, HANDLE* sh) {
     HRESULT hr = S_OK;
     if (!Run(g_ctex, d, hr, w, h, l, u, f, p, t, sh)) return hr;
-    return o_ctex(d, w, h, l, u, f, p, t, sh);
+    hr = o_ctex(d, w, h, l, u, f, p, t, sh);
+    // development builds (memory_owners): a texture the ASI itself asked for is counted until Direct3D destroys it
+    if (DevSwitches::kCompiled && SUCCEEDED(hr) && t && *t) ApexMemory::NoteTexture(_ReturnAddress(), *t, w, h, l, u, f, p);
+    return hr;
 }
 HRESULT STDMETHODCALLTYPE H_CreateRenderTarget(IDirect3DDevice9* d, UINT w, UINT h, D3DFORMAT f, D3DMULTISAMPLE_TYPE m, DWORD q, BOOL lk, IDirect3DSurface9** s, HANDLE* sh) {
     HRESULT hr = S_OK;
     if (!Run(g_crt, d, hr, w, h, f, m, q, lk, s, sh)) return hr;
-    return o_crt(d, w, h, f, m, q, lk, s, sh);
+    hr = o_crt(d, w, h, f, m, q, lk, s, sh);
+    if (DevSwitches::kCompiled && SUCCEEDED(hr) && s && *s) ApexMemory::NoteSurface(_ReturnAddress(), *s, w, h, f, true);
+    return hr;
 }
 HRESULT STDMETHODCALLTYPE H_SetViewport(IDirect3DDevice9* d, const D3DVIEWPORT9* v) {
     HRESULT hr = S_OK;
@@ -594,12 +600,16 @@ HRESULT STDMETHODCALLTYPE H_SetViewport(IDirect3DDevice9* d, const D3DVIEWPORT9*
 HRESULT STDMETHODCALLTYPE H_CreatePixelShader(IDirect3DDevice9* d, const DWORD* fn, IDirect3DPixelShader9** s) {
     HRESULT hr = S_OK;
     if (!Run(g_cps, d, hr, fn, s)) return hr;
-    return o_cps(d, fn, s);
+    hr = o_cps(d, fn, s);
+    if (DevSwitches::kCompiled && SUCCEEDED(hr)) ApexMemory::NoteShader(_ReturnAddress(), fn, true);
+    return hr;
 }
 HRESULT STDMETHODCALLTYPE H_CreateVertexShader(IDirect3DDevice9* d, const DWORD* fn, IDirect3DVertexShader9** s) {
     HRESULT hr = S_OK;
     if (!Run(g_cvs, d, hr, fn, s)) return hr;
-    return o_cvs(d, fn, s);
+    hr = o_cvs(d, fn, s);
+    if (DevSwitches::kCompiled && SUCCEEDED(hr)) ApexMemory::NoteShader(_ReturnAddress(), fn, false);
+    return hr;
 }
 HRESULT STDMETHODCALLTYPE H_SetPixelShaderConstantF(IDirect3DDevice9* d, UINT r, const float* c, UINT n) {
     CountCall(kCallSetPSC);

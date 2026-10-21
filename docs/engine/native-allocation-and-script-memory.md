@@ -46,6 +46,14 @@ critical-section layout and reject changing counts. The companion PowerShell scr
 reads additionally require a matching Apex file SHA-256 and the native ResourceSystem vtable; the known pointer RVA
 is supported only for explicitly hashed artifacts in the capture script. Cache fields are raw accounting, not guaranteed reclaimable RAM.
 
+## Allocator trim and top-down blocks
+
+The general allocator's global pointer is `0x011CB864`. Its trim, `0x004E4F90` (thiscall `(allocator, pad)`, prologue
+`83 EC 10 53 55 56 8B E9`), decommits the free tops of its cores down to the pad and returns the bytes decommitted.
+The byte at allocator `+0x498` makes large reservations come from the top of the address space. Apex uses both on
+Steam 1.67.2 ([fast-memory.md](../features/performance/fast-memory.md#allocator-trim-and-top-down-large-blocks)). In one
+measured session the trim returned 0 bytes, because the allocator already returns core tops when it frees them.
+
 ## Limitations
 
 Captures are sequential while the process continues; neither stable reads nor signatures make them atomic. No game

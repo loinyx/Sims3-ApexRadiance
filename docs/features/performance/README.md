@@ -81,6 +81,20 @@ research and code by idavidveiga): [lot-streaming.md](lot-streaming.md). They ar
 One related change has no switch: the [Vulkan driver guard](vulkan-driver-guard.md) keeps an unused AMD Vulkan driver
 out of the game's address space on hybrid-GPU PCs.
 
+Several 2.14.0 behaviours also have no switch of their own; they follow the switch or feature named:
+
+- the step budget of the extra solves, with *Faster room lighting*, and automatic lamps first in the room queue, with
+  Night Lights
+  ([room-light-queue.md](room-light-queue.md#automatic-lamps-first-and-the-step-budget));
+- the game allocator's own trim and top-down large blocks, always on Steam 1.67.2
+  ([fast-memory.md](fast-memory.md#allocator-trim-and-top-down-large-blocks));
+- the early save preparation in front of sims3-modernization's save detour, with *Room to save*
+  ([room-to-save.md](room-to-save.md#compatibility-and-interactions));
+- lamp-visibility memo, liveness pruning and buffer reads without waiting for the GPU, with Night Lights
+  ([level-light-share.md](../night-lighting/level-light-share.md#cost)).
+
+Their maintainer-side switches are listed in [workflow.md](../../workflow.md#development-switches-dev_build).
+
 ## Bounded gameplay work
 
 The gameplay paths avoid compression and bookkeeping work without changing simulation timing or shader

@@ -34,4 +34,6 @@ scope cleanup and pre-save buffer ownership without modifying the game.
 
 - A save in a session that failed with Error 12 before.
 - The EA app build in game.
+- 2.14.0: a save with sims3-modernization's `ts3native.asi` loaded. **Expected:** the log line about ts3native's detour
+  and the early save preparation running, with no *Early save sites differ* line.
 - The idle cache size read for the log (`+0x98` of each cache) against the game's own statistics.

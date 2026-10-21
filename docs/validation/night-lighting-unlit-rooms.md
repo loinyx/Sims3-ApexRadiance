@@ -70,3 +70,10 @@ installed hooks or D3D9 draws; the check count includes many slider values rathe
 - Where the game writes the two colours, and whether they change with the time of day.
 - Whether room-mode rigs gather again on a relight of their room (the furniture fill after a slider change).
 - Floor switches, initial night loads, open stairwells, lots without lamps, rapid drags.
+- 2.14.0: blue bathrooms. A wall of a second-story bathroom was drawn by Apex's wall copy (PS `2C4D27F0`) with
+  c4 = c5 = c6 = (0.15, 0.15, 0.30), the game's native family-1 unlit colour, while the room's solve recorded Apex's grey
+  (0.007) and the lot is of family 0. c5 and c6 tint the cube reflection, which matters on glossy tiles. The cause is
+  undetermined: the colour came from the game or from a write without Apex's tint, after the solve or at draw time. The
+  developer F8 snapshot lists each room's current `+0x110` (drawn), `+0x120` (objects), `+0x650` (sampler copy) and
+  normalisation, and counts Apex `WriteAmbient` calls that write the native blue with their caller. Next evidence: an F8
+  with a blue bathroom on screen.

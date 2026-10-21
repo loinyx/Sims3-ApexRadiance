@@ -84,6 +84,8 @@ the automatic *Refresh the lighting* 1 s after the last change.
 - When a story changes, furniture can draw one frame on the game's shader before Apex pairs the new room light map with
   its directional maps.
 - Outdoor and roofless rooms (room 0, fenced yards) keep the game's value.
+- A room can be drawn with the game's own blue unlit colour instead of Apex's (seen on a bathroom wall); the cause is
+  not determined ([validation](../../validation/night-lighting-unlit-rooms.md#open-checks)).
 - Steam 1.67.2 only. If the six read sites differ, the card cannot act; if only the top-up hook fails, lit rooms keep the
   game's top-up (log: *Base under the lamps: the game code differs*).
 
@@ -207,6 +209,10 @@ N, moved at once N)*.
 
 Developer page status *Rooms at night: on | the game's unlit-room colours (...) | Apex's (...) | furniture fill (...) |
 relights: N*.
+
+The developer F8 snapshot lists, per room, the ambient it holds now: `+0x110` (drawn), `+0x120` (objects), `+0x650`
+(the sampler copy) and the normalisation, and counts Apex ambient writes (`WriteAmbient`) that equal the game's native
+blue, with their caller.
 
 ## Rejected approaches
 
