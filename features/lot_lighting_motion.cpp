@@ -192,6 +192,7 @@ std::atomic<uint64_t> g_passTick{0};            // GetTickCount64 at its end
 std::atomic<uint64_t> g_firstWaitSince{0};      // a first pass has been deferred since (0 = none waiting)
 std::atomic<uint64_t> g_refineWaitSince{0};     // a refinement has been deferred since (0 = none waiting)
 std::atomic<int> g_firstPassWaitMs{2000};
+std::atomic<float> g_settleScale{1.0f};      // the settle pacing (PaceSettle, below)
 // (2.15.1) a first pass was held (motion wait or the frame's pass taken) at this tick: while one is pending its wait is not
 // started over by a still frame, and refinements give it the frame's pass. A new lot's load waits for every level's first
 // pass; in Edit Town a camera read that kept flipping between moving and still restarted the 2 s wait on every still frame,
@@ -286,7 +287,7 @@ float __fastcall Hook_LotLightBudget(void* mgr, void* edx) {
     // a log: 4.4 ms of solving a frame for 8 s): the lot being played keeps the game's budget while the camera moves, and
     // gets kLampEditMs with it still
     const bool settling = game >= kPriorityMs && game < kLeaveAloneMs && LevelLightShare::SettlingAfterLoad();
-    if (settling && !moving) out = std::max(out, kLampEditMs);
+    if (settling && !moving) out = std::max(out, game + (kLampEditMs - game) * g_settleScale.load(std::memory_order_relaxed)); // dosed by the frame time
     if (!boosted && !settling && moving && game > 0.0f && game < kLeaveAloneMs) {
         const float scaled = game * (static_cast<float>(g_budgetMs.load(std::memory_order_relaxed)) / kPriorityMs);
         out = std::max(kMinMs, std::min(game, scaled));
@@ -417,7 +418,50 @@ int __fastcall Hook_WallAoStep(void* solver, void* edx, void* stopwatch, uint32_
     return RunPass(next, solver, edx, stopwatch, budgetBits, state, moving);
 }
 
+// (2.15.1) Settle pacing. In the settle window (LevelLightShare::SettlingAfterLoad: 15 s after a load, 10 s after entering a
+// lot) the lot being played took 25 ms of room solving a frame (kLampEditMs) and the room queue's drain 12 ms more: frames
+// of 31 to 37 ms of "Lot room solve" while lots loaded (21/10 F8 session: 276 of 440 hitches). The raise is now dosed by
+// the frame time: the baseline is the frame time outside the window; in it a frame over max(16.7 ms, 1.5 x baseline)
+// takes 0.15 off the scale, a frame under 0.8 x that target gives 0.05 back. A fast PC keeps the quick light, a PC
+// already at its limit keeps the game's own budget. Each room's light is the game's complete solve; only the frame it
+// finishes in moves. Without this sampler (both camera-motion options off) the scale stays 1, as before.
+float g_baseFrameMs = 0.0f;   // render thread
+uint64_t g_lastPresentQpc = 0;
+double g_qpcMs = 0.0;
+bool g_wasSettling = false;
+constexpr float kSettleMinTargetMs = 16.7f, kSettleTargetOverBase = 1.5f;
+void PaceSettle() {
+    if (g_qpcMs == 0.0) {
+        LARGE_INTEGER f{};
+        QueryPerformanceFrequency(&f);
+        g_qpcMs = f.QuadPart ? 1000.0 / static_cast<double>(f.QuadPart) : 0.0;
+        if (g_qpcMs == 0.0) return;
+    }
+    LARGE_INTEGER n{};
+    QueryPerformanceCounter(&n);
+    const uint64_t now = static_cast<uint64_t>(n.QuadPart), last = g_lastPresentQpc;
+    g_lastPresentQpc = now;
+    if (!last) return;
+    const float dt = static_cast<float>(static_cast<double>(now - last) * g_qpcMs);
+    if (!(dt > 0.0f && dt < 250.0f)) return; // a loading screen or a pause
+    if (!LevelLightShare::SettlingAfterLoad()) {
+        g_baseFrameMs = g_baseFrameMs > 0.0f ? g_baseFrameMs * 0.95f + dt * 0.05f : dt;
+        g_wasSettling = false;
+        return;
+    }
+    if (!g_wasSettling) {
+        g_wasSettling = true;
+        g_settleScale.store(0.5f, std::memory_order_relaxed);
+    }
+    const float target = std::max(kSettleMinTargetMs, (g_baseFrameMs > 0.0f ? g_baseFrameMs : kSettleMinTargetMs) * kSettleTargetOverBase);
+    float s = g_settleScale.load(std::memory_order_relaxed);
+    if (dt > target) s -= 0.15f;
+    else if (dt < 0.8f * target) s += 0.05f;
+    g_settleScale.store(std::clamp(s, 0.0f, 1.0f), std::memory_order_relaxed);
+}
+
 void OnPresentSample() {
+    PaceSettle();
     const uint64_t now = GetTickCount64();
     g_frame.fetch_add(1, std::memory_order_relaxed);
     g_lastPresentTick.store(now, std::memory_order_relaxed);
@@ -621,6 +665,9 @@ void Stop() {
 bool Running() { return g_on.load(std::memory_order_acquire); }
 
 void NoteDrainSpent(float ms) { g_drainSpent.store(std::bit_cast<uint32_t>(ms), std::memory_order_relaxed); }
+float SettleScale() { return g_settleScale.load(std::memory_order_relaxed); }
+float BaselineFrameMs() { return g_baseFrameMs; }
+
 float DrainBudget(float wanted) {
     const float cap = DragLite::SolveCapMs();
     return cap > 0.0f ? std::min(wanted, cap) : wanted;
@@ -655,6 +702,8 @@ void RenderDeveloperUI() {
     if (kPublicBuild) return;
     if (!ImGui::GetCurrentContext()) return;
     ImGui::TextUnformatted(("Lot lighting while moving: " + StatusText()).c_str());
+    ImGui::TextDisabled("Settle pacing: %.0f%% of the raised budgets (frame baseline %.1f ms, %s)", g_settleScale.load() * 100.0f, g_baseFrameMs,
+                        LevelLightShare::SettlingAfterLoad() ? "settling now" : "not settling");
     const uint64_t last = g_lastMoveTick.load();
     const uint64_t now = GetTickCount64();
     if (ApexUi::BeginAdvanced("CameraCounters", "Live counters")) {

@@ -24,6 +24,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps hidden behind objects no longer reflect on water", "Le lampade nascoste dietro gli oggetti non si riflettono più sull'acqua"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "La luna illumina la città dall'alto: niente più strisce scure sulle strade di notte"},
     {"Moonlight is softer by default and in every preset", "La luce della luna è più tenue per impostazione predefinita e in ogni preimpostazione"},
+    {"Loading lots is smoother: the extra lighting work follows your frame rate", "Il caricamento dei lotti è più fluido: il lavoro extra di illuminazione segue il tuo frame rate"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "La luce Istantanea delle lampade lavora meno mentre un lotto viene illuminato di continuo"},
     {"Options on by default for several versions no longer show an Experimental badge", "Le opzioni attive per impostazione predefinita da diverse versioni non mostrano più l'etichetta Sperimentale"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "L'occlusione ambientale e la sfocatura di profondità indicano perché sono in pausa"},

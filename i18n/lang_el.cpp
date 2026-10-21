@@ -24,6 +24,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps hidden behind objects no longer reflect on water", "Οι λάμπες πίσω από αντικείμενα δεν καθρεφτίζονται πια στο νερό"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Το φεγγάρι φωτίζει την πόλη από ψηλότερα: τέλος οι σκούρες λωρίδες στους δρόμους τη νύχτα"},
     {"Moonlight is softer by default and in every preset", "Το φως του φεγγαριού είναι πιο απαλό από προεπιλογή και σε κάθε προεπιλογή ρυθμίσεων"},
+    {"Loading lots is smoother: the extra lighting work follows your frame rate", "Η φόρτωση οικοπέδων είναι πιο ομαλή: η επιπλέον δουλειά φωτισμού ακολουθεί τον ρυθμό καρέ σου"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Το Άμεσο φως λαμπών κάνει λιγότερη δουλειά όσο ένα οικόπεδο φωτίζεται ξανά και ξανά"},
     {"Options on by default for several versions no longer show an Experimental badge", "Οι επιλογές που είναι ενεργές από προεπιλογή εδώ και αρκετές εκδόσεις δεν δείχνουν πια την ένδειξη Πειραματικό"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "Το Ambient Occlusion και η Θόλωση Βάθους δείχνουν γιατί είναι σε παύση"},

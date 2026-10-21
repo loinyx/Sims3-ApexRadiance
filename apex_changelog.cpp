@@ -8,6 +8,7 @@ namespace {
 
 constexpr const char* k2151Improved[] = {
     "Moonlight is softer by default and in every preset",
+    "Loading lots is smoother: the extra lighting work follows your frame rate",
     "Instant lamp lighting does less work while a lot keeps relighting",
     nullptr};
 constexpr const char* k2151Fixed[] = {

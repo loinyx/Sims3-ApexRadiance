@@ -24,6 +24,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps hidden behind objects no longer reflect on water", "被物件擋住的燈不再在水面上反射"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "月亮從更高處照亮城鎮：夜晚道路上不再出現暗色條紋"},
     {"Moonlight is softer by default and in every preset", "月光預設更柔和，所有預設中也是如此"},
+    {"Loading lots is smoother: the extra lighting work follows your frame rate", "載入地塊更流暢：額外的照明計算會依你的影格率進行"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "地塊反覆重新照明時，即時燈光的工作量更少"},
     {"Options on by default for several versions no longer show an Experimental badge", "多個版本以來預設開啟的選項不再顯示「實驗性」標記"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "環境光遮蔽和景深模糊會顯示暫停的原因"},

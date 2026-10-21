@@ -24,6 +24,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps hidden behind objects no longer reflect on water", "Лампы, скрытые за объектами, больше не отражаются в воде"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Луна освещает город сверху: ночью на дорогах больше нет тёмных полос"},
     {"Moonlight is softer by default and in every preset", "Лунный свет по умолчанию и во всех пресетах стал мягче"},
+    {"Loading lots is smoother: the extra lighting work follows your frame rate", "Загрузка участков стала плавнее: дополнительный расчёт освещения подстраивается под частоту кадров"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Мгновенный свет ламп работает меньше, пока участок снова и снова перерасчитывает свет"},
     {"Options on by default for several versions no longer show an Experimental badge", "Параметры, включённые по умолчанию уже несколько версий, больше не помечены как «Экспериментально»"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "Фоновое затенение и размытие глубины показывают, почему они приостановлены"},

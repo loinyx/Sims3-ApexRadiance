@@ -24,6 +24,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps hidden behind objects no longer reflect on water", "Lampy skryté za předměty se už neodrážejí ve vodě"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Měsíc osvětluje město z větší výšky: v noci už na silnicích nejsou tmavé pruhy"},
     {"Moonlight is softer by default and in every preset", "Měsíční světlo je ve výchozím stavu i ve všech předvolbách jemnější"},
+    {"Loading lots is smoother: the extra lighting work follows your frame rate", "Načítání pozemků je plynulejší: práce navíc s osvětlením se řídí vaší snímkovou frekvencí"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Okamžité světlo lamp pracuje méně, když se pozemek stále znovu osvětluje"},
     {"Options on by default for several versions no longer show an Experimental badge", "Možnosti zapnuté ve výchozím stavu už několik verzí nemají štítek Experimentální"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "Ambientní okluze a Rozostření hloubky ukazují, proč jsou pozastaveny"},

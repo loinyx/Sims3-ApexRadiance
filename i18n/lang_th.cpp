@@ -24,6 +24,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps hidden behind objects no longer reflect on water", "โคมไฟที่ถูกวัตถุบังไม่สะท้อนบนน้ำอีกต่อไป"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "ดวงจันทร์ส่องเมืองจากที่สูงขึ้น: ไม่มีแถบมืดบนถนนตอนกลางคืนอีกต่อไป"},
     {"Moonlight is softer by default and in every preset", "แสงจันทร์นุ่มนวลขึ้นตามค่าเริ่มต้นและในทุกพรีเซ็ต"},
+    {"Loading lots is smoother: the extra lighting work follows your frame rate", "โหลดล็อตลื่นขึ้น: งานแสงเพิ่มเติมปรับตามอัตราเฟรมของคุณ"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "แสงโคมไฟแบบทันทีทำงานน้อยลงขณะที่ล็อตถูกคำนวณแสงซ้ำไปมา"},
     {"Options on by default for several versions no longer show an Experimental badge", "ตัวเลือกที่เปิดเป็นค่าเริ่มต้นมาหลายเวอร์ชันจะไม่แสดงป้ายทดลองอีกต่อไป"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "Ambient Occlusion และเบลอระยะลึกแสดงเหตุผลที่หยุดชั่วคราว"},

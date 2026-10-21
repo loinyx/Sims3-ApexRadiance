@@ -41,7 +41,14 @@ the lot being played):
 - **A lamp just switched:** the game's own budget is kept for a moment, even while the camera moves (`Boost`).
 - **After a load or entering a lot:** for 15 s after the world goes live, and for 10 s after the camera enters a lot
   (`LevelLightShare::SettlingAfterLoad`), the lot being played keeps the game's budget while the camera moves and gets
-  25 ms with it still, so a lot corrects its lighting in one round.
+  up to 25 ms with it still, so a lot corrects its lighting in one round. Since 2.15.1 the raise (and the room queue's
+  drain raise from 4 to 12 ms, [Faster room lighting](room-light-queue.md)) is dosed by the frame time (`PaceSettle`, on
+  the Present sample): the baseline is the frame time outside the window; in it a frame over max(16.7 ms, 1.5 x
+  baseline) takes 0.15 off the scale, a frame under 0.8 x that target gives 0.05 back (each window starts at 0.5). The
+  game budget becomes `game + (25 - game) x scale`, the drain `4 + (12 - 4) x scale`. A fast PC keeps the quick light,
+  a PC at its limit keeps the game's own budget (21/10 F8 session while lots loaded: frames of 31 to 37 ms of room
+  solving in 276 of 440 hitches). Without the Present sample (both camera-motion options off) the scale stays 1.
+  Developer status: *Settle pacing* on the Lighting while the camera moves card.
 - **A lamp edit's room while moving:** while the room being solved is an edit's urgent room
   (`RoomLightQueue::CurrentRoomUrgent`), the lot being played gets the game's budget up to 6 ms (`kEditMovingMs`)
   instead of the scaled one, so an edit made while panning does not wait for 3 ms slices. Which lot a budget call serves

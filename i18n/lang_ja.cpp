@@ -24,6 +24,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps hidden behind objects no longer reflect on water", "物の陰に隠れたランプが水面に映らなくなりました"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "月がより高い位置から街を照らし、夜の道路に暗い縞が出なくなりました"},
     {"Moonlight is softer by default and in every preset", "月明かりが既定でもすべてのプリセットでも柔らかくなりました"},
+    {"Loading lots is smoother: the extra lighting work follows your frame rate", "区画の読み込みがなめらかに：追加の照明処理がフレームレートに合わせて行われます"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "区画の照明が繰り返し再計算される間、インスタントのランプ照明の負荷が減りました"},
     {"Options on by default for several versions no longer show an Experimental badge", "何バージョンも前から既定でオンのオプションに「実験的」バッジが表示されなくなりました"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "アンビエントオクルージョンと深度ぼかしが、停止中の理由を表示します"},

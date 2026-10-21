@@ -24,6 +24,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps hidden behind objects no longer reflect on water", "Lampor dolda bakom föremål speglas inte längre i vattnet"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Månen lyser upp staden högre uppifrån: inga mörka ränder på vägarna på natten"},
     {"Moonlight is softer by default and in every preset", "Månljuset är mjukare som standard och i alla förinställningar"},
+    {"Loading lots is smoother: the extra lighting work follows your frame rate", "Tomter laddas smidigare: det extra ljusarbetet följer din bildfrekvens"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Direkt lampljus arbetar mindre medan en tomt belyses om och om igen"},
     {"Options on by default for several versions no longer show an Experimental badge", "Alternativ som varit på som standard i flera versioner visar inte längre märket Experimentell"},
     {"Ambient Occlusion and Depth Blur say why they are paused", "Ambient Occlusion och Djuposkärpa visar varför de är pausade"},
