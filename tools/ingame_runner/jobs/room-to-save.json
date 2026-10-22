@@ -1,0 +1,55 @@
+{
+  "id": "room-to-save",
+  "description": "Room to Save save matrix: a save after play, a second save at once, a reload of that save and a save after the reload. Pass: every save completes without Error 12, the reload reaches live mode; with the feature on every save logs its outcome.",
+  "save": "ApexTest-Town",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.MemoryGuard": {
+          "enabled": false
+        }
+      }
+    },
+    "on": {
+      "toml": {
+        "patches.MemoryGuard": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[MemoryGuard\\] On:",
+        "\\[MemoryGuard\\] World save done"
+      ]
+    }
+  },
+  "fail": [
+    "FAILED \\(Error 12\\)"
+  ],
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "fast"
+    },
+    {
+      "do": "wait",
+      "minutes": 10
+    },
+    {
+      "do": "save"
+    },
+    {
+      "do": "save"
+    },
+    {
+      "do": "reload",
+      "save": "last"
+    },
+    {
+      "do": "wait",
+      "minutes": 2
+    },
+    {
+      "do": "save"
+    }
+  ]
+}

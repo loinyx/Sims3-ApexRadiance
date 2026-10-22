@@ -1,0 +1,35 @@
+{
+  "id": "object-lookup-index",
+  "description": "Object Lookup Index with the town running at fast speed. Pass: the index logs On, no verification mismatch; A/B metric: simulation hitches per minute (-Profiler Sim or Both).",
+  "save": "ApexTest-Town",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.ObjectLookupIndex": {
+          "enabled": false
+        }
+      }
+    },
+    "on": {
+      "toml": {
+        "patches.ObjectLookupIndex": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[ObjectIndex\\] On:"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "fast"
+    },
+    {
+      "do": "wait",
+      "minutes": 10,
+      "measure": true
+    }
+  ]
+}

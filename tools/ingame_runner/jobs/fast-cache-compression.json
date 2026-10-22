@@ -1,0 +1,52 @@
+{
+  "id": "fast-cache-compression",
+  "description": "Fast Cache Compression: two saves write compressed resources. Pass: the RefPack layer logs On, no result differs from the game, both saves complete and the second reloads.",
+  "save": "ApexTest-Town",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.FastCacheCompression": {
+          "enabled": false
+        }
+      }
+    },
+    "on": {
+      "toml": {
+        "patches.FastCacheCompression": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[FastRefPack\\] On:"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "fast"
+    },
+    {
+      "do": "wait",
+      "minutes": 3
+    },
+    {
+      "do": "save"
+    },
+    {
+      "do": "wait",
+      "minutes": 2
+    },
+    {
+      "do": "save"
+    },
+    {
+      "do": "reload",
+      "save": "last"
+    },
+    {
+      "do": "wait",
+      "minutes": 1
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "description": "Every performance job as an ABBA pair: 4 game starts per job.",
+  "ab": true,
+  "jobs": [
+    "../jobs/resource-lookup-cache.json",
+    "../jobs/file-list-cache.json",
+    "../jobs/object-lookup-index.json",
+    "../jobs/fast-memory.json",
+    "../jobs/fast-cache-compression.json",
+    "../jobs/room-to-save.json",
+    "../jobs/scene-node-budget.json",
+    "../jobs/room-light-queue.json",
+    "../jobs/lot-lighting-motion.json"
+  ]
+}
