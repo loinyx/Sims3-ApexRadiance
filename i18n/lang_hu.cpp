@@ -25,6 +25,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps placed on the ground light the lawn around them", "A földre tett lámpák megvilágítják a körülöttük lévő gyepet"},
     {"Lamps keep their night strength in Build mode at night", "Éjjel építés módban a lámpák megtartják éjszakai erejüket"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "A hold magasabbról világítja meg a várost: éjjel már nincsenek sötét csíkok az utakon"},
+    {"Moving the camera at night is smooth again with Instant lamp lighting", "Éjjel a kamera mozgatása ismét gördülékeny az azonnali lámpavilágítással"},
     {"Filtered screenshots can be saved to any folder you choose", "A szűrt képernyőképek bármelyik választott mappába menthetők"},
     {"Moonlight is softer by default and in every preset", "A holdfény alapból és minden előbeállításban lágyabb"},
     {"Lamps brighten smoothly at dusk and dim smoothly at dawn", "A lámpák alkonyatkor fokozatosan fényesednek, hajnalban fokozatosan halványodnak"},
