@@ -485,6 +485,59 @@ thread_local ThreadSlot* t_slot = nullptr;
 thread_local bool t_noSlot = false;
 std::atomic<DWORD> g_renderTid{0}; // render thread (written in the Present hook, read by the sampler too)
 std::atomic<DWORD> g_simTid{0}; // the thread calling GC_try_to_collect
+// (2.15.3) Which logical processors the two busiest threads run on: the game gives the simulation thread ideal processor 1,
+// which is the second hardware thread of core 0 on SMT CPUs; if the render thread mostly runs on logical 0, the two share a
+// core. Counted at each Present (render) and each GC slice (simulation); the report names the SMT pairs.
+constexpr int kCpuSlots = 64;
+std::atomic<uint32_t> g_cpuRender[kCpuSlots] = {}, g_cpuSim[kCpuSlots] = {};
+void NoteCpu(std::atomic<uint32_t>* slots) {
+    PROCESSOR_NUMBER pn{};
+    GetCurrentProcessorNumberEx(&pn);
+    const unsigned cpu = pn.Group * 64u + pn.Number;
+    if (cpu < kCpuSlots) slots[cpu].fetch_add(1, std::memory_order_relaxed);
+}
+// The physical core of each logical processor (group 0), -1 when unknown
+std::vector<int> CoreOfLogical() {
+    std::vector<int> core(kCpuSlots, -1);
+    DWORD len = 0;
+    GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &len);
+    std::vector<BYTE> buf(len);
+    if (!len || !GetLogicalProcessorInformationEx(RelationProcessorCore, reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(buf.data()), &len)) return core;
+    int id = 0;
+    for (DWORD off = 0; off < len;) {
+        const auto* p = reinterpret_cast<const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buf.data() + off);
+        if (p->Relationship == RelationProcessorCore) {
+            const GROUP_AFFINITY& g = p->Processor.GroupMask[0];
+            for (int b = 0; b < 64; b++)
+                if (g.Group == 0 && (g.Mask >> b & 1) && b < kCpuSlots) core[b] = id;
+            id++;
+        }
+        off += p->Size;
+    }
+    return core;
+}
+std::string CpuText() {
+    const std::vector<int> core = CoreOfLogical();
+    uint64_t rTot = 0, sTot = 0;
+    for (int i = 0; i < kCpuSlots; i++) rTot += g_cpuRender[i].load(), sTot += g_cpuSim[i].load();
+    if (!rTot && !sTot) return "CPU: not counted yet\n";
+    const auto list = [&](std::atomic<uint32_t>* slots, uint64_t total) {
+        std::string s;
+        for (int i = 0; i < kCpuSlots; i++) {
+            const uint32_t n = slots[i].load();
+            if (total && n * 20 >= total) s += std::format("{}logical {} (core {}) {:.0f}%", s.empty() ? "" : ", ", i, core[i], 100.0 * n / total);
+        }
+        return s.empty() ? std::string("-") : s;
+    };
+    // how often both threads ran on one physical core, assuming independence of the two distributions
+    double shared = 0.0;
+    if (rTot && sTot)
+        for (int a = 0; a < kCpuSlots; a++)
+            for (int b = 0; b < kCpuSlots; b++)
+                if (a != b && core[a] >= 0 && core[a] == core[b]) shared += (double(g_cpuRender[a].load()) / rTot) * (double(g_cpuSim[b].load()) / sTot);
+    return std::format("CPU: render thread on {}; simulation thread on {}; both on the two hardware threads of one core about {:.0f}% of the time (estimate)\n",
+                       list(g_cpuRender, rTot), list(g_cpuSim, sTot), shared * 100.0);
+}
 
 ThreadSlot* GetSlot() {
     if (ThreadSlot* s = t_slot) return s;
@@ -1041,6 +1094,7 @@ uint64_t __fastcall Hook_TerrainUpdate(void* self, void* edx, uint32_t a, uint32
 
 uint64_t __cdecl Hook_ScriptGC(uint32_t stopFunc) {
     g_simTid.store(GetCurrentThreadId(), std::memory_order_relaxed);
+    NoteCpu(g_cpuSim);
     Scope sc(kScriptGC);
     return Orig<T_ScriptGC, FnCdecl1>()(stopFunc);
 }
@@ -3304,6 +3358,7 @@ void AttachWaitingLocked();
 void OnPresentStart(D3D9Hooks::DeviceContext& ctx) {
     const uint64_t now = Now();
     g_renderTid.store(GetCurrentThreadId(), std::memory_order_relaxed);
+    NoteCpu(g_cpuRender);
     if (ThreadSlot* s = GetSlot()) {
         CleanStale(s, &ctx);
         Split(s, now);
@@ -4136,6 +4191,7 @@ std::string BuildReport() {
     s += std::format("Last {} frames: frame {:.2f} ms, cpu {:.2f}, present {:.2f}, limiter {:.2f}, mod D3D {:.2f}, draws {:.0f} (+{:.0f} end-of-frame)\n", g_liveCount, a.frameMs, a.cpuMs,
         a.presentMs, a.limiterMs, a.modMs, a.gameDraws, a.endFrameDraws);
     const auto rate = [](uint64_t h, uint64_t f) { return f ? 100.0 * static_cast<double>(h) / static_cast<double>(f) : 0.0; };
+    s += CpuText();
     s += std::format("Camera: moving in {} frames, still in {}; hitch rate while moving {:.2f}%, while still {:.2f}%\n", g_stats.framesMoving, g_stats.framesStill,
         rate(g_stats.hitchesMoving, g_stats.framesMoving), rate(g_stats.hitchesStill, g_stats.framesStill));
     {
@@ -4233,6 +4289,7 @@ void Clear() {
         g_otherSvcBaseCalls[i] = g_otherSvc[i].calls.load();
     }
     g_stats = Stats{};
+    for (int i = 0; i < kCpuSlots; i++) g_cpuRender[i].store(0), g_cpuSim[i].store(0);
     g_graphPos = g_graphCount = 0;
     g_livePos = g_liveCount = 0;
     g_medianPos = g_medianCount = 0;
