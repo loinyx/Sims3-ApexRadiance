@@ -56,6 +56,36 @@ int main() {
         check(g.Decide(m, 0.6f, 1.0f, -1.0f, 6.9f) == 0.6f && !g.holding);   // then taken once the clock ran on
         check(g.Decide(0x2000, 0.0f, 0.0f, 0.0f, 12.0f) == 0.0f);             // another light manager: taken
     }
+    // the sky's sun times: Build mode's 0 / 0 keeps the season's while the clock stands still; a world being loaded (0 / 0
+    // to the season's) and a 0 / 0 that lasts with the clock running are taken
+    {
+        NightLevel::SunTimesGate g;
+        const uintptr_t sky = 0x3000, w = 0x4000;
+        float r = 0.0f, s = 0.0f;
+        check(!g.Apply(sky, w, false, r, s, 0.0f) && r == 0.0f);                      // a world loading: 0 / 0 first
+        r = 2.0f, s = -2.5f;
+        check(!g.Apply(sky, w, false, r, s, 18.9f) && r == 2.0f && s == -2.5f);       // its season's times: taken at once
+        r = 0.0f, s = 0.0f;
+        check(g.Apply(sky, w, false, r, s, 18.95f) && r == 2.0f && s == -2.5f);       // Build mode: kept
+        r = 0.0f, s = 0.0f;
+        check(g.Apply(sky, w, false, r, s, 18.95f) && r == 2.0f && s == -2.5f);
+        r = 2.0f, s = -2.5f;
+        check(!g.Apply(sky, w, false, r, s, 18.95f) && r == 2.0f);                    // live mode again
+        r = 0.0f, s = 0.0f;
+        check(g.Apply(sky, w, false, r, s, 6.0f) && r == 2.0f);                       // a season without offsets, the clock running:
+        r = 0.0f, s = 0.0f;
+        check(!g.Apply(sky, w, false, r, s, 6.3f) && r == 0.0f && s == 0.0f);         // taken after kSunGateHours
+        r = 1.0f, s = -1.0f;
+        check(!g.Apply(sky, w, false, r, s, 6.4f) && r == 1.0f);                      // any other change: taken
+        r = 2.0f, s = -2.5f;
+        check(!g.Apply(sky, w, false, r, s, 6.5f) && r == 2.0f);
+        r = 0.0f, s = 0.0f;
+        check(!g.Apply(sky, w, true, r, s, 6.5f) && r == 0.0f);             // the debug weather set: never held
+        r = 2.0f, s = -2.5f;
+        check(!g.Apply(sky, w, false, r, s, 6.5f));
+        r = 0.0f, s = 0.0f;
+        check(!g.Apply(sky, 0x5000, false, r, s, 6.5f) && r == 0.0f);       // another weather manager (travel): taken
+    }
     check(TerrainBakeRule::AreaType(9) && TerrainBakeRule::AreaType(10) && !TerrainBakeRule::AreaType(7) && !TerrainBakeRule::AreaType(11));
     std::printf("World lamp policy: %d checks, %d failures\n", checks, failed);
     return failed ? 1 : 0;

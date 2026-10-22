@@ -675,20 +675,36 @@ bool WriteFloat(uintptr_t at, float v) {
     }
 }
 
-// (2.15.1) The night level in Build mode (features/night_level.h): the sky update FUN_00C11AD0 hands the light manager
-// its level through one call, "fld [ebp+8]; push ecx; mov ecx,edi; fstp [esp]; call 0x006ADD60" at 0x00C11B40
-// (thiscall(lightMgr, float), ret 4; the setter writes +0xF0 and re-lights the rigs when the level moves by 0.2 or reaches
-// an end). That call goes to NightSetHook, which passes the level through NightLevel::Gate: a fall that comes with Build
-// mode's change of the sun times keeps the level of before, so the game keeps its street lamps and lamp factors at night.
-using NightSetFn = void(__thiscall*)(void*, float);
-NightSetFn g_nightSet = nullptr; // 0x006ADD60
-uintptr_t g_nightSetCall = 0;    // the redirected call (0 = not redirected)
-std::vector<BYTE> g_nightSetOrig;
-const char* const kNightSetPattern = "D9 45 08 51 8B CF D9 1C 24 E8 ?? ?? ?? ?? D9 45 0C 51 8B CF D9 1C 24 E8";
-// the setter's start: sub esp,10h; movss xmm0,[esp+14h]; push esi; mov esi,ecx; movss xmm1,[esi+0F0h]
-const BYTE kNightSetStart[] = {0x83, 0xEC, 0x10, 0xF3, 0x0F, 0x10, 0x44, 0x24, 0x14, 0x56, 0x8B, 0xF1, 0xF3, 0x0F, 0x10, 0x8E, 0xF0, 0x00, 0x00, 0x00};
-void __fastcall NightSetHook(void* lightMgr, void*, float level) {
-    g_nightSet(lightMgr, NightLevel::Gate(reinterpret_cast<uintptr_t>(lightMgr), level));
+// (2.15.1) Day and night in Build mode (features/night_level.h): the sky copies its sunrise / sunset from the weather
+// manager every update, "lea ecx,[esi+974h]; push ecx; mov ecx,[edx+74h]; call FUN_00D68FE0" at 0x00C15D9A
+// (thiscall(weather, float* sunrise, float* sunset), ret 8; ESI = the sky). Build mode makes them the seasonless 0 / 0,
+// and the sky's smooth night, the light manager's level and the lamp factors of the shaders then turned to day at dusk.
+// That call goes to SunTimesHook, which keeps the season's times while the 0 / 0 stands with the clock still.
+using SunTimesFn = void(__thiscall*)(void*, float*, float*);
+SunTimesFn g_sunTimes = nullptr; // FUN_00D68FE0
+uintptr_t g_sunTimesCall = 0;    // the redirected call (0 = not redirected)
+std::vector<BYTE> g_sunTimesOrig;
+const char* const kSunTimesPattern = "8D 8E 74 09 00 00 51 8B 4A 74 E8 ?? ?? ?? ?? 80 3D";
+// FUN_00D68FE0's start: cmp byte [ecx+0B04h],0; lea eax,[ecx+0A48h]
+const BYTE kSunTimesStart[] = {0x80, 0xB9, 0x04, 0x0B, 0x00, 0x00, 0x00, 0x8D, 0x81, 0x48, 0x0A, 0x00, 0x00};
+// The clock (lightMgr+0xB4, hours) and the weather manager's debug set switch (+0xB04); NAN / false when unreadable
+void ReadSkyState(uintptr_t sky, uintptr_t weather, float& hour, bool& debug) {
+    hour = NAN;
+    debug = false;
+    __try {
+        const uintptr_t lightMgr = *reinterpret_cast<const uintptr_t*>(sky + 0x1F4);
+        if (lightMgr) hour = *reinterpret_cast<const float*>(lightMgr + 0xB4);
+        if (weather) debug = *reinterpret_cast<const BYTE*>(weather + 0xB04) != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+void __fastcall SunTimesHook(void* weather, void*, float* rise, float* set) {
+    g_sunTimes(weather, rise, set);
+    const uintptr_t sky = reinterpret_cast<uintptr_t>(rise) - 0x974;
+    float hour;
+    bool debug;
+    ReadSkyState(sky, reinterpret_cast<uintptr_t>(weather), hour, debug);
+    NightLevel::GateSunTimes(sky, reinterpret_cast<uintptr_t>(weather), debug, *rise, *set, hour);
 }
 
 // Finds "mov ecx,<scale>; call <mov eax,ecx; ret>; movss xmm0,[eax]" in the game image and points that call at
@@ -1470,8 +1486,8 @@ void OnPresent() {
         static bool s_held = false;
         if (NightLevel::Holding() != s_held) {
             s_held = !s_held;
-            LOG_INFO(s_held ? std::format("[NightTerrainRelight] The game's night level fell with Build mode's sun times: it stays {:.2f}", s.level)
-                            : std::string("[NightTerrainRelight] The game's own night level again (sun times back, or the level rose)"));
+            LOG_INFO(s_held ? std::format("[NightTerrainRelight] Build mode's seasonless sun times: the season's are kept (night level {:.2f})", s.level)
+                            : std::string("[NightTerrainRelight] The sky's own sun times again"));
         }
     }
     g_counter38 = c38;
@@ -2317,28 +2333,28 @@ class NightTerrainRelightPatch : public ApexPatch {
             if (g_bakePosInstalled) FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(kBakePosSite), kBakePosOrig.size());
         }
         g_lowLiftSeen = TerrainBakeRule::LowLampLift();
-        // The night level in Build mode (optional: without it Apex gates the level it reads, the game's own lamps fade)
-        NightLevel::g_setterHooked = false;
-        g_nightSetCall = 0;
+        // Day and night in Build mode (optional: without it Apex gates only the level it reads; the game's lamps fade)
+        NightLevel::g_timesHooked = false;
+        g_sunTimesCall = 0;
         {
             BYTE* base = nullptr;
             size_t size = 0;
-            const uintptr_t at = MemPatch::GetModuleInfo(GetModuleHandleW(nullptr), &base, &size) ? MemPatch::ScanPattern(base, size, kNightSetPattern) : 0;
-            const uintptr_t call = at ? at + 9 : 0;
+            const uintptr_t at = MemPatch::GetModuleInfo(GetModuleHandleW(nullptr), &base, &size) ? MemPatch::ScanPattern(base, size, kSunTimesPattern) : 0;
+            const uintptr_t call = at ? at + 10 : 0;
             int32_t rel = 0;
             if (call && MemPatch::ReadBytes(call + 1, reinterpret_cast<BYTE*>(&rel), 4) &&
-                MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(call + 5 + rel), kNightSetStart, sizeof(kNightSetStart))) {
-                g_nightSet = reinterpret_cast<NightSetFn>(call + 5 + rel);
-                g_nightSetOrig.assign(reinterpret_cast<const BYTE*>(call), reinterpret_cast<const BYTE*>(call) + 5);
-                const auto setBytes = CallPatch(call, 0, {}, reinterpret_cast<void*>(&NightSetHook), 5);
-                if (MemPatch::WriteBytes(call, setBytes, &patchedLocations, &g_nightSetOrig)) {
+                MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(call + 5 + rel), kSunTimesStart, sizeof(kSunTimesStart))) {
+                g_sunTimes = reinterpret_cast<SunTimesFn>(call + 5 + rel);
+                g_sunTimesOrig.assign(reinterpret_cast<const BYTE*>(call), reinterpret_cast<const BYTE*>(call) + 5);
+                const auto timesBytes = CallPatch(call, 0, {}, reinterpret_cast<void*>(&SunTimesHook), 5);
+                if (MemPatch::WriteBytes(call, timesBytes, &patchedLocations, &g_sunTimesOrig)) {
                     FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(call), 5);
-                    g_nightSetCall = call;
-                    NightLevel::g_setterHooked = true;
+                    g_sunTimesCall = call;
+                    NightLevel::g_timesHooked = true;
                 }
             }
-            if (g_nightSetCall) LOG_INFO(std::format("[NightTerrainRelight] Night level: the sky's call of the level setter at {:#x} goes through Apex (Build mode keeps the night)", g_nightSetCall));
-            else LOG_WARNING("[NightTerrainRelight] Night level: the sky's call of the level setter was not found; Apex keeps the night only for its own lamp terms in Build mode");
+            if (g_sunTimesCall) LOG_INFO(std::format("[NightTerrainRelight] Day and night: the sky's copy of the sun times at {:#x} goes through Apex (Build mode keeps the season's)", g_sunTimesCall));
+            else LOG_WARNING("[NightTerrainRelight] Day and night: the sky's copy of the sun times was not found; Apex keeps the night only for its own lamp terms in Build mode");
         }
         if (g_bakePosInstalled) LOG_INFO("[NightTerrainRelight] Terrain bake: lot lamps on the ground are stamped from 40 cm over their lot's ground");
         else LOG_WARNING("[NightTerrainRelight] Terrain bake position code differs or was not found: lamps on the ground light the lawn from their real height");
@@ -2573,8 +2589,8 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_chunkHookInstalled = false;
         g_bakeGainInstalled = false;
         g_bakePosInstalled = false;
-        NightLevel::g_setterHooked = false;
-        g_nightSetCall = 0;
+        NightLevel::g_timesHooked = false;
+        g_sunTimesCall = 0;
         LevelLightShare::SetBakeConeSpill(false);
         // The chunk re-render call is the game's own again: a local relight in progress is dropped (the chunk in flight, if
         // any, is rendered by the game at its next update). Its lamps were never marked as baked: the change is decided
