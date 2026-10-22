@@ -41,5 +41,8 @@ None offline. Every session checks the first 64 answers and then 1 in 64 against
 - The Layer mutators (AddChild / RemoveChild* / RemoveAll / Clear / SetId) could be hooked through their vtable slots as
   an extra "something changed" signal, and the eight WorldManager root writers through their entries; not done (the
   validation already covers removals; only an earlier duplicate ID is not covered).
+- Per-thread counters and the 16 recent answers per thread (`e4fb59a`): "from the index" share and "Object lookup by ID"
+  time in a room-solve frame against the previous build; still no `Verification mismatch`. The totals on the Developer
+  card lag by up to 256 counts per thread, by design.
 - Object service ID index (2.7.0): the Off line's checked answers with no "Verification" or turn-off message in a long
   session; its effect on hitches when lot lights update.

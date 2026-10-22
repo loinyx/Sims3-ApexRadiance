@@ -17,3 +17,11 @@ the known callers sort and unique.
 ### 2026-10-02: on by default (2.5.5)
 
 **Outcome:** default changed to on. See [group history](performance.md).
+
+### 2026-10-22: shared key lists
+
+**Context:** commit `f58a6f0`. A cached GetKeyList call copied each package's kept list under the lock: about 207
+packages a call, one allocation each, 2 ms a call on average and up to 4 ms on the render thread.
+
+**Outcome:** the kept lists are immutable vectors shared through `std::shared_ptr`; a lookup takes a reference and
+appends the same keys to the game's vector. Answers are unchanged.

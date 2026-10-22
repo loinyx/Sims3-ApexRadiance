@@ -112,7 +112,9 @@ Isolated pixels (leaf edges, thin rails) fade out. Off-screen samples count as s
 scene draws). Fallback: near 0.25, A 1.00008, `tanY = 1/4.293`. See
 [engine/camera-and-map-view.md](../engine/camera-and-map-view.md).
 
-**Resources.** R32F pyramid (3840x2304 with 9 levels at 4K) plus 8 one-level targets, two G16R16F targets at full screen size and a colour copy. No temporal history targets are allocated. Everything is released on
+**Resources.** R32F pyramid (3840x2304 with 9 levels at 4K) plus 8 one-level targets, two G16R16F targets at full screen size and a colour copy. The colour copy is made and read inside the AO pass only, so
+it is the full-resolution copy shared with Edge Smoothing, Depth Blur and Picture (`SceneCopy`,
+[architecture.md](../architecture.md#43-post-scene-chain-and-the-intz-depth-share)). No temporal history targets are allocated. Everything is released on
 device reset and rebuilt on the next frame.
 
 **Cost** at 3840x2160, native D3D9, RTX 4070 Ti SUPER:

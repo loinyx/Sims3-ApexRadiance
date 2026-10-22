@@ -216,6 +216,7 @@ assumed (a save loaded by day keeps a lamps-off terrain light).
 | Priority value edit | Exact comparison (`LightChanged`) for: Build mode editing; type-11 edits on the same lot (lot-owned any change, world-owned light, enable or zero-intensity change); ordinary enable switches (0x40 or intensity through 0, `ObservedEnableSwitch`); any change of a plain lamp on a visible lot. Resets the animated state |
 | Animated | 3 automatic changes within 60 s; expires after 120 s without one |
 | Settled lot | Seen for 10 s and no uncounted change for 5 s; required unless the change is an observed value edit with no addition or removal on that lot |
+| Observed value edit | A player-driven value change of a known lamp with no addition or removal on its lot. Counts only once the world is live (`LevelLightShare::WorldIsLive`, set by `OnWorldLive`), as the addition and removal path already requires: a lamp the game switches on the load screen is not taken as an edit and does not put the lot's rooms on the lamp edit budget |
 | Bulk | More than 8 changes in one enumeration, unless all are switches of one lot; ignored unless observed value edits |
 | Removal | Confirmed at the next enumeration if the lot is still there and lost no more lamps |
 | World lamps (lot 0) | `WorldLampPolicy::AcceptEdit`: observed value edits only, no additions or removals |
@@ -397,6 +398,8 @@ that do not rebuild the terrain`.
 - Relighting lots after every rebuild: a re-arm loop invalidating slow lot solves.
 - The "Rebuild terrain light" button for houses on foundations: the story gate drops their lamps from every bake.
 - Fixed 30 s rate for automatic changes: lamps switched by Sims stayed on the ground too long.
+- Skipping the daytime world-load rebuild when no baked lamp is lit: the bake's lamp light ignores the night level, and
+  the skip would leave the bake snapshot unset for later lamp edit decisions, for one frame saved per load.
 
 Details in [history](../../history/night-lighting-terrain-relight.md).
 

@@ -336,6 +336,14 @@ walls and lit the lower side wall around the corner.
    with no height test (`0x0069AC04` skips it). If the ray crosses no wall there, the shade was only the penumbra and the
    ray passes; otherwise the soft result stays (it alone knows a ray passed over a low wall). Status: *from where they
    enter its story N (outdoors M, past a wall end's penumbra P)*.
+7. **Window light channel test.** The window light's evaluation (type 7, `0x006BEFD0`) asks for every sample whether
+   the light belongs to channel 1 through its `vfunc+0x1C` (`0x006C1DD0`, shared by the light classes): the lot object
+   by id through ObjectById `0x00C62D40`, then the room's entry in that lot's table `+0x364`. Within one sample batch
+   on the light tree thread the light, its lot and that table do not change, so `WindowChannelHook` keeps the answer per
+   light and channel for the batch (256 slots, keyed by the batch serial); the first call of a batch, any call outside
+   a batch sample (`t_inBatchSample`) and any call on another thread ask the game. The slot is written only when it
+   holds the same function as the first light class. Tester switch *Window light channel memo*
+   (`perf_window_channel_memo`, on).
 
 ### Part 4: indoor light through openings
 
@@ -934,6 +942,8 @@ lighting, diagnostic arming, solves or budgets. An empty file means no qualifyin
 - Samples are recorded only while armed (Developer > Lighting *Record story light samples for the diagnostics*, or the
   first F8 of a session). The game's wall test is wrapped (`GameWallTest`, CALL at `0x0069FE93`) in every build (for the
   entry points of parts 3 and 4); the development build also records its result.
+- F8 (indoor diagnostics) prints *Window lights' channel test*: kept per batch or not installed, how often the game was
+  asked and how often the answer was kept for the sample batch (part 3, step 7).
 
 ### Address reference
 
@@ -989,6 +999,16 @@ outside walls' and slabs' copies `g_wallSnap` and `g_floorSnap`, the story grid 
 been missing from the loaded lots in two sweeps in a row (`liveness_prune.h`). Diagnostic sample recording exists only in developer mode and runs only while armed. Every
 floor in full detail adds solve work once when entering a lot. In-game cost has not been measured (see
 [validation](../../validation/night-lighting-level-light-share.md)).
+
+The hot loops of the room solve (`level_light_share.cpp`, `stairwell_bounce.h`, `penumbra.h`, `lamp_visibility.h`) take
+square roots and absolute values of floats from `ApexMath::Sqrt` and `ApexMath::Fabs`
+([`features/fast_math.h`](../../../features/fast_math.h)): `sqrtss` and a sign-bit mask, inline. Under `/fp:precise`
+`std::sqrt(float)` and `std::fabs(float)` are calls to the CRT, which ranked among the hottest Apex samples inside the
+game's room solve. `sqrtss` is correctly rounded like `sqrtf` and clearing the sign bit is exactly `fabsf`, so every
+result is bit for bit the same; the double overloads keep the standard functions. The light position (`vfunc+0x24`) is
+kept per point generation in 64 slots, one per light by its address (a room sees up to 32 lamps); a light that misses
+its slot asks the game again, so every position is the game's own. The stairwell timing total (a diagnostic, one
+solving thread) is a plain load and store instead of a 64-bit locked add.
 
 ## Closed-floor guards, directional weights and the retired mesh blockers
 

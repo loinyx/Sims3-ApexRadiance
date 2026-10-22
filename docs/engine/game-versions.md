@@ -30,7 +30,7 @@ Offline checker: `sigcheck.pl`, with its method notes (private research tools, n
 | Build | Exe | PE timestamp | `GameVersion` | Game-code addresses |
 |---|---|---|---|---|
 | Retail disc 1.67.2.024002 | TS3W.exe | 0x52D872DA | `Retail` | signature scan |
-| Steam 1.67.2.024037 | TS3W.exe | 0x52DEC247 | `Steam` | fixed (verified in `TS3W.exe`), signatures logged as a self-check |
+| Steam 1.67.2.024037 | TS3W.exe | 0x52DEC247 | `Steam` | fixed (verified in `TS3W.exe`), signatures logged as a self-check in developer mode |
 | EA app 1.69.47.024017 | TS3.exe | 0x6707155C | `EA` | signature scan |
 | Origin / EA 1.69.43.024017 | TS3.exe | 0x568D4BAC | `EA_1_69_43` | signature scan |
 | anything else | | | `Unknown` | signature scan |
@@ -88,8 +88,9 @@ shipping, so every signature logs enough to be refined from a player's `ApexRadi
 4. Cross-checks (non-Steam: a failed check drops the ids concerned): the nine light vtables are distinct and share one
    position function (`+0x24`), the batch solve call is one of the three point-solve calls and calls the point solve, the
    story refresh calls follow the cascade test in order.
-5. Steam 1.67.2: the scan runs the same way but only as a self-check. `GameAddr::Get` always returns the fixed address;
-   a signature that disagrees is logged as `DIFFERS: the fixed address is kept`. The features keep their exact byte
+5. Steam 1.67.2: the scan runs the same way but only as a self-check, and only in developer mode (it takes about
+   0.9 s of the start); with developer mode off the fixed addresses are used without a scan. `GameAddr::Get` always
+   returns the fixed address; a signature that disagrees is logged as `DIFFERS: the fixed address is kept`. The features keep their exact byte
    checks on Steam, so Steam behaviour is unchanged.
 
 `GameAddr::Get(id)` returns the address or 0. Every feature loads its addresses from `GameAddr` when it installs, checks
@@ -376,7 +377,7 @@ At HEAD, `framework/game_addresses.cpp` lists 230 ids (207 table rows; the other
 `CallersOf` and `SlotsOf` rows, by address). The rows below are the ids added after the last check recorded above. Their
 Steam address and signatures are copied from `kInfo` and `kTable`, and the notes from the comments in
 `framework/game_addresses.h`. Their match counts on Steam are not recorded in this page *(unverified here)*; run
-`sigcheck.pl` to record them. The self-check in `ApexRadiance_LOG.txt` reports any id whose signature does not give
+`sigcheck.pl` to record them. The self-check in `ApexRadiance_LOG.txt` (developer mode) reports any id whose signature does not give
 the fixed Steam address.
 
 | Id | Steam VA | Kind | Signature(s) | Notes |

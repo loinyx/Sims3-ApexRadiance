@@ -190,5 +190,15 @@ through, stored / not stored, entries, table restarts, container / object classe
 
 ### Consecutive lookup reuse
 
-A thread-local last entry (88 bytes on x86) avoids another shared lock and hash lookup for the same manager, object ID and generation. The local fast path expires with the shared entry, so a newly stored shared answer can replace it. Each answer still passes the existing age limit, live path validation and generation check. Invalidations discard the local answer. Public builds also omit unused timing reads.
+Each thread keeps its 16 most recent answers (one slot per key hash, an entry and its table generation) and answers a
+repeated lookup of the same manager, object ID and generation from them without the shared lock and hash probe; a room
+solve alternates between a few owners, and each miss there took the shared SRW lock. The local fast path expires with
+the shared entry, so a newly stored shared answer can replace it. Each answer still passes the existing age limit, live
+path validation and generation check. Invalidations discard the local answers. Public builds also omit unused timing
+reads.
+
+The statistics counters (status text only) are counted per thread and added to the shared 64-bit totals every 256
+counts, since a 64-bit atomic add is a `lock cmpxchg8b` loop on 32-bit x86 and a lookup made up to three of them; the
+totals lag by at most 256 per thread and counter. The verification serial (`CheckThisOne`) is 32 bits (`lock xadd`); a
+wrap only checks the first 64 answers again.
 

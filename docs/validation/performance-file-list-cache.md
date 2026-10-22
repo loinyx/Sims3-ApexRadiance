@@ -31,3 +31,5 @@ compares the keys as a set (plus the return value).
 ## Open checks
 
 - Memory use of kept lists in long sessions (the Developer line shows lists and keys kept).
+- Shared key lists (`f58a6f0`): the Frame Profiler's "Key list" time on the render thread in CAS against the previous
+  build (a lookup copied about 207 lists, 2 ms on average, up to 4 ms), and still no file list check difference.

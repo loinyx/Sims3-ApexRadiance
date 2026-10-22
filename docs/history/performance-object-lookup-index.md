@@ -29,3 +29,12 @@ its count (+0x1028), so an index kept by those two hooks can be checked against 
 
 **Outcome:** `ObjectIdMap`, an open-addressing side index started with Faster Object Lookups; answers only while the
 counts match, the first 256 checked against the game's walk. Released in 2.7.0.
+
+### 2026-10-22: cheaper counters and 16 recent answers
+
+**Context:** commit `e4fb59a`. A room-solve frame makes 150 to 180 thousand lookups, and each made up to three 64-bit
+atomic adds (`lock cmpxchg8b` loops on 32-bit x86); the one remembered answer per thread missed whenever a solve
+alternated between owners, and each miss took the shared SRW lock.
+
+**Outcome:** per-thread counters added to the totals every 256 counts, a 32-bit verification serial, and 16 recent
+answers per thread. Every answer is still validated against the live tree.

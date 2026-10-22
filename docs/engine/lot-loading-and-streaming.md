@@ -120,11 +120,26 @@ Load stages of `FUN_00AEA680` (from `re/out/fn_00aea680.c`; allocator tag string
 | 16 | "LotRenderer/InitDetailedView/..." room sets (sunnyRooms, lightableRooms, fogOfExplorationRooms, blackLitRooms, strobeLitRooms, buildableShellRooms) |
 | 17 / 18 | Post a job (function 0xACBB80) / wait for it (+0x30) |
 | 19 | Wait for `FUN_00C4D990` |
-| 20 (0x14) | Lighting ready (`FUN_00ADBBA0` -> `0x006A5B50` per level: both level solvers' state != 0, i.e. the **wall AO first pass** of every level ran; not yet = yield and retry next frame; round 3, [room-light-maps.md](room-light-maps.md) 4.5); clears manager+0x4F |
+| 20 (0x14) | Lighting ready (`FUN_00ADBBA0` -> `0x006A5B50` per level: both level solvers' state != 0, i.e. the **wall AO first pass** of every level ran; not yet = yield and retry next frame; round 3, [room-light-maps.md](room-light-maps.md) 4.5; full conditions [below](#stage-20-the-lighting-wait)); clears manager+0x4F |
 | 21 (0x15) | Done (`FUN_00AD9CA0`) |
 
 The budget stopwatch is unit 4 (ms), started once before the loop, and checked after each stage. A failed stage sets
 +0x1F and calls `FUN_00AE1A90(1)`.
+
+#### Stage 20: the lighting wait
+
+Stage 20 (case 20 of `0x00AEA680`) moves on only when `0x00ADBBA0` on the lot lighting manager (`[renderer+0x23C]`)
+finds every level of its deque (`+0x24..+0x40`, 64 levels per block) ready by `0x006A5B50`:
+
+1. A level with `[lvl+0x81] == 0` (not lit) is ready.
+2. Otherwise, when `[lvl+0x88] >= 0`, both solver states `[lvl+0x2A4]` and `[lvl+0x2FC]` must be non-zero (the wall AO
+   first pass ran, [room-light-maps.md](room-light-maps.md)).
+3. Then every room light of the level's table (buckets `+0x234`, count `+0x238`, next node `+0x80`, the room light at
+   node `+0x10`) must pass `0x0069F540(0)`: a room it does not let through on the level numbers (`[lvl+0x88]`,
+   `[lvl+0x284]`, `[room+0x18]`) must have `[room+0x104] != 4`.
+
+Not ready: the stage yields and is retried next frame. Lot loading analysis logs these fields for a lot that waits here
+for more than 10 s ([features/lot-load-analysis.md](../features/lot-load-analysis.md#lighting-wait-note)).
 
 #### Lot lighting manager
 - +0x14: lot.

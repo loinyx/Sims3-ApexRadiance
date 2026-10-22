@@ -124,3 +124,12 @@ the settings always forces `enabled` off, and profile import never starts a meas
 **Outcome:** commit `98a4149`: with *Per-hook registry timing*, the SetRenderTarget, Set*Shader, SetTexture, SetViewport
 and Set*ShaderConstantF chains are timed per name, each entry carrying a method suffix. The option's tooltip was not
 updated.
+
+### 2026-10-22: driver time of re-issued draws out of the hook cost
+
+**Context:** commit `24684ff`. The dispatch cost log line and *D3D hooks (mod)* counted the driver time of draws the
+callbacks issued themselves: only draws under `ReissueScope` (Night Lighting) were booked as *Re-issued draw (driver)*,
+so the Banding Fix's re-issue of every 3D back-buffer draw counted as mod time.
+
+**Outcome:** every original draw issued inside a dispatch is booked as *Re-issued draw (driver)*, and the dispatch
+cost line reports the callbacks' own time and that driver time apart ([architecture.md](../architecture.md#33-dispatch-and-locking)).

@@ -22,6 +22,8 @@ Per-switch harnesses (`tools/dxt_test`, `tools/refpack_test`, `tools/cas_sort_te
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-22 | `7d69737` | `tools/development/check.ps1 -Suite Smoke` (DXT, RefPack and CAS sort quick checks) | Passed | Offline CPU harnesses |
+| 2026-10-22 | `715a410` | `tools/development/check.ps1 -Suite Smoke`; development, public and standard builds | Passed; the three builds without warnings | Offline CPU harnesses, MSVC v143 x86 |
 | 2026-09-29 | first performance round | `sigcheck.pl` | 140 of 140 ok, each alternate matches once at the same place | None |
 | 2026-09-29 | round 3 ids | `sigcheck.pl` | 147 of 147 ok (every new primary signature and alternate) | None |
 | 2026-09-29 | v1.5.0 merge with C6 / C8 | `sigcheck.pl` | 153 of 153 ok | None |
@@ -47,6 +49,13 @@ Per-switch harnesses (`tools/dxt_test`, `tools/refpack_test`, `tools/cas_sort_te
 - In-game visual and performance validation of the removal of the *Optimize rendering* mode (released in 2.6.0).
 - Group switch of fifteen (2.7.0), profile behaviour and default-on loading (not yet confirmed in game).
 - Lot Streaming off by default and left alone by the built-in profiles (2.7.0).
+- Gameplay frame times of the start-up, lookup, room solve, motion pacing and shared scene copy changes from
+  `0405517` to `715a410` together: record frame times while moving the camera over a loaded neighbourhood at night, and
+  compare the Tester switches *Window light channel memo* and *Paced relight while moving* off and on. Not yet measured;
+  the offline harnesses do not cover it.
+- Start-up with developer mode off on Steam 1.67.2 (`70ad305`): the log shows `[Addr] Steam 1.67.2: the fixed addresses
+  are used ...` with no signature lines, and the features install earlier in the world load than before; a suspended
+  code write after the first takes no new thread snapshot within 1 s.
 
 ## Per-switch validation
 

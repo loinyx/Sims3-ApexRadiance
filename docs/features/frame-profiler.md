@@ -330,8 +330,10 @@ none.
   `EndModTime` around the whole chain, also when a callback returns Skip or Block. One outermost dispatch in
   16 is timed (`BeginModTimeSampled`) and booked 16 times, with every frame timed inside it; its parent loses the scaled
   time. Nested dispatches (a draw Night Lighting replaces is re-issued inside its own dispatch) are part of the outer
-  one, except the driver call of the re-issued draw, booked as **Re-issued draw (driver)** (the game would have paid it
-  for its own call). Per frame the figure is an estimate from about 1 in 16 dispatches; over a second it averages out.
+  one, except the driver call of any original draw a callback issues inside a dispatch (Night Lighting's re-issued
+  draws, the Banding Fix's dithered re-issue of 3D back-buffer draws, any `CallOriginalDraw*`), booked as **Re-issued
+  draw (driver)** (the game would have paid it for its own call). The same driver time is kept out of the dispatch cost
+  log line ([architecture.md](../architecture.md#33-dispatch-and-locking)). Per frame the figure is an estimate from about 1 in 16 dispatches; over a second it averages out.
 - **Present hooks (mod):** the -1000 Present hook is the frame boundary and pushes a `kPresentHooks` frame; the +1000
   hook pops it. It includes every module's Present hooks and the profiler's own per-frame bookkeeping.
 - **Lamp refresh (mod):** Night Lighting's 20-frame lamp list refresh (`LotLightBridge::OnPresent`,
@@ -442,7 +444,7 @@ joinable `std::thread` would `std::terminate` at exit), appending in binary mode
    `d3d:` counts, `lots promoted/demoted`, the counters line, the `dominant:` line, `services (render thread, ms incl /
    self)`, `jobs run on the render thread`, `render-thread waits`, `file reads`, and the per-thread sample summaries when
    sampling.
-4. *Save report now* (`BuildReport`): percentiles, last-60-frame averages, camera hit rates, hook status, GC call-site
+4. *Save report now* (`BuildReport`): percentiles, last-60-frame averages, the CPU line, camera hit rates, hook status, GC call-site
    state, limiter state, totals since Clear per category and bucket, per-hitch averages over the last 200 hitches, all
    200 hitches, keyed session tables (services / jobs / waits: ms per hitch vs per other frame), sim-loop services, the
    sampling tables, "Counters since Clear", "Counters per hitch", "Apex shaders: ..." (the
@@ -464,6 +466,20 @@ render group and after the other-threads group. Extras: RefPack compress `, in X
 Resource lookup `, from cache N` and `, absent from cache N`; Key list `, keys N` and `, packages from cache N`. The
 dominant key is a category name, `svc:<service>`, `job:<job name>` (`job:job 007297C0`, `job:remote call -> 00AC1130`)
 or `Unattributed`; `top counter: none` when no counter reached 0.05 ms of render self time.
+
+The CPU line (`CpuText`) says on which logical processors the two busiest threads run. The game gives the simulation
+thread ideal processor 1, which is the second hardware thread of core 0 on SMT CPUs, so a render thread mostly on
+logical 0 shares a physical core with it. Each Present counts the render thread's logical processor and each GC slice
+(`Hook_ScriptGC`) the simulation thread's (`GetCurrentProcessorNumberEx`, the first 64); *Clear* resets the counts.
+The line lists, per thread, every logical processor with at least 5% of the counts and its physical core (from
+`GetLogicalProcessorInformationEx`, group 0), and estimates how often both threads ran on the two hardware threads of
+one core, taking the two distributions as independent (illustrative values):
+
+```
+CPU: render thread on logical 0 (core 0) 71%, logical 4 (core 2) 22%; simulation thread on logical 1 (core 0) 96%; both on the two hardware threads of one core about 68% of the time (estimate)
+```
+
+`CPU: not counted yet` before the first Present or GC slice.
 
 `GcCallSiteText` inspects 0x00D819AA (Steam, after `MatchAt(0x00D819A0, "68 ?? ?? ?? ?? A3")`; elsewhere a unique scan):
 `90` = removed by Chunky Patch, `E8` to 0x00E4A050 = direct, `E8` elsewhere = redirected. `LimiterText` inspects

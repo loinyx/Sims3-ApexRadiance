@@ -33,6 +33,10 @@ only the repository and print to the console.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-22 | `7d69737` | `tools/development/check.ps1 -Suite Lighting` (`stairwell_bounce_test`, `opening_bounce_test`, `arch_ambient_test`; `stairwell_bounce.h` now uses `ApexMath`) | Passed | Offline CPU harnesses |
+| 2026-10-22 | `715a410` | `tools/development/check.ps1 -Suite Lighting` | Passed | Offline CPU harnesses |
+| 2026-10-22 | `715a410` | `tools/rt_lamps_test/run.ps1`, `tools/stairwell_bounce_test/run.ps1`, `tools/roofed_openings_test/run.ps1` | Passed: 22, 56 and 196 checks, no failure | Offline CPU harnesses |
+| 2026-10-22 | `522ef32` | Exhaustive comparison of `ApexMath::Sqrt` / `ApexMath::Fabs` (`features/fast_math.h`) with `std::sqrt(float)` / `std::fabs(float)` over all 2^32 float bit patterns | Bit-identical for every input, NaN payloads included | Offline CPU check |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/mesh_occlusion_test/` | Standard: 20,017 checks passed; development: 20,119 checks passed | None |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/liveness_prune_test/` | 27 checks passed | None (pure) |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/roofed_openings_test/` | 196 checks passed, including the stairwell veto, floor-level sill, hard wall top and arch cone cases | None (pure) |
@@ -190,6 +194,14 @@ topology mutation inside a point is not reproduced. This release does not promis
 
 ## Open checks
 
+- Window light channel memo (`7d69737`), in game: on a lot with window lights at night, F8's *Window lights' channel
+  test* shows the answers kept for the sample batch well above those asked of the game, and the rooms look the same
+  with the Tester switch *Window light channel memo* off and on.
+- Room solve with `ApexMath` and the 64-slot lamp position cache (`522ef32`): room solve time in the Frame Profiler
+  against the previous build on the same save; the light is expected to be identical.
+- Real-time outdoor lamps from the shader cache (`0405517`): with Lamp lighting on Instant, the log shows `Taking the
+  shadow and relight shaders from the shader cache` and the option becomes active without the former start-up compile;
+  no `does not compile` line.
 - The second solve of a room (fill or normalisation resend) is urgent only while a lamp edit is pending; after a load it queues as before. Expected: a placed lamp shows its final light without the 1-2 s step, and no 15-21 ms frames in the first seconds after loading a lot with stairwells and arches.
 - 2.14.0: indoor light through openings and between stories with the mesh blockers retired: no periodic room
   invalidations in a recording while the camera moves, and no hard tread shadow under stairs.

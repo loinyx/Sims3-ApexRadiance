@@ -58,3 +58,16 @@ frame for 8 s); and many lamps refined after their quick pass took 35 to 44 ms o
 
 **Outcome:** for 15 s after the world goes live the lot being played keeps the game's budget while moving and gets 25 ms
 still; while a quick pass is refined the budget is capped at 6 ms. All four changes released in 2.7.0.
+
+### 2026-10-22: paced raises while moving
+
+**Context:** commit `715a410`. In a frame-time recording, 61 of 197 hitches while the camera moved came from the two
+raised budgets that kept the game's full budget while moving: a lot settling after its load and a lamp switch's boost.
+
+**Finding:** the frame-time pacing the settle window already used with the camera still (`PaceSettle`) can dose both:
+the game's budget while frames hold, down to the moving budget when they do not. Only the pace of relighting changes,
+not the light.
+
+**Outcome:** both raises are paced while moving, behind the Tester switch *Paced relight while moving*
+(`perf_motion_paced_raise`, on) so the two paths can be compared in game. Gameplay measurement is open
+([validation](../validation/performance-lot-lighting-motion.md)).

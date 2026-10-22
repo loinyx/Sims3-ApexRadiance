@@ -22,6 +22,21 @@ contention and full queues increment a loss counter. The pump writes `LotLoadAna
 Apex documents folder, capped at 16 MiB per session, and logs terminal events. Captures have separate epochs when
 the profiler is toggled. Tracking holds at most 256 lot IDs; exceeding it discards request baselines with a warning.
 
+## Lighting wait note
+
+On Steam 1.67.2, while the profiler's load-stage wrapper is attached, after each load-stage call a lot that stays in stage 20 (the lighting wait) for more than 10 s has what it waits for
+written to the log, at most once every 30 s per lot (`NoteWait`; the text is built under SEH and written by the pump):
+
+```
+[LotLoadAnalysis] Lot <id> waits in stage 20 (lighting) for N s: level <ptr>: lit L, step A/B, solvers S1/S2, rooms R, waiting in state 4: W <room ptrs>; ...
+```
+
+Per level of the lot lighting manager: the lit flag `+0x81`, the steps `+0x88` / `+0x284`, the two solver states
+`+0x2A4` / `+0x2FC` and, for a lit level, the rooms of its table and how many of them still hold it in state 4 (up to
+four listed). The conditions are those of stage 20 in
+[engine/lot-loading-and-streaming.md](../engine/lot-loading-and-streaming.md#stage-20-the-lighting-wait). At most 256
+waiting lots are tracked; a lot that leaves stage 20, finishes or fails is forgotten.
+
 ## Recorded data
 
 - Full development build, QPC timestamp/frequency, thread and capture epoch.

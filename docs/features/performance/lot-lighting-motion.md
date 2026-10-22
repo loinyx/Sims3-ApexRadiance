@@ -38,17 +38,25 @@ tool mode's 1000 ms budget is never changed.
 The same hook also adjusts the budget around lamp edits and loads (budgets of 15 ms or more and under 100 ms, that is
 the lot being played):
 
-- **A lamp just switched:** the game's own budget is kept for a moment, even while the camera moves (`Boost`).
+- **A lamp just switched:** the lot keeps a raised budget for a moment (`Boost`): the game's own with the camera still,
+  and the paced budget below while it moves.
 - **After a load or entering a lot:** for 15 s after the world goes live, and for 10 s after the camera enters a lot
-  (`LevelLightShare::SettlingAfterLoad`), the lot being played keeps the game's budget while the camera moves and gets
-  up to 25 ms with it still, so a lot corrects its lighting in one round. Since 2.15.1 the raise (and the room queue's
-  drain raise from 4 to 12 ms, [Faster room lighting](room-light-queue.md)) is dosed by the frame time (`PaceSettle`, on
-  the Present sample): the baseline is the frame time outside the window; in it a frame over max(16.7 ms, 1.5 x
-  baseline) takes 0.15 off the scale, a frame under 0.8 x that target gives 0.05 back (each window starts at 0.5). The
-  game budget becomes `game + (25 - game) x scale`, the drain `4 + (12 - 4) x scale`. A fast PC keeps the quick light,
-  a PC at its limit keeps the game's own budget (an F8 session while lots loaded: frames of 31 to 37 ms of room
-  solving in 276 of 440 hitches). Without the Present sample (both camera-motion options off) the scale stays 1.
-  Developer status: *Settle pacing* on the Lighting while the camera moves card.
+  (`LevelLightShare::SettlingAfterLoad`), the lot being played gets up to 25 ms with the camera still, so a lot corrects
+  its lighting in one round, and the paced budget below while it moves. With the camera still the raise (and the room
+  queue's drain raise from 4 to 12 ms, [Faster room lighting](room-light-queue.md)) is dosed by the frame time
+  (`PaceSettle`, on the Present sample): the baseline is the frame time outside the window; in it a frame over
+  max(16.7 ms, 1.5 x baseline) takes 0.15 off the scale, a frame under 0.8 x that target gives 0.05 back (each window
+  starts at 0.5). The game budget becomes `game + (25 - game) x scale`, the drain `4 + (12 - 4) x scale`. A fast PC
+  keeps the quick light, a PC at its limit keeps the game's own budget (an F8 session while lots loaded: frames of 31 to
+  37 ms of room solving in 276 of 440 hitches). Without the Present sample (both camera-motion options off) the scale
+  stays 1. Developer status: *Settle pacing* on the Lighting while the camera moves card.
+- **Paced while moving:** during a lamp switch's boost or the settle window, a moving camera gives
+  `moving + (game - moving) x scale`, where *moving* is the scaled budget above and *scale* the same frame-time pacing
+  (a lamp switch's boost is a pacing window too): the game's budget while the frames hold, down to the moving budget
+  when they do not. These two raises caused many of the hitches while panning (a frame-time recording: 61 of 197). The
+  lamp edit room's 6 ms below still applies. Only how fast those rooms relight while panning changes, not their light.
+  Tester switch *Paced relight while moving* (`perf_motion_paced_raise`, on); off, both keep the game's full budget
+  while moving.
 - **A lamp edit's room while moving:** while the room being solved is an edit's urgent room
   (`RoomLightQueue::CurrentRoomUrgent`), the lot being played gets the game's budget up to 6 ms (`kEditMovingMs`)
   instead of the scaled one, so an edit made while panning does not wait for 3 ms slices. Which lot a budget call serves
@@ -182,7 +190,7 @@ Group `LotLightingMotion`.
 
 Developer card *Lighting while the camera moves*: the call and camera addresses, "Camera moving" / "Camera still", the
 last camera move, frames sampled, lot build slices (shortened while moving, on / off), budget calls, calls scaled while
-moving, camera reads failed and the last budget ("game 15.00 ms -> 3.00 ms").
+moving (a lamp edit's room kept up to 6 ms; settle or lamp switch paced), camera reads failed and the last budget ("game 15.00 ms -> 3.00 ms").
 
 ## Rejected approaches
 

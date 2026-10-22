@@ -175,7 +175,9 @@ Capture; `RawSet/RawGetDepthStencilSurface` bypass the substitution.
   depth buffer yet)" or "Waiting for the game (depth buffer is not the screen's)". Kept (AddRef) as `origDS`.
 - **INTZ** texture `W x H` (`D3DUSAGE_DEPTHSTENCIL`, `MAKEFOURCC('I','N','T','Z')`) and its level 0; failure: "ERROR: the
   graphics card/driver does not support INTZ depth textures".
-- **fullTex:** `W x H` render target in the back buffer's format (Prep colour source; 33 MB at 4K).
+- **fullTex:** `W x H` render target in the back buffer's format (Prep colour source; 33 MB at 4K). Copied and read
+  inside the blur pass only, so it is the full-resolution copy shared with Ambient Occlusion, Edge Smoothing and
+  Picture (`SceneCopy`, [architecture.md](../architecture.md#43-post-scene-chain-and-the-intz-depth-share)).
 - **halfA / halfB:** `ceil(W/2) x ceil(H/2)`, `A16B16G16R16F` when `CheckDeviceFormat` reports it as a filterable render
   target and creation succeeds; else `A8R8G8B8` with `[DepthBlur] 16-bit float render targets not available, using
   A8R8G8B8 (blur in gamma space)` (linear light off: an 8-bit linear image would band in the darks). Alpha carries the
@@ -409,7 +411,7 @@ details*.
 At 3840 x 2160 on an RTX 4070 Ti SUPER, Quality High: copy about 0.1 ms, Prep about 0.15 ms (8 fetches per half-res
 texel, 66 MB read), gather H + V about 0.2 to 0.3 ms (2 x 17 bilinear FP16 taps on 2 Mpx, sharp pixels exit early),
 composite about 0.2 ms, focus negligible: about 0.6 to 0.8 ms (Ultra about 0.9 ms). Memory: INTZ 33 MB, full copy
-33 MB, two 16.6 MB FP16 targets. The card shows the measured value.
+33 MB (shared with the other screen passes), two 16.6 MB FP16 targets. The card shows the measured value.
 
 ## Rejected approaches
 

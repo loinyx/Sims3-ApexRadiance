@@ -92,7 +92,10 @@ Lines logged before the log file opens are queued and written first.
    off, the startup state becomes `RefusedOldBuild` and a banner asks to delete it.
 10. Otherwise `GameAddr::Resolve()` resolves every game-code address (fixed on Steam 1.67.2, signature scan elsewhere;
     on the EA app build `.text` is decrypted only in memory, which is long done by now), then `ApexConfig::LoadFeatures()`
-    applies `[patches.*]` and installs the enabled features. Startup state `Running`.
+    applies `[patches.*]` and installs the enabled features. Startup state `Running`. On Steam 1.67.2 the signature scan
+    is only a self-check for the log (about 0.9 s), so it runs in developer mode only; with developer mode off the fixed
+    addresses are taken at once (`[Addr] Steam 1.67.2: the fixed addresses are used ...`) and the features start
+    sooner in the world load.
 11. `CrashReport::Install()`, after the game's own start-up (which may set its own filter).
 12. **Pump loop** every 10 ms (`kPumpIntervalMs`) until the stop event:
     - `PatchManager::UpdateAll()` while `Running` (each feature's `Update()`: debounced reinstalls, work scheduled off the
@@ -262,9 +265,12 @@ registered:
   dispatch run inside one exception frame (re-entered at the next callback after one threw), the thread's CallOriginal*
   counter is read through a pointer taken once per dispatch, each callback's off flag through a raw pointer, and the
   developer and timing flags once per dispatch.
-- **Dispatch cost (developer build).** Every dispatch with callbacks is counted and one in 16 is timed with the time
-  stamp counter; every 10 s the Present hook logs `[D3D9Hooks] Dispatch cost over 10 s: N dispatches with callbacks a
-  frame, X us each (sampled 1 in 16, callbacks included), about Y ms a frame`.
+- **Dispatch cost (developer build).** Every dispatch with callbacks is counted and one outermost dispatch in 16 is
+  timed with the time stamp counter; every 10 s the Present hook logs `[D3D9Hooks] Dispatch cost over 10 s: N
+  dispatches with callbacks a frame, X us each in the callbacks (sampled 1 in 16), about Y ms a frame; draws the
+  callbacks issued themselves: Z ms a frame in the driver`. The driver time of original draws a callback issues inside a
+  sampled dispatch (Night Lighting's re-issued draws, the Banding Fix's dithered re-issue, any `CallOriginalDraw*`) is
+  measured apart and taken out of X, so X is the callbacks' own cost.
 - **Bound shaders.** `BoundPixelShader(device)` / `BoundVertexShader(device)` give the shaders bound now on the render
   thread without a device call: they are followed through the Set*Shader dispatches and `CallOriginalSet*Shader`, and
   read back from the device when not known (another thread, a device call from another thread, every BeginScene and
@@ -273,7 +279,8 @@ registered:
 - **Performance switches.** `features/perf_toggles.h` (`PerfToggles`) holds one atomic switch, on by default, per
   per-frame cache or filter (re-issued draw filter, followed shaders, sampled timing, precompile answer, Ambient
   Occlusion's last shader, Banding Fix front caches, Night Lighting's shader facts, rig mode and indoor sampler scan,
-  the room solve's record lookup). Off restores the earlier path live, so frame rates can be compared.
+  the room solve's record lookup, the window light's channel memo, the paced relight while the camera moves). Off
+  restores the earlier path live, so frame rates can be compared ([Tester tab](features/dev-tools/tester.md)).
 - **Locked chains.** Present, BeginScene and the four Create* chains, and any chain called from **another thread**, run
   under one recursive registration lock. Off-thread dispatches of the lock-free chains are counted
   (`D3D9Hooks::OffThreadDispatches()`, shown by the Frame Profiler); the first one per method is logged
@@ -426,12 +433,23 @@ One shared trigger runs effects on the finished 3D scene, before any game UI
   off). Night Lighting's pond reflection reads the texture when it exists and does not request it. A multisampled back
   buffer means the game's Edge Smoothing (MSAA) is on: the swap then refuses, with the status "turn it off in Options >
   Graphics".
+- **Shared scene copy (`SceneCopy`, [framework/scene_copy.h](../framework/scene_copy.h)):** Ambient Occlusion, Edge
+  Smoothing, Depth Blur and Picture's frame copy each copy the back buffer right before their own pass and read that
+  copy only inside it, so the copy holds nothing from one pass to the next and one full-resolution render-target
+  texture serves all four (about 100 MB less video memory at 3840x2160 than one copy each). `Acquire` hands the
+  texture to a holder (created with the first), `Drop` gives it back and the last holder releases it; every holder
+  drops it where it releases its other `D3DPOOL_DEFAULT` resources (before a device Reset, on uninstall). A holder that
+  asks for another size or format while the shared one is held gets a texture of its own (logged `[SceneCopy] A copy of
+  WxH was asked ...`). Picture's copy of the finished scene, kept from the end of the scene until its final pass, stays
+  its own.
 
 ### 4.4 Shader precompile
 
 <a id="shader-precompile"></a>
-Apex's own HLSL pixel shaders are never compiled on the render thread
-([framework/shader_cache.cpp](../framework/shader_cache.cpp)).
+Apex's own HLSL shaders are never compiled on the render thread
+([framework/shader_cache.cpp](../framework/shader_cache.cpp)). Users: Ambient Occlusion, Edge Smoothing, Depth Blur, Picture,
+Night Lighting's lot pass and light map smoothing (`lot_light_bridge.cpp`, `lightmap_smooth.cpp`) and the 13 shaders of
+[Real-time outdoor lamps](features/night-lighting/rt-outdoor-lamps.md).
 
 - **Registration:** each feature adds every variant it can use (all qualities and modes) with `ShaderCache::Add` from
   namespace-scope initialisers in its own `.cpp`, so the list is complete before the init thread runs. A `Desc` keeps
@@ -459,7 +477,8 @@ Apex's own HLSL pixel shaders are never compiled on the render thread
   worker has not reached that variant yet, it becomes the worker's next job and the caller waits (logged as a warning
   `waited for the precompile`, counted; the worker is raised to normal priority). With no worker left (thread creation
   failed, or FreeLibrary) the variant is compiled on the calling thread as a last resort (logged).
-  `PrecompileComplete()` is a non-blocking readiness probe.
+  `ShaderCache::Bytecode(id, out, &msg)` (any thread, same wait) hands out the bytecode itself, for shaders a feature
+  creates on its own (vertex shaders, Real-time outdoor lamps). `PrecompileComplete()` is a non-blocking readiness probe.
 - **Reset and release:** D3D9 shader objects survive `Reset`. Features that release them (Uninstall, Shutdown) recreate
   them from the kept bytecode, never compiling again.
 - **Status:** `ShaderCache::StatusText()` on the Developer page and in the profiler report (`Apex shaders: ...`).
@@ -477,7 +496,7 @@ Apex's own HLSL pixel shaders are never compiled on the render thread
 | `MemPatch::ReadBytes` / `ValidateBytes` | Guarded read; compare with expected bytes |
 | `MemPatch::WriteBytes` / `WriteDWORD` | Write code or data (protection lifted, instruction cache flushed); with `expected`, nothing is written unless the current bytes match; `undo` receives the old bytes |
 | `MemPatch::RestoreAll(undo)` | Restores every recorded write, newest first; keeps what could not be restored |
-| `MemPatch::WriteCodeSuspended(address, bytes, n)` | Writes 1 to 16 code bytes with every other thread suspended and none stopped inside them (retried for about 100 ms), for CALL rewrites that several threads may run. Nothing is allocated and no lock is taken while threads are suspended |
+| `MemPatch::WriteCodeSuspended(address, bytes, n)` | Writes 1 to 16 code bytes with every other thread suspended and none stopped inside them (retried for about 100 ms), for CALL rewrites that several threads may run. Nothing is allocated and no lock is taken while threads are suspended. The list of the other threads (a Toolhelp snapshot of every thread of the system, about 60 ms) is kept for 1 s and reused by later writes from the same thread; a thread started in that second is not suspended, which is safe because these writes happen at feature install, when no new thread runs the game's code |
 | `MemPatch::CalculateRelativeOffset(from, to, length)` | rel32 for a JMP or CALL |
 | `MemPatch::ScanPattern(base, size, "8B 4E ?? E8")` | First match of an IDA-style pattern; unreadable memory skipped |
 | `DetourBatch::InstallHooks` / `RemoveHooks` | Several Detours hooks in one all-or-nothing transaction |

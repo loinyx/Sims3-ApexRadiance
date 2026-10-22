@@ -38,3 +38,7 @@ None offline.
 
 - 2.15.1 settle pacing: frame times while lots load, against 2.15.0 on the same save, not yet measured.
 - Why the current lot relights continuously while the camera moves.
+- Paced relight while moving (`715a410`): pan right after a load and right after switching lamps, with the Tester switch
+  *Paced relight while moving* off and on. **Expected:** fewer hitches while moving with it on (the developer card's
+  *settle or lamp switch paced* count grows), the same final light, and on a fast PC relighting about as quick as before.
+  Not yet measured in game.

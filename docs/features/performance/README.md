@@ -259,6 +259,9 @@ preferences ([developer-mode.md](../developer-mode.md)), never with profiles unl
   reused texture metadata: removed in 2.6.0. Details in [history](../../history/performance.md).
 - A lot lighting budget while the camera is still: reverted, lamps moved in Build mode updated visibly slower. See
   [lot-lighting-motion.md](lot-lighting-motion.md).
+- Thread affinity or ideal-processor changes for the render and simulation threads: deferred, no cache gain on a
+  single-CCD CPU; the Frame Profiler's CPU line gathers the evidence first. Details in
+  [history](../../history/performance.md#2026-10-22-thread-affinity-and-smt-placement-deferred).
 
 ## See also
 

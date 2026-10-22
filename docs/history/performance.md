@@ -103,6 +103,19 @@ the next save. In-game validation of the removal is an open check.
 default) and the Overview group switch, which now skips a switch the game version lacks. The five Lot Streaming switches
 have their own page, are off by default, and are neither in the group nor in the built-in profiles. Released in 2.7.0.
 
+### 2026-10-22: thread affinity and SMT placement (deferred)
+
+**Context:** the game gives the simulation thread ideal processor 1, the second hardware thread of core 0 on SMT CPUs,
+so it may share a physical core with the render thread. Setting thread affinity or ideal processors was considered,
+for example on single-CCD CPUs such as the Ryzen 7 7800X3D.
+
+**Finding:** on one CCD affinity brings no cache gain: every core shares the same L3, which already holds Apex's
+caches. Whether the two threads actually share a core, and for how long, had not been measured.
+
+**Outcome:** deferred. The Frame Profiler report gained a CPU line (logical processors of the render and simulation
+threads, SMT pairs and an estimated shared-core share, [frame-profiler.md](../features/frame-profiler.md#output-file))
+to gather that evidence first; no scheduling change is made.
+
 ## Switch histories
 
 [Room lighting](performance-room-light-queue.md), [lot lighting](performance-lot-lighting-motion.md),

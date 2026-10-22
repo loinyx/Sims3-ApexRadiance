@@ -45,7 +45,9 @@ and off, for frame time and for look, without another build.
 | | Relight when the lamp is let go | `drag_let_go` | Releasing the mouse button ends a drag at once, without the 400 ms still time (`DragLite::LetGo`) |
 | | Show the lamp's room as soon as it is solved | `own_room_at_once` | No 300 ms grace for the rooms around the lamp; a room not solved since its mark keeps its maps until it is (`AtriumHold`, trailing) |
 | | Furniture changes with its room | `furniture_with_room` | Any lamp edit, not only switches, holds the furniture's lights until its room's maps show the edit (`HoldRig`, `AtriumHold::RoomShowsOldLight`) |
-| Per-frame work | Story grid memo, and the ten `PerfToggles` caches and filters | `grid_memo`, `perf_*` | The cache or filter; the earlier per-frame path gives the same result |
+| Per-frame work | Story grid memo, and the twelve `PerfToggles` caches, filters and pacing rules | `grid_memo`, `perf_*` | The cache or filter; the earlier per-frame path gives the same result |
+| | Window light channel memo | `perf_window_channel_memo` | The window light's channel test kept per sample batch ([level light share](../night-lighting/level-light-share.md#part-3-walls-of-the-lamps-story)); off, the game is asked for every sample. Same light |
+| | Paced relight while moving | `perf_motion_paced_raise` | The frame-time pacing of a settling lot's and a lamp switch's raised budgets while the camera moves ([Lot Lighting While Moving](../performance/lot-lighting-motion.md#how-apex-radiance-solves-it)); off, they keep the game's full budget while moving. Same light, only the pace of relighting changes |
 
 A switch that changes the story grids (Colonnades) builds them again and relights every room; Roofed rooms from the
 story below relights every room; the rig switches make the object rigs gather again. The other switches act on the next

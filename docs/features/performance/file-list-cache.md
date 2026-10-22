@@ -87,6 +87,11 @@ Verification uses the lookup cache's *Check 1 answer in N* control ([resource-lo
 - Cached calls: `unique` false, an `out` vector, a filter whose vtable is the type filter's, no list change in progress.
 - Same packages in the same order, same keys per package; only the order inside one package can be the other of the
   game's own two orders.
+- **Shared lists.** Each kept list is an immutable vector held by a `std::shared_ptr<const std::vector<uint32_t>>`
+  (`KlKeys`). `KlStore` builds it outside the lock and moves it in; `KlFind` takes a reference under the shared lock,
+  and the keys are appended to the game's vector after the lock is released. A lookup therefore copies no list under
+  the lock (about 207 packages a call, each copy an allocation, on the render thread); a list replaced or dropped while
+  a lookup still reads it lives until that lookup ends.
 - **Verification** (1 call in N, as the lookup cache): the real calls run for every read-only package with a kept list
   and their keys are compared as a set (plus the return value). A difference turns the file list cache off for the
   session and is logged.
