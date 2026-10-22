@@ -136,6 +136,7 @@
 #include <cstring>
 #include <format>
 #include <iterator>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
@@ -1308,10 +1309,13 @@ constexpr size_t kKlMaxKeys = 1u << 18;    // keys kept in total (4 MB); more: e
 constexpr size_t kKlMaxPerList = 1u << 16; // longer lists are not kept
 constexpr uint32_t kKlMaxAgeMs = 60000;
 
+// (2.15.3) The keys are shared, read only: a lookup took a copy of each package's list under the lock (about 207 packages a
+// call, one allocation each; 2 ms a call on average, up to 4 ms, on the render thread). It now takes a reference.
+using KlKeys = std::shared_ptr<const std::vector<uint32_t>>;
 struct KlEntry {
     uint32_t tick = 0;
-    int32_t ret = 0;             // what the package's GetKeyList returned
-    std::vector<uint32_t> keys;  // 4 dwords per key, in the order it appended them
+    int32_t ret = 0; // what the package's GetKeyList returned
+    KlKeys keys;     // 4 dwords per key, in the order it appended them (never null once stored)
 };
 std::unordered_map<uint64_t, KlEntry> g_kl; // guarded by g_klLock
 SRWLOCK g_klLock = SRWLOCK_INIT;
@@ -1326,19 +1330,20 @@ inline uint64_t KlKey(uint32_t db, uint32_t type) { return (static_cast<uint64_t
 
 // 07/10, players' Runtime Error: these run inside the game's GetKeyList on any thread. The locks are scoped and the copies
 // caught: a list that cannot be copied is simply not remembered / not found (the package is asked, as without the cache).
-bool KlFind(uint32_t db, uint32_t type, uint32_t gen, std::vector<uint32_t>& keys, int32_t& ret) {
+bool KlFind(uint32_t db, uint32_t type, uint32_t gen, KlKeys& keys, int32_t& ret) {
+    keys.reset();
     try {
         ApexUtil::SrwShared srw(g_klLock);
         if (g_klGen == gen) {
             const auto it = g_kl.find(KlKey(db, type));
-            if (it != g_kl.end() && GetTickCount() - it->second.tick <= kKlMaxAgeMs) {
+            if (it != g_kl.end() && it->second.keys && GetTickCount() - it->second.tick <= kKlMaxAgeMs) {
                 keys = it->second.keys;
                 ret = it->second.ret;
                 return true;
             }
         }
     } catch (...) {
-        keys.clear();
+        keys.reset();
     }
     return false;
 }
@@ -1349,7 +1354,7 @@ void KlStore(uint32_t db, uint32_t type, uint32_t gen, int32_t ret, const std::v
         return;
     }
     try {
-        std::vector<uint32_t> copy = keys; // outside the lock; moved in below, so a failure never leaves a half-updated entry
+        KlKeys copy = std::make_shared<const std::vector<uint32_t>>(keys); // outside the lock; moved in below, so a failure never leaves a half-updated entry
         ApexUtil::SrwExclusive srw(g_klLock);
         if (g_gen.load() == gen && g_mutating.load() == 0) {
             if (g_klGen != gen || g_klKeyCount + keys.size() / 4 > kKlMaxKeys) {
@@ -1358,11 +1363,11 @@ void KlStore(uint32_t db, uint32_t type, uint32_t gen, int32_t ret, const std::v
                 g_klGen = gen;
             }
             KlEntry& e = g_kl[KlKey(db, type)]; // the only allocation under the lock: nothing changed yet if it throws
-            g_klKeyCount -= e.keys.size() / 4;
+            if (e.keys) g_klKeyCount -= e.keys->size() / 4;
             e.tick = GetTickCount();
             e.ret = ret;
             e.keys = std::move(copy);
-            g_klKeyCount += e.keys.size() / 4;
+            g_klKeyCount += e.keys->size() / 4;
             c_klStored.Add();
         } else {
             c_klNotStored.Add();
@@ -1464,7 +1469,8 @@ uint32_t ReadU32(uintptr_t a) {
 int32_t EmulateKeyList(uintptr_t begin, uintptr_t end, uint8_t* out, void* filter, uint32_t type, KeyListNote& note) {
     const uint32_t gen = g_gen.load(std::memory_order_acquire);
     const bool verify = ShouldVerify(t_klVerifyCount);
-    std::vector<uint32_t> cached, got; // per call (a database call never re-enters GetKeyList, but nothing depends on it)
+    KlKeys cached;
+    std::vector<uint32_t> got; // per call (a database call never re-enters GetKeyList, but nothing depends on it)
     int32_t count = 0;
     for (uintptr_t p = begin; p != end; p += 8) {
         void* db = *reinterpret_cast<void* const*>(p);
@@ -1479,7 +1485,7 @@ int32_t EmulateKeyList(uintptr_t begin, uintptr_t end, uint8_t* out, void* filte
         int32_t cachedRet = 0;
         const bool have = KlFind(dbv, type, gen, cached, cachedRet);
         if (have && !verify) {
-            for (size_t k = 0; k + 4 <= cached.size(); k += 4) AppendKey(out, cached.data() + k);
+            for (size_t k = 0; k + 4 <= cached->size(); k += 4) AppendKey(out, cached->data() + k);
             count += cachedRet;
             note.cachedPackages++;
             c_klFromMem.Add();
@@ -1496,8 +1502,8 @@ int32_t EmulateKeyList(uintptr_t begin, uintptr_t end, uint8_t* out, void* filte
         if (have) {
             const bool settled = g_gen.load() == gen && g_mutating.load() == 0;
             if (!settled) c_klInconclusive.Add();
-            else if (r == cachedRet && SameKeys(cached, got)) c_klVerified.Add();
-            else KlMismatch(dbv, type, cached.size() / 4, got.size() / 4, cachedRet, r);
+            else if (r == cachedRet && SameKeys(*cached, got)) c_klVerified.Add();
+            else KlMismatch(dbv, type, cached->size() / 4, got.size() / 4, cachedRet, r);
             continue;
         }
         // an empty list may come from a failed open: kept only when the package answered from its key set or open index
