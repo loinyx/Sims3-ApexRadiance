@@ -1,4 +1,5 @@
 #include "../../features/world_lamp_policy.h"
+#include "../../features/night_level.h"
 #include <cmath>
 #include <cstdio>
 #include <initializer_list>
@@ -40,6 +41,27 @@ int main() {
     TerrainBakeRule::g_lowLampLift = false;
     check(TerrainBakeRule::StampHeight(0.05f) == 0.05f);
     TerrainBakeRule::g_lowLampLift = true;
+    // (2.15.1) night level: a fall with the clock stopped (Build mode) keeps the level of before; a rise and a fall with
+    // the clock moving are taken
+    {
+        alignas(4) unsigned char mgr[0x100] = {};
+        float* f0 = reinterpret_cast<float*>(mgr + 0xF0);
+        float* hour = reinterpret_cast<float*>(mgr + 0xB4);
+        const uintptr_t m = reinterpret_cast<uintptr_t>(mgr);
+        float lv = -1.0f;
+        *hour = 18.952f, *f0 = 0.0f;
+        check(NightLevel::Read(m, lv) && lv == 0.0f);
+        *f0 = 0.6f;
+        check(NightLevel::Read(m, lv) && lv == 0.6f); // a world loaded at night: the ramp with the clock still
+        *f0 = 1.0f;
+        check(NightLevel::Read(m, lv) && lv == 1.0f && !NightLevel::Holding());
+        *f0 = 0.0f;
+        check(NightLevel::Read(m, lv) && lv == 1.0f && NightLevel::Holding()); // Build mode
+        *f0 = 1.0f;
+        check(NightLevel::Read(m, lv) && lv == 1.0f && !NightLevel::Holding()); // back to live mode
+        *hour = 6.5f, *f0 = 0.8f;
+        check(NightLevel::Read(m, lv) && lv == 0.8f && !NightLevel::Holding()); // dawn, the clock moving
+    }
     check(TerrainBakeRule::AreaType(9) && TerrainBakeRule::AreaType(10) && !TerrainBakeRule::AreaType(7) && !TerrainBakeRule::AreaType(11));
     std::printf("World lamp policy: %d checks, %d failures\n", checks, failed);
     return failed ? 1 : 0;

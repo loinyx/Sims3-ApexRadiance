@@ -592,7 +592,7 @@ float g_sunScaled = 0.0f;
 // the sun is below the horizon, so y is that minimum and the moon (the same direction, x mirrored) sits at atan(min / its
 // horizontal part): 0.7 degrees after dusk (min 0.0122), a few degrees at most later. At that height every bump of a road's
 // normal map and every road piece's slight tilt switched the moon on or off and curbs cast shadows tens of metres long
-// (21/10: dark bands on roads 40 % under the snow beside them, with moonlight x1.82). At full night the minimum is raised so
+// (dark bands on roads 40 % under the snow beside them, with moonlight x1.82). At full night the minimum is raised so
 // the moon stands at least kMoonHeightDeg high; its horizontal direction still turns as the game moves it. FUN_00C11AD0
 // calls this getter with ESI = that object (light direction +0x7F0, read for SetSun 0x006ACDF0 right after), so the new
 // minimum shapes the next frame's direction. By day and through dusk the game's minimum is put back.
@@ -1454,8 +1454,8 @@ void OnPresent() {
         static bool s_held = false;
         if (NightLevel::Holding() != s_held) {
             s_held = !s_held;
-            LOG_INFO(s_held ? std::format("[NightTerrainRelight] The game uses its seasonless sun times (Build mode): the night level stays {:.2f}", s.level)
-                            : std::string("[NightTerrainRelight] The game's own night level again (seasonless sun times ended)"));
+            LOG_INFO(s_held ? std::format("[NightTerrainRelight] The game's night level fell with the clock stopped (Build mode): it stays {:.2f}", s.level)
+                            : std::string("[NightTerrainRelight] The game's own night level again (the clock runs or the level rose)"));
         }
     }
     g_counter38 = c38;

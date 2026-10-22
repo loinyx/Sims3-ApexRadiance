@@ -251,13 +251,14 @@ on at dusk through the same setter but re-solves neither lots nor terrain. Apex 
 (night_terrain_relight `ReadLightState`, object_light_bridge `ReadNight`) and passes it to shaders as the moon-shadow fade
 (see [shaders.md](shaders.md)) and to the room-rig re-gather (every 0.1 of change).
 
-**Build mode (2.15.1).** The sky asks the weather manager `*(*(sky+0x21C)+0x74)` for sunrise and sunset (`FUN_00D68FE0`,
-called at `0x00C15D9A`); its byte `+0xB04` picks the set at `+0xA48` instead of the season's at `+0x9EC`. Build mode sets
-it: in a winter world at 18:57 sunrise / sunset went from 2.0 / -2.5 to 0 / 0 and `+0xF0` from 1 to 0 within half a
-second while the sky stayed dark (Daylight log of 21/10). That Build mode sets the byte is inferred from the timing; the
-selection itself is verified in the bytes. Apex reads the level through `NightLevel::Read` (`features/night_level.h`):
-while the byte is set it keeps the level last read with it clear, so lamps keep their night strength and leaving Build
-mode no longer arms a dusk rebuild.
+**Build mode (2.15.1).** Build mode switches the sky to sun times without the season: in a winter world at dusk sunrise
+/ sunset (`sky+0x974` / `+0x978`) went from 2.0 / -2.5 to 0 / 0 and `+0xF0` from 1 to 0 within half a second, while the
+sky stayed dark and the clock (`lightMgr+0xB4`) stood still (Daylight logs of 21/10 and 22/10). The sky asks the weather
+manager `*(*(sky+0x21C)+0x74)` for them (`FUN_00D68FE0`, called at `0x00C15D9A`), whose byte `+0xB04` picks the set at
+`+0xA48` or `+0x9EC`; in Build mode the byte read 0 and both sets 0 / 0 (memory read of 22/10), so the byte does not tell
+Build mode apart. Apex reads the level through `NightLevel::Read` (`features/night_level.h`): night only turns to day
+with the clock moving, so a fall of `+0xF0` with the clock unchanged keeps the level of before (a rise is always taken).
+Lamps keep their night strength in Build mode and leaving it no longer arms a dusk rebuild.
 
 ### How Apex reads and patches this
 
