@@ -35,8 +35,11 @@ only the repository and print to the console.
 |---|---|---|---|---|
 | 2026-10-22 | `7d69737` | `tools/development/check.ps1 -Suite Lighting` (`stairwell_bounce_test`, `opening_bounce_test`, `arch_ambient_test`; `stairwell_bounce.h` now uses `ApexMath`) | Passed | Offline CPU harnesses |
 | 2026-10-22 | `715a410` | `tools/development/check.ps1 -Suite Lighting` | Passed | Offline CPU harnesses |
+| 2026-10-22 | `fd85116` | `tools/development/fast_math_check.cpp`: `ApexMath::Sqrt`, `Fabs`, `Floor`, `Ceil`, `FloorToInt`, `CeilToInt`, `IsFinite`, `IsNaN` against the CRT over all 2^32 floats (x86, /O2 /fp:precise) | Same bits for every input; a signalling NaN input may come back unquieted from `Fabs` and `Floor` | Offline CPU check |
+| 2026-10-22 | `fd85116` | Early rejection of `SegPass` / `PassesOverLowerWall` against the original t test, 180 million random and special cases | No difference (an infinite denominator takes the original path) | Offline CPU check |
+| 2026-10-22 | `fd85116` | `check.ps1 -Suite Lighting` and `-Suite Smoke`, `rt_lamps_test`, `stairwell_bounce_test`, `roofed_openings_test` (the extracted grid walk with the near-edge map), `room_structure_test` | Passed | Offline CPU harnesses |
 | 2026-10-22 | `715a410` | `tools/rt_lamps_test/run.ps1`, `tools/stairwell_bounce_test/run.ps1`, `tools/roofed_openings_test/run.ps1` | Passed: 22, 56 and 196 checks, no failure | Offline CPU harnesses |
-| 2026-10-22 | `522ef32` | Exhaustive comparison of `ApexMath::Sqrt` / `ApexMath::Fabs` (`features/fast_math.h`) with `std::sqrt(float)` / `std::fabs(float)` over all 2^32 float bit patterns | Bit-identical for every input, NaN payloads included | Offline CPU check |
+| 2026-10-22 | `522ef32` | Exhaustive comparison of `ApexMath::Sqrt` / `ApexMath::Fabs` (`features/fast_math.h`) with `std::sqrt(float)` / `std::fabs(float)` over all 2^32 float bit patterns | Bit-identical for every input except signalling NaNs, which `std::fabs` returns quieted and `ApexMath::Fabs` unquieted (rerun with `tools/development/fast_math_check.cpp`; no arithmetic produces a signalling NaN) | Offline CPU check |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/mesh_occlusion_test/` | Standard: 20,017 checks passed; development: 20,119 checks passed | None |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/liveness_prune_test/` | 27 checks passed | None (pure) |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/roofed_openings_test/` | 196 checks passed, including the stairwell veto, floor-level sill, hard wall top and arch cone cases | None (pure) |
