@@ -150,6 +150,11 @@ std::mutex g_timingLock;                    // FrameProfiler::AddRegistryHookTim
 thread_local int t_dispatchDepth = 0;       // development build: nesting of dispatches on this thread (the mod time)
 thread_local int t_reissue = 0;             // ReissueScope nesting on this thread (lot_light_bridge.cpp's re-issued draws)
 thread_local bool t_sampled = false;        // development build: the outermost dispatch on this thread is a timed sample
+// (2.15.3) development build: the outermost dispatch on this thread is one of the 1 in 16 the dispatch cost line samples; the
+// original draws callbacks issue inside it (Banding Fix's dithered re-issue, Night Lighting's replaced draws) are the
+// driver's time, counted apart (g_dispatchDriverCycles) so the line reports the callbacks' own cost
+thread_local bool t_costSampled = false;
+uint64_t g_dispatchDriverCycles = 0;
 
 // Render thread, around a lock-free dispatch. The "inside" store must precede the list load: the compiler barrier keeps
 // that order in the code, the other thread's FlushProcessWriteBuffers covers the processor's store buffer.
@@ -240,13 +245,17 @@ struct ModTimeGuard {
     ModTimeGuard& operator=(const ModTimeGuard&) = delete;
 };
 
-// Development build: the driver call of a re-issued draw inside a timed sample, booked as "Re-issued draw (driver)"
+// Development build: the driver call of an original draw issued inside a dispatch (a re-issued draw of Night Lighting or any
+// callback's own CallOriginalDraw*): booked as "Re-issued draw (driver)" inside a timed sample (was only under ReissueScope,
+// so the Banding Fix's re-issued draws counted as mod time), and its cycles kept apart from the dispatch cost line
 template <typename Call> HRESULT TimedReissueDraw(Call call) {
-    if (kPublicBuild || !t_reissue || !t_sampled) return call();
+    if (kPublicBuild || t_dispatchDepth == 0) return call();
+    const uint64_t c0 = t_costSampled ? __rdtsc() : 0;
     int anchor = 0;
-    const int token = FrameProfiler::BeginModTime(FrameProfiler::ModTime::ReissuedDraw, &anchor);
+    const int token = t_sampled ? FrameProfiler::BeginModTime(FrameProfiler::ModTime::ReissuedDraw, &anchor) : -1;
     const HRESULT hr = call();
     if (token >= 0) FrameProfiler::EndModTime(token, &anchor);
+    if (c0) g_dispatchDriverCycles += __rdtsc() - c0;
     return hr;
 }
 
@@ -334,15 +343,17 @@ template <typename Fn, typename... Args> bool Run(Chain<Fn>& chain, IDirect3DDev
     uint64_t c0 = 0;
     if (!kPublicBuild) {
         timed = chain.timing == Timing::Always ? FrameProfiler::PresentHookTimingActive() : (chain.timing == Timing::Option && FrameProfiler::RegistryHookTimingActive());
-        if ((++g_dispatchCount & 15) == 0) c0 = __rdtsc();
+        if ((++g_dispatchCount & 15) == 0 && t_dispatchDepth == 1) c0 = __rdtsc(); // (outermost only: nested ones are inside it)
     }
     const bool reissue = chain.reissueFilter && t_reissue != 0 && PerfToggles::ReissueFilter.load(std::memory_order_relaxed);
     struct Sample {
         uint64_t c0;
+        bool was;
         ~Sample() {
-            if (c0) g_dispatchCycles += __rdtsc() - c0, g_dispatchSampled++;
+            if (c0) g_dispatchCycles += __rdtsc() - c0, g_dispatchSampled++, t_costSampled = was;
         }
-    } sample{c0};
+    } sample{c0, t_costSampled};
+    if (c0) t_costSampled = true;
     if (chain.lockFree) {
         if (ThreadId() == g_renderTid.load(std::memory_order_relaxed)) {
             RenderInside inside;
@@ -364,12 +375,12 @@ template <typename Fn, typename... Args> bool Run(Chain<Fn>& chain, IDirect3DDev
 void LogDispatchCost() {
     if (kPublicBuild) return;
     static uint32_t s_frames = 0, s_count0 = 0;
-    static uint64_t s_sampled0 = 0, s_cycles0 = 0, s_tsc0 = 0;
+    static uint64_t s_sampled0 = 0, s_cycles0 = 0, s_tsc0 = 0, s_driver0 = 0;
     static LARGE_INTEGER s_qpc0{};
     if (!s_tsc0) {
         s_tsc0 = __rdtsc();
         QueryPerformanceCounter(&s_qpc0);
-        s_count0 = g_dispatchCount, s_sampled0 = g_dispatchSampled, s_cycles0 = g_dispatchCycles;
+        s_count0 = g_dispatchCount, s_sampled0 = g_dispatchSampled, s_cycles0 = g_dispatchCycles, s_driver0 = g_dispatchDriverCycles;
         return;
     }
     s_frames++;
@@ -381,13 +392,15 @@ void LogDispatchCost() {
     const uint64_t tsc = __rdtsc();
     const double cyclesPerMs = static_cast<double>(tsc - s_tsc0) / (sec * 1000.0);
     const uint32_t calls = g_dispatchCount - s_count0;
-    const uint64_t sampled = g_dispatchSampled - s_sampled0, cycles = g_dispatchCycles - s_cycles0;
-    const double perCallUs = sampled && cyclesPerMs > 0.0 ? static_cast<double>(cycles) / static_cast<double>(sampled) / cyclesPerMs * 1000.0 : 0.0;
+    const uint64_t sampled = g_dispatchSampled - s_sampled0, cycles = g_dispatchCycles - s_cycles0, driver = g_dispatchDriverCycles - s_driver0;
+    const uint64_t own = cycles > driver ? cycles - driver : 0;
+    const double perCallUs = sampled && cyclesPerMs > 0.0 ? static_cast<double>(own) / static_cast<double>(sampled) / cyclesPerMs * 1000.0 : 0.0;
+    const double driverUs = sampled && cyclesPerMs > 0.0 ? static_cast<double>(driver) / static_cast<double>(sampled) / cyclesPerMs * 1000.0 : 0.0;
     const double perFrame = s_frames ? static_cast<double>(calls) / s_frames : 0.0;
-    LOG_INFO(std::format("[D3D9Hooks] Dispatch cost over {:.0f} s: {:.0f} dispatches with callbacks a frame, {:.3f} us each (sampled 1 in 16, callbacks "
-                         "included), about {:.3f} ms a frame",
-                         sec, perFrame, perCallUs, perFrame * perCallUs / 1000.0));
-    s_frames = 0, s_tsc0 = tsc, s_qpc0 = now, s_count0 = g_dispatchCount, s_sampled0 = g_dispatchSampled, s_cycles0 = g_dispatchCycles;
+    LOG_INFO(std::format("[D3D9Hooks] Dispatch cost over {:.0f} s: {:.0f} dispatches with callbacks a frame, {:.3f} us each in the callbacks (sampled 1 in 16), "
+                         "about {:.3f} ms a frame; draws the callbacks issued themselves: {:.3f} ms a frame in the driver",
+                         sec, perFrame, perCallUs, perFrame * perCallUs / 1000.0, perFrame * driverUs / 1000.0));
+    s_frames = 0, s_tsc0 = tsc, s_qpc0 = now, s_count0 = g_dispatchCount, s_sampled0 = g_dispatchSampled, s_cycles0 = g_dispatchCycles, s_driver0 = g_dispatchDriverCycles;
 }
 
 Chain<DrawIndexedPrimitiveHook> g_dip("DrawIndexedPrimitive", true, true, Timing::Option, nullptr, kOrigDIP, true);
@@ -736,12 +749,12 @@ HRESULT CallOriginalSetViewport(IDirect3DDevice9* d, const D3DVIEWPORT9* v) {
 }
 HRESULT CallOriginalDrawIndexedPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, INT bv, UINT mv, UINT nv, UINT si, UINT pc) {
     ++t_origCalls[kOrigDIP];
-    if (!kPublicBuild && t_reissue) return TimedReissueDraw([&] { return o_dip ? o_dip(d, t, bv, mv, nv, si, pc) : d->DrawIndexedPrimitive(t, bv, mv, nv, si, pc); });
+    if (!kPublicBuild && t_dispatchDepth > 0) return TimedReissueDraw([&] { return o_dip ? o_dip(d, t, bv, mv, nv, si, pc) : d->DrawIndexedPrimitive(t, bv, mv, nv, si, pc); });
     return o_dip ? o_dip(d, t, bv, mv, nv, si, pc) : d->DrawIndexedPrimitive(t, bv, mv, nv, si, pc);
 }
 HRESULT CallOriginalDrawPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT sv, UINT pc) {
     ++t_origCalls[kOrigDP];
-    if (!kPublicBuild && t_reissue) return TimedReissueDraw([&] { return o_dp ? o_dp(d, t, sv, pc) : d->DrawPrimitive(t, sv, pc); });
+    if (!kPublicBuild && t_dispatchDepth > 0) return TimedReissueDraw([&] { return o_dp ? o_dp(d, t, sv, pc) : d->DrawPrimitive(t, sv, pc); });
     return o_dp ? o_dp(d, t, sv, pc) : d->DrawPrimitive(t, sv, pc);
 }
 HRESULT CallOriginalSetVertexShaderConstantF(IDirect3DDevice9* d, UINT r, const float* c, UINT n) {
