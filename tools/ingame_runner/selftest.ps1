@@ -50,11 +50,76 @@ try {
     Check ([math]::Abs($f.Over50PerMin - (1 / (1720 / 60000))) -lt 0.1) 'long frames per minute'
 } finally { Remove-Item -LiteralPath $csv -ErrorAction SilentlyContinue }
 
+# Pair statistics: exact Poisson (Garwood) and Clopper-Pearson intervals, verdict rule, loads needed
+$ci = Get-PoissonCI 0; Check ($ci[0] -eq 0 -and [math]::Abs($ci[1] - 3.689) -lt 0.001) 'Garwood k=0'
+$ci = Get-PoissonCI 10; Check ([math]::Abs($ci[0] - 4.795) -lt 0.001 -and [math]::Abs($ci[1] - 18.39) -lt 0.01) 'Garwood k=10'
+$ci = Get-PoissonCI 2000; Check ($ci[0] -gt 1900 -and $ci[1] -lt 2100) 'Garwood k=2000 without overflow'
+$ci = Get-BinomialCI 5 10; Check ([math]::Abs($ci[0] - 0.187) -lt 0.001 -and [math]::Abs($ci[1] - 0.813) -lt 0.001) 'Clopper-Pearson 5/10'
+Check ((Compare-Rates 20 100 2 100 'on').Verdict -eq 'fewer with on') '2 vs 20 events: fewer'
+Check ((Compare-Rates 4 100 3 100 'on').Verdict -eq 'not enough events (7 < 10)') '3 vs 4 events: not enough'
+Check ((Compare-Rates 33 100 30 100 'on').Verdict -eq 'no clear difference') '30 vs 33 events: no clear difference'
+Check ((Compare-Rates 10 100 40 100 'on').Verdict -eq 'more with on') '40 vs 10 events: more'
+$c = Compare-Rates 10 100 40 100 'on'; Check ([math]::Abs($c.Diff.Est - 3) -lt 1e-9 -and $c.Ratio.Est -eq 4 -and $c.Ratio.Lo -gt 1) 'difference and ratio'
+Check ((Get-LoadsNeeded 5.4 0.3 3.5) -eq 80 -and $null -eq (Get-LoadsNeeded 0 0.3 3.5)) 'loads needed for a 30% cut'
+Check ((Get-TailPercentile @(60, 80, 400) 1000 99) -eq $null -and (Get-TailPercentile @(60, 80, 400) 1000 99.9) -eq 400) 'percentile from the tail'
+
+# Real hitches only: a fixture profile of 120 s with every exclusion reason
+$fx = Join-Path ([IO.Path]::GetTempPath()) ('apex-ingame-selftest-' + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $fx | Out-Null
+try {
+    $base = Join-Path $fx 'measure3'
+    Set-Content -LiteralPath "$base-seconds.csv" -Value (@('iters,maxIterMs,publishes,t') + (1..120 | ForEach-Object { "30,40,30,$($_ * 1000)" }))
+    $h = @(@{ t = 30000; wallMs = 400; steps = 1; n = 50 },     # first minute
+           @{ t = 70000; wallMs = 350; steps = 1; n = 100 },    # real
+           @{ t = 80000; wallMs = 500; steps = 1; n = 120 },    # inside the camera_pan step
+           @{ t = 95000; wallMs = 1200; steps = 0; n = 150 },   # save or load
+           @{ t = 100000; wallMs = 300; steps = 1; n = 160 },   # agent call
+           @{ t = 110000; wallMs = 60; steps = 1; n = 170 },    # real
+           @{ t = 119500; wallMs = 200; steps = 1; n = 180 })   # profiler edge
+    Set-Content -LiteralPath "$base-hitches.jsonl" -Value ($h | ForEach-Object { $_ | ConvertTo-Json -Compress })
+    $g = @(@{ t0 = 69600; t1 = 70050; gapMs = 450; prevGapMs = 30; n = 100; iters = 1 },   # the 350 ms iteration inside: real
+           @{ t0 = 105000; t1 = 105400; gapMs = 400; prevGapMs = 30; n = 200; iters = 3 }, # no slow iteration, 3 iterations
+           @{ t0 = 106000; t1 = 106200; gapMs = 200; prevGapMs = 30; n = 210; iters = 1 }) # no slow iteration: render-paced
+    Set-Content -LiteralPath "$base-freezes.jsonl" -Value ($g | ForEach-Object { $_ | ConvertTo-Json -Compress })
+    $head = 'epochMs,qpcMs,frameMs,workMs,fg,loadMs,idleMs,svcMs,consumeMs,captureMs,rcbMs,beginMs,drawMs,presentMs,postMs,endMs,otherMs,consumes,tryFail,notReady,drains,msgs,svc1,svc1Ms,svc2,svc2Ms,svc3,svc3Ms'
+    # one slow frame at 70092 ms led by the services stage (Canvas 60 of its 80 ms)
+    $fr = @($head) + (1..3600 | ForEach-Object { $q = $_ * 33
+        if ($q -eq 70092) { "$q,$q,120,5,0,0,na,90,10,3,1,1,20,2,1,1,1,1,0,0,1,4,Canvas,60,UTFWin,20,," } else { "$q,$q,33,5,0,0,na,5,1,3,1,1,20,2,1,1,1,1,0,0,1,4,Canvas,2,,,," } })
+    Set-Content -LiteralPath "$base-frames.csv" -Value $fr
+    # the same collection types run.ps1 passes (List[object])
+    $cmds = New-Object System.Collections.Generic.List[object]
+    $cmds.Add([pscustomobject]@{ label = 'camera_pan'; kind = 'step'; t0 = 79000; t1 = 79500 }); $cmds.Add([pscustomobject]@{ label = 'game_state'; kind = 'call'; t0 = 99900; t1 = 99950 })
+    $quiet = New-Object System.Collections.Generic.List[object]
+    $quiet.Add([pscustomobject]@{ t = 1000; game = 30; other = 50 }); $quiet.Add([pscustomobject]@{ t = 90000; game = 30; other = 2 })
+    $m = Get-Measurement $base 120 $cmds $quiet
+    Check ($m.RealMin -eq 0.75) "real minutes leave excluded rows (got $($m.RealMin))"
+    Check (($m.Walls -join ',') -eq '350,60' -and $m.Sim.Hitches -eq 2) 'only real iterations count'
+    Check ($m.Excluded['first minute'].N -eq 1 -and $m.Excluded['profiler edge'].N -eq 1 -and $m.Excluded['harness step'].N -eq 2 -and $m.Excluded['agent call'].N -eq 1) 'iterations excluded by reason'
+    Check ($m.Harness['camera_pan'].N -eq 1 -and $m.Harness['save or load (iteration without a sim step)'].N -eq 1 -and $m.Harness['game_state'].N -eq 1) 'harness commands reported as their own cost'
+    Check (($m.Gaps -join ',') -eq '450' -and $m.GapsExcluded['render-paced'].N -eq 2) 'publish gaps without a slow iteration are render-paced'
+    $m2 = Get-Measurement $base 120 $cmds $quiet -NoInactiveIdle
+    Check (($m2.Gaps -join ',') -eq '450,400' -and $m2.GapsExcluded['render-paced'].N -eq 1) 'NoInactiveIdle: a gap over 3 iterations stays real'
+    Check ($null -eq $m.Invalid) 'clean load is valid'
+    Check ($m.FramesExcluded['first minute'].N -gt 0 -and $m.FramesExcluded['harness step'].N -gt 0 -and $m.Frames.Frames -lt 3601) 'frames in excluded windows leave the frame stats'
+    Check ($m.SlowFrames.N -eq 1 -and $m.SlowFrames.Stages[0].Stage -eq 'services' -and $m.SlowFrames.Stages[0].Lead -eq 1 -and $m.SlowFrames.Services[0].Service -eq 'Canvas') 'slow frame led by the services stage, Canvas first'
+    Check ((Get-Measurement $base 600 $cmds $quiet).Invalid -match 'cut short') 'profile shorter than 80% is invalid'
+    Check ((Get-Measurement $base 120 $cmds @([pscustomobject]@{ t = 90000; game = 30; other = 15 })).Invalid -match 'noisy machine') 'other programs >= 10% make the load invalid'
+    Check ((Get-Measurement $base 120 $cmds $quiet -Crash 'crash report written').Invalid -match 'crash') 'a crash makes the load invalid'
+    Check ($null -eq (Get-Measurement (Join-Path $fx 'none') 120 @() @())) 'no profile, no measurement'
+} finally { Remove-Item -LiteralPath $fx -Recurse -Force -ErrorAction SilentlyContinue }
+
 # Results page
 $res = @([pscustomobject]@{ Name = 'x-1-off'; JobId = 'x'; Variant = 'off'; Ok = $true; Closed = 'quit'; Frames = $f; Sim = $null; Notes = @() },
          [pscustomobject]@{ Name = 'x-2-on'; JobId = 'x'; Variant = 'on'; Ok = $false; Closed = 'quit'; Frames = $null; Sim = $null; Notes = @('log: a|b') })
 $md = Format-Results $res 'Self-test'
 Check ($md -match '\| x-2-on \| FAIL \|' -and $md -match '## x: A/B' -and $md -match 'log: a/b') 'results page'
+$res = @([pscustomobject]@{ Name = 'x-1-off'; JobId = 'x'; Variant = 'off'; Ok = $true; Closed = 'quit'; Frames = $m.Frames; Sim = $m.Sim; M = $m; Notes = @() },
+         [pscustomobject]@{ Name = 'x-2-on'; JobId = 'x'; Variant = 'on'; Ok = $true; Closed = 'quit'; Frames = $m2.Frames; Sim = $m2.Sim; M = $m2; Notes = @() },
+         [pscustomobject]@{ Name = 'x-3-on'; JobId = 'x'; Variant = 'on'; Ok = $true; Closed = 'quit'; Frames = $null; Sim = $null; M = [pscustomobject]@{ RealMin = 1; Invalid = 'noisy machine (x)'; HasFreezes = $false }; Notes = @() })
+$md = Format-Results $res 'Self-test'
+Check ($md -match '### x-1-off' -and $md -match '\| harness step \| 2 \|' -and $md -match '\| camera_pan \| 1 \|' -and $md -match '\| services \| 1 \|') 'load detail: excluded, harness cost, slow frames'
+Check ($md -match '\| iterations \| 300 \| 1, ' -and $md -match '\| visible freezes \| 300 \|' -and $md -match 'not enough events \(3 < 10\)') 'pair rows with intervals and the verdict rule'
+Check ($md -match 'Left out \(invalid\): x-3-on \(noisy machine' -and $md -match 'INVALID: noisy') 'invalid loads named and left out of the pair'
 
 # Results: progress lines go to the host, so a load returns exactly one row; exit code 0 / 1 / 2
 function Test-Load { Say 'starting the game'; Say '  test agent: 30 s'; [pscustomobject]@{ Name = 'x-1-on'; Ok = $false } }

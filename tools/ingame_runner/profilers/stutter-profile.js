@@ -10,7 +10,10 @@
 // Addresses and reasons: docs/04-re-findings.md.
 //
 // Run (game already in Live mode): run.ps1 -Profiler Sim, or frida -n TS3W.exe -l stutter-profile.js -P '{"out":"<prefix>","hitchMs":50}'
-// Output: <out>-seconds.csv (one row per second) and <out>-hitches.jsonl (one line per slow iteration).
+// Output: <out>-seconds.csv (one row per second), <out>-hitches.jsonl (one line per slow iteration, `n` = iteration number)
+// and <out>-freezes.jsonl (one line per sim-to-render publish gap >= hitchMs: what the player sees as frozen Sims).
+// -P stages:false keeps only the iteration boundary, catch-up steps and publish gaps (no stage, GC or route hooks): hitch
+// lines keep wallMs/steps/n and freezes.jsonl stays complete, but carry no stage split.
 // Default <out> is ts3prof-<timestamp> in the game's working directory (Game\Bin).
 
 'use strict';
@@ -79,8 +82,17 @@ function blankSecond() {
            // -1 = P-clock off or no iteration this second; NaN/Infinity = docs/85 H6)
            simPaused: 0, stepAcc: -1,
            // ts3native [HitchAttr] (docs/96 §9), ms per second; 0 when the plugin or the section is off
-           rtLock: 0, rtOtherLock: 0, rtJob: 0, rtPlanWait: 0, rtWaits: 0 }; // new columns go last: readers use the header
+           rtLock: 0, rtOtherLock: 0, rtJob: 0, rtPlanWait: 0, rtWaits: 0, // new columns go last: readers use the header
+           // FrameDb_PublishFrame 0x593600 calls on the sim thread: 0 or 1 per iteration; longest publish gap ending here
+           publishes: 0, maxPubGapMs: 0 };
 }
+
+// Sim-to-render publish: Simulate calls 0x76C8A0 -> FrameDb_PublishFrame once per iteration at most (0xD81DF5 after the
+// steps, 0xD81E9E when paused; an unpaused iteration with 0 steps publishes nothing). The renderer interpolates between the
+// two newest published frames, so the time between two publishes is how long the Sims stand still on screen. Not in HOOKS:
+// a mismatch only turns the freeze log off instead of stopping the whole profiler.
+const PUBLISH_FRAME = [0x593600, '56 57 8b f1 8d 7e 48 57'];
+let iterNo = 0, lastPub = 0, prevPubGap = 0, itersSincePub = 0;
 
 // P-clock: Simulate's step branch reads its paused copy through `mov ecx, edi; call 0x8A6D10` at 0xD81B38
 // (0x8A6D10 = `mov al, [ecx+0x10]; ret`, edi = host+0xA64) after `fstp [esi+0xC14]`. Never hook inside Simulate: it
@@ -144,12 +156,13 @@ let secStart = 0;
 let inTryToCollect = false;
 const entryStack = []; // script entry point for the current route call (sim thread)
 
-let csv = null, jsonl = null;
+let csv = null, jsonl = null, freezes = null;
 
 function openOutputs() {
   const base = cfg.out || `ts3prof-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   csv = new File(`${base}-seconds.csv`, 'w');
   jsonl = new File(`${base}-hitches.jsonl`, 'w');
+  freezes = new File(`${base}-freezes.jsonl`, 'w');
   csv.write(Object.keys(blankSecond()).concat(['t']).join(',') + '\n');
   csv.flush();
   console.log(`[ts3prof] writing ${base}-seconds.csv and ${base}-hitches.jsonl (hitch >= ${cfg.hitchMs} ms)`);
@@ -169,7 +182,7 @@ function endIteration(t) {
   sec.maxSteps = Math.max(sec.maxSteps, iter.steps);
   if (wall >= cfg.hitchMs) {
     sec.hitches++;
-    const rec = { t: round(t), wallMs: round(wall) };
+    const rec = { t: round(t), wallMs: round(wall), n: iterNo };
     for (const [k, v] of Object.entries(iter)) rec[k] = typeof v === 'number' ? round(v) : v;
     jsonl.write(JSON.stringify(rec) + '\n');
     jsonl.flush();
@@ -177,6 +190,25 @@ function endIteration(t) {
   if (t - secStart >= 1000) flushSecond(t);
   iter = blankIter();
   iterStart = t;
+  iterNo++; itersSincePub++;
+}
+
+// on the sim thread at FrameDb_PublishFrame's return; n = the iteration it closes, iters = iteration boundaries inside the
+// gap (n - iters .. n are the iterations it overlaps; their hitches.jsonl lines carry the same n)
+function onPublish(t) {
+  if (iterStart === 0) return; // before the first iteration boundary: no n yet
+  if (lastPub) {
+    const gap = t - lastPub;
+    sec.publishes++;
+    sec.maxPubGapMs = Math.max(sec.maxPubGapMs, gap);
+    if (gap >= cfg.hitchMs) {
+      freezes.write(JSON.stringify({ t0: round(lastPub), t1: round(t), gapMs: round(gap), prevGapMs: round(prevPubGap), n: iterNo, iters: itersSincePub }) + '\n');
+      freezes.flush();
+    }
+    prevPubGap = gap;
+  }
+  lastPub = t;
+  itersSincePub = 0;
 }
 
 function flushSecond(t) {
@@ -240,6 +272,24 @@ function install() {
     onLeave() { inTryToCollect = false; },
   });
 
+  Interceptor.attach(addr('catchUpSteps'), {
+    onEnter(args) { if (Process.getCurrentThreadId() === simThread) iter.steps += args[0].toInt32(); },
+  });
+  if (cfg.stages !== false) installStages();
+  else console.log('[ts3prof] stage hooks off (stages: false): iterations, steps and publish gaps only');
+
+  try { // after the all-or-nothing check: a mismatch here costs only the freeze log
+    HOOKS.publishFrame = PUBLISH_FRAME;
+    Interceptor.attach(addr('publishFrame'), { onLeave() { if (Process.getCurrentThreadId() === simThread) onPublish(now()); } });
+    console.log('[ts3prof] publish gaps: FrameDb_PublishFrame 0x593600 timed on the sim thread (freezes.jsonl)');
+  } catch (e) {
+    console.log(`[ts3prof] publish gaps off (freezes.jsonl stays empty): ${e.message}`);
+  }
+  installClock();
+  console.log('[ts3prof] hooks installed; the sim thread is detected on the first GC_try_to_collect');
+}
+
+function installStages() {
   timed('gcStoppedMark', function (ms, retval) {
     if (Process.getCurrentThreadId() !== simThread) return;
     iter.gcMark += ms; iter.gcMarks++;
@@ -270,10 +320,6 @@ function install() {
     });
   }
 
-  Interceptor.attach(addr('catchUpSteps'), {
-    onEnter(args) { if (Process.getCurrentThreadId() === simThread) iter.steps += args[0].toInt32(); },
-  });
-
   for (const name of ROUTE_ENTRIES) {
     Interceptor.attach(addr(name), {
       onEnter() { entryStack.push(name); },
@@ -295,9 +341,6 @@ function install() {
     const e = iter.byEntry[entry] || (iter.byEntry[entry] = { n: 0, fail: 0, ms: 0 });
     e.n++; if (!ok) e.fail++; e.ms = round(e.ms + ms);
   });
-
-  installClock();
-  console.log('[ts3prof] hooks installed; the sim thread is detected on the first GC_try_to_collect');
 }
 
 // Observe only, no hook of its own: a mismatch leaves simPaused 0 and stepAcc -1 instead of stopping the whole profiler.
@@ -329,6 +372,6 @@ setTimeout(() => start({}), 1000); // fallback when the host does not call init
 rpc.exports = {
   init(stage, parameters) { start(parameters); },
   dispose() {
-    if (csv) { flushSecond(now()); csv.close(); jsonl.close(); }
+    if (csv) { flushSecond(now()); csv.close(); jsonl.close(); freezes.close(); }
   },
 };

@@ -20,7 +20,7 @@ harness rules in [workflow.md](../../docs/workflow.md#4-testing) do not apply to
 | A built `ApexRadiance.asi` | `tools/development/build.ps1`; the runner takes `Public\` first, then `Release\`, or `-Asi <path>` |
 | Node | `build_agent.mjs` |
 | Test saves (below) | Every job names the save it loads |
-| Optional: Python with `frida` (`pip install frida`) | `-Profiler`: frame times and simulation hitches |
+| Optional: Python with `frida` (`pip install frida`) | `-Profiler`: frame times, visible freezes and simulation hitches |
 
 Windows PowerShell 5.1 and PowerShell 7 both run the scripts.
 
@@ -72,8 +72,10 @@ A queue (every performance job as an ABBA pair, about 15 minutes per load):
 ```
 
 `-DryRun` lists the loads and each load's TOML changes without touching anything. Other options: `-Variant <name>`,
-`-Profiler Sim|Both` (simulation-thread hitches), `-GameDocuments <folder>` for a localized Documents folder,
-`-LoadTimeoutMin`, `-KeepSaves`, `-OutDir`.
+`-Profiler Sim|Both` (simulation-thread hitches and visible freezes), `-Lean` (the simulation profiler keeps only
+iterations, steps and publish gaps: no per-stage hooks, for measurements where its own cost matters),
+`-InactiveIdle` (keep the game's inactive-window sleep, below), `-GameDocuments <folder>` for a localized Documents
+folder, `-LoadTimeoutMin`, `-KeepSaves`, `-OutDir`.
 
 Each load:
 
@@ -114,10 +116,80 @@ pattern matches a line of `ApexRadiance_LOG.txt` and no fail pattern does. The f
 `[CRITICAL]`, `[Patches] ... did not start`, `Verification mismatch`, `turns itself off` / `turned itself off`,
 `Result differs from the game`, `Safety check failed`; a job adds its own.
 
-`results.md` lists per load: frames per second, frame time p50 / p95 / p99 / max and frames over 50 ms per minute
-(from `frame-times.js`, focused frames only: the game caps itself at about 30 FPS in the background), and simulation
-hitches per minute (`stutter-profile.js`). For an A/B pair it adds the mean per variant and the load order. Loads are
-separate game starts, so a difference smaller than the spread between loads of the same variant is not an effect.
+`results.md` lists per load: real minutes, frames per second, frame time p50 / p95 / p99 / max, frames over 50 ms per
+minute, simulation hitches per minute and visible freezes of 300 ms or more per 10 minutes. For an A/B pair it adds the
+mean per variant, the load order and the pair statistics below. Only the first measured `wait` of a load is profiled.
+
+### What is measured
+
+| Measure | What the player sees | Source | File in the load folder |
+|---|---|---|---|
+| Visible freeze | Sims stand still: the time between two sim-to-render publishes (`FrameDb_PublishFrame` `0x00593600` returns on the simulation thread). The renderer only interpolates between the two newest published frames, so no new publish means no movement on screen, while the camera keeps moving | `stutter-profile.js` | `measure<n>-freezes.jsonl` (gaps of 50 ms or more), `publishes` and `maxPubGapMs` in `measure<n>-seconds.csv` |
+| Slow iteration | A simulation-loop iteration of 50 ms or more, split by stage (script, GC, routes, animation) | `stutter-profile.js` | `measure<n>-hitches.jsonl`, `measure<n>-seconds.csv` |
+| Camera stutter | Presented frame time on the main thread (`0x00EC9F00` with present = 1) | `frame-times.js` | `measure<n>-frames.csv` |
+| Main-loop stages | Per frame: load state, idle sleep, services, frame consume, video capture, render callback, begin frame, draw, present, after present, end-frame job wait, other; and the three main-loop services with the most time (Canvas, UTFWin, ResourceSystem, World, SwarmSystem and so on, by vtable) | `frame-times.js` | stage and `svc1..svc3` columns of `measure<n>-frames.csv` |
+
+A visible freeze and a long frame are separate events: the main thread keeps drawing while the simulation is stuck. Each
+load's section in `results.md` lists the frames of 100 ms or more by their leading main-loop stage and the services
+inside them, so a slow frame reads as "services, led by World" rather than one number.
+
+The frame recorder runs in its own Frida session. At the end of the measured wait it writes its last rows and closes its
+file, but its hooks stay in place until the game exits: unloading a hook on the main thread's per-frame path while the
+game runs is where an end-of-profile crash was seen.
+
+### Unfocused window: `NoInactiveIdle`
+
+The runner never focuses the game window, and the game sleeps 10 ms per main-loop pass while another window is in front.
+Without a fix every frame and every publish gap of a measured load would carry that sleep, which the player never sees.
+The game has its own switch for it: the main loop skips the sleep when its `[Config]` settings hold a `NoInactiveIdle`
+key, and the game's command line fills that section. The runner starts the game with `-NoInactiveIdle`
+(`-InactiveIdle` leaves it out); no file changes and no game code is patched. The same key under `[Config]` in
+`Game\Bin\Default.ini` did not take effect in a live check (the idle stage still ran every frame). With the switch every
+frame counts in the frame statistics, focused or not, and each load's frame log shows it: the idle sleep stage stays
+at 0 ms.
+
+A frame limiter that wakes the simulation once per presented frame (for example Sims3SettingsSetter's precise limiter)
+still ties publishes to the render rate, so a publish gap with no slow iteration inside is the render side waiting, not
+the simulation: such gaps are excluded as render-paced (next section).
+
+### Real hitches only
+
+A result holds only what a player would see. One classifier (`runner_lib.ps1` `Get-Measurement`) checks every slow
+iteration, publish gap, seconds row and frame, and lists what it left out by reason:
+
+| Reason | Left out |
+|---|---|
+| first minute | The first 60 seconds of the profile: the load settling and the profiler starting |
+| profiler edge | The last 2 s before the profiler stops |
+| harness step | A job step (speed, camera, camera_pan, save, reload and the repro steps) from its start to 10 s after it returns, and any iteration of 1 s or more without a simulation step (a save or a load). Listed per command as the scenario's own cost, never mixed into the rates |
+| agent call | A test agent call outside a step (the 30-second dialog and speed upkeep), 200 ms either side: agent calls run on the simulation thread |
+| render-paced | A publish gap with no simulation iteration of 50 ms or more inside. With `NoInactiveIdle` on, a gap that spans two or more iterations without a publish stays real |
+
+The runner and the profilers share one clock (QueryPerformanceCounter), so the windows are exact. Seconds rows inside a
+window leave the real minutes; an iteration or gap is excluded by its own window, else by its row's. There are no
+sampler windows because the runner never samples stacks: a sampler suspends the simulation thread and slows the main
+thread too, so measurement loads run without one.
+
+A whole load is **invalid**, kept in the table but left out of the means and pairs, when the profile is cut short (under
+80% of its seconds), the machine is noisy (other programs use 10% or more of the machine's CPU over the measured
+window after the first minute, sampled every 30 s into `measure<n>-machine.jsonl`), or the game crashed or did not quit.
+
+### Pair statistics
+
+For an A/B job `results.md` pools each variant's valid loads and compares the last variant (B) with the first (A) on
+slow iterations and visible freezes of at least 300, 500, 1000 and 2000 ms:
+
+- per variant: count and rate per 10 real minutes with the exact Poisson (Garwood) 95% interval;
+- B minus A per 10 minutes with a Wald 95% interval, and B / A with the exact conditional (Clopper-Pearson) interval;
+- verdict: fewer than 10 events in both variants together reads **not enough events** (below that the ratio interval
+  spans 1 for nearly every split), else "fewer with B" when the ratio's upper bound is below 1, "more with B" when its
+  lower bound is above 1, else "no clear difference";
+- loads per variant needed to see a 30% cut at A's rate (two-sided 5%, power 80%).
+
+Slow iterations cluster (one stall delays several Sims), so the Poisson interval is somewhat too narrow; the ABBA order
+agreeing in both halves is the practical check. Rare multi-second freezes need many loads: judge a fix for them by its
+mechanism and a repro, not by a count. Loads are separate game starts, so a difference smaller than the spread between
+loads of the same variant is not an effect.
 
 ## Writing a job
 
@@ -177,9 +249,9 @@ API, C# 5) and `run.ps1` (the step's `switch` branch). Rebuild with `build_agent
   `run.ps1 -Restore outputs/ingame/<run>`.
 - **Saves:** jobs only load the tester's saves; `save` steps write new `ApexRunner-*` saves, never over the loaded one,
   and the runner deletes them after the load.
-- **The game window** is never moved or focused by the runner. Leave it in front and do not use the computer during
-  measured runs: frame times only count while the window is in front, and other work on the machine shows up as
-  stutter.
+- **The game window** is never moved or focused by the runner. Do not use the computer during measured runs: other work
+  on the machine shows up as stutter, and a load with other programs at 10% of the CPU or more is marked invalid. With
+  `-InactiveIdle` only frames with the game window in front count.
 - The game is ended (`Stop-Process`) only when it neither quits nor closes its window, and only the process the runner
   started.
 
@@ -191,7 +263,10 @@ API, C# 5) and `run.ps1` (the step's `switch` branch). Rebuild with `build_agent
   hooks the same function and checks its bytes, so it would refuse to time that function if started from the menu
   during a measured load. It cannot be started by the runner: `[qol.frame_profiler] enabled` is forced off at start.
 - `stutter-profile.js` hooks the simulation loop and the route functions; another mod that patches those prologues
-  makes it refuse that hook (logged in `measure<n>-profiler.log`).
+  makes it refuse that hook (logged in `measure<n>-profiler.log`). A changed `FrameDb_PublishFrame` prologue only turns
+  the freeze log off. `frame-times.js` checks each main-loop stage's bytes and leaves a changed one unhooked (its column
+  reads `na`, its time lands in other; logged in `measure<n>-frames.log`).
+- Only the frames of the measured wait are recorded; the frame recorder's session stays attached until the game exits.
 - The agent drives the game through its script API: a save that opens a dialog the agent does not know may need an
   answer rule in `kDialogRules` (`agent/Agent.cs`).
 - Only the Steam 1.67.2 executable is supported; the profilers check their hook bytes and refuse other builds.
@@ -199,7 +274,7 @@ API, C# 5) and `run.ps1` (the step's `switch` branch). Rebuild with `build_agent
 ## Origin and licences
 
 Adapted from the test harness of [sims3-modernization](https://github.com/rodneypantonial/sims3-modernization) (MIT,
-[LICENSE-sims3-modernization](LICENSE-sims3-modernization)): the agent and its mailbox, the profilers (copied
-unchanged apart from their headers; their `docs/` references point to that repository), the package writer and the
-fail-fast waits. The agent was forked there from [Sims3-MCP](https://github.com/Critical-Reynolds/Sims3-MCP) (MIT,
+[LICENSE-sims3-modernization](LICENSE-sims3-modernization)): the agent and its mailbox, the profilers (their `docs/`
+references point to that repository), the package writer, the fail-fast waits, the real-hitch classifier and the pair
+statistics. The agent was forked there from [Sims3-MCP](https://github.com/Critical-Reynolds/Sims3-MCP) (MIT,
 [agent/LICENSE-Sims3-MCP](agent/LICENSE-Sims3-MCP)).
