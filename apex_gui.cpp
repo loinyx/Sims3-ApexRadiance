@@ -4337,6 +4337,56 @@ void ShortcutsContent() {
     }
 }
 
+// The screenshots folder picker (Windows' folder dialog on its own thread, as the profile file dialog): the chosen path is
+// taken by the card on a later frame; nothing when cancelled.
+std::mutex g_shotFolderLock;
+std::optional<std::wstring> g_shotFolderResult;
+std::atomic<bool> g_shotFolderBusy{false};
+void PickScreenshotFolder(std::string current) {
+    if (g_shotFolderBusy.exchange(true)) return;
+    std::wstring title = ApexUtil::ToWide(I18n::Tr("Choose a folder for the screenshots"));
+    if (!HookGuard::StartDetached("Screenshots: folder dialog", [current = std::move(current), title = std::move(title)] {
+        std::optional<std::wstring> picked;
+        struct Finish {
+            std::optional<std::wstring>& picked;
+            ~Finish() {
+                std::lock_guard<std::mutex> lock(g_shotFolderLock);
+                g_shotFolderResult = std::move(picked);
+                g_shotFolderBusy = false;
+            }
+        } finish{picked};
+        const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        if (FAILED(com)) return;
+        IFileDialog* dialog = nullptr;
+        if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) {
+            DWORD options = 0;
+            dialog->GetOptions(&options);
+            dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR | FOS_PATHMUSTEXIST);
+            dialog->SetTitle(title.c_str());
+            if (!current.empty()) {
+                IShellItem* start = nullptr;
+                if (SUCCEEDED(SHCreateItemFromParsingName(ApexUtil::ToWide(current).c_str(), nullptr, IID_PPV_ARGS(&start)))) {
+                    dialog->SetFolder(start);
+                    start->Release();
+                }
+            }
+            if (SUCCEEDED(dialog->Show(nullptr))) {
+                IShellItem* item = nullptr;
+                if (SUCCEEDED(dialog->GetResult(&item))) {
+                    PWSTR path = nullptr;
+                    if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+                        picked = path;
+                        CoTaskMemFree(path);
+                    }
+                    item->Release();
+                }
+            }
+            dialog->Release();
+        }
+        CoUninitialize();
+    })) g_shotFolderBusy = false;
+}
+
 // Settings > Menu: screenshot settings and the existing validated shortcut recorder.
 void ScreenshotCaptureCard() {
     g_recSeenFrame = ImGui::GetFrameCount();
@@ -4344,13 +4394,38 @@ void ScreenshotCaptureCard() {
         ApexConfig::UiSettings ui = ApexConfig::GetUi();
         ApexUi::CardHeader(IconId::Camera, "Screenshot capture", "Save the finished game image with Apex's active effects", nullptr, nullptr);
         ApexUi::CardDivider();
-        static const char* const kFolders[] = {"Game's Screenshots folder", "Apex Radiance folder"};
+        {
+            std::lock_guard<std::mutex> lock(g_shotFolderLock);
+            if (g_shotFolderResult) { // a folder was picked: it becomes the screenshots folder
+                ui.screenshotCustomFolder = ApexUtil::ToUtf8(*g_shotFolderResult);
+                ui.screenshotFolder = 2;
+                ApexConfig::SetUi(ui);
+                g_shotFolderResult.reset();
+            }
+        }
+        static const char* const kFolders[] = {"Game's Screenshots folder", "Apex Radiance folder", "Another folder"};
         static const char* const kFolderTips[] = {"Next to the photos the game takes, in Documents > Electronic Arts > The Sims 3 > Screenshots",
-                                                  "Kept apart from the game's photos, in Documents > Electronic Arts > The Sims 3 > Apex Radiance > Screenshots"};
-        int folder = ui.screenshotToApexFolder ? 1 : 0;
-        if (ApexUi::SegmentedRow("Save screenshots to", "Where the filtered screenshots are saved", "##ShotFolder", &folder, kFolders, 2, kFolderTips, nullptr, 0)) {
-            ui.screenshotToApexFolder = folder == 1;
-            ApexConfig::SetUi(ui);
+                                                  "Kept apart from the game's photos, in Documents > Electronic Arts > The Sims 3 > Apex Radiance > Screenshots",
+                                                  "Any folder you choose, for example on another drive"};
+        int folder = std::clamp(ui.screenshotFolder, 0, 2);
+        if (ApexUi::SegmentedRow("Save screenshots to", "Where the filtered screenshots are saved", "##ShotFolder", &folder, kFolders, 3, kFolderTips, nullptr, 0)) {
+            if (folder == 2 && ui.screenshotCustomFolder.empty()) PickScreenshotFolder({}); // the choice applies once a folder is picked
+            else {
+                ui.screenshotFolder = folder;
+                ApexConfig::SetUi(ui);
+            }
+        }
+        if (ui.screenshotFolder == 2) {
+            const bool busy = g_shotFolderBusy.load();
+            const char* button = "Change##ShotFolderPick";
+            ApexUi::SetNextRowUntranslated();
+            const std::string label = I18n::Tr("Screenshots folder");
+            if (ApexUi::BeginControlRow(label.c_str(), ui.screenshotCustomFolder.c_str(), ApexUi::ButtonWidth(I18n::Tr("Change"), true))) {
+                ImGui::BeginDisabled(busy);
+                if (ApexUi::IconTextButton(button, IconId::FolderOpen, "Choose another folder for the screenshots")) PickScreenshotFolder(ui.screenshotCustomFolder);
+                ImGui::EndDisabled();
+                ApexUi::EndControlRow();
+            }
         }
         if (ApexUi::BeginControlRow(RowName(RowScreenshot),
                                     I18n::Trf("Press {} to save one screenshot with Apex's effects", ApexConfig::KeyChordText(Hotkeys::Key(Hotkeys::Action::Screenshot))).c_str(),

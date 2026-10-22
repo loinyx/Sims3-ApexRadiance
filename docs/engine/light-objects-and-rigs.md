@@ -64,7 +64,11 @@ Vfunc slot addresses (vtable + 0x10) as patched by Apex: `0xFF42B0, 0xFF4308, 0x
 
 Type usage in practice (notebook, F8 dumps): lot lamps placed in Build mode are types 3..6 (garden lamps 3, spots/floods 4,
 wall sconces 5); street lamps are type 11 with lot id 0 (world lights); type 11 can also be placed on a lot; window lights
-are 7/8 and take part in room solves. "Lamp types" for Apex = 3..6 plus 11.
+are 7/8 and take part in room solves. "Lamp types" for Apex = 3..6 plus 11; the terrain bake also takes a lot's area lights
+9 and 10 since 2.15.1 (a park lot had three rectangle area lights of 100 m range, intensity 1). Area light room law
+(`0x006BFBA0` / `0x006BFDC0` -> `0x006BFAF0`): distance to the rectangle or disc (third axis +0x180 clamped to 0, half
+extents +0x1A0), `E = colour x sat(dir.z) x min(range x intensity x k2 / (d^2 x k1), cap)`; the area lights the side its
+third axis points away from.
 
 Light vtable functions used by the engine and Apex:
 
@@ -257,13 +261,30 @@ The HDR lamp gain that the combined build applied to rig colours and shaders exi
 | Item | Where | Status |
 |---|---|---|
 | Sky object | `*(lightMgr+0xD0) - 0x210`, accepted only when `*(sky+0x1F4) == lightMgr` | Verified in the executable's bytes; read at runtime by the development daylight log |
-| Night level | `lightMgr+0xF0`: follows the clock only (the season moves sunrise and sunset; weather does not change it), in steps of 0.2 | Observed at runtime |
+| Night level | `lightMgr+0xF0`: follows the clock only (the season moves sunrise and sunset; weather does not change it), in steps of 0.2. Build mode switches the sky to sun times without the season, which can turn it to 0 at night with the clock stopped ([room-light-maps](room-light-maps.md#night-level-lightmgr0xf0)) | Observed at runtime |
+| Sun time sets | weather manager `*(*(sky+0x21C)+0x74)`, byte `+0xB04`: `FUN_00D68FE0` copies sunrise / sunset from `+0xA48` when set, else `+0x9EC`. In Build mode the byte read 0 and both sets 0 / 0 | Selection verified in the executable's bytes; values from one memory read |
 | Manmade light intensity | `lightMgr+0xF4`, from `ManmadeLightIntensity` per sky type, weighted by the weather | *Unverified*: the daylight log recomputes it to check the offsets |
 | Sun direction | `sky+0x6B0` | *Unverified* |
 | Smooth night | `sky+0x780` | *Unverified* |
 | Weather object | `*(*(sky+0x21C)+0x74)+0x10` (`FUN_00580430` = `lea eax,[ecx+10h]; ret`) | Verified in the executable's bytes |
 | Time of day | `*(*(sky+0x30)+0x1C)+0x370 / 3600` | Verified in the executable's bytes |
 | Sunlight Scale | float `0x011D0918`; single reader `FUN_00c11ad0`, `mov ecx,011D0918h; call` at `0x00C11B01`, the call at `0x00C11B06` reaching the shared getter `mov eax,ecx; ret` | Verified in the executable's bytes; Apex redirects that call ([README](../features/night-lighting/README.md#brightness-controls)) |
+
+### Sky time override and the light probe queue (2.15.1 static analysis)
+
+The sky's time override `sky+0x884` (vtable `0x01074250`: slot 0 `0x00C15E00` sets it, slot 1 `0x00C15E40` sets -1) serves
+only the light manager's probe queue, not impostors or thumbnails.
+
+| Item | Where | Status |
+|---|---|---|
+| Probe queue | deque at lightMgr+0x38 of `{probe*, hour}` (hour < 0: the live clock); `FUN_006AE580` pops one per frame, `FUN_006AE990` queues; the exterior probe lightMgr+0x64 and the room probes +0x68/+0x6C; debug command "Force Probe Update" -> `0x006AEF60` | Verified in the bytes |
+| What the override changes for a capture | only the sun / moon parameter (`0x00C11970` reads it at `0x00C1487C`), the sun direction and the keyframed sky colours (`0x00C14860`); the smooth night `sky+0x780`, the level `+0xF0`, `+0xF4`, the clock and the sun times keep their live values; restored right after the capture (`0x006AE605`) | Verified in the bytes |
+| Why | the exterior probe is captured again at the next hour whose sky colour differs by 0.15 and blended toward it (state at lightMgr+0xB0..+0xC4) | Verified in the bytes; the keyframe channel unverified |
+| Lot impostors | the impostor pump `0x00AD97E0` updates the light manager with argument 0 (`0x00AD9847`), skipping the probe queue and the override; the impostor material binds albedo, AO, water, detail and holiday light textures and is lit when drawn; rebuilt on content changes | Pump verified; the material and the rebuild trigger inferred |
+
+Changing the hour the probes take would remove the exterior probe's blend between sky keyframes (visible jumps), so
+Apex leaves the queue alone. A future-hour exterior capture keeps the live lamps (a small mismatch, softened at night by
+ProbeNeutral). Distant lots that look wrong at night point to the lotImposter shader's constants, not to its build.
 
 ### Open items / unverified
 

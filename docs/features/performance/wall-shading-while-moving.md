@@ -9,7 +9,7 @@ moment and get their shading within a few frames of stopping.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (on by default since its introduction) |
+| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Bounded first-pass wait and refinements behind a first pass: Released in 2.15.1 |
 | Default | On |
 | Menu | System > Performance > Camera and lighting > *Wall shading waits while moving* |
 | Configuration | `[patches.WallShadingWhileMoving]` in `ApexRadiance.toml` |
@@ -30,9 +30,13 @@ The solver step's vtable slot goes through a gate. For calls from the solver dri
 1. **While the camera moves,** return the current state without a pass. This is exactly what the engine does itself in
    state 1 when its cost estimate is negative: the driver stores the state unchanged and asks again next frame.
 2. **Bound the wait:** one wait per state and per camera motion, at most 2 s. After that, the pending passes of that
-   state run for the rest of the motion, one per frame.
-3. **Always,** run at most one pass of 1 ms or more per frame across all lots.
-4. **When the camera stops,** clear the waits; the waiting passes run one per frame.
+   state run for the rest of the motion, one per frame. While a first pass is pending (held within the last 0.5 s), its
+   wait keeps its start: a frame where the camera only looks still does not start it over.
+3. **Always,** run at most one pass of 1 ms or more per frame across all lots. While a first pass is pending, refinements
+   (state 1) wait, so the frame's pass goes to the first passes a lot load waits for.
+4. **When the camera stops** and no first pass is pending, clear the waits; the waiting passes run one per frame.
+5. A first pass that has waited more than 10 s is reported in the log (`[WallShading] A first pass has waited`), at
+   most every 30 s.
 
 Every other call (the synchronous level solve, the tool mode, any unknown caller or state) goes to the game unchanged.
 
@@ -55,6 +59,12 @@ Every other call (the synchronous level solve, the tool mode, any unknown caller
   0x006A0E00 / 0x006A4480 / 0x0069FD60 / 0x006A8D20 / 0x006A8C88 / 0x006A8DE0, none of which is the AO solver.
 
 ## Limitations
+
+- In Edit Town (2.15.0, an F8 session) the camera read flipped between moving and still while a placed lot loaded.
+  Each still frame started the 2 s wait over and other lots' refinements took the one pass a frame, so the lot stayed
+  "Processing" for minutes (11876 first passes held, 214 run); turning the effects off ended it in 3 s. Since 2.15.1 the
+  wait keeps its start while a first pass is pending, and refinements wait for it. Why the camera read flipped is not
+  known (unverified: a thumbnail camera in the same slot).
 
 - A lot that loads while you pan finishes loading (is shown instead of its impostor) up to about 2 s later.
 - Outdoor walls of such a lot get their AO shading when the camera stops (or after 2 s), one level per frame.

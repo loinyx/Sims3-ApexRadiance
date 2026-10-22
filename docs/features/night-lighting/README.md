@@ -10,7 +10,7 @@ in Build mode and at dusk. By day, lamps that the game keeps lit add a subdued g
 
 | | |
 |---|---|
-| Availability | Released (standalone since 0.1.0). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: Released in 2.6.0. Light detail, walls blocking lamp light outdoors, lamp switches in one frame, weather variants of the lot and terrain passes, and idavidveiga's daytime bloom fixes: Released in 2.7.0. Lamp lighting (Instant (GPU) with real-time outdoor lamps and quick outdoor lamp edits; Classic with lamp drags and floors shown together), outdoor and indoor light through openings, doors block light, walls shade lamp light near the ground, buildings block lamp light on trees and objects, shadow softness and smooth light maps: Released in 2.13.0. Light through stairwells, stairs on the directional maps, light through arches and doorways, foliage lit per vertex with crown shade on lot ground, and moonlight scaled at its reader: Released in 2.14.0 |
+| Availability | Released (standalone since 0.1.0). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: Released in 2.6.0. Light detail, walls blocking lamp light outdoors, lamp switches in one frame, weather variants of the lot and terrain passes, and idavidveiga's daytime bloom fixes: Released in 2.7.0. Lamp lighting (Instant (GPU) with real-time outdoor lamps and quick outdoor lamp edits; Classic with lamp drags and floors shown together), outdoor and indoor light through openings, doors block light, walls shade lamp light near the ground, buildings block lamp light on trees and objects, shadow softness and smooth light maps: Released in 2.13.0. Light through stairwells, stairs on the directional maps, light through arches and doorways, foliage lit per vertex with crown shade on lot ground, and moonlight scaled at its reader: Released in 2.14.0. Moon at least 20 degrees high, Build mode keeping the season's sun times and smooth dusk: Released in 2.15.1 |
 | Default | On (`enabledByDefault = true`; the feature metadata keeps `experimental = true`) |
 | Menu | Lighting page (tabs Overview, Ground, Objects, Buildings, Stories); World > Water & Snow page (Lamp Glow, Water Reflections, Snow); developer options under Developer > Lighting |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -144,7 +144,7 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 | Individual options | `luzDasLampadasNatural` | float | 1.0 | 0 to 1 | Stock lamp colour: 0 pink (game), 1 warm white; applied on release ([lamp-colour](lamp-colour.md)) |
 | Individual options | `corPropriaNoLote` | bool | off | | Lot lamps get their own colour |
 | Individual options | `corDasLampadasDoLote` | float | 1.0 | 0 to 1 | That lot lamp colour |
-| Individual options | `luar` | float | 1.0 | 0 to 2 | Moonlight at night (see *Brightness controls*) |
+| Individual options | `luar` | float | 0.277 (1.0 until 2.15.1) | 0 to 2 | Moonlight at night (see *Brightness controls*); 0.277 in the Performance, Balanced and Quality presets too (1.817 until 2.15.1) |
 | Individual options | `postesAcesosNoCalculo` | bool | on | | Street lamps count as lit in lot light solves (0x6BE18C); reinstall |
 | Individual options | `qualidadeAltaEmTodosOsLotes` | bool | off | | Experimental: every lot at the active lot's quality; reinstall; lots loaded afterwards |
 | Individual options | `gramaDoLoteUsaLuzDoLote` | bool | on | | Lot pass keeps "no terrain lightmap" (0xC7F87D), so lot grass keeps the lot's own light after a terrain rebuild; reinstall |
@@ -350,6 +350,19 @@ At night level n (lightMgr+0xF0, 0 day to 1 night) and a configured gain g. Sinc
 one daytime curve, `LampDay(n) = 0.03 + 0.97 smoothstep(0, 1, n)` (exactly 1 at n >= 1, `kLampDayFloor` = 0.03 by day):
 a lamp left on by day lights every outdoor surface at 3% of its night strength. Full-night values are unchanged bit for bit.
 
+**Smooth dusk (2.15.1).** The light manager's level moves in steps of 0.2: its setter `0x006ADD60` takes a new level
+only when it moved 0.2 and snaps to 1 over 0.8 and to 0 under 0.2 (`0x00F9D514` = 0.8, `0x00FAA20C` = 0.2), so these
+terms jumped five times at dusk. The level n of Apex's own lamp terms is now the sky's smooth night `sky+0x780.x` (the
+"ShaderDayNightParameters" the game's shaders read), mapped as `clamp((x - 0.2) / 0.6, 0, 1)`: continuous, and 1 or 0
+exactly where the setter snaps (`NightLevel::Read`, `features/night_level.h`). What follows the game's own lights keeps
+`+0xF0`: the room-rig re-gather, the room solves' daytime factor and the rigs' reach law (`ObjectReachLawScale`, which
+re-gathers every rig when its scale moves: about 70 times a dusk on the smooth level, five on the steps). Without the Build mode redirect of the sun times
+(`night_terrain_relight_patch.cpp` `SunTimesHook`) the level is `+0xF0` as before. Developer A/B: *Smooth dusk*. Every
+lighting snapshot (F8) starts with a day and night line: clock, sun height, smooth night and the sun times it was
+measured against, the weather set, the light manager's levels, Apex's level and the Build mode gate, with a warning
+when the sky counts day with the sun 20 degrees under the horizon (or night 10 degrees over it) or the light manager's
+level is far from the sky's ([room light maps](../../engine/room-light-maps.md#night-level-lightmgr0xf0)).
+
 | Function | Formula | Used by |
 |---|---|---|
 | `NightWeighted(g)` (lot_light_bridge.cpp) | `1 + (g - 1) n` | Ground, road and lot-map gains at night |
@@ -384,6 +397,17 @@ Native solar and sky constants are never raised.
   (ExteriorLightData, read by 88 techniques including Sims). Its only reader, `FUN_00c11ad0`, loads it with
   `mov ecx,011D0918h; call <mov eax,ecx; ret>; movss xmm0,[eax]` at 0x00C11B01. Apex points that call (0x00C11B06) at
   its own getter, which returns the game's value x `lerp(1, luar, night level)`; the variable itself is never written.
+- **Moon height** (2.15.1): the game's light direction (`0x00C14F2E..0x00C150F5`, every frame) is the sun's
+  with its height scaled by `[obj+0x9B4]` and held at a minimum `[obj+0x9B8]` (`y = max(y k, min)`, then normalised); at
+  night the sun is below the horizon, so the moon (the same direction, x mirrored) stands at `atan(min / horizontal part)`:
+  0.7 degrees after dusk (min 0.0122), a few degrees later. At that height every bump of a road's normal map and every road
+  piece's slight tilt switched the moon on or off and curbs cast shadows tens of metres long (F7 and F8 captures: dark
+  bands on roads 40 % under the snow beside them, moonlight x1.82). At full night (night level 0.9 to 1 brings it in) the
+  sun scale getter, called by `FUN_00C11AD0` with ESI = that object, raises the minimum so the moon stands at least 20
+  degrees high (`min = r tan H`, r = the direction's horizontal part); its horizontal direction still turns as the game
+  moves it. By day and through dusk the game's minimum is put back, and on uninstall. A fade of the moon's light below
+  6 degrees was tried first and removed: with the game's moon that low all night it turned the moon off for the whole night.
+  Developer: Lighting > Developer > *Moon height at night* (A/B) and *Least moon height (degrees)*, 5 to 60, 20.
   A blend that starts from the current value, or another mod's "Sunlight brightness", is therefore scaled once and
   never stacks. When the bytes differ (another game build), the value is written every frame as before, and a value
   written by another mod becomes the new base. Rigs copy the sun colour when they gather, so they are refreshed on
@@ -425,6 +449,7 @@ the directional maps of each room light map while the game holds both (reference
 | 0x006B6516, 0x006B60D3, 0x006B6618 | Light register / remove / move-toggle arm tests | `8B 17 8B 42 20 8B CF FF D0` |
 | 0x00C8504C | Chunk texture render call in the terrain sweep | 15 bytes at 0x00C85047 |
 | 0x00C2950F | Bake colour copy (`BakeColourStub`) | `0F 28 87 F0 00 00 00` |
+| 0x00C294F7 | Bake position copy (`BakePosStub`, low lamps from 40 cm; colour site - 0x18) | `0F 28 00 0F 29 86 10 01 00 00` |
 | 0x011D0918 | Sunlight scale float | Reader at 0x00C11B01 `B9 18 09 1D 01 E8`; its call at 0x00C11B06 must reach `8B C1 C3` (`mov eax,ecx; ret`) to be redirected |
 | 0x006C7160 | Room queue `FUN_006c7160` thiscall(treeLevel, roomId) | `83 EC 2C 53 55 56 33 DB 8B F1` (Fail otherwise) |
 | 0x006BE18C | Street lamp colour in the lot solve (experimental) | `0F 28 86 E0 00 00 00` |

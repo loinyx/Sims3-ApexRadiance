@@ -251,6 +251,27 @@ on at dusk through the same setter but re-solves neither lots nor terrain. Apex 
 (night_terrain_relight `ReadLightState`, object_light_bridge `ReadNight`) and passes it to shaders as the moon-shadow fade
 (see [shaders.md](shaders.md)) and to the room-rig re-gather (every 0.1 of change).
 
+**Build mode (2.15.1).** Build mode switches the sky to sun times without the season: in a winter world at dusk sunrise
+/ sunset (`sky+0x974` / `+0x978`) went from 2.0 / -2.5 to 0 / 0, the level from 1 to 0 within half a second and the sun
+from -35 to -13 degrees, while the clock (`lightMgr+0xB4`) stood still (Daylight logs). Static analysis of 1.67.2:
+
+| Item | Where | Status |
+|---|---|---|
+| Copy of the sun times into the sky, every update | `0x00C15D9A`: `call FUN_00D68FE0` (thiscall(weather, float* sunrise, float* sunset), ret 8; weather = `*(*(sky+0x21C)+0x74)`, active set `+0x9EC`, debug set `+0xA48` when byte `+0xB04` is set) | Verified in the bytes |
+| Who fills the active set | game script, `WeatherControl_SetSet` (`0x007846E0` -> `FUN_00D69900` writes `+0x924`, copied to `+0x9EC` at `0x00D6E6D8`) | Verified in the bytes; that Build mode's script pushes 0 / 0 is inferred (the script assembly is encrypted) |
+| Smooth night `sky+0x780` (.x night, .y manmade light) | `FUN_00C130B0`: day when the clock is within sunrise + `+0x9C4` - `+0x9D0` .. sunset + `+0x990` + `+0x9D0` + `+0x9C0`; .x moves by the frame time | Verified in the bytes |
+| "ShaderDayNightParameters" | global shader parameter registered on `sky+0x780` (`0x00C10F1C`), read by pointer at every draw; the lot pass c3.x is taken to be it (0 with `+0xF0` held at 1, F7 capture) | Registration verified; the c3 mapping inferred |
+| Light manager level `+0xF0` / `+0xF4` | `FUN_00C11AD0` sets them from .x / .y (`0x006ADD60`, `0x006ADE40`, steps of 0.2); each light's fade `0x006BC430`: world lights take F0, lot lights in the lot's table F4, others 1 | Verified in the bytes |
+| Also from the sun times | sun and moon directions (`0x00C11970`), dominant light and shadow direction (`0x00C15062`), sky, ambient and fog keyframe (`0x00C152F4`) | Verified in the bytes |
+
+Holding `+0xF0` alone (an earlier attempt) left the shaders' day/night parameter at day. Apex points the copy at
+`SunTimesHook` (`features/night_level.h`, `SunTimesGate`): when the copy returns 0 / 0 after a non-zero pair and the clock
+has not run 0.25 h since, the season's pair is written back. Build mode then shows sun, moon, shadows, sky colour, street
+lamps and every lamp factor exactly as live mode at that hour. Any other pair, a new sky or weather manager (world load,
+travel, Edit Town) and the debug weather set are taken as they are; nothing is saved (the copy is rewritten every frame,
+the weather set is not touched). Without the redirect (bytes not found) Apex gates only the level it reads
+(`NightLevel::Read`).
+
 ### How Apex reads and patches this
 
 | Site / hook | What | Code | Option (TOML key) |

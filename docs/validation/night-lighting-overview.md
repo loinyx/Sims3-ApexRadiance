@@ -26,6 +26,7 @@ The harnesses only read captures and the repository; they never write into the g
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-22 | `4e32cea` | 2.15.1 release: CPU Lighting and Smoke suites, world lamp policy (low-lamp rule, sun time gates, smooth dusk mapping), Instant lamps, floor shade, i18n check, menu audit; developer, public and standard Release x86 builds | 58,249 + 22 + 5,842 checks passed, 0 failed; builds without warnings. In game (developer builds of this branch): the moon height and the lot area lights confirmed by the maintainer; a lamp on the ground lit the snow in live mode; Build mode kept the night level at 1.00 (log) | Offline; in game DXVK |
 | 2026-10-04 | `92582b6` | Terrain lighting GPU, policy and resource checks | 2,017,393 passed, 0 failed; Release x86 build without warnings | Native D3D9 |
 
 Sub-part results are on their own validation pages.
@@ -51,6 +52,9 @@ Sub-part results are on their own validation pages.
 
 ## Open checks
 
+- 2.15.1 standard build: Build mode at night in a winter world (lawn, sidewalks and street lamps as in live mode; the
+  sun time gate's log lines), smooth dusk (no steps, frame times while rigs re-gather), the F8 day and night line, and a
+  lamp on the lawn in Classic lamp lighting.
 - PR #2 daylight composition, day/night phase rebuilds and squared ground scale: same-lot gameplay and DXVK.
 - Smooth indoor light with the `IndoorBasisScale` correction (furniture after floor switches): not tested in game.
 - Draw-handler CPU cost changes (`CallOriginal*` wrappers, `SamplerBind`, `VsInfo`, memoized `SelectLamps`): written

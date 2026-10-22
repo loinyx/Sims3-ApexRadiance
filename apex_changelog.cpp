@@ -6,6 +6,23 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k2151Added[] = {
+    "Filtered screenshots can be saved to any folder you choose",
+    nullptr};
+constexpr const char* k2151Improved[] = {
+    "Moonlight is softer by default and in every preset",
+    "Lamps brighten smoothly at dusk and dim smoothly at dawn",
+    "Loading lots is smoother: the extra lighting work follows your frame rate",
+    "Instant lamp lighting does less work while a lot keeps relighting",
+    nullptr};
+constexpr const char* k2151Fixed[] = {
+    "A lot placed in Edit Town no longer stays on Processing",
+    "Area lights of a lot light the ground past the lot's border",
+    "Lamps hidden behind objects no longer reflect on water",
+    "Lamps placed on the ground light the lawn around them",
+    "Lamps keep their night strength in Build mode at night",
+    "The moon lights the town from higher up: no more dark stripes on roads at night",
+    nullptr};
 constexpr const char* k2150Added[] = {
     "Steam Deck and Linux: Proton is detected, effects need no shader compiler, and the Deck suggests the Performance preset",
     nullptr};
@@ -297,6 +314,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"2.15.1", "2026-10-22", k2151Added, k2151Improved, k2151Fixed},
     {"2.15.0", "2026-10-21", k2150Added, k2150Improved, k2150Fixed},
     {"2.14.0", "2026-10-20", k2140Added, k2140Improved, k2140Fixed},
     {"2.13.2", "2026-10-15", k2132Added, k2132Improved, k2132Fixed},

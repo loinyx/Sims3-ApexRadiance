@@ -21,6 +21,7 @@
 #define NOMINMAX
 #endif
 #include "lot_light_bridge.h"
+#include "terrain_bake_rule.h"
 #include "rt_outdoor_lamps.h"
 #include "game_addresses.h"
 #include "shader_ids.h"
@@ -349,6 +350,9 @@ IDirect3DPixelShader9* g_objectPs = nullptr;
 bool g_objectCompileTried = false;
 std::atomic<bool> g_objectFix{false};
 std::atomic<float> g_night{0.0f};
+// (2.15.1) the light manager's level in its steps of 0.2: the rigs' reach law (ObjectReachLawScale) re-gathers every rig when
+// its scale moves, so it keeps the game's five steps at dusk instead of following smooth dusk (about 70 re-gathers)
+std::atomic<float> g_rigNight{0.0f};
 
 // ---- Lamp brightness on the ground ("Ground brightness", "Roads and sidewalks"): the game's lamp scale cK.x of a light
 // map term (lamp light only: the terrain map rgb, the lot map, max(map, atlas) of floors and roads) times the gain for
@@ -459,6 +463,7 @@ struct LotRect {
     uint32_t lotLo, lotHi;
     float m2 = 0, m10 = 1;  // the rotation's other terms (world.z = m2 lx + m10 lz + tz; VS c10.x, c10.z)
     float ty = 0;           // the lot's origin height (m13): its ground for the lamp shade (GroundShadow)
+    float base = 0;         // the lot base (its story's manager +0xD4, world y): the ground low lamps are measured from
 };
 std::vector<LotRect> g_lotRects;
 std::atomic<bool> g_softEdges{true};
@@ -541,6 +546,8 @@ int ReadLotRects(LotRect* out, int max) {
                 r.m2 = m[2];
                 r.m10 = m[10];
                 r.ty = m[13];
+                r.base = *reinterpret_cast<const float*>(mgr + 0xD4);
+                if (!std::isfinite(r.base)) r.base = r.ty;
                 if (std::isfinite(r.tx) && std::isfinite(r.tz) && std::isfinite(r.m0) && std::isfinite(r.m8) && std::isfinite(r.m2) && std::isfinite(r.m10) && std::isfinite(r.ty)) n++;
                 break; // one story per lot is enough
             }
@@ -988,6 +995,7 @@ std::vector<GroundShadow::Lamp> ShadeLamps(const LotRect& r) {
         if (!b.baked || b.rect[0] > x1 || b.rect[2] < x0 || b.rect[1] > z1 || b.rect[3] < z0) continue;
         const float lum = b.light[0] * 0.2126f + b.light[1] * 0.7152f + b.light[2] * 0.0722f;
         GroundShadow::Lamp L{b.pos[0], b.pos[1], b.pos[2], 0.4f * lum};
+        L.liftable = TerrainBakeRule::Liftable(b.lot != 0, b.type);
         if (!(L.k > 0.0f) || !std::isfinite(L.k) || !std::isfinite(L.x) || !std::isfinite(L.y) || !std::isfinite(L.z)) continue;
         const float nx = std::clamp(L.x, x0, x1), nz = std::clamp(L.z, z0, z1);
         const float wgt = GroundShadow::Weight(L, nx, r.ty, nz);
@@ -2530,7 +2538,7 @@ constexpr auto kAnimatedWindow = std::chrono::seconds(60);
 constexpr auto kAnimatedExpire = std::chrono::seconds(120); // an animated lamp with no automatic change for this long is a plain lamp again
 constexpr auto kQuietLogEvery = std::chrono::seconds(60);
 
-bool IsPlainType(int type) { return type >= 3 && type <= 6; }
+bool IsPlainType(int type) { return TerrainBakeRule::LotLampType(type); } // (2.15.1: and the area lights 9, 10)
 
 // A captured session toggles 0x40 on ordinary lot lamps (types 3..6).
 // Do not confuse that discrete enable switch with an animated colour/intensity.
@@ -8008,6 +8016,7 @@ void SetObjectShadowFix(bool on) {
 }
 
 void SetNightLevel(float level) { g_night = level < 0 ? 0.0f : (level > 1 ? 1.0f : level); }
+void SetRigNightLevel(float level) { g_rigNight = level < 0 ? 0.0f : (level > 1 ? 1.0f : level); }
 
 void SetRoofFix(bool on, float strength) {
     g_roofStrength = strength;
@@ -8123,8 +8132,10 @@ int ChunkCount() { return static_cast<int>(g_chunks.size()); }
 bool ObjectLampColourAt(const void* light, const float* point, float rgb[3], const float* ext) { return ObjectLampColourAtImpl(light, point, rgb, ext); }
 float ObjectReachLawScale() {
     if (!g_objPixel.load(std::memory_order_relaxed) || !g_objPixelLamps.load(std::memory_order_relaxed) || !LevelLightShare::RealisticReachActive()) return -1.0f;
-    return TerrainLightingPolicy::ReachLampScale(NativeWallScale(), g_night.load(std::memory_order_relaxed), g_wallEnabled.load(std::memory_order_relaxed),
-                                                 g_wallGain.load(std::memory_order_relaxed), g_objPixelLampStrength.load(std::memory_order_relaxed) / kPixelLampTrimUnit);
+    const float night = g_rigNight.load(std::memory_order_relaxed);
+    const float native = NativeWallFresh() ? static_cast<float>(g_nativeWallScale) : TerrainLightingPolicy::LampDay(night);
+    return TerrainLightingPolicy::ReachLampScale(native, night, g_wallEnabled.load(std::memory_order_relaxed), g_wallGain.load(std::memory_order_relaxed),
+                                                 g_objPixelLampStrength.load(std::memory_order_relaxed) / kPixelLampTrimUnit);
 }
 void SetObjectPixelLamps(bool on, float strength) {
     g_objPixel = on;
@@ -8303,6 +8314,23 @@ std::string LotLampStatus() {
 }
 
 const BakeSnapshot& CurrentBakeLamps() { return g_bakeSnap; }
+bool LotGroundY(uint64_t lot, float& y) {
+    auto find = [&]() {
+        for (const LotRect& r : g_lotRects)
+            if ((static_cast<uint64_t>(r.lotHi) << 32 | r.lotLo) == lot) {
+                y = r.base;
+                return true;
+            }
+        return false;
+    };
+    if (!lot || find()) return lot != 0;
+    // a lot the table does not hold yet (it streamed in since the last refresh): read the lots again, once a frame
+    static DWORD missTick = ~0u;
+    if (missTick == g_lotDrawTick.load()) return false;
+    missTick = g_lotDrawTick;
+    RefreshLotRects();
+    return find();
+}
 int LampEnumerations() { return g_lampEnumerations; }
 const std::vector<uint64_t>& LastUserChangeLots() { return g_lastUserLots; }
 void RequestLampRefresh() { g_lampRefreshNow = true; }

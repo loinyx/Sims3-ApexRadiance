@@ -37,6 +37,8 @@
 #include "light_probe.h"
 #include "screen_watch.h"
 #include "lot_light_bridge.h"
+#include "terrain_bake_rule.h"
+#include "night_level.h"
 #include "bloom_alpha_probe.h"
 #include "lightmap_smooth.h"
 #include "terrain_chunk_relight.h"
@@ -232,7 +234,7 @@ float g_groundBrightness = 0.75f;
 float g_roadBrightness = 1.0f;  // x the ground brightness
 float g_streetLampGain = 0.8f;  // street lamps on the ground (terrain bake)
 float g_lotLampGain = 0.8f;     // lot lamps on the ground (terrain bake + the lot's own light map)
-float g_moonlight = 1.0f;       // the moon's light at night
+float g_moonlight = 0.277f;     // the moon's light at night
 bool g_edgePad = true;          // pad the room light maps' edges (RoomMapPadding): no dark side on things along walls
 bool g_lotTintOwn = false;      // lot lamps have their own colour
 float g_lotLampTint = 1.0f;     // their colour (0 = pink, 1 = warm white)
@@ -444,6 +446,8 @@ const std::vector<BYTE> kBakeColourOrig = {0x0F, 0x28, 0x87, 0xF0, 0x00, 0x00, 0
 // stamps type-5 lot lamps at their spill. The pool right under the lamp comes from the room-solve map, which has the cones.
 // The upper-floor gate mirrors it (LevelLightShare::SetBakeConeSpill).
 volatile bool g_bakeConeSpill = true;
+// (2.15.1) area lights (types 9, 10) at the share of the ground below they face (TerrainBakeRule::AreaGroundShare)
+const float g_areaHalf = 0.5f, g_areaZero = 0.0f, g_areaOne = 1.0f;
 bool g_bakeGainInstalled = false;
 float g_bakeGainSeen[2] = {1.0f, 1.0f}; // street / lot gains the multipliers hold
 float g_tintSeen[2] = {1.0f, 1.0f};     // street / lot lamp colours the stock lamps were last re-coloured with
@@ -458,12 +462,97 @@ __declspec(naked) void BakeColourStub() {
         ret
     lot:
         mulps xmm0, xmmword ptr [g_bakeLotMul]
+        mov eax, dword ptr [edi+0xB0]
+        cmp eax, 9                            // area lights: the share of the ground below they face
+        je area
+        cmp eax, 10
+        je area
         cmp byte ptr [g_bakeConeSpill], 0
         je done
-        cmp dword ptr [edi+0xB0], 5           // type 5: a lamp with cones
+        cmp eax, 5                            // type 5: a lamp with cones
         jne done
         mulps xmm0, xmmword ptr [edi+0x150]   // its spill, per channel
     done:
+        ret
+    area:
+        sub esp, 16
+        movups xmmword ptr [esp], xmm1        // (xmm1 kept for the game)
+        movss xmm1, dword ptr [edi+0x184]     // its third axis' y (TerrainBakeRule::kAreaAxisYOffset)
+        mulss xmm1, dword ptr [g_areaHalf]
+        addss xmm1, dword ptr [g_areaHalf]
+        maxss xmm1, dword ptr [g_areaZero]
+        minss xmm1, dword ptr [g_areaOne]
+        shufps xmm1, xmm1, 0
+        mulps xmm0, xmm1
+        movups xmm1, xmmword ptr [esp]
+        add esp, 16
+        ret
+    }
+}
+
+// (2.15.1) Low lamps on the ground: the bake copies each light's position (vfunc+0x24) into its shader parameter at 0xC294F7
+// ("movaps xmm0,[eax]; movaps [esi+110h],xmm0", EAX = the position, EDI = the light, ESI = the bake). The stub copies it and,
+// for a lot lamp whose light stands lower than TerrainBakeRule::kLowLampLift over its lot's ground, stamps it from that height
+// (TerrainBakeRule::StampHeight; the lot's ground from LotLightBridge::LotGroundY): a lamp lying on the lawn (light 5 cm up)
+// lit only a tree above it, the lawn 2 m away took about 1 % of what a lamp 40 cm up gives it. The world grass, the lot edges,
+// snow and the atlas then agree with the lot's own floor map (RtOutdoorLamps). EAX, ECX, EDX and the flags are dead there
+// (written at 0xC29501, 0xC29508, 0xC2951D); xmm0 is loaded again at 0xC2950F; xmm1..7 are kept for the game.
+uintptr_t kBakePosSite = 0; // 0x00C294F7 = BakeColourSite - 0x18
+constexpr uintptr_t kBakePosBeforeColour = 0x18;
+const std::vector<BYTE> kBakePosOrig = {0x0F, 0x28, 0x00, 0x0F, 0x29, 0x86, 0x10, 0x01, 0x00, 0x00};
+bool g_bakePosInstalled = false;
+bool g_lowLiftSeen = true; // TerrainBakeRule::LowLampLift() as the last rebuild had it
+std::atomic<long> g_bakeLowLifted{0};
+bool ReadLightLot(const BYTE* light, int& type, uint64_t& lot) {
+    __try {
+        type = *reinterpret_cast<const int*>(light + 0xB0);
+        lot = *reinterpret_cast<const uint32_t*>(light + 0xC0) | static_cast<uint64_t>(*reinterpret_cast<const uint32_t*>(light + 0xC4)) << 32;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+void __cdecl BakeLiftHead(const BYTE* light, float* head) {
+    int type = 0;
+    uint64_t lot = 0;
+    if (!TerrainBakeRule::LowLampLift() || !ReadLightLot(light, type, lot) || !lot || !TerrainBakeRule::LotLampType(type)) return;
+    float ground = 0.0f;
+    if (!LotLightBridge::LotGroundY(lot, ground)) return;
+    const float h = head[1] - ground, s = TerrainBakeRule::StampHeight(h);
+    if (std::isfinite(s) && s != h) {
+        head[1] = ground + s;
+        g_bakeLowLifted.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+__declspec(naked) void BakePosStub() {
+    __asm {
+        movaps xmm0, xmmword ptr [eax]
+        movaps xmmword ptr [esi+0x110], xmm0
+        mov edx, dword ptr [edi+0xC0]
+        or edx, dword ptr [edi+0xC4]
+        jz street                              // a street lamp: as the game
+        sub esp, 112
+        movups xmmword ptr [esp], xmm1
+        movups xmmword ptr [esp+16], xmm2
+        movups xmmword ptr [esp+32], xmm3
+        movups xmmword ptr [esp+48], xmm4
+        movups xmmword ptr [esp+64], xmm5
+        movups xmmword ptr [esp+80], xmm6
+        movups xmmword ptr [esp+96], xmm7
+        lea eax, [esi+0x110]
+        push eax
+        push edi
+        call BakeLiftHead
+        add esp, 8
+        movups xmm1, xmmword ptr [esp]
+        movups xmm2, xmmword ptr [esp+16]
+        movups xmm3, xmmword ptr [esp+32]
+        movups xmm4, xmmword ptr [esp+48]
+        movups xmm5, xmmword ptr [esp+64]
+        movups xmm6, xmmword ptr [esp+80]
+        movups xmm7, xmmword ptr [esp+96]
+        add esp, 112
+    street:
         ret
     }
 }
@@ -498,12 +587,79 @@ bool g_sunCallTried = false;
 float g_sunFactor = 1.0f;      // what SunScaleGetter multiplies by (render thread)
 float g_sunScaled = 0.0f;
 
+// (2.15.1) Moon height. The game's light direction (0x00C14F2E..0x00C150F5, every frame) is the sun's from the time of day
+// with its height scaled by [obj+0x9B4] and held at a minimum [obj+0x9B8] (y = max(y k, min), then normalised); at night
+// the sun is below the horizon, so y is that minimum and the moon (the same direction, x mirrored) sits at atan(min / its
+// horizontal part): 0.7 degrees after dusk (min 0.0122), a few degrees at most later. At that height every bump of a road's
+// normal map and every road piece's slight tilt switched the moon on or off and curbs cast shadows tens of metres long
+// (dark bands on roads 40 % under the snow beside them, with moonlight x1.82). At full night the minimum is raised so
+// the moon stands at least kMoonHeightDeg high; its horizontal direction still turns as the game moves it. FUN_00C11AD0
+// calls this getter with ESI = that object (light direction +0x7F0, read for SetSun 0x006ACDF0 right after), so the new
+// minimum shapes the next frame's direction. By day and through dusk the game's minimum is put back.
+bool g_moonLift = true;          // developer A/B (moon_height)
+float g_moonHeightDeg = 20.0f;   // developer slider: the least height of the moon at night
+float g_liftWeight = 0.0f;       // night weight (render thread): 0 by day and at dusk, 1 at full night
+uintptr_t g_liftObj = 0;         // the object whose minimum is managed
+float g_liftGameMin = -1.0f;     // its own minimum (< 0 = not read)
+float g_liftWritten = -1.0f;     // the minimum last written (< 0 = none)
+float g_moonHeightNow = 0.0f;    // the light's height now, degrees (status line)
+void LiftMoon(BYTE* obj) {
+    __try {
+        float& minRef = *reinterpret_cast<float*>(obj + 0x9B8);
+        const float* n = reinterpret_cast<const float*>(obj + 0x7F0);
+        if (g_liftObj != reinterpret_cast<uintptr_t>(obj)) { // a new world's sky: its own minimum
+            g_liftObj = reinterpret_cast<uintptr_t>(obj);
+            g_liftGameMin = minRef;
+            g_liftWritten = -1.0f;
+        } else if (g_liftWritten >= 0.0f && minRef != g_liftWritten) {
+            g_liftGameMin = minRef; // the game set its minimum again (a new sky setting): that is the base now
+        }
+        const float base = g_liftGameMin;
+        if (!(base > 0.0f && base < 1.0f) || !std::isfinite(n[0]) || !std::isfinite(n[1]) || !std::isfinite(n[2])) return;
+        g_moonHeightNow = std::asin(std::clamp(n[1], -1.0f, 1.0f)) * 57.2957795f;
+        float want = base;
+        const float w = g_moonLift ? g_liftWeight : 0.0f;
+        const float hor = std::sqrt(n[0] * n[0] + n[2] * n[2]);
+        if (w > 0.0f && n[1] > 0.0f && hor > 1e-4f) {
+            // n was normalised from (x, used, z): its horizontal part r = used x hor / n.y; the height H needs min = r tan H
+            const float used = g_liftWritten >= 0.0f ? g_liftWritten : base;
+            const float r = used * hor / n[1];
+            const float target = std::max(base, r * std::tan(std::clamp(g_moonHeightDeg, 0.0f, 60.0f) * 0.0174532925f));
+            want = base + w * (target - base);
+        }
+        if (minRef != want) minRef = want;
+        g_liftWritten = want;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_liftObj = 0;
+    }
+}
+bool LiftObjLive(); // the managed sky is still the world's (below, with ReadLightState)
+void RestoreMoonHeight() {
+    if (!g_liftObj || !(g_liftGameMin > 0.0f) || g_liftWritten < 0.0f) return;
+    if (!LiftObjLive()) { // its world was left (main menu): the sky is freed, nothing to put back
+        g_liftObj = 0;
+        g_liftWritten = -1.0f;
+        return;
+    }
+    __try {
+        *reinterpret_cast<float*>(g_liftObj + 0x9B8) = g_liftGameMin;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+    g_liftWritten = -1.0f;
+}
+float* __cdecl ScaledSun(const float* scale, BYTE* obj) {
+    if (obj) LiftMoon(obj);
+    g_sunScaled = *scale * g_sunFactor;
+    return &g_sunScaled;
+}
+
+// (the game reloads xmm0 and ecx right after the call and keeps nothing in xmm or edx across it; esi and edi are kept)
 __declspec(naked) void SunScaleGetter() {
     __asm {
-        movss xmm0, dword ptr [ecx]
-        mulss xmm0, dword ptr [g_sunFactor]
-        movss dword ptr [g_sunScaled], xmm0
-        mov eax, offset g_sunScaled
+        push esi
+        push ecx
+        call ScaledSun
+        add esp, 8
         ret
     }
 }
@@ -523,6 +679,38 @@ bool WriteFloat(uintptr_t at, float v) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
+}
+
+// (2.15.1) Day and night in Build mode (features/night_level.h): the sky copies its sunrise / sunset from the weather
+// manager every update, "lea ecx,[esi+974h]; push ecx; mov ecx,[edx+74h]; call FUN_00D68FE0" at 0x00C15D9A
+// (thiscall(weather, float* sunrise, float* sunset), ret 8; ESI = the sky). Build mode makes them the seasonless 0 / 0,
+// and the sky's smooth night, the light manager's level and the lamp factors of the shaders then turned to day at dusk.
+// That call goes to SunTimesHook, which keeps the season's times while the 0 / 0 stands with the clock still.
+using SunTimesFn = void(__thiscall*)(void*, float*, float*);
+SunTimesFn g_sunTimes = nullptr; // FUN_00D68FE0
+uintptr_t g_sunTimesCall = 0;    // the redirected call (0 = not redirected)
+std::vector<BYTE> g_sunTimesOrig;
+const char* const kSunTimesPattern = "8D 8E 74 09 00 00 51 8B 4A 74 E8 ?? ?? ?? ?? 80 3D";
+// FUN_00D68FE0's start: cmp byte [ecx+0B04h],0; lea eax,[ecx+0A48h]
+const BYTE kSunTimesStart[] = {0x80, 0xB9, 0x04, 0x0B, 0x00, 0x00, 0x00, 0x8D, 0x81, 0x48, 0x0A, 0x00, 0x00};
+// The clock (lightMgr+0xB4, hours) and the weather manager's debug set switch (+0xB04); NAN / false when unreadable
+void ReadSkyState(uintptr_t sky, uintptr_t weather, float& hour, bool& debug) {
+    hour = NAN;
+    debug = false;
+    __try {
+        const uintptr_t lightMgr = *reinterpret_cast<const uintptr_t*>(sky + 0x1F4);
+        if (lightMgr) hour = *reinterpret_cast<const float*>(lightMgr + 0xB4);
+        if (weather) debug = *reinterpret_cast<const BYTE*>(weather + 0xB04) != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+void __fastcall SunTimesHook(void* weather, void*, float* rise, float* set) {
+    g_sunTimes(weather, rise, set);
+    const uintptr_t sky = reinterpret_cast<uintptr_t>(rise) - 0x974;
+    float hour;
+    bool debug;
+    ReadSkyState(sky, reinterpret_cast<uintptr_t>(weather), hour, debug);
+    NightLevel::GateSunTimes(sky, reinterpret_cast<uintptr_t>(weather), debug, *rise, *set, hour);
 }
 
 // Finds "mov ecx,<scale>; call <mov eax,ecx; ret>; movss xmm0,[eax]" in the game image and points that call at
@@ -571,6 +759,8 @@ bool ApplyMoonlight(float level) {
         RedirectSunCall();
     }
     const float factor = 1.0f + (g_moonlight - 1.0f) * level;
+    // the moon height at full night only (night level 0.9 to 1 brings it in): by day and through dusk the sun is the game's
+    g_liftWeight = level > 0.9f ? std::min((level - 0.9f) * 10.0f, 1.0f) : 0.0f;
     if (g_sunCall) {
         float game = 0.0f;
         if (ReadFloat(kSunlightScale, game) && game > 0.0f && game < 100.0f) g_sunlightBase = game;
@@ -597,6 +787,7 @@ bool ApplyMoonlight(float level) {
 }
 
 void RestoreMoonlight() {
+    RestoreMoonHeight();
     if (g_sunCall) {
         g_sunFactor = 1.0f;
         // only while the site still holds our call (another mod may have patched it since: then it is left alone)
@@ -676,6 +867,7 @@ std::atomic<int> g_lotLampArms{0};
 std::atomic<int> g_lotLampsBaked{0};
 std::atomic<int> g_lotLampsSkippedOff{0};
 float g_level = 0.0f;
+float g_levelStep = 0.0f; // (2.15.1) +0xF0 as the game steps it (g_level is the sky's smooth night)
 std::atomic<float> g_menuLevel{-1.0f}; // g_level for the menu's status pill; -1 = no world loaded or the feature is off
 int g_counter38 = 0;
 int g_counter3C = 0;
@@ -690,14 +882,14 @@ bool OriginalWorldLightTest(void* light) {
     return reinterpret_cast<BoolVfn>(vtable[0x20 / 4])(light);
 }
 
-// Lamp that belongs to a lot, is an ordinary lamp type, is alive/enabled and sits outdoors (room 0).
+// Lamp that belongs to a lot, is a lamp class (TerrainBakeRule::LotLampType), is alive/enabled and sits outdoors (room 0).
 bool IsOutdoorLotLamp(const BYTE* L) {
     __try {
         const uint32_t lotLo = *reinterpret_cast<const uint32_t*>(L + 0xC0);
         const uint32_t lotHi = *reinterpret_cast<const uint32_t*>(L + 0xC4);
         if ((lotLo | lotHi) == 0) return false;
         const int type = *reinterpret_cast<const int*>(L + 0xB0);
-        if (type < 3 || type > 6) return false;
+        if (!TerrainBakeRule::LotLampType(type)) return false;
         const BYTE f = L[0x100];
         if (!(f & 0x01) || !(f & 0x40) || !(f & 0x04)) return false; // alive, enabled, room known
         return *reinterpret_cast<const int*>(L + 0x08) == 0;           // room 0 = outdoors
@@ -740,6 +932,18 @@ struct LightState {
     float level = 0.0f;
 };
 
+bool LiftObjLive() {
+    if (!g_rootPtrAddr || !g_liftObj) return false;
+    __try {
+        const uintptr_t root = *reinterpret_cast<const uintptr_t*>(g_rootPtrAddr);
+        const uintptr_t lightMgr = root ? *reinterpret_cast<const uintptr_t*>(root + 0x1C0) : 0;
+        const uintptr_t back = lightMgr ? *reinterpret_cast<const uintptr_t*>(lightMgr + 0xD0) : 0;
+        return back > 0x210 && back - 0x210 == g_liftObj && *reinterpret_cast<const uintptr_t*>(g_liftObj + 0x1F4) == lightMgr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 bool ReadLightState(LightState& out) {
     if (!g_rootPtrAddr) return false;
     __try {
@@ -751,11 +955,10 @@ bool ReadLightState(LightState& out) {
         if (!cells) return false;
         out.lightMgr = lightMgr;
         out.cells = cells;
-        out.level = *reinterpret_cast<const float*>(lightMgr + 0xF0);
-        return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
+    return NightLevel::Read(out.lightMgr, out.level, true); // the sky's smooth night (Apex's lamp terms; +0xF0 without the redirect)
 }
 
 bool ReadCounters(uintptr_t cells, int& c38, int& c3C) {
@@ -1039,7 +1242,7 @@ bool ArrivalFootprint(const std::vector<LotLightBridge::BakeLamp>& old, const st
                       bool plain, std::vector<ChunkRelight::Lamp>& footprints, std::vector<LotLightBridge::BakeChange>& changes) {
     for (int pass = 0; pass < 2; ++pass)
         for (const auto& b : pass == 0 ? old : current) {
-            if (!plain && b.type >= 3 && b.type <= 6) continue;
+            if (!plain && TerrainBakeRule::LotLampType(b.type)) continue;
             const auto* r = b.rect;
             for (int k = 0; k < 4; ++k) if (!std::isfinite(r[k])) return false;
             if (!(r[0] < r[2] && r[1] < r[3])) {
@@ -1289,6 +1492,9 @@ void OnPresent() {
         g_prevCounter = INT_MIN;
         g_status = "Waiting for the game to load a world";
         g_menuLevel.store(-1.0f);
+        g_liftObj = 0; // the world's sky is gone: nothing to put back
+        g_liftWritten = -1.0f;
+        NightLevel::ResetGates(); // the next world's sun times start fresh
         return;
     }
     DaylightProbe::OnPresent(s.lightMgr); // development builds only (daylight_log): logs the sky state, changes nothing
@@ -1297,7 +1503,19 @@ void OnPresent() {
     int c38 = 0, c3C = 0;
     ReadCounters(s.cells, c38, c3C);
     g_level = s.level;
+    {
+        float f0 = 0.0f; // the light manager's level in its steps (smooth dusk is s.level)
+        g_levelStep = NightLevel::ReadF0(s.lightMgr, f0) && std::isfinite(f0) ? std::clamp(f0, 0.0f, 1.0f) : s.level;
+    }
     g_menuLevel.store(s.level);
+    {
+        static bool s_held = false;
+        if (NightLevel::Holding() != s_held) {
+            s_held = !s_held;
+            LOG_INFO(s_held ? std::format("[NightTerrainRelight] Build mode's seasonless sun times: the season's are kept (night level {:.2f})", s.level)
+                            : std::string("[NightTerrainRelight] The sky's own sun times again"));
+        }
+    }
     g_counter38 = c38;
     g_counter3C = c3C;
     // (14/10, drag solves) the countdown a lamp drag armed: idle again while the local path is there (CancelCountdown)
@@ -1569,6 +1787,10 @@ void OnPresent() {
     if (!dragging && g_bakeGainInstalled && (g_streetLampGain != g_bakeGainSeen[0] || g_lotLampGain != g_bakeGainSeen[1])) {
         SetBakeGains(g_streetLampGain, g_lotLampGain);
         NoteEdit(now, true, true, "lamp brightness on the ground changed", true);
+    }
+    if (g_bakePosInstalled && TerrainBakeRule::LowLampLift() != g_lowLiftSeen) {
+        g_lowLiftSeen = TerrainBakeRule::LowLampLift();
+        NoteEdit(now, true, true, "height of lamps on the ground changed", true);
     }
     const float tintLot = g_lotTintOwn ? g_lotLampTint : g_lampTint;
     if (!dragging && (g_lampTint != g_tintSeen[0] || tintLot != g_tintSeen[1])) {
@@ -1971,7 +2193,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             "How strongly street lamps light the ground (1 = the default; the ground light is rebuilt when it changes).");
         RegisterFloatSetting(&g_lotLampGain, "forcaDasLampadasDoLote", SettingWidget::Slider, 0.8f, 0.25f, 3.0f,
             "How strongly outdoor lot lamps light the ground (1 = the default; the ground light is rebuilt when it changes).");
-        RegisterFloatSetting(&g_moonlight, "luar", SettingWidget::Slider, 1.0f, 0.0f, 2.0f,
+        RegisterFloatSetting(&g_moonlight, "luar", SettingWidget::Slider, 0.277f, 0.0f, 2.0f,
             "How strong the moonlight is at night (1 = the game; 0 = no moonlight, only lamps and the sky's glow).");
         RegisterBoolSetting(&g_edgePad, "bordasDosMapasDeLuz", true,
             "Stairs, curtains and furniture indoors get smooth light from the game's room light maps: no dark side along outer walls, no steps between neighbouring objects.");
@@ -2127,6 +2349,41 @@ class NightTerrainRelightPatch : public ApexPatch {
             g_bakeGainInstalled = MemPatch::WriteBytes(kBakeColourSite, bakeBytes, &patchedLocations, &kBakeColourOrig);
             if (g_bakeGainInstalled) FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(kBakeColourSite), kBakeColourOrig.size());
         }
+        // Low lamps on the ground (optional: without it the bake stamps them from their real height)
+        g_bakePosInstalled = false;
+        kBakePosSite = kBakeColourSite ? kBakeColourSite - kBakePosBeforeColour : 0;
+        if (g_bakeGainInstalled && MemPatch::ValidateBytes(reinterpret_cast<LPVOID>(kBakePosSite), kBakePosOrig.data(), kBakePosOrig.size())) {
+            // call BakePosStub; nop x5
+            const auto posBytes = CallPatch(kBakePosSite, 0, {}, reinterpret_cast<void*>(&BakePosStub), kBakePosOrig.size());
+            g_bakePosInstalled = MemPatch::WriteBytes(kBakePosSite, posBytes, &patchedLocations, &kBakePosOrig);
+            if (g_bakePosInstalled) FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(kBakePosSite), kBakePosOrig.size());
+        }
+        g_lowLiftSeen = TerrainBakeRule::LowLampLift();
+        // Day and night in Build mode (optional: without it Apex gates only the level it reads; the game's lamps fade)
+        NightLevel::g_timesHooked = false;
+        g_sunTimesCall = 0;
+        {
+            BYTE* base = nullptr;
+            size_t size = 0;
+            const uintptr_t at = MemPatch::GetModuleInfo(GetModuleHandleW(nullptr), &base, &size) ? MemPatch::ScanPattern(base, size, kSunTimesPattern) : 0;
+            const uintptr_t call = at ? at + 10 : 0;
+            int32_t rel = 0;
+            if (call && MemPatch::ReadBytes(call + 1, reinterpret_cast<BYTE*>(&rel), 4) &&
+                MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(call + 5 + rel), kSunTimesStart, sizeof(kSunTimesStart))) {
+                g_sunTimes = reinterpret_cast<SunTimesFn>(call + 5 + rel);
+                g_sunTimesOrig.assign(reinterpret_cast<const BYTE*>(call), reinterpret_cast<const BYTE*>(call) + 5);
+                const auto timesBytes = CallPatch(call, 0, {}, reinterpret_cast<void*>(&SunTimesHook), 5);
+                if (MemPatch::WriteBytes(call, timesBytes, &patchedLocations, &g_sunTimesOrig)) {
+                    FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(call), 5);
+                    g_sunTimesCall = call;
+                    NightLevel::g_timesHooked = true;
+                }
+            }
+            if (g_sunTimesCall) LOG_INFO(std::format("[NightTerrainRelight] Day and night: the sky's copy of the sun times at {:#x} goes through Apex (Build mode keeps the season's)", g_sunTimesCall));
+            else LOG_WARNING("[NightTerrainRelight] Day and night: the sky's copy of the sun times was not found; Apex keeps the night only for its own lamp terms in Build mode");
+        }
+        if (g_bakePosInstalled) LOG_INFO("[NightTerrainRelight] Terrain bake: lot lamps on the ground are stamped from 40 cm over their lot's ground");
+        else LOG_WARNING("[NightTerrainRelight] Terrain bake position code differs or was not found: lamps on the ground light the lawn from their real height");
         LevelLightShare::SetBakeConeSpill(g_bakeGainInstalled && g_bakeConeSpill);
         if (g_bakeGainInstalled && g_bakeConeSpill) LOG_INFO("[NightTerrainRelight] Terrain bake: lamps with cones (type 5) are stamped at their spill");
         if (!g_bakeGainInstalled) LOG_WARNING("[NightTerrainRelight] Terrain bake colour code differs or was not found: street / lot lamp brightness on the ground not available");
@@ -2227,6 +2484,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             }
             HookGuard::Run("LevelLightShare frame update", [] { LevelLightShare::OnPresent(); });
             LotLightBridge::SetNightLevel(g_level);
+            LotLightBridge::SetRigNightLevel(g_levelStep); // the rigs' reach law keeps the game's steps (one re-gather per step)
             ProbeNeutral::SetNightLevel(g_level);
             ProbeNeutral::Set(g_neutralProbe, g_neutralProbeStrength);
             LotLightBridge::SetRoofFix(g_roofs, g_roofStrengthSetting);
@@ -2357,6 +2615,9 @@ class NightTerrainRelightPatch : public ApexPatch {
         patchedLocations.clear();
         g_chunkHookInstalled = false;
         g_bakeGainInstalled = false;
+        g_bakePosInstalled = false;
+        NightLevel::g_timesHooked = false;
+        g_sunTimesCall = 0;
         LevelLightShare::SetBakeConeSpill(false);
         // The chunk re-render call is the game's own again: a local relight in progress is dropped (the chunk in flight, if
         // any, is rendered by the game at its next update). Its lamps were never marked as baked: the change is decided
@@ -2498,7 +2759,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_roadBrightness = 1.0f;
         g_streetLampGain = 0.8f;
         g_lotLampGain = 0.8f;
-        g_moonlight = 1.0f;
+        g_moonlight = 0.277f;
         g_objLamps = true;
         g_objStrength = 0.75f;
         g_objAll = true;
@@ -2982,6 +3243,19 @@ class NightTerrainRelightPatch : public ApexPatch {
             ImGui::TextWrapped("%s", LampMarkFilter::Status().c_str());
         }
         if (ApexUi::Checkbox("Soft lot edges (A/B: off = plain max of lot and ground light)", &g_softLotEdges)) NotifySettingChanged();
+        if (ApexUi::Checkbox("Moon height at night (A/B: off = the game's moon on the horizon)", &g_moonLift)) ObjectLightBridge::RequestRigRefresh();
+        bool smoothDusk = NightLevel::g_smoothDusk.load();
+        if (ApexUi::Checkbox("Smooth dusk (A/B: off = the game's night level in steps of 0.2)", &smoothDusk)) NightLevel::g_smoothDusk = smoothDusk;
+        bool lowLamp = RtOutdoorLamps::LowLampLift();
+        if (ApexUi::Checkbox("Lamps on the ground light the lawn from 40 cm (A/B: off = from their real 5 cm)", &lowLamp)) RtOutdoorLamps::SetLowLampLift(lowLamp);
+        ImGui::SameLine();
+        ImGui::TextDisabled("%ld Instant draws, %ld terrain stamps lifted%s", RtOutdoorLamps::LowLampLifted(), g_bakeLowLifted.load(std::memory_order_relaxed),
+                            g_bakePosInstalled ? "" : " (terrain bake: not installed)");
+        if (g_moonLift) {
+            ImGui::SetNextItemWidth(220.0f);
+            if (ImGui::SliderFloat("Least moon height (degrees)##MoonHeight", &g_moonHeightDeg, 5.0f, 60.0f, "%.0f") && !ApexUi::SliderDragging())
+                ObjectLightBridge::RequestRigRefresh();
+        }
         // Lamp lighting is chosen on the Performance page (Lamp lighting card); read-only here
         ImGui::TextWrapped("Lamp lighting: %s (Performance > Lamp lighting)", g_lampMode == kLampInstant ? "Instant (Real-time outdoor lamps on Quick outdoor lamp edits' parts)" : "Classic");
         if (g_lampMode == kLampInstant && ApexUi::SwitchRow("Check quick lamp edits", &g_outdoorDeltaCheck,
@@ -3016,7 +3290,8 @@ class NightTerrainRelightPatch : public ApexPatch {
         ImGui::TextWrapped("Windows take outdoor light: %s", LotLightBridge::WindowOutdoorStatus().c_str());
         ImGui::TextWrapped("Terrain bake: %s | moonlight: %s", g_bakeGainInstalled ? std::format("street lamps x{:.2f}, lot lamps x{:.2f}", g_bakeStreetMul[0], g_bakeLotMul[0]).c_str() : "not installed",
                            g_sunlightBase < 0.0f ? (kSunlightScale ? "waiting for a world" : "not available")
-                                                 : std::format("sunlight scale {:.3f} (base {:.3f}, moonlight x{:.2f})", g_moonWritten, g_sunlightBase, g_moonlight).c_str());
+                                                 : std::format("sunlight scale {:.3f} (base {:.3f}, moonlight x{:.2f}; light height {:.1f} deg, moon height {})", g_moonWritten, g_sunlightBase, g_moonlight,
+                                                             g_moonHeightNow, g_moonLift ? std::format("at least {:.0f} deg at night", g_moonHeightDeg) : std::string("the game's")).c_str());
         ImGui::TextWrapped("Roofs: %s", LotLightBridge::RoofStatus().c_str());
         ImGui::TextWrapped("Water: %s", LotLightBridge::WaterStatus().c_str());
         ImGui::TextWrapped("Smoothed light map: %s", LightmapSmooth::Status().c_str());

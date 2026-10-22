@@ -7,7 +7,8 @@
 namespace LotLightBridge {
 void SetEnabled(bool on);
 void SetObjectShadowFix(bool on);
-void SetNightLevel(float level); // lightMgr+0xF0, 0 = day, 1 = night
+void SetNightLevel(float level); // lightMgr+0xF0, 0 = day, 1 = night (2.15.1: the sky's smooth night, NightLevel::Read)
+void SetRigNightLevel(float level); // the light manager's level in its steps (the rigs' reach law, ObjectReachLawScale)
 void SetRoofFix(bool on, float strength);
 void OnPresent();                  // render thread, every frame (refreshes the nearby lamp list for roofs)
 // Counts changes of outdoor lot lamps that change the terrain bake (a lamp of the bake added, removed or moved; a lamp
@@ -41,6 +42,8 @@ struct BakeSnapshot {
     std::vector<uint64_t> lots;        // every lot with a tracked lamp (sorted)
 };
 const BakeSnapshot& CurrentBakeLamps();
+// (2.15.1) The ground (lot base, world y) of a lot the soft lot edges' table holds; render thread (the terrain bake's low lamps)
+bool LotGroundY(uint64_t lot, float& y);
 // What differs in the bake between two snapshots: only on lots settled in `now` that were already in `baked` (lots that
 // streamed in later were never baked, and streaming never rebuilds). Lamps are matched by type and place (5 cm), not by
 // pointer. Light changes under 5 % per channel are noise; animated lamps are counted apart and never make Any() true.

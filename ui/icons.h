@@ -133,6 +133,7 @@ enum class IconId : int {
     Ellipsis, // ellipsis
     ChevronUp, // chevron-up
     FlaskConical, // flask-conical
+    FolderOpen, // folder-open
     Count,
     None = Count, // "no icon" for widgets that take an optional one
 };

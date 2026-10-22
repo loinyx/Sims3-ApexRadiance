@@ -79,6 +79,7 @@ float4 main(PSIn i) : COLOR0 {
     float3 r = reflect(-v, nr);
     float3 refl = 0;
     float cover = 0;
+    float tHit = 1e9, block = 0; // where the reflected ray met the scene, and how surely (lamps behind it are hidden there)
     if (haveDepth) {
         // Only real hits are used; a ray that leaves the screen or finds nothing keeps the game's own sky reflection.
         // Every hit fades out smoothly (screen edges, ray length, how well the depth matched), so there is no hard line
@@ -103,6 +104,8 @@ float4 main(PSIn i) : COLOR0 {
                 float match = 1 - saturate((ch.w - SceneW(uh)) / thick);
                 refl = tex2Dlod(sScene, float4(uh, 0, 0)).rgb;
                 cover = EdgeFade(uh) * match * saturate(1.5 - hi / 60);
+                tHit = hi;
+                block = EdgeFade(uh) * match;
                 break;
             }
             // diff >= thick: a thin object in front of the ray (post, leaf); keep marching behind it
@@ -121,6 +124,9 @@ float4 main(PSIn i) : COLOR0 {
         float rr = lampPos[k].w * lampPos[k].w + 1e-3;
         float3 h = normalize(l * rsqrt(d2 + 1e-4) + v);
         float sp = pow(saturate(dot(n, h)), exponent) * (2 * peakScale) / (1 + d2 / (rr * 16));
+        // a lamp behind what the reflected ray met (a tent, a wall between the water and the lamp) shows no reflection there;
+        // the glow on the water around the lamp stays
+        sp *= 1 - block * saturate(sqrt(d2) - tHit - 0.5);
         float g = saturate(1 - d2 / rr);
         spec += lampCol[k].rgb * sp;
         glow += lampCol[k].rgb * (g * g);

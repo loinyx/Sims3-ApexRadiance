@@ -9,7 +9,7 @@ a time, so the game does not freeze for a full terrain rebuild. Part of [Night L
 
 | | |
 |---|---|
-| Availability | Released (visitor patch, arm sites and dusk rebuild since 0.1.0; paced sweep default since 2.5.3; local relight of user and visible-lot edits since 2.5.4; world-owned type-11 lamps since 2.5.6; day/night endpoint rebuilds, Build-mode phase response, priority re-queue of in-flight chunks and the world-lamp rig request on early completion since 2.6.0). Changed in 2.7.0: the world-load and Refresh terrain rebuilds run one chunk per frame, nearest first; a lamp switch's ground changes in one frame; urgent chunks go back to back |
+| Availability | Released (visitor patch, arm sites and dusk rebuild since 0.1.0; paced sweep default since 2.5.3; local relight of user and visible-lot edits since 2.5.4; world-owned type-11 lamps since 2.5.6; day/night endpoint rebuilds, Build-mode phase response, priority re-queue of in-flight chunks and the world-lamp rig request on early completion since 2.6.0). Changed in 2.7.0: the world-load and Refresh terrain rebuilds run one chunk per frame, nearest first; a lamp switch's ground changes in one frame; urgent chunks go back to back. Lot area lights in the bake and lamps on the ground stamped from 40 cm: Released in 2.15.1 |
 | Default | On |
 | Menu | Lighting > Ground > Ground & Lots > *Lot lamps light the street*; Lighting > Ground > Ground & Lots > *Game fixes* (folded: *Update at dusk*, *Delay after dusk*); Lighting > Overview > Refresh lighting |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` (keys below) |
@@ -96,9 +96,31 @@ armed like a lamp pick-up, a full rebuild, day or night) and *Refresh lots*
 - Street and lot lamp brightness and lamp colours ([README](README.md#brightness-controls)) enter the bake through
   `BakeColourStub`; a change, once the slider is released, is a "switch" edit (one rebuild).
 
+**Area lights (2.15.1).** The rectangle and disc area lights (types 9 and 10) of a lot are lamps too: the game baked them
+into the lot's own ground only, so a park lot's area lights (100 m range, F7 and F8 captures) lit its snow and stopped in a
+straight line at the lot border. They enter the bake with the other outdoor lot lamps. The game's area light law
+(`0x006BFBA0` rectangle, `0x006BFDC0` disc, both through `0x006BFAF0`) lights only the side its third axis (+0x180)
+points away from, and the bake stamps a light all round from its position, so `BakeColourStub` stamps an area light at
+`clamp(0.5 + 0.5 x axis.y, 0, 1)` of its colour: all of it when it shines down, half sideways, none when it shines up.
+The floor gate (`LevelLightShare::InTerrainBake`) and the GPU lamps' under-floor share (`RtOutdoorLamps`) use the same rule
+(`features/terrain_bake_rule.h`). The stamp keeps the bake's point law (distance to the light's position, not to its area).
+
+**Low lamps (2.15.1).** A lamp lying on the lawn (its light 5 cm up, an F8 capture in Build mode, the game's own lot
+map) lit only a tree above it: the stamp's law `2 w cos / d^2` gives the lawn 2 m away about 1 % of what a lamp 40 cm up
+gives it. `BakePosStub` replaces the copy of the light's position into its shader parameter at `0x00C294F7`
+(`0F 28 00 0F 29 86 10 01 00 00`, `movaps xmm0,[eax]; movaps [esi+110h],xmm0`, 0x18 bytes before the colour site, checked
+at install) with `call BakePosStub; nop x5`: it makes the same copy and, for a lot lamp (lot id != 0, types 3..6, 9, 10)
+whose light stands less than 40 cm over its lot's ground and not 0.5 m under it, stamps it from 40 cm
+(`TerrainBakeRule::StampHeight`; the ground is the lot base, manager `+0xD4`, from the soft lot edges' table,
+`LotLightBridge::LotGroundY`, read again once a frame for a lot it lacks). EAX, ECX, EDX and the flags are dead there; xmm1..7
+are kept. The world grass, the atlas, snow (atlas x 4), the soft lot edge and Classic then agree with Instant's lifted floor
+map. Optional (a warning if the bytes differ); the developer A/B is a switch edit (one rebuild). Shows after the next
+terrain rebuild of the lamp's chunks (placing or moving a lamp rebuilds them).
+
 ## Limitations
 
-- Basement lamps and lot lights other than outdoor lamps (types 3..6 and lot-owned 11, room 0, lit) stay out of the bake,
+- Basement lamps and lot lights other than outdoor lamps (types 3..6, the area lights 9 and 10 since 2.15.1, and lot-owned
+  11, room 0, lit) stay out of the bake,
   as in the game.
 - A full rebuild consumed by the game itself (a Build-mode pick-up) is treated as covering every lamp.
 - Animated lamps (3 automatic changes within 60 s) do not trigger work; their state reaches the ground with the next
@@ -138,7 +160,7 @@ armed like a lamp pick-up, a full rebuild, day or night) and *Refresh lots*
 | `TerrainLightTest(light)` (visitor 0xC29626) | vfunc+0x20 | A lot-owned outdoor type-11 lamp (lot id != 0, room known 0x04, room 0) is refused unless flags have 0x01 alive, 0x20 lit and 0x40 enabled (its vfunc+0x20 is `FUN_007EAEA0`, always true). Then the original test (world lights). With `luzDoLoteNaGrama`: `IsOutdoorLotLamp` and lit (+0x100 & 0x20). Counters "on the ground" (`g_lotLampsBaked`) and "off" (`g_lotLampsSkippedOff`) |
 | `ArmTest(light)` (0x6B6516, 0x6B60D3, 0x6B6618) | vfunc+0x20 | World lights, or outdoor lot lamps with `luzDoLoteNaGrama` (counted in `g_lotLampArms`, "armed") |
 
-`IsOutdoorLotLamp(L)`: lot id (+0xC0 | +0xC4) != 0, type +0xB0 in 3..6, flags +0x100 with 0x01 alive, 0x40 enabled,
+`IsOutdoorLotLamp(L)`: lot id (+0xC0 | +0xC4) != 0, type +0xB0 in 3..6, 9 or 10 (`TerrainBakeRule::LotLampType`), flags +0x100 with 0x01 alive, 0x40 enabled,
 0x04 room known, and room +0x08 == 0. All reads inside `__try`.
 
 ### Per frame (`OnPresent`, render thread = the game's light and terrain update thread)
@@ -177,7 +199,7 @@ Not possible: log `Paced sweep not possible (...): full rebuild instead` and `Ki
 
 The enumeration (`FUN_006ACF70`) runs every 20 frames, at once after a rebuild or world change, and on an edit read
 request (`RequestLampEditRefresh` from the lamp-entry mark, at least 50 ms after the previous read). `ReadLotLamp`
-admits lamps by `WorldLampPolicy::Eligible` (lot types 3..6/11 outdoors, world-owned type 11) and reads base colour
+admits lamps by `WorldLampPolicy::Eligible` (lot types 3..6, 9, 10 and 11 outdoors, world-owned type 11) and reads base colour
 +0xF0, intensity +0x10, range +0x130, position +0x120, light rect +0x134 {minX, minZ, maxX, maxZ} (set by `FUN_006BDDF0`
 from position and range), type and flags.
 

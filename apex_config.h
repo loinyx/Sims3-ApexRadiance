@@ -59,7 +59,10 @@ struct UiSettings {
     KeyChord pictureCompareKey{'B', false, false, false}; // hold to bypass Picture while over the menu ([ui] picture_compare_key)
     bool screenshotShortcutEnabled = true; // intercept a configurable key for filtered screenshots ([ui] screenshot_shortcut_enabled)
     KeyChord screenshotKey{VK_F8, false, false, false}; // F8 alone: an extra filtered screenshot (Ctrl+Shift+F8 is the lighting snapshot); the game's own C stays untouched
-    bool screenshotToApexFolder = false; // [ui] screenshot_folder: "game" (Documents\...\The Sims 3\Screenshots) or "apex" (Apex Radiance\Screenshots)
+    // [ui] screenshot_folder: "game" (Documents\...\The Sims 3\Screenshots), "apex" (Apex Radiance\Screenshots) or "custom"
+    // ([ui] screenshot_custom_folder, UTF-8; the game's folder while none is chosen or it cannot be created)
+    int screenshotFolder = 0; // 0 game, 1 apex, 2 custom
+    std::string screenshotCustomFolder;
     bool screenshotHideGameUi = true; // temporarily toggle the game's F10 UI visibility only while taking the screenshot
     int minePresetBase = 0; // the preset the "mine" keys started from (its keys for the tools) ([ui] mine_base)
     bool sidebarCollapsed = false; // the sidebar is the icon-only rail ([ui] sidebar_collapsed)

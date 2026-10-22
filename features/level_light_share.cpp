@@ -83,6 +83,8 @@
 #define NOMINMAX
 #endif
 #include "level_light_share.h"
+#include "terrain_bake_rule.h"
+#include "night_level.h"
 #include "lamp_visibility.h"
 #include "lamp_reach.h"
 #include "wall_heights.h"
@@ -9171,7 +9173,11 @@ void StairwellBounceAt(const BYTE* room, const RoomInfo& info, const float* s, f
                 StairwellBounce::UpFlux(seen, 0.25f, q.up);
             }
             if (q.up[0] + q.up[1] + q.up[2] <= 0.0f) continue;
-            const float k = StairwellBounce::CeilingKernel(std::hypot(p[0] - qw[0], p[2] - qw[2]));
+            // (2.15.1) sqrt, not std::hypot: hypot's library call sets the FPU control word on every call, and this runs per
+            // floor texel and per opening patch (an F8 session while lots loaded: __ctrlfp and __hypothlp among the hottest
+            // render-thread samples); the kernel only takes the square, so the light is the same
+            const float ex = p[0] - qw[0], ez = p[2] - qw[2];
+            const float k = StairwellBounce::CeilingKernel(std::sqrt(ex * ex + ez * ez));
             for (int c = 0; c < 3; c++) add[c] += q.up[c] * k;
         }
     }
@@ -10049,7 +10055,7 @@ bool InTerrainBake(const BYTE* L) {
     const int room = *reinterpret_cast<const int*>(L + 0x08);
     const bool lot = (*reinterpret_cast<const uint32_t*>(L + 0xC0) | *reinterpret_cast<const uint32_t*>(L + 0xC4)) != 0;
     if (type == 11) return !(lot && (f & 0x04) && room == 0 && (f & 0x61) != 0x61);
-    return lot && type >= 3 && type <= 6 && (f & 0x65) == 0x65 && room == 0;
+    return lot && TerrainBakeRule::LotLampType(type) && (f & 0x65) == 0x65 && room == 0;
 }
 // The share (0..1) of the ground atlas at the floor point s that the baked lamps of room0's list put there from under the
 // point's plane; -1 when none of them reaches it or the list cannot be read. POD only (SEH)
@@ -10063,7 +10069,8 @@ float UnderFloorShare(const BYTE* room0, const float* s, float base) {
             const BYTE* L = reinterpret_cast<const BYTE*>(*p);
             if (!L || !InTerrainBake(L)) continue;
             const float* head = reinterpret_cast<const float*>(L + 0x120);
-            const float h = head[1] - base; // the stamp is measured at the terrain under the point
+            const bool lotLamp = (*reinterpret_cast<const uint32_t*>(L + 0xC0) | *reinterpret_cast<const uint32_t*>(L + 0xC4)) != 0;
+            const float h = TerrainBakeRule::StampHeight(head[1] - base, TerrainBakeRule::Liftable(lotLamp, *reinterpret_cast<const int*>(L + 0xB0))); // the stamp is measured at the terrain under the point (a lamp on the lawn: as the bake)
             if (!(h > 0.0f)) continue;      // cos <= 0: the lamp stamps nothing there
             const float dx = head[0] - s[0], dz = head[2] - s[2];
             const float d2 = dx * dx + h * h + dz * dz;
@@ -10073,9 +10080,12 @@ float UnderFloorShare(const BYTE* room0, const float* s, float base) {
             if (stamp > 1.0f) stamp = 1.0f; // saturated next to the lamp
             // a lamp with cones (type 5) is stamped at its spill +0x150 when the bake stub does it (SetBakeConeSpill, 07/10)
             const float *col = reinterpret_cast<const float*>(L + 0xF0), *S = reinterpret_cast<const float*>(L + 0x150);
-            const bool spill = g_bakeConeSpill.load(std::memory_order_relaxed) && *reinterpret_cast<const int*>(L + 0xB0) == 5;
+            const int type = *reinterpret_cast<const int*>(L + 0xB0);
+            const bool spill = g_bakeConeSpill.load(std::memory_order_relaxed) && type == 5;
             float v = 0.0f;
             for (int i = 0; i < 3; i++) v += std::max(col[i], 0.0f) * (spill ? std::clamp(S[i], 0.0f, 1.0f) : 1.0f);
+            // an area light at the share of the ground it faces, as the bake stub
+            if (TerrainBakeRule::AreaType(type)) v *= TerrainBakeRule::AreaGroundShare(*reinterpret_cast<const float*>(L + TerrainBakeRule::kAreaAxisYOffset));
             v *= stamp;
             if (!(v > 0.0f)) continue;
             all += v;
@@ -13835,15 +13845,15 @@ DWORD g_daySweepAt = 0;
 DWORD g_dayWorldAt = 0; // GetTickCount at the last world change (OnWorldChanged)
 bool g_daySwept = false;
 bool ReadNightLevel(float& level) {
+    uintptr_t lightMgr = 0;
     __try {
         const uintptr_t root = kRootPtr ? *reinterpret_cast<const uintptr_t*>(kRootPtr) : 0;
-        const uintptr_t lightMgr = root ? *reinterpret_cast<const uintptr_t*>(root + 0x1C0) : 0;
+        lightMgr = root ? *reinterpret_cast<const uintptr_t*>(root + 0x1C0) : 0;
         if (!lightMgr) return false;
-        level = *reinterpret_cast<const float*>(lightMgr + 0xF0); // the night level (0 day, 1 night), as LotLightBridge reads it
-        return std::isfinite(level);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
+    return NightLevel::Read(lightMgr, level); // the night level (0 day, 1 night), as LotLightBridge reads it
 }
 void SweepDayRooms() {
     float level = 0.0f;

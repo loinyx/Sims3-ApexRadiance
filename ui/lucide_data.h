@@ -769,6 +769,10 @@ inline constexpr Element kEllipsis[] = {
 // chevron-up.svg
 inline constexpr Element kChevronUp[] = {{Kind::Path, "m18 15-6-6-6 6", {}, false}};
 // flask-conical.svg
+// folder-open.svg
+inline constexpr Element kFolderOpen[] = {
+    {Kind::Path, "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2", {}, false},
+};
 inline constexpr Element kFlaskConical[] = {
     {Kind::Path, "M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2", {}, false},
     {Kind::Path, "M6.453 15h11.094", {}, false},
@@ -892,6 +896,7 @@ inline constexpr IconData kIcons[] = {
     {"ellipsis",kEllipsis,static_cast<int>(sizeof(kEllipsis)/sizeof(kEllipsis[0]))},
     {"chevron-up",kChevronUp,static_cast<int>(sizeof(kChevronUp)/sizeof(kChevronUp[0]))},
     {"flask-conical", kFlaskConical, static_cast<int>(sizeof(kFlaskConical) / sizeof(kFlaskConical[0]))},
+    {"folder-open", kFolderOpen, static_cast<int>(sizeof(kFolderOpen) / sizeof(kFolderOpen[0]))},
 };
 
 } // namespace ApexUi::LucideData
