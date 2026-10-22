@@ -14610,10 +14610,17 @@ uint64_t LampVisibilityState() {
     const float r = Penumbra::g_radius.load(std::memory_order_relaxed);
     uint32_t rb;
     std::memcpy(&rb, &r, 4);
-    uint64_t s = (uint64_t(g_wallSnapGen.load(std::memory_order_relaxed)) * 1099511628211ull) ^ (uint64_t(g_floorSnapGen.load(std::memory_order_relaxed)) << 21) ^
-                 (uint64_t(rb) << 7);
-    s ^= (g_objectWallsOn.load(std::memory_order_relaxed) ? 1u : 0u) | (g_installed.load(std::memory_order_relaxed) ? 2u : 0u) |
-         (Penumbra::g_on.load(std::memory_order_relaxed) ? 4u : 0u);
+    const uint32_t wall = g_wallSnapGen.load(std::memory_order_relaxed), floor = g_floorSnapGen.load(std::memory_order_relaxed);
+    const uint32_t flags = (g_objectWallsOn.load(std::memory_order_relaxed) ? 1u : 0u) | (g_installed.load(std::memory_order_relaxed) ? 2u : 0u) |
+                           (Penumbra::g_on.load(std::memory_order_relaxed) ? 4u : 0u);
+    // (2.15.3) asked twice per lamp per object draw: the last value while its inputs are the same (the 64-bit multiply is a
+    // CRT call, __allmul, on x86)
+    thread_local uint32_t t_wall = ~0u, t_floor = ~0u, t_rb = ~0u, t_flags = ~0u;
+    thread_local uint64_t t_state = 0;
+    if (wall == t_wall && floor == t_floor && rb == t_rb && flags == t_flags) return t_state;
+    uint64_t s = (uint64_t(wall) * 1099511628211ull) ^ (uint64_t(floor) << 21) ^ (uint64_t(rb) << 7);
+    s ^= flags;
+    t_wall = wall, t_floor = floor, t_rb = rb, t_flags = flags, t_state = s;
     return s;
 }
 bool VisibilityDiagArmed() { return g_diagArmed.load(std::memory_order_relaxed); } // F8 records each test: no memo then

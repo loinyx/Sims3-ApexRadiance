@@ -4338,13 +4338,16 @@ std::string ReachLawText(bool reach, bool refused, bool placed, float scale, con
 // Returns the lamp count.
 // exitLamps (outdoor objects, 2.12.4): also the indoor lamps shining out of a house through an opening (not for windows: their
 // outdoor face would take the lamp of the room behind them)
-int PickObjectLamps(float x, float y, float z, float (*lamps)[4], float& groundShare, float nearSkip, float (*cones)[4] = nullptr, float* lampTop = nullptr,
-                    float (*reachRows)[4] = nullptr, bool exitLamps = false) {
+int PickObjectLampsImpl(float x, float y, float z, float (*lamps)[4], float& groundShare, float nearSkip, float (*cones)[4], float* lampTop, float (*reachRows)[4],
+                        bool exitLamps, bool* exitPicked) {
     constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
     int nLamps = 0;
     const int n = SelectLamps(x, z, 40.0f, exitLamps);
     const float obj[3] = {x, y + 0.5f, z};
     float seen = 0.0f, all = 0.0f;
+    if (exitPicked)
+        for (int k = 0; k < n; k++)
+            if (g_lampCone[k].light) *exitPicked = true;
     for (int k = 0; k < n; k++) {
         const float* pr = g_lampData[k];
         const float* col = g_lampData[16 + k];
@@ -4393,6 +4396,119 @@ int PickObjectLamps(float x, float y, float z, float (*lamps)[4], float& groundS
     }
     if (all > 1e-5f) groundShare = std::clamp(seen / all, 0.0f, 1.0f);
     return nLamps;
+}
+
+// (2.15.3) The whole pick of an object kept (objects are drawn at the same place frame after frame, and the pieces of one
+// object at one place): keyed by the exact float bits of every input and valid while the lamp list (g_lampMemoGen, the
+// SelectLamps memo's generation) and everything the wall and slab test reads (LampVisibilityState) are the same, read before
+// and after the pick (a change during it keeps nothing). A pick with a lamp shining out of a house is not kept (its test
+// reads that lamp's own copy of the walls). A hit writes exactly what the pick would: the same lamp rows, cones and reach
+// rows, the ground share only when the pick set it, lampTop, the counters and the candidate count. With the lamp
+// visibility memo (the development switch lamp_visibility_memo; on in released builds), and never while F8 records tests or a
+// light probe captures. 1024 entries, direct-mapped.
+struct PickMemo {
+    uint32_t gen = 0; // 0 = empty
+    uint64_t state = 0;
+    uint32_t key[6] = {};
+    int nLamps = 0, candidates = 0;
+    bool shareSet = false;
+    float groundShare = 0.0f, lampTop = 0.0f;
+    uint32_t leftOut = 0, dimmed = 0;
+    float lamps[2 * ShaderPatches::kObjectPixelLamps][4] = {}; // rows 1 .. 2N of the caller's array
+    float cones[2 * ShaderPatches::kObjectPixelLamps][4] = {};
+    float reach[(ShaderPatches::kObjectPixelLamps + 3) / 4][4] = {};
+};
+constexpr uint32_t kPickMemoSize = 1024;
+PickMemo g_pickMemo[kPickMemoSize];
+uint32_t g_pickMemoHits = 0, g_pickMemoMisses = 0;
+// Development builds: one hit in 64 is picked again from scratch and compared bit for bit; after a difference (logged) the
+// memo is not used again in the session
+uint32_t g_pickMemoChecks = 0, g_pickMemoDiffs = 0;
+bool g_pickMemoOff = false;
+
+int PickObjectLamps(float x, float y, float z, float (*lamps)[4], float& groundShare, float nearSkip, float (*cones)[4] = nullptr, float* lampTop = nullptr,
+                    float (*reachRows)[4] = nullptr, bool exitLamps = false) {
+    constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
+    if (!DevSwitches::LampVisibilityMemo() || g_pickMemoOff || LevelLightShare::VisibilityDiagArmed() || LightProbe::Capturing())
+        return PickObjectLampsImpl(x, y, z, lamps, groundShare, nearSkip, cones, lampTop, reachRows, exitLamps, nullptr);
+    const uint32_t flags = (cones ? 1u : 0u) | (lampTop ? 2u : 0u) | (reachRows ? 4u : 0u) | (exitLamps ? 8u : 0u);
+    const uint32_t key[6] = {FloatBits(x), FloatBits(y), FloatBits(z), FloatBits(nearSkip), lampTop ? FloatBits(*lampTop) : 0u, flags};
+    uint32_t h = 2166136261u;
+    for (uint32_t v : key) h = (h ^ v) * 16777619u;
+    PickMemo& e = g_pickMemo[(h * 2654435761u) >> 22]; // top 10 bits: 1024 entries
+    static_assert(kPickMemoSize == (1u << (32 - 22)));
+    const uint64_t state = LevelLightShare::LampVisibilityState();
+    if (e.gen == g_lampMemoGen && e.state == state && std::memcmp(e.key, key, sizeof key) == 0) {
+        g_pickMemoHits++;
+        // (development builds) the check: the same pick from scratch on copies of the caller's rows, compared after the hit's copy
+        float chkLamps[1 + 2 * N][4], chkCones[2 * N][4], chkReach[(N + 3) / 4][4], chkShare = groundShare, chkTop = lampTop ? *lampTop : 0.0f;
+        int chkN = -1;
+        if (!kPublicBuild && (++g_pickMemoChecks & 63u) == 0) {
+            std::memcpy(chkLamps, lamps, sizeof chkLamps);
+            if (cones) std::memcpy(chkCones, cones, sizeof chkCones);
+            if (reachRows) std::memcpy(chkReach, reachRows, sizeof chkReach);
+            const uint32_t leftOut0 = g_objLampsLeftOut, dimmed0 = g_objLampsDimmed;
+            chkN = PickObjectLampsImpl(x, y, z, chkLamps, chkShare, nearSkip, cones ? chkCones : nullptr, lampTop ? &chkTop : nullptr, reachRows ? chkReach : nullptr,
+                                       exitLamps, nullptr);
+            g_objLampsLeftOut = leftOut0, g_objLampsDimmed = dimmed0; // (counted once, below)
+        }
+        for (int slot = 0; slot < e.nLamps; slot++) {
+            std::memcpy(lamps[1 + 2 * slot], e.lamps[2 * slot], 16);
+            std::memcpy(lamps[2 + 2 * slot], e.lamps[2 * slot + 1], 16);
+            if (cones) {
+                std::memcpy(cones[2 * slot], e.cones[2 * slot], 16);
+                std::memcpy(cones[2 * slot + 1], e.cones[2 * slot + 1], 16);
+            }
+            if (reachRows) reachRows[slot >> 2][slot & 3] = e.reach[slot >> 2][slot & 3];
+        }
+        if (e.shareSet) groundShare = e.groundShare;
+        if (lampTop) *lampTop = e.lampTop;
+        g_objLampsLeftOut += e.leftOut, g_objLampsDimmed += e.dimmed;
+        g_lastLampCandidates = e.candidates;
+        if (chkN >= 0) {
+            bool same = chkN == e.nLamps && FloatBits(chkShare) == FloatBits(groundShare) && (!lampTop || FloatBits(chkTop) == FloatBits(*lampTop)) &&
+                        std::memcmp(chkLamps[1], lamps[1], sizeof(float) * 4 * 2 * N) == 0;
+            if (same && cones) same = std::memcmp(chkCones, cones, sizeof chkCones) == 0;
+            if (same && reachRows) same = std::memcmp(chkReach, reachRows, sizeof chkReach) == 0;
+            if (!same) {
+                g_pickMemoOff = true;
+                if (g_pickMemoDiffs++ == 0)
+                    LOG_WARNING(std::format("[LotLightBridge] Object lamp pick memo: a kept pick differed from a new one at ({:.2f} {:.2f} {:.2f}) ({} lamps kept, {} picked): "
+                                            "not used again in this session", x, y, z, e.nLamps, chkN));
+            }
+        }
+        return e.nLamps;
+    }
+    g_pickMemoMisses++;
+    const uint32_t gen = g_lampMemoGen, leftOut0 = g_objLampsLeftOut, dimmed0 = g_objLampsDimmed;
+    // the ground share as the pick leaves it, told apart from the caller's value it may keep (NaN bits cannot come from the clamp)
+    constexpr uint32_t kUnset = 0x7FC0DEADu;
+    float share;
+    std::memcpy(&share, &kUnset, 4);
+    bool exitPicked = false;
+    const int n = PickObjectLampsImpl(x, y, z, lamps, share, nearSkip, cones, lampTop, reachRows, exitLamps, &exitPicked);
+    const bool shareSet = FloatBits(share) != kUnset;
+    if (shareSet) groundShare = share;
+    if (exitPicked || gen != g_lampMemoGen || state != LevelLightShare::LampVisibilityState() || n > static_cast<int>(N)) return n;
+    e.gen = gen;
+    e.state = state;
+    std::memcpy(e.key, key, sizeof key);
+    e.nLamps = n;
+    e.candidates = g_lastLampCandidates;
+    e.shareSet = shareSet;
+    e.groundShare = shareSet ? share : 0.0f;
+    e.lampTop = lampTop ? *lampTop : 0.0f;
+    e.leftOut = g_objLampsLeftOut - leftOut0, e.dimmed = g_objLampsDimmed - dimmed0;
+    for (int slot = 0; slot < n; slot++) {
+        std::memcpy(e.lamps[2 * slot], lamps[1 + 2 * slot], 16);
+        std::memcpy(e.lamps[2 * slot + 1], lamps[2 + 2 * slot], 16);
+        if (cones) {
+            std::memcpy(e.cones[2 * slot], cones[2 * slot], 16);
+            std::memcpy(e.cones[2 * slot + 1], cones[2 * slot + 1], 16);
+        }
+        if (reachRows) e.reach[slot >> 2][slot & 3] = reachRows[slot >> 2][slot & 3];
+    }
+    return n;
 }
 
 // The colour an outdoor object's per-pixel lamp gives at `point` (2.12.4): DrawObjectLamp's law and scale for the current
@@ -8526,7 +8642,9 @@ std::string BakeDiff::Text() const {
 std::string RoofStatus() {
     std::string s = std::format("roofs: {} | lamps on: {} | draws fixed: {} | with snow: {}", g_roofFix.load() ? (g_roofPs ? "fixed" : "waiting") : "off",
                                 g_lampCount, g_roofDrawn.load(), g_roofSnowDrawn.load());
-    if (!kPublicBuild) s += std::format(" | lamp choice memo: {} reused, {} computed", g_lampMemoHits, g_lampMemoMisses);
+    if (!kPublicBuild)
+        s += std::format(" | lamp choice memo: {} reused, {} computed | object lamp picks: {} reused, {} computed", g_lampMemoHits, g_lampMemoMisses, g_pickMemoHits,
+                         g_pickMemoMisses);
     return s;
 }
 
