@@ -74,6 +74,7 @@
 #include "imgui.h"
 #include "drag_lite.h"
 #include "tester_toggles.h"
+#include "perf_toggles.h"
 #include <windows.h>
 #include <intrin.h>
 #include <algorithm>
@@ -133,7 +134,7 @@ std::atomic<uint32_t> g_frame{0};
 std::atomic<uint64_t> g_lastPresentTick{0};
 
 // statistics
-std::atomic<uint32_t> c_calls{0}, c_scaled{0}, c_eyeFails{0}, c_editMoving{0};
+std::atomic<uint32_t> c_calls{0}, c_scaled{0}, c_eyeFails{0}, c_editMoving{0}, c_pacedMoving{0};
 
 // ---- Lot build slice while moving (05/10) ----
 // 0x00AEA680 builds a streaming lot a slice per frame: its budget [esp+14h] is 20 ms (35 for a priority lot; 2000 when
@@ -288,9 +289,18 @@ float __fastcall Hook_LotLightBudget(void* mgr, void* edx) {
     // gets kLampEditMs with it still
     const bool settling = game >= kPriorityMs && game < kLeaveAloneMs && LevelLightShare::SettlingAfterLoad();
     if (settling && !moving) out = std::max(out, game + (kLampEditMs - game) * g_settleScale.load(std::memory_order_relaxed)); // dosed by the frame time
-    if (!boosted && !settling && moving && game > 0.0f && game < kLeaveAloneMs) {
+    // (2.15.3) while the camera moves, the raised budgets of a settling lot and of a lamp switch are dosed by the same frame
+    // time pacing (PaceSettle): the game's budget while the frames hold, down to the moving budget when they do not (a
+    // recording: 61 of 197 hitches while moving came from these two). Off: the game's budget, as before
+    const bool paced = (boosted || settling) && PerfToggles::MotionPacedRaise.load(std::memory_order_relaxed);
+    if ((paced || (!boosted && !settling)) && moving && game > 0.0f && game < kLeaveAloneMs) {
         const float scaled = game * (static_cast<float>(g_budgetMs.load(std::memory_order_relaxed)) / kPriorityMs);
         out = std::max(kMinMs, std::min(game, scaled));
+        if (paced) {
+            const float raised = out + (game - out) * g_settleScale.load(std::memory_order_relaxed);
+            if (raised > out) out = raised;
+            c_pacedMoving.fetch_add(1, std::memory_order_relaxed);
+        }
         // 12/10: a lamp edit's room is the current room (RoomLightQueue::CurrentRoomUrgent): the lot being played keeps the
         // game's own budget, at most kEditMovingMs, while the camera moves (an edit made while panning waited for the
         // scaled 3 ms). Only the lot being played (its budget is the game's priority one): which lot a budget call serves is
@@ -444,7 +454,9 @@ void PaceSettle() {
     if (!last) return;
     const float dt = static_cast<float>(static_cast<double>(now - last) * g_qpcMs);
     if (!(dt > 0.0f && dt < 250.0f)) return; // a loading screen or a pause
-    if (!LevelLightShare::SettlingAfterLoad()) {
+    // (2.15.3) a lamp switch's boost is paced the same way while the camera moves (MotionPacedRaise)
+    const bool boosted = PerfToggles::MotionPacedRaise.load(std::memory_order_relaxed) && GetTickCount64() < g_boostUntil.load(std::memory_order_relaxed);
+    if (!LevelLightShare::SettlingAfterLoad() && !boosted) {
         g_baseFrameMs = g_baseFrameMs > 0.0f ? g_baseFrameMs * 0.95f + dt * 0.05f : dt;
         g_wasSettling = false;
         return;
@@ -715,8 +727,8 @@ void RenderDeveloperUI() {
                         last ? std::format("{:.1f} s ago", static_cast<double>(now - last) / 1000.0).c_str() : "never", g_frame.load());
     ImGui::TextWrapped("Lot build slices %u, shortened to %u ms while moving %u (%s)", c_buildCalls.load(), kBuildMovingMs, c_buildLowered.load(),
                         g_buildOn ? "on" : "off");
-    ImGui::TextWrapped("Budget calls %u, scaled while moving %u (a lamp edit's room kept up to 6 ms %u), camera reads failed %u; last budget: game %.2f ms -> %.2f ms", c_calls.load(),
-                        c_scaled.load(), c_editMoving.load(), c_eyeFails.load(), Bits(g_lastGame.load()), Bits(g_lastOut.load()));
+    ImGui::TextWrapped("Budget calls %u, scaled while moving %u (a lamp edit's room kept up to 6 ms %u; settle or lamp switch paced %u), camera reads failed %u; last budget: game %.2f ms -> %.2f ms",
+                        c_calls.load(), c_scaled.load(), c_editMoving.load(), c_pacedMoving.load(), c_eyeFails.load(), Bits(g_lastGame.load()), Bits(g_lastOut.load()));
         ApexUi::EndAdvanced();
     }
 }

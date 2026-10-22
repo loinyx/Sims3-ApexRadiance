@@ -41,6 +41,8 @@ const Item kItems[] = {
     {"perf_rig_mode_once_per_draw", &PerfToggles::RigModeOncePerDraw, Effect::None},
     {"perf_indoor_sampler_scan", &PerfToggles::IndoorSamplerScan, Effect::None},
     {"perf_solve_info_cache", &PerfToggles::SolveInfoCache, Effect::None},
+    {"perf_window_channel_memo", &PerfToggles::WindowChannelMemo, Effect::None},
+    {"perf_motion_paced_raise", &PerfToggles::MotionPacedRaise, Effect::None},
 };
 } // namespace
 

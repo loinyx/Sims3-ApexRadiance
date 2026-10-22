@@ -1703,6 +1703,8 @@ void DevTesterTab() {
         TesterSwitch("Rig mode once per draw", "Read once instead of at every check", PerfToggles::RigModeOncePerDraw, Effect::None);
         TesterSwitch("Indoor object sampler scan", "Only declared samplers are checked", PerfToggles::IndoorSamplerScan, Effect::None);
         TesterSwitch("Room record lookup cache", "Kept while no room record changed", PerfToggles::SolveInfoCache, Effect::None);
+        TesterSwitch("Window light channel memo", "Asked once per sample batch", PerfToggles::WindowChannelMemo, Effect::None);
+        TesterSwitch("Paced relight while moving", "After a load or a lamp switch, at the pace the frame rate allows", PerfToggles::MotionPacedRaise, Effect::None);
     });
 }
 

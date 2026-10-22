@@ -11915,7 +11915,9 @@ ChannelMemo g_channelMemo[256];
 std::atomic<long> g_channelHits{0}, g_channelAsked{0};
 bool __fastcall WindowChannelHook(void* light, void* edx, int channel) {
     const auto game = reinterpret_cast<ChannelFn>(g_windowChannelOrig);
-    if (!t_inBatchSample || !g_batchSerial || ThreadId() != g_gatherThread.load(std::memory_order_relaxed)) return game(light, edx, channel);
+    if (!t_inBatchSample || !g_batchSerial || ThreadId() != g_gatherThread.load(std::memory_order_relaxed) ||
+        !PerfToggles::WindowChannelMemo.load(std::memory_order_relaxed))
+        return game(light, edx, channel);
     const uintptr_t l = reinterpret_cast<uintptr_t>(light);
     ChannelMemo& m = g_channelMemo[((static_cast<uint32_t>(l) * 2654435761u) >> 24) ^ (static_cast<uint32_t>(channel) & 0xFF)];
     if (m.serial == g_batchSerial && m.light == l && m.channel == channel) {

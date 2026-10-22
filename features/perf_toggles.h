@@ -27,4 +27,10 @@ inline std::atomic<bool> RigModeOncePerDraw{true};
 inline std::atomic<bool> IndoorSamplerScan{true};
 // Room solves: the room record lookup is kept while no record can have been erased or added (level_light_share.cpp SolveInfo)
 inline std::atomic<bool> SolveInfoCache{true};
+// (2.15.3) Room solves: a window light's channel test is kept for the sample batch (level_light_share.cpp WindowChannelHook)
+inline std::atomic<bool> WindowChannelMemo{true};
+// (2.15.3) Lot lighting while the camera moves: the raised budgets right after a load and after a lamp switch are dosed by
+// the frame time, as the settle budget with the camera still (lot_lighting_motion.cpp); off = the game's full budget while
+// moving, as before. Only how fast those rooms relight while panning changes, not their light
+inline std::atomic<bool> MotionPacedRaise{true};
 } // namespace PerfToggles
