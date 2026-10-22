@@ -196,7 +196,7 @@ std::atomic<float> g_settleScale{1.0f};      // the settle pacing (PaceSettle, b
 // (2.15.1) a first pass was held (motion wait or the frame's pass taken) at this tick: while one is pending its wait is not
 // started over by a still frame, and refinements give it the frame's pass. A new lot's load waits for every level's first
 // pass; in Edit Town a camera read that kept flipping between moving and still restarted the 2 s wait on every still frame,
-// and other lots' refinements took the one pass a frame, so a placed lot stayed "Processing" for minutes (21/10 F8 session:
+// and other lots' refinements took the one pass a frame, so a placed lot stayed "Processing" for minutes (F8 session:
 // 11876 first passes held, 214 run)
 std::atomic<uint64_t> g_firstHeldTick{0};
 constexpr uint64_t kFirstPendingMs = 500; // a first pass held within this long is still pending (frames of 80 ms and more)
@@ -420,7 +420,7 @@ int __fastcall Hook_WallAoStep(void* solver, void* edx, void* stopwatch, uint32_
 
 // (2.15.1) Settle pacing. In the settle window (LevelLightShare::SettlingAfterLoad: 15 s after a load, 10 s after entering a
 // lot) the lot being played took 25 ms of room solving a frame (kLampEditMs) and the room queue's drain 12 ms more: frames
-// of 31 to 37 ms of "Lot room solve" while lots loaded (21/10 F8 session: 276 of 440 hitches). The raise is now dosed by
+// of 31 to 37 ms of "Lot room solve" while lots loaded (F8 session: 276 of 440 hitches). The raise is now dosed by
 // the frame time: the baseline is the frame time outside the window; in it a frame over max(16.7 ms, 1.5 x baseline)
 // takes 0.15 off the scale, a frame under 0.8 x that target gives 0.05 back. A fast PC keeps the quick light, a PC
 // already at its limit keeps the game's own budget. Each room's light is the game's complete solve; only the frame it

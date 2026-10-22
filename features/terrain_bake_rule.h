@@ -8,7 +8,7 @@
 namespace TerrainBakeRule {
 
 // The lamp classes of a lot: bare bulb 3, spot 4, shaded lamp 5, tube 6, and (2.15.1) the rectangle and disc area lights 9 and
-// 10. The game bakes a lot's lights into its own ground only (its room 0 maps): an area light of a park lot (100 m range, 21/10
+// 10. The game bakes a lot's lights into its own ground only (its room 0 maps): an area light of a park lot (100 m range,
 // F7 and F8) lit the lot's snow and stopped in a straight line at the lot border.
 inline bool LotLampType(int type) { return (type >= 3 && type <= 6) || type == 9 || type == 10; }
 inline bool AreaType(int type) { return type == 9 || type == 10; }
@@ -23,7 +23,7 @@ inline float AreaGroundShare(float axisY) {
 }
 constexpr int kAreaAxisYOffset = 0x184; // +0x180 is the third axis (x, y, z)
 
-// (2.15.1) Low lamps. A lamp lying on the lawn (its light 5 cm over the grass, 21/10 F8 17-26-36) lit a tree above it and left
+// (2.15.1) Low lamps. A lamp lying on the lawn (its light 5 cm over the grass, F8 capture) lit a tree above it and left
 // the lawn dark: the stamp's law (2 w cos / d^2) and the room law fall with the angle of incidence, and from 5 cm the lawn 2 m
 // away takes about 1 % of what it would from above. A lot lamp whose light stands less than kLowLampLift over its lot's ground
 // (and not kLowLampBelow under it: a lamp in a basement) is stamped from kLowLampLift: the terrain bake (BakePosStub), its

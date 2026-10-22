@@ -9174,7 +9174,7 @@ void StairwellBounceAt(const BYTE* room, const RoomInfo& info, const float* s, f
             }
             if (q.up[0] + q.up[1] + q.up[2] <= 0.0f) continue;
             // (2.15.1) sqrt, not std::hypot: hypot's library call sets the FPU control word on every call, and this runs per
-            // floor texel and per opening patch (21/10 F8 session while lots loaded: __ctrlfp and __hypothlp among the hottest
+            // floor texel and per opening patch (an F8 session while lots loaded: __ctrlfp and __hypothlp among the hottest
             // render-thread samples); the kernel only takes the square, so the light is the same
             const float ex = p[0] - qw[0], ez = p[2] - qw[2];
             const float k = StairwellBounce::CeilingKernel(std::sqrt(ex * ex + ez * ez));

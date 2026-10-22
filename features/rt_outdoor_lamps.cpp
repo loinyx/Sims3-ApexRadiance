@@ -72,7 +72,7 @@ constexpr DWORD kRepairWaitMs = 4000;    // a story sent to gather a lamp is che
 constexpr DWORD kDragRelightMs = 200;    // while dragged: at most one relight start this often (14/10, drag solves: was 66; 5 a second,
                                          // the exact relight once the drag ends; a recording: 1-13 ms of CPU a relight)
 constexpr uint64_t kGameWriteGapMs = 500; // a relight made only for a game write: at most this often per map
-// (2.15.1) A lamp lying on the lot's ground (its light 5 cm over the lawn, 21/10 F8 17-26-36) lit a tree above it and left the
+// (2.15.1) A lamp lying on the lot's ground (its light 5 cm over the lawn, F8 capture) lit a tree above it and left the
 // lawn dark: the law's light falls with its angle of incidence, and from 5 cm the lawn 2 m away takes about 1 % of what it
 // would from above. On story 0's floor map a lamp whose light stands lower than kLowLampLift over the lot's ground is
 // drawn from that height, as a fixture's glow would spread; walls, ceilings, objects and trees keep its real place. The
@@ -1679,7 +1679,7 @@ void Frame(IDirect3DDevice9* dev) {
         const bool exactUnder = s.underDirty;
         const bool dirty = !s.relit || !s.copy || sig != s.sig || paramsChanged || (s.fast && !dragging) || s.pendingWrite || s.underDirty;
         if (!dirty) continue;
-        // (2.15.1) the game writing the map again and again (a lot that stays loading, 21/10: 105 writes in 10 s, each relight
+        // (2.15.1) the game writing the map again and again (a lot that stays loading: 105 writes in 10 s, each relight
         // 45 ms of floor mask with 28 lamps): a relight made only for a game write waits kGameWriteGapMs after the last one; a
         // single write after a rest is relit at once, as before
         const bool onlyWrite = s.relit && s.copy && sig == s.sig && !paramsChanged && !(s.fast && !dragging) && !s.underDirty;
