@@ -32,16 +32,44 @@ namespace ApexTestAgent
     public class Instantiator
     {
         [Tunable] protected static bool kInstantiator = false;
-        public const string Version = "1.0.0";
+        public const string Version = "1.0.1";
+        public static string StartError; // why the commands did not register, reported by game_state and the marker
 
         static Instantiator()
         {
+            // Mailbox and marker first: whatever fails below, the runner still finds the agent and can say what failed
+            Mailbox.Open();
+            try { Handlers.Register(); } catch (Exception e) { StartError = e.GetType().Name + ": " + e.Message; }
+            Marker.Write("loaded");
             World.OnStartupAppEventHandler += delegate { Mailbox.Open(); PollTask.Start(); };
             World.OnWorldLoadFinishedEventHandler += delegate { Mailbox.Open(); Mailbox.SetWorldLoaded(true); PollTask.Start(); };
             World.OnWorldQuitEventHandler += delegate { Mailbox.SetWorldLoaded(false); PollTask.Start(); };
-            Handlers.Register();
-            Mailbox.Open();
             try { PollTask.Start(); } catch (Exception) { } // tuning may load after the startup event already fired
+        }
+    }
+
+    // Tells run.ps1 from outside that the agent's code ran, without the memory scan: one ScriptError_*.xml in the user
+    // folder (the game's only file API for scripts), holding an <ApexTestAgent .../> line. run.ps1 moves it into the
+    // run's folder. Retried on the first poll tick when the simulator could not write it yet.
+    public static class Marker
+    {
+        static bool sWritten;
+
+        public static void Write(string stage)
+        {
+            if (sWritten) return;
+            try
+            {
+                uint handle = 0;
+                Simulator.CreateScriptErrorFile(ref handle);
+                if (handle == 0) return;
+                string text = "<ApexTestAgent version=\"" + Instantiator.Version + "\" stage=\"" + stage + "\" commands=\"" +
+                    (Instantiator.StartError ?? "ok").Replace("&", "&amp;").Replace("\"", "&quot;").Replace("<", "&lt;") + "\" />\n";
+                Simulator.AppendToScriptErrorFile(handle, text.ToCharArray());
+                Simulator.CloseScriptErrorFile(handle);
+                sWritten = true;
+            }
+            catch (Exception) { }
         }
     }
 
@@ -60,6 +88,7 @@ namespace ApexTestAgent
 
         public override void Simulate()
         {
+            Marker.Write("tick");
             while (mRunning)
             {
                 try { Mailbox.Poll(); } catch (Exception) { }
@@ -258,6 +287,7 @@ namespace ApexTestAgent
         {
             Dictionary<string, object> r = Obj();
             r["agent"] = Instantiator.Version;
+            r["start_error"] = Instantiator.StartError;
             r["in_world"] = GameStates.IsInWorld();
             r["sub_state"] = SubState();
             r["load_file"] = GameStates.LoadFileName;

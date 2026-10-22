@@ -79,14 +79,30 @@ Each load:
 
 1. Writes `ApexRadiance.toml`: the tester's own file with the job's and the variant's `[patches.<Name>]` keys changed.
 2. Starts `TS3W.exe` from `Game\Bin` (no launcher) and finds the test agent's mailbox in the game's memory.
-3. Loads the save through the agent and waits for live mode, answering dialogs on the way.
+3. Answers the main menu's "Mod Scripts Found" warning (accepting it during a load leaves the game on the loading
+   screen), then loads the save through the agent and waits for live mode, answering dialogs on the way.
 4. Runs the steps. A measured `wait` records frame times with `-Profiler`.
 5. Asks the game to quit, waits up to 2 minutes, then closes the window; the game is ended only when both fail.
 6. Copies `ApexRadiance_LOG.txt`, `ApexRadiance_Crash.txt` and `ApexRadiance_Hitches.txt` from this session and checks
-   the log.
+   the log, and moves the agent's marker file (below) into the load's folder.
 
 Every wait checks progress every 30 seconds (simulator ticks, or CPU time while loading) and prints the minutes left.
 Two checks in a row without progress fail the load at once instead of waiting for the time limit.
+
+The wait for the test agent after the start fails with its reason at the first of these:
+
+| Check | Fails when |
+|---|---|
+| Game process | it closed (the exit code is shown) |
+| `ApexRadiance_LOG.txt` | no log of this start 60 s after the start (`ApexRadiance.asi` did not load) |
+| Progress | CPU time, the log and the agent heartbeat did not move over two checks (60 s) |
+| Agent | no mailbox 90 s after the log's `[Main] Features started`: without the agent's marker the agent did not load, with it the agent loaded but its mailbox was not found |
+
+The marker is a `ScriptError_*.xml` in the user folder (the game's only file API for scripts) with one
+`<ApexTestAgent version=".." stage="loaded" commands="ok" />` line, written when the agent's code first runs; `commands`
+holds the error when the agent's commands failed to register (`game_state` reports it as `start_error`).
+`-LoadTimeoutMin` is the last resort only. `run.ps1` exits 0 when every load passed, 1 when a load failed and 2 when
+the run stopped before every load ran.
 
 ## Reading the results
 
