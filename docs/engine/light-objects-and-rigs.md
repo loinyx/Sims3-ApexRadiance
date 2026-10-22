@@ -270,6 +270,22 @@ The HDR lamp gain that the combined build applied to rig colours and shaders exi
 | Time of day | `*(*(sky+0x30)+0x1C)+0x370 / 3600` | Verified in the executable's bytes |
 | Sunlight Scale | float `0x011D0918`; single reader `FUN_00c11ad0`, `mov ecx,011D0918h; call` at `0x00C11B01`, the call at `0x00C11B06` reaching the shared getter `mov eax,ecx; ret` | Verified in the executable's bytes; Apex redirects that call ([README](../features/night-lighting/README.md#brightness-controls)) |
 
+### Sky time override and the light probe queue (2.15.1 static analysis)
+
+The sky's time override `sky+0x884` (vtable `0x01074250`: slot 0 `0x00C15E00` sets it, slot 1 `0x00C15E40` sets -1) serves
+only the light manager's probe queue, not impostors or thumbnails.
+
+| Item | Where | Status |
+|---|---|---|
+| Probe queue | deque at lightMgr+0x38 of `{probe*, hour}` (hour < 0: the live clock); `FUN_006AE580` pops one per frame, `FUN_006AE990` queues; the exterior probe lightMgr+0x64 and the room probes +0x68/+0x6C; debug command "Force Probe Update" -> `0x006AEF60` | Verified in the bytes |
+| What the override changes for a capture | only the sun / moon parameter (`0x00C11970` reads it at `0x00C1487C`), the sun direction and the keyframed sky colours (`0x00C14860`); the smooth night `sky+0x780`, the level `+0xF0`, `+0xF4`, the clock and the sun times keep their live values; restored right after the capture (`0x006AE605`) | Verified in the bytes |
+| Why | the exterior probe is captured again at the next hour whose sky colour differs by 0.15 and blended toward it (state at lightMgr+0xB0..+0xC4) | Verified in the bytes; the keyframe channel unverified |
+| Lot impostors | the impostor pump `0x00AD97E0` updates the light manager with argument 0 (`0x00AD9847`), skipping the probe queue and the override; the impostor material binds albedo, AO, water, detail and holiday light textures and is lit when drawn; rebuilt on content changes | Pump verified; the material and the rebuild trigger inferred |
+
+Changing the hour the probes take would remove the exterior probe's blend between sky keyframes (visible jumps), so
+Apex leaves the queue alone. A future-hour exterior capture keeps the live lamps (a small mismatch, softened at night by
+ProbeNeutral). Distant lots that look wrong at night point to the lotImposter shader's constants, not to its build.
+
 ### Open items / unverified
 
 - The meaning of the constructor flag bits and of rig+0x225; k3 and g in the street-lamp rig formula.
