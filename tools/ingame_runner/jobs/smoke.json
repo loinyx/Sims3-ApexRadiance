@@ -1,0 +1,24 @@
+{
+  "id": "smoke",
+  "description": "Apex Radiance with the saved settings loads a save, runs 5 minutes at normal speed and closes. Pass: no crash, the settings and the feature list are logged, no feature refuses to start or turns itself off.",
+  "save": "ApexTest-Town",
+  "toml": {},
+  "variants": {
+    "saved": {}
+  },
+  "expect": [
+    "\\[Config\\] Settings loaded from ApexRadiance\\.toml",
+    "\\[Patches\\] \\d+ features:"
+  ],
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "wait",
+      "minutes": 5,
+      "measure": true
+    }
+  ]
+}
