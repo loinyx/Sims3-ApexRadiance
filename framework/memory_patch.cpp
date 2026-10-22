@@ -148,22 +148,47 @@ bool RestoreAll(std::vector<PatchLocation>& undo) {
     return ok;
 }
 
+// (2.15.3) The other threads of the process, opened for a suspended write. A Toolhelp snapshot lists every thread of the
+// system (about 60 ms a write in the log, some 1.4 s of feature start-up in all), so the list is kept for kThreadListMs and
+// reused by writes from the same thread (a list made on another thread would hold the writer itself). A thread started in
+// that window is not suspended: Apex's writes are made at feature install, while no new thread runs the game's code.
+// Called with g_writeLock held.
+constexpr ULONGLONG kThreadListMs = 1000;
+struct ThreadList {
+    std::vector<HANDLE> handles;
+    DWORD owner = 0;
+    ULONGLONG at = 0;
+};
+ThreadList g_threadList;
+const std::vector<HANDLE>* OtherThreads() {
+    const DWORD self = GetCurrentThreadId();
+    const ULONGLONG now = GetTickCount64();
+    if (g_threadList.owner == self && now - g_threadList.at < kThreadListMs) return &g_threadList.handles;
+    for (HANDLE h : g_threadList.handles) CloseHandle(h);
+    g_threadList = ThreadList{};
+    const HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snap == INVALID_HANDLE_VALUE) return nullptr;
+    g_threadList.handles.reserve(256);
+    THREADENTRY32 te;
+    te.dwSize = sizeof te;
+    const DWORD pid = GetCurrentProcessId();
+    for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
+        if (te.th32OwnerProcessID != pid || te.th32ThreadID == self) continue;
+        if (HANDLE h = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, te.th32ThreadID)) g_threadList.handles.push_back(h);
+    }
+    CloseHandle(snap);
+    g_threadList.owner = self;
+    g_threadList.at = now;
+    return &g_threadList.handles;
+}
+
 bool WriteCodeSuspended(uintptr_t address, const BYTE* bytes, size_t count) {
     if (!address || !bytes || count == 0 || count > 16) return false;
     std::lock_guard<std::mutex> lock(g_writeLock); // taken before any thread is suspended (a suspended Apex thread may not hold it)
     // Every other thread of the process, opened before anything is suspended
-    std::vector<HANDLE> threads;
-    threads.reserve(256);
-    const HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (snap == INVALID_HANDLE_VALUE) return false;
-    THREADENTRY32 te;
-    te.dwSize = sizeof te;
-    const DWORD pid = GetCurrentProcessId(), self = GetCurrentThreadId();
-    for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
-        if (te.th32OwnerProcessID != pid || te.th32ThreadID == self) continue;
-        if (HANDLE h = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, te.th32ThreadID)) threads.push_back(h);
-    }
-    CloseHandle(snap);
+    const std::vector<HANDLE>* list = OtherThreads();
+    if (!list) return false;
+    const std::vector<HANDLE>& threads = *list;
     bool written = false;
     for (int attempt = 0; attempt < 100 && !written; attempt++) {
         // ---- other threads suspended: no allocation, no lock ----
@@ -184,8 +209,7 @@ bool WriteCodeSuspended(uintptr_t address, const BYTE* bytes, size_t count) {
         if (!busy) break;
         Sleep(1);
     }
-    for (HANDLE h : threads) CloseHandle(h);
-    return written;
+    return written; // (the handles stay in g_threadList for the next write)
 }
 
 bool WriteCodeBatchSuspended(const CodeWrite* writes, size_t n) {

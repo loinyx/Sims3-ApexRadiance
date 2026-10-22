@@ -1,6 +1,7 @@
 #include "game_addresses.h"
 #include "apex_log.h"
 #include "game_version.h"
+#include "build_flavor.h"
 #include <windows.h>
 #include <atomic>
 #include <cstring>
@@ -1353,6 +1354,13 @@ void Resolve() {
         LOG_WARNING(std::format("[Addr] The game's code looks encrypted still ({} \"push ebp; mov ebp,esp\"): waiting 1 s", prologues));
         Sleep(1000);
         prologues = PrologueCount();
+    }
+    // (2.15.3) On Steam 1.67.2 the fixed addresses are used and the signature scan is only a self-check for the log (about
+    // 0.9 s of the start, during which the world load already runs without Apex's caches): developer mode only
+    if (IsFixedBuild() && kPublicBuild) {
+        LOG_INFO("[Addr] Steam 1.67.2: the fixed addresses are used (the signature self-check runs in developer mode)");
+        g_resolved.store(true, std::memory_order_release);
+        return;
     }
     LOG_INFO(std::format("[Addr] Scanning the game's code for {}: .text {:#010x}..{:#010x} ({} readable range(s), {} \"push ebp; mov ebp,esp\")", GetGameVersionName(), g_text.begin,
                          g_text.end, g_readable.size(), prologues));
