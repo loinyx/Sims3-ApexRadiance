@@ -7978,8 +7978,8 @@ bool DepWaitsFor(uintptr_t tracker) {
     return std::any_of(g_depWait.begin(), g_depWait.end(), [&](const auto& kv) { return kv.first.tracker == tracker; });
 }
 
-bool WorldLiveSeen(); // below: the world went live (OnWorldLive) since the load
 bool SettlingAfterWorldLoad(); // below
+bool WorldLiveSeen(); // below: the world went live (OnWorldLive) since the load
 void AfterChangedWalk(BYTE* tl) {
     if (!*reinterpret_cast<const uintptr_t*>(tl)) return;
     const uintptr_t tracker = *reinterpret_cast<const uintptr_t*>(tl + 4);
@@ -16643,6 +16643,7 @@ void GridEdgeTo(const StoryGrid& g, int32_t idx, float x0, float z0, float x1, f
 } // namespace
 
 namespace LevelLightShare {
+bool WorldIsLive() { return WorldLiveSeen(); }
 bool DeltaReady() {
     return g_installed.load(std::memory_order_relaxed) && g_ambReady && g_finalizeReady.load(std::memory_order_relaxed) && g_lockStepReady.load(std::memory_order_relaxed) &&
            g_alignReady.load(std::memory_order_relaxed) && kWallSolve && kBatchSamples && kRoomById &&

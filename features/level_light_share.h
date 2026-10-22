@@ -20,6 +20,7 @@ void OnPresent();      // render thread, every frame (runs the refresh asked by 
 void OnWorldChanged(); // forget the rooms of the previous world
 // The world is on screen after its load: every lot's rooms near openings gather once more (then settle)
 void OnWorldLive();
+bool WorldIsLive(); // the world went live (OnWorldLive) since the load
 // Render thread: how many lots are loaded now (0 at the main menu and during most of a load)
 int LoadedLots();
 bool LoadedRoomsBusy(); // cached room states plus pending ambient; startup refresh readiness

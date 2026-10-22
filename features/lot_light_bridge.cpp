@@ -3059,7 +3059,9 @@ void TrackLotLampEdits() {
         }
         LotSeen& seen = s->second;
         const bool settled = now - seen.firstSeen >= std::chrono::seconds(10) && now - seen.lastUncounted >= std::chrono::seconds(5);
-        const bool observedValueEdit = c.userEdited && c.added == 0 && c.removed == 0;
+        // (2.15.3) not before the world is live: a lamp the game switches on the load screen made the lot's rooms solve at
+        // the edit budget (4.4 s of 36 ms frames in a log), as the add / remove path already guards (LevelLightShare)
+        const bool observedValueEdit = c.userEdited && c.added == 0 && c.removed == 0 && LevelLightShare::WorldIsLive();
         // Streaming on another lot must not hide a real edit of this lot's known
         // lamps. Additions/removals on this lot still require the streaming guards.
         if (observedValueEdit) seen.explicitEdit = true;
