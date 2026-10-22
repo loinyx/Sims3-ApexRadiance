@@ -104,8 +104,9 @@ The wait for the test agent after the start fails with its reason at the first o
 The marker is a `ScriptError_*.xml` in the user folder (the game's only file API for scripts) with one
 `<ApexTestAgent version=".." stage="loaded" commands="ok" />` line, written when the agent's code first runs; `commands`
 holds the error when the agent's commands failed to register (`game_state` reports it as `start_error`).
-`-LoadTimeoutMin` is the last resort only. `run.ps1` exits 0 when every load passed, 1 when a load failed and 2 when
-the run stopped before every load ran.
+`-LoadTimeoutMin` is the last resort only. `run.ps1` exits 0 when every load passed, 1 when a load failed, 2 when
+the run stopped early (before every load ran, or the check after the last load failed) and 3 when a file could not be
+put back (see [Safety](#safety)).
 
 ## Reading the results
 
@@ -115,7 +116,11 @@ and the profiler output, plus `results.md` and `results.json`.
 A load passes when the game reaches live mode, runs every step and quits, no crash report is written, every `expect`
 pattern matches a line of `ApexRadiance_LOG.txt` and no fail pattern does. The fail patterns of every load:
 `[CRITICAL]`, `[Patches] ... did not start`, `Verification mismatch`, `turns itself off` / `turned itself off`,
-`Result differs from the game`, `Safety check failed`; a job adds its own.
+`Result differs from the game`, `Safety check failed`, `[SceneBudget] Node ... found destroyed but still queued`,
+`[LotLightingMotion] Lot build slice left as it is`, `[RoomLightQueue] Could not put back the game code` and
+`some game code could not be put back`; a job adds its own. Every feature in the jobs is on by default, so each `off`
+variant lists the feature's own start line (`[<Tag>] On:`, `[RoomLightQueue] Started:`) in its `fail`: a table name
+that no longer matches fails the load instead of comparing on with on.
 
 `results.md` lists per load: real minutes, frames per second, frame time p50 / p95 / p99 / max, frames over 50 ms per
 minute, simulation hitches per minute and visible freezes of 300 ms or more per 10 minutes. For an A/B pair it adds the
@@ -229,7 +234,7 @@ A job is a JSON file in `jobs/`, its `id` equal to the file name:
 | `wait` | `minutes`, `measure`, `until` | Lets the game run; answers dialogs every 30 s. `measure` records frame times with `-Profiler` (the first measured wait counts). `until` (`{ "jumps": 75 }`; also `loops`, `outfitChanges`, `spawned` of `camera_jumps`, `rounds`, `started` of `vfx_burst`) ends a measured wait once the running repro reaches that count, checked every 30 s; `minutes` is then the cap |
 | `camera` | `pos`, `target` (`{x, y, z}`) | Places the game camera |
 | `camera_pan` | `lots` (8), `height` (25 m), `seconds` (40), `dwellS` (0), `passes` (4) | Pans the camera over the densest neighbourhood's lots, there and back, in the background; follow it with a `wait` |
-| `save` | | Saves as a new `ApexRunner-<load>-<n>` save and waits until it is written. The runner deletes these saves after the load unless `-KeepSaves` |
+| `save` | | Saves as a new `ApexRunner-<run id>-<load>-<n>` save and waits until it is written (a save of that name that already exists fails the step). The runner deletes these saves after the load unless `-KeepSaves` |
 | `reload` | `save` (`last` or a save name) | Loads a save from inside the world and waits for live mode |
 | `profile` | `minutes` | Starts the measured window in the background and goes on with the next steps (a scenario job); the load waits for the window's end after the last step. One per load |
 | `camera_jumps` | `order` (`far` or `populated`), `lots` (10), `dwellS` (8), `height` (25 m), `loops` (1000), `outfits` (0), `spawn` (0, at most 10) | Repro, in the background: see [Feature repros](#feature-repros) |
@@ -239,7 +244,8 @@ A job is a JSON file in `jobs/`, its `id` equal to the file name:
 
 For a new feature: copy the closest job, set the `[patches.<Name>]` table (the feature's settings table names it),
 put the feature's start line in the `on` variant's `expect` (most features log `[<Tag>] On: ...` when they install)
-and its own refusal or mismatch lines in `fail`, and pick steps that exercise it. Then `./tools/ingame_runner/run.ps1
+and in the `off` variant's `fail`, its own refusal or mismatch lines in the job's `fail`, and pick steps that exercise
+it (`selftest.ps1` checks that every `off` variant fails on the `on` variant's first `expect` line). Then `./tools/ingame_runner/run.ps1
 ... -DryRun` and `./tools/ingame_runner/selftest.ps1`.
 
 A step the agent does not have yet goes into `agent/Agent.cs` or `agent/Repros.cs` (a `Dispatcher.Register` command;
@@ -307,15 +313,28 @@ loads (the last column says how many) rather than reading the means.
 
 - **Never while the game is in use.** The runner refuses to start when `TS3W.exe` or `Sims3LauncherW.exe` is running,
   and stops the run when a game is still running after a load.
-- **Everything is put back.** Before installing, it copies `Bin\ApexRadiance.asi`, `ApexRadiance.toml`,
-  `scriptCache.package` and, with `-AsiLoader`, `Bin\wininet.dll` into `<run>\backup` with a manifest, and restores
-  them (or removes what did not exist) when the run ends, fails or is stopped with Ctrl+C. After a power loss: `run.ps1 -Restore outputs/ingame/<run>`.
+- **Everything is put back.** Before installing, it copies `ApexRadiance.toml`, `Bin\ApexRadiance.asi`, the test
+  agent's package path, `scriptCache.package`, with `-AsiLoader` `Bin\wininet.dll`, Apex Radiance's own
+  `ApexRadiance_LOG.txt`, `_Crash.txt`, `_Hitches.txt` and `_ShaderCache.bin`, and every job save folder into
+  `<run>\backup` with a manifest. When the run ends, fails or is stopped with Ctrl+C it waits up to 2 minutes for every
+  `TS3W.exe` to close, then puts each entry back on its own (the settings first, 5 tries each; a path that did not
+  exist is removed) and marks it in the manifest. What could not be put back is listed on screen and in `results.md`,
+  and the run exits 3.
+- **An interrupted run blocks the next one.** `outputs/ingame/restore-pending.json` is the run's lock: written before
+  anything is installed and removed only when every entry is back. While it exists `run.ps1` refuses to start: during
+  a run it says a run is in progress, after a closed window, a killed process or a power loss it names the command to
+  run, `run.ps1 -Restore outputs/ingame/<run>`. `-Restore` refuses while `TS3W.exe` or `Sims3LauncherW.exe` runs, puts
+  back only the entries not put back yet and removes the lock; a manifest that is used up is never copied again.
+- **The agent is idle without the runner.** It opens its mailbox, starts its poll task and writes its marker only
+  when the game was started with `-ApexTestAgent:1`, which `run.ps1` adds; a package left in `Mods` does nothing.
 - **Repros change nothing that lasts.** Effects are visual only (no fire object, nothing burns or spreads), Sims spawned
   by `camera_jumps` are removed every loop and at `stop_repros`, outfit changes and mode switches leave nothing behind,
   Create a Sim is left without saving, and a repro load is never saved unless the job has a `save` step (a new
   `ApexRunner-*` file, deleted after the load).
-- **Saves:** jobs only load the tester's saves; `save` steps write new `ApexRunner-*` saves, never over the loaded one,
-  and the runner deletes them after the load.
+- **Saves:** jobs only load the tester's saves (the agent saves with a new name, `SaveGame(false, true, false)`:
+  `forceUseSaveName`), and each job save folder is in the backup all the same. `save` steps write new
+  `ApexRunner-<run id>-*` saves, so a kept save (`-KeepSaves`) is never overwritten or deleted by a later run, and the
+  runner deletes them after the load.
 - **The game window** is never moved or focused by the runner. Do not use the computer during measured runs: other work
   on the machine shows up as stutter, and a load with other programs at 10% of the CPU or more is marked invalid. With
   `-InactiveIdle` only frames with the game window in front count.
@@ -341,7 +360,6 @@ loads (the last column says how many) rather than reading the means.
 ## Origin and licences
 
 Adapted from the test harness of [sims3-modernization](https://github.com/rodneypantonial/sims3-modernization) (MIT,
-[LICENSE-sims3-modernization](LICENSE-sims3-modernization)): the agent and its mailbox, the profilers (their `docs/`
-references point to that repository), the package writer, the fail-fast waits, the real-hitch classifier and the pair
+[LICENSE-sims3-modernization](LICENSE-sims3-modernization)): the agent and its mailbox, the profilers, the package writer, the fail-fast waits, the real-hitch classifier and the pair
 statistics. The agent was forked there from [Sims3-MCP](https://github.com/Critical-Reynolds/Sims3-MCP) (MIT,
 [agent/LICENSE-Sims3-MCP](agent/LICENSE-Sims3-MCP)).

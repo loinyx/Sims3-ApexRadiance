@@ -22,6 +22,9 @@ Check ((ConvertTo-TomlLiteral 'a"b\c') -eq '"a\"b\\c"') 'string escaping'
 $o = '{ "patches.A": { "enabled": false }, "ui": { "developer_mode": true } }' | ConvertFrom-Json
 $r = Set-TomlOverrides $t $o
 Check ($r -match '\[patches\.A\]\r\nenabled = false' -and $r -match 'developer_mode = true') 'overrides from job JSON'
+$t2 = "[ patches.FastMemory ]  # tuned`r`nenabled = true`r`n[patches.Other] # x`r`nenabled = true`r`n"
+$r = Set-TomlValue (Set-TomlValue $t2 'patches.FastMemory' 'enabled' $false) 'patches.Other' 'enabled' $false
+Check ($r -match '\[ patches\.FastMemory \]  # tuned\r\nenabled = false' -and $r -match '\[patches\.Other\] # x\r\nenabled = false' -and ([regex]::Matches($r, 'patches\.')).Count -eq 2) 'header with spaces or a comment found, no duplicate table'
 
 # Load order
 $job = '{ "id": "x", "variants": { "off": {}, "on": {} } }' | ConvertFrom-Json
@@ -39,6 +42,12 @@ Check (-not $c.Ok -and $c.Failures.Count -eq 1 -and $c.Missing.Count -eq 0) 'mis
 $c = Test-ApexLog $log[0..1] @('\[ResourceCache\] On:', '\[FileListCache\] On:') $script:DefaultFailPatterns
 Check (-not $c.Ok -and $c.Missing -contains '\[FileListCache\] On:') 'missing expected line fails the load'
 Check (Test-ApexLog $log[0..1] @('\[ResourceCache\] On:') $script:DefaultFailPatterns).Ok 'clean log passes'
+foreach ($bad in '12:00:03.000 [WARNING] [SceneBudget] Node 0x0a0b0c0d was found destroyed but still queued in a drain; unlinked and skipped (please report)',
+                 '12:00:03.000 [WARNING] [LotLightingMotion] Lot build slice left as it is (the code at 0x00123456 differs or could not be written)',
+                 '12:00:03.000 [WARNING] [RoomLightQueue] Could not put back the game code at 0x123456',
+                 '12:00:03.000 [INFO] [RoomLightQueue] Stopped, but some game code could not be put back') {
+    Check (-not (Test-ApexLog @($bad) @() $script:DefaultFailPatterns).Ok) "fails a load: $($bad.Substring(13, 40))"
+}
 
 # Frame statistics: 100 focused frames of 16 ms, one of 120 ms, 10 unfocused frames that do not count
 $csv = Join-Path ([IO.Path]::GetTempPath()) ('apex-ingame-selftest-' + [Guid]::NewGuid().ToString('N') + '.csv')
@@ -129,6 +138,59 @@ $pass = [pscustomobject]@{ Ok = $true }; $fail = [pscustomobject]@{ Ok = $false 
 Check ((Get-RunExitCode @($pass, $pass) 2) -eq 0) 'exit 0 when every load passed'
 Check ((Get-RunExitCode @($pass, $fail) 2) -eq 1) 'exit 1 when a load failed'
 Check ((Get-RunExitCode @($pass) 2) -eq 2 -and (Get-RunExitCode @() 1) -eq 2) 'exit 2 when the run stopped early'
+Check ((Get-RunExitCode @($pass, $pass) 2 $true) -eq 2) 'exit 2 when the check after the last load failed'
+Check ((Get-RunExitCode @($pass, $pass) 2 $false $true) -eq 3) 'exit 3 when files are still to put back'
+
+# Backup, lock and restore on stand-in game files: an interrupted run, a file that cannot be put back, the job's save
+# folder and Apex Radiance's own files
+$sb = Join-Path ([IO.Path]::GetTempPath()) ('apex-ingame-selftest-' + [Guid]::NewGuid().ToString('N'))
+$held = $null
+try {
+    $state = Join-Path $sb 'state'; $run = Join-Path $state 'run1'; $game = Join-Path $sb 'game'
+    New-Item -ItemType Directory -Path (Join-Path $game 'Saves/Town.sims3'), (Join-Path $game 'Apex Radiance') -Force | Out-Null
+    $f = @{ toml = 'Apex Radiance/ApexRadiance.toml'; asi = 'ApexRadiance.asi'; log = 'Apex Radiance/ApexRadiance_LOG.txt'; crash = 'Apex Radiance/ApexRadiance_Crash.txt'
+            hitches = 'Apex Radiance/ApexRadiance_Hitches.txt'; cache = 'Apex Radiance/ApexRadiance_ShaderCache.bin'; agent = 'Mods/Packages/ApexTestAgent.package'; save = 'Saves/Town.sims3' }
+    $p = @{}; foreach ($k in $f.Keys) { $p[$k] = Join-Path $game $f[$k] }
+    foreach ($k in 'toml', 'asi', 'log', 'crash', 'cache') { Set-Content -LiteralPath $p[$k] -Value "player $k" }
+    Set-Content -LiteralPath (Join-Path $p.save 'Town.nhd') -Value 'player save'
+    $paths = @($p.toml, $p.asi, $p.agent, $p.log, $p.crash, $p.hitches, $p.cache, $p.save)
+
+    New-Item -ItemType Directory -Path $run -Force | Out-Null
+    Enter-RunLock $state $run
+    $man = New-RunBackup $run $paths
+    Check (@($man | Where-Object existed).Count -eq 6 -and @($man | Where-Object folder).Count -eq 1) 'backup lists files, missing files and the save folder'
+    $why = $null; try { Enter-RunLock $state (Join-Path $state 'run2') } catch { $why = $_.Exception.Message }
+    Check ($why -match 'in progress') 'a second run started mid-run refuses'
+
+    # the test run: everything replaced, new files written, the save touched
+    foreach ($k in 'toml', 'asi', 'log', 'crash', 'cache', 'hitches') { Set-Content -LiteralPath $p[$k] -Value "test $k" }
+    New-Item -ItemType Directory -Path (Split-Path $p.agent) -Force | Out-Null; Set-Content -LiteralPath $p.agent -Value 'agent'
+    Set-Content -LiteralPath (Join-Path $p.save 'Town.nhd') -Value 'overwritten'; Set-Content -LiteralPath (Join-Path $p.save 'extra.tmp') -Value 'x'
+
+    # power loss: the marker stays with a runner process that no longer exists
+    $dead = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList '-NoProfile', '-Command', 'exit' -PassThru -WindowStyle Hidden; $dead.WaitForExit()
+    $mk = Get-PendingRun $state; $mk.pid = $dead.Id
+    Set-Content -LiteralPath (Join-Path $state 'restore-pending.json') -Value ($mk | ConvertTo-Json -Compress)
+    $why = $null; try { Enter-RunLock $state (Join-Path $state 'run2') } catch { $why = $_.Exception.Message }
+    Check ($why -match [regex]::Escape("-Restore '$run'")) 'after an interrupted run the next run refuses and points to -Restore'
+
+    # a file still held by a closing game: the others are put back, the held one is reported, the lock stays
+    $held = [IO.File]::Open($p.asi, 'Open', 'ReadWrite', 'None')
+    $r = Restore-RunBackup $run 2 50
+    Check ($r.Pending.Count -eq 1 -and $r.Pending[0].path -eq $p.asi -and $r.Restored -eq 7) 'one held file stays pending, the rest are put back'
+    Check ((Get-Content -LiteralPath $p.toml) -eq 'player toml' -and -not (Test-Path -LiteralPath $p.agent)) 'settings put back, installed agent removed'
+    Check ((Get-Content -LiteralPath (Join-Path $p.save 'Town.nhd')) -eq 'player save' -and -not (Test-Path -LiteralPath (Join-Path $p.save 'extra.tmp'))) 'save folder put back as it was'
+    Check ((Get-Content -LiteralPath $p.log) -eq 'player log' -and (Get-Content -LiteralPath $p.crash) -eq 'player crash' -and (Get-Content -LiteralPath $p.cache) -eq 'player cache' -and -not (Test-Path -LiteralPath $p.hitches)) 'Apex log, crash report, shader cache back; new hitch log removed'
+    Check ($null -ne (Get-PendingRun $state)) 'lock kept while a file is pending'
+
+    $held.Dispose(); $held = $null
+    Set-Content -LiteralPath $p.toml -Value 'player changed it later'
+    $r = Restore-RunBackup $run 2 50
+    Check ($r.Pending.Count -eq 0 -and $r.Restored -eq 1 -and (Get-Content -LiteralPath $p.asi) -eq 'player asi') 'second restore puts back only what was pending'
+    Check ((Get-Content -LiteralPath $p.toml) -eq 'player changed it later') 'entries already put back are not copied again'
+    Exit-RunLock $state $run
+    Check ($null -eq (Get-PendingRun $state) -and (Restore-RunBackup $run 1 0).Already) 'lock removed; the manifest is used up'
+} finally { if ($held) { $held.Dispose() }; Remove-Item -LiteralPath $sb -Recurse -Force -ErrorAction SilentlyContinue }
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ('apex-ingame-selftest-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
@@ -184,6 +246,9 @@ foreach ($file in Get-ChildItem (Join-Path $PSScriptRoot 'jobs') -Filter *.json)
     foreach ($u in @($steps | Where-Object { $_.until })) {
         $ok = $true; try { $null = Get-UntilCommand @($u.until.PSObject.Properties)[0].Name } catch { $ok = $false }
         Check ($ok -and $u.measure -and @($u.until.PSObject.Properties).Count -eq 1 -and [double]@($u.until.PSObject.Properties)[0].Value -ge 1) "$($file.Name): until is one repro count on a measured wait"
+    }
+    if ($j.variants.off -and $j.variants.on) { # an off load must prove the feature is off
+        Check (@($j.variants.off.fail) -contains @($j.variants.on.expect)[0]) "$($file.Name): off fails on the feature's own start line"
     }
     $patterns = @($j.expect) + @($j.fail) + @($j.variants.PSObject.Properties | ForEach-Object { @($_.Value.expect) + @($_.Value.fail) }) | Where-Object { $_ }
     foreach ($p in $patterns) { $ok = $true; try { [regex]::new($p) | Out-Null } catch { $ok = $false }; Check $ok "$($file.Name): pattern $p" }

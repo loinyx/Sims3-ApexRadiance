@@ -9,7 +9,11 @@ $script:DefaultFailPatterns = @(
     'Verification mismatch',
     'turn(s|ed) itself off',
     'Result differs from the game',
-    'Safety check failed'
+    'Safety check failed',
+    '\[SceneBudget\] Node .* found destroyed but still queued',
+    '\[LotLightingMotion\] Lot build slice left as it is',
+    '\[RoomLightQueue\] Could not put back the game code',
+    'some game code could not be put back'
 )
 
 # The mode step's targets and the in-world sub state each one waits for (agent set_mode).
@@ -40,8 +44,8 @@ function Set-TomlValue([string]$Text, [string]$Table, [string]$Key, $Value) {
     if ($Text) { foreach ($l in ($Text -split "`r?`n")) { $lines.Add($l) } }
     while ($lines.Count -gt 0 -and $lines[$lines.Count - 1] -eq '') { $lines.RemoveAt($lines.Count - 1) }
     $header = -1
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i].Trim() -eq "[$Table]") { $header = $i; break }
+    for ($i = 0; $i -lt $lines.Count; $i++) { # [Table], [ Table ] and [Table] # comment are the same header
+        if ($lines[$i] -match '^\s*\[\s*([^\[\]]+?)\s*\]\s*(#.*)?$' -and $Matches[1] -eq $Table) { $header = $i; break }
     }
     if ($header -lt 0) {
         if ($lines.Count -gt 0) { $lines.Add('') }
@@ -606,17 +610,116 @@ function Step-StartWatch([hashtable]$State, $Obs, [int]$AgentSec = 90) {
     if ($Obs.Features -and -not $State.ContainsKey('FeaturesAt')) { $State.FeaturesAt = $Obs.Sec }
     if ($State.ContainsKey('FeaturesAt') -and -not $Obs.Found -and $Obs.Sec - $State.FeaturesAt -ge $AgentSec) {
         if (-not $Obs.Marker) {
-            return "the test agent did not load: no ApexTestAgent marker (ScriptError_*.xml) and no mailbox $AgentSec s after Apex started its features (check Mods\Resource.cfg, Mods\Packages\ApexTestAgent.package and the game's script errors)"
+            return "the test agent did not load: no ApexTestAgent marker (ScriptError_*.xml) and no mailbox $AgentSec s after Apex started its features (check Mods\Resource.cfg, Mods\Packages\ApexTestAgent.package, the -ApexTestAgent:1 switch on the game's command line and the game's script errors)"
         }
         return "the test agent loaded ($($Obs.Marker)) but its mailbox was not found in the game's memory"
     }
     return $null
 }
 
-# 0: every planned load ran and passed; 1: a load failed; 2: the run stopped before every load ran.
-function Get-RunExitCode($Results, [int]$Planned) {
+# 0: every planned load ran and passed; 1: a load failed; 2: the run stopped early (before every load ran, or a check
+# after the last load failed); 3: files are still to be put back (run.ps1 -Restore).
+function Get-RunExitCode($Results, [int]$Planned, [bool]$Stopped = $false, [bool]$RestorePending = $false) {
+    if ($RestorePending) { return 3 }
     $rows = @($Results | Where-Object { $_ })
-    if ($rows.Count -lt $Planned) { return 2 }
+    if ($Stopped -or $rows.Count -lt $Planned) { return 2 }
     if (@($rows | Where-Object { -not $_.Ok }).Count) { return 1 }
     return 0
+}
+
+# ------------------------------------------------------------------ run lock, backup and restore
+# restore-pending.json in the state folder (outputs/ingame) is the lock and the "restore pending" marker in one: created
+# before anything is installed (CreateNew, so two runs cannot both take it) and removed only when every file is back.
+# A run that was closed, killed or lost power leaves it behind, and the next run refuses to start until -Restore ran.
+function Get-PendingRun([string]$StateDir) {
+    $p = Join-Path $StateDir 'restore-pending.json'
+    if (-not (Test-Path -LiteralPath $p)) { return $null }
+    try { return (Get-Content -LiteralPath $p -Raw | ConvertFrom-Json) } catch { return [pscustomobject]@{ runDir = '(unreadable marker)'; pid = 0; started = '' } }
+}
+
+# The marker's runner still runs: same process id and start time (a reused id is another process).
+function Test-RunAlive($Marker) {
+    if (-not $Marker -or -not $Marker.pid) { return $false }
+    $p = Get-Process -Id ([int]$Marker.pid) -ErrorAction SilentlyContinue
+    if (-not $p) { return $false }
+    try { return [string]$p.StartTime.ToUniversalTime().Ticks -eq [string]$Marker.started } catch { return $p.ProcessName -match '^(powershell|pwsh)$' }
+}
+
+function Get-RunLockError($Marker) {
+    if (-not $Marker) { return $null }
+    if (Test-RunAlive $Marker) { return "Another in-game run is in progress (process $($Marker.pid), $($Marker.runDir)): wait for it to end." }
+    return "The in-game run in $($Marker.runDir) did not put the player's files back (closed, killed or power loss). Close the game, then run: run.ps1 -Restore '$($Marker.runDir)'"
+}
+
+function Enter-RunLock([string]$StateDir, [string]$RunDir) {
+    New-Item -ItemType Directory -Path $StateDir -Force | Out-Null
+    $me = Get-Process -Id $PID
+    $text = [pscustomobject]@{ runDir = $RunDir; pid = $PID; started = [string]$me.StartTime.ToUniversalTime().Ticks } | ConvertTo-Json -Compress
+    try { $fs = [IO.File]::Open((Join-Path $StateDir 'restore-pending.json'), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None) }
+    catch { throw (Get-RunLockError (Get-PendingRun $StateDir)) }
+    try { $b = (New-Object Text.UTF8Encoding($false)).GetBytes($text); $fs.Write($b, 0, $b.Length) } finally { $fs.Dispose() }
+}
+
+# Removes the marker when it belongs to $RunDir (never another run's).
+function Exit-RunLock([string]$StateDir, [string]$RunDir) {
+    $m = Get-PendingRun $StateDir
+    if ($m -and $m.runDir -eq $RunDir) { Remove-Item -LiteralPath (Join-Path $StateDir 'restore-pending.json') -Force }
+}
+
+# Copies every path (file or folder) into <RunDir>\backup and writes the manifest: path, whether it existed, its copy,
+# whether it is a folder and whether it was put back. The manifest is written last: without it nothing was installed.
+function New-RunBackup([string]$RunDir, [string[]]$Paths) {
+    $dir = Join-Path $RunDir 'backup'
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    $manifest = @()
+    $i = 0
+    foreach ($path in $Paths) {
+        $i++
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        $copy = "$i-" + (Split-Path $path -Leaf)
+        if ($item) { Copy-Item -LiteralPath $path -Destination (Join-Path $dir $copy) -Recurse -Force }
+        $manifest += [pscustomobject]@{ path = $path; existed = [bool]$item; folder = [bool]($item -and $item.PSIsContainer); copy = $copy; restored = $false }
+    }
+    Save-Manifest $RunDir $manifest
+    return $manifest
+}
+
+function Save-Manifest([string]$RunDir, $Manifest) {
+    [IO.File]::WriteAllText((Join-Path $RunDir 'backup/manifest.json'), (ConvertTo-Json -InputObject @($Manifest) -Depth 3), (New-Object Text.UTF8Encoding($false)))
+}
+
+# Puts one manifest entry back: a file is copied over, a folder is copied next to it and swapped in, a path that did not
+# exist before the run is removed.
+function Restore-Entry([string]$RunDir, $E) {
+    $from = Join-Path $RunDir "backup/$($E.copy)"
+    if (-not $E.existed) { if (Test-Path -LiteralPath $E.path) { Remove-Item -LiteralPath $E.path -Recurse -Force }; return }
+    New-Item -ItemType Directory -Path (Split-Path $E.path) -Force | Out-Null
+    if (-not $E.folder) { Copy-Item -LiteralPath $from -Destination $E.path -Force; return }
+    $new = "$($E.path).apex-restore"; $old = "$($E.path).apex-replaced"
+    foreach ($p in $new, $old) { if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force } }
+    Copy-Item -LiteralPath $from -Destination $new -Recurse -Force
+    if (Test-Path -LiteralPath $E.path) { Move-Item -LiteralPath $E.path -Destination $old }
+    Move-Item -LiteralPath $new -Destination $E.path
+    if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Recurse -Force }
+}
+
+# Puts back every entry not put back yet, each on its own with $Tries tries (a file still held by a closing game), and
+# marks each one in the manifest. Returns Already (nothing was left to put back), Restored and Pending ({ path, error }).
+function Restore-RunBackup([string]$RunDir, [int]$Tries = 5, [int]$DelayMs = 2000) {
+    $mp = Join-Path $RunDir 'backup/manifest.json'
+    if (-not (Test-Path -LiteralPath $mp)) { throw "No backup manifest in $RunDir" }
+    $manifest = @(Get-Content -LiteralPath $mp -Raw | ConvertFrom-Json | ForEach-Object { $_ })
+    foreach ($e in $manifest) { if ($null -eq $e.PSObject.Properties['restored']) { $e | Add-Member restored $false } }
+    $todo = @($manifest | Where-Object { -not $_.restored })
+    $res = [pscustomobject]@{ Already = ($todo.Count -eq 0); Restored = 0; Pending = @() }
+    # the settings first: a test ApexRadiance.toml left behind changes the player's game even when the rest is back
+    foreach ($e in @($todo | Sort-Object { if ($_.path -like '*.toml') { 0 } else { 1 } })) {
+        $err = $null
+        for ($t = 1; $t -le $Tries; $t++) {
+            try { Restore-Entry $RunDir $e; $err = $null; break } catch { $err = $_.Exception.Message; if ($t -lt $Tries) { Start-Sleep -Milliseconds $DelayMs } }
+        }
+        if ($err) { $res.Pending += [pscustomobject]@{ path = $e.path; error = $err } } else { $e.restored = $true; $res.Restored++ }
+        Save-Manifest $RunDir $manifest
+    }
+    return $res
 }

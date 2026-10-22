@@ -37,6 +37,8 @@ namespace ApexTestAgent
 
         static Instantiator()
         {
+            // Idle unless run.ps1 started the game: a package left in Mods opens no mailbox, starts no task, writes no file
+            try { if (CommandLine.FindSwitch("ApexTestAgent") == null) return; } catch (Exception) { return; }
             // Mailbox and marker first: whatever fails below, the runner still finds the agent and can say what failed
             Mailbox.Open();
             try { Handlers.Register(); } catch (Exception e) { StartError = e.GetType().Name + ": " + e.Message; }
