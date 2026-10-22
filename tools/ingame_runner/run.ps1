@@ -20,6 +20,8 @@ param(
     [string]$OutDir,
     [int]$LoadTimeoutMin = 20,
     [switch]$KeepSaves,
+    [switch]$InactiveIdle,
+    [switch]$Lean,
     [switch]$DryRun,
     [string]$Restore
 )
@@ -89,6 +91,7 @@ $loaders = @('wininet.dll', 'dinput8.dll', 'version.dll', 'winmm.dll', 'dsound.d
 if (-not $AsiLoader -and -not $loaders) { Say 'warning: no ASI loader found in Bin (for example Ultimate ASI Loader as wininet.dll); pass -AsiLoader' }
 
 Add-Type -Path (Join-Path $PSScriptRoot 'MailboxClient.cs')
+Add-Type -Namespace ApexIngame -Name SystemTimes -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool GetSystemTimes(out long idle, out long kernel, out long user);'
 if (-not $OutDir) { $OutDir = Join-Path $repo ('outputs/ingame/' + (Get-Date -Format 'yyyyMMdd-HHmmss')) }
 New-Item -ItemType Directory -Path (Join-Path $OutDir 'backup') -Force | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
@@ -97,12 +100,32 @@ $OutDir = (Resolve-Path $OutDir).Path
 $script:proc = $null
 $script:mbox = $null
 $script:speed = 'normal'
+$script:commands = $null # agent calls and job steps of the current load, QPC ms (runner_lib.ps1 Get-Measurement)
+
+# QueryPerformanceCounter in ms: the clock the profilers stamp with, so commands and profiles line up exactly
+function Get-QpcMs { [Diagnostics.Stopwatch]::GetTimestamp() * 1000.0 / [Diagnostics.Stopwatch]::Frequency }
 
 function Call-Agent([string]$Cmd, $ArgsObject, [int]$TimeoutMs = 15000) {
     $json = if ($null -ne $ArgsObject) { $ArgsObject | ConvertTo-Json -Compress -Depth 6 } else { '' }
-    $reply = $script:mbox.Call($Cmd, $json, $TimeoutMs) | ConvertFrom-Json
+    $t0 = Get-QpcMs
+    try { $reply = $script:mbox.Call($Cmd, $json, $TimeoutMs) | ConvertFrom-Json }
+    finally { if ($null -ne $script:commands) { $script:commands.Add([pscustomobject]@{ label = $Cmd; kind = 'call'; t0 = $t0; t1 = (Get-QpcMs) }) } }
     if (-not $reply.ok) { throw "agent $Cmd failed: $($reply.error)" }
     return $reply.result
+}
+
+# CPU of the game and of everything else, as a share of the whole machine since the previous sample
+$script:cpuPrev = $null
+function Add-MachineSample($List) {
+    $idle = 0L; $kernel = 0L; $user = 0L
+    if (-not [ApexIngame.SystemTimes]::GetSystemTimes([ref]$idle, [ref]$kernel, [ref]$user)) { return }
+    $script:proc.Refresh()
+    $now = @{ T = (Get-QpcMs); Total = $kernel + $user; Busy = $kernel + $user - $idle; Game = $script:proc.TotalProcessorTime.Ticks }
+    $p = $script:cpuPrev; $script:cpuPrev = $now
+    if (-not $p -or $now.Total -le $p.Total) { return }
+    $total = [double]($now.Total - $p.Total)
+    $game = 100 * ($now.Game - $p.Game) / $total
+    $List.Add([pscustomobject]@{ t = $now.T; game = [math]::Round($game, 1); other = [math]::Round([math]::Max(0, 100 * ($now.Busy - $p.Busy) / $total - $game), 1) })
 }
 
 # Waits until $Done returns true. Every 30 s the game must show progress (simulator ticks, or CPU time while loading);
@@ -188,13 +211,26 @@ function Wait-LiveMode([string]$What) {
     } { Clear-Dialog }
 }
 
+# Sim: stutter-profile.js, unloaded at the end of the window. Frames: frame-times.js in its own session, its file closed at
+# the end of the window and the session kept loaded until the game exits (attach.py --keep). Returns the processes.
 function Start-Profilers([string]$Base, [double]$Seconds) {
-    if ($Profiler -eq 'None') { return $null }
-    $pargs = @((Join-Path $PSScriptRoot 'profilers/attach.py'), $script:proc.Id, $Seconds)
-    if ($Profiler -in 'Frames', 'Both') { $pargs += @((Join-Path $PSScriptRoot 'profilers/frame-times.js'), (@{ out = ("$Base-frames.csv" -replace '\\', '/') } | ConvertTo-Json -Compress)) }
-    if ($Profiler -in 'Sim', 'Both') { $pargs += @((Join-Path $PSScriptRoot 'profilers/stutter-profile.js'), (@{ out = ($Base -replace '\\', '/'); hitchMs = 50 } | ConvertTo-Json -Compress)) }
-    return Start-Process -FilePath 'python' -ArgumentList ($pargs | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }) -NoNewWindow -PassThru `
-        -RedirectStandardOutput "$Base-profiler.log" -RedirectStandardError "$Base-profiler.err.log"
+    $started = @{}
+    $attach = Join-Path $PSScriptRoot 'profilers/attach.py'
+    $launch = {
+        param($Name, $PyArgs)
+        Start-Process -FilePath 'python' -ArgumentList ($PyArgs | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }) -NoNewWindow -PassThru `
+            -RedirectStandardOutput "$Base-$Name.log" -RedirectStandardError "$Base-$Name.err.log"
+    }
+    if ($Profiler -in 'Sim', 'Both') {
+        $opts = @{ out = ($Base -replace '\\', '/'); hitchMs = 50 }
+        if ($Lean) { $opts.stages = $false }
+        $started.Sim = & $launch 'profiler' @($attach, $script:proc.Id, $Seconds, (Join-Path $PSScriptRoot 'profilers/stutter-profile.js'), ($opts | ConvertTo-Json -Compress))
+    }
+    if ($Profiler -in 'Frames', 'Both') {
+        $started.Frames = & $launch 'frames' @($attach, '--keep', $script:proc.Id, $Seconds, (Join-Path $PSScriptRoot 'profilers/frame-times.js'),
+            (@{ out = ("$Base-frames.csv" -replace '\\', '/') } | ConvertTo-Json -Compress))
+    }
+    return $started
 }
 
 # ------------------------------------------------------------------ one load
@@ -204,7 +240,10 @@ function Invoke-Load($Load, [string]$BaseToml) {
     $dir = Join-Path $OutDir $Load.Name
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
     $notes = New-Object System.Collections.Generic.List[string]
-    $result = [pscustomobject]@{ Name = $Load.Name; JobId = $jobDef.id; Variant = $Load.Variant; Ok = $false; Closed = ''; Frames = $null; Sim = $null; Notes = $notes; Saves = @() }
+    $result = [pscustomobject]@{ Name = $Load.Name; JobId = $jobDef.id; Variant = $Load.Variant; Ok = $false; Closed = ''; Frames = $null; Sim = $null; M = $null; Notes = $notes; Saves = @() }
+    $script:commands = New-Object System.Collections.Generic.List[object]
+    $machine = New-Object System.Collections.Generic.List[object]
+    $measured = $null # the first measured wait: profile base, seconds, profiler processes
 
     $toml = Set-TomlOverrides (Set-TomlOverrides $BaseToml $jobDef.toml) $v.toml
     New-Item -ItemType Directory -Path $apexDir -Force | Out-Null
@@ -213,8 +252,12 @@ function Invoke-Load($Load, [string]$BaseToml) {
 
     $started = Get-Date
     $script:speed = 'normal'
-    $measuredMin = 0
     $gameArgs = @($jobDef.gameArgs | Where-Object { $_ })
+    # The game sleeps 10 ms per main-loop pass while another window is in front unless the NoInactiveIdle key is in its
+    # [Config] settings; the command line fills that section (-Key or -Key=value), Default.ini's [Config] does not reach
+    # this key. The runner never focuses the game window, so without it every frame and publish gap of a measured load
+    # would carry that sleep. -InactiveIdle keeps the game's default.
+    if (-not $InactiveIdle) { $gameArgs += '-NoInactiveIdle' }
     Say "$($Load.Name): starting the game"
     if ($gameArgs) { $script:proc = Start-Process -FilePath $exe -WorkingDirectory $GameBin -ArgumentList $gameArgs -PassThru }
     else { $script:proc = Start-Process -FilePath $exe -WorkingDirectory $GameBin -PassThru }
@@ -230,6 +273,7 @@ function Invoke-Load($Load, [string]$BaseToml) {
         $n = 0
         foreach ($step in (Get-JobSteps $jobDef)) {
             $n++
+            $stepAt = $script:commands.Count; $stepT0 = Get-QpcMs
             switch ($step.do) {
                 'speed' { $script:speed = $step.speed; Call-Agent 'set_speed' @{ speed = $step.speed } | Out-Null }
                 'camera' { Call-Agent 'camera' @{ pos = $step.pos; target = $step.target } | Out-Null }
@@ -241,13 +285,19 @@ function Invoke-Load($Load, [string]$BaseToml) {
                 'wait' {
                     $seconds = [double]$step.minutes * 60
                     $prof = $null
-                    if ($step.measure) { $prof = Start-Profilers (Join-Path $dir "measure$n") $seconds; $measuredMin += [double]$step.minutes }
-                    Say "  step ${n}: wait $($step.minutes) min$(if ($step.measure) { ' (measured)' })"
+                    $first = $step.measure -and -not $measured # shortcut: only the first measured wait counts; sum several when a job needs it
+                    if ($first) {
+                        $measured = @{ Base = (Join-Path $dir "measure$n"); Seconds = $seconds }
+                        $prof = Start-Profilers $measured.Base $seconds; $measured.Prof = $prof
+                        Add-MachineSample $machine
+                    }
+                    Say "  step ${n}: wait $($step.minutes) min$(if ($first) { ' (measured)' })"
                     $until = (Get-Date).AddSeconds($seconds)
-                    Wait-Game "step $n (wait)" ([double]$step.minutes + 2) { (Get-Date) -ge $until } { Keep-Speed }
-                    if ($prof) {
-                        if (-not $prof.WaitForExit(90000)) { $prof.Kill(); $notes.Add('profiler did not stop in time and was ended') }
-                        elseif ($prof.ExitCode -ne 0) { $notes.Add("profiler exit $($prof.ExitCode), see measure$n-profiler.err.log") }
+                    Wait-Game "step $n (wait)" ([double]$step.minutes + 2) { (Get-Date) -ge $until } { Keep-Speed; if ($first) { Add-MachineSample $machine } }
+                    if ($first) { Add-MachineSample $machine }
+                    if ($prof -and $prof.Sim) {
+                        if (-not $prof.Sim.WaitForExit(90000)) { $prof.Sim.Kill(); $notes.Add('profiler did not stop in time and was ended') }
+                        elseif ($prof.Sim.ExitCode -ne 0) { $notes.Add("profiler exit $($prof.Sim.ExitCode), see measure$n-profiler.err.log") }
                     }
                 }
                 'save' {
@@ -269,6 +319,7 @@ function Invoke-Load($Load, [string]$BaseToml) {
                 }
                 default { throw "unknown step '$($step.do)'" }
             }
+            if ($step.do -ne 'wait') { $script:commands.Add([pscustomobject]@{ label = $step.do; kind = 'step'; t0 = $stepT0; t1 = (Get-QpcMs) }) }
         }
         Say "$($Load.Name): closing the game"
         try { Call-Agent 'quit_game' $null | Out-Null } catch { $notes.Add("quit_game: $($_.Exception.Message)") }
@@ -299,11 +350,15 @@ function Invoke-Load($Load, [string]$BaseToml) {
     $check = Test-ApexLog $lines (@($jobDef.expect) + @($v.expect)) ($script:DefaultFailPatterns + @($jobDef.fail) + @($v.fail))
     foreach ($m in $check.Missing) { $notes.Add("missing log line: $m") }
     foreach ($m in $check.Failures) { $notes.Add("log: $m") }
-    # shortcut: only the first measured wait counts; sum several measured steps when a job needs it
-    $frames = Get-ChildItem -Path $dir -Filter 'measure*-frames.csv' -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($frames) { $result.Frames = Get-FrameStats $frames.FullName }
-    $simBase = Get-ChildItem -Path $dir -Filter 'measure*-hitches.jsonl' -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($simBase) { $result.Sim = Get-SimStats ($simBase.FullName -replace '-hitches\.jsonl$', '') $measuredMin }
+    $script:commands | ForEach-Object { $_ | ConvertTo-Json -Compress } | Set-Content -LiteralPath (Join-Path $dir 'commands.jsonl') -Encoding UTF8
+    if ($measured) {
+        # the frame recorder's session ends with the game; give it a moment, then end it
+        if ($measured.Prof.Frames -and -not $measured.Prof.Frames.WaitForExit(30000)) { $measured.Prof.Frames.Kill(); $notes.Add('frame recorder still attached after the game closed; ended') }
+        $machine | ForEach-Object { $_ | ConvertTo-Json -Compress } | Set-Content -LiteralPath "$($measured.Base)-machine.jsonl" -Encoding UTF8
+        $crash = if (Test-Path (Join-Path $dir 'ApexRadiance_Crash.txt')) { 'crash report written' } elseif ($result.Closed -notin 'quit', 'window closed') { "game did not quit ($($result.Closed))" } else { $null }
+        $result.M = Get-Measurement $measured.Base $measured.Seconds $script:commands $machine -NoInactiveIdle:(-not $InactiveIdle) -Crash $crash
+        if ($result.M) { $result.Frames = $result.M.Frames; $result.Sim = $result.M.Sim }
+    }
     $result.Ok = $check.Ok -and ($result.Closed -in 'quit', 'window closed') -and -not (Test-Path (Join-Path $dir 'ApexRadiance_Crash.txt')) -and
         -not ($notes | Where-Object { $_ -notmatch '^(log|missing log line):' -and $_ -notmatch 'profiler' })
     if (-not $KeepSaves) { foreach ($s in $result.Saves) { $p = Join-Path $savesDir "$s.sims3"; if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force } } }
