@@ -8,6 +8,7 @@
 // Lot space (ToLocal in level_light_share.cpp): y up, 1 m tiles, each split along its diagonals into four quadrants
 // (FUN_006aa390): 0 toward -z, 1 +x, 2 +z, 3 -x. A view is one story's plane: `float h` (its lowest floor, lot space) and
 // `bool Placed(int ix, int iz, int q) const` (a floor a player placed in that quadrant).
+#include "fast_math.h"
 #include <algorithm>
 #include <cmath>
 #include "penumbra.h"
@@ -15,7 +16,7 @@
 namespace LampVis {
 
 inline int Quadrant(float fx, float fz) {
-    if (std::fabs(fx - 0.5f) <= std::fabs(fz - 0.5f)) return fz > 0.5f ? 2 : 0;
+    if (ApexMath::Fabs(fx - 0.5f) <= ApexMath::Fabs(fz - 0.5f)) return fz > 0.5f ? 2 : 0;
     return fx > 0.5f ? 1 : 3;
 }
 
@@ -40,7 +41,7 @@ template <class View> float OpenFraction(const View& v, float ax, float az, floa
     cut[n++] = 1.0f;
     const float dx = bx - ax, dz = bz - az;
     const auto family = [&](float a0, float d) { // the lines a0 + s d = k for s in (0, 1)
-        if (!(std::fabs(d) > 1e-6f)) return;
+        if (!(ApexMath::Fabs(d) > 1e-6f)) return;
         const float lo = std::min(a0, a0 + d), hi = std::max(a0, a0 + d);
         for (float k = std::floor(lo) + 1.0f; k < hi && n < kMaxCuts; k += 1.0f) cut[n++] = (k - a0) / d;
     };
@@ -77,7 +78,7 @@ float SlabGate(const View* st, int n, const float* P, const float* Q, int* block
     const float dy = Q[1] - P[1];
     if (!(dy > 1e-4f)) return 1.0f;
     float ux = P[0] - Q[0], uz = P[2] - Q[2]; // from the point toward the lamp, along the ground
-    const float ul = std::sqrt(ux * ux + uz * uz);
+    const float ul = ApexMath::Sqrt(ux * ux + uz * uz);
     const bool across = ul > 1e-4f;
     if (across) ux /= ul, uz /= ul;
     else ux = uz = 0.0f;
@@ -86,7 +87,7 @@ float SlabGate(const View* st, int n, const float* P, const float* Q, int* block
         const float h = st[i].h;
         if (!(h > P[1]) || !(h < Q[1] + kOnPlane)) continue;
         float t, x, z;
-        if (std::fabs(Q[1] - h) < kOnPlane) {
+        if (ApexMath::Fabs(Q[1] - h) < kOnPlane) {
             t = 1.0f;
             x = Q[0] + kOnPlaneStep * ux;
             z = Q[2] + kOnPlaneStep * uz;
