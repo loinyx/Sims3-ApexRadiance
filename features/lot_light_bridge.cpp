@@ -321,6 +321,8 @@ struct PsFacts {
     bool ps3 = false;      // ps_3_0 (PatchIndoorBasis patches nothing else: DrawIndoorObject skips its sampler scan)
 };
 std::unordered_map<IDirect3DPixelShader9*, PsFacts> g_psFacts;
+// (2.15.3) 32 recent shaders' entries (pointers into g_psFacts / g_vsInfo: stable until Shutdown clears the maps, and these)
+ShaderLookupCache<PsFacts*> g_psFactsFront;
 PsFacts* g_curFacts = nullptr; // g_curPs's entry (null for no shader)
 bool g_curFactsKnown = false;  // g_curFacts follows g_curPs (TrackPs with PerfToggles::NightLightingPsFacts on)
 // RigTracker::CurrentMode for the draw being handled (14/10: read 2-3 times a draw, each under SEH). Valid while
@@ -2212,6 +2214,7 @@ struct VsInfo {
     ShaderPatches::UvRows winRows; // how the basis uv is made from the world position (ShaderPatches::WorldUvRows)
 };
 std::unordered_map<IDirect3DVertexShader9*, VsInfo> g_vsInfo;
+uint32_t g_vsInfoGen = 0, g_vsInfoFrontGen = 0; // (2.15.3) g_vsInfo cleared: ClassifyVs's front cache goes too
 VsInfo* g_curVsInfo = nullptr; // entry of g_curVs (null for no shader)
 std::atomic<int> g_roofDrawn{0};
 float g_cam[3] = {};
@@ -2243,8 +2246,14 @@ uintptr_t g_coneScaleAt = 0; // 0x011D11A0 on fixed Steam addresses, else s = 5 
 
 VsInfo* ClassifyVs(IDirect3DVertexShader9* vs) {
     if (!vs) return nullptr;
+    static ShaderLookupCache<VsInfo*> s_front; // (2.15.3) as g_psFactsFront; cleared with g_vsInfo
+    if (VsInfo* front = nullptr; g_vsInfoFrontGen == g_vsInfoGen && s_front.Find(reinterpret_cast<uintptr_t>(vs), front)) return front;
+    if (g_vsInfoFrontGen != g_vsInfoGen) s_front.Clear(), g_vsInfoFrontGen = g_vsInfoGen;
     auto it = g_vsInfo.find(vs);
-    if (it != g_vsInfo.end()) return &it->second;
+    if (it != g_vsInfo.end()) {
+        s_front.Store(reinterpret_cast<uintptr_t>(vs), &it->second);
+        return &it->second;
+    }
     VsInfo info;
     uint8_t cls = 0;
     UINT size = 0;
@@ -6830,6 +6839,14 @@ void TrackPs(IDirect3DPixelShader9* ps, bool force = false) {
         g_curPsRoomMap = ps && g_roomMapPs.count(ps);
         return;
     }
+    if (PsFacts* front = nullptr; g_psFactsFront.Find(reinterpret_cast<uintptr_t>(ps), front)) {
+        g_curFacts = front;
+        g_curFactsKnown = true;
+        g_curClass = front->cls;
+        g_curPsBasis = front->basis;
+        g_curPsRoomMap = front->roomMap;
+        return;
+    }
     auto it = g_psFacts.find(ps); // one lookup for a known shader
     if (it == g_psFacts.end()) {
         Classify(ps);
@@ -6844,6 +6861,7 @@ void TrackPs(IDirect3DPixelShader9* ps, bool force = false) {
         }
     }
     g_curFacts = &it->second;
+    g_psFactsFront.Store(reinterpret_cast<uintptr_t>(ps), &it->second);
     g_curFactsKnown = true;
     g_curClass = it->second.cls;
     g_curPsBasis = it->second.basis;
@@ -8641,6 +8659,7 @@ void Shutdown(bool keepChunkMaps) {
     }
     g_curVsInfo = nullptr;
     g_vsInfo.clear();
+    g_vsInfoGen++; // (ClassifyVs's front cache)
     if (g_roofSnowPs) {
         g_roofSnowPs->Release();
         g_roofSnowPs = nullptr;
@@ -8683,6 +8702,7 @@ void Shutdown(bool keepChunkMaps) {
     g_wetLotPs.clear();
     g_classCache.clear();
     g_psFacts.clear();
+    g_psFactsFront.Clear();
     g_curFacts = nullptr;
     g_curFactsKnown = false;
     g_cinemaMarqueeDayPs.clear();

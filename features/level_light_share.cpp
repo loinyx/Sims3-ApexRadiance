@@ -4819,14 +4819,18 @@ float GridPassImpl(const StoryGrid& g, const float* A, const float* B, GridWhy& 
     float pass = 1.0f, t0 = 0.0f;
     const bool hardTops = g_hardWallTops.load(std::memory_order_relaxed);
     for (int guard = 0; guard < 1024 && pass > 0.0f; guard++) {
-        const float t1 = std::min({tx, tz, 1.0f});
         t_gridCapY = 1e30f;
         if (ix >= 0 && iz >= 0 && ix < g.w && iz < g.h) {
             const uint8_t f = g.flags[static_cast<size_t>(iz) * g.w + ix];
             // the ray leaves this tile next: its ceiling caps the walls it crosses there (hard_wall_tops)
             if (hardTops && (f & 0xF0)) t_gridCapY = g.ceil[static_cast<size_t>(iz) * g.w + ix];
             if (f & 0x03) pass *= GridDiagPass(g, ix, iz, A, dx, dy, dz, tMin, tMax, why, floor, rim);
-            if (f & 0xF0) pass *= GridRoofPass(g, ix, iz, A, dx, dy, dz, std::max(t0, tMin), std::min(t1, tMax), why);
+            // (2.15.3) t1 = std::min({tx, tz, 1.0f}) as before (the first of the smallest, NaN included), only where it is read: the
+            // initializer-list min was a CRT call on every step
+            if (f & 0xF0) {
+                const float t1 = std::min(std::min(tx, tz), 1.0f);
+                pass *= GridRoofPass(g, ix, iz, A, dx, dy, dz, std::max(t0, tMin), std::min(t1, tMax), why);
+            }
         }
         if (pass <= 0.0f || (ix == bx && iz == bz)) break;
         const float t = std::min(tx, tz);
@@ -14309,9 +14313,10 @@ struct WallGrid {
 } g_grid;
 constexpr float kCell = 4.0f;
 int64_t CellKey(int cx, int cz) { return (static_cast<int64_t>(cx) << 32) ^ static_cast<uint32_t>(cz); }
-inline uint32_t SpanSlot(int64_t key, uint32_t mask) {
-    const uint64_t h = static_cast<uint64_t>(key) * 0x9E3779B97F4A7C15ull;
-    return static_cast<uint32_t>(h >> 32) & mask;
+inline uint32_t SpanSlot(int64_t key, uint32_t mask) { // (32-bit products: a 64-bit multiply is a CRT call, __allmul, on x86)
+    const uint32_t hi = static_cast<uint32_t>(static_cast<uint64_t>(key) >> 32), lo = static_cast<uint32_t>(key);
+    const uint32_t h = hi * 0x9E3779B1u ^ lo * 0x85EBCA77u;
+    return (h ^ (h >> 15)) & mask;
 }
 struct CellSegs {
     const int* p = nullptr;
