@@ -4,7 +4,8 @@ Runs Apex Radiance in the real game without anyone at the keyboard: it installs 
 The Sims 3 once per load with that load's `ApexRadiance.toml`, loads a test save, drives the job's steps (speed, camera
 pan, saves, reloads), collects Apex Radiance's own log and crash report, optionally records frame times, closes the
 game, puts every installed file back and writes `results.md`. A feature is compared on and off as an A/B pair of
-separate game starts in ABBA order.
+separate game starts in ABBA order. [METHODOLOGY.md](METHODOLOGY.md) explains what a result counts, how features are
+triggered and compared, and when a run stops.
 
 This is the one tool in `tools/` that starts the game and writes into the game and Documents folders. The offline
 harness rules in [workflow.md](../../docs/workflow.md#4-testing) do not apply to it; its own safety rules are
@@ -286,7 +287,8 @@ textures and the pan job moves the camera, so `repro-file-lookups` and `lot-ligh
 effect. Travel to another world is not a repro step: a `reload` covers loading a world.
 
 Each repro job stops its measured window at a fixed jump count set in the job (`until`, counted from the repro's
-start), with 15 minutes as the cap: the count is decided before the run and never depends on the on/off difference. The event counts above follow from the
+start), with 15 minutes as the cap: the count is decided before the run and never depends on the on/off difference
+([METHODOLOGY.md](METHODOLOGY.md#6-when-a-run-stops-and-how-sure-a-result-is)). The event counts above follow from the
 jump and effect timing (one jump per `dwellS` seconds plus the build time); the exact counts of each load are in its
 row of `results.md` (`repro events: stopped at jumps 75 of 75 after 10.4 min; jumps ..., outfit changes ..., Sims
 spawned ..., effect rounds ...`), or "cap ... reached" when the count was not met. The measured window starts after the
