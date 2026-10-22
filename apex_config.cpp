@@ -27,6 +27,10 @@ std::vector<std::string> g_compareOff;
 bool g_comparePictureOff = false;
 namespace {
 
+// [ui] screenshot_folder: "game" (default), "apex" or "custom" (the folder in screenshot_custom_folder)
+int ScreenshotFolderMode(const std::string& v) { return v == "apex" ? 1 : (v == "custom" ? 2 : 0); }
+const char* ScreenshotFolderName(int mode) { return mode == 1 ? "apex" : (mode == 2 ? "custom" : "game"); }
+
 std::mutex g_fileLock; // one reader/writer of ApexRadiance.toml at a time
 std::mutex g_uiLock;
 UiSettings g_ui;
@@ -372,7 +376,8 @@ void LoadSettings() {
         // screenshot_shortcut_enabled is no longer shown in the menu; a saved false would hide the shortcut for good
         if (ParseKeyChord((*ui)["screenshot_key"].value_or(std::string()), own)) u.screenshotKey = AcceptScreenshotKey(own);
         u.screenshotHideGameUi = (*ui)["screenshot_hide_game_ui"].value_or(true);
-        u.screenshotToApexFolder = (*ui)["screenshot_folder"].value_or(std::string("game")) == "apex";
+        u.screenshotFolder = ScreenshotFolderMode((*ui)["screenshot_folder"].value_or(std::string("game")));
+        u.screenshotCustomFolder = (*ui)["screenshot_custom_folder"].value_or(std::string());
         u.sidebarCollapsed = (*ui)["sidebar_collapsed"].value_or(false);
         u.changelogSeen = (*ui)["changelog_seen"].value_or(std::string());
         u.testBuildSeen = (*ui)["test_build_seen"].value_or(std::string());
@@ -473,7 +478,8 @@ bool Save(std::string* error) {
         ui.insert("screenshot_shortcut_enabled", u.screenshotShortcutEnabled);
         ui.insert("screenshot_key", KeyChordText(u.screenshotKey));
         ui.insert("screenshot_hide_game_ui", u.screenshotHideGameUi);
-        ui.insert("screenshot_folder", std::string(u.screenshotToApexFolder ? "apex" : "game"));
+        ui.insert("screenshot_folder", std::string(ScreenshotFolderName(u.screenshotFolder)));
+        ui.insert("screenshot_custom_folder", u.screenshotCustomFolder);
         ui.insert("sidebar_collapsed", u.sidebarCollapsed);
         if (!u.changelogSeen.empty()) ui.insert("changelog_seen", u.changelogSeen);
         if (!u.testBuildSeen.empty()) ui.insert("test_build_seen", u.testBuildSeen);
@@ -684,7 +690,8 @@ void ApplyFeatureState(const toml::table& state) {
         if (ParseKeyChord((*sc)["picture_compare_key"].value_or(std::string()), k)) u.pictureCompareKey = k;
         if (ParseKeyChord((*sc)["screenshot_key"].value_or(std::string()), k)) u.screenshotKey = AcceptScreenshotKey(k);
         u.screenshotHideGameUi = (*sc)["screenshot_hide_game_ui"].value_or(u.screenshotHideGameUi);
-        if (auto f = (*sc)["screenshot_folder"].value<std::string>()) u.screenshotToApexFolder = *f == "apex";
+        if (auto f = (*sc)["screenshot_folder"].value<std::string>()) u.screenshotFolder = ScreenshotFolderMode(*f);
+        if (auto f = (*sc)["screenshot_custom_folder"].value<std::string>()) u.screenshotCustomFolder = *f;
         u.keyChosen = true;
         SetUi(u);
         LOG_INFO("[Config] Shortcuts taken from the profile: menu key " + KeyChordText(u.toggle));
@@ -855,7 +862,8 @@ void CaptureProfileState(toml::table& root) {
             sc.insert("screenshot_shortcut_enabled", u.screenshotShortcutEnabled);
             sc.insert("screenshot_key", KeyChordText(u.screenshotKey));
             sc.insert("screenshot_hide_game_ui", u.screenshotHideGameUi);
-            sc.insert("screenshot_folder", std::string(u.screenshotToApexFolder ? "apex" : "game"));
+            sc.insert("screenshot_folder", std::string(ScreenshotFolderName(u.screenshotFolder)));
+            sc.insert("screenshot_custom_folder", u.screenshotCustomFolder);
             root.insert_or_assign("shortcuts", std::move(sc));
         }
 }

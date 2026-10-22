@@ -13,7 +13,7 @@ separate screenshot shortcut saves one filtered PNG, with all Apex effects, to t
 | Availability | Report a problem: Released in 2.5.0. Post-save title and description: Released in 2.5.5 (title optional); required title and Cancel that deletes the new capture: Released in 2.6.0. Filtered player screenshots: Released in 2.6.0. Light update trace in recordings: Released in 2.7.0 |
 | Default | Capture screenshots on (`[ui] capture_screenshot`); screenshot shortcut on, key `F8` (the game's own C is untouched), saved to the game's Screenshots folder, game UI hidden |
 | Menu | System > Report a problem. Settings > Menu > Screenshot capture. Settings > Shortcuts > Report a problem |
-| Configuration | `[ui] capture_screenshot`, `capture_max_mb`, `capture_max_folders`, `screenshot_folder`, `screenshot_key`, `screenshot_hide_game_ui`, `recorder_key`, `probe_key`, `diagnostics_key` (see [ui.md](../ui.md#shortcuts)) |
+| Configuration | `[ui] capture_screenshot`, `capture_max_mb`, `capture_max_folders`, `screenshot_folder`, `screenshot_custom_folder`, `screenshot_key`, `screenshot_hide_game_ui`, `recorder_key`, `probe_key`, `diagnostics_key` (see [ui.md](../ui.md#shortcuts)) |
 | Source | [`features/captures.h`](../../features/captures.h), [`features/captures.cpp`](../../features/captures.cpp), [`apex_gui.cpp`](../../apex_gui.cpp) (`ReportPage`, `CaptureNote`, `ScreenshotCaptureCard`) |
 
 ## The problem
@@ -86,7 +86,8 @@ Set in `ApexRadiance.toml` only; the menu has no control for them.
 | Control | TOML (`[ui]`) | Default | Notes |
 |---|---|---|---|
 | Include a screenshot (Report page) | `capture_screenshot` | true | Adds `Screenshot.png` to every capture |
-| Save screenshots to | `screenshot_folder` | `game` | `game`: Documents > Electronic Arts > The Sims 3 > Screenshots; `apex`: the Apex Radiance folder > Screenshots |
+| Save screenshots to | `screenshot_folder` | `game` | `game`: Documents > Electronic Arts > The Sims 3 > Screenshots; `apex`: the Apex Radiance folder > Screenshots; `custom`: the folder in `screenshot_custom_folder` (since 2.15.1) |
+| Screenshots folder | `screenshot_custom_folder` | empty | The folder chosen with *Another folder* (Windows' folder dialog; UTF-8 path). Choosing *Another folder* with none set opens the dialog first, and the choice applies once a folder is picked. When the folder cannot be created (a removed drive), the screenshot goes to the game's Screenshots folder with a note |
 | Screenshot key | `screenshot_key` | `F8` | Custom only, not part of the presets; a saved bare letter or digit (e.g. `C`) falls back to the default with a log line |
 | Hide game UI in screenshots | `screenshot_hide_game_ui` | true | Hides the game's interface for the shot, then restores it |
 

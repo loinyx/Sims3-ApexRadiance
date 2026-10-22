@@ -605,7 +605,7 @@ The localized folder name is resolved from the game executable's string table, w
 | Table | Contents |
 |---|---|
 | `[meta]` | `version`, `written_by` (product and version), migration record |
-| `[ui]` | `toggle_key`, `developer_mode`, `font_scale` (0.5 to 3), `recommend_s3ss`, `start_note`, `capture_screenshot`, `hotkey_preset`, `mine_base`, `compare_key`, `refresh_key`, `probe_key`, `diagnostics_key`, `recorder_key`, `frame_capture_key`, `search_key`, `peek_key`, `picture_compare_key`, `screenshot_folder`, `screenshot_key`, `screenshot_hide_game_ui`, `sidebar_collapsed`, `language`; legacy `welcome_done`, `key_chosen` kept for compatibility |
+| `[ui]` | `toggle_key`, `developer_mode`, `font_scale` (0.5 to 3), `recommend_s3ss`, `start_note`, `capture_screenshot`, `hotkey_preset`, `mine_base`, `compare_key`, `refresh_key`, `probe_key`, `diagnostics_key`, `recorder_key`, `frame_capture_key`, `search_key`, `peek_key`, `picture_compare_key`, `screenshot_folder`, `screenshot_custom_folder`, `screenshot_key`, `screenshot_hide_game_ui`, `sidebar_collapsed`, `language`; legacy `welcome_done`, `key_chosen` kept for compatibility |
 | `[qol.picture]` | Picture filters |
 | `[qol.frame_profiler]` | Frame Profiler preferences (developer mode; never saved as running) |
 | `[developer]` | Developer preferences imported with a profile |

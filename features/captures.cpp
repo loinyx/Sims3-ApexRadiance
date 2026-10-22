@@ -776,17 +776,30 @@ void OnWorldSessionChanged() {
 bool RequestPlayerScreenshot(bool hideGameUi) {
     if (g_playerPhoto.active) return false;
     std::error_code ec;
-    const bool toApex = ApexConfig::GetUi().screenshotToApexFolder;
-    const std::wstring& gameDir = toApex ? ApexPaths::ApexDirectory() : ApexPaths::GameDocumentsDirectory();
-    if (gameDir.empty()) {
-        Notify(I18n::Tr("Could not create the screenshots folder"), 5, NoteKind::Warning);
-        return false;
+    const ApexConfig::UiSettings ui = ApexConfig::GetUi();
+    std::filesystem::path folder;
+    if (ui.screenshotFolder == 2 && !ui.screenshotCustomFolder.empty()) { // the folder the player chose
+        folder = std::filesystem::path(ApexUtil::ToWide(ui.screenshotCustomFolder));
+        std::filesystem::create_directories(folder, ec);
+        if (ec || !std::filesystem::is_directory(folder, ec)) {
+            LOG_WARNING("[Captures] The chosen screenshots folder is not available: " + ui.screenshotCustomFolder);
+            Notify(I18n::Tr("The chosen screenshots folder is not available; saved in the game's Screenshots folder"), 5, NoteKind::Warning);
+            folder.clear();
+            ec.clear();
+        }
     }
-    const std::filesystem::path folder = std::filesystem::path(gameDir) / L"Screenshots";
-    std::filesystem::create_directories(folder, ec);
-    if (ec) {
-        Notify(I18n::Tr("Could not create the screenshots folder"), 5, NoteKind::Warning);
-        return false;
+    if (folder.empty()) {
+        const std::wstring& gameDir = ui.screenshotFolder == 1 ? ApexPaths::ApexDirectory() : ApexPaths::GameDocumentsDirectory();
+        if (gameDir.empty()) {
+            Notify(I18n::Tr("Could not create the screenshots folder"), 5, NoteKind::Warning);
+            return false;
+        }
+        folder = std::filesystem::path(gameDir) / L"Screenshots";
+        std::filesystem::create_directories(folder, ec);
+        if (ec) {
+            Notify(I18n::Tr("Could not create the screenshots folder"), 5, NoteKind::Warning);
+            return false;
+        }
     }
     SYSTEMTIME t{};
     GetLocalTime(&t);
