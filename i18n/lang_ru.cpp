@@ -25,6 +25,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps placed on the ground light the lawn around them", "Лампы, стоящие на земле, освещают газон вокруг себя"},
     {"Lamps keep their night strength in Build mode at night", "Ночью в режиме строительства лампы сохраняют ночную яркость"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Луна освещает город сверху: ночью на дорогах больше нет тёмных полос"},
+    {"Moving the camera at night is smooth again with Instant lamp lighting", "Камера ночью снова движется плавно при мгновенном освещении ламп"},
     {"Filtered screenshots can be saved to any folder you choose", "Снимки с фильтрами можно сохранять в любую выбранную папку"},
     {"Moonlight is softer by default and in every preset", "Лунный свет по умолчанию и во всех пресетах стал мягче"},
     {"Lamps brighten smoothly at dusk and dim smoothly at dawn", "Лампы плавно разгораются в сумерках и плавно гаснут на рассвете"},

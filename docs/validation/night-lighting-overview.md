@@ -26,6 +26,7 @@ The harnesses only read captures and the repository; they never write into the g
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-22 | `173e2bd` | 2.15.2: CPU Lighting suite, Instant lamps; developer and standard Release x86 builds. In game, the frame profiler of 2.15.1 while moving the camera at night put RtOutdoorLamps `UnderDelta` at the top of the render-thread samples (748 hitches, up to 92 ms); with the developer build of this commit the frame rate while moving the camera was much smoother in game | Checks passed, 0 failed; the in-game gain was observed, not re-measured with the profiler | Offline; in game DXVK |
 | 2026-10-22 | `4e32cea` | 2.15.1 release: CPU Lighting and Smoke suites, world lamp policy (low-lamp rule, sun time gates, smooth dusk mapping), Instant lamps, floor shade, i18n check, menu audit; developer, public and standard Release x86 builds | 58,249 + 22 + 5,842 checks passed, 0 failed; builds without warnings. In game (developer builds of this branch): the moon height and the lot area lights confirmed by the maintainer; a lamp on the ground lit the snow in live mode; Build mode kept the night level at 1.00 (log) | Offline; in game DXVK |
 | 2026-10-04 | `92582b6` | Terrain lighting GPU, policy and resource checks | 2,017,393 passed, 0 failed; Release x86 build without warnings | Native D3D9 |
 

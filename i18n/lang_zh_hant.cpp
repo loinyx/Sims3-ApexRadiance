@@ -25,6 +25,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps placed on the ground light the lawn around them", "放在地上的燈會照亮周圍的草坪"},
     {"Lamps keep their night strength in Build mode at night", "夜間在建造模式下燈光保持夜間亮度"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "月亮從更高處照亮城鎮：夜晚道路上不再出現暗色條紋"},
+    {"Moving the camera at night is smooth again with Instant lamp lighting", "使用即時燈光照明時，夜間移動鏡頭重新變得流暢"},
     {"Filtered screenshots can be saved to any folder you choose", "套用濾鏡的截圖可以儲存到你選擇的任何資料夾"},
     {"Moonlight is softer by default and in every preset", "月光預設更柔和，所有預設中也是如此"},
     {"Lamps brighten smoothly at dusk and dim smoothly at dawn", "黃昏時燈光平滑變亮，黎明時平滑變暗"},

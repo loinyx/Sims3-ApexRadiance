@@ -1365,7 +1365,7 @@ void Frame(IDirect3DDevice9* dev) {
                 const bool spill = coneSpill && r.f.type == 5;
                 for (int k = 0; k < 3; k++) b.colour += std::max(r.f0[k], 0.0f) * (spill ? std::clamp(r.S[k], 0.0f, 1.0f) : 1.0f);
                 b.colour *= r.areaShare;
-                b.liftable = TerrainBakeRule::Liftable(r.f.lot != 0, r.f.type);
+                b.liftable = TerrainBakeRule::Liftable(r.f.lot != 0, r.f.type) ? 1u : 0u;
                 bake[S].push_back(b);
                 bakeLights[S].push_back(L);
             }
