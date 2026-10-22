@@ -21,6 +21,7 @@
 #include "rt_lamp_model.h"
 #include "rt_lamp_proxy.h"
 #include "rt_lamps_hlsl.h"
+#include "shader_cache.h"
 #include "outdoor_delta.h"
 #include "outdoor_delta_model.h"
 #include "level_light_share.h"
@@ -90,28 +91,39 @@ std::atomic<float> g_lastMs{0.0f}, g_lastGpuMs{-1.0f}, g_lastEditMs{-1.0f};
 std::string g_inactive;             // render thread: why the option does nothing now ("" = active)
 std::string g_inactiveLogged;       // the last reason logged
 
-// ---- the shaders (compiled once on a worker thread, made on the render thread) ----
+// ---- the shaders (made on the render thread from the bytecode Apex's shader cache precompiled) ----
+// (2.15.3) They were compiled with D3DCompile on a worker of their own at every start (3.6 s, and the compiler's heap peak
+// the shader cache avoids): they are now registered with ShaderCache (same source, entries, targets and flags, so the same
+// bytecode), taken from its disk cache or the copy built into the ASI like every other Apex shader.
 struct Compiled {
-    std::atomic<int> state{0}; // 0 not started, 1 compiling, 2 done, 3 failed
+    std::atomic<int> state{0}; // 0 not started, 1 taking the bytecode, 2 done, 3 failed
     std::vector<DWORD> code[RtLampGpu::kShaderCount];
     std::string error;
 };
 Compiled g_compiled;
+ShaderCache::Id AddRtLampShader(int i) {
+    const auto id = static_cast<RtLampGpu::ShaderId>(i);
+    ShaderCache::Desc d;
+    d.tag = RtLampGpu::EntryOf(id);
+    d.source = kRtLampsHlsl;
+    d.sourceName = "rt_lamps";
+    d.entry = RtLampGpu::EntryOf(id);
+    d.target = RtLampGpu::IsVertex(id) ? "vs_3_0" : "ps_3_0";
+    d.flags = D3DCOMPILE_OPTIMIZATION_LEVEL3;
+    return ShaderCache::Add(std::move(d));
+}
+const ShaderCache::Id kRtLampShaderIds[RtLampGpu::kShaderCount] = {
+    AddRtLampShader(0), AddRtLampShader(1), AddRtLampShader(2), AddRtLampShader(3), AddRtLampShader(4), AddRtLampShader(5), AddRtLampShader(6),
+    AddRtLampShader(7), AddRtLampShader(8), AddRtLampShader(9), AddRtLampShader(10), AddRtLampShader(11), AddRtLampShader(12)};
+static_assert(RtLampGpu::kShaderCount == 13, "kRtLampShaderIds lists every RtLampGpu::ShaderId");
 void CompileAll() {
     for (int i = 0; i < RtLampGpu::kShaderCount; i++) {
-        const auto id = static_cast<RtLampGpu::ShaderId>(i);
-        ID3DBlob *code = nullptr, *errs = nullptr;
-        const HRESULT hr = D3DCompile(kRtLampsHlsl, std::strlen(kRtLampsHlsl), "rt_lamps", nullptr, nullptr, RtLampGpu::EntryOf(id),
-                                      RtLampGpu::IsVertex(id) ? "vs_3_0" : "ps_3_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &errs);
-        if (FAILED(hr) || !code) {
-            g_compiled.error = std::format("{} does not compile: {}", RtLampGpu::EntryOf(id), errs ? static_cast<const char*>(errs->GetBufferPointer()) : "?");
-            if (errs) errs->Release();
+        std::string err;
+        if (!ShaderCache::Bytecode(kRtLampShaderIds[i], g_compiled.code[i], &err)) {
+            g_compiled.error = std::format("{} does not compile: {}", RtLampGpu::EntryOf(static_cast<RtLampGpu::ShaderId>(i)), err);
             g_compiled.state.store(3);
             return;
         }
-        if (errs) errs->Release();
-        g_compiled.code[i].assign(static_cast<const DWORD*>(code->GetBufferPointer()), static_cast<const DWORD*>(code->GetBufferPointer()) + code->GetBufferSize() / 4);
-        code->Release();
     }
     g_compiled.state.store(2);
 }
@@ -1006,11 +1018,11 @@ void Frame(IDirect3DDevice9* dev) {
     const int cs = g_compiled.state.load();
     if (cs == 0) {
         g_compiled.state.store(1);
-        if (!HookGuard::StartDetached("RtOutdoorLamps shader compile", [] { CompileAll(); })) {
+        if (!HookGuard::StartDetached("RtOutdoorLamps shader bytecode", [] { CompileAll(); })) {
             g_compiled.error = "the compile thread could not start";
             g_compiled.state.store(3);
         }
-        LOG_INFO("[RtOutdoorLamps] Compiling the shadow and relight shaders (once a session)");
+        LOG_INFO("[RtOutdoorLamps] Taking the shadow and relight shaders from the shader cache");
         return off("its shaders are being compiled");
     }
     if (cs == 1) return off("its shaders are being compiled");

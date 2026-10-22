@@ -47,6 +47,10 @@ enum class Result { Ok, CompileFailed, CreateFailed };
 // compiler's message. Waits for the worker when it has not compiled the variant yet.
 Result CreatePixelShader(IDirect3DDevice9* dev, Id id, IDirect3DPixelShader9** out, std::string* compileError = nullptr);
 
+// The precompiled bytecode of `id` (any thread; waits for the worker like CreatePixelShader). False with *compileError
+// when it did not compile. For shaders a feature creates itself (vertex shaders, its own verification).
+bool Bytecode(Id id, std::vector<DWORD>& out, std::string* compileError = nullptr);
+
 // "Precompiled 34 of 34 Apex shaders in 1234 ms on a background thread (0 failed); render-thread waits: 0" (dev status)
 std::string StatusText();
 

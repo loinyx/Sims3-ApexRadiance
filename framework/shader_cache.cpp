@@ -503,6 +503,17 @@ bool SameFunction(IDirect3DPixelShader9* ps, const std::vector<DWORD>& code, UIN
 }
 } // namespace
 
+bool Bytecode(Id id, std::vector<DWORD>& out, std::string* compileError) {
+    out.clear();
+    const Job* j = Ready(id);
+    if (!j || j->code.empty()) {
+        if (compileError) *compileError = j ? j->error : std::string("unknown shader id");
+        return false;
+    }
+    out = j->code;
+    return true;
+}
+
 Result CreatePixelShader(IDirect3DDevice9* dev, Id id, IDirect3DPixelShader9** out, std::string* compileError) {
     *out = nullptr;
     const Job* j = Ready(id);
