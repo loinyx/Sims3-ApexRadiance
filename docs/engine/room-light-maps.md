@@ -251,6 +251,14 @@ on at dusk through the same setter but re-solves neither lots nor terrain. Apex 
 (night_terrain_relight `ReadLightState`, object_light_bridge `ReadNight`) and passes it to shaders as the moon-shadow fade
 (see [shaders.md](shaders.md)) and to the room-rig re-gather (every 0.1 of change).
 
+**Build mode (2.15.1).** The sky asks the weather manager `*(*(sky+0x21C)+0x74)` for sunrise and sunset (`FUN_00D68FE0`,
+called at `0x00C15D9A`); its byte `+0xB04` picks the set at `+0xA48` instead of the season's at `+0x9EC`. Build mode sets
+it: in a winter world at 18:57 sunrise / sunset went from 2.0 / -2.5 to 0 / 0 and `+0xF0` from 1 to 0 within half a
+second while the sky stayed dark (Daylight log of 21/10). That Build mode sets the byte is inferred from the timing; the
+selection itself is verified in the bytes. Apex reads the level through `NightLevel::Read` (`features/night_level.h`):
+while the byte is set it keeps the level last read with it clear, so lamps keep their night strength and leaving Build
+mode no longer arms a dusk rebuild.
+
 ### How Apex reads and patches this
 
 | Site / hook | What | Code | Option (TOML key) |

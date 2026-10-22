@@ -23,6 +23,7 @@ const I18n::Pair kPairs[] = {
     {"Area lights of a lot light the ground past the lot's border", "부지의 영역 조명이 부지 경계 밖의 땅도 비춥니다"},
     {"Lamps hidden behind objects no longer reflect on water", "물체 뒤에 가려진 램프가 더 이상 물에 비치지 않습니다"},
     {"Lamps placed on the ground light the lawn around them", "땅에 놓은 램프가 주변 잔디를 비춥니다"},
+    {"Lamps keep their night strength in Build mode at night", "밤에 건축 모드에서도 램프가 밤의 밝기를 유지합니다"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "달이 더 높은 곳에서 마을을 비춰 밤에 도로에 어두운 줄무늬가 더 이상 생기지 않습니다"},
     {"Moonlight is softer by default and in every preset", "달빛이 기본값과 모든 프리셋에서 더 부드러워졌습니다"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "부지 로딩이 더 부드러워졌습니다. 추가 조명 작업이 프레임 속도에 맞춰 진행됩니다"},

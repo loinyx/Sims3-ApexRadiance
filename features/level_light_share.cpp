@@ -84,6 +84,7 @@
 #endif
 #include "level_light_share.h"
 #include "terrain_bake_rule.h"
+#include "night_level.h"
 #include "lamp_visibility.h"
 #include "lamp_reach.h"
 #include "wall_heights.h"
@@ -13843,15 +13844,15 @@ DWORD g_daySweepAt = 0;
 DWORD g_dayWorldAt = 0; // GetTickCount at the last world change (OnWorldChanged)
 bool g_daySwept = false;
 bool ReadNightLevel(float& level) {
+    uintptr_t lightMgr = 0;
     __try {
         const uintptr_t root = kRootPtr ? *reinterpret_cast<const uintptr_t*>(kRootPtr) : 0;
-        const uintptr_t lightMgr = root ? *reinterpret_cast<const uintptr_t*>(root + 0x1C0) : 0;
+        lightMgr = root ? *reinterpret_cast<const uintptr_t*>(root + 0x1C0) : 0;
         if (!lightMgr) return false;
-        level = *reinterpret_cast<const float*>(lightMgr + 0xF0); // the night level (0 day, 1 night), as LotLightBridge reads it
-        return std::isfinite(level);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
+    return NightLevel::Read(lightMgr, level); // the night level (0 day, 1 night), as LotLightBridge reads it
 }
 void SweepDayRooms() {
     float level = 0.0f;

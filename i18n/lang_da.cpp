@@ -23,6 +23,7 @@ const I18n::Pair kPairs[] = {
     {"Area lights of a lot light the ground past the lot's border", "En grunds områdelys oplyser jorden ud over grundens kant"},
     {"Lamps hidden behind objects no longer reflect on water", "Lamper skjult bag genstande spejler sig ikke længere i vandet"},
     {"Lamps placed on the ground light the lawn around them", "Lamper på jorden oplyser græsplænen omkring dem"},
+    {"Lamps keep their night strength in Build mode at night", "Lamper beholder deres natstyrke i byggetilstand om natten"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Månen lyser byen op højere oppefra: ingen mørke striber på vejene om natten"},
     {"Moonlight is softer by default and in every preset", "Månelyset er blødere som standard og i alle forudindstillinger"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "Indlæsning af grunde er mere glidende: det ekstra lysarbejde følger din billedhastighed"},

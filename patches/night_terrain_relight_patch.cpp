@@ -38,6 +38,7 @@
 #include "screen_watch.h"
 #include "lot_light_bridge.h"
 #include "terrain_bake_rule.h"
+#include "night_level.h"
 #include "bloom_alpha_probe.h"
 #include "lightmap_smooth.h"
 #include "terrain_chunk_relight.h"
@@ -903,11 +904,10 @@ bool ReadLightState(LightState& out) {
         if (!cells) return false;
         out.lightMgr = lightMgr;
         out.cells = cells;
-        out.level = *reinterpret_cast<const float*>(lightMgr + 0xF0);
-        return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
+    return NightLevel::Read(out.lightMgr, out.level); // +0xF0, kept while Build mode's seasonless sun times are in use
 }
 
 bool ReadCounters(uintptr_t cells, int& c38, int& c3C) {
@@ -1450,6 +1450,14 @@ void OnPresent() {
     ReadCounters(s.cells, c38, c3C);
     g_level = s.level;
     g_menuLevel.store(s.level);
+    {
+        static bool s_held = false;
+        if (NightLevel::Holding() != s_held) {
+            s_held = !s_held;
+            LOG_INFO(s_held ? std::format("[NightTerrainRelight] The game uses its seasonless sun times (Build mode): the night level stays {:.2f}", s.level)
+                            : std::string("[NightTerrainRelight] The game's own night level again (seasonless sun times ended)"));
+        }
+    }
     g_counter38 = c38;
     g_counter3C = c3C;
     // (14/10, drag solves) the countdown a lamp drag armed: idle again while the local path is there (CancelCountdown)

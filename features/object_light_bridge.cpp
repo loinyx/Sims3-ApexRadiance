@@ -43,6 +43,7 @@
 #include "tester_toggles.h"
 #include "rig_cut.h"
 #include "terrain_lighting_policy.h"
+#include "night_level.h"
 
 namespace {
 
@@ -409,16 +410,17 @@ void RegatherOpeningRooms() {
 // Render thread, every frame: current night level and light cells (0 when no world).
 bool ReadNight(float& level, uintptr_t& cells) {
     if (!kRootPtr) return false;
+    uintptr_t mgr = 0;
     __try {
         const uintptr_t root = *reinterpret_cast<const uintptr_t*>(kRootPtr);
         const uintptr_t lightMgr = root ? *reinterpret_cast<const uintptr_t*>(root + 0x1C0) : 0;
         if (!lightMgr) return false;
-        level = *reinterpret_cast<const float*>(lightMgr + 0xF0);
         cells = *reinterpret_cast<const uintptr_t*>(lightMgr + 0x104);
-        return true;
+        mgr = lightMgr;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
+    return NightLevel::Read(mgr, level); // +0xF0, kept while Build mode's seasonless sun times are in use
 }
 
 void UpdateRoomRigs() {

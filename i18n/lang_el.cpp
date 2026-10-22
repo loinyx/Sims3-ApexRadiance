@@ -23,6 +23,7 @@ const I18n::Pair kPairs[] = {
     {"Area lights of a lot light the ground past the lot's border", "Τα φώτα επιφάνειας ενός οικοπέδου φωτίζουν το έδαφος πέρα από το όριό του"},
     {"Lamps hidden behind objects no longer reflect on water", "Οι λάμπες πίσω από αντικείμενα δεν καθρεφτίζονται πια στο νερό"},
     {"Lamps placed on the ground light the lawn around them", "Οι λάμπες πάνω στο έδαφος φωτίζουν το γρασίδι γύρω τους"},
+    {"Lamps keep their night strength in Build mode at night", "Τη νύχτα στη λειτουργία Κατασκευής οι λάμπες κρατούν τη νυχτερινή τους ένταση"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Το φεγγάρι φωτίζει την πόλη από ψηλότερα: τέλος οι σκούρες λωρίδες στους δρόμους τη νύχτα"},
     {"Moonlight is softer by default and in every preset", "Το φως του φεγγαριού είναι πιο απαλό από προεπιλογή και σε κάθε προεπιλογή ρυθμίσεων"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "Η φόρτωση οικοπέδων είναι πιο ομαλή: η επιπλέον δουλειά φωτισμού ακολουθεί τον ρυθμό καρέ σου"},

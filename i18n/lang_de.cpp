@@ -23,6 +23,7 @@ const I18n::Pair kPairs[] = {
     {"Area lights of a lot light the ground past the lot's border", "Flächenlichter eines Grundstücks beleuchten den Boden über die Grundstücksgrenze hinaus"},
     {"Lamps hidden behind objects no longer reflect on water", "Hinter Objekten verdeckte Lampen spiegeln sich nicht mehr im Wasser"},
     {"Lamps placed on the ground light the lawn around them", "Auf den Boden gestellte Lampen beleuchten den Rasen um sie herum"},
+    {"Lamps keep their night strength in Build mode at night", "Lampen behalten nachts im Baumodus ihre Nachtstärke"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Der Mond beleuchtet die Stadt von weiter oben: keine dunklen Streifen mehr auf den Straßen bei Nacht"},
     {"Moonlight is softer by default and in every preset", "Das Mondlicht ist standardmäßig und in jeder Voreinstellung sanfter"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "Grundstücke laden flüssiger: die zusätzliche Lichtberechnung richtet sich nach deiner Bildrate"},
