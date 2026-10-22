@@ -36,6 +36,7 @@ template <typename Fn> struct Entry {
     bool observeReissue = false;          // runs for draws re-issued inside a ReissueScope (ObserveReissuedDraws)
     std::string name;
     std::string timingName; // the name the per-name timing reports ("<name> (Present)" on the Present chain)
+    int timingSlot = -1;    // its slot in the Frame Profiler's table (development build, timed chains)
     Fn hook;                // owns the callable behind fn / self
     int priority = 0;
     uint64_t sequence = 0;
@@ -110,6 +111,7 @@ template <typename Fn> bool Add(Chain<Fn>& chain, const std::string& name, Fn fn
     e.observeReissue = chain.reissueFilter && ObservesReissue(name);
     e.name = name;
     e.timingName = chain.timingSuffix ? name + chain.timingSuffix : name;
+    if (!kPublicBuild && chain.timing != Timing::None) e.timingSlot = FrameProfiler::RegistryTimingSlot(e.timingName);
     e.hook = std::move(fn);
     e.priority = static_cast<int>(priority);
     e.sequence = ++g_sequence;
@@ -146,7 +148,9 @@ std::atomic<int> g_renderInside{0};         // written by the render thread only
 std::atomic<uint32_t> g_renderExits{0};     // written by the render thread only: outermost lock-free dispatches finished
 std::atomic<uint32_t> g_offThread{0};       // lock-free chains dispatched from another thread (under the lock)
 int g_lockedDepth = 0;                    // guarded by g_lock: dispatches running under the lock (the lock's owner only)
-std::mutex g_timingLock;                    // FrameProfiler::AddRegistryHookTime is not thread-safe on its own
+// (2.15.3) development build, per-name timing: the ticks of this thread's callbacks and driver draws that ran inside the
+// callback being timed (subtracted from it: each callback is charged its own time only)
+thread_local uint64_t t_regExcluded = 0;
 thread_local int t_dispatchDepth = 0;       // development build: nesting of dispatches on this thread (the mod time)
 thread_local int t_reissue = 0;             // ReissueScope nesting on this thread (lot_light_bridge.cpp's re-issued draws)
 thread_local bool t_sampled = false;        // development build: the outermost dispatch on this thread is a timed sample
@@ -251,11 +255,13 @@ struct ModTimeGuard {
 template <typename Call> HRESULT TimedReissueDraw(Call call) {
     if (kPublicBuild || t_dispatchDepth == 0) return call();
     const uint64_t c0 = t_costSampled ? __rdtsc() : 0;
+    const uint64_t r0 = FrameProfiler::RegistryHookTimingActive() ? FrameProfiler::Ticks() : 0;
     int anchor = 0;
     const int token = t_sampled ? FrameProfiler::BeginModTime(FrameProfiler::ModTime::ReissuedDraw, &anchor) : -1;
     const HRESULT hr = call();
     if (token >= 0) FrameProfiler::EndModTime(token, &anchor);
     if (c0) g_dispatchDriverCycles += __rdtsc() - c0;
+    if (r0) t_regExcluded += FrameProfiler::Ticks() - r0; // the driver's draw: not the timed callback's own time
     return hr;
 }
 
@@ -291,12 +297,14 @@ bool RunList(const Chain<Fn>& chain, const typename Chain<Fn>::List& list, Devic
                 returned = false;
                 orig0 = origCount ? *origCount : 0;
                 if (timed) {
+                    const uint64_t ex0 = t_regExcluded;
                     const uint64_t t0 = FrameProfiler::Ticks();
                     r = e.fn(e.self, ctx, args...);
                     returned = true;
                     const uint64_t dt = FrameProfiler::Ticks() - t0;
-                    std::lock_guard<std::mutex> tl(g_timingLock);
-                    FrameProfiler::AddRegistryHookTime(e.timingName, dt);
+                    const uint64_t inner = t_regExcluded - ex0;
+                    FrameProfiler::AddRegistryHookTimeAt(e.timingSlot, dt > inner ? dt - inner : 0);
+                    t_regExcluded = ex0 + dt; // the callback around this one leaves all of it out
                 } else {
                     r = e.fn(e.self, ctx, args...);
                     returned = true;

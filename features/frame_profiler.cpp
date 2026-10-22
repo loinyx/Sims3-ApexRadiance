@@ -2378,18 +2378,16 @@ std::atomic<uint32_t> g_qHead{0}, g_qTail{0};
 std::atomic<uint32_t> g_qDropped{0}, g_qWritten{0};
 std::atomic<bool> g_writerRunning{false};
 
-// ---- optional per-hook registry timing (all access under the registry mutex, see frame_profiler.h) ----
-struct RegName {
-    std::string name;
-    uint64_t ticks = 0;
-    uint32_t calls = 0;
+// ---- optional per-hook registry timing (see frame_profiler.h): one slot per registered name, never removed ----
+constexpr int kRegSlots = 96;
+struct RegSlot {
+    std::string name;                 // written once under g_regSlotLock, before the slot is published
+    std::atomic<uint64_t> ticks{0};
+    std::atomic<uint32_t> calls{0};
 };
-struct RegPtr {
-    const char* ptr;
-    int idx;
-};
-std::vector<RegName> g_regNames;
-std::vector<RegPtr> g_regPtrs;
+RegSlot g_regSlots[kRegSlots];
+std::atomic<int> g_regSlotCount{0};
+std::mutex g_regSlotLock;
 uint32_t g_regFrames = 0;
 uint64_t g_regWindowStart = 0;
 struct RegDisplay {
@@ -3172,12 +3170,13 @@ void RollRegistryWindow(uint64_t now) {
     g_regFrames++;
     if (static_cast<double>(now - g_regWindowStart) * g_msPerTick < 1000.0) return;
     g_regDisplay.clear();
-    for (auto& n : g_regNames) {
-        if (n.calls && g_regFrames) {
-            g_regDisplay.push_back({n.name, static_cast<float>(static_cast<double>(n.ticks) * g_msPerTick / g_regFrames), static_cast<float>(n.calls) / g_regFrames});
-        }
-        n.ticks = 0;
-        n.calls = 0;
+    const int slots = g_regSlotCount.load(std::memory_order_acquire);
+    for (int i = 0; i < slots; i++) {
+        RegSlot& n = g_regSlots[i];
+        const uint64_t ticks = n.ticks.exchange(0, std::memory_order_relaxed);
+        const uint32_t calls = n.calls.exchange(0, std::memory_order_relaxed);
+        if (calls && g_regFrames)
+            g_regDisplay.push_back({n.name, static_cast<float>(static_cast<double>(ticks) * g_msPerTick / g_regFrames), static_cast<float>(calls) / g_regFrames});
     }
     std::sort(g_regDisplay.begin(), g_regDisplay.end(), [](const RegDisplay& a, const RegDisplay& b) { return a.msPerFrame > b.msPerFrame; });
     g_regFrames = 0;
@@ -4214,7 +4213,8 @@ std::string BuildReport() {
     s += AddressSpace::ReportText();
     s += "Apex shaders: " + ShaderCache::StatusText() + "\n";
     if (!g_regDisplay.empty()) {
-        s += "Registry hooks by name (last second; Present hooks always, draw hooks with per-hook registry timing):\n";
+        s += "Registry hooks by name (last second; Present hooks always, draw hooks with per-hook registry timing; each callback's own time, without the "
+             "callbacks nested in it and the driver time of the draws it issued):\n";
         for (const auto& d : g_regDisplay) s += std::format("   {:<36} {:>7.3f} ms / frame {:>9.1f} calls / frame\n", d.name, d.msPerFrame, d.callsPerFrame);
     }
     s += std::format("Draw / state hooks called off the render thread (dispatched under the lock): {}\n", D3D9Hooks::OffThreadDispatches());
@@ -5081,34 +5081,21 @@ void EndModTime(int token, const void* key) {
     Pop(s, token, key, Now(), 0, 0);
 }
 
-// Keyed by the name string's address (fast path), verified by content: the registry's short names live inside its
-// vectors' elements, so an address can be reused by another module's hook after a register / unregister.
-void AddRegistryHookTime(const std::string& hookName, uint64_t ticks) {
-    const char* p = hookName.c_str();
-    RegPtr* cached = nullptr;
-    for (auto& e : g_regPtrs) {
-        if (e.ptr == p) {
-            if (g_regNames[e.idx].name == hookName) {
-                g_regNames[e.idx].ticks += ticks;
-                g_regNames[e.idx].calls++;
-                return;
-            }
-            cached = &e;
-            break;
-        }
-    }
-    int idx = -1;
-    for (size_t i = 0; i < g_regNames.size(); i++)
-        if (g_regNames[i].name == hookName) idx = static_cast<int>(i);
-    if (idx < 0) {
-        if (g_regNames.size() >= 64) return;
-        g_regNames.push_back({hookName, 0, 0});
-        idx = static_cast<int>(g_regNames.size()) - 1;
-    }
-    if (cached) cached->idx = idx;
-    else if (g_regPtrs.size() < 256) g_regPtrs.push_back({p, idx});
-    g_regNames[idx].ticks += ticks;
-    g_regNames[idx].calls++;
+int RegistryTimingSlot(const std::string& hookName) {
+    std::lock_guard<std::mutex> lock(g_regSlotLock);
+    const int n = g_regSlotCount.load(std::memory_order_relaxed);
+    for (int i = 0; i < n; i++)
+        if (g_regSlots[i].name == hookName) return i;
+    if (n >= kRegSlots) return -1;
+    g_regSlots[n].name = hookName;
+    g_regSlotCount.store(n + 1, std::memory_order_release);
+    return n;
+}
+
+void AddRegistryHookTimeAt(int slot, uint64_t ticks) {
+    if (slot < 0 || slot >= kRegSlots) return;
+    g_regSlots[slot].ticks.fetch_add(ticks, std::memory_order_relaxed);
+    g_regSlots[slot].calls.fetch_add(1, std::memory_order_relaxed);
 }
 
 } // namespace FrameProfiler
@@ -5126,7 +5113,8 @@ void LoadFromToml(const toml::table&) {}
 void Shutdown() {}
 bool RegistryHookTimingActive() { return false; }
 uint64_t Ticks() { return __rdtsc(); }
-void AddRegistryHookTime(const std::string&, uint64_t) {}
+int RegistryTimingSlot(const std::string&) { return -1; }
+void AddRegistryHookTimeAt(int, uint64_t) {}
 bool PresentHookTimingActive() { return false; }
 bool ModTimeActive() { return false; }
 int BeginModTime(ModTime, const void*) { return -1; }
