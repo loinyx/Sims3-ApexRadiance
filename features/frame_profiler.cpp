@@ -1063,7 +1063,9 @@ uint64_t __fastcall Hook_LotLoadStages(void* self, void* edx) {
     const uint64_t started = LotLoadAnalysis::Clock();
     const auto result = Orig<T_LotLoadStages, FnThis0>()(self, edx);
     const uint64_t ended = LotLoadAnalysis::Clock();
-    LotLoadAnalysis::Sample(before, LotLoadAnalysis::ReadRenderer(self), started, ended);
+    const auto after = LotLoadAnalysis::ReadRenderer(self);
+    LotLoadAnalysis::Sample(before, after, started, ended);
+    LotLoadAnalysis::NoteWait(self, after);
     return result;
 }
 

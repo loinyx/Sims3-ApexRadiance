@@ -10106,7 +10106,14 @@ void NoteFloorGate(const float* s, float base, float share) {
 }
 
 float* SolvePointBatchImpl(BYTE* room, float* out, void* list2D, void* list3D, void* flags, void* sample);
+thread_local bool t_inBatchSample = false; // (2.15.3) inside one sample of a batch solve (WindowChannelHook keeps answers only here)
+struct InBatchSample {
+    bool was = t_inBatchSample;
+    InBatchSample() { t_inBatchSample = true; }
+    ~InBatchSample() { t_inBatchSample = was; }
+};
 float* __fastcall SolvePointBatch(BYTE* room, void*, float* out, void* list2D, void* list3D, void* flags, void* sample) {
+    const InBatchSample inSample;
     // Quick outdoor lamp edits (Instant only, outdoor_delta.h): one changed light evaluated alone gives its part here
     if (t_replay) {
         float* r = SolvePointBatchImpl(room, out, list2D, list3D, flags, sample);
@@ -11891,6 +11898,36 @@ const LightEvalHook_t kEvalHooks[] = {&LightEvalHook<0>, &LightEvalHook<1>, &Lig
                                   &LightEvalHook<4>, &LightEvalHook<5>, &LightEvalHook<6>, &LightEvalHook<7>, &LightEvalHook<8>};
 static_assert(std::size(kEvalHooks) == std::size(kClasses));
 
+// (2.15.3) A window light's evaluation (type 7, 0x006BEFD0) asks for every sample whether the light belongs to channel 1
+// (its own vfunc+0x1C, 0x006C1DD0 on Steam: the lot object by id through ObjectById 0x00C62D40, then the room's entry in
+// that lot's table +0x364): 150 to 180 thousand object lookups in one room-solve frame. Within one batch of samples
+// (g_batchSerial, the light tree thread) the light, its lot and the lot's table do not change, so the answer is kept per
+// light and channel for the batch; the first call of a batch asks the game, as before.
+using ChannelFn = bool(__fastcall*)(void* light, void* edx, int channel); // = thiscall ret 4
+uintptr_t g_windowChannelOrig = 0;
+struct ChannelMemo {
+    uint32_t serial = 0;
+    uintptr_t light = 0;
+    int channel = 0;
+    bool answer = false;
+};
+ChannelMemo g_channelMemo[256];
+std::atomic<long> g_channelHits{0}, g_channelAsked{0};
+bool __fastcall WindowChannelHook(void* light, void* edx, int channel) {
+    const auto game = reinterpret_cast<ChannelFn>(g_windowChannelOrig);
+    if (!t_inBatchSample || !g_batchSerial || ThreadId() != g_gatherThread.load(std::memory_order_relaxed)) return game(light, edx, channel);
+    const uintptr_t l = reinterpret_cast<uintptr_t>(light);
+    ChannelMemo& m = g_channelMemo[((static_cast<uint32_t>(l) * 2654435761u) >> 24) ^ (static_cast<uint32_t>(channel) & 0xFF)];
+    if (m.serial == g_batchSerial && m.light == l && m.channel == channel) {
+        g_channelHits.fetch_add(1, std::memory_order_relaxed);
+        return m.answer;
+    }
+    const bool answer = game(light, edx, channel);
+    g_channelAsked.fetch_add(1, std::memory_order_relaxed);
+    m.serial = g_batchSerial, m.light = l, m.channel = channel, m.answer = answer;
+    return answer;
+}
+
 // The game's wall test with the room's walls at their real ends (+0x639 = 0 for the call): in soft mode FUN_0069d4c0 tests
 // each wall's widened segment (0x0069AA90 with the soft flag, wall+0x40 + 0x30) and shades by where the ray crosses it
 // (0x0069A8C0), so a ray passing near a wall's end loses light without crossing the wall. Hard mode is the plain 2D
@@ -13271,6 +13308,8 @@ std::string IndoorDiagText() {
                                 g_floorRefreshes.load());
     s += std::format("Lamps taken through openings: {} | points tested: {}, a floor in the way: {}, a wall of the lamp's room: {} (of them on its story's own grid: {}) | rooms sent to gather again: {}\n",
                      g_indoorAdded.load(), g_indoorTests.load(), g_indoorFloorBlocked.load(), g_indoorWallBlocked.load(), g_indoorLampWallVetoes.load(), g_indoorQueued.load());
+    s += std::format("Window lights' channel test: {} | asked the game {}, kept for the sample batch {}\n", g_windowChannelOrig ? "kept per batch" : "not installed",
+                     g_channelAsked.load(), g_channelHits.load());
     if (DevSwitches::ArchAmbient()) s += LevelLightShare::ArchAmbientStatus() + "\n";
     if (DevSwitches::BasisWallFilter()) s += LevelLightShare::WallMaskStatus() + "\n";
     if (DevSwitches::StairHeightLight()) s += std::format("stairwell texels lit by a lamp of the story above from {} m higher: {}\n", kStairSampleUp, g_basisRaised.load());
@@ -13647,6 +13686,19 @@ bool Install(std::string& error) {
             g_evalOrig[i] = kClasses[i].eval;
             DWORD orig = static_cast<DWORD>(kClasses[i].eval);
             if (MemPatch::WriteDWORD(slot, static_cast<DWORD>(reinterpret_cast<uintptr_t>(kEvalHooks[i])), &g_patches, &orig)) classes++;
+            // the window light's channel test, kept per batch (WindowChannelHook); only when its slot holds the shared function
+            // the other classes use too (0x006C1DD0 on Steam)
+            if (kClassTypes[i] == 7) {
+                const uintptr_t chSlot = kClasses[i].vtable + 0x1C;
+                const uint32_t chFn = *reinterpret_cast<const uint32_t*>(chSlot);
+                const bool shared = kClasses[0].vtable && *reinterpret_cast<const uint32_t*>(kClasses[0].vtable + 0x1C) == chFn;
+                DWORD chOrig = chFn;
+                // (g_windowChannelOrig is never cleared: a thread still inside the hook after an uninstall calls the game's function)
+                if (shared && chFn && chFn != reinterpret_cast<uintptr_t>(&WindowChannelHook)) {
+                    g_windowChannelOrig = chFn;
+                    MemPatch::WriteDWORD(chSlot, static_cast<DWORD>(reinterpret_cast<uintptr_t>(&WindowChannelHook)), &g_patches, &chOrig);
+                }
+            }
         }
     } else
         LOG_WARNING(wallsMissing.empty() ? std::string("[LevelLightShare] Per-point evaluation differs; no shadow from the walls of other stories")
