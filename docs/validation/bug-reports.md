@@ -63,6 +63,8 @@ Native PNG previews use CPU rasterization and real WIC output; they do not prove
 
 ## Open checks
 
+- 2.15.1: screenshots to *Another folder* (folder dialog, Change, a removed drive falling back to the game's folder, a
+  profile with *Another folder* on a PC without a chosen folder) not yet tested in game.
 - Player screenshot in game: message-pump timing of the posted F10, the restored interface state, CC and game visuals,
   and the PNG output.
 - Required title, Cancel deletion and the notes form across languages and text sizes in game.

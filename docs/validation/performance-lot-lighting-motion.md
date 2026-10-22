@@ -36,4 +36,5 @@ None offline.
 
 ## Open checks
 
+- 2.15.1 settle pacing: frame times while lots load, against 2.15.0 on the same save, not yet measured.
 - Why the current lot relights continuously while the camera moves.
