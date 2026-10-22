@@ -65,7 +65,8 @@ same moment, and a drift over the session (a warming file cache, a growing heap)
 
 Apex Radiance reads its settings at start, so the runner cannot flip a feature inside a load. It compares separate game
 starts in ABBA order instead (off, on, on, off). That keeps drift balanced but adds start-to-start noise: each start
-loads a slightly different world. A per-firing A/B becomes possible once a feature can be switched while the game runs.
+loads a slightly different world. Features install and uninstall at game start and on menu changes, so the runner
+keeps to separate starts and offsets the noise with forced repros (many firings per load) and more loads.
 
 ## 6. When a run stops, and how sure a result is
 
