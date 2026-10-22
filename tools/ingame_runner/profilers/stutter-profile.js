@@ -1,13 +1,12 @@
 // Copied from sims3-modernization (MIT, see ../LICENSE-sims3-modernization; https://github.com/rodneypantonial/sims3-modernization).
-// The docs/ references below point to that repository. Run through attach.py by run.ps1 -Profiler; read-only hooks.
+// Run through attach.py by run.ps1 -Profiler; read-only hooks.
 // Sim-thread stutter profiler for TS3W.exe (Steam build, SHA-256 10b2423e...0609).
 // Times what the simulation loop (MonoScriptHost::Simulate, 0xD81840) spends per iteration:
 // script tick, route searches, GC stop-the-world marking, finalizers, catch-up steps, animation (two passes), locomotion,
 // render publish, and the four scheduler seams
-// (ScriptTick 0xD80BC0, TaskObjects 0xD7FC60, OneShotObjects 0xD74800, ThreadedObjects 0xD7F8B0; docs/04 F17) as
+// (ScriptTick 0xD80BC0, TaskObjects 0xD7FC60, OneShotObjects 0xD74800, ThreadedObjects 0xD7F8B0) as
 // separate buckets, so each hitch is split by stage. S3PP's SimulatorStageProfiler detours the same prologues: turn it
 // off in Sims3Performance.ini while profiling (the byte check refuses to hook a detoured prologue).
-// Addresses and reasons: docs/04-re-findings.md.
 //
 // Run (game already in Live mode): run.ps1 -Profiler Sim, or frida -n TS3W.exe -l stutter-profile.js -P '{"out":"<prefix>","hitchMs":50}'
 // Output: <out>-seconds.csv (one row per second), <out>-hitches.jsonl (one line per slow iteration, `n` = iteration number)
@@ -22,7 +21,7 @@ const HOOKS = {
   // name: [address, expected first bytes]
   simulate: [0xd81840, '81 ec 88 00 00 00 53 55'],
   scriptTick: [0xd80bc0, '55 8b ec 83 e4 f8 81 ec'],
-  // the other scheduler seams, siblings of scriptTick inside Simulate (docs/04 F17); each runs at most once per iteration
+  // the other scheduler seams, siblings of scriptTick inside Simulate; each runs at most once per iteration
   taskObjects: [0xd7fc60, '55 8b ec 83 e4 f8 83 ec'],
   oneShot: [0xd74800, '83 ec 10 53 55 56 57 8b'],
   threaded: [0xd7f8b0, '55 8b ec 83 e4 f8 81 ec'],
@@ -32,13 +31,13 @@ const HOOKS = {
   gcInvokeFinalizers: [0xe697f0, 'e8 eb 1b fe ff 85 c0 74'],
   routeOuter: [0x82c6e0, '81 ec d8 00 00 00 53 56'], // lock + setup + search + unlock, returns success in AL
   routeSearch: [0x81b2a0, '55 8b ec 83 e4 f0 81 ec'], // the A* search itself
-  // script entry points, from tools/internal-calls-map.ts (the table is {fn, name})
+  // script entry points (the internal calls the scripts reach routing through)
   Route_Plan: [0x765160, '0f 57 c0 8b 0d c4 40 1d'],
   Route_Replan: [0x765490, '8b 0d c4 40 1d 01 83 ec'],
   Route_PlanFromPoint: [0x765240, '55 8b ec 83 e4 f0 0f 57'],
   Route_ReplanFromPosition: [0x765550, '55 8b ec 83 e4 f0 8b 0d'],
   Route_IsPointRoutable: [0x7538c0, '55 8b ec 83 e4 f0 8b 0d'],
-  // the rest of Simulate's untimed share (docs/28 G12): two animation passes (docs/22 §1: call 0xD81A70 -> SACS driver,
+  // the rest of Simulate's untimed share: two animation passes (call 0xD81A70 -> SACS driver,
   // time step, rig pose; call 0xD81C73 -> time step, rig pose 0x940430), locomotion, and the sim-to-render publish
   animSacs: [0x571ad0, '53 56 8b f1 83 4e 28 08'],
   animPose: [0x571b90, '83 ec 08 55 57 8b f9 8b'],
@@ -65,7 +64,7 @@ function blankIter() {
   return { script: 0, gcMark: 0, gcMarks: 0, gcAborted: 0, gcForced: 0, gcForcedMs: 0, fin: 0, finRun: 0,
            steps: 0, route: 0, routeSearch: 0, routes: 0, routeFails: 0, byEntry: {},
            taskObjects: 0, oneShot: 0, threaded: 0, animSacs: 0, animPose: 0, locomotion: 0, publish: 0,
-           // ts3native [HitchAttr] (docs/96 §9): sim waits for the route job, ms by class, count, longest and its key
+           // ts3native [HitchAttr]: sim waits for the route job, ms by class, count, longest and its key
            rtLock: 0, rtOtherLock: 0, rtJob: 0, rtPlanWait: 0, rtWaits: 0, rtMaxMs: 0, rtMaxKey: '' };
 }
 function blankSecond() {
@@ -74,14 +73,14 @@ function blankSecond() {
            routeFails: 0, maxRouteMs: 0, routeOtherThreads: 0,
            taskObjects: 0, oneShot: 0, threaded: 0, maxTaskObjectsMs: 0,
            animSacs: 0, animPose: 0, locomotion: 0, publish: 0,
-           // ts3native [LotStream] (docs/28 §5.5); 0 when the plugin or the section is off
+           // ts3native [LotStream]; 0 when the plugin or the section is off
            lotAdds: 0, lotAddMs: 0, lotAddMaxMs: 0, lotAddObjs: 0, lotRemoves: 0, lotRemoveMs: 0, pumpMaxMs: 0, lotScoreMs: 0,
            lotSetActive: 0,
-           // P-clock (docs/85 §6): 1 when Simulate's paused copy was set at the start of any iteration of this second; the
+           // P-clock: 1 when Simulate's paused copy was set at the start of any iteration of this second; the
            // step accumulator host+0xC14 at the start of the last iteration (left over from the previous one's steps;
-           // -1 = P-clock off or no iteration this second; NaN/Infinity = docs/85 H6)
+           // -1 = P-clock off or no iteration this second; NaN/Infinity = the accumulator held no number)
            simPaused: 0, stepAcc: -1,
-           // ts3native [HitchAttr] (docs/96 §9), ms per second; 0 when the plugin or the section is off
+           // ts3native [HitchAttr], ms per second; 0 when the plugin or the section is off
            rtLock: 0, rtOtherLock: 0, rtJob: 0, rtPlanWait: 0, rtWaits: 0, // new columns go last: readers use the header
            // FrameDb_PublishFrame 0x593600 calls on the sim thread: 0 or 1 per iteration; longest publish gap ending here
            publishes: 0, maxPubGapMs: 0 };
@@ -96,8 +95,8 @@ let iterNo = 0, lastPub = 0, prevPubGap = 0, itersSincePub = 0;
 
 // P-clock: Simulate's step branch reads its paused copy through `mov ecx, edi; call 0x8A6D10` at 0xD81B38
 // (0x8A6D10 = `mov al, [ecx+0x10]; ret`, edi = host+0xA64) after `fstp [esi+0xC14]`. Never hook inside Simulate: it
-// never returns, and a Frida hook there (the 2026-10-17 call-site hook) keeps the script from unloading, so the
-// profiler outlived its -t window in every run (tools/probe/frida-unload-test.py). Instead the existing
+// never returns, and a Frida hook there keeps the script from unloading, so the
+// profiler outlives its -t window. Instead the existing
 // GC_try_to_collect hook reads the same fields once per iteration: Simulate keeps host in esi from 0xD81849 on and calls
 // it directly at 0xD819AA, so at that entry esi = host, paused copy = host+0xA74, accumulator = host+0xC14.
 const CLOCK_CHECKS = [[0xd81849, '8b f1'], [0xd819aa, 'e8 a1 86 0c 00'], [0xd81a46, '8d be 64 0a 00 00'],
@@ -105,7 +104,7 @@ const CLOCK_CHECKS = [[0xd81849, '8b f1'], [0xd819aa, 'e8 a1 86 0c 00'], [0xd81a
 const CLOCK_RET = ptr(0xd819af);
 let clockOn = false;
 
-// ts3native [LotStream] counters, v19 byte offsets (docs/registry.md; the names match tools/probe/agent.js nativeCounters).
+// ts3native [LotStream] counters, counter layout version 19 byte offsets.
 // Totals become per-second deltas; the *MaxUs fields hold the max since the last reset, so they are read and zeroed here.
 const LS_OFF = { lotAdds: 0x2cc, lotAddUs: 0x2d0, lotAddMaxUs: 0x2d4, lotAddObjs: 0x2d8, lotRemoves: 0x2e0, lotRemoveUs: 0x2e4,
                  pumpMaxUs: 0x2f4, lotScoreUs: 0x304, lotSetOn: 0x310, lotSetOff: 0x314 };

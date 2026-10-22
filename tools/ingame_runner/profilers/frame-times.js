@@ -1,7 +1,7 @@
 // Copied from sims3-modernization (MIT, see ../LICENSE-sims3-modernization; https://github.com/rodneypantonial/sims3-modernization).
-// The docs/ references below point to that repository. Run through attach.py by run.ps1 -Profiler; read-only hooks.
+// Run through attach.py by run.ps1 -Profiler; read-only hooks.
 // Frame-time recorder for TS3W.exe (Steam build, SHA-256 10b2423e...0609).
-// Hooks FUN_00ec9f00(bool present) (0xEC9F00-0xEC9FDE, __thiscall, RET 4), verified in Ghidra 2026-10-13 (docs/04 F19):
+// Hooks FUN_00ec9f00(bool present) (0xEC9F00-0xEC9FDE, __thiscall, RET 4), verified in the disassembly:
 //   - BeginScene (0x611620, device vtable +0xA4), scene render, StreamHost flush, then with present != 0 EndScene + Present
 //     (0x611760 -> 0x611680, vtable +0xA8 / +0x44), then the inactive-window ~30 FPS sleep at 0xEC9FBA (S3SS Smooth Patch
 //     anchor: S3SS jumps out there and back; the prologue stays intact). No tail calls, no other exits.
@@ -9,11 +9,11 @@
 //     thread, not the sim thread) calls it with present = 1 once per loop iteration at 0xECAAFC; the window-message path
 //     0xECA2A0 also with 1; the callback 0xECA030 (run by 0x9DE140 earlier in the same iteration) with present = 0, which
 //     renders without presenting. Only present = 1 calls are frames; present = 0 calls are counted, not recorded.
-// Stage timers (docs/167): entry hooks on the MainLoop callees of docs/41 §3, each accepted only from its MainLoop call site
+// Stage timers: entry hooks on the MainLoop callees, each accepted only from its MainLoop call site
 // (return address, so the same function called from elsewhere is not counted) or, for the nested ones, only on the main
 // thread. Every prologue is checked byte for byte; a mismatch (detoured by another plugin or another session) leaves
-// that stage unhooked, logged, and its column `na`. Byte and call-site addresses verified in the Steam 1.67 disassembly
-// 2026-10-22 (docs/167 §2). Stage times are summed per frame interval [previous presented frame's start, this one's start],
+// that stage unhooked, logged, and its column `na`. Byte and call-site addresses verified in the Steam 1.67 disassembly.
+// Stage times are summed per frame interval [previous presented frame's start, this one's start],
 // so they explain frameMs; a stage call that straddles a frame start (a nested present from the window path) is clipped.
 // The hook is a CModule: the main thread never takes Frida's JS lock, so a sampler that suspends the sim thread (possibly
 // while it holds that lock in stutter-profile.js) cannot stall a frame or deadlock with it. No thread is suspended.
@@ -27,7 +27,7 @@
 // stages (clock tick, mode apply, loading-cap spin, 0xC0FD60 and every unhooked stage). consumes / tryFail / notReady =
 // FrameDb_ConsumeAndInterpolate calls, of them skipped before reading a pair (TryEnterCriticalSection(+0x48) failed or
 // +0xF8 set) and skipped with no ready frame (sim late); drains / msgs = FrameDb_DrainEvents calls and render messages run.
-// Per-service split of svcMs (docs/167 §7): two probes inside ServiceList_Update 0x59ED20 (the whole function's bytes are
+// Per-service split of svcMs: two probes inside ServiceList_Update 0x59ED20 (the whole function's bytes are
 // checked first): 0x59ED3D (esi = list node about to be called through vtable +0x1C) starts a timer, 0x59ED59 (the return
 // of `call eax`, also the jump target of a skipped node: told apart by esi) stops it. Only the outermost list walk inside the
 // svc stage on the main thread counts (a nested walk is inside its outer service). Per frame the three services with the most
@@ -56,12 +56,12 @@ const STAGES = [
   ['drain', 0x5937b0, '51 53 55 8b 2d 2c 51 f9', 0],              // FrameDb_DrainEvents, returns the message count (eax at 0x5938FA)
 ];
 const NS = 11; // timed stages (0..10); 11, 12 only count
-// ServiceList_Update 0x59ED20 (docs/36 §2.3; list object [0x11CE3F4], node +8 service, +0x14 flags bit 0, +0x1A enabled):
-// all 68 bytes checked, then probes at the call setup and at the call's return (docs/167 §7)
+// ServiceList_Update 0x59ED20 (list object [0x11CE3F4], node +8 service, +0x14 flags bit 0, +0x1A enabled):
+// all 68 bytes checked, then probes at the call setup and at the call's return
 const SVC_WALK = { list: 0x11ce3f4, check: [[0x59ed20, '57 8b f9 8b 47 0c 85 c0 74 36 56 8b 37 3b f7 74 2e 80 7e 1a 00 74 22 f6 46 14 01 74 1c 8b 4e 08 ' +
   'd9 44 24 10 8b 11 8b 42 1c 83 ec 08 d9 5c 24 04 d9 44 24 14 d9 1c 24 ff d0 8b 36 3b f7 75 d2 5e 5f c2 08 00']], start: 0x59ed3d, end: 0x59ed59 };
 // main-slot services (vtable +0x1C not the stub 0x861C50), Steam 1.67 [verified vtables and slots; names from the heap/config
-// strings at the creator, inferred]: vtable -> name (update functions in docs/167 §7)
+// strings at the creator, inferred]: vtable -> name
 const SERVICES = {
   0xfcbccc: 'MessageServer', 0xfcbd34: 'Canvas', 0xfd9690: 'Input', 0xfd9810: 'JobManager', 0xfe514c: 'CAS/SimService',
   0xfe6b08: 'CAS/TextureCompositor', 0xfe6f08: 'NPMessageServer', 0xff0070: 'AnimatedTextureManager', 0xff7d84: 'RenderSystem',
@@ -106,7 +106,7 @@ typedef struct {
   guint32 snap[NS], snap_msgs, snap_cnt;
   guint32 rp, dr, cons_rp, cons_dr;
   gint64 frame_t, pres_in, pres_out;
-  /* services (docs/167 §7): in_svc = inside the svc stage; walk stack (node, vtable, start) for nested list walks */
+  /* services: in_svc = inside the svc stage; walk stack (node, vtable, start) for nested list walks */
   guint32 in_svc, sdepth, nsv, pad2;
   guint32 snode[4], svt[4];
   gint64 sstart[4];
@@ -114,7 +114,7 @@ typedef struct {
   guint32 top_vt[3], top_t[3];
 } G;
 extern int __attribute__((stdcall)) QueryPerformanceCounter (gint64 * t);
-/* in JS-allocated memory: CModule's own data is not writable on Windows (dummy run, 2026-10-13) */
+/* in JS-allocated memory: CModule's own data is not writable on Windows */
 extern volatile G g;
 extern Rec recs[N];
 
