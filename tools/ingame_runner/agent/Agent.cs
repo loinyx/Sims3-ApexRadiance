@@ -32,7 +32,7 @@ namespace ApexTestAgent
     public class Instantiator
     {
         [Tunable] protected static bool kInstantiator = false;
-        public const string Version = "1.0.1";
+        public const string Version = "1.1.0";
         public static string StartError; // why the commands did not register, reported by game_state and the marker
 
         static Instantiator()
@@ -222,10 +222,11 @@ namespace ApexTestAgent
         public bool Bool(string key, bool dflt) { return Has(key) ? Convert.ToString(mValues[key], CultureInfo.InvariantCulture).ToLowerInvariant() == "true" : dflt; }
     }
 
-    public static class Handlers
+    public static partial class Handlers
     {
         public static void Register()
         {
+            RegisterRepros(); // Repros.cs
             Dispatcher.Register("game_state", GameState);
             Dispatcher.Register("load_save", LoadSave);
             Dispatcher.Register("set_speed", SetSpeed);

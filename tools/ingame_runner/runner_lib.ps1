@@ -12,6 +12,18 @@ $script:DefaultFailPatterns = @(
     'Safety check failed'
 )
 
+# The mode step's targets and the in-world sub state each one waits for (agent set_mode).
+$script:ModeStates = [ordered]@{ build = 'BuildModeState'; buy = 'BuyModeState'; cas = 'CASFullModeState'; edittown = 'EditTownState'; live = 'LiveModeState' }
+# A wait's `until` field: the repro command whose status holds the count.
+$script:UntilFields = @{ jumps = 'camera_jumps'; loops = 'camera_jumps'; outfitChanges = 'camera_jumps'; spawned = 'camera_jumps'; rounds = 'vfx_burst'; started = 'vfx_burst' }
+function Get-UntilCommand([string]$Field) {
+    if (-not $script:UntilFields.ContainsKey($Field)) { throw "until: '$Field' is not one of $($script:UntilFields.Keys -join ', ')" }
+    return $script:UntilFields[$Field]
+}
+function Format-Until($Until) { $p = @($Until.PSObject.Properties)[0]; return "$($p.Value) $($p.Name)" }
+# Every step run.ps1 knows.
+$script:KnownSteps = @('speed', 'wait', 'profile', 'camera', 'camera_pan', 'save', 'reload', 'camera_jumps', 'vfx_burst', 'mode', 'stop_repros')
+
 function ConvertTo-TomlLiteral($Value) {
     if ($Value -is [bool]) { if ($Value) { return 'true' } else { return 'false' } }
     if ($Value -is [int] -or $Value -is [long]) { return [string]$Value }
@@ -521,6 +533,7 @@ function Format-Results($Results, [string]$Title) {
     foreach ($r in $Results) {
         $f = $r.Frames; $s = $r.Sim; $m = $r.M
         $notes = @($r.Notes | ForEach-Object { $_ -replace '\|', '/' })
+        if ($r.PSObject.Properties['Events'] -and $r.Events) { $notes = @("repro events: $($r.Events)") + $notes }
         if ($m -and $m.Invalid) { $notes = @("INVALID: $($m.Invalid)") + $notes }
         $cells = @($r.Name, $(if ($r.Ok) { 'pass' } else { 'FAIL' }), $r.Closed, $(if ($m) { $m.RealMin } else { '' }))
         if ($f -and $f.Frames -gt 0) { $cells += @($f.Fps, $f.P50, $f.P95, $f.P99, $f.Max, $f.Over50PerMin) } else { $cells += @('', '', '', '', '', '') }

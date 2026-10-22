@@ -1,0 +1,47 @@
+{
+  "id": "repro-room-lights",
+  "description": "Faster Room Lighting at night: the camera jumps across 10 far lit lots, 6 s at each (about 100 lots entered in 10 minutes), so the rooms of every lot light up anew. Needs the night save. A/B metric: frames over 50 ms per minute, slow frames by stage.",
+  "save": "ApexTest-Night",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.RoomLightQueue": {
+          "enabled": false
+        }
+      }
+    },
+    "on": {
+      "toml": {
+        "patches.RoomLightQueue": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[RoomLightQueue\\] Started:"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_jumps",
+      "order": "far",
+      "lots": 10,
+      "dwellS": 6
+    },
+    {
+      "do": "wait",
+      "minutes": 15,
+      "measure": true,
+      "until": {
+        "jumps": 100
+      }
+    },
+    {
+      "do": "stop_repros"
+    }
+  ]
+}

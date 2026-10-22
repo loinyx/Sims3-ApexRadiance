@@ -167,11 +167,24 @@ try {
 } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 
 # Every shipped job: valid JSON, an id equal to its file name, a save, known steps, patterns that compile
-$known = 'speed', 'wait', 'camera', 'camera_pan', 'save', 'reload'
 foreach ($file in Get-ChildItem (Join-Path $PSScriptRoot 'jobs') -Filter *.json) {
     $j = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json
     Check ($j.id -eq $file.BaseName -and $j.save -and @(Get-JobLoads $j -AB).Count -ge 1) "$($file.Name): id, save, variants"
-    Check (@(Get-JobSteps $j | Where-Object { $known -notcontains $_.do }).Count -eq 0) "$($file.Name): steps"
+    $steps = @(Get-JobSteps $j)
+    Check (@($steps | Where-Object { $script:KnownSteps -notcontains $_.do }).Count -eq 0) "$($file.Name): steps"
+    Check (@($steps | Where-Object { $_.do -eq 'mode' -and -not $script:ModeStates.Contains([string]$_.mode) }).Count -eq 0) "$($file.Name): mode targets"
+    # a job that starts a repro measures while it runs and stops it afterwards (event counts, spawned Sims removed)
+    $does = @($steps | ForEach-Object { if ($_.do -eq 'wait' -and $_.measure) { 'measure' } else { $_.do } })
+    $iRepro = [array]::IndexOf($does, @($does | Where-Object { $_ -in 'camera_jumps', 'vfx_burst' } | Select-Object -First 1)[0])
+    if ($iRepro -ge 0) {
+        $iStop = [array]::IndexOf($does, 'stop_repros'); $iMeasure = [array]::IndexOf($does, 'measure'); $iProfile = [array]::IndexOf($does, 'profile')
+        Check ($iStop -gt $iRepro -and (($iMeasure -gt $iRepro -and $iStop -gt $iMeasure) -or ($iProfile -ge 0 -and $iProfile -lt $iStop))) "$($file.Name): repro measured, then stop_repros"
+    }
+    Check (@($does | Where-Object { $_ -eq 'profile' }).Count -le 1) "$($file.Name): at most one profile step"
+    foreach ($u in @($steps | Where-Object { $_.until })) {
+        $ok = $true; try { $null = Get-UntilCommand @($u.until.PSObject.Properties)[0].Name } catch { $ok = $false }
+        Check ($ok -and $u.measure -and @($u.until.PSObject.Properties).Count -eq 1 -and [double]@($u.until.PSObject.Properties)[0].Value -ge 1) "$($file.Name): until is one repro count on a measured wait"
+    }
     $patterns = @($j.expect) + @($j.fail) + @($j.variants.PSObject.Properties | ForEach-Object { @($_.Value.expect) + @($_.Value.fail) }) | Where-Object { $_ }
     foreach ($p in $patterns) { $ok = $true; try { [regex]::new($p) | Out-Null } catch { $ok = $false }; Check $ok "$($file.Name): pattern $p" }
 }
