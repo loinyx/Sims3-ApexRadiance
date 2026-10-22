@@ -1,0 +1,57 @@
+{
+  "id": "repro-scene-nodes",
+  "description": "Spread New Objects Over Frames: the camera jumps between the 6 most populated lots, 6 s at each, 6 new Sims per jump, with 24 effects (fire, spells, lightning, sparkles; visual only) re-created around the camera target every 4 s. A/B metric: frames over 50 ms per minute, slow frames by stage.",
+  "save": "ApexTest-Town",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.SceneNodeBudget": {
+          "enabled": false
+        }
+      }
+    },
+    "on": {
+      "toml": {
+        "patches.SceneNodeBudget": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[SceneBudget\\] On:"
+      ]
+    }
+  },
+  "fail": [
+    "\\[SceneBudget\\] Node .* (destroyed|added to a scene) while still queued"
+  ],
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_jumps",
+      "order": "populated",
+      "lots": 6,
+      "dwellS": 6,
+      "spawn": 6
+    },
+    {
+      "do": "vfx_burst",
+      "count": 24,
+      "restartS": 4,
+      "seconds": 960
+    },
+    {
+      "do": "wait",
+      "minutes": 15,
+      "measure": true,
+      "until": {
+        "jumps": 100
+      }
+    },
+    {
+      "do": "stop_repros"
+    }
+  ]
+}

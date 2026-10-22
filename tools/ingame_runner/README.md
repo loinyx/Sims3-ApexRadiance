@@ -225,19 +225,81 @@ A job is a JSON file in `jobs/`, its `id` equal to the file name:
 | Step | Arguments | Does |
 |---|---|---|
 | `speed` | `speed`: `pause`, `normal`, `fast`, `ultra` | Sets the game speed; a wait sets it again when a dialog paused the game |
-| `wait` | `minutes`, `measure` | Lets the game run; answers dialogs every 30 s. `measure` records frame times with `-Profiler` (the first measured wait counts) |
+| `wait` | `minutes`, `measure`, `until` | Lets the game run; answers dialogs every 30 s. `measure` records frame times with `-Profiler` (the first measured wait counts). `until` (`{ "jumps": 75 }`; also `loops`, `outfitChanges`, `spawned` of `camera_jumps`, `rounds`, `started` of `vfx_burst`) ends a measured wait once the running repro reaches that count, checked every 30 s; `minutes` is then the cap |
 | `camera` | `pos`, `target` (`{x, y, z}`) | Places the game camera |
 | `camera_pan` | `lots` (8), `height` (25 m), `seconds` (40), `dwellS` (0), `passes` (4) | Pans the camera over the densest neighbourhood's lots, there and back, in the background; follow it with a `wait` |
 | `save` | | Saves as a new `ApexRunner-<load>-<n>` save and waits until it is written. The runner deletes these saves after the load unless `-KeepSaves` |
 | `reload` | `save` (`last` or a save name) | Loads a save from inside the world and waits for live mode |
+| `profile` | `minutes` | Starts the measured window in the background and goes on with the next steps (a scenario job); the load waits for the window's end after the last step. One per load |
+| `camera_jumps` | `order` (`far` or `populated`), `lots` (10), `dwellS` (8), `height` (25 m), `loops` (1000), `outfits` (0), `spawn` (0, at most 10) | Repro, in the background: see [Feature repros](#feature-repros) |
+| `vfx_burst` | `count` (16, at most 64), `radius` (8 m), `restartS` (4), `seconds` (600), `names` | Repro, in the background: see [Feature repros](#feature-repros) |
+| `mode` | `mode` (`build`, `buy`, `cas`, `edittown`, `live`), `seconds` (0) | Switches the world mode and waits for it, then stays `seconds` |
+| `stop_repros` | | Stops `camera_jumps` and `vfx_burst`, removes the spawned Sims and records the event counts in `results.md` |
 
 For a new feature: copy the closest job, set the `[patches.<Name>]` table (the feature's settings table names it),
 put the feature's start line in the `on` variant's `expect` (most features log `[<Tag>] On: ...` when they install)
 and its own refusal or mismatch lines in `fail`, and pick steps that exercise it. Then `./tools/ingame_runner/run.ps1
 ... -DryRun` and `./tools/ingame_runner/selftest.ps1`.
 
-A step the agent does not have yet goes into `agent/Agent.cs` (a `Dispatcher.Register` command; the game's own script
-API, C# 5) and `run.ps1` (the step's `switch` branch). Rebuild with `build_agent.mjs`.
+A step the agent does not have yet goes into `agent/Agent.cs` or `agent/Repros.cs` (a `Dispatcher.Register` command;
+the game's own script API, C# 5) and `run.ps1` (the step's `switch` branch). Rebuild with `build_agent.mjs`.
+
+## Feature repros
+
+The `repro-*` jobs set the state that makes one feature's code path run and repeat it for the whole measured window,
+so a load fires that path many times instead of waiting for play to cause it. Each compares the feature's switch off
+and on (`-AB`: off, on, on, off). The repro commands live in `agent/Repros.cs`:
+
+| Command | What it triggers |
+|---|---|
+| `camera_jumps` `order: far` | The camera jumps (no pan) across the town to the lot farthest from the last one and holds still `dwellS` seconds at street height, so the game streams that lot in: lot, object and texture loads, and at night the lot's lights. `lots` lots per loop, the path recomputed every loop |
+| `camera_jumps` `order: populated` | The same over the `lots` lots with the most Sims on them, re-ranked every loop |
+| `outfits: n` | Per jump, up to n Sims on the lot switch outfit (athletic and everyday in turn): one Sim build each, with its outfit files, see-through layer sort and textures |
+| `spawn: n` | Per jump, n new adult Sims stand around the lot centre in view; the previous loop's Sims are removed first, so every loop builds new ones |
+| `vfx_burst` | A ring of `count` effects (the game's own fire, ice spell, fairy, lightning and sparkle effects) around the camera target, disposed and re-created every `restartS` seconds: effect and scene-node churn. An effect from a pack that is not installed counts as missing |
+| `mode` | The game's own Build, Buy, Create a Sim (the selected Sim, left without saving) and Edit Town transitions and back to live mode |
+
+Run one with frame times and visible freezes, four game starts of about 15 minutes each:
+
+```powershell
+./tools/ingame_runner/run.ps1 -GameBin '...\Game\Bin' -Job tools/ingame_runner/jobs/repro-file-lookups.json -AB -Profiler Both
+./tools/ingame_runner/run.ps1 -GameBin '...\Game\Bin' -Queue tools/ingame_runner/queues/repros.json -Profiler Both
+```
+
+| Feature (`[patches.<Name>]`) | Job | Events per window (about 10 minutes) | Read in `results.md` |
+|---|---|---|---|
+| Faster Game File Lookups (`ResourceLookupCache`) | `repro-file-lookups` | about 75 far jumps, 2 outfit changes each | frames over 50 ms per minute; slow frames led by services, with ResourceSystem and World in the service table |
+| Faster File Lists (`FileListCache`) | `repro-file-lists` | about 100 jumps, 4 outfit changes and 3 new Sims each | as above, CAS/SimService in the service table |
+| Faster Sim Building (`FastCasSort`) | `repro-sim-building` | about 120 jumps, 6 outfit changes and 4 new Sims each | as above, CAS/SimService and CAS/TextureCompositor |
+| Faster Object Lookups (`ObjectLookupIndex`) | `repro-object-lookups` (night save) | about 100 far jumps, 2 new Sims each | simulation hitches and visible freezes per 10 minutes and their pair rows; frames over 50 ms |
+| Faster Memory Handling (`FastMemory`) | `repro-fast-memory` | about 100 far jumps, 2 outfit changes and 4 new Sims each | frame time p99, visible freezes, pair rows |
+| Faster Memory Handling (`FastMemory`) | `repro-mode-switches` | 3 rounds of Build, Buy, Create a Sim and Edit Town, each entered and left | the `mode ...` rows of the harness table (the switches' own cost); the rest of the window is play |
+| Faster Cache Compression (`FastCacheCompression`) | `repro-cache-compression` | about 100 jumps with Sim builds, then 2 saves | frames over 50 ms in the window; both saves complete |
+| Spread New Objects Over Frames (`SceneNodeBudget`) | `repro-scene-nodes` | about 100 jumps with 6 new Sims each, 24 effects re-created about 150 times | frames over 50 ms per minute, slow frames by stage, no node warning in the log |
+| Faster Room Lighting (`RoomLightQueue`) | `repro-room-lights` (night save) | about 100 lit lots entered | frames over 50 ms per minute, slow frames by stage |
+| Room to Save (`MemoryGuard`) | `repro-room-to-save` | 10 minutes of jumps with Sim builds, then save, save, reload, save | every save completes without Error 12; the save and reload steps in the harness table |
+| Lot Lighting While Moving (`LotLightingMotion`) | `lot-lighting-motion` (night save, camera pan) | a continuous pan: the feature works while the camera moves, which jumps do not do | frame time p99 and frames over 50 ms per minute |
+
+The night jobs use the `ApexTest-Night` save: the agent has no command to set the clock. Faster Texture Compression,
+Wall Shading While Moving and Lot Streaming have no repro of their own yet; the far camera jumps load terrain and lot
+textures and the pan job moves the camera, so `repro-file-lookups` and `lot-lighting-motion` exercise them as a side
+effect. Travel to another world is not a repro step: a `reload` covers loading a world.
+
+Each repro job stops its measured window at a fixed jump count set in the job (`until`, counted from the repro's
+start), with 15 minutes as the cap: the count is decided before the run and never depends on the on/off difference. The event counts above follow from the
+jump and effect timing (one jump per `dwellS` seconds plus the build time); the exact counts of each load are in its
+row of `results.md` (`repro events: stopped at jumps 75 of 75 after 10.4 min; jumps ..., outfit changes ..., Sims
+spawned ..., effect rounds ...`), or "cap ... reached" when the count was not met. The measured window starts after the
+repro does; its first minute and the 10 seconds after the repro command are left out as usual, so the counted part is
+steady repro load. A repro step's
+own call is a harness step; the work it then causes in the background is what the window measures.
+
+How to read a pair: the per-load section lists frames of 100 ms or more by leading main-loop stage and the services
+inside them (for example `services` leading, with World/Service or CAS/SimService on top); the A/B section gives the
+pair rows for slow iterations and visible freezes. A feature that removes main-thread work shows fewer slow frames
+led by its stage or service and a lower frames-over-50-ms rate with `on`; one that removes simulation work shows in
+the iteration and freeze rows. Below 10 events in both variants together the pair reads "not enough events": run more
+loads (the last column says how many) rather than reading the means.
 
 ## Safety
 
@@ -245,8 +307,11 @@ API, C# 5) and `run.ps1` (the step's `switch` branch). Rebuild with `build_agent
   and stops the run when a game is still running after a load.
 - **Everything is put back.** Before installing, it copies `Bin\ApexRadiance.asi`, `ApexRadiance.toml`,
   `scriptCache.package` and, with `-AsiLoader`, `Bin\wininet.dll` into `<run>\backup` with a manifest, and restores
-  them (or removes what did not exist) when the run ends, fails or is stopped with Ctrl+C. After a power loss:
-  `run.ps1 -Restore outputs/ingame/<run>`.
+  them (or removes what did not exist) when the run ends, fails or is stopped with Ctrl+C. After a power loss: `run.ps1 -Restore outputs/ingame/<run>`.
+- **Repros change nothing that lasts.** Effects are visual only (no fire object, nothing burns or spreads), Sims spawned
+  by `camera_jumps` are removed every loop and at `stop_repros`, outfit changes and mode switches leave nothing behind,
+  Create a Sim is left without saving, and a repro load is never saved unless the job has a `save` step (a new
+  `ApexRunner-*` file, deleted after the load).
 - **Saves:** jobs only load the tester's saves; `save` steps write new `ApexRunner-*` saves, never over the loaded one,
   and the runner deletes them after the load.
 - **The game window** is never moved or focused by the runner. Do not use the computer during measured runs: other work

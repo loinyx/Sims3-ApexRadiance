@@ -151,6 +151,7 @@ function Wait-Game([string]$What, [double]$Minutes, [scriptblock]$Done, [scriptb
             if ($progress) { $misses = 0 } else { $misses++ }
             Say ("  {0}: {1:N1} min left, cpu {2:N0} s, ticks {3}" -f $What, ($end - (Get-Date)).TotalMinutes, $nowCpu, $nowBeat)
             if ($misses -ge 2) { throw "no progress for 60 s while waiting for $What" }
+            if ($script:window -and (Get-Date) -lt $script:window.End) { Add-MachineSample $script:window.Machine }
             if ($Each) { & $Each }
         }
         Start-Sleep -Milliseconds 1000
@@ -224,13 +225,50 @@ function Start-Profilers([string]$Base, [double]$Seconds) {
     if ($Profiler -in 'Sim', 'Both') {
         $opts = @{ out = ($Base -replace '\\', '/'); hitchMs = 50 }
         if ($Lean) { $opts.stages = $false }
-        $started.Sim = & $launch 'profiler' @($attach, $script:proc.Id, $Seconds, (Join-Path $PSScriptRoot 'profilers/stutter-profile.js'), ($opts | ConvertTo-Json -Compress))
+        $started.Sim = & $launch 'profiler' @($attach, '--stop', "$Base.stop", $script:proc.Id, $Seconds, (Join-Path $PSScriptRoot 'profilers/stutter-profile.js'), ($opts | ConvertTo-Json -Compress))
     }
     if ($Profiler -in 'Frames', 'Both') {
-        $started.Frames = & $launch 'frames' @($attach, '--keep', $script:proc.Id, $Seconds, (Join-Path $PSScriptRoot 'profilers/frame-times.js'),
+        $started.Frames = & $launch 'frames' @($attach, '--keep', '--stop', "$Base.stop", $script:proc.Id, $Seconds, (Join-Path $PSScriptRoot 'profilers/frame-times.js'),
             (@{ out = ("$Base-frames.csv" -replace '\\', '/') } | ConvertTo-Json -Compress))
     }
     return $started
+}
+
+# The measured window: profilers for $Seconds and a machine sample every 30 s (Wait-Game) while it lasts.
+$script:window = $null
+function Start-Measured([string]$Base, [double]$Seconds, $Machine) {
+    $script:cpuPrev = $null
+    Remove-Item -LiteralPath "$Base.stop" -ErrorAction SilentlyContinue
+    $m = @{ Base = $Base; Seconds = $Seconds; Start = (Get-Date); End = (Get-Date).AddSeconds($Seconds); Machine = $Machine; Done = $false }
+    $m.Prof = Start-Profilers $Base $Seconds
+    Add-MachineSample $Machine
+    $script:window = $m
+    return $m
+}
+
+# until: { "<field>": N } of camera_jumps (jumps, loops, outfitChanges, spawned) or vfx_burst (rounds, started), read from
+# the repro's status. Decided before the run and independent of the on/off difference, so stopping there biases nothing.
+function Get-UntilCount($Until) {
+    $p = @($Until.PSObject.Properties)[0]
+    $cmd = Get-UntilCommand $p.Name
+    $s = Call-Agent $cmd @{ status = $true } 5000
+    $have = [double]$s.($p.Name)
+    [pscustomobject]@{ Reached = ($have -ge [double]$p.Value); Text = "$($p.Name) $have of $($p.Value)" }
+}
+
+# Waits for the window's end (the game keeps running at its speed), then for the simulation profiler to unload.
+function Complete-Measured($M, $Machine, $Notes) {
+    if ($M.Done) { return }
+    if ((Get-Date) -lt $M.End) {
+        Say "  measured window: $([math]::Ceiling(($M.End - (Get-Date)).TotalSeconds)) s left"
+        Wait-Game 'the end of the measured window' (($M.End - (Get-Date)).TotalMinutes + 2) { (Get-Date) -ge $M.End } { Keep-Speed }
+    }
+    Add-MachineSample $Machine
+    $script:window = $null; $M.Done = $true
+    if ($M.Prof.Sim) {
+        if (-not $M.Prof.Sim.WaitForExit(90000)) { $M.Prof.Sim.Kill(); $Notes.Add('profiler did not stop in time and was ended') }
+        elseif ($M.Prof.Sim.ExitCode -ne 0) { $Notes.Add("profiler exit $($M.Prof.Sim.ExitCode), see $(Split-Path $M.Base -Leaf)-profiler.err.log") }
+    }
 }
 
 # ------------------------------------------------------------------ one load
@@ -240,10 +278,11 @@ function Invoke-Load($Load, [string]$BaseToml) {
     $dir = Join-Path $OutDir $Load.Name
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
     $notes = New-Object System.Collections.Generic.List[string]
-    $result = [pscustomobject]@{ Name = $Load.Name; JobId = $jobDef.id; Variant = $Load.Variant; Ok = $false; Closed = ''; Frames = $null; Sim = $null; M = $null; Notes = $notes; Saves = @() }
+    $result = [pscustomobject]@{ Name = $Load.Name; JobId = $jobDef.id; Variant = $Load.Variant; Ok = $false; Closed = ''; Frames = $null; Sim = $null; M = $null; Events = $null; Notes = $notes; Saves = @() }
     $script:commands = New-Object System.Collections.Generic.List[object]
     $machine = New-Object System.Collections.Generic.List[object]
-    $measured = $null # the first measured wait: profile base, seconds, profiler processes
+    $measured = $null # the measured window (a profile step or the first measured wait): base, seconds, profilers
+    $script:window = $null
 
     $toml = Set-TomlOverrides (Set-TomlOverrides $BaseToml $jobDef.toml) $v.toml
     New-Item -ItemType Directory -Path $apexDir -Force | Out-Null
@@ -282,22 +321,31 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     $pan = Call-Agent 'camera_pan' $a
                     Say "  camera pan over $($pan.lots) lots, $($pan.passes) passes of $([math]::Round($pan.passMs / 1000)) s"
                 }
+                'profile' { # starts the measured window and goes on with the next steps; the load waits for its end after the last step
+                    if ($measured) { throw 'profile: a load has one measured window' }
+                    $measured = Start-Measured (Join-Path $dir "measure$n") ([double]$step.minutes * 60) $machine
+                    Say "  step ${n}: profiling $($step.minutes) min in the background"
+                }
                 'wait' {
                     $seconds = [double]$step.minutes * 60
-                    $prof = $null
                     $first = $step.measure -and -not $measured # shortcut: only the first measured wait counts; sum several when a job needs it
-                    if ($first) {
-                        $measured = @{ Base = (Join-Path $dir "measure$n"); Seconds = $seconds }
-                        $prof = Start-Profilers $measured.Base $seconds; $measured.Prof = $prof
-                        Add-MachineSample $machine
-                    }
-                    Say "  step ${n}: wait $($step.minutes) min$(if ($first) { ' (measured)' })"
+                    if ($first) { $measured = Start-Measured (Join-Path $dir "measure$n") $seconds $machine }
+                    Say "  step ${n}: wait $($step.minutes) min$(if ($first) { ' (measured)' })$(if ($step.until) { ', or until ' + (Format-Until $step.until) })"
                     $until = (Get-Date).AddSeconds($seconds)
-                    Wait-Game "step $n (wait)" ([double]$step.minutes + 2) { (Get-Date) -ge $until } { Keep-Speed; if ($first) { Add-MachineSample $machine } }
-                    if ($first) { Add-MachineSample $machine }
-                    if ($prof -and $prof.Sim) {
-                        if (-not $prof.Sim.WaitForExit(90000)) { $prof.Sim.Kill(); $notes.Add('profiler did not stop in time and was ended') }
-                        elseif ($prof.Sim.ExitCode -ne 0) { $notes.Add("profiler exit $($prof.Sim.ExitCode), see measure$n-profiler.err.log") }
+                    $poll = if ($step.until -and $first) { { # every 30 s: the repro's own count against the count set in the job
+                        $c = Get-UntilCount $step.until
+                        if ($c.Reached -and -not $script:stopAt) {
+                            $script:stopAt = Get-Date; Set-Content -LiteralPath "$($measured.Base).stop" -Value $c.Text
+                            $result.Events = "stopped at $($c.Text) after $([math]::Round(($script:stopAt - $measured.Start).TotalMinutes, 1)) min"
+                            Say "  $($result.Events)"
+                        }
+                    } } else { $null }
+                    $script:stopAt = $null
+                    Wait-Game "step $n (wait)" ([double]$step.minutes + 2) { (Get-Date) -ge $until -or $script:stopAt } { Keep-Speed; if ($poll) { & $poll } }
+                    if ($first) {
+                        if ($script:stopAt) { $measured.Seconds = ($script:stopAt - $measured.Start).TotalSeconds; $measured.End = $script:stopAt }
+                        elseif ($step.until) { $result.Events = "cap of $($step.minutes) min reached before $(Format-Until $step.until)" }
+                        Complete-Measured $measured $machine $notes
                     }
                 }
                 'save' {
@@ -310,6 +358,28 @@ function Invoke-Load($Load, [string]$BaseToml) {
                         try { $s = Call-Agent 'game_state' $null 5000; return (-not $s.save_in_progress -and (Test-Path -LiteralPath (Join-Path $savesDir "$lastSave.sims3"))) } catch { return $false }
                     }
                 }
+                { $_ -in 'camera_jumps', 'vfx_burst' } {
+                    $a = @{}; foreach ($p in $step.PSObject.Properties) { if ($p.Name -ne 'do') { $a[$p.Name] = $p.Value } }
+                    $rep = Call-Agent $step.do $a
+                    Say "  step ${n}: $($step.do) $(if ($rep.path) { 'over ' + @($rep.path).Count + ' lots' } else { "$($rep.count) effects" }) in the background"
+                }
+                'mode' {
+                    $want = $script:ModeStates[[string]$step.mode]
+                    if (-not $want) { throw "mode: '$($step.mode)' is not one of $($script:ModeStates.Keys -join ', ')" }
+                    Call-Agent 'set_mode' @{ mode = $step.mode } | Out-Null
+                    Say "  step ${n}: mode $($step.mode)"
+                    Wait-Game "mode $($step.mode)" $LoadTimeoutMin {
+                        try { $s = Call-Agent 'game_state' $null 5000; return ($s.sub_state -eq $want -and -not $s.modal) } catch { return $false }
+                    } { Clear-Dialog }
+                    if ($step.seconds) { Start-Sleep -Seconds ([double]$step.seconds) } # time in the mode before the next step
+                }
+                'stop_repros' {
+                    $j = Call-Agent 'camera_jumps' @{ stop = $true }; $v = Call-Agent 'vfx_burst' @{ stop = $true }
+                    $counts = 'jumps {0}, loops {1}, outfit changes {2}, Sims spawned {3} (removed {4}), effect rounds {5}, effects {6}, missing {7}' -f
+                        $j.jumps, $j.loops, $j.outfitChanges, $j.spawned, $j.removed, $v.rounds, $v.started, $v.missing
+                    $result.Events = (@($result.Events, $counts) | Where-Object { $_ }) -join '; '
+                    Say "  step ${n}: repros stopped: $($result.Events)"
+                }
                 'reload' {
                     $file = if ($step.save -and $step.save -ne 'last') { "$($step.save).sims3" } elseif ($lastSave) { "$lastSave.sims3" } else { throw 'reload: no save made yet' }
                     Say "  step ${n}: reloading $file"
@@ -319,8 +389,12 @@ function Invoke-Load($Load, [string]$BaseToml) {
                 }
                 default { throw "unknown step '$($step.do)'" }
             }
-            if ($step.do -ne 'wait') { $script:commands.Add([pscustomobject]@{ label = $step.do; kind = 'step'; t0 = $stepT0; t1 = (Get-QpcMs) }) }
+            if ($step.do -notin 'wait', 'profile') {
+                $label = if ($step.do -eq 'mode') { "mode $($step.mode)" } else { $step.do }
+                $script:commands.Add([pscustomobject]@{ label = $label; kind = 'step'; t0 = $stepT0; t1 = (Get-QpcMs) })
+            }
         }
+        if ($measured) { Complete-Measured $measured $machine $notes } # a profile step's window may outlast the steps
         Say "$($Load.Name): closing the game"
         try { Call-Agent 'quit_game' $null | Out-Null } catch { $notes.Add("quit_game: $($_.Exception.Message)") }
         if ($script:proc.WaitForExit(120000)) { $result.Closed = 'quit' }
@@ -409,7 +483,7 @@ try {
     if ($results) {
         $title = 'In-game run ' + (Split-Path $OutDir -Leaf)
         [IO.File]::WriteAllText((Join-Path $OutDir 'results.md'), (Format-Results $results $title), (New-Object Text.UTF8Encoding($false)))
-        $results | Select-Object Name, JobId, Variant, Ok, Closed, Frames, Sim, Notes | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $OutDir 'results.json') -Encoding UTF8
+        $results | Select-Object Name, JobId, Variant, Ok, Closed, Frames, Sim, Events, Notes | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $OutDir 'results.json') -Encoding UTF8
         Say "results: $OutDir\results.md ($(@($results | Where-Object Ok).Count) of $($results.Count) loads passed)"
     }
 }

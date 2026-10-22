@@ -1,0 +1,16 @@
+{
+  "description": "Every feature repro as an ABBA pair: 4 game starts per job, about 15 minutes each.",
+  "ab": true,
+  "jobs": [
+    "../jobs/repro-file-lookups.json",
+    "../jobs/repro-file-lists.json",
+    "../jobs/repro-sim-building.json",
+    "../jobs/repro-object-lookups.json",
+    "../jobs/repro-fast-memory.json",
+    "../jobs/repro-cache-compression.json",
+    "../jobs/repro-scene-nodes.json",
+    "../jobs/repro-room-lights.json",
+    "../jobs/repro-room-to-save.json",
+    "../jobs/repro-mode-switches.json"
+  ]
+}

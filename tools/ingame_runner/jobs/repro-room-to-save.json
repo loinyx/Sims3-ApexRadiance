@@ -1,0 +1,70 @@
+{
+  "id": "repro-room-to-save",
+  "description": "Room to Save after a heavy session: 10 minutes of far camera jumps with 2 outfit changes and 3 new Sims per jump grow the address space use, then the save matrix: save, save again, reload, save. Pass: every save completes without Error 12, the reload reaches live mode.",
+  "save": "ApexTest-Town",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.MemoryGuard": {
+          "enabled": false
+        }
+      }
+    },
+    "on": {
+      "toml": {
+        "patches.MemoryGuard": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[MemoryGuard\\] On:",
+        "\\[MemoryGuard\\] World save done"
+      ]
+    }
+  },
+  "fail": [
+    "FAILED \\(Error 12\\)"
+  ],
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "fast"
+    },
+    {
+      "do": "camera_jumps",
+      "order": "far",
+      "lots": 10,
+      "dwellS": 6,
+      "outfits": 2,
+      "spawn": 3
+    },
+    {
+      "do": "wait",
+      "minutes": 15,
+      "measure": true,
+      "until": {
+        "jumps": 100
+      }
+    },
+    {
+      "do": "stop_repros"
+    },
+    {
+      "do": "save"
+    },
+    {
+      "do": "save"
+    },
+    {
+      "do": "reload",
+      "save": "last"
+    },
+    {
+      "do": "wait",
+      "minutes": 2
+    },
+    {
+      "do": "save"
+    }
+  ]
+}

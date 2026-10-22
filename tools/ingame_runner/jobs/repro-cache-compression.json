@@ -1,0 +1,55 @@
+{
+  "id": "repro-cache-compression",
+  "description": "Faster Cache Compression: 10 minutes of Sim builds and lot loads fill the caches (populated lots, 3 outfit changes and 3 new Sims per jump), then two saves write them. Pass: both saves complete; A/B metric: frames over 50 ms per minute in the window, and the save steps in the harness table.",
+  "save": "ApexTest-Town",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.FastCacheCompression": {
+          "enabled": false
+        }
+      }
+    },
+    "on": {
+      "toml": {
+        "patches.FastCacheCompression": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[FastRefPack\\] On:"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_jumps",
+      "order": "populated",
+      "lots": 8,
+      "dwellS": 6,
+      "outfits": 3,
+      "spawn": 3
+    },
+    {
+      "do": "wait",
+      "minutes": 15,
+      "measure": true,
+      "until": {
+        "jumps": 100
+      }
+    },
+    {
+      "do": "stop_repros"
+    },
+    {
+      "do": "save"
+    },
+    {
+      "do": "save"
+    }
+  ]
+}
