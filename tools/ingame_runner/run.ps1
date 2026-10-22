@@ -32,19 +32,34 @@ $apexDir = Join-Path $GameDocuments 'Apex Radiance'
 $tomlPath = Join-Path $apexDir 'ApexRadiance.toml'
 
 # ------------------------------------------------------------------ backup and restore
-# The manifest lists every file the run may replace or remove, with whether it existed. Restore copies each back, or
-# deletes it when it did not exist before the run.
-function Restore-Backup([string]$RunDir) {
-    $manifestPath = Join-Path $RunDir 'backup/manifest.json'
-    if (-not (Test-Path -LiteralPath $manifestPath)) { throw "No backup manifest in $RunDir" }
-    foreach ($e in (Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json)) {
-        if ($e.existed) { Copy-Item -LiteralPath (Join-Path $RunDir "backup/$($e.copy)") -Destination $e.path -Force }
-        elseif (Test-Path -LiteralPath $e.path) { Remove-Item -LiteralPath $e.path -Force }
-    }
-    Say "restored $((Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json).Count) files from $RunDir\backup"
+# The manifest (runner_lib.ps1 New-RunBackup) lists every file and folder the run may replace or remove, with whether it
+# existed. restore-pending.json in outputs/ingame locks the run and stays until every entry is back.
+$stateDir = Join-Path $repo 'outputs/ingame'
+function Test-GameClosed { -not @(Get-Process -Name 'TS3W', 'Sims3LauncherW' -ErrorAction SilentlyContinue).Count }
+
+function Write-RestoreState($R, [string]$RunDir) {
+    if ($R.Pending.Count) {
+        foreach ($p in $R.Pending) { Say "  not put back: $($p.path) ($($p.error))" }
+        Say "$($R.Pending.Count) file(s) still to put back: close every TS3W.exe, then run.ps1 -Restore '$RunDir'"
+    } else { Say "put back $($R.Restored) file(s) from $RunDir\backup" }
 }
 
-if ($Restore) { Restore-Backup (Resolve-Path $Restore).Path; return }
+if ($Restore) {
+    $runDir = (Resolve-Path $Restore).Path
+    if (-not (Test-GameClosed)) { throw 'The game or its launcher is running: close TS3W.exe and Sims3LauncherW.exe, then run -Restore again.' }
+    $marker = Get-PendingRun $stateDir
+    if ($marker -and (Test-RunAlive $marker)) { throw (Get-RunLockError $marker) }
+    if (-not (Test-Path -LiteralPath (Join-Path $runDir 'backup/manifest.json'))) {
+        # the run stopped before its backup was complete, so it installed nothing
+        if ($marker -and $marker.runDir -eq $runDir) { Exit-RunLock $stateDir $runDir; Say "nothing was installed by $runDir; lock removed"; return }
+        throw "No backup manifest in $runDir"
+    }
+    $r = Restore-RunBackup $runDir
+    if ($r.Already) { Say "$runDir was already put back (its manifest is used up); nothing copied" } else { Write-RestoreState $r $runDir }
+    if ($r.Pending.Count) { exit 3 }
+    Exit-RunLock $stateDir $runDir
+    return
+}
 
 # ------------------------------------------------------------------ jobs and checks before touching anything
 if ($Queue) {
@@ -84,15 +99,17 @@ if ($DryRun) {
     return
 }
 
-$running = @(Get-Process -Name 'TS3W', 'Sims3LauncherW' -ErrorAction SilentlyContinue)
-if ($running) { throw 'The game or its launcher is running. The runner never touches a game in use: close it first.' }
+$lockError = Get-RunLockError (Get-PendingRun $stateDir)
+if ($lockError) { throw $lockError }
+if (-not (Test-GameClosed)) { throw 'The game or its launcher is running. The runner never touches a game in use: close it first.' }
 if (-not (Get-Process -Name 'steam' -ErrorAction SilentlyContinue)) { Say 'warning: Steam is not running; the Steam game needs it to start' }
 $loaders = @('wininet.dll', 'dinput8.dll', 'version.dll', 'winmm.dll', 'dsound.dll') | Where-Object { Test-Path (Join-Path $GameBin $_) }
 if (-not $AsiLoader -and -not $loaders) { Say 'warning: no ASI loader found in Bin (for example Ultimate ASI Loader as wininet.dll); pass -AsiLoader' }
 
 Add-Type -Path (Join-Path $PSScriptRoot 'MailboxClient.cs')
 Add-Type -Namespace ApexIngame -Name SystemTimes -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool GetSystemTimes(out long idle, out long kernel, out long user);'
-if (-not $OutDir) { $OutDir = Join-Path $repo ('outputs/ingame/' + (Get-Date -Format 'yyyyMMdd-HHmmss')) }
+$runId = Get-Date -Format 'yyMMdd-HHmmss' # in the runner's save names, so no run meets another run's saves
+if (-not $OutDir) { $OutDir = Join-Path $stateDir "20$runId" }
 New-Item -ItemType Directory -Path (Join-Path $OutDir 'backup') -Force | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
 
@@ -186,7 +203,7 @@ function Wait-Agent([datetime]$Started) {
 }
 
 # "Mod Scripts Found" (the game's warning when script mods are installed) opens at the main menu up to ~90 s after the
-# agent answers, and accepting it during a load leaves the game on the loading screen (sims3-modernization cycle.ts).
+# agent answers, and accepting it during a load leaves the game on the loading screen.
 # Answers menu dialogs until that one was seen and the menu stayed quiet for 5 s, or for 120 s without it.
 function Wait-MenuQuiet {
     $m = @{ Start = Get-Date; Quiet = Get-Date; Saw = $false } # a hashtable: the script block below cannot assign outer variables
@@ -297,6 +314,7 @@ function Invoke-Load($Load, [string]$BaseToml) {
     # this key. The runner never focuses the game window, so without it every frame and publish gap of a measured load
     # would carry that sleep. -InactiveIdle keeps the game's default.
     if (-not $InactiveIdle) { $gameArgs += '-NoInactiveIdle' }
+    $gameArgs += '-ApexTestAgent:1' # the run marker: without it the agent stays idle (agent/Agent.cs)
     Say "$($Load.Name): starting the game"
     if ($gameArgs) { $script:proc = Start-Process -FilePath $exe -WorkingDirectory $GameBin -ArgumentList $gameArgs -PassThru }
     else { $script:proc = Start-Process -FilePath $exe -WorkingDirectory $GameBin -PassThru }
@@ -349,7 +367,9 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     }
                 }
                 'save' {
-                    $lastSave = 'ApexRunner-{0}-{1}' -f $Load.Name, $n
+                    $lastSave = 'ApexRunner-{0}-{1}-{2}' -f $runId, $Load.Name, $n
+                    # a save of that name from before would pass the check below at once
+                    if (Test-Path -LiteralPath (Join-Path $savesDir "$lastSave.sims3")) { throw "save: $lastSave.sims3 already exists" }
                     $result.Saves += $lastSave
                     Call-Agent 'save_game' @{ name = $lastSave } | Out-Null
                     Say "  step ${n}: saving as $lastSave"
@@ -441,27 +461,25 @@ function Invoke-Load($Load, [string]$BaseToml) {
 }
 
 # ------------------------------------------------------------------ install, run, restore
+# The settings first: restored first too. Apex Radiance's own outputs and shader cache are written by the test build;
+# the job saves are only loaded (the agent saves under new names) but are kept in the backup all the same.
 $installs = @(
+    @{ path = $tomlPath; from = $null },
     @{ path = (Join-Path $GameBin 'ApexRadiance.asi'); from = $Asi },
     @{ path = (Join-Path $GameDocuments 'Mods/Packages/ApexTestAgent.package'); from = $agent },
-    @{ path = (Join-Path $GameDocuments 'scriptCache.package'); from = $null }, # stale compiled scripts; the game rebuilds it
-    @{ path = $tomlPath; from = $null }
+    @{ path = (Join-Path $GameDocuments 'scriptCache.package'); from = $null } # stale compiled scripts; the game rebuilds it
 )
 if ($AsiLoader) { $installs += @{ path = (Join-Path $GameBin 'wininet.dll'); from = $AsiLoader } }
-$manifest = @()
-$i = 0
-foreach ($e in $installs) {
-    $i++
-    $existed = Test-Path -LiteralPath $e.path
-    $copy = "$i-" + (Split-Path $e.path -Leaf)
-    if ($existed) { Copy-Item -LiteralPath $e.path -Destination (Join-Path $OutDir "backup/$copy") }
-    $manifest += [pscustomobject]@{ path = $e.path; existed = $existed; copy = $copy }
-}
-$manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $OutDir 'backup/manifest.json') -Encoding UTF8
-Say "backup of $($manifest.Count) files in $OutDir\backup (restore by hand: run.ps1 -Restore '$OutDir')"
+$kept = @('ApexRadiance_LOG.txt', 'ApexRadiance_Crash.txt', 'ApexRadiance_Hitches.txt', 'ApexRadiance_ShaderCache.bin' | ForEach-Object { Join-Path $apexDir $_ }) +
+    @($jobs | ForEach-Object { Join-Path $savesDir "$($_.save).sims3" } | Select-Object -Unique)
+Enter-RunLock $stateDir $OutDir
+try { $manifest = New-RunBackup $OutDir (@($installs | ForEach-Object { $_.path }) + $kept) }
+catch { Exit-RunLock $stateDir $OutDir; throw } # nothing installed yet
+Say "backup of $($manifest.Count) files and folders in $OutDir\backup (by hand: run.ps1 -Restore '$OutDir')"
 $baseToml = if (Test-Path -LiteralPath $tomlPath) { [IO.File]::ReadAllText($tomlPath) } else { '' }
 $results = @()
 $stopped = $null
+$restored = $null
 try {
     foreach ($e in $installs) {
         if ($e.from) { New-Item -ItemType Directory -Path (Split-Path $e.path) -Force | Out-Null; Copy-Item -LiteralPath $e.from -Destination $e.path -Force }
@@ -479,13 +497,25 @@ try {
     Say "run stopped: $stopped"
 } finally {
     if ($script:proc -and -not $script:proc.HasExited) { Stop-Process -Id $script:proc.Id -Force; Wait-Process -Id $script:proc.Id -Timeout 60 -ErrorAction SilentlyContinue }
-    Restore-Backup $OutDir
+    # every TS3W, not only ours: a second one started through Steam holds the ASI too. Waited for, never ended.
+    $others = @(Get-Process -Name 'TS3W' -ErrorAction SilentlyContinue)
+    if ($others) { Say "waiting up to 2 min for $($others.Count) TS3W.exe to close before putting files back"; $others | Wait-Process -Timeout 120 -ErrorAction SilentlyContinue }
+    try { $restored = Restore-RunBackup $OutDir }
+    catch { $restored = [pscustomobject]@{ Already = $false; Restored = 0; Pending = @([pscustomobject]@{ path = "$OutDir\backup"; error = $_.Exception.Message }) } }
+    Write-RestoreState $restored $OutDir
+    if (-not $restored.Pending.Count) { Exit-RunLock $stateDir $OutDir }
     if ($results) {
         $title = 'In-game run ' + (Split-Path $OutDir -Leaf)
-        [IO.File]::WriteAllText((Join-Path $OutDir 'results.md'), (Format-Results $results $title), (New-Object Text.UTF8Encoding($false)))
+        $md = Format-Results $results $title
+        if ($stopped) { $md += "`r`nRun stopped: $($stopped -replace '\|', '/')`r`n" }
+        if ($restored.Pending.Count) {
+            $md += "`r`n## Files not put back`r`n`r`nClose every TS3W.exe, then run ``run.ps1 -Restore '$OutDir'``.`r`n`r`n" +
+                (($restored.Pending | ForEach-Object { "- $($_.path): $($_.error -replace '\|', '/')" }) -join "`r`n") + "`r`n"
+        }
+        [IO.File]::WriteAllText((Join-Path $OutDir 'results.md'), $md, (New-Object Text.UTF8Encoding($false)))
         $results | Select-Object Name, JobId, Variant, Ok, Closed, Frames, Sim, Events, Notes | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $OutDir 'results.json') -Encoding UTF8
         Say "results: $OutDir\results.md ($(@($results | Where-Object Ok).Count) of $($results.Count) loads passed)"
     }
 }
-# 0 all loads passed, 1 a load failed, 2 the run stopped early (see runner_lib.ps1 Get-RunExitCode)
-exit (Get-RunExitCode $results $loads.Count)
+# 0 all loads passed, 1 a load failed, 2 the run stopped early, 3 files still to put back (runner_lib.ps1 Get-RunExitCode)
+exit (Get-RunExitCode $results $loads.Count ([bool]$stopped) ([bool]$restored.Pending.Count))
