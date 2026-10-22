@@ -8,7 +8,10 @@
         "patches.FastCacheCompression": {
           "enabled": false
         }
-      }
+      },
+      "fail": [
+        "\\[FastRefPack\\] On:"
+      ]
     },
     "on": {
       "toml": {

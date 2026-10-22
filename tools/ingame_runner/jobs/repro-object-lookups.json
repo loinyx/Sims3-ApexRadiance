@@ -8,7 +8,10 @@
         "patches.ObjectLookupIndex": {
           "enabled": false
         }
-      }
+      },
+      "fail": [
+        "\\[ObjectIndex\\] On:"
+      ]
     },
     "on": {
       "toml": {

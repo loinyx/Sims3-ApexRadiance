@@ -8,7 +8,10 @@
         "patches.LotLightingMotion": {
           "enabled": false
         }
-      }
+      },
+      "fail": [
+        "\\[LotLightingMotion\\] On:"
+      ]
     },
     "on": {
       "toml": {

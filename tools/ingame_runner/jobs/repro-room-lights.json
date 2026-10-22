@@ -8,7 +8,10 @@
         "patches.RoomLightQueue": {
           "enabled": false
         }
-      }
+      },
+      "fail": [
+        "\\[RoomLightQueue\\] Started:"
+      ]
     },
     "on": {
       "toml": {
