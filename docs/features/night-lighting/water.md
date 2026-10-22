@@ -10,7 +10,7 @@ player's side in [reflections.md](../reflections.md).
 
 | | |
 |---|---|
-| Availability | Released in 1.0.0. Second lake shader (cloudy and rainy weather): 2.5.2. Highlight filter and colour preservation: 2.5.5. The water shader without the game's reflection (Twinbrook, Bridgeport, Moonlight Falls): 2.7.0 |
+| Availability | Released in 1.0.0. Second lake shader (cloudy and rainy weather): 2.5.2. Highlight filter and colour preservation: 2.5.5. The water shader without the game's reflection (Twinbrook, Bridgeport, Moonlight Falls): 2.7.0. Lamps hidden behind objects no longer reflect: Released in 2.15.1 |
 | Default | On |
 | Menu | World > Water & Snow > *Lamp Glow* and *Water Reflections* cards; Developer > Lighting > *Compare lighting paths* > Water highlights |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |

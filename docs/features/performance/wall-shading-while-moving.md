@@ -9,7 +9,7 @@ moment and get their shading within a few frames of stopping.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Bounded first-pass wait and refinements behind a first pass: In development (2.15.1) |
+| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Bounded first-pass wait and refinements behind a first pass: Released in 2.15.1 |
 | Default | On |
 | Menu | System > Performance > Camera and lighting > *Wall shading waits while moving* |
 | Configuration | `[patches.WallShadingWhileMoving]` in `ApexRadiance.toml` |
@@ -60,7 +60,7 @@ Every other call (the synchronous level solve, the tool mode, any unknown caller
 
 ## Limitations
 
-- In Edit Town (2.15.0, F8 session of 21/10) the camera read flipped between moving and still while a placed lot loaded.
+- In Edit Town (2.15.0, an F8 session) the camera read flipped between moving and still while a placed lot loaded.
   Each still frame started the 2 s wait over and other lots' refinements took the one pass a frame, so the lot stayed
   "Processing" for minutes (11876 first passes held, 214 run); turning the effects off ended it in 3 s. Since 2.15.1 the
   wait keeps its start while a first pass is pending, and refinements wait for it. Why the camera read flipped is not

@@ -25,6 +25,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps placed on the ground light the lawn around them", "Maahan asetetut lamput valaisevat ympäröivää nurmikkoa"},
     {"Lamps keep their night strength in Build mode at night", "Lamput säilyttävät yövoimakkuutensa rakennustilassa yöllä"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Kuu valaisee kaupunkia korkeammalta: teillä ei enää ole tummia raitoja yöllä"},
+    {"Filtered screenshots can be saved to any folder you choose", "Suodatetut kuvakaappaukset voi tallentaa mihin tahansa valitsemaasi kansioon"},
     {"Moonlight is softer by default and in every preset", "Kuunvalo on oletuksena ja kaikissa esiasetuksissa pehmeämpi"},
     {"Lamps brighten smoothly at dusk and dim smoothly at dawn", "Lamput kirkastuvat tasaisesti hämärässä ja himmenevät tasaisesti aamunkoitteessa"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "Tonttien lataus on sujuvampaa: ylimääräinen valaistuslaskenta mukautuu kuvanopeuteesi"},

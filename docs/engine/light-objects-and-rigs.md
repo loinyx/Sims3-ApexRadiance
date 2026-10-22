@@ -262,7 +262,7 @@ The HDR lamp gain that the combined build applied to rig colours and shaders exi
 |---|---|---|
 | Sky object | `*(lightMgr+0xD0) - 0x210`, accepted only when `*(sky+0x1F4) == lightMgr` | Verified in the executable's bytes; read at runtime by the development daylight log |
 | Night level | `lightMgr+0xF0`: follows the clock only (the season moves sunrise and sunset; weather does not change it), in steps of 0.2. Build mode switches the sky to sun times without the season, which can turn it to 0 at night with the clock stopped ([room-light-maps](room-light-maps.md#night-level-lightmgr0xf0)) | Observed at runtime |
-| Sun time sets | weather manager `*(*(sky+0x21C)+0x74)`, byte `+0xB04`: `FUN_00D68FE0` copies sunrise / sunset from `+0xA48` when set, else `+0x9EC`. In Build mode the byte read 0 and both sets 0 / 0 | Selection verified in the executable's bytes; values from one memory read (22/10) |
+| Sun time sets | weather manager `*(*(sky+0x21C)+0x74)`, byte `+0xB04`: `FUN_00D68FE0` copies sunrise / sunset from `+0xA48` when set, else `+0x9EC`. In Build mode the byte read 0 and both sets 0 / 0 | Selection verified in the executable's bytes; values from one memory read |
 | Manmade light intensity | `lightMgr+0xF4`, from `ManmadeLightIntensity` per sky type, weighted by the weather | *Unverified*: the daylight log recomputes it to check the offsets |
 | Sun direction | `sky+0x6B0` | *Unverified* |
 | Smooth night | `sky+0x780` | *Unverified* |

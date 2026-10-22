@@ -9,7 +9,7 @@ a time, so the game does not freeze for a full terrain rebuild. Part of [Night L
 
 | | |
 |---|---|
-| Availability | Released (visitor patch, arm sites and dusk rebuild since 0.1.0; paced sweep default since 2.5.3; local relight of user and visible-lot edits since 2.5.4; world-owned type-11 lamps since 2.5.6; day/night endpoint rebuilds, Build-mode phase response, priority re-queue of in-flight chunks and the world-lamp rig request on early completion since 2.6.0). Changed in 2.7.0: the world-load and Refresh terrain rebuilds run one chunk per frame, nearest first; a lamp switch's ground changes in one frame; urgent chunks go back to back |
+| Availability | Released (visitor patch, arm sites and dusk rebuild since 0.1.0; paced sweep default since 2.5.3; local relight of user and visible-lot edits since 2.5.4; world-owned type-11 lamps since 2.5.6; day/night endpoint rebuilds, Build-mode phase response, priority re-queue of in-flight chunks and the world-lamp rig request on early completion since 2.6.0). Changed in 2.7.0: the world-load and Refresh terrain rebuilds run one chunk per frame, nearest first; a lamp switch's ground changes in one frame; urgent chunks go back to back. Lot area lights in the bake and lamps on the ground stamped from 40 cm: Released in 2.15.1 |
 | Default | On |
 | Menu | Lighting > Ground > Ground & Lots > *Lot lamps light the street*; Lighting > Ground > Ground & Lots > *Game fixes* (folded: *Update at dusk*, *Delay after dusk*); Lighting > Overview > Refresh lighting |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` (keys below) |
@@ -97,7 +97,7 @@ armed like a lamp pick-up, a full rebuild, day or night) and *Refresh lots*
   `BakeColourStub`; a change, once the slider is released, is a "switch" edit (one rebuild).
 
 **Area lights (2.15.1).** The rectangle and disc area lights (types 9 and 10) of a lot are lamps too: the game baked them
-into the lot's own ground only, so a park lot's area lights (100 m range, F7 and F8 of 21/10) lit its snow and stopped in a
+into the lot's own ground only, so a park lot's area lights (100 m range, F7 and F8 captures) lit its snow and stopped in a
 straight line at the lot border. They enter the bake with the other outdoor lot lamps. The game's area light law
 (`0x006BFBA0` rectangle, `0x006BFDC0` disc, both through `0x006BFAF0`) lights only the side its third axis (+0x180)
 points away from, and the bake stamps a light all round from its position, so `BakeColourStub` stamps an area light at
@@ -105,7 +105,7 @@ points away from, and the bake stamps a light all round from its position, so `B
 The floor gate (`LevelLightShare::InTerrainBake`) and the GPU lamps' under-floor share (`RtOutdoorLamps`) use the same rule
 (`features/terrain_bake_rule.h`). The stamp keeps the bake's point law (distance to the light's position, not to its area).
 
-**Low lamps (2.15.1).** A lamp lying on the lawn (its light 5 cm up, F8 of 21/10 20-39-09: Build mode, the game's own lot
+**Low lamps (2.15.1).** A lamp lying on the lawn (its light 5 cm up, an F8 capture in Build mode, the game's own lot
 map) lit only a tree above it: the stamp's law `2 w cos / d^2` gives the lawn 2 m away about 1 % of what a lamp 40 cm up
 gives it. `BakePosStub` replaces the copy of the light's position into its shader parameter at `0x00C294F7`
 (`0F 28 00 0F 29 86 10 01 00 00`, `movaps xmm0,[eax]; movaps [esi+110h],xmm0`, 0x18 bytes before the colour site, checked

@@ -12,7 +12,7 @@ that cannot run it, none of it runs.
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s: In development (2.15.1) |
+| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1 |
 | Default | On (Lamp lighting: Instant (GPU); a saved `lampLightingMode` keeps its choice) |
 | Menu | System > Performance > Lamp lighting > Lamp updates: Instant (GPU) |
 | Configuration | `lampLightingMode = "instant"` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -55,11 +55,11 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    computed on a worker thread (the map keeps its last copy until it arrives); once the lamp stays put every map is relit
    with the full estimate. Each frame starts maps only while its relight work stays under about 2 ms of CPU.
    A map the game writes again and again (its room solves, for instance while a lot stays loading) is relit for those
-   writes at most every 0.5 s; a single write after a rest is relit at once (since 2.15.1; 21/10: 105 writes in 10 s,
+   writes at most every 0.5 s; a single write after a rest is relit at once (since 2.15.1; an F8 session: 105 writes in 10 s,
    each relight 45 ms of floor mask with 28 lamps, logged as "relights for repeated game writes moved later").
    On story 0's floor map, a lamp whose light stands less than 40 cm over the lot's ground (its base `+0xD4` taken into
    lot space) is drawn from 40 cm (since 2.15.1): a lamp lying on the lawn, its light 5 cm up, lit a tree above it and
-   left the lawn dark, the law's light falling with its angle of incidence (21/10 F8 17-26-36). Walls, ceilings, objects
+   left the lawn dark, the law's light falling with its angle of incidence (F8 capture). Walls, ceilings, objects
    and trees keep its real place. The terrain bake stamps such a lamp from the same 40 cm (`BakePosStub`,
    [terrain relight](terrain-relight.md)), so the lot pass's max(lot map, atlas), the soft lot edge, snow (atlas x 4),
    Classic and the moments right after an edit, when the game's own map is drawn, light the lawn too. One rule:

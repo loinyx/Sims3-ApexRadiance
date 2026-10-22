@@ -25,6 +25,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps placed on the ground light the lawn around them", "Οι λάμπες πάνω στο έδαφος φωτίζουν το γρασίδι γύρω τους"},
     {"Lamps keep their night strength in Build mode at night", "Τη νύχτα στη λειτουργία Κατασκευής οι λάμπες κρατούν τη νυχτερινή τους ένταση"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Το φεγγάρι φωτίζει την πόλη από ψηλότερα: τέλος οι σκούρες λωρίδες στους δρόμους τη νύχτα"},
+    {"Filtered screenshots can be saved to any folder you choose", "Τα στιγμιότυπα με φίλτρα αποθηκεύονται σε όποιον φάκελο επιλέξεις"},
     {"Moonlight is softer by default and in every preset", "Το φως του φεγγαριού είναι πιο απαλό από προεπιλογή και σε κάθε προεπιλογή ρυθμίσεων"},
     {"Lamps brighten smoothly at dusk and dim smoothly at dawn", "Οι λάμπες δυναμώνουν ομαλά το σούρουπο και χαμηλώνουν ομαλά την αυγή"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "Η φόρτωση οικοπέδων είναι πιο ομαλή: η επιπλέον δουλειά φωτισμού ακολουθεί τον ρυθμό καρέ σου"},

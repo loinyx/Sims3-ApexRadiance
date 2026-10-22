@@ -8,7 +8,7 @@ the game's own pace as soon as the camera stops.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lot build slice while moving, the lamp edit and after-load budgets and the refinement cap: Released in 2.7.0. A lamp edit's room while moving: Released in 2.12.3. Spread cap after a drag: Released in 2.13.0. Settle window after entering a lot: Released in 2.15.0 |
+| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lot build slice while moving, the lamp edit and after-load budgets and the refinement cap: Released in 2.7.0. A lamp edit's room while moving: Released in 2.12.3. Spread cap after a drag: Released in 2.13.0. Settle window after entering a lot: Released in 2.15.0. Settle window paced by the frame time: Released in 2.15.1 |
 | Default | On, 3 ms |
 | Menu | System > Performance > Camera and lighting > *Spread lot lighting while moving* |
 | Configuration | `[patches.LotLightingMotion]` in `ApexRadiance.toml` |
@@ -46,7 +46,7 @@ the lot being played):
   the Present sample): the baseline is the frame time outside the window; in it a frame over max(16.7 ms, 1.5 x
   baseline) takes 0.15 off the scale, a frame under 0.8 x that target gives 0.05 back (each window starts at 0.5). The
   game budget becomes `game + (25 - game) x scale`, the drain `4 + (12 - 4) x scale`. A fast PC keeps the quick light,
-  a PC at its limit keeps the game's own budget (21/10 F8 session while lots loaded: frames of 31 to 37 ms of room
+  a PC at its limit keeps the game's own budget (an F8 session while lots loaded: frames of 31 to 37 ms of room
   solving in 276 of 440 hitches). Without the Present sample (both camera-motion options off) the scale stays 1.
   Developer status: *Settle pacing* on the Lighting while the camera moves card.
 - **A lamp edit's room while moving:** while the room being solved is an edit's urgent room

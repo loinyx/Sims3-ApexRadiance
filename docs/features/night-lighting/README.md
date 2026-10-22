@@ -10,7 +10,7 @@ in Build mode and at dusk. By day, lamps that the game keeps lit add a subdued g
 
 | | |
 |---|---|
-| Availability | Released (standalone since 0.1.0). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: Released in 2.6.0. Light detail, walls blocking lamp light outdoors, lamp switches in one frame, weather variants of the lot and terrain passes, and idavidveiga's daytime bloom fixes: Released in 2.7.0. Lamp lighting (Instant (GPU) with real-time outdoor lamps and quick outdoor lamp edits; Classic with lamp drags and floors shown together), outdoor and indoor light through openings, doors block light, walls shade lamp light near the ground, buildings block lamp light on trees and objects, shadow softness and smooth light maps: Released in 2.13.0. Light through stairwells, stairs on the directional maps, light through arches and doorways, foliage lit per vertex with crown shade on lot ground, and moonlight scaled at its reader: Released in 2.14.0 |
+| Availability | Released (standalone since 0.1.0). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: Released in 2.6.0. Light detail, walls blocking lamp light outdoors, lamp switches in one frame, weather variants of the lot and terrain passes, and idavidveiga's daytime bloom fixes: Released in 2.7.0. Lamp lighting (Instant (GPU) with real-time outdoor lamps and quick outdoor lamp edits; Classic with lamp drags and floors shown together), outdoor and indoor light through openings, doors block light, walls shade lamp light near the ground, buildings block lamp light on trees and objects, shadow softness and smooth light maps: Released in 2.13.0. Light through stairwells, stairs on the directional maps, light through arches and doorways, foliage lit per vertex with crown shade on lot ground, and moonlight scaled at its reader: Released in 2.14.0. Moon at least 20 degrees high, Build mode keeping the season's sun times and smooth dusk: Released in 2.15.1 |
 | Default | On (`enabledByDefault = true`; the feature metadata keeps `experimental = true`) |
 | Menu | Lighting page (tabs Overview, Ground, Objects, Buildings, Stories); World > Water & Snow page (Lamp Glow, Water Reflections, Snow); developer options under Developer > Lighting |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -400,7 +400,7 @@ Native solar and sky constants are never raised.
   with its height scaled by `[obj+0x9B4]` and held at a minimum `[obj+0x9B8]` (`y = max(y k, min)`, then normalised); at
   night the sun is below the horizon, so the moon (the same direction, x mirrored) stands at `atan(min / horizontal part)`:
   0.7 degrees after dusk (min 0.0122), a few degrees later. At that height every bump of a road's normal map and every road
-  piece's slight tilt switched the moon on or off and curbs cast shadows tens of metres long (F7 and F8 of 21/10: dark
+  piece's slight tilt switched the moon on or off and curbs cast shadows tens of metres long (F7 and F8 captures: dark
   bands on roads 40 % under the snow beside them, moonlight x1.82). At full night (night level 0.9 to 1 brings it in) the
   sun scale getter, called by `FUN_00C11AD0` with ESI = that object, raises the minimum so the moon stands at least 20
   degrees high (`min = r tan H`, r = the direction's horizontal part); its horizontal direction still turns as the game
