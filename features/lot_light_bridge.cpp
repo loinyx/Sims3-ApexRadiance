@@ -4400,7 +4400,8 @@ int PickObjectLampsImpl(float x, float y, float z, float (*lamps)[4], float& gro
 
 // (2.15.3) The whole pick of an object kept (objects are drawn at the same place frame after frame, and the pieces of one
 // object at one place): keyed by the exact float bits of every input and valid while the lamp list (g_lampMemoGen, the
-// SelectLamps memo's generation) and everything the wall and slab test reads (LampVisibilityState) are the same, read before
+// SelectLamps memo's generation; cleared with that memo when a world change starts the generation again) and everything
+// the wall and slab test reads (LampVisibilityState) are the same, read before
 // and after the pick (a change during it keeps nothing). A pick with a lamp shining out of a house is not kept (its test
 // reads that lamp's own copy of the walls). A hit writes exactly what the pick would: the same lamp rows, cones and reach
 // rows, the ground share only when the pick set it, lampTop, the counters and the candidate count. With the lamp
@@ -8197,6 +8198,7 @@ void OnWorldChanged() {
     std::memset(g_lampData, 0, sizeof g_lampData);
     g_lampMemoGen = 1;
     for (auto& memo : g_lampMemo) memo.gen = 0;
+    for (auto& memo : g_pickMemo) memo.gen = 0; // (2.15.3) the generation starts again at 1: picks kept under the old ones would match it again
     g_enumLights.clear();
     g_lotLampCur.clear();
     g_lotsNow.clear();
