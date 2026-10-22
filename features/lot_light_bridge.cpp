@@ -350,6 +350,9 @@ IDirect3DPixelShader9* g_objectPs = nullptr;
 bool g_objectCompileTried = false;
 std::atomic<bool> g_objectFix{false};
 std::atomic<float> g_night{0.0f};
+// (2.15.1) the light manager's level in its steps of 0.2: the rigs' reach law (ObjectReachLawScale) re-gathers every rig when
+// its scale moves, so it keeps the game's five steps at dusk instead of following smooth dusk (about 70 re-gathers)
+std::atomic<float> g_rigNight{0.0f};
 
 // ---- Lamp brightness on the ground ("Ground brightness", "Roads and sidewalks"): the game's lamp scale cK.x of a light
 // map term (lamp light only: the terrain map rgb, the lot map, max(map, atlas) of floors and roads) times the gain for
@@ -992,6 +995,7 @@ std::vector<GroundShadow::Lamp> ShadeLamps(const LotRect& r) {
         if (!b.baked || b.rect[0] > x1 || b.rect[2] < x0 || b.rect[1] > z1 || b.rect[3] < z0) continue;
         const float lum = b.light[0] * 0.2126f + b.light[1] * 0.7152f + b.light[2] * 0.0722f;
         GroundShadow::Lamp L{b.pos[0], b.pos[1], b.pos[2], 0.4f * lum};
+        L.liftable = TerrainBakeRule::Liftable(b.lot != 0, b.type);
         if (!(L.k > 0.0f) || !std::isfinite(L.k) || !std::isfinite(L.x) || !std::isfinite(L.y) || !std::isfinite(L.z)) continue;
         const float nx = std::clamp(L.x, x0, x1), nz = std::clamp(L.z, z0, z1);
         const float wgt = GroundShadow::Weight(L, nx, r.ty, nz);
@@ -8012,6 +8016,7 @@ void SetObjectShadowFix(bool on) {
 }
 
 void SetNightLevel(float level) { g_night = level < 0 ? 0.0f : (level > 1 ? 1.0f : level); }
+void SetRigNightLevel(float level) { g_rigNight = level < 0 ? 0.0f : (level > 1 ? 1.0f : level); }
 
 void SetRoofFix(bool on, float strength) {
     g_roofStrength = strength;
@@ -8127,8 +8132,10 @@ int ChunkCount() { return static_cast<int>(g_chunks.size()); }
 bool ObjectLampColourAt(const void* light, const float* point, float rgb[3], const float* ext) { return ObjectLampColourAtImpl(light, point, rgb, ext); }
 float ObjectReachLawScale() {
     if (!g_objPixel.load(std::memory_order_relaxed) || !g_objPixelLamps.load(std::memory_order_relaxed) || !LevelLightShare::RealisticReachActive()) return -1.0f;
-    return TerrainLightingPolicy::ReachLampScale(NativeWallScale(), g_night.load(std::memory_order_relaxed), g_wallEnabled.load(std::memory_order_relaxed),
-                                                 g_wallGain.load(std::memory_order_relaxed), g_objPixelLampStrength.load(std::memory_order_relaxed) / kPixelLampTrimUnit);
+    const float night = g_rigNight.load(std::memory_order_relaxed);
+    const float native = NativeWallFresh() ? static_cast<float>(g_nativeWallScale) : TerrainLightingPolicy::LampDay(night);
+    return TerrainLightingPolicy::ReachLampScale(native, night, g_wallEnabled.load(std::memory_order_relaxed), g_wallGain.load(std::memory_order_relaxed),
+                                                 g_objPixelLampStrength.load(std::memory_order_relaxed) / kPixelLampTrimUnit);
 }
 void SetObjectPixelLamps(bool on, float strength) {
     g_objPixel = on;

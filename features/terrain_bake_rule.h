@@ -33,6 +33,10 @@ constexpr float kLowLampLift = 0.4f, kLowLampBelow = 0.5f;
 inline std::atomic<bool> g_lowLampLift{true};
 inline bool LowLampLift() { return g_lowLampLift.load(std::memory_order_relaxed); }
 // The height over its lot's ground (h, metres) a lot lamp's light is stamped from
-inline float StampHeight(float h) { return h < kLowLampLift && h > -kLowLampBelow && LowLampLift() ? kLowLampLift : h; }
+// (liftable: a lot lamp of the lamp classes, lot id != 0 and LotLampType, as the bake stub lifts; street lamps never are)
+inline float StampHeight(float h, bool liftable = true) {
+    return liftable && h < kLowLampLift && h > -kLowLampBelow && LowLampLift() ? kLowLampLift : h;
+}
+inline bool Liftable(bool lot, int type) { return lot && LotLampType(type); }
 
 } // namespace TerrainBakeRule

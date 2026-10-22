@@ -163,6 +163,15 @@ inline bool Read(uintptr_t lightMgr, float& level, bool smooth = false) {
     return true;
 }
 
+// A world was left: both gates start again with the next world's sun times
+inline void ResetGates() {
+    AcquireSRWLockExclusive(&g_lock);
+    g_gate = SunGate{};
+    g_timesGate = SunTimesGate{};
+    g_holding.store(false, std::memory_order_relaxed);
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
 // A gate is keeping the season's sun times or the level of before (log and developer status)
 inline bool Holding() { return g_holding.load(std::memory_order_relaxed); }
 

@@ -500,6 +500,9 @@ void UpdatePresentSampler() {
         D3D9Hooks::UnregisterAll(kPresentHookName);
         g_presentRegistered = false;
         g_lastPresentTick.store(0);
+        g_settleScale.store(1.0f, std::memory_order_relaxed); // without the sampler the raised budgets apply as before
+        g_wasSettling = false;
+        g_lastPresentQpc = 0;
     }
 }
 

@@ -355,7 +355,8 @@ only when it moved 0.2 and snaps to 1 over 0.8 and to 0 under 0.2 (`0x00F9D514` 
 terms jumped five times at dusk. The level n of Apex's own lamp terms is now the sky's smooth night `sky+0x780.x` (the
 "ShaderDayNightParameters" the game's shaders read), mapped as `clamp((x - 0.2) / 0.6, 0, 1)`: continuous, and 1 or 0
 exactly where the setter snaps (`NightLevel::Read`, `features/night_level.h`). What follows the game's own lights keeps
-`+0xF0`: the room-rig re-gather and the room solves' daytime factor. Without the Build mode redirect of the sun times
+`+0xF0`: the room-rig re-gather, the room solves' daytime factor and the rigs' reach law (`ObjectReachLawScale`, which
+re-gathers every rig when its scale moves: about 70 times a dusk on the smooth level, five on the steps). Without the Build mode redirect of the sun times
 (`night_terrain_relight_patch.cpp` `SunTimesHook`) the level is `+0xF0` as before. Developer A/B: *Smooth dusk*. Every
 lighting snapshot (F8) starts with a day and night line: clock, sun height, smooth night and the sun times it was
 measured against, the weather set, the light manager's levels, Apex's level and the Build mode gate, with a warning

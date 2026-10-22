@@ -64,7 +64,8 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    [terrain relight](terrain-relight.md)), so the lot pass's max(lot map, atlas), the soft lot edge, snow (atlas x 4),
    Classic and the moments right after an edit, when the game's own map is drawn, light the lawn too. One rule:
    `TerrainBakeRule::StampHeight` (`features/terrain_bake_rule.h`), also in the stamp mirrors (`BakeStamp`,
-   `UnderFloorShare`, `GroundShadow::Weight`). Developer A/B: Lighting > Developer > *Lamps on the ground light the lawn
+   `UnderFloorShare`, `GroundShadow::Weight`), for lot lamps of the lamp classes only (`TerrainBakeRule::Liftable`; a
+   lot's street-lamp class and the world's street lamps keep their height, as in the bake). Developer A/B: Lighting > Developer > *Lamps on the ground light the lawn
    from 40 cm* (both places; the terrain is rebuilt once).
    Under DXVK the floor mask buffer is written in two copies, alternately: each write fills the one the last draws did not
    read and then becomes the drawn one, since a lock of a buffer the GPU may still read waits there (native D3D9 copies

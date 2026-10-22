@@ -87,7 +87,7 @@ Set in `ApexRadiance.toml` only; the menu has no control for them.
 |---|---|---|---|
 | Include a screenshot (Report page) | `capture_screenshot` | true | Adds `Screenshot.png` to every capture |
 | Save screenshots to | `screenshot_folder` | `game` | `game`: Documents > Electronic Arts > The Sims 3 > Screenshots; `apex`: the Apex Radiance folder > Screenshots; `custom`: the folder in `screenshot_custom_folder` (since 2.15.1) |
-| Screenshots folder | `screenshot_custom_folder` | empty | The folder chosen with *Another folder* (Windows' folder dialog; UTF-8 path). Choosing *Another folder* with none set opens the dialog first, and the choice applies once a folder is picked. When the folder cannot be created (a removed drive), the screenshot goes to the game's Screenshots folder with a note |
+| Screenshots folder | `screenshot_custom_folder` | empty | The folder chosen with *Another folder* (Windows' folder dialog; UTF-8 path). Choosing *Another folder* with none set opens the dialog first, and the choice applies once a folder is picked. When the folder cannot be created (a removed drive), the screenshot goes to the game's Screenshots folder with a note. Profiles carry the choice but never the path: a profile with *Another folder* applied where no folder was chosen saves to the game's folder |
 | Screenshot key | `screenshot_key` | `F8` | Custom only, not part of the presets; a saved bare letter or digit (e.g. `C`) falls back to the default with a log line |
 | Hide game UI in screenshots | `screenshot_hide_game_ui` | true | Hides the game's interface for the shot, then restores it |
 

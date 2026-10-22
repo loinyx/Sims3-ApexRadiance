@@ -852,6 +852,7 @@ struct GpuLamp {
     RtLampModel::Lamp lamp; // lot space; mult per story is set per map
     float esum, spill;
     int mult[8] = {};
+    bool liftable = false; // drawn from kLowLampLift on story 0's floor map when it lies on the ground
 };
 struct BakeLampW {
     RtLampModel::BakeLamp b; // world space (the gate is measured in world y against the lot base)
@@ -1364,6 +1365,7 @@ void Frame(IDirect3DDevice9* dev) {
                 const bool spill = coneSpill && r.f.type == 5;
                 for (int k = 0; k < 3; k++) b.colour += std::max(r.f0[k], 0.0f) * (spill ? std::clamp(r.S[k], 0.0f, 1.0f) : 1.0f);
                 b.colour *= r.areaShare;
+                b.liftable = TerrainBakeRule::Liftable(r.f.lot != 0, r.f.type);
                 bake[S].push_back(b);
                 bakeLights[S].push_back(L);
             }
@@ -1381,6 +1383,7 @@ void Frame(IDirect3DDevice9* dev) {
                 ToLaw(r, gc, rns[S].xf, reachOn, g.lamp.law);
                 g.esum = std::max(r.colour[0], 0.0f) + std::max(r.colour[1], 0.0f) + std::max(r.colour[2], 0.0f);
                 g.spill = r.f.type == 5 ? std::max({1.0f, r.S[0], r.S[1], r.S[2]}) : 1.0f;
+                g.liftable = TerrainBakeRule::Liftable(r.f.lot != 0, r.f.type); // a lot's street-lamp class (11) is not
                 lamps.push_back(g);
                 it = lamps.end() - 1;
             }
@@ -1620,7 +1623,7 @@ void Frame(IDirect3DDevice9* dev) {
             }
             RtLampModel::Lamp l = g.lamp;
             l.mult = static_cast<float>(g.mult[s.story]);
-            if (s.story == 0 && s.m == 1 && TerrainBakeRule::LowLampLift()) {
+            if (s.story == 0 && s.m == 1 && g.liftable && TerrainBakeRule::LowLampLift()) {
                 // the lot's ground in lot space (its base is world y; lots turn about y only)
                 const float base[3] = {0.0f, rns[0].lotBase, 0.0f};
                 float baseLot[3];
@@ -1684,7 +1687,8 @@ void Frame(IDirect3DDevice9* dev) {
         // single write after a rest is relit at once, as before
         const bool onlyWrite = s.relit && s.copy && sig == s.sig && !paramsChanged && !(s.fast && !dragging) && !s.underDirty;
         if (onlyWrite && GetTickCount64() - s.relitTick < kGameWriteGapMs) {
-            left++; // (it keeps its last copy until its turn)
+            // (it keeps its last copy and stays dirty until its turn; not counted in `left`: a lot whose game keeps writing
+            // would keep the round open, and with it the drag throttle off)
             g_why.writeGap++;
             continue;
         }

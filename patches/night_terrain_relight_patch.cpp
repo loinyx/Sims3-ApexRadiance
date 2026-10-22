@@ -587,7 +587,7 @@ bool g_sunCallTried = false;
 float g_sunFactor = 1.0f;      // what SunScaleGetter multiplies by (render thread)
 float g_sunScaled = 0.0f;
 
-// (2.16) Moon height. The game's light direction (0x00C14F2E..0x00C150F5, every frame) is the sun's from the time of day
+// (2.15.1) Moon height. The game's light direction (0x00C14F2E..0x00C150F5, every frame) is the sun's from the time of day
 // with its height scaled by [obj+0x9B4] and held at a minimum [obj+0x9B8] (y = max(y k, min), then normalised); at night
 // the sun is below the horizon, so y is that minimum and the moon (the same direction, x mirrored) sits at atan(min / its
 // horizontal part): 0.7 degrees after dusk (min 0.0122), a few degrees at most later. At that height every bump of a road's
@@ -633,8 +633,14 @@ void LiftMoon(BYTE* obj) {
         g_liftObj = 0;
     }
 }
+bool LiftObjLive(); // the managed sky is still the world's (below, with ReadLightState)
 void RestoreMoonHeight() {
     if (!g_liftObj || !(g_liftGameMin > 0.0f) || g_liftWritten < 0.0f) return;
+    if (!LiftObjLive()) { // its world was left (main menu): the sky is freed, nothing to put back
+        g_liftObj = 0;
+        g_liftWritten = -1.0f;
+        return;
+    }
     __try {
         *reinterpret_cast<float*>(g_liftObj + 0x9B8) = g_liftGameMin;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -861,6 +867,7 @@ std::atomic<int> g_lotLampArms{0};
 std::atomic<int> g_lotLampsBaked{0};
 std::atomic<int> g_lotLampsSkippedOff{0};
 float g_level = 0.0f;
+float g_levelStep = 0.0f; // (2.15.1) +0xF0 as the game steps it (g_level is the sky's smooth night)
 std::atomic<float> g_menuLevel{-1.0f}; // g_level for the menu's status pill; -1 = no world loaded or the feature is off
 int g_counter38 = 0;
 int g_counter3C = 0;
@@ -924,6 +931,18 @@ struct LightState {
     uintptr_t cells = 0;
     float level = 0.0f;
 };
+
+bool LiftObjLive() {
+    if (!g_rootPtrAddr || !g_liftObj) return false;
+    __try {
+        const uintptr_t root = *reinterpret_cast<const uintptr_t*>(g_rootPtrAddr);
+        const uintptr_t lightMgr = root ? *reinterpret_cast<const uintptr_t*>(root + 0x1C0) : 0;
+        const uintptr_t back = lightMgr ? *reinterpret_cast<const uintptr_t*>(lightMgr + 0xD0) : 0;
+        return back > 0x210 && back - 0x210 == g_liftObj && *reinterpret_cast<const uintptr_t*>(g_liftObj + 0x1F4) == lightMgr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 
 bool ReadLightState(LightState& out) {
     if (!g_rootPtrAddr) return false;
@@ -1473,6 +1492,9 @@ void OnPresent() {
         g_prevCounter = INT_MIN;
         g_status = "Waiting for the game to load a world";
         g_menuLevel.store(-1.0f);
+        g_liftObj = 0; // the world's sky is gone: nothing to put back
+        g_liftWritten = -1.0f;
+        NightLevel::ResetGates(); // the next world's sun times start fresh
         return;
     }
     DaylightProbe::OnPresent(s.lightMgr); // development builds only (daylight_log): logs the sky state, changes nothing
@@ -1481,6 +1503,10 @@ void OnPresent() {
     int c38 = 0, c3C = 0;
     ReadCounters(s.cells, c38, c3C);
     g_level = s.level;
+    {
+        float f0 = 0.0f; // the light manager's level in its steps (smooth dusk is s.level)
+        g_levelStep = NightLevel::ReadF0(s.lightMgr, f0) && std::isfinite(f0) ? std::clamp(f0, 0.0f, 1.0f) : s.level;
+    }
     g_menuLevel.store(s.level);
     {
         static bool s_held = false;
@@ -2458,6 +2484,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             }
             HookGuard::Run("LevelLightShare frame update", [] { LevelLightShare::OnPresent(); });
             LotLightBridge::SetNightLevel(g_level);
+            LotLightBridge::SetRigNightLevel(g_levelStep); // the rigs' reach law keeps the game's steps (one re-gather per step)
             ProbeNeutral::SetNightLevel(g_level);
             ProbeNeutral::Set(g_neutralProbe, g_neutralProbeStrength);
             LotLightBridge::SetRoofFix(g_roofs, g_roofStrengthSetting);

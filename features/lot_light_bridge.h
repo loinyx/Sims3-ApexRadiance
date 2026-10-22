@@ -7,7 +7,8 @@
 namespace LotLightBridge {
 void SetEnabled(bool on);
 void SetObjectShadowFix(bool on);
-void SetNightLevel(float level); // lightMgr+0xF0, 0 = day, 1 = night
+void SetNightLevel(float level); // lightMgr+0xF0, 0 = day, 1 = night (2.15.1: the sky's smooth night, NightLevel::Read)
+void SetRigNightLevel(float level); // the light manager's level in its steps (the rigs' reach law, ObjectReachLawScale)
 void SetRoofFix(bool on, float strength);
 void OnPresent();                  // render thread, every frame (refreshes the nearby lamp list for roofs)
 // Counts changes of outdoor lot lamps that change the terrain bake (a lamp of the bake added, removed or moved; a lamp

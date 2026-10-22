@@ -690,8 +690,9 @@ void ApplyFeatureState(const toml::table& state) {
         if (ParseKeyChord((*sc)["picture_compare_key"].value_or(std::string()), k)) u.pictureCompareKey = k;
         if (ParseKeyChord((*sc)["screenshot_key"].value_or(std::string()), k)) u.screenshotKey = AcceptScreenshotKey(k);
         u.screenshotHideGameUi = (*sc)["screenshot_hide_game_ui"].value_or(u.screenshotHideGameUi);
+        // (a profile carries the choice, never a folder path: another PC's path would create folders here)
         if (auto f = (*sc)["screenshot_folder"].value<std::string>()) u.screenshotFolder = ScreenshotFolderMode(*f);
-        if (auto f = (*sc)["screenshot_custom_folder"].value<std::string>()) u.screenshotCustomFolder = *f;
+        if (u.screenshotFolder == 2 && u.screenshotCustomFolder.empty()) u.screenshotFolder = 0;
         u.keyChosen = true;
         SetUi(u);
         LOG_INFO("[Config] Shortcuts taken from the profile: menu key " + KeyChordText(u.toggle));
@@ -863,7 +864,6 @@ void CaptureProfileState(toml::table& root) {
             sc.insert("screenshot_key", KeyChordText(u.screenshotKey));
             sc.insert("screenshot_hide_game_ui", u.screenshotHideGameUi);
             sc.insert("screenshot_folder", std::string(ScreenshotFolderName(u.screenshotFolder)));
-            sc.insert("screenshot_custom_folder", u.screenshotCustomFolder);
             root.insert_or_assign("shortcuts", std::move(sc));
         }
 }

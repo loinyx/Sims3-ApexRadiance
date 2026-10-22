@@ -30,6 +30,7 @@ struct Wall {
 struct Lamp {
     float x, y, z; // the head, world
     float k;       // 0.4 x lum(colour x intensity x range): the stamp's weight numerator
+    bool liftable = false; // a lot lamp the bake stamps from kLowLampLift when it lies on the ground (TerrainBakeRule::Liftable)
 };
 // Lot-local metres -> world: wx = m0 lx + m8 lz + tx, wz = m2 lx + m10 lz + tz (room 0's +0xF8 matrix); ground at ty
 struct Grid {
@@ -103,7 +104,7 @@ inline bool FloorShadeRows(const Grid& g, float xzScale, bool on, float rows[12]
 
 // The stamp's weight of a lamp at a ground point (x, groundY, z)
 inline float Weight(const Lamp& L, float x, float groundY, float z) {
-    const float h = std::max(TerrainBakeRule::StampHeight(L.y - groundY), kMinHead); // a lamp on the lawn: as the bake stamps it
+    const float h = std::max(TerrainBakeRule::StampHeight(L.y - groundY, L.liftable), kMinHead); // a lamp on the lawn: as the bake stamps it
     const float dx = L.x - x, dz = L.z - z;
     const float d2 = dx * dx + dz * dz + h * h;
     const float cosv = h / std::sqrt(d2);
@@ -112,7 +113,7 @@ inline float Weight(const Lamp& L, float x, float groundY, float z) {
 
 // How far (horizontal metres) the lamp's stamp weighs at least kMinWeight: k h / d^3 >= kMinWeight
 inline float Reach(const Lamp& L, float groundY) {
-    const float h = std::max(TerrainBakeRule::StampHeight(L.y - groundY), kMinHead);
+    const float h = std::max(TerrainBakeRule::StampHeight(L.y - groundY, L.liftable), kMinHead);
     if (!(L.k > 0.0f) || !std::isfinite(L.k)) return 0.0f;
     return std::min(std::cbrt(L.k * h / kMinWeight), kMaxReach);
 }

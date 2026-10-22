@@ -101,10 +101,11 @@ struct BakeLamp {
     float head[3] = {};
     float range = 0.0f, intensity = 0.0f;
     float colour = 0.0f; // sum of the colour channels the bake takes
+    bool liftable = true; // a lot lamp the bake stamps from kLowLampLift when it lies on the ground (TerrainBakeRule::Liftable)
 };
 // One lamp's stamp at s (v > 0) and whether its head is at most eps over s (under); false when it stamps nothing there
 inline bool BakeStamp(const BakeLamp& L, const float s[3], float base, float eps, float& v, bool& under) {
-    const float h = TerrainBakeRule::StampHeight(L.head[1] - base); // a lamp on the lawn: from kLowLampLift, as the bake
+    const float h = TerrainBakeRule::StampHeight(L.head[1] - base, L.liftable); // a lamp on the lawn: from kLowLampLift, as the bake
     if (!(h > 0.0f)) return false;
     const float dx = L.head[0] - s[0], dz = L.head[2] - s[2];
     const float d2 = dx * dx + h * h + dz * dz;

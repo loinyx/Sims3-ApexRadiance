@@ -10069,7 +10069,8 @@ float UnderFloorShare(const BYTE* room0, const float* s, float base) {
             const BYTE* L = reinterpret_cast<const BYTE*>(*p);
             if (!L || !InTerrainBake(L)) continue;
             const float* head = reinterpret_cast<const float*>(L + 0x120);
-            const float h = TerrainBakeRule::StampHeight(head[1] - base); // the stamp is measured at the terrain under the point (a lamp on the lawn: as the bake)
+            const bool lotLamp = (*reinterpret_cast<const uint32_t*>(L + 0xC0) | *reinterpret_cast<const uint32_t*>(L + 0xC4)) != 0;
+            const float h = TerrainBakeRule::StampHeight(head[1] - base, TerrainBakeRule::Liftable(lotLamp, *reinterpret_cast<const int*>(L + 0xB0))); // the stamp is measured at the terrain under the point (a lamp on the lawn: as the bake)
             if (!(h > 0.0f)) continue;      // cos <= 0: the lamp stamps nothing there
             const float dx = head[0] - s[0], dz = head[2] - s[2];
             const float d2 = dx * dx + h * h + dz * dz;
