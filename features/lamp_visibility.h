@@ -26,7 +26,7 @@ constexpr float kOnPlaneStep = 0.05f; // m: such a point is tested this far towa
 constexpr float kMinRim = 0.04f;      // m: the narrowest half rim of a slab's edge (its floor quadrants' stairs)
 
 template <class View> bool PlacedAt(const View& v, float x, float z) {
-    const float fx = std::floor(x), fz = std::floor(z);
+    const float fx = ApexMath::Floor(x), fz = ApexMath::Floor(z);
     return v.Placed(static_cast<int>(fx), static_cast<int>(fz), Quadrant(x - fx, z - fz));
 }
 
@@ -43,7 +43,7 @@ template <class View> float OpenFraction(const View& v, float ax, float az, floa
     const auto family = [&](float a0, float d) { // the lines a0 + s d = k for s in (0, 1)
         if (!(ApexMath::Fabs(d) > 1e-6f)) return;
         const float lo = std::min(a0, a0 + d), hi = std::max(a0, a0 + d);
-        for (float k = std::floor(lo) + 1.0f; k < hi && n < kMaxCuts; k += 1.0f) cut[n++] = (k - a0) / d;
+        for (float k = ApexMath::Floor(lo) + 1.0f; k < hi && n < kMaxCuts; k += 1.0f) cut[n++] = (k - a0) / d;
     };
     family(ax, dx);
     family(az, dz);

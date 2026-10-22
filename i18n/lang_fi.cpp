@@ -2225,6 +2225,8 @@ const I18n::Pair kPairs[] = {
     {"Indoor object sampler scan", "Sisäesineiden samplerien tarkistus"},
     {"Only declared samplers are checked", "Vain esitellyt samplerit tarkistetaan"},
     {"Room record lookup cache", "Huonetietueiden hakuvälimuisti"},
+    {"Follow bound textures", "Seuraa sidottuja tekstuureja"},
+    {"Texture reads answered without asking the device", "Tekstuurien luvut vastataan kysymättä laitteelta"},
     {"Window light channel memo", "Ikkunavalojen kanavan muisti"},
     {"Asked once per sample batch", "Kysytään kerran näyte-erää kohden"},
     {"Paced relight while moving", "Annosteltu uudelleenvalaisu liikkuessa"},

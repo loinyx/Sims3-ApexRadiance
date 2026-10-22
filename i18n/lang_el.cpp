@@ -2225,6 +2225,8 @@ const I18n::Pair kPairs[] = {
     {"Indoor object sampler scan", "Σάρωση samplers εσωτερικών αντικειμένων"},
     {"Only declared samplers are checked", "Ελέγχονται μόνο οι δηλωμένοι samplers"},
     {"Room record lookup cache", "Cache αναζήτησης εγγραφών δωματίων"},
+    {"Follow bound textures", "Παρακολούθηση δεμένων υφών"},
+    {"Texture reads answered without asking the device", "Οι αναγνώσεις υφών απαντώνται χωρίς ερώτηση στη συσκευή"},
     {"Window light channel memo", "Μνήμη καναλιού φώτων παραθύρων"},
     {"Asked once per sample batch", "Ερωτάται μία φορά ανά δέσμη δειγμάτων"},
     {"Paced relight while moving", "Σταδιακός επαναφωτισμός σε κίνηση"},

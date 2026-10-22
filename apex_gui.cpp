@@ -1695,6 +1695,7 @@ void DevTesterTab() {
         TesterSwitch("Story grid memo", "A story's walls are looked up once per frame", TesterToggles::gridMemo, Effect::None);
         TesterSwitch("Re-issued draw filter", "Only observers run for draws drawn again", PerfToggles::ReissueFilter, Effect::None);
         TesterSwitch("Follow bound shaders", "Shader reads answered without asking the device", PerfToggles::FollowBoundShaders, Effect::None);
+        TesterSwitch("Follow bound textures", "Texture reads answered without asking the device", PerfToggles::FollowBoundTextures, Effect::None);
         TesterSwitch("Sampled dispatch timing", "Developer timing measures one call in 16", PerfToggles::SampledDispatchTiming, Effect::None);
         TesterSwitch("Shader precompile answer", "Kept once every job is done", PerfToggles::PrecompileAnswerCache, Effect::None);
         TesterSwitch("Ambient shadows shader cache", "The last shader's answer is kept", PerfToggles::AoLastShaderCache, Effect::None);

@@ -525,11 +525,26 @@ IDirect3DDevice9* g_boundDev = nullptr;
 IDirect3DPixelShader9* g_boundPs = nullptr;
 IDirect3DVertexShader9* g_boundVs = nullptr;
 bool g_boundPsKnown = false, g_boundVsKnown = false;
-std::atomic<bool> g_shadersDirty{false};
+// (2.15.3) the textures of pixel samplers 0..15 (BoundTexture), on the same terms; bit s of g_boundTexKnown = s is known
+IDirect3DBaseTexture9* g_boundTex[16] = {};
+uint32_t g_boundTexKnown = 0;
+uint32_t g_texChecks = 0, g_texMismatches = 0;
+bool g_texFollowOff = false; // repeated differences from the device: read back from then on
+std::atomic<bool> g_shadersDirty{false}; // (shaders and textures)
 inline bool OnRenderThread() { return ThreadId() == g_renderTid.load(std::memory_order_relaxed); }
 inline void ForgetBoundShaders() {
-    if (OnRenderThread()) g_boundPsKnown = g_boundVsKnown = false;
+    if (OnRenderThread()) g_boundPsKnown = g_boundVsKnown = false, g_boundTexKnown = 0;
     else g_shadersDirty.store(true, std::memory_order_relaxed);
+}
+inline void NoteBoundTex(IDirect3DDevice9* d, DWORD st, IDirect3DBaseTexture9* t) {
+    if (st >= 16) return;
+    if (!OnRenderThread()) g_shadersDirty.store(true, std::memory_order_relaxed);
+    else if (d == g_boundDev) g_boundTex[st] = t, g_boundTexKnown |= 1u << st;
+}
+inline void ForgetBoundTex(DWORD st) {
+    if (st >= 16) return;
+    if (!OnRenderThread()) g_shadersDirty.store(true, std::memory_order_relaxed);
+    else g_boundTexKnown &= ~(1u << st);
 }
 inline void NoteBoundPs(IDirect3DDevice9* d, IDirect3DPixelShader9* s) {
     if (!OnRenderThread()) g_shadersDirty.store(true, std::memory_order_relaxed);
@@ -541,7 +556,7 @@ inline void NoteBoundVs(IDirect3DDevice9* d, IDirect3DVertexShader9* s) {
 }
 // Render thread: follow this device's shaders from now on (another device's were followed)
 inline void TakeBoundDevice(IDirect3DDevice9* d) {
-    if (d != g_boundDev) g_boundDev = d, g_boundPsKnown = g_boundVsKnown = false;
+    if (d != g_boundDev) g_boundDev = d, g_boundPsKnown = g_boundVsKnown = false, g_boundTexKnown = 0;
 }
 
 HRESULT STDMETHODCALLTYPE H_DrawIndexedPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, INT bv, UINT mv, UINT nv, UINT si, UINT pc) {
@@ -581,8 +596,11 @@ HRESULT STDMETHODCALLTYPE H_SetVertexShader(IDirect3DDevice9* d, IDirect3DVertex
 HRESULT STDMETHODCALLTYPE H_SetTexture(IDirect3DDevice9* d, DWORD st, IDirect3DBaseTexture9* t) {
     CountCall(kCallSetTexture);
     HRESULT hr = S_OK;
-    if (!Run(g_stex, d, hr, st, t)) return hr;
-    return o_stex(d, st, t);
+    if (!Run(g_stex, d, hr, st, t)) return hr; // (a callback that skipped it and set one itself did so through CallOriginal*: followed there)
+    hr = o_stex(d, st, t);
+    if (SUCCEEDED(hr)) NoteBoundTex(d, st, t);
+    else ForgetBoundTex(st);
+    return hr;
 }
 HRESULT STDMETHODCALLTYPE H_Present(IDirect3DDevice9* d, const RECT* sr, const RECT* dr, HWND w, const RGNDATA* rg) {
     HRESULT hr = S_OK;
@@ -798,7 +816,7 @@ HRESULT CallOriginalSetVertexShader(IDirect3DDevice9* d, IDirect3DVertexShader9*
 
 IDirect3DPixelShader9* BoundPixelShader(IDirect3DDevice9* d) {
     const bool render = OnRenderThread();
-    if (render && g_shadersDirty.load(std::memory_order_relaxed) && g_shadersDirty.exchange(false)) g_boundPsKnown = g_boundVsKnown = false;
+    if (render && g_shadersDirty.load(std::memory_order_relaxed) && g_shadersDirty.exchange(false)) g_boundPsKnown = g_boundVsKnown = false, g_boundTexKnown = 0;
     if (render) TakeBoundDevice(d);
     if (render && g_boundPsKnown && PerfToggles::FollowBoundShaders.load(std::memory_order_relaxed)) return g_boundPs;
     IDirect3DPixelShader9* s = nullptr;
@@ -810,7 +828,7 @@ IDirect3DPixelShader9* BoundPixelShader(IDirect3DDevice9* d) {
 
 IDirect3DVertexShader9* BoundVertexShader(IDirect3DDevice9* d) {
     const bool render = OnRenderThread();
-    if (render && g_shadersDirty.load(std::memory_order_relaxed) && g_shadersDirty.exchange(false)) g_boundPsKnown = g_boundVsKnown = false;
+    if (render && g_shadersDirty.load(std::memory_order_relaxed) && g_shadersDirty.exchange(false)) g_boundPsKnown = g_boundVsKnown = false, g_boundTexKnown = 0;
     if (render) TakeBoundDevice(d);
     if (render && g_boundVsKnown && PerfToggles::FollowBoundShaders.load(std::memory_order_relaxed)) return g_boundVs;
     IDirect3DVertexShader9* s = nullptr;
@@ -820,10 +838,38 @@ IDirect3DVertexShader9* BoundVertexShader(IDirect3DDevice9* d) {
     return s;
 }
 
+IDirect3DBaseTexture9* BoundTexture(IDirect3DDevice9* d, DWORD st) {
+    const bool render = OnRenderThread() && st < 16;
+    if (render && g_shadersDirty.load(std::memory_order_relaxed) && g_shadersDirty.exchange(false)) g_boundPsKnown = g_boundVsKnown = false, g_boundTexKnown = 0;
+    if (render) TakeBoundDevice(d);
+    const bool known = render && (g_boundTexKnown >> st & 1u) && !g_texFollowOff && PerfToggles::FollowBoundTextures.load(std::memory_order_relaxed);
+    if (known && (++g_texChecks & 255u) != 0) return g_boundTex[st];
+    IDirect3DBaseTexture9* t = nullptr;
+    if (FAILED(d->GetTexture(st, &t))) t = nullptr;
+    if (t) t->Release(); // the device keeps it alive
+    if (known && t != g_boundTex[st] && ++g_texMismatches >= 8 && !g_texFollowOff) {
+        g_texFollowOff = true;
+        LOG_WARNING("[D3D9Hooks] The followed textures differed from the device's 8 times (a texture set past the device's SetTexture): read back from now on");
+    }
+    if (render) g_boundTex[st] = t, g_boundTexKnown |= 1u << st;
+    return t;
+}
+
+HRESULT GetBoundTexture(IDirect3DDevice9* d, DWORD st, IDirect3DBaseTexture9** out) {
+    if (!out) return E_POINTER;
+    IDirect3DBaseTexture9* t = BoundTexture(d, st);
+    if (t) t->AddRef();
+    *out = t;
+    return S_OK;
+}
+
 void ShaderStateChanged() { ForgetBoundShaders(); }
 HRESULT CallOriginalSetTexture(IDirect3DDevice9* d, DWORD st, IDirect3DBaseTexture9* t) {
     ++t_origCalls[kOrigSTex];
-    return o_stex ? o_stex(d, st, t) : d->SetTexture(st, t);
+    const HRESULT hr = o_stex ? o_stex(d, st, t) : d->SetTexture(st, t);
+    if (SUCCEEDED(hr)) NoteBoundTex(d, st, t);
+    else ForgetBoundTex(st);
+    return hr;
 }
 
 // ---- development build counters ----

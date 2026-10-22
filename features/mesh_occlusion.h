@@ -1,4 +1,5 @@
 #pragma once
+#include "fast_math.h"
 // Opaque instanced geometry supplements floor/wall rays. Credits: @loinyx
 #include <algorithm>
 #include <atomic>
@@ -13,13 +14,13 @@ struct Vec {float x=0,y=0,z=0;};
 inline Vec Sub(Vec a,Vec b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
 inline Vec Cross(Vec a,Vec b){return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};}
 inline float Dot(Vec a,Vec b){return a.x*b.x+a.y*b.y+a.z*b.z;}
-inline bool Finite(Vec a){return std::isfinite(a.x)&&std::isfinite(a.y)&&std::isfinite(a.z);}
+inline bool Finite(Vec a){return ApexMath::IsFinite(a.x)&&ApexMath::IsFinite(a.y)&&ApexMath::IsFinite(a.z);}
 // The captured instanced VS divides POSITION0 by w, rotates xz and shears y along x.
 inline bool Decode(const float p[4],const float place[4],const float turn[4],Vec& out){
-    if(!std::isfinite(p[3])||std::fabs(p[3])<1e-6f)return false;
+    if(!ApexMath::IsFinite(p[3])||ApexMath::Fabs(p[3])<1e-6f)return false;
     const Vec l{p[0]/p[3],p[1]/p[3],p[2]/p[3]};
     out={l.x*turn[0]-l.z*turn[2]+place[0],l.y+l.x*turn[1]+place[1],l.x*turn[2]+l.z*turn[0]+place[2]};
-    return Finite(out)&&std::fabs(l.x)<64&&std::fabs(l.y)<64&&std::fabs(l.z)<64;
+    return Finite(out)&&ApexMath::Fabs(l.x)<64&&ApexMath::Fabs(l.y)<64&&ApexMath::Fabs(l.z)<64;
 }
 struct Triangle {Vec a,b,c;};
 struct Box {
@@ -28,7 +29,7 @@ struct Box {
     bool Hits(Vec a,Vec d,float low,float high)const{
         const float p[3]={a.x,a.y,a.z},v[3]={d.x,d.y,d.z},l[3]={lo.x,lo.y,lo.z},h[3]={hi.x,hi.y,hi.z};
         for(int k=0;k<3;++k){
-            if(std::fabs(v[k])<1e-8f){if(p[k]<l[k]||p[k]>h[k])return false;continue;}
+            if(ApexMath::Fabs(v[k])<1e-8f){if(p[k]<l[k]||p[k]>h[k])return false;continue;}
             float x=(l[k]-p[k])/v[k],y=(h[k]-p[k])/v[k];if(x>y)std::swap(x,y);
             low=std::max(low,x);high=std::min(high,y);if(high<low)return false;
         }return true;
@@ -36,7 +37,7 @@ struct Box {
 };
 inline bool Hits(const Triangle& t,Vec a,Vec d,float low,float high){
     const Vec e1=Sub(t.b,t.a),e2=Sub(t.c,t.a),p=Cross(d,e2);const float det=Dot(e1,p);
-    if(std::fabs(det)<1e-8f)return false;
+    if(ApexMath::Fabs(det)<1e-8f)return false;
     const float inv=1/det;const Vec s=Sub(a,t.a);const float u=Dot(s,p)*inv;
     if(u<0||u>1)return false;const Vec q=Cross(s,e1);const float v=Dot(d,q)*inv;
     if(v<0||u+v>1)return false;const float distance=Dot(e2,q)*inv;
@@ -67,7 +68,7 @@ public:
     }
     size_t Count()const{return triangles.size();}
     bool Blocked(Vec a,Vec b)const{
-        if(nodes.empty()||!Finite(a)||!Finite(b))return false;const Vec d=Sub(b,a);const float length=std::sqrt(Dot(d,d));
+        if(nodes.empty()||!Finite(a)||!Finite(b))return false;const Vec d=Sub(b,a);const float length=ApexMath::Sqrt(Dot(d,d));
         if(!(length>.04f))return false;const float low=.02f/length,high=1-low;
         uint32_t stack[64]={0};unsigned count=1;
         while(count){const auto& n=nodes[stack[--count]];if(!n.box.Hits(a,d,low,high))continue;

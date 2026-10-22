@@ -2225,6 +2225,8 @@ const I18n::Pair kPairs[] = {
     {"Indoor object sampler scan", "สแกนแซมเพลอร์ของวัตถุในอาคาร"},
     {"Only declared samplers are checked", "ตรวจเฉพาะแซมเพลอร์ที่ประกาศไว้"},
     {"Room record lookup cache", "แคชค้นหาระเบียนห้อง"},
+    {"Follow bound textures", "ติดตามเท็กซ์เจอร์ที่ผูกอยู่"},
+    {"Texture reads answered without asking the device", "ตอบการอ่านเท็กซ์เจอร์โดยไม่ต้องถามอุปกรณ์"},
     {"Window light channel memo", "บันทึกช่องของแสงหน้าต่าง"},
     {"Asked once per sample batch", "ถามครั้งเดียวต่อชุดตัวอย่าง"},
     {"Paced relight while moving", "ปรับแสงใหม่แบบค่อยเป็นค่อยไประหว่างเคลื่อนที่"},

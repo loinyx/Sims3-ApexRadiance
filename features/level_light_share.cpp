@@ -82,6 +82,7 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include "apex_util.h"
 #include "level_light_share.h"
 #include "terrain_bake_rule.h"
 #include "fast_math.h"
@@ -342,12 +343,17 @@ constexpr const char* kTestPartNames[kTpCount] = {"wall pass", "of it game wall 
                                                   "stories in between", "grid pass", "of it slab gate", "indoor floors"};
 uint64_t g_partCycles[kTpCount] = {};
 uint32_t g_partCalls[kTpCount] = {};
+// (2.15.3) One call in kTimedEvery is timed and counted kTimedEvery times (each rdtsc costs some 25-40 cycles, and these
+// run per lamp per sample: up to a dozen a sample). The totals stay estimates of the same size; the calls are all counted.
+constexpr uint32_t kTimedEvery = 8;
+thread_local uint32_t t_timedTick = 0;
+inline uint64_t TimedStart() { return (++t_timedTick & (kTimedEvery - 1)) == 0 ? __rdtsc() : 0; }
 struct PartTimer {
     int part;
     uint64_t t0;
-    explicit PartTimer(int p) : part(p), t0(__rdtsc()) {}
+    explicit PartTimer(int p) : part(p), t0(TimedStart()) {}
     ~PartTimer() {
-        g_partCycles[part] += __rdtsc() - t0;
+        if (t0) g_partCycles[part] += (__rdtsc() - t0) * kTimedEvery;
         g_partCalls[part]++;
     }
 };
@@ -1420,16 +1426,16 @@ float UpwardHeadroom(uintptr_t tracker, int home, void* light) {
         // Gather is outside the lifetime of LampPos's per-point cache.
         reinterpret_cast<LightPos_t>(kLightPos)(light, lampW);
         const uintptr_t mgr1 = StoryManager(tracker, 1);
-        if (!mgr1 || !std::isfinite(lampW[1])) return 0.0f;
+        if (!mgr1 || !ApexMath::IsFinite(lampW[1])) return 0.0f;
         const float floor1 = *reinterpret_cast<const float*>(mgr1 + 0x98);
         const float lotBase = *reinterpret_cast<const float*>(mgr1 + 0xD4);
-        if (!std::isfinite(floor1) || !std::isfinite(lotBase)) return 0.0f;
+        if (!ApexMath::IsFinite(floor1) || !ApexMath::IsFinite(lotBase)) return 0.0f;
         const float foundation = floor1 - lotBase;
         const float wall1 = lotBase + (foundation > 0.05f && foundation < 2.95f ? foundation : 3.0f);
         for (int story = std::max(home + 1, 1); story <= 7; story++) {
             if (!StoryManager(tracker, story)) continue;
             const float rise = wall1 + 3.0f * static_cast<float>(story - 1) - lampW[1];
-            if (std::isfinite(rise) && rise > 0.0f) return rise;
+            if (ApexMath::IsFinite(rise) && rise > 0.0f) return rise;
         }
         return 0.0f;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -1479,7 +1485,7 @@ struct OpeningMask {
     int w = 0, h = 0, openings = 0; // openings: quadrants
     std::vector<uint8_t> bits;
     bool NearTile(int ix, int iz) const { return ix >= 0 && iz >= 0 && ix < w && iz < h && (bits[static_cast<size_t>(iz) * w + ix] & 2); }
-    bool Near(float x, float z) const { return NearTile(static_cast<int>(std::floor(x)), static_cast<int>(std::floor(z))); }
+    bool Near(float x, float z) const { return NearTile(static_cast<int>(ApexMath::Floor(x)), static_cast<int>(ApexMath::Floor(z))); }
 };
 
 bool ReadGridSize(uintptr_t mgr, int& w, int& h) {
@@ -2025,7 +2031,7 @@ void NoteClassThreshold(const BYTE* room) {
     __try {
         const int cls = *reinterpret_cast<const int*>(room + 0xF4);
         const float thr = *reinterpret_cast<const float*>(room + 0x63C);
-        if (cls >= 0 && cls < 4 && std::isfinite(thr) && thr > 0.0f) g_thrByClass[cls] = thr;
+        if (cls >= 0 && cls < 4 && ApexMath::IsFinite(thr) && thr > 0.0f) g_thrByClass[cls] = thr;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
     }
 }
@@ -2047,7 +2053,7 @@ void ReadThresholdTable() {
     if (!MemPatch::ReadBytes(fn, got, sizeof got) || std::memcmp(got, code, sizeof code) != 0) return;
     if (!MemPatch::ReadBytes(factorAt, factor, sizeof factor) || !MemPatch::ReadBytes(scaleAt, &scale, sizeof scale)) return;
     const float thr = factor[2] * scale;
-    if (std::isfinite(thr) && thr > 0.0f) g_thrTable = thr;
+    if (ApexMath::IsFinite(thr) && thr > 0.0f) g_thrTable = thr;
 }
 float TopThreshold() {
     if (g_thrTable > 0.0f) return g_thrTable;
@@ -2102,8 +2108,8 @@ bool ProbeAmbient(BYTE* room, float thr, RoomAmbient& a) {
     }
     if (!ok) return false;
     for (float v : a.c4)
-        if (!std::isfinite(v)) return false;
-    return std::isfinite(a.norm) && a.norm > 0.0f && std::isfinite(a.base);
+        if (!ApexMath::IsFinite(v)) return false;
+    return ApexMath::IsFinite(a.norm) && a.norm > 0.0f && ApexMath::IsFinite(a.base);
 }
 // A member whose light list is gathered: waiting for its solve, being solved or done (states 2 to 5)
 bool AmbientGathered(const BYTE* room) {
@@ -2819,12 +2825,12 @@ float MeasuredDrop(uintptr_t wall, int cls, uintptr_t batch) {
     // the whole wall, not only this piece: a long wall has vertices at its ends and openings only (F7: the middle
     // pieces found none and kept their base)
     const float ax = w.cx, az = w.cz, bx = w.cx + w.dx, bz = w.cz + w.dz;
-    if (!std::isfinite(ax) || !std::isfinite(az) || !std::isfinite(bx) || !std::isfinite(bz) || w.dx * w.dx + w.dz * w.dz < 1e-4f) return 0.0f;
+    if (!ApexMath::IsFinite(ax) || !ApexMath::IsFinite(az) || !ApexMath::IsFinite(bx) || !ApexMath::IsFinite(bz) || w.dx * w.dx + w.dz * w.dz < 1e-4f) return 0.0f;
     const float ext = 0.1f;
     float foot = 0.0f;
     if (WallHeights::DrawnFoot(ax, az, bx, bz, ext, w.oy, foot)) {
         const float drop = foot - w.oy;
-        return std::isfinite(drop) && ApexMath::Fabs(drop) > 0.1f && ApexMath::Fabs(drop) < 3.2f ? drop : 0.0f;
+        return ApexMath::IsFinite(drop) && ApexMath::Fabs(drop) > 0.1f && ApexMath::Fabs(drop) < 3.2f ? drop : 0.0f;
     }
     return 0.0f;
 }
@@ -2944,7 +2950,7 @@ void NoteWallCell(void* geo, uintptr_t mgr, int x, int z, int dir) {
     g_wallUvSeen.fetch_add(1, std::memory_order_relaxed);
     WallCellRead c;
     if (!ReadWallCell(geo, mgr, x, z, dir, c)) return;
-    const int cell = static_cast<int>(std::floor(c.tmid * static_cast<float>(c.len)));
+    const int cell = static_cast<int>(ApexMath::Floor(c.tmid * static_cast<float>(c.len)));
     const bool sane = c.perp < 0.35f && cell >= 0 && cell < c.len && c.hl > 0.2f && c.hr > 0.2f && c.hm > 0.2f && c.hl < 20.0f && c.hr < 20.0f && c.hm < 20.0f;
     const bool tall = sane && std::max({c.hl, c.hm, c.hr}) > 3.02f;
     if (sane) g_wallUvMatched.fetch_add(1, std::memory_order_relaxed);
@@ -3054,7 +3060,7 @@ void __fastcall WallUvHook(void* geo, void*, uintptr_t mgr, int x, int z, int di
     bool recut = false;
     float f3 = 0.0f, f5 = 0.0f;
     if ((mode == 0 || mode == 1) && g_foundationWallsOn.load(std::memory_order_relaxed) && ReadWallCell(geo, mgr, x, z, dir, c) && ReadCellCrop(geo, k)) {
-        const int cell = static_cast<int>(std::floor(c.tmid * static_cast<float>(c.len)));
+        const int cell = static_cast<int>(ApexMath::Floor(c.tmid * static_cast<float>(c.len)));
         if (c.perp < 0.35f && cell >= 0 && cell < c.len && c.hl > 0.2f && c.hm > 0.2f && c.hr > 0.2f && std::max({c.hl, c.hm, c.hr}) < 2.98f) {
             f3 = std::max(0.0f, k.w3 / 512.0f - 8.0f), f5 = std::max(0.0f, k.w5 / 512.0f - 8.0f);
             // the game shows the bottom vertices at the light base and the top ones at base + 3 (1 - f)
@@ -3083,7 +3089,7 @@ void __fastcall WallUvHook(void* geo, void*, uintptr_t mgr, int x, int z, int di
 }
 // The drawn height at t (0..len cells along the wall) of a wall's cells; 0 = not known
 float CellHeightAt(const WallCellH* cells, int n, float t) {
-    const int cell = std::clamp(static_cast<int>(std::floor(t)), 0, n - 1);
+    const int cell = std::clamp(static_cast<int>(ApexMath::Floor(t)), 0, n - 1);
     const WallCellH& h = cells[cell];
     if (!h.set) return 0.0f;
     const float u = std::clamp(t - static_cast<float>(cell), 0.0f, 1.0f);
@@ -3601,6 +3607,9 @@ struct StoryGrid {
     bool capKnown = false;      // the story above was known (its lot tracker) when built; else built again once it is
     std::vector<int32_t> zl;    // edge (x, Z)-(x + 1, Z) at Z * w + x (Z = 0..h); -1 = no wall
     std::vector<int32_t> xl;    // edge (X, z)-(X, z + 1) at z * (w + 1) + X (X = 0..w)
+    // (2.15.3) 1 where a wall edge lies on the line within one cell of the crossing: zlNear at Z * w + x for zl (x - 1 .. x + 1),
+    // xlNear at z * (w + 1) + X for xl (z - 1 .. z + 1); built with the grid (NoteNearEdges), read by GridPassImpl's LineEmpty
+    std::vector<uint8_t> zlNear, xlNear;
     std::vector<int32_t> dg;    // per tile: [0] (x, z)-(x + 1, z + 1), [1] (x, z + 1)-(x + 1, z)
     std::vector<uint8_t> flags; // per tile: bit 0 / 1 a diagonal wall [0] / [1]; bit 4 + q: quadrant q under a roof or a ceiling
     std::vector<float> ceil;    // per tile: its floor + 3 m, or the story above's floor where lower (a ray crossing that height over
@@ -3622,6 +3631,17 @@ struct StoryGrid {
 };
 int32_t GridZL(const StoryGrid& g, int x, int Z) { return x >= 0 && x < g.w && Z >= 0 && Z <= g.h ? g.zl[static_cast<size_t>(Z) * g.w + x] : -1; }
 int32_t GridXL(const StoryGrid& g, int X, int z) { return X >= 0 && X <= g.w && z >= 0 && z < g.h ? g.xl[static_cast<size_t>(z) * (g.w + 1) + X] : -1; }
+// The grid's zlNear / xlNear (see StoryGrid), once its edges are final
+void NoteNearEdges(StoryGrid& g) {
+    g.zlNear.assign(g.zl.size(), 0);
+    g.xlNear.assign(g.xl.size(), 0);
+    for (int Z = 0; Z <= g.h; Z++)
+        for (int x = 0; x < g.w; x++)
+            g.zlNear[static_cast<size_t>(Z) * g.w + x] = GridZL(g, x - 1, Z) >= 0 || GridZL(g, x, Z) >= 0 || GridZL(g, x + 1, Z) >= 0;
+    for (int z = 0; z < g.h; z++)
+        for (int X = 0; X <= g.w; X++)
+            g.xlNear[static_cast<size_t>(z) * (g.w + 1) + X] = GridXL(g, X, z - 1) >= 0 || GridXL(g, X, z) >= 0 || GridXL(g, X, z + 1) >= 0;
+}
 struct GridTileRead {
     uintptr_t walls[8];
     float floor;
@@ -3661,7 +3681,7 @@ bool ReadGridWall(uintptr_t w, GridWallRead& g) { // POD only (SEH)
         g.len = *reinterpret_cast<const int*>(w + 0x24);
         g.orient = *reinterpret_cast<const int*>(w + 0x8);
         g.half = (*reinterpret_cast<const BYTE*>(w + 0x11) & 1) != 0;
-        return g.len >= 1 && g.len <= 64 && std::isfinite(g.ox) && std::isfinite(g.oy) && std::isfinite(g.oz) && std::isfinite(g.rx) && std::isfinite(g.rz);
+        return g.len >= 1 && g.len <= 64 && ApexMath::IsFinite(g.ox) && ApexMath::IsFinite(g.oy) && ApexMath::IsFinite(g.oz) && ApexMath::IsFinite(g.rx) && ApexMath::IsFinite(g.rz);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -3701,7 +3721,7 @@ bool FaceEdge(const StoryGrid& g, const GridWallRead& f, int ix, int iz, int& ki
     const float ax = ApexMath::Fabs(f.rx), az = ApexMath::Fabs(f.rz), rr = f.rx * f.rx + f.rz * f.rz;
     if (!(rr > 1e-4f)) return false;
     const float t = ((static_cast<float>(ix) + 0.5f - f.ox) * f.rx + (static_cast<float>(iz) + 0.5f - f.oz) * f.rz) / rr; // the tile's centre along the run
-    cell = static_cast<int>(std::floor(t * static_cast<float>(f.len)));
+    cell = static_cast<int>(ApexMath::Floor(t * static_cast<float>(f.len)));
     if (az < 0.01f * ax) { // along x: the line z = Z, the tile's -z or +z edge
         const int Z = static_cast<int>(std::lround(f.oz));
         if (Z != iz && Z != iz + 1) return false;
@@ -3888,11 +3908,11 @@ float UpperFloorBeside(uintptr_t mgrUp, uintptr_t levelUp, float x, float z, flo
     __try {
         for (int side = -1; side <= 1; side += 2) {
             const float sx = x + side * nx, sz = z + side * nz;
-            const int ix = static_cast<int>(std::floor(sx)), iz = static_cast<int>(std::floor(sz));
+            const int ix = static_cast<int>(ApexMath::Floor(sx)), iz = static_cast<int>(ApexMath::Floor(sz));
             const uintptr_t tile = LightTile(mgrUp, ix, iz);
             if (!tile || !PlacedFloorAt(levelUp, ix, iz, Quadrant(sx - static_cast<float>(ix), sz - static_cast<float>(iz)))) continue;
             const float fh = *reinterpret_cast<const float*>(tile + 0x78);
-            if (std::isfinite(fh)) top = std::max(top, fh);
+            if (ApexMath::IsFinite(fh)) top = std::max(top, fh);
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return -1e30f;
@@ -3951,7 +3971,7 @@ int ReadStoryWindowLights(uintptr_t tracker, int story, const Xform& xf, GlassLi
                 const float* pos = reinterpret_cast<const float*>(light + 0x120);
                 float L[3];
                 ToLocal(xf, pos, L);
-                if (!std::isfinite(L[0]) || !std::isfinite(L[1]) || !std::isfinite(L[2])) return;
+                if (!ApexMath::IsFinite(L[0]) || !ApexMath::IsFinite(L[1]) || !ApexMath::IsFinite(L[2])) return;
                 seen[n] = light;
                 out[n] = GlassLight{L[0], L[1], L[2]};
                 n++;
@@ -4023,7 +4043,7 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
             GridTileRead t{};
             if (!ReadGridTile(mgr, ix, iz, t)) continue;
             const size_t ti = static_cast<size_t>(iz) * w + ix;
-            if (std::isfinite(t.floor)) {
+            if (ApexMath::IsFinite(t.floor)) {
                 floorY[ti] = t.floor;
                 g->ceil[ti] = t.floor + kStoryWallH;
             }
@@ -4068,7 +4088,7 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
                     const size_t ti = static_cast<size_t>(iz) * w + ix;
                     if (!(g->ceil[ti] < 1e8f)) continue;
                     GridTileRead up{};
-                    if (!ReadGridTile(mgrUp, ix, iz, up) || !std::isfinite(up.floor)) continue;
+                    if (!ReadGridTile(mgrUp, ix, iz, up) || !ApexMath::IsFinite(up.floor)) continue;
                     if (up.floor < g->ceil[ti] - 0.05f && up.floor > floorY[ti] + 0.3f) {
                         g->ceil[ti] = up.floor;
                         g->ceilLowered++;
@@ -4189,6 +4209,7 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
     }
     if (++g_gridSerial == 0) g_gridSerial = 1;
     g->serial = g_gridSerial;
+    NoteNearEdges(*g);
     QueryPerformanceCounter(&q1);
     QueryPerformanceFrequency(&qf);
     g->buildMs = static_cast<double>(q1.QuadPart - q0.QuadPart) * 1000.0 / static_cast<double>(qf.QuadPart);
@@ -4710,19 +4731,21 @@ struct GridRim {
     float dx = 0.0f, dy = 0.0f, dz = 0.0f;
     bool off = false;
     float offHalf = Penumbra::kMinHalf;
-    mutable bool ready = false;
+    // (2.15.3) each slant at the ray's first crossing of a wall of its direction (was all four at the first walled crossing:
+    // 16 square roots and 16 divisions, most rays crossing walls of one or two directions); the same SlantOf calls
+    mutable uint8_t ready = 0; // bit 0..3: x_, z_, d0_, d1_ worked out
     mutable Penumbra::Slant x_, z_, d0_, d1_; // walls on x = X, on z = Z, diagonals x - z = k and x + z = k
-    void Ready() const {
-        if (ready) return;
-        ready = true;
-        if (off) return; // (slant 1)
-        x_ = Penumbra::SlantOf(dx, dy, dz, 1.0f, 0.0f), z_ = Penumbra::SlantOf(dx, dy, dz, 0.0f, 1.0f);
-        d0_ = Penumbra::SlantOf(dx, dy, dz, 1.0f, -1.0f), d1_ = Penumbra::SlantOf(dx, dy, dz, 1.0f, 1.0f);
+    const Penumbra::Slant& Lazy(Penumbra::Slant& s, uint8_t bit, float nx, float nz) const {
+        if (!(ready & bit)) {
+            ready |= bit;
+            if (!off) s = Penumbra::SlantOf(dx, dy, dz, nx, nz); // (off: slant 1)
+        }
+        return s;
     }
-    const Penumbra::Slant& X() const { return Ready(), x_; }
-    const Penumbra::Slant& Z() const { return Ready(), z_; }
-    const Penumbra::Slant& D0() const { return Ready(), d0_; }
-    const Penumbra::Slant& D1() const { return Ready(), d1_; }
+    const Penumbra::Slant& X() const { return Lazy(x_, 1, 1.0f, 0.0f); }
+    const Penumbra::Slant& Z() const { return Lazy(z_, 2, 0.0f, 1.0f); }
+    const Penumbra::Slant& D0() const { return Lazy(d0_, 4, 1.0f, -1.0f); }
+    const Penumbra::Slant& D1() const { return Lazy(d1_, 8, 1.0f, 1.0f); }
     float Half(float t) const { return off ? offHalf : Penumbra::Half(radius, t, aa); }
 };
 // Diagonal walls across tile (ix, iz): [0] x - z = ix - iz, [1] x + z = ix + iz + 1 (u = x - ix from the low-x end; the edge
@@ -4776,13 +4799,18 @@ float GridPassImpl(const StoryGrid& g, const float* A, const float* B, GridWhy& 
     rim.off = !Penumbra::g_on.load(std::memory_order_relaxed), rim.offHalf = offHalf;
     // no wall edge on this line within the spot's reach (the cell crossed and the one on each side, GridLinePass): the crossing
     // passes whole and needs no rim (most crossings: the slants are then never worked out)
+    // (2.15.3) inside the grid one look at the near-edge map built with it (the same three cells); outside, the three looks
     const auto LineEmpty = [&g](bool xl, int line, int cell) {
+        if (xl) {
+            if (line >= 0 && line <= g.w && cell >= 0 && cell < g.h && !g.xlNear.empty()) return g.xlNear[static_cast<size_t>(cell) * (g.w + 1) + line] == 0;
+        } else if (line >= 0 && line <= g.h && cell >= 0 && cell < g.w && !g.zlNear.empty())
+            return g.zlNear[static_cast<size_t>(line) * g.w + cell] == 0;
         for (int k = cell - 1; k <= cell + 1; k++)
             if ((xl ? GridXL(g, line, k) : GridZL(g, k, line)) >= 0) return false;
         return true;
     };
-    int ix = static_cast<int>(std::floor(A[0])), iz = static_cast<int>(std::floor(A[2]));
-    const int bx = static_cast<int>(std::floor(B[0])), bz = static_cast<int>(std::floor(B[2]));
+    int ix = static_cast<int>(ApexMath::Floor(A[0])), iz = static_cast<int>(ApexMath::Floor(A[2]));
+    const int bx = static_cast<int>(ApexMath::Floor(B[0])), bz = static_cast<int>(ApexMath::Floor(B[2]));
     const int sx = dx > 0.0f ? 1 : -1, sz = dz > 0.0f ? 1 : -1;
     constexpr float kInf = 1e30f;
     const float tdx = ApexMath::Fabs(dx) > 1e-9f ? 1.0f / ApexMath::Fabs(dx) : kInf, tdz = ApexMath::Fabs(dz) > 1e-9f ? 1.0f / ApexMath::Fabs(dz) : kInf;
@@ -4869,7 +4897,7 @@ bool GridWallHitHard(const StoryGrid& g, const float* A, const float* B, float c
     // a line crossed at `along` (the other axis): its cell's edge; on a cell boundary only when both cells beside it block
     const auto lineBlocks = [&](bool xl, int line, float along, float t) {
         if (t < tMin || t > tMax) return false;
-        const int cell = static_cast<int>(std::floor(along));
+        const int cell = static_cast<int>(ApexMath::Floor(along));
         const float u = along - static_cast<float>(cell);
         const auto edge = [&](int k) { return xl ? GridXL(g, line, k) : GridZL(g, k, line); };
         if (u < 1e-4f) return blocks(edge(cell), 0.0f, t) && blocks(edge(cell - 1), 1.0f, t);
@@ -4877,12 +4905,12 @@ bool GridWallHitHard(const StoryGrid& g, const float* A, const float* B, float c
         return blocks(edge(cell), u, t);
     };
     if (ApexMath::Fabs(dx) > 1e-6f)
-        for (int X = static_cast<int>(std::ceil(std::min(A[0], B[0]))), x1 = static_cast<int>(std::floor(std::max(A[0], B[0]))); X <= x1; X++) {
+        for (int X = static_cast<int>(ApexMath::Ceil(std::min(A[0], B[0]))), x1 = static_cast<int>(ApexMath::Floor(std::max(A[0], B[0]))); X <= x1; X++) {
             const float t = (static_cast<float>(X) - A[0]) / dx;
             if (lineBlocks(true, X, A[2] + t * dz, t)) return true;
         }
     if (ApexMath::Fabs(dz) > 1e-6f)
-        for (int Z = static_cast<int>(std::ceil(std::min(A[2], B[2]))), z1 = static_cast<int>(std::floor(std::max(A[2], B[2]))); Z <= z1; Z++) {
+        for (int Z = static_cast<int>(ApexMath::Ceil(std::min(A[2], B[2]))), z1 = static_cast<int>(ApexMath::Floor(std::max(A[2], B[2]))); Z <= z1; Z++) {
             const float t = (static_cast<float>(Z) - A[2]) / dz;
             if (lineBlocks(false, Z, A[0] + t * dx, t)) return true;
         }
@@ -4959,7 +4987,7 @@ std::atomic<int> g_yardLampLines{0};
 // A lamp's range (+0x130, what RoomLampSignature compares) when readable, else kSameReachM
 float LampReach(uintptr_t light) {
     const float range = *reinterpret_cast<const float*>(light + 0x130);
-    return std::isfinite(range) && range > 0.5f && range < 40.0f ? range : kSameReachM;
+    return ApexMath::IsFinite(range) && range > 0.5f && range < 40.0f ? range : kSameReachM;
 }
 bool GatherSameStory(uintptr_t tracker, int S, int id, BYTE* room, const std::vector<Cross>& cross, std::vector<SameLamp>& out,
                      std::shared_ptr<const StoryGrid>* grids) {
@@ -5865,7 +5893,7 @@ bool ReadRoomAmbient(uintptr_t room, uintptr_t mgr, int id, float* amb) {
     __try {
         if (!room || *reinterpret_cast<const uintptr_t*>(room) != mgr || *reinterpret_cast<const int*>(room + 0xC) != id) return false;
         std::memcpy(amb, reinterpret_cast<const void*>(room + 0x110), 3 * sizeof(float));
-        return std::isfinite(amb[0]) && std::isfinite(amb[1]) && std::isfinite(amb[2]);
+        return ApexMath::IsFinite(amb[0]) && ApexMath::IsFinite(amb[1]) && ApexMath::IsFinite(amb[2]);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -6467,7 +6495,7 @@ bool ReadFoundationBase(const BYTE* wall, float& lotBase, float& story1, int& st
         if (!mgr) return false;
         story = *reinterpret_cast<const int*>(mgr + 0x88);
         lotBase = *reinterpret_cast<const float*>(mgr + 0xD4);
-        return std::isfinite(lotBase);
+        return ApexMath::IsFinite(lotBase);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -6477,7 +6505,7 @@ bool ReadStoryOneFloor(uintptr_t tracker, float& floor1) { // POD only (SEH)
         const uintptr_t mgr1 = StoryManager(tracker, 1);
         if (!mgr1) return false;
         floor1 = *reinterpret_cast<const float*>(mgr1 + 0x98);
-        return std::isfinite(floor1);
+        return ApexMath::IsFinite(floor1);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -6591,7 +6619,7 @@ bool ReadWallPeak(const BYTE* room, uintptr_t batch, const void* atlas, uintptr_
             pk.cz = *reinterpret_cast<const float*>(wallBaseFrom + 0x118) - *reinterpret_cast<const float*>(wallBaseFrom + 0x158) * 0.05f;
             pk.dx = *reinterpret_cast<const float*>(wallBaseFrom + 0xF0);
             pk.dz = *reinterpret_cast<const float*>(wallBaseFrom + 0xF8);
-            pk.line = std::isfinite(pk.cx) && std::isfinite(pk.cz) && pk.dx * pk.dx + pk.dz * pk.dz > 1e-4f;
+            pk.line = ApexMath::IsFinite(pk.cx) && ApexMath::IsFinite(pk.cz) && pk.dx * pk.dx + pk.dz * pk.dz > 1e-4f;
         }
         // the nearest lamp of the room's list to the brightest sample (along the ground)
         const uintptr_t* lb = *reinterpret_cast<const uintptr_t* const*>(room + 0xC8);
@@ -8433,7 +8461,7 @@ void RoofedDay(void* light, float* colour) {
     NoteDayRoom(g_ctx.roofed, g_ctx.dayScale);
     if (g_ctx.dayScale >= 1.0f) return;
     for (int i = 0; i < 4; i++) colour[i] *= g_ctx.dayScale;
-    g_dayScaled.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_dayScaled);
 }
 bool g_enterReady = false; // GameWallTest is in (Install)
 std::atomic<long> g_enterTests{0}, g_outdoorEnters{0}, g_penumbraLifted{0};
@@ -8809,7 +8837,7 @@ void FadeAtThreshold(float* colour) {
     const float x = (sum - thr) / thr;
     const float f = x * x * (3.0f - 2.0f * x);
     for (int i = 0; i < 4; i++) colour[i] *= f;
-    g_softCutFaded.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_softCutFaded);
 }
 // The game's point solve with the soft light cut's state put back however it ends (a structured exception the caller's
 // guard catches would leave the room's threshold lowered for good): POD, __finally
@@ -8907,7 +8935,7 @@ int BounceQuadsImpl(uintptr_t mgr, uintptr_t levelS, uintptr_t mgrD, int id, Bou
 // The story below's room and floor at a lot point (-1 = unreadable)
 int BounceRoomAt(uintptr_t mgrD, const float* l) {
     __try {
-        const int x = static_cast<int>(std::floor(l[0])), z = static_cast<int>(std::floor(l[2]));
+        const int x = static_cast<int>(ApexMath::Floor(l[0])), z = static_cast<int>(ApexMath::Floor(l[2]));
         const uintptr_t t = LightTile(mgrD, x, z);
         return t ? TileRoom(t, Quadrant(l[0] - x, l[2] - z)) : 0;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -8916,7 +8944,7 @@ int BounceRoomAt(uintptr_t mgrD, const float* l) {
 }
 bool BounceFloorAt(uintptr_t levelD, const float* l) {
     __try {
-        const int x = static_cast<int>(std::floor(l[0])), z = static_cast<int>(std::floor(l[2]));
+        const int x = static_cast<int>(ApexMath::Floor(l[0])), z = static_cast<int>(ApexMath::Floor(l[2]));
         return FloorAt(levelD, x, z, Quadrant(l[0] - x, l[2] - z)) != 0;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -8944,7 +8972,7 @@ bool BounceBelowImpl(const BYTE* room, const float* at, const float* n, float yL
             alignas(16) float c[4] = {};
             reinterpret_cast<LightEval_t>(eval)(L, s, s + 4, c);
             for (int k = 0; k < 3; k++)
-                if (std::isfinite(c[k]) && c[k] > 0.0f) rgb[k] += c[k];
+                if (ApexMath::IsFinite(c[k]) && c[k] > 0.0f) rgb[k] += c[k];
         }
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -8963,7 +8991,7 @@ bool BounceRebuild(BounceCtx& b, const BYTE* room, const RoomInfo& info) {
     // lot -> world: the inverse of the 3x3 part (rows r[0..2]) and the translation r[3]
     const float(*a)[4] = b.xf.r;
     const float det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
-    if (!(ApexMath::Fabs(det) > 1e-8f) || !std::isfinite(det)) return false;
+    if (!(ApexMath::Fabs(det) > 1e-8f) || !ApexMath::IsFinite(det)) return false;
     // ToLocal: l[k] = sum_j w[j] a[j][k] + a[3][k], so w = (l - a[3]) M^-1 with M[j][k] = a[j][k]
     const float m[3][3] = {{a[0][0], a[0][1], a[0][2]}, {a[1][0], a[1][1], a[1][2]}, {a[2][0], a[2][1], a[2][2]}};
     b.inv[0][0] = (m[1][1] * m[2][2] - m[1][2] * m[2][1]) / det, b.inv[0][1] = (m[0][2] * m[2][1] - m[0][1] * m[2][2]) / det, b.inv[0][2] = (m[0][1] * m[1][2] - m[0][2] * m[1][1]) / det;
@@ -8978,12 +9006,12 @@ bool BounceRebuild(BounceCtx& b, const BYTE* room, const RoomInfo& info) {
         const float l[3] = {q.lx - b.t[0], q.ly - b.t[1], q.lz - b.t[2]};
         q.wx = l[0] * b.inv[0][0] + l[1] * b.inv[1][0] + l[2] * b.inv[2][0];
         q.wz = l[0] * b.inv[0][2] + l[1] * b.inv[1][2] + l[2] * b.inv[2][2];
-        if (std::isfinite(q.wx) && std::isfinite(q.wz)) b.quads.push_back(q);
+        if (ApexMath::IsFinite(q.wx) && ApexMath::IsFinite(q.wz)) b.quads.push_back(q);
     }
     for (int i = 0; i < static_cast<int>(b.quads.size()); i++) { // the quadrants come tile by tile (BounceQuadsImpl)
         const BounceQuad& q = b.quads[static_cast<size_t>(i)];
-        const bool same = !b.tiles.empty() && std::floor(b.quads[static_cast<size_t>(b.tiles.back().first)].lx) == std::floor(q.lx) &&
-                          std::floor(b.quads[static_cast<size_t>(b.tiles.back().first)].lz) == std::floor(q.lz);
+        const bool same = !b.tiles.empty() && ApexMath::Floor(b.quads[static_cast<size_t>(b.tiles.back().first)].lx) == ApexMath::Floor(q.lx) &&
+                          ApexMath::Floor(b.quads[static_cast<size_t>(b.tiles.back().first)].lz) == ApexMath::Floor(q.lz);
         if (!same) b.tiles.push_back(BounceCtx::Tile{0, 0, 0, i, 0});
         BounceCtx::Tile& t = b.tiles.back();
         t.wx = (t.wx * static_cast<float>(t.count) + q.wx) / static_cast<float>(t.count + 1);
@@ -8995,9 +9023,9 @@ bool BounceRebuild(BounceCtx& b, const BYTE* room, const RoomInfo& info) {
 }
 // The irradiance of the lower room's surface the line through quadrant q meets (hit), kept per room solve
 const std::array<float, 3>& BounceSeen(BounceCtx& b, const BounceQuad& q, const StairwellBounce::Hit& hit, float offY) {
-    const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(static_cast<int>(std::floor(hit.at[0] * 4.0f)) & 0xFFFFF)) << 40) ^
-                         (static_cast<uint64_t>(static_cast<uint32_t>(static_cast<int>(std::floor(hit.at[2] * 4.0f)) & 0xFFFFF)) << 20) ^
-                         static_cast<uint64_t>(static_cast<uint32_t>(static_cast<int>(std::floor(hit.at[1] * 4.0f)) & 0x3FFF)) ^
+    const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(static_cast<int>(ApexMath::Floor(hit.at[0] * 4.0f)) & 0xFFFFF)) << 40) ^
+                         (static_cast<uint64_t>(static_cast<uint32_t>(static_cast<int>(ApexMath::Floor(hit.at[2] * 4.0f)) & 0xFFFFF)) << 20) ^
+                         static_cast<uint64_t>(static_cast<uint32_t>(static_cast<int>(ApexMath::Floor(hit.at[1] * 4.0f)) & 0x3FFF)) ^
                          (static_cast<uint64_t>((hit.wall ? 1 : 0) + (hit.n[0] > 0.5f ? 2 : hit.n[0] < -0.5f ? 4 : hit.n[2] > 0.5f ? 8 : hit.n[2] < -0.5f ? 16 : 0)) << 14);
     auto it = b.below.find(key);
     if (it == b.below.end()) {
@@ -9072,7 +9100,7 @@ void NoteRoomWalls(const BYTE* room, const float* s, const float* out) {
     if (!e) return;
     std::array<float, 8>& w = e->w;
     for (int k = 0; k < 3; k++)
-        if (std::isfinite(out[k]) && out[k] > 0.0f) w[k] += out[k];
+        if (ApexMath::IsFinite(out[k]) && out[k] > 0.0f) w[k] += out[k];
     w[3] += 1.0f;
 }
 void RoomWallsSolveStart(const BYTE* room, bool storyOnly) { // allocates: HookGuard
@@ -9221,15 +9249,15 @@ float* SolvePoint(BYTE* room, float* out, void* list2D, void* list3D, void* flag
     BYTE* const prevFadeRoom = t_fadeRoom;
     const float prevFadeThr = t_fadeThr;
     bool lowered = false;
-    if (g_softCut.load(std::memory_order_relaxed) && !t_maskCopy && std::isfinite(g_ctx.thr) && g_ctx.thr > kFadeGameThr && g_ctx.thr < 0.5f) {
+    if (g_softCut.load(std::memory_order_relaxed) && !t_maskCopy && ApexMath::IsFinite(g_ctx.thr) && g_ctx.thr > kFadeGameThr && g_ctx.thr < 0.5f) {
         if (room == t_fadeRoom) g_ctx.fade = true; // lowered already by the solve this one is nested in
         else if (AllEvalWrappedMemo(room) && SwapThreshold(room, kFadeGameThr, nullptr)) {
             lowered = g_ctx.fade = true;
             t_fadeRoom = room;
             t_fadeThr = g_ctx.thr;
         } else
-            g_softCutRefused.fetch_add(1, std::memory_order_relaxed);
-        if (g_ctx.fade) g_softCutSolves.fetch_add(1, std::memory_order_relaxed);
+            ApexUtil::CountOne(g_softCutRefused);
+        if (g_ctx.fade) ApexUtil::CountOne(g_softCutSolves);
     }
     const float prevAA = t_mapAA;
     t_mapAA = MapHalfTexel(room); // (the penumbra at this map's texels, GridPassImpl)
@@ -9358,11 +9386,11 @@ bool ReadWallBase(const BYTE* wall, int x, int z, int len, int orient, WallBaseR
         r.hx = hx, r.hz = hz;
         if (const uintptr_t t = LightTile(mgr, ox, oz)) {
             const float v = *reinterpret_cast<const float*>(t + 0x78);
-            if (std::isfinite(v)) r.own = v, r.haveOwn = true;
+            if (ApexMath::IsFinite(v)) r.own = v, r.haveOwn = true;
         }
         if (const uintptr_t t = LightTile(mgr, hx, hz)) {
             const float v = *reinterpret_cast<const float*>(t + 0x78);
-            if (std::isfinite(v)) r.house = v, r.haveHouse = true;
+            if (ApexMath::IsFinite(v)) r.house = v, r.haveHouse = true;
             for (int q = 0; q < 4; q++) r.houseIsRoom = r.houseIsRoom || TileRoom(t, q) > 0;
         }
         return true;
@@ -9479,7 +9507,7 @@ int ReadStoryWalls(const BYTE* room0, uintptr_t& mgr) {
             const float* o = reinterpret_cast<const float*>(w + 0x110);
             const float* d = reinterpret_cast<const float*>(w + 0xF0);
             const float* nn = reinterpret_cast<const float*>(w + 0x150); // the face normal: the origin sits 5 cm out on it, the wall line is behind
-            if (!std::isfinite(o[0]) || !std::isfinite(o[1]) || !std::isfinite(o[2]) || !std::isfinite(d[0]) || !std::isfinite(d[2]) || !std::isfinite(nn[0]) || !std::isfinite(nn[2])) continue;
+            if (!ApexMath::IsFinite(o[0]) || !ApexMath::IsFinite(o[1]) || !ApexMath::IsFinite(o[2]) || !ApexMath::IsFinite(d[0]) || !ApexMath::IsFinite(d[2]) || !ApexMath::IsFinite(nn[0]) || !ApexMath::IsFinite(nn[2])) continue;
             const float cx = o[0] - nn[0] * 0.05f, cz = o[2] - nn[2] * 0.05f;
             g_wallRead[n++] = {cx, cz, cx + d[0], cz + d[2], o[1], o[1] + 3.0f};
         }
@@ -9520,7 +9548,7 @@ int CapFoundationSides(uintptr_t mgr, uintptr_t tracker, WallSeg* segs, int n) {
                 const float pw[3] = {mid[0] - dz / len * 0.3f * side, mid[1], mid[2] + dx / len * 0.3f * side};
                 float pl[3];
                 ToLocal(xf, pw, pl);
-                const int ix = static_cast<int>(std::floor(pl[0])), iz = static_cast<int>(std::floor(pl[2]));
+                const int ix = static_cast<int>(ApexMath::Floor(pl[0])), iz = static_cast<int>(ApexMath::Floor(pl[2]));
                 floorBeside = PlacedFloorAt(l1, ix, iz, Quadrant(pl[0] - ix, pl[2] - iz));
             }
             if (!floorBeside) continue;
@@ -9571,7 +9599,7 @@ void FillWallPatches(const StoryGrid& g, StoryWallCopy& c) {
         const float lo = std::min(A[k], B[k]), hi = std::max(A[k], B[k]);
         const auto uOf = [&](float v) { return (v - A[k]) / (B[k] - A[k]); };
         const auto worldY = [&](float ly) { return s.y0 + (ly - A[1]) / r11; };
-        const int c0 = static_cast<int>(std::floor(lo + 1e-3f)), c1 = static_cast<int>(std::ceil(hi - 1e-3f));
+        const int c0 = static_cast<int>(ApexMath::Floor(lo + 1e-3f)), c1 = static_cast<int>(ApexMath::Ceil(hi - 1e-3f));
         for (int cell = c0; cell < c1; cell++) {
             const int32_t idx = alongX ? GridZL(g, cell, L) : GridXL(g, L, cell);
             if (idx < 0) continue;
@@ -10042,7 +10070,7 @@ bool LotBaseY(const BYTE* room, float& base) {
         const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(room);
         if (!mgr) return false;
         base = *reinterpret_cast<const float*>(mgr + 0xD4);
-        return std::isfinite(base);
+        return ApexMath::IsFinite(base);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -10365,7 +10393,7 @@ void NoteRoomTook(const BYTE* room, const float* out) {
     if (!e) return;
     float& m = e->t[0];
     for (int k = 0; k < 3; k++)
-        if (std::isfinite(out[k]) && out[k] > m) m = out[k];
+        if (ApexMath::IsFinite(out[k]) && out[k] > m) m = out[k];
 }
 // A solve starts (RoomNormHook): the measure of the one that just ended becomes the last one, unless it measured nothing
 float RoomTookSolveStart(const BYTE* room) { // allocates: HookGuard
@@ -10390,7 +10418,7 @@ void ClearRoomMeasures() { // MaybeClearRooms (a new world): gather thread
 float RoomNormHookImpl(BYTE* room, float took, AdaptNote& note, bool& storyOnly) { // POD only (SEH): the game's value adjusted; -1 = unreadable
     __try {
         float& norm = *reinterpret_cast<float*>(room + 0x160);
-        const bool finite = std::isfinite(norm);
+        const bool finite = ApexMath::IsFinite(norm);
         if (!finite) {
             norm = 1.0f;
             g_normNotFinite.fetch_add(1, std::memory_order_relaxed);
@@ -10492,7 +10520,7 @@ bool UnderFloorOpening(const RoomInfo& info, const float* pos) {
         if (!level || !ReadXform(info.mgr, xf)) return false;
         float l[3];
         ToLocal(xf, pos, l);
-        const int x = static_cast<int>(std::floor(l[0])), z = static_cast<int>(std::floor(l[2]));
+        const int x = static_cast<int>(ApexMath::Floor(l[0])), z = static_cast<int>(ApexMath::Floor(l[2]));
         return LightTile(up, x, z) && FloorAt(level, x, z, Quadrant(l[0] - x, l[2] - z)) == 0;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -10577,7 +10605,7 @@ void __fastcall BasisLightHook(BYTE* room, void*, const float* pos, void* light,
             for (int i = 0; i < 16 && !lit; ++i) lit = contribution[i] != 0.0f;
             if (lit) {
                 NoteDayRoom(roofed, scale);
-                if (scale < 1.0f) g_dayScaled.fetch_add(1, std::memory_order_relaxed);
+                if (scale < 1.0f) ApexUtil::CountOne(g_dayScaled);
             }
             const float k = std::min(scale, 1.0f) * openShare;
             for (int i = 0; i < 16; ++i) acc[i] += contribution[i] * k;
@@ -10618,7 +10646,7 @@ float CrossLampReachImpl(BYTE* room, void* light, const float* point) {
         pass[0] = 0.0f;
     }
     g_ctx = prev;
-    return std::isfinite(pass[0]) ? std::clamp(pass[0], 0.0f, 1.0f) : 0.0f;
+    return ApexMath::IsFinite(pass[0]) ? std::clamp(pass[0], 0.0f, 1.0f) : 0.0f;
 }
 
 // Walls of room 0 of `floor` that the game would test for this light in this batch (its own culling), or null = all.
@@ -10672,8 +10700,11 @@ bool PassesOverLowerWall(uintptr_t occ, int mode, uintptr_t mgrNext, uintptr_t l
     const float den = dx * r[2] - dz * r[0];
     if (!(ApexMath::Fabs(den) > 1e-6f)) return false;
     const float ex = o[0] - A[0], ez = o[2] - A[2];
-    const float t = (ex * r[2] - ez * r[0]) / den, u = (ez * dx - ex * dz) / den; // along the ray, along the wall (+0x60 = start - end, 0x0069A7A1)
-    if (!(t > 0.0f && t < 1.0f && u > -0.05f && u < 1.05f)) return false;        // not crossed: the game passes it anyway
+    // (2.15.3) behind A or past B, told before the divisions (as SegPass: these give t <= 0 or t >= 1)
+    const float tn = ex * r[2] - ez * r[0];
+    if ((den > 0.0f && tn <= 0.0f) || (den < 0.0f && tn >= 0.0f) || ApexMath::Fabs(tn) >= ApexMath::Fabs(den)) return false;
+    const float t = tn / den, u = (ez * dx - ex * dz) / den; // along the ray, along the wall (+0x60 = start - end, 0x0069A7A1)
+    if (!(t > 0.0f && t < 1.0f && u > -0.05f && u < 1.05f)) return false; // not crossed: the game passes it anyway
     const float rl = ApexMath::Sqrt(r[0] * r[0] + r[2] * r[2]);
     if (!(rl > 1e-4f)) return false;
     const float nx = -r[2] / rl * 0.25f, nz = r[0] / rl * 0.25f; // 25 cm to each side of the wall
@@ -10690,11 +10721,11 @@ bool PassesOverLowerWall(uintptr_t occ, int mode, uintptr_t mgrNext, uintptr_t l
         const float S[3] = {X[0] + side * nx, X[1], X[2] + side * nz};
         float Sl[3];
         ToLocal(xf, S, Sl);
-        const int ix = static_cast<int>(std::floor(Sl[0])), iz = static_cast<int>(std::floor(Sl[2]));
+        const int ix = static_cast<int>(ApexMath::Floor(Sl[0])), iz = static_cast<int>(ApexMath::Floor(Sl[2]));
         const uintptr_t tile = LightTile(mgrNext, ix, iz);
         if (!tile || !PlacedFloorAt(levelNext, ix, iz, Quadrant(Sl[0] - ix, Sl[2] - iz))) continue;
         const float fh = *reinterpret_cast<const float*>(tile + 0x78); // lot space
-        if (std::isfinite(fh)) top = std::max(top, fh);
+        if (ApexMath::IsFinite(fh)) top = std::max(top, fh);
     }
     if (!(top > ol[1] + 0.05f && top < ol[1] + 3.0f - 0.05f)) return false; // no floor it ends at
     return Xl[1] > top - 0.02f;
@@ -10764,7 +10795,7 @@ float WallPassImpl(uintptr_t tracker, int roomLevel, int home, int homeRoom, voi
                 if (s_kept.size() < walls + 1) s_kept.resize(walls + 1);
                 const int n = [&] { const PartTimer tk(kTpKeep); return KeepWallsNotPassedOver(room0, static_cast<const IntVec*>(idx), s_kept.data(), static_cast<int>(s_kept.size()), g_ctx.soft ? 1 : 0, mgrNext, s_nextLevel, pos, static_cast<const float*>(sample)); }();
                 if (n >= 0) {
-                    g_overLower.fetch_add(1, std::memory_order_relaxed);
+                    ApexUtil::CountOne(g_overLower);
                     kept = {s_kept.data(), s_kept.data() + n, s_kept.data() + n};
                     idx = &kept; // (empty = nothing in the way: FUN_0069d4c0 tests no wall)
                 }
@@ -10949,7 +10980,7 @@ bool OutdoorEntryImpl(const RoomInfo& info, int home, void* light, const float* 
     const uintptr_t level = mgr ? LevelForPoint(mgr) : 0;
     Xform xf;
     if (!mgr || !level || LevelManager(level) != mgr || !ReadXform(info.mgr, xf)) {
-        g_exitLink.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_exitLink);
         return false;
     }
     alignas(16) float pos[4];
@@ -10963,11 +10994,11 @@ bool OutdoorEntryImpl(const RoomInfo& info, int home, void* light, const float* 
     // so for this test they stand 3 cm over the floor, where that foot row is gated. A lamp at or over the floor keeps its path.
     if (g_ghostSolve && P[1] < h && Q[1] < h + 0.03f && ApexMath::Fabs(h) < 1000.0f) {
         Q[1] = h + 0.03f;
-        g_ghostRaised.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_ghostRaised);
     }
     const float dy = Q[1] - P[1];
     if (!(ApexMath::Fabs(h) < 1000.0f) || dy < 1e-4f) { // the lamp below the point only
-        g_exitDown.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_exitDown);
         return false;
     }
     if (above && P[1] >= h) *above = true; // the bulb above this story's lowest floor (CrossFloorShadow tests the walls itself)
@@ -10996,13 +11027,13 @@ bool OutdoorEntryImpl(const RoomInfo& info, int home, void* light, const float* 
         const PartTimer gateTimer(kTpGate);
         v = LampVis::SlabGate(st, n, P, Q, &stop);
     }
-    g_gateTests.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_gateTests);
     if (v <= 0.0f) {
-        g_gateBlocked.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_gateBlocked);
         if (slab) (stop >= 0 && st[stop].story < info.level ? slab->lower : slab->valid) = true;
         return false;
     }
-    if (v < 1.0f) g_gateRim.fetch_add(1, std::memory_order_relaxed);
+    if (v < 1.0f) ApexUtil::CountOne(g_gateRim);
     entry.valid = true;
     entry.weight = v;
     for (int k = 0; k < 3; ++k) {
@@ -11059,7 +11090,7 @@ float InnerDownGateImpl(const RoomInfo& info, const float* lampW, const float* p
     if (!(A[1] > h)) return 0.0f;                    // (the lamp under its own story's floor: not a lamp shining out of it)
     const float t = (A[1] - h) / (A[1] - B[1]);
     const float x = A[0] + t * (B[0] - A[0]), z = A[2] + t * (B[2] - A[2]);
-    const int ix = static_cast<int>(std::floor(x)), iz = static_cast<int>(std::floor(z));
+    const int ix = static_cast<int>(ApexMath::Floor(x)), iz = static_cast<int>(ApexMath::Floor(z));
     const int q = Quadrant(x - static_cast<float>(ix), z - static_cast<float>(iz));
     if (ix >= 0 && iz >= 0 && ix < gu->w && iz < gu->h && (gu->flags[static_cast<size_t>(iz) * gu->w + ix] & (0x10 << q))) return 0.0f; // the house above
     const uintptr_t level = LevelForPoint(gu->mgr);
@@ -11311,9 +11342,9 @@ void CrossFloorShadow(const RoomInfo& info, void* light, const float* sample, fl
         }
     }
     if (home >= 0 && home < info.level && lit) {
-        g_slabSeen.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_slabSeen);
         if (!(g_ctx.flags && g_ctx.flags[0])) {
-            g_slabNoFlags.fetch_add(1, std::memory_order_relaxed);
+            ApexUtil::CountOne(g_slabNoFlags);
             // (07/10, balcony4: bands of a ground post on the tower's story 3, behind the balcony) A batch with no 2D wall
             // test (the room's lighting detail class) skipped every test of ours, so the lamp lit points of an upper story
             // through the floors in between. The floors and this story's slab still stop it here (12/10: no share is left
@@ -11325,11 +11356,11 @@ void CrossFloorShadow(const RoomInfo& info, void* light, const float* sample, fl
                 const bool entered = OutdoorEntry(info, home, light, sample, e, &a, &sr);
                 if (sr.lower) {
                     for (int i = 0; i < 4; i++) colour[i] = 0.0f;
-                    g_slabNoFlagsLower.fetch_add(1, std::memory_order_relaxed);
+                    ApexUtil::CountOne(g_slabNoFlagsLower);
                 } else if (sr.valid) {
                     for (int i = 0; i < 4; i++) colour[i] = 0.0f;
-                    g_slabNoFlagsSlab.fetch_add(1, std::memory_order_relaxed);
-                    g_slabBlocked.fetch_add(1, std::memory_order_relaxed);
+                    ApexUtil::CountOne(g_slabNoFlagsSlab);
+                    ApexUtil::CountOne(g_slabBlocked);
                 } else if (entered && e.weight < 1.0f) {
                     // (12/10) the share a slab's edge leaves (LampVis::SlabGate). Only that: the steep-ray dimming of the
                     // batches with a wall test (UpwardShare) stays out of this batch, as before (12/10 review: added here it
@@ -11340,9 +11371,9 @@ void CrossFloorShadow(const RoomInfo& info, void* light, const float* sample, fl
         }
     }
     if (home >= 0 && lit && g_ctx.flags && g_ctx.flags[0]) { // the game tests 2D walls in this batch: so do we, on the lamp's floor
-        g_wallTests.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_wallTests);
         mine = WallPass(info.tracker, info.level, home, cross->outdoor ? cross->room : 0, light, sample, culledList);
-        if (mine <= 0.0f) g_wallBlocked.fetch_add(1, std::memory_order_relaxed);
+        if (mine <= 0.0f) ApexUtil::CountOne(g_wallBlocked);
         if (mine < 1.0f)
             for (int i = 0; i < 4; i++) colour[i] *= std::max(0.0f, mine);
         // a lamp of a lower story: this story's walls, tested next by the game, from where its ray enters this story. A ray
@@ -11351,14 +11382,14 @@ void CrossFloorShadow(const RoomInfo& info, void* light, const float* sample, fl
         RayEntry entry;
         bool above = false;
         SlabRay slab;
-        if (home < info.level && mine <= 0.0f) g_slabWallZero.fetch_add(1, std::memory_order_relaxed);
+        if (home < info.level && mine <= 0.0f) ApexUtil::CountOne(g_slabWallZero);
         if (mine > 0.0f && home < info.level && g_enterReady && !g_ctx.basis) {
             const bool entered = OutdoorEntry(info, home, light, sample, entry, &above, &slab);
             (entered ? g_slabEntered : above ? g_slabAbove : slab.lower ? g_slabLower : slab.valid ? g_slabThrough : g_slabOther).fetch_add(1, std::memory_order_relaxed);
             if (slab.lower || slab.valid) { // a floor in the way: no light (the game's test sees no floors)
                 for (int i = 0; i < 4; i++) colour[i] = 0.0f;
                 mine = 0.0f;
-                if (slab.valid) g_slabBlocked.fetch_add(1, std::memory_order_relaxed);
+                if (slab.valid) ApexUtil::CountOne(g_slabBlocked);
             }
             if (entered) {
                 if (entry.weight < 1.0f) { // at a slab's edge: the share of the lantern it leaves (LampVis::SlabGate)
@@ -11367,22 +11398,22 @@ void CrossFloorShadow(const RoomInfo& info, void* light, const float* sample, fl
                 }
                 if (home + 1 < info.level) { // the walls of the stories in between (a lower balcony's parapet)
                     const float mid = MidPass(info, home, light, sample);
-                    g_midTests.fetch_add(1, std::memory_order_relaxed);
+                    ApexUtil::CountOne(g_midTests);
                     if (mid < 1.0f)
                         for (int i = 0; i < 4; i++) colour[i] *= std::max(0.0f, mid);
-                    if (mid <= 0.0f) g_midBlocked.fetch_add(1, std::memory_order_relaxed);
+                    if (mid <= 0.0f) ApexUtil::CountOne(g_midBlocked);
                     mine *= std::max(0.0f, mid);
                 }
                 if (const float up = UpwardShare(light, sample, cross->upwardHeadroom); up < 1.0f) {
                     for (int i = 0; i < 4; i++) colour[i] *= up;
                     mine *= up;
-                    g_steepDimmed.fetch_add(1, std::memory_order_relaxed);
+                    ApexUtil::CountOne(g_steepDimmed);
                 }
                 g_ctx.enterLight = reinterpret_cast<uintptr_t>(light);
                 std::memcpy(g_ctx.enterLamp, entry.lamp, sizeof g_ctx.enterLamp);
                 std::memcpy(g_ctx.enterAt, entry.at, sizeof g_ctx.enterAt);
                 g_ctx.enterHard = true; // and without a wall end's penumbra (WallTestHard)
-                g_outdoorEnters.fetch_add(1, std::memory_order_relaxed);
+                ApexUtil::CountOne(g_outdoorEnters);
             } else if (above && info.grid[0] && !info.yard) {
                 // (a capture: the yard's lamp posts left the upper facade behind a balcony's parapet dark)
                 // A lamp of a lower story whose bulb stands above this story's lowest floor: the game's whole-ray 2D test,
@@ -11398,8 +11429,8 @@ void CrossFloorShadow(const RoomInfo& info, void* light, const float* sample, fl
                 mine *= std::max(0.0f, pass);
                 g_ctx.yardLight = reinterpret_cast<uintptr_t>(light);
                 std::memcpy(g_ctx.yardLamp, pos, sizeof g_ctx.yardLamp);
-                g_aboveTests.fetch_add(1, std::memory_order_relaxed);
-                if (pass <= 0.0f) g_aboveBlocked.fetch_add(1, std::memory_order_relaxed);
+                ApexUtil::CountOne(g_aboveTests);
+                if (pass <= 0.0f) ApexUtil::CountOne(g_aboveBlocked);
             }
         }
     }
@@ -11438,7 +11469,7 @@ float IndoorBoundaryPass(const RoomInfo& info, uintptr_t floorLevel, int B, cons
             break;
         }
         const float x = P[0] + t * (Q[0] - P[0]), z = P[2] + t * (Q[2] - P[2]);
-        const int ix = static_cast<int>(std::floor(x)), iz = static_cast<int>(std::floor(z));
+        const int ix = static_cast<int>(ApexMath::Floor(x)), iz = static_cast<int>(ApexMath::Floor(z));
         const uintptr_t tile = LightTile(mgrB, ix, iz);
         if (!tile) return blocked(PassWhy::Floor, PassStage::OutsideStory);
         const float th = *reinterpret_cast<const float*>(tile + 0x78); // the floor height of that tile
@@ -11465,7 +11496,7 @@ float IndoorBoundaryPass(const RoomInfo& info, uintptr_t floorLevel, int B, cons
         // (measured: a lamp 2.2 m over story 2's floor lit story 1 through the opening with a hard straight edge)
         if (DevSwitches::SoftSlabEdges()) {
             const auto open = [&](float px, float pz) {
-                const int jx = static_cast<int>(std::floor(px)), jz = static_cast<int>(std::floor(pz));
+                const int jx = static_cast<int>(ApexMath::Floor(px)), jz = static_cast<int>(ApexMath::Floor(pz));
                 const uintptr_t tb = LightTile(mgrB, jx, jz);
                 if (!tb || ApexMath::Fabs(*reinterpret_cast<const float*>(tb + 0x78) - h) > 0.01f) return 0;
                 const int jq = Quadrant(px - jx, pz - jz);
@@ -11512,13 +11543,13 @@ float IndoorPassImpl(const RoomInfo& info, const Cross& c, void* light, const fl
         // below-floor support rows even when every visible sample correctly rejects it.
         const int boundary=c.floor<info.level?info.level:info.level+1;
         const uintptr_t manager=StoryManager(info.tracker,boundary);
-        const int x=static_cast<int>(std::floor(localSample[0])),z=static_cast<int>(std::floor(localSample[2]));
+        const int x=static_cast<int>(ApexMath::Floor(localSample[0])),z=static_cast<int>(ApexMath::Floor(localSample[2]));
         const uintptr_t tile=manager?LightTile(manager,x,z):0;
         const uintptr_t level=manager?LevelForPoint(manager):0;
         if(tile&&level&&LevelManager(level)==manager){
             const float plane=*reinterpret_cast<const float*>(tile+0x78);
             const bool beyond=c.floor<info.level?localSample[1]<plane-.01f:localSample[1]>plane+.01f;
-            if(std::isfinite(plane)&&beyond&&FloorAt(level,x,z,Quadrant(localSample[0]-x,localSample[2]-z))!=0)return blocked(PassWhy::Floor,PassStage::UnderSlab,boundary);
+            if(ApexMath::IsFinite(plane)&&beyond&&FloorAt(level,x,z,Quadrant(localSample[0]-x,localSample[2]-z))!=0)return blocked(PassWhy::Floor,PassStage::UnderSlab,boundary);
         }
     }
     const bool nativeWalls=g_ctx.flags && g_ctx.flags[0];
@@ -11601,7 +11632,7 @@ float IndoorPassImpl(const RoomInfo& info, const Cross& c, void* light, const fl
             const bool passed = reinterpret_cast<WallTest_t>(kWallTest)(exterior, nullptr, pos, sample, &keep);
             *g_swapAt = g_swapSaved;
             g_swapAt = nullptr;
-            if (!passed || !std::isfinite(keep) || keep <= 0.0f) return blocked(PassWhy::StoryWall, PassStage::ExteriorWall, story);
+            if (!passed || !ApexMath::IsFinite(keep) || keep <= 0.0f) return blocked(PassWhy::StoryWall, PassStage::ExteriorWall, story);
         }
     }
     for (int i = 0; i < count; ++i) {
@@ -11615,7 +11646,7 @@ float IndoorPassImpl(const RoomInfo& info, const Cross& c, void* light, const fl
             float midpoint[3], local[3];
             for (int k = 0; k < 3; ++k) midpoint[k] = pos[k] + (segment.begin + t) * 0.5f * (sample[k] - pos[k]);
             ToLocal(xf, midpoint, local);
-            const int x = static_cast<int>(std::floor(local[0])), z = static_cast<int>(std::floor(local[2]));
+            const int x = static_cast<int>(ApexMath::Floor(local[0])), z = static_cast<int>(ApexMath::Floor(local[2]));
             const uintptr_t tile = LightTile(manager, x, z);
             if (!tile) return blocked(PassWhy::StoryWall, PassStage::SegmentTile, story);
             roomId = TileRoom(tile, Quadrant(local[0] - x, local[2] - z));
@@ -11654,7 +11685,7 @@ float IndoorPassImpl(const RoomInfo& info, const Cross& c, void* light, const fl
         const bool passed = reinterpret_cast<WallTest_t>(kWallTest)(home, nullptr, from, to, &keep);
         *g_swapAt = g_swapSaved;
         g_swapAt = nullptr;
-        if (!passed || !std::isfinite(keep)) return blocked(PassWhy::StoryWall, PassStage::GameWallTest, story);
+        if (!passed || !ApexMath::IsFinite(keep)) return blocked(PassWhy::StoryWall, PassStage::GameWallTest, story);
         transmission *= std::clamp(keep, 0.0f, 1.0f);
         if (transmission <= 0.0f) return blocked(PassWhy::StoryWall, PassStage::NothingTransmitted, story);
     }
@@ -11685,11 +11716,11 @@ void IndoorShadow(const RoomInfo& info, void* light, const float* sample, float*
     float mine = -1.0f;
     PassWhy why = PassWhy::Passed;
     if (c) {
-        g_indoorTests.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_indoorTests);
         RayEntry entry;
         mine = IndoorPass(info, *c, light, sample, why, g_enterReady ? &entry : nullptr);
-        if (why == PassWhy::Floor) g_indoorFloorBlocked.fetch_add(1, std::memory_order_relaxed);
-        else if (why == PassWhy::StoryWall) g_indoorWallBlocked.fetch_add(1, std::memory_order_relaxed);
+        if (why == PassWhy::Floor) ApexUtil::CountOne(g_indoorFloorBlocked);
+        else if (why == PassWhy::StoryWall) ApexUtil::CountOne(g_indoorWallBlocked);
         if (mine < 1.0f)
             for (int i = 0; i < 4; i++) colour[i] *= std::max(0.0f, mine);
         if (mine > 0.0f && !c->lit && !g_ctx.basis) { // this lamp lights this room (once per gather; g_litBy)
@@ -11730,10 +11761,10 @@ void YardShadow(const RoomInfo& info, void* light, const float* sample, float* c
     alignas(16) float pos[4] = {};
     GridWhy why{};
     const float pass = info.openings ? OpenLampPass(info, light, sample, pos, why) : YardPass(info.grid[0].get(), info.grid[1].get(), light, sample, pos, why);
-    g_yardTests.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_yardTests);
     if (info.openings) { // a roofed room's lamp of room 0 (outdoor light through openings)
-        g_roofedTests.fetch_add(1, std::memory_order_relaxed);
-        if (pass > 0.0f) g_roofedLit.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_roofedTests);
+        if (pass > 0.0f) ApexUtil::CountOne(g_roofedLit);
     }
     if (pass < 1.0f)
         for (int i = 0; i < 4; i++) colour[i] *= std::max(0.0f, pass);
@@ -11743,10 +11774,10 @@ void YardShadow(const RoomInfo& info, void* light, const float* sample, float* c
         (why.roof ? g_yardRoofed : g_yardBlocked).fetch_add(1, std::memory_order_relaxed);
     } else if (why.opening) {
         code = PassWhy::Opening;
-        g_yardOpening.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_yardOpening);
     } else if (why.over) {
         code = PassWhy::OverTop;
-        g_yardOver.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_yardOver);
     }
     g_ctx.yardLight = reinterpret_cast<uintptr_t>(light);
     std::memcpy(g_ctx.yardLamp, pos, sizeof g_ctx.yardLamp);
@@ -11813,8 +11844,8 @@ void InnerShadow(const RoomInfo& info, void* light, const float* sample, float* 
     alignas(16) float pos[4] = {};
     GridWhy why{};
     const float pass = InnerPass(info, light, sample, pos, why);
-    g_innerTests.fetch_add(1, std::memory_order_relaxed);
-    if (pass > 0.0f) g_innerLit.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_innerTests);
+    if (pass > 0.0f) ApexUtil::CountOne(g_innerLit);
     // the room it shines out of draws it x its normalisation (room+0x160); this room's own normalisation (indoor) follows
     const float k = pass > 0.0f ? InnerNormScale(info, light) : 1.0f;
     if (pass < 1.0f || k != 1.0f)
@@ -11836,8 +11867,10 @@ void InnerShadow(const RoomInfo& info, void* light, const float* sample, float* 
 // The time Apex's own tests take inside the game's room solves (ApexSolveMs): started after the threshold early-out, so a
 // dropped light costs no timer read
 struct ApexCycles {
-    uint64_t t0 = __rdtsc();
-    ~ApexCycles() { AddSolveCycles(__rdtsc() - t0); }
+    uint64_t t0 = TimedStart(); // (sampled as PartTimer)
+    ~ApexCycles() {
+        if (t0) AddSolveCycles((__rdtsc() - t0) * kTimedEvery);
+    }
 };
 
 template <int I> void __fastcall LightEvalHook(void* light, void*, const float* sample, const float* normal, float* colour) {
@@ -11878,7 +11911,7 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
             (colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f)) {
             const float m = ReachShare(light, sample);
             for (int i = 0; i < 4; i++) colour[i] *= m;
-            g_reachDimmed.fetch_add(1, std::memory_order_relaxed);
+            ApexUtil::CountOne(g_reachDimmed);
         }
         // A light the game is about to drop (0x69FE40: threshold > (b + g) + r, the same sums in the same order) needs no
         // test of ours: our tests only lower the colour, so it is dropped either way (bit-identical; most far lamps end here)
@@ -11921,11 +11954,11 @@ bool __fastcall WindowChannelHook(void* light, void* edx, int channel) {
     const uintptr_t l = reinterpret_cast<uintptr_t>(light);
     ChannelMemo& m = g_channelMemo[((static_cast<uint32_t>(l) * 2654435761u) >> 24) ^ (static_cast<uint32_t>(channel) & 0xFF)];
     if (m.serial == g_batchSerial && m.light == l && m.channel == channel) {
-        g_channelHits.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_channelHits);
         return m.answer;
     }
     const bool answer = game(light, edx, channel);
-    g_channelAsked.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_channelAsked);
     m.serial = g_batchSerial, m.light = l, m.channel = channel, m.answer = answer;
     return answer;
 }
@@ -12029,7 +12062,7 @@ bool __fastcall GameWallTest(BYTE* room, void*, void* idx, const float* lightPos
         // count), that shade was only the soft penumbra of a wall's end; else the soft test's result stays (it knows the
         // ray passed over a low wall)
         float hardT = 1.0f;
-        if (WallTestHard(room, idx, from, sample, &hardT) && std::isfinite(hardT) && hardT > 0.0f) {
+        if (WallTestHard(room, idx, from, sample, &hardT) && ApexMath::IsFinite(hardT) && hardT > 0.0f) {
             ok = true;
             *t = hardT;
             g_penumbraLifted.fetch_add(1, std::memory_order_relaxed);
@@ -12467,7 +12500,7 @@ BYTE* SafeRoomById(uintptr_t tracker, int level, int id) {
 }
 // QueueRoom under SEH (a lot unloaded between the list and the send)
 bool AmbientNear(const float* a, const float* b) {
-    for (int k = 0; k < 4; k++) if (!std::isfinite(a[k]) || !std::isfinite(b[k]) || ApexMath::Fabs(a[k] - b[k]) > 1e-5f) return false;
+    for (int k = 0; k < 4; k++) if (!ApexMath::IsFinite(a[k]) || !ApexMath::IsFinite(b[k]) || ApexMath::Fabs(a[k] - b[k]) > 1e-5f) return false;
     return true;
 }
 bool AmbientIdentity(BYTE* room, uintptr_t& mgr, int& level, int& id) {
@@ -12521,7 +12554,7 @@ GroupApply ApplyGroupAmbient(const DepKey& key, unsigned& budget) {
         const auto next = g_ambToQueue.find(member.key);
         if (old == g_ambApplied.end() || next == g_ambToQueue.end()
             || !RoomAmbientPolicy::AmbientMapsCompatible(old->second.norm, next->second.norm, old->second.wallBase, next->second.wallBase)) return fallback();
-        for (float value : next->second.c4) if (!std::isfinite(value)) return fallback();
+        for (float value : next->second.c4) if (!ApexMath::IsFinite(value)) return fallback();
         if (count && (Differs(ready[0].wanted, next->second.c4, next->second.norm, next->second.wallBase)
             || !AmbientNear(ready[0].wanted.c4, next->second.c4))) return fallback();
         BYTE* room = SafeRoomById(member.key.tracker, member.key.level, member.key.room);
@@ -12563,7 +12596,7 @@ bool ApplyIdleAmbient(const DepKey& key, const Applied& wanted) {
     uintptr_t mgr = 0; int level = 0, id = 0;
     if (!room || !AmbientIdentity(room, mgr, level, id) || level != key.level || id != key.room
         || SafeStoryManager(key.tracker, level) != mgr || !AmbientHeld(room, old->second, nullptr, false)) return false;
-    for (float value : wanted.c4) if (!std::isfinite(value)) return false;
+    for (float value : wanted.c4) if (!ApexMath::IsFinite(value)) return false;
     WriteAmbient(room, wanted.c4, 0);
     if (!AmbientHeld(room, wanted, nullptr, false)) return false;
     old->second = wanted;
@@ -13119,7 +13152,7 @@ bool ReadStoryMap(uintptr_t tl, uintptr_t mgr, uintptr_t level, const Xform& xf,
             if (!light) return;
             float lp[3];
             ToLocal(xf, reinterpret_cast<const float*>(light + 0x120), lp);
-            const int ix = static_cast<int>(std::floor(lp[0])), iz = static_cast<int>(std::floor(lp[2]));
+            const int ix = static_cast<int>(ApexMath::Floor(lp[0])), iz = static_cast<int>(ApexMath::Floor(lp[2]));
             if (ix >= 0 && iz >= 0 && ix < m.w && iz < m.h) m.rooms[iz][ix] = 'L';
         });
         return true;
@@ -13608,7 +13641,7 @@ void ApplyAmbientBaseChanges() {
             norm = std::min(norm, own->second.norm);
             base = std::min(base, own->second.base);
         }
-        if (!std::isfinite(norm) || !std::isfinite(base)) continue;
+        if (!ApexMath::IsFinite(norm) || !ApexMath::IsFinite(base)) continue;
         for (const auto& member : group->second) {
             const auto own = g_ambOrig.find(member.key);
             if (own == g_ambOrig.end()) continue;
@@ -14263,9 +14296,39 @@ struct WallGrid {
     std::unordered_map<int64_t, std::vector<int>> cells;
     std::vector<uint32_t> seen; // per segment: the query that last tested it (a segment spans several cells)
     uint32_t query = 0;
+    // (2.15.3) the same cells for the per-lamp tests: an open-addressed table (power of two, linear probing) of each cell's
+    // run in one array, each run in the order of cells' vector; and the bounds of every cell that holds a wall
+    struct Span {
+        int64_t key = INT64_MIN; // INT64_MIN: free
+        uint32_t off = 0, n = 0;
+    };
+    std::vector<Span> table;
+    uint32_t mask = 0;
+    std::vector<int> runs;
+    int cx0 = 0, cx1 = -1, cz0 = 0, cz1 = -1;
 } g_grid;
 constexpr float kCell = 4.0f;
 int64_t CellKey(int cx, int cz) { return (static_cast<int64_t>(cx) << 32) ^ static_cast<uint32_t>(cz); }
+inline uint32_t SpanSlot(int64_t key, uint32_t mask) {
+    const uint64_t h = static_cast<uint64_t>(key) * 0x9E3779B97F4A7C15ull;
+    return static_cast<uint32_t>(h >> 32) & mask;
+}
+struct CellSegs {
+    const int* p = nullptr;
+    uint32_t n = 0;
+    const int* begin() const { return p; }
+    const int* end() const { return p + n; }
+};
+// The segments of cell (cx, cz), in the order g_grid.cells holds them (none: n = 0)
+CellSegs FindCell(int cx, int cz) {
+    if (g_grid.table.empty()) return {};
+    const int64_t key = CellKey(cx, cz);
+    for (uint32_t i = SpanSlot(key, g_grid.mask);; i = (i + 1) & g_grid.mask) {
+        const WallGrid::Span& s = g_grid.table[i];
+        if (s.key == key) return {g_grid.runs.data() + s.off, s.n};
+        if (s.key == INT64_MIN) return {};
+    }
+}
 void RefreshGrid() {
     const uint32_t gen = g_wallSnapGen.load(std::memory_order_relaxed);
     if (gen == g_grid.gen) return;
@@ -14288,11 +14351,28 @@ void RefreshGrid() {
     g_grid.seen.assign(g_grid.segs.size(), 0);
     for (int i = 0; i < static_cast<int>(g_grid.segs.size()); i++) {
         const WallSeg& s = g_grid.segs[i];
-        const int x0 = static_cast<int>(std::floor(std::min(s.x0, s.x1) / kCell)), x1 = static_cast<int>(std::floor(std::max(s.x0, s.x1) / kCell));
-        const int z0 = static_cast<int>(std::floor(std::min(s.z0, s.z1) / kCell)), z1 = static_cast<int>(std::floor(std::max(s.z0, s.z1) / kCell));
+        const int x0 = static_cast<int>(ApexMath::Floor(std::min(s.x0, s.x1) / kCell)), x1 = static_cast<int>(ApexMath::Floor(std::max(s.x0, s.x1) / kCell));
+        const int z0 = static_cast<int>(ApexMath::Floor(std::min(s.z0, s.z1) / kCell)), z1 = static_cast<int>(ApexMath::Floor(std::max(s.z0, s.z1) / kCell));
         for (int cx = x0; cx <= x1; cx++)
             for (int cz = z0; cz <= z1; cz++) g_grid.cells[CellKey(cx, cz)].push_back(i);
     }
+    // the lookup table and the bounds (at most half full)
+    uint32_t size = 16;
+    while (size < 2 * g_grid.cells.size() + 1) size <<= 1;
+    g_grid.table.assign(g_grid.cells.empty() ? 0 : size, WallGrid::Span{});
+    g_grid.mask = size - 1;
+    g_grid.runs.clear();
+    g_grid.cx0 = g_grid.cz0 = INT_MAX, g_grid.cx1 = g_grid.cz1 = INT_MIN;
+    for (const auto& [key, list] : g_grid.cells) {
+        uint32_t i = SpanSlot(key, g_grid.mask);
+        while (g_grid.table[i].key != INT64_MIN) i = (i + 1) & g_grid.mask;
+        g_grid.table[i] = WallGrid::Span{key, static_cast<uint32_t>(g_grid.runs.size()), static_cast<uint32_t>(list.size())};
+        g_grid.runs.insert(g_grid.runs.end(), list.begin(), list.end());
+        const int cx = static_cast<int>(key >> 32), cz = static_cast<int>(static_cast<uint32_t>(key));
+        g_grid.cx0 = std::min(g_grid.cx0, cx), g_grid.cx1 = std::max(g_grid.cx1, cx);
+        g_grid.cz0 = std::min(g_grid.cz0, cz), g_grid.cz1 = std::max(g_grid.cz1, cz);
+    }
+    if (g_grid.cells.empty()) g_grid.cx0 = g_grid.cz0 = 0, g_grid.cx1 = g_grid.cz1 = -1;
 }
 } // namespace
 
@@ -14324,9 +14404,16 @@ float SegPass(const WallSeg& s, const WallOpenings::Patch* patches, const float*
     const float den = rx * sz - rz * sx;
     if (ApexMath::Fabs(den) < 1e-6f) return 1.0f; // parallel
     const float qx = s.x0 - ax, qz = s.z0 - az;
-    const float t = (qx * sz - qz * sx) / den; // along lamp -> point
+    // (2.15.3) most segments are behind the lamp or past the point: told from the numerator's sign and size before the two
+    // divisions (the quotient's sign is the operands' and rounding is monotone, so these give t <= 0 or t >= 1 >= tEnd;
+    // a NaN fails both tests and an infinite den is left out: both take the path below, as before)
+    const float tn = qx * sz - qz * sx;
+    if (ApexMath::IsFinite(den) && ((den > 0.0f && tn <= 0.0f) || (den < 0.0f && tn >= 0.0f) || (tEnd <= 1.0f && ApexMath::Fabs(tn) >= ApexMath::Fabs(den))))
+        return 1.0f;
+    const float t = tn / den;                  // along lamp -> point
+    if (t <= 0.001f || t >= tEnd) return 1.0f;
     const float u = (qx * rz - qz * rx) / den; // along the wall
-    if (t <= 0.001f || t >= tEnd || u < 0.0f || u > 1.0f) return 1.0f;
+    if (u < 0.0f || u > 1.0f) return 1.0f;
     const float y = lamp[1] + t * (point[1] - lamp[1]); // the ray's height where it crosses the wall line
     uOut = u, yOut = y;
     if (!(y > s.y0 + 0.02f && y < s.y1 - 0.02f)) return 1.0f;
@@ -14355,14 +14442,16 @@ float WallPass(const float lamp[3], const float point[3], float nearSkip) {
         std::fill(g_grid.seen.begin(), g_grid.seen.end(), 0u);
         g_grid.query = 1;
     }
-    const int x0 = static_cast<int>(std::floor(std::min(ax, bx) / kCell)), x1 = static_cast<int>(std::floor(std::max(ax, bx) / kCell));
-    const int z0 = static_cast<int>(std::floor(std::min(az, bz) / kCell)), z1 = static_cast<int>(std::floor(std::max(az, bz) / kCell));
+    // (2.15.3) only the cells within the walls' bounds (those outside hold none) through the lookup table; the same cells in
+    // the same order, so the same product
+    const int x0 = std::max(static_cast<int>(ApexMath::Floor(std::min(ax, bx) / kCell)), g_grid.cx0), x1 = std::min(static_cast<int>(ApexMath::Floor(std::max(ax, bx) / kCell)), g_grid.cx1);
+    const int z0 = std::max(static_cast<int>(ApexMath::Floor(std::min(az, bz) / kCell)), g_grid.cz0), z1 = std::min(static_cast<int>(ApexMath::Floor(std::max(az, bz) / kCell)), g_grid.cz1);
     float v = 1.0f;
     for (int cx = x0; cx <= x1; cx++)
         for (int cz = z0; cz <= z1; cz++) {
-            const auto it = g_grid.cells.find(CellKey(cx, cz));
-            if (it == g_grid.cells.end()) continue;
-            for (int i : it->second) {
+            const CellSegs it = FindCell(cx, cz);
+            if (!it.n) continue;
+            for (int i : it) {
                 if (g_grid.seen[i] == g_grid.query) continue;
                 g_grid.seen[i] = g_grid.query;
                 const WallSeg& s = g_grid.segs[i];
@@ -14411,14 +14500,14 @@ struct SnapView {
 bool LotToWorld(const Xform& x, float lx, float ly, float lz, float& wx, float& wz) {
     const float(*a)[4] = x.r;
     const float det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
-    if (!(ApexMath::Fabs(det) > 1e-8f) || !std::isfinite(det)) return false;
+    if (!(ApexMath::Fabs(det) > 1e-8f) || !ApexMath::IsFinite(det)) return false;
     const float l[3] = {lx - a[3][0], ly - a[3][1], lz - a[3][2]};
     // w = l . inverse(A), A[j][k] = r[j][k]: columns 0 and 2 of the inverse (cofactors over det)
     const float i00 = (a[1][1] * a[2][2] - a[1][2] * a[2][1]) / det, i10 = (a[1][2] * a[2][0] - a[1][0] * a[2][2]) / det, i20 = (a[1][0] * a[2][1] - a[1][1] * a[2][0]) / det;
     const float i02 = (a[0][1] * a[1][2] - a[0][2] * a[1][1]) / det, i12 = (a[0][2] * a[1][0] - a[0][0] * a[1][2]) / det, i22 = (a[0][0] * a[1][1] - a[0][1] * a[1][0]) / det;
     wx = l[0] * i00 + l[1] * i10 + l[2] * i20;
     wz = l[0] * i02 + l[1] * i12 + l[2] * i22;
-    return std::isfinite(wx) && std::isfinite(wz);
+    return ApexMath::IsFinite(wx) && ApexMath::IsFinite(wz);
 }
 void RefreshSlabGridImpl() {
     g_slabGrid.lots.clear();
@@ -14602,8 +14691,8 @@ float SharedWallPass(const VisSnap& s, const float lamp[3], const float point[3]
     if (ApexMath::Fabs(rx) + ApexMath::Fabs(rz) > 200.0f) return 1.0f;
     const float len = ApexMath::Sqrt(rx * rx + rz * rz);
     const float tEnd = len > nearSkip ? 1.0f - nearSkip / len : 0.0f;
-    const int x0 = static_cast<int>(std::floor(std::min(ax, bx) / kCell)), x1 = static_cast<int>(std::floor(std::max(ax, bx) / kCell));
-    const int z0 = static_cast<int>(std::floor(std::min(az, bz) / kCell)), z1 = static_cast<int>(std::floor(std::max(az, bz) / kCell));
+    const int x0 = static_cast<int>(ApexMath::Floor(std::min(ax, bx) / kCell)), x1 = static_cast<int>(ApexMath::Floor(std::max(ax, bx) / kCell));
+    const int z0 = static_cast<int>(ApexMath::Floor(std::min(az, bz) / kCell)), z1 = static_cast<int>(ApexMath::Floor(std::max(az, bz) / kCell));
     float v = 1.0f;
     for (int cx = x0; cx <= x1; cx++)
         for (int cz = z0; cz <= z1; cz++) {
@@ -14618,7 +14707,7 @@ float SharedWallPass(const VisSnap& s, const float lamp[3], const float point[3]
                 if (p >= 1.0f && why == 0) continue;
                 // the crossing point's own cell only (the segment is listed in every cell of its box)
                 const float px = w.x0 + (w.x1 - w.x0) * u, pz = w.z0 + (w.z1 - w.z0) * u;
-                if (static_cast<int>(std::floor(px / kCell)) != cx || static_cast<int>(std::floor(pz / kCell)) != cz) continue;
+                if (static_cast<int>(ApexMath::Floor(px / kCell)) != cx || static_cast<int>(ApexMath::Floor(pz / kCell)) != cz) continue;
                 if (why == 2) {
                     g_sharedThrough.fetch_add(1, std::memory_order_relaxed);
                     if (p > 0.0f) NoteOpeningTest(lamp, point, w, u, y, p, why, true);
@@ -14670,14 +14759,14 @@ uint32_t OutsideWallsIn(float x0, float z0, float x1, float z1, std::vector<Grou
     RefreshGrid();
     if (g_grid.segs.empty()) return g_grid.gen;
     std::vector<uint8_t> taken(g_grid.segs.size(), 0);
-    const int cx0 = static_cast<int>(std::floor(x0 / kCell)), cx1 = static_cast<int>(std::floor(x1 / kCell));
-    const int cz0 = static_cast<int>(std::floor(z0 / kCell)), cz1 = static_cast<int>(std::floor(z1 / kCell));
+    const int cx0 = static_cast<int>(ApexMath::Floor(x0 / kCell)), cx1 = static_cast<int>(ApexMath::Floor(x1 / kCell));
+    const int cz0 = static_cast<int>(ApexMath::Floor(z0 / kCell)), cz1 = static_cast<int>(ApexMath::Floor(z1 / kCell));
     if (static_cast<int64_t>(cx1 - cx0 + 1) * (cz1 - cz0 + 1) > 4096) return g_grid.gen; // not a lot's surroundings
     for (int cx = cx0; cx <= cx1; cx++)
         for (int cz = cz0; cz <= cz1; cz++) {
-            const auto it = g_grid.cells.find(CellKey(cx, cz));
-            if (it == g_grid.cells.end()) continue;
-            for (int i : it->second) {
+            const CellSegs it = FindCell(cx, cz);
+            if (!it.n) continue;
+            for (int i : it) {
                 if (taken[i]) continue;
                 taken[i] = 1;
                 const WallSeg& s = g_grid.segs[i];
@@ -14811,7 +14900,7 @@ std::string WallSurvey(const std::vector<SurveyPoint>& pts) {
     if (notes.empty()) return "no wall piece noted yet (the walls are noted when they are solved: refresh the lighting, then capture)\n";
     // the points on a 1 m grid (world xz)
     std::unordered_map<int64_t, std::vector<int>> grid;
-    auto cell = [](float x, float z) { return (static_cast<int64_t>(std::floor(x)) << 32) ^ static_cast<int64_t>(static_cast<uint32_t>(static_cast<int32_t>(std::floor(z)))); };
+    auto cell = [](float x, float z) { return (static_cast<int64_t>(ApexMath::Floor(x)) << 32) ^ static_cast<int64_t>(static_cast<uint32_t>(static_cast<int32_t>(ApexMath::Floor(z)))); };
     for (int i = 0; i < static_cast<int>(pts.size()); i++) grid[cell(pts[i].x, pts[i].z)].push_back(i);
     struct Span {
         int draw = -1, count = 0;
@@ -14831,8 +14920,8 @@ std::string WallSurvey(const std::vector<SurveyPoint>& pts) {
         const float minX = std::min(w.x0, w.x1) - ex - 0.3f, maxX = std::max(w.x0, w.x1) + ex + 0.3f;
         const float minZ = std::min(w.z0, w.z1) - ex - 0.3f, maxZ = std::max(w.z0, w.z1) + ex + 0.3f;
         std::map<int, Span> byDraw;
-        for (int cx = static_cast<int>(std::floor(minX)); cx <= static_cast<int>(std::floor(maxX)); cx++)
-            for (int cz = static_cast<int>(std::floor(minZ)); cz <= static_cast<int>(std::floor(maxZ)); cz++) {
+        for (int cx = static_cast<int>(ApexMath::Floor(minX)); cx <= static_cast<int>(ApexMath::Floor(maxX)); cx++)
+            for (int cz = static_cast<int>(ApexMath::Floor(minZ)); cz <= static_cast<int>(ApexMath::Floor(maxZ)); cz++) {
                 const auto it = grid.find((static_cast<int64_t>(cx) << 32) ^ static_cast<int64_t>(static_cast<uint32_t>(cz)));
                 if (it == grid.end()) continue;
                 for (int i : it->second) {
@@ -14975,13 +15064,13 @@ bool OnWallLine(const float point[3], float dirX, float dirZ, float maxDist) {
     RefreshGrid();
     if (g_grid.segs.empty()) return false;
     const float px = point[0], pz = point[2], y = point[1] + 0.5f;
-    const int cx0 = static_cast<int>(std::floor((px - maxDist) / kCell)), cx1 = static_cast<int>(std::floor((px + maxDist) / kCell));
-    const int cz0 = static_cast<int>(std::floor((pz - maxDist) / kCell)), cz1 = static_cast<int>(std::floor((pz + maxDist) / kCell));
+    const int cx0 = static_cast<int>(ApexMath::Floor((px - maxDist) / kCell)), cx1 = static_cast<int>(ApexMath::Floor((px + maxDist) / kCell));
+    const int cz0 = static_cast<int>(ApexMath::Floor((pz - maxDist) / kCell)), cz1 = static_cast<int>(ApexMath::Floor((pz + maxDist) / kCell));
     for (int cx = cx0; cx <= cx1; cx++)
         for (int cz = cz0; cz <= cz1; cz++) {
-            const auto it = g_grid.cells.find(CellKey(cx, cz));
-            if (it == g_grid.cells.end()) continue;
-            for (int i : it->second) {
+            const CellSegs it = FindCell(cx, cz);
+            if (!it.n) continue;
+            for (int i : it) {
                 const WallSeg& s = g_grid.segs[i];
                 if (y < s.y0 || y > s.y1) continue;
                 const float sx = s.x1 - s.x0, sz = s.z1 - s.z0, len2 = sx * sx + sz * sz;
@@ -15024,7 +15113,7 @@ bool OutdoorThroughOpeningsActive() { return RoofedOpeningsOn(); }
 // opening (theirs). Rooms with no opening and no yard keep their solve (the game's own wall test has no penumbra).
 std::atomic<long> g_softSends{0};
 void SetShadowSoftness(float radius) {
-    const float r = std::clamp(std::isfinite(radius) ? radius : Penumbra::kDefaultRadius, Penumbra::kMinRadius, Penumbra::kMaxRadius);
+    const float r = std::clamp(ApexMath::IsFinite(radius) ? radius : Penumbra::kDefaultRadius, Penumbra::kMinRadius, Penumbra::kMaxRadius);
     // (the stored radius: Radius() answers kMinRadius while the Tester switch has the penumbra off, which would differ every frame)
     const float was = Penumbra::g_radius.load(std::memory_order_relaxed);
     if (ApexMath::Fabs(r - was) < 1e-4f) return;
@@ -15105,7 +15194,7 @@ bool ReadOpenRigRoom(const void* room, const void* light, OpenLampHead& r) { // 
         r.mgr = *reinterpret_cast<const uintptr_t*>(rm);
         r.id = *reinterpret_cast<const int*>(rm + 0xC);
         std::memcpy(r.head, static_cast<const BYTE*>(light) + 0x120, sizeof r.head);
-        return std::isfinite(r.head[0]) && std::isfinite(r.head[1]) && std::isfinite(r.head[2]);
+        return ApexMath::IsFinite(r.head[0]) && ApexMath::IsFinite(r.head[1]) && ApexMath::IsFinite(r.head[2]);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -15124,7 +15213,7 @@ float OpeningLampReach(const void* room, const void* light, const float* point) 
         return -1.0f;
     OpenLampHead r;
     if (!ReadOpenRigRoom(room, light, r) || r.mgr != it->second.mgr || r.id != it->second.id) return -1.0f; // (a room gone, or another at its address)
-    if (!std::isfinite(point[0]) || !std::isfinite(point[1]) || !std::isfinite(point[2])) return 0.0f;
+    if (!ApexMath::IsFinite(point[0]) || !ApexMath::IsFinite(point[1]) || !ApexMath::IsFinite(point[2])) return 0.0f;
     if (inner) {
         const StoryGrid& g = *it->second.ig0;
         float A[3], B[3];
@@ -15133,7 +15222,7 @@ float OpeningLampReach(const void* room, const void* light, const float* point) 
         GridWhy why{};
         float pass = GridPassImpl(g, A, B, why);
         if (pass > 0.0f && it->second.ig1 && std::max(A[1], B[1]) > it->second.ig1->minFoot - kGridSoft) pass *= GridPassImpl(*it->second.ig1, A, B, why, it->second.ig1->plane);
-        return std::isfinite(pass) ? std::clamp(pass, 0.0f, 1.0f) : 0.0f;
+        return ApexMath::IsFinite(pass) ? std::clamp(pass, 0.0f, 1.0f) : 0.0f;
     }
     const StoryGrid& g0 = *it->second.g0;
     float A[3], B[3];
@@ -15150,7 +15239,7 @@ float OpeningLampReach(const void* room, const void* light, const float* point) 
         const SnapView v{f.h, f.bits.data(), f.w, f.d};
         if (pass > 0.0f) pass *= LampVis::SlabGate(&v, 1, A, B);
     }
-    return std::isfinite(pass) ? std::clamp(pass, 0.0f, 1.0f) : 0.0f;
+    return ApexMath::IsFinite(pass) ? std::clamp(pass, 0.0f, 1.0f) : 0.0f;
 }
 bool IsOpeningLamp(const void* room, const void* light) {
     const std::shared_ptr<const OpenRigMap> s = OpenRigSnap();
@@ -15178,7 +15267,7 @@ float ExitPass(const ExitLamp& e, const float lamp[3], const float point[3]) {
         if (!(A[1] > e.plane) || !e.slab) return 0.0f;
         const float t = (A[1] - e.plane) / (A[1] - B[1]);
         const float x = A[0] + t * (B[0] - A[0]), z = A[2] + t * (B[2] - A[2]);
-        const int ix = static_cast<int>(std::floor(x)), iz = static_cast<int>(std::floor(z));
+        const int ix = static_cast<int>(ApexMath::Floor(x)), iz = static_cast<int>(ApexMath::Floor(z));
         const int q = Quadrant(x - static_cast<float>(ix), z - static_cast<float>(iz));
         if (ix >= 0 && iz >= 0 && ix < g.w && iz < g.h && (g.flags[static_cast<size_t>(iz) * g.w + ix] & (0x10 << q))) return 0.0f; // the house
         const FloorSnap& f = *e.slab;
@@ -15186,7 +15275,7 @@ float ExitPass(const ExitLamp& e, const float lamp[3], const float point[3]) {
         if (LampVis::PlacedAt(v, x, z)) return 0.0f; // a deck, a balcony, the floor on a foundation
         if (e.below) pass *= GridPassImpl(*e.below, A, B, why);
     }
-    return std::isfinite(pass) ? std::clamp(pass, 0.0f, 1.0f) : 0.0f;
+    return ApexMath::IsFinite(pass) ? std::clamp(pass, 0.0f, 1.0f) : 0.0f;
 }
 } // namespace
 float ExitLampVisibility(const void* light, const float lamp[3], const float point[3], float nearSkip) {
@@ -15195,7 +15284,7 @@ float ExitLampVisibility(const void* light, const float lamp[3], const float poi
     if (!s) return -1.0f;
     const auto it = s->find(reinterpret_cast<uintptr_t>(light));
     if (it == s->end() || !it->second.g0) return -1.0f;
-    if (!std::isfinite(point[0]) || !std::isfinite(point[1]) || !std::isfinite(point[2])) return 0.0f;
+    if (!ApexMath::IsFinite(point[0]) || !ApexMath::IsFinite(point[1]) || !ApexMath::IsFinite(point[2])) return 0.0f;
     g_exitTests.fetch_add(1, std::memory_order_relaxed);
     const float pass = ExitPass(it->second, lamp, point);
     if (!(pass > 0.0f)) {
@@ -15398,7 +15487,7 @@ bool ReadLampHomeRaw(uintptr_t light, int& id, float& y, bool& on) {
 bool ReadStoryBase(uintptr_t mgr, float& base) {
     __try {
         base = *reinterpret_cast<const float*>(mgr + 0x98);
-        return std::isfinite(base);
+        return ApexMath::IsFinite(base);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -15406,7 +15495,7 @@ bool ReadStoryBase(uintptr_t mgr, float& base) {
 bool LampHome(uintptr_t tracker, uintptr_t light, int& story, int& room, bool& on) {
     int id = -1;
     float y = 0.0f;
-    if (!light || !ReadLampHomeRaw(light, id, y, on) || id < 0 || id > 65535 || !std::isfinite(y)) return false;
+    if (!light || !ReadLampHomeRaw(light, id, y, on) || id < 0 || id > 65535 || !ApexMath::IsFinite(y)) return false;
     int best = INT_MIN;
     float bestBase = -1e30f;
     for (int S = -4; S <= 7; S++) {
@@ -16142,7 +16231,7 @@ bool StoryAboveFor(const uintptr_t cur[4], uintptr_t up[4], float& yLow, float& 
         }
     }
     yLow = MgrFloorY(mgr), yUp = MgrFloorY(mgrUp);
-    if (!std::isfinite(yLow) || !std::isfinite(yUp) || !(yUp - yLow > 1.0f) || yUp - yLow > 10.0f) {
+    if (!ApexMath::IsFinite(yLow) || !ApexMath::IsFinite(yUp) || !(yUp - yLow > 1.0f) || yUp - yLow > 10.0f) {
         g_storyBlendNone.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
@@ -16926,7 +17015,7 @@ int ActiveLotTrackers(uintptr_t* out, int max) {
 namespace {
 using namespace ApexMemory::Est;
 uint64_t GridOwned(const StoryGrid& g) {
-    return Vec(g.zl) + Vec(g.xl) + Vec(g.dg) + Vec(g.flags) + Vec(g.ceil) + Vec(g.quad) + Vec(g.edges) + Vec(g.openings) + Vec(g.doorCuts);
+    return Vec(g.zl) + Vec(g.xl) + Vec(g.zlNear) + Vec(g.xlNear) + Vec(g.dg) + Vec(g.flags) + Vec(g.ceil) + Vec(g.quad) + Vec(g.edges) + Vec(g.openings) + Vec(g.doorCuts);
 }
 uint64_t RoomOwned(const RoomInfo& r) {
     return Vec(r.cross) + Vec(r.same) + Vec(r.sameHomes) + Vec(r.lower) + Vec(r.inner) + Vec(r.innerUp) + Vec(r.innerSrc);

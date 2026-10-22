@@ -2225,6 +2225,8 @@ const I18n::Pair kPairs[] = {
     {"Indoor object sampler scan", "室内物品采样器扫描"},
     {"Only declared samplers are checked", "只检查已声明的采样器"},
     {"Room record lookup cache", "房间记录查找缓存"},
+    {"Follow bound textures", "跟踪已绑定的纹理"},
+    {"Texture reads answered without asking the device", "无需询问设备即可回答纹理读取"},
     {"Window light channel memo", "窗户灯光通道记忆"},
     {"Asked once per sample batch", "每批采样只询问一次"},
     {"Paced relight while moving", "移动时按节奏重新照明"},

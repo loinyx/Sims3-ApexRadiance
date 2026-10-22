@@ -1,4 +1,5 @@
 #pragma once
+#include "fast_math.h"
 // Realistic lamp reach (12/10, option "alcanceRealistaDasLampadas"): the distance law of a lamp on an outdoor wall texel,
 // shared by the room solve (level_light_share.cpp ReachShareImpl, wall texels) and the per-pixel lamps of outdoor objects,
 // fences and windows (lot_light_bridge.cpp, ShaderPatches AppendLampLaw), so a column, a balcony band or a window frame takes
@@ -12,8 +13,8 @@ namespace LampReach {
 // sqrt(w / 85): 3.5 m and 15 m for the garden post of the 12/10 captures (range 42.5 x intensity 2), within 2..5 m and
 // 6..20 m. An unreadable w counts as 85.
 inline void Radii(float w, float& r0, float& R) {
-    if (!(w > 0.0f) || !std::isfinite(w)) w = 85.0f;
-    const float k = std::sqrt(w / 85.0f);
+    if (!(w > 0.0f) || !ApexMath::IsFinite(w)) w = 85.0f;
+    const float k = ApexMath::Sqrt(w / 85.0f);
     r0 = std::clamp(3.5f * k, 2.0f, 5.0f);
     R = std::clamp(15.0f * k, 6.0f, 20.0f);
 }
@@ -35,7 +36,7 @@ inline float Share(float d, float r0, float R) {
 // (20-31-19 / 20-31-21, within 2/255). UNVERIFIED: that the 3.333 applies to every wall sample, and to lamp types other than
 // 11 (only the street-lamp class 0x006BE020 was read in full).
 inline float EntryGain(float w) {
-    if (!(w > 0.0f) || !std::isfinite(w)) w = 85.0f;
+    if (!(w > 0.0f) || !ApexMath::IsFinite(w)) w = 85.0f;
     return 0.25f * w;
 }
 // Entries of a lamp in the outdoor rooms' (room 0) light lists, on every story (12/10, review: the walls weigh only the

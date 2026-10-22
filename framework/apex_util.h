@@ -1,6 +1,7 @@
 #pragma once
 // Small string and file helpers shared by the framework.
 #include <windows.h>
+#include <atomic>
 #include <string>
 
 namespace ApexUtil {
@@ -27,6 +28,11 @@ class SrwExclusive {
   private:
     SRWLOCK& lock_;
 };
+
+// (2.15.3) One more on a statistics counter without a locked add: a plain load and store (a lock xadd costs about 20 cycles
+// and a full barrier; these run per lamp per sample or per draw). Two threads counting at once can lose a count, so this is
+// only for numbers shown in the status and logs, never for a generation or anything a cache or a decision reads.
+template <typename T> inline void CountOne(std::atomic<T>& c) { c.store(c.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed); }
 
 inline std::wstring ToWide(const std::string& utf8) {
     if (utf8.empty()) return {};

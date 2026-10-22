@@ -13,6 +13,7 @@
 // maps from here.
 #include "room_map_padding.h"
 #include "apex_log.h"
+#include "d3d9_hooks.h"
 #include "shader_patches.h"
 #include <windows.h>
 #include <array>
@@ -115,7 +116,7 @@ void NoteDraw(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps) {
     // one look per set (story and lot) and shader every kCheckEvery frames, keyed by the +X basis map this draw binds
     {
         IDirect3DBaseTexture9* key = nullptr;
-        if (FAILED(dev->GetTexture(static_cast<DWORD>(dirs[0]), &key)) || !key) return;
+        if (FAILED(D3D9Hooks::GetBoundTexture(dev, static_cast<DWORD>(dirs[0]), &key)) || !key) return;
         uint32_t& last = g_noted[NoteKey{key, ps}];
         key->Release(); // only a key: never dereferenced
         if (last && g_frame - last < kCheckEvery) return;
@@ -129,7 +130,7 @@ void NoteDraw(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps) {
     for (DWORD s = 0; s < 16; s++) {
         if (!(declared & (1u << s))) continue;
         IDirect3DBaseTexture9* t = nullptr;
-        if (FAILED(dev->GetTexture(s, &t)) || !t) continue;
+        if (FAILED(D3D9Hooks::GetBoundTexture(dev, s, &t)) || !t) continue;
         int dir = -1;
         for (int k = 0; k < 4; k++)
             if (dirs[k] == static_cast<int>(s)) dir = k;

@@ -61,10 +61,18 @@ int64_t Cell(float x, float z) {
     return (static_cast<int64_t>(static_cast<int32_t>(std::floor(x))) << 32) ^ static_cast<int64_t>(static_cast<uint32_t>(static_cast<int32_t>(std::floor(z))));
 }
 
+// (2.15.3) the last answer: asked on every draw, and the game draws many in a row with one vertex shader
+IDirect3DVertexShader9* g_lastVs = nullptr;
+bool g_lastWall = false;
+
 bool IsWallVs(IDirect3DVertexShader9* vs) {
     if (!vs) return false;
+    if (vs == g_lastVs) return g_lastWall;
     const auto it = g_isWallVs.find(vs);
-    if (it != g_isWallVs.end()) return it->second;
+    if (it != g_isWallVs.end()) {
+        g_lastVs = vs, g_lastWall = it->second;
+        return it->second;
+    }
     bool wall = false;
     UINT size = 0;
     if (SUCCEEDED(vs->GetFunction(nullptr, &size)) && size == kWallVs.size) {
@@ -73,6 +81,7 @@ bool IsWallVs(IDirect3DVertexShader9* vs) {
     }
     if (g_isWallVs.size() > 4096) g_isWallVs.clear(); // shaders released and their addresses reused
     g_isWallVs[vs] = wall;
+    g_lastVs = vs, g_lastWall = wall;
     return wall;
 }
 
@@ -317,6 +326,7 @@ void Uninstall() {
     D3D9Hooks::UnregisterAll(kHookName);
     g_installed = false;
     g_isWallVs.clear();
+    g_lastVs = nullptr;
     std::lock_guard<std::mutex> lk(g_mx);
     g_meshes.clear();
     g_grid.clear();

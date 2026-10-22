@@ -24,7 +24,7 @@ inline std::atomic<float> g_radius{kDefaultRadius};
 // 2.12.3, no texel spread) whatever the radius
 inline std::atomic<bool> g_on{true};
 inline float Radius() { return g_on.load(std::memory_order_relaxed) ? g_radius.load(std::memory_order_relaxed) : kMinRadius; }
-inline void SetRadius(float r) { g_radius.store(std::clamp(std::isfinite(r) ? r : kDefaultRadius, kMinRadius, kMaxRadius), std::memory_order_relaxed); }
+inline void SetRadius(float r) { g_radius.store(std::clamp(ApexMath::IsFinite(r) ? r : kDefaultRadius, kMinRadius, kMaxRadius), std::memory_order_relaxed); }
 
 // The share (0..1) of a spot of half width h on the open side of an edge at signed distance x (x > 0: open side)
 inline float Cover(float x, float h) {

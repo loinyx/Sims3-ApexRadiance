@@ -1,3 +1,5 @@
+#include "apex_util.h"
+#include "fast_math.h"
 #include "shader_lookup_cache.h"
 #include "world_lamp_policy.h"
 #include "terrain_lighting_policy.h"
@@ -123,7 +125,7 @@ struct SamplerBind {
     uint8_t changed = 0; // bit i: kStates[i] was set
     static constexpr D3DSAMPLERSTATETYPE kStates[6] = {D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_SRGBTEXTURE};
     SamplerBind(IDirect3DDevice9* d, DWORD sampler, IDirect3DBaseTexture9* tex, DWORD mip = D3DTEXF_LINEAR) : dev(d), s(sampler) {
-        dev->GetTexture(s, &old);
+        D3D9Hooks::GetBoundTexture(dev, s, &old);
         for (int i = 0; i < 6; i++) dev->GetSamplerState(s, kStates[i], &st[i]);
         const DWORD v[6] = {D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, D3DTEXF_LINEAR, D3DTEXF_LINEAR, mip, FALSE};
         if (old != tex) {
@@ -316,6 +318,7 @@ struct PsFacts {
     bool roomMap = false;  // reads a room light map (Smooth light maps, g_roomMapPs)
     uint16_t declared = 0; // bit s = sampler s declared (0: not read)
     int8_t lastLm = -1;    // DrawIndoorObject: the sampler of the room light map at the last draw that found one
+    bool ps3 = false;      // ps_3_0 (PatchIndoorBasis patches nothing else: DrawIndoorObject skips its sampler scan)
 };
 std::unordered_map<IDirect3DPixelShader9*, PsFacts> g_psFacts;
 PsFacts* g_curFacts = nullptr; // g_curPs's entry (null for no shader)
@@ -391,7 +394,7 @@ struct ConstX {
     int k = -1;
     float old[4] = {};
     ConstX(IDirect3DDevice9* d, int reg, bool on, float value) : dev(d) {
-        if (!on || reg < 0 || !std::isfinite(value) || FAILED(dev->GetPixelShaderConstantF(static_cast<UINT>(reg), old, 1)) || old[0] == value) return;
+        if (!on || reg < 0 || !ApexMath::IsFinite(value) || FAILED(dev->GetPixelShaderConstantF(static_cast<UINT>(reg), old, 1)) || old[0] == value) return;
         const float c[4] = {value, old[1], old[2], old[3]};
         SetPsConst(dev, static_cast<UINT>(reg), c, 1);
         k = reg;
@@ -413,7 +416,7 @@ struct TerrainConst {
         if (reg < 0 || FAILED(dev->GetPixelShaderConstantF(reg, old, 1))) return;
         const float value = TerrainLightingPolicy::LampScale(old[0], g_night.load(std::memory_order_relaxed),
                                                             g_groundGain.load(std::memory_order_relaxed), squared);
-        if (value == old[0] || !std::isfinite(value)) return;
+        if (value == old[0] || !ApexMath::IsFinite(value)) return;
         const float c[4] = {value, old[1], old[2], old[3]};
         if (SUCCEEDED(D3D9Hooks::CallOriginalSetPixelShaderConstantF(dev, reg, c, 1))) {
             k = reg;
@@ -443,7 +446,7 @@ IDirect3DBaseTexture9* ChunkTexture(const std::pair<int, int>& key, IDirect3DBas
     return original;
 }
 
-bool Near(float a, float b) { return std::fabs(a - b) < 1e-5f; }
+bool Near(float a, float b) { return ApexMath::Fabs(a - b) < 1e-5f; }
 
 // ---- Soft lot edges: the rectangle of every loaded lot, for the lot pass feather (kReplacementHlsl c28..c30). ----
 // Walk (render thread, Present): *(0x011D1860)+0x1C0 = lightMgr; +0xD4 light update tree (buckets +0x58, count +0x5C,
@@ -547,8 +550,8 @@ int ReadLotRects(LotRect* out, int max) {
                 r.m10 = m[10];
                 r.ty = m[13];
                 r.base = *reinterpret_cast<const float*>(mgr + 0xD4);
-                if (!std::isfinite(r.base)) r.base = r.ty;
-                if (std::isfinite(r.tx) && std::isfinite(r.tz) && std::isfinite(r.m0) && std::isfinite(r.m8) && std::isfinite(r.m2) && std::isfinite(r.m10) && std::isfinite(r.ty)) n++;
+                if (!ApexMath::IsFinite(r.base)) r.base = r.ty;
+                if (ApexMath::IsFinite(r.tx) && ApexMath::IsFinite(r.tz) && ApexMath::IsFinite(r.m0) && ApexMath::IsFinite(r.m8) && ApexMath::IsFinite(r.m2) && ApexMath::IsFinite(r.m10) && ApexMath::IsFinite(r.ty)) n++;
                 break; // one story per lot is enough
             }
             node = *reinterpret_cast<const uintptr_t*>(node + 0x10);
@@ -574,7 +577,7 @@ void RefreshLotRects() {
 // The rectangle of the lot the current lot pass draws, matched by its matrix (VS c8, c10). nullptr = unknown lot.
 const LotRect* FindLotRect(const float c8[4], const float c10[4]) {
     for (const LotRect& r : g_lotRects)
-        if (std::fabs(r.tx - c8[3]) < 0.05f && std::fabs(r.tz - c10[3]) < 0.05f && std::fabs(r.m0 - c8[0]) < 2e-3f && std::fabs(r.m8 - c8[2]) < 2e-3f) return &r;
+        if (ApexMath::Fabs(r.tx - c8[3]) < 0.05f && ApexMath::Fabs(r.tz - c10[3]) < 0.05f && ApexMath::Fabs(r.m0 - c8[0]) < 2e-3f && ApexMath::Fabs(r.m8 - c8[2]) < 2e-3f) return &r;
     return nullptr;
 }
 
@@ -587,7 +590,7 @@ bool LotEdgeConstants(const float k[4], const float c15[4], const float c8[4], c
     if (!r || !g_softEdges.load(std::memory_order_relaxed)) return false;
     const double a = c8[0], b = c8[2], c = c10[0], d = c10[2];
     const double det = a * d - b * c;
-    if (std::fabs(det) < 1e-4 || std::fabs(k[0]) < 1e-9f || std::fabs(k[1]) < 1e-9f) return false;
+    if (ApexMath::Fabs(det) < 1e-4 || ApexMath::Fabs(k[0]) < 1e-9f || ApexMath::Fabs(k[1]) < 1e-9f) return false;
     const double sx = 1.0 / k[0], sz = 1.0 / k[1];
     const double ox = c15[0] - k[2] * sx - c8[3]; // world.x - tx = uv.x * sx + ox
     const double oz = c15[2] - k[3] * sz - c10[3];
@@ -740,8 +743,8 @@ void BuildChunkMips(const ShadeTask& t, ShadeResult& r) {
         const size_t n = static_cast<size_t>(m.grid.w) * m.grid.h;
         if (!m.v || m.v->v.size() != n || m.v->w.size() != n) continue;
         if (sumW.empty()) sumW.assign(static_cast<size_t>(N) * N, 0.0f), sumMW.assign(static_cast<size_t>(N) * N, 0.0f);
-        const int i0 = std::max(0, static_cast<int>(std::floor((m.x0 - wx0) * tpm))), i1 = std::min(N - 1, static_cast<int>(std::ceil((m.x1 - wx0) * tpm)));
-        const int j0 = std::max(0, static_cast<int>(std::floor((m.z0 - wz0) * tpm))), j1 = std::min(N - 1, static_cast<int>(std::ceil((m.z1 - wz0) * tpm)));
+        const int i0 = std::max(0, static_cast<int>(ApexMath::Floor((m.x0 - wx0) * tpm))), i1 = std::min(N - 1, static_cast<int>(ApexMath::Ceil((m.x1 - wx0) * tpm)));
+        const int j0 = std::max(0, static_cast<int>(ApexMath::Floor((m.z0 - wz0) * tpm))), j1 = std::min(N - 1, static_cast<int>(ApexMath::Ceil((m.z1 - wz0) * tpm)));
         for (int j = j0; j <= j1; j++)
             for (int i = i0; i <= i1; i++) {
                 float v, wt;
@@ -909,8 +912,8 @@ void ReleaseLotMasks() {
 // The chunks over a world box are made again at their next draw
 void MarkChunkShades(float x0, float z0, float x1, float z1) {
     if (!(x1 >= x0) || !(z1 >= z0) || x1 - x0 > 4096.0f || z1 - z0 > 4096.0f) return;
-    const int i0 = static_cast<int>(std::floor(x0 / kChunkSize)), i1 = static_cast<int>(std::floor(x1 / kChunkSize));
-    const int j0 = static_cast<int>(std::floor(z0 / kChunkSize)), j1 = static_cast<int>(std::floor(z1 / kChunkSize));
+    const int i0 = static_cast<int>(ApexMath::Floor(x0 / kChunkSize)), i1 = static_cast<int>(ApexMath::Floor(x1 / kChunkSize));
+    const int j0 = static_cast<int>(ApexMath::Floor(z0 / kChunkSize)), j1 = static_cast<int>(ApexMath::Floor(z1 / kChunkSize));
     for (int i = i0; i <= i1; i++)
         for (int j = j0; j <= j1; j++) g_chunkShades[{i * 256 + 128, j * 256 + 128}].dirty = true;
 }
@@ -996,7 +999,7 @@ std::vector<GroundShadow::Lamp> ShadeLamps(const LotRect& r) {
         const float lum = b.light[0] * 0.2126f + b.light[1] * 0.7152f + b.light[2] * 0.0722f;
         GroundShadow::Lamp L{b.pos[0], b.pos[1], b.pos[2], 0.4f * lum};
         L.liftable = TerrainBakeRule::Liftable(b.lot != 0, b.type);
-        if (!(L.k > 0.0f) || !std::isfinite(L.k) || !std::isfinite(L.x) || !std::isfinite(L.y) || !std::isfinite(L.z)) continue;
+        if (!(L.k > 0.0f) || !ApexMath::IsFinite(L.k) || !ApexMath::IsFinite(L.x) || !ApexMath::IsFinite(L.y) || !ApexMath::IsFinite(L.z)) continue;
         const float nx = std::clamp(L.x, x0, x1), nz = std::clamp(L.z, z0, z1);
         const float wgt = GroundShadow::Weight(L, nx, r.ty, nz);
         if (!(wgt >= GroundShadow::kMinWeight)) continue;
@@ -1019,15 +1022,15 @@ GroundShadow::Grid ShadeGrid(const LotRect& r, int w, int h, const std::vector<G
     g.m0 = r.m0, g.m2 = r.m2, g.m8 = r.m8, g.m10 = r.m10, g.tx = r.tx, g.tz = r.tz, g.ty = r.ty;
     float lx0 = 0, lz0 = 0, lx1 = r.w, lz1 = r.d; // lot-local metres
     const double det = static_cast<double>(r.m0) * r.m10 - static_cast<double>(r.m8) * r.m2;
-    if (std::fabs(det) > 1e-6)
+    if (ApexMath::Fabs(det) > 1e-6)
         for (const GroundShadow::Lamp& L : lamps) {
             const double dx = L.x - r.tx, dz = L.z - r.tz;
             const float lx = static_cast<float>((r.m10 * dx - r.m8 * dz) / det), lz = static_cast<float>((-r.m2 * dx + r.m0 * dz) / det);
             const float R = GroundShadow::Reach(L, r.ty);
-            if (!std::isfinite(lx) || !std::isfinite(lz) || !(R > 0.0f)) continue;
+            if (!ApexMath::IsFinite(lx) || !ApexMath::IsFinite(lz) || !(R > 0.0f)) continue;
             lx0 = std::min(lx0, lx - R), lz0 = std::min(lz0, lz - R), lx1 = std::max(lx1, lx + R), lz1 = std::max(lz1, lz + R);
         }
-    const auto texels = [](float m) { return static_cast<int>(std::ceil(std::clamp(m, 0.0f, kShadeMargin) * GroundShadow::kTexelsPerMetre)); };
+    const auto texels = [](float m) { return static_cast<int>(ApexMath::Ceil(std::clamp(m, 0.0f, kShadeMargin) * GroundShadow::kTexelsPerMetre)); };
     ox = texels(-lx0);
     oz = texels(-lz0);
     g.w = w + ox + texels(lx1 - r.w);
@@ -1095,14 +1098,14 @@ void FenceWallsIn(float x0, float z0, float x1, float z1, std::vector<GroundShad
             for (const GroundShadow::Wall& w : g.walls) {
                 const uint32_t i = static_cast<uint32_t>(g_fenceAll.size());
                 g_fenceAll.push_back(w);
-                const int cx = static_cast<int>(std::floor(0.5f * (w.x0 + w.x1) / kFenceCell)), cz = static_cast<int>(std::floor(0.5f * (w.z0 + w.z1) / kFenceCell));
+                const int cx = static_cast<int>(ApexMath::Floor(0.5f * (w.x0 + w.x1) / kFenceCell)), cz = static_cast<int>(ApexMath::Floor(0.5f * (w.z0 + w.z1) / kFenceCell));
                 g_fenceCells[FenceCellKey(cx, cz)].push_back(i);
             }
     }
     if (g_fenceAll.empty()) return;
     // (pieces are at most 8 m long: their middle is within one cell of any point of them)
-    const int i0 = static_cast<int>(std::floor(x0 / kFenceCell)) - 1, i1 = static_cast<int>(std::floor(x1 / kFenceCell)) + 1;
-    const int j0 = static_cast<int>(std::floor(z0 / kFenceCell)) - 1, j1 = static_cast<int>(std::floor(z1 / kFenceCell)) + 1;
+    const int i0 = static_cast<int>(ApexMath::Floor(x0 / kFenceCell)) - 1, i1 = static_cast<int>(ApexMath::Floor(x1 / kFenceCell)) + 1;
+    const int j0 = static_cast<int>(ApexMath::Floor(z0 / kFenceCell)) - 1, j1 = static_cast<int>(ApexMath::Floor(z1 / kFenceCell)) + 1;
     if (static_cast<int64_t>(i1 - i0 + 1) * (j1 - j0 + 1) > 4096) return;
     for (int i = i0; i <= i1; i++)
         for (int j = j0; j <= j1; j++) {
@@ -1180,10 +1183,10 @@ bool MeshBox(const BYTE* p, UINT count, UINT stride, const FenceLayout& L, float
         hi[0] = hi[1] = hi[2] = -1e30f;
         for (UINT i = 0; i < count; i++) {
             float v[4];
-            if (!ReadElement(p + static_cast<size_t>(i) * stride + L.posOff, L.posType, v) || !(std::fabs(v[3]) > 1e-6f)) return false;
+            if (!ReadElement(p + static_cast<size_t>(i) * stride + L.posOff, L.posType, v) || !(ApexMath::Fabs(v[3]) > 1e-6f)) return false;
             for (int k = 0; k < 3; k++) {
                 const float c = v[k] / v[3];
-                if (!std::isfinite(c)) return false;
+                if (!ApexMath::IsFinite(c)) return false;
                 lo[k] = std::min(lo[k], c), hi[k] = std::max(hi[k], c);
             }
         }
@@ -1450,7 +1453,7 @@ bool FencePieceWalls(const BYTE* p, UINT count, UINT stride, const FenceLayout& 
             float t[4], q[4];
             if (!ReadElement(r + L.placeOff, L.placeType, t) || !ReadElement(r + L.turnOff, L.turnType, q)) return false;
             const float c = q[0], k = q[1], s = q[2];
-            if (!std::isfinite(t[0]) || !std::isfinite(t[1]) || !std::isfinite(t[2]) || !std::isfinite(c) || !std::isfinite(s) || !std::isfinite(k)) return false;
+            if (!ApexMath::IsFinite(t[0]) || !ApexMath::IsFinite(t[1]) || !ApexMath::IsFinite(t[2]) || !ApexMath::IsFinite(c) || !ApexMath::IsFinite(s) || !ApexMath::IsFinite(k)) return false;
             const auto world = [&](const float l[2], float& x, float& z) {
                 x = l[0] * c - l[1] * s + t[0];
                 z = l[0] * s + l[1] * c + t[2];
@@ -1786,7 +1789,7 @@ IDirect3DTexture9* LotMaskForImpl(IDirect3DDevice9* dev, const float k[4], const
     if (!r) return WhiteMask(dev);
     const double a = c8[0], b = c8[2], c = c10[0], d = c10[2];
     const double det = a * d - b * c;
-    if (std::fabs(det) < 1e-4 || std::fabs(k[0]) < 1e-9f || std::fabs(k[1]) < 1e-9f || r->w <= 0 || r->d <= 0) return WhiteMask(dev);
+    if (ApexMath::Fabs(det) < 1e-4 || ApexMath::Fabs(k[0]) < 1e-9f || ApexMath::Fabs(k[1]) < 1e-9f || r->w <= 0 || r->d <= 0) return WhiteMask(dev);
     const double sx = 1.0 / k[0], sz = 1.0 / k[1];
     const double ox = c15[0] - k[2] * sx - c8[3], oz = c15[2] - k[3] * sz - c10[3];
     rows[0] = static_cast<float>(d * sx / det / r->w);
@@ -1881,9 +1884,9 @@ std::atomic<long> g_floorShadeLot{0}, g_floorShadeNoLot{0};
 const LotRect* FindFloorLot(const float c8[4], const float c10[4]) {
     if (const LotRect* r = FindLotRect(c8, c10)) return r;
     for (const LotRect& r : g_lotRects) {
-        if (std::fabs(r.m0 - c8[0]) >= 2e-3f || std::fabs(r.m8 - c8[2]) >= 2e-3f || std::fabs(r.m2 - c10[0]) >= 2e-3f || std::fabs(r.m10 - c10[2]) >= 2e-3f) continue;
+        if (ApexMath::Fabs(r.m0 - c8[0]) >= 2e-3f || ApexMath::Fabs(r.m8 - c8[2]) >= 2e-3f || ApexMath::Fabs(r.m2 - c10[0]) >= 2e-3f || ApexMath::Fabs(r.m10 - c10[2]) >= 2e-3f) continue;
         const double det = static_cast<double>(r.m0) * r.m10 - static_cast<double>(r.m8) * r.m2;
-        if (std::fabs(det) < 1e-6) continue;
+        if (ApexMath::Fabs(det) < 1e-6) continue;
         const double dx = c8[3] - r.tx, dz = c10[3] - r.tz;
         const double lx = (r.m10 * dx - r.m8 * dz) / det, lz = (-r.m2 * dx + r.m0 * dz) / det;
         if (lx > -0.5 && lz > -0.5 && lx < r.w + 0.5 && lz < r.d + 0.5) return &r;
@@ -1895,7 +1898,7 @@ std::atomic<long> g_fenceShadeLot{0}, g_fenceShadeNoLot{0};
 const LotRect* FindLotAt(float x, float z) {
     for (const LotRect& r : g_lotRects) {
         const double det = static_cast<double>(r.m0) * r.m10 - static_cast<double>(r.m8) * r.m2;
-        if (std::fabs(det) < 1e-6) continue;
+        if (ApexMath::Fabs(det) < 1e-6) continue;
         const double dx = x - r.tx, dz = z - r.tz;
         const double lx = (r.m10 * dx - r.m8 * dz) / det, lz = (-r.m2 * dx + r.m0 * dz) / det;
         if (lx >= 0.0 && lz >= 0.0 && lx <= r.w && lz <= r.d) return &r;
@@ -2002,10 +2005,12 @@ PsClass Classify(IDirect3DPixelShader9* ps) {
     if (it != g_classCache.end()) return it->second;
     PsClass c = PsClass::Other;
     uint16_t declaredSamplers = 0;
+    bool ps3 = false;
     UINT size = 0;
     if (SUCCEEDED(ps->GetFunction(nullptr, &size)) && size >= 8 && size < 65536) {
         std::vector<BYTE> code(size);
         if (SUCCEEDED(ps->GetFunction(code.data(), &size))) {
+            ps3 = size >= 4 && *reinterpret_cast<const DWORD*>(code.data()) == 0xFFFF0300u;
             if (RoomMapPadding::IsBasisPs(reinterpret_cast<const DWORD*>(code.data()), size / 4)) g_basisPs.insert(ps); // reads the room basis maps
             {
                 const auto* t = reinterpret_cast<const DWORD*>(code.data());
@@ -2122,6 +2127,7 @@ PsClass Classify(IDirect3DPixelShader9* ps) {
     facts.basis = g_basisPs.count(ps) != 0;
     facts.roomMap = g_roomMapPs.count(ps) != 0;
     facts.declared = declaredSamplers;
+    facts.ps3 = ps3;
     ps->AddRef();
     g_pinned.push_back(ps);
     return c;
@@ -2366,7 +2372,7 @@ bool ReadLamp(uintptr_t L, float out[8], LampCone& cone) { // POD only (SEH)
         (void)bounds;
         const float range = *reinterpret_cast<const float*>(L + 0x130);
         if (!(range > 0.01f)) return false;
-        float radius = std::sqrt(range) * 1.2f;
+        float radius = ApexMath::Sqrt(range) * 1.2f;
         radius = radius < 2.0f ? 2.0f : (radius > 25.0f ? 25.0f : radius);
         out[0] = head[0]; out[1] = head[1]; out[2] = head[2]; out[3] = radius;
         out[4] = col[0] * inten * fade; out[5] = col[1] * inten * fade; out[6] = col[2] * inten * fade; out[7] = 0;
@@ -2389,8 +2395,8 @@ bool ReadLamp(uintptr_t L, float out[8], LampCone& cone) { // POD only (SEH)
             c.c1[3] = c.c2[3] = -sc * o;
             c.spill = 0.0f;
         }
-        bool finite = std::isfinite(c.spill);
-        for (int i = 0; i < 4; i++) finite = finite && std::isfinite(c.c1[i]) && std::isfinite(c.c2[i]);
+        bool finite = ApexMath::IsFinite(c.spill);
+        for (int i = 0; i < 4; i++) finite = finite && ApexMath::IsFinite(c.c1[i]) && ApexMath::IsFinite(c.c2[i]);
         cone = finite ? c : LampCone{};
         cone.w = range * inten; // the product ReachShareImpl reads (LampReach::Radii takes an unreadable one as 85)
         cone.entries = LampReach::Entries(lotOwned, *reinterpret_cast<const int*>(L + 0xD0)); // +0xD0: the lamp's story (light_diag "d0")
@@ -2416,12 +2422,12 @@ bool ReadExitLamp(uintptr_t L, float out[8], LampCone& cone) { // POD only (SEH)
         const float fade = *reinterpret_cast<const float*>(L + 0x20);
         const float range = *reinterpret_cast<const float*>(L + 0x130);
         if (!(range > 0.01f)) return false;
-        float radius = std::sqrt(range) * 1.2f;
+        float radius = ApexMath::Sqrt(range) * 1.2f;
         radius = radius < 2.0f ? 2.0f : (radius > 25.0f ? 25.0f : radius);
         out[0] = head[0]; out[1] = head[1]; out[2] = head[2]; out[3] = radius;
         out[4] = col[0] * inten * fade; out[5] = col[1] * inten * fade; out[6] = col[2] * inten * fade; out[7] = 0;
         for (int i = 0; i < 7; i++)
-            if (!std::isfinite(out[i])) return false;
+            if (!ApexMath::IsFinite(out[i])) return false;
         LampCone c;
         if (type == 5) {
             float k = 5.0f;
@@ -2441,8 +2447,8 @@ bool ReadExitLamp(uintptr_t L, float out[8], LampCone& cone) { // POD only (SEH)
             c.c1[3] = c.c2[3] = -sc * o;
             c.spill = 0.0f;
         }
-        bool finite = std::isfinite(c.spill);
-        for (int i = 0; i < 4; i++) finite = finite && std::isfinite(c.c1[i]) && std::isfinite(c.c2[i]);
+        bool finite = ApexMath::IsFinite(c.spill);
+        for (int i = 0; i < 4; i++) finite = finite && ApexMath::IsFinite(c.c1[i]) && ApexMath::IsFinite(c.c2[i]);
         cone = finite ? c : LampCone{};
         cone.w = range * inten;
         cone.entries = 1.0f;
@@ -2583,7 +2589,7 @@ bool InBake(const LotLampState& s) {
     if (!(s.flags & 0x20)) return false;
     if (!(s.flags & 0x40)) return false;
     const float w = s.inten * s.range;
-    if (!std::isfinite(w) || !(w > 1e-3f)) return false;
+    if (!ApexMath::IsFinite(w) || !(w > 1e-3f)) return false;
     return std::max({s.col[0], s.col[1], s.col[2]}) > 1e-3f;
 }
 
@@ -2594,8 +2600,8 @@ bool MovedApart(const float* a, const float* b) {
 
 bool LightDiffers(const float* a, const float* b) {
     for (int c = 0; c < 3; c++) {
-        const float tol = std::max(kLightAbs, kLightRel * std::max(std::fabs(a[c]), std::fabs(b[c])));
-        if (!(std::fabs(a[c] - b[c]) <= tol)) return true;
+        const float tol = std::max(kLightAbs, kLightRel * std::max(ApexMath::Fabs(a[c]), ApexMath::Fabs(b[c])));
+        if (!(ApexMath::Fabs(a[c] - b[c]) <= tol)) return true;
     }
     return false;
 }
@@ -2626,7 +2632,7 @@ std::string LampChangeText(uintptr_t L, const LotLampState& a, const LotLampStat
     if (std::memcmp(&a.range, &b.range, 4) != 0) t += std::format(" range {:.2f}->{:.2f},", a.range, b.range);
     if (std::memcmp(a.pos, b.pos, sizeof a.pos) != 0) {
         const float dx = b.pos[0] - a.pos[0], dy = b.pos[1] - a.pos[1], dz = b.pos[2] - a.pos[2];
-        t += std::format(" moved {:.3f} m,", std::sqrt(dx * dx + dy * dy + dz * dz));
+        t += std::format(" moved {:.3f} m,", ApexMath::Sqrt(dx * dx + dy * dy + dz * dz));
     }
     if (t.back() == ',') t.pop_back();
     if (a.baked != b.baked) t += b.baked ? " [enters the bake]" : " [leaves the bake]";
@@ -3194,7 +3200,7 @@ int SelectLampsScan(float x, float z, float maxScore, bool withExit) {
         for (size_t i = 0; i < rows.size(); i++) {
             const auto& v = rows[i];
             const float dx = v[0] - x, dz = v[2] - z;
-            const float d = std::sqrt(dx * dx + dz * dz);
+            const float d = ApexMath::Sqrt(dx * dx + dz * dz);
             const float score = d - v[3];
             if (score > maxScore) continue; // too far from the lamp's reach
             const Cand cand{score, &v, i < cones.size() ? &cones[i] : nullptr};
@@ -3225,7 +3231,7 @@ int SelectLampsScan(float x, float z, float maxScore, bool withExit) {
 // The cone factor (LampCone) of a lamp at its head `head` for a point p: S + (1 - S) sat(max(t1, t2)); 1 for a lamp with no cone
 float LampConeAt(const LampCone& c, const float* head, const float* p) {
     float l[3] = {head[0] - p[0], head[1] - p[1], head[2] - p[2]};
-    const float d = std::sqrt(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]);
+    const float d = ApexMath::Sqrt(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]);
     if (!(d > 1e-3f)) return 1.0f;
     for (float& v : l) v /= d;
     const float t1 = l[0] * c.c1[0] + l[1] * c.c1[1] + l[2] * c.c1[2] + c.c1[3], t2 = l[0] * c.c2[0] + l[1] * c.c2[1] + l[2] * c.c2[2] + c.c2[3];
@@ -3387,7 +3393,7 @@ template <typename DrawFn> bool DrawLake(IDirect3DDevice9* dev, DrawFn draw, boo
         {
             const float a = world[0], b = world[1], c = world[2], d = world[4], e = world[5], f = world[6], g = world[8], h = world[9], k = world[10];
             const float det = a * (e * k - f * h) - b * (d * k - f * g) + c * (d * h - e * g);
-            if (std::fabs(det) > 1e-8f) {
+            if (ApexMath::Fabs(det) > 1e-8f) {
                 const float id = 1.0f / det;
                 float inv[4][4] = {{(e * k - f * h) * id, (c * h - b * k) * id, (b * f - c * e) * id, 0},
                                    {(f * g - d * k) * id, (a * k - c * g) * id, (c * d - a * f) * id, 0},
@@ -3425,7 +3431,7 @@ template <typename DrawFn> bool DrawLake(IDirect3DDevice9* dev, DrawFn draw, boo
         IDirect3DBaseTexture9* old7 = nullptr;
         DWORD s7u = 0, s7v = 0, s7min = 0, s7mag = 0, s7mip = 0, s7srgb = 0, zen = 0;
         if (useDepth) {
-            dev->GetTexture(7, &old7);
+            D3D9Hooks::GetBoundTexture(dev, 7, &old7);
             dev->GetSamplerState(7, D3DSAMP_ADDRESSU, &s7u);
             dev->GetSamplerState(7, D3DSAMP_ADDRESSV, &s7v);
             dev->GetSamplerState(7, D3DSAMP_MINFILTER, &s7min);
@@ -3874,7 +3880,7 @@ template <typename DrawFn> bool DrawRoad(IDirect3DDevice9* dev, DrawFn draw) {
     // sidewalks get exactly the same clean light as the ground next to them.
     IDirect3DTexture9* smooth = LightmapSmooth::Find(it->first);
     IDirect3DBaseTexture9* oldLight = nullptr;
-    if (smooth) dev->GetTexture(p.road.lightSampler, &oldLight);
+    if (smooth) D3D9Hooks::GetBoundTexture(dev, p.road.lightSampler, &oldLight);
     float oldC[4] = {};
     const bool sidewalk = p.road.sidewalkConst >= 0;
     if (sidewalk) dev->GetPixelShaderConstantF(p.road.sidewalkConst, oldC, 1);
@@ -3929,7 +3935,7 @@ bool ReadInstancePositions(const BYTE* p, UINT count, UINT stride, GroupCentre& 
         double sx = 0, sy = 0, sz = 0;
         for (UINT i = 0; i < count; i++) {
             const float* v = reinterpret_cast<const float*>(p + static_cast<size_t>(i) * stride);
-            if (!std::isfinite(v[0]) || !std::isfinite(v[1]) || !std::isfinite(v[2])) return false;
+            if (!ApexMath::IsFinite(v[0]) || !ApexMath::IsFinite(v[1]) || !ApexMath::IsFinite(v[2])) return false;
             sx += v[0];
             sy += v[1];
             sz += v[2];
@@ -3950,7 +3956,7 @@ bool ReadInstancePositions(const BYTE* p, UINT count, UINT stride, GroupCentre& 
         };
         farthest(g.x, g.z, g.a);
         farthest(g.a[0], g.a[2], g.b);
-        g.ext = 0.5f * std::sqrt((g.a[0] - g.b[0]) * (g.a[0] - g.b[0]) + (g.a[2] - g.b[2]) * (g.a[2] - g.b[2]));
+        g.ext = 0.5f * ApexMath::Sqrt((g.a[0] - g.b[0]) * (g.a[0] - g.b[0]) + (g.a[2] - g.b[2]) * (g.a[2] - g.b[2]));
         const UINT step = (count + kGroupPieces - 1) / kGroupPieces;
         g.pieces = 0;
         for (UINT i = 0; i < count && g.pieces < kGroupPieces; i += step) {
@@ -4192,7 +4198,7 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
     }
     g_objDrawInfo.clear();
     g_inOwnCall = false;
-    g_fenceDrawn.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_fenceDrawn);
     return true;
 }
 
@@ -4274,9 +4280,9 @@ std::string DescribeObjectDraw(IDirect3DDevice9* dev, const ShaderPatches::Objec
     s += std::format("\n      per-pixel lamps: {} used of {} in range", nLamps, g_lastLampCandidates);
     for (int k = 0; k < nLamps; k++) {
         const float *p = lamps[1 + 2 * k], *c = lamps[2 + 2 * k];
-        const float r = p[3] > 0 ? 1.0f / std::sqrt(p[3]) : 0.0f, dx = p[0] - w[0][3], dy = p[1] - w[1][3], dz = p[2] - w[2][3];
+        const float r = p[3] > 0 ? 1.0f / ApexMath::Sqrt(p[3]) : 0.0f, dx = p[0] - w[0][3], dy = p[1] - w[1][3], dz = p[2] - w[2][3];
         s += std::format("\n        [{}] pos ({:.2f} {:.2f} {:.2f}) radius {:.2f} colour ({:.3f} {:.3f} {:.3f}) distance to the object centre {:.2f}", k, p[0], p[1], p[2], r, c[0], c[1],
-                         c[2], std::sqrt(dx * dx + dy * dy + dz * dz));
+                         c[2], ApexMath::Sqrt(dx * dx + dy * dy + dz * dz));
     }
     float pc[14][4] = {};
     dev->GetPixelShaderConstantF(0, &pc[0][0], 14);
@@ -4306,7 +4312,7 @@ std::string ReachLawText(bool reach, bool refused, bool placed, float scale, con
                                 "the walls' native lamp scale {:.4f}{} (before full night the daytime curve instead) x their gain {:.2f} ({}) x the slider trims | r0:",
                                 scale, NativeWallScale(), NativeWallFresh() ? "" : " (none read in the last 2 s: the daytime curve's value)", g_wallGain.load(),
                                 g_wallEnabled.load() ? "walls on" : "walls off: gain unused");
-    for (int k = 0; k < nLamps && k < static_cast<int>(ShaderPatches::kObjectPixelLamps); k++) s += std::format(" [{}] {:.2f} m", k, std::sqrt(r0Rows[k >> 2][k & 3]));
+    for (int k = 0; k < nLamps && k < static_cast<int>(ShaderPatches::kObjectPixelLamps); k++) s += std::format(" [{}] {:.2f} m", k, ApexMath::Sqrt(r0Rows[k >> 2][k & 3]));
     return s;
 }
 
@@ -4397,7 +4403,7 @@ bool ObjectLampColourAtImpl(const void* light, const float* centre, float rgb[3]
         for (int k = 0; k < 3; k++) nearPt[k] = std::clamp(v[k], centre[k] - ext[k], centre[k] + ext[k]);
     const float* point = nearPt;
     const float dx = v[0] - point[0], dy = v[1] - point[1], dz = v[2] - point[2], d2 = dx * dx + dy * dy + dz * dz;
-    if (!std::isfinite(d2)) return false;
+    if (!ApexMath::IsFinite(d2)) return false;
     const float night = g_night.load(std::memory_order_relaxed);
     float law, scale;
     if (LevelLightShare::RealisticReachActive()) {
@@ -4410,7 +4416,7 @@ bool ObjectLampColourAtImpl(const void* light, const float* centre, float rgb[3]
     }
     const float k = law * scale * LampConeAt(cone, v, point);
     for (int c = 0; c < 3; c++) rgb[c] = std::clamp(v[4 + c] * k, 0.0f, 1.0f);
-    return std::isfinite(rgb[0]) && std::isfinite(rgb[1]) && std::isfinite(rgb[2]);
+    return ApexMath::IsFinite(rgb[0]) && ApexMath::IsFinite(rgb[1]) && ApexMath::IsFinite(rgb[2]);
 }
 
 // ---- Per-vertex lamp light on instanced foliage (numbered development builds, switch foliage_vertex_lamps;
@@ -4496,7 +4502,7 @@ bool FoliageMeshBox(IDirect3DDevice9* dev, FoliageCrown& out) {
                 float top = -1.0f;
                 for (UINT i = 0; i < count && c.ok; i++) {
                     float v[4];
-                    if (!ReadElement(static_cast<const BYTE*>(p) + static_cast<size_t>(i) * stride + idxOff, idxType, v) || !std::isfinite(v[3])) break;
+                    if (!ReadElement(static_cast<const BYTE*>(p) + static_cast<size_t>(i) * stride + idxOff, idxType, v) || !ApexMath::IsFinite(v[3])) break;
                     top = std::max(top, v[3]);
                 }
                 if (top >= 0.0f && top < 9.0f) c.instances = static_cast<int>(top + 0.5f) + 1;
@@ -4530,7 +4536,7 @@ int PickFoliageLamps(const float* mid, const float* boxC, const float* ext, Foli
         if (!(law > 0.0f)) continue;
         const float cn = LampConeAt(cone, pr, mid);
         const float luma = (col[0] * 0.2126f + col[1] * 0.7152f + col[2] * 0.0722f) * cn * law;
-        if (!(luma > 1e-5f) || !std::isfinite(luma)) continue;
+        if (!(luma > 1e-5f) || !ApexMath::IsFinite(luma)) continue;
         const float v = LampConeVisibility(cone, pr, mid, 0.2f);
         if (v < 0.01f) {
             g_foliageWallOut.fetch_add(1, std::memory_order_relaxed);
@@ -4559,7 +4565,7 @@ bool CrownShape(const float* inst, float scale, const float eye[3], const Foliag
     f.centre[2] = inst[2] + eye[2];
     f.rx = std::max(0.5f * (mesh.hi[0] - mesh.lo[0]), 0.5f * (mesh.hi[2] - mesh.lo[2])) * scale;
     f.ry = 0.5f * (hi - lo) * scale;
-    return f.rx > 0.1f && f.ry > 0.15f && f.rx < 30.0f && f.ry < 30.0f && std::isfinite(f.centre[0] + f.centre[1] + f.centre[2]);
+    return f.rx > 0.1f && f.ry > 0.15f && f.rx < 30.0f && f.ry < 30.0f && ApexMath::IsFinite(f.centre[0] + f.centre[1] + f.centre[2]);
 }
 
 // Each lit slot's lamp, by direction from the crown's centre (the rig's centre differs a little: 16 degrees at most)
@@ -4569,14 +4575,14 @@ bool MatchLamps(const float (*dirs)[4], const float (*cols)[4], FoliageInstance&
     for (int k = 0; k < 3; k++) {
         f.lamp[k] = SIZE_MAX;
         if (!(std::max({cols[k][0], cols[k][1], cols[k][2]}) > 1.0f / 512.0f)) continue; // unused slot
-        const float dl = std::sqrt(dirs[k][0] * dirs[k][0] + dirs[k][1] * dirs[k][1] + dirs[k][2] * dirs[k][2]);
+        const float dl = ApexMath::Sqrt(dirs[k][0] * dirs[k][0] + dirs[k][1] * dirs[k][1] + dirs[k][2] * dirs[k][2]);
         if (!(dl > 0.5f)) continue;
         float best = 0.90f; // the rig's centre (its whole box) and ours (the crown) differ: about 25 degrees at most
         for (size_t j = 0; j < g_allLamps.size(); j++) {
             const auto& v = g_allLamps[j];
             const float lx = v[0] - f.centre[0], ly = v[1] - f.centre[1], lz = v[2] - f.centre[2], l2 = lx * lx + ly * ly + lz * lz;
             if (!(l2 > 1e-4f) || l2 > 40.0f * 40.0f) continue;
-            const float c = (lx * dirs[k][0] + ly * dirs[k][1] + lz * dirs[k][2]) / (std::sqrt(l2) * dl);
+            const float c = (lx * dirs[k][0] + ly * dirs[k][1] + lz * dirs[k][2]) / (ApexMath::Sqrt(l2) * dl);
             if (c > best) best = c, f.lamp[k] = j;
         }
         any = any || f.lamp[k] != SIZE_MAX;
@@ -4588,7 +4594,7 @@ bool MatchLamps(const float (*dirs)[4], const float (*cols)[4], FoliageInstance&
 void NoteCrown(const FoliageInstance& f) {
     for (CrownSeen& c : g_crowns) {
         const float dx = c.e.cx - f.centre[0], dy = c.e.cy - f.centre[1], dz = c.e.cz - f.centre[2];
-        if (dx * dx + dy * dy + dz * dz < 0.25f * 0.25f && std::fabs(c.e.rx - f.rx) < 0.15f * f.rx && std::fabs(c.e.ry - f.ry) < 0.15f * f.ry) return;
+        if (dx * dx + dy * dy + dz * dz < 0.25f * 0.25f && ApexMath::Fabs(c.e.rx - f.rx) < 0.15f * f.rx && ApexMath::Fabs(c.e.ry - f.ry) < 0.15f * f.ry) return;
     }
     if (g_crowns.size() >= kMaxCrowns) return;
     CrownSeen c;
@@ -4656,7 +4662,7 @@ uint32_t FoliageMeshId(const FoliageCrown& mesh) {
     return (h ^ static_cast<uint32_t>(mesh.instances)) * 16777619u;
 }
 void CorrectFoliageEye(const float (*c)[4], int count, const FoliageCrown& mesh, float eye[3], DWORD now) {
-    if (std::fabs(eye[0] - g_eyeLast[0]) + std::fabs(eye[1] - g_eyeLast[1]) + std::fabs(eye[2] - g_eyeLast[2]) > 1e-3f) {
+    if (ApexMath::Fabs(eye[0] - g_eyeLast[0]) + ApexMath::Fabs(eye[1] - g_eyeLast[1]) + ApexMath::Fabs(eye[2] - g_eyeLast[2]) > 1e-3f) {
         std::memcpy(g_eyeLast, eye, sizeof g_eyeLast);
         g_eyeChanged = now;
     }
@@ -4669,7 +4675,7 @@ void CorrectFoliageEye(const float (*c)[4], int count, const FoliageCrown& mesh,
     if (now - g_eyeChanged >= 300) { // still: the read eye is the game's; learn the places, no offset
         for (int i = 0; i < count; i++) {
             const float w[3] = {rel[i][0] + eye[0], rel[i][1] + eye[1], rel[i][2] + eye[2]};
-            if (std::isfinite(w[0] + w[1] + w[2])) g_eyeAnchors.Learn(meshId, scales[i], w);
+            if (ApexMath::IsFinite(w[0] + w[1] + w[2])) g_eyeAnchors.Learn(meshId, scales[i], w);
         }
         g_eyeOffset[0] = g_eyeOffset[1] = g_eyeOffset[2] = 0.0f;
         std::memcpy(g_eyeOffsetFor, eye, sizeof g_eyeOffsetFor);
@@ -4684,7 +4690,7 @@ void CorrectFoliageEye(const float (*c)[4], int count, const FoliageCrown& mesh,
             s_frame = g_roomMapFrame;
             std::memcpy(g_eyeOffset, o, sizeof o);
             std::memcpy(g_eyeOffsetFor, eye, sizeof g_eyeOffsetFor);
-            const float len = std::sqrt(o[0] * o[0] + o[1] * o[1] + o[2] * o[2]);
+            const float len = ApexMath::Sqrt(o[0] * o[0] + o[1] * o[1] + o[2] * o[2]);
             if (len > g_eyeDriftMax.load(std::memory_order_relaxed)) g_eyeDriftMax.store(len, std::memory_order_relaxed);
         }
     }
@@ -4724,7 +4730,7 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
     for (int i = 0; i < count; i++) {
         const float* inst = c[3 * i];
         const float scale = c[3 * i + 2][0];
-        if (!std::isfinite(inst[0] + inst[1] + inst[2])) return false;
+        if (!ApexMath::IsFinite(inst[0] + inst[1] + inst[2])) return false;
         // the instance: its place (10 cm), scale and the mesh (its lamps are its own, picked again with each lamp list)
         uint64_t key = 1469598103934665603ull;
         const auto mix = [&key](uint64_t v) { key = (key ^ v) * 1099511628211ull; };
@@ -4766,7 +4772,7 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
                     bool changed = f.owned != ownedBefore;
                     for (int k = 0; k < f.owned && !changed; k++)
                         for (int a = 0; a < 3 && !changed; a++)
-                            changed = std::fabs(f.own[k].pos[a] - before[k].pos[a]) > 1e-3f || std::fabs(f.own[k].colour[a] - before[k].colour[a]) > 1.0f / 512.0f;
+                            changed = ApexMath::Fabs(f.own[k].pos[a] - before[k].pos[a]) > 1e-3f || ApexMath::Fabs(f.own[k].colour[a] - before[k].colour[a]) > 1.0f / 512.0f;
                     (changed ? g_foliageRepickChanged : g_foliageRepickSame).fetch_add(1, std::memory_order_relaxed);
                 }
                 f.pickGen = g_foliageLampGen, f.pickTick = now, f.pickState = visState;
@@ -4855,8 +4861,8 @@ void CrownsIn(float x0, float z0, float x1, float z1, std::vector<Canopy::Ellips
 // c = that centre
 bool WallLinePoint(const float (&m)[3][4], float (&c)[3]) {
     const float xx = m[0][0], xz = m[2][0], zx = m[0][2], zz = m[2][2];
-    const float lx = std::sqrt(xx * xx + xz * xz), lz = std::sqrt(zx * zx + zz * zz);
-    if (!(lx > 0.9f && lx < 1.1f && lz > 0.9f && lz < 1.1f) || std::fabs(m[1][0]) + std::fabs(m[1][2]) > 0.05f) return false; // turned about y only, unscaled
+    const float lx = ApexMath::Sqrt(xx * xx + xz * xz), lz = ApexMath::Sqrt(zx * zx + zz * zz);
+    if (!(lx > 0.9f && lx < 1.1f && lz > 0.9f && lz < 1.1f) || ApexMath::Fabs(m[1][0]) + ApexMath::Fabs(m[1][2]) > 0.05f) return false; // turned about y only, unscaled
     c[0] = m[0][3] + 0.5f * (xx - zx);
     c[1] = m[1][3];
     c[2] = m[2][3] + 0.5f * (xz - zz);
@@ -5027,7 +5033,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
     }
     g_objDrawInfo.clear();
     g_inOwnCall = false;
-    g_objLampDrawn.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_objLampDrawn);
     return true;
 }
 
@@ -5103,8 +5109,8 @@ template <typename DrawFn> bool DrawWindowOutdoor(IDirect3DDevice9* dev, DrawFn 
         if (FAILED(dev->GetVertexShaderConstantF(static_cast<UINT>(vi.winRows.row[k]), row, 1))) return false;
         if (vi.winRows.scale[k] >= 0 && FAILED(dev->GetVertexShaderConstantF(static_cast<UINT>(vi.winRows.scale[k]), sc, 1))) return false;
         const float s = vi.winRows.scale[k] >= 0 ? sc[vi.winRows.scaleComp[k] & 3] : 1.0f;
-        const float ux = row[0] * s, uz = row[2] * s, len = std::sqrt(ux * ux + uz * uz);
-        if (!std::isfinite(len) || len < 1.0f / 4096.0f || len > 1.0f) return false; // not a map over metres
+        const float ux = row[0] * s, uz = row[2] * s, len = ApexMath::Sqrt(ux * ux + uz * uz);
+        if (!ApexMath::IsFinite(len) || len < 1.0f / 4096.0f || len > 1.0f) return false; // not a map over metres
         plan[k][0] = ux * kWindowPlanReach;
         plan[k][1] = uz * kWindowPlanReach;
     }
@@ -5269,8 +5275,8 @@ bool RoomMapConsts(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& p, 
         if (FAILED(dev->GetVertexShaderConstantF(static_cast<UINT>(uv.constReg), c, 1))) return false;
         scale = c[uv.comp & 3];
     }
-    wall = std::fabs(scale * 4096.0f - 1.0f) < 1e-3f;
-    const bool floor = std::fabs(scale * 32767.0f - 1.0f) < 1e-3f;
+    wall = ApexMath::Fabs(scale * 4096.0f - 1.0f) < 1e-3f;
+    const bool floor = ApexMath::Fabs(scale * 32767.0f - 1.0f) < 1e-3f;
     if (!wall && !floor) {
         g_roomUnknownVs.fetch_add(1, std::memory_order_relaxed);
         return false;
@@ -5282,7 +5288,7 @@ bool RoomMapConsts(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& p, 
     }
     IDirect3DBaseTexture9* map = nullptr;
     bool haveSize = false;
-    if (SUCCEEDED(dev->GetTexture(p.sampler, &map)) && map) {
+    if (SUCCEEDED(D3D9Hooks::GetBoundTexture(dev, p.sampler, &map)) && map) {
         // (one level description per room map and frame: a story's maps are bound for many draws; kept for this frame only,
         // so a map freed and made again at the same address is read again next frame)
         RoomMapSizeMemo& m = g_roomMapSizes[(reinterpret_cast<uintptr_t>(map) >> 4) & (std::size(g_roomMapSizes) - 1)];
@@ -5321,7 +5327,7 @@ int ArchRowsFor(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& room, 
     float own[4] = {};
     if (FAILED(dev->GetPixelShaderConstantF(static_cast<UINT>(room.ambConst), own, 1))) return 0;
     IDirect3DBaseTexture9* map = nullptr; // the room light map: its story tells rooms with the same ambient apart
-    dev->GetTexture(room.sampler, &map);
+    D3D9Hooks::GetBoundTexture(dev, room.sampler, &map);
     const uintptr_t mapTex = reinterpret_cast<uintptr_t>(map);
     if (map) map->Release();
     return LevelLightShare::ArchAmbientConsts(own, mapTex, basisTex, rows, static_cast<int>(ShaderPatches::kArchCells));
@@ -5410,7 +5416,7 @@ void ReleaseWallMasks() {
 IDirect3DTexture9* WallMaskTexture(IDirect3DDevice9* dev, DWORD basisSampler) {
     if (!DevSwitches::BasisWallFilter()) return nullptr;
     IDirect3DBaseTexture9* b = nullptr;
-    if (FAILED(dev->GetTexture(basisSampler, &b)) || !b) return nullptr;
+    if (FAILED(D3D9Hooks::GetBoundTexture(dev, basisSampler, &b)) || !b) return nullptr;
     const uintptr_t key = reinterpret_cast<uintptr_t>(b);
     b->Release();
     if (dev != g_wallMaskDev) {
@@ -5444,7 +5450,7 @@ struct WallMaskBind {
     DWORD st[kCount] = {};
     static constexpr D3DSAMPLERSTATETYPE kStates[kCount] = {D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_SRGBTEXTURE};
     WallMaskBind(IDirect3DDevice9* d, DWORD sampler, IDirect3DTexture9* mask) : dev(d), s(sampler) {
-        dev->GetTexture(s, &old);
+        D3D9Hooks::GetBoundTexture(dev, s, &old);
         for (int i = 0; i < kCount; i++) dev->GetSamplerState(s, kStates[i], &st[i]);
         const DWORD want[kCount] = {D3DTEXF_POINT, D3DTEXF_POINT, D3DTEXF_NONE, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, FALSE};
         SetTex(dev, s, mask);
@@ -5486,7 +5492,7 @@ IDirect3DTexture9* AmbientMapTextureFor(IDirect3DDevice9* dev, uintptr_t key) {
 }
 IDirect3DTexture9* AmbientMapTexture(IDirect3DDevice9* dev, DWORD basisSampler) {
     IDirect3DBaseTexture9* b = nullptr;
-    if (FAILED(dev->GetTexture(basisSampler, &b)) || !b) return nullptr;
+    if (FAILED(D3D9Hooks::GetBoundTexture(dev, basisSampler, &b)) || !b) return nullptr;
     const uintptr_t key = reinterpret_cast<uintptr_t>(b);
     b->Release();
     return AmbientMapTextureFor(dev, key);
@@ -5553,7 +5559,7 @@ template <typename DrawFn> bool DrawBasisSmooth(IDirect3DDevice9* dev, DrawFn dr
         bool wall = false;
         IDirect3DBaseTexture9* bmap = nullptr;
         const PatchedPs* any = plainOk ? &qp : qa;
-        const bool ok = any && SUCCEEDED(dev->GetTexture(any->smooth.sizeSampler, &bmap)) && MapSize(bmap, bsize) && RoomMapConsts(dev, any->room, rsize, band, wall);
+        const bool ok = any && SUCCEEDED(D3D9Hooks::GetBoundTexture(dev, any->smooth.sizeSampler, &bmap)) && MapSize(bmap, bsize) && RoomMapConsts(dev, any->room, rsize, band, wall);
         const uintptr_t basisTex = reinterpret_cast<uintptr_t>(bmap); // (one of the draw's directional maps: its story, for the arches)
         if (bmap) bmap->Release();
         if (ok) {
@@ -5600,7 +5606,7 @@ template <typename DrawFn> bool DrawBasisSmooth(IDirect3DDevice9* dev, DrawFn dr
     if (!p.ps) return false;
     float size[4], oldSize[4] = {};
     IDirect3DBaseTexture9* map = nullptr;
-    const bool haveSize = SUCCEEDED(dev->GetTexture(p.smooth.sizeSampler, &map)) && MapSize(map, size);
+    const bool haveSize = SUCCEEDED(D3D9Hooks::GetBoundTexture(dev, p.smooth.sizeSampler, &map)) && MapSize(map, size);
     if (map) map->Release();
     if (!haveSize) return false;
     dev->GetPixelShaderConstantF(p.smooth.sizeConst, oldSize, 1);
@@ -5614,7 +5620,7 @@ template <typename DrawFn> bool DrawBasisSmooth(IDirect3DDevice9* dev, DrawFn dr
         float fsize[4], floorK[4] = {0, 0, 0, 0}, oldFloor[4] = {};
         IDirect3DBaseTexture9* fmap = nullptr;
         if (p.smooth.floorConst >= 0) {
-            if (SUCCEEDED(dev->GetTexture(static_cast<DWORD>(p.smooth.floorSampler), &fmap)) && MapSize(fmap, fsize))
+            if (SUCCEEDED(D3D9Hooks::GetBoundTexture(dev, static_cast<DWORD>(p.smooth.floorSampler), &fmap)) && MapSize(fmap, fsize))
                 floorK[0] = 4.0f * size[0] / fsize[0], floorK[1] = 4.0f * size[1] / fsize[1], floorK[2] = 1.0f;
             if (fmap) fmap->Release();
             dev->GetPixelShaderConstantF(static_cast<UINT>(p.smooth.floorConst), oldFloor, 1);
@@ -5631,7 +5637,7 @@ template <typename DrawFn> bool DrawBasisSmooth(IDirect3DDevice9* dev, DrawFn dr
                 uintptr_t cur[4] = {}, up[4] = {};
                 for (int d = 0; d < 4; d++) {
                     IDirect3DBaseTexture9* c = nullptr;
-                    if (SUCCEEDED(dev->GetTexture(static_cast<DWORD>(p.smooth.basisSampler[d]), &c)) && c) {
+                    if (SUCCEEDED(D3D9Hooks::GetBoundTexture(dev, static_cast<DWORD>(p.smooth.basisSampler[d]), &c)) && c) {
                         cur[d] = reinterpret_cast<uintptr_t>(c);
                         c->Release();
                     }
@@ -5716,7 +5722,7 @@ bool IndoorBasisScale(IDirect3DDevice9* dev, const ShaderPatches::IndoorBasisPat
         bool fromVs = g_curVsInfo->lmRow[0] >= 0 && g_curVsInfo->lmRow[1] >= 0;
         for (int k = 0; k < 2 && fromVs; k++) {
             fromVs = SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(g_curVsInfo->lmRow[k]), rows[k], 1));
-            const float len = fromVs ? std::sqrt(rows[k][0] * rows[k][0] + rows[k][1] * rows[k][1] + rows[k][2] * rows[k][2]) : 0.0f;
+            const float len = fromVs ? ApexMath::Sqrt(rows[k][0] * rows[k][0] + rows[k][1] * rows[k][1] + rows[k][2] * rows[k][2]) : 0.0f;
             fromVs = fromVs && len > 1.0f / 1024.0f && len < 1.0f; // 1 m .. 1 km of uv per 1.0
             if (fromVs) rows[k][3] = 1.0f / len;
         }
@@ -5741,14 +5747,14 @@ std::atomic<bool> g_doorsLogged{false}, g_doorsNoWorldLogged{false};
 // map, x its size: 1 texel per metre; F7 capture: c195 / c196, the door's centre at texel (12.99, 20.99))
 bool SetInWall(const float (&m)[5][4], float sizeU, float sizeV) {
     const float xx = m[0][0], xz = m[2][0], zx = m[0][2], zz = m[2][2];
-    const float lx = std::sqrt(xx * xx + xz * xz), lz = std::sqrt(zx * zx + zz * zz);
-    if (!(lx > 0.9f && lx < 1.1f && lz > 0.9f && lz < 1.1f) || std::fabs(m[1][0]) + std::fabs(m[1][2]) > 0.05f) return false;
+    const float lx = ApexMath::Sqrt(xx * xx + xz * xz), lz = ApexMath::Sqrt(zx * zx + zz * zz);
+    if (!(lx > 0.9f && lx < 1.1f && lz > 0.9f && lz < 1.1f) || ApexMath::Fabs(m[1][0]) + ApexMath::Fabs(m[1][2]) > 0.05f) return false;
     const float c[3] = {m[0][3] + 0.5f * (xx - zx), m[1][3], m[2][3] + 0.5f * (xz - zz)};
     if (LevelLightShare::OnWallLine(c, xx / lx, xz / lx, 0.15f) || LevelLightShare::OnWallLine(c, zx / lz, zz / lz, 0.15f)) return true;
     const float u = (m[3][0] * c[0] + m[3][1] * c[1] + m[3][2] * c[2] + m[3][3]) * sizeU;
     const float v = (m[4][0] * c[0] + m[4][1] * c[1] + m[4][2] * c[2] + m[4][3]) * sizeV;
-    if (!std::isfinite(u) || !std::isfinite(v) || u < -1.0f || v < -1.0f || u > sizeU + 1.0f || v > sizeV + 1.0f) return false;
-    return std::fabs(u - std::round(u)) < 0.12f || std::fabs(v - std::round(v)) < 0.12f;
+    if (!ApexMath::IsFinite(u) || !ApexMath::IsFinite(v) || u < -1.0f || v < -1.0f || u > sizeU + 1.0f || v > sizeV + 1.0f) return false;
+    return ApexMath::Fabs(u - std::round(u)) < 0.12f || ApexMath::Fabs(v - std::round(v)) < 0.12f;
 }
 
 template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn draw) {
@@ -5764,11 +5770,14 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
         else if (g_curPs)
             if (const auto it = g_psFacts.find(g_curPs); it != g_psFacts.end()) facts = &it->second;
     }
+    // (2.15.3) not ps_3_0: PatchIndoorBasis refuses it whatever the sampler, so the draw always stays the game's; the scan's
+    // texture reads (up to 8 GetTexture + Release a draw) are skipped
+    if (facts && !facts->ps3) return false;
     const unsigned declared = facts && facts->declared ? facts->declared & 0xFFu : 0xFFu;
     const int first = facts ? facts->lastLm : -1;
     const auto tryS = [&](DWORD s) {
         IDirect3DBaseTexture9* t = nullptr;
-        if (FAILED(dev->GetTexture(s, &t)) || !t) return;
+        if (FAILED(D3D9Hooks::GetBoundTexture(dev, s, &t)) || !t) return;
         if (t->GetType() == D3DRTYPE_TEXTURE && RoomMapPadding::BasisFor(static_cast<IDirect3DTexture9*>(t), basis)) {
             lmS = static_cast<int>(s);
             lightMap = t;
@@ -5847,7 +5856,7 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     }
     g_traceA = TraceA{lightMapPtr, reinterpret_cast<uintptr_t>(basis[0]), size[0], size[1]};
     g_inOwnCall = false;
-    g_indoorDrawn.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_indoorDrawn);
     return true;
 }
 
@@ -5871,7 +5880,7 @@ template <typename DrawFn> bool DrawWallGain(IDirect3DDevice9* dev, DrawFn draw)
 
     float c[4], old[4];
     if (FAILED(dev->GetPixelShaderConstantF(it->second, old, 1))) return false;
-    if (!std::isfinite(old[0]) || old[0] < 0) return false;
+    if (!ApexMath::IsFinite(old[0]) || old[0] < 0) return false;
     g_nativeWallScale = old[0]; // the walls' native lamp scale, which the reach law gives objects too (NativeWallScale)
     const DWORD drawTick = g_lotDrawTick;
     g_nativeWallTick = drawTick ? drawTick : 1;
@@ -5907,13 +5916,13 @@ template <typename DrawFn> bool DrawWallGain(IDirect3DDevice9* dev, DrawFn draw)
         draw();
         SetPsConst(dev, it->second, old, 1);
         dev->SetRenderState(D3DRS_COLORWRITEENABLE, colorMask);
-        g_wallBloomPreserved.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_wallBloomPreserved);
     } else {
         // If the wall is blended, alpha is not writable, or a state query failed, preserve the exact previous behaviour.
         SetPsConst(dev, it->second, c, 1);
         draw();
         SetPsConst(dev, it->second, old, 1);
-        g_wallBloomFallback.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_wallBloomFallback);
     }
     g_inOwnCall = false;
     g_wallDrawn.fetch_add(1, std::memory_order_relaxed);
@@ -6018,7 +6027,7 @@ template <typename DrawFn> bool DrawSnowFloor(IDirect3DDevice9* dev, DrawFn draw
     // the map it lights with must be a room light map (A8R8G8B8 managed: 32x64 in m69 / m71, 512x128 in m72), not a terrain map (DXT5)
     bool roomMap = false;
     IDirect3DBaseTexture9* map = nullptr;
-    if (SUCCEEDED(dev->GetTexture(p.floor.mapSampler, &map)) && map) {
+    if (SUCCEEDED(D3D9Hooks::GetBoundTexture(dev, p.floor.mapSampler, &map)) && map) {
         D3DSURFACE_DESC d{};
         // (Lamp lighting: Instant: a relit copy of Real-time outdoor lamps is a DEFAULT target: the game's map behind it decides;
         // Classic: the map itself)
@@ -6215,7 +6224,7 @@ template <typename DrawFn> bool DrawRoofSnow(IDirect3DDevice9* dev, DrawFn draw)
     g_inOwnCall = true;
     draw(); // the game's roof, unchanged
     const int picked = SelectLamps(world[3], world[11], 80.0f);
-    if (picked > 0 && std::fabs(vs15[0]) > 1e-6f) {
+    if (picked > 0 && ApexMath::Fabs(vs15[0]) > 1e-6f) {
         float consts[34][4] = {};
         std::memcpy(consts, g_lampData, sizeof(float) * 4 * 33);
         consts[32][0] = g_roofStrength.load(std::memory_order_relaxed) * TerrainLightingPolicy::LampDay(g_night.load(std::memory_order_relaxed)); // x the daytime curve (12/10)
@@ -6327,7 +6336,7 @@ void NoteSunShadow(IDirect3DDevice9* dev) {
     static const bool s_registered = (RenderCallbacks::preReset.Add(ForgetSunShadow), true);
     (void)s_registered;
     IDirect3DBaseTexture9* t = nullptr;
-    if (FAILED(dev->GetTexture(5, &t)) || !t) return;
+    if (FAILED(D3D9Hooks::GetBoundTexture(dev, 5, &t)) || !t) return;
     if (t != g_sunShadowMap && t->GetType() == D3DRTYPE_TEXTURE) {
         D3DSURFACE_DESC d{};
         const bool depth = SUCCEEDED(static_cast<IDirect3DTexture9*>(t)->GetLevelDesc(0, &d)) &&
@@ -6443,7 +6452,7 @@ DWORD RecordWorldChunk(IDirect3DDevice9* dev, std::pair<int, int>& key, ChunkTex
     for (DWORD s = 15; s >= 1 && !t; s--) {
         if (!(mask & (1u << s))) continue;
         IDirect3DBaseTexture9* cand = nullptr;
-        if (FAILED(dev->GetTexture(s, &cand)) || !cand) continue;
+        if (FAILED(D3D9Hooks::GetBoundTexture(dev, s, &cand)) || !cand) continue;
         bool ok = cand->GetType() == D3DRTYPE_TEXTURE && cand->GetLevelCount() <= 5;
         if (ok) {
             D3DSURFACE_DESC d{};
@@ -6477,7 +6486,7 @@ DWORD RecordWorldChunk(IDirect3DDevice9* dev, std::pair<int, int>& key, ChunkTex
     } else
         t->Release();
     chunk = &slot;
-    g_worldSeen.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_worldSeen);
     return sampler;
 }
 
@@ -6672,7 +6681,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
         const int k = multi ? 3 : TerrainLampConst(g_curPs, s, squared);
         if (!smooth && !shade && k < 0) return D3D9Hooks::HookAction::Continue;
         IDirect3DBaseTexture9* old = nullptr;
-        if ((smooth || shade) && FAILED(dev->GetTexture(s, &old))) smooth = nullptr, shade = nullptr, old = nullptr;
+        if ((smooth || shade) && FAILED(D3D9Hooks::GetBoundTexture(dev, s, &old))) smooth = nullptr, shade = nullptr, old = nullptr;
         // the light map the patched shader reads: the smoothed one, else the game's own (bound already)
         IDirect3DBaseTexture9* const lampMap = smooth ? smooth : (shade ? old : nullptr);
         if (!lampMap) shade = nullptr;
@@ -6768,7 +6777,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
     float lotGain[4] = {dayPass.day ? dayPass.lotGain : LotMapGain(), 0, 0, 0};
     float lotUvScale[4]{};
     if (g_curVsInfo && g_curVsInfo->contractedLotUv && SUCCEEDED(dev->GetVertexShaderConstantF(12, lotUvScale, 1))
-        && std::isfinite(lotUvScale[0]) && lotUvScale[0] > 0 && lotUvScale[0] <= 1
+        && ApexMath::IsFinite(lotUvScale[0]) && lotUvScale[0] > 0 && lotUvScale[0] <= 1
         && lotUvScale[0] == lotUvScale[1]) {
         lotGain[2] = 1.0f / 63.0f;
         lotGain[3] = -lotUvScale[0] * (16.0f / 63.0f);
@@ -6903,7 +6912,7 @@ bool RoomAmbientChroma(const void* room, float* chroma) {
         return false;
     }
     const float luma = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
-    if (!(luma > 1e-5f) || !std::isfinite(luma)) return false;
+    if (!(luma > 1e-5f) || !ApexMath::IsFinite(luma)) return false;
     // the hue at luma 1, then brought towards white until no channel passes the cap (1 + s (chroma - 1) keeps luma 1)
     float top = 0.0f;
     for (int k = 0; k < 3; k++) top = std::max(top, chroma[k] = std::max(c[k], 0.0f) / luma);
@@ -6911,7 +6920,7 @@ bool RoomAmbientChroma(const void* room, float* chroma) {
         const float s = (kFurnitureChromaMax - 1.0f) / (top - 1.0f);
         for (int k = 0; k < 3; k++) chroma[k] = 1.0f + s * (chroma[k] - 1.0f);
     }
-    return std::isfinite(chroma[0] + chroma[1] + chroma[2]);
+    return ApexMath::IsFinite(chroma[0] + chroma[1] + chroma[2]);
 }
 // The furniture draw with the rig's unlit-room lights, the vertex lights and the cube weight turned (rig = PS c0..c7 or
 // null when the shader has no rig chain; chroma: the room's ambient hue for the fill, or null)
@@ -6954,9 +6963,9 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice
             const float tint = UnlitRooms::FurnitureTint();
             float cubeColour[3];
             UnlitRooms::FurnitureCubeColour(cubeColour);
-            const bool coloured = std::fabs(cubeColour[0] - 1.0f) > 1e-3f || std::fabs(cubeColour[1] - 1.0f) > 1e-3f || std::fabs(cubeColour[2] - 1.0f) > 1e-3f;
+            const bool coloured = ApexMath::Fabs(cubeColour[0] - 1.0f) > 1e-3f || ApexMath::Fabs(cubeColour[1] - 1.0f) > 1e-3f || ApexMath::Fabs(cubeColour[2] - 1.0f) > 1e-3f;
             PatchedPs* tinted = nullptr;
-            if (cubeSet && (std::fabs(tint - 1.0f) > 1e-3f || coloured)) {
+            if (cubeSet && (ApexMath::Fabs(tint - 1.0f) > 1e-3f || coloured)) {
                 PatchedPs& p = PatchedFor(dev, g_cubeTintPs, "Indoor object (blue tint)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchCubeTint(t, pp.cubeTint); });
                 if (p.ps && p.cubeTint >= 0) tinted = &p;
             }
@@ -6995,7 +7004,7 @@ struct TraceSeen {
 };
 std::unordered_map<uint64_t, TraceSeen> g_traceLast; // object part (rig + pixel shader) -> its states (render thread)
 uint64_t TraceHash(uint64_t h, int64_t v) { return (h ^ static_cast<uint64_t>(v)) * 1099511628211ull; }
-int64_t TraceQ(float v) { return std::isfinite(v) ? static_cast<int64_t>(std::llround(static_cast<double>(v) * 10000.0)) : 0x7FFFFFFF; }
+int64_t TraceQ(float v) { return ApexMath::IsFinite(v) ? static_cast<int64_t>(std::llround(static_cast<double>(v) * 10000.0)) : 0x7FFFFFFF; }
 char SlotKind(const float* colour, const float* dir) {
     if (colour[0] + colour[1] + colour[2] <= 1e-6f && colour[3] <= 1e-6f) return '-';
     if (colour[3] > 1e-6f) return 'F';
@@ -7255,7 +7264,7 @@ void HoldRig(IDirect3DDevice9* dev, float (*rig)[4], RigHeld& h) {
         h.vs = true;
         h.vl = vl;
     }
-    g_rigHeldDraws.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_rigHeldDraws);
 }
 void ReleaseRig(IDirect3DDevice9* dev, const RigHeld& h) {
     if (h.ps) SetPsConst(dev, 0, &h.psGame[0][0], 8);
@@ -7267,10 +7276,10 @@ void ReleaseRig(IDirect3DDevice9* dev, const RigHeld& h) {
 template <typename DrawFn> D3D9Hooks::HookAction OnDrawInner(IDirect3DDevice9* dev, DrawFn draw) {
     if (!g_curVsIsObject || !g_curPs || g_inOwnCall) return OnDrawInnerCore(dev, draw);
     if (RigMode() != 0) return OnDrawInnerCore(dev, draw);
-    if (!kPublicBuild) g_fdMode0.fetch_add(1, std::memory_order_relaxed);
+    if (!kPublicBuild) ApexUtil::CountOne(g_fdMode0);
     const ShaderPatches::RigPsInfo& info = RigPsInfoFor(g_curPs);
     if (!kPublicBuild)
-        if (!info.rigLights) g_fdNoChain.fetch_add(1, std::memory_order_relaxed);
+        if (!info.rigLights) ApexUtil::CountOne(g_fdNoChain);
     float rig[8][4] = {};
     const bool haveRig = info.rigLights && SUCCEEDED(dev->GetPixelShaderConstantF(0, &rig[0][0], 8));
     RigHeld held;
@@ -7400,7 +7409,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawTracked(IDirect3DDevice9*
         SetVsConst(dev, 54, &s_colSaved[0][0], 27);                       // and of its lamp colours
     }
     g_inOwnCall = false;
-    g_foliageDrawn.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_foliageDrawn);
     MarkClaimSource(ClaimSource::FoliageVertex);
     return D3D9Hooks::HookAction::Skip;
 }
@@ -7512,7 +7521,7 @@ bool LightingBloomPosition(IDirect3DDevice9* dev, float& x, float& y, float& z) 
     x = m[0][3];
     y = m[1][3];
     z = m[2][3];
-    return std::isfinite(x) && std::isfinite(y) && std::isfinite(z) && std::fabs(x) < 1e7f && std::fabs(y) < 1e7f && std::fabs(z) < 1e7f;
+    return ApexMath::IsFinite(x) && ApexMath::IsFinite(y) && ApexMath::IsFinite(z) && ApexMath::Fabs(x) < 1e7f && ApexMath::Fabs(y) < 1e7f && ApexMath::Fabs(z) < 1e7f;
 }
 
 // ---- Exterior surface capture (developer, read-only): how every visible outdoor wall, fence, half wall, stair, floor,

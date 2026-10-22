@@ -33,6 +33,7 @@ const Item kItems[] = {
     {"grid_memo", &gridMemo, Effect::None},
     {"perf_reissue_filter", &PerfToggles::ReissueFilter, Effect::None},
     {"perf_follow_bound_shaders", &PerfToggles::FollowBoundShaders, Effect::None},
+    {"perf_follow_bound_textures", &PerfToggles::FollowBoundTextures, Effect::None},
     {"perf_sampled_dispatch_timing", &PerfToggles::SampledDispatchTiming, Effect::None},
     {"perf_precompile_answer_cache", &PerfToggles::PrecompileAnswerCache, Effect::None},
     {"perf_ao_last_shader_cache", &PerfToggles::AoLastShaderCache, Effect::None},
