@@ -26,6 +26,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps keep their night strength in Build mode at night", "夜間在建造模式下燈光保持夜間亮度"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "月亮從更高處照亮城鎮：夜晚道路上不再出現暗色條紋"},
     {"Moonlight is softer by default and in every preset", "月光預設更柔和，所有預設中也是如此"},
+    {"Lamps brighten smoothly at dusk and dim smoothly at dawn", "黃昏時燈光平滑變亮，黎明時平滑變暗"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "載入地塊更流暢：額外的照明計算會依你的影格率進行"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "地塊反覆重新照明時，即時燈光的工作量更少"},
     {"Options on by default for several versions no longer show an Experimental badge", "多個版本以來預設開啟的選項不再顯示「實驗性」標記"},

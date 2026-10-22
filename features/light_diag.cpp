@@ -16,12 +16,14 @@
 #include "apex_paths.h"
 #include "level_light_share.h"
 #include "daylight_probe.h"
+#include "night_level.h"
 #include "apex_memory.h"
 #include "captures.h"
 #include "ui/i18n.h"
 #include "imgui.h"
 #include <windows.h>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <format>
@@ -66,6 +68,35 @@ bool SafeCopy(void* dst, uintptr_t src, size_t n) {
 template <typename T> T Rd(uintptr_t a, T def = T{}) {
     T v{};
     return SafeCopy(&v, a, sizeof(T)) ? v : def;
+}
+
+
+// (2.15.1) Day and night, side by side: the sun's height, the sky's smooth night and the times it was measured against,
+// the light manager's levels, the level Apex uses and the Build mode gate; a line of warnings when they disagree
+// (features/night_level.h, docs/engine/room-light-maps.md#night-level-lightmgr0xf0)
+std::string DayNightText(uintptr_t lightMgr) {
+    const uintptr_t back = Rd<uintptr_t>(lightMgr + 0xD0);
+    const uintptr_t sky = back > 0x10000 + 0x210 ? back - 0x210 : 0;
+    if (!sky || Rd<uintptr_t>(sky + 0x1F4) != lightMgr) return "day and night: the sky is not readable";
+    const float sunY = Rd<float>(sky + 0x6B4), x = Rd<float>(sky + 0x780), y = Rd<float>(sky + 0x784);
+    const float f0 = Rd<float>(lightMgr + 0xF0), f4 = Rd<float>(lightMgr + 0xF4), hour = Rd<float>(lightMgr + 0xB4);
+    const float sunDeg = std::asin(sunY < -1.0f ? -1.0f : (sunY > 1.0f ? 1.0f : sunY)) * 57.2957795f;
+    const uintptr_t holder = Rd<uintptr_t>(sky + 0x21C), weather = holder ? Rd<uintptr_t>(holder + 0x74) : 0;
+    const bool hooked = NightLevel::g_timesHooked.load(), smooth = hooked && NightLevel::g_smoothDusk.load();
+    const float apex = smooth ? NightLevel::SmoothLevel(x) : f0;
+    std::string t = std::format("day and night: clock {:.3f} h, sun height {:.1f} deg, sky smooth night {:.3f} (manmade {:.3f}) measured against sunrise / sunset {:.2f} / {:.2f}",
+                                hour, sunDeg, x, y, Rd<float>(sky + 0x974), Rd<float>(sky + 0x978));
+    if (weather)
+        t += std::format(" (weather set {:.2f} / {:.2f}{})", Rd<float>(weather + 0x9EC + 0x10), Rd<float>(weather + 0x9EC + 0x14),
+                         Rd<BYTE>(weather + 0xB04) ? ", debug set on" : "");
+    t += std::format("; light manager level {:.2f} (manmade {:.2f}); Apex level {:.3f} ({}); Build mode gate: {}", f0, f4, apex,
+                     smooth ? "smooth dusk" : "the light manager's", !hooked ? "not installed" : (NightLevel::Holding() ? "keeping the season's sun times" : "idle"));
+    std::string warn;
+    if (sunDeg < -20.0f && x < 0.2f) warn += " the sky counts day with the sun 20 degrees under the horizon;";
+    if (sunDeg > 10.0f && x > 0.8f) warn += " the sky counts night with the sun 10 degrees over the horizon;";
+    if (std::fabs(f0 - NightLevel::SmoothLevel(x)) > 0.45f) warn += " the light manager's level is far from the sky's;";
+    if (!warn.empty()) t += "\nday and night WARNING:" + warn;
+    return t;
 }
 
 bool EnumerateLights() {
@@ -188,8 +219,9 @@ void WriteDiag() {
     const std::string memory = ApexMemory::ReportText();
     std::ostringstream out;
     const uintptr_t cells = Rd<uintptr_t>(lightMgr + 0x104);
-    out << std::format("Apex Radiance lighting snapshot\nnight level={:.2f} lightMgr={:08X} cells={:08X} counter={} / {}\n\n", Rd<float>(lightMgr + 0xF0), lightMgr, cells,
+    out << std::format("Apex Radiance lighting snapshot\nnight level={:.2f} lightMgr={:08X} cells={:08X} counter={} / {}\n", Rd<float>(lightMgr + 0xF0), lightMgr, cells,
         cells ? Rd<int>(cells + 0x38) : 0, cells ? Rd<int>(cells + 0x3C) : 0);
+    out << DayNightText(lightMgr) << "\n\n";
 
     // ---- all lights ----
     const bool enumOk = EnumerateLights();

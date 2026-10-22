@@ -26,6 +26,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps keep their night strength in Build mode at night", "Lampy si v noci v režimu stavby zachovávají noční sílu"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Měsíc osvětluje město z větší výšky: v noci už na silnicích nejsou tmavé pruhy"},
     {"Moonlight is softer by default and in every preset", "Měsíční světlo je ve výchozím stavu i ve všech předvolbách jemnější"},
+    {"Lamps brighten smoothly at dusk and dim smoothly at dawn", "Lampy se za soumraku plynule rozsvěcují a za úsvitu plynule zhasínají"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "Načítání pozemků je plynulejší: práce navíc s osvětlením se řídí vaší snímkovou frekvencí"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Okamžité světlo lamp pracuje méně, když se pozemek stále znovu osvětluje"},
     {"Options on by default for several versions no longer show an Experimental badge", "Možnosti zapnuté ve výchozím stavu už několik verzí nemají štítek Experimentální"},

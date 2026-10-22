@@ -26,6 +26,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps keep their night strength in Build mode at night", "Lamput säilyttävät yövoimakkuutensa rakennustilassa yöllä"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Kuu valaisee kaupunkia korkeammalta: teillä ei enää ole tummia raitoja yöllä"},
     {"Moonlight is softer by default and in every preset", "Kuunvalo on oletuksena ja kaikissa esiasetuksissa pehmeämpi"},
+    {"Lamps brighten smoothly at dusk and dim smoothly at dawn", "Lamput kirkastuvat tasaisesti hämärässä ja himmenevät tasaisesti aamunkoitteessa"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "Tonttien lataus on sujuvampaa: ylimääräinen valaistuslaskenta mukautuu kuvanopeuteesi"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Välitön lamppujen valo tekee vähemmän työtä, kun tonttia valaistaan yhä uudelleen"},
     {"Options on by default for several versions no longer show an Experimental badge", "Useiden versioiden ajan oletuksena päällä olleissa valinnoissa ei enää ole Kokeellinen-merkkiä"},

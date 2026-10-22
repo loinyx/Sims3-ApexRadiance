@@ -350,6 +350,18 @@ At night level n (lightMgr+0xF0, 0 day to 1 night) and a configured gain g. Sinc
 one daytime curve, `LampDay(n) = 0.03 + 0.97 smoothstep(0, 1, n)` (exactly 1 at n >= 1, `kLampDayFloor` = 0.03 by day):
 a lamp left on by day lights every outdoor surface at 3% of its night strength. Full-night values are unchanged bit for bit.
 
+**Smooth dusk (2.15.1).** The light manager's level moves in steps of 0.2: its setter `0x006ADD60` takes a new level
+only when it moved 0.2 and snaps to 1 over 0.8 and to 0 under 0.2 (`0x00F9D514` = 0.8, `0x00FAA20C` = 0.2), so these
+terms jumped five times at dusk. The level n of Apex's own lamp terms is now the sky's smooth night `sky+0x780.x` (the
+"ShaderDayNightParameters" the game's shaders read), mapped as `clamp((x - 0.2) / 0.6, 0, 1)`: continuous, and 1 or 0
+exactly where the setter snaps (`NightLevel::Read`, `features/night_level.h`). What follows the game's own lights keeps
+`+0xF0`: the room-rig re-gather and the room solves' daytime factor. Without the Build mode redirect of the sun times
+(`night_terrain_relight_patch.cpp` `SunTimesHook`) the level is `+0xF0` as before. Developer A/B: *Smooth dusk*. Every
+lighting snapshot (F8) starts with a day and night line: clock, sun height, smooth night and the sun times it was
+measured against, the weather set, the light manager's levels, Apex's level and the Build mode gate, with a warning
+when the sky counts day with the sun 20 degrees under the horizon (or night 10 degrees over it) or the light manager's
+level is far from the sky's ([room light maps](../../engine/room-light-maps.md#night-level-lightmgr0xf0)).
+
 | Function | Formula | Used by |
 |---|---|---|
 | `NightWeighted(g)` (lot_light_bridge.cpp) | `1 + (g - 1) n` | Ground, road and lot-map gains at night |

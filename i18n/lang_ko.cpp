@@ -26,6 +26,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps keep their night strength in Build mode at night", "밤에 건축 모드에서도 램프가 밤의 밝기를 유지합니다"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "달이 더 높은 곳에서 마을을 비춰 밤에 도로에 어두운 줄무늬가 더 이상 생기지 않습니다"},
     {"Moonlight is softer by default and in every preset", "달빛이 기본값과 모든 프리셋에서 더 부드러워졌습니다"},
+    {"Lamps brighten smoothly at dusk and dim smoothly at dawn", "해 질 녘에 램프가 부드럽게 밝아지고 새벽에 부드럽게 어두워집니다"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "부지 로딩이 더 부드러워졌습니다. 추가 조명 작업이 프레임 속도에 맞춰 진행됩니다"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "부지 조명이 계속 다시 계산되는 동안 즉시 램프 조명의 작업이 줄었습니다"},
     {"Options on by default for several versions no longer show an Experimental badge", "여러 버전 동안 기본으로 켜져 있던 옵션에 더 이상 실험적 배지가 표시되지 않습니다"},

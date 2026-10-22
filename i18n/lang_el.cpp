@@ -26,6 +26,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps keep their night strength in Build mode at night", "Τη νύχτα στη λειτουργία Κατασκευής οι λάμπες κρατούν τη νυχτερινή τους ένταση"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Το φεγγάρι φωτίζει την πόλη από ψηλότερα: τέλος οι σκούρες λωρίδες στους δρόμους τη νύχτα"},
     {"Moonlight is softer by default and in every preset", "Το φως του φεγγαριού είναι πιο απαλό από προεπιλογή και σε κάθε προεπιλογή ρυθμίσεων"},
+    {"Lamps brighten smoothly at dusk and dim smoothly at dawn", "Οι λάμπες δυναμώνουν ομαλά το σούρουπο και χαμηλώνουν ομαλά την αυγή"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "Η φόρτωση οικοπέδων είναι πιο ομαλή: η επιπλέον δουλειά φωτισμού ακολουθεί τον ρυθμό καρέ σου"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Το Άμεσο φως λαμπών κάνει λιγότερη δουλειά όσο ένα οικόπεδο φωτίζεται ξανά και ξανά"},
     {"Options on by default for several versions no longer show an Experimental badge", "Οι επιλογές που είναι ενεργές από προεπιλογή εδώ και αρκετές εκδόσεις δεν δείχνουν πια την ένδειξη Πειραματικό"},

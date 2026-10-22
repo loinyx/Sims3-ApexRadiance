@@ -26,6 +26,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps keep their night strength in Build mode at night", "Éjjel építés módban a lámpák megtartják éjszakai erejüket"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "A hold magasabbról világítja meg a várost: éjjel már nincsenek sötét csíkok az utakon"},
     {"Moonlight is softer by default and in every preset", "A holdfény alapból és minden előbeállításban lágyabb"},
+    {"Lamps brighten smoothly at dusk and dim smoothly at dawn", "A lámpák alkonyatkor fokozatosan fényesednek, hajnalban fokozatosan halványodnak"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "A telkek betöltése simább: a többlet világításszámítás a képkockasebességhez igazodik"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Az Azonnali lámpafény kevesebbet dolgozik, amíg egy telek újra és újra megvilágítódik"},
     {"Options on by default for several versions no longer show an Experimental badge", "A több verzió óta alapból bekapcsolt opciók már nem viselik a Kísérleti jelzést"},

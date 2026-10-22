@@ -56,6 +56,9 @@ int main() {
         check(g.Decide(m, 0.6f, 1.0f, -1.0f, 6.9f) == 0.6f && !g.holding);   // then taken once the clock ran on
         check(g.Decide(0x2000, 0.0f, 0.0f, 0.0f, 12.0f) == 0.0f);             // another light manager: taken
     }
+    // smooth dusk: the sky's smooth night mapped onto the setter's ends (0 under 0.2, 1 over 0.8, linear between)
+    check(NightLevel::SmoothLevel(0.1f) == 0.0f && NightLevel::SmoothLevel(0.2f) == 0.0f && NightLevel::SmoothLevel(0.8f) == 1.0f &&
+          NightLevel::SmoothLevel(0.95f) == 1.0f && std::fabs(NightLevel::SmoothLevel(0.5f) - 0.5f) < 1e-6f);
     // the sky's sun times: Build mode's 0 / 0 keeps the season's while the clock stands still; a world being loaded (0 / 0
     // to the season's) and a 0 / 0 that lasts with the clock running are taken
     {

@@ -939,7 +939,7 @@ bool ReadLightState(LightState& out) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
-    return NightLevel::Read(out.lightMgr, out.level); // +0xF0, kept while Build mode's seasonless sun times are in use
+    return NightLevel::Read(out.lightMgr, out.level, true); // the sky's smooth night (Apex's lamp terms; +0xF0 without the redirect)
 }
 
 bool ReadCounters(uintptr_t cells, int& c38, int& c3C) {
@@ -3217,6 +3217,8 @@ class NightTerrainRelightPatch : public ApexPatch {
         }
         if (ApexUi::Checkbox("Soft lot edges (A/B: off = plain max of lot and ground light)", &g_softLotEdges)) NotifySettingChanged();
         if (ApexUi::Checkbox("Moon height at night (A/B: off = the game's moon on the horizon)", &g_moonLift)) ObjectLightBridge::RequestRigRefresh();
+        bool smoothDusk = NightLevel::g_smoothDusk.load();
+        if (ApexUi::Checkbox("Smooth dusk (A/B: off = the game's night level in steps of 0.2)", &smoothDusk)) NightLevel::g_smoothDusk = smoothDusk;
         bool lowLamp = RtOutdoorLamps::LowLampLift();
         if (ApexUi::Checkbox("Lamps on the ground light the lawn from 40 cm (A/B: off = from their real 5 cm)", &lowLamp)) RtOutdoorLamps::SetLowLampLift(lowLamp);
         ImGui::SameLine();

@@ -26,6 +26,7 @@ const I18n::Pair kPairs[] = {
     {"Lamps keep their night strength in Build mode at night", "Lamper beholder deres natstyrke i byggetilstand om natten"},
     {"The moon lights the town from higher up: no more dark stripes on roads at night", "Månen lyser byen op højere oppefra: ingen mørke striber på vejene om natten"},
     {"Moonlight is softer by default and in every preset", "Månelyset er blødere som standard og i alle forudindstillinger"},
+    {"Lamps brighten smoothly at dusk and dim smoothly at dawn", "Lamper tændes blødt i skumringen og dæmpes blødt ved daggry"},
     {"Loading lots is smoother: the extra lighting work follows your frame rate", "Indlæsning af grunde er mere glidende: det ekstra lysarbejde følger din billedhastighed"},
     {"Instant lamp lighting does less work while a lot keeps relighting", "Øjeblikkeligt lampelys arbejder mindre, mens en grund belyses igen og igen"},
     {"Options on by default for several versions no longer show an Experimental badge", "Indstillinger, der har været slået til som standard i flere versioner, viser ikke længere mærket Eksperimentel"},

@@ -119,6 +119,26 @@ inline float Gate(uintptr_t lightMgr, float wanted) {
     return out;
 }
 
+// (2.15.1) Smooth dusk. The light manager's level moves in steps of 0.2 (the setter 0x006ADD60 takes a new level only when
+// it moved 0.2, and snaps to 1 over 0.8 and to 0 under 0.2: 0x00F9D514 = 0.8, 0x00FAA20C = 0.2), so Apex's lamp terms on
+// the ground, sidewalks, objects, roofs and water jumped five times at dusk. The sky's smooth night sky+0x780.x moves
+// continuously; mapped as (x - 0.2) / 0.6 it reaches 1 and 0 exactly where the setter snaps. Apex's own lamp terms take
+// it (Read with smooth); what follows the game's lights (room rigs, room solves) keeps +0xF0. Developer A/B.
+inline std::atomic<bool> g_smoothDusk{true};
+inline float SmoothLevel(float x) { return x <= 0.2f ? 0.0f : (x >= 0.8f ? 1.0f : (x - 0.2f) / 0.6f); }
+inline bool ReadSmoothNight(uintptr_t lightMgr, float& x) {
+    __try {
+        const uintptr_t back = *reinterpret_cast<const uintptr_t*>(lightMgr + 0xD0);
+        if (back < 0x10000 + 0x210) return false;
+        const uintptr_t sky = back - 0x210;
+        if (*reinterpret_cast<const uintptr_t*>(sky + 0x1F4) != lightMgr) return false;
+        x = *reinterpret_cast<const float*>(sky + 0x780);
+        return std::isfinite(x);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 inline bool ReadF0(uintptr_t lightMgr, float& f0) {
     __try {
         f0 = *reinterpret_cast<const float*>(lightMgr + 0xF0);
@@ -128,11 +148,18 @@ inline bool ReadF0(uintptr_t lightMgr, float& f0) {
     }
 }
 
-// The level Apex uses: +0xF0 (through the gate when the game's setter is not redirected); false when unreadable
-inline bool Read(uintptr_t lightMgr, float& level) {
+// The level Apex uses: +0xF0 (through the gate when the sky's sun times are not redirected); with smooth, the sky's smooth
+// night mapped onto it (Apex's own lamp terms) when the sun times are redirected and the A/B is on. False when unreadable
+inline bool Read(uintptr_t lightMgr, float& level, bool smooth = false) {
     float f0 = 0.0f;
     if (!lightMgr || !ReadF0(lightMgr, f0) || !std::isfinite(f0)) return false;
-    level = g_timesHooked.load(std::memory_order_relaxed) ? f0 : Gate(lightMgr, f0);
+    const bool hooked = g_timesHooked.load(std::memory_order_relaxed);
+    float x = 0.0f;
+    if (smooth && hooked && g_smoothDusk.load(std::memory_order_relaxed) && ReadSmoothNight(lightMgr, x)) {
+        level = SmoothLevel(x);
+        return true;
+    }
+    level = hooked ? f0 : Gate(lightMgr, f0);
     return true;
 }
 
