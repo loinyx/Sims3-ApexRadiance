@@ -33,7 +33,7 @@ namespace ApexIngame
         [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr VirtualQueryEx(IntPtr h, IntPtr addr, out MemoryBasicInformation mbi, IntPtr size);
 
         const uint ProcessVmRead = 0x10, ProcessVmWrite = 0x20, ProcessVmOperation = 0x8, ProcessQueryInformation = 0x400;
-        const uint MemCommit = 0x1000, MemPrivate = 0x20000, PageReadWrite = 0x04, PageExecuteReadWrite = 0x40;
+        const uint MemCommit = 0x1000, PageWritable = 0x04 | 0x08 | 0x40 | 0x80, PageGuard = 0x100;
 
         readonly IntPtr mProcess;
         long mAddress; // 0 until found
@@ -83,8 +83,9 @@ namespace ApexIngame
 
         bool Valid(long addr) { return HeaderValid(Read(addr, Header)); }
 
-        // One pass over the committed private read-write regions of at least 1 MB (the game's GC heap may be executable too),
-        // up to the end of the target's address space. Returns true once found.
+        // One pass over the committed writable regions of at least 1 MB, of any type and with or without execute (the game's
+        // GC heap is PAGE_EXECUTE_READWRITE), up to the end of the target's address space; the same ranges as Frida's
+        // enumerateRanges('rw-') that the sims3-modernization probe scans. Returns true once found.
         public bool Scan()
         {
             if (Found) return true;
@@ -97,7 +98,7 @@ namespace ApexIngame
             {
                 long size = mbi.RegionSize.ToInt64();
                 if (size <= 0) break;
-                if (mbi.State == MemCommit && mbi.Type == MemPrivate && (mbi.Protect == PageReadWrite || mbi.Protect == PageExecuteReadWrite) && size >= Capacity)
+                if (mbi.State == MemCommit && (mbi.Protect & PageWritable) != 0 && (mbi.Protect & PageGuard) == 0 && size >= Capacity)
                 {
                     for (long off = 0; off < size; off += chunk.Length - Magic.Length)
                     {

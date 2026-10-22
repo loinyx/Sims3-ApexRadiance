@@ -29,8 +29,6 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $apexDir = Join-Path $GameDocuments 'Apex Radiance'
 $tomlPath = Join-Path $apexDir 'ApexRadiance.toml'
 
-function Say([string]$Text) { Write-Output ('{0:HH:mm:ss} {1}' -f (Get-Date), $Text) }
-
 # ------------------------------------------------------------------ backup and restore
 # The manifest lists every file the run may replace or remove, with whether it existed. Restore copies each back, or
 # deletes it when it did not exist before the run.
@@ -136,6 +134,47 @@ function Wait-Game([string]$What, [double]$Minutes, [scriptblock]$Done, [scriptb
     }
 }
 
+# Waits for the test agent's mailbox after the game starts. Scans the game's memory every 10 s; every 30 s
+# Step-StartWatch (runner_lib.ps1) checks the process, Apex's log, the agent's marker file and heartbeat and stops the
+# load with the reason; -LoadTimeoutMin is only the last resort.
+function Wait-Agent([datetime]$Started) {
+    $state = @{}
+    $logPath = Join-Path $apexDir 'ApexRadiance_LOG.txt'
+    $lastScan = [datetime]::MinValue
+    $nextCheck = $Started.AddSeconds(30)
+    $end = $Started.AddMinutes($LoadTimeoutMin)
+    while (-not $script:mbox.Found) {
+        if ($script:proc.HasExited) { throw "the game closed before the test agent answered (exit code $($script:proc.ExitCode))" }
+        if (((Get-Date) - $lastScan).TotalSeconds -ge 10) { $lastScan = Get-Date; if ($script:mbox.Scan()) { break } }
+        if ((Get-Date) -ge $nextCheck) {
+            $nextCheck = (Get-Date).AddSeconds(30)
+            $o = Get-StartObservation $script:proc $logPath $GameDocuments $Started $script:mbox
+            Say ("  test agent: {0:N0} s since start, cpu {1:N0} s, Apex log {2}, features {3}, agent marker {4}" -f $o.Sec, $o.Cpu,
+                $(if ($o.LogBytes -ge 0) { "$($o.LogBytes) bytes" } else { 'none yet' }), $(if ($o.Features) { 'started' } else { 'not yet' }),
+                $(if ($o.Marker) { $o.Marker } else { 'none yet' }))
+            $why = Step-StartWatch $state $o
+            if ($why) { throw $why }
+        }
+        if ((Get-Date) -ge $end) { throw "timeout after $LoadTimeoutMin min waiting for the test agent" }
+        Start-Sleep -Seconds 1
+    }
+    Say "  test agent found $([math]::Round(((Get-Date) - $Started).TotalSeconds)) s after the start"
+}
+
+# "Mod Scripts Found" (the game's warning when script mods are installed) opens at the main menu up to ~90 s after the
+# agent answers, and accepting it during a load leaves the game on the loading screen (sims3-modernization cycle.ts).
+# Answers menu dialogs until that one was seen and the menu stayed quiet for 5 s, or for 120 s without it.
+function Wait-MenuQuiet {
+    $m = @{ Start = Get-Date; Quiet = Get-Date; Saw = $false } # a hashtable: the script block below cannot assign outer variables
+    Wait-Game 'the "Mod Scripts Found" dialog' 3 {
+        try { $d = Call-Agent 'auto_dialog' $null 5000 } catch { return $false }
+        if ($d.open) { Say "  menu dialog '$($d.title)': clicked $($d.clicked)"; if ($d.title -match 'mod scripts') { $m.Saw = $true }; $m.Quiet = Get-Date }
+        if ($m.Saw) { return ((Get-Date) - $m.Quiet).TotalSeconds -ge 5 }
+        return ((Get-Date) - $m.Start).TotalSeconds -ge 120
+    }
+    if (-not $m.Saw) { Say '  no "Mod Scripts Found" dialog within 120 s; loading anyway' }
+}
+
 function Clear-Dialog { try { $d = Call-Agent 'auto_dialog' $null; if ($d.clicked) { Say "  dialog '$($d.title)': clicked $($d.clicked)" } } catch { Say "  dialog: $($_.Exception.Message)" } }
 
 function Keep-Speed {
@@ -181,15 +220,9 @@ function Invoke-Load($Load, [string]$BaseToml) {
     else { $script:proc = Start-Process -FilePath $exe -WorkingDirectory $GameBin -PassThru }
     try {
         $script:mbox = New-Object ApexIngame.MailboxClient($script:proc.Id)
-        $script:lastScan = [datetime]::MinValue
-        Wait-Game 'the test agent (main menu)' $LoadTimeoutMin {
-            if ($script:mbox.Found) { return $true }
-            if (((Get-Date) - $script:lastScan).TotalSeconds -lt 10) { return $false }
-            $script:lastScan = Get-Date
-            return $script:mbox.Scan()
-        }
+        Wait-Agent $started
         Wait-Game 'the main menu' 5 { try { Call-Agent 'game_state' $null 5000 | Out-Null; return $true } catch { return $false } }
-        Clear-Dialog
+        Wait-MenuQuiet
         Call-Agent 'load_save' @{ file = "$($jobDef.save).sims3" } | Out-Null
         Say "$($Load.Name): loading $($jobDef.save)"
         Wait-LiveMode "the save $($jobDef.save)"
@@ -257,6 +290,10 @@ function Invoke-Load($Load, [string]$BaseToml) {
         if ((Test-Path -LiteralPath $p) -and (Get-Item -LiteralPath $p).LastWriteTime -ge $started) { Copy-Item -LiteralPath $p -Destination $dir }
     }
     if (Test-Path (Join-Path $dir 'ApexRadiance_Crash.txt')) { $notes.Add('crash report written') }
+    # the agent's marker files (Marker in agent/Agent.cs) belong to the run, not to the player's folder
+    Get-ChildItem -LiteralPath $GameDocuments -Filter 'ScriptError*.xml' -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -ge $started -and (Select-String -LiteralPath $_.FullName -SimpleMatch '<ApexTestAgent ' -List) } |
+        Move-Item -Destination $dir -Force
     $logPath = Join-Path $dir 'ApexRadiance_LOG.txt'
     $lines = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } else { $notes.Add('no ApexRadiance_LOG.txt from this load'); @() }
     $check = Test-ApexLog $lines (@($jobDef.expect) + @($v.expect)) ($script:DefaultFailPatterns + @($jobDef.fail) + @($v.fail))
@@ -295,6 +332,7 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $OutDir 'backup
 Say "backup of $($manifest.Count) files in $OutDir\backup (restore by hand: run.ps1 -Restore '$OutDir')"
 $baseToml = if (Test-Path -LiteralPath $tomlPath) { [IO.File]::ReadAllText($tomlPath) } else { '' }
 $results = @()
+$stopped = $null
 try {
     foreach ($e in $installs) {
         if ($e.from) { New-Item -ItemType Directory -Path (Split-Path $e.path) -Force | Out-Null; Copy-Item -LiteralPath $e.from -Destination $e.path -Force }
@@ -302,9 +340,14 @@ try {
     }
     Say "installed $(Split-Path $Asi -Leaf) ($((Get-FileHash -LiteralPath $Asi -Algorithm SHA256).Hash.Substring(0, 12))) and the test agent; $($loads.Count) load(s)"
     foreach ($l in $loads) {
-        $results += Invoke-Load $l $baseToml
+        $row = @(Invoke-Load $l $baseToml)
+        if ($row.Count -ne 1) { throw "internal: Invoke-Load returned $($row.Count) values instead of one result" }
+        $results += $row[0]
         if (Get-Process -Name 'TS3W' -ErrorAction SilentlyContinue) { throw 'TS3W.exe still running after a load; stopping the run' }
     }
+} catch {
+    $stopped = $_.Exception.Message
+    Say "run stopped: $stopped"
 } finally {
     if ($script:proc -and -not $script:proc.HasExited) { Stop-Process -Id $script:proc.Id -Force; Wait-Process -Id $script:proc.Id -Timeout 60 -ErrorAction SilentlyContinue }
     Restore-Backup $OutDir
@@ -315,4 +358,5 @@ try {
         Say "results: $OutDir\results.md ($(@($results | Where-Object Ok).Count) of $($results.Count) loads passed)"
     }
 }
-if (@($results | Where-Object { -not $_.Ok }).Count) { exit 1 }
+# 0 all loads passed, 1 a load failed, 2 the run stopped early (see runner_lib.ps1 Get-RunExitCode)
+exit (Get-RunExitCode $results $loads.Count)

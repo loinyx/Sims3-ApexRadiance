@@ -1,6 +1,7 @@
 # Offline checks of the in-game runner: no game, nothing installed, scratch files under %TEMP% only.
-# Covers the TOML switches, the ABBA load order, the log pass rule, the frame statistics, every job file, and the
-# mailbox client against an in-process stand-in for the game's agent (same layout, same magic).
+# Covers the TOML switches, the ABBA load order, the log pass rule, the frame statistics, one result row per load, the
+# exit codes, the start-up watch on a stand-in game, log and agent marker, every job file, and the mailbox client
+# against an in-process stand-in for the game's agent (same layout, same magic).
 #   ./tools/ingame_runner/selftest.ps1
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'runner_lib.ps1')
@@ -54,6 +55,51 @@ $res = @([pscustomobject]@{ Name = 'x-1-off'; JobId = 'x'; Variant = 'off'; Ok =
          [pscustomobject]@{ Name = 'x-2-on'; JobId = 'x'; Variant = 'on'; Ok = $false; Closed = 'quit'; Frames = $null; Sim = $null; Notes = @('log: a|b') })
 $md = Format-Results $res 'Self-test'
 Check ($md -match '\| x-2-on \| FAIL \|' -and $md -match '## x: A/B' -and $md -match 'log: a/b') 'results page'
+
+# Results: progress lines go to the host, so a load returns exactly one row; exit code 0 / 1 / 2
+function Test-Load { Say 'starting the game'; Say '  test agent: 30 s'; [pscustomobject]@{ Name = 'x-1-on'; Ok = $false } }
+$rows = @(Test-Load 6>$null)
+Check ($rows.Count -eq 1 -and $rows[0].Name -eq 'x-1-on') 'one result row per load (no status lines in the results)'
+$pass = [pscustomobject]@{ Ok = $true }; $fail = [pscustomobject]@{ Ok = $false }
+Check ((Get-RunExitCode @($pass, $pass) 2) -eq 0) 'exit 0 when every load passed'
+Check ((Get-RunExitCode @($pass, $fail) 2) -eq 1) 'exit 1 when a load failed'
+Check ((Get-RunExitCode @($pass) 2) -eq 2 -and (Get-RunExitCode @() 1) -eq 2) 'exit 2 when the run stopped early'
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ('apex-ingame-selftest-' + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $tmp | Out-Null
+try {
+    # a run that cannot start ends non-zero (here: no TS3W.exe in -GameBin)
+    $runArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'run.ps1'), '-Job', (Join-Path $PSScriptRoot 'jobs/smoke.json'), '-GameBin', $tmp)
+    $p = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList ($runArgs | ForEach-Object { '"' + $_ + '"' }) -Wait -PassThru -WindowStyle Hidden
+    Check ($p.ExitCode -ne 0) "run.ps1 exits non-zero when it cannot run (exit $($p.ExitCode))"
+
+    # Start-up watch: observations of a stand-in game (this process), log, marker and mailbox
+    $started = (Get-Date).AddSeconds(-5)
+    $log = Join-Path $tmp 'ApexRadiance_LOG.txt'
+    $o = Get-StartObservation (Get-Process -Id $PID) $log $tmp $started $null
+    Check ($o.Alive -and $o.LogBytes -eq -1 -and -not $o.Features -and -not $o.Marker -and -not $o.Found) 'observation before Apex and the agent'
+    Set-Content -LiteralPath $log -Value @('12:00:00.000 [INFO] [Main] Loaded as ApexRadiance.asi', '12:00:20.000 [INFO] [Main] Features started')
+    Set-Content -LiteralPath (Join-Path $tmp 'ScriptError_1234.xml') -Value '<ApexTestAgent version="1.0.1" stage="loaded" commands="ok" />'
+    Set-Content -LiteralPath (Join-Path $tmp 'ScriptError_9999.xml') -Value '<ScriptError>another mod</ScriptError>'
+    $o = Get-StartObservation (Get-Process -Id $PID) $log $tmp $started ([pscustomobject]@{ Found = $true; Heartbeat = 7 })
+    Check ($o.LogBytes -gt 0 -and $o.Features -and $o.Marker -match 'stage="loaded"' -and $o.Found -and $o.Beat -eq 7) 'observation of log, marker and heartbeat'
+    $o = Get-StartObservation (Get-Process -Id $PID) $log $tmp (Get-Date).AddMinutes(1) $null
+    Check ($o.LogBytes -eq -1 -and -not $o.Marker) 'files from an earlier start do not count'
+
+    # the rules, one 30 s check per observation
+    function Obs([double]$Sec, [double]$Cpu, [long]$Log = 100, [bool]$Features = $false, [string]$Marker = $null, [bool]$Alive = $true) {
+        [pscustomobject]@{ Sec = $Sec; Alive = $Alive; ExitCode = 3; Cpu = $Cpu; LogBytes = $Log; Features = $Features; Marker = $Marker; Found = $false; Beat = $null }
+    }
+    function Run-Watch($List) { $st = @{}; foreach ($x in $List) { $why = Step-StartWatch $st $x; if ($why) { return $why } }; return $null }
+    Check ($null -eq (Run-Watch @((Obs 30 5), (Obs 60 9 200 $true), (Obs 90 14 300 $true '<a/>')))) 'healthy start keeps waiting'
+    Check ((Run-Watch @((Obs 30 5 -1), (Obs 60 9 -1))) -match 'ApexRadiance.asi did not load') 'no Apex log after 60 s'
+    Check ((Run-Watch @((Obs 30 5), (Obs 60 5 0 $false $null $false))) -match 'closed .*exit code 3') 'game closed'
+    Check ((Run-Watch @((Obs 30 5), (Obs 60 5.5), (Obs 90 5.9))) -match 'no progress for 60 s') 'two flat checks fail'
+    Check ($null -eq (Run-Watch @((Obs 30 5), (Obs 60 5.5), (Obs 90 9)))) 'one flat check is tolerated'
+    Check ((Run-Watch @((Obs 30 5 100 $true), (Obs 60 9 200 $true), (Obs 90 13 300 $true), (Obs 120 17 400 $true))) -match 'did not load: no ApexTestAgent marker') 'agent not loaded 90 s after the features'
+    Check ((Run-Watch @((Obs 30 5 100 $true), (Obs 120 17 400 $true '<ApexTestAgent stage="loaded" />'))) -match 'loaded \(<ApexTestAgent.*mailbox was not found') 'agent loaded, mailbox not found'
+    $st = @{}; $null = Step-StartWatch $st (Obs 30 5 100 $true); $found = Obs 150 30 900 $true; $found.Found = $true; $found.Beat = 4
+    Check ($null -eq (Step-StartWatch $st $found)) 'a found mailbox never fails the agent rule'
+} finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 
 # Every shipped job: valid JSON, an id equal to its file name, a save, known steps, patterns that compile
 $known = 'speed', 'wait', 'camera', 'camera_pan', 'save', 'reload'

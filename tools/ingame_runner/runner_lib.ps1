@@ -165,3 +165,58 @@ function Format-Results($Results, [string]$Title) {
     $out.Add('difference with the spread between loads of the same variant before reading it as an effect.')
     return ($out -join "`r`n") + "`r`n"
 }
+
+# Progress lines go to the host, not the output: a function's output is its return value, and a status line written
+# to it lands in the caller's results (the first live run had 46 result rows for one load).
+function Say([string]$Text) { Write-Host ('{0:HH:mm:ss} {1}' -f (Get-Date), $Text) }
+
+# What the wait for the test agent sees now: the game process, Apex's log of this start, the agent's marker file in
+# the user folder ($DocsDir) and, once found, its mailbox (any object with Found and Heartbeat).
+function Get-StartObservation($Proc, [string]$LogPath, [string]$DocsDir, [datetime]$Started, $Mbox) {
+    $o = [pscustomobject]@{ Sec = ((Get-Date) - $Started).TotalSeconds; Alive = -not $Proc.HasExited; ExitCode = $null; Cpu = 0.0
+                            LogBytes = -1; Features = $false; Marker = $null; Found = $false; Beat = $null }
+    if ($o.Alive) { $Proc.Refresh(); $o.Cpu = $Proc.TotalProcessorTime.TotalSeconds } else { $o.ExitCode = $Proc.ExitCode }
+    $log = Get-Item -LiteralPath $LogPath -ErrorAction SilentlyContinue
+    if ($log -and $log.LastWriteTime -ge $Started) { # Apex starts a new log at every game start
+        $o.LogBytes = $log.Length
+        $o.Features = [bool](Select-String -LiteralPath $LogPath -SimpleMatch '[Main] Features started' -List -ErrorAction SilentlyContinue)
+    }
+    foreach ($f in @(Get-ChildItem -LiteralPath $DocsDir -Filter 'ScriptError*.xml' -File -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge $Started })) {
+        $line = @(Get-Content -LiteralPath $f.FullName -ErrorAction SilentlyContinue) -match '<ApexTestAgent ' | Select-Object -First 1
+        if ($line) { $o.Marker = $line.Trim(); break }
+    }
+    if ($Mbox -and $Mbox.Found) { $o.Found = $true; try { $o.Beat = $Mbox.Heartbeat } catch { } }
+    return $o
+}
+
+# One 30 s check of the wait for the test agent: the reason to stop, or $null to keep waiting. $State carries the last
+# check. Rules: the game runs; Apex's log has its first lines 60 s after the start; CPU time, the log or the agent's
+# heartbeat moves (two flat checks in a row fail); $AgentSec after Apex started its features (the main menu follows
+# within seconds) the agent's mailbox is found, and the message tells "not loaded" (no marker) from "loaded but its
+# mailbox not found" (marker).
+function Step-StartWatch([hashtable]$State, $Obs, [int]$AgentSec = 90) {
+    if (-not $Obs.Alive) { return "the game closed before the test agent answered (exit code $($Obs.ExitCode))" }
+    if ($Obs.LogBytes -lt 0 -and $Obs.Sec -ge 60) {
+        return 'no ApexRadiance_LOG.txt from this start after 60 s: ApexRadiance.asi did not load (is an ASI loader in Game\Bin? see -AsiLoader)'
+    }
+    $moved = (-not $State.ContainsKey('Cpu')) -or ($Obs.Cpu - $State.Cpu -gt 1) -or ($Obs.LogBytes -ne $State.LogBytes) -or ($Obs.Beat -ne $State.Beat)
+    $State.Misses = if ($moved) { 0 } else { $State.Misses + 1 }
+    $State.Cpu = $Obs.Cpu; $State.LogBytes = $Obs.LogBytes; $State.Beat = $Obs.Beat
+    if ($State.Misses -ge 2) { return 'no progress for 60 s: CPU time, ApexRadiance_LOG.txt and the agent heartbeat did not move (the game hangs)' }
+    if ($Obs.Features -and -not $State.ContainsKey('FeaturesAt')) { $State.FeaturesAt = $Obs.Sec }
+    if ($State.ContainsKey('FeaturesAt') -and -not $Obs.Found -and $Obs.Sec - $State.FeaturesAt -ge $AgentSec) {
+        if (-not $Obs.Marker) {
+            return "the test agent did not load: no ApexTestAgent marker (ScriptError_*.xml) and no mailbox $AgentSec s after Apex started its features (check Mods\Resource.cfg, Mods\Packages\ApexTestAgent.package and the game's script errors)"
+        }
+        return "the test agent loaded ($($Obs.Marker)) but its mailbox was not found in the game's memory"
+    }
+    return $null
+}
+
+# 0: every planned load ran and passed; 1: a load failed; 2: the run stopped before every load ran.
+function Get-RunExitCode($Results, [int]$Planned) {
+    $rows = @($Results | Where-Object { $_ })
+    if ($rows.Count -lt $Planned) { return 2 }
+    if (@($rows | Where-Object { -not $_.Ok }).Count) { return 1 }
+    return 0
+}
