@@ -8,7 +8,10 @@
         "patches.ResourceLookupCache": {
           "enabled": false
         }
-      }
+      },
+      "fail": [
+        "\\[ResourceCache\\] On:"
+      ]
     },
     "on": {
       "toml": {

@@ -8,7 +8,10 @@
         "patches.FastMemory": {
           "enabled": false
         }
-      }
+      },
+      "fail": [
+        "\\[FastMemory\\] On:"
+      ]
     },
     "on": {
       "toml": {

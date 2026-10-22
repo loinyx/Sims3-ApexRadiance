@@ -8,7 +8,10 @@
         "patches.FileListCache": {
           "enabled": false
         }
-      }
+      },
+      "fail": [
+        "\\[FileListCache\\] On:"
+      ]
     },
     "on": {
       "toml": {

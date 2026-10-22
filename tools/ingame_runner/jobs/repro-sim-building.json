@@ -8,7 +8,10 @@
         "patches.FastCasSort": {
           "enabled": false
         }
-      }
+      },
+      "fail": [
+        "\\[FastCas\\] On:"
+      ]
     },
     "on": {
       "toml": {

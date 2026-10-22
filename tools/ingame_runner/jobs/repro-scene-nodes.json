@@ -8,7 +8,10 @@
         "patches.SceneNodeBudget": {
           "enabled": false
         }
-      }
+      },
+      "fail": [
+        "\\[SceneBudget\\] On:"
+      ]
     },
     "on": {
       "toml": {

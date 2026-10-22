@@ -8,7 +8,10 @@
         "patches.MemoryGuard": {
           "enabled": false
         }
-      }
+      },
+      "fail": [
+        "\\[MemoryGuard\\] On:"
+      ]
     },
     "on": {
       "toml": {
