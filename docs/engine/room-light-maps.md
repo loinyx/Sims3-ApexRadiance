@@ -256,9 +256,13 @@ on at dusk through the same setter but re-solves neither lots nor terrain. Apex 
 sky stayed dark and the clock (`lightMgr+0xB4`) stood still (Daylight logs of 21/10 and 22/10). The sky asks the weather
 manager `*(*(sky+0x21C)+0x74)` for them (`FUN_00D68FE0`, called at `0x00C15D9A`), whose byte `+0xB04` picks the set at
 `+0xA48` or `+0x9EC`; in Build mode the byte read 0 and both sets 0 / 0 (memory read of 22/10), so the byte does not tell
-Build mode apart. Apex reads the level through `NightLevel::Read` (`features/night_level.h`): night only turns to day
-with the clock moving, so a fall of `+0xF0` with the clock unchanged keeps the level of before (a rise is always taken).
-Lamps keep their night strength in Build mode and leaving it no longer arms a dusk rebuild.
+Build mode apart. The fall faded the game's own street lamps and lamp factors (terrain, roads, sidewalks, lot ground) as
+well as Apex's lamp terms. The sky update hands the level to the setter through one call, `0x00C11B40` in
+`FUN_00C11AD0` (`call 0x006ADD60`, thiscall(lightMgr, float), ret 4; found by the bytes around it, the setter checked by
+its start). Apex points it at `NightSetHook`, which passes the level through `NightLevel::Gate`: a fall that comes with a
+change of the sky's sun times keeps the level of before, released after 0.25 h of game time with the clock running (a
+season shift). The game itself then keeps its night in Build mode, and leaving it no longer arms a dusk rebuild. When the
+call is not found, Apex gates only the level it reads (`NightLevel::Read`).
 
 ### How Apex reads and patches this
 

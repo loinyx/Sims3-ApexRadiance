@@ -41,26 +41,20 @@ int main() {
     TerrainBakeRule::g_lowLampLift = false;
     check(TerrainBakeRule::StampHeight(0.05f) == 0.05f);
     TerrainBakeRule::g_lowLampLift = true;
-    // (2.15.1) night level: a fall with the clock stopped (Build mode) keeps the level of before; a rise and a fall with
-    // the clock moving are taken
+    // (2.15.1) night level: a fall that comes with a change of the sun times (Build mode) keeps the level of before; the
+    // ramp of a world loaded at night, a dawn with the same sun times and a held fall outlasting kSunGateHours are taken
     {
-        alignas(4) unsigned char mgr[0x100] = {};
-        float* f0 = reinterpret_cast<float*>(mgr + 0xF0);
-        float* hour = reinterpret_cast<float*>(mgr + 0xB4);
-        const uintptr_t m = reinterpret_cast<uintptr_t>(mgr);
-        float lv = -1.0f;
-        *hour = 18.952f, *f0 = 0.0f;
-        check(NightLevel::Read(m, lv) && lv == 0.0f);
-        *f0 = 0.6f;
-        check(NightLevel::Read(m, lv) && lv == 0.6f); // a world loaded at night: the ramp with the clock still
-        *f0 = 1.0f;
-        check(NightLevel::Read(m, lv) && lv == 1.0f && !NightLevel::Holding());
-        *f0 = 0.0f;
-        check(NightLevel::Read(m, lv) && lv == 1.0f && NightLevel::Holding()); // Build mode
-        *f0 = 1.0f;
-        check(NightLevel::Read(m, lv) && lv == 1.0f && !NightLevel::Holding()); // back to live mode
-        *hour = 6.5f, *f0 = 0.8f;
-        check(NightLevel::Read(m, lv) && lv == 0.8f && !NightLevel::Holding()); // dawn, the clock moving
+        NightLevel::SunGate g;
+        const uintptr_t m = 0x1000;
+        check(g.Decide(m, 0.0f, 2.0f, -2.5f, 18.9f) == 0.0f);
+        check(g.Decide(m, 0.6f, 2.0f, -2.5f, 18.9f) == 0.6f && g.Decide(m, 1.0f, 2.0f, -2.5f, 18.9f) == 1.0f);
+        check(g.Decide(m, 0.6f, 0.0f, 0.0f, 18.94f) == 1.0f && g.holding);  // Build mode: first step, the clock's last tick
+        check(g.Decide(m, 0.0f, 0.0f, 0.0f, 18.94f) == 1.0f && g.holding);
+        check(g.Decide(m, 1.0f, 2.0f, -2.5f, 18.94f) == 1.0f && !g.holding); // back to live mode
+        check(g.Decide(m, 0.8f, 2.0f, -2.5f, 6.5f) == 0.8f);                  // dawn, same sun times
+        check(g.Decide(m, 0.6f, 1.0f, -1.0f, 6.6f) == 0.8f && g.holding);    // a season shift: held a while
+        check(g.Decide(m, 0.6f, 1.0f, -1.0f, 6.9f) == 0.6f && !g.holding);   // then taken once the clock ran on
+        check(g.Decide(0x2000, 0.0f, 0.0f, 0.0f, 12.0f) == 0.0f);             // another light manager: taken
     }
     check(TerrainBakeRule::AreaType(9) && TerrainBakeRule::AreaType(10) && !TerrainBakeRule::AreaType(7) && !TerrainBakeRule::AreaType(11));
     std::printf("World lamp policy: %d checks, %d failures\n", checks, failed);
