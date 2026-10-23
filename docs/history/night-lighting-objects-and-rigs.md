@@ -200,3 +200,15 @@ under 0.1, so the lamp left its rig. Not a wall, grid or foundation issue: the s
 own colour (`rig_cut.h`, `KeepOverCut`). Offline: with the 12/10 garden post the game dropped the lamp from 4.25 m while
 its light stayed visible to 8.75 m; kept now (`tools/roofed_openings_test`). Developer Tester switch *Lamps through arches
 on indoor objects*. Not yet checked in game.
+
+### 2026-10-22: area lights light only the side they face
+
+**Context:** commit `b863bce`. A lot's white area light at ground height lit a whole tree crown at full strength
+([foliage history](night-lighting-foliage.md)).
+
+**Finding:** `ReadLamp` accepts every outdoor light, area lights (types 9 and 10) included, and gave them no cone, so
+they lit all round, while the game lights only the side the area faces ([engine](../engine/light-objects-and-rigs.md)).
+
+**Outcome:** an area light's cone is its third axis `+0x180` normalised with offset 0 and no spill: `sat(l . axis)`,
+the game's facing with the area's centre as its nearest point. Objects, fences and foliage evaluate it; roofs and water
+take their rows without cones, as for spots. Not yet checked in game.

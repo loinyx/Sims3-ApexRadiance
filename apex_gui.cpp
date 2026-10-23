@@ -1695,6 +1695,7 @@ void DevTesterTab() {
         TesterSwitch("Story grid memo", "A story's walls are looked up once per frame", TesterToggles::gridMemo, Effect::None);
         TesterSwitch("Re-issued draw filter", "Only observers run for draws drawn again", PerfToggles::ReissueFilter, Effect::None);
         TesterSwitch("Follow bound shaders", "Shader reads answered without asking the device", PerfToggles::FollowBoundShaders, Effect::None);
+        TesterSwitch("Follow bound textures", "Texture reads answered without asking the device", PerfToggles::FollowBoundTextures, Effect::None);
         TesterSwitch("Sampled dispatch timing", "Developer timing measures one call in 16", PerfToggles::SampledDispatchTiming, Effect::None);
         TesterSwitch("Shader precompile answer", "Kept once every job is done", PerfToggles::PrecompileAnswerCache, Effect::None);
         TesterSwitch("Ambient shadows shader cache", "The last shader's answer is kept", PerfToggles::AoLastShaderCache, Effect::None);
@@ -1702,7 +1703,11 @@ void DevTesterTab() {
         TesterSwitch("Night Lights shader facts", "One lookup per pixel shader change", PerfToggles::NightLightingPsFacts, Effect::None);
         TesterSwitch("Rig mode once per draw", "Read once instead of at every check", PerfToggles::RigModeOncePerDraw, Effect::None);
         TesterSwitch("Indoor object sampler scan", "Only declared samplers are checked", PerfToggles::IndoorSamplerScan, Effect::None);
+        TesterSwitch("Writable packages' file lists", "Kept while their counted writes do not change", PerfToggles::KeyListCountedPackages, Effect::None);
         TesterSwitch("Room record lookup cache", "Kept while no room record changed", PerfToggles::SolveInfoCache, Effect::None);
+        TesterSwitch("Window light channel memo", "Asked once per sample batch", PerfToggles::WindowChannelMemo, Effect::None);
+        TesterSwitch("Paced relight at rest", "With the camera still, room lighting gives way when frames run long", PerfToggles::SteadyRoomPacing, Effect::None);
+        TesterSwitch("Paced relight while moving", "After a load or a lamp switch, at the pace the frame rate allows", PerfToggles::MotionPacedRaise, Effect::None);
     });
 }
 

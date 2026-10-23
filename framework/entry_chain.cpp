@@ -61,11 +61,18 @@ const SiteInfo kSiteInfo[kSites] = {
     {"object map find", GameAddr::Id::ObjMapFind, {0x83, 0xEC, 0x08, 0x56, 0x8B, 0x74, 0x24, 0x14}, 8},
     {"object map insert", GameAddr::Id::ObjMapInsert, {0x53, 0x55, 0x56, 0x8B, 0x74, 0x24, 0x14}, 7},
     {"object map erase", GameAddr::Id::ObjMapErase, {0x8B, 0x44, 0x24, 0x04, 0x53}, 5},
+    // (no branch lands on 0x006FDFB1..0x006FDFB7, 0x006FE1F1..0x006FE1F6 or 0x006FDF41..0x006FDF44)
+    {"scene object map find", GameAddr::Id::RenMapFind, {0x83, 0xEC, 0x08, 0x56, 0x8B, 0x74, 0x24, 0x14}, 8},
+    {"scene object map insert", GameAddr::Id::RenMapInsert, {0x53, 0x55, 0x56, 0x8B, 0x74, 0x24, 0x14}, 7},
+    {"scene object map erase", GameAddr::Id::RenMapErase, {0x8B, 0x44, 0x24, 0x04, 0x53}, 5},
     {"light object removal", GameAddr::Id::LightObjectRemove, {0x53, 0x8B, 0x5C, 0x24, 0x08, 0x56, 0x57}, 7},
     {"lot AddLotObjectsToScene", GameAddr::Id::LotAddObjectsToScene, {0x83, 0xEC, 0x08, 0x57, 0x8B, 0xF9}, 6},
     // no branch lands on 0x006B4721..0x006B4724 or 0x006B4B11..0x006B4B15 (jmps.tsv / calls.tsv)
     {"light probe diffuse write", GameAddr::Id::ProbeDiffuseWrite, {0x83, 0xEC, 0x28, 0x53, 0x55}, 5},
     {"light probe specular write", GameAddr::Id::ProbeSpecularWrite, {0x81, 0xEC, 0xF4, 0x00, 0x00, 0x00}, 6},
+    // (the two setters' first instructions: function entries reached through the SpeedTree vtable)
+    {"tree level setter", GameAddr::Id::TreeSetLevel, {0x8B, 0x44, 0x24, 0x04, 0x56, 0x50}, 6},
+    {"tree custom rig setter", GameAddr::Id::TreeSetCustomRig, {0x8B, 0x44, 0x24, 0x04, 0x56, 0x8B, 0xF1}, 7},
 };
 static_assert(sizeof(kSiteInfo) / sizeof(kSiteInfo[0]) == static_cast<size_t>(Site::Count), "kSiteInfo must list every Site in order");
 

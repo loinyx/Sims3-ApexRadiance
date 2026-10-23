@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstdio>
 #include <format>
+#include <string>
 #include <unordered_map>
 
 namespace LotLoadAnalysis {
@@ -66,6 +67,89 @@ void Request(void* lot, bool detailed) noexcept {
     e.request = true; e.detailed = detailed; e.start = e.end = Tick(); e.thread = GetCurrentThreadId();
     Push(e);
 }
+// (2.15.3) Stage 20 of the lot load (0x00AEA680, case 20) waits until 0x00ADBBA0 (the lot lighting manager [renderer+0x23C])
+// says every level of its deque (+0x24..+0x40, 64 per block) is ready (0x006A5B50): a level with [lvl+0x81] == 0 is; else,
+// when [lvl+0x88] >= 0, both solver states [lvl+0x2A4] / [lvl+0x2FC] must be non-zero; then every room light of the level's
+// table (+0x234 buckets, +0x238 count, next node +0x80, the room light at node+0x10) must pass 0x0069F540(0), which, when it
+// does not let the room through on its level numbers ([lvl+0x88], [lvl+0x284], [room+0x18]), wants [room+0x104] != 4.
+// The note says which of these holds the lot.
+namespace {
+constexpr uint64_t kWaitNoteMs = 10000, kWaitRepeatMs = 30000;
+struct Waiting { uint64_t since = 0, noted = 0; };
+std::unordered_map<uint64_t, Waiting> g_waiting; // render thread (the load calls)
+SRWLOCK g_noteLock = SRWLOCK_INIT;
+std::string g_notes; // under g_noteLock; taken by Pump
+bool RoomBlocks(const unsigned char* room) {
+    const auto* lvl = *reinterpret_cast<const unsigned char* const*>(room);
+    const int32_t a = *reinterpret_cast<const int32_t*>(lvl + 0x88), b = *reinterpret_cast<const int32_t*>(lvl + 0x284);
+    const bool dl = room[0x18] != 0;
+    if (a > b || (dl && a < 0) || (a < b && !dl)) return false;
+    return *reinterpret_cast<const int32_t*>(room + 0x104) == 4;
+}
+std::string WaitText(const unsigned char* mgr) {
+    std::string s;
+    const auto d = [&](uint32_t off) { return *reinterpret_cast<const uintptr_t*>(mgr + off); };
+    const intptr_t count = ((intptr_t(d(0x40)) - intptr_t(d(0x30))) >> 2) * 64 + ((intptr_t(d(0x34)) - intptr_t(d(0x38))) >> 2) +
+                           ((intptr_t(d(0x2C)) - intptr_t(d(0x24))) >> 2) - 64;
+    if (count <= 0 || count > 64) return std::format("{} levels", count);
+    const auto* blocks = reinterpret_cast<const uintptr_t*>(d(0x30));
+    const intptr_t first = (intptr_t(d(0x24)) - intptr_t(d(0x28))) >> 2;
+    for (intptr_t i = 0; i < count; i++) {
+        const intptr_t k = first + i;
+        const auto* lvl = reinterpret_cast<const unsigned char*>(reinterpret_cast<const uintptr_t*>(blocks[k >> 6])[k & 63]);
+        if (!lvl) continue;
+        const int32_t l88 = *reinterpret_cast<const int32_t*>(lvl + 0x88);
+        s += std::format("{}level {:08X}: lit {}, step {}/{}, solvers {}/{}", s.empty() ? "" : "; ", reinterpret_cast<uintptr_t>(lvl), lvl[0x81],
+                         l88, *reinterpret_cast<const int32_t*>(lvl + 0x284), *reinterpret_cast<const int32_t*>(lvl + 0x2A4),
+                         *reinterpret_cast<const int32_t*>(lvl + 0x2FC));
+        if (!lvl[0x81]) continue;
+        const auto* buckets = *reinterpret_cast<const uintptr_t* const*>(lvl + 0x234);
+        const uint32_t nb = *reinterpret_cast<const uint32_t*>(lvl + 0x238);
+        int rooms = 0, blocking = 0;
+        std::string which;
+        for (uint32_t b = 0; buckets && b < nb && b < 4096; b++)
+            for (auto node = reinterpret_cast<const unsigned char*>(buckets[b]); node && rooms < 4096;
+                 node = *reinterpret_cast<const unsigned char* const*>(node + 0x80)) {
+                rooms++;
+                const auto* room = *reinterpret_cast<const unsigned char* const*>(node + 0x10);
+                if (room && RoomBlocks(room) && ++blocking <= 4) which += std::format(" {:08X}", reinterpret_cast<uintptr_t>(room));
+            }
+        s += std::format(", rooms {}, waiting in state 4: {}{}", rooms, blocking, which);
+    }
+    return s;
+}
+void FillWaitText(const unsigned char* mgr, std::string* out) { *out = mgr ? WaitText(mgr) : std::string("no lighting manager"); }
+// (no object to unwind in a function with __try: the text is built in FillWaitText)
+bool TryWaitText(const void* renderer, std::string* out) {
+    __try {
+        FillWaitText(*reinterpret_cast<const unsigned char* const*>(static_cast<const unsigned char*>(renderer) + 0x23C), out);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+}
+void NoteWait(void* renderer, const State& after) noexcept {
+    if (!Supported() || !renderer || !after.valid) return;
+    if (after.stage != 20 || after.done || after.failed) {
+        if (!g_waiting.empty()) g_waiting.erase(after.lot);
+        return;
+    }
+    const uint64_t now = GetTickCount64();
+    try {
+        Waiting& w = g_waiting[after.lot];
+        if (!w.since) w.since = now;
+        if (now - w.since < kWaitNoteMs || (w.noted && now - w.noted < kWaitRepeatMs)) return;
+        w.noted = now;
+        if (g_waiting.size() > 256) g_waiting.clear();
+        std::string text;
+        if (!TryWaitText(renderer, &text)) text += " (unreadable)";
+        AcquireSRWLockExclusive(&g_noteLock);
+        if (g_notes.size() < 16384) g_notes += std::format("[LotLoadAnalysis] Lot {:016X} waits in stage 20 (lighting) for {:.0f} s: {}\n", after.lot, (now - w.since) / 1000.0, text);
+        ReleaseSRWLockExclusive(&g_noteLock);
+    } catch (...) {
+    }
+}
 void Sample(const State& before, const State& after, uint64_t started, uint64_t ended) noexcept {
     if (!before.valid || !after.valid || before.lot != after.lot || ended < started) return;
     Push({before, after, started, ended, GetCurrentThreadId(), false, false});
@@ -84,6 +168,18 @@ void Pump() {
     static uint64_t lastDropped = 0;
     const auto lost = dropped.load();
     if (lost != lastDropped) { LOG_WARNING(std::format("[LotLoadAnalysis] {} events lost in total; request-to-done intervals may be incomplete", lost)); lastDropped=lost; }
+    {
+        std::string notes;
+        AcquireSRWLockExclusive(&g_noteLock);
+        notes.swap(g_notes);
+        ReleaseSRWLockExclusive(&g_noteLock);
+        for (size_t at = 0; at < notes.size();) {
+            const size_t nl = notes.find('\n', at);
+            LOG_INFO(notes.substr(at, nl == std::string::npos ? std::string::npos : nl - at));
+            if (nl == std::string::npos) break;
+            at = nl + 1;
+        }
+    }
     std::array<Event, 512> batch;
     size_t count = 0;
     AcquireSRWLockExclusive(&lock);

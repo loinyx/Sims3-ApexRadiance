@@ -9,7 +9,7 @@ own pages (see [See also](#see-also)). Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released in 1.0.0. Subdued daytime response on snow on objects and *Ground brightness* on the squared terrain variant: Released in 2.6.0. The melting-snow lot pass, the daytime lamp term on snowy lots, the wet world pass left to the game in snow and the game's own snow on objects in full daylight: Released in 2.7.0 |
+| Availability | Released in 1.0.0. Subdued daytime response on snow on objects and *Ground brightness* on the squared terrain variant: Released in 2.6.0. The melting-snow lot pass, the daytime lamp term on snowy lots, the wet world pass left to the game in snow and the game's own snow on objects in full daylight: Released in 2.7.0. The room mask and lamp shade on snowy lots, and the indoor light on the ground on the snowy lot passes: Released in 2.15.3 |
 | Default | On (with Night Lighting and *Street lamps light lots*) |
 | Menu | No snow-specific switch; World > Water & Snow > Snow holds *Sidewalk visibility*. Uses Lighting > Ground > Ground & Lots > Game fixes (*Street lamps light lots*, *Smooth ground light*), Lighting > Ground > Ground intensity (*Ground brightness*) and Lighting > Objects > Objects > Game fixes (*Fences and stairs catch light*, *Fence brightness*) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -127,6 +127,17 @@ snow, and in snow the wet world terrain pass is left to the game.
     max_pp   r0.xyz, r0, r7
     ```
   - patched output identity: C61F8B55/1940.
+- The masked copy (room mask and lamp shade, [lot-light-pass](lot-light-pass.md#lamp-shade-on-lot-ground-groundshadow))
+  takes the mask into a temp the game's shader does not use (its highest + 1, at least r8). It used r6, which the snowy
+  lot shader uses, so the copy was always refused: snowy lots drew with no room mask or lamp shade while the world grass
+  beside them took the shade, a step at the lot border at night in winter, and lamp light passed fence openings
+  differently on snow and on grass.
+- The patch lives in `ShaderPatches::PatchLotTerrainMax` (checked by `tools/floor_shade_check` over the precomp's
+  snowy, rug-cut and melting-snow shaders). With *Indoor light adds to the ground* the masked copy also takes the indoor
+  light in the lot map's alpha: right after the map's texld `s = sat(a c202.x / max(lum(map), 1/255))`, before the max
+  `ex = r0 s`, `r0 -= ex` and the terrain weighted by `sat((1 - a) 255)`, after the shade `r0 += ex`
+  ([lot-light-pass](lot-light-pass.md#indoor-light-on-the-ground)); c202.x is set per draw (0 while the option is
+  inactive: the pixels of the masked copy exactly), defs in c203 / c204.
 - `DrawLotSnow`: the terrain source is the world atlas when ready. The VS computes the UV as
   `(world.xz - c16.xz) * c15.xy + c15.zw`, so `c15` becomes `(a.x, a.y, a.z + c16.x a.x, a.w + c16.z a.y)` for the draw.
   Without the atlas: the home chunk map at key (`c16.x`, `c16.z`) (smoothed if ready), else `g_lotMissing++` and the game

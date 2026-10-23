@@ -77,6 +77,11 @@ real game session, driver memory attribution and an FPS gain remain unverified.
 - GPU cost at 1080p, 1440p and 4K.
 - Behaviour with the game's own Edge Smoothing on, beyond the menus-tinted note.
 - Whether the game ever ends more than one scene per frame with the back buffer bound.
+- Shared scene copy (`0b2db2f`, [architecture.md](../architecture.md#43-post-scene-chain-and-the-intz-depth-share)):
+  Ambient Occlusion, Edge Smoothing, Depth Blur and Picture on together and in every combination, at 3840x2160,
+  through alt-tab and a resolution change. **Expected:** the same image as with one copy each, one `[SceneCopy] Shared
+  copy of the picture created` line at start and after each reset, no `A copy of WxH was asked` warning, and about 100 MB less video
+  memory with all four on. Not yet checked in game.
 
 
 ## Current release evidence

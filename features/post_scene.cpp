@@ -283,10 +283,7 @@ void OnGameDraw(D3D9Hooks::DeviceContext& ctx) {
     // A depth test that passes everything with no depth write uses no depth: neither scene nor the end of it (06/10: the
     // game's ~137 glass passes of the UI panels, a back-buffer copy drawn back with ZFUNC ALWAYS, counted as scene draws
     // after the UI had started; at angles with few scene draws they made up the count, and the effects ran over the UI)
-    if (z != D3DZB_FALSE && !ctx.ZWriteEnable()) {
-        DWORD func = D3DCMP_LESSEQUAL;
-        if (SUCCEEDED(dev->GetRenderState(D3DRS_ZFUNC, &func)) && func == D3DCMP_ALWAYS) return;
-    }
+    if (z != D3DZB_FALSE && !ctx.ZWriteEnable() && ctx.ZFunc() == D3DCMP_ALWAYS) return;
     if (z != D3DZB_FALSE) {
         if (g_rejectedBoundary && ctx.ZWriteEnable() && SceneDepthReady(dev)) g_rejectedBoundary = false; // real scene resumed
         g_sceneDraws++;

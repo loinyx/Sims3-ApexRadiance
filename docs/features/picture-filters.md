@@ -16,7 +16,7 @@ at any time. In the menu the **Color > Overview** tab owns the *Picture* master 
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (present in the first version in this repository). Filters tab and LUT files: Released in 2.7.0 |
+| Availability | Released in 2.1.0 or earlier (present in the first version in this repository). Filters tab and LUT files: Released in 2.7.0. The frame copy shared with the other screen passes: Released in 2.15.3 |
 | Default | Off; every filter off |
 | Menu | Image > Color (tabs Overview, Basic, Tones, Color, Detail, Filters, LUTs); *Smooth gradients* on the Image > Banding Fix page; Overview > Image > Picture |
 | Configuration | `[qol.picture]` and `[qol.picture.filters]` in `ApexRadiance.toml`; compare key `[ui] picture_compare_key`; LUT files in `Documents\Electronic Arts\The Sims 3\Apex Radiance\LUTs\` |
@@ -279,7 +279,10 @@ After each settings change the next 3 passes read the constants and bound shader
 `[Picture] Pass check: ...` when another mod changed them on the way.
 
 **Resources** (`InitResources`, `D3DPOOL_DEFAULT` render targets in the back buffer's format, normally
-`D3DFMT_A8R8G8B8`): `frameTex`, `sceneTex` (back-buffer size), `chainTex[0..2]` (ceil halvings); `adaptTex[0..1]` (1x1
+`D3DFMT_A8R8G8B8`): `frameTex` (back-buffer size; copied and read inside the final pass only, so it is the full-resolution
+copy shared with Ambient Occlusion, Edge Smoothing and Depth Blur, `SceneCopy`,
+[architecture.md](../architecture.md#43-post-scene-chain-and-the-intz-depth-share)), `sceneTex` (back-buffer size,
+Picture's own: it keeps the finished scene from the end of the scene until the final pass), `chainTex[0..2]` (ceil halvings); `adaptTex[0..1]` (1x1
 `D3DFMT_A16B16G16R16F`, optional: without them Auto exposure does nothing); `depthTex` (R32F copy of the scene depth,
 created while Emphasize asks for it); `lutTex` (`D3DPOOL_MANAGED` A8R8G8B8, decoded with WIC). Shaders
 `PicturePS` ("picture.hlsl"), `DepthCopyPS` and `AdaptPS`, ps_3_0, `D3DCOMPILE_OPTIMIZATION_LEVEL3`, compiled at

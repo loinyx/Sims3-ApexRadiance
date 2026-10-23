@@ -150,14 +150,29 @@ std::mutex g_shapeLock;
 std::atomic<uint32_t> g_layerClasses{0}, g_objectClasses{0};
 
 // ---- statistics ----
+// (2.15.3) A 64-bit atomic add is a lock cmpxchg8b loop on 32-bit x86, and a lookup made up to three of them (150 to 180
+// thousand lookups in a room-solve frame): each thread now counts in its own slots and adds them to the shared totals
+// every kFlushEvery counts. The totals (status text only) lag by at most that many per thread.
+constexpr uint32_t kFlushEvery = 256;
+constexpr int kCounters = 13;
+thread_local uint32_t t_counts[kCounters] = {};
 struct Counter {
+    int slot;
     std::atomic<uint64_t> v{0};
-    void Add(uint64_t n = 1) { v.fetch_add(n, std::memory_order_relaxed); }
+    explicit Counter(int s) : slot(s) {}
+    void Add() {
+        uint32_t& c = t_counts[slot];
+        if (++c >= kFlushEvery) {
+            v.fetch_add(c, std::memory_order_relaxed);
+            c = 0;
+        }
+    }
     uint64_t Get() const { return v.load(std::memory_order_relaxed); }
 };
-Counter c_lookups, c_hits, c_walks, c_passed, c_notFound, c_stored, c_notStored, c_expired, c_rejected, c_verified, c_mismatches, c_inconclusive, c_restarts;
+Counter c_lookups{0}, c_hits{1}, c_walks{2}, c_passed{3}, c_notFound{4}, c_stored{5}, c_notStored{6}, c_expired{7}, c_rejected{8},
+    c_verified{9}, c_mismatches{10}, c_inconclusive{11}, c_restarts{12};
 std::atomic<uint64_t> g_hitTicks{0}, g_walkTicks{0}; // development build only
-std::atomic<uint64_t> g_hitSerial{0};
+std::atomic<uint32_t> g_hitSerial{0}; // 32-bit: lock xadd (a wrap only checks the first answers again)
 double g_qpcMs = 0.0;
 std::atomic<int> g_verifyEvery{64};
 std::atomic<uint64_t> g_verifyAllUntil{0};
@@ -309,9 +324,15 @@ bool Build(uint32_t mgr, uint32_t obj, Entry& e) {
 bool Find(uint32_t mgr, uint32_t lo, uint32_t hi, uint32_t gen, Entry& out) {
     // The caller still validates every remembered parent/child and ID against the live tree.
     // Consecutive lookups of one lot need not acquire the shared table lock again.
-    static thread_local Entry last{};
-    static thread_local uint32_t lastGen=0;
-    if(lastGen==gen&&last.mgr==mgr&&last.idLo==lo&&last.idHi==hi&&GetTickCount()-last.tick<=kMaxAgeMs){out=last;return true;}
+    // (2.15.3) 16 recent answers per thread (was the last one only): a room solve alternates between a few owners, and
+    // each miss here took the shared SRW lock. Same answers as the shared table (the caller validates every one).
+    struct Recent {
+        Entry e{};
+        uint32_t gen = 0;
+    };
+    static thread_local Recent recent[16];
+    Recent& last = recent[Hash(mgr, lo, hi) & 15u];
+    if(last.gen==gen&&last.e.mgr==mgr&&last.e.idLo==lo&&last.e.idHi==hi&&GetTickCount()-last.e.tick<=kMaxAgeMs){out=last.e;return true;}
     bool found = false;
     AcquireSRWLockShared(&g_lock);
     if (g_table && g_stampGen == gen) {
@@ -327,7 +348,7 @@ bool Find(uint32_t mgr, uint32_t lo, uint32_t hi, uint32_t gen, Entry& out) {
         }
     }
     ReleaseSRWLockShared(&g_lock);
-    if(found){last=out;lastGen=gen;}
+    if(found){last.e=out;last.gen=gen;}
     return found;
 }
 
@@ -374,12 +395,12 @@ void Restart() {
 }
 
 bool CheckThisOne() {
-    const uint64_t n = g_hitSerial.fetch_add(1, std::memory_order_relaxed);
+    const uint32_t n = g_hitSerial.fetch_add(1, std::memory_order_relaxed);
     if (n < kFirstChecks) return true;
     const auto until=g_verifyAllUntil.load(std::memory_order_relaxed);
     if (until&&GetTickCount64()<until) return true;
     const int every = g_verifyEvery.load(std::memory_order_relaxed);
-    return every > 0 && n % static_cast<uint64_t>(every) == 0;
+    return every > 0 && n % static_cast<uint32_t>(every) == 0;
 }
 
 void RecordMismatch(uint32_t mgr, uint32_t lo, uint32_t hi, const Entry& e, uint32_t game) {

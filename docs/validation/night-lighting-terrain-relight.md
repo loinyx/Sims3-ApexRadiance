@@ -85,3 +85,6 @@ Lamp changes (night and Build-mode day preview; stationary and moving camera):
 - Interaction with the official Split-Level Lighting Fix: inferred from the decompile, not tested in game
   ([level light share](../features/night-lighting/level-light-share.md)).
 - Winter variants, unverified lot shader variants and DXVK.
+- Lamps the game switches on the load screen (`8172a29`): load a save at dusk or night with lamps on a timer.
+  **Expected:** no lot's rooms solve at the lamp edit budget during or right after the load (no run of 36 ms frames),
+  while a lamp switched by the player after the world is live still relights at once.

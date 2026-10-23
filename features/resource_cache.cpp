@@ -114,6 +114,10 @@
 //   the order inside one package can differ, as it does in the game between the key-set walk and the index walk), every
 //   other package is asked for real. A read-only package's list is captured from out after the real call, and stored
 //   only when it could answer for sure (key set present or file open before and after).
+//   (2.15.3) A writable package of a counted class (write epochs above: every writer of its index is hooked) is kept the
+//   same way with its write epoch: answered from memory while the epoch is the same and no counted write is in progress,
+//   stored only when no counted write happened during the real call (its list is what its index holds; the same walk, so
+//   the same order). In a CPU sample the 22 writable packages' walks were 1.2% of the render thread.
 //
 // Part of Apex Radiance. Credits: @loinyx
 
@@ -125,6 +129,7 @@
 #include "entry_chain.h"
 #include "game_addresses.h"
 #include "memory_patch.h"
+#include "perf_toggles.h"
 #include "slot_chain.h"
 #include "imgui.h"
 #include <windows.h>
@@ -136,6 +141,7 @@
 #include <cstring>
 #include <format>
 #include <iterator>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
@@ -311,6 +317,14 @@ bool IsCountedVtable(uint32_t vt) {
     for (int c = 0; c < kClsCount; c++)
         if (g_clsVtable[c] == vt && g_clsCounted[c].load(std::memory_order_acquire)) return true;
     return false;
+}
+
+// (2.15.3) One database's write epoch when no counted write is in progress and none happens while it is read (seqlock)
+bool StableEpoch(uint32_t db, uint32_t& seq, uint32_t& epoch) {
+    seq = g_writeSeq.load(std::memory_order_seq_cst);
+    if (g_writeBusy.load(std::memory_order_seq_cst) != 0) return false;
+    epoch = g_epoch[Bucket(db)].load(std::memory_order_acquire);
+    return g_writeSeq.load(std::memory_order_seq_cst) == seq;
 }
 
 // Snapshot of the list: begin, size, fingerprint, the non-read-only packages. False when unreadable.
@@ -1308,10 +1322,15 @@ constexpr size_t kKlMaxKeys = 1u << 18;    // keys kept in total (4 MB); more: e
 constexpr size_t kKlMaxPerList = 1u << 16; // longer lists are not kept
 constexpr uint32_t kKlMaxAgeMs = 60000;
 
+// (2.15.3) The keys are shared, read only: a lookup took a copy of each package's list under the lock (about 207 packages a
+// call, one allocation each; 2 ms a call on average, up to 4 ms, on the render thread). It now takes a reference.
+using KlKeys = std::shared_ptr<const std::vector<uint32_t>>;
 struct KlEntry {
     uint32_t tick = 0;
-    int32_t ret = 0;             // what the package's GetKeyList returned
-    std::vector<uint32_t> keys;  // 4 dwords per key, in the order it appended them
+    int32_t ret = 0; // what the package's GetKeyList returned
+    KlKeys keys;     // 4 dwords per key, in the order it appended them (never null once stored)
+    bool counted = false; // (2.15.3) a writable package of a counted class, valid while its write epoch is `epoch`
+    uint32_t epoch = 0;
 };
 std::unordered_map<uint64_t, KlEntry> g_kl; // guarded by g_klLock
 SRWLOCK g_klLock = SRWLOCK_INIT;
@@ -1321,35 +1340,38 @@ std::atomic<bool> g_klOn{false};
 std::atomic<bool> g_klSelfDisabled{false};
 uintptr_t g_typeFilterVt = 0, g_vecInsert = 0, g_sortUnique = 0; // set by StartKeyLists
 Counter c_klCalls, c_klCached, c_klPassed, c_klFromMem, c_klAsked, c_klStored, c_klNotStored, c_klVerified, c_klMismatches, c_klInconclusive;
+Counter c_klCountedFromMem; // (2.15.3) of c_klFromMem: writable packages of a counted class
 
 inline uint64_t KlKey(uint32_t db, uint32_t type) { return (static_cast<uint64_t>(db) << 32) | type; }
 
 // 07/10, players' Runtime Error: these run inside the game's GetKeyList on any thread. The locks are scoped and the copies
 // caught: a list that cannot be copied is simply not remembered / not found (the package is asked, as without the cache).
-bool KlFind(uint32_t db, uint32_t type, uint32_t gen, std::vector<uint32_t>& keys, int32_t& ret) {
+bool KlFind(uint32_t db, uint32_t type, uint32_t gen, KlKeys& keys, int32_t& ret, const uint32_t* epoch = nullptr) {
+    keys.reset();
     try {
         ApexUtil::SrwShared srw(g_klLock);
         if (g_klGen == gen) {
             const auto it = g_kl.find(KlKey(db, type));
-            if (it != g_kl.end() && GetTickCount() - it->second.tick <= kKlMaxAgeMs) {
+            if (it != g_kl.end() && it->second.keys && GetTickCount() - it->second.tick <= kKlMaxAgeMs && it->second.counted == (epoch != nullptr) &&
+                (!epoch || it->second.epoch == *epoch)) {
                 keys = it->second.keys;
                 ret = it->second.ret;
                 return true;
             }
         }
     } catch (...) {
-        keys.clear();
+        keys.reset();
     }
     return false;
 }
 
-void KlStore(uint32_t db, uint32_t type, uint32_t gen, int32_t ret, const std::vector<uint32_t>& keys) {
+void KlStore(uint32_t db, uint32_t type, uint32_t gen, int32_t ret, const std::vector<uint32_t>& keys, const uint32_t* epoch = nullptr) {
     if (keys.size() / 4 > kKlMaxPerList) {
         c_klNotStored.Add();
         return;
     }
     try {
-        std::vector<uint32_t> copy = keys; // outside the lock; moved in below, so a failure never leaves a half-updated entry
+        KlKeys copy = std::make_shared<const std::vector<uint32_t>>(keys); // outside the lock; moved in below, so a failure never leaves a half-updated entry
         ApexUtil::SrwExclusive srw(g_klLock);
         if (g_gen.load() == gen && g_mutating.load() == 0) {
             if (g_klGen != gen || g_klKeyCount + keys.size() / 4 > kKlMaxKeys) {
@@ -1358,11 +1380,13 @@ void KlStore(uint32_t db, uint32_t type, uint32_t gen, int32_t ret, const std::v
                 g_klGen = gen;
             }
             KlEntry& e = g_kl[KlKey(db, type)]; // the only allocation under the lock: nothing changed yet if it throws
-            g_klKeyCount -= e.keys.size() / 4;
+            if (e.keys) g_klKeyCount -= e.keys->size() / 4;
             e.tick = GetTickCount();
             e.ret = ret;
             e.keys = std::move(copy);
-            g_klKeyCount += e.keys.size() / 4;
+            e.counted = epoch != nullptr;
+            e.epoch = epoch ? *epoch : 0;
+            g_klKeyCount += e.keys->size() / 4;
             c_klStored.Add();
         } else {
             c_klNotStored.Add();
@@ -1464,7 +1488,8 @@ uint32_t ReadU32(uintptr_t a) {
 int32_t EmulateKeyList(uintptr_t begin, uintptr_t end, uint8_t* out, void* filter, uint32_t type, KeyListNote& note) {
     const uint32_t gen = g_gen.load(std::memory_order_acquire);
     const bool verify = ShouldVerify(t_klVerifyCount);
-    std::vector<uint32_t> cached, got; // per call (a database call never re-enters GetKeyList, but nothing depends on it)
+    KlKeys cached;
+    std::vector<uint32_t> got; // per call (a database call never re-enters GetKeyList, but nothing depends on it)
     int32_t count = 0;
     for (uintptr_t p = begin; p != end; p += 8) {
         void* db = *reinterpret_cast<void* const*>(p);
@@ -1472,14 +1497,49 @@ int32_t EmulateKeyList(uintptr_t begin, uintptr_t end, uint8_t* out, void* filte
         const DbKeyListFn fn = reinterpret_cast<DbKeyListFn>(vt[0x30 / 4]);
         const uint32_t dbv = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(db));
         if (reinterpret_cast<uintptr_t>(vt) != g_readOnlyVtable) {
-            count += fn(db, nullptr, out, filter);
+            // (2.15.3) a writable package of a counted class: its list with its write epoch (see the header)
+            uint32_t seq = 0, epoch = 0;
+            const bool countedDb = PerfToggles::KeyListCountedPackages.load(std::memory_order_relaxed) && EpochsUsable() &&
+                                   IsCountedVtable(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(vt))) && StableEpoch(dbv, seq, epoch);
+            if (!countedDb) {
+                count += fn(db, nullptr, out, filter);
+                c_klAsked.Add();
+                continue;
+            }
+            int32_t cachedRet = 0;
+            const bool have = KlFind(dbv, type, gen, cached, cachedRet, &epoch);
+            if (have && !verify) {
+                for (size_t k = 0; k + 4 <= cached->size(); k += 4) AppendKey(out, cached->data() + k);
+                count += cachedRet;
+                note.cachedPackages++;
+                c_klFromMem.Add();
+                c_klCountedFromMem.Add();
+                continue;
+            }
+            uintptr_t b0 = 0, e0 = 0;
+            const bool rangeOk = VecRange(out, b0, e0);
+            const int32_t r = fn(db, nullptr, out, filter);
+            count += r;
             c_klAsked.Add();
+            if (!rangeOk || !CapturedKeys(out, e0 - b0, got)) continue;
+            // no counted write during the call (the same epoch, nothing in progress, the sequence unmoved)
+            const bool quiet = g_writeBusy.load(std::memory_order_seq_cst) == 0 && g_writeSeq.load(std::memory_order_seq_cst) == seq &&
+                               g_epoch[Bucket(dbv)].load(std::memory_order_acquire) == epoch;
+            if (have) {
+                const bool settled = quiet && g_gen.load() == gen && g_mutating.load() == 0;
+                if (!settled) c_klInconclusive.Add();
+                else if (r == cachedRet && SameKeys(*cached, got)) c_klVerified.Add();
+                else KlMismatch(dbv, type, cached->size() / 4, got.size() / 4, cachedRet, r);
+                continue;
+            }
+            if (quiet && g_gen.load() == gen && g_mutating.load() == 0) KlStore(dbv, type, gen, r, got, &epoch);
+            else c_klNotStored.Add();
             continue;
         }
         int32_t cachedRet = 0;
         const bool have = KlFind(dbv, type, gen, cached, cachedRet);
         if (have && !verify) {
-            for (size_t k = 0; k + 4 <= cached.size(); k += 4) AppendKey(out, cached.data() + k);
+            for (size_t k = 0; k + 4 <= cached->size(); k += 4) AppendKey(out, cached->data() + k);
             count += cachedRet;
             note.cachedPackages++;
             c_klFromMem.Add();
@@ -1496,8 +1556,8 @@ int32_t EmulateKeyList(uintptr_t begin, uintptr_t end, uint8_t* out, void* filte
         if (have) {
             const bool settled = g_gen.load() == gen && g_mutating.load() == 0;
             if (!settled) c_klInconclusive.Add();
-            else if (r == cachedRet && SameKeys(cached, got)) c_klVerified.Add();
-            else KlMismatch(dbv, type, cached.size() / 4, got.size() / 4, cachedRet, r);
+            else if (r == cachedRet && SameKeys(*cached, got)) c_klVerified.Add();
+            else KlMismatch(dbv, type, cached->size() / 4, got.size() / 4, cachedRet, r);
             continue;
         }
         // an empty list may come from a failed open: kept only when the package answered from its key set or open index
@@ -1858,7 +1918,8 @@ std::string ReportLine() {
                                 s.epochRefreshes, s.verified, s.mismatches);
     if (KeyListsRunning() || s.klCalls)
         t += std::format("; file lists: calls {}, cached {} (passed {}), package lists from memory {}, asked {}, kept {} ({} keys), not kept {}, checks {} / {} different",
-                         s.klCalls, s.klCached, s.klPassed, s.klPackagesFromMemory, s.klPackagesAsked, s.klEntries, s.klKeys, s.klNotStored, s.klVerified, s.klMismatches);
+                         s.klCalls, s.klCached, s.klPassed, s.klPackagesFromMemory, s.klPackagesAsked, s.klEntries, s.klKeys, s.klNotStored, s.klVerified, s.klMismatches) +
+             std::format(" (writable packages of a counted class from memory {})", c_klCountedFromMem.Get());
     return t;
 }
 

@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [2.15.3](2.15.3.md): indoor light on the lot ground, shadows that take only the light they block, closed gates, real window sizes, no white trees.
 - [2.15.2](2.15.2.md): smooth camera moves at night again with Instant lamp lighting.
 - [2.15.1](2.15.1.md): Edit Town lots no longer stuck on Processing, a higher moon with no stripes on roads, Build mode at the hour of live mode, lamps on the ground, smooth dusk, screenshots to any folder.
 - [2.15.0](2.15.0.md): faster indoor light, furniture with its floor and room colour, less memory, Steam Deck support.
@@ -40,6 +41,7 @@ tests, publication) is in [workflow.md](../workflow.md#6-release).
 
 | Version | Published | Headline |
 |---|---|---|
+| [2.15.3](2.15.3.md) | 2026-10-23 | Indoor light on the lot ground, ground shadows that take only the light they block, closed gates, real window sizes, no white trees and no light from the story below in closed rooms |
 | [2.15.2](2.15.2.md) | 2026-10-22 | Smooth camera moves at night again with Instant lamp lighting |
 | [2.15.1](2.15.1.md) | 2026-10-22 | Edit Town lots no longer stuck on Processing, a higher moon with no stripes on roads, Build mode at the hour of live mode, lamps on the ground light the lawn, smooth dusk, screenshots to any folder |
 | [2.15.0](2.15.0.md) | 2026-10-21 | Faster indoor light, furniture with its floor and room colour, less memory, Steam Deck support |

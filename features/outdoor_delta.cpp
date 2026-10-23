@@ -19,6 +19,7 @@
 // Part of Apex Radiance. Credits: @loinyx
 
 #include "high_alloc.h"
+#include "fast_math.h"
 #include "outdoor_delta.h"
 #include "outdoor_delta_model.h"
 #include "rt_lamp_model.h"
@@ -97,6 +98,9 @@ struct LampRec {
     bool drawn = false;
     // (14/10) its parts are only in the record's drawn sum (CollapseDrawn): a delta that needs them solves in full
     bool collapsed = false;
+    // (2.15.3) a roofed room's lamp that story 0's room 0 took through an opening: its part of a ground texel is also in the
+    // texel's alpha (LevelLightShare::SetIndoorLightOnGround), which a delta does not compose again
+    bool exit = false;
     std::vector<Contrib, ApexMem::HighAllocator<Contrib>> parts; // by texel, ascending
 };
 // The collapsed drawn lamps' parts of a texel together (CollapseDrawn): the base Real-time outdoor lamps relights from is the
@@ -382,7 +386,7 @@ bool ReadLight(uintptr_t L, LightNow& r) {
             b += std::max(f0[k], 0.0f);
         }
         // the lit colour; a street lamp that is off may be evaluated with +0xF0 x +0x10 ("street lamps count as lit")
-        r.esum = a > 0.0f ? a : (r.type == 11 ? b * std::fabs(r.intensity) : 0.0f);
+        r.esum = a > 0.0f ? a : (r.type == 11 ? b * ApexMath::Fabs(r.intensity) : 0.0f);
         if (r.type == 5) {
             const float* S = reinterpret_cast<const float*>(p + 0x150);
             r.spill = std::max({1.0f, S[0], S[1], S[2]});
@@ -778,6 +782,14 @@ Delta ComputeDelta(BYTE* room, const RoomRead& rr, Record& r, const char*& why, 
             return Delta::Ok;
         }
     }
+    // (2.15.3) indoor light on the ground: a changed exit lamp also changes the ground texels' alpha (E), which the kept parts
+    // do not hold; the full solve writes both
+    if (LevelLightShare::IndoorLightOnGroundActive())
+        for (const Changed& c : changed)
+            if ((c.rec >= 0 && r.lamps[static_cast<size_t>(c.rec)].exit) || LevelLightShare::ExitLampOf(room, c.light)) {
+                why = "a lamp shining out of a room onto the ground changed";
+                return Delta::Fail;
+            }
     for (const Changed& c : changed)
         if (c.rec >= 0 && r.lamps[static_cast<size_t>(c.rec)].collapsed) {
             why = "a lamp the GPU draws keeps only its sum (Instant)";
@@ -794,7 +806,7 @@ Delta ComputeDelta(BYTE* room, const RoomRead& rr, Record& r, const char*& why, 
         const Changed& c = changed[ci];
         if (c.now.type == 3 || c.now.type == 4 || c.now.type == 5 || c.now.type == 11) {
             const float W = c.now.range * c.now.intensity * k.k2 / k.k1 * (c.now.type == 11 ? k.street : 1.0f);
-            bounds[ci] = std::isfinite(W) ? ReachBound2(std::fabs(W), c.now.esum, c.now.spill, rr.thr) : -1.0f;
+            bounds[ci] = ApexMath::IsFinite(W) ? ReachBound2(ApexMath::Fabs(W), c.now.esum, c.now.spill, rr.thr) : -1.0f;
         }
     }
     // 14/10: the replay runs in the lock step, in one piece (13 deltas of 44-73 ms and 193-252 ms ones in the logs): while a
@@ -808,7 +820,7 @@ Delta ComputeDelta(BYTE* room, const RoomRead& rr, Record& r, const char*& why, 
             for (const BatchRec& b : r.batches) {
                 if (b2 > 0.0f) {
                     const float dx = changed[ci].now.head[0] - b.c[0], dy = changed[ci].now.head[1] - b.c[1], dz = changed[ci].now.head[2] - b.c[2];
-                    const float d = std::sqrt(dx * dx + dy * dy + dz * dz) - b.r;
+                    const float d = ApexMath::Sqrt(dx * dx + dy * dy + dz * dz) - b.r;
                     if (d > 0.0f && d * d > b2) continue;
                 }
                 inReach++;
@@ -831,12 +843,12 @@ Delta ComputeDelta(BYTE* room, const RoomRead& rr, Record& r, const char*& why, 
             return Delta::Fail;
         }
         const float bound2 = bounds[ci];
-        if (bound2 > 0.0f) plan.reach = std::max(plan.reach, std::sqrt(bound2));
+        if (bound2 > 0.0f) plan.reach = std::max(plan.reach, ApexMath::Sqrt(bound2));
         if (bound2 == 0.0f) continue; // it adds nothing anywhere (switched off)
         for (const BatchRec& b : r.batches) {
             if (bound2 > 0.0f) {
                 const float dx = c.now.head[0] - b.c[0], dy = c.now.head[1] - b.c[1], dz = c.now.head[2] - b.c[2];
-                const float d = std::sqrt(dx * dx + dy * dy + dz * dz) - b.r;
+                const float d = ApexMath::Sqrt(dx * dx + dy * dy + dz * dz) - b.r;
                 if (d > 0.0f && d * d > bound2) {
                     plan.batchesSkipped++;
                     continue;
@@ -859,7 +871,7 @@ Delta ComputeDelta(BYTE* room, const RoomRead& rr, Record& r, const char*& why, 
                 }
                 Contrib p;
                 p.texel = b.first + i;
-                for (int q = 0; q < 3; q++) p.rgb[q] = std::isfinite(o.rgb[q]) ? o.rgb[q] : 0.0f;
+                for (int q = 0; q < 3; q++) p.rgb[q] = ApexMath::IsFinite(o.rgb[q]) ? o.rgb[q] : 0.0f;
                 const bool masked = (r.texels[p.texel].bits & kMasked) != 0;
                 p.vis = masked ? ToHalf(o.vis) : 0;
                 p.all = masked ? ToHalf(o.all) : 0;
@@ -889,6 +901,7 @@ Delta ComputeDelta(BYTE* room, const RoomRead& rr, Record& r, const char*& why, 
             l = &r.lamps.back();
             l->light = c.light;
             l->drawn = DrawnLight(c.light, r.lot);
+            l->exit = LevelLightShare::ExitLampOf(room, c.light);
         }
         // at its exact size (assign keeps a larger buffer, or grows by half), unless that moves it under 2 GB (ShrinkExact)
         if (WouldLeaveHigh(l->parts, fresh[ci].size())) l->parts.assign(fresh[ci].begin(), fresh[ci].end());
@@ -1513,6 +1526,7 @@ void SolveEnd(unsigned char* room) {
                 c.lampIdx[list[i].light] = static_cast<int>(r.lamps.size());
                 r.lamps.push_back(LampRec{});
                 r.lamps.back().drawn = DrawnLight(list[i].light, r.lot);
+                r.lamps.back().exit = LevelLightShare::ExitLampOf(room, list[i].light);
             }
             LampRec& l = r.lamps[static_cast<size_t>(c.lampIdx[list[i].light])];
             l.light = list[i].light;
@@ -1578,7 +1592,7 @@ void SolveEnd(unsigned char* room) {
             for (uint32_t i = 0; i < b.count; i++) {
                 const float* p = reinterpret_cast<const float*>(r.samples.data() + static_cast<size_t>(b.first + i) * 0x30);
                 const float dx = p[0] - b.c[0], dy = p[1] - b.c[1], dz = p[2] - b.c[2];
-                rad = std::max(rad, std::sqrt(dx * dx + dy * dy + dz * dz));
+                rad = std::max(rad, ApexMath::Sqrt(dx * dx + dy * dy + dz * dz));
             }
             b.r = rad + 0.01f;
         }
@@ -1837,6 +1851,7 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
                 r.lamps.push_back(LampRec{});
                 r.lamps.back().light = a.light;
                 r.lamps.back().drawn = DrawnLight(a.light, r.lot);
+                r.lamps.back().exit = LevelLightShare::ExitLampOf(room, a.light);
             }
             r.lamps[static_cast<size_t>(it->second)].parts.push_back(p);
         }

@@ -9,7 +9,7 @@ shadows. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0: *Buildings block lamp light on trees and objects* on rigs (trees, bushes, rig objects), indoor and outdoor lamps through openings on objects, a lamp through an arch on objects inside it, disabled lamps no longer lighting objects. Released in 2.12.3: the outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and the ground-light height gate. Released in 2.12.1: lighting corrections.  Released (present since 2.1.0, the first version in this repository). Daytime response of the per-pixel terms: Released in 2.6.0. Walls blocking per-pixel lamps outdoors, indoor objects lit by lamps of another story, furniture keeping its light until its room changes at a lamp switch, and the game's own lighting in full daylight: Released in 2.7.0 |
+| Availability | Released in 2.15.3: the reach law's lamp sum held under 1 by its brightest channel, loose outdoor objects (gates) at the fences' lamp scale, ceiling lamps of the story below kept off the furniture above. Released in 2.13.0: *Buildings block lamp light on trees and objects* on rigs (trees, bushes, rig objects), indoor and outdoor lamps through openings on objects, a lamp through an arch on objects inside it, disabled lamps no longer lighting objects. Released in 2.12.3: the outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and the ground-light height gate. Released in 2.12.1: lighting corrections.  Released (present since 2.1.0, the first version in this repository). Daytime response of the per-pixel terms: Released in 2.6.0. Walls blocking per-pixel lamps outdoors, indoor objects lit by lamps of another story, furniture keeping its light until its room changes at a lamp switch, and the game's own lighting in full daylight: Released in 2.7.0 |
 | Default | On (all switches), Brightness 75%, Seamless light brightness 75% (the Soft light style) |
 | Menu | Lighting > Objects > *Objects* card (its folded *Game fixes* holds the stairs, doors, windows, pieces, fences and indoor rows); *Realistic lamp reach* on Lighting > Overview |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -103,6 +103,9 @@ forcaLuzPorPixelNosObjetos)`. The *Fences and stairs catch light* rows of the sa
   still differ between pieces.
 - Shape B: whether c0/c4 is the sun or a fourth rig lamp is not verified; c4 is not treated as a lamp.
 - Only 8 lamps per draw, chosen at the object's translation; a very large object far from its origin can miss one.
+- An area light is treated as a point lamp with a facing: its distance and its facing are taken to its position, not
+  to the nearest point of its area as in the game's law. Roofs and water take the lamp rows without cones, so spots and
+  area lights light them all round.
 - Summer instanced shrubs and fences drawn with the 600-byte PS `kObjectRigPs` go to `DrawObjectRig` (moon-shadow HLSL)
   and get neither the ground light nor per-pixel lamps.
 - Not covered: OutdoorProp `C0C6E0FF` (and `2BE88B48`): 1 lamp (c1 -> c3) and the sun (c5 -> c4), `mad rA, sky x c8.x,
@@ -186,6 +189,12 @@ runs on more than one thread, so the test reads an immutable copy of the walls a
 publishes when they change; once the copy has been quiet for 1 s every rig gathers again (`RequestRigRefresh`). A wall
 within 0.5 m of the rig centre is the object's own (doors, windows, a hedge against a wall) and does not block. Status:
 *outdoor lamps behind buildings: tested N, left out N, dimmed N*.
+
+**Lamps under the room's floor** (2.15.3). The game lists a ceiling lamp of the story below on the story above, its light a
+few centimetres under that story's floor, so furniture of a closed room above glowed with the room below's light. A rig
+record of a lamp under the floor of the rig's own room, with no removed floor on the way
+(`LevelLightShare::LampUnderRoomFloor`, the room solve's test, [level-light-share.md](level-light-share.md#lamps-under-a-storys-floor)),
+is set to 0 and falls under the game's cut.
 
 **Indoor lamps through openings** (with *Indoor light through openings*, [level-light-share](level-light-share.md)):
 a roofed room's lamps of a roofed neighbour, taken through an opening between them, go through the game's per-light test
@@ -331,7 +340,8 @@ own: by day it reaches the screen only through the rig scaled or replaced per dr
 **Lamp list and selection.** `LotLightBridge::OnPresent` every 20 frames, when roofs, water or per-pixel lamps are on,
 runs `ReadEnumeratedLamps`: `FUN_006acf70(visitor)` (stdcall, visitor vtable[0] = thiscall `(visitor, Light*)`; prologue
 `E8 2B 36 00 00 8B 4C 24 04 51 68 40 CF 6A 00`) enumerates every light, and `g_allLamps` keeps those alive (`0x01`) and lit
-(`0x20`) that are street lamps (type `0xB`) or outdoor lamps (`flags & 0x04` and room 0), with head `+0x120`, radius
+(`0x20`) that are street lamps (type `0xB`) or outdoor lamps (`flags & 0x04` and room 0, any class: a lot's
+rectangle and disc area lights, types 9 and 10, included), with head `+0x120`, radius
 `clamp(1.2 sqrt(range), 2, 25)` (range `+0x130`) and colour `F0 x I x fade`. `SelectLamps(x, z, 40)` at the object's
 translation (`c[worldK..+2].w`) scores each lamp by horizontal distance minus radius, drops scores above 40 m, keeps the
 best 16 (memoised per position and lamp-list generation), and the draw uses the first 8. Unused blocks: position
@@ -345,7 +355,10 @@ lamps' light. The ground term is then multiplied by `sat(1 - (origin y - top) / 
 
 **Lamp cones (F8 10-57-41).** `ReadLamp` also keeps each lamp's cones (`LampCone`, beside `g_allLamps` in
 `g_allCones`; `SelectLamps` hands them out as `g_lampCone`, memo included): the game's cone laws, type 5 `0x006BC940`
-(two cones, scale `[0x011D11A0] = 5`, spill `+0x150`) and type 4 `0x006BDA10` (one cone, spill 0). `PickObjectLamps`
+(two cones, scale `[0x011D11A0] = 5`, spill `+0x150`) and type 4 `0x006BDA10` (one cone, spill 0). An area light
+(types 9 and 10) lights only the side it faces ([engine law](../../engine/light-objects-and-rigs.md)): its cone is its
+third axis `+0x180` normalised, with offset 0 and no spill, so its term is `sat(l . axis)`, the game's `sat(dir.z)` with
+the area's centre taken as its nearest point. `PickObjectLamps`
 passes the cone rows to the pixel shader, which evaluates `S + (1 - S) sat(max(t1, t2))` at each surface position.
 The surface normal still determines which face receives direct light. In valid direct-pixel mode, the directionless
 ground atlas contributes only to upward-facing surfaces, keeping vertical gate faces independent of ground color.
@@ -364,7 +377,8 @@ wall behind a story-2 balcony band and column stayed lit while the band and colu
 shared with `ReachShareImpl`):
 
 - per lamp `colour x Gain(w) x sat(N.l) / d^2 x min(1, r0^2 / d^2 x sat(1 - (d^2/R^2)^2)^2)`, then the cones, and the sum
-  held under 1 per channel (`mov_sat`), as the room map's `min(sum, 1)` texel; `w = range x intensity`, r0 and R as for the
+  held under 1 as the room map's `min(sum, 1)` texel, by its brightest channel: `v / max(1, max(v.r, v.g, v.b))`
+  (`AppendHueClamp`; until 2.15.2 per channel, which turned warm and coloured lamps white near their heads); `w = range x intensity`, r0 and R as for the
   walls (3.5 m and 15 m for w = 85, scaled by sqrt(w / 85) within 2 to 5 m and 6 to 20 m);
 - `Gain(w, entries) = 0.25 w x entries`: `k2 0.075 x w x 3.333` per entry of the outdoor room's light list, times the
   lamp's entries there (`LampReach::Entries`, read by `ReadLamp`): 2 for a lot lamp of story 0 (light `+0xD0` = 0; the game
@@ -380,7 +394,9 @@ shared with `ReachShareImpl`):
   wall draw read it, else `LampDay(night)`, 1 at night: a daytime 0 kept while no wall was drawn left these draws unlit,
   and until 2.12.2 the fallback 1 gave columns the night scale at dusk) x their gain as `WallLampScale` applies it (walls
   on, before full night gain x `LampDay(night)`; the native scale alone with walls off), times `forcaLuzPorPixelNosObjetos / 0.75`
-  (fences also `x forcaNasCercas / 0.75`). At the default sliders a column, a band or a window frame takes the light of the
+  (fences also `x forcaNasCercas / 0.75`). The walls' gain applies only to an object set in its wall (a window or door
+  frame, `ObjectLampPoint`); a loose object outdoors (a gate in a fence line) and fences take gain 1 (2.15.3: a wooden
+  gate took 30% of the light the same garden post gave the fence 0.7 m beside it). At the default sliders a column, a band or a window frame takes the light of the
   wall behind it; the two sliders act as trims. The ground terms (`cB.x`) are unchanged;
 - a shader without room for the two rows keeps the first law (status *first law kept*); with the option off, the first
   law's copies and constants are byte-identical to before (offline comparison with the previous source). Since 2.12.3

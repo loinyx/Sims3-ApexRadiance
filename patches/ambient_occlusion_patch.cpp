@@ -34,6 +34,7 @@
 #include "post_scene.h"
 #include "gpu_timing_policy.h"
 #include "world_session.h"
+#include "scene_copy.h"
 #include "shader_cache.h"
 #include "imgui.h"
 #include "ui/violet_theme.h"
@@ -586,10 +587,9 @@ void ReleaseResources() {
     SafeRelease(g.zTex);
     SafeRelease(g.aoASurf);
     SafeRelease(g.aoBSurf);
-    SafeRelease(g.colorSurf);
+    SceneCopy::Drop(&g.colorTex, &g.colorSurf);
     SafeRelease(g.aoA);
     SafeRelease(g.aoB);
-    SafeRelease(g.colorTex);
     for (int i = 0; i < State::kQ; i++) {
         SafeRelease(g.qDisjoint[i]);
         SafeRelease(g.qBegin[i]);
@@ -696,7 +696,8 @@ bool InitResources(IDirect3DDevice9* dev) {
         return SUCCEEDED(dev->CreateTexture(g.width, g.height, 1, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, tex, nullptr)) && *tex &&
                SUCCEEDED((*tex)->GetSurfaceLevel(0, surf)) && *surf;
     };
-    ok = ok && make(&g.aoA, &g.aoASurf, D3DFMT_G16R16F) && make(&g.aoB, &g.aoBSurf, D3DFMT_G16R16F) && make(&g.colorTex, &g.colorSurf, bd.Format);
+    ok = ok && make(&g.aoA, &g.aoASurf, D3DFMT_G16R16F) && make(&g.aoB, &g.aoBSurf, D3DFMT_G16R16F) &&
+         SceneCopy::Acquire(dev, g.width, g.height, bd.Format, &g.colorTex, &g.colorSurf); // (copied and read inside RunAo only)
     if (!ok) {
         ReleaseResources();
         g.status = "ERROR: not enough video memory for the shade textures";

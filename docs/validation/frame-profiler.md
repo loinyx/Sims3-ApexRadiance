@@ -54,6 +54,11 @@ None for the profiler itself. The analysis tools in `research\perf2\tools\` (out
 
 ## Open checks
 
+- The CPU line (`02f9234`): not yet seen in a saved report. Check on an SMT CPU that the logical processors and core
+  pairs match the system's topology and that the shared-core estimate is plausible for the counts listed.
+- The dispatch cost line and *D3D hooks (mod)* with the re-issued driver time kept apart (`24684ff`): with the Banding
+  Fix on, the callbacks' own cost drops by about the driver time the line now reports separately. Not yet compared in
+  a log.
 - The exact count logged with the current 40 targets (`Timing 38 of 38` is expected from the code, not observed).
 - Remote-call job keys (both PostRemoteMethodCall vtables): not yet seen in a report.
 - `kTargets` labels the lot impostor pump 0x00AD97E0 "render", but in the 13:19 report its two calls (563 ms) were booked

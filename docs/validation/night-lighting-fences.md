@@ -26,6 +26,8 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-23 | `40f351e` | `tools/floor_shade_check` (`run.ps1 -Precomp <Shaders_Win32.precomp>`) | 7,103 checks, 0 failures (the fence copy's mask read in front of the face). No harness covers the reach scale without the walls' gain or the gates in the lot shade | Offline, native D3D9 |
+| 2026-10-22 | `d625404` | None: `run_resource_checks.ps1` (which extracts `DrawInstanced`) was not re-run; no harness covers the lamp pick memo | Not run | not run in game yet |
 | 2026-10-13 | Release preparation tree for 2.12.3; final SHA in the release PR | Developer and public Release x86 builds: 0 errors, 0 warnings; `run_resource_checks.ps1` | Builds passed; resource paths 14,154 checks, 0 failures (extracted `DrawInstanced` 54, realistic reach on objects and fences 386). The captured fence shader suite (`run.ps1`) was not re-run | Fake D3D9 / x86 build |
 | 2026-10-12 | Release preparation tree; final SHA in PR | Public Release x86 build; Reconstructed fence shader fixture | Zero build warnings; Passed spatial/native selection, directional lamp composition and fallback checks; captured-scene gameplay is not reconstructed | Native D3D9 fixtures / x86 build |
 | 2026-10-04 | `92582b6` | Terrain lighting suite (policy, bench GPU, resource fixtures) | Passed (part of 2,017,393 GPU, policy and resource checks); Release x86 built with no errors or warnings | Native D3D9 |
@@ -49,6 +51,12 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
 
 ## Open checks
 
+- 2.15.3, *Realistic lamp reach* on: a fence, its gate and the ground beside a garden post. **Expected:** fence, gate and ground take the same light; no dark band under 1 m on a fence face turned to the lamp.
+- Fence lamp pick memo (`d625404`), development build at night: fences, stairs and railings near lamps while the camera
+  moves, a lamp switch and a lamp drag beside a fence. **Expected:** the same light as with `lamp_visibility_memo` off;
+  the roof status line's `fence lamp picks: N reused, M computed` with most picks reused while nothing changes; no
+  `Fence lamp pick memo: a kept pick differed` warning. `run_resource_checks.ps1` (the extracted `DrawInstanced`, which
+  now calls `PickFenceLamps`) to be re-run.
 - 2.12.3 public build, not yet tested in game: a balcony railing and an L-shaped band with a garden post below them, with *Realistic lamp reach* on and off. **Expected:** the band follows the light of the wall behind it; railing tops above the lamp heads take no ground light; a lamp under the balcony does not light the railing on it.
 - Exact release artifact: final SHA, build verification and unchanged visual behavior after cleanup
 - Version footer and unread-version indicator on the final release build; all 21 changelog language tables pass offline validation

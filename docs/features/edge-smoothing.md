@@ -9,7 +9,7 @@ menu stay perfectly sharp. Two methods are offered: **FXAA** (recommended, light
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (present in the first version in this repository). The wait for the drawn world (never on the main menu or load screens): Released in 2.7.0 |
+| Availability | Released in 2.1.0 or earlier (present in the first version in this repository). The wait for the drawn world (never on the main menu or load screens): Released in 2.7.0. The full-resolution colour copy shared with the other screen passes: Released in 2.15.3 |
 | Default | On for new configurations; method SMAA, quality High |
 | Menu | Image > Edge Smoothing; Overview > Image > Edge Smoothing |
 | Configuration | `[patches.EdgeSmoothing]` in `ApexRadiance.toml` |
@@ -138,7 +138,9 @@ can be longer than Ultra's reach (32 steps of 2 pixels per side).
    (`DepthShare::Request` while `depthEdges` is on and the game's MSAA is off), releases resources if MSAA appeared, and
    while not ready calls `InitResources` now and then every `kRetryFrames = 120` frames.
 3. `InitResources`: checks `MultiSampleType == D3DMULTISAMPLE_NONE`; creates `copyTex` (back-buffer size and format; the
-   game's back buffer is `D3DFMT_A8R8G8B8`), `edgesTex` and `blendTex` (back-buffer size, A8R8G8B8), the SMAA lookups,
+   game's back buffer is `D3DFMT_A8R8G8B8`; copied and read inside the pass only, so it is the full-resolution copy
+   shared with Ambient Occlusion, Depth Blur and Picture, `SceneCopy`,
+   [architecture.md](../architecture.md#43-post-scene-chain-and-the-intz-depth-share)), `edgesTex` and `blendTex` (back-buffer size, A8R8G8B8), the SMAA lookups,
    the optional R32F `depthLogTex`, and 4 sets of timestamp queries. Logs `[EdgeSmoothing] Resources ready (WxH)`.
 4. **Reset:** `OnPreReset` releases every resource and query (status "Recreating after a video change..."); `OnPostReset`
    retries at the next Present. Shader objects survive.

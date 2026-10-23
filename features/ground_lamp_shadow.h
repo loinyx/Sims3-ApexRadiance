@@ -5,12 +5,18 @@
 // outdoor lamps' stamp that reaches each texel past the outside walls:
 //   M = 1 - sum_i w_i (1 - v_i) / max(sum_i w_i, kOtherLight)  (= sum w v / sum w where the lamps light the ground),
 //   w_i = sat(0.4 x lum(colour x intensity x range) x cos / d^2) (the stamp's law, engine/terrain-and-light-bake.md),
-//   v_i = 0 when an outside wall stands between the lamp's head and the texel. 1 where no lamp reaches. POD and templates only, no game reads: built from copies (the walls copied from the room solves,
+//   v_i = 0 when an outside wall stands between the lamp's head and the texel. 1 where no lamp reaches.
+// (2.15.3) The sum runs over every bake lamp whose stamp covers the texel: the lamps tested against the walls and, with
+// v = 1, the others (ShadeJob::Init's `others`: past kMaxLamps or not over the lot), so a wall's shadow takes away only the
+// light of the lamps it blocks (F8: a fence's shadow on snow was darker than the snow no lamp of the lot reaches, as it
+// took the light of the lamps not listed too). A lamp weighs only inside its stamp's rectangle (the bake writes nothing
+// past it): its shadow ends where its light on the ground ends. POD and templates only, no game reads: built from copies (the walls copied from the room solves,
 // the bake lamp snapshot), so a read-only offline harness can test it, and it is built a slice at a time on the render
 // thread (ShadeJob::Step).
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <vector>
 #include "wall_openings.h"
 #include "foliage_canopy.h"
@@ -31,6 +37,7 @@ struct Lamp {
     float x, y, z; // the head, world
     float k;       // 0.4 x lum(colour x intensity x range): the stamp's weight numerator
     bool liftable = false; // a lot lamp the bake stamps from kLowLampLift when it lies on the ground (TerrainBakeRule::Liftable)
+    float rx0 = -1e30f, rz0 = -1e30f, rx1 = 1e30f, rz1 = 1e30f; // its stamp's rectangle, world xz (none: unbounded)
 };
 // Lot-local metres -> world: wx = m0 lx + m8 lz + tx, wz = m2 lx + m10 lz + tz (room 0's +0xF8 matrix); ground at ty
 struct Grid {
@@ -52,6 +59,10 @@ constexpr float kOtherLight = 0.05f; // the stamp weight under which a blocked l
 constexpr float kSoftAA = 0.75f / kTexelsPerMetre; // m: the half width an edge spans at least on the mask (1.5 texels)
 constexpr float kJoinEps = 0.02f;    // m: two walls' ends this close meet
 constexpr float kJoinCos = 0.996f;   // and they join (one run) when in line within about 5 degrees
+
+// (2.15.3) == static_cast<uint8_t>(std::lround(v)) for v in [0, 255], without the CRT call: v + 0.5 is exact in double and
+// the cast truncates it, as lround rounds a half away from zero (checked for every float of the range, tools/ground_shade_test)
+inline uint8_t ToByte(float v) { return static_cast<uint8_t>(static_cast<int>(static_cast<double>(v) + 0.5)); }
 
 inline void TexelWorld(const Grid& g, int i, int j, float& wx, float& wz) {
     const float lx = (static_cast<float>(i) + 0.5f) / kTexelsPerMetre, lz = (static_cast<float>(j) + 0.5f) / kTexelsPerMetre;
@@ -79,6 +90,8 @@ inline bool WorldTexel(const Grid& g, float wx, float wz, float& fi, float& fj) 
 // 1 up to kFloorGateFull from the lot's ground, 0 from kFloorGateNone (the stories above keep their own wall test, the floor
 // map's alpha). on = false: gate 0 everywhere (the floor as before). False (the floor as before) for a degenerate grid.
 constexpr float kFloorGateFull = 1.0f;  // m
+// Fences: a face reads the mask this far in front of it, along its normal (rows[10]; ShaderPatches PatchInstancedLamps)
+constexpr float kFenceShadeReach = 0.6f; // m
 constexpr float kFloorGateNone = 1.25f; // m
 inline bool FloorShadeRows(const Grid& g, float xzScale, bool on, float rows[12]) {
     for (int i = 0; i < 12; i++) rows[i] = 0.0f;
@@ -104,10 +117,11 @@ inline bool FloorShadeRows(const Grid& g, float xzScale, bool on, float rows[12]
 
 // The stamp's weight of a lamp at a ground point (x, groundY, z)
 inline float Weight(const Lamp& L, float x, float groundY, float z) {
+    if (x < L.rx0 || x > L.rx1 || z < L.rz0 || z > L.rz1) return 0.0f; // past its stamp
     const float h = std::max(TerrainBakeRule::StampHeight(L.y - groundY, L.liftable), kMinHead); // a lamp on the lawn: as the bake stamps it
     const float dx = L.x - x, dz = L.z - z;
     const float d2 = dx * dx + dz * dz + h * h;
-    const float cosv = h / std::sqrt(d2);
+    const float cosv = h / ApexMath::Sqrt(d2); // (2.15.3: the same bits as std::sqrt, fast_math.h, without the CRT call)
     return std::clamp(L.k * cosv / d2, 0.0f, 1.0f);
 }
 
@@ -115,7 +129,9 @@ inline float Weight(const Lamp& L, float x, float groundY, float z) {
 inline float Reach(const Lamp& L, float groundY) {
     const float h = std::max(TerrainBakeRule::StampHeight(L.y - groundY, L.liftable), kMinHead);
     if (!(L.k > 0.0f) || !std::isfinite(L.k)) return 0.0f;
-    return std::min(std::cbrt(L.k * h / kMinWeight), kMaxReach);
+    // no further than its stamp's farthest corner
+    const float fx = std::max(std::fabs(L.rx0 - L.x), std::fabs(L.rx1 - L.x)), fz = std::max(std::fabs(L.rz0 - L.z), std::fabs(L.rz1 - L.z));
+    return std::min({std::cbrt(L.k * h / kMinWeight), kMaxReach, std::sqrt(fx * fx + fz * fz)});
 }
 
 // The share of the head's light reaching the ground point (x, groundY, z) past an outside wall: 0 where the wall stands
@@ -129,13 +145,17 @@ inline float Reach(const Lamp& L, float groundY) {
 // run goes on) and up it over the wall's top, each at least kSoftAA wide at the ground point; the base stays hard (no light
 // under a wall). t, u: the crossing along the ray and along the wall.
 inline float SoftPass(const Lamp& L, float groundY, const Wall& w, const WallOpenings::Patch* patches, float t, float u, float rx, float rz, float sx, float sz) {
-    const float m = std::sqrt(sx * sx + sz * sz);
+    const float m = ApexMath::Sqrt(sx * sx + sz * sz);
     if (!(m > 1e-4f)) return 1.0f;
-    const float py = std::fabs(w.y0 - groundY) < 1.0f ? std::max(groundY, w.y0) : groundY;
+    const float py = ApexMath::Fabs(w.y0 - groundY) < 1.0f ? std::max(groundY, w.y0) : groundY;
     const float y = L.y + t * (py - L.y);
     if (!(y > w.y0 - 0.05f)) return 1.0f; // under its base: hard, as before
+    const float c = u * m;
+    // (2.15.3) past a joined end, or past a free end by the widest penumbra (the rim's half width is at most kMaxHalf): lit,
+    // as the tests below find, before the rim is worked out (most of a wall's shadow box lies beside its wedge)
+    if ((!w.free0 && c < 0.0f) || (!w.free1 && c > m) || (w.free0 && c <= -Penumbra::kMaxHalf) || (w.free1 && c >= m + Penumbra::kMaxHalf)) return 1.0f;
     const Penumbra::Rim rim = Penumbra::SlantOf(rx, py - L.y, rz, sz, -sx).At(Penumbra::Half(Penumbra::Radius(), t, kSoftAA));
-    const float c = u * m, h = rim.along;
+    const float h = rim.along;
     // (across a joint the run goes on: by the spot's width, which the wall beyond covers in full)
     const float a = w.free0 ? 0.0f : -2.0f * h, b = w.free1 ? m : m + 2.0f * h;
     if (c <= a - h || c >= b + h) return 1.0f; // past a free end's penumbra
@@ -145,7 +165,8 @@ inline float SoftPass(const Lamp& L, float groundY, const Wall& w, const WallOpe
     if (!(along > 0.0f)) return 1.0f;
     float inside;
     if (w.pn && patches && u >= 0.0f && u <= 1.0f) // its patches decide within the run (their tops, openings: wall_openings.h)
-        inside = WallOpenings::CrossPass(patches + w.p0, static_cast<int>(w.pn), m, std::min(w.y0, y) - 1.0f, w.y1, u, y, nullptr, rim);
+        inside = WallOpenings::CrossPass(patches + w.p0, static_cast<int>(w.pn), m, std::min(w.y0, y) - 1.0f, w.y1, u, y, nullptr, rim,
+                                         WallOpenings::AcrossOf(rx, py - L.y, rz, sx, sz));
     else
         inside = 1.0f - Penumbra::Cover((w.y1 - 0.02f) - y, rim.up); // the wall's top, softened
     return std::clamp(1.0f - along * (1.0f - inside), 0.0f, 1.0f);
@@ -155,12 +176,12 @@ inline float Pass(const Lamp& L, float x, float groundY, float z, const Wall& w,
     const float rx = x - ax, rz = z - az;
     const float sx = w.x1 - w.x0, sz = w.z1 - w.z0;
     const float den = rx * sz - rz * sx;
-    if (std::fabs(den) < 1e-9f) return 1.0f; // parallel
+    if (ApexMath::Fabs(den) < 1e-9f) return 1.0f; // parallel
     const float qx = w.x0 - ax, qz = w.z0 - az;
     const float t = (qx * sz - qz * sx) / den; // along head -> point
     const float u = (qx * rz - qz * rx) / den; // along the wall
     if (!(t > 0.0f && t < 1.0f)) return 1.0f;
-    const float len = std::sqrt(rx * rx + rz * rz);
+    const float len = ApexMath::Sqrt(rx * rx + rz * rz);
     if (t * len < kLampSkip) return 1.0f;
     if (soft) return SoftPass(L, groundY, w, patches, t, u, rx, rz, sx, sz);
     if (!(u >= 0.0f && u <= 1.0f)) return 1.0f;
@@ -170,8 +191,8 @@ inline float Pass(const Lamp& L, float x, float groundY, float z, const Wall& w,
     if (!w.pn || !patches) return 0.0f;
     // within the wall's band: its patches decide (the base margin above stays the wall's: a ray to the wall's own foot), with
     // the lamp's penumbra at the crossing (penumbra.h)
-    return WallOpenings::CrossPass(patches + w.p0, static_cast<int>(w.pn), std::sqrt(sx * sx + sz * sz), std::min(w.y0, y) - 1.0f, w.y1, u, y, nullptr,
-                                   WallOpenings::RimAt(t, rx, py - L.y, rz, sx, sz, Penumbra::Radius()));
+    return WallOpenings::CrossPass(patches + w.p0, static_cast<int>(w.pn), ApexMath::Sqrt(sx * sx + sz * sz), std::min(w.y0, y) - 1.0f, w.y1, u, y, nullptr,
+                                   WallOpenings::RimAt(t, rx, py - L.y, rz, sx, sz, Penumbra::Radius()), WallOpenings::AcrossOf(rx, py - L.y, rz, sx, sz));
 }
 inline bool Blocks(const Lamp& L, float x, float groundY, float z, const Wall& w, const WallOpenings::Patch* patches = nullptr) {
     return Pass(L, x, groundY, z, w, patches) <= 0.0f;
@@ -211,9 +232,10 @@ inline void MarkFreeEnds(std::vector<Wall>& walls) {
 class ShadeJob {
 public:
     void Init(const Grid& g, std::vector<Lamp> lamps, std::vector<Wall> walls, std::vector<WallOpenings::Patch> patches = {},
-              std::vector<Canopy::Ellipsoid> canopies = {}) {
+              std::vector<Canopy::Ellipsoid> canopies = {}, std::vector<Lamp> others = {}) {
         grid_ = g;
         lamps_ = std::move(lamps);
+        others_ = std::move(others);
         walls_ = std::move(walls);
         patches_ = std::move(patches);
         canopies_ = std::move(canopies);
@@ -226,6 +248,7 @@ public:
         num_.assign(n, 0.0f);
         den_.assign(n, 0.0f);
         vis_.assign(n, 1.0f);
+        wgt_.assign(n, 0.0f);
         out_.clear();
         lamp_ = 0;
         wall_ = 0;
@@ -239,6 +262,11 @@ public:
         while (!done_) {
             if (!more()) return false;
             if (lamp_ >= lamps_.size()) {
+                for (const Lamp& L : others_) { // lit everywhere they reach: in the total only
+                    reach_ = Reach(L, grid_.ty);
+                    Weights(L);
+                    Accumulate(false);
+                }
                 Finish();
                 done_ = true;
                 break;
@@ -247,7 +275,9 @@ public:
             if (phase_ == 0) { // the lamp's walls: the texels behind each one, within its reach
                 if (wall_ == 0) {
                     reach_ = Reach(L, grid_.ty);
-                    std::fill(vis_.begin(), vis_.end(), 1.0f);
+                    Weights(L);
+                    for (int j = box_[2]; j <= box_[3]; j++) // (2.15.3: only where it is read, box_)
+                        std::fill_n(vis_.begin() + static_cast<ptrdiff_t>(j) * grid_.w + box_[0], box_[1] - box_[0] + 1, 1.0f);
                 }
                 if (wall_ < walls_.size()) {
                     ShadowOf(L, walls_[wall_]);
@@ -267,7 +297,7 @@ public:
                 phase_ = 1;
                 continue;
             }
-            Accumulate(L);
+            Accumulate();
             lamp_++;
             wall_ = 0;
             phase_ = 0;
@@ -297,13 +327,14 @@ private:
                 if (!WorldTexel(grid_, px, pz, fi, fj)) return;
                 i0 = std::min(i0, fi), i1 = std::max(i1, fi), j0 = std::min(j0, fj), j1 = std::max(j1, fj);
             }
-        const int a0 = std::max(0, static_cast<int>(std::floor(i0))), a1 = std::min(grid_.w - 1, static_cast<int>(std::ceil(i1)));
-        const int b0 = std::max(0, static_cast<int>(std::floor(j0))), b1 = std::min(grid_.h - 1, static_cast<int>(std::ceil(j1)));
+        int a0 = std::max(0, static_cast<int>(std::floor(i0))), a1 = std::min(grid_.w - 1, static_cast<int>(std::ceil(i1)));
+        int b0 = std::max(0, static_cast<int>(std::floor(j0))), b1 = std::min(grid_.h - 1, static_cast<int>(std::ceil(j1)));
+        if (!Clip(a0, a1, b0, b1)) return;
         const float r2 = reach_ * reach_;
         for (int j = b0; j <= b1; j++)
             for (int i = a0; i <= a1; i++) {
                 const size_t at = static_cast<size_t>(j) * grid_.w + i;
-                if (!(vis_[at] > 0.0f)) continue; // already behind a wall
+                if (!Weighs(at) || !(vis_[at] > 0.0f)) continue; // already behind a wall, or out of the lamp's sum
                 float x, z;
                 TexelWorld(grid_, i, j, x, z);
                 const float dx = x - L.x, dz = z - L.z;
@@ -358,13 +389,14 @@ private:
             if (!WorldTexel(grid_, px[k], pz[k], fi, fj)) return;
             i0 = std::min(i0, fi), i1 = std::max(i1, fi), j0 = std::min(j0, fj), j1 = std::max(j1, fj);
         }
-        const int a0 = std::max(0, static_cast<int>(std::floor(i0)) - 1), a1 = std::min(grid_.w - 1, static_cast<int>(std::ceil(i1)) + 1);
-        const int b0 = std::max(0, static_cast<int>(std::floor(j0)) - 1), b1 = std::min(grid_.h - 1, static_cast<int>(std::ceil(j1)) + 1);
+        int a0 = std::max(0, static_cast<int>(std::floor(i0)) - 1), a1 = std::min(grid_.w - 1, static_cast<int>(std::ceil(i1)) + 1);
+        int b0 = std::max(0, static_cast<int>(std::floor(j0)) - 1), b1 = std::min(grid_.h - 1, static_cast<int>(std::ceil(j1)) + 1);
+        if (!Clip(a0, a1, b0, b1)) return; // (2.15.3) only the texels the lamp's light is summed over
         const float r2 = reach_ * reach_;
         for (int j = b0; j <= b1; j++)
             for (int i = a0; i <= a1; i++) {
                 const size_t at = static_cast<size_t>(j) * grid_.w + i;
-                if (!(vis_[at] > 0.0f)) continue;
+                if (!Weighs(at) || !(vis_[at] > 0.0f)) continue;
                 float x, z;
                 TexelWorld(grid_, i, j, x, z);
                 const float dx = x - L.x, dz = z - L.z;
@@ -375,7 +407,11 @@ private:
                 if (w.pn && p > 0.0f && CrossesLine(L, x, z, w)) through_++;
             }
     }
-    void Accumulate(const Lamp& L) {
+    // (2.15.3) The lamp's stamp weight per texel of the box its light is summed over (wgt_, box_; box_ empty when it adds
+    // nothing), made once per lamp: Accumulate reads it, and the wall and crown tests skip the texels it leaves out (their
+    // share past the walls is never read), so a build does fewer tests and gives the same bits
+    void Weights(const Lamp& L) {
+        box_[0] = box_[2] = 0, box_[1] = box_[3] = -1;
         if (!(reach_ > 0.0f)) return;
         float ci, cj;
         if (!WorldTexel(grid_, L.x, L.z, ci, cj)) return;
@@ -388,11 +424,24 @@ private:
             for (int i = a0; i <= a1; i++) {
                 float x, z;
                 TexelWorld(grid_, i, j, x, z);
-                const float wgt = Weight(L, x, grid_.ty, z);
-                if (!(wgt >= kMinWeight)) continue;
+                wgt_[static_cast<size_t>(j) * grid_.w + i] = Weight(L, x, grid_.ty, z);
+            }
+        box_[0] = a0, box_[1] = a1, box_[2] = b0, box_[3] = b1;
+    }
+    // The texels of [a0, a1] x [b0, b1] the lamp's light is summed over, clipped to box_; false when none
+    bool Clip(int& a0, int& a1, int& b0, int& b1) const {
+        a0 = std::max(a0, box_[0]), a1 = std::min(a1, box_[1]), b0 = std::max(b0, box_[2]), b1 = std::min(b1, box_[3]);
+        return a0 <= a1 && b0 <= b1;
+    }
+    bool Weighs(size_t at) const { return wgt_[at] >= kMinWeight; }
+    void Accumulate(bool tested = true) {
+        for (int j = box_[2]; j <= box_[3]; j++)
+            for (int i = box_[0]; i <= box_[1]; i++) {
                 const size_t at = static_cast<size_t>(j) * grid_.w + i;
+                const float wgt = wgt_[at];
+                if (!(wgt >= kMinWeight)) continue;
                 den_[at] += wgt;
-                num_[at] += wgt * vis_[at];
+                num_[at] += tested ? wgt * vis_[at] : wgt;
             }
     }
     void Finish() {
@@ -402,30 +451,36 @@ private:
         // the pass's other light (the lot map also holds light that is not a bake lamp's) is not taken with it
         for (size_t i = 0; i < m.size(); i++) m[i] = std::clamp(1.0f - (den_[i] - num_[i]) / std::max(den_[i], kOtherLight), 0.0f, 1.0f);
         // soft edges: [1 2 1] along each axis, twice (a penumbra of about half a metre; the pass samples it bilinearly)
+        // (2.15.3: by rows, the edges apart, so the loops vectorise; each texel takes the same sum as before)
+        const auto blur = [](float a, float b, float c) { return (a + 2.0f * b + c) * 0.25f; };
         for (int pass = 0; pass < 2; pass++) {
-            for (int j = 0; j < H; j++)
-                for (int i = 0; i < W; i++) {
-                    const float a = m[static_cast<size_t>(j) * W + std::max(i - 1, 0)], b = m[static_cast<size_t>(j) * W + i], c = m[static_cast<size_t>(j) * W + std::min(i + 1, W - 1)];
-                    t[static_cast<size_t>(j) * W + i] = (a + 2.0f * b + c) * 0.25f;
-                }
-            for (int j = 0; j < H; j++)
-                for (int i = 0; i < W; i++) {
-                    const float a = t[static_cast<size_t>(std::max(j - 1, 0)) * W + i], b = t[static_cast<size_t>(j) * W + i], c = t[static_cast<size_t>(std::min(j + 1, H - 1)) * W + i];
-                    m[static_cast<size_t>(j) * W + i] = (a + 2.0f * b + c) * 0.25f;
-                }
+            for (int j = 0; j < H; j++) {
+                const float* r = &m[static_cast<size_t>(j) * W];
+                float* o = &t[static_cast<size_t>(j) * W];
+                o[0] = blur(r[0], r[0], r[std::min(1, W - 1)]);
+                for (int i = 1; i < W - 1; i++) o[i] = blur(r[i - 1], r[i], r[i + 1]);
+                if (W > 1) o[W - 1] = blur(r[W - 2], r[W - 1], r[W - 1]);
+            }
+            for (int j = 0; j < H; j++) {
+                const float *a = &t[static_cast<size_t>(std::max(j - 1, 0)) * W], *b = &t[static_cast<size_t>(j) * W], *c = &t[static_cast<size_t>(std::min(j + 1, H - 1)) * W];
+                float* o = &m[static_cast<size_t>(j) * W];
+                for (int i = 0; i < W; i++) o[i] = blur(a[i], b[i], c[i]);
+            }
         }
         out_.resize(m.size());
-        for (size_t i = 0; i < m.size(); i++) out_[i] = static_cast<uint8_t>(std::lround(std::clamp(m[i], 0.0f, 1.0f) * 255.0f));
+        for (size_t i = 0; i < m.size(); i++) out_[i] = ToByte(std::clamp(m[i], 0.0f, 1.0f) * 255.0f);
     }
 
     Grid grid_;
-    std::vector<Lamp> lamps_;
+    std::vector<Lamp> lamps_, others_; // others_: not tested against the walls (Init)
     std::vector<Wall> walls_;
     std::vector<WallOpenings::Patch> patches_;
     std::vector<Canopy::Ellipsoid> canopies_;
     size_t canopy_ = 0;
     long long canopyTests_ = 0;
     std::vector<float> num_, den_, vis_; // vis_: the current lamp's share past the walls tested so far, per texel
+    std::vector<float> wgt_; // the current lamp's stamp weight over box_ (Weights)
+    int box_[4] = {0, -1, 0, -1}; // i0, i1, j0, j1
     std::vector<uint8_t> out_;
     size_t lamp_ = 0, wall_ = 0;
     int phase_ = 0;
@@ -440,5 +495,170 @@ private:
         return t > 0.0f && t < 1.0f && u >= 0.0f && u <= 1.0f;
     }
 };
+
+
+// ---- (2.15.3) The shade on the world grass around lots: one terrain chunk's texture (lot_light_bridge.cpp ChunkShade; L8,
+// kChunkTexels a side over the chunk's kChunkSize metres, full mips). A texel is the shades of the lots over it weighed by
+// their lamps' light there (sum w M / sum w; 255 where none), a mip texel the rounded mean of the four under it. ChunkFull
+// makes the whole chunk; ChunkUpdate makes again only the texels over a changed box and the mip texels over them, from the
+// texture's own texels around that box. Both give the same bytes (tools/ground_shade_test): a texel sums its lots in the
+// order of the list (sorted by lot), and a texel past the box has the same lots as when the texture was made.
+struct ExtData { // one lot's shade over its grid (ShadeJob::Result) and the lamps' stamp weight it is a share of
+    std::vector<uint8_t> v;
+    std::vector<float> w;
+};
+struct ExtSrc { // one lot's shade, for a chunk (shared, never changed once made)
+    Grid grid;
+    std::shared_ptr<const ExtData> v;
+    float x0 = 0, z0 = 0, x1 = 0, z1 = 0; // its world box
+    uint64_t lot = 0;
+};
+constexpr int kChunkTexels = 1024;
+constexpr float kChunkSize = 256.0f;
+constexpr int kChunkLevels = 11; // 1024 x 1024 .. 1 x 1
+struct TexRect { // texels [i0, i1] x [j0, j1] of one level
+    int i0 = 0, j0 = 0, i1 = -1, j1 = -1;
+    bool Empty() const { return i1 < i0 || j1 < j0; }
+    int W() const { return i1 - i0 + 1; }
+    int H() const { return j1 - j0 + 1; }
+    size_t Size() const { return Empty() ? 0 : static_cast<size_t>(W()) * H(); }
+};
+// The level-l texels whose level-0 texels meet r0
+inline TexRect LevelRect(const TexRect& r0, int l) { return {r0.i0 >> l, r0.j0 >> l, r0.i1 >> l, r0.j1 >> l}; }
+// The level-l texels the level-(l + 1) texels over r0 are the means of (l < kChunkLevels - 1): LevelRect(r0, l) and the
+// texels beside it in the same 2 x 2 blocks
+inline TexRect BlockRect(const TexRect& r0, int l) {
+    const TexRect n = LevelRect(r0, l + 1);
+    return {2 * n.i0, 2 * n.j0, 2 * n.i1 + 1, 2 * n.j1 + 1};
+}
+// The level-0 texels a world box covers, clipped to the chunk whose corner is (wx0, wz0)
+inline TexRect ChunkRectOf(float wx0, float wz0, float x0, float z0, float x1, float z1) {
+    constexpr int N = kChunkTexels;
+    constexpr float tpm = N / kChunkSize; // texels a metre
+    TexRect r;
+    r.i0 = std::max(0, static_cast<int>(ApexMath::Floor((x0 - wx0) * tpm))), r.i1 = std::min(N - 1, static_cast<int>(ApexMath::Ceil((x1 - wx0) * tpm)));
+    r.j0 = std::max(0, static_cast<int>(ApexMath::Floor((z0 - wz0) * tpm))), r.j1 = std::min(N - 1, static_cast<int>(ApexMath::Ceil((z1 - wz0) * tpm)));
+    return r;
+}
+// The shade of one lot at the world point (bilinear on its grid); false outside its grid
+inline bool ExtShadeAt(const ExtSrc& m, float x, float z, float& v, float& wt) {
+    float fi, fj;
+    if (!WorldTexel(m.grid, x, z, fi, fj)) return false;
+    const int W = m.grid.w, H = m.grid.h;
+    if (!(fi >= 0.0f) || !(fj >= 0.0f) || !(fi <= W) || !(fj <= H)) return false;
+    const float a = std::clamp(fi - 0.5f, 0.0f, W - 1.0f), b = std::clamp(fj - 0.5f, 0.0f, H - 1.0f);
+    const int i0 = static_cast<int>(a), j0 = static_cast<int>(b), i1 = std::min(i0 + 1, W - 1), j1 = std::min(j0 + 1, H - 1);
+    const float u = a - i0, t = b - j0;
+    const std::vector<uint8_t>& e = m.v->v;
+    const std::vector<float>& ww = m.v->w;
+    const auto at = [&](int i, int j) { return static_cast<float>(e[static_cast<size_t>(j) * W + i]); };
+    const auto wa = [&](int i, int j) { return ww[static_cast<size_t>(j) * W + i]; };
+    v = (at(i0, j0) * (1 - u) + at(i1, j0) * u) * (1 - t) + (at(i0, j1) * (1 - u) + at(i1, j1) * u) * t;
+    wt = (wa(i0, j0) * (1 - u) + wa(i1, j0) * u) * (1 - t) + (wa(i0, j1) * (1 - u) + wa(i1, j1) * u) * t;
+    return true;
+}
+// The level-0 texels over r (px: r's size, by rows) from the lots over the chunk whose corner is (wx0, wz0); returns the
+// count of them under 255
+inline int ChunkTexels(const std::vector<ExtSrc>& srcs, float wx0, float wz0, const TexRect& r, std::vector<uint8_t>& px) {
+    constexpr float tpm = kChunkTexels / kChunkSize;
+    px.assign(r.Size(), 255);
+    if (r.Empty()) return 0;
+    std::vector<float> sumW, sumMW;
+    for (const ExtSrc& m : srcs) {
+        const size_t n = static_cast<size_t>(m.grid.w) * m.grid.h;
+        if (!m.v || m.v->v.size() != n || m.v->w.size() != n) continue;
+        if (sumW.empty()) sumW.assign(r.Size(), 0.0f), sumMW.assign(r.Size(), 0.0f);
+        TexRect s = ChunkRectOf(wx0, wz0, m.x0, m.z0, m.x1, m.z1);
+        s.i0 = std::max(s.i0, r.i0), s.i1 = std::min(s.i1, r.i1), s.j0 = std::max(s.j0, r.j0), s.j1 = std::min(s.j1, r.j1);
+        for (int j = s.j0; j <= s.j1; j++)
+            for (int i = s.i0; i <= s.i1; i++) {
+                float v, wt;
+                if (!ExtShadeAt(m, wx0 + (i + 0.5f) / tpm, wz0 + (j + 0.5f) / tpm, v, wt)) continue;
+                const float w = std::max(wt, 0.0f) + 1e-4f; // (a lot with no lamp here weighs almost nothing)
+                const size_t at = static_cast<size_t>(j - r.j0) * r.W() + (i - r.i0);
+                sumW[at] += w;
+                sumMW[at] += w * v;
+            }
+    }
+    int shaded = 0;
+    for (size_t k = 0; k < sumW.size(); k++)
+        if (sumW[k] > 0.0f) {
+            const uint8_t q = ToByte(std::clamp(sumMW[k] / sumW[k], 0.0f, 255.0f));
+            if (q < 255) px[k] = q, shaded++;
+        }
+    return shaded;
+}
+// The level-l texels over `out` from the level-(l - 1) texels `in` over inRect (which holds out's 2 x 2 blocks)
+inline void ChunkMip(const std::vector<uint8_t>& in, const TexRect& inRect, const TexRect& out, std::vector<uint8_t>& px) {
+    px.resize(out.Size());
+    const int iw = inRect.W();
+    for (int j = out.j0; j <= out.j1; j++)
+        for (int i = out.i0; i <= out.i1; i++) {
+            const size_t p = static_cast<size_t>(2 * j - inRect.j0) * iw + (2 * i - inRect.i0), q = p + iw;
+            px[static_cast<size_t>(j - out.j0) * out.W() + (i - out.i0)] = static_cast<uint8_t>((in[p] + in[p + 1] + in[q] + in[q + 1] + 2) / 4);
+        }
+}
+// a's texels over ra into b over rb (which holds ra)
+inline void PutRect(const std::vector<uint8_t>& a, const TexRect& ra, std::vector<uint8_t>& b, const TexRect& rb) {
+    for (int j = ra.j0; j <= ra.j1; j++)
+        std::copy_n(&a[static_cast<size_t>(j - ra.j0) * ra.W()], ra.W(), &b[static_cast<size_t>(j - rb.j0) * rb.W() + (ra.i0 - rb.i0)]);
+}
+// A chunk's texels: levels[l] over rects[l] (the whole level, or what changed); no levels: no lot shades the chunk
+struct ChunkTexture {
+    std::vector<TexRect> rects;
+    std::vector<std::vector<uint8_t>> levels;
+    int shaded = 0; // level-0 texels under 255
+};
+inline void ChunkFull(const std::vector<ExtSrc>& srcs, float wx0, float wz0, ChunkTexture& out) {
+    out = {};
+    const TexRect r{0, 0, kChunkTexels - 1, kChunkTexels - 1};
+    std::vector<uint8_t> px;
+    out.shaded = ChunkTexels(srcs, wx0, wz0, r, px);
+    if (!out.shaded) return; // nothing shaded: no texture
+    out.rects.push_back(r);
+    out.levels.push_back(std::move(px));
+    for (int l = 1; l < kChunkLevels; l++) {
+        const TexRect n{0, 0, (kChunkTexels >> l) - 1, (kChunkTexels >> l) - 1};
+        std::vector<uint8_t> next;
+        ChunkMip(out.levels.back(), out.rects.back(), n, next);
+        out.rects.push_back(n);
+        out.levels.push_back(std::move(next));
+    }
+}
+// The texels over r0 (level 0) and the mip texels over them made again. old[l]: the texture's level-l texels over
+// BlockRect(r0, l) (l < kChunkLevels - 1); oldShaded: its count of level-0 texels under 255. out: LevelRect(r0, l) per level,
+// or no levels when nothing stays shaded (no texture). false: old does not fit r0
+inline bool ChunkUpdate(const std::vector<ExtSrc>& srcs, float wx0, float wz0, const TexRect& r0, const std::vector<std::vector<uint8_t>>& old, int oldShaded,
+                        ChunkTexture& out) {
+    out = {};
+    if (r0.Empty() || old.size() != static_cast<size_t>(kChunkLevels - 1)) return false;
+    for (int l = 0; l < kChunkLevels - 1; l++)
+        if (old[l].size() != BlockRect(r0, l).Size()) return false;
+    std::vector<uint8_t> px;
+    const int now = ChunkTexels(srcs, wx0, wz0, r0, px);
+    std::vector<uint8_t> cur = old[0];
+    TexRect cr = BlockRect(r0, 0);
+    int before = 0;
+    for (int j = r0.j0; j <= r0.j1; j++)
+        for (int i = r0.i0; i <= r0.i1; i++) before += cur[static_cast<size_t>(j - cr.j0) * cr.W() + (i - cr.i0)] < 255;
+    out.shaded = oldShaded - before + now;
+    if (out.shaded <= 0) return out.shaded == 0; // nothing shaded: no texture
+    PutRect(px, r0, cur, cr);
+    out.rects.push_back(r0);
+    out.levels.push_back(std::move(px));
+    for (int l = 1; l < kChunkLevels; l++) {
+        const TexRect rl = LevelRect(r0, l);
+        std::vector<uint8_t> v;
+        ChunkMip(cur, cr, rl, v);
+        if (l < kChunkLevels - 1) {
+            cur = old[l];
+            cr = BlockRect(r0, l);
+            PutRect(v, rl, cur, cr);
+        }
+        out.rects.push_back(rl);
+        out.levels.push_back(std::move(v));
+    }
+    return true;
+}
 
 } // namespace GroundShadow

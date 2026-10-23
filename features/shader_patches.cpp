@@ -137,6 +137,17 @@ int LampScaleAfter(const std::vector<DWORD>& t, const std::vector<Ins>& ins, siz
     return uses == 1 ? K : -1;
 }
 
+// (2.15.3) The reach law's lamp sum held under 1 by its brightest channel, as v / max(1, max(v.r, v.g, v.b)): the lamps' hue
+// stays where they are bright (a per-channel clamp turned a warm or coloured lamp white near its head). tmp.x is overwritten.
+// rcp of 0 is +inf, which the saturate makes 1.
+void AppendHueClamp(std::vector<DWORD>& v, DWORD q, DWORD tmp) {
+    v.insert(v.end(), {Op(kMax, 3), Dst(kTemp, tmp, 0x1), Src(kTemp, q, kSwzX), Src(kTemp, q, 0x55),
+                       Op(kMax, 3), Dst(kTemp, tmp, 0x1), Src(kTemp, tmp, kSwzX), Src(kTemp, q, 0xAA),
+                       Op(0x06 /* rcp */, 2), Dst(kTemp, tmp, 0x1), Src(kTemp, tmp, kSwzX),
+                       Op(kMov, 2), Dst(kTemp, tmp, 0x1, true), Src(kTemp, tmp, kSwzX),
+                       Op(kMul, 3), Dst(kTemp, q, 0x7), Src(kTemp, q), Src(kTemp, tmp, kSwzX)});
+}
+
 // One per-pixel lamp of the object, fence and window patches (ps_3_0): A.xyz = l (pixel to lamp, normalised), A.w = d^2,
 // B.x = the lamp's share before its cones; B.y, B.z and B.w are free after it. pos = the pixel's world position (negated
 // here), nrm = its normal, cp = the lamp row (pos, 1/R^2), cS.w = the smallest d^2, cH.z = 1. One constant per instruction
@@ -555,6 +566,48 @@ void AppendGroundShade(std::vector<DWORD>& code, DWORD B, DWORD T, DWORD T2, DWO
                              Op(kMul, 3), Dst(kTemp, B, 0x7), Src(kTemp, B), Src(kTemp, T2, kSwzX)});
 }
 
+// (2.15.3) Indoor light on the ground of story-0 floors (LevelLightShare::SetIndoorLightOnGround): the floor map's alpha a of
+// room 0 on story 0 holds E, the luminance of the light lit rooms send onto the texel through their openings (1 = a roofless
+// room's own floor, a share of walls' blocked light on the stories above). It replaces the atlas read, the max and the ground
+// shade: with the per-pixel ground gate g of AppendGroundShade (1 within about 1 m of the lot's ground, 0 above),
+//   tw = sat(sat-less(a cH.y + cH.x) (1 + 254 g)),  s = g sat(a / max(lum(map), 1/255)),  ex = B s,
+//   B = max(B - ex, atlas tw) (1 + g (M - 1)) + ex.
+// At g = 0 (the stories above, a draw with no lot) it is the block of before: the atlas weight sat(a cH.y + cH.x), no ex, the
+// shade 1. On the ground a <= 254/255 leaves the atlas whole (a = 1 none, as before). a, lum: replicated sources (the summer
+// floors read the map's own .w and a dp3 into Q.w; the winter floors copies taken right after the map's texld). uv: the
+// atlas uv source (with cA as before); x, z, y: world sources. Temps P (mask, shade), Q (g, weights), R (atlas), U (ex);
+// constants cA, cH, cM .. cM + 2 as before, cX = (lum weights, 1/255), cY = (254, 1) (ExitDefs). One constant per instruction.
+void AppendExitGround(std::vector<DWORD>& code, DWORD B, DWORD a, DWORD lum, DWORD uv, DWORD P, DWORD Q, DWORD R, DWORD U, DWORD x, DWORD z, DWORD y,
+                      DWORD cA, DWORD cH, DWORD cM, DWORD cX, DWORD cY, DWORD E, DWORD S) {
+    constexpr DWORD kNeg = 0x01000000u, kAbs = 0x0B000000u, kXyyy = 0x54, kZwww = 0xFE, kZzzz = 0xAA, kRcpOp = 0x06;
+    code.insert(code.end(), {Op(kMad, 4), Dst(kTemp, P, 0x3), x, Src(kConst, cM, kXyyy), Src(kConst, cM, kZwww),           // mask uv from x
+                             Op(kMad, 4), Dst(kTemp, P, 0x3), z, Src(kConst, cM + 1, kXyyy), Src(kTemp, P),               // + from z
+                             Op(kTexld, 3), Dst(kTemp, P), Src(kTemp, P), Src(kSampler, S),                                // M = P.w
+                             Op(kAdd, 3), Dst(kTemp, Q, 0x1), y, Src(kConst, cM + 1, kZzzz),                               // y - ground
+                             Op(kMad, 4), Dst(kTemp, Q, 0x1, true), Src(kTemp, Q, kSwzX) | kAbs, Src(kConst, cM + 2, kSwzY), Src(kConst, cM + 2, kSwzX), // g
+                             Op(kAdd, 3), Dst(kTemp, P, 0x8), Src(kTemp, P, kSwzW), Src(kConst, cM + 1, kSwzW) | kNeg,     // M - 1
+                             Op(kMad, 4), Dst(kTemp, P, 0x8), Src(kTemp, Q, kSwzX), Src(kTemp, P, kSwzW), Src(kConst, cM + 1, kSwzW), // 1 + g (M - 1)
+                             Op(kMad, 4), Dst(kTemp, Q, 0x2), a, Src(kConst, cH, kSwzY), Src(kConst, cH, kSwzX),          // a cH.y + cH.x
+                             Op(kMad, 4), Dst(kTemp, Q, 0x4), Src(kTemp, Q, kSwzX), Src(kConst, cY, kSwzX), Src(kConst, cY, kSwzY), // 1 + 254 g
+                             Op(kMul, 3), Dst(kTemp, Q, 0x2, true), Src(kTemp, Q, kSwzY), Src(kTemp, Q, kZzzz),           // tw
+                             Op(kMax, 3), Dst(kTemp, Q, 0x4), lum, Src(kConst, cX, kSwzW),                                 // max(lum, 1/255)
+                             Op(kRcpOp, 2), Dst(kTemp, Q, 0x4), Src(kTemp, Q, kZzzz),
+                             Op(kMul, 3), Dst(kTemp, Q, 0x4, true), a, Src(kTemp, Q, kZzzz),                               // sat(a / lum)
+                             Op(kMul, 3), Dst(kTemp, Q, 0x4), Src(kTemp, Q, kZzzz), Src(kTemp, Q, kSwzX),                  // s = g sat(a / lum)
+                             Op(kMad, 4), Dst(kTemp, R, 0x3), uv, Src(kConst, cA), Src(kConst, cA, kSwzZWZW),             // atlas uv
+                             Op(kTexld, 3), Dst(kTemp, R), Src(kTemp, R), Src(kSampler, E),
+                             Op(kMul, 3), Dst(kTemp, R, 0x7), Src(kTemp, R), Src(kTemp, Q, kSwzY),                         // atlas tw
+                             Op(kMul, 3), Dst(kTemp, U, 0x7), Src(kTemp, B), Src(kTemp, Q, kZzzz),                         // ex
+                             Op(kAdd, 3), Dst(kTemp, B, 0x7), Src(kTemp, B), Src(kTemp, U) | kNeg,
+                             Op(kMax, 3), Dst(kTemp, B, 0x7), Src(kTemp, B), Src(kTemp, R),
+                             Op(kMul, 3), Dst(kTemp, B, 0x7), Src(kTemp, B), Src(kTemp, P, kSwzW),                         // the shade
+                             Op(kAdd, 3), Dst(kTemp, B, 0x7), Src(kTemp, B), Src(kTemp, U)});                              // + ex
+}
+std::vector<DWORD> ExitDefs(DWORD cX, DWORD cY) {
+    return {Op(kDef, 5), Dst(kConst, cX), F(0.2126f), F(0.7152f), F(0.0722f), F(1.0f / 255.0f),
+            Op(kDef, 5), Dst(kConst, cY), F(254.0f), F(1.0f), F(0.0f), F(0.0f)};
+}
+
 // The input register that holds TEXCOORDn.c in a pixel shader: its declaration widened to the whole register (and to full
 // precision: world coordinates) when it does not read c, or a new input maxIn + 1 declared after the last one. False when no
 // input register is left (10 in ps_3_0). firstNew: the lowest register a new input may take (one another edit declares).
@@ -594,6 +647,30 @@ void WinterShade(std::vector<DWORD>& t, const std::vector<Ins>& ins, const Usage
     AppendGroundShade(code, B, T, T + 1, x, z, Src(kInput, reg, static_cast<DWORD>(y.comp) * 0x55u), cM, S);
     out.shadeSampler = static_cast<int>(S);
     out.shadeConst = static_cast<int>(cM);
+}
+// (2.15.3) The winter floors with the indoor light on the ground (AppendExitGround) in place of AtlasWeight, the max and
+// WinterShade: the map's alpha and the luminance of its rgb copied into T + 1 right after its texld, then the block at the
+// end of the lamp term B. Needs the texld to write .w, world y, a sampler after E, cA + 1 .. cA + 6 and five temps. uv: the
+// atlas uv source of the patch.
+bool WinterExit(std::vector<DWORD>& t, const std::vector<Ins>& ins, const Usage& u, const WorldY& y, const Ins& fetch, DWORD B, DWORD T, DWORD E, DWORD cA,
+                DWORD uv, DWORD x, DWORD z, std::vector<Edit>& edits, std::vector<DWORD>& code, FloorPatch& out, int firstNew = 0) {
+    const DWORD dest = t[fetch.at + 1];
+    if (!(WMask(dest) & 0x8) || y.texcoord < 0 || y.texcoord > 15 || y.comp < 0 || y.comp > 3 || E + 1 > 15 || cA + 6 >= 224 || u.maxTemp + 5 >= 32) return false;
+    DWORD reg = 0;
+    if (!InputFor(t, ins, y.texcoord, edits, reg, firstNew)) return false;
+    const DWORD L = Num(dest), T1 = T + 1, S = E + 1, cH = cA + 1, cM = cA + 2, cX = cA + 5, cY = cA + 6;
+    edits.push_back({End(fetch), {Op(kMov, 2), Dst(kTemp, T1, 0x1), Src(kTemp, L, kSwzW),
+                                  Op(kDp3, 3), Dst(kTemp, T1, 0x2), Src(kTemp, L), Src(kConst, cX)}});
+    edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, S)}});
+    edits.push_back({u.afterLastSamplerDcl, ExitDefs(cX, cY)});
+    AppendExitGround(code, B, Src(kTemp, T1, kSwzX), Src(kTemp, T1, kSwzY), uv, T, T + 2, T + 3, T + 4, x, z, Src(kInput, reg, static_cast<DWORD>(y.comp) * 0x55u),
+                     cA, cH, cM, cX, cY, E, S);
+    out.maskAlpha = true;
+    out.heightConst = static_cast<int>(cH);
+    out.shadeSampler = static_cast<int>(S);
+    out.shadeConst = static_cast<int>(cM);
+    out.exitLight = true;
+    return true;
 }
 } // namespace
 
@@ -652,7 +729,8 @@ bool WorldYOutput(const std::vector<DWORD>& t, WorldY& out) {
     return true;
 }
 
-bool PatchFloor(std::vector<DWORD>& t, FloorPatch& out, const WorldY& worldY) {
+namespace {
+bool PatchFloorImpl(std::vector<DWORD>& t, FloorPatch& out, const WorldY& worldY, bool exitLight) {
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto ins = Parse(t);
     if (ins.empty()) return false;
@@ -679,15 +757,34 @@ bool PatchFloor(std::vector<DWORD>& t, FloorPatch& out, const WorldY& worldY) {
     t[v0Dcl] = (t[v0Dcl] & ~0x000F0000u) | 0x000F0000u; // v0.xy -> v0 (zw = world xz)
     std::vector<Edit> edits;
     edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E)}});
-    std::vector<DWORD> atlas = {Op(kMad, 4), Dst(kTemp, T, 0x3), Src(kInput, 0, kSwzZWZW), Src(kConst, cA), Src(kConst, cA, kSwzZWZW),
-                                Op(kTexld, 3), Dst(kTemp, T), Src(kTemp, T), Src(kSampler, E)};
-    AtlasWeight(t, ins[fetch], T, cA, u, edits, atlas, out);
-    atlas.insert(atlas.end(), {Op(kMax, 3), Dst(kTemp, B, 0x7), Src(kTemp, B), Src(kTemp, T)});
-    WinterShade(t, ins, u, worldY, B, T, E, cA, Src(kInput, 0, 0xAA), Src(kInput, 0, kSwzW), edits, atlas, out);
+    std::vector<DWORD> atlas;
+    if (exitLight) {
+        if (!WinterExit(t, ins, u, worldY, ins[fetch], B, T, E, cA, Src(kInput, 0, kSwzZWZW), Src(kInput, 0, 0xAA), Src(kInput, 0, kSwzW), edits, atlas, out)) return false;
+    } else {
+        atlas = {Op(kMad, 4), Dst(kTemp, T, 0x3), Src(kInput, 0, kSwzZWZW), Src(kConst, cA), Src(kConst, cA, kSwzZWZW),
+                 Op(kTexld, 3), Dst(kTemp, T), Src(kTemp, T), Src(kSampler, E)};
+        AtlasWeight(t, ins[fetch], T, cA, u, edits, atlas, out);
+        atlas.insert(atlas.end(), {Op(kMax, 3), Dst(kTemp, B, 0x7), Src(kTemp, B), Src(kTemp, T)});
+        WinterShade(t, ins, u, worldY, B, T, E, cA, Src(kInput, 0, 0xAA), Src(kInput, 0, kSwzW), edits, atlas, out);
+    }
     if (out.shadeSampler >= 0) t[v0Dcl] &= ~0x00200000u; // world xz at full precision
     edits.push_back({End(ins[scale]), std::move(atlas)});
     Apply(t, std::move(edits));
     return true;
+}
+} // namespace
+// (2.15.3) exitLight: the indoor light on the ground (WinterExit) when the shader has room for it, else the copy of before
+bool PatchFloor(std::vector<DWORD>& t, FloorPatch& out, const WorldY& worldY, bool exitLight) {
+    if (exitLight) {
+        std::vector<DWORD> c = t;
+        FloorPatch o;
+        if (PatchFloorImpl(c, o, worldY, true)) {
+            t.swap(c);
+            out = o;
+            return true;
+        }
+    }
+    return PatchFloorImpl(t, out, worldY, false);
 }
 
 // Winter floor tile vertex shaders: TEXCOORD0.zw = world xz ("mov o1.zw, rW.xyxz", rW.x / rW.z from dp4 with c8 / c10).
@@ -769,7 +866,8 @@ bool IsSnowFloorVs(const std::vector<DWORD>& t, int& texcoord) {
     return found == 1;
 }
 
-bool PatchSnowFloor(std::vector<DWORD>& t, int texcoord, FloorPatch& out, const WorldY& worldY) {
+namespace {
+bool PatchSnowFloorImpl(std::vector<DWORD>& t, int texcoord, FloorPatch& out, const WorldY& worldY, bool exitLight) {
     if (texcoord != 0 && texcoord != 7) return false;
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto ins = Parse(t);
@@ -836,26 +934,50 @@ bool PatchSnowFloor(std::vector<DWORD>& t, int texcoord, FloorPatch& out, const 
         t[tcDcl] |= 0x000F0000u;
     }
     edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E)}});
-    std::vector<DWORD> atlas = {Op(kMad, 4), Dst(kTemp, T, 0x3), Src(kInput, V, swz), Src(kConst, cA), Src(kConst, cA, kSwzZWZW),
-                                Op(kTexld, 3), Dst(kTemp, T), Src(kTemp, T), Src(kSampler, E)};
-    AtlasWeight(t, ins[tex], T, cA, u, edits, atlas, out);
-    atlas.insert(atlas.end(), {Op(kMax, 3), Dst(kTemp, B, 0x7), Src(kTemp, B), Src(kTemp, T)});
     // world xz / 2 at V (the caller doubles the shade's x and z rows)
     const DWORD cx = swz == kSwzXYXY ? 0x00 : 0xAA, cz = swz == kSwzXYXY ? kSwzY : kSwzW;
-    // (TEXCOORD7 is the input this patch declares: world y must come from another one)
-    if (!(texcoord == 7 && worldY.texcoord == 7))
-        WinterShade(t, ins, u, worldY, B, T, E, cA, Src(kInput, V, cx), Src(kInput, V, cz), edits, atlas, out, texcoord == 7 ? static_cast<int>(V) + 1 : 0);
-    else
-        out.shadeSampler = out.shadeConst = -1;
+    std::vector<DWORD> atlas;
+    if (exitLight) {
+        // (TEXCOORD7 is the input this patch declares: world y must come from another one)
+        if ((texcoord == 7 && worldY.texcoord == 7) ||
+            !WinterExit(t, ins, u, worldY, ins[tex], B, T, E, cA, Src(kInput, V, swz), Src(kInput, V, cx), Src(kInput, V, cz), edits, atlas, out,
+                        texcoord == 7 ? static_cast<int>(V) + 1 : 0))
+            return false;
+    } else {
+        atlas = {Op(kMad, 4), Dst(kTemp, T, 0x3), Src(kInput, V, swz), Src(kConst, cA), Src(kConst, cA, kSwzZWZW),
+                 Op(kTexld, 3), Dst(kTemp, T), Src(kTemp, T), Src(kSampler, E)};
+        AtlasWeight(t, ins[tex], T, cA, u, edits, atlas, out);
+        atlas.insert(atlas.end(), {Op(kMax, 3), Dst(kTemp, B, 0x7), Src(kTemp, B), Src(kTemp, T)});
+        // (TEXCOORD7 is the input this patch declares: world y must come from another one)
+        if (!(texcoord == 7 && worldY.texcoord == 7))
+            WinterShade(t, ins, u, worldY, B, T, E, cA, Src(kInput, V, cx), Src(kInput, V, cz), edits, atlas, out, texcoord == 7 ? static_cast<int>(V) + 1 : 0);
+        else
+            out.shadeSampler = out.shadeConst = -1;
+    }
     edits.push_back({End(ins[scale]), std::move(atlas)});
     Apply(t, std::move(edits));
     return true;
+}
+} // namespace
+// (2.15.3) exitLight: as PatchFloor
+bool PatchSnowFloor(std::vector<DWORD>& t, int texcoord, FloorPatch& out, const WorldY& worldY, bool exitLight) {
+    if (exitLight) {
+        std::vector<DWORD> c = t;
+        FloorPatch o;
+        if (PatchSnowFloorImpl(c, texcoord, o, worldY, true)) {
+            t.swap(c);
+            out = o;
+            return true;
+        }
+    }
+    return PatchSnowFloorImpl(t, texcoord, out, worldY, false);
 }
 
 // Surfaces lit only by a baked light map (summer outdoor floors, ExteriorFloors technique; census 25/09): the single
 // "texld rL, vK, sM" (2D sampler, input coordinate) whose next rgb reader is "mad rX.xyz, rL, cK.x, rY", before any
 // flow control. Inserts max(rL, atlas) there, the atlas read at TEXCOORD7.xy = world xz (PatchObjectLampVs exports it).
-bool PatchBakedAtlasPs(std::vector<DWORD>& t, int texcoord, FloorPatch& out, bool groundShade) {
+namespace {
+bool PatchBakedAtlasPsImpl(std::vector<DWORD>& t, int texcoord, FloorPatch& out, bool groundShade, bool exitLight) {
     if (texcoord < 0 || texcoord > 15) return false;
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto all = Parse(t);
@@ -935,7 +1057,20 @@ bool PatchBakedAtlasPs(std::vector<DWORD>& t, int texcoord, FloorPatch& out, boo
                                {u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E)}}};
     // the ground lamp shade (story 0): world (x, z, y) = V.xyz; only with a sampler and 3 constants to spare
     out.shadeSampler = out.shadeConst = -1;
-    if (groundShade && E + 1 <= 15 && cH + 3 < 224) {
+    if (exitLight) {
+        // (2.15.3) the indoor light on the ground (AppendExitGround) in place of the atlas, the max and the shade: the map's
+        // alpha must be readable, a sampler, cH + 1 .. cH + 5 and four temps to spare
+        if (!out.maskAlpha || E + 1 > 15 || cH + 5 >= 224 || u.maxTemp + 4 >= 32) return false;
+        const DWORD S = E + 1, cM = cH + 1, cX = cH + 4, cY = cH + 5;
+        code = {Op(kDp3, 3), Dst(kTemp, T2, 0x8), Src(kTemp, L), Src(kConst, cX)}; // lum(map) in Q.w
+        AppendExitGround(code, L, Src(kTemp, L, kSwzW), Src(kTemp, T2, kSwzW), Src(kInput, V, kSwzXYXY), T, T2, T + 2, T + 3, Src(kInput, V, kSwzX),
+                         Src(kInput, V, kSwzY), Src(kInput, V, 0xAA), cA, cH, cM, cX, cY, E, S);
+        edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, S)}});
+        edits.push_back({u.afterLastSamplerDcl, ExitDefs(cX, cY)});
+        out.shadeSampler = static_cast<int>(S);
+        out.shadeConst = static_cast<int>(cM);
+        out.exitLight = true;
+    } else if (groundShade && E + 1 <= 15 && cH + 3 < 224) {
         const DWORD S = E + 1, cM = cH + 1;
         edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, S)}});
         AppendGroundShade(code, L, T, T2, Src(kInput, V, kSwzX), Src(kInput, V, kSwzY), Src(kInput, V, 0xAA), cM, S);
@@ -945,6 +1080,20 @@ bool PatchBakedAtlasPs(std::vector<DWORD>& t, int texcoord, FloorPatch& out, boo
     edits.push_back({all[mad].at, std::move(code)});
     Apply(t, std::move(edits));
     return true;
+}
+} // namespace
+// (2.15.3) exitLight (with groundShade): as PatchFloor
+bool PatchBakedAtlasPs(std::vector<DWORD>& t, int texcoord, FloorPatch& out, bool groundShade, bool exitLight) {
+    if (exitLight && groundShade) {
+        std::vector<DWORD> c = t;
+        FloorPatch o;
+        if (PatchBakedAtlasPsImpl(c, texcoord, o, true, true)) {
+            t.swap(c);
+            out = o;
+            return true;
+        }
+    }
+    return PatchBakedAtlasPsImpl(t, texcoord, out, groundShade, false);
 }
 
 bool PatchLeafShadow(std::vector<DWORD>& t, DWORD& nightConst) {
@@ -1160,8 +1309,8 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
             if (k == 0) code.insert(code.end(), {Op(kMul, 3), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, LB, kSwzX)});
             else code.insert(code.end(), {Op(kMad, 4), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, LB, kSwzX), Src(kTemp, Q)});
         }
-        // reach: the sum is held under 1 per channel as an outdoor wall's texel is (the room map's min(sum, 1))
-        if (reach) code.insert(code.end(), {Op(kMov, 2), Dst(kTemp, Q, 0x7, true), Src(kTemp, Q)});
+        // reach: the sum is held under 1 as an outdoor wall's texel is (the room map's min(sum, 1)), by its brightest channel
+        if (reach) AppendHueClamp(code, Q, LB);
         // Native rig and pixel lamps are alternative estimates; adding both can
         // amplify overlapping illumination. Use pixel lamps when the group is valid,
         // otherwise retain the native rig.
@@ -1180,7 +1329,10 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
         if (groundShade && E + 1 <= 15 && cM + 2 < 224) {
             const DWORD S = E + 1;
             edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, S)}});
-            AppendGroundShade(code, T, LA, LB, Src(kTemp, P, kSwzX), Src(kTemp, P, 0xAA), Src(kTemp, P, kSwzY), cM, S);
+            // (2.15.3) the mask in front of the face: xz + N.xz x rows[10] (cM + 2 .z; 0.6 m, kFenceShadeReach). The fence is a
+            // wall in the mask, so its own footprint lies on the edge of its shadow; tops (N.xz = 0) read where they stand
+            code.insert(code.end(), {Op(kMad, 4), Dst(kTemp, LA, 0x5), Src(kTemp, N), Src(kConst, cM + 2, 0xAA), Src(kTemp, P)});
+            AppendGroundShade(code, T, LA, LB, Src(kTemp, LA, kSwzX), Src(kTemp, LA, 0xAA), Src(kTemp, P, kSwzY), cM, S);
             out.shadeSampler = static_cast<int>(S);
             out.shadeConst = static_cast<int>(cM);
         }
@@ -1736,8 +1888,8 @@ bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach) 
         if (k == 0) ground.insert(ground.end(), {Op(kMul, 3), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, B, kSwzX)});
         else ground.insert(ground.end(), {Op(kMad, 4), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, B, kSwzX), Src(kTemp, Q)});
     }
-    // reach: the sum is held under 1 per channel as an outdoor wall's texel is (the room map's min(sum, 1))
-    if (reach) ground.insert(ground.end(), {Op(kMov, 2), Dst(kTemp, Q, 0x7, true), Src(kTemp, Q)});
+    // reach: the sum is held under 1 as an outdoor wall's texel is (the room map's min(sum, 1)), by its brightest channel
+    if (reach) AppendHueClamp(ground, Q, B);
     std::vector<Edit> edits = {{1, {Op(kDef, 5), Dst(kConst, cH), F(0.5f), F(0.5f), F(1.0f), F(0.0f)}},
                                {afterLastInDcl, {Op(kDcl, 2), 0x80080005u /* texcoord8 */, Dst(kInput, V, 0x7)}},
                                {u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E)}}};
@@ -3068,7 +3220,7 @@ bool PatchWindowOutdoor(std::vector<DWORD>& t, WindowOutdoorPatch& out, bool rea
         if (k == 0) v.insert(v.end(), {Op(kMul, 3), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, B, kSwzX)});
         else v.insert(v.end(), {Op(kMad, 4), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, B, kSwzX), Src(kTemp, Q)});
     }
-    if (reach) v.insert(v.end(), {Op(kMov, 2), Dst(kTemp, Q, 0x7, true), Src(kTemp, Q)});
+    if (reach) AppendHueClamp(v, Q, B); // (held under 1 by its brightest channel)
     // outdoor = ground + lamps x cS.y, x w; the game's light is never lowered
     v.insert(v.end(), {Op(kMad, 4), Dst(kTemp, T, 0x7), Src(kTemp, Q), Src(kConst, cS, kSwzY), Src(kTemp, T),
                        Op(kMul, 3), Dst(kTemp, T, 0x7), Src(kTemp, T), Src(kTemp, P, kSwzW),
@@ -3440,5 +3592,113 @@ JitterResult AddJitterVs(std::vector<DWORD>& t, int jitterConst) {
     Apply(t, {{t.size() - 1, {Op(kMad, 4), Dst(kTemp, P, 0x3), Src(kTemp, P, kSwzW), Src(kConst, J), Src(kTemp, P),
                               Op(kMov, 2), Dst(posType, posNum), Src(kTemp, P)}}});
     return JitterResult::Ok;
+}
+
+// ---- The snowy and melting-snow lot light passes (lot_light_bridge DrawLotSnow / DrawLotMelt; moved here from
+// lot_light_bridge.cpp in 2.15.3 to be checked offline by tools/floor_shade_check). The same patch for the snowy pass (last
+// sampler s11, terrain light in s12) and the melting-snow pass (kMeltLotPs: last sampler s13, terrain light in s14): after
+// "texld r0, v3, s2" (lot light map) and the following "mul r0.xyz, r1.w, r0" (light basis factor) insert
+// "texld r7, v7(TEXCOORD1), s<new>", r7 x4 and "max r0.xyz, r0, r7". r7, v7 and the new sampler must be unused (checked).
+// With mask (room mask): also "mad rM.x/y" (mask uv from v7 with PS c200 / c201), "texld rM, rM, s<new+1>" and
+// "mul r7.xyz, r7, rM.x" before the max, so the terrain light stays outside the lot's rooms; c200, c201 and that sampler
+// must be unused too. After the max, "mul r0.xyz, r0, rM.w": the lamp shade (the mask's alpha) on both terms. (2.15.3) rM
+// is a temp the shader does not use (its highest + 1, at least r8): it was r6, which the game's snowy lot shader uses, so
+// every snowy pass drew without the mask and the lamp shade while the world grass beside it took the shade (a step at the
+// lot border at night in winter).
+// (2.15.3) With exit (and mask): indoor light on the ground, as in the dry pass (kReplacementHlsl c34). The lot map's alpha
+// a (the game's shader does not read it here: the texld writes r0.w and the basis factor's mul does not, checked) times the
+// gate c202.x gives s = sat(a / max(lum(map), 1/255)) right after the texld, before the basis factor; then, before the max,
+// ex = r0 s (rF), r0 -= ex, r7 *= sat((1 - a) 255), and after the shade r0 += ex. rE = rM + 1, rF = rM + 2; the luminance
+// weights and 255 are defs in c203 / c204 (c202..c204 must be unused). Gate 0: s = 0, ex = 0 and the weight 1, the same
+// values as without it. The snowy pass has no soft lot edge (w = 1).
+bool PatchLotTerrainMax(std::vector<DWORD>& t, DWORD lastSampler, DWORD newSampler, bool mask, bool exit) {
+    auto regNum = [](DWORD r) { return r & 0x7FF; };
+    auto regType = [](DWORD r) { return ((r >> 28) & 7) | (((r >> 11) & 3) << 3); };
+    if (exit && !mask) return false;
+    size_t dclEnd = 0, texldEnd = 0, texldAt = 0;
+    DWORD maxTemp = 0;
+    for (size_t i = 1; i < t.size();) {
+        const DWORD tok = t[i];
+        if (tok == 0x0000FFFF) break;
+        if ((tok & 0xFFFF) == 0xFFFE) { i += 1 + ((tok >> 16) & 0x7FFF); continue; }
+        const size_t len = (tok >> 24) & 0xF;
+        const DWORD op = tok & 0xFFFF;
+        if (i + len >= t.size()) return false;
+        for (size_t k = 1; k <= len; k++) {
+            const DWORD r = t[i + k];
+            if (op == 0x1F && k == 1) continue; // dcl usage token
+            if (op == 0x51 && k > 1) continue;  // def values
+            if (!(r & 0x80000000u)) continue;
+            const DWORD ty = regType(r), n = regNum(r);
+            if ((ty == 0 && n == 7) || (ty == 1 && n == 7) || (ty == 10 && n == newSampler)) return false; // r7 / v7 / new sampler taken
+            if (mask && ((ty == 2 && (n == kLotMaskConst || n == kLotMaskConst + 1)) || (ty == 10 && n == newSampler + 1))) return false;
+            if (exit && ty == 2 && n >= kLotMaskConst + 2 && n <= kLotMaskConst + 4) return false; // the gate and the defs
+            if (ty == 0) maxTemp = std::max(maxTemp, n);
+        }
+        if (op == 0x1F && regType(t[i + 2]) == 10 && regNum(t[i + 2]) == lastSampler) dclEnd = i + 1 + len;
+        if (op == 0x42 && !texldEnd && regType(t[i + 1]) == 0 && regNum(t[i + 1]) == 0 && regType(t[i + 2]) == 1 && regNum(t[i + 2]) == 3 && regType(t[i + 3]) == 10 && regNum(t[i + 3]) == 2) {
+            texldEnd = i + 1 + len;
+            texldAt = i;
+        }
+        i += 1 + len;
+    }
+    if (!dclEnd || !texldEnd || texldEnd < dclEnd || texldEnd + 1 >= t.size()) return false;
+    // next instruction must be "mul r0.xyz, r1.w, r0" (light basis factor)
+    if ((t[texldEnd] & 0xFFFF) != 0x05 || regType(t[texldEnd + 1]) != 0 || regNum(t[texldEnd + 1]) != 0) return false;
+    const DWORD r = std::max<DWORD>(maxTemp + 1, 8); // the mask's temp (see above)
+    // (exit) the lot map's alpha: the texld writes r0.w and the basis factor's mul does not; two more temps
+    if (exit && (!(t[texldAt + 1] & 0x00080000u) || (t[texldEnd + 1] & 0x00080000u) || r + 2 > 31)) return false;
+    const size_t insertAt = texldEnd + 1 + ((t[texldEnd] >> 24) & 0xF);
+    const DWORD fetch[] = {0x03000042, 0x802F0007, 0x90E40007, 0xA0E40800 | newSampler, // texld_pp r7, v7, s<new>
+                           0x03000002, 0x80270007, 0x80E40007, 0x80E40007,              // add_pp r7.xyz, r7, r7
+                           0x03000002, 0x80270007, 0x80E40007, 0x80E40007,              // add_pp r7.xyz, r7, r7
+                           0x0300000B, 0x80270000, 0x80E40000, 0x80E40007};             // max_pp r0.xyz, r0, r7
+    t.insert(t.begin() + insertAt, std::begin(fetch), std::end(fetch));
+    if (mask) {
+        const DWORD m = newSampler + 1, c0 = 0xA0000000 | kLotMaskConst, c1 = 0xA0000000 | (kLotMaskConst + 1);
+        const DWORD ops[] = {0x04000004, 0x80010000 | r, 0x90000007, c0,              c0 | 0x00AA0000, // mad rM.x, v7.x, c200.x, c200.z
+                             0x04000004, 0x80010000 | r, 0x90550007, c0 | 0x00550000, 0x80000000 | r,  // mad rM.x, v7.y, c200.y, rM.x
+                             0x04000004, 0x80020000 | r, 0x90000007, c1,              c1 | 0x00AA0000, // mad rM.y, v7.x, c201.x, c201.z
+                             0x04000004, 0x80020000 | r, 0x90550007, c1 | 0x00550000, 0x80550000 | r,  // mad rM.y, v7.y, c201.y, rM.y
+                             0x03000042, 0x800F0000 | r, 0x80E40000 | r, 0xA0E40800 | m,             // texld rM, rM, s<m>
+                             0x03000005, 0x80070007, 0x80E40007, 0x80000000 | r};                    // mul r7.xyz, r7, rM.x
+        t.insert(t.begin() + insertAt + 12, std::begin(ops), std::end(ops)); // after the texld and the two adds, before the max
+        size_t beforeMax = insertAt + 12 + std::size(ops);
+        const DWORD E = r + 1, F = r + 2, cG = kLotMaskConst + 2, cL = kLotMaskConst + 3, cK = kLotMaskConst + 4;
+        if (exit) {
+            const DWORD pre[] = {0x03000005, 0x80070000 | F, 0x80E40000, 0x80000000 | E,                   // mul rF.xyz, r0, rE.x (ex)
+                                 0x03000002, 0x80070000, 0x80E40000, 0x81E40000 | F,                       // add r0.xyz, r0, -rF
+                                 0x04000004, 0x80140000 | E, 0x81550000 | E, 0xA0000000 | cK, 0xA0000000 | cK, // mad_sat rE.z, -rE.y, c204.x, c204.x
+                                 0x03000005, 0x80070007, 0x80E40007, 0x80AA0000 | E};                     // mul r7.xyz, r7, rE.z
+            t.insert(t.begin() + beforeMax, std::begin(pre), std::end(pre));
+            beforeMax += std::size(pre);
+        }
+        // the lamp shade (the mask's alpha, 1 with no wall between): x the whole lamp term, after the max
+        const DWORD shade[] = {0x03000005, 0x80270000, 0x80E40000, 0x80FF0000 | r}; // mul_pp r0.xyz, r0, rM.w
+        t.insert(t.begin() + beforeMax + 4, std::begin(shade), std::end(shade));
+        if (exit) {
+            const DWORD post[] = {0x03000002, 0x80070000, 0x80E40000, 0x80E40000 | F}; // add r0.xyz, r0, rF (ex, after the shade)
+            t.insert(t.begin() + beforeMax + 8, std::begin(post), std::end(post));
+            const DWORD share[] = {0x03000008, 0x80010000 | E, 0x80E40000, 0xA0E40000 | cL,             // dp3 rE.x, r0, c203 (lum of the map)
+                                   0x0300000B, 0x80010000 | E, 0x80000000 | E, 0xA0FF0000 | cL,         // max rE.x, rE.x, c203.w
+                                   0x02000006, 0x80010000 | E, 0x80000000 | E,                          // rcp rE.x, rE.x
+                                   0x03000005, 0x80020000 | E, 0x80FF0000, 0xA0000000 | cG,             // mul rE.y, r0.w, c202.x (a)
+                                   0x03000005, 0x80110000 | E, 0x80550000 | E, 0x80000000 | E};         // mul_sat rE.x, rE.y, rE.x (s)
+            t.insert(t.begin() + texldEnd, std::begin(share), std::end(share)); // before the basis factor's mul
+            const auto bits = [](float f) {
+                DWORD d;
+                std::memcpy(&d, &f, 4);
+                return d;
+            };
+            const DWORD defs[] = {0x05000051, 0xA00F0000 | cL, bits(0.2126f), bits(0.7152f), bits(0.0722f), bits(1.0f / 255.0f),
+                                  0x05000051, 0xA00F0000 | cK, bits(255.0f), bits(1.0f), 0, 0};
+            t.insert(t.begin() + dclEnd, std::begin(defs), std::end(defs));
+        }
+        const DWORD mdecl[] = {0x0200001F, 0x90000000, 0xA00F0800 | m};
+        t.insert(t.begin() + dclEnd, std::begin(mdecl), std::end(mdecl));
+    }
+    const DWORD decl[] = {0x0200001F, 0x80010005, 0x90230007, 0x0200001F, 0x90000000, 0xA00F0800 | newSampler}; // v7 = TEXCOORD1, s<new> 2D
+    t.insert(t.begin() + dclEnd, std::begin(decl), std::end(decl));
+    return true;
 }
 } // namespace ShaderPatches

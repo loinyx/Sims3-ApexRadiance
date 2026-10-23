@@ -20,7 +20,7 @@ The probe's GPU path (occlusion queries, constant reads, texture dumps) has no o
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
-| | | No dedicated probe result is recorded | | |
+| 2026-10-22 | `916df4b` | None: the foliage description of the `mod:` line has no offline harness | Not run | not run in game yet |
 
 ## In-game test plan
 
@@ -47,3 +47,7 @@ The probe's GPU path (occlusion queries, constant reads, texture dumps) has no o
 - The one-click pointer selection (`Aim`) has no menu control; it is not reachable from the current Report page.
 - Planned extra detail (replacement shader pointers for mod draws, constants c144..c149, a lamp block id) is not
   implemented.
+- Foliage draws (`916df4b`): a capture on a lamp-lit tree at night. **Expected:** its `mod:` line reads `mod draw:
+  foliage | per-vertex lamps: drawn | ...` with one instance line per instance (box, crown, pick age, own lamps), the
+  lamps matching the lamps near the tree; a foliage draw without per-vertex lamps (by day) reads `not used for this
+  draw (the old path)`, with no instance lines. Not yet seen in a capture.

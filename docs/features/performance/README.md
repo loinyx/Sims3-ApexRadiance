@@ -209,7 +209,7 @@ profiler). Each site type has a chain with fixed layer positions, lower = outer,
 | Chain | File | Hooks | Layers (outer to inner) |
 |---|---|---|---|
 | `SlotChain` | [`framework/slot_chain.{h,cpp}`](../../../framework/slot_chain.h) | Vtable slots | `Gate` (wall shading gate, site `WallAoStep` only), `FrameProfiler`, `ResourceCache`, `FastCompress` |
-| `EntryChain` | [`framework/entry_chain.{h,cpp}`](../../../framework/entry_chain.h) | Function entries: the prologue moves to a trampoline, a 5-byte JMP is written with every other thread suspended | `FrameProfiler`, `FastDxt`, `ResourceCache`, `ObjectIndex`, `SceneBudget`, `LevelLightShare`, `FastCas`, `FastCrc` |
+| `EntryChain` | [`framework/entry_chain.{h,cpp}`](../../../framework/entry_chain.h) | Function entries: the prologue moves to a trampoline, a 5-byte JMP is written with every other thread suspended | `FrameProfiler`, `FastDxt`, `ResourceCache`, `ObjectIndex`, `SceneBudget`, `LevelLightShare`, `FastCas`, `FastCrc`, `ScriptMath`, `ObjectIdMap`, `RoomLightQueue`, `LotObjectThrottle`, `ProbeNeutral`, `RenderObjectMap` |
 | `CallChain` | [`framework/call_chain.{h,cpp}`](../../../framework/call_chain.h) | One `E8 rel32` CALL, rewritten with every other thread suspended | `FrameProfiler`, `SceneBudget` |
 
 Protocol (`SlotChain`; the other two are the same idea):
@@ -222,7 +222,9 @@ Protocol (`SlotChain`; the other two are the same idea):
 - Remove does the reverse. A removed hook keeps its next pointer, so threads still inside it finish normally.
 - Sites: `FindProvider`, `RegisterDb`, `RegisterDbDerived`, `SetDbPriority`, `DbChanged`, `RefPackCompress`,
   `WallAoStep`, `KeyListBase`, `KeyListDerived` (slots); `DxtEncode1/5`, `DpfWriteDirect`, `ObjectById`,
-  `SceneNodeDtor`, `SceneAddNode`, `SceneHolderTeardown`, `CasTriSort`, `RecordCrc` (entries); `SceneDrain` (call).
+  `SceneNodeDtor`, `SceneAddNode`, `SceneHolderTeardown`, `CasTriSort`, `RecordCrc`, `ObjMapFind` / `ObjMapInsert` /
+  `ObjMapErase`, `RenMapFind` / `RenMapInsert` / `RenMapErase` and others listed in `framework/entry_chain.h`
+  (entries); `SceneDrain` (call).
 
 Code writes outside the chains use `MemPatch::WriteCodeSuspended` ([`framework/memory_patch.{h,cpp}`](../../../framework/memory_patch.h)):
 every other thread is suspended and none may be stopped inside the bytes being replaced.
@@ -257,8 +259,12 @@ preferences ([developer-mode.md](../developer-mode.md)), never with profiles unl
 
 - A per-frame "Optimize rendering" mode (`[ui] performance_mode`) that cached lamp blocks, indexed light maps and
   reused texture metadata: removed in 2.6.0. Details in [history](../../history/performance.md).
-- A lot lighting budget while the camera is still: reverted, lamps moved in Build mode updated visibly slower. See
+- A fixed lot lighting budget while the camera is still: reverted, lamps moved in Build mode updated visibly slower.
+  The steady pacing is a different design: it keeps the game's budget while frames hold and leaves lamp edits alone. See
   [lot-lighting-motion.md](lot-lighting-motion.md).
+- Thread affinity or ideal-processor changes for the render and simulation threads: deferred, no cache gain on a
+  single-CCD CPU; the Frame Profiler's CPU line gathers the evidence first. Details in
+  [history](../../history/performance.md#2026-10-22-thread-affinity-and-smt-placement-deferred).
 
 ## See also
 

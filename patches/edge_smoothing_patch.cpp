@@ -23,6 +23,7 @@
 #include "post_scene.h"
 #include "gpu_timing_policy.h"
 #include "world_session.h"
+#include "scene_copy.h"
 #include "shader_cache.h"
 #include "imgui.h"
 #include "ui/violet_theme.h"
@@ -433,8 +434,7 @@ template <typename T> void SafeRelease(T*& ptr) {
 void ReleaseResources() {
     g.ready = false;
     g.resolveFailed = false;
-    SafeRelease(g.copySurf);
-    SafeRelease(g.copyTex);
+    SceneCopy::Drop(&g.copyTex, &g.copySurf);
     SafeRelease(g.edgesSurf);
     SafeRelease(g.blendSurf);
     SafeRelease(g.edgesTex);
@@ -559,8 +559,7 @@ bool InitResources(IDirect3DDevice9* dev) {
     }
     g.width = bd.Width;
     g.height = bd.Height;
-    if (FAILED(dev->CreateTexture(g.width, g.height, 1, D3DUSAGE_RENDERTARGET, bd.Format, D3DPOOL_DEFAULT, &g.copyTex, nullptr)) || !g.copyTex ||
-        FAILED(g.copyTex->GetSurfaceLevel(0, &g.copySurf)) || !g.copySurf) {
+    if (!SceneCopy::Acquire(dev, g.width, g.height, bd.Format, &g.copyTex, &g.copySurf)) { // (copied and read inside one pass only)
         ReleaseResources();
         g.status = "ERROR: not enough video memory for the screen copy";
         return false;

@@ -184,3 +184,13 @@ lot, so the scene under study changed between captures.
 
 **Outcome:** removed. `LightProbe::OnPresent` clears the `Watch` state on each capture request and nothing arms it, so a
 shortcut press gives exactly one capture and no `Light capture (automatic)` folder is made.
+
+### 2026-10-22: foliage draws described
+
+**Context:** commit `916df4b`. A light capture of a tree showed only `mod draw (another fix)`: nothing about the lamps
+its instances had picked.
+
+**Outcome:** the `mod:` line of a foliage draw gives the per-vertex lamp path, the wrap weights, the instance position
+space and the camera eye with its correction, and for each instance its box, crown, pick age and each own lamp's place,
+colour and share ([foliage.md](../features/night-lighting/foliage.md#light-capture-of-a-foliage-draw)). Filled only
+while a capture runs.

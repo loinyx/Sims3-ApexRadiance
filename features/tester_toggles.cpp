@@ -33,6 +33,7 @@ const Item kItems[] = {
     {"grid_memo", &gridMemo, Effect::None},
     {"perf_reissue_filter", &PerfToggles::ReissueFilter, Effect::None},
     {"perf_follow_bound_shaders", &PerfToggles::FollowBoundShaders, Effect::None},
+    {"perf_follow_bound_textures", &PerfToggles::FollowBoundTextures, Effect::None},
     {"perf_sampled_dispatch_timing", &PerfToggles::SampledDispatchTiming, Effect::None},
     {"perf_precompile_answer_cache", &PerfToggles::PrecompileAnswerCache, Effect::None},
     {"perf_ao_last_shader_cache", &PerfToggles::AoLastShaderCache, Effect::None},
@@ -41,6 +42,10 @@ const Item kItems[] = {
     {"perf_rig_mode_once_per_draw", &PerfToggles::RigModeOncePerDraw, Effect::None},
     {"perf_indoor_sampler_scan", &PerfToggles::IndoorSamplerScan, Effect::None},
     {"perf_solve_info_cache", &PerfToggles::SolveInfoCache, Effect::None},
+    {"perf_window_channel_memo", &PerfToggles::WindowChannelMemo, Effect::None},
+    {"perf_motion_paced_raise", &PerfToggles::MotionPacedRaise, Effect::None},
+    {"perf_steady_room_pacing", &PerfToggles::SteadyRoomPacing, Effect::None},
+    {"perf_key_list_counted_packages", &PerfToggles::KeyListCountedPackages, Effect::None},
 };
 } // namespace
 

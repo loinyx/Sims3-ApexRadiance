@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -35,6 +36,9 @@ void Check(bool ok, const char* text) {
         std::printf("FAIL: %s\n", text);
     }
 }
+
+// (2.15.3) the share a window's glass and frame pass (a glazed door's too)
+bool Glass(float pass) { return std::fabs(pass - WallOpenings::kWindowPass) < 0.01f; }
 
 struct Builder {
     StoryGrid g;
@@ -279,7 +283,7 @@ void DoorRuleChecks() {
     {
         DoorRule d(kCutWindow, kCutWindow, true);
         Check(d.b.g.openings.size() == 2 && d.Doors() == 2 && d.Patches() == 2, "doors block light: a window passes");
-        Check(d.Through() >= 0.99f && Pass(d.b.g, 6.5f, 0.4f, 1.0f, 6.5f, 0.4f, 6.5f) == 0.0f, "through the window's glass, not under its sill");
+        Check(Glass(d.Through()) && Pass(d.b.g, 6.5f, 0.4f, 1.0f, 6.5f, 0.4f, 6.5f) == 0.0f, "through the window's glass (its share), not under its sill");
     }
     {
         DoorRule d(kCutUnknown, kCutGate, true);
@@ -294,7 +298,7 @@ void DoorRuleChecks() {
         DoorRule d(kCutWindow, kCutDoor, true); // a window at x = 5 beside a closed door at x = 6
         Check(d.b.g.openings.size() == 1 && d.b.g.cutsClosed == 1, "a window beside a door: only the window opens");
         Check(d.b.g.openings[0].u1 < 1.0f, "the window keeps its jamb toward the closed door");
-        Check(d.Through() == 0.0f && Pass(d.b.g, 5.5f, 1.5f, 1.0f, 5.5f, 1.5f, 6.5f) >= 0.99f, "light through the window, not through the door");
+        Check(d.Through() == 0.0f && Glass(Pass(d.b.g, 5.5f, 1.5f, 1.0f, 5.5f, 1.5f, 6.5f)), "light through the window, not through the door");
     }
 }
 
@@ -310,8 +314,8 @@ void GlassDoorChecks() {
         Check(d.glazed.size() == 2 && d.b.g.glassDoors == 2 && d.b.g.cutsClosed == 0 && d.b.g.openings.size() == 2, "a glazed double door opens both cells");
         Check(d.b.g.openings[0].sill == 0.0f && std::fabs(d.b.g.openings[0].head[2] - 2.2f) < 1e-6f, "with a door's opening: sill 0, head 2.2 m");
         Check(d.b.g.openings[0].u1 == 1.0f || d.b.g.openings[1].u0 == 0.0f, "no jamb between its two glazed cells");
-        Check(d.Doors() == 2 && d.Through() >= 0.99f && d.Patches() == 2, "lamp light through the glass: roofed doors, grid walk and walls' copy");
-        Check(Pass(d.b.g, 6.5f, 0.3f, 1.0f, 6.5f, 0.3f, 6.5f) >= 0.99f, "low through the glass, as through a door (no sill)");
+        Check(d.Doors() == 2 && Glass(d.Through()) && d.Patches() == 2, "lamp light through the glass: roofed doors, grid walk and walls' copy");
+        Check(Glass(Pass(d.b.g, 6.5f, 0.3f, 1.0f, 6.5f, 0.3f, 6.5f)), "low through the glass, as through a door (no sill)");
         Check(d.b.g.doorCuts.size() == 2 && d.b.g.glassSig == GlazedSig(d.glazed) && d.b.g.glassSig != GlazedSig({}), "the grid keeps its door cuts and its glass stamp");
         std::unordered_set<uint32_t> again;
         GlazedCuts(d.b.g, d.b.g.doorCuts, {pane5, pane6}, again);
@@ -323,7 +327,7 @@ void GlassDoorChecks() {
         DoorRule d(kCutDoor, kCutDoor, true, {pane6}); // glass in one cell only (a door with one glazed leaf)
         Check(d.glazed.size() == 1 && d.glazed.count(EdgeKey(6, 4, 7, 4)) && d.b.g.openings.size() == 1 && d.b.g.cutsClosed == 1, "only the glazed cell opens");
         Check(d.b.g.openings[0].u0 > 0.0f, "it keeps its jamb toward the closed leaf");
-        Check(d.Through() >= 0.99f && Pass(d.b.g, 5.5f, 1.5f, 1.0f, 5.5f, 1.5f, 6.5f) == 0.0f, "light through the glazed leaf, not the solid one");
+        Check(Glass(d.Through()) && Pass(d.b.g, 5.5f, 1.5f, 1.0f, 5.5f, 1.5f, 6.5f) == 0.0f, "light through the glazed leaf, not the solid one");
     }
     {
         DoorRule d(kCutDoor, kCutDoor, true); // a solid door: no window light
@@ -944,6 +948,127 @@ void ArchConeChecks() {
     Check(mid >= 0.99f, "arch cone: the middle of the cone keeps the whole light");
 }
 
+// (2.15.3) Real window sizes, wall thickness, floor-level sills in the outside walls' copy and the window's glass. A wall on
+// z = 4 from x = 1 to 11 with one opening in cell x = 5 (u 0.1 .. 0.9: jambs at x 5.1 and 5.9).
+struct ThickWall {
+    Builder b{12, 12};
+    StoryWallCopy c;
+    explicit ThickWall(uint8_t kind, float sill = 0.0f, float head = 2.4f) {
+        for (int x = 1; x < 11; x++) {
+            const int32_t s = b.Wall(true, x, 4);
+            if (x == 5) b.Open(s, kind, sill, head, 0.1f, 0.9f);
+        }
+        b.g.openings[0].glass = kind == kCutWindow ? WallOpenings::kWindowPass : 1.0f; // (as PlaceGridOpenings sets it)
+        b.g.xf = Identity();
+        c.segs.push_back(WallSeg{1.0f, 4.0f, 11.0f, 4.0f, 0.0f, 3.0f});
+        FillWallPatches(b.g, c);
+    }
+    // the light through the opening for rays at `deg` off the wall's normal, integrated over where they cross the line (m):
+    // the beam's width; grid: the room solves' walk, else the render thread's copy
+    float Width(float deg, bool grid) {
+        const float k = std::tan(deg * 3.14159265f / 180.0f);
+        float sum = 0.0f;
+        for (float x = 4.6f; x < 6.4f; x += 0.002f) {
+            const float A[3] = {x - 2.0f * k, 1.2f, 2.0f}, B[3] = {x + 0.5f * k, 1.2f, 4.5f};
+            GridWhy why{};
+            sum += 0.002f * (grid ? GridPassImpl(b.g, A, B, why) : SegShare(c, 0, A[0], A[1], A[2], B[0], B[1], B[2]));
+        }
+        return sum;
+    }
+};
+void OpeningShapeChecks() {
+    Penumbra::SetRadius(0.02f);
+    {
+        // thickness: 0.1 m (two faces 0.05 m off the line, FUN_006AB280); at 60 degrees each jamb takes 0.05 x tan 60 = 0.087 m
+        ThickWall t(kCutArch);
+        const float g0 = t.Width(0.0f, true), g60 = t.Width(60.0f, true), c0 = t.Width(0.0f, false), c60 = t.Width(60.0f, false);
+        std::printf("wall thickness: beam through a 0.8 m arch at 0 / 60 degrees: grid walk %.3f / %.3f m, walls' copy %.3f / %.3f m (expected 0.800 / 0.627)\n", g0, g60, c0,
+                    c60);
+        Check(std::fabs(g0 - 0.8f) < 0.01f && std::fabs(c0 - 0.8f) < 0.01f, "wall thickness: no narrowing at normal incidence");
+        Check(std::fabs(g60 - (0.8f - 2.0f * 0.05f * std::sqrt(3.0f))) < 0.02f, "wall thickness: the grid walk's beam narrows by 2 x 0.05 x tan 60 at 60 degrees");
+        Check(std::fabs(c60 - g60) < 0.02f, "wall thickness: the walls' copy narrows the beam as the grid walk does");
+        // a ray crossing the line 5 cm inside the jamb at 60 degrees meets the jamb at the far face; straight on it passes
+        const float k = std::sqrt(3.0f);
+        Check(Pass(t.b.g, 5.85f - 2.0f * k, 1.2f, 2.0f, 5.85f + 0.5f * k, 1.2f, 4.5f) < 0.05f, "wall thickness: a grazing ray near the jamb is stopped by the wall's depth");
+        Check(Pass(t.b.g, 5.85f, 1.2f, 2.0f, 5.85f, 1.2f, 4.5f) >= 0.99f, "wall thickness: the same crossing straight on passes");
+        // a crossing far from any opening gives what it did
+        Check(Pass(t.b.g, 8.5f - 2.0f * k, 3.5f, 2.0f, 8.5f + 0.5f * k, 3.5f, 4.5f) >= 0.99f && Pass(t.b.g, 8.5f - 2.0f * k, 1.2f, 2.0f, 8.5f + 0.5f * k, 1.2f, 4.5f) == 0.0f,
+              "wall thickness: walls without an opening as before (over the top passes, through the wall stops)");
+    }
+    {
+        // glass: a window passes kWindowPass at every crossing of its hole, the beam's width x that share
+        ThickWall t(kCutWindow, 0.85f, 2.25f);
+        const float g0 = t.Width(0.0f, true), c0 = t.Width(0.0f, false);
+        std::printf("window glass: %.3f of the light (glass %.2f x frame %.2f); beam x share %.3f grid walk, %.3f walls' copy\n", WallOpenings::kWindowPass,
+                    WallOpenings::kGlassPass, WallOpenings::kFrameOpen, g0, c0);
+        Check(std::fabs(g0 - 0.8f * WallOpenings::kWindowPass) < 0.01f && std::fabs(c0 - 0.8f * WallOpenings::kWindowPass) < 0.01f, "window glass: the window passes its share");
+        ThickWall a(kCutArch);
+        Check(a.Width(0.0f, true) > 0.79f && a.Width(0.0f, false) > 0.79f, "window glass: an arch passes all of it");
+    }
+    {
+        // floor-level sill in the walls' copy: an outdoor lamp through an arch onto the ground just past it (render thread and
+        // the ground shade), with the flag FillWallPatches sets and without it (as before)
+        ThickWall t(kCutArch);
+        Check(t.c.patches.size() == 1 && t.c.patches[0].floorSill == 1 && std::fabs(t.c.patches[0].glass - 1.0f) < 1e-6f, "floor sill: the arch's patch stands on the floor");
+        StoryWallCopy old = t.c;
+        old.patches[0].floorSill = 0;
+        GroundShadow::Lamp L{5.5f, 2.2f, 2.0f, 1.0f};
+        GroundShadow::Wall w{1.0f, 4.0f, 11.0f, 4.0f, 0.0f, 3.0f, 0, 1};
+        float worst = 1.0f, worstOld = 1.0f, soft = 1.0f, softOld = 1.0f;
+        for (float z : {4.02f, 4.06f, 4.125f, 4.25f, 4.5f}) {
+            worst = std::min(worst, SegShare(t.c, 0, 5.5f, 2.2f, 2.0f, 5.5f, 0.0f, z));
+            worstOld = std::min(worstOld, SegShare(old, 0, 5.5f, 2.2f, 2.0f, 5.5f, 0.0f, z));
+            soft = std::min(soft, GroundShadow::Pass(L, 5.5f, 0.0f, z, w, t.c.patches.data(), true));
+            softOld = std::min(softOld, GroundShadow::Pass(L, 5.5f, 0.0f, z, w, old.patches.data(), true));
+        }
+        std::printf("floor sill (walls' copy): the ground just past the arch keeps %.3f of the lamp (before %.3f); ground shade %.3f (before %.3f)\n", worst, worstOld, soft,
+                    softOld);
+        Check(worst >= 0.99f && soft >= 0.99f, "floor sill: the walls' copy and the ground shade do not shade the ground past an arch with a sill at the floor");
+        ThickWall wdw(kCutWindow, 0.85f, 2.25f);
+        Check(wdw.c.patches[0].floorSill == 0 && std::fabs(wdw.c.patches[0].glass - WallOpenings::kWindowPass) < 1e-6f, "floor sill: a window's raised sill keeps its rim");
+    }
+    Penumbra::SetRadius(Penumbra::kDefaultRadius);
+    {
+        // real window sizes: a window in cell x = 5 of DoorRule's wall z = 4 (a closed door beside it) with a pane in front of
+        // each face (half extents 0.3 along, 0.5 up, centred 1.5 m up: u 0.2 .. 0.8, sill 1.0, head 2.0)
+        const GlassLight in{5.5f, 1.5f, 3.95f, 0.3f, 0.5f, 0.0f}, out{5.5f, 1.5f, 4.05f, 0.3f, 0.5f, 0.0f};
+        DoorRule plain(kCutWindow, kCutDoor, true);
+        PaneShapes panes;
+        WindowPanes(plain.b.g, plain.cuts, {in, out}, panes);
+        Check(panes.size() == 1 && panes.count(EdgeKey(5, 4, 6, 4)), "window size: the window's cell takes its panes' shape");
+        DoorRule d(kCutWindow, kCutDoor, true);
+        d.b.g.openings.clear(), d.b.g.cutsOnWall = d.b.g.cutsClosed = d.b.g.glassDoors = 0;
+        for (int& k : d.b.g.kinds) k = 0;
+        for (GridEdge& e : d.b.g.edges) e.open = 0;
+        PlaceGridOpenings(d.b.g, d.cuts, true, {}, [](const CutRec&, GridOpening&) {}, &panes);
+        const GridOpening& o = d.b.g.openings[0];
+        std::printf("window size from its panes: u %.2f .. %.2f, sill %.2f, head %.2f (defaults u 0.10 .. 0.90, sill 0.85, head 2.25)\n", o.u0, o.u1, o.sill, o.head[2]);
+        Check(o.shaped == 2 && std::fabs(o.u0 - 0.2f) < 1e-4f && std::fabs(o.u1 - 0.8f) < 1e-4f && std::fabs(o.sill - 1.0f) < 1e-4f && std::fabs(o.head[0] - 2.0f) < 1e-4f &&
+                  std::fabs(o.head[4] - 2.0f) < 1e-4f,
+              "window size: jambs, sill and head from the panes' rectangle");
+        Check(d.b.g.paneSized == 1 && d.b.g.windowCuts.size() == 1 && d.b.g.paneSig == PaneSig(panes) && d.b.g.paneSig != PaneSig({}), "window size: counted and stamped");
+        // a ray 0.9 m up passes the default sill (0.85) but not the panes' (1.0); 2.1 m up the default head (2.25) but not the panes'
+        Check(Glass(Pass(d.b.g, 5.5f, 1.5f, 1.0f, 5.5f, 1.5f, 6.5f)) && Pass(d.b.g, 5.5f, 0.9f, 1.0f, 5.5f, 0.9f, 6.5f) < 0.05f &&
+                  Pass(d.b.g, 5.5f, 2.1f, 1.0f, 5.5f, 2.1f, 6.5f) < 0.05f && Pass(d.b.g, 5.15f, 1.5f, 1.0f, 5.15f, 1.5f, 6.5f) < 0.05f,
+              "window size: light through the glass only, not the defaults' larger hole");
+        Check(Pass(plain.b.g, 5.5f, 0.9f, 1.0f, 5.5f, 0.9f, 6.5f) > 0.5f, "window size: with no pane the defaults stay (0.9 m up passes)");
+        // panes that do not belong to the window: on a perpendicular wall (extent across the line), in the next cell, a size
+        // out of the limits, no size read; a pane moved changes the stamp (EnsureStoryGrid builds the grid again)
+        PaneShapes none;
+        WindowPanes(plain.b.g, plain.cuts, {GlassLight{5.5f, 1.5f, 3.95f, 0.0f, 0.5f, 0.3f}}, none);
+        Check(none.empty(), "window size: a pane across the wall's line is not this window's");
+        WindowPanes(plain.b.g, plain.cuts, {GlassLight{6.5f, 1.5f, 4.05f, 0.3f, 0.5f, 0.0f}}, none);
+        Check(none.empty(), "window size: a pane in the next cell is not this window's");
+        WindowPanes(plain.b.g, plain.cuts, {GlassLight{5.5f, 1.5f, 4.05f, 0.3f, 0.05f, 0.0f}}, none);
+        Check(none.empty(), "window size: a pane under 0.15 m high leaves the defaults");
+        WindowPanes(plain.b.g, plain.cuts, {GlassLight{5.5f, 1.5f, 4.05f}}, none);
+        Check(none.empty(), "window size: a window light with no size read leaves the defaults");
+        PaneShapes moved;
+        WindowPanes(plain.b.g, plain.cuts, {GlassLight{5.5f, 1.6f, 4.05f, 0.3f, 0.5f, 0.0f}}, moved);
+        Check(moved.size() == 1 && PaneSig(moved) != PaneSig(panes), "window size: a pane moved changes the stamp");
+    }
+}
+
 int main() {
     ArchConeChecks();
     FloorSillChecks();
@@ -1056,6 +1181,7 @@ int main() {
     RoofedDoors(half.g, 48, nullptr, 0, o5, one);
     Check(one.size() == 1 && DoorSig(half.g, one) != sig && DoorSig(half.g, one) != 0, "one arch cell closed: another signature");
     WallCopyChecks();
+    OpeningShapeChecks();
     std::printf("Roofed openings: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

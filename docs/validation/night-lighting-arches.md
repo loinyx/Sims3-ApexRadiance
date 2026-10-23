@@ -22,6 +22,7 @@ The feature is described in [features/night-lighting/arches.md](../features/nigh
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-22 | `823e339` | None: `arch_ambient_test` covers `arch_ambient.h`, not the story memo of `ArchAmbientConsts` | Not run for the memo | not run in game yet |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/arch_ambient_test/` | 25 checks passed | None (pure) |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/room_map_smooth_check/` | 1084 checks passed | Native D3D9 |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/roofed_openings_test/` | 196 checks passed | None (pure) |
@@ -49,3 +50,6 @@ rooms near openings are no longer solved again every one to two seconds.
 - The appearance in game of every part.
 - Whether the receiving room should also follow later changes of the source room's normalisation.
 - Whether floors with more than 6 arch and opening segments occur and lose a transition.
+- Story memo of 16 room maps (`823e339`): a house with arches on two stories, both in view (open stairwell or cutaway).
+  **Expected:** each story's floors keep their own arch transition, the same as before; the F8 snapshot's draws of no
+  known room do not grow.

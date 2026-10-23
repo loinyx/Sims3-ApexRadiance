@@ -9,7 +9,7 @@ story. Interior floors are unchanged. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released (present since 2.1.0, the first version in this repository). The lot's ground lamp shade on story-0 floors (*Walls shade lamp light near the ground*): Released in 2.13.0 |
+| Availability | Released (present since 2.1.0, the first version in this repository). The lot's ground lamp shade on story-0 floors (*Walls shade lamp light near the ground*): Released in 2.13.0. Outdoor floors kept off the indoor light on the ground: Released in 2.15.3 |
 | Default | On (follows the Ground & Lots switches) |
 | Menu | No card of its own: Lighting > Ground (*Street lamps light lots*, *Smooth ground light*, *Ground brightness*) and Lighting > Stories |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -58,6 +58,7 @@ Floors have no setting of their own. They depend on:
 | Ground brightness | `brilhoNoChao` | Scales the floor's lamp constant after the `max` (`GroundGain`, `1 + (gain - 1) x night`) |
 | Outdoor light between floors | `luzExternaEntreAndares` | Floors of other stories get the outdoor lamps |
 | Walls shade lamp light near the ground | `paredesSombreiamOChao` | The lot's ground lamp shade, on story-0 floors too (off: gate 0, the floor as before) |
+| Indoor light adds to the ground | `luzInternaSomaNoChao` | None on floors: they keep the plain patch, and the texels under a story-0 floor tile keep alpha 0 (*Indoor light on the ground* below) |
 
 These settings are documented on their own pages ([lot-light-pass.md](lot-light-pass.md),
 [world-atlas-and-smoothed-maps.md](world-atlas-and-smoothed-maps.md), [level-light-share.md](level-light-share.md)).
@@ -83,6 +84,8 @@ These settings are documented on their own pages ([lot-light-pass.md](lot-light-
   foundation (within 1 m of the ground) is shaded as the ground under it; fences, plants and objects do not shade. It is
   one factor for all lamps: a floor lit by a second lamp that no wall hides is dimmed as much as the first lamp's shade
   there. Fences, curbs and stairs near the ground take the same shade ([fences.md](fences.md)).
+- Story-0 outdoor floors do not add the indoor light of *Indoor light adds to the ground*: patios and paths in front of
+  a lit window keep the look of before.
 - The 235 ps_2_0 ExteriorFloors pixel shaders, and any ps_3_0 variant the pattern refuses, keep the game's look.
 - Ground under an up-pointing type-4 spot 0.1 m above the tile is dark under the game's own law; it is the wrong place to
   judge floor light.
@@ -183,6 +186,34 @@ level_light_share masks for floor texels from story 1 up only (`MaskedFloorRoom0
   pixels of a synthetic floor shader equal `map x (1 + gate (M - 1))` within 2 LSB on both lots at seven heights, off and
   with the white mask; the captured copy `PS_2ADA0AF0` is found again as the 1044-byte table shader's patch.
 
+### Indoor light on the ground
+
+(*Indoor light adds to the ground*.) Story 0's floor map is room 0's, whose floor texels keep in their alpha the
+luminance of the light lit rooms send through their openings ([level-light-share](level-light-share.md#indoor-light-on-the-ground)).
+The floors do not add it: `kFloorIndoorLight` is off, and every floor draw keeps the plain patch. A floor draw cannot
+tell story 0's floor map from a higher story's, and above story 0 the map's alpha is the walls' mask (1 outside them): a
+porch deck 0.75 m over the ground passed the ground gate, read that 1 as indoor light and dropped the atlas texel by
+texel (square steps of light on the porch and a dark square beside a pillar, F8 and two light captures). The floor copies
+read the alpha as the atlas weight (`1 - alpha`), so the solve writes no indoor light under a story-0 floor tile: those
+texels keep alpha 0 and patios and paths keep the garden lamps' light (a review fix; it took that light off them in
+front of lit windows). The lot pass and the snowy lot passes, which
+draw story 0 only, add the indoor light ([lot-light-pass](lot-light-pass.md#indoor-light-on-the-ground)).
+
+The copies that would take it stay in the code, unused (`exitLight` of `PatchBakedAtlasPs`, `PatchFloor`,
+`PatchSnowFloor`; `AppendExitGround`); they replace the atlas read, the max and the shade with, for the ground gate g of
+the shade:
+
+```
+tw = sat((a cH.y + cH.x) (1 + 254 g))       s = g sat(a / max(lum(map), 1/255))       ex = map s
+B  = max(B - ex, atlas tw) (1 + g (M - 1)) + ex
+```
+
+At g = 0 (the stories above, a draw with no lot) this is the weight and the shade of before. The shade's rows carry the
+gate also with *Walls shade lamp light near the ground* off (over the white mask). Two defs hold the luminance weights and
+254. Offline (`tools/floor_shade_check`): 261 of the 285 summer pairs (the 12 without room for the shade and 12 more
+without room for this keep the copy of before, byte for byte) and the 6 shaded winter floor shaders take it, within 181
+slots; the synthetic floor's pixels equal the formula within 1 LSB.
+
 ### Engine facts
 
 | Fact | Evidence |
@@ -206,6 +237,8 @@ none) and PS size. Log kinds `Floor` and `Outdoor floor` in
 
 ## Rejected approaches
 
+- Adding the indoor light on the ground on story-0 floors: a floor draw cannot tell story 0's map from a higher
+  story's, and a porch deck read the walls' mask as indoor light ([history](../../history/night-lighting-floors.md)).
 - An exact-byte class for the floor VS: missed the pool edge; replaced by the `IsFloorVs` pattern. Details in
   [history](../../history/night-lighting-floors.md).
 - Per-pixel floor lamps with HLSL replicas of `1788C5B6` / `9BF0A41E` (PASSO3 increment 2): planned, replaced by the

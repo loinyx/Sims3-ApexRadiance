@@ -67,6 +67,9 @@ thread.
   time the kept parts pass 85% of the ceiling, split into samples, texels, baked lights' parts, drawn parts and sums;
   Developer > Tester > Frame time shows *Instant (GPU) kept data* (MB kept / ceiling, rooms).
 - While a lamp is edited, a delta with more than 200 batches to solve again is refused: the room takes its full solve.
+- (2.15.3) With *Indoor light adds to the ground* active, a delta whose changed light is a roofed room's lamp that story 0's
+  room 0 took through an opening is refused: the ground texels' alpha holds that lamp's light too
+  ([level-light-share](level-light-share.md#indoor-light-on-the-ground)).
 
 ## Technical reference
 

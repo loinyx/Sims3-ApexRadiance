@@ -30,7 +30,7 @@ Offline checker: `sigcheck.pl`, with its method notes (private research tools, n
 | Build | Exe | PE timestamp | `GameVersion` | Game-code addresses |
 |---|---|---|---|---|
 | Retail disc 1.67.2.024002 | TS3W.exe | 0x52D872DA | `Retail` | signature scan |
-| Steam 1.67.2.024037 | TS3W.exe | 0x52DEC247 | `Steam` | fixed (verified in `TS3W.exe`), signatures logged as a self-check |
+| Steam 1.67.2.024037 | TS3W.exe | 0x52DEC247 | `Steam` | fixed (verified in `TS3W.exe`), signatures logged as a self-check in developer mode |
 | EA app 1.69.47.024017 | TS3.exe | 0x6707155C | `EA` | signature scan |
 | Origin / EA 1.69.43.024017 | TS3.exe | 0x568D4BAC | `EA_1_69_43` | signature scan |
 | anything else | | | `Unknown` | signature scan |
@@ -88,8 +88,9 @@ shipping, so every signature logs enough to be refined from a player's `ApexRadi
 4. Cross-checks (non-Steam: a failed check drops the ids concerned): the nine light vtables are distinct and share one
    position function (`+0x24`), the batch solve call is one of the three point-solve calls and calls the point solve, the
    story refresh calls follow the cascade test in order.
-5. Steam 1.67.2: the scan runs the same way but only as a self-check. `GameAddr::Get` always returns the fixed address;
-   a signature that disagrees is logged as `DIFFERS: the fixed address is kept`. The features keep their exact byte
+5. Steam 1.67.2: the scan runs the same way but only as a self-check, and only in developer mode (it takes about
+   0.9 s of the start); with developer mode off the fixed addresses are used without a scan. `GameAddr::Get` always
+   returns the fixed address; a signature that disagrees is logged as `DIFFERS: the fixed address is kept`. The features keep their exact byte
    checks on Steam, so Steam behaviour is unchanged.
 
 `GameAddr::Get(id)` returns the address or 0. Every feature loads its addresses from `GameAddr` when it installs, checks
@@ -163,6 +164,7 @@ for uniqueness on Steam with `sigcheck.pl` (it must still resolve every id to th
 | Faster File Lists (`FileListCache`, group `FileListCache`) | ResKeyList + slot, ResKeyListDerived + slot, KeyTypeFilterVtable, the four package-list methods + slots, ShadowedDbVtable; the base loop, the vector insert, the sort, the filter's predicate and the read-only class's key list are checked at run time | "Not available on <version>: missing ..." / "... differs from the one studied; nothing was changed" |
 | Spread New Objects Over Frames (`SceneNodeBudget`, group `SceneNodeBudget`) | SceneDrainCall, SceneDrain, SceneBoundsCall, SceneNodeBounds, SceneSpatialCall, SceneNodeSpatial, SceneNodeDtor, SceneAddNode, SceneHolderTeardown, the four camera ids; at run time the whole drain (0xD1 bytes) is compared with the Steam code (rel32s excepted) and its two CALLs must sit at +0xAE / +0xB6 and reach SceneNodeBounds / SceneNodeSpatial; the heads of AddNode, the node destructor and the teardown are compared too | "Not available on <version>: missing ..." / "... is not the code Apex was written for" |
 | Faster Object Lookups (`ObjectLookupIndex`, group `ObjectIndex`) | ObjectById, ObjectTreeWalk, ObjectTreeSearch; at run time the three bodies are compared with the Steam code (rel32s and the lookup's first 8 bytes excepted), the lookup must CALL the walk at +0x10, the walk the search at +0x41, the search itself at +0x68; container / object classes are recognised by the bytes of their vtable functions | "Not available on <version>: missing ..." / "... is not the code Apex was written for" |
+| Faster Object Lookups: scene object map index (`RenderObjectMap`, group `RenderObjectMap`) | RenMapFind, RenMapInsert, RenMapErase (each prologue is checked by `framework/entry_chain.cpp`); the first 256 answers of each map are compared with the game's walk on every build | `[RenderObjectMap] Not used: Not available on <version>: missing ...`; the other two parts still run |
 | Night Lights: local terrain relight and paced sweep (developer toggles `relightNearbyChunks`, `relightPacedSweep`; no group, optional) | WorldManagerPtr, TerrainUpdateCall (the terrain offset is the disp8 of its `mov ecx,[esi+disp8]`), ChunkRenderCall / ChunkRenderFn (the completion signal); at run time the terrain back pointer, the chunk grid (nx x nz, cell 256, dense), each chunk's corner / centre / size / rect and its bake record are checked before a chunk is flagged | lamp changes keep the full rebuild; the developer status says why |
 | Night Lights brightness controls ("Street lamps" / "Lot lamps" on the ground, "Moonlight") | BakeColourSite, SunlightScale | those controls are not available |
 | Rooms at Night (`features/unlit_rooms.cpp`) | UnlitColourA/B, DimColourA/B, FillGate, FillColour; the base under the lamps (optional) also needs DimAmbient, DimAmbientCall0..1, WorldManagerPtr; the `mov ecx, imm32`, `cmp byte` and `movaps` encodings around each site are checked | "Rooms at night: Not available on <version>: missing ..." / "the game code differs" |
@@ -372,11 +374,11 @@ from a signature that is itself such a push.
 
 ### Ids not covered by the recorded check
 
-At HEAD, `framework/game_addresses.cpp` lists 230 ids (207 table rows; the other ids are filled by `Multi`,
+At HEAD, `framework/game_addresses.cpp` lists 330 ids (301 table rows; the other ids are filled by `Multi`,
 `CallersOf` and `SlotsOf` rows, by address). The rows below are the ids added after the last check recorded above. Their
 Steam address and signatures are copied from `kInfo` and `kTable`, and the notes from the comments in
 `framework/game_addresses.h`. Their match counts on Steam are not recorded in this page *(unverified here)*; run
-`sigcheck.pl` to record them. The self-check in `ApexRadiance_LOG.txt` reports any id whose signature does not give
+`sigcheck.pl` to record them. The self-check in `ApexRadiance_LOG.txt` (developer mode) reports any id whose signature does not give
 the fixed Steam address.
 
 | Id | Steam VA | Kind | Signature(s) | Notes |
@@ -467,6 +469,9 @@ the fixed Steam address.
 | TexFillCall | 0x0060E1FF | Sig | `8A 4D FB 51 8B 55 10 52 8B 45 0C 50 8B 4D 08 51 E8 ?? ?? ?? ?? 83 C4 10` +16 | call FUN_0060d290 (0x0060E1FF): copies every mip level into it (cdecl, 4 args) |
 | TexFill | 0x0060D290 | Target(TexFillCall) | - |  |
 | UiServiceGetter | 0x0050AB70 | Sig | `56 57 E8 ?? ?? ?? ?? 8B F8 E8 ?? ?? ?? ?? 85 C0 74 ?? 8B 10 8B C8 8B 42 04 FF D0 8B F0 85 F6` call at +9 | UIManager_GetMainWindowImpl calls this read-only root-service getter |
+| RenMapFind | 0x006FDFB0 | Sig | `83 EC 08 56 8B 74 24 14 8B 06 33 D2 57 BF 09 04 00 00 F7 F7 8B 04 91 85 C0 8D 14 91 74 15 8B 3E 8B 76 04 3B 78 08 75 05 3B 70 0C 74 30 8B 00 85 C0 75 F0 8D 81 24 10 00 00` +0 | FUN_006fdfb0 thiscall(map; out[2], key*), ret 8: find in the scene's 1033-bucket map by object ID (node links at node+0) |
+| RenMapInsert | 0x006FE1F0 | Sig | `53 55 56 8B 74 24 14 8B 46 08 57 33 D2 BF 09 04 00 00 F7 F7 8B 04 91 8D 3C 91 8B D0 85 D2 74 16 8B 5E 08 8B 6E 0C 3B 5A 08 75 05 3B 6A 0C 74 28 8B 12 85 D2 75 F0 89 06` +0 | FUN_006fe1f0 thiscall(map; out[3], node, flag), ret 0xC (leaf): its insert |
+| RenMapErase | 0x006FDF40 | Sig | `8B 44 24 04 53 8B 5C 24 10 56 57 8B 7C 24 14 8B 17 85 D2 89 58 04 89 10 75 14 BE 04 00 00 00 90 01 70 04 8B 50 04 8B 12 85 D2 89 10 74 F2 8B 33 3B F7 8B 16 75 0F 5F 89 13 83 81 28 10 00 00 FF 5E 5B C2 0C 00` +0 | FUN_006fdf40 thiscall(map; out[2], node, bucket*), ret 0xC (leaf): its erase |
 
 Ids filled by a `Multi`, `CallersOf` or `SlotsOf` row (in address order after the first id of their row):
 SetColourCall1..6 (0x006C051D, 0x006C05C1, 0x006C1251, 0x006C15D1, 0x006C1891, 0x006C1B11), AddWorldLightsCall1

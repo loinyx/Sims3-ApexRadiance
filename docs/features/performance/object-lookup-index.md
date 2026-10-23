@@ -3,18 +3,18 @@
 Fewer hitches when lot lights update, and less work for the game's scripts. When the game looks up a lot by its ID it
 searches the whole world object tree. Faster Object Lookups remembers where the game found each lot and re-reads that
 path in the live tree instead of searching again. It also keeps a quick index of every object by its ID next to the
-object service's own map, so the game's lookups of an object by ID no longer walk a long hash chain. The answers are
-the game's own.
+object service's own map, and another next to the scene's map of objects by ID, so the game's lookups of an object by
+ID no longer walk a long hash chain. The answers are the game's own.
 
 ## Status
 
 | | |
 |---|---|
-| Availability | Expiring local lookup caching: Released in 2.14.0. Released in 2.1.0 or earlier; on by default since 2.5.5. Object service ID index: Released in 2.7.0 |
+| Availability | Expiring local lookup caching: Released in 2.14.0. Released in 2.1.0 or earlier; on by default since 2.5.5. Object service ID index: Released in 2.7.0. Per-thread counters, 16 recent answers per thread and the scene's object map index: Released in 2.15.3 |
 | Default | On |
 | Menu | System > Performance > Files and objects > *Faster object lookups* |
 | Configuration | `[patches.ObjectLookupIndex]` in `ApexRadiance.toml` |
-| Source | [`features/object_index.{h,cpp}`](../../../features/object_index.cpp), [`features/object_id_map.{h,cpp}`](../../../features/object_id_map.cpp), [`patches/performance_patches.cpp`](../../../patches/performance_patches.cpp) |
+| Source | [`features/object_index.{h,cpp}`](../../../features/object_index.cpp), [`features/object_id_map.{h,cpp}`](../../../features/object_id_map.cpp), [`features/render_object_map.{h,cpp}`](../../../features/render_object_map.cpp), [`patches/performance_patches.cpp`](../../../patches/performance_patches.cpp) |
 
 ## The problem
 
@@ -23,7 +23,9 @@ node. It has 233 direct callers, including the lot lighting code on the render t
 simulation thread, and its search function is the hottest leaf in hitches dominated by lot lighting.
 
 Separately, the object service keeps every object by its 64-bit ID in a hash map of 1033 buckets. With tens of
-thousands of objects every chain holds dozens of them, and each lookup by ID walks one (a cache miss per node).
+thousands of objects every chain holds dozens of them, and each lookup by ID walks one (a cache miss per node). The
+scene's message router keeps a second map of the same kind, searched by the lot's light and scene updates; in a CPU
+sample its find was the game's busiest function on the render thread (2.8% of it).
 
 ## How Apex Radiance solves it
 
@@ -43,6 +45,12 @@ There are no hooks on the tree's mutators; the validation reads exactly what the
 find answers from the index, with exactly the game's output, only while the index's count equals the map's own count.
 The first 256 answers are also compared with the game's walk. If this part cannot start, the lot lookup index still
 runs (logged as `[ObjectIdMap] Not used: ...`).
+
+**Scene object map index.** A third part (`RenderObjectMap`) does the same for the scene's map: one table per map
+seen (up to 8), kept by the map's only insert and only erase, answering its find only while the table's count equals
+the map's. A different count builds that map's table again from the game's links; the first 256 answers of each map
+are compared with the game's walk. If it cannot start, the other two parts still run (`[RenderObjectMap] Not used:
+...`).
 
 ## Settings
 
@@ -68,6 +76,8 @@ runs (logged as `[ObjectIdMap] Not used: ...`).
   game's walk would answer the other one. Lot IDs are unique by design (inferred); the checks would catch it.
 - Every path that stops validating restarts the whole table. Frequent lot changes reduce the gain.
 - Lookups that find nothing are never cached; the game's walk runs every time.
+- A scene map whose count changes outside the hooks more than 16 times, one of more than 524,288 objects, one whose
+  links cannot be read as expected, and any map past the first 8 keep the game's own search for the session.
 
 ## Technical reference
 
@@ -148,6 +158,33 @@ runs (logged as `[ObjectIdMap] Not used: ...`).
   `[ObjectIdMap] Indexed the object map ...`, `[ObjectIdMap] On: ...` and an Off line with lookups found, not found,
   left to the game while busy, checked, inserts, erases and grows.
 
+### The scene object map index
+
+- **The game side:** the scene's message router keeps objects by their 64-bit ID in a hash map at +4, the same kind
+  as the object service's (1033 buckets keyed by `idLo % 1033`, end sentinel at map +0x1024, count at +0x1028), except
+  that a node links at node +0 (ID at +8 / +0xC, the object at node - 8). 0x006FDFB0 find (56 call sites), 0x006FE1F0
+  insert (one caller; out byte 8 = 1 when the node was linked) and 0x006FDF40 erase (callers 0x007030FB, 0x00703406)
+  are the only writers of its links; the only other write of the count is the constructor's 0. Details:
+  [lot loading and streaming](../../engine/lot-loading-and-streaming.md#scene-message-router-objects-by-id).
+- **The index** (`RenderObjectMap`): one open-addressing table per map (ID -> node, 12-byte slots, 4,096 to 1,048,576
+  slots, at least three per object when built, grown before 70% of the slots are live or erased), up to 8 maps (`kMaps`,
+  a map seen first takes the next one). A table is built from the game's links at the map's first find, under the
+  exclusive SRW lock (the insert and erase hooks are installed first), and that one find goes to the game. Insert and
+  erase run under the exclusive lock and apply the game's own result; find takes the shared lock (busy: the game's
+  walk) and answers, with exactly the game's output (`{node, &bucket}` or the end sentinel), only while the table's
+  count equals the map's. With every insert and erase seen, a table can only hold entries the map no longer has (a map
+  made again at the same address), never miss one, so equal counts mean the same contents; a different count builds
+  that map's table again, at most 16 times (`kMaxRebuilds`), after which that map keeps the game's search. A map of
+  more than 524,288 objects (`kMaxNodes`), or whose walk does not give its count, is left to the game.
+- **Checks:** the first 256 answers of each map (`kStartupChecks`), then 1 in 64 in the development build, also run
+  the game's walk under the shared lock. A difference returns the game's answer, turns the index off for the session
+  and logs `[RenderObjectMap] An answer differed from the game's (ID ..., the index ..., the game ...)`.
+- **Hooks:** `EntryChain` sites `RenMapFind`, `RenMapInsert`, `RenMapErase`, layer `RenderObjectMap` (prologues as the
+  object service's three). Start fails, and removes what it installed, if one cannot be hooked; Stop removes them and
+  frees the tables. Logs: `[RenderObjectMap] On: ...`, `[RenderObjectMap] Indexed the scene map 0x...: N objects in N
+  slots (N KB)`, a warning for a map left to the game, and an Off line with lookups found, not found, left to the game
+  while busy or while a table was built, checked, inserts, erases, grows and tables built.
+
 ### Address reference
 
 | Id (`GameAddr`) | Steam 1.67.2 | Kind |
@@ -155,8 +192,9 @@ runs (logged as `[ObjectIdMap] Not used: ...`).
 | ObjectById | 0x00C62D40 | Sig (shared with the Frame Profiler) |
 | ObjectTreeWalk / ObjectTreeSearch | 0x00C60D30 / 0x00C5FA60 | Sig (alternates: the CALLs inside the lookup / the walk) |
 | ObjMapFind / ObjMapInsert / ObjMapErase | 0x00939100 / 0x00939170 / 0x00938D00 | Sig |
+| RenMapFind / RenMapInsert / RenMapErase | 0x006FDFB0 / 0x006FE1F0 / 0x006FDF40 | Sig |
 
-Group `ObjectIndex`.
+Groups `ObjectIndex`, `ObjectIdMap`, `RenderObjectMap` (each part checks its own group).
 
 ### Source
 
@@ -164,11 +202,14 @@ Group `ObjectIndex`.
 (path of a found object), `Validate` / `ValidateRaw` (a hit), `ShapeOf` (class shapes), `CheckThisOne` /
 `RecordMismatch` (verification), `TakeLookupNote`, `GetStats`, `StatusText`, `RenderDeveloperUI`.
 `features/object_id_map.{h,cpp}`: `Start`, `Stop`, `Build`, `Hook_Find`, `Hook_Insert`, `Hook_Erase`, `Rehash`,
-`TurnOff`, `StatusText`.
+`TurnOff`, `StatusText`. `features/render_object_map.{h,cpp}`: `Start`, `Stop`, `Running`, `Build` / `WalkMap`,
+`Hook_Find`, `Hook_Insert`, `Hook_Erase`, `Room` / `Rehash`, `TurnOff`, `StatusText`.
 
 Developer card *Find objects faster*: lookups, from the index, game walks (not found), too old, path changed, passed
 through, stored / not stored, entries, table restarts, container / object classes recognised, per-second rates and
-"saved about X ms", average walk vs answer, checks (equal / different / inconclusive) and the last difference.
+"saved about X ms", average walk vs answer, checks (equal / different / inconclusive) and the last difference. The
+status line (`Performance::ObjectIndexStatus`) ends with the two map indexes; the scene's reads `Scene object index: N
+lookups (N found, N not found) in N maps, N checked against the game, all equal`.
 
 ### Rules for maintainers
 
@@ -190,5 +231,15 @@ through, stored / not stored, entries, table restarts, container / object classe
 
 ### Consecutive lookup reuse
 
-A thread-local last entry (88 bytes on x86) avoids another shared lock and hash lookup for the same manager, object ID and generation. The local fast path expires with the shared entry, so a newly stored shared answer can replace it. Each answer still passes the existing age limit, live path validation and generation check. Invalidations discard the local answer. Public builds also omit unused timing reads.
+Each thread keeps its 16 most recent answers (one slot per key hash, an entry and its table generation) and answers a
+repeated lookup of the same manager, object ID and generation from them without the shared lock and hash probe; a room
+solve alternates between a few owners, and each miss there took the shared SRW lock. The local fast path expires with
+the shared entry, so a newly stored shared answer can replace it. Each answer still passes the existing age limit, live
+path validation and generation check. Invalidations discard the local answers. Public builds also omit unused timing
+reads.
+
+The statistics counters (status text only) are counted per thread and added to the shared 64-bit totals every 256
+counts, since a 64-bit atomic add is a `lock cmpxchg8b` loop on 32-bit x86 and a lookup made up to three of them; the
+totals lag by at most 256 per thread and counter. The verification serial (`CheckThisOne`) is 32 bits (`lock xadd`); a
+wrap only checks the first 64 answers again.
 

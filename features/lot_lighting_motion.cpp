@@ -74,6 +74,7 @@
 #include "imgui.h"
 #include "drag_lite.h"
 #include "tester_toggles.h"
+#include "perf_toggles.h"
 #include <windows.h>
 #include <intrin.h>
 #include <algorithm>
@@ -92,6 +93,7 @@ using SlotChain::Layer;
 using SlotChain::Site;
 
 constexpr float kPriorityMs = 15.0f;       // the game's budget for a priority lot (0x00ADB120, constant 0x00F9A62C)
+constexpr float kOtherLotMs = 5.0f;        // and for another lot (constant 0x00FBD498); while loading 30 / 10 (0x011833D8 / 0x01045CCC)
 constexpr float kLeaveAloneMs = 100.0f;    // budgets from here up (the tool mode's 1000, the synchronous solve's 60,000) are the game's
 constexpr float kMinMs = 0.25f;            // never below
 constexpr float kLampEditMs = 25.0f;       // the lot being played while a lamp edit's rooms wait, camera still (LevelLightShare)
@@ -133,7 +135,7 @@ std::atomic<uint32_t> g_frame{0};
 std::atomic<uint64_t> g_lastPresentTick{0};
 
 // statistics
-std::atomic<uint32_t> c_calls{0}, c_scaled{0}, c_eyeFails{0}, c_editMoving{0};
+std::atomic<uint32_t> c_calls{0}, c_scaled{0}, c_eyeFails{0}, c_editMoving{0}, c_pacedMoving{0}, c_steadyPaced{0};
 
 // ---- Lot build slice while moving (05/10) ----
 // 0x00AEA680 builds a streaming lot a slice per frame: its budget [esp+14h] is 20 ms (35 for a priority lot; 2000 when
@@ -193,6 +195,7 @@ std::atomic<uint64_t> g_firstWaitSince{0};      // a first pass has been deferre
 std::atomic<uint64_t> g_refineWaitSince{0};     // a refinement has been deferred since (0 = none waiting)
 std::atomic<int> g_firstPassWaitMs{2000};
 std::atomic<float> g_settleScale{1.0f};      // the settle pacing (PaceSettle, below)
+std::atomic<float> g_steadyScale{1.0f};      // (2.15.3) the steady pacing (PaceSettle, below)
 // (2.15.1) a first pass was held (motion wait or the frame's pass taken) at this tick: while one is pending its wait is not
 // started over by a still frame, and refinements give it the frame's pass. A new lot's load waits for every level's first
 // pass; in Edit Town a camera read that kept flipping between moving and still restarted the 2 s wait on every still frame,
@@ -288,9 +291,18 @@ float __fastcall Hook_LotLightBudget(void* mgr, void* edx) {
     // gets kLampEditMs with it still
     const bool settling = game >= kPriorityMs && game < kLeaveAloneMs && LevelLightShare::SettlingAfterLoad();
     if (settling && !moving) out = std::max(out, game + (kLampEditMs - game) * g_settleScale.load(std::memory_order_relaxed)); // dosed by the frame time
-    if (!boosted && !settling && moving && game > 0.0f && game < kLeaveAloneMs) {
+    // (2.15.3) while the camera moves, the raised budgets of a settling lot and of a lamp switch are dosed by the same frame
+    // time pacing (PaceSettle): the game's budget while the frames hold, down to the moving budget when they do not (a
+    // recording: 61 of 197 hitches while moving came from these two). Off: the game's budget, as before
+    const bool paced = (boosted || settling) && PerfToggles::MotionPacedRaise.load(std::memory_order_relaxed);
+    if ((paced || (!boosted && !settling)) && moving && game > 0.0f && game < kLeaveAloneMs) {
         const float scaled = game * (static_cast<float>(g_budgetMs.load(std::memory_order_relaxed)) / kPriorityMs);
         out = std::max(kMinMs, std::min(game, scaled));
+        if (paced) {
+            const float raised = out + (game - out) * g_settleScale.load(std::memory_order_relaxed);
+            if (raised > out) out = raised;
+            c_pacedMoving.fetch_add(1, std::memory_order_relaxed);
+        }
         // 12/10: a lamp edit's room is the current room (RoomLightQueue::CurrentRoomUrgent): the lot being played keeps the
         // game's own budget, at most kEditMovingMs, while the camera moves (an edit made while panning waited for the
         // scaled 3 ms). Only the lot being played (its budget is the game's priority one): which lot a budget call serves is
@@ -303,6 +315,19 @@ float __fastcall Hook_LotLightBudget(void* mgr, void* edx) {
             }
         }
         if (out < game) c_scaled.fetch_add(1, std::memory_order_relaxed);
+    }
+    // (2.15.3) Camera still: the game's own budgets (15 ms for the lot being played, 5 for the others; not the loading ones,
+    // 30 and 10, which a lot's load waits on) dosed by the steady pacing (PaceSettle): the game's budget while the frames hold,
+    // down to the moving budget when they run long (hitches while still were mostly the room solves: 25-50 ms frames). Not
+    // during a lamp edit (its rooms keep the edit budgets), the settle window or a lamp switch's boost (their own budgets).
+    if (!moving && !boosted && !settling && (game == kPriorityMs || game == kOtherLotMs) && PerfToggles::SteadyRoomPacing.load(std::memory_order_relaxed) &&
+        !LevelLightShare::LampEditPending() && !RoomLightQueue::CurrentRoomUrgent()) {
+        const float floorMs = std::max(kMinMs, std::min(game, game * (static_cast<float>(g_budgetMs.load(std::memory_order_relaxed)) / kPriorityMs)));
+        const float paced = floorMs + (game - floorMs) * g_steadyScale.load(std::memory_order_relaxed);
+        if (paced < out) {
+            out = paced;
+            c_steadyPaced.fetch_add(1, std::memory_order_relaxed);
+        }
     }
     // A lamp being edited in Build mode (the corrections in Build mode should be near instant): its rooms
     // waiting for or in their solve get 25 ms of the lot being played per frame instead of 15, camera still, once the lamp
@@ -429,6 +454,7 @@ float g_baseFrameMs = 0.0f;   // render thread
 uint64_t g_lastPresentQpc = 0;
 double g_qpcMs = 0.0;
 bool g_wasSettling = false;
+float g_steadyBase = 0.0f; // (2.15.3) the steady pacing's baseline frame time (ms; render thread)
 constexpr float kSettleMinTargetMs = 16.7f, kSettleTargetOverBase = 1.5f;
 void PaceSettle() {
     if (g_qpcMs == 0.0) {
@@ -444,7 +470,19 @@ void PaceSettle() {
     if (!last) return;
     const float dt = static_cast<float>(static_cast<double>(now - last) * g_qpcMs);
     if (!(dt > 0.0f && dt < 250.0f)) return; // a loading screen or a pause
-    if (!LevelLightShare::SettlingAfterLoad()) {
+    // (2.15.3) The steady pacing, every frame: its baseline follows the frame time's lower envelope (down at once, up slowly,
+    // so a run of solving frames does not raise it), the same target and steps as the settle pacing below
+    g_steadyBase = g_steadyBase > 0.0f ? (dt < g_steadyBase ? g_steadyBase * 0.8f + dt * 0.2f : g_steadyBase * 0.995f + dt * 0.005f) : dt;
+    {
+        const float target = std::max(kSettleMinTargetMs, g_steadyBase * kSettleTargetOverBase);
+        float s = g_steadyScale.load(std::memory_order_relaxed);
+        if (dt > target) s -= 0.15f;
+        else if (dt < 0.8f * target) s += 0.05f;
+        g_steadyScale.store(std::clamp(s, 0.0f, 1.0f), std::memory_order_relaxed);
+    }
+    // (2.15.3) a lamp switch's boost is paced the same way while the camera moves (MotionPacedRaise)
+    const bool boosted = PerfToggles::MotionPacedRaise.load(std::memory_order_relaxed) && GetTickCount64() < g_boostUntil.load(std::memory_order_relaxed);
+    if (!LevelLightShare::SettlingAfterLoad() && !boosted) {
         g_baseFrameMs = g_baseFrameMs > 0.0f ? g_baseFrameMs * 0.95f + dt * 0.05f : dt;
         g_wasSettling = false;
         return;
@@ -501,6 +539,8 @@ void UpdatePresentSampler() {
         g_presentRegistered = false;
         g_lastPresentTick.store(0);
         g_settleScale.store(1.0f, std::memory_order_relaxed); // without the sampler the raised budgets apply as before
+        g_steadyScale.store(1.0f, std::memory_order_relaxed);
+        g_steadyBase = 0.0f;
         g_wasSettling = false;
         g_lastPresentQpc = 0;
     }
@@ -669,6 +709,8 @@ bool Running() { return g_on.load(std::memory_order_acquire); }
 
 void NoteDrainSpent(float ms) { g_drainSpent.store(std::bit_cast<uint32_t>(ms), std::memory_order_relaxed); }
 float SettleScale() { return g_settleScale.load(std::memory_order_relaxed); }
+float SteadyScale() { return PerfToggles::SteadyRoomPacing.load(std::memory_order_relaxed) ? g_steadyScale.load(std::memory_order_relaxed) : 1.0f; }
+float SteadyDrainMs(float wanted) { return 1.0f + (wanted - 1.0f) * SteadyScale(); }
 float BaselineFrameMs() { return g_baseFrameMs; }
 
 float DrainBudget(float wanted) {
@@ -715,8 +757,10 @@ void RenderDeveloperUI() {
                         last ? std::format("{:.1f} s ago", static_cast<double>(now - last) / 1000.0).c_str() : "never", g_frame.load());
     ImGui::TextWrapped("Lot build slices %u, shortened to %u ms while moving %u (%s)", c_buildCalls.load(), kBuildMovingMs, c_buildLowered.load(),
                         g_buildOn ? "on" : "off");
-    ImGui::TextWrapped("Budget calls %u, scaled while moving %u (a lamp edit's room kept up to 6 ms %u), camera reads failed %u; last budget: game %.2f ms -> %.2f ms", c_calls.load(),
-                        c_scaled.load(), c_editMoving.load(), c_eyeFails.load(), Bits(g_lastGame.load()), Bits(g_lastOut.load()));
+    ImGui::TextWrapped("Budget calls %u, scaled while moving %u (a lamp edit's room kept up to 6 ms %u; settle or lamp switch paced %u), camera reads failed %u; last budget: game %.2f ms -> %.2f ms",
+                        c_calls.load(), c_scaled.load(), c_editMoving.load(), c_pacedMoving.load(), c_eyeFails.load(), Bits(g_lastGame.load()), Bits(g_lastOut.load()));
+    ImGui::TextWrapped("Steady pacing (camera still): %.0f%% of the game's budgets (frame baseline %.1f ms), lowered in %u budget calls", g_steadyScale.load() * 100.0f,
+                       g_steadyBase, c_steadyPaced.load());
         ApexUi::EndAdvanced();
     }
 }

@@ -17,3 +17,25 @@ the known callers sort and unique.
 ### 2026-10-02: on by default (2.5.5)
 
 **Outcome:** default changed to on. See [group history](performance.md).
+
+### 2026-10-22: shared key lists
+
+**Context:** commit `f58a6f0`. A cached GetKeyList call copied each package's kept list under the lock: about 207
+packages a call, one allocation each, 2 ms a call on average and up to 4 ms on the render thread.
+
+**Outcome:** the kept lists are immutable vectors shared through `std::shared_ptr`; a lookup takes a reference and
+appends the same keys to the game's vector. Answers are unchanged.
+
+### 2026-10-22: writable packages' lists by their write epoch
+
+**Context:** commit `000f3bc`. In a CPU sample the GetKeyList walks of the 22 writable packages, asked on every call,
+were 1.2% of the render thread.
+
+**Finding:** the write epochs of Remember missing files already hook every writer of the index of three writable
+classes (DPF, DDF, packed stream). While a package's epoch is unchanged and no counted write is in progress, its list
+is what its index held when it was captured, from the same walk, so in the same order.
+
+**Outcome:** those packages' lists are kept with their write epoch and answered while it is the same, stored only from
+a call during which no counted write happened. Behind the Tester switch *Writable packages' file lists*
+(`perf_key_list_counted_packages`, on); gameplay checks are open
+([validation](../validation/performance-file-list-cache.md)).

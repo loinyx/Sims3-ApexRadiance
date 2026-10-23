@@ -422,6 +422,7 @@ std::string LotHlsl(const std::filesystem::path& source) {
     if (end == std::string::npos) { Check(false, "production lot shader delimiter"); return {}; }
     return text.substr(start, end - start);
 }
+int lotMaxLsb = 0;
 void LotPixels(Gpu& gpu, const std::filesystem::path& current, const std::filesystem::path& reference) {
     auto oldCode = Compile(LotHlsl(reference), "ps_3_0"), newCode = Compile(LotHlsl(current), "ps_3_0");
     if (!gpu.dev || oldCode.empty() || newCode.empty()) return;
@@ -447,9 +448,13 @@ Out main(float4 pos:POSITION,float2 uv:TEXCOORD0){Out o;o.pos=pos;o.shadow=float
         const float edge[4] = {feather == 2 ? 3.f : 0.f, feather == 1 ? 1.f : 0.f, 0, 0};
         gpu.dev->SetPixelShaderConstantF(3, c3, 1); gpu.dev->SetPixelShaderConstantF(30, edge, 1); gpu.dev->SetPixelShaderConstantF(31, c31, 1);
         const auto before = gpu.Render(oldPs, vs), after = gpu.Render(newPs, vs);
-        for (size_t p = 0; p < before.size(); ++p) for (int channel = 0; channel < 3; ++channel)
-            Check(std::abs(int((before[p] >> (channel * 8)) & 255) - int((after[p] >> (channel * 8)) & 255)) <= 1, "actual lot HLSL preserves night pixels (one LSB tolerance)");
+        for (size_t p = 0; p < before.size(); ++p) for (int channel = 0; channel < 3; ++channel) {
+            const int d = std::abs(int((before[p] >> (channel * 8)) & 255) - int((after[p] >> (channel * 8)) & 255));
+            Check(d <= 1, "actual lot HLSL preserves night pixels (one LSB tolerance)");
+            lotMaxLsb = std::max(lotMaxLsb, d);
+        }
     }
+    std::printf("Production lot HLSL against the reference at night: largest difference %d LSB (c34 = 0)\n", lotMaxLsb);
     // At day, native c3 remains zero: the window/lot map must stay native, while
     // the added terrain lamp contribution must be independent of lot-edge weight.
     const float c3[4] = {0, 0, 0, 0}, c31[4] = {1, .75f, 0, 0};
@@ -484,6 +489,51 @@ Out main(float4 pos:POSITION,float2 uv:TEXCOORD0){Out o;o.pos=pos;o.shadow=float
             Check(shaded == noLamps, "lot shade 0 removes the whole lamp term");
             Check(full != noLamps, "lot shade 1 keeps the lamp term");
         }
+        gpu.dev->SetTexture(3, nullptr);
+        Release(mask);
+    }
+    // (2.15.3) Indoor light on the ground (c34.x = 1): the lot map's alpha a (20 + 3x / 255 across the test texture) is the
+    // luminance of its exit light; s = sat(a / lum(map)) of the map leaves max(lot, terrain) and the shade and is added after
+    // them, tw = sat((1 - a) 255). Checked as the difference to c34 = 0 against the CPU formula (white mask, no clamping).
+    {
+        IDirect3DTexture9* mask = nullptr;
+        Check(SUCCEEDED(gpu.dev->CreateTexture(1, 1, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &mask, nullptr)), "exit light mask texture");
+        D3DLOCKED_RECT r{}; mask->LockRect(0, &r, nullptr, 0); *static_cast<DWORD*>(r.pBits) = 0xFFFFFFFFu; mask->UnlockRect(0);
+        gpu.dev->SetTexture(3, mask);
+        gpu.dev->SetSamplerState(3, D3DSAMP_MINFILTER, D3DTEXF_POINT); gpu.dev->SetSamplerState(3, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+        const float mx[4] = {0, 0, 0, 0}; gpu.dev->SetPixelShaderConstantF(32, mx, 1); gpu.dev->SetPixelShaderConstantF(33, mx, 1);
+        int worst = 0; bool added = false;
+        for (float scale : {.25f, .5f}) for (float gain : {.75f, 1.f}) for (int feather = 0; feather < 3; ++feather) {
+            const float c3[4] = {scale, 0, 0, 0}, c31[4] = {gain, 0, 0, 0};
+            const float edge[4] = {feather == 2 ? 3.f : 0.f, feather == 1 ? 1.f : 0.f, 0, 0};
+            gpu.dev->SetPixelShaderConstantF(3, c3, 1); gpu.dev->SetPixelShaderConstantF(30, edge, 1); gpu.dev->SetPixelShaderConstantF(31, c31, 1);
+            const float off[4] = {0, 0, 0, 0}, on[4] = {1, 0, 0, 0};
+            gpu.dev->SetPixelShaderConstantF(34, off, 1);
+            const auto p0 = gpu.Render(newPs, vs);
+            gpu.dev->SetPixelShaderConstantF(34, on, 1);
+            const auto p1 = gpu.Render(newPs, vs);
+            gpu.dev->SetPixelShaderConstantF(34, off, 1);
+            for (int y = 0; y < 64; ++y) for (int x = 0; x < 64; ++x) {
+                const float u = (x + .5f) / 64, v = (y + .5f) / 64;
+                const float e = std::min(std::min(u, 1 - u), std::min(v, 1 - v));
+                float w = std::clamp(e * edge[0] + edge[1], 0.f, 1.f); w = w * w * (3 - 2 * w);
+                const float lot[3] = {0xAA / 255.f, 0xBB / 255.f, 0xCC / 255.f}, ter[3] = {0x33 / 255.f, 0x66 / 255.f, 0x99 / 255.f};
+                const float a = (20 + 3 * x) / 255.f, lum = .2126f * lot[0] + .7152f * lot[1] + .0722f * lot[2];
+                const float s = std::clamp(a / std::max(lum, 1 / 255.f), 0.f, 1.f), tw = std::clamp((1 - a) * 255, 0.f, 1.f);
+                for (int c = 0; c < 3; ++c) {
+                    const float lm = lot[c] * gain * scale, T = ter[c] * scale, ex = lm * s;
+                    const float l0 = T + (std::max(lm, T) - T) * w, l1 = T + (std::max(lm - ex, T * tw) - T) * w + ex * w;
+                    const int shift = (2 - c) * 8; // A8R8G8B8: red in bits 16..23
+                    const int got = int((p1[y * 64 + x] >> shift) & 255) - int((p0[y * 64 + x] >> shift) & 255);
+                    const int want = int(std::lround((l1 - l0) * .5f * 255));
+                    worst = std::max(worst, std::abs(got - want));
+                    added = added || got > 0;
+                }
+            }
+        }
+        Check(worst <= 2, "indoor light on the ground: lot pass matches the CPU formula (two LSB tolerance)");
+        Check(added, "indoor light on the ground: the exit light adds where the terrain is brighter");
+        std::printf("Indoor light on the ground (c34 = 1): largest difference to the CPU formula %d LSB\n", worst);
         gpu.dev->SetTexture(3, nullptr);
         Release(mask);
     }
@@ -872,9 +922,9 @@ float3 w=rows[0].xyz+uv.x*rows[1].xyz+uv.y*rows[2].xyz;o.uv=float4(uv,w.x,w.z);o
 void GroundShadowChecks() {
     using namespace GroundShadow;
     const int before = checks;
-    const auto run = [](const Grid& g, std::vector<Lamp> lamps, std::vector<Wall> walls, int slices) {
+    const auto run = [](const Grid& g, std::vector<Lamp> lamps, std::vector<Wall> walls, int slices, std::vector<Lamp> others = {}) {
         ShadeJob job;
-        job.Init(g, std::move(lamps), std::move(walls));
+        job.Init(g, std::move(lamps), std::move(walls), {}, {}, std::move(others));
         int budget = 0, guard = 0;
         // a few steps a slice, as the render thread's budget would cut it
         while (!job.Step([&] { return ++budget % slices != 0; }) && guard++ < 1000000) {}
@@ -903,6 +953,18 @@ void GroundShadowChecks() {
     const Lamp other{24.0f, 12.0f, 20.0f, 0.4f * 30.0f};
     const auto two = run(g, {post, other}, {wall}, 5);
     Check(at(two, 16.0f, 20.0f) > 64 && at(two, 16.0f, 20.0f) < 255, "ground shade: two lamps, one blocked, a share stays");
+    // (2.15.3) a lamp not tested against the walls stays in the total: east of the wall, where the wall does not block it,
+    // the same shade as when it is tested
+    const auto untested = run(g, {post}, {wall}, 5, {other});
+    bool same = untested.size() == two.size();
+    for (size_t i = 0; same && i < two.size(); i++)
+        if (static_cast<float>(i % g.w) / 4.0f > 15.0f) same = std::abs(int(untested[i]) - int(two[i])) <= 1;
+    Check(same, "ground shade: an untested lamp's light stays in the shade's total");
+    // a lamp's shadow ends where its stamp's rectangle ends (nothing of it lies there to block)
+    Lamp clipped = post;
+    clipped.rx0 = 0.0f, clipped.rz0 = 0.0f, clipped.rx1 = 17.0f, clipped.rz1 = 40.0f;
+    const auto cl = run(g, {clipped}, {wall}, 5);
+    Check(at(cl, 16.0f, 20.0f) < 8 && at(cl, 18.0f, 20.0f) == 255, "ground shade: no shadow past the lamp's stamp");
     // a low wall (0.5 m) under a 2 m head shades only near its foot
     const Wall low{14.0f, 15.0f, 14.0f, 25.0f, 10.0f, 10.5f};
     const auto lowM = run(g, {post}, {low}, 5);

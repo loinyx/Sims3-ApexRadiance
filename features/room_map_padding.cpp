@@ -13,6 +13,7 @@
 // maps from here.
 #include "room_map_padding.h"
 #include "apex_log.h"
+#include "d3d9_hooks.h"
 #include "shader_patches.h"
 #include <windows.h>
 #include <array>
@@ -92,32 +93,45 @@ bool IsBasisPs(const DWORD* t, size_t n) {
     return false;
 }
 
+// (2.15.3) The last shader's entry of g_psInfo and the last (map, shader) entry of g_noted (render thread): the game draws
+// a story's objects with the same shader and maps in a row. Entries keep their addresses (unordered_map) and leave only by
+// the clears, which reset these (Clear, OnPresent).
+const PsInfo* g_lastInfo = nullptr;
+IDirect3DPixelShader9* g_lastInfoPs = nullptr;
+uint32_t* g_lastNoted = nullptr;
+NoteKey g_lastNotedKey{};
+
 void NoteDraw(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps) {
     if (!g_enabled || !dev) return;
-    auto infoIt = g_psInfo.find(ps);
-    if (infoIt == g_psInfo.end()) {
-        PsInfo info;
-        UINT size = 0;
-        if (SUCCEEDED(ps->GetFunction(nullptr, &size)) && size >= 8 && size < 65536) {
-            std::vector<DWORD> code(size / 4);
-            if (SUCCEEDED(ps->GetFunction(code.data(), &size))) {
-                if (!ShaderPatches::BasisSamplers(code, info.dirs.data())) info.dirs = {-1, -1, -1, -1};
-                for (size_t k = 0; k + 2 < code.size(); k++) // dcl + sampler register token
-                    if ((code[k] & 0xFFFF) == 0x001F && (((code[k + 2] >> 28) & 7) | (((code[k + 2] >> 11) & 3) << 3)) == 10 && (code[k + 2] & 0x7FF) < 16)
-                        info.declared |= static_cast<uint16_t>(1u << (code[k + 2] & 0x7FF));
+    if (!g_lastInfo || g_lastInfoPs != ps) {
+        auto infoIt = g_psInfo.find(ps);
+        if (infoIt == g_psInfo.end()) {
+            PsInfo info;
+            UINT size = 0;
+            if (SUCCEEDED(ps->GetFunction(nullptr, &size)) && size >= 8 && size < 65536) {
+                std::vector<DWORD> code(size / 4);
+                if (SUCCEEDED(ps->GetFunction(code.data(), &size))) {
+                    if (!ShaderPatches::BasisSamplers(code, info.dirs.data())) info.dirs = {-1, -1, -1, -1};
+                    for (size_t k = 0; k + 2 < code.size(); k++) // dcl + sampler register token
+                        if ((code[k] & 0xFFFF) == 0x001F && (((code[k + 2] >> 28) & 7) | (((code[k + 2] >> 11) & 3) << 3)) == 10 && (code[k + 2] & 0x7FF) < 16)
+                            info.declared |= static_cast<uint16_t>(1u << (code[k + 2] & 0x7FF));
+                }
             }
+            infoIt = g_psInfo.emplace(ps, info).first;
         }
-        infoIt = g_psInfo.emplace(ps, info).first;
+        g_lastInfo = &infoIt->second, g_lastInfoPs = ps;
     }
-    const auto& dirs = infoIt->second.dirs;
-    const uint16_t declared = infoIt->second.declared;
+    const auto& dirs = g_lastInfo->dirs;
+    const uint16_t declared = g_lastInfo->declared;
     if (dirs[0] < 0) return;
     // one look per set (story and lot) and shader every kCheckEvery frames, keyed by the +X basis map this draw binds
     {
-        IDirect3DBaseTexture9* key = nullptr;
-        if (FAILED(dev->GetTexture(static_cast<DWORD>(dirs[0]), &key)) || !key) return;
-        uint32_t& last = g_noted[NoteKey{key, ps}];
-        key->Release(); // only a key: never dereferenced
+        // (only a key, never dereferenced: the bound texture's identity, no reference taken)
+        IDirect3DBaseTexture9* const key = D3D9Hooks::BoundTexture(dev, static_cast<DWORD>(dirs[0]));
+        if (!key) return;
+        const NoteKey nk{key, ps};
+        if (!g_lastNoted || !(g_lastNotedKey == nk)) g_lastNoted = &g_noted[nk], g_lastNotedKey = nk;
+        uint32_t& last = *g_lastNoted;
         if (last && g_frame - last < kCheckEvery) return;
         last = g_frame;
     }
@@ -129,7 +143,7 @@ void NoteDraw(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps) {
     for (DWORD s = 0; s < 16; s++) {
         if (!(declared & (1u << s))) continue;
         IDirect3DBaseTexture9* t = nullptr;
-        if (FAILED(dev->GetTexture(s, &t)) || !t) continue;
+        if (FAILED(D3D9Hooks::GetBoundTexture(dev, s, &t)) || !t) continue;
         int dir = -1;
         for (int k = 0; k < 4; k++)
             if (dirs[k] == static_cast<int>(s)) dir = k;
@@ -168,7 +182,7 @@ void NoteDraw(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps) {
 
 void OnPresent() {
     g_frame++;
-    if (g_noted.size() > 4096) g_noted.clear(); // keys of textures long gone (never dereferenced)
+    if (g_noted.size() > 4096) g_noted.clear(), g_lastNoted = nullptr; // keys of textures long gone (never dereferenced)
     if (g_frame % kSweepEvery) return;
     // one basis set is shared by a story's light maps (floor and objects): Apex holds one reference per entry naming it
     std::unordered_map<IDirect3DTexture9*, ULONG> ours;
@@ -204,6 +218,8 @@ void Clear() {
     g_basisOf.clear();
     g_noted.clear();
     g_psInfo.clear();
+    g_lastNoted = nullptr;
+    g_lastInfo = nullptr, g_lastInfoPs = nullptr;
 }
 
 std::string Status() {

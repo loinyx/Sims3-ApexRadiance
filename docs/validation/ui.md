@@ -26,6 +26,7 @@ Native checks are geometric evidence; they do not replace inspecting every page 
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-22 | `715a410` (the Tester labels *Window light channel memo* and *Paced relight while moving*) | `tools/i18n_check` | OK, 2243 of 2243 keys | None |
 | 2026-10-03 | PR #2 (control sizing) | `control_layout_check` | 40 multi-frame cases passed across EN/PT/ES/FR and scales 1.0 / 1.4: popup style stacks, stable neighbouring heights, button glyph centres within 1.1 px, one-pixel divider origins | None |
 | 2026-10-03 | PR #2 (control sizing) | `menu_253_check` | 24 notice and 40 page cases passed | None |
 | 2026-10-03 | PR #2 (control sizing) | Release x86 build | Zero warnings | MSBuild |

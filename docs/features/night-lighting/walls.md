@@ -8,7 +8,7 @@ sun and shadows; only the lamp light baked into each wall is scaled. Part of [Ni
 
 | | |
 |---|---|
-| Availability | Released (present since 2.1.0, the first version in this repository). Daytime lamp term on walls: Released in 2.6.0. The game's bloom alpha kept on lit walls and the rebalanced style brightness (84% for Soft): Released in 2.7.0. Realistic lamp reach and balcony floors blocking a lamp below them (replacing *Light behind balconies*), the shared daytime curve: Released in 2.12.3. Soft edges by the lamp's size (*Shadow softness*) and lamp light through openings: Released in 2.13.0 |
+| Availability | Released (present since 2.1.0, the first version in this repository). Daytime lamp term on walls: Released in 2.6.0. The game's bloom alpha kept on lit walls and the rebalanced style brightness (84% for Soft): Released in 2.7.0. Realistic lamp reach and balcony floors blocking a lamp below them (replacing *Light behind balconies*), the shared daytime curve: Released in 2.12.3. Soft edges by the lamp's size (*Shadow softness*) and lamp light through openings: Released in 2.13.0. Outdoor walls drawn below their light base (gables, eaves) lit from their drawn foot: Released in 2.15.3 |
 | Default | On, Brightness 30%, Realistic lamp reach on |
 | Menu | Lighting > Buildings > Buildings card, group *WALLS* (lamps of every story: Lighting > Stories) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -79,6 +79,7 @@ Both apply live (pushed every frame). The lamps of every story are controlled by
 - The gain scales everything baked in the wall map. The map is a lamp and room solve, so window light baked into it, if
   any, is scaled too (inferred).
 - The gain adds no light where the game baked none: no new lamps, no change to wall occlusion.
+- Gables, eaves and sloped foundation faces lit from their drawn foot are not yet confirmed in game.
 - Wall variants outside the table (for example `PS_2A74E378`, if it is not one of them) keep the game's look.
 - The daytime curve is visual tuning, not a physical ratio. Brightness below 100% stays lower than the game.
 - The curve meets the night value only if the game's own factor is 1 at full night (F7 20-31-19 on the captured
@@ -114,8 +115,18 @@ LightProbe captures `andar2-b` (m44), `andar1-b` (m45), `passo3-parede` (m59) an
   the top of the stone showed light computed well under a sconce. With *Wall lamps at the right height*
   (`paredesExternasNaAlturaDesenhada`), `WallUvHook` writes a short cell (under 2.98 m) whose game mapping is more than
   2 cm off its drawn heights untrimmed, then sets each vertex's V to the row lit at its own height (`clamp((y - base) / 3)`, rows at
-  base + 3k/(N-1)); the trim words go back. Gables the game already maps right are left byte for byte. Counter: "short
-  wall cells (foundation faces) lit at their drawn heights"; dev log `[WallTall] short wall lit at its drawn heights`.
+  base + 3k/(N-1)); the trim words go back. Counter: "short wall cells (foundation faces) lit at their drawn heights";
+  dev log `[WallTall] short wall lit at its drawn heights`.
+- Walls drawn below their light base (2.15.3). An outdoor room's wall is lit from story x 3 (or the floor under it), but a
+  gable is drawn from the top of the knee wall below it: in two light captures story 4's gable was drawn from 27.822 with
+  its light base at 29.708, so its lower 1.9 m took one row lit 1.9 m above it, a hard step where the gable starts. A
+  garage beside a house on a foundation showed the same under its eave (drawn 0.76 m below its base). Per cell, an
+  outdoor wall drawn 5 cm to 3.2 m below its light base has its sample columns moved down to the cell's drawn foot after
+  alignment and stretching (`DropLowFootWall`), and the cell is recut against that foot (`WallUvHook`), so each vertex
+  reads the row lit at its own height; the gable's eave cell, whose tip dips under its foot, is recut like its
+  neighbours. That relaxed recut applies only to walls drawn below their light base; other cells are recut only when
+  one height is over 0.2 m and none is under it. A cell seen low for the first time sends its room to be solved again (`NoteWallCell`); a column of a cell
+  not drawn yet keeps the base. The light probe finds a wall's pixels down to its lowest lit row.
 
 ### Wall gain
 
@@ -130,7 +141,9 @@ LightProbe captures `andar2-b` (m44), `andar1-b` (m45), `passo3-parede` (m59) an
   unknown shaders and an unchanged result keep the native draw. `TerrainLightingPolicy::WallLampScale(native, night,
   gain) = native x gain` at night >= 1, else `gain x LampDay(night)` with `LampDay(n) = 0.03 + 0.97 smoothstep(0, 1, n)`
   (the curve every outdoor lamp term shares, [README](README.md#daylight-policy-terrain_lighting_policyh)). Only `.x`
-  changes; the full constant is restored after the single draw. Counter `g_wallDrawn`.
+  changes; the full constant is restored after the single draw. Counter `g_wallDrawn`. The last wall shader's `K` is
+  kept between draws, and the native scale read here (`NativeWallScale`) is stored without a locked exchange
+  ([per draw](README.md#per-draw-lot_light_bridgecpp)).
 
 ### Lamps of every story (summary)
 
@@ -147,6 +160,8 @@ share. F7 on a wall shows the PS (1372 bytes or another table entry) and the dra
 
 ## Rejected approaches
 
+- Recutting only a gable's eave cell at its drawn heights: reverted after broken light in game; the whole wall is
+  lit from its drawn foot instead ([history](../../history/night-lighting-walls.md)).
 - A per-pixel wall lamp model (PASSO3 design A) was designed and critiqued but never implemented; pattern patches tested
   against the whole shader package were chosen instead. Details in [history](../../history/night-lighting-walls.md).
 - A signature cascade between stories, and a cross-story test without batch culling or the wall-mode byte: see

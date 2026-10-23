@@ -127,3 +127,29 @@ with hysteresis, and kept the game's night level for the moonlight and lamp swit
 **Outcome:** not implemented. Several offsets are unverified at runtime, and on a stormy day walls and ground could lose
 lamp light (the game's daytime lamp constant is 0). A first phase that only logs the sky state exists in development
 builds (`daylight_log`, `features/daylight_probe.cpp`); it changes no light.
+
+### 2026-10-22: the draw hook's patched shader answers and its cost by fix
+
+**Context:** commits `0dba5de` and `6592518`. A draw asks one to three per-shader patch caches (`PatchedFor`) and the
+room map UV map, thousands of times a frame, for the shader the game has set again; the Frame Profiler gives the hooks'
+total cost but not which fix spends it.
+
+**Outcome:** `PatchedFor` answers from a 32-entry front table keyed by cache and pixel shader, and `RoomMapConsts`
+keeps the last vertex shader's entry; both are exact because the maps only grow while the hooks run, and `Shutdown`
+moves the generation they carry. Development builds time one draw in 16 and log the cost by claim source every 10 s,
+with the driver time of the game draws the fixes make kept apart
+([diagnostics](../features/night-lighting/README.md#diagnostics)). No measurement recorded yet
+([validation](../validation/night-lighting-overview.md)).
+
+### 2026-10-22: last answers per Night Lighting draw
+
+**Context:** commits `99b99fb`, `c827d18` and `bb640cb`. The game draws a story's objects and floors with the same
+shaders, maps and lot matrix one after the other, and each draw looked them up again (hash finds, texture references,
+level descriptions, the lot list walk) and counted its status with locked adds.
+
+**Outcome:** the wall gain's constant register, `HoldRig`'s rig snapshot, `RoomMapPadding`'s shader entry and note,
+`FindFloorLot` and `FindLotAt` keep their last answer while their inputs and generations are unchanged; the room map
+reads and the indoor objects' basis scale share the per-frame map size memo; bound maps used as keys are read without a
+reference; the render-thread counters count without a locked add and the native wall scale is stored relaxed then
+release. The draw cost timing flag now ends with its scope when a fix throws. Answers are unchanged by design; not yet
+checked in game ([validation](../validation/night-lighting-overview.md)).

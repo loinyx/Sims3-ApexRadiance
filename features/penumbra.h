@@ -7,6 +7,7 @@
 // cumulative of a parabolic kernel, so the weight of any stretch [a, b] of a wall is Cover(c - a) - Cover(c - b), and
 // stretches side by side add up with no seam. Measured on the wall, the disc stretches by the ray's slant (Slant).
 // No allocation, no game reads: the offline harnesses test it directly (tools/roofed_openings_test).
+#include "fast_math.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -23,7 +24,7 @@ inline std::atomic<float> g_radius{kDefaultRadius};
 // 2.12.3, no texel spread) whatever the radius
 inline std::atomic<bool> g_on{true};
 inline float Radius() { return g_on.load(std::memory_order_relaxed) ? g_radius.load(std::memory_order_relaxed) : kMinRadius; }
-inline void SetRadius(float r) { g_radius.store(std::clamp(std::isfinite(r) ? r : kDefaultRadius, kMinRadius, kMaxRadius), std::memory_order_relaxed); }
+inline void SetRadius(float r) { g_radius.store(std::clamp(ApexMath::IsFinite(r) ? r : kDefaultRadius, kMinRadius, kMaxRadius), std::memory_order_relaxed); }
 
 // The share (0..1) of a spot of half width h on the open side of an edge at signed distance x (x > 0: open side)
 inline float Cover(float x, float h) {
@@ -70,13 +71,13 @@ struct Slant {
 // the wall (tangent T, normal N), |x| |d.N| / sqrt(1 - (d.T)^2).
 inline Slant SlantOf(float dx, float dy, float dz, float nx, float nz) {
     Slant s;
-    const float nl = std::sqrt(nx * nx + nz * nz), dl = std::sqrt(dx * dx + dy * dy + dz * dz), hl = std::sqrt(dx * dx + dz * dz);
+    const float nl = ApexMath::Sqrt(nx * nx + nz * nz), dl = ApexMath::Sqrt(dx * dx + dy * dy + dz * dz), hl = ApexMath::Sqrt(dx * dx + dz * dz);
     if (!(nl > 1e-6f) || !(dl > 1e-6f)) return s;
     nx /= nl, nz /= nl;
-    const float dn = std::fabs(dx * nx + dz * nz);  // |d.N| (unnormalised)
-    const float dt = std::fabs(-dx * nz + dz * nx); // |d.T|
+    const float dn = ApexMath::Fabs(dx * nx + dz * nz);  // |d.N| (unnormalised)
+    const float dt = ApexMath::Fabs(-dx * nz + dz * nx); // |d.T|
     s.along = hl > 1e-6f ? hl / std::max(dn, 1e-3f * hl) : 1.0f;
-    s.up = std::sqrt(std::max(dl * dl - dt * dt, 0.0f)) / std::max(dn, 1e-3f * dl);
+    s.up = ApexMath::Sqrt(std::max(dl * dl - dt * dt, 0.0f)) / std::max(dn, 1e-3f * dl);
     return s;
 }
 

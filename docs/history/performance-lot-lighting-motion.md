@@ -58,3 +58,33 @@ frame for 8 s); and many lamps refined after their quick pass took 35 to 44 ms o
 
 **Outcome:** for 15 s after the world goes live the lot being played keeps the game's budget while moving and gets 25 ms
 still; while a quick pass is refined the budget is capped at 6 ms. All four changes released in 2.7.0.
+
+### 2026-10-22: paced raises while moving
+
+**Context:** commit `715a410`. In a frame-time recording, 61 of 197 hitches while the camera moved came from the two
+raised budgets that kept the game's full budget while moving: a lot settling after its load and a lamp switch's boost.
+
+**Finding:** the frame-time pacing the settle window already used with the camera still (`PaceSettle`) can dose both:
+the game's budget while frames hold, down to the moving budget when they do not. Only the pace of relighting changes,
+not the light.
+
+**Outcome:** both raises are paced while moving, behind the Tester switch *Paced relight while moving*
+(`perf_motion_paced_raise`, on) so the two paths can be compared in game. Gameplay measurement is open
+([validation](../validation/performance-lot-lighting-motion.md)).
+
+### 2026-10-22: paced room solving with the camera still
+
+**Context:** commit `0b6b5af`. Hitches with the camera still were mostly room solves: the game's 15 ms budget plus
+Faster room lighting's 4 ms drain made 25 to 50 ms frames. A fixed smaller budget with the camera still was rejected on
+2026-09-30 because lamps moved in Build mode relit visibly more slowly: the budget hook had no lamp-moved signal.
+
+**Finding:** the frame-time pacing already used for the settle window can dose the steady budgets too, with its own
+baseline (the lower envelope of the frame time, so a run of solving frames does not raise it). Unlike the rejected
+approach it keeps the game's budget while the frames hold, and it leaves alone every case with a budget of its own: a
+lamp edit's rooms (`LevelLightShare::LampEditPending`, `RoomLightQueue::CurrentRoomUrgent`, the edit marks that
+[Faster room lighting](../features/performance/room-light-queue.md#an-edits-rooms-sooner) already keeps), the settle
+window after a load and a lamp switch's boost. The loading budgets (30 and 10 ms) are not paced.
+
+**Outcome:** the steady budgets (15 and 5 ms) and the drain's 4 ms are paced with the camera still, behind the Tester
+switch *Paced relight at rest* (`perf_steady_room_pacing`, on). Gameplay measurement and the Build-mode check are open
+([validation](../validation/performance-lot-lighting-motion.md)).

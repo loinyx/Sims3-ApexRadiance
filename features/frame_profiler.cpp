@@ -485,6 +485,59 @@ thread_local ThreadSlot* t_slot = nullptr;
 thread_local bool t_noSlot = false;
 std::atomic<DWORD> g_renderTid{0}; // render thread (written in the Present hook, read by the sampler too)
 std::atomic<DWORD> g_simTid{0}; // the thread calling GC_try_to_collect
+// (2.15.3) Which logical processors the two busiest threads run on: the game gives the simulation thread ideal processor 1,
+// which is the second hardware thread of core 0 on SMT CPUs; if the render thread mostly runs on logical 0, the two share a
+// core. Counted at each Present (render) and each GC slice (simulation); the report names the SMT pairs.
+constexpr int kCpuSlots = 64;
+std::atomic<uint32_t> g_cpuRender[kCpuSlots] = {}, g_cpuSim[kCpuSlots] = {};
+void NoteCpu(std::atomic<uint32_t>* slots) {
+    PROCESSOR_NUMBER pn{};
+    GetCurrentProcessorNumberEx(&pn);
+    const unsigned cpu = pn.Group * 64u + pn.Number;
+    if (cpu < kCpuSlots) slots[cpu].fetch_add(1, std::memory_order_relaxed);
+}
+// The physical core of each logical processor (group 0), -1 when unknown
+std::vector<int> CoreOfLogical() {
+    std::vector<int> core(kCpuSlots, -1);
+    DWORD len = 0;
+    GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &len);
+    std::vector<BYTE> buf(len);
+    if (!len || !GetLogicalProcessorInformationEx(RelationProcessorCore, reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(buf.data()), &len)) return core;
+    int id = 0;
+    for (DWORD off = 0; off < len;) {
+        const auto* p = reinterpret_cast<const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buf.data() + off);
+        if (p->Relationship == RelationProcessorCore) {
+            const GROUP_AFFINITY& g = p->Processor.GroupMask[0];
+            for (int b = 0; b < 64; b++)
+                if (g.Group == 0 && (g.Mask >> b & 1) && b < kCpuSlots) core[b] = id;
+            id++;
+        }
+        off += p->Size;
+    }
+    return core;
+}
+std::string CpuText() {
+    const std::vector<int> core = CoreOfLogical();
+    uint64_t rTot = 0, sTot = 0;
+    for (int i = 0; i < kCpuSlots; i++) rTot += g_cpuRender[i].load(), sTot += g_cpuSim[i].load();
+    if (!rTot && !sTot) return "CPU: not counted yet\n";
+    const auto list = [&](std::atomic<uint32_t>* slots, uint64_t total) {
+        std::string s;
+        for (int i = 0; i < kCpuSlots; i++) {
+            const uint32_t n = slots[i].load();
+            if (total && n * 20 >= total) s += std::format("{}logical {} (core {}) {:.0f}%", s.empty() ? "" : ", ", i, core[i], 100.0 * n / total);
+        }
+        return s.empty() ? std::string("-") : s;
+    };
+    // how often both threads ran on one physical core, assuming independence of the two distributions
+    double shared = 0.0;
+    if (rTot && sTot)
+        for (int a = 0; a < kCpuSlots; a++)
+            for (int b = 0; b < kCpuSlots; b++)
+                if (a != b && core[a] >= 0 && core[a] == core[b]) shared += (double(g_cpuRender[a].load()) / rTot) * (double(g_cpuSim[b].load()) / sTot);
+    return std::format("CPU: render thread on {}; simulation thread on {}; both on the two hardware threads of one core about {:.0f}% of the time (estimate)\n",
+                       list(g_cpuRender, rTot), list(g_cpuSim, sTot), shared * 100.0);
+}
 
 ThreadSlot* GetSlot() {
     if (ThreadSlot* s = t_slot) return s;
@@ -1010,7 +1063,9 @@ uint64_t __fastcall Hook_LotLoadStages(void* self, void* edx) {
     const uint64_t started = LotLoadAnalysis::Clock();
     const auto result = Orig<T_LotLoadStages, FnThis0>()(self, edx);
     const uint64_t ended = LotLoadAnalysis::Clock();
-    LotLoadAnalysis::Sample(before, LotLoadAnalysis::ReadRenderer(self), started, ended);
+    const auto after = LotLoadAnalysis::ReadRenderer(self);
+    LotLoadAnalysis::Sample(before, after, started, ended);
+    LotLoadAnalysis::NoteWait(self, after);
     return result;
 }
 
@@ -1041,6 +1096,7 @@ uint64_t __fastcall Hook_TerrainUpdate(void* self, void* edx, uint32_t a, uint32
 
 uint64_t __cdecl Hook_ScriptGC(uint32_t stopFunc) {
     g_simTid.store(GetCurrentThreadId(), std::memory_order_relaxed);
+    NoteCpu(g_cpuSim);
     Scope sc(kScriptGC);
     return Orig<T_ScriptGC, FnCdecl1>()(stopFunc);
 }
@@ -2322,18 +2378,16 @@ std::atomic<uint32_t> g_qHead{0}, g_qTail{0};
 std::atomic<uint32_t> g_qDropped{0}, g_qWritten{0};
 std::atomic<bool> g_writerRunning{false};
 
-// ---- optional per-hook registry timing (all access under the registry mutex, see frame_profiler.h) ----
-struct RegName {
-    std::string name;
-    uint64_t ticks = 0;
-    uint32_t calls = 0;
+// ---- optional per-hook registry timing (see frame_profiler.h): one slot per registered name, never removed ----
+constexpr int kRegSlots = 96;
+struct RegSlot {
+    std::string name;                 // written once under g_regSlotLock, before the slot is published
+    std::atomic<uint64_t> ticks{0};
+    std::atomic<uint32_t> calls{0};
 };
-struct RegPtr {
-    const char* ptr;
-    int idx;
-};
-std::vector<RegName> g_regNames;
-std::vector<RegPtr> g_regPtrs;
+RegSlot g_regSlots[kRegSlots];
+std::atomic<int> g_regSlotCount{0};
+std::mutex g_regSlotLock;
 uint32_t g_regFrames = 0;
 uint64_t g_regWindowStart = 0;
 struct RegDisplay {
@@ -3116,12 +3170,13 @@ void RollRegistryWindow(uint64_t now) {
     g_regFrames++;
     if (static_cast<double>(now - g_regWindowStart) * g_msPerTick < 1000.0) return;
     g_regDisplay.clear();
-    for (auto& n : g_regNames) {
-        if (n.calls && g_regFrames) {
-            g_regDisplay.push_back({n.name, static_cast<float>(static_cast<double>(n.ticks) * g_msPerTick / g_regFrames), static_cast<float>(n.calls) / g_regFrames});
-        }
-        n.ticks = 0;
-        n.calls = 0;
+    const int slots = g_regSlotCount.load(std::memory_order_acquire);
+    for (int i = 0; i < slots; i++) {
+        RegSlot& n = g_regSlots[i];
+        const uint64_t ticks = n.ticks.exchange(0, std::memory_order_relaxed);
+        const uint32_t calls = n.calls.exchange(0, std::memory_order_relaxed);
+        if (calls && g_regFrames)
+            g_regDisplay.push_back({n.name, static_cast<float>(static_cast<double>(ticks) * g_msPerTick / g_regFrames), static_cast<float>(calls) / g_regFrames});
     }
     std::sort(g_regDisplay.begin(), g_regDisplay.end(), [](const RegDisplay& a, const RegDisplay& b) { return a.msPerFrame > b.msPerFrame; });
     g_regFrames = 0;
@@ -3304,6 +3359,7 @@ void AttachWaitingLocked();
 void OnPresentStart(D3D9Hooks::DeviceContext& ctx) {
     const uint64_t now = Now();
     g_renderTid.store(GetCurrentThreadId(), std::memory_order_relaxed);
+    NoteCpu(g_cpuRender);
     if (ThreadSlot* s = GetSlot()) {
         CleanStale(s, &ctx);
         Split(s, now);
@@ -4136,6 +4192,7 @@ std::string BuildReport() {
     s += std::format("Last {} frames: frame {:.2f} ms, cpu {:.2f}, present {:.2f}, limiter {:.2f}, mod D3D {:.2f}, draws {:.0f} (+{:.0f} end-of-frame)\n", g_liveCount, a.frameMs, a.cpuMs,
         a.presentMs, a.limiterMs, a.modMs, a.gameDraws, a.endFrameDraws);
     const auto rate = [](uint64_t h, uint64_t f) { return f ? 100.0 * static_cast<double>(h) / static_cast<double>(f) : 0.0; };
+    s += CpuText();
     s += std::format("Camera: moving in {} frames, still in {}; hitch rate while moving {:.2f}%, while still {:.2f}%\n", g_stats.framesMoving, g_stats.framesStill,
         rate(g_stats.hitchesMoving, g_stats.framesMoving), rate(g_stats.hitchesStill, g_stats.framesStill));
     {
@@ -4156,7 +4213,8 @@ std::string BuildReport() {
     s += AddressSpace::ReportText();
     s += "Apex shaders: " + ShaderCache::StatusText() + "\n";
     if (!g_regDisplay.empty()) {
-        s += "Registry hooks by name (last second; Present hooks always, draw hooks with per-hook registry timing):\n";
+        s += "Registry hooks by name (last second; Present hooks always, draw hooks with per-hook registry timing; each callback's own time, without the "
+             "callbacks nested in it and the driver time of the draws it issued):\n";
         for (const auto& d : g_regDisplay) s += std::format("   {:<36} {:>7.3f} ms / frame {:>9.1f} calls / frame\n", d.name, d.msPerFrame, d.callsPerFrame);
     }
     s += std::format("Draw / state hooks called off the render thread (dispatched under the lock): {}\n", D3D9Hooks::OffThreadDispatches());
@@ -4233,6 +4291,7 @@ void Clear() {
         g_otherSvcBaseCalls[i] = g_otherSvc[i].calls.load();
     }
     g_stats = Stats{};
+    for (int i = 0; i < kCpuSlots; i++) g_cpuRender[i].store(0), g_cpuSim[i].store(0);
     g_graphPos = g_graphCount = 0;
     g_livePos = g_liveCount = 0;
     g_medianPos = g_medianCount = 0;
@@ -5022,34 +5081,21 @@ void EndModTime(int token, const void* key) {
     Pop(s, token, key, Now(), 0, 0);
 }
 
-// Keyed by the name string's address (fast path), verified by content: the registry's short names live inside its
-// vectors' elements, so an address can be reused by another module's hook after a register / unregister.
-void AddRegistryHookTime(const std::string& hookName, uint64_t ticks) {
-    const char* p = hookName.c_str();
-    RegPtr* cached = nullptr;
-    for (auto& e : g_regPtrs) {
-        if (e.ptr == p) {
-            if (g_regNames[e.idx].name == hookName) {
-                g_regNames[e.idx].ticks += ticks;
-                g_regNames[e.idx].calls++;
-                return;
-            }
-            cached = &e;
-            break;
-        }
-    }
-    int idx = -1;
-    for (size_t i = 0; i < g_regNames.size(); i++)
-        if (g_regNames[i].name == hookName) idx = static_cast<int>(i);
-    if (idx < 0) {
-        if (g_regNames.size() >= 64) return;
-        g_regNames.push_back({hookName, 0, 0});
-        idx = static_cast<int>(g_regNames.size()) - 1;
-    }
-    if (cached) cached->idx = idx;
-    else if (g_regPtrs.size() < 256) g_regPtrs.push_back({p, idx});
-    g_regNames[idx].ticks += ticks;
-    g_regNames[idx].calls++;
+int RegistryTimingSlot(const std::string& hookName) {
+    std::lock_guard<std::mutex> lock(g_regSlotLock);
+    const int n = g_regSlotCount.load(std::memory_order_relaxed);
+    for (int i = 0; i < n; i++)
+        if (g_regSlots[i].name == hookName) return i;
+    if (n >= kRegSlots) return -1;
+    g_regSlots[n].name = hookName;
+    g_regSlotCount.store(n + 1, std::memory_order_release);
+    return n;
+}
+
+void AddRegistryHookTimeAt(int slot, uint64_t ticks) {
+    if (slot < 0 || slot >= kRegSlots) return;
+    g_regSlots[slot].ticks.fetch_add(ticks, std::memory_order_relaxed);
+    g_regSlots[slot].calls.fetch_add(1, std::memory_order_relaxed);
 }
 
 } // namespace FrameProfiler
@@ -5067,7 +5113,8 @@ void LoadFromToml(const toml::table&) {}
 void Shutdown() {}
 bool RegistryHookTimingActive() { return false; }
 uint64_t Ticks() { return __rdtsc(); }
-void AddRegistryHookTime(const std::string&, uint64_t) {}
+int RegistryTimingSlot(const std::string&) { return -1; }
+void AddRegistryHookTimeAt(int, uint64_t) {}
 bool PresentHookTimingActive() { return false; }
 bool ModTimeActive() { return false; }
 int BeginModTime(ModTime, const void*) { return -1; }

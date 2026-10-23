@@ -739,3 +739,20 @@ walls, and softly. Nothing tested the other walls of the receiving story between
 **Outcome:** the stretch from where the ray enters the receiving story through the opening to the point is tested on
 that story's wall grid (`GridWallHitHard`, under `indoor_lamp_walls`) in `IndoorPassImpl`. It is a veto only: a ray
 that crosses a wall is stopped, and every other ray keeps the game's answer. Visual confirmation in game is open.
+
+### 2026-10-22: room solve hot spots
+
+**Context:** commits `522ef32` and `7d69737`, from Frame Profiler samples inside the game's room solve. Under
+`/fp:precise`, `std::sqrt(float)` and `std::fabs(float)` were calls to the CRT and among the hottest Apex samples; the
+lamp position cache had 8 slots tried in turn, filled round robin, while a room sees up to 32 lamps; and the window
+light's evaluation asked for every sample whether the light belongs to channel 1, an object lookup by lot id each time
+(150 to 180 thousand lookups in one room-solve frame).
+
+**Finding:** `sqrtss` and a sign-bit mask give the same bits as `sqrtf` and `fabsf` for all 2^32 float inputs, NaN
+payloads included ([validation](../validation/night-lighting-level-light-share.md#latest-results)). Within one sample
+batch on the light tree thread the light, its lot and the lot's room table do not change, so the channel answer cannot
+change either.
+
+**Outcome:** `ApexMath::Sqrt` / `Fabs` in the solve's hot loops, a 64-slot position cache with one slot per light, and
+the channel answer kept per light and channel for the batch (Tester switch *Window light channel memo*). The light is
+unchanged by design; gameplay timing is open.

@@ -7,7 +7,7 @@ This page documents how `TS3W.exe` streams lots around the camera: LOD scoring, 
 | | |
 |---|---|
 | Game build | Steam 1.67.2 (`TS3W.exe`, image base 0x00400000) unless stated |
-| Used by | [Architecture: loaded-world gate](../architecture.md#12-loaded-world-gate-and-start-note) (`features/world_session.h`), [Depth Blur](../features/depth-blur.md), [Performance](../features/performance/README.md), [Terrain relight](../features/night-lighting/terrain-relight.md), [Frame Profiler](../features/frame-profiler.md) |
+| Used by | [Architecture: loaded-world gate](../architecture.md#12-loaded-world-gate-and-start-note) (`features/world_session.h`), [Depth Blur](../features/depth-blur.md), [Performance](../features/performance/README.md) (with the scene message router's map for [Faster Object Lookups](../features/performance/object-lookup-index.md)), [Terrain relight](../features/night-lighting/terrain-relight.md), [Frame Profiler](../features/frame-profiler.md) |
 | Evidence | Disassembly (`engine_map`), Ghidra `re/out/fn_00aea680.c`, combined-build patch headers, `features/world_session.h`; items marked *(inferred)* are static only |
 
 ## Overview
@@ -120,11 +120,26 @@ Load stages of `FUN_00AEA680` (from `re/out/fn_00aea680.c`; allocator tag string
 | 16 | "LotRenderer/InitDetailedView/..." room sets (sunnyRooms, lightableRooms, fogOfExplorationRooms, blackLitRooms, strobeLitRooms, buildableShellRooms) |
 | 17 / 18 | Post a job (function 0xACBB80) / wait for it (+0x30) |
 | 19 | Wait for `FUN_00C4D990` |
-| 20 (0x14) | Lighting ready (`FUN_00ADBBA0` -> `0x006A5B50` per level: both level solvers' state != 0, i.e. the **wall AO first pass** of every level ran; not yet = yield and retry next frame; round 3, [room-light-maps.md](room-light-maps.md) 4.5); clears manager+0x4F |
+| 20 (0x14) | Lighting ready (`FUN_00ADBBA0` -> `0x006A5B50` per level: both level solvers' state != 0, i.e. the **wall AO first pass** of every level ran; not yet = yield and retry next frame; round 3, [room-light-maps.md](room-light-maps.md) 4.5; full conditions [below](#stage-20-the-lighting-wait)); clears manager+0x4F |
 | 21 (0x15) | Done (`FUN_00AD9CA0`) |
 
 The budget stopwatch is unit 4 (ms), started once before the loop, and checked after each stage. A failed stage sets
 +0x1F and calls `FUN_00AE1A90(1)`.
+
+#### Stage 20: the lighting wait
+
+Stage 20 (case 20 of `0x00AEA680`) moves on only when `0x00ADBBA0` on the lot lighting manager (`[renderer+0x23C]`)
+finds every level of its deque (`+0x24..+0x40`, 64 levels per block) ready by `0x006A5B50`:
+
+1. A level with `[lvl+0x81] == 0` (not lit) is ready.
+2. Otherwise, when `[lvl+0x88] >= 0`, both solver states `[lvl+0x2A4]` and `[lvl+0x2FC]` must be non-zero (the wall AO
+   first pass ran, [room-light-maps.md](room-light-maps.md)).
+3. Then every room light of the level's table (buckets `+0x234`, count `+0x238`, next node `+0x80`, the room light at
+   node `+0x10`) must pass `0x0069F540(0)`: a room it does not let through on the level numbers (`[lvl+0x88]`,
+   `[lvl+0x284]`, `[room+0x18]`) must have `[room+0x104] != 4`.
+
+Not ready: the stage yields and is retried next frame. Lot loading analysis logs these fields for a lot that waits here
+for more than 10 s ([features/lot-load-analysis.md](../features/lot-load-analysis.md#lighting-wait-note)).
 
 #### Lot lighting manager
 - +0x14: lot.
@@ -133,6 +148,27 @@ The budget stopwatch is unit 4 (ms), started once before the loop, and checked a
 #### SceneObjectManager ([0x011D1CF8])
 - +0x10D0 / +0x10E0: the two lot ids that `FUN_006FDC80` treats as "priority". The same test gives a lot the larger
   lighting budget in `FUN_00ADB120`. Most likely the active or focused lot *(not proven)*.
+
+#### Scene message router: objects by ID
+
+The scene's message router, a 0x11A8-byte singleton made at `0x006E0E19` and registered by `0x006FDE20` (vtable
+`0x00FFA1F4`, constructor `0x00703510`), keeps objects by their 64-bit ID in a hash map at +4:
+
+- 1033 (0x409) buckets of singly linked nodes, keyed by `idLo % 1033`; a node holds the ID at +8 / +0xC and the next
+  node at +0, and the object is node - 8. The end sentinel is at map +0x1024, the count at +0x1028.
+- `0x006FDFB0` find, thiscall(map; out[2], key*), ret 8: out = {node, &bucket}, or {`*(map+0x1024)`, map+0x1024} when
+  the ID is not there; 56 call sites, among them `0x006FE3B0` and the getter at `0x006FE420` (each a thin "object by
+  ID"), used by the lot's light and scene updates. In a CPU sample it was the busiest game function on the render
+  thread (2.8% of it).
+- `0x006FE1F0` insert, thiscall(map; out[3], node, flag), ret 0xC: the only writer of new links (one caller); out byte 8
+  is 1 when the node was linked, 0 when the ID was there already.
+- `0x006FDF40` erase, thiscall(map; out[2], node, bucket*), ret 0xC: the only unlinker (callers `0x007030FB`,
+  `0x00703406`).
+- Nothing else writes the count: the only other write is the constructor's 0 (`0x00703528`), and the owner does not
+  write +0x102C. Insert and erase are leaves.
+
+The map is the same kind as the object service's map that Faster Object Lookups also indexes (there the next link is
+at node +0x10). Apex keeps a side index of it ([Faster Object Lookups](../features/performance/object-lookup-index.md#the-scene-object-map-index)).
 
 #### Terrain (WorldManager+0x58)
 - +0xB0/+0xB4: chunk vector. Chunk +0x0C/+0x10 are int x/z; +0x54 re-renders the four composited textures; +0x55
@@ -233,10 +269,14 @@ LSO's install log lines, as seen on 28/09:
 | 0x73E060 | `map_view.cpp` (Depth Blur off in map view), LSO |
 | CALL 0xADB95D (-> 0xADB120), camera eye read 0xC6D5BD (0x6E8330 / 0x6E8400, +0x60) | Lot Lighting While Moving ([../features/performance/lot-lighting-motion.md](../features/performance/lot-lighting-motion.md)): the budget is scaled while the camera moves |
 | 0x4AFFC0 FindProvider and the resource manager's list methods (0x4B2D00, 0x736A70, 0x4B2EC0, 0x4B0960) | Faster Game File Lookups ([../features/performance/resource-lookup-cache.md](../features/performance/resource-lookup-cache.md)) |
+| The scene message router's map by ID: 0x6FDFB0 find, 0x6FE1F0 insert, 0x6FDF40 erase | Faster Object Lookups ([../features/performance/object-lookup-index.md](../features/performance/object-lookup-index.md)): a side index answers the finds |
 
 ### Open questions
 
 - The meaning of the "priority" lots (SceneObjectManager+0x10D0/+0x10E0).
+- Whether the scene message router is the SceneObjectManager: its constructor `0x00703510` is also one of the writers
+  of the priority lot ids, and its registration `0x006FDE20` sits next to the SceneObjectManager getter `0x006FDE10`
+  *(not checked)*.
 - The default of "Throttle Lot LoD Transitions" (0x011ECBC0 is presumably zero-initialized) and whether the live-setting
   registry loads saved values over the constructor's defaults.
 - What exactly 0xC62D80 measures (it is some distance squared, scaled), and whether LSO's JZ→JMP removes a hysteresis
@@ -269,6 +309,8 @@ LSO's install log lines, as seen on 28/09:
 | 0x00AEA6AC / 0xAEA6D0 / 0xAEA6E9 | The three budget movs: 20 / 35 (priority lot) / 2000 (tool mode) ms | Smooth Streaming |
 | 0x006FDC80 | "Priority lot" test thiscall(sceneObjMgr, lo, hi), RET 8: lot id == SceneObjectManager+0x10D0 or +0x10E0 | Smooth Streaming |
 | 0x006FDE10 | SceneObjectManager getter `mov eax,[0x011D1CF8]; ret` | bytes checked |
+| 0x006FDFB0 / 0x006FE1F0 / 0x006FDF40 | Find / insert / erase of the scene message router's map by object ID (map at router +4) | `features/render_object_map.h` header; `GameAddr` ids RenMapFind / RenMapInsert / RenMapErase |
+| 0x006E0E19 / 0x006FDE20 / 0x00703510 | The scene message router's creation / registration / constructor (vtable 0x00FFA1F4, 0x11A8 bytes) | `features/render_object_map.h` header |
 | 0x00ADB120 | Lot lighting budget (ECX = lot lighting manager, ST0): 5 ms; 10 while loading (+0x4F); 15/30 for priority lots; 1000 in tool mode. Only caller: the CALL at 0x00ADB95D in 0x00ADB8F0 | Smooth Streaming; Lot Lighting While Moving redirects that CALL ([../features/performance/README.md](../features/performance/README.md)) |
 | 0x00AE4CB0 → 0x00ADB8F0 → 0x006A8BA0 | Budgeted per-frame room lighting of a lot (`FUN_00ADB8F0` only caller 0xAE4D2A) | profiler, Smooth Streaming note 5 |
 | 0x00ADBAD0 → 0x006A80E0 → 0x006A3EC0 | Synchronous room light solve (while room+0xF0 == 3, 60000 ms budget), used by the impostor builder | Smooth Streaming note 3 |

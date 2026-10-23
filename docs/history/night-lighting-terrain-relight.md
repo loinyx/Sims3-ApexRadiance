@@ -305,3 +305,15 @@ a cross-shaped seam.
 smoothed maps until its last chunk is re-rendered (1.5 s at most), then builds them all in the next frame. Pure switches
 only, not drags or value edits. In the recording that showed it, 4 chunks took 8 frames before and 4 after. Released in
 2.7.0.
+
+### 2026-10-22: skipping the daytime world-load rebuild (rejected)
+
+**Context:** a world loaded by day still runs the terrain light rebuild of the load, about one 240 ms frame, even when
+no baked lamp is lit. Skipping it when no lamp in the bake is lit was considered.
+
+**Finding:** the bake's lamp light (colour x intensity x range) does not include the night level, so a daytime bake
+already holds the lamps' light; nothing shows that the terrain shader hides the lamp maps by day. Skipping the rebuild
+would also leave the bake snapshot (`g_baked`) unset, which the later lamp edit decisions (`DiffBake`) read.
+
+**Outcome:** rejected. The saving is one frame per load, against a risk of stale terrain light and of wrong lamp edit
+decisions after the load.

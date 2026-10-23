@@ -12,7 +12,7 @@ that cannot run it, none of it runs.
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1. Baked lamp records without padding (the frame rate of 2.15.1 while moving the camera): Released in 2.15.2 |
+| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1. Baked lamp records without padding (the frame rate of 2.15.1 while moving the camera): Released in 2.15.2. Shaders from the shader cache: Released in 2.15.3 |
 | Default | On (Lamp lighting: Instant (GPU); a saved `lampLightingMode` keeps its choice) |
 | Menu | System > Performance > Lamp lighting > Lamp updates: Instant (GPU) |
 | Configuration | `lampLightingMode = "instant"` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -122,6 +122,12 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
   G16R16F with D24X8 depth, 16 lamps an atlas, near 0.005 m, far 64 m; the relight accumulates 16 lamps a draw into an
   A32B32G32R32F target at each texel, then composes and packs into the copy; the wall blur runs on the GPU with the
   game's integer rounding.
+- **Shaders.** The 13 vertex and pixel shaders (`shaders/rt_lamps_hlsl.h`, `RtLampGpu::ShaderId`) are registered with
+  Apex's shader cache with the same source, entries, targets and flags they always used, so their bytecode is unchanged.
+  They are precompiled with every other Apex shader at start-up, off the render thread, and come from the disk cache or
+  the copy built into the ASI ([shader precompile](../../architecture.md#44-shader-precompile)). The first frame the
+  option runs, a worker takes the 13 bytecodes with `ShaderCache::Bytecode`; until they are ready the status says the
+  shaders are being compiled, and a shader that failed to compile leaves the option inactive with the compiler's message.
 - **Logs**: `[RtOutdoorLamps]` lines (inactive reasons once each, each story's map identity, each relight and each edit).
 - **Offline check**: `tools/rt_lamps_test/run.ps1` (shadows against a CPU reference on a Direct3D 9 device, the bake split
   and the wall blur).

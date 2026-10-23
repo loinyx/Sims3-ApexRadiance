@@ -23,3 +23,10 @@ and elapsed-time conversion. Synthetic objects are not validation of live object
 5. Correlate with memory CSV and aggregate profiler reports, without assigning causality from correlation alone.
 
 Live field validation, capture overhead and EA 1.69 support remain open.
+
+## Open checks
+
+- Lighting wait note (`7d69737`): a lot held in stage 20 for more than 10 s logs `[LotLoadAnalysis] Lot ... waits in
+  stage 20 (lighting)`, at most every 30 s, and the level fields agree with the conditions in
+  [engine/lot-loading-and-streaming.md](../engine/lot-loading-and-streaming.md#stage-20-the-lighting-wait). Not yet seen
+  in a log.

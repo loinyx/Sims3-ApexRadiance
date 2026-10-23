@@ -11,6 +11,7 @@
 // whose radiance is albedo x irradiance / pi; the wall point takes radiance x cos(at the point) x cos(at the patch) x area
 // / distance^2. The irradiance below is the game's own evaluation of the lower room's lamps there. The floor of the story
 // above lies in the opening's plane and takes nothing (cos 0 at the patch), as it should: only a third bounce lights it.
+#include "fast_math.h"
 #include <algorithm>
 #include <cmath>
 
@@ -29,7 +30,7 @@ inline float Geometry(const float p[3], const float n[3], const float q[3], floa
     const float above = p[1] - q[1];
     if (!(above > kMinAbove) || !(area > 0.0f)) return 0.0f;
     const float r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-    const float r = std::sqrt(r2);
+    const float r = ApexMath::Sqrt(r2);
     if (!(r > 1e-4f)) return 0.0f;
     const float cosP = (n[0] * d[0] + n[1] * d[1] + n[2] * d[2]) / r, cosQ = above / r;
     if (!(cosP > 0.0f)) return 0.0f;
@@ -41,7 +42,7 @@ inline void Add(const float p[3], const float n[3], const float q[3], float area
     const float g = Geometry(p, n, q, area) * kAlbedo / kPi;
     if (!(g > 0.0f)) return;
     for (int c = 0; c < 3; c++)
-        if (std::isfinite(below[c]) && below[c] > 0.0f) out[c] += g * below[c];
+        if (ApexMath::IsFinite(below[c]) && below[c] > 0.0f) out[c] += g * below[c];
 }
 
 // The floor of the story above (its plane holds the opening, so it sees none of it): the light that rises through an
@@ -68,7 +69,7 @@ inline void UpFlux(const float (*seen)[3], float area, float flux[3]) {
         float dir[3], w;
         Line(i, dir, w);
         for (int c = 0; c < 3; c++)
-            if (std::isfinite(seen[i][c]) && seen[i][c] > 0.0f) flux[c] += area * kAlbedo / kPi * seen[i][c] * w;
+            if (ApexMath::IsFinite(seen[i][c]) && seen[i][c] > 0.0f) flux[c] += area * kAlbedo / kPi * seen[i][c] * w;
     }
 }
 // The ceiling's share of one patch's upward flux that a floor point takes per unit flux, at ground distance d (m)
@@ -83,18 +84,18 @@ constexpr float kWellLift = 1.5f;
 // and the rest of the room stays black): its surfaces take back what its lit ones reflect, one bounce averaged over the
 // room, albedo x the mean light of its floor and wall texels (a closed room's first bounce; the further ones are left to the
 // game's own ambient)
-inline float RoomFill(float mean) { return std::isfinite(mean) && mean > 0.0f ? kAlbedo * mean : 0.0f; }
+inline float RoomFill(float mean) { return ApexMath::IsFinite(mean) && mean > 0.0f ? kAlbedo * mean : 0.0f; }
 // (room_fill) Whether the mean light a solve measured (now) differs from the one its fill used (used) by more than a quarter
 // of the larger; two means both under 1e-4 count as the same (dark), and a mean that is not a number counts as changed
 inline bool FillChanged(float used, float now) {
-    return !(std::fabs(now - used) <= 0.25f * std::max(now, used) || std::max(now, used) < 1e-4f);
+    return !(ApexMath::Fabs(now - used) <= 0.25f * std::max(now, used) || std::max(now, used) < 1e-4f);
 }
 // The surface a sample's normal (world, y up) belongs to: a floor (facing up), a wall (horizontal) or neither (a ceiling,
 // a slope, a normal that is not a number)
 enum class Surface { None, Floor, Wall };
 inline Surface SurfaceKind(float nx, float ny, float nz) {
     if (ny > 0.9f) return Surface::Floor;
-    if (std::fabs(ny) < 0.5f && std::fabs(nx) + std::fabs(nz) > 0.5f) return Surface::Wall;
+    if (ApexMath::Fabs(ny) < 0.5f && ApexMath::Fabs(nx) + ApexMath::Fabs(nz) > 0.5f) return Surface::Wall;
     return Surface::None;
 }
 // (borrowed_light_adapt) The normalisation of a room lit only by lamps of another story. The eye adapts to a dark room only
@@ -110,8 +111,8 @@ constexpr float kBorrowedAdaptMax = 1.4f;
 constexpr float kAdaptNoneTook = 0.002f, kAdaptFullTook = 0.01f;
 inline float BorrowedAdapt(float game, float took) {
     const float keep = std::min(game, 1.0f);
-    if (!(took > 0.0f) || !std::isfinite(took)) return keep;
-    const float adapt = std::clamp(std::sqrt(1.0f / took), keep, kBorrowedAdaptMax);
+    if (!(took > 0.0f) || !ApexMath::IsFinite(took)) return keep;
+    const float adapt = std::clamp(ApexMath::Sqrt(1.0f / took), keep, kBorrowedAdaptMax);
     const float w = std::clamp((took - kAdaptNoneTook) / (kAdaptFullTook - kAdaptNoneTook), 0.0f, 1.0f);
     return keep + w * (adapt - keep);
 }
@@ -135,8 +136,8 @@ bool Follow(const float p[3], const float q[3], float yLow, int room, RoomAt roo
     if (!(d[1] < -1e-4f) || room <= 0) return false;
     const float tFloor = (yLow - q[1]) / d[1]; // > 0: q is above the lower floor
     if (!(tFloor > 0.0f)) return false;
-    const float run = std::sqrt(d[0] * d[0] + d[2] * d[2]);
-    const int steps = run > 1e-4f ? static_cast<int>(std::ceil(tFloor * run / kStep)) : 1;
+    const float run = ApexMath::Sqrt(d[0] * d[0] + d[2] * d[2]);
+    const int steps = run > 1e-4f ? static_cast<int>(ApexMath::Ceil(tFloor * run / kStep)) : 1;
     if (static_cast<float>(steps) * kStep > kMaxRun + kStep) return false;
     float prev[3] = {q[0], q[1], q[2]};
     for (int i = 1; i <= steps; i++) {

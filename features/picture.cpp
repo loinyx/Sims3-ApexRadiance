@@ -32,6 +32,7 @@
 #include "gpu_timing_policy.h"
 #include "build_flavor.h"
 #include "world_session.h"
+#include "scene_copy.h"
 #include "shader_cache.h"
 #include "imgui.h"
 #include "ui/i18n.h"
@@ -993,10 +994,7 @@ void OnGameDraw(D3D9Hooks::DeviceContext& ctx, bool isStripOfTwo) {
     // The depth test on but passing everything with no depth write uses no depth: not scene (06/10, frame capture with
     // the pie menu open: ~25 full-screen copies of the back buffer at the end of the frame, z on / ALWAYS / no write,
     // counted as more scene, so the end-of-frame copy took the UI and the Sim portrait's cleared depth: a grey box)
-    if (z != D3DZB_FALSE && !ctx.ZWriteEnable()) {
-        DWORD func = D3DCMP_LESSEQUAL;
-        if (SUCCEEDED(dev->GetRenderState(D3DRS_ZFUNC, &func)) && func == D3DCMP_ALWAYS) z = D3DZB_FALSE;
-    }
+    if (z != D3DZB_FALSE && !ctx.ZWriteEnable() && ctx.ZFunc() == D3DCMP_ALWAYS) z = D3DZB_FALSE;
     if (z != D3DZB_FALSE) {
         gpu.sceneDraws++;
         gpu.runDraws++;
@@ -1417,9 +1415,8 @@ void Picture::ReleaseResources() {
     SafeRelease(gpu.lutTex);
     gpu.lutSize = 0;
     gpu.lutLoaded = "\x01"; // never a file name: loaded again on the next frame that needs it
-    SafeRelease(gpu.frameSurf);
+    SceneCopy::Drop(&gpu.frameTex, &gpu.frameSurf);
     SafeRelease(gpu.sceneSurf);
-    SafeRelease(gpu.frameTex);
     SafeRelease(gpu.sceneTex);
     SafeRelease(gpu.depthSurf);
     SafeRelease(gpu.depthTex);
@@ -1480,7 +1477,9 @@ bool Picture::InitResources(IDirect3DDevice9* dev) {
         lastHr = dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, bd.Format, D3DPOOL_DEFAULT, t, nullptr);
         return SUCCEEDED(lastHr) && *t && SUCCEEDED((*t)->GetSurfaceLevel(0, s)) && *s;
     };
-    bool ok = make(bd.Width, bd.Height, &gpu.frameTex, &gpu.frameSurf);
+    // the frame copy is made and read inside the final pass only (the shared copy); the scene copy is kept from the end of the
+    // scene to that pass, so it stays Picture's own
+    bool ok = SceneCopy::Acquire(dev, bd.Width, bd.Height, bd.Format, &gpu.frameTex, &gpu.frameSurf);
     UINT cw = bd.Width, ch = bd.Height;
     // Keep the same dimensions in shader constants even before an effect needs the copies.
     for (int i = 0; i < Gpu::kChain; i++) {

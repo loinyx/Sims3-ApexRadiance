@@ -1426,3 +1426,18 @@ made the effects come 3 to 10 s after the map showed.
 
 **Outcome:** `WorldSession::InWorld` gates Color, Ambient Occlusion, Edge Smoothing and Depth Blur; the menu and the start
 note are available from the world selector on (the startup loading window gone). Released in 2.7.0.
+
+### 2026-10-22: start-up time and one shared scene copy
+
+**Context:** commits `70ad305`, `0405517` and `0b2db2f`. Features started 2.3 to 2.5 s after the world load began, so
+the first seconds of the load ran without Apex's caches. On Steam 1.67.2 the signature scan, only a self-check there,
+took about 0.9 s; each suspended code write took a Toolhelp snapshot of every thread of the system (about 60 ms, some
+1.4 s of feature start-up in all). Real-time outdoor lamps compiled its 13 shaders with `D3DCompile` at every start
+(about 3.6 s on a worker, with the compiler's heap peak). Picture, Ambient Occlusion, Depth Blur and Edge Smoothing
+each kept a full-resolution back-buffer copy that holds nothing between passes (up to four textures of about 33 MB
+each at 3840x2160).
+
+**Outcome:** the self-check runs in developer mode only; a suspended write reuses the thread list for 1 s on the same
+thread; the outdoor lamp shaders come from the shader cache with unchanged bytecode (`ShaderCache::Bytecode`); the four
+passes share one copy (`SceneCopy`), about 100 MB less video memory at 3840x2160. Gameplay validation is open
+([validation/performance.md](../validation/performance.md#open-checks), [validation/picture-filters.md](../validation/picture-filters.md#open-checks)).

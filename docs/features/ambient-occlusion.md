@@ -9,7 +9,7 @@ the shade on Sims and their hair separately.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0. Distance: Released in 2.6.0. Temporal smoothing, Half resolution, Thin object detail and the wait for the drawn world (never on the main menu or load screens): Released in 2.7.0. Temporal smoothing, Thin object detail and Object thickness are removed in 2.11.1; their legacy keys are ignored. |
+| Availability | Released in 2.1.0. Distance: Released in 2.6.0. Temporal smoothing, Half resolution, Thin object detail and the wait for the drawn world (never on the main menu or load screens): Released in 2.7.0. Temporal smoothing, Thin object detail and Object thickness are removed in 2.11.1; their legacy keys are ignored. The full-resolution colour copy shared with the other screen passes: Released in 2.15.3 |
 | Default | On for new configurations |
 | Menu | Image > Ambient Occlusion |
 | Configuration | `[patches.AmbientOcclusion]` in `ApexRadiance.toml` |
@@ -112,7 +112,9 @@ Isolated pixels (leaf edges, thin rails) fade out. Off-screen samples count as s
 scene draws). Fallback: near 0.25, A 1.00008, `tanY = 1/4.293`. See
 [engine/camera-and-map-view.md](../engine/camera-and-map-view.md).
 
-**Resources.** R32F pyramid (3840x2304 with 9 levels at 4K) plus 8 one-level targets, two G16R16F targets at full screen size and a colour copy. No temporal history targets are allocated. Everything is released on
+**Resources.** R32F pyramid (3840x2304 with 9 levels at 4K) plus 8 one-level targets, two G16R16F targets at full screen size and a colour copy. The colour copy is made and read inside the AO pass only, so
+it is the full-resolution copy shared with Edge Smoothing, Depth Blur and Picture (`SceneCopy`,
+[architecture.md](../architecture.md#43-post-scene-chain-and-the-intz-depth-share)). No temporal history targets are allocated. Everything is released on
 device reset and rebuilt on the next frame.
 
 **Cost** at 3840x2160, native D3D9, RTX 4070 Ti SUPER:

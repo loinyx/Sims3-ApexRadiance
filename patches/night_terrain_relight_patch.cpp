@@ -23,6 +23,7 @@
 //  - Optional: outdoor lot lamps (lot id != 0, type 3..6, alive, enabled, room known and room 0) arm the counter like
 //    world lights (3 call sites) and, when switched on, are accepted by the terrain light bake (visitor).
 
+#include "tree_light_rig.h"
 #include "patch_base.h"
 #include "apex_version.h"
 #include "memory_patch.h"
@@ -200,6 +201,7 @@ bool g_realisticOpenings = kRealisticOpeningsDefault; // (08/10, experimental) w
 bool g_outdoorOpenings = true; // (2.12.4) roofed rooms take room 0's lamps through their doors, windows and arches (LevelLightShare::SetOutdoorThroughOpenings)
 bool g_doorsBlock = true;       // (2.12.4) doors and gates stay closed for lamp light; arches and windows open (LevelLightShare::SetDoorsBlockLight)
 bool g_indoorOpenings = true;   // (2.12.4) lit rooms shine out through their openings and into the next room (LevelLightShare::SetIndoorThroughOpenings)
+bool g_indoorGround = true;     // (2.15.3) that light adds to the outdoor light on story 0's ground (LevelLightShare::SetIndoorLightOnGround)
 float g_shadowSoftness = 0.15f; // (2.12.4) a lamp's radius in metres: the penumbra past openings, wall ends and tops (LevelLightShare::SetShadowSoftness)
 bool g_objectWalls = true;      // walls block lamp light on outdoor objects and trees (LevelLightShare::SetObjectWalls)
 bool g_groundShade = true;      // (14/10) walls shade lamp light on lot ground, paths, decks, curbs and low fences (LevelLightShare::SetGroundShade)
@@ -234,7 +236,7 @@ float g_groundBrightness = 0.75f;
 float g_roadBrightness = 1.0f;  // x the ground brightness
 float g_streetLampGain = 0.8f;  // street lamps on the ground (terrain bake)
 float g_lotLampGain = 0.8f;     // lot lamps on the ground (terrain bake + the lot's own light map)
-float g_moonlight = 0.277f;     // the moon's light at night
+float g_moonlight = 0.0f;     // the moon's light at night
 bool g_edgePad = true;          // pad the room light maps' edges (RoomMapPadding): no dark side on things along walls
 bool g_lotTintOwn = false;      // lot lamps have their own colour
 float g_lotLampTint = 1.0f;     // their colour (0 = pink, 1 = warm white)
@@ -2130,6 +2132,11 @@ class NightTerrainRelightPatch : public ApexPatch {
             "Lamps in a room with a roof light the garden, the terraces, the outside walls and the objects outside through the room's arches "
             "and windows, and a roofed room next door through an opening between them, blocked by the walls on the way; one opening only, no "
             "light through a closed door while doors block light (relights every room when changed).");
+        RegisterBoolSetting(&g_indoorGround, "luzInternaSomaNoChao", true,
+            "The light lit rooms send through their windows, doors and arches onto the lot ground and the outdoor floors of the ground "
+            "story adds to the garden and street lamps' light there, instead of the brighter of the two, and the walls' shade of the "
+            "outdoor lamps leaves it whole (needs \"Indoor light through openings\" and \"Walls block light on floors\"; relights every "
+            "room when changed).");
         RegisterFloatSetting(&g_shadowSoftness, "suavidadeDasSombras", SettingWidget::Slider, 0.15f, 0.02f, 0.5f,
             "A lamp's size (its radius in metres; the game keeps none): the light passing an opening, a wall's end or top and a balcony's "
             "edge keeps a sharp edge next to it and a softer one farther behind, as with a real lamp; at least a texel and a half on the "
@@ -2193,7 +2200,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             "How strongly street lamps light the ground (1 = the default; the ground light is rebuilt when it changes).");
         RegisterFloatSetting(&g_lotLampGain, "forcaDasLampadasDoLote", SettingWidget::Slider, 0.8f, 0.25f, 3.0f,
             "How strongly outdoor lot lamps light the ground (1 = the default; the ground light is rebuilt when it changes).");
-        RegisterFloatSetting(&g_moonlight, "luar", SettingWidget::Slider, 0.277f, 0.0f, 2.0f,
+        RegisterFloatSetting(&g_moonlight, "luar", SettingWidget::Slider, 0.0f, 0.0f, 2.0f,
             "How strong the moonlight is at night (1 = the game; 0 = no moonlight, only lamps and the sky's glow).");
         RegisterBoolSetting(&g_edgePad, "bordasDosMapasDeLuz", true,
             "Stairs, curtains and furniture indoors get smooth light from the game's room light maps: no dark side along outer walls, no steps between neighbouring objects.");
@@ -2444,6 +2451,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             LevelLightShare::SetOutdoorThroughOpenings(g_outdoorOpenings);
             LevelLightShare::SetDoorsBlockLight(g_doorsBlock);
             LevelLightShare::SetIndoorThroughOpenings(g_indoorOpenings);
+            LevelLightShare::SetIndoorLightOnGround(g_indoorGround);
             if (!MenuSliderHeld()) LevelLightShare::SetShadowSoftness(g_shadowSoftness); // (applied once the slider is let go)
             LevelLightShare::SetRealisticReach(g_realisticReach);
             LevelLightShare::SetObjectWalls(g_objectWalls);
@@ -2576,6 +2584,10 @@ class NightTerrainRelightPatch : public ApexPatch {
         }
         // Light detail: once per session, before any lot is lit (a later change takes effect after a restart)
         LightDetail::ApplyAtStartup(g_lightDetail);
+        if (!TreeLightRig::Installed()) { // trees out of the game's underground light rig (tree_light_rig.h)
+            std::string treeErr;
+            if (!TreeLightRig::Install(&treeErr)) LOG_WARNING("[TreeLightRig] Not used: " + treeErr);
+        }
         if (g_levelShare && !LevelLightShare::IsInstalled()) {
             std::string shareErr;
             if (!LevelLightShare::Install(shareErr)) LOG_WARNING("[NightTerrainRelight] " + shareErr);
@@ -2608,6 +2620,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         if (!reinstalling) LampMarkFilter::Uninstall();
         if (!reinstalling) ProbeNeutral::Uninstall();
         if (!reinstalling) LevelLightShare::Uninstall();
+        if (!reinstalling) TreeLightRig::Uninstall();
         if (!reinstalling) RoomMapDither::Stop();
         if (!reinstalling) RigTracker::Uninstall();
         if (!MemPatch::RestoreAll(patchedLocations)) return Fail(S3SS_TR("Falha ao restaurar os bytes originais", "Could not restore the original code"));
@@ -2677,6 +2690,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         if (installed) RequestAutoRefresh(); // the options that needed the reinstall show at once
         if (removed && !installed) {
             if (LevelLightShare::IsInstalled()) LevelLightShare::Uninstall();
+            TreeLightRig::Uninstall();
             RoomMapDither::Stop();
             RigTracker::Uninstall();
             LotLightBridge::OnWorldChanged();
@@ -2735,6 +2749,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_outdoorOpenings = true;
         g_doorsBlock = true;
         g_indoorOpenings = true;
+        g_indoorGround = true;
         g_shadowSoftness = 0.15f;
         g_objectWalls = true;
         g_groundShade = true;
@@ -2759,7 +2774,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_roadBrightness = 1.0f;
         g_streetLampGain = 0.8f;
         g_lotLampGain = 0.8f;
-        g_moonlight = 0.277f;
+        g_moonlight = 0.0f;
         g_objLamps = true;
         g_objStrength = 0.75f;
         g_objAll = true;
@@ -3105,6 +3120,9 @@ class NightTerrainRelightPatch : public ApexPatch {
                 ApexUi::GroupLabel("LAMP LIGHT");
                 bool changed = ApexUi::SwitchRow("Outdoor light through openings", &g_outdoorOpenings, "Garden lamps light rooms through doors, windows and arches", true);
                 changed |= ApexUi::SwitchRow("Indoor light through openings", &g_indoorOpenings, "Lit rooms shine through arches and windows onto the garden and the next room", true);
+                ImGui::BeginDisabled(!g_indoorOpenings || !g_floorWalls); // (2.15.3) a part of the light above, kept in the floor maps' alpha
+                changed |= ApexUi::SwitchRow("Indoor light adds to the ground", &g_indoorGround, "Window and door light on the lot ground adds to the garden lamps", true);
+                ImGui::EndDisabled();
                 ImGui::BeginDisabled(!g_outdoorOpenings && !g_indoorOpenings && !(g_realisticOpenings && g_floorWalls)); // it shapes the options above
                 changed |= ApexUi::SwitchRow("Doors block light", &g_doorsBlock, "Closed doors stop lamp light; windows, arches and glass doors let it through", true);
                 ImGui::EndDisabled();
@@ -3298,6 +3316,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         ImGui::TextDisabled("GPU vs CPU: %s", LightmapSmooth::CompareStatus().c_str());
         ImGui::TextWrapped("Lamp colour: %s", ObjectLightBridge::LampColourStatus().c_str());
         ImGui::TextWrapped("Stories: %s", LevelLightShare::Status().c_str());
+        ImGui::TextWrapped("Indoor light on the ground: %s", LevelLightShare::IndoorLightOnGroundStatus().c_str());
         ImGui::TextWrapped("Quick outdoor lamp edits: %s", OutdoorDelta::Status().c_str());
         ImGui::TextWrapped("Real-time outdoor lamps: %s", RtOutdoorLamps::Status().c_str());
         ImGui::TextWrapped("Smooth light maps: %s | %s | %s | %s", LevelLightShare::SoftLightCutStatus().c_str(), RoomMapDither::Status().c_str(),

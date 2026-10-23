@@ -33,7 +33,7 @@ struct DeviceContext {
     // dispatch (05/10: each read its own every draw, ~2,000 draws a frame). Valid for this dispatch only; a callback that
     // changes them through CallOriginal* restores them before it returns, as every callback does.
     uint8_t cached = 0;
-    DWORD zEnable = 0, zWrite = 0;
+    DWORD zEnable = 0, zWrite = 0, zFunc = 0;
     DWORD ZEnable() {
         if (!(cached & 1)) {
             zEnable = D3DZB_TRUE;
@@ -49,6 +49,14 @@ struct DeviceContext {
             cached |= 2;
         }
         return zWrite;
+    }
+    DWORD ZFunc() { // (2.15.3) PostScene, Picture and the Banding Fix's jitter each read it for the same draw
+        if (!(cached & 4)) {
+            zFunc = D3DCMP_LESSEQUAL;
+            device->GetRenderState(D3DRS_ZFUNC, &zFunc);
+            cached |= 4;
+        }
+        return zFunc;
     }
 };
 
@@ -170,6 +178,13 @@ HRESULT CallOriginalSetTexture(IDirect3DDevice9* device, DWORD stage, IDirect3DB
 // ShaderStateChanged. The pointers are identities: the device holds the references.
 IDirect3DPixelShader9* BoundPixelShader(IDirect3DDevice9* device);
 IDirect3DVertexShader9* BoundVertexShader(IDirect3DDevice9* device);
+// (2.15.3) The texture bound at a pixel sampler (0..15), followed the same way through SetTexture and CallOriginalSetTexture
+// (other stages: read back every time). No reference is added: an identity the device holds; a caller that keeps it past
+// a texture change adds its own. One answer in 256 is checked against the device; after 8 differences in a session the
+// textures are no longer followed (logged).
+IDirect3DBaseTexture9* BoundTexture(IDirect3DDevice9* device, DWORD stage);
+// As IDirect3DDevice9::GetTexture (a reference added to *texture, null for an empty stage), from BoundTexture
+HRESULT GetBoundTexture(IDirect3DDevice9* device, DWORD stage, IDirect3DBaseTexture9** texture);
 // Shaders were set without the device's Set*Shader (a state block applied, RtLampGpu::Engine::End): read them back
 void ShaderStateChanged();
 

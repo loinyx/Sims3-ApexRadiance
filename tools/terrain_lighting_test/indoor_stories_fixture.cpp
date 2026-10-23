@@ -1,3 +1,4 @@
+#include "../../features/fast_math.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>

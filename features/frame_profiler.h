@@ -54,11 +54,14 @@ void Shutdown();
 
 // ---- per-hook timing in the D3D9 hook registry (framework/d3d9_hooks.cpp) ----
 // The registry times each draw-call callback while RegistryHookTimingActive() (a relaxed atomic load, true only while the
-// profiler is on and the Advanced option "Per-hook registry timing" is checked) and reports it here, one call at a time
-// (the registry serialises AddRegistryHookTime with its own lock).
+// profiler is on and the Advanced option "Per-hook registry timing" is checked). (2.15.3) Each callback's own time: the
+// callbacks nested in it (a re-issued draw's chain) and the driver time of the draws issued inside it are left out, so
+// a callback that draws in the game's place is not charged for the draw the game would have made. Every registered name
+// gets a slot once (RegistryTimingSlot, at registration); AddRegistryHookTimeAt adds to it with relaxed atomics, any thread.
 bool RegistryHookTimingActive();
 uint64_t Ticks();
-void AddRegistryHookTime(const std::string& hookName, uint64_t ticks);
+int RegistryTimingSlot(const std::string& hookName); // -1 when the table is full
+void AddRegistryHookTimeAt(int slot, uint64_t ticks);
 // Present chain: every callback is timed by name while the profiler is on (a relaxed atomic load); the registry reports
 // it through AddRegistryHookTime under the name "<name> (Present)".
 bool PresentHookTimingActive();

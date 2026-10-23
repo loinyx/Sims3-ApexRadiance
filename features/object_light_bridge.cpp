@@ -22,6 +22,7 @@
 #define NOMINMAX
 #endif
 #include "object_light_bridge.h"
+#include "fast_math.h"
 #include "level_light_share.h"
 #include "lot_light_bridge.h"
 #include "game_addresses.h"
@@ -330,14 +331,17 @@ void CrossStoryLamps(BYTE* rig, void* a, void* b, void* c, void* d) {
 // (RigRoom, lot_light_bridge.cpp). Any thread (gathers), read on the render thread.
 std::mutex g_rigRoomMx;
 std::unordered_map<uintptr_t, const void*> g_rigRoom;
+std::atomic<uint32_t> g_rigRoomGen{0}; // (2.15.3) bumped under g_rigRoomMx at every change of g_rigRoom (RigRoom's last answer)
 
 // Apex's part after the game's gather (RoomGatherThunk)
 void AfterRoomGather(BYTE* rig, void* a, void* b, void* c, void* d) {
     const int mode = *reinterpret_cast<const int*>(rig + 0x1D4);
     if (mode == 0 && a) {
         std::lock_guard<std::mutex> lk(g_rigRoomMx);
-        if (g_rigRoom.size() > 16384) g_rigRoom.clear();
-        g_rigRoom[reinterpret_cast<uintptr_t>(rig)] = static_cast<const BYTE*>(a) - 0x30;
+        if (g_rigRoom.size() > 16384) g_rigRoom.clear(), g_rigRoomGen.fetch_add(1, std::memory_order_release);
+        const void*& room = g_rigRoom[reinterpret_cast<uintptr_t>(rig)];
+        const void* const now = static_cast<const BYTE*>(a) - 0x30;
+        if (room != now) room = now, g_rigRoomGen.fetch_add(1, std::memory_order_release);
     }
     if (mode == 0 && a && b) CrossStoryLamps(rig, a, b, c, d);
     if (!g_forceAll.load(std::memory_order_relaxed) || mode != 1) return;
@@ -437,12 +441,13 @@ void UpdateRoomRigs() {
         {
             std::lock_guard<std::mutex> lk(g_rigRoomMx);
             g_rigRoom.clear();
+            g_rigRoomGen.fetch_add(1, std::memory_order_release);
         }
         std::lock_guard<std::mutex> lk(g_roomRigMx);
         g_roomRigSet.clear();
         return;
     }
-    if (std::fabs(level - g_regatherLevel) < 0.1f) return;
+    if (ApexMath::Fabs(level - g_regatherLevel) < 0.1f) return;
     g_regatherLevel = level;
     RegatherRoomRigs();
 }
@@ -545,7 +550,7 @@ float BoostConeShare(const BYTE* L, int type, const float* pos) { // reads the l
     if (type != 5 && !(kBoostConeSpots && type == 4)) return 1.0f;
     const float* head = reinterpret_cast<const float*>(L + 0x120);
     float u[3] = {pos[0] - head[0], pos[1] - head[1], pos[2] - head[2]};
-    const float len = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+    const float len = ApexMath::Sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
     if (!(len > 1e-3f)) return 1.0f;
     u[0] /= len;
     u[1] /= len;
@@ -640,7 +645,7 @@ bool ShadeCandidate(const BYTE* L, const float* rec, bool street, float head[3])
             if (!(f & 0x04) || *reinterpret_cast<const int*>(L + 0x08) != 0 || type < 3 || type > 6) return false;
         }
         std::memcpy(head, L + 0x120, 12);
-        return std::isfinite(head[0]) && std::isfinite(head[1]) && std::isfinite(head[2]);
+        return ApexMath::IsFinite(head[0]) && ApexMath::IsFinite(head[1]) && ApexMath::IsFinite(head[2]);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -650,7 +655,7 @@ void ShadeRec(const BYTE* L, const float* pos, float* rec, bool street) {
     float head[3];
     if (!ShadeCandidate(L, rec, street, head)) return;
     const float p[3] = {pos[0], pos[1], pos[2]};
-    if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || !std::isfinite(p[2])) return;
+    if (!ApexMath::IsFinite(p[0]) || !ApexMath::IsFinite(p[1]) || !ApexMath::IsFinite(p[2])) return;
     g_shadeTests.fetch_add(1, std::memory_order_relaxed);
     // a wall crossed within 0.5 m of the centre is the wall the object is set in or stands against (doors, windows, wall
     // decor; a turned window's centre is half a tile inside its wall): it does not block
@@ -733,9 +738,9 @@ bool RigBoxExtents(const float* pos, float e[3]) {
             const float* row = reinterpret_cast<const float*>(rig + 0x170 + 0x10 * i);
             const float h = 0.5f * (hi[i] - lo[i]);
             if (!(h >= 0.0f && h < 200.0f)) return false;
-            for (int k = 0; k < 3; k++) e[k] += std::fabs(row[k]) * h;
+            for (int k = 0; k < 3; k++) e[k] += ApexMath::Fabs(row[k]) * h;
         }
-        return std::isfinite(e[0]) && std::isfinite(e[1]) && std::isfinite(e[2]) && e[0] < 400.0f && e[1] < 400.0f && e[2] < 400.0f;
+        return ApexMath::IsFinite(e[0]) && ApexMath::IsFinite(e[1]) && ApexMath::IsFinite(e[2]) && e[0] < 400.0f && e[1] < 400.0f && e[2] < 400.0f;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -789,6 +794,13 @@ template <int I> void __fastcall ClassColour(void* L, void* edx, const float* po
     if (g_reachLawOn.load(std::memory_order_relaxed)) HookGuard::Run("ObjectLightBridge reach law", [&] { law = ReachLawRec(L, pos, rec, I == kStreetClass); });
     if (!law) BoostRec(static_cast<BYTE*>(L), pos, rec, I == kStreetClass);
     HookGuard::Run("ObjectLightBridge lamp visibility", [=] { ShadeRec(static_cast<const BYTE*>(L), pos, rec, I == kStreetClass); });
+    // (2.15.3) a ceiling lamp of the story below listed on this story: no light through the floor (as the room solve,
+    // LevelLightShare::LampUnderRoomFloor); the record's luminance under the rig's cut drops it
+    float ext[3];
+    if (RigBoxExtents(pos, ext) && (rec[4] > 0.0f || rec[5] > 0.0f || rec[6] > 0.0f)) {
+        const uintptr_t rig = reinterpret_cast<uintptr_t>(pos) - 0x140;
+        if (LevelLightShare::LampUnderRoomFloor(ObjectLightBridge::RigRoom(rig), L, pos)) rec[4] = rec[5] = rec[6] = rec[10] = 0.0f;
+    }
 }
 
 const LightColour_t kClassThunks[] = {&ClassColour<0>, &ClassColour<1>, &ClassColour<2>, &ClassColour<3>, &ClassColour<4>, &ClassColour<5>, &ClassColour<6>,
@@ -843,7 +855,7 @@ std::unordered_map<uintptr_t, TintedLight> g_tintedLights;
 bool IsStockPink(const float c[3]) {
     if (c[0] <= 0.05f) return false;
     const float g = c[1] / c[0], b = c[2] / c[0];
-    return std::fabs(g - 0.75f) < 0.03f && std::fabs(b - 0.79f) < 0.03f;
+    return ApexMath::Fabs(g - 0.75f) < 0.03f && ApexMath::Fabs(b - 0.79f) < 0.03f;
 }
 
 // The stock pink turned towards warm white (1, 0.80, 0.62) by t, with the luminance of the original
@@ -1179,9 +1191,18 @@ std::string RigOpeningNote(uintptr_t rig) {
 
 const void* RigRoom(uintptr_t rig) {
     if (!rig) return nullptr;
+    // (2.15.3) the last answer on this thread while g_rigRoom did not change (asked on every furniture draw at night; the
+    // game draws a rig's parts one after another): no lock and no lookup
+    thread_local uintptr_t t_rig = 0;
+    thread_local const void* t_room = nullptr;
+    thread_local uint32_t t_gen = 0;
+    const uint32_t gen = g_rigRoomGen.load(std::memory_order_acquire); // (before the lookup: a change after it makes the answer stale)
+    if (rig == t_rig && gen == t_gen) return t_room;
     std::lock_guard<std::mutex> lk(g_rigRoomMx);
     const auto it = g_rigRoom.find(rig);
-    return it == g_rigRoom.end() ? nullptr : it->second;
+    const void* room = it == g_rigRoom.end() ? nullptr : it->second;
+    t_rig = rig, t_room = room, t_gen = gen;
+    return room;
 }
 
 std::string Status() {

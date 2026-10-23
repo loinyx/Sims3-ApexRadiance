@@ -13,12 +13,15 @@ The feature is described in [features/night-lighting/floors.md](../features/nigh
 | Offline table generators (private research folder: `snowcover/test13.cpp`, not in the repository) | Which ExteriorFloors pixel shaders `PatchBakedAtlasPs` accepts and which pass `D3DDisassemble` after patching | Not maintained in the repository | Game `Shaders_Win32.precomp`, d3dcompiler |
 | Offline VS pattern test (combined build, notes m66) | `IsFloorVs` accepts only `kFloorVs` and the pool-edge VS | Not maintained in the repository | Captured shaders |
 
-No maintained harness in `tools/` covers the floor patches.
+[`tools/floor_shade_check`](../../tools/floor_shade_check/README.md) (`run.ps1 -Precomp <Shaders_Win32.precomp>`, native
+D3D9) covers the floors' ground lamp shade patches, the instanced structure (fence) copies and the snowy lot passes over
+the game's precomp; the table generators above are not maintained in the repository.
 
 ## Latest results
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-23 | `40f351e` | `tools/floor_shade_check` (`run.ps1 -Precomp <Shaders_Win32.precomp>`) | 7,103 checks, 0 failures: the precomp floor shaders patched with and without the indoor light copies (the copies are not drawn at this commit, `kFloorIndoorLight` off) | Offline, native D3D9 |
 | 2026-09-25 | combined build | `floor_atlas_table.h` generation | 261 of 571 ExteriorFloors PS accepted and valid (235 are ps_2_0); 0 of 58 InteriorFloor PS; all 96 vs_3_0 ExteriorFloors VS export world xz | d3dcompiler |
 | 2026-09-25 | combined build | Captured `.bin` hashes | m60 / m61 / fountain PS (1044 bytes) = `0x9CFC614F`, flat PS (812 bytes) = `0x802006F6`, both in the table | None |
 
@@ -40,5 +43,6 @@ No maintained harness in `tools/` covers the floor patches.
 
 ## Open checks
 
+- 2.15.3: a porch deck on a foundation beside a pillar at night, *Indoor light adds to the ground* on. **Expected:** no square steps of light and no dark square beside the pillar; a patio or path beside a lit window as bright as in 2.15.2.
 - Ground brightness on floors (the `scaleConst` gain) has no recorded in-game check.
 - ps_2_0 ExteriorFloors coverage (235 variants).

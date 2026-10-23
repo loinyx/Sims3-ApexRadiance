@@ -34,6 +34,7 @@
 #include "world_session.h"
 #include "night_lighting.h"
 #include "map_view.h"
+#include "scene_copy.h"
 #include "shader_cache.h"
 #include "imgui.h"
 #include "ui/violet_theme.h"
@@ -393,8 +394,7 @@ void ReleaseResources(IDirect3DDevice9* dev) {
     g.ready = false;
     SafeRelease(g.intzSurf);
     SafeRelease(g.intzTex);
-    SafeRelease(g.fullSurf);
-    SafeRelease(g.fullTex);
+    SceneCopy::Drop(&g.fullTex, &g.fullSurf);
     SafeRelease(g.halfASurf);
     SafeRelease(g.halfATex);
     SafeRelease(g.halfBSurf);
@@ -558,7 +558,7 @@ bool InitResources(IDirect3DDevice9* dev) {
         LOG_ERROR(std::format("[DepthBlur] INTZ depth texture {}x{} could not be created: Depth Blur and Ambient Occlusion stay off", g.width, g.height));
         return false;
     }
-    if (!CreateRT(dev, g.width, g.height, bd.Format, &g.fullTex, &g.fullSurf)) {
+    if (!SceneCopy::Acquire(dev, g.width, g.height, bd.Format, &g.fullTex, &g.fullSurf)) { // (copied and read inside one pass only)
         ReleaseResources(dev);
         g.status = "ERROR: not enough video memory for the blur textures";
         return false;

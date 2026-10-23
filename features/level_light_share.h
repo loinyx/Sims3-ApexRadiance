@@ -20,6 +20,7 @@ void OnPresent();      // render thread, every frame (runs the refresh asked by 
 void OnWorldChanged(); // forget the rooms of the previous world
 // The world is on screen after its load: every lot's rooms near openings gather once more (then settle)
 void OnWorldLive();
+bool WorldIsLive(); // the world went live (OnWorldLive) since the load
 // Render thread: how many lots are loaded now (0 at the main menu and during most of a load)
 int LoadedLots();
 bool LoadedRoomsBusy(); // cached room states plus pending ambient; startup refresh readiness
@@ -70,6 +71,17 @@ bool DoorsBlockLightActive();
 // openings noted.
 void SetIndoorThroughOpenings(bool on);
 bool IndoorThroughOpeningsActive();
+// (2.15.3) Indoor light adds to the ground (option "luzInternaSomaNoChao", default on, needs indoor light through openings
+// and walls blocking light on floors): the floor texels of story 0's room 0 keep in their alpha the luminance E (at most
+// 254/255) of the light the roofed rooms' lamps put there through their openings; the lot pass and the story-0 floors add
+// that share of the map to the outdoor light instead of taking it in max(map, atlas) x the walls' shade. Relights every room
+// when changed. Active = on, installed and both options it needs active.
+void SetIndoorLightOnGround(bool on);
+bool IndoorLightOnGroundActive();
+std::string IndoorLightOnGroundStatus();
+// Light tree thread (the outdoor delta): the light is a roofed room's lamp that room 0 of story 0 took through an opening
+// (its part of a texel is in the texel's alpha); false on any other thread or room
+bool ExitLampOf(unsigned char* room, uintptr_t light);
 // Shadow softness (option "suavidadeDasSombras", 2.12.4): a lamp's radius in metres (0.02 .. 0.5, default 0.15), the size
 // of the penumbra its light has past a wall's opening, end or top and a slab's edge (penumbra.h). A change sends the rooms
 // such an edge shapes (of every loaded lot: room 0, the roofless rooms, the roofed rooms with openings), the object rigs
@@ -106,6 +118,9 @@ void SetRealisticReach(bool on);
 // The walls are lit by that law now (on and installed): the per-pixel lamps of outdoor objects, fences and windows follow
 // the same law then (lot_light_bridge, lamp_reach.h). Any thread.
 bool RealisticReachActive();
+// (2.15.3) Whether a lamp's light stands under the floor of `room`'s story (an indoor room) and its ray to `point` (world,
+// above that floor) crosses a floor there, not an opening: a ceiling lamp of the story below that the game lists on this one
+bool LampUnderRoomFloor(const void* room, void* light, const float* point);
 // Walls block light on objects: true when an outside wall stands between the lamp and the point at the height the ray
 // crosses it (render thread; a copy of each story's outside walls taken when room 0 is solved). Since 2.12.4 the copy
 // carries each wall's doors, windows and arches and its half-wall cells from its story grid (wall_openings.h): a ray

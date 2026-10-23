@@ -317,8 +317,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
     const int k = useDither ? copy.texcoord : -1; // ps_2_x copies: the vertex shader must carry the position
     // the vertex copy: TEXCOORDk and / or the temporal jitter
     IDirect3DVertexShader9 *vs = nullptr, *vsCopy = nullptr;
-    DWORD zfunc = D3DCMP_LESSEQUAL;
-    if (jitter) dev->GetRenderState(D3DRS_ZFUNC, &zfunc);
+    const DWORD zfunc = jitter ? ctx.ZFunc() : static_cast<DWORD>(D3DCMP_LESSEQUAL);
     // Depth enabled + ALWAYS is also used by screen-space composition draws;
     // ZENABLE alone does not identify a projected 3D surface (pool capture #202).
     bool useJitter = jitter && zfunc != D3DCMP_ALWAYS;
@@ -349,8 +348,10 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
     }
     float before[4] = {};
     if (useDither) {
+        // (2.15.3) the viewport only for ps_2_x copies: the ps_3_0 grain reads the amount's .x and .w alone (AddDither), the
+        // ps_2_x one rebuilds the pixel from .y / .z (AddDither2)
         D3DVIEWPORT9 vp{};
-        dev->GetViewport(&vp);
+        if (k >= 0) dev->GetViewport(&vp);
         dev->GetPixelShaderConstantF(static_cast<UINT>(copy.amountReg), before, 1);
         // Developer "Show covered surfaces": a coarse grain only where the fix applies
         const float amount[4] = {(g_showCovered ? kShowCoveredSteps : SceneDither::Strength()) / 255.0f, 0.5f * static_cast<float>(vp.Width),

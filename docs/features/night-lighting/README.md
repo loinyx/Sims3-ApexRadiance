@@ -10,7 +10,7 @@ in Build mode and at dusk. By day, lamps that the game keeps lit add a subdued g
 
 | | |
 |---|---|
-| Availability | Released (standalone since 0.1.0). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: Released in 2.6.0. Light detail, walls blocking lamp light outdoors, lamp switches in one frame, weather variants of the lot and terrain passes, and idavidveiga's daytime bloom fixes: Released in 2.7.0. Lamp lighting (Instant (GPU) with real-time outdoor lamps and quick outdoor lamp edits; Classic with lamp drags and floors shown together), outdoor and indoor light through openings, doors block light, walls shade lamp light near the ground, buildings block lamp light on trees and objects, shadow softness and smooth light maps: Released in 2.13.0. Light through stairwells, stairs on the directional maps, light through arches and doorways, foliage lit per vertex with crown shade on lot ground, and moonlight scaled at its reader: Released in 2.14.0. Moon at least 20 degrees high, Build mode keeping the season's sun times and smooth dusk: Released in 2.15.1 |
+| Availability | Released (standalone since 0.1.0). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: Released in 2.6.0. Light detail, walls blocking lamp light outdoors, lamp switches in one frame, weather variants of the lot and terrain passes, and idavidveiga's daytime bloom fixes: Released in 2.7.0. Lamp lighting (Instant (GPU) with real-time outdoor lamps and quick outdoor lamp edits; Classic with lamp drags and floors shown together), outdoor and indoor light through openings, doors block light, walls shade lamp light near the ground, buildings block lamp light on trees and objects, shadow softness and smooth light maps: Released in 2.13.0. Light through stairwells, stairs on the directional maps, light through arches and doorways, foliage lit per vertex with crown shade on lot ground, and moonlight scaled at its reader: Released in 2.14.0. Moon at least 20 degrees high, Build mode keeping the season's sun times and smooth dusk: Released in 2.15.1. No moonlight by default, *Indoor light adds to the ground*, closed gates and fence gaps in the lot shade, trees kept on the normal light rig, windows at the size of their panes: Released in 2.15.3 |
 | Default | On (`enabledByDefault = true`; the feature metadata keeps `experimental = true`) |
 | Menu | Lighting page (tabs Overview, Ground, Objects, Buildings, Stories); World > Water & Snow page (Lamp Glow, Water Reflections, Snow); developer options under Developer > Lighting |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -125,6 +125,7 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 | Rooms at Night > Blue tint | `azulNosComodos` | float | 0% | 0 to 100% | 0% neutral grey, 100% the game's blue |
 | Rooms at Night > Outdoor light through openings | `luzDeForaPelasAberturas` | bool | on | | Roofed rooms (arcades, porches, rooms with doors or windows) take the outdoor lamps of their story that see one of their doors, windows or arches, lit only through those openings and under their roof; their objects too; a roofed room on a foundation also takes the garden lamps of the story below (Tester sub-part *Roofed rooms take lamps from the story below*) ([level-light-share](level-light-share.md)); needs *Outdoor light between floors* |
 | Rooms at Night > Indoor light through openings | `luzInternaPelasAberturas` | bool | on | | Lit rooms shine through their arches and windows onto the garden, the terraces, the outside walls and the objects outside, and into a roofed room next door, only through those openings; one opening only ([level-light-share](level-light-share.md)) |
+| Rooms at Night > Indoor light adds to the ground | `luzInternaSomaNoChao` | bool | on | | The light lit rooms send through their openings onto the lot ground (lot pass and snowy lots; not the outdoor floors) adds to the outdoor lamps' light there instead of the brighter of the two, and the outside walls' shade of the outdoor lamps leaves it whole (story 0's room-0 floor texels keep its luminance in their alpha, [level-light-share](level-light-share.md#indoor-light-on-the-ground)); needs *Indoor light through openings* and *Walls block light on floors*; a change relights every room |
 | Rooms at Night > Doors block light | `portasBloqueiamLuz` | bool | on | | Doors and gates count as closed for lamp light (the game keeps them closed except while they open); arches, windows and doors with glass let it through. Applies to *Light through doors and windows* and both *light through openings* options; a change lights again only the stories with doors ([level-light-share](level-light-share.md)) |
 | Rooms at Night > Shadow softness | `suavidadeDasSombras` | float | 0.15 (15 cm) | 0.02 .. 0.5 | A lamp's size in metres: light through an opening, past a wall's end or top and a balcony's edge keeps a sharp edge next to it and a softer one farther behind; at least 1.5 texels on the lighting maps ([level-light-share](level-light-share.md)); Tester sub-part *Soft edges from the lamp's size* |
 | Rooms at Night > Game fixes > Smooth light maps | `mapasDosComodosSuaves` | bool | on | | Room light maps read as a B-spline, their texels dithered and lamps faded at the light cut; relights every room when changed ([room-map-smoothing](room-map-smoothing.md)); the three parts are Tester sub-parts only |
@@ -144,7 +145,7 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 | Individual options | `luzDasLampadasNatural` | float | 1.0 | 0 to 1 | Stock lamp colour: 0 pink (game), 1 warm white; applied on release ([lamp-colour](lamp-colour.md)) |
 | Individual options | `corPropriaNoLote` | bool | off | | Lot lamps get their own colour |
 | Individual options | `corDasLampadasDoLote` | float | 1.0 | 0 to 1 | That lot lamp colour |
-| Individual options | `luar` | float | 0.277 (1.0 until 2.15.1) | 0 to 2 | Moonlight at night (see *Brightness controls*); 0.277 in the Performance, Balanced and Quality presets too (1.817 until 2.15.1) |
+| Individual options | `luar` | float | 0 (1.0 until 2.15.1, 0.277 in 2.15.1 and 2.15.2) | 0 to 2 | Moonlight at night (see *Brightness controls*); 0 in the Performance, Balanced and Quality presets too (1.817 until 2.15.1, 0.277 in 2.15.1 and 2.15.2); saved profiles keep the value they hold |
 | Individual options | `postesAcesosNoCalculo` | bool | on | | Street lamps count as lit in lot light solves (0x6BE18C); reinstall |
 | Individual options | `qualidadeAltaEmTodosOsLotes` | bool | off | | Experimental: every lot at the active lot's quality; reinstall; lots loaded afterwards |
 | Individual options | `gramaDoLoteUsaLuzDoLote` | bool | on | | Lot pass keeps "no terrain lightmap" (0xC7F87D), so lot grass keeps the lot's own light after a terrain rebuild; reinstall |
@@ -343,6 +344,22 @@ unchanged):
   shader again. `SelectLamps` results are memoized per (x, z, maxScore) bit pattern in a 512-entry direct-mapped table
   (`g_lampMemo`) until the lamp list changes. `RecordWorldChunk` hands back the chunk's `g_chunks` entry. The lamp
   refresh appears in the Frame Profiler as "Lamp refresh (mod)".
+- **Patched shader answers:** a draw asks one to three of the per-shader patch caches (`PatchedFor`), thousands of
+  times a frame, for the shader the game has set again. `PatchedFor` first looks in a 32-entry front table
+  (`g_patchedFront`, render thread) keyed by the cache and the current pixel shader, and `RoomMapConsts` keeps the last
+  vertex shader's room map UV entry (`g_roomUvVs`). Both are exact: the caches only grow while the hooks run (an
+  `unordered_map` keeps its elements' addresses), and `Shutdown`, which empties them, moves the generation
+  (`g_patchedGen`) both entries carry.
+- **Last answers per draw:** the wall gain keeps the last wall shader's constant register (`g_wallConst`, same
+  generation); `HoldRig` keeps the last part's rig snapshot (the parts of one object share their rig's key; valid while
+  no entry left the map, `g_rigSnapsGen`); `RoomMapPadding` keeps the last shader's entry and the last (map, shader)
+  note (reset by its clears); `FindFloorLot` and `FindLotAt` answer again from their last call while the inputs have
+  the same bits and the lot list was not written since (`g_lotRectsGen`, moved at every write and world change). The
+  room map reads and the indoor objects' basis scale share the per-frame map size memo (`MapSizeThisFrame`, one level
+  description per bound map and frame). Bound maps used only as keys are read with `D3D9Hooks::BoundTexture`, without
+  a reference. The claimed draws' status counters count with a plain load and store (`ApexUtil::CountOne`; render
+  thread only), and the walls' native lamp scale and its tick are stored relaxed then release (read acquire,
+  `NativeWallFresh`) instead of with a locked exchange per wall draw.
 
 ### Daylight policy (`terrain_lighting_policy.h`)
 
@@ -474,6 +491,16 @@ only DXVK's.
 - Ctrl+Shift+F7 over a pixel: `ApexRadiance_LightProbe.txt` lists the draws covering it; the `mod:` line
   (`LotLightBridge::DescribeDraw`) says whether the mod redrew it and with which class.
 - Ctrl+Shift+F8: `ApexRadiance_LightDiag.txt` (all lights, lots, stories, rooms, the "LUZ POR PIXEL" section).
+- Development builds, draw cost by fix: one draw hook call in 16 is timed with the performance counter (`DrawCostSampled`;
+  not while false colour, a census, the lighting bloom census or the exterior capture runs), and every 10 s the log gets
+  `[LotLightBridge] Draw cost by fix over N frames (1 draw in 16 timed, the fixes' own time): X ms a frame in all, Y ms
+  a frame in the driver for the game draws the fixes made; <fix>: N draws a frame, U us each, Z ms a frame; ...`. A row
+  is the claim source the fix marked (`ClaimSource`: `IndoorBasisSmooth`, `FoliageVertex`, `WorldTerrainLight`, ...),
+  `several fixes` when a draw marked more than one, `left to the game` when none; the ten costliest rows are listed.
+  The driver time of the game's own draw a fix issues (`UpdateHooks`' draw calls) is measured apart and taken out of
+  the fix's time; the timed flag ends with the draw's scope, also when a fix throws (the hook's catch then makes the
+  draw). The Frame Profiler's *D3D hooks (mod)* gives the total of every module's hooks
+  ([frame-profiler.md](../frame-profiler.md#d3d9-counters-and-mod-hook-time)).
 - Developer > Lighting: "False colour: magenta = gets lamp light but no fix claimed it" and the census
   (`ApexRadiance_Censo.txt`, [../dev-tools/census.md](../dev-tools/census.md)).
 
