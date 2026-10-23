@@ -75,6 +75,7 @@
 #include <d3dcommon.h>
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -7812,12 +7813,77 @@ bool PsIs3(IDirect3DPixelShader9* ps) {
     return is3;
 }
 
+// (2.15.3, development builds) What the draws cost by the fix that took them: one draw in 16 is timed (performance
+// counter), the game's draw that a fix made itself (the driver's time, g_drawCostDriver from UpdateHooks' draw calls) kept
+// apart, and the row is the claim source the fix marked (several: their own row; none: the draws left to the game). Logged
+// every 10 s with the frames between (render thread).
+struct DrawCostRow {
+    int64_t ticks = 0, driver = 0;
+    uint32_t draws = 0;
+};
+DrawCostRow g_drawCost[kClaimSourceCount + 2]; // [kClaimSourceCount]: several sources, [+1]: not claimed
+uint32_t g_drawCostTick = 0, g_drawCostFrame0 = 0;
+DWORD g_drawCostLogAt = 0;
+bool g_drawCostTimed = false; // the current draw is timed: UpdateHooks' draw calls add their driver time
+int64_t g_drawCostDriver = 0;
+void LogDrawCost() {
+    LARGE_INTEGER f;
+    QueryPerformanceFrequency(&f);
+    const uint32_t frames = g_roomMapFrame - g_drawCostFrame0;
+    g_drawCostFrame0 = g_roomMapFrame;
+    if (!frames || !f.QuadPart) return;
+    std::array<size_t, kClaimSourceCount + 2> order{};
+    for (size_t i = 0; i < order.size(); i++) order[i] = i;
+    std::sort(order.begin(), order.end(), [](size_t a, size_t b) { return g_drawCost[a].ticks - g_drawCost[a].driver > g_drawCost[b].ticks - g_drawCost[b].driver; });
+    const double msPerTick = 1000.0 / static_cast<double>(f.QuadPart), scale = 16.0 / frames; // (one in 16 timed)
+    std::string text;
+    double own = 0, driver = 0;
+    int shown = 0;
+    for (size_t i : order) {
+        const DrawCostRow& r = g_drawCost[i];
+        if (!r.draws) continue;
+        const double ms = static_cast<double>(r.ticks - r.driver) * msPerTick * scale;
+        own += ms, driver += static_cast<double>(r.driver) * msPerTick * scale;
+        if (shown++ < 10)
+            text += std::format("{}{}: {:.0f} draws a frame, {:.2f} us each, {:.3f} ms a frame", shown > 1 ? "; " : "",
+                                i < kClaimSourceCount ? kClaimSourceNames[i] : i == kClaimSourceCount ? "several fixes" : "left to the game", r.draws * scale,
+                                static_cast<double>(r.ticks - r.driver) * msPerTick * 1000.0 / r.draws, ms);
+    }
+    for (DrawCostRow& r : g_drawCost) r = DrawCostRow{};
+    LOG_INFO(std::format("[LotLightBridge] Draw cost by fix over {} frames (1 draw in 16 timed, the fixes' own time): {:.3f} ms a frame in all, {:.3f} ms a frame "
+                         "in the driver for the game draws the fixes made; {}",
+                         frames, own, driver, text));
+}
+template <typename DrawFn> D3D9Hooks::HookAction DrawCostSampled(IDirect3DDevice9* dev, DrawFn draw) {
+    if ((++g_drawCostTick & 15) != 0) return OnDrawTracked(dev, draw);
+    g_claimSourceMask = 0;
+    g_drawCostDriver = 0;
+    g_drawCostTimed = true;
+    LARGE_INTEGER t0, t1;
+    QueryPerformanceCounter(&t0);
+    const D3D9Hooks::HookAction r = OnDrawTracked(dev, draw);
+    QueryPerformanceCounter(&t1);
+    g_drawCostTimed = false;
+    const uint32_t m = g_claimSourceMask;
+    DrawCostRow& row = g_drawCost[!m ? kClaimSourceCount + 1 : (m & (m - 1)) ? kClaimSourceCount : static_cast<size_t>(std::countr_zero(m))];
+    row.ticks += t1.QuadPart - t0.QuadPart;
+    row.driver += g_drawCostDriver;
+    row.draws++;
+    if (const DWORD now = GetTickCount(); now - g_drawCostLogAt >= 10000) {
+        if (g_drawCostLogAt) LogDrawCost();
+        else g_drawCostFrame0 = g_roomMapFrame, std::fill(std::begin(g_drawCost), std::end(g_drawCost), DrawCostRow{});
+        g_drawCostLogAt = now;
+    }
+    return r;
+}
+
 template <typename DrawFn> D3D9Hooks::HookAction OnDraw(IDirect3DDevice9* dev, DrawFn draw) {
+    if (kPublicBuild || g_inOwnCall) return OnDrawTracked(dev, draw);
     const bool fc = g_falseColor.load(std::memory_order_relaxed);
     const bool census = g_censusFrames.load(std::memory_order_relaxed) > 0;
     const bool lightingBloom = g_lightingBloomFrames.load(std::memory_order_relaxed) > 0;
     const bool exterior = g_exteriorFrames.load(std::memory_order_relaxed) > 0;
-    if (kPublicBuild || (!fc && !census && !lightingBloom && !exterior) || g_inOwnCall) return OnDrawTracked(dev, draw);
+    if (!fc && !census && !lightingBloom && !exterior) return DrawCostSampled(dev, draw);
 
     std::string desc;
     const int rig = RigMode();
@@ -8174,7 +8240,14 @@ void UpdateHooks() {
                     return OnDraw(ctx.device, [&]() {
                         drawn = true;
                         D3D9Hooks::ReissueScope reissue; // only the observers of re-issued draws run for it (d3d9_hooks.h)
-                        ctx.device->DrawIndexedPrimitive(type, bvi, minV, numV, start, prims);
+                        if (kPublicBuild || !g_drawCostTimed) ctx.device->DrawIndexedPrimitive(type, bvi, minV, numV, start, prims);
+                        else {
+                            LARGE_INTEGER a, b;
+                            QueryPerformanceCounter(&a);
+                            ctx.device->DrawIndexedPrimitive(type, bvi, minV, numV, start, prims);
+                            QueryPerformanceCounter(&b);
+                            g_drawCostDriver += b.QuadPart - a.QuadPart;
+                        }
                     });
                 } catch (...) {
                     g_inOwnCall = false;
@@ -8192,7 +8265,14 @@ void UpdateHooks() {
                 return OnDraw(ctx.device, [&]() {
                     drawn = true;
                     D3D9Hooks::ReissueScope reissue;
-                    ctx.device->DrawPrimitive(type, start, prims);
+                    if (kPublicBuild || !g_drawCostTimed) ctx.device->DrawPrimitive(type, start, prims);
+                    else {
+                        LARGE_INTEGER a, b;
+                        QueryPerformanceCounter(&a);
+                        ctx.device->DrawPrimitive(type, start, prims);
+                        QueryPerformanceCounter(&b);
+                        g_drawCostDriver += b.QuadPart - a.QuadPart;
+                    }
                 });
             } catch (...) {
                 g_inOwnCall = false;
