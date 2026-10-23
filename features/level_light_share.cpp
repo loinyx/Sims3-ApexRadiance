@@ -11877,6 +11877,37 @@ struct ApexCycles {
     }
 };
 
+// (2.15.3) A lamp whose light stands under the solving room's own story floor: a ceiling lamp of the story below that the
+// game lists on this story (F8: a pink ceiling spot 6 cm under story 1's floor lit 3364 points of story 1's closed rooms,
+// none of them tested, since it is not another story's lamp). It lights an indoor room's points above that floor only where
+// the ray crosses it through a removed floor (an opening; FloorAt: anything unread is a floor). Room 0 keeps the game's
+// light (lamps on the ground under a raised house). POD (SEH).
+std::atomic<long> g_underFloorBlocked{0};
+bool OwnFloorBlocks(const unsigned char* room, void* light, const float* sample) {
+    __try {
+        const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(room);
+        if (!mgr || *reinterpret_cast<const int*>(room + 0xC) == 0) return false;
+        Xform xf;
+        if (!ReadXform(mgr, xf)) return false;
+        alignas(16) float lp[4];
+        LampPos(light, lp);
+        float L[3], S[3];
+        ToLocal(xf, lp, L);
+        ToLocal(xf, sample, S);
+        const float h = *reinterpret_cast<const float*>(mgr + 0x98) - *reinterpret_cast<const float*>(mgr + 0xD4); // the story's lowest floor, lot space
+        if (!(ApexMath::Fabs(h) < 1000.0f) || !(L[1] < h - 0.02f) || !(S[1] > h + 0.02f)) return false;
+        const float t = (h - L[1]) / (S[1] - L[1]);
+        const float x = L[0] + t * (S[0] - L[0]), z = L[2] + t * (S[2] - L[2]);
+        if (!ApexMath::IsFinite(x) || !ApexMath::IsFinite(z)) return false;
+        const uintptr_t level = LevelForPoint(mgr);
+        if (!level) return false;
+        const int ix = static_cast<int>(ApexMath::Floor(x)), iz = static_cast<int>(ApexMath::Floor(z));
+        return FloorAt(level, ix, iz, Quadrant(x - ix, z - iz)) != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 template <int I> void __fastcall LightEvalHook(void* light, void*, const float* sample, const float* normal, float* colour) {
     // Quick outdoor lamp edits (Instant only): each light's part of the sums a kept sample adds to (the running sum is read
     // before each light of the outer point solve; t_odSample is set on the light tree thread only)
@@ -11901,6 +11932,13 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
         return;
     }
     reinterpret_cast<LightEval_t>(g_evalOrig[I])(light, sample, normal, colour);
+    // a lamp under this story's floor (above): nothing through the floor
+    if (t_solveRoom && (colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f) && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) &&
+        ThreadId() == g_gatherThread.load(std::memory_order_relaxed) && OwnFloorBlocks(t_solveRoom, light, sample)) {
+        for (int i = 0; i < 4; i++) colour[i] = 0.0f;
+        ApexUtil::CountOne(g_underFloorBlocked);
+        return;
+    }
     // one daytime curve: an outdoor lamp in a roofed room's solve (any roofed room, recorded or not), before every other test
     if (g_ctx.roofed && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
         RoofedDay(light, colour);
@@ -16481,7 +16519,8 @@ std::string Status() {
                        g_basisTests.load() ? std::format(" | directional maps: lamps of another story tested {}, behind a floor {}", g_basisTests.load(), g_basisBlocked.load()) : "",
                        g_faults.load() ? std::format(" | failures: {}", g_faults.load()) : "") + OpeningsStatus() + " | " + WallOpeningsText(false) +
            std::format(" | daytime curve in roofed rooms: outdoor lamps x {:.3f} in solves now, lamp points scaled {}, rooms gathered again at a settled day or night {}",
-                       g_roomLampDay.load(), g_dayScaled.load(), g_dayRoomsSent.load());
+                       g_roomLampDay.load(), g_dayScaled.load(), g_dayRoomsSent.load()) +
+           std::format(" | lamp points under their own story's floor left dark: {}", g_underFloorBlocked.load());
 }
 
 } // namespace LevelLightShare
