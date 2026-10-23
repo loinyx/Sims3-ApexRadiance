@@ -1095,20 +1095,133 @@ constexpr float kFenceCell = 8.0f;
 std::vector<GroundShadow::Wall> g_fenceAll;
 std::unordered_map<uint64_t, std::vector<uint32_t>> g_fenceCells;
 uint64_t FenceCellKey(int x, int z) { return (static_cast<uint64_t>(static_cast<uint32_t>(x)) << 32) | static_cast<uint32_t>(z); }
-void FenceWallsIn(float x0, float z0, float x1, float z1, std::vector<GroundShadow::Wall>& out) {
-    if (g_fenceGridGen != g_fenceGen) {
-        g_fenceGridGen = g_fenceGen;
-        g_fenceAll.clear();
-        g_fenceCells.clear();
-        for (const auto& [k, g] : g_fenceGroups)
-            for (const GroundShadow::Wall& w : g.walls) {
-                const uint32_t i = static_cast<uint32_t>(g_fenceAll.size());
-                g_fenceAll.push_back(w);
-                const int cx = static_cast<int>(ApexMath::Floor(0.5f * (w.x0 + w.x1) / kFenceCell)), cz = static_cast<int>(ApexMath::Floor(0.5f * (w.z0 + w.z1) / kFenceCell));
-                g_fenceCells[FenceCellKey(cx, cz)].push_back(i);
-            }
+// (2.15.3) Gates. A fence gate is an object, not an instanced fence piece, so the fence line had a gap in the mask where the
+// gate stands and a garden post's light passed through the closed gate onto the ground behind it (F8). The gaps between
+// two fence pieces in line (kGapMin .. kGapMax apart, facing each other) are listed with the fence grid; an outdoor object
+// drawn with its origin in one (DrawObjectLamp, NoteGate) fills it with a wall from the higher base to the lower top of the
+// two pieces. A filled gap not seen for kGateKeepMs is dropped. Render thread.
+struct FenceGap {
+    GroundShadow::Wall w;
+    uint64_t key;
+};
+constexpr float kGapMin = 0.4f, kGapMax = 2.5f;
+constexpr DWORD kGateKeepMs = 300000;
+std::vector<FenceGap> g_fenceGaps;
+std::unordered_map<uint64_t, std::vector<uint32_t>> g_gapCells; // every 8 m cell a gap's box (+0.5 m) touches
+std::unordered_map<uint64_t, DWORD> g_gates;                     // gap key -> last tick an object was drawn in it
+std::atomic<long> g_gatesFilled{0};
+int FenceCell(float v) { return static_cast<int>(ApexMath::Floor(v / kFenceCell)); }
+uint64_t GapKey(float ax, float az, float bx, float bz) {
+    int64_t q[4] = {std::lround(ax * 20.0f), std::lround(az * 20.0f), std::lround(bx * 20.0f), std::lround(bz * 20.0f)};
+    if (q[0] > q[2] || (q[0] == q[2] && q[1] > q[3])) std::swap(q[0], q[2]), std::swap(q[1], q[3]);
+    uint64_t e = 1469598103934665603ull;
+    for (int64_t v : q) e = (e ^ static_cast<uint64_t>(v)) * 1099511628211ull;
+    return e;
+}
+void FenceGapsBuild() {
+    g_fenceGaps.clear();
+    g_gapCells.clear();
+    const auto end = [](const GroundShadow::Wall& w, int e, float& x, float& z) { x = e ? w.x1 : w.x0, z = e ? w.z1 : w.z0; };
+    for (size_t i = 0; i < g_fenceAll.size(); i++) {
+        const GroundShadow::Wall& a = g_fenceAll[i];
+        const float la = std::hypot(a.x1 - a.x0, a.z1 - a.z0);
+        if (!(la > 0.05f)) continue;
+        const float ux = (a.x1 - a.x0) / la, uz = (a.z1 - a.z0) / la;
+        for (int ea = 0; ea < 2; ea++) {
+            float ax, az;
+            end(a, ea, ax, az);
+            const float ox = ea ? ux : -ux, oz = ea ? uz : -uz; // outward along the piece from this end
+            float best = kGapMax;
+            int bj = -1, be = 0;
+            bool joined = false;
+            for (int ci = FenceCell(ax) - 1; ci <= FenceCell(ax) + 1; ci++)
+                for (int cj = FenceCell(az) - 1; cj <= FenceCell(az) + 1; cj++) {
+                    const auto it = g_fenceCells.find(FenceCellKey(ci, cj));
+                    if (it == g_fenceCells.end()) continue;
+                    for (uint32_t j : it->second) {
+                        if (j == i) continue;
+                        const GroundShadow::Wall& b = g_fenceAll[j];
+                        const float lb = std::hypot(b.x1 - b.x0, b.z1 - b.z0);
+                        if (!(lb > 0.05f) || ApexMath::Fabs((b.x1 - b.x0) / lb * ux + (b.z1 - b.z0) / lb * uz) < 0.98f) continue;
+                        for (int eb = 0; eb < 2; eb++) {
+                            float bx, bz;
+                            end(b, eb, bx, bz);
+                            const float dx = bx - ax, dz = bz - az, d = std::hypot(dx, dz);
+                            if (d < 0.05f && ApexMath::Fabs(b.y0 - a.y0) < 1.0f) joined = true; // a piece goes on from this end: no gap
+                            if (!(d >= kGapMin && d < best) || (dx * ox + dz * oz) < 0.98f * d) continue; // in line, ahead of this end
+                            float fx, fz;
+                            end(b, 1 - eb, fx, fz);
+                            if ((fx - bx) * ox + (fz - bz) * oz <= 0.0f) continue; // b goes on away from the gap
+                            best = d, bj = static_cast<int>(j), be = eb;
+                        }
+                    }
+                }
+            if (bj < 0 || joined || static_cast<size_t>(bj) < i) continue; // each gap once (from its lower piece)
+            const GroundShadow::Wall& b = g_fenceAll[bj];
+            float bx, bz;
+            end(b, be, bx, bz);
+            FenceGap gp;
+            gp.w = {ax, az, bx, bz, std::max(a.y0, b.y0), std::min(a.y1, b.y1)};
+            if (!(gp.w.y1 > gp.w.y0 + 0.3f)) continue;
+            gp.key = GapKey(ax, az, bx, bz);
+            const uint32_t k = static_cast<uint32_t>(g_fenceGaps.size());
+            g_fenceGaps.push_back(gp);
+            for (int ci = FenceCell(std::min(ax, bx) - 0.5f); ci <= FenceCell(std::max(ax, bx) + 0.5f); ci++)
+                for (int cj = FenceCell(std::min(az, bz) - 0.5f); cj <= FenceCell(std::max(az, bz) + 0.5f); cj++) g_gapCells[FenceCellKey(ci, cj)].push_back(k);
+        }
     }
+}
+void FenceGridUpdate() {
+    if (g_fenceGridGen == g_fenceGen) return;
+    g_fenceGridGen = g_fenceGen;
+    g_fenceAll.clear();
+    g_fenceCells.clear();
+    for (const auto& [k, g] : g_fenceGroups)
+        for (const GroundShadow::Wall& w : g.walls) {
+            const uint32_t i = static_cast<uint32_t>(g_fenceAll.size());
+            g_fenceAll.push_back(w);
+            const int cx = static_cast<int>(ApexMath::Floor(0.5f * (w.x0 + w.x1) / kFenceCell)), cz = static_cast<int>(ApexMath::Floor(0.5f * (w.z0 + w.z1) / kFenceCell));
+            g_fenceCells[FenceCellKey(cx, cz)].push_back(i);
+        }
+    FenceGapsBuild();
+}
+// An outdoor object drawn at world (x, y, z): a gate when its origin stands in a fence gap (within 0.35 m of the line,
+// between the two pieces' ends, between the gap's base - 1 m and its top)
+void NoteGate(float x, float y, float z) {
+    FenceGridUpdate();
+    if (g_fenceGaps.empty()) return;
+    const auto it = g_gapCells.find(FenceCellKey(FenceCell(x), FenceCell(z)));
+    if (it == g_gapCells.end()) return;
+    for (uint32_t k : it->second) {
+        const FenceGap& gp = g_fenceGaps[k];
+        const float dx = gp.w.x1 - gp.w.x0, dz = gp.w.z1 - gp.w.z0, l = std::hypot(dx, dz);
+        const float t = ((x - gp.w.x0) * dx + (z - gp.w.z0) * dz) / l, side = ApexMath::Fabs((x - gp.w.x0) * dz - (z - gp.w.z0) * dx) / l;
+        if (t < -0.1f || t > l + 0.1f || side > 0.35f || y < gp.w.y0 - 1.0f || y > gp.w.y1) continue;
+        const DWORD now = GetTickCount();
+        const auto [g, fresh] = g_gates.try_emplace(gp.key, now);
+        if (fresh) ApexUtil::CountOne(g_gatesFilled);
+        else if (now - g->second > 1000) g->second = now;
+        return;
+    }
+}
+void FenceWallsIn(float x0, float z0, float x1, float z1, std::vector<GroundShadow::Wall>& out) {
+    FenceGridUpdate();
     if (g_fenceAll.empty()) return;
+    // the filled gaps (gates) in the box
+    if (!g_gates.empty()) {
+        const DWORD now = GetTickCount();
+        for (const FenceGap& gp : g_fenceGaps) {
+            const GroundShadow::Wall& w = gp.w;
+            if (std::max(w.x0, w.x1) < x0 || std::min(w.x0, w.x1) > x1 || std::max(w.z0, w.z1) < z0 || std::min(w.z0, w.z1) > z1) continue;
+            const auto it = g_gates.find(gp.key);
+            if (it == g_gates.end()) continue;
+            if (now - it->second > kGateKeepMs) {
+                g_gates.erase(it);
+                continue;
+            }
+            out.push_back(w);
+        }
+    }
     // (pieces are at most 8 m long: their middle is within one cell of any point of them)
     const int i0 = static_cast<int>(ApexMath::Floor(x0 / kFenceCell)) - 1, i1 = static_cast<int>(ApexMath::Floor(x1 / kFenceCell)) + 1;
     const int j0 = static_cast<int>(ApexMath::Floor(z0 / kFenceCell)) - 1, j1 = static_cast<int>(ApexMath::Floor(z1 / kFenceCell)) + 1;
@@ -1869,11 +1982,11 @@ IDirect3DTexture9* LotMaskFor(IDirect3DDevice9* dev, const float k[4], const flo
     return LotMaskForImpl(dev, k, c15, c8, c10, r, rows);
 }
 std::string LotShadeStatusText() {
-    return std::format("{} | lots shaded {}, builds dropped {} (inputs changed or lot gone), queued {}{} | last build: {} lamps, {} walls ({} of garden walls and fences, {} noted), {:.1f} ms on the worker "
+    return std::format("{} | lots shaded {}, builds dropped {} (inputs changed or lot gone), queued {}{} | last build: {} lamps, {} walls ({} of garden walls and fences, {} noted, gates filling a fence gap {} of {}), {:.1f} ms on the worker "
                        "(longest {:.1f} ms), darkest texel {:.0f}%, {} wall cells with an opening or a lower top | wall tests {} (crossing a wall through an opening or "
                        "over a lower cell {}) | world grass around lots: {} chunks shaded, {} chunk builds (last {:.1f} ms)",
                        g_shadeOn ? "on" : "off", g_shadeBuilt.load(), g_shadeDropped.load(), g_shadeQueue.size(), g_lotsInFlight ? " (building)" : "",
-                       g_shadeLastLamps, g_shadeLastWalls, g_shadeLastFences, g_fenceWalls.load(), g_shadeLastMs, g_shadeMaxMs, g_shadeLastMin * 100.0f, g_shadeLastPatches, g_shadeTests,
+                       g_shadeLastLamps, g_shadeLastWalls, g_shadeLastFences, g_fenceWalls.load(), g_gates.size(), g_gatesFilled.load(), g_shadeLastMs, g_shadeMaxMs, g_shadeLastMin * 100.0f, g_shadeLastPatches, g_shadeTests,
                        g_shadeThrough, g_chunkShades.size(), g_chunkShadeBuilds.load(), g_chunkShadeLastMs);
 }
 
@@ -5258,6 +5371,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
             // loose objects keep 0.2 m, so a wall 0.4 m behind an armchair still blocks the next room's lamp (F7 capture, 07/10)
             float at[3];
             const bool inWall = ObjectLampPoint(m, at);
+            if (!inWall && rigMode == 2) NoteGate(m[0][3], m[1][3], m[2][3]); // a gate fills its fence's gap in the lot shade
             const float nearSkip = inWall ? kWindowWallSkip : 0.2f;
             nLamps = PickObjectLamps(at[0], at[1], at[2], lamps, groundShare, nearSkip, lamps + 1 + 2 * N, &lampTop, reach ? lamps + kLampRows : nullptr, true);
             originY = at[1];
@@ -8545,6 +8659,7 @@ void OnWorldChanged() {
     g_haveLastEdgeRect = false;
     g_shadeQueue.clear(); // the lamp shades waiting or building belong to the previous world's lots
     g_fenceGroups.clear(); // (garden walls of the old world)
+    g_gates.clear();
     g_fenceBusy.clear();
     g_fenceGen++;
     g_meshBoxes.clear();
@@ -9072,6 +9187,7 @@ void Shutdown(bool keepChunkMaps) {
     g_shadeWorker.Stop();
     ReleaseLotMasks();
     g_fenceGroups.clear();
+    g_gates.clear();
     g_fenceBusy.clear();
     g_fenceGen++;
     g_meshBoxes.clear();
