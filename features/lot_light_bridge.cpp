@@ -4823,7 +4823,12 @@ void CorrectFoliageEye(const float (*c)[4], int count, const FoliageCrown& mesh,
     for (int k = 0; k < 3; k++) eye[k] += g_eyeOffset[k];
 }
 
+// (2.15.3) A light capture's detail of a foliage draw: each instance's place and the lamps it took (render thread; filled by
+// FoliageVertexConstants only while LightProbe::Capturing, read in OnDrawTracked's foliage branch)
+std::string g_foliageNote;
 bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<float>& out) {
+    const bool noting = LightProbe::Capturing();
+    if (noting) g_foliageNote.clear();
     FoliageCrown mesh;
     if (!FoliageMeshBox(dev, mesh)) return false;
     const int count = std::clamp(mesh.instances, 1, 9);
@@ -4932,6 +4937,15 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
             }
             FoliageVertexLamps::SlotConstants(f.own[k], eye, groundY, lawScale, lp, law, out[(56 + 3 * i) * 4 + k]);
             for (int a = 0; a < 3; a++) rgb[a] = f.own[k].colour[a];
+        }
+        if (noting) {
+            g_foliageNote += std::format("\n      instance {}: box centre ({:.2f} {:.2f} {:.2f}) half {:.2f} x {:.2f}, crown {}, picked {:.1f} s ago (lamp list {} / now {}, walls {}), "
+                                         "{} own lamp(s):",
+                                         i, boxC[0], boxC[1], boxC[2], ext[0], ext[1], f.shaped ? std::format("({:.2f} {:.2f} {:.2f})", f.centre[0], f.centre[1], f.centre[2]) : "none",
+                                         (now - f.pickTick) / 1000.0, f.pickGen, g_foliageLampGen, f.pickState == visState ? "same" : "changed since", f.owned);
+            for (int k = 0; k < f.owned; k++)
+                g_foliageNote += std::format(" [{}] at ({:.2f} {:.2f} {:.2f}) colour ({:.3f} {:.3f} {:.3f}) share {:.2f} key {:016X}", k, f.own[k].pos[0], f.own[k].pos[1],
+                                             f.own[k].pos[2], f.own[k].colour[0], f.own[k].colour[1], f.own[k].colour[2], f.own[k].share, f.own[k].key);
         }
         float* cr = &out[(54 + 3 * i) * 4];
         float* cr2 = &out[(55 + 3 * i) * 4];
@@ -7526,6 +7540,16 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawTracked(IDirect3DDevice9*
                                  g_foliageOwned[3].load(), g_foliageNoShape.load(), g_foliageWallOut.load(), g_crownCount.load(), g_eyeDriftMax.exchange(0.0f), g_eyeAnchors.Count(), g_treeShadowDrawn.load(), g_foliageRepickChanged.load(), g_foliageRepickSame.load()));
         }
     }
+    if (LightProbe::Capturing()) {
+        float eyeNow[3] = {};
+        const bool eyeKnown = LotLightingMotion::CameraEye(eyeNow);
+        g_objDrawInfo = std::format("mod draw: foliage | per-vertex lamps: {} | wrap weights {:.3f} {:.3f} ({}) | instance positions {} | camera eye {} offset ({:.2f} {:.2f} {:.2f})",
+                                    pvBase > 0 ? "drawn" : "not used for this draw (the old path)", weights[0], weights[1], reachLaw ? "reach law" : "daytime curve",
+                                    g_foliageOrigin.load() == 1 ? "relative to the camera" : g_foliageOrigin.load() == 2 ? "world" : "not known yet",
+                                    eyeKnown ? std::format("({:.2f} {:.2f} {:.2f})", eyeNow[0], eyeNow[1], eyeNow[2]) : std::string("not read"), g_eyeOffset[0], g_eyeOffset[1],
+                                    g_eyeOffset[2]) +
+                        (pvBase > 0 ? g_foliageNote : std::string());
+    }
     g_inOwnCall = true;
     SetVs(dev, drawVs);
     SetVsConst(dev, ShaderPatches::kFoliageWrapConst, wrap, 1);
@@ -7544,6 +7568,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawTracked(IDirect3DDevice9*
         SetVsConst(dev, 54, &s_colSaved[0][0], 27);                       // and of its lamp colours
     }
     g_inOwnCall = false;
+    g_objDrawInfo.clear();
     ApexUtil::CountOne(g_foliageDrawn);
     MarkClaimSource(ClaimSource::FoliageVertex);
     return D3D9Hooks::HookAction::Skip;
