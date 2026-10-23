@@ -3224,6 +3224,7 @@ uint32_t FloatBits(float f) {
 int SelectLampsScan(float x, float z, float maxScore, bool withExit);
 
 // withExit (objects and fences outside): also the indoor lamps shining out of a house (g_exitLampRows); a separate memo key
+int g_lastLampPicked = 0; // (2.15.3) the lamps the last SelectLamps returned (g_lampData / g_lampCone rows; FencePickMemo)
 int SelectLamps(float x, float z, float maxScore, bool withExit = false) {
     const uint32_t bx = FloatBits(x), bz = FloatBits(z), bm = FloatBits(maxScore) ^ (withExit ? 0x80000000u : 0u);
     LampMemo& e = g_lampMemo[((bx * 0x9E3779B1u) ^ (bz * 0x85EBCA77u) ^ (bm * 0xC2B2AE3Du)) >> 23]; // top 9 bits: 512 entries
@@ -3232,7 +3233,7 @@ int SelectLamps(float x, float z, float maxScore, bool withExit = false) {
         g_lastLampCandidates = e.candidates;
         std::memcpy(g_lampData, e.rows, sizeof(e.rows));
         std::memcpy(g_lampCone, e.cones, sizeof(e.cones));
-        return e.picked;
+        return g_lastLampPicked = e.picked;
     }
     g_lampMemoMisses++;
     const int m = SelectLampsScan(x, z, maxScore, withExit);
@@ -3244,7 +3245,7 @@ int SelectLamps(float x, float z, float maxScore, bool withExit = false) {
     e.candidates = g_lastLampCandidates;
     std::memcpy(e.rows, g_lampData, sizeof(e.rows));
     std::memcpy(e.cones, g_lampCone, sizeof(e.cones));
-    return m;
+    return g_lastLampPicked = m;
 }
 
 int SelectLampsScan(float x, float z, float maxScore, bool withExit) {
@@ -4001,8 +4002,10 @@ struct GroupCentre {
     unsigned pieces = 0;
     DWORD at = 0;
     bool ok = false;
+    uint32_t read = 0; // (2.15.3) moved at every read of the positions (FencePickMemo): from g_groupReads, never reused
 };
 std::unordered_map<uint64_t, GroupCentre> g_groupCentres;
+uint32_t g_groupReads = 0;
 bool ReadInstancePositions(const BYTE* p, UINT count, UINT stride, GroupCentre& g) {
     __try {
         double sx = 0, sy = 0, sz = 0;
@@ -4070,6 +4073,8 @@ const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
             } else {
                 g.at = now ? now : 1;
                 if (busy) *busy = 0;
+                if (++g_groupReads == 0) g_groupReads = 1;
+                g.read = g_groupReads;
                 g.ok = SUCCEEDED(hr) && p && ReadInstancePositions(static_cast<const BYTE*>(p), count, stride, g);
             }
             if (p) vb->Unlock();
@@ -4084,6 +4089,150 @@ const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
 // only while a capture is recording; and the per-pixel lamps' law line (ReachLawText, below)
 std::string g_objDrawInfo;
 std::string ReachLawText(bool reach, bool refused, bool placed, float scale, const float (*r0Rows)[4], int nLamps);
+
+// The lamps of an instanced group (fences, stairs, railings) around its centre, into rows 1 .. 4N of lamps (pos, 1/R^2;
+// colour, spill; the two cones) and, with the reach law, rows 1 + 4N .. 2 + 4N (r0^2); lampTop: the highest atlas lamp head
+// around; share: the share of the atlas lamps' light the group sees. Returns the lamps placed.
+int PickFenceLampsImpl(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share) {
+    constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
+    constexpr unsigned kLampRows = 1 + 4 * N;
+    int used = 0;
+    lampTop = -1e9f;
+    const int n = SelectLamps(g.x, g.z, 40.0f + std::min(g.ext, 60.0f), true); // (with the lamps shining out of a house)
+    // the highest head of the atlas lamps around: faces turned up above it see none of the atlas (below). A lamp shining
+    // out of a house is not in the atlas and does not count (14/10: an upper story's indoor lamp raised the gate of the
+    // parapets beside it, whose tops then took a ground post's whole pool)
+    for (int k = 0; k < n; k++)
+        GroundLightGate::NoteHead(lampTop, g_lampData[k][1], g_lampData[k][0] - g.x, g_lampData[k][2] - g.z, 15.0f + std::min(g.ext, 60.0f), !g_lampCone[k].light);
+    GroundLightGate::Share groundShare; // the share of the atlas lamps' light the group sees (below)
+    // Buildings block light on objects applies to fences too (a brick fence behind a tower took the wall
+    // lamp on the other side). One lamp list serves the whole group, so a lamp leaves it only when a wall stands
+    // between it and the group's centre and both its ends (0.5 m above the pieces): a fence wholly behind a wall
+    // loses it, one that only runs past a wall keeps it. The placed floors of upper stories count too (12/10, the
+    // rule objects follow, PickObjectLamps): the lamp keeps the largest share (LampVisibility) of the three points, so
+    // a railing on a balcony loses a lamp under the slab and keeps one in front of it. (12/10, F7 18-17-00 #393: the
+    // group's centre is not always a piece: an L-shaped band's stood in open air 3.6 m from its nearest piece, where a
+    // lamp could be seen that no piece sees. The first point is the piece nearest the lamp instead; the centre only
+    // when no piece was read.)
+    const float mid[3] = {g.x, g.y + 0.5f, g.z}, endA[3] = {g.a[0], g.a[1] + 0.5f, g.a[2]}, endB[3] = {g.b[0], g.b[1] + 0.5f, g.b[2]};
+    for (int k = 0; k < n; k++) { // (every lamp: the ground share counts those past the N slots too)
+        const float* pr = g_lampData[k];
+        const float* col = g_lampData[16 + k];
+        float piece[3] = {mid[0], mid[1], mid[2]}, best = 3.0e38f;
+        for (unsigned i = 0; i < g.pieces && i < kGroupPieces; i++) {
+            const float* q = g.piece[i];
+            const float dx = q[0] - pr[0], dy = q[1] + 0.5f - pr[1], dz = q[2] - pr[2], d = dx * dx + dy * dy + dz * dz;
+            if (d < best) {
+                best = d;
+                piece[0] = q[0], piece[1] = q[1] + 0.5f, piece[2] = q[2];
+            }
+        }
+        float v = PickedLampVisibility(k, pr, piece);
+        if (v < 1.0f) v = std::max(v, PickedLampVisibility(k, pr, endA));
+        if (v < 1.0f) v = std::max(v, PickedLampVisibility(k, pr, endB));
+        { // its weight at the nearest piece, as PickObjectLamps weighs an object's ground share
+            const float r = pr[3] > 0.1f ? pr[3] : 0.1f, dx = pr[0] - piece[0], dy = pr[1] - piece[1], dz = pr[2] - piece[2];
+            const float w = (col[0] * 0.2126f + col[1] * 0.7152f + col[2] * 0.0722f) * LampConeAt(g_lampCone[k], pr, piece) / (1.0f + (dx * dx + dy * dy + dz * dz) / (r * r));
+            groundShare.Add(w, v < 0.01f ? 0.0f : v, !g_lampCone[k].light);
+        }
+        if (used >= static_cast<int>(N)) continue;
+        if (v < 0.01f) { // under 1% left: the slot goes to the next lamp
+            g_fenceLampsLeftOut++;
+            continue;
+        }
+        if (v < 1.0f) g_fenceLampsDimmed++;
+        const float r = pr[3] > 0.1f ? pr[3] : 0.1f;
+        lamps[1 + 2 * used][0] = pr[0];
+        lamps[1 + 2 * used][1] = pr[1];
+        lamps[1 + 2 * used][2] = pr[2];
+        lamps[1 + 2 * used][3] = 1.0f / (r * r);
+        // its cones (07/10): the fence face 47 deg or more off a sconce's axis takes only its spill, as in the game
+        const LampCone& cone = g_lampCone[k];
+        float colourScale = v;
+        if (reachLaw) { // the outdoor walls' law (lamp_reach.h): R, r0^2 and the game's weight of this lamp
+            float r0, R;
+            LampReach::Radii(cone.w, r0, R);
+            lamps[1 + 2 * used][3] = 1.0f / (R * R);
+            lamps[kLampRows + (used >> 2)][used & 3] = r0 * r0;
+            colourScale *= LampReach::Gain(cone.w, cone.entries);
+        }
+        lamps[2 + 2 * used][0] = col[0] * colourScale;
+        lamps[2 + 2 * used][1] = col[1] * colourScale;
+        lamps[2 + 2 * used][2] = col[2] * colourScale;
+        lamps[2 + 2 * used][3] = cone.spill;
+        std::memcpy(lamps[1 + 2 * N + 2 * used], cone.c1, 16);
+        std::memcpy(lamps[2 + 2 * N + 2 * used], cone.c2, 16);
+        if (!g_fenceConeLogged && HasCone(cone)) {
+            g_fenceConeLogged = true;
+            LOG_INFO(std::format("[LotLightBridge] Fence/stairs: per-pixel lamps follow their cones (first: the lamp at ({:.1f} {:.1f} {:.1f}), spill {:.3f})", pr[0], pr[1], pr[2], cone.spill));
+        }
+        used++;
+    }
+    share = groundShare.Value();
+    return used;
+}
+
+// (2.15.3) A group's pick kept, as PickMemo keeps an object's (its comment has the rules): keyed by the group (its entry and
+// the generation of its positions, moved at every read of them) and the law, valid while the lamp list (g_lampMemoGen) and
+// everything the wall and slab test reads (LampVisibilityState, before and after the pick) are the same; a pick that weighed
+// a lamp shining out of a house is not kept. A hit writes exactly what the pick would: the same rows, lampTop and share, the
+// counters and the candidate count. 256 entries, direct-mapped; the same switches and checks as PickMemo.
+constexpr unsigned kFenceRows = 4 * ShaderPatches::kObjectPixelLamps + 2; // rows 1 .. 2 + 4N of the caller's array
+struct FencePickMemo {
+    const GroupCentre* g = nullptr;
+    uint32_t read = 0, gen = 0; // gen 0 = empty
+    uint64_t state = 0;
+    bool reachLaw = false;
+    int used = 0, candidates = 0;
+    uint32_t leftOut = 0, dimmed = 0;
+    float lampTop = 0.0f, share = 0.0f;
+    float rows[kFenceRows][4] = {};
+};
+FencePickMemo g_fencePick[256];
+uint32_t g_fencePickHits = 0, g_fencePickMisses = 0, g_fencePickChecks = 0;
+bool g_fencePickOff = false;
+int PickFenceLamps(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share) {
+    if (!DevSwitches::LampVisibilityMemo() || g_fencePickOff || LevelLightShare::VisibilityDiagArmed() || LightProbe::Capturing())
+        return PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share);
+    FencePickMemo& e = g_fencePick[(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g)) * 2654435761u ^ g.read * 0x85EBCA77u) >> 24];
+    const uint64_t state = LevelLightShare::LampVisibilityState();
+    if (e.gen == g_lampMemoGen && e.g == &g && e.read == g.read && e.reachLaw == reachLaw && e.state == state) {
+        g_fencePickHits++;
+        // (development builds) one hit in 64 is picked again from scratch on a copy and compared bit for bit
+        if (!kPublicBuild && (++g_fencePickChecks & 63u) == 0) {
+            float chk[kFenceRows + 1][4];
+            std::memcpy(chk, lamps, sizeof chk);
+            float chkTop = -1e9f, chkShare = 0.0f;
+            const uint32_t leftOut0 = g_fenceLampsLeftOut, dimmed0 = g_fenceLampsDimmed;
+            const int chkUsed = PickFenceLampsImpl(g, reachLaw, chk, chkTop, chkShare);
+            g_fenceLampsLeftOut = leftOut0, g_fenceLampsDimmed = dimmed0;
+            if (chkUsed != e.used || FloatBits(chkTop) != FloatBits(e.lampTop) || FloatBits(chkShare) != FloatBits(e.share) ||
+                std::memcmp(chk[1], e.rows, sizeof e.rows) != 0) {
+                g_fencePickOff = true;
+                LOG_WARNING(std::format("[LotLightBridge] Fence lamp pick memo: a kept pick differed from a new one at ({:.2f} {:.2f} {:.2f}) ({} lamps kept, {} picked): "
+                                        "not used again in this session", g.x, g.y, g.z, e.used, chkUsed));
+            }
+        }
+        std::memcpy(lamps[1], e.rows, sizeof e.rows);
+        lampTop = e.lampTop, share = e.share;
+        g_fenceLampsLeftOut += e.leftOut, g_fenceLampsDimmed += e.dimmed;
+        g_lastLampCandidates = e.candidates;
+        return e.used;
+    }
+    g_fencePickMisses++;
+    const uint32_t gen = g_lampMemoGen, leftOut0 = g_fenceLampsLeftOut, dimmed0 = g_fenceLampsDimmed;
+    const int used = PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share);
+    bool exitLamp = false; // (the lamps SelectLamps returned: g_lampCone[0 .. n) of this pick)
+    for (int k = 0; k < g_lastLampPicked && k < 16; k++) exitLamp = exitLamp || g_lampCone[k].light != 0;
+    if (gen == g_lampMemoGen && !exitLamp && LevelLightShare::LampVisibilityState() == state) {
+        e.g = &g, e.read = g.read, e.gen = gen, e.state = state, e.reachLaw = reachLaw;
+        e.used = used, e.candidates = g_lastLampCandidates;
+        e.leftOut = g_fenceLampsLeftOut - leftOut0, e.dimmed = g_fenceLampsDimmed - dimmed0;
+        e.lampTop = lampTop, e.share = share;
+        std::memcpy(e.rows, lamps[1], sizeof e.rows);
+    }
+    return used;
+}
 
 template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw) {
     NoteFenceGroup(dev); // garden walls and fences shade the ground (ShadeWalls)
@@ -4130,77 +4279,8 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
         for (unsigned k = 0; k < N; k++) lamps[1 + 2 * k][0] = lamps[1 + 2 * k][2] = 1e6f; // unused slot: far away, colour 0
         for (unsigned k = 0; k < N; k++) lamps[2 + 2 * k][3] = lamps[1 + 2 * N + 2 * k][3] = lamps[2 + 2 * N + 2 * k][3] = 1.0f; // no cone
         if (g) {
-            const int n = SelectLamps(g->x, g->z, 40.0f + std::min(g->ext, 60.0f), true); // (with the lamps shining out of a house)
-            // the highest head of the atlas lamps around: faces turned up above it see none of the atlas (below). A lamp shining
-            // out of a house is not in the atlas and does not count (14/10: an upper story's indoor lamp raised the gate of the
-            // parapets beside it, whose tops then took a ground post's whole pool)
-            float lampTop = -1e9f;
-            for (int k = 0; k < n; k++)
-                GroundLightGate::NoteHead(lampTop, g_lampData[k][1], g_lampData[k][0] - g->x, g_lampData[k][2] - g->z, 15.0f + std::min(g->ext, 60.0f), !g_lampCone[k].light);
-            GroundLightGate::Share groundShare; // the share of the atlas lamps' light the group sees (below)
-            // Buildings block light on objects applies to fences too (a brick fence behind a tower took the wall
-            // lamp on the other side). One lamp list serves the whole group, so a lamp leaves it only when a wall stands
-            // between it and the group's centre and both its ends (0.5 m above the pieces): a fence wholly behind a wall
-            // loses it, one that only runs past a wall keeps it. The placed floors of upper stories count too (12/10, the
-            // rule objects follow, PickObjectLamps): the lamp keeps the largest share (LampVisibility) of the three points, so
-            // a railing on a balcony loses a lamp under the slab and keeps one in front of it. (12/10, F7 18-17-00 #393: the
-            // group's centre is not always a piece: an L-shaped band's stood in open air 3.6 m from its nearest piece, where a
-            // lamp could be seen that no piece sees. The first point is the piece nearest the lamp instead; the centre only
-            // when no piece was read.)
-            const float mid[3] = {g->x, g->y + 0.5f, g->z}, endA[3] = {g->a[0], g->a[1] + 0.5f, g->a[2]}, endB[3] = {g->b[0], g->b[1] + 0.5f, g->b[2]};
-            for (int k = 0; k < n; k++) { // (every lamp: the ground share counts those past the N slots too)
-                const float* pr = g_lampData[k];
-                const float* col = g_lampData[16 + k];
-                float piece[3] = {mid[0], mid[1], mid[2]}, best = 3.0e38f;
-                for (unsigned i = 0; i < g->pieces && i < kGroupPieces; i++) {
-                    const float* q = g->piece[i];
-                    const float dx = q[0] - pr[0], dy = q[1] + 0.5f - pr[1], dz = q[2] - pr[2], d = dx * dx + dy * dy + dz * dz;
-                    if (d < best) {
-                        best = d;
-                        piece[0] = q[0], piece[1] = q[1] + 0.5f, piece[2] = q[2];
-                    }
-                }
-                float v = PickedLampVisibility(k, pr, piece);
-                if (v < 1.0f) v = std::max(v, PickedLampVisibility(k, pr, endA));
-                if (v < 1.0f) v = std::max(v, PickedLampVisibility(k, pr, endB));
-                { // its weight at the nearest piece, as PickObjectLamps weighs an object's ground share
-                    const float r = pr[3] > 0.1f ? pr[3] : 0.1f, dx = pr[0] - piece[0], dy = pr[1] - piece[1], dz = pr[2] - piece[2];
-                    const float w = (col[0] * 0.2126f + col[1] * 0.7152f + col[2] * 0.0722f) * LampConeAt(g_lampCone[k], pr, piece) / (1.0f + (dx * dx + dy * dy + dz * dz) / (r * r));
-                    groundShare.Add(w, v < 0.01f ? 0.0f : v, !g_lampCone[k].light);
-                }
-                if (used >= static_cast<int>(N)) continue;
-                if (v < 0.01f) { // under 1% left: the slot goes to the next lamp
-                    g_fenceLampsLeftOut++;
-                    continue;
-                }
-                if (v < 1.0f) g_fenceLampsDimmed++;
-                const float r = pr[3] > 0.1f ? pr[3] : 0.1f;
-                lamps[1 + 2 * used][0] = pr[0];
-                lamps[1 + 2 * used][1] = pr[1];
-                lamps[1 + 2 * used][2] = pr[2];
-                lamps[1 + 2 * used][3] = 1.0f / (r * r);
-                // its cones (07/10): the fence face 47 deg or more off a sconce's axis takes only its spill, as in the game
-                const LampCone& cone = g_lampCone[k];
-                float colourScale = v;
-                if (reachLaw) { // the outdoor walls' law (lamp_reach.h): R, r0^2 and the game's weight of this lamp
-                    float r0, R;
-                    LampReach::Radii(cone.w, r0, R);
-                    lamps[1 + 2 * used][3] = 1.0f / (R * R);
-                    lamps[kLampRows + (used >> 2)][used & 3] = r0 * r0;
-                    colourScale *= LampReach::Gain(cone.w, cone.entries);
-                }
-                lamps[2 + 2 * used][0] = col[0] * colourScale;
-                lamps[2 + 2 * used][1] = col[1] * colourScale;
-                lamps[2 + 2 * used][2] = col[2] * colourScale;
-                lamps[2 + 2 * used][3] = cone.spill;
-                std::memcpy(lamps[1 + 2 * N + 2 * used], cone.c1, 16);
-                std::memcpy(lamps[2 + 2 * N + 2 * used], cone.c2, 16);
-                if (!g_fenceConeLogged && HasCone(cone)) {
-                    g_fenceConeLogged = true;
-                    LOG_INFO(std::format("[LotLightBridge] Fence/stairs: per-pixel lamps follow their cones (first: the lamp at ({:.1f} {:.1f} {:.1f}), spill {:.3f})", pr[0], pr[1], pr[2], cone.spill));
-                }
-                used++;
-            }
+            float lampTop = -1e9f, share = 0.0f;
+            used = PickFenceLamps(*g, reachLaw, lamps, lampTop, share);
             lamps[0][1] = TerrainLightingPolicy::SurfaceLampGain(g_night.load(std::memory_order_relaxed), g_objPixelLampStrength.load(std::memory_order_relaxed)) *
                           std::max(g_fenceStrength.load(std::memory_order_relaxed), 0.0f);
             // reach: the outdoor walls' scale, the two sliders as trims over their defaults (x1 at the defaults: a band in
@@ -4228,7 +4308,7 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
             // data). Ground fences and curbs, below the heads, keep it all. (14/10) The atlas has no walls or slabs either: the
             // tops take it x the share of the atlas lamps' light the group sees (the objects' ground share), so a parapet over
             // the slab of an arcade takes none of the pool of the lamp under that slab.
-            weight[0] = GroundLightGate::HeightGate(g->y, lampTop) * groundShare.Value();
+            weight[0] = GroundLightGate::HeightGate(g->y, lampTop) * share;
         }
         dev->GetPixelShaderConstantF(p.inst.lampParamConst, &oldLamps[0][0], rows);
         dev->GetPixelShaderConstantF(p.inst.groundWeightConst, oldWeight, 1);
@@ -8396,6 +8476,7 @@ void OnWorldChanged() {
     g_lampMemoGen = 1;
     for (auto& memo : g_lampMemo) memo.gen = 0;
     for (auto& memo : g_pickMemo) memo.gen = 0; // (2.15.3) the generation starts again at 1: picks kept under the old ones would match it again
+    for (auto& memo : g_fencePick) memo.gen = 0;
     g_enumLights.clear();
     g_lotLampCur.clear();
     g_lotsNow.clear();
@@ -8847,8 +8928,8 @@ std::string RoofStatus() {
     std::string s = std::format("roofs: {} | lamps on: {} | draws fixed: {} | with snow: {}", g_roofFix.load() ? (g_roofPs ? "fixed" : "waiting") : "off",
                                 g_lampCount, g_roofDrawn.load(), g_roofSnowDrawn.load());
     if (!kPublicBuild)
-        s += std::format(" | lamp choice memo: {} reused, {} computed | object lamp picks: {} reused, {} computed", g_lampMemoHits, g_lampMemoMisses, g_pickMemoHits,
-                         g_pickMemoMisses);
+        s += std::format(" | lamp choice memo: {} reused, {} computed | object lamp picks: {} reused, {} computed | fence lamp picks: {} reused, {} computed{}", g_lampMemoHits,
+                         g_lampMemoMisses, g_pickMemoHits, g_pickMemoMisses, g_fencePickHits, g_fencePickMisses, g_fencePickOff ? " (off: a kept pick differed)" : "");
     return s;
 }
 
