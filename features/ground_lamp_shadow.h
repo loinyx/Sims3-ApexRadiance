@@ -59,6 +59,10 @@ constexpr float kSoftAA = 0.75f / kTexelsPerMetre; // m: the half width an edge 
 constexpr float kJoinEps = 0.02f;    // m: two walls' ends this close meet
 constexpr float kJoinCos = 0.996f;   // and they join (one run) when in line within about 5 degrees
 
+// (2.15.3) == static_cast<uint8_t>(std::lround(v)) for v in [0, 255], without the CRT call: v + 0.5 is exact in double and
+// the cast truncates it, as lround rounds a half away from zero (checked for every float of the range, tools/ground_shade_test)
+inline uint8_t ToByte(float v) { return static_cast<uint8_t>(static_cast<int>(static_cast<double>(v) + 0.5)); }
+
 inline void TexelWorld(const Grid& g, int i, int j, float& wx, float& wz) {
     const float lx = (static_cast<float>(i) + 0.5f) / kTexelsPerMetre, lz = (static_cast<float>(j) + 0.5f) / kTexelsPerMetre;
     wx = g.m0 * lx + g.m8 * lz + g.tx;
@@ -116,7 +120,7 @@ inline float Weight(const Lamp& L, float x, float groundY, float z) {
     const float h = std::max(TerrainBakeRule::StampHeight(L.y - groundY, L.liftable), kMinHead); // a lamp on the lawn: as the bake stamps it
     const float dx = L.x - x, dz = L.z - z;
     const float d2 = dx * dx + dz * dz + h * h;
-    const float cosv = h / std::sqrt(d2);
+    const float cosv = h / ApexMath::Sqrt(d2); // (2.15.3: the same bits as std::sqrt, fast_math.h, without the CRT call)
     return std::clamp(L.k * cosv / d2, 0.0f, 1.0f);
 }
 
@@ -140,13 +144,17 @@ inline float Reach(const Lamp& L, float groundY) {
 // run goes on) and up it over the wall's top, each at least kSoftAA wide at the ground point; the base stays hard (no light
 // under a wall). t, u: the crossing along the ray and along the wall.
 inline float SoftPass(const Lamp& L, float groundY, const Wall& w, const WallOpenings::Patch* patches, float t, float u, float rx, float rz, float sx, float sz) {
-    const float m = std::sqrt(sx * sx + sz * sz);
+    const float m = ApexMath::Sqrt(sx * sx + sz * sz);
     if (!(m > 1e-4f)) return 1.0f;
-    const float py = std::fabs(w.y0 - groundY) < 1.0f ? std::max(groundY, w.y0) : groundY;
+    const float py = ApexMath::Fabs(w.y0 - groundY) < 1.0f ? std::max(groundY, w.y0) : groundY;
     const float y = L.y + t * (py - L.y);
     if (!(y > w.y0 - 0.05f)) return 1.0f; // under its base: hard, as before
+    const float c = u * m;
+    // (2.15.3) past a joined end, or past a free end by the widest penumbra (the rim's half width is at most kMaxHalf): lit,
+    // as the tests below find, before the rim is worked out (most of a wall's shadow box lies beside its wedge)
+    if ((!w.free0 && c < 0.0f) || (!w.free1 && c > m) || (w.free0 && c <= -Penumbra::kMaxHalf) || (w.free1 && c >= m + Penumbra::kMaxHalf)) return 1.0f;
     const Penumbra::Rim rim = Penumbra::SlantOf(rx, py - L.y, rz, sz, -sx).At(Penumbra::Half(Penumbra::Radius(), t, kSoftAA));
-    const float c = u * m, h = rim.along;
+    const float h = rim.along;
     // (across a joint the run goes on: by the spot's width, which the wall beyond covers in full)
     const float a = w.free0 ? 0.0f : -2.0f * h, b = w.free1 ? m : m + 2.0f * h;
     if (c <= a - h || c >= b + h) return 1.0f; // past a free end's penumbra
@@ -167,12 +175,12 @@ inline float Pass(const Lamp& L, float x, float groundY, float z, const Wall& w,
     const float rx = x - ax, rz = z - az;
     const float sx = w.x1 - w.x0, sz = w.z1 - w.z0;
     const float den = rx * sz - rz * sx;
-    if (std::fabs(den) < 1e-9f) return 1.0f; // parallel
+    if (ApexMath::Fabs(den) < 1e-9f) return 1.0f; // parallel
     const float qx = w.x0 - ax, qz = w.z0 - az;
     const float t = (qx * sz - qz * sx) / den; // along head -> point
     const float u = (qx * rz - qz * rx) / den; // along the wall
     if (!(t > 0.0f && t < 1.0f)) return 1.0f;
-    const float len = std::sqrt(rx * rx + rz * rz);
+    const float len = ApexMath::Sqrt(rx * rx + rz * rz);
     if (t * len < kLampSkip) return 1.0f;
     if (soft) return SoftPass(L, groundY, w, patches, t, u, rx, rz, sx, sz);
     if (!(u >= 0.0f && u <= 1.0f)) return 1.0f;
@@ -182,7 +190,7 @@ inline float Pass(const Lamp& L, float x, float groundY, float z, const Wall& w,
     if (!w.pn || !patches) return 0.0f;
     // within the wall's band: its patches decide (the base margin above stays the wall's: a ray to the wall's own foot), with
     // the lamp's penumbra at the crossing (penumbra.h)
-    return WallOpenings::CrossPass(patches + w.p0, static_cast<int>(w.pn), std::sqrt(sx * sx + sz * sz), std::min(w.y0, y) - 1.0f, w.y1, u, y, nullptr,
+    return WallOpenings::CrossPass(patches + w.p0, static_cast<int>(w.pn), ApexMath::Sqrt(sx * sx + sz * sz), std::min(w.y0, y) - 1.0f, w.y1, u, y, nullptr,
                                    WallOpenings::RimAt(t, rx, py - L.y, rz, sx, sz, Penumbra::Radius()), WallOpenings::AcrossOf(rx, py - L.y, rz, sx, sz));
 }
 inline bool Blocks(const Lamp& L, float x, float groundY, float z, const Wall& w, const WallOpenings::Patch* patches = nullptr) {
@@ -239,6 +247,7 @@ public:
         num_.assign(n, 0.0f);
         den_.assign(n, 0.0f);
         vis_.assign(n, 1.0f);
+        wgt_.assign(n, 0.0f);
         out_.clear();
         lamp_ = 0;
         wall_ = 0;
@@ -254,7 +263,8 @@ public:
             if (lamp_ >= lamps_.size()) {
                 for (const Lamp& L : others_) { // lit everywhere they reach: in the total only
                     reach_ = Reach(L, grid_.ty);
-                    Accumulate(L, false);
+                    Weights(L);
+                    Accumulate(false);
                 }
                 Finish();
                 done_ = true;
@@ -264,7 +274,9 @@ public:
             if (phase_ == 0) { // the lamp's walls: the texels behind each one, within its reach
                 if (wall_ == 0) {
                     reach_ = Reach(L, grid_.ty);
-                    std::fill(vis_.begin(), vis_.end(), 1.0f);
+                    Weights(L);
+                    for (int j = box_[2]; j <= box_[3]; j++) // (2.15.3: only where it is read, box_)
+                        std::fill_n(vis_.begin() + static_cast<ptrdiff_t>(j) * grid_.w + box_[0], box_[1] - box_[0] + 1, 1.0f);
                 }
                 if (wall_ < walls_.size()) {
                     ShadowOf(L, walls_[wall_]);
@@ -284,7 +296,7 @@ public:
                 phase_ = 1;
                 continue;
             }
-            Accumulate(L);
+            Accumulate();
             lamp_++;
             wall_ = 0;
             phase_ = 0;
@@ -314,13 +326,14 @@ private:
                 if (!WorldTexel(grid_, px, pz, fi, fj)) return;
                 i0 = std::min(i0, fi), i1 = std::max(i1, fi), j0 = std::min(j0, fj), j1 = std::max(j1, fj);
             }
-        const int a0 = std::max(0, static_cast<int>(std::floor(i0))), a1 = std::min(grid_.w - 1, static_cast<int>(std::ceil(i1)));
-        const int b0 = std::max(0, static_cast<int>(std::floor(j0))), b1 = std::min(grid_.h - 1, static_cast<int>(std::ceil(j1)));
+        int a0 = std::max(0, static_cast<int>(std::floor(i0))), a1 = std::min(grid_.w - 1, static_cast<int>(std::ceil(i1)));
+        int b0 = std::max(0, static_cast<int>(std::floor(j0))), b1 = std::min(grid_.h - 1, static_cast<int>(std::ceil(j1)));
+        if (!Clip(a0, a1, b0, b1)) return;
         const float r2 = reach_ * reach_;
         for (int j = b0; j <= b1; j++)
             for (int i = a0; i <= a1; i++) {
                 const size_t at = static_cast<size_t>(j) * grid_.w + i;
-                if (!(vis_[at] > 0.0f)) continue; // already behind a wall
+                if (!Weighs(at) || !(vis_[at] > 0.0f)) continue; // already behind a wall, or out of the lamp's sum
                 float x, z;
                 TexelWorld(grid_, i, j, x, z);
                 const float dx = x - L.x, dz = z - L.z;
@@ -375,13 +388,14 @@ private:
             if (!WorldTexel(grid_, px[k], pz[k], fi, fj)) return;
             i0 = std::min(i0, fi), i1 = std::max(i1, fi), j0 = std::min(j0, fj), j1 = std::max(j1, fj);
         }
-        const int a0 = std::max(0, static_cast<int>(std::floor(i0)) - 1), a1 = std::min(grid_.w - 1, static_cast<int>(std::ceil(i1)) + 1);
-        const int b0 = std::max(0, static_cast<int>(std::floor(j0)) - 1), b1 = std::min(grid_.h - 1, static_cast<int>(std::ceil(j1)) + 1);
+        int a0 = std::max(0, static_cast<int>(std::floor(i0)) - 1), a1 = std::min(grid_.w - 1, static_cast<int>(std::ceil(i1)) + 1);
+        int b0 = std::max(0, static_cast<int>(std::floor(j0)) - 1), b1 = std::min(grid_.h - 1, static_cast<int>(std::ceil(j1)) + 1);
+        if (!Clip(a0, a1, b0, b1)) return; // (2.15.3) only the texels the lamp's light is summed over
         const float r2 = reach_ * reach_;
         for (int j = b0; j <= b1; j++)
             for (int i = a0; i <= a1; i++) {
                 const size_t at = static_cast<size_t>(j) * grid_.w + i;
-                if (!(vis_[at] > 0.0f)) continue;
+                if (!Weighs(at) || !(vis_[at] > 0.0f)) continue;
                 float x, z;
                 TexelWorld(grid_, i, j, x, z);
                 const float dx = x - L.x, dz = z - L.z;
@@ -392,7 +406,11 @@ private:
                 if (w.pn && p > 0.0f && CrossesLine(L, x, z, w)) through_++;
             }
     }
-    void Accumulate(const Lamp& L, bool tested = true) {
+    // (2.15.3) The lamp's stamp weight per texel of the box its light is summed over (wgt_, box_; box_ empty when it adds
+    // nothing), made once per lamp: Accumulate reads it, and the wall and crown tests skip the texels it leaves out (their
+    // share past the walls is never read), so a build does fewer tests and gives the same bits
+    void Weights(const Lamp& L) {
+        box_[0] = box_[2] = 0, box_[1] = box_[3] = -1;
         if (!(reach_ > 0.0f)) return;
         float ci, cj;
         if (!WorldTexel(grid_, L.x, L.z, ci, cj)) return;
@@ -405,9 +423,22 @@ private:
             for (int i = a0; i <= a1; i++) {
                 float x, z;
                 TexelWorld(grid_, i, j, x, z);
-                const float wgt = Weight(L, x, grid_.ty, z);
-                if (!(wgt >= kMinWeight)) continue;
+                wgt_[static_cast<size_t>(j) * grid_.w + i] = Weight(L, x, grid_.ty, z);
+            }
+        box_[0] = a0, box_[1] = a1, box_[2] = b0, box_[3] = b1;
+    }
+    // The texels of [a0, a1] x [b0, b1] the lamp's light is summed over, clipped to box_; false when none
+    bool Clip(int& a0, int& a1, int& b0, int& b1) const {
+        a0 = std::max(a0, box_[0]), a1 = std::min(a1, box_[1]), b0 = std::max(b0, box_[2]), b1 = std::min(b1, box_[3]);
+        return a0 <= a1 && b0 <= b1;
+    }
+    bool Weighs(size_t at) const { return wgt_[at] >= kMinWeight; }
+    void Accumulate(bool tested = true) {
+        for (int j = box_[2]; j <= box_[3]; j++)
+            for (int i = box_[0]; i <= box_[1]; i++) {
                 const size_t at = static_cast<size_t>(j) * grid_.w + i;
+                const float wgt = wgt_[at];
+                if (!(wgt >= kMinWeight)) continue;
                 den_[at] += wgt;
                 num_[at] += tested ? wgt * vis_[at] : wgt;
             }
@@ -419,20 +450,24 @@ private:
         // the pass's other light (the lot map also holds light that is not a bake lamp's) is not taken with it
         for (size_t i = 0; i < m.size(); i++) m[i] = std::clamp(1.0f - (den_[i] - num_[i]) / std::max(den_[i], kOtherLight), 0.0f, 1.0f);
         // soft edges: [1 2 1] along each axis, twice (a penumbra of about half a metre; the pass samples it bilinearly)
+        // (2.15.3: by rows, the edges apart, so the loops vectorise; each texel takes the same sum as before)
+        const auto blur = [](float a, float b, float c) { return (a + 2.0f * b + c) * 0.25f; };
         for (int pass = 0; pass < 2; pass++) {
-            for (int j = 0; j < H; j++)
-                for (int i = 0; i < W; i++) {
-                    const float a = m[static_cast<size_t>(j) * W + std::max(i - 1, 0)], b = m[static_cast<size_t>(j) * W + i], c = m[static_cast<size_t>(j) * W + std::min(i + 1, W - 1)];
-                    t[static_cast<size_t>(j) * W + i] = (a + 2.0f * b + c) * 0.25f;
-                }
-            for (int j = 0; j < H; j++)
-                for (int i = 0; i < W; i++) {
-                    const float a = t[static_cast<size_t>(std::max(j - 1, 0)) * W + i], b = t[static_cast<size_t>(j) * W + i], c = t[static_cast<size_t>(std::min(j + 1, H - 1)) * W + i];
-                    m[static_cast<size_t>(j) * W + i] = (a + 2.0f * b + c) * 0.25f;
-                }
+            for (int j = 0; j < H; j++) {
+                const float* r = &m[static_cast<size_t>(j) * W];
+                float* o = &t[static_cast<size_t>(j) * W];
+                o[0] = blur(r[0], r[0], r[std::min(1, W - 1)]);
+                for (int i = 1; i < W - 1; i++) o[i] = blur(r[i - 1], r[i], r[i + 1]);
+                if (W > 1) o[W - 1] = blur(r[W - 2], r[W - 1], r[W - 1]);
+            }
+            for (int j = 0; j < H; j++) {
+                const float *a = &t[static_cast<size_t>(std::max(j - 1, 0)) * W], *b = &t[static_cast<size_t>(j) * W], *c = &t[static_cast<size_t>(std::min(j + 1, H - 1)) * W];
+                float* o = &m[static_cast<size_t>(j) * W];
+                for (int i = 0; i < W; i++) o[i] = blur(a[i], b[i], c[i]);
+            }
         }
         out_.resize(m.size());
-        for (size_t i = 0; i < m.size(); i++) out_[i] = static_cast<uint8_t>(std::lround(std::clamp(m[i], 0.0f, 1.0f) * 255.0f));
+        for (size_t i = 0; i < m.size(); i++) out_[i] = ToByte(std::clamp(m[i], 0.0f, 1.0f) * 255.0f);
     }
 
     Grid grid_;
@@ -443,6 +478,8 @@ private:
     size_t canopy_ = 0;
     long long canopyTests_ = 0;
     std::vector<float> num_, den_, vis_; // vis_: the current lamp's share past the walls tested so far, per texel
+    std::vector<float> wgt_; // the current lamp's stamp weight over box_ (Weights)
+    int box_[4] = {0, -1, 0, -1}; // i0, i1, j0, j1
     std::vector<uint8_t> out_;
     size_t lamp_ = 0, wall_ = 0;
     int phase_ = 0;
