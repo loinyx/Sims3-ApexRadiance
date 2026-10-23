@@ -666,7 +666,7 @@ IDirect3DTexture9* WhiteMask(IDirect3DDevice9* dev) {
     return g_whiteMask;
 }
 
-constexpr DWORD kShadeMinEveryMs = 2000;
+constexpr DWORD kShadeMinEveryMs = 750; // (2.15.3: 2000; with the nearest lot first a change shows sooner)
 struct ShadeWant {
     uint64_t lot = 0, key = 0;
     LotRect rect{};
@@ -1099,7 +1099,7 @@ void ShadeBox(const LotRect& r, const std::vector<GroundShadow::Lamp>& lamps, fl
 // of one mesh (POSITION0 / w). The mesh's box gives each piece a wall: along its longer side, from its base to its top, so
 // a low wall casts a short shadow and a tall one a long one (ShadeJob tests the lamp over each wall's top). Posts (under
 // 0.3 m both ways) and thick pieces (stairs, decks: over 0.6 m deep) are left out. Render thread (DrawInstanced notes the
-// groups it draws, read again every 5 s; a group not drawn for 5 min is dropped).
+// groups it draws, read again every 60 s; a group not drawn for 20 s is dropped).
 struct FenceGroup {
     std::vector<GroundShadow::Wall> walls;
     float x0 = 0, z0 = 0, x1 = 0, z1 = 0;
@@ -1116,19 +1116,25 @@ UINT g_curDipBase = 0, g_curDipMin = 0, g_curDipNum = 0; // the current DrawInde
 uint32_t g_fenceGen = 1, g_fenceGridGen = 0;
 constexpr float kFenceCell = 8.0f;
 std::vector<GroundShadow::Wall> g_fenceAll;
+std::vector<uint64_t> g_fenceAllGroup; // each wall's group (g_fenceGroups key)
 std::unordered_map<uint64_t, std::vector<uint32_t>> g_fenceCells;
 uint64_t FenceCellKey(int x, int z) { return (static_cast<uint64_t>(static_cast<uint32_t>(x)) << 32) | static_cast<uint32_t>(z); }
 // (2.15.3) Gates. A fence gate is an object, not an instanced fence piece, so the fence line had a gap in the mask where the
 // gate stands and a garden post's light passed through the closed gate onto the ground behind it (F8). The gaps between
 // two fence pieces in line (kGapMin .. kGapMax apart, facing each other) are listed with the fence grid; an outdoor object
 // drawn with its origin in one (DrawObjectLamp, NoteGate) fills it with a wall from the higher base to the lower top of the
-// two pieces. A filled gap not seen for kGateKeepMs is dropped. Render thread.
+// two pieces. A gate stays while its gap does: it goes only when it has not been drawn for kGateKeepMs while the fence on
+// both sides was drawn in the last kGateFenceSeenMs (it was taken away; off screen it stays closed). A gap narrower than
+// kGapMin (a post, pieces a few cm short) is always closed: no fence has an opening that narrow, and light came round it
+// in a wedge. Render thread.
 struct FenceGap {
     GroundShadow::Wall w;
     uint64_t key;
+    uint64_t ga = 0, gb = 0; // the two pieces' groups
+    bool closed = false;     // under kGapMin: always a wall
 };
-constexpr float kGapMin = 0.4f, kGapMax = 2.5f;
-constexpr DWORD kGateKeepMs = 300000;
+constexpr float kGapMin = 0.4f, kGapMax = 2.5f, kGapNarrow = 0.02f;
+constexpr DWORD kGateKeepMs = 30000, kGateFenceSeenMs = 2000;
 constexpr float kGateOff = 0.6f; // m: a gate's origin off its fence's line (half a tile, and a margin)
 std::vector<FenceGap> g_fenceGaps;
 std::unordered_map<uint64_t, std::vector<uint32_t>> g_gapCells; // every 8 m cell a gap's box (+0.5 m) touches
@@ -1146,6 +1152,7 @@ uint64_t GapKey(float ax, float az, float bx, float bz) {
 void FenceGapsBuild() {
     g_fenceGaps.clear();
     g_gapCells.clear();
+    std::unordered_set<uint64_t> seen;
     const auto end = [](const GroundShadow::Wall& w, int e, float& x, float& z) { x = e ? w.x1 : w.x0, z = e ? w.z1 : w.z0; };
     for (size_t i = 0; i < g_fenceAll.size(); i++) {
         const GroundShadow::Wall& a = g_fenceAll[i];
@@ -1172,8 +1179,8 @@ void FenceGapsBuild() {
                             float bx, bz;
                             end(b, eb, bx, bz);
                             const float dx = bx - ax, dz = bz - az, d = std::hypot(dx, dz);
-                            if (d < 0.05f && ApexMath::Fabs(b.y0 - a.y0) < 1.0f) joined = true; // a piece goes on from this end: no gap
-                            if (!(d >= kGapMin && d < best) || (dx * ox + dz * oz) < 0.98f * d) continue; // in line, ahead of this end
+                            if (d < kGapNarrow && ApexMath::Fabs(b.y0 - a.y0) < 1.0f) joined = true; // a piece goes on from this end: no gap
+                            if (!(d >= kGapNarrow && d < best) || (dx * ox + dz * oz) < 0.98f * d) continue; // in line, ahead of this end
                             float fx, fz;
                             end(b, 1 - eb, fx, fz);
                             if ((fx - bx) * ox + (fz - bz) * oz <= 0.0f) continue; // b goes on away from the gap
@@ -1181,7 +1188,7 @@ void FenceGapsBuild() {
                         }
                     }
                 }
-            if (bj < 0 || joined || static_cast<size_t>(bj) < i) continue; // each gap once (from its lower piece)
+            if (bj < 0 || joined) continue;
             const GroundShadow::Wall& b = g_fenceAll[bj];
             float bx, bz;
             end(b, be, bx, bz);
@@ -1189,6 +1196,10 @@ void FenceGapsBuild() {
             gp.w = {ax, az, bx, bz, std::max(a.y0, b.y0), std::min(a.y1, b.y1)};
             if (!(gp.w.y1 > gp.w.y0 + 0.3f)) continue;
             gp.key = GapKey(ax, az, bx, bz);
+            // each gap once, whichever end found it (it is found from both: the walls' order follows a hash map)
+            if (!seen.insert(gp.key).second) continue;
+            gp.ga = g_fenceAllGroup[i], gp.gb = g_fenceAllGroup[bj];
+            gp.closed = best < kGapMin;
             const uint32_t k = static_cast<uint32_t>(g_fenceGaps.size());
             g_fenceGaps.push_back(gp);
             for (int ci = FenceCell(std::min(ax, bx) - 0.5f); ci <= FenceCell(std::max(ax, bx) + 0.5f); ci++)
@@ -1200,11 +1211,17 @@ void FenceGridUpdate() {
     if (g_fenceGridGen == g_fenceGen) return;
     g_fenceGridGen = g_fenceGen;
     g_fenceAll.clear();
+    g_fenceAllGroup.clear();
     g_fenceCells.clear();
+    // (2.15.3) a piece held by two groups (a group made again over the same fence stays until the sweep) once: two copies of
+    // a piece's end beside a gap made it look joined, and the gap and its gate were lost until the old group went
+    std::unordered_set<uint64_t> pieces;
     for (const auto& [k, g] : g_fenceGroups)
         for (const GroundShadow::Wall& w : g.walls) {
+            if (!pieces.insert(GapKey(w.x0, w.z0, w.x1, w.z1) ^ static_cast<uint64_t>(std::lround(w.y0 * 20.0f)) * 0x9E3779B97F4A7C15ull).second) continue;
             const uint32_t i = static_cast<uint32_t>(g_fenceAll.size());
             g_fenceAll.push_back(w);
+            g_fenceAllGroup.push_back(k);
             const int cx = static_cast<int>(ApexMath::Floor(0.5f * (w.x0 + w.x1) / kFenceCell)), cz = static_cast<int>(ApexMath::Floor(0.5f * (w.z0 + w.z1) / kFenceCell));
             g_fenceCells[FenceCellKey(cx, cz)].push_back(i);
         }
@@ -1233,9 +1250,11 @@ void NoteGate(float x, float y, float z) {
     FenceGridUpdate();
     if (g_fenceGaps.empty()) return;
     const auto it = g_gapCells.find(FenceCellKey(FenceCell(x), FenceCell(z)));
+    // (closed gaps need no gate)
     if (it == g_gapCells.end()) return;
     for (uint32_t k : it->second) {
         const FenceGap& gp = g_fenceGaps[k];
+        if (gp.closed) continue;
         const float dx = gp.w.x1 - gp.w.x0, dz = gp.w.z1 - gp.w.z0, l = std::hypot(dx, dz);
         const float t = ((x - gp.w.x0) * dx + (z - gp.w.z0) * dz) / l, side = ApexMath::Fabs((x - gp.w.x0) * dz - (z - gp.w.z0) * dx) / l;
         if (t < -0.1f || t > l + 0.1f || side > kGateOff || y < gp.w.y0 - 1.0f || y > gp.w.y1) {
@@ -1262,20 +1281,24 @@ void NoteGate(float x, float y, float z) {
 void FenceWallsIn(float x0, float z0, float x1, float z1, std::vector<GroundShadow::Wall>& out) {
     FenceGridUpdate();
     if (g_fenceAll.empty()) return;
-    // the filled gaps (gates) in the box
-    if (!g_gates.empty()) {
-        const DWORD now = GetTickCount();
-        for (const FenceGap& gp : g_fenceGaps) {
-            const GroundShadow::Wall& w = gp.w;
-            if (std::max(w.x0, w.x1) < x0 || std::min(w.x0, w.x1) > x1 || std::max(w.z0, w.z1) < z0 || std::min(w.z0, w.z1) > z1) continue;
+    // the closed gaps in the box: the narrow ones and the gates
+    const DWORD now = GetTickCount();
+    const auto fenceSeen = [now](uint64_t g) {
+        const auto it = g_fenceGroups.find(g);
+        return it != g_fenceGroups.end() && now - it->second.seen < kGateFenceSeenMs;
+    };
+    for (const FenceGap& gp : g_fenceGaps) {
+        const GroundShadow::Wall& w = gp.w;
+        if (std::max(w.x0, w.x1) < x0 || std::min(w.x0, w.x1) > x1 || std::max(w.z0, w.z1) < z0 || std::min(w.z0, w.z1) > z1) continue;
+        if (!gp.closed) {
             const auto it = g_gates.find(gp.key);
             if (it == g_gates.end()) continue;
-            if (now - it->second > kGateKeepMs) {
+            if (now - it->second > kGateKeepMs && fenceSeen(gp.ga) && fenceSeen(gp.gb)) { // the fence is drawn, the gate is not
                 g_gates.erase(it);
                 continue;
             }
-            out.push_back(w);
         }
+        out.push_back(w);
     }
     // (pieces are at most 8 m long: their middle is within one cell of any point of them)
     const int i0 = static_cast<int>(ApexMath::Floor(x0 / kFenceCell)) - 1, i1 = static_cast<int>(ApexMath::Floor(x1 / kFenceCell)) + 1;
@@ -1820,8 +1843,20 @@ void ShadeTick() {
         return;
     }
     while (g_lotsInFlight < 2 && !g_shadeQueue.empty()) {
-        const ShadeWant want = g_shadeQueue.front();
-        g_shadeQueue.erase(g_shadeQueue.begin());
+        // (2.15.3) the lot nearest the camera first: the one the player looks at waited behind every lot queued before it
+        size_t pick = 0;
+        float eye[3];
+        if (g_shadeQueue.size() > 1 && LotLightingMotion::CameraEye(eye)) {
+            float best = 1e30f;
+            for (size_t i = 0; i < g_shadeQueue.size(); i++) {
+                float x0, z0, x1, z1;
+                LotBox(g_shadeQueue[i].rect, x0, z0, x1, z1);
+                const float dx = std::max({x0 - eye[0], 0.0f, eye[0] - x1}), dz = std::max({z0 - eye[2], 0.0f, eye[2] - z1}), d = dx * dx + dz * dz;
+                if (d < best) best = d, pick = i;
+            }
+        }
+        const ShadeWant want = g_shadeQueue[pick];
+        g_shadeQueue.erase(g_shadeQueue.begin() + static_cast<ptrdiff_t>(pick));
         ShadeTask t;
         t.epoch = g_shadeEpoch;
         t.lamps = ShadeLamps(want.rect, &t.others);
@@ -5431,7 +5466,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
             // loose objects keep 0.2 m, so a wall 0.4 m behind an armchair still blocks the next room's lamp (F7 capture, 07/10)
             float at[3];
             const bool inWall = ObjectLampPoint(m, at);
-            if (!inWall && rigMode == 2) NoteGate(m[0][3], m[1][3], m[2][3]); // a gate fills its fence's gap in the lot shade
+            if (!inWall) NoteGate(m[0][3], m[1][3], m[2][3]); // a gate fills its fence's gap in the lot shade (rig modes 1 and 2)
             const float nearSkip = inWall ? kWindowWallSkip : 0.2f;
             nLamps = PickObjectLamps(at[0], at[1], at[2], lamps, groundShare, nearSkip, lamps + 1 + 2 * N, &lampTop, reach ? lamps + kLampRows : nullptr, true);
             originY = at[1];
