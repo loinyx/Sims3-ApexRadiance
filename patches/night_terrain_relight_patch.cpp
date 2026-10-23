@@ -23,6 +23,7 @@
 //  - Optional: outdoor lot lamps (lot id != 0, type 3..6, alive, enabled, room known and room 0) arm the counter like
 //    world lights (3 call sites) and, when switched on, are accepted by the terrain light bake (visitor).
 
+#include "tree_light_rig.h"
 #include "patch_base.h"
 #include "apex_version.h"
 #include "memory_patch.h"
@@ -2576,6 +2577,10 @@ class NightTerrainRelightPatch : public ApexPatch {
         }
         // Light detail: once per session, before any lot is lit (a later change takes effect after a restart)
         LightDetail::ApplyAtStartup(g_lightDetail);
+        if (!TreeLightRig::Installed()) { // trees out of the game's underground light rig (tree_light_rig.h)
+            std::string treeErr;
+            if (!TreeLightRig::Install(&treeErr)) LOG_WARNING("[TreeLightRig] Not used: " + treeErr);
+        }
         if (g_levelShare && !LevelLightShare::IsInstalled()) {
             std::string shareErr;
             if (!LevelLightShare::Install(shareErr)) LOG_WARNING("[NightTerrainRelight] " + shareErr);
@@ -2608,6 +2613,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         if (!reinstalling) LampMarkFilter::Uninstall();
         if (!reinstalling) ProbeNeutral::Uninstall();
         if (!reinstalling) LevelLightShare::Uninstall();
+        if (!reinstalling) TreeLightRig::Uninstall();
         if (!reinstalling) RoomMapDither::Stop();
         if (!reinstalling) RigTracker::Uninstall();
         if (!MemPatch::RestoreAll(patchedLocations)) return Fail(S3SS_TR("Falha ao restaurar os bytes originais", "Could not restore the original code"));
@@ -2677,6 +2683,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         if (installed) RequestAutoRefresh(); // the options that needed the reinstall show at once
         if (removed && !installed) {
             if (LevelLightShare::IsInstalled()) LevelLightShare::Uninstall();
+            TreeLightRig::Uninstall();
             RoomMapDither::Stop();
             RigTracker::Uninstall();
             LotLightBridge::OnWorldChanged();

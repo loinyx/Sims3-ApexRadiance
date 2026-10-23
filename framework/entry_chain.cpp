@@ -70,6 +70,9 @@ const SiteInfo kSiteInfo[kSites] = {
     // no branch lands on 0x006B4721..0x006B4724 or 0x006B4B11..0x006B4B15 (jmps.tsv / calls.tsv)
     {"light probe diffuse write", GameAddr::Id::ProbeDiffuseWrite, {0x83, 0xEC, 0x28, 0x53, 0x55}, 5},
     {"light probe specular write", GameAddr::Id::ProbeSpecularWrite, {0x81, 0xEC, 0xF4, 0x00, 0x00, 0x00}, 6},
+    // (the two setters' first instructions: function entries reached through the SpeedTree vtable)
+    {"tree level setter", GameAddr::Id::TreeSetLevel, {0x8B, 0x44, 0x24, 0x04, 0x56, 0x50}, 6},
+    {"tree custom rig setter", GameAddr::Id::TreeSetCustomRig, {0x8B, 0x44, 0x24, 0x04, 0x56, 0x8B, 0xF1}, 7},
 };
 static_assert(sizeof(kSiteInfo) / sizeof(kSiteInfo[0]) == static_cast<size_t>(Site::Count), "kSiteInfo must list every Site in order");
 

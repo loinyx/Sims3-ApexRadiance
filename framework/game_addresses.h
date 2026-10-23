@@ -272,6 +272,9 @@ enum class Id : uint16_t {
     RenMapFind, // FUN_006fdfb0 thiscall(map; out[2], key*), ret 8
     RenMapInsert, // FUN_006fe1f0 thiscall(map; out[3], node, flag), ret 0xC (leaf)
     RenMapErase, // FUN_006fdf40 thiscall(map; out[2], node, bucket*), ret 0xC (leaf)
+    // (2.15.3) The SpeedTree cluster's light rig key setters (features/tree_light_rig.h)
+    TreeSetLevel,     // FUN_0070d370 thiscall(cluster, level), ret 4
+    TreeSetCustomRig, // FUN_0070d800 thiscall(cluster, key, arg), ret 8
     // ---- Compositor tile readback without the GPU wait (features/compositor_readback.cpp; group "CompositorReadback")
     CompQueueCall,    // call FUN_005fdef0 in the texture compositor queue loop FUN_00608270 (0x006082F8)
     CompDispatch,     // FUN_005fdef0 thiscall(builder; job), ret 4: the texture builder's state machine ([b+0x74] state, [b+0x70] tile)

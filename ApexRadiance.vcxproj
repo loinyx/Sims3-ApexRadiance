@@ -110,6 +110,7 @@
     <ClCompile Include="features\script_math.cpp" />
     <ClCompile Include="features\object_id_map.cpp" />
     <ClCompile Include="features\render_object_map.cpp" />
+    <ClCompile Include="features\tree_light_rig.cpp" />
     <ClCompile Include="features\captures.cpp" />
     <ClCompile Include="features\vulkan_driver_guard.cpp" />
     <ClCompile Include="features\address_space.cpp" />
@@ -244,6 +245,7 @@
     <ClInclude Include="features\script_math.h" />
     <ClInclude Include="features\object_id_map.h" />
     <ClInclude Include="features\render_object_map.h" />
+    <ClInclude Include="features\tree_light_rig.h" />
     <ClInclude Include="features\captures.h" />
     <ClInclude Include="features\vulkan_driver_guard.h" />
     <ClInclude Include="features\address_space.h" />
