@@ -11894,7 +11894,14 @@ bool OwnFloorBlocks(const unsigned char* room, void* light, const float* sample)
         float L[3], S[3];
         ToLocal(xf, lp, L);
         ToLocal(xf, sample, S);
-        const float h = *reinterpret_cast<const float*>(mgr + 0x98) - *reinterpret_cast<const float*>(mgr + 0xD4); // the story's lowest floor, lot space
+        // the floor over the lamp: its tile's floor height (lot space); the story's lowest floor (mgr+0x98 - mgr+0xD4) only
+        // where the lamp has no tile (on a lot mixing a house on a foundation with one without, the lowest floor is the
+        // foundation house's, 1.5 m under the other's)
+        float h = *reinterpret_cast<const float*>(mgr + 0x98) - *reinterpret_cast<const float*>(mgr + 0xD4);
+        if (const uintptr_t lt = LightTile(mgr, static_cast<int>(ApexMath::Floor(L[0])), static_cast<int>(ApexMath::Floor(L[2])))) {
+            const float th = *reinterpret_cast<const float*>(lt + 0x78);
+            if (ApexMath::IsFinite(th) && ApexMath::Fabs(th) < 1000.0f) h = th;
+        }
         if (!(ApexMath::Fabs(h) < 1000.0f) || !(L[1] < h - 0.02f) || !(S[1] > h + 0.02f)) return false;
         const float t = (h - L[1]) / (S[1] - L[1]);
         const float x = L[0] + t * (S[0] - L[0]), z = L[2] + t * (S[2] - L[2]);
