@@ -107,6 +107,9 @@ void SetRealisticReach(bool on);
 // The walls are lit by that law now (on and installed): the per-pixel lamps of outdoor objects, fences and windows follow
 // the same law then (lot_light_bridge, lamp_reach.h). Any thread.
 bool RealisticReachActive();
+// (2.15.3) Whether a lamp's light stands under the floor of `room`'s story (an indoor room) and its ray to `point` (world,
+// above that floor) crosses a floor there, not an opening: a ceiling lamp of the story below that the game lists on this one
+bool LampUnderRoomFloor(const void* room, void* light, const float* point);
 // Walls block light on objects: true when an outside wall stands between the lamp and the point at the height the ray
 // crosses it (render thread; a copy of each story's outside walls taken when room 0 is solved). Since 2.12.4 the copy
 // carries each wall's doors, windows and arches and its half-wall cells from its story grid (wall_openings.h): a ray

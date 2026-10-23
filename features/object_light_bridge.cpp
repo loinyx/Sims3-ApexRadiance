@@ -794,6 +794,13 @@ template <int I> void __fastcall ClassColour(void* L, void* edx, const float* po
     if (g_reachLawOn.load(std::memory_order_relaxed)) HookGuard::Run("ObjectLightBridge reach law", [&] { law = ReachLawRec(L, pos, rec, I == kStreetClass); });
     if (!law) BoostRec(static_cast<BYTE*>(L), pos, rec, I == kStreetClass);
     HookGuard::Run("ObjectLightBridge lamp visibility", [=] { ShadeRec(static_cast<const BYTE*>(L), pos, rec, I == kStreetClass); });
+    // (2.15.3) a ceiling lamp of the story below listed on this story: no light through the floor (as the room solve,
+    // LevelLightShare::LampUnderRoomFloor); the record's luminance under the rig's cut drops it
+    float ext[3];
+    if (RigBoxExtents(pos, ext) && (rec[4] > 0.0f || rec[5] > 0.0f || rec[6] > 0.0f)) {
+        const uintptr_t rig = reinterpret_cast<uintptr_t>(pos) - 0x140;
+        if (LevelLightShare::LampUnderRoomFloor(ObjectLightBridge::RigRoom(rig), L, pos)) rec[4] = rec[5] = rec[6] = rec[10] = 0.0f;
+    }
 }
 
 const LightColour_t kClassThunks[] = {&ClassColour<0>, &ClassColour<1>, &ClassColour<2>, &ClassColour<3>, &ClassColour<4>, &ClassColour<5>, &ClassColour<6>,

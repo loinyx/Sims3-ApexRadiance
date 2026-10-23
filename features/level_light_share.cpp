@@ -11883,14 +11883,12 @@ struct ApexCycles {
 // the ray crosses it through a removed floor (an opening; FloorAt: anything unread is a floor). Room 0 keeps the game's
 // light (lamps on the ground under a raised house). POD (SEH).
 std::atomic<long> g_underFloorBlocked{0};
-bool OwnFloorBlocks(const unsigned char* room, void* light, const float* sample) {
+bool OwnFloorBlocksAt(const unsigned char* room, const float* lp, const float* sample) {
     __try {
         const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(room);
         if (!mgr || *reinterpret_cast<const int*>(room + 0xC) == 0) return false;
         Xform xf;
         if (!ReadXform(mgr, xf)) return false;
-        alignas(16) float lp[4];
-        LampPos(light, lp);
         float L[3], S[3];
         ToLocal(xf, lp, L);
         ToLocal(xf, sample, S);
@@ -11913,6 +11911,11 @@ bool OwnFloorBlocks(const unsigned char* room, void* light, const float* sample)
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
+}
+bool OwnFloorBlocks(const unsigned char* room, void* light, const float* sample) {
+    alignas(16) float lp[4];
+    LampPos(light, lp);
+    return OwnFloorBlocksAt(room, lp, sample);
 }
 
 template <int I> void __fastcall LightEvalHook(void* light, void*, const float* sample, const float* normal, float* colour) {
@@ -16475,6 +16478,20 @@ int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, 
     if (n) g_archDraws.fetch_add(1, std::memory_order_relaxed);
     return n;
 }
+// (2.15.3) The same test for an object's rig (ObjectLightBridge): the lamp's head read from the light itself (no per-point cache)
+std::atomic<long> g_underFloorRigs{0};
+bool LampUnderRoomFloor(const void* room, void* light, const float* point) {
+    if (!room || !light || !point || !kLightPos || !g_installed.load(std::memory_order_relaxed)) return false;
+    alignas(16) float lp[4];
+    __try {
+        reinterpret_cast<LightPos_t>(kLightPos)(light, lp);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    if (!OwnFloorBlocksAt(static_cast<const unsigned char*>(room), lp, point)) return false;
+    ApexUtil::CountOne(g_underFloorRigs);
+    return true;
+}
 std::string ArchAmbientStatus() {
     size_t rooms = 0;
     {
@@ -16527,7 +16544,7 @@ std::string Status() {
                        g_faults.load() ? std::format(" | failures: {}", g_faults.load()) : "") + OpeningsStatus() + " | " + WallOpeningsText(false) +
            std::format(" | daytime curve in roofed rooms: outdoor lamps x {:.3f} in solves now, lamp points scaled {}, rooms gathered again at a settled day or night {}",
                        g_roomLampDay.load(), g_dayScaled.load(), g_dayRoomsSent.load()) +
-           std::format(" | lamp points under their own story's floor left dark: {}", g_underFloorBlocked.load());
+           std::format(" | lamp points under their own story's floor left dark: {} (object lights: {})", g_underFloorBlocked.load(), g_underFloorRigs.load());
 }
 
 } // namespace LevelLightShare
