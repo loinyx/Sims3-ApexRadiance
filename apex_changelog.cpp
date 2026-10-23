@@ -6,6 +6,28 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k2153Added[] = {
+    "Rooms at Night: window and door light adds to garden lamps on the ground",
+    nullptr};
+constexpr const char* k2153Improved[] = {
+    "Wall and fence shadows on the ground take away only the light they block",
+    "Ground shadows show sooner, nearest lot first, with no seam at the lot's edge",
+    "Windows let lamp light through at their real size, with glass",
+    "No moonlight by default: at night only lamps and the sky light the town",
+    "Less work at night: smoother frames with the camera still and while moving",
+    "The screen effects share one copy of the picture, using less video memory",
+    nullptr};
+constexpr const char* k2153Fixed[] = {
+    "Trees on lots with a basement are no longer flat and white at night",
+    "Ceiling lamps no longer light the closed rooms on the story above",
+    "Closed gates and narrow fence gaps no longer let lamp light through",
+    "Fences and gates take as much lamp light as the ground beside them",
+    "Colored lamps keep their color near the lamp on objects and fences",
+    "Gables and eaves no longer show a hard step of light where they start",
+    "Snowy lots take wall and fence shadows like the grass beside them",
+    "Lamp light on rectangular lots sits under its lamp, no longer shifted",
+    "Area lights light only the side they face, not whole tree crowns",
+    nullptr};
 constexpr const char* k2152Fixed[] = {
     "Moving the camera at night is smooth again with Instant lamp lighting",
     nullptr};
@@ -317,6 +339,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"2.15.3", "2026-10-23", k2153Added, k2153Improved, k2153Fixed},
     {"2.15.2", "2026-10-22", nullptr, nullptr, k2152Fixed},
     {"2.15.1", "2026-10-22", k2151Added, k2151Improved, k2151Fixed},
     {"2.15.0", "2026-10-21", k2150Added, k2150Improved, k2150Fixed},
