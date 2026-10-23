@@ -685,6 +685,11 @@ IDirect3DTexture9* WhiteMask(IDirect3DDevice9* dev) {
     return g_whiteMask;
 }
 
+// (2.15.3) Off: a floor cannot tell story 0's map from a higher story's, and above story 0 the floor map's alpha is the walls'
+// mask (1 outside them). A porch deck 0.75 m over the ground passed the ground gate, read that 1 as indoor light and dropped
+// the atlas texel by texel (an F8: square steps of light on a porch). Story 0's floors keep the plain patch; the lot and snow
+// passes (story 0 only) add the indoor light
+constexpr bool kFloorIndoorLight = false;
 constexpr DWORD kShadeMinEveryMs = 750; // (2.15.3: 2000; with the nearest lot first a change shows sooner)
 struct ShadeWant {
     uint64_t lot = 0, key = 0;
@@ -6681,7 +6686,7 @@ template <typename DrawFn> bool DrawFloor(IDirect3DDevice9* dev, DrawFn draw) {
     if (!atlas) return false;
     const ShaderPatches::WorldY y = g_curVsInfo ? g_curVsInfo->worldY : ShaderPatches::WorldY{};
     // (2.15.3) with the indoor light on the ground active, the copies that take it (kinds 3 to 5 of g_floorShadePs)
-    const bool exitOn = LevelLightShare::IndoorLightOnGroundActive();
+    const bool exitOn = kFloorIndoorLight && LevelLightShare::IndoorLightOnGroundActive();
     PatchedPs& p = y.texcoord < 0 ? PatchedFor(dev, g_floorPs, "Floor", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchFloor(t, pp.floor); })
                    : exitOn       ? PatchedFor(dev, g_floorShadePs[FloorShadeKey(3, y)], "Floor (ground lamp shade, indoor light on the ground)",
                                                [y](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchFloor(t, pp.floor, y, true); })
@@ -6722,7 +6727,7 @@ template <typename DrawFn> bool DrawSnowFloor(IDirect3DDevice9* dev, DrawFn draw
     if (!atlas) return false;
     // world y: none in the snow-on-floor vertex shaders of the precomp (tools/floor_shade_check), so no shade there for now
     const ShaderPatches::WorldY y = g_curVsInfo ? g_curVsInfo->worldY : ShaderPatches::WorldY{};
-    const bool exitOn = LevelLightShare::IndoorLightOnGroundActive(); // (2.15.3, as DrawFloor)
+    const bool exitOn = kFloorIndoorLight && LevelLightShare::IndoorLightOnGroundActive(); // (2.15.3, as DrawFloor)
     PatchedPs& p = y.texcoord < 0 ? PatchedFor(dev, g_curSnowFloorTc == 0 ? g_snowFloorPs0 : g_snowFloorPs, "Snow on floors", [tc = g_curSnowFloorTc](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchSnowFloor(t, tc, pp.floor); })
                    : exitOn       ? PatchedFor(dev, g_floorShadePs[FloorShadeKey(g_curSnowFloorTc == 0 ? 4 : 5, y)], "Snow on floors (ground lamp shade, indoor light on the ground)",
                                                [tc = g_curSnowFloorTc, y](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchSnowFloor(t, tc, pp.floor, y, true); })
@@ -6799,7 +6804,7 @@ template <typename DrawFn> bool DrawFloorAtlas(IDirect3DDevice9* dev, DrawFn dra
     }
     if (!fv.vs) return false;
     // (2.15.3) with the indoor light on the ground active, the copies that take it, kept under TEXCOORD + kFloorExitKey
-    const bool exitOn = LevelLightShare::IndoorLightOnGroundActive();
+    const bool exitOn = kFloorIndoorLight && LevelLightShare::IndoorLightOnGroundActive();
     PatchedPs& p = exitOn ? PatchedFor(dev, g_floorAtlasPs[fv.tc + kFloorExitKey], "Outdoor floor (indoor light on the ground)",
                                        [tc = fv.tc](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchBakedAtlasPs(t, tc, pp.floor, true, true); })
                           : PatchedFor(dev, g_floorAtlasPs[fv.tc], "Outdoor floor", [tc = fv.tc](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchBakedAtlasPs(t, tc, pp.floor); });
