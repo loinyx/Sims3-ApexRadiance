@@ -159,6 +159,13 @@ struct SamplerBind {
 //   c28 = (dLx/du, dLx/dv, Lx0, W)   c29 = (dLz/du, dLz/dv, Lz0, D)   c30 = (1/band, bias, 0, 0)
 // c31.x = "Lot lamps" brightness on the lot's own light map (night-weighted; 1 = the game). c31.y = 0 (12/10: before full
 // night c3.x itself is set to ground gain x LampDay(night), TerrainLightingPolicy::LotPass, so it is no longer needed).
+// (2.15.3) c34.x = 1 while "Indoor light adds to the ground" is active (LevelLightShare::IndoorLightOnGroundActive), else 0.
+// The lot map's alpha a then holds E, the luminance of the light lit rooms send onto the texel through their openings
+// (level_light_share SolveGroundTexel; 1 = a roofless room's own floor). Its share of the map, s = sat(a / lum(map)), is
+// taken out of max(lot, terrain) and the walls' shade and added after them: ex = lm s,
+//   lamps = lerp(terrain, max(lm - ex, terrain tw), w) M + ex w,  tw = sat((1 - a) 255) (0 only at a = 1: the map alone).
+// ex comes after the lamp scale c3.x, so the daylight curve fades it like every lamp. With c34.x = 0: a = 0, s = 0, tw = 1,
+// exactly the pass of before.
 const char* kReplacementHlsl = R"(
 float4 c0 : register(c0);
 float4 c1 : register(c1);
@@ -175,6 +182,7 @@ float4 cEdge : register(c30);
 float4 cLotGain : register(c31);
 float4 cMaskX : register(c32);
 float4 cMaskZ : register(c33);
+float4 cExit : register(c34);
 samplerCUBE sSky : register(s0);
 sampler2D sLot : register(s1);
 sampler2D sTerrain : register(s2);
@@ -211,7 +219,11 @@ float4 main(PSIn i) : COLOR0 {
     // Undo that contraction for the CPU floor map, per axis (cEdge.zw: a lot map need not be square); zero z/w retains
     // unsupported VS mapping.
     float2 lotUv = i.lotUv * (1 + cLotGain.z) + cEdge.zw;
-    float3 lamps = lerp(terrain, max(tex2D(sLot, lotUv).rgb * cLotGain.x * c3.x, terrain), w) * maskTex.a;
+    float4 lot = tex2D(sLot, lotUv);
+    float3 lm = lot.rgb * cLotGain.x * c3.x;
+    float a = lot.a * cExit.x;
+    float3 ex = lm * saturate(a / max(dot(lot.rgb, float3(0.2126, 0.7152, 0.0722)), 1.0 / 255));
+    float3 lamps = lerp(terrain, max(lm - ex, terrain * saturate((1 - a) * 255)), w) * maskTex.a + ex * w;
     float3 col = sun * c0.rgb + lamps;
     col = texCUBE(sSky, i.normal).rgb * c4.x + col;
 #ifdef WET
@@ -7522,9 +7534,12 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
         float maskRows[8];
         IDirect3DTexture9* const mask = LotMaskFor(dev, atlas ? atlasMap : v, &v[4], &lotM[0], &lotM[8], rect, maskRows);
         SamplerBind maskMap(dev, 3, mask, D3DTEXF_NONE);
-        float savedMask[8];
-        const bool maskSaved = SUCCEEDED(dev->GetPixelShaderConstantF(32, savedMask, 2));
+        float savedMask[12];
+        const bool maskSaved = SUCCEEDED(dev->GetPixelShaderConstantF(32, savedMask, 3));
         SetPsConst(dev, 32, maskRows, 2);
+        // (2.15.3) the indoor light in the lot map's alpha, added after the max and the shade (c34, kReplacementHlsl)
+        const float exitGate[4] = {LevelLightShare::IndoorLightOnGroundActive() ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+        SetPsConst(dev, 34, exitGate, 1);
         SetPs(dev, replacement);
         if (atlas) SetVsConst(dev, 14, atlasMap, 1);
         SetPsConst(dev, 28, edge, 3);
@@ -7535,7 +7550,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
         draw();
         if (atlas) SetVsConst(dev, 14, v, 1);
         SetPsConst(dev, 28, savedEdge, 4);
-        if (maskSaved) SetPsConst(dev, 32, savedMask, 2);
+        if (maskSaved) SetPsConst(dev, 32, savedMask, 3);
     }
     g_objDrawInfo.clear();
     SetPs(dev, original);
