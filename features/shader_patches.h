@@ -361,4 +361,12 @@ bool MakeAoReceiverMask(std::vector<DWORD>& vs, std::vector<DWORD>& ps, bool hai
 enum class JitterResult { Ok, NotVertexShader, Unreadable, NoPosition, Subroutines, PassThrough, NoFreeRegister, ConstantInUse, ProjectedWater };
 JitterResult AddJitterVs(std::vector<DWORD>& t, int jitterConst);
 
+// The snowy and melting-snow lot light passes (lot_light_bridge DrawLotSnow / DrawLotMelt): after the lot map's texld
+// ("texld r0, v3, s2") and its basis factor, the max with the terrain light read at TEXCOORD1 (v7) from s<newSampler>, x4;
+// with mask, the room mask from s<newSampler + 1> at the uv rows PS c200 / c201 (kLotMaskConst) keeps the terrain out of rooms
+// and its alpha shades the lamp term; with exit (needs mask, 2.15.3), the indoor light in the lot map's alpha leaves the max
+// and the shade and is added after them, gated by PS c202.x (defs in c203 / c204). t unchanged when refused.
+constexpr DWORD kLotMaskConst = 200;
+bool PatchLotTerrainMax(std::vector<DWORD>& t, DWORD lastSampler, DWORD newSampler, bool mask = false, bool exit = false);
+
 } // namespace ShaderPatches

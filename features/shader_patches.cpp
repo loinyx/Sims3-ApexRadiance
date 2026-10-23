@@ -3455,4 +3455,112 @@ JitterResult AddJitterVs(std::vector<DWORD>& t, int jitterConst) {
                               Op(kMov, 2), Dst(posType, posNum), Src(kTemp, P)}}});
     return JitterResult::Ok;
 }
+
+// ---- The snowy and melting-snow lot light passes (lot_light_bridge DrawLotSnow / DrawLotMelt; moved here from
+// lot_light_bridge.cpp in 2.15.3 to be checked offline by tools/floor_shade_check). The same patch for the snowy pass (last
+// sampler s11, terrain light in s12) and the melting-snow pass (kMeltLotPs: last sampler s13, terrain light in s14): after
+// "texld r0, v3, s2" (lot light map) and the following "mul r0.xyz, r1.w, r0" (light basis factor) insert
+// "texld r7, v7(TEXCOORD1), s<new>", r7 x4 and "max r0.xyz, r0, r7". r7, v7 and the new sampler must be unused (checked).
+// With mask (room mask): also "mad rM.x/y" (mask uv from v7 with PS c200 / c201), "texld rM, rM, s<new+1>" and
+// "mul r7.xyz, r7, rM.x" before the max, so the terrain light stays outside the lot's rooms; c200, c201 and that sampler
+// must be unused too. After the max, "mul r0.xyz, r0, rM.w": the lamp shade (the mask's alpha) on both terms. (2.15.3) rM
+// is a temp the shader does not use (its highest + 1, at least r8): it was r6, which the game's snowy lot shader uses, so
+// every snowy pass drew without the mask and the lamp shade while the world grass beside it took the shade (a step at the
+// lot border at night in winter).
+// (2.15.3) With exit (and mask): indoor light on the ground, as in the dry pass (kReplacementHlsl c34). The lot map's alpha
+// a (the game's shader does not read it here: the texld writes r0.w and the basis factor's mul does not, checked) times the
+// gate c202.x gives s = sat(a / max(lum(map), 1/255)) right after the texld, before the basis factor; then, before the max,
+// ex = r0 s (rF), r0 -= ex, r7 *= sat((1 - a) 255), and after the shade r0 += ex. rE = rM + 1, rF = rM + 2; the luminance
+// weights and 255 are defs in c203 / c204 (c202..c204 must be unused). Gate 0: s = 0, ex = 0 and the weight 1, the same
+// values as without it. The snowy pass has no soft lot edge (w = 1).
+bool PatchLotTerrainMax(std::vector<DWORD>& t, DWORD lastSampler, DWORD newSampler, bool mask, bool exit) {
+    auto regNum = [](DWORD r) { return r & 0x7FF; };
+    auto regType = [](DWORD r) { return ((r >> 28) & 7) | (((r >> 11) & 3) << 3); };
+    if (exit && !mask) return false;
+    size_t dclEnd = 0, texldEnd = 0, texldAt = 0;
+    DWORD maxTemp = 0;
+    for (size_t i = 1; i < t.size();) {
+        const DWORD tok = t[i];
+        if (tok == 0x0000FFFF) break;
+        if ((tok & 0xFFFF) == 0xFFFE) { i += 1 + ((tok >> 16) & 0x7FFF); continue; }
+        const size_t len = (tok >> 24) & 0xF;
+        const DWORD op = tok & 0xFFFF;
+        if (i + len >= t.size()) return false;
+        for (size_t k = 1; k <= len; k++) {
+            const DWORD r = t[i + k];
+            if (op == 0x1F && k == 1) continue; // dcl usage token
+            if (op == 0x51 && k > 1) continue;  // def values
+            if (!(r & 0x80000000u)) continue;
+            const DWORD ty = regType(r), n = regNum(r);
+            if ((ty == 0 && n == 7) || (ty == 1 && n == 7) || (ty == 10 && n == newSampler)) return false; // r7 / v7 / new sampler taken
+            if (mask && ((ty == 2 && (n == kLotMaskConst || n == kLotMaskConst + 1)) || (ty == 10 && n == newSampler + 1))) return false;
+            if (exit && ty == 2 && n >= kLotMaskConst + 2 && n <= kLotMaskConst + 4) return false; // the gate and the defs
+            if (ty == 0) maxTemp = std::max(maxTemp, n);
+        }
+        if (op == 0x1F && regType(t[i + 2]) == 10 && regNum(t[i + 2]) == lastSampler) dclEnd = i + 1 + len;
+        if (op == 0x42 && !texldEnd && regType(t[i + 1]) == 0 && regNum(t[i + 1]) == 0 && regType(t[i + 2]) == 1 && regNum(t[i + 2]) == 3 && regType(t[i + 3]) == 10 && regNum(t[i + 3]) == 2) {
+            texldEnd = i + 1 + len;
+            texldAt = i;
+        }
+        i += 1 + len;
+    }
+    if (!dclEnd || !texldEnd || texldEnd < dclEnd || texldEnd + 1 >= t.size()) return false;
+    // next instruction must be "mul r0.xyz, r1.w, r0" (light basis factor)
+    if ((t[texldEnd] & 0xFFFF) != 0x05 || regType(t[texldEnd + 1]) != 0 || regNum(t[texldEnd + 1]) != 0) return false;
+    const DWORD r = std::max<DWORD>(maxTemp + 1, 8); // the mask's temp (see above)
+    // (exit) the lot map's alpha: the texld writes r0.w and the basis factor's mul does not; two more temps
+    if (exit && (!(t[texldAt + 1] & 0x00080000u) || (t[texldEnd + 1] & 0x00080000u) || r + 2 > 31)) return false;
+    const size_t insertAt = texldEnd + 1 + ((t[texldEnd] >> 24) & 0xF);
+    const DWORD fetch[] = {0x03000042, 0x802F0007, 0x90E40007, 0xA0E40800 | newSampler, // texld_pp r7, v7, s<new>
+                           0x03000002, 0x80270007, 0x80E40007, 0x80E40007,              // add_pp r7.xyz, r7, r7
+                           0x03000002, 0x80270007, 0x80E40007, 0x80E40007,              // add_pp r7.xyz, r7, r7
+                           0x0300000B, 0x80270000, 0x80E40000, 0x80E40007};             // max_pp r0.xyz, r0, r7
+    t.insert(t.begin() + insertAt, std::begin(fetch), std::end(fetch));
+    if (mask) {
+        const DWORD m = newSampler + 1, c0 = 0xA0000000 | kLotMaskConst, c1 = 0xA0000000 | (kLotMaskConst + 1);
+        const DWORD ops[] = {0x04000004, 0x80010000 | r, 0x90000007, c0,              c0 | 0x00AA0000, // mad rM.x, v7.x, c200.x, c200.z
+                             0x04000004, 0x80010000 | r, 0x90550007, c0 | 0x00550000, 0x80000000 | r,  // mad rM.x, v7.y, c200.y, rM.x
+                             0x04000004, 0x80020000 | r, 0x90000007, c1,              c1 | 0x00AA0000, // mad rM.y, v7.x, c201.x, c201.z
+                             0x04000004, 0x80020000 | r, 0x90550007, c1 | 0x00550000, 0x80550000 | r,  // mad rM.y, v7.y, c201.y, rM.y
+                             0x03000042, 0x800F0000 | r, 0x80E40000 | r, 0xA0E40800 | m,             // texld rM, rM, s<m>
+                             0x03000005, 0x80070007, 0x80E40007, 0x80000000 | r};                    // mul r7.xyz, r7, rM.x
+        t.insert(t.begin() + insertAt + 12, std::begin(ops), std::end(ops)); // after the texld and the two adds, before the max
+        size_t beforeMax = insertAt + 12 + std::size(ops);
+        const DWORD E = r + 1, F = r + 2, cG = kLotMaskConst + 2, cL = kLotMaskConst + 3, cK = kLotMaskConst + 4;
+        if (exit) {
+            const DWORD pre[] = {0x03000005, 0x80070000 | F, 0x80E40000, 0x80000000 | E,                   // mul rF.xyz, r0, rE.x (ex)
+                                 0x03000002, 0x80070000, 0x80E40000, 0x81E40000 | F,                       // add r0.xyz, r0, -rF
+                                 0x04000004, 0x80140000 | E, 0x81550000 | E, 0xA0000000 | cK, 0xA0000000 | cK, // mad_sat rE.z, -rE.y, c204.x, c204.x
+                                 0x03000005, 0x80070007, 0x80E40007, 0x80AA0000 | E};                     // mul r7.xyz, r7, rE.z
+            t.insert(t.begin() + beforeMax, std::begin(pre), std::end(pre));
+            beforeMax += std::size(pre);
+        }
+        // the lamp shade (the mask's alpha, 1 with no wall between): x the whole lamp term, after the max
+        const DWORD shade[] = {0x03000005, 0x80270000, 0x80E40000, 0x80FF0000 | r}; // mul_pp r0.xyz, r0, rM.w
+        t.insert(t.begin() + beforeMax + 4, std::begin(shade), std::end(shade));
+        if (exit) {
+            const DWORD post[] = {0x03000002, 0x80070000, 0x80E40000, 0x80E40000 | F}; // add r0.xyz, r0, rF (ex, after the shade)
+            t.insert(t.begin() + beforeMax + 8, std::begin(post), std::end(post));
+            const DWORD share[] = {0x03000008, 0x80010000 | E, 0x80E40000, 0xA0E40000 | cL,             // dp3 rE.x, r0, c203 (lum of the map)
+                                   0x0300000B, 0x80010000 | E, 0x80000000 | E, 0xA0FF0000 | cL,         // max rE.x, rE.x, c203.w
+                                   0x02000006, 0x80010000 | E, 0x80000000 | E,                          // rcp rE.x, rE.x
+                                   0x03000005, 0x80020000 | E, 0x80FF0000, 0xA0000000 | cG,             // mul rE.y, r0.w, c202.x (a)
+                                   0x03000005, 0x80110000 | E, 0x80550000 | E, 0x80000000 | E};         // mul_sat rE.x, rE.y, rE.x (s)
+            t.insert(t.begin() + texldEnd, std::begin(share), std::end(share)); // before the basis factor's mul
+            const auto bits = [](float f) {
+                DWORD d;
+                std::memcpy(&d, &f, 4);
+                return d;
+            };
+            const DWORD defs[] = {0x05000051, 0xA00F0000 | cL, bits(0.2126f), bits(0.7152f), bits(0.0722f), bits(1.0f / 255.0f),
+                                  0x05000051, 0xA00F0000 | cK, bits(255.0f), bits(1.0f), 0, 0};
+            t.insert(t.begin() + dclEnd, std::begin(defs), std::end(defs));
+        }
+        const DWORD mdecl[] = {0x0200001F, 0x90000000, 0xA00F0800 | m};
+        t.insert(t.begin() + dclEnd, std::begin(mdecl), std::end(mdecl));
+    }
+    const DWORD decl[] = {0x0200001F, 0x80010005, 0x90230007, 0x0200001F, 0x90000000, 0xA00F0800 | newSampler}; // v7 = TEXCOORD1, s<new> 2D
+    t.insert(t.begin() + dclEnd, std::begin(decl), std::end(decl));
+    return true;
+}
 } // namespace ShaderPatches

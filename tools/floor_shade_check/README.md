@@ -23,4 +23,10 @@ It checks the ground lamp shade of story-0 outdoor floors ([floors.md](../../doc
   `ShadersRecusados` folders) every distinct `ps_3_0` `.bin` goes through the same checks, and each captured fence copy is
   found again as a precomp shader's copy.
 
+- the snowy, rug-cut and melting-snow lot light passes (`PatchLotTerrainMax`, [snow.md](../../docs/features/night-lighting/snow.md)):
+  the precomp's three shaders with the room mask, and with the mask and the indoor light on the ground; both copies
+  disassemble within 512 slots and native D3D9 accepts them; on a hidden D3D9 device the second copy draws the first one's
+  pixels exactly with its gate at 0, and over a lot map of alpha 0 with the gate at 1, and changes them with the gate at 1
+  over a lot map whose alpha varies.
+
 The last line is `OK` or `PROBLEMS`. These checks do not replace an in-game capture.

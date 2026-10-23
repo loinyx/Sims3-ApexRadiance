@@ -807,6 +807,122 @@ void InstancedPixels(Gpu& gpu) {
     std::printf("Instanced shade pixels: %d checks\n", g_checks - before);
 }
 
+// ---- 7. (2.15.3) The snowy, rug-cut and melting-snow lot light passes (PatchLotTerrainMax): the precomp's three shaders
+// with the room mask, and with the mask and the indoor light on the ground (exit). Both disassemble within 512 slots and
+// native D3D9 accepts them; on a hidden device with every input varied, the exit copy with the gate c202.x = 0, or with
+// the gate 1 over a lot map of alpha 0, draws exactly the pixels of the masked copy, and with the gate 1 over a lot map
+// whose alpha varies it changes them.
+IDirect3DTexture9* Pattern(Gpu& gpu, DWORD seed, bool alpha) {
+    IDirect3DTexture9* t = nullptr;
+    if (FAILED(gpu.dev->CreateTexture(64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &t, nullptr))) return nullptr;
+    D3DLOCKED_RECT r{};
+    t->LockRect(0, &r, nullptr, 0);
+    for (DWORD y = 0; y < 64; y++)
+        for (DWORD x = 0; x < 64; x++) {
+            const DWORD v = (x * 7 + y * 13 + seed * 29) & 255, w = (x * 3 + y * 5 + seed * 11) & 255, z = (x * 11 + y * 2 + seed * 7) & 255;
+            reinterpret_cast<DWORD*>(static_cast<char*>(r.pBits) + y * r.Pitch)[x] = (alpha ? ((x * 4 + y) & 255) << 24 : 0u) | v << 16 | w << 8 | z;
+        }
+    t->UnlockRect(0);
+    return t;
+}
+void SnowLotPasses(Gpu& gpu, const std::vector<Blob>& blobs) {
+    const int before = g_checks;
+    struct Pass {
+        ShaderId id;
+        DWORD last, terrain;
+        const char* name;
+    } const passes[] = {{kSnowLotPs, 11, 12, "snowy lot pass"}, {kSnowLotCutPs, 12, 13, "snowy lot pass under rugs"}, {kMeltLotPs, 13, 14, "melting-snow lot pass"}};
+    const auto vsCode = Compile(R"(
+struct Out { float4 pos : POSITION; float4 t0 : TEXCOORD0; float4 t1 : TEXCOORD1; float4 t2 : TEXCOORD2; float4 t3 : TEXCOORD3;
+             float4 t4 : TEXCOORD4; float4 t5 : TEXCOORD5; float4 t6 : TEXCOORD6; float4 t7 : TEXCOORD7; float4 c : COLOR0; };
+Out main(float4 pos : POSITION, float2 uv : TEXCOORD0) {
+    Out o; o.pos = pos;
+    o.t0 = float4(uv, uv.yx); o.t1 = float4(uv * 0.9 + 0.05, 1 - uv); o.t2 = float4(uv * 0.5 + 0.25, 0.5, 1);
+    o.t3 = float4(uv.yx, uv); o.t4 = float4(normalize(float3(uv.x - 0.5, 1, uv.y - 0.5)), 1); o.t5 = float4(uv * 0.7 + 0.1, uv);
+    o.t6 = float4(uv, uv * 0.8); o.t7 = float4(uv.x * 4, 0.5, uv.y * 4, 0.6); o.c = float4(uv, 0.5, 0.3); return o;
+})", "vs_3_0");
+    IDirect3DVertexShader9* vs = nullptr;
+    Check(!vsCode.empty() && SUCCEEDED(gpu.dev->CreateVertexShader(vsCode.data(), &vs)), "snowy passes: test vertex shader");
+    IDirect3DCubeTexture9* cube = nullptr;
+    gpu.dev->CreateCubeTexture(1, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &cube, nullptr);
+    if (cube)
+        for (int f = 0; f < 6; f++) {
+            D3DLOCKED_RECT r{};
+            cube->LockRect(static_cast<D3DCUBEMAP_FACES>(f), 0, &r, nullptr, 0);
+            *static_cast<DWORD*>(r.pBits) = 0xFF405060u + static_cast<DWORD>(f) * 0x00101010u;
+            cube->UnlockRect(static_cast<D3DCUBEMAP_FACES>(f), 0);
+        }
+    IDirect3DTexture9* tex[16] = {};
+    for (DWORD s = 2; s < 16; s++) tex[s] = Pattern(gpu, s, true);
+    IDirect3DTexture9* lotNoAlpha = Pattern(gpu, 2, false);
+    for (const Pass& p : passes) {
+        const Blob* blob = nullptr;
+        for (const Blob& b : blobs)
+            if (!b.vs && IsShader(p.id, b.code.data(), b.code.size() * 4)) blob = &b;
+        Check(blob != nullptr, "snowy passes: the shader is in the precomp");
+        if (!blob) continue;
+        std::vector<DWORD> masked = blob->code, exit = blob->code;
+        const bool pm = ShaderPatches::PatchLotTerrainMax(masked, p.last, p.terrain, true), pe = ShaderPatches::PatchLotTerrainMax(exit, p.last, p.terrain, true, true);
+        Check(pm && pe, "snowy passes: the masked and the exit copies are made");
+        if (!pm || !pe) {
+            std::printf("  %s: masked %d, exit %d\n", p.name, pm, pe);
+            continue;
+        }
+        const int sm = Slots(Disasm(masked)), se = Slots(Disasm(exit));
+        Check(sm > 0 && se > 0 && se <= 512, "snowy passes: both copies disassemble within 512 slots");
+        Check(gpu.AcceptsPs(masked) && gpu.AcceptsPs(exit), "snowy passes: native D3D9 accepts both copies");
+        IDirect3DPixelShader9 *psM = nullptr, *psE = nullptr;
+        gpu.dev->CreatePixelShader(masked.data(), &psM);
+        gpu.dev->CreatePixelShader(exit.data(), &psE);
+        if (!psM || !psE || !vs) {
+            Release(psM);
+            Release(psE);
+            continue;
+        }
+        gpu.dev->SetTexture(0, cube);
+        gpu.dev->SetTexture(1, cube);
+        for (DWORD s = 2; s < 16; s++) {
+            gpu.dev->SetTexture(s, tex[s]);
+            gpu.dev->SetSamplerState(s, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+            gpu.dev->SetSamplerState(s, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+            gpu.dev->SetSamplerState(s, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        }
+        float k[16][4];
+        for (int i = 0; i < 16; i++)
+            for (int j = 0; j < 4; j++) k[i][j] = 0.05f + 0.07f * static_cast<float>((i * 5 + j * 3) % 11);
+        gpu.dev->SetPixelShaderConstantF(0, &k[0][0], 16);
+        const float rows[8] = {0.9f, 0.1f, 0.05f, 0, 0.1f, 0.8f, 0.1f, 0};
+        gpu.dev->SetPixelShaderConstantF(ShaderPatches::kLotMaskConst, rows, 2);
+        const float off[4] = {0, 0, 0, 0}, on[4] = {1, 0, 0, 0};
+        gpu.dev->SetPixelShaderConstantF(ShaderPatches::kLotMaskConst + 2, off, 1);
+        const auto ref = gpu.Render(psM, vs), gate0 = gpu.Render(psE, vs);
+        gpu.dev->SetPixelShaderConstantF(ShaderPatches::kLotMaskConst + 2, on, 1);
+        const auto gate1 = gpu.Render(psE, vs);
+        gpu.dev->SetTexture(2, lotNoAlpha);
+        const auto ref0 = gpu.Render(psM, vs), alpha0 = gpu.Render(psE, vs);
+        gpu.dev->SetPixelShaderConstantF(ShaderPatches::kLotMaskConst + 2, off, 1);
+        int lit = 0, changed = 0;
+        for (size_t i = 0; i < ref.size(); i++) {
+            lit += (ref[i] & 0xFFFFFF) != 0;
+            changed += gate1[i] != ref[i];
+        }
+        Check(gate0 == ref, "snowy passes: the exit copy with the gate 0 draws the masked copy's pixels exactly");
+        Check(alpha0 == ref0, "snowy passes: the exit copy over a lot map of alpha 0 draws the masked copy's pixels exactly");
+        Check(changed > 0 || lit == 0, "snowy passes: the exit copy with the gate 1 adds the lot map's alpha share");
+        std::printf("Snowy pass %s: masked %d slots, exit %d slots; %d of %d pixels lit, %d changed by the gate\n", p.name, sm, se, lit, static_cast<int>(ref.size()), changed);
+        for (DWORD s = 0; s < 16; s++) gpu.dev->SetTexture(s, nullptr);
+        gpu.dev->SetPixelShader(nullptr);
+        gpu.dev->SetVertexShader(nullptr);
+        Release(psM);
+        Release(psE);
+    }
+    for (auto*& t : tex) Release(t);
+    Release(lotNoAlpha);
+    Release(cube);
+    Release(vs);
+    std::printf("Snowy lot passes: %d checks\n", g_checks - before);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -828,6 +944,7 @@ int main(int argc, char** argv) {
     Pixels(gpu);
     Check(Instanced(gpu, InstancedPs(blobs, techs), "precomp") > 0, "instanced: the precomp has instanced shaders that take the shade");
     InstancedPixels(gpu);
+    SnowLotPasses(gpu, blobs);
     for (int i = 2; i < argc; i++) {
         Captured(blobs, argv[i]);
         InstancedCaptured(gpu, blobs, techs, argv[i]);
