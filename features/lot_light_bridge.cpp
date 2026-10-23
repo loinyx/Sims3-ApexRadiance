@@ -1129,6 +1129,7 @@ struct FenceGap {
 };
 constexpr float kGapMin = 0.4f, kGapMax = 2.5f;
 constexpr DWORD kGateKeepMs = 300000;
+constexpr float kGateOff = 0.6f; // m: a gate's origin off its fence's line (half a tile, and a margin)
 std::vector<FenceGap> g_fenceGaps;
 std::unordered_map<uint64_t, std::vector<uint32_t>> g_gapCells; // every 8 m cell a gap's box (+0.5 m) touches
 std::unordered_map<uint64_t, DWORD> g_gates;                     // gap key -> last tick an object was drawn in it
@@ -1224,8 +1225,10 @@ void FenceGridUpdate() {
         LOG_INFO(f);
     }
 }
-// An outdoor object drawn at world (x, y, z): a gate when its origin stands in a fence gap (within 0.35 m of the line,
-// between the two pieces' ends, between the gap's base - 1 m and its top)
+// An outdoor object drawn at world (x, y, z): a gate when its origin stands in a fence gap (within kGateOff of the line,
+// between the two pieces' ends, between the gap's base - 1 m and its top). A gate's origin is its tile's centre, half a tile
+// off the fence's line (the log: both gates of a lot 0.50 m off it); at 0.35 m they were missed, and a gap was filled only
+// while some other object stood on its line, so the light came through again minutes later
 void NoteGate(float x, float y, float z) {
     FenceGridUpdate();
     if (g_fenceGaps.empty()) return;
@@ -1235,7 +1238,7 @@ void NoteGate(float x, float y, float z) {
         const FenceGap& gp = g_fenceGaps[k];
         const float dx = gp.w.x1 - gp.w.x0, dz = gp.w.z1 - gp.w.z0, l = std::hypot(dx, dz);
         const float t = ((x - gp.w.x0) * dx + (z - gp.w.z0) * dz) / l, side = ApexMath::Fabs((x - gp.w.x0) * dz - (z - gp.w.z0) * dx) / l;
-        if (t < -0.1f || t > l + 0.1f || side > 0.35f || y < gp.w.y0 - 1.0f || y > gp.w.y1) {
+        if (t < -0.1f || t > l + 0.1f || side > kGateOff || y < gp.w.y0 - 1.0f || y > gp.w.y1) {
             if (!kPublicBuild && g_gateMissLogs < 30 && t > -1.5f && t < l + 1.5f && side < 1.5f) {
                 g_gateMissLogs++;
                 LOG_INFO(std::format("[GroundShadow] object at ({:.2f} {:.2f} {:.2f}) near the fence gap ({:.2f} {:.2f})-({:.2f} {:.2f}) y {:.2f}..{:.2f}: "
