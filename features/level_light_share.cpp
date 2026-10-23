@@ -2874,15 +2874,24 @@ std::unordered_map<uintptr_t, float> g_wallSolvedH;   // wall -> the tallest col
 std::vector<uintptr_t> g_wallHRequeue;                // walls drawn taller (or shorter) than their last solve took
 std::atomic<long> g_wallUvSeen{0}, g_wallUvMatched{0}, g_wallTallCells{0}, g_wallStretched{0};
 std::atomic<int> g_wallTallLogged{0};
-// Light through doors and windows: each wall cell's drawn foot and, for a wall drawn taller than a story (> 3.02 m), the
-// tallest heights seen (kept while the wall stays: walls-down and cutaway modes draw it short for a while), with the wall's
-// line when noted (another wall made at a freed wall's address is not taken for it); the story grids read them under
-// g_wallHMx. g_wallTopGen moves when a top first appears or rises, or a foot is first seen off the wall's light base.
+// Each wall cell's full geometry heights and foot, with the wall's line so a
+// reused address cannot inherit them. Camera cutaway uses a separate vertex
+// component. Story grids read these under g_wallHMx and rebuild when they rise.
 struct WallTopCell {
     float foot = 0, hl = 0, hm = 0, hr = 0; // the drawn foot (lot y) and the heights over it at the cell's low end, middle, high end
     bool tall = false;                     // hl / hm / hr hold a height over 3.02 m
     bool set = false;                      // the foot was seen drawn
 };
+bool KeepWallTop(WallTopCell& t, float left, float middle, float right) {
+    const bool tall = std::max({left, middle, right}) > 3.02f;
+    const bool rose = (tall && !t.tall) || left > t.hl + 0.02f || middle > t.hm + 0.02f || right > t.hr + 0.02f;
+    if (rose) t.hl = std::max(t.hl, left), t.hm = std::max(t.hm, middle), t.hr = std::max(t.hr, right);
+    t.tall = t.tall || tall;
+    return rose;
+}
+bool MeasuredShortTop(const WallTopCell& c) {
+    return c.set && !c.tall && std::min({c.hl, c.hm, c.hr}) > 0.2f && std::max({c.hl, c.hm, c.hr}) < 2.98f;
+}
 struct WallTopRec {
     float ox = 0, oz = 0, rx = 0, rz = 0; // the wall's line when noted (+0x100 / +0xE0, x and z)
     std::vector<WallTopCell> cells;
@@ -3005,8 +3014,8 @@ void NoteWallCell(void* geo, uintptr_t mgr, int x, int z, int dir) {
     for (const WallCellH& h : rec.cells)
         if (h.set) maxH = std::max({maxH, h.hl, h.hm, h.hr});
     rec.maxH = maxH;
-    // light through doors and windows: the cell's drawn foot, and its tallest heights over a story (never lowered while the
-    // wall stays)
+    // Keep the full geometry height, including short foundation and pillar faces.
+    // The wall VS lowers cutaway vertices separately; these are the stored full-height positions.
     WallTopRec& top = g_wallTop[c.wall];
     if (static_cast<int>(top.cells.size()) != c.len || top.ox != c.ox || top.oz != c.oz || top.rx != c.rx || top.rz != c.rz) {
         top.cells.assign(c.len, WallTopCell{});
@@ -3017,10 +3026,7 @@ void NoteWallCell(void* geo, uintptr_t mgr, int x, int z, int dir) {
     bool rose = spanChanged || (t.set ? ApexMath::Fabs(t.foot - c.foot) > 0.02f : ApexMath::Fabs(c.foot - c.base) > 0.05f);
     t.foot = c.foot;
     t.set = true;
-    if (tall && (!t.tall || c.hl > t.hl + 0.02f || c.hm > t.hm + 0.02f || c.hr > t.hr + 0.02f)) {
-        t.hl = std::max(t.hl, c.hl), t.hm = std::max(t.hm, c.hm), t.hr = std::max(t.hr, c.hr);
-        t.tall = rose = true;
-    }
+    rose = KeepWallTop(t, c.hl, c.hm, c.hr) || rose;
     if (rose && (spanChanged || WallSampleSpan::ShiftFoot(c.foot, c.base, c.hl, c.hm, c.hr)) && g_foundationWallsOn.load(std::memory_order_relaxed) && WallOutdoor(c.wall) &&
         std::find(g_wallHRequeue.begin(), g_wallHRequeue.end(), c.wall) == g_wallHRequeue.end() && g_wallHRequeue.size() < 4096)
         g_wallHRequeue.push_back(c.wall); // (2.15.3) drawn below its light base: solved again from its foot (MoveWallFoot)
@@ -3654,6 +3660,7 @@ struct GridEdge {
     uint16_t open = 0;                  // 1 + index into StoryGrid::openings, 0 = none
     uint8_t faces = 0;
     bool half = false;
+    bool shortTop = false; // every full face has a measured top below the native three-metre top
 };
 struct GridOpening {
     float sill = 0;              // m over the edge's base
@@ -3685,6 +3692,7 @@ struct StoryGrid {
     long floorGen = 0;          // g_floorEditGen when built (the story above's floors cap its walls: CapLowerWalls)
     int capped = 0;             // full walls ending at a floor of the story above beside them (foundation sides, deck edges)
     bool capKnown = false;      // the story above was known (its lot tracker) when built; else built again once it is
+    bool shortTops = false;     // permits a cheap rejection before the optional downward-wall retest
     std::vector<int32_t> zl;    // edge (x, Z)-(x + 1, Z) at Z * w + x (Z = 0..h); -1 = no wall
     std::vector<int32_t> xl;    // edge (X, z)-(X, z + 1) at z * (w + 1) + X (X = 0..w)
     // (2.15.3) 1 where a wall edge lies on the line within one cell of the crossing: zlNear at Z * w + x for zl (x - 1 .. x + 1),
@@ -4099,7 +4107,7 @@ int CapLowerWalls(StoryGrid& g) {
     const auto cap = [&](int32_t idx, float x, float z, float nx, float nz) {
         if (idx < 0) return;
         GridEdge& e = g.edges[static_cast<size_t>(idx)];
-        if (e.half) return;
+        if (e.half || e.shortTop) return; // measured pillar tops need not end at the adjacent deck
         const float top = UpperFloorBeside(mgrUp, levelUp, x, z, nx, nz);
         if (!(top > e.foot + 0.05f && top < e.foot + kStoryWallH - 0.05f)) return;
         e.topL = std::min(e.topL, top), e.topM = std::min(e.topM, top), e.topR = std::min(e.topR, top);
@@ -4201,7 +4209,7 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
     std::vector<float> floorY(nt, kNoFloor); // the tiles' +0x78
     struct FaceSum {
         float foot = 1e9f, fullL = -1e9f, fullM = -1e9f, fullR = -1e9f, halfTop = -1e9f;
-        bool full = false;
+        bool full = false, shortTop = true;
         int faces = 0, kind = 0;
         size_t index = 0;
     };
@@ -4294,7 +4302,7 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
         }
         FaceSum& s = sums[static_cast<size_t>(slotRef)];
         float foot = f.oy, drawnFoot = f.oy, hl = 0, hm = 0, hr = 0;
-        bool tall = false;
+        bool tall = false, shortTop = false;
         if (const auto it = tops.find(wall); it != tops.end() && it->second[static_cast<size_t>(fc.cell)].set) {
             const WallTopCell& c = it->second[static_cast<size_t>(fc.cell)];
             if (ApexMath::Fabs(c.foot - f.oy) < 3.5f) { // (a foot that far from the base is not this wall's)
@@ -4302,6 +4310,7 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
                 foot = std::min(foot, c.foot);
                 tall = c.tall;
                 hl = fc.flip ? c.hr : c.hl, hm = c.hm, hr = fc.flip ? c.hl : c.hr;
+                shortTop = MeasuredShortTop(c);
             }
         }
         s.foot = std::min(s.foot, foot);
@@ -4309,10 +4318,11 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
         if (f.half) s.halfTop = std::max(s.halfTop, foot + kHalfWallH);
         else {
             s.full = true;
+            s.shortTop = s.shortTop && shortTop;
             const float plain = foot + kStoryWallH;
-            s.fullL = std::max(s.fullL, tall ? std::max(plain, drawnFoot + hl) : plain);
-            s.fullM = std::max(s.fullM, tall ? std::max(plain, drawnFoot + hm) : plain);
-            s.fullR = std::max(s.fullR, tall ? std::max(plain, drawnFoot + hr) : plain);
+            s.fullL = std::max(s.fullL, shortTop ? drawnFoot + hl : tall ? std::max(plain, drawnFoot + hl) : plain);
+            s.fullM = std::max(s.fullM, shortTop ? drawnFoot + hm : tall ? std::max(plain, drawnFoot + hm) : plain);
+            s.fullR = std::max(s.fullR, shortTop ? drawnFoot + hr : tall ? std::max(plain, drawnFoot + hr) : plain);
         }
         if (fc.kind == 2) g->flags[fc.index / 2] |= static_cast<uint8_t>(1 << (fc.index & 1));
     }
@@ -4323,6 +4333,8 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
         e.foot = s.foot;
         e.faces = static_cast<uint8_t>(std::min(s.faces, 255));
         e.half = !s.full;
+        e.shortTop = s.full && s.shortTop;
+        g->shortTops |= e.shortTop;
         e.topL = s.full ? s.fullL : s.halfTop;
         e.topM = s.full ? s.fullM : s.halfTop;
         e.topR = s.full ? s.fullR : s.halfTop;
@@ -4807,6 +4819,7 @@ void DrainWarmStories() {
 // ---- One ray against a story's grid (light tree thread, every point of a roofless room x lamp of its own story) ----
 struct GridWhy {
     bool wall = false, opening = false, over = false, roof = false;
+    bool shortTop = false;
 };
 // The top of edge e at u (0..1 from its low end)
 inline float GridEdgeTop(const GridEdge& e, float u) {
@@ -4820,6 +4833,7 @@ inline float GridEdgeTop(const GridEdge& e, float u) {
 // floor stands in the story below, whose own grid holds its walls)
 struct GridSpot {
     float clear = 0.0f, over = 0.0f, through = 0.0f;
+    bool shortTop = false;
 };
 // (development builds, hard_wall_tops) The ceiling over the tile the ray comes from at the crossing being tested (GridPassImpl
 // sets it; 1e30 = none): a full wall whose top reaches it has the slab on it, so nothing passes over that top and its soft rim
@@ -4856,7 +4870,10 @@ void GridEdgeSpot(const StoryGrid& g, int32_t idx, float c, float s0, float s1, 
         const float sill = o && o->sill > kFloorSill ? Penumbra::Cover(hh - o->sill, rim.up) : 1.0f;
         const float in = open ? sill * Penumbra::Cover(OpeningHead(*o, v) - hh, rim.up) * o->glass : 0.0f; // (2.15.3) x its glass
         if (in > ov) out.through += w * in;
-        else out.over += w * ov;
+        else {
+            out.over += w * ov;
+            out.shortTop |= e.shortTop && w * ov > 0.0f;
+        }
     };
     if (!o) {
         piece(0.0f, 1.0f, false);
@@ -4871,6 +4888,7 @@ float GridSpotPass(const GridSpot& s, float total, GridWhy& why) {
     if (pass <= 0.0f) why.wall = true;
     else if (s.through > 0.0f && s.through >= s.over) why.opening = true;
     else if (s.over > 0.0f) why.over = true; // (passed, not through an opening: over its top)
+    why.shortTop |= pass > 0.0f && s.shortTop;
     return pass;
 }
 // The share of a ray crossing edge idx at u (0..1 from its low end) at lot height y, the lamp's spot there `rim` wide (in
@@ -9937,8 +9955,11 @@ void CaptureStoryWalls(BYTE* room0) {
     uintptr_t mgr = 0;
     const int n = ReadStoryWalls(room0, mgr);
     if (n < 0) return;
-    if (const auto it = g_rooms.find(reinterpret_cast<uintptr_t>(room0)); it != g_rooms.end() && it->second.tracker)
-        if (const int c = CapFoundationSides(mgr, it->second.tracker, g_wallRead, n)) g_foundationSides.fetch_add(c, std::memory_order_relaxed);
+    // With grid patches, preserve the native span until each cell receives its
+    // measured top. A whole-run deck cap would irreversibly shorten its pillars.
+    if (!(OpeningsOn() || RoofedOpeningsOn()))
+        if (const auto it = g_rooms.find(reinterpret_cast<uintptr_t>(room0)); it != g_rooms.end() && it->second.tracker)
+            if (const int c = CapFoundationSides(mgr, it->second.tracker, g_wallRead, n)) g_foundationSides.fetch_add(c, std::memory_order_relaxed);
     StoreStoryWalls(mgr, g_wallRead, n, false);
 }
 // Light tree thread (DrainWarmStories): a story whose openings changed or whose grid was not ready takes its patches again
@@ -11565,16 +11586,19 @@ float ReachShare(void* light, const float* sample) {
 }
 // Evaluate the same world ray against every crossed story, at each wall's actual ray height.
 // Only reuse complete, already-gathered geometry; missing geometry retains the native fallback.
-bool OutdoorFloorVisibilityImpl(const RoomInfo& info, int home, void* light, const float* sample, float& pass, float* lamp) {
+bool OutdoorFloorVisibilityImpl(const RoomInfo& info, int home, void* light, const float* sample, float& pass, float* lamp, bool* shortTop = nullptr) {
     const int lo = std::min(home, info.level), hi = std::max(home, info.level);
     if (lo < 0 || hi > 7) return false;
     const StoryGrid* grids[8]{};
+    bool hasShortTop = false;
     for (int k = lo; k <= hi; ++k) {
         const uintptr_t mgr = StoryManager(info.tracker, k);
         const auto it = g_grids.find(mgr);
         if (!mgr || it == g_grids.end() || !it->second) return false;
         grids[k] = it->second.get();
+        hasShortTop |= grids[k]->shortTops;
     }
+    if (shortTop && !hasShortTop) return false;
     LampPos(light, lamp);
     pass = 1.0f;
     for (int k = lo; k <= hi && pass > 0.0f; ++k) {
@@ -11583,13 +11607,14 @@ bool OutdoorFloorVisibilityImpl(const RoomInfo& info, int home, void* light, con
         ToLocal(grids[k]->xf, sample, B);
         GridWhy why{};
         const float transmission = GridPassImpl(*grids[k], A, B, why);
+        if (shortTop) *shortTop |= why.shortTop;
         pass *= transmission;
     }
     return true;
 }
-bool OutdoorFloorVisibility(const RoomInfo& info, int home, void* light, const float* sample, float& pass, float* lamp) {
+bool OutdoorFloorVisibility(const RoomInfo& info, int home, void* light, const float* sample, float& pass, float* lamp, bool* shortTop = nullptr) {
     __try {
-        return OutdoorFloorVisibilityImpl(info, home, light, sample, pass, lamp);
+        return OutdoorFloorVisibilityImpl(info, home, light, sample, pass, lamp, shortTop);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false; // unchanged native path; do not bypass an unreadable obstacle
     }
@@ -11614,6 +11639,21 @@ void CrossFloorShadow(const RoomInfo& info, void* light, const float* sample, fl
     }
     const bool lit = colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f;
     const float before[3] = {colour[0], colour[1], colour[2]};
+    // Downward outdoor rays can clear a pillar's measured top while the native
+    // story test still sees a full wall. Replace that test only after the complete
+    // wall/roof walk succeeds and identifies such a crossing; unknown grids keep it.
+    if (lit && cross && cross->outdoor && !info.indoor && !g_ctx.floorSurface && !g_ctx.basis && home > info.level &&
+        g_ctx.flags && g_ctx.flags[0] && g_enterReady) {
+        float pass = 1.0f;
+        bool shortTop = false;
+        alignas(16) float lamp[4]{};
+        if (OutdoorFloorVisibility(info, home, light, sample, pass, lamp, &shortTop) && shortTop) {
+            for (int i = 0; i < 4; ++i) colour[i] *= pass;
+            g_ctx.yardLight = reinterpret_cast<uintptr_t>(light);
+            std::memcpy(g_ctx.yardLamp, lamp, sizeof g_ctx.yardLamp);
+            return;
+        }
+    }
     // An outdoor floor texel never takes the light of a lamp under its plane: the game weighs each lamp by max(0, N.L) with
     // the texel's real normal (0x006BE020, room-light-maps.md), so the texel's own solve adds no zeroing (12/10). Counted to
     // confirm it in game (expected 0). The floor mask's two wrapped copies ignore N.L on purpose, and they must drop such a

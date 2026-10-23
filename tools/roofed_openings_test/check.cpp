@@ -1101,7 +1101,47 @@ void RaisedWallSpanChecks() {
     }
 }
 
+void PillarLightChecks() {
+    WallTopCell top;
+    Check(!MeasuredShortTop(top), "unmeasured wall retains its native blocker");
+    top.set = true;
+    top.foot = 0.739f;
+    Check(KeepWallTop(top, 1.125f, 1.125f, 1.125f) && MeasuredShortTop(top), "captured pillar keeps its real short top");
+    Check(!KeepWallTop(top, 0.5f, 0.5f, 0.5f) && top.hl == 1.125f, "lower geometry cannot shrink a known blocker");
+    Builder b(8, 8);
+    const auto idx = b.Wall(true, 3, 4);
+    auto& e = b.g.edges[idx];
+    e.foot = e.base = top.foot;
+    e.topL = top.foot + top.hl, e.topM = top.foot + top.hm, e.topR = top.foot + top.hr;
+    e.shortTop = MeasuredShortTop(top);
+    GridWhy why;
+    Check(Pass(b.g, 3.5f, 2.372f, 3.0f, 3.5f, 1.5f, 5.0f, &why) > 0.5f && why.shortTop,
+          "lamp above captured pillar reaches deck past its physical top");
+    why = {};
+    Check(Pass(b.g, 3.5f, 1.5f, 3.0f, 3.5f, 1.0f, 5.0f, &why) < 0.01f && !why.shortTop,
+          "the same pillar still blocks light through its solid side");
+    StoryWallCopy copy;
+    copy.segs.push_back(WallSeg{});
+    copy.segs[0].x0 = 3.0f, copy.segs[0].x1 = 4.0f;
+    copy.segs[0].z0 = copy.segs[0].z1 = 4.0f;
+    copy.segs[0].y0 = 0.0f, copy.segs[0].y1 = 3.0f;
+    b.g.xf = Identity();
+    FillWallPatches(b.g, copy);
+    Check(copy.lowered == 1 && copy.patches.size() == 1 && std::fabs(copy.patches[0].top0 - 1.864f) < 0.001f,
+          "ground and object shadow copy uses the captured pillar top");
+    Check(KeepWallTop(top, 3.0f, 3.0f, 3.0f) && !MeasuredShortTop(top), "full wall replaces a previously short measure");
+    e.topL = e.topM = e.topR = 3.0f, e.shortTop = false;
+    why = {};
+    Check(Pass(b.g, 3.5f, 2.372f, 3.0f, 3.5f, 1.5f, 5.0f, &why) < 0.01f && !why.shortTop,
+          "ordinary full wall still blocks the porch ray");
+    Check(KeepWallTop(top, 4.0f, 3.5f, 3.2f) && top.tall && !MeasuredShortTop(top), "tall gable protection remains active");
+    top = {};
+    KeepWallTop(top, 3.01f, 3.01f, 3.01f);
+    Check(KeepWallTop(top, 3.025f, 3.025f, 3.025f) && top.tall, "crossing the tall threshold always invalidates the grid");
+}
+
 int main() {
+    PillarLightChecks();
     RaisedWallSpanChecks();
     ArchConeChecks();
     FloorSillChecks();

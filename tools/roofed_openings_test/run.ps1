@@ -16,6 +16,7 @@ function Between([string]$from,[string]$to){
  return $source.Substring($s,$e-$s)
 }
 $parts=@(
+ (Between 'struct WallTopCell {' 'struct WallTopRec {'),
  (Between 'struct CutRec {' 'struct StoryCuts {'),
  (Between 'constexpr float kGridSoft = 0.04f;' 'struct GridTileRead {'),
  (Between 'uint32_t EdgeKey(int x0' '// At 0x00B0D860 (Add)'),

@@ -1336,15 +1336,15 @@ void FenceGridUpdate() {
 // between the two pieces' ends, between the gap's base - 1 m and its top). A gate's origin is its tile's centre, half a tile
 // off the fence's line (the log: both gates of a lot 0.50 m off it); at 0.35 m they were missed, and a gap was filled only
 // while some other object stood on its line, so the light came through again minutes later
-void NoteGate(float x, float y, float z) {
+bool NoteGate(float x, float y, float z) {
     FenceGridUpdate();
-    if (g_fenceGaps.empty()) return;
+    if (g_fenceGaps.empty()) return false;
     const auto it = g_gapCells.find(FenceCellKey(FenceCell(x), FenceCell(z)));
     // (closed gaps need no gate)
-    if (it == g_gapCells.end()) return;
+    if (it == g_gapCells.end()) return false;
+    bool closedMatch = false;
     for (uint32_t k : it->second) {
         const FenceGap& gp = g_fenceGaps[k];
-        if (gp.closed) continue;
         const float dx = gp.w.x1 - gp.w.x0, dz = gp.w.z1 - gp.w.z0, l = std::hypot(dx, dz);
         const float t = ((x - gp.w.x0) * dx + (z - gp.w.z0) * dz) / l, side = ApexMath::Fabs((x - gp.w.x0) * dz - (z - gp.w.z0) * dx) / l;
         if (t < -0.1f || t > l + 0.1f || side > kGateOff || y < gp.w.y0 - 1.0f || y > gp.w.y1) {
@@ -1356,6 +1356,10 @@ void NoteGate(float x, float y, float z) {
             }
             continue;
         }
+        if (gp.closed) {
+            closedMatch = true;
+            continue; // retain the scale without skipping another gap that still needs its gate noted
+        }
         const DWORD now = GetTickCount();
         const auto [g, fresh] = g_gates.try_emplace(gp.key, now);
         if (fresh) ApexUtil::CountOne(g_gatesFilled);
@@ -1365,8 +1369,9 @@ void NoteGate(float x, float y, float z) {
                                  gp.w.x0, gp.w.z0, gp.w.x1, gp.w.z1, gp.w.y0, gp.w.y1));
         }
         else if (now - g->second > 1000) g->second = now;
-        return;
+        return true;
     }
+    return closedMatch;
 }
 void FenceWallsIn(float x0, float z0, float x1, float z1, std::vector<GroundShadow::Wall>& out) {
     FenceGridUpdate();
@@ -5621,7 +5626,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
             // loose objects keep 0.2 m, so a wall 0.4 m behind an armchair still blocks the next room's lamp (F7 capture, 07/10)
             float at[3];
             const bool inWall = ObjectLampPoint(m, at);
-            if (!inWall) NoteGate(m[0][3], m[1][3], m[2][3]); // a gate fills its fence's gap in the lot shade (rig modes 1 and 2)
+            const bool gate = !inWall && NoteGate(m[0][3], m[1][3], m[2][3]);
             const float nearSkip = inWall ? kWindowWallSkip : 0.2f;
             nLamps = PickObjectLamps(at[0], at[1], at[2], lamps, groundShare, nearSkip, lamps + 1 + 2 * N, &lampTop, reach ? lamps + kLampRows : nullptr, true);
             originY = at[1];
@@ -5629,12 +5634,11 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
             // colour constants = 0; Phong's ambient term in COLOR0 stays)
             lamps[0][1] = TerrainLightingPolicy::SurfaceLampGain(g_night.load(std::memory_order_relaxed),
                               g_objPixelLampStrength.load(std::memory_order_relaxed));
-            // reach: the outdoor walls' scale, the slider a trim over its default. The walls' gain only for an object set in its
-            // wall (a window or door frame takes the light of the wall around it); a loose object outdoors takes the fences'
-            // scale (2.15.3, F7: a wooden gate in a fence line took 30% of the light the same garden post gave the fence beside it)
+            // Architectural objects share the walls' lamp scale. Only an object
+            // occupying a fence gap keeps the fence scale, preserving gate continuity.
             if (reach)
                 lamps[0][1] = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), night, g_wallEnabled.load(std::memory_order_relaxed),
-                                                                    inWall ? g_wallGain.load(std::memory_order_relaxed) : 1.0f,
+                                                                    gate ? 1.0f : g_wallGain.load(std::memory_order_relaxed),
                                                                     g_objPixelLampStrength.load(std::memory_order_relaxed) / kPixelLampTrimUnit);
             zeroRig = true;
             lamps[0][0] = 1.0f; // no directionless ground light on vertical faces
