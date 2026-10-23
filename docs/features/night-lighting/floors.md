@@ -58,6 +58,7 @@ Floors have no setting of their own. They depend on:
 | Ground brightness | `brilhoNoChao` | Scales the floor's lamp constant after the `max` (`GroundGain`, `1 + (gain - 1) x night`) |
 | Outdoor light between floors | `luzExternaEntreAndares` | Floors of other stories get the outdoor lamps |
 | Walls shade lamp light near the ground | `paredesSombreiamOChao` | The lot's ground lamp shade, on story-0 floors too (off: gate 0, the floor as before) |
+| Indoor light adds to the ground | `luzInternaSomaNoChao` | Story-0 floors add the indoor light their map's alpha holds after the max and the shade (*Indoor light on the ground* below) |
 
 These settings are documented on their own pages ([lot-light-pass.md](lot-light-pass.md),
 [world-atlas-and-smoothed-maps.md](world-atlas-and-smoothed-maps.md), [level-light-share.md](level-light-share.md)).
@@ -182,6 +183,27 @@ level_light_share masks for floor texels from story 1 up only (`MaskedFloorRoom0
   families as listed under Limitations; `FloorShadeRows` against `WorldTexel` on straight and rotated lots; native D3D9
   pixels of a synthetic floor shader equal `map x (1 + gate (M - 1))` within 2 LSB on both lots at seven heights, off and
   with the white mask; the captured copy `PS_2ADA0AF0` is found again as the 1044-byte table shader's patch.
+
+### Indoor light on the ground
+
+(2.15.3, *Indoor light adds to the ground*.) Story 0's floor map is room 0's, whose floor texels now keep in their alpha the
+luminance of the light lit rooms send through their openings ([level-light-share](level-light-share.md#indoor-light-on-the-ground)).
+The floor copies read that alpha as the atlas weight, so while the option is active the draws use separate copies
+(`exitLight` of `PatchBakedAtlasPs`, `PatchFloor`, `PatchSnowFloor`; `AppendExitGround`) that replace the atlas read, the
+max and the shade with, for the ground gate g of the shade:
+
+```
+tw = sat((a cH.y + cH.x) (1 + 254 g))       s = g sat(a / max(lum(map), 1/255))       ex = map s
+B  = max(B - ex, atlas tw) (1 + g (M - 1)) + ex
+```
+
+At g = 0 (the stories above, a draw with no lot) this is the weight and the shade of before. The shade's rows carry the
+gate also with *Walls shade lamp light near the ground* off (over the white mask). Two defs hold the luminance weights and
+254. Offline (`tools/floor_shade_check`): 261 of the 285 summer pairs (the 12 without room for the shade and 12 more
+without room for this keep the copy of before, byte for byte) and the 6 shaded winter floor shaders take it, within 181
+slots; the synthetic floor's pixels equal the formula within 1 LSB. Limitations: a story-0 floor whose shader has no room
+for it, or whose draw finds no lot, still weights the atlas by `1 - a` there (a small dimming where the atlas is brighter
+than the floor map next to a lit window); snow lying on floors has no world y, so none takes it.
 
 ### Engine facts
 

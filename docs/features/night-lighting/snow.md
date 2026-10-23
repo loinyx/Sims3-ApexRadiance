@@ -127,6 +127,12 @@ snow, and in snow the wet world terrain pass is left to the game.
     max_pp   r0.xyz, r0, r7
     ```
   - patched output identity: C61F8B55/1940.
+- (2.15.3) The patch lives in `ShaderPatches::PatchLotTerrainMax` (checked by `tools/floor_shade_check` over the precomp's
+  snowy, rug-cut and melting-snow shaders). With *Indoor light adds to the ground* the masked copy also takes the indoor
+  light in the lot map's alpha: right after the map's texld `s = sat(a c202.x / max(lum(map), 1/255))`, before the max
+  `ex = r0 s`, `r0 -= ex` and the terrain weighted by `sat((1 - a) 255)`, after the shade `r0 += ex`
+  ([lot-light-pass](lot-light-pass.md#indoor-light-on-the-ground)); c202.x is set per draw (0 while the option is
+  inactive: the pixels of the masked copy exactly), defs in c203 / c204.
 - `DrawLotSnow`: the terrain source is the world atlas when ready. The VS computes the UV as
   `(world.xz - c16.xz) * c15.xy + c15.zw`, so `c15` becomes `(a.x, a.y, a.z + c16.x a.x, a.w + c16.z a.y)` for the draw.
   Without the atlas: the home chunk map at key (`c16.x`, `c16.z`) (smoothed if ready), else `g_lotMissing++` and the game

@@ -69,6 +69,7 @@ kept, never the game's bytecode. The snowy and melting-snow lot passes are separ
 | Smooth ground light | `mapaDeLuzSuavizado` | bool | on | | Needed for the atlas; without it the pass uses the home chunk's game map |
 | Ground brightness | `brilhoNoChao` | float | 75% | 25 to 300% | Night-weighted scale of c3.x |
 | Lot lamp brightness | `forcaDasLampadasDoLote` | float | 80% | 25 to 300% | Night-weighted scale of the lot's own map (c31.x) |
+| Rooms at Night > Indoor light adds to the ground | `luzInternaSomaNoChao` | bool | on | | The lot map's indoor light added after the max and the shade (c34, *Indoor light on the ground* below) |
 | Developer: Soft lot edges (A/B) | `bordaSuaveLote` | bool | on | | Registered only in developer mode (always on otherwise); pushed every frame (`SetSoftLotEdges`) |
 | Individual options | `gramaDoLoteUsaLuzDoLote` | bool | on | | See *Game patches in Individual options* |
 | Individual options | `qualidadeAltaEmTodosOsLotes` | bool | off | | Experimental |
@@ -124,6 +125,7 @@ The full table is in the [Night Lighting overview](README.md#settings).
 | c28 | soft edges: `(dLx/du, dLx/dv, Lx0, W)`: lot-local x in metres = `dot(float3(terrainUv, 1), c28.xyz)`; W = lot width |
 | c29 | soft edges: `(dLz/du, dLz/dv, Lz0, D)`: lot-local z; D = lot depth |
 | c30 | soft edges: `(1 / band, bias, 0, 0)`: `(1/3, 0)` on, `(0, 1)` off (w = 1 everywhere) |
+| c34 | `(gate, 0, 0, 0)`: 1 while *Indoor light adds to the ground* is active, else 0 (2.15.3, below) |
 | c31 | `(lot map gain, daylight terrain term, lot uv scale, lot uv offset)`: x = `LotMapGain()` at full night, the lot map's night gain before it; y = 0 (since 2.12.3: before full night c3.x itself is set to ground gain x `LampDay(night)` for one draw, `TerrainLightingPolicy::LotPass`, so the terrain and the lot map follow the shared daytime curve; until 2.12.2 y = `(1 - night) x ground gain`, the full gain by day), z/w = `1/63` and `-c12.x x 16/63` for the recognised VS, else 0 |
 | s0 | sky cube (game) |
 | s1 | lot light map (game) |
@@ -143,7 +145,9 @@ terrain = tex2D(sTerrain, terrainUv.xy).rgb * (c3.x + c31.y)
 lp      = (dot(float3(terrainUv.xy, 1), c28.xyz), dot(float3(terrainUv.xy, 1), c29.xyz))   // lot-local metres
 e       = min(lp, (c28.w, c29.w) - lp);  w = smoothstep01(saturate(min(e.x, e.y) * c30.x + c30.y))
 lotUv   = lotUv * (1 + c31.z) + c31.w
-lamps   = lerp(terrain, max(tex2D(sLot, lotUv).rgb * c31.x * c3.x, terrain), w) * shade   // game: tex2D(sLot).rgb * c3.x
+lot     = tex2D(sLot, lotUv);  lm = lot.rgb * c31.x * c3.x                                // game: tex2D(sLot).rgb * c3.x
+a       = lot.a * c34.x;  ex = lm * sat(a / max(lum(lot.rgb), 1/255))                    // indoor light on the ground
+lamps   = lerp(terrain, max(lm - ex, terrain * sat((1 - a) 255)), w) * shade + ex * w
 col     = sun * c0.rgb + lamps
 col     = texCUBE(sSky, n).rgb * c4.x + col
 return float4(col * 0.5, 0)                                                          // modulate2x
@@ -152,6 +156,17 @@ return float4(col * 0.5, 0)                                                     
 At night c31.y = 0 and the result equals the earlier night shader. By day the terrain term gains
 `(1 - night) x ground gain`, matching the world terrain's daylight term ([world-atlas](world-atlas-and-smoothed-maps.md));
 the native lot/window map scale is unchanged. fxc check: `fxc /T ps_3_0 /E main` on the string's contents.
+
+### Indoor light on the ground
+
+(2.15.3, *Indoor light adds to the ground*, `luzInternaSomaNoChao`.) The lot map's alpha a holds the luminance of the light
+lit rooms send onto the texel through their openings ([level-light-share](level-light-share.md#indoor-light-on-the-ground)).
+Its share of the map, `ex = lm s`, `s = sat(a / max(lum(map), 1/255))`, leaves `max(lot, terrain)` and the walls' shade and is
+added after them, so a window's light adds to a street lamp's pool and stays whole behind a wall that shades the outdoor
+lamps. The terrain weight `sat((1 - a) 255)` is 0 only at a = 1 (a roofless room's own floor: the map alone); E is at
+most 254/255. `ex` follows the lamp scale c3.x (the daylight curve) and the soft edge w. With c34.x = 0 every term is the
+pass of before (0 LSB against the previous shader over the terrain lighting check's 60 scenarios); with c34.x = 1 the
+pixels match the CPU formula within 2 LSB. The snowy passes take the same terms ([snow](snow.md)).
 
 ### Terrain source
 

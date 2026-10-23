@@ -235,8 +235,12 @@ type 5 (vtable `0x00FF4350`): a1 +0x1A0, o1 +0x174, a2 +0x190, o2 +0x170, S +0x1
 | Interior objects in room mode | Lot LightMap + LightBasisMap0..3 via `WorldToLotTransform` (LightMapXform) | | notebook "Counters/Phong"; `fn_006a7700.c` |
 | Doors/thresholds (Counter-like pieces) | Own 32×32 A8R8G8B8 map | | notebook "Porta" (m52) |
 
-Room-0 texels always have alpha 0 (PASSO3 critique F2: an atlas alpha > 0 comes from indoor texels); Apex's planned
-per-pixel wall lamps used "alpha < 1/255" as the outdoor guard.
+Room-0 texels always have alpha 0 in the game (PASSO3 critique F2: an atlas alpha > 0 comes from indoor texels); Apex's
+planned per-pixel wall lamps used "alpha < 1/255" as the outdoor guard. With Night Lighting, outdoor floor texels carry
+Apex's values through the floor mask's site 0x006A333B: on stories 1 and up the share of room 0's lamp light that walls
+block, 1 on a roofless room's own floor, and (2.15.3, *Indoor light adds to the ground*) on story 0's room 0 the luminance
+of the indoor light through openings, at most 254/255
+([level-light-share.md](../features/night-lighting/level-light-share.md#indoor-light-on-the-ground)).
 
 **Lot map vs world terrain map**: lot surfaces bind "LightMap" (per room, CPU solve, occluded by walls, lamps × k2 or
 × 3.333 for street lamps on the ground); world terrain binds "terrainLightMap" (per 256 m chunk, GPU stamp, no occlusion,
