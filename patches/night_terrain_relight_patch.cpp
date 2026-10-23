@@ -235,7 +235,7 @@ float g_groundBrightness = 0.75f;
 float g_roadBrightness = 1.0f;  // x the ground brightness
 float g_streetLampGain = 0.8f;  // street lamps on the ground (terrain bake)
 float g_lotLampGain = 0.8f;     // lot lamps on the ground (terrain bake + the lot's own light map)
-float g_moonlight = 0.095f;     // the moon's light at night
+float g_moonlight = 0.0f;     // the moon's light at night
 bool g_edgePad = true;          // pad the room light maps' edges (RoomMapPadding): no dark side on things along walls
 bool g_lotTintOwn = false;      // lot lamps have their own colour
 float g_lotLampTint = 1.0f;     // their colour (0 = pink, 1 = warm white)
@@ -2194,7 +2194,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             "How strongly street lamps light the ground (1 = the default; the ground light is rebuilt when it changes).");
         RegisterFloatSetting(&g_lotLampGain, "forcaDasLampadasDoLote", SettingWidget::Slider, 0.8f, 0.25f, 3.0f,
             "How strongly outdoor lot lamps light the ground (1 = the default; the ground light is rebuilt when it changes).");
-        RegisterFloatSetting(&g_moonlight, "luar", SettingWidget::Slider, 0.095f, 0.0f, 2.0f,
+        RegisterFloatSetting(&g_moonlight, "luar", SettingWidget::Slider, 0.0f, 0.0f, 2.0f,
             "How strong the moonlight is at night (1 = the game; 0 = no moonlight, only lamps and the sky's glow).");
         RegisterBoolSetting(&g_edgePad, "bordasDosMapasDeLuz", true,
             "Stairs, curtains and furniture indoors get smooth light from the game's room light maps: no dark side along outer walls, no steps between neighbouring objects.");
@@ -2766,7 +2766,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_roadBrightness = 1.0f;
         g_streetLampGain = 0.8f;
         g_lotLampGain = 0.8f;
-        g_moonlight = 0.095f;
+        g_moonlight = 0.0f;
         g_objLamps = true;
         g_objStrength = 0.75f;
         g_objAll = true;
