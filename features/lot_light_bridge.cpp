@@ -7858,12 +7858,18 @@ template <typename DrawFn> D3D9Hooks::HookAction DrawCostSampled(IDirect3DDevice
     if ((++g_drawCostTick & 15) != 0) return OnDrawTracked(dev, draw);
     g_claimSourceMask = 0;
     g_drawCostDriver = 0;
-    g_drawCostTimed = true;
+    struct TimedScope {
+        TimedScope() { g_drawCostTimed = true; }
+        ~TimedScope() { g_drawCostTimed = false; } // (also when a fix throws: the hook's catch makes the draw)
+    };
     LARGE_INTEGER t0, t1;
-    QueryPerformanceCounter(&t0);
-    const D3D9Hooks::HookAction r = OnDrawTracked(dev, draw);
-    QueryPerformanceCounter(&t1);
-    g_drawCostTimed = false;
+    D3D9Hooks::HookAction r;
+    {
+        const TimedScope timed;
+        QueryPerformanceCounter(&t0);
+        r = OnDrawTracked(dev, draw);
+        QueryPerformanceCounter(&t1);
+    }
     const uint32_t m = g_claimSourceMask;
     DrawCostRow& row = g_drawCost[!m ? kClaimSourceCount + 1 : (m & (m - 1)) ? kClaimSourceCount : static_cast<size_t>(std::countr_zero(m))];
     row.ticks += t1.QuadPart - t0.QuadPart;
