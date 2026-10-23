@@ -208,8 +208,9 @@ float4 main(PSIn i) : COLOR0 {
     float w = saturate(min(e.x, e.y) * cEdge.x + cEdge.y);
     w = w * w * (3 - 2 * w);
     // The studied VS maps local xz as (xz * 63/64 + 1/4) * VS c12.
-    // Undo that contraction for the CPU floor map; zero z/w retains unsupported VS mapping.
-    float2 lotUv = i.lotUv * (1 + cLotGain.z) + cLotGain.w;
+    // Undo that contraction for the CPU floor map, per axis (cEdge.zw: a lot map need not be square); zero z/w retains
+    // unsupported VS mapping.
+    float2 lotUv = i.lotUv * (1 + cLotGain.z) + cEdge.zw;
     float3 lamps = lerp(terrain, max(tex2D(sLot, lotUv).rgb * cLotGain.x * c3.x, terrain), w) * maskTex.a;
     float3 col = sun * c0.rgb + lamps;
     col = texCUBE(sSky, i.normal).rgb * c4.x + col;
@@ -7327,11 +7328,15 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
         g_night.load(std::memory_order_relaxed), g_groundGain.load(std::memory_order_relaxed), g_lotMapGain.load(std::memory_order_relaxed));
     float lotGain[4] = {dayPass.day ? dayPass.lotGain : LotMapGain(), 0, 0, 0};
     float lotUvScale[4]{};
+    // (2.15.3) each axis on its own (PS c30.zw): a 50 x 50 m lot's map was 512 x 256 (VS c12 = 1/128, 1/64), the two
+    // scales differed and the contraction stayed, so its lot map's light lay up to 0.25-0.5 m off (F7: a ground lamp's pool
+    // 0.25 m off along x, egg-shaped where it took the max with the centred atlas stamp)
     if (g_curVsInfo && g_curVsInfo->contractedLotUv && SUCCEEDED(dev->GetVertexShaderConstantF(12, lotUvScale, 1))
         && ApexMath::IsFinite(lotUvScale[0]) && lotUvScale[0] > 0 && lotUvScale[0] <= 1
-        && lotUvScale[0] == lotUvScale[1]) {
+        && ApexMath::IsFinite(lotUvScale[1]) && lotUvScale[1] > 0 && lotUvScale[1] <= 1) {
         lotGain[2] = 1.0f / 63.0f;
-        lotGain[3] = -lotUvScale[0] * (16.0f / 63.0f);
+        edge[10] = -lotUvScale[0] * (16.0f / 63.0f);
+        edge[11] = -lotUvScale[1] * (16.0f / 63.0f);
     }
 
     IDirect3DPixelShader9* original = g_curPs;
