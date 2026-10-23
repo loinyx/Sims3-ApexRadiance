@@ -2229,6 +2229,8 @@ const I18n::Pair kPairs[] = {
     {"Texture reads answered without asking the device", "無需詢問裝置即可回答紋理讀取"},
     {"Window light channel memo", "窗戶燈光通道記憶"},
     {"Asked once per sample batch", "每批取樣只詢問一次"},
+    {"Paced relight at rest", "靜止時按節奏重新照明"},
+    {"With the camera still, room lighting gives way when frames run long", "相機靜止時，幀耗時過長時房間照明會讓步"},
     {"Paced relight while moving", "移動時按節奏重新照明"},
     {"After a load or a lamp switch, at the pace the frame rate allows", "載入或開關燈之後，按幀率允許的節奏進行"},
     {"Kept while no room record changed", "在房間記錄未變更時保留"},

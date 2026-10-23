@@ -2229,6 +2229,8 @@ const I18n::Pair kPairs[] = {
     {"Texture reads answered without asking the device", "Texturläsningar besvaras utan att fråga enheten"},
     {"Window light channel memo", "Memo för fönsterljusens kanal"},
     {"Asked once per sample batch", "Frågas en gång per provomgång"},
+    {"Paced relight at rest", "Doserad ny belysning i vila"},
+    {"With the camera still, room lighting gives way when frames run long", "Med stillastående kamera viker rumsbelysningen när bildrutor drar ut"},
     {"Paced relight while moving", "Doserad ny belysning under rörelse"},
     {"After a load or a lamp switch, at the pace the frame rate allows", "Efter en inläsning eller ett lampbyte, i den takt bildfrekvensen tillåter"},
     {"Kept while no room record changed", "Behålls så länge ingen rumspost ändras"},

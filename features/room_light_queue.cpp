@@ -462,7 +462,8 @@ void Drain(BYTE* tree, BYTE* before) {
         const float budget = LotLightingMotion::DrainBudget(LotLightingMotion::SampleCameraMoving() ? 1.0f
                              : AtriumHold::EditHolding() && !LevelLightShare::LampDragging() ? 16.0f
                              : lampEdit ? (g_refining ? 4.0f : LevelLightShare::LampDragging() ? 6.0f : 12.0f)
-                                        : LevelLightShare::SettlingAfterLoad() ? 4.0f + ((DevSwitches::RoomDrainBudget() ? 6.0f : 12.0f) - 4.0f) * LotLightingMotion::SettleScale() : 4.0f);
+                                        : LevelLightShare::SettlingAfterLoad() ? 4.0f + ((DevSwitches::RoomDrainBudget() ? 6.0f : 12.0f) - 4.0f) * LotLightingMotion::SettleScale()
+                                                                               : LotLightingMotion::SteadyDrainMs(4.0f)); // (2.15.3) the steady pacing: 1 to 4 ms
         // room_drain_budget (numbered development builds): the stopwatch is only checked between game steps, and one step
         // can take several milliseconds, so "elapsed < 0.8 budget" still started steps that ran 15-21 ms frames. A step is
         // started only when the running average of a step's cost still fits. Each room's light is still the game's own

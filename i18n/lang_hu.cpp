@@ -2229,6 +2229,8 @@ const I18n::Pair kPairs[] = {
     {"Texture reads answered without asking the device", "Textúra-lekérdezések az eszköz megkérdezése nélkül"},
     {"Window light channel memo", "Ablakfények csatornájának memója"},
     {"Asked once per sample batch", "Mintakötegenként egyszer lekérdezve"},
+    {"Paced relight at rest", "Adagolt újravilágítás nyugalomban"},
+    {"With the camera still, room lighting gives way when frames run long", "Álló kameránál a szobák világítása enged, ha a képkockák elhúzódnak"},
     {"Paced relight while moving", "Adagolt újravilágítás mozgás közben"},
     {"After a load or a lamp switch, at the pace the frame rate allows", "Betöltés vagy lámpakapcsolás után olyan ütemben, amit a képkockasebesség enged"},
     {"Kept while no room record changed", "Megmarad, amíg egyik szobarekord sem változik"},

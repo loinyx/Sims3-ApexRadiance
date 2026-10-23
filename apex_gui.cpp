@@ -1705,6 +1705,7 @@ void DevTesterTab() {
         TesterSwitch("Indoor object sampler scan", "Only declared samplers are checked", PerfToggles::IndoorSamplerScan, Effect::None);
         TesterSwitch("Room record lookup cache", "Kept while no room record changed", PerfToggles::SolveInfoCache, Effect::None);
         TesterSwitch("Window light channel memo", "Asked once per sample batch", PerfToggles::WindowChannelMemo, Effect::None);
+        TesterSwitch("Paced relight at rest", "With the camera still, room lighting gives way when frames run long", PerfToggles::SteadyRoomPacing, Effect::None);
         TesterSwitch("Paced relight while moving", "After a load or a lamp switch, at the pace the frame rate allows", PerfToggles::MotionPacedRaise, Effect::None);
     });
 }

@@ -2229,6 +2229,8 @@ const I18n::Pair kPairs[] = {
     {"Texture reads answered without asking the device", "Odczyty tekstur obsłużone bez pytania urządzenia"},
     {"Window light channel memo", "Pamięć kanału świateł okien"},
     {"Asked once per sample batch", "Sprawdzane raz na partię próbek"},
+    {"Paced relight at rest", "Dawkowane ponowne oświetlenie w spoczynku"},
+    {"With the camera still, room lighting gives way when frames run long", "Przy nieruchomej kamerze oświetlenie pokoi ustępuje, gdy klatki się przeciągają"},
     {"Paced relight while moving", "Dawkowane ponowne oświetlenie w ruchu"},
     {"After a load or a lamp switch, at the pace the frame rate allows", "Po wczytaniu lub przełączeniu lampy, w tempie, na jakie pozwala liczba klatek"},
     {"Kept while no room record changed", "Zachowana, dopóki żaden rekord pokoju się nie zmieni"},

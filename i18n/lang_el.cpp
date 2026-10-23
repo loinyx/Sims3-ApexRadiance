@@ -2229,6 +2229,8 @@ const I18n::Pair kPairs[] = {
     {"Texture reads answered without asking the device", "Οι αναγνώσεις υφών απαντώνται χωρίς ερώτηση στη συσκευή"},
     {"Window light channel memo", "Μνήμη καναλιού φώτων παραθύρων"},
     {"Asked once per sample batch", "Ερωτάται μία φορά ανά δέσμη δειγμάτων"},
+    {"Paced relight at rest", "Σταδιακός επαναφωτισμός σε ηρεμία"},
+    {"With the camera still, room lighting gives way when frames run long", "Με ακίνητη κάμερα, ο φωτισμός των δωματίων υποχωρεί όταν τα καρέ αργούν"},
     {"Paced relight while moving", "Σταδιακός επαναφωτισμός σε κίνηση"},
     {"After a load or a lamp switch, at the pace the frame rate allows", "Μετά από φόρτωση ή αλλαγή λάμπας, με τον ρυθμό που επιτρέπει ο ρυθμός καρέ"},
     {"Kept while no room record changed", "Διατηρείται όσο δεν αλλάζει καμία εγγραφή δωματίου"},

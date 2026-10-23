@@ -45,6 +45,10 @@ float DrainBudget(float wanted); // the drain's budget this frame (render thread
 // (2.15.1) 0..1: how much of the settle window's raised solving budgets the frame time leaves (1 without the Present sampler)
 float SettleScale();
 float BaselineFrameMs(); // the frame time outside the settle window (ms; 0 = not measured yet)
+// (2.15.3) The steady pacing (camera still, PerfToggles::SteadyRoomPacing): 0..1, how much of the game's room solving budget
+// the frame time leaves (1 when the frames hold, or without the Present sampler); and the drain budget it gives from `wanted`
+float SteadyScale();
+float SteadyDrainMs(float wanted);
 void NoteDrainSpent(float ms);   // what the drain spent this frame (render thread)
 
 std::string StatusText();

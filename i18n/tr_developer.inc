@@ -317,6 +317,8 @@ const I18n::Entry kDevBuildExtra[] = {
 {"Texture reads answered without asking the device", "Leituras de textura respondidas sem consultar o dispositivo", "Lecturas de textura respondidas sin consultar el dispositivo", "Lectures de texture servies sans interroger le périphérique"},
 {"Window light channel memo", "Memória do canal das luzes de janela", "Memoria del canal de las luces de ventana", "Mémo du canal des lumières de fenêtre"},
 {"Asked once per sample batch", "Consultado uma vez por lote de amostras", "Se consulta una vez por lote de muestras", "Demandé une fois par lot d’échantillons"},
+{"Paced relight at rest", "Reiluminação dosada parado", "Reiluminación dosificada en reposo", "Rééclairage dosé à l’arrêt"},
+{"With the camera still, room lighting gives way when frames run long", "Com a câmera parada, a iluminação dos cômodos cede quando os quadros demoram", "Con la cámara quieta, la iluminación de las habitaciones cede cuando los fotogramas tardan", "Caméra immobile, l’éclairage des pièces cède quand les images tardent"},
 {"Paced relight while moving", "Reiluminação dosada ao mover", "Reiluminación dosificada al moverse", "Rééclairage dosé en mouvement"},
 {"After a load or a lamp switch, at the pace the frame rate allows", "Após um carregamento ou uma lâmpada ligada ou desligada, no ritmo que a taxa de quadros permite", "Tras una carga o al encender o apagar una lámpara, al ritmo que permite la tasa de fotogramas", "Après un chargement ou une lampe allumée ou éteinte, au rythme que permet la fréquence d’images"},
 {"Soft light", "Luz suave", "Luz suave", "Lumière douce"},

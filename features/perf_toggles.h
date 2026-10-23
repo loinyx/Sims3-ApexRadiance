@@ -36,4 +36,8 @@ inline std::atomic<bool> WindowChannelMemo{true};
 // the frame time, as the settle budget with the camera still (lot_lighting_motion.cpp); off = the game's full budget while
 // moving, as before. Only how fast those rooms relight while panning changes, not their light
 inline std::atomic<bool> MotionPacedRaise{true};
+// (2.15.3) Lot lighting with the camera still: the game's room solving budget (and Faster room lighting's drain) dosed by
+// the frame time when frames run long (lot_lighting_motion.cpp SteadyPace); lamp edits, the settle window after a load and
+// a lamp switch keep their own budgets. Off: the game's budget every frame, as before. Only how soon rooms finish changes
+inline std::atomic<bool> SteadyRoomPacing{true};
 } // namespace PerfToggles

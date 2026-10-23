@@ -2229,6 +2229,8 @@ const I18n::Pair kPairs[] = {
     {"Texture reads answered without asking the device", "ตอบการอ่านเท็กซ์เจอร์โดยไม่ต้องถามอุปกรณ์"},
     {"Window light channel memo", "บันทึกช่องของแสงหน้าต่าง"},
     {"Asked once per sample batch", "ถามครั้งเดียวต่อชุดตัวอย่าง"},
+    {"Paced relight at rest", "ปรับแสงใหม่แบบค่อยเป็นค่อยไปขณะหยุดนิ่ง"},
+    {"With the camera still, room lighting gives way when frames run long", "เมื่อกล้องหยุดนิ่ง การจัดแสงห้องจะหลีกทางเมื่อเฟรมใช้เวลานาน"},
     {"Paced relight while moving", "ปรับแสงใหม่แบบค่อยเป็นค่อยไประหว่างเคลื่อนที่"},
     {"After a load or a lamp switch, at the pace the frame rate allows", "หลังโหลดหรือเปิดปิดโคมไฟ ตามจังหวะที่อัตราเฟรมรองรับ"},
     {"Kept while no room record changed", "เก็บไว้ตราบที่ไม่มีระเบียนห้องเปลี่ยน"},
