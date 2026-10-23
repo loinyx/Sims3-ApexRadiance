@@ -1,0 +1,161 @@
+{
+  "id": "repro-mode-switches",
+  "description": "World mode switches as a scenario for Faster Memory Handling: three rounds of Build, Buy, Create a Sim and Edit Town, each entered and left again. The profile runs in the background for 12 minutes; each switch is a harness step, so its own cost is listed per mode in the harness table and the rest is play. A/B metric: the mode rows of the harness table (iterations over 300 ms, freezes), frame time p99.",
+  "save": "ApexTest-Town",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.FastMemory": {
+          "enabled": false
+        }
+      },
+      "fail": [
+        "\\[FastMemory\\] On:"
+      ]
+    },
+    "on": {
+      "toml": {
+        "patches.FastMemory": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[FastMemory\\] On:"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "profile",
+      "minutes": 12
+    },
+    {
+      "do": "wait",
+      "minutes": 1.5
+    },
+    {
+      "do": "mode",
+      "mode": "build",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "live",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "buy",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "live",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "cas",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "live",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "edittown",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "live",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "build",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "live",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "buy",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "live",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "cas",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "live",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "edittown",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "live",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "build",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "live",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "buy",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "live",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "cas",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "live",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "edittown",
+      "seconds": 10
+    },
+    {
+      "do": "mode",
+      "mode": "live",
+      "seconds": 10
+    }
+  ]
+}

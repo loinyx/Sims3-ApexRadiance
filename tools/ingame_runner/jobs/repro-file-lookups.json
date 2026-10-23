@@ -1,0 +1,51 @@
+{
+  "id": "repro-file-lookups",
+  "description": "Faster Game File Lookups under lot streaming: the camera jumps across the town to 10 far lots, 8 s still at each (about 75 jumps in 10 minutes), and 2 Sims per lot change outfit. Every jump loads lots, objects and textures. A/B metric: frames over 50 ms per minute, slow frames led by the services stage (ResourceSystem, World).",
+  "save": "ApexTest-Town",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.ResourceLookupCache": {
+          "enabled": false
+        }
+      },
+      "fail": [
+        "\\[ResourceCache\\] On:"
+      ]
+    },
+    "on": {
+      "toml": {
+        "patches.ResourceLookupCache": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[ResourceCache\\] On:"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_jumps",
+      "order": "far",
+      "lots": 10,
+      "dwellS": 8,
+      "outfits": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 15,
+      "measure": true,
+      "until": {
+        "jumps": 75
+      }
+    },
+    {
+      "do": "stop_repros"
+    }
+  ]
+}
