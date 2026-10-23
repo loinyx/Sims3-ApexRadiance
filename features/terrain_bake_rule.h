@@ -21,7 +21,8 @@ inline float AreaGroundShare(float axisY) {
     const float s = 0.5f + 0.5f * axisY;
     return s > 0.0f ? (s < 1.0f ? s : 1.0f) : 0.0f; // (a NaN axis gives 0)
 }
-constexpr int kAreaAxisYOffset = 0x184; // +0x180 is the third axis (x, y, z)
+constexpr int kAreaAxisOffset = 0x180;                    // the third axis (x, y, z)
+constexpr int kAreaAxisYOffset = kAreaAxisOffset + 4;
 
 // (2.15.1) Low lamps. A lamp lying on the lawn (its light 5 cm over the grass, F8 capture) lit a tree above it and left
 // the lawn dark: the stamp's law (2 w cos / d^2) and the room law fall with the angle of incidence, and from 5 cm the lawn 2 m

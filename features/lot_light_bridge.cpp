@@ -2403,6 +2403,21 @@ bool ReadLamp(uintptr_t L, float out[8], LampCone& cone) { // POD only (SEH)
             for (int i = 0; i < 3; i++) c.c1[i] = c.c2[i] = -sc * a[i];
             c.c1[3] = c.c2[3] = -sc * o;
             c.spill = 0.0f;
+        } else if (TerrainBakeRule::AreaType(type)) {
+            // (2.15.3) A rectangle or disc area light lights only the side its third axis points away from. The game's law
+            // (0x006BFBA0 / 0x006BFDC0 -> 0x006BFAF0) is E0 x sat(dir.z) x min(k2 range intensity / (k1 d^2), cap), with dir
+            // the direction from the point to the nearest point of the area in the light's axes and no N.L: the same falloff
+            // as a lamp's, weighed by that side. Its cone is that half space with no spill (dir.z = l.axis with the area's
+            // centre for its nearest point). Before, these lights lit all round: a lot's white area light (range 100, at
+            // ground height) lit a whole tree crown at full strength. Roofs and water take their rows without cones, as for
+            // spots.
+            const float* a = reinterpret_cast<const float*>(L + TerrainBakeRule::kAreaAxisOffset);
+            const float len = ApexMath::Sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+            if (len > 1e-3f) {
+                for (int i = 0; i < 3; i++) c.c1[i] = c.c2[i] = a[i] / len;
+                c.c1[3] = c.c2[3] = 0.0f;
+                c.spill = 0.0f;
+            }
         }
         bool finite = ApexMath::IsFinite(c.spill);
         for (int i = 0; i < 4; i++) finite = finite && ApexMath::IsFinite(c.c1[i]) && ApexMath::IsFinite(c.c2[i]);
@@ -8258,6 +8273,10 @@ void OnWorldChanged() {
     g_lotMasks.clear();
     g_groupCentres.clear();
     g_centreBusy.clear();
+    // (2.15.3) the foliage meshes' boxes (keyed by vertex buffer address: a buffer of the new world made at an old one's
+    // address took that mesh's box and instance count) and the instances' picks of the old world's lamps
+    g_foliageMeshes.clear();
+    g_foliageInstances.clear();
 }
 
 void SetSoftLotEdges(bool on) { g_softEdges = on; }
