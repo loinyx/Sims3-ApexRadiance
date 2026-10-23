@@ -172,8 +172,8 @@ patch.
   the story above's lamps shining out (not its roofless rooms, not further stories). The lot ground and the story-0 outdoor
   floors carry these lamps in story 0's room-0 map. With *Indoor light adds to the ground* the lot ground and snowy lots
   add that light after the ground lamp shade; the story-0 outdoor floors still take it in `max(map, atlas)` times the
-  shade (next to an outdoor lamp the shade hides, the light from a window is dimmed as much) and, next to a lit window,
-  weight the atlas by `1 - E` (a slight dimming; unverified in game). Outdoor draws of room 0's maps take the draws' daytime factor (3% by day) for these lamps too. A lamp added to a
+  shade (next to an outdoor lamp the shade hides, the light from a window is dimmed as much) ; the texels under a story-0 floor tile keep alpha 0, so
+  patios and paths keep the look of before. Outdoor draws of room 0's maps take the draws' daytime factor (3% by day) for these lamps too. A lamp added to a
   room's list counts in the game's normalisation of that room (its strongest lamp), as the other borrowed lamps do; a room
   lit only by borrowed lamps gets no boost. The objects outside take such a lamp only below its story's floor where the
   slab copy is known (*Buildings block lamp light on trees and objects*). Cost not measured in game: each lit texel of room 0 within a
@@ -830,7 +830,7 @@ outdoor lamps' wall shade): a window's light on the grass under it was lost in t
 darkened by M.
 
 - **Solve** (`SolveGroundTexel`): each floor texel of that room in the budgeted solve's floor pass (`room+0xEC == 3`,
-  `FUN_006a3c90` on `+0x180`) keeps in its alpha (0 for room 0 in the game, written through the floor mask's site
+  `FUN_006a3c90` on `+0x180`) outside a floor tile keeps in its alpha (0 for room 0 in the game, written through the floor mask's site
   0x006A333B) `E = min(Lum3(exit), 254/255)`, the light of the lamps taken through openings (`innerLamp`). The game's
   running sum is noted before each light (`LightEvalHook`, as the outdoor delta does) and an exit lamp's part is what the
   sum gained by the next light or the end, so the drop under the room's live threshold, the soft cut's fade and the 3D

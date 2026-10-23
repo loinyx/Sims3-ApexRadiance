@@ -43,6 +43,6 @@ the game's precomp; the table generators above are not maintained in the reposit
 
 ## Open checks
 
-- 2.15.3: a porch deck on a foundation beside a pillar at night, *Indoor light adds to the ground* on. **Expected:** no square steps of light and no dark square beside the pillar; a story-0 floor beside a lit window only slightly dimmer than before.
+- 2.15.3: a porch deck on a foundation beside a pillar at night, *Indoor light adds to the ground* on. **Expected:** no square steps of light and no dark square beside the pillar; a patio or path beside a lit window as bright as in 2.15.2.
 - Ground brightness on floors (the `scaleConst` gain) has no recorded in-game check.
 - ps_2_0 ExteriorFloors coverage (235 variants).

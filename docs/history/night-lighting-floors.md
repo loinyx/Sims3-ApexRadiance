@@ -52,5 +52,5 @@ floor draw cannot tell story 0's floor map from a higher story's. Above story 0 
 outside them): the deck passed the ground gate, read that 1 as indoor light and dropped the atlas texel by texel.
 
 **Outcome:** the floors keep the plain patch (`kFloorIndoorLight` off, `40f351e`); the lot pass and the snowy lot passes,
-which draw story 0 only, still add the indoor light. A story-0 floor next to a lit window still weights the atlas by
-`1 - E` (unverified in game).
+which draw story 0 only, still add the indoor light. A review fix then keeps alpha 0 under every story-0 floor
+tile, so the floors' `1 - alpha` atlas weight no longer takes the garden lamps' light off patios and paths.

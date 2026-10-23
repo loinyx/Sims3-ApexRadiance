@@ -103,7 +103,8 @@ The full table is in the [Night Lighting overview](README.md#settings).
   multiplies the whole lamp term, which is exact only where that term follows the stamp's weights; the lot map's own
   light near a wall takes the same factor.
 - A gap in a fence line is closed only between two fence pieces in line 0.4 to 2.5 m apart, by an outdoor object drawn
-  in it; any outdoor object standing there (a plant, a sign) closes it too, and an open gate shades as a closed one.
+  in it, and gates are seen only while the per-pixel object lamps draw (*Lamps light objects* and *Doors and windows
+  stay lit*); any outdoor object standing there (a plant, a sign) closes it too, and an open gate shades as a closed one.
   Narrower gaps are always closed. Unverified in game.
 - The winter lot pass with VS 436BB272 (m58, "prefeitura") is not handled ([snow.md](snow.md)).
 - The snowy lot pass has no soft edge.

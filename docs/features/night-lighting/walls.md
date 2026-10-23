@@ -124,7 +124,8 @@ LightProbe captures `andar2-b` (m44), `andar1-b` (m45), `passo3-parede` (m59) an
   outdoor wall drawn 5 cm to 3.2 m below its light base has its sample columns moved down to the cell's drawn foot after
   alignment and stretching (`DropLowFootWall`), and the cell is recut against that foot (`WallUvHook`), so each vertex
   reads the row lit at its own height; the gable's eave cell, whose tip dips under its foot, is recut like its
-  neighbours. A cell seen low for the first time sends its room to be solved again (`NoteWallCell`); a column of a cell
+  neighbours. That relaxed recut applies only to walls drawn below their light base; other cells are recut only when
+  one height is over 0.2 m and none is under it. A cell seen low for the first time sends its room to be solved again (`NoteWallCell`); a column of a cell
   not drawn yet keeps the base. The light probe finds a wall's pixels down to its lowest lit row.
 
 ### Wall gain
