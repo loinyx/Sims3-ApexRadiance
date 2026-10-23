@@ -4191,7 +4191,21 @@ struct FencePickMemo {
 FencePickMemo g_fencePick[256];
 uint32_t g_fencePickHits = 0, g_fencePickMisses = 0, g_fencePickChecks = 0;
 bool g_fencePickOff = false;
+int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share);
+// (development builds) the draw cost log's timed draws (DrawCostSampled): the fence picks' own time, and the arch rows' below
+bool g_drawCostTimed = false; // the current draw is timed: UpdateHooks' draw calls add their driver time
+int64_t g_fencePickTicks = 0;
+uint32_t g_fencePickCalls = 0;
 int PickFenceLamps(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share) {
+    if (kPublicBuild || !g_drawCostTimed) return PickFenceLampsMemo(g, reachLaw, lamps, lampTop, share);
+    LARGE_INTEGER a, b;
+    QueryPerformanceCounter(&a);
+    const int used = PickFenceLampsMemo(g, reachLaw, lamps, lampTop, share);
+    QueryPerformanceCounter(&b);
+    g_fencePickTicks += b.QuadPart - a.QuadPart, g_fencePickCalls++;
+    return used;
+}
+int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share) {
     if (!DevSwitches::LampVisibilityMemo() || g_fencePickOff || LevelLightShare::VisibilityDiagArmed() || LightProbe::Capturing())
         return PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share);
     FencePickMemo& e = g_fencePick[(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g)) * 2654435761u ^ g.read * 0x85EBCA77u) >> 24];
@@ -5617,7 +5631,6 @@ bool RoomMapConsts(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& p, 
 constexpr UINT kArchRows = 2 * ShaderPatches::kArchCells;
 std::atomic<long> g_archCopyDraws{0}, g_archPlainDraws{0};
 // (development builds) the draw cost log's timed draws (DrawCostSampled): their arch rows' own time
-bool g_drawCostTimed = false; // the current draw is timed: UpdateHooks' draw calls add their driver time
 int64_t g_archRowsTicks = 0;
 uint32_t g_archRowsCalls = 0;
 int ArchRowsForImpl(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& room, const float band[4], uintptr_t basisTex, float* rows);
@@ -7991,10 +8004,13 @@ void LogDrawCost() {
                                 static_cast<double>(r.ticks - r.driver) * msPerTick * 1000.0 / r.draws, ms);
     }
     for (DrawCostRow& r : g_drawCost) r = DrawCostRow{};
-    const std::string arch = g_archRowsCalls ? std::format(" | of it the floors' arch rows: {:.0f} a frame, {:.2f} us each", g_archRowsCalls * scale,
-                                                           static_cast<double>(g_archRowsTicks) * msPerTick * 1000.0 / g_archRowsCalls)
-                                             : std::string();
-    g_archRowsTicks = 0, g_archRowsCalls = 0;
+    std::string arch = g_archRowsCalls ? std::format(" | of it the floors' arch rows: {:.0f} a frame, {:.2f} us each", g_archRowsCalls * scale,
+                                                     static_cast<double>(g_archRowsTicks) * msPerTick * 1000.0 / g_archRowsCalls)
+                                       : std::string();
+    if (g_fencePickCalls)
+        arch += std::format(" | of it the fence lamp picks: {:.0f} a frame, {:.2f} us each", g_fencePickCalls * scale,
+                            static_cast<double>(g_fencePickTicks) * msPerTick * 1000.0 / g_fencePickCalls);
+    g_archRowsTicks = 0, g_archRowsCalls = 0, g_fencePickTicks = 0, g_fencePickCalls = 0;
     LOG_INFO(std::format("[LotLightBridge] Draw cost by fix over {} frames (1 draw in 16 timed, the fixes' own time): {:.3f} ms a frame in all, {:.3f} ms a frame "
                          "in the driver for the game draws the fixes made; {}{}",
                          frames, own, driver, text, arch));
