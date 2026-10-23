@@ -751,6 +751,17 @@ void GroundGateChecks() {
           "ground objects and columns on a foundation retain their pool strength");
     Check(std::fabs(GroundShadow::GroundPoolHeightGate(lotGround + 1.125f, lotGround) - 0.5f) < 1e-5f,
           "ground pool fades continuously at the existing ground-height boundary");
+    const float capturedGround = 16.7266541f, capturedRun = 22.7266846f;
+    const float upperPool = GroundShadow::GroundPoolHeightGate(capturedRun, capturedGround);
+    Check(upperPool == 0.0f && GroundShadow::StructureLampGain(upperPool, 0.30f) == 0.30f,
+          "captured upper instanced trim matches the adjacent object's lamp gain without a ground pool");
+    for (float y : {capturedGround, capturedGround + 0.75f, capturedGround + 1.0f})
+        Check(GroundShadow::StructureLampGain(GroundShadow::GroundPoolHeightGate(y, capturedGround), 0.30f) == 1.0f,
+              "ground runs and foundation stairs retain their fence lamp gain");
+    Check(std::fabs(GroundShadow::StructureLampGain(0.5f, 0.30f) - 0.65f) < 1e-6f,
+          "structure gain blends continuously across the ground-height band");
+    Check(GroundShadow::StructureLampGain(upperPool, 1.0f) == 1.0f,
+          "neutral architectural gain preserves elevated direct lamps");
     const float post[3] = {1034.0f, 54.2f, 1274.5f}, indoor[3] = {1036.0f, 59.1f, 1270.0f};
     const float parapetY = 57.7f, curbY = 52.9f, reach = 15.0f;
     // the old rule: every head around raised the gate
