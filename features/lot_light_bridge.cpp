@@ -698,7 +698,7 @@ struct ShadeTask {
     uint64_t lot = 0, key = 0;
     int w = 0, h = 0, ox = 0, oz = 0;
     GroundShadow::Grid grid;
-    std::vector<GroundShadow::Lamp> lamps;
+    std::vector<GroundShadow::Lamp> lamps, others; // others: in the shade's total only (ShadeLamps)
     std::vector<GroundShadow::Wall> walls;
     std::vector<WallOpenings::Patch> patches;
     std::vector<Canopy::Ellipsoid> crowns; // tree and bush crowns (canopy_ground_shadow)
@@ -853,7 +853,7 @@ private:
                 } else {
                     r.lot = t.lot, r.key = t.key, r.w = t.w, r.h = t.h, r.ox = t.ox, r.oz = t.oz, r.grid = t.grid;
                     GroundShadow::ShadeJob job;
-                    job.Init(t.grid, std::move(t.lamps), std::move(t.walls), std::move(t.patches), std::move(t.crowns));
+                    job.Init(t.grid, std::move(t.lamps), std::move(t.walls), std::move(t.patches), std::move(t.crowns), std::move(t.others));
                     job.Step([this] { return !stop_; });
                     r.res = job.Result();
                     r.den = job.StampWeight();
@@ -996,33 +996,56 @@ void LotBox(const LotRect& r, float& x0, float& z0, float& x1, float& z1) {
 }
 // The lamps of the bake snapshot that can shade this lot's ground (in the bake now, their rect over the lot's box), the
 // strongest kMaxLamps by their stamp weight at the box's nearest point
-std::vector<GroundShadow::Lamp> ShadeLamps(const LotRect& r) {
+// others (2.15.3): the bake lamps whose stamp covers the shade grid's margin (kShadeMargin) but are not tested against the
+// walls (past kMaxLamps, or over the margin only), at most kMaxOtherLamps, strongest first: their light stays in the shade's
+// total (GroundShadow::ShadeJob::Init)
+constexpr size_t kMaxOtherLamps = 96;
+constexpr float kShadeMargin = 24.0f; // m
+std::vector<GroundShadow::Lamp> ShadeLamps(const LotRect& r, std::vector<GroundShadow::Lamp>* others = nullptr) {
     float x0, z0, x1, z1;
     LotBox(r, x0, z0, x1, z1);
-    std::vector<std::pair<float, GroundShadow::Lamp>> c;
+    std::vector<std::pair<float, GroundShadow::Lamp>> c, o;
     for (const LotLightBridge::BakeLamp& b : LotLightBridge::CurrentBakeLamps().lamps) {
-        if (!b.baked || b.rect[0] > x1 || b.rect[2] < x0 || b.rect[1] > z1 || b.rect[3] < z0) continue;
+        const bool overLot = !(b.rect[0] > x1 || b.rect[2] < x0 || b.rect[1] > z1 || b.rect[3] < z0);
+        const bool overMargin = !(b.rect[0] > x1 + kShadeMargin || b.rect[2] < x0 - kShadeMargin || b.rect[1] > z1 + kShadeMargin || b.rect[3] < z0 - kShadeMargin);
+        if (!b.baked || !(overLot || (others && overMargin))) continue;
         const float lum = b.light[0] * 0.2126f + b.light[1] * 0.7152f + b.light[2] * 0.0722f;
         GroundShadow::Lamp L{b.pos[0], b.pos[1], b.pos[2], 0.4f * lum};
         L.liftable = TerrainBakeRule::Liftable(b.lot != 0, b.type);
+        L.rx0 = b.rect[0], L.rz0 = b.rect[1], L.rx1 = b.rect[2], L.rz1 = b.rect[3];
+        if (!(L.rx1 >= L.rx0 && L.rz1 >= L.rz0)) L.rx0 = L.rz0 = -1e30f, L.rx1 = L.rz1 = 1e30f; // (no rectangle read)
         if (!(L.k > 0.0f) || !ApexMath::IsFinite(L.k) || !ApexMath::IsFinite(L.x) || !ApexMath::IsFinite(L.y) || !ApexMath::IsFinite(L.z)) continue;
-        const float nx = std::clamp(L.x, x0, x1), nz = std::clamp(L.z, z0, z1);
+        if (!overLot) { // the margin only: by its weight at its own stamp's nearest point to the lot
+            const float nx = std::clamp(std::clamp(L.x, x0, x1), L.rx0, L.rx1), nz = std::clamp(std::clamp(L.z, z0, z1), L.rz0, L.rz1);
+            o.emplace_back(GroundShadow::Weight(L, nx, r.ty, nz), L);
+            continue;
+        }
+        const float nx = std::clamp(std::clamp(L.x, x0, x1), L.rx0, L.rx1), nz = std::clamp(std::clamp(L.z, z0, z1), L.rz0, L.rz1);
         const float wgt = GroundShadow::Weight(L, nx, r.ty, nz);
         if (!(wgt >= GroundShadow::kMinWeight)) continue;
         c.emplace_back(wgt, L);
     }
-    std::stable_sort(c.begin(), c.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
-    if (c.size() > static_cast<size_t>(GroundShadow::kMaxLamps)) c.resize(GroundShadow::kMaxLamps);
+    const auto strongest = [](const auto& a, const auto& b) { return a.first > b.first; };
+    std::stable_sort(c.begin(), c.end(), strongest);
+    if (c.size() > static_cast<size_t>(GroundShadow::kMaxLamps)) {
+        o.insert(o.end(), c.begin() + GroundShadow::kMaxLamps, c.end());
+        c.resize(GroundShadow::kMaxLamps);
+    }
     std::vector<GroundShadow::Lamp> out;
     out.reserve(c.size());
     for (const auto& [w, L] : c) out.push_back(L);
+    if (others) {
+        std::stable_sort(o.begin(), o.end(), strongest);
+        if (o.size() > kMaxOtherLamps) o.resize(kMaxOtherLamps);
+        others->clear();
+        for (const auto& [w, L] : o) others->push_back(L);
+    }
     return out;
 }
 // The grid the shade is built on (15/10, F8/F7 2026-10-14 23-27: a wall's shadow stopped at the lot's edge and the lamp light
 // that reaches past the lot lay over it; the world grass takes the bake lamps from the terrain map, which knows no wall): the
 // lot's grid (w x h texels, 4 a metre) grown on each side as far as its lamps reach past it (GroundShadow::Reach), at most
 // kShadeMargin; the lot's texels start at (ox, oz) on it, at the same texel centres
-constexpr float kShadeMargin = 24.0f; // m
 GroundShadow::Grid ShadeGrid(const LotRect& r, int w, int h, const std::vector<GroundShadow::Lamp>& lamps, int& ox, int& oz) {
     GroundShadow::Grid g;
     g.m0 = r.m0, g.m2 = r.m2, g.m8 = r.m8, g.m10 = r.m10, g.tx = r.tx, g.tz = r.tz, g.ty = r.ty;
@@ -1701,7 +1724,12 @@ uint64_t ShadeKey(const LotRect& r, int w, int h) {
     for (float f : {r.tx, r.tz, r.ty, r.m0, r.m2, r.m8, r.m10}) mixf(f, 100.0f);
     mixf(Penumbra::Radius(), 1000.0f); // the openings' penumbra (Shadow softness)
     mix(TesterToggles::groundSoftEdges.load(std::memory_order_relaxed) ? 0x50F7ull : 0ull); // soft wall ends and tops on the mask (GroundShadow::Grid::soft)
-    const std::vector<GroundShadow::Lamp> lamps = ShadeLamps(r);
+    std::vector<GroundShadow::Lamp> others;
+    const std::vector<GroundShadow::Lamp> lamps = ShadeLamps(r, &others);
+    for (const GroundShadow::Lamp& L : others) { // (their light stays in the total)
+        mixf(L.x, 50.0f), mixf(L.z, 50.0f);
+        mix(static_cast<uint64_t>(static_cast<int64_t>(std::lround(std::log2(std::max(L.k, 1e-6f)) * 4.0f))));
+    }
     {
         int ox, oz;
         const GroundShadow::Grid g = ShadeGrid(r, w, h, lamps, ox, oz);
@@ -1764,7 +1792,7 @@ void ShadeTick() {
         g_shadeQueue.erase(g_shadeQueue.begin());
         ShadeTask t;
         t.epoch = g_shadeEpoch;
-        t.lamps = ShadeLamps(want.rect);
+        t.lamps = ShadeLamps(want.rect, &t.others);
         t.grid = ShadeGrid(want.rect, want.w, want.h, t.lamps, t.ox, t.oz);
         t.grid.soft = TesterToggles::groundSoftEdges.load(std::memory_order_relaxed);
         float x0, z0, x1, z1;

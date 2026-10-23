@@ -872,9 +872,9 @@ float3 w=rows[0].xyz+uv.x*rows[1].xyz+uv.y*rows[2].xyz;o.uv=float4(uv,w.x,w.z);o
 void GroundShadowChecks() {
     using namespace GroundShadow;
     const int before = checks;
-    const auto run = [](const Grid& g, std::vector<Lamp> lamps, std::vector<Wall> walls, int slices) {
+    const auto run = [](const Grid& g, std::vector<Lamp> lamps, std::vector<Wall> walls, int slices, std::vector<Lamp> others = {}) {
         ShadeJob job;
-        job.Init(g, std::move(lamps), std::move(walls));
+        job.Init(g, std::move(lamps), std::move(walls), {}, {}, std::move(others));
         int budget = 0, guard = 0;
         // a few steps a slice, as the render thread's budget would cut it
         while (!job.Step([&] { return ++budget % slices != 0; }) && guard++ < 1000000) {}
@@ -903,6 +903,18 @@ void GroundShadowChecks() {
     const Lamp other{24.0f, 12.0f, 20.0f, 0.4f * 30.0f};
     const auto two = run(g, {post, other}, {wall}, 5);
     Check(at(two, 16.0f, 20.0f) > 64 && at(two, 16.0f, 20.0f) < 255, "ground shade: two lamps, one blocked, a share stays");
+    // (2.15.3) a lamp not tested against the walls stays in the total: east of the wall, where the wall does not block it,
+    // the same shade as when it is tested
+    const auto untested = run(g, {post}, {wall}, 5, {other});
+    bool same = untested.size() == two.size();
+    for (size_t i = 0; same && i < two.size(); i++)
+        if (static_cast<float>(i % g.w) / 4.0f > 15.0f) same = std::abs(int(untested[i]) - int(two[i])) <= 1;
+    Check(same, "ground shade: an untested lamp's light stays in the shade's total");
+    // a lamp's shadow ends where its stamp's rectangle ends (nothing of it lies there to block)
+    Lamp clipped = post;
+    clipped.rx0 = 0.0f, clipped.rz0 = 0.0f, clipped.rx1 = 17.0f, clipped.rz1 = 40.0f;
+    const auto cl = run(g, {clipped}, {wall}, 5);
+    Check(at(cl, 16.0f, 20.0f) < 8 && at(cl, 18.0f, 20.0f) == 255, "ground shade: no shadow past the lamp's stamp");
     // a low wall (0.5 m) under a 2 m head shades only near its foot
     const Wall low{14.0f, 15.0f, 14.0f, 25.0f, 10.0f, 10.5f};
     const auto lowM = run(g, {post}, {low}, 5);

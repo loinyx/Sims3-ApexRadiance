@@ -5,7 +5,12 @@
 // outdoor lamps' stamp that reaches each texel past the outside walls:
 //   M = 1 - sum_i w_i (1 - v_i) / max(sum_i w_i, kOtherLight)  (= sum w v / sum w where the lamps light the ground),
 //   w_i = sat(0.4 x lum(colour x intensity x range) x cos / d^2) (the stamp's law, engine/terrain-and-light-bake.md),
-//   v_i = 0 when an outside wall stands between the lamp's head and the texel. 1 where no lamp reaches. POD and templates only, no game reads: built from copies (the walls copied from the room solves,
+//   v_i = 0 when an outside wall stands between the lamp's head and the texel. 1 where no lamp reaches.
+// (2.15.3) The sum runs over every bake lamp whose stamp covers the texel: the lamps tested against the walls and, with
+// v = 1, the others (ShadeJob::Init's `others`: past kMaxLamps or not over the lot), so a wall's shadow takes away only the
+// light of the lamps it blocks (F8: a fence's shadow on snow was darker than the snow no lamp of the lot reaches, as it
+// took the light of the lamps not listed too). A lamp weighs only inside its stamp's rectangle (the bake writes nothing
+// past it): its shadow ends where its light on the ground ends. POD and templates only, no game reads: built from copies (the walls copied from the room solves,
 // the bake lamp snapshot), so a read-only offline harness can test it, and it is built a slice at a time on the render
 // thread (ShadeJob::Step).
 #include <algorithm>
@@ -31,6 +36,7 @@ struct Lamp {
     float x, y, z; // the head, world
     float k;       // 0.4 x lum(colour x intensity x range): the stamp's weight numerator
     bool liftable = false; // a lot lamp the bake stamps from kLowLampLift when it lies on the ground (TerrainBakeRule::Liftable)
+    float rx0 = -1e30f, rz0 = -1e30f, rx1 = 1e30f, rz1 = 1e30f; // its stamp's rectangle, world xz (none: unbounded)
 };
 // Lot-local metres -> world: wx = m0 lx + m8 lz + tx, wz = m2 lx + m10 lz + tz (room 0's +0xF8 matrix); ground at ty
 struct Grid {
@@ -106,6 +112,7 @@ inline bool FloorShadeRows(const Grid& g, float xzScale, bool on, float rows[12]
 
 // The stamp's weight of a lamp at a ground point (x, groundY, z)
 inline float Weight(const Lamp& L, float x, float groundY, float z) {
+    if (x < L.rx0 || x > L.rx1 || z < L.rz0 || z > L.rz1) return 0.0f; // past its stamp
     const float h = std::max(TerrainBakeRule::StampHeight(L.y - groundY, L.liftable), kMinHead); // a lamp on the lawn: as the bake stamps it
     const float dx = L.x - x, dz = L.z - z;
     const float d2 = dx * dx + dz * dz + h * h;
@@ -117,7 +124,9 @@ inline float Weight(const Lamp& L, float x, float groundY, float z) {
 inline float Reach(const Lamp& L, float groundY) {
     const float h = std::max(TerrainBakeRule::StampHeight(L.y - groundY, L.liftable), kMinHead);
     if (!(L.k > 0.0f) || !std::isfinite(L.k)) return 0.0f;
-    return std::min(std::cbrt(L.k * h / kMinWeight), kMaxReach);
+    // no further than its stamp's farthest corner
+    const float fx = std::max(std::fabs(L.rx0 - L.x), std::fabs(L.rx1 - L.x)), fz = std::max(std::fabs(L.rz0 - L.z), std::fabs(L.rz1 - L.z));
+    return std::min({std::cbrt(L.k * h / kMinWeight), kMaxReach, std::sqrt(fx * fx + fz * fz)});
 }
 
 // The share of the head's light reaching the ground point (x, groundY, z) past an outside wall: 0 where the wall stands
@@ -213,9 +222,10 @@ inline void MarkFreeEnds(std::vector<Wall>& walls) {
 class ShadeJob {
 public:
     void Init(const Grid& g, std::vector<Lamp> lamps, std::vector<Wall> walls, std::vector<WallOpenings::Patch> patches = {},
-              std::vector<Canopy::Ellipsoid> canopies = {}) {
+              std::vector<Canopy::Ellipsoid> canopies = {}, std::vector<Lamp> others = {}) {
         grid_ = g;
         lamps_ = std::move(lamps);
+        others_ = std::move(others);
         walls_ = std::move(walls);
         patches_ = std::move(patches);
         canopies_ = std::move(canopies);
@@ -241,6 +251,10 @@ public:
         while (!done_) {
             if (!more()) return false;
             if (lamp_ >= lamps_.size()) {
+                for (const Lamp& L : others_) { // lit everywhere they reach: in the total only
+                    reach_ = Reach(L, grid_.ty);
+                    Accumulate(L, false);
+                }
                 Finish();
                 done_ = true;
                 break;
@@ -377,7 +391,7 @@ private:
                 if (w.pn && p > 0.0f && CrossesLine(L, x, z, w)) through_++;
             }
     }
-    void Accumulate(const Lamp& L) {
+    void Accumulate(const Lamp& L, bool tested = true) {
         if (!(reach_ > 0.0f)) return;
         float ci, cj;
         if (!WorldTexel(grid_, L.x, L.z, ci, cj)) return;
@@ -394,7 +408,7 @@ private:
                 if (!(wgt >= kMinWeight)) continue;
                 const size_t at = static_cast<size_t>(j) * grid_.w + i;
                 den_[at] += wgt;
-                num_[at] += wgt * vis_[at];
+                num_[at] += tested ? wgt * vis_[at] : wgt;
             }
     }
     void Finish() {
@@ -421,7 +435,7 @@ private:
     }
 
     Grid grid_;
-    std::vector<Lamp> lamps_;
+    std::vector<Lamp> lamps_, others_; // others_: not tested against the walls (Init)
     std::vector<Wall> walls_;
     std::vector<WallOpenings::Patch> patches_;
     std::vector<Canopy::Ellipsoid> canopies_;
