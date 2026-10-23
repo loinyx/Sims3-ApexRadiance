@@ -2888,6 +2888,33 @@ struct WallTopRec {
 };
 std::unordered_map<uintptr_t, WallTopRec> g_wallTop; // wall -> its cells
 std::atomic<long> g_wallTopGen{1};
+// ---- (2.15.3) Outdoor walls drawn below their light base. The game lights an outdoor room's wall from story x 3 (the
+// option "Outside walls on foundations" from the floor under it, OutdoorWallBase), but a gable is drawn from the top of the
+// knee wall under it: two light captures, story 4's gable drawn from 27.822 with its light base at 29.708, so its lower 1.9 m
+// took one row (RecutCellV clamps under the base) lit 1.9 m above it, a hard step where the gable starts; on a lot mixing a
+// house on a foundation with a garage without one, the garage's eave band (story 2, base 23.708, drawn from 22.947) showed
+// the same. Such a wall takes its drawn foot as its base:
+// each sample column moves down by its cell's foot - base (DropLowFootWall) and
+// the cell is recut against its foot (WallUvHook), so each vertex reads the row lit at its own height. Per cell, from 3.2 m
+// to 5 cm below the base, outdoor rooms' walls only; a column of a cell not drawn yet keeps the base (its room is solved
+// again once the cell is seen, NoteWallCell).
+bool WallOutdoor(uintptr_t wall) { // POD only (SEH): the wall's room (wall +0) is solved as outdoor
+    __try {
+        const BYTE* room = *reinterpret_cast<BYTE* const*>(wall);
+        return room && room[0x18] != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool WallLightBase(uintptr_t wall, float& oy) { // POD only (SEH): +0x104, lot space as the cells' feet (ReadWallCell's base)
+    __try {
+        oy = *reinterpret_cast<const float*>(wall + 0x104);
+        return ApexMath::IsFinite(oy);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool LowFoot(float foot, float base) { return foot < base - 0.05f && foot > base - 3.2f; }
 // The same two moves per story manager (LotGeometryKey: another lot's walls or floors leave this lot's key alone)
 std::mutex g_geoGenMx;
 std::unordered_map<uintptr_t, long> g_geoGenByMgr; // (under g_geoGenMx)
@@ -2989,6 +3016,9 @@ void NoteWallCell(void* geo, uintptr_t mgr, int x, int z, int dir) {
         t.hl = std::max(t.hl, c.hl), t.hm = std::max(t.hm, c.hm), t.hr = std::max(t.hr, c.hr);
         t.tall = rose = true;
     }
+    if (rose && LowFoot(c.foot, c.base) && g_foundationWallsOn.load(std::memory_order_relaxed) && WallOutdoor(c.wall) &&
+        std::find(g_wallHRequeue.begin(), g_wallHRequeue.end(), c.wall) == g_wallHRequeue.end() && g_wallHRequeue.size() < 4096)
+        g_wallHRequeue.push_back(c.wall); // (2.15.3) drawn below its light base: solved again from its foot (DropLowFootWall)
     if (rose) {
         g_wallTopGen.fetch_add(1, std::memory_order_relaxed);
         BumpGeoGen(mgr);
@@ -3058,14 +3088,20 @@ void __fastcall WallUvHook(void* geo, void*, uintptr_t mgr, int x, int z, int di
     WallCellRead c;
     CellCrop k;
     bool recut = false;
-    float f3 = 0.0f, f5 = 0.0f;
+    float f3 = 0.0f, f5 = 0.0f, ref = 0.0f;
     if ((mode == 0 || mode == 1) && g_foundationWallsOn.load(std::memory_order_relaxed) && ReadWallCell(geo, mgr, x, z, dir, c) && ReadCellCrop(geo, k)) {
         const int cell = static_cast<int>(ApexMath::Floor(c.tmid * static_cast<float>(c.len)));
-        if (c.perp < 0.35f && cell >= 0 && cell < c.len && c.hl > 0.2f && c.hm > 0.2f && c.hr > 0.2f && std::max({c.hl, c.hm, c.hr}) < 2.98f) {
+        ref = c.base;
+        // (2.15.3) the eave cell of a gable is a triangle whose tip dips under its foot (heights 0.83 / 0.33 / -0.17 at 0.5 m
+        // steps): it is recut too (RecutCellV clamps each vertex to its own height), as its neighbours are
+        if (c.perp < 0.35f && cell >= 0 && cell < c.len && std::max({c.hl, c.hm, c.hr}) > 0.2f && std::min({c.hl, c.hm, c.hr}) > -1.0f &&
+            std::max({c.hl, c.hm, c.hr}) < 2.98f) {
             f3 = std::max(0.0f, k.w3 / 512.0f - 8.0f), f5 = std::max(0.0f, k.w5 / 512.0f - 8.0f);
+            // an outdoor wall's cell drawn below its light base is lit from its foot (DropLowFootWall)
+            if (LowFoot(c.foot, c.base) && WallOutdoor(c.wall)) ref = c.foot;
             // the game shows the bottom vertices at the light base and the top ones at base + 3 (1 - f)
-            const float off = std::max({ApexMath::Fabs(k.y[0] - c.base), ApexMath::Fabs(k.y[2] - c.base), ApexMath::Fabs(3.0f * (1.0f - f3) - (k.y[3] - c.base)),
-                                        ApexMath::Fabs(3.0f * (1.0f - f5) - (k.y[5] - c.base))});
+            const float off = std::max({ApexMath::Fabs(k.y[0] - ref), ApexMath::Fabs(k.y[2] - ref), ApexMath::Fabs(3.0f * (1.0f - f3) - (k.y[3] - ref)),
+                                        ApexMath::Fabs(3.0f * (1.0f - f5) - (k.y[5] - ref))});
             recut = off > 0.02f && WriteCellCrop(geo, 0x1000, 0x1000); // (0 + 8) x 512: f = 0
         }
     }
@@ -3073,7 +3109,7 @@ void __fastcall WallUvHook(void* geo, void*, uintptr_t mgr, int x, int z, int di
     if (recut) {
         WriteCellCrop(geo, k.w3, k.w5);
         int16_t vb = 0, vt = 0;
-        if (RecutCellV(geo, mode, c.base, k.y, vb, vt)) {
+        if (RecutCellV(geo, mode, ref, k.y, vb, vt)) {
             g_shortRecut.fetch_add(1, std::memory_order_relaxed);
             if (!kPublicBuild && mode == 0 && g_shortLogged.fetch_add(1, std::memory_order_relaxed) < 40)
                 HookGuard::Try("LevelLightShare short wall note", [&] {
@@ -3115,6 +3151,38 @@ long StretchWallSamples(uintptr_t wall, int cls, uintptr_t batch, const WallBloc
     } __except (EXCEPTION_EXECUTE_HANDLER) {
     }
     return moved;
+}
+// After AlignWallSamples and StretchWallSamples: each column of an outdoor wall whose cell is drawn below the light base
+// (LowFoot) moves down to that foot. POD only (SEH).
+long DropLowFootSamples(uintptr_t wall, int cls, uintptr_t batch, const WallBlock& r, const WallTopCell* cells, int n) {
+    long moved = 0;
+    __try {
+        const int cols = *reinterpret_cast<const int*>(wall + cls * 0x10 + 0x28), len = *reinterpret_cast<const int*>(wall + 0x24);
+        float base = 0.0f;
+        if (cols < 1 || len != n || !WallLightBase(wall, base)) return 0;
+        const uintptr_t b = *reinterpret_cast<const uintptr_t*>(batch), e = *reinterpret_cast<const uintptr_t*>(batch + 4);
+        if (!b || e <= b || (e - b) % 0x30 || (e - b) / 0x30 > 1u << 20) return 0;
+        for (uintptr_t p = b; p < e; p += 0x30) {
+            const int i = *reinterpret_cast<const uint16_t*>(p + 0x20) - r.x0;
+            const int cell = std::clamp(static_cast<int>(ApexMath::Floor((static_cast<float>(i) + 0.5f) * static_cast<float>(len) / static_cast<float>(cols))), 0, n - 1);
+            if (!cells[cell].set || !LowFoot(cells[cell].foot, base)) continue;
+            *reinterpret_cast<float*>(p + 4) += cells[cell].foot - base;
+            moved++;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+    return moved;
+}
+bool DropLowFootWall(uintptr_t wall, int cls, uintptr_t batch, const WallBlock& r) {
+    if (!WallOutdoor(wall)) return false;
+    std::vector<WallTopCell> cells;
+    {
+        std::lock_guard<std::mutex> lk(g_wallHMx);
+        const auto it = g_wallTop.find(wall);
+        if (it == g_wallTop.end()) return false;
+        cells = it->second.cells;
+    }
+    return !cells.empty() && DropLowFootSamples(wall, cls, batch, r, cells.data(), static_cast<int>(cells.size())) > 0;
 }
 void StretchTallWall(uintptr_t wall, int cls, uintptr_t batch, const WallBlock& r) {
     std::vector<WallCellH> cells;
@@ -6433,7 +6501,11 @@ void AfterWallSamples(void* wall, int piece, int cls, void* batch) {
     }
     PieceNote note{reinterpret_cast<uintptr_t>(wall)};
     const bool aligned = AlignWallSamples(note.wall, cls, reinterpret_cast<uintptr_t>(batch), note.block, note.rows);
-    if (aligned && g_wallUvReady && g_foundationWallsOn.load(std::memory_order_relaxed)) StretchTallWall(note.wall, cls, reinterpret_cast<uintptr_t>(batch), note.block);
+    if (aligned && g_wallUvReady && g_foundationWallsOn.load(std::memory_order_relaxed)) {
+        StretchTallWall(note.wall, cls, reinterpret_cast<uintptr_t>(batch), note.block);
+        // (2.15.3) the columns of an outdoor wall drawn below its light base: lit from their drawn foot (a gable)
+        if (DropLowFootWall(note.wall, cls, reinterpret_cast<uintptr_t>(batch), note.block)) g_foundationPieces.fetch_add(1, std::memory_order_relaxed);
+    }
     if (drop != 0.0f) {
         DropWallSamples(reinterpret_cast<uintptr_t>(batch), drop);
         g_foundationPieces.fetch_add(1, std::memory_order_relaxed);
@@ -15074,7 +15146,8 @@ std::string WallNotesOnRay(const float o[3], const float d[3], float* hitOut) {
         if (t <= 0 || t >= bestT) continue;
         const float h[3] = {o[0] + t * d[0], o[1] + t * d[1], o[2] + t * d[2]};
         const float a = ((h[0] - w.x0) * ux + (h[2] - w.z0) * uz) / L;
-        if (a < -0.5f * cw || a > L + 0.5f * cw || h[1] < w.oy - 0.05f || h[1] > w.oy + 3.05f) continue;
+        const float lo = w.litLo < 1e8f ? std::min(w.oy, w.litLo) : w.oy; // (lit from its drawn foot: DropLowFootWall)
+        if (a < -0.5f * cw || a > L + 0.5f * cw || h[1] < lo - 0.05f || h[1] > w.oy + 3.05f) continue;
         best = &w;
         bestT = t;
         std::memcpy(hit, h, sizeof hit);
