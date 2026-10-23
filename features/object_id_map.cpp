@@ -200,7 +200,9 @@ void __fastcall Hook_Find(uint8_t* map, void* edx, uint32_t* out, const uint32_t
     c_finds.fetch_add(1, std::memory_order_relaxed);
     if (!g_map) { // first use: index this map (the only one these functions serve)
         ApexUtil::SrwExclusive srw(g_lock);
-        if (!g_map && !g_off.load()) Build(map);
+        // (g_on again under the lock: Stop turns it off, then frees the table under this lock, so a find that passed the test
+        // above before Stop builds nothing once Stop has freed it)
+        if (!g_map && !g_off.load() && g_on.load(std::memory_order_acquire)) Build(map);
     }
     if (!TryAcquireSRWLockShared(&g_lock)) {
         c_busy.fetch_add(1, std::memory_order_relaxed);

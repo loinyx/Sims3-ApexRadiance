@@ -219,8 +219,10 @@ void __fastcall Hook_Find(uint8_t* map, void* edx, uint32_t* out, const uint32_t
         if (g_off.load(std::memory_order_relaxed)) return next(map, edx, out, key);
         {
             ApexUtil::SrwExclusive srw(g_lock);
-            Index* y = IndexOf(map);
-            if (!y)
+            // (Stop turns g_on off, then frees the tables under this lock: a find that passed the test above before Stop builds
+            // nothing once Stop has freed them; one that gets here first is freed by Stop after it)
+            Index* y = g_on.load(std::memory_order_acquire) ? IndexOf(map) : nullptr;
+            if (!y && g_on.load(std::memory_order_acquire))
                 for (Index& f : g_idx)
                     if (!f.map) {
                         y = &f;
