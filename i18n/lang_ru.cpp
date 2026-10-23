@@ -2225,6 +2225,8 @@ const I18n::Pair kPairs[] = {
     {"Indoor object sampler scan", "Проверка сэмплеров объектов в помещении"},
     {"Only declared samplers are checked", "Проверяются только объявленные сэмплеры"},
     {"Room record lookup cache", "Кэш поиска записей комнат"},
+    {"Writable packages' file lists", "Списки файлов записываемых пакетов"},
+    {"Kept while their counted writes do not change", "Сохраняются, пока учтённые записи не меняются"},
     {"Follow bound textures", "Отслеживать привязанные текстуры"},
     {"Texture reads answered without asking the device", "Чтение текстур без запроса к устройству"},
     {"Window light channel memo", "Память канала света окон"},

@@ -2225,6 +2225,8 @@ const I18n::Pair kPairs[] = {
     {"Indoor object sampler scan", "실내 오브젝트 샘플러 검사"},
     {"Only declared samplers are checked", "선언된 샘플러만 확인해요"},
     {"Room record lookup cache", "방 레코드 조회 캐시"},
+    {"Writable packages' file lists", "쓰기 가능한 패키지의 파일 목록"},
+    {"Kept while their counted writes do not change", "집계된 쓰기가 바뀌지 않는 동안 유지돼요"},
     {"Follow bound textures", "바인딩된 텍스처 추적"},
     {"Texture reads answered without asking the device", "장치에 묻지 않고 텍스처 읽기에 답해요"},
     {"Window light channel memo", "창문 조명 채널 메모"},

@@ -1703,6 +1703,7 @@ void DevTesterTab() {
         TesterSwitch("Night Lights shader facts", "One lookup per pixel shader change", PerfToggles::NightLightingPsFacts, Effect::None);
         TesterSwitch("Rig mode once per draw", "Read once instead of at every check", PerfToggles::RigModeOncePerDraw, Effect::None);
         TesterSwitch("Indoor object sampler scan", "Only declared samplers are checked", PerfToggles::IndoorSamplerScan, Effect::None);
+        TesterSwitch("Writable packages' file lists", "Kept while their counted writes do not change", PerfToggles::KeyListCountedPackages, Effect::None);
         TesterSwitch("Room record lookup cache", "Kept while no room record changed", PerfToggles::SolveInfoCache, Effect::None);
         TesterSwitch("Window light channel memo", "Asked once per sample batch", PerfToggles::WindowChannelMemo, Effect::None);
         TesterSwitch("Paced relight at rest", "With the camera still, room lighting gives way when frames run long", PerfToggles::SteadyRoomPacing, Effect::None);

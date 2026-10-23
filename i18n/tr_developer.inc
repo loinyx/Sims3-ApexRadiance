@@ -313,6 +313,8 @@ const I18n::Entry kDevBuildExtra[] = {
 {"Only declared samplers are checked", "Só os samplers declarados são verificados", "Solo se comprueban los samplers declarados", "Seuls les samplers déclarés sont vérifiés"},
 {"Room record lookup cache", "Cache de consulta dos registros de cômodos", "Caché de consulta de registros de habitaciones", "Cache de recherche des fiches de pièces"},
 {"Kept while no room record changed", "Mantido enquanto nenhum registro de cômodo muda", "Se conserva mientras ningún registro de habitación cambie", "Conservé tant qu’aucune fiche de pièce ne change"},
+{"Writable packages' file lists", "Listas de arquivos dos pacotes graváveis", "Listas de archivos de los paquetes escribibles", "Listes de fichiers des paquets inscriptibles"},
+{"Kept while their counted writes do not change", "Mantidas enquanto as gravações contadas não mudam", "Se conservan mientras las escrituras contadas no cambian", "Conservées tant que les écritures comptées ne changent pas"},
 {"Follow bound textures", "Seguir as texturas ligadas", "Seguir las texturas enlazadas", "Suivre les textures liées"},
 {"Texture reads answered without asking the device", "Leituras de textura respondidas sem consultar o dispositivo", "Lecturas de textura respondidas sin consultar el dispositivo", "Lectures de texture servies sans interroger le périphérique"},
 {"Window light channel memo", "Memória do canal das luzes de janela", "Memoria del canal de las luces de ventana", "Mémo du canal des lumières de fenêtre"},

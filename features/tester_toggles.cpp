@@ -45,6 +45,7 @@ const Item kItems[] = {
     {"perf_window_channel_memo", &PerfToggles::WindowChannelMemo, Effect::None},
     {"perf_motion_paced_raise", &PerfToggles::MotionPacedRaise, Effect::None},
     {"perf_steady_room_pacing", &PerfToggles::SteadyRoomPacing, Effect::None},
+    {"perf_key_list_counted_packages", &PerfToggles::KeyListCountedPackages, Effect::None},
 };
 } // namespace
 

@@ -40,4 +40,8 @@ inline std::atomic<bool> MotionPacedRaise{true};
 // the frame time when frames run long (lot_lighting_motion.cpp SteadyPace); lamp edits, the settle window after a load and
 // a lamp switch keep their own budgets. Off: the game's budget every frame, as before. Only how soon rooms finish changes
 inline std::atomic<bool> SteadyRoomPacing{true};
+// (2.15.3) File list cache: the writable packages whose writes are counted (DPF, DDF, packed stream; resource_cache.cpp
+// write epochs) also answer from memory while their write epoch is the same (resource_cache.cpp EmulateKeyList). Off: only
+// the read-only packages, as before
+inline std::atomic<bool> KeyListCountedPackages{true};
 } // namespace PerfToggles
