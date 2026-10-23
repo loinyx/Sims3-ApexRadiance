@@ -631,6 +631,13 @@ bool LotEdgeConstants(const float k[4], const float c15[4], const float c8[4], c
 // over one texel combine as sum M w / sum w (the lowest of them darkened a lamp's light past a gap with a neighbour's shade
 // of other lamps)
 using ExtData = GroundShadow::ExtData; // (2.15.3: ground_lamp_shadow.h, with the chunk build)
+// (2.15.3, developer log) A lot's shade from the check that saw its inputs change to its mask shown: when it was seen, its build
+// sent, its result taken, its chunks' texels uploaded with it (GetTickCount), its build's time and its chunks
+struct LotShadeTiming {
+    DWORD seen = 0, sent = 0, taken = 0, applied = 0;
+    double buildMs = 0.0;
+    int chunks = 0;
+};
 struct LotMask {
     IDirect3DTexture9* tex = nullptr;
     uint64_t sig = 0;
@@ -648,6 +655,8 @@ struct LotMask {
     GroundShadow::Grid extGrid;
     std::shared_ptr<const ExtData> ext;
     float ex0 = 0, ez0 = 0, ex1 = 0, ez1 = 0; // its world box
+    DWORD changeSeen = 0;  // (2.15.3, developer log) the check that saw its inputs change (WantShade)
+    LotShadeTiming timing; // (developer log) the shade applied, logged when its mask is made (MakeMaskTexture)
 };
 std::unordered_map<uint64_t, LotMask> g_lotMasks;
 IDirect3DTexture9* g_whiteMask = nullptr;
@@ -693,6 +702,7 @@ struct ShadeTask {
     // a lot
     uint64_t lot = 0, key = 0;
     int w = 0, h = 0, ox = 0, oz = 0;
+    DWORD sent = 0; // (developer log) when it was sent
     GroundShadow::Grid grid;
     std::vector<GroundShadow::Lamp> lamps, others; // others: in the shade's total only (ShadeLamps)
     std::vector<GroundShadow::Wall> walls;
@@ -712,6 +722,7 @@ struct ShadeResult {
     uint32_t epoch = 0;
     uint64_t lot = 0, key = 0;
     int w = 0, h = 0, ox = 0, oz = 0;
+    DWORD sent = 0;
     GroundShadow::Grid grid;
     std::vector<uint8_t> res;
     std::vector<float> den;
@@ -805,7 +816,7 @@ private:
                     r.group = t.group;
                     BuildChunkMips(t, r);
                 } else {
-                    r.lot = t.lot, r.key = t.key, r.w = t.w, r.h = t.h, r.ox = t.ox, r.oz = t.oz, r.grid = t.grid;
+                    r.lot = t.lot, r.key = t.key, r.w = t.w, r.h = t.h, r.ox = t.ox, r.oz = t.oz, r.grid = t.grid, r.sent = t.sent;
                     GroundShadow::ShadeJob job;
                     job.Init(t.grid, std::move(t.lamps), std::move(t.walls), std::move(t.patches), std::move(t.crowns), std::move(t.others));
                     job.Step([this] { return !stop_; });
@@ -885,6 +896,8 @@ struct LotPending {
     std::vector<std::pair<int, int>> chunks;
     std::vector<ShadeResult> ready; // their results, applied together
     DWORD at = 0;
+    DWORD seen = 0, sent = 0, arrived = 0; // (developer log)
+    double buildMs = 0.0;
 };
 LotPending g_pend;
 std::vector<ShadeResult> g_lotResults; // lots' results waiting for the held one
@@ -1947,6 +1960,7 @@ void ShadeTick() {
         g_shadeLastPatches = static_cast<int>(t.patches.size());
         if (t.walls.empty() && t.crowns.empty()) t.lamps.clear(); // nothing shades: 255 everywhere at once
         t.lot = want.lot, t.key = want.key, t.w = want.w, t.h = want.h;
+        t.sent = GetTickCount() | 1;
         g_shadeWorker.Submit(std::move(t));
         g_lotsInFlight++;
     }
@@ -1963,6 +1977,7 @@ void HoldLotResult(ShadeResult& r) {
     LotMask& m = it->second;
     g_pend = {};
     g_pend.lot = r.lot, g_pend.key = r.key, g_pend.w = r.w, g_pend.h = r.h;
+    g_pend.seen = m.changeSeen, g_pend.sent = r.sent, g_pend.arrived = GetTickCount(), g_pend.buildMs = r.ms;
     const GroundShadow::Grid& eg = r.grid;
     const int W = r.w, H = r.h, ox = r.ox, oz = r.oz;
     // the lot's part for the lot passes; the whole grid for the world grass when it shades any texel
@@ -2013,6 +2028,10 @@ void CommitPending() {
     if (m.ext) m.extGrid = p.grid, m.ex0 = p.box.x0, m.ez0 = p.box.z0, m.ex1 = p.box.x1, m.ez1 = p.box.z1;
     if (!m.shade.empty()) g_shadeLastMin = p.lo;
     g_shadeBuilt.fetch_add(1, std::memory_order_relaxed);
+    if (DevSwitches::kCompiled && p.seen) { // (developer log, LotMaskTexture: when the mask is shown)
+        m.timing = LotShadeTiming{p.seen, p.sent, p.arrived, GetTickCount(), p.buildMs, static_cast<int>(p.chunks.size())};
+    }
+    m.changeSeen = 0;
 }
 // (2.15.3) The held shade given up (its lot left, its grid changed, the shade switched off): its chunks' builds are dropped
 // and made again at their next draw; the lot asks for its shade again
@@ -2059,6 +2078,7 @@ void ShadeApply(IDirect3DDevice9* dev) {
 // again; a running build is not cancelled by a key change: it finishes and the new one follows)
 void WantShade(uint64_t lot, LotMask& m, const LotRect& r, DWORD now) {
     const uint64_t key = ShadeKey(r, m.w, m.h);
+    if (DevSwitches::kCompiled && key != m.shadeKey && !m.changeSeen) m.changeSeen = now | 1; // (2.15.3, developer log)
     if (key == m.shadeKey || key == m.queuedKey) return;
     if (m.shadeAt && now - m.shadeAt < kShadeMinEveryMs) return; // again at a later check
     m.shadeAt = now;
@@ -2133,6 +2153,19 @@ bool MakeMaskTexture(IDirect3DDevice9* dev, LotMask& m) {
     m.tex = tex;
     m.dirty = false;
     g_maskBuilds.fetch_add(1, std::memory_order_relaxed);
+    if (DevSwitches::kCompiled && m.timing.seen) { // (2.15.3) the in-game time from a change of the lot's inputs to its new shade shown
+        static int s_logs = 0;
+        const LotShadeTiming t = m.timing;
+        m.timing = {};
+        const auto ms = [](DWORD from, DWORD to) { return static_cast<long>(to - from); };
+        if (s_logs < 400) {
+            s_logs++;
+            LOG_INFO(std::format("[LotLightBridge] Lamp shade on lot ground: shown {} ms after its inputs changed (seen at a check every 500 ms; then {} ms to "
+                                 "its build sent, {} ms building on the worker, {} ms to taken, {} ms held for its {} chunks, {} ms to its draw){}",
+                                 ms(t.seen, GetTickCount()), ms(t.seen, t.sent), static_cast<long>(t.buildMs + 0.5), ms(t.sent, t.taken), ms(t.taken, t.applied),
+                                 t.chunks, ms(t.applied, GetTickCount()), s_logs == 400 ? " (last such line)" : ""));
+        }
+    }
     return true;
 }
 IDirect3DTexture9* LotMaskTexture(IDirect3DDevice9* dev, const LotRect& rect);
