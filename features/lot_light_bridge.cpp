@@ -1953,12 +1953,14 @@ public:
     FloorShadeBind(IDirect3DDevice9* dev, const ShaderPatches::FloorPatch& f, int worldK, float xzScale)
         : FloorShadeBind(dev, f.shadeSampler, f.shadeConst, f.shadeSampler >= 0 && f.shadeConst >= 0 ? LotFromRows(dev, worldK) : nullptr, xzScale, g_floorShadeLot,
                          g_floorShadeNoLot) {}
-    FloorShadeBind(IDirect3DDevice9* dev, int sampler, int constant, const LotRect* lot, float xzScale, std::atomic<long>& withLot, std::atomic<long>& noLot)
+    FloorShadeBind(IDirect3DDevice9* dev, int sampler, int constant, const LotRect* lot, float xzScale, std::atomic<long>& withLot, std::atomic<long>& noLot,
+                   float faceReach = 0.0f)
         : dev_(dev) {
         if (sampler < 0 || constant < 0) return;
         lot_ = lot;
         float rows[12];
         on_ = GroundShadow::FloorShadeRows(lot_ ? LotGrid(*lot_) : GroundShadow::Grid{}, xzScale, g_shadeOn, rows) && g_shadeOn;
+        rows[10] = faceReach; // the fences' copy only (PatchInstancedLamps); the floors' never read it
         ApexUtil::CountOne(lot_ ? withLot : noLot);
         EvictLotMasks();
         IDirect3DTexture9* const tex = on_ ? LotMaskTexture(dev, *lot_) : WhiteMask(dev);
@@ -4358,7 +4360,10 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
         // (FloorShadeBind, as the story-0 floors), gated to about 1 m over the lot's ground per pixel, so balcony railings and
         // stair tops above it keep their own lamps. The lot: the one under the group's centre; none (or no group read): white
         // and gate 0, the draw as before.
-        FloorShadeBind shade(dev, p.inst.shadeSampler, p.inst.shadeConst, g ? FindLotAt(g->x, g->z) : nullptr, 1.0f, g_fenceShadeLot, g_fenceShadeNoLot);
+        // (2.15.3) A face reads the shade of the ground it faces, kFenceShadeReach in front of it: the fence is a wall in the lot
+        // mask, so its own footprint lies on its shadow's edge (F7: a dark band under 1 m on the face turned to the lamp)
+        FloorShadeBind shade(dev, p.inst.shadeSampler, p.inst.shadeConst, g ? FindLotAt(g->x, g->z) : nullptr, 1.0f, g_fenceShadeLot, g_fenceShadeNoLot,
+                             GroundShadow::kFenceShadeReach);
         if (LightProbe::Capturing()) g_objDrawInfo += "\n      " + shade.Text();
         SetPs(dev, p.ps);
         draw();
@@ -5260,10 +5265,12 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
             // colour constants = 0; Phong's ambient term in COLOR0 stays)
             lamps[0][1] = TerrainLightingPolicy::SurfaceLampGain(g_night.load(std::memory_order_relaxed),
                               g_objPixelLampStrength.load(std::memory_order_relaxed));
-            // reach: the outdoor walls' scale, the slider a trim over its default (x1 at the default: a column takes the
-            // light of the wall behind it)
+            // reach: the outdoor walls' scale, the slider a trim over its default. The walls' gain only for an object set in its
+            // wall (a window or door frame takes the light of the wall around it); a loose object outdoors takes the fences'
+            // scale (2.15.3, F7: a wooden gate in a fence line took 30% of the light the same garden post gave the fence beside it)
             if (reach)
-                lamps[0][1] = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), night, g_wallEnabled.load(std::memory_order_relaxed), g_wallGain.load(std::memory_order_relaxed),
+                lamps[0][1] = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), night, g_wallEnabled.load(std::memory_order_relaxed),
+                                                                    inWall ? g_wallGain.load(std::memory_order_relaxed) : 1.0f,
                                                                     g_objPixelLampStrength.load(std::memory_order_relaxed) / kPixelLampTrimUnit);
             zeroRig = true;
             lamps[0][0] = 1.0f; // no directionless ground light on vertical faces

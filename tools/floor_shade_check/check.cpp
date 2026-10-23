@@ -232,8 +232,10 @@ constexpr size_t kShadeTokens = 36; // mad 5, mad 5, texld 4, add 4, mad 5, add 
 
 // with = without + (the sampler dcl: 3 tokens) + (the shade block: kShadeTokens, right after an atlas max, ending with the
 // multiply of that max's destination). B = the destination register token's number.
-bool ShadeIsExactInsertion(const std::vector<DWORD>& with, const std::vector<DWORD>& without, DWORD S) {
-    if (with.size() != without.size() + 3 + kShadeTokens) return false;
+// lead: tokens the block starts with before the shade (the fences' mad that moves the sample in front of the face: 5)
+bool ShadeIsExactInsertion(const std::vector<DWORD>& with, const std::vector<DWORD>& without, DWORD S, size_t lead = 0) {
+    const size_t tokens = lead + kShadeTokens;
+    if (with.size() != without.size() + 3 + tokens) return false;
     size_t i = 0;
     while (i < without.size() && with[i] == without[i]) i++;
     if (i >= 2 && with[i - 2] == kDclSampler && with[i - 1] == 0x90000000u) i -= 2; // a dcl before another: the same first tokens
@@ -244,11 +246,13 @@ bool ShadeIsExactInsertion(const std::vector<DWORD>& with, const std::vector<DWO
     size_t j = 0;
     while (j < without.size() && rest[j] == without[j]) j++;
     if (j > 0 && rest[j - 1] == kMadOp) j--; // the block's first opcode is the same as the game's mad after it
-    if (j < 4 || j + kShadeTokens > rest.size() || without[j - 4] != kMaxOp) return false;
+    if (j < 4 || j + tokens > rest.size() || without[j - 4] != kMaxOp) return false;
     const DWORD maxDst = without[j - 3];
     const DWORD* blk = &rest[j];
-    if (blk[0] != kMadOp || blk[kShadeTokens - 4] != kMulOp || (blk[kShadeTokens - 3] & 0x7FF) != (maxDst & 0x7FF) || ((blk[kShadeTokens - 3] >> 16) & 0xF) != 0x7) return false;
-    rest.erase(rest.begin() + static_cast<ptrdiff_t>(j), rest.begin() + static_cast<ptrdiff_t>(j + kShadeTokens));
+    if (blk[0] != kMadOp || (lead && blk[lead] != kMadOp) || blk[tokens - 4] != kMulOp || (blk[tokens - 3] & 0x7FF) != (maxDst & 0x7FF) ||
+        ((blk[tokens - 3] >> 16) & 0xF) != 0x7)
+        return false;
+    rest.erase(rest.begin() + static_cast<ptrdiff_t>(j), rest.begin() + static_cast<ptrdiff_t>(j + tokens));
     return rest == without;
 }
 
@@ -629,7 +633,8 @@ int Instanced(Gpu& gpu, const std::vector<std::vector<DWORD>>& shaders, const ch
             Check(ia.shadeSampler == static_cast<int>(ia.atlasSampler) + 1 &&
                       ia.shadeConst == static_cast<int>(reach ? ia.reachConst + 2 : ia.coneConst + 2 * N),
                   "instanced: shade registers after the atlas sampler and after the last lamp rows (one more upload)");
-            Check(ShadeIsExactInsertion(a, n, static_cast<DWORD>(ia.shadeSampler)), "instanced: the shade is the sampler dcl plus the block after the lamp max");
+            Check(ShadeIsExactInsertion(a, n, static_cast<DWORD>(ia.shadeSampler), 5),
+                  "instanced: the shade is the sampler dcl plus the block after the lamp max (the sample moved in front of the face first)");
             const std::string text = Disasm(a);
             const int slots = Slots(text);
             maxSlots = std::max(maxSlots, slots);

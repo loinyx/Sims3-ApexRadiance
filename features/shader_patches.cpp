@@ -1191,7 +1191,10 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
         if (groundShade && E + 1 <= 15 && cM + 2 < 224) {
             const DWORD S = E + 1;
             edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, S)}});
-            AppendGroundShade(code, T, LA, LB, Src(kTemp, P, kSwzX), Src(kTemp, P, 0xAA), Src(kTemp, P, kSwzY), cM, S);
+            // (2.15.3) the mask in front of the face: xz + N.xz x rows[10] (cM + 2 .z; 0.6 m, kFenceShadeReach). The fence is a
+            // wall in the mask, so its own footprint lies on the edge of its shadow; tops (N.xz = 0) read where they stand
+            code.insert(code.end(), {Op(kMad, 4), Dst(kTemp, LA, 0x5), Src(kTemp, N), Src(kConst, cM + 2, 0xAA), Src(kTemp, P)});
+            AppendGroundShade(code, T, LA, LB, Src(kTemp, LA, kSwzX), Src(kTemp, LA, 0xAA), Src(kTemp, P, kSwzY), cM, S);
             out.shadeSampler = static_cast<int>(S);
             out.shadeConst = static_cast<int>(cM);
         }

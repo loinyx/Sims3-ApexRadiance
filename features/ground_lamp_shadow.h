@@ -79,6 +79,8 @@ inline bool WorldTexel(const Grid& g, float wx, float wz, float& fi, float& fj) 
 // 1 up to kFloorGateFull from the lot's ground, 0 from kFloorGateNone (the stories above keep their own wall test, the floor
 // map's alpha). on = false: gate 0 everywhere (the floor as before). False (the floor as before) for a degenerate grid.
 constexpr float kFloorGateFull = 1.0f;  // m
+// Fences: a face reads the mask this far in front of it, along its normal (rows[10]; ShaderPatches PatchInstancedLamps)
+constexpr float kFenceShadeReach = 0.6f; // m
 constexpr float kFloorGateNone = 1.25f; // m
 inline bool FloorShadeRows(const Grid& g, float xzScale, bool on, float rows[12]) {
     for (int i = 0; i < 12; i++) rows[i] = 0.0f;
