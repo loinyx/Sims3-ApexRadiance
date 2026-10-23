@@ -3061,7 +3061,12 @@ void __fastcall WallUvHook(void* geo, void*, uintptr_t mgr, int x, int z, int di
     float f3 = 0.0f, f5 = 0.0f;
     if ((mode == 0 || mode == 1) && g_foundationWallsOn.load(std::memory_order_relaxed) && ReadWallCell(geo, mgr, x, z, dir, c) && ReadCellCrop(geo, k)) {
         const int cell = static_cast<int>(ApexMath::Floor(c.tmid * static_cast<float>(c.len)));
-        if (c.perp < 0.35f && cell >= 0 && cell < c.len && c.hl > 0.2f && c.hm > 0.2f && c.hr > 0.2f && std::max({c.hl, c.hm, c.hr}) < 2.98f) {
+        // (2.15.3) the eave cell of a gable is a triangle whose tip dips under its foot (heights 0.83 / 0.33 / -0.17 at 0.5 m
+        // steps): it is recut too (RecutCellV clamps each vertex to its own height). It was left with the game's mapping, so
+        // on a lot mixing a house on a foundation with one without, its foot read the light 1.5 m lower than its neighbours
+        // (a lit 1 m block on the gable at the eave, two light captures)
+        if (c.perp < 0.35f && cell >= 0 && cell < c.len && std::max({c.hl, c.hm, c.hr}) > 0.2f && std::min({c.hl, c.hm, c.hr}) > -1.0f &&
+            std::max({c.hl, c.hm, c.hr}) < 2.98f) {
             f3 = std::max(0.0f, k.w3 / 512.0f - 8.0f), f5 = std::max(0.0f, k.w5 / 512.0f - 8.0f);
             // the game shows the bottom vertices at the light base and the top ones at base + 3 (1 - f)
             const float off = std::max({ApexMath::Fabs(k.y[0] - c.base), ApexMath::Fabs(k.y[2] - c.base), ApexMath::Fabs(3.0f * (1.0f - f3) - (k.y[3] - c.base)),
