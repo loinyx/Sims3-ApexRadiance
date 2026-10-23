@@ -11900,8 +11900,10 @@ bool OwnFloorBlocksAt(const unsigned char* room, const float* lp, const float* s
             const float th = *reinterpret_cast<const float*>(lt + 0x78);
             if (ApexMath::IsFinite(th) && ApexMath::Fabs(th) < 1000.0f) h = th;
         }
-        if (!(ApexMath::Fabs(h) < 1000.0f) || !(L[1] < h - 0.02f) || !(S[1] > h + 0.02f)) return false;
-        const float t = (h - L[1]) / (S[1] - L[1]);
+        // (a ceiling lamp's light sits on the floor's plane, a few millimetres either side of it: within 5 cm over it counts
+        // as under it; no lamp of this story has its light on its own floor)
+        if (!(ApexMath::Fabs(h) < 1000.0f) || !(L[1] < h + 0.05f) || !(S[1] > h + 0.10f)) return false;
+        const float t = L[1] < h ? (h - L[1]) / (S[1] - L[1]) : 0.0f; // (on the plane: where the lamp is)
         const float x = L[0] + t * (S[0] - L[0]), z = L[2] + t * (S[2] - L[2]);
         if (!ApexMath::IsFinite(x) || !ApexMath::IsFinite(z)) return false;
         const uintptr_t level = LevelForPoint(mgr);
