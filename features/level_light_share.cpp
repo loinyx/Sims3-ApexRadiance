@@ -3103,7 +3103,7 @@ void __fastcall WallUvHook(void* geo, void*, uintptr_t mgr, int x, int z, int di
         // relaxed rule alone was reverted once with breakage seen in game)
         const bool outdoor = WallOutdoor(c.wall);
         const bool lowOut = LowFoot(c.foot, c.base) && outdoor;
-        const bool raisedOut = outdoor && WallSampleSpan::RaisedOverflow(c.foot, c.base, c.hl, c.hm, c.hr);
+        const bool raisedOut = outdoor && WallSampleSpan::RaisedCell(c.foot, c.base, c.hl, c.hm, c.hr);
         const bool shortCell = lowOut ? std::max({c.hl, c.hm, c.hr}) > 0.2f && std::min({c.hl, c.hm, c.hr}) > -1.0f
                                       : c.hl > 0.2f && c.hm > 0.2f && c.hr > 0.2f;
         if (c.perp < 0.35f && cell >= 0 && cell < c.len && shortCell && std::max({c.hl, c.hm, c.hr}) < 2.98f) {

@@ -74,5 +74,28 @@ int main() {
           "existing lower-foot sample mover is preserved");
     for (int k = 0; k < 13; ++k)
         Check(std::fabs(Get<float>(samples, k * 0x30 + 4) - (cell.foot + k * 0.25f)) < 1e-5f, "lower-foot sample height remains correct");
+    // Adjacent captured gable cells share a foot but have different tops. The
+    // middle one crossed the old native span; its neighbours did not.
+    alignas(4) std::array<unsigned char, 3 * 13 * 0x30> adjacent{};
+    Put(wall, 0x24, 3);
+    Put(wall, 0x48, 3);
+    WallCellH cells[] = {{foot, 0.691f, 0.691f, 0.691f, true},
+                        {foot, 0.832f, 0.832f, 0.832f, true},
+                        {foot, 0.691f, 0.691f, 0.691f, true}};
+    for (int row = 0; row < 13; ++row)
+        for (int column = 0; column < 3; ++column) {
+            const size_t at = static_cast<size_t>(row * 3 + column) * 0x30;
+            Put(adjacent, at + 4, base + row * 0.25f);
+            Put(adjacent, at + 0x20, static_cast<uint16_t>(column));
+        }
+    const uintptr_t adjacentStart = reinterpret_cast<uintptr_t>(adjacent.data());
+    uintptr_t adjacentBatch[] = {adjacentStart, adjacentStart + adjacent.size()};
+    const WallBlock adjacentBlock{0, 0, 2, 12};
+    Check(MoveWallFootSamples(reinterpret_cast<uintptr_t>(wall.data()), 2, reinterpret_cast<uintptr_t>(adjacentBatch), adjacentBlock, cells, 3) == 39,
+          "adjacent gable cells all use the same drawn foot");
+    for (int row = 0; row < 13; ++row)
+        for (int column = 0; column < 3; ++column)
+            Check(std::fabs(Get<float>(adjacent, static_cast<size_t>(row * 3 + column) * 0x30 + 4) - (foot + row * 0.25f)) < 1e-5f,
+                  "neighbouring gable columns agree at every sample row");
     std::printf("Native wall span: %d checks passed\n", checks);
 }

@@ -1074,16 +1074,16 @@ void RaisedWallSpanChecks() {
     using namespace WallSampleSpan;
     const float base = 20.708f, foot = 22.947f, top = 23.923f;
     const float height = top - foot;
-    Check(RaisedOverflow(foot, base, height, height, height), "raised gable exceeds the native light span");
-    Check(!RaisedOverflow(19.951f, 19.958f, 2.996f, 2.996f, 2.996f), "wall below the gable keeps its native span");
-    Check(!RaisedOverflow(1.0f, 0.0f, 1.0f, 1.0f, 1.0f), "raised cell within the native span stays unchanged");
-    Check(!RaisedOverflow(1.0f, 0.0f, 3.1f, 3.1f, 3.1f), "tall wall retains the existing stretch path");
-    Check(!RaisedOverflow(2.3f, 0.0f, 0.1f, 1.0f, 1.0f), "unsupported thin edge retains the native mapping");
-    Check(!RaisedOverflow(4.0f, 0.0f, 1.0f, 1.0f, 1.0f), "distant span is not reinterpreted");
+    Check(RaisedCell(foot, base, height, height, height), "raised gable exceeds the native light span");
+    Check(!RaisedCell(19.951f, 19.958f, 2.996f, 2.996f, 2.996f), "wall below the gable keeps its native span");
+    Check(RaisedCell(1.0f, 0.0f, 1.0f, 1.0f, 1.0f), "short raised cells use their foot even below the native top");
+    Check(!RaisedCell(1.0f, 0.0f, 3.1f, 3.1f, 3.1f), "tall wall retains the existing stretch path");
+    Check(!RaisedCell(2.3f, 0.0f, 0.1f, 1.0f, 1.0f), "unsupported thin edge retains the native mapping");
+    Check(!RaisedCell(4.0f, 0.0f, 1.0f, 1.0f, 1.0f), "distant span is not reinterpreted");
     Check(ShiftFoot(-1.9f, 0.0f, 1.0f, 1.0f, 1.0f), "existing lower-foot correction remains active");
     Check(!ShiftFoot(0.0f, 0.0f, 3.0f, 3.0f, 3.0f), "ordinary wall keeps its span");
-    Check(!RaisedOverflow(2.3f, 0.0f, 0.5f, 0.5f, 0.5f) && RaisedOverflow(2.3f, 0.0f, 1.0f, 1.0f, 1.0f),
-          "height edit changes the span even when the foot stays fixed");
+    Check(RaisedCell(2.3f, 0.0f, 0.5f, 0.5f, 0.5f) && RaisedCell(2.3f, 0.0f, 1.0f, 1.0f, 1.0f),
+          "a gable height edit retains the same reference at its neighbours");
     // The native clamp cannot represent the captured top. Moving the sample base
     // and UV base together preserves world height through the whole drawn face.
     const float oldTop = base + 3.0f * std::clamp((top - base) / 3.0f, 0.0f, 1.0f);
