@@ -16372,21 +16372,50 @@ int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, 
         uintptr_t nb, mgr, nbMgr;
         int nbId;
     };
-    static std::vector<Seg> segs; // (render thread, under g_archMx)
-    segs.clear();
-    for (const ArchRec* rec : matched)
-        for (const ArchRec::Arch& a : rec->arches) {
-            bool joined = false;
-            for (Seg& s : segs)
-                if (s.mgr == rec->mgr && s.nbMgr == a.nbMgr && s.nbId == a.nbId && ApexMath::Fabs(s.bx - a.ax) < 0.1f && ApexMath::Fabs(s.bz - a.az) < 0.1f && (a.ax == a.bx) == (s.ax == s.bx)) {
-                    s.bx = a.bx, s.bz = a.bz;
-                    joined = true;
-                    break;
-                }
-            if (!joined) segs.push_back(Seg{a.ax, a.az, a.bx, a.bz, a.nb, rec->mgr, a.nbMgr, a.nbId});
+    // (2.15.3) The segments of the last few sets of rooms taken (every floor draw of a story asks again, and the join is
+    // quadratic in the cells): they depend only on those records' arches, which change only with g_archGen (every writer of
+    // g_archRooms moves it under g_archMx, held here). The neighbours' ambients below are read live as before.
+    struct SegSet {
+        uint32_t gen = 0;
+        size_t n = 0;
+        const ArchRec* recs[4] = {};
+        std::vector<Seg> segs;
+    };
+    static SegSet s_segSets[8]; // (render thread, under g_archMx)
+    static unsigned s_segNext = 0;
+    const uint32_t archGen = g_archGen.load(std::memory_order_relaxed);
+    const std::vector<Seg>* segsIn = nullptr;
+    if (matched.size() <= std::size(s_segSets[0].recs))
+        for (const SegSet& set : s_segSets)
+            if (set.gen == archGen && set.n == matched.size() && std::equal(matched.begin(), matched.end(), set.recs)) {
+                segsIn = &set.segs;
+                break;
+            }
+    if (!segsIn) {
+        static std::vector<Seg> built;
+        std::vector<Seg>& segs = matched.size() <= std::size(s_segSets[0].recs) ? s_segSets[s_segNext].segs : built;
+        segs.clear();
+        for (const ArchRec* rec : matched)
+            for (const ArchRec::Arch& a : rec->arches) {
+                bool joined = false;
+                for (Seg& s : segs)
+                    if (s.mgr == rec->mgr && s.nbMgr == a.nbMgr && s.nbId == a.nbId && ApexMath::Fabs(s.bx - a.ax) < 0.1f && ApexMath::Fabs(s.bz - a.az) < 0.1f && (a.ax == a.bx) == (s.ax == s.bx)) {
+                        s.bx = a.bx, s.bz = a.bz;
+                        joined = true;
+                        break;
+                    }
+                if (!joined) segs.push_back(Seg{a.ax, a.az, a.bx, a.bz, a.nb, rec->mgr, a.nbMgr, a.nbId});
+            }
+        if (&segs != &built) {
+            SegSet& set = s_segSets[s_segNext];
+            set.gen = archGen, set.n = matched.size();
+            std::copy(matched.begin(), matched.end(), set.recs);
+            s_segNext = (s_segNext + 1) % std::size(s_segSets);
         }
+        segsIn = &segs;
+    }
     int n = 0;
-    for (const Seg& s : segs) {
+    for (const Seg& s : *segsIn) {
         if (n >= maxCells) break;
         float nb[3];
         if (!ReadRoomAmbient(s.nb, s.nbMgr ? s.nbMgr : s.mgr, s.nbId, nb)) continue;

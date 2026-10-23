@@ -5616,7 +5616,21 @@ bool RoomMapConsts(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& p, 
 // pixel the same, without the block's ~106 ALU per pixel). basisTex: one of the draw's directional maps, 0 = none bound.
 constexpr UINT kArchRows = 2 * ShaderPatches::kArchCells;
 std::atomic<long> g_archCopyDraws{0}, g_archPlainDraws{0};
+// (development builds) the draw cost log's timed draws (DrawCostSampled): their arch rows' own time
+bool g_drawCostTimed = false; // the current draw is timed: UpdateHooks' draw calls add their driver time
+int64_t g_archRowsTicks = 0;
+uint32_t g_archRowsCalls = 0;
+int ArchRowsForImpl(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& room, const float band[4], uintptr_t basisTex, float* rows);
 int ArchRowsFor(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& room, const float band[4], uintptr_t basisTex, float* rows) {
+    if (kPublicBuild || !g_drawCostTimed) return ArchRowsForImpl(dev, room, band, basisTex, rows);
+    LARGE_INTEGER a, b;
+    QueryPerformanceCounter(&a);
+    const int n = ArchRowsForImpl(dev, room, band, basisTex, rows);
+    QueryPerformanceCounter(&b);
+    g_archRowsTicks += b.QuadPart - a.QuadPart, g_archRowsCalls++;
+    return n;
+}
+int ArchRowsForImpl(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& room, const float band[4], uintptr_t basisTex, float* rows) {
     if (room.archConst < 0 || room.ambConst < 0 || !(band[1] > 60000.0f)) return 0;
     float own[4] = {};
     if (FAILED(dev->GetPixelShaderConstantF(static_cast<UINT>(room.ambConst), own, 1))) return 0;
@@ -7952,7 +7966,6 @@ struct DrawCostRow {
 DrawCostRow g_drawCost[kClaimSourceCount + 2]; // [kClaimSourceCount]: several sources, [+1]: not claimed
 uint32_t g_drawCostTick = 0, g_drawCostFrame0 = 0;
 DWORD g_drawCostLogAt = 0;
-bool g_drawCostTimed = false; // the current draw is timed: UpdateHooks' draw calls add their driver time
 int64_t g_drawCostDriver = 0;
 void LogDrawCost() {
     LARGE_INTEGER f;
@@ -7978,9 +7991,13 @@ void LogDrawCost() {
                                 static_cast<double>(r.ticks - r.driver) * msPerTick * 1000.0 / r.draws, ms);
     }
     for (DrawCostRow& r : g_drawCost) r = DrawCostRow{};
+    const std::string arch = g_archRowsCalls ? std::format(" | of it the floors' arch rows: {:.0f} a frame, {:.2f} us each", g_archRowsCalls * scale,
+                                                           static_cast<double>(g_archRowsTicks) * msPerTick * 1000.0 / g_archRowsCalls)
+                                             : std::string();
+    g_archRowsTicks = 0, g_archRowsCalls = 0;
     LOG_INFO(std::format("[LotLightBridge] Draw cost by fix over {} frames (1 draw in 16 timed, the fixes' own time): {:.3f} ms a frame in all, {:.3f} ms a frame "
-                         "in the driver for the game draws the fixes made; {}",
-                         frames, own, driver, text));
+                         "in the driver for the game draws the fixes made; {}{}",
+                         frames, own, driver, text, arch));
 }
 template <typename DrawFn> D3D9Hooks::HookAction DrawCostSampled(IDirect3DDevice9* dev, DrawFn draw) {
     if ((++g_drawCostTick & 15) != 0) return OnDrawTracked(dev, draw);
