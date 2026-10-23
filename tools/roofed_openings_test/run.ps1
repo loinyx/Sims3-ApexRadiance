@@ -30,6 +30,14 @@ $parts=@(
  (Between 'float SegPass(' '// The share of the lamp')
 )
 Set-Content -LiteralPath (Join-Path $OutDir 'extracted_roofed.h') -Value ($parts -join "`n") -Encoding UTF8
+$wallParts = @(
+ (Between 'struct WallBlock {' '// After FUN_006ac070'),
+ (Between 'struct WallCellH {' 'struct WallHeightRec {'),
+ (Between 'bool WallLightBase(' 'bool LowFoot('),
+ (Between 'bool RecutCellV(' 'void __fastcall WallUvHook('),
+ (Between 'long MoveWallFootSamples(' 'bool MoveWallFoot(')
+)
+Set-Content -LiteralPath (Join-Path $OutDir 'extracted_wall_span.h') -Value ($wallParts -join "`n") -Encoding UTF8
 . (Join-Path $repo 'tools/terrain_lighting_test/compiler_env.ps1')
 Initialize-TerrainCompiler
 Push-Location -LiteralPath $OutDir
@@ -38,4 +46,8 @@ try {
  if($LASTEXITCODE -ne 0){throw 'Roofed openings checks compilation failed'}
  & './roofed_openings_checks.exe'
  if($LASTEXITCODE -ne 0){throw 'Roofed openings checks failed'}
+ & cl.exe /nologo /std:c++20 /EHsc /W4 /O2 /MT ('/I'+$repo) ('/I'+$OutDir) /Fewall_native_checks.exe (Join-Path $PSScriptRoot 'wall_native_check.cpp')
+ if($LASTEXITCODE -ne 0){throw 'Native wall checks compilation failed'}
+ & './wall_native_checks.exe'
+ if($LASTEXITCODE -ne 0){throw 'Native wall checks failed'}
 }finally{Pop-Location}

@@ -14,6 +14,7 @@
 #include "features/lamp_visibility.h"
 #include "features/ground_lamp_shadow.h" // (wall_openings.h)
 #include "features/ground_light_gate.h"
+#include "features/wall_sample_span.h"
 #include "features/inner_retry.h"
 #include "features/lamp_reach.h"
 #include "features/rig_cut.h"
@@ -1069,7 +1070,39 @@ void OpeningShapeChecks() {
     }
 }
 
+void RaisedWallSpanChecks() {
+    using namespace WallSampleSpan;
+    const float base = 20.708f, foot = 22.947f, top = 23.923f;
+    const float height = top - foot;
+    Check(RaisedOverflow(foot, base, height, height, height), "raised gable exceeds the native light span");
+    Check(!RaisedOverflow(19.951f, 19.958f, 2.996f, 2.996f, 2.996f), "wall below the gable keeps its native span");
+    Check(!RaisedOverflow(1.0f, 0.0f, 1.0f, 1.0f, 1.0f), "raised cell within the native span stays unchanged");
+    Check(!RaisedOverflow(1.0f, 0.0f, 3.1f, 3.1f, 3.1f), "tall wall retains the existing stretch path");
+    Check(!RaisedOverflow(2.3f, 0.0f, 0.1f, 1.0f, 1.0f), "unsupported thin edge retains the native mapping");
+    Check(!RaisedOverflow(4.0f, 0.0f, 1.0f, 1.0f, 1.0f), "distant span is not reinterpreted");
+    Check(ShiftFoot(-1.9f, 0.0f, 1.0f, 1.0f, 1.0f), "existing lower-foot correction remains active");
+    Check(!ShiftFoot(0.0f, 0.0f, 3.0f, 3.0f, 3.0f), "ordinary wall keeps its span");
+    Check(!RaisedOverflow(2.3f, 0.0f, 0.5f, 0.5f, 0.5f) && RaisedOverflow(2.3f, 0.0f, 1.0f, 1.0f, 1.0f),
+          "height edit changes the span even when the foot stays fixed");
+    // The native clamp cannot represent the captured top. Moving the sample base
+    // and UV base together preserves world height through the whole drawn face.
+    const float oldTop = base + 3.0f * std::clamp((top - base) / 3.0f, 0.0f, 1.0f);
+    Check(top - oldTop > 0.2f, "native top clamps more than twenty centimetres below the face");
+    for (int i = 0; i <= 1000; ++i) {
+        const float y = foot + height * static_cast<float>(i) / 1000.0f;
+        const float uv = std::clamp((y - foot) / 3.0f, 0.0f, 1.0f);
+        const float sampledY = foot + 3.0f * uv;
+        Check(std::fabs(sampledY - y) < 1e-5f, "raised wall reads light at its drawn world height");
+    }
+    for (int i = -400; i <= 400; ++i) {
+        const float f = static_cast<float>(i) / 100.0f;
+        const bool old = f < -0.05f && f > -3.2f;
+        if (f <= 0.0f) Check(ShiftFoot(f, 0.0f, 1.0f, 1.0f, 1.0f) == old, "lower-foot policy remains equivalent");
+    }
+}
+
 int main() {
+    RaisedWallSpanChecks();
     ArchConeChecks();
     FloorSillChecks();
     StairwellChecks();
