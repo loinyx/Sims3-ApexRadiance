@@ -153,7 +153,7 @@ int64_t WalkMap(uint8_t* map, Slot* slots, uint32_t mask) {
     __try {
         for (uint32_t b = 0; b < kBuckets; b++)
             for (uintptr_t node = *reinterpret_cast<uintptr_t*>(map + b * 4); node; node = *reinterpret_cast<uintptr_t*>(node + kNext)) {
-                if (++n > kMaxNodes) return -1;
+                if (++n > kMaxNodes || n > mask) return -1; // (release review: a full table would probe forever)
                 const uint32_t lo = *reinterpret_cast<uint32_t*>(node + kIdLo), hi = *reinterpret_cast<uint32_t*>(node + kIdHi);
                 for (uint32_t i = Hash(lo, hi) & mask;; i = (i + 1) & mask)
                     if (!slots[i].node) {

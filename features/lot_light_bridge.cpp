@@ -1109,7 +1109,10 @@ std::vector<GroundShadow::Lamp> ShadeLamps(const LotRect& r, std::vector<GroundS
         }
         const float nx = std::clamp(std::clamp(L.x, x0, x1), L.rx0, L.rx1), nz = std::clamp(std::clamp(L.z, z0, z1), L.rz0, L.rz1);
         const float wgt = GroundShadow::Weight(L, nx, r.ty, nz);
-        if (!(wgt >= GroundShadow::kMinWeight)) continue;
+        if (!(wgt >= GroundShadow::kMinWeight)) { // (release review) faint over the lot, maybe strong on the margin: in the total
+            o.emplace_back(wgt, L);
+            continue;
+        }
         c.emplace_back(wgt, L);
     }
     const auto strongest = [](const auto& a, const auto& b) { return a.first > b.first; };
@@ -1975,7 +1978,7 @@ void ShadeTick() {
         g_shadeLastLamps = static_cast<int>(t.lamps.size());
         g_shadeLastWalls = static_cast<int>(t.walls.size());
         g_shadeLastPatches = static_cast<int>(t.patches.size());
-        if (t.walls.empty() && t.crowns.empty()) t.lamps.clear(); // nothing shades: 255 everywhere at once
+        if (t.walls.empty() && t.crowns.empty()) t.lamps.clear(), t.others.clear(); // nothing shades: 255 everywhere at once
         t.lot = want.lot, t.key = want.key, t.w = want.w, t.h = want.h;
         t.sent = GetTickCount() | 1;
         g_shadeWorker.Submit(std::move(t));

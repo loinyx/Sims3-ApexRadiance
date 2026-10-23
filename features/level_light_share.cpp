@@ -3094,11 +3094,15 @@ void __fastcall WallUvHook(void* geo, void*, uintptr_t mgr, int x, int z, int di
         ref = c.base;
         // (2.15.3) the eave cell of a gable is a triangle whose tip dips under its foot (heights 0.83 / 0.33 / -0.17 at 0.5 m
         // steps): it is recut too (RecutCellV clamps each vertex to its own height), as its neighbours are
-        if (c.perp < 0.35f && cell >= 0 && cell < c.len && std::max({c.hl, c.hm, c.hr}) > 0.2f && std::min({c.hl, c.hm, c.hr}) > -1.0f &&
-            std::max({c.hl, c.hm, c.hr}) < 2.98f) {
+        // (release review) only for an outdoor wall drawn below its light base; other cells keep the all-above-0.2 m rule (the
+        // relaxed rule alone was reverted once with breakage seen in game)
+        const bool lowOut = LowFoot(c.foot, c.base) && WallOutdoor(c.wall);
+        const bool shortCell = lowOut ? std::max({c.hl, c.hm, c.hr}) > 0.2f && std::min({c.hl, c.hm, c.hr}) > -1.0f
+                                      : c.hl > 0.2f && c.hm > 0.2f && c.hr > 0.2f;
+        if (c.perp < 0.35f && cell >= 0 && cell < c.len && shortCell && std::max({c.hl, c.hm, c.hr}) < 2.98f) {
             f3 = std::max(0.0f, k.w3 / 512.0f - 8.0f), f5 = std::max(0.0f, k.w5 / 512.0f - 8.0f);
             // an outdoor wall's cell drawn below its light base is lit from its foot (DropLowFootWall)
-            if (LowFoot(c.foot, c.base) && WallOutdoor(c.wall)) ref = c.foot;
+            if (lowOut) ref = c.foot;
             // the game shows the bottom vertices at the light base and the top ones at base + 3 (1 - f)
             const float off = std::max({ApexMath::Fabs(k.y[0] - ref), ApexMath::Fabs(k.y[2] - ref), ApexMath::Fabs(3.0f * (1.0f - f3) - (k.y[3] - ref)),
                                         ApexMath::Fabs(3.0f * (1.0f - f5) - (k.y[5] - ref))});
@@ -10421,6 +10425,7 @@ float* SolveGroundTexel(BYTE* room, float* out, void* list2D, void* list3D, void
 }
 
 float* SolvePointBatchImpl(BYTE* room, float* out, void* list2D, void* list3D, void* flags, void* sample);
+bool GroundFloorTileAt(const unsigned char* room, const float* sample);
 thread_local bool t_inBatchSample = false; // (2.15.3) inside one sample of a batch solve (WindowChannelHook keeps answers only here)
 struct InBatchSample {
     bool was = t_inBatchSample;
@@ -10483,6 +10488,10 @@ float* SolvePointBatchImpl(BYTE* room, float* out, void* list2D, void* list3D, v
             OutdoorDelta::Mask(false, false, 0.0f, 0.0f);
         }
         if (t_replay) t_lastMask = LastMask{};
+        // (2.15.3, release review) a texel under a floor tile of story 0 (a patio, a path) keeps alpha 0: the outdoor floors
+        // weight the atlas by 1 - alpha and do not add the indoor light (kFloorIndoorLight), so E there took the garden lamps'
+        // light off the tile; the lot pass and the snowy passes (grass and snow) take E
+        if (exitAlpha > 0.0f && GroundFloorTileAt(room, static_cast<const float*>(sample))) exitAlpha = 0.0f;
         if (g_floorMaskReady && room[0x18]) out[3] = exitAlpha; // outdoor: the game's alpha 0
         return r;
     }
@@ -12180,6 +12189,23 @@ struct ApexCycles {
 // the ray crosses it through a removed floor (an opening; FloorAt: anything unread is a floor). Room 0 keeps the game's
 // light (lamps on the ground under a raised house). POD (SEH).
 std::atomic<long> g_underFloorBlocked{0};
+// The sample (world) stands over a floor tile of its room's story (FloorAt: a placed floor), POD (SEH)
+bool GroundFloorTileAt(const unsigned char* room, const float* sample) {
+    __try {
+        const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(room);
+        if (!mgr) return false;
+        Xform xf;
+        if (!ReadXform(mgr, xf)) return false;
+        float S[3];
+        ToLocal(xf, sample, S);
+        const uintptr_t level = LevelForPoint(mgr);
+        if (!level || !ApexMath::IsFinite(S[0]) || !ApexMath::IsFinite(S[2])) return false;
+        const int ix = static_cast<int>(ApexMath::Floor(S[0])), iz = static_cast<int>(ApexMath::Floor(S[2]));
+        return FloorAt(level, ix, iz, Quadrant(S[0] - ix, S[2] - iz)) != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 bool OwnFloorBlocksAt(const unsigned char* room, const float* lp, const float* sample) {
     __try {
         const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(room);
@@ -14522,6 +14548,10 @@ void OnPresent() {
 }
 
 void OnWorldChanged() {
+    { // (release review) a wall freed with the world may come back at the same address: its cells' feet start afresh
+        std::lock_guard<std::mutex> lk(g_wallHMx);
+        g_wallH.clear(), g_wallSolvedH.clear(), g_wallTop.clear();
+    }
     MeshOcclusion::Reset();
     // a new world is not live until OnWorldLive again: its load's lamps are no edit, and no lot is entered meanwhile
     g_worldLiveAt.store(0, std::memory_order_relaxed);
