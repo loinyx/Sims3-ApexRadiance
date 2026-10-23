@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <vector>
 #include "wall_openings.h"
 #include "foliage_canopy.h"
@@ -494,5 +495,170 @@ private:
         return t > 0.0f && t < 1.0f && u >= 0.0f && u <= 1.0f;
     }
 };
+
+
+// ---- (2.15.3) The shade on the world grass around lots: one terrain chunk's texture (lot_light_bridge.cpp ChunkShade; L8,
+// kChunkTexels a side over the chunk's kChunkSize metres, full mips). A texel is the shades of the lots over it weighed by
+// their lamps' light there (sum w M / sum w; 255 where none), a mip texel the rounded mean of the four under it. ChunkFull
+// makes the whole chunk; ChunkUpdate makes again only the texels over a changed box and the mip texels over them, from the
+// texture's own texels around that box. Both give the same bytes (tools/ground_shade_test): a texel sums its lots in the
+// order of the list (sorted by lot), and a texel past the box has the same lots as when the texture was made.
+struct ExtData { // one lot's shade over its grid (ShadeJob::Result) and the lamps' stamp weight it is a share of
+    std::vector<uint8_t> v;
+    std::vector<float> w;
+};
+struct ExtSrc { // one lot's shade, for a chunk (shared, never changed once made)
+    Grid grid;
+    std::shared_ptr<const ExtData> v;
+    float x0 = 0, z0 = 0, x1 = 0, z1 = 0; // its world box
+    uint64_t lot = 0;
+};
+constexpr int kChunkTexels = 1024;
+constexpr float kChunkSize = 256.0f;
+constexpr int kChunkLevels = 11; // 1024 x 1024 .. 1 x 1
+struct TexRect { // texels [i0, i1] x [j0, j1] of one level
+    int i0 = 0, j0 = 0, i1 = -1, j1 = -1;
+    bool Empty() const { return i1 < i0 || j1 < j0; }
+    int W() const { return i1 - i0 + 1; }
+    int H() const { return j1 - j0 + 1; }
+    size_t Size() const { return Empty() ? 0 : static_cast<size_t>(W()) * H(); }
+};
+// The level-l texels whose level-0 texels meet r0
+inline TexRect LevelRect(const TexRect& r0, int l) { return {r0.i0 >> l, r0.j0 >> l, r0.i1 >> l, r0.j1 >> l}; }
+// The level-l texels the level-(l + 1) texels over r0 are the means of (l < kChunkLevels - 1): LevelRect(r0, l) and the
+// texels beside it in the same 2 x 2 blocks
+inline TexRect BlockRect(const TexRect& r0, int l) {
+    const TexRect n = LevelRect(r0, l + 1);
+    return {2 * n.i0, 2 * n.j0, 2 * n.i1 + 1, 2 * n.j1 + 1};
+}
+// The level-0 texels a world box covers, clipped to the chunk whose corner is (wx0, wz0)
+inline TexRect ChunkRectOf(float wx0, float wz0, float x0, float z0, float x1, float z1) {
+    constexpr int N = kChunkTexels;
+    constexpr float tpm = N / kChunkSize; // texels a metre
+    TexRect r;
+    r.i0 = std::max(0, static_cast<int>(ApexMath::Floor((x0 - wx0) * tpm))), r.i1 = std::min(N - 1, static_cast<int>(ApexMath::Ceil((x1 - wx0) * tpm)));
+    r.j0 = std::max(0, static_cast<int>(ApexMath::Floor((z0 - wz0) * tpm))), r.j1 = std::min(N - 1, static_cast<int>(ApexMath::Ceil((z1 - wz0) * tpm)));
+    return r;
+}
+// The shade of one lot at the world point (bilinear on its grid); false outside its grid
+inline bool ExtShadeAt(const ExtSrc& m, float x, float z, float& v, float& wt) {
+    float fi, fj;
+    if (!WorldTexel(m.grid, x, z, fi, fj)) return false;
+    const int W = m.grid.w, H = m.grid.h;
+    if (!(fi >= 0.0f) || !(fj >= 0.0f) || !(fi <= W) || !(fj <= H)) return false;
+    const float a = std::clamp(fi - 0.5f, 0.0f, W - 1.0f), b = std::clamp(fj - 0.5f, 0.0f, H - 1.0f);
+    const int i0 = static_cast<int>(a), j0 = static_cast<int>(b), i1 = std::min(i0 + 1, W - 1), j1 = std::min(j0 + 1, H - 1);
+    const float u = a - i0, t = b - j0;
+    const std::vector<uint8_t>& e = m.v->v;
+    const std::vector<float>& ww = m.v->w;
+    const auto at = [&](int i, int j) { return static_cast<float>(e[static_cast<size_t>(j) * W + i]); };
+    const auto wa = [&](int i, int j) { return ww[static_cast<size_t>(j) * W + i]; };
+    v = (at(i0, j0) * (1 - u) + at(i1, j0) * u) * (1 - t) + (at(i0, j1) * (1 - u) + at(i1, j1) * u) * t;
+    wt = (wa(i0, j0) * (1 - u) + wa(i1, j0) * u) * (1 - t) + (wa(i0, j1) * (1 - u) + wa(i1, j1) * u) * t;
+    return true;
+}
+// The level-0 texels over r (px: r's size, by rows) from the lots over the chunk whose corner is (wx0, wz0); returns the
+// count of them under 255
+inline int ChunkTexels(const std::vector<ExtSrc>& srcs, float wx0, float wz0, const TexRect& r, std::vector<uint8_t>& px) {
+    constexpr float tpm = kChunkTexels / kChunkSize;
+    px.assign(r.Size(), 255);
+    if (r.Empty()) return 0;
+    std::vector<float> sumW, sumMW;
+    for (const ExtSrc& m : srcs) {
+        const size_t n = static_cast<size_t>(m.grid.w) * m.grid.h;
+        if (!m.v || m.v->v.size() != n || m.v->w.size() != n) continue;
+        if (sumW.empty()) sumW.assign(r.Size(), 0.0f), sumMW.assign(r.Size(), 0.0f);
+        TexRect s = ChunkRectOf(wx0, wz0, m.x0, m.z0, m.x1, m.z1);
+        s.i0 = std::max(s.i0, r.i0), s.i1 = std::min(s.i1, r.i1), s.j0 = std::max(s.j0, r.j0), s.j1 = std::min(s.j1, r.j1);
+        for (int j = s.j0; j <= s.j1; j++)
+            for (int i = s.i0; i <= s.i1; i++) {
+                float v, wt;
+                if (!ExtShadeAt(m, wx0 + (i + 0.5f) / tpm, wz0 + (j + 0.5f) / tpm, v, wt)) continue;
+                const float w = std::max(wt, 0.0f) + 1e-4f; // (a lot with no lamp here weighs almost nothing)
+                const size_t at = static_cast<size_t>(j - r.j0) * r.W() + (i - r.i0);
+                sumW[at] += w;
+                sumMW[at] += w * v;
+            }
+    }
+    int shaded = 0;
+    for (size_t k = 0; k < sumW.size(); k++)
+        if (sumW[k] > 0.0f) {
+            const uint8_t q = ToByte(std::clamp(sumMW[k] / sumW[k], 0.0f, 255.0f));
+            if (q < 255) px[k] = q, shaded++;
+        }
+    return shaded;
+}
+// The level-l texels over `out` from the level-(l - 1) texels `in` over inRect (which holds out's 2 x 2 blocks)
+inline void ChunkMip(const std::vector<uint8_t>& in, const TexRect& inRect, const TexRect& out, std::vector<uint8_t>& px) {
+    px.resize(out.Size());
+    const int iw = inRect.W();
+    for (int j = out.j0; j <= out.j1; j++)
+        for (int i = out.i0; i <= out.i1; i++) {
+            const size_t p = static_cast<size_t>(2 * j - inRect.j0) * iw + (2 * i - inRect.i0), q = p + iw;
+            px[static_cast<size_t>(j - out.j0) * out.W() + (i - out.i0)] = static_cast<uint8_t>((in[p] + in[p + 1] + in[q] + in[q + 1] + 2) / 4);
+        }
+}
+// a's texels over ra into b over rb (which holds ra)
+inline void PutRect(const std::vector<uint8_t>& a, const TexRect& ra, std::vector<uint8_t>& b, const TexRect& rb) {
+    for (int j = ra.j0; j <= ra.j1; j++)
+        std::copy_n(&a[static_cast<size_t>(j - ra.j0) * ra.W()], ra.W(), &b[static_cast<size_t>(j - rb.j0) * rb.W() + (ra.i0 - rb.i0)]);
+}
+// A chunk's texels: levels[l] over rects[l] (the whole level, or what changed); no levels: no lot shades the chunk
+struct ChunkTexture {
+    std::vector<TexRect> rects;
+    std::vector<std::vector<uint8_t>> levels;
+    int shaded = 0; // level-0 texels under 255
+};
+inline void ChunkFull(const std::vector<ExtSrc>& srcs, float wx0, float wz0, ChunkTexture& out) {
+    out = {};
+    const TexRect r{0, 0, kChunkTexels - 1, kChunkTexels - 1};
+    std::vector<uint8_t> px;
+    out.shaded = ChunkTexels(srcs, wx0, wz0, r, px);
+    if (!out.shaded) return; // nothing shaded: no texture
+    out.rects.push_back(r);
+    out.levels.push_back(std::move(px));
+    for (int l = 1; l < kChunkLevels; l++) {
+        const TexRect n{0, 0, (kChunkTexels >> l) - 1, (kChunkTexels >> l) - 1};
+        std::vector<uint8_t> next;
+        ChunkMip(out.levels.back(), out.rects.back(), n, next);
+        out.rects.push_back(n);
+        out.levels.push_back(std::move(next));
+    }
+}
+// The texels over r0 (level 0) and the mip texels over them made again. old[l]: the texture's level-l texels over
+// BlockRect(r0, l) (l < kChunkLevels - 1); oldShaded: its count of level-0 texels under 255. out: LevelRect(r0, l) per level,
+// or no levels when nothing stays shaded (no texture). false: old does not fit r0
+inline bool ChunkUpdate(const std::vector<ExtSrc>& srcs, float wx0, float wz0, const TexRect& r0, const std::vector<std::vector<uint8_t>>& old, int oldShaded,
+                        ChunkTexture& out) {
+    out = {};
+    if (r0.Empty() || old.size() != static_cast<size_t>(kChunkLevels - 1)) return false;
+    for (int l = 0; l < kChunkLevels - 1; l++)
+        if (old[l].size() != BlockRect(r0, l).Size()) return false;
+    std::vector<uint8_t> px;
+    const int now = ChunkTexels(srcs, wx0, wz0, r0, px);
+    std::vector<uint8_t> cur = old[0];
+    TexRect cr = BlockRect(r0, 0);
+    int before = 0;
+    for (int j = r0.j0; j <= r0.j1; j++)
+        for (int i = r0.i0; i <= r0.i1; i++) before += cur[static_cast<size_t>(j - cr.j0) * cr.W() + (i - cr.i0)] < 255;
+    out.shaded = oldShaded - before + now;
+    if (out.shaded <= 0) return out.shaded == 0; // nothing shaded: no texture
+    PutRect(px, r0, cur, cr);
+    out.rects.push_back(r0);
+    out.levels.push_back(std::move(px));
+    for (int l = 1; l < kChunkLevels; l++) {
+        const TexRect rl = LevelRect(r0, l);
+        std::vector<uint8_t> v;
+        ChunkMip(cur, cr, rl, v);
+        if (l < kChunkLevels - 1) {
+            cur = old[l];
+            cr = BlockRect(r0, l);
+            PutRect(v, rl, cur, cr);
+        }
+        out.rects.push_back(rl);
+        out.levels.push_back(std::move(v));
+    }
+    return true;
+}
 
 } // namespace GroundShadow
