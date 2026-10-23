@@ -3853,12 +3853,28 @@ void SaveRefused(const char* what, const std::vector<DWORD>& ps) {
     }
 }
 
+// (2.15.3) The last answers of PatchedFor, by cache and shader: a draw asks one to three of these maps, thousands of times a
+// frame, for the shader the game has set again and again. Exact: an entry is never erased while the hooks run (the maps
+// only grow, and an unordered_map keeps its elements' addresses), and Shutdown, which empties them, moves the generation.
+struct PatchedFront {
+    const void* cache = nullptr;
+    IDirect3DPixelShader9* ps = nullptr;
+    PatchedPs* p = nullptr;
+    uint32_t gen = 0;
+};
+PatchedFront g_patchedFront[32]; // render thread
+uint32_t g_patchedGen = 1;
+
 // Patched copy of the current pixel shader, made once per shader with `patch`. variant (12/10, realistic reach): a second
 // copy of a shader another patch already took; refused, that first copy keeps drawing it, and the shader, saved under the
 // first patch's name when it was refused there, is not saved again.
 template <typename PatchFn>
 PatchedPs& PatchedFor(IDirect3DDevice9* dev, std::unordered_map<IDirect3DPixelShader9*, PatchedPs>& cache, const char* what, PatchFn patch, bool variant = false) {
+    const uint32_t slotKey = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&cache) ^ (reinterpret_cast<uintptr_t>(g_curPs) >> 4));
+    PatchedFront& front = g_patchedFront[(slotKey * 2654435761u) >> 27];
+    if (front.cache == &cache && front.ps == g_curPs && front.gen == g_patchedGen) return *front.p;
     PatchedPs& p = cache[g_curPs];
+    front = {&cache, g_curPs, &p, g_patchedGen};
     if (!p.tried) {
         p.tried = true;
         std::vector<DWORD> t = ShaderCode(g_curPs);
@@ -5407,19 +5423,26 @@ bool RoomMapCapsOk(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& p) 
 // The draw's room map constants: size (w, h, 1/w, 1/h) and band (1/S, S, 0.5, S - 1); false when this draw keeps the game's read
 bool RoomMapConsts(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& p, float size[4], float band[4], bool& wall) {
     if (!g_curVs) return false;
-    auto it = g_roomUvVs.find(g_curVs);
-    if (it == g_roomUvVs.end()) {
-        ShaderPatches::RoomMapUv uv;
-        UINT n = 0;
-        std::vector<DWORD> code;
-        if (SUCCEEDED(g_curVs->GetFunction(nullptr, &n)) && n >= 8 && n <= 65536) {
-            code.resize(n / 4);
-            if (FAILED(g_curVs->GetFunction(code.data(), &n))) code.clear();
+    // (2.15.3) the last shader's entry, kept while the map only grows (Shutdown empties it and moves g_patchedGen)
+    static IDirect3DVertexShader9* s_lastVs = nullptr;
+    static const ShaderPatches::RoomMapUv* s_lastUv = nullptr;
+    static uint32_t s_lastGen = 0;
+    if (s_lastVs != g_curVs || s_lastGen != g_patchedGen || !s_lastUv) {
+        auto it = g_roomUvVs.find(g_curVs);
+        if (it == g_roomUvVs.end()) {
+            ShaderPatches::RoomMapUv fresh;
+            UINT n = 0;
+            std::vector<DWORD> code;
+            if (SUCCEEDED(g_curVs->GetFunction(nullptr, &n)) && n >= 8 && n <= 65536) {
+                code.resize(n / 4);
+                if (FAILED(g_curVs->GetFunction(code.data(), &n))) code.clear();
+            }
+            if (code.empty() || !ShaderPatches::RoomMapUvScale(code, fresh)) fresh.constReg = -1;
+            it = g_roomUvVs.emplace(g_curVs, fresh).first;
         }
-        if (code.empty() || !ShaderPatches::RoomMapUvScale(code, uv)) uv.constReg = -1;
-        it = g_roomUvVs.emplace(g_curVs, uv).first;
+        s_lastVs = g_curVs, s_lastUv = &it->second, s_lastGen = g_patchedGen;
     }
-    const ShaderPatches::RoomMapUv& uv = it->second;
+    const ShaderPatches::RoomMapUv& uv = *s_lastUv;
     if (uv.constReg < 0) {
         g_roomUnknownVs.fetch_add(1, std::memory_order_relaxed);
         return false;
@@ -8805,6 +8828,7 @@ void Shutdown(bool keepChunkMaps) {
         g_meltPs = nullptr;
     }
     g_meltTried = false;
+    g_patchedGen++; // (PatchedFor's front answers and RoomMapConsts' last shader)
     for (auto* cache : {&g_terrainAlphaPs, &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs, &g_windowPs,
                         &g_objLampPsReach, &g_fencePsReach, &g_windowPsReach}) {
         for (auto& [k, p] : *cache)
