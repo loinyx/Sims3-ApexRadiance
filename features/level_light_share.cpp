@@ -16320,17 +16320,24 @@ int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, 
         return 0;
     }
     // the draw's story: the manager whose room maps include the bound map, else the one whose directional maps include the
-    // bound basis map (rooms with arches first, then the wall masks' stories); a memo of the last room map's story
-    static uintptr_t s_mapTex = 0, s_mapMgr = 0;
+    // bound basis map (rooms with arches first, then the wall masks' stories); a memo of the recent room maps' stories, each
+    // answer checked against the manager's sets again (a map is in one manager's sets only, so a confirmed entry is the
+    // manager the walk would find). (2.15.3) 16 maps instead of the last one: a frame's floors alternate between the stories'
+    // maps, and every miss walked the rooms with arches through StoryMapsInclude.
+    struct MapStory {
+        uintptr_t tex = 0, mgr = 0;
+    };
+    static MapStory s_mapStory[16];
     uintptr_t drawMgr = 0;
     if (mapTex) {
-        if (s_mapTex == mapTex && s_mapMgr && StoryMapsInclude(s_mapMgr, mapTex)) drawMgr = s_mapMgr;
+        MapStory& memo = s_mapStory[(static_cast<uint32_t>(mapTex) * 2654435761u) >> 28];
+        if (memo.tex == mapTex && memo.mgr && StoryMapsInclude(memo.mgr, mapTex)) drawMgr = memo.mgr;
         else {
             uintptr_t tried = 0;
             for (const auto& [key, rec] : g_archRooms)
                 if (rec.mgr != tried && StoryMapsInclude(tried = rec.mgr, mapTex)) {
                     drawMgr = rec.mgr;
-                    s_mapTex = mapTex, s_mapMgr = drawMgr;
+                    memo = {mapTex, drawMgr};
                     break;
                 }
         }
