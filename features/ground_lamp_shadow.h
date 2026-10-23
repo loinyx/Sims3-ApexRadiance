@@ -156,7 +156,8 @@ inline float SoftPass(const Lamp& L, float groundY, const Wall& w, const WallOpe
     if (!(along > 0.0f)) return 1.0f;
     float inside;
     if (w.pn && patches && u >= 0.0f && u <= 1.0f) // its patches decide within the run (their tops, openings: wall_openings.h)
-        inside = WallOpenings::CrossPass(patches + w.p0, static_cast<int>(w.pn), m, std::min(w.y0, y) - 1.0f, w.y1, u, y, nullptr, rim);
+        inside = WallOpenings::CrossPass(patches + w.p0, static_cast<int>(w.pn), m, std::min(w.y0, y) - 1.0f, w.y1, u, y, nullptr, rim,
+                                         WallOpenings::AcrossOf(rx, py - L.y, rz, sx, sz));
     else
         inside = 1.0f - Penumbra::Cover((w.y1 - 0.02f) - y, rim.up); // the wall's top, softened
     return std::clamp(1.0f - along * (1.0f - inside), 0.0f, 1.0f);
@@ -182,7 +183,7 @@ inline float Pass(const Lamp& L, float x, float groundY, float z, const Wall& w,
     // within the wall's band: its patches decide (the base margin above stays the wall's: a ray to the wall's own foot), with
     // the lamp's penumbra at the crossing (penumbra.h)
     return WallOpenings::CrossPass(patches + w.p0, static_cast<int>(w.pn), std::sqrt(sx * sx + sz * sz), std::min(w.y0, y) - 1.0f, w.y1, u, y, nullptr,
-                                   WallOpenings::RimAt(t, rx, py - L.y, rz, sx, sz, Penumbra::Radius()));
+                                   WallOpenings::RimAt(t, rx, py - L.y, rz, sx, sz, Penumbra::Radius()), WallOpenings::AcrossOf(rx, py - L.y, rz, sx, sz));
 }
 inline bool Blocks(const Lamp& L, float x, float groundY, float z, const Wall& w, const WallOpenings::Patch* patches = nullptr) {
     return Pass(L, x, groundY, z, w, patches) <= 0.0f;

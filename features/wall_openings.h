@@ -30,8 +30,38 @@ struct Patch {
     float head[kProfile] = {};   // world y at ou0 .. ou1
     uint8_t open = 0;            // 1 = the cell holds an opening
     uint8_t jamb0 = 0, jamb1 = 0; // a jamb (soft rim) at ou0 / ou1
-    uint8_t shaped = 0;          // 1 = sill and head from the opening's cutout mask, 0 = its kind's defaults
+    uint8_t shaped = 0;          // 1 = sill and head from the opening's cutout mask, 2 = from its window's panes, 0 = its kind's defaults
+    // (2.15.3) a sill on the floor (an arch, a door): no rim under it, as the grid walk's kFloorSill (the ground just past an
+    // arch lost up to 10 % of an outdoor lamp to the sill's rim)
+    uint8_t floorSill = 0;
+    float glass = 1.0f;          // (2.15.3) the share its opening passes: kWindowPass for a window's glass and frame, 1 for doors and arches
 };
+
+// (2.15.3) Wall thickness: the game lights a wall from two faces, each 0.05 m inside its cell from the edge line (the wall
+// setup FUN_006AB280 adds [0x00FF37E0] = 0.05 to the start of a -z / -x face and [0x01158B90] = 0.95 to a +z / +x one,
+// [0x00FF37E4] = 0.0353 across a diagonal), and a window's two daylight panes (type 7) stand 0.05 m in front of each side
+// (Lighting snapshot: pairs 0.1 m apart). So a wall is 0.1 m thick for light. A ray through an opening is tested again at
+// both faces and keeps the smaller share: the beam narrows at grazing angles (at 60 degrees off the wall's normal each jamb
+// takes 9 cm more of it). The drawn mesh's own thickness is not read.
+constexpr float kHalfThick = 0.05f;
+constexpr float kFaceShiftMax = 0.5f; // m: the faces' shift along the wall and up is capped (a ray almost along the wall)
+// (2.15.3) Light through a window: clear glass passes about 0.85 at the angles that matter (a single pane at normal incidence
+// 0.90, double glazing about 0.8) and the frame's bars and the mullions between panes cover about a tenth of the hole: 0.85 x
+// 0.9. Doors and arches pass 1. A chosen constant, not read from the game (it keeps no glass value for lamp light).
+constexpr float kGlassPass = 0.85f, kFrameOpen = 0.9f, kWindowPass = kGlassPass * kFrameOpen;
+// A ray's run per metre across a wall's line (sx, sz): metres along the wall (from its start toward its end) and up. on =
+// false for a ray parallel to it.
+struct Across {
+    float along = 0.0f, up = 0.0f;
+    bool on = false;
+};
+inline Across AcrossOf(float rx, float ry, float rz, float sx, float sz) {
+    const float m = std::sqrt(sx * sx + sz * sz);
+    if (!(m > 1e-6f)) return {};
+    const float n = std::fabs(rx * sz - rz * sx) / m;
+    if (!(n > 1e-6f)) return {};
+    return {(rx * sx + rz * sz) / m / n, ry / n, true};
+}
 
 inline float Ramp(float x, float soft = kSoft) {
     const float t = std::clamp(x / soft + 0.5f, 0.0f, 1.0f);
@@ -55,8 +85,8 @@ inline Penumbra::Rim RimAt(float t, float dx, float dy, float dz, float sx, floa
 // y, the lamp's spot there `rim` wide (half widths; the default is the narrowest rim). The spot is spread along the segment
 // over the patches it covers: a patch's opening passes Cover(sill) x Cover(head) or over its top, its solid part over its
 // top only, the wall between patches nothing. why: 0 under its base or over its top (or no wall there), 1 over a patch's
-// lower top, 2 through an opening, 3 stopped.
-inline float CrossPass(const Patch* ps, int n, float segLen, float y0, float y1, float u, float y, int* why = nullptr, const Penumbra::Rim& rim = {}) {
+// lower top, 2 through an opening, 3 stopped. opened: the spot covered an opening.
+inline float CrossPassAt(const Patch* ps, int n, float segLen, float y0, float y1, float u, float y, int* why, const Penumbra::Rim& rim, bool& opened) {
     if (why) *why = 0;
     if (!(y > y0 + kEdge && y < y1 - kEdge)) return 1.0f; // (the copies' rule before patches)
     const float m = std::max(segLen, 1e-3f);
@@ -77,7 +107,10 @@ inline float CrossPass(const Patch* ps, int n, float segLen, float y0, float y1,
             const float w = Penumbra::Weight(c, h, s0, s1), v = std::clamp(c, s0, s1);
             const float ov = Penumbra::Cover(y - topAt(v), rim.up);
             float in = 0.0f;
-            if (open) in = Penumbra::Cover(y - p.sill, rim.up) * Penumbra::Cover(HeadAt(p, v / m) - y, rim.up);
+            if (open) {
+                opened = true;
+                in = (p.floorSill ? 1.0f : Penumbra::Cover(y - p.sill, rim.up)) * Penumbra::Cover(HeadAt(p, v / m) - y, rim.up) * p.glass;
+            }
             if (in > ov) through += w * in;
             else over += w * ov;
         };
@@ -95,12 +128,29 @@ inline float CrossPass(const Patch* ps, int n, float segLen, float y0, float y1,
     return pass;
 }
 
+// CrossPassAt; (2.15.3) a ray through an opening (across: its run across the wall, AcrossOf) is tested at the wall's two
+// faces instead (kHalfThick) and keeps the smaller share. Rays that cover no opening cost what they did.
+inline float CrossPass(const Patch* ps, int n, float segLen, float y0, float y1, float u, float y, int* why = nullptr, const Penumbra::Rim& rim = {}, const Across& across = {}) {
+    bool opened = false;
+    const float pass = CrossPassAt(ps, n, segLen, y0, y1, u, y, why, rim, opened);
+    if (!opened || !across.on) return pass;
+    const float m = std::max(segLen, 1e-3f);
+    const float du = std::clamp(kHalfThick * across.along, -kFaceShiftMax, kFaceShiftMax) / m, dy = std::clamp(kHalfThick * across.up, -kFaceShiftMax, kFaceShiftMax);
+    int w0 = 0, w1 = 0;
+    bool unused = false;
+    // (the faces stay on the segment: past its ends its neighbour is not known, as for the spot)
+    const float p0 = CrossPassAt(ps, n, segLen, y0, y1, std::clamp(u - du, 0.0f, 1.0f), y - dy, &w0, rim, unused);
+    const float p1 = CrossPassAt(ps, n, segLen, y0, y1, std::clamp(u + du, 0.0f, 1.0f), y + dy, &w1, rim, unused);
+    if (why) *why = p0 <= p1 ? w0 : w1;
+    return std::min(p0, p1);
+}
+
 // ---- Opening shapes from the cutout mask (no mask is read yet) ----
 // The game keeps each opening's exact shape in a mask texture (the cut post's TGI, type 0x00B2D882 per the disassembly notes)
 // that it draws the wall through. No path in this codebase reads a resource's bytes (the resource cache answers which
-// package holds a key and never opens one), and the record and stream layouts such a read needs are not verified, so the
-// openings keep their kind's defaults. ShapeFromAlpha is what a reader would hand the mask to: from an alpha image (row 0 at
-// the top, unverified) covering `cells` wall cells across and `heightM` metres up from the wall's base, the hole of cell
+// package holds a key and never opens one), and the record and stream layouts such a read needs are not verified, so doors
+// and arches keep their kind's defaults (windows take their panes', WindowPanes). ShapeFromAlpha is what a reader would hand
+// the mask to: from an alpha image (row 0 at the top, unverified) covering `cells` wall cells across and `heightM` metres up from the wall's base, the hole of cell
 // `piece` (alpha under `cutBelow` = cut, unverified polarity): its span in the cell (0..1), its sill and the head heights
 // across it (m over the base). False when the cell has no hole.
 struct MaskShape {

@@ -3649,7 +3649,8 @@ struct GridOpening {
     float head[WallOpenings::kProfile] = {2.2f, 2.2f, 2.2f, 2.2f, 2.2f}; // m over the edge's base, u0 .. u1 evenly (an arch's curve)
     float u0 = 0, u1 = 1;        // along the edge from its low end (the jambs)
     uint8_t kind = 0;
-    uint8_t shaped = 0;          // 1 = from its cutout mask (MaskShapeFor), 0 = its kind's defaults
+    uint8_t shaped = 0;          // 1 = from its cutout mask (MaskShapeFor), 2 = from its window's panes (WindowPanes), 0 = its kind's defaults
+    float glass = 1.0f;          // (2.15.3) the share it passes: WallOpenings::kWindowPass for a window or a door open only for its glass, else 1
 };
 // The opening's head at u (edge units, 0..1 from its low end)
 inline float OpeningHead(const GridOpening& o, float u) {
@@ -3695,6 +3696,11 @@ struct StoryGrid {
     // EnsureStoryGrid can tell when the story's window lights near them changed (glassSig: GlazedSig of their glazed keys)
     std::vector<std::pair<uint32_t, CutRec>> doorCuts;
     uint64_t glassSig = 0;
+    // (2.15.3) its window cuts on walls and the stamp of the shapes their panes gave (WindowPanes, PaneSig): built again when
+    // the story's window lights change, as for the glass doors
+    std::vector<std::pair<uint32_t, CutRec>> windowCuts;
+    uint64_t paneSig = 0;
+    int paneSized = 0;          // windows sized from their panes
     double buildMs = 0;
 };
 int32_t GridZL(const StoryGrid& g, int x, int Z) { return x >= 0 && x < g.w && Z >= 0 && Z <= g.h ? g.zl[static_cast<size_t>(Z) * g.w + x] : -1; }
@@ -3835,11 +3841,69 @@ bool CutOpensForLamps(uint8_t kind, bool doorsBlock) { return !doorsBlock || kin
 // above its head). So a door cut whose cell holds a window light within the door's height lets lamp light through its
 // glass, as a window does. UNVERIFIED in game: that the window lights of a placed door stand in its cut cell (the grid's
 // developer line counts the door cuts and the window lights found near them).
+// (2.15.3) A pane's size: the RectangleWindowLight's constructor (0x006C0870) stores half the width and half the height of its
+// record (+0x38, +0x3C x [0x00F9A5AC] = 0.5) at +0x210 / +0x214 and their product x 4 (its area) at +0x208; its daylight
+// (0x006BEBF0) fades where |local x| and |local y| pass them, local x and y being the ray along the axes +0x190 and +0x1B0
+// (the room evaluation 0x006BEFD0 builds local = (axis +0x190, axis +0x1B0, axis +0x1A0) . (light - point)). So each type 7
+// light is a rectangle centred on its position, and its extents on the lot's axes outline its pane. The Lighting snapshot
+// lists them in pairs 0.1 m apart (one in front of each face) at the cell's middle. UNVERIFIED in game: the values (the F8
+// list shows only positions) and that the pane's rectangle is the glass and not a larger daylight patch; the developer log
+// lists the windows sized from them.
 struct GlassLight {
-    float x = 0, y = 0, z = 0; // lot space
+    float x = 0, y = 0, z = 0;    // lot space
+    float ex = 0, ey = 0, ez = 0; // (2.15.3) its pane's half extents on the lot's axes (type 7 with readable sizes; 0 = none)
 };
 constexpr float kGlassWallNear = 0.3f; // m: a window light this close to the cut's wall line (its own pane: 0.05 m in front of it)
 constexpr float kGlassAlong = 0.02f;   // m: past the cell's ends along the line
+// (2.15.3) a window's hole from its panes (WindowPanes) is kept only within these: the sill from the floor up to 2.2 m, the
+// head at least 0.15 m over it and under the wall's top, at least a tenth of the cell wide; otherwise its kind's defaults
+constexpr float kPaneSillMax = 2.2f, kPaneHeadMax = 2.95f, kPaneMinH = 0.15f, kPaneMinW = 0.1f, kPaneOverlap = 0.02f;
+using PaneShapes = std::unordered_map<uint32_t, WallOpenings::MaskShape>;
+// (2.15.3) Real window sizes: for each window cut on the grid, the union of the rectangles of the panes (sized window lights)
+// in front of its cell (within kGlassWallNear of the line, overlapping the cell by kPaneOverlap, centred between the edge's
+// base and 3 m over it), clipped to the cell: its jambs (u0, u1), sill and flat head over the edge's base. A window with no
+// sized pane there, or a shape outside the limits above, is left out (its kind's defaults stay).
+void WindowPanes(const StoryGrid& g, const std::vector<std::pair<uint32_t, CutRec>>& cuts, const std::vector<GlassLight>& lights, PaneShapes& out) {
+    out.clear();
+    for (const auto& [key, rec] : cuts) {
+        if (rec.kind != kCutWindow) continue;
+        const int x0 = static_cast<int8_t>(key & 0xFF), z0 = static_cast<int8_t>(key >> 8 & 0xFF), x1 = static_cast<int8_t>(key >> 16 & 0xFF),
+                  z1 = static_cast<int8_t>(key >> 24 & 0xFF);
+        const bool alongZ = x0 == x1;
+        const int32_t idx = alongZ ? GridXL(g, x0, z0) : GridZL(g, x0, z0);
+        if (idx < 0) continue;
+        const float base = g.edges[static_cast<size_t>(idx)].base;
+        const float line = static_cast<float>(alongZ ? x0 : z0), a = static_cast<float>(alongZ ? z0 : x0), b = static_cast<float>(alongZ ? z1 : x1);
+        float lo = 1e9f, hi = -1e9f, bottom = 1e9f, top = -1e9f;
+        for (const GlassLight& l : lights) {
+            const float e = alongZ ? l.ez : l.ex;
+            if (!(e > 0.0f && l.ey > 0.0f)) continue;
+            const float across = alongZ ? l.x : l.z, along = alongZ ? l.z : l.x;
+            if (ApexMath::Fabs(across - line) > kGlassWallNear || l.y < base || l.y > base + kStoryWallH) continue;
+            const float p0 = std::max(along - e, a), p1 = std::min(along + e, b);
+            if (!(p1 - p0 > kPaneOverlap)) continue;
+            lo = std::min(lo, p0), hi = std::max(hi, p1), bottom = std::min(bottom, l.y - l.ey), top = std::max(top, l.y + l.ey);
+        }
+        if (!(hi > lo)) continue;
+        WallOpenings::MaskShape m;
+        m.u0 = std::clamp(lo - a, 0.0f, 1.0f), m.u1 = std::clamp(hi - a, 0.0f, 1.0f);
+        m.sill = std::max(bottom - base, 0.0f);
+        const float head = std::min(top - base, kPaneHeadMax);
+        if (m.sill > kPaneSillMax || head < m.sill + kPaneMinH || m.u1 - m.u0 < kPaneMinW) continue;
+        for (float& h : m.head) h = head;
+        out.emplace(key, m);
+    }
+}
+// A stamp of a set of window shapes (order free; 1 cm steps)
+uint64_t PaneSig(const PaneShapes& panes) {
+    uint64_t s = panes.size();
+    for (const auto& [k, m] : panes) {
+        uint64_t e = k;
+        for (const float f : {m.u0, m.u1, m.sill, m.head[0]}) e = (e ^ static_cast<uint64_t>(std::lround(f * 100.0f))) * 1099511628211ull;
+        s += e * 0x9E3779B97F4A7C15ull;
+    }
+    return s;
+}
 // The keys of the cuts (doors, gates, unknown kinds) whose cell on the grid holds a window light between the floor and the
 // head of the opening their kind gets (OpeningDefaults)
 void GlazedCuts(const StoryGrid& g, const std::vector<std::pair<uint32_t, CutRec>>& cuts, const std::vector<GlassLight>& lights, std::unordered_set<uint32_t>& out) {
@@ -3876,11 +3940,17 @@ uint64_t GlazedSig(const std::unordered_set<uint32_t>& keys) {
 // shape when one was read), a closed one leaves the wall whole. A side whose next cell along the same line holds an open
 // cut has no jamb (a wide window, a double arch); a closed door beside a window keeps the window's jamb. A glazed cut
 // (GlazedCuts: a door with glass) is open while doors block light, with its own kind's defaults (sill 0 for a door).
+// (2.15.3) A window not shaped by its mask takes the shape of its panes when it has one (panes: WindowPanes; shaped 2), and a
+// window, or a door open only for its glass, passes WallOpenings::kWindowPass of the light.
 template <class Shape>
-void PlaceGridOpenings(StoryGrid& g, const std::vector<std::pair<uint32_t, CutRec>>& cuts, bool doorsBlock, const std::unordered_set<uint32_t>& glazed, Shape&& shape) {
+void PlaceGridOpenings(StoryGrid& g, const std::vector<std::pair<uint32_t, CutRec>>& cuts, bool doorsBlock, const std::unordered_set<uint32_t>& glazed, Shape&& shape,
+                       const PaneShapes* panes = nullptr) {
     g.doorsBlock = doorsBlock;
     g.doorCuts.clear();
+    g.windowCuts.clear();
     g.glassSig = GlazedSig(glazed);
+    g.paneSig = panes ? PaneSig(*panes) : PaneSig({});
+    g.paneSized = 0;
     std::unordered_set<uint32_t> openKeys;
     for (const auto& [key, rec] : cuts)
         if (CutOpensForLamps(rec.kind, doorsBlock) || glazed.count(key)) openKeys.insert(key);
@@ -3894,6 +3964,7 @@ void PlaceGridOpenings(StoryGrid& g, const std::vector<std::pair<uint32_t, CutRe
             continue;
         }
         g.kinds[rec.kind < 5 ? rec.kind : kCutUnknown]++;
+        if (rec.kind == kCutWindow && g.windowCuts.size() < 4096) g.windowCuts.emplace_back(key, rec);
         if (!CutOpensForLamps(rec.kind, doorsBlock)) {
             if (g.doorCuts.size() < 4096) g.doorCuts.emplace_back(key, rec);
             if (openKeys.count(key)) g.glassDoors++;
@@ -3905,6 +3976,15 @@ void PlaceGridOpenings(StoryGrid& g, const std::vector<std::pair<uint32_t, CutRe
         GridOpening o;
         OpeningDefaults(rec.kind, o);
         shape(rec, o);
+        if (!o.shaped && panes)
+            if (const auto it = panes->find(key); it != panes->end()) {
+                const WallOpenings::MaskShape& m = it->second;
+                o.sill = m.sill, o.u0 = m.u0, o.u1 = m.u1;
+                for (int k = 0; k < WallOpenings::kProfile; k++) o.head[k] = m.head[k];
+                o.shaped = 2;
+                g.paneSized++;
+            }
+        o.glass = rec.kind == kCutWindow || !CutOpensForLamps(rec.kind, doorsBlock) ? WallOpenings::kWindowPass : 1.0f; // (open here: a window, or a glazed door)
         if (alongZ ? openKeys.count(EdgeKey(x0, z0 - 1, x0, z0)) : openKeys.count(EdgeKey(x0 - 1, z0, x0, z0))) o.u0 = 0.0f;
         if (alongZ ? openKeys.count(EdgeKey(x0, z1, x0, z1 + 1)) : openKeys.count(EdgeKey(x1, z0, x1 + 1, z0))) o.u1 = 1.0f;
         g.edges[static_cast<size_t>(idx)].open = static_cast<uint16_t>(g.openings.size() + 1);
@@ -3913,8 +3993,9 @@ void PlaceGridOpenings(StoryGrid& g, const std::vector<std::pair<uint32_t, CutRe
     }
 }
 // Opening shapes from the cutout masks: the cut post's mask TGI (CutRec::tgi) -> its hole, per piece. Nothing fills this
-// cache yet: no read path for a resource's bytes exists in the codebase (wall_openings.h, ShapeFromAlpha), so every opening
-// keeps its kind's defaults; a reader would store each mask's shape here (any thread) and the grids built after it take it.
+// cache yet: no read path for a resource's bytes exists in the codebase (wall_openings.h, ShapeFromAlpha), so every door and
+// arch keeps its kind's defaults (a window takes its panes' shape, WindowPanes); a reader would store each mask's shape here
+// (any thread) and the grids built after it take it.
 struct MaskKey {
     uint32_t tgi[4];
     uint8_t piece, count;
@@ -4021,7 +4102,8 @@ int CapLowerWalls(StoryGrid& g) {
 }
 // The window lights (types 7 and 8) of a lot registered on a story and the two beside it (light tree thread), in lot space:
 // at most `max`, each light once (a window entry can sit in two rooms' lists). Position +0x120 (vfunc+0x24 of every light
-// class, 0x009691E0, returns it). POD only (SEH); a fault keeps what was read before it.
+// class, 0x009691E0, returns it); (2.15.3) a type 7's pane: half extents +0x210 / +0x214 along its axes +0x190 / +0x1B0
+// (GlassLight), kept when both are 2 cm to 2 m and the axes unit length. POD only (SEH); a fault keeps what was read before it.
 int ReadStoryWindowLights(uintptr_t tracker, int story, const Xform& xf, GlassLight* out, uintptr_t* seen, int max) {
     int n = 0;
     __try {
@@ -4042,6 +4124,22 @@ int ReadStoryWindowLights(uintptr_t tracker, int story, const Xform& xf, GlassLi
                 if (!ApexMath::IsFinite(L[0]) || !ApexMath::IsFinite(L[1]) || !ApexMath::IsFinite(L[2])) return;
                 seen[n] = light;
                 out[n] = GlassLight{L[0], L[1], L[2]};
+                if (type == 7) {
+                    const float* a1 = reinterpret_cast<const float*>(light + 0x190);
+                    const float* a2 = reinterpret_cast<const float*>(light + 0x1B0);
+                    const float* he = reinterpret_cast<const float*>(light + 0x210);
+                    float b1[3], b2[3]; // the axes in lot space (the lot's rotation only)
+                    for (int k = 0; k < 3; k++) {
+                        b1[k] = a1[0] * xf.r[0][k] + a1[1] * xf.r[1][k] + a1[2] * xf.r[2][k];
+                        b2[k] = a2[0] * xf.r[0][k] + a2[1] * xf.r[1][k] + a2[2] * xf.r[2][k];
+                    }
+                    const float n1 = b1[0] * b1[0] + b1[1] * b1[1] + b1[2] * b1[2], n2 = b2[0] * b2[0] + b2[1] * b2[1] + b2[2] * b2[2];
+                    if (he[0] >= 0.02f && he[0] <= 2.0f && he[1] >= 0.02f && he[1] <= 2.0f && n1 > 0.8f && n1 < 1.2f && n2 > 0.8f && n2 < 1.2f) {
+                        out[n].ex = ApexMath::Fabs(b1[0]) * he[0] + ApexMath::Fabs(b2[0]) * he[1];
+                        out[n].ey = ApexMath::Fabs(b1[1]) * he[0] + ApexMath::Fabs(b2[1]) * he[1];
+                        out[n].ez = ApexMath::Fabs(b1[2]) * he[0] + ApexMath::Fabs(b2[2]) * he[1];
+                    }
+                }
                 n++;
             });
         }
@@ -4061,10 +4159,12 @@ void StoryWindowLights(uintptr_t mgr, int story, const Xform& xf, std::vector<Gl
     out.resize(static_cast<size_t>(ReadStoryWindowLights(tracker, story, xf, out.data(), seen.data(), kGlassLightsMax)));
 }
 std::atomic<long> g_glassDoorCells{0}, g_glassChecks{0}, g_glassRebuilds{0};
+std::atomic<long> g_paneSized{0}, g_paneDefault{0}; // (2.15.3) window cells placed in the grids built: sized from their panes, with the defaults
 std::atomic<int> g_glassLogged{0};
 constexpr DWORD kGlassCheckMs = 1000; // a grid's glass doors are looked at again at most this often (EnsureStoryGrid)
 constexpr DWORD kGlassSendQuietMs = 250; // (= kCutQuietMs, below: a story whose glass doors changed is sent at the next check)
 std::unordered_map<uint32_t, DWORD> g_glassCheckAt; // light tree thread: grid serial -> its last look
+std::map<std::pair<uint64_t, int>, uint64_t> g_paneLogKeys; // light tree thread (developer notes): (lot, story) -> its windows' pane stamp when last logged
 std::map<std::pair<uint64_t, int>, std::tuple<size_t, size_t, int>> g_glassLogKeys; // light tree thread (developer notes): (lot, story) -> door cuts, window lights, glass doors when last logged
 std::atomic<int> g_gridLogged{0};
 std::mutex g_warmMx;
@@ -4239,14 +4339,34 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
     // glass doors: the window lights near the story, while doors block light and a door, gate or unknown cut is noted
     std::unordered_set<uint32_t> glazed;
     std::vector<GlassLight> glassLights;
-    if (doorsBlock && std::any_of(cuts.begin(), cuts.end(), [&](const auto& c) { return !CutOpensForLamps(c.second.kind, true); })) {
-        StoryWindowLights(mgr, story, g->xf, glassLights);
-        GlazedCuts(*g, cuts, glassLights, glazed);
-    }
-    PlaceGridOpenings(*g, cuts, doorsBlock, glazed, [](const CutRec& rec, GridOpening& o) { MaskShapeFor(rec, o); }); // (its mask's shape when one was read; none yet)
+    PaneShapes panes; // (2.15.3) the windows' shapes from their panes
+    const bool doorGlass = doorsBlock && std::any_of(cuts.begin(), cuts.end(), [&](const auto& c) { return !CutOpensForLamps(c.second.kind, true); });
+    const bool windows = std::any_of(cuts.begin(), cuts.end(), [&](const auto& c) { return c.second.kind == kCutWindow; });
+    if (doorGlass || windows) StoryWindowLights(mgr, story, g->xf, glassLights);
+    if (doorGlass) GlazedCuts(*g, cuts, glassLights, glazed);
+    if (windows) WindowPanes(*g, cuts, glassLights, panes);
+    PlaceGridOpenings(*g, cuts, doorsBlock, glazed, [](const CutRec& rec, GridOpening& o) { MaskShapeFor(rec, o); }, &panes); // (its mask's shape when one was read; none yet)
+    g_paneSized.fetch_add(g->paneSized, std::memory_order_relaxed);
+    g_paneDefault.fetch_add(static_cast<long>(g->windowCuts.size()) - g->paneSized, std::memory_order_relaxed);
     if (g->glassDoors) g_glassDoorCells.fetch_add(g->glassDoors, std::memory_order_relaxed);
     const auto glassNote = std::make_tuple(g->doorCuts.size(), glassLights.size(), g->glassDoors);
     const auto glassKey = std::make_pair(lot ? lot : cl.mgrId, story);
+    // (2.15.3, developer notes) the windows sized from their panes, with the first few shapes, to check the pane sizes in game
+    if (!kPublicBuild && !g->windowCuts.empty() && g_paneLogKeys.size() < 4096 && g_paneLogKeys[glassKey] != g->paneSig &&
+        g_glassLogged.fetch_add(1, std::memory_order_relaxed) < 400) {
+        g_paneLogKeys[glassKey] = g->paneSig;
+        int sized = 0;
+        for (const GlassLight& l : glassLights) sized += l.ey > 0.0f ? 1 : 0;
+        std::string notes;
+        int listed = 0;
+        for (const auto& [key, m] : panes) {
+            if (listed++ >= 6) break;
+            notes += std::format("{}({},{})-({},{}) u {:.2f}..{:.2f} sill {:.2f} head {:.2f}", listed > 1 ? "; " : "", static_cast<int8_t>(key & 0xFF),
+                                 static_cast<int8_t>(key >> 8 & 0xFF), static_cast<int8_t>(key >> 16 & 0xFF), static_cast<int8_t>(key >> 24 & 0xFF), m.u0, m.u1, m.sill, m.head[0]);
+        }
+        LOG_INFO(std::format("[Openings] lot {:016X} story {}: {} window cuts on walls, {} sized from their panes ({} of {} window lights with a pane size): {}", glassKey.first,
+                             story, g->windowCuts.size(), g->paneSized, sized, glassLights.size(), notes.empty() ? std::string("none") : notes));
+    }
     if (!kPublicBuild && !g->doorCuts.empty() && g_glassLogKeys.size() < 4096 && g_glassLogKeys[glassKey] != glassNote &&
         g_glassLogged.fetch_add(1, std::memory_order_relaxed) < 400) {
         g_glassLogKeys[glassKey] = glassNote;
@@ -4532,7 +4652,8 @@ std::shared_ptr<const StoryGrid> EnsureStoryGridImpl(uintptr_t mgr, bool warm) {
     // glass doors: a grid with door cuts closed for lamps is built again when the window lights near them changed (a door's
     // lights can register after its cut was posted, or the door was swapped for another with the same cut)
     const auto glassSame = [&](const StoryGrid& o) {
-        if (!o.doorsBlock || o.doorCuts.empty()) return true;
+        const bool doorGlass = o.doorsBlock && !o.doorCuts.empty();
+        if (!doorGlass && o.windowCuts.empty()) return true; // (2.15.3) and the windows' panes
         const DWORD now = GetTickCount();
         if (g_glassCheckAt.size() > 4096) g_glassCheckAt.clear();
         DWORD& at = g_glassCheckAt[o.serial];
@@ -4542,8 +4663,10 @@ std::shared_ptr<const StoryGrid> EnsureStoryGridImpl(uintptr_t mgr, bool warm) {
         std::vector<GlassLight> lights;
         StoryWindowLights(mgr, story, o.xf, lights);
         std::unordered_set<uint32_t> glazed;
-        GlazedCuts(o, o.doorCuts, lights, glazed);
-        if (GlazedSig(glazed) == o.glassSig) return true;
+        if (doorGlass) GlazedCuts(o, o.doorCuts, lights, glazed);
+        PaneShapes panes;
+        if (!o.windowCuts.empty()) WindowPanes(o, o.windowCuts, lights, panes);
+        if (GlazedSig(glazed) == o.glassSig && PaneSig(panes) == o.paneSig) return true;
         g_glassRebuilds.fetch_add(1, std::memory_order_relaxed);
         // the story's openings changed for lamps: sent as a story whose cuts changed (its roofless and roofed rooms, its
         // room 0, its walls' copy), as a door switched by "Doors block light" is
@@ -4720,7 +4843,7 @@ void GridEdgeSpot(const StoryGrid& g, int32_t idx, float c, float s0, float s1, 
         // floor just past the opening (a capture: 25 % at an arch's line, at the camera story's class, whose
         // map texel spread widens every rim; 44 % offline). Raised sills (windows) keep theirs.
         const float sill = o && o->sill > kFloorSill ? Penumbra::Cover(hh - o->sill, rim.up) : 1.0f;
-        const float in = open ? sill * Penumbra::Cover(OpeningHead(*o, v) - hh, rim.up) : 0.0f;
+        const float in = open ? sill * Penumbra::Cover(OpeningHead(*o, v) - hh, rim.up) * o->glass : 0.0f; // (2.15.3) x its glass
         if (in > ov) out.through += w * in;
         else out.over += w * ov;
     };
@@ -4760,7 +4883,7 @@ bool GridVertexFree(const StoryGrid& g, int X, int Z, bool xl) {
 // A ray crossing grid line `line` (xl: x = line, its cells along z; else z = line, its cells along x) in cell `cell` at u
 // (0..1 in it) and lot height y: the lamp's spot there (rim, metres = edge units) spread over the cells beside where the
 // line goes on (both walled: an opening's next cell, a wall's next piece; both open; or a wall's free end, GridVertexFree)
-float GridLinePass(const StoryGrid& g, bool xl, int line, int cell, float u, float y, GridWhy& why, float floor, const Penumbra::Rim& rim) {
+float GridLinePassAt(const StoryGrid& g, bool xl, int line, int cell, float u, float y, GridWhy& why, float floor, const Penumbra::Rim& rim) {
     const auto edgeAt = [&](int k) { return xl ? GridXL(g, line, k) : GridZL(g, k, line); };
     const float h = rim.along, lo = u - h, hi = u + h;
     const int32_t own = edgeAt(cell);
@@ -4788,6 +4911,28 @@ float GridLinePass(const StoryGrid& g, bool xl, int line, int cell, float u, flo
     }
     if (!any) return 1.0f;
     return GridSpotPass(s, Penumbra::Weight(u, h, a, b), why);
+}
+// GridLinePassAt; (2.15.3) where the lamp's spot at either face of the wall reaches a cell with an opening, the ray (dir: lamp
+// -> point) is tested at the wall's two faces instead (WallOpenings::kHalfThick each side of the line) and keeps the smaller
+// share, so the beam narrows at grazing angles. Taken over the spot's whole reach, not the cell crossed alone, so the light
+// has no step where the crossing moves from an opening's cell to the solid cell beside it. Other crossings cost what they did.
+float GridLinePass(const StoryGrid& g, bool xl, int line, int cell, float u, float y, GridWhy& why, float floor, const Penumbra::Rim& rim, const float* dir) {
+    const float n = dir ? ApexMath::Fabs(dir[xl ? 0 : 2]) : 0.0f;
+    if (!(n > 1e-6f)) return GridLinePassAt(g, xl, line, cell, u, y, why, floor, rim);
+    const float du = std::clamp(WallOpenings::kHalfThick * dir[xl ? 2 : 0] / n, -WallOpenings::kFaceShiftMax, WallOpenings::kFaceShiftMax);
+    const float reach = ApexMath::Fabs(du) + rim.along;
+    bool opening = false;
+    for (int k = cell + static_cast<int>(ApexMath::Floor(u - reach)), k1 = cell + static_cast<int>(ApexMath::Floor(u + reach)); k <= k1 && !opening; k++) {
+        const int32_t idx = xl ? GridXL(g, line, k) : GridZL(g, k, line);
+        opening = idx >= 0 && g.edges[static_cast<size_t>(idx)].open;
+    }
+    if (!opening) return GridLinePassAt(g, xl, line, cell, u, y, why, floor, rim);
+    const float dy = std::clamp(WallOpenings::kHalfThick * dir[1] / n, -WallOpenings::kFaceShiftMax, WallOpenings::kFaceShiftMax);
+    GridWhy w0{}, w1{};
+    const float p0 = GridLinePassAt(g, xl, line, cell, u - du, y - dy, w0, floor, rim), p1 = GridLinePassAt(g, xl, line, cell, u + du, y + dy, w1, floor, rim);
+    const GridWhy& w = p0 <= p1 ? w0 : w1;
+    why.wall |= w.wall, why.opening |= w.opening, why.over |= w.over;
+    return std::min(p0, p1);
 }
 // The lamp's penumbra along a ray (light tree thread): its radius (Shadow softness), the map's half texel (t_mapAA) and the
 // ray's slant against the walls of each direction
@@ -4865,6 +5010,7 @@ float GridPassImpl(const StoryGrid& g, const float* A, const float* B, GridWhy& 
     rim.radius = Penumbra::Radius(), rim.aa = std::max(t_mapAA, t_gridMinSpread);
     rim.dx = dx, rim.dy = dy, rim.dz = dz;
     rim.off = !Penumbra::g_on.load(std::memory_order_relaxed), rim.offHalf = offHalf;
+    const float dir[3] = {dx, dy, dz}; // (2.15.3) the wall's thickness at an opening (GridLinePass)
     // no wall edge on this line within the spot's reach (the cell crossed and the one on each side, GridLinePass): the crossing
     // passes whole and needs no rim (most crossings: the slants are then never worked out)
     // (2.15.3) inside the grid one look at the near-edge map built with it (the same three cells); outside, the three looks
@@ -4916,10 +5062,10 @@ float GridPassImpl(const StoryGrid& g, const float* A, const float* B, GridWhy& 
                 }
                 const float half = rim.Half(t);
                 const Penumbra::Rim rx = rim.X().At(half), rz = rim.Z().At(half);
-                const float r1 = GridLinePass(g, true, X, iz, static_cast<float>(Z - iz), y, w1, floor, rx) *
-                                 GridLinePass(g, false, Z, ix + sx, static_cast<float>(X - ix - sx), y, w1, floor, rz);
-                const float r2 = GridLinePass(g, false, Z, ix, static_cast<float>(X - ix), y, w2, floor, rz) *
-                                 GridLinePass(g, true, X, iz + sz, static_cast<float>(Z - iz - sz), y, w2, floor, rx);
+                const float r1 = GridLinePass(g, true, X, iz, static_cast<float>(Z - iz), y, w1, floor, rx, dir) *
+                                 GridLinePass(g, false, Z, ix + sx, static_cast<float>(X - ix - sx), y, w1, floor, rz, dir);
+                const float r2 = GridLinePass(g, false, Z, ix, static_cast<float>(X - ix), y, w2, floor, rz, dir) *
+                                 GridLinePass(g, true, X, iz + sz, static_cast<float>(Z - iz - sz), y, w2, floor, rx, dir);
                 const GridWhy& w = r1 >= r2 ? w1 : w2;
                 pass *= std::max(r1, r2);
                 why.wall |= w.wall, why.opening |= w.opening, why.over |= w.over;
@@ -4927,11 +5073,11 @@ float GridPassImpl(const StoryGrid& g, const float* A, const float* B, GridWhy& 
             ix += sx, iz += sz, tx += tdx, tz += tdz;
         } else if (tx < tz) {
             if (inRange && !LineEmpty(true, sx > 0 ? ix + 1 : ix, iz))
-                pass *= GridLinePass(g, true, sx > 0 ? ix + 1 : ix, iz, A[2] + t * dz - static_cast<float>(iz), y, why, floor, rim.X().At(rim.Half(t)));
+                pass *= GridLinePass(g, true, sx > 0 ? ix + 1 : ix, iz, A[2] + t * dz - static_cast<float>(iz), y, why, floor, rim.X().At(rim.Half(t)), dir);
             ix += sx, tx += tdx;
         } else {
             if (inRange && !LineEmpty(false, sz > 0 ? iz + 1 : iz, ix))
-                pass *= GridLinePass(g, false, sz > 0 ? iz + 1 : iz, ix, A[0] + t * dx - static_cast<float>(ix), y, why, floor, rim.Z().At(rim.Half(t)));
+                pass *= GridLinePass(g, false, sz > 0 ? iz + 1 : iz, ix, A[0] + t * dx - static_cast<float>(ix), y, why, floor, rim.Z().At(rim.Half(t)), dir);
             iz += sz, tz += tdz;
         }
         t0 = t;
@@ -9699,6 +9845,8 @@ void FillWallPatches(const StoryGrid& g, StoryWallCopy& c) {
                 pt.sill = worldY(e.base + o.sill);
                 for (int h = 0; h < WallOpenings::kProfile; h++) pt.head[h] = worldY(e.base + o.head[flip ? WallOpenings::kProfile - 1 - h : h]);
                 pt.shaped = o.shaped;
+                pt.floorSill = o.sill <= kFloorSill ? 1 : 0; // (2.15.3) as GridEdgeSpot: no rim under a sill on the floor
+                pt.glass = o.glass;
                 c.opened++;
             }
             if (lower) c.lowered++;
@@ -13621,10 +13769,10 @@ std::string OpeningsDiagText() {
     std::string s = std::format("\n-- openings of walls (light through doors and windows) --\nposts: cuts {}, closed again {}, rejected {}; lot ids checked against the "
                                 "story manager {}, differing {}\ndoors block light: {} (doors, gates and cuts of unknown kind {}; windows and arches open); switched {} "
                                 "times, stories sent again {}\nglass doors (a window light in the door's cell): {} door cells opened in the grids built, {} looks at "
-                                "the window lights, {} stories whose glass doors changed\ncut cells per post lot id and story ({}):\n",
+                                "the window lights, {} stories whose glass doors or window panes changed\nwindow cells sized from their panes {}, with the defaults {}\ncut cells per post lot id and story ({}):\n",
                                 g_cutPosts.load(), g_cutCloses.load(), g_cutUnread.load(), g_cutChecked.load(), g_cutIdDiffers.load(), doorsBlock ? "on" : "off",
                                 doorsBlock ? "closed for lamps" : "open", g_doorRuleChanges.load(), g_doorRuleStories.load(), g_glassDoorCells.load(), g_glassChecks.load(),
-                                g_glassRebuilds.load(), rows.size());
+                                g_glassRebuilds.load(), g_paneSized.load(), g_paneDefault.load(), rows.size());
     for (const Row& r : rows) {
         const int closed = doorsBlock ? r.kinds[kCutDoor] + r.kinds[kCutGate] + r.kinds[kCutUnknown] : 0;
         s += std::format("  lot {:016X} story {}: {} cut cells (door {}, window {}, arch {}, gate {}, unknown {}; {} closed for lamps), gen {}, lot object {:08X}\n", r.lot,
@@ -14561,7 +14709,7 @@ float SegPass(const WallSeg& s, const WallOpenings::Patch* patches, const float*
         return 0.0f;
     }
     return WallOpenings::CrossPass(patches + s.p0, static_cast<int>(s.pn), ApexMath::Sqrt(sx * sx + sz * sz), s.y0, s.y1, u, y, &why,
-                                   WallOpenings::RimAt(t, rx, point[1] - lamp[1], rz, sx, sz, Penumbra::Radius()));
+                                   WallOpenings::RimAt(t, rx, point[1] - lamp[1], rz, sx, sz, Penumbra::Radius()), WallOpenings::AcrossOf(rx, point[1] - lamp[1], rz, sx, sz));
 }
 // The share of the lamp's light reaching the point past the outside walls (render thread); 1 while the option is off
 float WallPass(const float lamp[3], const float point[3], float nearSkip) {
@@ -14980,7 +15128,7 @@ std::string WallOpeningsText(bool detail) {
         for (const WallOpenings::Patch& p : ps)
             if (p.open)
                 o += std::format(" [u {:.3f}..{:.3f} sill {:.2f} head {:.2f}..{:.2f} jambs {}{}{}]", p.ou0, p.ou1, p.sill, p.head[0], p.head[WallOpenings::kProfile / 2], p.jamb0,
-                                 p.jamb1, p.shaped ? " mask" : "");
+                                 p.jamb1, p.shaped == 1 ? " mask" : p.shaped == 2 ? " panes" : "");
             else
                 o += std::format(" [u {:.3f}..{:.3f} top {:.2f}..{:.2f}]", p.u0, p.u1, p.top0, p.top1);
         o += "\n";
