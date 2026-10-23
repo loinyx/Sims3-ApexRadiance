@@ -383,7 +383,7 @@ struct ConstGain {
         const float c[4] = {old[0] * gain, old[1], old[2], old[3]};
         SetPsConst(dev, static_cast<UINT>(reg), c, 1);
         k = reg;
-        g_groundGainDraws.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_groundGainDraws);
     }
     ~ConstGain() {
         if (k >= 0) SetPsConst(dev, static_cast<UINT>(k), old, 1);
@@ -401,7 +401,7 @@ struct ConstX {
         const float c[4] = {value, old[1], old[2], old[3]};
         SetPsConst(dev, static_cast<UINT>(reg), c, 1);
         k = reg;
-        g_groundGainDraws.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_groundGainDraws);
     }
     ~ConstX() {
         if (k >= 0) SetPsConst(dev, static_cast<UINT>(k), old, 1);
@@ -423,7 +423,7 @@ struct TerrainConst {
         const float c[4] = {value, old[1], old[2], old[3]};
         if (SUCCEEDED(D3D9Hooks::CallOriginalSetPixelShaderConstantF(dev, reg, c, 1))) {
             k = reg;
-            g_groundGainDraws.fetch_add(1, std::memory_order_relaxed);
+            ApexUtil::CountOne(g_groundGainDraws);
         }
     }
     ~TerrainConst() { if (k >= 0) SetPsConst(dev, k, old, 1); }
@@ -1929,7 +1929,7 @@ public:
         lot_ = lot;
         float rows[12];
         on_ = GroundShadow::FloorShadeRows(lot_ ? LotGrid(*lot_) : GroundShadow::Grid{}, xzScale, g_shadeOn, rows) && g_shadeOn;
-        (lot_ ? withLot : noLot).fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(lot_ ? withLot : noLot);
         EvictLotMasks();
         IDirect3DTexture9* const tex = on_ ? LotMaskTexture(dev, *lot_) : WhiteMask(dev);
         c_ = static_cast<UINT>(constant);
@@ -3350,7 +3350,7 @@ template <typename DrawFn> bool DrawRoof(IDirect3DDevice9* dev, DrawFn draw) {
     SetPsConst(dev, 20, &saved[0][0], 33);
     SetPs(dev, original);
     g_inOwnCall = false;
-    g_roofDrawn.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_roofDrawn);
     return true;
 }
 
@@ -3798,7 +3798,9 @@ uint32_t g_reachObjDraws = 0, g_reachFenceDraws = 0, g_reachWindowDraws = 0, g_r
 // scale while the walls took the day one; before full night WallLampScale no longer reads the native value anyway.)
 std::atomic<float> g_nativeWallScale{1.0f}; // (14/10: atomics, read by ObjectLampColourAt on the light tree thread too)
 std::atomic<DWORD> g_nativeWallTick{0};     // g_lotDrawTick when it was read; 0 = never
-bool NativeWallFresh() { const DWORD at = g_nativeWallTick, draw = g_lotDrawTick; return at && draw - at <= 2000; }
+// (2.15.3) DrawWallGain stores the scale (relaxed), then the tick (release); a reader that sees the tick sees that scale or
+// a later one (acquire), as with the sequentially consistent stores before, without a locked exchange per wall draw
+bool NativeWallFresh() { const DWORD at = g_nativeWallTick.load(std::memory_order_acquire), draw = g_lotDrawTick; return at && draw - at <= 2000; }
 float NativeWallScale() { return NativeWallFresh() ? static_cast<float>(g_nativeWallScale) : TerrainLightingPolicy::LampDay(g_night.load(std::memory_order_relaxed)); }
 constexpr float kPixelLampTrimUnit = 0.75f; // the default of the per-pixel lamp and fence sliders: x1 of the walls' scale (reach)
 std::atomic<bool> g_objPixel{true};
@@ -3943,7 +3945,7 @@ template <typename DrawFn> bool DrawRoad(IDirect3DDevice9* dev, DrawFn draw) {
     }
     if (oldLight) oldLight->Release();
     g_inOwnCall = false;
-    g_roadDrawn.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_roadDrawn);
     return true;
 }
 
@@ -5405,6 +5407,21 @@ struct RoomMapSizeMemo {
 };
 RoomMapSizeMemo g_roomMapSizes[64]; // render thread; valid for g_roomMapFrame only (OnPresent counts frames)
 uint32_t g_roomMapFrame = 1;
+// MapSize through g_roomMapSizes: one level description per bound map and frame (a story's maps are bound for many draws;
+// kept for this frame only, so a map freed and made again at the same address is read again next frame). (2.15.3) Shared by
+// the room map reads and the indoor objects' basis scale, which read two sizes per draw.
+bool MapSizeThisFrame(IDirect3DBaseTexture9* t, float out[4]) {
+    if (!t) return false;
+    RoomMapSizeMemo& m = g_roomMapSizes[(reinterpret_cast<uintptr_t>(t) >> 4) & (std::size(g_roomMapSizes) - 1)];
+    if (m.tex == t && m.frame == g_roomMapFrame) {
+        std::memcpy(out, m.size, sizeof m.size);
+        return true;
+    }
+    if (!MapSize(t, out)) return false;
+    m.tex = t, m.frame = g_roomMapFrame;
+    std::memcpy(m.size, out, sizeof m.size);
+    return true;
+}
 std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_roomMapSmoothPs, g_basisRoomPs;
 // (arch_ambient) the same copies with the arch block, bound only for a floor draw of a room with arches (DrawWithRoomMap)
 std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_roomMapSmoothArchPs, g_basisRoomArchPs, g_basisRoomWallArchPs;
@@ -5465,22 +5482,10 @@ bool RoomMapConsts(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& p, 
         g_roomPointFilter.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
-    IDirect3DBaseTexture9* map = nullptr;
+    // (the bound map for this draw: the device holds it, no reference of ours)
+    IDirect3DBaseTexture9* const map = D3D9Hooks::BoundTexture(dev, p.sampler);
     bool haveSize = false;
-    if (SUCCEEDED(D3D9Hooks::GetBoundTexture(dev, p.sampler, &map)) && map) {
-        // (one level description per room map and frame: a story's maps are bound for many draws; kept for this frame only,
-        // so a map freed and made again at the same address is read again next frame)
-        RoomMapSizeMemo& m = g_roomMapSizes[(reinterpret_cast<uintptr_t>(map) >> 4) & (std::size(g_roomMapSizes) - 1)];
-        if (m.tex == map && m.frame == g_roomMapFrame) {
-            std::memcpy(size, m.size, sizeof m.size);
-            haveSize = true;
-        } else if (MapSize(map, size)) {
-            m.tex = map, m.frame = g_roomMapFrame;
-            std::memcpy(m.size, size, sizeof m.size);
-            haveSize = true;
-        }
-    }
-    if (map) map->Release();
+    if (map) haveSize = MapSizeThisFrame(map, size);
     if (!haveSize) return false;
     float S = 65536.0f; // floors: one block
     if (wall) {
@@ -5505,10 +5510,8 @@ int ArchRowsFor(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& room, 
     if (room.archConst < 0 || room.ambConst < 0 || !(band[1] > 60000.0f)) return 0;
     float own[4] = {};
     if (FAILED(dev->GetPixelShaderConstantF(static_cast<UINT>(room.ambConst), own, 1))) return 0;
-    IDirect3DBaseTexture9* map = nullptr; // the room light map: its story tells rooms with the same ambient apart
-    D3D9Hooks::GetBoundTexture(dev, room.sampler, &map);
-    const uintptr_t mapTex = reinterpret_cast<uintptr_t>(map);
-    if (map) map->Release();
+    // the room light map (its identity only): its story tells rooms with the same ambient apart
+    const uintptr_t mapTex = reinterpret_cast<uintptr_t>(D3D9Hooks::BoundTexture(dev, room.sampler));
     return LevelLightShare::ArchAmbientConsts(own, mapTex, basisTex, rows, static_cast<int>(ShaderPatches::kArchCells));
 }
 // (arch_ambient) The arch copy of a room-map copy just made: none where it has no arch block (ps_2_x, no ambient constant),
@@ -5540,7 +5543,7 @@ template <typename DrawFn> void DrawWithRoomMap(IDirect3DDevice9* dev, IDirect3D
     SetPsConst(dev, p.bandConst, oldBand, 1);
     SetPsConst(dev, p.sizeConst, oldSize, 1);
     g_inOwnCall = false;
-    (arch ? g_archCopyDraws : g_archPlainDraws).fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(arch ? g_archCopyDraws : g_archPlainDraws);
 }
 template <typename DrawFn> bool DrawRoomMapSmooth(IDirect3DDevice9* dev, DrawFn draw) {
     if (!g_roomMapSmooth.load(std::memory_order_relaxed)) return false;
@@ -5560,7 +5563,7 @@ template <typename DrawFn> bool DrawRoomMapSmooth(IDirect3DDevice9* dev, DrawFn 
     const int cells = a ? ArchRowsFor(dev, a->room, band, 0, rows) : 0;
     if (a && (cells > 0 || !plainOk)) DrawWithRoomMap(dev, a->ps, a->room, size, band, rows, draw);
     else DrawWithRoomMap(dev, p.ps, p.room, size, band, nullptr, draw);
-    (wall ? g_roomWallDrawn : g_roomFloorDrawn).fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(wall ? g_roomWallDrawn : g_roomFloorDrawn);
     return true;
 }
 
@@ -5763,8 +5766,8 @@ template <typename DrawFn> bool DrawBasisSmooth(IDirect3DDevice9* dev, DrawFn dr
             g_inOwnCall = true;
             SetPsConst(dev, q.smooth.sizeConst, oldB, 1);
             g_inOwnCall = false;
-            g_basisSmoothDrawn.fetch_add(1, std::memory_order_relaxed);
-            (wall ? g_roomWallDrawn : g_roomFloorDrawn).fetch_add(1, std::memory_order_relaxed);
+            ApexUtil::CountOne(g_basisSmoothDrawn);
+            ApexUtil::CountOne(wall ? g_roomWallDrawn : g_roomFloorDrawn);
             return true;
         }
     }
@@ -5859,7 +5862,7 @@ template <typename DrawFn> bool DrawBasisSmooth(IDirect3DDevice9* dev, DrawFn dr
     SetPs(dev, original);
     SetPsConst(dev, p.smooth.sizeConst, oldSize, 1);
     g_inOwnCall = false;
-    g_basisSmoothDrawn.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_basisSmoothDrawn);
     return true;
 }
 
@@ -5882,7 +5885,7 @@ constexpr float kBasisCoverM = 64.0f;
 std::atomic<long> g_indoorUvFromVs{0}, g_indoorUvFallback{0};
 bool IndoorBasisScale(IDirect3DDevice9* dev, const ShaderPatches::IndoorBasisPatch& ip, IDirect3DBaseTexture9* lightMap, IDirect3DTexture9* basis0, float out[4]) {
     float b[4], lm[4];
-    if (!MapSize(basis0, b) || !MapSize(lightMap, lm)) return false;
+    if (!MapSizeThisFrame(basis0, b) || !MapSizeThisFrame(lightMap, lm)) return false;
     if (b[0] != kBasisCoverM || b[1] != kBasisCoverM) return false; // only 64x64 basis maps were ever captured: others keep the game's shader
     float cover[2] = {lm[0] / 4.0f, lm[1] / 4.0f};
     const int sem = ip.uvUsage >= 0 ? (ip.uvUsage << 4) | ip.uvIndex : -1;
@@ -5909,9 +5912,9 @@ bool IndoorBasisScale(IDirect3DDevice9* dev, const ShaderPatches::IndoorBasisPat
             cover[0] = rows[0][3];
             cover[1] = rows[1][3];
         }
-        (fromVs ? g_indoorUvFromVs : g_indoorUvFallback).fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(fromVs ? g_indoorUvFromVs : g_indoorUvFallback);
     } else
-        g_indoorUvFallback.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_indoorUvFallback);
     out[0] = cover[0] * b[0] / kBasisCoverM;
     out[1] = cover[1] * b[1] / kBasisCoverM;
     out[2] = b[2];
@@ -6054,15 +6057,24 @@ std::atomic<int> g_wallBloomFallback{0};
 template <typename DrawFn> bool DrawWallGain(IDirect3DDevice9* dev, DrawFn draw) {
     const float gain = g_wallGain.load(std::memory_order_relaxed);
     if (!g_wallEnabled.load(std::memory_order_relaxed)) return false;
-    auto it = g_wallConst.find(g_curPs);
-    if (it == g_wallConst.end()) return false;
+    // (2.15.3) the last wall shader's constant register (found entries only: the map only grows, Shutdown clears it and
+    // moves g_patchedGen)
+    static IDirect3DPixelShader9* s_ps = nullptr;
+    static DWORD s_reg = 0;
+    static uint32_t s_gen = 0;
+    if (s_ps != g_curPs || s_gen != g_patchedGen) {
+        const auto found = g_wallConst.find(g_curPs);
+        if (found == g_wallConst.end()) return false;
+        s_ps = g_curPs, s_reg = found->second, s_gen = g_patchedGen;
+    }
+    const DWORD reg = s_reg;
 
     float c[4], old[4];
-    if (FAILED(dev->GetPixelShaderConstantF(it->second, old, 1))) return false;
+    if (FAILED(dev->GetPixelShaderConstantF(reg, old, 1))) return false;
     if (!ApexMath::IsFinite(old[0]) || old[0] < 0) return false;
-    g_nativeWallScale = old[0]; // the walls' native lamp scale, which the reach law gives objects too (NativeWallScale)
+    g_nativeWallScale.store(old[0], std::memory_order_relaxed); // the walls' native lamp scale, which the reach law gives objects too (NativeWallScale)
     const DWORD drawTick = g_lotDrawTick;
-    g_nativeWallTick = drawTick ? drawTick : 1;
+    g_nativeWallTick.store(drawTick ? drawTick : 1, std::memory_order_release);
     std::memcpy(c, old, sizeof(c));
     c[0] = TerrainLightingPolicy::WallLampScale(old[0], g_night.load(std::memory_order_relaxed), gain);
     if (c[0] == old[0]) return false; // unchanged lamp scale: retain the native draw
@@ -6091,20 +6103,20 @@ template <typename DrawFn> bool DrawWallGain(IDirect3DDevice9* dev, DrawFn draw)
 
         // Pass 2 is the normal geometry write, but RGB only, with Apex's stronger baked lamp term.
         dev->SetRenderState(D3DRS_COLORWRITEENABLE, rgbMask);
-        SetPsConst(dev, it->second, c, 1);
+        SetPsConst(dev, reg, c, 1);
         draw();
-        SetPsConst(dev, it->second, old, 1);
+        SetPsConst(dev, reg, old, 1);
         dev->SetRenderState(D3DRS_COLORWRITEENABLE, colorMask);
         ApexUtil::CountOne(g_wallBloomPreserved);
     } else {
         // If the wall is blended, alpha is not writable, or a state query failed, preserve the exact previous behaviour.
-        SetPsConst(dev, it->second, c, 1);
+        SetPsConst(dev, reg, c, 1);
         draw();
-        SetPsConst(dev, it->second, old, 1);
+        SetPsConst(dev, reg, old, 1);
         ApexUtil::CountOne(g_wallBloomFallback);
     }
     g_inOwnCall = false;
-    g_wallDrawn.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_wallDrawn);
     return true;
 }
 
@@ -6187,7 +6199,7 @@ template <typename DrawFn> bool DrawFloor(IDirect3DDevice9* dev, DrawFn draw) {
         if (p.floor.heightConst >= 0) SetPsConst(dev, static_cast<UINT>(p.floor.heightConst), oldH, 1);
     }
     g_inOwnCall = false;
-    g_floorDrawn.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_floorDrawn);
     return true;
 }
 
@@ -6306,7 +6318,7 @@ template <typename DrawFn> bool DrawFloorAtlas(IDirect3DDevice9* dev, DrawFn dra
         SetPsConst(dev, static_cast<UINT>(p.floor.heightConst), oldH, 1);
     }
     g_inOwnCall = false;
-    g_floorAtlasDrawn.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_floorAtlasDrawn);
     return true;
 }
 
@@ -6380,7 +6392,7 @@ template <typename DrawFn> bool DrawLeafShadow(IDirect3DDevice9* dev, DrawFn dra
     SetPs(dev, original);
     SetPsConst(dev, p.nightConst, oldC, 1);
     g_inOwnCall = false;
-    g_leafDrawn.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_leafDrawn);
     return true;
 }
 
@@ -6446,7 +6458,7 @@ template <typename DrawFn> bool DrawObjectRig(IDirect3DDevice9* dev, DrawFn draw
     SetPsConst(dev, 3, oldC3, 1);
     SetPs(dev, original);
     g_inOwnCall = false;
-    g_objectDrawn.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_objectDrawn);
     return true;
 }
 
@@ -6938,11 +6950,11 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
     }
     const bool feather = LotEdgeConstants(atlas ? atlasMap : v, &v[4], &lotM[0], &lotM[8], rect, edge);
     if (feather) {
-        g_edgeMatched.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_edgeMatched);
         g_lastEdgeRect = *rect;
         g_haveLastEdgeRect = true;
     } else if (g_softEdges.load(std::memory_order_relaxed))
-        g_edgeUnmatched.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_edgeUnmatched);
     float savedEdge[16]; // c28..c31: do not modify the draw unless restoration is possible
     if (FAILED(dev->GetPixelShaderConstantF(28, savedEdge, 4))) return kContinue;
     if (LightProbe::Capturing())
@@ -6988,7 +7000,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
     g_objDrawInfo.clear();
     SetPs(dev, original);
     g_inOwnCall = false;
-    g_lotDrawn.fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_lotDrawn);
     return NoteClaim(ClaimSource::LotLightAtlas);
 }
 
@@ -7178,7 +7190,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice
         if (psSet) SetPsConst(dev, 4, &psOld[0][0], 4);
         if (vsSet) SetVsConst(dev, static_cast<UINT>(vl), &vsOld[0][0], 4);
         if (cubeSet) SetPsConst(dev, static_cast<UINT>(info.cubeWeightConst), cubeOld, 1);
-        g_nightFurniture.fetch_add(1, std::memory_order_relaxed);
+        ApexUtil::CountOne(g_nightFurniture);
     }
     return r;
 }
@@ -7289,6 +7301,11 @@ struct RigSnap {
     uint32_t preEpisode = 0; // the episode (its first frame) it was kept for
 };
 std::unordered_map<uint64_t, RigSnap> g_rigSnaps; // (rig, vertex-light register) -> its lights before a switch (render thread)
+// (2.15.3) HoldRig's last entry (the parts of one object share their rig's key): valid while no entry left the map
+uint32_t g_rigSnapsGen = 1;
+uint64_t g_lastSnapKey = 0;
+RigSnap* g_lastSnap = nullptr;
+uint32_t g_lastSnapGen = 0;
 std::atomic<long> g_rigHeldDraws{0};
 constexpr DWORD kRigSnapFreshMs = 2000;
 // (HoldRig) the time a part waits from an edit's start for its room to be marked
@@ -7389,8 +7406,9 @@ void HoldRig(IDirect3DDevice9* dev, float (*rig)[4], RigHeld& h) {
     }
     if (!wait) { // the lights as the game set them, for the next switch (not just after one: the rig may hold its new lights)
         if (lastSwitch && now - lastSwitch < 100) return;
-        if (g_rigSnaps.size() > (g_rigEpisodeOn ? kRigSnapsEpisodeMax : kRigSnapsMax)) g_rigSnaps.clear();
-        RigSnap& s = g_rigSnaps[key];
+        if (g_rigSnaps.size() > (g_rigEpisodeOn ? kRigSnapsEpisodeMax : kRigSnapsMax)) g_rigSnaps.clear(), g_rigSnapsGen++;
+        if (!g_lastSnap || g_lastSnapKey != key || g_lastSnapGen != g_rigSnapsGen) g_lastSnap = &g_rigSnaps[key], g_lastSnapKey = key, g_lastSnapGen = g_rigSnapsGen;
+        RigSnap& s = *g_lastSnap;
         if (withRoom && g_rigEpisodeOn && s.tick && static_cast<int32_t>(s.frame - g_rigEpisodeFrame) < 0 && s.preEpisode != g_rigEpisodeFrame) {
             std::memcpy(s.prePs, s.ps, sizeof s.prePs); // (the lights from before the episode, once per episode)
             std::memcpy(s.preVs, s.vs, sizeof s.preVs);
@@ -7543,7 +7561,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawTracked(IDirect3DDevice9*
     TerrainLightingPolicy::FoliageLampWeights(g_night.load(std::memory_order_relaxed), reachLaw, TesterToggles::foliageDayFix.load(std::memory_order_relaxed), weights);
     const bool dayScaled = !reachLaw && weights[0] < 1.0f / 1.5f; // the daytime curve scaled the wrap (status)
     const float wrap[4] = {weights[0], weights[1], 0.0f, 0.0f};
-    if (reachLaw) g_foliageReachLaw.fetch_add(1, std::memory_order_relaxed);
+    if (reachLaw) ApexUtil::CountOne(g_foliageReachLaw);
     float oldWrap[4] = {};
     const bool wrapSaved = SUCCEEDED(dev->GetVertexShaderConstantF(ShaderPatches::kFoliageWrapConst, oldWrap, 1));
     // Development builds: per-vertex lamps (foliage_vertex_lamps) and the crowns for the ground shade (canopy_ground_shadow),
@@ -7593,7 +7611,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawTracked(IDirect3DDevice9*
     SetVs(dev, drawVs);
     SetVsConst(dev, ShaderPatches::kFoliageWrapConst, wrap, 1);
     g_inOwnCall = false;
-    if (dayScaled) g_foliageDayScaled.fetch_add(1, std::memory_order_relaxed);
+    if (dayScaled) ApexUtil::CountOne(g_foliageDayScaled);
     if (OnDrawInner(dev, draw) == D3D9Hooks::HookAction::Continue) {
         g_inOwnCall = true;
         draw();
@@ -8529,7 +8547,7 @@ void OnPresent() {
     if (const DWORD now = GetTickCount(); now - g_rigSweepAt >= kRigSnapSweepMs) {
         g_rigSweepAt = now;
         if (!g_rigEpisodeOn && !RigEpisodeWanted())
-            std::erase_if(g_rigSnaps, [now](const auto& kv) { return now - kv.second.tick > kRigSnapKeepMs; });
+            if (std::erase_if(g_rigSnaps, [now](const auto& kv) { return now - kv.second.tick > kRigSnapKeepMs; })) g_rigSnapsGen++;
     }
     ReportHookFailure();
     // the lamp shade on lot ground follows "Walls shade lamp light near the ground" (14/10; the same wall copy as "Buildings
