@@ -125,3 +125,21 @@ generation of its positions, with the outdoor objects' pick memo rules: valid wh
 test state are the same before and after the pick, never for a pick with a lamp shining out of a house, and not used
 under F8 recording or a light capture. Development builds compare one hit in 64 with a new pick and turn the memo off on
 a difference. Not yet checked in game ([validation](../validation/night-lighting-fences.md)).
+
+### 2026-10-23: gates and narrow gaps in the lot shade
+
+**Context:** an F8 at night: a garden post's light passed through a closed wooden gate onto the ground behind it, and the
+gate took far less light than the fence beside it (F7: 0.285 against 1.0 at pixels 0.7 m apart).
+
+**Finding:** a gate is an object, not an instanced fence piece, so the fence line had a gap in the lot shade mask. The
+first gap filler (`415ff06`) took a gate within 0.35 m of the fence line, but the developer log of `1109e53` showed both
+gates of a lot 0.50 m off it: a gate's origin is its tile's centre. A gap was then kept only while some other object
+stood on its line, and after a shade update a group made again over the same fence was listed twice, its second copy's
+end beside the gap made the gap look joined, and gaps were found only from the lower-index piece, in a hash map's order.
+In-line gaps a few centimetres wide (a post, short pieces) let light round them in a wedge. On the reach law the gate
+took the walls' gain 0.30 like a window frame, and fences took it on top of their own strength. The fence copy read the
+mask at its own footprint, on the edge of its own shadow: a dark band under 1 m on the face turned to the lamp.
+
+**Outcome:** gaps from either end, kept once by key; a gate within 0.6 m, kept until not drawn for 30 s while the fence on
+both sides was drawn; gaps under 0.4 m always closed (`baf0ad0`, `1fe6714`). Loose objects and fences take gain 1, objects
+set in their wall keep the walls' gain (`26bacaf`, `1dc4da7`); faces read the mask 0.6 m in front. Not verified in game.

@@ -16,20 +16,23 @@ It must:
 |---|---|---|---|
 | [`tools/terrain_lighting_test`](../../tools/terrain_lighting_test/README.md) (`check.cpp` with `-ReferenceSource`) | Production lot HLSL at night against the previous source; day continuity across forced lot-edge weights with native window/lot scaling at zero; extracted regular lot draw path: atlas/chunk fallback, failed original-constant reads, texture reference balance, restoration of all touched state | `run.ps1 -Captures ... -OutDir ... -ReferenceSource 'previous lot_light_bridge.cpp'` | Native D3D9 GPU |
 | `tools/terrain_lighting_test/lot_uv_fixture.cpp` | Lot UV inversion for scales 1/16 to 1/256 over local -1 to 256 m; captured outside point moves from the indoor row to the outside row; shader creation by the device | `run_lot_uv_checks.ps1` | Native D3D9 GPU |
+| [`tools/ground_shade_test`](../../tools/ground_shade_test/check.cpp) | `ground_lamp_shadow.h`: the lot build timed on a synthetic 40 m lot (8 lamps, 20 walls, soft and hard edges, turned and not) and, with `-Reference <revision>`, compared bit for bit with that revision's header; `ChunkUpdate` against `ChunkFull` after random lot changes; the byte rounding against `lround` over the range | `run.ps1 [-Reference <revision>]` | None (CPU) |
 | `tools/terrain_lighting_test/resource_paths_fixture.cpp` | UV fallback and resource restoration | `run_resource_checks.ps1` | Native D3D9 GPU |
 
 ## Latest results
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-23 | `40f351e` | `tools/ground_shade_test` (`run.ps1`) | 240 checks, 0 failures: the whole chunk gives the bytes it gave before; after each of 240 random lot changes (added, moved, reshaded, gone, turned grids, over the chunk's edges) and then every lot gone, `ChunkUpdate` gives `ChunkFull`'s bytes at every mip; the lot build's mask and stamp weight equal the previous header's on a synthetic 40 m lot | CPU harness |
+| 2026-10-23 | `40f351e` | `lot_uv_fixture.cpp` (`run_lot_uv_checks.ps1`), compiled at ps_3_0 as in production, with a non-square lot map check | 130,699 passed, 0 failed | Native D3D9 |
+| 2026-10-23 | `40f351e` | `tools/terrain_lighting_test` (`run.ps1`) | 1,303,085 checks, 2 failures: *both captured terrain variants tested* and *GPU reach law matches the walls' law*, which also fail at commits from the 2.15.2 period (known, not from this release); the gated indoor light pass equals the previous shader at gate 0 and the CPU formula at gate 1 | Native D3D9 |
 | 2026-10-04 | `2584e01` | Lot UV inversion and shader compilation/device acceptance | 128,512 passed, 0 failed (RTX 4070 Ti SUPER) | Native D3D9 |
 | 2026-10-04 | `2584e01` | Resource restoration and UV fallback | 13,682 passed, 0 failed | Native D3D9 |
 | 2026-10-04 | `92582b6` | 60 GPU scenarios of the production lot HLSL at night vs the previous HLSL | Within one 8-bit LSB, including soft-edge weights | Native D3D9 |
 | 2026-10-04 | `92582b6` | Failure injection of the c28..c31 read | Native draw kept | Native D3D9 |
 
-The lot UV fixture compiles the replacement as ps_2_0, while production compiles it as ps_3_0
-(`AddLotShader(..., "ps_3_0", 0)`); the mapping check is profile-independent, but the device-acceptance part tests a
-different profile from the one shipped.
+Since `0c418a6` the lot UV fixture compiles the replacement at ps_3_0, the profile production uses (`kReplacementPsId`);
+at ps_2_0 it had no c32 and failed since the lot shade's mask rows moved there.
 
 ## In-game test plan
 
@@ -58,6 +61,11 @@ different profile from the one shipped.
 
 ## Open checks
 
+- 2.15.3: a fence lit by one garden post on grass and on snow. **Expected:** the shadow behind it ends where the post's light on the ground ends and is never darker than the ground no lamp of the lot reaches.
+- 2.15.3: a closed gate in a fence line beside a garden post, after shade updates, after a few minutes on screen and after the camera returns. **Expected:** no light through the gate; gaps under 0.4 m closed; developer log lines for the gaps and gates.
+- 2.15.3: a lot's shade after a wall or lamp change. **Expected:** the lot and the world grass beside it change in the same frame (no seam at the lot's edge), the lot nearest the camera first; the developer log's time to show is plausible.
+- 2.15.3: a ground lamp on a non-square lot (50 x 50 m with a 512 x 256 map). **Expected:** its pool centred on the lamp, round where it meets the atlas.
+- 2.15.3, *Indoor light adds to the ground*: a lit window beside a street lamp's pool, on grass and on snow, the option on and off. **Expected:** the window's light adds to the pool and stays whole behind a wall that shades the outdoor lamps; off, the look of 2.15.2.
 - The runtime value of room 0's +0xC0 / +0xC4 has not been printed in a log.
 - PR #2: lot UV alignment, daylight terrain term and the c28..c31 read guard in gameplay and under DXVK; whether the
   failed constant read ever occurs in play.

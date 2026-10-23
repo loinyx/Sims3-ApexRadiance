@@ -41,3 +41,16 @@ the combined build's HDR lamp gain (removed, see [removed-features.md](../remove
 Native HDR also had an interior-floor tanh-curve rule (LightingTweaks), removed with it.
 
 **Outcome:** `scaleConst` was later reused for *Ground brightness* (`GroundGain`), which is its role in the current code.
+
+### 2026-10-23: square steps of light on a porch
+
+**Context:** with *Indoor light adds to the ground*, an F8 and two light captures of a porch deck 0.75 m over the ground
+showed square steps of light on the deck and a dark square beside a pillar.
+
+**Finding:** the floor copies that add the indoor light (`8530732`) gate it by the height over the lot's ground, but a
+floor draw cannot tell story 0's floor map from a higher story's. Above story 0 the map's alpha is the walls' mask (1
+outside them): the deck passed the ground gate, read that 1 as indoor light and dropped the atlas texel by texel.
+
+**Outcome:** the floors keep the plain patch (`kFloorIndoorLight` off, `40f351e`); the lot pass and the snowy lot passes,
+which draw story 0 only, still add the indoor light. A story-0 floor next to a lit window still weights the atlas by
+`1 - E` (unverified in game).

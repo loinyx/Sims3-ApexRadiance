@@ -33,6 +33,7 @@ only the repository and print to the console.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-23 | `40f351e` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting` (includes `tools/roofed_openings_test`) | Passed, 0 failures. `roofed_openings_test`: 217 checks, 0 failures (window sizes from their panes, the wall's two faces at grazing angles, the glass share, floor-level sills in the outside walls' copy). No harness covers the lamps under a story's floor (`OwnFloorBlocksAt`, `LampUnderRoomFloor`), the tile floor crossing or the walls lit from their drawn foot | CPU harness |
 | 2026-10-22 | `d625404` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting` (`stairwell_bounce_test`, `opening_bounce_test` 11 checks, `arch_ambient_test` 25 checks), `tools/rt_lamps_test` (22 checks), `tools/roofed_openings_test` (196 checks), `tools/room_structure_test` (11 checks); developer, public and standard Release x86 builds | Passed, 0 failures; the three builds compiled. These cover the extracted grid walk, openings and room structure code; none exercises the arch story memo of `823e339` (`ArchAmbientConsts`) | CPU harness |
 | 2026-10-22 | `7d69737` | `tools/development/check.ps1 -Suite Lighting` (`stairwell_bounce_test`, `opening_bounce_test`, `arch_ambient_test`; `stairwell_bounce.h` now uses `ApexMath`) | Passed | Offline CPU harnesses |
 | 2026-10-22 | `715a410` | `tools/development/check.ps1 -Suite Lighting` | Passed | Offline CPU harnesses |
@@ -184,6 +185,7 @@ topology mutation inside a point is not reproduced. This release does not promis
 
 ## Confirmed in game
 
+- 2026-10-23, development build of this branch (`bb67164` to `6c38bfb`): ceiling lamps of the story below no longer light the closed room on the story above.
 - Outdoor sharing (parts 1 and 2) and the wall test of the lamp's story (part 3), combined build: confirmed in game
   as almost seamless after the first round and much better after the wall test.
 - Floor pairing through the story's own floor object (build `e3fab9d4`): the walls above a double-height room lit at once.
@@ -198,6 +200,8 @@ topology mutation inside a point is not reproduced. This release does not promis
 
 ## Open checks
 
+- 2.15.3: windows sized from their panes. **Expected:** the developer log lists the windows sized from their panes with plausible sizes, and the light through a window onto the floor outside matches the glass; glass passes 0.765 of a lamp's light.
+- 2.15.3: gables, a garage's eave band beside a house on a foundation and sloped foundation faces at night. **Expected:** no hard step of light where a gable starts or under the eave; lamps that now test lower samples keep their light.
 - Window light channel memo (`7d69737`), in game: on a lot with window lights at night, F8's *Window lights' channel
   test* shows the answers kept for the sample batch well above those asked of the game, and the rooms look the same
   with the Tester switch *Window light channel memo* off and on.

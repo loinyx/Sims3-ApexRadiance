@@ -31,6 +31,7 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-23 | `40f351e` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting`; developer, public and standard Release x86 builds | Passed; the builds compiled. No harness run covers the hue clamp of the reach law, the gates' lamp scale or the rig records of lamps under a room's floor | CPU harness |
 | 2026-10-22 | `b863bce` | None: no harness covers the area lights' cones in `ReadLamp` | Not run | not run in game yet |
 | 2026-10-14 | `release/2.13.0` (`2aefeb7`) | Developer and public Release x86 builds; `tools/roofed_openings_test`; `tools/floor_shade_check -Precomp` | Both builds: 0 errors; 173 and 5842 checks, 0 failures | native D3D9 |
 | 2026-10-13 | Release preparation tree for 2.12.3; final SHA in the release PR | Developer and public Release x86 builds: 0 errors, 0 warnings; `run_resource_checks.ps1` | Builds passed; resource paths 14,154 checks, 0 failures (extracted `DrawObjectLamp` 386, realistic reach on objects and fences 386, *Buildings block light on objects* 14). `DrawWindowOutdoor` is not extracted; the captured-shader law checks (`run.ps1`) were not re-run | Fake D3D9 / x86 build |
@@ -69,6 +70,8 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
 
 ## Open checks
 
+- 2.15.3: warm and coloured lamps near objects and fences with *Realistic lamp reach* on. **Expected:** their hue near the lamp head, not white.
+- 2.15.3: furniture in a closed room above a lit room with ceiling lamps. **Expected:** no glow from the room below.
 - Area lights (`b863bce`): objects, fences and trees beside a lot's rectangle or disc area light at night (a park lot).
   **Expected:** lit only on the side the light faces, none of its light behind it; roofs and water near it unchanged
   (they take no cones). Not yet checked in game.

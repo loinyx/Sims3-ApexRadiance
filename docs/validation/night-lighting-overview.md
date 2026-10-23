@@ -26,6 +26,8 @@ The harnesses only read captures and the repository; they never write into the g
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-23 | `40f351e` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting`; developer, public and standard Release x86 builds | Passed, 0 failures; the three builds compiled. Sub-part harnesses: [lot light pass](night-lighting-lot-light-pass.md#latest-results), [light between stories](night-lighting-level-light-share.md#latest-results), [floors](night-lighting-floors.md#latest-results), [foliage](night-lighting-foliage.md#latest-results) | CPU harness |
+| 2026-10-23 | `40f351e` | `tools/terrain_lighting_test` (`run.ps1`) | 1,303,085 checks, 2 failures: *both captured terrain variants tested* and *GPU reach law matches the walls' law*, which also fail at commits from the 2.15.2 period (known, not from this release); the gated indoor light pass equals the previous shader at gate 0 and the CPU formula at gate 1 | Native D3D9 |
 | 2026-10-22 | `d625404` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting`, `tools/rt_lamps_test`, `tools/roofed_openings_test`, `tools/room_structure_test` (counts in [light between stories](night-lighting-level-light-share.md#latest-results)); developer, public and standard Release x86 builds | Passed, 0 failures; the three builds compiled. The solve-side harnesses do not exercise the draw hook's memos of `99b99fb`, `c827d18`, `d625404` or the timing scope of `bb640cb` | CPU harness |
 | 2026-10-22 | `99b99fb`, `c827d18`, `bb640cb` | None: no harness covers the draw hook's last answers, the lot lookups' memo or the draw cost timing scope | Not run | not run in game yet |
 | 2026-10-22 | `0dba5de`, `6592518` | None: no harness covers the draw hook's front table or the draw cost log | Not run | not run in game yet |
@@ -56,6 +58,7 @@ Sub-part results are on their own validation pages.
 
 ## Open checks
 
+- 2.15.3, in game: moonlight 0 by default (the night lit only by the lamps and the sky's glow) on a lot with few lamps; frame times at night against 2.15.2 on the same save with the paced room solving and the draw memos.
 - Draw cost by fix (`6592518`), development build at night on a busy lot: the `[LotLightBridge] Draw cost by fix ...`
   line every 10 s, its rows plausible against the Frame Profiler's *D3D hooks (mod)* and *Re-issued draw (driver)*.
   Not yet seen in a log.

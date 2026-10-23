@@ -48,3 +48,17 @@ the wall was still too saturated.
 **Outcome:** the shared daytime factor was lowered to 0.08 (`kDaySurfaceResponse`); full night keeps the exact previous
 multiplication; saved strengths below 100% stay lower; no saved setting is rewritten. A separate enabled switch
 (`paredesComLuz`) keeps Off native by day. Previously the gain applied only when it differed from 1.
+
+### 2026-10-23: a gable and a garage eave lit from above their foot
+
+**Context:** two light captures of a house: a hard step of light where story 4's gable starts; on a lot mixing a house on
+a foundation with a garage without one, a lit block under the garage's eave.
+
+**Finding:** an outdoor room's wall is lit from story x 3 (or the floor under it), but the gable is drawn from the top of
+the knee wall below it: drawn from 27.822 with its light base at 29.708, its lower 1.9 m took one row lit 1.9 m above it.
+The garage's eave band was drawn 0.76 m below its base. A first fix (`59a81fe`) recut only the gable's eave cell at its
+drawn heights; shipped together with the snowy lot mask (`1ca6c6e`), the pair showed broken light in game and both were
+reverted (`8fe77fe`) to be checked one at a time; the snowy lot mask came back alone (`877fcd5`).
+
+**Outcome:** per cell, a wall drawn 5 cm to 3.2 m below its light base has its sample columns moved down to its drawn foot
+and the cell recut against it, the eave cell included (`81af078`). Not verified in game.

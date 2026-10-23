@@ -22,6 +22,7 @@ validation of a player's lot and does not establish instant wall-map baking.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-23 | `40f351e` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting` | Passed, 0 failures. No harness covers the walls lit from their drawn foot (`DropLowFootWall`, the eave cell recut) | CPU harness |
 | 2026-10-22 | `99b99fb` | None: `run_resource_checks.ps1` (which extracts `DrawWallGain`) was not re-run | Not run | not run in game yet |
 | 2026-10-13 | Release preparation tree for 2.12.3; final SHA in the release PR | Developer and public Release x86 builds: 0 errors, 0 warnings; `run_resource_checks.ps1` | Builds passed; resource paths 14,154 checks, 0 failures (extracted `DrawWallGain` 12,734). The captured-shader suite (`run.ps1`) was not re-run: it needs the capture folders | Fake D3D9 / x86 build |
 | 2026-10-04 | PR #2 (`92582b6`) | Wall draw fixtures and captured-shader daytime checks | Passed | Native D3D9 |
@@ -48,6 +49,7 @@ validation of a player's lot and does not establish instant wall-map baking.
 
 ## Open checks
 
+- 2.15.3: see the gable and eave check in [light between stories](night-lighting-level-light-share.md#open-checks).
 - Wall gain's last constant register and its relaxed / release stores (`99b99fb`): outdoor walls at night and at dusk
   look as before, and objects with *Realistic lamp reach* still take the walls' native scale (the developer status's
   native wall scale read in the last 2 s). `run_resource_checks.ps1` (the extracted `DrawWallGain`) to be re-run.

@@ -23,6 +23,7 @@ The ground scale harness only reads captures and prints results; it does not ins
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-23 | `40f351e` | `tools/floor_shade_check` (`run.ps1 -Precomp <Shaders_Win32.precomp>`) | 7,103 checks, 0 failures: `PatchLotTerrainMax` over the precomp's snowy, rug-cut and melting-snow lot shaders; with the gate at 0, or over a lot map without alpha, the copy draws the masked copy's pixels | Offline, native D3D9 |
 | 2026-09-25 | combined build | `PatchSnowBytecode` | Output validated with `D3DDisassemble`; patched identity C61F8B55/1940 | Offline |
 | 2026-09-25 | combined build | `IsSnowReliefVs` over 161 VS | Only `VS_2E036438` matches | Offline |
 | 2026-09-25 | combined build | `IsSnowCoverVs` over all captured shaders | Only `VS_2F27C9C0` / `PS_2F27C510` match | Offline |
@@ -50,5 +51,6 @@ The ground scale harness only reads captures and prints results; it does not ins
 
 ## Open checks
 
+- 2.15.3: a snowy lot beside shaded world grass at night. **Expected:** no step at the lot border; lamp light through fence openings the same on snow and on grass.
 - *Ground brightness* on the squared terrain variant (PR #2): visual validation on snow and grass pending.
 - Daytime response on snow on objects (PR #2): gameplay appearance pending.

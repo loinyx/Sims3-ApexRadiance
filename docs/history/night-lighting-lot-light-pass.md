@@ -138,3 +138,30 @@ contracted texel (`(local x 63/64 + 0.25) x 4 - 0.5`) stays below 131 while the 
 
 **Outcome:** the exact VS gets the inverse mapping through c31.zw; other layouts keep native coordinates. Candidate
 `2.5.6-indoor-wall-guard-test`.
+
+### 2026-10-23: the shade's total and the stamp rectangle
+
+**Context:** F8 on snow behind a fence lit by one garden post: the shadow was darker than the snow no lamp of the lot
+reaches (luma 50 to 54 against 59 to 61) and ran far past the post's light.
+
+**Finding:** the shade is the share of the bake lamps' stamp a texel keeps past the walls, but its total held only the
+lamps tested against the walls (at most 32, over the lot). Behind the fence that share was 0 out to about 17 m and under
+1 out to about 33 m, so the shadow also took the light of every lamp not listed. A lamp's weight also ran past its stamp's
+rectangle, where the bake writes nothing.
+
+**Outcome:** a lamp weighs only inside its stamp's rectangle and its reach stops at the rectangle's farthest corner; the
+bake lamps over the grid's margin that are not tested (at most 96) stay in the total with no wall test (`05e5280`).
+Offline: two new ground shade checks. Then the build was made cheaper with the same bits (`fe63f42`), the chunks made
+again over the changed box only (`78ce22a`) and a lot's shade held until its chunks are back, so the lot and the world
+grass change in the same frame (`c0b9f95`). Not verified in game.
+
+### 2026-10-23: a non-square lot map
+
+**Context:** F7 of a ground lamp on a 50 x 50 m lot: its pool sat 0.25 m along x from the lamp and turned egg-shaped where
+it met the centred atlas stamp.
+
+**Finding:** the lot map was 512 x 256 (VS c12 = 1/128, 1/64); the UV contraction was undone only when both scales were
+equal, so it stayed on this lot.
+
+**Outcome:** each axis takes its own offset in PS c30.zw (`26494d5`); square maps are unchanged. The lot UV fixture moved
+to the production profile ps_3_0 (`0c418a6`).
