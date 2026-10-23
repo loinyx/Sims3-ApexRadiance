@@ -567,9 +567,12 @@ int ReadLotRects(LotRect* out, int max) {
     return n;
 }
 
+// (2.15.3) moved whenever g_lotRects is written: FindFloorLot's and FindLotAt's last answers (render thread)
+uint32_t g_lotRectsGen = 1;
 void RefreshLotRects() {
     static LotRect buf[1024];
     const int n = ReadLotRects(buf, 1024);
+    g_lotRectsGen++;
     if (n < 0) {
         g_lotRects.clear();
         return;
@@ -1884,7 +1887,25 @@ std::string LotShadeStatusText() {
 // matched as the lot pass's (FindLotRect), else a lot with the same rotation whose rectangle holds the rows' origin. No lot,
 // or the shade off: gate 0 and the white mask (the floor as before). Render thread.
 std::atomic<long> g_floorShadeLot{0}, g_floorShadeNoLot{0};
+// (2.15.3) The last answer, by the exact bits of everything it reads, while the list is the same: a story's floor draws
+// come with the same lot matrix one after the other
+struct LotMemo {
+    uint32_t in[6] = {};
+    uint32_t gen = 0;
+    const LotRect* r = nullptr;
+};
+const LotRect* FindFloorLotImpl(const float c8[4], const float c10[4]);
 const LotRect* FindFloorLot(const float c8[4], const float c10[4]) {
+    static LotMemo s_memo;
+    uint32_t in[6];
+    std::memcpy(&in[0], &c8[0], 4), std::memcpy(&in[1], &c8[2], 8), std::memcpy(&in[3], &c10[0], 4), std::memcpy(&in[4], &c10[2], 8);
+    if (s_memo.gen == g_lotRectsGen && std::memcmp(s_memo.in, in, sizeof in) == 0) return s_memo.r;
+    const LotRect* r = FindFloorLotImpl(c8, c10);
+    std::memcpy(s_memo.in, in, sizeof in);
+    s_memo.gen = g_lotRectsGen, s_memo.r = r;
+    return r;
+}
+const LotRect* FindFloorLotImpl(const float c8[4], const float c10[4]) {
     if (const LotRect* r = FindLotRect(c8, c10)) return r;
     for (const LotRect& r : g_lotRects) {
         if (ApexMath::Fabs(r.m0 - c8[0]) >= 2e-3f || ApexMath::Fabs(r.m8 - c8[2]) >= 2e-3f || ApexMath::Fabs(r.m2 - c10[0]) >= 2e-3f || ApexMath::Fabs(r.m10 - c10[2]) >= 2e-3f) continue;
@@ -1899,14 +1920,23 @@ const LotRect* FindFloorLot(const float c8[4], const float c10[4]) {
 // The lot whose rectangle holds the world point (x, z), any rotation (instanced groups: their centre); null when none
 std::atomic<long> g_fenceShadeLot{0}, g_fenceShadeNoLot{0};
 const LotRect* FindLotAt(float x, float z) {
+    static float s_x = 0.0f, s_z = 0.0f;
+    static uint32_t s_gen = 0;
+    static const LotRect* s_r = nullptr;
+    if (s_gen == g_lotRectsGen && std::memcmp(&s_x, &x, 4) == 0 && std::memcmp(&s_z, &z, 4) == 0) return s_r;
+    const LotRect* found = nullptr;
     for (const LotRect& r : g_lotRects) {
         const double det = static_cast<double>(r.m0) * r.m10 - static_cast<double>(r.m8) * r.m2;
         if (ApexMath::Fabs(det) < 1e-6) continue;
         const double dx = x - r.tx, dz = z - r.tz;
         const double lx = (r.m10 * dx - r.m8 * dz) / det, lz = (-r.m2 * dx + r.m0 * dz) / det;
-        if (lx >= 0.0 && lz >= 0.0 && lx <= r.w && lz <= r.d) return &r;
+        if (lx >= 0.0 && lz >= 0.0 && lx <= r.w && lz <= r.d) {
+            found = &r;
+            break;
+        }
     }
-    return nullptr;
+    s_x = x, s_z = z, s_gen = g_lotRectsGen, s_r = found;
+    return found;
 }
 GroundShadow::Grid LotGrid(const LotRect& r) {
     GroundShadow::Grid g;
@@ -8379,6 +8409,7 @@ void OnWorldChanged() {
     g_bakeSnap = LotLightBridge::BakeSnapshot{};
     g_lastUserLots.clear();
     g_lotRects.clear(); // soft lot edges: the next Present reads the new world's lots
+    g_lotRectsGen++;
     g_lotDrawSeen.clear();
     g_lotArrivals.clear();
     g_lampEditRefresh = false;
