@@ -22,6 +22,7 @@ validation of a player's lot and does not establish instant wall-map baking.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-23 | `4802ed9` (ASI SHA-256 `FC2D565C0F003F0DD9DF2BC56DFC5F047CA6FCDAC508B2DA66A83D032258ECFB`) | Standard Release x86 build; `tools/terrain_lighting_test/run_resource_checks.ps1` | Build succeeded with 0 warnings; resource paths: 14,637 checks, 0 failures, including `DrawWallGain` (12,734). The release ASI has not been tested in game | MSBuild x86 / fake D3D9 |
 | 2026-10-23 | `40f351e` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting` | Passed, 0 failures. No harness covers the walls lit from their drawn foot (`DropLowFootWall`, the eave cell recut) | CPU harness |
 | 2026-10-22 | `99b99fb` | None: `run_resource_checks.ps1` (which extracts `DrawWallGain`) was not re-run | Not run | not run in game yet |
 | 2026-10-13 | Release preparation tree for 2.12.3; final SHA in the release PR | Developer and public Release x86 builds: 0 errors, 0 warnings; `run_resource_checks.ps1` | Builds passed; resource paths 14,154 checks, 0 failures (extracted `DrawWallGain` 12,734). The captured-shader suite (`run.ps1`) was not re-run: it needs the capture folders | Fake D3D9 / x86 build |
