@@ -11461,6 +11461,19 @@ float IndoorBoundaryPass(const RoomInfo& info, uintptr_t floorLevel, int B, cons
     const float dy = Q[1] - P[1];
     float h = *reinterpret_cast<const float*>(mgrB + 0x98) - *reinterpret_cast<const float*>(mgrB + 0xD4); // the story's lowest floor, lot space
     if (!(ApexMath::Fabs(h) < 1000.0f) || ApexMath::Fabs(dy) < 1e-4f) return blocked(PassWhy::Floor, PassStage::FloorHeight);
+    // (2.15.3) The plane to cross: story B's floor height at the tile under the point, else under the lamp. The lowest floor
+    // is the foundation house's on a lot mixing a house on a foundation with one without, 1.5 m under the other house's
+    // floor: lamp and point then both stood over it, "the same side", and a lower room's lamp borrowed through a stairwell
+    // lit the floor line of the closed room above it (an F8: a pink band along its walls)
+    for (const float* at : {Q, P}) {
+        const uintptr_t tl = LightTile(mgrB, static_cast<int>(ApexMath::Floor(at[0])), static_cast<int>(ApexMath::Floor(at[2])));
+        if (!tl) continue;
+        const float th = *reinterpret_cast<const float*>(tl + 0x78);
+        if (ApexMath::IsFinite(th) && ApexMath::Fabs(th - h) < 50.0f) {
+            h = th;
+            break;
+        }
+    }
     float t = -1.0f;
     for (int pass = 0; pass < 2; pass++) {
         t = (h - P[1]) / dy;
@@ -11900,10 +11913,9 @@ bool OwnFloorBlocksAt(const unsigned char* room, const float* lp, const float* s
             const float th = *reinterpret_cast<const float*>(lt + 0x78);
             if (ApexMath::IsFinite(th) && ApexMath::Fabs(th) < 1000.0f) h = th;
         }
-        // (a ceiling lamp's light sits on the floor's plane, a few millimetres either side of it: within 5 cm over it counts
-        // as under it; no lamp of this story has its light on its own floor)
-        if (!(ApexMath::Fabs(h) < 1000.0f) || !(L[1] < h + 0.05f) || !(S[1] > h + 0.10f)) return false;
-        const float t = L[1] < h ? (h - L[1]) / (S[1] - L[1]) : 0.0f; // (on the plane: where the lamp is)
+        // a point on the floor's plane (the bottom row of the walls) is tested where it is, as IndoorBoundaryPass does
+        if (!(ApexMath::Fabs(h) < 1000.0f) || !(L[1] < h - 0.02f) || !(S[1] >= h - 0.02f)) return false;
+        const float t = S[1] > h + 0.02f ? (h - L[1]) / (S[1] - L[1]) : 1.0f;
         const float x = L[0] + t * (S[0] - L[0]), z = L[2] + t * (S[2] - L[2]);
         if (!ApexMath::IsFinite(x) || !ApexMath::IsFinite(z)) return false;
         const uintptr_t level = LevelForPoint(mgr);
