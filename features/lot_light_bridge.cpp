@@ -4303,10 +4303,11 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
             used = PickFenceLamps(*g, reachLaw, lamps, lampTop, share);
             lamps[0][1] = TerrainLightingPolicy::SurfaceLampGain(g_night.load(std::memory_order_relaxed), g_objPixelLampStrength.load(std::memory_order_relaxed)) *
                           std::max(g_fenceStrength.load(std::memory_order_relaxed), 0.0f);
-            // reach: the outdoor walls' scale, the two sliders as trims over their defaults (x1 at the defaults: a band in
-            // front of a wall takes the wall's light)
+            // reach: the outdoor walls' native scale with the daytime curve, the two sliders as trims over their defaults.
+            // (2.15.3) Not the walls' gain: fences are not walls and have their own strength; with the walls' gain at 0.30 they
+            // took 30% of the light the same lamp gives the ground and objects around them
             if (reachLaw)
-                lamps[0][1] = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), night, g_wallEnabled.load(std::memory_order_relaxed), g_wallGain.load(std::memory_order_relaxed),
+                lamps[0][1] = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), night, g_wallEnabled.load(std::memory_order_relaxed), 1.0f,
                                                                     g_objPixelLampStrength.load(std::memory_order_relaxed) / kPixelLampTrimUnit *
                                                                         (std::max(g_fenceStrength.load(std::memory_order_relaxed), 0.0f) / kPixelLampTrimUnit));
             // A valid per-instance group supplies world position/normal. Replace
