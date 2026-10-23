@@ -174,9 +174,8 @@ behind it fully lit. Per lot, on the room mask's grid, `features/ground_lamp_sha
 *Buildings block lamp light on trees and objects* tests) stands between the head and the ground texel. A wall within 1 m of the lot's
 ground is tested with the point at its own base; a crossing within 0.15 m of the head is the lamp's own face (a sconce).
 Two `[1 2 1]` blurs soften the edge. Inside rooms the alpha is 1 (their own lamps light them). The pass multiplies the
-whole lamp term (lot map, atlas and the soft edge's target) by it; the snowy passes get `mul r0.xyz, r0, rM.w` after their
-max, rM a temp the game's shader does not use (its highest + 1, at least r8; it was r6, which the game's snowy lot shader
-uses, so the masked copy was always refused and snowy lots drew with no mask or shade beside shaded world grass). The build runs on the render thread from copies, 1 ms a frame (`ShadeTick`), and again only when the lot's place, its
+whole lamp term (lot map, atlas and the soft edge's target) by it; the snowy passes get `mul r0.xyz, r0, r6.w` after their
+max. The build runs on the render thread from copies, 1 ms a frame (`ShadeTick`), and again only when the lot's place, its
 lamps (place, about 20% of light, in or out of the bake) or the outside walls in its box changed, at most every 2 s.
 It follows *Walls shade lamp light near the ground* (Lighting > Ground, `paredesSombreiamOChao`). Status (developer page): *Walls shade lamps on lot ground*. The lot's
 ground height is taken from room 0's matrix (`m13`, unverified as the ground under every texel).
