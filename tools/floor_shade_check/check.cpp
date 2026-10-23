@@ -19,6 +19,7 @@
 #include <d3d9.h>
 #include <d3dcompiler.h>
 #include "../../features/ground_lamp_shadow.h"
+#include "../../features/lamp_cap_shadow.h"
 #include "../../features/shader_patches.h"
 #include "../../shaders/floor_atlas_table.h"
 #include "../../shaders/shader_ids.h"
@@ -802,6 +803,15 @@ int Instanced(Gpu& gpu, const std::vector<std::vector<DWORD>>& shaders, const ch
                   "instanced: the disassembly shows the mask sampler and the gate");
             Check(gpu.AcceptsPs(a), "instanced: native D3D9 accepts the shaded copy");
             Check(gpu.AcceptsPs(n), "instanced: native D3D9 accepts the copy without the shade");
+            std::vector<DWORD> cap = ps;
+            ShaderPatches::InstancedPatch ic;
+            const bool capOk = ShaderPatches::PatchInstancedLamps(cap, ic, reach != 0, true, true);
+            Check(capOk && ic.capConst > 0, "instanced: emitter floor shadows cover the native shader");
+            if (capOk) {
+                Check(ic.lampParamConst == ia.lampParamConst && ic.shadeConst == ia.shadeConst,
+                      "instanced: emitter caps preserve the existing constant layout");
+                Check(gpu.AcceptsPs(cap), "instanced: native D3D9 accepts emitter floor shadows");
+            }
         }
     std::printf("Instanced structures (%s): %zu pixel shaders; first law patched %d, shaded %d (no per-pixel lamps %d), refused %d; reach patched %d, shaded %d "
                 "(no per-pixel lamps %d), refused %d; most slots %d\n",
@@ -959,6 +969,87 @@ void InstancedPixels(Gpu& gpu) {
         gpu.dev->SetVertexShader(nullptr);
         Release(shader);
     }
+    // A lantern above a short solid pillar: the group can see it from one end,
+    // but pixels behind its complete cap must still be shadowed independently.
+    for (bool reach : {false, true}) {
+        auto code = ps;
+        ShaderPatches::InstancedPatch o;
+        const bool ok = ShaderPatches::PatchInstancedLamps(code, o, reach, true, true);
+        IDirect3DPixelShader9* shader = nullptr;
+        const HRESULT capHr = ok ? gpu.dev->CreatePixelShader(code.data(), &shader) : E_FAIL;
+        Check(ok && SUCCEEDED(capHr), "cap pixels: native shader created");
+        if (FAILED(capHr)) {
+            const auto text = Disasm(code);
+            std::printf("cap shader: reach %d HRESULT %08lX slots %d\n", reach, static_cast<unsigned long>(capHr), Slots(text));
+            using Assemble = HRESULT(WINAPI*)(LPCVOID, SIZE_T, LPCSTR, const D3D_SHADER_MACRO*, ID3DInclude*, UINT, ID3DBlob**, ID3DBlob**);
+            const auto compiler = LoadLibraryW(L"d3dcompiler_47.dll");
+            const auto assemble = compiler ? reinterpret_cast<Assemble>(GetProcAddress(compiler, "D3DAssemble")) : nullptr;
+            ID3DBlob *assembled = nullptr, *errors = nullptr;
+            if (assemble) assemble(text.data(), text.size(), nullptr, nullptr, nullptr, 0, &assembled, &errors);
+            if (errors) std::printf("%s\n", static_cast<const char*>(errors->GetBufferPointer()));
+            Release(assembled); Release(errors);
+            if (compiler) FreeLibrary(compiler);
+        }
+        if (!shader) continue;
+        const float base[4] = {0, 0, 0, 1}, zero[4]{}, one[4] = {1, 0, 1, 0};
+        gpu.dev->SetPixelShaderConstantF(0, base, 1);
+        gpu.dev->SetPixelShaderConstantF(o.strengthConst, zero, 1);
+        gpu.dev->SetPixelShaderConstantF(o.groundWeightConst, one, 1);
+        gpu.dev->SetTexture(0, black);
+        gpu.dev->SetTexture(o.atlasSampler, black);
+        gpu.dev->SetTexture(static_cast<DWORD>(o.shadeSampler), white);
+        float shade[12]{}; shade[7] = 1;
+        gpu.dev->SetPixelShaderConstantF(static_cast<UINT>(o.shadeConst), shade, 3);
+        float lamps[1 + 4 * N + 2][4]{};
+        lamps[0][0] = lamps[0][1] = 1, lamps[0][3] = 1e-4f;
+        for (unsigned k = 0; k < N; ++k) {
+            lamps[1 + 2 * k][0] = lamps[1 + 2 * k][2] = 1e6f;
+            lamps[2 + 2 * k][3] = lamps[1 + 2 * N + 2 * k][3] = lamps[2 + 2 * N + 2 * k][3] = 1;
+        }
+        lamps[1][0] = lamps[1][2] = 0, lamps[1][1] = 2.372f, lamps[1][3] = 1.0f / 36.0f;
+        lamps[2][0] = 0.6f;
+        lamps[3][1] = 2.372f, lamps[3][3] = 1.0f / 36.0f;
+        lamps[4][1] = 0.3f;
+        lamps[1 + 4 * N][0] = 4;
+        lamps[1 + 4 * N][1] = 4;
+        gpu.dev->SetPixelShaderConstantF(o.lampParamConst, lamps[0], 1 + 4 * N + (reach ? 2 : 0));
+        for (int layout : {0, 1}) for (float height : {0.75f, 1.25f, 2.0f}) {
+            const float cx = layout ? 636.775f : 0.0f, cz = layout ? 762.2866f : 0.0f;
+            const float co = layout ? 0.9902679f : 1.0f, si = layout ? 0.1391745f : 0.0f;
+            lamps[1][0] = cx, lamps[1][2] = cz, lamps[3][0] = cx + 3, lamps[3][2] = cz;
+            gpu.dev->SetPixelShaderConstantF(o.lampParamConst, lamps[0], 1 + 4 * N + (reach ? 2 : 0));
+            const float vr[3][4] = {{cx - 3, height, cz - 3, 0}, {6, 0, 0, 1}, {0, 0, 6, 0}};
+            gpu.dev->SetVertexShaderConstantF(0, vr[0], 3);
+            float caps[2 * N + 1][4]{};
+            caps[2 * N][0] = caps[2 * N][2] = 0.5f;
+            caps[2 * N][1] = 0.15f, caps[2 * N][3] = 1e-4f;
+            gpu.dev->SetPixelShaderConstantF(o.capConst, caps[0], 2 * N + 1);
+            const auto beforeCap = gpu.Render(shader, vs);
+            caps[0][0] = co, caps[0][1] = -si, caps[0][2] = -co * cx + si * cz, caps[0][3] = 0.497f;
+            caps[1][0] = si, caps[1][1] = co, caps[1][2] = -si * cx - co * cz;
+            gpu.dev->SetPixelShaderConstantF(o.capConst, caps[0], 2 * N + 1);
+            const auto afterCap = gpu.Render(shader, vs);
+            int worst = 0, darkened = 0, greenDifference = 0;
+            const float head[3] = {cx, 2.372f, cz};
+            for (int y = 0; y < 64; ++y)
+                for (int x = 0; x < 64; ++x) {
+                    const float point[3] = {cx - 3 + 6.0f * x / 64.0f, height, cz - 3 + 6.0f * y / 64.0f};
+                    const float pass = LampCapShadow::Pass(reinterpret_cast<const float (*)[4]>(caps), head, point, 0.15f);
+                    const int a = (beforeCap[y * 64 + x] >> 16) & 255, b = (afterCap[y * 64 + x] >> 16) & 255;
+                    worst = std::max(worst, std::abs(b - static_cast<int>(std::lround(a * pass))));
+                    darkened += a > b + 2;
+                    greenDifference = std::max(greenDifference, std::abs(static_cast<int>((beforeCap[y * 64 + x] >> 8) & 255) - static_cast<int>((afterCap[y * 64 + x] >> 8) & 255)));
+                }
+            Check(worst <= 2, "cap pixels: native shader agrees with the CPU ray and soft edge within two LSB");
+            Check(height < 1.875f ? darkened > 100 : darkened == 0, "cap pixels: only receivers below the cap lose the blocked lamp");
+            Check(greenDifference <= 1, "cap pixels: the unblocked green lamp keeps its contribution");
+            if (worst > 2) std::printf("cap pixels: reach %d height %.3f worst %d\n", reach, height, worst);
+        }
+        Release(shader);
+    }
+    for (DWORD s = 0; s < 16; ++s) gpu.dev->SetTexture(s, nullptr);
+    gpu.dev->SetPixelShader(nullptr);
+    gpu.dev->SetVertexShader(nullptr);
     Release(vs);
     Release(black);
     Release(white);

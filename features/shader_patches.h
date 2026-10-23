@@ -133,10 +133,11 @@ struct InstancedPatch {
     DWORD groundWeightConst = 0; // (a, b, 1, 0): atlas weight sat(N.y * a + b); (1, 0) with lamps, (0, 1) = every face (as before)
     DWORD coneConst = 0;         // per lamp k: its cones at coneConst + 2k / + 2k + 1 (= lampConst + 2 kObjectPixelLamps); the lamp colour .w = its spill
     DWORD reachConst = 0;        // reach variant: the 2 r0^2 rows (= coneConst + 2 kObjectPixelLamps); 0 = the first law
+    DWORD capConst = 0;          // optional two projection rows per lamp, then one shared softness row
     int shadeSampler = -1;       // the ground lamp shade: the lot mask (atlasSampler + 1); -1 = none
     int shadeConst = -1;         // its 3 rows, right after the cones (first law) or the reach rows
 };
-bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach = false, bool groundShade = true);
+bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach = false, bool groundShade = true, bool capShadows = false);
 
 // Snow lying on objects (fence tops, rails, props: the winter snow-cover mesh drawn over the object). Its vertex shader
 // morphs between two positions with flags in TEXCOORD1.x ("slt rX, cK, v.x") and writes world xz to TEXCOORD3.xy

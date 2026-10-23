@@ -11,6 +11,9 @@ namespace RtLampProxy {
 struct Lot;
 }
 namespace LevelLightShare {
+// Render thread: a complete floor tile just under an outdoor lamp, for the
+// per-pixel shadow on instanced stairs. False keeps the existing lamp path.
+bool LampFloorCap(const float lamp[3], float rows[2][4]);
 bool Install(std::string& error);
 void Uninstall();
 bool IsInstalled();

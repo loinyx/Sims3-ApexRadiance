@@ -280,6 +280,7 @@
     <ClInclude Include="features\tester_settings.h" />
     <ClInclude Include="features\penumbra.h" />
     <ClInclude Include="features\lamp_reach.h" />
+    <ClInclude Include="features\lamp_cap_shadow.h" />
     <ClInclude Include="features\rig_cut.h" />
     <ClInclude Include="features\wall_heights.h" />
     <ClInclude Include="features\light_diag.h" />

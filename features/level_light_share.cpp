@@ -84,6 +84,7 @@
 #endif
 #include "apex_util.h"
 #include "level_light_share.h"
+#include "lamp_cap_shadow.h"
 #include "terrain_bake_rule.h"
 #include "fast_math.h"
 #include "night_level.h"
@@ -15003,6 +15004,56 @@ bool RefreshSlabGrid() {
     return g_slabGrid.ok;
 }
 } // namespace
+
+bool LampFloorCap(const float lamp[3], float rows[2][4]) {
+    std::memset(rows, 0, sizeof(float) * 8);
+    if (!g_objectWallsOn.load(std::memory_order_relaxed) || !RefreshSlabGrid()) return false;
+    struct Memo { uint32_t gen = 0; long edits = 0; float head[3]{}, rows[2][4]{}; bool valid = false; };
+    static Memo memo[64]; // render thread only; the geometry generation invalidates every answer
+    const uint32_t gen = g_floorSnapGen.load(std::memory_order_relaxed);
+    const long edits = g_floorEdits.load(std::memory_order_relaxed);
+    uint32_t bits[3];
+    std::memcpy(bits, lamp, sizeof bits);
+    uint32_t hash = bits[0] * 0x9E3779B1u ^ bits[1] * 0x85EBCA6Bu ^ bits[2] * 0xC2B2AE35u;
+    hash ^= hash >> 16;
+    hash *= 0x85EBCA6Bu;
+    hash ^= hash >> 13;
+    Memo& m = memo[hash & 63u];
+    if (m.gen == gen && m.edits == edits && std::memcmp(m.head, lamp, sizeof m.head) == 0) {
+        std::memcpy(rows, m.rows, sizeof m.rows);
+        return m.valid;
+    }
+    float best = 1.25f;
+    bool found = false;
+    for (const SlabLot& lot : g_slabGrid.lots) {
+        if (lamp[0] < lot.x0 || lamp[0] > lot.x1 || lamp[2] < lot.z0 || lamp[2] > lot.z1) continue;
+        float local[3];
+        ToLocal(lot.xf, lamp, local);
+        const int x = static_cast<int>(ApexMath::Floor(local[0])), z = static_cast<int>(ApexMath::Floor(local[2]));
+        if (ApexMath::Fabs(lot.xf.r[1][1] - 1.0f) > 0.001f) continue;
+        for (int k = 0; k < lot.n; ++k) {
+            const auto& floor = lot.st[k];
+            if (!floor) continue;
+            const SnapView view{floor->h, floor->bits.data(), floor->w, floor->d};
+            if (!view.Placed(x, z, 0) || !view.Placed(x, z, 1) || !view.Placed(x, z, 2) || !view.Placed(x, z, 3)) continue;
+            const uintptr_t mgr = SafeStoryManager(floor->tracker, floor->story);
+            GridTileRead tile{};
+            if (!mgr || !ReadGridTile(mgr, x, z, tile) || !ApexMath::IsFinite(tile.floor)) continue;
+            const float gap = local[1] - tile.floor;
+            if (!(gap > 0.02f && gap < best)) continue;
+            best = gap;
+            rows[0][0] = lot.xf.r[0][0], rows[0][1] = lot.xf.r[2][0];
+            rows[0][2] = lot.xf.r[3][0] - static_cast<float>(x) - 0.5f, rows[0][3] = gap + LampCapShadow::kBias;
+            rows[1][0] = lot.xf.r[0][2], rows[1][1] = lot.xf.r[2][2];
+            rows[1][2] = lot.xf.r[3][2] - static_cast<float>(z) - 0.5f;
+            found = true;
+        }
+    }
+    m.gen = gen, m.edits = edits, m.valid = found;
+    std::memcpy(m.head, lamp, sizeof m.head);
+    std::memcpy(m.rows, rows, sizeof m.rows);
+    return found;
+}
 
 float LampVisibility(const float lamp[3], const float point[3], float nearSkip) {
     const float walls = WallPass(lamp, point, nearSkip); // (through doors, windows and arches partly: their soft rim)

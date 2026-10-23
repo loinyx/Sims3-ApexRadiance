@@ -4194,6 +4194,7 @@ uint32_t g_objRigDayScaled = 0;
 // option off), and the walls' own scale (ReachLampScale). Render thread: the draws by the reach law (objects, fences,
 // windows) and those that kept the first law because the shader had no room for the 2 more rows.
 std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_objLampPsReach, g_fencePsReach;
+std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_fenceCapPs[2];
 uint32_t g_reachObjDraws = 0, g_reachFenceDraws = 0, g_reachWindowDraws = 0, g_reachLawRefused = 0;
 // The game's lamp scale of the outdoor walls (the native cK.x DrawWallGain reads; F7 20-31-19 at night drew c3.x 0.309124 =
 // 1 x the walls' gain 0.309124 of that capture's settings), render thread. The reach law gives objects the walls' scale.
@@ -4711,6 +4712,25 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
                                     used, !p.inst.pixelLamps ? " (this shader has none: ground light only)" : g ? "" : " (group not read or option off: the game's vertex lights)",
                                     lamps[0][1], s[0], weight[0], weight[1]) +
                         (p.inst.pixelLamps ? ReachLawText(reachLaw, reachRefused, g != nullptr, lamps[0][1], lamps + kLampRows, used) : std::string());
+    constexpr unsigned kCapRows = 2 * N + 1;
+    float caps[kCapRows][4]{}, oldCaps[kCapRows][4];
+    unsigned capCount = 0;
+    PatchedPs* active = &p;
+    if (g && p.inst.pixelLamps) {
+        for (int k = 0; k < used; ++k)
+            if (LevelLightShare::LampFloorCap(lamps[1 + 2 * k], caps + 2 * k)) ++capCount;
+        if (capCount) {
+            PatchedPs& candidate = PatchedFor(dev, g_fenceCapPs[reachLaw ? 1 : 0], "Fence/stairs (emitter floor shadows)",
+                [reachLaw](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchInstancedLamps(t, pp.inst, reachLaw, true, true); }, true);
+            if (candidate.ps && candidate.inst.capConst && candidate.inst.lampParamConst == p.inst.lampParamConst && candidate.inst.shadeConst == p.inst.shadeConst &&
+                SUCCEEDED(dev->GetPixelShaderConstantF(candidate.inst.capConst, &oldCaps[0][0], kCapRows))) {
+                active = &candidate;
+                caps[2 * N][0] = 0.5f, caps[2 * N][1] = Penumbra::Radius(), caps[2 * N][2] = 0.5f, caps[2 * N][3] = 1e-4f;
+            }
+        }
+    }
+    if (LightProbe::Capturing())
+        g_objDrawInfo += std::format("\n      emitter floor shadows: {} verified caps, {}", capCount, active != &p ? "per pixel" : "existing shader retained");
     if (reachLaw) g_reachFenceDraws++;
     IDirect3DPixelShader9* original = g_curPs;
     g_inOwnCall = true;
@@ -4733,9 +4753,11 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
         FloorShadeBind shade(dev, p.inst.shadeSampler, p.inst.shadeConst, g ? FindLotAt(g->x, g->z) : nullptr, 1.0f, g_fenceShadeLot, g_fenceShadeNoLot,
                              GroundShadow::kFenceShadeReach);
         if (LightProbe::Capturing()) g_objDrawInfo += "\n      " + shade.Text();
-        SetPs(dev, p.ps);
+        if (active != &p) SetPsConst(dev, active->inst.capConst, &caps[0][0], kCapRows);
+        SetPs(dev, active->ps);
         draw();
         SetPs(dev, original);
+        if (active != &p) SetPsConst(dev, active->inst.capConst, &oldCaps[0][0], kCapRows);
         if (p.inst.pixelLamps) {
             SetPsConst(dev, p.inst.groundWeightConst, oldWeight, 1);
             SetPsConst(dev, p.inst.lampParamConst, &oldLamps[0][0], rows);
@@ -5595,6 +5617,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
                        g_objPixelStrength.load(std::memory_order_relaxed)), 0, 0, 0};
     float groundShare = 1.0f; // the share of the nearby lamps' light no wall blocks (below)
     float lampTop = -1e9f, originY = 0.0f; // the highest lamp head around and the object's origin (the ground gate, below)
+    float poolGate = 1.0f;
     // Per-pixel lamps ("Counters" request): the same world lamps for every piece, chosen by the object's position (the
     // VS world triple's translation), so neighbouring pieces of a modular object get the same lamps.
     constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
@@ -5630,6 +5653,11 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
             const float nearSkip = inWall ? kWindowWallSkip : 0.2f;
             nLamps = PickObjectLamps(at[0], at[1], at[2], lamps, groundShare, nearSkip, lamps + 1 + 2 * N, &lampTop, reach ? lamps + kLampRows : nullptr, true);
             originY = at[1];
+            // The atlas represents light on the lot ground. Upper cornice pieces
+            // must not acquire different pools from their nearest lamp-head lists.
+            // Direct pixel lamps remain responsible for those elevated surfaces.
+            if (const LotRect* lot = FindLotAt(at[0], at[2]))
+                poolGate = GroundShadow::GroundPoolHeightGate(originY, lot->ty);
             // the rig goes: its 3 pixel lamps (PS c5..c7 = 0 below, diffuse and specular) and its 4 vertex lights (the VS
             // colour constants = 0; Phong's ambient term in COLOR0 stays)
             lamps[0][1] = TerrainLightingPolicy::SurfaceLampGain(g_night.load(std::memory_order_relaxed),
@@ -5652,7 +5680,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
     // find lampTop).
     const float gate = lampTop > -1e8f ? std::clamp(1.0f - (originY - lampTop) / 1.5f, 0.0f, 1.0f) : 1.0f;
     if (gate < 1.0f) g_objGroundGated++;
-    s[0] *= groundShare * gate;
+    s[0] *= groundShare * gate * poolGate;
     const float rigDayScale = TerrainLightingPolicy::LampDay(night);
     const bool rigDay = !zeroRig && rigDayScale < 1.0f && (p.obj.rigLamps || vl >= 0); // the kept rig, scaled for this draw
     if (rigDay) g_objRigDayScaled++;
@@ -5661,6 +5689,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
         if (rigDay) g_objDrawInfo += std::format("\n      no per-pixel lamps placed: the game's rig lamp colours x {:.4f} (daytime curve) for this draw", rigDayScale);
         g_objDrawInfo += std::format("\n      ground light: share not behind buildings {:.2f}, height gate {:.2f} (object origin y {:.2f}, highest lamp head within 15 m {})",
                                      groundShare, gate, originY, lampTop > -1e8f ? std::format("{:.2f}", lampTop) : std::string("none"));
+        g_objDrawInfo += std::format("\n      ground pool at the object's height: {:.2f} (direct pixel lamps unchanged)", poolGate);
         g_objDrawInfo += ReachLawText(reach, reachRefused, zeroRig, lamps[0][1], lamps + kLampRows, nLamps);
     }
     if (reach && zeroRig) g_reachObjDraws++; // zeroRig: the lamps were placed (else cS.x = 0 and the sum is not used)
@@ -9481,7 +9510,7 @@ void Shutdown(bool keepChunkMaps) {
     g_meltTried = false;
     g_patchedGen++; // (PatchedFor's front answers and RoomMapConsts' last shader)
     for (auto* cache : {&g_terrainAlphaPs, &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs, &g_windowPs,
-                        &g_objLampPsReach, &g_fencePsReach, &g_windowPsReach}) {
+                        &g_objLampPsReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_windowPsReach}) {
         for (auto& [k, p] : *cache)
             if (p.ps) p.ps->Release();
         cache->clear();
@@ -9607,7 +9636,7 @@ void MeasureMemoryImpl() {
     size_t patchedItems = 0;
     const auto ps = [&](const std::unordered_map<IDirect3DPixelShader9*, PatchedPs>& m) { patched += Hash(m), patchedItems += m.size(); };
     for (const auto* m : {&g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_terrainAlphaPs,
-                          &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_objLampPsReach, &g_fencePsReach, &g_windowPs, &g_windowPsReach,
+                          &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_objLampPsReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_windowPs, &g_windowPsReach,
                           &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs})
         ps(*m);
     for (const auto* t : {&g_floorShadePs, &g_indoorPs, &g_floorAtlasPs}) {

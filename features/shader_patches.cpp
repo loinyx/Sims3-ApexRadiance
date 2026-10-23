@@ -1206,11 +1206,12 @@ bool IsInstancedStructureVs(const std::vector<DWORD>& t) {
     return world && lamps;
 }
 
-bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach, bool groundShade) {
+bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach, bool groundShade, bool capShadows) {
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto ins = Parse(t);
     if (ins.empty()) return false;
     const Usage u = Scan(t, ins);
+    if (capShadows && (t[0] != 0xFFFF0300u || u.maxConst + 10 + 6 * kObjectPixelLamps + (reach ? 2 : 0) >= 224)) return false;
     int colorReg = -1, tc1Reg = -1;
     size_t tc1Dcl = 0;
     for (const Ins& x : ins) {
@@ -1260,6 +1261,7 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
     out.pixelLamps = false;
     out.coneConst = 0;
     out.reachConst = 0;
+    out.capConst = 0;
     out.shadeSampler = out.shadeConst = -1;
     t[tc1Dcl] = (t[tc1Dcl] & ~0x000F0000u) | 0x000F0000u; // vT.xy -> vT (zw = world xz)
     const Ins& A = ins[add];
@@ -1280,6 +1282,9 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
         out.coneConst = cK;
         const DWORD cR = cK + 2 * kObjectPixelLamps; // reach: r0^2 of lamps 0..3 / 4..7 (one upload with the rows above)
         out.reachConst = reach ? cR : 0;
+        const DWORD cCap = cR + (reach ? 2 : 0) + 3;
+        const DWORD cCapParams = cCap + 2 * kObjectPixelLamps;
+        out.capConst = capShadows ? cCap : 0;
         t[tc2Dcl] = (t[tc2Dcl] & ~0x000F0000u) | 0x000F0000u; // vT2.xyz -> vT2 (w = world y)
         std::vector<DWORD> code = {Op(kMad, 4), Dst(kTemp, T, 0x3), Src(kInput, V, kSwzZWZW), Src(kConst, cA), Src(kConst, cA, kSwzZWZW),
                                    Op(kTexld, 3), Dst(kTemp, T), Src(kTemp, T), Src(kSampler, E),
@@ -1306,6 +1311,38 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
                                      Op(kMad, 4), Dst(kTemp, LB, 0x8), Src(kTemp, LB, 0xAA), Src(kConst, cc, kSwzW) | kNeg, Src(kTemp, LB, 0xAA), // t (1 - S)
                                      Op(kAdd, 3), Dst(kTemp, LB, 0x4), Src(kTemp, LB, kSwzW), Src(kConst, cc, kSwzW),                            // S + t (1 - S)
                                      Op(kMul, 3), Dst(kTemp, LB, 0x1), Src(kTemp, LB, kSwzX), Src(kTemp, LB, 0xAA)});
+            if (capShadows) {
+                // A floor under the emitter casts a soft shadow on each pixel,
+                // independently of the three points that selected the group's lamps.
+                // The uniform branch skips lamps with no verified complete tile.
+                const DWORD a = cCap + 2 * k, b = a + 1;
+                code.insert(code.end(), {
+                    Op(kMov, 2), Dst(kTemp, G, 0x1), Src(kConst, a, kSwzW),
+                    Op(0x29, 2) | 0x00010000u, Src(kTemp, G, kSwzX), Src(kConst, cCapParams, kSwzW), // ifc_gt
+                    Op(kAdd, 3), Dst(kTemp, G, 0x2), Src(kConst, cp, kSwzY), Src(kTemp, P, kSwzY) | kNeg,
+                    Op(kMax, 3), Dst(kTemp, G, 0x2), Src(kTemp, G, kSwzY), Src(kConst, cCapParams, kSwzW),
+                    Op(0x06, 2), Dst(kTemp, G, 0x2), Src(kTemp, G, kSwzY),
+                    Op(kMul, 3), Dst(kTemp, G, 0x1), Src(kTemp, G, kSwzX), Src(kTemp, G, kSwzY),
+                    Op(kAdd, 3), Dst(kTemp, G, 0x8), Src(kTemp, G, kSwzX) | kNeg, Src(kConst, cH, 0xAA),
+                    Op(kMul, 3), Dst(kTemp, G, 0x4), Src(kTemp, G, kSwzW), Src(kConst, cCapParams, kSwzY),
+                    Op(kMax, 3), Dst(kTemp, G, 0x4), Src(kTemp, G, 0xAA), Src(kConst, cCapParams, kSwzW),
+                    Op(0x06, 2), Dst(kTemp, G, 0x4), Src(kTemp, G, 0xAA),
+                    Op(kMul, 3), Dst(kTemp, G, 0x4), Src(kTemp, G, 0xAA), Src(kConst, cCapParams, 0xAA),
+                    Op(kAdd, 3), Dst(kTemp, LB, 0xC), Src(kTemp, P, 0x88), Src(kConst, cp, 0x88) | kNeg,
+                    Op(kMad, 4), Dst(kTemp, G, 0x3), Src(kTemp, G, kSwzX), Src(kTemp, LB, kSwzZWZW), Src(kConst, cp, 0x88),
+                    Op(0x5A, 4), Dst(kTemp, LB, 0x4), Src(kTemp, G), Src(kConst, a), Src(kConst, a, 0xAA),
+                    Op(0x5A, 4), Dst(kTemp, LB, 0x8), Src(kTemp, G), Src(kConst, b), Src(kConst, b, 0xAA),
+                    Op(kAdd, 3), Dst(kTemp, LB, 0xC), Src(kTemp, LB) | 0x0C000000u, Src(kConst, cCapParams, kSwzX),
+                    Op(kMad, 4), Dst(kTemp, LB, 0xC, true), Src(kTemp, LB), Src(kTemp, G, 0xAA), Src(kConst, cCapParams, kSwzX),
+                    Op(kMul, 3), Dst(kTemp, G, 0x3), Src(kTemp, LB, kSwzZWZW), Src(kTemp, LB, kSwzZWZW),
+                    Op(kMad, 4), Dst(kTemp, LB, 0xC), Src(kTemp, LB), Src(kConst, cCapParams + 1, kSwzY), Src(kConst, cCapParams + 1, kSwzX),
+                    Op(kMul, 3), Dst(kTemp, LB, 0xC), Src(kTemp, LB), Src(kTemp, G, kSwzXYXY),
+                    Op(kMul, 3), Dst(kTemp, LB, 0x4), Src(kTemp, LB, 0xAA), Src(kTemp, LB, kSwzW),
+                    Op(0x58, 4), Dst(kTemp, LB, 0x4), Src(kTemp, G, kSwzW) | kNeg, Src(kConst, cH, kSwzW), Src(kTemp, LB, 0xAA),
+                    Op(kAdd, 3), Dst(kTemp, LB, 0x4), Src(kTemp, LB, 0xAA) | kNeg, Src(kConst, cH, 0xAA),
+                    Op(kMul, 3), Dst(kTemp, LB, 0x1), Src(kTemp, LB, kSwzX), Src(kTemp, LB, 0xAA),
+                    Op(0x2B, 0)}); // endif
+            }
             if (k == 0) code.insert(code.end(), {Op(kMul, 3), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, LB, kSwzX)});
             else code.insert(code.end(), {Op(kMad, 4), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, LB, kSwzX), Src(kTemp, Q)});
         }
@@ -1318,6 +1355,7 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
                                  Op(kLrp, 4), Dst(kTemp, LA, 0x7), Src(kConst, cS, kSwzX), Src(kTemp, LA), Src(kInput, C),
                                  Op(kMax, 3), Dst(kTemp, T, 0x7), Src(kTemp, LA), Src(kTemp, T)});
         std::vector<Edit> edits = {{u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E)}}};
+        if (capShadows) edits.push_back({1, {Op(kDef, 5), Dst(kConst, cCapParams + 1), F(3.0f), F(-2.0f), F(0.0f), F(0.0f)}});
         // The ground lamp shade (13/10, F7 2026-10-13 09-31-30 #268: the wooden curbs of a flowerbed behind a free-standing wall
         // stayed lit by the garden post on the other side, while the grass and the paths beside them were shaded). One lamp
         // list serves the whole group, so a group running past the wall keeps the lamp for every piece, and neither the lamps

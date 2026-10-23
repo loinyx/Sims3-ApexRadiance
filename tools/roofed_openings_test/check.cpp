@@ -14,6 +14,7 @@
 #include "features/lamp_visibility.h"
 #include "features/ground_lamp_shadow.h" // (wall_openings.h)
 #include "features/ground_light_gate.h"
+#include "features/lamp_cap_shadow.h"
 #include "features/wall_sample_span.h"
 #include "features/inner_retry.h"
 #include "features/lamp_reach.h"
@@ -741,6 +742,15 @@ void GroundSoftChecks() {
 // house, took the post's ground pool on their tops)
 void GroundGateChecks() {
     using namespace GroundLightGate;
+    const float lotGround = 16.7266541f, cornice = 26.85f;
+    const float pool = GroundShadow::GroundPoolHeightGate(cornice, lotGround);
+    Check(pool == 0.0f && pool * HeightGate(cornice, 25.58f) == pool * HeightGate(cornice, 28.58f),
+          "captured cornice neighbours cannot receive different ground pools from their head lists");
+    Check(GroundShadow::GroundPoolHeightGate(lotGround, lotGround) == 1.0f &&
+          GroundShadow::GroundPoolHeightGate(lotGround + 0.75f, lotGround) == 1.0f,
+          "ground objects and columns on a foundation retain their pool strength");
+    Check(std::fabs(GroundShadow::GroundPoolHeightGate(lotGround + 1.125f, lotGround) - 0.5f) < 1e-5f,
+          "ground pool fades continuously at the existing ground-height boundary");
     const float post[3] = {1034.0f, 54.2f, 1274.5f}, indoor[3] = {1036.0f, 59.1f, 1270.0f};
     const float parapetY = 57.7f, curbY = 52.9f, reach = 15.0f;
     // the old rule: every head around raised the gate
@@ -1102,6 +1112,14 @@ void RaisedWallSpanChecks() {
 }
 
 void PillarLightChecks() {
+    const float cap[2][4] = {{1, 0, 0, 0.497f}, {0, 1, 0, 0}};
+    const float head[3] = {0, 2.372f, 0};
+    const float behind[3] = {0.6946f, 0.75f, 0.7919f}, clear[3] = {3.0f, 0.75f, 3.0f}, above[3] = {0, 2.0f, 0};
+    Check(LampCapShadow::Pass(cap, head, behind, 0.15f) < 0.01f, "captured deck ray crosses the pillar's opaque cap");
+    Check(LampCapShadow::Pass(cap, head, clear, 0.15f) > 0.99f, "a stair pixel past the cap's shadow keeps its lamp");
+    Check(LampCapShadow::Pass(cap, head, above, 0.15f) == 1.0f, "the cap never blocks a receiver above it");
+    const float disabled[2][4]{};
+    Check(LampCapShadow::Pass(disabled, head, behind, 0.15f) == 1.0f, "an unknown or incomplete cap leaves lighting unchanged");
     WallTopCell top;
     Check(!MeasuredShortTop(top), "unmeasured wall retains its native blocker");
     top.set = true;
