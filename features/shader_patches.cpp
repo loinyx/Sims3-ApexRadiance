@@ -137,6 +137,17 @@ int LampScaleAfter(const std::vector<DWORD>& t, const std::vector<Ins>& ins, siz
     return uses == 1 ? K : -1;
 }
 
+// (2.15.3) The reach law's lamp sum held under 1 by its brightest channel, as v / max(1, max(v.r, v.g, v.b)): the lamps' hue
+// stays where they are bright (a per-channel clamp turned a warm or coloured lamp white near its head). tmp.x is overwritten.
+// rcp of 0 is +inf, which the saturate makes 1.
+void AppendHueClamp(std::vector<DWORD>& v, DWORD q, DWORD tmp) {
+    v.insert(v.end(), {Op(kMax, 3), Dst(kTemp, tmp, 0x1), Src(kTemp, q, kSwzX), Src(kTemp, q, 0x55),
+                       Op(kMax, 3), Dst(kTemp, tmp, 0x1), Src(kTemp, tmp, kSwzX), Src(kTemp, q, 0xAA),
+                       Op(0x06 /* rcp */, 2), Dst(kTemp, tmp, 0x1), Src(kTemp, tmp, kSwzX),
+                       Op(kMov, 2), Dst(kTemp, tmp, 0x1, true), Src(kTemp, tmp, kSwzX),
+                       Op(kMul, 3), Dst(kTemp, q, 0x7), Src(kTemp, q), Src(kTemp, tmp, kSwzX)});
+}
+
 // One per-pixel lamp of the object, fence and window patches (ps_3_0): A.xyz = l (pixel to lamp, normalised), A.w = d^2,
 // B.x = the lamp's share before its cones; B.y, B.z and B.w are free after it. pos = the pixel's world position (negated
 // here), nrm = its normal, cp = the lamp row (pos, 1/R^2), cS.w = the smallest d^2, cH.z = 1. One constant per instruction
@@ -1160,8 +1171,8 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
             if (k == 0) code.insert(code.end(), {Op(kMul, 3), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, LB, kSwzX)});
             else code.insert(code.end(), {Op(kMad, 4), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, LB, kSwzX), Src(kTemp, Q)});
         }
-        // reach: the sum is held under 1 per channel as an outdoor wall's texel is (the room map's min(sum, 1))
-        if (reach) code.insert(code.end(), {Op(kMov, 2), Dst(kTemp, Q, 0x7, true), Src(kTemp, Q)});
+        // reach: the sum is held under 1 as an outdoor wall's texel is (the room map's min(sum, 1)), by its brightest channel
+        if (reach) AppendHueClamp(code, Q, LB);
         // Native rig and pixel lamps are alternative estimates; adding both can
         // amplify overlapping illumination. Use pixel lamps when the group is valid,
         // otherwise retain the native rig.
@@ -1736,8 +1747,8 @@ bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach) 
         if (k == 0) ground.insert(ground.end(), {Op(kMul, 3), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, B, kSwzX)});
         else ground.insert(ground.end(), {Op(kMad, 4), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, B, kSwzX), Src(kTemp, Q)});
     }
-    // reach: the sum is held under 1 per channel as an outdoor wall's texel is (the room map's min(sum, 1))
-    if (reach) ground.insert(ground.end(), {Op(kMov, 2), Dst(kTemp, Q, 0x7, true), Src(kTemp, Q)});
+    // reach: the sum is held under 1 as an outdoor wall's texel is (the room map's min(sum, 1)), by its brightest channel
+    if (reach) AppendHueClamp(ground, Q, B);
     std::vector<Edit> edits = {{1, {Op(kDef, 5), Dst(kConst, cH), F(0.5f), F(0.5f), F(1.0f), F(0.0f)}},
                                {afterLastInDcl, {Op(kDcl, 2), 0x80080005u /* texcoord8 */, Dst(kInput, V, 0x7)}},
                                {u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E)}}};
@@ -3068,7 +3079,7 @@ bool PatchWindowOutdoor(std::vector<DWORD>& t, WindowOutdoorPatch& out, bool rea
         if (k == 0) v.insert(v.end(), {Op(kMul, 3), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, B, kSwzX)});
         else v.insert(v.end(), {Op(kMad, 4), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, B, kSwzX), Src(kTemp, Q)});
     }
-    if (reach) v.insert(v.end(), {Op(kMov, 2), Dst(kTemp, Q, 0x7, true), Src(kTemp, Q)});
+    if (reach) AppendHueClamp(v, Q, B); // (held under 1 by its brightest channel)
     // outdoor = ground + lamps x cS.y, x w; the game's light is never lowered
     v.insert(v.end(), {Op(kMad, 4), Dst(kTemp, T, 0x7), Src(kTemp, Q), Src(kConst, cS, kSwzY), Src(kTemp, T),
                        Op(kMul, 3), Dst(kTemp, T, 0x7), Src(kTemp, T), Src(kTemp, P, kSwzW),
