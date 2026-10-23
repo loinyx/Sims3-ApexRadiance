@@ -1133,6 +1133,7 @@ std::vector<FenceGap> g_fenceGaps;
 std::unordered_map<uint64_t, std::vector<uint32_t>> g_gapCells; // every 8 m cell a gap's box (+0.5 m) touches
 std::unordered_map<uint64_t, DWORD> g_gates;                     // gap key -> last tick an object was drawn in it
 std::atomic<long> g_gatesFilled{0};
+int g_gapLogs = 0, g_gateLogs = 0, g_gateMissLogs = 0; // developer log lines (render thread)
 int FenceCell(float v) { return static_cast<int>(ApexMath::Floor(v / kFenceCell)); }
 uint64_t GapKey(float ax, float az, float bx, float bz) {
     int64_t q[4] = {std::lround(ax * 20.0f), std::lround(az * 20.0f), std::lround(bx * 20.0f), std::lround(bz * 20.0f)};
@@ -1207,6 +1208,21 @@ void FenceGridUpdate() {
             g_fenceCells[FenceCellKey(cx, cz)].push_back(i);
         }
     FenceGapsBuild();
+    if (!kPublicBuild && g_gapLogs < 12) {
+        g_gapLogs++;
+        std::string s = std::format("[GroundShadow] fence grid: {} fence walls, {} gaps in line", g_fenceAll.size(), g_fenceGaps.size());
+        for (size_t k = 0; k < g_fenceGaps.size() && k < 12; k++) {
+            const GroundShadow::Wall& w = g_fenceGaps[k].w;
+            s += std::format(" | ({:.2f} {:.2f})-({:.2f} {:.2f}) y {:.2f}..{:.2f}", w.x0, w.z0, w.x1, w.z1, w.y0, w.y1);
+        }
+        LOG_INFO(s);
+        std::string f = "[GroundShadow] fence walls:";
+        for (size_t k = 0; k < g_fenceAll.size() && k < 80; k++) {
+            const GroundShadow::Wall& w = g_fenceAll[k];
+            f += std::format(" ({:.2f} {:.2f})-({:.2f} {:.2f}) {:.2f}..{:.2f};", w.x0, w.z0, w.x1, w.z1, w.y0, w.y1);
+        }
+        LOG_INFO(f);
+    }
 }
 // An outdoor object drawn at world (x, y, z): a gate when its origin stands in a fence gap (within 0.35 m of the line,
 // between the two pieces' ends, between the gap's base - 1 m and its top)
@@ -1219,10 +1235,23 @@ void NoteGate(float x, float y, float z) {
         const FenceGap& gp = g_fenceGaps[k];
         const float dx = gp.w.x1 - gp.w.x0, dz = gp.w.z1 - gp.w.z0, l = std::hypot(dx, dz);
         const float t = ((x - gp.w.x0) * dx + (z - gp.w.z0) * dz) / l, side = ApexMath::Fabs((x - gp.w.x0) * dz - (z - gp.w.z0) * dx) / l;
-        if (t < -0.1f || t > l + 0.1f || side > 0.35f || y < gp.w.y0 - 1.0f || y > gp.w.y1) continue;
+        if (t < -0.1f || t > l + 0.1f || side > 0.35f || y < gp.w.y0 - 1.0f || y > gp.w.y1) {
+            if (!kPublicBuild && g_gateMissLogs < 30 && t > -1.5f && t < l + 1.5f && side < 1.5f) {
+                g_gateMissLogs++;
+                LOG_INFO(std::format("[GroundShadow] object at ({:.2f} {:.2f} {:.2f}) near the fence gap ({:.2f} {:.2f})-({:.2f} {:.2f}) y {:.2f}..{:.2f}: "
+                                     "{:.2f} m along it of {:.2f}, {:.2f} m off its line: not a gate",
+                                     x, y, z, gp.w.x0, gp.w.z0, gp.w.x1, gp.w.z1, gp.w.y0, gp.w.y1, t, l, side));
+            }
+            continue;
+        }
         const DWORD now = GetTickCount();
         const auto [g, fresh] = g_gates.try_emplace(gp.key, now);
         if (fresh) ApexUtil::CountOne(g_gatesFilled);
+        if (fresh && !kPublicBuild && g_gateLogs < 20) {
+            g_gateLogs++;
+            LOG_INFO(std::format("[GroundShadow] gate at ({:.2f} {:.2f} {:.2f}) fills the fence gap ({:.2f} {:.2f})-({:.2f} {:.2f}) y {:.2f}..{:.2f}", x, y, z,
+                                 gp.w.x0, gp.w.z0, gp.w.x1, gp.w.z1, gp.w.y0, gp.w.y1));
+        }
         else if (now - g->second > 1000) g->second = now;
         return;
     }
