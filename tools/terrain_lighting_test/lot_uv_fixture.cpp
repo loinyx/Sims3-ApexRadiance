@@ -5,11 +5,11 @@
 #undef wmain
 int wmain(int argc, wchar_t** argv) {
     if (argc != 2) return 2;
-    const auto code = Compile(LotHlsl(argv[1]), "ps_2_0");
+    const auto code = Compile(LotHlsl(argv[1]), "ps_3_0");
     Gpu gpu;
     if (!gpu.dev || code.empty()) return 1;
     auto* shader = gpu.Shader(code);
-    Check(shader != nullptr, "production ps_2_0 accepted by D3D9 device");
+    Check(shader != nullptr, "production ps_3_0 accepted by D3D9 device");
     for (float scale : {1.f/16,1.f/32,1.f/64,1.f/128,1.f/256}) {
         for (int p = -100; p <= 25600; ++p) {
             const float local = p / 100.f;
