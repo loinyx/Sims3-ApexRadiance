@@ -10394,7 +10394,7 @@ bool ExitGroundRoom(const BYTE* room) {
     }
 }
 bool ExitGroundOn() {
-    return g_exitGroundOn.load(std::memory_order_relaxed) && g_floorMaskReady && InnerOpeningsOn();
+    return g_exitGroundOn.load(std::memory_order_relaxed) && g_floorMaskReady && g_floorWallsOn.load(std::memory_order_relaxed) && InnerOpeningsOn();
 }
 // The point solve of an unmasked outdoor sample, with the exit part tapped when it is a story-0 ground texel; E in alpha
 float* SolveGroundTexel(BYTE* room, float* out, void* list2D, void* list3D, void* flags, void* sample, float& alpha) {

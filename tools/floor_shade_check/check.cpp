@@ -264,7 +264,7 @@ void SummerFloors(Gpu& gpu, const std::vector<Blob>& blobs, const std::vector<Te
         for (auto [vs, ps] : t.passes)
             if (ps >= 1 && ps <= blobs.size() && vs >= 1 && vs <= blobs.size()) vsOf[ps].insert(vs);
     std::set<uint32_t> tableHashes;
-    int found = 0, pairs = 0, shaded = 0, accepted = 0, maxSlots = 0, noRoom = 0;
+    int found = 0, pairs = 0, shaded = 0, accepted = 0, maxSlots = 0, noRoom = 0, exitN = 0, exitMaxSlots = 0;
     std::map<int, int> tcCount, wkCount;
     std::map<uint32_t, int> vsTc; // vs index -> TEXCOORD of its copy (-1 none)
     for (size_t i = 0; i < blobs.size(); i++) {
@@ -297,6 +297,23 @@ void SummerFloors(Gpu& gpu, const std::vector<Blob>& blobs, const std::vector<Te
             Check(pa && pn, "summer floor: the table's shader takes the patch, with and without the shade");
             if (!pa || !pn) continue;
             accepted++;
+            // (2.15.3) the indoor light on the ground: taken where the shader has room, else exactly the shaded copy
+            {
+                std::vector<DWORD> e = b.code;
+                ShaderPatches::FloorPatch fe;
+                Check(ShaderPatches::PatchBakedAtlasPs(e, tc, fe, true, true), "summer floor exit: the table's shader takes the patch");
+                if (!fe.exitLight) Check(e == a && !fe.exitLight, "summer floor exit: without room the copy is the shaded one");
+                else {
+                    exitN++;
+                    const int s = Slots(Disasm(e));
+                    exitMaxSlots = std::max(exitMaxSlots, s);
+                    Check(s > 0 && s <= 512, "summer floor exit: disassembles within 512 slots");
+                    Check(gpu.AcceptsPs(e), "summer floor exit: native D3D9 accepts the copy");
+                    Check(fe.atlasSampler == fa.atlasSampler && fe.atlasConst == fa.atlasConst && fe.heightConst == fa.heightConst && fe.scaleConst == fa.scaleConst &&
+                              fe.shadeSampler == fa.shadeSampler && fe.shadeConst == fa.shadeConst && fe.maskAlpha,
+                          "summer floor exit: the same registers as the shaded copy");
+                }
+            }
             Check(fn.shadeSampler == -1 && fn.shadeConst == -1, "summer floor: no shade fields without the shade");
             Check(fa.atlasSampler == fn.atlasSampler && fa.atlasConst == fn.atlasConst && fa.heightConst == fn.heightConst && fa.scaleConst == fn.scaleConst &&
                       fa.maskAlpha == fn.maskAlpha,
@@ -328,7 +345,7 @@ void SummerFloors(Gpu& gpu, const std::vector<Blob>& blobs, const std::vector<Te
     for (auto [tc, n] : tcCount) std::printf(" %d x%d", tc, n);
     std::printf("; vertex shader copies' world rows from:");
     for (auto [wk, n] : wkCount) std::printf(" c%d x%d", wk, n);
-    std::printf("\n");
+    std::printf("\n  indoor light on the ground: %d pairs take it, most slots %d\n", exitN, exitMaxSlots);
 }
 
 // ---- 2. winter floor tiles and snow on floors ----
@@ -351,7 +368,7 @@ void WinterFloors(Gpu& gpu, const std::vector<Blob>& blobs, const std::vector<Te
             if (ps >= 1 && ps <= blobs.size() && vs >= 1 && vs <= blobs.size()) psOf[vs].insert(ps);
     for (int kind = 0; kind < 2; kind++) {
         const char* name = kind == 0 ? "Winter floor tiles" : "Snow on floors";
-        int vsN = 0, vsY = 0, psN = 0, psShaded = 0, psRefusedBoth = 0, psNoRoom = 0;
+        int vsN = 0, vsY = 0, psN = 0, psShaded = 0, psRefusedBoth = 0, psNoRoom = 0, psExit = 0;
         std::set<uint32_t> seenVs;
         std::map<std::string, int> yAt;
         for (size_t i = 0; i < blobs.size(); i++) {
@@ -396,6 +413,23 @@ void WinterFloors(Gpu& gpu, const std::vector<Blob>& blobs, const std::vector<Te
                 }
                 psShaded++;
                 Check(fa.shadeSampler == static_cast<int>(fa.atlasSampler) + 1 && fa.shadeConst == static_cast<int>(fa.atlasConst) + 2, "winter: shade registers");
+                {
+                    // (2.15.3) the indoor light on the ground, else exactly the shaded copy
+                    std::vector<DWORD> e = ps;
+                    ShaderPatches::FloorPatch fe;
+                    const bool pe = kind == 0 ? ShaderPatches::PatchFloor(e, fe, y, true) : ShaderPatches::PatchSnowFloor(e, tc, fe, y, true);
+                    Check(pe, "winter exit: the shader takes the patch");
+                    if (pe && !fe.exitLight) Check(e == a, "winter exit: without room the copy is the shaded one");
+                    if (pe && fe.exitLight) {
+                        psExit++;
+                        const int s = Slots(Disasm(e));
+                        Check(s > 0 && s <= 512, "winter exit: disassembles within 512 slots");
+                        Check(gpu.AcceptsPs(e), "winter exit: native D3D9 accepts the copy");
+                        Check(fe.atlasSampler == fa.atlasSampler && fe.atlasConst == fa.atlasConst && fe.heightConst == fa.heightConst && fe.scaleConst == fa.scaleConst &&
+                                  fe.shadeSampler == fa.shadeSampler && fe.shadeConst == fa.shadeConst && fe.maskAlpha,
+                              "winter exit: the same registers as the shaded copy");
+                    }
+                }
                 const std::string text = Disasm(a);
                 Check(!text.empty() && Slots(text) > 0 && Slots(text) <= 512, "winter: patched shader disassembles within 512 slots");
                 // world y read from the TEXCOORD the vertex shader writes it to
@@ -407,7 +441,8 @@ void WinterFloors(Gpu& gpu, const std::vector<Blob>& blobs, const std::vector<Te
         }
         std::printf("%s: %d vertex shaders, %d write world y (", name, vsN, vsY);
         for (auto& [k, v] : yAt) std::printf(" %s x%d", k.c_str(), v);
-        std::printf(" ); pixel shaders patched %d, shaded %d (no sampler to spare %d), refused by the patch %d\n", psN, psShaded, psNoRoom, psRefusedBoth);
+        std::printf(" ); pixel shaders patched %d, shaded %d (no sampler to spare %d), refused by the patch %d; indoor light on the ground %d\n", psN, psShaded,
+                    psNoRoom, psRefusedBoth, psExit);
     }
 }
 
@@ -553,6 +588,130 @@ void Pixels(Gpu& gpu) {
     Release(white);
     Release(mask);
     std::printf("Floor shade pixels: %d checks\n", g_checks - before);
+}
+
+// ---- 4b. (2.15.3) GPU pixels of the indoor light on the ground: the synthetic floor shader patched with exitLight, a map
+// whose rgb and alpha vary per pixel (a = 1 in the first column: a roofless room's floor), a grey atlas, the lot mask's
+// alpha pattern; at seven heights, with the shade, with the gate rows over the white mask (the shade off), off (gate 0) and
+// with the atlas weight constant (1, -1) and (1, 0): out = max(L - ex, atlas tw) (1 + g (M - 1)) + ex within 2 LSB.
+void ExitPixels(Gpu& gpu) {
+    if (!gpu.dev) return;
+    const int before = g_checks;
+    const std::vector<DWORD> ps = Compile("sampler2D map:register(s0); sampler2D base:register(s1); float4 k:register(c0); float4 s:register(c2);\n"
+                                          "float4 main(float2 uv:TEXCOORD0):COLOR0{float4 m=tex2D(map,uv);float3 b=tex2D(base,uv).rgb;return float4((m.rgb*k.x+b)*s.x,1);}",
+                                          "ps_3_0");
+    const std::vector<DWORD> vsCode = Compile("float4 rows[3]:register(c0);\n"
+                                              "struct O{float4 p:POSITION;float2 uv:TEXCOORD0;float3 w:TEXCOORD7;};\n"
+                                              "O main(float4 p:POSITION,float2 uv:TEXCOORD0){O o;o.p=p;o.uv=uv;o.w=rows[0].xyz+uv.x*rows[1].xyz+uv.y*rows[2].xyz;return o;}",
+                                              "vs_3_0");
+    std::vector<DWORD> code = ps;
+    ShaderPatches::FloorPatch f;
+    const bool ok = !code.empty() && ShaderPatches::PatchBakedAtlasPs(code, 7, f, true, true) && f.exitLight;
+    Check(ok, "exit pixels: the synthetic floor shader takes the indoor light on the ground");
+    if (!ok) return;
+    IDirect3DPixelShader9* shader = nullptr;
+    IDirect3DVertexShader9* vs = nullptr;
+    Check(SUCCEEDED(gpu.dev->CreatePixelShader(code.data(), &shader)), "exit pixels: D3D9 accepts the patched synthetic shader");
+    Check(!vsCode.empty() && SUCCEEDED(gpu.dev->CreateVertexShader(vsCode.data(), &vs)), "exit pixels: fixture vertex shader");
+    const auto make = [&](int w, int h, DWORD (*fill)(int, int)) {
+        IDirect3DTexture9* t = nullptr;
+        if (FAILED(gpu.dev->CreateTexture(w, h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &t, nullptr))) return t;
+        D3DLOCKED_RECT r{};
+        t->LockRect(0, &r, nullptr, 0);
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) reinterpret_cast<DWORD*>(static_cast<char*>(r.pBits) + y * r.Pitch)[x] = fill(x, y);
+        t->UnlockRect(0);
+        return t;
+    };
+    const auto mapOf = [](int x, int y) -> DWORD {
+        const DWORD a = x == 0 ? 255u : static_cast<DWORD>((x * 3 + y * 5) & 255), r = static_cast<DWORD>((x * 4 + 10) & 255), g = static_cast<DWORD>((y * 4 + 20) & 255),
+                    b = static_cast<DWORD>(((x + y) * 2) & 255);
+        return a << 24 | r << 16 | g << 8 | b;
+    };
+    const auto alphaOf = [](int i, int j) { return static_cast<DWORD>((i * 37 + j * 91 + (i * j) % 17 * 13) & 255); };
+    IDirect3DTexture9* map = make(64, 64, +[](int x, int y) -> DWORD {
+        const DWORD a = x == 0 ? 255u : static_cast<DWORD>((x * 3 + y * 5) & 255), r = static_cast<DWORD>((x * 4 + 10) & 255), g = static_cast<DWORD>((y * 4 + 20) & 255),
+                    b = static_cast<DWORD>(((x + y) * 2) & 255);
+        return a << 24 | r << 16 | g << 8 | b;
+    });
+    IDirect3DTexture9* black = make(4, 4, +[](int, int) -> DWORD { return 0u; });
+    IDirect3DTexture9* atlas = make(4, 4, +[](int, int) -> DWORD { return 0x00707070u; });
+    IDirect3DTexture9* white = make(1, 1, +[](int, int) -> DWORD { return 0xFFFFFFFFu; });
+    IDirect3DTexture9* mask = make(160, 120, +[](int i, int j) -> DWORD { return ((static_cast<DWORD>((i * 37 + j * 91 + (i * j) % 17 * 13) & 255)) << 24) | 0xFFFFFFu; });
+    if (!shader || !vs || !map || !black || !atlas || !white || !mask) {
+        Check(false, "exit pixels: fixture resources");
+    } else {
+        gpu.dev->SetTexture(0, map);
+        gpu.dev->SetTexture(1, black);
+        gpu.dev->SetTexture(f.atlasSampler, atlas);
+        const DWORD samplers[] = {0, 1, f.atlasSampler, static_cast<DWORD>(f.shadeSampler)};
+        for (DWORD s : samplers) {
+            gpu.dev->SetSamplerState(s, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+            gpu.dev->SetSamplerState(s, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+            gpu.dev->SetSamplerState(s, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+            gpu.dev->SetSamplerState(s, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+        }
+        const float k[4] = {1, 0, 0, 0}, one[4] = {1, 0, 0, 0}, atlasC[4] = {0, 0, 0, 0};
+        gpu.dev->SetPixelShaderConstantF(0, k, 1);
+        gpu.dev->SetPixelShaderConstantF(2, one, 1);
+        gpu.dev->SetPixelShaderConstantF(f.atlasConst, atlasC, 1);
+        GroundShadow::Grid g;
+        g.w = 160, g.h = 120, g.tx = 100.0f, g.tz = 50.0f, g.ty = 3.0f;
+        int worstAll = 0;
+        for (float cHy : {-1.0f, 0.0f}) {
+            const float weight[4] = {1, cHy, 0, 0};
+            gpu.dev->SetPixelShaderConstantF(static_cast<UINT>(f.heightConst), weight, 1);
+            for (int mode = 0; mode < 3; mode++) // 0 shade, 1 gate rows over the white mask (shade off), 2 off (gate 0)
+                for (float dy : {0.0f, -0.6f, 0.9f, 1.1f, 1.2f, 2.0f, 3.0f}) {
+                    if (mode == 2 && dy != 0.0f) continue;
+                    float rows[12];
+                    GroundShadow::FloorShadeRows(g, 1.0f, mode != 2, rows);
+                    gpu.dev->SetPixelShaderConstantF(static_cast<UINT>(f.shadeConst), rows, 3);
+                    gpu.dev->SetTexture(static_cast<DWORD>(f.shadeSampler), mode == 0 ? mask : white);
+                    const float lx0 = 0.3f, lz0 = 0.3f, du = 39.0f, dv = 29.0f, y = g.ty + dy;
+                    const float vrows[3][4] = {{lx0 + g.tx, lz0 + g.tz, y, 0}, {du, 0, 0, 0}, {0, dv, 0, 0}};
+                    gpu.dev->SetVertexShaderConstantF(0, vrows[0], 3);
+                    const auto px = gpu.Render(shader, vs);
+                    const float gate = mode == 2 ? 0.0f : std::clamp(5.0f - 4.0f * std::fabs(dy), 0.0f, 1.0f);
+                    int worst = 0;
+                    for (int py = 0; py < 64; py++)
+                        for (int pxi = 0; pxi < 64; pxi++) {
+                            const float lx = lx0 + du * pxi / 64.0f, lz = lz0 + dv * py / 64.0f;
+                            const int i = std::min(159, static_cast<int>(lx * 4.0f)), j = std::min(119, static_cast<int>(lz * 4.0f));
+                            const float M = mode == 0 ? alphaOf(i, j) / 255.0f : 1.0f;
+                            const DWORD m = mapOf(pxi, py);
+                            const float L[3] = {((m >> 16) & 255) / 255.0f, ((m >> 8) & 255) / 255.0f, (m & 255) / 255.0f}, a = (m >> 24) / 255.0f;
+                            const float lum = 0.2126f * L[0] + 0.7152f * L[1] + 0.0722f * L[2];
+                            const float tw = std::clamp((1.0f + a * cHy) * (1.0f + 254.0f * gate), 0.0f, 1.0f);
+                            const float s = gate * std::clamp(a / std::max(lum, 1.0f / 255.0f), 0.0f, 1.0f);
+                            for (int c = 0; c < 3; c++) {
+                                const float ex = L[c] * s;
+                                const float want = std::clamp(std::max(L[c] - ex, 0x70 / 255.0f * tw) * (1.0f + gate * (M - 1.0f)) + ex, 0.0f, 1.0f);
+                                const int got = static_cast<int>((px[py * 64 + pxi] >> (16 - 8 * c)) & 255);
+                                worst = std::max(worst, std::abs(got - static_cast<int>(std::lround(want * 255.0f))));
+                            }
+                        }
+                    worstAll = std::max(worstAll, worst);
+                    char what[200];
+                    std::snprintf(what, sizeof what, "exit pixels: weight (1, %.0f), %s, %.1f m over the ground: out = max(L - ex, atlas tw) (1 + g (M - 1)) + ex within 2 LSB (worst %d)",
+                                  cHy, mode == 0 ? "shade" : mode == 1 ? "gate over the white mask" : "off", dy, worst);
+                    Check(worst <= 2, what);
+                    if (worst > 2) std::printf("  %s\n", what);
+                }
+        }
+        std::printf("Indoor light on the ground, floor pixels: largest difference %d LSB\n", worstAll);
+    }
+    for (DWORD s = 0; s < 16; s++) gpu.dev->SetTexture(s, nullptr);
+    gpu.dev->SetPixelShader(nullptr);
+    gpu.dev->SetVertexShader(nullptr);
+    Release(shader);
+    Release(vs);
+    Release(map);
+    Release(black);
+    Release(atlas);
+    Release(white);
+    Release(mask);
+    std::printf("Indoor light on the ground, floor pixels: %d checks\n", g_checks - before);
 }
 
 // ---- 5. captured outdoor floor copies (optional F7 folders): each PS_*.bin that is the summer floor patch (without the
@@ -942,6 +1101,7 @@ int main(int argc, char** argv) {
     WinterFloors(gpu, blobs, techs);
     Rows();
     Pixels(gpu);
+    ExitPixels(gpu);
     Check(Instanced(gpu, InstancedPs(blobs, techs), "precomp") > 0, "instanced: the precomp has instanced shaders that take the shade");
     InstancedPixels(gpu);
     SnowLotPasses(gpu, blobs);

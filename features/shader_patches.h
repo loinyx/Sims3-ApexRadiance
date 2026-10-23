@@ -59,6 +59,10 @@ struct FloorPatch {
     // -1 = no shade (no world y, or no sampler / constants to spare): the draw binds nothing more.
     int shadeSampler = -1;
     int shadeConst = -1;
+    // (2.15.3) The copy takes the indoor light on the ground (exitLight of the patch functions): on story 0 the share of the
+    // map its alpha gives (the light lit rooms send through their openings) leaves max(map, atlas) and the shade and is added
+    // after them; the shade's rows must then carry the ground gate even while the shade itself is off (a white mask)
+    bool exitLight = false;
 };
 // Where a vertex shader writes world y to one output component: "mov oK.c, rW.y" with rW.y = "dp4 rW.y, rP, c9" (the
 // last write before it) and rW.x / rW.z from c8 / c10, exactly one such write and nothing else writing oK.c, no flow control.
@@ -70,19 +74,21 @@ struct WorldY {
 };
 bool WorldYOutput(const std::vector<DWORD>& t, WorldY& out);
 // worldY: where the paired vertex shader writes world y (WorldYOutput); with it, the ground lamp shade (out.shadeSampler).
-bool PatchFloor(std::vector<DWORD>& t, FloorPatch& out, const WorldY& worldY = WorldY{});
+// exitLight (2.15.3): the indoor light on the ground (out.exitLight) when the shader has room for it (with world y), else
+// the copy without it, byte for byte.
+bool PatchFloor(std::vector<DWORD>& t, FloorPatch& out, const WorldY& worldY = WorldY{}, bool exitLight = false);
 // Snow lying on lot floor tiles (LightProbe-m69): the VS writes TEXCOORD7.xy = world xz / 2; the PS gets max(room map, atlas).
 // texcoord: where the VS puts world xz / 2 (7 = TEXCOORD7.xy, 0 = TEXCOORD0.zw). worldY as PatchFloor (the shade's x and z
 // rows are doubled by the caller: the input is world xz / 2).
 bool IsSnowFloorVs(const std::vector<DWORD>& t, int& texcoord);
-bool PatchSnowFloor(std::vector<DWORD>& t, int texcoord, FloorPatch& out, const WorldY& worldY = WorldY{});
+bool PatchSnowFloor(std::vector<DWORD>& t, int texcoord, FloorPatch& out, const WorldY& worldY = WorldY{}, bool exitLight = false);
 // Baked-light surfaces (summer outdoor floors): max(light map, atlas at TEXCOORDn.xy = world xz, n from PatchObjectLampVs) before "mad ..., cK.x".
 // The atlas has no walls, so it is weighted by the floor map's alpha (out.heightConst, out.maskAlpha): level_light_share
 // stores there, for outdoor floor texels of the upper stories, the share of their lamps' light that walls block. Story 0's
 // floor map is room 0's solve, with no wall test either: with groundShade, max(map, weighted atlas) is then multiplied by the
 // ground lamp shade (out.shadeSampler; world y = TEXCOORDn.z, which PatchObjectLampVs writes). groundShade = false gives the
-// bytes of the patch before the shade.
-bool PatchBakedAtlasPs(std::vector<DWORD>& t, int texcoord, FloorPatch& out, bool groundShade = true);
+// bytes of the patch before the shade. exitLight (with groundShade, 2.15.3): as PatchFloor.
+bool PatchBakedAtlasPs(std::vector<DWORD>& t, int texcoord, FloorPatch& out, bool groundShade = true, bool exitLight = false);
 
 // Winter foliage with a shadow map: "lrp rD.w, t5.x, cK.y, rS.w" is the moon shadow that also darkens lamp light.
 // After it: rD.w = lerp(rD.w, 1, cN.x), cN.x = night level.

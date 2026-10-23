@@ -2346,16 +2346,20 @@ GroundShadow::Grid LotGrid(const LotRect& r) {
 // constructor takes the lot itself (instanced groups: the lot under their centre) and the counters to add the draw to.
 class FloorShadeBind {
 public:
-    FloorShadeBind(IDirect3DDevice9* dev, const ShaderPatches::FloorPatch& f, int worldK, float xzScale)
+    // (2.15.3) exitGate: the copy takes the indoor light on the ground (FloorPatch::exitLight) and that option is active: its
+    // ground gate is set even with the shade off (over the white mask), since the gate also says where the map's alpha is
+    // the indoor light (story 0) rather than the walls' blocked share (the stories above)
+    FloorShadeBind(IDirect3DDevice9* dev, const ShaderPatches::FloorPatch& f, int worldK, float xzScale, bool exitGate = false)
         : FloorShadeBind(dev, f.shadeSampler, f.shadeConst, f.shadeSampler >= 0 && f.shadeConst >= 0 ? LotFromRows(dev, worldK) : nullptr, xzScale, g_floorShadeLot,
-                         g_floorShadeNoLot) {}
+                         g_floorShadeNoLot, 0.0f, exitGate) {}
     FloorShadeBind(IDirect3DDevice9* dev, int sampler, int constant, const LotRect* lot, float xzScale, std::atomic<long>& withLot, std::atomic<long>& noLot,
-                   float faceReach = 0.0f)
+                   float faceReach = 0.0f, bool exitGate = false)
         : dev_(dev) {
         if (sampler < 0 || constant < 0) return;
         lot_ = lot;
         float rows[12];
-        on_ = GroundShadow::FloorShadeRows(lot_ ? LotGrid(*lot_) : GroundShadow::Grid{}, xzScale, g_shadeOn, rows) && g_shadeOn;
+        const bool gate = g_shadeOn || exitGate;
+        on_ = GroundShadow::FloorShadeRows(lot_ ? LotGrid(*lot_) : GroundShadow::Grid{}, xzScale, gate, rows) && g_shadeOn;
         rows[10] = faceReach; // the fences' copy only (PatchInstancedLamps); the floors' never read it
         ApexUtil::CountOne(lot_ ? withLot : noLot);
         EvictLotMasks();
@@ -6676,7 +6680,11 @@ template <typename DrawFn> bool DrawFloor(IDirect3DDevice9* dev, DrawFn draw) {
     IDirect3DTexture9* atlas = LightmapSmooth::Atlas(c);
     if (!atlas) return false;
     const ShaderPatches::WorldY y = g_curVsInfo ? g_curVsInfo->worldY : ShaderPatches::WorldY{};
+    // (2.15.3) with the indoor light on the ground active, the copies that take it (kinds 3 to 5 of g_floorShadePs)
+    const bool exitOn = LevelLightShare::IndoorLightOnGroundActive();
     PatchedPs& p = y.texcoord < 0 ? PatchedFor(dev, g_floorPs, "Floor", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchFloor(t, pp.floor); })
+                   : exitOn       ? PatchedFor(dev, g_floorShadePs[FloorShadeKey(3, y)], "Floor (ground lamp shade, indoor light on the ground)",
+                                               [y](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchFloor(t, pp.floor, y, true); })
                                   : PatchedFor(dev, g_floorShadePs[FloorShadeKey(0, y)], "Floor (ground lamp shade)",
                                                [y](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchFloor(t, pp.floor, y); });
     if (!p.ps) return false;
@@ -6691,7 +6699,7 @@ template <typename DrawFn> bool DrawFloor(IDirect3DDevice9* dev, DrawFn draw) {
         SamplerBind bind(dev, p.floor.atlasSampler, atlas, D3DTEXF_NONE);
         SetPsConst(dev, p.floor.atlasConst, c, 1);
         if (p.floor.heightConst >= 0) SetPsConst(dev, static_cast<UINT>(p.floor.heightConst), weight, 1);
-        FloorShadeBind shade(dev, p.floor, 8, 1.0f); // world xz in TEXCOORD0.zw (IsFloorVs: rows c8 .. c10)
+        FloorShadeBind shade(dev, p.floor, 8, 1.0f, exitOn && p.floor.exitLight); // world xz in TEXCOORD0.zw (IsFloorVs: rows c8 .. c10)
         SetPs(dev, p.ps);
         ConstGain lampGain(dev, p.floor.scaleConst, FloorDayGain()); // the lamp scale of max(map, atlas)
         if (LightProbe::Capturing()) g_objDrawInfo = "mod draw: winter floor tile | " + shade.Text();
@@ -6714,7 +6722,10 @@ template <typename DrawFn> bool DrawSnowFloor(IDirect3DDevice9* dev, DrawFn draw
     if (!atlas) return false;
     // world y: none in the snow-on-floor vertex shaders of the precomp (tools/floor_shade_check), so no shade there for now
     const ShaderPatches::WorldY y = g_curVsInfo ? g_curVsInfo->worldY : ShaderPatches::WorldY{};
+    const bool exitOn = LevelLightShare::IndoorLightOnGroundActive(); // (2.15.3, as DrawFloor)
     PatchedPs& p = y.texcoord < 0 ? PatchedFor(dev, g_curSnowFloorTc == 0 ? g_snowFloorPs0 : g_snowFloorPs, "Snow on floors", [tc = g_curSnowFloorTc](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchSnowFloor(t, tc, pp.floor); })
+                   : exitOn       ? PatchedFor(dev, g_floorShadePs[FloorShadeKey(g_curSnowFloorTc == 0 ? 4 : 5, y)], "Snow on floors (ground lamp shade, indoor light on the ground)",
+                                               [tc = g_curSnowFloorTc, y](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchSnowFloor(t, tc, pp.floor, y, true); })
                                   : PatchedFor(dev, g_floorShadePs[FloorShadeKey(g_curSnowFloorTc == 0 ? 1 : 2, y)], "Snow on floors (ground lamp shade)",
                                                [tc = g_curSnowFloorTc, y](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchSnowFloor(t, tc, pp.floor, y); });
     if (!p.ps) return false;
@@ -6743,7 +6754,7 @@ template <typename DrawFn> bool DrawSnowFloor(IDirect3DDevice9* dev, DrawFn draw
         SamplerBind bind(dev, p.floor.atlasSampler, atlas, D3DTEXF_NONE);
         SetPsConst(dev, p.floor.atlasConst, half, 1);
         if (p.floor.heightConst >= 0) SetPsConst(dev, static_cast<UINT>(p.floor.heightConst), weight, 1);
-        FloorShadeBind shade(dev, p.floor, 8, 2.0f); // world xz / 2 (IsSnowFloorVs: rows c8 .. c10)
+        FloorShadeBind shade(dev, p.floor, 8, 2.0f, exitOn && p.floor.exitLight); // world xz / 2 (IsSnowFloorVs: rows c8 .. c10)
         SetPs(dev, p.ps);
         ConstGain lampGain(dev, p.floor.scaleConst, FloorDayGain()); // the lamp scale of max(map, atlas)
         if (LightProbe::Capturing()) g_objDrawInfo = "mod draw: snow on a floor | " + shade.Text();
@@ -6763,6 +6774,7 @@ template <typename DrawFn> bool DrawSnowFloor(IDirect3DDevice9* dev, DrawFn draw
 // a copy with max(floor map, atlas) before the map's scale (ShaderPatches::PatchBakedAtlasPs), as the winter floors.
 // The vertex shader copy lives in the shader's VsInfo (FloorVs).
 std::map<int, std::unordered_map<IDirect3DPixelShader9*, PatchedPs>> g_floorAtlasPs; // per TEXCOORD index
+constexpr int kFloorExitKey = 64; // (2.15.3) g_floorAtlasPs: the copies with the indoor light on the ground, TEXCOORD + 64
 std::atomic<int> g_floorAtlasDrawn{0};
 
 template <typename DrawFn> bool DrawFloorAtlas(IDirect3DDevice9* dev, DrawFn draw) {
@@ -6786,7 +6798,11 @@ template <typename DrawFn> bool DrawFloorAtlas(IDirect3DDevice9* dev, DrawFn dra
         LOG_INFO(std::format("[LotLightBridge] Outdoor floor: vertex shader {:08X} {} (TEXCOORD{})", reinterpret_cast<uintptr_t>(g_curVs), fv.vs ? "patched" : "without the expected pattern", fv.tc));
     }
     if (!fv.vs) return false;
-    PatchedPs& p = PatchedFor(dev, g_floorAtlasPs[fv.tc], "Outdoor floor", [tc = fv.tc](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchBakedAtlasPs(t, tc, pp.floor); });
+    // (2.15.3) with the indoor light on the ground active, the copies that take it, kept under TEXCOORD + kFloorExitKey
+    const bool exitOn = LevelLightShare::IndoorLightOnGroundActive();
+    PatchedPs& p = exitOn ? PatchedFor(dev, g_floorAtlasPs[fv.tc + kFloorExitKey], "Outdoor floor (indoor light on the ground)",
+                                       [tc = fv.tc](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchBakedAtlasPs(t, tc, pp.floor, true, true); })
+                          : PatchedFor(dev, g_floorAtlasPs[fv.tc], "Outdoor floor", [tc = fv.tc](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchBakedAtlasPs(t, tc, pp.floor); });
     if (!p.ps) return false;
     if (!p.floor.loggedMask) {
         p.floor.loggedMask = true;
@@ -6807,12 +6823,13 @@ template <typename DrawFn> bool DrawFloorAtlas(IDirect3DDevice9* dev, DrawFn dra
         SetPsConst(dev, p.floor.atlasConst, c, 1);
         SetPsConst(dev, static_cast<UINT>(p.floor.heightConst), height, 1);
         // story 0: max(map, atlas) x the lot's ground lamp shade (world x, z, y = the copy's TEXCOORDn.xyz)
-        FloorShadeBind shade(dev, p.floor, fv.worldConst, 1.0f);
+        FloorShadeBind shade(dev, p.floor, fv.worldConst, 1.0f, exitOn && p.floor.exitLight);
         SetVs(dev, fv.vs);
         SetPs(dev, p.ps);
         ConstGain lampGain(dev, p.floor.scaleConst, FloorDayGain()); // the lamp scale of max(map, atlas)
         if (LightProbe::Capturing())
-            g_objDrawInfo = std::format("mod draw: outdoor floor | atlas weight 1 - floor map alpha: {} | {}", height[1] < 0.0f ? "on" : "off", shade.Text());
+            g_objDrawInfo = std::format("mod draw: outdoor floor | atlas weight 1 - floor map alpha: {} | {} | indoor light on the ground: {}", height[1] < 0.0f ? "on" : "off",
+                                        shade.Text(), !exitOn ? "off" : p.floor.exitLight ? "on" : "no room in the shader");
         draw();
         g_objDrawInfo.clear();
         SetPs(dev, originalPs);
