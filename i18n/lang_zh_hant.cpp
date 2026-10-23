@@ -1967,6 +1967,8 @@ const I18n::Pair kPairs[] = {
     {"Garden lamps light rooms through doors, windows and arches", "花園燈透過門、窗和拱門照亮房間"},
     {"Indoor light through openings", "室內光穿過開口"},
     {"Lit rooms shine through arches and windows onto the garden and the next room", "亮燈的房間透過拱門和窗戶照亮花園和隔壁房間"},
+    {"Indoor light adds to the ground", "室內光疊加到地面"},
+    {"Window and door light on the lot ground adds to the garden lamps", "從窗戶和門照到地塊地面上的光與花園燈的光疊加"},
     {"Shadow softness", "陰影柔和度"},
     {"Lamp size: shadows stay sharp next to a wall and soften farther from it", "燈的大小：靠近牆壁時陰影清晰，越遠越柔和"},
     {"Doors block light", "門會擋光"},

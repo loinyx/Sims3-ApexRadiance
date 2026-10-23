@@ -1967,6 +1967,8 @@ const I18n::Pair kPairs[] = {
     {"Garden lamps light rooms through doors, windows and arches", "Trädgårdslampor lyser upp rum genom dörrar, fönster och valv"},
     {"Indoor light through openings", "Inomhusljus genom öppningar"},
     {"Lit rooms shine through arches and windows onto the garden and the next room", "Upplysta rum lyser genom valv och fönster ut i trädgården och in i rummet bredvid"},
+    {"Indoor light adds to the ground", "Inomhusljus adderas på marken"},
+    {"Window and door light on the lot ground adds to the garden lamps", "Ljus från fönster och dörrar på tomtens mark adderas till trädgårdslampornas ljus"},
     {"Shadow softness", "Skuggornas mjukhet"},
     {"Lamp size: shadows stay sharp next to a wall and soften farther from it", "Lampans storlek: skuggor är skarpa vid väggen och mjukare längre bort"},
     {"Doors block light", "Dörrar blockerar ljus"},

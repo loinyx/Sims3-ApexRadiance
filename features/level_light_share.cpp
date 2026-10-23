@@ -10357,6 +10357,69 @@ void NoteFloorGate(const float* s, float base, float share) {
                          s[0], s[1], s[2], s[1] - base, share * 100.0f));
 }
 
+// ---- (2.15.3) Indoor light on the ground outside: what the lamps of roofed rooms add through their openings to a floor texel
+// of room 0 on story 0 (indoor light through openings, ShareInnerLamps). That map is the lot pass's lot map and the story-0
+// outdoor floors' floor map, which their draws combine with the ground atlas as max(map, atlas) x the outdoor lamps' wall
+// shade M (lot_light_bridge, kReplacementHlsl): a window's light on the grass under it was lost in the max next to a street
+// lamp's pool and darkened by M, a shade made for the outdoor lamps only. The texel's alpha (0 for room 0 in the game,
+// written through kOutdoorAlpha) now carries E = min(Lum3(exit), 254/255), the absolute luminance of that light, so the
+// draws can take the share E / lum(map) of the map out of the max and the shade and add it (alpha 1 stays a roofless room's
+// "none of the atlas", ownYard). The exit part is measured on the game's own running sum: before each light the sum is
+// noted (as OutdoorDelta::OnEval does), and an exit lamp's part is what the sum gained by the next light or the end, so the
+// game's drop under the room's live threshold +0x63C, the soft cut's fade and the 3D test all count as in the texel. Only
+// in the budgeted solve's floor pass (room+0xEC == 3, FUN_006a3c90 on +0x180, the floor lock +0x1C4); the synchronous
+// solve 0x006A3EC0 (impostors) is not read (unverified whether it moves +0xEC there): its texels keep alpha 0.
+std::atomic<bool> g_exitGroundOn{true}; // the option (SetIndoorLightOnGround)
+std::atomic<long> g_exitTexels{0}, g_exitLit{0};
+struct ExitTap {
+    float* sum = nullptr;     // the game's running sum of the texel (out), null when off
+    const BYTE* room = nullptr;
+    bool pending = false;     // the light evaluated last is an exit lamp: its part is the sum's gain since snap
+    float snap[3] = {};
+    float acc[3] = {};
+};
+thread_local ExitTap t_exit;
+inline void ExitFlush() {
+    if (!t_exit.pending) return;
+    t_exit.pending = false;
+    for (int i = 0; i < 3; i++) t_exit.acc[i] += t_exit.sum[i] - t_exit.snap[i];
+}
+// Room 0 of story 0 in the budgeted floor pass, read live (POD, SEH)
+bool ExitGroundRoom(const BYTE* room) {
+    __try {
+        const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(room);
+        return mgr && *reinterpret_cast<const int*>(room + 0xC) == 0 && *reinterpret_cast<const int*>(mgr + 0x88) == 0 && *reinterpret_cast<const int*>(room + 0xEC) == 3;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool ExitGroundOn() {
+    return g_exitGroundOn.load(std::memory_order_relaxed) && g_floorMaskReady && InnerOpeningsOn();
+}
+// The point solve of an unmasked outdoor sample, with the exit part tapped when it is a story-0 ground texel; E in alpha
+float* SolveGroundTexel(BYTE* room, float* out, void* list2D, void* list3D, void* flags, void* sample, float& alpha) {
+    alpha = 0.0f;
+    const float* s = static_cast<const float*>(sample);
+    const bool tap = room[0x18] && s[5] >= 0.9f && !t_replay && !t_maskCopy && ThreadId() == g_gatherThread.load(std::memory_order_relaxed) && ExitGroundOn() &&
+                     ExitGroundRoom(room);
+    if (!tap) return SolvePoint(room, out, list2D, list3D, flags, sample, true);
+    struct Reset {
+        ~Reset() { t_exit = ExitTap{}; }
+    } reset;
+    t_exit = ExitTap{};
+    t_exit.sum = out;
+    t_exit.room = room;
+    float* r = SolvePoint(room, out, list2D, list3D, flags, sample, true);
+    ExitFlush();
+    const float e = Lum3(t_exit.acc);
+    ApexUtil::CountOne(g_exitTexels);
+    if (e > 0.0f && ApexMath::IsFinite(e)) {
+        alpha = std::min(e, 254.0f / 255.0f); // (1 = a roofless room's own floor)
+        ApexUtil::CountOne(g_exitLit);
+    }
+    return r;
+}
+
 float* SolvePointBatchImpl(BYTE* room, float* out, void* list2D, void* list3D, void* flags, void* sample);
 thread_local bool t_inBatchSample = false; // (2.15.3) inside one sample of a batch solve (WindowChannelHook keeps answers only here)
 struct InBatchSample {
@@ -10413,13 +10476,14 @@ float* SolvePointBatchImpl(BYTE* room, float* out, void* list2D, void* list3D, v
     BYTE* room0 = !masked ? nullptr : ownYard ? room : MaskedFloorRoom0(room);
     if (!room0) {
         if (t_odSample) OutdoorDelta::Tap(0, out);
-        float* r = SolvePoint(room, out, list2D, list3D, flags, sample, true);
+        float exitAlpha = 0.0f; // (2.15.3) story 0's ground: the indoor light through openings in it (SolveGroundTexel)
+        float* r = SolveGroundTexel(room, out, list2D, list3D, flags, sample, exitAlpha);
         if (t_odSample) {
             OutdoorDelta::TapEnd();
             OutdoorDelta::Mask(false, false, 0.0f, 0.0f);
         }
         if (t_replay) t_lastMask = LastMask{};
-        if (g_floorMaskReady && room[0x18]) out[3] = 0.0f; // outdoor: the game's alpha 0
+        if (g_floorMaskReady && room[0x18]) out[3] = exitAlpha; // outdoor: the game's alpha 0
         return r;
     }
     // An outdoor floor texel of a story >= 1: its own light is solved once, with the walls tested (top view:
@@ -12168,6 +12232,14 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
     // scales, holds none of them; the room's own map carries them)
     const bool innerLamp = g_ctx.info && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed) &&
                            FindInner(*g_ctx.info, reinterpret_cast<uintptr_t>(light));
+    // (2.15.3) indoor light on the ground outside (SolveGroundTexel): the previous exit lamp's part, then this one's start
+    if (t_exit.sum && t_solveRoom == t_exit.room && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn)) {
+        ExitFlush();
+        if (innerLamp) {
+            for (int i = 0; i < 3; i++) t_exit.snap[i] = t_exit.sum[i];
+            t_exit.pending = true;
+        }
+    }
     if (innerLamp && t_maskCopy) {
         g_ctx.enterLight = 0;
         g_ctx.yardLight = 0;
@@ -15448,6 +15520,29 @@ void SetIndoorThroughOpenings(bool on) {
     ObjectLightBridge::RequestRigRefresh();
 }
 bool IndoorThroughOpeningsActive() { return InnerOpeningsOn(); }
+
+// (2.15.3) Indoor light adds to the ground: story 0's room 0 is solved again (its texels' alpha carries the exit light)
+void SetIndoorLightOnGround(bool on) {
+    if (g_exitGroundOn.exchange(on) == on) return;
+    if (g_installed.load(std::memory_order_relaxed) && g_floorMaskReady && InnerOpeningsOn())
+        RelightAllRooms(on ? "Indoor light adds to the ground on" : "Indoor light adds to the ground off");
+}
+bool IndoorLightOnGroundActive() { return g_installed.load(std::memory_order_relaxed) && ExitGroundOn(); }
+bool ExitLampOf(unsigned char* room, uintptr_t light) {
+    if (!room || !light || ThreadId() != g_gatherThread.load(std::memory_order_relaxed)) return false;
+    __try {
+        const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(room);
+        if (!mgr || *reinterpret_cast<const int*>(room + 0xC) != 0 || *reinterpret_cast<const int*>(mgr + 0x88) != 0) return false;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    const RoomInfo* info = SolveInfo(room);
+    return info && FindInner(*info, light);
+}
+std::string IndoorLightOnGroundStatus() {
+    return std::format("indoor light on the ground: {} ({} ground texels tapped, {} lit through openings)", IndoorLightOnGroundActive() ? "on" : "off",
+                       g_exitTexels.load(std::memory_order_relaxed), g_exitLit.load(std::memory_order_relaxed));
+}
 
 // "Doors block light": the stories with a door, gate or cut of unknown kind noted get a new cut generation (their grids and
 // outside walls' copies are built again at their next use) and are sent like a story whose openings changed

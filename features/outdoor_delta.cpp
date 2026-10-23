@@ -98,6 +98,9 @@ struct LampRec {
     bool drawn = false;
     // (14/10) its parts are only in the record's drawn sum (CollapseDrawn): a delta that needs them solves in full
     bool collapsed = false;
+    // (2.15.3) a roofed room's lamp that story 0's room 0 took through an opening: its part of a ground texel is also in the
+    // texel's alpha (LevelLightShare::SetIndoorLightOnGround), which a delta does not compose again
+    bool exit = false;
     std::vector<Contrib, ApexMem::HighAllocator<Contrib>> parts; // by texel, ascending
 };
 // The collapsed drawn lamps' parts of a texel together (CollapseDrawn): the base Real-time outdoor lamps relights from is the
@@ -779,6 +782,14 @@ Delta ComputeDelta(BYTE* room, const RoomRead& rr, Record& r, const char*& why, 
             return Delta::Ok;
         }
     }
+    // (2.15.3) indoor light on the ground: a changed exit lamp also changes the ground texels' alpha (E), which the kept parts
+    // do not hold; the full solve writes both
+    if (LevelLightShare::IndoorLightOnGroundActive())
+        for (const Changed& c : changed)
+            if ((c.rec >= 0 && r.lamps[static_cast<size_t>(c.rec)].exit) || LevelLightShare::ExitLampOf(room, c.light)) {
+                why = "a lamp shining out of a room onto the ground changed";
+                return Delta::Fail;
+            }
     for (const Changed& c : changed)
         if (c.rec >= 0 && r.lamps[static_cast<size_t>(c.rec)].collapsed) {
             why = "a lamp the GPU draws keeps only its sum (Instant)";
@@ -890,6 +901,7 @@ Delta ComputeDelta(BYTE* room, const RoomRead& rr, Record& r, const char*& why, 
             l = &r.lamps.back();
             l->light = c.light;
             l->drawn = DrawnLight(c.light, r.lot);
+            l->exit = LevelLightShare::ExitLampOf(room, c.light);
         }
         // at its exact size (assign keeps a larger buffer, or grows by half), unless that moves it under 2 GB (ShrinkExact)
         if (WouldLeaveHigh(l->parts, fresh[ci].size())) l->parts.assign(fresh[ci].begin(), fresh[ci].end());
@@ -1514,6 +1526,7 @@ void SolveEnd(unsigned char* room) {
                 c.lampIdx[list[i].light] = static_cast<int>(r.lamps.size());
                 r.lamps.push_back(LampRec{});
                 r.lamps.back().drawn = DrawnLight(list[i].light, r.lot);
+                r.lamps.back().exit = LevelLightShare::ExitLampOf(room, list[i].light);
             }
             LampRec& l = r.lamps[static_cast<size_t>(c.lampIdx[list[i].light])];
             l.light = list[i].light;
@@ -1838,6 +1851,7 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
                 r.lamps.push_back(LampRec{});
                 r.lamps.back().light = a.light;
                 r.lamps.back().drawn = DrawnLight(a.light, r.lot);
+                r.lamps.back().exit = LevelLightShare::ExitLampOf(room, a.light);
             }
             r.lamps[static_cast<size_t>(it->second)].parts.push_back(p);
         }

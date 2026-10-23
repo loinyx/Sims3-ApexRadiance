@@ -1967,6 +1967,8 @@ const I18n::Pair kPairs[] = {
     {"Garden lamps light rooms through doors, windows and arches", "庭のランプがドア、窓、アーチから部屋を照らします"},
     {"Indoor light through openings", "開口部からの室内の光"},
     {"Lit rooms shine through arches and windows onto the garden and the next room", "明かりのついた部屋がアーチや窓を通して庭や隣の部屋を照らします"},
+    {"Indoor light adds to the ground", "室内の光を地面に加算"},
+    {"Window and door light on the lot ground adds to the garden lamps", "窓やドアから敷地の地面に届く光を庭のランプの光に加えます"},
     {"Shadow softness", "影の柔らかさ"},
     {"Lamp size: shadows stay sharp next to a wall and soften farther from it", "ランプの大きさ：壁の近くでは影がくっきりし、離れるほど柔らかくなります"},
     {"Doors block light", "ドアが光を遮る"},
