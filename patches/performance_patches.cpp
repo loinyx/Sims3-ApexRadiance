@@ -27,6 +27,7 @@
 #include "scene_budget.h"
 #include "object_index.h"
 #include "object_id_map.h"
+#include "render_object_map.h"
 #include "room_light_queue.h"
 #include "atrium_hold.h"
 #include <algorithm>
@@ -676,12 +677,15 @@ class ObjectLookupIndexPatch : public ApexPatch {
         if (!ObjectIndex::Start(&error)) return Fail(error);
         std::string mapError;
         if (!ObjectIdMap::Start(&mapError)) LOG_WARNING("[ObjectIdMap] Not used: " + mapError);
+        std::string sceneError;
+        if (!RenderObjectMap::Start(&sceneError)) LOG_WARNING("[RenderObjectMap] Not used: " + sceneError);
         isEnabled = true;
         return true;
     }
 
     bool Uninstall() override {
         if (!isEnabled) return true;
+        RenderObjectMap::Stop();
         ObjectIdMap::Stop();
         ObjectIndex::Stop(); // the layer passes every call to the game from then on, even if the entry could not be put back
         isEnabled = false;
@@ -846,7 +850,7 @@ std::string Performance::MemoryGuardStatus() { return MemoryGuard::StatusText();
 std::string Performance::WindowRepaintStatus() { return WindowRepaint::StatusText(); }
 std::string Performance::ScriptMathStatus() { return ScriptMath::StatusText(); }
 std::string Performance::SceneBudgetStatus() { return SceneBudget::StatusText(); }
-std::string Performance::ObjectIndexStatus() { return ObjectIndex::StatusText() + "; " + ObjectIdMap::StatusText(); }
+std::string Performance::ObjectIndexStatus() { return ObjectIndex::StatusText() + "; " + ObjectIdMap::StatusText() + "; " + RenderObjectMap::StatusText(); }
 std::string Performance::RoomLightQueueStatus() { return RoomLightQueue::StatusText(); }
 
 APEX_REGISTER_FEATURE(ResourceLookupCachePatch,

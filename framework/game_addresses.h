@@ -267,6 +267,11 @@ enum class Id : uint16_t {
     ObjMapFind, // FUN_00939100 thiscall(map; out[2], key*), ret 8: the object service's hash map find (1033 buckets)
     ObjMapInsert, // FUN_00939170 thiscall(map; out[3], node, flag), ret 0xC: its insert (leaf)
     ObjMapErase, // FUN_00938d00 thiscall(map; out[2], node, bucket*), ret 0xC: its erase (leaf)
+    // (2.15.3) The same 1033-bucket map as the scene's (the message router at 0x006FDE20's singleton keeps one at +4, keyed
+    // by the 64-bit object id; features/render_object_map.h): node links at node+0 (the object service's at +0x10)
+    RenMapFind, // FUN_006fdfb0 thiscall(map; out[2], key*), ret 8
+    RenMapInsert, // FUN_006fe1f0 thiscall(map; out[3], node, flag), ret 0xC (leaf)
+    RenMapErase, // FUN_006fdf40 thiscall(map; out[2], node, bucket*), ret 0xC (leaf)
     // ---- Compositor tile readback without the GPU wait (features/compositor_readback.cpp; group "CompositorReadback")
     CompQueueCall,    // call FUN_005fdef0 in the texture compositor queue loop FUN_00608270 (0x006082F8)
     CompDispatch,     // FUN_005fdef0 thiscall(builder; job), ret 4: the texture builder's state machine ([b+0x74] state, [b+0x70] tile)
