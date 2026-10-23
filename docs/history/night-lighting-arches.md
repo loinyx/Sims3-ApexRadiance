@@ -119,3 +119,13 @@ with that ambient gives its arches. The F8 snapshot lists the last unmatched dra
 
 **Outcome:** the spread is 0.3 m: the step falls from 0.806 to 0.577. `ArchConeChecks` requires a cut of at least one
 third and an edge of 0.3 m or less.
+
+### 2026-10-22: the stories of the recent room maps
+
+**Context:** commit `823e339`. The arch rows of a floor draw find the draw's story by its room map, and the memo kept only
+the last map. A frame's floors alternate between the stories' maps, so the memo often missed, and every miss walked the
+rooms with arches through `StoryMapsInclude`.
+
+**Outcome:** the memo keeps the stories of 16 room maps, each answer still checked against the manager's sets; a map is
+in one manager's sets only, so a confirmed entry is the manager the walk would find. Not yet checked in game
+([validation](../validation/night-lighting-arches.md)).

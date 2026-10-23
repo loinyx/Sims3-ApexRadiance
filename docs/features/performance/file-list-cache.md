@@ -2,7 +2,8 @@
 
 Fewer stutters when Sims load outfits and shapes. Create a Sim and Sim loading ask the game for the list of every file
 of one type, and every package then walks its whole index. Faster File Lists keeps each read-only package's list per
-type and hands it back on the next request. The lists the game receives contain the same keys from the same packages.
+type, and the list of each writable package while nothing has written to it, and hands it back on the next request.
+The lists the game receives contain the same keys from the same packages.
 
 ## Status
 
@@ -26,10 +27,17 @@ Apex Radiance hooks both GetKeyList vtable slots and runs the game's per-package
 
 1. For a read-only package whose keys of that type were captured under the current generation and less than 60 s ago,
    append the kept keys as the game appends them and add its return value.
-2. For any other package, or with no capture yet, make the real call. For a read-only package, keep the keys it
+2. For a writable package of a counted class (DPF, DDF, packed stream: every writer of its index is hooked by the
+   [write epochs](remember-missing-files.md#write-epochs)), do the same while its write epoch is the one its keys were
+   captured with and no counted write is in progress.
+3. For any other package, or with no capture yet, make the real call. For a read-only package, keep the keys it
    appended when the generation did not move and the answer was sure (keys found, or an empty list with the key set
-   present or the file open before and after).
-3. For the ResourceSystem slot, sort and unique the result exactly like 0x00736660.
+   present or the file open before and after). For a writable package of a counted class, keep them with its write
+   epoch when no counted write happened during the call.
+4. For the ResourceSystem slot, sort and unique the result exactly like 0x00736660.
+
+In a CPU sample the walks of the 22 writable packages were 1.2% of the render thread. Tester switch *Writable packages'
+file lists* (`perf_key_list_counted_packages`, on); off, only read-only packages' lists are kept.
 
 ## Settings
 
@@ -43,6 +51,9 @@ Verification uses the lookup cache's *Check 1 answer in N* control ([resource-lo
 
 - Shares the lookup cache's generation and package-list watchers (installed while either cache is on). Every package-list
   change and change notice empties both.
+- **Remember missing files:** writable packages' lists need its write epochs, which are installed only while *Faster
+  game file lookups* and *Remember missing files* are both on and are trusted 10 s after they start. Without them only
+  read-only packages' lists are kept.
 - **Frame Profiler:** its "Key list" counter is the outer layer of both slots and adds ", keys N" and ", packages from
   cache N" to hitch lines; the report adds "File list cache: ...".
 - **Official Sims3SettingsSetter:** its source has none of GetKeyList or its slots.
@@ -92,9 +103,18 @@ Verification uses the lookup cache's *Check 1 answer in N* control ([resource-lo
   and the keys are appended to the game's vector after the lock is released. A lookup therefore copies no list under
   the lock (about 207 packages a call, each copy an allocation, on the render thread); a list replaced or dropped while
   a lookup still reads it lives until that lookup ends.
-- **Verification** (1 call in N, as the lookup cache): the real calls run for every read-only package with a kept list
-  and their keys are compared as a set (plus the return value). A difference turns the file list cache off for the
-  session and is logged.
+- **Writable packages.** A non-read-only package whose vtable is a counted class (`IsCountedVtable`) is read with
+  `StableEpoch`: the write sequence `g_writeSeq` before and after, no write in progress (`g_writeBusy` 0) and the
+  epoch of its bucket in between (a seqlock). Its entry (`KlEntry`) is marked `counted` with that `epoch`, and `KlFind`
+  answers a counted package only from a counted entry of the same epoch, a read-only one only from a read-only entry.
+  After the real call the keys are kept only when the call was quiet (no write in progress, the sequence and the epoch
+  unchanged) and the generation did not move. Its list is what its index holds, from the same walk the game makes, so
+  it is in the game's own order. While the write epochs are off or not yet trusted, or with the Tester switch off,
+  these packages are asked every time, as before.
+- **Verification** (1 call in N, as the lookup cache): the real calls run for every package with a kept list and their
+  keys are compared as a set (plus the return value). A difference turns the file list cache off for the session and
+  is logged. For a writable package, a check during which a counted write or a list change happened counts as
+  inconclusive.
 
 ### Address reference
 
@@ -109,10 +129,11 @@ Group `FileListCache`.
 ### Source
 
 `features/resource_cache.cpp`: `StartKeyLists` / `StopKeyLists`, `Hook_KeyListBase` / `Hook_KeyListDerived`,
-`EmulateKeyList`, `KlFind` / `KlStore`, `AppendKey`, `TakeKeyListNote`.
+`EmulateKeyList`, `KlFind` / `KlStore`, `StableEpoch`, `IsCountedVtable`, `AppendKey`, `TakeKeyListNote`.
 
 Developer counters: "File list cache: calls (cacheable, passed to the game); package lists from memory, packages asked;
-kept lists (keys), not kept" and "File list checks".
+kept lists (keys), not kept" and "File list checks". The report line ends with "(writable packages of a counted class
+from memory N)".
 
 ## Rejected approaches
 

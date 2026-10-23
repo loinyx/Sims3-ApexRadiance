@@ -31,7 +31,9 @@ Six changes to the queue, each checked against the Steam bytes and left off when
 2. **No middle step.** A finished class-0 solve steps straight to the room's target detail class.
 3. **Requeues keep the class.** A room solved before goes straight to its target class when it is invalidated.
 4. **Several rooms per frame.** After the game's scheduler makes a room of the priority lot current, Apex solves it at
-   once and picks the next, until 4 ms are used (1 ms while the camera moves) or a room does not finish.
+   once and picks the next, until 4 ms are used (1 ms while the camera moves; with the camera still, 1 to 4 ms by the
+   frame-time pacing of [Lot Lighting While Moving](lot-lighting-motion.md#how-apex-radiance-solves-it)) or a room does
+   not finish.
 5. **Stranded rooms.** A room waiting at a class above its current target (its story left the camera's view) gets the
    lowest priority instead of zero, so it is solved last rather than never.
 6. **Empty light maps.** An object removal from a level's five light maps returns at once when the five maps are
@@ -253,7 +255,8 @@ Every write goes through `MemPatch::WriteCodeSuspended`, and Stop puts the bytes
 4. **Several rooms per frame:** the `jmp` at 0x006C5E39 -> `PickHook`. It runs the scheduler, then, only on the render
    thread (id taken at Present) and only when the pick made a new room current that belongs to the priority lot (story
    built, `mgr+0x280`), solves the room at once (0x006A3F80 with a game stopwatch of its own: 0x004F35B0 kind 4 = ms,
-   0x00408700, 0x004F33C0) and picks the next, until 4 ms (1 ms while `LotLightingMotion::SampleCameraMoving()`) or a
+   0x00408700, 0x004F33C0) and picks the next, until 4 ms (1 ms while `LotLightingMotion::SampleCameraMoving()`; with
+   no edit hold, lamp edit or settle window, `LotLightingMotion::SteadyDrainMs(4)`, 1 to 4 ms by the steady pacing) or a
    room that did not finish (the lot pass goes on with it next frame). The drain runs only when the room current at the
    previous pick is done and the new one is of that same lot (so that lot's pass ran: not paused by +0x18 / +0x4E).
 5. **Stranded rooms:** a room in state 2 (`room+0xF0`) with a pending class above its LodChoice (`room+0xF4 > 0`) gets

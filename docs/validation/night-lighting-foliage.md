@@ -26,6 +26,7 @@ No repository harness covers `PatchFoliageVs` and `PatchLeafShadow`.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-22 | `b863bce` | None: `tools/foliage_vertex_test/` was not re-run; no harness covers the area lights' cones or the world change clear | Not run | not run in game yet |
 | 2026-10-20 | Working tree on `c22e8d7`, foliage code as in `3e0b6ad` | `tools/foliage_vertex_test/` | 28 checks passed; the trees' own lamps by the inverse square: a street lamp 5 m from a crown gives 0.425, 9 m 0.042, 11 m 0; the red lantern's crown stays 0 | Native D3D9 |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/foliage_vertex_test/` with `-Precomp` | 26 checks passed; `PatchTreeSunShadow` over the 8,011 pixel shaders of `Shaders_Win32.precomp`: 16 tree shaders, the 8 without a shadow patched and loading in D3D9, the 8 with one left alone, nothing else touched | Native D3D9 |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/foliage_vertex_test/` | 24 checks passed; adds `EyeAnchors`: a drift of (0.8, -0.1, -0.6) m between the read and the game's eye comes back within 1 mm; another mesh, a place 9 m away and instances that disagree give no offset | Native D3D9 |
@@ -56,6 +57,11 @@ No repository harness covers `PatchFoliageVs` and `PatchLeafShadow`.
 
 ## Open checks
 
+- Area lights (`b863bce`): the lot tree that drew bright white at load in the session whose lighting snapshot showed a
+  lot rectangle area light (white, range 100, intensity 1, at ground height) as the only non-lamp light the lamp reader
+  accepted ([history](../history/night-lighting-foliage.md)). **Expected:** it looks like its neighbours, at load and after
+  travelling to another world and back (the mesh boxes and picks are cleared on a world change). A light capture of it
+  lists the lamps each instance picked ([Light Probe](dev-tools-light-probe.md)). Not yet checked in game.
 - A lamp switched on indoors next to a window, with a tree outside: the tree takes its light at once, not after the rooms of the house (the trees now read the lamps shining out themselves during a hold).
 - Summer plants and flowers remain darker than the lit ground next to them (m79: rig 0.62 / 0.55 / 0.49).
 - Plant 2 (m65): a new F7 on that plant is needed to study its texture multiply (F7 now decodes DXT1/3/5).

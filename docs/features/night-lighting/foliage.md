@@ -105,8 +105,9 @@ With the rig law above on, at night, each foliage draw uses a further copy of it
 
 **Each instance picks its own lamps** (`PickFoliageLamps`), by the rule of the per-pixel lamps of outdoor objects
 instead of the rig's three slots: the lamps within reach of the crown's middle (`SelectLamps`, with the indoor lamps
-shining out of a house), each with its cones and its share past the outside walls and slabs at that middle
-(`PickedLampVisibility`), ranked by the light the reach law gives at the mesh box's point nearest the lamp (trunk
+shining out of a house), each with its cones (an area light's facing counts as its cone,
+[objects-and-rigs.md](objects-and-rigs.md#per-pixel-patch)) and its share past the outside walls and slabs at that
+middle (`PickedLampVisibility`), ranked by the light the reach law gives at the mesh box's point nearest the lamp (trunk
 included). The three brightest are kept, brightest first (slot 0 takes the ground bounce); a lamp whose reach ends before
 the box is left out. The draw replaces the per-instance colours `c54..c80` with their colours (F0 x intensity x fade x
 cone x walls' share) and restores them afterwards; each vertex then takes colour x min(law x gain x scale, 1 / the
@@ -122,8 +123,10 @@ again every 1.5 s when what a pick reads changed since (the walls and floors, wh
 the lamps' colours, which set the ranking; or with indoor lamps shining out), at most 96 per 8 ms, keeping their older
 pick meanwhile; an instance's first pick is never put off, so no draw falls back to the old light. When the instance map
 passes 16,384 (grass and flowers are instances too), the ones not drawn for 3 s go, then the ones not drawn for 250 ms;
-the map is cleared only past 32,768. The log counts
-the picks made again that changed the light and the ones that kept it.
+the map is cleared only past 32,768. A world change clears the mesh boxes (kept by vertex buffer address, so a
+buffer of the new world made at an old one's address would take that mesh's box and instance count) and every
+instance's pick of the old world's lamps. The log counts the picks made again that changed the light and the ones that
+kept it.
 
 **The camera the game drew with** (`FoliageVertexLamps::EyeAnchors`). The instance positions are relative to the eye the
 game built the frame with, while the eye Apex reads from the game's camera can differ from it while the camera moves (in
@@ -285,6 +288,26 @@ mad rD.w, rT.w, cN.x, rD.w              ; rD.w = lerp(rD.w, 1, night)
 | `max r0, r0, cK.w` (runtime) or `max r0, r0, cK.s` with `def cK.s = 0` | Wrap-light site |
 | `lrp rD.w, tN.x, cK.s, rS.w` with runtime `cK.y` or `def cK.s = 1` | Leaf-shadow site |
 | PS size 600 + FNV-1a `0x0A2D0BE4` | Summer object-rig PS |
+
+### Light capture of a foliage draw
+
+A light capture ([Light Probe](../dev-tools/light-probe.md)) describes a foliage draw in its `mod:` line, filled only
+while a capture runs (`LightProbe::Capturing`; `FoliageVertexConstants` writes the instance part, the foliage branch of
+`OnDrawTracked` the rest):
+
+```
+mod draw: foliage | per-vertex lamps: drawn | wrap weights A B (reach law) | instance positions relative to the camera | camera eye (x y z) offset (dx dy dz)
+      instance i: box centre (x y z) half a x b, crown (x y z), picked T s ago (lamp list G / now G', walls same), N own lamp(s): [k] at (x y z) colour (r g b) share s key K ...
+```
+
+- *per-vertex lamps*: `drawn`, or `not used for this draw (the old path)` (no instance lines then).
+- *wrap weights* and their source: `reach law` or `daytime curve`.
+- *instance positions*: `relative to the camera`, `world` or `not known yet`.
+- *camera eye*: the eye read from the game's camera (`not read` when unavailable) and the offset added to it
+  (`EyeAnchors`, above).
+- Per instance (up to 9 a draw): the mesh box's centre and half extents, the crown's centre (`none` without a crown
+  shape), how long ago it picked its lamps, the lamp list generation of its pick and now, whether the walls and floors
+  it read are the same or changed since, and each own lamp's place, colour, share (cones and walls) and key.
 
 ### Files
 

@@ -334,6 +334,8 @@ none.
   draws, the Banding Fix's dithered re-issue of 3D back-buffer draws, any `CallOriginalDraw*`), booked as **Re-issued
   draw (driver)** (the game would have paid it for its own call). The same driver time is kept out of the dispatch cost
   log line ([architecture.md](../architecture.md#33-dispatch-and-locking)). Per frame the figure is an estimate from about 1 in 16 dispatches; over a second it averages out.
+  Night Lighting's share is split by fix in the development-build log line `[LotLightBridge] Draw cost by fix ...`
+  ([Night Lighting diagnostics](night-lighting/README.md#diagnostics)), which is not part of the profiler.
 - **Present hooks (mod):** the -1000 Present hook is the frame boundary and pushes a `kPresentHooks` frame; the +1000
   hook pops it. It includes every module's Present hooks and the profiler's own per-frame bookkeeping.
 - **Lamp refresh (mod):** Night Lighting's 20-frame lamp list refresh (`LotLightBridge::OnPresent`,

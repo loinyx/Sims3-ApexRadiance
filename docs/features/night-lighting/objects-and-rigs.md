@@ -103,6 +103,9 @@ forcaLuzPorPixelNosObjetos)`. The *Fences and stairs catch light* rows of the sa
   still differ between pieces.
 - Shape B: whether c0/c4 is the sun or a fourth rig lamp is not verified; c4 is not treated as a lamp.
 - Only 8 lamps per draw, chosen at the object's translation; a very large object far from its origin can miss one.
+- An area light is treated as a point lamp with a facing: its distance and its facing are taken to its position, not
+  to the nearest point of its area as in the game's law. Roofs and water take the lamp rows without cones, so spots and
+  area lights light them all round.
 - Summer instanced shrubs and fences drawn with the 600-byte PS `kObjectRigPs` go to `DrawObjectRig` (moon-shadow HLSL)
   and get neither the ground light nor per-pixel lamps.
 - Not covered: OutdoorProp `C0C6E0FF` (and `2BE88B48`): 1 lamp (c1 -> c3) and the sun (c5 -> c4), `mad rA, sky x c8.x,
@@ -331,7 +334,8 @@ own: by day it reaches the screen only through the rig scaled or replaced per dr
 **Lamp list and selection.** `LotLightBridge::OnPresent` every 20 frames, when roofs, water or per-pixel lamps are on,
 runs `ReadEnumeratedLamps`: `FUN_006acf70(visitor)` (stdcall, visitor vtable[0] = thiscall `(visitor, Light*)`; prologue
 `E8 2B 36 00 00 8B 4C 24 04 51 68 40 CF 6A 00`) enumerates every light, and `g_allLamps` keeps those alive (`0x01`) and lit
-(`0x20`) that are street lamps (type `0xB`) or outdoor lamps (`flags & 0x04` and room 0), with head `+0x120`, radius
+(`0x20`) that are street lamps (type `0xB`) or outdoor lamps (`flags & 0x04` and room 0, any class: a lot's
+rectangle and disc area lights, types 9 and 10, included), with head `+0x120`, radius
 `clamp(1.2 sqrt(range), 2, 25)` (range `+0x130`) and colour `F0 x I x fade`. `SelectLamps(x, z, 40)` at the object's
 translation (`c[worldK..+2].w`) scores each lamp by horizontal distance minus radius, drops scores above 40 m, keeps the
 best 16 (memoised per position and lamp-list generation), and the draw uses the first 8. Unused blocks: position
@@ -345,7 +349,10 @@ lamps' light. The ground term is then multiplied by `sat(1 - (origin y - top) / 
 
 **Lamp cones (F8 10-57-41).** `ReadLamp` also keeps each lamp's cones (`LampCone`, beside `g_allLamps` in
 `g_allCones`; `SelectLamps` hands them out as `g_lampCone`, memo included): the game's cone laws, type 5 `0x006BC940`
-(two cones, scale `[0x011D11A0] = 5`, spill `+0x150`) and type 4 `0x006BDA10` (one cone, spill 0). `PickObjectLamps`
+(two cones, scale `[0x011D11A0] = 5`, spill `+0x150`) and type 4 `0x006BDA10` (one cone, spill 0). An area light
+(types 9 and 10) lights only the side it faces ([engine law](../../engine/light-objects-and-rigs.md)): its cone is its
+third axis `+0x180` normalised, with offset 0 and no spill, so its term is `sat(l . axis)`, the game's `sat(dir.z)` with
+the area's centre taken as its nearest point. `PickObjectLamps`
 passes the cone rows to the pixel shader, which evaluates `S + (1 - S) sat(max(t1, t2))` at each surface position.
 The surface normal still determines which face receives direct light. In valid direct-pixel mode, the directionless
 ground atlas contributes only to upward-facing surfaces, keeping vertical gate faces independent of ground color.

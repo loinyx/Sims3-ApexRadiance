@@ -1,8 +1,9 @@
 # Lot Lighting While Moving
 
 While the camera moves, lots relight in small steps each frame instead of taking up to 15 ms at once, so panning over
-busy neighbourhoods stutters less. Nothing is skipped: the room solves resume on the next frame, and lights finish at
-the game's own pace as soon as the camera stops.
+busy neighbourhoods stutters less. With the camera still, lots relight at the game's own pace while the frame rate
+holds, and in smaller steps when frames run long. Nothing is skipped: the room solves resume on the next frame, and
+every room still gets the game's complete solve.
 
 ## Status
 
@@ -72,6 +73,21 @@ the lot being played):
   ([Faster room lighting](room-light-queue.md), *Quick update for lamp switches*), the budget is capped at 6 ms so the
   frame rate holds.
 
+**Camera still: steady pacing.** With the camera still, the game's own budgets (15 ms for the lot being played, 5 ms for
+the others; not the loading budgets of 30 and 10 ms, which a lot's load waits on) are dosed by the frame time:
+`moving + (game - moving) x scale`, where *moving* is the budget the camera motion rule above would give. Hitches with
+the camera still were mostly room solves: the game's 15 ms plus the room queue's drain made 25 to 50 ms frames. The
+scale (`g_steadyScale`, `PaceSettle`, every Present sample) starts at 1; its baseline follows the lower envelope of the
+frame time (20% of the way down towards a shorter frame, 0.5% of the way up towards a longer one, so a run of solving
+frames does not raise it); a frame over max(16.7 ms, 1.5 x baseline) takes 0.15 off, a frame under 0.8 x that target
+gives 0.05 back. While the frames hold the lot keeps the game's budget; when they run long it goes down towards the
+moving budget. The room queue's drain takes the same scale: `1 + (4 - 1) x scale` ms instead of 4
+([Faster room lighting](room-light-queue.md)). It does not apply while a lamp edit's rooms wait
+(`LevelLightShare::LampEditPending`, `RoomLightQueue::CurrentRoomUrgent`), in the settle window after a load or during a
+lamp switch's boost: those keep their own budgets. Without the Present sample (both camera-motion options off) the scale
+stays 1. Only how soon rooms finish changes, not their light. Tester switch *Paced relight at rest*
+(`perf_steady_room_pacing`, on); off, the game's budget every frame.
+
 **Lot build slice.** A streaming lot is built a slice per frame by 0x00AEA680 with a 20 ms budget (35 ms for a priority
 lot). While the camera moves Apex lowers that slice to 6 ms; the loading screen's 2000 ms is never changed.
 
@@ -104,6 +120,8 @@ lot). While the camera moves Apex lowers that slice to 6 ms; the loading screen'
 
 - The current lot's lights, and lots streaming in, finish over more frames while the camera moves. They catch up within
   about 300 ms of stopping plus the remaining work at full budget.
+- With the camera still on a PC whose frames run long, rooms relit by something other than a lamp edit (dusk, a load
+  still solving after its settle window, Night Lighting's requeues) finish over more frames than with the game's budget.
 - Budgets of 100 ms or more (tool mode) are never scaled.
 
 ## Technical reference
@@ -146,7 +164,9 @@ lot). While the camera moves Apex lowers that slice to 6 ms; the loading screen'
   caller's x87 stack is empty at the call), samples the camera, and applies the rules above. The minimum is 0.25 ms
   (`kMinMs`); the lamp edit and after-load budget is `kLampEditMs` (25 ms), the refinement cap `kRefineMs` (6 ms), the edit room's budget while moving `kEditMovingMs` (6 ms; a room counts as
   urgent when `LevelLightShare::LampUrgency` of the queue's current room is above 1). The drag spread cap is checked
-  first, before the switch's own rules, and is `DragLite::kSpreadCapMs` (3.5 ms) for at most `kSettleMs` (15 s).
+  first, before the switch's own rules, and is `DragLite::kSpreadCapMs` (3.5 ms) for at most `kSettleMs` (15 s). The
+  steady pacing applies to budgets equal to `kPriorityMs` (15 ms) or `kOtherLotMs` (5 ms); `SteadyScale()` (1 with the
+  Tester switch off) and `SteadyDrainMs(wanted)` = `1 + (wanted - 1) x SteadyScale()` give it to the room queue.
 - **Lot build slice** (optional part; skipped with a warning when the code differs): 0x00AEA680 stores its slice budget
   at `[esp+14h]` (20 ms, 35 for a priority lot), then tests `[[0x011ECBC4]+0x1B4]` for the loading screen's 2000 ms. The
   5-byte `mov eax,[0x011ECBC4]` at 0x00AEA6D8, right after the budget is chosen, becomes a CALL of `LotBuildStub`: it
@@ -185,17 +205,20 @@ Group `LotLightingMotion`.
 
 `features/lot_lighting_motion.{h,cpp}`: `Start`, `Stop`, `Hook_LotLightBudget`, `SampleCamera`, `ReadEye`,
 `ParseCamera` (`ParseRootGetter` / `ParseCameraGetter` / `ParseEyeRead`), `UpdatePresentSampler` / `OnPresentSample`,
-`SetBudgetMs`, `CameraMoving`, `SampleCameraMoving`, `EnsureCamera`, `StatusText`, `RenderDeveloperUI`.
+`SetBudgetMs`, `CameraMoving`, `SampleCameraMoving`, `EnsureCamera`, `PaceSettle`, `SettleScale`, `SteadyScale`,
+`SteadyDrainMs`, `DrainBudget`, `StatusText`, `RenderDeveloperUI`.
 `Performance::LotLightingBudgetMs` / `SetLotLightingBudgetMs` in [`patches/performance.h`](../../../patches/performance.h).
 
 Developer card *Lighting while the camera moves*: the call and camera addresses, "Camera moving" / "Camera still", the
 last camera move, frames sampled, lot build slices (shortened while moving, on / off), budget calls, calls scaled while
-moving (a lamp edit's room kept up to 6 ms; settle or lamp switch paced), camera reads failed and the last budget ("game 15.00 ms -> 3.00 ms").
+moving (a lamp edit's room kept up to 6 ms; settle or lamp switch paced), camera reads failed and the last budget ("game 15.00 ms -> 3.00 ms"),
+and "Steady pacing (camera still): N% of the game's budgets (frame baseline X ms), lowered in N budget calls".
 
 ## Rejected approaches
 
-- A smaller lot lighting budget with the camera still too: lamps moved in Build mode updated visibly slower for a small
-  gain. Do not bring it back without a real Build-mode or lamp-moved signal. Details in
+- A fixed smaller lot lighting budget with the camera still too: lamps moved in Build mode updated visibly slower for a
+  small gain. Do not bring it back without a real Build-mode or lamp-moved signal. The steady pacing above is not that
+  approach: it keeps the game's budget while frames hold and leaves a lamp edit's rooms their own budgets. Details in
   [history](../../history/performance-lot-lighting-motion.md).
 
 ## See also

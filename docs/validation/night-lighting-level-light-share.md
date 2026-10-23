@@ -33,6 +33,7 @@ only the repository and print to the console.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-22 | `d625404` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting` (`stairwell_bounce_test`, `opening_bounce_test` 11 checks, `arch_ambient_test` 25 checks), `tools/rt_lamps_test` (22 checks), `tools/roofed_openings_test` (196 checks), `tools/room_structure_test` (11 checks); developer, public and standard Release x86 builds | Passed, 0 failures; the three builds compiled. These cover the extracted grid walk, openings and room structure code; none exercises the arch story memo of `823e339` (`ArchAmbientConsts`) | CPU harness |
 | 2026-10-22 | `7d69737` | `tools/development/check.ps1 -Suite Lighting` (`stairwell_bounce_test`, `opening_bounce_test`, `arch_ambient_test`; `stairwell_bounce.h` now uses `ApexMath`) | Passed | Offline CPU harnesses |
 | 2026-10-22 | `715a410` | `tools/development/check.ps1 -Suite Lighting` | Passed | Offline CPU harnesses |
 | 2026-10-22 | `fd85116` | `tools/development/fast_math_check.cpp`: `ApexMath::Sqrt`, `Fabs`, `Floor`, `Ceil`, `FloorToInt`, `CeilToInt`, `IsFinite`, `IsNaN` against the CRT over all 2^32 floats (x86, /O2 /fp:precise) | Same bits for every input; a signalling NaN input may come back unquieted from `Fabs` and `Floor` | Offline CPU check |

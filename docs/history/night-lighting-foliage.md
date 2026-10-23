@@ -126,3 +126,26 @@ Colour x min(law, 1 / brightest channel) keeps the hue. Offline: 19 checks (red 
 leaf capped at its own hue). The log counts instances by their own lamps (0 to 3), lamps left out by walls and
 instances without a crown shape, and names why a foliage vertex shader is refused (its code kept in `Censo`). Not
 confirmed in game.
+
+### 2026-10-22: a lot tree lit white by an area light
+
+**Context:** commit `b863bce`. In one session a lot tree was lit bright white at load while the trees around it were
+not.
+
+**Finding:**
+
+- In a lighting snapshot of that session, the only non-lamp light the lamp reader (`ReadLamp`) accepted was a lot's
+  rectangle area light: white, range 100, intensity 1, at ground height. The lamp reader keeps any outdoor light, and
+  area lights (types 9 and 10) entered the per-pixel lamp list as lamps lighting all round, so such a light lit a whole
+  tree crown at full strength.
+- The game lights only one side of an area light: its law (`0x006BFBA0` / `0x006BFDC0` -> `0x006BFAF0`) weighs the
+  light by `sat(dir.z)`, the direction to the area in the light's axes, with no `N.L`
+  ([engine](../engine/light-objects-and-rigs.md)). The game's own room solve gave that light 0.11 to 0.27 at samples
+  about 3 m away.
+- The foliage mesh boxes are kept by vertex buffer address and were not cleared on a world change, so a buffer of a new
+  world made at an old one's address took that mesh's box and instance count; the instances' picks of the old world's
+  lamps were kept too.
+
+**Outcome:** an area light carries its facing as its cone (the third axis, no spill), for objects, fences and trees;
+roofs and water still take it without a cone. A world change clears the mesh boxes and the instance picks. Not yet
+checked in game ([validation](../validation/night-lighting-foliage.md)).

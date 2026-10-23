@@ -114,3 +114,14 @@ the group's centre and both ends. Released in 2.7.0.
 **Finding:** shared fence-group lamp brightness and directionless ground light on vertical object faces can obscure spatial lamp response. Deferred wall refresh requests can already be covered by a newer generation.
 
 **Outcome:** retain spatial fence lighting with native fallback, per-pixel object cones, vertical ground-light isolation and generation-aware wall refresh. Offline CPU/GPU exploration remains research rather than a shipped companion DLL. Final release identity and gameplay coverage are recorded in the validation page.
+
+### 2026-10-22: the fence group's lamp pick kept
+
+**Context:** commit `d625404`. Every draw of an instanced group (fences, stairs, railings) picked its lamps again: the
+lamp choice, the wall and slab test of each lamp, the cones, the reach rows and the ground share.
+
+**Outcome:** the pick moves into `PickFenceLampsImpl` and is kept in a 256-entry memo keyed by the group and the
+generation of its positions, with the outdoor objects' pick memo rules: valid while the lamp list and the wall and slab
+test state are the same before and after the pick, never for a pick with a lamp shining out of a house, and not used
+under F8 recording or a light capture. Development builds compare one hit in 64 with a new pick and turn the memo off on
+a difference. Not yet checked in game ([validation](../validation/night-lighting-fences.md)).

@@ -26,6 +26,9 @@ The harnesses only read captures and the repository; they never write into the g
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-22 | `d625404` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting`, `tools/rt_lamps_test`, `tools/roofed_openings_test`, `tools/room_structure_test` (counts in [light between stories](night-lighting-level-light-share.md#latest-results)); developer, public and standard Release x86 builds | Passed, 0 failures; the three builds compiled. The solve-side harnesses do not exercise the draw hook's memos of `99b99fb`, `c827d18`, `d625404` or the timing scope of `bb640cb` | CPU harness |
+| 2026-10-22 | `99b99fb`, `c827d18`, `bb640cb` | None: no harness covers the draw hook's last answers, the lot lookups' memo or the draw cost timing scope | Not run | not run in game yet |
+| 2026-10-22 | `0dba5de`, `6592518` | None: no harness covers the draw hook's front table or the draw cost log | Not run | not run in game yet |
 | 2026-10-22 | `173e2bd` | 2.15.2: CPU Lighting suite, Instant lamps; developer and standard Release x86 builds. In game, the frame profiler of 2.15.1 while moving the camera at night put RtOutdoorLamps `UnderDelta` at the top of the render-thread samples (748 hitches, up to 92 ms); with the developer build of this commit the frame rate while moving the camera was much smoother in game | Checks passed, 0 failed; the in-game gain was observed, not re-measured with the profiler | Offline; in game DXVK |
 | 2026-10-22 | `4e32cea` | 2.15.1 release: CPU Lighting and Smoke suites, world lamp policy (low-lamp rule, sun time gates, smooth dusk mapping), Instant lamps, floor shade, i18n check, menu audit; developer, public and standard Release x86 builds | 58,249 + 22 + 5,842 checks passed, 0 failed; builds without warnings. In game (developer builds of this branch): the moon height and the lot area lights confirmed by the maintainer; a lamp on the ground lit the snow in live mode; Build mode kept the night level at 1.00 (log) | Offline; in game DXVK |
 | 2026-10-04 | `92582b6` | Terrain lighting GPU, policy and resource checks | 2,017,393 passed, 0 failed; Release x86 build without warnings | Native D3D9 |
@@ -53,6 +56,17 @@ Sub-part results are on their own validation pages.
 
 ## Open checks
 
+- Draw cost by fix (`6592518`), development build at night on a busy lot: the `[LotLightBridge] Draw cost by fix ...`
+  line every 10 s, its rows plausible against the Frame Profiler's *D3D hooks (mod)* and *Re-issued draw (driver)*.
+  Not yet seen in a log.
+- Patched shader answers (`0dba5de`): the same lighting as before (the front table and the last room map entry give
+  the caches' own answers), across a device reset and a Night Lighting reinstall (`Shutdown` moves the generation); the
+  cost per draw in the draw cost line against the previous build. Not yet run in game.
+- Last answers per draw (`99b99fb`, `c827d18`): furniture during a lamp switch and drag (`HoldRig`), smooth indoor light
+  (`RoomMapPadding`), story-0 floors and fences with the ground lamp shade on several lots (`FindFloorLot`,
+  `FindLotAt`), including after travelling and a lot change in Edit Town. **Expected:** the same light as the previous
+  build, the Night Lighting status counters still counting, and a lower cost per draw in the draw cost line. Not yet
+  run in game.
 - 2.15.1 standard build: Build mode at night in a winter world (lawn, sidewalks and street lamps as in live mode; the
   sun time gate's log lines), smooth dusk (no steps, frame times while rigs re-gather), the F8 day and night line, and a
   lamp on the lawn in Classic lamp lighting.

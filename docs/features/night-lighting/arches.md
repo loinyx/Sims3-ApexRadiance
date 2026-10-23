@@ -82,6 +82,7 @@ and [Smooth light maps](room-map-smoothing.md).
 | Arch reach | 1.5 m (`kReach`, `kArchReach`) |
 | Segments per draw | 6 (`kArchCells`), 2 constant rows each: (a.x, a.z, e.x, e.z), (D.rgb, 1 / \|e\|^2) |
 | Room match | `c4` within 2% + 1e-4 per channel; the draw's story from its room map set (manager `+0x16C` + class x 64, unverified in game), else from its directional maps (`+0x220`) |
+| Story memo | The stories of the 16 most recent room maps (`ArchAmbientConsts`, one slot per map by pointer hash), each answer checked again against that manager's sets (a map is in one manager's sets only, so a confirmed entry is the manager the walk would find); a miss walks the rooms with arches (`StoryMapsInclude`). A frame's floors alternate between the stories' maps, so one remembered map often missed |
 | Floor sill | 0.02 m (`kFloorSill`) |
 | Cone edge spread | 0.3 m (`kInnerSoftSpread`) |
 | Wall top tolerance | 0.05 m |

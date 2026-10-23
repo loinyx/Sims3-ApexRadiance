@@ -153,7 +153,8 @@ face) in fallback mode. The first lamp parameter selects an `lrp` between spatia
 
 Lamp cones (F8 10-57-41): after the lamp block, `coneConst = lampConst + 16` holds two rows per lamp, the cones
 `c = (-s a, -s o)` of the game's laws (type 5 `0x006BC940`: two cones `a1 +0x1A0 / o1 +0x174`, `a2 +0x190 / o2 +0x170`,
-`s = [0x011D11A0] = 5`, spill `+0x150`; type 4 `0x006BDA10`: one cone `a +0x170`, scale `+0x154`, offset `+0x158`, spill 0),
+`s = [0x011D11A0] = 5`, spill `+0x150`; type 4 `0x006BDA10`: one cone `a +0x170`, scale `+0x154`, offset `+0x158`, spill 0;
+area lights, types 9 and 10: one cone `c = (axis, 0)` with the third axis `+0x180` normalised, spill 0),
 filled by `ReadLamp` (`LotLightBridge::LampCone`). Each lamp's term is multiplied by
 `S + (1 - S) sat(max(l.c1.xyz + c1.w, l.c2.xyz + c2.w))` (8 more instructions per lamp, `l` = pixel to lamp
 normalised, `S` = the colour row's `.w`, the spill's luminance); an unused slot or a lamp with no cone has `S = 1`. One
@@ -206,6 +207,19 @@ Reached from `OnDrawInner` when the VS is class 7, after the *Street lamps light
    adds a `ground lamp shade:` line under the `FENCE/STAIRS (instanced) lit by the mod` line (the lot, its ground height
    and the gate, or why there is none).
 
+**Lamp pick memo** (`PickFenceLamps`, `FencePickMemo`). The group's lamp pick (`PickFenceLampsImpl`: the lamps, their
+cones and reach rows, the highest atlas lamp head and the ground share) is kept in 256 direct-mapped entries keyed by
+the group's entry, the generation of its positions (moved at every read of them) and the law, with the rules of the
+outdoor objects' pick memo: an entry is valid while the lamp list (`g_lampMemoGen`) and everything the wall and slab
+test reads (`LevelLightShare::LampVisibilityState`, the same before and after the pick) are unchanged, and a pick that
+weighed a lamp shining out of a house is not kept. A hit writes exactly what the pick would: the same rows, head
+height, share, counters and candidate count. The memo follows the development switch `lamp_visibility_memo` and is not
+used while F8 records the wall and slab tests or a light capture runs. Development builds pick one hit in 64 again on a copy and
+compare it bit for bit; a difference turns the memo off for the session
+(`[LotLightBridge] Fence lamp pick memo: a kept pick differed from a new one ...`). A world change empties it. The
+developer roof status line counts `fence lamp picks: N reused, M computed` (with `(off: a kept pick differed)` after a
+difference).
+
 Offline (`tools/floor_shade_check`, read-only): the 116 pixel shaders the precomp pairs with an instanced structure
 vertex shader all take both laws with the shade (at most 335 slots); the shaded copy is exactly the copy without it plus
 the sampler declaration and the block, and native D3D9 accepts both; with the shade off the copy is byte for byte the
@@ -252,7 +266,7 @@ The same function feeds the outdoor object lamp paths and snow on objects (`Draw
 | File | Symbols | Role |
 |---|---|---|
 | `features/shader_patches.cpp/.h` | `IsInstancedStructureVs`, `PatchInstancedLamps`, `InstancedPatch`, `AppendGroundShade` | Recognition and patch |
-| `features/lot_light_bridge.cpp` | `ClassifyVs` (class 7), `DrawInstanced`, `PatchedFor`, `g_fencePs`, `SetFenceGroundLight`; `FindLotAt`, `FloorShadeBind`, `g_fenceShadeLot` / `g_fenceShadeNoLot` | Dispatch; ground lamp shade |
+| `features/lot_light_bridge.cpp` | `ClassifyVs` (class 7), `DrawInstanced`, `PatchedFor`, `g_fencePs`, `SetFenceGroundLight`; `PickFenceLamps` / `PickFenceLampsImpl`, `g_fencePick`; `FindLotAt`, `FloorShadeBind`, `g_fenceShadeLot` / `g_fenceShadeNoLot` | Dispatch; lamp pick and its memo; ground lamp shade |
 | `features/ground_lamp_shadow.h` | `FloorShadeRows` | The shade's rows |
 | `features/terrain_lighting_policy.h` | `SurfaceLampGain`, `LampDay` | Daytime response |
 | `features/object_light_bridge.cpp` | `RoomGatherThunk` | Fenced yards on the CPU (mode 1) |

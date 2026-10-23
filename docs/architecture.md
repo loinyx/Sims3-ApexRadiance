@@ -270,7 +270,8 @@ registered:
   dispatches with callbacks a frame, X us each in the callbacks (sampled 1 in 16), about Y ms a frame; draws the
   callbacks issued themselves: Z ms a frame in the driver`. The driver time of original draws a callback issues inside a
   sampled dispatch (Night Lighting's re-issued draws, the Banding Fix's dithered re-issue, any `CallOriginalDraw*`) is
-  measured apart and taken out of X, so X is the callbacks' own cost.
+  measured apart and taken out of X, so X is the callbacks' own cost. Night Lighting's draw hook logs its own cost by
+  fix the same way ([Night Lighting diagnostics](features/night-lighting/README.md#diagnostics)).
 - **Bound shaders.** `BoundPixelShader(device)` / `BoundVertexShader(device)` give the shaders bound now on the render
   thread without a device call: they are followed through the Set*Shader dispatches and `CallOriginalSet*Shader`, and
   read back from the device when not known (another thread, a device call from another thread, every BeginScene and
@@ -279,7 +280,8 @@ registered:
 - **Performance switches.** `features/perf_toggles.h` (`PerfToggles`) holds one atomic switch, on by default, per
   per-frame cache or filter (re-issued draw filter, followed shaders, sampled timing, precompile answer, Ambient
   Occlusion's last shader, Banding Fix front caches, Night Lighting's shader facts, rig mode and indoor sampler scan,
-  the room solve's record lookup, the window light's channel memo, the paced relight while the camera moves). Off
+  the room solve's record lookup, the window light's channel memo, the paced relight while the camera moves and with
+  it still, the writable packages' file lists). Off
   restores the earlier path live, so frame rates can be compared ([Tester tab](features/dev-tools/tester.md)).
 - **Locked chains.** Present, BeginScene and the four Create* chains, and any chain called from **another thread**, run
   under one recursive registration lock. Off-thread dispatches of the lock-free chains are counted
@@ -538,8 +540,9 @@ The write epochs of "Remember missing files" swap their database-class slots dir
 **`EntryChain`** ([framework/entry_chain.h](../framework/entry_chain.h)): functions reached by direct CALLs from several
 threads. The entry's relocation-free prologue is copied to a trampoline (plus a JMP back) and a 5-byte JMP to the
 outermost layer's hook is written with `MemPatch::WriteCodeSuspended`. Layers: 0 Frame Profiler, 1 FastDxt,
-2 ResourceCache, 3 ObjectIndex, 4 SceneBudget, 5 LevelLightShare, 6 FastCas, 7 FastCrc; each module layer is used on its
-own sites only.
+2 ResourceCache, 3 ObjectIndex, 4 SceneBudget, 5 LevelLightShare, 6 FastCas, 7 FastCrc, 8 ScriptMath, 9 ObjectIdMap,
+10 RoomLightQueue, 11 LotObjectThrottle, 12 ProbeNeutral, 13 RenderObjectMap; each module layer is used on its own
+sites only.
 
 | Site | Address | Prologue | Users |
 |---|---|---|---|
@@ -553,6 +556,8 @@ own sites only.
 | RoomInvalidateFlag | `0x0069F160` thiscall(room, char flag), ret 4 | `8A 44 24 04 56` | same |
 | CasTriSort | `0x005D1960` cdecl(6 args) | `55 8B EC 83 E4 F0` | Fast CAS sort |
 | RecordCrc | `0x004FA4C0` cdecl(bytes, length, crc, bool invert) | `8B 4C 24 04 8B 44 24 08` | Fast CRC |
+| ObjMapFind / ObjMapInsert / ObjMapErase | `0x00939100` / `0x00939170` / `0x00938D00`: the object service's map by ID | `83 EC 08 56 8B 74 24 14` / `53 55 56 8B 74 24 14` / `8B 44 24 04 53` | Faster Object Lookups (`ObjectIdMap`) |
+| RenMapFind / RenMapInsert / RenMapErase | `0x006FDFB0` / `0x006FE1F0` / `0x006FDF40`: the scene's map by ID ([features/render_object_map.h](../features/render_object_map.h)) | as the three above | Faster Object Lookups (`RenderObjectMap`) |
 
 **`CallChain`** ([framework/call_chain.h](../framework/call_chain.h)): one CALL instruction (E8 rel32). The CALL targets
 the outermost layer's hook, written with `WriteCodeSuspended`; removing the last layer writes the original CALL back.

@@ -66,9 +66,13 @@ Type usage in practice (notebook, F8 dumps): lot lamps placed in Build mode are 
 wall sconces 5); street lamps are type 11 with lot id 0 (world lights); type 11 can also be placed on a lot; window lights
 are 7/8 and take part in room solves. "Lamp types" for Apex = 3..6 plus 11; the terrain bake also takes a lot's area lights
 9 and 10 since 2.15.1 (a park lot had three rectangle area lights of 100 m range, intensity 1). Area light room law
-(`0x006BFBA0` / `0x006BFDC0` -> `0x006BFAF0`): distance to the rectangle or disc (third axis +0x180 clamped to 0, half
-extents +0x1A0), `E = colour x sat(dir.z) x min(range x intensity x k2 / (d^2 x k1), cap)`; the area lights the side its
-third axis points away from.
+(`0x006BFBA0` rectangle / `0x006BFDC0` disc -> `0x006BFAF0`):
+`E = colour x sat(dir.z) x min(k2 x range x intensity / (k1 x d^2), cap)`, where `d` is the distance from the point to
+the nearest point of the area (for the rectangle, in the light's axes: the third-axis coordinate, axis +0x180, clamped
+to 0, the other two to the half extents +0x1A0) and `dir` is the normalised direction from the point to that nearest
+point, in the light's axes. There is no `N.L` term. An area light therefore lights only the side its third axis points
+away from. Apex's per-pixel lamps take that facing as the light's cone
+([objects-and-rigs.md](../features/night-lighting/objects-and-rigs.md#per-pixel-patch)).
 
 Light vtable functions used by the engine and Apex:
 

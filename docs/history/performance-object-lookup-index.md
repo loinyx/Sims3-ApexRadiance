@@ -38,3 +38,20 @@ alternated between owners, and each miss took the shared SRW lock.
 
 **Outcome:** per-thread counters added to the totals every 256 counts, a 32-bit verification serial, and 16 recent
 answers per thread. Every answer is still validated against the live tree.
+
+### 2026-10-22: scene object map index
+
+**Context:** commit `cdff27e`. In a CPU sample the busiest game function on the render thread was 0x006FDFB0 (2.8% of
+the thread): the find of the scene message router's map of objects by their 64-bit ID, walking long chains of its 1033
+buckets for the lot's light and scene updates (callers 0x006FE3B0 and the getter at 0x006FE420).
+
+**Finding:** the map is the twin of the object service's map that `ObjectIdMap` indexes: the same find, insert and
+erase code, with nodes linked at +0 instead of +0x10. The insert 0x006FE1F0 (one caller) and the erase 0x006FDF40
+(callers 0x007030FB, 0x00703406) are leaves and the only writers of its links; the count is written only by them and
+by the constructor's 0 (0x00703528). With every insert and erase seen, a table can only hold entries the map no longer
+has, never miss one, so equal counts mean equal contents.
+
+**Outcome:** `RenderObjectMap`, one table per map, started with Faster Object Lookups. Unlike `ObjectIdMap`, a count
+difference builds that map's table again from the game's links (at most 16 times) instead of turning the index off; a
+wrong answer turns it off for the session. The first 256 answers of each map are checked against the game's walk.
+Gameplay checks are open ([validation](../validation/performance-object-lookup-index.md)).

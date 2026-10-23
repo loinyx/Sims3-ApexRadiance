@@ -184,7 +184,8 @@ Outdoor floors on the ground (story 0) read the same texture: their shaders mult
 alpha within about 1 m of the lot's ground (`FloorShadeBind`, `LotMaskTexture`; [floors.md](floors.md)). A floor draw
 finds its lot by its world rows (`FindFloorLot`: `FindLotRect`, else the same rotation with the rows' origin inside the
 lot rectangle). Fences, curbs, railings and stairs (instanced groups) take it too, on their per-pixel lamp sum and within
-the same 1 m: their lot is the one under the group's centre (`FindLotAt`; [fences.md](fences.md)). The alpha is
+the same 1 m: their lot is the one under the group's centre (`FindLotAt`; [fences.md](fences.md)). Both lookups keep
+their last answer while the inputs and the lot list are unchanged ([per draw](README.md#per-draw-lot_light_bridgecpp)). The alpha is
 one factor for all lamps, so a surface it shades is dimmed for every lamp, also one that no wall hides from it.
 
 **World grass around lots** (2.13.1; F8 and F7 2026-10-14 23-27: a wall's shadow stopped at the lot edge and the lamp

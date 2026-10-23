@@ -130,7 +130,9 @@ LightProbe captures `andar2-b` (m44), `andar1-b` (m45), `passo3-parede` (m59) an
   unknown shaders and an unchanged result keep the native draw. `TerrainLightingPolicy::WallLampScale(native, night,
   gain) = native x gain` at night >= 1, else `gain x LampDay(night)` with `LampDay(n) = 0.03 + 0.97 smoothstep(0, 1, n)`
   (the curve every outdoor lamp term shares, [README](README.md#daylight-policy-terrain_lighting_policyh)). Only `.x`
-  changes; the full constant is restored after the single draw. Counter `g_wallDrawn`.
+  changes; the full constant is restored after the single draw. Counter `g_wallDrawn`. The last wall shader's `K` is
+  kept between draws, and the native scale read here (`NativeWallScale`) is stored without a locked exchange
+  ([per draw](README.md#per-draw-lot_light_bridgecpp)).
 
 ### Lamps of every story (summary)
 
