@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Hungarian}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: gables and upper trim keep continuous lamp light", "Éjszakai világítás: az oromzatok és felső párkányok egyenletes lámpafényt kapnak"},
+    {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Éjszakai világítás: az alacsony pillérek és lépcsők figyelembe veszik a lámpák alatti tömör padlókat"},
+
     {"Steam Deck and Linux: Proton is detected and a lighter profile is suggested", "Steam Deck és Linux: a Proton felismerése és egy könnyebb profil ajánlása"},
     {"Indoor lights update sooner when you enter a lot or change floors", "A belső fények hamarabb frissülnek, amikor telekre lépsz vagy szintet váltasz"},
     {"Lamps on other lots no longer delay the lights of the lot you play", "Más telkek lámpái már nem késleltetik annak a teleknek a fényeit, ahol játszol"},

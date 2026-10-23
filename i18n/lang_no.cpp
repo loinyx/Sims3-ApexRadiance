@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Norwegian (Bokmal)}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: gables and upper trim keep continuous lamp light", "Nattbelysning: gavler og øvre lister får sammenhengende lampelys"},
+    {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Nattbelysning: lave søyler og trapper tar hensyn til tette gulv under lamper"},
+
     {"Steam Deck and Linux: Proton is detected and a lighter profile is suggested", "Steam Deck og Linux: Proton gjenkjennes, og en lettere profil foreslås"},
     {"Indoor lights update sooner when you enter a lot or change floors", "Innendørslys oppdateres raskere når du går inn på en tomt eller bytter etasje"},
     {"Lamps on other lots no longer delay the lights of the lot you play", "Lamper på andre tomter forsinker ikke lenger lyset på tomten du spiller på"},

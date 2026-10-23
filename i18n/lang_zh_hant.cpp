@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Traditional, Taiwan / Hong Kong)}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: gables and upper trim keep continuous lamp light", "夜間照明：山牆與頂部飾邊獲得連續的燈光"},
+    {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "夜間照明：矮柱與樓梯會考慮燈下的實心樓板"},
+
     {"Steam Deck and Linux: Proton is detected and a lighter profile is suggested", "Steam Deck 與 Linux：偵測 Proton 並建議較輕量的設定檔"},
     {"Indoor lights update sooner when you enter a lot or change floors", "進入地塊或切換樓層時，室內燈光更新得更快"},
     {"Lamps on other lots no longer delay the lights of the lot you play", "其他地塊的燈不再拖慢你所在地塊的燈光"},

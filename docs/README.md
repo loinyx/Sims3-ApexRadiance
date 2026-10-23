@@ -40,7 +40,7 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 
 | Feature | Status |
 |---|---|
-| [Night Lighting](features/night-lighting/README.md): lamps that really light the world at night | Released |
+| [Night Lighting](features/night-lighting/README.md): lamps that really light the world at night | Released; Released in 2.15.4: consistent gable and trim light, balanced outdoor structures and measured shadows |
 | [Lot light pass](features/night-lighting/lot-light-pass.md): lot and street lamps on lot grass | Released; Released in 2.13.0: lamp shade on lot ground (walls shade lamp light near the ground); Released in 2.13.1: the shade past the lot (world grass, roads), garden walls and fences, smooth ground shade with Instant; Released in 2.15.3: a shade that takes only the light of the lamps a wall blocks, closed gates and fence gaps, snowy lots shaded, indoor light added to the ground |
 | [World atlas and smoothed maps](features/night-lighting/world-atlas-and-smoothed-maps.md): smooth terrain light maps | Released |
 | [Terrain relight](features/night-lighting/terrain-relight.md): rebuilding terrain lighting at dusk and after edits | Released |

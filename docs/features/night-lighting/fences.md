@@ -9,7 +9,7 @@ same switch and strength. By day the lamp term fades to 3% of its night strength
 
 | | |
 |---|---|
-| Availability | Released in 2.15.3: the reach law's scale without the outdoor walls' gain, the lamp sum held under 1 by its brightest channel, faces reading the ground lamp shade in front of them, gates closing their fence's gap in the lot shade. Released in 2.13.0: the lot's ground lamp shade on pieces near the ground (*Walls shade lamp light near the ground*), upper-story railing and parapet tops without a ground lamp's pool, lamps tested from the piece nearest them. Released in 2.12.3: the outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and tops above the lamp heads without ground light. Released in 2.12.1: lighting corrections.  Released in 1.0.0. Subdued daytime lamp response: Released in 2.6.0. Per-pixel lamps, walls blocking them and the game's own lighting in full daylight: Released in 2.7.0 |
+| Availability | Released (present since 1.0.0). Subdued daytime lamp response: Released in 2.6.0. Per-pixel lamps, walls blocking them and the game's own lighting in full daylight: Released in 2.7.0. Lighting corrections: Released in 2.12.1. The outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and tops above the lamp heads without ground light: Released in 2.12.3. The lot's ground lamp shade on pieces near the ground (*Walls shade lamp light near the ground*), upper-story railing and parapet tops without a ground lamp's pool, lamps tested from the piece nearest them: Released in 2.13.0. The reach law's scale without the outdoor walls' gain, the lamp sum held under 1 by its brightest channel, faces reading the ground lamp shade in front of them, gates closing their fence's gap in the lot shade: Released in 2.15.3. Elevated structures follow the architectural lamp gain and keep the ground pool out: Released in 2.15.4. |
 | Default | On |
 | Menu | Lighting > Objects > Objects card > Game fixes (folded) > *Fences and stairs catch light*, *Fence brightness* |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -25,6 +25,8 @@ lamp light at all. See [engine/light-objects-and-rigs.md](../../engine/light-obj
 
 ## How Apex Radiance solves it
 
+Elevated instanced runs follow the architectural lamp gain with Realistic lamp reach and exclude the ground atlas pool. The lowest instance origin selects the existing ground-height blend, preserving ground runs and stairs that extend down to the ground. A verified complete floor tile immediately below an emitter casts a soft per-pixel shadow on each selected lamp separately.
+
 Apex Radiance patches the fence pixel shader by pattern so that valid groups use per-pixel lamp light, as on outdoor objects:
 the lamps around the fence group, with angle and distance. Where the group's position cannot be read, the lamp term
 falls back to the brighter of the game's vertex lights and the world ground-light atlas at the pixel's world position.
@@ -34,9 +36,7 @@ falls back to the brighter of the game's vertex lights and the world ground-ligh
    from the world normal and height the instanced vertex shader already passes in TEXCOORD2) replace shared vertex lamp light when the group has valid spatial data. Missing spatial data keeps
    the original vertex/atlas fallback. With *Realistic lamp reach* on, a second copy takes the outdoor walls' law and
    native lamp scale instead (F7 20-31-19: a balcony band went black at 7.82 m from a post while the wall behind it stayed lit;
-   see [objects-and-rigs.md](objects-and-rigs.md#realistic-reach-on-objects-fences-and-windows)), without the walls'
-   *Brightness* gain (fences are not walls: at the walls' 30% they took 30% of the light the same lamp gave the ground
-   and objects beside them); the fence strength then acts as a trim over its 75% default. Only a group whose pieces were read (lamps placed) takes that copy; otherwise the
+   see [objects-and-rigs.md](objects-and-rigs.md#realistic-reach-on-objects-fences-and-windows)), with the walls' *Brightness* gain for elevated architectural runs. Ground-level runs retain their fence gain; the fence strength then acts as a trim over its 75% default. Only a group whose pieces were read (lamps placed) takes that copy; otherwise the
    first copy draws. F7 on a fence, railing or balcony band shows `FENCE/STAIRS (instanced) lit by the mod` with the lamps
    placed, the strengths and the `lamp law:` line.
 3. **Choose the lamps per group.** The group's centre and its two ends are read from the instance stream (the mean of the
@@ -102,6 +102,8 @@ The Lighting balance styles set `forcaNasCercas` to 67.5% (Subtle), 75% (Soft) o
 - No game code is patched for the shader part; recognition is by instruction shape.
 
 ## Limitations
+
+- Final release-build gameplay confirmation is pending; offline checks do not establish identical material appearance or frame-time cost.
 
 - Release cleanup has not yet received gameplay confirmation on the exact release artifact; see validation.
 

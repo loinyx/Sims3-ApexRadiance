@@ -8,7 +8,7 @@ sun and shadows; only the lamp light baked into each wall is scaled. Part of [Ni
 
 | | |
 |---|---|
-| Availability | Released (present since 2.1.0, the first version in this repository). Daytime lamp term on walls: Released in 2.6.0. The game's bloom alpha kept on lit walls and the rebalanced style brightness (84% for Soft): Released in 2.7.0. Realistic lamp reach and balcony floors blocking a lamp below them (replacing *Light behind balconies*), the shared daytime curve: Released in 2.12.3. Soft edges by the lamp's size (*Shadow softness*) and lamp light through openings: Released in 2.13.0. Outdoor walls drawn below their light base (gables, eaves) lit from their drawn foot: Released in 2.15.3 |
+| Availability | Released (present since 2.1.0, the first version in this repository). Daytime lamp term on walls: Released in 2.6.0. The game's bloom alpha kept on lit walls and the rebalanced style brightness (84% for Soft): Released in 2.7.0. Realistic lamp reach and balcony floors blocking a lamp below them (replacing *Light behind balconies*), the shared daytime curve: Released in 2.12.3. Soft edges by the lamp's size (*Shadow softness*) and lamp light through openings: Released in 2.13.0. Outdoor walls drawn below their light base (gables, eaves) lit from their drawn foot: Released in 2.15.3. Adjacent gable cells keep one lighting reference and upper trim avoids the ground lamp pool: Released in 2.15.4. |
 | Default | On, Brightness 30%, Realistic lamp reach on |
 | Menu | Lighting > Buildings > Buildings card, group *WALLS* (lamps of every story: Lighting > Stories) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -26,6 +26,8 @@ one per wall piece. Two defects follow:
    constant to zero on some wall variants, discarding the baked lamp light entirely.
 
 ## How Apex Radiance solves it
+
+Raised short gable cells keep their sample rows and vertex UVs on one drawn-foot reference, including neighboring cells with different top heights.
 
 Two Night Lighting parts act on walls; no wall shader is rewritten.
 
@@ -71,6 +73,8 @@ Both apply live (pushed every frame). The lamps of every story are controlled by
 - **Roofs** have their own brightness in the same card ([roofs.md](roofs.md)).
 
 ## Limitations
+
+- Final release-build gameplay confirmation is pending; offline checks do not establish identical material appearance or frame-time cost.
 
 - A balcony slab blocks only light going up: a lamp on a balcony still lights the wall under it, and story planes use
   the story's nominal floor height (split levels may be off).

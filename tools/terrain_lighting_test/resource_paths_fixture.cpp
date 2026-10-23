@@ -17,6 +17,10 @@
 #include <vector>
 #include "features/terrain_lighting_policy.h"
 #include "features/lamp_reach.h"
+#include "features/ground_light_gate.h"
+#include "features/ground_lamp_shadow.h"
+#include "features/fast_math.h"
+#include "features/penumbra.h"
 
 struct FakeTexture {
     int id = 0, refs = 1;
@@ -64,7 +68,9 @@ struct FakeDevice {
 #define IDirect3DBaseTexture9 FakeTexture
 #include "features/native_terrain_sampler.h"
 
-namespace D3D9Hooks { enum class HookAction { Continue,Skip }; }
+namespace D3D9Hooks { enum class HookAction { Continue,Skip }; HRESULT GetBoundTexture(FakeDevice* d,DWORD s,FakeTexture** t){return d->GetTexture(s,t);} }
+namespace ApexUtil {template<class T> void CountOne(T& x){++x;}}
+uint32_t g_patchedGen=1;
 enum class ClaimSource { LotLightAtlas };
 D3D9Hooks::HookAction NoteClaim(ClaimSource){return D3D9Hooks::HookAction::Skip;}
 std::atomic<int> g_wallBloomPreserved{0},g_wallBloomFallback{0};
@@ -79,7 +85,7 @@ FakeShader* g_replacementPs=&replacementPs;
 std::map<FakeShader*,DWORD> g_wallConst;
 struct ChunkTex { FakeTexture* tex=nullptr; };
 std::map<std::pair<int,int>,ChunkTex> g_chunks;
-struct LotRect { uint32_t lotHi=0,lotLo=1; float w=32,d=64,tx=0,tz=0; };
+struct LotRect { uint32_t lotHi=0,lotLo=1; float w=32,d=64,tx=0,ty=0,tz=0; };
 LotRect fixtureRect{},g_lastEdgeRect{};
 bool fixtureHasRect=false,fixtureCapture=false,fixtureFeather=false;
 FakeTexture* fixtureAtlas=nullptr;
@@ -109,19 +115,21 @@ namespace RigTracker { int fixtureMode=2;int CurrentMode(){return fixtureMode;} 
 int RigMode(){return RigTracker::CurrentMode();} // production: RigTracker::CurrentMode read once per draw
 namespace ShaderPatches {
 constexpr unsigned kObjectPixelLamps=8;
-struct ObjectPatch {UINT atlasConst=40,strengthConst=41,lampParamConst=42,atlasSampler=9;bool rigLamps=true,pixelLamps=true;UINT groundWeightConst=39;UINT reachConst=0;int shadeSampler=-1,shadeConst=-1;};
+struct ObjectPatch {UINT atlasConst=40,strengthConst=41,lampParamConst=42,atlasSampler=9;bool rigLamps=true,pixelLamps=true;UINT groundWeightConst=39;UINT reachConst=0,capConst=0;int shadeSampler=-1,shadeConst=-1;};
 bool PatchObjectLampPs(std::vector<DWORD>&,ObjectPatch&,bool=false){return true;}
-bool PatchInstancedLamps(std::vector<DWORD>&,ObjectPatch&,bool=false){return true;}
+bool PatchInstancedLamps(std::vector<DWORD>&,ObjectPatch&,bool=false,bool=true,bool=false){return true;}
 }
 struct PatchedPs { FakeShader* ps=&replacementPs;ShaderPatches::ObjectPatch obj,inst; } objectPatch,reachPatch,refusedPatch{nullptr};
 int g_objLampPs=0,g_objLampPsReach=0;
-int g_fencePs=0,g_fencePsReach=0;
+int g_fencePs=0,g_fencePsReach=0,g_fenceCapPs[2]{};
+FakeShader capShader{5};PatchedPs capPatch;
+bool fixtureCaps=false,fixtureCapRefused=false;int fixtureCapCalls=0;
 // realistic reach (12/10): the fixture's PatchedFor returns objectPatch for the first law and reachPatch (reachConst set,
 // ResetGlobals) for the variant copy, or refusedPatch (no shader) while fixtureReachRefused
 uint32_t g_reachObjDraws=0,g_reachFenceDraws=0,g_reachWindowDraws=0,g_reachLawRefused=0;
 DWORD g_lotDrawTick=0;
-float g_nativeWallScale=1.f;
-DWORD g_nativeWallTick=0;
+std::atomic<float> g_nativeWallScale{1.f};
+std::atomic<DWORD> g_nativeWallTick{0};
 constexpr float kPixelLampTrimUnit=.75f;
 bool fixtureReach=false,fixtureReachRefused=false,fixtureNoGroup=false;
 std::string ReachLawText(bool,bool,bool,float,const float(*)[4],int){return {};}
@@ -135,7 +143,10 @@ struct ObjectVsInfo {bool contractedLotUv=false;struct {int vertexLight=20,world
 ObjectVsInfo* g_curVsInfo=&objectVsInfo;
 FakeShader nativeVs{3},replacementVs{4};FakeShader* g_curVs=&nativeVs;
 float g_lampData[33][4]{};
-template<class Patch> PatchedPs& PatchedFor(FakeDevice*,int&,const char*,Patch,bool variant=false){return !variant?objectPatch:fixtureReachRefused?refusedPatch:reachPatch;}
+template<class Patch> PatchedPs& PatchedFor(FakeDevice*,int& cache,const char*,Patch,bool variant=false){
+    if(&cache==&g_fenceCapPs[0]||&cache==&g_fenceCapPs[1]) return fixtureCapRefused?refusedPatch:capPatch;
+    return !variant?objectPatch:fixtureReachRefused?refusedPatch:reachPatch;
+}
 FakeShader* ObjectVsFor(FakeDevice*,FakeShader*){return &replacementVs;}
 int SelectLamps(float,float,float,bool=false){return 1;}
 struct LampCone {float c1[4]={0,0,0,1},c2[4]={0,0,0,1};float spill=1;float w=0;float entries=1;uintptr_t light=0;};
@@ -143,17 +154,28 @@ LampCone g_lampCone[16];
 bool g_fenceConeLogged=false,g_lampConeLogged=false;
 
 #define LOG_INFO(...) ((void)0)
+#define LOG_WARNING(...) ((void)0)
+constexpr bool kPublicBuild=false;
+uint32_t FloatBits(float x){return std::bit_cast<uint32_t>(x);}
+uint32_t g_lampMemoGen=1;int g_lastLampCandidates=1,g_lastLampPicked=1;
+namespace DevSwitches { bool LampVisibilityMemo(){return false;} }
+void NoteFenceGroup(FakeDevice*){}
+bool NoteGate(float,float,float){return false;}
 float fixtureVisibility=1;
 int visCalls=0;float firstVis[3]{}; // the first point a draw tests (fences: the piece nearest the lamp, 12/10)
 namespace LevelLightShare {bool WallBlocks(const float*,const float*,float=0){return false;}
 float LampVisibility(const float*,const float* p,float=.2f){if(visCalls++==0)std::memcpy(firstVis,p,12);return fixtureVisibility;}
 float ExitLampVisibility(const void*,const float*,const float*,float=.2f){return -1;}
-bool RealisticReachActive(){return fixtureReach;}}
+bool RealisticReachActive(){return fixtureReach;}
+bool IndoorLightOnGroundActive(){return false;}
+bool VisibilityDiagArmed(){return false;}uint64_t LampVisibilityState(){return 1;}
+bool LampFloorCap(const float*,float rows[2][4]){++fixtureCapCalls;std::memset(rows,0,32);if(!fixtureCaps)return false;rows[0][0]=1;rows[0][3]=.5f;rows[1][1]=1;return true;}
+}
 uint32_t g_objLampsLeftOut=0,g_objLampsDimmed=0,g_fenceLampsLeftOut=0,g_fenceLampsDimmed=0,g_objGroundGated=0,g_objRigDayScaled=0;
 constexpr float kWindowWallSkip=.75f;
 bool ObjectLampPoint(const float (&m)[3][4],float (&at)[3]){for(int k=0;k<3;++k)at[k]=m[k][3];return false;}
 constexpr unsigned kGroupPieces=32;
-struct GroupCentre {float x=0,y=0,z=0,ext=0,a[3]{},b[3]{};float piece[kGroupPieces][3]{};unsigned pieces=0;};
+struct GroupCentre {float x=0,y=0,z=0,ext=0,minY=0,a[3]{},b[3]{};float piece[kGroupPieces][3]{};unsigned pieces=0;uint32_t read=0;};
 GroupCentre fixtureGroup;
 const GroupCentre* InstancedGroupCentre(FakeDevice*){return fixtureNoGroup?nullptr:&fixtureGroup;}
 std::map<FakeShader*,int> g_wetLotPs;
@@ -167,7 +189,7 @@ const LotRect* fixtureShadeLot=nullptr;float fixtureShadeAt[2]{};int fixtureShad
 const LotRect* FindLotAt(float x,float z){++fixtureShadeLookups;fixtureShadeAt[0]=x;fixtureShadeAt[1]=z;return fixtureShadeLot;}
 struct FloorShadeBind {
     FakeDevice* d;UINT c=0;float old[3][4]{};bool active=false;
-    FloorShadeBind(FakeDevice* dev,int sampler,int constant,const LotRect* lot,float,std::atomic<long>& withLot,std::atomic<long>& noLot):d(dev){
+    FloorShadeBind(FakeDevice* dev,int sampler,int constant,const LotRect* lot,float,std::atomic<long>& withLot,std::atomic<long>& noLot,float=0):d(dev){
         if(sampler<0||constant<0) return;
         c=UINT(constant);(lot?withLot:noLot)++;d->GetPixelShaderConstantF(c,&old[0][0],3);
         const float rows[12]{7,7,7,7,7,7,7,7,7,7,7,7};SetPsConst(d,c,rows,3);active=true;
@@ -183,6 +205,7 @@ int checks=0,failures=0;
 void Check(bool value,const char* text) { ++checks; if(!value) { ++failures; if(failures<30) std::printf("FAIL: %s\n",text); } }
 template<class T> bool Same(const T& a,const T& b) { return !std::memcmp(&a,&b,sizeof(T)); }
 void ResetGlobals() {
+    ++g_patchedGen;fixtureCaps=false;fixtureCapRefused=false;fixtureCapCalls=0;capPatch=PatchedPs{};capPatch.ps=&capShader;capPatch.inst.capConst=120;
     objectVsInfo.contractedLotUv=false;
     g_wallGain=1;g_groundGain=1;g_roadGain=1;g_lotMapGain=1;g_night=1;
     g_wallDrawn=0;g_groundGainDraws=0;g_lotDrawn=0;g_lotMissing=0;g_edgeMatched=0;g_edgeUnmatched=0;
@@ -253,10 +276,12 @@ void LotChecks() {
         if(scenario==3)d.vertex[12][0]=NAN;
         if(scenario==4)d.vertex[12][0]=0;
         const auto savedPixel=d.pixel;const auto savedVertex=d.vertex;
-        const bool align=recognised&&scenario==0;
+        const bool validScale=recognised&&scenario!=1&&scenario!=3&&scenario!=4;
+        const float yScale=scenario==2?1.f/32:1.f/64;
         Check(ExtractedLotBranch(&d,[&]{
-            Check(d.pixel[31][2]==(align?1.f/63:0),"lot inverse scale guarded by verified VS and valid constants");
-            Check(d.pixel[31][3]==(align?-(1.f/64)*(16.f/63):0),"unsupported lot UV stays native");
+            Check(d.pixel[31][2]==(validScale?1.f/63:0),"lot inverse scale guarded by verified VS and valid constants");
+            Check(d.pixel[30][3]==(validScale?-yScale*(16.f/63):.24f),"lot y contraction goes to the matching edge offset");
+            Check(d.pixel[31][3]==0,"lot inverse scale leaves unused gain channels unchanged");
         })==D3D9Hooks::HookAction::Skip,"UV fallback retains normal draw");
         Check(Same(d.pixel,savedPixel)&&Same(d.vertex,savedVertex),"lot UV correction restores constants including invalid values");
     }
@@ -377,6 +402,20 @@ void InstancedChecks() {
     }
     ResetGlobals();d=Device();fixtureAtlas=&atlas;fixtureCapture=true;g_fenceFix=true;g_night=1;g_objPixelLamps=true;fixtureGroup=GroupCentre{};objectPatch.inst.shadeSampler=10;objectPatch.inst.shadeConst=200;
     Check(DrawInstanced(&d,[&]{Check(g_objDrawInfo.find("ground lamp shade: fixture")!=std::string::npos,"F7 fence line shows the ground lamp shade");}),"captured shaded fence draws");
+    ResetGlobals();d=Device();fixtureAtlas=&atlas;g_fenceFix=true;g_objPixelLamps=true;fixtureGroup=GroupCentre{};fixtureCaps=true;
+    const auto capsBefore=d.pixel;int capDraws=0;
+    Check(DrawInstanced(&d,[&]{++capDraws;
+        Check(d.ps==&capShader,"verified emitter floor selects the cap shader");
+        Check(d.pixel[120][0]==1.f&&d.pixel[120][3]==.5f,"per-lamp floor cap rows reach the selected shader");
+        Check(d.pixel[136][0]==.5f&&d.pixel[136][2]==.5f&&d.pixel[136][3]==1e-4f,"shared cap constants reach the selected shader");
+    })&&capDraws==1&&fixtureCapCalls==1,"verified emitter floor draws with the per-lamp cap shader");
+    Check(d.ps==g_curPs&&Same(d.pixel,capsBefore),"cap shader and constants restore after draw");
+    ResetGlobals();d=Device();fixtureAtlas=&atlas;g_fenceFix=true;g_objPixelLamps=true;fixtureGroup=GroupCentre{};fixtureCaps=true;fixtureCapRefused=true;
+    const auto refusedCaps=d.pixel;
+    Check(DrawInstanced(&d,[&]{Check(d.ps==&replacementPs,"refused cap shader retains the existing fence shader");})&&d.ps==g_curPs&&Same(d.pixel,refusedCaps),"refused cap patch falls back without changing constants");
+    ResetGlobals();d=Device();fixtureAtlas=&atlas;g_fenceFix=true;g_objPixelLamps=true;fixtureGroup=GroupCentre{};fixtureCaps=true;d.failPixelRead=120;
+    const auto unreadableCaps=d.pixel;
+    Check(DrawInstanced(&d,[&]{Check(d.ps==&replacementPs,"unreadable cap constants retain the existing fence shader");})&&d.ps==g_curPs&&Same(d.pixel,unreadableCaps),"unreadable cap constants fail closed");
     ResetGlobals();
     std::printf("Extracted DrawInstanced: %d checks\n",checks-before);
 }
@@ -490,7 +529,7 @@ void ReachChecks() {
         // fences: both trims
         ResetGlobals();d=Device();fixtureAtlas=&atlas;setup();
         g_fenceFix=true;g_fenceStrength=1.5f;g_objPixelLamps=true;g_objPixelLampStrength=strength;fixtureGroup=GroupCentre{};
-        const float fenceScale=reach?TerrainLightingPolicy::ReachLampScale(1.0304f,night,walls,.3f,strength/.75f*(1.5f/.75f)):TerrainLightingPolicy::SurfaceLampGain(night,strength)*1.5f;
+        const float fenceScale=reach?TerrainLightingPolicy::ReachLampScale(1.0304f,night,walls,1.f,strength/.75f*(1.5f/.75f)):TerrainLightingPolicy::SurfaceLampGain(night,strength)*1.5f;
         ps=d.pixel;calls=0;
         Check(DrawInstanced(&d,[&]{++calls;
             Check(d.pixel[42][1]==fenceScale,reach?"reach fence: the walls' scale x both trims":"first-law fence: its strength as before");

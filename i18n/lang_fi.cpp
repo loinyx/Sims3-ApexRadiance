@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Finnish}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: gables and upper trim keep continuous lamp light", "Yövalaistus: päädyt ja ylälistat saavat yhtenäisen lampunvalon"},
+    {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Yövalaistus: matalat pylväät ja portaat huomioivat lamppujen alla olevat umpinaiset lattiat"},
+
     {"Steam Deck and Linux: Proton is detected and a lighter profile is suggested", "Steam Deck ja Linux: Proton tunnistetaan ja kevyempää profiilia ehdotetaan"},
     {"Indoor lights update sooner when you enter a lot or change floors", "Sisävalot päivittyvät nopeammin, kun saavut tontille tai vaihdat kerrosta"},
     {"Lamps on other lots no longer delay the lights of the lot you play", "Muiden tonttien lamput eivät enää viivästytä pelattavan tontin valoja"},

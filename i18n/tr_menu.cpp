@@ -11,6 +11,9 @@ namespace {
 
 // {English (exactly as in the code), Portuguese (Brazil), Spanish, French}
 const I18n::Entry kEntries[] = {
+    {"Night Lights: gables and upper trim keep continuous lamp light", "Luzes noturnas: empenas e acabamentos superiores recebem luz contínua das lâmpadas", "Luces nocturnas: hastiales y remates superiores reciben luz continua de las lámparas", "Éclairage nocturne : pignons et bordures supérieures gardent une lumière continue"},
+    {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Luzes noturnas: pilares baixos e escadas respeitam pisos sólidos sob as lâmpadas", "Luces nocturnas: pilares bajos y escaleras respetan los suelos sólidos bajo las lámparas", "Éclairage nocturne : piliers bas et escaliers respectent les planchers pleins sous les lampes"},
+
     {"Steam Deck and Linux: Proton is detected and a lighter profile is suggested", "Steam Deck e Linux: o Proton é detectado e um perfil mais leve é sugerido", "Steam Deck y Linux: se detecta Proton y se sugiere un perfil más ligero", "Steam Deck et Linux : Proton est détecté et un profil plus léger est proposé"},
     {"Indoor lights update sooner when you enter a lot or change floors", "As luzes internas atualizam mais rápido ao entrar num lote ou trocar de andar", "Las luces interiores se actualizan antes al entrar en un solar o cambiar de planta", "Les lumières intérieures se mettent à jour plus vite en entrant sur un terrain ou en changeant d'étage"},
     {"Lamps on other lots no longer delay the lights of the lot you play", "Lâmpadas de outros lotes não atrasam mais as luzes do lote em que você joga", "Las lámparas de otros solares ya no retrasan las luces del solar en el que juegas", "Les lampes des autres terrains ne retardent plus les lumières du terrain où vous jouez"},
