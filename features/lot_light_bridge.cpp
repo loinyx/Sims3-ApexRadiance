@@ -630,10 +630,7 @@ bool LotEdgeConstants(const float k[4], const float c15[4], const float c8[4], c
 // A lot's shade over the world grass (15/10): the share per texel and the lamps' stamp weight it is a share of, so the lots
 // over one texel combine as sum M w / sum w (the lowest of them darkened a lamp's light past a gap with a neighbour's shade
 // of other lamps)
-struct ExtData {
-    std::vector<uint8_t> v;
-    std::vector<float> w;
-};
+using ExtData = GroundShadow::ExtData; // (2.15.3: ground_lamp_shadow.h, with the chunk build)
 struct LotMask {
     IDirect3DTexture9* tex = nullptr;
     uint64_t sig = 0;
@@ -686,11 +683,9 @@ bool g_shadeOn = true;
 // couple of seconds to show and every frame paid for it). A lot's shade (GroundShadow::ShadeJob) and a chunk's texture
 // (its mips) are made there from copies; the render thread only makes the inputs, uploads and applies. One thread, tasks
 // in order; results carry the epoch they were asked in (ReleaseLotMasks starts a new one, older results are dropped).
-struct ExtSrc { // one lot's shade over the world grass, for a chunk build (shared, never changed once made)
-    GroundShadow::Grid grid;
-    std::shared_ptr<const ExtData> v;
-    float x0 = 0, z0 = 0, x1 = 0, z1 = 0;
-};
+// (2.15.3) A chunk's task goes before the lots' tasks waiting: a lot's new shade is held until its chunks come back
+// (LotPending).
+using ExtSrc = GroundShadow::ExtSrc;
 void CrownsIn(float x0, float z0, float x1, float z1, std::vector<Canopy::Ellipsoid>& out); // canopy_ground_shadow (below)
 struct ShadeTask {
     bool chunk = false;
@@ -703,9 +698,14 @@ struct ShadeTask {
     std::vector<GroundShadow::Wall> walls;
     std::vector<WallOpenings::Patch> patches;
     std::vector<Canopy::Ellipsoid> crowns; // tree and bush crowns (canopy_ground_shadow)
-    // a chunk
+    // a chunk (2.15.3: gen, group, box, old)
     std::pair<int, int> chunkKey{};
-    std::vector<ExtSrc> srcs;
+    std::vector<ExtSrc> srcs;                 // by lot
+    uint32_t gen = 0;                         // the chunk's build it is (ChunkShade::gen)
+    uint64_t group = 0;                       // the lot whose held shade it is made with (LotPending), 0 = none
+    GroundShadow::TexRect box;                // its level-0 texels made again (ChunkUpdate); empty: the whole chunk
+    std::vector<std::vector<uint8_t>> old;    // the texture's texels around box (ReadChunkTexels)
+    int oldShaded = 0;
 };
 struct ShadeResult {
     bool chunk = false;
@@ -718,72 +718,19 @@ struct ShadeResult {
     double ms = 0.0;
     long long tests = 0, through = 0;
     std::pair<int, int> chunkKey{};
-    std::vector<std::vector<uint8_t>> mips; // empty: no lot shades the chunk
+    uint32_t gen = 0;
+    uint64_t group = 0;
+    bool failed = false;
+    GroundShadow::ChunkTexture tex; // no levels: no lot shades the chunk
 };
-constexpr int kChunkShadeTexels = 1024;
-constexpr float kChunkSize = 256.0f;
-// The shade of one lot at the world point (bilinear on its grid); false outside its grid
-bool ExtShadeAt(const ExtSrc& m, float x, float z, float& v, float& wt) {
-    float fi, fj;
-    if (!GroundShadow::WorldTexel(m.grid, x, z, fi, fj)) return false;
-    const int W = m.grid.w, H = m.grid.h;
-    if (!(fi >= 0.0f) || !(fj >= 0.0f) || !(fi <= W) || !(fj <= H)) return false;
-    const float a = std::clamp(fi - 0.5f, 0.0f, W - 1.0f), b = std::clamp(fj - 0.5f, 0.0f, H - 1.0f);
-    const int i0 = static_cast<int>(a), j0 = static_cast<int>(b), i1 = std::min(i0 + 1, W - 1), j1 = std::min(j0 + 1, H - 1);
-    const float u = a - i0, t = b - j0;
-    const std::vector<uint8_t>& e = m.v->v;
-    const std::vector<float>& ww = m.v->w;
-    const auto at = [&](int i, int j) { return static_cast<float>(e[static_cast<size_t>(j) * W + i]); };
-    const auto wa = [&](int i, int j) { return ww[static_cast<size_t>(j) * W + i]; };
-    v = (at(i0, j0) * (1 - u) + at(i1, j0) * u) * (1 - t) + (at(i0, j1) * (1 - u) + at(i1, j1) * u) * t;
-    wt = (wa(i0, j0) * (1 - u) + wa(i1, j0) * u) * (1 - t) + (wa(i0, j1) * (1 - u) + wa(i1, j1) * u) * t;
-    return true;
-}
-// Worker: the chunk's texels (the lots' shades weighed by their lamps' light there, 255 where none) and their mips
+constexpr int kChunkShadeTexels = GroundShadow::kChunkTexels;
+constexpr float kChunkSize = GroundShadow::kChunkSize;
+// Worker: the chunk's texels over its changed box and the mips over them (ChunkUpdate), or the whole chunk (ChunkFull):
+// the same bytes either way (tools/ground_shade_test)
 void BuildChunkMips(const ShadeTask& t, ShadeResult& r) {
-    constexpr int N = kChunkShadeTexels;
-    constexpr float tpm = N / kChunkSize; // texels a metre
     const float wx0 = t.chunkKey.first - kChunkSize * 0.5f, wz0 = t.chunkKey.second - kChunkSize * 0.5f;
-    std::vector<float> sumW, sumMW;
-    bool any = false;
-    for (const ExtSrc& m : t.srcs) {
-        const size_t n = static_cast<size_t>(m.grid.w) * m.grid.h;
-        if (!m.v || m.v->v.size() != n || m.v->w.size() != n) continue;
-        if (sumW.empty()) sumW.assign(static_cast<size_t>(N) * N, 0.0f), sumMW.assign(static_cast<size_t>(N) * N, 0.0f);
-        const int i0 = std::max(0, static_cast<int>(ApexMath::Floor((m.x0 - wx0) * tpm))), i1 = std::min(N - 1, static_cast<int>(ApexMath::Ceil((m.x1 - wx0) * tpm)));
-        const int j0 = std::max(0, static_cast<int>(ApexMath::Floor((m.z0 - wz0) * tpm))), j1 = std::min(N - 1, static_cast<int>(ApexMath::Ceil((m.z1 - wz0) * tpm)));
-        for (int j = j0; j <= j1; j++)
-            for (int i = i0; i <= i1; i++) {
-                float v, wt;
-                if (!ExtShadeAt(m, wx0 + (i + 0.5f) / tpm, wz0 + (j + 0.5f) / tpm, v, wt)) continue;
-                const float w = std::max(wt, 0.0f) + 1e-4f; // (a lot with no lamp here weighs almost nothing)
-                const size_t at = static_cast<size_t>(j) * N + i;
-                sumW[at] += w;
-                sumMW[at] += w * v;
-            }
-    }
-    if (sumW.empty()) return;
-    std::vector<uint8_t> px(static_cast<size_t>(N) * N, 255);
-    for (size_t k = 0; k < px.size(); k++)
-        if (sumW[k] > 0.0f) {
-            const uint8_t q = static_cast<uint8_t>(std::lround(std::clamp(sumMW[k] / sumW[k], 0.0f, 255.0f)));
-            if (q < 255) px[k] = q, any = true;
-        }
-    if (!any) return; // nothing shaded: no texture
-    int n = N;
-    r.mips.push_back(std::move(px));
-    while (n > 1) { // 2 x 2 averages down to 1 x 1
-        const std::vector<uint8_t>& a = r.mips.back();
-        const int h = n / 2;
-        std::vector<uint8_t> next(static_cast<size_t>(h) * h);
-        for (int j = 0; j < h; j++)
-            for (int i = 0; i < h; i++) {
-                const size_t p = static_cast<size_t>(2 * j) * n + 2 * i, q = p + n;
-                next[static_cast<size_t>(j) * h + i] = static_cast<uint8_t>((a[p] + a[p + 1] + a[q] + a[q + 1] + 2) / 4);
-            }
-        r.mips.push_back(std::move(next));
-        n = h;
-    }
+    if (!t.box.Empty() && GroundShadow::ChunkUpdate(t.srcs, wx0, wz0, t.box, t.old, t.oldShaded, r.tex)) return;
+    GroundShadow::ChunkFull(t.srcs, wx0, wz0, r.tex);
 }
 class ShadeWorker {
 public:
@@ -791,10 +738,14 @@ public:
     ~ShadeWorker() {
         if (th_.joinable()) th_.detach();
     }
-    void Submit(ShadeTask&& t) {
+    // first: before the lots' tasks waiting (after the chunks' tasks already there)
+    void Submit(ShadeTask&& t, bool first = false) {
         {
             std::lock_guard<std::mutex> lk(mx_);
-            in_.push_back(std::move(t));
+            if (first)
+                in_.insert(std::find_if(in_.begin(), in_.end(), [](const ShadeTask& q) { return !q.chunk; }), std::move(t));
+            else
+                in_.push_back(std::move(t));
         }
         Start();
         cv_.notify_one();
@@ -850,6 +801,8 @@ private:
             try {
                 if (t.chunk) {
                     r.chunkKey = t.chunkKey;
+                    r.gen = t.gen;
+                    r.group = t.group;
                     BuildChunkMips(t, r);
                 } else {
                     r.lot = t.lot, r.key = t.key, r.w = t.w, r.h = t.h, r.ox = t.ox, r.oz = t.oz, r.grid = t.grid;
@@ -863,7 +816,8 @@ private:
                 }
             } catch (...) {
                 r.res.clear();
-                r.mips.clear();
+                r.tex = {};
+                r.failed = true;
             }
             QueryPerformanceCounter(&t1);
             r.ms = static_cast<double>(t1.QuadPart - t0.QuadPart) * 1000.0 / static_cast<double>(f.QuadPart);
@@ -890,99 +844,201 @@ int g_lotsInFlight = 0;
 // lots' shades over it (LotMask::ext, 255 where none); it shares the chunk light map's uv (uv = (world xz - centre) / 256 +
 // 0.5, RecordWorldChunk), and the patched terrain shader multiplies the lamp light by it (ShaderPatches::PatchTerrainShade).
 // A chunk is made again on the worker when a lot's shade over it changed; it keeps its texture until the new one is ready.
+// (2.15.3) Only the texels over what changed are made again and uploaded (each level's rect locked), from the texture's own
+// texels around them (ReadChunkTexels): a lot's change sent 1.4 MB a chunk, now about 160 KB for a 40 m lot. Its builds carry
+// a generation: a result older than the chunk's last build sent is dropped, the box it made being in the newer one.
+struct WorldBox {
+    float x0 = 1e30f, z0 = 1e30f, x1 = -1e30f, z1 = -1e30f;
+    bool Empty() const { return !(x1 >= x0 && z1 >= z0); }
+    void Add(float ax0, float az0, float ax1, float az1) { x0 = std::min(x0, ax0), z0 = std::min(z0, az0), x1 = std::max(x1, ax1), z1 = std::max(z1, az1); }
+    void Add(const WorldBox& b) {
+        if (!b.Empty()) Add(b.x0, b.z0, b.x1, b.z1);
+    }
+};
 struct ChunkShade {
     IDirect3DTexture9* tex = nullptr;
     bool dirty = true;
     bool building = false;
+    bool full = true;   // (2.15.3) its texels are not known (a new entry): the next build makes the whole chunk
+    WorldBox changed;   // what changed over it since its last build was sent
+    WorldBox flight;    // what its builds in flight make again (the last one sent covers the others)
+    uint32_t gen = 0;   // its last build sent
+    int shaded = 0;     // tex's level-0 texels under 255
 };
 std::map<std::pair<int, int>, ChunkShade> g_chunkShades; // key: chunk centre (x, z), as g_chunks
 std::atomic<long> g_chunkShadeBuilds{0};
 double g_chunkShadeLastMs = 0.0;
-std::map<std::pair<int, int>, ShadeResult> g_chunkReady; // finished chunk builds waiting for their chunk's draw
+long long g_chunkShadeLastBytes = 0;
+std::vector<ShadeResult> g_chunkReady; // finished chunk builds with no held lot shade, uploaded one a frame (ShadeApply)
+// (2.15.3) A lot's new shade held until the chunks under its old and new shade are made with it, then shown with them in
+// the same frame (ShadeApply): the lot showed it a chunk round trip before the world grass beside it, a seam where the
+// shade crossed the lot's edge. Its old shade stays until then. One lot at a time; the next lots' results wait in turn.
+struct LotPending {
+    bool active = false;
+    uint64_t lot = 0, key = 0;
+    int w = 0, h = 0;
+    std::vector<uint8_t> shade; // the lot's part (empty: 255 everywhere)
+    float lo = 1.0f;
+    GroundShadow::Grid grid;
+    std::shared_ptr<const ExtData> ext; // the whole grid, when it shades the world grass
+    WorldBox box;                       // ext's world box
+    std::vector<std::pair<int, int>> chunks;
+    std::vector<ShadeResult> ready; // their results, applied together
+    DWORD at = 0;
+};
+LotPending g_pend;
+std::vector<ShadeResult> g_lotResults; // lots' results waiting for the held one
+constexpr DWORD kHoldMaxMs = 3000; // a held shade is shown after this even with a chunk missing (made again after)
 void ReleaseChunkShades() {
     for (auto& [k, c] : g_chunkShades)
         if (c.tex) c.tex->Release();
     g_chunkShades.clear();
     g_chunkReady.clear();
+    g_pend = {};
 }
 void ReleaseLotMasks() {
     for (auto& [lot, m] : g_lotMasks)
         if (m.tex) m.tex->Release();
     g_lotMasks.clear();
     ReleaseChunkShades();
+    g_lotResults.clear();
     if (g_whiteMask) g_whiteMask->Release();
     g_whiteMask = nullptr;
     g_shadeQueue.clear();
     g_shadeEpoch++; // the builds in flight are dropped when they come back
     g_lotsInFlight = 0;
 }
-// The chunks over a world box are made again at their next draw
-void MarkChunkShades(float x0, float z0, float x1, float z1) {
+// The chunks over a world box
+template <class F> void ForChunksOver(float x0, float z0, float x1, float z1, F f) {
     if (!(x1 >= x0) || !(z1 >= z0) || x1 - x0 > 4096.0f || z1 - z0 > 4096.0f) return;
     const int i0 = static_cast<int>(ApexMath::Floor(x0 / kChunkSize)), i1 = static_cast<int>(ApexMath::Floor(x1 / kChunkSize));
     const int j0 = static_cast<int>(ApexMath::Floor(z0 / kChunkSize)), j1 = static_cast<int>(ApexMath::Floor(z1 / kChunkSize));
     for (int i = i0; i <= i1; i++)
-        for (int j = j0; j <= j1; j++) g_chunkShades[{i * 256 + 128, j * 256 + 128}].dirty = true;
+        for (int j = j0; j <= j1; j++) f(std::pair<int, int>{i * 256 + 128, j * 256 + 128});
+}
+// The chunks over a world box are made again at their next draw (over that box)
+void MarkChunkShades(float x0, float z0, float x1, float z1) {
+    ForChunksOver(x0, z0, x1, z1, [&](const std::pair<int, int>& key) {
+        ChunkShade& c = g_chunkShades[key];
+        c.dirty = true;
+        c.changed.Add(x0, z0, x1, z1);
+    });
 }
 void MarkLotChunkShades(const LotMask& m) {
     if (m.ext) MarkChunkShades(m.ex0, m.ez0, m.ex1, m.ez1);
 }
+// (2.15.3) The chunk's builds in flight dropped: what they make is made again at its next draw
+void ForgetChunkBuilds(ChunkShade& c) {
+    if (!c.building) return;
+    c.gen++;
+    c.changed.Add(c.flight);
+    c.flight = {};
+    c.building = false;
+    c.dirty = true;
+}
+// The texture's texels over BlockRect(box, l) of every level but the last (D3DLOCK_READONLY: the managed copy); false when
+// a level could not be read
+bool ReadChunkTexels(IDirect3DTexture9* tex, const GroundShadow::TexRect& box, std::vector<std::vector<uint8_t>>& old) {
+    old.assign(GroundShadow::kChunkLevels - 1, {});
+    if (tex->GetLevelCount() < static_cast<DWORD>(GroundShadow::kChunkLevels)) return false;
+    for (int l = 0; l < GroundShadow::kChunkLevels - 1; l++) {
+        const GroundShadow::TexRect b = GroundShadow::BlockRect(box, l);
+        RECT rc{b.i0, b.j0, b.i1 + 1, b.j1 + 1};
+        D3DLOCKED_RECT lr;
+        if (FAILED(tex->LockRect(l, &lr, &rc, D3DLOCK_READONLY)) || !lr.pBits) return false;
+        old[l].resize(b.Size());
+        for (int j = 0; j < b.H(); j++) std::memcpy(&old[l][static_cast<size_t>(j) * b.W()], static_cast<const BYTE*>(lr.pBits) + static_cast<size_t>(j) * lr.Pitch, b.W());
+        tex->UnlockRect(l);
+    }
+    return true;
+}
+// A chunk's build sent to the worker, before the lots' builds: its texels over what changed and what its builds in flight
+// make (which are dropped then: older), or the whole chunk when its texels are not known. The lots over it in lot order;
+// group: the lot whose held shade it takes instead of the one shown (LotPending)
+void SendChunk(const std::pair<int, int>& key, ChunkShade& c, uint64_t group) {
+    ShadeTask t;
+    t.chunk = true;
+    t.epoch = g_shadeEpoch;
+    t.chunkKey = key;
+    t.group = group;
+    WorldBox box = c.changed;
+    box.Add(c.flight);
+    c.changed = {};
+    c.flight = box;
+    c.dirty = false;
+    c.building = true;
+    t.gen = ++c.gen;
+    const float wx0 = key.first - kChunkSize * 0.5f, wz0 = key.second - kChunkSize * 0.5f;
+    for (const auto& [lot, m] : g_lotMasks) {
+        const bool held = group && g_pend.active && lot == group;
+        const std::shared_ptr<const ExtData>& ext = held ? g_pend.ext : m.ext;
+        const WorldBox b = held ? g_pend.box : WorldBox{m.ex0, m.ez0, m.ex1, m.ez1};
+        if (ext && !(b.x1 < wx0 || b.z1 < wz0 || b.x0 > wx0 + kChunkSize || b.z0 > wz0 + kChunkSize))
+            t.srcs.push_back(ExtSrc{held ? g_pend.grid : m.extGrid, ext, b.x0, b.z0, b.x1, b.z1, lot});
+    }
+    std::sort(t.srcs.begin(), t.srcs.end(), [](const ExtSrc& a, const ExtSrc& b) { return a.lot < b.lot; });
+    if (!c.full && c.tex && !box.Empty()) {
+        t.box = GroundShadow::ChunkRectOf(wx0, wz0, box.x0, box.z0, box.x1, box.z1);
+        t.oldShaded = c.shaded;
+        if (t.box.Empty() || !ReadChunkTexels(c.tex, t.box, t.old)) t.box = {}, t.old.clear(); // (the whole chunk)
+    }
+    g_shadeWorker.Submit(std::move(t), true);
+}
 // The chunk's shade texture, or null where no lot shades it (the terrain draw is then left as it was). A changed chunk is
-// sent to the worker; its texture (or none) stays until the new one is uploaded (ShadeTick).
-void ApplyChunkResult(IDirect3DDevice9* dev, ShadeResult& r);
+// sent to the worker; its texture (or none) stays until the new one is uploaded (ShadeApply).
+void ShadeApply(IDirect3DDevice9* dev);
 IDirect3DTexture9* ChunkShadeTexture(IDirect3DDevice9* dev, const std::pair<int, int>& key) {
     if (!g_shadeOn) return nullptr;
-    if (const auto ready = g_chunkReady.find(key); ready != g_chunkReady.end()) {
-        ShadeResult r = std::move(ready->second);
-        g_chunkReady.erase(ready);
-        ApplyChunkResult(dev, r);
-    }
+    ShadeApply(dev);
     const auto it = g_chunkShades.find(key);
     if (it == g_chunkShades.end()) return nullptr;
     ChunkShade& c = it->second;
-    if (c.dirty && !c.building) {
-        c.dirty = false;
-        c.building = true;
-        ShadeTask t;
-        t.chunk = true;
-        t.epoch = g_shadeEpoch;
-        t.chunkKey = key;
-        const float wx0 = key.first - kChunkSize * 0.5f, wz0 = key.second - kChunkSize * 0.5f;
-        for (const auto& [lot, m] : g_lotMasks)
-            if (m.ext && !(m.ex1 < wx0 || m.ez1 < wz0 || m.ex0 > wx0 + kChunkSize || m.ez0 > wz0 + kChunkSize))
-                t.srcs.push_back(ExtSrc{m.extGrid, m.ext, m.ex0, m.ez0, m.ex1, m.ez1});
-        g_shadeWorker.Submit(std::move(t));
-    }
+    if (c.dirty && !c.building) SendChunk(key, c, 0);
     return c.tex;
 }
-// Render thread: a chunk's new texels (mips) into its texture; none: its texture goes
+// Render thread: a chunk's new texels into its texture, each level's changed rect locked (the whole level when it is all
+// new); no levels: its texture goes. A result older than the chunk's last build sent is dropped.
 void ApplyChunkResult(IDirect3DDevice9* dev, ShadeResult& r) {
     const auto it = g_chunkShades.find(r.chunkKey);
-    if (it == g_chunkShades.end()) return;
+    if (it == g_chunkShades.end() || r.gen != it->second.gen) return;
     ChunkShade& c = it->second;
     c.building = false;
+    c.flight = {};
     g_chunkShadeLastMs = r.ms;
     g_chunkShadeBuilds.fetch_add(1, std::memory_order_relaxed);
-    bool ok = !r.mips.empty();
-    if (ok && !c.tex && FAILED(dev->CreateTexture(kChunkShadeTexels, kChunkShadeTexels, 0, 0, D3DFMT_L8, D3DPOOL_MANAGED, &c.tex, nullptr))) c.tex = nullptr, ok = false;
-    if (ok) {
-        const DWORD levels = std::min<DWORD>(c.tex->GetLevelCount(), static_cast<DWORD>(r.mips.size()));
-        int n = kChunkShadeTexels;
-        for (DWORD l = 0; l < levels && ok; l++, n = std::max(n / 2, 1)) {
-            D3DLOCKED_RECT lr;
-            if (r.mips[l].size() != static_cast<size_t>(n) * n || FAILED(c.tex->LockRect(l, &lr, nullptr, 0))) {
-                ok = false;
-                break;
-            }
-            for (int j = 0; j < n; j++) std::memcpy(static_cast<BYTE*>(lr.pBits) + static_cast<size_t>(j) * lr.Pitch, &r.mips[l][static_cast<size_t>(j) * n], n);
-            c.tex->UnlockRect(l);
+    const GroundShadow::ChunkTexture& x = r.tex;
+    bool ok = !r.failed && x.levels.size() == static_cast<size_t>(GroundShadow::kChunkLevels) && x.rects.size() == x.levels.size();
+    if (ok && !c.tex) // a new texture: only from the whole chunk
+        ok = x.rects[0].Size() == static_cast<size_t>(kChunkShadeTexels) * kChunkShadeTexels &&
+             SUCCEEDED(dev->CreateTexture(kChunkShadeTexels, kChunkShadeTexels, 0, 0, D3DFMT_L8, D3DPOOL_MANAGED, &c.tex, nullptr));
+    if (ok && c.tex->GetLevelCount() < static_cast<DWORD>(GroundShadow::kChunkLevels)) ok = false;
+    long long bytes = 0;
+    for (int l = 0; ok && l < GroundShadow::kChunkLevels; l++) {
+        const GroundShadow::TexRect& b = x.rects[l];
+        const int n = kChunkShadeTexels >> l;
+        RECT rc{b.i0, b.j0, b.i1 + 1, b.j1 + 1};
+        D3DLOCKED_RECT lr;
+        if (b.Empty() || b.i0 < 0 || b.j0 < 0 || b.i1 >= n || b.j1 >= n || x.levels[l].size() != b.Size() ||
+            FAILED(c.tex->LockRect(l, &lr, b.Size() == static_cast<size_t>(n) * n ? nullptr : &rc, 0))) {
+            ok = false;
+            break;
         }
+        for (int j = 0; j < b.H(); j++) std::memcpy(static_cast<BYTE*>(lr.pBits) + static_cast<size_t>(j) * lr.Pitch, &x.levels[l][static_cast<size_t>(j) * b.W()], b.W());
+        c.tex->UnlockRect(l);
+        bytes += static_cast<long long>(b.Size());
     }
-    if (!ok) {
-        if (c.tex) c.tex->Release();
-        c.tex = nullptr;
-        if (!c.dirty) g_chunkShades.erase(it);
+    g_chunkShadeLastBytes = bytes;
+    if (ok) {
+        c.shaded = x.shaded;
+        c.full = false;
+        return;
     }
+    // no lot shades it any more, or the upload failed (its texels are not known then: the next build makes the whole chunk)
+    if (c.tex) c.tex->Release();
+    c.tex = nullptr;
+    c.shaded = 0;
+    c.full = r.failed || !x.levels.empty();
+    if (!c.dirty) g_chunkShades.erase(it);
 }
 
 // The lot's world box (its rectangle through the lot matrix)
@@ -1827,21 +1883,40 @@ uint64_t ShadeKey(const LotRect& r, int w, int h) {
     }
     return s | 1;
 }
-// Render thread, every frame: the worker's results applied, the next queued lots sent (at most 2 in flight, so the inputs
-// stay fresh)
-void ApplyLotResult(ShadeResult& r);
+// Render thread, every frame: the worker's results taken (a lot's held, LotPending; a chunk's kept for ShadeApply), the next
+// queued lots sent (at most 2 in flight, so the inputs stay fresh)
+void HoldLotResult(ShadeResult& r);
+void DropPending();
 void ShadeTick() {
     for (ShadeResult& r : g_shadeWorker.Take()) {
         if (r.epoch != g_shadeEpoch) continue;
-        if (r.chunk) g_chunkReady[r.chunkKey] = std::move(r); // uploaded at the chunk's next draw (ChunkShadeTexture)
-        else {
+        if (r.chunk) {
+            const auto it = g_chunkShades.find(r.chunkKey);
+            if (it == g_chunkShades.end() || r.gen != it->second.gen) continue; // (older than its last build sent)
+            if (r.group && g_pend.active && r.group == g_pend.lot) g_pend.ready.push_back(std::move(r));
+            else g_chunkReady.push_back(std::move(r)); // uploaded one a frame (ShadeApply)
+        } else {
             g_lotsInFlight = std::max(g_lotsInFlight - 1, 0);
-            ApplyLotResult(r);
+            g_shadeTests += r.tests;
+            g_shadeThrough += r.through;
+            g_shadeLastMs = r.ms;
+            g_shadeMaxMs = std::max(g_shadeMaxMs, r.ms);
+            const auto same = std::find_if(g_lotResults.begin(), g_lotResults.end(), [&](const ShadeResult& q) { return q.lot == r.lot; });
+            if (same != g_lotResults.end()) *same = std::move(r), g_shadeDropped.fetch_add(1, std::memory_order_relaxed);
+            else g_lotResults.push_back(std::move(r));
         }
     }
     if (!g_shadeOn) {
         g_chunkReady.clear(); // (review: results held for chunks while the shade is off)
+        g_lotResults.clear();
+        DropPending();
+        for (auto& [key, c] : g_chunkShades) ForgetChunkBuilds(c); // (made again when the shade is back)
         return;
+    }
+    while (!g_pend.active && !g_lotResults.empty()) {
+        ShadeResult r = std::move(g_lotResults.front());
+        g_lotResults.erase(g_lotResults.begin());
+        HoldLotResult(r);
     }
     while (g_lotsInFlight < 2 && !g_shadeQueue.empty()) {
         // (2.15.3) the lot nearest the camera first: the one the player looks at waited behind every lot queued before it
@@ -1876,45 +1951,108 @@ void ShadeTick() {
         g_lotsInFlight++;
     }
 }
-void ApplyLotResult(ShadeResult& r) {
-    g_shadeTests += r.tests;
-    g_shadeThrough += r.through;
-    g_shadeLastMs = r.ms;
-    g_shadeMaxMs = std::max(g_shadeMaxMs, r.ms);
+// (2.15.3) A lot's finished build held (LotPending): its lot's part and the whole grid for the world grass worked out, and the
+// chunks under its old and new shade over the world grass sent to be made with it. With no chunk to wait for, shown at once.
+void CommitPending();
+void HoldLotResult(ShadeResult& r) {
     const auto it = g_lotMasks.find(r.lot);
     if (it == g_lotMasks.end() || it->second.w != r.w || it->second.h != r.h) {
         g_shadeDropped.fetch_add(1, std::memory_order_relaxed); // the lot left, or its grid changed meanwhile
         return;
     }
-    // (14/10) applied also when its inputs changed again meanwhile (a newer build is queued then)
     LotMask& m = it->second;
-    m.shadeKey = r.key;
-    if (m.queuedKey == r.key) m.queuedKey = 0;
+    g_pend = {};
+    g_pend.lot = r.lot, g_pend.key = r.key, g_pend.w = r.w, g_pend.h = r.h;
     const GroundShadow::Grid& eg = r.grid;
     const int W = r.w, H = r.h, ox = r.ox, oz = r.oz;
-    MarkLotChunkShades(m); // the chunks under the shade shown so far
-    m.ext.reset();
-    if (r.res.size() != static_cast<size_t>(eg.w) * eg.h || r.den.size() != r.res.size() || ox + W > eg.w || oz + H > eg.h) {
-        m.shade.clear(); // (no texel: 255 everywhere)
-        m.dirty = true;
+    // the lot's part for the lot passes; the whole grid for the world grass when it shades any texel
+    if (r.res.size() == static_cast<size_t>(eg.w) * eg.h && r.den.size() == r.res.size() && ox + W <= eg.w && oz + H <= eg.h) {
+        g_pend.shade.resize(static_cast<size_t>(W) * H);
+        for (int j = 0; j < H; j++) std::memcpy(&g_pend.shade[static_cast<size_t>(j) * W], &r.res[static_cast<size_t>(j + oz) * eg.w + ox], W);
+        uint8_t lo = 255, extLo = 255;
+        for (uint8_t v : g_pend.shade) lo = std::min(lo, v);
+        for (uint8_t v : r.res) extLo = std::min(extLo, v);
+        g_pend.lo = lo / 255.0f;
+        if (extLo < 255) {
+            g_pend.grid = eg;
+            g_pend.ext = std::make_shared<const ExtData>(ExtData{std::move(r.res), std::move(r.den)});
+            GridBox(eg, g_pend.box.x0, g_pend.box.z0, g_pend.box.x1, g_pend.box.z1);
+        }
+    } // (else no texel: 255 everywhere)
+    WorldBox all = g_pend.box;
+    if (m.ext) all.Add(m.ex0, m.ez0, m.ex1, m.ez1); // the shade shown so far
+    g_pend.active = true;
+    g_pend.at = GetTickCount();
+    if (!all.Empty())
+        ForChunksOver(all.x0, all.z0, all.x1, all.z1, [&](const std::pair<int, int>& key) {
+            ChunkShade& c = g_chunkShades[key];
+            c.changed.Add(all);
+            SendChunk(key, c, r.lot);
+            g_pend.chunks.push_back(key);
+        });
+    if (g_pend.chunks.empty()) CommitPending();
+}
+// The held shade shown: the lot's mask is made again at its next draw (LotMaskTexture), in the frame its chunks' texels are
+// uploaded (ShadeApply)
+void CommitPending() {
+    if (!g_pend.active) return;
+    LotPending p = std::move(g_pend);
+    g_pend = {};
+    const auto it = g_lotMasks.find(p.lot);
+    if (it == g_lotMasks.end() || it->second.w != p.w || it->second.h != p.h) {
+        g_shadeDropped.fetch_add(1, std::memory_order_relaxed);
+        if (p.ext) MarkChunkShades(p.box.x0, p.box.z0, p.box.x1, p.box.z1); // (its chunks were made with it: again without)
         return;
     }
-    // the lot's part for the lot passes; the whole grid for the world grass when it shades any texel
-    std::vector<uint8_t> lotShade(static_cast<size_t>(W) * H);
-    for (int j = 0; j < H; j++) std::memcpy(&lotShade[static_cast<size_t>(j) * W], &r.res[static_cast<size_t>(j + oz) * eg.w + ox], W);
-    uint8_t lo = 255, extLo = 255;
-    for (uint8_t v : lotShade) lo = std::min(lo, v);
-    for (uint8_t v : r.res) extLo = std::min(extLo, v);
-    g_shadeLastMin = lo / 255.0f;
-    m.shade = std::move(lotShade);
+    LotMask& m = it->second;
+    m.shadeKey = p.key;
+    if (m.queuedKey == p.key) m.queuedKey = 0;
+    m.shade = std::move(p.shade);
     m.dirty = true;
-    if (extLo < 255) {
-        m.extGrid = eg;
-        m.ext = std::make_shared<const ExtData>(ExtData{std::move(r.res), std::move(r.den)});
-        GridBox(eg, m.ex0, m.ez0, m.ex1, m.ez1);
-        MarkLotChunkShades(m);
-    }
+    m.ext = std::move(p.ext);
+    if (m.ext) m.extGrid = p.grid, m.ex0 = p.box.x0, m.ez0 = p.box.z0, m.ex1 = p.box.x1, m.ez1 = p.box.z1;
+    if (!m.shade.empty()) g_shadeLastMin = p.lo;
     g_shadeBuilt.fetch_add(1, std::memory_order_relaxed);
+}
+// (2.15.3) The held shade given up (its lot left, its grid changed, the shade switched off): its chunks' builds are dropped
+// and made again at their next draw; the lot asks for its shade again
+void DropPending() {
+    if (!g_pend.active) return;
+    for (const auto& key : g_pend.chunks)
+        if (const auto c = g_chunkShades.find(key); c != g_chunkShades.end()) ForgetChunkBuilds(c->second);
+    if (const auto it = g_lotMasks.find(g_pend.lot); it != g_lotMasks.end() && it->second.queuedKey == g_pend.key) it->second.queuedKey = 0;
+    g_pend = {};
+}
+// Render thread, once a frame at the first draw that reads a lot's mask or a chunk's shade: the held lot shade shown with
+// its chunks' texels when they are all back (or after kHoldMaxMs), else one chunk's texels with no held shade. At most one
+// chunk upload a frame, or one lot's chunks together.
+extern uint32_t g_roomMapFrame; // (below: OnPresent counts frames)
+void ShadeApply(IDirect3DDevice9* dev) {
+    static uint32_t s_frame = 0;
+    if (s_frame == g_roomMapFrame) return;
+    s_frame = g_roomMapFrame;
+    if (g_pend.active) {
+        const bool all = g_pend.ready.size() >= g_pend.chunks.size();
+        if (all || GetTickCount() - g_pend.at > kHoldMaxMs) {
+            std::vector<ShadeResult> ready = std::move(g_pend.ready);
+            g_pend.ready.clear();
+            for (const auto& key : g_pend.chunks) // (a missing one: dropped, made again at its next draw)
+                if (const auto c = g_chunkShades.find(key); c != g_chunkShades.end() &&
+                    std::none_of(ready.begin(), ready.end(), [&](const ShadeResult& q) { return q.chunkKey == key && q.gen == c->second.gen; }))
+                    ForgetChunkBuilds(c->second);
+            for (ShadeResult& r : ready) ApplyChunkResult(dev, r);
+            CommitPending();
+            return;
+        }
+    }
+    while (!g_chunkReady.empty()) {
+        ShadeResult r = std::move(g_chunkReady.front());
+        g_chunkReady.erase(g_chunkReady.begin());
+        const auto it = g_chunkShades.find(r.chunkKey);
+        if (it == g_chunkShades.end() || r.gen != it->second.gen) continue; // (dropped: no upload)
+        ApplyChunkResult(dev, r);
+        break;
+    }
 }
 // The lot's shade is wanted with these inputs: queued (or its queued entry updated); a running build of an older key is dropped
 // (14/10: the built key is set when the build is applied, the queued one apart, so a dropped or cancelled build is asked
@@ -1962,6 +2100,7 @@ void EvictLotMasks() {
         if (g_lotMasks.size() <= target) break;
         const auto it = g_lotMasks.find(lot);
         if (it->second.tex) it->second.tex->Release();
+        if (g_pend.active && g_pend.lot == lot) DropPending(); // (2.15.3)
         MarkLotChunkShades(it->second);
         g_lotMasks.erase(it);
         std::erase_if(g_shadeQueue, [lot](const ShadeWant& q) { return q.lot == lot; });
@@ -2041,6 +2180,7 @@ void ReleaseIdleMaskTextures() {
 IDirect3DTexture9* LotMaskTexture(IDirect3DDevice9* dev, const LotRect& rect) {
     const LotRect* const r = &rect;
     const uint64_t lot = (static_cast<uint64_t>(r->lotHi) << 32) | r->lotLo;
+    ShadeApply(dev); // (2.15.3: a held shade is shown with its chunks before any draw of the frame reads it)
     LotMask& m = g_lotMasks[lot];
     const DWORD now = GetTickCount();
     m.lastUse = now;
@@ -2051,6 +2191,7 @@ IDirect3DTexture9* LotMaskTexture(IDirect3DDevice9* dev, const LotRect& rect) {
         LevelLightShare::GroundMask gm;
         if (LevelLightShare::LotGroundMask(lot, m.tex ? m.sig : 0, gm) && gm.w > 0 && gm.h > 0 && gm.px.size() == static_cast<size_t>(gm.w) * gm.h) {
             if (gm.w != m.w || gm.h != m.h) { // another grid: the old shade does not fit
+                if (g_pend.active && g_pend.lot == lot) DropPending(); // (2.15.3: nor the held one)
                 m.shade.clear();
                 MarkLotChunkShades(m);
                 m.ext.reset();
@@ -2080,10 +2221,11 @@ IDirect3DTexture9* LotMaskFor(IDirect3DDevice9* dev, const float k[4], const flo
 std::string LotShadeStatusText() {
     return std::format("{} | lots shaded {}, builds dropped {} (inputs changed or lot gone), queued {}{} | last build: {} lamps, {} walls ({} of garden walls and fences, {} noted, gates filling a fence gap {} of {}), {:.1f} ms on the worker "
                        "(longest {:.1f} ms), darkest texel {:.0f}%, {} wall cells with an opening or a lower top | wall tests {} (crossing a wall through an opening or "
-                       "over a lower cell {}) | world grass around lots: {} chunks shaded, {} chunk builds (last {:.1f} ms)",
+                       "over a lower cell {}) | world grass around lots: {} chunks shaded, {} chunk builds (last {:.1f} ms, {} KB uploaded){}",
                        g_shadeOn ? "on" : "off", g_shadeBuilt.load(), g_shadeDropped.load(), g_shadeQueue.size(), g_lotsInFlight ? " (building)" : "",
                        g_shadeLastLamps, g_shadeLastWalls, g_shadeLastFences, g_fenceWalls.load(), g_gates.size(), g_gatesFilled.load(), g_shadeLastMs, g_shadeMaxMs, g_shadeLastMin * 100.0f, g_shadeLastPatches, g_shadeTests,
-                       g_shadeThrough, g_chunkShades.size(), g_chunkShadeBuilds.load(), g_chunkShadeLastMs);
+                       g_shadeThrough, g_chunkShades.size(), g_chunkShadeBuilds.load(), g_chunkShadeLastMs, (g_chunkShadeLastBytes + 1023) / 1024,
+                       g_pend.active ? ", a lot's new shade held for its chunks" : "");
 }
 
 // ---- The same shade on the outdoor floors of story 0 (13/10, F7 2026-10-13 08-16-00: a paved path behind a free-standing
@@ -8769,9 +8911,7 @@ void OnWorldChanged() {
     g_exitLampRows.clear();
     g_exitCones.clear();
     g_exitList.clear();
-    for (auto& [lot, m] : g_lotMasks)
-        if (m.tex) m.tex->Release();
-    g_lotMasks.clear();
+    ReleaseLotMasks(); // (2.15.3: with the chunks' shades, whose texels are made again only where a lot changes)
     g_groupCentres.clear();
     g_centreBusy.clear();
     // (2.15.3) the foliage meshes' boxes (keyed by vertex buffer address: a buffer of the new world made at an old one's
@@ -9451,8 +9591,9 @@ void MeasureMemoryImpl() {
             const LotMask& m = kv.second;
             return Vec(m.room) + Vec(m.shade) + (m.ext ? Shared<ExtData>() + Vec(m.ext->v) + Vec(m.ext->w) : 0);
         }), g_lotMasks.size());
-    Set(sChunkShade, Tree(g_chunkShades) + Tree(g_chunkReady, [](const auto& kv) { return Vec(kv.second.res) + Vec(kv.second.den); }) + Vec(g_shadeQueue),
-        g_chunkShades.size() + g_chunkReady.size());
+    const auto result = [](const ShadeResult& r) { return Vec(r.res) + Vec(r.den) + Vec(r.tex.rects) + Vec(r.tex.levels, [](const auto& l) { return Vec(l); }); };
+    Set(sChunkShade, Tree(g_chunkShades) + Vec(g_chunkReady, result) + Vec(g_lotResults, result) + Vec(g_pend.ready, result) + Vec(g_pend.shade) + Vec(g_shadeQueue),
+        g_chunkShades.size() + g_chunkReady.size() + g_lotResults.size());
     Set(sSolid, Hash(g_solidGroups, [](const auto& kv) { return Vec(kv.second.triangles); }) + Hash(g_solidGeometry) + Hash(g_solidAttempts) + Hash(g_solidBusy),
         g_solidTriangles);
     Set(sFence,
