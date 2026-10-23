@@ -11,7 +11,7 @@ same fixes apply to the snowy winter variants and to the fences that share the b
 
 | | |
 |---|---|
-| Availability | Released in 1.0.0. The daytime curve on foliage lamp colours and garden lamps blocked by buildings: Released in 2.13.0. Per-vertex lamps and crown shade on lot ground: Released in 2.14.0 |
+| Availability | Released in 1.0.0. The daytime curve on foliage lamp colours and garden lamps blocked by buildings: Released in 2.13.0. Per-vertex lamps and crown shade on lot ground: Released in 2.14.0. Trees kept on the normal light rig instead of the underground one: Released in 2.15.3 |
 | Default | On |
 | Menu | Lighting > Objects > *Objects* card; the reach law also needs *Realistic lamp reach* (Lighting > Overview) and *Outdoor light between floors* (Lighting > Stories) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -48,6 +48,15 @@ per-instance lamp colours no longer light foliage at night strength by day.
 Lamps behind buildings: the rig gather scales an outdoor lamp's per-instance colour by the share that reaches the
 instance's centre past the outside walls (and the slabs above the lamp), with *Buildings block lamp light on trees and objects*; trees
 behind a house no longer take a garden post's light through it ([objects-and-rigs.md](objects-and-rigs.md)).
+
+Trees on the underground rig: a SpeedTree cluster whose level the game sets below 0 (on a lot with a basement, a tree
+whose root stands under floor 0) takes the fixed `[UndergroundTree]` light rig of `CustomLightRigging.ini`, four white
+lights at 0.5 that never gather, so the tree was drawn flat and bright white all night, and again whenever its level was
+set. `TreeLightRig` hooks the cluster's level setter (vfunc `+0x50`, `0x0070D370`) and custom-rig setter (vfunc `+0x6C`,
+`0x0070D800` on Steam 1.67.2): after each, a cluster left on that rig's key (`0x08D11E8C`, FNV-1 of "undergroundtree", at
+`cluster+0x1F0`) with no script rig (`+0x53C`) gets key 0, the normal rig, applied by the cluster's own next update. It
+installs with Night Lighting when both sites are known for the game build ([`features/tree_light_rig.cpp`](../../../features/tree_light_rig.cpp));
+developer status: tree levels set and clusters given the normal rig.
 
 ### Lamp reach on foliage (2.13.1)
 
@@ -319,6 +328,7 @@ mod draw: foliage | per-vertex lamps: drawn | wrap weights A B (reach law) | ins
 | | `ObjectStatus` | Status line |
 | `features/shader_patches.cpp/.h` | `PatchFoliageVs(t)`, `PatchLeafShadow(t, nightConst)` | Bytecode patches |
 | `shaders/shader_ids.h` | `kObjectRigPs` {600, `0x0A2D0BE4`} | Exact identity of the summer PS |
+| `features/tree_light_rig.cpp/.h` | `Hook_SetLevel`, `Hook_SetCustomRig`, `Restore` | Trees off the underground rig |
 
 ## Rejected approaches
 

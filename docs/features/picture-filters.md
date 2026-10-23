@@ -16,7 +16,7 @@ at any time. In the menu the **Color > Overview** tab owns the *Picture* master 
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (present in the first version in this repository). Filters tab and LUT files: Released in 2.7.0 |
+| Availability | Released in 2.1.0 or earlier (present in the first version in this repository). Filters tab and LUT files: Released in 2.7.0. The frame copy shared with the other screen passes: Released in 2.15.3 |
 | Default | Off; every filter off |
 | Menu | Image > Color (tabs Overview, Basic, Tones, Color, Detail, Filters, LUTs); *Smooth gradients* on the Image > Banding Fix page; Overview > Image > Picture |
 | Configuration | `[qol.picture]` and `[qol.picture.filters]` in `ApexRadiance.toml`; compare key `[ui] picture_compare_key`; LUT files in `Documents\Electronic Arts\The Sims 3\Apex Radiance\LUTs\` |

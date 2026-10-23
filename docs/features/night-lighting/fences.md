@@ -9,7 +9,7 @@ same switch and strength. By day the lamp term fades to 3% of its night strength
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0: the lot's ground lamp shade on pieces near the ground (*Walls shade lamp light near the ground*), upper-story railing and parapet tops without a ground lamp's pool, lamps tested from the piece nearest them. Released in 2.12.3: the outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and tops above the lamp heads without ground light. Released in 2.12.1: lighting corrections.  Released in 1.0.0. Subdued daytime lamp response: Released in 2.6.0. Per-pixel lamps, walls blocking them and the game's own lighting in full daylight: Released in 2.7.0 |
+| Availability | Released in 2.15.3: the reach law's scale without the outdoor walls' gain, the lamp sum held under 1 by its brightest channel, faces reading the ground lamp shade in front of them, gates closing their fence's gap in the lot shade. Released in 2.13.0: the lot's ground lamp shade on pieces near the ground (*Walls shade lamp light near the ground*), upper-story railing and parapet tops without a ground lamp's pool, lamps tested from the piece nearest them. Released in 2.12.3: the outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and tops above the lamp heads without ground light. Released in 2.12.1: lighting corrections.  Released in 1.0.0. Subdued daytime lamp response: Released in 2.6.0. Per-pixel lamps, walls blocking them and the game's own lighting in full daylight: Released in 2.7.0 |
 | Default | On |
 | Menu | Lighting > Objects > Objects card > Game fixes (folded) > *Fences and stairs catch light*, *Fence brightness* |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -33,9 +33,10 @@ falls back to the brighter of the game's vertex lights and the world ground-ligh
 2. **Patch the pixel shader** once per game shader: up to 8 per-pixel lamps (colour x sat(N.l) x sat(1 - d^2/R^2)^2,
    from the world normal and height the instanced vertex shader already passes in TEXCOORD2) replace shared vertex lamp light when the group has valid spatial data. Missing spatial data keeps
    the original vertex/atlas fallback. With *Realistic lamp reach* on, a second copy takes the outdoor walls' law and
-   scale instead (F7 20-31-19: a balcony band went black at 7.82 m from a post while the wall behind it stayed lit;
-   see [objects-and-rigs.md](objects-and-rigs.md#realistic-reach-on-objects-fences-and-windows)); the fence strength then
-   acts as a trim over its 75% default. Only a group whose pieces were read (lamps placed) takes that copy; otherwise the
+   native lamp scale instead (F7 20-31-19: a balcony band went black at 7.82 m from a post while the wall behind it stayed lit;
+   see [objects-and-rigs.md](objects-and-rigs.md#realistic-reach-on-objects-fences-and-windows)), without the walls'
+   *Brightness* gain (fences are not walls: at the walls' 30% they took 30% of the light the same lamp gave the ground
+   and objects beside them); the fence strength then acts as a trim over its 75% default. Only a group whose pieces were read (lamps placed) takes that copy; otherwise the
    first copy draws. F7 on a fence, railing or balcony band shows `FENCE/STAIRS (instanced) lit by the mod` with the lamps
    placed, the strengths and the `lamp law:` line.
 3. **Choose the lamps per group.** The group's centre and its two ends are read from the instance stream (the mean of the
@@ -59,7 +60,11 @@ falls back to the brighter of the game's vertex lights and the world ground-ligh
    the lot pass gives the grass under them ([lot-light-pass.md](lot-light-pass.md), as the story-0 outdoor floors,
    [floors.md](floors.md)), within about 1 m of the lot's ground. A curb or low fence behind a free-standing wall no longer
    keeps a lamp on the other side because another part of its group sees it; balcony railings and stair tops higher up
-   keep the per-group test alone.
+   keep the per-group test alone. A face reads the shade 0.6 m in front of it along its normal
+   (`GroundShadow::kFenceShadeReach`); tops read it where they stand. The fence is itself a wall in the lot's mask, so at
+   its own footprint a face turned to the lamp read the edge of its own shadow: a dark band under 1 m. Fence gates are
+   objects ([objects-and-rigs.md](objects-and-rigs.md)); one standing in its fence's gap closes that gap in the lot shade
+   ([lot-light-pass.md](lot-light-pass.md#lamp-shade-on-lot-ground-groundshadow)).
 4. **Draw with the atlas bound** and the strength and lamps set per draw; restore everything afterwards.
 5. **Daytime response:** the strength sent to the shader is `SurfaceLampGain(night, strength)` = strength x
    `LampDay(night)`: the configured strength at full night, 3% of it in full daylight, `0.03 + 0.97 smoothstep(0, 1,
@@ -75,7 +80,7 @@ This page covers the `vs_3_0` instanced structure family.
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Fences and stairs catch light | `cercasComLuzDoChao` | bool | on | | Ground light on fences, railings, posts and stairs, and on snow lying on objects and stair tops ([snow.md](snow.md)) |
-| Fence brightness | `forcaNasCercas` | float | 75% | 25 to 200% | Multiplies the atlas term and the per-pixel lamps; 100% = the same light as the ground. With *Realistic lamp reach* on, the per-pixel lamps take the outdoor walls' scale and this value (with *Seamless light brightness*) is a trim over its 75% default. Shown when the switch is on |
+| Fence brightness | `forcaNasCercas` | float | 75% | 25 to 200% | Multiplies the atlas term and the per-pixel lamps; 100% = the same light as the ground. With *Realistic lamp reach* on, the per-pixel lamps take the outdoor walls' native lamp scale (not the walls' *Brightness*) and this value (with *Seamless light brightness*) is a trim over its 75% default. Shown when the switch is on |
 
 Both apply live (`LotLightBridge::SetFenceGroundLight`, every frame). The Game fixes section disables these rows unless
 *Street lamps light lots* and *Smooth ground light* (Ground tab) are both on (the atlas exists only with both) and offers
@@ -183,7 +188,8 @@ the lot's ground lamp shade `M`, unlike the lot pass and the story-0 floors.
 
 With the per-pixel lamps, after the final `max rT.xyz, rLA, rT` the patch appends the floors' block (`AppendGroundShade`,
 [floors.md](floors.md#ground-lamp-shade-on-story-0-floors)) on `rT`: `rT.xyz *= 1 + gate (M - 1)`, with world x and z
-from the lamp code's position temp (TEXCOORD1.zw) and world y from TEXCOORD2.w, temps `rLA` and `rLB` (free after the
+from the lamp code's position temp (TEXCOORD1.zw) moved by `N.xz x rows[10]` (`cM + 2`.z, 0.6 m for fences; the
+floors' rows leave it 0) and world y from TEXCOORD2.w, temps `rLA` and `rLB` (free after the
 `max`). Mask sampler `sS = sE + 1`; rows `cM .. cM + 2` = `GroundShadow::FloorShadeRows` (xz scale 1) right after the
 cones (first law, `coneConst + 16`) or after the two reach rows (`reachConst + 2`). Without the per-pixel lamps, or
 without a sampler (s15 at most) or the 3 constants, the copy is byte for byte the copy of before (`shadeSampler = -1`).

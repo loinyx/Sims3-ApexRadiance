@@ -10,7 +10,7 @@ ID no longer walk a long hash chain. The answers are the game's own.
 
 | | |
 |---|---|
-| Availability | Expiring local lookup caching: Released in 2.14.0. Released in 2.1.0 or earlier; on by default since 2.5.5. Object service ID index: Released in 2.7.0 |
+| Availability | Expiring local lookup caching: Released in 2.14.0. Released in 2.1.0 or earlier; on by default since 2.5.5. Object service ID index: Released in 2.7.0. Per-thread counters, 16 recent answers per thread and the scene's object map index: Released in 2.15.3 |
 | Default | On |
 | Menu | System > Performance > Files and objects > *Faster object lookups* |
 | Configuration | `[patches.ObjectLookupIndex]` in `ApexRadiance.toml` |

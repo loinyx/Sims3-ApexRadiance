@@ -10,7 +10,7 @@ Color's *Emphasize* and Water Reflections read.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (present in the first version in this repository). Loaded-world and loading-window guard: Released in 2.6.0. The shared world gate (the world drawn) and the frozen-screen pause: Released in 2.7.0 |
+| Availability | Released in 2.1.0 or earlier (present in the first version in this repository). Loaded-world and loading-window guard: Released in 2.6.0. The shared world gate (the world drawn) and the frozen-screen pause: Released in 2.7.0. The full-resolution colour copy shared with the other screen passes: Released in 2.15.3 |
 | Default | On for new configurations; Fixed focus |
 | Menu | Image > Depth Blur; Overview > Image > Depth Blur |
 | Configuration | `[patches.DepthBlur]` in `ApexRadiance.toml` |

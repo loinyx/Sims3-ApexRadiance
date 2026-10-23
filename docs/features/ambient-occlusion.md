@@ -9,7 +9,7 @@ the shade on Sims and their hair separately.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0. Distance: Released in 2.6.0. Temporal smoothing, Half resolution, Thin object detail and the wait for the drawn world (never on the main menu or load screens): Released in 2.7.0. Temporal smoothing, Thin object detail and Object thickness are removed in 2.11.1; their legacy keys are ignored. |
+| Availability | Released in 2.1.0. Distance: Released in 2.6.0. Temporal smoothing, Half resolution, Thin object detail and the wait for the drawn world (never on the main menu or load screens): Released in 2.7.0. Temporal smoothing, Thin object detail and Object thickness are removed in 2.11.1; their legacy keys are ignored. The full-resolution colour copy shared with the other screen passes: Released in 2.15.3 |
 | Default | On for new configurations |
 | Menu | Image > Ambient Occlusion |
 | Configuration | `[patches.AmbientOcclusion]` in `ApexRadiance.toml` |

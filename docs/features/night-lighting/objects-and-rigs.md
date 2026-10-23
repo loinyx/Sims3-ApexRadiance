@@ -9,7 +9,7 @@ shadows. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0: *Buildings block lamp light on trees and objects* on rigs (trees, bushes, rig objects), indoor and outdoor lamps through openings on objects, a lamp through an arch on objects inside it, disabled lamps no longer lighting objects. Released in 2.12.3: the outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and the ground-light height gate. Released in 2.12.1: lighting corrections.  Released (present since 2.1.0, the first version in this repository). Daytime response of the per-pixel terms: Released in 2.6.0. Walls blocking per-pixel lamps outdoors, indoor objects lit by lamps of another story, furniture keeping its light until its room changes at a lamp switch, and the game's own lighting in full daylight: Released in 2.7.0 |
+| Availability | Released in 2.15.3: the reach law's lamp sum held under 1 by its brightest channel, loose outdoor objects (gates) at the fences' lamp scale, ceiling lamps of the story below kept off the furniture above. Released in 2.13.0: *Buildings block lamp light on trees and objects* on rigs (trees, bushes, rig objects), indoor and outdoor lamps through openings on objects, a lamp through an arch on objects inside it, disabled lamps no longer lighting objects. Released in 2.12.3: the outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and the ground-light height gate. Released in 2.12.1: lighting corrections.  Released (present since 2.1.0, the first version in this repository). Daytime response of the per-pixel terms: Released in 2.6.0. Walls blocking per-pixel lamps outdoors, indoor objects lit by lamps of another story, furniture keeping its light until its room changes at a lamp switch, and the game's own lighting in full daylight: Released in 2.7.0 |
 | Default | On (all switches), Brightness 75%, Seamless light brightness 75% (the Soft light style) |
 | Menu | Lighting > Objects > *Objects* card (its folded *Game fixes* holds the stairs, doors, windows, pieces, fences and indoor rows); *Realistic lamp reach* on Lighting > Overview |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -189,6 +189,12 @@ runs on more than one thread, so the test reads an immutable copy of the walls a
 publishes when they change; once the copy has been quiet for 1 s every rig gathers again (`RequestRigRefresh`). A wall
 within 0.5 m of the rig centre is the object's own (doors, windows, a hedge against a wall) and does not block. Status:
 *outdoor lamps behind buildings: tested N, left out N, dimmed N*.
+
+**Lamps under the room's floor** (2.15.3). The game lists a ceiling lamp of the story below on the story above, its light a
+few centimetres under that story's floor, so furniture of a closed room above glowed with the room below's light. A rig
+record of a lamp under the floor of the rig's own room, with no removed floor on the way
+(`LevelLightShare::LampUnderRoomFloor`, the room solve's test, [level-light-share.md](level-light-share.md#lamps-under-a-storys-floor)),
+is set to 0 and falls under the game's cut.
 
 **Indoor lamps through openings** (with *Indoor light through openings*, [level-light-share](level-light-share.md)):
 a roofed room's lamps of a roofed neighbour, taken through an opening between them, go through the game's per-light test
@@ -371,7 +377,8 @@ wall behind a story-2 balcony band and column stayed lit while the band and colu
 shared with `ReachShareImpl`):
 
 - per lamp `colour x Gain(w) x sat(N.l) / d^2 x min(1, r0^2 / d^2 x sat(1 - (d^2/R^2)^2)^2)`, then the cones, and the sum
-  held under 1 per channel (`mov_sat`), as the room map's `min(sum, 1)` texel; `w = range x intensity`, r0 and R as for the
+  held under 1 as the room map's `min(sum, 1)` texel, by its brightest channel: `v / max(1, max(v.r, v.g, v.b))`
+  (`AppendHueClamp`; until 2.15.2 per channel, which turned warm and coloured lamps white near their heads); `w = range x intensity`, r0 and R as for the
   walls (3.5 m and 15 m for w = 85, scaled by sqrt(w / 85) within 2 to 5 m and 6 to 20 m);
 - `Gain(w, entries) = 0.25 w x entries`: `k2 0.075 x w x 3.333` per entry of the outdoor room's light list, times the
   lamp's entries there (`LampReach::Entries`, read by `ReadLamp`): 2 for a lot lamp of story 0 (light `+0xD0` = 0; the game
@@ -387,7 +394,9 @@ shared with `ReachShareImpl`):
   wall draw read it, else `LampDay(night)`, 1 at night: a daytime 0 kept while no wall was drawn left these draws unlit,
   and until 2.12.2 the fallback 1 gave columns the night scale at dusk) x their gain as `WallLampScale` applies it (walls
   on, before full night gain x `LampDay(night)`; the native scale alone with walls off), times `forcaLuzPorPixelNosObjetos / 0.75`
-  (fences also `x forcaNasCercas / 0.75`). At the default sliders a column, a band or a window frame takes the light of the
+  (fences also `x forcaNasCercas / 0.75`). The walls' gain applies only to an object set in its wall (a window or door
+  frame, `ObjectLampPoint`); a loose object outdoors (a gate in a fence line) and fences take gain 1 (2.15.3: a wooden
+  gate took 30% of the light the same garden post gave the fence 0.7 m beside it). At the default sliders a column, a band or a window frame takes the light of the
   wall behind it; the two sliders act as trims. The ground terms (`cB.x`) are unchanged;
 - a shader without room for the two rows keeps the first law (status *first law kept*); with the option off, the first
   law's copies and constants are byte-identical to before (offline comparison with the previous source). Since 2.12.3

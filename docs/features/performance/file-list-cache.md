@@ -9,7 +9,7 @@ The lists the game receives contain the same keys from the same packages.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier; on by default since 2.5.5 |
+| Availability | Released in 2.1.0 or earlier; on by default since 2.5.5. Shared kept lists and writable packages' lists by their write epoch: Released in 2.15.3 |
 | Default | On |
 | Menu | System > Performance > Files and objects > *Faster file lists* |
 | Configuration | `[patches.FileListCache]` in `ApexRadiance.toml` |
