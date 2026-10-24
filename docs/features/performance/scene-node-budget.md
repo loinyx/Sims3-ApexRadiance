@@ -133,8 +133,9 @@ Verified in the disassembly unless marked inferred.
 - Per BeginFrame (render thread): samples the camera (`LotLightingMotion::SampleCameraMoving`). Moving ->
   `BudgetedDrain`: the game's loop instruction for instruction (same splice, same unlink order, same calls, same
   counter) plus a stop test before each node: at least `kMinNodes` (8), then stop at `nodesPerFrame` nodes or
-  `msPerFrame` (QPC). Past the limit the loop keeps walking: a node whose update slot (+0x48) is `SwarmListGather`
-  or whose draw slot (+0x18) is `SceneModelFurDraw` is updated as the game's loop would; the others move, in order, to
+  `msPerFrame` (QPC). Past the limit the loop keeps walking: a node whose vtable is `SwarmDrawableVtable` or
+  `SceneModelFurVtable` is updated as the game's loop would (the vtable, not a slot's content: another module may swap
+  the update or draw slot for its own stub); the others move, in order, to
   a second local list that is appended after the local list. The nodes not reached are spliced back at the tail of
   the holder's list, in order.
 - Why those two: a Swarm effect remove (0x0071FF10) blanks its entry and leaves the bucket lists pointing at it; the
@@ -185,7 +186,7 @@ lifetime layers are removed and the records cleared. Nodes still left are proces
 | SceneBoundsCall / SceneNodeBounds | 0x006E41DE / 0x006FB4B0 | InRange(SceneDrain, 0xD1) / Target (fallback Sig) |
 | SceneSpatialCall / SceneNodeSpatial | 0x006E41E6 / 0x006FAD70 | InRange(SceneDrain, 0xD1) / Target (fallback Sig) |
 | SceneNodeDtor / SceneAddNode / SceneHolderTeardown | 0x006FD930 / 0x006E6480 / 0x006E4DE0 | Sig (entry; alternates at +0x11 / +5 / +6) |
-| SwarmListGather / SceneModelFurDraw | 0x00722190 / 0x006FA0B0 | Sig (entry; compared with vtable slots, never called or patched) |
+| SwarmDrawableVtable / SceneModelFurVtable | 0x00FFC248 / 0x00FF9B50 | Sig, the vtable stored by each constructor (0x0071C0A0 / 0x006FA020); compared with the node's vtable, never patched |
 
 Group `SceneNodeBudget`.
 

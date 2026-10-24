@@ -58,10 +58,11 @@
 //   its update 0x006F7B40 refills the slot or clears the draw flags; the fur draw 0x006FA0B0 reads the slot without a
 //   NULL check: access violation at 0x006C93D0). VERIFIED in the disassembly; that these two stale-state crashes come from
 //   the deferral is INFERRED from crash logs (the Swarm one: last gather by this copy, removes after it). Past the budget
-//   the copy keeps walking the rest and still updates every node whose update slot is the Swarm gather or whose draw slot
-//   is the fur draw, in the game's order; the others are moved, in order, to a second local list and go back as before.
-//   The Swarm drawable is queued again by its own update every frame and fur models are few, so the budget is unchanged
-//   for ordinary nodes.
+//   the copy keeps walking the rest and still updates every node of these two classes, in the game's order; the others are
+//   moved, in order, to a second local list and go back as before. The two are told by their vtable (0x00FFC248, 0x00FF9B50),
+//   not by a slot's content: another module that swaps the update or draw slot for its own stub (a profiler, a crash
+//   logger) leaves the vtable as it is, and a slot compare would then miss every such node. The Swarm drawable is queued
+//   again by its own update every frame and fur models are few, so the budget is unchanged for ordinary nodes.
 //   The rule: camera still -> the game's drain; camera moving -> the budgeted copy; once a node waited maxDeferMs the budget
 //   grows every frame (x2, x4 ... x64, doubling every kGrowStepMs) instead of the whole backlog at once (05/10: the forced full
 //   drain was a single long frame in the middle of a camera move); a node waited kHardFactor x maxDeferMs -> the game's drain
@@ -142,7 +143,6 @@ constexpr uint32_t kListOff = 0x20;    // holder: pending list sentinel {next, p
 constexpr uint32_t kLinkOff = 0x18;    // node: its pending link
 constexpr uint32_t kOwnerOff = 0x30;   // node: its owner (the holder), 0 = in no scene
 constexpr uint32_t kUpdateSlot = 0x48; // node vfunc: per-node update
-constexpr uint32_t kDrawSlot = 0x18;   // drawable vfunc: draw
 constexpr uint32_t kMinNodes = 8;      // processed every frame whatever the budget (progress)
 constexpr uint32_t kCountCap = 1u << 20;
 
@@ -163,8 +163,8 @@ bool g_started = false;
 std::atomic<bool> g_on{false};
 std::atomic<bool> g_stopped{false}; // a safety check failed: the game's drain from then on (sticky until the game restarts)
 uintptr_t g_drainFn = 0;
-uintptr_t g_swarmGather = 0; // 0x00722190: node update that must not wait (see "Draw state" above)
-uintptr_t g_furDraw = 0;     // 0x006FA0B0: draw of a node whose update must not wait
+uintptr_t g_swarmVtable = 0; // 0x00FFC248: nodes whose update must not wait (see "Draw state" above)
+uintptr_t g_furVtable = 0;   // 0x00FF9B50: same
 FnBounds g_bounds = nullptr;   // 0x006FB4B0
 FnSpatial g_spatial = nullptr; // 0x006FAD70
 std::atomic<DWORD> g_drainThread{0};
@@ -486,7 +486,7 @@ void UpdateTail(Link* local, uint32_t* counter, float* bounds) {
 bool MustNotWait(const uint8_t* node) {
     __try {
         const uintptr_t vtable = *reinterpret_cast<const uintptr_t*>(node);
-        return *reinterpret_cast<const uintptr_t*>(vtable + kUpdateSlot) == g_swarmGather || *reinterpret_cast<const uintptr_t*>(vtable + kDrawSlot) == g_furDraw;
+        return vtable == g_swarmVtable || vtable == g_furVtable;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -751,7 +751,7 @@ bool Start(std::string* error) {
     const uintptr_t bounds = GameAddr::Get(GameAddr::Id::SceneNodeBounds), spatial = GameAddr::Get(GameAddr::Id::SceneNodeSpatial);
     const uintptr_t dtor = GameAddr::Get(GameAddr::Id::SceneNodeDtor), addNode = GameAddr::Get(GameAddr::Id::SceneAddNode);
     const uintptr_t teardown = GameAddr::Get(GameAddr::Id::SceneHolderTeardown);
-    const uintptr_t swarmGather = GameAddr::Get(GameAddr::Id::SwarmListGather), furDraw = GameAddr::Get(GameAddr::Id::SceneModelFurDraw);
+    const uintptr_t swarmVtable = GameAddr::Get(GameAddr::Id::SwarmDrawableVtable), furVtable = GameAddr::Get(GameAddr::Id::SceneModelFurVtable);
     // The whole drain must be the loop this copy reproduces, and its two calls must reach the functions the copy calls
     if (!MatchAt(drain, kDrainBody)) return fail(std::format("The scene's pending-node drain at {:#010x} is not the code Apex was written for", drain));
     if (boundsCall != drain + 0xAE || spatialCall != drain + 0xB6 || CallTargetAt(boundsCall) != bounds || CallTargetAt(spatialCall) != spatial)
@@ -773,8 +773,8 @@ bool Start(std::string* error) {
         g_qpcMs = 1000.0 / static_cast<double>(f.QuadPart);
     }
     g_drainFn = drain;
-    g_swarmGather = swarmGather;
-    g_furDraw = furDraw;
+    g_swarmVtable = swarmVtable;
+    g_furVtable = furVtable;
     g_bounds = reinterpret_cast<FnBounds>(bounds);
     g_spatial = reinterpret_cast<FnSpatial>(spatial);
     LotLightingMotion::SampleCameraMoving(); // parses the camera position now (Start's thread), not in the first frame

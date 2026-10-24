@@ -209,8 +209,8 @@ enum class Id : uint16_t {
     SceneNodeDtor,            // FUN_006fd930 thiscall(): the scene node base destructor (every derived destructor ends in it; does not unlink +0x18)
     SceneAddNode,             // FUN_006e6480 thiscall(node, group), ret 8: the pending holder's AddNode (pushes the node's link without unlinking it)
     SceneHolderTeardown,      // FUN_006e4de0 thiscall(): the pending holder's teardown (SetOwner(0) + Release of every node, list left as it is)
-    SwarmListGather,          // FUN_00722190 thiscall(): the Swarm effect renderer drawable's node update (vfunc +0x48): rebuilds its bucket draw lists
-    SceneModelFurDraw,        // FUN_006fa0b0 SceneModelFur draw (vfunc +0x18): reads the model handle's current LOD (+0x210, slot +8) without a NULL check
+    SwarmDrawableVtable,      // 0x00FFC248: the Swarm effect renderer drawable; its node update (+0x48, FUN_00722190) rebuilds its bucket draw lists
+    SceneModelFurVtable,      // 0x00FF9B50: SceneModelFur; its draw (+0x18, FUN_006fa0b0) reads the model handle's current LOD (+0x210, slot +8) without a NULL check
     // ---- Object lookup index (features/object_index.cpp; group "ObjectIndex" = ObjectById + these two) ----
     ObjectTreeWalk,           // FUN_00c60d30 thiscall(idLo, idHi, int* visited), ret 0xC: walks the root vector [this+0x9C, this+0xA0)
     ObjectTreeSearch,         // FUN_00c5fa60 cdecl(node, idLo, idHi, int* visited): recursive depth-first search (id at +0x48/+0x4C)

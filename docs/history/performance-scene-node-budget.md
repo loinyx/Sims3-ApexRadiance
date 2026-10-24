@@ -49,5 +49,6 @@ rebuild run by the budgeted copy.
 current LOD slot after an LOD unload). The game's full drain always runs those updates before the draw; a budget that
 leaves the node queued does not.
 
-**Outcome:** past the budget the copy still updates nodes whose update is the Swarm list gather or whose draw is the fur
-draw; the others are deferred as before.
+**Outcome:** past the budget the copy still updates the Swarm renderer drawable and fur models; the others are deferred
+as before. A first version told them apart by the update and draw slots; a test with a crash logger that swaps the
+Swarm update slot for its own stub still showed draws on stale lists, so they are told apart by their vtable.
