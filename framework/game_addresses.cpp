@@ -238,6 +238,8 @@ constexpr Info kInfo[] = {
     {"SceneNodeDtor", 0x006FD930},
     {"SceneAddNode", 0x006E6480},
     {"SceneHolderTeardown", 0x006E4DE0},
+    {"SwarmListGather", 0x00722190},
+    {"SceneModelFurDraw", 0x006FA0B0},
     {"ObjectTreeWalk", 0x00C60D30},
     {"ObjectTreeSearch", 0x00C5FA60},
     {"LotLodScoring", 0x00C6C290},
@@ -611,6 +613,9 @@ const Entry kTable[] = {
     {Id::SceneNodeDtor, K::Sig, W::Text, None, 0, {{"55 8B EC 83 E4 F0 81 EC 94 00 00 00 53 56 57 8B F9 8D 9F 94 01 00 00 C7 07 ?? ?? ?? ?? 39 5B 04 74", 0, M::At}, {"8D 9F 94 01 00 00 C7 07 ?? ?? ?? ?? 39 5B 04 74 ?? 8D 4C 24 10 E8", -17, M::At}}},
     {Id::SceneAddNode, K::Sig, W::Text, None, 0, {{"56 8B 74 24 08 83 7E 30 00 57 8B F9 0F 85 ?? ?? ?? ?? 53 55 E8", 0, M::At}, {"83 7E 30 00 57 8B F9 0F 85 ?? ?? ?? ?? 53 55 E8", -5, M::At}}},
     {Id::SceneHolderTeardown, K::Sig, W::Text, None, 0, {{"53 55 56 57 8B F9 8B 4F 2C 85 C9 74 ?? E8 ?? ?? ?? ?? 8B 77 2C 85 F6 74", 0, M::At}, {"8B 4F 2C 85 C9 74 ?? E8 ?? ?? ?? ?? 8B 77 2C 85 F6 74 ?? 8B CE E8", -6, M::At}}},
+    //      the node updates the budget never defers: the Swarm list gather (tail-jumps MarkDirty) and the fur draw that reads the LOD slot unchecked
+    {Id::SwarmListGather, K::Sig, W::Text, None, 0, {{"56 8B F1 8B 8E 10 02 00 00 56 8D 46 40 50 E8 ?? ?? ?? ?? 8B CE 5E E9", 0, M::At}, NOSIG}},
+    {Id::SceneModelFurDraw, K::Sig, W::Text, None, 0, {{"55 8B EC 83 E4 F0 83 EC 34 53 56 57 8B F9 E8 ?? ?? ?? ?? 8B F0 8B CE 89 74 24 10 E8 ?? ?? ?? ?? 8B 55 0C 8B 42 04 8B D8 8B C8 C1 EB 12", 0, M::At}, NOSIG}},
     // ---- Object lookup index (docs/features/performance.md): the tree walk behind ObjectById ----
     {Id::ObjectTreeWalk, K::Sig, W::Text, None, 0, {{"53 8B 5C 24 08 55 8B 6C 24 10 56 8B F1 8B CB 33 C0 0B CD 74 ?? 8B 96 A0 00 00 00 2B 96 9C 00 00 00 57 33 FF C1 FA 02", 0, M::At}, {"8B 44 24 0C 52 50 E8 ?? ?? ?? ?? 8B F0 85 F6 74 14 8B 16 8B 42 40 8B CE FF D0 83 F8 01", 6, M::Call}}},
     {Id::ObjectTreeSearch, K::Sig, W::Text, None, 0, {{"53 55 56 8B 74 24 10 85 F6 0F 84 ?? ?? ?? ?? 8B 46 48 8B 5C 24 14 3B C3 8B 6C 24 18 75 ?? 8B 4E 4C 3B CD 74", 0, M::At}, {"8B 04 B8 51 55 53 50 E8 ?? ?? ?? ?? 83 C4 10 85 C0 75", 7, M::Call}}},
@@ -769,7 +774,7 @@ const Group kGroups[] = {
                        Id::ResRegisterDbDerived, Id::ResRegisterDbDerivedSlot, Id::ResSetDbPriority, Id::ResSetDbPrioritySlot0, Id::ResSetDbPrioritySlot1, Id::ResDbChanged,
                        Id::ResDbChangedSlot0, Id::ResDbChangedSlot1, Id::ShadowedDbVtable}},
     {"SceneNodeBudget", {Id::SceneDrainCall, Id::SceneDrain, Id::SceneBoundsCall, Id::SceneNodeBounds, Id::SceneSpatialCall, Id::SceneNodeSpatial, Id::SceneNodeDtor,
-                         Id::SceneAddNode, Id::SceneHolderTeardown, Id::CameraRootCall, Id::CameraGetterCall, Id::CameraRootGetter, Id::CameraGetter}},
+                         Id::SceneAddNode, Id::SceneHolderTeardown, Id::SwarmListGather, Id::SceneModelFurDraw, Id::CameraRootCall, Id::CameraGetterCall, Id::CameraRootGetter, Id::CameraGetter}},
     {"ObjectIndex", {Id::ObjectById, Id::ObjectTreeWalk, Id::ObjectTreeSearch}},
     {"RoomLightQueue", {Id::RoomPriorityCall, Id::RoomPriority, Id::LodStepSite, Id::KeepClassA, Id::KeepClassB, Id::RoomPickJump, Id::RoomPick, Id::RoomSolveStep,
                         Id::StopwatchCtor, Id::StopwatchStart, Id::StopwatchElapsed, Id::PriorityLotObject, Id::PriorityLotTest}},
