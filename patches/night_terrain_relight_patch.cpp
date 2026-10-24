@@ -397,6 +397,7 @@ LightingRestartPolicy::Run g_restart;
 bool g_restartRequested = false;
 bool g_restartUnavailable = false;
 bool g_restartFinishing = false;
+bool g_restartPartial = false;
 void PumpLightingRestart();
 // The load is over: the after-load refresh ran (lots and rooms lit again), or 10 s passed since the world went live. With
 // the game's interactive loading (Options.ini enableinteractiveloading = 1) terrain is drawn and the loading window is gone
@@ -1944,6 +1945,7 @@ void PumpLightingRestart() {
         g_restart.Start(GetTickCount());
         g_restartUnavailable = false;
         g_restartFinishing = false;
+        g_restartPartial = false;
         LightmapSmooth::Clear();
         RtOutdoorLamps::RestartLighting();
         g_kickRequested = true;
@@ -1967,7 +1969,9 @@ void PumpLightingRestart() {
     }
     const bool busy = workBusy || ObjectLightBridge::RigRefreshPending() || UnlitRooms::RigRefreshPending();
     if (g_restart.Observe(GetTickCount(), busy)) {
-        LOG_INFO("[NightTerrainRelight] Lighting restart finished: loaded maps are idle and object refresh requests were dispatched");
+        g_restartPartial = RtOutdoorLamps::RestartIncomplete();
+        LOG_INFO(g_restartPartial ? "[NightTerrainRelight] Lighting restart finished with fallback: some areas keep the game's maps" :
+                                   "[NightTerrainRelight] Lighting restart finished: loaded maps are idle and object refresh requests were dispatched");
     }
 }
 
@@ -3518,7 +3522,8 @@ void NightLighting::DrawRefreshCard() {
             if (progress.scheduled < progress.total)
                 ApexUi::MutedText(I18n::Trf("Rebuilding lighting: {} / {} stories queued", progress.scheduled, progress.total).c_str());
             else ApexUi::MutedText("Waiting for lighting calculations");
-        } else if (g_restart.done) ApexUi::MutedText("Lighting restarted");
+        } else if (g_restart.done && g_restartPartial) ApexUi::MutedText("Lighting restarted; some areas use the game's maps");
+        else if (g_restart.done) ApexUi::MutedText("Lighting restarted");
         else if (g_restartUnavailable) ApexUi::MutedText("Lighting restart unavailable");
     }
     ApexUi::EndCard();

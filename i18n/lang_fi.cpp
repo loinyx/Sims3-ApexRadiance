@@ -9,12 +9,16 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Finnish}
 const I18n::Pair kPairs[] = {
+    {"Lighting restarted; some areas use the game's maps", "Valaistus käynnistetty uudelleen; osa alueista käyttää pelin karttoja"},
     {"Restart lighting", "Käynnistä valaistus uudelleen"},
     {"Discard cached lighting and rebuild it without changing settings", "Poistaa välimuistiin tallennetun valaistuksen ja laskee sen uudelleen muuttamatta asetuksia"},
     {"Rebuilding lighting: {} / {} stories queued", "Valaistusta lasketaan: {} / {} kerrosta jonossa"},
     {"Waiting for lighting calculations", "Odotetaan valaistuslaskentaa"},
     {"Lighting restarted", "Valaistus käynnistetty uudelleen"},
     {"Lighting restart unavailable", "Valaistuksen uudelleenkäynnistys ei ole käytettävissä"},
+    {"Restart lighting rebuilds temporary light maps and keeps your settings", "Valaistuksen uudelleenkäynnistys luo väliaikaiset valokartat uudelleen ja säilyttää asetukset"},
+    {"Night Lights: snowy lot edges stay continuous as snow melts", "Yövalaistus: tonttien reunojen valo pysyy yhtenäisenä lumen sulaessa"},
+    {"Performance: effects and animal fur update safely while lots load", "Suorituskyky: tehosteet ja eläinten turkit päivittyvät turvallisesti tonttien latautuessa"},
     {"Night Lights: gables and upper trim keep continuous lamp light", "Yövalaistus: päädyt ja ylälistat saavat yhtenäisen lampunvalon"},
     {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Yövalaistus: matalat pylväät ja portaat huomioivat lamppujen alla olevat umpinaiset lattiat"},
 
@@ -779,6 +783,7 @@ const I18n::Pair kPairs[] = {
     {"Sims3SettingsSetter by sims3fiend: project origin and framework reference.", "sims3fiendin Sims3SettingsSetter: projektin alkuperä ja kehyksen esikuva."},
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11: Timothy Lottes (NVIDIA)."},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "Tonttien suoratoisto ja päiväajan hehkun korjaukset: tutkimus ja koodi @idavidveiga."},
+    {"Scene update safety: contribution by @rodneypantonial.", "Turvalliset näkymäpäivitykset: @rodneypantonial."},
     {"Thanks to @boringbones for testing every build.", "Kiitos @boringbones jokaisen version testaamisesta."},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "Yläkerrosten maavalo: Arron tekniikka, sovitettu Apex Radianceen."},

@@ -445,6 +445,11 @@ struct Ask {
 std::vector<std::unique_ptr<Slot>> g_slots;
 uintptr_t g_tracker = 0;
 uint64_t g_lotId = 0;
+// A completed native solve with no remaining send is an explicit fallback, not queued GPU work.
+bool RestartSolveTerminal(const Ask& ask, int state, bool budgetOut) {
+    return (state == 4 || state == 5) && (budgetOut || (ask.count >= kSolveAsks && ask.logged));
+}
+bool g_restartGpuPending = false, g_restartGpuFallback = false;
 std::unordered_map<const void*, Ask> g_askedSolve; // room -> its sends to its solve for a kept solve
 std::unordered_map<const IDirect3DBaseTexture9*, Slot*> g_swap; // the game's map -> its slot (the SetTexture swap; render thread)
 uintptr_t g_swapLo = ~uintptr_t{0}, g_swapHi = 0;               // the address range of its keys (most binds end at this test)
@@ -979,6 +984,8 @@ void ReadGpuTime() {
 }
 
 void Frame(IDirect3DDevice9* dev) {
+    g_restartGpuPending = false;
+    g_restartGpuFallback = false;
     ReadGpuTime();
     // what makes the option do nothing now, logged once each
     if (!g_option.load(std::memory_order_relaxed)) {
@@ -1083,6 +1090,7 @@ void Frame(IDirect3DDevice9* dev) {
         proxyWhy = g_proxyWhy;
     }
     if (!proxy) {
+        g_restartGpuPending = true;
         g_proxyWanted.store(tracker);
         g_on.store(false);
         Inactive("waiting for the lot's occluders (built on the light tree thread at its next room update or room-0 solve)" +
@@ -1098,6 +1106,11 @@ void Frame(IDirect3DDevice9* dev) {
                 } else if (a.count >= kSolveAsks && !a.logged) {
                     a.logged = true;
                     LOG_INFO(std::format("[RtOutdoorLamps] Story {} room 0 sent to its solve {} times with no occluders read: no more sends (idle until the lot's next room update)", S, kSolveAsks));
+                }
+                RoomNow current;
+                if (ReadRoomNow(static_cast<const BYTE*>(room), current) && RestartSolveTerminal(a, current.state, false)) {
+                    g_restartGpuPending = false;
+                    g_restartGpuFallback = true;
                 }
                 break;
             }
@@ -1200,6 +1213,10 @@ void Frame(IDirect3DDevice9* dev) {
                                      "edits go through the game's solve until it keeps one",
                                      S, cls, g_budgetOut ? "the lot's kept parts overflow the memory budget" : std::format("sent {} times", kSolveAsks)));
             }
+            if (!(had && all)) {
+                if (RestartSolveTerminal(a, rn.state, g_budgetOut)) g_restartGpuFallback = true;
+                else g_restartGpuPending = true;
+            }
             continue;
         }
         // the slots of this story: built again when its kept base or its class changed (prepared on a worker thread, then
@@ -1217,6 +1234,7 @@ void Frame(IDirect3DDevice9* dev) {
             uintptr_t setAt = 0;
             if (slot && !slot->built && slot->retryAt && static_cast<int32_t>(GetTickCount() - slot->retryAt) < 0) { // (an upload's backoff)
                 covered = false;
+                g_restartGpuPending = true;
                 continue;
             }
             needs[m] = !(slot && slot->built && slot->version == ver && (!slot->used || OwnMap(room, cls, kSetIdx[m], setAt) == slot->game));
@@ -1228,6 +1246,7 @@ void Frame(IDirect3DDevice9* dev) {
             if (jit != g_jobs.end() && (*jit)->state.load() != 1) g_jobs.erase(jit);
             continue;
         }
+        g_restartGpuPending = true; // includes preparation/export backoff without an in-flight job
         if (jit != g_jobs.end() && (*jit)->state.load() != 1 && ((*jit)->cls != cls || (*jit)->ver != ver)) { // (stale: the base changed again)
             g_jobs.erase(jit);
             jit = g_jobs.end();
@@ -2046,10 +2065,19 @@ void OnWorldChanged() {
 }
 
 void RestartLighting() { g_restartRequested = true; }
+bool RestartIncomplete() {
+    if (!g_option.load(std::memory_order_relaxed) || !g_watch.load(std::memory_order_relaxed) || !g_jobs.empty() || g_restartGpuPending) return false;
+    if (std::any_of(g_slots.begin(), g_slots.end(), [](const auto& slot) { return slot->used && slot->built && slot->ok && !slot->relit; })) return false;
+    if (g_restartGpuFallback) return true;
+    if (std::any_of(g_slots.begin(), g_slots.end(), [](const auto& slot) { return slot->used && slot->built && !slot->ok; })) return true;
+    std::lock_guard<std::mutex> lock(g_coverMx);
+    return g_budgetOut && !g_cover.full;
+}
 bool RestartPending() {
     if (g_restartRequested) return true;
+    if (RestartIncomplete()) return false;
     if (!g_option.load(std::memory_order_relaxed) || !g_watch.load(std::memory_order_relaxed)) return false;
-    if (!g_jobs.empty() || !g_proxyUsed || !g_on.load(std::memory_order_relaxed)) return true;
+    if (g_restartGpuPending || !g_jobs.empty() || !g_proxyUsed || !g_on.load(std::memory_order_relaxed)) return true;
     if (std::any_of(g_slots.begin(), g_slots.end(), [](const auto& slot) { return slot->used && !slot->relit; })) return true;
     std::lock_guard<std::mutex> lock(g_coverMx);
     return !g_cover.full;

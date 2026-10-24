@@ -110,6 +110,7 @@ void Test() {
 namespace Coordinator {
 LightingRestartPolicy::Run g_restart;
 bool g_restartRequested=false,g_restartUnavailable=false,g_restartFinishing=false,g_live=true;
+bool g_restartPartial=false;
 std::atomic<bool> g_kickRequested{false};
 int g_rebuildId=0,g_sweepId=0;
 std::string g_pendingReason;
@@ -126,9 +127,10 @@ void StopLightingRestart() {++stops;}
 namespace LightmapSmooth {unsigned clears=0;void Clear() {++clears;}bool HoldPending() {return false;}}
 namespace ChunkRelight {bool Busy() {return false;}}
 namespace RtOutdoorLamps {
-unsigned resets=0;bool pending=false;
+unsigned resets=0;bool pending=false,incomplete=false;
 void RestartLighting() {++resets;pending=true;}
-bool RestartPending() {return pending;}
+bool RestartPending() {return pending && !incomplete;}
+bool RestartIncomplete() {return incomplete;}
 }
 namespace ObjectLightBridge {
 bool pending=false;void RequestRigRefresh() {pending=true;}bool RigRefreshPending() {return pending;}
@@ -153,10 +155,58 @@ void Test() {
     Check(g_restart.done && !g_restart.active,"completion follows idle maps and dispatched object refresh");
     g_restart.Start(7000);WorldSession::live=false;PumpLightingRestart();
     Check(g_restart.interrupted && LevelLightShare::stops==1 && !g_restart.done,"leaving the world stops room dispatch without claiming success");
+    WorldSession::live=true;g_restart.Start(7000);RtOutdoorLamps::incomplete=true;RtOutdoorLamps::pending=true;
+    tick=8000;PumpLightingRestart();
+    ObjectLightBridge::pending=UnlitRooms::pending=false;
+    tick=9000;PumpLightingRestart();
+    Check(g_restart.done && g_restartPartial && !g_restart.active,"terminal fallback finishes with an explicit partial outcome");
+}
+}
+namespace Fallback {
+constexpr int kSolveAsks=3;
+struct Slot {bool used=true,built=true,ok=true,relit=true;};
+std::vector<std::unique_ptr<Slot>> g_slots;
+std::vector<int> g_jobs;
+std::atomic<bool> g_option{true},g_watch{true},g_on{true};
+bool g_restartRequested=false,g_budgetOut=false,g_proxyUsed=true;
+struct Cover {bool full=true;} g_cover;
+std::mutex g_coverMx;
+#include "fallback_extracted.h"
+void Test() {
+    g_slots.push_back(std::make_unique<Slot>());
+    Check(!RestartIncomplete() && !RestartPending(),"covered ready maps are idle");
+    g_budgetOut=true;g_cover.full=false;
+    Check(RestartIncomplete() && !RestartPending(),"memory-budget fallback is not endless queued work");
+    g_jobs.push_back(1);Check(!RestartIncomplete() && RestartPending(),"in-flight work remains pending even with fallback");g_jobs.clear();
+    g_budgetOut=false;g_slots[0]->ok=false;
+    Check(RestartIncomplete() && !RestartPending(),"permanent prepared-map failure is terminal fallback");
+    g_slots[0]->built=false;Check(!RestartIncomplete() && RestartPending(),"a retryable upload remains pending");
+    g_slots[0]->built=true;
+    g_slots.push_back(std::make_unique<Slot>());g_slots[1]->built=false;g_slots[1]->relit=false;
+    g_restartGpuPending=true;
+    Check(!RestartIncomplete() && RestartPending(),"a failed slot cannot hide another story upload backoff");
+    g_slots[1]->built=true;g_slots[1]->relit=false;g_restartGpuPending=false;
+    Check(!RestartIncomplete() && RestartPending(),"a terminal slot cannot hide another map waiting for relight");
+    g_slots[1]->built=g_slots[1]->relit=true;g_restartGpuPending=false;
+    Check(RestartIncomplete() && !RestartPending(),"fallback becomes terminal only after recoverable work ends");
+    g_slots.clear();g_on=false;g_proxyUsed=false;g_cover.full=false;g_restartGpuFallback=true;
+    Check(RestartIncomplete() && !RestartPending(),"exhausted proxy sends finish partially even without a slot");
+    g_restartGpuPending=true;
+    Check(!RestartIncomplete() && RestartPending(),"a native solve in flight still blocks exhausted proxy sends");
+    g_restartGpuPending=false;g_proxyUsed=true;
+    Check(RestartIncomplete() && !RestartPending(),"exhausted kept-solve sends finish partially without a slot");
+    g_restartGpuFallback=false;
+    Check(!RestartIncomplete() && RestartPending(),"a new attempt rearms pending work after fallback");
+    Ask ask;ask.count=3;ask.logged=true;
+    for(int state=0;state<6;state++)Check(RestartSolveTerminal(ask,state,false)==(state==4||state==5),"exhausted sends wait for a completed native solve");
+    ask.logged=false;Check(!RestartSolveTerminal(ask,4,false),"the final dispatched request is not terminal yet");
+    ask.count=0;Check(RestartSolveTerminal(ask,4,true),"memory budget uses the native completed solve as fallback");
+    Check(!RestartSolveTerminal(ask,0,true),"memory budget does not finish a native solve early");
+    g_watch=false;Check(!RestartIncomplete() && !RestartPending(),"inactive GPU path keeps the native solve behavior");
 }
 }
 int main() {
-    Rooms::Test();ProxyCheck::Test();Coordinator::Test();
+    Rooms::Test();ProxyCheck::Test();Coordinator::Test();Fallback::Test();
     LightingRestartPolicy::Run run;
     Check(run.Start(100),"idle restart starts");
     Check(!run.Start(200),"active restart coalesces clicks");

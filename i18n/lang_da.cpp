@@ -9,12 +9,16 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Danish}
 const I18n::Pair kPairs[] = {
+    {"Lighting restarted; some areas use the game's maps", "Belysningen er genstartet; nogle områder bruger spillets kort"},
     {"Restart lighting", "Genstart belysning"},
     {"Discard cached lighting and rebuild it without changing settings", "Kasserer gemt belysning og genberegner den uden at ændre indstillingerne"},
     {"Rebuilding lighting: {} / {} stories queued", "Genberegner belysning: {} / {} etager i kø"},
     {"Waiting for lighting calculations", "Venter på lysberegninger"},
     {"Lighting restarted", "Belysningen er genstartet"},
     {"Lighting restart unavailable", "Genstart af belysning er ikke tilgængelig"},
+    {"Restart lighting rebuilds temporary light maps and keeps your settings", "Genstart af belysning gendanner midlertidige lyskort og bevarer dine indstillinger"},
+    {"Night Lights: snowy lot edges stay continuous as snow melts", "Natbelysning: lyset ved grundenes kanter forbliver jævnt, når sneen smelter"},
+    {"Performance: effects and animal fur update safely while lots load", "Ydeevne: effekter og dyrepels opdateres sikkert, mens grunde indlæses"},
     {"Night Lights: gables and upper trim keep continuous lamp light", "Natbelysning: gavle og øverste lister får sammenhængende lampelys"},
     {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Natbelysning: lave søjler og trapper tager højde for faste gulve under lamper"},
 
@@ -779,6 +783,7 @@ const I18n::Pair kPairs[] = {
     {"Sims3SettingsSetter by sims3fiend: project origin and framework reference.", "Sims3SettingsSetter af sims3fiend: projektets oprindelse og framework-reference."},
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11: Timothy Lottes (NVIDIA)."},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "Grundestreaming og rettelserne af bloom om dagen: research og kode af @idavidveiga."},
+    {"Scene update safety: contribution by @rodneypantonial.", "Sikre sceneopdateringer: bidrag fra @rodneypantonial."},
     {"Thanks to @boringbones for testing every build.", "Tak til @boringbones for at teste hver eneste build."},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "Jordlys fra øvre etager: Arros teknik, tilpasset i Apex Radiance."},

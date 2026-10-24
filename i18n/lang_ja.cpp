@@ -9,12 +9,16 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Japanese}
 const I18n::Pair kPairs[] = {
+    {"Lighting restarted; some areas use the game's maps", "照明を再起動しました。一部のエリアではゲームの光照明マップを使います"},
     {"Restart lighting", "照明を再起動"},
     {"Discard cached lighting and rebuild it without changing settings", "キャッシュされた照明を破棄し、設定を変えずに再計算します"},
     {"Rebuilding lighting: {} / {} stories queued", "照明を再計算中：{} / {} 階を登録済み"},
     {"Waiting for lighting calculations", "照明の計算を待っています"},
     {"Lighting restarted", "照明を再起動しました"},
     {"Lighting restart unavailable", "照明を再起動できません"},
+    {"Restart lighting rebuilds temporary light maps and keeps your settings", "照明の再起動で一時的なライトマップを再構築し、設定は維持します"},
+    {"Night Lights: snowy lot edges stay continuous as snow melts", "夜間照明: 雪解け中も区画の境界で光が途切れません"},
+    {"Performance: effects and animal fur update safely while lots load", "パフォーマンス: 区画の読み込み中もエフェクトと動物の毛を安全に更新します"},
     {"Night Lights: gables and upper trim keep continuous lamp light", "夜間照明：切妻と上部の縁取りにランプの光が途切れず当たります"},
     {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "夜間照明：低い柱と階段がランプの下の隙間のない床を考慮します"},
 
@@ -779,6 +783,7 @@ const I18n::Pair kPairs[] = {
     {"Sims3SettingsSetter by sims3fiend: project origin and framework reference.", "sims3fiend作のSims3SettingsSetter: プロジェクトの起源、フレームワークの参考。"},
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11: Timothy Lottes（NVIDIA）。"},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "区画ストリーミングと昼間のブルームの修正: @idavidveigaによる調査とコード。"},
+    {"Scene update safety: contribution by @rodneypantonial.", "シーン更新の安全性向上: @rodneypantonial による貢献。"},
     {"Thanks to @boringbones for testing every build.", "すべてのビルドをテストしてくれた@boringbonesに感謝します。"},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD（MIT）。"},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "上の階からの地面ライト: Arroの手法をApex Radianceで応用。"},

@@ -9,12 +9,16 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Russian}
 const I18n::Pair kPairs[] = {
+    {"Lighting restarted; some areas use the game's maps", "Освещение перезапущено; некоторые области используют карты игры"},
     {"Restart lighting", "Перезапустить освещение"},
     {"Discard cached lighting and rebuild it without changing settings", "Удаляет сохранённое освещение и пересчитывает его без изменения настроек"},
     {"Rebuilding lighting: {} / {} stories queued", "Пересчёт освещения: {} / {} этажей в очереди"},
     {"Waiting for lighting calculations", "Ожидание расчётов освещения"},
     {"Lighting restarted", "Освещение перезапущено"},
     {"Lighting restart unavailable", "Перезапуск освещения недоступен"},
+    {"Restart lighting rebuilds temporary light maps and keeps your settings", "Перезапуск освещения перестраивает временные карты света и сохраняет настройки"},
+    {"Night Lights: snowy lot edges stay continuous as snow melts", "Ночное освещение: свет на границах участков остаётся плавным при таянии снега"},
+    {"Performance: effects and animal fur update safely while lots load", "Производительность: эффекты и шерсть животных безопасно обновляются при загрузке участков"},
     {"Night Lights: gables and upper trim keep continuous lamp light", "Ночное освещение: фронтоны и верхние карнизы получают непрерывный свет ламп"},
     {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Ночное освещение: низкие столбы и лестницы учитывают сплошные перекрытия под лампами"},
 
@@ -779,6 +783,7 @@ const I18n::Pair kPairs[] = {
     {"Sims3SettingsSetter by sims3fiend: project origin and framework reference.", "Sims3SettingsSetter от sims3fiend: исток проекта и образец архитектуры."},
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11: Timothy Lottes (NVIDIA)."},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "Подгрузка участков и исправления дневного свечения: исследование и код от @idavidveiga."},
+    {"Scene update safety: contribution by @rodneypantonial.", "Безопасное обновление сцены: вклад @rodneypantonial."},
     {"Thanks to @boringbones for testing every build.", "Спасибо @boringbones за тестирование каждой сборки."},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "Свет на земле с верхних этажей: техника Arro, адаптированная в Apex Radiance."},

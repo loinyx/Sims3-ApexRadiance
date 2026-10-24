@@ -9,12 +9,16 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Czech}
 const I18n::Pair kPairs[] = {
+    {"Lighting restarted; some areas use the game's maps", "Osvětlení restartováno; některé oblasti používají mapy hry"},
     {"Restart lighting", "Restartovat osvětlení"},
     {"Discard cached lighting and rebuild it without changing settings", "Zahodí uložené osvětlení a přepočítá ho beze změny nastavení"},
     {"Rebuilding lighting: {} / {} stories queued", "Přepočet osvětlení: {} / {} podlaží ve frontě"},
     {"Waiting for lighting calculations", "Čeká se na výpočty osvětlení"},
     {"Lighting restarted", "Osvětlení restartováno"},
     {"Lighting restart unavailable", "Restart osvětlení není dostupný"},
+    {"Restart lighting rebuilds temporary light maps and keeps your settings", "Restart osvětlení obnoví dočasné světelné mapy a zachová nastavení"},
+    {"Night Lights: snowy lot edges stay continuous as snow melts", "Noční osvětlení: světlo na okrajích parcel zůstává plynulé i při tání sněhu"},
+    {"Performance: effects and animal fur update safely while lots load", "Výkon: efekty a srst zvířat se při načítání parcel aktualizují bezpečně"},
     {"Night Lights: gables and upper trim keep continuous lamp light", "Noční osvětlení: štíty a horní římsy mají souvislé světlo lamp"},
     {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Noční osvětlení: nízké pilíře a schody respektují plné podlahy pod lampami"},
 
@@ -779,6 +783,7 @@ const I18n::Pair kPairs[] = {
     {"Sims3SettingsSetter by sims3fiend: project origin and framework reference.", "Sims3SettingsSetter od sims3fiend: původ projektu a vzor frameworku."},
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11: Timothy Lottes (NVIDIA)."},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "Streamování parcel a opravy denního bloomu: výzkum a kód od @idavidveiga."},
+    {"Scene update safety: contribution by @rodneypantonial.", "Bezpečné aktualizace scény: příspěvek od @rodneypantonial."},
     {"Thanks to @boringbones for testing every build.", "Díky @boringbones za testování každého sestavení."},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "Světlo na zemi z horních pater: technika od Arro, upravená v Apex Radiance."},

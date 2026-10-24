@@ -16,6 +16,8 @@ $parts=@((Slice $level 'struct RestartStory {' 'void RefreshCompletedLotRigs()')
 Set-Content -LiteralPath (Join-Path $OutDir 'restart_extracted.h') -Value ($parts -join "`n") -Encoding UTF8
 Set-Content -LiteralPath (Join-Path $OutDir 'proxy_extracted.h') -Value (Slice $gpu 'void BuildProxy(uintptr_t tracker, const void* room0) {' "`n} // namespace") -Encoding UTF8
 Set-Content -LiteralPath (Join-Path $OutDir 'coordinator_extracted.h') -Value (Slice $patch 'void PumpLightingRestart() {' '// ---- menu helpers ----') -Encoding UTF8
+$fallback=@((Slice $gpu 'struct Ask {' 'std::vector<std::unique_ptr<Slot>> g_slots;'),(Slice $gpu 'bool RestartSolveTerminal(' 'std::unordered_map<const void*, Ask> g_askedSolve;'),(Slice $gpu 'bool RestartIncomplete() {' '// ---- the light tree thread ----'))
+Set-Content -LiteralPath (Join-Path $OutDir 'fallback_extracted.h') -Value ($fallback -join "`n") -Encoding UTF8
 . (Join-Path $repo 'tools/terrain_lighting_test/compiler_env.ps1')
 Initialize-TerrainCompiler
 Push-Location -LiteralPath $OutDir

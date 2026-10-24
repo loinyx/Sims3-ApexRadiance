@@ -2879,6 +2879,7 @@ void AboutTab() {
         CreditLine("FidelityFX CAS: AMD (MIT).");
         CreditLine("Upper-floor ground light: Arro's technique, adapted in Apex Radiance.");
         CreditLine("Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.");
+        CreditLine("Scene update safety: contribution by @rodneypantonial.");
         CreditLine("Thanks to @boringbones for testing every build.");
         CreditLine("Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).");
     }

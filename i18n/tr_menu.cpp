@@ -11,6 +11,9 @@ namespace {
 
 // {English (exactly as in the code), Portuguese (Brazil), Spanish, French}
 const I18n::Entry kEntries[] = {
+    {"Restart lighting rebuilds temporary light maps and keeps your settings", "Reiniciar iluminação refaz os mapas temporários e mantém suas configurações", "Reiniciar iluminación reconstruye los mapas temporales y conserva tus ajustes", "Réinitialiser l’éclairage recrée les cartes temporaires et conserve vos réglages"},
+    {"Night Lights: snowy lot edges stay continuous as snow melts", "Iluminação noturna: a luz nas bordas dos lotes continua uniforme durante o degelo", "Luces nocturnas: los bordes de solares mantienen la luz uniforme durante el deshielo", "Éclairage nocturne : la lumière aux limites des terrains reste uniforme pendant la fonte"},
+    {"Performance: effects and animal fur update safely while lots load", "Desempenho: efeitos e pelos dos animais se atualizam com segurança durante o carregamento dos lotes", "Rendimiento: efectos y pelaje se actualizan con seguridad mientras cargan los solares", "Performances : effets et pelages se mettent à jour sans risque pendant le chargement des terrains"},
     {"Night Lights: gables and upper trim keep continuous lamp light", "Luzes noturnas: empenas e acabamentos superiores recebem luz contínua das lâmpadas", "Luces nocturnas: hastiales y remates superiores reciben luz continua de las lámparas", "Éclairage nocturne : pignons et bordures supérieures gardent une lumière continue"},
     {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Luzes noturnas: pilares baixos e escadas respeitam pisos sólidos sob as lâmpadas", "Luces nocturnas: pilares bajos y escaleras respetan los suelos sólidos bajo las lámparas", "Éclairage nocturne : piliers bas et escaliers respectent les planchers pleins sous les lampes"},
 
@@ -974,6 +977,7 @@ const I18n::Entry kEntries[] = {
      "Sims3SettingsSetter, par sims3fiend : origine du projet et référence pour le framework."},
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11 : Timothy Lottes (NVIDIA)."},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "Carregamento de lotes e as correções do brilho de dia: pesquisa e código de @idavidveiga.", "Carga de lotes y las correcciones del resplandor de día: investigación y código de @idavidveiga.", "Chargement des terrains et les corrections du halo de jour : recherche et code de @idavidveiga."},
+    {"Scene update safety: contribution by @rodneypantonial.", "Segurança na atualização da cena: contribuição de @rodneypantonial.", "Seguridad en las actualizaciones de la escena: contribución de @rodneypantonial.", "Sécurité des mises à jour de la scène : contribution de @rodneypantonial."},
     {"Thanks to @boringbones for testing every build.", "Obrigado a @boringbones por testar cada build.", "Gracias a @boringbones por probar cada build.", "Merci à @boringbones d'avoir testé chaque build."},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT).", "FidelityFX CAS : AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.",
@@ -1441,6 +1445,7 @@ const I18n::Table kDeveloperCounterTable(kDeveloperCounterEntries, std::size(kDe
 
 namespace {
 const I18n::Entry kRefreshLightingCardEntries[] = {
+    {"Lighting restarted; some areas use the game's maps", "Iluminação reiniciada; algumas áreas usam os mapas do jogo", "Iluminación reiniciada; algunas zonas usan los mapas del juego", "Éclairage réinitialisé ; certaines zones utilisent les cartes du jeu"},
     {"Restart lighting", "Reiniciar iluminação", "Reiniciar iluminación", "Réinitialiser l’éclairage"},
     {"Discard cached lighting and rebuild it without changing settings", "Descarta a iluminação em cache e a recalcula sem alterar suas configurações", "Descarta la iluminación en caché y la recalcula sin cambiar los ajustes", "Supprime l’éclairage en cache et le recalcule sans modifier les réglages"},
     {"Rebuilding lighting: {} / {} stories queued", "Refazendo iluminação: {} / {} andares na fila", "Recalculando iluminación: {} / {} plantas en cola", "Calcul de l’éclairage : {} / {} étages en attente"},

@@ -45,6 +45,7 @@ void OnWorldChanged();
 // Old proxy builds cannot publish into the new generation.
 void RestartLighting();
 bool RestartPending();
+bool RestartIncomplete(); // terminal map fallback, rather than work still running
 
 // ---- the light tree thread (LevelLightShare's and LampMarkFilter's hooks) ----
 // The lamp entry update of `light` (registered in `room` of tree level `treeLevel`): true = the GPU draws it on every story

@@ -9,12 +9,16 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Dutch}
 const I18n::Pair kPairs[] = {
+    {"Lighting restarted; some areas use the game's maps", "Verlichting herstart; sommige gebieden gebruiken de lichtkaarten van het spel"},
     {"Restart lighting", "Verlichting herstarten"},
     {"Discard cached lighting and rebuild it without changing settings", "Verwijdert opgeslagen verlichting en berekent deze opnieuw zonder instellingen te wijzigen"},
     {"Rebuilding lighting: {} / {} stories queued", "Verlichting berekenen: {} / {} verdiepingen ingepland"},
     {"Waiting for lighting calculations", "Wachten op verlichtingsberekeningen"},
     {"Lighting restarted", "Verlichting herstart"},
     {"Lighting restart unavailable", "Verlichting herstarten niet beschikbaar"},
+    {"Restart lighting rebuilds temporary light maps and keeps your settings", "Verlichting herstarten bouwt tijdelijke lichtkaarten opnieuw op en behoudt je instellingen"},
+    {"Night Lights: snowy lot edges stay continuous as snow melts", "Nachtverlichting: licht langs kavelranden blijft gelijkmatig terwijl de sneeuw smelt"},
+    {"Performance: effects and animal fur update safely while lots load", "Prestaties: effecten en dierenvachten worden veilig bijgewerkt terwijl kavels laden"},
     {"Night Lights: gables and upper trim keep continuous lamp light", "Nachtverlichting: geveltoppen en bovenranden krijgen doorlopend lamplicht"},
     {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Nachtverlichting: lage pilaren en trappen houden rekening met dichte vloeren onder lampen"},
 
@@ -779,6 +783,7 @@ const I18n::Pair kPairs[] = {
     {"Sims3SettingsSetter by sims3fiend: project origin and framework reference.", "Sims3SettingsSetter van sims3fiend: oorsprong van het project en referentie voor het framework."},
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11: Timothy Lottes (NVIDIA)."},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "Kavelstreaming en de oplossingen voor bloom overdag: onderzoek en code door @idavidveiga."},
+    {"Scene update safety: contribution by @rodneypantonial.", "Veilige scène-updates: bijdrage van @rodneypantonial."},
     {"Thanks to @boringbones for testing every build.", "Met dank aan @boringbones voor het testen van elke build."},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "Grondlicht van hogere verdiepingen: Arro's techniek, aangepast in Apex Radiance."},
