@@ -9,7 +9,8 @@
 // (measured once: 2224 nodes, 2.84 ms in one frame).
 // While the camera moves this feature answers that one CALL (0x006EBC49) with an exact copy of the game's loop that stops
 // after `nodesPerFrame` nodes or `msPerFrame` ms; the rest goes back to the tail of the scene's own list and is processed
-// first the next frames; once the oldest waiting node waited `maxDeferMs` the budget doubles every 50 ms (up to x64). When
+// first the next frames, except nodes whose draw this frame depends on their update (the Swarm effect lists, fur models:
+// always updated; scene_budget.cpp, "Draw state"); once the oldest waiting node waited `maxDeferMs` the budget doubles every 50 ms (up to x64). When
 // the camera is still, when nothing was left, or when it waited 3 x `maxDeferMs`, the game's own drain runs (all nodes). Effect: an object can appear, or finish moving in the culling tree,
 // one or a few frames later while the camera moves; nothing is skipped.
 //
@@ -57,6 +58,7 @@ struct Stats {
     uint64_t framesLeft = 0;     // budgeted frames that left nodes for later
     uint64_t nodesBudgeted = 0;  // nodes processed by the budgeted copy
     uint64_t nodesLeft = 0;      // sum over budgeted frames of the nodes left
+    uint64_t drawState = 0;      // nodes updated past the budget because their draw needs it (Swarm lists, fur LOD)
     uint32_t maxLeft = 0;        // largest backlog seen
     uint32_t lastDone = 0, lastLeft = 0;
     float lastMs = 0.0f;         // time of the last budgeted drain

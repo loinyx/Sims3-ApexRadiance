@@ -50,6 +50,19 @@
 //   in their order, and the remainder is spliced back at the TAIL of the holder's list (where the drain takes from), so they
 //   are processed first next frame and stay queued exactly as the game would have them: RemoveNode unlinks them, MarkDirty
 //   sees them as queued, any other drain processes them.
+//   Draw state (issue #37): two kinds of node are drawn every frame from state that only their update refreshes, so the
+//   game relies on BeginFrame draining them before the passes draw. The Swarm effect renderer drawable (update 0x00722190
+//   rebuilds its bucket draw lists from the entry array; a remove 0x0071FF10 blanks an entry and leaves the lists
+//   pointing at it, then the draw 0x0071D440 writes through the blanked entry: access violation at 0x0071D56E) and the
+//   SceneModelFur (an LOD unload 0x006DBCE0 empties the model handle's current LOD slot and MarkDirty queues the node;
+//   its update 0x006F7B40 refills the slot or clears the draw flags; the fur draw 0x006FA0B0 reads the slot without a
+//   NULL check: access violation at 0x006C93D0). VERIFIED in the disassembly; that these two stale-state crashes come from
+//   the deferral is INFERRED from crash logs (the Swarm one: last gather by this copy, removes after it). Past the budget
+//   the copy keeps walking the rest and still updates every node of these two classes, in the game's order; the others are
+//   moved, in order, to a second local list and go back as before. The two are told by their vtable (0x00FFC248, 0x00FF9B50),
+//   not by a slot's content: another module that swaps the update or draw slot for its own stub (a profiler, a crash
+//   logger) leaves the vtable as it is, and a slot compare would then miss every such node. The Swarm drawable is queued
+//   again by its own update every frame and fur models are few, so the budget is unchanged for ordinary nodes.
 //   The rule: camera still -> the game's drain; camera moving -> the budgeted copy; once a node waited maxDeferMs the budget
 //   grows every frame (x2, x4 ... x64, doubling every kGrowStepMs) instead of the whole backlog at once (05/10: the forced full
 //   drain was a single long frame in the middle of a camera move); a node waited kHardFactor x maxDeferMs -> the game's drain
@@ -150,6 +163,8 @@ bool g_started = false;
 std::atomic<bool> g_on{false};
 std::atomic<bool> g_stopped{false}; // a safety check failed: the game's drain from then on (sticky until the game restarts)
 uintptr_t g_drainFn = 0;
+uintptr_t g_swarmVtable = 0; // 0x00FFC248: nodes whose update must not wait (see "Draw state" above)
+uintptr_t g_furVtable = 0;   // 0x00FF9B50: same
 FnBounds g_bounds = nullptr;   // 0x006FB4B0
 FnSpatial g_spatial = nullptr; // 0x006FAD70
 std::atomic<DWORD> g_drainThread{0};
@@ -219,6 +234,7 @@ struct Counter {
 };
 Counter c_grown;
 Counter c_calls, c_fullStill, c_fullForced, c_budgeted, c_framesLeft, c_nodesBudgeted, c_nodesLeft;
+Counter c_drawState; // nodes updated past the budget because their draw this frame needs it
 Counter c_dtorUnlinked, c_addUnlinked, c_teardownDropped, c_otherThread, c_foreignOwner, c_repaired;
 std::atomic<uint32_t> g_maxLeft{0}, g_lastDone{0}, g_lastLeft{0};
 std::atomic<float> g_lastMs{0.0f};
@@ -465,6 +481,17 @@ void UpdateTail(Link* local, uint32_t* counter, float* bounds) {
     *counter += 1;
 }
 
+// True when the node's draw this frame depends on its update (see "Draw state" in the header comment); reads only, and an
+// unreadable node is left to the development checks (no C++ objects here: SEH)
+bool MustNotWait(const uint8_t* node) {
+    __try {
+        const uintptr_t vtable = *reinterpret_cast<const uintptr_t*>(node);
+        return vtable == g_swarmVtable || vtable == g_furVtable;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 // Room for `count` more records, in the local list and in the registry; false (noted) when there is no memory for them
 bool ReserveRecords(std::vector<Link*>& rest, uint32_t count) {
     try {
@@ -500,11 +527,25 @@ uint32_t BudgetedDrain(uint8_t* holder, uint32_t cap, int64_t deadline, uint32_t
     *counter = 0;
     uint32_t done = 0;
     alignas(16) float bounds[8] = {}; // 0x006FB4B0 stores two aligned xmm into it
+    // Past the budget, nodes that may wait move here (each to the front, so the list keeps their order); a live list like
+    // the local one, so RemoveNode can still unlink them; spliced back after the local list below
+    Link keep{&keep, &keep};
+    bool over = false;
     // the loop (0x006E41A6..0x006E41F8), newest first; local.prev is re-read after every node (game code may unlink others)
     while (local.prev != &local) {
-        if (done >= kMinNodes && (done >= cap || Qpc() >= deadline)) break;
         Link* const l = local.prev;
         uint8_t* const node = reinterpret_cast<uint8_t*>(l) - kLinkOff;
+        if (!over && done >= kMinNodes && (done >= cap || Qpc() >= deadline)) over = true;
+        if (over && !MustNotWait(node)) {
+            Link* const p = l->prev;
+            p->next = &local;
+            local.prev = p;
+            l->prev = &keep;
+            l->next = keep.next;
+            keep.next->prev = l;
+            keep.next = l;
+            continue;
+        }
         if (!kPublicBuild) {
             uintptr_t vt = 0;
             const bool linked = LinkConsistent(l) && l->next == &local; // l is the tail: its next is our sentinel
@@ -528,6 +569,14 @@ uint32_t BudgetedDrain(uint8_t* holder, uint32_t cap, int64_t deadline, uint32_t
         }
         UpdateTail(&local, counter, bounds);
         done++;
+        if (over) c_drawState.Add();
+    }
+    if (keep.next != &keep) { // after what a failed check left in the local list: the original order
+        Link* const t = local.prev;
+        t->next = keep.next;
+        keep.next->prev = t;
+        keep.prev->next = &local;
+        local.prev = keep.prev;
     }
     // 07/10, players' Runtime Error: the records of the nodes left need memory, taken before anything goes back to the
     // holder. Without it this drain ends as the game's own does: every node processed, nothing left to record (after a
@@ -702,6 +751,7 @@ bool Start(std::string* error) {
     const uintptr_t bounds = GameAddr::Get(GameAddr::Id::SceneNodeBounds), spatial = GameAddr::Get(GameAddr::Id::SceneNodeSpatial);
     const uintptr_t dtor = GameAddr::Get(GameAddr::Id::SceneNodeDtor), addNode = GameAddr::Get(GameAddr::Id::SceneAddNode);
     const uintptr_t teardown = GameAddr::Get(GameAddr::Id::SceneHolderTeardown);
+    const uintptr_t swarmVtable = GameAddr::Get(GameAddr::Id::SwarmDrawableVtable), furVtable = GameAddr::Get(GameAddr::Id::SceneModelFurVtable);
     // The whole drain must be the loop this copy reproduces, and its two calls must reach the functions the copy calls
     if (!MatchAt(drain, kDrainBody)) return fail(std::format("The scene's pending-node drain at {:#010x} is not the code Apex was written for", drain));
     if (boundsCall != drain + 0xAE || spatialCall != drain + 0xB6 || CallTargetAt(boundsCall) != bounds || CallTargetAt(spatialCall) != spatial)
@@ -723,6 +773,8 @@ bool Start(std::string* error) {
         g_qpcMs = 1000.0 / static_cast<double>(f.QuadPart);
     }
     g_drainFn = drain;
+    g_swarmVtable = swarmVtable;
+    g_furVtable = furVtable;
     g_bounds = reinterpret_cast<FnBounds>(bounds);
     g_spatial = reinterpret_cast<FnSpatial>(spatial);
     LotLightingMotion::SampleCameraMoving(); // parses the camera position now (Start's thread), not in the first frame
@@ -807,6 +859,7 @@ Stats GetStats() {
     s.otherThread = c_otherThread.Get();
     s.foreignOwner = c_foreignOwner.Get();
     s.repaired = c_repaired.Get();
+    s.drawState = c_drawState.Get();
     s.stopped = g_stopped.load();
     return s;
 }
@@ -836,9 +889,9 @@ void RenderDeveloperUI() {
                         static_cast<unsigned>(CallChain::CallAddress(Site::SceneDrain)), static_cast<unsigned>(g_drainFn), static_cast<unsigned long long>(s.calls),
                         static_cast<unsigned long long>(s.fullStill), static_cast<unsigned long long>(s.fullForced), static_cast<unsigned long long>(s.budgeted),
                         static_cast<unsigned long long>(s.grown));
-    ImGui::TextWrapped("With a budget: %llu nodes processed, %llu frames left nodes (%llu node-frames waiting), largest backlog %u; last: %u done, %u left, %.2f ms",
-                        static_cast<unsigned long long>(s.nodesBudgeted), static_cast<unsigned long long>(s.framesLeft), static_cast<unsigned long long>(s.nodesLeft), s.maxLeft,
-                        s.lastDone, s.lastLeft, s.lastMs);
+    ImGui::TextWrapped("With a budget: %llu nodes processed (%llu past the budget for their draw state), %llu frames left nodes (%llu node-frames waiting), largest backlog %u; last: %u done, %u left, %.2f ms",
+                        static_cast<unsigned long long>(s.nodesBudgeted), static_cast<unsigned long long>(s.drawState), static_cast<unsigned long long>(s.framesLeft),
+                        static_cast<unsigned long long>(s.nodesLeft), s.maxLeft, s.lastDone, s.lastLeft, s.lastMs);
     ImGui::TextWrapped("Lifetime guard: %u nodes recorded; unlinked at destruction %llu, before AddNode %llu, repaired %llu (all three expected 0); dropped at "
                         "teardown %llu; destroyed on another thread %llu; left nodes not owned by their holder %llu",
                         s.tracked, static_cast<unsigned long long>(s.dtorUnlinked), static_cast<unsigned long long>(s.addUnlinked),

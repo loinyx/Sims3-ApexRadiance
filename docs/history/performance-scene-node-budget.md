@@ -38,3 +38,17 @@ full drain ran: a single long frame in the middle of the move.
 **Outcome:** past the longest wait the per-frame node and time limits double every 50 ms (x2 up to x64); the game's
 drain runs only after three times the longest wait. The node registry became a vector sorted by link, rebuilt once per
 budgeted drain without allocating, instead of an `unordered_map`. Released in 2.7.0.
+
+### 2026-10-24: draw state never deferred (issue #37)
+
+**Context:** issue #37: access violations at 0x0071D56E (Swarm effect list draw) and 0x006C93D0 (fur model draw) while
+the camera pans over streaming lots. The crash log showed the Swarm entry removed after the last list rebuild, and that
+rebuild run by the budgeted copy.
+
+**Finding:** both draws read state that only the node's own update refreshes (the Swarm bucket lists; the fur model's
+current LOD slot after an LOD unload). The game's full drain always runs those updates before the draw; a budget that
+leaves the node queued does not.
+
+**Outcome:** past the budget the copy still updates the Swarm renderer drawable and fur models; the others are deferred
+as before. A first version told them apart by the update and draw slots; a test with a crash logger that swaps the
+Swarm update slot for its own stub still showed draws on stale lists, so they are told apart by their vtable.

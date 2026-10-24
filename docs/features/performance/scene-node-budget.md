@@ -31,7 +31,11 @@ Apex Radiance wraps BeginFrame's CALL of the drain:
    reached. The nodes not reached stay in the game's own list, at the end the drain takes from, so they go first next
    frame. Once a node has waited the longest wait (500 ms), both limits double every 50 ms (x2 up to x64) instead of
    the whole backlog being drained in one frame.
-3. **Guard every node left queued.** Hooks on the node destructor, AddNode and the scene holder teardown make sure a node
+3. **Never defer draw state.** Past the budget the copy still updates, in the game's order, the nodes whose draw in the
+   same frame reads state that only their update refreshes: the Swarm effect renderer (its update rebuilds the bucket
+   draw lists after effects are removed) and fur models (their update refills the LOD slot an LOD unload emptied). Both
+   are few per frame, so the budget still applies to ordinary nodes.
+4. **Guard every node left queued.** Hooks on the node destructor, AddNode and the scene holder teardown make sure a node
    held for later can never be freed or queued twice while it is still linked.
 
 The other five callers of the drain are untouched; they process the nodes left exactly as they process nodes the game
@@ -129,7 +133,17 @@ Verified in the disassembly unless marked inferred.
 - Per BeginFrame (render thread): samples the camera (`LotLightingMotion::SampleCameraMoving`). Moving ->
   `BudgetedDrain`: the game's loop instruction for instruction (same splice, same unlink order, same calls, same
   counter) plus a stop test before each node: at least `kMinNodes` (8), then stop at `nodesPerFrame` nodes or
-  `msPerFrame` (QPC). The nodes not reached are spliced back at the tail of the holder's list, in order.
+  `msPerFrame` (QPC). Past the limit the loop keeps walking: a node whose vtable is `SwarmDrawableVtable` or
+  `SceneModelFurVtable` is updated as the game's loop would (the vtable, not a slot's content: another module may swap
+  the update or draw slot for its own stub); the others move, in order, to
+  a second local list that is appended after the local list. The nodes not reached are spliced back at the tail of
+  the holder's list, in order.
+- Why those two: a Swarm effect remove (0x0071FF10) blanks its entry and leaves the bucket lists pointing at it; the
+  gather 0x00722190 rebuilds them, and the draw 0x0071D440 writes through a blanked entry (access violation at
+  0x0071D56E). An LOD unload (0x006DBCE0 from UpdateLOD 0x006F7300) empties the model handle's current LOD slot
+  (`+0x210` + 8) and queues the node; its update 0x006F7B40 refills the slot or clears the draw flags, and the fur draw
+  0x006FA0B0 reads the slot without a NULL check (access violation at 0x006C93D0). Verified in the disassembly; that the
+  reported crashes came from the deferral is inferred from crash logs (issue #37).
 - The list is always well formed when Apex returns.
 
 ### The node lifetime guard
@@ -172,6 +186,7 @@ lifetime layers are removed and the records cleared. Nodes still left are proces
 | SceneBoundsCall / SceneNodeBounds | 0x006E41DE / 0x006FB4B0 | InRange(SceneDrain, 0xD1) / Target (fallback Sig) |
 | SceneSpatialCall / SceneNodeSpatial | 0x006E41E6 / 0x006FAD70 | InRange(SceneDrain, 0xD1) / Target (fallback Sig) |
 | SceneNodeDtor / SceneAddNode / SceneHolderTeardown | 0x006FD930 / 0x006E6480 / 0x006E4DE0 | Sig (entry; alternates at +0x11 / +5 / +6) |
+| SwarmDrawableVtable / SceneModelFurVtable | 0x00FFC248 / 0x00FF9B50 | Sig, the vtable stored by each constructor (0x0071C0A0 / 0x006FA020); compared with the node's vtable, never patched |
 
 Group `SceneNodeBudget`.
 
@@ -182,7 +197,8 @@ Group `SceneNodeBudget`.
 and hook head checks), `TakeDrainNote`, `Set*` (tuning), `GetStats`, `StatusText`, `RenderDeveloperUI`.
 
 Developer card *Objects spread across frames*: drain call, drains (game's while still / game's after a too-long wait /
-with a budget), frames with a grown budget, nodes processed with a budget, frames that left nodes, node-frames waiting, largest backlog, the last
+with a budget), frames with a grown budget, nodes processed with a budget (of them past the budget for their draw
+state), frames that left nodes, node-frames waiting, largest backlog, the last
 budgeted drain (done, left, ms); lifetime guard: nodes recorded, unlinked at destruction, unlinked before AddNode,
 repaired (each expected 0), records dropped at teardown (expected after world or lot changes), recorded nodes destroyed
 on another thread, left nodes whose owner is not the holder that drained them (expected 0). The Off line in the log sums
@@ -194,6 +210,8 @@ the same counters.
   the local sentinel re-read after every node because game code may unlink other nodes, the rest put back at the tail).
   Apex keeps no node pointer it dereferences outside the game's list: the records are keys (the link address), only read
   or written while the invariant says the link is in a live list.
+- Do not let a node whose draw reads state refreshed only by its update wait past the frame (Swarm lists, fur LOD); a
+  new class of such node is added to `MustNotWait`.
 - Do not remove the lifetime hooks, and do not turn them into unconditional unlinks: after a holder teardown the game
   leaves nodes with stale links into freed memory, and unlinking those would write into freed memory. Only recorded
   nodes are ever unlinked.
