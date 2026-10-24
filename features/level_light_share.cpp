@@ -2989,7 +2989,8 @@ void NoteWallCell(void* geo, uintptr_t mgr, int x, int z, int dir) {
     WallCellRead c;
     if (!ReadWallCell(geo, mgr, x, z, dir, c)) return;
     const int cell = static_cast<int>(ApexMath::Floor(c.tmid * static_cast<float>(c.len)));
-    const bool sane = c.perp < 0.35f && cell >= 0 && cell < c.len && c.hl > 0.2f && c.hr > 0.2f && c.hm > 0.2f && c.hl < 20.0f && c.hr < 20.0f && c.hm < 20.0f;
+    const bool sane = c.perp < 0.35f && cell >= 0 && cell < c.len &&
+        WallSampleSpan::MeasuredCell(c.foot, c.base, c.hl, c.hm, c.hr, WallOutdoor(c.wall));
     const bool tall = sane && std::max({c.hl, c.hm, c.hr}) > 3.02f;
     if (sane) g_wallUvMatched.fetch_add(1, std::memory_order_relaxed);
     if (tall) g_wallTallCells.fetch_add(1, std::memory_order_relaxed);
