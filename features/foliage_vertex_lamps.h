@@ -23,11 +23,11 @@
 //   c[B + 27 + 3i + k]  x = 1/R^2, y = scale (0: lamp unused), z = minimum d^2, w = head height over the instance's ground
 //   c[B + 54 + 3i]      crown centre, camera-relative; w = 1 / horizontal semi-axis
 //   c[B + 55 + 3i]      x = 1 / vertical semi-axis, y = extinction x leaf area density / ln 2 (exp is base 2)
-//   c[B + 56 + 3i]      x, y, z = the cap of lamps 0, 1, 2 (1 / the brightest channel of the colour); w = tau/rho (0: none)
+//   c[B + 56 + 3i]      x, y, z = the cap of lamps 0, 1, 2 (dusk phase / brightest colour channel); w = tau/rho (0: none)
 //   c[B + 81]           x = tau/rho, y = rho_g / 2, w = 1
 // The draw sets every one of them or does not use the patched copy. It also replaces the per-instance colours c54..c80 with
 // the instance's own lamps (OwnLamp below; F0 x intensity x fade x the cone and the walls' share), so the vertex light of
-// lamp k is colour x min(law(d) x gain x scale, 1 / the colour's brightest channel) x the terms above. Credits: @loinyx
+// lamp k is colour x min(law(d) x gain x scale, phase / brightest colour channel) x the terms above. Credits: @loinyx
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -106,12 +106,16 @@ inline int KeepBrightest(const OwnLamp& l, OwnLamp* out, int n) {
 // The shader's constants for one picked lamp (see the layout above): the head relative to the origin of c0 (eye) with
 // r0^2; 1/R^2, gain x the reach law's scale, the minimum d^2, the head's height over the instance's ground; the cap (no
 // channel of colour x weight passes 1: the hue kept).
-inline void SlotConstants(const OwnLamp& l, const float* eye, float groundY, float lawScale, float lp[4], float law[4], float& cap) {
+inline void SlotConstants(const OwnLamp& l, const float* eye, float groundY, float lawScale, float lp[4], float law[4], float& cap, float phase = 1.0f) {
     for (int a = 0; a < 3; a++) lp[a] = l.pos[a] - eye[a];
     lp[3] = l.r0sq;
     law[0] = l.invR2, law[1] = l.gain * lawScale, law[2] = 1e-4f, law[3] = std::max(l.pos[1] - groundY, 0.0f);
     const float top = std::max({l.colour[0], l.colour[1], l.colour[2]});
     cap = top > 0.0f ? 1.0f / top : 1e30f;
+    // The distance weight already contains the dusk curve. Its saturation ceiling
+    // must follow that curve too, or a strong lamp reaches night brightness early.
+    // Full night keeps the previous constants exactly. Runtime scene timing is unverified.
+    if (top > 0.0f && std::isfinite(phase) && phase < 1.0f) cap *= std::max(phase, 0.0f);
 }
 
 // The camera the game drew an instanced foliage draw with (in game: lamp light on trees moved with the camera and

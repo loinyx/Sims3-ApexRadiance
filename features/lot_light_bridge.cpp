@@ -5460,7 +5460,9 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
     static DWORD s_budgetAt = 0;
     static int s_budget = 0;
     if (now - s_budgetAt >= 8) s_budgetAt = now, s_budget = 96;
-    const float lawScale = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), g_night.load(std::memory_order_relaxed), g_wallEnabled.load(std::memory_order_relaxed),
+    const float night = g_night.load(std::memory_order_relaxed);
+    const float phase = TerrainLightingPolicy::LampDay(night);
+    const float lawScale = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), night, g_wallEnabled.load(std::memory_order_relaxed),
                                                                  g_wallGain.load(std::memory_order_relaxed), g_objPixelLampStrength.load(std::memory_order_relaxed) / kPixelLampTrimUnit);
     for (int i = 0; i < count; i++) {
         const float* inst = c[3 * i];
@@ -5539,7 +5541,7 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
                 rgb[0] = rgb[1] = rgb[2] = 0.0f;
                 continue;
             }
-            FoliageVertexLamps::SlotConstants(f.own[k], eye, groundY, lawScale, lp, law, out[(56 + 3 * i) * 4 + k]);
+            FoliageVertexLamps::SlotConstants(f.own[k], eye, groundY, lawScale, lp, law, out[(56 + 3 * i) * 4 + k], phase);
             for (int a = 0; a < 3; a++) rgb[a] = f.own[k].colour[a];
         }
         if (noting) {
