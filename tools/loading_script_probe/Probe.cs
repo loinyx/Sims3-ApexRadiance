@@ -34,7 +34,7 @@ namespace ApexRadiance.LoadingStudy
             observed = null;
             reports = bytes = 0;
             files = 0;
-            Write("Session started. Passive script task and dialog observer. Build loading-study.1. No task is resumed, cancelled or replaced.");
+            Write("Session started. Passive script task and dialog observer. Build loading-study.2. No task is resumed, cancelled or replaced.");
             Schedule();
         }
         private static void OnQuit(object sender, EventArgs args) { running = false; ++generation; }
@@ -102,6 +102,30 @@ namespace ApexRadiance.LoadingStudy
             return name.IndexOf("OneShot", StringComparison.Ordinal) >= 0 || name.IndexOf("StateMachine", StringComparison.Ordinal) >= 0 ||
                 name.IndexOf("SceneReady", StringComparison.Ordinal) >= 0 || name.IndexOf("MiniLoad", StringComparison.Ordinal) >= 0;
         }
+        private static bool Critical(string name)
+        {
+            return name.IndexOf("StateMachine", StringComparison.Ordinal) >= 0 || name.IndexOf("EditTown", StringComparison.Ordinal) >= 0 ||
+                name.IndexOf("MiniLoad", StringComparison.Ordinal) >= 0 || name.IndexOf("ProgressDialog", StringComparison.Ordinal) >= 0 ||
+                name.IndexOf("SceneReady", StringComparison.Ordinal) >= 0 || name.IndexOf("BuildMode", StringComparison.Ordinal) >= 0 ||
+                name.IndexOf("BuyMode", StringComparison.Ordinal) >= 0;
+        }
+        private static void DescribeMachine(StringBuilder text, object machine)
+        {
+            if (machine == null || machine is string) return;
+            text.AppendLine("Machine type: " + machine.GetType().FullName);
+            foreach (string field in new string[] { "mbPauseUpdate", "mbEnabled", "mPendingShutdown", "mbPendingReturn", "mPendingCall", "mObjectId" })
+                text.AppendLine("Machine " + field + ": " + Read(machine.GetType(), machine, field));
+            object status = Read(machine.GetType(), machine, "mStatus");
+            if (status == null || status is string) return;
+            foreach (string field in new string[] { "mCurState", "mNextState" })
+            {
+                object state = Read(status.GetType(), status, field);
+                text.AppendLine("Machine " + field + ": " + (state == null ? "null" : state is string ? state.ToString() : state.GetType().FullName));
+                if (state == null || state is string) continue;
+                foreach (string name in new string[] { "mStateId", "mNextStateId", "mStateName" })
+                    text.AppendLine("State " + name + ": " + Read(state.GetType(), state, name));
+            }
+        }
         private static void Capture(object dialog, uint age, bool stacks)
         {
             ++reports;
@@ -121,8 +145,11 @@ namespace ApexRadiance.LoadingStudy
             {
                 object world = Read(game.GetType(), game, "mInWorldState");
                 if (world != null && !(world is string))
+                {
                     foreach (string field in new string[] { "mPrevStateId", "mNextStateId", "mToggleState" })
                         text.AppendLine("InWorldState " + field + ": " + Read(world.GetType(), world, field));
+                    DescribeMachine(text, Read(world.GetType(), world, "mStateMachine"));
+                }
                 text.AppendLine("State change dialog: " + Static("Sims3GameplaySystems", "Sims3.Gameplay.InWorldState", "sStateChangeDialogUp"));
             }
             foreach (string field in new string[] { "mCurrentTask", "mPauseMode", "mDelayScript", "mModalDialogWindow", "mGlideWindow" })
@@ -134,18 +161,22 @@ namespace ApexRadiance.LoadingStudy
             int visited = 0, relevant = 0;
             foreach (DictionaryEntry entry in tasks)
             {
-                if (++visited > 16384) break;
+                if (++visited > 65536) break;
                 ulong id = (ulong)entry.Key;
                 if (id == Simulator.CurrentTask.Value) continue;
+                // Most entries are simulation objects, not transition tasks. Avoid reflection over their fields.
+                if (entry.Value == null || !Relevant(entry.Value.GetType().FullName)) continue;
                 string name = DescribeTask(entry.Value);
-                if (!Relevant(name)) continue;
                 ++relevant;
-                if (selected.Count < 64) selected.Add(new KeyValuePair<ulong, object>(id, entry.Value));
+                if (Critical(name)) selected.Insert(0, new KeyValuePair<ulong, object>(id, entry.Value));
+                else if (selected.Count < 64) selected.Add(new KeyValuePair<ulong, object>(id, entry.Value));
+                if (selected.Count > 64) selected.RemoveAt(64);
             }
-            text.AppendLine("Task registry count " + tasks.Count + "; inspected " + visited + "; relevant " + relevant + "; selected " + selected.Count + "; truncated " + (visited > 16384 || relevant > 64));
+            text.AppendLine("Task registry count " + tasks.Count + "; inspected " + Math.Min(visited, 65536) + "; relevant " + relevant + "; selected " + selected.Count + "; truncated " + (visited > 65536 || relevant > 64));
             foreach (KeyValuePair<ulong, object> task in selected)
             {
                 text.AppendLine("Task " + task.Key.ToString("X16") + " " + DescribeTask(task.Value));
+                if (task.Value.GetType().FullName == "Sims3.SimIFace.StateMachine") DescribeMachine(text, task.Value);
                 if (stacks)
                 {
                     try
@@ -172,7 +203,8 @@ namespace ApexRadiance.LoadingStudy
                 string created = Simulator.CreateScriptErrorFile(ref handle);
                 if (String.IsNullOrEmpty(created)) { running = false; return; }
                 ++files;
-                if (!Simulator.AppendToScriptErrorFile(handle, text.ToCharArray())) running = false;
+                // The native writer converts a zero-terminated character buffer, not an explicit-length string.
+                if (!Simulator.AppendToScriptErrorFile(handle, (text + "\0").ToCharArray())) running = false;
                 bytes += Encoding.UTF8.GetByteCount(text);
             }
             catch (ResetException) { throw; }

@@ -16,6 +16,15 @@ namespace Sims3.SimIFace
         public static void Quit() { OnWorldQuitEventHandler(null, EventArgs.Empty); }
     }
     public class StopWatch { public enum TickStyles { Seconds } }
+    public class StateMachine
+    {
+        public bool mbPauseUpdate = false, mbEnabled = true, mPendingShutdown = false, mbPendingReturn = false;
+        public object mPendingCall = null;
+        public ObjectGuid mObjectId = new ObjectGuid(90000);
+        public StateMachineStatus mStatus = new StateMachineStatus();
+    }
+    public class StateMachineStatus { public object mCurState = new FakeState(); public object mNextState = null; }
+    public class FakeState { public int mStateId = 1, mNextStateId = 14; public string mStateName = "BuildMode"; }
     public static class Simulator
     {
         public static ObjectGuid CurrentTask { get { return new ObjectGuid(99); } }
@@ -25,7 +34,11 @@ namespace Sims3.SimIFace
         public static ObjectGuid AddObject(object task) { Scheduled.Add(task); return new ObjectGuid(99); }
         public static string GetObjectStackTrace(ObjectGuid task) { ++Stacks; return "Suspended task " + task.Value + " in WaitForSceneReadiness"; }
         public static string CreateScriptErrorFile(ref uint handle) { handle = 1; Files.Add(""); return "test"; }
-        public static bool AppendToScriptErrorFile(uint handle, char[] text) { Files[Files.Count - 1] += new string(text); return true; }
+        public static bool AppendToScriptErrorFile(uint handle, char[] text) {
+            if (text.Length == 0 || text[text.Length - 1] != '\0') throw new Exception("Native writer requires a terminated buffer");
+            Files[Files.Count - 1] += new string(text, 0, text.Length - 1);
+            return true;
+        }
         public static bool CloseScriptErrorFile(uint handle) { return true; }
     }
 }
@@ -65,6 +78,8 @@ class Check
         Type registryType = DynamicType("ScriptCore", "ScriptCore.Simulator", "mObjHash", typeof(IDictionary));
         IDictionary tasks = new Dictionary<ulong, object>();
         for (ulong i = 0; i < 70; ++i) tasks[i] = new Sims3.UI.OneShotFunctionTask(delegate { }, Sims3.SimIFace.StopWatch.TickStyles.Seconds, 1, false, false);
+        for (ulong i = 1000; i < 25000; ++i) tasks[i] = new object();
+        tasks[90000ul] = new Sims3.SimIFace.StateMachine(); // Beyond the previous registry traversal limit.
         registryType.GetField("mObjHash", BindingFlags.Static | BindingFlags.NonPublic).SetValue(null, tasks);
         ApexRadiance.LoadingStudy.Bootstrap.kInstantiator = true;
         Sims3.SimIFace.World.Load();
@@ -77,7 +92,9 @@ class Check
         Assert(Sims3.SimIFace.Simulator.Stacks == 0);
         Call("Capture", dialog, (uint)12000, true);
         string text = Sims3.SimIFace.Simulator.Files[Sims3.SimIFace.Simulator.Files.Count - 1];
-        Assert(text.Contains("relevant 70; selected 64; truncated True"));
+        Assert(text.Contains("inspected 24071; relevant 71; selected 64; truncated True"));
+        Assert(text.Contains("Machine mCurState: Sims3.SimIFace.FakeState"));
+        Assert(text.Contains("State mNextStateId: 14"));
         Assert(text.Contains("WaitForSceneReadiness"));
         Assert(text.Contains("Dialog mCurrentTask: 5"));
         Assert(Sims3.SimIFace.Simulator.Stacks == 64);

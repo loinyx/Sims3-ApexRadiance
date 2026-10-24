@@ -38,5 +38,5 @@ $s3sa=Join-Path $OutDir 'ApexLoadingStudy.s3sa'
 $roundtrip=[ScriptResource.ScriptResource]::new(1,[IO.MemoryStream]::new($resource.AsBytes))
 $decoded=$roundtrip.Assembly.ReadBytes([int]$roundtrip.Assembly.BaseStream.Length)
 if([Convert]::ToBase64String($decoded) -ne [Convert]::ToBase64String($bytes)){throw 'Script resource roundtrip failed'}
-& $Python -I (Join-Path $PSScriptRoot 'package.py') $s3sa (Join-Path $PSScriptRoot 'Bootstrap.xml') (Join-Path $OutDir 'ApexRadiance_LoadingScriptStudy_test1.package')
+& $Python -I (Join-Path $PSScriptRoot 'package.py') $s3sa (Join-Path $PSScriptRoot 'Bootstrap.xml') (Join-Path $OutDir 'ApexRadiance_LoadingScriptStudy_test2.package')
 if($LASTEXITCODE -ne 0){throw 'Script observer package validation failed'}
