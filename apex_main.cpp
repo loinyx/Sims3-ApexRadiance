@@ -35,6 +35,7 @@
 #include "module_lifetime.h"
 #include "load_timing.h"
 #include "transition_watch.h"
+#include "transition_calls.h"
 #include "lot_load_analysis.h"
 #include "overlay.h"
 #include "patch_base.h"
@@ -209,6 +210,7 @@ DWORD InitBody() {
         LOG_INFO("[Main] Features started");
         LoadTiming::NoteFeaturesStarted();
         TransitionWatch::Start();
+        TransitionCalls::Start();
     }
     CrashReport::Install(); // after the game's own start-up (it may set a filter too): ApexRadiance_Crash.txt on a crash
 
@@ -220,6 +222,7 @@ DWORD InitBody() {
         HookGuard::Try("Pump: settings autosave", [] { ApexConfig::PumpAutosave(); });
         HookGuard::Try("Pump: load timing", [] { LoadTiming::Pump(); }); // log lines only ([LoadTiming])
         HookGuard::Try("Pump: transition watch", [] { TransitionWatch::Pump(); });
+        HookGuard::Try("Pump: transition calls", [] { TransitionCalls::Pump(); });
         HookGuard::Try("Pump: allocator trim", [] { AllocatorTuning::Pump(); }); // allocator_trim
         if constexpr (kDevToolsBuild) if(!kPublicBuild) HookGuard::Try("Pump: lot loading analysis", [] { LotLoadAnalysis::Pump(); });
         const ULONGLONG now = GetTickCount64();

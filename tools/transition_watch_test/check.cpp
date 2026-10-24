@@ -1,6 +1,8 @@
 #include "../../framework/transition_watch_state.h"
 #include "../../framework/transition_watch_native.h"
 #include "../../framework/transition_watch.h"
+#include "../../framework/transition_calls_state.h"
+#include "../../framework/transition_calls.h"
 #include <cassert>
 #include <cstring>
 #include <iostream>
@@ -12,6 +14,24 @@ template<class T, size_t N> void Put(std::array<unsigned char, N>& memory, size_
 int main() {
     Start(); // The normal public flavor has no observer or diagnostic dependencies.
     Pump();
+    TransitionCalls::Start();
+    TransitionCalls::Pump();
+    TransitionCalls::Calls calls;
+    const auto first = calls.Begin(TransitionCalls::Kind::Thumbnails, 100, 0x1234, 7);
+    const auto second = calls.Begin(TransitionCalls::Kind::Routing, 110, 0, 8);
+    assert(first != second && calls.slots[0].argument == 0x1234);
+    TransitionCalls::Call ended;
+    assert(!calls.End(first, 99, &ended));
+    assert(calls.End(second, 120, &ended) && ended.kind == TransitionCalls::Kind::Routing && ended.ended - ended.started == 10);
+    assert(!calls.End(second, 130, &ended));
+    assert(calls.slots[0].active); // another call's return cannot end the waiting thumbnail call
+    const auto reused = calls.Begin(TransitionCalls::Kind::HeightMap, 130, 1, 9);
+    assert(reused > second);
+    assert(!calls.End(second, 140, &ended)); // a stale ID cannot end a reused slot
+    for (unsigned i = 0; i < 14; ++i) assert(calls.Begin(TransitionCalls::Kind::Routing, 150 + i, 0, i));
+    assert(!calls.Begin(TransitionCalls::Kind::Routing, 200, 0, 0));
+    assert(calls.End(first, 60000, &ended) && ended.ended - ended.started == 59900);
+    assert(ended.argument == 0x1234 && ended.thread == 7);
     Tracker t;
     assert(t.Update(0, 1, true, true, 0) == Event::None);
     assert(t.Update(10000, 1, true, true, 0) == Event::None); // initial loading is not an armed gap
@@ -75,5 +95,5 @@ int main() {
     Put(renderer, 0x20, 8193u);
     ReadLots(reinterpret_cast<uintptr_t>(renderer.data()), &s);
     assert(!s.readable);
-    std::cout << "Transition watch: startup, debounce, wait, resumption, interruption, unavailable counting, native fields and bounded corrupt reads passed\n";
+    std::cout << "Transition watch: scene lifecycle, native fields, bounded corrupt reads and concurrent native call matching passed\n";
 }
