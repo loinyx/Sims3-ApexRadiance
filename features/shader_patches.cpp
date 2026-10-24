@@ -429,6 +429,23 @@ int LightMapScaleConst(const std::vector<DWORD>& t, DWORD sampler, bool* squared
     return -1;
 }
 
+// Keep the existing allocation where possible; dense terrain variants can leave a hole below s15.
+int TerrainAlphaSampler(const std::vector<DWORD>& t, const std::vector<Ins>& ins, const Usage& u) {
+    if (u.maxSampler < 15) return u.maxSampler + 1;
+    uint32_t used = 0;
+    for (const Ins& x : ins) {
+        if (x.op == kDef || x.op == kDefI || x.op == kDefB) continue;
+        for (size_t k = x.op == kDcl ? 2 : 1; k <= x.len; ++k) {
+            const DWORD r = t[x.at + k];
+            if ((r & 0x80000000u) && Type(r) == kSampler) {
+                if (Num(r) >= 16) return -1;
+                used |= 1u << Num(r);
+            }
+        }
+    }
+    for (int s = 0; s < 16; ++s) if (!(used & (1u << s))) return s;
+    return -1;
+}
 bool PatchTerrainNativeAlpha(std::vector<DWORD>& t, DWORD sampler, DWORD& extraSampler) {
     if (t.empty() || (t[0] != 0xFFFF0200 && t[0] != 0xFFFF0300) || sampler >= 16) return false;
     const auto ins = Parse(t);
@@ -439,7 +456,8 @@ bool PatchTerrainNativeAlpha(std::vector<DWORD>& t, DWORD sampler, DWORD& extraS
             (x.op == kDefB && x.len != 2) || IsFlow(x.op) || (t[x.at] & 0x10000000u)) return false;
     const Usage u = Scan(t, ins);
     const int tempLimit = t[0] == 0xFFFF0200 ? 12 : 32;
-    if (u.maxTemp + 1 >= tempLimit || u.maxSampler + 1 >= 16 || !u.afterLastSamplerDcl) return false;
+    const int spareSampler = TerrainAlphaSampler(t, ins, u);
+    if (u.maxTemp + 1 >= tempLimit || spareSampler < 0 || !u.afterLastSamplerDcl) return false;
     const Ins* fetch = nullptr;
     bool declared = false;
     for (const Ins& x : ins) {
@@ -463,7 +481,7 @@ bool PatchTerrainNativeAlpha(std::vector<DWORD>& t, DWORD sampler, DWORD& extraS
     const DWORD dest = t[fetch->at + 1], uv = t[fetch->at + 2];
     if (Type(dest) != kTemp || WMask(dest) != 0xF || (dest & 0x00100000u) ||
         (Type(uv) != kInput && Type(uv) != kTexture) || (uv & 0x0F002000u) || Swz(uv) != kSwzXYZW) return false;
-    const DWORD spare = static_cast<DWORD>(u.maxSampler + 1), temp = static_cast<DWORD>(u.maxTemp + 1);
+    const DWORD spare = static_cast<DWORD>(spareSampler), temp = static_cast<DWORD>(u.maxTemp + 1);
     // Match the original read's partial precision, then replace only alpha.
     Apply(t, {{u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, spare)}},
               {End(*fetch), {Op(kTexld, 3), Dst(kTemp, temp) | (dest & 0x00200000u), uv, Src(kSampler, spare),

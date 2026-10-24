@@ -1175,6 +1175,31 @@ Out main(float4 pos : POSITION, float2 uv : TEXCOORD0) {
 
 } // namespace
 
+void TerrainSamplerGaps(Gpu& gpu, const std::vector<Blob>& blobs) {
+    const unsigned hashes[] = {0x30F50F2E, 0x473EF8DA, 0x751D1971, 0xC4AC1DD6};
+    int found = 0;
+    for (const Blob& b : blobs) {
+        if (b.vs || std::find(std::begin(hashes), std::end(hashes), Hash(b.code)) == std::end(hashes)) continue;
+        found++;
+        auto code = b.code;
+        DWORD spare = 999;
+        Check(ShaderPatches::LightMapScaleConst(code, 8) >= 0, "terrain gap: native lamp scale identified");
+        auto full = b.code;
+        full.insert(full.begin() + 1, {0x0200001Fu, 0x90000000u, 0xA00F0805u});
+        const auto saved = full;
+        DWORD unchanged = 999;
+        Check(!ShaderPatches::PatchTerrainNativeAlpha(full, 8, unchanged) && full == saved && unchanged == 999,
+              "terrain gap: all occupied slots leave the shader and output untouched");
+        const bool ok = ShaderPatches::PatchTerrainNativeAlpha(code, 8, spare);
+        Check(ok && spare == 5, "terrain gap: unused s5 holds native alpha despite declared s15");
+        if (ok) {
+            Check(gpu.AcceptsPs(code), "terrain gap: native D3D9 accepts the patched variant");
+            const auto text = Disasm(code);
+            Check(text.find("dcl_2d s15") != std::string::npos, "terrain gap: original upper sampler preserved");
+        }
+    }
+    Check(found == 4, "terrain gap: all four native variants tested");
+}
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     if (argc < 2) {
@@ -1188,6 +1213,7 @@ int main(int argc, char** argv) {
     Check(LoadPrecomp(d, blobs, techs), "precomp read");
     std::printf("%zu shaders, %zu techniques in %s\n", blobs.size(), techs.size(), argv[1]);
     Gpu gpu;
+    TerrainSamplerGaps(gpu, blobs);
     SummerFloors(gpu, blobs, techs);
     WinterFloors(gpu, blobs, techs);
     Rows();
