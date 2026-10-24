@@ -2,7 +2,7 @@
 
 The feature is described in [features/night-lighting/snow.md](../features/night-lighting/snow.md). It must:
 
-- Remove the cut at lot borders on snowy lots: the lot term is never below the terrain term at the same point.
+- Meet the same terrain term at snowy and melting-snow lot borders, with the dry lot's soft transition into the interior.
 - Light snow on floors, door sills, stair tops and fence tops like the ground next to them.
 - Route stair-top snow to the stair fix, never to the snowy roof pass.
 - Keep terrain, lot and water draws away from the snow-floor fix.
@@ -15,6 +15,7 @@ The feature is described in [features/night-lighting/snow.md](../features/night-
 |---|---|---|---|
 | [`tools/terrain_lighting_test/ground_scale_check.cpp`](../../tools/terrain_lighting_test/README.md) | Reads the captured `s7`/`s11` terrain shaders; linear versus squared classification; refusal of shared, mixed or saturated multipliers; native D3D9 readback comparing both multiplier equations at five day/night weights and eight brightness gains | `run_ground_scale_checks.ps1 -Captures <2026-10-04 15-33-55 session>` | D3D9 GPU, F7 capture |
 | `tools/terrain_lighting_test/check.cpp` | `LampScale` for single-pass and squared multi-pass factors: 101 night levels, 120 gains, 21 native scales, previous night rounding, invalid values; `SurfaceLampGain` (snow on objects) | `run.ps1 -Captures <dir> -OutDir <dir>` | D3D9 GPU for the shader parts |
+| `tools/floor_shade_check` | Snow, rug-cut snow and melting-snow boundary blending; native shader readback; unchanged interiors, malformed bytecode refusal | `run.ps1 -Precomp <Shaders_Win32.precomp>` | Native D3D9 |
 | Offline captured-shader scans (combined build, not kept in `tools/`) | `IsSnowReliefVs`, `IsSnowCoverVs`, `PatchSnowBytecode` over all captured shaders | Not kept as a repository harness | Captured shader set |
 
 The ground scale harness only reads captures and prints results; it does not install files.
@@ -23,6 +24,7 @@ The ground scale harness only reads captures and prints results; it does not ins
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| | `8412c11` | `tools/floor_shade_check`; `run_resource_checks.ps1` | 9,624 shader checks and 14,649 resource/state checks passed, including visibility-arrival rearming | Native D3D9 / extracted resource fixture |
 | 2026-10-23 | `40f351e` | `tools/floor_shade_check` (`run.ps1 -Precomp <Shaders_Win32.precomp>`) | 7,103 checks, 0 failures: `PatchLotTerrainMax` over the precomp's snowy, rug-cut and melting-snow lot shaders; with the gate at 0, or over a lot map without alpha, the copy draws the masked copy's pixels | Offline, native D3D9 |
 | 2026-09-25 | combined build | `PatchSnowBytecode` | Output validated with `D3DDisassemble`; patched identity C61F8B55/1940 | Offline |
 | 2026-09-25 | combined build | `IsSnowReliefVs` over 161 VS | Only `VS_2E036438` matches | Offline |

@@ -48,6 +48,13 @@ Two Night Lighting parts act on walls; no wall shader is rewritten.
    RGB pass with Apex's gain and alpha writes off. Blended wall variants keep the single pass. Found and validated by
    idavidveiga ([day-bloom-fixes.md](day-bloom-fixes.md)).
 
+### Drawn wall sample positions
+
+Outdoor gable and facade cells use measured geometry and the native UV endpoints to align their sample columns.
+Clipped ends interpolate only between compatible anchors; unknown or conflicting geometry keeps the native mapping.
+The vertical base follows the drawn cell, including a tip clipped below its native foot. The normal perpendicular
+sample bias is preserved. This changes sample alignment, not lamp strength or reach.
+
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |

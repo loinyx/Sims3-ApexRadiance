@@ -12,13 +12,16 @@ It must:
 
 ## Automated tests
 
-None offline.
+[`tools/scene_budget_test`](../../tools/scene_budget_test/README.md) extracts the production drain and required-node
+classification. Run `tools/scene_budget_test/run.ps1`. Synthetic x86 layouts cover all mandatory-node combinations,
+relative update/deferred order, callback removal and requeue, failed allocation and developer validation failure.
+This does not measure gameplay frame time or validate other drawable classes.
 
 ## Latest results
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
-| | | | No recorded in-game run | |
+| | `a92b656` | `tools/scene_budget_test` | Developer: 1,507,611 checks; public: 1,507,576 checks; no failures | Extracted production, synthetic x86 nodes |
 
 ## In-game test plan
 
@@ -60,8 +63,7 @@ Developer mode, Developer > Performance > *Objects spread across frames*:
 - The per-frame limits (512 nodes / 2 ms / 500 ms) were chosen without data; pick them from the profiler's "Scene
   pending nodes, nodes N, deferred D" in the moving hitches.
 - Which node classes are expensive in vfunc +0x48.
-- Nothing was found that expects the pending list to be empty right after BeginFrame (inferred). A crash or a missing
-  object that appears only with the feature on would contradict it.
+- Swarm effect lists and fur LOD require updates before drawing; those classes are no longer deferred. Other drawable classes have not been exhaustively classified.
 - The destructor hook may run on any thread; the "destroyed on another thread" counter should not grow together with a
   crash.
 - Growing budget (2.7.0): the Developer card's "grown" count during long pans over streaming lots, and no forced full

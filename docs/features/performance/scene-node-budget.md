@@ -8,7 +8,7 @@ placed at once as soon as the camera stops.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier; on by default since 2.5.5. Growing budget past the longest wait and the flat node registry: Released in 2.7.0 |
+| Availability | Released in 2.1.0 or earlier; on by default since 2.5.5. Growing budget past the longest wait and the flat node registry: Released in 2.7.0. Mandatory effect and fur updates: Released in 2.15.4 |
 | Default | On |
 | Menu | System > Performance > Camera and lighting > *Spread new objects over frames* |
 | Configuration | `[patches.SceneNodeBudget]` in `ApexRadiance.toml` |
@@ -69,6 +69,7 @@ queued after BeginFrame.
   lot that streams in with about 2,000 nodes takes a few frames. Inferred look; if moving Sims or objects flicker at the
   edge of the screen while panning, lower the wait or raise the per-frame limits (Developer card).
 - If one node dominates (a whole lot's model), a node budget cannot split it.
+- Past the budget, the remaining list is still scanned and effect/fur updates run when required for safe drawing. The time budget is not a strict limit on the complete drain; its cost depends on the pending scene.
 - Only scenes drained every frame (within 100 ms) are budgeted; others drain fully. Holder slots (8) are reused only
   after 1 s without a drain; with none free the scene drains fully.
 - The drain list has no lock in the game; the budgeted copy runs where the game's drain runs (inferred: the render
