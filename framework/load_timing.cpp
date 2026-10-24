@@ -121,6 +121,8 @@ void Begin(int64_t at, bool byMap, int64_t now) {
 
 } // namespace
 
+std::string DiagnosticWork() { return Counters({}, Take()); }
+
 void NoteDeviceCreated() {
     int64_t z = 0;
     g_deviceAt.compare_exchange_strong(z, Qpc());

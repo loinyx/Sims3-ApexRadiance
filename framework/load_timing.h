@@ -1,4 +1,5 @@
 #pragma once
+#include <string>
 // Load-phase timing for the log ([LoadTiming], 07/10): logging only, no behaviour change. Hooks and features note events
 // with one QueryPerformanceCounter read and an atomic store (no lock, no log line on their thread); the start-up pump thread
 // (10 ms) turns them into log lines and takes the counter snapshots of the load window:
@@ -9,6 +10,8 @@
 // The save or world name is not logged: no existing hook reads it.
 
 namespace LoadTiming {
+// Cumulative work counters, read by diagnostic reports on the initialization thread.
+std::string DiagnosticWork();
 
 void NoteDeviceCreated();          // any thread, first call counts
 void NoteFeaturesStarted();        // init thread

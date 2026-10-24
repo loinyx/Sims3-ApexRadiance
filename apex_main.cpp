@@ -34,6 +34,7 @@
 #include "hook_guard.h"
 #include "module_lifetime.h"
 #include "load_timing.h"
+#include "transition_watch.h"
 #include "lot_load_analysis.h"
 #include "overlay.h"
 #include "patch_base.h"
@@ -207,6 +208,7 @@ DWORD InitBody() {
         AllocatorTuning::Install(); // allocator_trim / allocator_top_down (the allocator exists by now)
         LOG_INFO("[Main] Features started");
         LoadTiming::NoteFeaturesStarted();
+        TransitionWatch::Start();
     }
     CrashReport::Install(); // after the game's own start-up (it may set a filter too): ApexRadiance_Crash.txt on a crash
 
@@ -217,6 +219,7 @@ DWORD InitBody() {
         if (ApexGui::GetStartup() == ApexGui::Startup::Running) HookGuard::Try("Pump: features' periodic work", [] { PatchManager::Get().UpdateAll(); });
         HookGuard::Try("Pump: settings autosave", [] { ApexConfig::PumpAutosave(); });
         HookGuard::Try("Pump: load timing", [] { LoadTiming::Pump(); }); // log lines only ([LoadTiming])
+        HookGuard::Try("Pump: transition watch", [] { TransitionWatch::Pump(); });
         HookGuard::Try("Pump: allocator trim", [] { AllocatorTuning::Pump(); }); // allocator_trim
         if constexpr (kDevToolsBuild) if(!kPublicBuild) HookGuard::Try("Pump: lot loading analysis", [] { LotLoadAnalysis::Pump(); });
         const ULONGLONG now = GetTickCount64();
