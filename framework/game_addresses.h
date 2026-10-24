@@ -200,7 +200,7 @@ enum class Id : uint16_t {
     DdfVtable,                // 0x00FB2420: loose-file folder database "DDF" (ctor near FUN_004a5510)
     PackedStreamVtable,       // 0x00FFD790: base packed stream database (ctor FUN_0072cc60; e.g. the CAS compositor cache at priority -1000)
     DpfWriteDirect,           // FUN_004a7fc0 thiscall(key, data, size, ...), ret 0x14: the DPF's non-virtual record write (removes and re-inserts the key)
-    // ---- Scene node budget (features/scene_budget.cpp; group "SceneNodeBudget" = SceneDrainCall, SceneDrain, these seven
+    // ---- Scene node budget (features/scene_budget.cpp; group "SceneNodeBudget" = SceneDrainCall, SceneDrain, these nine
     //      and the camera ids) ----
     SceneBoundsCall,          // call FUN_006fb4b0 inside the drain FUN_006e4130 (node world bounds into an aligned 32-byte buffer)
     SceneNodeBounds,          // FUN_006fb4b0 thiscall(node, float out[8]), ret 4, returns out (the node's world AABB)
@@ -209,6 +209,8 @@ enum class Id : uint16_t {
     SceneNodeDtor,            // FUN_006fd930 thiscall(): the scene node base destructor (every derived destructor ends in it; does not unlink +0x18)
     SceneAddNode,             // FUN_006e6480 thiscall(node, group), ret 8: the pending holder's AddNode (pushes the node's link without unlinking it)
     SceneHolderTeardown,      // FUN_006e4de0 thiscall(): the pending holder's teardown (SetOwner(0) + Release of every node, list left as it is)
+    SwarmDrawableVtable,      // 0x00FFC248: the Swarm effect renderer drawable; its node update (+0x48, FUN_00722190) rebuilds its bucket draw lists
+    SceneModelFurVtable,      // 0x00FF9B50: SceneModelFur; its draw (+0x18, FUN_006fa0b0) reads the model handle's current LOD (+0x210, slot +8) without a NULL check
     // ---- Object lookup index (features/object_index.cpp; group "ObjectIndex" = ObjectById + these two) ----
     ObjectTreeWalk,           // FUN_00c60d30 thiscall(idLo, idHi, int* visited), ret 0xC: walks the root vector [this+0x9C, this+0xA0)
     ObjectTreeSearch,         // FUN_00c5fa60 cdecl(node, idLo, idHi, int* visited): recursive depth-first search (id at +0x48/+0x4C)

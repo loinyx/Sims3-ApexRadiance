@@ -7,6 +7,8 @@ It must:
 - Drain everything when the camera is still or a node waited the longest wait.
 - Never let a recorded node be freed or re-added while linked; never write a dead list or a destroyed node.
 - Leave every lifetime counter that marks an unexpected case at 0.
+- Never leave the Swarm effect renderer or a fur model queued past the frame (their draw reads state their update
+  refreshes).
 
 ## Automated tests
 
@@ -44,6 +46,10 @@ Developer mode, Developer > Performance > *Objects spread across frames*:
    `[SceneBudget]` warning naming the node); "dropped at teardown" > 0 after a world change is normal; "left nodes not
    owned by their holder" stays 0. The status never reads "Stopped: a safety check failed" (else the log has
    `[SceneBudget] Safety check failed: ...`). Turning it off logs an Off line with the same counters.
+
+7. Draw state (issue #37): pan over a town with lots streaming and pets or effects in view for 10 minutes. **Expected:**
+   "past the budget for their draw state" grows while "frames left nodes" grows; no access violation at 0x0071D56E or
+   0x006C93D0.
 
 ## Confirmed in game
 
