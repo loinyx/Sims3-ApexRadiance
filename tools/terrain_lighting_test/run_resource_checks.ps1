@@ -38,7 +38,19 @@ if($lotStart -lt 0 -or $lotEnd -lt 0) { throw 'Lot branch boundaries missing' }
 $lot=$source.Substring($lotStart,$lotEnd-$lotStart).TrimEnd()
 if(-not $lot.StartsWith('    EnsureReplacement(dev);') -or -not $lot.EndsWith('}')) { throw 'Unexpected lot branch bounds' }
 $prefix="template <typename DrawFn> D3D9Hooks::HookAction ExtractedLotBranch(IDirect3DDevice9* dev, DrawFn draw) {`n    constexpr auto kContinue = D3D9Hooks::HookAction::Continue;`n"
-$extracted=$sampler+"`n"+$gain+"`n"+$constX+"`n"+$weighted+"`n"+$nativeScale+"`n"+$wall+"`n"+$cone+"`n"+$hasCone+"`n"+$picked+"`n"+$picker+"`n"+$fencePicker+"`n"+$object+"`n"+$instanced+"`n"+$prefix+$lot+"`n"
+$snowEdge=Extract-Block '(?s)struct SnowEdgeBind \{.*?\r?\n\};'
+$arrival=Extract-Block '(?s)void NoteLotDraw\(.*?\r?\n\}'
+$arrivalFixture=@"
+namespace ArrivalFixture {
+std::atomic<DWORD> g_lotDrawTick{0};
+std::unordered_map<uint64_t,DWORD> g_lotDrawSeen;
+std::unordered_set<uint64_t> g_lotArrivals;
+namespace LotLightBridge { int requests=0; void RequestLampEditRefresh(){++requests;} }
+$arrival
+}
+"@
+$extracted=$sampler+"`n"+$gain+"`n"+$constX+"`n"+$weighted+"`n"+$nativeScale+"`n"+$wall+"`n"+$cone+"`n"+$hasCone+"`n"+$picked+"`n"+$picker+"`n"+$fencePicker+"`n"+$object+"`n"+$instanced+"`n"+$snowEdge+"`n"+$prefix+$lot+"`n"
+$extracted += $arrivalFixture
 $header=Join-Path $OutDir 'extracted_resource_paths.h'
 Set-Content -LiteralPath $header -Value $extracted -Encoding UTF8
 $sourceHash=(Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash

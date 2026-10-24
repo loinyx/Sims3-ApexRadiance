@@ -1159,6 +1159,75 @@ Out main(float4 pos : POSITION, float2 uv : TEXCOORD0) {
         Check(gate0 == ref, "snowy passes: the exit copy with the gate 0 draws the masked copy's pixels exactly");
         Check(alpha0 == ref0, "snowy passes: the exit copy over a lot map of alpha 0 draws the masked copy's pixels exactly");
         Check(changed > 0 || lit == 0, "snowy passes: the exit copy with the gate 1 adds the lot map's alpha share");
+        auto edgeM = masked, edgeE = exit, terrainOnly = masked;
+        auto unpatched = blob->code;
+        Check(!ShaderPatches::PatchLotTerrainEdges(unpatched) && unpatched == blob->code,
+              "winter borders: an unrecognised light accumulator stays unchanged");
+        auto missingExit = masked;
+        Check(!ShaderPatches::PatchLotTerrainEdges(missingExit, true) && missingExit == masked,
+              "winter borders: the indoor copy requires its complete original gate");
+        for (size_t cut = 0; cut < masked.size(); ++cut) {
+            auto truncated = std::vector<DWORD>(masked.begin(), masked.begin() + cut);
+            const auto saved = truncated;
+            Check(!ShaderPatches::PatchLotTerrainEdges(truncated) && truncated == saved,
+                  "winter borders: every truncation is refused without changes");
+        }
+        Check(ShaderPatches::PatchLotTerrainEdges(edgeM) && ShaderPatches::PatchLotTerrainEdges(edgeE, true),
+              "winter borders: both native pass copies take the transition");
+        bool forced = false;
+        for (size_t at = 1; at + 3 < terrainOnly.size();) {
+            const DWORD op = terrainOnly[at] & 0xFFFF;
+            const size_t len = (terrainOnly[at] >> 24) & 15;
+            if (op == 0xFFFE) { at += 1 + ((terrainOnly[at] >> 16) & 0x7FFF); continue; }
+            if (op == 0x0B && len == 3 && (terrainOnly[at + 1] & 0x7FF) == 0 &&
+                (terrainOnly[at + 2] & 0x7FF) == 0 && (terrainOnly[at + 3] & 0x7FF) == 7) {
+                terrainOnly[at] = 0x02000001;
+                terrainOnly[at + 2] = terrainOnly[at + 3];
+                terrainOnly.erase(terrainOnly.begin() + at + 3);
+                forced = true;
+                break;
+            }
+            if (!len) break;
+            at += 1 + len;
+        }
+        Check(forced, "winter borders: reference uses only the terrain lamp term");
+        IDirect3DPixelShader9 *psEM = nullptr, *psEE = nullptr, *psTerrain = nullptr;
+        Check(SUCCEEDED(gpu.dev->CreatePixelShader(edgeM.data(), &psEM)) &&
+              SUCCEEDED(gpu.dev->CreatePixelShader(edgeE.data(), &psEE)) &&
+              SUCCEEDED(gpu.dev->CreatePixelShader(terrainOnly.data(), &psTerrain)),
+              "winter borders: native D3D9 accepts every patched shader");
+        if (psEM && psEE && psTerrain) {
+            gpu.dev->SetTexture(2, tex[2]);
+            const float disabled[12] = {0,0,0,0, 0,0,0,0, 0,1,3,2};
+            gpu.dev->SetPixelShaderConstantF(ShaderPatches::kLotEdgeConst, disabled, 3);
+            Check(gpu.Render(psEM, vs) == ref, "winter borders: unknown lot keeps the previous masked pixels");
+            gpu.dev->SetPixelShaderConstantF(ShaderPatches::kLotMaskConst + 2, on, 1);
+            Check(gpu.Render(psEE, vs) == gate1, "winter borders: unknown lot keeps indoor light unchanged");
+            const float interior[12] = {0,0,4,20, 0,0,4,20, 1.0f/3,0,3,2};
+            gpu.dev->SetPixelShaderConstantF(ShaderPatches::kLotEdgeConst, interior, 3);
+            const auto inside = gpu.Render(psEE, vs);
+            Check(inside == gate1, "winter borders: the lot interior keeps its previous light exactly");
+            const float border[12] = {0,0,0,20, 0,0,4,20, 1.0f/3,0,3,2};
+            gpu.dev->SetPixelShaderConstantF(ShaderPatches::kLotEdgeConst, border, 3);
+            const auto target = gpu.Render(psTerrain, vs), borderM = gpu.Render(psEM, vs), borderE = gpu.Render(psEE, vs);
+            Check(borderM == target && borderE == target, "winter borders: both copies meet terrain light exactly at the boundary");
+            const float gradient[12] = {4.0f/0.9f,0,-0.2f/0.9f,20, 0,0,4,20, 1.0f/3,0,3,2};
+            gpu.dev->SetPixelShaderConstantF(ShaderPatches::kLotEdgeConst, gradient, 3);
+            const auto smooth = gpu.Render(psEE, vs);
+            int worst = 0;
+            for (int y = 0; y < 64; ++y) for (int x = 0; x < 64; ++x) {
+                float w = std::clamp((4.0f * x / 64) / 3, 0.0f, 1.0f);
+                w = w * w * (3 - 2 * w);
+                for (int channel : {0,8,16}) {
+                    const size_t pixel = static_cast<size_t>(y * 64 + x);
+                    const float a = static_cast<float>((target[pixel] >> channel) & 255), b = static_cast<float>((inside[pixel] >> channel) & 255);
+                    worst = std::max(worst, std::abs(static_cast<int>((smooth[pixel] >> channel) & 255) - static_cast<int>(std::lround(a + (b - a) * w))));
+                }
+            }
+            Check(worst <= 2, "winter borders: pixels follow the smooth transition within two LSB");
+            std::printf("Winter border %s: worst gradient error %d LSB\n", p.name, worst);
+        }
+        Release(psEM); Release(psEE); Release(psTerrain);
         std::printf("Snowy pass %s: masked %d slots, exit %d slots; %d of %d pixels lit, %d changed by the gate\n", p.name, sm, se, lit, static_cast<int>(ref.size()), changed);
         for (DWORD s = 0; s < 16; s++) gpu.dev->SetTexture(s, nullptr);
         gpu.dev->SetPixelShader(nullptr);

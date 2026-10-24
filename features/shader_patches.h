@@ -375,5 +375,9 @@ JitterResult AddJitterVs(std::vector<DWORD>& t, int jitterConst);
 // and the shade and is added after them, gated by PS c202.x (defs in c203 / c204). t unchanged when refused.
 constexpr DWORD kLotMaskConst = 200;
 bool PatchLotTerrainMax(std::vector<DWORD>& t, DWORD lastSampler, DWORD newSampler, bool mask = false, bool exit = false);
+// Feather the patched winter pass to the terrain term at lot borders. No extra
+// texture read; c205/c206 map terrain UVs to lot metres, c207 = (1/band, off, 3, 2).
+constexpr DWORD kLotEdgeConst = 205;
+bool PatchLotTerrainEdges(std::vector<DWORD>& t, bool exit = false);
 
 } // namespace ShaderPatches

@@ -4001,7 +4001,8 @@ IDirect3DPixelShader9* PatchSnowPass(IDirect3DDevice9* dev, const std::vector<DW
     for (int kind = 0; kind < 3; kind++) {
         std::vector<DWORD> t = code;
         IDirect3DPixelShader9* ps = nullptr;
-        if (!PatchLotTerrainMax(t, lastSampler, newSampler, kind < 2, kind == 0) || FAILED(dev->CreatePixelShader(t.data(), &ps)) || !ps) continue;
+        if (!PatchLotTerrainMax(t, lastSampler, newSampler, kind < 2, kind == 0) ||
+            !ShaderPatches::PatchLotTerrainEdges(t, kind == 0) || FAILED(dev->CreatePixelShader(t.data(), &ps)) || !ps) continue;
         masked = kind < 2;
         exit = kind == 0;
         return ps;
@@ -4037,6 +4038,37 @@ struct MaskBind {
     }
     ~MaskBind() {
         if (on && saved) SetPsConst(dev, kMaskConst, old, count);
+    }
+};
+
+// Winter and melting snow use the same three-metre transition as the dry lot
+// pass. The terrain side already contains the lamps crossing the lot border.
+struct SnowEdgeBind {
+    IDirect3DDevice9* dev;
+    float old[12]{};
+    bool saved = false, ready = false;
+    SnowEdgeBind(IDirect3DDevice9* d, const float k[4], const float centre[4]) : dev(d) {
+        saved = SUCCEEDED(dev->GetPixelShaderConstantF(ShaderPatches::kLotEdgeConst, old, 3));
+        if (!saved) return;
+        float m[16]{}, edge[12]{};
+        const LotRect* r = nullptr;
+        int first = 0, third = 8;
+        if (SUCCEEDED(dev->GetVertexShaderConstantF(8, m, 4))) {
+            r = FindLotRect(m, m + 8);
+            if (!r) {
+                r = FindLotRect(m + 4, m + 12);
+                first = 4, third = 12;
+            }
+        }
+        if (r) NoteLotDraw((static_cast<uint64_t>(r->lotHi) << 32) | r->lotLo);
+        else g_lotRectMiss = true;
+        LotEdgeConstants(k, centre, m + first, m + third, r, edge);
+        edge[10] = 3.0f;
+        edge[11] = 2.0f;
+        ready = SUCCEEDED(D3D9Hooks::CallOriginalSetPixelShaderConstantF(dev, ShaderPatches::kLotEdgeConst, edge, 3));
+    }
+    ~SnowEdgeBind() {
+        if (saved) SetPsConst(dev, ShaderPatches::kLotEdgeConst, old, 3);
     }
 };
 
@@ -4079,6 +4111,8 @@ template <typename DrawFn> bool DrawLotSnow(IDirect3DDevice9* dev, DrawFn draw, 
         terrain = ChunkTexture(it->first, it->second.tex);
     }
     const float atlasMap[4] = {atlasC[0], atlasC[1], atlasC[2] + v[4] * atlasC[0], atlasC[3] + v[6] * atlasC[1]};
+    SnowEdgeBind edgeBind(dev, atlas ? atlasMap : v, &v[4]);
+    if (!edgeBind.ready) return false;
     IDirect3DPixelShader9* original = g_curPs;
     g_inOwnCall = true;
     {
@@ -4126,6 +4160,8 @@ template <typename DrawFn> bool DrawLotMelt(IDirect3DDevice9* dev, DrawFn draw) 
         terrain = ChunkTexture(it->first, it->second.tex);
     }
     const float atlasMap[4] = {atlasC[0], atlasC[1], atlasC[2] + v[4] * atlasC[0], atlasC[3] + v[6] * atlasC[1]};
+    SnowEdgeBind edgeBind(dev, atlas ? atlasMap : v, &v[4]);
+    if (!edgeBind.ready) return false;
     IDirect3DPixelShader9* original = g_curPs;
     g_inOwnCall = true;
     {

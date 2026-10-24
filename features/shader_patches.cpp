@@ -3757,4 +3757,57 @@ bool PatchLotTerrainMax(std::vector<DWORD>& t, DWORD lastSampler, DWORD newSampl
     t.insert(t.begin() + dclEnd, std::begin(decl), std::end(decl));
     return true;
 }
+bool PatchLotTerrainEdges(std::vector<DWORD>& t, bool exit) {
+    const auto ins = Parse(t);
+    if (t.empty() || t[0] != 0xFFFF0300 || ins.empty()) return false;
+    const Usage u = Scan(t, ins);
+    if (u.maxConst >= static_cast<int>(kLotEdgeConst) || u.maxTemp + (exit ? 3 : 2) > 31) return false;
+    const Ins* maximum = nullptr;
+    const Ins* addExit = nullptr;
+    const Ins* terrainGate = nullptr;
+    for (const Ins& x : ins) {
+        if (IsFlow(x.op)) return false;
+        if (x.op == kMul && x.len == 3 && IsReg(t[x.at + 1], kTemp, 7) && WMask(t[x.at + 1]) == 7 &&
+            IsReg(t[x.at + 2], kTemp, 7) && Type(t[x.at + 3]) == kTemp && Swz(t[x.at + 3]) == 0xAA)
+            terrainGate = &x;
+        if (x.op == kMax && x.len == 3 && IsReg(t[x.at + 1], kTemp, 0) && WMask(t[x.at + 1]) == 7 &&
+            IsReg(t[x.at + 2], kTemp, 0) && IsReg(t[x.at + 3], kTemp, 7)) {
+            if (maximum) return false;
+            maximum = &x;
+        }
+        if (maximum && x.op == kAdd && x.len == 3 && IsReg(t[x.at + 1], kTemp, 0) && WMask(t[x.at + 1]) == 7 &&
+            IsReg(t[x.at + 2], kTemp, 0) && Type(t[x.at + 3]) == kTemp && Num(t[x.at + 3]) != 0) {
+            addExit = &x;
+            break;
+        }
+    }
+    if (!maximum || (exit && (!addExit || !terrainGate || terrainGate->at >= maximum->at))) return false;
+    const DWORD a = u.maxTemp + 1, w = a + 1;
+    const DWORD terrain = exit ? a + 2 : 7;
+    const DWORD cx = kLotEdgeConst, cz = cx + 1, ce = cx + 2;
+    const auto neg = [](DWORD r) { return r | 0x01000000u; };
+    std::vector<DWORD> ops = {
+        Op(kMad,4), Dst(kTemp,a,1), Src(kInput,7,kSwzX), Src(kConst,cx,kSwzX), Src(kConst,cx,0xAA),
+        Op(kMad,4), Dst(kTemp,a,1), Src(kInput,7,kSwzY), Src(kConst,cx,kSwzY), Src(kTemp,a,kSwzX),
+        Op(kMad,4), Dst(kTemp,a,2), Src(kInput,7,kSwzX), Src(kConst,cz,kSwzX), Src(kConst,cz,0xAA),
+        Op(kMad,4), Dst(kTemp,a,2), Src(kInput,7,kSwzY), Src(kConst,cz,kSwzY), Src(kTemp,a,kSwzY),
+        Op(kAdd,3), Dst(kTemp,w,1), Src(kConst,cx,kSwzW), neg(Src(kTemp,a,kSwzX)),
+        Op(kAdd,3), Dst(kTemp,w,2), Src(kConst,cz,kSwzW), neg(Src(kTemp,a,kSwzY)),
+        Op(0x0A,3), Dst(kTemp,a,3), Src(kTemp,a), Src(kTemp,w),
+        Op(0x0A,3), Dst(kTemp,a,1), Src(kTemp,a,kSwzX), Src(kTemp,a,kSwzY),
+        Op(kMad,4), Dst(kTemp,w,1,true), Src(kTemp,a,kSwzX), Src(kConst,ce,kSwzX), Src(kConst,ce,kSwzY),
+        Op(kMul,3), Dst(kTemp,w,2), Src(kTemp,w,kSwzX), Src(kTemp,w,kSwzX),
+        Op(kMad,4), Dst(kTemp,w,4), neg(Src(kTemp,w,kSwzX)), Src(kConst,ce,kSwzW), Src(kConst,ce,0xAA),
+        Op(kMul,3), Dst(kTemp,w,1), Src(kTemp,w,kSwzY), Src(kTemp,w,0xAA),
+        Op(kLrp,4), Dst(kTemp,0,7), Src(kTemp,w,kSwzX), Src(kTemp,0), Src(kTemp,terrain)
+    };
+    std::vector<Edit> edits{{End(*maximum), std::move(ops)}};
+    if (exit) {
+        edits.push_back({terrainGate->at, {Op(kMov,2), Dst(kTemp,terrain,7), Src(kTemp,7)}});
+        const DWORD f = Num(t[addExit->at + 3]);
+        edits.push_back({addExit->at, {Op(kMul,3), Dst(kTemp,f,7), Src(kTemp,f), Src(kTemp,w,kSwzX)}});
+    }
+    Apply(t, std::move(edits));
+    return true;
+}
 } // namespace ShaderPatches

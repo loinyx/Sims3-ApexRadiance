@@ -14,6 +14,8 @@
 #include <map>
 #include <string>
 #include <utility>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include "features/terrain_lighting_policy.h"
 #include "features/lamp_reach.h"
@@ -103,17 +105,26 @@ std::pair<int,int> Key(float x,float z) { return {int(std::round(x)),int(std::ro
 FakeTexture* ChunkTexture(const std::pair<int,int>&,FakeTexture* tex) { return tex; }
 void EnsureReplacement(FakeDevice*) {}
 const LotRect* FindLotRect(const float*,const float*) { return fixtureHasRect?&fixtureRect:nullptr; }
-void NoteLotDraw(uint64_t) {}
+int fixtureLotDrawNotes = 0;
+void NoteLotDraw(uint64_t) { ++fixtureLotDrawNotes; }
 bool LotEdgeConstants(const float* uv,const float*,const float*,const float*,const LotRect*,float* out) {
     std::memcpy(lastEdgeUv.data(),uv,16); for(int i=0;i<12;++i) out[i]=.02f*float(i+1); return fixtureFeather;
 }
 void SetPs(FakeDevice* d,FakeShader* ps) { ++d->writes; ++d->shaderWrites; d->ps=ps; }
 void SetTex(FakeDevice* d,DWORD s,FakeTexture* tex) { d->SetTexture(s,tex); }
 void SetPsConst(FakeDevice* d,UINT r,const float* v,UINT n) { ++d->writes; ++d->pixelWrites; std::memcpy(d->pixel[r].data(),v,n*16); }
+bool fixtureEdgeWriteFailure = false;
+namespace D3D9Hooks {
+HRESULT CallOriginalSetPixelShaderConstantF(FakeDevice* d, UINT r, const float* v, UINT n) {
+    SetPsConst(d, r, v, fixtureEdgeWriteFailure ? 1 : n);
+    return fixtureEdgeWriteFailure ? E_FAIL : S_OK;
+}
+}
 void SetVsConst(FakeDevice* d,UINT r,const float* v,UINT n) { ++d->writes; ++d->vertexWrites; std::memcpy(d->vertex[r].data(),v,n*16); }
 namespace RigTracker { int fixtureMode=2;int CurrentMode(){return fixtureMode;} }
 int RigMode(){return RigTracker::CurrentMode();} // production: RigTracker::CurrentMode read once per draw
 namespace ShaderPatches {
+constexpr DWORD kLotEdgeConst = 205;
 constexpr unsigned kObjectPixelLamps=8;
 struct ObjectPatch {UINT atlasConst=40,strengthConst=41,lampParamConst=42,atlasSampler=9;bool rigLamps=true,pixelLamps=true;UINT groundWeightConst=39;UINT reachConst=0,capConst=0;int shadeSampler=-1,shadeConst=-1;};
 bool PatchObjectLampPs(std::vector<DWORD>&,ObjectPatch&,bool=false){return true;}
@@ -597,8 +608,60 @@ void ReachChecks() {
     fixtureCapture=false;
     std::printf("Realistic reach on objects and fences: %d checks\n",checks-before);
 }
+void WinterEdgeStateChecks() {
+    ResetGlobals();
+    fixtureHasRect = true;
+    fixtureLotDrawNotes = 0;
+    const float uv[4] = {0.001f,0.001f,0.5f,0.5f}, centre[4] = {128,0,128,1};
+    auto d = Device();
+    const auto before = d.pixel;
+    const auto beforeVertex = d.vertex;
+    {
+        SnowEdgeBind edge(&d, uv, centre);
+        Check(edge.ready, "winter edge: constants ready");
+        Check(d.pixel[207][2] == 3 && d.pixel[207][3] == 2, "winter edge: smoothstep constants bound");
+    }
+    Check(fixtureLotDrawNotes == 1, "winter edge: a visible snowy lot enters the terrain arrival tracking");
+    Check(d.pixel == before && d.vertex == beforeVertex, "winter edge: every changed register restored");
+    d = Device();
+    d.failPixelRead = 205;
+    const auto unreadable = d.pixel;
+    {
+        SnowEdgeBind edge(&d, uv, centre);
+        Check(!edge.ready && d.pixel == unreadable, "winter edge: failed read never changes constants");
+    }
+    Check(d.pixelWrites == 0, "winter edge: no writes without restorable state");
+    d = Device();
+    const auto failedWrite = d.pixel;
+    fixtureEdgeWriteFailure = true;
+    {
+        SnowEdgeBind edge(&d, uv, centre);
+        Check(!edge.ready, "winter edge: a failed write refuses the replacement draw");
+    }
+    fixtureEdgeWriteFailure = false;
+    Check(d.pixel == failedWrite, "winter edge: partial writes are restored");
+    fixtureHasRect = false;
+    const int knownNotes = fixtureLotDrawNotes;
+    {
+        SnowEdgeBind edge(&d, uv, centre);
+        Check(fixtureLotDrawNotes == knownNotes, "winter edge: an unknown rectangle cannot invent a visible lot");
+        Check(g_lotRectMiss, "winter edge: missing lot metadata requests a prompt refresh");
+    }
+    for (DWORD frame = 0; frame < 1000; ++frame) {
+        ArrivalFixture::g_lotDrawTick = frame * 16;
+        ArrivalFixture::NoteLotDraw(42);
+    }
+    Check(ArrivalFixture::g_lotArrivals.size() == 1 && ArrivalFixture::LotLightBridge::requests == 1,
+          "winter arrivals: continuous drawing requests one entry update, not one per frame");
+    ArrivalFixture::g_lotArrivals.clear();
+    ArrivalFixture::g_lotDrawTick += 2100;
+    ArrivalFixture::NoteLotDraw(42);
+    Check(ArrivalFixture::g_lotArrivals.size() == 1 && ArrivalFixture::LotLightBridge::requests == 2,
+          "winter arrivals: returning to a lot asks for fresh terrain light");
+}
 int main() {
     WallChecks();LotChecks();NativeSamplerChecks();ObjectChecks();InstancedChecks();ExpandedStateChecks();VisibilityChecks();ReachChecks();
+    WinterEdgeStateChecks();
     std::printf("Resource paths: %d checks, %d failures; extracted production, fake D3D9, no game/driver execution\n",checks,failures);
     return failures?1:0;
 }
