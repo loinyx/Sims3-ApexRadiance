@@ -37,6 +37,7 @@ void SetNightLevel(float level);
 void SetDrawDark(bool dark);
 // Render thread: the object rigs gather once more in ms (after rooms were sent to light again: "Refresh the lighting")
 void RigsAgainIn(unsigned ms);
+bool RigRefreshPending(); // render thread: scheduled room-object refresh not yet dispatched
 bool IsDarkRoomLight(const float* colour, const float* dir);
 // Light tree thread: on while LevelLightShare runs the game's ambient step on a room only to read its result (the room's
 // fields are put back after): the base is added as usual, but not remembered as what the room holds

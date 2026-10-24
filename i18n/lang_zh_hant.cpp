@@ -9,6 +9,19 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Traditional, Taiwan / Hong Kong)}
 const I18n::Pair kPairs[] = {
+    {"Lighting restarted; some areas use the game's maps", "光照已重新計算；部分區域使用遊戲的光照貼圖"},
+    {"Restart lighting", "重新計算光照"},
+    {"Discard cached lighting and rebuild it without changing settings", "清除快取的光照並重新計算，保留目前設定"},
+    {"Rebuilding lighting: {} / {} stories queued", "正在重算光照：已排入佇列 {} / {} 層"},
+    {"Waiting for lighting calculations", "正在等待光照計算"},
+    {"Lighting restarted", "光照已重新計算"},
+    {"Lighting restart unavailable", "無法重新計算光照"},
+    {"Restart lighting rebuilds temporary light maps and keeps your settings", "重新啟動光照會重建暫存光照貼圖並保留你的設定"},
+    {"Night Lights: snowy lot edges stay continuous as snow melts", "夜間照明：積雪融化時用地邊緣的光照仍保持連續"},
+    {"Performance: effects and animal fur update safely while lots load", "效能：用地載入時安全更新特效與動物毛髮"},
+    {"Night Lights: gables and upper trim keep continuous lamp light", "夜間照明：山牆與頂部飾邊獲得連續的燈光"},
+    {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "夜間照明：矮柱與樓梯會考慮燈下的實心樓板"},
+
     {"Steam Deck and Linux: Proton is detected and a lighter profile is suggested", "Steam Deck 與 Linux：偵測 Proton 並建議較輕量的設定檔"},
     {"Indoor lights update sooner when you enter a lot or change floors", "進入地塊或切換樓層時，室內燈光更新得更快"},
     {"Lamps on other lots no longer delay the lights of the lot you play", "其他地塊的燈不再拖慢你所在地塊的燈光"},
@@ -770,6 +783,7 @@ const I18n::Pair kPairs[] = {
     {"Sims3SettingsSetter by sims3fiend: project origin and framework reference.", "sims3fiend 的 Sims3SettingsSetter：專案起源與框架參考。"},
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11：Timothy Lottes（NVIDIA）。"},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "地段串流與白天光暈修正：由 @idavidveiga 研究與撰寫程式碼。"},
+    {"Scene update safety: contribution by @rodneypantonial.", "場景更新安全性：由 @rodneypantonial 貢獻。"},
     {"Thanks to @boringbones for testing every build.", "感謝 @boringbones 測試每一個版本。"},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS：AMD（MIT）。"},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "上層樓地面光：Arro 的技術，由 Apex Radiance 改編。"},

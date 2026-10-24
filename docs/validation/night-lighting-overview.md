@@ -18,6 +18,7 @@ sub-part has its own validation page (for example [lot light pass](night-lightin
 | [`tools/terrain_lighting_test`](../../tools/terrain_lighting_test/README.md) | Daylight policy, terrain lamp scales, native solar alpha, lot pass HLSL, edit and queue logic, world reset | `run.ps1` and the `run_*_checks.ps1` scripts | Native D3D9 GPU; F7 capture folders for some fixtures |
 | [`tools/world_lamp_test/check.cpp`](../../tools/world_lamp_test/check.cpp) | World lamp eligibility and edit guard | See [world lamp response validation](night-lighting-world-lamp-response.md) | None |
 | `tools/basis_test` | Room basis map patches (smooth indoor light) | See the harness | Captured shaders |
+| [`tools/lighting_restart_test`](../../tools/lighting_restart_test/run.ps1) | Extracted restart dispatcher, proxy generation, native-map fallback, mixed retry states and completion coordinator | `run.ps1` | MSVC x86 |
 | `perl tools/menu_audit.pl .` | Menu texts, translations, documented keys, ResetDefaults coverage | From the repository root | Perl |
 
 The harnesses only read captures and the repository; they never write into the game folder.
@@ -26,6 +27,8 @@ The harnesses only read captures and the repository; they never write into the g
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-24 | `7425406` | Public x86 startup without external shader cache; resource inspection and menu footer | 78 embedded shaders, 0 to compile; embedded resource equals the validated 78-entry cache. Footer shows 2.15.4; previously unread changelog is acknowledged once in the saved menu state. General visual regression coverage remains incomplete | In game, Steam / DXVK |
+| | `a92b656` | `tools/lighting_restart_test`; `tools/i18n_check`; CPU Smoke | 63 restart checks passed; all 2,280 keys covered in every menu language; Smoke passed. Public/developer fixture results: [scene budget](performance-scene-node-budget.md) | Extracted CPU / menu tables |
 | 2026-10-23 | `40f351e` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting`; developer, public and standard Release x86 builds | Passed, 0 failures; the three builds compiled. Sub-part harnesses: [lot light pass](night-lighting-lot-light-pass.md#latest-results), [light between stories](night-lighting-level-light-share.md#latest-results), [floors](night-lighting-floors.md#latest-results), [foliage](night-lighting-foliage.md#latest-results) | CPU harness |
 | 2026-10-23 | `40f351e` | `tools/terrain_lighting_test` (`run.ps1`) | 1,303,085 checks, 2 failures: *both captured terrain variants tested* and *GPU reach law matches the walls' law*, which also fail at commits from the 2.15.2 period (known, not from this release); the gated indoor light pass equals the previous shader at gate 0 and the CPU formula at gate 1 | Native D3D9 |
 | 2026-10-22 | `d625404` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting`, `tools/rt_lamps_test`, `tools/roofed_openings_test`, `tools/room_structure_test` (counts in [light between stories](night-lighting-level-light-share.md#latest-results)); developer, public and standard Release x86 builds | Passed, 0 failures; the three builds compiled. The solve-side harnesses do not exercise the draw hook's memos of `99b99fb`, `c827d18`, `d625404` or the timing scope of `bb640cb` | CPU harness |

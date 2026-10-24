@@ -18,8 +18,16 @@ $nativeScale=Extract-Block '(?m)^bool NativeWallFresh\(.*\r?\nfloat NativeWallSc
 $wall=Extract-Block '(?s)template <typename DrawFn> bool DrawWallGain\(.*?\r?\n\}'
 $cone=Extract-Block '(?s)float LampConeAt\(.*?\r?\n\}'
 $hasCone=Extract-Block '(?m)^bool HasCone\(.*'
-$picked=Extract-Block '(?s)float PickedLampVisibility\(.*?\r?\n\}'
-$picker=Extract-Block '(?s)int PickObjectLamps\(.*?\r?\n\}'
+$picked="float LampConeVisibility(const LampCone&, const float*, const float*, float);`n"+(Extract-Block '(?s)float PickedLampVisibility\(.*?\r?\n\}')
+# Keep both implementations and their production memo wrappers.
+$pickerStart=$source.IndexOf('int PickObjectLampsImpl(')
+$pickerEnd=$source.IndexOf('// The colour an outdoor object', $pickerStart)
+if($pickerStart -lt 0 -or $pickerEnd -lt 0){throw 'Object picker boundaries missing'}
+$picker=$source.Substring($pickerStart,$pickerEnd-$pickerStart)
+$fenceStart=$source.IndexOf('int PickFenceLampsImpl(')
+$fenceEnd=$source.IndexOf('template <typename DrawFn> bool DrawInstanced(', $fenceStart)
+if($fenceStart -lt 0 -or $fenceEnd -lt 0){throw 'Fence picker boundaries missing'}
+$fencePicker=$source.Substring($fenceStart,$fenceEnd-$fenceStart)
 $object=Extract-Block '(?s)template <typename DrawFn> bool DrawObjectLamp\(.*?\r?\n\}'
 $instanced=Extract-Block '(?s)template <typename DrawFn> bool DrawInstanced\(.*?\r?\n\}'
 $core=$source.IndexOf('template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(')
@@ -30,7 +38,19 @@ if($lotStart -lt 0 -or $lotEnd -lt 0) { throw 'Lot branch boundaries missing' }
 $lot=$source.Substring($lotStart,$lotEnd-$lotStart).TrimEnd()
 if(-not $lot.StartsWith('    EnsureReplacement(dev);') -or -not $lot.EndsWith('}')) { throw 'Unexpected lot branch bounds' }
 $prefix="template <typename DrawFn> D3D9Hooks::HookAction ExtractedLotBranch(IDirect3DDevice9* dev, DrawFn draw) {`n    constexpr auto kContinue = D3D9Hooks::HookAction::Continue;`n"
-$extracted=$sampler+"`n"+$gain+"`n"+$constX+"`n"+$weighted+"`n"+$nativeScale+"`n"+$wall+"`n"+$cone+"`n"+$hasCone+"`n"+$picked+"`n"+$picker+"`n"+$object+"`n"+$instanced+"`n"+$prefix+$lot+"`n"
+$snowEdge=Extract-Block '(?s)struct SnowEdgeBind \{.*?\r?\n\};'
+$arrival=Extract-Block '(?s)void NoteLotDraw\(.*?\r?\n\}'
+$arrivalFixture=@"
+namespace ArrivalFixture {
+std::atomic<DWORD> g_lotDrawTick{0};
+std::unordered_map<uint64_t,DWORD> g_lotDrawSeen;
+std::unordered_set<uint64_t> g_lotArrivals;
+namespace LotLightBridge { int requests=0; void RequestLampEditRefresh(){++requests;} }
+$arrival
+}
+"@
+$extracted=$sampler+"`n"+$gain+"`n"+$constX+"`n"+$weighted+"`n"+$nativeScale+"`n"+$wall+"`n"+$cone+"`n"+$hasCone+"`n"+$picked+"`n"+$picker+"`n"+$fencePicker+"`n"+$object+"`n"+$instanced+"`n"+$snowEdge+"`n"+$prefix+$lot+"`n"
+$extracted += $arrivalFixture
 $header=Join-Path $OutDir 'extracted_resource_paths.h'
 Set-Content -LiteralPath $header -Value $extracted -Encoding UTF8
 $sourceHash=(Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash

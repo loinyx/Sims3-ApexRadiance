@@ -9,6 +9,19 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Hungarian}
 const I18n::Pair kPairs[] = {
+    {"Lighting restarted; some areas use the game's maps", "Világítás újraindítva; egyes területek a játék térképeit használják"},
+    {"Restart lighting", "Világítás újraindítása"},
+    {"Discard cached lighting and rebuild it without changing settings", "Törli a tárolt világítást, és a beállítások módosítása nélkül újraszámítja"},
+    {"Rebuilding lighting: {} / {} stories queued", "Világítás újraszámítása: {} / {} szint a sorban"},
+    {"Waiting for lighting calculations", "Várakozás a világítás számításaira"},
+    {"Lighting restarted", "Világítás újraindítva"},
+    {"Lighting restart unavailable", "A világítás újraindítása nem érhető el"},
+    {"Restart lighting rebuilds temporary light maps and keeps your settings", "A világítás újraindítása újraépíti az ideiglenes fénytérképeket és megtartja a beállításokat"},
+    {"Night Lights: snowy lot edges stay continuous as snow melts", "Éjszakai világítás: a telekhatárok fénye hóolvadáskor is folyamatos marad"},
+    {"Performance: effects and animal fur update safely while lots load", "Teljesítmény: az effektek és az állatok szőre biztonságosan frissülnek a telkek betöltésekor"},
+    {"Night Lights: gables and upper trim keep continuous lamp light", "Éjszakai világítás: az oromzatok és felső párkányok egyenletes lámpafényt kapnak"},
+    {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Éjszakai világítás: az alacsony pillérek és lépcsők figyelembe veszik a lámpák alatti tömör padlókat"},
+
     {"Steam Deck and Linux: Proton is detected and a lighter profile is suggested", "Steam Deck és Linux: a Proton felismerése és egy könnyebb profil ajánlása"},
     {"Indoor lights update sooner when you enter a lot or change floors", "A belső fények hamarabb frissülnek, amikor telekre lépsz vagy szintet váltasz"},
     {"Lamps on other lots no longer delay the lights of the lot you play", "Más telkek lámpái már nem késleltetik annak a teleknek a fényeit, ahol játszol"},
@@ -770,6 +783,7 @@ const I18n::Pair kPairs[] = {
     {"Sims3SettingsSetter by sims3fiend: project origin and framework reference.", "Sims3SettingsSetter, készítette: sims3fiend: a projekt eredete és keretrendszer-referencia."},
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11: Timothy Lottes (NVIDIA)."},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "Telekbetöltés és a nappali bloom javításai: kutatás és kód: @idavidveiga."},
+    {"Scene update safety: contribution by @rodneypantonial.", "Biztonságos jelenetfrissítés: @rodneypantonial hozzájárulása."},
     {"Thanks to @boringbones for testing every build.", "Köszönet @boringbones-nak, aki minden buildet tesztel."},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "Felső szinti talajfény: Arro technikája, az Apex Radiance-hez igazítva."},

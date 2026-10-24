@@ -93,6 +93,17 @@ constexpr float kFloorGateFull = 1.0f;  // m
 // Fences: a face reads the mask this far in front of it, along its normal (rows[10]; ShaderPatches PatchInstancedLamps)
 constexpr float kFenceShadeReach = 0.6f; // m
 constexpr float kFloorGateNone = 1.25f; // m
+inline float GroundPoolHeightGate(float y, float groundY) {
+    if (!std::isfinite(y) || !std::isfinite(groundY)) return 1.0f;
+    return std::clamp((kFloorGateNone - std::fabs(y - groundY)) / (kFloorGateNone - kFloorGateFull), 0.0f, 1.0f);
+}
+// Elevated structure pieces share architectural objects' direct-lamp gain.
+// Ground-level runs retain their fence gain; the existing height band blends both.
+inline float StructureLampGain(float groundPool, float wallGain) {
+    if (!std::isfinite(wallGain) || wallGain < 0.0f) return 1.0f;
+    const float pool = std::clamp(groundPool, 0.0f, 1.0f);
+    return wallGain + pool * (1.0f - wallGain);
+}
 inline bool FloorShadeRows(const Grid& g, float xzScale, bool on, float rows[12]) {
     for (int i = 0; i < 12; i++) rows[i] = 0.0f;
     rows[2] = rows[3] = 0.5f;

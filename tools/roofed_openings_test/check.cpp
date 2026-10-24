@@ -14,6 +14,8 @@
 #include "features/lamp_visibility.h"
 #include "features/ground_lamp_shadow.h" // (wall_openings.h)
 #include "features/ground_light_gate.h"
+#include "features/lamp_cap_shadow.h"
+#include "features/wall_sample_span.h"
 #include "features/inner_retry.h"
 #include "features/lamp_reach.h"
 #include "features/rig_cut.h"
@@ -740,6 +742,26 @@ void GroundSoftChecks() {
 // house, took the post's ground pool on their tops)
 void GroundGateChecks() {
     using namespace GroundLightGate;
+    const float lotGround = 16.7266541f, cornice = 26.85f;
+    const float pool = GroundShadow::GroundPoolHeightGate(cornice, lotGround);
+    Check(pool == 0.0f && pool * HeightGate(cornice, 25.58f) == pool * HeightGate(cornice, 28.58f),
+          "captured cornice neighbours cannot receive different ground pools from their head lists");
+    Check(GroundShadow::GroundPoolHeightGate(lotGround, lotGround) == 1.0f &&
+          GroundShadow::GroundPoolHeightGate(lotGround + 0.75f, lotGround) == 1.0f,
+          "ground objects and columns on a foundation retain their pool strength");
+    Check(std::fabs(GroundShadow::GroundPoolHeightGate(lotGround + 1.125f, lotGround) - 0.5f) < 1e-5f,
+          "ground pool fades continuously at the existing ground-height boundary");
+    const float capturedGround = 16.7266541f, capturedRun = 22.7266846f;
+    const float upperPool = GroundShadow::GroundPoolHeightGate(capturedRun, capturedGround);
+    Check(upperPool == 0.0f && GroundShadow::StructureLampGain(upperPool, 0.30f) == 0.30f,
+          "captured upper instanced trim matches the adjacent object's lamp gain without a ground pool");
+    for (float y : {capturedGround, capturedGround + 0.75f, capturedGround + 1.0f})
+        Check(GroundShadow::StructureLampGain(GroundShadow::GroundPoolHeightGate(y, capturedGround), 0.30f) == 1.0f,
+              "ground runs and foundation stairs retain their fence lamp gain");
+    Check(std::fabs(GroundShadow::StructureLampGain(0.5f, 0.30f) - 0.65f) < 1e-6f,
+          "structure gain blends continuously across the ground-height band");
+    Check(GroundShadow::StructureLampGain(upperPool, 1.0f) == 1.0f,
+          "neutral architectural gain preserves elevated direct lamps");
     const float post[3] = {1034.0f, 54.2f, 1274.5f}, indoor[3] = {1036.0f, 59.1f, 1270.0f};
     const float parapetY = 57.7f, curbY = 52.9f, reach = 15.0f;
     // the old rule: every head around raised the gate
@@ -1069,7 +1091,87 @@ void OpeningShapeChecks() {
     }
 }
 
+void RaisedWallSpanChecks() {
+    using namespace WallSampleSpan;
+    const float base = 20.708f, foot = 22.947f, top = 23.923f;
+    const float height = top - foot;
+    Check(RaisedCell(foot, base, height, height, height), "raised gable exceeds the native light span");
+    Check(!RaisedCell(19.951f, 19.958f, 2.996f, 2.996f, 2.996f), "wall below the gable keeps its native span");
+    Check(RaisedCell(1.0f, 0.0f, 1.0f, 1.0f, 1.0f), "short raised cells use their foot even below the native top");
+    Check(!RaisedCell(1.0f, 0.0f, 3.1f, 3.1f, 3.1f), "tall wall retains the existing stretch path");
+    Check(!RaisedCell(2.3f, 0.0f, 0.1f, 1.0f, 1.0f), "unsupported thin edge retains the native mapping");
+    Check(!RaisedCell(4.0f, 0.0f, 1.0f, 1.0f, 1.0f), "distant span is not reinterpreted");
+    Check(ShiftFoot(-1.9f, 0.0f, 1.0f, 1.0f, 1.0f), "existing lower-foot correction remains active");
+    Check(!ShiftFoot(0.0f, 0.0f, 3.0f, 3.0f, 3.0f), "ordinary wall keeps its span");
+    Check(RaisedCell(2.3f, 0.0f, 0.5f, 0.5f, 0.5f) && RaisedCell(2.3f, 0.0f, 1.0f, 1.0f, 1.0f),
+          "a gable height edit retains the same reference at its neighbours");
+    // The native clamp cannot represent the captured top. Moving the sample base
+    // and UV base together preserves world height through the whole drawn face.
+    const float oldTop = base + 3.0f * std::clamp((top - base) / 3.0f, 0.0f, 1.0f);
+    Check(top - oldTop > 0.2f, "native top clamps more than twenty centimetres below the face");
+    for (int i = 0; i <= 1000; ++i) {
+        const float y = foot + height * static_cast<float>(i) / 1000.0f;
+        const float uv = std::clamp((y - foot) / 3.0f, 0.0f, 1.0f);
+        const float sampledY = foot + 3.0f * uv;
+        Check(std::fabs(sampledY - y) < 1e-5f, "raised wall reads light at its drawn world height");
+    }
+    for (int i = -400; i <= 400; ++i) {
+        const float f = static_cast<float>(i) / 100.0f;
+        const bool old = f < -0.05f && f > -3.2f;
+        if (f <= 0.0f) Check(ShiftFoot(f, 0.0f, 1.0f, 1.0f, 1.0f) == old, "lower-foot policy remains equivalent");
+    }
+}
+
+void PillarLightChecks() {
+    const float cap[2][4] = {{1, 0, 0, 0.497f}, {0, 1, 0, 0}};
+    const float head[3] = {0, 2.372f, 0};
+    const float behind[3] = {0.6946f, 0.75f, 0.7919f}, clear[3] = {3.0f, 0.75f, 3.0f}, above[3] = {0, 2.0f, 0};
+    Check(LampCapShadow::Pass(cap, head, behind, 0.15f) < 0.01f, "captured deck ray crosses the pillar's opaque cap");
+    Check(LampCapShadow::Pass(cap, head, clear, 0.15f) > 0.99f, "a stair pixel past the cap's shadow keeps its lamp");
+    Check(LampCapShadow::Pass(cap, head, above, 0.15f) == 1.0f, "the cap never blocks a receiver above it");
+    const float disabled[2][4]{};
+    Check(LampCapShadow::Pass(disabled, head, behind, 0.15f) == 1.0f, "an unknown or incomplete cap leaves lighting unchanged");
+    WallTopCell top;
+    Check(!MeasuredShortTop(top), "unmeasured wall retains its native blocker");
+    top.set = true;
+    top.foot = 0.739f;
+    Check(KeepWallTop(top, 1.125f, 1.125f, 1.125f) && MeasuredShortTop(top), "captured pillar keeps its real short top");
+    Check(!KeepWallTop(top, 0.5f, 0.5f, 0.5f) && top.hl == 1.125f, "lower geometry cannot shrink a known blocker");
+    Builder b(8, 8);
+    const auto idx = b.Wall(true, 3, 4);
+    auto& e = b.g.edges[idx];
+    e.foot = e.base = top.foot;
+    e.topL = top.foot + top.hl, e.topM = top.foot + top.hm, e.topR = top.foot + top.hr;
+    e.shortTop = MeasuredShortTop(top);
+    GridWhy why;
+    Check(Pass(b.g, 3.5f, 2.372f, 3.0f, 3.5f, 1.5f, 5.0f, &why) > 0.5f && why.shortTop,
+          "lamp above captured pillar reaches deck past its physical top");
+    why = {};
+    Check(Pass(b.g, 3.5f, 1.5f, 3.0f, 3.5f, 1.0f, 5.0f, &why) < 0.01f && !why.shortTop,
+          "the same pillar still blocks light through its solid side");
+    StoryWallCopy copy;
+    copy.segs.push_back(WallSeg{});
+    copy.segs[0].x0 = 3.0f, copy.segs[0].x1 = 4.0f;
+    copy.segs[0].z0 = copy.segs[0].z1 = 4.0f;
+    copy.segs[0].y0 = 0.0f, copy.segs[0].y1 = 3.0f;
+    b.g.xf = Identity();
+    FillWallPatches(b.g, copy);
+    Check(copy.lowered == 1 && copy.patches.size() == 1 && std::fabs(copy.patches[0].top0 - 1.864f) < 0.001f,
+          "ground and object shadow copy uses the captured pillar top");
+    Check(KeepWallTop(top, 3.0f, 3.0f, 3.0f) && !MeasuredShortTop(top), "full wall replaces a previously short measure");
+    e.topL = e.topM = e.topR = 3.0f, e.shortTop = false;
+    why = {};
+    Check(Pass(b.g, 3.5f, 2.372f, 3.0f, 3.5f, 1.5f, 5.0f, &why) < 0.01f && !why.shortTop,
+          "ordinary full wall still blocks the porch ray");
+    Check(KeepWallTop(top, 4.0f, 3.5f, 3.2f) && top.tall && !MeasuredShortTop(top), "tall gable protection remains active");
+    top = {};
+    KeepWallTop(top, 3.01f, 3.01f, 3.01f);
+    Check(KeepWallTop(top, 3.025f, 3.025f, 3.025f) && top.tall, "crossing the tall threshold always invalidates the grid");
+}
+
 int main() {
+    PillarLightChecks();
+    RaisedWallSpanChecks();
     ArchConeChecks();
     FloorSillChecks();
     StairwellChecks();

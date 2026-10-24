@@ -429,6 +429,23 @@ int LightMapScaleConst(const std::vector<DWORD>& t, DWORD sampler, bool* squared
     return -1;
 }
 
+// Keep the existing allocation where possible; dense terrain variants can leave a hole below s15.
+int TerrainAlphaSampler(const std::vector<DWORD>& t, const std::vector<Ins>& ins, const Usage& u) {
+    if (u.maxSampler < 15) return u.maxSampler + 1;
+    uint32_t used = 0;
+    for (const Ins& x : ins) {
+        if (x.op == kDef || x.op == kDefI || x.op == kDefB) continue;
+        for (size_t k = x.op == kDcl ? 2 : 1; k <= x.len; ++k) {
+            const DWORD r = t[x.at + k];
+            if ((r & 0x80000000u) && Type(r) == kSampler) {
+                if (Num(r) >= 16) return -1;
+                used |= 1u << Num(r);
+            }
+        }
+    }
+    for (int s = 0; s < 16; ++s) if (!(used & (1u << s))) return s;
+    return -1;
+}
 bool PatchTerrainNativeAlpha(std::vector<DWORD>& t, DWORD sampler, DWORD& extraSampler) {
     if (t.empty() || (t[0] != 0xFFFF0200 && t[0] != 0xFFFF0300) || sampler >= 16) return false;
     const auto ins = Parse(t);
@@ -439,7 +456,8 @@ bool PatchTerrainNativeAlpha(std::vector<DWORD>& t, DWORD sampler, DWORD& extraS
             (x.op == kDefB && x.len != 2) || IsFlow(x.op) || (t[x.at] & 0x10000000u)) return false;
     const Usage u = Scan(t, ins);
     const int tempLimit = t[0] == 0xFFFF0200 ? 12 : 32;
-    if (u.maxTemp + 1 >= tempLimit || u.maxSampler + 1 >= 16 || !u.afterLastSamplerDcl) return false;
+    const int spareSampler = TerrainAlphaSampler(t, ins, u);
+    if (u.maxTemp + 1 >= tempLimit || spareSampler < 0 || !u.afterLastSamplerDcl) return false;
     const Ins* fetch = nullptr;
     bool declared = false;
     for (const Ins& x : ins) {
@@ -463,7 +481,7 @@ bool PatchTerrainNativeAlpha(std::vector<DWORD>& t, DWORD sampler, DWORD& extraS
     const DWORD dest = t[fetch->at + 1], uv = t[fetch->at + 2];
     if (Type(dest) != kTemp || WMask(dest) != 0xF || (dest & 0x00100000u) ||
         (Type(uv) != kInput && Type(uv) != kTexture) || (uv & 0x0F002000u) || Swz(uv) != kSwzXYZW) return false;
-    const DWORD spare = static_cast<DWORD>(u.maxSampler + 1), temp = static_cast<DWORD>(u.maxTemp + 1);
+    const DWORD spare = static_cast<DWORD>(spareSampler), temp = static_cast<DWORD>(u.maxTemp + 1);
     // Match the original read's partial precision, then replace only alpha.
     Apply(t, {{u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, spare)}},
               {End(*fetch), {Op(kTexld, 3), Dst(kTemp, temp) | (dest & 0x00200000u), uv, Src(kSampler, spare),
@@ -1206,11 +1224,12 @@ bool IsInstancedStructureVs(const std::vector<DWORD>& t) {
     return world && lamps;
 }
 
-bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach, bool groundShade) {
+bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach, bool groundShade, bool capShadows) {
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto ins = Parse(t);
     if (ins.empty()) return false;
     const Usage u = Scan(t, ins);
+    if (capShadows && (t[0] != 0xFFFF0300u || u.maxConst + 10 + 6 * kObjectPixelLamps + (reach ? 2 : 0) >= 224)) return false;
     int colorReg = -1, tc1Reg = -1;
     size_t tc1Dcl = 0;
     for (const Ins& x : ins) {
@@ -1260,6 +1279,7 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
     out.pixelLamps = false;
     out.coneConst = 0;
     out.reachConst = 0;
+    out.capConst = 0;
     out.shadeSampler = out.shadeConst = -1;
     t[tc1Dcl] = (t[tc1Dcl] & ~0x000F0000u) | 0x000F0000u; // vT.xy -> vT (zw = world xz)
     const Ins& A = ins[add];
@@ -1280,6 +1300,9 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
         out.coneConst = cK;
         const DWORD cR = cK + 2 * kObjectPixelLamps; // reach: r0^2 of lamps 0..3 / 4..7 (one upload with the rows above)
         out.reachConst = reach ? cR : 0;
+        const DWORD cCap = cR + (reach ? 2 : 0) + 3;
+        const DWORD cCapParams = cCap + 2 * kObjectPixelLamps;
+        out.capConst = capShadows ? cCap : 0;
         t[tc2Dcl] = (t[tc2Dcl] & ~0x000F0000u) | 0x000F0000u; // vT2.xyz -> vT2 (w = world y)
         std::vector<DWORD> code = {Op(kMad, 4), Dst(kTemp, T, 0x3), Src(kInput, V, kSwzZWZW), Src(kConst, cA), Src(kConst, cA, kSwzZWZW),
                                    Op(kTexld, 3), Dst(kTemp, T), Src(kTemp, T), Src(kSampler, E),
@@ -1306,6 +1329,38 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
                                      Op(kMad, 4), Dst(kTemp, LB, 0x8), Src(kTemp, LB, 0xAA), Src(kConst, cc, kSwzW) | kNeg, Src(kTemp, LB, 0xAA), // t (1 - S)
                                      Op(kAdd, 3), Dst(kTemp, LB, 0x4), Src(kTemp, LB, kSwzW), Src(kConst, cc, kSwzW),                            // S + t (1 - S)
                                      Op(kMul, 3), Dst(kTemp, LB, 0x1), Src(kTemp, LB, kSwzX), Src(kTemp, LB, 0xAA)});
+            if (capShadows) {
+                // A floor under the emitter casts a soft shadow on each pixel,
+                // independently of the three points that selected the group's lamps.
+                // The uniform branch skips lamps with no verified complete tile.
+                const DWORD a = cCap + 2 * k, b = a + 1;
+                code.insert(code.end(), {
+                    Op(kMov, 2), Dst(kTemp, G, 0x1), Src(kConst, a, kSwzW),
+                    Op(0x29, 2) | 0x00010000u, Src(kTemp, G, kSwzX), Src(kConst, cCapParams, kSwzW), // ifc_gt
+                    Op(kAdd, 3), Dst(kTemp, G, 0x2), Src(kConst, cp, kSwzY), Src(kTemp, P, kSwzY) | kNeg,
+                    Op(kMax, 3), Dst(kTemp, G, 0x2), Src(kTemp, G, kSwzY), Src(kConst, cCapParams, kSwzW),
+                    Op(0x06, 2), Dst(kTemp, G, 0x2), Src(kTemp, G, kSwzY),
+                    Op(kMul, 3), Dst(kTemp, G, 0x1), Src(kTemp, G, kSwzX), Src(kTemp, G, kSwzY),
+                    Op(kAdd, 3), Dst(kTemp, G, 0x8), Src(kTemp, G, kSwzX) | kNeg, Src(kConst, cH, 0xAA),
+                    Op(kMul, 3), Dst(kTemp, G, 0x4), Src(kTemp, G, kSwzW), Src(kConst, cCapParams, kSwzY),
+                    Op(kMax, 3), Dst(kTemp, G, 0x4), Src(kTemp, G, 0xAA), Src(kConst, cCapParams, kSwzW),
+                    Op(0x06, 2), Dst(kTemp, G, 0x4), Src(kTemp, G, 0xAA),
+                    Op(kMul, 3), Dst(kTemp, G, 0x4), Src(kTemp, G, 0xAA), Src(kConst, cCapParams, 0xAA),
+                    Op(kAdd, 3), Dst(kTemp, LB, 0xC), Src(kTemp, P, 0x88), Src(kConst, cp, 0x88) | kNeg,
+                    Op(kMad, 4), Dst(kTemp, G, 0x3), Src(kTemp, G, kSwzX), Src(kTemp, LB, kSwzZWZW), Src(kConst, cp, 0x88),
+                    Op(0x5A, 4), Dst(kTemp, LB, 0x4), Src(kTemp, G), Src(kConst, a), Src(kConst, a, 0xAA),
+                    Op(0x5A, 4), Dst(kTemp, LB, 0x8), Src(kTemp, G), Src(kConst, b), Src(kConst, b, 0xAA),
+                    Op(kAdd, 3), Dst(kTemp, LB, 0xC), Src(kTemp, LB) | 0x0C000000u, Src(kConst, cCapParams, kSwzX),
+                    Op(kMad, 4), Dst(kTemp, LB, 0xC, true), Src(kTemp, LB), Src(kTemp, G, 0xAA), Src(kConst, cCapParams, kSwzX),
+                    Op(kMul, 3), Dst(kTemp, G, 0x3), Src(kTemp, LB, kSwzZWZW), Src(kTemp, LB, kSwzZWZW),
+                    Op(kMad, 4), Dst(kTemp, LB, 0xC), Src(kTemp, LB), Src(kConst, cCapParams + 1, kSwzY), Src(kConst, cCapParams + 1, kSwzX),
+                    Op(kMul, 3), Dst(kTemp, LB, 0xC), Src(kTemp, LB), Src(kTemp, G, kSwzXYXY),
+                    Op(kMul, 3), Dst(kTemp, LB, 0x4), Src(kTemp, LB, 0xAA), Src(kTemp, LB, kSwzW),
+                    Op(0x58, 4), Dst(kTemp, LB, 0x4), Src(kTemp, G, kSwzW) | kNeg, Src(kConst, cH, kSwzW), Src(kTemp, LB, 0xAA),
+                    Op(kAdd, 3), Dst(kTemp, LB, 0x4), Src(kTemp, LB, 0xAA) | kNeg, Src(kConst, cH, 0xAA),
+                    Op(kMul, 3), Dst(kTemp, LB, 0x1), Src(kTemp, LB, kSwzX), Src(kTemp, LB, 0xAA),
+                    Op(0x2B, 0)}); // endif
+            }
             if (k == 0) code.insert(code.end(), {Op(kMul, 3), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, LB, kSwzX)});
             else code.insert(code.end(), {Op(kMad, 4), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, LB, kSwzX), Src(kTemp, Q)});
         }
@@ -1318,6 +1373,7 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
                                  Op(kLrp, 4), Dst(kTemp, LA, 0x7), Src(kConst, cS, kSwzX), Src(kTemp, LA), Src(kInput, C),
                                  Op(kMax, 3), Dst(kTemp, T, 0x7), Src(kTemp, LA), Src(kTemp, T)});
         std::vector<Edit> edits = {{u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E)}}};
+        if (capShadows) edits.push_back({1, {Op(kDef, 5), Dst(kConst, cCapParams + 1), F(3.0f), F(-2.0f), F(0.0f), F(0.0f)}});
         // The ground lamp shade (13/10, F7 2026-10-13 09-31-30 #268: the wooden curbs of a flowerbed behind a free-standing wall
         // stayed lit by the garden post on the other side, while the grass and the paths beside them were shaded). One lamp
         // list serves the whole group, so a group running past the wall keeps the lamp for every piece, and neither the lamps
@@ -3699,6 +3755,59 @@ bool PatchLotTerrainMax(std::vector<DWORD>& t, DWORD lastSampler, DWORD newSampl
     }
     const DWORD decl[] = {0x0200001F, 0x80010005, 0x90230007, 0x0200001F, 0x90000000, 0xA00F0800 | newSampler}; // v7 = TEXCOORD1, s<new> 2D
     t.insert(t.begin() + dclEnd, std::begin(decl), std::end(decl));
+    return true;
+}
+bool PatchLotTerrainEdges(std::vector<DWORD>& t, bool exit) {
+    const auto ins = Parse(t);
+    if (t.empty() || t[0] != 0xFFFF0300 || ins.empty()) return false;
+    const Usage u = Scan(t, ins);
+    if (u.maxConst >= static_cast<int>(kLotEdgeConst) || u.maxTemp + (exit ? 3 : 2) > 31) return false;
+    const Ins* maximum = nullptr;
+    const Ins* addExit = nullptr;
+    const Ins* terrainGate = nullptr;
+    for (const Ins& x : ins) {
+        if (IsFlow(x.op)) return false;
+        if (x.op == kMul && x.len == 3 && IsReg(t[x.at + 1], kTemp, 7) && WMask(t[x.at + 1]) == 7 &&
+            IsReg(t[x.at + 2], kTemp, 7) && Type(t[x.at + 3]) == kTemp && Swz(t[x.at + 3]) == 0xAA)
+            terrainGate = &x;
+        if (x.op == kMax && x.len == 3 && IsReg(t[x.at + 1], kTemp, 0) && WMask(t[x.at + 1]) == 7 &&
+            IsReg(t[x.at + 2], kTemp, 0) && IsReg(t[x.at + 3], kTemp, 7)) {
+            if (maximum) return false;
+            maximum = &x;
+        }
+        if (maximum && x.op == kAdd && x.len == 3 && IsReg(t[x.at + 1], kTemp, 0) && WMask(t[x.at + 1]) == 7 &&
+            IsReg(t[x.at + 2], kTemp, 0) && Type(t[x.at + 3]) == kTemp && Num(t[x.at + 3]) != 0) {
+            addExit = &x;
+            break;
+        }
+    }
+    if (!maximum || (exit && (!addExit || !terrainGate || terrainGate->at >= maximum->at))) return false;
+    const DWORD a = u.maxTemp + 1, w = a + 1;
+    const DWORD terrain = exit ? a + 2 : 7;
+    const DWORD cx = kLotEdgeConst, cz = cx + 1, ce = cx + 2;
+    const auto neg = [](DWORD r) { return r | 0x01000000u; };
+    std::vector<DWORD> ops = {
+        Op(kMad,4), Dst(kTemp,a,1), Src(kInput,7,kSwzX), Src(kConst,cx,kSwzX), Src(kConst,cx,0xAA),
+        Op(kMad,4), Dst(kTemp,a,1), Src(kInput,7,kSwzY), Src(kConst,cx,kSwzY), Src(kTemp,a,kSwzX),
+        Op(kMad,4), Dst(kTemp,a,2), Src(kInput,7,kSwzX), Src(kConst,cz,kSwzX), Src(kConst,cz,0xAA),
+        Op(kMad,4), Dst(kTemp,a,2), Src(kInput,7,kSwzY), Src(kConst,cz,kSwzY), Src(kTemp,a,kSwzY),
+        Op(kAdd,3), Dst(kTemp,w,1), Src(kConst,cx,kSwzW), neg(Src(kTemp,a,kSwzX)),
+        Op(kAdd,3), Dst(kTemp,w,2), Src(kConst,cz,kSwzW), neg(Src(kTemp,a,kSwzY)),
+        Op(0x0A,3), Dst(kTemp,a,3), Src(kTemp,a), Src(kTemp,w),
+        Op(0x0A,3), Dst(kTemp,a,1), Src(kTemp,a,kSwzX), Src(kTemp,a,kSwzY),
+        Op(kMad,4), Dst(kTemp,w,1,true), Src(kTemp,a,kSwzX), Src(kConst,ce,kSwzX), Src(kConst,ce,kSwzY),
+        Op(kMul,3), Dst(kTemp,w,2), Src(kTemp,w,kSwzX), Src(kTemp,w,kSwzX),
+        Op(kMad,4), Dst(kTemp,w,4), neg(Src(kTemp,w,kSwzX)), Src(kConst,ce,kSwzW), Src(kConst,ce,0xAA),
+        Op(kMul,3), Dst(kTemp,w,1), Src(kTemp,w,kSwzY), Src(kTemp,w,0xAA),
+        Op(kLrp,4), Dst(kTemp,0,7), Src(kTemp,w,kSwzX), Src(kTemp,0), Src(kTemp,terrain)
+    };
+    std::vector<Edit> edits{{End(*maximum), std::move(ops)}};
+    if (exit) {
+        edits.push_back({terrainGate->at, {Op(kMov,2), Dst(kTemp,terrain,7), Src(kTemp,7)}});
+        const DWORD f = Num(t[addExit->at + 3]);
+        edits.push_back({addExit->at, {Op(kMul,3), Dst(kTemp,f,7), Src(kTemp,f), Src(kTemp,w,kSwzX)}});
+    }
+    Apply(t, std::move(edits));
     return true;
 }
 } // namespace ShaderPatches

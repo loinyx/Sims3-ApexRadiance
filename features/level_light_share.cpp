@@ -84,6 +84,7 @@
 #endif
 #include "apex_util.h"
 #include "level_light_share.h"
+#include "lamp_cap_shadow.h"
 #include "terrain_bake_rule.h"
 #include "fast_math.h"
 #include "night_level.h"
@@ -143,6 +144,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include "wall_sample_span.h"
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -2861,6 +2863,7 @@ bool g_wallUvReady = false;
 struct WallCellH {
     float foot = 0, hl = 3, hm = 3, hr = 3;
     bool set = false;
+    WallSampleSpan::Columns columns;
 };
 struct WallHeightRec {
     std::vector<WallCellH> cells;
@@ -2873,15 +2876,24 @@ std::unordered_map<uintptr_t, float> g_wallSolvedH;   // wall -> the tallest col
 std::vector<uintptr_t> g_wallHRequeue;                // walls drawn taller (or shorter) than their last solve took
 std::atomic<long> g_wallUvSeen{0}, g_wallUvMatched{0}, g_wallTallCells{0}, g_wallStretched{0};
 std::atomic<int> g_wallTallLogged{0};
-// Light through doors and windows: each wall cell's drawn foot and, for a wall drawn taller than a story (> 3.02 m), the
-// tallest heights seen (kept while the wall stays: walls-down and cutaway modes draw it short for a while), with the wall's
-// line when noted (another wall made at a freed wall's address is not taken for it); the story grids read them under
-// g_wallHMx. g_wallTopGen moves when a top first appears or rises, or a foot is first seen off the wall's light base.
+// Each wall cell's full geometry heights and foot, with the wall's line so a
+// reused address cannot inherit them. Camera cutaway uses a separate vertex
+// component. Story grids read these under g_wallHMx and rebuild when they rise.
 struct WallTopCell {
     float foot = 0, hl = 0, hm = 0, hr = 0; // the drawn foot (lot y) and the heights over it at the cell's low end, middle, high end
     bool tall = false;                     // hl / hm / hr hold a height over 3.02 m
     bool set = false;                      // the foot was seen drawn
 };
+bool KeepWallTop(WallTopCell& t, float left, float middle, float right) {
+    const bool tall = std::max({left, middle, right}) > 3.02f;
+    const bool rose = (tall && !t.tall) || left > t.hl + 0.02f || middle > t.hm + 0.02f || right > t.hr + 0.02f;
+    if (rose) t.hl = std::max(t.hl, left), t.hm = std::max(t.hm, middle), t.hr = std::max(t.hr, right);
+    t.tall = t.tall || tall;
+    return rose;
+}
+bool MeasuredShortTop(const WallTopCell& c) {
+    return c.set && !c.tall && std::min({c.hl, c.hm, c.hr}) > 0.2f && std::max({c.hl, c.hm, c.hr}) < 2.98f;
+}
 struct WallTopRec {
     float ox = 0, oz = 0, rx = 0, rz = 0; // the wall's line when noted (+0x100 / +0xE0, x and z)
     std::vector<WallTopCell> cells;
@@ -2894,7 +2906,7 @@ std::atomic<long> g_wallTopGen{1};
 // took one row (RecutCellV clamps under the base) lit 1.9 m above it, a hard step where the gable starts; on a lot mixing a
 // house on a foundation with a garage without one, the garage's eave band (story 2, base 23.708, drawn from 22.947) showed
 // the same. Such a wall takes its drawn foot as its base:
-// each sample column moves down by its cell's foot - base (DropLowFootWall) and
+// each sample column moves down by its cell's foot - base (MoveWallFoot) and
 // the cell is recut against its foot (WallUvHook), so each vertex reads the row lit at its own height. Per cell, from 3.2 m
 // to 5 cm below the base, outdoor rooms' walls only; a column of a cell not drawn yet keeps the base (its room is solved
 // again once the cell is seen, NoteWallCell).
@@ -2973,12 +2985,58 @@ bool ReadWallCell(void* geo, uintptr_t mgr, int x, int z, int dir, WallCellRead&
         return false;
     }
 }
+// The UV writer selects the room's class, then uses the wall block's owner
+// dimensions. Read the completed mode-0 UVs, not a screen-space wall candidate.
+bool ReadWallColumnAnchors(void* geo, uintptr_t wall, int cell, int len, float* offsets, unsigned& mask) {
+    __try {
+        mask = 0;
+        const BYTE* v = *reinterpret_cast<BYTE* const*>(static_cast<BYTE*>(geo) + 8);
+        const BYTE* room = *reinterpret_cast<BYTE* const*>(wall);
+        if (!v || !room || len < 1 || len > 64) return false;
+        int cls = *reinterpret_cast<const int*>(room + 0x100);
+        if (cls >= 3) cls = 0;
+        if (cls < 0) return false;
+        const uintptr_t rect = wall + cls * 0x20 + 0x58;
+        const uintptr_t owner = *reinterpret_cast<const uintptr_t*>(rect + 0x1C);
+        if (!owner) return false;
+        const int width = *reinterpret_cast<const int*>(owner + 0x30);
+        const int cols = *reinterpret_cast<const int*>(wall + cls * 0x10 + 0x28);
+        const int first = *reinterpret_cast<const int*>(rect), last = *reinterpret_cast<const int*>(rect + 8);
+        if (width < 16 || width > 16384 || cols < 2 || first < 0 || last < first || last >= width || last - first + 1 != cols) return false;
+        const float* origin = reinterpret_cast<const float*>(wall + 0x100);
+        const float* run = reinterpret_cast<const float*>(wall + 0xE0);
+        const float rr = run[0] * run[0] + run[2] * run[2];
+        if (!std::isfinite(rr) || rr < 1e-4f) return false;
+        const float tolerance = std::min(0.12f, width / 4096.0f * len / (cols - 1) * 0.51f + 1e-4f);
+        for (int i = 0; i < 6; ++i) {
+            const BYTE* p = v + i * 0x2C;
+            const float texel = *reinterpret_cast<const int16_t*>(p + 0x10) * (width / 4096.0f) - 0.5f;
+            const float q = (texel - first) / (cols - 1);
+            const float local = q * len - cell;
+            const int anchor = static_cast<int>(std::lround(local * 2));
+            if (anchor < 0 || anchor > 2 || std::fabs(local - anchor * 0.5f) > tolerance) continue;
+            const float px = *reinterpret_cast<const int16_t*>(p) / 256.0f;
+            const float pz = *reinterpret_cast<const int16_t*>(p + 4) / 256.0f;
+            const float t = ((px - origin[0]) * run[0] + (pz - origin[2]) * run[2]) / rr;
+            const float delta = t - (cell + anchor * 0.5f) / len;
+            if (!std::isfinite(delta) || std::fabs(delta) * std::sqrt(rr) > 0.35f) return false;
+            const unsigned bit = 1u << anchor;
+            if ((mask & bit) && std::fabs(offsets[anchor] - delta) * std::sqrt(rr) > 0.02f) return false;
+            offsets[anchor] = delta;
+            mask |= bit;
+        }
+        return mask != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 void NoteWallCell(void* geo, uintptr_t mgr, int x, int z, int dir) {
     g_wallUvSeen.fetch_add(1, std::memory_order_relaxed);
     WallCellRead c;
     if (!ReadWallCell(geo, mgr, x, z, dir, c)) return;
     const int cell = static_cast<int>(ApexMath::Floor(c.tmid * static_cast<float>(c.len)));
-    const bool sane = c.perp < 0.35f && cell >= 0 && cell < c.len && c.hl > 0.2f && c.hr > 0.2f && c.hm > 0.2f && c.hl < 20.0f && c.hr < 20.0f && c.hm < 20.0f;
+    const bool sane = c.perp < 0.35f && cell >= 0 && cell < c.len &&
+        WallSampleSpan::MeasuredCell(c.foot, c.base, c.hl, c.hm, c.hr, WallOutdoor(c.wall));
     const bool tall = sane && std::max({c.hl, c.hm, c.hr}) > 3.02f;
     if (sane) g_wallUvMatched.fetch_add(1, std::memory_order_relaxed);
     if (tall) g_wallTallCells.fetch_add(1, std::memory_order_relaxed);
@@ -2987,6 +3045,9 @@ void NoteWallCell(void* geo, uintptr_t mgr, int x, int z, int dir) {
                              c.story, c.wall, c.edge, cell, c.len, sane ? (tall ? "taller than 3 m" : "foot differs") : "NOT MATCHED", c.foot, c.base, c.lotBase, c.hl, c.hm,
                              c.hr, c.perp));
     if (!sane) return;
+    float columnOffsets[3]{};
+    unsigned columnMask = 0;
+    const bool haveColumns = WallOutdoor(c.wall) && ReadWallColumnAnchors(geo, c.wall, cell, c.len, columnOffsets, columnMask);
     std::lock_guard<std::mutex> lk(g_wallHMx);
     if (g_wallH.size() > 50000) g_wallH.clear(), g_wallSolvedH.clear(), g_wallTop.clear();
     WallHeightRec& rec = g_wallH[c.wall];
@@ -2995,13 +3056,24 @@ void NoteWallCell(void* geo, uintptr_t mgr, int x, int z, int dir) {
         rec.ox = c.ox, rec.oz = c.oz, rec.rx = c.rx, rec.rz = c.rz;
         g_wallSolvedH.erase(c.wall); // (its last solve was another wall's)
     }
-    rec.cells[cell] = WallCellH{c.foot, c.hl, c.hm, c.hr, true};
+    const WallCellH previousCell = rec.cells[cell];
+    const bool spanChanged = previousCell.set &&
+        WallSampleSpan::ShiftFoot(previousCell.foot, c.base, previousCell.hl, previousCell.hm, previousCell.hr) !=
+        WallSampleSpan::ShiftFoot(c.foot, c.base, c.hl, c.hm, c.hr);
+    WallCellH& current = rec.cells[cell];
+    current.foot = c.foot, current.hl = c.hl, current.hm = c.hm, current.hr = c.hr, current.set = true;
+    bool columnsChanged = false;
+    if (haveColumns) {
+        const float run = std::sqrt(c.rx * c.rx + c.rz * c.rz);
+        for (int a = 0; a < 3; ++a)
+            if (columnMask & (1u << a)) columnsChanged = WallSampleSpan::NoteColumn(current.columns, a, columnOffsets[a], 0.02f / run) || columnsChanged;
+    }
     float maxH = 3.0f;
     for (const WallCellH& h : rec.cells)
         if (h.set) maxH = std::max({maxH, h.hl, h.hm, h.hr});
     rec.maxH = maxH;
-    // light through doors and windows: the cell's drawn foot, and its tallest heights over a story (never lowered while the
-    // wall stays)
+    // Keep the full geometry height, including short foundation and pillar faces.
+    // The wall VS lowers cutaway vertices separately; these are the stored full-height positions.
     WallTopRec& top = g_wallTop[c.wall];
     if (static_cast<int>(top.cells.size()) != c.len || top.ox != c.ox || top.oz != c.oz || top.rx != c.rx || top.rz != c.rz) {
         top.cells.assign(c.len, WallTopCell{});
@@ -3009,16 +3081,13 @@ void NoteWallCell(void* geo, uintptr_t mgr, int x, int z, int dir) {
     }
     WallTopCell& t = top.cells[cell];
     // a foot seen for the first time matters only where the light base is not where the wall is drawn (foundations)
-    bool rose = t.set ? ApexMath::Fabs(t.foot - c.foot) > 0.02f : ApexMath::Fabs(c.foot - c.base) > 0.05f;
+    bool rose = columnsChanged || spanChanged || (t.set ? ApexMath::Fabs(t.foot - c.foot) > 0.02f : ApexMath::Fabs(c.foot - c.base) > 0.05f);
     t.foot = c.foot;
     t.set = true;
-    if (tall && (!t.tall || c.hl > t.hl + 0.02f || c.hm > t.hm + 0.02f || c.hr > t.hr + 0.02f)) {
-        t.hl = std::max(t.hl, c.hl), t.hm = std::max(t.hm, c.hm), t.hr = std::max(t.hr, c.hr);
-        t.tall = rose = true;
-    }
-    if (rose && LowFoot(c.foot, c.base) && g_foundationWallsOn.load(std::memory_order_relaxed) && WallOutdoor(c.wall) &&
+    rose = KeepWallTop(t, c.hl, c.hm, c.hr) || rose;
+    if (rose && (columnsChanged || spanChanged || WallSampleSpan::ShiftFoot(c.foot, c.base, c.hl, c.hm, c.hr)) && g_foundationWallsOn.load(std::memory_order_relaxed) && WallOutdoor(c.wall) &&
         std::find(g_wallHRequeue.begin(), g_wallHRequeue.end(), c.wall) == g_wallHRequeue.end() && g_wallHRequeue.size() < 4096)
-        g_wallHRequeue.push_back(c.wall); // (2.15.3) drawn below its light base: solved again from its foot (DropLowFootWall)
+        g_wallHRequeue.push_back(c.wall); // (2.15.3) drawn below its light base: solved again from its foot (MoveWallFoot)
     if (rose) {
         g_wallTopGen.fetch_add(1, std::memory_order_relaxed);
         BumpGeoGen(mgr);
@@ -3096,13 +3165,15 @@ void __fastcall WallUvHook(void* geo, void*, uintptr_t mgr, int x, int z, int di
         // steps): it is recut too (RecutCellV clamps each vertex to its own height), as its neighbours are
         // (release review) only for an outdoor wall drawn below its light base; other cells keep the all-above-0.2 m rule (the
         // relaxed rule alone was reverted once with breakage seen in game)
-        const bool lowOut = LowFoot(c.foot, c.base) && WallOutdoor(c.wall);
+        const bool outdoor = WallOutdoor(c.wall);
+        const bool lowOut = LowFoot(c.foot, c.base) && outdoor;
+        const bool raisedOut = outdoor && WallSampleSpan::RaisedCell(c.foot, c.base, c.hl, c.hm, c.hr);
         const bool shortCell = lowOut ? std::max({c.hl, c.hm, c.hr}) > 0.2f && std::min({c.hl, c.hm, c.hr}) > -1.0f
                                       : c.hl > 0.2f && c.hm > 0.2f && c.hr > 0.2f;
         if (c.perp < 0.35f && cell >= 0 && cell < c.len && shortCell && std::max({c.hl, c.hm, c.hr}) < 2.98f) {
             f3 = std::max(0.0f, k.w3 / 512.0f - 8.0f), f5 = std::max(0.0f, k.w5 / 512.0f - 8.0f);
-            // an outdoor wall's cell drawn below its light base is lit from its foot (DropLowFootWall)
-            if (lowOut) ref = c.foot;
+            // Eligible outdoor cells use their drawn foot for both the samples and UVs.
+            if (lowOut || raisedOut) ref = c.foot;
             // the game shows the bottom vertices at the light base and the top ones at base + 3 (1 - f)
             const float off = std::max({ApexMath::Fabs(k.y[0] - ref), ApexMath::Fabs(k.y[2] - ref), ApexMath::Fabs(3.0f * (1.0f - f3) - (k.y[3] - ref)),
                                         ApexMath::Fabs(3.0f * (1.0f - f5) - (k.y[5] - ref))});
@@ -3156,9 +3227,9 @@ long StretchWallSamples(uintptr_t wall, int cls, uintptr_t batch, const WallBloc
     }
     return moved;
 }
-// After AlignWallSamples and StretchWallSamples: each column of an outdoor wall whose cell is drawn below the light base
-// (LowFoot) moves down to that foot. POD only (SEH).
-long DropLowFootSamples(uintptr_t wall, int cls, uintptr_t batch, const WallBlock& r, const WallTopCell* cells, int n) {
+// After sample alignment and stretching, move each eligible outdoor cell to its drawn foot.
+// The same base is used by the UV writer; other cells keep the native sample positions. POD only (SEH).
+long MoveWallFootSamples(uintptr_t wall, int cls, uintptr_t batch, const WallBlock& r, const WallCellH* cells, int n) {
     long moved = 0;
     __try {
         const int cols = *reinterpret_cast<const int*>(wall + cls * 0x10 + 0x28), len = *reinterpret_cast<const int*>(wall + 0x24);
@@ -3169,7 +3240,7 @@ long DropLowFootSamples(uintptr_t wall, int cls, uintptr_t batch, const WallBloc
         for (uintptr_t p = b; p < e; p += 0x30) {
             const int i = *reinterpret_cast<const uint16_t*>(p + 0x20) - r.x0;
             const int cell = std::clamp(static_cast<int>(ApexMath::Floor((static_cast<float>(i) + 0.5f) * static_cast<float>(len) / static_cast<float>(cols))), 0, n - 1);
-            if (!cells[cell].set || !LowFoot(cells[cell].foot, base)) continue;
+            if (!cells[cell].set || !WallSampleSpan::ShiftFoot(cells[cell].foot, base, cells[cell].hl, cells[cell].hm, cells[cell].hr)) continue;
             *reinterpret_cast<float*>(p + 4) += cells[cell].foot - base;
             moved++;
         }
@@ -3177,16 +3248,56 @@ long DropLowFootSamples(uintptr_t wall, int cls, uintptr_t batch, const WallBloc
     }
     return moved;
 }
-bool DropLowFootWall(uintptr_t wall, int cls, uintptr_t batch, const WallBlock& r) {
+// Native columns use (i + 0.5) / N; the UV endpoints span N - 1 intervals.
+// Apply measured tangential offsets for cut fragments, preserving the face bias.
+long MoveWallColumnSamples(uintptr_t wall, int cls, uintptr_t batch, const WallBlock& r, const WallCellH* cells, int n) {
+    __try {
+        if (cls < 0 || cls > 2 || !cells || n < 1 || n > 64 || *reinterpret_cast<const int*>(wall + 0x24) != n) return 0;
+        const int cols = *reinterpret_cast<const int*>(wall + cls * 0x10 + 0x28);
+        if (cols < 2 || cols > 65536 || r.x0 < 0 || r.x1 < r.x0 || r.x1 >= 65536 || r.x1 - r.x0 + 1 != cols) return 0;
+        const float* run = reinterpret_cast<const float*>(wall + 0xF0);
+        const float* origin = reinterpret_cast<const float*>(wall + 0x110);
+        if (!std::isfinite(run[0]) || !std::isfinite(run[2]) || !std::isfinite(origin[0]) || !std::isfinite(origin[2])) return 0;
+        const uintptr_t b = *reinterpret_cast<const uintptr_t*>(batch), e = *reinterpret_cast<const uintptr_t*>(batch + 4);
+        if (!b || e <= b || (e - b) % 0x30 || (e - b) / 0x30 > 1u << 20) return 0;
+        for (uintptr_t p = b; p < e; p += 0x30) {
+            const int i = *reinterpret_cast<const uint16_t*>(p + 0x20) - r.x0;
+            if (i < 0 || i >= cols) return 0;
+            const float native = (i + 0.5f) / cols;
+            const float x = *reinterpret_cast<const float*>(p), z = *reinterpret_cast<const float*>(p + 8);
+            if (!std::isfinite(x) || !std::isfinite(z) ||
+                std::fabs(x - origin[0] - native * run[0]) > 1e-3f || std::fabs(z - origin[2] - native * run[2]) > 1e-3f) return 0;
+        }
+        long moved = 0;
+        for (uintptr_t p = b; p < e; p += 0x30) {
+            const int i = *reinterpret_cast<const uint16_t*>(p + 0x20) - r.x0;
+            const float q = static_cast<float>(i) / (cols - 1);
+            const float t = q * n;
+            const int cell = std::min(static_cast<int>(t), n - 1);
+            float delta = 0;
+            if (!cells[cell].set || !WallSampleSpan::ColumnOffset(cells[cell].columns, t - cell, delta)) continue;
+            const float shift = q + delta - (i + 0.5f) / cols;
+            *reinterpret_cast<float*>(p) += shift * run[0];
+            *reinterpret_cast<float*>(p + 8) += shift * run[2];
+            ++moved;
+        }
+        return moved;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+bool MoveWallFoot(uintptr_t wall, int cls, uintptr_t batch, const WallBlock& r) {
     if (!WallOutdoor(wall)) return false;
-    std::vector<WallTopCell> cells;
+    std::vector<WallCellH> cells;
     {
         std::lock_guard<std::mutex> lk(g_wallHMx);
-        const auto it = g_wallTop.find(wall);
-        if (it == g_wallTop.end()) return false;
+        const auto it = g_wallH.find(wall);
+        if (it == g_wallH.end()) return false;
         cells = it->second.cells;
     }
-    return !cells.empty() && DropLowFootSamples(wall, cls, batch, r, cells.data(), static_cast<int>(cells.size())) > 0;
+    if (cells.empty()) return false;
+    const bool columns = MoveWallColumnSamples(wall, cls, batch, r, cells.data(), static_cast<int>(cells.size())) > 0;
+    return MoveWallFootSamples(wall, cls, batch, r, cells.data(), static_cast<int>(cells.size())) > 0 || columns;
 }
 void StretchTallWall(uintptr_t wall, int cls, uintptr_t batch, const WallBlock& r) {
     std::vector<WallCellH> cells;
@@ -3647,6 +3758,7 @@ struct GridEdge {
     uint16_t open = 0;                  // 1 + index into StoryGrid::openings, 0 = none
     uint8_t faces = 0;
     bool half = false;
+    bool shortTop = false; // every full face has a measured top below the native three-metre top
 };
 struct GridOpening {
     float sill = 0;              // m over the edge's base
@@ -3678,6 +3790,7 @@ struct StoryGrid {
     long floorGen = 0;          // g_floorEditGen when built (the story above's floors cap its walls: CapLowerWalls)
     int capped = 0;             // full walls ending at a floor of the story above beside them (foundation sides, deck edges)
     bool capKnown = false;      // the story above was known (its lot tracker) when built; else built again once it is
+    bool shortTops = false;     // permits a cheap rejection before the optional downward-wall retest
     std::vector<int32_t> zl;    // edge (x, Z)-(x + 1, Z) at Z * w + x (Z = 0..h); -1 = no wall
     std::vector<int32_t> xl;    // edge (X, z)-(X, z + 1) at z * (w + 1) + X (X = 0..w)
     // (2.15.3) 1 where a wall edge lies on the line within one cell of the crossing: zlNear at Z * w + x for zl (x - 1 .. x + 1),
@@ -4092,7 +4205,7 @@ int CapLowerWalls(StoryGrid& g) {
     const auto cap = [&](int32_t idx, float x, float z, float nx, float nz) {
         if (idx < 0) return;
         GridEdge& e = g.edges[static_cast<size_t>(idx)];
-        if (e.half) return;
+        if (e.half || e.shortTop) return; // measured pillar tops need not end at the adjacent deck
         const float top = UpperFloorBeside(mgrUp, levelUp, x, z, nx, nz);
         if (!(top > e.foot + 0.05f && top < e.foot + kStoryWallH - 0.05f)) return;
         e.topL = std::min(e.topL, top), e.topM = std::min(e.topM, top), e.topR = std::min(e.topR, top);
@@ -4194,7 +4307,7 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
     std::vector<float> floorY(nt, kNoFloor); // the tiles' +0x78
     struct FaceSum {
         float foot = 1e9f, fullL = -1e9f, fullM = -1e9f, fullR = -1e9f, halfTop = -1e9f;
-        bool full = false;
+        bool full = false, shortTop = true;
         int faces = 0, kind = 0;
         size_t index = 0;
     };
@@ -4287,7 +4400,7 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
         }
         FaceSum& s = sums[static_cast<size_t>(slotRef)];
         float foot = f.oy, drawnFoot = f.oy, hl = 0, hm = 0, hr = 0;
-        bool tall = false;
+        bool tall = false, shortTop = false;
         if (const auto it = tops.find(wall); it != tops.end() && it->second[static_cast<size_t>(fc.cell)].set) {
             const WallTopCell& c = it->second[static_cast<size_t>(fc.cell)];
             if (ApexMath::Fabs(c.foot - f.oy) < 3.5f) { // (a foot that far from the base is not this wall's)
@@ -4295,6 +4408,7 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
                 foot = std::min(foot, c.foot);
                 tall = c.tall;
                 hl = fc.flip ? c.hr : c.hl, hm = c.hm, hr = fc.flip ? c.hl : c.hr;
+                shortTop = MeasuredShortTop(c);
             }
         }
         s.foot = std::min(s.foot, foot);
@@ -4302,10 +4416,11 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
         if (f.half) s.halfTop = std::max(s.halfTop, foot + kHalfWallH);
         else {
             s.full = true;
+            s.shortTop = s.shortTop && shortTop;
             const float plain = foot + kStoryWallH;
-            s.fullL = std::max(s.fullL, tall ? std::max(plain, drawnFoot + hl) : plain);
-            s.fullM = std::max(s.fullM, tall ? std::max(plain, drawnFoot + hm) : plain);
-            s.fullR = std::max(s.fullR, tall ? std::max(plain, drawnFoot + hr) : plain);
+            s.fullL = std::max(s.fullL, shortTop ? drawnFoot + hl : tall ? std::max(plain, drawnFoot + hl) : plain);
+            s.fullM = std::max(s.fullM, shortTop ? drawnFoot + hm : tall ? std::max(plain, drawnFoot + hm) : plain);
+            s.fullR = std::max(s.fullR, shortTop ? drawnFoot + hr : tall ? std::max(plain, drawnFoot + hr) : plain);
         }
         if (fc.kind == 2) g->flags[fc.index / 2] |= static_cast<uint8_t>(1 << (fc.index & 1));
     }
@@ -4316,6 +4431,8 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
         e.foot = s.foot;
         e.faces = static_cast<uint8_t>(std::min(s.faces, 255));
         e.half = !s.full;
+        e.shortTop = s.full && s.shortTop;
+        g->shortTops |= e.shortTop;
         e.topL = s.full ? s.fullL : s.halfTop;
         e.topM = s.full ? s.fullM : s.halfTop;
         e.topR = s.full ? s.fullR : s.halfTop;
@@ -4800,6 +4917,7 @@ void DrainWarmStories() {
 // ---- One ray against a story's grid (light tree thread, every point of a roofless room x lamp of its own story) ----
 struct GridWhy {
     bool wall = false, opening = false, over = false, roof = false;
+    bool shortTop = false;
 };
 // The top of edge e at u (0..1 from its low end)
 inline float GridEdgeTop(const GridEdge& e, float u) {
@@ -4813,6 +4931,7 @@ inline float GridEdgeTop(const GridEdge& e, float u) {
 // floor stands in the story below, whose own grid holds its walls)
 struct GridSpot {
     float clear = 0.0f, over = 0.0f, through = 0.0f;
+    bool shortTop = false;
 };
 // (development builds, hard_wall_tops) The ceiling over the tile the ray comes from at the crossing being tested (GridPassImpl
 // sets it; 1e30 = none): a full wall whose top reaches it has the slab on it, so nothing passes over that top and its soft rim
@@ -4849,7 +4968,10 @@ void GridEdgeSpot(const StoryGrid& g, int32_t idx, float c, float s0, float s1, 
         const float sill = o && o->sill > kFloorSill ? Penumbra::Cover(hh - o->sill, rim.up) : 1.0f;
         const float in = open ? sill * Penumbra::Cover(OpeningHead(*o, v) - hh, rim.up) * o->glass : 0.0f; // (2.15.3) x its glass
         if (in > ov) out.through += w * in;
-        else out.over += w * ov;
+        else {
+            out.over += w * ov;
+            out.shortTop |= e.shortTop && w * ov > 0.0f;
+        }
     };
     if (!o) {
         piece(0.0f, 1.0f, false);
@@ -4864,6 +4986,7 @@ float GridSpotPass(const GridSpot& s, float total, GridWhy& why) {
     if (pass <= 0.0f) why.wall = true;
     else if (s.through > 0.0f && s.through >= s.over) why.opening = true;
     else if (s.over > 0.0f) why.over = true; // (passed, not through an opening: over its top)
+    why.shortTop |= pass > 0.0f && s.shortTop;
     return pass;
 }
 // The share of a ray crossing edge idx at u (0..1 from its low end) at lot height y, the lamp's spot there `rim` wide (in
@@ -6654,7 +6777,7 @@ void AfterWallSamples(void* wall, int piece, int cls, void* batch) {
     if (aligned && g_wallUvReady && g_foundationWallsOn.load(std::memory_order_relaxed)) {
         StretchTallWall(note.wall, cls, reinterpret_cast<uintptr_t>(batch), note.block);
         // (2.15.3) the columns of an outdoor wall drawn below its light base: lit from their drawn foot (a gable)
-        if (DropLowFootWall(note.wall, cls, reinterpret_cast<uintptr_t>(batch), note.block)) g_foundationPieces.fetch_add(1, std::memory_order_relaxed);
+        if (MoveWallFoot(note.wall, cls, reinterpret_cast<uintptr_t>(batch), note.block)) g_foundationPieces.fetch_add(1, std::memory_order_relaxed);
     }
     if (drop != 0.0f) {
         DropWallSamples(reinterpret_cast<uintptr_t>(batch), drop);
@@ -9930,8 +10053,11 @@ void CaptureStoryWalls(BYTE* room0) {
     uintptr_t mgr = 0;
     const int n = ReadStoryWalls(room0, mgr);
     if (n < 0) return;
-    if (const auto it = g_rooms.find(reinterpret_cast<uintptr_t>(room0)); it != g_rooms.end() && it->second.tracker)
-        if (const int c = CapFoundationSides(mgr, it->second.tracker, g_wallRead, n)) g_foundationSides.fetch_add(c, std::memory_order_relaxed);
+    // With grid patches, preserve the native span until each cell receives its
+    // measured top. A whole-run deck cap would irreversibly shorten its pillars.
+    if (!(OpeningsOn() || RoofedOpeningsOn()))
+        if (const auto it = g_rooms.find(reinterpret_cast<uintptr_t>(room0)); it != g_rooms.end() && it->second.tracker)
+            if (const int c = CapFoundationSides(mgr, it->second.tracker, g_wallRead, n)) g_foundationSides.fetch_add(c, std::memory_order_relaxed);
     StoreStoryWalls(mgr, g_wallRead, n, false);
 }
 // Light tree thread (DrainWarmStories): a story whose openings changed or whose grid was not ready takes its patches again
@@ -11558,16 +11684,19 @@ float ReachShare(void* light, const float* sample) {
 }
 // Evaluate the same world ray against every crossed story, at each wall's actual ray height.
 // Only reuse complete, already-gathered geometry; missing geometry retains the native fallback.
-bool OutdoorFloorVisibilityImpl(const RoomInfo& info, int home, void* light, const float* sample, float& pass, float* lamp) {
+bool OutdoorFloorVisibilityImpl(const RoomInfo& info, int home, void* light, const float* sample, float& pass, float* lamp, bool* shortTop = nullptr) {
     const int lo = std::min(home, info.level), hi = std::max(home, info.level);
     if (lo < 0 || hi > 7) return false;
     const StoryGrid* grids[8]{};
+    bool hasShortTop = false;
     for (int k = lo; k <= hi; ++k) {
         const uintptr_t mgr = StoryManager(info.tracker, k);
         const auto it = g_grids.find(mgr);
         if (!mgr || it == g_grids.end() || !it->second) return false;
         grids[k] = it->second.get();
+        hasShortTop |= grids[k]->shortTops;
     }
+    if (shortTop && !hasShortTop) return false;
     LampPos(light, lamp);
     pass = 1.0f;
     for (int k = lo; k <= hi && pass > 0.0f; ++k) {
@@ -11576,13 +11705,14 @@ bool OutdoorFloorVisibilityImpl(const RoomInfo& info, int home, void* light, con
         ToLocal(grids[k]->xf, sample, B);
         GridWhy why{};
         const float transmission = GridPassImpl(*grids[k], A, B, why);
+        if (shortTop) *shortTop |= why.shortTop;
         pass *= transmission;
     }
     return true;
 }
-bool OutdoorFloorVisibility(const RoomInfo& info, int home, void* light, const float* sample, float& pass, float* lamp) {
+bool OutdoorFloorVisibility(const RoomInfo& info, int home, void* light, const float* sample, float& pass, float* lamp, bool* shortTop = nullptr) {
     __try {
-        return OutdoorFloorVisibilityImpl(info, home, light, sample, pass, lamp);
+        return OutdoorFloorVisibilityImpl(info, home, light, sample, pass, lamp, shortTop);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false; // unchanged native path; do not bypass an unreadable obstacle
     }
@@ -11607,6 +11737,21 @@ void CrossFloorShadow(const RoomInfo& info, void* light, const float* sample, fl
     }
     const bool lit = colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f;
     const float before[3] = {colour[0], colour[1], colour[2]};
+    // Downward outdoor rays can clear a pillar's measured top while the native
+    // story test still sees a full wall. Replace that test only after the complete
+    // wall/roof walk succeeds and identifies such a crossing; unknown grids keep it.
+    if (lit && cross && cross->outdoor && !info.indoor && !g_ctx.floorSurface && !g_ctx.basis && home > info.level &&
+        g_ctx.flags && g_ctx.flags[0] && g_enterReady) {
+        float pass = 1.0f;
+        bool shortTop = false;
+        alignas(16) float lamp[4]{};
+        if (OutdoorFloorVisibility(info, home, light, sample, pass, lamp, &shortTop) && shortTop) {
+            for (int i = 0; i < 4; ++i) colour[i] *= pass;
+            g_ctx.yardLight = reinterpret_cast<uintptr_t>(light);
+            std::memcpy(g_ctx.yardLamp, lamp, sizeof g_ctx.yardLamp);
+            return;
+        }
+    }
     // An outdoor floor texel never takes the light of a lamp under its plane: the game weighs each lamp by max(0, N.L) with
     // the texel's real normal (0x006BE020, room-light-maps.md), so the texel's own solve adds no zeroing (12/10). Counted to
     // confirm it in game (expected 0). The floor mask's two wrapped copies ignore N.L on purpose, and they must drop such a
@@ -13030,6 +13175,52 @@ bool RigWorkPending(uintptr_t tracker) {
         if (std::any_of(g_deferred.begin(), g_deferred.end(), [tracker](const DeferredRoom& item) { return item.tracker == tracker; })) return true;
     }
     return DepWaitsFor(tracker);
+}
+
+struct RestartStory { uintptr_t tracker; int level; };
+std::vector<RestartStory> g_restartStories;
+std::vector<RigRoomWatch> g_restartRooms;
+unsigned g_restartNext = 0, g_restartCursor = 0, g_restartTotal = 0;
+bool g_restartActive = false;
+void CancelLightingRestart() {
+    std::vector<RestartStory>().swap(g_restartStories);
+    std::vector<RigRoomWatch>().swap(g_restartRooms);
+    g_restartNext = g_restartCursor = g_restartTotal = 0;
+    g_restartActive = false;
+}
+void PumpLightingRestart() {
+    if (!g_restartActive) return;
+    // Poll a bounded slice. A missing room has unloaded; only native finished
+    // states count as complete for a room that is still present.
+    for (unsigned n = 0, visits = std::min(64u, static_cast<unsigned>(g_restartRooms.size())); n < visits && !g_restartRooms.empty(); ++n) {
+        g_restartCursor %= static_cast<unsigned>(g_restartRooms.size());
+        const auto& room = g_restartRooms[g_restartCursor];
+        const int state = WatchedRoomState(room);
+        if (state < 0 || ((state == 4 || state == 5) && !RigWorkPending(room.key.tracker))) {
+            g_restartRooms[g_restartCursor] = g_restartRooms.back();
+            g_restartRooms.pop_back();
+        } else ++g_restartCursor;
+    }
+    // Backpressure bounds retained room references even in very large worlds.
+    if (g_restartNext < g_restartStories.size() && g_restartRooms.size() < 8192) {
+        const RestartStory story = g_restartStories[g_restartNext++];
+        if (const uintptr_t mgr = SafeStoryManager(story.tracker, story.level)) {
+            BumpGeoGen(mgr);
+            const DragLite::WhyScope why(DragLite::Why::RelightAll);
+            struct ForceSolve {
+                bool previous = t_queueForce;
+                ForceSolve() { t_queueForce = true; }
+                ~ForceSolve() { t_queueForce = previous; }
+            } force;
+            RequeueStory(story.tracker, story.level, 0, nullptr, &g_restartRooms);
+        }
+    }
+    if (g_restartNext == g_restartStories.size() && g_restartRooms.empty()) {
+        g_restartActive = false;
+        std::vector<RestartStory>().swap(g_restartStories);
+        std::vector<RigRoomWatch>().swap(g_restartRooms);
+        LOG_INFO("[LevelLightShare] Lighting restart: loaded room solves finished");
+    }
 }
 void RefreshCompletedLotRigs() {
     const DWORD now = GetTickCount();
@@ -14498,6 +14689,7 @@ void OnPresent() {
     if (g_groupRigsPending.exchange(false, std::memory_order_relaxed)) ObjectLightBridge::RequestRigRefresh();
     g_renderThread = ThreadId();
     ApplyPendingAmbient();
+    PumpLightingRestart();
     RefreshCompletedLotRigs();
     if (g_refreshRequested.exchange(false)) RefreshAllLots();
     if (g_alignRequeue.exchange(false)) LevelLightShare::RelightAllRooms(g_alignOn.load() ? "Seamless walls between floors on" : "Seamless walls between floors off");
@@ -14548,6 +14740,7 @@ void OnPresent() {
 }
 
 void OnWorldChanged() {
+    CancelLightingRestart();
     { // (release review) a wall freed with the world may come back at the same address: its cells' feet start afresh
         std::lock_guard<std::mutex> lk(g_wallHMx);
         g_wallH.clear(), g_wallSolvedH.clear(), g_wallTop.clear();
@@ -14956,6 +15149,56 @@ bool RefreshSlabGrid() {
     return g_slabGrid.ok;
 }
 } // namespace
+
+bool LampFloorCap(const float lamp[3], float rows[2][4]) {
+    std::memset(rows, 0, sizeof(float) * 8);
+    if (!g_objectWallsOn.load(std::memory_order_relaxed) || !RefreshSlabGrid()) return false;
+    struct Memo { uint32_t gen = 0; long edits = 0; float head[3]{}, rows[2][4]{}; bool valid = false; };
+    static Memo memo[64]; // render thread only; the geometry generation invalidates every answer
+    const uint32_t gen = g_floorSnapGen.load(std::memory_order_relaxed);
+    const long edits = g_floorEdits.load(std::memory_order_relaxed);
+    uint32_t bits[3];
+    std::memcpy(bits, lamp, sizeof bits);
+    uint32_t hash = bits[0] * 0x9E3779B1u ^ bits[1] * 0x85EBCA6Bu ^ bits[2] * 0xC2B2AE35u;
+    hash ^= hash >> 16;
+    hash *= 0x85EBCA6Bu;
+    hash ^= hash >> 13;
+    Memo& m = memo[hash & 63u];
+    if (m.gen == gen && m.edits == edits && std::memcmp(m.head, lamp, sizeof m.head) == 0) {
+        std::memcpy(rows, m.rows, sizeof m.rows);
+        return m.valid;
+    }
+    float best = 1.25f;
+    bool found = false;
+    for (const SlabLot& lot : g_slabGrid.lots) {
+        if (lamp[0] < lot.x0 || lamp[0] > lot.x1 || lamp[2] < lot.z0 || lamp[2] > lot.z1) continue;
+        float local[3];
+        ToLocal(lot.xf, lamp, local);
+        const int x = static_cast<int>(ApexMath::Floor(local[0])), z = static_cast<int>(ApexMath::Floor(local[2]));
+        if (ApexMath::Fabs(lot.xf.r[1][1] - 1.0f) > 0.001f) continue;
+        for (int k = 0; k < lot.n; ++k) {
+            const auto& floor = lot.st[k];
+            if (!floor) continue;
+            const SnapView view{floor->h, floor->bits.data(), floor->w, floor->d};
+            if (!view.Placed(x, z, 0) || !view.Placed(x, z, 1) || !view.Placed(x, z, 2) || !view.Placed(x, z, 3)) continue;
+            const uintptr_t mgr = SafeStoryManager(floor->tracker, floor->story);
+            GridTileRead tile{};
+            if (!mgr || !ReadGridTile(mgr, x, z, tile) || !ApexMath::IsFinite(tile.floor)) continue;
+            const float gap = local[1] - tile.floor;
+            if (!(gap > 0.02f && gap < best)) continue;
+            best = gap;
+            rows[0][0] = lot.xf.r[0][0], rows[0][1] = lot.xf.r[2][0];
+            rows[0][2] = lot.xf.r[3][0] - static_cast<float>(x) - 0.5f, rows[0][3] = gap + LampCapShadow::kBias;
+            rows[1][0] = lot.xf.r[0][2], rows[1][1] = lot.xf.r[2][2];
+            rows[1][2] = lot.xf.r[3][2] - static_cast<float>(z) - 0.5f;
+            found = true;
+        }
+    }
+    m.gen = gen, m.edits = edits, m.valid = found;
+    std::memcpy(m.head, lamp, sizeof m.head);
+    std::memcpy(m.rows, rows, sizeof m.rows);
+    return found;
+}
 
 float LampVisibility(const float lamp[3], const float point[3], float nearSkip) {
     const float walls = WallPass(lamp, point, nearSkip); // (through doors, windows and arches partly: their soft rim)
@@ -15396,7 +15639,7 @@ std::string WallNotesOnRay(const float o[3], const float d[3], float* hitOut) {
         if (t <= 0 || t >= bestT) continue;
         const float h[3] = {o[0] + t * d[0], o[1] + t * d[1], o[2] + t * d[2]};
         const float a = ((h[0] - w.x0) * ux + (h[2] - w.z0) * uz) / L;
-        const float lo = w.litLo < 1e8f ? std::min(w.oy, w.litLo) : w.oy; // (lit from its drawn foot: DropLowFootWall)
+        const float lo = w.litLo < 1e8f ? std::min(w.oy, w.litLo) : w.oy; // (lit from its drawn foot: MoveWallFoot)
         if (a < -0.5f * cw || a > L + 0.5f * cw || h[1] < lo - 0.05f || h[1] > w.oy + 3.05f) continue;
         best = &w;
         bestT = t;
@@ -16357,6 +16600,37 @@ void RelightAllRooms(const char* why) {
     }
     g_relightAllAt.store((GetTickCount() + 250) | 1, std::memory_order_relaxed);
 }
+
+bool BeginLightingRestart() {
+    if (g_restartActive) return false;
+    LoadAddresses();
+    if (!g_installed || !kRootPtr || !kRoomById || !kInvalidateRoom || !kSetInsert) return false;
+    CancelLightingRestart();
+    uintptr_t trackers[256], active[4];
+    const int count = AllTrackers(trackers, static_cast<int>(std::size(trackers)));
+    const int activeCount = ActiveLotTrackers(active, static_cast<int>(std::size(active)));
+    for (int priority = 0; priority < 2; ++priority)
+        for (int i = 0; i < count; ++i) {
+            const bool current = std::find(active, active + activeCount, trackers[i]) != active + activeCount;
+            if (current != (priority == 0)) continue;
+            for (int level = -4; level <= 7; ++level)
+                if (SafeStoryManager(trackers[i], level)) g_restartStories.push_back({trackers[i], level});
+        }
+    OutdoorDelta::InvalidateAll("lighting restart");
+    g_floorEditGen.fetch_add(1, std::memory_order_relaxed);
+    g_indoorGen.fetch_add(1, std::memory_order_relaxed);
+    MeshOcclusion::Reset();
+    g_relightAllAt.store(0, std::memory_order_relaxed);
+    { std::lock_guard<std::mutex> lock(g_relightWhyMx); g_relightWhy.clear(); }
+    g_restartActive = !g_restartStories.empty();
+    g_restartTotal = static_cast<unsigned>(g_restartStories.size());
+    LOG_INFO(std::format("[LevelLightShare] Lighting restart: {} loaded stories queued, active lots first", g_restartStories.size()));
+    return true;
+}
+RestartProgress LightingRestartProgress() {
+    return {g_restartNext, g_restartTotal, static_cast<unsigned>(g_restartRooms.size()), g_restartActive};
+}
+void StopLightingRestart() { CancelLightingRestart(); }
 
 void SetFoundationWalls(bool on) {
     if (g_foundationWallsOn.exchange(on) == on) return;

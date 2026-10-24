@@ -9,6 +9,19 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Greek}
 const I18n::Pair kPairs[] = {
+    {"Lighting restarted; some areas use the game's maps", "Ο φωτισμός επανεκκινήθηκε· ορισμένες περιοχές χρησιμοποιούν τους χάρτες του παιχνιδιού"},
+    {"Restart lighting", "Επανεκκίνηση φωτισμού"},
+    {"Discard cached lighting and rebuild it without changing settings", "Διαγράφει τον αποθηκευμένο φωτισμό και τον υπολογίζει ξανά χωρίς αλλαγή ρυθμίσεων"},
+    {"Rebuilding lighting: {} / {} stories queued", "Υπολογισμός φωτισμού: {} / {} όροφοι στην ουρά"},
+    {"Waiting for lighting calculations", "Αναμονή για τους υπολογισμούς φωτισμού"},
+    {"Lighting restarted", "Ο φωτισμός επανεκκινήθηκε"},
+    {"Lighting restart unavailable", "Η επανεκκίνηση φωτισμού δεν είναι διαθέσιμη"},
+    {"Restart lighting rebuilds temporary light maps and keeps your settings", "Η επανεκκίνηση φωτισμού αναδημιουργεί τους προσωρινούς χάρτες και διατηρεί τις ρυθμίσεις"},
+    {"Night Lights: snowy lot edges stay continuous as snow melts", "Νυχτερινός φωτισμός: το φως στα όρια οικοπέδων παραμένει ομαλό καθώς λιώνει το χιόνι"},
+    {"Performance: effects and animal fur update safely while lots load", "Απόδοση: εφέ και γούνα ζώων ενημερώνονται με ασφάλεια κατά τη φόρτωση οικοπέδων"},
+    {"Night Lights: gables and upper trim keep continuous lamp light", "Νυχτερινός φωτισμός: αετώματα και πάνω γείσα δέχονται συνεχές φως λαμπτήρων"},
+    {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Νυχτερινός φωτισμός: χαμηλές κολόνες και σκάλες λαμβάνουν υπόψη τα συμπαγή δάπεδα κάτω από τις λάμπες"},
+
     {"Steam Deck and Linux: Proton is detected and a lighter profile is suggested", "Steam Deck και Linux: το Proton εντοπίζεται και προτείνεται ελαφρύτερο προφίλ"},
     {"Indoor lights update sooner when you enter a lot or change floors", "Τα εσωτερικά φώτα ενημερώνονται νωρίτερα όταν μπαίνεις σε οικόπεδο ή αλλάζεις όροφο"},
     {"Lamps on other lots no longer delay the lights of the lot you play", "Οι λάμπες άλλων οικοπέδων δεν καθυστερούν πια τα φώτα του οικοπέδου όπου παίζεις"},
@@ -770,6 +783,7 @@ const I18n::Pair kPairs[] = {
     {"Sims3SettingsSetter by sims3fiend: project origin and framework reference.", "Sims3SettingsSetter του sims3fiend: αφετηρία του έργου και πρότυπο σχεδιασμού."},
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11: Timothy Lottes (NVIDIA)."},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "Ροή Οικοπέδων και διορθώσεις bloom της μέρας: έρευνα και κώδικας από τον @idavidveiga."},
+    {"Scene update safety: contribution by @rodneypantonial.", "Ασφαλείς ενημερώσεις σκηνής: συνεισφορά του @rodneypantonial."},
     {"Thanks to @boringbones for testing every build.", "Ευχαριστούμε τον @boringbones που δοκιμάζει κάθε έκδοση."},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "Φως εδάφους από πάνω ορόφους: τεχνική του Arro, προσαρμοσμένη στο Apex Radiance."},

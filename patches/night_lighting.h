@@ -21,6 +21,8 @@ void RefreshAll(const char* why = "shortcut", bool terrain = true); // terrain f
 // The same once the changes rest (1 s after the last call): any lighting setting changed (menu, profile, undo, reset, the
 // upper floors switch). Nothing while Night Lighting is off or no world is loaded when it runs. Render thread.
 void RefreshSoon();
+// Queue a deep lighting restart at the next frame boundary. Does not change settings.
+void Restart();
 // The world is on screen after a load (false during load screens; only kept while Night Lighting runs). Render thread.
 bool WorldLive();
 // The load is over (the after-load refresh ran, or 10 s after WorldLive): false during the game's interactive loading

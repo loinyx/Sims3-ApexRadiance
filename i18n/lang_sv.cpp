@@ -9,6 +9,19 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Swedish}
 const I18n::Pair kPairs[] = {
+    {"Lighting restarted; some areas use the game's maps", "Belysningen har startats om; vissa områden använder spelets kartor"},
+    {"Restart lighting", "Starta om belysningen"},
+    {"Discard cached lighting and rebuild it without changing settings", "Tar bort sparad belysning och beräknar den på nytt utan att ändra inställningarna"},
+    {"Rebuilding lighting: {} / {} stories queued", "Beräknar belysning: {} / {} våningar i kö"},
+    {"Waiting for lighting calculations", "Väntar på ljusberäkningar"},
+    {"Lighting restarted", "Belysningen har startats om"},
+    {"Lighting restart unavailable", "Omstart av belysningen är inte tillgänglig"},
+    {"Restart lighting rebuilds temporary light maps and keeps your settings", "Starta om belysningen återskapar tillfälliga ljuskartor och behåller dina inställningar"},
+    {"Night Lights: snowy lot edges stay continuous as snow melts", "Nattbelysning: ljuset vid tomtgränserna förblir jämnt när snön smälter"},
+    {"Performance: effects and animal fur update safely while lots load", "Prestanda: effekter och djurpäls uppdateras säkert medan tomter laddas"},
+    {"Night Lights: gables and upper trim keep continuous lamp light", "Nattbelysning: gavlar och övre lister får sammanhängande lampljus"},
+    {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Nattbelysning: låga pelare och trappor tar hänsyn till solida golv under lampor"},
+
     {"Steam Deck and Linux: Proton is detected and a lighter profile is suggested", "Steam Deck och Linux: Proton känns igen och en lättare profil föreslås"},
     {"Indoor lights update sooner when you enter a lot or change floors", "Inomhusljuset uppdateras snabbare när du går in på en tomt eller byter våning"},
     {"Lamps on other lots no longer delay the lights of the lot you play", "Lampor på andra tomter fördröjer inte längre ljuset på tomten du spelar på"},
@@ -770,6 +783,7 @@ const I18n::Pair kPairs[] = {
     {"Sims3SettingsSetter by sims3fiend: project origin and framework reference.", "Sims3SettingsSetter av sims3fiend: projektets ursprung och ramverksreferens."},
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11: Timothy Lottes (NVIDIA)."},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "Tomtströmning och korrigeringarna av dagsljusets bloom: forskning och kod av @idavidveiga."},
+    {"Scene update safety: contribution by @rodneypantonial.", "Säkra scenuppdateringar: bidrag från @rodneypantonial."},
     {"Thanks to @boringbones for testing every build.", "Tack till @boringbones som testar varje version."},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "Markljus från övre våningar: Arros teknik, anpassad i Apex Radiance."},

@@ -7,16 +7,21 @@ It must:
 - Drain everything when the camera is still or a node waited the longest wait.
 - Never let a recorded node be freed or re-added while linked; never write a dead list or a destroyed node.
 - Leave every lifetime counter that marks an unexpected case at 0.
+- Never leave the Swarm effect renderer or a fur model queued past the frame (their draw reads state their update
+  refreshes).
 
 ## Automated tests
 
-None offline.
+[`tools/scene_budget_test`](../../tools/scene_budget_test/README.md) extracts the production drain and required-node
+classification. Run `tools/scene_budget_test/run.ps1`. Synthetic x86 layouts cover all mandatory-node combinations,
+relative update/deferred order, callback removal and requeue, failed allocation and developer validation failure.
+This does not measure gameplay frame time or validate other drawable classes.
 
 ## Latest results
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
-| | | | No recorded in-game run | |
+| | `a92b656` | `tools/scene_budget_test` | Developer: 1,507,611 checks; public: 1,507,576 checks; no failures | Extracted production, synthetic x86 nodes |
 
 ## In-game test plan
 
@@ -45,6 +50,10 @@ Developer mode, Developer > Performance > *Objects spread across frames*:
    owned by their holder" stays 0. The status never reads "Stopped: a safety check failed" (else the log has
    `[SceneBudget] Safety check failed: ...`). Turning it off logs an Off line with the same counters.
 
+7. Draw state (issue #37): pan over a town with lots streaming and pets or effects in view for 10 minutes. **Expected:**
+   "past the budget for their draw state" grows while "frames left nodes" grows; no access violation at 0x0071D56E or
+   0x006C93D0.
+
 ## Confirmed in game
 
 - Nothing recorded beyond the default-on release in 2.5.5.
@@ -54,8 +63,7 @@ Developer mode, Developer > Performance > *Objects spread across frames*:
 - The per-frame limits (512 nodes / 2 ms / 500 ms) were chosen without data; pick them from the profiler's "Scene
   pending nodes, nodes N, deferred D" in the moving hitches.
 - Which node classes are expensive in vfunc +0x48.
-- Nothing was found that expects the pending list to be empty right after BeginFrame (inferred). A crash or a missing
-  object that appears only with the feature on would contradict it.
+- Swarm effect lists and fur LOD require updates before drawing; those classes are no longer deferred. Other drawable classes have not been exhaustively classified.
 - The destructor hook may run on any thread; the "destroyed on another thread" counter should not grow together with a
   crash.
 - Growing budget (2.7.0): the Developer card's "grown" count during long pans over streaming lots, and no forced full

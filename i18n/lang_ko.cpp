@@ -9,6 +9,19 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Korean}
 const I18n::Pair kPairs[] = {
+    {"Lighting restarted; some areas use the game's maps", "조명을 다시 시작했어요. 일부 영역은 게임의 조명 맵을 사용해요"},
+    {"Restart lighting", "조명 다시 시작"},
+    {"Discard cached lighting and rebuild it without changing settings", "캐시된 조명을 삭제하고 설정을 변경하지 않고 다시 계산해요"},
+    {"Rebuilding lighting: {} / {} stories queued", "조명 재계산 중: {} / {}개 층 대기열에 추가됨"},
+    {"Waiting for lighting calculations", "조명 계산을 기다리는 중이에요"},
+    {"Lighting restarted", "조명을 다시 시작했어요"},
+    {"Lighting restart unavailable", "조명을 다시 시작할 수 없어요"},
+    {"Restart lighting rebuilds temporary light maps and keeps your settings", "조명 재시작은 임시 조명 맵을 다시 만들고 설정을 유지해요"},
+    {"Night Lights: snowy lot edges stay continuous as snow melts", "야간 조명: 눈이 녹을 때도 부지 경계의 빛이 자연스럽게 이어져요"},
+    {"Performance: effects and animal fur update safely while lots load", "성능: 부지를 불러오는 동안 효과와 동물 털을 안전하게 업데이트해요"},
+    {"Night Lights: gables and upper trim keep continuous lamp light", "야간 조명: 박공과 상단 장식에 램프 빛이 끊김 없이 비쳐요"},
+    {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "야간 조명: 낮은 기둥과 계단이 램프 아래의 막힌 바닥을 반영해요"},
+
     {"Steam Deck and Linux: Proton is detected and a lighter profile is suggested", "Steam Deck 및 Linux: Proton을 감지하고 더 가벼운 프로필을 제안합니다"},
     {"Indoor lights update sooner when you enter a lot or change floors", "부지에 들어가거나 층을 바꿀 때 실내 조명이 더 빨리 갱신됩니다"},
     {"Lamps on other lots no longer delay the lights of the lot you play", "다른 부지의 램프가 더 이상 플레이 중인 부지의 조명을 늦추지 않습니다"},
@@ -770,6 +783,7 @@ const I18n::Pair kPairs[] = {
     {"Sims3SettingsSetter by sims3fiend: project origin and framework reference.", "sims3fiend의 Sims3SettingsSetter: 프로젝트의 출발점이자 프레임워크 참고."},
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11: Timothy Lottes (NVIDIA)."},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "부지 스트리밍과 낮 블룸 수정: 연구 및 코드 @idavidveiga."},
+    {"Scene update safety: contribution by @rodneypantonial.", "안전한 장면 업데이트: @rodneypantonial 기여."},
     {"Thanks to @boringbones for testing every build.", "모든 빌드를 테스트해 준 @boringbones에게 감사드려요."},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "위층 지면 조명: Arro의 기법을 Apex Radiance에 맞게 적용."},

@@ -86,6 +86,8 @@ constexpr double kFrameWork = 1.0e6;     // ... or past this many units (texel x
 // maps' soft light cut and map dither when they are on (no lamp shade shapes: the game's cones)
 
 std::atomic<bool> g_option{false}, g_on{false}, g_watch{false};
+bool g_restartRequested = false;
+std::atomic<uint32_t> g_proxyEpoch{1};
 std::atomic<long> c_relights{0}, c_mapsRelit{0}, c_tiles{0}, c_edits{0}, c_editsRefused{0}, c_sends{0}, c_binds{0}, c_proxyBuilds{0};
 std::atomic<float> g_lastMs{0.0f}, g_lastGpuMs{-1.0f}, g_lastEditMs{-1.0f};
 std::string g_inactive;             // render thread: why the option does nothing now ("" = active)
@@ -443,6 +445,11 @@ struct Ask {
 std::vector<std::unique_ptr<Slot>> g_slots;
 uintptr_t g_tracker = 0;
 uint64_t g_lotId = 0;
+// A completed native solve with no remaining send is an explicit fallback, not queued GPU work.
+bool RestartSolveTerminal(const Ask& ask, int state, bool budgetOut) {
+    return (state == 4 || state == 5) && (budgetOut || (ask.count >= kSolveAsks && ask.logged));
+}
+bool g_restartGpuPending = false, g_restartGpuFallback = false;
 std::unordered_map<const void*, Ask> g_askedSolve; // room -> its sends to its solve for a kept solve
 std::unordered_map<const IDirect3DBaseTexture9*, Slot*> g_swap; // the game's map -> its slot (the SetTexture swap; render thread)
 uintptr_t g_swapLo = ~uintptr_t{0}, g_swapHi = 0;               // the address range of its keys (most binds end at this test)
@@ -554,7 +561,7 @@ void RebuildSwap() {
 }
 struct Job;
 std::vector<std::shared_ptr<Job>> g_jobs; // render thread: the stories whose maps are being prepared (a worker thread each, one at a time)
-void DropAll(IDirect3DDevice9* dev, const char* why) {
+void DropAll(IDirect3DDevice9* dev, const char* why, bool requeue = true) {
     g_jobs.clear(); // (a job still running finishes on its own)
     g_swap.clear();
     g_swapLo = ~uintptr_t{0}, g_swapHi = 0;
@@ -574,7 +581,7 @@ void DropAll(IDirect3DDevice9* dev, const char* why) {
     // the game's room-0 maps never took the edits the GPU stood in for: each story's room 0 of that lot is solved again
     // (only while the game still has that lot: after a world change or a lot's teardown its tracker is gone)
     int sent = 0;
-    if (n && g_tracker && LevelLightShare::TrackerLive(g_tracker))
+    if (requeue && n && g_tracker && LevelLightShare::TrackerLive(g_tracker))
         for (int S = 0; S <= 7; S++)
             if (LevelLightShare::Room0Of(g_tracker, S)) sent += LevelLightShare::QueueRoom0(g_tracker, S) ? 1 : 0;
     if (n) LOG_INFO(std::format("[RtOutdoorLamps] {} relit maps dropped ({}): the game's maps are bound again, {} rooms 0 sent to their solve", n, why, sent));
@@ -977,6 +984,8 @@ void ReadGpuTime() {
 }
 
 void Frame(IDirect3DDevice9* dev) {
+    g_restartGpuPending = false;
+    g_restartGpuFallback = false;
     ReadGpuTime();
     // what makes the option do nothing now, logged once each
     if (!g_option.load(std::memory_order_relaxed)) {
@@ -1081,6 +1090,7 @@ void Frame(IDirect3DDevice9* dev) {
         proxyWhy = g_proxyWhy;
     }
     if (!proxy) {
+        g_restartGpuPending = true;
         g_proxyWanted.store(tracker);
         g_on.store(false);
         Inactive("waiting for the lot's occluders (built on the light tree thread at its next room update or room-0 solve)" +
@@ -1096,6 +1106,11 @@ void Frame(IDirect3DDevice9* dev) {
                 } else if (a.count >= kSolveAsks && !a.logged) {
                     a.logged = true;
                     LOG_INFO(std::format("[RtOutdoorLamps] Story {} room 0 sent to its solve {} times with no occluders read: no more sends (idle until the lot's next room update)", S, kSolveAsks));
+                }
+                RoomNow current;
+                if (ReadRoomNow(static_cast<const BYTE*>(room), current) && RestartSolveTerminal(a, current.state, false)) {
+                    g_restartGpuPending = false;
+                    g_restartGpuFallback = true;
                 }
                 break;
             }
@@ -1198,6 +1213,10 @@ void Frame(IDirect3DDevice9* dev) {
                                      "edits go through the game's solve until it keeps one",
                                      S, cls, g_budgetOut ? "the lot's kept parts overflow the memory budget" : std::format("sent {} times", kSolveAsks)));
             }
+            if (!(had && all)) {
+                if (RestartSolveTerminal(a, rn.state, g_budgetOut)) g_restartGpuFallback = true;
+                else g_restartGpuPending = true;
+            }
             continue;
         }
         // the slots of this story: built again when its kept base or its class changed (prepared on a worker thread, then
@@ -1215,6 +1234,7 @@ void Frame(IDirect3DDevice9* dev) {
             uintptr_t setAt = 0;
             if (slot && !slot->built && slot->retryAt && static_cast<int32_t>(GetTickCount() - slot->retryAt) < 0) { // (an upload's backoff)
                 covered = false;
+                g_restartGpuPending = true;
                 continue;
             }
             needs[m] = !(slot && slot->built && slot->version == ver && (!slot->used || OwnMap(room, cls, kSetIdx[m], setAt) == slot->game));
@@ -1226,6 +1246,7 @@ void Frame(IDirect3DDevice9* dev) {
             if (jit != g_jobs.end() && (*jit)->state.load() != 1) g_jobs.erase(jit);
             continue;
         }
+        g_restartGpuPending = true; // includes preparation/export backoff without an in-flight job
         if (jit != g_jobs.end() && (*jit)->state.load() != 1 && ((*jit)->cls != cls || (*jit)->ver != ver)) { // (stale: the base changed again)
             g_jobs.erase(jit);
             jit = g_jobs.end();
@@ -1972,6 +1993,25 @@ void Frame(IDirect3DDevice9* dev) {
 void OnPresent(IDirect3DDevice9* dev) {
     g_frame++;
     if (dev) g_dev = dev;
+    if (dev && g_restartRequested) {
+        g_restartRequested = false;
+        DropAll(dev, "lighting restart", false); // the paced restart owns room scheduling
+        g_on.store(false);
+        g_proxyUsed.reset();
+        {
+            std::lock_guard<std::mutex> lock(g_proxyMx);
+            g_proxyEpoch.fetch_add(1, std::memory_order_relaxed);
+            g_proxy.reset();
+            g_proxyWhy.clear();
+        }
+        g_proxyWanted.store(g_tracker);
+        g_askedSolve.clear();
+        g_exportBackoff.clear();
+        for (KeptList& list : g_keptList) list = KeptList{};
+        g_budgetOut = false;
+        if (g_eng) g_eng->ReleaseDefault();
+        LOG_INFO("[RtOutdoorLamps] Lighting restart: maps, pending jobs and shadow targets discarded");
+    }
     if (dev && g_ps3 < 0) { // (read once, also while off: the menu says when Instant cannot run here)
         D3DCAPS9 caps{};
         if (SUCCEEDED(dev->GetDeviceCaps(&caps))) {
@@ -2004,10 +2044,12 @@ void OnWorldChanged() {
     // (render thread) every map, the occluders and the edits of the previous world go; nothing is sent to a solve (the
     // previous world's lots are gone, and the new world's lots solve their rooms as they load)
     g_tracker = 0;
+    g_restartRequested = false;
     DropAll(g_dev, "the world changed");
     g_proxyUsed.reset();
     {
         std::lock_guard<std::mutex> lk(g_proxyMx);
+        g_proxyEpoch.fetch_add(1, std::memory_order_relaxed);
         g_proxy.reset();
         g_proxyWhy.clear();
     }
@@ -2020,6 +2062,25 @@ void OnWorldChanged() {
     g_exportBackoff.clear();
     for (KeptList& kl : g_keptList) kl = KeptList{};
     g_budgetOut = false;
+}
+
+void RestartLighting() { g_restartRequested = true; }
+bool RestartIncomplete() {
+    if (!g_option.load(std::memory_order_relaxed) || !g_watch.load(std::memory_order_relaxed) || !g_jobs.empty() || g_restartGpuPending) return false;
+    if (std::any_of(g_slots.begin(), g_slots.end(), [](const auto& slot) { return slot->used && slot->built && slot->ok && !slot->relit; })) return false;
+    if (g_restartGpuFallback) return true;
+    if (std::any_of(g_slots.begin(), g_slots.end(), [](const auto& slot) { return slot->used && slot->built && !slot->ok; })) return true;
+    std::lock_guard<std::mutex> lock(g_coverMx);
+    return g_budgetOut && !g_cover.full;
+}
+bool RestartPending() {
+    if (g_restartRequested) return true;
+    if (RestartIncomplete()) return false;
+    if (!g_option.load(std::memory_order_relaxed) || !g_watch.load(std::memory_order_relaxed)) return false;
+    if (g_restartGpuPending || !g_jobs.empty() || !g_proxyUsed || !g_on.load(std::memory_order_relaxed)) return true;
+    if (std::any_of(g_slots.begin(), g_slots.end(), [](const auto& slot) { return slot->used && !slot->relit; })) return true;
+    std::lock_guard<std::mutex> lock(g_coverMx);
+    return !g_cover.full;
 }
 
 // ---- the light tree thread ----
@@ -2059,6 +2120,7 @@ uintptr_t TrackerOfRoom(const void* room, int& story, int& id, int& cls, uintptr
 }
 // The lot's occluders (light tree thread): built when wanted or when its walls, floors or openings changed
 void BuildProxy(uintptr_t tracker, const void* room0) {
+    const uint32_t epoch = g_proxyEpoch.load(std::memory_order_relaxed);
     const uint64_t geo = room0 ? LevelLightShare::LotGeometryKey(room0) : 0;
     {
         std::lock_guard<std::mutex> lk(g_proxyMx);
@@ -2073,6 +2135,7 @@ void BuildProxy(uintptr_t tracker, const void* room0) {
     const bool ok = LevelLightShare::ExportLotProxy(tracker, p->lot, why);
     QueryPerformanceCounter(&b);
     std::lock_guard<std::mutex> lk(g_proxyMx);
+    if (epoch != g_proxyEpoch.load(std::memory_order_relaxed)) return;
     if (!ok) {
         g_proxyWhy = why;
         return;

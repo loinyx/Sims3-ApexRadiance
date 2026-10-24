@@ -9,6 +9,19 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Italian}
 const I18n::Pair kPairs[] = {
+    {"Lighting restarted; some areas use the game's maps", "Illuminazione riavviata; alcune aree usano le mappe del gioco"},
+    {"Restart lighting", "Riavvia illuminazione"},
+    {"Discard cached lighting and rebuild it without changing settings", "Elimina l’illuminazione in cache e la ricalcola senza cambiare le impostazioni"},
+    {"Rebuilding lighting: {} / {} stories queued", "Ricalcolo illuminazione: {} / {} piani in coda"},
+    {"Waiting for lighting calculations", "In attesa dei calcoli dell’illuminazione"},
+    {"Lighting restarted", "Illuminazione riavviata"},
+    {"Lighting restart unavailable", "Riavvio dell’illuminazione non disponibile"},
+    {"Restart lighting rebuilds temporary light maps and keeps your settings", "Riavvia illuminazione ricrea le mappe temporanee e mantiene le impostazioni"},
+    {"Night Lights: snowy lot edges stay continuous as snow melts", "Luci notturne: i bordi dei lotti mantengono una luce uniforme durante il disgelo"},
+    {"Performance: effects and animal fur update safely while lots load", "Prestazioni: effetti e pelliccia degli animali si aggiornano in sicurezza durante il caricamento dei lotti"},
+    {"Night Lights: gables and upper trim keep continuous lamp light", "Luci notturne: timpani e cornici superiori ricevono una luce continua"},
+    {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Luci notturne: pilastri bassi e scale rispettano i pavimenti pieni sotto le lampade"},
+
     {"Steam Deck and Linux: Proton is detected and a lighter profile is suggested", "Steam Deck e Linux: Proton viene rilevato e viene suggerito un profilo più leggero"},
     {"Indoor lights update sooner when you enter a lot or change floors", "Le luci interne si aggiornano prima quando entri in un lotto o cambi piano"},
     {"Lamps on other lots no longer delay the lights of the lot you play", "Le lampade di altri lotti non ritardano più le luci del lotto in cui giochi"},
@@ -770,6 +783,7 @@ const I18n::Pair kPairs[] = {
     {"Sims3SettingsSetter by sims3fiend: project origin and framework reference.", "Sims3SettingsSetter di sims3fiend: origine del progetto e riferimento per l'architettura."},
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11: Timothy Lottes (NVIDIA)."},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "Streaming dei lotti e correzioni del bloom diurno: ricerca e codice di @idavidveiga."},
+    {"Scene update safety: contribution by @rodneypantonial.", "Aggiornamenti sicuri della scena: contributo di @rodneypantonial."},
     {"Thanks to @boringbones for testing every build.", "Grazie a @boringbones per aver testato ogni build."},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "Luce a terra dai piani superiori: tecnica di Arro, adattata in Apex Radiance."},

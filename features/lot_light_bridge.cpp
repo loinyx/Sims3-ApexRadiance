@@ -1336,15 +1336,15 @@ void FenceGridUpdate() {
 // between the two pieces' ends, between the gap's base - 1 m and its top). A gate's origin is its tile's centre, half a tile
 // off the fence's line (the log: both gates of a lot 0.50 m off it); at 0.35 m they were missed, and a gap was filled only
 // while some other object stood on its line, so the light came through again minutes later
-void NoteGate(float x, float y, float z) {
+bool NoteGate(float x, float y, float z) {
     FenceGridUpdate();
-    if (g_fenceGaps.empty()) return;
+    if (g_fenceGaps.empty()) return false;
     const auto it = g_gapCells.find(FenceCellKey(FenceCell(x), FenceCell(z)));
     // (closed gaps need no gate)
-    if (it == g_gapCells.end()) return;
+    if (it == g_gapCells.end()) return false;
+    bool closedMatch = false;
     for (uint32_t k : it->second) {
         const FenceGap& gp = g_fenceGaps[k];
-        if (gp.closed) continue;
         const float dx = gp.w.x1 - gp.w.x0, dz = gp.w.z1 - gp.w.z0, l = std::hypot(dx, dz);
         const float t = ((x - gp.w.x0) * dx + (z - gp.w.z0) * dz) / l, side = ApexMath::Fabs((x - gp.w.x0) * dz - (z - gp.w.z0) * dx) / l;
         if (t < -0.1f || t > l + 0.1f || side > kGateOff || y < gp.w.y0 - 1.0f || y > gp.w.y1) {
@@ -1356,6 +1356,10 @@ void NoteGate(float x, float y, float z) {
             }
             continue;
         }
+        if (gp.closed) {
+            closedMatch = true;
+            continue; // retain the scale without skipping another gap that still needs its gate noted
+        }
         const DWORD now = GetTickCount();
         const auto [g, fresh] = g_gates.try_emplace(gp.key, now);
         if (fresh) ApexUtil::CountOne(g_gatesFilled);
@@ -1365,8 +1369,9 @@ void NoteGate(float x, float y, float z) {
                                  gp.w.x0, gp.w.z0, gp.w.x1, gp.w.z1, gp.w.y0, gp.w.y1));
         }
         else if (now - g->second > 1000) g->second = now;
-        return;
+        return true;
     }
+    return closedMatch;
 }
 void FenceWallsIn(float x0, float z0, float x1, float z1, std::vector<GroundShadow::Wall>& out) {
     FenceGridUpdate();
@@ -3996,7 +4001,8 @@ IDirect3DPixelShader9* PatchSnowPass(IDirect3DDevice9* dev, const std::vector<DW
     for (int kind = 0; kind < 3; kind++) {
         std::vector<DWORD> t = code;
         IDirect3DPixelShader9* ps = nullptr;
-        if (!PatchLotTerrainMax(t, lastSampler, newSampler, kind < 2, kind == 0) || FAILED(dev->CreatePixelShader(t.data(), &ps)) || !ps) continue;
+        if (!PatchLotTerrainMax(t, lastSampler, newSampler, kind < 2, kind == 0) ||
+            !ShaderPatches::PatchLotTerrainEdges(t, kind == 0) || FAILED(dev->CreatePixelShader(t.data(), &ps)) || !ps) continue;
         masked = kind < 2;
         exit = kind == 0;
         return ps;
@@ -4032,6 +4038,37 @@ struct MaskBind {
     }
     ~MaskBind() {
         if (on && saved) SetPsConst(dev, kMaskConst, old, count);
+    }
+};
+
+// Winter and melting snow use the same three-metre transition as the dry lot
+// pass. The terrain side already contains the lamps crossing the lot border.
+struct SnowEdgeBind {
+    IDirect3DDevice9* dev;
+    float old[12]{};
+    bool saved = false, ready = false;
+    SnowEdgeBind(IDirect3DDevice9* d, const float k[4], const float centre[4]) : dev(d) {
+        saved = SUCCEEDED(dev->GetPixelShaderConstantF(ShaderPatches::kLotEdgeConst, old, 3));
+        if (!saved) return;
+        float m[16]{}, edge[12]{};
+        const LotRect* r = nullptr;
+        int first = 0, third = 8;
+        if (SUCCEEDED(dev->GetVertexShaderConstantF(8, m, 4))) {
+            r = FindLotRect(m, m + 8);
+            if (!r) {
+                r = FindLotRect(m + 4, m + 12);
+                first = 4, third = 12;
+            }
+        }
+        if (r) NoteLotDraw((static_cast<uint64_t>(r->lotHi) << 32) | r->lotLo);
+        else g_lotRectMiss = true;
+        LotEdgeConstants(k, centre, m + first, m + third, r, edge);
+        edge[10] = 3.0f;
+        edge[11] = 2.0f;
+        ready = SUCCEEDED(D3D9Hooks::CallOriginalSetPixelShaderConstantF(dev, ShaderPatches::kLotEdgeConst, edge, 3));
+    }
+    ~SnowEdgeBind() {
+        if (saved) SetPsConst(dev, ShaderPatches::kLotEdgeConst, old, 3);
     }
 };
 
@@ -4074,6 +4111,8 @@ template <typename DrawFn> bool DrawLotSnow(IDirect3DDevice9* dev, DrawFn draw, 
         terrain = ChunkTexture(it->first, it->second.tex);
     }
     const float atlasMap[4] = {atlasC[0], atlasC[1], atlasC[2] + v[4] * atlasC[0], atlasC[3] + v[6] * atlasC[1]};
+    SnowEdgeBind edgeBind(dev, atlas ? atlasMap : v, &v[4]);
+    if (!edgeBind.ready) return false;
     IDirect3DPixelShader9* original = g_curPs;
     g_inOwnCall = true;
     {
@@ -4121,6 +4160,8 @@ template <typename DrawFn> bool DrawLotMelt(IDirect3DDevice9* dev, DrawFn draw) 
         terrain = ChunkTexture(it->first, it->second.tex);
     }
     const float atlasMap[4] = {atlasC[0], atlasC[1], atlasC[2] + v[4] * atlasC[0], atlasC[3] + v[6] * atlasC[1]};
+    SnowEdgeBind edgeBind(dev, atlas ? atlasMap : v, &v[4]);
+    if (!edgeBind.ready) return false;
     IDirect3DPixelShader9* original = g_curPs;
     g_inOwnCall = true;
     {
@@ -4189,6 +4230,7 @@ uint32_t g_objRigDayScaled = 0;
 // option off), and the walls' own scale (ReachLampScale). Render thread: the draws by the reach law (objects, fences,
 // windows) and those that kept the first law because the shader had no room for the 2 more rows.
 std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_objLampPsReach, g_fencePsReach;
+std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_fenceCapPs[2];
 uint32_t g_reachObjDraws = 0, g_reachFenceDraws = 0, g_reachWindowDraws = 0, g_reachLawRefused = 0;
 // The game's lamp scale of the outdoor walls (the native cK.x DrawWallGain reads; F7 20-31-19 at night drew c3.x 0.309124 =
 // 1 x the walls' gain 0.309124 of that capture's settings), render thread. The reach law gives objects the walls' scale.
@@ -4366,6 +4408,7 @@ template <typename DrawFn> bool DrawRoad(IDirect3DDevice9* dev, DrawFn draw) {
 constexpr unsigned kGroupPieces = 32;
 struct GroupCentre {
     float x = 0, y = 0, z = 0, ext = 0;
+    float minY = 0; // lowest instance origin; mixed-height runs retain their ground response
     float a[3] = {}, b[3] = {}; // the group's two ends (the instance farthest from the centre, then the one farthest from it)
     // (12/10, F7 18-17-00 #393: the centre of an L-shaped balcony band of 33 pieces stood in open air, 3.6 m from the nearest
     // piece) up to kGroupPieces of its pieces, evenly through the buffer: DrawInstanced tests each lamp from the one nearest it
@@ -4380,15 +4423,18 @@ uint32_t g_groupReads = 0;
 bool ReadInstancePositions(const BYTE* p, UINT count, UINT stride, GroupCentre& g) {
     __try {
         double sx = 0, sy = 0, sz = 0;
+        float minY = 1e30f;
         for (UINT i = 0; i < count; i++) {
             const float* v = reinterpret_cast<const float*>(p + static_cast<size_t>(i) * stride);
             if (!ApexMath::IsFinite(v[0]) || !ApexMath::IsFinite(v[1]) || !ApexMath::IsFinite(v[2])) return false;
             sx += v[0];
             sy += v[1];
             sz += v[2];
+            minY = std::min(minY, v[1]);
         }
         g.x = static_cast<float>(sx / count);
         g.y = static_cast<float>(sy / count);
+        g.minY = minY;
         g.z = static_cast<float>(sz / count);
         auto farthest = [&](float fx, float fz, float* out) {
             float best = -1.0f;
@@ -4644,6 +4690,9 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
     }
     PatchedPs& p = *chosen;
     const bool reachLaw = p.inst.reachConst != 0;
+    const LotRect* groupLot = g ? FindLotAt(g->x, g->z) : nullptr;
+    const float poolGate = groupLot ? GroundShadow::GroundPoolHeightGate(g->minY, groupLot->ty) : 1.0f;
+    const float structureGain = GroundShadow::StructureLampGain(poolGate, g_wallGain.load(std::memory_order_relaxed));
     float oldA[4] = {}, oldB[4] = {};
     dev->GetPixelShaderConstantF(p.inst.atlasConst, oldA, 1);
     dev->GetPixelShaderConstantF(p.inst.strengthConst, oldB, 1);
@@ -4668,11 +4717,10 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
             used = PickFenceLamps(*g, reachLaw, lamps, lampTop, share);
             lamps[0][1] = TerrainLightingPolicy::SurfaceLampGain(g_night.load(std::memory_order_relaxed), g_objPixelLampStrength.load(std::memory_order_relaxed)) *
                           std::max(g_fenceStrength.load(std::memory_order_relaxed), 0.0f);
-            // reach: the outdoor walls' native scale with the daytime curve, the two sliders as trims over their defaults.
-            // (2.15.3) Not the walls' gain: fences are not walls and have their own strength; with the walls' gain at 0.30 they
-            // took 30% of the light the same lamp gives the ground and objects around them
+            // Upper architectural runs use the same gain as adjacent loose pieces.
+            // A run touching the ground keeps the fence response, including stairs.
             if (reachLaw)
-                lamps[0][1] = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), night, g_wallEnabled.load(std::memory_order_relaxed), 1.0f,
+                lamps[0][1] = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), night, g_wallEnabled.load(std::memory_order_relaxed), structureGain,
                                                                     g_objPixelLampStrength.load(std::memory_order_relaxed) / kPixelLampTrimUnit *
                                                                         (std::max(g_fenceStrength.load(std::memory_order_relaxed), 0.0f) / kPixelLampTrimUnit));
             // A valid per-instance group supplies world position/normal. Replace
@@ -4694,7 +4742,7 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
             // data). Ground fences and curbs, below the heads, keep it all. (14/10) The atlas has no walls or slabs either: the
             // tops take it x the share of the atlas lamps' light the group sees (the objects' ground share), so a parapet over
             // the slab of an arcade takes none of the pool of the lamp under that slab.
-            weight[0] = GroundLightGate::HeightGate(g->y, lampTop) * share;
+            weight[0] = GroundLightGate::HeightGate(g->y, lampTop) * share * poolGate;
         }
         dev->GetPixelShaderConstantF(p.inst.lampParamConst, &oldLamps[0][0], rows);
         dev->GetPixelShaderConstantF(p.inst.groundWeightConst, oldWeight, 1);
@@ -4706,6 +4754,27 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
                                     used, !p.inst.pixelLamps ? " (this shader has none: ground light only)" : g ? "" : " (group not read or option off: the game's vertex lights)",
                                     lamps[0][1], s[0], weight[0], weight[1]) +
                         (p.inst.pixelLamps ? ReachLawText(reachLaw, reachRefused, g != nullptr, lamps[0][1], lamps + kLampRows, used) : std::string());
+    if (LightProbe::Capturing())
+        g_objDrawInfo += std::format("\n      structure height: lowest origin {:.2f}, ground pool {:.2f}, architectural gain {:.4f}", g ? g->minY : 0.0f, poolGate, structureGain);
+    constexpr unsigned kCapRows = 2 * N + 1;
+    float caps[kCapRows][4]{}, oldCaps[kCapRows][4];
+    unsigned capCount = 0;
+    PatchedPs* active = &p;
+    if (g && p.inst.pixelLamps) {
+        for (int k = 0; k < used; ++k)
+            if (LevelLightShare::LampFloorCap(lamps[1 + 2 * k], caps + 2 * k)) ++capCount;
+        if (capCount) {
+            PatchedPs& candidate = PatchedFor(dev, g_fenceCapPs[reachLaw ? 1 : 0], "Fence/stairs (emitter floor shadows)",
+                [reachLaw](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchInstancedLamps(t, pp.inst, reachLaw, true, true); }, true);
+            if (candidate.ps && candidate.inst.capConst && candidate.inst.lampParamConst == p.inst.lampParamConst && candidate.inst.shadeConst == p.inst.shadeConst &&
+                SUCCEEDED(dev->GetPixelShaderConstantF(candidate.inst.capConst, &oldCaps[0][0], kCapRows))) {
+                active = &candidate;
+                caps[2 * N][0] = 0.5f, caps[2 * N][1] = Penumbra::Radius(), caps[2 * N][2] = 0.5f, caps[2 * N][3] = 1e-4f;
+            }
+        }
+    }
+    if (LightProbe::Capturing())
+        g_objDrawInfo += std::format("\n      emitter floor shadows: {} verified caps, {}", capCount, active != &p ? "per pixel" : "existing shader retained");
     if (reachLaw) g_reachFenceDraws++;
     IDirect3DPixelShader9* original = g_curPs;
     g_inOwnCall = true;
@@ -4725,12 +4794,14 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
         // and gate 0, the draw as before.
         // (2.15.3) A face reads the shade of the ground it faces, kFenceShadeReach in front of it: the fence is a wall in the lot
         // mask, so its own footprint lies on its shadow's edge (F7: a dark band under 1 m on the face turned to the lamp)
-        FloorShadeBind shade(dev, p.inst.shadeSampler, p.inst.shadeConst, g ? FindLotAt(g->x, g->z) : nullptr, 1.0f, g_fenceShadeLot, g_fenceShadeNoLot,
+        FloorShadeBind shade(dev, p.inst.shadeSampler, p.inst.shadeConst, groupLot, 1.0f, g_fenceShadeLot, g_fenceShadeNoLot,
                              GroundShadow::kFenceShadeReach);
         if (LightProbe::Capturing()) g_objDrawInfo += "\n      " + shade.Text();
-        SetPs(dev, p.ps);
+        if (active != &p) SetPsConst(dev, active->inst.capConst, &caps[0][0], kCapRows);
+        SetPs(dev, active->ps);
         draw();
         SetPs(dev, original);
+        if (active != &p) SetPsConst(dev, active->inst.capConst, &oldCaps[0][0], kCapRows);
         if (p.inst.pixelLamps) {
             SetPsConst(dev, p.inst.groundWeightConst, oldWeight, 1);
             SetPsConst(dev, p.inst.lampParamConst, &oldLamps[0][0], rows);
@@ -5590,6 +5661,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
                        g_objPixelStrength.load(std::memory_order_relaxed)), 0, 0, 0};
     float groundShare = 1.0f; // the share of the nearby lamps' light no wall blocks (below)
     float lampTop = -1e9f, originY = 0.0f; // the highest lamp head around and the object's origin (the ground gate, below)
+    float poolGate = 1.0f;
     // Per-pixel lamps ("Counters" request): the same world lamps for every piece, chosen by the object's position (the
     // VS world triple's translation), so neighbouring pieces of a modular object get the same lamps.
     constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
@@ -5621,20 +5693,24 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
             // loose objects keep 0.2 m, so a wall 0.4 m behind an armchair still blocks the next room's lamp (F7 capture, 07/10)
             float at[3];
             const bool inWall = ObjectLampPoint(m, at);
-            if (!inWall) NoteGate(m[0][3], m[1][3], m[2][3]); // a gate fills its fence's gap in the lot shade (rig modes 1 and 2)
+            const bool gate = !inWall && NoteGate(m[0][3], m[1][3], m[2][3]);
             const float nearSkip = inWall ? kWindowWallSkip : 0.2f;
             nLamps = PickObjectLamps(at[0], at[1], at[2], lamps, groundShare, nearSkip, lamps + 1 + 2 * N, &lampTop, reach ? lamps + kLampRows : nullptr, true);
             originY = at[1];
+            // The atlas represents light on the lot ground. Upper cornice pieces
+            // must not acquire different pools from their nearest lamp-head lists.
+            // Direct pixel lamps remain responsible for those elevated surfaces.
+            if (const LotRect* lot = FindLotAt(at[0], at[2]))
+                poolGate = GroundShadow::GroundPoolHeightGate(originY, lot->ty);
             // the rig goes: its 3 pixel lamps (PS c5..c7 = 0 below, diffuse and specular) and its 4 vertex lights (the VS
             // colour constants = 0; Phong's ambient term in COLOR0 stays)
             lamps[0][1] = TerrainLightingPolicy::SurfaceLampGain(g_night.load(std::memory_order_relaxed),
                               g_objPixelLampStrength.load(std::memory_order_relaxed));
-            // reach: the outdoor walls' scale, the slider a trim over its default. The walls' gain only for an object set in its
-            // wall (a window or door frame takes the light of the wall around it); a loose object outdoors takes the fences'
-            // scale (2.15.3, F7: a wooden gate in a fence line took 30% of the light the same garden post gave the fence beside it)
+            // Architectural objects share the walls' lamp scale. Only an object
+            // occupying a fence gap keeps the fence scale, preserving gate continuity.
             if (reach)
                 lamps[0][1] = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), night, g_wallEnabled.load(std::memory_order_relaxed),
-                                                                    inWall ? g_wallGain.load(std::memory_order_relaxed) : 1.0f,
+                                                                    gate ? 1.0f : g_wallGain.load(std::memory_order_relaxed),
                                                                     g_objPixelLampStrength.load(std::memory_order_relaxed) / kPixelLampTrimUnit);
             zeroRig = true;
             lamps[0][0] = 1.0f; // no directionless ground light on vertical faces
@@ -5648,7 +5724,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
     // find lampTop).
     const float gate = lampTop > -1e8f ? std::clamp(1.0f - (originY - lampTop) / 1.5f, 0.0f, 1.0f) : 1.0f;
     if (gate < 1.0f) g_objGroundGated++;
-    s[0] *= groundShare * gate;
+    s[0] *= groundShare * gate * poolGate;
     const float rigDayScale = TerrainLightingPolicy::LampDay(night);
     const bool rigDay = !zeroRig && rigDayScale < 1.0f && (p.obj.rigLamps || vl >= 0); // the kept rig, scaled for this draw
     if (rigDay) g_objRigDayScaled++;
@@ -5657,6 +5733,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
         if (rigDay) g_objDrawInfo += std::format("\n      no per-pixel lamps placed: the game's rig lamp colours x {:.4f} (daytime curve) for this draw", rigDayScale);
         g_objDrawInfo += std::format("\n      ground light: share not behind buildings {:.2f}, height gate {:.2f} (object origin y {:.2f}, highest lamp head within 15 m {})",
                                      groundShare, gate, originY, lampTop > -1e8f ? std::format("{:.2f}", lampTop) : std::string("none"));
+        g_objDrawInfo += std::format("\n      ground pool at the object's height: {:.2f} (direct pixel lamps unchanged)", poolGate);
         g_objDrawInfo += ReachLawText(reach, reachRefused, zeroRig, lamps[0][1], lamps + kLampRows, nLamps);
     }
     if (reach && zeroRig) g_reachObjDraws++; // zeroRig: the lamps were placed (else cS.x = 0 and the sum is not used)
@@ -9477,7 +9554,7 @@ void Shutdown(bool keepChunkMaps) {
     g_meltTried = false;
     g_patchedGen++; // (PatchedFor's front answers and RoomMapConsts' last shader)
     for (auto* cache : {&g_terrainAlphaPs, &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs, &g_windowPs,
-                        &g_objLampPsReach, &g_fencePsReach, &g_windowPsReach}) {
+                        &g_objLampPsReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_windowPsReach}) {
         for (auto& [k, p] : *cache)
             if (p.ps) p.ps->Release();
         cache->clear();
@@ -9603,7 +9680,7 @@ void MeasureMemoryImpl() {
     size_t patchedItems = 0;
     const auto ps = [&](const std::unordered_map<IDirect3DPixelShader9*, PatchedPs>& m) { patched += Hash(m), patchedItems += m.size(); };
     for (const auto* m : {&g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_terrainAlphaPs,
-                          &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_objLampPsReach, &g_fencePsReach, &g_windowPs, &g_windowPsReach,
+                          &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_objLampPsReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_windowPs, &g_windowPsReach,
                           &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs})
         ps(*m);
     for (const auto* t : {&g_floorShadePs, &g_indoorPs, &g_floorAtlasPs}) {

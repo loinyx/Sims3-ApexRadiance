@@ -9,6 +9,19 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), German}
 const I18n::Pair kPairs[] = {
+    {"Lighting restarted; some areas use the game's maps", "Beleuchtung neu gestartet; einige Bereiche nutzen die Lichtkarten des Spiels"},
+    {"Restart lighting", "Beleuchtung neu starten"},
+    {"Discard cached lighting and rebuild it without changing settings", "Verwirft die zwischengespeicherte Beleuchtung und berechnet sie ohne Einstellungsänderungen neu"},
+    {"Rebuilding lighting: {} / {} stories queued", "Beleuchtung wird neu berechnet: {} / {} Etagen eingereiht"},
+    {"Waiting for lighting calculations", "Warte auf Beleuchtungsberechnungen"},
+    {"Lighting restarted", "Beleuchtung neu gestartet"},
+    {"Lighting restart unavailable", "Neustart der Beleuchtung nicht verfügbar"},
+    {"Restart lighting rebuilds temporary light maps and keeps your settings", "Beleuchtung neu starten erstellt temporäre Lichtkarten neu und behält deine Einstellungen"},
+    {"Night Lights: snowy lot edges stay continuous as snow melts", "Nachtbeleuchtung: Grundstücksränder bleiben beim Schmelzen des Schnees gleichmäßig beleuchtet"},
+    {"Performance: effects and animal fur update safely while lots load", "Leistung: Effekte und Tierfell werden beim Laden von Grundstücken sicher aktualisiert"},
+    {"Night Lights: gables and upper trim keep continuous lamp light", "Nachtbeleuchtung: Giebel und obere Zierleisten erhalten durchgehendes Lampenlicht"},
+    {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Nachtbeleuchtung: Niedrige Pfeiler und Treppen beachten feste Böden unter Lampen"},
+
     {"Steam Deck and Linux: Proton is detected and a lighter profile is suggested", "Steam Deck und Linux: Proton wird erkannt und ein leichteres Profil vorgeschlagen"},
     {"Indoor lights update sooner when you enter a lot or change floors", "Innenlicht aktualisiert sich schneller, wenn du ein Grundstück betrittst oder das Stockwerk wechselst"},
     {"Lamps on other lots no longer delay the lights of the lot you play", "Lampen auf anderen Grundstücken verzögern das Licht deines Grundstücks nicht mehr"},
@@ -770,6 +783,7 @@ const I18n::Pair kPairs[] = {
     {"Sims3SettingsSetter by sims3fiend: project origin and framework reference.", "Sims3SettingsSetter von sims3fiend: Ursprung des Projekts und Framework-Vorlage."},
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11: Timothy Lottes (NVIDIA)."},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "Grundstücks-Streaming und die Korrekturen für Tages-Bloom: Recherche und Code von @idavidveiga."},
+    {"Scene update safety: contribution by @rodneypantonial.", "Sichere Szenenaktualisierung: Beitrag von @rodneypantonial."},
     {"Thanks to @boringbones for testing every build.", "Danke an @boringbones für das Testen jedes Builds."},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "Bodenlicht aus oberen Stockwerken: Arros Technik, angepasst in Apex Radiance."},

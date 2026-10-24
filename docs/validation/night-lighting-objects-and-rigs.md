@@ -31,6 +31,7 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-23 | `4802ed9` (ASI SHA-256 `FC2D565C0F003F0DD9DF2BC56DFC5F047CA6FCDAC508B2DA66A83D032258ECFB`) | Standard Release x86 build; `tools/terrain_lighting_test/run_resource_checks.ps1`; `tools/terrain_lighting_test/run.ps1 -Captures <folder>` | Build: 0 warnings. Resource paths: 14,637 checks, 0 failures, including 826 object-draw checks and 388 realistic-reach checks. Terrain suite: 1,303,085 checks; 2 failures: required terrain captures are absent, and the synthetic reach-law case at `w=144.5` differs from the wall-law reference by up to 179/255; the `w=85` case differs by at most 1/255. The reach-law source is unchanged from 2.15.3 | MSBuild x86 / fake D3D9 / native D3D9 GPU |
 | 2026-10-23 | `40f351e` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting`; developer, public and standard Release x86 builds | Passed; the builds compiled. No harness run covers the hue clamp of the reach law, the gates' lamp scale or the rig records of lamps under a room's floor | CPU harness |
 | 2026-10-22 | `b863bce` | None: no harness covers the area lights' cones in `ReadLamp` | Not run | not run in game yet |
 | 2026-10-14 | `release/2.13.0` (`2aefeb7`) | Developer and public Release x86 builds; `tools/roofed_openings_test`; `tools/floor_shade_check -Precomp` | Both builds: 0 errors; 173 and 5842 checks, 0 failures | native D3D9 |
@@ -69,6 +70,10 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
   recorded.
 
 ## Open checks
+
+- On the exact release ASI, compare outdoor objects and fences with adjacent walls using a high-intensity lamp. The
+  synthetic `w=144.5` GPU case differs from the wall law by up to 179/255; scene impact is unverified. The ordinary
+  `w=85` case differs by at most 1/255. This shader law is unchanged from 2.15.3.
 
 - 2.15.3: warm and coloured lamps near objects and fences with *Realistic lamp reach* on. **Expected:** their hue near the lamp head, not white.
 - 2.15.3: furniture in a closed room above a lit room with ceiling lamps. **Expected:** no glow from the room below.

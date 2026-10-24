@@ -9,6 +9,19 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Thai}
 const I18n::Pair kPairs[] = {
+    {"Lighting restarted; some areas use the game's maps", "เริ่มแสงใหม่แล้ว บางพื้นที่ใช้แผนที่แสงของเกม"},
+    {"Restart lighting", "เริ่มแสงใหม่"},
+    {"Discard cached lighting and rebuild it without changing settings", "ล้างข้อมูลแสงที่แคชไว้และคำนวณใหม่โดยไม่เปลี่ยนการตั้งค่า"},
+    {"Rebuilding lighting: {} / {} stories queued", "กำลังคำนวณแสงใหม่: เพิ่ม {} / {} ชั้นในคิวแล้ว"},
+    {"Waiting for lighting calculations", "กำลังรอการคำนวณแสง"},
+    {"Lighting restarted", "เริ่มแสงใหม่แล้ว"},
+    {"Lighting restart unavailable", "ไม่สามารถเริ่มแสงใหม่ได้"},
+    {"Restart lighting rebuilds temporary light maps and keeps your settings", "การเริ่มแสงใหม่จะสร้างแผนที่แสงชั่วคราวใหม่และเก็บการตั้งค่าของคุณไว้"},
+    {"Night Lights: snowy lot edges stay continuous as snow melts", "แสงกลางคืน: แสงบริเวณขอบที่ดินยังคงต่อเนื่องขณะหิมะละลาย"},
+    {"Performance: effects and animal fur update safely while lots load", "ประสิทธิภาพ: เอฟเฟกต์และขนสัตว์อัปเดตอย่างปลอดภัยระหว่างโหลดที่ดิน"},
+    {"Night Lights: gables and upper trim keep continuous lamp light", "แสงกลางคืน: หน้าจั่วและขอบด้านบนรับแสงโคมอย่างต่อเนื่อง"},
+    {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "แสงกลางคืน: เสาเตี้ยและบันไดคำนึงถึงพื้นทึบใต้โคมไฟ"},
+
     {"Steam Deck and Linux: Proton is detected and a lighter profile is suggested", "Steam Deck และ Linux: ตรวจพบ Proton และแนะนำโปรไฟล์ที่เบากว่า"},
     {"Indoor lights update sooner when you enter a lot or change floors", "แสงในบ้านอัปเดตเร็วขึ้นเมื่อเข้าล็อตหรือเปลี่ยนชั้น"},
     {"Lamps on other lots no longer delay the lights of the lot you play", "โคมไฟในล็อตอื่นไม่ทำให้แสงในล็อตที่คุณเล่นช้าลงอีกต่อไป"},
@@ -770,6 +783,7 @@ const I18n::Pair kPairs[] = {
     {"Sims3SettingsSetter by sims3fiend: project origin and framework reference.", "Sims3SettingsSetter ของ sims3fiend: ต้นกำเนิดโปรเจกต์และต้นแบบเฟรมเวิร์ก"},
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11: Timothy Lottes (NVIDIA)"},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "การสตรีมที่ดินและการแก้ Bloom กลางวัน: ค้นคว้าและเขียนโค้ดโดย @idavidveiga"},
+    {"Scene update safety: contribution by @rodneypantonial.", "การอัปเดตฉากอย่างปลอดภัย: ผลงานจาก @rodneypantonial."},
     {"Thanks to @boringbones for testing every build.", "ขอบคุณ @boringbones ที่ทดสอบทุกบิลด์"},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)"},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "แสงบนพื้นจากชั้นบน: เทคนิคของ Arro ปรับใช้ใน Apex Radiance"},

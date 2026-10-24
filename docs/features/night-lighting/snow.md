@@ -9,7 +9,7 @@ own pages (see [See also](#see-also)). Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released in 1.0.0. Subdued daytime response on snow on objects and *Ground brightness* on the squared terrain variant: Released in 2.6.0. The melting-snow lot pass, the daytime lamp term on snowy lots, the wet world pass left to the game in snow and the game's own snow on objects in full daylight: Released in 2.7.0. The room mask and lamp shade on snowy lots, and the indoor light on the ground on the snowy lot passes: Released in 2.15.3 |
+| Availability | Released in 1.0.0. Subdued daytime response on snow on objects and *Ground brightness* on the squared terrain variant: Released in 2.6.0. The melting-snow lot pass, the daytime lamp term on snowy lots, the wet world pass left to the game in snow and the game's own snow on objects in full daylight: Released in 2.7.0. The room mask and lamp shade on snowy lots, and the indoor light on the ground on the snowy lot passes: Released in 2.15.3. Snow and melting-snow edge blending and visible-lot updates: Released in 2.15.4 |
 | Default | On (with Night Lighting and *Street lamps light lots*) |
 | Menu | No snow-specific switch; World > Water & Snow > Snow holds *Sidewalk visibility*. Uses Lighting > Ground > Ground & Lots > Game fixes (*Street lamps light lots*, *Smooth ground light*), Lighting > Ground > Ground intensity (*Ground brightness*) and Lighting > Objects > Objects > Game fixes (*Fences and stairs catch light*, *Fence brightness*) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -40,7 +40,9 @@ Every snow fix reads the world light atlas (the smoothed ground light of every c
 brighter of it and the game's term, or adds it where the game has no lamp term.
 
 1. **Snowy lot ground:** the lot light pass takes `max(lot term, terrain x 4)`; the x4 cancels the pass's 0.25 so lot and
-   world match.
+   world match. Snowy and melting-snow passes blend to the same terrain term over the outer three metres, matching
+   the dry-lot transition. The indoor exit term fades with that blend. Snow draws also report visible-lot arrival so
+   the existing local terrain update starts when a snowy lot comes into view.
 2. **Snow on floors and door sills:** `max(room map term, atlas)` before the game's lamp scale.
 3. **Snow on stair tops:** atlas x strength added to the moon and sky light, outside the shader's noise loops. These
    draws share their pixel shader with snowy roofs and are told apart by the vertex shader.

@@ -9,6 +9,19 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Simplified, mainland China)}
 const I18n::Pair kPairs[] = {
+    {"Lighting restarted; some areas use the game's maps", "光照已重新计算；部分区域使用游戏的光照贴图"},
+    {"Restart lighting", "重新计算光照"},
+    {"Discard cached lighting and rebuild it without changing settings", "清除缓存的光照并重新计算，保留当前设置"},
+    {"Rebuilding lighting: {} / {} stories queued", "正在重算光照：已排入队列 {} / {} 层"},
+    {"Waiting for lighting calculations", "正在等待光照计算"},
+    {"Lighting restarted", "光照已重新计算"},
+    {"Lighting restart unavailable", "无法重新计算光照"},
+    {"Restart lighting rebuilds temporary light maps and keeps your settings", "重启光照会重建临时光照贴图并保留你的设置"},
+    {"Night Lights: snowy lot edges stay continuous as snow melts", "夜间照明：积雪融化时地段边缘的光照仍保持连续"},
+    {"Performance: effects and animal fur update safely while lots load", "性能：地段加载时安全更新特效和动物毛发"},
+    {"Night Lights: gables and upper trim keep continuous lamp light", "夜间照明：山墙和顶部饰边获得连续的灯光"},
+    {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "夜间照明：矮柱和楼梯会考虑灯下的实心楼板"},
+
     {"Steam Deck and Linux: Proton is detected and a lighter profile is suggested", "Steam Deck 和 Linux：检测 Proton 并建议更轻量的配置文件"},
     {"Indoor lights update sooner when you enter a lot or change floors", "进入地块或切换楼层时，室内灯光更新得更快"},
     {"Lamps on other lots no longer delay the lights of the lot you play", "其他地块的灯不再拖慢你所在地块的灯光"},
@@ -770,6 +783,7 @@ const I18n::Pair kPairs[] = {
     {"Sims3SettingsSetter by sims3fiend: project origin and framework reference.", "sims3fiend 的 Sims3SettingsSetter：项目起源和框架参考。"},
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11：Timothy Lottes（NVIDIA）。"},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "地块流式加载和白天泛光修复：由 @idavidveiga 研究并编写代码。"},
+    {"Scene update safety: contribution by @rodneypantonial.", "场景更新安全性：由 @rodneypantonial 贡献。"},
     {"Thanks to @boringbones for testing every build.", "感谢 @boringbones 测试每一个版本。"},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS：AMD（MIT）。"},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "楼上地面光：Arro 的技术，经 Apex Radiance 改编。"},

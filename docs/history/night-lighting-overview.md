@@ -153,3 +153,23 @@ reads and the indoor objects' basis scale share the per-frame map size memo; bou
 reference; the render-thread counters count without a locked add and the native wall scale is stored relaxed then
 release. The draw cost timing flag now ends with its scope when a fix throws. Answers are unchanged by design; not yet
 checked in game ([validation](../validation/night-lighting-overview.md)).
+
+### 2026-10-23: gable references and architectural light continuity
+
+**Context:** adjacent roof cells and trim pieces use different geometry and shader families.
+
+**Finding:** gable samples and UVs need the same drawn-foot reference. Elevated instanced trim kept an unoccluded ground pool and a different direct-lamp gain from loose architectural pieces. Short pillars also retained full-story blockers.
+
+**Outcome:** keep one gable reference, use measured short tops, suppress elevated ground pools, align elevated architectural gain, and project verified emitter floor tiles per lamp. Release-build gameplay and general performance remain unverified.
+
+
+### Measured wall columns, winter edges and restart completion
+
+**Finding:** clipped facade/gable cells can map the same world point to different horizontal light samples despite a
+shared vertical base. Snow and melting-snow lot draws also lacked the dry pass's visibility-arrival event and edge
+blend. Restart completion could confuse terminal native-map fallback with pending uploads or relights.
+
+**Outcome:** compatible native UV/geometry anchors align outdoor wall columns, winter passes share the dry-lot edge
+transition and arrival notification, and restart completion distinguishes native fallback from recoverable work.
+Unknown wall anchors and winter shaders remain native; gameplay and general performance still require separate
+validation. Scene draw-state scheduling is recorded in [performance history](performance-scene-node-budget.md).

@@ -26,6 +26,7 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-23 | `4802ed9` (ASI SHA-256 `FC2D565C0F003F0DD9DF2BC56DFC5F047CA6FCDAC508B2DA66A83D032258ECFB`) | Standard Release x86 build; `tools/terrain_lighting_test/run_resource_checks.ps1`; `tools/floor_shade_check`; `tools/ground_shade_test/run.ps1` | Build: 0 warnings. Resource paths: 14,637 checks, 0 failures, including `DrawInstanced` (85) and realistic reach (388). Floor shade: 7,885 checks, 0 failures, including the per-lamp cap shader. Ground shade: 240 checks, 0 failures. Release gameplay remains unverified | MSBuild x86 / fake D3D9 / native D3D9 |
 | 2026-10-23 | `40f351e` | `tools/floor_shade_check` (`run.ps1 -Precomp <Shaders_Win32.precomp>`) | 7,103 checks, 0 failures (the fence copy's mask read in front of the face). No harness covers the reach scale without the walls' gain or the gates in the lot shade | Offline, native D3D9 |
 | 2026-10-22 | `d625404` | None: `run_resource_checks.ps1` (which extracts `DrawInstanced`) was not re-run; no harness covers the lamp pick memo | Not run | not run in game yet |
 | 2026-10-13 | Release preparation tree for 2.12.3; final SHA in the release PR | Developer and public Release x86 builds: 0 errors, 0 warnings; `run_resource_checks.ps1` | Builds passed; resource paths 14,154 checks, 0 failures (extracted `DrawInstanced` 54, realistic reach on objects and fences 386). The captured fence shader suite (`run.ps1`) was not re-run | Fake D3D9 / x86 build |
@@ -50,6 +51,9 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
 - Ground term on fences, railings and stairs (combined build, 2026-09-25).
 
 ## Open checks
+
+- Exact release ASI in game: compare a raised railing, elevated fence run and stairs below an emitter with nearby walls;
+  verify that the floor shadow stops at open stair treads and that elevated structures keep the ground atlas pool out.
 
 - 2.15.3, *Realistic lamp reach* on: a fence, its gate and the ground beside a garden post. **Expected:** fence, gate and ground take the same light; no dark band under 1 m on a fence face turned to the lamp.
 - Fence lamp pick memo (`d625404`), development build at night: fences, stairs and railings near lamps while the camera
