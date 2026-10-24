@@ -172,7 +172,6 @@
     <ClCompile Include="framework\load_timing.cpp" />
     <ClCompile Include="framework\transition_watch.cpp" />
     <ClCompile Include="framework\transition_calls.cpp" />
-    <ClCompile Include="framework\thumbnail_progress.cpp" />
     <ClCompile Include="features\lot_load_analysis.cpp" />
     <ClCompile Include="framework\d3d9_bootstrap.cpp" />
     <ClCompile Include="framework\d3d9_extra_hooks.cpp" />
@@ -327,8 +326,7 @@
     <ClInclude Include="framework\load_timing.h" />
     <ClInclude Include="framework\transition_watch.h" />
     <ClInclude Include="framework\transition_calls.h" />
-    <ClInclude Include="framework\thumbnail_progress.h" />
-    <ClInclude Include="framework\thumbnail_progress_state.h" />
+    <ClInclude Include="features\room_gather_queue.h" />
     <ClInclude Include="framework\transition_calls_state.h" />
     <ClInclude Include="framework\transition_watch_state.h" />
     <ClInclude Include="framework\transition_watch_native.h" />

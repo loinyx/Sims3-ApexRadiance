@@ -84,6 +84,7 @@
 #endif
 #include "apex_util.h"
 #include "level_light_share.h"
+#include "room_gather_queue.h"
 #include "lamp_cap_shadow.h"
 #include "terrain_bake_rule.h"
 #include "fast_math.h"
@@ -8189,6 +8190,28 @@ void AfterRoomUpdateInstant(BYTE* tl) {
     HookGuard::Run("OutdoorDelta after the room update", [tl] { OutdoorDelta::AfterRoomUpdate(tl); });
     if (RtOutdoorLamps::Watching()) HookGuard::Run("RtOutdoorLamps after the room update", [tl] { RtOutdoorLamps::AfterRoomUpdate(tl); });
 }
+bool RestoreOutdoorGatherTry(BYTE* tl) {
+    __try {
+        if (!tl || !kSetInsert || !kRoomById) return false;
+        BYTE* mgr = *reinterpret_cast<BYTE**>(tl);
+        if (!mgr) return false;
+        BYTE* room = static_cast<BYTE*>(reinterpret_cast<RoomById_t>(kRoomById)(mgr, 0));
+        if (!room || *reinterpret_cast<BYTE**>(room) != mgr || *reinterpret_cast<const int*>(room + 0xC) != 0) return false;
+        return RoomGatherQueue::RestoreOutdoor(*reinterpret_cast<const int*>(room + 0xF0),
+            *reinterpret_cast<const uint32_t*>(room + 0x168),
+            *reinterpret_cast<const uint32_t*>(tl + 0x14), *reinterpret_cast<const uint32_t*>(tl + 0x34),
+            mgr[0x280] != 0 && mgr[0x81] != 0, room[0x18] != 0, [tl] {
+                const int id = 0;
+                alignas(16) BYTE out[16] = {};
+                reinterpret_cast<SetInsert_t>(kSetInsert)(tl + 0x28, out, &id, 0);
+            });
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+void RestoreOutdoorGather(BYTE* tl) {
+    if (!RestoreOutdoorGatherTry(tl)) return;
+    static unsigned reports = 0;
+    if (reports++ < 32) LOG_INFO("[RoomGatherQueue] Restored a missing outdoor gather entry; native countdown and solve retained.");
+}
 void __fastcall RoomUpdateHook(BYTE* tl) {
     if (g_installed.load(std::memory_order_relaxed) && g_indoorReady && tl) {
         FlushHeldMarks(tl);
@@ -8198,6 +8221,11 @@ void __fastcall RoomUpdateHook(BYTE* tl) {
             g_faults.fetch_add(1, std::memory_order_relaxed);
         }
     }
+    // At this point the native update owns the tree level. A room in state 1
+    // cannot advance without its pending key, regardless of its invalidator.
+    // Restore only the missing key; the native update still gathers and solves.
+    if (g_installed.load(std::memory_order_relaxed) && g_indoorReady && tl)
+        RestoreOutdoorGather(tl);
     reinterpret_cast<RoomUpdate_t>(kRoomUpdate)(tl);
     if (tl && (OutdoorDelta::Enabled() || RtOutdoorLamps::Watching() || (ThreadId() == g_gatherThread.load(std::memory_order_relaxed) && OutdoorDelta::HasPending())))
         AfterRoomUpdateInstant(tl);

@@ -36,7 +36,6 @@
 #include "load_timing.h"
 #include "transition_watch.h"
 #include "transition_calls.h"
-#include "thumbnail_progress.h"
 #include "lot_load_analysis.h"
 #include "overlay.h"
 #include "patch_base.h"
@@ -212,7 +211,6 @@ DWORD InitBody() {
         LoadTiming::NoteFeaturesStarted();
         TransitionWatch::Start();
         TransitionCalls::Start();
-        ThumbnailProgress::Start();
     }
     CrashReport::Install(); // after the game's own start-up (it may set a filter too): ApexRadiance_Crash.txt on a crash
 
