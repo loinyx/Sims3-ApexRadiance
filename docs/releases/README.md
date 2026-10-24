@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [2.15.5](2.15.5.md): return to Edit Town after editing a lot.
 - [2.15.4](2.15.4.md): continuous gable and snow-edge light, measured pillar shadows, lighting restart and safer scene updates.
 - [2.15.3](2.15.3.md): indoor light on the lot ground, shadows that take only the light they block, closed gates, real window sizes, no white trees.
 - [2.15.2](2.15.2.md): smooth camera moves at night again with Instant lamp lighting.
@@ -42,6 +43,7 @@ tests, publication) is in [workflow.md](../workflow.md#6-release).
 
 | Version | Published | Headline |
 |---|---|---|
+| [2.15.5](2.15.5.md) | — | Return to Edit Town after editing a lot |
 | [2.15.4](2.15.4.md) | 2026-10-24 | Continuous gable and snow-edge light, lighting restart and safe effect/fur updates |
 | [2.15.3](2.15.3.md) | 2026-10-23 | Indoor light on the lot ground, ground shadows that take only the light they block, closed gates, real window sizes, no white trees and no light from the story below in closed rooms |
 | [2.15.2](2.15.2.md) | 2026-10-22 | Smooth camera moves at night again with Instant lamp lighting |

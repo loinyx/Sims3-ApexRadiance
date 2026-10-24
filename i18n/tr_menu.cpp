@@ -11,6 +11,7 @@ namespace {
 
 // {English (exactly as in the code), Portuguese (Brazil), Spanish, French}
 const I18n::Entry kEntries[] = {
+    {"Edit Town finishes loading after leaving Build or Buy mode", "Editar Cidade termina de carregar ao sair do modo Construir ou Comprar", "Editar ciudad termina de cargar al salir del modo Construir o Comprar", "Modifier la ville termine le chargement après le mode Construction ou Achat"},
     {"Restart lighting rebuilds temporary light maps and keeps your settings", "Reiniciar iluminação refaz os mapas temporários e mantém suas configurações", "Reiniciar iluminación reconstruye los mapas temporales y conserva tus ajustes", "Réinitialiser l’éclairage recrée les cartes temporaires et conserve vos réglages"},
     {"Night Lights: snowy lot edges stay continuous as snow melts", "Iluminação noturna: a luz nas bordas dos lotes continua uniforme durante o degelo", "Luces nocturnas: los bordes de solares mantienen la luz uniforme durante el deshielo", "Éclairage nocturne : la lumière aux limites des terrains reste uniforme pendant la fonte"},
     {"Performance: effects and animal fur update safely while lots load", "Desempenho: efeitos e pelos dos animais se atualizam com segurança durante o carregamento dos lotes", "Rendimiento: efectos y pelaje se actualizan con seguridad mientras cargan los solares", "Performances : effets et pelages se mettent à jour sans risque pendant le chargement des terrains"},

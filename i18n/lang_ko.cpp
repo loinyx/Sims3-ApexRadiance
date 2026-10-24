@@ -9,6 +9,7 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Korean}
 const I18n::Pair kPairs[] = {
+    {"Edit Town finishes loading after leaving Build or Buy mode", "건축 또는 구입 모드를 종료하면 마을 편집 로딩이 완료됩니다"},
     {"Lighting restarted; some areas use the game's maps", "조명을 다시 시작했어요. 일부 영역은 게임의 조명 맵을 사용해요"},
     {"Restart lighting", "조명 다시 시작"},
     {"Discard cached lighting and rebuild it without changing settings", "캐시된 조명을 삭제하고 설정을 변경하지 않고 다시 계산해요"},

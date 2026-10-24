@@ -15,6 +15,9 @@ It must:
 
 ## Automated tests
 
+`tools/room_gather_queue_test/run.ps1` reproduces a room invalidated during a gather whose pending key is then erased. It checks restoration without changing the countdown, completion through the native work model, and guards for idle, inactive, indoor and already queued rooms. It uses a CPU model, not the game engine.
+
+
 | Harness | Covers | Run | Needs |
 |---|---|---|---|
 | [`tools/exterior_lookup_test`](../../tools/exterior_lookup_test/README.md) | Extracted exterior floor lookup and per-point cache against the v2.10.0 implementation; alternating stories, replacement, missing data and eviction | `run.ps1 -ReferenceSource <v2.10.0-level_light_share.cpp>` | MSVC x86 |
@@ -33,6 +36,8 @@ only the repository and print to the console.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| — | `10c8107`; `v2.15.5`, ASI SHA-256 `24A2A83A2B189E7FA5CF88B847E5E9B1F68C36E6428B9FCC744E76735A6E1DAB` | Standard Release x86 startup; i18n check; menu audit | No build warnings; all 21 languages cover the new line; embedded cache supplies 78 shaders with 0 to compile; developer mode off and temporary script probe removed. The exact standard build returns normally from Build/Buy to Edit Town | Steam / DXVK |
+| — | `5dd19f1`; release `v2.15.5` | Room gather queue regression; CPU Lighting suite | Lost-key reproduction and queue guards pass; 92 lighting checks pass. Gameplay reproduction returns to Edit Town with the correction | CPU model / Steam gameplay |
 | 2026-10-23 | `4802ed9` (ASI SHA-256 `FC2D565C0F003F0DD9DF2BC56DFC5F047CA6FCDAC508B2DA66A83D032258ECFB`) | Standard Release x86 build; `tools/roofed_openings_test`; `tools/floor_shade_check`; `tools/ground_shade_test/run.ps1` | Build: 0 warnings. Roofed openings: 1,652 checks, 0 failures; floor shade: 7,885, 0 failures; ground shade: 240, 0 failures. The exact release build has not been checked in game | MSBuild x86 / CPU fixtures / native D3D9 |
 | 2026-10-23 | `40f351e` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting` (includes `tools/roofed_openings_test`) | Passed, 0 failures. `roofed_openings_test`: 217 checks, 0 failures (window sizes from their panes, the wall's two faces at grazing angles, the glass share, floor-level sills in the outside walls' copy). No harness covers the lamps under a story's floor (`OwnFloorBlocksAt`, `LampUnderRoomFloor`), the tile floor crossing or the walls lit from their drawn foot | CPU harness |
 | 2026-10-22 | `d625404` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting` (`stairwell_bounce_test`, `opening_bounce_test` 11 checks, `arch_ambient_test` 25 checks), `tools/rt_lamps_test` (22 checks), `tools/roofed_openings_test` (196 checks), `tools/room_structure_test` (11 checks); developer, public and standard Release x86 builds | Passed, 0 failures; the three builds compiled. These cover the extracted grid walk, openings and room structure code; none exercises the arch story memo of `823e339` (`ArchAmbientConsts`) | CPU harness |
@@ -104,6 +109,7 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| — | `10c8107`; `v2.15.5`, ASI SHA-256 `24A2A83A2B189E7FA5CF88B847E5E9B1F68C36E6428B9FCC744E76735A6E1DAB` | Standard Release x86 startup; i18n check; menu audit | No build warnings; all 21 languages cover the new line; embedded cache supplies 78 shaders with 0 to compile; developer mode off and temporary script probe removed. The exact standard build returns normally from Build/Buy to Edit Town | Steam / DXVK |
 | 2026-10-14 | `release/2.13.0` (`2aefeb7`) | Developer and public Release x86 builds; `tools/i18n_check`; `tools/menu_audit.pl`; `tools/roofed_openings_test`; `tools/rt_lamps_test`; `tools/outdoor_delta_test`; `tools/floor_shade_check -Precomp`; `tools/room_structure_test`; `tools/room_ambient_test` | Both builds: 0 errors. i18n_check OK (2118 keys, 17 tables complete). Roofed openings 173, real-time lamps 22, outdoor delta 11, floor shade 5842, room structure 11 and room ambient 107 checks, 0 failures; the unlit-rooms recovery executable of `room_ambient_test` was removed by security software after it compiled and did not run | native D3D9 |
 | 2026-10-13 | `release/2.12.4-arriscada`, outdoor light through openings | Developer and public Release x86 builds; `tools/roofed_openings_test`; `run_resource_checks.ps1`; `run_lamp_state_checks.ps1`; `tools/room_structure_test`; `tools/i18n_check` | Builds: 0 errors, 0 warnings; roofed openings 18 checks, 0 failures (it failed twice before the jamb fix: the seam between two arch cells); resource paths 14,618 checks, 0 failures; room structure 11 checks, 0 failures; lamp state passed; i18n 21 languages complete. The indoor-stories, world-pool, queue, dispatch and exterior-lookup harnesses still do not compile against the current source (as before) | None (mocks) / x86 build |
 | 2026-10-13 | Release preparation tree for 2.12.3; final SHA in the release PR | Developer and public Release x86 builds: 0 errors, 0 warnings; `tools/room_ambient_test`; `run_resource_checks.ps1` | Builds passed; room ambient policy 102 checks, 0 failures; resource paths 14,154 checks, 0 failures (*Buildings block light on objects* 14). The extracted indoor-stories, world-pool, queue and dispatch harnesses no longer compile against the current source (the same failure at v2.12.2), so they were not run | None (mocks) / x86 build |
@@ -200,6 +206,9 @@ topology mutation inside a point is not reproduced. This release does not promis
 - Session `2026-10-01 15-26-42`: rooms 23/19/3/20 of lot `27D24720` change their merged ambient during a slider drag.
 
 ## Open checks
+
+- Broader lots and other game versions remain unverified. The exact standard build and the development build both complete the reproduced Steam transition; this does not establish every cause of a loading hang.
+
 
 - 2.15.3: windows sized from their panes. **Expected:** the developer log lists the windows sized from their panes with plausible sizes, and the light through a window onto the floor outside matches the glass; glass passes 0.765 of a lamp's light.
 - 2.15.3: gables, a garage's eave band beside a house on a foundation and sloped foundation faces at night. **Expected:** no hard step of light where a gable starts or under the eave; lamps that now test lower samples keep their light.

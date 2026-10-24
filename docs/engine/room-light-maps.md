@@ -440,6 +440,10 @@ solve).
 | `0x006C7451` | Caller that invalidates rooms on a camera story change | recordings of the 2.14.0 development builds |
 | `0x006AC560` | `IsNight`: lightMgr+0xF0 > 0.99 and byte `[0x011D08C0] == 0` | full.asm |
 
+## Outdoor gather readiness
+
+A room in state 1 needs a key in the tree level pending set at `+0x28`. The update calls `0x0069EB00`, decrements `room+0x168`, and gathers when the countdown reaches zero. Without that key, updates cannot advance the room. Lot-thumbnail readiness requires `room+0x104 == 2` where the level tests do not exempt the room; ordinary lot-load readiness only excludes state 4. A loaded lot can therefore still have a blocked thumbnail.
+
 ## See also
 
 - [Terrain and light bake](terrain-and-light-bake.md).

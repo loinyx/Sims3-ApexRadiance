@@ -9,6 +9,7 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Hungarian}
 const I18n::Pair kPairs[] = {
+    {"Edit Town finishes loading after leaving Build or Buy mode", "A Városszerkesztés betöltése befejeződik az építés vagy vásárlás után"},
     {"Lighting restarted; some areas use the game's maps", "Világítás újraindítva; egyes területek a játék térképeit használják"},
     {"Restart lighting", "Világítás újraindítása"},
     {"Discard cached lighting and rebuild it without changing settings", "Törli a tárolt világítást, és a beállítások módosítása nélkül újraszámítja"},

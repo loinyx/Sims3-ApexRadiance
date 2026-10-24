@@ -756,3 +756,11 @@ change either.
 **Outcome:** `ApexMath::Sqrt` / `Fabs` in the solve's hot loops, a 64-slot position cache with one slot per light, and
 the channel answer kept per light and channel for the batch (Tester switch *Window light channel memo*). The light is
 unchanged by design; gameplay timing is open.
+
+### Outdoor gather queue recovery
+
+**Context:** returning from Build or Buy mode leaves the lot-thumbnail task waiting for final lighting.
+
+**Finding:** the ground outdoor room remains in gather state 1 with countdown 5 and readiness state 0, while its changed and pending sets are empty. Native world updates continue. The originating invalidation remains unidentified. A native gather erases its pending key after the gather call, so a same-key requeue during that call is one reproducible model of the lost entry, not an established origin in gameplay.
+
+**Outcome:** restore the missing pending key on the native tree-level update thread. Native collection and solving complete the work. The extra-update recovery is rejected because normal updates already continue. The reproduced Edit Town transition completes with the queue correction.

@@ -170,6 +170,8 @@
     <ClCompile Include="framework\crash_report.cpp" />
     <ClCompile Include="framework\hook_guard.cpp" />
     <ClCompile Include="framework\load_timing.cpp" />
+    <ClCompile Include="framework\transition_watch.cpp" />
+    <ClCompile Include="framework\transition_calls.cpp" />
     <ClCompile Include="features\lot_load_analysis.cpp" />
     <ClCompile Include="framework\d3d9_bootstrap.cpp" />
     <ClCompile Include="framework\d3d9_extra_hooks.cpp" />
@@ -322,6 +324,12 @@
     <ClInclude Include="framework\hook_guard.h" />
     <ClInclude Include="framework\module_lifetime.h" />
     <ClInclude Include="framework\load_timing.h" />
+    <ClInclude Include="framework\transition_watch.h" />
+    <ClInclude Include="framework\transition_calls.h" />
+    <ClInclude Include="features\room_gather_queue.h" />
+    <ClInclude Include="framework\transition_calls_state.h" />
+    <ClInclude Include="framework\transition_watch_state.h" />
+    <ClInclude Include="framework\transition_watch_native.h" />
     <ClInclude Include="features\lot_load_analysis.h" />
     <ClInclude Include="framework\conflict_guard.h" />
     <ClInclude Include="framework\d3d9_bootstrap.h" />

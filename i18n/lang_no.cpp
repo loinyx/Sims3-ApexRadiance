@@ -9,6 +9,7 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Norwegian (Bokmal)}
 const I18n::Pair kPairs[] = {
+    {"Edit Town finishes loading after leaving Build or Buy mode", "Rediger by lastes ferdig etter byggemodus eller kjøpemodus"},
     {"Lighting restarted; some areas use the game's maps", "Belysningen er startet på nytt; noen områder bruker spillets kart"},
     {"Restart lighting", "Start belysningen på nytt"},
     {"Discard cached lighting and rebuild it without changing settings", "Forkaster lagret belysning og beregner den på nytt uten å endre innstillingene"},
