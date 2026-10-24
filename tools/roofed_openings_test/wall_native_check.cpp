@@ -167,5 +167,127 @@ int main() {
                   "clipped tip UV and sample heights agree within half an atlas texel");
         }
     }
+    // Native UVs of a half-cell clipped at a window corner. Its left end is
+    // extended by 20 fixed-point units; the UV midpoint stays on the grid.
+    alignas(4) std::array<unsigned char, 0x120> room{}, owner{};
+    owner.fill(0);
+    Put(owner, 0x30, 1024);
+    Put(room, 0x100, 2);
+    Put(wall, 0, reinterpret_cast<uintptr_t>(room.data()));
+    Put(wall, 0x24, 5);
+    Put(wall, 0x48, 21);
+    Put(wall, 0x98, 205);
+    Put(wall, 0xA0, 225);
+    Put(wall, 0xB4, reinterpret_cast<uintptr_t>(owner.data()));
+    Put(wall, 0x100, 29.0f);
+    Put(wall, 0x108, 10.0f);
+    Put(wall, 0xE0, 5.0f);
+    Put(wall, 0xE8, 0.0f);
+    Put(wall, 0xF0, 5.0f);
+    Put(wall, 0xF8, 0.0f);
+    Put(wall, 0x110, 464.305206f);
+    Put(wall, 0x118, 323.336536f);
+    const int16_t xx[] = {7552, 7478, 7404, 7404, 7478, 7552};
+    const int16_t uu[] = {830, 826, 822, 822, 826, 830};
+    for (int i = 0; i < 6; ++i) {
+        Put(vertices, i * 0x2c, xx[i]);
+        Put(vertices, i * 0x2c + 4, int16_t{2540});
+        Put(vertices, i * 0x2c + 0x10, uu[i]);
+    }
+    float offsets[3]{};
+    unsigned mask = 0;
+    Check(ReadWallColumnAnchors(geo, reinterpret_cast<uintptr_t>(wall.data()), 0, 5, offsets, mask) && mask == 3,
+          "production reader finds the two captured corner anchors");
+    Check(std::fabs(offsets[0] + 0.015625f) < 1e-6f && std::fabs(offsets[1]) < 1e-6f,
+          "corner UVs measure the actual extension rather than a uniform shift");
+    WallCellH columnCells[5]{};
+    columnCells[0].set = true;
+    for (int a = 0; a < 3; ++a)
+        if (mask & (1u << a)) WallSampleSpan::NoteColumn(columnCells[0].columns, a, offsets[a], 0.001f);
+    alignas(4) std::array<unsigned char, 21 * 0x30> columnSamples{};
+    const auto fillColumns = [&] {
+        for (int i = 0; i < 21; ++i) {
+            Put(columnSamples, i * 0x30, 464.305206f + (i + 0.5f) * 5.0f / 21);
+            Put(columnSamples, i * 0x30 + 8, 323.336536f);
+            Put(columnSamples, i * 0x30 + 0x20, static_cast<uint16_t>(205 + i));
+        }
+    };
+    fillColumns();
+    const auto nativeColumns = columnSamples;
+    const uintptr_t columnsStart = reinterpret_cast<uintptr_t>(columnSamples.data());
+    uintptr_t columnsBatch[] = {columnsStart, columnsStart + columnSamples.size()};
+    const WallBlock columnsBlock{205, 0, 225, 12};
+    Check(MoveWallColumnSamples(reinterpret_cast<uintptr_t>(wall.data()), 2, reinterpret_cast<uintptr_t>(columnsBatch), columnsBlock, columnCells, 5) == 3,
+          "only measured columns move; hidden or unknown fragments stay native");
+    for (int i = 0; i < 3; ++i) {
+        const float expected = 435.305206f + (7404.0f + i * 74.0f) / 256;
+        Check(std::fabs(Get<float>(columnSamples, i * 0x30) - expected) < 5e-5f,
+              "production columns land on the positions encoded by captured corner UVs");
+        Check(Get<float>(columnSamples, i * 0x30 + 8) == 323.336536f,
+              "native perpendicular bias is preserved");
+    }
+    for (int i = 3; i < 21; ++i)
+        Check(std::memcmp(columnSamples.data() + i * 0x30, nativeColumns.data() + i * 0x30, 0x30) == 0,
+              "unmeasured sample bytes remain unchanged");
+    fillColumns();
+    Put(columnSamples, 20 * 0x30, 999.0f);
+    const auto malformed = columnSamples;
+    Check(MoveWallColumnSamples(reinterpret_cast<uintptr_t>(wall.data()), 2, reinterpret_cast<uintptr_t>(columnsBatch), columnsBlock, columnCells, 5) == 0 && columnSamples == malformed,
+          "the entire native layout is checked before any column changes");
+    auto conflicting = columnCells[0].columns;
+    Check(WallSampleSpan::NoteColumn(conflicting, 0, 0.1f, 0.001f) && !(conflicting.mask & 1) && (conflicting.rejected & 1),
+          "conflicting geometry disables the affected anchor");
+    float unavailable = 123;
+    Check(!WallSampleSpan::ColumnOffset(conflicting, 0.25f, unavailable) && unavailable == 123,
+          "a conflict cannot silently interpolate a different surface");
+    for (const auto run : {std::array<float, 2>{0, 5}, std::array<float, 2>{3, 4}, std::array<float, 2>{-5, 0}}) {
+        Put(wall, 0xF0, run[0]);
+        Put(wall, 0xF8, run[1]);
+        for (int i = 0; i < 21; ++i) {
+            Put(columnSamples, i * 0x30, 464.305206f + (i + 0.5f) * run[0] / 21);
+            Put(columnSamples, i * 0x30 + 8, 323.336536f + (i + 0.5f) * run[1] / 21);
+        }
+        Check(MoveWallColumnSamples(reinterpret_cast<uintptr_t>(wall.data()), 2, reinterpret_cast<uintptr_t>(columnsBatch), columnsBlock, columnCells, 5) == 3,
+              "rotated and reversed walls use the measured column mapping");
+        for (int i = 0; i < 3; ++i) {
+            const float q = i / 20.0f, delta = -0.015625f * (1 - i * 0.5f);
+            Check(std::fabs(Get<float>(columnSamples, i * 0x30) - (464.305206f + (q + delta) * run[0])) < 5e-5f &&
+                  std::fabs(Get<float>(columnSamples, i * 0x30 + 8) - (323.336536f + (q + delta) * run[1])) < 5e-5f,
+                  "the correction follows the wall tangent in world space");
+        }
+    }
+    Put(wall, 0x24, 1);
+    Put(wall, 0x48, 5);
+    Put(wall, 0x98, 200);
+    Put(wall, 0xA0, 204);
+    Put(wall, 0x100, 28.0f);
+    Put(wall, 0xE0, 1.0f);
+    Put(wall, 0xF0, 1.0f);
+    Put(wall, 0xF8, 0.0f);
+    Put(wall, 0x110, 463.305206f);
+    const int16_t tipX[] = {7168, 7296, 7424, 7424, 7296, 7168};
+    const int16_t tipU[] = {802, 810, 818, 818, 810, 802};
+    for (int i = 0; i < 6; ++i) {
+        Put(vertices, i * 0x2c, tipX[i]);
+        Put(vertices, i * 0x2c + 0x10, tipU[i]);
+    }
+    Check(ReadWallColumnAnchors(geo, reinterpret_cast<uintptr_t>(wall.data()), 0, 1, offsets, mask) && mask == 7,
+          "the captured gable supplies all three anchors");
+    WallCellH tipColumns{};
+    tipColumns.set = true;
+    for (int a = 0; a < 3; ++a) WallSampleSpan::NoteColumn(tipColumns.columns, a, offsets[a], 0.001f);
+    for (int i = 0; i < 5; ++i) {
+        Put(columnSamples, i * 0x30, 463.305206f + (i + 0.5f) / 5);
+        Put(columnSamples, i * 0x30 + 8, 323.336536f);
+        Put(columnSamples, i * 0x30 + 0x20, static_cast<uint16_t>(200 + i));
+    }
+    uintptr_t tipBatch[] = {columnsStart, columnsStart + 5 * 0x30};
+    Check(std::fabs(Get<float>(columnSamples, 0) - 463.305206f) > 0.09f,
+          "the native gable columns reproduce the captured endpoint mismatch");
+    Check(MoveWallColumnSamples(reinterpret_cast<uintptr_t>(wall.data()), 2, reinterpret_cast<uintptr_t>(tipBatch), WallBlock{200, 0, 204, 12}, &tipColumns, 1) == 5,
+          "all gable columns align to their drawn UV positions");
+    for (int i = 0; i < 5; ++i)
+        Check(std::fabs(Get<float>(columnSamples, i * 0x30) - (463.305206f + i * 0.25f)) < 5e-5f,
+              "every gable column matches the captured mesh");
     std::printf("Native wall span: %d checks passed\n", checks);
 }

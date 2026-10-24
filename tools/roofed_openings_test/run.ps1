@@ -36,6 +36,7 @@ $wallParts = @(
  (Between 'struct WallCellH {' 'struct WallHeightRec {'),
  (Between 'bool WallLightBase(' 'bool LowFoot('),
  (Between 'bool RecutCellV(' 'void __fastcall WallUvHook('),
+ (Between 'bool ReadWallColumnAnchors(' 'void NoteWallCell('),
  (Between 'long MoveWallFootSamples(' 'bool MoveWallFoot(')
 )
 Set-Content -LiteralPath (Join-Path $OutDir 'extracted_wall_span.h') -Value ($wallParts -join "`n") -Encoding UTF8

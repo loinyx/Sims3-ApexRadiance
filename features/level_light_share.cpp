@@ -2863,6 +2863,7 @@ bool g_wallUvReady = false;
 struct WallCellH {
     float foot = 0, hl = 3, hm = 3, hr = 3;
     bool set = false;
+    WallSampleSpan::Columns columns;
 };
 struct WallHeightRec {
     std::vector<WallCellH> cells;
@@ -2984,6 +2985,51 @@ bool ReadWallCell(void* geo, uintptr_t mgr, int x, int z, int dir, WallCellRead&
         return false;
     }
 }
+// The UV writer selects the room's class, then uses the wall block's owner
+// dimensions. Read the completed mode-0 UVs, not a screen-space wall candidate.
+bool ReadWallColumnAnchors(void* geo, uintptr_t wall, int cell, int len, float* offsets, unsigned& mask) {
+    __try {
+        mask = 0;
+        const BYTE* v = *reinterpret_cast<BYTE* const*>(static_cast<BYTE*>(geo) + 8);
+        const BYTE* room = *reinterpret_cast<BYTE* const*>(wall);
+        if (!v || !room || len < 1 || len > 64) return false;
+        int cls = *reinterpret_cast<const int*>(room + 0x100);
+        if (cls >= 3) cls = 0;
+        if (cls < 0) return false;
+        const uintptr_t rect = wall + cls * 0x20 + 0x58;
+        const uintptr_t owner = *reinterpret_cast<const uintptr_t*>(rect + 0x1C);
+        if (!owner) return false;
+        const int width = *reinterpret_cast<const int*>(owner + 0x30);
+        const int cols = *reinterpret_cast<const int*>(wall + cls * 0x10 + 0x28);
+        const int first = *reinterpret_cast<const int*>(rect), last = *reinterpret_cast<const int*>(rect + 8);
+        if (width < 16 || width > 16384 || cols < 2 || first < 0 || last < first || last >= width || last - first + 1 != cols) return false;
+        const float* origin = reinterpret_cast<const float*>(wall + 0x100);
+        const float* run = reinterpret_cast<const float*>(wall + 0xE0);
+        const float rr = run[0] * run[0] + run[2] * run[2];
+        if (!std::isfinite(rr) || rr < 1e-4f) return false;
+        const float tolerance = std::min(0.12f, width / 4096.0f * len / (cols - 1) * 0.51f + 1e-4f);
+        for (int i = 0; i < 6; ++i) {
+            const BYTE* p = v + i * 0x2C;
+            const float texel = *reinterpret_cast<const int16_t*>(p + 0x10) * (width / 4096.0f) - 0.5f;
+            const float q = (texel - first) / (cols - 1);
+            const float local = q * len - cell;
+            const int anchor = static_cast<int>(std::lround(local * 2));
+            if (anchor < 0 || anchor > 2 || std::fabs(local - anchor * 0.5f) > tolerance) continue;
+            const float px = *reinterpret_cast<const int16_t*>(p) / 256.0f;
+            const float pz = *reinterpret_cast<const int16_t*>(p + 4) / 256.0f;
+            const float t = ((px - origin[0]) * run[0] + (pz - origin[2]) * run[2]) / rr;
+            const float delta = t - (cell + anchor * 0.5f) / len;
+            if (!std::isfinite(delta) || std::fabs(delta) * std::sqrt(rr) > 0.35f) return false;
+            const unsigned bit = 1u << anchor;
+            if ((mask & bit) && std::fabs(offsets[anchor] - delta) * std::sqrt(rr) > 0.02f) return false;
+            offsets[anchor] = delta;
+            mask |= bit;
+        }
+        return mask != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 void NoteWallCell(void* geo, uintptr_t mgr, int x, int z, int dir) {
     g_wallUvSeen.fetch_add(1, std::memory_order_relaxed);
     WallCellRead c;
@@ -2999,6 +3045,9 @@ void NoteWallCell(void* geo, uintptr_t mgr, int x, int z, int dir) {
                              c.story, c.wall, c.edge, cell, c.len, sane ? (tall ? "taller than 3 m" : "foot differs") : "NOT MATCHED", c.foot, c.base, c.lotBase, c.hl, c.hm,
                              c.hr, c.perp));
     if (!sane) return;
+    float columnOffsets[3]{};
+    unsigned columnMask = 0;
+    const bool haveColumns = WallOutdoor(c.wall) && ReadWallColumnAnchors(geo, c.wall, cell, c.len, columnOffsets, columnMask);
     std::lock_guard<std::mutex> lk(g_wallHMx);
     if (g_wallH.size() > 50000) g_wallH.clear(), g_wallSolvedH.clear(), g_wallTop.clear();
     WallHeightRec& rec = g_wallH[c.wall];
@@ -3011,7 +3060,14 @@ void NoteWallCell(void* geo, uintptr_t mgr, int x, int z, int dir) {
     const bool spanChanged = previousCell.set &&
         WallSampleSpan::ShiftFoot(previousCell.foot, c.base, previousCell.hl, previousCell.hm, previousCell.hr) !=
         WallSampleSpan::ShiftFoot(c.foot, c.base, c.hl, c.hm, c.hr);
-    rec.cells[cell] = WallCellH{c.foot, c.hl, c.hm, c.hr, true};
+    WallCellH& current = rec.cells[cell];
+    current.foot = c.foot, current.hl = c.hl, current.hm = c.hm, current.hr = c.hr, current.set = true;
+    bool columnsChanged = false;
+    if (haveColumns) {
+        const float run = std::sqrt(c.rx * c.rx + c.rz * c.rz);
+        for (int a = 0; a < 3; ++a)
+            if (columnMask & (1u << a)) columnsChanged = WallSampleSpan::NoteColumn(current.columns, a, columnOffsets[a], 0.02f / run) || columnsChanged;
+    }
     float maxH = 3.0f;
     for (const WallCellH& h : rec.cells)
         if (h.set) maxH = std::max({maxH, h.hl, h.hm, h.hr});
@@ -3025,11 +3081,11 @@ void NoteWallCell(void* geo, uintptr_t mgr, int x, int z, int dir) {
     }
     WallTopCell& t = top.cells[cell];
     // a foot seen for the first time matters only where the light base is not where the wall is drawn (foundations)
-    bool rose = spanChanged || (t.set ? ApexMath::Fabs(t.foot - c.foot) > 0.02f : ApexMath::Fabs(c.foot - c.base) > 0.05f);
+    bool rose = columnsChanged || spanChanged || (t.set ? ApexMath::Fabs(t.foot - c.foot) > 0.02f : ApexMath::Fabs(c.foot - c.base) > 0.05f);
     t.foot = c.foot;
     t.set = true;
     rose = KeepWallTop(t, c.hl, c.hm, c.hr) || rose;
-    if (rose && (spanChanged || WallSampleSpan::ShiftFoot(c.foot, c.base, c.hl, c.hm, c.hr)) && g_foundationWallsOn.load(std::memory_order_relaxed) && WallOutdoor(c.wall) &&
+    if (rose && (columnsChanged || spanChanged || WallSampleSpan::ShiftFoot(c.foot, c.base, c.hl, c.hm, c.hr)) && g_foundationWallsOn.load(std::memory_order_relaxed) && WallOutdoor(c.wall) &&
         std::find(g_wallHRequeue.begin(), g_wallHRequeue.end(), c.wall) == g_wallHRequeue.end() && g_wallHRequeue.size() < 4096)
         g_wallHRequeue.push_back(c.wall); // (2.15.3) drawn below its light base: solved again from its foot (MoveWallFoot)
     if (rose) {
@@ -3192,6 +3248,44 @@ long MoveWallFootSamples(uintptr_t wall, int cls, uintptr_t batch, const WallBlo
     }
     return moved;
 }
+// Native columns use (i + 0.5) / N; the UV endpoints span N - 1 intervals.
+// Apply measured tangential offsets for cut fragments, preserving the face bias.
+long MoveWallColumnSamples(uintptr_t wall, int cls, uintptr_t batch, const WallBlock& r, const WallCellH* cells, int n) {
+    __try {
+        if (cls < 0 || cls > 2 || !cells || n < 1 || n > 64 || *reinterpret_cast<const int*>(wall + 0x24) != n) return 0;
+        const int cols = *reinterpret_cast<const int*>(wall + cls * 0x10 + 0x28);
+        if (cols < 2 || cols > 65536 || r.x0 < 0 || r.x1 < r.x0 || r.x1 >= 65536 || r.x1 - r.x0 + 1 != cols) return 0;
+        const float* run = reinterpret_cast<const float*>(wall + 0xF0);
+        const float* origin = reinterpret_cast<const float*>(wall + 0x110);
+        if (!std::isfinite(run[0]) || !std::isfinite(run[2]) || !std::isfinite(origin[0]) || !std::isfinite(origin[2])) return 0;
+        const uintptr_t b = *reinterpret_cast<const uintptr_t*>(batch), e = *reinterpret_cast<const uintptr_t*>(batch + 4);
+        if (!b || e <= b || (e - b) % 0x30 || (e - b) / 0x30 > 1u << 20) return 0;
+        for (uintptr_t p = b; p < e; p += 0x30) {
+            const int i = *reinterpret_cast<const uint16_t*>(p + 0x20) - r.x0;
+            if (i < 0 || i >= cols) return 0;
+            const float native = (i + 0.5f) / cols;
+            const float x = *reinterpret_cast<const float*>(p), z = *reinterpret_cast<const float*>(p + 8);
+            if (!std::isfinite(x) || !std::isfinite(z) ||
+                std::fabs(x - origin[0] - native * run[0]) > 1e-3f || std::fabs(z - origin[2] - native * run[2]) > 1e-3f) return 0;
+        }
+        long moved = 0;
+        for (uintptr_t p = b; p < e; p += 0x30) {
+            const int i = *reinterpret_cast<const uint16_t*>(p + 0x20) - r.x0;
+            const float q = static_cast<float>(i) / (cols - 1);
+            const float t = q * n;
+            const int cell = std::min(static_cast<int>(t), n - 1);
+            float delta = 0;
+            if (!cells[cell].set || !WallSampleSpan::ColumnOffset(cells[cell].columns, t - cell, delta)) continue;
+            const float shift = q + delta - (i + 0.5f) / cols;
+            *reinterpret_cast<float*>(p) += shift * run[0];
+            *reinterpret_cast<float*>(p + 8) += shift * run[2];
+            ++moved;
+        }
+        return moved;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
 bool MoveWallFoot(uintptr_t wall, int cls, uintptr_t batch, const WallBlock& r) {
     if (!WallOutdoor(wall)) return false;
     std::vector<WallCellH> cells;
@@ -3201,7 +3295,9 @@ bool MoveWallFoot(uintptr_t wall, int cls, uintptr_t batch, const WallBlock& r) 
         if (it == g_wallH.end()) return false;
         cells = it->second.cells;
     }
-    return !cells.empty() && MoveWallFootSamples(wall, cls, batch, r, cells.data(), static_cast<int>(cells.size())) > 0;
+    if (cells.empty()) return false;
+    const bool columns = MoveWallColumnSamples(wall, cls, batch, r, cells.data(), static_cast<int>(cells.size())) > 0;
+    return MoveWallFootSamples(wall, cls, batch, r, cells.data(), static_cast<int>(cells.size())) > 0 || columns;
 }
 void StretchTallWall(uintptr_t wall, int cls, uintptr_t batch, const WallBlock& r) {
     std::vector<WallCellH> cells;
