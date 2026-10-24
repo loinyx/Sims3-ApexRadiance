@@ -58,6 +58,7 @@
 #include "room_map_padding.h"
 #include "build_flavor.h"
 #include "night_lighting.h"
+#include "lighting_restart_policy.h"
 #include "lot_lighting_motion.h"
 #include "outdoor_delta.h"
 #include "rt_outdoor_lamps.h"
@@ -392,6 +393,11 @@ Clock::time_point g_lotRelightAt{};
 // 1 s, so it never runs during the loading screen with the night level still at 0 (lamps off).
 Clock::time_point g_worldAt{}, g_liveAt{}, g_levelRefAt{};
 bool g_live = false;
+LightingRestartPolicy::Run g_restart;
+bool g_restartRequested = false;
+bool g_restartUnavailable = false;
+bool g_restartFinishing = false;
+void PumpLightingRestart();
 // The load is over: the after-load refresh ran (lots and rooms lit again), or 10 s passed since the world went live. With
 // the game's interactive loading (Options.ini enableinteractiveloading = 1) terrain is drawn and the loading window is gone
 // long before the lots finish (a log: the after-load refresh came 47 s after the world loaded), so "live" alone opened
@@ -1489,6 +1495,9 @@ void OnPresent() {
     Recorder::OnPresent(); // the recording (F6): a few seconds of lighting activity, with the clock time
     LightState s;
     if (!ReadLightState(s)) {
+        g_restart.Cancel();
+        g_restartRequested = false;
+        LevelLightShare::StopLightingRestart();
         g_lastCells = 0;
         g_scheduled = false;
         g_prevCounter = INT_MIN;
@@ -1593,6 +1602,8 @@ void OnPresent() {
         g_worldAt = now;
         LoadTiming::NoteWorldChange();
         g_live = false;
+        g_restart.Cancel();
+        g_restartRequested = false;
         g_loadSettled.store(false);
         g_liveSignal = "none";
         g_levelRef = s.level;
@@ -1911,6 +1922,7 @@ void OnPresent() {
         LOG_INFO("[NightTerrainRelight] Lots: " + g_lastLotRelight);
     }
 
+    PumpLightingRestart();
     if (g_loadKickPending)
         g_status = g_live ? "World loaded: rebuilding the terrain light once the night level is steady" : "World loading: the terrain light is rebuilt once the world is drawn";
     else if (c38 == 0 && !night)
@@ -1919,6 +1931,44 @@ void OnPresent() {
         g_status = std::format("Rebuild in {} frames", c38);
     else
         g_status = night ? "Night: ok" : "Day: ok";
+}
+
+void PumpLightingRestart() {
+    if (g_restartRequested) {
+        g_restartRequested = false;
+        if (!g_live || !WorldSession::InWorld() || !LevelLightShare::BeginLightingRestart()) {
+            g_restart.Cancel();
+            g_restartUnavailable = true;
+            return;
+        }
+        g_restart.Start(GetTickCount());
+        g_restartUnavailable = false;
+        g_restartFinishing = false;
+        LightmapSmooth::Clear();
+        RtOutdoorLamps::RestartLighting();
+        g_kickRequested = true;
+        ObjectLightBridge::RequestRigRefresh();
+        LOG_INFO("[NightTerrainRelight] Lighting restart: temporary maps discarded; loaded stories rebuild in frame-sized batches");
+    }
+    if (!g_restart.active) return;
+    if (!g_live || !WorldSession::InWorld()) {
+        g_restart.Cancel();
+        LevelLightShare::StopLightingRestart();
+        return;
+    }
+    const auto rooms = LevelLightShare::LightingRestartProgress();
+    const bool terrainBusy = g_kickRequested.load() || g_rebuildId || g_sweepId || !g_pendingReason.empty() || ChunkRelight::Busy() || LightmapSmooth::HoldPending();
+    const bool workBusy = rooms.active || rooms.pending || terrainBusy || RtOutdoorLamps::RestartPending();
+    if (workBusy) g_restartFinishing = false;
+    else if (!g_restartFinishing) {
+        ObjectLightBridge::RequestRigRefresh();
+        UnlitRooms::RigsAgainIn(0);
+        g_restartFinishing = true;
+    }
+    const bool busy = workBusy || ObjectLightBridge::RigRefreshPending() || UnlitRooms::RigRefreshPending();
+    if (g_restart.Observe(GetTickCount(), busy)) {
+        LOG_INFO("[NightTerrainRelight] Lighting restart finished: loaded maps are idle and object refresh requests were dispatched");
+    }
 }
 
 // ---- menu helpers ----
@@ -3450,13 +3500,26 @@ void NightLighting::DrawRefreshCard() {
         const float terrainW = ApexUi::ButtonWidth("Refresh terrain", true), lotW = ApexUi::ButtonWidth("Refresh lots", true), lightsW = ApexUi::ButtonWidth("Refresh lights", true);
         const bool inlineActions = terrainW + lotW + lightsW + 2.0f * gap <= ImGui::GetContentRegionAvail().x;
         if (inlineActions) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - terrainW - lotW - lightsW - 2.0f * gap);
-        ImGui::BeginDisabled(g_menuLevel.load() < 0.0f || !g_live);
+        ImGui::BeginDisabled(g_menuLevel.load() < 0.0f || !g_live || g_restart.active || g_restartRequested);
         if (ApexUi::IconTextButton("Refresh terrain", ApexUi::IconId::LandPlot)) g_kickRequested = true;
         if (inlineActions) ImGui::SameLine();
         if (ApexUi::IconTextButton("Refresh lots", ApexUi::IconId::House)) g_relightLotsRequested = true;
         if (inlineActions) ImGui::SameLine();
         if (ApexUi::IconTextButton("Refresh lights", ApexUi::IconId::Lightbulb)) NightLighting::RefreshAll("button");
         ImGui::EndDisabled();
+        ApexUi::CardDivider();
+        ApexUi::MutedText("Discard cached lighting and rebuild it without changing settings");
+        ApexUi::Gap(ApexUi::kSpace3);
+        ImGui::BeginDisabled(g_menuLevel.load() < 0.0f || !g_live || !WorldSession::InWorld() || g_restart.active || g_restartRequested);
+        if (ApexUi::IconTextButton("Restart lighting", ApexUi::IconId::RotateCcw)) NightLighting::Restart();
+        ImGui::EndDisabled();
+        if (g_restart.active) {
+            const auto progress = LevelLightShare::LightingRestartProgress();
+            if (progress.scheduled < progress.total)
+                ApexUi::MutedText(I18n::Trf("Rebuilding lighting: {} / {} stories queued", progress.scheduled, progress.total).c_str());
+            else ApexUi::MutedText("Waiting for lighting calculations");
+        } else if (g_restart.done) ApexUi::MutedText("Lighting restarted");
+        else if (g_restartUnavailable) ApexUi::MutedText("Lighting restart unavailable");
     }
     ApexUi::EndCard();
     ImGui::PopID();
@@ -3533,6 +3596,12 @@ void NightLighting::RefreshAll(const char* why, bool terrain) {
     LOG_INFO(std::format("[NightTerrainRelight] Refresh the lighting ({}): {}lots and rooms light again", why, terrain ? "terrain, " : ""));
 }
 void NightLighting::RefreshSoon() { RequestAutoRefresh(); }
+void NightLighting::Restart() {
+    if (g_menuLevel.load() < 0.0f || !g_live || !WorldSession::InWorld() || g_restart.active || g_restartRequested) return;
+    g_restartRequested = true;
+    g_restart.done = false;
+    g_restartUnavailable = false;
+}
 
 // The world is on screen (its terrain is drawn, or the fallback after the world change); false during load screens
 bool NightLighting::WorldLive() { return g_live; }

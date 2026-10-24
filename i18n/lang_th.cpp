@@ -9,6 +9,12 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Thai}
 const I18n::Pair kPairs[] = {
+    {"Restart lighting", "เริ่มแสงใหม่"},
+    {"Discard cached lighting and rebuild it without changing settings", "ล้างข้อมูลแสงที่แคชไว้และคำนวณใหม่โดยไม่เปลี่ยนการตั้งค่า"},
+    {"Rebuilding lighting: {} / {} stories queued", "กำลังคำนวณแสงใหม่: เพิ่ม {} / {} ชั้นในคิวแล้ว"},
+    {"Waiting for lighting calculations", "กำลังรอการคำนวณแสง"},
+    {"Lighting restarted", "เริ่มแสงใหม่แล้ว"},
+    {"Lighting restart unavailable", "ไม่สามารถเริ่มแสงใหม่ได้"},
     {"Night Lights: gables and upper trim keep continuous lamp light", "แสงกลางคืน: หน้าจั่วและขอบด้านบนรับแสงโคมอย่างต่อเนื่อง"},
     {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "แสงกลางคืน: เสาเตี้ยและบันไดคำนึงถึงพื้นทึบใต้โคมไฟ"},
 

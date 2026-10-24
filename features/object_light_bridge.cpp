@@ -1174,6 +1174,7 @@ void OnPresent() {
 void SetAllObjects(bool on) { g_forceAll = on; }
 
 void RequestRigRefresh() { g_refreshRequested = true; }
+bool RigRefreshPending() { return g_refreshRequested.load(); }
 
 std::string RigOpeningNote(uintptr_t rig) {
     if (!rig) return std::string();

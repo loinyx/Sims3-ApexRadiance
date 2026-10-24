@@ -1390,6 +1390,12 @@ Live counters	tr_menu.cpp:kDeveloperCounterEntries	Contadores atuais	Contadores 
 Worker counters	tr_menu.cpp:kDeveloperCounterEntries	Contadores dos trabalhadores	Contadores de los trabajadores	Compteurs des threads de travail	
 Validation run	tr_menu.cpp:kDeveloperCounterEntries	Teste de validação	Prueba de validación	Test de validation	
 Adds comparison work while the test is active	tr_menu.cpp:kDeveloperCounterEntries	Adiciona trabalho de comparação enquanto o teste está ativo	Añade trabajo de comparación mientras la prueba está activa	Ajoute du travail de comparaison pendant le test	
+Restart lighting	tr_menu.cpp:kRefreshLightingCardEntries	Reiniciar iluminação	Reiniciar iluminación	Réinitialiser l’éclairage	
+Discard cached lighting and rebuild it without changing settings	tr_menu.cpp:kRefreshLightingCardEntries	Descarta a iluminação em cache e a recalcula sem alterar suas configurações	Descarta la iluminación en caché y la recalcula sin cambiar los ajustes	Supprime l’éclairage en cache et le recalcule sans modifier les réglages	
+Rebuilding lighting: {} / {} stories queued	tr_menu.cpp:kRefreshLightingCardEntries	Refazendo iluminação: {} / {} andares na fila	Recalculando iluminación: {} / {} plantas en cola	Calcul de l’éclairage : {} / {} étages en attente	{} {}
+Waiting for lighting calculations	tr_menu.cpp:kRefreshLightingCardEntries	Aguardando os cálculos de iluminação	Esperando los cálculos de iluminación	En attente des calculs d’éclairage	
+Lighting restarted	tr_menu.cpp:kRefreshLightingCardEntries	Iluminação reiniciada	Iluminación reiniciada	Éclairage réinitialisé	
+Lighting restart unavailable	tr_menu.cpp:kRefreshLightingCardEntries	Reinício da iluminação indisponível	Reinicio de iluminación no disponible	Réinitialisation de l’éclairage indisponible	
 Refresh lights	tr_menu.cpp:kRefreshLightingCardEntries	Atualizar luzes	Actualizar luces	Actualiser les lumières	
 Recalculate lighting if something looks wrong	tr_menu.cpp:kRefreshLightingCardEntries	Recalcule a iluminação se algo parecer errado	Recalcula la iluminación si algo se ve mal	Recalculez l’éclairage si quelque chose semble incorrect	
 Terrain and lots	tr_menu.cpp:kRefreshLightingCardEntries	Terreno e lotes	Terreno y solares	Terrain et parcelles	

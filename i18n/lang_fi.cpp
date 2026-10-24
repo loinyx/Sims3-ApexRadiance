@@ -9,6 +9,12 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Finnish}
 const I18n::Pair kPairs[] = {
+    {"Restart lighting", "Käynnistä valaistus uudelleen"},
+    {"Discard cached lighting and rebuild it without changing settings", "Poistaa välimuistiin tallennetun valaistuksen ja laskee sen uudelleen muuttamatta asetuksia"},
+    {"Rebuilding lighting: {} / {} stories queued", "Valaistusta lasketaan: {} / {} kerrosta jonossa"},
+    {"Waiting for lighting calculations", "Odotetaan valaistuslaskentaa"},
+    {"Lighting restarted", "Valaistus käynnistetty uudelleen"},
+    {"Lighting restart unavailable", "Valaistuksen uudelleenkäynnistys ei ole käytettävissä"},
     {"Night Lights: gables and upper trim keep continuous lamp light", "Yövalaistus: päädyt ja ylälistat saavat yhtenäisen lampunvalon"},
     {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Yövalaistus: matalat pylväät ja portaat huomioivat lamppujen alla olevat umpinaiset lattiat"},
 

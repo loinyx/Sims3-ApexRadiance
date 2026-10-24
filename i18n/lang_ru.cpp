@@ -9,6 +9,12 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Russian}
 const I18n::Pair kPairs[] = {
+    {"Restart lighting", "Перезапустить освещение"},
+    {"Discard cached lighting and rebuild it without changing settings", "Удаляет сохранённое освещение и пересчитывает его без изменения настроек"},
+    {"Rebuilding lighting: {} / {} stories queued", "Пересчёт освещения: {} / {} этажей в очереди"},
+    {"Waiting for lighting calculations", "Ожидание расчётов освещения"},
+    {"Lighting restarted", "Освещение перезапущено"},
+    {"Lighting restart unavailable", "Перезапуск освещения недоступен"},
     {"Night Lights: gables and upper trim keep continuous lamp light", "Ночное освещение: фронтоны и верхние карнизы получают непрерывный свет ламп"},
     {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Ночное освещение: низкие столбы и лестницы учитывают сплошные перекрытия под лампами"},
 

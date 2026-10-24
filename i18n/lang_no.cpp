@@ -9,6 +9,12 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Norwegian (Bokmal)}
 const I18n::Pair kPairs[] = {
+    {"Restart lighting", "Start belysningen på nytt"},
+    {"Discard cached lighting and rebuild it without changing settings", "Forkaster lagret belysning og beregner den på nytt uten å endre innstillingene"},
+    {"Rebuilding lighting: {} / {} stories queued", "Beregner belysning: {} / {} etasjer i kø"},
+    {"Waiting for lighting calculations", "Venter på lysberegninger"},
+    {"Lighting restarted", "Belysningen er startet på nytt"},
+    {"Lighting restart unavailable", "Omstart av belysning er ikke tilgjengelig"},
     {"Night Lights: gables and upper trim keep continuous lamp light", "Nattbelysning: gavler og øvre lister får sammenhengende lampelys"},
     {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Nattbelysning: lave søyler og trapper tar hensyn til tette gulv under lamper"},
 

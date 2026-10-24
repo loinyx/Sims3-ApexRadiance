@@ -9,6 +9,12 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Czech}
 const I18n::Pair kPairs[] = {
+    {"Restart lighting", "Restartovat osvětlení"},
+    {"Discard cached lighting and rebuild it without changing settings", "Zahodí uložené osvětlení a přepočítá ho beze změny nastavení"},
+    {"Rebuilding lighting: {} / {} stories queued", "Přepočet osvětlení: {} / {} podlaží ve frontě"},
+    {"Waiting for lighting calculations", "Čeká se na výpočty osvětlení"},
+    {"Lighting restarted", "Osvětlení restartováno"},
+    {"Lighting restart unavailable", "Restart osvětlení není dostupný"},
     {"Night Lights: gables and upper trim keep continuous lamp light", "Noční osvětlení: štíty a horní římsy mají souvislé světlo lamp"},
     {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Noční osvětlení: nízké pilíře a schody respektují plné podlahy pod lampami"},
 

@@ -698,6 +698,7 @@ void FurnitureCubeColour(float* rgb) {
 void SetNightLevel(float level) { g_night = level; }
 void SetDrawDark(bool dark) { g_drawDark = dark; }
 void RigsAgainIn(unsigned ms) { g_rigAgainAt = (GetTickCount() + ms) | 1; }
+bool RigRefreshPending() { return g_rigAgainAt != 0; }
 void SetAmbientProbe(bool on) { g_probe = on; }
 // The directions of the three [NoLight] lights (normalised CustomLightRigging.ini directions; PS c0 / c3 / c2 of every
 // captured unlit room-mode furniture draw, 088-093)

@@ -27,6 +27,15 @@ bool WorldIsLive(); // the world went live (OnWorldLive) since the load
 // Render thread: how many lots are loaded now (0 at the main menu and during most of a load)
 int LoadedLots();
 bool LoadedRoomsBusy(); // cached room states plus pending ambient; startup refresh readiness
+struct RestartProgress {
+    unsigned scheduled = 0, total = 0, pending = 0;
+    bool active = false;
+};
+// Render thread: rebuild geometry-dependent lighting and queue one loaded story
+// per frame, with active lots first. Settings and measured mesh heights stay intact.
+bool BeginLightingRestart();
+RestartProgress LightingRestartProgress();
+void StopLightingRestart(); // stop dispatching; native solves already queued continue
 // Development tools (render thread): the story each loaded lot shows (low half of its id, story); returns the count
 int DisplayLevels(uint32_t* lots, int* stories, int max);
 // Development tools (F6 recorder, render thread): "[room]" lines for the indoor rooms whose ambient, state, class or light

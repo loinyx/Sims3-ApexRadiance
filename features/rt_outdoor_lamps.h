@@ -41,6 +41,10 @@ void OnPresent(IDirect3DDevice9* dev);
 // was. Called by the one SetTexture callback of both relit-copy swaps (RoomLampsGpu::RegisterMapSwap).
 bool SwapTexture(IDirect3DDevice9* dev, DWORD stage, IDirect3DBaseTexture9* t);
 void OnWorldChanged();
+// Render thread: discard relit copies, jobs and shadows at the next Present.
+// Old proxy builds cannot publish into the new generation.
+void RestartLighting();
+bool RestartPending();
 
 // ---- the light tree thread (LevelLightShare's and LampMarkFilter's hooks) ----
 // The lamp entry update of `light` (registered in `room` of tree level `treeLevel`): true = the GPU draws it on every story

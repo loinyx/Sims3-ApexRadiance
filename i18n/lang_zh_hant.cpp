@@ -9,6 +9,12 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Traditional, Taiwan / Hong Kong)}
 const I18n::Pair kPairs[] = {
+    {"Restart lighting", "重新計算光照"},
+    {"Discard cached lighting and rebuild it without changing settings", "清除快取的光照並重新計算，保留目前設定"},
+    {"Rebuilding lighting: {} / {} stories queued", "正在重算光照：已排入佇列 {} / {} 層"},
+    {"Waiting for lighting calculations", "正在等待光照計算"},
+    {"Lighting restarted", "光照已重新計算"},
+    {"Lighting restart unavailable", "無法重新計算光照"},
     {"Night Lights: gables and upper trim keep continuous lamp light", "夜間照明：山牆與頂部飾邊獲得連續的燈光"},
     {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "夜間照明：矮柱與樓梯會考慮燈下的實心樓板"},
 

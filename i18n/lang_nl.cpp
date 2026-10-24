@@ -9,6 +9,12 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Dutch}
 const I18n::Pair kPairs[] = {
+    {"Restart lighting", "Verlichting herstarten"},
+    {"Discard cached lighting and rebuild it without changing settings", "Verwijdert opgeslagen verlichting en berekent deze opnieuw zonder instellingen te wijzigen"},
+    {"Rebuilding lighting: {} / {} stories queued", "Verlichting berekenen: {} / {} verdiepingen ingepland"},
+    {"Waiting for lighting calculations", "Wachten op verlichtingsberekeningen"},
+    {"Lighting restarted", "Verlichting herstart"},
+    {"Lighting restart unavailable", "Verlichting herstarten niet beschikbaar"},
     {"Night Lights: gables and upper trim keep continuous lamp light", "Nachtverlichting: geveltoppen en bovenranden krijgen doorlopend lamplicht"},
     {"Night Lights: short pillars and stairs respect solid floors beneath lamps", "Nachtverlichting: lage pilaren en trappen houden rekening met dichte vloeren onder lampen"},
 

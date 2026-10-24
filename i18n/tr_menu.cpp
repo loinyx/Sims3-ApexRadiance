@@ -1441,6 +1441,12 @@ const I18n::Table kDeveloperCounterTable(kDeveloperCounterEntries, std::size(kDe
 
 namespace {
 const I18n::Entry kRefreshLightingCardEntries[] = {
+    {"Restart lighting", "Reiniciar iluminação", "Reiniciar iluminación", "Réinitialiser l’éclairage"},
+    {"Discard cached lighting and rebuild it without changing settings", "Descarta a iluminação em cache e a recalcula sem alterar suas configurações", "Descarta la iluminación en caché y la recalcula sin cambiar los ajustes", "Supprime l’éclairage en cache et le recalcule sans modifier les réglages"},
+    {"Rebuilding lighting: {} / {} stories queued", "Refazendo iluminação: {} / {} andares na fila", "Recalculando iluminación: {} / {} plantas en cola", "Calcul de l’éclairage : {} / {} étages en attente"},
+    {"Waiting for lighting calculations", "Aguardando os cálculos de iluminação", "Esperando los cálculos de iluminación", "En attente des calculs d’éclairage"},
+    {"Lighting restarted", "Iluminação reiniciada", "Iluminación reiniciada", "Éclairage réinitialisé"},
+    {"Lighting restart unavailable", "Reinício da iluminação indisponível", "Reinicio de iluminación no disponible", "Réinitialisation de l’éclairage indisponible"},
     {"Refresh lights", "Atualizar luzes", "Actualizar luces", "Actualiser les lumières"},
     {"Recalculate lighting if something looks wrong", "Recalcule a iluminação se algo parecer errado", "Recalcula la iluminación si algo se ve mal", "Recalculez l’éclairage si quelque chose semble incorrect"},
     {"Terrain and lots", "Terreno e lotes", "Terreno y solares", "Terrain et parcelles"},

@@ -13079,6 +13079,52 @@ bool RigWorkPending(uintptr_t tracker) {
     }
     return DepWaitsFor(tracker);
 }
+
+struct RestartStory { uintptr_t tracker; int level; };
+std::vector<RestartStory> g_restartStories;
+std::vector<RigRoomWatch> g_restartRooms;
+unsigned g_restartNext = 0, g_restartCursor = 0, g_restartTotal = 0;
+bool g_restartActive = false;
+void CancelLightingRestart() {
+    std::vector<RestartStory>().swap(g_restartStories);
+    std::vector<RigRoomWatch>().swap(g_restartRooms);
+    g_restartNext = g_restartCursor = g_restartTotal = 0;
+    g_restartActive = false;
+}
+void PumpLightingRestart() {
+    if (!g_restartActive) return;
+    // Poll a bounded slice. A missing room has unloaded; only native finished
+    // states count as complete for a room that is still present.
+    for (unsigned n = 0, visits = std::min(64u, static_cast<unsigned>(g_restartRooms.size())); n < visits && !g_restartRooms.empty(); ++n) {
+        g_restartCursor %= static_cast<unsigned>(g_restartRooms.size());
+        const auto& room = g_restartRooms[g_restartCursor];
+        const int state = WatchedRoomState(room);
+        if (state < 0 || ((state == 4 || state == 5) && !RigWorkPending(room.key.tracker))) {
+            g_restartRooms[g_restartCursor] = g_restartRooms.back();
+            g_restartRooms.pop_back();
+        } else ++g_restartCursor;
+    }
+    // Backpressure bounds retained room references even in very large worlds.
+    if (g_restartNext < g_restartStories.size() && g_restartRooms.size() < 8192) {
+        const RestartStory story = g_restartStories[g_restartNext++];
+        if (const uintptr_t mgr = SafeStoryManager(story.tracker, story.level)) {
+            BumpGeoGen(mgr);
+            const DragLite::WhyScope why(DragLite::Why::RelightAll);
+            struct ForceSolve {
+                bool previous = t_queueForce;
+                ForceSolve() { t_queueForce = true; }
+                ~ForceSolve() { t_queueForce = previous; }
+            } force;
+            RequeueStory(story.tracker, story.level, 0, nullptr, &g_restartRooms);
+        }
+    }
+    if (g_restartNext == g_restartStories.size() && g_restartRooms.empty()) {
+        g_restartActive = false;
+        std::vector<RestartStory>().swap(g_restartStories);
+        std::vector<RigRoomWatch>().swap(g_restartRooms);
+        LOG_INFO("[LevelLightShare] Lighting restart: loaded room solves finished");
+    }
+}
 void RefreshCompletedLotRigs() {
     const DWORD now = GetTickCount();
     if (g_rigWait.empty() || static_cast<int32_t>(now - g_rigPollAt) < 0) return;
@@ -14546,6 +14592,7 @@ void OnPresent() {
     if (g_groupRigsPending.exchange(false, std::memory_order_relaxed)) ObjectLightBridge::RequestRigRefresh();
     g_renderThread = ThreadId();
     ApplyPendingAmbient();
+    PumpLightingRestart();
     RefreshCompletedLotRigs();
     if (g_refreshRequested.exchange(false)) RefreshAllLots();
     if (g_alignRequeue.exchange(false)) LevelLightShare::RelightAllRooms(g_alignOn.load() ? "Seamless walls between floors on" : "Seamless walls between floors off");
@@ -14596,6 +14643,7 @@ void OnPresent() {
 }
 
 void OnWorldChanged() {
+    CancelLightingRestart();
     { // (release review) a wall freed with the world may come back at the same address: its cells' feet start afresh
         std::lock_guard<std::mutex> lk(g_wallHMx);
         g_wallH.clear(), g_wallSolvedH.clear(), g_wallTop.clear();
@@ -16455,6 +16503,37 @@ void RelightAllRooms(const char* why) {
     }
     g_relightAllAt.store((GetTickCount() + 250) | 1, std::memory_order_relaxed);
 }
+
+bool BeginLightingRestart() {
+    if (g_restartActive) return false;
+    LoadAddresses();
+    if (!g_installed || !kRootPtr || !kRoomById || !kInvalidateRoom || !kSetInsert) return false;
+    CancelLightingRestart();
+    uintptr_t trackers[256], active[4];
+    const int count = AllTrackers(trackers, static_cast<int>(std::size(trackers)));
+    const int activeCount = ActiveLotTrackers(active, static_cast<int>(std::size(active)));
+    for (int priority = 0; priority < 2; ++priority)
+        for (int i = 0; i < count; ++i) {
+            const bool current = std::find(active, active + activeCount, trackers[i]) != active + activeCount;
+            if (current != (priority == 0)) continue;
+            for (int level = -4; level <= 7; ++level)
+                if (SafeStoryManager(trackers[i], level)) g_restartStories.push_back({trackers[i], level});
+        }
+    OutdoorDelta::InvalidateAll("lighting restart");
+    g_floorEditGen.fetch_add(1, std::memory_order_relaxed);
+    g_indoorGen.fetch_add(1, std::memory_order_relaxed);
+    MeshOcclusion::Reset();
+    g_relightAllAt.store(0, std::memory_order_relaxed);
+    { std::lock_guard<std::mutex> lock(g_relightWhyMx); g_relightWhy.clear(); }
+    g_restartActive = !g_restartStories.empty();
+    g_restartTotal = static_cast<unsigned>(g_restartStories.size());
+    LOG_INFO(std::format("[LevelLightShare] Lighting restart: {} loaded stories queued, active lots first", g_restartStories.size()));
+    return true;
+}
+RestartProgress LightingRestartProgress() {
+    return {g_restartNext, g_restartTotal, static_cast<unsigned>(g_restartRooms.size()), g_restartActive};
+}
+void StopLightingRestart() { CancelLightingRestart(); }
 
 void SetFoundationWalls(bool on) {
     if (g_foundationWallsOn.exchange(on) == on) return;
