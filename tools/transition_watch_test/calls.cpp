@@ -9,8 +9,15 @@ std::vector<std::string> logLines;
 namespace ApexLog {
 void Write(Level, const std::string& text, const std::source_location&) noexcept { logLines.push_back(text); }
 }
-std::optional<uintptr_t> GameAddress::Resolve() const { return std::nullopt; }
-namespace DetourBatch { bool InstallHooks(const std::vector<Hook>&) { return false; } }
+std::optional<uintptr_t> GameAddress::Resolve() const {
+    if (std::string(name) == "Transition thumbnails") return 0x00778CC0;
+    if (std::string(name) == "Transition height map") return 0x00787060;
+    return std::nullopt;
+}
+unsigned installAttempts = 0;
+namespace DetourBatch {
+bool InstallHooks(const std::vector<Hook>& hooks) { ++installAttempts; assert(hooks.size() == 1); return true; }
+}
 unsigned routes = 0, thumbs = 0, heights = 0;
 uintptr_t received = 0;
 void __cdecl OriginalRouting() { ++routes; }
@@ -28,6 +35,11 @@ int main() {
     using namespace TransitionCalls;
     Start(); // unsupported executable: no patch attempt and no addresses read
     assert(logLines.empty());
+    g_exeTimestamp = 0x52DEC247;
+    Start();
+    assert(installAttempts == 2);
+    assert(Contains("2 of 3 native observers attached"));
+    logLines.clear();
     thumbnails = OriginalThumbnail;
     routing = OriginalRouting;
     heightMap = OriginalHeight;

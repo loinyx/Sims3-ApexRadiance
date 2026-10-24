@@ -72,20 +72,23 @@ void Start() {
     const GameAddress heightEntry{"Transition height map", {},
         "8B 0D C4 CB 1E 01 85 C9 74 0A 8B 44 24 04 50 E8 6C C8 4D 00 C3 CC CC CC", 0,
         {0x8B,0x0D}};
-    const auto a = thumbnailEntry.Resolve(), b = routingEntry.Resolve(), c = heightEntry.Resolve();
-    if (!a || !b || !c || *a != 0x00778CC0 || *b != 0x0078AE40 || *c != 0x00787060) {
-        LOG_WARNING("[TransitionCalls] Native transition entries did not match the verified Steam layout; call observation disabled.");
-        return;
-    }
-    thumbnails = reinterpret_cast<OneArg>(*a);
-    routing = reinterpret_cast<NoArg>(*b);
-    heightMap = reinterpret_cast<OneArg>(*c);
-    const bool ok = DetourBatch::InstallHooks({
-        {reinterpret_cast<void**>(&thumbnails), reinterpret_cast<void*>(&Thumbnails)},
-        {reinterpret_cast<void**>(&routing), reinterpret_cast<void*>(&Routing)},
-        {reinterpret_cast<void**>(&heightMap), reinterpret_cast<void*>(&HeightMap)}});
-    LOG_INFO(ok ? "[TransitionCalls] Native thumbnail, routing and height-map entries observed independently of scene draws. Entry/return timing includes yielding and waits, not CPU time. ProgressDialog closure and callback consumption are not observed."
-                : "[TransitionCalls] Native observers could not attach; call coverage unavailable.");
+    unsigned attached = 0;
+    const auto observe = [&](const GameAddress& entry, uintptr_t expected, void** original, void* hook) {
+        const auto address = entry.Resolve();
+        if (!address || *address != expected) {
+            LOG_WARNING(std::format("[TransitionCalls] {} unavailable or already changed; other observers remain independent.", entry.name));
+            return;
+        }
+        *original = reinterpret_cast<void*>(*address);
+        if (DetourBatch::InstallHooks({{original, hook}})) {
+            ++attached;
+            LOG_INFO(std::format("[TransitionCalls] {} attached.", entry.name));
+        } else LOG_WARNING(std::format("[TransitionCalls] {} could not attach; other observers remain independent.", entry.name));
+    };
+    observe(thumbnailEntry, 0x00778CC0, reinterpret_cast<void**>(&thumbnails), reinterpret_cast<void*>(&Thumbnails));
+    observe(routingEntry, 0x0078AE40, reinterpret_cast<void**>(&routing), reinterpret_cast<void*>(&Routing));
+    observe(heightEntry, 0x00787060, reinterpret_cast<void**>(&heightMap), reinterpret_cast<void*>(&HeightMap));
+    LOG_INFO(std::format("[TransitionCalls] {} of 3 native observers attached. Entry/return timing includes yielding and waits, not CPU time. ProgressDialog closure and callback consumption are not observed.", attached));
 }
 void Pump() {
     static uint64_t last = 0, lastPending = 0, reportedLost = 0;
