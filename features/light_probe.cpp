@@ -48,6 +48,18 @@ using ConstList = std::vector<std::pair<int, std::array<float, 4>>>; // non-zero
 
 enum class State { Idle, Armed, Capturing };
 
+// Raw geometry is kept only for a requested capture. Historical lighting-wall
+// notes do not identify the vertex UVs used by the draw that covers the pixel.
+constexpr size_t kMeshBudget = 6 * 1024 * 1024;
+size_t g_meshBytes = 0;
+struct WallMesh {
+    std::vector<BYTE> vertices, indices;
+    std::string declaration, status;
+    UINT stride = 0, first = 0, startIndex = 0, minVertex = 0;
+    INT baseVertex = 0;
+    D3DFORMAT indexFormat = D3DFMT_UNKNOWN;
+};
+
 struct DrawRec {
     int index = 0;
     const char* kind = "";
@@ -64,6 +76,7 @@ struct DrawRec {
     std::string bridge; // LotLightBridge::DescribeDraw
     std::string instances; // instanced draws: the per-instance data (read while the draw is recorded)
     std::vector<std::array<float, 4>> verts; // the draw's vertex positions as stored (stream POSITION, raw), for the wall block (WallUnderPixel)
+    WallMesh mesh;
     DWORD samples = 0;
     bool resolved = false;
 };
@@ -459,7 +472,7 @@ bool AnyBlank() {
 
 // The positions of the vertices a draw reads (POSITION 0 of its declaration, as stored), read-only; up to 20000. The wall
 // shader scales them by 1/256 into lot space (x, z; y full height), so the wall block can tell where a wall is drawn.
-std::vector<std::array<float, 4>> ReadPositions(IDirect3DDevice9* dev, UINT first, UINT count) {
+std::vector<std::array<float, 4>> ReadPositions(IDirect3DDevice9* dev, UINT first, UINT count, WallMesh& mesh) {
     std::vector<std::array<float, 4>> out;
     if (count == 0 || count > 20000) return out;
     IDirect3DVertexDeclaration9* decl = nullptr;
@@ -473,15 +486,30 @@ std::vector<std::array<float, 4>> ReadPositions(IDirect3DDevice9* dev, UINT firs
     for (UINT i = 0; i < ne && el[i].Stream != 0xFF; i++)
         if (el[i].Usage == D3DDECLUSAGE_POSITION && el[i].UsageIndex == 0) pos = &el[i];
     if (!pos) return out;
+    for (UINT i = 0; i < ne && el[i].Stream != 0xFF; ++i)
+        mesh.declaration += std::format(" stream={} offset={} type={} usage={} index={};", el[i].Stream, el[i].Offset, el[i].Type, el[i].Usage, el[i].UsageIndex);
     IDirect3DVertexBuffer9* vb = nullptr;
     UINT off = 0, stride = 0;
     if (FAILED(dev->GetStreamSource(pos->Stream, &vb, &off, &stride)) || !vb) return out;
     D3DVERTEXBUFFER_DESC d{};
     vb->GetDesc(&d);
-    const UINT begin = off + first * stride, bytes = count * stride;
+    const uint64_t begin = static_cast<uint64_t>(off) + static_cast<uint64_t>(first) * stride, bytes = static_cast<uint64_t>(count) * stride;
+    // Position decoding below may read sixteen bytes from its element.
+    const UINT posBytes = pos->Type == D3DDECLTYPE_FLOAT3 ? 12 : pos->Type == D3DDECLTYPE_FLOAT4 ? 16 :
+                          pos->Type == D3DDECLTYPE_UBYTE4 ? 4 : 8;
     void* p = nullptr;
-    if (stride >= 8 && d.Pool != D3DPOOL_DEFAULT && begin + bytes <= d.Size && SUCCEEDED(vb->Lock(begin, bytes, &p, D3DLOCK_READONLY)) && p) {
+    const bool keepMesh = pos->Stream == 0 && bytes <= 1024 * 1024 && bytes <= kMeshBudget - g_meshBytes;
+    if (keepMesh) mesh.vertices.resize(static_cast<size_t>(bytes));
+    out.reserve(count);
+    if (stride >= 8 && pos->Offset <= stride && posBytes <= stride - pos->Offset && d.Pool != D3DPOOL_DEFAULT && begin <= d.Size && bytes <= d.Size - begin &&
+        SUCCEEDED(vb->Lock(static_cast<UINT>(begin), static_cast<UINT>(bytes), &p, D3DLOCK_READONLY)) && p) {
         const BYTE* b = static_cast<const BYTE*>(p);
+        if (keepMesh) {
+            std::memcpy(mesh.vertices.data(), b, static_cast<size_t>(bytes));
+            mesh.stride = stride;
+            mesh.first = first;
+            g_meshBytes += static_cast<size_t>(bytes);
+        }
         for (UINT i = 0; i < count; i++) {
             const BYTE* v = b + static_cast<size_t>(i) * stride + pos->Offset;
             std::array<float, 4> f{0, 0, 0, 1};
@@ -504,13 +532,44 @@ std::vector<std::array<float, 4>> ReadPositions(IDirect3DDevice9* dev, UINT firs
             out.push_back(f);
         }
         vb->Unlock();
-    }
+    } else std::vector<BYTE>().swap(mesh.vertices);
     vb->Release();
     return out;
 }
 
+void ReadWallIndices(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT prims, UINT start, INT base, UINT minVertex, WallMesh& mesh) {
+    mesh.startIndex = start;
+    mesh.baseVertex = base;
+    mesh.minVertex = minVertex;
+    if (mesh.vertices.empty()) { mesh.status = "vertex data unavailable or capture budget reached"; return; }
+    const uint64_t count = type == D3DPT_TRIANGLELIST ? static_cast<uint64_t>(prims) * 3 :
+                           type == D3DPT_TRIANGLESTRIP ? static_cast<uint64_t>(prims) + 2 : 0;
+    if (!count || count > 60000) { mesh.status = "unsupported topology or index count"; return; }
+    IDirect3DIndexBuffer9* ib = nullptr;
+    if (FAILED(dev->GetIndices(&ib)) || !ib) { mesh.status = "index buffer unavailable"; return; }
+    D3DINDEXBUFFER_DESC desc{};
+    const bool described = SUCCEEDED(ib->GetDesc(&desc));
+    const UINT width = desc.Format == D3DFMT_INDEX16 ? 2 : desc.Format == D3DFMT_INDEX32 ? 4 : 0;
+    const uint64_t begin = static_cast<uint64_t>(start) * width, bytes = count * width;
+    void* data = nullptr;
+    const bool readable = described && width && desc.Pool != D3DPOOL_DEFAULT && begin <= desc.Size && bytes <= desc.Size - begin && bytes <= kMeshBudget - g_meshBytes;
+    if (readable) mesh.indices.resize(static_cast<size_t>(bytes));
+    if (readable && SUCCEEDED(ib->Lock(static_cast<UINT>(begin), static_cast<UINT>(bytes), &data, D3DLOCK_READONLY)) && data) {
+        std::memcpy(mesh.indices.data(), data, static_cast<size_t>(bytes));
+        mesh.indexFormat = desc.Format;
+        g_meshBytes += static_cast<size_t>(bytes);
+        ib->Unlock();
+        mesh.status = "raw draw geometry; apply the captured shader and declaration before interpreting UVs";
+    } else {
+        std::vector<BYTE>().swap(mesh.indices);
+        mesh.status = "index data unavailable or capture budget reached";
+    }
+    ib->Release();
+}
+
 // ---- per-draw work ----
-template <typename DrawFn> D3D9Hooks::HookAction OnDraw(IDirect3DDevice9* dev, const char* kind, D3DPRIMITIVETYPE type, UINT prims, DrawFn draw, UINT firstVertex = 0, UINT vertexCount = 0) {
+template <typename DrawFn> D3D9Hooks::HookAction OnDraw(IDirect3DDevice9* dev, const char* kind, D3DPRIMITIVETYPE type, UINT prims, DrawFn draw, UINT firstVertex = 0, UINT vertexCount = 0,
+                                                     UINT startIndex = 0, INT baseVertex = 0, UINT minVertex = 0) {
     if (g_inProbeCall) return D3D9Hooks::HookAction::Continue;
 
     if (g_state == State::Capturing && g_draws.size() < kMaxDraws) {
@@ -560,7 +619,11 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(IDirect3DDevice9* dev, c
                     const float l = std::sqrt(tmp[k][0] * tmp[k][0] + tmp[k][1] * tmp[k][1] + tmp[k][2] * tmp[k][2]);
                     rigid = l > 0.99f && l < 1.01f;
                 }
-                if (rigid) r.verts = ReadPositions(dev, firstVertex, vertexCount);
+                if (rigid) {
+                    r.verts = ReadPositions(dev, firstVertex, vertexCount, r.mesh);
+                    if (std::strcmp(kind, "DIP") == 0) ReadWallIndices(dev, type, prims, startIndex, baseVertex, minVertex, r.mesh);
+                    else r.mesh.status = "non-indexed raw draw geometry";
+                }
             }
 
             IDirect3DQuery9* q = nullptr;
@@ -645,7 +708,7 @@ void RegisterHooks() {
     D3D9Hooks::ObserveReissuedDraws(kHookName); // probes the replaced draws as drawn (as before)
     D3D9Hooks::RegisterDrawIndexedPrimitive(kHookName,
         [](D3D9Hooks::DeviceContext& ctx, D3DPRIMITIVETYPE type, INT bvi, UINT minV, UINT numV, UINT start, UINT prims) {
-            return OnDraw(ctx.device, "DIP", type, prims, [&]() { ctx.device->DrawIndexedPrimitive(type, bvi, minV, numV, start, prims); }, static_cast<UINT>(bvi + static_cast<INT>(minV)), numV);
+            return OnDraw(ctx.device, "DIP", type, prims, [&]() { ctx.device->DrawIndexedPrimitive(type, bvi, minV, numV, start, prims); }, static_cast<UINT>(static_cast<int64_t>(bvi) + minV), numV, start, bvi, minV);
         },
         D3D9Hooks::Priority::Last);
     D3D9Hooks::RegisterDrawPrimitive(kHookName,
@@ -675,6 +738,7 @@ void ReleaseDraws() {
         d.ps = nullptr;
     }
     g_draws.clear();
+    g_meshBytes = 0;
 }
 // (development builds, release_debug_buffers) Between captures the room reserved for kMaxDraws records (about 1.7 MB, kept by
 // clear()) and the occlusion queries of the last capture are given back; the next capture reserves and creates them again.
@@ -698,7 +762,7 @@ void MeasureMemory() {
     static auto* sDraws = ApexMemory::Register("LightProbe", "draw records of a capture (F7) and its queries");
     static auto* sTex = ApexMemory::Register("LightProbe", "textures listed for the menu (references to game textures)");
     ApexMemory::Set(sDraws,
-                    Vec(g_draws, [](const DrawRec& d) { return Vec(d.psc) + Vec(d.vsc) + Str(d.bridge) + Str(d.instances) + Vec(d.verts); }) + Vec(g_queryPool) +
+                    Vec(g_draws, [](const DrawRec& d) { return Vec(d.psc) + Vec(d.vsc) + Str(d.bridge) + Str(d.instances) + Vec(d.verts) + Vec(d.mesh.vertices) + Vec(d.mesh.indices) + Str(d.mesh.declaration) + Str(d.mesh.status); }) + Vec(g_queryPool) +
                         Vec(g_prevPick.psc) + Vec(g_prevPick.vsc) + Str(g_prevPick.bridge),
                     g_draws.size() + g_queryPool.size());
     ApexMemory::Set(sTex, Vec(g_textures, [](const TexInfo& t) { return Str(t.desc) + Str(t.file); }), g_textures.size());
@@ -849,6 +913,7 @@ std::string WallUnderPixel(const DrawRec& d) {
     const float dir[3] = {pw[1][0] - pw[0][0], pw[1][1] - pw[0][1], pw[1][2] - pw[0][2]};
     float hit[3] = {1e30f, 0, 0};
     std::string s = LevelLightShare::WallNotesOnRay(pw[0], dir, hit);
+    if (!s.empty()) s = "Historical lighting-wall candidate; not a match to the draw's UVs.\n" + s;
     // where the wall is drawn: the draw's vertices near the hit (the wall shader: lot space = stored / 256, y full height)
     if (hit[0] < 1e29f && !d.verts.empty()) {
         float lo = 1e30f, hi = -1e30f;
@@ -928,6 +993,22 @@ void FinishCapture(IDirect3DDevice9* dev) {
         }
         out << "   mod: " << d.bridge << "\n";
         if (!d.instances.empty()) out << "   " << d.instances << "\n";
+        if (!d.mesh.status.empty()) {
+            out << "   wall mesh: " << d.mesh.status << "\n";
+            out << "   wall declaration:" << d.mesh.declaration << "\n";
+            out << std::format("   wall mesh range: first={} stride={} base={} min={} start={} indexFormat={}\n", d.mesh.first, d.mesh.stride,
+                               d.mesh.baseVertex, d.mesh.minVertex, d.mesh.startIndex, static_cast<int>(d.mesh.indexFormat));
+            const auto saveBytes = [&](const char* kind, const std::vector<BYTE>& bytes) {
+                if (bytes.empty()) return;
+                const std::string name = std::format("Draw_{}_{}.bin", d.index, kind);
+                std::ofstream file(CapDir() / name, std::ios::binary);
+                file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+                file.close();
+                out << std::format("   wall mesh {}: {} ({} bytes{})\n", kind, name, bytes.size(), file ? "" : ", write failed");
+            };
+            saveBytes("vertices", d.mesh.vertices);
+            saveBytes("indices", d.mesh.indices);
+        }
         out << "   PS c0..c223 (zeros omitidos):";
         for (const auto& [i, v] : d.psc) out << std::format(" [{}]({:.9g} {:.9g} {:.9g} {:.9g})", i, v[0], v[1], v[2], v[3]);
         out << "\n   VS c0..c255 (zeros omitidos):";
