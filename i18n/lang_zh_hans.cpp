@@ -9,6 +9,7 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Simplified, mainland China)}
 const I18n::Pair kPairs[] = {
+    {"Edit Town finishes loading after leaving Build or Buy mode", "退出建造或购买模式后，编辑城镇可完成加载"},
     {"Lighting restarted; some areas use the game's maps", "光照已重新计算；部分区域使用游戏的光照贴图"},
     {"Restart lighting", "重新计算光照"},
     {"Discard cached lighting and rebuild it without changing settings", "清除缓存的光照并重新计算，保留当前设置"},

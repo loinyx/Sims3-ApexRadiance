@@ -15,6 +15,9 @@ It must:
 
 ## Automated tests
 
+`tools/room_gather_queue_test/run.ps1` reproduces a room invalidated during a gather whose pending key is then erased. It checks restoration without changing the countdown, completion through the native work model, and guards for idle, inactive, indoor and already queued rooms. It uses a CPU model, not the game engine.
+
+
 | Harness | Covers | Run | Needs |
 |---|---|---|---|
 | [`tools/exterior_lookup_test`](../../tools/exterior_lookup_test/README.md) | Extracted exterior floor lookup and per-point cache against the v2.10.0 implementation; alternating stories, replacement, missing data and eviction | `run.ps1 -ReferenceSource <v2.10.0-level_light_share.cpp>` | MSVC x86 |
@@ -33,6 +36,7 @@ only the repository and print to the console.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| — | `5dd19f1`; release `v2.15.5` | Room gather queue regression; CPU Lighting suite | Lost-key reproduction and queue guards pass; 92 lighting checks pass. Gameplay reproduction returns to Edit Town with the correction | CPU model / Steam gameplay |
 | 2026-10-23 | `4802ed9` (ASI SHA-256 `FC2D565C0F003F0DD9DF2BC56DFC5F047CA6FCDAC508B2DA66A83D032258ECFB`) | Standard Release x86 build; `tools/roofed_openings_test`; `tools/floor_shade_check`; `tools/ground_shade_test/run.ps1` | Build: 0 warnings. Roofed openings: 1,652 checks, 0 failures; floor shade: 7,885, 0 failures; ground shade: 240, 0 failures. The exact release build has not been checked in game | MSBuild x86 / CPU fixtures / native D3D9 |
 | 2026-10-23 | `40f351e` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting` (includes `tools/roofed_openings_test`) | Passed, 0 failures. `roofed_openings_test`: 217 checks, 0 failures (window sizes from their panes, the wall's two faces at grazing angles, the glass share, floor-level sills in the outside walls' copy). No harness covers the lamps under a story's floor (`OwnFloorBlocksAt`, `LampUnderRoomFloor`), the tile floor crossing or the walls lit from their drawn foot | CPU harness |
 | 2026-10-22 | `d625404` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting` (`stairwell_bounce_test`, `opening_bounce_test` 11 checks, `arch_ambient_test` 25 checks), `tools/rt_lamps_test` (22 checks), `tools/roofed_openings_test` (196 checks), `tools/room_structure_test` (11 checks); developer, public and standard Release x86 builds | Passed, 0 failures; the three builds compiled. These cover the extracted grid walk, openings and room structure code; none exercises the arch story memo of `823e339` (`ArchAmbientConsts`) | CPU harness |
@@ -200,6 +204,9 @@ topology mutation inside a point is not reproduced. This release does not promis
 - Session `2026-10-01 15-26-42`: rooms 23/19/3/20 of lot `27D24720` change their merged ambient during a slider drag.
 
 ## Open checks
+
+- Confirm the exact standard release build returns to Edit Town and uses the embedded shader cache. The successful development gameplay test does not establish coverage of every lot or game version.
+
 
 - 2.15.3: windows sized from their panes. **Expected:** the developer log lists the windows sized from their panes with plausible sizes, and the light through a window onto the floor outside matches the glass; glass passes 0.765 of a lamp's light.
 - 2.15.3: gables, a garage's eave band beside a house on a foundation and sloped foundation faces at night. **Expected:** no hard step of light where a gable starts or under the eave; lamps that now test lower samples keep their light.

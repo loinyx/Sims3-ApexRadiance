@@ -6,6 +6,11 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k2155Empty[] = {nullptr};
+constexpr const char* k2155Fixed[] = {
+    "Edit Town finishes loading after leaving Build or Buy mode",
+    nullptr};
+
 constexpr const char* k2154Added[] = {
     "Restart lighting rebuilds temporary light maps and keeps your settings",
     nullptr};
@@ -350,6 +355,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"2.15.5", "", k2155Empty, k2155Empty, k2155Fixed},
     {"2.15.4", "2026-10-24", k2154Added, k2154Improved, k2154Fixed},
     {"2.15.3", "2026-10-23", k2153Added, k2153Improved, k2153Fixed},
     {"2.15.2", "2026-10-22", nullptr, nullptr, k2152Fixed},
