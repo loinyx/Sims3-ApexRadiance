@@ -1244,10 +1244,13 @@ void FenceGapsBuild() {
     g_fenceGaps.clear();
     g_gapCells.clear();
     std::unordered_set<uint64_t> seen;
+    std::vector<float> lengths;
+    lengths.reserve(g_fenceAll.size());
+    for (const auto& w : g_fenceAll) lengths.push_back(std::hypot(w.x1 - w.x0, w.z1 - w.z0));
     const auto end = [](const GroundShadow::Wall& w, int e, float& x, float& z) { x = e ? w.x1 : w.x0, z = e ? w.z1 : w.z0; };
     for (size_t i = 0; i < g_fenceAll.size(); i++) {
         const GroundShadow::Wall& a = g_fenceAll[i];
-        const float la = std::hypot(a.x1 - a.x0, a.z1 - a.z0);
+        const float la = lengths[i];
         if (!(la > 0.05f)) continue;
         const float ux = (a.x1 - a.x0) / la, uz = (a.z1 - a.z0) / la;
         for (int ea = 0; ea < 2; ea++) {
@@ -1264,7 +1267,7 @@ void FenceGapsBuild() {
                     for (uint32_t j : it->second) {
                         if (j == i) continue;
                         const GroundShadow::Wall& b = g_fenceAll[j];
-                        const float lb = std::hypot(b.x1 - b.x0, b.z1 - b.z0);
+                        const float lb = lengths[j];
                         if (!(lb > 0.05f) || ApexMath::Fabs((b.x1 - b.x0) / lb * ux + (b.z1 - b.z0) / lb * uz) < 0.98f) continue;
                         for (int eb = 0; eb < 2; eb++) {
                             float bx, bz;
