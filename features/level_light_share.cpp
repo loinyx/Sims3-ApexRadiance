@@ -8190,6 +8190,21 @@ void AfterRoomUpdateInstant(BYTE* tl) {
     HookGuard::Run("OutdoorDelta after the room update", [tl] { OutdoorDelta::AfterRoomUpdate(tl); });
     if (RtOutdoorLamps::Watching()) HookGuard::Run("RtOutdoorLamps after the room update", [tl] { RtOutdoorLamps::AfterRoomUpdate(tl); });
 }
+RoomGatherQueue::Membership OutdoorQueueMembership(const BYTE* set) {
+    __try {
+        const uint32_t count = *reinterpret_cast<const uint32_t*>(set + 0xC);
+        const uint32_t buckets = *reinterpret_cast<const uint32_t*>(set + 8);
+        const uintptr_t table = *reinterpret_cast<const uintptr_t*>(set + 4);
+        if (!table || (table & 3) || !buckets || buckets > 1048576 || count > 1048576) return RoomGatherQueue::Membership::Unknown;
+        const uintptr_t head = *reinterpret_cast<const uintptr_t*>(table);
+        return RoomGatherQueue::LookupOutdoor(count, buckets, head, [](uintptr_t node, int& key, uintptr_t& next) {
+            if (node & 3) return false;
+            key = *reinterpret_cast<const int*>(node);
+            next = *reinterpret_cast<const uintptr_t*>(node + 4);
+            return true;
+        });
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return RoomGatherQueue::Membership::Unknown; }
+}
 bool RestoreOutdoorGatherTry(BYTE* tl) {
     __try {
         if (!tl || !kSetInsert || !kRoomById) return false;
@@ -8197,13 +8212,16 @@ bool RestoreOutdoorGatherTry(BYTE* tl) {
         if (!mgr) return false;
         BYTE* room = static_cast<BYTE*>(reinterpret_cast<RoomById_t>(kRoomById)(mgr, 0));
         if (!room || *reinterpret_cast<BYTE**>(room) != mgr || *reinterpret_cast<const int*>(room + 0xC) != 0) return false;
-        return RoomGatherQueue::RestoreOutdoor(*reinterpret_cast<const int*>(room + 0xF0),
-            *reinterpret_cast<const uint32_t*>(room + 0x168),
-            *reinterpret_cast<const uint32_t*>(tl + 0x14), *reinterpret_cast<const uint32_t*>(tl + 0x34),
-            mgr[0x280] != 0 && mgr[0x81] != 0, room[0x18] != 0, [tl] {
+        const int state = *reinterpret_cast<const int*>(room + 0xF0);
+        const uint32_t countdown = *reinterpret_cast<const uint32_t*>(room + 0x168);
+        const bool active = mgr[0x280] != 0 && mgr[0x81] != 0, outdoor = room[0x18] != 0;
+        if (!active || !outdoor || state != 1 || !countdown) return false;
+        return RoomGatherQueue::RestoreOutdoor(state, countdown,
+            OutdoorQueueMembership(tl + 8), OutdoorQueueMembership(tl + 0x28), active, outdoor, [tl] {
                 const int id = 0;
                 alignas(16) BYTE out[16] = {};
                 reinterpret_cast<SetInsert_t>(kSetInsert)(tl + 0x28, out, &id, 0);
+                return out[8] != 0; // native insertion result; an existing key is not a repair
             });
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
