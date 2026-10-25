@@ -58,6 +58,12 @@ inline uint32_t MatchLen(const uint8_t* a, const uint8_t* b, uint32_t maxLen) {
     return n;
 }
 
+// A candidate must beat the current gain even at its cheapest possible opcode cost.
+inline bool CanImproveMatch(const uint8_t* a, const uint8_t* b, uint32_t maxLen, uint32_t off, int bestGain) {
+    const uint32_t needed = static_cast<uint32_t>(bestGain) + (off <= 1024 ? 2u : off <= 16384 ? 3u : 4u);
+    return needed < maxLen && (needed < 4 || a[needed] == b[needed]);
+}
+
 // Opcode bytes for a match (the game's choice, 0x004EB8A1): 2 when offset <= 1024 and length <= 10, 3 when offset <=
 // 16384 and length <= 67, else 4. Combinations no opcode can hold get a prohibitive cost.
 inline int Cost(uint32_t len, uint32_t off) {
@@ -324,7 +330,7 @@ uint32_t Compress(Context& ctx, const uint8_t* src, uint32_t size, uint8_t* dst,
             if (cand < minVp || cand >= vp) break;
             const uint32_t ci = cand - base;
             const uint8_t* c = src + ci;
-            if (Load32(c) == v && (bestLen == 0 || c[bestLen] == cur[bestLen])) {
+            if (Load32(c) == v && (bestLen == 0 || c[bestLen] == cur[bestLen]) && CanImproveMatch(c, cur, maxLen, i - ci, bestGain)) {
                 const uint32_t len = MatchLen(c, cur, maxLen);
                 const uint32_t off = i - ci;
                 const int gain = static_cast<int>(len) - Cost(len, off);
@@ -429,7 +435,7 @@ uint32_t ParseSegment(Context& ctx, const uint8_t* src, uint32_t size, uint32_t 
             if (cand < minVp || cand >= vp) break;
             const uint32_t ci = cand - base;
             const uint8_t* c = src + ci;
-            if (Load32(c) == v && (bestLen == 0 || c[bestLen] == cur[bestLen])) {
+            if (Load32(c) == v && (bestLen == 0 || c[bestLen] == cur[bestLen]) && CanImproveMatch(c, cur, maxLen, i - ci, bestGain)) {
                 const uint32_t len = MatchLen(c, cur, maxLen);
                 const uint32_t off = i - ci;
                 const int gain = static_cast<int>(len) - Cost(len, off);

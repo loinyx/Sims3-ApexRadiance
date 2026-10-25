@@ -10,6 +10,7 @@
 // street-lamp class), the spot (FUN_006bffb0) and the shaded lamp (FUN_006be1c0) times their cone blends
 // (docs/engine/light-objects-and-rigs.md, lamp_shape.h), and on outdoor wall texels Apex's realistic reach share
 // (lamp_reach.h). Every factor after that (walls, slabs, openings, the soft light cut, a lamp listed twice) is in vis.
+#include "fast_math.h"
 #include <algorithm>
 #include <cmath>
 
@@ -35,7 +36,7 @@ inline float Sat(float v) { return std::clamp(v, 0.0f, 1.0f); }
 inline void Eval(const Lamp& L, const float p[3], const float n[3], float wallReach, float out[3]) {
     float l[3] = {L.pos[0] - p[0], L.pos[1] - p[1], L.pos[2] - p[2]};
     const float d2 = std::max(l[0] * l[0] + l[1] * l[1] + l[2] * l[2], 1e-4f);
-    const float inv = 1.0f / std::sqrt(d2);
+    const float inv = 1.0f / ApexMath::Sqrt(d2);
     for (float& v : l) v *= inv;
     const float ndl = Sat(n[0] * l[0] + n[1] * l[1] + n[2] * l[2]);
     const float f = std::min(ndl * (inv * inv) * L.W, L.cmax);

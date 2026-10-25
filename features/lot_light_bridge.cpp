@@ -1,6 +1,7 @@
 #include "apex_util.h"
 #include "fast_math.h"
 #include "shader_lookup_cache.h"
+#include "shader_constant_pair.h"
 #include "world_lamp_policy.h"
 #include "terrain_lighting_policy.h"
 #include "lamp_reach.h"
@@ -1220,6 +1221,7 @@ uint64_t FenceCellKey(int x, int z) { return (static_cast<uint64_t>(static_cast<
 // in a wedge. Render thread.
 struct FenceGap {
     GroundShadow::Wall w;
+    float length = 0.0f;
     uint64_t key;
     uint64_t ga = 0, gb = 0; // the two pieces' groups
     bool closed = false;     // under kGapMin: always a wall
@@ -1294,6 +1296,7 @@ void FenceGapsBuild() {
             if (!seen.insert(gp.key).second) continue;
             gp.ga = g_fenceAllGroup[i], gp.gb = g_fenceAllGroup[bj];
             gp.closed = best < kGapMin;
+            gp.length = std::hypot(gp.w.x1 - gp.w.x0, gp.w.z1 - gp.w.z0);
             const uint32_t k = static_cast<uint32_t>(g_fenceGaps.size());
             g_fenceGaps.push_back(gp);
             for (int ci = FenceCell(std::min(ax, bx) - 0.5f); ci <= FenceCell(std::max(ax, bx) + 0.5f); ci++)
@@ -1349,7 +1352,7 @@ bool NoteGate(float x, float y, float z) {
     bool closedMatch = false;
     for (uint32_t k : it->second) {
         const FenceGap& gp = g_fenceGaps[k];
-        const float dx = gp.w.x1 - gp.w.x0, dz = gp.w.z1 - gp.w.z0, l = std::hypot(dx, dz);
+        const float dx = gp.w.x1 - gp.w.x0, dz = gp.w.z1 - gp.w.z0, l = gp.length;
         const float t = ((x - gp.w.x0) * dx + (z - gp.w.z0) * dz) / l, side = ApexMath::Fabs((x - gp.w.x0) * dz - (z - gp.w.z0) * dx) / l;
         if (t < -0.1f || t > l + 0.1f || side > kGateOff || y < gp.w.y0 - 1.0f || y > gp.w.y1) {
             if (!kPublicBuild && g_gateMissLogs < 30 && t > -1.5f && t < l + 1.5f && side < 1.5f) {
@@ -6142,22 +6145,23 @@ PatchedPs* ArchCopyOrNull(PatchedPs& a) {
 // rows: the arch rows (kArchRows) for a copy with the arch block, nullptr for a copy without it
 template <typename DrawFn> void DrawWithRoomMap(IDirect3DDevice9* dev, IDirect3DPixelShader9* copy, const ShaderPatches::RoomMapPatch& p, const float size[4],
                                                 const float band[4], const float* rows, DrawFn draw) {
-    float oldSize[4] = {}, oldBand[4] = {}, oldArch[kArchRows * 4] = {};
-    dev->GetPixelShaderConstantF(p.sizeConst, oldSize, 1);
-    dev->GetPixelShaderConstantF(p.bandConst, oldBand, 1);
+    float oldArch[kArchRows * 4] = {};
+    const ShaderConstantPair::Block constants(p.sizeConst, p.bandConst,
+                                             [dev](UINT reg, float* values, UINT count) { return SUCCEEDED(dev->GetPixelShaderConstantF(reg, values, count)); });
+    const auto setConstants = [dev](UINT reg, const float* values, UINT count) {
+        return SUCCEEDED(D3D9Hooks::CallOriginalSetPixelShaderConstantF(dev, reg, values, count));
+    };
     const bool arch = rows && p.archConst >= 0;
     if (arch) dev->GetPixelShaderConstantF(static_cast<UINT>(p.archConst), oldArch, kArchRows);
     IDirect3DPixelShader9* original = g_curPs;
     g_inOwnCall = true;
-    SetPsConst(dev, p.sizeConst, size, 1);
-    SetPsConst(dev, p.bandConst, band, 1);
+    constants.Apply(size, band, setConstants);
     if (arch) SetPsConst(dev, static_cast<UINT>(p.archConst), rows, kArchRows);
     SetPs(dev, copy);
     draw();
     SetPs(dev, original);
     if (arch) SetPsConst(dev, static_cast<UINT>(p.archConst), oldArch, kArchRows);
-    SetPsConst(dev, p.bandConst, oldBand, 1);
-    SetPsConst(dev, p.sizeConst, oldSize, 1);
+    constants.Restore(setConstants);
     g_inOwnCall = false;
     ApexUtil::CountOne(arch ? g_archCopyDraws : g_archPlainDraws);
 }

@@ -13,7 +13,7 @@
 #include <cassert>
 namespace ApexMath { float Fabs(float x){return std::fabs(x);} float Floor(float x){return std::floor(x);} }
 namespace GroundShadow { struct Wall{float x0,z0,x1,z1,y0,y1;}; }
-struct FenceGap {GroundShadow::Wall w;uint64_t key;uint64_t ga=0,gb=0;bool closed=false;};
+struct FenceGap {GroundShadow::Wall w;float length=0;uint64_t key;uint64_t ga=0,gb=0;bool closed=false;};
 constexpr float kFenceCell=8.0f,kGapMax=2.5f,kGapMin=.4f,kGapNarrow=.02f;
 std::vector<GroundShadow::Wall> g_fenceAll;std::vector<uint64_t> g_fenceAllGroup;
 std::unordered_map<uint64_t,std::vector<uint32_t>> g_fenceCells,g_gapCells;
@@ -53,7 +53,9 @@ void FenceChecks(){
  hypotCalls=0;auto t=std::chrono::steady_clock::now();ReferenceGapsBuild();oldMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t).count();oldCalls+=hypotCalls;
  auto expected=g_fenceGaps;auto expectedCells=g_gapCells;
  hypotCalls=0;t=std::chrono::steady_clock::now();FenceGapsBuild();newMs+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t).count();newCalls+=hypotCalls;
- assert(Equal(expected,g_fenceGaps)&&expectedCells==g_gapCells);++cases;
+ assert(Equal(expected,g_fenceGaps)&&expectedCells==g_gapCells);
+ for(const auto& gap:g_fenceGaps) assert(gap.length==std::hypot(gap.w.x1-gap.w.x0,gap.w.z1-gap.w.z0));
+ ++cases;
  }
  std::cout<<cases<<" geometry cases exactly equal; baseline "<<oldMs<<" ms / "<<oldCalls<<" hypot calls; cache "<<newMs<<" ms / "<<newCalls<<" calls; speedup "<<oldMs/newMs<<"x (CPU fixture only)\n";
 }

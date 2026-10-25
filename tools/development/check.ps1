@@ -7,7 +7,7 @@ $out = Join-Path $repo 'outputs/checks'
 New-Item -ItemType Directory -Path $out -Force | Out-Null
 if ($Suite -eq 'Lighting') {
     # Pure lighting harnesses: no captures, no shader package. Each runner compiles its harness and throws on a failure.
-    foreach ($name in @('stairwell_bounce_test', 'opening_bounce_test', 'arch_ambient_test', 'lighting_prepare_test')) {
+    foreach ($name in @('stairwell_bounce_test', 'opening_bounce_test', 'arch_ambient_test', 'lighting_prepare_test', 'render_cost_test')) {
         & (Join-Path $repo "tools/$name/run.ps1") -OutDir (Join-Path $out $name) | Tee-Object -FilePath (Join-Path $out ($name + '.txt'))
     }
     Write-Output 'CPU Lighting suite passed. Gameplay validation remains separate.'
