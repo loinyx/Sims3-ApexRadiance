@@ -14,6 +14,9 @@ namespace ShaderPatches {
 // declare .xyzw with a separate zw opacity UV write using the captured (1, 2) scale. Terrain and lot shaders do not match.
 // mapConst = M.
 bool IsRoadVs(const std::vector<DWORD>& t, DWORD& mapConst);
+// World terrain UV in TEXCOORD1, with the chunk transform in c8/c10.
+// Returns its mapping constant, or -1 for an unknown/ambiguous layout.
+int WorldTerrainMapConstant(const std::vector<DWORD>& t);
 struct RoadPatch {
     DWORD lightSampler = 0;
     DWORD extraSampler = 0;
@@ -27,6 +30,9 @@ bool PatchRoad(std::vector<DWORD>& t, RoadPatch& out, bool shade = false);
 // World terrain chunks: an exclusive cK.x lamp-map multiplier, either linear or
 // squared through a scalar temporary. Unknown/shared layouts return -1.
 int LightMapScaleConst(const std::vector<DWORD>& t, DWORD sampler, bool* squared = nullptr);
+// Prefer declared samplers with a proven lamp-RGB scale; retain the declared
+// mask when the shader's lighting layout is unknown.
+DWORD WorldTerrainLampSamplers(const std::vector<DWORD>& t, DWORD declared);
 
 // Keep native terrain alpha (solar visibility) when smoothing lamp RGB. A single
 // direct light-map read is required; unsupported layouts are left untouched.

@@ -228,6 +228,46 @@ int BloomThresholdConst(const std::vector<DWORD>& t) {
     return uses == 1 ? threshold : -1;
 }
 
+int WorldTerrainMapConstant(const std::vector<DWORD>& t) {
+    if (t.empty() || t[0] != 0xFFFE0300) return -1;
+    const auto ins = Parse(t);
+    if (ins.empty()) return -1;
+    int output = -1, originX = -1, originZ = -1;
+    bool rowX = false, rowZ = false;
+    for (const auto& x : ins) {
+        if (x.op == kDcl && x.len == 2) {
+            const DWORD semantic = t[x.at + 1], dst = t[x.at + 2];
+            if ((semantic & 0x1F) == 5 && ((semantic >> 16) & 0xF) == 1 && Type(dst) == kOutput) {
+                if (output >= 0 || (WMask(dst) & 3) != 3) return -1;
+                output = static_cast<int>(Num(dst));
+            }
+        }
+        if (x.op == kMov && x.len == 2 && Type(t[x.at + 1]) == kTemp &&
+            !(t[x.at + 2] & 0x0F002000u) && Swz(t[x.at + 2]) == kSwzW) {
+            if (IsReg(t[x.at + 2], kConst, 8) && WMask(t[x.at + 1]) == 1) originX = static_cast<int>(Num(t[x.at + 1]));
+            if (IsReg(t[x.at + 2], kConst, 10) && WMask(t[x.at + 1]) == 2) originZ = static_cast<int>(Num(t[x.at + 1]));
+        }
+        if (x.op == kDp4 && x.len == 3) {
+            rowX |= IsReg(t[x.at + 3], kConst, 8);
+            rowZ |= IsReg(t[x.at + 3], kConst, 10);
+        }
+    }
+    if (output < 0 || originX < 0 || originX != originZ || !rowX || !rowZ) return -1;
+    int mapping = -1;
+    for (const auto& x : ins) {
+        if (x.op == kDcl || x.op == kDef || x.len < 1 ||
+            !IsReg(t[x.at + 1], kOutput, static_cast<DWORD>(output)) || !(WMask(t[x.at + 1]) & 3)) continue;
+        if (mapping >= 0 || x.op != kMad || x.len != 4 || WMask(t[x.at + 1]) != 3 ||
+            Type(t[x.at + 2]) != kTemp || Swz(t[x.at + 2]) != kSwzXZZW ||
+            (t[x.at + 2] & 0x0F002000u) || Type(t[x.at + 3]) != kConst ||
+            Swz(t[x.at + 3]) != kSwzXYZW || (t[x.at + 3] & 0x0F002000u) ||
+            !IsReg(t[x.at + 4], kConst, Num(t[x.at + 3])) || Swz(t[x.at + 4]) != kSwzZWZW ||
+            (t[x.at + 4] & 0x0F002000u)) return -1;
+        mapping = static_cast<int>(Num(t[x.at + 3]));
+    }
+    return mapping;
+}
+
 bool IsRoadVs(const std::vector<DWORD>& t, DWORD& mapConst) {
     if (t.empty() || t[0] != 0xFFFE0300) return false;
     const auto ins = Parse(t);
@@ -361,6 +401,14 @@ bool PatchRoad(std::vector<DWORD>& t, RoadPatch& out, bool shade) {
 
 // World terrain chunks (LightProbe-mundo PS_28CD3DB0: "texld_pp r0, v1, s8" ... "mul_pp r7.xyz, r0, c7.x"; winter
 // LightProbe-m05 PS_295B4ED0: "texld_pp r0, v1, s11" ... "mul_pp r0.xyz, r0, c7.x", with r0.w used in between).
+DWORD WorldTerrainLampSamplers(const std::vector<DWORD>& t, DWORD declared) {
+    DWORD lamps = 0;
+    for (DWORD sampler = 1; sampler < 16; ++sampler)
+        if ((declared & (1u << sampler)) && LightMapScaleConst(t, sampler) >= 0)
+            lamps |= 1u << sampler;
+    return lamps ? lamps : declared;
+}
+
 int LightMapScaleConst(const std::vector<DWORD>& t, DWORD sampler, bool* squared) {
     if (squared) *squared = false;
     if (t.empty() || (t[0] & 0xFFFF0000u) != 0xFFFF0000u || ((t[0] >> 8) & 0xFF) < 2) return -1;

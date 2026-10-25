@@ -354,7 +354,8 @@ struct DrawRigScope { // around one draw callback of Night Lighting (not nested:
 };
 std::unordered_set<IDirect3DPixelShader9*> g_roomMapPs; // room-lit pixel shaders (ShaderPatches::IsRoomMapPs): Smooth light maps
 bool g_curPsRoomMap = false;
-// The samplers each WorldCandidate pixel shader declares (bit s = s declared), from its bytecode in Classify.
+// Declared samplers of each WorldCandidate PS, narrowed to proven lamp-RGB
+// samplers when that pattern is known. Alpha-only weather masks are not lamp maps.
 // RecordWorldChunk looks for the chunk light map only there: a texture left bound in a sampler the shader never reads
 // (e.g. the neighbour chunk's map in s8 while a 3-layer chunk reads s7) was taken as this chunk's map, depending on the
 // draw order, i.e. on the camera; the road, fence and lot grass fixes then used a map without the lamps (a gameplay
@@ -2562,7 +2563,10 @@ PsClass Classify(IDirect3DPixelShader9* ps) {
                     for (size_t k = 0; k + 2 < n; k++)
                         if ((t[k] & 0xFFFF) == 0x001F && (((t[k + 2] >> 28) & 7) | (((t[k + 2] >> 11) & 3) << 3)) == 10 && (t[k + 2] & 0x7FF) < 16)
                             mask |= static_cast<uint16_t>(1u << (t[k + 2] & 0x7FF));
-                    g_worldSamplers[ps] = mask;
+                    // A frozen multipass material binds another 256-square texture
+                    // beside its lamp map. Prefer samplers proven to scale lamp RGB.
+                    const std::vector<DWORD> tokens(t, t + n);
+                    g_worldSamplers[ps] = static_cast<uint16_t>(ShaderPatches::WorldTerrainLampSamplers(tokens, mask));
                 }
             }
         }
@@ -2644,6 +2648,7 @@ struct VsInfo {
     bool packedRoomFloor = false;
     bool worldMultiLight = false; // exact captured summer multi-pass light VS
     bool worldCompact = false; // exact captured single-layer WORLD VS (not an object rig)
+    int worldMap = -1; // mapping constant of a structurally verified world terrain VS
     bool contractedLotUv = false; // exact regular lot VS; CPU floor samples use uncontracted local xz
     bool cinemaMarqueeDay = false; // exact EA 1.69 cinema/theatre marquee VS paired with kCinemaMarqueeDayPs
     uint8_t cls = 0;      // 0 other, 1 roof, 2 lake, 3 snow lot, 4 road, 5 floor, 6 foliage, 7 fence/stairs, 8 snow on objects,
@@ -2721,6 +2726,7 @@ VsInfo* ClassifyVs(IDirect3DVertexShader9* vs) {
                 std::vector<DWORD> t(size / 4);
                 std::memcpy(t.data(), code.data(), t.size() * 4);
                 info.packedRoomFloor = ShaderPatches::IsPackedRoomFloorVs(t);
+                info.worldMap = ShaderPatches::WorldTerrainMapConstant(t);
                 DWORD mapConst = 0;
                 if (ShaderPatches::IsRoadVs(t, mapConst)) {
                     info.roadMap = mapConst; // c16 in winter, c14 in summer
@@ -7230,11 +7236,15 @@ template <typename DrawFn> bool DrawTreeSunShadow(IDirect3DDevice9* dev, DrawFn 
 
 // Returns the sampler that holds the chunk light map (0 = not a terrain chunk draw), the chunk key and its g_chunks entry
 // (std::map: the reference stays valid; the caller no longer looks the key up a second time).
-DWORD RecordWorldChunk(IDirect3DDevice9* dev, std::pair<int, int>& key, ChunkTex*& chunk, UINT mapConst = 15) {
+DWORD RecordWorldChunk(IDirect3DDevice9* dev, std::pair<int, int>& key, ChunkTex*& chunk, UINT mapConst = 15, UINT fallbackConst = 15) {
     float c[16];
     if (FAILED(dev->GetVertexShaderConstantF(8, c, 3))) return 0; // c8..c10 = world matrix rows
     float m[4];
-    if (FAILED(dev->GetVertexShaderConstantF(mapConst, m, 1)) || !Near(m[0], 1.0f / 256.0f) || !Near(m[1], 1.0f / 256.0f) || !Near(m[2], 0.5f) || !Near(m[3], 0.5f)) return 0;
+    const auto mapping = [&](UINT at) {
+        return SUCCEEDED(dev->GetVertexShaderConstantF(at, m, 1)) && Near(m[0], 1.0f / 256.0f) &&
+               Near(m[1], 1.0f / 256.0f) && Near(m[2], 0.5f) && Near(m[3], 0.5f);
+    };
+    if (!mapping(mapConst) && (mapConst == fallbackConst || !mapping(fallbackConst))) return 0;
     // The terrain light map is the 256x256 texture with few mips: the world file's map and a rebuilt one are both DXT5 with
     // 4 mips (the rebuild reads the render target back and CPU-encodes 4 mips into the same texture, 0x00C29AB6 ->
     // 0x00618CD0; research\perf2\chunkrelight.md 1.3, 512 DXT calls = 128 textures x 4 mips). Which sampler holds it
@@ -7424,7 +7434,8 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
         if (g_curClass == PsClass::WorldCompact && (!g_curVsInfo || !g_curVsInfo->worldCompact)) return kContinue;
         std::pair<int, int> key;
         ChunkTex* chunk = nullptr;
-        const DWORD s = RecordWorldChunk(dev, key, chunk, multi ? 13 : 15);
+        const UINT map = g_curVsInfo && g_curVsInfo->worldMap >= 0 ? static_cast<UINT>(g_curVsInfo->worldMap) : multi ? 13u : 15u;
+        const DWORD s = RecordWorldChunk(dev, key, chunk, map, multi ? 13u : 15u);
         if (!s) {
             // not a world terrain chunk: the snow-on-floor pixel shaders (m69, m71) also declare s6+ and land here
             if (g_curVsIsSnowFloor && DrawSnowFloor(dev, draw)) return NoteClaim(ClaimSource::SnowFloorLight);
