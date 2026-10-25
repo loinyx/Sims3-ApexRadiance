@@ -2448,6 +2448,7 @@ std::vector<IUnknown*> g_pinned;
 std::unordered_map<IDirect3DPixelShader9*, DWORD> g_cinemaMarqueeDayPs;
 std::unordered_set<IDirect3DPixelShader9*> g_cinemaMarqueePanelDayPs;
 
+std::vector<DWORD> ShaderCode(IDirect3DPixelShader9* ps);
 PsClass Classify(IDirect3DPixelShader9* ps) {
     if (!ps) return PsClass::Other;
     auto it = g_classCache.find(ps);
@@ -2573,6 +2574,16 @@ PsClass Classify(IDirect3DPixelShader9* ps) {
     }
     // (A size-only "possible weather variant" log was tried on 05/10 and removed: dozens of unrelated game shaders share
     // those sizes. Variants are found by structure instead, see shader_structure.h and tools/shader_structure_test.)
+    // Low-layer terrain can share an object pixel shader. Its vertex layout,
+    // lamp-only RGB scale and bound chunk map must all agree before dispatch.
+    if ((c == PsClass::ObjectRig || c == PsClass::Other) && declaredSamplers) {
+        const auto tokens = ShaderCode(ps);
+        uint16_t lamps = 0;
+        for (DWORD sampler = 1; sampler < 16; ++sampler)
+            if ((declaredSamplers & (1u << sampler)) && ShaderPatches::LightMapScaleConst(tokens, sampler) >= 0)
+                lamps |= static_cast<uint16_t>(1u << sampler);
+        if (lamps) g_worldSamplers[ps] = lamps;
+    }
     g_classCache[ps] = c;
     PsFacts& facts = g_psFacts[ps];
     facts.cls = c;
@@ -5467,8 +5478,10 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
     static int s_budget = 0;
     if (now - s_budgetAt >= 8) s_budgetAt = now, s_budget = 96;
     const float night = g_night.load(std::memory_order_relaxed);
-    const float phase = TerrainLightingPolicy::LampDay(night);
-    const float lawScale = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), night, g_wallEnabled.load(std::memory_order_relaxed),
+    // Native lamp activation and the smooth sky must both reach the requested phase.
+    const float lampNight = std::min(night, g_rigNight.load(std::memory_order_relaxed));
+    const float phase = TerrainLightingPolicy::LampDay(lampNight);
+    const float lawScale = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), lampNight, g_wallEnabled.load(std::memory_order_relaxed),
                                                                  g_wallGain.load(std::memory_order_relaxed), g_objPixelLampStrength.load(std::memory_order_relaxed) / kPixelLampTrimUnit);
     for (int i = 0; i < count; i++) {
         const float* inst = c[3 * i];
@@ -7389,6 +7402,8 @@ inline D3D9Hooks::HookAction NoteClaim(ClaimSource source) {
 template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice9* dev, DrawFn draw) {
     constexpr auto kSkip = D3D9Hooks::HookAction::Skip;
     constexpr auto kContinue = D3D9Hooks::HookAction::Continue;
+    const bool terrainPair = g_curVsInfo && g_curVsInfo->worldMap >= 0 &&
+        (g_curClass == PsClass::ObjectRig || g_curClass == PsClass::Other) && g_worldSamplers.count(g_curPs) != 0;
     if (g_curPsBasis) RoomMapPadding::NoteDraw(dev, g_curPs); // note the room light maps it binds (edge padding)
     // the frame's sun shadow map, from the draws that read it (the trees' shadow, DrawTreeSunShadow)
     if (DevSwitches::FoliageSunShadow() && (g_curClass == PsClass::ObjectRig || g_curClass == PsClass::Roof || g_curClass == PsClass::LotLight || g_curClass == PsClass::Lake))
@@ -7397,7 +7412,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
     if (g_curPsBasis && !g_curVsIsInstanced && !g_curVsIsSnowRelief && !g_curVsIsObject && DrawBasisSmooth(dev, draw)) return NoteClaim(ClaimSource::IndoorBasisSmooth);
     const bool roomFloor=kMemoryOptimizationsEnabled && g_curVsInfo && g_curVsInfo->packedRoomFloor;
     if (g_curPsRoomMap && !g_curVsIsInstanced && !g_curVsIsSnowRelief && (!g_curVsIsObject || roomFloor) && DrawRoomMapSmooth(dev, draw)) return NoteClaim(ClaimSource::RoomMapSmooth);
-    if (g_curClass == PsClass::ObjectRig) return DrawObjectRig(dev, draw) ? NoteClaim(ClaimSource::ObjectRigNightFix) : kContinue;
+    if (g_curClass == PsClass::ObjectRig && !terrainPair) return DrawObjectRig(dev, draw) ? NoteClaim(ClaimSource::ObjectRigNightFix) : kContinue;
     if (g_curClass == PsClass::Roof) return DrawRoof(dev, draw) ? NoteClaim(ClaimSource::RoofLampFix) : kContinue;
     // The snowy roof pixel shader is also the one of snow on stair tops (same bytes, LightProbe-neve-escada); the vertex
     // shader tells them apart (the stair one takes the snow base in TEXCOORD2) and stairs go to DrawSnowRelief below.
@@ -7415,7 +7430,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
     }
     if (!g_enabled.load(std::memory_order_relaxed)) return kContinue;
     if (DrawCinemaMarqueeDayBloomGuard(dev, g_curPrims, draw)) return NoteClaim(ClaimSource::CinemaMarqueeDayBloomGuard);
-    if (g_curVsIsRoad) return DrawRoad(dev, draw) ? NoteClaim(ClaimSource::RoadLight) : kContinue;
+    if (g_curVsIsRoad && !terrainPair) return DrawRoad(dev, draw) ? NoteClaim(ClaimSource::RoadLight) : kContinue;
     if (g_curVsIsFloor) return DrawFloor(dev, draw) ? NoteClaim(ClaimSource::FloorLight) : kContinue;
     if (g_curClass == PsClass::FloorAtlas && !g_curVsIsSnowFloor) return DrawFloorAtlas(dev, draw) ? NoteClaim(ClaimSource::OutdoorFloorLight) : kContinue;
     if (g_curVsIsInstanced) return DrawInstanced(dev, draw) ? NoteClaim(ClaimSource::FenceStairGroundLight) : kContinue;
@@ -7428,7 +7443,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
     if (g_curVsIsObject && DrawObjectLamp(dev, draw)) return NoteClaim(ClaimSource::OutdoorObjectGroundLight);
     if (g_curClass == PsClass::LotLightSnow || g_curClass == PsClass::LotLightSnowCut)
         return DrawLotSnow(dev, draw, g_curClass == PsClass::LotLightSnowCut) ? NoteClaim(ClaimSource::LotSnowLight) : kContinue;
-    if (g_curClass == PsClass::WorldCandidate || g_curClass == PsClass::WorldMultiLight || g_curClass == PsClass::WorldCompact) {
+    if (terrainPair || g_curClass == PsClass::WorldCandidate || g_curClass == PsClass::WorldMultiLight || g_curClass == PsClass::WorldCompact) {
         const bool multi = g_curClass == PsClass::WorldMultiLight;
         if (multi && (!g_curVsInfo || !g_curVsInfo->worldMultiLight)) return kContinue;
         if (g_curClass == PsClass::WorldCompact && (!g_curVsInfo || !g_curVsInfo->worldCompact)) return kContinue;

@@ -98,6 +98,26 @@ int main() {
         Check(Select(nullptr, 0, 0x1000) == Pick::None, "no match: none");
     }
 
+    // A confirmed map owner can filter records before their live ambient read.
+    for (unsigned pattern = 0; pattern < 4096; ++pattern) {
+        Candidate all[6], filtered[6];
+        int n = 0;
+        for (unsigned i = 0; i < 6; ++i) {
+            const unsigned kind = (pattern >> (2 * i)) & 3;
+            all[i] = Candidate{0x1000u + kind * 0x100u, 0xA0u + kind};
+            if (all[i].mgr == 0x1100u) filtered[n++] = all[i];
+        }
+        const Pick oldPick = Select(all, 6, 0x1100u), newPick = Select(filtered, n, 0x1100u);
+        int selected = 0;
+        bool equal = true;
+        for (const Candidate& candidate : all)
+            if (Takes(oldPick, candidate, 0x1100u)) {
+                equal &= selected < n && Takes(newPick, filtered[selected], 0x1100u) &&
+                         filtered[selected].mgr == candidate.mgr && filtered[selected].tracker == candidate.tracker;
+                ++selected;
+            }
+        Check(equal && selected == n, "map-owner filtering preserves selected arch records");
+    }
     std::printf("Arch ambient: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

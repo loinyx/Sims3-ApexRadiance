@@ -18,7 +18,7 @@ std::vector<DWORD> Load(const char* path) {
     return out;
 }
 int main(int argc, char** argv) {
-    assert(argc == 5);
+    assert(argc == 5 || argc == 8);
     const auto vs = Load(argv[1]), base = Load(argv[2]), overlay = Load(argv[3]);
     const auto saved = vs;
     assert(ShaderPatches::WorldTerrainMapConstant(vs) == 16);
@@ -50,9 +50,20 @@ int main(int argc, char** argv) {
     pp.Windowed = TRUE; pp.SwapEffect = D3DSWAPEFFECT_DISCARD; pp.hDeviceWindow = window;
     IDirect3DDevice9* device = nullptr;
     assert(SUCCEEDED(api->CreateDevice(0, D3DDEVTYPE_HAL, window, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &pp, &device)));
-    for (const auto* input : {&base, &overlay}) {
-        auto code = *input;
-        const DWORD lamp = input == &base ? 6 : 3;
+    std::vector<std::vector<DWORD>> inputs{base, overlay};
+    if (argc == 8) {
+        const auto lowVertex = Load(argv[5]);
+        assert(ShaderPatches::WorldTerrainMapConstant(lowVertex) == 16);
+        inputs.push_back(Load(argv[6]));
+        assert(ShaderPatches::WorldTerrainLampSamplers(inputs.back(), 0x3F) == (1u << 3));
+        assert(ShaderPatches::LightMapScaleConst(inputs.back(), 3) == 7);
+        inputs.push_back(Load(argv[7]));
+        assert(ShaderPatches::WorldTerrainLampSamplers(inputs.back(), 0x3F) == (1u << 2));
+        assert(ShaderPatches::LightMapScaleConst(inputs.back(), 2) == 7);
+    }
+    for (size_t input = 0; input < inputs.size(); ++input) {
+        auto code = inputs[input];
+        const DWORD lamp = input == 0 ? 6 : input == 3 ? 2 : 3;
         DWORD native = 0, shade = 0;
         assert(ShaderPatches::PatchTerrainNativeAlpha(code, lamp, native));
         assert(ShaderPatches::PatchTerrainShade(code, lamp, shade));
