@@ -20,8 +20,13 @@ The feature is described in [features/night-lighting/arches.md](../features/nigh
 
 ## Latest results
 
+Release validation for `v2.15.6`: Map slot replacement, relocation and unreadable memory; constant state preservation and existing arch checks. The reviewed implementation is `f66e777`;
+final release build and gameplay confirmation are tracked with the release tag and PR. Offline results do not establish
+an FPS gain, complete climate coverage or resolution of texture allocation stalls.
+
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| — | `v2.15.6` (implementation `f66e777`) | `arch_ambient_test; render_cost_test; lighting_prepare_test` | 4121 arch checks; 32768 constant blocks; 16 map-slot cases passed | CPU fixtures |
 | 2026-10-22 | `823e339` | None: `arch_ambient_test` covers `arch_ambient.h`, not the story memo of `ArchAmbientConsts` | Not run for the memo | not run in game yet |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/arch_ambient_test/` | 25 checks passed | None (pure) |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/room_map_smooth_check/` | 1084 checks passed | Native D3D9 |

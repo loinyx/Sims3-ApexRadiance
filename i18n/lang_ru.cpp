@@ -9,6 +9,12 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Russian}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "Ночное освещение: расчёты повторно используют неизменённые данные без снижения качества"},
+    {"Performance: cache compression avoids unnecessary match searches", "Производительность: сжатие кэша пропускает ненужный поиск совпадений"},
+    {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "Ночное освещение: замёрзшая и оттаивающая земля сохраняет непрерывный свет на границах участков"},
+    {"Night Lights: trees follow lamp brightness through dusk and dawn", "Ночное освещение: деревья следуют яркости ламп в сумерках и на рассвете"},
+    {"Edit Town restores missing outdoor lighting work while other rooms update", "Изменение города восстанавливает пропущенные расчёты наружного света при обновлении других комнат"},
+
     {"Edit Town finishes loading after leaving Build or Buy mode", "Изменение города завершает загрузку после режима строительства или покупки"},
     {"Lighting restarted; some areas use the game's maps", "Освещение перезапущено; некоторые области используют карты игры"},
     {"Restart lighting", "Перезапустить освещение"},

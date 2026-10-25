@@ -9,6 +9,12 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Finnish}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "Yövalaistus: laskenta käyttää muuttumattomia tietoja uudelleen laadusta tinkimättä"},
+    {"Performance: cache compression avoids unnecessary match searches", "Suorituskyky: välimuistin pakkaus välttää turhat vastaavuushaut"},
+    {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "Yövalaistus: jäätynyt ja sulava maa säilyttää yhtenäisen valon tonttien rajoilla"},
+    {"Night Lights: trees follow lamp brightness through dusk and dawn", "Yövalaistus: puut seuraavat lamppujen kirkkautta illan ja aamun hämärässä"},
+    {"Edit Town restores missing outdoor lighting work while other rooms update", "Muokkaa kaupunkia palauttaa puuttuvat ulkovalaistuslaskelmat muiden huoneiden päivittyessä"},
+
     {"Edit Town finishes loading after leaving Build or Buy mode", "Kaupungin muokkaus latautuu rakennus- tai ostotilasta poistuttaessa"},
     {"Lighting restarted; some areas use the game's maps", "Valaistus käynnistetty uudelleen; osa alueista käyttää pelin karttoja"},
     {"Restart lighting", "Käynnistä valaistus uudelleen"},

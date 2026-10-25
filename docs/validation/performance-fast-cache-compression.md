@@ -27,6 +27,10 @@ game's compressor go into the report.
 
 ## Latest results
 
+Release validation for `v2.15.6`: Candidate bound checks and Smoke stream checks; additional pre-change stream comparison preserves bytes. The reviewed implementation is `f66e777`;
+final release build and gameplay confirmation are tracked with the release tag and PR. Offline results do not establish
+an FPS gain, complete climate coverage or resolution of texture allocation stalls.
+
 2026-10-19: 525,825 prefix comparisons against the previous helper pass with buffers ending at inaccessible pages.
 The RefPack quick suite passes round trips, capacity checks and serial/threaded segmented byte equality. The long
 prefix loop is unrolled without changing matching, flags, output ownership or stream lifetime. In-game hitch reduction
@@ -34,6 +38,7 @@ from this revision remains unverified.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| — | `v2.15.6` (implementation `f66e777`) | `render_cost_test; development/check.ps1 -Suite Smoke` | 6328350 candidate bounds; stream and capacity checks passed; 630 additional streams match prior compressor bytes | CPU fixtures |
 | 2026-09-30 | | `refpack_test`, 5.6 MB buffers, flags 2 | Segmented stream size within ±0.13% of `Compress`; one thread 10 to 20% slower than `Compress` (the window fill per piece); 7 threads 3.8x faster than one (thread start included), same bytes; about 3,000 segmented streams round-tripped through the game's decoder translation, piece-boundary sizes included | CPU |
 | 2026-09-30 | build 0d1408ad | In game, Frame Profiler, the same cache writes before and after, hitch frames only | About 21 MB writes (4 calls: 2 counting runs and their writes) 299 ms (49 cases) -> 101 ms (3); about 11 MB 121 -> 43 ms; about 5.5 MB 78 -> 24 ms (44 / 6 cases); worst compression-dominated hitch 295 to 395 ms -> 135 ms. In game the pieces run about 2x faster than one thread (offline 3.8x): the game's own threads are busy at those moments | DXVK, maintainer's PC |
 | 2026-09-30 | | CRC scratch test | 4,850 cases, all equal to the byte-wise loop | CPU |

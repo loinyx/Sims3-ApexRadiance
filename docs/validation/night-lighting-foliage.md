@@ -24,8 +24,13 @@ No repository harness covers `PatchFoliageVs` and `PatchLeafShadow`.
 
 ## Latest results
 
+Release validation for `v2.15.6`: Foliage phase and saturation policy checks; runtime dusk comparison remains open. The reviewed implementation is `f66e777`;
+final release build and gameplay confirmation are tracked with the release tag and PR. Offline results do not establish
+an FPS gain, complete climate coverage or resolution of texture allocation stalls.
+
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| — | `v2.15.6` (implementation `f66e777`) | `foliage_vertex_test` | 132 checks passed; canopy and trunk fixtures, phase and saturation policy, tree shader package coverage | CPU fixtures; shader package |
 | 2026-10-23 | `40f351e` | `tools/canopy_test/` | 16 checks, 0 failures. No harness covers the tree light rig hooks (`TreeLightRig`) | CPU harness |
 | 2026-10-22 | `b863bce` | None: `tools/foliage_vertex_test/` was not re-run; no harness covers the area lights' cones or the world change clear | Not run | not run in game yet |
 | 2026-10-20 | Working tree on `c22e8d7`, foliage code as in `3e0b6ad` | `tools/foliage_vertex_test/` | 28 checks passed; the trees' own lamps by the inverse square: a street lamp 5 m from a crown gives 0.425, 9 m 0.042, 11 m 0; the red lantern's crown stays 0 | Native D3D9 |

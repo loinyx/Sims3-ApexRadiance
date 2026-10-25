@@ -10,7 +10,7 @@ in Build mode and at dusk. By day, lamps that the game keeps lit add a subdued g
 
 | | |
 |---|---|
-| Availability | Released (standalone since 0.1.0). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: Released in 2.6.0. Light detail, walls blocking lamp light outdoors, lamp switches in one frame, weather variants of the lot and terrain passes, and idavidveiga's daytime bloom fixes: Released in 2.7.0. Lamp lighting (Instant (GPU) with real-time outdoor lamps and quick outdoor lamp edits; Classic with lamp drags and floors shown together), outdoor and indoor light through openings, doors block light, walls shade lamp light near the ground, buildings block lamp light on trees and objects, shadow softness and smooth light maps: Released in 2.13.0. Light through stairwells, stairs on the directional maps, light through arches and doorways, foliage lit per vertex with crown shade on lot ground, and moonlight scaled at its reader: Released in 2.14.0. Moon at least 20 degrees high, Build mode keeping the season's sun times and smooth dusk: Released in 2.15.1. No moonlight by default, *Indoor light adds to the ground*, closed gates and fence gaps in the lot shade, trees kept on the normal light rig, windows at the size of their panes: Released in 2.15.3. Gable sampling, elevated trim gain, measured pillar blockers, per-lamp floor shadows on instanced structures, snowy lot edge blending and Restart lighting: Released in 2.15.4 |
+| Availability | Released (standalone since 0.1.0). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: Released in 2.6.0. Light detail, walls blocking lamp light outdoors, lamp switches in one frame, weather variants of the lot and terrain passes, and idavidveiga's daytime bloom fixes: Released in 2.7.0. Lamp lighting (Instant (GPU) with real-time outdoor lamps and quick outdoor lamp edits; Classic with lamp drags and floors shown together), outdoor and indoor light through openings, doors block light, walls shade lamp light near the ground, buildings block lamp light on trees and objects, shadow softness and smooth light maps: Released in 2.13.0. Light through stairwells, stairs on the directional maps, light through arches and doorways, foliage lit per vertex with crown shade on lot ground, and moonlight scaled at its reader: Released in 2.14.0. Moon at least 20 degrees high, Build mode keeping the season's sun times and smooth dusk: Released in 2.15.1. No moonlight by default, *Indoor light adds to the ground*, closed gates and fence gaps in the lot shade, trees kept on the normal light rig, windows at the size of their panes: Released in 2.15.3. Gable sampling, elevated trim gain, measured pillar blockers, per-lamp floor shadows on instanced structures, snowy lot edge blending and Restart lighting: Released in 2.15.4. Winter terrain layout recognition, foliage dusk synchronisation and reduced repeated work: Released in 2.15.6. |
 | Default | On (`enabledByDefault = true`; the feature metadata keeps `experimental = true`) |
 | Menu | Lighting page (tabs Overview, Ground, Objects, Buildings, Stories); World > Water & Snow page (Lamp Glow, Water Reflections, Snow); developer options under Developer > Lighting |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -240,6 +240,11 @@ has been corrected.
 - The daytime lamp response is visual tuning, not a physical model.
 
 ## Technical reference
+
+Winter terrain layout recognition, foliage dusk synchronisation, per-key loading recovery and reduced repeated
+lighting work avoid stale map identities and redundant calculations. See [lot light pass](lot-light-pass.md), [foliage](foliage.md),
+[light between stories](level-light-share.md) and [arches](arches.md). Unknown terrain layouts retain their fallback.
+
 
 ### Module map
 

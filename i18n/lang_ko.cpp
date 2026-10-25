@@ -9,6 +9,12 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Korean}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "야간 조명: 품질 저하 없이 변경되지 않은 데이터를 재사용해 계산"},
+    {"Performance: cache compression avoids unnecessary match searches", "성능: 캐시 압축에서 불필요한 일치 검색 생략"},
+    {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "야간 조명: 얼거나 녹는 지면에서도 부지 경계의 빛을 연속적으로 유지"},
+    {"Night Lights: trees follow lamp brightness through dusk and dawn", "야간 조명: 황혼과 새벽에 나무가 램프 밝기를 따라 변화"},
+    {"Edit Town restores missing outdoor lighting work while other rooms update", "마을 편집: 다른 방을 업데이트하는 동안 누락된 실외 조명 계산 복원"},
+
     {"Edit Town finishes loading after leaving Build or Buy mode", "건축 또는 구입 모드를 종료하면 마을 편집 로딩이 완료됩니다"},
     {"Lighting restarted; some areas use the game's maps", "조명을 다시 시작했어요. 일부 영역은 게임의 조명 맵을 사용해요"},
     {"Restart lighting", "조명 다시 시작"},

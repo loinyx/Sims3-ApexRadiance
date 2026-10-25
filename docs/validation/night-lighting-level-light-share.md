@@ -34,8 +34,13 @@ only the repository and print to the console.
 
 ## Latest results
 
+Release validation for `v2.15.6`: Room queue policy and native reader/insertion fixtures; exact lamp RGB and wall blur comparisons. The reviewed implementation is `f66e777`;
+final release build and gameplay confirmation are tracked with the release tag and PR. Offline results do not establish
+an FPS gain, complete climate coverage or resolution of texture allocation stalls.
+
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| — | `v2.15.6` (implementation `f66e777`) | `room_gather_queue_test; render_cost_test; lighting_prepare_test` | 648 policies; 2048 native set comparisons; 131072 lamp RGB comparisons; 144 wall blur cases passed | CPU fixtures; native layouts |
 | — | `10c8107`; `v2.15.5`, ASI SHA-256 `24A2A83A2B189E7FA5CF88B847E5E9B1F68C36E6428B9FCC744E76735A6E1DAB` | Standard Release x86 startup; i18n check; menu audit | No build warnings; all 21 languages cover the new line; embedded cache supplies 78 shaders with 0 to compile; developer mode off and temporary script probe removed. The exact standard build returns normally from Build/Buy to Edit Town | Steam / DXVK |
 | — | `5dd19f1`; release `v2.15.5` | Room gather queue regression; CPU Lighting suite | Lost-key reproduction and queue guards pass; 92 lighting checks pass. Gameplay reproduction returns to Edit Town with the correction | CPU model / Steam gameplay |
 | 2026-10-23 | `4802ed9` (ASI SHA-256 `FC2D565C0F003F0DD9DF2BC56DFC5F047CA6FCDAC508B2DA66A83D032258ECFB`) | Standard Release x86 build; `tools/roofed_openings_test`; `tools/floor_shade_check`; `tools/ground_shade_test/run.ps1` | Build: 0 warnings. Roofed openings: 1,652 checks, 0 failures; floor shade: 7,885, 0 failures; ground shade: 240, 0 failures. The exact release build has not been checked in game | MSBuild x86 / CPU fixtures / native D3D9 |

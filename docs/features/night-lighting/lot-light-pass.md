@@ -8,7 +8,7 @@ border. Near the border the two sides blend over 3 m, so a lamp standing next to
 
 | | |
 |---|---|
-| Availability | Released (part of Night Lighting since 0.1.0). Lot UV alignment, daylight terrain term and the constant-read guard: Released in 2.6.0. Rain and other weather variants recognised (exact rain variant and by structure): Released in 2.7.0. Lamp shade on lot ground (*Walls shade lamp light near the ground*) and lamps through the outside walls' openings: Released in 2.13.0. Crown shade from trees and bushes: Released in 2.14.0. A shade that takes only the light of the lamps a wall blocks, closed gates and narrow fence gaps, the room mask and lamp shade on snowy lots, the lot map aligned on each axis, *Indoor light adds to the ground*, and a lot's shade shown with its chunks' texels: Released in 2.15.3 |
+| Availability | Released (part of Night Lighting since 0.1.0). Lot UV alignment, daylight terrain term and the constant-read guard: Released in 2.6.0. Rain and other weather variants recognised (exact rain variant and by structure): Released in 2.7.0. Lamp shade on lot ground (*Walls shade lamp light near the ground*) and lamps through the outside walls' openings: Released in 2.13.0. Crown shade from trees and bushes: Released in 2.14.0. A shade that takes only the light of the lamps a wall blocks, closed gates and narrow fence gaps, the room mask and lamp shade on snowy lots, the lot map aligned on each axis, *Indoor light adds to the ground*, and a lot's shade shown with its chunks' texels: Released in 2.15.3. Verified winter terrain layouts and exact fence-gap length reuse: Released in 2.15.6. |
 | Default | On |
 | Menu | Lighting > Ground > Ground & Lots > *Game fixes* (folded) > *Street lamps light lots* |
 | Configuration | `[patches.NightTerrainRelight]` `luzDoPosteNaGramaDoLote` in `ApexRadiance.toml` |
@@ -117,6 +117,12 @@ The full table is in the [Night Lighting overview](README.md#settings).
 - Lot UV alignment applies only to the exact recognised lot VS; other layouts keep native coordinates.
 
 ## Technical reference
+
+Winter terrain identification follows the actual texture read rather than a fixed sampler slot. The compact terrain
+path accepts its validated weather vertex layouts; the bound map still needs the expected dimensions and mapping.
+Known weather masks are excluded. Unrecognised layouts keep the existing fallback. Fence reconstruction computes each
+piece length once; each derived gap retains its exact length until the geometry is rebuilt, including gate tests.
+
 
 ### The replacement shader (`kReplacementHlsl`, ps_3_0)
 
