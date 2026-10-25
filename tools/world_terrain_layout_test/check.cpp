@@ -6,6 +6,7 @@
 #include <iostream>
 #include <map>
 #include <cassert>
+#include "package_checks.h"
 #pragma comment(lib, "d3d9.lib")
 #pragma comment(lib, "user32.lib")
 
@@ -55,6 +56,8 @@ int main(int argc, char** argv) {
         const auto lowVertex = Load(argv[5]);
         assert(ShaderPatches::WorldTerrainMapConstant(lowVertex) == 16);
         inputs.push_back(Load(argv[6]));
+        assert(IsShader(kWorldCompactPs, inputs.back().data(), inputs.back().size() * 4));
+        assert(!IsShader(kWorldCompactVs, lowVertex.data(), lowVertex.size() * 4));
         assert(ShaderPatches::WorldTerrainLampSamplers(inputs.back(), 0x3F) == (1u << 3));
         assert(ShaderPatches::LightMapScaleConst(inputs.back(), 3) == 7);
         inputs.push_back(Load(argv[7]));
@@ -72,17 +75,17 @@ int main(int argc, char** argv) {
         assert(SUCCEEDED(device->CreatePixelShader(code.data(), &shader)) && shader);
         shader->Release();
     }
-    device->Release(); api->Release(); DestroyWindow(window);
 
     std::ifstream gameFile(argv[4], std::ios::binary);
     const std::vector<unsigned char> game((std::istreambuf_iterator<char>(gameFile)), {});
     assert(!game.empty());
     std::map<int, unsigned> mappings;
-    unsigned shaders = 0;
+    unsigned shaders = 0, pixels = 0, lampPaths = 0;
     for (size_t i = 0; i + 8 < game.size(); ++i) {
         DWORD version = 0;
         std::memcpy(&version, &game[i], 4);
-        if (version != 0xFFFE0300u && version != 0xFFFE0200u) continue;
+        const bool vertex = version == 0xFFFE0300u || version == 0xFFFE0200u;
+        if (!vertex && version != 0xFFFF0300u && version != 0xFFFF0200u) continue;
         size_t end = i + 4;
         DWORD token = 0;
         while (end + 4 <= game.size() && end - i < 65536) {
@@ -95,9 +98,18 @@ int main(int argc, char** argv) {
         if (end + 4 > game.size() || token != 0xFFFFu) continue;
         std::vector<DWORD> code((end + 4 - i) / 4);
         std::memcpy(code.data(), &game[i], end + 4 - i);
-        ++shaders;
-        const int mapping = ShaderPatches::WorldTerrainMapConstant(code);
-        if (mapping >= 0) ++mappings[mapping];
+        if (vertex) {
+            ++shaders;
+            const int mapping = ShaderPatches::WorldTerrainMapConstant(code);
+            if (mapping >= 0) ++mappings[mapping];
+        } else {
+            ++pixels;
+            for (DWORD sampler = 1; sampler < 16; ++sampler) {
+                if (ShaderPatches::LightMapScaleConst(code, sampler) < 0) continue;
+                ++lampPaths;
+
+            }
+        }
         i = end + 3;
     }
     assert(shaders && mappings[16]);
@@ -105,4 +117,7 @@ int main(int argc, char** argv) {
     std::cout << shaders << " game vertex shaders scanned:";
     for (const auto& [constant, count] : mappings) std::cout << " c" << constant << '=' << count;
     std::cout << '\n';
+    std::cout << pixels << " pixel shaders scanned; " << lampPaths << " isolated RGB paths\n";
+    TerrainPackageChecks::Run(game, device);
+    device->Release(); api->Release(); DestroyWindow(window);
 }

@@ -7446,7 +7446,10 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
     if (terrainPair || g_curClass == PsClass::WorldCandidate || g_curClass == PsClass::WorldMultiLight || g_curClass == PsClass::WorldCompact) {
         const bool multi = g_curClass == PsClass::WorldMultiLight;
         if (multi && (!g_curVsInfo || !g_curVsInfo->worldMultiLight)) return kContinue;
-        if (g_curClass == PsClass::WorldCompact && (!g_curVsInfo || !g_curVsInfo->worldCompact)) return kContinue;
+        // The compact pixel pass is shared by dry and weather-specific vertex
+        // layouts. Accept a proven light-map mapping, not only one exact VS.
+        if (g_curClass == PsClass::WorldCompact &&
+            (!g_curVsInfo || (!g_curVsInfo->worldCompact && g_curVsInfo->worldMap < 0))) return kContinue;
         std::pair<int, int> key;
         ChunkTex* chunk = nullptr;
         const UINT map = g_curVsInfo && g_curVsInfo->worldMap >= 0 ? static_cast<UINT>(g_curVsInfo->worldMap) : multi ? 13u : 15u;
@@ -9492,13 +9495,11 @@ std::string DescribeDraw() {
     if (!g_hooksRegistered || g_hookFailed || g_stateUnknown) return "Night Lighting has no active hooks";
     static const char* kVs[] = {"other", "roof", "lake", "snowy lot", "road", "floor", "foliage", "fence/stairs (instanced)", "snow on object", "snow with relief",
                                 "object with rig", "snowy floor"};
-    static const char* kPs[] = {"unknown", "other", "world candidate", "lot light", "object rig", "roof", "lake", "snowy lot", "snowy roof",
-                                "outside wall", "outdoor floor"};
     const auto itv = g_vsInfo.find(g_curVs);
     const int vc = itv == g_vsInfo.end() ? -1 : itv->second.cls;
-    const int pc = static_cast<int>(Classify(g_curPs));
+    const PsClass pc = Classify(g_curPs);
     const int rig = RigTracker::CurrentMode();
-    std::string s = std::format("game (the mod did not replace this draw) | VS {} | PS {} | rig mode {}", vc < 0 || vc > 11 ? "not classified" : kVs[vc], pc >= 0 && pc < 11 ? kPs[pc] : "?",
+    std::string s = std::format("game (the mod did not replace this draw) | VS {} | PS {} | rig mode {}", vc < 0 || static_cast<size_t>(vc) >= std::size(kVs) ? "not classified" : kVs[vc], PsClassName(pc),
                                 rig);
     if (vc == 10) {
         const FoliageVs& o = itv->second.patched;
