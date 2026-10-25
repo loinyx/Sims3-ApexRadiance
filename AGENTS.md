@@ -20,6 +20,12 @@ unmodified Sims3SettingsSetter and does not depend on it. Visible names come fro
 - Anything that becomes public (code comments, docs, commit messages, PR titles and bodies, release notes):
   [docs/PUBLIC-TEXT-POLICY.md](docs/PUBLIC-TEXT-POLICY.md), checked by `python tools/public_text_check.py`.
 
+## Implementation approach
+
+Apply [Ponytail](.agents/skills/ponytail/SKILL.md) in full mode to coding tasks: trace the affected flow, reuse existing
+code and make the smallest complete correction with appropriate tests. The lighting, build, installation and release
+rules in this project remain authoritative.
+
 ## Rules
 
 - **Evidence before patches.** Study the real shader, its constants and the engine code before implementing; patch by
