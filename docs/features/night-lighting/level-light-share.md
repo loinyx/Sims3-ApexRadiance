@@ -765,12 +765,12 @@ floor mask.
   out), then the day factor. Normalisation (`RoomNormHook`): a room whose list holds
   only borrowed lamps (other stories' or these) gets no boost.
 - **At the outdoor scale** ([`opening_lamp_balance.h`](../../../features/opening_lamp_balance.h)): outside, the same lamp
-  is drawn from room 0's map, cut at 1 per channel, times the outdoor surface's brightness (the lot pass: *Ground
+  is drawn from room 0's map, its sum divided by its largest channel past 1, times the outdoor surface's brightness (the lot pass: *Ground
   brightness* x *Lot lamp brightness*; outside walls: the walls' *Brightness*), and room 0 is not normalised. Inside, the
   room solve summed it whole, with no cut before the room's curve, and the room's normalisation multiplied it. A light
   capture of a green sconce (intensity 1.7, colour (0, 1, 0), a story-0 room-0 lamp listed twice) beside a courtyard: the
   kitchen behind its glass door showed 0.808 on screen, the courtyard at the same distance at most 0.567 of its map.
-  Each entry of such a lamp is now held under 1 / its entries per channel (the outdoor cut), then takes the opening's
+  Each entry of such a lamp is now held under 1 / its entries at its largest channel, its hue kept (the outdoor cut), then takes the opening's
   share and glass, then the outdoor scale: floors, ceilings and the directional maps the ground's (`Ground brightness x
   Lot lamp brightness` while *Street lamps light lots* is on, else 1), wall texels the walls' (*Lamps light walls* on,
   else 1), over the room's normalisation (`InnerLight::NormScale(1, room+0x160)`; the directional maps take no
@@ -780,6 +780,28 @@ floor mask.
   change relights every room once the slider is let go (`SetOpeningLampBalance`). Indoor lamps, the lamps of other
   stories, the roofless rooms and daylight are unchanged. Unverified: the indoor wall shaders' curve (taken to match the
   floor's), so the walls' share of this balance is inferred.
+- **The outdoor colour response** (`MaxResponse`): a red sconce (1.7, (1, 0, 0)) lit the kitchen behind its glass door
+  redder than its courtyard. Both indoor curves scale a texel by a function of the mean of its three channels: the room
+  solve's `x tanh(m / 2) / m` and the room-lit floor shader's `y (2 / (1 + 2^(-4.2 m)) - 1) / m` (PS `44ECECA0` and
+  `981C53E8`, `c2.z` 4.2, `m = 0.333 (r + g + b)`; a D3D `exp` is 2^x, so `y tanh(1.456 m) / m`, not the `tanh(2.1 m)` the
+  first balance assumed). A pure colour has a third of the mean of a white light of the same channel and is compressed
+  as if three times dimmer; outdoors the map is linear up to its hue-kept cut. Replayed offline, a red share came out up
+  to 41% brighter than a white one of the same strength (Ground and Lot lamp brightness at 150%), 3% at the player's
+  scale. A strong orange (1.7, 0.85, 0.26) cut channel by channel entered as (0.5, 0.5, 0.26), nearly white. A share of
+  room 0's lamp in a room solved with its curve is now scaled after the outdoor scale so that both curves give it the
+  response of its largest channel, what a white light of that channel gets: a white share keeps x1, a saturated one at
+  most x1 (closed form, the solve's step under a mean of 0.01 included). It is taken as lighting the texel alone and on a
+  floor of albedo 1, so on a darker floor or in a lit room a colour ends a little under the white (at most 3% at the
+  player's scale, 8% on an albedo-0.8 floor at 150% / 150%), never over it. The status *outdoor light through openings*
+  counts those points. Offline (`tools/roofed_openings_test`, `OpeningColourChecks`): 7 lamp colours x 3 floor scales x
+  119 distances; through the glass never brighter than outdoors on the same floor, the hue within 0.03 of the lamp's
+  (597 cases off with the per-channel cut), no colour lit more than white (1365 cases over 3% before). The red sconce by
+  the door at the player's scale: courtyard floor 0.454, kitchen 0.252 before, 0.241 now. Not reproduced: the lighting
+  snapshot's kitchen floor on screen, (0.43 to 0.53, 0.05, 0.04) beside a courtyard at (0.41 to 0.56, 0.17 to 0.24,
+  0.13 to 0.22), while an F7 of the same kitchen's map held at most 0.21 red, about 0.25 on screen through the floor
+  curve: the rest comes from a term outside the room map (unverified: the floor's albedo or its reflection of the room's
+  probe). The courtyard's paler colour is its other light: a white lamp (1, 0.98, 0.85) 4.4 m from the sconce and the
+  night sky reach the courtyard, not the kitchen.
 - **Walls ending at a floor above** (2.13.0, `CapLowerWalls`): a story's grid caps a full straight wall with a placed
   floor of the story above beside it, over its foot and lower than a story, at that floor (the rule of `PassesOverLowerWall`
   and `CapFoundationSides`). A foundation's sides are walls of story 0 drawn only up to the floor on the foundation; at 3 m
