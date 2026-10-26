@@ -4,8 +4,7 @@ The Banding Fix removes the visible colour steps (banding) in smooth gradients o
 throws on a wall or floor, the fall-off of room light and soft shadows. Instead of rings, light fades smoothly. It does
 this with a fixed, invisible grain added to the scene before the game rounds its colours to 8 bits. Menus, the HUD and
 the Apex overlay are not touched. Its *High-precision scene* (on by default) draws the 3D scene in 16-bit colour and
-rounds it once, with one grain, so blended passes no longer add their own roundings. Glow sprites such as car
-headlights are drawn with a smoothed copy of their compressed texture, whose own steps no grain can hide.
+rounds it once, with one grain, so blended passes no longer add their own roundings.
 
 ## Status
 
@@ -15,7 +14,7 @@ headlights are drawn with a smoothed copy of their compressed texture, whose own
 | Default | On for new configurations |
 | Menu | Image > Banding Fix (card *Banding Fix*: a before / after picture of a stepped and a smoothed gradient that follows the current state, then *Grain* with Strength and *Precision* with High-precision scene and its status; Live counters in the development build); Overview > Image > Banding Fix |
 | Configuration | `[patches.SceneDither]` in `ApexRadiance.toml` |
-| Source | [`features/scene_dither.cpp`](../../features/scene_dither.cpp), [`features/shader_patches.cpp`](../../features/shader_patches.cpp) (`AddDither`, `AddDither2`, `AddScreenPosVs`), [`features/sprite_smooth_logic.h`](../../features/sprite_smooth_logic.h) (glow sprites) |
+| Source | [`features/scene_dither.cpp`](../../features/scene_dither.cpp), [`features/shader_patches.cpp`](../../features/shader_patches.cpp) (`AddDither`, `AddDither2`, `AddScreenPosVs`) |
 
 ## The problem
 
@@ -218,70 +217,6 @@ back buffer as before.
 - `A2B10G10R10`: 2 bits of alpha break the bloom mask kept in the back buffer's alpha.
 - 10-bit output (an `A2R10G10B10` swap chain): the same 2-bit alpha, and the UI and every Apex pass read the back
   buffer as 8-bit; not part of this switch.
-
-## Glow sprites
-
-Not yet tested in game. A light capture of a car headlight at night (2026-10-26, draw #229) showed the glow drawn by
-`texld r0, t1, s0; mul r0, r0, v0; mov oC0, r0` (ps_2_0, texture x vertex colour), additive (`SRCALPHA` / `ONE`), depth
-test on and no depth write, from a 128x128 DXT5 texture with 8 mips: white RGB, a radial glow in alpha, sampled with
-linear filtering and no mip filter. DXT5 keeps 8 alpha levels per 4x4 block, so the glow's slope changes from texel to
-texel (up to 13 levels between neighbours along a row or column of the captured texture). Magnified over a large part of
-the screen, every change is a crease of the bilinear filter, seen as a ring. The 16-bit scene and the grain act after the
-texture is read and cannot remove it. A second capture (draw #1840) showed the headlight's beam drawn the same way from a
-64x256 DXT5 texture with 9 mips: a narrow cone in alpha, white RGB. In game its steps show as blotches along the beam.
-
-**What it does.** For a 3D scene draw (the grain's gate: render target 0 the back buffer, the depth test used) with no
-depth write, additive or `SRCALPHA` / `INVSRCALPHA` blending and a pixel shader of this family, s0 is bound to a smoothed
-copy of the game's texture for the draw, then the game's texture is put back. The sampler states are the game's.
-
-1. **Shader family** (`SpriteSmoothLogic::IsTintedSprite`, by bytecode, cached per shader): ps_2_x `texld rA, tN, s0;
-   mul rB, rA, vC; mov oC0, rB` (either operand order, or the `mul` writing `oC0`), every register `.xyzw` without
-   modifier or swizzle, `_pp` / `_sat` allowed; ps_3_0 the same with `vC` declared `COLOR`. In the game's shader package
-   it matches 2 ps_2_x and 1 ps_3_0 of 8018 pixel shaders. The other captures hold no other draw of this family: the
-   nearest, a texture-only shader with alpha blending over a flat grey texture, is not one.
-2. **Texture** (once per texture, at its first such draw): level 0 of a `DXT1`, `DXT3` or `DXT5` texture of 16 to 512
-   texels a side in `MANAGED` or `SYSTEMMEM` (read with `LockRect` `READONLY`; `DEFAULT` cannot be read) is decoded on the
-   CPU and smoothed without rounding its real edges (`SpriteSmoothLogic::Smooth`). G is a separable Gaussian of the
-   texture (sigma 1.5 texels, mirrored edges, which keep the mean exactly). A texel is on a real edge where G itself still
-   bends: `|blur(G) - G|` above 1 level, fully at 4 (DXT noise is gone from G, a beam's side is not). There it is smoothed
-   only along the edge (a 1D Gaussian across the gradient of G, sampled bilinearly) and moves at most 4 levels; elsewhere
-   it takes G. No texel moves more than 8 levels (a thin line beside a flat area).
-3. **Detail gate:** the copy is made only when the smoothing changed each channel by at most 1.5 levels RMS, with at
-   most 1% of texels changed by more than 4 levels and at most 15% of texels on real edges: a smooth gradient or beam
-   whose only fine detail is the compression's. Until the beam capture the gate tested a plain Gaussian, which changed
-   the beam by 2.80 levels RMS (4.7% of texels by more than 4, the sides): it was refused ("detail"), and the log showed
-   "1 as drawn, textures smoothed 0". Over the 20 distinct captured DXT textures of 16 to 512 texels a side, the glow
-   and the beam are smoothed, a flat texture passes unchanged, and one nearly flat grey object texture with a thin line
-   passes (0.4 level RMS; it is not drawn with this shader family in the captures); the other 16 are refused.
-4. **Copy:** `A16B16G16R16` (`A8R8G8B8` when the device cannot filter it: `CheckDeviceFormat` with
-   `D3DUSAGE_QUERY_FILTER`), `MANAGED`, the same size and mip count as the game's, the mips 2x2 averages of the smoothed
-   level 0. It is attached to the game texture with `SetPrivateData` (`D3DSPD_IUNKNOWN`, a private GUID), so it is
-   released with that texture and never used for another texture at the same address. A texture refused for any reason
-   gets a mark under a second GUID and is not tried again. An `SRGBTEXTURE` read on s0 is drawn as it is.
-5. **On** while the Banding Fix is on, with or without the High-precision scene, and with the grain when the draw also
-   gets it. Copies already made stay with their textures while the Banding Fix is off and are not used.
-
-**Offline** ([`tools/sprite_smooth_test`](../../tools/sprite_smooth_test/README.md)), measured on the ramps (texels whose
-steps to both neighbours are at most 12 levels) as the change of slope from one texel to the next, which bilinear
-magnification shows as a crease; real edges as the sum of the steps over 12 levels, after / before:
-
-| Texture | Slope changes rms / max, levels | Real edges kept | Mean alpha |
-|---|---|---|---|
-| Captured glow 128x128 (draw #229) | 2.66 / 12.0 -> 0.16 / 1.7 | (no step over 12) | 42.396 -> 42.406 |
-| Captured beam 64x256 (draw #1840) | 2.56 / 24.0 -> 0.79 / 14.5 | 92% (a plain Gaussian: 69%) | 9.771 -> 9.760 |
-| Synthetic glow, the game's DXT5 encoder | 2.32 / 6.9 -> 0.16 / 0.7 | 100% | 63.409 -> 63.404 |
-| Synthetic beam, the game's DXT5 encoder | 1.80 / 17.7 -> 0.92 / 18.5 | 97% | 15.574 -> 15.579 |
-
-The beam's remaining large slope changes are at its bright tip, where the texture itself alternates by about 20 levels
-from texel to texel; they are kept as real detail. The captured textures are the light captures' lossless PNGs of the
-decoded textures.
-
-**Developer:** the *Shader coverage* section shows the sprite draws of the last frame (smoothed, drawn as they are), the
-textures smoothed with their memory and format, and the refusals by reason (format, size, pool, detail, lock, create);
-the coverage log line adds the same counts.
-
-**Costs.** Video memory: about 170 KB for a 128x128 texture with its mips, 2.8 MB at 512x512. CPU: the first draw of
-each texture decodes and smooths it on the render thread (*not measured*; a few milliseconds expected at 512x512).
 
 ## Rejected approaches
 

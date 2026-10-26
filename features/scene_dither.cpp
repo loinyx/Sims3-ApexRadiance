@@ -19,10 +19,6 @@
 //    with the amount constant, then the game's shaders and the constant's previous value are put back. Additive and
 //    multiply blends get half the grain with a decorrelated phase (they add to a target that already has its grain).
 //  - The mouse-pick pass draws into its own 16x16 target, shadows and reflections into their own targets: untouched.
-//  - Glow sprites (a light capture of a car headlight: "texld r0, t1, s0; mul r0, r0, v0", additive, no depth
-//    write, a 128x128 DXT5 glow in alpha): DXT keeps 8 levels per 4x4 block, so the magnified glow shows rings that no grain
-//    removes. Such draws get, at s0, a smoothed 16-bit copy of the texture (sprite_smooth_logic.h), made at its first use
-//    and kept by the game texture itself (SetPrivateData), also while the High-precision scene stands in for the grain.
 // Offline checks (30/09, Shaders_Win32.precomp): ps_3_0 4907 / 4907 and ps_2_0 2996 / 3104 patched, vertex shaders
 // vs_2_0 4035 / 4338, every copy accepted by native D3D9; a grey of 20.40 / 100.70 levels comes out as 20.355 / 100.657
 // on average with the grain (20 / 101 without), for ps_3_0 and for a ps_2_0 + vs_2_0 pair alike.
@@ -34,7 +30,6 @@
 #include "d3d9_hooks.h"
 #include "render_callbacks.h"
 #include "shader_patches.h"
-#include "sprite_smooth_logic.h"
 #include "scene_dither.h"
 #include "scene_target.h"
 #include "f10_study.h"
@@ -71,7 +66,6 @@ struct Copy {
     DWORD version = 0;                  // the game shader's version token
 };
 std::unordered_map<IDirect3DPixelShader9*, Copy> g_copies; // game pixel shader -> its copy
-std::unordered_map<IDirect3DPixelShader9*, bool> g_sprites; // game pixel shader -> texture x vertex colour (a glow sprite)
 // game vertex shader -> its copies writing the clip position to TEXCOORDk (null = cannot), key = pointer * 8 + k
 std::unordered_map<uint64_t, IDirect3DVertexShader9*> g_vsCopies;
 ShaderLookupCache<Copy> g_pixelLookup;
@@ -112,7 +106,6 @@ struct FrameCount {
     unsigned noDepth = 0;                  // depth on with ZFUNC ALWAYS and no depth write: the UI's passes, left alone
     unsigned noShader = 0;                 // fixed-function scene draws (no pixel shader): no grain
     unsigned blend[kBlends] = {};          // dithered draws by blend class
-    unsigned sprites = 0, spritesAlone = 0; // glow sprite draws with the smoothed texture / without (refused texture, sRGB read)
     unsigned jittered = 0, jitterRefused = 0, jitterNoShader = 0; // temporal AA: scene draws moved / whose vertex shader was refused / fixed-function
 };
 FrameCount g_frame, g_last;
@@ -224,7 +217,6 @@ void Forget(IDirect3DPixelShader9* ps) {
     std::lock_guard<std::mutex> lock(g_lock);
     g_pixelLookup.Clear();
     g_copyGen.fetch_add(1, std::memory_order_release); // (also with no copy: a front entry may hold this address)
-    g_sprites.erase(ps);
     const auto it = g_copies.find(ps);
     if (it == g_copies.end()) return;
     if (it->second.ps) it->second.ps->Release();
@@ -252,7 +244,6 @@ void ReleaseCopies() {
     for (auto& [game, copy] : g_copies)
         if (copy.ps) copy.ps->Release();
     g_copies.clear();
-    g_sprites.clear();
     for (auto& [key, copy] : g_vsCopies)
         if (copy) copy->Release();
     g_vsCopies.clear();
@@ -323,166 +314,11 @@ Blend BlendOf(IDirect3DDevice9* dev) {
     return kOtherBlend;
 }
 
-// ---- glow sprites: a smoothed copy of their DXT texture (sprite_smooth_logic.h) ----
-namespace SS = SpriteSmoothLogic;
-// The copy hangs on the game texture as private data (released with it, never met by another texture at its address);
-// a texture that cannot have one is marked with its refusal so it is tried once
-constexpr GUID kSmoothedGuid = {0x21dae682, 0x4e81, 0x474c, {0x9a, 0x24, 0xbc, 0x7b, 0x3a, 0xb5, 0x4a, 0x41}};
-constexpr GUID kRefusedGuid = {0x321eb54b, 0x87f3, 0x4690, {0xa3, 0x86, 0xa8, 0x63, 0xc0, 0x8c, 0x8b, 0x35}};
-std::atomic<unsigned> g_spriteMade{0}, g_spriteRefused[static_cast<int>(SS::Refusal::Count)] = {};
-std::atomic<unsigned long long> g_spriteBytes{0};
-int g_filter16 = -1; // A16B16G16R16 can be filtered (CheckDeviceFormat D3DUSAGE_QUERY_FILTER), -1 not asked yet
-struct SpriteFront {
-    IDirect3DPixelShader9* ps = nullptr;
-    uint32_t gen = 0;
-    bool sprite = false;
-};
-SpriteFront g_spriteFront[kFront];
-
-bool IsSprite(IDirect3DPixelShader9* ps) {
-    const uint32_t gen = g_copyGen.load(std::memory_order_acquire);
-    SpriteFront& front = g_spriteFront[FrontSlot(reinterpret_cast<std::uintptr_t>(ps))];
-    if (front.ps == ps && front.gen == gen) return front.sprite;
-    bool sprite = false, known = false;
-    {
-        std::lock_guard<std::mutex> lock(g_lock);
-        const auto it = g_sprites.find(ps);
-        if (it != g_sprites.end()) sprite = it->second, known = true;
-    }
-    if (!known) {
-        const std::vector<DWORD> t = ReadCode(ps);
-        sprite = SS::IsTintedSprite(t.data(), t.size());
-        std::lock_guard<std::mutex> lock(g_lock);
-        g_sprites.emplace(ps, sprite);
-    }
-    front.ps = ps, front.gen = gen, front.sprite = sprite;
-    return sprite;
-}
-
-bool Filterable16(IDirect3DDevice9* dev) {
-    if (g_filter16 >= 0) return g_filter16 != 0;
-    IDirect3D9* d3d = nullptr;
-    D3DDEVICE_CREATION_PARAMETERS cp{};
-    D3DDISPLAYMODE mode{};
-    g_filter16 = 0;
-    if (FAILED(dev->GetDirect3D(&d3d)) || !d3d) return false;
-    if (SUCCEEDED(dev->GetCreationParameters(&cp)) && SUCCEEDED(dev->GetDisplayMode(0, &mode)))
-        g_filter16 = d3d->CheckDeviceFormat(cp.AdapterOrdinal, cp.DeviceType, mode.Format, D3DUSAGE_QUERY_FILTER, D3DRTYPE_TEXTURE, D3DFMT_A16B16G16R16) == D3D_OK;
-    d3d->Release();
-    return g_filter16 != 0;
-}
-
-// Decodes, smooths and uploads the copy (render thread, once per texture): same size and mip count, 16 bits a channel
-SS::Refusal MakeSmoothed(IDirect3DDevice9* dev, IDirect3DTexture9* tex, IDirect3DTexture9** out) {
-    D3DSURFACE_DESC d{};
-    if (FAILED(tex->GetLevelDesc(0, &d))) return SS::Refusal::Format;
-    if (d.Format != D3DFMT_DXT1 && d.Format != D3DFMT_DXT3 && d.Format != D3DFMT_DXT5) return SS::Refusal::Format;
-    if (d.Pool != D3DPOOL_MANAGED && d.Pool != D3DPOOL_SYSTEMMEM) return SS::Refusal::Pool; // a DEFAULT texture cannot be read back
-    if (d.Width > SS::kMaxSide || d.Height > SS::kMaxSide || d.Width < SS::kMinSide || d.Height < SS::kMinSide || d.Width % 4 || d.Height % 4)
-        return SS::Refusal::Size;
-    const int w = static_cast<int>(d.Width), h = static_cast<int>(d.Height);
-    std::vector<float> img(static_cast<size_t>(w) * h * 4);
-    D3DLOCKED_RECT lr{};
-    if (FAILED(tex->LockRect(0, &lr, nullptr, D3DLOCK_READONLY)) || !lr.pBits) return SS::Refusal::Lock;
-    SS::Decode(d.Format, static_cast<const uint8_t*>(lr.pBits), lr.Pitch, w, h, img.data());
-    tex->UnlockRect(0);
-    std::vector<float> level = img;
-    const float edges = SS::Smooth(level.data(), w, h);
-    if (!SS::SmoothEnough(img.data(), level.data(), w, h, edges)) return SS::Refusal::Detail;
-    const bool wide = Filterable16(dev);
-    const DWORD levels = tex->GetLevelCount();
-    IDirect3DTexture9* copy = nullptr;
-    if (FAILED(dev->CreateTexture(d.Width, d.Height, levels, 0, wide ? D3DFMT_A16B16G16R16 : D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &copy, nullptr)) || !copy)
-        return SS::Refusal::Create;
-    unsigned long long bytes = 0;
-    int lw = w, lh = h;
-    for (DWORD i = 0; i < levels; i++) {
-        if (i) { // the next level: 2x2 averages of this one
-            std::vector<float> next(static_cast<size_t>(std::max(1, lw / 2)) * std::max(1, lh / 2) * 4);
-            SS::Half(level.data(), lw, lh, next.data());
-            level.swap(next);
-            lw = std::max(1, lw / 2), lh = std::max(1, lh / 2);
-        }
-        if (FAILED(copy->LockRect(i, &lr, nullptr, 0)) || !lr.pBits) {
-            copy->Release();
-            return SS::Refusal::Create;
-        }
-        for (int y = 0; y < lh; y++) {
-            uint8_t* row = static_cast<uint8_t*>(lr.pBits) + static_cast<size_t>(y) * lr.Pitch;
-            for (int x = 0; x < lw; x++) {
-                const float* p = &level[4 * (static_cast<size_t>(y) * lw + x)];
-                if (wide) {
-                    const uint16_t v[4] = {SS::To16(p[0]), SS::To16(p[1]), SS::To16(p[2]), SS::To16(p[3])}; // R, G, B, A
-                    std::memcpy(row + 8 * x, v, 8);
-                } else {
-                    const uint8_t v[4] = {SS::To8(p[2]), SS::To8(p[1]), SS::To8(p[0]), SS::To8(p[3])}; // B, G, R, A
-                    std::memcpy(row + 4 * x, v, 4);
-                }
-            }
-        }
-        copy->UnlockRect(i);
-        bytes += static_cast<unsigned long long>(lw) * lh * (wide ? 8 : 4);
-    }
-    IUnknown* held = copy;
-    if (FAILED(tex->SetPrivateData(kSmoothedGuid, &held, sizeof(held), D3DSPD_IUNKNOWN))) { // (it adds its own reference)
-        copy->Release();
-        return SS::Refusal::Create;
-    }
-    copy->Release();
-    g_spriteMade++;
-    g_spriteBytes += bytes;
-    *out = copy;
-    return SS::Refusal::None;
-}
-
-// A glow sprite's draw: the smoothed copy of its s0 texture (*game: the game's, to put back), or null to draw it as it is.
-// Texture x vertex colour, additive or alpha blend (the caller checked: no depth write), a DXT texture read without sRGB.
-IDirect3DTexture9* SmoothedFor(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps, IDirect3DBaseTexture9** game) {
-    if (!IsSprite(ps)) return nullptr;
-    const Blend blend = BlendOf(dev);
-    if (blend != kAdditive && blend != kAlpha) return nullptr;
-    IDirect3DBaseTexture9* base = D3D9Hooks::BoundTexture(dev, 0);
-    if (!base || base->GetType() != D3DRTYPE_TEXTURE) return nullptr;
-    DWORD srgb = FALSE;
-    dev->GetSamplerState(0, D3DSAMP_SRGBTEXTURE, &srgb);
-    if (srgb) { // an sRGB read would differ on the 16-bit copy (not seen in the captures)
-        g_frame.spritesAlone++;
-        return nullptr;
-    }
-    auto* tex = static_cast<IDirect3DTexture9*>(base);
-    IUnknown* held = nullptr;
-    DWORD size = sizeof(held);
-    IDirect3DTexture9* copy = nullptr;
-    if (SUCCEEDED(tex->GetPrivateData(kSmoothedGuid, &held, &size)) && held) {
-        held->Release(); // (GetPrivateData added a reference; the game texture keeps the copy)
-        copy = static_cast<IDirect3DTexture9*>(held);
-    } else {
-        DWORD why = 0;
-        size = sizeof(why);
-        if (FAILED(tex->GetPrivateData(kRefusedGuid, &why, &size))) {
-            const SS::Refusal r = MakeSmoothed(dev, tex, &copy);
-            if (r != SS::Refusal::None) {
-                copy = nullptr;
-                g_spriteRefused[static_cast<int>(r)]++;
-                why = static_cast<DWORD>(r);
-                tex->SetPrivateData(kRefusedGuid, &why, sizeof(why), 0);
-            }
-        }
-    }
-    if (!copy) {
-        g_frame.spritesAlone++;
-        return nullptr;
-    }
-    *game = base;
-    return copy;
-}
-
 template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext& ctx, DrawFn draw) {
     IDirect3DDevice9* dev = ctx.device;
     // (the High-precision scene grains its 16-bit scene once, at its resolve)
-    const bool on = g_on.load(std::memory_order_relaxed);
-    const bool dither = on && !SceneTarget::Substituting(), jitter = g_jitterOn;
-    if ((!on && !jitter) || !g_backBuffer) return D3D9Hooks::HookAction::Continue;
+    const bool dither = g_on.load(std::memory_order_relaxed) && !SceneTarget::Substituting(), jitter = g_jitterOn;
+    if ((!dither && !jitter) || !g_backBuffer) return D3D9Hooks::HookAction::Continue;
     if (!g_rt0 || g_rt0 != g_backBuffer) return D3D9Hooks::HookAction::Continue;
     if (ctx.ZEnable() == D3DZB_FALSE) return D3D9Hooks::HookAction::Continue; // UI and 2D passes
     // Depth on with ZFUNC ALWAYS and no depth write uses no depth (PostScene's rule): the UI's ~137 glass passes and
@@ -495,8 +331,8 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
     // the Banding Fix's pixel copy
     IDirect3DPixelShader9* ps = nullptr;
     Copy copy;
-    if (on) ps = D3D9Hooks::BoundPixelShader(dev); // (followed through Set*Shader; the device keeps it alive)
     if (dither) {
+        ps = D3D9Hooks::BoundPixelShader(dev); // (followed through Set*Shader; the device keeps it alive)
         if (!ps) g_frame.noShader++;
         if (ps) {
             copy = CopyOf(dev, ps);
@@ -533,10 +369,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
             useDither = false;
         }
     }
-    // a glow sprite (no depth write): its smoothed texture at s0, with or without the grain
-    IDirect3DBaseTexture9* sprite = nullptr;
-    IDirect3DTexture9* smoothed = on && ps && !ctx.ZWriteEnable() ? SmoothedFor(dev, ps, &sprite) : nullptr;
-    if (!useDither && !useJitter && !smoothed) {
+    if (!useDither && !useJitter) {
 #ifdef APEX_F10_STUDY
         F10Study::CompositionShader(dev, ps, ps, vs, false);
 #endif
@@ -563,15 +396,10 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
     }
     if (useJitter) D3D9Hooks::CallOriginalSetVertexShaderConstantF(dev, kJitterConst, g_jitter, 1); // no game shader reads c252
     if (vsCopy) D3D9Hooks::CallOriginalSetVertexShader(dev, vsCopy);
-    if (smoothed) D3D9Hooks::CallOriginalSetTexture(dev, 0, smoothed);
 #ifdef APEX_F10_STUDY
     F10Study::CompositionShader(dev, ps, useDither ? copy.ps : ps, vsCopy ? vsCopy : vs, useDither);
 #endif
     draw();
-    if (smoothed) {
-        D3D9Hooks::CallOriginalSetTexture(dev, 0, sprite);
-        g_frame.sprites++;
-    }
     if (vsCopy) D3D9Hooks::CallOriginalSetVertexShader(dev, vs);
     if (useDither) {
         D3D9Hooks::CallOriginalSetPixelShader(dev, ps);
@@ -604,12 +432,9 @@ void OnFrameBoundary(IDirect3DDevice9* dev) {
             g_logs++;
             LOG_INFO(std::format("[SceneDither] Last frame, 3D scene draws: {} dithered (ps_3_0), {} dithered (ps_2_x), {} ps_2_x whose vertex shader "
                                  "could not carry the position, {} ps_2_x refused, {} ps_3_0 refused, {} other | copies made: pixel {}, vertex {}; "
-                                 "refused: no colour write {}, subroutines {}, relative constants {}, no free register {}, unreadable {} | glow sprites: "
-                                 "{} smoothed, {} as drawn, textures smoothed {}; refused: format {}, size {}, pool {}, detail {}, lock {}, create {}",
+                                 "refused: no colour write {}, subroutines {}, relative constants {}, no free register {}, unreadable {}",
                                  g_last.dithered3, g_last.dithered2, g_last.ps2NoPair, g_last.ps2Refused, g_last.ps3Refused, g_last.other, g_made.load(),
-                                 g_madeVs.load(), g_refused[2].load(), g_refused[3].load(), g_refused[4].load(), g_refused[5].load(), g_refused[6].load(),
-                                 g_last.sprites, g_last.spritesAlone, g_spriteMade.load(), g_spriteRefused[1].load(), g_spriteRefused[2].load(),
-                                 g_spriteRefused[3].load(), g_spriteRefused[4].load(), g_spriteRefused[5].load(), g_spriteRefused[6].load()));
+                                 g_madeVs.load(), g_refused[2].load(), g_refused[3].load(), g_refused[4].load(), g_refused[5].load(), g_refused[6].load()));
         }
     }
 }
@@ -733,12 +558,6 @@ class SceneDitherPatch : public ApexPatch {
                             "%u depth ALWAYS without depth write (UI), %u without a pixel shader",
                             g_last.blend[kOpaque], g_last.blend[kAlpha], g_last.blend[kAdditive], g_last.blend[kMultiply], g_last.blend[kOtherBlend],
                             g_last.noDepth, g_last.noShader);
-        const auto refused = [](SpriteSmoothLogic::Refusal r) { return g_spriteRefused[static_cast<int>(r)].load(); };
-        using R = SpriteSmoothLogic::Refusal;
-        ImGui::TextDisabled("Glow sprites, last frame: %u smoothed, %u as drawn  |  textures smoothed %u (%.0f KB, %s); refused: format %u, size %u, "
-                            "pool %u, detail %u, lock %u, create %u",
-                            g_last.sprites, g_last.spritesAlone, g_spriteMade.load(), g_spriteBytes.load() / 1024.0, g_filter16 == 0 ? "8-bit" : "16-bit",
-                            refused(R::Format), refused(R::Size), refused(R::Pool), refused(R::Detail), refused(R::Lock), refused(R::Create));
             ApexUi::EndAdvanced();
         }
     }
@@ -759,9 +578,7 @@ APEX_REGISTER_FEATURE(SceneDitherPatch, {.displayName = "Banding Fix",
                                                               "with the clip position.",
                                                               "Bound only for draws into the back buffer that use the depth test (the 3D scene; not ZFUNC ALWAYS without "
                                                               "depth write), last in the draw chain, at half strength for additive and multiply blends; "
-                                                              "the amount constant's previous value is put back after the draw.",
-                                                              "Glow sprites (texture x vertex colour, additive or alpha blend, no depth write) whose texture is a small "
-                                                              "DXT gradient are drawn with a smoothed 16-bit copy of it, made once per texture."}})
+                                                              "the amount constant's previous value is put back after the draw."}})
 
 namespace SceneBinder {
 void AcquireJitter() {

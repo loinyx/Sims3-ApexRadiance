@@ -14,6 +14,4 @@ It checks the shader copies of the [Banding Fix](../../docs/features/banding-fix
 - a patched `vs_2_0` + `ps_2_0` pair gives the same pixels as the `ps_3_0` copy (the two grains line up);
 - the Picture dither: `PicturePS` from `features/picture.cpp` with every control neutral; an unchanged picture stays
   bit for bit;
-- how many of the package's pixel shaders the glow sprite family matches (`SpriteSmoothLogic::IsTintedSprite`); at least
-  one ps_2_x must;
 - with `-D3d9`, every check again on that D3D9 implementation, loaded from the given path.

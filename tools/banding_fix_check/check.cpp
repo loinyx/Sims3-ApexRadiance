@@ -8,14 +8,12 @@
 // 3. The ps_2_x path (a patched vs_2_0 + ps_2_0 pair) gives the same pixels as the ps_3_0 path.
 // 4. The Picture dither (PicturePS from features/picture.cpp, every control neutral): an unchanged picture stays bit for
 //    bit.
-// 5. The glow sprite family (SpriteSmoothLogic::IsTintedSprite): how many of the package's pixel shaders it matches.
 // --d3d9 runs 1 to 4 again on another D3D9 implementation (a DXVK d3d9.dll), loaded from that path.
 #define NOMINMAX
 #include <windows.h>
 #include <d3d9.h>
 #include <d3dcompiler.h>
 #include "../../features/shader_patches.h"
-#include "../../features/sprite_smooth_logic.h"
 #include "../../shaders/shader_ids.h"
 #include <algorithm>
 #include <cmath>
@@ -192,11 +190,10 @@ const char* Reason(ShaderPatches::DitherResult r) {
 
 // ---- 1. the game's shaders ----
 void Package(Gpu& gpu, const std::vector<std::vector<DWORD>>& all) {
-    int n3 = 0, ok3 = 0, acc3 = 0, n2 = 0, ok2 = 0, acc2 = 0, n1 = 0, nv = 0, okv = 0, accv = 0, k7 = 0, sprites2 = 0, sprites3 = 0;
+    int n3 = 0, ok3 = 0, acc3 = 0, n2 = 0, ok2 = 0, acc2 = 0, n1 = 0, nv = 0, okv = 0, accv = 0, k7 = 0;
     std::map<std::string, int> why3, why2;
     for (const auto& code : all) {
         const DWORD v = code[0];
-        if (SpriteSmoothLogic::IsTintedSprite(code.data(), code.size())) (v == 0xFFFF0300u ? sprites3 : sprites2)++;
         if (v == 0xFFFF0300u) {
             n3++;
             std::vector<DWORD> t = code;
@@ -240,8 +237,6 @@ void Package(Gpu& gpu, const std::vector<std::vector<DWORD>>& all) {
     std::printf("ps_2_0: %d unique, %d patched (ps_2_x), %d accepted; refused:%s\n", n2, ok2, acc2, list(why2).c_str());
     std::printf("ps_1_x: %d left alone\n", n1);
     std::printf("vs_1_1 / vs_2_x: %d unique, %d with a screen-position copy (%d with t7), %d accepted\n", nv, okv, k7, accv);
-    std::printf("glow sprite family (texture x vertex colour): %d ps_2_x, %d ps_3_0\n", sprites2, sprites3);
-    Check(sprites2 > 0, "the glow sprite family is in the package");
     Check(ok3 > 0 && acc3 == ok3, "every ps_3_0 copy is accepted");
     Check(ok2 > 0 && acc2 == ok2, "every ps_2_x copy is accepted");
     Check(okv > 0 && accv + 1 >= okv, "every vertex copy but one is accepted (the refused one is not used at run time)");

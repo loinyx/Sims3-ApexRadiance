@@ -122,37 +122,10 @@ and *Moving grain* with it; old `deband` and `graoEmMovimento` keys are ignored.
 after picture of the gradient that follows the current state, then *Grain* (Strength) and *Precision* (the switch and a
 Status pill), with the developer resolves under *Live counters*.
 
-### 2026-10-26: rings in car headlights' glow
+### Glow sprite smoothing (removed)
 
-**Context:** observed in game with the High-precision scene build: car headlights' glow still showed rings. Light
-captures of the glow (draw #229) showed `texld r0, t1, s0; mul r0, r0, v0; mov oC0, r0` (ps_2_0), additive blending,
-no depth write, and a 128x128 DXT5 texture, white with a radial glow in alpha, sampled without a mip filter.
+**Context:** car headlight glows and beams showed rings: their textures are DXT5 with a radial or beam gradient in alpha, magnified over a large screen area.
 
-**Finding:** the rings are in the texture. DXT5 keeps 8 alpha levels per 4x4 block: along a row of the captured glow the
-values go 22, 26, 28, 31, 33, 37, 41, 43, 49 and the slope changes by up to 13 levels between neighbouring texels.
-Magnified, each change is a crease of the bilinear filter. The 16-bit scene and the grain act after the texture is read.
-In the game's shader package the texture x vertex colour family is 2 ps_2_x and 1 ps_3_0 shaders; the other captures
-hold no other draw of it. A blur of 1.5 texels changes the glow by 0.87 levels RMS and textured content by 2.8 or more.
+**Tried:** a smoothed 16-bit copy of the sprite texture (Gaussian, then edge-aware), bound for the three-instruction sprite pixel shader family.
 
-**Outcome:** the Banding Fix draws such sprites with a smoothed 16-bit copy of their DXT texture, made once per texture
-when the blur changes it no more than DXT noise, and kept by the game texture as private data. Offline: the slope
-changes drop from 13 to 1.3 levels on the captured glow, the mean is kept. Not yet tested in game: open checks on the
-[validation page](../validation/banding-fix.md#open-checks).
-
-### 2026-10-26: the headlight beam was refused
-
-**Context:** observed in game with the glow-sprite build: the car light was still banded. A light capture of the beam
-(draw #1840) showed the same shader, additive blending, no depth write and a 64x256 DXT5 texture with a narrow cone in
-alpha; the coverage log line read "1 as drawn, textures smoothed 0".
-
-**Finding:** the detail gate refused the beam: the Gaussian changed it by 2.80 levels RMS, 4.7% of texels by more than 4
-levels, at its steep sides. A range-limited bilateral filter (3 to 12 levels) left the glow's slope changes almost as
-they were (2.66 -> 2.29 rms at 4 levels; 0.93 at 12 levels, against 0.16 with the Gaussian), since a ramp of 4 levels a
-texel already exceeds such a range. Bounding each texel's
-move to half its DXT step kept too much of the beam's noise, which is larger than the quantisation. Detecting real
-edges as the places where the smoothed image still bends, and smoothing those only along the edge, kept 92% of the
-beam's edge sharpness (69% with the Gaussian) with the same ramp smoothing (0.79 against 0.78 rms).
-
-**Outcome:** the edge-aware smoothing replaces the Gaussian, the gate tests its result and the share of edge texels, and
-the coverage log line lists the refusals by reason. The offline check measures the captured glow and beam and scans the
-captured textures. Not yet tested in game.
+**Outcome:** removed. In game the headlights looked the same with and without it.
