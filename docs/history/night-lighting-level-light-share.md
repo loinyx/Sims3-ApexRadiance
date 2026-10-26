@@ -788,3 +788,8 @@ later, so the roofed room gathered with 2 doors, then 5.
 **Outcome:** outdoor lamps through openings take the outdoor cut and scale over the room's normalisation
 (`opening_lamp_balance.h`); a cut's close counts after 2 s (`cut_close_hold.h`). Offline checks in
 `tools/roofed_openings_test`. In-game confirmation pending.
+
+**Follow-up:** a later capture showed the camera keeping a wall's window cuts closed while it stays (`windows 6 -> 3`, 18
+closes past the hold), the kitchen again gathering with 8 or 5 doors. Windows now count by the window built: a close
+marks the cut, and the grid keeps it while a window light stands in its cell (`KeepBuiltWindows`); doors, arches and
+gates keep the hold. In-game confirmation pending.

@@ -212,6 +212,13 @@ topology mutation inside a point is not reproduced. This release does not promis
 
 ## Open checks
 
+- Windows counted by the window built (`ApplyCutPost`, `KeepBuiltWindows`, `UnlitWindows`): a house with windows next
+  to an outdoor lamp at night, developer mode. Rotate the camera round the house and stop on each side. **Expected:** the
+  rooms' light stays the same; the `[RoofedLamps]` gathers of those rooms keep the same number of doors to the outside
+  and no `[Openings] ... windows 6 -> 3` change follows a turn (the line counts window closes marked). Delete a window:
+  its light through the wall goes within about a second; undo, or place it on another wall cell: the light follows.
+  Offline: `tools/roofed_openings_test`.
+
 - Outdoor lamp edits reach the rooms that take the lamp through their openings (`SendRoom0DependentsTry` with
   `SameStoryRoofed`, `RoofedSendWanted`), Lamp lighting Instant and Classic: the courtyard save, a wall sconce next to the
   kitchen's glass doors. Change its colour in Buy mode, switch it off and on, move it along the wall, delete it.

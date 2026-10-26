@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -1279,8 +1280,66 @@ void RoofedSendChecks() {
           "a lamp removed: the rooms that took one, not a room out of reach");
 }
 
+// Windows the game closed again (CutRec::closed, ApplyCutPost, KeepBuiltWindows, UnlitWindows). In game the camera closed the
+// windows of the wall it looked through ('windows 6 -> 3') and kept them closed while it stayed, every window light kept;
+// the kitchen behind them took the courtyard sconce through 5 openings or 8 depending on the camera.
+void ClosedWindowChecks() {
+    const uint32_t k = EdgeKey(5, 4, 6, 4);
+    CutRec win;
+    win.kind = kCutWindow;
+    CutRec door;
+    door.kind = kCutDoor;
+    std::unordered_map<uint32_t, CutRec> edges;
+    Check(ApplyCutPost(edges, k, true, win) == 1, "a window posted: a new generation");
+    Check(ApplyCutPost(edges, k, false, CutRec{}) == 0 && edges.count(k) && edges[k].closed == 1, "a camera close of a window: marked closed, no new generation");
+    Check(ApplyCutPost(edges, k, false, CutRec{}) == 0 && edges[k].closed == 1, "a repeated close changes nothing");
+    Check(ApplyCutPost(edges, k, true, win) == 0 && edges[k].closed == 0, "the window posted again: the mark cleared, no new generation");
+    ApplyCutPost(edges, k, false, CutRec{});
+    edges[k].closed = 2; // (the grid left it out: no window light in its cell)
+    Check(ApplyCutPost(edges, k, true, win) == 1 && edges[k].closed == 0, "a window put back after it was left out: a new generation");
+    const uint32_t d = EdgeKey(6, 4, 7, 4);
+    ApplyCutPost(edges, d, true, door);
+    Check(ApplyCutPost(edges, d, false, CutRec{}) == 2, "a door's close keeps the hold (cut_close_hold.h)");
+    Check(ApplyCutPost(edges, EdgeKey(1, 1, 2, 1), false, CutRec{}) == 0, "a close of an edge with no cut changes nothing");
+    // the grid: the window of DoorRule's wall z = 4, cell x = 5, closed by the camera, its panes in front of each face
+    DoorRule rule(kCutWindow, kCutDoor, true);
+    std::vector<std::pair<uint32_t, CutRec>> cuts = rule.cuts;
+    cuts[0].second.closed = 1;
+    const GlassLight in{5.5f, 1.5f, 3.95f, 0.3f, 0.5f, 0.0f}, out{5.5f, 1.5f, 4.05f, 0.3f, 0.5f, 0.0f};
+    std::unordered_set<uint32_t> leftOut;
+    std::vector<std::pair<uint32_t, CutRec>> closed;
+    auto kept = KeepBuiltWindows(rule.b.g, cuts, {in, out}, leftOut, &closed);
+    Check(kept.size() == 2 && leftOut.empty() && closed.size() == 1, "a camera-closed window with its pane lights stays open");
+    kept = KeepBuiltWindows(rule.b.g, cuts, {GlassLight{5.5f, 1.5f, 4.05f}}, leftOut, &closed);
+    Check(kept.size() == 2 && leftOut.empty(), "a window light with no size read keeps it too (a round window)");
+    kept = KeepBuiltWindows(rule.b.g, cuts, {}, leftOut, &closed);
+    Check(kept.size() == 1 && leftOut.count(k) && kept[0].first == d, "a deleted window (no window light) closes");
+    kept = KeepBuiltWindows(rule.b.g, cuts, {GlassLight{6.5f, 1.5f, 4.05f, 0.3f, 0.5f, 0.0f}, GlassLight{5.5f, 1.5f, 5.0f}}, leftOut, &closed);
+    Check(leftOut.count(k), "the next cell's pane, or a light 1 m inside the room, does not keep it");
+    kept = KeepBuiltWindows(rule.b.g, rule.cuts, {}, leftOut, &closed);
+    Check(kept.size() == 2 && leftOut.empty() && closed.empty(), "an open window is never left out by its lights");
+    // placed: the kept window lets the lamp through, the left-out one does not
+    DoorRule hidden(kCutWindow, kCutDoor, true), gone(kCutWindow, kCutDoor, true);
+    for (DoorRule* r : {&hidden, &gone}) {
+        r->b.g.openings.clear(), r->b.g.cutsOnWall = r->b.g.cutsClosed = r->b.g.glassDoors = 0;
+        for (int& n : r->b.g.kinds) n = 0;
+        for (GridEdge& e : r->b.g.edges) e.open = 0;
+    }
+    PlaceGridOpenings(hidden.b.g, KeepBuiltWindows(hidden.b.g, cuts, {in, out}, leftOut, &hidden.b.g.closedWindows), true, {}, [](const CutRec&, GridOpening&) {});
+    PlaceGridOpenings(gone.b.g, KeepBuiltWindows(gone.b.g, cuts, {}, leftOut, &gone.b.g.closedWindows), true, {}, [](const CutRec&, GridOpening&) {});
+    const float hidPass = Pass(hidden.b.g, 5.5f, 1.5f, 1.0f, 5.5f, 1.5f, 6.5f), gonePass = Pass(gone.b.g, 5.5f, 1.5f, 1.0f, 5.5f, 1.5f, 6.5f);
+    std::printf("closed windows: a camera-closed window passes %.3f of the lamp, a deleted one %.3f\n", hidPass, gonePass);
+    Check(Glass(hidPass) && gonePass < 0.05f, "a camera-closed window passes the light through its glass, a deleted one blocks it");
+    // EnsureStoryGrid's stamp: the same lights give the same stamp; the lights of a window gone (open or closed) change it
+    const uint64_t hid = GlazedSig(UnlitWindows(hidden.b.g, {in, out}));
+    Check(hid == GlazedSig(UnlitWindows(hidden.b.g, {in, out})) && hid == 0, "a camera close with its lights kept: no rebuild");
+    Check(GlazedSig(UnlitWindows(hidden.b.g, {})) != hid, "its lights gone (deleted): built again");
+    Check(GlazedSig(UnlitWindows(rule.b.g, {})) != 0, "an open window whose lights went: built again (its close may come later)");
+}
+
 int main() {
     RoofedSendChecks();
+    ClosedWindowChecks();
     PillarLightChecks();
     RaisedWallSpanChecks();
     ArchConeChecks();

@@ -1,10 +1,10 @@
 #pragma once
-// Openings of walls (level_light_share.cpp NoteCutoutPostImpl): a cut closed again counts for lamp light only once it stays
-// closed for kHoldMs. Moving the camera made the game post a lot's cuts again (in game, three camera turns, 21 posts each):
-// its window cuts closed and opened again 0.18 to 0.67 s later. Each close took the windows out of the story's grid, the
-// roofed rooms behind them gathered and solved with 2 doors to the outside instead of 5, then again with 5: the light of a
-// room depended on how the camera had moved. An add of the same edge within the hold cancels the close; a window really
-// removed lets its light out kHoldMs later. Pure, no game reads (tools/roofed_openings_test includes it).
+// Openings of walls (level_light_share.cpp NoteCutoutPostImpl): a door, arch, gate or unknown cut closed again counts for lamp
+// light only once it stays closed for kHoldMs; an add of the same edge within the hold cancels the close. Windows do not come
+// here: the camera closes the window cuts of the wall it looks through and keeps them closed while it stays (in game, closes
+// that lasted past the hold: 18), so a window's close only marks it (CutRec::closed) and the story's grid keeps it while a
+// window light stands in its cell (KeepBuiltWindows); a deleted window loses its lights and leaves the grid. Pure, no game
+// reads (tools/roofed_openings_test includes it).
 #include <algorithm>
 #include <cstdint>
 #include <vector>

@@ -640,9 +640,19 @@ half wall and the objects in them.
   window cuts closed and opened again 0.18 to 0.67 s later. Each close took the windows out of the story's grid and a
   roofed room behind them gathered with 2 doors to the outside, then with 5, and its light depended on how the camera had
   moved (`[Openings] ... windows 3 -> 0` then `0 -> 3` in the log, a kitchen dark from one side and lit from the other).
-  A window really removed lets its light out 2 s later; a moved one keeps its old cell open for those 2 s. The
-  `[Openings]` line and the *outdoor light through openings* status count the closes reopened within the hold and those
-  that lasted. Unverified: which game path re-posts the cuts on a camera move.
+  The `[Openings]` line and the *outdoor light through openings* status count the closes reopened within the hold and
+  those that lasted. Unverified: which game path re-posts the cuts on a camera move.
+- **Windows by the window built:** the hold did not cover the camera: it closes the window cuts of the wall it looks
+  through and keeps them closed while it stays (a later capture: `windows 6 -> 3` at a camera turn, 18 closes that lasted,
+  the kitchen's `[RoofedLamps]` gathers alternating 8 and 5 doors to the outside, every window light still listed). So a
+  window's close no longer goes through the hold nor changes the story's cuts: it marks the cut closed
+  (`CutRec::closed`, `ApplyCutPost`), with no new generation. The grid keeps a closed window while a window light (type
+  7 or 8) stands in front of its cell, as the panes are found (`KeepBuiltWindows`); a deleted window loses its lights and
+  is left out (and leaves the lot's geometry key, `StoryCutsContent`). `EnsureStoryGrid` builds the grid again when the
+  set of window cuts with no light changes (`UnlitWindows`, at most once a second, as for glass doors), and an add of a
+  window left out gives a new generation. Doors, arches and gates keep the hold. A window with no window light of its own
+  (none known in the base game) closes and opens with the camera as before, without the hold. The `[Openings]` line
+  counts the window closes marked.
 - **Grids built too early:** a grid built while its lot streams in can have no wall edge yet (in game: stories 1..4
   of `B1280029950F0CA0` with 79 / 98 / 38 / 8 noted cuts and no wall, and no room of theirs gathered again). A grid with
   no wall edge on a story with noted cuts or roofed tiles is not kept (`NoteGridReadiness`); the rooms on its tiles (at
