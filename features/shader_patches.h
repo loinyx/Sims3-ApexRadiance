@@ -100,6 +100,13 @@ bool PatchSnowFloor(std::vector<DWORD>& t, int texcoord, FloorPatch& out, const 
 // ground lamp shade (out.shadeSampler; world y = TEXCOORDn.z, which PatchObjectLampVs writes). groundShade = false gives the
 // bytes of the patch before the shade. exitLight (with groundShade, 2.15.3): as PatchFloor.
 bool PatchBakedAtlasPs(std::vector<DWORD>& t, int texcoord, FloorPatch& out, bool groundShade = true, bool exitLight = false);
+// The outdoor scale on the outside walls (ExteriorWall: "texld rA, vK, sM" whose next rgb reader is "mad rB.xyz, rA, cK.x,
+// rC", before any flow control, ps_3_0): right after the texld, texld rT, vK, sQ; mul rT.x, rT.x, cQ.x; exp rT.x, rT.x;
+// mul rA.xyz, rA, rT.x (cQ.x = 0: the wall as before). sampler = Q, constReg = cQ, mapSampler = M.
+struct WallScalePatch {
+    DWORD sampler = 0, constReg = 0, mapSampler = 0;
+};
+bool PatchWallScale(std::vector<DWORD>& t, WallScalePatch& out);
 
 // Winter foliage with a shadow map: "lrp rD.w, t5.x, cK.y, rS.w" is the moon shadow that also darkens lamp light.
 // After it: rD.w = lerp(rD.w, 1, cN.x), cN.x = night level.

@@ -1769,9 +1769,9 @@ void Frame(IDirect3DDevice9* dev) {
             failNote = std::format("story {} {}: its copy could not be made", s.story, kMapName[s.m]);
             continue;
         }
-        // the outdoor scale beside it (a device with two render targets; a map the draws multiply back: no blur). None: the
-        // draws read the copy as before, the light past 1 cut
-        if (!s.scale && !s.map.blur && g_mrt > 0 &&
+        // the outdoor scale beside it (a device with two render targets). None: the draws read the copy as before, the light
+        // past 1 cut
+        if (!s.scale && g_mrt > 0 &&
             (FAILED(dev->CreateTexture(s.map.w, s.map.h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &s.scale, nullptr)) || !s.scale))
             s.scale = nullptr;
         if (!s.preblur && s.map.blur) { // after a device reset

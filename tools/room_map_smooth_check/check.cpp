@@ -797,6 +797,30 @@ int main(int argc, char** argv) {
     std::printf("  with the arch ambient (ps_3_0): %d copies, %d created natively\n", st.arch, st.archCreated);
     Check(st.arch > 0 && st.arch == st.archCreated, "every copy with the arch ambient is created natively");
     for (const auto& [n, c] : perTech) std::printf("  %-38s %3d of %3d\n", n.c_str(), c.first, c.second);
+    // The outdoor scale on the outside walls (ShaderPatches::PatchWallScale): every ps_3_0 ExteriorWall pixel shader takes it
+    // and the copy is created natively (the ps_2_x ones, lower shader settings, keep the cut at 1)
+    {
+        const uint32_t ew = Fnv1Lower("ExteriorWall");
+        int walls = 0, patched = 0, created = 0, ps2 = 0;
+        for (uint32_t i = 0; i < blobs.size(); i++) {
+            const Blob& b = blobs[i];
+            const auto tt = techOf.find(i + 1);
+            if (b.vs || b.code.empty() || tt == techOf.end() || !tt->second.count(ew)) continue;
+            if (b.code[0] != 0xFFFF0300) {
+                ps2++;
+                continue;
+            }
+            walls++;
+            std::vector<DWORD> c = b.code;
+            ShaderPatches::WallScalePatch wp;
+            if (!ShaderPatches::PatchWallScale(c, wp)) continue;
+            patched++;
+            if (gpu.dev && gpu.AcceptsPs(c)) created++;
+        }
+        std::printf("  outside walls with the outdoor scale: %d of %d ps_3_0 ExteriorWall shaders patched, %d created natively (%d ps_2_x left as they are)\n", patched, walls,
+                    created, ps2);
+        Check(walls > 0 && patched == walls && (!gpu.dev || created == walls), "every ps_3_0 ExteriorWall shader takes the outdoor scale and is created natively");
+    }
     Check(outside == 0, "no match outside the room-lit techniques");
     Check(perTech["InteriorWall"].first == perTech["InteriorWall"].second && perTech["InteriorWall"].second > 0, "every InteriorWall shader matches");
     Check(perTech["InteriorFloor"].first >= 48, "the InteriorFloor shaders with a room map match (48 of 58: 10 have none)");

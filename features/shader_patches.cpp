@@ -1169,6 +1169,52 @@ bool PatchBakedAtlasPsImpl(std::vector<DWORD>& t, int texcoord, FloorPatch& out,
     return true;
 }
 } // namespace
+bool PatchWallScale(std::vector<DWORD>& t, WallScalePatch& out) {
+    constexpr DWORD kExp = 0x0E;
+    if (t.empty() || t[0] != 0xFFFF0300) return false;
+    const auto all = Parse(t);
+    if (all.empty()) return false;
+    const Usage u = Scan(t, all);
+    size_t firstFlow = all.size();
+    for (size_t i = 0; i < all.size(); i++)
+        if ((all[i].op >= 0x19 && all[i].op <= 0x1E) || (all[i].op >= 0x26 && all[i].op <= 0x2D)) {
+            firstFlow = i;
+            break;
+        }
+    std::vector<int> is2d(16, 0);
+    for (const Ins& x : all)
+        if (x.op == kDcl && Type(t[x.at + 2]) == kSampler && Num(t[x.at + 2]) < 16) is2d[Num(t[x.at + 2])] = ((t[x.at + 1] >> 27) & 0xF) == 2;
+    int tex = -1, found = 0;
+    for (size_t i = 0; i < firstFlow; i++) {
+        const Ins& x = all[i];
+        if (x.op != kTexld || Type(t[x.at + 1]) != kTemp || Type(t[x.at + 2]) != kInput || Type(t[x.at + 3]) != kSampler || !is2d[Num(t[x.at + 3]) & 15]) continue;
+        const DWORD A = Num(t[x.at + 1]);
+        for (size_t j = i + 1; j < firstFlow; j++) {
+            const Ins& y = all[j];
+            bool reads = false;
+            for (size_t k = 2; k <= y.len; k++) reads |= IsReg(t[y.at + k], kTemp, A) && Swz(t[y.at + k]) != kSwzW;
+            if (reads) {
+                if (y.op == kMad && Type(t[y.at + 1]) == kTemp && WMask(t[y.at + 1]) == 0x7 && IsReg(t[y.at + 2], kTemp, A) && Swz(t[y.at + 2]) == kSwzXYZW &&
+                    Type(t[y.at + 3]) == kConst && Swz(t[y.at + 3]) == kSwzX && Type(t[y.at + 4]) == kTemp) {
+                    tex = static_cast<int>(i);
+                    found++;
+                }
+                break;
+            }
+            if (IsReg(t[y.at + 1], kTemp, A) && (WMask(t[y.at + 1]) & 0x7)) break;
+        }
+    }
+    if (found != 1 || u.maxSampler < 0 || u.maxSampler >= 15 || !u.afterLastSamplerDcl || u.maxConst + 1 >= 224 || u.maxTemp + 1 >= 32) return false;
+    const Ins& x = all[static_cast<size_t>(tex)];
+    const DWORD A = Num(t[x.at + 1]), Q = static_cast<DWORD>(u.maxSampler + 1), cQ = static_cast<DWORD>(u.maxConst + 1), T = static_cast<DWORD>(u.maxTemp + 1);
+    out.sampler = Q, out.constReg = cQ, out.mapSampler = Num(t[x.at + 3]);
+    std::vector<DWORD> code = {Op(kTexld, 3), Dst(kTemp, T), t[x.at + 2], Src(kSampler, Q),
+                               Op(kMul, 3), Dst(kTemp, T, 0x1), Src(kTemp, T, kSwzX), Src(kConst, cQ, kSwzX),
+                               Op(kExp, 2), Dst(kTemp, T, 0x1), Src(kTemp, T, kSwzX),
+                               Op(kMul, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, T, kSwzX)};
+    Apply(t, {{u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, Q)}}, {End(x), std::move(code)}});
+    return true;
+}
 // (2.15.3) exitLight (with groundShade): as PatchFloor
 bool PatchBakedAtlasPs(std::vector<DWORD>& t, int texcoord, FloorPatch& out, bool groundShade, bool exitLight) {
     if (exitLight && groundShade) {

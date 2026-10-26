@@ -69,7 +69,7 @@ void NoteMapsWritten(const void* room);
 void NoteUnlock(const void* texture);
 // Render thread: the game's map behind a relit copy (Apex's own checks of a bound map), else the texture itself
 const void* GameMapOf(const void* texture);
-// Render thread: the outdoor scale of a bound relit copy (same size, A8R8G8B8), else null. A room-0 texel's sum is packed with
+// Render thread: the outdoor scale of a bound relit copy (same size, A8R8G8B8; a blurred wall atlas's not blurred), else null. A room-0 texel's sum is packed with
 // its hue kept past 1, divided by its largest channel m; the scale texture holds log2(m) / kScaleLog2 (0: within 1), so a
 // draw that multiplies the copy's colour by 2^(kScaleLog2 x r) gets the sum back, up to 8 times. Texels of other rooms: 0.
 IDirect3DTexture9* ScaleOf(const void* texture);

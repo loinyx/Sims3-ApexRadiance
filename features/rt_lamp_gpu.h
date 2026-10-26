@@ -119,8 +119,8 @@ class Engine {
     // One batch of lamps (their shadows in tiles 0 .. n - 1) added to the map's sum; first = the sum starts at 0
     bool Accumulate(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, int n, const Params& p, bool first, std::string& err);
     // The map composed into out (DEFAULT render target, w x h): the game's texture copied, the texels over it (and the blur).
-    // scale (a map with no blur; DEFAULT render target, w x h, or null): cleared to 0 and given each texel's outdoor scale
-    // (ComposePS COLOR1) as a second target of the texels' draw
+    // scale (DEFAULT render target, w x h, or null): cleared to 0 and given each texel's outdoor scale (ComposePS COLOR1) as a
+    // second target of the texels' draw (a blurred atlas: through a scratch map; the scale is not blurred)
     bool Compose(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, std::string& err,
                  IDirect3DTexture9* scale = nullptr);
     // The harness: the current sum (w x h float4, row major)

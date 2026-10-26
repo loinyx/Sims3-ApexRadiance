@@ -1287,9 +1287,12 @@ bool SplitCheck() {
     RtLampGpu::Engine::MakeVb(g_dev, bv.data(), mb.count, &mb.vb);
     RtLampGpu::Engine::MakeDyn(g_dev, bdyn.data(), mb.count, &mb.dyn);
     mb.blur = true, mb.passes = 2, mb.blocks = blocks, mb.preblur = preTex;
+    // (with the outdoor scale: drawn through scratch 3 and copied; the blurred colour must stay the game's)
+    IDirect3DTexture9* scaleB = nullptr;
+    g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &scaleB, nullptr);
     g_dev->BeginScene();
         eng.Begin(g_dev);
-    ok = eng.Compose(g_dev, mb, game, out, p, err);
+    ok = eng.Compose(g_dev, mb, game, out, p, err, scaleB);
     eng.End(g_dev);
         g_dev->EndScene();
     Check(ok, "blur passes: " + err);
@@ -1321,6 +1324,26 @@ bool SplitCheck() {
                 blockTexels, bv.size(), blockBad, outsideBad);
     Check(blockBad == 0, "a blurred block texel differs from the game's blur");
     Check(outsideBad == 0, "a texel outside the blocks changed");
+    {
+        std::vector<uint32_t> sc(static_cast<size_t>(w) * h, 0);
+        IDirect3DSurface9 *s = nullptr, *sys = nullptr;
+        if (scaleB && SUCCEEDED(scaleB->GetSurfaceLevel(0, &s))) {
+            g_dev->CreateOffscreenPlainSurface(w, h, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr);
+            if (sys && SUCCEEDED(g_dev->GetRenderTargetData(s, sys))) {
+                D3DLOCKED_RECT lr{};
+                sys->LockRect(&lr, nullptr, D3DLOCK_READONLY);
+                for (int y = 0; y < h; y++) std::memcpy(&sc[static_cast<size_t>(y) * w], static_cast<BYTE*>(lr.pBits) + lr.Pitch * y, w * 4);
+                sys->UnlockRect();
+            }
+            if (sys) sys->Release();
+            s->Release();
+        }
+        long inScaled = 0, outScaled = 0;
+        for (size_t i = 0; i < sc.size(); i++) (inBlock[i] ? inScaled : outScaled) += sc[i] != 0 ? 1 : 0;
+        std::printf("  the outdoor scale of the blurred atlas: %ld block texels past 1, %ld texels outside the blocks not at 0\n", inScaled, outScaled);
+        Check(inScaled > 0 && outScaled == 0, "the blurred atlas's outdoor scale is written on its texels past 1 only");
+    }
+    if (scaleB) scaleB->Release();
     m.vb->Release(), m.dyn->Release(), mb.vb->Release(), mb.dyn->Release();
     preTex->Release(), game->Release(), out->Release();
     return true;

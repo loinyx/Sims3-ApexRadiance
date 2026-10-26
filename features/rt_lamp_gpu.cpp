@@ -559,10 +559,13 @@ bool Engine::ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTextu
     PointSampler(dev, 0);
     PointSampler(dev, 1);
     c_.SetVertexShader(dev, nullptr);
-    if (m.blur || psId != kComposePs) scale = nullptr; // (the scale follows no blur: the walls' draws do not read it)
-    // 0. the outdoor scale: 0 (x 1) where no texel of the record lands
-    if (scale) {
-        if (!Target(dev, scale, m.w, m.h)) {
+    if (psId != kComposePs) scale = nullptr;
+    // 0. the outdoor scale: 0 (x 1) where no texel of the record lands. A blurred atlas's texels are drawn into a scratch
+    // map (its size can pass the map's, and two targets must have one size): its scale into scratch 3 (free until the blur's
+    // columns), copied into `scale` after the texels. The scale itself is not blurred (a smooth factor on the blurred colour)
+    IDirect3DTexture9* const scaleTarget = !scale ? nullptr : m.blur ? scratch_[3] : scale;
+    if (scaleTarget) {
+        if (!Target(dev, scaleTarget, m.w, m.h)) {
             err = "the outdoor scale could not be targeted";
             return false;
         }
@@ -609,7 +612,7 @@ bool Engine::ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTextu
         PointSampler(dev, 2);
     }
     TexelTarget(dev, m.w, m.h);
-    IDirect3DSurface9* scaleSurf = scale ? Surf(scale) : nullptr;
+    IDirect3DSurface9* scaleSurf = scaleTarget ? Surf(scaleTarget) : nullptr;
     if (scaleSurf) {
         if (FAILED(c_.SetRenderTarget(dev, 1, scaleSurf))) {
             scaleSurf->Release();
@@ -634,6 +637,16 @@ bool Engine::ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTextu
     if (FAILED(hr)) {
         err = std::format("the texels' draw failed ({:08X})", static_cast<unsigned>(hr));
         return false;
+    }
+    if (scaleSurf && scaleTarget != scale) {
+        if (!Target(dev, scale, m.w, m.h)) {
+            err = "the outdoor scale could not be targeted";
+            return false;
+        }
+        c_.SetPixelShader(dev, ps_[kCopyPs]);
+        c_.SetTexture(dev, 0, scaleTarget);
+        Quad(dev, m.w, m.h, static_cast<float>(m.w) / static_cast<float>(scratchW_), static_cast<float>(m.h) / static_cast<float>(scratchH_));
+        c_.SetTexture(dev, 0, nullptr);
     }
     if (!m.blur) return true;
     // 3. the game's wall blur: [passes] x (rows, then columns), and apart the rows only (each block's first and last rows)
