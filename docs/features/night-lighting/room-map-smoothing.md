@@ -33,7 +33,12 @@ texels per metre by lighting class (twice that with *Light detail* High). Three 
    read the same map: FloorWith\*, InteriorWallWith\*, Hideable, FloorTileCeiling) is found by pattern and drawn with a
    copy whose map read is a cubic B-spline (four bilinear taps). The paired vertex shader tells walls from floors by its uv
    scale (1/4096 for the wall atlas, 1/32767 for the floor maps). On walls, each tap stays in the atlas block of its row
-   (3n + 1 texel rows, n = atlas width / 256), so no light comes in from the wall stored above or below.
+   (3n + 1 texel rows, n = atlas width / 256), so no light comes in from the wall stored above or below. The colour is then
+   held under the brightest of the 2 x 2 texels the game's own bilinear read takes, plus 2/255 (the alpha, the ambient
+   weight, stays the B-spline's): the B-spline reaches a texel further, and where a room's texels touch those of the room
+   beyond a wall with no texel row on the wall line, it took that room's light. In game a hall beside a glass door showed a
+   warm band along the wall, the courtyard's light: an F7 of the hall floor 0.15 m from the wall read 0.14 of a courtyard
+   texel at (1, 0.55, 0.25) beside hall texels at 0.03 (on screen (0.26, 0.15, 0.07) against 0.05 a little further in).
 2. **Dither.** Before the game packs a texel, Apex adds up to half an 8-bit level of interleaved gradient noise taken from
    the texel's position: the mean light stays, the rings become a fine grain the B-spline smooths out. The same texel
    always gets the same offset, so a room lit again does not shimmer.
@@ -64,8 +69,9 @@ texels per metre by lighting class (twice that with *Light detail* High). Three 
 
 ## Limitations
 
-- The B-spline is wider than the bilinear filter: at the ends of a wall (columns of the atlas packed side by side) and at
-  the edge of a room's floor area a texel of the neighbouring block weighs up to 1/6.
+- Within half a texel of a room's edge the read still blends the texel beyond it, as the game's bilinear read does.
+- The bound trims the B-spline's tail on the dark side of a shadow edge: by at most 6 levels at the softest penumbra
+  (1.5 texels), nothing on a lamp's falloff (`tools/room_map_smooth_check`, `BoundChecks`).
 - A room solved on the render thread (the room queue solving at once) keeps the game's hard cut.
 - A room whose light list holds a light of a class whose evaluation Apex does not wrap keeps the hard cut.
 - Walls are drawn with the bilinear read again for the session if a wall block is seen off the 3n + 1 grid.
@@ -100,7 +106,7 @@ unverified in game.
 with the wall mask does not fit the registers, the combined variant without the mask is used, never one that drops the
 room map's smoothing.
 
-Cost: the reads add about 45 ALU and 3 texture instructions per room-lit pixel; the dither one call per texel solved; the
+Cost: the reads add about 70 ALU and 7 texture instructions per room-lit pixel (the B-spline and its bound); the dither one call per texel solved; the
 soft cut a list walk per solved point and a multiply per lamp kept.
 
 ## Rejected approaches

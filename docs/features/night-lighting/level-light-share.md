@@ -796,12 +796,15 @@ floor mask.
   counts those points. Offline (`tools/roofed_openings_test`, `OpeningColourChecks`): 7 lamp colours x 3 floor scales x
   119 distances; through the glass never brighter than outdoors on the same floor, the hue within 0.03 of the lamp's
   (597 cases off with the per-channel cut), no colour lit more than white (1365 cases over 3% before). The red sconce by
-  the door at the player's scale: courtyard floor 0.454, kitchen 0.252 before, 0.241 now. Not reproduced: the lighting
-  snapshot's kitchen floor on screen, (0.43 to 0.53, 0.05, 0.04) beside a courtyard at (0.41 to 0.56, 0.17 to 0.24,
-  0.13 to 0.22), while an F7 of the same kitchen's map held at most 0.21 red, about 0.25 on screen through the floor
-  curve: the rest comes from a term outside the room map (unverified: the floor's albedo or its reflection of the room's
-  probe). The courtyard's paler colour is its other light: a white lamp (1, 0.98, 0.85) 4.4 m from the sconce and the
-  night sky reach the courtyard, not the kitchen.
+  the door at the player's scale: courtyard floor 0.454, kitchen 0.252 before, 0.241 now. An F7 of the kitchen floor
+  in the red pool: the room map held 0.18 to 0.21 red (no green or blue), the albedo 0.84 and no specular map, so the floor
+  draw gave 0.25 to 0.28; the screen showed 0.47 to 0.51 there, and twice the floor draw's value on the unlit hall floor
+  too (0.025 to 0.051, every channel): a step after the floor draw that takes the whole screen, outdoors as well (the
+  additive full-screen pass that follows it; what its buffer holds at that moment is not captured, unverified). So the
+  kitchen is no brighter than its map gives, and on the same screen darker than the courtyard by the lamp (0.41 to 0.56
+  red). The courtyard's paler colour is its other light: a white lamp (1, 0.98, 0.85) 4.4 m from the sconce and the night
+  sky reach the courtyard, not the kitchen. The warm band along the hall's wall by the glass door was the courtyard's
+  texels read across the wall ([room-map-smoothing](room-map-smoothing.md)).
 - **Walls ending at a floor above** (2.13.0, `CapLowerWalls`): a story's grid caps a full straight wall with a placed
   floor of the story above beside it, over its foot and lower than a story, at that floor (the rule of `PassesOverLowerWall`
   and `CapFoundationSides`). A foundation's sides are walls of story 0 drawn only up to the floor on the foundation; at 3 m
