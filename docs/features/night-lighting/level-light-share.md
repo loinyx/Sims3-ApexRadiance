@@ -770,7 +770,8 @@ floor mask.
   room solve summed it whole, with no cut before the room's curve, and the room's normalisation multiplied it. A light
   capture of a green sconce (intensity 1.7, colour (0, 1, 0), a story-0 room-0 lamp listed twice) beside a courtyard: the
   kitchen behind its glass door showed 0.808 on screen, the courtyard at the same distance at most 0.567 of its map.
-  Each entry of such a lamp is now held under 1 / its entries at its largest channel, its hue kept (the outdoor cut), then takes the opening's
+  Each entry of such a lamp is now held under 1 / its entries at its largest channel, its hue kept (the outdoor cut,
+  taken at the opening it came in by: *The cut at the opening* below), then takes the opening's
   share and glass, then the outdoor scale: floors, ceilings and the directional maps the ground's (`Ground brightness x
   Lot lamp brightness` while *Street lamps light lots* is on, else 1), wall texels the walls' (*Lamps light walls* on,
   else 1), over the room's normalisation (`InnerLight::NormScale(1, room+0x160)`; the directional maps take no
@@ -805,6 +806,26 @@ floor mask.
   red). The courtyard's paler colour is its other light: a white lamp (1, 0.98, 0.85) 4.4 m from the sconce and the night
   sky reach the courtyard, not the kitchen. The warm band along the hall's wall by the glass door was the courtyard's
   texels read across the wall ([room-map-smoothing](room-map-smoothing.md)).
+- **The cut at the opening** (`OpeningGain`, `EntryScale`): held under 1 / its entries wherever it reached, an entry was
+  flat over every texel the lamp lit past the outdoor cut, so the room lost its falloff. Three light captures of the red
+  sconce (2.2 m up, 1 m outside the kitchen's glass doors) on the story's floor map: the courtyard at 1 out to 4.6 m from
+  the lamp (the law, both entries, 3.4 at the door's outer side; beyond the cut the map follows the law, 0.060 for 0.060 at
+  9.3 m), the kitchen flat at 0.21 from 0.5 to 1.5 m in (the law 2.2 down to 1.2), then falling. On screen the kitchen
+  floor (0.48 to 0.53 red) matched the courtyard at the door (0.36 to 0.50): 1 to 2 m in it kept 0.77 to 0.66 of the
+  door's outer floor where the law x the glass gives 0.37 to 0.19. Outdoors nothing is under the law: every texel past
+  the cut is at the map's 1, x the player's *Ground brightness* x *Lot lamp brightness* (0.75 x 0.756) in the lot pass
+  (`sLot x c31.x x c3.x`, its blend 2 x dest x src). The cut now follows the opening: the grid walk notes the ray's last
+  crossing through an opening or over a wall's top (`GridWhy::tOpen`, its share of the way from the lamp); the outdoor
+  surface at that crossing, at the texel's height and with its normal (a floor texel: the floor just outside the door),
+  gets `gain` times the texel's law (the distances and `n . l`; the cone taken as the texel's and the law's `Cmax` left
+  out). With `x` = the entry's largest channel x its entries and `R = x gain`: `R <= 1` keeps the entry whole; past it the
+  entry is scaled to `x / (1 + x (1 - 1 / R))` of the cut: the cut at the door, the law for a faint texel, strictly
+  falling between, its hue kept. With no crossing known (`gain` 1) it is the previous cut. Offline
+  (`tools/roofed_openings_test`, `OpeningFalloffChecks`, the capture's geometry, a glass door, the player's scale): the
+  kitchen floor 0.25, 1.25, 2.25 and 3.25 m in was 0.241, 0.241, 0.182, 0.104 (6 flat steps of 20) and is 0.228, 0.174,
+  0.122, 0.081, falling at every step, never over the courtyard at the door x the glass (0.347) nor over before; a lamp
+  under the outdoor cut at the door leaves the room unchanged. The status *outdoor light through openings* counts the
+  points held. Unverified in game; the outdoor clip itself (an 8-bit map at 1) is kept.
 - **Walls ending at a floor above** (2.13.0, `CapLowerWalls`): a story's grid caps a full straight wall with a placed
   floor of the story above beside it, over its foot and lower than a story, at that floor (the rule of `PassesOverLowerWall`
   and `CapFoundationSides`). A foundation's sides are walls of story 0 drawn only up to the floor on the foundation; at 3 m
