@@ -966,6 +966,7 @@ bool SplitCheck() {
         RtLampModel::TexelIn in;
         float p[3], n[3];
         uint32_t game = 0, model = 0;
+        bool past1 = false; // the sum passes 1: packed with its hue kept (outdoor_delta_model.h KeepHue)
     };
     std::vector<Tx> tx;
     std::vector<RtLampGpu::TexelVertex> verts;
@@ -994,6 +995,7 @@ bool SplitCheck() {
             }
             // the game's texel: the plain sum packed (the parts summed in the solve's order)
             float S[3] = {t.in.base[0] + G[0], t.in.base[1] + G[1], t.in.base[2] + G[2]};
+            t.past1 = std::max({S[0], S[1], S[2]}) > 1.0f;
             float alpha = t.in.masked ? OutdoorDeltaModel::MaskAlpha(t.in.baseVis + gVis, t.in.baseAll + gAll, t.in.gated ? t.in.under : -1.0f) : 0.0f;
             float c[4];
             OutdoorDeltaModel::PackInput(S, alpha, c);
@@ -1111,6 +1113,17 @@ bool SplitCheck() {
     Check(worseGame == 0, "a relit texel more than 1/255 from the game's texel");
     Check(exactGame >= static_cast<long>(tx.size() * 0.99), "fewer than 99% of relit texels equal to the game's");
     Check(untouchedBad == 0, "a texel no sample writes changed");
+    {
+        long past = 0, pastExact = 0;
+        for (size_t i = 0; i < tx.size(); i++)
+            if (tx[i].past1) {
+                past++;
+                const uint32_t g = got[static_cast<size_t>(verts[i].y) * w + static_cast<size_t>(verts[i].x)];
+                if (OutdoorDeltaModel::MaxLevelDiff(g, tx[i].game) == 0) pastExact++;
+            }
+        std::printf("  of them %ld with a sum past 1 (its hue kept), %ld equal to the game's texel\n", past, pastExact);
+        Check(past > 0 && pastExact == past, "texels with a sum past 1: the compose shader keeps the hue as the solve does");
+    }
     {
         // the floor mask's "all" of the GPU lamps evaluated by the compose shader (one batch of all six lamps, dyn.x = 0)
         std::vector<RtLampGpu::TexelDyn> dyn2 = dyn;

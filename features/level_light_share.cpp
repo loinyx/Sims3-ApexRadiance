@@ -111,6 +111,7 @@
 #include "light_detail.h"
 #include "terrain_lighting_policy.h"
 #include "outdoor_delta.h"
+#include "outdoor_delta_model.h"
 #include "room_map_dither.h"
 #include "rt_outdoor_lamps.h"
 #include "rt_lamp_proxy.h"
@@ -10759,6 +10760,8 @@ float* __fastcall SolvePointBatch(BYTE* room, void*, float* out, void* list2D, v
         t_odSample = false;
         OutdoorDelta::SampleEnd(room, sample, static_cast<const char*>(flags), out);
     }
+    // an outdoor texel's colour keeps its hue past 1 (the kept sum above stays whole: the deltas and the GPU relight pack it alike)
+    if (out && room[0x18]) OutdoorDeltaModel::KeepHue(out);
     return r;
 }
 float* SolvePointBatchImpl(BYTE* room, float* out, void* list2D, void* list3D, void* flags, void* sample) {

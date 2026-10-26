@@ -337,7 +337,11 @@ float4 ComposePS(TexelIn i, float2 vpos : VPOS) : COLOR0 {
             alpha = a;
         }
     }
-    float4 c = float4(min(max(Fin(S.r), 0.0), 1.0), min(max(Fin(S.g), 0.0), 1.0), min(max(Fin(S.b), 0.0), 1.0), min(max(Fin(alpha), 0.0), 1.0));
+    // (outdoor_delta_model.h PackInput) the sum's hue kept past 1 (KeepHue), then cut at 1
+    float3 s = max(float3(Fin(S.r), Fin(S.g), Fin(S.b)), 0.0);
+    const float sm = max(s.r, max(s.g, s.b));
+    if (sm > 1.0) s /= sm;
+    float4 c = float4(min(s, 1.0), min(max(Fin(alpha), 0.0), 1.0));
     if (i.base.w != 0) c.rgb = clamp(c.rgb + i.base.w, 0.0, 1.0);
     return float4(Rne(c.r * 255.0), Rne(c.g * 255.0), Rne(c.b * 255.0), Rne(c.a * 255.0)) / 255.0;
 }
@@ -456,7 +460,10 @@ float4 ComposeRlgPS(TexelIn i, float2 vpos : VPOS) : COLOR0 {
                 alpha = a;
             }
         }
-        c = float4(min(max(Fin(S.r), 0.0), 1.0), min(max(Fin(S.g), 0.0), 1.0), min(max(Fin(S.b), 0.0), 1.0), min(max(Fin(alpha), 0.0), 1.0));
+        float3 s = max(float3(Fin(S.r), Fin(S.g), Fin(S.b)), 0.0); // (as ComposePS: the hue kept past 1)
+        const float sm = max(s.r, max(s.g, s.b));
+        if (sm > 1.0) s /= sm;
+        c = float4(min(s, 1.0), min(max(Fin(alpha), 0.0), 1.0));
     }
     if (i.base.w != 0) c.rgb = clamp(c.rgb + i.base.w, 0.0, 1.0);
     return float4(Rne(c.r * 255.0), Rne(c.g * 255.0), Rne(c.b * 255.0), Rne(c.a * 255.0)) / 255.0;
