@@ -79,6 +79,20 @@ inline float EntryScale(float m, int times, float gain) {
     if (!(R > 1.0f) || !std::isfinite(R)) return 1.0f;
     return 1.0f / (1.0f + x * (1.0f - 1.0f / R));
 }
+// The outdoor cut is the texel's, not the lamp's: room 0's texel divides the sum of all its lights by its largest channel
+// past 1 (KeepHue), so where another light reaches X the lamp shows there at its own part of that sum only. A light capture
+// of a green sconce (1.7, (0, 1, 0), 2.9 m out from a hall's glass door) beside a white sconce (1, (1, 0.98, 0.85)) on the
+// door's own wall: the map just outside the door read (0.64 to 0.90, 1, 0.46 to 0.68), the green there 0.12 to 0.37 of
+// it, the white the rest; the white, flat on the wall, does not reach the hall, and the green alone entered under the cut
+// whole: the hall's floor at the door took about 3 times the green the courtyard shows beside it. total (the largest
+// channel of that sum at X, in the units of R; negative: not known) takes the texel's cut: R / total at the door, the law for
+// a faint texel, strictly falling between; equal to R it is the formula above.
+inline float EntryScale(float m, int times, float gain, float total) {
+    const float x = m * static_cast<float>(std::max(times, 1)), g = std::max(gain, 1.0f), R = x * g;
+    if (!(total > R) || !std::isfinite(total)) return EntryScale(m, times, gain);
+    if (!(total > 1.0f)) return 1.0f;
+    return 1.0f / (1.0f + (total - 1.0f) / g);
+}
 
 // The two curves an indoor texel goes through both scale its colour by a function of the MEAN of its channels, so a
 // saturated colour (one channel lit, a mean a third of it) is compressed as if it were three times dimmer than a white

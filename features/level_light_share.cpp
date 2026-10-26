@@ -12518,6 +12518,103 @@ float OpeningLampFactor(const float* normal, const BYTE* room) {
     return k;
 }
 
+// The outdoor sum at the opening's outer side (OpeningLampBalance::EntryScale's total): room 0's lights of the room's story
+// at X, each as the game evaluates it (its entries as listed: story 0's lamps twice) and passed through the story's walls
+// as a yard's lamp (YardPass), the window lights left out (the gather leaves them out too); the outdoor lamps at the solve's
+// daytime factor, as the lamp itself. Kept per batch and X (0.125 m, 0.25 m in height, the normal in sevenths), with the
+// parts of the room's lamps of room 0 (`same`) so a lamp's own part is taken out. Light tree thread.
+struct OpenTotalMemo {
+    uint32_t serial = 0;
+    uintptr_t room0 = 0;
+    int32_t q[4] = {};
+    bool ok = false;
+    float total[3] = {};
+    int n = 0;
+    uintptr_t lamp[16] = {};
+    float part[16][3] = {};
+};
+thread_local OpenTotalMemo t_openTotal[64];
+std::atomic<long> g_openShared{0}, g_openTotalFills{0}, g_openTotalFaults{0};
+bool OpenTotalFill(const BYTE* room0, const RoomInfo& info, const StoryGrid* g0, const StoryGrid* g1, const float* X, const float* n, OpenTotalMemo& m) {
+    __try {
+        const uintptr_t* lb = *reinterpret_cast<const uintptr_t* const*>(room0 + 0xC8);
+        const uintptr_t* le = *reinterpret_cast<const uintptr_t* const*>(room0 + 0xCC);
+        if (!lb || le < lb || le - lb > 4096) return false;
+        alignas(16) float s[12] = {X[0], X[1], X[2], 1.0f, n[0], n[1], n[2], 0.0f, 0, 0, 0, 0};
+        for (const uintptr_t* p = lb; p < le; p++) {
+            const uintptr_t l = *p;
+            if (!l) continue;
+            const int type = *reinterpret_cast<const int*>(l + 0xB0);
+            if (type == 7 || type == 8) continue;
+            const uintptr_t vt = *reinterpret_cast<const uintptr_t*>(l);
+            uintptr_t eval = 0;
+            for (size_t i = 0; i < std::size(kClasses); i++)
+                if (kClasses[i].vtable == vt && g_evalOrig[i]) eval = g_evalOrig[i];
+            if (!eval) continue;
+            alignas(16) float c[4] = {};
+            reinterpret_cast<LightEval_t>(eval)(reinterpret_cast<void*>(l), s, s + 4, c);
+            if (!(c[0] > 0.0f || c[1] > 0.0f || c[2] > 0.0f)) continue;
+            alignas(16) float lw[4] = {};
+            GridWhy why{};
+            float pass = YardPass(g0, g1, reinterpret_cast<void*>(l), X, lw, why);
+            if (g_ctx.dayScale < 1.0f && OutdoorLamp(reinterpret_cast<const void*>(l))) pass *= g_ctx.dayScale;
+            if (!(pass > 0.0f)) continue;
+            int slot = -1;
+            if (std::binary_search(info.same.begin(), info.same.end(), l)) {
+                for (int k = 0; k < m.n; k++)
+                    if (m.lamp[k] == l) slot = k;
+                if (slot < 0 && m.n < 16) slot = m.n++, m.lamp[slot] = l;
+            }
+            for (int k = 0; k < 3; k++) {
+                const float v = ApexMath::IsFinite(c[k]) ? std::max(0.0f, c[k] * pass) : 0.0f;
+                m.total[k] += v;
+                if (slot >= 0) m.part[slot][k] += v;
+            }
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_openTotalFaults.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+}
+// The total for one point of the room's solve: the largest channel of (the lamp's colour at X as EntryScale takes it, R, in
+// the hue of `colour`) + (the other lights at X); negative when X or room 0 is not known (the lamp's own cut then)
+float OpeningOutdoorTotal(const RoomInfo& info, void* light, const float* sample, const float* normal, float tOpen, const float colour[3], float R) {
+    if (!(tOpen > 0.0f && tOpen < 1.0f) || !info.grid[0] || !(R > 0.0f)) return -1.0f;
+    const float* L = g_ctx.yardLamp;
+    const float dx = sample[0] - L[0], dz = sample[2] - L[2], len = ApexMath::Sqrt(dx * dx + dz * dz);
+    if (!(len > 0.05f)) return -1.0f;
+    const float t = std::max(0.0f, tOpen - 0.03f / len); // (3 cm out from the opening's line, on the lamp's side)
+    const float X[3] = {L[0] + t * dx, sample[1], L[2] + t * dz};
+    const float up[3] = {0.0f, 1.0f, 0.0f};
+    const float* n = normal ? normal : up;
+    const BYTE* room0 = static_cast<const BYTE*>(LevelLightShare::Room0Of(info.tracker, info.level));
+    if (!room0) return -1.0f;
+    const int32_t q[4] = {static_cast<int32_t>(ApexMath::Floor(X[0] * 8.0f)), static_cast<int32_t>(ApexMath::Floor(X[1] * 4.0f)),
+                          static_cast<int32_t>(ApexMath::Floor(X[2] * 8.0f)),
+                          static_cast<int32_t>(std::lround((n[0] + 1.0f) * 3.5f) + 8 * std::lround((n[1] + 1.0f) * 3.5f) + 64 * std::lround((n[2] + 1.0f) * 3.5f))};
+    const uint32_t h = (static_cast<uint32_t>(q[0]) * 73856093u) ^ (static_cast<uint32_t>(q[1]) * 19349663u) ^ (static_cast<uint32_t>(q[2]) * 83492791u) ^
+                       (static_cast<uint32_t>(q[3]) * 2654435761u);
+    OpenTotalMemo& m = t_openTotal[h >> 26];
+    if (!(m.serial == g_batchSerial && m.room0 == reinterpret_cast<uintptr_t>(room0) && std::memcmp(m.q, q, sizeof q) == 0)) {
+        m = OpenTotalMemo{};
+        m.serial = g_batchSerial, m.room0 = reinterpret_cast<uintptr_t>(room0);
+        std::memcpy(m.q, q, sizeof q);
+        m.ok = OpenTotalFill(room0, info, info.grid[0].get(), info.grid[1].get(), X, n, m);
+        g_openTotalFills.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (!m.ok) return -1.0f;
+    const float* own = nullptr;
+    for (int k = 0; k < m.n; k++)
+        if (m.lamp[k] == reinterpret_cast<uintptr_t>(light)) own = m.part[k];
+    if (!own) return -1.0f; // (its own part not known: the lamp's own cut)
+    const float top = std::max({colour[0], colour[1], colour[2]});
+    if (!(top > 0.0f)) return -1.0f;
+    float T = 0.0f;
+    for (int k = 0; k < 3; k++) T = std::max(T, colour[k] / top * R + std::max(0.0f, m.total[k] - own[k]));
+    return T;
+}
+
 // Indoor light through openings: a lamp of a roofed room taken through an opening (ShareInnerLamps), tested like a yard's
 // (InnerPass); the game's own wall test that follows for it is skipped (GameWallTest)
 void InnerShadow(const RoomInfo& info, void* light, const float* sample, float* colour) {
@@ -12682,11 +12779,17 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
                                   : 1;
             // (the entry as the law gave it: the cut follows the opening's outer side, known once the walls are passed)
             const float law = openLamp ? std::max({colour[0], colour[1], colour[2]}) : 0.0f;
+            const float hue[3] = {colour[0], colour[1], colour[2]};
             float tOpen = -1.0f;
             YardShadow(*g_ctx.info, light, sample, colour, openLamp ? &tOpen : nullptr); // a lamp of a roofless room's own story (light through doors and windows), or of a roofed room's doors
             if (openLamp && (colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f)) { // at the outdoor surface's scale
-                // the outdoor cut where the light came in, falling off from there with the law (OpeningLampBalance::EntryScale)
-                const float cut = OpeningLampBalance::EntryScale(law, times, OpeningLampBalance::OpeningGain(g_ctx.yardLamp, sample, normal, tOpen));
+                // the outdoor cut where the light came in, falling off from there with the law (OpeningLampBalance::EntryScale);
+                // the cut of the outdoor texel there, which every light reaching it shares
+                const float gain = OpeningLampBalance::OpeningGain(g_ctx.yardLamp, sample, normal, tOpen);
+                const float R = law * static_cast<float>(times) * std::max(gain, 1.0f);
+                const float total = R > 0.0f ? OpeningOutdoorTotal(*g_ctx.info, light, sample, normal, tOpen, hue, R) : -1.0f;
+                if (total > R && total > 1.0f) ApexUtil::CountOne(g_openShared);
+                const float cut = OpeningLampBalance::EntryScale(law, times, gain, total);
                 if (cut != 1.0f) {
                     for (int i = 0; i < 4; i++) colour[i] *= cut;
                     ApexUtil::CountOne(g_openCut);
@@ -14272,11 +14375,11 @@ std::string OpeningsStatus() {
         " | outdoor light through openings: {} (roofed rooms taking outdoor lamps {}, {} lamps; with no door to the outside {}; lamps beyond reach {}, with no door in "
         "sight {}; points tested {}, lit {}; lamps of the story below tested {}, stopped by this story's floors {}; directional map samples tested {}, blocked {}; rooms "
         "sent for lamp edits {}, for their doors {}; rig copies published {}; grid walls ending at a floor above them {}; at the outdoor scale x{:.3f} floors, x{:.3f} walls, "
-        "points scaled {}, of them saturated colours at the outdoor response {}, held under the outdoor cut at their opening {}; cut closes held: reopened {}, lasted {})",
+        "points scaled {}, of them saturated colours at the outdoor response {}, held under the outdoor cut at their opening {}, at the cut of the outdoor texel there (its other light) {} (sums at openings {}, faults {}); cut closes held: reopened {}, lasted {})",
         roofed ? (RoofedOpeningsOn() ? "on" : "on, not ready") : "off", g_roofedRooms.load(), g_roofedAdded.load(), g_roofedNoDoor.load(), g_roofedFar.load(),
         g_roofedHidden.load(), g_roofedTests.load(), g_roofedLit.load(), g_roofedBelowTests.load(), g_roofedBelowSlab.load(), g_roofedBasisTests.load(),
         g_roofedBasisBlocked.load(), g_roofedSends.load(), g_roofedDoorSends.load(), g_openRigPublished.load(), g_gridCapped.load(), g_openGround.load(), g_openWall.load(),
-        g_openScaled.load(), g_openResponse.load(), g_openCut.load(), g_cutReopened.load(), g_cutHeldApplied.load());
+        g_openScaled.load(), g_openResponse.load(), g_openCut.load(), g_openShared.load(), g_openTotalFills.load(), g_openTotalFaults.load(), g_cutReopened.load(), g_cutHeldApplied.load());
     const std::string innerText = std::format(
         " | indoor light through openings: {} (rooms taking lamps of roofed rooms {}, {} lamps, {} of them of the story above; lamps beyond reach {}, with no "
         "opening in sight {}; points tested {}, lit {}, stopped where they go down through a floor {}; left out of the floor mask {}; directional map samples tested {}, "

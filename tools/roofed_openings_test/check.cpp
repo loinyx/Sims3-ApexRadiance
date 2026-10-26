@@ -1430,6 +1430,51 @@ void OpeningFalloffChecks() {
     Check(2.0f * SconceEntry(25.9f, 0.0f, z, far) < 1.0f && moved == 0, "a lamp under the outdoor cut at the door: the room unchanged");
 }
 
+// The cut of the outdoor texel, which every light reaching it shares (EntryScale's total). The light capture of a green
+// sconce (1.7, (0, 1, 0), its two entries 0.64 together at the hall's glass door, under the cut alone) beside a white sconce
+// on the door's wall (1, (1, 0.98, 0.85), 2.5 at the door's outer side, both entries): the courtyard's texel there is the
+// sum over its largest channel, the green 0.21 of it; the hall's floor at the door took the green whole, 3.1 times that.
+void OpeningShareChecks() {
+    int moved = 0;
+    for (int i = 1; i <= 300; i++) // total = R (no other light): the lamp's own cut, bit for bit
+        for (float g : {1.0f, 1.3f, 2.0f, 7.0f}) {
+            const float m = 0.01f * static_cast<float>(i), R = 2.0f * m * g;
+            if (OpeningLampBalance::EntryScale(m, 2, g, R) != OpeningLampBalance::EntryScale(m, 2, g) ||
+                OpeningLampBalance::EntryScale(m, 2, g, -1.0f) != OpeningLampBalance::EntryScale(m, 2, g))
+                ++moved;
+        }
+    Check(moved == 0, "no other light at the opening (or none known): the lamp's own cut, unchanged");
+    const float green = 0.64f, white[3] = {2.5f, 2.45f, 2.125f};
+    const float T = std::max({white[0], green + white[1], white[2]});
+    const float outdoorPart = green / T; // the green's part of the courtyard's texel at the door
+    const float before = green * OpeningLampBalance::EntryScale(green / 2.0f, 2, 1.0f), now = green * OpeningLampBalance::EntryScale(green / 2.0f, 2, 1.0f, T);
+    std::printf("Green sconce beside a white one at a glass door: the courtyard's texel there %.2f over its largest channel, the green's part %.3f; the hall's floor "
+                "at the door before %.3f (x%.2f), now %.3f\n",
+                T, outdoorPart, before, before / outdoorPart, now);
+    Check(before > 3.0f * outdoorPart, "before: the green entered whole, 3 times its part of the courtyard's texel beside it");
+    Check(std::fabs(now - outdoorPart) < 1e-4f, "now: at the door the green is its part of the courtyard's texel there");
+    // from the door in: the law at X over the texel's (gain), the same X; falls at every step, never over before, the law far in
+    float prev = 1e9f;
+    int notFalling = 0, overBefore = 0;
+    for (int i = 0; i <= 200; i++) {
+        const float g = 1.0f + 0.1f * static_cast<float>(i), m = green / 2.0f / g;
+        const float v = 2.0f * m * OpeningLampBalance::EntryScale(m, 2, g, T), was = 2.0f * m * OpeningLampBalance::EntryScale(m, 2, g);
+        if (v >= prev) ++notFalling;
+        if (v > was + 1e-6f) ++overBefore;
+        prev = v;
+    }
+    const float farIn = OpeningLampBalance::EntryScale(0.001f, 2, 1000.0f, T);
+    Check(notFalling == 0 && overBefore == 0, "from the door in: falling at every step, never brighter than before");
+    Check(farIn > 0.99f, "a faint texel far in keeps the law");
+    // two white lamps, each 1.2 at the door alone: the courtyard shows their sum at the cut, the room took each at its cut
+    const float each = 1.2f, beforeTwo = 2.0f * each * OpeningLampBalance::EntryScale(each / 2.0f, 2, 1.0f),
+                nowTwo = 2.0f * each * OpeningLampBalance::EntryScale(each / 2.0f, 2, 1.0f, 2.0f * each);
+    std::printf("Two white lamps at 1.2 each at a door: the room's sum at the door before %.2f, now %.2f (the courtyard's texel: 1)\n", beforeTwo, nowTwo);
+    Check(beforeTwo > 1.9f && std::fabs(nowTwo - 1.0f) < 1e-4f, "two lamps past the cut together: the room at the door is the courtyard's texel, not twice it");
+    // a total under the cut at the opening: nothing changes
+    Check(OpeningLampBalance::EntryScale(0.2f, 2, 1.0f, 0.9f) == 1.0f, "an outdoor texel under the cut at the opening: the entry whole");
+}
+
 // Cut closes held (cut_close_hold.h), replayed on the log of three camera turns: windows closed at 39.083 and reopened at
 // 39.751, closed at 46.352 and reopened at 46.529; a window really removed closes once.
 void CutHoldChecks() {
@@ -1697,6 +1742,7 @@ int main() {
     BalanceChecks();
     OpeningColourChecks();
     OpeningFalloffChecks();
+    OpeningShareChecks();
     CutHoldChecks();
     std::printf("Roofed openings: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
