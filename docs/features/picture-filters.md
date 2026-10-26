@@ -31,8 +31,8 @@ the game's own DXT textures (5 to 6-bit colour endpoints) and 8-bit light maps a
 ## How Apex Radiance solves it
 
 Apex Radiance grades the finished scene as the last effect in the shared post-scene chain, before the game draws its
-interface. The grade and the filters run in linear light and are re-quantised to 8 bits with a fixed dither below one
-step. The end-of-frame scene-copy mask is a fallback, not the normal colour path.
+interface. The grade and the filters run in linear light and are re-quantised to 8 bits with a fixed triangular dither
+of up to one step where the pass changed the pixel. The end-of-frame scene-copy mask is a fallback, not the normal colour path.
 
 The hidden-UI boundary learns the game's scratch-target identity from an already-filtered UI-visible
 frame. It recognises the actual point-filtered 256x256 first-tile rectangles into the 2048x1024 A8R8G8B8 target.
@@ -99,7 +99,7 @@ dragging and save when released. Missing keys keep their defaults.
 | Detail > Clarity | `clarity` | float | 0 | -100 (Softer) to +100 (Crisper) | Local midtone contrast against a 1/8-size copy of the scene |
 | Detail > Vignette | `vignette` | float | 0% | 0 to 100% (stored 0 to 0.8) | Darker corners |
 | Detail > Vignette size | `vignette_size` | float | 50% | 0 to 95% | Radius (0 centre, 1 corner) where the darkening starts |
-| Banding Fix > Smooth gradients | `deband` | float | 8% | 0 to 200% | Deband filter; follows the Banding Fix switch, not Picture's (see [banding-fix.md](banding-fix.md)) |
+| Banding Fix > Smooth gradients | `deband` | float | 8% | 0 to 200% | Deband filter: smooths steps up to `1 + 6.25 x deband` levels (8% = 1.5, 100% = 7.25, 200% = 13.5); follows the Banding Fix switch, not Picture's (see [banding-fix.md](banding-fix.md)) |
 
 *Film tones* and *Color mixer* are collapsed *Advanced* groups.
 
@@ -228,7 +228,9 @@ Filter disclosure buttons point down when closed and up when open.
 - Deband and sharpening near UI edges: the deband threshold excludes most UI pixels and sharpening clamps to the
   neighbour range.
 - 8-bit output: Brightness and Highlights pushed above white clip at the encode.
-- With Picture on and every slider neutral, the image still changes slightly (the fixed dither).
+- With Picture on and every slider neutral, the dither adds nothing: it applies only where the pass changed a pixel by
+  half a step or more (offline, a flat grey and a stepped gradient come out bit for bit; until 2.15.6 a uniform dither
+  of half a step changed the image slightly).
 - Emphasize needs the shared scene depth (off while the game's Edge Smoothing is on).
 - LUTs accept PNG strips and 3D CUBE files. 1D and combined shaper/3D CUBE files are refused.
 
@@ -267,7 +269,7 @@ back buffer, outside a loaded world (`WorldSession::InWorld`), or (Picture off, 
 3. Work out the effective filters (switch on and amount above 0.001); load the LUT when its file changed.
 4. If clarity, Glow, Halation, Dreamy, Tilt-shift, Fake HDR or Auto exposure is on: build the 1/2, 1/4,
    1/8 chain with linear `StretchRect`s from `sceneSurf` (or `frameSurf` without a copy).
-5. Save 12 render states, 8 samplers x 6 sampler states and textures, PS, VS, declaration / FVF, stream 0, PS constants
+5. Save 12 render states, 9 samplers x 6 sampler states and textures, PS, VS, declaration / FVF, stream 0, PS constants
    c0..c56 and the viewport. Neutral state (Z, blend, alpha test, stencil, scissor, fog, sRGB write, clip planes off; cull
    none; colour write 0xF).
 6. Auto exposure first renders its 1x1 pass (`AdaptPS`) into the other of two targets, reading the previous value.
@@ -290,7 +292,9 @@ start-up on a background thread (`framework/shader_cache.h`); creation failure i
 `[Picture] Resources ready (WxH, format N)`, `[Picture] LUT loaded: <file> (N cells per side)`.
 
 **Samplers:** s0 frame (point), s1 scene copy (point), s2 1/8 scene (bilinear), s3 scene depth (point, only for
-Emphasize), s4 1/2 scene and s5 1/4 scene (bilinear), s6 LUT strip (bilinear), s7 the adapted luminance (1x1).
+Emphasize), s4 1/2 scene and s5 1/4 scene (bilinear), s6 LUT strip (bilinear), s7 the adapted luminance (1x1), s8
+the deband's taps (the texture `SceneTap` reads; bilinear when it holds no UI: the scene copy, or the frame at the
+post-scene boundary; point otherwise).
 
 **Shader** (`PicturePS`), per pixel:
 
@@ -300,9 +304,10 @@ Emphasize), s4 1/2 scene and s5 1/4 scene (bilinear), s6 LUT strip (bilinear), s
 2. **Sample position and neighbour filters** (scene pixels): CRT curvature moves the sample position; then deband,
    Prism, 3DFX soft pixels, sharpening and Adaptive sharpening, each reading the scene copy (`SceneTap`); Tilt-shift
    blends toward the 1/2 and 1/4 copies.
-3. **Deband** (scene pixels, `ui < 0.5`): average with samples on two rings of 8 fixed directions (ring 2 rotated
-   22.5 degrees), radii `12 x H/2160` and `32 x H/2160` px, accepting only samples whose max channel difference is
-   below `deband x 6/255` (gamma-encoded). Deterministic.
+3. **Deband** (scene pixels, `ui < 0.5`): average with samples (s8) on two rings of 8 fixed directions (ring 2
+   rotated 22.5 degrees), radii `12 x H/2160` and `32 x H/2160` px, accepting only samples whose max channel difference
+   is below `(1 + 6.25 x deband) / 255` (gamma-encoded, `DebandThreshold`). Deterministic. Until 2.15.6 the threshold
+   was `deband x 6/255`: the default 8% (0.48 level) accepted no 8-bit neighbour, so the pass changed nothing.
 4. **Sharpen** (scene pixels): `fs + s x (fs - mean of 4 neighbours)`, clamped to `[min(neighbours, fs),
    max(neighbours, fs)]`.
 5. **Decode** gamma 2.2: `pow(max(c, 0), 2.2)`; then **Auto exposure** (gain toward the target, clamped to its range).
@@ -330,9 +335,11 @@ Emphasize), s4 1/2 scene and s5 1/4 scene (bilinear), s6 LUT strip (bilinear), s
     `g *= 1 - amount x v^2 (3 - 2v)`.
 16. **Encode** `o = pow(saturate(g), 1/2.2)`; then Film grain, 3DFX (posterise with a 4x4 Bayer dither and scanlines)
     and the CRT mask, scanlines and edges.
-17. **Dither** (skipped after 3DFX): `o += (IGN(px) - 0.5) / 255`,
-    `IGN = frac(52.9829189 x frac(dot(px, (0.06711056, 0.00583715))))`, the same pattern every frame. Then
-    `o = saturate(o x veil)`. Compare: the left half `o = frame`, the divider red.
+17. **Dither** (skipped after 3DFX): the Banding Fix's grain law (triangular `t` from `r = 2 IGN(px) - 1`, tapering
+    to `r / 2` above mid-grey, amplitude `min(a, min(o, 1 - o) + 0.5/255)`), with
+    `IGN = frac(52.9829189 x frac(dot(px, (0.06711056, 0.00583715))))`, the same pattern every frame (it does not correlate
+    with the scene's or the AO composite's R2 grain). `a = saturate(max|o - frame| x 510) / 255`: full where the pass
+    changed the pixel by half a step, none where it did not. Then `o = saturate(o x veil)`. Compare: the left half `o = frame`, the divider red.
 18. Output `lerp(o, frame, ui)`.
 
 **Constants** (c0..c12, the grade):
@@ -343,7 +350,7 @@ Emphasize), s4 1/2 scene and s5 1/4 scene (bilinear), s6 LUT strip (bilinear), s
 | c1 `cSize` | 1/W | 1/H | W | H |
 | c2 `cGrade` | exp2(exposure), exposure clamped -3 to 3 | contrast (0.5 to 1.8) | blacks x 0.02 | |
 | c3 `cWb` | wbR / wbL | wbG / wbL | wbB / wbL | |
-| c4 `cDeband` | deband x 6/255 (deband 0 to 2) | 12 x H/2160 | 32 x H/2160 | on (deband > 0.001) |
+| c4 `cDeband` | (1 + 6.25 x deband) / 255 (deband 0 to 2) | 12 x H/2160 | 32 x H/2160 | on (deband > 0.001) |
 | c5 `cTone` | 1 / midtones (0.5 to 2) | shadows | highlights | vibrance |
 | c6 `cDetail` | sharpen (0 to 1.5) | clarity (0 when below 0.001) | | |
 | c7 `cTintS` | shadow tint rgb | | | amount (0 to 1) |

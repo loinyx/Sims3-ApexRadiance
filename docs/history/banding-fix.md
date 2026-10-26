@@ -65,3 +65,28 @@ shifted pattern (AO settings revision 5).
 **Finding:** the in-game coverage of the ps_2_x path was not yet confirmed.
 
 **Outcome:** the Banding Fix is flagged experimental and the Banding tab shows a "Still being tested" note.
+
+### 2026-10-26: grain under the UI, specks and a deband that did nothing
+
+**Context:** players reported a grainy picture and areas the fix missed.
+
+**Finding:** five causes, checked in code, light captures and a new offline harness (`tools/banding_fix_check`):
+
+- The draw gate tested only the depth test. The UI's glass passes and back-buffer redraws draw with the depth test on,
+  `ZFUNC ALWAYS` and no depth write (all 30 light captures show such draws, 59 in all, every one the same ps_2_0 computing `x (1 + 0.4) / (x + 0.4)`
+  from a 2048x1024 copy), so they got the grain on top of the scene's; PostScene and Picture already skipped them. The
+  feature page wrongly said the UI draws with the depth test off.
+- The grain crossed the clamp: on native D3D9 and DXVK, 9.7% of pure black pixels came out at level 1 and 12.5% of pure
+  white at 254.
+- Every blended draw got a full grain on top of the target's, also additive and multiply blends (decals
+  `DESTCOLOR` / `SRCCOLOR` in the captures).
+- The Picture dither used the scene's IGN pattern (correlated) and changed every pixel by up to half a step.
+- *Smooth gradients* at the default 8% had a threshold of 0.48 level: no 8-bit neighbour passed it, so the pass ran
+  every frame and changed nothing (0 pixels on a stepped gradient, offline).
+
+**Outcome:** depth-`ALWAYS` draws without depth write are left alone; the grain stays within half a step of black and
+white and tapers to uniform above mid-grey; additive and multiply blends get half of it with a decorrelated phase; the
+pattern is R2 (lower 2x2 and 4x4 block variance than IGN); the AO composite uses R2 with swapped coefficients and the
+Picture dither IGN, triangular, only where the pass changed the pixel; the deband threshold is `1 + 6.25 x setting`
+levels with bilinear taps. Shader acceptance is unchanged (ps_3_0 4907 / 4907, ps_2_0 2996 / 3104). Subtracting half a
+pixel from the ps_2_x position was rejected: the two grains already match pixel for pixel. Not yet confirmed in game.
