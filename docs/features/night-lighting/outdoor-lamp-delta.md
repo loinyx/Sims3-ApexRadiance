@@ -24,7 +24,8 @@ its lights, story by story.
 
 ## How Apex Radiance solves it
 
-A room 0 texel is the plain sum of what each light of the list added at it, packed as `min(sum, 1)`. When room 0 of the
+A room 0 texel is the plain sum of what each light of the list added at it, packed as `min(sum, 1)` with its hue kept past 1
+([level-light-share](level-light-share.md#outdoor-texels-keep-their-hue)). When room 0 of the
 active lot is solved, Apex keeps each light's part of every texel, read from the solve's running sum after the game and
 Apex tested that light. A lamp edit then brings every story's room 0 up to date in the frame of the edit:
 

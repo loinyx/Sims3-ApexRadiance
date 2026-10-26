@@ -793,3 +793,21 @@ later, so the roofed room gathered with 2 doors, then 5.
 closes past the hold), the kitchen again gathering with 8 or 5 doors. Windows now count by the window built: a close
 marks the cut, and the grid keeps it while a window light stands in its cell (`KeepBuiltWindows`); doors, arches and
 gates keep the hold. In-game confirmation pending.
+
+### 2026-10-26: the red sconce yellow in the courtyard, red behind the glass
+
+**Context:** the same courtyard with the sconce turned red (`L39F18C40`, colour (1.7, 0, 0), story 0, room 0, listed
+twice): the kitchen behind the glass red, the courtyard ground by the lamp and the lattice wall carrying it yellow and
+cream (F7 13-00-02, pixel 2161, 1026: screen (0.557, 0.498, 0.427)).
+
+**Finding:** the pixel is the terrain (draw #17) with the lot pass (#29, Apex's). Its lot map (Real-time outdoor lamps'
+copy) held (1, 1, 0.41) by the lamp; the shade is 1 in the courtyard (0.31 behind the decorative wall, which blocks the
+lamp correctly), the ground atlas holds the lamp's red, and the alpha E is at most 3/255, so the indoor light on the ground
+(`ex`) is at most 1.3 % of the map and luzInternaSomaNoChao on or off gives the same pixel. The red lamp adds no green: the
+yellow is light baked in room 0's sum around the glass doors and windows, at least 1 in green, and the lamp's red, many
+times 1 in red, was cut at 1 channel by channel, so the weaker yellow decided the colour.
+
+**Outcome:** outdoor texels keep their hue past 1 (`OutdoorDeltaModel::KeepHue`, the solve, the deltas and the compose
+shader alike); the same rule the per-pixel object lamps took in 2.15.2. Offline: `tools/outdoor_delta_test`,
+`tools/rt_lamps_test`. Unverified in game; which baked light is yellow (the windows' type 7 lights or another) is not
+read.

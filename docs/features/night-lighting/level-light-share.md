@@ -897,6 +897,27 @@ darkened by M.
   alpha; `LampRec::exit`, `ExitLampOf`).
 - Developer status: *Indoor light on the ground* (ground texels tapped, lit through openings).
 
+### Outdoor texels keep their hue
+
+The game packs a room texel as `min(sum, 1)` channel by channel. On an outdoor texel (room 0, a roofless room) where a
+strong lamp meets a weaker light of another colour, the strong lamp's channel stopped at 1 while the weaker light filled the
+others. F7 of a red sconce (intensity 1.7, listed twice) on a courtyard's decorative wall, beside a kitchen's glass doors and
+windows: the lot map by the lamp held (1, 1, 0.41), the courtyard ground and the lattice wall showed the yellow light
+baked in room 0's map there (not a GPU lamp's: the red lamp adds no green) instead of red, while the kitchen behind the glass (the lamp at the outdoor cut, *Outdoor light through
+openings*) was red. The lot pass, its shade and the indoor light on the ground were not the cause: the shade there is 1,
+the ground atlas holds the lamp's red, and the texels' alpha E is at most 3/255 (the exit share `ex` at most 1.3 % of the
+map).
+
+`SolvePointBatch` now divides an outdoor texel's sum by its largest channel when that passes 1 (`OutdoorDeltaModel::KeepHue`)
+before the game's pack, after the kept parts are noted (Quick outdoor lamp edits keep the whole sum). The deltas
+(`PackInput`) and Real-time outdoor lamps' compose shader pack the same way, so the three paths still give the same texel. A
+sum within 1 is packed as before, bit for bit. In the courtyard's case (red 5.8 + yellow (1, 1, 0.41)) the texel is
+(255, 38, 15) instead of (255, 255, 105). A single lamp past 1 keeps its colour too: the hottest spot of a warm lamp on an
+outside wall is its warm colour at full brightness instead of near white (on the grass the ground atlas keeps the white
+spot through the lot pass's max). Indoor rooms keep the game's pack. Checked offline: `tools/outdoor_delta_test` (the
+pack within 1 bit for bit, ratios past 1, the courtyard's case) and `tools/rt_lamps_test` (the compose shader against the
+pack on texels past 1). Unverified in game.
+
 ### Penumbra
 
 Every edge the walls and slabs give lamp light is soft by the lamp's size (2.13.0,

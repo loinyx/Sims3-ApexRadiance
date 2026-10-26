@@ -34,7 +34,8 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    bulbs, spots, shaded lamps and lot street lamps (types 3, 4, 5 and 11) listed in room 0 of their own lot.
 2. **The maps.** Each story's own room-0 maps of the class on screen (wall atlas, floor map; ceiling and object maps when
    they hold room-0 texels) get a copy in video memory. Every room-0 texel of the kept solve is relit over the game's map:
-   `pack(min(base + Σ mult × fade(law × shadow), 1))`, with the floor mask's alpha and the class-2 wall blur. The law,
+   `pack(base + Σ mult × fade(law × shadow))`, packed as the solve packs it (its hue kept past 1,
+   [level-light-share](level-light-share.md#outdoor-texels-keep-their-hue)), with the floor mask's alpha and the class-2 wall blur. The law,
    cones and realistic reach are those of the room bake (`rt_lamp_model.h`, `lamp_reach.h`): the game's own cones for
    shaded lamps, the game's hard light cut and no map dither.
 3. **Shadows.** The lot's occluders are read from its story grids on the light tree thread
