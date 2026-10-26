@@ -2,8 +2,8 @@
 // The game draws its 3D scene straight into an 8-bit back buffer, so a smooth light gradient (a lamp's pool of light on
 // a wall, the fall-off of a room light map) is rounded to 256 steps per channel, and in the dark range each step is a
 // visible ring. This adds a fixed, invisible grain to every scene pixel shader's colour before the rounding (triangular
-// noise of +-1 step at the default Strength, from interleaved gradient noise of the pixel position), so the rings become
-// a fine grain. The alpha (the bloom mask) is never touched.
+// noise of +-1 step at the default Strength, from the R2 pattern of the pixel position, within half a step of black and
+// white), so the rings become a fine grain. The alpha (the bloom mask) is never touched.
 //
 // How:
 //  - ps_3_0 (ShaderPatches::AddDither): the pixel position is vPos. ps_2_0 / ps_2_x (AddDither2, 30/09 evening: in game
@@ -573,11 +573,13 @@ APEX_REGISTER_FEATURE(SceneDitherPatch, {.displayName = "Banding Fix",
                                          .experimental = false,
                                          .enabledByDefault = true,
                                          .supportedVersions = VERSION_ALL,
-                                         .technicalDetails = {"A dithered copy of every pixel shader (triangular noise from interleaved gradient noise of the pixel "
-                                                              "position, +-1/255 at Strength 100% on RGB; alpha untouched), made at the shader's first draw in the 3D scene.",
+                                         .technicalDetails = {"A dithered copy of every pixel shader (triangular noise from the R2 pattern of the pixel position, "
+                                                              "+-1/255 at Strength 100% on RGB, within half a step of black and white; alpha untouched), made at the "
+                                                              "shader's first draw in the 3D scene.",
                                                               "ps_2_x copies take the pixel position from a texture coordinate that a copy of the vertex shader fills "
                                                               "with the clip position.",
-                                                              "Bound only for draws into the back buffer with the depth test on (the 3D scene), last in the draw chain; "
+                                                              "Bound only for draws into the back buffer that use the depth test (the 3D scene; not ZFUNC ALWAYS without "
+                                                              "depth write), last in the draw chain, at half strength for additive and multiply blends; "
                                                               "the amount constant's previous value is put back after the draw."}})
 
 namespace SceneBinder {
