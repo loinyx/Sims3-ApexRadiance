@@ -5055,6 +5055,9 @@ void DrainWarmStories() {
 struct GridWhy {
     bool wall = false, opening = false, over = false, roof = false;
     bool shortTop = false;
+    // the ray's last crossing that passed through an opening or over a wall's top: its share of the way from the lamp (-1 =
+    // none; GridPassImpl, the largest of every grid asked), the opening the light came in by (OpeningLampBalance::OpeningGain)
+    float tOpen = -1.0f;
 };
 // The top of edge e at u (0..1 from its low end)
 inline float GridEdgeTop(const GridEdge& e, float u) {
@@ -5296,13 +5299,22 @@ float GridPassImpl(const StoryGrid& g, const float* A, const float* B, GridWhy& 
     float tz = tdz < kInf ? (sz > 0 ? static_cast<float>(iz + 1) - A[2] : A[2] - static_cast<float>(iz)) * tdz : kInf;
     float pass = 1.0f, t0 = 0.0f;
     const bool hardTops = g_hardWallTops.load(std::memory_order_relaxed);
+    // a crossing's reasons into why, and its place when it passed through an opening or over a wall's top (tOpen)
+    const auto note = [&why](const GridWhy& w, float t) {
+        why.wall |= w.wall, why.opening |= w.opening, why.over |= w.over, why.shortTop |= w.shortTop;
+        if ((w.opening || w.over) && t > why.tOpen) why.tOpen = t;
+    };
     for (int guard = 0; guard < 1024 && pass > 0.0f; guard++) {
         t_gridCapY = 1e30f;
         if (ix >= 0 && iz >= 0 && ix < g.w && iz < g.h) {
             const uint8_t f = g.flags[static_cast<size_t>(iz) * g.w + ix];
             // the ray leaves this tile next: its ceiling caps the walls it crosses there (hard_wall_tops)
             if (hardTops && (f & 0xF0)) t_gridCapY = g.ceil[static_cast<size_t>(iz) * g.w + ix];
-            if (f & 0x03) pass *= GridDiagPass(g, ix, iz, A, dx, dy, dz, tMin, tMax, why, floor, rim);
+            if (f & 0x03) { // (a diagonal crossed inside the tile: placed at the tile's entry)
+                GridWhy w{};
+                pass *= GridDiagPass(g, ix, iz, A, dx, dy, dz, tMin, tMax, w, floor, rim);
+                note(w, std::max(t0, tMin));
+            }
             // (2.15.3) t1 = std::min({tx, tz, 1.0f}) as before (the first of the smallest, NaN included), only where it is read: the
             // initializer-list min was a CRT call on every step
             if (f & 0xF0) {
@@ -5330,18 +5342,25 @@ float GridPassImpl(const StoryGrid& g, const float* A, const float* B, GridWhy& 
                                  GridLinePass(g, false, Z, ix + sx, static_cast<float>(X - ix - sx), y, w1, floor, rz, dir);
                 const float r2 = GridLinePass(g, false, Z, ix, static_cast<float>(X - ix), y, w2, floor, rz, dir) *
                                  GridLinePass(g, true, X, iz + sz, static_cast<float>(Z - iz - sz), y, w2, floor, rx, dir);
-                const GridWhy& w = r1 >= r2 ? w1 : w2;
+                GridWhy w = r1 >= r2 ? w1 : w2;
                 pass *= std::max(r1, r2);
-                why.wall |= w.wall, why.opening |= w.opening, why.over |= w.over;
+                w.shortTop = false; // (a corner's reasons as before: wall, opening, over)
+                note(w, t);
             }
             ix += sx, iz += sz, tx += tdx, tz += tdz;
         } else if (tx < tz) {
-            if (inRange && !LineEmpty(true, sx > 0 ? ix + 1 : ix, iz))
-                pass *= GridLinePass(g, true, sx > 0 ? ix + 1 : ix, iz, A[2] + t * dz - static_cast<float>(iz), y, why, floor, rim.X().At(rim.Half(t)), dir);
+            if (inRange && !LineEmpty(true, sx > 0 ? ix + 1 : ix, iz)) {
+                GridWhy w{};
+                pass *= GridLinePass(g, true, sx > 0 ? ix + 1 : ix, iz, A[2] + t * dz - static_cast<float>(iz), y, w, floor, rim.X().At(rim.Half(t)), dir);
+                note(w, t);
+            }
             ix += sx, tx += tdx;
         } else {
-            if (inRange && !LineEmpty(false, sz > 0 ? iz + 1 : iz, ix))
-                pass *= GridLinePass(g, false, sz > 0 ? iz + 1 : iz, ix, A[0] + t * dx - static_cast<float>(ix), y, why, floor, rim.Z().At(rim.Half(t)), dir);
+            if (inRange && !LineEmpty(false, sz > 0 ? iz + 1 : iz, ix)) {
+                GridWhy w{};
+                pass *= GridLinePass(g, false, sz > 0 ? iz + 1 : iz, ix, A[0] + t * dx - static_cast<float>(ix), y, w, floor, rim.Z().At(rim.Half(t)), dir);
+                note(w, t);
+            }
             iz += sz, tz += tdz;
         }
         t0 = t;
@@ -12403,12 +12422,14 @@ void IndoorShadow(const RoomInfo& info, void* light, const float* sample, float*
 // stopped by a wall, Roof by a roof, Passed nothing in the way.
 std::atomic<long> g_yardTests{0}, g_yardBlocked{0}, g_yardRoofed{0}, g_yardOpening{0}, g_yardOver{0}, g_yardBypass{0};
 bool FindSame(const RoomInfo& info, uintptr_t light) { return std::binary_search(info.same.begin(), info.same.end(), light); }
-void YardShadow(const RoomInfo& info, void* light, const float* sample, float* colour) {
+// tOpen (when given): the ray's last opening (GridWhy::tOpen)
+void YardShadow(const RoomInfo& info, void* light, const float* sample, float* colour, float* tOpen = nullptr) {
     if (!(colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f)) return;
     const float before[3] = {colour[0], colour[1], colour[2]};
     alignas(16) float pos[4] = {};
     GridWhy why{};
     const float pass = info.openings ? OpenLampPass(info, light, sample, pos, why) : YardPass(info.grid[0].get(), info.grid[1].get(), light, sample, pos, why);
+    if (tOpen) *tOpen = why.tOpen;
     ApexUtil::CountOne(g_yardTests);
     if (info.openings) { // a roofed room's lamp of room 0 (outdoor light through openings)
         ApexUtil::CountOne(g_roofedTests);
@@ -12488,6 +12509,7 @@ float InnerNormScale(const RoomInfo& info, void* light) {return InnerNormScaleAt
 // normalisation (opening_lamp_balance.h), set from the menu values (SetOpeningLampBalance)
 std::atomic<float> g_openGround{1.0f}, g_openWall{1.0f};
 std::atomic<long> g_openScaled{0}, g_openResponse{0}; // (points scaled; of them, saturated colours given the outdoor response)
+std::atomic<long> g_openCut{0}; // points of such a lamp held under the outdoor cut at its opening (OpeningLampBalance::EntryScale)
 float OpeningLampFactor(const float* normal, const BYTE* room) {
     OpeningLampBalance::Scales s;
     s.ground = g_openGround.load(std::memory_order_relaxed), s.wall = g_openWall.load(std::memory_order_relaxed);
@@ -12658,9 +12680,17 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
                                                          std::binary_search(g_ctx.info->lower.begin(), g_ctx.info->lower.end(), reinterpret_cast<uintptr_t>(light)))
                                   ? 2
                                   : 1;
-            if (openLamp) OpeningLampBalance::CapEntry(colour, times);
-            YardShadow(*g_ctx.info, light, sample, colour); // a lamp of a roofless room's own story (light through doors and windows), or of a roofed room's doors
+            // (the entry as the law gave it: the cut follows the opening's outer side, known once the walls are passed)
+            const float law = openLamp ? std::max({colour[0], colour[1], colour[2]}) : 0.0f;
+            float tOpen = -1.0f;
+            YardShadow(*g_ctx.info, light, sample, colour, openLamp ? &tOpen : nullptr); // a lamp of a roofless room's own story (light through doors and windows), or of a roofed room's doors
             if (openLamp && (colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f)) { // at the outdoor surface's scale
+                // the outdoor cut where the light came in, falling off from there with the law (OpeningLampBalance::EntryScale)
+                const float cut = OpeningLampBalance::EntryScale(law, times, OpeningLampBalance::OpeningGain(g_ctx.yardLamp, sample, normal, tOpen));
+                if (cut != 1.0f) {
+                    for (int i = 0; i < 4; i++) colour[i] *= cut;
+                    ApexUtil::CountOne(g_openCut);
+                }
                 const float k = OpeningLampFactor(normal, t_solveRoom);
                 for (int i = 0; i < 4; i++) colour[i] *= k;
                 // and the outdoor response to its colour: the indoor curves, on the mean, gave a saturated lamp more than a white
@@ -14242,11 +14272,11 @@ std::string OpeningsStatus() {
         " | outdoor light through openings: {} (roofed rooms taking outdoor lamps {}, {} lamps; with no door to the outside {}; lamps beyond reach {}, with no door in "
         "sight {}; points tested {}, lit {}; lamps of the story below tested {}, stopped by this story's floors {}; directional map samples tested {}, blocked {}; rooms "
         "sent for lamp edits {}, for their doors {}; rig copies published {}; grid walls ending at a floor above them {}; at the outdoor scale x{:.3f} floors, x{:.3f} walls, "
-        "points scaled {}, of them saturated colours at the outdoor response {}; cut closes held: reopened {}, lasted {})",
+        "points scaled {}, of them saturated colours at the outdoor response {}, held under the outdoor cut at their opening {}; cut closes held: reopened {}, lasted {})",
         roofed ? (RoofedOpeningsOn() ? "on" : "on, not ready") : "off", g_roofedRooms.load(), g_roofedAdded.load(), g_roofedNoDoor.load(), g_roofedFar.load(),
         g_roofedHidden.load(), g_roofedTests.load(), g_roofedLit.load(), g_roofedBelowTests.load(), g_roofedBelowSlab.load(), g_roofedBasisTests.load(),
         g_roofedBasisBlocked.load(), g_roofedSends.load(), g_roofedDoorSends.load(), g_openRigPublished.load(), g_gridCapped.load(), g_openGround.load(), g_openWall.load(),
-        g_openScaled.load(), g_openResponse.load(), g_cutReopened.load(), g_cutHeldApplied.load());
+        g_openScaled.load(), g_openResponse.load(), g_openCut.load(), g_cutReopened.load(), g_cutHeldApplied.load());
     const std::string innerText = std::format(
         " | indoor light through openings: {} (rooms taking lamps of roofed rooms {}, {} lamps, {} of them of the story above; lamps beyond reach {}, with no "
         "opening in sight {}; points tested {}, lit {}, stopped where they go down through a floor {}; left out of the floor mask {}; directional map samples tested {}, "

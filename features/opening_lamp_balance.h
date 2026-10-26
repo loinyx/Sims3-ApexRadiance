@@ -46,6 +46,40 @@ inline void CapEntry(float* colour, int times) {
         for (int i = 0; i < 3; i++) colour[i] *= cap / m;
 }
 
+// The cut at the opening. Held under 1 / times wherever it reached, an entry was flat over every texel of the room where the
+// lamp passes the outdoor cut: three light captures of a red sconce (2.2 m up, 1 m outside a kitchen's glass door) read the
+// kitchen map flat at 0.21 from 0.5 to 1.5 m in (the law, both entries, from 2.2 down to 1.2) and the courtyard map at 1
+// out to 4.6 m from the lamp (the law 3.4 at the door's outer side), so the kitchen 1 to 2 m in kept 0.77 to 0.66 of the
+// door's outer floor where the law x the glass gives it 0.37 to 0.19, its falloff gone. The outdoor surface at the
+// opening's outer side is the one the cut must follow: X, where the ray to the texel last passes an opening (t, its share of
+// the way from the lamp: GridPassImpl's tOpen), taken at the texel's height and with its normal (a floor texel: the
+// floor just outside the door). Gain: that surface's law over the texel's, from the distances and the normal (the cone
+// taken as the texel's, the law's Cmax left out: the unclipped light), at least 1. 1 when no opening is known.
+constexpr float kMaxOpeningGain = 1e4f;
+inline float OpeningGain(const float lamp[3], const float p[3], const float* normal, float t) {
+    if (!(t > 0.0f && t < 1.0f)) return 1.0f;
+    const float dx = p[0] - lamp[0], dy = p[1] - lamp[1], dz = p[2] - lamp[2];
+    const float h2 = dx * dx + dz * dz, dP2 = h2 + dy * dy, dX2 = t * t * h2 + dy * dy;
+    if (!(dX2 > 1e-6f) || !(dP2 > dX2)) return 1.0f;
+    float g = dP2 / dX2;
+    if (normal) { // n . l at the texel and at X (l towards the lamp)
+        const float nP = -(normal[0] * dx + normal[1] * dy + normal[2] * dz) / std::sqrt(dP2);
+        const float nX = -(normal[0] * t * dx + normal[1] * dy + normal[2] * t * dz) / std::sqrt(dX2);
+        if (nP > 1e-4f && nX > nP) g *= nX / nP;
+    }
+    return std::isfinite(g) ? std::min(g, kMaxOpeningGain) : 1.0f;
+}
+// The scale on one entry of largest channel m (as the law gave it, before the opening's share) with `times` entries: x = m x
+// times, the opening's outer side at R = x x gain. R <= 1: that surface is under the outdoor cut, the entry kept whole.
+// Past it the entry follows x / (1 + x (1 - 1 / R)): 1 at R (the outer side's cut, so the texel by the door matches the
+// outdoor surface there), x for a faint texel, strictly increasing in x, so the room falls off from the door as the law
+// does and never passes the cut. gain 1 is CapEntry. Hue kept (one scale on every channel).
+inline float EntryScale(float m, int times, float gain) {
+    const float x = m * static_cast<float>(std::max(times, 1)), R = x * std::max(gain, 1.0f);
+    if (!(R > 1.0f) || !std::isfinite(R)) return 1.0f;
+    return 1.0f / (1.0f + x * (1.0f - 1.0f / R));
+}
+
 // The two curves an indoor texel goes through both scale its colour by a function of the MEAN of its channels, so a
 // saturated colour (one channel lit, a mean a third of it) is compressed as if it were three times dimmer than a white
 // light of the same channel; outdoors the map is linear up to its hue-kept cut at the largest channel. The room solve's

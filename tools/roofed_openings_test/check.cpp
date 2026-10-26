@@ -3,6 +3,7 @@
 // wall, room 0 all around. Then the outside walls' copy (FillWallPatches, SegPass): the arch, a window and a half wall in a
 // copied wall, the ground shade through a door (ground_lamp_shadow.h) and an arch's curve from a mask (ShapeFromAlpha).
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -1335,6 +1336,100 @@ void OpeningColourChecks() {
     OpeningLampBalance::CapEntry(orange, 2);
     Check(std::fabs(orange[0] - 0.5f) < 1e-6f && std::fabs(orange[1] - 0.25f) < 1e-6f && std::fabs(orange[2] - 0.26f * 0.5f / 1.7f) < 1e-6f, "an orange entry keeps its hue under the cut");
 }
+// The cut at the opening (OpeningLampBalance::OpeningGain, EntryScale), replayed on three light captures of the red sconce
+// by the kitchen (the lot's floor map, lot space): the lamp 2.2 m over the floor at (25.0, 22.8), 1 m outside the kitchen's
+// glass doors (the wall x = 26, z 20 to 23), the kitchen beyond. The law of each of its two entries is half of
+// 1.7 x min(2, 12.75 n.l / d^2), the capture's courtyard map (1 up to 4.6 m from the lamp, then the law: 0.060 at 9.3 m for
+// 0.060) and its kitchen map (0.21 flat to 3.4 m, then falling with it) read so. A line from the lamp through the door: the
+// kitchen floor must fall off from the door with the law and stay under the courtyard floor at the door x the glass.
+float SconceEntry(float x, float y, float z, const float L[3]) {
+    const float dx = x - L[0], dy = y - L[1], dz = z - L[2], d2 = dx * dx + dy * dy + dz * dz;
+    const float ndl = std::max(0.0f, -dy) / std::sqrt(d2);
+    return 0.5f * 1.7f * std::min(2.0f, 12.75f * ndl / d2);
+}
+// One kitchen floor point through the walls of b, red; gainOn false: the cut held at 1 / entries wherever it reached (CapEntry)
+float KitchenFloor(const StoryGrid& g, const float L[3], float x, float z, bool gainOn, const OpeningLampBalance::Scales& s, float albedo, float* tOpen = nullptr) {
+    const float P[3] = {x, 0.0f, z}, up[3] = {0.0f, 1.0f, 0.0f};
+    GridWhy why{};
+    const float pass = GridPassImpl(g, L, P, why);
+    if (tOpen) *tOpen = why.tOpen;
+    const float e = SconceEntry(x, 0.0f, z, L);
+    const float gain = gainOn ? OpeningLampBalance::OpeningGain(L, P, up, why.tOpen) : 1.0f;
+    float c[3] = {e * OpeningLampBalance::EntryScale(e, 2, gain) * pass, 0.0f, 0.0f};
+    const float k = OpeningLampBalance::Factor(s, up, 1.0f, false);
+    for (float& v : c) v *= k;
+    const float q = OpeningLampBalance::MaxResponse(c, 2.0f);
+    float X[3] = {2.0f * c[0] * q, 0.0f, 0.0f}, t[3], out[3];
+    GpuLampLaw::Tone(X, t);
+    for (float& v : t) v = std::min(v, 1.0f);
+    FloorDrawRgb(t, albedo, out);
+    return out[0];
+}
+void OpeningFalloffChecks() {
+    for (int i = 0; i <= 400; i++) { // the cut at gain 1 is the old one
+        const float m = 0.01f * static_cast<float>(i);
+        float c[3] = {m, 0.3f * m, 0.0f};
+        OpeningLampBalance::CapEntry(c, 2);
+        if (std::fabs(m * OpeningLampBalance::EntryScale(m, 2, 1.0f) - c[0]) > 1e-5f) {
+            Check(false, "EntryScale at gain 1 is CapEntry");
+            break;
+        }
+    }
+    Check(OpeningLampBalance::EntryScale(0.3f, 2, 1.5f) == 1.0f, "an opening under the outdoor cut keeps the entry whole");
+    Check(OpeningLampBalance::OpeningGain(std::array<float, 3>{0, 2, 0}.data(), std::array<float, 3>{3, 0, 0}.data(), nullptr, -1.0f) == 1.0f,
+          "no opening known: gain 1");
+    Builder b(40, 40);
+    b.Room(26, 16, 34, 28, 48, true);
+    for (int z = 16; z < 28; z++) {
+        const int32_t e = b.Wall(false, 26, z);
+        b.Wall(false, 34, z);
+        if (z >= 20 && z < 23) {
+            b.Open(e, kCutDoor, 0.0f, 2.1f, 0.0f, 1.0f);
+            b.g.openings.back().glass = WallOpenings::kWindowPass; // (a door open only for its glass)
+        }
+    }
+    for (int x = 26; x < 34; x++) b.Wall(true, x, 16), b.Wall(true, x, 28);
+    const float L[3] = {25.0f, 2.2f, 22.8f};
+    float t = 0.0f;
+    KitchenFloor(b.g, L, 28.0f, 21.98f, true, {}, 0.8f, &t);
+    Check(std::fabs(t - 1.0f / 3.0f) < 0.01f, "the walls' walk places the glass door a third of the way to a point 2 m in");
+    OpeningLampBalance::Scales s;
+    s.ground = 0.567f; // the player's Ground 75% x Lot lamps 75.6%
+    const float albedo = 0.8f, z = 21.98f;
+    // the courtyard floor at the door's outer side, both entries cut at 1 (the outdoor map)
+    const float door = albedo * s.ground * std::min(1.0f, 2.0f * SconceEntry(25.9f, 0.0f, z, L));
+    float prevOld = 1e9f, prevNew = 1e9f;
+    int flatOld = 0, notFalling = 0, overDoor = 0, overOld = 0;
+    std::string profile;
+    for (int i = 0; i <= 20; i++) {
+        const float x = 26.25f + 0.25f * static_cast<float>(i);
+        const float was = KitchenFloor(b.g, L, x, z, false, s, albedo), now = KitchenFloor(b.g, L, x, z, true, s, albedo);
+        if (i > 0 && was > prevOld - 0.002f) ++flatOld;
+        if (i > 0 && now > 0.005f && now > prevNew - 1e-4f) ++notFalling;
+        if (now > door * WallOpenings::kWindowPass + 1e-4f) ++overDoor;
+        if (now > was + 1e-4f) ++overOld;
+        prevOld = was, prevNew = now;
+        if (i % 4 == 0) profile += std::format(" {:.2f} m: {:.3f} -> {:.3f} (law {:.2f});", x - 26.0f, was, now, 2.0f * SconceEntry(x, 0.0f, z, L));
+    }
+    std::printf("Red sconce through the kitchen's glass door: courtyard floor at the door %.3f (x glass %.3f); kitchen floor before -> now, metres in:%s steps flat before %d, "
+                "not falling now %d\n",
+                door, door * WallOpenings::kWindowPass, profile.c_str(), flatOld, notFalling);
+    Check(flatOld >= 3, "before: the kitchen floor flat from the door (the cut held wherever it reached)");
+    Check(notFalling == 0, "now: the kitchen floor falls off at every step from the door in");
+    Check(overDoor == 0, "now: never over the courtyard floor at the door x the glass");
+    Check(overOld == 0, "now: never brighter than before");
+    // a lamp far enough that the door's outer side is under the outdoor cut: nothing changes
+    const float far[3] = {19.0f, 2.2f, 22.8f};
+    int moved = 0;
+    for (int i = 0; i <= 20; i++) {
+        const float x = 26.25f + 0.25f * static_cast<float>(i);
+        if (2.0f * SconceEntry(25.9f, 0.0f, z, far) < 1.0f &&
+            std::fabs(KitchenFloor(b.g, far, x, z, false, s, albedo) - KitchenFloor(b.g, far, x, z, true, s, albedo)) > 1e-6f)
+            ++moved;
+    }
+    Check(2.0f * SconceEntry(25.9f, 0.0f, z, far) < 1.0f && moved == 0, "a lamp under the outdoor cut at the door: the room unchanged");
+}
+
 // Cut closes held (cut_close_hold.h), replayed on the log of three camera turns: windows closed at 39.083 and reopened at
 // 39.751, closed at 46.352 and reopened at 46.529; a window really removed closes once.
 void CutHoldChecks() {
@@ -1601,6 +1696,7 @@ int main() {
     OpeningShapeChecks();
     BalanceChecks();
     OpeningColourChecks();
+    OpeningFalloffChecks();
     CutHoldChecks();
     std::printf("Roofed openings: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
