@@ -14,9 +14,10 @@
 //    once, shadow, reflection, UI and bloom ones too, and DXVK keeps every shader for the whole session; the game's memory
 //    grew ~0.3 GB more in 30 min with Apex). At creation (last in the chain) only the old copies of a reused address go.
 //  - At each draw (last in the chain, after every observer): when render target 0 is the back buffer and the depth
-//    test is on (the 3D scene; the UI draws with it off and reads the back buffer back many times per frame, where a
-//    dither would feed on itself), the copies are bound for the draw with the amount constant, then the game's shaders
-//    and the constant's previous value are put back.
+//    test is on and used (the 3D scene; the UI draws with it off, or on with ZFUNC ALWAYS and no depth write, and reads
+//    the back buffer back many times per frame, where a dither would feed on itself), the copies are bound for the draw
+//    with the amount constant, then the game's shaders and the constant's previous value are put back. Additive and
+//    multiply blends get half the grain with a decorrelated phase (they add to a target that already has its grain).
 //  - The mouse-pick pass draws into its own 16x16 target, shadows and reflections into their own targets: untouched.
 // Offline checks (30/09, Shaders_Win32.precomp): ps_3_0 4907 / 4907 and ps_2_0 2996 / 3104 patched, vertex shaders
 // vs_2_0 4035 / 4338, every copy accepted by native D3D9; a grey of 20.40 / 100.70 levels comes out as 20.355 / 100.657
@@ -97,10 +98,15 @@ IDirect3DSurface9* g_rt0 = nullptr;
 
 // statistics (Developer page, dev log)
 std::atomic<unsigned> g_made{0}, g_madeVs{0}, g_refused[7] = {};
+// blend classes of the dithered draws (Developer page): the grain is halved for additive and multiply blends (BlendOf)
+enum Blend { kOpaque, kAlpha, kAdditive, kMultiply, kOtherBlend, kBlends };
 struct FrameCount {
     unsigned dithered3 = 0, dithered2 = 0; // 3D scene draws with the grain: ps_3_0, ps_2_x
     unsigned ps2NoPair = 0;                // ps_2_x with a copy whose vertex shader could not carry the position
     unsigned ps2Refused = 0, ps3Refused = 0, other = 0;
+    unsigned noDepth = 0;                  // depth on with ZFUNC ALWAYS and no depth write: the UI's passes, left alone
+    unsigned noShader = 0;                 // fixed-function scene draws (no pixel shader): no grain
+    unsigned blend[kBlends] = {};          // dithered draws by blend class
     unsigned jittered = 0, jitterRefused = 0, jitterNoShader = 0; // temporal AA: scene draws moved / whose vertex shader was refused / fixed-function
 };
 FrameCount g_frame, g_last;
@@ -294,17 +300,40 @@ IDirect3DVertexShader9* VsCopyOf(IDirect3DDevice9* dev, IDirect3DVertexShader9* 
     return copy;
 }
 
+// The blend class of a draw, read only for draws that get the grain (no SetRenderState hook follows the blend states)
+Blend BlendOf(IDirect3DDevice9* dev) {
+    DWORD on = FALSE, src = D3DBLEND_ONE, dst = D3DBLEND_ZERO, op = D3DBLENDOP_ADD;
+    dev->GetRenderState(D3DRS_ALPHABLENDENABLE, &on);
+    if (!on) return kOpaque;
+    dev->GetRenderState(D3DRS_SRCBLEND, &src);
+    dev->GetRenderState(D3DRS_DESTBLEND, &dst);
+    dev->GetRenderState(D3DRS_BLENDOP, &op);
+    if (op != D3DBLENDOP_ADD) return kOtherBlend;
+    if (src == D3DBLEND_SRCALPHA && dst == D3DBLEND_INVSRCALPHA) return kAlpha;
+    if (src == D3DBLEND_DESTCOLOR || src == D3DBLEND_ZERO) return kMultiply; // decals: DESTCOLOR / SRCCOLOR, DESTCOLOR / ONE
+    if (dst == D3DBLEND_ONE) return kAdditive;
+    return kOtherBlend;
+}
+
 template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext& ctx, DrawFn draw) {
     IDirect3DDevice9* dev = ctx.device;
     const bool dither = g_on.load(std::memory_order_relaxed), jitter = g_jitterOn;
     if ((!dither && !jitter) || !g_backBuffer) return D3D9Hooks::HookAction::Continue;
     if (!g_rt0 || g_rt0 != g_backBuffer) return D3D9Hooks::HookAction::Continue;
     if (ctx.ZEnable() == D3DZB_FALSE) return D3D9Hooks::HookAction::Continue; // UI and 2D passes
+    // Depth on with ZFUNC ALWAYS and no depth write uses no depth (PostScene's rule): the UI's ~137 glass passes and
+    // back-buffer copies drawn back (a light capture shows one under a panel: ps_2_0 reading a 2048x1024 copy). The grain
+    // fed on itself there; the jitter already skipped them
+    if (!ctx.ZWriteEnable() && ctx.ZFunc() == D3DCMP_ALWAYS) {
+        g_frame.noDepth++;
+        return D3D9Hooks::HookAction::Continue;
+    }
     // the Banding Fix's pixel copy
     IDirect3DPixelShader9* ps = nullptr;
     Copy copy;
     if (dither) {
         ps = D3D9Hooks::BoundPixelShader(dev); // (followed through Set*Shader; the device keeps it alive)
+        if (!ps) g_frame.noShader++;
         if (ps) {
             copy = CopyOf(dev, ps);
             if (!copy.ps) {
@@ -347,15 +376,21 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
         return D3D9Hooks::HookAction::Continue;
     }
     float before[4] = {};
+    Blend blend = kOpaque;
     if (useDither) {
+        blend = BlendOf(dev);
+        // Additive and multiply blends add their grain on top of the grain already in the target: half of it, with a phase
+        // whose pattern does not correlate with the full one (R2 shifted by 0.19: correlation 0.006, offline)
+        const bool half = blend == kAdditive || blend == kMultiply || blend == kOtherBlend;
         // (2.15.3) the viewport only for ps_2_x copies: the ps_3_0 grain reads the amount's .x and .w alone (AddDither), the
         // ps_2_x one rebuilds the pixel from .y / .z (AddDither2)
         D3DVIEWPORT9 vp{};
         if (k >= 0) dev->GetViewport(&vp);
         dev->GetPixelShaderConstantF(static_cast<UINT>(copy.amountReg), before, 1);
         // Developer "Show covered surfaces": a coarse grain only where the fix applies
-        const float amount[4] = {(g_showCovered ? kShowCoveredSteps : SceneDither::Strength()) / 255.0f, 0.5f * static_cast<float>(vp.Width),
-                                 0.5f * static_cast<float>(vp.Height), SceneDither::GrainPhase()};
+        const float steps = g_showCovered ? kShowCoveredSteps : SceneDither::Strength() * (half ? 0.5f : 1.0f);
+        const float amount[4] = {steps / 255.0f, 0.5f * static_cast<float>(vp.Width), 0.5f * static_cast<float>(vp.Height),
+                                 SceneDither::GrainPhase() + (half ? 0.19f : 0.0f)};
         D3D9Hooks::CallOriginalSetPixelShaderConstantF(dev, static_cast<UINT>(copy.amountReg), amount, 1);
         D3D9Hooks::CallOriginalSetPixelShader(dev, copy.ps);
     }
@@ -370,6 +405,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
         D3D9Hooks::CallOriginalSetPixelShader(dev, ps);
         D3D9Hooks::CallOriginalSetPixelShaderConstantF(dev, static_cast<UINT>(copy.amountReg), before, 1); // the game may cache it
         (k >= 0 ? g_frame.dithered2 : g_frame.dithered3)++;
+        g_frame.blend[blend]++;
     }
     if (useJitter) g_frame.jittered++;
     return D3D9Hooks::HookAction::Skip;
@@ -520,6 +556,10 @@ class SceneDitherPatch : public ApexPatch {
                             "%u ps_3_0 refused, %u other",
                             dithered, total ? 100.0 * dithered / total : 0.0, g_last.dithered3, g_last.dithered2, g_last.ps2NoPair, g_last.ps2Refused,
                             g_last.ps3Refused, g_last.other);
+        ImGui::TextDisabled("Dithered by blend: opaque %u, alpha %u, additive %u (half), multiply %u (half), other %u (half)  |  left alone: "
+                            "%u depth ALWAYS without depth write (UI), %u without a pixel shader",
+                            g_last.blend[kOpaque], g_last.blend[kAlpha], g_last.blend[kAdditive], g_last.blend[kMultiply], g_last.blend[kOtherBlend],
+                            g_last.noDepth, g_last.noShader);
             ApexUi::EndAdvanced();
         }
     }
