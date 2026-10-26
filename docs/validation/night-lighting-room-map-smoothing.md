@@ -16,6 +16,7 @@ or shimmering, and fade a lamp at the light cut without lighting anything the ga
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-26 | `ae5a3aa` (the pixel's side of a wall) | `tools/room_map_smooth_check -Precomp` (the game's Shaders_Win32.precomp) | 1094 checks, 0 failures: the 186 copies and the 120 arch copies created natively; a hall's last half texel beside a lit courtyard +124 levels of green with the 2 x 2 bound, +2 with the pixel's side; the courtyard's own pixels, light sent out and bright room texels unchanged; the GPU within 1 LSB of the CPU reference. Not checked in game | native D3D9 |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/room_map_smooth_check -Precomp` | 1084 checks passed; includes the 120 floor and wall copies with the arch variant (6 segments) created natively and a pixel within 1 LSB of the CPU formula | native D3D9 |
 | 2026-10-14 | `release/2.13.0` (`2aefeb7`) | `tools/room_map_smooth_check -Precomp` (the game's Shaders_Win32.precomp) | 957 checks, 0 failures; pixels within 1 LSB of the CPU B-spline | native D3D9 |
 | 2026-10-14 | feature/v2.12.3-rt | `tools/room_map_smooth_check` | 957 checks, 0 failures | native D3D9 |

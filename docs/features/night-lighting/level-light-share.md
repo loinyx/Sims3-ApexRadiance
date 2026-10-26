@@ -826,6 +826,28 @@ floor mask.
   0.122, 0.081, falling at every step, never over the courtyard at the door x the glass (0.347) nor over before; a lamp
   under the outdoor cut at the door leaves the room unchanged. The status *outdoor light through openings* counts the
   points held. Unverified in game; the outdoor clip itself (an 8-bit map at 1) is kept.
+- **The cut of the outdoor texel** (`OpeningOutdoorTotal`, `EntryScale`'s total): room 0's texel divides the sum of all its
+  lights by its largest channel past 1, so where another light reaches the opening's outer side a lamp shows there at its
+  own part of that sum only; the entering lamp was cut as if it lit that texel alone. A light capture and a lighting
+  snapshot of a green sconce (1.7, (0, 1, 0), 2.9 m out from a hall's glass door, 2.2 m up) beside a white sconce (1, (1,
+  0.98, 0.85)) on the door's own wall, followed on screen draw by draw: the hall floor (PS `285BBA18`, the room map's
+  B-spline, `x tanh(1.456 m) / m`, albedo 0.65 green) and the courtyard ground (the lot pass: `col x 0.5` blended
+  `2 x dest x src`, so `dest x col` with no factor left over, the map x 0.75 x 0.756) are then added to by the same bloom
+  (about 0.03) and scaled by the same full-screen passes (about x1.5 on both); no surface is doubled. The map just
+  outside the door read (0.64 to 0.90, 1, 0.46 to 0.68): the white flat on the wall lights it, the green is 0.12 to 0.37
+  of it. The white does not reach the hall; the green, 0.64 there alone (under the cut), entered whole: the hall floor at
+  the door showed the green at 0.32 to 0.37 on screen against the courtyard's 0.29 to 0.44 green of which the green
+  sconce's part is a quarter. Per point, X (the outdoor floor 3 cm out from the opening, at the texel's height and with
+  its normal) gets room 0's list evaluated by the game's light functions (window lights left out, the outdoor lamps at the
+  solve's daytime factor) and passed through the story's walls (`YardPass`), kept per batch and X (0.125 m); the total T
+  is the largest channel of the lamp's colour at X (R, as before) plus the other lights there, and the entry takes
+  `1 / (1 + (T - 1) / gain)`: at the door its part of the courtyard's texel, the law for a faint texel, strictly falling
+  between; with no other light (T = R) the previous cut exactly. Two lamps each at 1.2 at a door gave the room 2 at the
+  door against the courtyard's 1; now 1. Offline (`tools/roofed_openings_test`, `OpeningShareChecks`): the green's
+  replay 0.640 before, 0.207 now (its part of the courtyard's texel: 0.207), falling at every step in, never brighter
+  than before. The status *outdoor light through openings* counts the points held at the texel's cut and the sums made.
+  Unverified in game. The outdoor map's own clip stays: within its lamp's reach the courtyard is flat at the cut, so the
+  ground right under a strong lamp shows no more than the ground at the door.
 - **Walls ending at a floor above** (2.13.0, `CapLowerWalls`): a story's grid caps a full straight wall with a placed
   floor of the story above beside it, over its foot and lower than a story, at that floor (the rule of `PassesOverLowerWall`
   and `CapFoundationSides`). A foundation's sides are walls of story 0 drawn only up to the floor on the foundation; at 3 m

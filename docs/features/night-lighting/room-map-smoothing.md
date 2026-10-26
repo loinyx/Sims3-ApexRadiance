@@ -39,6 +39,13 @@ texels per metre by lighting class (twice that with *Light detail* High). Three 
    beyond a wall with no texel row on the wall line, it took that room's light. In game a hall beside a glass door showed a
    warm band along the wall, the courtyard's light: an F7 of the hall floor 0.15 m from the wall read 0.14 of a courtyard
    texel at (1, 0.55, 0.25) beside hall texels at 0.03 (on screen (0.26, 0.15, 0.07) against 0.05 a little further in).
+   Within half a texel of the wall the 2 x 2 still holds the texel beyond it: an F7 of a hall beside a courtyard lit green
+   (texels at 1 beside the hall's at 0.01 to 0.05) showed a green line along the wall's foot, the B-spline taking 1/6 of
+   the courtyard's texel at the hall texel's centre and about a quarter at the wall's face. The solve marks the sides: a
+   roofed room's texel holds its ambient weight in alpha (0.44 to 0.84 there), room 0's 0 (or the little light rooms send
+   out of their openings). When the pixel's own texel (the one it lies in) has alpha 0.125 or more, the bound leaves out
+   the texels of alpha under 4/255. A pixel of room 0, a bright room texel with little ambient weight or a neighbour
+   holding light sent out keep the bound as before.
 2. **Dither.** Before the game packs a texel, Apex adds up to half an 8-bit level of interleaved gradient noise taken from
    the texel's position: the mean light stays, the rings become a fine grain the B-spline smooths out. The same texel
    always gets the same offset, so a room lit again does not shimmer.
@@ -69,7 +76,7 @@ texels per metre by lighting class (twice that with *Light detail* High). Three 
 
 ## Limitations
 
-- Within half a texel of a room's edge the read still blends the texel beyond it, as the game's bilinear read does.
+- Within half a texel of a room's edge the read still blends the texel beyond it where the bound does not tell the sides apart (room 0 beside room 0, two roofed rooms, light sent out of an opening), as the game's bilinear read does.
 - The bound trims the B-spline's tail on the dark side of a shadow edge: by at most 6 levels at the softest penumbra
   (1.5 texels), nothing on a lamp's falloff (`tools/room_map_smooth_check`, `BoundChecks`).
 - A room solved on the render thread (the room queue solving at once) keeps the game's hard cut.
@@ -106,7 +113,7 @@ unverified in game.
 with the wall mask does not fit the registers, the combined variant without the mask is used, never one that drops the
 room map's smoothing.
 
-Cost: the reads add about 70 ALU and 7 texture instructions per room-lit pixel (the B-spline and its bound); the dither one call per texel solved; the
+Cost: the reads add about 90 ALU and 7 texture instructions per room-lit pixel (the B-spline and its bound with the sides); the dither one call per texel solved; the
 soft cut a list walk per solved point and a multiply per lamp kept.
 
 ## Rejected approaches
