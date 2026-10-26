@@ -37,4 +37,15 @@ void SetDepthSubstitution(DepthSubstitute substitute, DepthReport report);
 HRESULT RawSetDepthStencilSurface(IDirect3DDevice9* device, IDirect3DSurface9* surface);
 HRESULT RawGetDepthStencilSurface(IDirect3DDevice9* device, IDirect3DSurface9** surface);
 
+// Render-target substitution (single owner, the High-precision scene, scene_target.cpp). Its detours (GetRenderTargetData,
+// ColorFill, GetRenderTarget) are installed by EnsureTargetHooks only, when that feature first turns on:
+//  - access: called before StretchRect, ColorFill and GetRenderTargetData with the surfaces they read or write (a copy of
+//    the back buffer must find the scene in it)
+//  - report: given the surface actually bound at an index, return the surface GetRenderTarget should give the caller
+using SurfaceAccess = void (*)(IDirect3DDevice9* device, IDirect3DSurface9* a, IDirect3DSurface9* b);
+using TargetReport = IDirect3DSurface9* (*)(IDirect3DSurface9* actual);
+bool EnsureTargetHooks(IDirect3DDevice9* device);
+void SetTargetSubstitution(SurfaceAccess access, TargetReport report);
+HRESULT RawGetRenderTarget(IDirect3DDevice9* device, DWORD index, IDirect3DSurface9** surface);
+
 } // namespace ExtraHooks

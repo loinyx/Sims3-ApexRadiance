@@ -31,6 +31,7 @@
 #include "render_callbacks.h"
 #include "shader_patches.h"
 #include "scene_dither.h"
+#include "scene_target.h"
 #include "f10_study.h"
 #include "shader_lookup_cache.h"
 #include "imgui.h"
@@ -317,7 +318,8 @@ Blend BlendOf(IDirect3DDevice9* dev) {
 
 template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext& ctx, DrawFn draw) {
     IDirect3DDevice9* dev = ctx.device;
-    const bool dither = g_on.load(std::memory_order_relaxed), jitter = g_jitterOn;
+    // (the High-precision scene grains its 16-bit scene once, at its resolve)
+    const bool dither = g_on.load(std::memory_order_relaxed) && !SceneTarget::Substituting(), jitter = g_jitterOn;
     if ((!dither && !jitter) || !g_backBuffer) return D3D9Hooks::HookAction::Continue;
     if (!g_rt0 || g_rt0 != g_backBuffer) return D3D9Hooks::HookAction::Continue;
     if (ctx.ZEnable() == D3DZB_FALSE) return D3D9Hooks::HookAction::Continue; // UI and 2D passes
@@ -502,6 +504,7 @@ class SceneDitherPatch : public ApexPatch {
     SceneDitherPatch() : ApexPatch("SceneDither", nullptr) {
         RegisterFloatSetting(&g_strength, "forca", SettingWidget::Slider, 1.0f, 0.0f, 1.0f, "Grain in 8-bit steps (triangular peak); 1 = +-1 step, 0 = none");
         RegisterBoolSetting(&g_moving, "graoEmMovimento", false, "A new grain pattern every frame (vanishes at high frame rates)");
+        RegisterBoolSetting(SceneTarget::Setting(), "cenaAltaPrecisao", false, "Experimental: the 3D scene in a 16-bit target, resolved once (scene_target.cpp)");
     }
 
     bool Install() override {

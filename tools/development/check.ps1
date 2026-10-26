@@ -29,4 +29,6 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Checks failed: $($case.Name)" }
     }
 } finally { Pop-Location }
+# High-precision scene: pure logic, and its resolve shader on a native D3D9 device when one exists (SKIP otherwise)
+& (Join-Path $repo 'tools/scene_target_test/run.ps1') -OutDir (Join-Path $out 'scene_target') | Tee-Object -FilePath (Join-Path $out 'scene_target.txt')
 Write-Output "CPU $Suite suite passed. Gameplay and D3D9/DXVK validation remain separate."

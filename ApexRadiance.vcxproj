@@ -186,6 +186,7 @@
     <ClCompile Include="framework\patch_base.cpp" />
     <ClCompile Include="framework\s3ss_detect.cpp" />
     <ClCompile Include="framework\scene_copy.cpp" />
+    <ClCompile Include="framework\scene_target.cpp" />
     <ClCompile Include="framework\shader_cache.cpp" />
     <ClCompile Include="framework\slot_chain.cpp" />
     <ClCompile Include="patches\ambient_occlusion_patch.cpp" />
@@ -347,6 +348,8 @@
     <ClInclude Include="framework\s3ss_detect.h" />
     <ClInclude Include="framework\s3ss_ambient_policy.h" />
     <ClInclude Include="framework\scene_copy.h" />
+    <ClInclude Include="framework\scene_target.h" />
+    <ClInclude Include="framework\scene_target_logic.h" />
     <ClInclude Include="framework\shader_cache.h" />
     <ClInclude Include="framework\slot_chain.h" />
     <ClInclude Include="patches\night_lighting.h" />
