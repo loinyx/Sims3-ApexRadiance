@@ -12,4 +12,7 @@ It checks the shader copies of the [Banding Fix](../../docs/features/banding-fix
   0.06 of a level (0.1 within half a level of black or white), pure black and pure white come out unchanged, alpha is
   unchanged and Strength 0 adds nothing;
 - a patched `vs_2_0` + `ps_2_0` pair gives the same pixels as the `ps_3_0` copy (the two grains line up);
+- *Smooth gradients* and the Picture dither: `PicturePS` from `features/picture.cpp` with every other control neutral;
+  an unchanged picture stays bit for bit, the deband off changes nothing, and at the default 8% steps of one level
+  soften (the largest jump between neighbouring column means falls below 0.6 level) with the mean kept;
 - with `-D3d9`, every check again on that D3D9 implementation, loaded from the given path.
