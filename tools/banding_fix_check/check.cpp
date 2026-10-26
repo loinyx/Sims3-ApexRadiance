@@ -6,7 +6,7 @@
 // 2. The grain on the GPU (a flat colour through a patched synthetic ps_3_0): the mean of each grey is kept, pure black and
 //    pure white come out unchanged, and Strength 0 adds nothing.
 // 3. The ps_2_x path (a patched vs_2_0 + ps_2_0 pair) gives the same pixels as the ps_3_0 path.
-// --d3d9 runs 2 and 3 again on another D3D9 implementation (a DXVK d3d9.dll), loaded from that path.
+// --d3d9 runs 1 to 3 again on another D3D9 implementation (a DXVK d3d9.dll), loaded from that path.
 #define NOMINMAX
 #include <windows.h>
 #include <d3d9.h>
@@ -282,7 +282,10 @@ void GrainOnGpu(Gpu& gpu, const Grain& g, const char* backend) {
             std::printf("  grey %7.2f -> mean %8.3f, levels:", gr[c], mean);
             for (const auto& [lv, n] : hist) std::printf(" %d:%.3f", lv, n / static_cast<double>(px.size()));
             std::printf("\n");
-            Check(std::fabs(mean - gr[c]) < 0.06, "the grain keeps the mean of a grey");
+            // within half a level of black or white the grain is narrower than a full TPDF (it must not cross the clamp):
+            // a bias of about 0.02 level there; the GPU's own conversion is about 0.05 low at every grey
+            const bool edge = gr[c] < 0.5f || gr[c] > 254.5f;
+            Check(std::fabs(mean - gr[c]) < (edge ? 0.1 : 0.06), "the grain keeps the mean of a grey");
             if (gr[c] == 0.0f || gr[c] == 255.0f) Check(hist.size() == 1, "pure black and pure white get no specks");
         }
         int alpha = 0;
@@ -337,6 +340,8 @@ int main(int argc, char** argv) {
         Check(other != nullptr, "the other d3d9.dll loads");
         if (!other || !prepared) continue;
         Gpu gpu(other);
+        std::printf("Shader package on %s\n", argv[a + 1]);
+        Package(gpu, all);
         GrainOnGpu(gpu, g, argv[a + 1]);
     }
     std::printf("%d checks, %d failures\n", g_checks, g_failures);

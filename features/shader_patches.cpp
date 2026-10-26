@@ -3397,12 +3397,48 @@ bool WorldUvRows(const std::vector<DWORD>& t, int usage, int index, int worldK, 
     return out.row[0] >= 0 && out.row[1] >= 0;
 }
 
+namespace {
+// The Banding Fix's grain (AddDither, AddDither2), one constant per instruction (ps_2_0 rule):
+//   u = frac(dot(pixel, R2) + cA.w)    R2 = (0.7548777, 0.5698403): the R2 low-discrepancy pattern (fixed, no sampler)
+//   r = 2u - 1;  t = sign(r) (1 - sqrt(1 - |r|))    triangular in (-1, 1): the inverse CDF (TPDF, no noise modulation)
+//   n = lerp(t, r / 2, sat(2x - 1))                 above mid-grey the grain tapers to a uniform +-0.5 step
+//   a = min(cA.x, min(x, 1 - x) + 0.5 / 255)        within the clamp: pure black and white get no specks and every grey
+//   dst = x + n a                                   keeps its mean (the noise never passes 0 or 1 by half a step)
+// cK, cL: the defs; cA = (amount, w/2, h/2, phase); pos: the pixel (vPos, or N.xy for ps_2_x); x = rO; N, M: free temps;
+// m: the colour components written (the others of rO may be unwritten)
+constexpr DWORD kGrainMin = 0x0A, kGrainAbs = 0x23, kGrainRsq = 0x07, kGrainCmp = 0x58;
+std::vector<DWORD> GrainDefs(DWORD cK, DWORD cL) {
+    return {Op(kDef, 5), Dst(kConst, cK), F(0.7548777f), F(0.5698403f), F(0.0f), F(0.5f / 255.0f),
+            Op(kDef, 5), Dst(kConst, cL), F(2.0f), F(-1.0f), F(1.0f), F(0.5f)};
+}
+std::vector<DWORD> GrainTail(DWORD pos, DWORD O, DWORD N, DWORD M, DWORD cK, DWORD cL, DWORD cA, DWORD dst, DWORD m) {
+    return {Op(kDp2add, 4), Dst(kTemp, N, 0x1), pos, Src(kConst, cK), Src(kConst, cK, 0xAA),
+            Op(kAdd, 3), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kConst, cA, kSwzW), // + cA.w: 0 still, per frame moving
+            Op(kFrc, 2), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX),                                                     // u
+            Op(kMad, 4), Dst(kTemp, N, 0x8), Src(kTemp, N, kSwzX), Src(kConst, cL, kSwzX), Src(kConst, cL, kSwzY),      // r
+            Op(kGrainAbs, 2), Dst(kTemp, N, 0x2), Src(kTemp, N, kSwzW),
+            Op(kAdd, 3), Dst(kTemp, N, 0x2), Neg(Src(kTemp, N, kSwzY)), Src(kConst, cL, 0xAA),                       // 1 - |r|
+            Op(kGrainRsq, 2), Dst(kTemp, N, 0x4), Src(kTemp, N, kSwzY),
+            Op(kRcp, 2), Dst(kTemp, N, 0x4), Src(kTemp, N, 0xAA),                                                      // sqrt
+            Op(kAdd, 3), Dst(kTemp, N, 0x4), Neg(Src(kTemp, N, 0xAA)), Src(kConst, cL, 0xAA),                       // 1 - sqrt
+            Op(kGrainCmp, 4), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzW), Src(kTemp, N, 0xAA), Neg(Src(kTemp, N, 0xAA)), // t
+            Op(kMad, 4), Dst(kTemp, N, 0x8), Src(kTemp, N, kSwzW), Src(kConst, cL, kSwzW), Neg(Src(kTemp, N, kSwzX)),  // r/2 - t
+            Op(kMad, 4), Dst(kTemp, M, m, true), Src(kTemp, O), Src(kConst, cL, kSwzX), Src(kConst, cL, kSwzY),         // sat(2x - 1)
+            Op(kMad, 4), Dst(kTemp, M, m), Src(kTemp, M), Src(kTemp, N, kSwzW), Src(kTemp, N, kSwzX),                   // n
+            Op(kAdd, 3), Dst(kTemp, N, m), Neg(Src(kTemp, O)), Src(kConst, cL, 0xAA),                                   // 1 - x
+            Op(kGrainMin, 3), Dst(kTemp, N, m), Src(kTemp, N), Src(kTemp, O),
+            Op(kAdd, 3), Dst(kTemp, N, m), Src(kTemp, N), Src(kConst, cK, kSwzW),
+            Op(kGrainMin, 3), Dst(kTemp, N, m), Src(kTemp, N), Src(kConst, cA, kSwzX),                                  // a
+            Op(kMad, 4), dst, Src(kTemp, M), Src(kTemp, N), Src(kTemp, O)};
+}
+} // namespace
+
 DitherResult AddDither(std::vector<DWORD>& t, int* amountConst) {
     if (t.empty() || t[0] != 0xFFFF0300) return DitherResult::NotPs30;
     if (t.back() != 0x0000FFFFu) return DitherResult::Unreadable;
     const auto ins = Parse(t);
     if (ins.empty()) return DitherResult::Unreadable;
-    constexpr DWORD kMisc = 17, kDp2add = 0x5A, kFrc = 0x13, kCall = 0x19, kCallnz = 0x1A, kRet = 0x1C, kLabel = 0x1E;
+    constexpr DWORD kMisc = 17, kCall = 0x19, kCallnz = 0x1A, kRet = 0x1C, kLabel = 0x1E;
     constexpr DWORD kRegBits = 0x70001800u | 0x7FFu, kRelative = 0x2000u;
     bool vPos = false;
     DWORD mask = 0;                // components of oC0 the shader writes
@@ -3427,30 +3463,15 @@ DitherResult AddDither(std::vector<DWORD>& t, int* amountConst) {
     }
     if (writes.empty() || !(mask & 0x7)) return DitherResult::NoColorWrite;
     const Usage u = Scan(t, ins);
-    if (u.maxTemp + 2 >= 32 || u.maxConst + 3 >= 224) return DitherResult::NoFreeRegister;
-    const DWORD O = static_cast<DWORD>(u.maxTemp + 1), N = O + 1, cK = static_cast<DWORD>(u.maxConst + 1), cL = cK + 1, cA = cK + 2;
+    if (u.maxTemp + 3 >= 32 || u.maxConst + 3 >= 224) return DitherResult::NoFreeRegister;
+    const DWORD O = static_cast<DWORD>(u.maxTemp + 1), N = O + 1, M = O + 2, cK = static_cast<DWORD>(u.maxConst + 1), cL = cK + 1, cA = cK + 2;
     for (size_t at : writes) t[at] = (t[at] & ~kRegBits) | (Reg(kTemp, O) & kRegBits); // oC0 -> rO, same mask and modifiers
-    constexpr DWORD kAbs = 0x23, kRsq = 0x07, kRcp = 0x06, kCmp = 0x58;
     std::vector<Edit> edits;
-    std::vector<DWORD> head = {Op(kDef, 5), Dst(kConst, cK), F(0.06711056f), F(0.00583715f), F(0.0f), F(52.9829189f),
-                               Op(kDef, 5), Dst(kConst, cL), F(2.0f), F(-1.0f), F(1.0f), F(0.0f)};
+    std::vector<DWORD> head = GrainDefs(cK, cL);
     if (!vPos) head.insert(head.end(), {Op(kDcl, 2), 0x80000000u, Dst(kMisc, 0, 0x3)});
     edits.push_back({1, head});
-    // u = IGN(vPos) in [0, 1); r = 2u - 1; triangular t = sign(r) (1 - sqrt(1 - |r|)) in (-1, 1): the inverse CDF of the
-    // triangular distribution, so the dither is TPDF (no noise modulation: the steps vanish instead of thinning out)
-    std::vector<DWORD> tail = {Op(kDp2add, 4), Dst(kTemp, N, 0x1), Src(kMisc, 0), Src(kConst, cK), Src(kConst, cK, 0xAA),
-                               Op(kAdd, 3), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kConst, cA, kSwzW), // + cA.w: 0 still, per frame moving
-                               Op(kFrc, 2), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX),
-                               Op(kMul, 3), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kConst, cK, kSwzW),
-                               Op(kFrc, 2), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX),                                                // u
-                               Op(kMad, 4), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kConst, cL, kSwzX), Src(kConst, cL, kSwzY), // r
-                               Op(kAbs, 2), Dst(kTemp, N, 0x2), Src(kTemp, N, kSwzX),
-                               Op(kAdd, 3), Dst(kTemp, N, 0x2), Neg(Src(kTemp, N, kSwzY)), Src(kConst, cL, 0xAA),                  // 1 - |r|
-                               Op(kRsq, 2), Dst(kTemp, N, 0x4), Src(kTemp, N, kSwzY),
-                               Op(kRcp, 2), Dst(kTemp, N, 0x4), Src(kTemp, N, 0xAA),                                                 // sqrt
-                               Op(kAdd, 3), Dst(kTemp, N, 0x4), Neg(Src(kTemp, N, 0xAA)), Src(kConst, cL, 0xAA),                  // 1 - sqrt
-                               Op(kCmp, 4), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kTemp, N, 0xAA), Neg(Src(kTemp, N, 0xAA)), // t
-                               Op(kMad, 4), Dst(kColorOut, 0, mask & 0x7), Src(kTemp, N, kSwzX), Src(kConst, cA, kSwzX), Src(kTemp, O)};
+    const DWORD m = mask & 0x7;
+    std::vector<DWORD> tail = GrainTail(Src(kMisc, 0), O, N, M, cK, cL, cA, Dst(kColorOut, 0, m), m);
     if (mask & 0x8) tail.insert(tail.end(), {Op(kMov, 2), Dst(kColorOut, 0, 0x8), Src(kTemp, O)});
     edits.push_back({t.size() - 1, tail}); // before the end token
     Apply(t, std::move(edits));
@@ -3463,8 +3484,7 @@ DitherResult AddDither2(std::vector<DWORD>& t, int* amountConst, int* texcoordOu
     if (t.back() != 0x0000FFFFu) return DitherResult::Unreadable;
     const auto ins = Parse(t);
     if (ins.empty()) return DitherResult::Unreadable;
-    constexpr DWORD kDp2add = 0x5A, kFrc = 0x13, kCall = 0x19, kCallnz = 0x1A, kRet = 0x1C, kLabel = 0x1E;
-    constexpr DWORD kAbs = 0x23, kRsq = 0x07, kRcp = 0x06, kCmp = 0x58;
+    constexpr DWORD kCall = 0x19, kCallnz = 0x1A, kRet = 0x1C, kLabel = 0x1E;
     constexpr DWORD kRegBits = 0x70001800u | 0x7FFu;
     std::vector<size_t> writes;
     unsigned usedT = 0; // texture coordinates the shader declares or reads
@@ -3486,33 +3506,22 @@ DitherResult AddDither2(std::vector<DWORD>& t, int* amountConst, int* texcoordOu
     const DWORD kT = static_cast<DWORD>(free);
     const Usage u = Scan(t, ins);
     // the copy is ps_2_x (more temps and instruction slots than ps_2_0: the grain does not fit in some ps_2_0 shaders)
-    if (u.maxTemp + 2 >= 32 || u.maxConst + 3 >= 32) return DitherResult::NoFreeRegister;
-    const DWORD O = static_cast<DWORD>(u.maxTemp + 1), N = O + 1, cK = static_cast<DWORD>(u.maxConst + 1), cL = cK + 1, cA = cK + 2;
+    if (u.maxTemp + 3 >= 32 || u.maxConst + 3 >= 32) return DitherResult::NoFreeRegister;
+    const DWORD O = static_cast<DWORD>(u.maxTemp + 1), N = O + 1, M = O + 2, cK = static_cast<DWORD>(u.maxConst + 1), cL = cK + 1, cA = cK + 2;
     for (size_t at : writes) t[at] = (t[at] & ~kRegBits) | (Reg(kTemp, O) & kRegBits); // oC0 -> rO, same mask and modifiers
     std::vector<Edit> edits;
-    edits.push_back({1, {Op(kDef, 5), Dst(kConst, cK), F(0.06711056f), F(0.00583715f), F(0.0f), F(52.9829189f),
-                         Op(kDef, 5), Dst(kConst, cL), F(2.0f), F(-1.0f), F(1.0f), F(0.0f),
-                         Op(kDcl, 2), 0x80000000u, Dst(kTexture, kT)}});
-    // pixel = (ndc.x * w/2 + w/2, -ndc.y * h/2 + h/2), ndc = t7.xy / t7.w; then the same triangular grain as AddDither.
-    // One constant per instruction (ps_2_0).
+    std::vector<DWORD> head = GrainDefs(cK, cL);
+    head.insert(head.end(), {Op(kDcl, 2), 0x80000000u, Dst(kTexture, kT)});
+    edits.push_back({1, head});
+    // pixel = (ndc.x * w/2 + w/2, -ndc.y * h/2 + h/2), ndc = t7.xy / t7.w: the same integer position as vPos (the ps_2_x
+    // and ps_3_0 grains match pixel for pixel on native D3D9 and DXVK, tools/banding_fix_check); then the same grain
     std::vector<DWORD> tail = {Op(kRcp, 2), Dst(kTemp, N, 0x8), Src(kTexture, kT, kSwzW),
                                Op(kMul, 3), Dst(kTemp, N, 0x3), Src(kTemp, N, kSwzW), Src(kTexture, kT),
                                Op(kMad, 4), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kConst, cA, kSwzY), Src(kConst, cA, kSwzY),
-                               Op(kMad, 4), Dst(kTemp, N, 0x2), Neg(Src(kTemp, N, kSwzY)), Src(kConst, cA, 0xAA), Src(kConst, cA, 0xAA),
-                               Op(kDp2add, 4), Dst(kTemp, N, 0x1), Src(kTemp, N), Src(kConst, cK), Src(kConst, cK, 0xAA),
-                               Op(kAdd, 3), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kConst, cA, kSwzW),
-                               Op(kFrc, 2), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX),
-                               Op(kMul, 3), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kConst, cK, kSwzW),
-                               Op(kFrc, 2), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX),
-                               Op(kMad, 4), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kConst, cL, kSwzX), Src(kConst, cL, kSwzY),
-                               Op(kAbs, 2), Dst(kTemp, N, 0x2), Src(kTemp, N, kSwzX),
-                               Op(kAdd, 3), Dst(kTemp, N, 0x2), Neg(Src(kTemp, N, kSwzY)), Src(kConst, cL, 0xAA),
-                               Op(kRsq, 2), Dst(kTemp, N, 0x4), Src(kTemp, N, kSwzY),
-                               Op(kRcp, 2), Dst(kTemp, N, 0x4), Src(kTemp, N, 0xAA),
-                               Op(kAdd, 3), Dst(kTemp, N, 0x4), Neg(Src(kTemp, N, 0xAA)), Src(kConst, cL, 0xAA),
-                               Op(kCmp, 4), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kTemp, N, 0xAA), Neg(Src(kTemp, N, 0xAA)),
-                               Op(kMad, 4), Dst(kTemp, O, 0x7), Src(kTemp, N, kSwzX), Src(kConst, cA, kSwzX), Src(kTemp, O),
-                               Op(kMov, 2), Dst(kColorOut, 0), Src(kTemp, O)};
+                               Op(kMad, 4), Dst(kTemp, N, 0x2), Neg(Src(kTemp, N, kSwzY)), Src(kConst, cA, 0xAA), Src(kConst, cA, 0xAA)};
+    const std::vector<DWORD> grain = GrainTail(Src(kTemp, N), O, N, M, cK, cL, cA, Dst(kTemp, O, 0x7), 0x7);
+    tail.insert(tail.end(), grain.begin(), grain.end());
+    tail.insert(tail.end(), {Op(kMov, 2), Dst(kColorOut, 0), Src(kTemp, O)});
     edits.push_back({t.size() - 1, tail});
     Apply(t, std::move(edits));
     t[0] = 0xFFFF0201; // ps_2_x
