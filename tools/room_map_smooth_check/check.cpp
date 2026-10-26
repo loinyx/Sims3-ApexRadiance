@@ -308,7 +308,7 @@ float Bw(int i, float f) {
     default: return f * f * f / 6.0f;
     }
 }
-void Reference(const std::vector<DWORD>& map, int W, int H, float cx, float cy, int rowLo, int rowHi, float out[4], bool bound = true) {
+void Reference(const std::vector<DWORD>& map, int W, int H, float cx, float cy, int rowLo, int rowHi, float out[4], bool bound = true, bool sides = true) {
     (void)H;
     const float px = cx - 0.5f, py = cy - 0.5f;
     const int ix = static_cast<int>(std::floor(px)), iy = static_cast<int>(std::floor(py));
@@ -324,11 +324,15 @@ void Reference(const std::vector<DWORD>& map, int W, int H, float cx, float cy, 
             out[2] += w * static_cast<float>(v & 0xFF);
             out[3] += w * static_cast<float>(v >> 24);
         }
-    // the colour no brighter than the brightest of the bilinear read's 2 x 2 texels + 2 levels (PatchRoomMapSmooth)
+    // the colour no brighter than the brightest of the bilinear read's 2 x 2 texels + 2 levels (PatchRoomMapSmooth); with the
+    // pixel's own texel at alpha 0.125 or more, the texels of alpha under 4/255 (room 0's) are not counted
+    const int ox = fx >= 0.5f ? 1 : 0, oy = fy >= 0.5f ? 1 : 0;
+    const float ownA = static_cast<float>(map[static_cast<size_t>(std::clamp(iy + oy, rowLo, rowHi)) * W + std::clamp(ix + ox, 0, W - 1)] >> 24) / 255.0f;
     float hi[3] = {};
     for (int j = 0; j < 2; j++)
         for (int i = 0; i < 2; i++) {
             const DWORD v = map[static_cast<size_t>(std::clamp(iy + j, rowLo, rowHi)) * W + std::clamp(ix + i, 0, W - 1)];
+            if (sides && ownA >= 0.125f && static_cast<float>(v >> 24) / 255.0f < 4.0f / 255.0f) continue;
             hi[0] = std::max(hi[0], static_cast<float>((v >> 16) & 0xFF));
             hi[1] = std::max(hi[1], static_cast<float>((v >> 8) & 0xFF));
             hi[2] = std::max(hi[2], static_cast<float>(v & 0xFF));
@@ -391,6 +395,102 @@ void BoundChecks() {
     }
     std::printf("  a soft shadow edge (0.375 m): largest change %.2f levels\n", softWorst);
     Check(softWorst <= 6.0f, "the softest shadow edge (1.5 texels) keeps its B-spline within 6 levels on its dark side");
+}
+
+// The pixel's side of a wall (PatchRoomMapSmooth): a hall's texels (ambient weight 0.75, green 3) beside a courtyard's lit
+// green at 255 (alpha 0, room 0) with no texel row on the wall line (F7 of a hall beside a glass door: a green line along
+// the wall). In the last half texel before the wall the bound held the courtyard's texel; now it holds the hall's. On the
+// courtyard's side, with light sent out of the hall (alpha 10/255) or a bright hall texel (alpha under 0.125), as before.
+std::vector<DWORD> SideMap(int W, int H, int K, DWORD hallA, DWORD yardA) {
+    std::vector<DWORD> m(static_cast<size_t>(W) * H);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) m[static_cast<size_t>(y) * W + x] = y < K ? (hallA << 24) | (2u << 16) | (3u << 8) | 2u : (yardA << 24) | (40u << 16) | (255u << 8) | 20u;
+    return m;
+}
+void SideChecks() {
+    constexpr int W = 16, H = 16, K = 8;
+    const std::vector<DWORD> hall = SideMap(W, H, K, 191, 0), sent = SideMap(W, H, K, 191, 10), bright = SideMap(W, H, K, 25, 0);
+    float before = 0, now = 0, yardMoved = 0, sentMoved = 0, brightMoved = 0;
+    for (float cy = K - 0.5f; cy < K; cy += 0.01f) { // the hall's last half texel
+        float a[4], b[4];
+        Reference(hall, W, H, 7.3f, cy, 0, H - 1, a, true, false);
+        Reference(hall, W, H, 7.3f, cy, 0, H - 1, b, true, true);
+        before = std::max(before, a[1] - 3.0f), now = std::max(now, b[1] - 3.0f);
+        Reference(sent, W, H, 7.3f, cy, 0, H - 1, a, true, false);
+        Reference(sent, W, H, 7.3f, cy, 0, H - 1, b, true, true);
+        sentMoved = std::max(sentMoved, std::fabs(a[1] - b[1]));
+        Reference(bright, W, H, 7.3f, cy, 0, H - 1, a, true, false);
+        Reference(bright, W, H, 7.3f, cy, 0, H - 1, b, true, true);
+        brightMoved = std::max(brightMoved, std::fabs(a[1] - b[1]));
+    }
+    for (float cy = K; cy < H - 1; cy += 0.05f) { // the courtyard's pixels
+        float a[4], b[4];
+        Reference(hall, W, H, 7.3f, cy, 0, H - 1, a, true, false);
+        Reference(hall, W, H, 7.3f, cy, 0, H - 1, b, true, true);
+        for (int c = 0; c < 4; c++) yardMoved = std::max(yardMoved, std::fabs(a[c] - b[c]));
+    }
+    std::printf("  a hall's last half texel beside a lit courtyard: up to +%.1f levels of green with the 2 x 2 bound, +%.1f with the pixel's side\n", before, now);
+    Check(before > 30.0f && now <= 2.0f + 1e-3f, "a hall's floor takes no line of the courtyard's light along the wall");
+    Check(yardMoved == 0.0f, "the courtyard's own pixels are unchanged");
+    Check(sentMoved == 0.0f && brightMoved == 0.0f, "light sent out of the hall, or a bright hall texel (little ambient weight): unchanged");
+}
+void SidePixelCheck(Gpu& gpu) {
+    if (!gpu.dev) return;
+    const char* src = "sampler2D s0 : register(s0); float4 amb : register(c0);\n"
+                      "float4 main(float2 uv0 : TEXCOORD0, float2 uv1 : TEXCOORD1) : COLOR0 { float4 m = tex2D(s0, uv1); m.rgb = m.a * amb.rgb + m.rgb; return m; }";
+    for (const char* profile : {"ps_2_0"}) { // (the ps_3_0 copies of the game's shaders are created above)
+        std::vector<DWORD> t = Compile(src, profile);
+        ShaderPatches::RoomMapPatch p;
+        if (t.empty() || !ShaderPatches::PatchRoomMapSmooth(t, p)) {
+            Check(false, "the synthetic shader is patched (sides)");
+            continue;
+        }
+        if (!gpu.CapsAllow(p)) continue;
+        IDirect3DPixelShader9* ps = nullptr;
+        Check(SUCCEEDED(gpu.dev->CreatePixelShader(t.data(), &ps)), "the synthetic copy is created (sides)");
+        if (!ps) continue;
+        constexpr int W = 16, H = 16, K = 8;
+        const std::vector<DWORD> map = SideMap(W, H, K, 191, 0);
+        IDirect3DTexture9* tex = nullptr;
+        gpu.dev->CreateTexture(W, H, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, nullptr);
+        if (!tex) {
+            Release(ps);
+            continue;
+        }
+        D3DLOCKED_RECT lr{};
+        if (SUCCEEDED(tex->LockRect(0, &lr, nullptr, 0))) {
+            for (int y = 0; y < H; y++) std::memcpy(static_cast<char*>(lr.pBits) + y * lr.Pitch, &map[static_cast<size_t>(y) * W], W * 4);
+            tex->UnlockRect(0);
+        }
+        gpu.dev->SetTexture(p.sampler, tex);
+        gpu.dev->SetSamplerState(p.sampler, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+        gpu.dev->SetSamplerState(p.sampler, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+        gpu.dev->SetSamplerState(p.sampler, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        gpu.dev->SetSamplerState(p.sampler, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        gpu.dev->SetSamplerState(p.sampler, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+        const float amb[4] = {0, 0, 0, 0}, size[4] = {static_cast<float>(W), static_cast<float>(H), 1.0f / W, 1.0f / H}, bc[4] = {1.0f / 65536.0f, 65536.0f, 0.5f, 65535.0f};
+        gpu.dev->SetPixelShaderConstantF(0, amb, 1);
+        gpu.dev->SetPixelShaderConstantF(p.sizeConst, size, 1);
+        gpu.dev->SetPixelShaderConstantF(p.bandConst, bc, 1);
+        const std::vector<DWORD> px = gpu.Render(ps);
+        int worst = 0, line = 0;
+        for (int y = 0; y < 64; y++)
+            for (int x = 0; x < 64; x++) {
+                const float cx = (x + 0.5f) / 64.0f * W, cy = (y + 0.5f) / 64.0f * H;
+                float ref[4];
+                Reference(map, W, H, cx, cy, 0, H - 1, ref);
+                const DWORD v = px[static_cast<size_t>(y) * 64 + x];
+                const int got[4] = {static_cast<int>((v >> 16) & 0xFF), static_cast<int>((v >> 8) & 0xFF), static_cast<int>(v & 0xFF), static_cast<int>(v >> 24)};
+                for (int c = 0; c < 4; c++) worst = std::max(worst, static_cast<int>(std::lround(std::fabs(got[c] - ref[c]))));
+                if (cy < K && cy > K - 0.5f) line = std::max(line, got[1] - 3);
+            }
+        std::printf("  pixel check, the pixel's side (%s): largest difference from the CPU reference %d LSB; the hall's last half texel at most +%d green\n", profile, worst, line);
+        Check(worst <= 3, "GPU bound with the pixel's side = CPU reference (3 LSB)");
+        Check(line <= 3, "GPU: no line of the courtyard's light along the hall's wall");
+        gpu.dev->SetTexture(p.sampler, nullptr);
+        Release(tex);
+        Release(ps);
+    }
 }
 
 void PixelCheck(Gpu& gpu) {
@@ -658,7 +758,9 @@ int main(int argc, char** argv) {
     Check(other == 0, "no paired vertex shader has another defined uv scale");
     // 4: pixels
     BoundChecks();
+    SideChecks();
     PixelCheck(gpu);
+    SidePixelCheck(gpu);
     ArchPixelCheck(gpu);
     // 5: captures
     std::set<std::vector<DWORD>> seen;
