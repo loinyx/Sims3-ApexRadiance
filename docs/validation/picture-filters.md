@@ -5,7 +5,6 @@ The feature is described in [features/picture-filters.md](../features/picture-fi
 - Grade only scene pixels when a scene copy exists; write UI pixels back unchanged.
 - Add no banding: the grade is re-quantised with a fixed dither below one 8-bit step, the same every frame.
 - Restore every device state it touches, and survive a device reset.
-- Run the deband-only pass (Picture off, Banding Fix on) only in frames with a scene copy.
 - Never save Picture as off because of the compare shortcut.
 - Run each filter only while its switch is on and its amount is not 0, never over the interface, and only in a drawn
   world.
@@ -43,7 +42,8 @@ real game session, driver memory attribution and an FPS gain remain unverified.
 3. Interior at night, and outdoors with bloom. **Expected:** both graded; bloom graded with the scene.
 4. Before / after. **Expected:** left half original, red line in the middle.
 5. Hold the eye button, or B over the menu. **Expected:** the original picture while held.
-6. Smooth gradients (Banding Fix page) at 100% on a sky gradient or a dim wall. **Expected:** steps smooth, edges stay sharp.
+6. Picture off, Banding Fix on. **Expected:** the Picture pass does not run; an old
+   `[qol.picture] deband` value changes nothing.
 7. Alt-tab or change resolution. **Expected:** grading continues; `Resources ready` logged again.
 8. Take a filtered screenshot (default F8). **Expected:** the PNG in the chosen Screenshots folder includes the grade
    and no game UI.

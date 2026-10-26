@@ -107,3 +107,17 @@ level above an integer round down, the same for the game's 8-bit path.
 **Outcome:** a switch on the Banding Fix card, off by default, with the target, the substitution and one resolve with
 one grain (exact 8-bit values pass unchanged). 10-bit output was left out. Not yet tested in game: open checks on the
 [validation page](../validation/banding-fix.md#open-checks).
+
+### 2026-10-26: High-precision scene on by default; Smooth gradients and Moving grain removed
+
+**Context:** the in-game test of the grain changes and the High-precision scene (development build of `banding/all`).
+
+**Finding:** the grain and the High-precision scene looked right; the card showed the target active (63 MB of video
+memory, most resolves at a back-buffer copy). *Smooth gradients* made no visible difference; *Moving grain* was not
+wanted.
+
+**Outcome:** the High-precision scene is on by default (also in the built-in profiles) and no longer marked
+Experimental. *Smooth gradients* is removed with its deband in the Picture pass (the pass no longer runs for it alone)
+and *Moving grain* with it; old `deband` and `graoEmMovimento` keys are ignored. The card was redesigned: a before /
+after picture of the gradient that follows the current state, then *Grain* (Strength) and *Precision* (the switch and a
+Status pill), with the developer resolves under *Live counters*.

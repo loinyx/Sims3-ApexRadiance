@@ -389,7 +389,7 @@ cover:
   ColorFill and GetRenderTargetData (the scene is resolved into the back buffer before it is copied or read); `report`
   makes GetRenderTarget show the back buffer while the 16-bit target is bound. The binding itself is
   `D3D9Hooks::SetRenderTargetSubstitute`, applied after the SetRenderTarget callbacks and in
-  `CallOriginalSetRenderTarget`. See [features/banding-fix.md](features/banding-fix.md#high-precision-scene-experimental).
+  `CallOriginalSetRenderTarget`. See [features/banding-fix.md](features/banding-fix.md#high-precision-scene).
 - Post-scene effects draw with DrawPrimitiveUP. The registry does not hook it, so the effects never re-trigger the
   post-scene trigger; the DrawUP observer only reports them.
 

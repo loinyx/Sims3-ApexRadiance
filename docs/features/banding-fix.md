@@ -3,17 +3,17 @@
 The Banding Fix removes the visible colour steps (banding) in smooth gradients of the 3D world: the pool of light a lamp
 throws on a wall or floor, the fall-off of room light and soft shadows. Instead of rings, light fades smoothly. It does
 this with a fixed, invisible grain added to the scene before the game rounds its colours to 8 bits. Menus, the HUD and
-the Apex overlay are not touched. The Banding Fix page also holds *Smooth gradients*, a filter that softens the steps
-the grain cannot reach (the sky and some other surfaces).
+the Apex overlay are not touched. Its *High-precision scene* (on by default) draws the 3D scene in 16-bit colour and
+rounds it once, with one grain, so blended passes no longer add their own roundings.
 
 ## Status
 
 | | |
 |---|---|
-| Availability | Released in 2.2.0 (Experimental, with a "Still being tested" note on its page, until 2.15.0). Its own page, Smooth gradients off by default and copies made at a shader's first scene draw: Released in 2.7.0 |
+| Availability | Released in 2.2.0 (Experimental, with a "Still being tested" note on its page, until 2.15.0). Its own page, Smooth gradients off by default and copies made at a shader's first scene draw: Released in 2.7.0. Smooth gradients and Moving grain removed, High-precision scene on by default: after 2.15.6, not yet released |
 | Default | On for new configurations |
-| Menu | Image > Banding Fix (card *Banding Fix*, with *Smooth gradients* and *High-precision scene*); Overview > Image > Banding Fix |
-| Configuration | `[patches.SceneDither]` in `ApexRadiance.toml` (Smooth gradients: `[qol.picture] deband`) |
+| Menu | Image > Banding Fix (card *Banding Fix*: a before / after picture of a stepped and a smoothed gradient that follows the current state, then *Grain* with Strength and *Precision* with High-precision scene and its status; Live counters in the development build); Overview > Image > Banding Fix |
+| Configuration | `[patches.SceneDither]` in `ApexRadiance.toml` |
 | Source | [`features/scene_dither.cpp`](../../features/scene_dither.cpp), [`features/shader_patches.cpp`](../../features/shader_patches.cpp) (`AddDither`, `AddDither2`, `AddScreenPosVs`) |
 
 ## The problem
@@ -42,10 +42,6 @@ which the game uses as its bloom mask, is never changed.
 4. **Draw.** For each draw into the back buffer that uses the depth test (the 3D scene), the copies are bound, the draw
    is issued, and the game's shaders and constant are put back. Additive and multiply blends, which add to a picture
    that already has its grain, get half of it with an uncorrelated pattern.
-5. **Smooth gradients** is a separate deband filter in the Picture pass ([picture-filters.md](picture-filters.md)): it
-   averages neighbours that differ by less than `1 + 6.25 x setting` levels (1.5 levels at the default 8%). It follows
-   the Banding Fix switch: with Picture off, the Picture pass still runs with only the deband while the Banding Fix is
-   on and Smooth gradients is above 0.
 
 ## Settings
 
@@ -53,10 +49,14 @@ which the game uses as its bloom mask, is never changed.
 |---|---|---|---|---|---|
 | Banding Fix (card switch) | `enabled` | bool | on | | Turns the grain on |
 | Strength | `forca` | float | 100% | 0 to 100% | Peak of the triangular grain in 8-bit steps (100% = plus or minus one step, the full TPDF). 0% adds nothing |
-| Moving grain | `graoEmMovimento` | bool | off | | A new grain pattern every frame. High frame rates average it away; at low frame rates it shows as a faint shimmer |
-| Smooth gradients | `[qol.picture] deband` | float | 8% (also in every built-in profile) | 0 to 200% | Deband filter of the Picture pass: smooths steps up to `1 + 6.25 x deband` levels (8% = 1.5, 100% = 7.25, 200% = 13.5; until 2.15.6 `deband x 6`, which at 8% smoothed nothing). Saved values are kept. Runs only while the Banding Fix is on |
-| High-precision scene (Experimental) | `cenaAltaPrecisao` | bool | off (not in the built-in profiles) | | Draws the 3D scene into a 16-bit target and resolves it once; see [High-precision scene](#high-precision-scene-experimental) |
+| High-precision scene | `cenaAltaPrecisao` | bool | on (also in every built-in profile) | | Draws the 3D scene into a 16-bit target and resolves it once; see [High-precision scene](#high-precision-scene) |
 | Developer > Show covered surfaces | (not saved) | bool | off | | Replaces the grain with a coarse 24-step grain on every covered surface |
+
+Removed after the 2026-10-26 in-game test: *Smooth gradients* (`[qol.picture] deband`, a deband filter in the Picture
+pass), which made no visible difference, and *Moving grain* (`graoEmMovimento`, a new grain pattern every frame). Older
+files still load: both keys are ignored (`deband` is dropped on the next save; `graoEmMovimento` stays in the feature's
+table, as unknown keys do), the grain stays fixed and the Picture pass no longer runs for the deband alone. A saved
+`cenaAltaPrecisao = false` (written by earlier builds while it was off by default) keeps the switch off.
 
 Settings apply live. The Developer page also shows the shader coverage counters (under *Shader coverage*): scene
 draws with the grain by shader model and by blend class, and the draws left alone (refused, depth `ALWAYS` without
@@ -71,11 +71,10 @@ depth write, no pixel shader).
 - **Night Lighting:** draws that Night Lighting replaces are re-issued through the device, so their patched shaders get
   their own dithered copies.
 - **Picture filters:** the Picture pass applies its own fixed dither (the same law, from interleaved gradient noise,
-  which does not correlate with the R2 grain) only where it changed a pixel; Smooth gradients lives in that pass.
+  which does not correlate with the R2 grain) only where it changed a pixel.
 - **Compare with the game** (shortcut) turns the Banding Fix off with the other effects until it is pressed again.
 - **Profiles:** the Banding Fix belongs to the Color part of a profile. The three built-in profiles set it
-  (`[patches.SceneDither]` on, Strength 100%, Moving grain off) and Smooth gradients at 8%
-  ([apex_presets.cpp](../../apex_presets.cpp)).
+  (`[patches.SceneDither]` on, Strength 100%, High-precision scene on) ([apex_presets.cpp](../../apex_presets.cpp)).
 - **Other Apex passes:** any new Apex pass that draws into the back buffer with the depth test on (and not `ALWAYS`
   without depth write) receives the grain.
 
@@ -86,7 +85,7 @@ depth write, no pixel shader).
   patched.
 - Some surfaces use ps_2_0-only techniques (Sky, Sky_Reflection, Ceiling, Rug, Foliage, pool water, SimEyes,
   FloorThickness, InteriorWall with strobe or black light). They are covered only when the vertex/pixel copy pair can be
-  made; Smooth gradients is the fallback for the sky.
+  made. With the High-precision scene active they are drawn into the 16-bit target too and get the resolve's grain.
 - The first session after installing may stutter slightly more while DXVK builds pipelines for the copies; its state
   cache keeps them afterwards. *Expected, not measured.*
 
@@ -105,8 +104,8 @@ oC0.a   = rO.a                                        // bloom mask untouched
 ```
 
 Two `def` constants and three temps are added above the shader's own; `dcl vPos.xy` is added when missing. The amount
-constant `cA = (strength / 255, w/2, h/2, phase)` is set per draw; `phase` (Moving grain) is
-`frac(frame x 0.6180339887)`, plus 0.19 for the half grain of additive and multiply blends (the R2 pattern shifted by
+constant `cA = (strength / 255, w/2, h/2, phase)` is set per draw; `phase` is 0 (a fixed grain; Moving grain set it
+to `frac(frame x 0.6180339887)` until it was removed), plus 0.19 for the half grain of additive and multiply blends (the R2 pattern shifted by
 0.19 correlates 0.006 with the unshifted one, offline). The clamp bound keeps pure black and white exact and every grey's
 mean (noise below -0.5 or above 255.5 would be clipped and bias it); within half a level of black or white the grain is
 narrower than a full TPDF, a bias of about 0.02 level there. Shaders that are not ps_3_0, have no colour write, use
@@ -164,9 +163,10 @@ refused: ...`. The Developer page shows the same counters for the last frame.
 anti-aliasing (constant `c252`). Temporal anti-aliasing is removed from Edge Smoothing and no longer calls it; the code
 remains.
 
-## High-precision scene (experimental)
+## High-precision scene
 
-Not yet tested in game; off by default. The grain above hides the 8-bit rounding of each draw, but each blend still
+On by default since the in-game test of 2026-10-26 (the card showed the target active, with most resolves at a
+back-buffer copy). The grain above hides the 8-bit rounding of each draw, but each blend still
 rounds: a pixel lit by several passes collects one rounding (and one grain) per pass. This switch removes those roundings
 instead of hiding them.
 
@@ -188,7 +188,7 @@ instead of hiding them.
    `ColorFill` or `GetRenderTargetData` touching the back buffer (the UI's back-buffer copies, the hidden-UI colour tile,
    Apex's own scene copies, read-backs), the game's EndScene while the target is bound, Present. After it, the frame
    continues on the real 8-bit back buffer, as without the switch.
-4. **Grain once.** The resolve adds the Banding Fix's triangular grain (its Strength and Moving grain phase) once. Its
+4. **Grain once.** The resolve adds the Banding Fix's triangular grain (its Strength) once. Its
    amplitude never reaches past 0 or 255 (`min(1, x, 255 - x)` levels), and a value that is exactly an 8-bit level (the
    UI, flat colours) passes unchanged. Alpha, the bloom mask, is copied without grain. While the scene goes into the
    target, the per-draw grain is not bound (`SceneDither` skips its copies).
@@ -199,8 +199,9 @@ instead of hiding them.
 6. **Hooks.** `GetRenderTargetData`, `ColorFill` and `GetRenderTarget` are detoured (`ExtraHooks::EnsureTargetHooks`)
    only when the switch first turns on. With the switch off the frame callbacks return at once.
 
-**Status.** The card shows the video memory of the target or the reason it is not used. The development build adds
-the resolves by cause and the CPU time to issue one. The texture is counted in Apex's Direct3D memory (developer
+**Status.** The card's *Status* row shows a pill (Active, Starting, Unavailable or Off) with the video memory of the
+target or the reason it is not used. The development build adds the resolves by cause and the CPU time to issue one,
+under *Live counters*. The texture is counted in Apex's Direct3D memory (developer
 `memory_owners`).
 
 **Not covered.** A `LockRect` of a lockable back buffer, `UpdateSurface` into it, or `GetFrontBufferData` would see
@@ -228,6 +229,9 @@ back buffer as before.
 - ps_3_0-only coverage: more than half of the scene, walls included, draws with ps_2_x shaders.
 - Strength range 0.5 to 3 steps: covered every surface with visible grain; replaced by 0 to 100%.
 - The same grain pattern in the scene and the AO composite: doubled the grain.
+- *Smooth gradients* (a deband filter in the Picture pass, averaging neighbours within `1 + 6.25 x setting` levels):
+  no visible difference in game (2026-10-26); removed with its full-screen pass.
+- *Moving grain* (a new grain pattern every frame): removed after the same in-game test; the grain is fixed.
 
 Details in [history](../history/banding-fix.md).
 
@@ -235,5 +239,5 @@ Details in [history](../history/banding-fix.md).
 
 - [Validation](../validation/banding-fix.md)
 - [History](../history/banding-fix.md)
-- [Picture filters](picture-filters.md) (Smooth gradients)
+- [Picture filters](picture-filters.md)
 - [Engine: shaders](../engine/shaders.md)

@@ -6,7 +6,7 @@ The feature is described in [features/banding-fix.md](../features/banding-fix.md
 - Keep the average colour: a grey between two levels must come out with the same mean, spread over neighbouring levels
   in the triangular proportions.
 - Leave pure black and pure white unchanged (no specks).
-- Produce the same pattern every frame unless Moving grain is on.
+- Produce the same pattern every frame.
 - Leave every non-scene target (pick pass, shadows, reflections, bloom), every depth-off back-buffer draw and every
   depth-on draw with `ZFUNC ALWAYS` and no depth write (the UI) unchanged.
 - Leave a shader unchanged when it cannot be patched, and put the game's shader and constant back after every draw.
@@ -15,7 +15,7 @@ The feature is described in [features/banding-fix.md](../features/banding-fix.md
 
 | Harness | Covers | Run | Needs |
 |---|---|---|---|
-| [`tools/banding_fix_check`](../../tools/banding_fix_check/README.md) | `AddDither` over every ps_3_0, `AddDither2` over every ps_2_0 and `AddScreenPosVs` over every vs_1_1 / vs_2_x of the game's shader package, each copy created on the device; mean, level weights, black and white of the grain; ps_2_x pair against ps_3_0 pixel for pixel; Smooth gradients and the Picture dither (`PicturePS`) | `run.ps1 -Precomp <Shaders_Win32.precomp> [-D3d9 <DXVK d3d9.dll>]` | Game `Shaders_Win32.precomp`, D3D9 GPU |
+| [`tools/banding_fix_check`](../../tools/banding_fix_check/README.md) | `AddDither` over every ps_3_0, `AddDither2` over every ps_2_0 and `AddScreenPosVs` over every vs_1_1 / vs_2_x of the game's shader package, each copy created on the device; mean, level weights, black and white of the grain; ps_2_x pair against ps_3_0 pixel for pixel; the Picture dither (`PicturePS`) leaves an unchanged picture alone | `run.ps1 -Precomp <Shaders_Win32.precomp> [-D3d9 <DXVK d3d9.dll>]` | Game `Shaders_Win32.precomp`, D3D9 GPU |
 | `techver.pl` (not in the repository) | ps_2_0 / ps_3_0 variant counts per technique | Perl over the shader package | Game shader package |
 
 `tools/banding_fix_check` replaces the scratch harnesses of the investigation (`dithertest.cpp`, `dithertest2.cpp`,
@@ -46,17 +46,15 @@ High-precision scene: [`tools/scene_target_test`](../../tools/scene_target_test/
    ps_2_x without a vertex copy.
 4. Strength 0% and 100%. **Expected:** 0% looks like Banding Fix off; 100% shows no visible noise at normal viewing
    distance.
-5. Moving grain on at a high and a low frame rate. **Expected:** invisible at high frame rates, a faint shimmer at low
-   ones.
-6. Smooth gradients at 0% and 100% on a sky gradient with Picture off. **Expected:** steps in the sky soften; menus are
-   unchanged.
-7. Click objects and Sims (pick pass). **Expected:** picking works normally.
-8. Open a panel over the world (the pie menu, the build catalog) with Show covered surfaces on. **Expected:** no coarse
+5. Click objects and Sims (pick pass). **Expected:** picking works normally.
+6. Open a panel over the world (the pie menu, the build catalog) with Show covered surfaces on. **Expected:** no coarse
    grain on the panels' glass; the Developer counters show the depth-`ALWAYS` draws left alone.
-9. Pure black and white areas (a dark night sky, a white wall in sunlight). **Expected:** no isolated lighter or darker
+7. Pure black and white areas (a dark night sky, a white wall in sunlight). **Expected:** no isolated lighter or darker
    pixels.
-10. Smooth gradients at the default 8% with Picture off, on a sky gradient or a dim wall. **Expected:** steps soften;
-    textures and edges keep their detail.
+8. The card in Image > Banding Fix at two text sizes and in a narrow menu, with the Banding Fix off, on, at Strength 0%
+   and with the High-precision scene on and off. **Expected:** the picture's lower bar is stepped while off or at 0%,
+   grained while on, and the caption follows; the Status pill shows Active with its video memory, Off, or Unavailable
+   with the reason; nothing overlaps or is cut.
 
 ## Confirmed in game
 
@@ -65,6 +63,9 @@ High-precision scene: [`tools/scene_target_test`](../../tools/scene_target_test/
   172 drawn with ps_2_x (0 ps_3_0 refused), and only 109 to 139 copies made in the session. This led to the ps_2_x path.
 - 2026-09-30: at 223% Strength (old range) the grain showed as fine specks, which led to the 0 to 100% range and to
   the shifted pattern in the AO composite.
+- 2026-10-26, development build of branch `banding/all`: the grain changes and the High-precision scene look right; the
+  card showed "On: 63 MB of video memory" with most resolves at a back-buffer copy. Smooth gradients made no visible
+  difference. This made the High-precision scene the default and removed Smooth gradients and Moving grain.
 
 ## Open checks
 
@@ -73,10 +74,10 @@ High-precision scene: [`tools/scene_target_test`](../../tools/scene_target_test/
 - GPU cost of the extra instructions per pixel (not measured; the grain is 18 instructions per pixel, 13 before, and
   the copies now need three free temps).
 - In game: the blend-class counts, the look of the half grain on additive and multiply draws, the absence of grain
-  under the UI panels, and Smooth gradients at 8% (now an active full-screen pass) and its GPU cost (built 2026-10-26,
-  not yet run in game).
+  under the UI panels (built 2026-10-26, not yet run in game).
 
-High-precision scene (experimental, never run in game). Each of these is open:
+High-precision scene (on by default since the 2026-10-26 in-game test, which showed it active; the checks below were
+not each run). Each of these is open:
 
 - Rings and grain: night interior lit by one lamp, switch off then on, Banding Fix Strength 100%. Expected: no rings, a
   grain no stronger than with the switch off.
