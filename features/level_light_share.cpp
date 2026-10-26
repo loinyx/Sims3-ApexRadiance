@@ -12487,7 +12487,7 @@ float InnerNormScale(const RoomInfo& info, void* light) {return InnerNormScaleAt
 // Outdoor light through openings: a roofed room's lamp of room 0 at the outdoor surface's brightness and outside the room's
 // normalisation (opening_lamp_balance.h), set from the menu values (SetOpeningLampBalance)
 std::atomic<float> g_openGround{1.0f}, g_openWall{1.0f};
-std::atomic<long> g_openScaled{0};
+std::atomic<long> g_openScaled{0}, g_openResponse{0}; // (points scaled; of them, saturated colours given the outdoor response)
 float OpeningLampFactor(const float* normal, const BYTE* room) {
     OpeningLampBalance::Scales s;
     s.ground = g_openGround.load(std::memory_order_relaxed), s.wall = g_openWall.load(std::memory_order_relaxed);
@@ -12653,14 +12653,25 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
         const ApexCycles timed;
         if (innerLamp) InnerShadow(*g_ctx.info, light, sample, colour); // a lamp of a roofed room through an opening (indoor light through openings)
         else if (openLamp || (g_ctx.info->yard && FindSame(*g_ctx.info, reinterpret_cast<uintptr_t>(light)))) {
-            // the outdoor map's cut at 1 for this lamp's entries (story 0's room-0 lamps are listed twice, ShareRoofedOpenings)
-            if (openLamp)
-                OpeningLampBalance::CapEntry(colour, g_ctx.info->level == 0 || (g_ctx.info->level == 1 &&
-                                                  std::binary_search(g_ctx.info->lower.begin(), g_ctx.info->lower.end(), reinterpret_cast<uintptr_t>(light))) ? 2 : 1);
+            // the outdoor map's cut at 1 for this lamp's entries, its hue kept (story 0's room-0 lamps are listed twice, ShareRoofedOpenings)
+            const int times = g_ctx.info->level == 0 || (g_ctx.info->level == 1 &&
+                                                         std::binary_search(g_ctx.info->lower.begin(), g_ctx.info->lower.end(), reinterpret_cast<uintptr_t>(light)))
+                                  ? 2
+                                  : 1;
+            if (openLamp) OpeningLampBalance::CapEntry(colour, times);
             YardShadow(*g_ctx.info, light, sample, colour); // a lamp of a roofless room's own story (light through doors and windows), or of a roofed room's doors
             if (openLamp && (colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f)) { // at the outdoor surface's scale
                 const float k = OpeningLampFactor(normal, t_solveRoom);
                 for (int i = 0; i < 4; i++) colour[i] *= k;
+                // and the outdoor response to its colour: the indoor curves, on the mean, gave a saturated lamp more than a white
+                // one (a room solved as outdoor packs its hue-kept sum with no curve)
+                if (t_solveRoom && !RoomOutdoorFlag(t_solveRoom)) {
+                    const float q = OpeningLampBalance::MaxResponse(colour, static_cast<float>(times) * InnerLight::Norm(RoomNormOf(t_solveRoom)));
+                    if (q != 1.0f) {
+                        for (int i = 0; i < 4; i++) colour[i] *= q;
+                        ApexUtil::CountOne(g_openResponse);
+                    }
+                }
             }
         }
         else if (!g_ctx.info->indoor) CrossFloorShadow(*g_ctx.info, light, sample, colour);
@@ -14231,11 +14242,11 @@ std::string OpeningsStatus() {
         " | outdoor light through openings: {} (roofed rooms taking outdoor lamps {}, {} lamps; with no door to the outside {}; lamps beyond reach {}, with no door in "
         "sight {}; points tested {}, lit {}; lamps of the story below tested {}, stopped by this story's floors {}; directional map samples tested {}, blocked {}; rooms "
         "sent for lamp edits {}, for their doors {}; rig copies published {}; grid walls ending at a floor above them {}; at the outdoor scale x{:.3f} floors, x{:.3f} walls, "
-        "points scaled {}; cut closes held: reopened {}, lasted {})",
+        "points scaled {}, of them saturated colours at the outdoor response {}; cut closes held: reopened {}, lasted {})",
         roofed ? (RoofedOpeningsOn() ? "on" : "on, not ready") : "off", g_roofedRooms.load(), g_roofedAdded.load(), g_roofedNoDoor.load(), g_roofedFar.load(),
         g_roofedHidden.load(), g_roofedTests.load(), g_roofedLit.load(), g_roofedBelowTests.load(), g_roofedBelowSlab.load(), g_roofedBasisTests.load(),
         g_roofedBasisBlocked.load(), g_roofedSends.load(), g_roofedDoorSends.load(), g_openRigPublished.load(), g_gridCapped.load(), g_openGround.load(), g_openWall.load(),
-        g_openScaled.load(), g_cutReopened.load(), g_cutHeldApplied.load());
+        g_openScaled.load(), g_openResponse.load(), g_cutReopened.load(), g_cutHeldApplied.load());
     const std::string innerText = std::format(
         " | indoor light through openings: {} (rooms taking lamps of roofed rooms {}, {} lamps, {} of them of the story above; lamps beyond reach {}, with no "
         "opening in sight {}; points tested {}, lit {}, stopped where they go down through a floor {}; left out of the floor mask {}; directional map samples tested {}, "

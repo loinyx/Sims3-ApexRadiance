@@ -1178,20 +1178,52 @@ void PillarLightChecks() {
 // Outdoor light through openings at the outdoor scale (opening_lamp_balance.h), replayed on the light capture of a green sconce
 // (intensity 1.7, colour (0, 1, 0), a story-0 room-0 lamp listed twice) beside a kitchen behind a glass door: the courtyard
 // draws the lot map x Ground brightness 0.75 x Lot lamp brightness 0.756 (the player's) and the kitchen floor showed 0.808.
-// The indoor chain: the solve's sum x the room's normalisation, its curve (GpuLampLaw::Tone), the room-lit floor shader's
-// curve (PS 44ECECA0: x tanh(2.1 mean) / mean, c2.z = 4.2) on map x albedo. The ground: albedo x scale x min(sum, 1).
+// The indoor chain: the solve's sum x the room's normalisation, its curve (GpuLampLaw::Tone), the pack's cut at 1, the
+// room-lit floor shader's curve on map x albedo (PS 44ECECA0 / 981C53E8: y (2 / (1 + 2^(-4.2 m)) - 1) / m, m = 0.333 (r + g +
+// b), a D3D `exp` being 2^x; c2.z = 4.2). The ground: albedo x scale x the outdoor texel (its sum's hue kept past 1).
+void FloorDrawRgb(const float map[3], float albedo, float out[3]) {
+    const float y[3] = {map[0] * albedo, map[1] * albedo, map[2] * albedo};
+    const float m = (y[0] + y[1] + y[2]) * 0.333f;
+    const float w = m > 1e-6f ? (2.0f / (1.0f + std::exp2(-4.2f * m)) - 1.0f) / m : 4.2f * 0.6931472f * 0.5f;
+    for (int i = 0; i < 3; i++) out[i] = std::min(1.0f, y[i] * w);
+}
 float FloorDraw(float map, float albedo) { // one channel of a saturated green texel: mean = a third of it
-    const float g = map * albedo, m = g / 3.0f;
-    return m > 1e-6f ? std::min(1.0f, g * std::tanh(2.1f * m) / m) : 2.1f * g;
+    const float c[3] = {0.0f, map, 0.0f};
+    float o[3];
+    FloorDrawRgb(c, albedo, o);
+    return o[1];
+}
+// One entry of a lamp of colour `lamp` (largest channel 1) at a texel, e its law there; `times` entries; `pass` the opening's
+// share (glass). stage 0: the chain before the balance (no cut, the room's normalisation); 1: the balance as it was first (a
+// cut per channel, no response); 2: production (CapEntry, the outdoor scale, MaxResponse)
+void IndoorDraw(const float lamp[3], float e, int times, float pass, float norm, int stage, const OpeningLampBalance::Scales& s, float albedo, float out[3]) {
+    const float up[3] = {0.0f, 1.0f, 0.0f};
+    float c[3] = {lamp[0] * e, lamp[1] * e, lamp[2] * e};
+    if (stage == 1)
+        for (float& v : c) v = std::min(v, 1.0f / static_cast<float>(times));
+    if (stage == 2) OpeningLampBalance::CapEntry(c, times);
+    const float k = stage ? OpeningLampBalance::Factor(s, up, norm, false) : 1.0f;
+    for (float& v : c) v *= pass * k;
+    if (stage == 2) {
+        const float q = OpeningLampBalance::MaxResponse(c, static_cast<float>(times) * norm);
+        for (float& v : c) v *= q;
+    }
+    float x[3] = {c[0] * times * norm, c[1] * times * norm, c[2] * times * norm}, t[3];
+    GpuLampLaw::Tone(x, t);
+    for (float& v : t) v = std::min(v, 1.0f);
+    FloorDrawRgb(t, albedo, out);
 }
 float IndoorGreen(float entry, int times, float pass, float norm, bool fixed, const OpeningLampBalance::Scales& s, float albedo) {
-    const float up[3] = {0.0f, 1.0f, 0.0f};
-    float c[3] = {0.0f, entry, 0.0f};
-    if (fixed) OpeningLampBalance::CapEntry(c, times);
-    const float k = fixed ? OpeningLampBalance::Factor(s, up, norm, false) : norm;
-    float x[3] = {0.0f, c[1] * times * pass * k, 0.0f}, t[3];
-    GpuLampLaw::Tone(x, t);
-    return FloorDraw(std::min(t[1], 1.0f), albedo);
+    const float green[3] = {0.0f, 1.0f, 0.0f};
+    float o[3];
+    IndoorDraw(green, entry, times, pass, norm, fixed ? 2 : 0, s, albedo, o);
+    return o[1];
+}
+// The same lamp outdoors: albedo x scale x its two entries' sum, hue kept past 1 (OutdoorDeltaModel::KeepHue)
+void OutdoorDraw(const float lamp[3], float e, float scale, float albedo, float out[3]) {
+    float S[3] = {2.0f * e * lamp[0], 2.0f * e * lamp[1], 2.0f * e * lamp[2]};
+    const float m = std::max({S[0], S[1], S[2]});
+    for (int i = 0; i < 3; i++) out[i] = albedo * scale * (m > 1.0f ? S[i] / m : S[i]);
 }
 void BalanceChecks() {
     const OpeningLampBalance::Scales s = OpeningLampBalance::From(0.75f, 0.756f, true, 0.30f, true);
@@ -1209,10 +1241,11 @@ void BalanceChecks() {
               OpeningLampBalance::Moved(s, OpeningLampBalance::From(0.80f, 0.756f, true, 0.30f, true)), "a slider moved by 0.1% relights nothing, by 5% every room");
     float capped[3] = {0.2f, 1.7f, 0.0f};
     OpeningLampBalance::CapEntry(capped, 2);
-    Check(capped[0] == 0.2f && capped[1] == 0.5f, "an entry of a lamp listed twice holds at most half the outdoor cut");
-    // the capture: the kitchen pixel (stone albedo 0.8, glass 0.765, norm 1) showed 0.808, a map of 0.49 per the floor curve
+    Check(std::fabs(capped[0] - 0.2f * 0.5f / 1.7f) < 1e-6f && std::fabs(capped[1] - 0.5f) < 1e-6f, "an entry of a lamp listed twice holds at most half the outdoor cut, its hue kept");
+    // the capture: the kitchen pixel (stone albedo 0.8, glass 0.765, norm 1) showed 0.808, a map of 0.71 per the floor curve (the
+    // capture's map ran 0.62 to 0.97 green over the kitchen texels by the door)
     const float albedo = 0.8f, glass = 0.765f;
-    Check(std::fabs(FloorDraw(0.4925f, albedo) - 0.808f) < 0.01f, "the floor curve gives the captured 0.808 from a map of 0.49");
+    Check(std::fabs(FloorDraw(0.71f, albedo) - 0.808f) < 0.01f, "the floor curve gives the captured 0.808 from a map of 0.71");
     int worse = 0, fixedWorse = 0;
     float before = 0, after = 0, ground = 0;
     for (int i = 1; i <= 200; i++) { // one entry's colour from 0.025 to 5 (both entries: up to 10, the cut 2 x Cmax)
@@ -1230,6 +1263,77 @@ void BalanceChecks() {
     Check(worse > 150, "before: the kitchen brighter than the courtyard at almost every distance");
     Check(fixedWorse == 0, "after: never brighter than the ground at the same distance");
     Check(after > 0.5f * ground, "after: still lit through the glass (no black room)");
+}
+
+// The same lamp outdoors and through an opening at the same distance (opening_lamp_balance.h CapEntry, MaxResponse): a red
+// sconce lit a kitchen behind its glass door redder and brighter than its own courtyard (a lighting snapshot: the kitchen
+// floor (0.53, 0.05, 0.04) on screen, the courtyard by the lamp (0.44, 0.18, 0.15) with a white lamp and the sky in it). Indoors
+// the same lamp must be no brighter than outdoors on the same floor, of the lamp's own hue, and lit alike whatever its colour.
+void OpeningColourChecks() {
+    const float albedo = 0.8f, glass = 0.765f;
+    const float lamps[][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 1}, {1, 0.5f, 0.15f}, {1, 0.98f, 0.85f}, {1, 1, 1}};
+    const float white[3] = {1, 1, 1};
+    const float grounds[] = {0.567f, 1.0f, 2.25f}; // the player's (0.75 x 0.756), the game's, Ground 150% x Lot lamps 150%
+    int brighter[3] = {}, hue[3] = {}, uneven[3] = {}, n = 0;
+    float worstUneven[3] = {};
+    for (float g : grounds) {
+        OpeningLampBalance::Scales s;
+        s.ground = g;
+        for (const auto& lamp : lamps)
+            for (int i = 2; i <= 120; i++) { // one entry's law from 0.05 to 3 (both entries up to 6; the cut is 2 x Cmax)
+                const float e = 0.025f * static_cast<float>(i);
+                float out[3], S[3];
+                OutdoorDraw(lamp, e, g, albedo, out);
+                OutdoorDraw(lamp, e, 1.0f, 1.0f, S);
+                const float outMax = std::min(std::max({out[0], out[1], out[2]}), 1.0f), sMax = std::max({S[0], S[1], S[2]});
+                ++n;
+                for (int stage = 0; stage < 3; stage++) {
+                    float in[3], ref[3];
+                    IndoorDraw(lamp, e, 2, glass, 1.0f, stage, s, albedo, in);
+                    IndoorDraw(white, e, 2, glass, 1.0f, stage, s, albedo, ref);
+                    const float inMax = std::max({in[0], in[1], in[2]}), refMax = std::max({ref[0], ref[1], ref[2]});
+                    if (inMax > outMax + 1e-4f) ++brighter[stage];
+                    // the hue: each channel over the largest, indoors and outdoors (the screen's cut at 1 left out)
+                    bool off = false;
+                    for (int c = 0; c < 3; c++) off = off || (inMax > 0.02f && std::fabs(in[c] / inMax - S[c] / sMax) > 0.03f);
+                    if (off) ++hue[stage];
+                    // lit alike whatever its colour: its largest channel as a white lamp's of the same strength, never more (the
+                    // response takes a floor of albedo 1: on a darker floor a colour ends a little under the white, at the
+                    // player's scale under 3%)
+                    const float d = refMax > 1e-4f ? inMax / refMax - 1.0f : 0.0f;
+                    if (d > (stage == 2 ? 0.005f : 0.03f) || d < (g < 0.6f ? -0.03f : -0.10f)) ++uneven[stage];
+                    if (std::fabs(d) > std::fabs(worstUneven[stage])) worstUneven[stage] = d;
+                }
+            }
+    }
+    std::printf("Same lamp outdoors and through an opening, %d cases: brighter indoors before the balance %d, with the first balance %d, now %d; "
+                "hue off %d, %d, now %d; a colour lit unlike white %d (worst %+.0f%%), %d (worst %+.0f%%), now %d (worst %+.1f%%)\n",
+                n, brighter[0], brighter[1], brighter[2], hue[0], hue[1], hue[2], uneven[0], 100.0f * worstUneven[0], uneven[1], 100.0f * worstUneven[1], uneven[2],
+                100.0f * worstUneven[2]);
+    Check(brighter[1] == 0 && brighter[2] == 0, "a lamp through an opening is never brighter than outdoors on the same floor");
+    Check(hue[1] > 0 && hue[2] == 0, "before: a strong orange cut channel by channel came in paler; now every lamp keeps its hue indoors");
+    Check(uneven[1] > 0 && uneven[2] == 0, "before: a saturated lamp lit the room more than a white one (the curves' mean); now never more, and alike within 3% at the player's scale");
+    // the red sconce by the kitchen door (law 1 per entry: both entries past the outdoor cut)
+    const float red[3] = {1, 0, 0};
+    for (float g : {0.567f, 2.25f}) {
+        OpeningLampBalance::Scales s;
+        s.ground = g;
+        float out[3], was[3], now[3], wh[3];
+        OutdoorDraw(red, 1.0f, g, albedo, out);
+        IndoorDraw(red, 1.0f, 2, glass, 1.0f, 1, s, albedo, was);
+        IndoorDraw(red, 1.0f, 2, glass, 1.0f, 2, s, albedo, now);
+        IndoorDraw(white, 1.0f, 2, glass, 1.0f, 2, s, albedo, wh);
+        std::printf("  red sconce, law 1, floor scale %.3f: courtyard floor %.3f (screen %.3f), kitchen floor %.3f with the first balance, %.3f now (a white lamp %.3f)\n", g,
+                    out[0], std::min(out[0], 1.0f), was[0], now[0], wh[0]);
+    }
+    // the response: a white share unchanged, a saturated one never raised
+    const float grey[3] = {0.3f, 0.3f, 0.3f}, dim[3] = {0.004f, 0.0f, 0.0f}, pure[3] = {0.4f, 0.0f, 0.0f};
+    Check(OpeningLampBalance::MaxResponse(grey, 2.0f) == 1.0f && OpeningLampBalance::MaxResponse(dim, 2.0f) == 1.0f, "a white share and one both curves leave alone keep 1");
+    const float q = OpeningLampBalance::MaxResponse(pure, 2.0f);
+    Check(q > 0.0f && q < 1.0f, "a saturated share is scaled down, never up");
+    float orange[3] = {1.7f, 0.85f, 0.26f};
+    OpeningLampBalance::CapEntry(orange, 2);
+    Check(std::fabs(orange[0] - 0.5f) < 1e-6f && std::fabs(orange[1] - 0.25f) < 1e-6f && std::fabs(orange[2] - 0.26f * 0.5f / 1.7f) < 1e-6f, "an orange entry keeps its hue under the cut");
 }
 // Cut closes held (cut_close_hold.h), replayed on the log of three camera turns: windows closed at 39.083 and reopened at
 // 39.751, closed at 46.352 and reopened at 46.529; a window really removed closes once.
@@ -1496,6 +1600,7 @@ int main() {
     WallCopyChecks();
     OpeningShapeChecks();
     BalanceChecks();
+    OpeningColourChecks();
     CutHoldChecks();
     std::printf("Roofed openings: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
