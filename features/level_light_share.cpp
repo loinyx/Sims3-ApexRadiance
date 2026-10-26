@@ -116,6 +116,8 @@
 #include "rt_lamp_proxy.h"
 #include "atrium_hold.h"
 #include "inner_retry.h"
+#include "cut_close_hold.h"
+#include "opening_lamp_balance.h"
 #include "tester_toggles.h"
 #include "drag_lite.h"
 #include "perf_toggles.h"
@@ -3390,6 +3392,10 @@ struct StoryCuts {
 };
 std::mutex g_cutMx;
 std::atomic<long> g_cutRepeats{0}; // cut posts that changed nothing (the game posts a lot's cuts again when an object moves)
+// Closes of a cut waiting kHoldMs before they count (cut_close_hold.h: a camera move closes and reopens window cuts), under
+// g_cutMx; reopened = closes an add of the same edge cancelled, applied = closes that lasted (RequeueCutStories)
+std::vector<CutCloseHold::Pending> g_cutHeld;
+std::atomic<long> g_cutReopened{0}, g_cutHeldApplied{0};
 // (lot id of the posts, payload +0x08 / +0x0C = the posting lot's +0x48 / +0x4C, the id the game routes the message by
 // (0x00C52AA0); story) -> its cut cells. Always the post's own id: until 2.12.4 the first post whose lot's story manager
 // carried another id (+0x90 / +0x94, read while the lot was still being built) made a permanent alias and moved every cut of
@@ -3526,7 +3532,7 @@ void NoteCutoutPostImpl(int add, const uintptr_t* siteEsp, uintptr_t frame, uint
             }
         }
         if (!reject) {
-            if (g_cuts.size() > 4096) g_cuts.clear(); // (lots of earlier worlds)
+            if (g_cuts.size() > 4096) g_cuts.clear(), g_cutHeld.clear(); // (lots of earlier worlds)
             const uint32_t k = EdgeKey(r.key[0], r.key[1], r.key[3], r.key[4]);
             const bool known = g_cuts.count({r.postLot, story}) != 0;
             StoryCuts& s = g_cuts[{r.postLot, story}];
@@ -3534,13 +3540,16 @@ void NoteCutoutPostImpl(int add, const uintptr_t* siteEsp, uintptr_t frame, uint
             // new generation, no story sent to its solve)
             bool changed = !known;
             if (cut) {
+                if (CutCloseHold::Cancel(g_cutHeld, r.postLot, story, k)) g_cutReopened.fetch_add(1, std::memory_order_relaxed);
                 const CutRec rec{CutKind(r.flags), r.orient, r.piece, r.count, r.flags, {r.tgi[0], r.tgi[1], r.tgi[2], r.tgi[3]}};
                 const auto e = s.edges.find(k);
                 const bool same = e != s.edges.end() && e->second.kind == rec.kind && e->second.orient == rec.orient && e->second.piece == rec.piece &&
                                   e->second.count == rec.count && e->second.flags == rec.flags && std::memcmp(e->second.tgi, rec.tgi, sizeof rec.tgi) == 0;
                 if (!same) s.edges[k] = rec, changed = true;
-            } else if (s.edges.erase(k))
+            } else if (s.edges.count(k) && !CutCloseHold::NoteClose(g_cutHeld, r.postLot, story, k, GetTickCount())) {
+                s.edges.erase(k); // (the hold is full: closed at once)
                 changed = true;
+            }
             if (changed) {
                 s.gen = g_cutGen.fetch_add(1, std::memory_order_relaxed) + 1;
                 const DWORD now = GetTickCount();
@@ -4545,9 +4554,9 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
             g_openingSetChanges.fetch_add(1, std::memory_order_relaxed);
             if (g_openingSetLogged.fetch_add(1, std::memory_order_relaxed) < (kPublicBuild ? 50 : 1000))
                 LOG_INFO(std::format("[Openings] lot {:016X} story {}: its openings changed: {} -> {} on walls (doors {} -> {}, windows {} -> {}, arches {} -> {}, gates "
-                                     "{} -> {}); its rooms' doors are looked at again (cut posts that changed nothing so far: {})",
+                                     "{} -> {}); its rooms' doors are looked at again (cut posts that changed nothing so far: {}; closes reopened within the hold {}, closes that lasted {})",
                                      key.first, story, std::get<0>(was), std::get<0>(now), std::get<1>(was), std::get<1>(now), std::get<2>(was), std::get<2>(now),
-                                     std::get<3>(was), std::get<3>(now), std::get<4>(was), std::get<4>(now), g_cutRepeats.load()));
+                                     std::get<3>(was), std::get<3>(now), std::get<4>(was), std::get<4>(now), g_cutRepeats.load(), g_cutReopened.load(), g_cutHeldApplied.load()));
             if (const uintptr_t tracker = MgrTracker(mgr)) {
                 std::lock_guard<std::mutex> lk(g_warmMx);
                 const auto w = std::make_pair(tracker, story);
@@ -10974,6 +10983,7 @@ float OpenLampPass(const RoomInfo& info, void* light, const float* pointW, float
 bool FindInner(const RoomInfo& info, uintptr_t light);                                                   // below (indoor light through openings)
 float InnerPass(const RoomInfo& info, void* light, const float* pointW, float* lampW, GridWhy& why);    // below
 float InnerNormScaleAt(const RoomInfo& info, void* light, const BYTE* room); // below
+float OpeningLampFactor(const float* normal, const BYTE* room);            // below (outdoor light through openings: the outdoor scale)
 // The time Apex's own tests take inside the game's room solves (LightEvalHook, this hook; ApexSolveMs)
 std::atomic<uint64_t> g_apexSolveCycles{0};
 // One writer (the gather thread: every caller checks g_gatherThread), so a relaxed load and store, without a locked add
@@ -11060,6 +11070,9 @@ void __fastcall BasisLightHook(BYTE* room, void*, const float* pos, void* light,
             // The floor solve already compensates source/recipient normalisation. The directional
             // maps need the same relative lamp weights, including gains above one, at an arch.
             if(kMemoryOptimizationsEnabled&&inner)openShare*=InnerNormScaleAt(*info,light,room);
+            // a lamp of room 0 at the outdoor ground's scale, as in the room's light maps (whether the game normalises the
+            // directional maps is not read: no normalisation factor here)
+            if (!inner) openShare *= OpeningLampFactor(nullptr, nullptr);
         }
     // one daytime curve (12/10): an outdoor lamp in a roofed room's directional maps (the window glass and the objects of
     // the room read them) x the solve's factor, as in its light maps (RoofedDay)
@@ -12340,6 +12353,18 @@ float InnerNormScaleAt(const RoomInfo& info, void* light, const BYTE* room) {
 }
 float InnerNormScale(const RoomInfo& info, void* light) {return InnerNormScaleAt(info,light,t_solveRoom);}
 
+// Outdoor light through openings: a roofed room's lamp of room 0 at the outdoor surface's brightness and outside the room's
+// normalisation (opening_lamp_balance.h), set from the menu values (SetOpeningLampBalance)
+std::atomic<float> g_openGround{1.0f}, g_openWall{1.0f};
+std::atomic<long> g_openScaled{0};
+float OpeningLampFactor(const float* normal, const BYTE* room) {
+    OpeningLampBalance::Scales s;
+    s.ground = g_openGround.load(std::memory_order_relaxed), s.wall = g_openWall.load(std::memory_order_relaxed);
+    const float k = room ? OpeningLampBalance::Factor(s, normal, RoomNormOf(room), RoomOutdoorFlag(room)) : (OpeningLampBalance::WallTexel(normal) ? s.wall : s.ground);
+    if (k != 1.0f) ApexUtil::CountOne(g_openScaled);
+    return k;
+}
+
 // Indoor light through openings: a lamp of a roofed room taken through an opening (ShareInnerLamps), tested like a yard's
 // (InnerPass); the game's own wall test that follows for it is skipped (GameWallTest)
 void InnerShadow(const RoomInfo& info, void* light, const float* sample, float* colour) {
@@ -12496,8 +12521,17 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
         if (g_ctx.thr > (colour[2] + colour[1]) + colour[0]) return;
         const ApexCycles timed;
         if (innerLamp) InnerShadow(*g_ctx.info, light, sample, colour); // a lamp of a roofed room through an opening (indoor light through openings)
-        else if (openLamp || (g_ctx.info->yard && FindSame(*g_ctx.info, reinterpret_cast<uintptr_t>(light))))
+        else if (openLamp || (g_ctx.info->yard && FindSame(*g_ctx.info, reinterpret_cast<uintptr_t>(light)))) {
+            // the outdoor map's cut at 1 for this lamp's entries (story 0's room-0 lamps are listed twice, ShareRoofedOpenings)
+            if (openLamp)
+                OpeningLampBalance::CapEntry(colour, g_ctx.info->level == 0 || (g_ctx.info->level == 1 &&
+                                                  std::binary_search(g_ctx.info->lower.begin(), g_ctx.info->lower.end(), reinterpret_cast<uintptr_t>(light))) ? 2 : 1);
             YardShadow(*g_ctx.info, light, sample, colour); // a lamp of a roofless room's own story (light through doors and windows), or of a roofed room's doors
+            if (openLamp && (colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f)) { // at the outdoor surface's scale
+                const float k = OpeningLampFactor(normal, t_solveRoom);
+                for (int i = 0; i < 4; i++) colour[i] *= k;
+            }
+        }
         else if (!g_ctx.info->indoor) CrossFloorShadow(*g_ctx.info, light, sample, colour);
         else if (const Cross* c = FindCross(*g_ctx.info, reinterpret_cast<uintptr_t>(light)); c && c->outdoor)
             CrossFloorShadow(*g_ctx.info, light, sample, colour); // a roofless room taking an outdoor lamp of another story
@@ -13378,8 +13412,18 @@ void RequeueCutStories() {
     std::vector<std::pair<uint64_t, int>> due, zero;
     {
         std::lock_guard<std::mutex> lk(g_cutMx);
-        if (g_cutDirty.empty()) return;
         const DWORD now = GetTickCount();
+        // the closes that lasted (cut_close_hold.h): the cut leaves its story now, sent once quiet as any other change
+        if (!g_cutHeld.empty())
+            g_cutHeldApplied.fetch_add(CutCloseHold::Due(g_cutHeld, now, [&](uint64_t lot, int story, uint32_t edge) {
+                const auto s = g_cuts.find({lot, story});
+                if (s == g_cuts.end() || !s->second.edges.erase(edge)) return;
+                s->second.gen = g_cutGen.fetch_add(1, std::memory_order_relaxed) + 1;
+                const auto d = std::find_if(g_cutDirty.begin(), g_cutDirty.end(), [&](const auto& e) { return std::get<0>(e) == lot && std::get<1>(e) == story; });
+                if (d != g_cutDirty.end()) std::get<2>(*d) = now;
+                else if (g_cutDirty.size() < 512) g_cutDirty.emplace_back(lot, story, now);
+            }), std::memory_order_relaxed);
+        if (g_cutDirty.empty()) return;
         for (auto it = g_cutDirty.begin(); it != g_cutDirty.end();)
             if (now - std::get<2>(*it) >= kCutQuietMs) {
                 due.emplace_back(std::get<0>(*it), std::get<1>(*it));
@@ -14055,10 +14099,12 @@ std::string OpeningsStatus() {
     const std::string roofedText = std::format(
         " | outdoor light through openings: {} (roofed rooms taking outdoor lamps {}, {} lamps; with no door to the outside {}; lamps beyond reach {}, with no door in "
         "sight {}; points tested {}, lit {}; lamps of the story below tested {}, stopped by this story's floors {}; directional map samples tested {}, blocked {}; rooms "
-        "sent for lamp edits {}, for their doors {}; rig copies published {}; grid walls ending at a floor above them {})",
+        "sent for lamp edits {}, for their doors {}; rig copies published {}; grid walls ending at a floor above them {}; at the outdoor scale x{:.3f} floors, x{:.3f} walls, "
+        "points scaled {}; cut closes held: reopened {}, lasted {})",
         roofed ? (RoofedOpeningsOn() ? "on" : "on, not ready") : "off", g_roofedRooms.load(), g_roofedAdded.load(), g_roofedNoDoor.load(), g_roofedFar.load(),
         g_roofedHidden.load(), g_roofedTests.load(), g_roofedLit.load(), g_roofedBelowTests.load(), g_roofedBelowSlab.load(), g_roofedBasisTests.load(),
-        g_roofedBasisBlocked.load(), g_roofedSends.load(), g_roofedDoorSends.load(), g_openRigPublished.load(), g_gridCapped.load());
+        g_roofedBasisBlocked.load(), g_roofedSends.load(), g_roofedDoorSends.load(), g_openRigPublished.load(), g_gridCapped.load(), g_openGround.load(), g_openWall.load(),
+        g_openScaled.load(), g_cutReopened.load(), g_cutHeldApplied.load());
     const std::string innerText = std::format(
         " | indoor light through openings: {} (rooms taking lamps of roofed rooms {}, {} lamps, {} of them of the story above; lamps beyond reach {}, with no "
         "opening in sight {}; points tested {}, lit {}, stopped where they go down through a floor {}; left out of the floor mask {}; directional map samples tested {}, "
@@ -15796,6 +15842,19 @@ void SetOutdoorThroughOpenings(bool on) {
     ObjectLightBridge::RequestRigRefresh();
 }
 bool OutdoorThroughOpeningsActive() { return RoofedOpeningsOn(); }
+
+void SetOpeningLampBalance(float groundBrightness, float lotLampBrightness, bool groundOn, float wallBrightness, bool wallsOn) {
+    const OpeningLampBalance::Scales now = OpeningLampBalance::From(groundBrightness, lotLampBrightness, groundOn, wallBrightness, wallsOn);
+    static bool s_set = false;
+    OpeningLampBalance::Scales was;
+    was.ground = g_openGround.load(std::memory_order_relaxed), was.wall = g_openWall.load(std::memory_order_relaxed);
+    if (s_set && !OpeningLampBalance::Moved(was, now)) return;
+    g_openGround.store(now.ground, std::memory_order_relaxed), g_openWall.store(now.wall, std::memory_order_relaxed);
+    const bool first = !s_set;
+    s_set = true;
+    // (the first value is set before any room is solved; a later one moves the maps of the roofed rooms with openings)
+    if (!first && g_installed.load(std::memory_order_relaxed) && g_indoorReady && RoofedOpeningsOn()) RelightAllRooms("Outdoor light through openings: brightness");
+}
 
 // Shadow softness: every room whose light passes a wall edge the grid walk softens, of every loaded lot and story: room 0,
 // the roofless rooms, the roofed rooms with doors to the outside (their records) and the rooms that took lamps through an

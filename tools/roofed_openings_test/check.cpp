@@ -19,6 +19,9 @@
 #include "features/inner_retry.h"
 #include "features/lamp_reach.h"
 #include "features/rig_cut.h"
+#include "features/opening_lamp_balance.h"
+#include "features/cut_close_hold.h"
+#include "features/gpu_lamp_law.h"
 using DWORD = unsigned long;
 struct Xform {
     float r[4][4];
@@ -1169,6 +1172,87 @@ void PillarLightChecks() {
     Check(KeepWallTop(top, 3.025f, 3.025f, 3.025f) && top.tall, "crossing the tall threshold always invalidates the grid");
 }
 
+// Outdoor light through openings at the outdoor scale (opening_lamp_balance.h), replayed on the light capture of a green sconce
+// (intensity 1.7, colour (0, 1, 0), a story-0 room-0 lamp listed twice) beside a kitchen behind a glass door: the courtyard
+// draws the lot map x Ground brightness 0.75 x Lot lamp brightness 0.756 (the player's) and the kitchen floor showed 0.808.
+// The indoor chain: the solve's sum x the room's normalisation, its curve (GpuLampLaw::Tone), the room-lit floor shader's
+// curve (PS 44ECECA0: x tanh(2.1 mean) / mean, c2.z = 4.2) on map x albedo. The ground: albedo x scale x min(sum, 1).
+float FloorDraw(float map, float albedo) { // one channel of a saturated green texel: mean = a third of it
+    const float g = map * albedo, m = g / 3.0f;
+    return m > 1e-6f ? std::min(1.0f, g * std::tanh(2.1f * m) / m) : 2.1f * g;
+}
+float IndoorGreen(float entry, int times, float pass, float norm, bool fixed, const OpeningLampBalance::Scales& s, float albedo) {
+    const float up[3] = {0.0f, 1.0f, 0.0f};
+    float c[3] = {0.0f, entry, 0.0f};
+    if (fixed) OpeningLampBalance::CapEntry(c, times);
+    const float k = fixed ? OpeningLampBalance::Factor(s, up, norm, false) : norm;
+    float x[3] = {0.0f, c[1] * times * pass * k, 0.0f}, t[3];
+    GpuLampLaw::Tone(x, t);
+    return FloorDraw(std::min(t[1], 1.0f), albedo);
+}
+void BalanceChecks() {
+    const OpeningLampBalance::Scales s = OpeningLampBalance::From(0.75f, 0.756f, true, 0.30f, true);
+    Check(std::fabs(s.ground - 0.567f) < 1e-4f && std::fabs(s.wall - 0.30f) < 1e-6f, "the player's scales: floors 0.75 x 0.756, walls 0.30");
+    const float up[3] = {0, 1, 0}, side[3] = {1, 0, 0};
+    Check(std::fabs(OpeningLampBalance::Factor(s, up, 1.0f, false) - 0.567f) < 1e-4f, "a floor texel takes the ground's scale");
+    Check(std::fabs(OpeningLampBalance::Factor(s, side, 1.0f, false) - 0.30f) < 1e-6f, "a wall texel takes the walls' scale");
+    Check(std::fabs(OpeningLampBalance::Factor(s, nullptr, 1.0f, false) - 0.567f) < 1e-4f, "a directional sample (no normal) takes the ground's");
+    Check(std::fabs(OpeningLampBalance::Factor(s, up, 1.5f, false) - 0.567f / 1.5f) < 1e-4f, "a boosted room does not boost the outdoor lamp");
+    Check(std::fabs(OpeningLampBalance::Factor(s, up, 1.5f, true) - 0.567f) < 1e-4f, "a room solved as outdoor has no normalisation");
+    Check(std::fabs(OpeningLampBalance::Factor(s, up, 1e9f, false) - 0.567f) < 1e-4f, "an unreadable normalisation counts as 1");
+    const OpeningLampBalance::Scales off = OpeningLampBalance::From(0.75f, 0.756f, false, 0.30f, false);
+    Check(off.ground == 1.0f && off.wall == 1.0f, "lot pass and walls off: the game's scale");
+    Check(!OpeningLampBalance::Moved(s, OpeningLampBalance::From(0.751f, 0.756f, true, 0.30f, true)) &&
+              OpeningLampBalance::Moved(s, OpeningLampBalance::From(0.80f, 0.756f, true, 0.30f, true)), "a slider moved by 0.1% relights nothing, by 5% every room");
+    float capped[3] = {0.2f, 1.7f, 0.0f};
+    OpeningLampBalance::CapEntry(capped, 2);
+    Check(capped[0] == 0.2f && capped[1] == 0.5f, "an entry of a lamp listed twice holds at most half the outdoor cut");
+    // the capture: the kitchen pixel (stone albedo 0.8, glass 0.765, norm 1) showed 0.808, a map of 0.49 per the floor curve
+    const float albedo = 0.8f, glass = 0.765f;
+    Check(std::fabs(FloorDraw(0.4925f, albedo) - 0.808f) < 0.01f, "the floor curve gives the captured 0.808 from a map of 0.49");
+    int worse = 0, fixedWorse = 0;
+    float before = 0, after = 0, ground = 0;
+    for (int i = 1; i <= 200; i++) { // one entry's colour from 0.025 to 5 (both entries: up to 10, the cut 2 x Cmax)
+        const float e = 0.025f * static_cast<float>(i);
+        const float out = albedo * s.ground * std::min(2.0f * e, 1.0f); // the courtyard at the same distance, no wall between
+        const float was = IndoorGreen(e, 2, glass, 1.0f, false, s, albedo), now = IndoorGreen(e, 2, glass, 1.0f, true, s, albedo);
+        if (was > out + 1e-4f) ++worse;
+        // (under a mean of 0.01 the room solve's curve leaves the sum whole, GpuLampLaw::Tone: the game's own step, a screen
+        // value under 0.04; the entries from 0.05 up are compared)
+        if (e >= 0.05f && now > out + 1e-4f) ++fixedWorse;
+        if (i == 40) before = was, after = now, ground = out; // e = 1 (the kitchen floor near the door)
+    }
+    std::printf("Green sconce, entry 1.0: ground %.3f, kitchen before %.3f, after %.3f; samples brighter indoors than the ground: before %d of 200, after %d\n", ground, before, after,
+                worse, fixedWorse);
+    Check(worse > 150, "before: the kitchen brighter than the courtyard at almost every distance");
+    Check(fixedWorse == 0, "after: never brighter than the ground at the same distance");
+    Check(after > 0.5f * ground, "after: still lit through the glass (no black room)");
+}
+// Cut closes held (cut_close_hold.h), replayed on the log of three camera turns: windows closed at 39.083 and reopened at
+// 39.751, closed at 46.352 and reopened at 46.529; a window really removed closes once.
+void CutHoldChecks() {
+    std::vector<CutCloseHold::Pending> p;
+    int applied = 0;
+    const auto apply = [&](uint64_t, int, uint32_t) { ++applied; };
+    Check(CutCloseHold::NoteClose(p, 0xE8980049DC0B34C0ull, 0, 7, 39083) && p.size() == 1, "a close is held");
+    Check(CutCloseHold::NoteClose(p, 0xE8980049DC0B34C0ull, 0, 7, 39200) && p.size() == 1 && p[0].at == 39083, "a repeated close keeps its first time");
+    CutCloseHold::Due(p, 39750, apply);
+    Check(applied == 0 && CutCloseHold::Cancel(p, 0xE8980049DC0B34C0ull, 0, 7) && p.empty(), "reopened 0.67 s later: the cut never left");
+    CutCloseHold::NoteClose(p, 1, 0, 7, 46352);
+    Check(!CutCloseHold::Cancel(p, 1, 1, 7) && !CutCloseHold::Cancel(p, 2, 0, 7) && p.size() == 1, "an add of another story or lot cancels nothing");
+    Check(CutCloseHold::Cancel(p, 1, 0, 7), "reopened 0.18 s later");
+    CutCloseHold::NoteClose(p, 1, 0, 9, 50000);
+    CutCloseHold::Due(p, 50000 + CutCloseHold::kHoldMs - 1, apply);
+    Check(applied == 0, "a removed window keeps its cut during the hold");
+    CutCloseHold::Due(p, 50000 + CutCloseHold::kHoldMs, apply);
+    Check(applied == 1 && p.empty(), "and loses it once the hold ends");
+    CutCloseHold::NoteClose(p, 1, 0, 9, 0xFFFFFF00u);
+    CutCloseHold::Due(p, 0xFFFFFF00u + CutCloseHold::kHoldMs, apply); // (the tick count wraps)
+    Check(applied == 2, "across the tick count's wrap");
+    for (uint32_t e = 0; e < CutCloseHold::kMax; e++) CutCloseHold::NoteClose(p, 3, 0, e, 0);
+    Check(!CutCloseHold::NoteClose(p, 3, 0, 99999, 0), "a full table closes at once (as before)");
+}
+
 int main() {
     PillarLightChecks();
     RaisedWallSpanChecks();
@@ -1284,6 +1368,8 @@ int main() {
     Check(one.size() == 1 && DoorSig(half.g, one) != sig && DoorSig(half.g, one) != 0, "one arch cell closed: another signature");
     WallCopyChecks();
     OpeningShapeChecks();
+    BalanceChecks();
+    CutHoldChecks();
     std::printf("Roofed openings: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

@@ -2503,6 +2503,8 @@ class NightTerrainRelightPatch : public ApexPatch {
             LevelLightShare::SetFloorWalls(g_floorWalls);
             LevelLightShare::SetRealisticOpenings(g_realisticOpenings);
             LevelLightShare::SetOutdoorThroughOpenings(g_outdoorOpenings);
+            if (!MenuSliderHeld()) // (applied once the slider is let go: a change relights every room)
+                LevelLightShare::SetOpeningLampBalance(g_groundBrightness, g_lotLampGain, g_bridge, g_wallStrength, g_walls);
             LevelLightShare::SetDoorsBlockLight(g_doorsBlock);
             LevelLightShare::SetIndoorThroughOpenings(g_indoorOpenings);
             LevelLightShare::SetIndoorLightOnGround(g_indoorGround);

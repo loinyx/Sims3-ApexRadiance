@@ -68,6 +68,11 @@ bool RealisticOpeningsActive();
 // the openings noted.
 void SetOutdoorThroughOpenings(bool on);
 bool OutdoorThroughOpeningsActive();
+// Their brightness: the lamps of room 0 a roofed room takes through its openings keep the scale of the outdoor surfaces
+// (floors and the directional maps: Ground brightness x Lot lamp brightness while the lot pass applies them; walls: the
+// walls' Brightness while walls are lit) over the room's normalisation (opening_lamp_balance.h). Night values: the daytime
+// curve is applied apart. A change of more than 0.5% relights every room; the first value relights none.
+void SetOpeningLampBalance(float groundBrightness, float lotLampBrightness, bool groundOn, float wallBrightness, bool wallsOn);
 // Doors block light (option "portasBloqueiamLuz", default on): a door or gate cut (and a cut of unknown kind) lets no lamp
 // light through, as the game keeps doors closed except while they open; arches, windows and doors with glass (a window light
 // of the door in its cell) stay open. Every reader of the

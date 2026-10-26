@@ -277,6 +277,8 @@
     <ClInclude Include="features\lamp_visibility.h" />
     <ClInclude Include="features\wall_openings.h" />
     <ClInclude Include="features\inner_retry.h" />
+    <ClInclude Include="features\cut_close_hold.h" />
+    <ClInclude Include="features\opening_lamp_balance.h" />
     <ClInclude Include="features\drag_lite.h" />
     <ClInclude Include="features\tester_toggles.h" />
     <ClInclude Include="features\ground_light_gate.h" />
