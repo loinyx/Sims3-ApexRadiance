@@ -22,6 +22,10 @@ The feature is described in [features/banding-fix.md](../features/banding-fix.md
 `tpdftest.cpp`), which were not kept. It counts unique shaders (by size and hash): 4907 ps_3_0, 3104 ps_2_0, 5 ps_1_x
 and 4348 vertex shaders.
 
+High-precision scene: [`tools/scene_target_test`](../../tools/scene_target_test/README.md) (pure logic of
+`framework/scene_target_logic.h`, and its resolve shader on a native D3D9 device; part of
+`tools/development/check.ps1 -Suite Smoke`).
+
 ## Latest results
 
 | Date | Commit | Harness | Result | Backend |
@@ -30,6 +34,8 @@ and 4348 vertex shaders.
 | 2026-09-30 | 7d5615d | `tpdftest.cpp` | Grey 20.40 / 100.70 levels comes out as 20.355 / 100.657 on average (20 / 101 without); level weights about 1/8, 3/4, 1/8 | Native D3D9 |
 | 2026-09-30 | f578f43 | `dithertest.cpp` | ps_3_0: 4907 / 4907 patched and accepted by a native HAL device (strict validator); 3104 ps_2_0 and 7 ps_1_1 left alone (no `vPos`) | Native D3D9 |
 | 2026-09-30 | 53d1091 | `dithertest2.cpp` | ps_2_0: 2996 / 3104 patched and created (108 with no free texture coordinate, temp or constant); 519 of 2308 failed when the copy was ps_2_0, hence ps_2_x. vs_2_0: 4035 / 4338 (2961 with t7, 1074 with a lower k, 303 refused). A grey through a patched vs_2_0 + ps_2_0 pair gives the same means and triangle as ps_3_0 (20.355 / 63.971 / 100.657) | Native D3D9 |
+
+| 2026-10-26 | 0d9ef9d | `tools/scene_target_test` | 30 / 30. Resolve average error 0.0005 level between 1 and 254 levels (plain rounding: up to 0.498); exact levels unchanged; never past 0 / 255. On the GPU: 0 channels more than one level from the C++ copy, 2.9% one level (float precision of the noise), alpha equal to plain rounding, ramp mean error -0.031 level. The GPU's own float to 8-bit conversion rounds values up to 0.56 level down (2.4% of channels at strength 0): the game's 8-bit path goes through the same conversion | Native D3D9, RTX 4070 Ti SUPER |
 
 ## In-game test plan
 
@@ -69,3 +75,25 @@ and 4348 vertex shaders.
 - In game: the blend-class counts, the look of the half grain on additive and multiply draws, the absence of grain
   under the UI panels, and Smooth gradients at 8% (now an active full-screen pass) and its GPU cost (built 2026-10-26,
   not yet run in game).
+
+High-precision scene (experimental, never run in game). Each of these is open:
+
+- Rings and grain: night interior lit by one lamp, switch off then on, Banding Fix Strength 100%. Expected: no rings, a
+  grain no stronger than with the switch off.
+- Picking: click objects, Sims and the terrain. Expected: unchanged (the 16x16 pick target is never substituted).
+- Bloom: night lamps and daylight glow. Expected: unchanged (alpha copied exactly).
+- Screenshots: the game's own and Apex's (report photo, filtered capture). Expected: the resolved scene, never a black or
+  stale picture. The game's screenshot path is not known.
+- UI: menus, the HUD glass panels, map view, Build mode and Create a Sim. Expected: unchanged (exact 8-bit values pass
+  unchanged; the UI's back-buffer copies resolve first).
+- Hidden UI (Tab camera, F10): the colour-tile path resolves before the effects. Expected: effects applied once.
+- Resolution change, windowed / full screen switch and alt-tab (device Reset). Expected: no failed Reset, the target made
+  again at the new size.
+- The game's own Edge Smoothing on. Expected: the "Unavailable" status, nothing substituted.
+- ReShade and DXVK: the substitution and the `GetRenderTarget` detour under a wrapped device; DXVK's support of
+  `D3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING` for `A16B16G16R16`.
+- Frame time at 3840x2160 with the switch on and off (the target doubles the scene's colour bandwidth; the resolve is
+  one full-screen pass), and the video memory reported (about 66 MB at 4K).
+- Developer page resolve causes over a minute in world: most at the boundary, few at Present.
+- sRGB writes: whether any scene draw into the back buffer turns `D3DRS_SRGBWRITEENABLE` on (the 16-bit target is not
+  known to support sRGB writes; such a draw would come out darker). Not checked.

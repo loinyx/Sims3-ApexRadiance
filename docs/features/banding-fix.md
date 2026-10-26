@@ -12,7 +12,7 @@ the grain cannot reach (the sky and some other surfaces).
 |---|---|
 | Availability | Released in 2.2.0 (Experimental, with a "Still being tested" note on its page, until 2.15.0). Its own page, Smooth gradients off by default and copies made at a shader's first scene draw: Released in 2.7.0 |
 | Default | On for new configurations |
-| Menu | Image > Banding Fix (card *Banding Fix*, with *Smooth gradients*); Overview > Image > Banding Fix |
+| Menu | Image > Banding Fix (card *Banding Fix*, with *Smooth gradients* and *High-precision scene*); Overview > Image > Banding Fix |
 | Configuration | `[patches.SceneDither]` in `ApexRadiance.toml` (Smooth gradients: `[qol.picture] deband`) |
 | Source | [`features/scene_dither.cpp`](../../features/scene_dither.cpp), [`features/shader_patches.cpp`](../../features/shader_patches.cpp) (`AddDither`, `AddDither2`, `AddScreenPosVs`) |
 
@@ -55,6 +55,7 @@ which the game uses as its bloom mask, is never changed.
 | Strength | `forca` | float | 100% | 0 to 100% | Peak of the triangular grain in 8-bit steps (100% = plus or minus one step, the full TPDF). 0% adds nothing |
 | Moving grain | `graoEmMovimento` | bool | off | | A new grain pattern every frame. High frame rates average it away; at low frame rates it shows as a faint shimmer |
 | Smooth gradients | `[qol.picture] deband` | float | 8% (also in every built-in profile) | 0 to 200% | Deband filter of the Picture pass: smooths steps up to `1 + 6.25 x deband` levels (8% = 1.5, 100% = 7.25, 200% = 13.5; until 2.15.6 `deband x 6`, which at 8% smoothed nothing). Saved values are kept. Runs only while the Banding Fix is on |
+| High-precision scene (Experimental) | `cenaAltaPrecisao` | bool | off (not in the built-in profiles) | | Draws the 3D scene into a 16-bit target and resolves it once; see [High-precision scene](#high-precision-scene-experimental) |
 | Developer > Show covered surfaces | (not saved) | bool | off | | Replaces the grain with a coarse 24-step grain on every covered surface |
 
 Settings apply live. The Developer page also shows the shader coverage counters (under *Shader coverage*): scene
@@ -162,6 +163,59 @@ refused: ...`. The Developer page shows the same counters for the last frame.
 **Shared binder.** The draw hook (`SceneBinder`) was written to also bind jittered vertex copies for temporal
 anti-aliasing (constant `c252`). Temporal anti-aliasing is removed from Edge Smoothing and no longer calls it; the code
 remains.
+
+## High-precision scene (experimental)
+
+Not yet tested in game; off by default. The grain above hides the 8-bit rounding of each draw, but each blend still
+rounds: a pixel lit by several passes collects one rounding (and one grain) per pass. This switch removes those roundings
+instead of hiding them.
+
+**How.** Source: [`framework/scene_target.cpp`](../../framework/scene_target.cpp), pure parts in
+[`framework/scene_target_logic.h`](../../framework/scene_target_logic.h).
+
+1. **Target.** A `D3DFMT_A16B16G16R16` render-target texture the size of the back buffer (8 bytes a pixel: about 66 MB
+   at 3840x2160), `D3DPOOL_DEFAULT`, released before a device Reset and made again at the next frame. 16-bit unsigned
+   normalised clamps to 0..1 like the 8-bit back buffer, so the game's blending gives the same result with more
+   precision.
+2. **Substitution.** From Present until the scene is resolved, `SetRenderTarget(0, back buffer)`, from the game or from
+   any Apex callback (`D3D9Hooks::SetRenderTargetSubstitute`, which `CallOriginalSetRenderTarget` also follows), binds
+   the target. Every SetRenderTarget callback still sees the back buffer, and `GetRenderTarget` reports the back buffer
+   while the target is bound, so the identity checks of PostScene, Picture and the Banding Fix are unchanged. The target
+   is bound again at every Present, after every other Present callback, so a Clear before the frame's first
+   SetRenderTarget lands in it. Other targets (mouse pick, shadows, reflections, bloom) are never touched.
+3. **Resolve.** One full-screen draw of the target into the back buffer, at the first of: the post-scene boundary (a
+   PostScene effect ordered before Ambient Occlusion, Edge Smoothing, Depth Blur and Picture), a `StretchRect`,
+   `ColorFill` or `GetRenderTargetData` touching the back buffer (the UI's back-buffer copies, the hidden-UI colour tile,
+   Apex's own scene copies, read-backs), the game's EndScene while the target is bound, Present. After it, the frame
+   continues on the real 8-bit back buffer, as without the switch.
+4. **Grain once.** The resolve adds the Banding Fix's triangular grain (its Strength and Moving grain phase) once. Its
+   amplitude never reaches past 0 or 255 (`min(1, x, 255 - x)` levels), and a value that is exactly an 8-bit level (the
+   UI, flat colours) passes unchanged. Alpha, the bloom mask, is copied without grain. While the scene goes into the
+   target, the per-draw grain is not bound (`SceneDither` skips its copies).
+5. **Refused** (status on the card, nothing substituted): the game's own Edge Smoothing on (a multisampled back buffer;
+   its depth-stencil is multisampled too), a back buffer other than `A8R8G8B8`, no 16-bit render target with
+   post-pixel-shader blending (`CheckDeviceFormat` with `D3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING`), a depth format that
+   does not match it (`CheckDepthStencilMatch`), or the target not created.
+6. **Hooks.** `GetRenderTargetData`, `ColorFill` and `GetRenderTarget` are detoured (`ExtraHooks::EnsureTargetHooks`)
+   only when the switch first turns on. With the switch off the frame callbacks return at once.
+
+**Status.** The card shows the video memory of the target or the reason it is not used. The development build adds
+the resolves by cause and the CPU time to issue one. The texture is counted in Apex's Direct3D memory (developer
+`memory_owners`).
+
+**Not covered.** A `LockRect` of a lockable back buffer, `UpdateSurface` into it, or `GetFrontBufferData` would see
+the back buffer before the resolve; the game is not known to use them (*not verified*). A scene draw with
+`D3DRS_SRGBWRITEENABLE` on would not get the sRGB conversion in the 16-bit target (*not verified* whether the game
+does this). A scene drawn in several
+BeginScene / EndScene pairs is resolved at the first EndScene with the target bound; what follows draws on the 8-bit
+back buffer as before.
+
+**Rejected for this switch.**
+
+- FP16 (`A16B16G16R16F`): does not clamp, so blends that rely on the 8-bit clamp would differ.
+- `A2B10G10R10`: 2 bits of alpha break the bloom mask kept in the back buffer's alpha.
+- 10-bit output (an `A2R10G10B10` swap chain): the same 2-bit alpha, and the UI and every Apex pass read the back
+  buffer as 8-bit; not part of this switch.
 
 ## Rejected approaches
 

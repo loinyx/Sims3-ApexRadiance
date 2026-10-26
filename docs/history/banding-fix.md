@@ -90,3 +90,20 @@ pattern is R2 (lower 2x2 and 4x4 block variance than IGN); the AO composite uses
 Picture dither IGN, triangular, only where the pass changed the pixel; the deband threshold is `1 + 6.25 x setting`
 levels with bilinear taps. Shader acceptance is unchanged (ps_3_0 4907 / 4907, ps_2_0 2996 / 3104). Subtracting half a
 pixel from the ps_2_x position was rejected: the two grains already match pixel for pixel. Not yet confirmed in game.
+
+### 2026-10-26: High-precision scene (experimental)
+
+**Context:** the grain hides the 8-bit rounding of each scene draw, but every blend still rounds to 8 bits, so a pixel
+lit by several passes collects one rounding and one grain per pass.
+
+**Finding:** from a read-only study of the frame: only render target 0 set to the back buffer needs a substitute; the
+pick pass, shadows, reflections and bloom use their own targets. Apex callbacks save render target 0 with
+`GetRenderTarget` and put it back with `CallOriginalSetRenderTarget` (Ambient Occlusion's receiver mask, the GPU lamps),
+so the substitution has to apply there too and `GetRenderTarget` has to report the back buffer. A 16-bit unsigned
+normalised target clamps like the back buffer; FP16 does not, and 10-bit formats keep 2 bits of alpha (the bloom
+mask). The offline check measured the GPU's own float to 8-bit conversion (RTX 4070 Ti SUPER): values up to 0.56
+level above an integer round down, the same for the game's 8-bit path.
+
+**Outcome:** a switch on the Banding Fix card, off by default, with the target, the substitution and one resolve with
+one grain (exact 8-bit values pass unchanged). 10-bit output was left out. Not yet tested in game: open checks on the
+[validation page](../validation/banding-fix.md#open-checks).
