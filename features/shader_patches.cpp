@@ -3083,7 +3083,7 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
     const bool ps3 = t[0] == 0xFFFF0300;
     const Usage u = Scan(t, ins);
     const int constLimit = ps3 ? 224 : 32; // ps_2_x: c0..c31
-    if (u.maxTemp + 11 >= 32 || u.maxConst + 6 >= constLimit) return false;
+    if (u.maxTemp + 14 >= 32 || u.maxConst + 6 >= constLimit) return false;
     const DWORD T = static_cast<DWORD>(u.maxTemp + 1);
     const DWORD cS = static_cast<DWORD>(u.maxConst + 1), cK = cS + 1, cH = cS + 2, cR = cS + 3, cG = cS + 4, cV = cS + 5;
     const DWORD P = T, Fr = T + 1, R = T + 2, A = T + 3, B = T + 4, Wt = T + 10;
@@ -3111,18 +3111,20 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
     }
     // Light across a wall. The B-spline reads the 4 x 4 texels around the pixel; where they include the texels of room 0
     // beyond a wall the pixel took that room's light: a hall beside a glass door showed a band of the lit courtyard's light
-    // along its wall (F7: 0.14 of a courtyard texel at 1 beside hall texels at 0.03), then, held under the brightest of the
-    // 2 x 2 texels the bilinear read takes, a line of it in the last half texel before the wall (0.25 of a texel at 1). The
-    // solve marks the sides: a roofed room's texel holds its ambient weight in alpha (0.44 to 0.84 there), room 0's 0 (or
-    // the little light rooms send out of their openings, Indoor light on the ground). When the pixel's own texel (the one
-    // it lies in) has alpha 0.125 or more, the colour is held under the brightest texel of the 4 x 4 with alpha 4/255 or
-    // more (+ 2/255): the B-spline of the room's own texels is never under it, so a shadow edge or a jamb's penumbra
-    // keeps its smooth read (the 2 x 2 bound cut its dark side's tail at texel lines, steps a texel wide along a door's
-    // jambs and sill); room 0's texels beyond the wall add nothing. A pixel of room 0 or a bright texel with little ambient
-    // weight keeps the B-spline. Rows as the taps (the pixel's wall block). Temps free here: A, B, R, C0..C3, T + 5, Wt.
+    // along its wall (F7: 0.14 of a courtyard texel at 1 beside hall texels at 0.03). Held under the brightest texel of the
+    // room's side it still drew a line: a room's texels along a wall under a window are dark (the wall below the sill
+    // shades them; F7: courtyard 1 | wall | 0, 0.08, 0.18), the B-spline lifted the first to the bound with the courtyard's
+    // light and left the second dark, a black line half a metre from the wall between two lit bands. The solve marks the
+    // sides: a roofed room's texel holds its ambient weight in alpha (0.44 to 0.84 there), room 0's 0 (or the little light
+    // rooms send out of their openings, Indoor light on the ground). When the pixel's own texel (the one it lies in) has
+    // alpha 0.125 or more, the read is the B-spline of the 4 x 4 texels with alpha 4/255 or more alone, its weights over
+    // their sum (the own texel's weight is at least 0.23): room 0's texels beyond the wall add nothing to the colour or to
+    // the ambient weight, and the room's light falls to the wall as the solve has it, smooth across shadow edges and a
+    // jamb's penumbra. A pixel of room 0 or a bright texel with little ambient weight keeps the B-spline. Rows as the taps
+    // (the pixel's wall block). Temps free here: A, B, R, C0..C3, T + 5, Wt, T + 11 .. T + 13.
     {
-        constexpr DWORD kCmp = 0x58;
-        const DWORD C0 = T + 6, Xc = T + 5, Yr = Wt;
+        constexpr DWORD kCmp = 0x58, kDp4 = 0x09;
+        const DWORD C0 = T + 6, Xc = T + 5, Yr = Wt, Wx = T + 11, Wy = T + 12, Acc = T + 13;
         const std::vector<DWORD> blockLimits(clampV.begin(), clampV.end() - 8); // (lo in A.x, hi in A.y; not the clamp of B)
         body.insert(body.end(), {
             Op(kAdd, 3), Dst(kTemp, B, 0x3), Src(kTemp, Fr), Src(kConst, cH, X),                                     // f - 0.5
@@ -3132,7 +3134,7 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
             Op(kMul, 3), Dst(kTemp, B, 0x3), Src(kTemp, B), Src(kConst, cS, Sw(2, 3, 2, 3)),
             Op(kTexld, 3), Dst(kTemp, R), Src(kTemp, B), Src(kSampler, r.S),
             Op(kAdd, 3), Dst(kTemp, A, 0x8), Src(kTemp, R, W), Neg(Src(kConst, cG, Y)),
-            Op(kCmp, 4), Dst(kTemp, A, 0x8), Src(kTemp, A, W), Src(kConst, cG, W), Src(kConst, cG, Z),              // 1 = no bound
+            Op(kCmp, 4), Dst(kTemp, A, 0x8), Src(kTemp, A, W), Src(kConst, cG, W), Src(kConst, cG, Z),              // 1 = the plain B-spline
             Op(kAdd, 3), Dst(kTemp, Xc), Src(kTemp, P, X), Src(kConst, cV),                                          // columns i - 1 .. i + 2
             Op(kMul, 3), Dst(kTemp, Xc), Src(kTemp, Xc), Src(kConst, cS, Z),
             Op(kAdd, 3), Dst(kTemp, Yr), Src(kTemp, P, Y), Src(kConst, cV)});                                        // rows
@@ -3140,6 +3142,23 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
         body.insert(body.end(), {Op(kMax, 3), Dst(kTemp, Yr), Src(kTemp, Yr), Src(kTemp, A, X),
                                  Op(kMin, 3), Dst(kTemp, Yr), Src(kTemp, Yr), Src(kTemp, A, Y),
                                  Op(kMul, 3), Dst(kTemp, Yr), Src(kTemp, Yr), Src(kConst, cS, W)});
+        // the B-spline's weights of the columns (Wx) and the rows (Wy): (1 - f)^3 / 6, 0.5 f^3 - f^2 + 2/3, the rest, f^3 / 6
+        const auto weights = [&](DWORD Wv, DWORD S, int fs) {
+            const DWORD f = Sw(fs, fs, fs, fs);
+            body.insert(body.end(), {Op(kMul, 3), Dst(kTemp, S, 0x1), Src(kTemp, Fr, f), Src(kTemp, Fr, f),         // f^2
+                                     Op(kMul, 3), Dst(kTemp, S, 0x2), Src(kTemp, S, X), Src(kTemp, Fr, f),           // f^3
+                                     Op(kAdd, 3), Dst(kTemp, S, 0x4), Neg(Src(kTemp, Fr, f)), Src(kConst, cK, W),    // 1 - f
+                                     Op(kMul, 3), Dst(kTemp, S, 0x8), Src(kTemp, S, Z), Src(kTemp, S, Z),
+                                     Op(kMul, 3), Dst(kTemp, S, 0x8), Src(kTemp, S, W), Src(kTemp, S, Z),            // (1 - f)^3
+                                     Op(kMul, 3), Dst(kTemp, Wv, 0x9), Src(kTemp, S, Sw(3, 3, 3, 1)), Src(kConst, cK, X),
+                                     Op(kMad, 4), Dst(kTemp, Wv, 0x2), Src(kTemp, S, Y), Src(kConst, cK, Z), Neg(Src(kTemp, S, X)),
+                                     Op(kAdd, 3), Dst(kTemp, Wv, 0x2), Src(kTemp, Wv, Y), Src(kConst, cK, Y),
+                                     Op(kAdd, 3), Dst(kTemp, Wv, 0x4), Neg(Src(kTemp, Wv, X)), Src(kConst, cK, W),
+                                     Op(kAdd, 3), Dst(kTemp, Wv, 0x4), Src(kTemp, Wv, Z), Neg(Src(kTemp, Wv, Y)),
+                                     Op(kAdd, 3), Dst(kTemp, Wv, 0x4), Src(kTemp, Wv, Z), Neg(Src(kTemp, Wv, W))});
+        };
+        weights(Wx, Wy, 0);
+        weights(Wy, Acc, 1);
         for (DWORD row = 0; row < 4; row++) {
             const DWORD rs = Sw(static_cast<int>(row), static_cast<int>(row), static_cast<int>(row), static_cast<int>(row));
             body.insert(body.end(), {Op(kMul, 3), Dst(kTemp, B, 0x3), Src(kTemp, Yr, rs), Src(kConst, cG, Sw(3, 2, 3, 2))}); // (0, y)
@@ -3152,19 +3171,21 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
                                      Op(kMov, 2), Dst(kTemp, R, 0x4), Src(kTemp, C0 + 2, W),
                                      Op(kMov, 2), Dst(kTemp, R, 0x8), Src(kTemp, C0 + 3, W),
                                      Op(kAdd, 3), Dst(kTemp, R), Src(kTemp, R), Neg(Src(kConst, cG, X)),
-                                     Op(kCmp, 4), Dst(kTemp, R), Src(kTemp, R), Src(kConst, cG, Z), Src(kConst, cG, W)}); // the room's own texels
-            for (DWORD k = 0; k < 4; k++)
-                body.insert(body.end(), {Op(kMul, 3), Dst(kTemp, C0 + k, 0x7), Src(kTemp, C0 + k),
-                                         Src(kTemp, R, Sw(static_cast<int>(k), static_cast<int>(k), static_cast<int>(k), static_cast<int>(k)))});
-            if (row == 0) body.insert(body.end(), {Op(kMax, 3), Dst(kTemp, A, 0x7), Src(kTemp, C0), Src(kTemp, C0 + 1)});
-            else body.insert(body.end(), {Op(kMax, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, C0),
-                                          Op(kMax, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, C0 + 1)});
-            body.insert(body.end(), {Op(kMax, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, C0 + 2),
-                                     Op(kMax, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, C0 + 3)});
+                                     Op(kCmp, 4), Dst(kTemp, R), Src(kTemp, R), Src(kConst, cG, Z), Src(kConst, cG, W), // the room's own texels
+                                     Op(kMul, 3), Dst(kTemp, R), Src(kTemp, R), Src(kTemp, Wx),
+                                     Op(kMul, 3), Dst(kTemp, R), Src(kTemp, R), Src(kTemp, Wy, rs),                    // their weights
+                                     Op(kDp4, 3), Dst(kTemp, B, 0x4), Src(kTemp, R), Src(kConst, cK, W)});
+            if (row == 0) body.insert(body.end(), {Op(kMov, 2), Dst(kTemp, A, 0x1), Src(kTemp, B, Z),
+                                                   Op(kMul, 3), Dst(kTemp, Acc), Src(kTemp, C0), Src(kTemp, R, X)});
+            else body.insert(body.end(), {Op(kAdd, 3), Dst(kTemp, A, 0x1), Src(kTemp, A, X), Src(kTemp, B, Z),
+                                          Op(kMad, 4), Dst(kTemp, Acc), Src(kTemp, C0), Src(kTemp, R, X), Src(kTemp, Acc)});
+            for (DWORD k = 1; k < 4; k++)
+                body.insert(body.end(), {Op(kMad, 4), Dst(kTemp, Acc), Src(kTemp, C0 + k),
+                                         Src(kTemp, R, Sw(static_cast<int>(k), static_cast<int>(k), static_cast<int>(k), static_cast<int>(k))), Src(kTemp, Acc)});
         }
-        body.insert(body.end(), {Op(kAdd, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kConst, cH, Z),
-                                 Op(kMad, 4), Dst(kTemp, A, 0x7), Src(kTemp, A, W), Src(kConst, cV, W), Src(kTemp, A), // (no bound: + 2.5)
-                                 Op(kMin, 3), Dst(kTemp, r.L, 0x7), Src(kTemp, r.L), Src(kTemp, A)});
+        body.insert(body.end(), {Op(kRcp, 2), Dst(kTemp, A, 0x1), Src(kTemp, A, X),
+                                 Op(kMul, 3), Dst(kTemp, Acc), Src(kTemp, Acc), Src(kTemp, A, X),
+                                 Op(kCmp, 4), Dst(kTemp, r.L), Neg(Src(kTemp, A, W)), Src(kTemp, Acc), Src(kTemp, r.L)}); // the own side's read
     }
     // (development builds, arch_ambient) the neighbours' ambient near the room's arches, right after the read (ps_3_0 only;
     // a copy that cannot hold it is made without it)
@@ -3188,7 +3209,7 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
     out.sampler = r.S;
     out.sizeConst = cS;
     out.bandConst = cR;
-    out.temps = static_cast<int>(T + 11);
+    out.temps = static_cast<int>(T + 14);
     ins = Parse(t);
     for (const Ins& y : ins) out.slots += y.op != kDcl && y.op != kDef && y.op != kDefI && y.op != kDefB ? 1 : 0;
     out.ps2x = !ps3;

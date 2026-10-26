@@ -324,12 +324,25 @@ void Reference(const std::vector<DWORD>& map, int W, int H, float cx, float cy, 
             out[2] += w * static_cast<float>(v & 0xFF);
             out[3] += w * static_cast<float>(v >> 24);
         }
-    // (PatchRoomMapSmooth) with the pixel's own texel at alpha 0.125 or more, the colour no brighter than the brightest texel of
-    // the 4 x 4 with alpha 4/255 or more (room 0's beyond a wall left out) + 2 levels; else the B-spline. sides false: the
-    // 2 x 2 bound of 866cfb0, every texel counted (the comparison)
+    // (PatchRoomMapSmooth) with the pixel's own texel at alpha 0.125 or more, the B-spline of the 4 x 4 texels with alpha
+    // 4/255 or more alone (room 0's beyond a wall left out), its weights over their sum, all four channels; else the
+    // B-spline. sides false: the 2 x 2 bound of 866cfb0, every texel counted (the comparison)
     const int ox = fx >= 0.5f ? 1 : 0, oy = fy >= 0.5f ? 1 : 0;
     const float ownA = static_cast<float>(map[static_cast<size_t>(std::clamp(iy + oy, rowLo, rowHi)) * W + std::clamp(ix + ox, 0, W - 1)] >> 24) / 255.0f;
     if (!bound || (sides && ownA < 0.125f)) return;
+    if (sides) {
+        float sum[4] = {}, ws = 0.0f;
+        for (int j = 0; j < 4; j++)
+            for (int i = 0; i < 4; i++) {
+                const DWORD v = map[static_cast<size_t>(std::clamp(iy - 1 + j, rowLo, rowHi)) * W + std::clamp(ix - 1 + i, 0, W - 1)];
+                if (static_cast<float>(v >> 24) / 255.0f < 4.0f / 255.0f) continue;
+                const float w = Bw(i, fx) * Bw(j, fy);
+                sum[0] += w * static_cast<float>((v >> 16) & 0xFF), sum[1] += w * static_cast<float>((v >> 8) & 0xFF);
+                sum[2] += w * static_cast<float>(v & 0xFF), sum[3] += w * static_cast<float>(v >> 24), ws += w;
+            }
+        for (int c = 0; c < 4; c++) out[c] = sum[c] / ws;
+        return;
+    }
     float hi[3] = {};
     const int lo = sides ? -1 : 0, n = sides ? 3 : 2;
     for (int j = lo; j < n; j++)
@@ -436,7 +449,7 @@ void SideChecks() {
     std::printf("  a hall within 2 texels of a lit courtyard's wall: up to +%.1f levels of green with the plain B-spline, +%.1f with the 2 x 2 bound, +%.1f now\n",
                 plain, square, now);
     Check(plain > 30.0f && square > 30.0f && now <= 2.0f + 1e-3f, "a hall's floor takes no band or line of the courtyard's light along the wall");
-    Check(keepMoved == 0.0f, "the courtyard's own pixels, light sent out of the hall and a bright hall texel keep the B-spline");
+    Check(keepMoved < 1e-3f, "the courtyard's own pixels, light sent out of the hall and a bright hall texel keep the B-spline");
     // a jamb's penumbra inside the hall, along x (0 to 120 over about a texel), every texel the hall's
     std::vector<DWORD> jamb(W * H);
     for (int y = 0; y < H; y++)
@@ -453,7 +466,39 @@ void SideChecks() {
         squareCut = std::max(squareCut, a[1] - b[1]), nowCut = std::max(nowCut, a[1] - c[1]);
     }
     std::printf("  a jamb's penumbra in the hall: the B-spline cut by up to %.1f levels at texel lines with the 2 x 2 bound, %.1f now\n", squareCut, nowCut);
-    Check(squareCut > 3.0f && nowCut == 0.0f, "a jamb's penumbra keeps the B-spline's smooth read (no steps at the texel lines)");
+    Check(squareCut > 3.0f && nowCut < 1e-3f, "a jamb's penumbra keeps the B-spline's smooth read (no steps at the texel lines)");
+    // a room's floor under a window (F7: courtyard 255 | wall | 0, 20, 47, 45, 41 of green, alpha 0.84 to 0.69): the wall below
+    // the sill shades the first texels. Held under the brightest texel of the room's side, the B-spline lifted the first with
+    // the courtyard's light and left the second dark (a black line between two lit bands); the room's side alone rises from
+    // the wall and keeps the room's ambient weight to the wall
+    const int prof[6] = {0, 20, 47, 45, 41, 37};
+    const DWORD profA[6] = {214, 196, 173, 176, 179, 181};
+    std::vector<DWORD> win(W * H);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++)
+            win[static_cast<size_t>(y) * W + x] = x < K ? (255u << 8) : (profA[std::min(x - K, 5)] << 24) | (static_cast<DWORD>(prof[std::min(x - K, 5)]) << 8);
+    float oldDip = 0, nowDip = 0, oldLift = 0, nowLift = 0, prevOld = -1, prevNow = -1, peakOld = 0, peakNow = 0;
+    for (float cx = K + 0.01f; cx < K + 2.5f; cx += 0.01f) {
+        float b[4], c[4];
+        Reference(win, W, H, cx, 6.3f, 0, H - 1, c, true, true);
+        // the 4 x 4 bound of eedcb23 (the comparison)
+        Reference(win, W, H, cx, 6.3f, 0, H - 1, b, false);
+        float hi = 0;
+        const int ix = static_cast<int>(std::floor(cx - 0.5f));
+        for (int i = -1; i < 3; i++) {
+            const DWORD v = win[static_cast<size_t>(6) * W + std::clamp(ix + i, 0, W - 1)];
+            if (v >> 24 >= 4) hi = std::max(hi, static_cast<float>((v >> 8) & 0xFF));
+        }
+        b[1] = std::min(b[1], hi + 2.0f);
+        if (prevOld >= 0) peakOld = std::max(peakOld, prevOld), oldDip = std::max(oldDip, peakOld - b[1]);
+        if (prevNow >= 0) peakNow = std::max(peakNow, prevNow), nowDip = std::max(nowDip, peakNow - c[1]);
+        if (cx < K + 0.5f) oldLift = std::max(oldLift, b[1]), nowLift = std::max(nowLift, c[1]);
+        prevOld = b[1], prevNow = c[1];
+        if (cx > K + 2.0f) break;
+    }
+    std::printf("  a room's floor under a window: the 4 x 4 bound lit the wall's half texel to %.0f and fell %.1f levels after it; now %.0f, falling %.1f\n", oldLift, oldDip,
+                nowLift, nowDip);
+    Check(oldDip > 10.0f && nowDip <= 0.5f && nowLift < 10.0f, "a room's floor under a window rises from the wall with no dark line");
 }
 void SidePixelCheck(Gpu& gpu) {
     if (!gpu.dev) return;
