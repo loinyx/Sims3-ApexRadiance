@@ -66,7 +66,7 @@ constexpr DWORD kSolveAskMs = 10000;     // a room 0 with no kept solve is sent 
 constexpr DWORD kCoverFreshMs = 3000;    // a lot's coverage counts this long after the last check
 constexpr int kSolveAsks = 3;            // a room 0 is sent to its solve for a kept solve at most this often in a row
 constexpr DWORD kDragQuietMs = 300;      // a GPU lamp that changed this recently is being dragged (or edited again and again)
-constexpr DWORD kHoldQuietMs = 1500;     // the rooms that take room 0's lamps are sent this long after a story's last edit
+constexpr DWORD kHoldQuietMs = 1500;     // the rooms that take room 0's lamps are sent this long after a story's last move
                                          // (a Build mode drag moves in grid steps with pauses of up to about a second)
 constexpr DWORD kCheckEveryMs = 2000;    // the consistency check of the GPU lamps' stories
 constexpr DWORD kRepairWaitMs = 4000;    // a story sent to gather a lamp is checked again after this
@@ -375,7 +375,14 @@ struct EditNote {
 };
 std::mutex g_editMx;
 std::vector<EditNote> g_edits;                  // edits not yet shown (under g_editMx)
-std::map<std::pair<uintptr_t, int>, DWORD> g_sendDue; // (tracker, story) -> the last edit; its dependents are sent kHoldQuietMs later (light tree thread)
+// (tracker, story) -> its edits since the last send: their dependents are sent kHoldQuietMs after the last one, or kDragQuietMs
+// when none moved a lamp (a value or a switch: no drag pauses to wait out); light tree thread
+struct SendDue {
+    DWORD at = 0;                 // the last edit
+    bool moved = false;           // one of them moved a lamp
+    std::vector<uintptr_t> lamps; // the lamps edited (the roofed rooms that saw a door of one are sent)
+};
+std::map<std::pair<uintptr_t, int>, SendDue> g_sendDue;
 std::atomic<long> c_repairs{0}; // story room 0s sent to gather a GPU lamp they lost (the consistency check)
 std::atomic<long> c_listKept{0}; // frames a story's room-0 list could not be read and its last list was kept
 // The last room-0 list read per story (render thread): kept for a few frames when a list cannot be read
@@ -2181,7 +2188,12 @@ void NoteLampEdit(uintptr_t tl, uintptr_t light, int kind) {
     {
         std::lock_guard<std::mutex> lk(g_editMx);
         if (g_edits.size() < 256) g_edits.push_back(e);
-        if (story >= 0 && story <= 7) g_sendDue[{tracker, story}] = GetTickCount() | 1; // (light tree thread; cleared by the render thread)
+        if (story >= 0 && story <= 7) { // (light tree thread; cleared by the render thread)
+            SendDue& d = g_sendDue[{tracker, story}];
+            d.at = GetTickCount() | 1;
+            d.moved = d.moved || kind != 0;
+            if (std::find(d.lamps.begin(), d.lamps.end(), light) == d.lamps.end() && d.lamps.size() < 64) d.lamps.push_back(light);
+        }
     }
 }
 
@@ -2200,24 +2212,31 @@ void AfterRoomUpdate(const void* tl) {
         }
     }
     // the rooms that take room 0's lamps, after an edit the GPU took: once, kHoldQuietMs after the story's last edit (a drag
-    // sends them when it is over)
+    // sends them when it is over), kDragQuietMs after a value or a switch
     // (14/10 review: as the tail of the edit, with no urgency and under the spread budget; the stories of a lot due together
-    // in one send, each room once)
+    // in one send, each room once; the roofed rooms that saw a door of an edited lamp with the edit's tier 1)
     const DWORD now = GetTickCount();
-    std::map<uintptr_t, unsigned> due;
+    struct Due {
+        unsigned mask = 0;
+        std::vector<uintptr_t> lamps;
+    };
+    std::map<uintptr_t, Due> due;
     {
         std::lock_guard<std::mutex> lk(g_editMx); // (OnWorldChanged clears it on the render thread)
         if (g_sendDue.empty()) return;
         for (auto it = g_sendDue.begin(); it != g_sendDue.end();) {
-            if (now - it->second < kHoldQuietMs) {
+            if (now - it->second.at < (it->second.moved ? kHoldQuietMs : kDragQuietMs)) {
                 ++it;
                 continue;
             }
-            due[it->first.first] |= 1u << it->first.second;
+            Due& d = due[it->first.first];
+            d.mask |= 1u << it->first.second;
+            for (uintptr_t l : it->second.lamps)
+                if (std::find(d.lamps.begin(), d.lamps.end(), l) == d.lamps.end()) d.lamps.push_back(l);
             it = g_sendDue.erase(it);
         }
     }
-    for (const auto& [tracker, mask] : due) c_sends.fetch_add(LevelLightShare::SendRoom0DependentsTail(tracker, mask), std::memory_order_relaxed);
+    for (const auto& [tracker, d] : due) c_sends.fetch_add(LevelLightShare::SendRoom0DependentsTail(tracker, d.mask, &d.lamps), std::memory_order_relaxed);
 }
 void NoteRoomSolved(const void* room, bool gather) {
     if (!g_watch.load(std::memory_order_relaxed) || !room) return;

@@ -5904,6 +5904,23 @@ void ShareRoofedOpenings(BYTE* treeLevel, BYTE* room) {
 // off; a flickering lamp no room sees sends none), and for a move or a player's edit (3) also those it can reach now; else
 // (a lamp added or removed, a wall changed) the rooms that took any lamp of room 0 or that any can reach (value changes:
 // those that took one).
+struct RoofedAt {
+    float x, z, reach; // a tested lamp in story space and its reach
+};
+// One roofed room's send for SameStoryRoofed (pure: tools/roofed_openings_test). seen = the lamps that saw one of its doors
+// at its last gather (sorted), took = it took one; at = the tested lamps' places, known only for a move or an add (haveXf)
+bool RoofedSendWanted(bool took, const std::vector<uintptr_t>& seen, const YardBox& box, bool precise, int change, const std::vector<uintptr_t>& tested,
+                      const std::vector<RoofedAt>& at, bool haveXf) {
+    if (precise ? std::any_of(tested.begin(), tested.end(), [&](uintptr_t l) { return std::binary_search(seen.begin(), seen.end(), l); }) : took) return true;
+    if (!(precise ? change == 3 : change != 1)) return false;
+    if (!haveXf) return true; // a lamp moved (or a player's edit) where it cannot be placed: it may see a door now
+    for (const RoofedAt& a : at) {
+        const float ddx = std::max({box.x0 - a.x, 0.0f, a.x - box.x1}), ddz = std::max({box.z0 - a.z, 0.0f, a.z - box.z1});
+        if (ddx * ddx + ddz * ddz <= a.reach * a.reach) return true;
+    }
+    return false;
+}
+// end of RoofedSendWanted
 void SameStoryRoofed(uintptr_t mgrL, int L, int changed, int change, const std::vector<uintptr_t>& lights, const std::vector<uintptr_t>* changedOnly,
                      std::vector<std::pair<int, int>>& out) {
     if (changed != 0) return;
@@ -5911,10 +5928,7 @@ void SameStoryRoofed(uintptr_t mgrL, int L, int changed, int change, const std::
     if (recs.empty()) return;
     const bool precise = changedOnly && !changedOnly->empty() && change != 2;
     const std::vector<uintptr_t>& tested = precise ? *changedOnly : lights;
-    struct At {
-        float x, z, reach;
-    };
-    std::vector<At> at;
+    std::vector<RoofedAt> at;
     Xform xf;
     // (the lamps' positions are the game's call: on the gathers' thread only, as SameStoryYards)
     const bool haveXf = (precise ? change == 3 : change != 1) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed) && ReadXform(mgrL, xf);
@@ -5924,19 +5938,10 @@ void SameStoryRoofed(uintptr_t mgrL, int L, int changed, int change, const std::
             reinterpret_cast<LightPos_t>(kLightPos)(reinterpret_cast<void*>(light), pos);
             float l[3];
             ToLocal(xf, pos, l);
-            at.push_back(At{l[0], l[2], LampReach(light)});
+            at.push_back(RoofedAt{l[0], l[2], LampReach(light)});
         }
     for (const RoofedRec& r : recs) {
-        bool send = precise ? std::any_of(tested.begin(), tested.end(), [&](uintptr_t l) { return std::binary_search(r.lamps.begin(), r.lamps.end(), l); })
-                            : r.took;
-        if (!send && (precise ? change == 3 : change != 1)) { // a lamp moved (or a player's edit): it may see a door now
-            send = !haveXf;
-            for (size_t i = 0; i < at.size() && !send; i++) {
-                const float ddx = std::max({r.box.x0 - at[i].x, 0.0f, at[i].x - r.box.x1}), ddz = std::max({r.box.z0 - at[i].z, 0.0f, at[i].z - r.box.z1});
-                send = ddx * ddx + ddz * ddz <= at[i].reach * at[i].reach;
-            }
-        }
-        if (send) {
+        if (RoofedSendWanted(r.took, r.lamps, r.box, precise, change, tested, at, haveXf)) {
             out.emplace_back(L, r.id);
             g_roofedSends.fetch_add(1, std::memory_order_relaxed);
         }
@@ -17501,11 +17506,13 @@ bool FirstUnwrappedRead(const unsigned char* room, uintptr_t& light, uintptr_t& 
 // The rooms that take room 0's lamps of the stories in `mask`, each once, as AfterChangedWalk sends them for a room-0 change
 // (the other stories' roofless rooms, this story's yards through its openings, the rooms near an opening that took them);
 // this story's roofless rooms mask their floors with room 0's lamps. tail: a GPU edit's tail (no urgency), else the edit's
-// tier 1. Light tree thread.
-int SendRoom0DependentsTry(uintptr_t tracker, unsigned mask, bool tail) {
+// tier 1. The roofed rooms of the story and of the story above that take room 0's lamps through their openings
+// (SameStoryRoofed; only those that saw a door of one of `edited` when it is given) go with the edit's tier 1 in both: such
+// an edit marks no room, so the game's walk never sends them, and they kept the lamp's old colour. Light tree thread.
+int SendRoom0DependentsTry(uintptr_t tracker, unsigned mask, bool tail, const std::vector<uintptr_t>* edited) {
     const DragLite::WhyScope liteWhy(DragLite::Why::Dependents);
     if (!tracker || !(mask & 0xFFu)) return 0;
-    std::vector<std::pair<int, int>> out, yardsOut;
+    std::vector<std::pair<int, int>> out, yardsOut, roofedNow, roofedKept;
     const bool yards = OpeningsOn() || g_sameHeld.load(std::memory_order_relaxed);
     for (int L = 0; L <= 7; L++) {
         if (!(mask >> L & 1u)) continue;
@@ -17528,6 +17535,11 @@ int SendRoom0DependentsTry(uintptr_t tracker, unsigned mask, bool tail) {
                     for (int k = 0; k < nr; k++) out.emplace_back(S, roofless[k]);
                 }
             if (yards) SameStoryYards(mgrL, L, 0, change, lights, out);
+            // (a lamp removed, change 2: sent stopping a solve that may still read it, as the walk's "now")
+            auto& roofed = change == 2 ? roofedNow : roofedKept;
+            SameStoryRoofed(mgrL, L, 0, change, lights, edited, roofed);
+            if (L < 7)
+                if (const uintptr_t mgrU = SafeStoryManager(tracker, L + 1)) SameStoryRoofed(mgrU, L + 1, 0, change, lights, edited, roofed);
             if (const auto deps = g_deps.find(key); deps != g_deps.end())
                 for (const auto& p : deps->second) out.push_back(p);
         }
@@ -17543,7 +17555,17 @@ int SendRoom0DependentsTry(uintptr_t tracker, unsigned mask, bool tail) {
     out.erase(std::unique(out.begin(), out.end()), out.end());
     if (tail) // (each room once: a yard is not sent again as a dependent)
         std::erase_if(out, [&](const std::pair<int, int>& p) { return std::binary_search(yardsOut.begin(), yardsOut.end(), p); });
+    for (auto* v : {&roofedNow, &roofedKept}) {
+        std::sort(v->begin(), v->end());
+        v->erase(std::unique(v->begin(), v->end()), v->end());
+    }
+    std::erase_if(roofedKept, [&](const std::pair<int, int>& p) { return std::binary_search(roofedNow.begin(), roofedNow.end(), p); });
+    std::erase_if(out, [&](const std::pair<int, int>& p) {
+        return std::binary_search(roofedNow.begin(), roofedNow.end(), p) || std::binary_search(roofedKept.begin(), roofedKept.end(), p);
+    });
     int sent = 0;
+    for (const auto& [S, r] : roofedNow) sent += QueueRoom(tracker, S, r, false, 1, false) ? 1 : 0;
+    for (const auto& [S, r] : roofedKept) sent += QueueRoom(tracker, S, r, true, 1, true) ? 1 : 0;
     struct Restore {
         bool prev;
         ~Restore() { t_tailSend = prev; }
@@ -17794,11 +17816,11 @@ bool QueueRoom0(uintptr_t tracker, int story) {
 }
 int SendRoom0Dependents(uintptr_t tracker, int story) {
     if (!g_installed.load(std::memory_order_relaxed) || !g_indoorReady || ThreadId() != g_gatherThread.load(std::memory_order_relaxed) || story < 0 || story > 7) return 0;
-    return HookGuard::Run("OutdoorDelta sends", 0, [=] { return SendRoom0DependentsTry(tracker, 1u << story, false); });
+    return HookGuard::Run("OutdoorDelta sends", 0, [=] { return SendRoom0DependentsTry(tracker, 1u << story, false, nullptr); });
 }
-int SendRoom0DependentsTail(uintptr_t tracker, unsigned storyMask) {
+int SendRoom0DependentsTail(uintptr_t tracker, unsigned storyMask, const std::vector<uintptr_t>* edited) {
     if (!g_installed.load(std::memory_order_relaxed) || !g_indoorReady || ThreadId() != g_gatherThread.load(std::memory_order_relaxed)) return 0;
-    return HookGuard::Run("GPU edit tail sends", 0, [=] { return SendRoom0DependentsTry(tracker, storyMask, true); });
+    return HookGuard::Run("GPU edit tail sends", 0, [=] { return SendRoom0DependentsTry(tracker, storyMask, true, edited); });
 }
 void NoteGpuEdit() { g_gpuEditAt.store(GetTickCount() | 1, std::memory_order_relaxed); }
 bool RoomMapsFree() { return CheckMapSteps() && RoomMapsFreeTry(); }

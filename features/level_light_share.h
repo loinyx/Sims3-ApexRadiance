@@ -366,8 +366,9 @@ bool QueueRoom0(uintptr_t tracker, int story);
 // lamps are sent as the changed-room walk sends them. Returns the rooms sent.
 int SendRoom0Dependents(uintptr_t tracker, int story);
 // The tail of a GPU-handled lamp edit (Real-time outdoor lamps, the outdoor delta: the edit marked no room): the rooms that
-// take room 0's lamps of the stories in storyMask, each once, sent with no urgency
-int SendRoom0DependentsTail(uintptr_t tracker, unsigned storyMask);
+// take room 0's lamps of the stories in storyMask, each once, sent with no urgency; the roofed rooms that take them through
+// their openings (only those that saw a door of one of `edited`, the changed lamps, when given) with a lamp edit's tier 1
+int SendRoom0DependentsTail(uintptr_t tracker, unsigned storyMask, const std::vector<uintptr_t>* edited = nullptr);
 // A GPU-handled lamp edit: the changed-room walk right after it takes its rooms as that edit's tail (no urgency)
 void NoteGpuEdit();
 // The finalize's own steps for a room 0 the delta locks outside a solve (Steam 1.67.2, checked once): no room holds the

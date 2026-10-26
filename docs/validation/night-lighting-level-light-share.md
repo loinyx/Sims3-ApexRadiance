@@ -212,6 +212,13 @@ topology mutation inside a point is not reproduced. This release does not promis
 
 ## Open checks
 
+- Outdoor lamp edits reach the rooms that take the lamp through their openings (`SendRoom0DependentsTry` with
+  `SameStoryRoofed`, `RoofedSendWanted`), Lamp lighting Instant and Classic: the courtyard save, a wall sconce next to the
+  kitchen's glass doors. Change its colour in Buy mode, switch it off and on, move it along the wall, delete it.
+  **Expected:** the kitchen and the rooms behind the glass doors follow within a second each time, with no story change;
+  the log shows a `[RoofedLamps] Room solve` of those rooms right after the edit; rooms that never saw the sconce are
+  not solved again. An indoor lamp of the kitchen recoloured still changes the courtyard floor in front of the doors.
+  Offline: `tools/roofed_openings_test` (the selection, and that the edit's tail sends the roofed rooms).
 - Outdoor lamps through openings at the outdoor scale, and cut closes held 2 s (`opening_lamp_balance.h`,
   `cut_close_hold.h`): the player's courtyard save with the green sconce, at night, developer mode. **Expected:** the
   kitchen and the rooms behind the glass doors are no brighter than the courtyard floor at the same distance from the

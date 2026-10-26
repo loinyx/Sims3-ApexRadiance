@@ -1253,7 +1253,34 @@ void CutHoldChecks() {
     Check(!CutCloseHold::NoteClose(p, 3, 0, 99999, 0), "a full table closes at once (as before)");
 }
 
+// The roofed rooms a room-0 lamp edit sends (RoofedSendWanted, from SameStoryRoofed: the changed-room walk and the tail of an
+// edit that marks no room). A kitchen behind glass doors saw a door of sconce A (red to green) and took it; a hall saw lamp B
+// only; a shed far off saw none.
+void RoofedSendChecks() {
+    const uintptr_t A = 0x6FB0F730, B = 0x6FB11650, C = 0x6FB20000;
+    const std::vector<uintptr_t> kitchenSeen{A, B}, hallSeen{B}, none;
+    const YardBox kitchen{20.0f, 18.0f, 26.0f, 23.0f}, hall{10.0f, 10.0f, 14.0f, 14.0f}, shed{40.0f, 40.0f, 42.0f, 42.0f};
+    const std::vector<uintptr_t> editA{A}, all{A, B, C};
+    const std::vector<RoofedAt> noAt;
+    // a colour, an intensity or a switch (1): only the rooms that saw a door of the edited lamp
+    Check(RoofedSendWanted(true, kitchenSeen, kitchen, true, 1, editA, noAt, false), "a sconce recoloured: the room behind its glass doors is sent");
+    Check(!RoofedSendWanted(true, hallSeen, hall, true, 1, editA, noAt, false), "a room that took another lamp is not sent");
+    Check(!RoofedSendWanted(false, none, shed, true, 1, editA, noAt, false), "a room that saw no lamp is not sent");
+    // no edited lamp known (a delta abandoned): every room that took one of room 0's lamps
+    Check(RoofedSendWanted(true, hallSeen, hall, false, 1, all, noAt, false) && !RoofedSendWanted(false, none, shed, false, 1, all, noAt, false),
+          "edited lamps unknown: the rooms that took a lamp");
+    // a move (3): also the rooms the lamp reaches from where it is now, and every room when it cannot be placed
+    const std::vector<RoofedAt> nearHall{{12.0f, 16.0f, 4.0f}};
+    Check(RoofedSendWanted(false, none, hall, true, 3, editA, nearHall, true), "a sconce moved next to a room it never saw: sent");
+    Check(!RoofedSendWanted(false, none, shed, true, 3, editA, nearHall, true), "a room beyond its reach: not sent");
+    Check(RoofedSendWanted(false, none, shed, true, 3, editA, noAt, false), "a moved lamp with no place: sent");
+    // a lamp removed or added (2): never precise, the rooms that took a lamp or that one can reach
+    Check(RoofedSendWanted(true, kitchenSeen, kitchen, false, 2, all, noAt, true) && !RoofedSendWanted(false, none, shed, false, 2, all, nearHall, true),
+          "a lamp removed: the rooms that took one, not a room out of reach");
+}
+
 int main() {
+    RoofedSendChecks();
     PillarLightChecks();
     RaisedWallSpanChecks();
     ArchConeChecks();

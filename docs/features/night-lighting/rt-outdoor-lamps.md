@@ -46,7 +46,11 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    the first time Instant is chosen), so every draw that reads room 0's light gets the lamps without a shader patch.
 5. **Edits.** The game's lamp entry update (`0x006C7CD6`, LampMarkFilter) asks whether the GPU draws the lamp on every
    story of a lot whose maps are all relit. If so, the edit marks no room and room 0 is not solved again; the rooms that
-   take room 0's lamps (yards, rooms near openings) are sent once, 1.5 s after the story's last edit, with no urgency. The
+   take room 0's lamps (yards, rooms near openings) are sent once, 1.5 s after the story's last move (0.3 s after a value
+   or a switch), with no urgency. The roofed rooms of that story and of the story above that saw a door of the edited lamp
+   at their last gather (outdoor light through openings, `SameStoryRoofed`) go with them at a lamp edit's priority (tier
+   1), as the changed-room walk sends them on Classic: such an edit marks no room, and before this the rooms behind a
+   courtyard sconce's glass doors kept its old colour until something else solved them (a story change, for instance). The
    lamp's own object, which the game marks as an occluder at every drag step (`0x006C7939`), marks no room while the GPU
    draws the lamp. Every 2 s a GPU lamp that is on is checked against the stories it was drawn on: a story whose room 0 no
    longer lists it is sent to gather again, once. A lamp switched on takes the usual path.
@@ -100,7 +104,8 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
 ## Limitations
 
 - Only the active lot. Other lots, the world grass and roads (terrain bake) and the world's street lamps stay baked.
-- Rooms that take room 0's lamps (yards, rooms near openings) and their objects follow at the game's pace.
+- Rooms that take room 0's lamps (yards, rooms near openings) and their objects follow at the game's pace, through their
+  own solve after the send above.
 - Objects, Sims and terrain do not cast shadows; roofs are flat at the wall top, as in the solve's own test.
 - A lamp added or removed reaches the GPU set once the game gathers the room's light list again.
 - A map whose walls were blurred by the game's own blur is not relit; the log says so.
