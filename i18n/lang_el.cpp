@@ -2300,6 +2300,14 @@ const I18n::Pair kPairs[] = {
     {"Classic: show all floors together", "Κλασικό: όλοι οι όροφοι μαζί"},
     {"After a lamp edit every floor shows its new light in the same frame", "Μετά από αλλαγή λαμπτήρα όλοι οι όροφοι δείχνουν το νέο φως στο ίδιο καρέ"},
     {"Instant (GPU) kept data", "Αποθηκευμένα δεδομένα Άμεση (GPU)"},
+    {"High-precision scene", "Σκηνή υψηλής ακρίβειας"},
+    {"Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", "Σχεδιάζει τον τρισδιάστατο κόσμο με χρώμα 16 bit και τον στρογγυλοποιεί μία φορά στο τέλος: πιο ομαλό φως, περισσότερη μνήμη γραφικών"},
+    {"On: {} MB of video memory", "Ενεργό: {} MB μνήμης γραφικών"},
+    {"Starts with the next frame", "Ξεκινά από το επόμενο καρέ"},
+    {"Unavailable while the game's own Edge Smoothing is on", "Μη διαθέσιμο όσο είναι ενεργή η Εξομάλυνση Άκρων του ίδιου του παιχνιδιού"},
+    {"Unavailable with the game's screen format", "Μη διαθέσιμο με τη μορφή οθόνης του παιχνιδιού"},
+    {"Unavailable: not enough video memory", "Μη διαθέσιμο: δεν αρκεί η μνήμη γραφικών"},
+    {"Unavailable on this graphics card", "Μη διαθέσιμο σε αυτή την κάρτα γραφικών"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Greek, kPairs, std::size(kPairs));

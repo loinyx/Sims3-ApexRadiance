@@ -728,6 +728,15 @@ const I18n::Entry kEntries[] = {
     {"0% is grey grain; higher adds colored specks", "0% é grão cinza; mais adiciona pontinhos coloridos", "0% es grano gris; más añade puntitos de color", "0 % = grain gris ; plus ajoute des points colorés"},
     {"Simulate", "Simular", "Simular", "Simuler"},
     {"Shows the picture as seen with this color blindness, to check it", "Mostra a imagem como é vista com este daltonismo, para conferir", "Muestra la imagen como se ve con este daltonismo, para comprobarlo", "Montre l'image telle qu'on la voit avec ce daltonisme, pour vérifier"},
+    // ---- Image > Banding Fix: High-precision scene (scene_target.cpp, experimental) ----
+    {"High-precision scene", "Cena de alta precisão", "Escena de alta precisión", "Scène haute précision"},
+    {"Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", "Desenha o mundo 3D com cor de 16 bits e arredonda uma vez no fim: luz mais suave, mais memória de vídeo", "Dibuja el mundo 3D con color de 16 bits y lo redondea una vez al final: luz más suave, más memoria de video", "Dessine le monde 3D en couleur 16 bits et l'arrondit une seule fois à la fin : lumière plus douce, plus de mémoire vidéo"},
+    {"On: {} MB of video memory", "Ligado: {} MB de memória de vídeo", "Activado: {} MB de memoria de video", "Activé : {} MB de mémoire vidéo"},
+    {"Starts with the next frame", "Começa no próximo quadro", "Empieza en el próximo fotograma", "Commence à la prochaine image"},
+    {"Unavailable while the game's own Edge Smoothing is on", "Indisponível com a Suavização de Bordas do próprio jogo ligada", "No disponible con el Suavizado de Bordes del propio juego activado", "Indisponible quand le Lissage des Bords du jeu est activé"},
+    {"Unavailable with the game's screen format", "Indisponível com o formato de tela do jogo", "No disponible con el formato de pantalla del juego", "Indisponible avec le format d'écran du jeu"},
+    {"Unavailable: not enough video memory", "Indisponível: memória de vídeo insuficiente", "No disponible: memoria de video insuficiente", "Indisponible : mémoire vidéo insuffisante"},
+    {"Unavailable on this graphics card", "Indisponível nesta placa de vídeo", "No disponible en esta tarjeta gráfica", "Indisponible sur cette carte graphique"},
 };
 const I18n::Table kTable(kEntries, std::size(kEntries));
 

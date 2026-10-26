@@ -2300,6 +2300,14 @@ const I18n::Pair kPairs[] = {
     {"Classic: show all floors together", "Klassiek: alle verdiepingen tegelijk"},
     {"After a lamp edit every floor shows its new light in the same frame", "Na een lampwijziging tonen alle verdiepingen hun nieuwe licht in hetzelfde frame"},
     {"Instant (GPU) kept data", "Bewaarde gegevens voor Direct (GPU)"},
+    {"High-precision scene", "Scène met hoge precisie"},
+    {"Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", "Tekent de 3D-wereld in 16-bits kleur en rondt die aan het eind één keer af: zachter licht, meer videogeheugen"},
+    {"On: {} MB of video memory", "Aan: {} MB videogeheugen"},
+    {"Starts with the next frame", "Start bij het volgende frame"},
+    {"Unavailable while the game's own Edge Smoothing is on", "Niet beschikbaar zolang de eigen Randvereffening van het spel aan staat"},
+    {"Unavailable with the game's screen format", "Niet beschikbaar met het schermformaat van het spel"},
+    {"Unavailable: not enough video memory", "Niet beschikbaar: te weinig videogeheugen"},
+    {"Unavailable on this graphics card", "Niet beschikbaar op deze videokaart"},
     {nullptr, nullptr},
 };
 const I18n::LangTable kTable(I18n::Lang::Dutch, kPairs, std::size(kPairs));

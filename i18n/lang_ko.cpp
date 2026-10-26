@@ -2300,6 +2300,14 @@ const I18n::Pair kPairs[] = {
     {"Classic: show all floors together", "클래식: 모든 층 함께"},
     {"After a lamp edit every floor shows its new light in the same frame", "램프를 편집한 후 모든 층이 같은 프레임에서 새 빛을 보여 줍니다"},
     {"Instant (GPU) kept data", "즉시 (GPU) 보관 데이터"},
+    {"High-precision scene", "고정밀 장면"},
+    {"Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", "3D 세계를 16비트 색상으로 그리고 마지막에 한 번만 반올림해요. 빛이 더 부드럽고 비디오 메모리를 더 써요"},
+    {"On: {} MB of video memory", "켜짐: 비디오 메모리 {} MB"},
+    {"Starts with the next frame", "다음 프레임부터 시작돼요"},
+    {"Unavailable while the game's own Edge Smoothing is on", "게임 자체의 가장자리 다듬기가 켜져 있으면 사용할 수 없어요"},
+    {"Unavailable with the game's screen format", "게임의 화면 형식에서는 사용할 수 없어요"},
+    {"Unavailable: not enough video memory", "사용할 수 없음: 비디오 메모리 부족"},
+    {"Unavailable on this graphics card", "이 그래픽 카드에서는 사용할 수 없어요"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Korean, kPairs, std::size(kPairs));

@@ -2300,6 +2300,14 @@ const I18n::Pair kPairs[] = {
     {"Classic: show all floors together", "Klassinen: kaikki kerrokset yhdessä"},
     {"After a lamp edit every floor shows its new light in the same frame", "Lamppumuutoksen jälkeen kaikki kerrokset näyttävät uuden valon samassa kuvassa"},
     {"Instant (GPU) kept data", "Välitön (GPU): tallessa olevat tiedot"},
+    {"High-precision scene", "Tarkka kohtaus"},
+    {"Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", "Piirtää 3D-maailman 16-bittisillä väreillä ja pyöristää sen kerran lopussa: pehmeämpi valo, enemmän näyttömuistia"},
+    {"On: {} MB of video memory", "Päällä: {} MB näyttömuistia"},
+    {"Starts with the next frame", "Alkaa seuraavasta kuvasta"},
+    {"Unavailable while the game's own Edge Smoothing is on", "Ei käytettävissä, kun pelin oma Reunanpehmennys on päällä"},
+    {"Unavailable with the game's screen format", "Ei käytettävissä pelin näyttömuodolla"},
+    {"Unavailable: not enough video memory", "Ei käytettävissä: näyttömuisti ei riitä"},
+    {"Unavailable on this graphics card", "Ei käytettävissä tällä näytönohjaimella"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Finnish, kPairs, std::size(kPairs));

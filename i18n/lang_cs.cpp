@@ -2300,6 +2300,14 @@ const I18n::Pair kPairs[] = {
     {"Classic: show all floors together", "Klasický: všechna patra najednou"},
     {"After a lamp edit every floor shows its new light in the same frame", "Po úpravě lampy ukážou všechna patra nové světlo ve stejném snímku"},
     {"Instant (GPU) kept data", "Uložená data režimu Okamžitý (GPU)"},
+    {"High-precision scene", "Scéna s vysokou přesností"},
+    {"Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", "Kreslí 3D svět v 16bitové barvě a na konci ho jednou zaokrouhlí: měkčí světlo, víc videopaměti"},
+    {"On: {} MB of video memory", "Zapnuto: {} MB videopaměti"},
+    {"Starts with the next frame", "Začne od dalšího snímku"},
+    {"Unavailable while the game's own Edge Smoothing is on", "Nedostupné, dokud je zapnuté Vyhlazování hran ve hře"},
+    {"Unavailable with the game's screen format", "Nedostupné s formátem obrazovky hry"},
+    {"Unavailable: not enough video memory", "Nedostupné: málo videopaměti"},
+    {"Unavailable on this graphics card", "Na této grafické kartě nedostupné"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Czech, kPairs, std::size(kPairs));

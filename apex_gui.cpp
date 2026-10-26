@@ -34,6 +34,7 @@
 #include "depth_share.h"
 #include "unlit_rooms.h"
 #include "shader_cache.h"
+#include "scene_target.h"
 #include "sim_occlusion.h"
 #include "ui/i18n.h"
 #include <charconv>
@@ -709,6 +710,31 @@ void PictureRows(int tab) {
     ImGui::PopID();
 }
 
+// The High-precision scene (scene_target.cpp, experimental), saved with the Banding Fix, and its status
+void HighPrecisionSceneRow(ApexPatch* p) {
+    ApexUi::SetNextRowBadge("Experimental", "Still being tested: if anything looks wrong or the game crashes, turn it off");
+    if (ApexUi::SwitchRow("High-precision scene", SceneTarget::Setting(),
+                          "Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", false))
+        p->NotifySettingChanged();
+    using S = SceneTarget::State;
+    const S state = SceneTarget::CurrentState();
+    if (state == S::Off) return;
+    const bool active = state == S::Active;
+    // (IconNote translates the fixed texts; the one with a number is built translated)
+    const std::string text = active ? I18n::Trf("On: {} MB of video memory", SceneTarget::VideoMemoryMB())
+                             : state == S::Waiting ? "Starts with the next frame"
+                             : state == S::Multisample ? "Unavailable while the game's own Edge Smoothing is on"
+                             : state == S::BackBufferFormat ? "Unavailable with the game's screen format"
+                             : state == S::NoMemory ? "Unavailable: not enough video memory"
+                                                    : "Unavailable on this graphics card";
+    ApexUi::IconNote(active ? IconId::Info : IconId::TriangleAlert, text.c_str(), active ? 0x8B8C96 : VioletTheme::kWarning);
+    if (!kPublicBuild && active) {
+        const SceneTarget::Stats s = SceneTarget::ReadStats();
+        ImGui::TextDisabled("Resolves: boundary %u, back-buffer copy %u, EndScene %u, Present %u; %.3f ms CPU each", s.atBoundary, s.atCopy, s.atEndScene,
+                            s.atPresent, s.resolveMs);
+    }
+}
+
 // Image > Banding Fix (everything against color steps in one place, on its own page): the Banding Fix card (scene_dither.cpp:
 // switch, grain Strength) with Picture's Smooth gradients (the deband), which follows the Banding Fix's switch
 void BandingTabContent() {
@@ -722,6 +748,7 @@ void BandingTabContent() {
         else if (ApexUi::SliderCommitted())
             Picture::Get().SetParams(q, true);
         ApexUi::IconNote(IconId::Info, "Smooth gradients also reaches the sky and other surfaces the grain can't");
+        HighPrecisionSceneRow(p);
     });
 }
 

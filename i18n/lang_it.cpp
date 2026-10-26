@@ -2300,6 +2300,14 @@ const I18n::Pair kPairs[] = {
     {"Classic: show all floors together", "Classico: tutti i piani insieme"},
     {"After a lamp edit every floor shows its new light in the same frame", "Dopo una modifica a una lampada, tutti i piani mostrano la nuova luce nello stesso fotogramma"},
     {"Instant (GPU) kept data", "Dati conservati per Istantanea (GPU)"},
+    {"High-precision scene", "Scena ad alta precisione"},
+    {"Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", "Disegna il mondo 3D con colore a 16 bit e lo arrotonda una volta alla fine: luce più morbida, più memoria video"},
+    {"On: {} MB of video memory", "Attiva: {} MB di memoria video"},
+    {"Starts with the next frame", "Parte dal prossimo fotogramma"},
+    {"Unavailable while the game's own Edge Smoothing is on", "Non disponibile con lo Smussamento bordi del gioco attivo"},
+    {"Unavailable with the game's screen format", "Non disponibile con il formato dello schermo del gioco"},
+    {"Unavailable: not enough video memory", "Non disponibile: memoria video insufficiente"},
+    {"Unavailable on this graphics card", "Non disponibile su questa scheda video"},
     {nullptr, nullptr},
 };
 const I18n::LangTable kTable(I18n::Lang::Italian, kPairs, std::size(kPairs));

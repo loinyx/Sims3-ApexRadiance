@@ -2300,6 +2300,14 @@ const I18n::Pair kPairs[] = {
     {"Classic: show all floors together", "Klasszikus: minden szint egyszerre"},
     {"After a lamp edit every floor shows its new light in the same frame", "Lámpamódosítás után minden szint ugyanabban a képkockában mutatja az új fényt"},
     {"Instant (GPU) kept data", "Azonnali (GPU) megőrzött adatai"},
+    {"High-precision scene", "Nagy pontosságú jelenet"},
+    {"Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", "A 3D világot 16 bites színnel rajzolja, és a végén egyszer kerekíti: lágyabb fény, több videomemória"},
+    {"On: {} MB of video memory", "Be: {} MB videomemória"},
+    {"Starts with the next frame", "A következő képkockától indul"},
+    {"Unavailable while the game's own Edge Smoothing is on", "Nem érhető el, amíg a játék saját Élsimítása be van kapcsolva"},
+    {"Unavailable with the game's screen format", "Nem érhető el a játék képernyőformátumával"},
+    {"Unavailable: not enough video memory", "Nem érhető el: kevés a videomemória"},
+    {"Unavailable on this graphics card", "Ezen a videokártyán nem érhető el"},
     {nullptr, nullptr},
 };
 const I18n::LangTable kTable(I18n::Lang::Hungarian, kPairs, std::size(kPairs));

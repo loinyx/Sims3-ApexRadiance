@@ -2300,6 +2300,14 @@ const I18n::Pair kPairs[] = {
     {"Classic: show all floors together", "Klassiskt: alla våningar samtidigt"},
     {"After a lamp edit every floor shows its new light in the same frame", "Efter en lampändring visar alla våningar sitt nya ljus i samma bildruta"},
     {"Instant (GPU) kept data", "Sparade data för Direkt (GPU)"},
+    {"High-precision scene", "Scen med hög precision"},
+    {"Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", "Ritar 3D-världen i 16-bitars färg och avrundar den en gång i slutet: mjukare ljus, mer grafikminne"},
+    {"On: {} MB of video memory", "På: {} MB grafikminne"},
+    {"Starts with the next frame", "Börjar med nästa bildruta"},
+    {"Unavailable while the game's own Edge Smoothing is on", "Inte tillgänglig medan spelets egen Kantutjämning är på"},
+    {"Unavailable with the game's screen format", "Inte tillgänglig med spelets skärmformat"},
+    {"Unavailable: not enough video memory", "Inte tillgänglig: för lite grafikminne"},
+    {"Unavailable on this graphics card", "Inte tillgänglig på det här grafikkortet"},
     {nullptr, nullptr},
 };
 const I18n::LangTable kTable(I18n::Lang::Swedish, kPairs, std::size(kPairs));

@@ -2300,6 +2300,14 @@ const I18n::Pair kPairs[] = {
     {"Classic: show all floors together", "คลาสสิก: ทุกชั้นพร้อมกัน"},
     {"After a lamp edit every floor shows its new light in the same frame", "หลังแก้ไขโคม ทุกชั้นจะแสดงแสงใหม่ในเฟรมเดียวกัน"},
     {"Instant (GPU) kept data", "ข้อมูลที่เก็บไว้ของโหมดทันที (GPU)"},
+    {"High-precision scene", "ฉากความแม่นยำสูง"},
+    {"Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", "วาดโลก 3D ด้วยสี 16 บิตแล้วปัดเศษครั้งเดียวตอนท้าย: แสงนุ่มขึ้น ใช้หน่วยความจำวิดีโอมากขึ้น"},
+    {"On: {} MB of video memory", "เปิด: หน่วยความจำวิดีโอ {} MB"},
+    {"Starts with the next frame", "เริ่มในเฟรมถัดไป"},
+    {"Unavailable while the game's own Edge Smoothing is on", "ใช้ไม่ได้ขณะเปิดทำขอบให้เรียบของเกม"},
+    {"Unavailable with the game's screen format", "ใช้ไม่ได้กับรูปแบบหน้าจอของเกม"},
+    {"Unavailable: not enough video memory", "ใช้ไม่ได้: หน่วยความจำวิดีโอไม่พอ"},
+    {"Unavailable on this graphics card", "ใช้ไม่ได้กับการ์ดจอนี้"},
     {nullptr, nullptr},
 };
 const I18n::LangTable kTable(I18n::Lang::Thai, kPairs, std::size(kPairs));

@@ -2300,6 +2300,14 @@ const I18n::Pair kPairs[] = {
     {"Classic: show all floors together", "クラシック：すべての階を同時に"},
     {"After a lamp edit every floor shows its new light in the same frame", "ランプを編集した後、すべての階が同じフレームで新しい光を表示します"},
     {"Instant (GPU) kept data", "インスタント（GPU）の保持データ"},
+    {"High-precision scene", "高精度シーン"},
+    {"Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", "3D の世界を 16 ビットカラーで描き、最後に一度だけ丸めます。光がより滑らかに、ビデオメモリは多めに使います"},
+    {"On: {} MB of video memory", "オン：ビデオメモリ {} MB"},
+    {"Starts with the next frame", "次のフレームから始まります"},
+    {"Unavailable while the game's own Edge Smoothing is on", "ゲーム自体のエッジスムージングがオンの間は使えません"},
+    {"Unavailable with the game's screen format", "ゲームの画面形式では使えません"},
+    {"Unavailable: not enough video memory", "使えません：ビデオメモリが足りません"},
+    {"Unavailable on this graphics card", "このグラフィックカードでは使えません"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Japanese, kPairs, std::size(kPairs));

@@ -2300,6 +2300,14 @@ const I18n::Pair kPairs[] = {
     {"Classic: show all floors together", "Klassisch: alle Stockwerke zusammen"},
     {"After a lamp edit every floor shows its new light in the same frame", "Nach einer Lampenänderung zeigen alle Stockwerke ihr neues Licht im selben Frame"},
     {"Instant (GPU) kept data", "Gespeicherte Daten für Sofort (GPU)"},
+    {"High-precision scene", "Hochpräzise Szene"},
+    {"Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", "Zeichnet die 3D-Welt mit 16-Bit-Farbe und rundet sie am Ende einmal: weicheres Licht, mehr Grafikspeicher"},
+    {"On: {} MB of video memory", "An: {} MB Grafikspeicher"},
+    {"Starts with the next frame", "Startet mit dem nächsten Frame"},
+    {"Unavailable while the game's own Edge Smoothing is on", "Nicht verfügbar, solange die Kantenglättung des Spiels an ist"},
+    {"Unavailable with the game's screen format", "Nicht verfügbar mit dem Bildformat des Spiels"},
+    {"Unavailable: not enough video memory", "Nicht verfügbar: zu wenig Grafikspeicher"},
+    {"Unavailable on this graphics card", "Auf dieser Grafikkarte nicht verfügbar"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::German, kPairs, std::size(kPairs));

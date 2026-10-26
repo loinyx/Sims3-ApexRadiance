@@ -2300,6 +2300,14 @@ const I18n::Pair kPairs[] = {
     {"Classic: show all floors together", "Klassisk: alle etasjer samtidig"},
     {"After a lamp edit every floor shows its new light in the same frame", "Etter en lampeendring viser alle etasjer det nye lyset i samme bilde"},
     {"Instant (GPU) kept data", "Lagrede data for Umiddelbar (GPU)"},
+    {"High-precision scene", "Scene med høy presisjon"},
+    {"Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", "Tegner 3D-verdenen i 16-biters farge og runder den av én gang til slutt: mykere lys, mer grafikkminne"},
+    {"On: {} MB of video memory", "På: {} MB grafikkminne"},
+    {"Starts with the next frame", "Starter med neste bilde"},
+    {"Unavailable while the game's own Edge Smoothing is on", "Ikke tilgjengelig mens spillets egen Kantutjevning er på"},
+    {"Unavailable with the game's screen format", "Ikke tilgjengelig med spillets skjermformat"},
+    {"Unavailable: not enough video memory", "Ikke tilgjengelig: for lite grafikkminne"},
+    {"Unavailable on this graphics card", "Ikke tilgjengelig på dette grafikkortet"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Norwegian, kPairs, std::size(kPairs));

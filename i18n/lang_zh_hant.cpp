@@ -2300,6 +2300,14 @@ const I18n::Pair kPairs[] = {
     {"Classic: show all floors together", "經典：所有樓層一起"},
     {"After a lamp edit every floor shows its new light in the same frame", "編輯燈後，所有樓層在同一畫格顯示新的光照"},
     {"Instant (GPU) kept data", "即時（GPU）保留的資料"},
+    {"High-precision scene", "高精度場景"},
+    {"Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", "以 16 位元色彩繪製 3D 世界，最後只取整一次：光線更平滑，使用更多顯示記憶體"},
+    {"On: {} MB of video memory", "已開啟：{} MB 顯示記憶體"},
+    {"Starts with the next frame", "從下一幀開始"},
+    {"Unavailable while the game's own Edge Smoothing is on", "遊戲本身的邊緣平滑開啟時無法使用"},
+    {"Unavailable with the game's screen format", "遊戲的畫面格式不支援"},
+    {"Unavailable: not enough video memory", "無法使用：顯示記憶體不足"},
+    {"Unavailable on this graphics card", "此顯示卡不支援"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::ChineseTraditional, kPairs, std::size(kPairs));
