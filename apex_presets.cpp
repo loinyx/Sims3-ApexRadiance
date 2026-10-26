@@ -132,7 +132,7 @@ enabled = true
 [patches.SceneDither]
 enabled = true
 forca = 1.0
-graoEmMovimento = false
+cenaAltaPrecisao = true
 
 [patches.SceneNodeBudget]
 enabled = true
@@ -165,7 +165,6 @@ enabled = true
 blacks = 0.0
 clarity = 0.0
 contrast = 1.0
-deband = 0.08
 enabled = false
 exposure = 0.0
 highlight_hue = 40.0
@@ -310,7 +309,7 @@ enabled = true
 [patches.SceneDither]
 enabled = true
 forca = 1.0
-graoEmMovimento = false
+cenaAltaPrecisao = true
 
 [patches.SceneNodeBudget]
 enabled = true
@@ -343,7 +342,6 @@ enabled = true
 blacks = 0.0
 clarity = 0.0
 contrast = 1.0
-deband = 0.08
 enabled = true
 exposure = 0.0
 highlight_hue = 40.0
@@ -488,7 +486,7 @@ enabled = true
 [patches.SceneDither]
 enabled = true
 forca = 1.0
-graoEmMovimento = false
+cenaAltaPrecisao = true
 
 [patches.SceneNodeBudget]
 enabled = true
@@ -521,7 +519,6 @@ enabled = true
 blacks = 0.0
 clarity = 0.0
 contrast = 1.0
-deband = 0.08
 enabled = true
 exposure = 0.0
 highlight_hue = 40.0

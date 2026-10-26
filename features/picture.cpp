@@ -37,7 +37,6 @@
 #include "imgui.h"
 #include "ui/i18n.h"
 #include "ui/widgets.h"
-#include "scene_dither.h"
 #include "apex_paths.h"
 #include "apex_util.h"
 #include <wincodec.h>
@@ -76,12 +75,10 @@ sampler2D sHalf  : register(s4); // the scene at 1/2 size, bilinear (tilt-shift)
 sampler2D sQuart : register(s5); // the scene at 1/4 size, bilinear (tilt-shift, glow, halation)
 sampler2D sLut   : register(s6); // PNG strip (bilinear) or float32 cube table (point), only while LUT is on
 sampler2D sAdapt : register(s7); // 1x1: the adapted scene luminance (auto exposure); AdaptPS reads the previous one here
-sampler2D sDeband : register(s8); // the deband's taps: the scene, bilinear where it holds no UI (else the frame, point)
 float4 cLook   : register(c0);  // x = saturation, y = scene copy valid, z = compare
 float4 cSize   : register(c1);  // xy = 1 / size, zw = size (pixels)
 float4 cGrade  : register(c2);  // x = exposure (linear gain), y = contrast, z = blacks (fraction of white, + deepens)
 float4 cWb     : register(c3);  // rgb = white balance gains (luminance of white kept)
-float4 cDeband : register(c4);  // x = step threshold (encoded units, DebandThreshold), y = inner radius (px), z = outer radius (px), w = on
 float4 cTone   : register(c5);  // x = midtone exponent (1 / midtones), y = shadows, z = highlights, w = vibrance
 float4 cDetail : register(c6);  // x = sharpening, y = clarity
 float4 cTintS  : register(c7);  // rgb = shadow colour (luminance 1), w = amount
@@ -143,7 +140,7 @@ float4 cExtC   : register(c60); // x = Film grain color
 static const float3 kLum = float3(0.2126, 0.7152, 0.0722);
 
 // A neighbour or shifted tap for the scene filters: from the scene copy (no UI) when it exists, so a filter that reads
-// around the pixel (deband, prism, sharpen, CRT, 3DFX) never pulls the colour of a button or a panel into the world
+// around the pixel (prism, sharpen, CRT, 3DFX) never pulls the colour of a button or a panel into the world
 float3 CubeFetch(float3 cell) {
     float index = cell.x + cLut.y * (cell.y + cLut.y * cell.z);
     float row = floor(index * cCubeTex.z);
@@ -166,30 +163,6 @@ float3 SceneTap(float2 p)
 float3 Decode(float3 c)
 {
     return pow(max(c, 0.0), 2.2);
-}
-
-// Gradient smoothing (deband): the game's textures are DXT (5-6 bit colour endpoints) and its light maps 8-bit, so
-// smooth gradients arrive as steps. Each pixel averages the neighbours on two rings (fixed directions, no noise) that
-// differ from it by less than a small step; an edge or a texture detail is larger than that and is left alone. The taps
-// are bilinear on the scene (between two pixels they read a value between two levels), point on a frame with UI.
-float3 Deband(float2 uv, float3 c)
-{
-    float3 sum = c;
-    float n = 1.0;
-    [unroll] for (int ring = 0; ring < 2; ring++)
-    {
-        float r = ring == 0 ? cDeband.y : cDeband.z;
-        [unroll] for (int i = 0; i < 8; i++)
-        {
-            float a = (i + ring * 0.5) * 0.7853982;
-            float3 v = tex2Dlod(sDeband, float4(uv + float2(cos(a), sin(a)) * r * cSize.xy, 0, 0)).rgb;
-            float3 dd = abs(v - c);
-            float w = max(dd.r, max(dd.g, dd.b)) < cDeband.x ? 1.0 : 0.0;
-            sum += v * w;
-            n += w;
-        }
-    }
-    return sum / n;
 }
 
 // Cubic B-spline sample of the 1/8 scene from 4 bilinear taps: a smooth local average with no grid pattern
@@ -552,7 +525,6 @@ float4 PicturePS(float2 uv : TEXCOORD0) : COLOR0
         suv = lerp(uv, crtQ * 0.5 + 0.5, cCrt.x);
     }
     float3 fs = (cFlagE.y > 0.5 && scene) ? SceneTap(suv) : f; // the scene under any veil (see the UI mask)
-    fs = (cDeband.w > 0.5 && scene) ? Deband(suv, fs) : fs; // the scene only; the UI keeps its sharp edges
     [branch] if (cFlagD.z > 0.5 && scene) fs = Prism(suv, fs);
     // 3DFX soft pixels: the old cards' output filter blurred each pixel with its horizontal neighbours
     [branch] if (cFlagE.x > 0.5 && cFx2.x > 0.0 && scene)
@@ -882,8 +854,8 @@ template <typename T> void SafeRelease(T*& p) {
 // The settings in one line, for the log
 std::string ParamsText(const PictureParams& q) {
     return std::format("on {}, exposure {:.2f}, contrast {:.2f}, midtones {:.2f}, shadows {:.2f}, highlights {:.2f}, blacks {:.2f}, temperature {:.2f}, tint {:.2f}, "
-                       "saturation {:.2f}, vibrance {:.2f}, deband {:.2f}, sharpen {:.2f}, clarity {:.2f}, vignette {:.2f}, compare {}",
-                       q.enabled, q.exposure, q.contrast, q.midtones, q.shadows, q.highlights, q.blacks, q.temperature, q.tint, q.saturation, q.vibrance, q.deband,
+                       "saturation {:.2f}, vibrance {:.2f}, sharpen {:.2f}, clarity {:.2f}, vignette {:.2f}, compare {}",
+                       q.enabled, q.exposure, q.contrast, q.midtones, q.shadows, q.highlights, q.blacks, q.temperature, q.tint, q.saturation, q.vibrance,
                        q.sharpen, q.clarity, q.vignette, q.compare);
 }
 
@@ -1411,7 +1383,7 @@ const FilterArrayKey kFilterArrays[] = {{"technicolor2_dye", &PictureParams::tec
                                         {"filmic_curve", &PictureParams::filmicCurve}};
 
 const char* const kKeys[] = {"enabled", "exposure", "contrast", "midtones", "shadows", "highlights", "blacks", "temperature", "tint", "saturation", "vibrance",
-                             "shadow_hue", "shadow_tint", "highlight_hue", "highlight_tint", "mixer", "deband", "sharpen", "clarity", "vignette", "vignette_size", "basic_enabled", "tones_enabled", "color_enabled", "detail_enabled", "filters_enabled", "filters"};
+                             "shadow_hue", "shadow_tint", "highlight_hue", "highlight_tint", "mixer", "sharpen", "clarity", "vignette", "vignette_size", "basic_enabled", "tones_enabled", "color_enabled", "detail_enabled", "filters_enabled", "filters"};
 
 } // namespace
 
@@ -1563,13 +1535,6 @@ bool Picture::EnsureReducedScene(IDirect3DDevice9* dev) {
 
 // ---- end of frame ----
 
-// Smooth gradients (deband) is on the Banding Fix page (a Color tab from 30/09, its own page since 06/10) and follows the Banding Fix's switch, not
-// Picture's: with Picture off the pass still runs, with only the deband (every other control neutral), while the Banding
-// Fix is on. That smoothing-only pass is skipped in a frame without a copy of the scene (it would smooth the game's menus).
-// The deband's step threshold in encoded units: 1 + 6.25 x deband levels (8% = 1.5 levels, 100% = 7.25, 200% = 13.5). It
-// was deband x 6 levels until 2.15.6: the default 8% (0.48 level) accepted no 8-bit neighbour, so the pass smoothed nothing
-static float DebandThreshold(float deband) { return (1.0f + 6.25f * std::clamp(deband, 0.0f, 2.0f)) / 255.0f; }
-
 static PictureParams Effective(const PictureParams& q) {
     PictureParams e = q.enabled ? q : PictureParams{};
     const PictureParams neutral{};
@@ -1584,8 +1549,6 @@ static PictureParams Effective(const PictureParams& q) {
     }
     if (!q.detailEnabled) { e.clarity=neutral.clarity; e.vignette=neutral.vignette; }
     if (!q.filtersEnabled) for (const auto& f : kToggleFilters) if(f.field!=&PictureParams::lut) e.*f.field=false;
-    e.deband = SceneDither::On() ? q.deband : 0.0f;
-    e.enabled = q.enabled || e.deband > 0.001f; // (any deband above 0 smooths a 1-level step: DebandThreshold)
     if (!q.enabled) e.compare = false;
     return e;
 }
@@ -1687,10 +1650,6 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
         bb->Release();
         return;
     }
-    if (!raw.enabled && !gpu.sceneCopied) { // smoothing only (Picture off): never over the game's menus
-        bb->Release();
-        return;
-    }
     const auto needsCopy = [](bool enabled, float amount) { return enabled && std::fabs(amount) > 0.001f; };
     const bool needsReducedScene = std::fabs(q.clarity) > 0.001f || needsCopy(q.glow, q.glowAmount) ||
         needsCopy(q.halation, q.halationAmount) || needsCopy(q.dreamy, q.dreamyAmount) ||
@@ -1779,7 +1738,7 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
     }
 
     // save what the pass touches (the game continues from here next frame)
-    constexpr DWORD kSamplers = 9;
+    constexpr DWORD kSamplers = 8;
     constexpr UINT kConsts = 61; // c0..c60 (c56 is AdaptPS's)
     constexpr D3DRENDERSTATETYPE kRS[] = {D3DRS_ZENABLE, D3DRS_ZWRITEENABLE, D3DRS_ALPHABLENDENABLE, D3DRS_SEPARATEALPHABLENDENABLE, D3DRS_ALPHATESTENABLE, D3DRS_STENCILENABLE,
                                           D3DRS_CULLMODE, D3DRS_SCISSORTESTENABLE, D3DRS_FOGENABLE, D3DRS_SRGBWRITEENABLE, D3DRS_CLIPPLANEENABLE, D3DRS_COLORWRITEENABLE};
@@ -1826,10 +1785,8 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
     dev->SetRenderState(D3DRS_CLIPPLANEENABLE, 0);
     dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0xF);
     for (DWORD s = 0; s < kSamplers; s++) {
-        // the reduced scene copies bilinear; the deband's taps too on a picture without UI (the scene copy, or the frame at the
-        // post-scene boundary)
-        const bool debandLinear = s == 8 && (gpu.sceneCopied || g_atBoundary);
-        const DWORD filter = (s == 2 || s == 4 || s == 5 || (s == 6 && !gpu.lutCube) || debandLinear) ? D3DTEXF_LINEAR : D3DTEXF_POINT;
+        // the reduced scene copies bilinear
+        const DWORD filter = (s == 2 || s == 4 || s == 5 || (s == 6 && !gpu.lutCube)) ? D3DTEXF_LINEAR : D3DTEXF_POINT;
         dev->SetSamplerState(s, D3DSAMP_MINFILTER, filter);
         dev->SetSamplerState(s, D3DSAMP_MAGFILTER, filter);
         dev->SetSamplerState(s, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
@@ -1844,7 +1801,6 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
     dev->SetTexture(4, gpu.chainTex[0]);
     dev->SetTexture(5, gpu.chainTex[1]);
     dev->SetTexture(6, fLut ? gpu.lutTex : nullptr);
-    dev->SetTexture(8, gpu.sceneCopied && !g_atBoundary ? gpu.sceneTex : gpu.frameTex); // as SceneTap reads
     // Auto exposure: the 1x1 pass first (into the other target, reading the previous one in s7), then the main pass reads it
     {
         LARGE_INTEGER now{}, freq{};
@@ -1910,7 +1866,6 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
     const float tt = std::clamp(q.temperature, -1.0f, 1.0f) * 0.08f;
     const float wbG = 1.0f - std::clamp(q.tint, -1.0f, 1.0f) * 0.06f; // tint: + = magenta (less green), - = green
     const float wbR = 1.0f + tt, wbB = 1.0f - tt, wbL = 0.2126f * wbR + 0.7152f * wbG + 0.0722f * wbB;
-    const float pxScale = static_cast<float>(gpu.height) / 2160.0f; // the deband radii were chosen at 4K
     float tintS[3], tintH[3];
     SplitToneColour(q.shadowHue, tintS);
     SplitToneColour(q.highlightHue, tintH);
@@ -1923,7 +1878,7 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
         {1.0f / W, 1.0f / H, W, H},
         {std::exp2(std::clamp(q.exposure, -3.0f, 3.0f)), std::clamp(q.contrast, 0.5f, 1.8f), std::clamp(q.blacks, -1.0f, 1.0f) * 0.02f, 0},
         {wbR / wbL, wbG / wbL, wbB / wbL, 0},
-        {DebandThreshold(q.deband), 12.0f * pxScale, 32.0f * pxScale, q.deband > 0.001f ? 1.0f : 0.0f},
+        {0, 0, 0, 0}, // c4: unused (Smooth gradients, removed)
         {1.0f / std::clamp(q.midtones, 0.5f, 2.0f), std::clamp(q.shadows, -1.0f, 1.0f), std::clamp(q.highlights, -1.0f, 1.0f), std::clamp(q.vibrance, -1.0f, 1.0f)},
         {std::clamp(q.sharpen, 0.0f, 1.5f), clarity ? std::clamp(q.clarity, -1.0f, 1.0f) : 0.0f, 0, 0},
         {tintS[0], tintS[1], tintS[2], std::clamp(q.shadowTint, 0.0f, 1.0f)},
@@ -2142,7 +2097,6 @@ void Picture::ParamsToToml(const PictureParams& q, toml::table& qolTable) {
     toml::array mixer;
     for (float m : q.mixer) mixer.push_back(static_cast<double>(m));
     pt.insert("mixer", std::move(mixer));
-    pt.insert("deband", static_cast<double>(q.deband));
     pt.insert("sharpen", static_cast<double>(q.sharpen));
     pt.insert("clarity", static_cast<double>(q.clarity));
     pt.insert("vignette", static_cast<double>(q.vignette));
@@ -2197,7 +2151,7 @@ bool Picture::ParamsFromToml(const toml::table& qolTable, PictureParams& out) {
     f("tint", q.tint);
     f("saturation", q.saturation);
     f("vibrance", q.vibrance);
-    f("deband", q.deband);
+    // "deband" (Smooth gradients, removed) is left in old files and ignored; it is dropped on the next save
     f("sharpen", q.sharpen);
     f("shadow_hue", q.shadowHue);
     f("shadow_tint", q.shadowTint);

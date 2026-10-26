@@ -6,9 +6,8 @@
 // 2. The grain on the GPU (a flat colour through a patched synthetic ps_3_0): the mean of each grey is kept, pure black and
 //    pure white come out unchanged, and Strength 0 adds nothing.
 // 3. The ps_2_x path (a patched vs_2_0 + ps_2_0 pair) gives the same pixels as the ps_3_0 path.
-// 4. Smooth gradients and the Picture dither (PicturePS from features/picture.cpp, every other control neutral): an
-//    unchanged picture stays bit for bit, the default 8% softens 1-level steps (the rule until 2.15.6 left them) and keeps
-//    the mean.
+// 4. The Picture dither (PicturePS from features/picture.cpp, every control neutral): an unchanged picture stays bit for
+//    bit.
 // --d3d9 runs 1 to 4 again on another D3D9 implementation (a DXVK d3d9.dll), loaded from that path.
 #define NOMINMAX
 #include <windows.h>
@@ -318,7 +317,7 @@ void GrainOnGpu(Gpu& gpu, const Grain& g, const char* backend) {
     Check(same >= total * 99 / 100, "the ps_2_x grain lines up with the ps_3_0 grain");
 }
 
-// ---- 4. Smooth gradients and the Picture dither (PicturePS of features/picture.cpp, every other control neutral) ----
+// ---- 4. The Picture dither (PicturePS of features/picture.cpp, every control neutral) ----
 std::string PictureSource() {
     std::string path = __FILE__;
     path = path.substr(0, path.find_last_of("\\/") + 1) + "../../features/picture.cpp";
@@ -334,8 +333,8 @@ std::string PictureSource() {
     return hlsl;
 }
 
-// the picture through PicturePS with only the deband (threshold in levels; 0 = off); the input as A8R8G8B8 pixels
-std::vector<DWORD> Picture(Gpu& gpu, const std::vector<DWORD>& code, const std::vector<DWORD>& in, float levels) {
+// the picture through PicturePS with every control neutral; the input as A8R8G8B8 pixels
+std::vector<DWORD> Picture(Gpu& gpu, const std::vector<DWORD>& code, const std::vector<DWORD>& in) {
     std::vector<DWORD> out(in.size(), 0);
     IDirect3DDevice9* dev = gpu.dev;
     IDirect3DTexture9* tex = nullptr;
@@ -352,14 +351,11 @@ std::vector<DWORD> Picture(Gpu& gpu, const std::vector<DWORD>& code, const std::
     float c[61][4] = {};
     const float neutral[][5] = {{0, 1, 1, 0, 0}, {1, 1.0f / kSize, 1.0f / kSize, kSize, kSize}, {2, 1, 1, 0, 0}, {3, 1, 1, 1, 0}, {5, 1, 0, 0, 0}};
     for (const auto& n : neutral) std::memcpy(c[static_cast<int>(n[0])], &n[1], 16);
-    const float deband[4] = {levels / 255.0f, 3.0f, 8.0f, levels > 0 ? 1.0f : 0.0f};
-    std::memcpy(c[4], deband, 16);
     dev->SetPixelShaderConstantF(0, &c[0][0], 61);
-    for (DWORD s : {0u, 1u, 8u}) {
+    for (DWORD s : {0u, 1u}) {
         dev->SetTexture(s, tex);
-        const DWORD filter = s == 8 ? D3DTEXF_LINEAR : D3DTEXF_POINT;
-        dev->SetSamplerState(s, D3DSAMP_MINFILTER, filter);
-        dev->SetSamplerState(s, D3DSAMP_MAGFILTER, filter);
+        dev->SetSamplerState(s, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+        dev->SetSamplerState(s, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
         dev->SetSamplerState(s, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
         dev->SetSamplerState(s, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
         dev->SetSamplerState(s, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
@@ -379,54 +375,23 @@ std::vector<DWORD> Picture(Gpu& gpu, const std::vector<DWORD>& code, const std::
         for (int y = 0; y < kSize; y++) std::memcpy(out.data() + y * kSize, static_cast<char*>(r.pBits) + y * r.Pitch, kSize * 4);
         gpu.readback->UnlockRect();
     }
-    for (DWORD s : {0u, 1u, 8u}) dev->SetTexture(s, nullptr);
+    for (DWORD s : {0u, 1u}) dev->SetTexture(s, nullptr);
     Release(ps);
     Release(tex);
     return out;
 }
 
-void SmoothGradients(Gpu& gpu) {
+void PictureDither(Gpu& gpu) {
     const std::vector<DWORD> code = Compile(PictureSource().c_str(), "ps_3_0", "PicturePS");
     Check(!code.empty(), "PicturePS compiles");
     if (code.empty() || !gpu.dev) return;
-    std::printf("Smooth gradients (PicturePS, every other control neutral)\n");
-    auto grey = [](int v) { return 0xFF000000u | (v << 16) | (v << 8) | v; };
-    std::vector<DWORD> flat(kSize * kSize, grey(40)), steps(kSize * kSize);
-    for (int y = 0; y < kSize; y++)
-        for (int x = 0; x < kSize; x++) steps[y * kSize + x] = grey(40 + x / 16); // 4 levels, one step every 16 pixels
-    auto changed = [](const std::vector<DWORD>& a, const std::vector<DWORD>& b) {
-        int n = 0;
-        for (size_t i = 0; i < a.size(); i++) n += (a[i] & 0xFFFFFF) != (b[i] & 0xFFFFFF);
-        return n;
-    };
-    // the largest jump between neighbouring column means (1 level at each step of the input)
-    auto jump = [](const std::vector<DWORD>& p) {
-        double worst = 0, prev = -1;
-        for (int x = 0; x < kSize; x++) {
-            double s = 0;
-            for (int y = 0; y < kSize; y++) s += Channel(p[y * kSize + x], 1);
-            s /= kSize;
-            if (prev >= 0) worst = std::max(worst, std::fabs(s - prev));
-            prev = s;
-        }
-        return worst;
-    };
-    auto mean = [](const std::vector<DWORD>& p) {
-        double s = 0;
-        for (DWORD v : p) s += Channel(v, 1);
-        return s / p.size();
-    };
-    const float now = 1.0f + 6.25f * 0.08f, before = 0.08f * 6.0f; // the default 8%: DebandThreshold, and the rule until 2.15.6
-    const int flatChanged = changed(Picture(gpu, code, flat, now), flat), offChanged = changed(Picture(gpu, code, steps, 0.0f), steps);
-    const auto old = Picture(gpu, code, steps, before), cur = Picture(gpu, code, steps, now);
-    std::printf("  flat grey 40: %d pixels changed; steps with the deband off: %d changed\n", flatChanged, offChanged);
-    std::printf("  steps of 1 level at 8%%: threshold %.2f levels (was %.2f): %d pixels changed (was %d); largest column jump %.3f (input %.3f, "
-                "was %.3f); mean %.3f (input %.3f)\n",
-                now, before, changed(cur, steps), changed(old, steps), jump(cur), jump(steps), jump(old), mean(cur), mean(steps));
-    Check(flatChanged == 0, "an unchanged picture gets no Picture dither");
-    Check(offChanged == 0, "the deband off changes nothing");
-    Check(jump(cur) < 0.6 * jump(steps), "the default 8% softens 1-level steps");
-    Check(std::fabs(mean(cur) - mean(steps)) < 0.1, "the deband keeps the mean");
+    std::printf("Picture dither (PicturePS, every control neutral)\n");
+    const std::vector<DWORD> flat(kSize * kSize, 0xFF282828u); // grey 40
+    const std::vector<DWORD> out = Picture(gpu, code, flat);
+    int changed = 0;
+    for (size_t i = 0; i < flat.size(); i++) changed += (out[i] & 0xFFFFFF) != (flat[i] & 0xFFFFFF);
+    std::printf("  flat grey 40: %d pixels changed\n", changed);
+    Check(changed == 0, "an unchanged picture gets no Picture dither");
 }
 
 } // namespace
@@ -447,7 +412,7 @@ int main(int argc, char** argv) {
         Gpu gpu(LoadLibraryW(L"d3d9.dll"));
         Package(gpu, all);
         if (prepared) GrainOnGpu(gpu, g, "native D3D9");
-        SmoothGradients(gpu);
+        PictureDither(gpu);
     }
     for (int a = 2; a + 1 < argc; a++) {
         if (std::strcmp(argv[a], "--d3d9") != 0) continue;
@@ -458,7 +423,7 @@ int main(int argc, char** argv) {
         std::printf("Shader package on %s\n", argv[a + 1]);
         Package(gpu, all);
         GrainOnGpu(gpu, g, argv[a + 1]);
-        SmoothGradients(gpu);
+        PictureDither(gpu);
     }
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

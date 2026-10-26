@@ -1,5 +1,5 @@
 #pragma once
-// High-precision scene (experimental, a switch on the Banding Fix card; off by default). The game draws its 3D scene into
+// High-precision scene (a switch on the Banding Fix card; on by default). The game draws its 3D scene into
 // the 8-bit back buffer, so every draw and every blend rounds to 8 bits. While this is on, a 16-bit target
 // (scene_target_logic.h) the size of the back buffer stands in for it: from the frame start until the scene is resolved,
 // a SetRenderTarget(0, back buffer) binds the target (D3D9Hooks::SetRenderTargetSubstitute) and GetRenderTarget still

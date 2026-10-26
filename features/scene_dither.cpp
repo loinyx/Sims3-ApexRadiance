@@ -88,8 +88,6 @@ PsFront g_psFront[kFront];
 VsFront g_vsFront[kFront];
 inline size_t FrontSlot(uint64_t k) { return static_cast<size_t>((static_cast<uint32_t>(k ^ (k >> 32)) * 2654435761u) >> 26) & (kFront - 1); }
 float g_strength = 1.0f;                  // the grain in 8-bit steps (triangular, peak): 1 = +-1 step
-bool g_moving = false;                    // a new grain pattern every frame (high frame rates average it away)
-unsigned g_frameIndex = 0;                // counts frames for the moving grain
 bool g_showCovered = false;               // Developer: a coarse grain where the fix applies (not saved)
 constexpr float kShowCoveredSteps = 24.0f;
 IDirect3DSurface9* g_backBuffer = nullptr; // identity only (render thread)
@@ -423,7 +421,6 @@ void OnFrameBoundary(IDirect3DDevice9* dev) {
         g_rt0 = bb;
         bb->Release();
     }
-    g_frameIndex++;
     g_last = g_frame;
     g_frame = {};
     // Development build: the coverage in the log now and then (the first 12 times, every 20 s of scene)
@@ -503,8 +500,8 @@ class SceneDitherPatch : public ApexPatch {
   public:
     SceneDitherPatch() : ApexPatch("SceneDither", nullptr) {
         RegisterFloatSetting(&g_strength, "forca", SettingWidget::Slider, 1.0f, 0.0f, 1.0f, "Grain in 8-bit steps (triangular peak); 1 = +-1 step, 0 = none");
-        RegisterBoolSetting(&g_moving, "graoEmMovimento", false, "A new grain pattern every frame (vanishes at high frame rates)");
-        RegisterBoolSetting(SceneTarget::Setting(), "cenaAltaPrecisao", false, "Experimental: the 3D scene in a 16-bit target, resolved once (scene_target.cpp)");
+        // "graoEmMovimento" (Moving grain, removed) is left in old files and ignored: the grain is always fixed
+        RegisterBoolSetting(SceneTarget::Setting(), "cenaAltaPrecisao", true, "The 3D scene in a 16-bit target, resolved once (scene_target.cpp)");
     }
 
     bool Install() override {
@@ -532,10 +529,8 @@ class SceneDitherPatch : public ApexPatch {
 
     void RenderCustomUI() override {
         SAFE_IMGUI_BEGIN();
-        bool changed = ApexUi::SliderPercent("Strength", &g_strength, 0.0f, 1.0f, "How much grain hides the color steps; 100% hides them fully, 0% is off", 1.0f);
-        changed |= ApexUi::SwitchRow("Moving grain", &g_moving, "A new grain each frame: invisible at high frame rates, a faint shimmer at low ones",
-                                     false);
-        if (changed) NotifySettingChanged();
+        if (ApexUi::SliderPercent("Strength", &g_strength, 0.0f, 1.0f, "How much grain hides the color steps; 100% hides them fully, 0% is off", 1.0f))
+            NotifySettingChanged();
     }
 
     // Developer page > Debug views
@@ -606,9 +601,5 @@ Coverage LastCoverage() { return {g_last.jittered, g_last.jitterRefused, g_last.
 namespace SceneDither {
 bool On() { return g_on.load(std::memory_order_relaxed); }
 float Strength() { return std::clamp(g_strength, 0.0f, 1.0f); }
-float GrainPhase() {
-    if (!g_moving) return 0.0f;
-    const double v = g_frameIndex * 0.6180339887498949; // golden ratio steps: every frame a different, even phase
-    return static_cast<float>(v - static_cast<double>(static_cast<unsigned long long>(v)));
-}
+float GrainPhase() { return 0.0f; }
 } // namespace SceneDither

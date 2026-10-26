@@ -31,7 +31,7 @@ const ShaderCache::Id kResolvePsId = [] {
     return ShaderCache::Add(std::move(d));
 }();
 
-bool g_want = false; // the switch
+bool g_want = true; // the switch (on by default)
 IDirect3DTexture9* g_tex = nullptr;
 IDirect3DSurface9* g_surf = nullptr;
 IDirect3DPixelShader9* g_ps = nullptr;

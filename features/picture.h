@@ -4,7 +4,7 @@
 // colours: the back buffer is copied at the point where the game goes from the scene to its UI, and pixels that
 // changed after that copy are left as they are.
 //
-// The pass: gamma 2.2 decode, gradient smoothing (deband), sharpening, clarity (local contrast against a 1/8-size copy
+// The pass: gamma 2.2 decode, sharpening, clarity (local contrast against a 1/8-size copy
 // of the scene), exposure, white balance, contrast, midtones / shadows / highlights / blacks, split toning, vibrance,
 // saturation with a per-hue colour mixer, vignette, then gamma 2.2 encode with a fixed triangular dither of up to one
 // 8-bit step where the pass changed the pixel, so the grading adds no banding. Before/after compare shows the left half unprocessed.
@@ -48,7 +48,6 @@ struct PictureParams {
     float highlightHue = 40.0f; // ... and of the highlights
     float highlightTint = 0.0f;
     float mixer[6] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f}; // saturation per hue: red, yellow, green, cyan, blue, magenta
-    float deband = 0.08f;     // gradient smoothing (8% by default): 0 = off, else steps up to 1 + 6.25 x deband levels (8% = 1.5)
     float sharpen = 0.0f;     // 0..1.5
     float clarity = 0.0f;     // local contrast of the midtones, -1..1
     float vignette = 0.0f;    // darker corners, 0..0.8
