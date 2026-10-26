@@ -247,11 +247,15 @@ float4 BlurPS(float2 uv : TEXCOORD0) : COLOR0
     return float4(ws > 0 ? sum / ws : c0.x, c0.y, 0, 0);
 }
 
-// Triangular noise in (-1, 1) of the pixel position (the Banding Fix's grain): the composite rounds to 8 bits again
-float TriNoise(float2 p, float phase)
+// The Banding Fix's grain (ShaderPatches::AddDither) on x, of at most `amount`: the composite rounds to 8 bits again.
+// Triangular, tapering to uniform above mid-grey, within the clamp (no specks at pure black or white); the R2 pattern
+// with its coefficients swapped, which does not correlate with the scene's grain (0.002, offline)
+float3 Grain(float3 x, float2 p, float phase, float amount)
 {
-    float r = 2.0 * frac(52.9829189 * frac(dot(p, float2(0.06711056, 0.00583715)) + phase)) - 1.0;
-    return sign(r) * (1.0 - sqrt(1.0 - abs(r)));
+    float r = 2.0 * frac(dot(p, float2(0.5698403, 0.7548777)) + phase) - 1.0;
+    float t = sign(r) * (1.0 - sqrt(1.0 - abs(r)));
+    float3 n = lerp(t, r * 0.5, saturate(2.0 * x - 1.0));
+    return x + n * min(amount, min(x, 1.0 - x) + 0.5 / 255.0);
 }
 
 // Jimenez 2016 multi-bounce: bright surfaces bounce light back into their own shade
@@ -300,11 +304,11 @@ float4 CompositePS(float2 uv : TEXCOORD0, float2 vpos : VPOS) : COLOR0
     float3 m = MultiBounce(v, alb);
     float luma = dot(col, float3(0.299, 0.587, 0.114));
     m = lerp(m, 1.0, saturate((luma - 0.35) * 2.5) * cLook.z);  // lamp-lit / bright pixels keep part of their light
-    // grain (Banding Fix on): only where the shade changed the pixel (elsewhere the scene already has its own), with a
-    // shifted pattern so it does not add up with the scene's grain
+    // grain (Banding Fix on): only where the shade changed the pixel (elsewhere the scene already has its own), with its
+    // own pattern so it does not add up with the scene's grain
     float3 dm = 1.0 - m;
     float changed = saturate(max(dm.r, max(dm.g, dm.b)) * 50.0);
-    return float4(col * m + TriNoise(vpos + float2(19.0, 47.0), cDepth.w) * cDepth.z * changed, 1);
+    return float4(Grain(col * m, vpos, cDepth.w, cDepth.z * changed), 1);
 }
 )HLSL";
 
