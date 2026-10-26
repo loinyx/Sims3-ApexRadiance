@@ -241,8 +241,8 @@ void CheckPatch(const std::vector<DWORD>& code, Gpu& gpu, PatchStats& st, const 
     const bool dis = !after.empty();
     st.disasmOk += dis;
     Check(dis, "the copy disassembles");
-    // the read became 4 taps and the bound 4 texel reads: 7 texld more
-    const bool taps = CountOf(after, "texld") == CountOf(before, "texld") + 7;
+    // the read became 4 taps and the bound the own texel and the 4 x 4 (17 texel reads): 20 texld more
+    const bool taps = CountOf(after, "texld") == CountOf(before, "texld") + 20;
     st.texldOk += taps;
     Check(taps, "the copy has the game's texture reads less one plus four taps and four bound reads");
     Check(t[0] == (code[0] == 0xFFFF0200 ? 0xFFFF0201u : code[0]), "ps_2_0 becomes ps_2_x, ps_3_0 stays");
@@ -324,21 +324,23 @@ void Reference(const std::vector<DWORD>& map, int W, int H, float cx, float cy, 
             out[2] += w * static_cast<float>(v & 0xFF);
             out[3] += w * static_cast<float>(v >> 24);
         }
-    // the colour no brighter than the brightest of the bilinear read's 2 x 2 texels + 2 levels (PatchRoomMapSmooth); with the
-    // pixel's own texel at alpha 0.125 or more, the texels of alpha under 4/255 (room 0's) are not counted
+    // (PatchRoomMapSmooth) with the pixel's own texel at alpha 0.125 or more, the colour no brighter than the brightest texel of
+    // the 4 x 4 with alpha 4/255 or more (room 0's beyond a wall left out) + 2 levels; else the B-spline. sides false: the
+    // 2 x 2 bound of 866cfb0, every texel counted (the comparison)
     const int ox = fx >= 0.5f ? 1 : 0, oy = fy >= 0.5f ? 1 : 0;
     const float ownA = static_cast<float>(map[static_cast<size_t>(std::clamp(iy + oy, rowLo, rowHi)) * W + std::clamp(ix + ox, 0, W - 1)] >> 24) / 255.0f;
+    if (!bound || (sides && ownA < 0.125f)) return;
     float hi[3] = {};
-    for (int j = 0; j < 2; j++)
-        for (int i = 0; i < 2; i++) {
+    const int lo = sides ? -1 : 0, n = sides ? 3 : 2;
+    for (int j = lo; j < n; j++)
+        for (int i = lo; i < n; i++) {
             const DWORD v = map[static_cast<size_t>(std::clamp(iy + j, rowLo, rowHi)) * W + std::clamp(ix + i, 0, W - 1)];
-            if (sides && ownA >= 0.125f && static_cast<float>(v >> 24) / 255.0f < 4.0f / 255.0f) continue;
+            if (sides && static_cast<float>(v >> 24) / 255.0f < 4.0f / 255.0f) continue;
             hi[0] = std::max(hi[0], static_cast<float>((v >> 16) & 0xFF));
             hi[1] = std::max(hi[1], static_cast<float>((v >> 8) & 0xFF));
             hi[2] = std::max(hi[2], static_cast<float>(v & 0xFF));
         }
-    if (bound)
-        for (int c = 0; c < 3; c++) out[c] = std::min(out[c], hi[c] + 2.0f);
+    for (int c = 0; c < 3; c++) out[c] = std::min(out[c], hi[c] + 2.0f);
 }
 
 // The bound of the B-spline (the brightest of the bilinear read's 2 x 2 texels + 2 levels), CPU: a hall's floor texels at 8
@@ -398,9 +400,11 @@ void BoundChecks() {
 }
 
 // The pixel's side of a wall (PatchRoomMapSmooth): a hall's texels (ambient weight 0.75, green 3) beside a courtyard's lit
-// green at 255 (alpha 0, room 0) with no texel row on the wall line (F7 of a hall beside a glass door: a green line along
-// the wall). In the last half texel before the wall the bound held the courtyard's texel; now it holds the hall's. On the
-// courtyard's side, with light sent out of the hall (alpha 10/255) or a bright hall texel (alpha under 0.125), as before.
+// green at 255 (alpha 0, room 0) with no texel row on the wall line (F7 of a hall beside a glass door: a band, then a line
+// of the courtyard's green along the wall). The hall within 2 texels of the wall takes none of it; the courtyard's pixels,
+// light sent out of the hall (alpha 10/255) and a bright hall texel (alpha under 0.125) keep the B-spline. A jamb's
+// penumbra inside the hall (0 to 120 over a texel): the 2 x 2 bound cut the B-spline's tail on its dark side at the texel
+// lines (steps a texel wide beside a glass door, in game); the 4 x 4 of the room's own texels never does.
 std::vector<DWORD> SideMap(int W, int H, int K, DWORD hallA, DWORD yardA) {
     std::vector<DWORD> m(static_cast<size_t>(W) * H);
     for (int y = 0; y < H; y++)
@@ -410,29 +414,46 @@ std::vector<DWORD> SideMap(int W, int H, int K, DWORD hallA, DWORD yardA) {
 void SideChecks() {
     constexpr int W = 16, H = 16, K = 8;
     const std::vector<DWORD> hall = SideMap(W, H, K, 191, 0), sent = SideMap(W, H, K, 191, 10), bright = SideMap(W, H, K, 25, 0);
-    float before = 0, now = 0, yardMoved = 0, sentMoved = 0, brightMoved = 0;
-    for (float cy = K - 0.5f; cy < K; cy += 0.01f) { // the hall's last half texel
-        float a[4], b[4];
-        Reference(hall, W, H, 7.3f, cy, 0, H - 1, a, true, false);
-        Reference(hall, W, H, 7.3f, cy, 0, H - 1, b, true, true);
-        before = std::max(before, a[1] - 3.0f), now = std::max(now, b[1] - 3.0f);
-        Reference(sent, W, H, 7.3f, cy, 0, H - 1, a, true, false);
-        Reference(sent, W, H, 7.3f, cy, 0, H - 1, b, true, true);
-        sentMoved = std::max(sentMoved, std::fabs(a[1] - b[1]));
-        Reference(bright, W, H, 7.3f, cy, 0, H - 1, a, true, false);
-        Reference(bright, W, H, 7.3f, cy, 0, H - 1, b, true, true);
-        brightMoved = std::max(brightMoved, std::fabs(a[1] - b[1]));
+    float plain = 0, square = 0, now = 0, keepMoved = 0;
+    for (float cy = K - 2.0f; cy < K; cy += 0.01f) { // the hall within 2 texels of the wall
+        float a[4], b[4], c[4];
+        Reference(hall, W, H, 7.3f, cy, 0, H - 1, a, false);
+        Reference(hall, W, H, 7.3f, cy, 0, H - 1, b, true, false);
+        Reference(hall, W, H, 7.3f, cy, 0, H - 1, c, true, true);
+        plain = std::max(plain, a[1] - 3.0f), square = std::max(square, b[1] - 3.0f), now = std::max(now, c[1] - 3.0f);
+        for (const std::vector<DWORD>* m : {&sent, &bright}) {
+            Reference(*m, W, H, 7.3f, cy, 0, H - 1, a, false);
+            Reference(*m, W, H, 7.3f, cy, 0, H - 1, c, true, true);
+            for (int k = 0; k < 4; k++) keepMoved = std::max(keepMoved, std::fabs(a[k] - c[k]));
+        }
     }
     for (float cy = K; cy < H - 1; cy += 0.05f) { // the courtyard's pixels
-        float a[4], b[4];
-        Reference(hall, W, H, 7.3f, cy, 0, H - 1, a, true, false);
-        Reference(hall, W, H, 7.3f, cy, 0, H - 1, b, true, true);
-        for (int c = 0; c < 4; c++) yardMoved = std::max(yardMoved, std::fabs(a[c] - b[c]));
+        float a[4], c[4];
+        Reference(hall, W, H, 7.3f, cy, 0, H - 1, a, false);
+        Reference(hall, W, H, 7.3f, cy, 0, H - 1, c, true, true);
+        for (int k = 0; k < 4; k++) keepMoved = std::max(keepMoved, std::fabs(a[k] - c[k]));
     }
-    std::printf("  a hall's last half texel beside a lit courtyard: up to +%.1f levels of green with the 2 x 2 bound, +%.1f with the pixel's side\n", before, now);
-    Check(before > 30.0f && now <= 2.0f + 1e-3f, "a hall's floor takes no line of the courtyard's light along the wall");
-    Check(yardMoved == 0.0f, "the courtyard's own pixels are unchanged");
-    Check(sentMoved == 0.0f && brightMoved == 0.0f, "light sent out of the hall, or a bright hall texel (little ambient weight): unchanged");
+    std::printf("  a hall within 2 texels of a lit courtyard's wall: up to +%.1f levels of green with the plain B-spline, +%.1f with the 2 x 2 bound, +%.1f now\n",
+                plain, square, now);
+    Check(plain > 30.0f && square > 30.0f && now <= 2.0f + 1e-3f, "a hall's floor takes no band or line of the courtyard's light along the wall");
+    Check(keepMoved == 0.0f, "the courtyard's own pixels, light sent out of the hall and a bright hall texel keep the B-spline");
+    // a jamb's penumbra inside the hall, along x (0 to 120 over about a texel), every texel the hall's
+    std::vector<DWORD> jamb(W * H);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) {
+            const DWORD v = static_cast<DWORD>(std::lround(120.0f / (1.0f + std::exp(-((x + 0.5f) - 8.0f) / 0.35f))));
+            jamb[static_cast<size_t>(y) * W + x] = (191u << 24) | (v << 8);
+        }
+    float squareCut = 0, nowCut = 0;
+    for (float cx = 3.0f; cx < 13.0f; cx += 0.01f) {
+        float a[4], b[4], c[4];
+        Reference(jamb, W, H, cx, 6.3f, 0, H - 1, a, false);
+        Reference(jamb, W, H, cx, 6.3f, 0, H - 1, b, true, false);
+        Reference(jamb, W, H, cx, 6.3f, 0, H - 1, c, true, true);
+        squareCut = std::max(squareCut, a[1] - b[1]), nowCut = std::max(nowCut, a[1] - c[1]);
+    }
+    std::printf("  a jamb's penumbra in the hall: the B-spline cut by up to %.1f levels at texel lines with the 2 x 2 bound, %.1f now\n", squareCut, nowCut);
+    Check(squareCut > 3.0f && nowCut == 0.0f, "a jamb's penumbra keeps the B-spline's smooth read (no steps at the texel lines)");
 }
 void SidePixelCheck(Gpu& gpu) {
     if (!gpu.dev) return;

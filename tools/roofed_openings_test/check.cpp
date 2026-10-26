@@ -1434,6 +1434,57 @@ void OpeningFalloffChecks() {
 // sconce (1.7, (0, 1, 0), its two entries 0.64 together at the hall's glass door, under the cut alone) beside a white sconce
 // on the door's wall (1, (1, 0.98, 0.85), 2.5 at the door's outer side, both entries): the courtyard's texel there is the
 // sum over its largest channel, the green 0.21 of it; the hall's floor at the door took the green whole, 3.1 times that.
+// Along the wall's foot beside a glass door (the light capture of a green sconce 2.9 m out from a hall's glass door, a white
+// sconce flat on the door's wall 0.5 m from its jamb): the hall's floor map texel by texel (4 a metre, class 2), each lamp's
+// entry through the walls and the cut at the opening. Beyond each jamb along the wall the light falls off at every texel,
+// with no stretch held level before a cut: the green is gone within 2 texels of the jamb's line (the wall shades it), the
+// white's grazing light (rays almost along the wall through the door) falls off with the distance.
+float HallTexel(const StoryGrid& g, const float L[3], float x, float z) {
+    const float P[3] = {x, 0.0f, z}, up[3] = {0.0f, 1.0f, 0.0f};
+    GridWhy why{};
+    t_mapAA = 0.75f * 0.25f;
+    const float pass = GridPassImpl(g, L, P, why);
+    t_mapAA = 0.0f;
+    const float e = SconceEntry(x, 0.0f, z, L);
+    return 2.0f * e * OpeningLampBalance::EntryScale(e, 2, OpeningLampBalance::OpeningGain(L, P, up, why.tOpen)) * pass;
+}
+void WallFootChecks() {
+    Builder b(40, 40);
+    b.Room(17, 18, 30, 20, 3, true);
+    for (int x = 17; x < 30; x++) {
+        const int32_t e = b.Wall(true, x, 20);
+        b.Wall(true, x, 18);
+        if (x >= 22 && x < 24) {
+            b.Open(e, kCutDoor, 0.0f, 2.1f, 0.0f, 1.0f);
+            b.g.openings.back().glass = WallOpenings::kWindowPass;
+        }
+    }
+    const float green[3] = {25.0f, 2.24f, 22.86f}, white[3] = {21.5f, 2.24f, 20.17f};
+    int rising = 0, lingering = 0;
+    std::string foot;
+    for (int r = 0; r < 3; r++) { // the three rows nearest the wall (0.125 to 0.625 m)
+        const float z = 19.875f - 0.25f * static_cast<float>(r);
+        float prev = 1e9f, atJamb = 0.0f;
+        for (int c = 0; c < 16; c++) { // from the far jamb (x = 24) along the wall
+            const float x = 23.875f + 0.25f * static_cast<float>(c), v = HallTexel(b.g, green, x, z);
+            if (c == 0) atJamb = v;
+            if (v > prev + 1e-6f) ++rising;
+            if (c >= 3 && v > 0.05f * atJamb + 1e-4f) ++lingering;
+            prev = v;
+            if (r == 0 && c < 6) foot += std::format(" {:.3f}", v);
+        }
+    }
+    float wPrev = 1e9f;
+    int wRising = 0;
+    for (int c = 0; c < 14; c++) { // the white's grazing light along the wall's foot, past the jamb's line
+        const float v = HallTexel(b.g, white, 24.625f + 0.25f * static_cast<float>(c), 19.875f);
+        if (v > wPrev + 1e-6f) ++wRising;
+        wPrev = v;
+    }
+    std::printf("Along the wall's foot beside the glass door, the green from the jamb (x 23.875 on):%s\n", foot.c_str());
+    Check(rising == 0 && lingering == 0, "beside the jamb the green falls off at every texel along the wall and is gone within 3 texels (no strip)");
+    Check(wRising == 0, "the white's grazing light along the wall's foot falls off at every texel past the jamb");
+}
 void OpeningShareChecks() {
     int moved = 0;
     for (int i = 1; i <= 300; i++) // total = R (no other light): the lamp's own cut, bit for bit
@@ -1743,6 +1794,7 @@ int main() {
     OpeningColourChecks();
     OpeningFalloffChecks();
     OpeningShareChecks();
+    WallFootChecks();
     CutHoldChecks();
     std::printf("Roofed openings: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

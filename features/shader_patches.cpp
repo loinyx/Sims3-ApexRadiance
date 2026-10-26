@@ -3083,9 +3083,9 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
     const bool ps3 = t[0] == 0xFFFF0300;
     const Usage u = Scan(t, ins);
     const int constLimit = ps3 ? 224 : 32; // ps_2_x: c0..c31
-    if (u.maxTemp + 11 >= 32 || u.maxConst + 5 >= constLimit) return false;
+    if (u.maxTemp + 11 >= 32 || u.maxConst + 6 >= constLimit) return false;
     const DWORD T = static_cast<DWORD>(u.maxTemp + 1);
-    const DWORD cS = static_cast<DWORD>(u.maxConst + 1), cK = cS + 1, cH = cS + 2, cR = cS + 3, cG = cS + 4;
+    const DWORD cS = static_cast<DWORD>(u.maxConst + 1), cK = cS + 1, cH = cS + 2, cR = cS + 3, cG = cS + 4, cV = cS + 5;
     const DWORD P = T, Fr = T + 1, R = T + 2, A = T + 3, B = T + 4, Wt = T + 10;
     const DWORD X = Sw(0, 0, 0, 0), Y = Sw(1, 1, 1, 1), Z = Sw(2, 2, 2, 2), W = Sw(3, 3, 3, 3);
     // The wall atlas's blocks: row = floor(v H / S) (S = 3n + 1 texel rows a block), the taps' v kept within
@@ -3109,62 +3109,71 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
         if (k == 0) body.insert(body.end(), {Op(kMul, 3), Dst(kTemp, r.L), Src(kTemp, R), Src(kTemp, Wt, X)});
         else body.insert(body.end(), {Op(kMad, 4), Dst(kTemp, r.L), Src(kTemp, R), Src(kTemp, Wt, Sw(c, c, c, c)), Src(kTemp, r.L)});
     }
-    // The colour no brighter than the brightest of the 2 x 2 texels the game's own bilinear read takes (+ 2/255): the wider
-    // B-spline reached the texels of the room beyond a wall (a hall floor took a band of the lit courtyard's light, F7: 0.14
-    // of an outdoor texel at 1 beside a hall texel at 0.03). A lamp's falloff inside a room never passes it, the softest
-    // shadow edge (1.5 texels) loses at most 6 levels on its dark side (tools/room_map_smooth_check); the alpha (the ambient
-    // weight) stays the B-spline's. Temps free here: A, B, C0..C3, R.
-    // Within half a texel of a wall the 2 x 2 holds the texel beyond it, so the bound let that room's light through: a
-    // line of the courtyard's green along a hall's wall (F7: a texel at 1 beside hall texels at 0.01 to 0.05; the B-spline
-    // takes 1/6 of it at the hall texel's centre, about a quarter at the wall's face). The solve tells the two sides apart:
-    // a roofed room's texel holds its ambient weight in alpha (0.44 to 0.84 there), room 0's 0 (or the little light rooms
-    // send out of their openings, Indoor light on the ground). The pixel's own texel (the one it lies in) with alpha
-    // 0.125 or more leaves the bound's texels with alpha under 4/255 out of it. A room-0 pixel, a bright texel with little
-    // ambient weight, or a neighbour holding light sent out keep the bound as it was (alpha under the gate: every texel in).
+    // Light across a wall. The B-spline reads the 4 x 4 texels around the pixel; where they include the texels of room 0
+    // beyond a wall the pixel took that room's light: a hall beside a glass door showed a band of the lit courtyard's light
+    // along its wall (F7: 0.14 of a courtyard texel at 1 beside hall texels at 0.03), then, held under the brightest of the
+    // 2 x 2 texels the bilinear read takes, a line of it in the last half texel before the wall (0.25 of a texel at 1). The
+    // solve marks the sides: a roofed room's texel holds its ambient weight in alpha (0.44 to 0.84 there), room 0's 0 (or
+    // the little light rooms send out of their openings, Indoor light on the ground). When the pixel's own texel (the one
+    // it lies in) has alpha 0.125 or more, the colour is held under the brightest texel of the 4 x 4 with alpha 4/255 or
+    // more (+ 2/255): the B-spline of the room's own texels is never under it, so a shadow edge or a jamb's penumbra
+    // keeps its smooth read (the 2 x 2 bound cut its dark side's tail at texel lines, steps a texel wide along a door's
+    // jambs and sill); room 0's texels beyond the wall add nothing. A pixel of room 0 or a bright texel with little ambient
+    // weight keeps the B-spline. Rows as the taps (the pixel's wall block). Temps free here: A, B, R, C0..C3, T + 5, Wt.
     {
         constexpr DWORD kCmp = 0x58;
-        const DWORD C0 = T + 6, C1 = T + 7, C2 = T + 8, C3 = T + 9;
-        body.insert(body.end(), {Op(kAdd, 3), Dst(kTemp, B, 0x3), Src(kTemp, P), Src(kConst, cK, Z),                  // i + 0.5
-                                 Op(kAdd, 3), Dst(kTemp, B, 0xC), Src(kTemp, P, Sw(0, 1, 0, 1)), Src(kConst, cH, Y)}); // i + 1.5
-        body.insert(body.end(), clampV.begin(), clampV.end()); // (rows kept in the pixel's wall block, as the taps)
-        body.insert(body.end(), {Op(kMul, 3), Dst(kTemp, B), Src(kTemp, B), Src(kConst, cS, Sw(2, 3, 2, 3)),
-                                 Op(kMov, 2), Dst(kTemp, C0), Src(kTemp, B, Sw(0, 1, 0, 1)),
-                                 Op(kMov, 2), Dst(kTemp, C1), Src(kTemp, B, Sw(2, 1, 2, 1)),
-                                 Op(kMov, 2), Dst(kTemp, C2), Src(kTemp, B, Sw(0, 3, 0, 3)),
-                                 Op(kMov, 2), Dst(kTemp, C3), Src(kTemp, B, Sw(2, 3, 2, 3))});
-        for (DWORD k = 0; k < 4; k++) body.insert(body.end(), {Op(kTexld, 3), Dst(kTemp, C0 + k), Src(kTemp, C0 + k), Src(kSampler, r.S)});
+        const DWORD C0 = T + 6, Xc = T + 5, Yr = Wt;
+        const std::vector<DWORD> blockLimits(clampV.begin(), clampV.end() - 8); // (lo in A.x, hi in A.y; not the clamp of B)
         body.insert(body.end(), {
             Op(kAdd, 3), Dst(kTemp, B, 0x3), Src(kTemp, Fr), Src(kConst, cH, X),                                     // f - 0.5
-            Op(kCmp, 4), Dst(kTemp, B, 0x3), Src(kTemp, B), Src(kConst, cG, Z), Src(kConst, cG, W),                  // the own texel: i + (f >= 0.5)
-            Op(kLrp, 4), Dst(kTemp, A, 0x1), Src(kTemp, B, X), Src(kTemp, C1, W), Src(kTemp, C0, W),
-            Op(kLrp, 4), Dst(kTemp, A, 0x2), Src(kTemp, B, X), Src(kTemp, C3, W), Src(kTemp, C2, W),
-            Op(kLrp, 4), Dst(kTemp, R, 0x1), Src(kTemp, B, Y), Src(kTemp, A, Y), Src(kTemp, A, X),                   // its alpha
-            Op(kAdd, 3), Dst(kTemp, A, 0x8), Src(kTemp, R, X), Neg(Src(kConst, cG, Y)),
-            Op(kCmp, 4), Dst(kTemp, A, 0x8), Src(kTemp, A, W), Src(kConst, cG, W), Src(kConst, cG, Z),              // 0 = the gate on
-            Op(kMov, 2), Dst(kTemp, B, 0x1), Src(kTemp, C0, W),
-            Op(kMov, 2), Dst(kTemp, B, 0x2), Src(kTemp, C1, W),
-            Op(kMov, 2), Dst(kTemp, B, 0x4), Src(kTemp, C2, W),
-            Op(kMov, 2), Dst(kTemp, B, 0x8), Src(kTemp, C3, W),
-            Op(kAdd, 3), Dst(kTemp, B), Src(kTemp, B), Neg(Src(kConst, cG, X)),
-            Op(kCmp, 4), Dst(kTemp, B), Src(kTemp, B), Src(kConst, cG, Z), Src(kConst, cG, W),                       // a texel of the pixel's side
-            Op(kMax, 3), Dst(kTemp, B), Src(kTemp, B), Src(kTemp, A, W),                                             // (all, the gate off)
-            Op(kMul, 3), Dst(kTemp, C0, 0x7), Src(kTemp, C0), Src(kTemp, B, X),
-            Op(kMul, 3), Dst(kTemp, C1, 0x7), Src(kTemp, C1), Src(kTemp, B, Y),
-            Op(kMul, 3), Dst(kTemp, C2, 0x7), Src(kTemp, C2), Src(kTemp, B, Z),
-            Op(kMul, 3), Dst(kTemp, C3, 0x7), Src(kTemp, C3), Src(kTemp, B, W),
-            Op(kMax, 3), Dst(kTemp, A, 0x7), Src(kTemp, C0), Src(kTemp, C1),
-            Op(kMax, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, C2),
-            Op(kMax, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, C3),
-            Op(kAdd, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kConst, cH, Z),
-            Op(kMin, 3), Dst(kTemp, r.L, 0x7), Src(kTemp, r.L), Src(kTemp, A)});
+            Op(kCmp, 4), Dst(kTemp, B, 0x3), Src(kTemp, B), Src(kConst, cG, Z), Src(kConst, cG, W),                  // f >= 0.5
+            Op(kAdd, 3), Dst(kTemp, B, 0x3), Src(kTemp, B), Src(kTemp, P),
+            Op(kAdd, 3), Dst(kTemp, B, 0x3), Src(kTemp, B), Src(kConst, cK, Z),                                      // the own texel's centre
+            Op(kMul, 3), Dst(kTemp, B, 0x3), Src(kTemp, B), Src(kConst, cS, Sw(2, 3, 2, 3)),
+            Op(kTexld, 3), Dst(kTemp, R), Src(kTemp, B), Src(kSampler, r.S),
+            Op(kAdd, 3), Dst(kTemp, A, 0x8), Src(kTemp, R, W), Neg(Src(kConst, cG, Y)),
+            Op(kCmp, 4), Dst(kTemp, A, 0x8), Src(kTemp, A, W), Src(kConst, cG, W), Src(kConst, cG, Z),              // 1 = no bound
+            Op(kAdd, 3), Dst(kTemp, Xc), Src(kTemp, P, X), Src(kConst, cV),                                          // columns i - 1 .. i + 2
+            Op(kMul, 3), Dst(kTemp, Xc), Src(kTemp, Xc), Src(kConst, cS, Z),
+            Op(kAdd, 3), Dst(kTemp, Yr), Src(kTemp, P, Y), Src(kConst, cV)});                                        // rows
+        body.insert(body.end(), blockLimits.begin(), blockLimits.end());
+        body.insert(body.end(), {Op(kMax, 3), Dst(kTemp, Yr), Src(kTemp, Yr), Src(kTemp, A, X),
+                                 Op(kMin, 3), Dst(kTemp, Yr), Src(kTemp, Yr), Src(kTemp, A, Y),
+                                 Op(kMul, 3), Dst(kTemp, Yr), Src(kTemp, Yr), Src(kConst, cS, W)});
+        for (DWORD row = 0; row < 4; row++) {
+            const DWORD rs = Sw(static_cast<int>(row), static_cast<int>(row), static_cast<int>(row), static_cast<int>(row));
+            body.insert(body.end(), {Op(kMul, 3), Dst(kTemp, B, 0x3), Src(kTemp, Yr, rs), Src(kConst, cG, Sw(3, 2, 3, 2))}); // (0, y)
+            for (DWORD k = 0; k < 4; k++)
+                body.insert(body.end(), {Op(kMad, 4), Dst(kTemp, C0 + k, 0x3), Src(kTemp, Xc, Sw(static_cast<int>(k), static_cast<int>(k), static_cast<int>(k), static_cast<int>(k))),
+                                         Src(kConst, cG, Sw(2, 3, 2, 3)), Src(kTemp, B)});
+            for (DWORD k = 0; k < 4; k++) body.insert(body.end(), {Op(kTexld, 3), Dst(kTemp, C0 + k), Src(kTemp, C0 + k), Src(kSampler, r.S)});
+            body.insert(body.end(), {Op(kMov, 2), Dst(kTemp, R, 0x1), Src(kTemp, C0, W),
+                                     Op(kMov, 2), Dst(kTemp, R, 0x2), Src(kTemp, C0 + 1, W),
+                                     Op(kMov, 2), Dst(kTemp, R, 0x4), Src(kTemp, C0 + 2, W),
+                                     Op(kMov, 2), Dst(kTemp, R, 0x8), Src(kTemp, C0 + 3, W),
+                                     Op(kAdd, 3), Dst(kTemp, R), Src(kTemp, R), Neg(Src(kConst, cG, X)),
+                                     Op(kCmp, 4), Dst(kTemp, R), Src(kTemp, R), Src(kConst, cG, Z), Src(kConst, cG, W)}); // the room's own texels
+            for (DWORD k = 0; k < 4; k++)
+                body.insert(body.end(), {Op(kMul, 3), Dst(kTemp, C0 + k, 0x7), Src(kTemp, C0 + k),
+                                         Src(kTemp, R, Sw(static_cast<int>(k), static_cast<int>(k), static_cast<int>(k), static_cast<int>(k)))});
+            if (row == 0) body.insert(body.end(), {Op(kMax, 3), Dst(kTemp, A, 0x7), Src(kTemp, C0), Src(kTemp, C0 + 1)});
+            else body.insert(body.end(), {Op(kMax, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, C0),
+                                          Op(kMax, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, C0 + 1)});
+            body.insert(body.end(), {Op(kMax, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, C0 + 2),
+                                     Op(kMax, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, C0 + 3)});
+        }
+        body.insert(body.end(), {Op(kAdd, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kConst, cH, Z),
+                                 Op(kMad, 4), Dst(kTemp, A, 0x7), Src(kTemp, A, W), Src(kConst, cV, W), Src(kTemp, A), // (no bound: + 2.5)
+                                 Op(kMin, 3), Dst(kTemp, r.L, 0x7), Src(kTemp, r.L), Src(kTemp, A)});
     }
     // (development builds, arch_ambient) the neighbours' ambient near the room's arches, right after the read (ps_3_0 only;
     // a copy that cannot hold it is made without it)
     std::vector<DWORD> defs = {Op(kDef, 5), Dst(kConst, cK), F(1.0f / 6.0f), F(2.0f / 3.0f), F(0.5f), F(1.0f),
                                Op(kDef, 5), Dst(kConst, cH), F(-0.5f), F(1.5f), F(2.0f / 255.0f), F(0.0f),
-                               Op(kDef, 5), Dst(kConst, cG), F(4.0f / 255.0f), F(0.125f), F(1.0f), F(0.0f)};
-    if (archAmb && ps3 && r.ambConst >= 0 && u.maxConst + 7 + 2 * static_cast<int>(kArchCells) < constLimit) {
-        const DWORD cP = cS + 5, cQ = cS + 6, cArch = cS + 7;
+                               Op(kDef, 5), Dst(kConst, cG), F(4.0f / 255.0f), F(0.125f), F(1.0f), F(0.0f),
+                               Op(kDef, 5), Dst(kConst, cV), F(-0.5f), F(0.5f), F(1.5f), F(2.5f)};
+    if (archAmb && ps3 && r.ambConst >= 0 && u.maxConst + 8 + 2 * static_cast<int>(kArchCells) < constLimit) {
+        const DWORD cP = cS + 6, cQ = cS + 7, cArch = cS + 8;
         const std::vector<DWORD> code = ArchAmbientCode(r.uvType, r.uvNum, cS, cP, cQ, cArch, r.L, T, T + 1, T + 2);
         body.insert(body.end(), code.begin(), code.end());
         defs.insert(defs.end(), {Op(kDef, 5), Dst(kConst, cP), F(3.0f), F(-2.0f), F(1.0f), F(0.25f),
