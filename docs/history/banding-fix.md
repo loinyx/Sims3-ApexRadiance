@@ -121,3 +121,20 @@ Experimental. *Smooth gradients* is removed with its deband in the Picture pass 
 and *Moving grain* with it; old `deband` and `graoEmMovimento` keys are ignored. The card was redesigned: a before /
 after picture of the gradient that follows the current state, then *Grain* (Strength) and *Precision* (the switch and a
 Status pill), with the developer resolves under *Live counters*.
+
+### 2026-10-26: rings in car headlights' glow
+
+**Context:** observed in game with the High-precision scene build: car headlights' glow still showed rings. Light
+captures of the glow (draw #229) showed `texld r0, t1, s0; mul r0, r0, v0; mov oC0, r0` (ps_2_0), additive blending,
+no depth write, and a 128x128 DXT5 texture, white with a radial glow in alpha, sampled without a mip filter.
+
+**Finding:** the rings are in the texture. DXT5 keeps 8 alpha levels per 4x4 block: along a row of the captured glow the
+values go 22, 26, 28, 31, 33, 37, 41, 43, 49 and the slope changes by up to 13 levels between neighbouring texels.
+Magnified, each change is a crease of the bilinear filter. The 16-bit scene and the grain act after the texture is read.
+In the game's shader package the texture x vertex colour family is 2 ps_2_x and 1 ps_3_0 shaders; the other captures
+hold no other draw of it. A blur of 1.5 texels changes the glow by 0.87 levels RMS and textured content by 2.8 or more.
+
+**Outcome:** the Banding Fix draws such sprites with a smoothed 16-bit copy of their DXT texture, made once per texture
+when the blur changes it no more than DXT noise, and kept by the game texture as private data. Offline: the slope
+changes drop from 13 to 1.3 levels on the captured glow, the mean is kept. Not yet tested in game: open checks on the
+[validation page](../validation/banding-fix.md#open-checks).
