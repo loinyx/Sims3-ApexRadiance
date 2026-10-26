@@ -409,6 +409,8 @@ struct Slot {
     const BYTE* room = nullptr;
     IDirect3DTexture9* game = nullptr; // the room's own map (AddRef'd while kept)
     IDirect3DTexture9* copy = nullptr; // DEFAULT render target: what the draws read instead
+    IDirect3DTexture9* scale = nullptr; // DEFAULT render target: each texel's outdoor scale (maps with no blur; ScaleOf)
+    bool scaled = false;                // the last relight wrote it
     IDirect3DVertexBuffer9 *vb = nullptr, *dyn = nullptr;
     IDirect3DVertexBuffer9* dynNext = nullptr; // the other floor mask buffer: a write fills the one the last draws did not read
     IDirect3DTexture9* preblur = nullptr;
@@ -504,6 +506,7 @@ DWORD g_frame = 0, g_lastFrame = 0;
 bool g_installed = false;
 IDirect3DDevice9* g_dev = nullptr; // the game's device (render thread)
 int g_ps3 = -1; // the device runs shader model 3 (1), not (0), not read yet (-1) (render thread)
+int g_mrt = -1; // the device draws into two render targets at once (the outdoor scale), not (0), not read yet (-1)
 DWORD g_makeFailAt = 0; // (render thread) the shader objects' last failed making
 int g_makeFails = 0;     // and how many in a row (5: given up until the next device reset)
 IDirect3DQuery9 *g_qDisjoint = nullptr, *g_qFreq = nullptr, *g_qBegin = nullptr, *g_qEnd = nullptr;
@@ -529,6 +532,8 @@ void Inactive(const std::string& why) {
 void ReleaseSlot(Slot& s) {
     if (s.watch >= 0) g_watchTex[s.watch].store(nullptr), s.watch = -1;
     if (s.copy) s.copy->Release(), s.copy = nullptr;
+    if (s.scale) s.scale->Release(), s.scale = nullptr;
+    s.scaled = false;
     if (s.vb) s.vb->Release(), s.vb = nullptr;
     if (s.dyn) s.dyn->Release(), s.dyn = nullptr;
     if (s.dynNext) s.dynNext->Release(), s.dynNext = nullptr;
@@ -917,6 +922,8 @@ void OnPreReset(IDirect3DDevice9* dev) {
     UnbindCopies(dev);
     for (auto& s : g_slots) {
         if (s->copy) s->copy->Release(), s->copy = nullptr;
+        if (s->scale) s->scale->Release(), s->scale = nullptr;
+        s->scaled = false;
         s->relit = false; // (14/10: its preblur texture is a MANAGED one: kept, and the slot stays built; only the copy is made again)
     }
     if (g_eng) g_eng->ReleaseDefault();
@@ -1326,6 +1333,8 @@ void Frame(IDirect3DDevice9* dev) {
                 slot->game = tex;
                 if (tex) tex->AddRef();
                 if (slot->copy) slot->copy->Release(), slot->copy = nullptr;
+                if (slot->scale) slot->scale->Release(), slot->scale = nullptr;
+                slot->scaled = false;
                 slot->relit = false;
             }
             if (!slot->logged) {
@@ -1760,6 +1769,11 @@ void Frame(IDirect3DDevice9* dev) {
             failNote = std::format("story {} {}: its copy could not be made", s.story, kMapName[s.m]);
             continue;
         }
+        // the outdoor scale beside it (a device with two render targets; a map the draws multiply back: no blur). None: the
+        // draws read the copy as before, the light past 1 cut
+        if (!s.scale && !s.map.blur && g_mrt > 0 &&
+            (FAILED(dev->CreateTexture(s.map.w, s.map.h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &s.scale, nullptr)) || !s.scale))
+            s.scale = nullptr;
         if (!s.preblur && s.map.blur) { // after a device reset
             s.built = false;
             continue;
@@ -1855,7 +1869,8 @@ void Frame(IDirect3DDevice9* dev) {
             ok = ok && g_eng->Accumulate(dev, s.map, mine.data() + std::min(b, mine.size()), n, p, b == 0, err);
             if (mine.empty()) break;
         }
-        ok = ok && g_eng->Compose(dev, s.map, s.game, s.copy, p, err);
+        ok = ok && g_eng->Compose(dev, s.map, s.game, s.copy, p, err, s.scale);
+        s.scaled = ok && s.scale;
         if (!ok) {
             s.relit = false;
             failNote = std::format("story {} {}: {}", s.story, kMapName[s.m], err);
@@ -2023,6 +2038,8 @@ void OnPresent(IDirect3DDevice9* dev) {
         D3DCAPS9 caps{};
         if (SUCCEEDED(dev->GetDeviceCaps(&caps))) {
             g_ps3 = caps.PixelShaderVersion >= D3DPS_VERSION(3, 0) && caps.VertexShaderVersion >= D3DVS_VERSION(3, 0) ? 1 : 0;
+            g_mrt = caps.NumSimultaneousRTs >= 2 ? 1 : 0;
+            if (!g_mrt) LOG_INFO("[RtOutdoorLamps] The device draws into one render target at a time: outdoor light stays cut at 1");
             if (!g_ps3) LOG_WARNING("[RtOutdoorLamps] The device has no shader model 3: Instant lamp lighting cannot run");
         }
     }
@@ -2262,6 +2279,12 @@ void NoteUnlock(const void* texture) {
     if (!g_watch.load(std::memory_order_relaxed) || !texture) return;
     for (int i = 0; i < kMaxWatch; i++)
         if (g_watchTex[i].load(std::memory_order_relaxed) == texture) g_watchDirty.fetch_or(1ull << i, std::memory_order_relaxed);
+}
+IDirect3DTexture9* ScaleOf(const void* texture) {
+    if (!texture || !g_on.load(std::memory_order_relaxed)) return nullptr;
+    for (const auto& s : g_slots)
+        if (s->copy == texture) return s->relit && s->scaled ? s->scale : nullptr;
+    return nullptr;
 }
 const void* GameMapOf(const void* texture) {
     if (!texture || !g_on.load(std::memory_order_relaxed)) return texture;

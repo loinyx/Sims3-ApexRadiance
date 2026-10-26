@@ -167,6 +167,11 @@ struct SamplerBind {
 //   lamps = lerp(terrain, max(lm - ex, terrain tw), w) M + ex w,  tw = sat((1 - a) 255) (0 only at a = 1: the map alone).
 // ex comes after the lamp scale c3.x, so the daylight curve fades it like every lamp. With c34.x = 0: a = 0, s = 0, tw = 1,
 // exactly the pass of before.
+// The outdoor scale (RtOutdoorLamps::ScaleOf, s4): with Instant lamp lighting the lot map is a relit copy whose texels past 1
+// were divided by their largest channel (the hue kept); c35.x = kScaleLog2 multiplies them back by 2^(c35.x s4.r), so the
+// ground under a strong lamp shows its light instead of the cut at 1 (F7 of a courtyard beside a green sconce: the map flat
+// at 1 out to 4.6 m, the room behind its glass door lit as brightly). c35.x = 0 (no scale: Classic, another lot, a device
+// with one render target): the pass of before. The soft lot edge blends it to the terrain over its band as before.
 const char* kReplacementHlsl = R"(
 float4 c0 : register(c0);
 float4 c1 : register(c1);
@@ -184,10 +189,12 @@ float4 cLotGain : register(c31);
 float4 cMaskX : register(c32);
 float4 cMaskZ : register(c33);
 float4 cExit : register(c34);
+float4 cScale : register(c35);
 samplerCUBE sSky : register(s0);
 sampler2D sLot : register(s1);
 sampler2D sTerrain : register(s2);
 sampler2D sMask : register(s3);
+sampler2D sScale : register(s4);
 sampler2D sShadow : register(s5);
 struct PSIn {
     float4 shadowPos : TEXCOORD2;
@@ -221,6 +228,7 @@ float4 main(PSIn i) : COLOR0 {
     // unsupported VS mapping.
     float2 lotUv = i.lotUv * (1 + cLotGain.z) + cEdge.zw;
     float4 lot = tex2D(sLot, lotUv);
+    lot.rgb *= exp2(tex2D(sScale, lotUv).r * cScale.x);
     float3 lm = lot.rgb * cLotGain.x * c3.x;
     float a = lot.a * cExit.x;
     float3 ex = lm * saturate(a / max(dot(lot.rgb, float3(0.2126, 0.7152, 0.0722)), 1.0 / 255));
@@ -6937,18 +6945,34 @@ template <typename DrawFn> bool DrawFloorAtlas(IDirect3DDevice9* dev, DrawFn dra
         SetPsConst(dev, static_cast<UINT>(p.floor.heightConst), height, 1);
         // story 0: max(map, atlas) x the lot's ground lamp shade (world x, z, y = the copy's TEXCOORDn.xyz)
         FloorShadeBind shade(dev, p.floor, fv.worldConst, 1.0f, exitOn && p.floor.exitLight);
+        // the outdoor scale of the relit floor map (RtOutdoorLamps::ScaleOf; FloorPatch::outScaleSampler): x 1 without it
+        IDirect3DTexture9* scale = nullptr;
+        float oldQ[4] = {};
+        if (p.floor.outScaleSampler >= 0) {
+            IDirect3DBaseTexture9* map = nullptr;
+            D3D9Hooks::GetBoundTexture(dev, p.floor.mapSampler, &map);
+            scale = RtOutdoorLamps::ScaleOf(map);
+            if (map) map->Release();
+            dev->GetPixelShaderConstantF(static_cast<UINT>(p.floor.outScaleConst), oldQ, 1);
+            const float q[4] = {scale ? RtOutdoorLamps::kScaleLog2 : 0.0f, 0.0f, 0.0f, 0.0f};
+            SetPsConst(dev, static_cast<UINT>(p.floor.outScaleConst), q, 1);
+        }
+        std::optional<SamplerBind> scaleMap;
+        if (p.floor.outScaleSampler >= 0) scaleMap.emplace(dev, static_cast<DWORD>(p.floor.outScaleSampler), scale, D3DTEXF_NONE);
         SetVs(dev, fv.vs);
         SetPs(dev, p.ps);
         ConstGain lampGain(dev, p.floor.scaleConst, FloorDayGain()); // the lamp scale of max(map, atlas)
         if (LightProbe::Capturing())
-            g_objDrawInfo = std::format("mod draw: outdoor floor | atlas weight 1 - floor map alpha: {} | {} | indoor light on the ground: {}", height[1] < 0.0f ? "on" : "off",
-                                        shade.Text(), !exitOn ? "off" : p.floor.exitLight ? "on" : "no room in the shader");
+            g_objDrawInfo = std::format("mod draw: outdoor floor | atlas weight 1 - floor map alpha: {} | {} | indoor light on the ground: {} | outdoor scale: {}",
+                                        height[1] < 0.0f ? "on" : "off", shade.Text(), !exitOn ? "off" : p.floor.exitLight ? "on" : "no room in the shader",
+                                        p.floor.outScaleSampler < 0 ? "no room in the shader" : scale ? "on" : "off (no relit copy)");
         draw();
         g_objDrawInfo.clear();
         SetPs(dev, originalPs);
         SetVs(dev, originalVs);
         SetPsConst(dev, p.floor.atlasConst, oldC, 1);
         SetPsConst(dev, static_cast<UINT>(p.floor.heightConst), oldH, 1);
+        if (p.floor.outScaleSampler >= 0) SetPsConst(dev, static_cast<UINT>(p.floor.outScaleConst), oldQ, 1);
     }
     g_inOwnCall = false;
     ApexUtil::CountOne(g_floorAtlasDrawn);
@@ -7635,6 +7659,15 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
         // (2.15.3) the indoor light in the lot map's alpha, added after the max and the shade (c34, kReplacementHlsl)
         const float exitGate[4] = {LevelLightShare::IndoorLightOnGroundActive() ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
         SetPsConst(dev, 34, exitGate, 1);
+        // the outdoor scale of the relit lot map on s1 (c35, kReplacementHlsl)
+        IDirect3DBaseTexture9* lotMap = nullptr;
+        D3D9Hooks::GetBoundTexture(dev, 1, &lotMap);
+        IDirect3DTexture9* const scale = RtOutdoorLamps::ScaleOf(lotMap);
+        if (lotMap) lotMap->Release();
+        SamplerBind scaleMap(dev, 4, scale, D3DTEXF_NONE);
+        const float scaleOn[4] = {scale ? RtOutdoorLamps::kScaleLog2 : 0.0f, 0.0f, 0.0f, 0.0f};
+        SetPsConst(dev, 35, scaleOn, 1);
+        if (LightProbe::Capturing()) g_objDrawInfo += scale ? " | outdoor scale: on" : " | outdoor scale: off (no relit copy)";
         SetPs(dev, replacement);
         if (atlas) SetVsConst(dev, 14, atlasMap, 1);
         SetPsConst(dev, 28, edge, 3);

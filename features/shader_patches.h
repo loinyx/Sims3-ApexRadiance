@@ -54,7 +54,7 @@ int BloomThresholdConst(const std::vector<DWORD>& t);
 struct FloorPatch {
     DWORD atlasSampler = 0;
     DWORD atlasConst = 0;
-    DWORD mapSampler = 0; // PatchSnowFloor: the sampler of the room light map it found
+    DWORD mapSampler = 0; // PatchSnowFloor, PatchBakedAtlasPs (with outScaleSampler): the sampler of the room light map it found
     int scaleConst = -1;  // K of the game's lamp scale cK.x applied to max(map, atlas), read by no other instruction; -1 unknown
     int heightConst = -1; // PatchBakedAtlasPs, PatchFloor, PatchSnowFloor: cH, the atlas weight saturate(map.a * cH.y + cH.x) ((1, 0) = always); -1 = none
     bool maskAlpha = false; // map.a is readable at the atlas (the floor visibility mask; the winter floors copy it after the map's texld)
@@ -69,6 +69,11 @@ struct FloorPatch {
     // map its alpha gives (the light lit rooms send through their openings) leaves max(map, atlas) and the shade and is added
     // after them; the shade's rows must then carry the ground gate even while the shade itself is off (a white mask)
     bool exitLight = false;
+    // PatchBakedAtlasPs: the outdoor scale (RtOutdoorLamps::ScaleOf) read at the map's uv from outScaleSampler, the map's colour
+    // multiplied by 2^(c[outScaleConst].x r) before the atlas (c.x = 0: the map as it is). -1: none (no sampler or constant
+    // to spare); the draw then binds nothing more
+    int outScaleSampler = -1;
+    int outScaleConst = -1;
 };
 // Where a vertex shader writes world y to one output component: "mov oK.c, rW.y" with rW.y = "dp4 rW.y, rP, c9" (the
 // last write before it) and rW.x / rW.z from c8 / c10, exactly one such write and nothing else writing oK.c, no flow control.

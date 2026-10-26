@@ -1143,6 +1143,27 @@ bool PatchBakedAtlasPsImpl(std::vector<DWORD>& t, int texcoord, FloorPatch& out,
         out.shadeSampler = static_cast<int>(S);
         out.shadeConst = static_cast<int>(cM);
     }
+    // The outdoor scale (Instant lamp lighting's relit copy: a texel past 1 divided by its largest channel), read at the map's
+    // own uv and multiplied back into the map's colour first, so the max, the shade and the indoor light take the whole sum:
+    // texld rT, vK, sQ; mul rT.x, rT.x, cQ.x; exp rT.x, rT.x; mul rL.xyz, rL, rT.x (cQ.x = 0: x 1). The sampler and the
+    // constant after every one above may take (the shade's sampler E + 1, the indoor light's constants to cH + 5), the same
+    // in every variant of the copy, so the shade and the indoor light stay the same insertions
+    out.outScaleSampler = out.outScaleConst = -1;
+    {
+        constexpr DWORD kExp = 0x0E;
+        const DWORD Q = E + 2, cQ = cH + 6;
+        if (Q <= 15 && cQ < 224) {
+            const std::vector<DWORD> scale = {Op(kTexld, 3), Dst(kTemp, T), t[all[tex].at + 2], Src(kSampler, Q),
+                                              Op(kMul, 3), Dst(kTemp, T, 0x1), Src(kTemp, T, kSwzX), Src(kConst, cQ, kSwzX),
+                                              Op(kExp, 2), Dst(kTemp, T, 0x1), Src(kTemp, T, kSwzX),
+                                              Op(kMul, 3), Dst(kTemp, L, 0x7), Src(kTemp, L), Src(kTemp, T, kSwzX)};
+            code.insert(code.begin(), scale.begin(), scale.end());
+            edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, Q)}});
+            out.outScaleSampler = static_cast<int>(Q);
+            out.outScaleConst = static_cast<int>(cQ);
+            out.mapSampler = Num(t[all[tex].at + 3]);
+        }
+    }
     edits.push_back({all[mad].at, std::move(code)});
     Apply(t, std::move(edits));
     return true;
