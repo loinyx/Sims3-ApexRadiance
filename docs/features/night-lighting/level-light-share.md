@@ -634,6 +634,15 @@ half wall and the objects in them.
   room. The game opens a door only during its animation; a door seen open at that moment, and glass doors, are not
   modelled: real-time door state belongs to per-pixel lighting on the GPU, and a glass door would need the cutout mask's
   shape (no resource read path yet).
+- **Closes held** ([`cut_close_hold.h`](../../../features/cut_close_hold.h)): a cut closed again counts for lamp light
+  only after it stays closed for 2 s (`CutCloseHold::kHoldMs`, applied by `RequeueCutStories`); an add of the same edge
+  within that time cancels it. In game, camera turns made the game post a lot's cuts again (21 posts each, 3 times): its
+  window cuts closed and opened again 0.18 to 0.67 s later. Each close took the windows out of the story's grid and a
+  roofed room behind them gathered with 2 doors to the outside, then with 5, and its light depended on how the camera had
+  moved (`[Openings] ... windows 3 -> 0` then `0 -> 3` in the log, a kitchen dark from one side and lit from the other).
+  A window really removed lets its light out 2 s later; a moved one keeps its old cell open for those 2 s. The
+  `[Openings]` line and the *outdoor light through openings* status count the closes reopened within the hold and those
+  that lasted. Unverified: which game path re-posts the cuts on a camera move.
 - **Grids built too early:** a grid built while its lot streams in can have no wall edge yet (in game: stories 1..4
   of `B1280029950F0CA0` with 79 / 98 / 38 / 8 noted cuts and no wall, and no room of theirs gathered again). A grid with
   no wall edge on a story with noted cuts or roofed tiles is not kept (`NoteGridReadiness`); the rooms on its tiles (at
@@ -743,6 +752,22 @@ floor mask.
   out). Directional maps (`BasisLightHook`): the same test at the basis sample, the contribution scaled by it (0: left
   out), then the day factor. Normalisation (`RoomNormHook`): a room whose list holds
   only borrowed lamps (other stories' or these) gets no boost.
+- **At the outdoor scale** ([`opening_lamp_balance.h`](../../../features/opening_lamp_balance.h)): outside, the same lamp
+  is drawn from room 0's map, cut at 1 per channel, times the outdoor surface's brightness (the lot pass: *Ground
+  brightness* x *Lot lamp brightness*; outside walls: the walls' *Brightness*), and room 0 is not normalised. Inside, the
+  room solve summed it whole, with no cut before the room's curve, and the room's normalisation multiplied it. A light
+  capture of a green sconce (intensity 1.7, colour (0, 1, 0), a story-0 room-0 lamp listed twice) beside a courtyard: the
+  kitchen behind its glass door showed 0.808 on screen, the courtyard at the same distance at most 0.567 of its map.
+  Each entry of such a lamp is now held under 1 / its entries per channel (the outdoor cut), then takes the opening's
+  share and glass, then the outdoor scale: floors, ceilings and the directional maps the ground's (`Ground brightness x
+  Lot lamp brightness` while *Street lamps light lots* is on, else 1), wall texels the walls' (*Lamps light walls* on,
+  else 1), over the room's normalisation (`InnerLight::NormScale(1, room+0x160)`; the directional maps take no
+  normalisation factor, as whether the game normalises them is not read). Offline (`tools/roofed_openings_test`) the
+  kitchen pixel replayed through the room solve's curve and the room-lit floor shader's (PS `44ECECA0`, `c2.z` 4.2) was
+  brighter than the courtyard at every one of 200 distances before and is at none from an entry of 0.05 up after. A slider
+  change relights every room once the slider is let go (`SetOpeningLampBalance`). Indoor lamps, the lamps of other
+  stories, the roofless rooms and daylight are unchanged. Unverified: the indoor wall shaders' curve (taken to match the
+  floor's), so the walls' share of this balance is inferred.
 - **Walls ending at a floor above** (2.13.0, `CapLowerWalls`): a story's grid caps a full straight wall with a placed
   floor of the story above beside it, over its foot and lower than a story, at that floor (the rule of `PassesOverLowerWall`
   and `CapFoundationSides`). A foundation's sides are walls of story 0 drawn only up to the floor on the foundation; at 3 m

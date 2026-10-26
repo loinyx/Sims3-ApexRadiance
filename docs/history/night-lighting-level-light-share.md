@@ -771,3 +771,20 @@ An outdoor room can lose its key while unrelated rooms remain in the two work se
 membership in each set and honours the native insertion result. Invalid membership remains a reason to abstain.
 Broader solve-context caching and forced completion are not introduced. Lamp evaluation reuses the exact SSE
 square root; wall blur avoids clearing pixels that are immediately overwritten.
+
+### 2026-10-26: an outdoor sconce brighter indoors than outdoors, and the camera's cut posts
+
+**Context:** a player's light capture and snapshots: a green wall sconce (`L19ABA670`, type 5, intensity 1.7, colour
+(0, 1, 0), story 0, room 0) on a free-standing courtyard wall lit the courtyard faintly and the kitchen behind a glass door
+in saturated green (screen 0.808); the kitchen's light also changed with the camera.
+
+**Finding:** the courtyard's lot pass draws the lot map x 0.75 x 0.756 = 0.567, cut at 1 per channel; the roofed room took
+the lamp twice (its weight in room 0, as intended) with no outdoor scale and no cut, its normalisation on top, and the
+room's mean-based curves let a one-channel colour grow three times further than a white one. Glass (0.765) and the
+opening's share applied; the lamp was not counted more than in room 0 and the reach law is for walls only. The camera
+dependence: the game posted the lot's cuts again on camera turns, and the window cuts closed and reopened 0.18 to 0.67 s
+later, so the roofed room gathered with 2 doors, then 5.
+
+**Outcome:** outdoor lamps through openings take the outdoor cut and scale over the room's normalisation
+(`opening_lamp_balance.h`); a cut's close counts after 2 s (`cut_close_hold.h`). Offline checks in
+`tools/roofed_openings_test`. In-game confirmation pending.

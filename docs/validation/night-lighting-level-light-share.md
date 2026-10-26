@@ -212,6 +212,14 @@ topology mutation inside a point is not reproduced. This release does not promis
 
 ## Open checks
 
+- Outdoor lamps through openings at the outdoor scale, and cut closes held 2 s (`opening_lamp_balance.h`,
+  `cut_close_hold.h`): the player's courtyard save with the green sconce, at night, developer mode. **Expected:** the
+  kitchen and the rooms behind the glass doors are no brighter than the courtyard floor at the same distance from the
+  sconce, still lit in green near the doors; turning the camera round the house leaves the rooms' light the same; the
+  `[Openings]` lines count closes reopened within the hold and no `windows 3 -> 0` change follows a camera turn; moving
+  *Ground brightness*, *Lot lamp brightness* or the walls' *Brightness* changes the light through the openings once the
+  slider is let go; indoor lamps, rooms with no opening and daylight look as before. Offline: `tools/roofed_openings_test`.
+
 - Broader lots and other game versions remain unverified. The exact standard build and the development build both complete the reproduced Steam transition; this does not establish every cause of a loading hang.
 
 
