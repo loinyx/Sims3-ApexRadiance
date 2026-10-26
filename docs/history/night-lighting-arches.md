@@ -129,3 +129,9 @@ rooms with arches through `StoryMapsInclude`.
 **Outcome:** the memo keeps the stories of 16 room maps, each answer still checked against the manager's sets; a map is
 in one manager's sets only, so a confirmed entry is the manager the walk would find. Not yet checked in game
 ([validation](../validation/night-lighting-arches.md)).
+
+### Release 2.15.6
+
+Repeated floor draws re-scanned map ownership. The direct slot shortcut now revalidates all identities before
+reuse, while room ambients remain live. Room-map constants span a small block containing two unchanged middle rows;
+batched reads and writes retain those rows exactly and restore them after each draw. No shader equation changes.

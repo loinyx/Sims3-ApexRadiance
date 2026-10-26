@@ -10,7 +10,7 @@ and [Smooth light maps](room-map-smoothing.md).
 
 | | |
 |---|---|
-| Availability | Released in 2.14.0. The story memo of 16 room maps and the kept segments of the matched rooms: Released in 2.15.3 |
+| Availability | Released in 2.14.0. The story memo of 16 room maps and the kept segments of the matched rooms: Released in 2.15.3. Direct map-slot validation and room shader state batching: Released in 2.15.6. |
 | Default | On |
 | Menu | None. Follows Lighting > Buildings > Rooms at Night > *Indoor light through openings* and *Smooth light maps* |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml`, read through `luzInternaPelasAberturas` and `mapasDosComodosSuaves` |
@@ -77,12 +77,18 @@ and [Smooth light maps](room-map-smoothing.md).
 
 ## Technical reference
 
+The room-map memo retains the native slot and wrapper that proved the map owner. Each reuse validates the slot,
+wrapper, type and texture directly; a mismatch falls back to the full manager scan. Room ambient values remain live.
+Room-map drawing saves a small contiguous constant block and restores it after the draw, preserving the intervening
+rows. Failed block operations retain the individual-row fallback. No ambient intensity or shader equation changes.
+
+
 | Item | Value |
 |---|---|
 | Arch reach | 1.5 m (`kReach`, `kArchReach`) |
 | Segments per draw | 6 (`kArchCells`), 2 constant rows each: (a.x, a.z, e.x, e.z), (D.rgb, 1 / \|e\|^2) |
 | Room match | `c4` within 2% + 1e-4 per channel; the draw's story from its room map set (manager `+0x16C` + class x 64, unverified in game), else from its directional maps (`+0x220`) |
-| Story memo | The stories of the 16 most recent room maps (`ArchAmbientConsts`, one slot per map by pointer hash), each answer checked again against that manager's sets (a map is in one manager's sets only, so a confirmed entry is the manager the walk would find); a miss walks the rooms with arches (`StoryMapsInclude`). A frame's floors alternate between the stories' maps, so one remembered map often missed |
+| Story memo | The stories of the 16 most recent room maps (`ArchAmbientConsts`, one slot per map by pointer hash), each answer checked against its retained native slot, wrapper, type and texture; a mismatch scans the manager's sets (a map is in one manager's sets only, so a confirmed entry is the manager the walk would find); a miss walks the rooms with arches (`StoryMapsInclude`). A frame's floors alternate between the stories' maps, so one remembered map often missed |
 | Segment memo | The matched rooms' 1 m cells joined into segments (quadratic in the cells) are kept for the last 8 sets of rooms while `g_archGen`, which every writer of the arch records moves under the same lock, is the same; the neighbours' ambients are still read live. The development draw cost log times the floors' arch rows |
 | Floor sill | 0.02 m (`kFloorSill`) |
 | Cone edge spread | 0.3 m (`kInnerSoftSpread`) |

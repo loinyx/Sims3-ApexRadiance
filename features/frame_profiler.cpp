@@ -1391,6 +1391,8 @@ const char* const kTexBucketNames[kTexBuckets] = {"up to 128x128", "up to 256x25
 struct TexBucket {
     std::atomic<uint64_t> loads{0}, createTicks{0}, createMax{0}, fills{0}, fillTicks{0}, fillMax{0}, bytes{0};
 };
+std::atomic<uint64_t> g_texDriverCalls{0}, g_texDriverTicks{0}, g_texDriverMax{0}, g_texDriverFailures{0};
+thread_local bool t_ddsCreate = false;
 TexBucket g_tex[kTexBuckets + 1]; // + unknown size
 thread_local uint32_t t_texW = 0, t_texH = 0, t_texLevels = 0;
 thread_local D3DFORMAT t_texFormat = D3DFMT_UNKNOWN;
@@ -1426,7 +1428,10 @@ uint64_t __cdecl Hook_TexCreate(uint32_t a, uint32_t b, uint32_t c, uint32_t d, 
     t_texFormat = D3DFMT_UNKNOWN;
     CounterScope sc(kTexCreate);
     const uint64_t t0 = Now();
+    const bool wasCreating = t_ddsCreate;
+    t_ddsCreate = true;
     const uint64_t r = Orig<T_TexCreate, FnCdecl9>()(a, b, c, d, e, f, g, h, i);
+    t_ddsCreate = wasCreating;
     const uint64_t dt = Now() - t0;
     sc.End();
     const uint64_t pixels = static_cast<uint64_t>(t_texW) * t_texH;
@@ -4171,6 +4176,9 @@ std::string TextureLoadReport() {
             static_cast<double>(t.fillMax.load()) * g_msPerTick, static_cast<double>(t.bytes.load()) / (1024.0 * 1024.0));
     }
     if (s.empty()) return "";
+    s += std::format("   Device allocation within DDS loads: {} calls, {:.2f} ms total, {:.2f} ms longest, {} failed; includes driver waits, excludes Apex callbacks\n",
+                     g_texDriverCalls.load(), static_cast<double>(g_texDriverTicks.load()) * g_msPerTick,
+                     static_cast<double>(g_texDriverMax.load()) * g_msPerTick, g_texDriverFailures.load());
     return "Texture loads by size (DDS loader: create = CALL 0x0060E1DC, fill = CALL 0x0060E1FF; all threads, since Clear):\n"
            "   level 0            loads  create ms     avg     max   fill ms     avg     max        MB\n" +
            s;
@@ -4269,6 +4277,10 @@ void SaveReport() {
 
 void Clear() {
     ClearSampleAggregates();
+    g_texDriverCalls.store(0);
+    g_texDriverTicks.store(0);
+    g_texDriverMax.store(0);
+    g_texDriverFailures.store(0);
     for (auto& t : g_tex) {
         t.loads = 0;
         t.createTicks = 0;
@@ -5051,6 +5063,16 @@ bool PresentHookTimingActive() {
     return g_enabled.load(std::memory_order_relaxed);
 }
 
+uint64_t BeginTextureAllocation() { return t_ddsCreate && g_enabled.load(std::memory_order_relaxed) ? Now() : 0; }
+void EndTextureAllocation(uint64_t start, bool succeeded) {
+    if (!start) return;
+    const uint64_t elapsed = Now() - start;
+    g_texDriverCalls.fetch_add(1, std::memory_order_relaxed);
+    g_texDriverTicks.fetch_add(elapsed, std::memory_order_relaxed);
+    StoreMax(g_texDriverMax, elapsed);
+    if (!succeeded) g_texDriverFailures.fetch_add(1, std::memory_order_relaxed);
+}
+
 bool ModTimeActive() {
     return g_enabled.load(std::memory_order_relaxed);
 }
@@ -5116,6 +5138,8 @@ uint64_t Ticks() { return __rdtsc(); }
 int RegistryTimingSlot(const std::string&) { return -1; }
 void AddRegistryHookTimeAt(int, uint64_t) {}
 bool PresentHookTimingActive() { return false; }
+uint64_t BeginTextureAllocation() { return 0; }
+void EndTextureAllocation(uint64_t, bool) {}
 bool ModTimeActive() { return false; }
 int BeginModTime(ModTime, const void*) { return -1; }
 int BeginModTimeSampled(ModTime, const void*, uint32_t) { return -1; }

@@ -11,7 +11,7 @@ same fixes apply to the snowy winter variants and to the fences that share the b
 
 | | |
 |---|---|
-| Availability | Released in 1.0.0. The daytime curve on foliage lamp colours and garden lamps blocked by buildings: Released in 2.13.0. Per-vertex lamps and crown shade on lot ground: Released in 2.14.0. Trees kept on the normal light rig instead of the underground one: Released in 2.15.3 |
+| Availability | Released in 1.0.0. The daytime curve on foliage lamp colours and garden lamps blocked by buildings: Released in 2.13.0. Per-vertex lamps and crown shade on lot ground: Released in 2.14.0. Trees kept on the normal light rig instead of the underground one: Released in 2.15.3. Lamp brightness and saturation aligned with dusk and dawn: Released in 2.15.6. |
 | Default | On |
 | Menu | Lighting > Objects > *Objects* card; the reach law also needs *Realistic lamp reach* (Lighting > Overview) and *Outdoor light between floors* (Lighting > Stories) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -225,6 +225,11 @@ the default) or 100% (Natural). The night level is the game's `lightMgr+0xF0`, p
   `c255` is not checked in code (`vs_2_0` guarantees 256 constants).
 
 ## Technical reference
+
+Foliage lamp colour uses the lower of the smooth daylight transition and the native lamp night factor. Its saturation
+cap follows that same phase, so tree crowns do not receive full night lamp brightness ahead of the native lights.
+This changes the lamp term only; sunlight and the existing foliage shadow paths remain.
+
 
 ### Captured shaders
 

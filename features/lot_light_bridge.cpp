@@ -1,6 +1,7 @@
 #include "apex_util.h"
 #include "fast_math.h"
 #include "shader_lookup_cache.h"
+#include "shader_constant_pair.h"
 #include "world_lamp_policy.h"
 #include "terrain_lighting_policy.h"
 #include "lamp_reach.h"
@@ -354,7 +355,8 @@ struct DrawRigScope { // around one draw callback of Night Lighting (not nested:
 };
 std::unordered_set<IDirect3DPixelShader9*> g_roomMapPs; // room-lit pixel shaders (ShaderPatches::IsRoomMapPs): Smooth light maps
 bool g_curPsRoomMap = false;
-// The samplers each WorldCandidate pixel shader declares (bit s = s declared), from its bytecode in Classify.
+// Declared samplers of each WorldCandidate PS, narrowed to proven lamp-RGB
+// samplers when that pattern is known. Alpha-only weather masks are not lamp maps.
 // RecordWorldChunk looks for the chunk light map only there: a texture left bound in a sampler the shader never reads
 // (e.g. the neighbour chunk's map in s8 while a 3-layer chunk reads s7) was taken as this chunk's map, depending on the
 // draw order, i.e. on the camera; the road, fence and lot grass fixes then used a map without the lamps (a gameplay
@@ -1219,6 +1221,7 @@ uint64_t FenceCellKey(int x, int z) { return (static_cast<uint64_t>(static_cast<
 // in a wedge. Render thread.
 struct FenceGap {
     GroundShadow::Wall w;
+    float length = 0.0f;
     uint64_t key;
     uint64_t ga = 0, gb = 0; // the two pieces' groups
     bool closed = false;     // under kGapMin: always a wall
@@ -1243,10 +1246,13 @@ void FenceGapsBuild() {
     g_fenceGaps.clear();
     g_gapCells.clear();
     std::unordered_set<uint64_t> seen;
+    std::vector<float> lengths;
+    lengths.reserve(g_fenceAll.size());
+    for (const auto& w : g_fenceAll) lengths.push_back(std::hypot(w.x1 - w.x0, w.z1 - w.z0));
     const auto end = [](const GroundShadow::Wall& w, int e, float& x, float& z) { x = e ? w.x1 : w.x0, z = e ? w.z1 : w.z0; };
     for (size_t i = 0; i < g_fenceAll.size(); i++) {
         const GroundShadow::Wall& a = g_fenceAll[i];
-        const float la = std::hypot(a.x1 - a.x0, a.z1 - a.z0);
+        const float la = lengths[i];
         if (!(la > 0.05f)) continue;
         const float ux = (a.x1 - a.x0) / la, uz = (a.z1 - a.z0) / la;
         for (int ea = 0; ea < 2; ea++) {
@@ -1263,7 +1269,7 @@ void FenceGapsBuild() {
                     for (uint32_t j : it->second) {
                         if (j == i) continue;
                         const GroundShadow::Wall& b = g_fenceAll[j];
-                        const float lb = std::hypot(b.x1 - b.x0, b.z1 - b.z0);
+                        const float lb = lengths[j];
                         if (!(lb > 0.05f) || ApexMath::Fabs((b.x1 - b.x0) / lb * ux + (b.z1 - b.z0) / lb * uz) < 0.98f) continue;
                         for (int eb = 0; eb < 2; eb++) {
                             float bx, bz;
@@ -1290,6 +1296,7 @@ void FenceGapsBuild() {
             if (!seen.insert(gp.key).second) continue;
             gp.ga = g_fenceAllGroup[i], gp.gb = g_fenceAllGroup[bj];
             gp.closed = best < kGapMin;
+            gp.length = std::hypot(gp.w.x1 - gp.w.x0, gp.w.z1 - gp.w.z0);
             const uint32_t k = static_cast<uint32_t>(g_fenceGaps.size());
             g_fenceGaps.push_back(gp);
             for (int ci = FenceCell(std::min(ax, bx) - 0.5f); ci <= FenceCell(std::max(ax, bx) + 0.5f); ci++)
@@ -1345,7 +1352,7 @@ bool NoteGate(float x, float y, float z) {
     bool closedMatch = false;
     for (uint32_t k : it->second) {
         const FenceGap& gp = g_fenceGaps[k];
-        const float dx = gp.w.x1 - gp.w.x0, dz = gp.w.z1 - gp.w.z0, l = std::hypot(dx, dz);
+        const float dx = gp.w.x1 - gp.w.x0, dz = gp.w.z1 - gp.w.z0, l = gp.length;
         const float t = ((x - gp.w.x0) * dx + (z - gp.w.z0) * dz) / l, side = ApexMath::Fabs((x - gp.w.x0) * dz - (z - gp.w.z0) * dx) / l;
         if (t < -0.1f || t > l + 0.1f || side > kGateOff || y < gp.w.y0 - 1.0f || y > gp.w.y1) {
             if (!kPublicBuild && g_gateMissLogs < 30 && t > -1.5f && t < l + 1.5f && side < 1.5f) {
@@ -2447,6 +2454,7 @@ std::vector<IUnknown*> g_pinned;
 std::unordered_map<IDirect3DPixelShader9*, DWORD> g_cinemaMarqueeDayPs;
 std::unordered_set<IDirect3DPixelShader9*> g_cinemaMarqueePanelDayPs;
 
+std::vector<DWORD> ShaderCode(IDirect3DPixelShader9* ps);
 PsClass Classify(IDirect3DPixelShader9* ps) {
     if (!ps) return PsClass::Other;
     auto it = g_classCache.find(ps);
@@ -2562,13 +2570,26 @@ PsClass Classify(IDirect3DPixelShader9* ps) {
                     for (size_t k = 0; k + 2 < n; k++)
                         if ((t[k] & 0xFFFF) == 0x001F && (((t[k + 2] >> 28) & 7) | (((t[k + 2] >> 11) & 3) << 3)) == 10 && (t[k + 2] & 0x7FF) < 16)
                             mask |= static_cast<uint16_t>(1u << (t[k + 2] & 0x7FF));
-                    g_worldSamplers[ps] = mask;
+                    // A frozen multipass material binds another 256-square texture
+                    // beside its lamp map. Prefer samplers proven to scale lamp RGB.
+                    const std::vector<DWORD> tokens(t, t + n);
+                    g_worldSamplers[ps] = static_cast<uint16_t>(ShaderPatches::WorldTerrainLampSamplers(tokens, mask));
                 }
             }
         }
     }
     // (A size-only "possible weather variant" log was tried on 05/10 and removed: dozens of unrelated game shaders share
     // those sizes. Variants are found by structure instead, see shader_structure.h and tools/shader_structure_test.)
+    // Low-layer terrain can share an object pixel shader. Its vertex layout,
+    // lamp-only RGB scale and bound chunk map must all agree before dispatch.
+    if ((c == PsClass::ObjectRig || c == PsClass::Other) && declaredSamplers) {
+        const auto tokens = ShaderCode(ps);
+        uint16_t lamps = 0;
+        for (DWORD sampler = 1; sampler < 16; ++sampler)
+            if ((declaredSamplers & (1u << sampler)) && ShaderPatches::LightMapScaleConst(tokens, sampler) >= 0)
+                lamps |= static_cast<uint16_t>(1u << sampler);
+        if (lamps) g_worldSamplers[ps] = lamps;
+    }
     g_classCache[ps] = c;
     PsFacts& facts = g_psFacts[ps];
     facts.cls = c;
@@ -2644,6 +2665,7 @@ struct VsInfo {
     bool packedRoomFloor = false;
     bool worldMultiLight = false; // exact captured summer multi-pass light VS
     bool worldCompact = false; // exact captured single-layer WORLD VS (not an object rig)
+    int worldMap = -1; // mapping constant of a structurally verified world terrain VS
     bool contractedLotUv = false; // exact regular lot VS; CPU floor samples use uncontracted local xz
     bool cinemaMarqueeDay = false; // exact EA 1.69 cinema/theatre marquee VS paired with kCinemaMarqueeDayPs
     uint8_t cls = 0;      // 0 other, 1 roof, 2 lake, 3 snow lot, 4 road, 5 floor, 6 foliage, 7 fence/stairs, 8 snow on objects,
@@ -2721,6 +2743,7 @@ VsInfo* ClassifyVs(IDirect3DVertexShader9* vs) {
                 std::vector<DWORD> t(size / 4);
                 std::memcpy(t.data(), code.data(), t.size() * 4);
                 info.packedRoomFloor = ShaderPatches::IsPackedRoomFloorVs(t);
+                info.worldMap = ShaderPatches::WorldTerrainMapConstant(t);
                 DWORD mapConst = 0;
                 if (ShaderPatches::IsRoadVs(t, mapConst)) {
                     info.roadMap = mapConst; // c16 in winter, c14 in summer
@@ -5460,7 +5483,11 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
     static DWORD s_budgetAt = 0;
     static int s_budget = 0;
     if (now - s_budgetAt >= 8) s_budgetAt = now, s_budget = 96;
-    const float lawScale = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), g_night.load(std::memory_order_relaxed), g_wallEnabled.load(std::memory_order_relaxed),
+    const float night = g_night.load(std::memory_order_relaxed);
+    // Native lamp activation and the smooth sky must both reach the requested phase.
+    const float lampNight = std::min(night, g_rigNight.load(std::memory_order_relaxed));
+    const float phase = TerrainLightingPolicy::LampDay(lampNight);
+    const float lawScale = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), lampNight, g_wallEnabled.load(std::memory_order_relaxed),
                                                                  g_wallGain.load(std::memory_order_relaxed), g_objPixelLampStrength.load(std::memory_order_relaxed) / kPixelLampTrimUnit);
     for (int i = 0; i < count; i++) {
         const float* inst = c[3 * i];
@@ -5539,7 +5566,7 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
                 rgb[0] = rgb[1] = rgb[2] = 0.0f;
                 continue;
             }
-            FoliageVertexLamps::SlotConstants(f.own[k], eye, groundY, lawScale, lp, law, out[(56 + 3 * i) * 4 + k]);
+            FoliageVertexLamps::SlotConstants(f.own[k], eye, groundY, lawScale, lp, law, out[(56 + 3 * i) * 4 + k], phase);
             for (int a = 0; a < 3; a++) rgb[a] = f.own[k].colour[a];
         }
         if (noting) {
@@ -6118,22 +6145,23 @@ PatchedPs* ArchCopyOrNull(PatchedPs& a) {
 // rows: the arch rows (kArchRows) for a copy with the arch block, nullptr for a copy without it
 template <typename DrawFn> void DrawWithRoomMap(IDirect3DDevice9* dev, IDirect3DPixelShader9* copy, const ShaderPatches::RoomMapPatch& p, const float size[4],
                                                 const float band[4], const float* rows, DrawFn draw) {
-    float oldSize[4] = {}, oldBand[4] = {}, oldArch[kArchRows * 4] = {};
-    dev->GetPixelShaderConstantF(p.sizeConst, oldSize, 1);
-    dev->GetPixelShaderConstantF(p.bandConst, oldBand, 1);
+    float oldArch[kArchRows * 4] = {};
+    const ShaderConstantPair::Block constants(p.sizeConst, p.bandConst,
+                                             [dev](UINT reg, float* values, UINT count) { return SUCCEEDED(dev->GetPixelShaderConstantF(reg, values, count)); });
+    const auto setConstants = [dev](UINT reg, const float* values, UINT count) {
+        return SUCCEEDED(D3D9Hooks::CallOriginalSetPixelShaderConstantF(dev, reg, values, count));
+    };
     const bool arch = rows && p.archConst >= 0;
     if (arch) dev->GetPixelShaderConstantF(static_cast<UINT>(p.archConst), oldArch, kArchRows);
     IDirect3DPixelShader9* original = g_curPs;
     g_inOwnCall = true;
-    SetPsConst(dev, p.sizeConst, size, 1);
-    SetPsConst(dev, p.bandConst, band, 1);
+    constants.Apply(size, band, setConstants);
     if (arch) SetPsConst(dev, static_cast<UINT>(p.archConst), rows, kArchRows);
     SetPs(dev, copy);
     draw();
     SetPs(dev, original);
     if (arch) SetPsConst(dev, static_cast<UINT>(p.archConst), oldArch, kArchRows);
-    SetPsConst(dev, p.bandConst, oldBand, 1);
-    SetPsConst(dev, p.sizeConst, oldSize, 1);
+    constants.Restore(setConstants);
     g_inOwnCall = false;
     ApexUtil::CountOne(arch ? g_archCopyDraws : g_archPlainDraws);
 }
@@ -7228,11 +7256,15 @@ template <typename DrawFn> bool DrawTreeSunShadow(IDirect3DDevice9* dev, DrawFn 
 
 // Returns the sampler that holds the chunk light map (0 = not a terrain chunk draw), the chunk key and its g_chunks entry
 // (std::map: the reference stays valid; the caller no longer looks the key up a second time).
-DWORD RecordWorldChunk(IDirect3DDevice9* dev, std::pair<int, int>& key, ChunkTex*& chunk, UINT mapConst = 15) {
+DWORD RecordWorldChunk(IDirect3DDevice9* dev, std::pair<int, int>& key, ChunkTex*& chunk, UINT mapConst = 15, UINT fallbackConst = 15) {
     float c[16];
     if (FAILED(dev->GetVertexShaderConstantF(8, c, 3))) return 0; // c8..c10 = world matrix rows
     float m[4];
-    if (FAILED(dev->GetVertexShaderConstantF(mapConst, m, 1)) || !Near(m[0], 1.0f / 256.0f) || !Near(m[1], 1.0f / 256.0f) || !Near(m[2], 0.5f) || !Near(m[3], 0.5f)) return 0;
+    const auto mapping = [&](UINT at) {
+        return SUCCEEDED(dev->GetVertexShaderConstantF(at, m, 1)) && Near(m[0], 1.0f / 256.0f) &&
+               Near(m[1], 1.0f / 256.0f) && Near(m[2], 0.5f) && Near(m[3], 0.5f);
+    };
+    if (!mapping(mapConst) && (mapConst == fallbackConst || !mapping(fallbackConst))) return 0;
     // The terrain light map is the 256x256 texture with few mips: the world file's map and a rebuilt one are both DXT5 with
     // 4 mips (the rebuild reads the render target back and CPU-encodes 4 mips into the same texture, 0x00C29AB6 ->
     // 0x00618CD0; research\perf2\chunkrelight.md 1.3, 512 DXT calls = 128 textures x 4 mips). Which sampler holds it
@@ -7377,6 +7409,8 @@ inline D3D9Hooks::HookAction NoteClaim(ClaimSource source) {
 template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice9* dev, DrawFn draw) {
     constexpr auto kSkip = D3D9Hooks::HookAction::Skip;
     constexpr auto kContinue = D3D9Hooks::HookAction::Continue;
+    const bool terrainPair = g_curVsInfo && g_curVsInfo->worldMap >= 0 &&
+        (g_curClass == PsClass::ObjectRig || g_curClass == PsClass::Other) && g_worldSamplers.count(g_curPs) != 0;
     if (g_curPsBasis) RoomMapPadding::NoteDraw(dev, g_curPs); // note the room light maps it binds (edge padding)
     // the frame's sun shadow map, from the draws that read it (the trees' shadow, DrawTreeSunShadow)
     if (DevSwitches::FoliageSunShadow() && (g_curClass == PsClass::ObjectRig || g_curClass == PsClass::Roof || g_curClass == PsClass::LotLight || g_curClass == PsClass::Lake))
@@ -7385,7 +7419,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
     if (g_curPsBasis && !g_curVsIsInstanced && !g_curVsIsSnowRelief && !g_curVsIsObject && DrawBasisSmooth(dev, draw)) return NoteClaim(ClaimSource::IndoorBasisSmooth);
     const bool roomFloor=kMemoryOptimizationsEnabled && g_curVsInfo && g_curVsInfo->packedRoomFloor;
     if (g_curPsRoomMap && !g_curVsIsInstanced && !g_curVsIsSnowRelief && (!g_curVsIsObject || roomFloor) && DrawRoomMapSmooth(dev, draw)) return NoteClaim(ClaimSource::RoomMapSmooth);
-    if (g_curClass == PsClass::ObjectRig) return DrawObjectRig(dev, draw) ? NoteClaim(ClaimSource::ObjectRigNightFix) : kContinue;
+    if (g_curClass == PsClass::ObjectRig && !terrainPair) return DrawObjectRig(dev, draw) ? NoteClaim(ClaimSource::ObjectRigNightFix) : kContinue;
     if (g_curClass == PsClass::Roof) return DrawRoof(dev, draw) ? NoteClaim(ClaimSource::RoofLampFix) : kContinue;
     // The snowy roof pixel shader is also the one of snow on stair tops (same bytes, LightProbe-neve-escada); the vertex
     // shader tells them apart (the stair one takes the snow base in TEXCOORD2) and stairs go to DrawSnowRelief below.
@@ -7403,7 +7437,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
     }
     if (!g_enabled.load(std::memory_order_relaxed)) return kContinue;
     if (DrawCinemaMarqueeDayBloomGuard(dev, g_curPrims, draw)) return NoteClaim(ClaimSource::CinemaMarqueeDayBloomGuard);
-    if (g_curVsIsRoad) return DrawRoad(dev, draw) ? NoteClaim(ClaimSource::RoadLight) : kContinue;
+    if (g_curVsIsRoad && !terrainPair) return DrawRoad(dev, draw) ? NoteClaim(ClaimSource::RoadLight) : kContinue;
     if (g_curVsIsFloor) return DrawFloor(dev, draw) ? NoteClaim(ClaimSource::FloorLight) : kContinue;
     if (g_curClass == PsClass::FloorAtlas && !g_curVsIsSnowFloor) return DrawFloorAtlas(dev, draw) ? NoteClaim(ClaimSource::OutdoorFloorLight) : kContinue;
     if (g_curVsIsInstanced) return DrawInstanced(dev, draw) ? NoteClaim(ClaimSource::FenceStairGroundLight) : kContinue;
@@ -7416,13 +7450,17 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
     if (g_curVsIsObject && DrawObjectLamp(dev, draw)) return NoteClaim(ClaimSource::OutdoorObjectGroundLight);
     if (g_curClass == PsClass::LotLightSnow || g_curClass == PsClass::LotLightSnowCut)
         return DrawLotSnow(dev, draw, g_curClass == PsClass::LotLightSnowCut) ? NoteClaim(ClaimSource::LotSnowLight) : kContinue;
-    if (g_curClass == PsClass::WorldCandidate || g_curClass == PsClass::WorldMultiLight || g_curClass == PsClass::WorldCompact) {
+    if (terrainPair || g_curClass == PsClass::WorldCandidate || g_curClass == PsClass::WorldMultiLight || g_curClass == PsClass::WorldCompact) {
         const bool multi = g_curClass == PsClass::WorldMultiLight;
         if (multi && (!g_curVsInfo || !g_curVsInfo->worldMultiLight)) return kContinue;
-        if (g_curClass == PsClass::WorldCompact && (!g_curVsInfo || !g_curVsInfo->worldCompact)) return kContinue;
+        // The compact pixel pass is shared by dry and weather-specific vertex
+        // layouts. Accept a proven light-map mapping, not only one exact VS.
+        if (g_curClass == PsClass::WorldCompact &&
+            (!g_curVsInfo || (!g_curVsInfo->worldCompact && g_curVsInfo->worldMap < 0))) return kContinue;
         std::pair<int, int> key;
         ChunkTex* chunk = nullptr;
-        const DWORD s = RecordWorldChunk(dev, key, chunk, multi ? 13 : 15);
+        const UINT map = g_curVsInfo && g_curVsInfo->worldMap >= 0 ? static_cast<UINT>(g_curVsInfo->worldMap) : multi ? 13u : 15u;
+        const DWORD s = RecordWorldChunk(dev, key, chunk, map, multi ? 13u : 15u);
         if (!s) {
             // not a world terrain chunk: the snow-on-floor pixel shaders (m69, m71) also declare s6+ and land here
             if (g_curVsIsSnowFloor && DrawSnowFloor(dev, draw)) return NoteClaim(ClaimSource::SnowFloorLight);
@@ -9464,13 +9502,11 @@ std::string DescribeDraw() {
     if (!g_hooksRegistered || g_hookFailed || g_stateUnknown) return "Night Lighting has no active hooks";
     static const char* kVs[] = {"other", "roof", "lake", "snowy lot", "road", "floor", "foliage", "fence/stairs (instanced)", "snow on object", "snow with relief",
                                 "object with rig", "snowy floor"};
-    static const char* kPs[] = {"unknown", "other", "world candidate", "lot light", "object rig", "roof", "lake", "snowy lot", "snowy roof",
-                                "outside wall", "outdoor floor"};
     const auto itv = g_vsInfo.find(g_curVs);
     const int vc = itv == g_vsInfo.end() ? -1 : itv->second.cls;
-    const int pc = static_cast<int>(Classify(g_curPs));
+    const PsClass pc = Classify(g_curPs);
     const int rig = RigTracker::CurrentMode();
-    std::string s = std::format("game (the mod did not replace this draw) | VS {} | PS {} | rig mode {}", vc < 0 || vc > 11 ? "not classified" : kVs[vc], pc >= 0 && pc < 11 ? kPs[pc] : "?",
+    std::string s = std::format("game (the mod did not replace this draw) | VS {} | PS {} | rig mode {}", vc < 0 || static_cast<size_t>(vc) >= std::size(kVs) ? "not classified" : kVs[vc], PsClassName(pc),
                                 rig);
     if (vc == 10) {
         const FoliageVs& o = itv->second.patched;

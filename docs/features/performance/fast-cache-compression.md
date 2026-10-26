@@ -9,7 +9,7 @@ computes the texture compositor cache's record checksums eight bytes per step, w
 
 | | |
 |---|---|
-| Availability | Bounded storage and repeated-prefix comparisons: Released in 2.14.0. Released in 2.1.0 or earlier; record checksums since 2.4.0; on by default since 2.5.5 |
+| Availability | Bounded storage and repeated-prefix comparisons: Released in 2.14.0. Released in 2.1.0 or earlier; record checksums since 2.4.0; on by default since 2.5.5. Conservative candidate-gain filtering: Released in 2.15.6. |
 | Default | On |
 | Menu | System > Performance > Textures and Sims > *Faster cache compression* |
 | Configuration | `[patches.FastCacheCompression]` in `ApexRadiance.toml` |
@@ -69,6 +69,11 @@ CRC-32 that shows up in cache eviction cascades.
   `FreeLibrary` of the ASI in that window would leave the slot pointing into unloaded code (ASI loaders never unload).
 
 ## Technical reference
+
+Both plain and segmented compression reject a candidate before scanning its prefix only when its cheapest possible
+opcode cannot improve the current gain. The search depth, match ordering, counting/write pairing and worker ownership
+remain. This is a bounded comparison change, with no extra retained input or texture cache.
+
 
 ### The game side (Steam 1.67.2)
 

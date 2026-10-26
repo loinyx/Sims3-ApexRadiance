@@ -7214,7 +7214,7 @@ void BlurWalls(BYTE* room) {
         const bool above = fits && g.filled[0] >= n, below = fits && g.filled[1] >= n;
         // The wall with the rows beyond it, blurred the game's way: the rows along, then the columns, each pass
         const int top = above ? 2 : 0, total = top + rows + (below ? 2 : 0);
-        ext.assign(static_cast<size_t>(total) * n, 0u); // within the capacity reserved above: no allocation
+        ext.resize(static_cast<size_t>(total) * n); // every texel is overwritten below; capacity reserved above
         if (above) std::memcpy(ext.data(), g.px.data(), static_cast<size_t>(n) * 2 * 4);
         std::memcpy(ext.data() + static_cast<size_t>(top) * n, before[j].data(), before[j].size() * 4);
         if (below) std::memcpy(ext.data() + static_cast<size_t>(top + rows) * n, g.px.data() + static_cast<size_t>(n) * 2, static_cast<size_t>(n) * 2 * 4);
@@ -8190,6 +8190,21 @@ void AfterRoomUpdateInstant(BYTE* tl) {
     HookGuard::Run("OutdoorDelta after the room update", [tl] { OutdoorDelta::AfterRoomUpdate(tl); });
     if (RtOutdoorLamps::Watching()) HookGuard::Run("RtOutdoorLamps after the room update", [tl] { RtOutdoorLamps::AfterRoomUpdate(tl); });
 }
+RoomGatherQueue::Membership OutdoorQueueMembership(const BYTE* set) {
+    __try {
+        const uint32_t count = *reinterpret_cast<const uint32_t*>(set + 0xC);
+        const uint32_t buckets = *reinterpret_cast<const uint32_t*>(set + 8);
+        const uintptr_t table = *reinterpret_cast<const uintptr_t*>(set + 4);
+        if (!table || (table & 3) || !buckets || buckets > 1048576 || count > 1048576) return RoomGatherQueue::Membership::Unknown;
+        const uintptr_t head = *reinterpret_cast<const uintptr_t*>(table);
+        return RoomGatherQueue::LookupOutdoor(count, buckets, head, [](uintptr_t node, int& key, uintptr_t& next) {
+            if (node & 3) return false;
+            key = *reinterpret_cast<const int*>(node);
+            next = *reinterpret_cast<const uintptr_t*>(node + 4);
+            return true;
+        });
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return RoomGatherQueue::Membership::Unknown; }
+}
 bool RestoreOutdoorGatherTry(BYTE* tl) {
     __try {
         if (!tl || !kSetInsert || !kRoomById) return false;
@@ -8197,13 +8212,16 @@ bool RestoreOutdoorGatherTry(BYTE* tl) {
         if (!mgr) return false;
         BYTE* room = static_cast<BYTE*>(reinterpret_cast<RoomById_t>(kRoomById)(mgr, 0));
         if (!room || *reinterpret_cast<BYTE**>(room) != mgr || *reinterpret_cast<const int*>(room + 0xC) != 0) return false;
-        return RoomGatherQueue::RestoreOutdoor(*reinterpret_cast<const int*>(room + 0xF0),
-            *reinterpret_cast<const uint32_t*>(room + 0x168),
-            *reinterpret_cast<const uint32_t*>(tl + 0x14), *reinterpret_cast<const uint32_t*>(tl + 0x34),
-            mgr[0x280] != 0 && mgr[0x81] != 0, room[0x18] != 0, [tl] {
+        const int state = *reinterpret_cast<const int*>(room + 0xF0);
+        const uint32_t countdown = *reinterpret_cast<const uint32_t*>(room + 0x168);
+        const bool active = mgr[0x280] != 0 && mgr[0x81] != 0, outdoor = room[0x18] != 0;
+        if (!active || !outdoor || state != 1 || !countdown) return false;
+        return RoomGatherQueue::RestoreOutdoor(state, countdown,
+            OutdoorQueueMembership(tl + 8), OutdoorQueueMembership(tl + 0x28), active, outdoor, [tl] {
                 const int id = 0;
                 alignas(16) BYTE out[16] = {};
                 reinterpret_cast<SetInsert_t>(kSetInsert)(tl + 0x28, out, &id, 0);
+                return out[8] != 0; // native insertion result; an existing key is not a repair
             });
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
@@ -16972,12 +16990,28 @@ std::string WallMaskStatus() {
 // POD (SEH): whether the D3D texture tex is one of the story manager's room light maps (its sets at +0x16C + class x 64, four
 // maps each; 0x006A7700 binds the floor's from there, as the directional maps from +0x220: the wrapper's texture at +0x30
 // while +0x2C is 0)
-bool StoryMapsInclude(uintptr_t mgr, uintptr_t tex) {
+struct StoryMapSlot {
+    uintptr_t address = 0, wrapper = 0;
+};
+bool StoryMapSlotMatches(const StoryMapSlot& slot, uintptr_t tex) {
+    __try {
+        return slot.address && slot.wrapper && *reinterpret_cast<const uintptr_t*>(slot.address) == slot.wrapper &&
+               *reinterpret_cast<const uintptr_t*>(slot.wrapper + 0x2C) == 0 && *reinterpret_cast<const uintptr_t*>(slot.wrapper + 0x30) == tex;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool StoryMapsInclude(uintptr_t mgr, uintptr_t tex, StoryMapSlot& slot) {
+    slot = {};
     __try {
         for (int c = 0; c < 4; c++)
             for (int i = 0; i < 4; i++) {
-                const uintptr_t w = *reinterpret_cast<const uintptr_t*>(mgr + 0x16C + c * 64 + 4 * i);
-                if (w && *reinterpret_cast<const uintptr_t*>(w + 0x2C) == 0 && *reinterpret_cast<const uintptr_t*>(w + 0x30) == tex) return true;
+                const uintptr_t address = mgr + 0x16C + c * 64 + 4 * i;
+                const uintptr_t w = *reinterpret_cast<const uintptr_t*>(address);
+                if (w && *reinterpret_cast<const uintptr_t*>(w + 0x2C) == 0 && *reinterpret_cast<const uintptr_t*>(w + 0x30) == tex) {
+                    slot = {address, w};
+                    return true;
+                }
             }
         return false;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -16998,6 +17032,22 @@ int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, 
     // the draw's story by its directional maps (the wall masks' stories; looked up before g_archMx, never both held)
     const uintptr_t byBasisMask = StoryOfBasisTex(basisTex);
     std::lock_guard<std::mutex> lk(g_archMx);
+    // the draw's story: the manager whose room maps include the bound map, else the one whose directional maps include the
+    // bound basis map (rooms with arches first, then the wall masks' stories); a memo of the recent room maps' stories, each
+    // answer checked against the manager's sets again (a map is in one manager's sets only, so a confirmed entry is the
+    // manager the walk would find). (2.15.3) 16 maps instead of the last one: a frame's floors alternate between the stories'
+    // maps, and every miss walked the rooms with arches through StoryMapsInclude.
+    struct MapStory {
+        uintptr_t tex = 0, mgr = 0;
+        StoryMapSlot slot;
+    };
+    static MapStory s_mapStory[16];
+    uintptr_t drawMgr = 0;
+    if (mapTex) {
+        MapStory& memo = s_mapStory[(static_cast<uint32_t>(mapTex) * 2654435761u) >> 28];
+        if (memo.tex == mapTex && memo.mgr &&
+            (StoryMapSlotMatches(memo.slot, mapTex) || StoryMapsInclude(memo.mgr, mapTex, memo.slot))) drawMgr = memo.mgr;
+    }
     // the drawn room: one with arches whose ambient is this draw's (the shader's constant is read from it), on the draw's own
     // story. Rooms with no lamp of their own can hold the very same ambient (a recording: the stair room took another room's
     // after the camera's story changed, and the arch's step came back): every such room of that story gives its arches (each
@@ -17006,6 +17056,8 @@ int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, 
     static std::vector<ArchAmbient::Candidate> cand;
     matched.clear(), cand.clear();
     for (const auto& [key, rec] : g_archRooms) {
+        // A confirmed map owner excludes other stories before reading their live ambient.
+        if (drawMgr && rec.mgr != drawMgr) continue;
         float a[3];
         if (!ReadRoomAmbient(key, rec.mgr, rec.id, a) || !SameAmbient(a, own)) continue;
         matched.push_back(&rec);
@@ -17029,28 +17081,16 @@ int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, 
         }
         return 0;
     }
-    // the draw's story: the manager whose room maps include the bound map, else the one whose directional maps include the
-    // bound basis map (rooms with arches first, then the wall masks' stories); a memo of the recent room maps' stories, each
-    // answer checked against the manager's sets again (a map is in one manager's sets only, so a confirmed entry is the
-    // manager the walk would find). (2.15.3) 16 maps instead of the last one: a frame's floors alternate between the stories'
-    // maps, and every miss walked the rooms with arches through StoryMapsInclude.
-    struct MapStory {
-        uintptr_t tex = 0, mgr = 0;
-    };
-    static MapStory s_mapStory[16];
-    uintptr_t drawMgr = 0;
-    if (mapTex) {
+    if (mapTex && !drawMgr) {
         MapStory& memo = s_mapStory[(static_cast<uint32_t>(mapTex) * 2654435761u) >> 28];
-        if (memo.tex == mapTex && memo.mgr && StoryMapsInclude(memo.mgr, mapTex)) drawMgr = memo.mgr;
-        else {
-            uintptr_t tried = 0;
-            for (const auto& [key, rec] : g_archRooms)
-                if (rec.mgr != tried && StoryMapsInclude(tried = rec.mgr, mapTex)) {
-                    drawMgr = rec.mgr;
-                    memo = {mapTex, drawMgr};
-                    break;
-                }
-        }
+        uintptr_t tried = 0;
+        StoryMapSlot slot;
+        for (const auto& [key, rec] : g_archRooms)
+            if (rec.mgr != tried && StoryMapsInclude(tried = rec.mgr, mapTex, slot)) {
+                drawMgr = rec.mgr;
+                memo = {mapTex, drawMgr, slot};
+                break;
+            }
         if (drawMgr) g_archByMap.fetch_add(1, std::memory_order_relaxed);
     }
     if (!drawMgr && basisTex) {

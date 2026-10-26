@@ -60,6 +60,9 @@ void Shutdown();
 // gets a slot once (RegistryTimingSlot, at registration); AddRegistryHookTimeAt adds to it with relaxed atomics, any thread.
 bool RegistryHookTimingActive();
 uint64_t Ticks();
+// The actual device allocation inside a measured DDS load, excluding Apex callbacks.
+uint64_t BeginTextureAllocation();
+void EndTextureAllocation(uint64_t start, bool succeeded);
 int RegistryTimingSlot(const std::string& hookName); // -1 when the table is full
 void AddRegistryHookTimeAt(int slot, uint64_t ticks);
 // Present chain: every callback is timed by name while the profiler is on (a relaxed atomic load); the registry reports

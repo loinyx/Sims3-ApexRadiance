@@ -149,3 +149,8 @@ not.
 **Outcome:** an area light carries its facing as its cone (the third axis, no spill), for objects, fences and trees;
 roofs and water still take it without a cone. A world change clears the mesh boxes and the instance picks. Not yet
 checked in game ([validation](../validation/night-lighting-foliage.md)).
+
+### Release 2.15.6
+
+A smooth dusk factor alone can precede native lamp activation. Foliage uses the lower phase for both lamp colour
+and the saturation cap. The sun term and existing shadow sampling are unchanged; runtime coverage remains open.

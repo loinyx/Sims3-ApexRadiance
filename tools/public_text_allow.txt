@@ -4,6 +4,8 @@ tools/public_text_check.py	*
 tools/public_text_allow.txt	*
 tools/public_text_legacy.txt	*
 third_party/**	*
+# Verbatim third-party skill; provenance and license are kept beside it.
+.agents/skills/ponytail/SKILL.md	conversation
 i18n/**	portuguese
 docs/releases/**	security-product
 i18n/**	security-product

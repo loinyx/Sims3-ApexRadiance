@@ -45,3 +45,10 @@ CRC (FUN_004fa4c0, one table lookup per byte) at 6 to 10% of a 490 ms cache evic
 
 **Outcome:** commit `6e34709`: a slicing-by-8 CRC built from the game's own table, started and stopped with this
 switch. Offline: 4850 cases, all equal to the byte-wise loop.
+
+### Release 2.15.6
+
+A match candidate with insufficient possible gain is discarded before the prefix scan, without changing the
+selected stream in comparison fixtures. Aggregate timing in the small isolated comparison is not evidence of a
+substantial gameplay gain. Texture allocation remains a separate investigation; its driver timing is split from
+callbacks and the native DDS wrapper, without introducing retained texture pooling.

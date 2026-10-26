@@ -9,6 +9,12 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Czech}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "Noční osvětlení: výpočty znovu využívají nezměněná data bez snížení kvality"},
+    {"Performance: cache compression avoids unnecessary match searches", "Výkon: komprese mezipaměti vynechává zbytečné hledání shod"},
+    {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "Noční osvětlení: zmrzlá a tající půda zachovává souvislé světlo na hranicích pozemků"},
+    {"Night Lights: trees follow lamp brightness through dusk and dawn", "Noční osvětlení: stromy sledují jas lamp za soumraku a úsvitu"},
+    {"Edit Town restores missing outdoor lighting work while other rooms update", "Úprava města obnovuje chybějící výpočty venkovního světla při aktualizaci ostatních místností"},
+
     {"Edit Town finishes loading after leaving Build or Buy mode", "Úprava města dokončí načítání po opuštění režimu stavby nebo nákupu"},
     {"Lighting restarted; some areas use the game's maps", "Osvětlení restartováno; některé oblasti používají mapy hry"},
     {"Restart lighting", "Restartovat osvětlení"},

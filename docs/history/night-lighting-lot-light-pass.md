@@ -165,3 +165,9 @@ equal, so it stayed on this lot.
 
 **Outcome:** each axis takes its own offset in PS c30.zw (`26494d5`); square maps are unchanged. The lot UV fixture moved
 to the production profile ps_3_0 (`0c418a6`).
+
+### Release 2.15.6
+
+Weather terrain can bind its light map below the earlier sampler range, while the compact pass can use another
+validated vertex layout. The renderer identifies the consumed map and excludes weather masks, then retains the
+runtime dimension and mapping checks. Unsupported dense paths keep their existing capacity fallback.

@@ -9,6 +9,12 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Hungarian}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "Éjszakai világítás: a számítások minőségromlás nélkül újrahasználják a változatlan adatokat"},
+    {"Performance: cache compression avoids unnecessary match searches", "Teljesítmény: a gyorsítótár tömörítése kihagyja a fölösleges egyezéskereséseket"},
+    {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "Éjszakai világítás: a fagyott és olvadó talajon folyamatos marad a fény a telekhatároknál"},
+    {"Night Lights: trees follow lamp brightness through dusk and dawn", "Éjszakai világítás: a fák követik a lámpák fényerejét alkonyatkor és hajnalban"},
+    {"Edit Town restores missing outdoor lighting work while other rooms update", "A Városszerkesztő helyreállítja a hiányzó kültéri fényszámításokat a többi szoba frissítése közben"},
+
     {"Edit Town finishes loading after leaving Build or Buy mode", "A Városszerkesztés betöltése befejeződik az építés vagy vásárlás után"},
     {"Lighting restarted; some areas use the game's maps", "Világítás újraindítva; egyes területek a játék térképeit használják"},
     {"Restart lighting", "Világítás újraindítása"},

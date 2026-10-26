@@ -6,6 +6,17 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k2156Empty[] = {nullptr};
+constexpr const char* k2156Improved[] = {
+    "Night Lights: lighting calculations reuse unchanged data without reducing quality",
+    "Performance: cache compression avoids unnecessary match searches",
+    nullptr};
+constexpr const char* k2156Fixed[] = {
+    "Night Lights: frozen and melting terrain keeps continuous light at lot edges",
+    "Night Lights: trees follow lamp brightness through dusk and dawn",
+    "Edit Town restores missing outdoor lighting work while other rooms update",
+    nullptr};
+
 constexpr const char* k2155Empty[] = {nullptr};
 constexpr const char* k2155Fixed[] = {
     "Edit Town finishes loading after leaving Build or Buy mode",
@@ -355,6 +366,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"2.15.6", "", k2156Empty, k2156Improved, k2156Fixed},
     {"2.15.5", "", k2155Empty, k2155Empty, k2155Fixed},
     {"2.15.4", "2026-10-24", k2154Added, k2154Improved, k2154Fixed},
     {"2.15.3", "2026-10-23", k2153Added, k2153Improved, k2153Fixed},

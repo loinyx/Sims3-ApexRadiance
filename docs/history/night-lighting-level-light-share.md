@@ -764,3 +764,10 @@ unchanged by design; gameplay timing is open.
 **Finding:** the ground outdoor room remains in gather state 1 with countdown 5 and readiness state 0, while its changed and pending sets are empty. Native world updates continue. The originating invalidation remains unidentified. A native gather erases its pending key after the gather call, so a same-key requeue during that call is one reproducible model of the lost entry, not an established origin in gameplay.
 
 **Outcome:** restore the missing pending key on the native tree-level update thread. Native collection and solving complete the work. The extra-update recovery is rejected because normal updates already continue. The reproduced Edit Town transition completes with the queue correction.
+
+### Release 2.15.6
+
+An outdoor room can lose its key while unrelated rooms remain in the two work sets. Recovery now tests that key's
+membership in each set and honours the native insertion result. Invalid membership remains a reason to abstain.
+Broader solve-context caching and forced completion are not introduced. Lamp evaluation reuses the exact SSE
+square root; wall blur avoids clearing pixels that are immediately overwritten.

@@ -619,7 +619,9 @@ HRESULT STDMETHODCALLTYPE H_BeginScene(IDirect3DDevice9* d) {
 HRESULT STDMETHODCALLTYPE H_CreateTexture(IDirect3DDevice9* d, UINT w, UINT h, UINT l, DWORD u, D3DFORMAT f, D3DPOOL p, IDirect3DTexture9** t, HANDLE* sh) {
     HRESULT hr = S_OK;
     if (!Run(g_ctex, d, hr, w, h, l, u, f, p, t, sh)) return hr;
+    const uint64_t allocationStart = FrameProfiler::BeginTextureAllocation();
     hr = o_ctex(d, w, h, l, u, f, p, t, sh);
+    FrameProfiler::EndTextureAllocation(allocationStart, SUCCEEDED(hr));
     // development builds (memory_owners): a texture the ASI itself asked for is counted until Direct3D destroys it
     if (DevSwitches::kCompiled && SUCCEEDED(hr) && t && *t) ApexMemory::NoteTexture(_ReturnAddress(), *t, w, h, l, u, f, p);
     return hr;

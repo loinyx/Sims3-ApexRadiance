@@ -13,6 +13,7 @@
 #include <vector>
 #include "features/foliage_vertex_lamps.h"
 #include "features/lamp_reach.h"
+#include "features/terrain_lighting_policy.h"
 #pragma comment(lib, "d3d9.lib")
 
 struct V3 {
@@ -167,10 +168,10 @@ struct OwnLampOut {
 };
 // A picked lamp's constants (FoliageVertexLamps::SlotConstants) as the patched shader reads them: per channel, colour x
 // min(law(d) x Q.y, cap)
-static OwnLampOut ShaderLight(const FoliageVertexLamps::OwnLamp& l, float w, V3 p) {
+static OwnLampOut ShaderLight(const FoliageVertexLamps::OwnLamp& l, float w, V3 p, float scale = 1.0f, float phase = 1.0f) {
     float lp[4], law[4], cap;
     const float eye[3] = {0, 0, 0};
-    FoliageVertexLamps::SlotConstants(l, eye, 0.0f, 1.0f, lp, law, cap);
+    FoliageVertexLamps::SlotConstants(l, eye, 0.0f, scale, lp, law, cap, phase);
     const V3 d{lp[0] - p.x, lp[1] - p.y, lp[2] - p.z};
     const float d2 = std::max(Dot(d, d), kMinD2), q = d2 * law[0], win = std::clamp(1 - q * q, 0.f, 1.f); // the shader's law with its own r0^2 (lp.w)
     const float ratio = std::min(1 / d2 * std::min(1.f, lp[3] / d2 * win * win) * law[1], cap);
@@ -223,6 +224,19 @@ static void OwnLampChecks() {
     Check(std::fabs(n.r - 1) < 1e-5f && std::fabs(n.g - 0.81f) < 1e-5f && std::fabs(n.b - 0.56f) < 1e-5f, "a bright lamp next to a leaf: capped at 1, the hue kept (no whitening)");
     const OwnLampOut f = ShaderLight(warm, 42.5f * 3.4f, {9, 1, 0});
     Check(f.r < 1 && std::fabs(f.g / f.r - 0.81f) < 1e-4f && std::fabs(f.b / f.r - 0.56f) < 1e-4f, "farther from it: dimmer, the same hue");
+    const auto strong = MakeLamp({0, 0, 0}, {0.4f, 0.3f, 0.2f}, 800.0f, 1.0f);
+    const float dusk = TerrainLightingPolicy::LampDay(0.2f);
+    const auto early = ShaderLight(strong, 800.0f, {0, 5, 0}, 2.0f * dusk);
+    const auto timed = ShaderLight(strong, 800.0f, {0, 5, 0}, 2.0f * dusk, dusk);
+    Check(early.r > 0.8f && timed.r <= dusk + 1e-6f,
+          "dusk regression: a strong lamp cannot saturate a crown before the shared night curve");
+    Check(std::fabs(timed.g / timed.r - 0.75f) < 1e-5f && std::fabs(timed.b / timed.r - 0.5f) < 1e-5f,
+          "dusk ceiling keeps the lamp hue");
+    for (int step = 0; step <= 100; ++step) {
+        const float p = TerrainLightingPolicy::LampDay(step / 100.0f);
+        const auto value = ShaderLight(strong, 800.0f, {0, 5, 0}, 2 * p, p);
+        Check(value.r <= p + 1e-6f, "the saturation ceiling follows dusk and dawn");
+    }
     // the three brightest, brightest first (the ground bounce takes slot 0)
     FoliageVertexLamps::OwnLamp out[3];
     int kept = 0;
