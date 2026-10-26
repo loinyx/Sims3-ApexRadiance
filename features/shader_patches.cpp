@@ -3109,10 +3109,32 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
         if (k == 0) body.insert(body.end(), {Op(kMul, 3), Dst(kTemp, r.L), Src(kTemp, R), Src(kTemp, Wt, X)});
         else body.insert(body.end(), {Op(kMad, 4), Dst(kTemp, r.L), Src(kTemp, R), Src(kTemp, Wt, Sw(c, c, c, c)), Src(kTemp, r.L)});
     }
+    // The colour no brighter than the brightest of the 2 x 2 texels the game's own bilinear read takes (+ 2/255): the wider
+    // B-spline reached the texels of the room beyond a wall (a hall floor took a band of the lit courtyard's light, F7: 0.14
+    // of an outdoor texel at 1 beside a hall texel at 0.03). A lamp's falloff inside a room never passes it, the softest
+    // shadow edge (1.5 texels) loses at most 6 levels on its dark side (tools/room_map_smooth_check); the alpha (the ambient
+    // weight) stays the B-spline's. Temps free here: A, B, C0..C3, R.
+    {
+        const DWORD C0 = T + 6, C1 = T + 7, C2 = T + 8, C3 = T + 9;
+        body.insert(body.end(), {Op(kAdd, 3), Dst(kTemp, B, 0x3), Src(kTemp, P), Src(kConst, cK, Z),                  // i + 0.5
+                                 Op(kAdd, 3), Dst(kTemp, B, 0xC), Src(kTemp, P, Sw(0, 1, 0, 1)), Src(kConst, cH, Y)}); // i + 1.5
+        body.insert(body.end(), clampV.begin(), clampV.end()); // (rows kept in the pixel's wall block, as the taps)
+        body.insert(body.end(), {Op(kMul, 3), Dst(kTemp, B), Src(kTemp, B), Src(kConst, cS, Sw(2, 3, 2, 3)),
+                                 Op(kMov, 2), Dst(kTemp, C0), Src(kTemp, B, Sw(0, 1, 0, 1)),
+                                 Op(kMov, 2), Dst(kTemp, C1), Src(kTemp, B, Sw(2, 1, 2, 1)),
+                                 Op(kMov, 2), Dst(kTemp, C2), Src(kTemp, B, Sw(0, 3, 0, 3)),
+                                 Op(kMov, 2), Dst(kTemp, C3), Src(kTemp, B, Sw(2, 3, 2, 3)),
+                                 Op(kTexld, 3), Dst(kTemp, A), Src(kTemp, C0), Src(kSampler, r.S)});
+        for (DWORD k = 1; k < 4; k++)
+            body.insert(body.end(), {Op(kTexld, 3), Dst(kTemp, R), Src(kTemp, C0 + k), Src(kSampler, r.S),
+                                     Op(kMax, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, R)});
+        body.insert(body.end(), {Op(kAdd, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kConst, cH, Z),
+                                 Op(kMin, 3), Dst(kTemp, r.L, 0x7), Src(kTemp, r.L), Src(kTemp, A)});
+    }
     // (development builds, arch_ambient) the neighbours' ambient near the room's arches, right after the read (ps_3_0 only;
     // a copy that cannot hold it is made without it)
     std::vector<DWORD> defs = {Op(kDef, 5), Dst(kConst, cK), F(1.0f / 6.0f), F(2.0f / 3.0f), F(0.5f), F(1.0f),
-                               Op(kDef, 5), Dst(kConst, cH), F(-0.5f), F(1.5f), F(0.0f), F(0.0f)};
+                               Op(kDef, 5), Dst(kConst, cH), F(-0.5f), F(1.5f), F(2.0f / 255.0f), F(0.0f)};
     if (archAmb && ps3 && r.ambConst >= 0 && u.maxConst + 6 + 2 * static_cast<int>(kArchCells) < constLimit) {
         const DWORD cP = cS + 4, cQ = cS + 5, cArch = cS + 6;
         const std::vector<DWORD> code = ArchAmbientCode(r.uvType, r.uvNum, cS, cP, cQ, cArch, r.L, T, T + 1, T + 2);
