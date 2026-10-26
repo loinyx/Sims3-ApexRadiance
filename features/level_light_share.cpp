@@ -3420,6 +3420,7 @@ std::atomic<long> g_cutRepeats{0}; // cut posts that changed nothing (the game p
 std::vector<CutCloseHold::Pending> g_cutHeld;
 std::atomic<long> g_cutReopened{0}, g_cutHeldApplied{0};
 std::atomic<long> g_cutWindowCloses{0}; // window cuts closed by a post: marked closed, never held (CutRec::closed)
+std::atomic<long> g_windowPostLogged{0}, g_windowKeepLogged{0}; // developer log lines: window close posts, closed windows at a grid build
 // (lot id of the posts, payload +0x08 / +0x0C = the posting lot's +0x48 / +0x4C, the id the game routes the message by
 // (0x00C52AA0); story) -> its cut cells. Always the post's own id: until 2.12.4 the first post whose lot's story manager
 // carried another id (+0x90 / +0x94, read while the lot was still being built) made a permanent alias and moved every cut of
@@ -3541,6 +3542,7 @@ void NoteCutoutPostImpl(int add, const uintptr_t* siteEsp, uintptr_t frame, uint
     const bool dev = !kPublicBuild;
     int nth = 0;
     bool newAlias = false;
+    std::string windowNote;
     {
         std::lock_guard<std::mutex> lk(g_cutMx);
         if (dev) {
@@ -3565,8 +3567,16 @@ void NoteCutoutPostImpl(int add, const uintptr_t* siteEsp, uintptr_t frame, uint
             bool changed = !known;
             if (cut && CutCloseHold::Cancel(g_cutHeld, r.postLot, story, k)) g_cutReopened.fetch_add(1, std::memory_order_relaxed);
             if (!cut && s.edges.count(k) && s.edges[k].kind == kCutWindow && !s.edges[k].closed) g_cutWindowCloses.fetch_add(1, std::memory_order_relaxed);
+            const auto was = s.edges.find(k);
+            const int wasClosed = was != s.edges.end() && was->second.kind == kCutWindow ? was->second.closed : -1; // (-1: not a window)
             const CutRec rec{CutKind(r.flags), r.orient, r.piece, r.count, r.flags, {r.tgi[0], r.tgi[1], r.tgi[2], r.tgi[3]}};
             const int post = ApplyCutPost(s.edges, k, cut, rec);
+            // (developer log) a window's close or reopen: the post's path and what it did, to tell the camera's posts in game
+            if (dev && wasClosed >= 0 && (!cut || wasClosed) && g_windowPostLogged.fetch_add(1, std::memory_order_relaxed) < 300)
+                windowNote = std::format("[Openings] lot {:016X} story {}: window ({},{})-({},{}) {} by {}: {}", r.postLot, story, r.key[0], r.key[1], r.key[3], r.key[4],
+                                         cut ? "posted again" : "closed", !add ? "a remove post" : cut ? "an add post" : "an add post with an empty mask",
+                                         cut ? (post ? "a new generation (the grid had left it out)" : "the mark cleared, no new generation")
+                                             : wasClosed ? "already marked closed, nothing changed" : "marked closed, no new generation");
             if (post == 1) changed = true;
             else if (post == 2 && !CutCloseHold::NoteClose(g_cutHeld, r.postLot, story, k, GetTickCount())) {
                 s.edges.erase(k); // (the hold is full: closed at once)
@@ -3589,6 +3599,7 @@ void NoteCutoutPostImpl(int add, const uintptr_t* siteEsp, uintptr_t frame, uint
         if (r.mgrLot != r.postLot) g_cutIdDiffers.fetch_add(1, std::memory_order_relaxed);
     }
     if (!dev) return;
+    if (!windowNote.empty()) LOG_INFO(windowNote);
     // the first posts of each lot, read or not (a lot streamed in after the world gets its own lines)
     const bool doorPost = read && r.flags && !CutOpensForLamps(CutKind(r.flags), true);
     if (nth >= 1 && (nth <= kCutLogPerLot || (doorPost && g_cutDoorLogged.fetch_add(1, std::memory_order_relaxed) < kCutDoorLogs))) {
@@ -4061,13 +4072,35 @@ void WindowPanes(const StoryGrid& g, const std::vector<std::pair<uint32_t, CutRe
         out.emplace(key, m);
     }
 }
-// The window cuts the game closed again (CutRec::closed) whose window is still built: a window light (type 7 or 8, sized or
-// not) in front of its cell, as WindowPanes finds its panes (within kGlassWallNear of the line, between the edge's base and
-// the story's wall height, along the cell within kGlassAlong). A camera-hidden window keeps its lights and stays; a deleted
-// one loses them and is left out (its key in leftOut). closedOut: every closed window cut on a wall (EnsureStoryGrid looks
-// at their lights again). Returns the cuts to place.
+// Whether a window cut's cell still holds its window: 1 = a window light (type 7 or 8, sized or not) centred in front of the
+// cell, 2 = a sized pane over it (overlapping the cell by kPaneOverlap, as WindowPanes takes it), 0 = none; within
+// kGlassWallNear of the line, between the edge's base and the story's wall height. A window three cells wide has its panes'
+// lights centred in its middle cell only (in game: (26,20)..(26,23), its end cells sized u 0.25..1 and 0..0.75 from a pane
+// over them): a centre test alone left those end cells out at each camera turn ('windows 6 -> 4').
+int WindowLightIn(const StoryGrid& g, uint32_t key, const std::vector<GlassLight>& lights) {
+    const int x0 = static_cast<int8_t>(key & 0xFF), z0 = static_cast<int8_t>(key >> 8 & 0xFF), x1 = static_cast<int8_t>(key >> 16 & 0xFF),
+              z1 = static_cast<int8_t>(key >> 24 & 0xFF);
+    const bool alongZ = x0 == x1;
+    const int32_t idx = alongZ ? GridXL(g, x0, z0) : GridZL(g, x0, z0);
+    if (idx < 0) return 0;
+    const float base = g.edges[static_cast<size_t>(idx)].base;
+    const float line = static_cast<float>(alongZ ? x0 : z0), a = static_cast<float>(alongZ ? z0 : x0), b = static_cast<float>(alongZ ? z1 : x1);
+    int how = 0;
+    for (const GlassLight& l : lights) {
+        const float across = alongZ ? l.x : l.z, along = alongZ ? l.z : l.x, e = alongZ ? l.ez : l.ex;
+        if (ApexMath::Fabs(across - line) > kGlassWallNear || l.y < base || l.y > base + kStoryWallH) continue;
+        if (along >= a - kGlassAlong && along <= b + kGlassAlong) return 1;
+        if (e > 0.0f && std::min(along + e, b) - std::max(along - e, a) > kPaneOverlap) how = 2;
+    }
+    return how;
+}
+// The window cuts the game closed again (CutRec::closed) whose window is still built (WindowLightIn). A camera-hidden window
+// keeps its lights and stays; a deleted one loses them and is left out (its key in leftOut). closedOut: every closed window
+// cut on a wall (EnsureStoryGrid looks at their lights again); notes: each one's decision (developer log). Returns the cuts
+// to place.
 std::vector<std::pair<uint32_t, CutRec>> KeepBuiltWindows(const StoryGrid& g, const std::vector<std::pair<uint32_t, CutRec>>& cuts, const std::vector<GlassLight>& lights,
-                                                          std::unordered_set<uint32_t>& leftOut, std::vector<std::pair<uint32_t, CutRec>>* closedOut) {
+                                                          std::unordered_set<uint32_t>& leftOut, std::vector<std::pair<uint32_t, CutRec>>* closedOut,
+                                                          std::string* notes = nullptr) {
     std::vector<std::pair<uint32_t, CutRec>> keep;
     leftOut.clear();
     if (closedOut) closedOut->clear();
@@ -4082,14 +4115,12 @@ std::vector<std::pair<uint32_t, CutRec>> KeepBuiltWindows(const StoryGrid& g, co
             continue;
         }
         if (closedOut && closedOut->size() < 4096) closedOut->push_back(kv);
-        const float base = g.edges[static_cast<size_t>(idx)].base;
-        const float line = static_cast<float>(alongZ ? x0 : z0), a = static_cast<float>(alongZ ? z0 : x0) - kGlassAlong, b = static_cast<float>(alongZ ? z1 : x1) + kGlassAlong;
-        const bool built = std::any_of(lights.begin(), lights.end(), [&](const GlassLight& l) {
-            const float across = alongZ ? l.x : l.z, along = alongZ ? l.z : l.x;
-            return ApexMath::Fabs(across - line) <= kGlassWallNear && along >= a && along <= b && l.y >= base && l.y <= base + kStoryWallH;
-        });
-        if (built) keep.push_back(kv);
+        const int how = WindowLightIn(g, key, lights);
+        if (how) keep.push_back(kv);
         else leftOut.insert(key);
+        if (notes && notes->size() < 1500)
+            *notes += std::format("{}({},{})-({},{}) {}", notes->empty() ? "" : "; ", x0, z0, x1, z1,
+                                  how == 1 ? "kept, a window light in its cell" : how == 2 ? "kept, a pane over its cell" : "left out, no window light");
     }
     return keep;
 }
@@ -4558,8 +4589,12 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
     if (doorGlass || windows) StoryWindowLights(mgr, story, g->xf, glassLights);
     if (windows) { // the windows the game closed again: kept while built (KeepBuiltWindows)
         std::unordered_set<uint32_t> leftOut;
-        cuts = KeepBuiltWindows(*g, cuts, glassLights, leftOut, &g->closedWindows);
+        std::string notes;
+        cuts = KeepBuiltWindows(*g, cuts, glassLights, leftOut, &g->closedWindows, kPublicBuild ? nullptr : &notes);
         if (lot && !g->closedWindows.empty()) MarkLeftOutWindows(lot, story, leftOut);
+        if (!notes.empty() && g_windowKeepLogged.fetch_add(1, std::memory_order_relaxed) < 300)
+            LOG_INFO(std::format("[Openings] lot {:016X} story {}: {} closed window cuts, {} left out ({} window lights near the story): {}", lot, story,
+                                 g->closedWindows.size(), leftOut.size(), glassLights.size(), notes));
     }
     if (doorGlass) GlazedCuts(*g, cuts, glassLights, glazed);
     if (windows) WindowPanes(*g, cuts, glassLights, panes);

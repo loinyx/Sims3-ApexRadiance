@@ -647,7 +647,9 @@ half wall and the objects in them.
   the kitchen's `[RoofedLamps]` gathers alternating 8 and 5 doors to the outside, every window light still listed). So a
   window's close no longer goes through the hold nor changes the story's cuts: it marks the cut closed
   (`CutRec::closed`, `ApplyCutPost`), with no new generation. The grid keeps a closed window while a window light (type
-  7 or 8) stands in front of its cell, as the panes are found (`KeepBuiltWindows`); a deleted window loses its lights and
+  7 or 8) stands in front of its cell or a sized pane lies over it (`WindowLightIn`, `KeepBuiltWindows`: a window three
+  cells wide has its lights centred in its middle cell, and a centre test alone left its end cells out at each camera
+  turn, `windows 6 -> 4` in a later capture); a deleted window loses its lights and
   is left out (and leaves the lot's geometry key, `StoryCutsContent`). `EnsureStoryGrid` builds the grid again when the
   set of window cuts with no light changes (`UnlitWindows`, at most once a second, as for glass doors), and an add of a
   window left out gives a new generation. Doors, arches and gates keep the hold. A window with no window light of its own

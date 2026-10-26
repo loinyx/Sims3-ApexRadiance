@@ -7,7 +7,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <format>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -1337,8 +1339,47 @@ void ClosedWindowChecks() {
     Check(GlazedSig(UnlitWindows(rule.b.g, {})) != 0, "an open window whose lights went: built again (its close may come later)");
 }
 
+// A camera turn as a later capture logged it: the kitchen's east wall x = 26 holds one window three cells wide, (26,20)..(26,23),
+// whose panes the developer log sized u 0.25..1, 0..1 and 0..0.75 (one pane over the three cells, its window lights centred
+// in the middle cell); every turn closed its cuts by remove posts and posted them again, the grid went 'windows 6 -> 4' and
+// the kitchen gathered with 6 doors, then 8.
+void CameraTurnChecks() {
+    Builder b(40, 40);
+    b.Room(21, 18, 26, 23, 3, true);
+    for (int z = 18; z < 23; z++) b.Wall(false, 26, z), b.Wall(false, 21, z);
+    b.g.xf = Identity();
+    const uint32_t k0 = EdgeKey(26, 20, 26, 21), k1 = EdgeKey(26, 21, 26, 22), k2 = EdgeKey(26, 22, 26, 23);
+    CutRec win;
+    win.kind = kCutWindow;
+    const std::vector<GlassLight> lights{{26.05f, 1.6f, 21.5f, 0.0f, 0.5f, 1.25f}, {25.95f, 1.6f, 21.5f, 0.0f, 0.5f, 1.25f}};
+    Check(WindowLightIn(b.g, k1, lights) == 1 && WindowLightIn(b.g, k0, lights) == 2 && WindowLightIn(b.g, k2, lights) == 2,
+          "a wide window: its middle cell holds its lights, its end cells a pane over them");
+    std::unordered_map<uint32_t, CutRec> edges;
+    for (uint32_t k : {k0, k1, k2}) ApplyCutPost(edges, k, true, win);
+    int changes = 0, built = 0;
+    for (int turn = 0; turn < 5; turn++) {
+        for (uint32_t k : {k0, k1, k2}) changes += ApplyCutPost(edges, k, false, CutRec{}) != 0; // the camera turns to that side
+        std::vector<std::pair<uint32_t, CutRec>> cuts(edges.begin(), edges.end());
+        std::unordered_set<uint32_t> leftOut;
+        std::vector<std::pair<uint32_t, CutRec>> closed;
+        std::string notes;
+        const auto kept = KeepBuiltWindows(b.g, cuts, lights, leftOut, &closed, &notes);
+        built += kept.size() == 3 && leftOut.empty() && closed.size() == 3;
+        if (turn == 0) std::printf("camera turn: %s\n", notes.c_str());
+        for (auto& [k, rec] : edges) rec.closed = leftOut.count(k) ? 2 : 1; // (MarkLeftOutLocked)
+        for (uint32_t k : {k0, k1, k2}) changes += ApplyCutPost(edges, k, true, win) != 0; // and away
+    }
+    Check(changes == 0, "five camera turns: no new cut generation");
+    Check(built == 5, "five camera turns: the three cells of the wide window stay open");
+    PaneShapes panes;
+    std::vector<std::pair<uint32_t, CutRec>> all(edges.begin(), edges.end());
+    WindowPanes(b.g, all, lights, panes);
+    Check(panes.size() == 3 && std::fabs(panes[k0].u0 - 0.25f) < 1e-4f && std::fabs(panes[k2].u1 - 0.75f) < 1e-4f, "its cells sized as in the capture's log");
+}
+
 int main() {
     RoofedSendChecks();
+    CameraTurnChecks();
     ClosedWindowChecks();
     PillarLightChecks();
     RaisedWallSpanChecks();
