@@ -5,9 +5,10 @@
 // A car headlight's glow (light capture 2026-10-26, draw #229) is a small DXT5 texture, white with a radial glow in its
 // alpha, drawn additively by "texld r0, t1, s0; mul r0, r0, v0; mov oC0, r0" over a large part of the screen. DXT5 keeps
 // 8 alpha levels per 4x4 block, so the glow's slope changes from texel to texel (+2, +6, +3 levels...) and the
-// magnified, bilinear-filtered glow shows rings that neither the 16-bit scene nor the grain can remove. The fix decodes
-// the texture once, smooths it with a small Gaussian (only when that changes it by no more than DXT noise) and draws the
-// sprite with a 16-bit copy.
+// magnified, bilinear-filtered glow shows rings that neither the 16-bit scene nor the grain can remove. A headlight's beam
+// (light capture of 2026-10-26, draw #1840: the same shader, a 64x256 DXT5 cone in alpha) shows the same steps as blotches
+// along its length. The fix decodes the texture once, smooths it without rounding the real edges (the beam's sides) and,
+// when that changed it by no more than DXT noise, draws the sprite with a 16-bit copy.
 #include <windows.h>
 #include <d3d9.h>
 #include <algorithm>
@@ -23,8 +24,9 @@ namespace SpriteSmoothLogic {
 constexpr float kSigma = 1.5f;
 constexpr UINT kMaxSide = 512;      // larger textures are not glow sprites (and would cost a visible hitch to convert)
 constexpr UINT kMinSide = 16;       // below this the blur would reshape the whole sprite
-constexpr float kMaxRms = 1.5f;     // levels: the blur may change each channel this much (the captured glow: 0.87)
-constexpr float kMaxBigShare = 0.01f; // and at most 1% of texels by more than 4 levels (the glow: 0.4%; textured content 1.4% to 77%)
+constexpr float kMaxRms = 1.5f;       // levels: the smoothing may change each channel this much
+constexpr float kMaxBigShare = 0.01f; // and at most 1% of texels by more than 4 levels
+constexpr float kMaxEdgeShare = 0.15f; // and at most 15% of texels lie on real edges (the captured beam: 5.5%)
 
 // Why a sampled texture gets no smoothed copy (developer counters)
 enum class Refusal { None, Format, Size, Pool, Detail, Lock, Create, Srgb, Count };
@@ -167,35 +169,87 @@ inline bool Decode(D3DFORMAT f, const uint8_t* src, int pitch, int w, int h, flo
 }
 
 // ---- smoothing ----
-// Separable Gaussian on all four channels, mirrored at the edges (each texel's weight sums to 1 in both directions, so
-// the image's mean is kept exactly). Needs w, h > 3 sigma.
-inline void Gaussian(float* rgba, int w, int h, float sigma) {
+// One channel (stride 4 in rgba), separable Gaussian, mirrored at the edges (each texel's weight sums to 1 in both
+// directions, so the mean is kept exactly). Needs w, h > 3 sigma.
+inline void Blur(const float* src, int stride, int w, int h, float sigma, float* out /* w x h */) {
     const int r = static_cast<int>(std::ceil(3.0f * sigma));
-    std::vector<float> k(2 * r + 1);
+    std::vector<float> k(2 * r + 1), tmp(static_cast<size_t>(w) * h);
     float sum = 0.0f;
     for (int i = -r; i <= r; i++) sum += k[i + r] = std::exp(-0.5f * (i / sigma) * (i / sigma));
     for (float& v : k) v /= sum;
     auto mirror = [](int i, int n) { return i < 0 ? -i - 1 : i >= n ? 2 * n - i - 1 : i; };
-    std::vector<float> tmp(static_cast<size_t>(w) * h * 4);
     for (int y = 0; y < h; y++)
-        for (int x = 0; x < w; x++)
-            for (int c = 0; c < 4; c++) {
-                float s = 0.0f;
-                for (int i = -r; i <= r; i++) s += k[i + r] * rgba[4 * (y * w + mirror(x + i, w)) + c];
-                tmp[4 * (y * w + x) + c] = s;
-            }
+        for (int x = 0; x < w; x++) {
+            float s = 0.0f;
+            for (int i = -r; i <= r; i++) s += k[i + r] * src[stride * (y * w + mirror(x + i, w))];
+            tmp[y * w + x] = s;
+        }
     for (int y = 0; y < h; y++)
-        for (int x = 0; x < w; x++)
-            for (int c = 0; c < 4; c++) {
-                float s = 0.0f;
-                for (int i = -r; i <= r; i++) s += k[i + r] * tmp[4 * (mirror(y + i, h) * w + x) + c];
-                rgba[4 * (y * w + x) + c] = s;
-            }
+        for (int x = 0; x < w; x++) {
+            float s = 0.0f;
+            for (int i = -r; i <= r; i++) s += k[i + r] * tmp[mirror(y + i, h) * w + x];
+            out[y * w + x] = s;
+        }
 }
 
-// A smooth gradient: the blur changed every channel by no more than DXT noise (kMaxRms, kMaxBigShare). Textured content
-// (a detailed particle, a cut-out edge) changes more and keeps the game's texture.
-inline bool SmoothEnough(const float* before, const float* after, int w, int h) {
+// Edge-aware smoothing of all four channels in place; returns the share of texels on a real edge (any channel).
+// A Gaussian removes the compression's steps but rounds real edges too (the sides of a headlight's beam: 31% of their
+// sharpness lost on the captured beam). An edge is where the smoothed image itself still bends: |blur(G) - G| over
+// kEdgeLo..kEdgeHi levels (G = the Gaussian; DXT noise is gone from G, a real corner is not). On an edge the texel is
+// smoothed along it only (a 1D Gaussian across the gradient of G, sampled bilinearly) and moves at most kEdgeMove levels;
+// elsewhere it takes G, blended by how much of an edge it is.
+constexpr float kEdgeLo = 1.0f, kEdgeHi = 4.0f, kEdgeMove = 4.0f;
+constexpr float kMaxMove = 8.0f; // no texel moves more (a thin line beside a flat area, which the edge test misses)
+inline float Smooth(float* rgba, int w, int h) {
+    const size_t n = static_cast<size_t>(w) * h;
+    std::vector<float> d(n), g(n), g2(n);
+    std::vector<uint8_t> edge(n, 0);
+    const int r = static_cast<int>(std::ceil(3.0f * kSigma));
+    std::vector<float> k(2 * r + 1);
+    float ks = 0.0f;
+    for (int i = -r; i <= r; i++) ks += k[i + r] = std::exp(-0.5f * (i / kSigma) * (i / kSigma));
+    auto bilinear = [&](float x, float y) {
+        x = std::clamp(x, 0.0f, w - 1.0f), y = std::clamp(y, 0.0f, h - 1.0f);
+        const int x0 = std::min(static_cast<int>(x), w - 2), y0 = std::min(static_cast<int>(y), h - 2); // (w, h >= kMinSide)
+        const float fx = x - x0, fy = y - y0;
+        const float* p = &d[static_cast<size_t>(y0) * w + x0];
+        return (p[0] * (1 - fx) + p[1] * fx) * (1 - fy) + (p[w] * (1 - fx) + p[w + 1] * fx) * fy;
+    };
+    for (int c = 0; c < 4; c++) {
+        for (size_t i = 0; i < n; i++) d[i] = rgba[4 * i + c];
+        Blur(d.data(), 1, w, h, kSigma, g.data());
+        Blur(g.data(), 1, w, h, kSigma, g2.data());
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                const size_t i = static_cast<size_t>(y) * w + x;
+                const float e = std::clamp((std::fabs(g2[i] - g[i]) - kEdgeLo) / (kEdgeHi - kEdgeLo), 0.0f, 1.0f);
+                float v = g[i];
+                if (e > 0.0f) {
+                    const float gx = 0.5f * (g[y * w + std::min(x + 1, w - 1)] - g[y * w + std::max(x - 1, 0)]);
+                    const float gy = 0.5f * (g[std::min(y + 1, h - 1) * w + x] - g[std::max(y - 1, 0) * w + x]);
+                    const float len = std::hypot(gx, gy);
+                    float along = d[i];
+                    if (len > 1e-6f) {
+                        const float tx = -gy / len, ty = gx / len;
+                        float s = 0.0f;
+                        for (int j = -r; j <= r; j++) s += k[j + r] * bilinear(x + j * tx, y + j * ty);
+                        along = d[i] + std::clamp(s / ks - d[i], -kEdgeMove, kEdgeMove);
+                    }
+                    v += (along - v) * e;
+                    if (e >= 0.5f) edge[i] = 1;
+                }
+                rgba[4 * i + c] = d[i] + std::clamp(v - d[i], -kMaxMove, kMaxMove);
+            }
+    }
+    size_t edges = 0;
+    for (uint8_t e : edge) edges += e;
+    return static_cast<float>(edges) / n;
+}
+
+// A smooth gradient or beam: the smoothing changed every channel by no more than DXT noise (kMaxRms, kMaxBigShare) and
+// few texels lie on real edges (kMaxEdgeShare). Textured content keeps the game's texture.
+inline bool SmoothEnough(const float* before, const float* after, int w, int h, float edgeShare) {
+    if (edgeShare > kMaxEdgeShare) return false;
     const size_t n = static_cast<size_t>(w) * h;
     for (int c = 0; c < 4; c++) {
         double sq = 0.0;

@@ -387,8 +387,8 @@ SS::Refusal MakeSmoothed(IDirect3DDevice9* dev, IDirect3DTexture9* tex, IDirect3
     SS::Decode(d.Format, static_cast<const uint8_t*>(lr.pBits), lr.Pitch, w, h, img.data());
     tex->UnlockRect(0);
     std::vector<float> level = img;
-    SS::Gaussian(level.data(), w, h, SS::kSigma);
-    if (!SS::SmoothEnough(img.data(), level.data(), w, h)) return SS::Refusal::Detail;
+    const float edges = SS::Smooth(level.data(), w, h);
+    if (!SS::SmoothEnough(img.data(), level.data(), w, h, edges)) return SS::Refusal::Detail;
     const bool wide = Filterable16(dev);
     const DWORD levels = tex->GetLevelCount();
     IDirect3DTexture9* copy = nullptr;
@@ -605,10 +605,11 @@ void OnFrameBoundary(IDirect3DDevice9* dev) {
             LOG_INFO(std::format("[SceneDither] Last frame, 3D scene draws: {} dithered (ps_3_0), {} dithered (ps_2_x), {} ps_2_x whose vertex shader "
                                  "could not carry the position, {} ps_2_x refused, {} ps_3_0 refused, {} other | copies made: pixel {}, vertex {}; "
                                  "refused: no colour write {}, subroutines {}, relative constants {}, no free register {}, unreadable {} | glow sprites: "
-                                 "{} smoothed, {} as drawn, textures smoothed {}",
+                                 "{} smoothed, {} as drawn, textures smoothed {}; refused: format {}, size {}, pool {}, detail {}, lock {}, create {}",
                                  g_last.dithered3, g_last.dithered2, g_last.ps2NoPair, g_last.ps2Refused, g_last.ps3Refused, g_last.other, g_made.load(),
                                  g_madeVs.load(), g_refused[2].load(), g_refused[3].load(), g_refused[4].load(), g_refused[5].load(), g_refused[6].load(),
-                                 g_last.sprites, g_last.spritesAlone, g_spriteMade.load()));
+                                 g_last.sprites, g_last.spritesAlone, g_spriteMade.load(), g_spriteRefused[1].load(), g_spriteRefused[2].load(),
+                                 g_spriteRefused[3].load(), g_spriteRefused[4].load(), g_spriteRefused[5].load(), g_spriteRefused[6].load()));
         }
     }
 }
