@@ -138,3 +138,21 @@ hold no other draw of it. A blur of 1.5 texels changes the glow by 0.87 levels R
 when the blur changes it no more than DXT noise, and kept by the game texture as private data. Offline: the slope
 changes drop from 13 to 1.3 levels on the captured glow, the mean is kept. Not yet tested in game: open checks on the
 [validation page](../validation/banding-fix.md#open-checks).
+
+### 2026-10-26: the headlight beam was refused
+
+**Context:** observed in game with the glow-sprite build: the car light was still banded. A light capture of the beam
+(draw #1840) showed the same shader, additive blending, no depth write and a 64x256 DXT5 texture with a narrow cone in
+alpha; the coverage log line read "1 as drawn, textures smoothed 0".
+
+**Finding:** the detail gate refused the beam: the Gaussian changed it by 2.80 levels RMS, 4.7% of texels by more than 4
+levels, at its steep sides. A range-limited bilateral filter (3 to 12 levels) left the glow's slope changes almost as
+they were (2.66 -> 2.29 rms at 4 levels; 0.93 at 12 levels, against 0.16 with the Gaussian), since a ramp of 4 levels a
+texel already exceeds such a range. Bounding each texel's
+move to half its DXT step kept too much of the beam's noise, which is larger than the quantisation. Detecting real
+edges as the places where the smoothed image still bends, and smoothing those only along the edge, kept 92% of the
+beam's edge sharpness (69% with the Gaussian) with the same ramp smoothing (0.79 against 0.78 rms).
+
+**Outcome:** the edge-aware smoothing replaces the Gaussian, the gate tests its result and the share of edge texels, and
+the coverage log line lists the refusals by reason. The offline check measures the captured glow and beam and scans the
+captured textures. Not yet tested in game.

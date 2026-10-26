@@ -40,7 +40,8 @@ the family in the game's shader package.
 | 2026-09-30 | f578f43 | `dithertest.cpp` | ps_3_0: 4907 / 4907 patched and accepted by a native HAL device (strict validator); 3104 ps_2_0 and 7 ps_1_1 left alone (no `vPos`) | Native D3D9 |
 | 2026-09-30 | 53d1091 | `dithertest2.cpp` | ps_2_0: 2996 / 3104 patched and created (108 with no free texture coordinate, temp or constant); 519 of 2308 failed when the copy was ps_2_0, hence ps_2_x. vs_2_0: 4035 / 4338 (2961 with t7, 1074 with a lower k, 303 refused). A grey through a patched vs_2_0 + ps_2_0 pair gives the same means and triangle as ps_3_0 (20.355 / 63.971 / 100.657) | Native D3D9 |
 
-| 2026-10-26 | glow sprites (this change) | `tools/sprite_smooth_test`, `banding_fix_check` | 31 / 31. Glow 128x128 through the game's DXT5 encoder: decode within 1.7 levels of the source; slope change between neighbouring texels rms / max 2.33 / 6.86 levels (source 0.75 / 2.00), smoothed (sigma 1.5) 0.15 / 0.73, mean alpha 63.409 kept, peak 255, within 3.7 levels of the source. Family in the package: 2 ps_2_x, 1 ps_3_0. The rest of `banding_fix_check` unchanged (66 / 66) | CPU; native D3D9 for `banding_fix_check` |
+| 2026-10-26 | edge-aware smoothing (this change) | `tools/sprite_smooth_test` with `-Glow`, `-Beam`, `-Scan` | 32 / 32 built in, 40 / 40 with the captures. Slope changes on the ramps rms / max: captured beam 2.56 / 24.0 -> 0.79 / 14.5 levels, real edges kept 92% (plain Gaussian 69%), mean alpha 9.771 -> 9.760, accepted (refused before: 2.80 RMS, 4.7% above 4 levels); captured glow 2.66 / 12.0 -> 0.16 / 1.7, mean 42.396 -> 42.406; synthetic glow 2.32 -> 0.16, synthetic beam 1.80 -> 0.92 with 97% of its edges. Scan of 20 distinct captured DXT textures: 4 smoothed (glow, beam, a flat texture, a nearly flat grey texture with one line), 16 refused. `banding_fix_check` 66 / 66 | CPU; native D3D9 for `banding_fix_check` |
+| 2026-10-26 | glow sprites (fdde69c) | `tools/sprite_smooth_test`, `banding_fix_check` | 31 / 31. Glow 128x128 through the game's DXT5 encoder: decode within 1.7 levels of the source; slope change between neighbouring texels rms / max 2.33 / 6.86 levels (source 0.75 / 2.00), smoothed (sigma 1.5) 0.15 / 0.73, mean alpha 63.409 kept, peak 255, within 3.7 levels of the source. Family in the package: 2 ps_2_x, 1 ps_3_0. The rest of `banding_fix_check` unchanged (66 / 66) | CPU; native D3D9 for `banding_fix_check` |
 | 2026-10-26 | 0d9ef9d | `tools/scene_target_test` | 30 / 30. Resolve average error 0.0005 level between 1 and 254 levels (plain rounding: up to 0.498); exact levels unchanged; never past 0 / 255. On the GPU: 0 channels more than one level from the C++ copy, 2.9% one level (float precision of the noise), alpha equal to plain rounding, ramp mean error -0.031 level. The GPU's own float to 8-bit conversion rounds values up to 0.56 level down (2.4% of channels at strength 0): the game's 8-bit path goes through the same conversion | Native D3D9, RTX 4070 Ti SUPER |
 
 ## In-game test plan
@@ -108,7 +109,9 @@ not each run). Each of these is open:
 Glow sprites (built 2026-10-26, not yet run in game). Each of these is open:
 
 - Car headlights at night, Banding Fix off then on, with the High-precision scene on and off. Expected: the rings in the
-  glow gone, its size, brightness and colour unchanged; the Developer counters show the sprite draws smoothed.
+  glow and the blotches along the beam gone, the beam's sides as sharp as before, size, brightness and colour unchanged;
+  the Developer counters and the coverage log line show the sprite draws smoothed and no texture refused as "detail".
+  The first in-game test (2026-10-26) still showed the beam banded: its texture was refused, fixed since.
 - Lamp halos, fire, smoke and other particles, light shafts. Expected: smooth glows smoothed, detailed particles left as
   they are (refused as "detail"); none softer than before. Which of them use this shader family is not known: only the
   headlight was captured.
