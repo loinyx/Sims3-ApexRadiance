@@ -3159,7 +3159,10 @@ void __fastcall WallUvHook(void* geo, void*, uintptr_t mgr, int x, int z, int di
     CellCrop k;
     bool recut = false;
     float f3 = 0.0f, f5 = 0.0f, ref = 0.0f;
-    if ((mode == 0 || mode == 1) && g_foundationWallsOn.load(std::memory_order_relaxed) && ReadWallCell(geo, mgr, x, z, dir, c) && ReadCellCrop(geo, k)) {
+    // mode 0 only: mode 1 (V at +0x1E, TEXCOORD3) is the game's wall shade strip (PS s6, L8 1024 x 32), baked in the game's
+    // own per-cell mapping, continuous from a knee wall's top row into the gable's bottom row; recutting it moved the knee
+    // wall's top onto a dark part of the strip (three light captures: a hard seam along the gable's foot, 30% darker below)
+    if (mode == 0 && g_foundationWallsOn.load(std::memory_order_relaxed) && ReadWallCell(geo, mgr, x, z, dir, c) && ReadCellCrop(geo, k)) {
         const int cell = static_cast<int>(ApexMath::Floor(c.tmid * static_cast<float>(c.len)));
         ref = c.base;
         // (2.15.3) the eave cell of a gable is a triangle whose tip dips under its foot (heights 0.83 / 0.33 / -0.17 at 0.5 m
@@ -3196,7 +3199,7 @@ void __fastcall WallUvHook(void* geo, void*, uintptr_t mgr, int x, int z, int di
                 });
         }
     }
-    // mode 1 writes the second UV set of the same vertices; the note allocates: caught, then off (07/10, players' Runtime Error)
+    // mode 1 writes the shade strip's UVs (left as the game maps them); the note allocates: caught, then off (a players' Runtime Error)
     if (mode == 0) HookGuard::Run("LevelLightShare wall cell note", [=] { NoteWallCell(geo, mgr, x, z, dir); });
 }
 // The drawn height at t (0..len cells along the wall) of a wall's cells; 0 = not known

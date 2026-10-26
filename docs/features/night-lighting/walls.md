@@ -118,7 +118,8 @@ LightProbe captures `andar2-b` (m44), `andar1-b` (m45), `passo3-parede` (m59) an
 - Wall VS in cutaway / walls-down mode: `max r1.xy, c12.xzzw, v7.xzzw`, `min r1.w, r1.x, c12.y`, `mad r2.y, r1.w, r0.w, r0.z`
   lower the wall (y = lerp(v0.w, v0.y, clamp(v7.x))), while the atlas UV is not lowered.
 - Light rows on the wall mesh: the light-UV writer `0x00C38530` (called per wall cell at `0x00C387B5` / `0x00C387CC`, mode 0
-  / 1 = the V at vertex `+0x12` / `+0x1E`, x 4096) maps the bottom vertices to the light base and the top ones to
+  / 1 = the V at vertex `+0x12` / `+0x1E`, x 4096; mode 1 is TEXCOORD3, the game's wall shade strip (PS `s6`, L8 1024 x 32),
+  which Apex leaves as the game maps it: only mode 0's light rows are recut) maps the bottom vertices to the light base and the top ones to
   base + 3 (1 - f), `f = max(0, int16 +0x0A / 512 - 8)` from the top vertices' wallpaper V (`0x00C385AB..DB`; the wall
   builders write `+0x0A = (V + 8) x 512` at `0x00C3C587` / `0x00C3C8B9`). Walls taller than 3 m get their light samples
   stretched (`StretchTallWall`). Short walls (F8 10-57-41): on a foundation face (story 0, drawn from the
