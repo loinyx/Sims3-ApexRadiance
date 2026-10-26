@@ -9380,10 +9380,12 @@ bool SwapThreshold(BYTE* room, float value, float* was) { // POD (SEH)
         return false;
     }
 }
-// The colour the game is about to sum (after Apex's tests), faded at the room's real threshold (the same sum, the same order)
-void FadeAtThreshold(float* colour) {
+// The colour the game is about to sum (after Apex's tests), faded at the room's real threshold (the same sum, the same order).
+// thrScale (at most 1): the scale Apex put on the colour after the game's law (an outdoor lamp through an opening: its cut,
+// the outdoor surface's factor and the colour response), so the cut stays where the law's light would meet it
+void FadeAtThreshold(float* colour, float thrScale = 1.0f) {
     const float sum = (colour[2] + colour[1]) + colour[0];
-    const float thr = g_ctx.thr;
+    const float thr = g_ctx.thr * thrScale;
     if (!(sum >= thr)) { // the game's drop
         for (int i = 0; i < 4; i++) colour[i] = 0.0f;
         return;
@@ -12719,8 +12721,9 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
     // colour the game is about to sum, Apex's tests done, fades at the room's real threshold on every way out below
     struct FadeOnExit {
         float* c;
+        float thrScale = 1.0f;
         ~FadeOnExit() {
-            if (c) FadeAtThreshold(c);
+            if (c) FadeAtThreshold(c, thrScale);
         }
     } fadeOnExit{g_ctx.fade && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed) ? colour : nullptr};
     // indoor light through openings: the floor mask's copies of room 0 leave these lamps out (the ground atlas, which the mask
@@ -12796,6 +12799,10 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
                 }
                 const float k = OpeningLampFactor(normal, t_solveRoom);
                 for (int i = 0; i < 4; i++) colour[i] *= k;
+                // The light cut follows these scales: measured on the scaled colour, the room's threshold (3/255) dropped the
+                // window's light where the law still gave it several times that (F7 of a living room behind a courtyard
+                // window: a strip 1.75 to 2.75 m in at 8/255 and nothing past it, the sill's shade before it)
+                float scaled = cut * k;
                 // and the outdoor response to its colour: the indoor curves, on the mean, gave a saturated lamp more than a white
                 // one (a room solved as outdoor packs its hue-kept sum with no curve)
                 if (t_solveRoom && !RoomOutdoorFlag(t_solveRoom)) {
@@ -12804,7 +12811,9 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
                         for (int i = 0; i < 4; i++) colour[i] *= q;
                         ApexUtil::CountOne(g_openResponse);
                     }
+                    scaled *= q;
                 }
+                if (scaled > 0.0f && scaled < 1.0f && ApexMath::IsFinite(scaled)) fadeOnExit.thrScale = scaled;
             }
         }
         else if (!g_ctx.info->indoor) CrossFloorShadow(*g_ctx.info, light, sample, colour);
