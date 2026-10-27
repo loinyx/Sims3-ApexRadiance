@@ -284,3 +284,10 @@ hold, which would delay the light the player sees.
 `restart_settle` now reads as off when its key is missing. The measurement adds, per caller, the time since the same
 room's previous invalidate and the count of room-0 invalidates, to tell the game's room-0 cascade from rooms restarted by
 lots arriving one after another.
+
+**Third session (2026-10-27, 6 minutes, gaps):** settled frames again almost without solves (2 in 6 minutes). Within 10 s
+of camera moves most invalidates came under 0.3 s after the same room's previous one (in one minute 820 of 1322 from the
+game's dirty-room loop, 355 of 489 from `AfterChangedWalk`): the game and Apex restart the same rooms for the same change.
+Room 0 of a story took 30 to 45 % of the invalidates (the room-0 cascade). Restarts 1 to 10 s apart were about 150 to 200
+a minute. An invalidate of a room still waiting for its solve throws no work away; which invalidates stop a solve in
+progress or undo a finished one (the room's state when invalidated) is not yet measured.
