@@ -40,6 +40,8 @@ void SolveTexel(uintptr_t room, const float* position, const float* colour);
 void SolveEnd(uintptr_t room, int cls, const float* packing, int n, uint64_t nowMs);
 // The room's next undo was predicted to change nothing (opening_skip_check): its comparison is also counted apart
 void NotePrediction(uintptr_t room);
+// The hash of what the room's last finished solve wrote (0 when none is known): an input of the rooms that read its light
+uint64_t LastHash(uintptr_t room);
 
 // Render thread, once a frame: the camera state for the counts until the next call. Returns true with the window's line in
 // *line once windowMs have passed since the window started (the counts start again).

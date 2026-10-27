@@ -214,6 +214,12 @@ void NoteSolve(uintptr_t mgr, int id, int level, uint32_t lot, int cls) {
     g_roomOverflow++;
 }
 
+uint64_t LastHash(uintptr_t room) {
+    std::lock_guard<std::mutex> lk(g_mx);
+    const HashSlot* h = HashOf(room, GetTickCount64(), false);
+    return h && h->hasPrev ? h->prev : 0;
+}
+
 void NotePrediction(uintptr_t room) {
     std::lock_guard<std::mutex> lk(g_mx);
     if (HashSlot* h = HashOf(room, GetTickCount64(), false)) h->predictNext = true;
