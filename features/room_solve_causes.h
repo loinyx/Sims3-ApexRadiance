@@ -37,20 +37,7 @@ void NoteSolve(uintptr_t mgr, int id, int level, uint32_t lot, int cls);
 // hash means the re-solve wrote what the room already showed. SolveStart / SolveTexel / SolveEnd run on the solve's thread.
 void SolveStart(uintptr_t room);
 void SolveTexel(uintptr_t room, const float* position, const float* colour);
-// What a predicted room's next solve changed against its last one (opening_skip_check's diagnostics): returned by SolveEnd
-// when the room's undo was predicted to change nothing and the comparison was made
-struct Diff {
-    bool predicted = false; // the comparison below belongs to a predicted undo
-    int outcome = -1;       // 0 same, 1 different, 2 another class, 3 not hashed, -1 no comparison
-    uint32_t texels = 0, before = 0, differing = 0; // this solve's texels, the last one's, how many changed (same count only)
-    float largest = 0.0f;   // the largest change of one colour channel
-    bool positionsSame = true, packingSame = true;
-};
-Diff SolveEnd(uintptr_t room, int cls, const float* packing, int n, uint64_t nowMs);
-// The room's next undo was predicted to change nothing (opening_skip_check): its comparison is also counted apart
-void NotePrediction(uintptr_t room);
-// The hash of what the room's last finished solve wrote (0 when none is known): an input of the rooms that read its light
-uint64_t LastHash(uintptr_t room);
+void SolveEnd(uintptr_t room, int cls, const float* packing, int n, uint64_t nowMs);
 
 // Render thread, once a frame: the camera state for the counts until the next call. Returns true with the window's line in
 // *line once windowMs have passed since the window started (the counts start again).

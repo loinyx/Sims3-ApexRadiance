@@ -4,12 +4,10 @@
 #include "room_solve_causes.h"
 #include <windows.h>
 #include <algorithm>
-#include <cmath>
 #include <atomic>
 #include <cstring>
 #include <format>
 #include <mutex>
-#include <unordered_map>
 #include <vector>
 
 namespace RoomSolveCauses {
@@ -39,26 +37,16 @@ struct HashSlot {
     uintptr_t room = 0;
     uint64_t at = 0, prev = 0;
     int prevCls = -1;
-    bool hasPrev = false, pending = false, pFlag = false, pQueue = false, predictNext = false, pPredicted = false;
+    bool hasPrev = false, pending = false, pFlag = false, pQueue = false;
     uintptr_t pCaller = 0;
 };
 constexpr int kHashes = 2048;
 HashSlot g_hashes[kHashes];
 uint32_t g_same = 0, g_differ = 0, g_otherClass = 0, g_unhashed = 0;
-uint32_t g_predicted[4] = {}; // the undos predicted to change nothing: same, different, other class, not hashed
 // The solve hashing on this thread (a solve's texels run on the thread that runs it)
 thread_local uintptr_t t_hashRoom = 0;
 thread_local uint64_t t_hash = 0;
 thread_local uint32_t t_texels = 0;
-thread_local std::vector<float> t_texelData; // this solve's texels: position and colour, 6 floats each (diagnostics)
-// Each room's last finished solve, texel by texel, with its packing values (diagnostics of a predicted undo; at most
-// kKeptRooms rooms, all dropped when full)
-struct Kept {
-    std::vector<float> texels;
-    float packing[8] = {};
-};
-constexpr size_t kKeptRooms = 512;
-std::unordered_map<uintptr_t, Kept> g_kept;
 constexpr uint64_t kFnvBasis = 1469598103934665603ull, kFnvPrime = 1099511628211ull;
 uint64_t Fold(uint64_t h, const float* v, int n) {
     for (int i = 0; i < n; i++) {
@@ -125,7 +113,6 @@ void Clear() {
     for (auto& v : g_invalidates) v = 0;
     for (auto& v : g_states) v = 0;
     g_same = g_differ = g_otherClass = g_unhashed = 0;
-    for (auto& v : g_predicted) v = 0;
     for (auto& v : g_frames) v = 0;
 }
 
@@ -152,9 +139,7 @@ std::string Line(double seconds) {
     s += "; invalidates " + Split(g_invalidates) +
          std::format(" (room waiting {}, mid-solve {}, solved {}, other {})", g_states[kWaiting], g_states[kMidSolve], g_states[kSolved], g_states[kOtherState]) +
          std::format("; finished solves undone, next solve of the same class same {}, different {}, other class {}, not hashed {}", g_same, g_differ,
-                     g_otherClass, g_unhashed) +
-         std::format("; of them predicted unchanged same {}, different {}, other class {}, not hashed {}", g_predicted[0], g_predicted[1], g_predicted[2],
-                     g_predicted[3]);
+                     g_otherClass, g_unhashed);
     std::vector<const CauseSlot*> causes;
     for (const auto& c : g_causes)
         if (c.caller) causes.push_back(&c);
@@ -192,9 +177,7 @@ void NoteInvalidate(uintptr_t caller, bool onFlag, bool viaQueueRoom, uintptr_t 
     // a finished solve undone: its hash waits for the room's next solve (the first undo of it is the one compared)
     if (room && state == kSolved)
         if (HashSlot* h = HashOf(room, nowMs, false); h && h->hasPrev && !h->pending)
-            h->pending = true, h->pCaller = caller, h->pFlag = onFlag, h->pQueue = viaQueueRoom, h->pPredicted = h->predictNext;
-    if (room)
-        if (HashSlot* h = HashOf(room, nowMs, false)) h->predictNext = false;
+            h->pending = true, h->pCaller = caller, h->pFlag = onFlag, h->pQueue = viaQueueRoom;
     for (int k = 0, i = static_cast<int>((caller * 2654435761u + (onFlag ? 1u : 0u)) % kCauses); k < kCauses; k++, i = (i + 1) % kCauses) {
         CauseSlot& c = g_causes[i];
         if (!c.caller) c.caller = caller, c.onFlag = onFlag, c.viaQueue = viaQueueRoom;
@@ -225,36 +208,22 @@ void NoteSolve(uintptr_t mgr, int id, int level, uint32_t lot, int cls) {
     g_roomOverflow++;
 }
 
-uint64_t LastHash(uintptr_t room) {
-    std::lock_guard<std::mutex> lk(g_mx);
-    const HashSlot* h = HashOf(room, GetTickCount64(), false);
-    return h && h->hasPrev ? h->prev : 0;
-}
-
-void NotePrediction(uintptr_t room) {
-    std::lock_guard<std::mutex> lk(g_mx);
-    if (HashSlot* h = HashOf(room, GetTickCount64(), false)) h->predictNext = true;
-}
-
 void SolveStart(uintptr_t room) {
     t_hashRoom = room;
     t_hash = kFnvBasis;
     t_texels = 0;
-    t_texelData.clear();
 }
 
 void SolveTexel(uintptr_t room, const float* position, const float* colour) {
     if (room != t_hashRoom) return;
     t_hash = Fold(Fold(t_hash, position, 3), colour, 3);
     t_texels++;
-    if (t_texelData.size() < 6u * 65536u) t_texelData.insert(t_texelData.end(), {position[0], position[1], position[2], colour[0], colour[1], colour[2]});
 }
 
-Diff SolveEnd(uintptr_t room, int cls, const float* packing, int n, uint64_t nowMs) {
+void SolveEnd(uintptr_t room, int cls, const float* packing, int n, uint64_t nowMs) {
     const bool hashed = room == t_hashRoom && t_texels > 0;
     const uint64_t h = hashed ? Fold(t_hash, packing, n) ^ t_texels : 0;
     t_hashRoom = 0;
-    Diff d;
     std::lock_guard<std::mutex> lk(g_mx);
     HashSlot* s = HashOf(room, nowMs, true);
     s->at = nowMs;
@@ -262,28 +231,6 @@ Diff SolveEnd(uintptr_t room, int cls, const float* packing, int n, uint64_t now
         int outcome = !hashed ? 3 : s->prevCls != cls ? 2 : s->prev == h ? 0 : 1; // same, different, other class, not hashed
         uint32_t* const total[4] = {&g_same, &g_differ, &g_otherClass, &g_unhashed};
         (*total[outcome])++;
-        if (s->pPredicted) {
-            g_predicted[outcome]++;
-            d.predicted = true;
-            d.outcome = outcome;
-            d.texels = t_texels;
-            if (const auto k = g_kept.find(room); k != g_kept.end() && hashed) {
-                const std::vector<float>& was = k->second.texels;
-                d.before = static_cast<uint32_t>(was.size() / 6);
-                for (int i = 0; i < n && i < 8; i++) d.packingSame = d.packingSame && std::memcmp(&packing[i], &k->second.packing[i], 4) == 0;
-                if (was.size() == t_texelData.size())
-                    for (size_t i = 0; i < was.size(); i += 6) {
-                        bool changed = false;
-                        for (int c = 0; c < 6; c++) {
-                            if (std::memcmp(&was[i + c], &t_texelData[i + c], 4) == 0) continue;
-                            changed = true;
-                            if (c < 3) d.positionsSame = false;
-                            else d.largest = (std::max)(d.largest, std::fabs(was[i + c] - t_texelData[i + c]));
-                        }
-                        if (changed) d.differing++;
-                    }
-            }
-        }
         for (auto& c : g_causes)
             if (c.caller == s->pCaller && c.onFlag == s->pFlag && c.viaQueue == s->pQueue) {
                 uint32_t* const mine[4] = {&c.same, &c.differ, &c.otherClass, &c.unhashed};
@@ -295,13 +242,6 @@ Diff SolveEnd(uintptr_t room, int cls, const float* packing, int n, uint64_t now
     s->hasPrev = hashed;
     s->prev = h;
     s->prevCls = cls;
-    if (hashed) {
-        if (g_kept.size() >= kKeptRooms && !g_kept.count(room)) g_kept.clear();
-        Kept& k = g_kept[room];
-        k.texels = t_texelData;
-        for (int i = 0; i < n && i < 8; i++) k.packing[i] = packing[i];
-    }
-    return d;
 }
 
 bool Frame(bool cameraMoving, uint64_t nowMs, std::string* line, uint64_t windowMs) {

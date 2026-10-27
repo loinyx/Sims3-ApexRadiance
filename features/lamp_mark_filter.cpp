@@ -548,13 +548,13 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
     if (!g_on.load(std::memory_order_relaxed)) {
         g_off.fetch_add(1, std::memory_order_relaxed);
         if (edit) {
-            LevelLightShare::NoteLampEditing(pure);
+            LevelLightShare::NoteLampEditing(pure, TrackerOf(tl));
             LevelLightShare::NoteLampMark(tl, room, user, stayed);
         }
         return true;
     }
     g_changed.fetch_add(1, std::memory_order_relaxed);
-    if (edit) LevelLightShare::NoteLampEditing(pure); // a drag (moved, value) or a switch: how the edit's rooms are solved
+    if (edit) LevelLightShare::NoteLampEditing(pure, TrackerOf(tl)); // a drag (moved, value) or a switch: how the edit's rooms are solved
     if (edit && pure && LevelLightShare::HoldLampMark(tl, room, user)) {
         g_held.fetch_add(1, std::memory_order_relaxed);
         return false;

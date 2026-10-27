@@ -306,19 +306,15 @@ with it and booked to that invalidate's caller: the same hash, a different one, 
 room's solve ran in between on the thread). Seams that later passes take from other stories (wall blur's ghost rows) are
 not in the hash. Measuring only: nothing is skipped.
 
-The switches `opening_skip_check` (measuring, on in development builds) and `opening_skip` (off unless `[dev_build]` sets
-it to true) act on `QueueOpeningRooms`, the source of most finished solves undone. Each room solve hashes its inputs at
-its start and at its end (`OpeningInputs`: `PhysicsKey`, `LotGeometryKey`, every lamp registered on any story of the lot
-with the fields `RoomLampSignature` compares, every room's ambient, normalisation, boost and last solve's hash (the room's own too: a room is predicted once two of its solves agree), and the light manager's night and manmade levels, summed so the order
-of the game's maps does not matter); when both are equal they are what the finished solve saw. At a send, a solved room
-(state 4 or 5) whose inputs are those is predicted to solve to the same texels: the check counts it and books its next
-solve's comparison apart, the skip leaves it unsent. An `[OpeningSkip]` line every minute gives the rooms sent, predicted
-and left unsent.
-
 A `[RoomSolveCauses]` line every minute gives the window's frames, finished solves by class, invalidates, the eight
 callers and four rooms with the most counts. Source: `features/room_solve_causes.{h,cpp}`.
 
 ### Restart settle (development builds)
+
+The switch `lamp_edit_lot_only` (development builds) limits the resend of the rooms near openings after a lamp edit to the
+edited lamp's lot: in game, each edit made every loaded lot send them again (147 edits sent 1053 rooms in one minute).
+An edit whose lot is not known still sends every lot's. It ships once a lamp switched near a stair opening is seen to
+update the story below.
 
 The switch `restart_settle` (`features/restart_settle.h`; off in every build unless `[dev_build]` sets it to true: in game it
 did not reduce the repeated solves, see [history](../../history/performance-room-light-queue.md)) acts on the rooms
@@ -344,6 +340,9 @@ line every minute (with the `[RoomSolveCauses]` line) gives the picks held and l
 
 ## Rejected approaches
 
+- Skipping the opening sends whose inputs a room's finished solve already saw (`opening_skip`, development builds): proven
+  in game (no predicted room re-solved differently once a room's own last result was an input), but it predicted 4 % of
+  the sends and its input hash cost more frame time than the solves it saved ([history](../../history/performance-room-light-queue.md)).
 - Smooth light changes indoors (the room maps fading over 250 ms during lamp edits): removed before release; the light
   changes at once. An old `lightFade` key is ignored.
 - Holding every story's maps until an edit's first solves end: the lamp's story waited for a cascade of 2 to 4 s;

@@ -302,7 +302,8 @@ constexpr int kApexTestParts = 8;
 bool ApexTestPartMs(double* ms, long* calls);
 const char* ApexTestPartName(int i);
 // From LampMarkFilter: a lamp edit was noted; continuous = it moved or a value changed (a drag), not switched on or off
-void NoteLampEditing(bool continuous);
+// tracker: the edited lamp's lot (0 = not known: every lot's rooms near openings are sent again)
+void NoteLampEditing(bool continuous, uintptr_t tracker = 0);
 // A lamp is being dragged (moved or a value changed within the last 200 ms). The one-go solve once an edit ended
 // (05/10, option A) was taken out the same day: 300-1300 ms frames while moving lamps in Build mode (log). False once the
 // mouse button let go of the lamp (DragLite::LetGo)
