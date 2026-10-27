@@ -67,21 +67,23 @@ The changelog opened from the version in the menu footer (`apex_changelog.cpp`):
 3. The release PR is titled `release: X.Y.Z`; merging and publishing are maintainer actions.
 4. Publish `Release\ApexRadiance.asi` to `loinyx/Sims3-ApexRadiance` as `Apex Radiance X.Y.Z`, with
    player-facing notes checked with `python tools/public_text_check.py --text-file`. The Nexus workflow derives its
-   changelog and file description from that body. The notes have three fixed sections, the ones of the in-game What's
-   new, in this order, each left out when empty, and nothing else (no headline, no install or upgrade section; the
-   release title carries the version):
+   changelog and file description from that body. The notes open with a bold headline (the release's theme in a few
+   words) and one short paragraph on what the player will notice, then one `## ` section per menu area the release
+   changes (for example `## Banding Fix`, `## Night Lights`, `## Performance`), then `## Fixes`; no install or upgrade
+   section (the release title carries the version):
 
    ```
-   ## New
-   - <the feature by its menu name, what the player gets>
-   ## Improved
-   - <what works or looks better>
-   ## Fixed
+   **<headline>**
+
+   <one paragraph, two sentences at most, in the player's words>
+
+   ## <menu area>
+   - <what the player gets or what looks better>
+   ## Fixes
    - <the problem that is gone, in the player's words>
    ```
 
-   One short line per item, about 5 to 12 words, no ending period, no area prefix such as "Night Lights:" (name the
-   feature only where the line needs it), related changes merged into one line. The lines are the in-game What's new
-   lines, shortened where they repeat.
+   One short line per item, about 5 to 15 words, no ending period, no area prefix inside the lines (the section names
+   it), related changes merged into one line. The lines follow the in-game What's new.
 5. After publication, verify that the published asset matches the reviewed build (version and SHA-256) and that the
    Nexus workflow succeeded. Publication does not validate gameplay.
