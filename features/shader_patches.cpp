@@ -3187,7 +3187,9 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
     // alpha 0.125 or more, the read is the B-spline of the 4 x 4 texels with alpha 4/255 or more alone, its weights over
     // their sum (the own texel's weight is at least 0.23): room 0's texels beyond the wall add nothing to the colour or to
     // the ambient weight, and the room's light falls to the wall as the solve has it, smooth across shadow edges and a
-    // jamb's penumbra. A pixel of room 0 or a bright texel with little ambient weight keeps the B-spline. Rows as the taps
+    // jamb's penumbra. A pixel of room 0 or a bright texel with little ambient weight keeps the B-spline. A roofed room's
+    // texel is packed with alpha 5/255 at least (room_map_dither.cpp): a brightly lit texel of the room itself is never taken
+    // for one beyond a wall (that left a dark square one texel wide beside it, under a table or a plant). Rows as the taps
     // (the pixel's wall block). Temps free here: A, B, R, C0..C3, T + 5, Wt, T + 11 .. T + 13.
     {
         constexpr DWORD kCmp = 0x58, kDp4 = 0x09;
