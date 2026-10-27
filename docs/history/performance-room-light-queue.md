@@ -262,3 +262,11 @@ invalidates a minute; after camera moves, 1000 to 3200 invalidates and up to 128
 frames counted as still. Two callers made almost all invalidates: the game's dirty-room loop `0x006C7250` (return
 `0x006C7451`) and Apex's `QueueRoom`. No class 1 solve was seen (the direct step 0 to 2). The counts were then split into
 settled (still for 10 s or more), stopped and moving, and `QueueRoom`'s invalidates by its own caller.
+
+**Second session (2026-10-27, `memory_owners` off, 2 minutes):** with the camera settled (still for 10 s or more, 7281
+and 736 frames) no room was invalidated or solved. Every solve came within 10 s of a camera move or during it: 389 and
+360 finished solves a minute while stopped, almost all class 0, and the same room solved up to 15 times a minute at
+class 0 without reaching class 2. Callers: the game's dirty-room loop (`0x006C7451`, 445 and 256 while stopped) and
+Apex's `QueueRoom` from `AfterChangedWalk` (the cross-story fan-out after the game's changed walk), `QueueOpeningRooms`,
+`QueueRoomSafe`, `RequeueStory`, `RequeueRoofedDoors`, `RequeueTallWalls` and `AuditTakers`. The cost is rooms
+restarted again and again while the lots near the camera settle, not solves with the camera at rest.
