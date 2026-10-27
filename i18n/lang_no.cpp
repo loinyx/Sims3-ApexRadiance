@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Norwegian (Bokmal)}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "Ytelse: Plass til å lagre spør én gang etter oppdateringen om den skal forbli slått på"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "Ytelse: når du endrer en lampe, blir rom på andre tomter ikke lenger belyst på nytt"},
     {"Night Lights: no more dark squares on lit floors under furniture", "Nattbelysning: ingen mørke firkanter på opplyste gulv under møbler"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Tomtestrømming: tomter som lastes samtidig deler arbeidet, så kameraet hakker mindre"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Nattbelysning: gjerdeskygger på plenen oppdateres på en brøkdel av tiden"},

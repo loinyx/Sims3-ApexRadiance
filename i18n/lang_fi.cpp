@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Finnish}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "Suorituskyky: Tilaa tallentamiselle kysyy päivityksen jälkeen kerran, pidetäänkö se päällä"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "Suorituskyky: lampun muuttaminen ei enää valaise uudelleen muiden tonttien huoneita"},
     {"Night Lights: no more dark squares on lit floors under furniture", "Yövalaistus: ei enää tummia neliöitä valaistulla lattialla huonekalujen alla"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Tonttien suoratoisto: yhtä aikaa latautuvat tontit jakavat työn, joten kamera nykii vähemmän"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Yövalaistus: aitojen varjot nurmikolla päivittyvät murto-osassa ajasta"},

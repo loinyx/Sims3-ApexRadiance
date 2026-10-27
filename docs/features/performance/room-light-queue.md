@@ -9,7 +9,7 @@ frame, once the new light is ready. The final lighting is the game's own.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lamp switches all at once and Quick update for lamp switches (Experimental until 2.15.0), an atrium's stories changing together and the quick return of empty light object removals: Released in 2.7.0. Lamp edits all at once (was *Lamp switches all at once*; every lamp edit, the lamp's own story shown first) and shorter waits for an edit's rooms: Released in 2.12.3. Classic: show all floors together (Lamp lighting Classic): Released in 2.13.0. Automatic lamps first and the step budget of the extra solves: Released in 2.14.0 |
+| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lamp switches all at once and Quick update for lamp switches (Experimental until 2.15.0), an atrium's stories changing together and the quick return of empty light object removals: Released in 2.7.0. Lamp edits all at once (was *Lamp switches all at once*; every lamp edit, the lamp's own story shown first) and shorter waits for an edit's rooms: Released in 2.12.3. Classic: show all floors together (Lamp lighting Classic): Released in 2.13.0. Automatic lamps first and the step budget of the extra solves: Released in 2.14.0. A lamp edit resends only its own lot's rooms near openings: Released in 2.17.0 |
 | Default | On |
 | Menu | System > Performance > Camera and lighting > *Faster room lighting* |
 | Configuration | `[patches.RoomLightQueue]` in `ApexRadiance.toml` |

@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Traditional, Taiwan / Hong Kong)}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "效能：更新後，「存檔空間」會詢問一次是否保持開啟"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "效能：變更燈具後，不再重新計算其他地段房間的光照"},
     {"Night Lights: no more dark squares on lit floors under furniture", "夜間照明：照亮的地板上，家具下方不再出現暗色方塊"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "地段串流：同時載入的地段分擔工作，移動鏡頭時卡頓更少"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "夜間照明：草坪上柵欄陰影的更新只需原本的一小部分時間"},
