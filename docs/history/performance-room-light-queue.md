@@ -326,3 +326,9 @@ less than 0.00001 and its normalisation and ambient changed: the room fill and t
 last solve and settle over a few solves. The prediction now includes the room's own last result, so a room is predicted
 only once two of its solves agree. The signature cost 50 to 80 us and ran 459 to 1401 times a minute; the sends came from
 lamp edits, settle rounds, floors counted, floor edits and rebuilt lots, none dominant.
+
+**Eighth session (2026-10-27, the final proof and the outcome):** with the room's own last result as an input, 26
+predicted sends were re-solved and none wrote different texels, so the prediction is sound. It predicted 75 of 1763
+sends (4 %), and the signature ran thousands of times a minute at 50 to 80 us, more frame time than the skipped solves
+would save: `opening_skip` and its signature were removed. The same minute showed the real waste: each lamp edit made
+every lot send its rooms near openings again (147 edits sent 1053 rooms), although only the edited lamp's lot changed.

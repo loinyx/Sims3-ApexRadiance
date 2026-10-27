@@ -108,39 +108,6 @@ int main() {
     Check(Has(line, "QueueRoom from 0x00700000") && Has(line, "undone solves redone same/different/other class/not hashed 1/0/0/0"),
           "the same re-solve booked to the caller of the first undo");
     Check(Has(line, "undone solves redone same/different/other class/not hashed 0/1/1/1"), "the game's caller: different, other class, not hashed");
-    Check(Has(line, "of them predicted unchanged same 0, different 0, other class 0, not hashed 0"), "no prediction: none counted apart");
-    // predictions (opening_skip_check): an undo announced as changing nothing is counted apart by its outcome
-    const uintptr_t e = 0xB400000, f = 0xB500000;
-    solve(e, 2, lit, 500000);
-    NotePrediction(e);
-    NoteInvalidate(0x00700000, false, true, e, 3, 500100, kSolved);
-    solve(e, 2, lit, 500200);                                          // predicted and the same
-    solve(f, 2, lit, 500000);
-    NotePrediction(f);
-    NoteInvalidate(0x00700000, false, true, f, 4, 500100, kSolved);
-    solve(f, 2, other, 500200);                                        // predicted but different: the case that must stay 0
-    solve(e, 2, lit, 500300);
-    NoteInvalidate(0x00700000, false, true, e, 3, 500400, kSolved);   // not predicted this time
-    solve(e, 2, lit, 500500);
-    // the diagnostics of a predicted undo that solved differently: texels compared one by one
-    const uintptr_t g = 0xB600000;
-    const float lit2[3] = {0.5f, 0.75f, 0.125f};
-    SolveStart(g);
-    SolveTexel(g, pos, lit);
-    SolveTexel(g, pos, lit);
-    SolveEnd(g, 2, pack, 4, 500000);
-    NotePrediction(g);
-    NoteInvalidate(0x00700000, false, true, g, 5, 500100, kSolved);
-    SolveStart(g);
-    SolveTexel(g, pos, lit);
-    SolveTexel(g, pos, lit2);
-    const Diff dg = SolveEnd(g, 2, pack, 4, 500200);
-    Check(dg.predicted && dg.outcome == 1 && dg.texels == 2 && dg.before == 2 && dg.differing == 1 && dg.largest > 0.49f && dg.largest < 0.51f &&
-              dg.positionsSame && dg.packingSame,
-          "a predicted undo that changed: one texel of two, by 0.5 in one channel, positions and packing the same");
-    Check(Frame(false, 560000, &line), "a sixth line");
-    Check(Has(line, "same 2, different 2") && Has(line, "of them predicted unchanged same 1, different 2, other class 0, not hashed 0"),
-          "predictions counted by outcome; an unpredicted undo is not");
     std::printf(g_fail ? "%d checks FAILED\n" : "Room solve causes: all checks passed\n", g_fail);
     return g_fail ? 1 : 0;
 }
