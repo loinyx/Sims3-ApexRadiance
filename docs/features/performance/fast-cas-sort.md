@@ -89,6 +89,9 @@ sort. This changes no triangle counts or tie ordering.
 
 - Attributing the CAS hitches to FUN_005d1010 from sampler data: the sampler's function-start guess booked FUN_005d1960's
   samples to it. See [history](../../history/performance-fast-cas-sort.md).
+- Reading the texture compositor's tiles back in a later frame (`features/compositor_readback.cpp`, not started): the
+  same bytes without the GPU wait, but one tile per frame, so Sim and object textures built more slowly
+  ([history](../../history/performance-fast-cas-sort.md)).
 
 ## See also
 

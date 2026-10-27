@@ -23,3 +23,24 @@ thread start included).
 
 **Pitfall kept for the sampler:** a function key of the form "fn~ADDRESS" is a guess; confirm with the stack's return
 addresses before attributing time to it.
+
+### 2026-10-05 and 2026-10-27: texture compositor readback without the GPU wait
+
+**Context:** in the 2.16.2 Frame Profiler reports, 5 to 6 % of the render thread's samples in ordinary frames wait in
+`SleepConditionVariableSRW` under the game's texture lock `0x00618DF0` (return `0x00618E5E`). The stacks hold
+`0x005FDCB7`, `0x005FDE42`, `0x005FDFF1` and `0x006082FD`: the texture compositor's queue loop `0x00608270`, its
+state 2 `0x005FDDE0` and `0x005FDBF0`, which copies the rendered tile into the builder's system-memory texture
+(`GetRenderTargetData` in `0x005FBCE0`) and locks it at once (`0x005FDCB2`). The room solve's locks (`0x0069FAD9` and
+the next four) and the wall ambient occlusion lock are not in those stacks. In DXVK 3.1.1, `GetRenderTargetData` marks
+the system-memory texture for read-back (`SetNeedsReadback`), and `LockImage` then copies and waits for that copy,
+behind every command recorded before it; `D3DLOCK_DONOTWAIT` is removed by DXVK.
+
+**Tried (2026-10-05, `features/compositor_readback.cpp`, part of Faster Sim building):** after the tile's copy, an
+EVENT query was issued and the queue stopped for the frame; the lock ran in state 3 of a later frame once the query
+signalled. The bytes read are the game's. In game the textures of Sims and objects built more slowly: the queue only
+works on its head builder, each tile is used before the next is rendered, so every deferred tile ended the queue's
+time slice and the compositor finished one tile per frame instead of several.
+
+**Outcome:** the part stays in the code, not started (commit `e62887c`). Two tiles in flight would need a second staging
+texture and the use of tile k (`0x005FD420`) after the render of tile k+1, an order the game's state machine does not
+have. Moving the lock within the frame does not shorten the wait, which covers everything recorded before the copy.
