@@ -311,3 +311,8 @@ same class with the same hash, 73 with a different one and 41 not hashed. By cal
 1 and 7. Most of `QueueOpeningRooms`' requeues of finished rooms rewrite what the room already shows, but about 8 % do
 not, so skipping them all would change the lighting; a skip needs a test that tells the two apart (the lamps the room saw
 near the openings and the openings themselves, as `AuditTakers` compares them) and a new proof.
+
+**Sixth session (2026-10-27, the opening-send prediction):** of 464 rooms near openings sent in three minutes, 135 were
+predicted unchanged; their next solves of the same class wrote the same texels 65 times and different ones 2 times, so
+`opening_skip` stays off. The prediction then also reads the light manager's night and manmade levels (`+0xF0` / `+0xF4`)
+and the hash of every other room's last solve (the bounce through openings and the room fill read other rooms' light).

@@ -7762,7 +7762,9 @@ void ShareIndoorLights(BYTE* treeLevel, BYTE* room) {
 // to solve again, also rooms already solved; in game most of those re-solves rewrote the same texels
 // (docs/history/performance-room-light-queue.md). What such a solve reads that those sends follow, hashed: the light options
 // (PhysicsKey), the lot's geometry (LotGeometryKey), every lamp registered on any story of the lot (the fields
-// RoomLampSignature compares, with its room), and every other room's ambient (+0x110), normalisation (+0x160) and boost.
+// RoomLampSignature compares, with its room), every other room's ambient (+0x110), normalisation (+0x160), boost and the
+// hash of what its last solve wrote (the bounce through openings and the room fill read the light of other rooms), and the
+// light manager's night and manmade levels (+0xF0 / +0xF4: the ambient and every lamp's fade follow them).
 // The lamps and rooms are summed, so the order of the game's maps does not matter. A room whose finished solve began and
 // ended with the inputs it has now is predicted to solve to the same texels again.
 uint64_t EntryHash(uintptr_t entry) {
@@ -7812,12 +7814,18 @@ uint64_t OpeningInputs(const BYTE* room) {
                 mix(static_cast<uint32_t>(rid));
                 for (int k = 0; k < 4; k++) mix(*reinterpret_cast<const uint32_t*>(other + (k < 3 ? 0x110 + k * 4 : 0x160)));
                 mix(Boosted(reinterpret_cast<uintptr_t>(other), rid, m) ? 1u : 0u);
+                mix(RoomSolveCauses::LastHash(reinterpret_cast<uintptr_t>(other)));
                 rooms += r;
             }
         }
     }
     h = (h ^ lamps) * 1099511628211ull;
     h = (h ^ rooms) * 1099511628211ull;
+    const uintptr_t root = kRootPtr ? *reinterpret_cast<const uintptr_t*>(kRootPtr) : 0;
+    const uintptr_t lightMgr = root ? *reinterpret_cast<const uintptr_t*>(root + 0x1C0) : 0;
+    if (!lightMgr) return 0;
+    h = (h ^ *reinterpret_cast<const uint32_t*>(lightMgr + 0xF0)) * 1099511628211ull;
+    h = (h ^ *reinterpret_cast<const uint32_t*>(lightMgr + 0xF4)) * 1099511628211ull;
     return h ? h : 1;
 }
 struct OpeningSig {
