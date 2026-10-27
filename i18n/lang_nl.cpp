@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Dutch}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "Prestaties: Ruimte om op te slaan vraagt na de update één keer of het aan moet blijven"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "Prestaties: een lamp aanpassen belicht kamers op andere kavels niet meer opnieuw"},
     {"Night Lights: no more dark squares on lit floors under furniture", "Nachtverlichting: geen donkere vierkanten meer op verlichte vloeren onder meubels"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Kavelstreaming: kavels die samen laden verdelen het werk, zodat de camera minder hapert"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Nachtverlichting: schaduwen van hekken op het gazon worden in een fractie van de tijd bijgewerkt"},

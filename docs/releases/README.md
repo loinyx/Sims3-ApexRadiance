@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [2.17.0](2.17.0.md): a lamp edit relights only its own lot, a one-time Room to save question, a measured memory map.
 - [2.16.3](2.16.3.md): a hotfix against dark squares on lit floors under furniture.
 - [2.16.2](2.16.2.md): smoother lot streaming, lot visibility and throttle fixes, cheaper fence shadows.
 - [2.16.1](2.16.1.md): a hotfix against old lamp light staying on the ground.
@@ -48,6 +49,7 @@ tests, publication) is in [workflow.md](../workflow.md#6-release).
 
 | Version | Published | Headline |
 |---|---|---|
+| [2.17.0](2.17.0.md) | — | Lamp edits stay on their own lot |
 | [2.16.3](2.16.3.md) | 2026-10-27 | No more dark squares on lit floors under furniture |
 | [2.16.2](2.16.2.md) | 2026-10-27 | Smoother panning as the neighbourhood fills in |
 | [2.15.6](2.15.6.md) | — | Continuous winter terrain light and less repeated lighting work |

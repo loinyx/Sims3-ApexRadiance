@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Greek}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "Επιδόσεις: ο Χώρος για αποθήκευση ρωτά μία φορά, μετά την ενημέρωση, αν θα μείνει ενεργός"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "Επιδόσεις: η αλλαγή μιας λάμπας δεν φωτίζει πια ξανά δωμάτια σε άλλα οικόπεδα"},
     {"Night Lights: no more dark squares on lit floors under furniture", "Νυχτερινός φωτισμός: όχι πια σκοτεινά τετράγωνα στο φωτισμένο πάτωμα κάτω από τα έπιπλα"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Ροή Οικοπέδων: τα οικόπεδα που φορτώνουν μαζί μοιράζονται τη δουλειά και η κάμερα κολλάει λιγότερο"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Νυχτερινός φωτισμός: οι σκιές των φραχτών στο γκαζόν ενημερώνονται σε ελάχιστο χρόνο"},

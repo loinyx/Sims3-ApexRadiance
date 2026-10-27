@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Japanese}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "パフォーマンス：アップデート後に一度だけ「セーブ用の余裕」をオンのままにするか確認します"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "パフォーマンス：ランプを変更しても、ほかの区画の部屋は再計算されなくなりました"},
     {"Night Lights: no more dark squares on lit floors under furniture", "夜間照明：照らされた床の家具の下に暗い四角が出なくなりました"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "区画ストリーミング：同時に読み込む区画が作業を分け合い、カメラ移動時のカクつきが減ります"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "夜間照明：芝生に落ちるフェンスの影の更新がずっと速くなります"},

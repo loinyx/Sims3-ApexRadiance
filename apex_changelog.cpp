@@ -6,6 +6,13 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k2170Added[] = {
+    "Performance: Room to save asks once, after updating, whether to keep it on",
+    nullptr};
+constexpr const char* k2170Improved[] = {
+    "Performance: changing a lamp no longer relights rooms on other lots",
+    nullptr};
+
 constexpr const char* k2163Fixed[] = {
     "Night Lights: no more dark squares on lit floors under furniture",
     nullptr};
@@ -400,6 +407,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"2.17.0", "2026-10-27", k2170Added, k2170Improved, nullptr},
     {"2.16.3", "2026-10-27", nullptr, nullptr, k2163Fixed},
     {"2.16.2", "2026-10-27", nullptr, k2162Improved, k2162Fixed},
     {"2.16.1", "2026-10-27", k2161Empty, k2161Empty, k2161Fixed},
