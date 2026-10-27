@@ -1706,9 +1706,9 @@ void ResolveTarget(int i) {
         }
         const uintptr_t call = a + static_cast<uintptr_t>(ti.callOffset);
         const uintptr_t callee = GameAddr::Get(ti.calleeId);
-        // The scene drain's CALL is shared with the scene node budget through framework/call_chain.h, which checks where
-        // the CALL goes itself (it may already reach the budget's hook)
-        if (i == T_SceneDrain) {
+        // The scene drain's CALL is shared with the scene node budget, and the load stages' CALL with the shared lot build
+        // time, through framework/call_chain.h, which checks where the CALL goes itself (it may already reach a hook)
+        if (i == T_SceneDrain || i == T_LotLoadStages) {
             if (*reinterpret_cast<const uint8_t*>(call) != 0xE8 || !callee) {
                 st.status = std::format("Skipped: no CALL at {:#010x}", call);
                 return;
