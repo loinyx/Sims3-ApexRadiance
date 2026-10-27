@@ -1157,7 +1157,7 @@ void LotStreamingCards() {
             CardNote("Handled by Sims3SettingsSetter: Apex leaves the same streaming settings untouched");
 
         const bool visibilityOn = FeatureSwitchRow(Performance::kLotVisibilityOverrideName, "Keep lot visibility stable",
-                                                   "The camera's viewing angle alone no longer makes lots load or unload", true);
+                                                   "Lots in full detail keep it a little farther, so lots at the edge stop switching back and forth", true);
         if (visibilityOn && Performance::LotVisibilityOverrideHandledByS3SS())
             CardNote("Handled by Sims3SettingsSetter: Apex leaves the lot visibility override untouched");
         else if (visibilityOn && Performance::LotVisibilityOverrideAlreadyExternal())
