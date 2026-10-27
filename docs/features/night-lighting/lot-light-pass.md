@@ -270,6 +270,13 @@ tile off; `NoteGate`, from `DrawObjectLamp`, rig modes 1 and 2), fills it with a
 top of the two pieces. A gate stays while its gap does; it goes only when it has not been drawn for 30 s while the fence
 on both sides was drawn in the last 2 s, so off screen it stays closed. Gaps narrower than 0.4 m (a post, pieces a few
 cm short) are always closed. Developer builds log the gaps, the gates and the objects near a gap that were not taken.
+The fence grid is built again whenever a fence group changes, which happens often while the camera pans; its piece
+lengths and end distances use `ApexMath::Hypot` ([`features/fast_math.h`](../../../features/fast_math.h)), a double
+`sqrtsd` of the exact squares, instead of `std::hypot`, whose x87 CRT path sets and restores the FPU control word on
+every call (`__ctrlfp` and `__hypothlp` were the hottest Apex samples of the "Render frame (game)" hitches). The results
+are the same bits. The half-float vertex and texture reads (`ReadElement`, the light probe, the outdoor delta) scale by
+`Pow2` ([`features/half_float.h`](../../../features/half_float.h)) instead of `std::ldexp` for the same reason, with the
+same bits.
 
 **Tree and bush crowns** (2.14.0). The crowns seen in the night foliage draws are porous occluders of the same mask: a
 lamp's ray through a crown keeps exp(-k u s) of its light, so the shade under a tree is soft and partial

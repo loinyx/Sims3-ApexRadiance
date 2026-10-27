@@ -11,7 +11,7 @@ function Block([string]$source,[string]$name) {
     if(-not $m.Success) { throw ('Production block missing: '+$name) }
     return $m.Value
 }
-$blocks=@((Block $lot 'uint64_t GapKey'), ((Block $lot 'void FenceGapsBuild').Replace('std::hypot','CountedHypot')))
+$blocks=@((Block $lot 'uint64_t GapKey'), ((Block $lot 'void FenceGapsBuild').Replace('ApexMath::Hypot','CountedHypot')))
 $start=$share.IndexOf('struct StoryMapSlot {')
 $end=$share.IndexOf('// The drawn ambient',$start)
 if($start -lt 0 -or $end -lt 0) { throw 'Map slot block missing' }

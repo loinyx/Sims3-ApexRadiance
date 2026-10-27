@@ -171,3 +171,18 @@ to the production profile ps_3_0 (`0c418a6`).
 Weather terrain can bind its light map below the earlier sampler range, while the compact pass can use another
 validated vertex layout. The renderer identifies the consumed map and excludes weather masks, then retains the
 runtime dimension and mapping checks. Unsupported dense paths keep their existing capacity fallback.
+
+### 2026-10-27: CRT control-word calls in the fence grid and half-float reads
+
+**Context:** a Frame Profiler session on 2.16.2-dev.1 (7417 frames, 461 hitches), its render-thread samples resolved with
+the build's map file.
+
+**Finding:** `__ctrlfp` was the hottest Apex function in the hitch samples (329 samples), with `__hypothlp` and
+`__hypotf` (112); in the hitches dominated by "Render frame (game)" they made most of the Apex samples, beside
+`FenceGapsBuild`. In that binary `__ctrlfp` is reached only from `_ldexp` (the half-float decoders `ReadElement`,
+`HalfToFloat`, `FromHalf`) and from `_hypot` (only caller: `FenceGapsBuild`); `floor` and `ceil` take the SSE4.1 path.
+Both CRT functions save and restore the x87 control word on every call.
+
+**Outcome:** `ApexMath::Hypot` (float squares are exact in double; one sum and one `sqrtsd`) and `Pow2` (a half is
+m x 2^k) replace them with the same bits ([validation](../validation/night-lighting-lot-light-pass.md)). No lighting
+result changes.

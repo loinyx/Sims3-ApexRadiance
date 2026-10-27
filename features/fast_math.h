@@ -57,6 +57,13 @@ __forceinline bool IsNaN(float x) {
     std::memcpy(&b, &x, sizeof b);
     return (b & 0x7FFFFFFFu) > 0x7F800000u;
 }
+// == std::hypot(float, float): the CRT's hypotf goes through the x87 _hypot, which sets and restores the FPU control word
+// on every call (__ctrlfp). The squares of two floats are exact in double, so one rounded sum and one correctly rounded
+// sqrtsd give the same float (no difference over 262 million pairs, random bit patterns included: tools/crt_math_test).
+__forceinline float Hypot(float x, float y) {
+    const double s = static_cast<double>(x) * x + static_cast<double>(y) * y;
+    return static_cast<float>(_mm_cvtsd_f64(_mm_sqrt_sd(_mm_setzero_pd(), _mm_set_sd(s))));
+}
 // Only for float: a double or integer argument would be narrowed (or promoted) and give other results than std::
 template <typename T> float Floor(T) = delete;
 template <typename T> float Ceil(T) = delete;
@@ -64,5 +71,6 @@ template <typename T> int FloorToInt(T) = delete;
 template <typename T> int CeilToInt(T) = delete;
 template <typename T> bool IsFinite(T) = delete;
 template <typename T> bool IsNaN(T) = delete;
+template <typename T, typename U> float Hypot(T, U) = delete;
 
 } // namespace ApexMath

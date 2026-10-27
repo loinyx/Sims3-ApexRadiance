@@ -4,6 +4,7 @@
 #define NOMINMAX
 #endif
 #include "light_probe.h"
+#include "half_float.h"
 #include "captures.h"
 #include "build_flavor.h"
 #include "ui/i18n.h"
@@ -232,9 +233,9 @@ std::string FmtStr(D3DFORMAT f) {
 float HalfToFloat(uint16_t h) {
     const uint32_t s = (h >> 15) & 1, e = (h >> 10) & 0x1F, m = h & 0x3FF;
     float v;
-    if (e == 0) v = std::ldexp(static_cast<float>(m), -24);
+    if (e == 0) v = static_cast<float>(m) * Pow2(-24);
     else if (e == 31) v = m ? NAN : INFINITY;
-    else v = std::ldexp(static_cast<float>(m | 0x400), static_cast<int>(e) - 25);
+    else v = static_cast<float>(m | 0x400) * Pow2(static_cast<int>(e) - 25);
     return s ? -v : v;
 }
 
@@ -522,7 +523,7 @@ std::vector<std::array<float, 4>> ReadPositions(IDirect3DDevice9* dev, UINT firs
                     for (int k = 0; k < 4; k++) {
                         const uint16_t h = reinterpret_cast<const uint16_t*>(v)[k];
                         const int e = (h >> 10) & 31, m = h & 1023;
-                        const float val = e == 0 ? m / 1024.0f / 16384.0f : std::ldexp(1.0f + m / 1024.0f, e - 15);
+                        const float val = e == 0 ? m / 1024.0f / 16384.0f : (1.0f + m / 1024.0f) * Pow2(e - 15);
                         f[k] = (h & 0x8000) ? -val : val;
                     }
                     break;
