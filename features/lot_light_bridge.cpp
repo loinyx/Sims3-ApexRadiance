@@ -6718,7 +6718,7 @@ template <typename DrawFn> bool DrawWallGain(IDirect3DDevice9* dev, DrawFn draw)
     // it shows it (a copy of the shader multiplies the atlas read by it; the bloom pass keeps the game's shader)
     IDirect3DTexture9* scale = nullptr;
     PatchedPs* sp = nullptr;
-    if (RtOutdoorLamps::Enabled()) {
+    if (RtOutdoorLamps::Enabled() && g_night.load(std::memory_order_relaxed) > 0.0f) { // (by day lamps are off: the wall as before)
         sp = &PatchedFor(dev, g_wallScalePs, "Outside wall (outdoor scale)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchWallScale(t, pp.wall); });
         if (sp->ps) {
             IDirect3DBaseTexture9* map = nullptr;

@@ -99,6 +99,11 @@ void Resolve(IDirect3DDevice9* dev, Cause cause) {
     dev->GetVertexDeclaration(&decl);
     dev->GetFVF(&fvf);
     dev->GetStreamSource(0, &stream0, &offset0, &stride0);
+    // (a resolve at a copy or at the scene's end can come while the game's instancing is set: DrawPrimitiveUP needs both
+    // streams at frequency 1)
+    UINT freq0 = 1, freq1 = 1;
+    if (FAILED(dev->GetStreamSourceFreq(0, &freq0))) freq0 = 1;
+    if (FAILED(dev->GetStreamSourceFreq(1, &freq1))) freq1 = 1;
     D3D9Hooks::GetBoundTexture(dev, 0, &tex0);
     for (size_t i = 0; i < std::size(kStates); i++) dev->GetRenderState(kStates[i], &rs[i]);
     for (size_t i = 0; i < std::size(kSamplerStates); i++) dev->GetSamplerState(0, kSamplerStates[i], &ss[i]);
@@ -117,6 +122,8 @@ void Resolve(IDirect3DDevice9* dev, Cause cause) {
     D3D9Hooks::CallOriginalSetPixelShader(dev, g_ps);
     D3D9Hooks::CallOriginalSetTexture(dev, 0, g_tex);
     dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
+    if (freq0 != 1) dev->SetStreamSourceFreq(0, 1);
+    if (freq1 != 1) dev->SetStreamSourceFreq(1, 1);
     const float x1 = static_cast<float>(g_w) - 0.5f, y1 = static_cast<float>(g_h) - 0.5f;
     const QuadVertex quad[4] = {{-0.5f, -0.5f, 0, 1, 0, 0}, {x1, -0.5f, 0, 1, 1, 0}, {-0.5f, y1, 0, 1, 0, 1}, {x1, y1, 0, 1, 1, 1}};
     dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(QuadVertex));
@@ -128,6 +135,8 @@ void Resolve(IDirect3DDevice9* dev, Cause cause) {
     if (decl) dev->SetVertexDeclaration(decl);
     else dev->SetFVF(fvf);
     dev->SetStreamSource(0, stream0, offset0, stride0); // DrawPrimitiveUP cleared stream 0
+    if (freq0 != 1) dev->SetStreamSourceFreq(0, freq0);
+    if (freq1 != 1) dev->SetStreamSourceFreq(1, freq1);
     for (size_t i = 0; i < std::size(kStates); i++) dev->SetRenderState(kStates[i], rs[i]);
     for (size_t i = 0; i < std::size(kSamplerStates); i++) dev->SetSamplerState(0, kSamplerStates[i], ss[i]);
     for (DWORD i = 1; i < 4; i++)

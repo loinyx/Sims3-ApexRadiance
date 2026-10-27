@@ -325,7 +325,7 @@ float MaskAll(float3 P) {
     return all;
 }
 // COLOR1: the outdoor scale (rt_outdoor_lamps.h ScaleOf), the factor KeepHue took off the sum: log2(largest channel) / 3 in
-// 8 bits (1 to 8 times, 0.8 % a level), 0 within 1. Bound only on maps the draws multiply back (no wall blur)
+// 8 bits (1 to 8 times, 0.8 % a level), 0 within 1. A blurred atlas's goes through a scratch map (RtLampGpu::ComposeImpl)
 struct ComposeOut {
     float4 c : COLOR0;
     float4 k : COLOR1;

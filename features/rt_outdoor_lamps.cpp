@@ -409,7 +409,7 @@ struct Slot {
     const BYTE* room = nullptr;
     IDirect3DTexture9* game = nullptr; // the room's own map (AddRef'd while kept)
     IDirect3DTexture9* copy = nullptr; // DEFAULT render target: what the draws read instead
-    IDirect3DTexture9* scale = nullptr; // DEFAULT render target: each texel's outdoor scale (maps with no blur; ScaleOf)
+    IDirect3DTexture9* scale = nullptr; // DEFAULT render target: each texel's outdoor scale (ScaleOf; a blurred atlas's not blurred)
     bool scaled = false;                // the last relight wrote it
     IDirect3DVertexBuffer9 *vb = nullptr, *dyn = nullptr;
     IDirect3DVertexBuffer9* dynNext = nullptr; // the other floor mask buffer: a write fills the one the last draws did not read
@@ -2039,7 +2039,7 @@ void OnPresent(IDirect3DDevice9* dev) {
         if (SUCCEEDED(dev->GetDeviceCaps(&caps))) {
             g_ps3 = caps.PixelShaderVersion >= D3DPS_VERSION(3, 0) && caps.VertexShaderVersion >= D3DVS_VERSION(3, 0) ? 1 : 0;
             g_mrt = caps.NumSimultaneousRTs >= 2 ? 1 : 0;
-            if (!g_mrt) LOG_INFO("[RtOutdoorLamps] The device draws into one render target at a time: outdoor light stays cut at 1");
+            if (!g_mrt) LOG_INFO("[RtOutdoorLamps] The device draws into one render target at a time: outdoor light past 1 is not shown");
             if (!g_ps3) LOG_WARNING("[RtOutdoorLamps] The device has no shader model 3: Instant lamp lighting cannot run");
         }
     }

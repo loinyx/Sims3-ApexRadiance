@@ -3250,7 +3250,9 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
                 body.insert(body.end(), {Op(kMad, 4), Dst(kTemp, Acc), Src(kTemp, C0 + k),
                                          Src(kTemp, R, Sw(static_cast<int>(k), static_cast<int>(k), static_cast<int>(k), static_cast<int>(k))), Src(kTemp, Acc)});
         }
-        body.insert(body.end(), {Op(kRcp, 2), Dst(kTemp, A, 0x1), Src(kTemp, A, X),
+        body.insert(body.end(), {Op(kMax, 3), Dst(kTemp, A, 0x1), Src(kTemp, A, X), Src(kConst, cG, X), // (the own texel's weight is 0.23 or more; a
+                                 // texel outside the taps' wall block can leave none: 0, not 0 / 0)
+                                 Op(kRcp, 2), Dst(kTemp, A, 0x1), Src(kTemp, A, X),
                                  Op(kMul, 3), Dst(kTemp, Acc), Src(kTemp, Acc), Src(kTemp, A, X),
                                  Op(kCmp, 4), Dst(kTemp, r.L), Neg(Src(kTemp, A, W)), Src(kTemp, Acc), Src(kTemp, r.L)}); // the own side's read
     }

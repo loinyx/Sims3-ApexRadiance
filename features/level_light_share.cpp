@@ -12762,7 +12762,8 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
             const float ndl = d > 1e-4f ? plane / d : 1.0f;
             const float raised = GpuLampLaw::MountedNdl(ndl, plane, normal[1]);
             if (raised > ndl && ndl > 1e-3f) {
-                const float k = raised / ndl;
+                // (at most 8 times: the law's Cmax cut, already in the game's colour, is not redone here)
+                const float k = std::min(raised / ndl, 8.0f);
                 for (int i = 0; i < 3; i++) colour[i] *= k;
                 ApexUtil::CountOne(g_mountRaised);
             }

@@ -265,7 +265,7 @@ void SummerFloors(Gpu& gpu, const std::vector<Blob>& blobs, const std::vector<Te
         for (auto [vs, ps] : t.passes)
             if (ps >= 1 && ps <= blobs.size() && vs >= 1 && vs <= blobs.size()) vsOf[ps].insert(vs);
     std::set<uint32_t> tableHashes;
-    int found = 0, pairs = 0, shaded = 0, accepted = 0, maxSlots = 0, noRoom = 0, exitN = 0, exitMaxSlots = 0;
+    int found = 0, pairs = 0, shaded = 0, accepted = 0, maxSlots = 0, noRoom = 0, exitN = 0, exitMaxSlots = 0, scaled = 0;
     std::map<int, int> tcCount, wkCount;
     std::map<uint32_t, int> vsTc; // vs index -> TEXCOORD of its copy (-1 none)
     for (size_t i = 0; i < blobs.size(); i++) {
@@ -316,6 +316,15 @@ void SummerFloors(Gpu& gpu, const std::vector<Blob>& blobs, const std::vector<Te
                 }
             }
             Check(fn.shadeSampler == -1 && fn.shadeConst == -1, "summer floor: no shade fields without the shade");
+            // the outdoor scale: one sampler and one constant after every other the copy may take, the same in each variant;
+            // none when that sampler would pass s15 (the floor keeps the cut at 1)
+            const bool scaleRoom = fa.atlasSampler + 2 <= 15;
+            Check(fn.outScaleSampler == fa.outScaleSampler && fn.outScaleConst == fa.outScaleConst &&
+                      (scaleRoom ? fa.outScaleSampler == static_cast<int>(fa.atlasSampler) + 2 && fa.outScaleConst == fa.heightConst + 6 &&
+                                       fa.mapSampler != static_cast<DWORD>(fa.outScaleSampler)
+                                 : fa.outScaleSampler == -1 && fa.outScaleConst == -1),
+                  "summer floor: the outdoor scale's sampler and constant follow the atlas, shade and indoor light registers");
+            if (scaleRoom) scaled++;
             Check(fa.atlasSampler == fn.atlasSampler && fa.atlasConst == fn.atlasConst && fa.heightConst == fn.heightConst && fa.scaleConst == fn.scaleConst &&
                       fa.maskAlpha == fn.maskAlpha,
                   "summer floor: the shade leaves the atlas, weight and scale registers alone");
@@ -341,8 +350,8 @@ void SummerFloors(Gpu& gpu, const std::vector<Blob>& blobs, const std::vector<Te
         }
     }
     Check(found == static_cast<int>(std::size(kFloorAtlasTable)), "summer floor: every table entry is in the precomp");
-    std::printf("  table shaders found %d, (shader, TEXCOORD) pairs %d, patched %d, shaded %d (no sampler to spare %d), most slots %d; TEXCOORD:", found, pairs,
-                accepted, shaded, noRoom, maxSlots);
+    std::printf("  table shaders found %d, (shader, TEXCOORD) pairs %d, patched %d, shaded %d (no sampler to spare %d), with the outdoor scale %d, most slots %d; TEXCOORD:",
+                found, pairs, accepted, shaded, noRoom, scaled, maxSlots);
     for (auto [tc, n] : tcCount) std::printf(" %d x%d", tc, n);
     std::printf("; vertex shader copies' world rows from:");
     for (auto [wk, n] : wkCount) std::printf(" c%d x%d", wk, n);
