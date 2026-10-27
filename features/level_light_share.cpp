@@ -6235,6 +6235,7 @@ struct ExitLamp {
 using ExitMap = std::unordered_map<uintptr_t, ExitLamp>;
 std::mutex g_exitMx;
 std::shared_ptr<const ExitMap> g_exitSnap;
+std::atomic<uint32_t> g_exitGen{1}; // moved whenever g_exitSnap is replaced (under g_exitMx): part of LampVisibilityState
 std::unordered_map<uintptr_t, std::pair<ExitLamp, std::vector<uintptr_t>>> g_exitTakers; // gather thread: light -> (its record, the rooms taking it)
 std::atomic<long> g_exitPublished{0}, g_exitTests{0}, g_exitBlocked{0};
 std::shared_ptr<const ExitMap> ExitSnap() {
@@ -6267,6 +6268,7 @@ void NoteExitLamps(uintptr_t room, const std::vector<std::pair<uintptr_t, ExitLa
     {
         std::lock_guard<std::mutex> lk(g_exitMx);
         g_exitSnap = std::move(next);
+        g_exitGen.fetch_add(1, std::memory_order_relaxed);
     }
     g_exitPublished.fetch_add(1, std::memory_order_relaxed);
 }
@@ -6768,6 +6770,7 @@ void ClearInnerState() { // MaybeClearRooms (a new world): light tree thread
     g_exitTakers.clear();
     std::lock_guard<std::mutex> lk(g_exitMx);
     g_exitSnap.reset();
+    g_exitGen.fetch_add(1, std::memory_order_relaxed);
 }
 void ClearRoofedState() { // MaybeClearRooms (a new world): light tree thread
     g_roofedLogged.clear();
@@ -15701,16 +15704,18 @@ uint64_t LampVisibilityState() {
     uint32_t rb;
     std::memcpy(&rb, &r, 4);
     const uint32_t wall = g_wallSnapGen.load(std::memory_order_relaxed), floor = g_floorSnapGen.load(std::memory_order_relaxed);
+    // (the lamps shining out of a house: ExitLampVisibility reads only the snapshot g_exitGen names, which is never changed in place)
+    const uint32_t exits = g_exitGen.load(std::memory_order_relaxed);
     const uint32_t flags = (g_objectWallsOn.load(std::memory_order_relaxed) ? 1u : 0u) | (g_installed.load(std::memory_order_relaxed) ? 2u : 0u) |
                            (Penumbra::g_on.load(std::memory_order_relaxed) ? 4u : 0u);
     // (2.15.3) asked twice per lamp per object draw: the last value while its inputs are the same (the 64-bit multiply is a
     // CRT call, __allmul, on x86)
-    thread_local uint32_t t_wall = ~0u, t_floor = ~0u, t_rb = ~0u, t_flags = ~0u;
+    thread_local uint32_t t_wall = ~0u, t_floor = ~0u, t_rb = ~0u, t_flags = ~0u, t_exits = ~0u;
     thread_local uint64_t t_state = 0;
-    if (wall == t_wall && floor == t_floor && rb == t_rb && flags == t_flags) return t_state;
+    if (wall == t_wall && floor == t_floor && rb == t_rb && flags == t_flags && exits == t_exits) return t_state;
     uint64_t s = (uint64_t(wall) * 1099511628211ull) ^ (uint64_t(floor) << 21) ^ (uint64_t(rb) << 7);
-    s ^= flags;
-    t_wall = wall, t_floor = floor, t_rb = rb, t_flags = flags, t_state = s;
+    s ^= flags ^ (uint64_t(exits) * 0xC2B2AE3D27D4EB4Full);
+    t_wall = wall, t_floor = floor, t_rb = rb, t_flags = flags, t_exits = exits, t_state = s;
     return s;
 }
 bool VisibilityDiagArmed() { return g_diagArmed.load(std::memory_order_relaxed); } // F8 records each test: no memo then

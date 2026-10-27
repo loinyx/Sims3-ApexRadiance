@@ -219,8 +219,9 @@ Reached from `OnDrawInner` when the VS is class 7, after the *Street lamps light
 cones and reach rows, the highest atlas lamp head and the ground share) is kept in 256 direct-mapped entries keyed by
 the group's entry, the generation of its positions (moved at every read of them) and the law, with the rules of the
 outdoor objects' pick memo: an entry is valid while the lamp list (`g_lampMemoGen`) and everything the wall and slab
-test reads (`LevelLightShare::LampVisibilityState`, the same before and after the pick) are unchanged, and a pick that
-weighed a lamp shining out of a house is not kept. A hit writes exactly what the pick would: the same rows, head
+test reads (`LevelLightShare::LampVisibilityState`, the same before and after the pick) are unchanged. A lamp shining
+out of a house is tested on its own copy of the walls, a snapshot that is replaced and never changed; its generation is
+part of `LampVisibilityState`, so picks with such lamps are kept too. A hit writes exactly what the pick would: the same rows, head
 height, share, counters and candidate count. The memo follows the development switch `lamp_visibility_memo` and is not
 used while F8 records the wall and slab tests or a light capture runs. Development builds pick one hit in 64 again on a copy and
 compare it bit for bit; a difference turns the memo off for the session

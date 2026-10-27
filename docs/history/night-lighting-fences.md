@@ -143,3 +143,11 @@ mask at its own footprint, on the edge of its own shadow: a dark band under 1 m 
 **Outcome:** gaps from either end, kept once by key; a gate within 0.6 m, kept until not drawn for 30 s while the fence on
 both sides was drawn; gaps under 0.4 m always closed (`baf0ad0`, `1fe6714`). Loose objects and fences take gain 1, objects
 set in their wall keep the walls' gain (`26bacaf`, `1dc4da7`); faces read the mask 0.6 m in front. Not verified in game.
+
+### 2026-10-27: picks with lamps shining out of a house kept
+
+At night in a neighbourhood the fence fix cost 22 us a draw, 15 us of it in the lamp pick, although the pick was memoised:
+every pick that weighed a lamp shining out of a house was left out of the memo, because that lamp's test reads its own copy
+of the walls. That copy is a snapshot replaced whole when it changes (`g_exitSnap`), so its generation (`g_exitGen`) now
+moves with every replacement and is part of `LampVisibilityState`; the fence and object pick memos keep those picks.
+Development builds still compare one hit in 64 with a fresh pick bit for bit.
