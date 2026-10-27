@@ -31,14 +31,27 @@ struct Lamp {
 
 inline float Sat(float v) { return std::clamp(v, 0.0f, 1.0f); }
 
+// A lamp on a wall lights the wall it hangs on: a sconce 0.14 m in front of its wall reached the wall above it at 5 to 10
+// degrees, N.l 0.1 to 0.15, and left it dark beside a perpendicular wall lit head on (F7 of a sconce on a screen wall, the
+// wall of the story above). A real wall glows over its sconce (the shade's opening and the wall's roughness). On a wall
+// texel (|n.y| < 0.5) with the lamp in front of its plane within kMountReach, N.l is at least kMountFloor x (1 - plane /
+// kMountReach): the floor is gone 0.4 m away from the wall, so free-standing lamps and other walls keep the game's law.
+constexpr float kMountReach = 0.4f, kMountFloor = 0.5f;
+// plane: n . (lamp - p), the lamp's height over the texel's plane (unnormalised l)
+inline float MountedNdl(float ndl, float plane, float ny) {
+    const float wall = Sat((0.5f - std::fabs(ny)) * 1e4f), front = Sat(plane * 1e4f);
+    return std::max(ndl, kMountFloor * wall * front * Sat(1.0f - plane * (1.0f / kMountReach)));
+}
+
 // The lamp's light at a point of normal n, as the shader computes it (the same operations in the same order).
 // wallReach: the reach share's weight (1 on an outdoor wall pixel with the reach on, 0 otherwise).
 inline void Eval(const Lamp& L, const float p[3], const float n[3], float wallReach, float out[3]) {
     float l[3] = {L.pos[0] - p[0], L.pos[1] - p[1], L.pos[2] - p[2]};
+    const float plane = n[0] * l[0] + n[1] * l[1] + n[2] * l[2];
     const float d2 = std::max(l[0] * l[0] + l[1] * l[1] + l[2] * l[2], 1e-4f);
     const float inv = 1.0f / ApexMath::Sqrt(d2);
     for (float& v : l) v *= inv;
-    const float ndl = Sat(n[0] * l[0] + n[1] * l[1] + n[2] * l[2]);
+    const float ndl = MountedNdl(Sat(n[0] * l[0] + n[1] * l[1] + n[2] * l[2]), plane, n[1]);
     const float f = std::min(ndl * (inv * inv) * L.W, L.cmax);
     const float al = L.axis[0] * l[0] + L.axis[1] * l[1] + L.axis[2] * l[2];
     const float t1 = (al + L.off1) * -L.sc1, t2 = (al - L.off2) * L.sc2;

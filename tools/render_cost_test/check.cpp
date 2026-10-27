@@ -13,10 +13,11 @@
 namespace GpuLampLaw {
 __declspec(noinline) void EvalBefore(const Lamp& L, const float p[3], const float n[3], float wallReach, float out[3]) {
     float l[3] = {L.pos[0] - p[0], L.pos[1] - p[1], L.pos[2] - p[2]};
+    const float plane = n[0] * l[0] + n[1] * l[1] + n[2] * l[2];
     const float d2 = std::max(l[0] * l[0] + l[1] * l[1] + l[2] * l[2], 1e-4f);
     const float inv = 1.0f / std::sqrt(d2);
     for (float& v : l) v *= inv;
-    const float ndl = Sat(n[0] * l[0] + n[1] * l[1] + n[2] * l[2]);
+    const float ndl = MountedNdl(Sat(n[0] * l[0] + n[1] * l[1] + n[2] * l[2]), plane, n[1]);
     const float f = std::min(ndl * (inv * inv) * L.W, L.cmax);
     const float al = L.axis[0] * l[0] + L.axis[1] * l[1] + L.axis[2] * l[2];
     const float t1 = (al + L.off1) * -L.sc1, t2 = (al - L.off2) * L.sc2;

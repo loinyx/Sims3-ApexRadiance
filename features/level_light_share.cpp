@@ -119,6 +119,7 @@
 #include "inner_retry.h"
 #include "cut_close_hold.h"
 #include "opening_lamp_balance.h"
+#include "gpu_lamp_law.h"
 #include "tester_toggles.h"
 #include "drag_lite.h"
 #include "perf_toggles.h"
@@ -12713,6 +12714,7 @@ bool OwnFloorBlocks(const unsigned char* room, void* light, const float* sample)
     return OwnFloorBlocksAt(room, lp, sample);
 }
 
+std::atomic<long> g_mountRaised{0}; // wall texels a lamp on that wall lit at the raised N.l
 template <int I> void __fastcall LightEvalHook(void* light, void*, const float* sample, const float* normal, float* colour) {
     // Quick outdoor lamp edits (Instant only): each light's part of the sums a kept sample adds to (the running sum is read
     // before each light of the outer point solve; t_odSample is set on the light tree thread only)
@@ -12746,6 +12748,26 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
         return;
     }
     reinterpret_cast<LightEval_t>(g_evalOrig[I])(light, sample, normal, colour);
+    // a lamp on a wall lights the wall it hangs on (gpu_lamp_law.h MountedNdl, the GPU's law alike): the game's N.l raised to
+    // the floor on a wall texel within kMountReach behind the lamp (the colour scaled by the ratio; the law's Cmax cut, which
+    // only a lamp touching the wall reaches, is not redone)
+    if (normal && (colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f) && ApexMath::Fabs(normal[1]) < 0.5f &&
+        _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) {
+        alignas(16) float lp[4];
+        LampPos(light, lp);
+        const float l[3] = {lp[0] - sample[0], lp[1] - sample[1], lp[2] - sample[2]};
+        const float plane = normal[0] * l[0] + normal[1] * l[1] + normal[2] * l[2];
+        if (plane > 0.0f && plane < GpuLampLaw::kMountReach) {
+            const float d = ApexMath::Sqrt(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]);
+            const float ndl = d > 1e-4f ? plane / d : 1.0f;
+            const float raised = GpuLampLaw::MountedNdl(ndl, plane, normal[1]);
+            if (raised > ndl && ndl > 1e-3f) {
+                const float k = raised / ndl;
+                for (int i = 0; i < 3; i++) colour[i] *= k;
+                ApexUtil::CountOne(g_mountRaised);
+            }
+        }
+    }
     // a lamp under this story's floor (above): nothing through the floor
     if (t_solveRoom && (colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f) && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) &&
         ThreadId() == g_gatherThread.load(std::memory_order_relaxed) && OwnFloorBlocks(t_solveRoom, light, sample)) {

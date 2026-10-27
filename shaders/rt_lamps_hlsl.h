@@ -124,10 +124,13 @@ LampRegs ReadLamp(int i) {
 }
 float3 Law(LampRegs L, float3 p, float3 n, float wallReach) {
     float3 l = L.pos.xyz - p;
+    const float plane = dot(n, l);
     const float d2 = max(dot(l, l), 1e-4);
     const float inv = rsqrt(d2);
     l *= inv;
-    const float ndl = Sat(dot(n, l));
+    // (gpu_lamp_law.h MountedNdl) a lamp within 0.4 m in front of a wall lights that wall at N.l 0.5 x (1 - plane / 0.4) at least
+    const float mount = 0.5 * Sat((0.5 - abs(n.y)) * 1e4) * Sat(plane * 1e4) * Sat(1.0 - plane * 2.5);
+    const float ndl = max(Sat(dot(n, l)), mount);
     const float f = min(ndl * (inv * inv) * L.pos.w, L.col.w);
     const float al = dot(L.axis.xyz, l);
     const float t1 = (al + L.off.x) * -L.axis.w, t2 = (al - L.off.z) * L.off.y;
