@@ -9,6 +9,7 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Norwegian (Bokmal)}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: no more dark squares on lit floors under furniture", "Nattbelysning: ingen mørke firkanter på opplyste gulv under møbler"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Tomtestrømming: tomter som lastes samtidig deler arbeidet, så kameraet hakker mindre"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Nattbelysning: gjerdeskygger på plenen oppdateres på en brøkdel av tiden"},
     {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "Tomtestrømming: Hold tomtesynlighet stabil holder tomter ved kanten i full detalj"},

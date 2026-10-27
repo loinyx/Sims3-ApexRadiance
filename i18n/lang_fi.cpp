@@ -9,6 +9,7 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Finnish}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: no more dark squares on lit floors under furniture", "Yövalaistus: ei enää tummia neliöitä valaistulla lattialla huonekalujen alla"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Tonttien suoratoisto: yhtä aikaa latautuvat tontit jakavat työn, joten kamera nykii vähemmän"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Yövalaistus: aitojen varjot nurmikolla päivittyvät murto-osassa ajasta"},
     {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "Tonttien suoratoisto: Vakaa tonttien näkyvyys pitää rajalla olevat tontit täysin yksityiskohtaisina"},

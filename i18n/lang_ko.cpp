@@ -9,6 +9,7 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Korean}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: no more dark squares on lit floors under furniture", "야간 조명: 조명이 비친 바닥의 가구 아래에 어두운 사각형이 더 이상 생기지 않아요"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "부지 스트리밍: 함께 불러오는 부지들이 작업을 나눠, 카메라 이동이 덜 끊겨요"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "야간 조명: 잔디 위 울타리 그림자가 훨씬 짧은 시간에 갱신돼요"},
     {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "부지 스트리밍: 부지 표시 안정 유지가 경계의 부지를 전체 디테일로 유지해요"},
