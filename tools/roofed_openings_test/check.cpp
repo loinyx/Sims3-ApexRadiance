@@ -3,10 +3,14 @@
 // wall, room 0 all around. Then the outside walls' copy (FillWallPatches, SegPass): the arch, a window and a half wall in a
 // copied wall, the ground shade through a door (ground_lamp_shadow.h) and an arch's curve from a mask (ShapeFromAlpha).
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <format>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -19,6 +23,9 @@
 #include "features/inner_retry.h"
 #include "features/lamp_reach.h"
 #include "features/rig_cut.h"
+#include "features/opening_lamp_balance.h"
+#include "features/cut_close_hold.h"
+#include "features/gpu_lamp_law.h"
 using DWORD = unsigned long;
 struct Xform {
     float r[4][4];
@@ -1169,7 +1176,506 @@ void PillarLightChecks() {
     Check(KeepWallTop(top, 3.025f, 3.025f, 3.025f) && top.tall, "crossing the tall threshold always invalidates the grid");
 }
 
+// Outdoor light through openings at the outdoor scale (opening_lamp_balance.h), replayed on the light capture of a green sconce
+// (intensity 1.7, colour (0, 1, 0), a story-0 room-0 lamp listed twice) beside a kitchen behind a glass door: the courtyard
+// draws the lot map x Ground brightness 0.75 x Lot lamp brightness 0.756 (the player's) and the kitchen floor showed 0.808.
+// The indoor chain: the solve's sum x the room's normalisation, its curve (GpuLampLaw::Tone), the pack's cut at 1, the
+// room-lit floor shader's curve on map x albedo (PS 44ECECA0 / 981C53E8: y (2 / (1 + 2^(-4.2 m)) - 1) / m, m = 0.333 (r + g +
+// b), a D3D `exp` being 2^x; c2.z = 4.2). The ground: albedo x scale x the outdoor texel (its sum's hue kept past 1).
+void FloorDrawRgb(const float map[3], float albedo, float out[3]) {
+    const float y[3] = {map[0] * albedo, map[1] * albedo, map[2] * albedo};
+    const float m = (y[0] + y[1] + y[2]) * 0.333f;
+    const float w = m > 1e-6f ? (2.0f / (1.0f + std::exp2(-4.2f * m)) - 1.0f) / m : 4.2f * 0.6931472f * 0.5f;
+    for (int i = 0; i < 3; i++) out[i] = std::min(1.0f, y[i] * w);
+}
+float FloorDraw(float map, float albedo) { // one channel of a saturated green texel: mean = a third of it
+    const float c[3] = {0.0f, map, 0.0f};
+    float o[3];
+    FloorDrawRgb(c, albedo, o);
+    return o[1];
+}
+// One entry of a lamp of colour `lamp` (largest channel 1) at a texel, e its law there; `times` entries; `pass` the opening's
+// share (glass). stage 0: the chain before the balance (no cut, the room's normalisation); 1: the balance as it was first (a
+// cut per channel, no response); 2: production (CapEntry, the outdoor scale, MaxResponse)
+void IndoorDraw(const float lamp[3], float e, int times, float pass, float norm, int stage, const OpeningLampBalance::Scales& s, float albedo, float out[3]) {
+    const float up[3] = {0.0f, 1.0f, 0.0f};
+    float c[3] = {lamp[0] * e, lamp[1] * e, lamp[2] * e};
+    if (stage == 1)
+        for (float& v : c) v = std::min(v, 1.0f / static_cast<float>(times));
+    if (stage == 2) OpeningLampBalance::CapEntry(c, times);
+    const float k = stage ? OpeningLampBalance::Factor(s, up, norm, false) : 1.0f;
+    for (float& v : c) v *= pass * k;
+    if (stage == 2) {
+        const float q = OpeningLampBalance::MaxResponse(c, static_cast<float>(times) * norm);
+        for (float& v : c) v *= q;
+    }
+    float x[3] = {c[0] * times * norm, c[1] * times * norm, c[2] * times * norm}, t[3];
+    GpuLampLaw::Tone(x, t);
+    for (float& v : t) v = std::min(v, 1.0f);
+    FloorDrawRgb(t, albedo, out);
+}
+float IndoorGreen(float entry, int times, float pass, float norm, bool fixed, const OpeningLampBalance::Scales& s, float albedo) {
+    const float green[3] = {0.0f, 1.0f, 0.0f};
+    float o[3];
+    IndoorDraw(green, entry, times, pass, norm, fixed ? 2 : 0, s, albedo, o);
+    return o[1];
+}
+// The same lamp outdoors: albedo x scale x its two entries' sum, hue kept past 1 (OutdoorDeltaModel::KeepHue)
+void OutdoorDraw(const float lamp[3], float e, float scale, float albedo, float out[3]) {
+    float S[3] = {2.0f * e * lamp[0], 2.0f * e * lamp[1], 2.0f * e * lamp[2]};
+    const float m = std::max({S[0], S[1], S[2]});
+    for (int i = 0; i < 3; i++) out[i] = albedo * scale * (m > 1.0f ? S[i] / m : S[i]);
+}
+void BalanceChecks() {
+    const OpeningLampBalance::Scales s = OpeningLampBalance::From(0.75f, 0.756f, true, 0.30f, true);
+    Check(std::fabs(s.ground - 0.567f) < 1e-4f && std::fabs(s.wall - 0.30f) < 1e-6f, "the player's scales: floors 0.75 x 0.756, walls 0.30");
+    const float up[3] = {0, 1, 0}, side[3] = {1, 0, 0};
+    Check(std::fabs(OpeningLampBalance::Factor(s, up, 1.0f, false) - 0.567f) < 1e-4f, "a floor texel takes the ground's scale");
+    Check(std::fabs(OpeningLampBalance::Factor(s, side, 1.0f, false) - 0.30f) < 1e-6f, "a wall texel takes the walls' scale");
+    Check(std::fabs(OpeningLampBalance::Factor(s, nullptr, 1.0f, false) - 0.567f) < 1e-4f, "a directional sample (no normal) takes the ground's");
+    Check(std::fabs(OpeningLampBalance::Factor(s, up, 1.5f, false) - 0.567f / 1.5f) < 1e-4f, "a boosted room does not boost the outdoor lamp");
+    Check(std::fabs(OpeningLampBalance::Factor(s, up, 1.5f, true) - 0.567f) < 1e-4f, "a room solved as outdoor has no normalisation");
+    Check(std::fabs(OpeningLampBalance::Factor(s, up, 1e9f, false) - 0.567f) < 1e-4f, "an unreadable normalisation counts as 1");
+    const OpeningLampBalance::Scales off = OpeningLampBalance::From(0.75f, 0.756f, false, 0.30f, false);
+    Check(off.ground == 1.0f && off.wall == 1.0f, "lot pass and walls off: the game's scale");
+    Check(!OpeningLampBalance::Moved(s, OpeningLampBalance::From(0.751f, 0.756f, true, 0.30f, true)) &&
+              OpeningLampBalance::Moved(s, OpeningLampBalance::From(0.80f, 0.756f, true, 0.30f, true)), "a slider moved by 0.1% relights nothing, by 5% every room");
+    float capped[3] = {0.2f, 1.7f, 0.0f};
+    OpeningLampBalance::CapEntry(capped, 2);
+    Check(std::fabs(capped[0] - 0.2f * 0.5f / 1.7f) < 1e-6f && std::fabs(capped[1] - 0.5f) < 1e-6f, "an entry of a lamp listed twice holds at most half the outdoor cut, its hue kept");
+    // the capture: the kitchen pixel (stone albedo 0.8, glass 0.765, norm 1) showed 0.808, a map of 0.71 per the floor curve (the
+    // capture's map ran 0.62 to 0.97 green over the kitchen texels by the door)
+    const float albedo = 0.8f, glass = 0.765f;
+    Check(std::fabs(FloorDraw(0.71f, albedo) - 0.808f) < 0.01f, "the floor curve gives the captured 0.808 from a map of 0.71");
+    int worse = 0, fixedWorse = 0;
+    float before = 0, after = 0, ground = 0;
+    for (int i = 1; i <= 200; i++) { // one entry's colour from 0.025 to 5 (both entries: up to 10, the cut 2 x Cmax)
+        const float e = 0.025f * static_cast<float>(i);
+        const float out = albedo * s.ground * std::min(2.0f * e, 1.0f); // the courtyard at the same distance, no wall between
+        const float was = IndoorGreen(e, 2, glass, 1.0f, false, s, albedo), now = IndoorGreen(e, 2, glass, 1.0f, true, s, albedo);
+        if (was > out + 1e-4f) ++worse;
+        // (under a mean of 0.01 the room solve's curve leaves the sum whole, GpuLampLaw::Tone: the game's own step, a screen
+        // value under 0.04; the entries from 0.05 up are compared)
+        if (e >= 0.05f && now > out + 1e-4f) ++fixedWorse;
+        if (i == 40) before = was, after = now, ground = out; // e = 1 (the kitchen floor near the door)
+    }
+    std::printf("Green sconce, entry 1.0: ground %.3f, kitchen before %.3f, after %.3f; samples brighter indoors than the ground: before %d of 200, after %d\n", ground, before, after,
+                worse, fixedWorse);
+    Check(worse > 150, "before: the kitchen brighter than the courtyard at almost every distance");
+    Check(fixedWorse == 0, "after: never brighter than the ground at the same distance");
+    Check(after > 0.5f * ground, "after: still lit through the glass (no black room)");
+}
+
+// The same lamp outdoors and through an opening at the same distance (opening_lamp_balance.h CapEntry, MaxResponse): a red
+// sconce lit a kitchen behind its glass door redder and brighter than its own courtyard (a lighting snapshot: the kitchen
+// floor (0.53, 0.05, 0.04) on screen, the courtyard by the lamp (0.44, 0.18, 0.15) with a white lamp and the sky in it). Indoors
+// the same lamp must be no brighter than outdoors on the same floor, of the lamp's own hue, and lit alike whatever its colour.
+void OpeningColourChecks() {
+    const float albedo = 0.8f, glass = 0.765f;
+    const float lamps[][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 1}, {1, 0.5f, 0.15f}, {1, 0.98f, 0.85f}, {1, 1, 1}};
+    const float white[3] = {1, 1, 1};
+    const float grounds[] = {0.567f, 1.0f, 2.25f}; // the player's (0.75 x 0.756), the game's, Ground 150% x Lot lamps 150%
+    int brighter[3] = {}, hue[3] = {}, uneven[3] = {}, n = 0;
+    float worstUneven[3] = {};
+    for (float g : grounds) {
+        OpeningLampBalance::Scales s;
+        s.ground = g;
+        for (const auto& lamp : lamps)
+            for (int i = 2; i <= 120; i++) { // one entry's law from 0.05 to 3 (both entries up to 6; the cut is 2 x Cmax)
+                const float e = 0.025f * static_cast<float>(i);
+                float out[3], S[3];
+                OutdoorDraw(lamp, e, g, albedo, out);
+                OutdoorDraw(lamp, e, 1.0f, 1.0f, S);
+                const float outMax = std::min(std::max({out[0], out[1], out[2]}), 1.0f), sMax = std::max({S[0], S[1], S[2]});
+                ++n;
+                for (int stage = 0; stage < 3; stage++) {
+                    float in[3], ref[3];
+                    IndoorDraw(lamp, e, 2, glass, 1.0f, stage, s, albedo, in);
+                    IndoorDraw(white, e, 2, glass, 1.0f, stage, s, albedo, ref);
+                    const float inMax = std::max({in[0], in[1], in[2]}), refMax = std::max({ref[0], ref[1], ref[2]});
+                    if (inMax > outMax + 1e-4f) ++brighter[stage];
+                    // the hue: each channel over the largest, indoors and outdoors (the screen's cut at 1 left out)
+                    bool off = false;
+                    for (int c = 0; c < 3; c++) off = off || (inMax > 0.02f && std::fabs(in[c] / inMax - S[c] / sMax) > 0.03f);
+                    if (off) ++hue[stage];
+                    // lit alike whatever its colour: its largest channel as a white lamp's of the same strength, never more (the
+                    // response takes a floor of albedo 1: on a darker floor a colour ends a little under the white, at the
+                    // player's scale under 3%)
+                    const float d = refMax > 1e-4f ? inMax / refMax - 1.0f : 0.0f;
+                    if (d > (stage == 2 ? 0.005f : 0.03f) || d < (g < 0.6f ? -0.03f : -0.10f)) ++uneven[stage];
+                    if (std::fabs(d) > std::fabs(worstUneven[stage])) worstUneven[stage] = d;
+                }
+            }
+    }
+    std::printf("Same lamp outdoors and through an opening, %d cases: brighter indoors before the balance %d, with the first balance %d, now %d; "
+                "hue off %d, %d, now %d; a colour lit unlike white %d (worst %+.0f%%), %d (worst %+.0f%%), now %d (worst %+.1f%%)\n",
+                n, brighter[0], brighter[1], brighter[2], hue[0], hue[1], hue[2], uneven[0], 100.0f * worstUneven[0], uneven[1], 100.0f * worstUneven[1], uneven[2],
+                100.0f * worstUneven[2]);
+    Check(brighter[1] == 0 && brighter[2] == 0, "a lamp through an opening is never brighter than outdoors on the same floor");
+    Check(hue[1] > 0 && hue[2] == 0, "before: a strong orange cut channel by channel came in paler; now every lamp keeps its hue indoors");
+    Check(uneven[1] > 0 && uneven[2] == 0, "before: a saturated lamp lit the room more than a white one (the curves' mean); now never more, and alike within 3% at the player's scale");
+    // the red sconce by the kitchen door (law 1 per entry: both entries past the outdoor cut)
+    const float red[3] = {1, 0, 0};
+    for (float g : {0.567f, 2.25f}) {
+        OpeningLampBalance::Scales s;
+        s.ground = g;
+        float out[3], was[3], now[3], wh[3];
+        OutdoorDraw(red, 1.0f, g, albedo, out);
+        IndoorDraw(red, 1.0f, 2, glass, 1.0f, 1, s, albedo, was);
+        IndoorDraw(red, 1.0f, 2, glass, 1.0f, 2, s, albedo, now);
+        IndoorDraw(white, 1.0f, 2, glass, 1.0f, 2, s, albedo, wh);
+        std::printf("  red sconce, law 1, floor scale %.3f: courtyard floor %.3f (screen %.3f), kitchen floor %.3f with the first balance, %.3f now (a white lamp %.3f)\n", g,
+                    out[0], std::min(out[0], 1.0f), was[0], now[0], wh[0]);
+    }
+    // the response: a white share unchanged, a saturated one never raised
+    const float grey[3] = {0.3f, 0.3f, 0.3f}, dim[3] = {0.004f, 0.0f, 0.0f}, pure[3] = {0.4f, 0.0f, 0.0f};
+    Check(OpeningLampBalance::MaxResponse(grey, 2.0f) == 1.0f && OpeningLampBalance::MaxResponse(dim, 2.0f) == 1.0f, "a white share and one both curves leave alone keep 1");
+    const float q = OpeningLampBalance::MaxResponse(pure, 2.0f);
+    Check(q > 0.0f && q < 1.0f, "a saturated share is scaled down, never up");
+    float orange[3] = {1.7f, 0.85f, 0.26f};
+    OpeningLampBalance::CapEntry(orange, 2);
+    Check(std::fabs(orange[0] - 0.5f) < 1e-6f && std::fabs(orange[1] - 0.25f) < 1e-6f && std::fabs(orange[2] - 0.26f * 0.5f / 1.7f) < 1e-6f, "an orange entry keeps its hue under the cut");
+}
+// The cut at the opening (OpeningLampBalance::OpeningGain, EntryScale), replayed on three light captures of the red sconce
+// by the kitchen (the lot's floor map, lot space): the lamp 2.2 m over the floor at (25.0, 22.8), 1 m outside the kitchen's
+// glass doors (the wall x = 26, z 20 to 23), the kitchen beyond. The law of each of its two entries is half of
+// 1.7 x min(2, 12.75 n.l / d^2), the capture's courtyard map (1 up to 4.6 m from the lamp, then the law: 0.060 at 9.3 m for
+// 0.060) and its kitchen map (0.21 flat to 3.4 m, then falling with it) read so. A line from the lamp through the door: the
+// kitchen floor must fall off from the door with the law and stay under the courtyard floor at the door x the glass.
+float SconceEntry(float x, float y, float z, const float L[3]) {
+    const float dx = x - L[0], dy = y - L[1], dz = z - L[2], d2 = dx * dx + dy * dy + dz * dz;
+    const float ndl = std::max(0.0f, -dy) / std::sqrt(d2);
+    return 0.5f * 1.7f * std::min(2.0f, 12.75f * ndl / d2);
+}
+// One kitchen floor point through the walls of b, red; gainOn false: the cut held at 1 / entries wherever it reached (CapEntry)
+float KitchenFloor(const StoryGrid& g, const float L[3], float x, float z, bool gainOn, const OpeningLampBalance::Scales& s, float albedo, float* tOpen = nullptr) {
+    const float P[3] = {x, 0.0f, z}, up[3] = {0.0f, 1.0f, 0.0f};
+    GridWhy why{};
+    const float pass = GridPassImpl(g, L, P, why);
+    if (tOpen) *tOpen = why.tOpen;
+    const float e = SconceEntry(x, 0.0f, z, L);
+    const float gain = gainOn ? OpeningLampBalance::OpeningGain(L, P, up, why.tOpen) : 1.0f;
+    float c[3] = {e * OpeningLampBalance::EntryScale(e, 2, gain) * pass, 0.0f, 0.0f};
+    const float k = OpeningLampBalance::Factor(s, up, 1.0f, false);
+    for (float& v : c) v *= k;
+    const float q = OpeningLampBalance::MaxResponse(c, 2.0f);
+    float X[3] = {2.0f * c[0] * q, 0.0f, 0.0f}, t[3], out[3];
+    GpuLampLaw::Tone(X, t);
+    for (float& v : t) v = std::min(v, 1.0f);
+    FloorDrawRgb(t, albedo, out);
+    return out[0];
+}
+void OpeningFalloffChecks() {
+    for (int i = 0; i <= 400; i++) { // the cut at gain 1 is the old one
+        const float m = 0.01f * static_cast<float>(i);
+        float c[3] = {m, 0.3f * m, 0.0f};
+        OpeningLampBalance::CapEntry(c, 2);
+        if (std::fabs(m * OpeningLampBalance::EntryScale(m, 2, 1.0f) - c[0]) > 1e-5f) {
+            Check(false, "EntryScale at gain 1 is CapEntry");
+            break;
+        }
+    }
+    Check(OpeningLampBalance::EntryScale(0.3f, 2, 1.5f) == 1.0f, "an opening under the outdoor cut keeps the entry whole");
+    Check(OpeningLampBalance::OpeningGain(std::array<float, 3>{0, 2, 0}.data(), std::array<float, 3>{3, 0, 0}.data(), nullptr, -1.0f) == 1.0f,
+          "no opening known: gain 1");
+    Builder b(40, 40);
+    b.Room(26, 16, 34, 28, 48, true);
+    for (int z = 16; z < 28; z++) {
+        const int32_t e = b.Wall(false, 26, z);
+        b.Wall(false, 34, z);
+        if (z >= 20 && z < 23) {
+            b.Open(e, kCutDoor, 0.0f, 2.1f, 0.0f, 1.0f);
+            b.g.openings.back().glass = WallOpenings::kWindowPass; // (a door open only for its glass)
+        }
+    }
+    for (int x = 26; x < 34; x++) b.Wall(true, x, 16), b.Wall(true, x, 28);
+    const float L[3] = {25.0f, 2.2f, 22.8f};
+    float t = 0.0f;
+    KitchenFloor(b.g, L, 28.0f, 21.98f, true, {}, 0.8f, &t);
+    Check(std::fabs(t - 1.0f / 3.0f) < 0.01f, "the walls' walk places the glass door a third of the way to a point 2 m in");
+    OpeningLampBalance::Scales s;
+    s.ground = 0.567f; // the player's Ground 75% x Lot lamps 75.6%
+    const float albedo = 0.8f, z = 21.98f;
+    // the courtyard floor at the door's outer side, both entries cut at 1 (the outdoor map)
+    const float door = albedo * s.ground * std::min(1.0f, 2.0f * SconceEntry(25.9f, 0.0f, z, L));
+    float prevOld = 1e9f, prevNew = 1e9f;
+    int flatOld = 0, notFalling = 0, overDoor = 0, overOld = 0;
+    std::string profile;
+    for (int i = 0; i <= 20; i++) {
+        const float x = 26.25f + 0.25f * static_cast<float>(i);
+        const float was = KitchenFloor(b.g, L, x, z, false, s, albedo), now = KitchenFloor(b.g, L, x, z, true, s, albedo);
+        if (i > 0 && was > prevOld - 0.002f) ++flatOld;
+        if (i > 0 && now > 0.005f && now > prevNew - 1e-4f) ++notFalling;
+        if (now > door * WallOpenings::kWindowPass + 1e-4f) ++overDoor;
+        if (now > was + 1e-4f) ++overOld;
+        prevOld = was, prevNew = now;
+        if (i % 4 == 0) profile += std::format(" {:.2f} m: {:.3f} -> {:.3f} (law {:.2f});", x - 26.0f, was, now, 2.0f * SconceEntry(x, 0.0f, z, L));
+    }
+    std::printf("Red sconce through the kitchen's glass door: courtyard floor at the door %.3f (x glass %.3f); kitchen floor before -> now, metres in:%s steps flat before %d, "
+                "not falling now %d\n",
+                door, door * WallOpenings::kWindowPass, profile.c_str(), flatOld, notFalling);
+    Check(flatOld >= 3, "before: the kitchen floor flat from the door (the cut held wherever it reached)");
+    Check(notFalling == 0, "now: the kitchen floor falls off at every step from the door in");
+    Check(overDoor == 0, "now: never over the courtyard floor at the door x the glass");
+    Check(overOld == 0, "now: never brighter than before");
+    // a lamp far enough that the door's outer side is under the outdoor cut: nothing changes
+    const float far[3] = {19.0f, 2.2f, 22.8f};
+    int moved = 0;
+    for (int i = 0; i <= 20; i++) {
+        const float x = 26.25f + 0.25f * static_cast<float>(i);
+        if (2.0f * SconceEntry(25.9f, 0.0f, z, far) < 1.0f &&
+            std::fabs(KitchenFloor(b.g, far, x, z, false, s, albedo) - KitchenFloor(b.g, far, x, z, true, s, albedo)) > 1e-6f)
+            ++moved;
+    }
+    Check(2.0f * SconceEntry(25.9f, 0.0f, z, far) < 1.0f && moved == 0, "a lamp under the outdoor cut at the door: the room unchanged");
+}
+
+// The cut of the outdoor texel, which every light reaching it shares (EntryScale's total). The light capture of a green
+// sconce (1.7, (0, 1, 0), its two entries 0.64 together at the hall's glass door, under the cut alone) beside a white sconce
+// on the door's wall (1, (1, 0.98, 0.85), 2.5 at the door's outer side, both entries): the courtyard's texel there is the
+// sum over its largest channel, the green 0.21 of it; the hall's floor at the door took the green whole, 3.1 times that.
+// Along the wall's foot beside a glass door (the light capture of a green sconce 2.9 m out from a hall's glass door, a white
+// sconce flat on the door's wall 0.5 m from its jamb): the hall's floor map texel by texel (4 a metre, class 2), each lamp's
+// entry through the walls and the cut at the opening. Beyond each jamb along the wall the light falls off at every texel,
+// with no stretch held level before a cut: the green is gone within 2 texels of the jamb's line (the wall shades it), the
+// white's grazing light (rays almost along the wall through the door) falls off with the distance.
+float HallTexel(const StoryGrid& g, const float L[3], float x, float z) {
+    const float P[3] = {x, 0.0f, z}, up[3] = {0.0f, 1.0f, 0.0f};
+    GridWhy why{};
+    t_mapAA = 0.75f * 0.25f;
+    const float pass = GridPassImpl(g, L, P, why);
+    t_mapAA = 0.0f;
+    const float e = SconceEntry(x, 0.0f, z, L);
+    return 2.0f * e * OpeningLampBalance::EntryScale(e, 2, OpeningLampBalance::OpeningGain(L, P, up, why.tOpen)) * pass;
+}
+void WallFootChecks() {
+    Builder b(40, 40);
+    b.Room(17, 18, 30, 20, 3, true);
+    for (int x = 17; x < 30; x++) {
+        const int32_t e = b.Wall(true, x, 20);
+        b.Wall(true, x, 18);
+        if (x >= 22 && x < 24) {
+            b.Open(e, kCutDoor, 0.0f, 2.1f, 0.0f, 1.0f);
+            b.g.openings.back().glass = WallOpenings::kWindowPass;
+        }
+    }
+    const float green[3] = {25.0f, 2.24f, 22.86f}, white[3] = {21.5f, 2.24f, 20.17f};
+    int rising = 0, lingering = 0;
+    std::string foot;
+    for (int r = 0; r < 3; r++) { // the three rows nearest the wall (0.125 to 0.625 m)
+        const float z = 19.875f - 0.25f * static_cast<float>(r);
+        float prev = 1e9f, atJamb = 0.0f;
+        for (int c = 0; c < 16; c++) { // from the far jamb (x = 24) along the wall
+            const float x = 23.875f + 0.25f * static_cast<float>(c), v = HallTexel(b.g, green, x, z);
+            if (c == 0) atJamb = v;
+            if (v > prev + 1e-6f) ++rising;
+            if (c >= 3 && v > 0.05f * atJamb + 1e-4f) ++lingering;
+            prev = v;
+            if (r == 0 && c < 6) foot += std::format(" {:.3f}", v);
+        }
+    }
+    float wPrev = 1e9f;
+    int wRising = 0;
+    for (int c = 0; c < 14; c++) { // the white's grazing light along the wall's foot, past the jamb's line
+        const float v = HallTexel(b.g, white, 24.625f + 0.25f * static_cast<float>(c), 19.875f);
+        if (v > wPrev + 1e-6f) ++wRising;
+        wPrev = v;
+    }
+    std::printf("Along the wall's foot beside the glass door, the green from the jamb (x 23.875 on):%s\n", foot.c_str());
+    Check(rising == 0 && lingering == 0, "beside the jamb the green falls off at every texel along the wall and is gone within 3 texels (no strip)");
+    Check(wRising == 0, "the white's grazing light along the wall's foot falls off at every texel past the jamb");
+}
+void OpeningShareChecks() {
+    int moved = 0;
+    for (int i = 1; i <= 300; i++) // total = R (no other light): the lamp's own cut, bit for bit
+        for (float g : {1.0f, 1.3f, 2.0f, 7.0f}) {
+            const float m = 0.01f * static_cast<float>(i), R = 2.0f * m * g;
+            if (OpeningLampBalance::EntryScale(m, 2, g, R) != OpeningLampBalance::EntryScale(m, 2, g) ||
+                OpeningLampBalance::EntryScale(m, 2, g, -1.0f) != OpeningLampBalance::EntryScale(m, 2, g))
+                ++moved;
+        }
+    Check(moved == 0, "no other light at the opening (or none known): the lamp's own cut, unchanged");
+    const float green = 0.64f, white[3] = {2.5f, 2.45f, 2.125f};
+    const float T = std::max({white[0], green + white[1], white[2]});
+    const float outdoorPart = green / T; // the green's part of the courtyard's texel at the door
+    const float before = green * OpeningLampBalance::EntryScale(green / 2.0f, 2, 1.0f), now = green * OpeningLampBalance::EntryScale(green / 2.0f, 2, 1.0f, T);
+    std::printf("Green sconce beside a white one at a glass door: the courtyard's texel there %.2f over its largest channel, the green's part %.3f; the hall's floor "
+                "at the door before %.3f (x%.2f), now %.3f\n",
+                T, outdoorPart, before, before / outdoorPart, now);
+    Check(before > 3.0f * outdoorPart, "before: the green entered whole, 3 times its part of the courtyard's texel beside it");
+    Check(std::fabs(now - outdoorPart) < 1e-4f, "now: at the door the green is its part of the courtyard's texel there");
+    // from the door in: the law at X over the texel's (gain), the same X; falls at every step, never over before, the law far in
+    float prev = 1e9f;
+    int notFalling = 0, overBefore = 0;
+    for (int i = 0; i <= 200; i++) {
+        const float g = 1.0f + 0.1f * static_cast<float>(i), m = green / 2.0f / g;
+        const float v = 2.0f * m * OpeningLampBalance::EntryScale(m, 2, g, T), was = 2.0f * m * OpeningLampBalance::EntryScale(m, 2, g);
+        if (v >= prev) ++notFalling;
+        if (v > was + 1e-6f) ++overBefore;
+        prev = v;
+    }
+    const float farIn = OpeningLampBalance::EntryScale(0.001f, 2, 1000.0f, T);
+    Check(notFalling == 0 && overBefore == 0, "from the door in: falling at every step, never brighter than before");
+    Check(farIn > 0.99f, "a faint texel far in keeps the law");
+    // two white lamps, each 1.2 at the door alone: the courtyard shows their sum at the cut, the room took each at its cut
+    const float each = 1.2f, beforeTwo = 2.0f * each * OpeningLampBalance::EntryScale(each / 2.0f, 2, 1.0f),
+                nowTwo = 2.0f * each * OpeningLampBalance::EntryScale(each / 2.0f, 2, 1.0f, 2.0f * each);
+    std::printf("Two white lamps at 1.2 each at a door: the room's sum at the door before %.2f, now %.2f (the courtyard's texel: 1)\n", beforeTwo, nowTwo);
+    Check(beforeTwo > 1.9f && std::fabs(nowTwo - 1.0f) < 1e-4f, "two lamps past the cut together: the room at the door is the courtyard's texel, not twice it");
+    // a total under the cut at the opening: nothing changes
+    Check(OpeningLampBalance::EntryScale(0.2f, 2, 1.0f, 0.9f) == 1.0f, "an outdoor texel under the cut at the opening: the entry whole");
+}
+
+// Cut closes held (cut_close_hold.h), replayed on the log of three camera turns: windows closed at 39.083 and reopened at
+// 39.751, closed at 46.352 and reopened at 46.529; a window really removed closes once.
+void CutHoldChecks() {
+    std::vector<CutCloseHold::Pending> p;
+    int applied = 0;
+    const auto apply = [&](uint64_t, int, uint32_t) { ++applied; };
+    Check(CutCloseHold::NoteClose(p, 0xE8980049DC0B34C0ull, 0, 7, 39083) && p.size() == 1, "a close is held");
+    Check(CutCloseHold::NoteClose(p, 0xE8980049DC0B34C0ull, 0, 7, 39200) && p.size() == 1 && p[0].at == 39083, "a repeated close keeps its first time");
+    CutCloseHold::Due(p, 39750, apply);
+    Check(applied == 0 && CutCloseHold::Cancel(p, 0xE8980049DC0B34C0ull, 0, 7) && p.empty(), "reopened 0.67 s later: the cut never left");
+    CutCloseHold::NoteClose(p, 1, 0, 7, 46352);
+    Check(!CutCloseHold::Cancel(p, 1, 1, 7) && !CutCloseHold::Cancel(p, 2, 0, 7) && p.size() == 1, "an add of another story or lot cancels nothing");
+    Check(CutCloseHold::Cancel(p, 1, 0, 7), "reopened 0.18 s later");
+    CutCloseHold::NoteClose(p, 1, 0, 9, 50000);
+    CutCloseHold::Due(p, 50000 + CutCloseHold::kHoldMs - 1, apply);
+    Check(applied == 0, "a removed window keeps its cut during the hold");
+    CutCloseHold::Due(p, 50000 + CutCloseHold::kHoldMs, apply);
+    Check(applied == 1 && p.empty(), "and loses it once the hold ends");
+    CutCloseHold::NoteClose(p, 1, 0, 9, 0xFFFFFF00u);
+    CutCloseHold::Due(p, 0xFFFFFF00u + CutCloseHold::kHoldMs, apply); // (the tick count wraps)
+    Check(applied == 2, "across the tick count's wrap");
+    for (uint32_t e = 0; e < CutCloseHold::kMax; e++) CutCloseHold::NoteClose(p, 3, 0, e, 0);
+    Check(!CutCloseHold::NoteClose(p, 3, 0, 99999, 0), "a full table closes at once (as before)");
+}
+
+// The roofed rooms a room-0 lamp edit sends (RoofedSendWanted, from SameStoryRoofed: the changed-room walk and the tail of an
+// edit that marks no room). A kitchen behind glass doors saw a door of sconce A (red to green) and took it; a hall saw lamp B
+// only; a shed far off saw none.
+void RoofedSendChecks() {
+    const uintptr_t A = 0x6FB0F730, B = 0x6FB11650, C = 0x6FB20000;
+    const std::vector<uintptr_t> kitchenSeen{A, B}, hallSeen{B}, none;
+    const YardBox kitchen{20.0f, 18.0f, 26.0f, 23.0f}, hall{10.0f, 10.0f, 14.0f, 14.0f}, shed{40.0f, 40.0f, 42.0f, 42.0f};
+    const std::vector<uintptr_t> editA{A}, all{A, B, C};
+    const std::vector<RoofedAt> noAt;
+    // a colour, an intensity or a switch (1): only the rooms that saw a door of the edited lamp
+    Check(RoofedSendWanted(true, kitchenSeen, kitchen, true, 1, editA, noAt, false), "a sconce recoloured: the room behind its glass doors is sent");
+    Check(!RoofedSendWanted(true, hallSeen, hall, true, 1, editA, noAt, false), "a room that took another lamp is not sent");
+    Check(!RoofedSendWanted(false, none, shed, true, 1, editA, noAt, false), "a room that saw no lamp is not sent");
+    // no edited lamp known (a delta abandoned): every room that took one of room 0's lamps
+    Check(RoofedSendWanted(true, hallSeen, hall, false, 1, all, noAt, false) && !RoofedSendWanted(false, none, shed, false, 1, all, noAt, false),
+          "edited lamps unknown: the rooms that took a lamp");
+    // a move (3): also the rooms the lamp reaches from where it is now, and every room when it cannot be placed
+    const std::vector<RoofedAt> nearHall{{12.0f, 16.0f, 4.0f}};
+    Check(RoofedSendWanted(false, none, hall, true, 3, editA, nearHall, true), "a sconce moved next to a room it never saw: sent");
+    Check(!RoofedSendWanted(false, none, shed, true, 3, editA, nearHall, true), "a room beyond its reach: not sent");
+    Check(RoofedSendWanted(false, none, shed, true, 3, editA, noAt, false), "a moved lamp with no place: sent");
+    // a lamp removed or added (2): never precise, the rooms that took a lamp or that one can reach
+    Check(RoofedSendWanted(true, kitchenSeen, kitchen, false, 2, all, noAt, true) && !RoofedSendWanted(false, none, shed, false, 2, all, nearHall, true),
+          "a lamp removed: the rooms that took one, not a room out of reach");
+}
+
+// Windows the game closed again (CutRec::closed, ApplyCutPost, KeepBuiltWindows, UnlitWindows). In game the camera closed the
+// windows of the wall it looked through ('windows 6 -> 3') and kept them closed while it stayed, every window light kept;
+// the kitchen behind them took the courtyard sconce through 5 openings or 8 depending on the camera.
+void ClosedWindowChecks() {
+    const uint32_t k = EdgeKey(5, 4, 6, 4);
+    CutRec win;
+    win.kind = kCutWindow;
+    CutRec door;
+    door.kind = kCutDoor;
+    std::unordered_map<uint32_t, CutRec> edges;
+    Check(ApplyCutPost(edges, k, true, win) == 1, "a window posted: a new generation");
+    Check(ApplyCutPost(edges, k, false, CutRec{}) == 0 && edges.count(k) && edges[k].closed == 1, "a camera close of a window: marked closed, no new generation");
+    Check(ApplyCutPost(edges, k, false, CutRec{}) == 0 && edges[k].closed == 1, "a repeated close changes nothing");
+    Check(ApplyCutPost(edges, k, true, win) == 0 && edges[k].closed == 0, "the window posted again: the mark cleared, no new generation");
+    ApplyCutPost(edges, k, false, CutRec{});
+    edges[k].closed = 2; // (the grid left it out: no window light in its cell)
+    Check(ApplyCutPost(edges, k, true, win) == 1 && edges[k].closed == 0, "a window put back after it was left out: a new generation");
+    const uint32_t d = EdgeKey(6, 4, 7, 4);
+    ApplyCutPost(edges, d, true, door);
+    Check(ApplyCutPost(edges, d, false, CutRec{}) == 2, "a door's close keeps the hold (cut_close_hold.h)");
+    Check(ApplyCutPost(edges, EdgeKey(1, 1, 2, 1), false, CutRec{}) == 0, "a close of an edge with no cut changes nothing");
+    // the grid: the window of DoorRule's wall z = 4, cell x = 5, closed by the camera, its panes in front of each face
+    DoorRule rule(kCutWindow, kCutDoor, true);
+    std::vector<std::pair<uint32_t, CutRec>> cuts = rule.cuts;
+    cuts[0].second.closed = 1;
+    const GlassLight in{5.5f, 1.5f, 3.95f, 0.3f, 0.5f, 0.0f}, out{5.5f, 1.5f, 4.05f, 0.3f, 0.5f, 0.0f};
+    std::unordered_set<uint32_t> leftOut;
+    std::vector<std::pair<uint32_t, CutRec>> closed;
+    auto kept = KeepBuiltWindows(rule.b.g, cuts, {in, out}, leftOut, &closed);
+    Check(kept.size() == 2 && leftOut.empty() && closed.size() == 1, "a camera-closed window with its pane lights stays open");
+    kept = KeepBuiltWindows(rule.b.g, cuts, {GlassLight{5.5f, 1.5f, 4.05f}}, leftOut, &closed);
+    Check(kept.size() == 2 && leftOut.empty(), "a window light with no size read keeps it too (a round window)");
+    kept = KeepBuiltWindows(rule.b.g, cuts, {}, leftOut, &closed);
+    Check(kept.size() == 1 && leftOut.count(k) && kept[0].first == d, "a deleted window (no window light) closes");
+    kept = KeepBuiltWindows(rule.b.g, cuts, {GlassLight{6.5f, 1.5f, 4.05f, 0.3f, 0.5f, 0.0f}, GlassLight{5.5f, 1.5f, 5.0f}}, leftOut, &closed);
+    Check(leftOut.count(k), "the next cell's pane, or a light 1 m inside the room, does not keep it");
+    kept = KeepBuiltWindows(rule.b.g, rule.cuts, {}, leftOut, &closed);
+    Check(kept.size() == 2 && leftOut.empty() && closed.empty(), "an open window is never left out by its lights");
+    // placed: the kept window lets the lamp through, the left-out one does not
+    DoorRule hidden(kCutWindow, kCutDoor, true), gone(kCutWindow, kCutDoor, true);
+    for (DoorRule* r : {&hidden, &gone}) {
+        r->b.g.openings.clear(), r->b.g.cutsOnWall = r->b.g.cutsClosed = r->b.g.glassDoors = 0;
+        for (int& n : r->b.g.kinds) n = 0;
+        for (GridEdge& e : r->b.g.edges) e.open = 0;
+    }
+    PlaceGridOpenings(hidden.b.g, KeepBuiltWindows(hidden.b.g, cuts, {in, out}, leftOut, &hidden.b.g.closedWindows), true, {}, [](const CutRec&, GridOpening&) {});
+    PlaceGridOpenings(gone.b.g, KeepBuiltWindows(gone.b.g, cuts, {}, leftOut, &gone.b.g.closedWindows), true, {}, [](const CutRec&, GridOpening&) {});
+    const float hidPass = Pass(hidden.b.g, 5.5f, 1.5f, 1.0f, 5.5f, 1.5f, 6.5f), gonePass = Pass(gone.b.g, 5.5f, 1.5f, 1.0f, 5.5f, 1.5f, 6.5f);
+    std::printf("closed windows: a camera-closed window passes %.3f of the lamp, a deleted one %.3f\n", hidPass, gonePass);
+    Check(Glass(hidPass) && gonePass < 0.05f, "a camera-closed window passes the light through its glass, a deleted one blocks it");
+    // EnsureStoryGrid's stamp: the same lights give the same stamp; the lights of a window gone (open or closed) change it
+    const uint64_t hid = GlazedSig(UnlitWindows(hidden.b.g, {in, out}));
+    Check(hid == GlazedSig(UnlitWindows(hidden.b.g, {in, out})) && hid == 0, "a camera close with its lights kept: no rebuild");
+    Check(GlazedSig(UnlitWindows(hidden.b.g, {})) != hid, "its lights gone (deleted): built again");
+    Check(GlazedSig(UnlitWindows(rule.b.g, {})) != 0, "an open window whose lights went: built again (its close may come later)");
+}
+
+// A camera turn as a later capture logged it: the kitchen's east wall x = 26 holds one window three cells wide, (26,20)..(26,23),
+// whose panes the developer log sized u 0.25..1, 0..1 and 0..0.75 (one pane over the three cells, its window lights centred
+// in the middle cell); every turn closed its cuts by remove posts and posted them again, the grid went 'windows 6 -> 4' and
+// the kitchen gathered with 6 doors, then 8.
+void CameraTurnChecks() {
+    Builder b(40, 40);
+    b.Room(21, 18, 26, 23, 3, true);
+    for (int z = 18; z < 23; z++) b.Wall(false, 26, z), b.Wall(false, 21, z);
+    b.g.xf = Identity();
+    const uint32_t k0 = EdgeKey(26, 20, 26, 21), k1 = EdgeKey(26, 21, 26, 22), k2 = EdgeKey(26, 22, 26, 23);
+    CutRec win;
+    win.kind = kCutWindow;
+    const std::vector<GlassLight> lights{{26.05f, 1.6f, 21.5f, 0.0f, 0.5f, 1.25f}, {25.95f, 1.6f, 21.5f, 0.0f, 0.5f, 1.25f}};
+    Check(WindowLightIn(b.g, k1, lights) == 1 && WindowLightIn(b.g, k0, lights) == 2 && WindowLightIn(b.g, k2, lights) == 2,
+          "a wide window: its middle cell holds its lights, its end cells a pane over them");
+    std::unordered_map<uint32_t, CutRec> edges;
+    for (uint32_t k : {k0, k1, k2}) ApplyCutPost(edges, k, true, win);
+    int changes = 0, built = 0;
+    for (int turn = 0; turn < 5; turn++) {
+        for (uint32_t k : {k0, k1, k2}) changes += ApplyCutPost(edges, k, false, CutRec{}) != 0; // the camera turns to that side
+        std::vector<std::pair<uint32_t, CutRec>> cuts(edges.begin(), edges.end());
+        std::unordered_set<uint32_t> leftOut;
+        std::vector<std::pair<uint32_t, CutRec>> closed;
+        std::string notes;
+        const auto kept = KeepBuiltWindows(b.g, cuts, lights, leftOut, &closed, &notes);
+        built += kept.size() == 3 && leftOut.empty() && closed.size() == 3;
+        if (turn == 0) std::printf("camera turn: %s\n", notes.c_str());
+        for (auto& [k, rec] : edges) rec.closed = leftOut.count(k) ? 2 : 1; // (MarkLeftOutLocked)
+        for (uint32_t k : {k0, k1, k2}) changes += ApplyCutPost(edges, k, true, win) != 0; // and away
+    }
+    Check(changes == 0, "five camera turns: no new cut generation");
+    Check(built == 5, "five camera turns: the three cells of the wide window stay open");
+    PaneShapes panes;
+    std::vector<std::pair<uint32_t, CutRec>> all(edges.begin(), edges.end());
+    WindowPanes(b.g, all, lights, panes);
+    Check(panes.size() == 3 && std::fabs(panes[k0].u0 - 0.25f) < 1e-4f && std::fabs(panes[k2].u1 - 0.75f) < 1e-4f, "its cells sized as in the capture's log");
+}
+
 int main() {
+    RoofedSendChecks();
+    CameraTurnChecks();
+    ClosedWindowChecks();
     PillarLightChecks();
     RaisedWallSpanChecks();
     ArchConeChecks();
@@ -1284,6 +1790,12 @@ int main() {
     Check(one.size() == 1 && DoorSig(half.g, one) != sig && DoorSig(half.g, one) != 0, "one arch cell closed: another signature");
     WallCopyChecks();
     OpeningShapeChecks();
+    BalanceChecks();
+    OpeningColourChecks();
+    OpeningFalloffChecks();
+    OpeningShareChecks();
+    WallFootChecks();
+    CutHoldChecks();
     std::printf("Roofed openings: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

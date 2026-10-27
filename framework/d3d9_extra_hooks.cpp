@@ -35,6 +35,46 @@ std::atomic<DepthReport> g_report{nullptr};
 std::atomic<bool> g_installed{false};
 std::atomic<bool> g_attempted{false};
 
+using GetRenderTargetData_t = HRESULT(__stdcall*)(IDirect3DDevice9*, IDirect3DSurface9*, IDirect3DSurface9*);
+using ColorFill_t = HRESULT(__stdcall*)(IDirect3DDevice9*, IDirect3DSurface9*, const RECT*, D3DCOLOR);
+using GetRenderTarget_t = HRESULT(__stdcall*)(IDirect3DDevice9*, DWORD, IDirect3DSurface9**);
+GetRenderTargetData_t oGetRenderTargetData = nullptr;
+ColorFill_t oColorFill = nullptr;
+GetRenderTarget_t oGetRenderTarget = nullptr;
+std::atomic<SurfaceAccess> g_access{nullptr};
+std::atomic<TargetReport> g_targetReport{nullptr};
+std::atomic<bool> g_targetInstalled{false};
+std::atomic<bool> g_targetAttempted{false};
+
+inline void BeforeAccess(IDirect3DDevice9* dev, IDirect3DSurface9* a, IDirect3DSurface9* b) {
+    if (auto access = g_access.load()) HookGuard::Try("High-precision scene before a back-buffer copy", [&] { access(dev, a, b); });
+}
+
+HRESULT __stdcall HookedGetRenderTargetData(IDirect3DDevice9* dev, IDirect3DSurface9* src, IDirect3DSurface9* dst) {
+    BeforeAccess(dev, src, dst);
+    return oGetRenderTargetData(dev, src, dst);
+}
+
+HRESULT __stdcall HookedColorFill(IDirect3DDevice9* dev, IDirect3DSurface9* surface, const RECT* rect, D3DCOLOR color) {
+    BeforeAccess(dev, surface, nullptr);
+    return oColorFill(dev, surface, rect, color);
+}
+
+HRESULT __stdcall HookedGetRenderTarget(IDirect3DDevice9* dev, DWORD index, IDirect3DSurface9** out) {
+    const HRESULT hr = oGetRenderTarget(dev, index, out);
+    if (SUCCEEDED(hr) && out && *out) {
+        if (auto report = g_targetReport.load()) {
+            IDirect3DSurface9* shown = report(*out);
+            if (shown && shown != *out) {
+                shown->AddRef();
+                (*out)->Release();
+                *out = shown;
+            }
+        }
+    }
+    return hr;
+}
+
 HRESULT __stdcall HookedClear(IDirect3DDevice9* dev, DWORD count, const D3DRECT* rects, DWORD flags, D3DCOLOR color, float z, DWORD stencil) {
     if (auto before = g_beforeClear.load()) before(dev, count, rects, flags);
     if (auto obs = g_clearObs.load()) obs(dev, count, flags, color, z);
@@ -64,6 +104,7 @@ HRESULT __stdcall HookedGetDepthStencilSurface(IDirect3DDevice9* dev, IDirect3DS
 }
 
 HRESULT __stdcall HookedStretchRect(IDirect3DDevice9* dev, IDirect3DSurface9* src, const RECT* srcRect, IDirect3DSurface9* dst, const RECT* dstRect, D3DTEXTUREFILTERTYPE filter) {
+    BeforeAccess(dev, src, dst); // first: the effects PostScene may run here copy the back buffer too
     if (auto before = g_beforeStretch.load())
         HookGuard::Try("PostScene before scene copy", [&] { before(dev, src, srcRect, dst, dstRect, filter); });
     if (auto obs = g_stretchObs.load()) obs(dev, src, dst, filter);
@@ -149,6 +190,45 @@ HRESULT RawSetDepthStencilSurface(IDirect3DDevice9* dev, IDirect3DSurface9* surf
 HRESULT RawGetDepthStencilSurface(IDirect3DDevice9* dev, IDirect3DSurface9** surface) {
     if (!g_installed.load()) return dev->GetDepthStencilSurface(surface);
     return oGetDepthStencilSurface(dev, surface);
+}
+
+bool EnsureTargetHooks(IDirect3DDevice9* dev) {
+    if (g_targetInstalled.load()) return true;
+    if (!dev || g_targetAttempted.exchange(true)) return false;
+    void** vt = *reinterpret_cast<void***>(dev);
+    const int owned[] = {16, 17, 23, 28, 34, 37, 39, 40, 41, 42, 43, 47, 65, 81, 82, 83, 84, 91, 92, 94, 106, 107, 109};
+    const int mine[] = {32, 35, 38};
+    for (int m : mine)
+        for (int o : owned)
+            if (vt[m] == vt[o]) {
+                LOG_ERROR(std::format("[ExtraHooks] vtable[{}] shares code with vtable[{}], render-target hooks not installed", m, o));
+                return false;
+            }
+    oGetRenderTargetData = reinterpret_cast<GetRenderTargetData_t>(vt[32]);
+    oColorFill = reinterpret_cast<ColorFill_t>(vt[35]);
+    oGetRenderTarget = reinterpret_cast<GetRenderTarget_t>(vt[38]);
+    std::vector<DetourBatch::Hook> hooks = {
+        {reinterpret_cast<void**>(&oGetRenderTargetData), reinterpret_cast<void*>(HookedGetRenderTargetData)},
+        {reinterpret_cast<void**>(&oColorFill), reinterpret_cast<void*>(HookedColorFill)},
+        {reinterpret_cast<void**>(&oGetRenderTarget), reinterpret_cast<void*>(HookedGetRenderTarget)},
+    };
+    if (!DetourBatch::InstallHooks(hooks)) {
+        LOG_ERROR("[ExtraHooks] Failed to install the render-target detours");
+        return false;
+    }
+    g_targetInstalled.store(true);
+    LOG_INFO("[ExtraHooks] Installed (GetRenderTargetData, ColorFill, GetRenderTarget)");
+    return true;
+}
+
+void SetTargetSubstitution(SurfaceAccess access, TargetReport report) {
+    g_access.store(access);
+    g_targetReport.store(report);
+}
+
+HRESULT RawGetRenderTarget(IDirect3DDevice9* dev, DWORD index, IDirect3DSurface9** surface) {
+    if (!g_targetInstalled.load()) return dev->GetRenderTarget(index, surface);
+    return oGetRenderTarget(dev, index, surface);
 }
 
 } // namespace ExtraHooks

@@ -167,6 +167,15 @@ screen-space shadows. Lights were placed at the world point under the screen's c
 
 **Outcome:** *Smooth gradients* moved with it, and its default changed from 100% to 0% (off).
 
+### 2026-10-26: Smooth gradients removed
+
+**Context:** the in-game test of the Banding Fix changes.
+
+**Finding:** *Smooth gradients* made no visible difference.
+
+**Outcome:** the deband is removed from `PicturePS` (sampler s8, constant c4 now unused) and from the settings; the pass
+no longer runs with Picture off. An old `deband` key is ignored. See [Banding Fix history](banding-fix.md).
+
 ### 2026-10-07: F10 changes the placement of screen effects
 
 **Evidence:** screenshots show brighter lamps and snow with the UI hidden. F7 probes retain the terrain shader and

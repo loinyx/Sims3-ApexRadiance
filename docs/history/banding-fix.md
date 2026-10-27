@@ -65,3 +65,67 @@ shifted pattern (AO settings revision 5).
 **Finding:** the in-game coverage of the ps_2_x path was not yet confirmed.
 
 **Outcome:** the Banding Fix is flagged experimental and the Banding tab shows a "Still being tested" note.
+
+### 2026-10-26: grain under the UI, specks and a deband that did nothing
+
+**Context:** players reported a grainy picture and areas the fix missed.
+
+**Finding:** five causes, checked in code, light captures and a new offline harness (`tools/banding_fix_check`):
+
+- The draw gate tested only the depth test. The UI's glass passes and back-buffer redraws draw with the depth test on,
+  `ZFUNC ALWAYS` and no depth write (all 30 light captures show such draws, 59 in all, every one the same ps_2_0 computing `x (1 + 0.4) / (x + 0.4)`
+  from a 2048x1024 copy), so they got the grain on top of the scene's; PostScene and Picture already skipped them. The
+  feature page wrongly said the UI draws with the depth test off.
+- The grain crossed the clamp: on native D3D9 and DXVK, 9.7% of pure black pixels came out at level 1 and 12.5% of pure
+  white at 254.
+- Every blended draw got a full grain on top of the target's, also additive and multiply blends (decals
+  `DESTCOLOR` / `SRCCOLOR` in the captures).
+- The Picture dither used the scene's IGN pattern (correlated) and changed every pixel by up to half a step.
+- *Smooth gradients* at the default 8% had a threshold of 0.48 level: no 8-bit neighbour passed it, so the pass ran
+  every frame and changed nothing (0 pixels on a stepped gradient, offline).
+
+**Outcome:** depth-`ALWAYS` draws without depth write are left alone; the grain stays within half a step of black and
+white and tapers to uniform above mid-grey; additive and multiply blends get half of it with a decorrelated phase; the
+pattern is R2 (lower 2x2 and 4x4 block variance than IGN); the AO composite uses R2 with swapped coefficients and the
+Picture dither IGN, triangular, only where the pass changed the pixel; the deband threshold is `1 + 6.25 x setting`
+levels with bilinear taps. Shader acceptance is unchanged (ps_3_0 4907 / 4907, ps_2_0 2996 / 3104). Subtracting half a
+pixel from the ps_2_x position was rejected: the two grains already match pixel for pixel. Not yet confirmed in game.
+
+### 2026-10-26: High-precision scene (experimental)
+
+**Context:** the grain hides the 8-bit rounding of each scene draw, but every blend still rounds to 8 bits, so a pixel
+lit by several passes collects one rounding and one grain per pass.
+
+**Finding:** from a read-only study of the frame: only render target 0 set to the back buffer needs a substitute; the
+pick pass, shadows, reflections and bloom use their own targets. Apex callbacks save render target 0 with
+`GetRenderTarget` and put it back with `CallOriginalSetRenderTarget` (Ambient Occlusion's receiver mask, the GPU lamps),
+so the substitution has to apply there too and `GetRenderTarget` has to report the back buffer. A 16-bit unsigned
+normalised target clamps like the back buffer; FP16 does not, and 10-bit formats keep 2 bits of alpha (the bloom
+mask). The offline check measured the GPU's own float to 8-bit conversion (RTX 4070 Ti SUPER): values up to 0.56
+level above an integer round down, the same for the game's 8-bit path.
+
+**Outcome:** a switch on the Banding Fix card, off by default, with the target, the substitution and one resolve with
+one grain (exact 8-bit values pass unchanged). 10-bit output was left out. Not yet tested in game: open checks on the
+[validation page](../validation/banding-fix.md#open-checks).
+
+### 2026-10-26: High-precision scene on by default; Smooth gradients and Moving grain removed
+
+**Context:** the in-game test of the grain changes and the High-precision scene (development build of `banding/all`).
+
+**Finding:** the grain and the High-precision scene looked right; the card showed the target active (63 MB of video
+memory, most resolves at a back-buffer copy). *Smooth gradients* made no visible difference; *Moving grain* was not
+wanted.
+
+**Outcome:** the High-precision scene is on by default (also in the built-in profiles) and no longer marked
+Experimental. *Smooth gradients* is removed with its deband in the Picture pass (the pass no longer runs for it alone)
+and *Moving grain* with it; old `deband` and `graoEmMovimento` keys are ignored. The card was redesigned: a before /
+after picture of the gradient that follows the current state, then *Grain* (Strength) and *Precision* (the switch and a
+Status pill), with the developer resolves under *Live counters*.
+
+### Glow sprite smoothing (removed)
+
+**Context:** car headlight glows and beams showed rings: their textures are DXT5 with a radial or beam gradient in alpha, magnified over a large screen area.
+
+**Tried:** a smoothed 16-bit copy of the sprite texture (Gaussian, then edge-aware), bound for the three-instruction sprite pixel shader family.
+
+**Outcome:** removed. In game the headlights looked the same with and without it.

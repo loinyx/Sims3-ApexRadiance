@@ -40,7 +40,7 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 
 | Feature | Status |
 |---|---|
-| [Night Lighting](features/night-lighting/README.md): lamps that really light the world at night | Released; Released in 2.15.6: winter terrain layout recognition, foliage dusk synchronisation and less repeated lighting work |
+| [Night Lighting](features/night-lighting/README.md): lamps that really light the world at night | Released; Released in 2.15.6: winter terrain layout recognition, foliage dusk synchronisation and less repeated lighting work; Released in 2.16.0: lamp light past 1 outdoors, outdoor light through openings balanced, room light map edges at walls, wall lamps lighting their wall |
 | [Lot light pass](features/night-lighting/lot-light-pass.md): lot and street lamps on lot grass | Released; Released in 2.13.0: lamp shade on lot ground (walls shade lamp light near the ground); Released in 2.13.1: the shade past the lot (world grass, roads), garden walls and fences, smooth ground shade with Instant; Released in 2.15.3: a shade that takes only the light of the lamps a wall blocks, closed gates and fence gaps, snowy lots shaded, indoor light added to the ground |
 | [World atlas and smoothed maps](features/night-lighting/world-atlas-and-smoothed-maps.md): smooth terrain light maps | Released |
 | [Terrain relight](features/night-lighting/terrain-relight.md): rebuilding terrain lighting at dusk and after edits | Released |
@@ -69,7 +69,7 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 | [Picture filters](features/picture-filters.md): colour and image controls, 26 stackable filters, LUT files | Released (Filters tab: 2.7.0) |
 | [Edge Smoothing](features/edge-smoothing.md): SMAA and FXAA | Released |
 | [Depth Blur](features/depth-blur.md): depth of field | Released |
-| [Banding Fix](features/banding-fix.md): dither against colour banding | Experimental (released in 2.2.0) |
+| [Banding Fix](features/banding-fix.md): dither against colour banding | Experimental (released in 2.2.0); Released in 2.16.0: High-precision scene on by default, redesigned card |
 
 ### Performance
 

@@ -68,6 +68,11 @@ bool RealisticOpeningsActive();
 // the openings noted.
 void SetOutdoorThroughOpenings(bool on);
 bool OutdoorThroughOpeningsActive();
+// Their brightness: the lamps of room 0 a roofed room takes through its openings keep the scale of the outdoor surfaces
+// (floors and the directional maps: Ground brightness x Lot lamp brightness while the lot pass applies them; walls: the
+// walls' Brightness while walls are lit) over the room's normalisation (opening_lamp_balance.h). Night values: the daytime
+// curve is applied apart. A change of more than 0.5% relights every room; the first value relights none.
+void SetOpeningLampBalance(float groundBrightness, float lotLampBrightness, bool groundOn, float wallBrightness, bool wallsOn);
 // Doors block light (option "portasBloqueiamLuz", default on): a door or gate cut (and a cut of unknown kind) lets no lamp
 // light through, as the game keeps doors closed except while they open; arches, windows and doors with glass (a window light
 // of the door in its cell) stay open. Every reader of the
@@ -361,8 +366,9 @@ bool QueueRoom0(uintptr_t tracker, int story);
 // lamps are sent as the changed-room walk sends them. Returns the rooms sent.
 int SendRoom0Dependents(uintptr_t tracker, int story);
 // The tail of a GPU-handled lamp edit (Real-time outdoor lamps, the outdoor delta: the edit marked no room): the rooms that
-// take room 0's lamps of the stories in storyMask, each once, sent with no urgency
-int SendRoom0DependentsTail(uintptr_t tracker, unsigned storyMask);
+// take room 0's lamps of the stories in storyMask, each once, sent with no urgency; the roofed rooms that take them through
+// their openings (only those that saw a door of one of `edited`, the changed lamps, when given) with a lamp edit's tier 1
+int SendRoom0DependentsTail(uintptr_t tracker, unsigned storyMask, const std::vector<uintptr_t>* edited = nullptr);
 // A GPU-handled lamp edit: the changed-room walk right after it takes its rooms as that edit's tail (no urgency)
 void NoteGpuEdit();
 // The finalize's own steps for a room 0 the delta locks outside a solve (Steam 1.67.2, checked once): no room holds the

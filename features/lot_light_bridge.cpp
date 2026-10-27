@@ -167,6 +167,15 @@ struct SamplerBind {
 //   lamps = lerp(terrain, max(lm - ex, terrain tw), w) M + ex w,  tw = sat((1 - a) 255) (0 only at a = 1: the map alone).
 // ex comes after the lamp scale c3.x, so the daylight curve fades it like every lamp. With c34.x = 0: a = 0, s = 0, tw = 1,
 // exactly the pass of before.
+// The outdoor scale (RtOutdoorLamps::ScaleOf, s4): with Instant lamp lighting the lot map is a relit copy whose texels past 1
+// were divided by their largest channel (the hue kept); c35.x = kScaleLog2 multiplies them back by 2^(c35.x s4.r), so the
+// ground under a strong lamp shows its light instead of the cut at 1 (F7 of a courtyard beside a green sconce: the map flat
+// at 1 out to 4.6 m, the room behind its glass door lit as brightly). c35.x = 0 (no scale: Classic, another lot, a device
+// with one render target): the pass of before. The soft lot edge blends it to the terrain over its band as before.
+// The walls' shade (the mask's alpha, 4 texels a metre, bilinear) is soft over a texel at a wall's foot: right behind a
+// screen wall its sconce lit the texel straddling the wall at 0.3 to 0.5 (F7 of a lattice wall: a green strip along the
+// foot behind it, "the light passes under the floor"). Within 1 that is the pass of before; the part past 1 (up to 7
+// times more) takes the shade to the 4th power, so it shows only where the shade lets the lamp through whole.
 const char* kReplacementHlsl = R"(
 float4 c0 : register(c0);
 float4 c1 : register(c1);
@@ -184,10 +193,12 @@ float4 cLotGain : register(c31);
 float4 cMaskX : register(c32);
 float4 cMaskZ : register(c33);
 float4 cExit : register(c34);
+float4 cScale : register(c35);
 samplerCUBE sSky : register(s0);
 sampler2D sLot : register(s1);
 sampler2D sTerrain : register(s2);
 sampler2D sMask : register(s3);
+sampler2D sScale : register(s4);
 sampler2D sShadow : register(s5);
 struct PSIn {
     float4 shadowPos : TEXCOORD2;
@@ -221,10 +232,14 @@ float4 main(PSIn i) : COLOR0 {
     // unsupported VS mapping.
     float2 lotUv = i.lotUv * (1 + cLotGain.z) + cEdge.zw;
     float4 lot = tex2D(sLot, lotUv);
+    float k = exp2(tex2D(sScale, lotUv).r * cScale.x);
     float3 lm = lot.rgb * cLotGain.x * c3.x;
     float a = lot.a * cExit.x;
-    float3 ex = lm * saturate(a / max(dot(lot.rgb, float3(0.2126, 0.7152, 0.0722)), 1.0 / 255));
-    float3 lamps = lerp(terrain, max(lm - ex, terrain * saturate((1 - a) * 255)), w) * maskTex.a + ex * w;
+    float share = saturate(a / max(k * dot(lot.rgb, float3(0.2126, 0.7152, 0.0722)), 1.0 / 255));
+    float3 ex = k * lm * share; // (the indoor light E is absolute: its share of the whole sum)
+    float3 own = lm * (1 - share);
+    float shade2 = maskTex.a * maskTex.a;
+    float3 lamps = lerp(terrain, max(own, terrain * saturate((1 - a) * 255)), w) * maskTex.a + ex * w + (k - 1) * own * w * shade2 * shade2;
     float3 col = sun * c0.rgb + lamps;
     col = texCUBE(sSky, i.normal).rgb * c4.x + col;
 #ifdef WET
@@ -4221,6 +4236,7 @@ struct PatchedPs {
     ShaderPatches::BasisSmoothPatch smooth;
     ShaderPatches::RoomMapPatch room;
     ShaderPatches::WindowOutdoorPatch window;
+    ShaderPatches::WallScalePatch wall;
     DWORD nightConst = 0;
     int cubeTint = -1; // PatchCubeTint
     DWORD nativeAlphaSampler = 0;
@@ -4230,6 +4246,7 @@ struct PatchedPs {
 };
 std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_roadPs, g_floorPs, g_snowFloorPs, g_snowFloorPs0, g_leafPs, g_fencePs, g_snowCoverPs, g_snowReliefPs, g_objLampPs;
 std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_terrainAlphaPs;
+std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_wallScalePs; // outside walls with the outdoor scale (DrawWallGain)
 // Winter floor and snow-on-floor copies with the ground lamp shade, per (kind, where the vertex shader writes world y):
 // FloorShadeKey; the copies without it stay in g_floorPs / g_snowFloorPs / g_snowFloorPs0
 std::map<int, std::unordered_map<IDirect3DPixelShader9*, PatchedPs>> g_floorShadePs;
@@ -6697,7 +6714,36 @@ template <typename DrawFn> bool DrawWallGain(IDirect3DDevice9* dev, DrawFn draw)
     g_nativeWallTick.store(drawTick ? drawTick : 1, std::memory_order_release);
     std::memcpy(c, old, sizeof(c));
     c[0] = TerrainLightingPolicy::WallLampScale(old[0], g_night.load(std::memory_order_relaxed), gain);
-    if (c[0] == old[0]) return false; // unchanged lamp scale: retain the native draw
+    // the outdoor scale of the relit wall atlas (RtOutdoorLamps::ScaleOf): the wall's lamp light past 1, as the ground beside
+    // it shows it (a copy of the shader multiplies the atlas read by it; the bloom pass keeps the game's shader)
+    IDirect3DTexture9* scale = nullptr;
+    PatchedPs* sp = nullptr;
+    if (RtOutdoorLamps::Enabled() && g_night.load(std::memory_order_relaxed) > 0.0f) { // (by day lamps are off: the wall as before)
+        sp = &PatchedFor(dev, g_wallScalePs, "Outside wall (outdoor scale)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchWallScale(t, pp.wall); });
+        if (sp->ps) {
+            IDirect3DBaseTexture9* map = nullptr;
+            D3D9Hooks::GetBoundTexture(dev, sp->wall.mapSampler, &map);
+            scale = RtOutdoorLamps::ScaleOf(map);
+            if (map) map->Release();
+        }
+    }
+    if (c[0] == old[0] && !scale) return false; // unchanged lamp scale: retain the native draw
+    float oldQ[4] = {};
+    std::optional<SamplerBind> scaleMap;
+    const auto scaledPs = [&]() {
+        if (!scale) return;
+        dev->GetPixelShaderConstantF(sp->wall.constReg, oldQ, 1);
+        const float q[4] = {RtOutdoorLamps::kScaleLog2, 0.0f, 0.0f, 0.0f};
+        SetPsConst(dev, sp->wall.constReg, q, 1);
+        scaleMap.emplace(dev, sp->wall.sampler, scale, D3DTEXF_NONE);
+        SetPs(dev, sp->ps);
+    };
+    const auto gamePs = [&]() {
+        if (!scale) return;
+        SetPs(dev, g_curPs);
+        scaleMap.reset();
+        SetPsConst(dev, sp->wall.constReg, oldQ, 1);
+    };
 
     DWORD colorMask = 0, blend = FALSE, zWrite = FALSE, stencilWriteMask = 0;
     const bool haveStates =
@@ -6724,14 +6770,18 @@ template <typename DrawFn> bool DrawWallGain(IDirect3DDevice9* dev, DrawFn draw)
         // Pass 2 is the normal geometry write, but RGB only, with Apex's stronger baked lamp term.
         dev->SetRenderState(D3DRS_COLORWRITEENABLE, rgbMask);
         SetPsConst(dev, reg, c, 1);
+        scaledPs();
         draw();
+        gamePs();
         SetPsConst(dev, reg, old, 1);
         dev->SetRenderState(D3DRS_COLORWRITEENABLE, colorMask);
         ApexUtil::CountOne(g_wallBloomPreserved);
     } else {
         // If the wall is blended, alpha is not writable, or a state query failed, preserve the exact previous behaviour.
         SetPsConst(dev, reg, c, 1);
+        scaledPs();
         draw();
+        gamePs();
         SetPsConst(dev, reg, old, 1);
         ApexUtil::CountOne(g_wallBloomFallback);
     }
@@ -6937,18 +6987,34 @@ template <typename DrawFn> bool DrawFloorAtlas(IDirect3DDevice9* dev, DrawFn dra
         SetPsConst(dev, static_cast<UINT>(p.floor.heightConst), height, 1);
         // story 0: max(map, atlas) x the lot's ground lamp shade (world x, z, y = the copy's TEXCOORDn.xyz)
         FloorShadeBind shade(dev, p.floor, fv.worldConst, 1.0f, exitOn && p.floor.exitLight);
+        // the outdoor scale of the relit floor map (RtOutdoorLamps::ScaleOf; FloorPatch::outScaleSampler): x 1 without it
+        IDirect3DTexture9* scale = nullptr;
+        float oldQ[4] = {};
+        if (p.floor.outScaleSampler >= 0) {
+            IDirect3DBaseTexture9* map = nullptr;
+            D3D9Hooks::GetBoundTexture(dev, p.floor.mapSampler, &map);
+            scale = RtOutdoorLamps::ScaleOf(map);
+            if (map) map->Release();
+            dev->GetPixelShaderConstantF(static_cast<UINT>(p.floor.outScaleConst), oldQ, 1);
+            const float q[4] = {scale ? RtOutdoorLamps::kScaleLog2 : 0.0f, 0.0f, 0.0f, 0.0f};
+            SetPsConst(dev, static_cast<UINT>(p.floor.outScaleConst), q, 1);
+        }
+        std::optional<SamplerBind> scaleMap;
+        if (p.floor.outScaleSampler >= 0) scaleMap.emplace(dev, static_cast<DWORD>(p.floor.outScaleSampler), scale, D3DTEXF_NONE);
         SetVs(dev, fv.vs);
         SetPs(dev, p.ps);
         ConstGain lampGain(dev, p.floor.scaleConst, FloorDayGain()); // the lamp scale of max(map, atlas)
         if (LightProbe::Capturing())
-            g_objDrawInfo = std::format("mod draw: outdoor floor | atlas weight 1 - floor map alpha: {} | {} | indoor light on the ground: {}", height[1] < 0.0f ? "on" : "off",
-                                        shade.Text(), !exitOn ? "off" : p.floor.exitLight ? "on" : "no room in the shader");
+            g_objDrawInfo = std::format("mod draw: outdoor floor | atlas weight 1 - floor map alpha: {} | {} | indoor light on the ground: {} | outdoor scale: {}",
+                                        height[1] < 0.0f ? "on" : "off", shade.Text(), !exitOn ? "off" : p.floor.exitLight ? "on" : "no room in the shader",
+                                        p.floor.outScaleSampler < 0 ? "no room in the shader" : scale ? "on" : "off (no relit copy)");
         draw();
         g_objDrawInfo.clear();
         SetPs(dev, originalPs);
         SetVs(dev, originalVs);
         SetPsConst(dev, p.floor.atlasConst, oldC, 1);
         SetPsConst(dev, static_cast<UINT>(p.floor.heightConst), oldH, 1);
+        if (p.floor.outScaleSampler >= 0) SetPsConst(dev, static_cast<UINT>(p.floor.outScaleConst), oldQ, 1);
     }
     g_inOwnCall = false;
     ApexUtil::CountOne(g_floorAtlasDrawn);
@@ -7635,6 +7701,17 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
         // (2.15.3) the indoor light in the lot map's alpha, added after the max and the shade (c34, kReplacementHlsl)
         const float exitGate[4] = {LevelLightShare::IndoorLightOnGroundActive() ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
         SetPsConst(dev, 34, exitGate, 1);
+        // the outdoor scale of the relit lot map on s1 (c35, kReplacementHlsl)
+        IDirect3DBaseTexture9* lotMap = nullptr;
+        D3D9Hooks::GetBoundTexture(dev, 1, &lotMap);
+        IDirect3DTexture9* const scale = RtOutdoorLamps::ScaleOf(lotMap);
+        if (lotMap) lotMap->Release();
+        SamplerBind scaleMap(dev, 4, scale, D3DTEXF_NONE);
+        const float scaleOn[4] = {scale ? RtOutdoorLamps::kScaleLog2 : 0.0f, 0.0f, 0.0f, 0.0f};
+        float savedScale[4] = {};
+        const bool scaleSaved = SUCCEEDED(dev->GetPixelShaderConstantF(35, savedScale, 1));
+        SetPsConst(dev, 35, scaleOn, 1);
+        if (LightProbe::Capturing()) g_objDrawInfo += scale ? " | outdoor scale: on" : " | outdoor scale: off (no relit copy)";
         SetPs(dev, replacement);
         if (atlas) SetVsConst(dev, 14, atlasMap, 1);
         SetPsConst(dev, 28, edge, 3);
@@ -7646,6 +7723,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
         if (atlas) SetVsConst(dev, 14, v, 1);
         SetPsConst(dev, 28, savedEdge, 4);
         if (maskSaved) SetPsConst(dev, 32, savedMask, 3);
+        if (scaleSaved) SetPsConst(dev, 35, savedScale, 1);
     }
     g_objDrawInfo.clear();
     SetPs(dev, original);
@@ -9589,7 +9667,7 @@ void Shutdown(bool keepChunkMaps) {
     }
     g_meltTried = false;
     g_patchedGen++; // (PatchedFor's front answers and RoomMapConsts' last shader)
-    for (auto* cache : {&g_terrainAlphaPs, &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs, &g_windowPs,
+    for (auto* cache : {&g_terrainAlphaPs, &g_wallScalePs, &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs, &g_windowPs,
                         &g_objLampPsReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_windowPsReach}) {
         for (auto& [k, p] : *cache)
             if (p.ps) p.ps->Release();
@@ -9715,7 +9793,7 @@ void MeasureMemoryImpl() {
     uint64_t patched = 0;
     size_t patchedItems = 0;
     const auto ps = [&](const std::unordered_map<IDirect3DPixelShader9*, PatchedPs>& m) { patched += Hash(m), patchedItems += m.size(); };
-    for (const auto* m : {&g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_terrainAlphaPs,
+    for (const auto* m : {&g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_terrainAlphaPs, &g_wallScalePs,
                           &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_objLampPsReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_windowPs, &g_windowPsReach,
                           &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs})
         ps(*m);

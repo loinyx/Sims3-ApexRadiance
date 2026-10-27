@@ -124,10 +124,13 @@ LampRegs ReadLamp(int i) {
 }
 float3 Law(LampRegs L, float3 p, float3 n, float wallReach) {
     float3 l = L.pos.xyz - p;
+    const float plane = dot(n, l);
     const float d2 = max(dot(l, l), 1e-4);
     const float inv = rsqrt(d2);
     l *= inv;
-    const float ndl = Sat(dot(n, l));
+    // (gpu_lamp_law.h MountedNdl) a lamp within 0.4 m in front of a wall lights that wall at N.l 0.5 x (1 - plane / 0.4) at least
+    const float mount = 0.5 * Sat((0.5 - abs(n.y)) * 1e4) * Sat(plane * 1e4) * Sat(1.0 - plane * 2.5);
+    const float ndl = max(Sat(dot(n, l)), mount);
     const float f = min(ndl * (inv * inv) * L.pos.w, L.col.w);
     const float al = dot(L.axis.xyz, l);
     const float t1 = (al + L.off.x) * -L.axis.w, t2 = (al - L.off.z) * L.off.y;
@@ -321,7 +324,13 @@ float MaskAll(float3 P) {
     }
     return all;
 }
-float4 ComposePS(TexelIn i, float2 vpos : VPOS) : COLOR0 {
+// COLOR1: the outdoor scale (rt_outdoor_lamps.h ScaleOf), the factor KeepHue took off the sum: log2(largest channel) / 3 in
+// 8 bits (1 to 8 times, 0.8 % a level), 0 within 1. Bound only on maps the draws multiply back (no wall blur)
+struct ComposeOut {
+    float4 c : COLOR0;
+    float4 k : COLOR1;
+};
+ComposeOut ComposePS(TexelIn i, float2 vpos : VPOS) {
     const float4 acc = tex2Dlod(sAcc, float4((vpos + 0.5) * gD.zw, 0, 0));
     const float3 S = i.base.rgb + acc.rgb;
     float alpha = i.n.w;
@@ -337,9 +346,16 @@ float4 ComposePS(TexelIn i, float2 vpos : VPOS) : COLOR0 {
             alpha = a;
         }
     }
-    float4 c = float4(min(max(Fin(S.r), 0.0), 1.0), min(max(Fin(S.g), 0.0), 1.0), min(max(Fin(S.b), 0.0), 1.0), min(max(Fin(alpha), 0.0), 1.0));
+    // (outdoor_delta_model.h PackInput) the sum's hue kept past 1 (KeepHue), then cut at 1
+    float3 s = max(float3(Fin(S.r), Fin(S.g), Fin(S.b)), 0.0);
+    const float sm = max(s.r, max(s.g, s.b));
+    if (sm > 1.0) s /= sm;
+    float4 c = float4(min(s, 1.0), min(max(Fin(alpha), 0.0), 1.0));
     if (i.base.w != 0) c.rgb = clamp(c.rgb + i.base.w, 0.0, 1.0);
-    return float4(Rne(c.r * 255.0), Rne(c.g * 255.0), Rne(c.b * 255.0), Rne(c.a * 255.0)) / 255.0;
+    ComposeOut o;
+    o.c = float4(Rne(c.r * 255.0), Rne(c.g * 255.0), Rne(c.b * 255.0), Rne(c.a * 255.0)) / 255.0;
+    o.k = (sm > 1.0 ? Rne(saturate(log2(sm) / 3.0) * 255.0) / 255.0 : 0.0).xxxx;
+    return o;
 }
 
 )RAW"
@@ -456,7 +472,10 @@ float4 ComposeRlgPS(TexelIn i, float2 vpos : VPOS) : COLOR0 {
                 alpha = a;
             }
         }
-        c = float4(min(max(Fin(S.r), 0.0), 1.0), min(max(Fin(S.g), 0.0), 1.0), min(max(Fin(S.b), 0.0), 1.0), min(max(Fin(alpha), 0.0), 1.0));
+        float3 s = max(float3(Fin(S.r), Fin(S.g), Fin(S.b)), 0.0); // (as ComposePS: the hue kept past 1)
+        const float sm = max(s.r, max(s.g, s.b));
+        if (sm > 1.0) s /= sm;
+        c = float4(min(s, 1.0), min(max(Fin(alpha), 0.0), 1.0));
     }
     if (i.base.w != 0) c.rgb = clamp(c.rgb + i.base.w, 0.0, 1.0);
     return float4(Rne(c.r * 255.0), Rne(c.g * 255.0), Rne(c.b * 255.0), Rne(c.a * 255.0)) / 255.0;

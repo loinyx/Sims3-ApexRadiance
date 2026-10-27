@@ -89,13 +89,23 @@ inline float MaskAlpha(float visLum, float allLum, float under) {
     return a;
 }
 
-// The colour FUN_006a31d0 packs for an outdoor texel: min(sum, 1) and min(alpha, 1) (0x006A34C2). A sum taken apart and
-// put together again can end a rounding under 0, where the true sum is 0 or more.
+// An outdoor texel's sum keeps its hue where it passes 1: divided by its largest channel (SolvePointBatch, before the
+// game's min). Cut channel by channel, a strong red sconce's R stopped at 1 while a weaker yellow light filled G, and the
+// courtyard by the lamp showed yellow (an F7 of a red sconce: lot map (1, 1, 0.41) beside it). A sum within 1 is unchanged.
+inline void KeepHue(float c[3]) {
+    const float m = std::max({c[0], c[1], c[2]});
+    if (m > 1.0f && std::isfinite(m))
+        for (int i = 0; i < 3; i++) c[i] /= m;
+}
+// The colour FUN_006a31d0 packs for an outdoor texel: min(sum, 1) and min(alpha, 1) (0x006A34C2), the sum's hue kept
+// (KeepHue). A sum taken apart and put together again can end a rounding under 0, where the true sum is 0 or more.
 inline void PackInput(const float S[3], float alpha, float out[4]) {
     for (int i = 0; i < 3; i++) {
         const float v = std::isfinite(S[i]) ? S[i] : 0.0f;
-        out[i] = std::min(std::max(v, 0.0f), 1.0f);
+        out[i] = std::max(v, 0.0f);
     }
+    KeepHue(out);
+    for (int i = 0; i < 3; i++) out[i] = std::min(out[i], 1.0f);
     out[3] = std::min(std::isfinite(alpha) ? std::max(alpha, 0.0f) : 0.0f, 1.0f);
 }
 // Smooth light maps' dither (RoomMapDither DitherPack): d (in units of the colour, the level offset / 255) added to r, g, b

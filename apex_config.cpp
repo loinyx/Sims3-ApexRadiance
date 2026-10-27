@@ -165,7 +165,7 @@ void DoMigrate() {
                     // settings from before the Picture section existed: the grading lived in [qol.hdr]
                     toml::table pic;
                     pic.insert("enabled", (*h)["enabled"].value_or(false));
-                    for (const char* k : {"exposure", "contrast", "midtones", "shadows", "highlights", "blacks", "temperature", "tint", "saturation", "vibrance", "deband", "sharpen"})
+                    for (const char* k : {"exposure", "contrast", "midtones", "shadows", "highlights", "blacks", "temperature", "tint", "saturation", "vibrance", "sharpen"})
                         if (const toml::node* v = h->get(k)) pic.insert_or_assign(k, *v);
                     qol.insert_or_assign("picture", std::move(pic));
                     carried.push_back("qol.picture (from the old grading in qol.hdr)");

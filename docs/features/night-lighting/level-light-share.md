@@ -10,7 +10,7 @@ their own story. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Missing outdoor gather entries restored: Released in 2.15.5.  Outdoor and indoor light between stories: Released (present since 2.1.0, the first version in this repository). Indoor light through openings across more than one floor, the raised-room wall veto, structure-change refresh and the *Wall seams.csv* recording: Released in 2.6.0. Walls block light on floors and objects, indoor objects lit by lamps of another story and an atrium's stories changing together, and the lit story's wall test from where an outdoor lamp's ray enters it (upper half walls): Released in 2.7.0. Placed floors of balconies and upper stories block a lamp below them (walls, floors, windows, objects, fences) and *Buildings block light on objects* (was *Walls block light on objects*): Released in 2.12.3. Lighting corrections: Released in 2.12.1. Outdoor light through openings into roofed rooms (garden lamps of the story below included), indoor light through openings, *Doors block light*, lamp light through openings in the outside walls' copies and room 0's own wall test, *Walls shade lamp light near the ground*, *Buildings block lamp light on trees and objects*, *Shadow softness*, walls ending at a floor above: Released in 2.13.0. Closed-floor support-row guards, walls of the lamp's own story for light through floor openings, hard wall tops under a ceiling, floor-level sills without a soft rim, and indoor light independent of the camera: Released in 2.14.0. *Indoor light adds to the ground*, pane-sized windows, ceiling lamps kept out of closed rooms above, story boundaries at tile floors and gables sampled from their drawn foot: Released in 2.15.3. Adjacent gable samples stay consistent; short pillar blockers use their measured top, and verified floor tiles under emitters cast per-lamp soft shadows on instanced structures: Released in 2.15.4. Per-key outdoor queue recovery and exact lamp evaluation optimisation: Released in 2.15.6. |
+| Availability | Missing outdoor gather entries restored: Released in 2.15.5.  Outdoor and indoor light between stories: Released (present since 2.1.0, the first version in this repository). Indoor light through openings across more than one floor, the raised-room wall veto, structure-change refresh and the *Wall seams.csv* recording: Released in 2.6.0. Walls block light on floors and objects, indoor objects lit by lamps of another story and an atrium's stories changing together, and the lit story's wall test from where an outdoor lamp's ray enters it (upper half walls): Released in 2.7.0. Placed floors of balconies and upper stories block a lamp below them (walls, floors, windows, objects, fences) and *Buildings block light on objects* (was *Walls block light on objects*): Released in 2.12.3. Lighting corrections: Released in 2.12.1. Outdoor light through openings into roofed rooms (garden lamps of the story below included), indoor light through openings, *Doors block light*, lamp light through openings in the outside walls' copies and room 0's own wall test, *Walls shade lamp light near the ground*, *Buildings block lamp light on trees and objects*, *Shadow softness*, walls ending at a floor above: Released in 2.13.0. Closed-floor support-row guards, walls of the lamp's own story for light through floor openings, hard wall tops under a ceiling, floor-level sills without a soft rim, and indoor light independent of the camera: Released in 2.14.0. *Indoor light adds to the ground*, pane-sized windows, ceiling lamps kept out of closed rooms above, story boundaries at tile floors and gables sampled from their drawn foot: Released in 2.15.3. Adjacent gable samples stay consistent; short pillar blockers use their measured top, and verified floor tiles under emitters cast per-lamp soft shadows on instanced structures: Released in 2.15.4. Per-key outdoor queue recovery and exact lamp evaluation optimisation: Released in 2.15.6. Outdoor lamps through openings at the outdoor scale and cut, falling off from the opening and fading into the room; windows kept by the window built; lamp edits sending the rooms behind openings: Released in 2.16.0. |
 | Default | On (every switch; *Light through doors and windows* follows `kRealisticOpeningsDefault` in `build_flavor.h`, on) |
 | Menu | Lighting > Stories (*Wall lamps at the right height*, *Seamless walls between floors* and *Every floor in full detail* under the folded *Game fixes*); Lighting > Buildings > Rooms at Night (group LAMP LIGHT: *Outdoor light through openings*, *Indoor light through openings*, *Indoor light adds to the ground*, *Doors block light*; then *Shadow softness*, and *Smooth light maps* under *Game fixes*); Lighting > Objects (*Buildings block lamp light on trees and objects*); Lighting > Ground (*Walls shade lamp light near the ground*) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -634,6 +634,27 @@ half wall and the objects in them.
   room. The game opens a door only during its animation; a door seen open at that moment, and glass doors, are not
   modelled: real-time door state belongs to per-pixel lighting on the GPU, and a glass door would need the cutout mask's
   shape (no resource read path yet).
+- **Closes held** ([`cut_close_hold.h`](../../../features/cut_close_hold.h)): a cut closed again counts for lamp light
+  only after it stays closed for 2 s (`CutCloseHold::kHoldMs`, applied by `RequeueCutStories`); an add of the same edge
+  within that time cancels it. In game, camera turns made the game post a lot's cuts again (21 posts each, 3 times): its
+  window cuts closed and opened again 0.18 to 0.67 s later. Each close took the windows out of the story's grid and a
+  roofed room behind them gathered with 2 doors to the outside, then with 5, and its light depended on how the camera had
+  moved (`[Openings] ... windows 3 -> 0` then `0 -> 3` in the log, a kitchen dark from one side and lit from the other).
+  The `[Openings]` line and the *outdoor light through openings* status count the closes reopened within the hold and
+  those that lasted. Unverified: which game path re-posts the cuts on a camera move.
+- **Windows by the window built:** the hold did not cover the camera: it closes the window cuts of the wall it looks
+  through and keeps them closed while it stays (a later capture: `windows 6 -> 3` at a camera turn, 18 closes that lasted,
+  the kitchen's `[RoofedLamps]` gathers alternating 8 and 5 doors to the outside, every window light still listed). So a
+  window's close no longer goes through the hold nor changes the story's cuts: it marks the cut closed
+  (`CutRec::closed`, `ApplyCutPost`), with no new generation. The grid keeps a closed window while a window light (type
+  7 or 8) stands in front of its cell or a sized pane lies over it (`WindowLightIn`, `KeepBuiltWindows`: a window three
+  cells wide has its lights centred in its middle cell, and a centre test alone left its end cells out at each camera
+  turn, `windows 6 -> 4` in a later capture); a deleted window loses its lights and
+  is left out (and leaves the lot's geometry key, `StoryCutsContent`). `EnsureStoryGrid` builds the grid again when the
+  set of window cuts with no light changes (`UnlitWindows`, at most once a second, as for glass doors), and an add of a
+  window left out gives a new generation. Doors, arches and gates keep the hold. A window with no window light of its own
+  (none known in the base game) closes and opens with the camera as before, without the hold. The `[Openings]` line
+  counts the window closes marked.
 - **Grids built too early:** a grid built while its lot streams in can have no wall edge yet (in game: stories 1..4
   of `B1280029950F0CA0` with 79 / 98 / 38 / 8 noted cuts and no wall, and no room of theirs gathered again). A grid with
   no wall edge on a story with noted cuts or roofed tiles is not kept (`NoteGridReadiness`); the rooms on its tiles (at
@@ -743,6 +764,90 @@ floor mask.
   out). Directional maps (`BasisLightHook`): the same test at the basis sample, the contribution scaled by it (0: left
   out), then the day factor. Normalisation (`RoomNormHook`): a room whose list holds
   only borrowed lamps (other stories' or these) gets no boost.
+- **At the outdoor scale** ([`opening_lamp_balance.h`](../../../features/opening_lamp_balance.h)): outside, the same lamp
+  is drawn from room 0's map, its sum divided by its largest channel past 1, times the outdoor surface's brightness (the lot pass: *Ground
+  brightness* x *Lot lamp brightness*; outside walls: the walls' *Brightness*), and room 0 is not normalised. Inside, the
+  room solve summed it whole, with no cut before the room's curve, and the room's normalisation multiplied it. A light
+  capture of a green sconce (intensity 1.7, colour (0, 1, 0), a story-0 room-0 lamp listed twice) beside a courtyard: the
+  kitchen behind its glass door showed 0.808 on screen, the courtyard at the same distance at most 0.567 of its map.
+  Each entry of such a lamp is now held under 1 / its entries at its largest channel, its hue kept (the outdoor cut,
+  taken at the opening it came in by: *The cut at the opening* below), then takes the opening's
+  share and glass, then the outdoor scale: floors, ceilings and the directional maps the ground's (`Ground brightness x
+  Lot lamp brightness` while *Street lamps light lots* is on, else 1), wall texels the walls' (*Lamps light walls* on,
+  else 1), over the room's normalisation (`InnerLight::NormScale(1, room+0x160)`; the directional maps take no
+  normalisation factor, as whether the game normalises them is not read). Offline (`tools/roofed_openings_test`) the
+  kitchen pixel replayed through the room solve's curve and the room-lit floor shader's (PS `44ECECA0`, `c2.z` 4.2) was
+  brighter than the courtyard at every one of 200 distances before and is at none from an entry of 0.05 up after. A slider
+  change relights every room once the slider is let go (`SetOpeningLampBalance`). Indoor lamps, the lamps of other
+  stories, the roofless rooms and daylight are unchanged. Unverified: the indoor wall shaders' curve (taken to match the
+  floor's), so the walls' share of this balance is inferred.
+- **The outdoor colour response** (`MaxResponse`): a red sconce (1.7, (1, 0, 0)) lit the kitchen behind its glass door
+  redder than its courtyard. Both indoor curves scale a texel by a function of the mean of its three channels: the room
+  solve's `x tanh(m / 2) / m` and the room-lit floor shader's `y (2 / (1 + 2^(-4.2 m)) - 1) / m` (PS `44ECECA0` and
+  `981C53E8`, `c2.z` 4.2, `m = 0.333 (r + g + b)`; a D3D `exp` is 2^x, so `y tanh(1.456 m) / m`, not the `tanh(2.1 m)` the
+  first balance assumed). A pure colour has a third of the mean of a white light of the same channel and is compressed
+  as if three times dimmer; outdoors the map is linear up to its hue-kept cut. Replayed offline, a red share came out up
+  to 41% brighter than a white one of the same strength (Ground and Lot lamp brightness at 150%), 3% at the player's
+  scale. A strong orange (1.7, 0.85, 0.26) cut channel by channel entered as (0.5, 0.5, 0.26), nearly white. A share of
+  room 0's lamp in a room solved with its curve is now scaled after the outdoor scale so that both curves give it the
+  response of its largest channel, what a white light of that channel gets: a white share keeps x1, a saturated one at
+  most x1 (closed form, the solve's step under a mean of 0.01 included). It is taken as lighting the texel alone and on a
+  floor of albedo 1, so on a darker floor or in a lit room a colour ends a little under the white (at most 3% at the
+  player's scale, 8% on an albedo-0.8 floor at 150% / 150%), never over it. The status *outdoor light through openings*
+  counts those points. Offline (`tools/roofed_openings_test`, `OpeningColourChecks`): 7 lamp colours x 3 floor scales x
+  119 distances; through the glass never brighter than outdoors on the same floor, the hue within 0.03 of the lamp's
+  (597 cases off with the per-channel cut), no colour lit more than white (1365 cases over 3% before). The red sconce by
+  the door at the player's scale: courtyard floor 0.454, kitchen 0.252 before, 0.241 now. An F7 of the kitchen floor
+  in the red pool: the room map held 0.18 to 0.21 red (no green or blue), the albedo 0.84 and no specular map, so the floor
+  draw gave 0.25 to 0.28; the screen showed 0.47 to 0.51 there, and twice the floor draw's value on the unlit hall floor
+  too (0.025 to 0.051, every channel): a step after the floor draw that takes the whole screen, outdoors as well (the
+  additive full-screen pass that follows it; what its buffer holds at that moment is not captured, unverified). So the
+  kitchen is no brighter than its map gives, and on the same screen darker than the courtyard by the lamp (0.41 to 0.56
+  red). The courtyard's paler colour is its other light: a white lamp (1, 0.98, 0.85) 4.4 m from the sconce and the night
+  sky reach the courtyard, not the kitchen. The warm band along the hall's wall by the glass door was the courtyard's
+  texels read across the wall ([room-map-smoothing](room-map-smoothing.md)).
+- **The cut at the opening** (`OpeningGain`, `EntryScale`): held under 1 / its entries wherever it reached, an entry was
+  flat over every texel the lamp lit past the outdoor cut, so the room lost its falloff. Three light captures of the red
+  sconce (2.2 m up, 1 m outside the kitchen's glass doors) on the story's floor map: the courtyard at 1 out to 4.6 m from
+  the lamp (the law, both entries, 3.4 at the door's outer side; beyond the cut the map follows the law, 0.060 for 0.060 at
+  9.3 m), the kitchen flat at 0.21 from 0.5 to 1.5 m in (the law 2.2 down to 1.2), then falling. On screen the kitchen
+  floor (0.48 to 0.53 red) matched the courtyard at the door (0.36 to 0.50): 1 to 2 m in it kept 0.77 to 0.66 of the
+  door's outer floor where the law x the glass gives 0.37 to 0.19. Outdoors nothing is under the law: every texel past
+  the cut is at the map's 1, x the player's *Ground brightness* x *Lot lamp brightness* (0.75 x 0.756) in the lot pass
+  (`sLot x c31.x x c3.x`, its blend 2 x dest x src). The cut now follows the opening: the grid walk notes the ray's last
+  crossing through an opening or over a wall's top (`GridWhy::tOpen`, its share of the way from the lamp); the outdoor
+  surface at that crossing, at the texel's height and with its normal (a floor texel: the floor just outside the door),
+  gets `gain` times the texel's law (the distances and `n . l`; the cone taken as the texel's and the law's `Cmax` left
+  out). With `x` = the entry's largest channel x its entries and `R = x gain`: `R <= 1` keeps the entry whole; past it the
+  entry is scaled to `x / (1 + x (1 - 1 / R))` of the cut: the cut at the door, the law for a faint texel, strictly
+  falling between, its hue kept. With no crossing known (`gain` 1) it is the previous cut. Offline
+  (`tools/roofed_openings_test`, `OpeningFalloffChecks`, the capture's geometry, a glass door, the player's scale): the
+  kitchen floor 0.25, 1.25, 2.25 and 3.25 m in was 0.241, 0.241, 0.182, 0.104 (6 flat steps of 20) and is 0.228, 0.174,
+  0.122, 0.081, falling at every step, never over the courtyard at the door x the glass (0.347) nor over before; a lamp
+  under the outdoor cut at the door leaves the room unchanged. The status *outdoor light through openings* counts the
+  points held. Unverified in game; the outdoor clip itself (an 8-bit map at 1) is kept.
+- **The cut of the outdoor texel** (`OpeningOutdoorTotal`, `EntryScale`'s total): room 0's texel divides the sum of all its
+  lights by its largest channel past 1, so where another light reaches the opening's outer side a lamp shows there at its
+  own part of that sum only; the entering lamp was cut as if it lit that texel alone. A light capture and a lighting
+  snapshot of a green sconce (1.7, (0, 1, 0), 2.9 m out from a hall's glass door, 2.2 m up) beside a white sconce (1, (1,
+  0.98, 0.85)) on the door's own wall, followed on screen draw by draw: the hall floor (PS `285BBA18`, the room map's
+  B-spline, `x tanh(1.456 m) / m`, albedo 0.65 green) and the courtyard ground (the lot pass: `col x 0.5` blended
+  `2 x dest x src`, so `dest x col` with no factor left over, the map x 0.75 x 0.756) are then added to by the same bloom
+  (about 0.03) and scaled by the same full-screen passes (about x1.5 on both); no surface is doubled. The map just
+  outside the door read (0.64 to 0.90, 1, 0.46 to 0.68): the white flat on the wall lights it, the green is 0.12 to 0.37
+  of it. The white does not reach the hall; the green, 0.64 there alone (under the cut), entered whole: the hall floor at
+  the door showed the green at 0.32 to 0.37 on screen against the courtyard's 0.29 to 0.44 green of which the green
+  sconce's part is a quarter. Per point, X (the outdoor floor 3 cm out from the opening, at the texel's height and with
+  its normal) gets room 0's list evaluated by the game's light functions (window lights left out, the outdoor lamps at the
+  solve's daytime factor) and passed through the story's walls (`YardPass`), kept per batch and X (0.125 m); the total T
+  is the largest channel of the lamp's colour at X (R, as before) plus the other lights there, and the entry takes
+  `1 / (1 + (T - 1) / gain)`: at the door its part of the courtyard's texel, the law for a faint texel, strictly falling
+  between; with no other light (T = R) the previous cut exactly. Two lamps each at 1.2 at a door gave the room 2 at the
+  door against the courtyard's 1; now 1. Offline (`tools/roofed_openings_test`, `OpeningShareChecks`): the green's
+  replay 0.640 before, 0.207 now (its part of the courtyard's texel: 0.207), falling at every step in, never brighter
+  than before. The status *outdoor light through openings* counts the points held at the texel's cut and the sums made.
+  Unverified in game. The outdoor map's own clip stays: within its lamp's reach the courtyard is flat at the cut, so the
+  ground right under a strong lamp shows no more than the ground at the door.
 - **Walls ending at a floor above** (2.13.0, `CapLowerWalls`): a story's grid caps a full straight wall with a placed
   floor of the story above beside it, over its foot and lower than a story, at that floor (the rule of `PassesOverLowerWall`
   and `CapFoundationSides`). A foundation's sides are walls of story 0 drawn only up to the floor on the foundation; at 3 m
@@ -859,6 +964,27 @@ darkened by M.
 - **Quick outdoor lamp edits:** a delta whose changed light is such a lamp solves room 0 in full (the kept parts hold no
   alpha; `LampRec::exit`, `ExitLampOf`).
 - Developer status: *Indoor light on the ground* (ground texels tapped, lit through openings).
+
+### Outdoor texels keep their hue
+
+The game packs a room texel as `min(sum, 1)` channel by channel. On an outdoor texel (room 0, a roofless room) where a
+strong lamp meets a weaker light of another colour, the strong lamp's channel stopped at 1 while the weaker light filled the
+others. F7 of a red sconce (intensity 1.7, listed twice) on a courtyard's decorative wall, beside a kitchen's glass doors and
+windows: the lot map by the lamp held (1, 1, 0.41), the courtyard ground and the lattice wall showed the yellow light
+baked in room 0's map there (not a GPU lamp's: the red lamp adds no green) instead of red, while the kitchen behind the glass (the lamp at the outdoor cut, *Outdoor light through
+openings*) was red. The lot pass, its shade and the indoor light on the ground were not the cause: the shade there is 1,
+the ground atlas holds the lamp's red, and the texels' alpha E is at most 3/255 (the exit share `ex` at most 1.3 % of the
+map).
+
+`SolvePointBatch` now divides an outdoor texel's sum by its largest channel when that passes 1 (`OutdoorDeltaModel::KeepHue`)
+before the game's pack, after the kept parts are noted (Quick outdoor lamp edits keep the whole sum). The deltas
+(`PackInput`) and Real-time outdoor lamps' compose shader pack the same way, so the three paths still give the same texel. A
+sum within 1 is packed as before, bit for bit. In the courtyard's case (red 5.8 + yellow (1, 1, 0.41)) the texel is
+(255, 38, 15) instead of (255, 255, 105). A single lamp past 1 keeps its colour too: the hottest spot of a warm lamp on an
+outside wall is its warm colour at full brightness instead of near white (on the grass the ground atlas keeps the white
+spot through the lot pass's max). Indoor rooms keep the game's pack. Checked offline: `tools/outdoor_delta_test` (the
+pack within 1 bit for bit, ratios past 1, the courtyard's case) and `tools/rt_lamps_test` (the compose shader against the
+pack on texels past 1). Unverified in game.
 
 ### Penumbra
 

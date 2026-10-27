@@ -8,6 +8,7 @@
 #include "platform.h"
 #include "render_callbacks.h"
 #include "s3ss_detect.h"
+#include "scene_target.h"
 #include "picture.h"
 #include "captures.h"
 #include "vulkan_driver_guard.h"
@@ -113,6 +114,7 @@ void FrameInit(IDirect3DDevice9* dev) {
         OnPresent(ctx.device);
         return D3D9Hooks::HookAction::Continue;
     }, static_cast<D3D9Hooks::Priority>(-2000)); // before everything else (the profiler's frame start is -1000)
+    SceneTarget::Init(); // (its frame callbacks return at once while the High-precision scene is off)
     Overlay::Init(dev, g_window.load());
     LOG_INFO("[D3D] Frame hooks ready");
 }

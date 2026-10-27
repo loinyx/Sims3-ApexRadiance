@@ -37,7 +37,6 @@
 #include "imgui.h"
 #include "ui/i18n.h"
 #include "ui/widgets.h"
-#include "scene_dither.h"
 #include "apex_paths.h"
 #include "apex_util.h"
 #include <wincodec.h>
@@ -80,7 +79,6 @@ float4 cLook   : register(c0);  // x = saturation, y = scene copy valid, z = com
 float4 cSize   : register(c1);  // xy = 1 / size, zw = size (pixels)
 float4 cGrade  : register(c2);  // x = exposure (linear gain), y = contrast, z = blacks (fraction of white, + deepens)
 float4 cWb     : register(c3);  // rgb = white balance gains (luminance of white kept)
-float4 cDeband : register(c4);  // x = step threshold (encoded units), y = inner radius (px), z = outer radius (px), w = on
 float4 cTone   : register(c5);  // x = midtone exponent (1 / midtones), y = shadows, z = highlights, w = vibrance
 float4 cDetail : register(c6);  // x = sharpening, y = clarity
 float4 cTintS  : register(c7);  // rgb = shadow colour (luminance 1), w = amount
@@ -142,7 +140,7 @@ float4 cExtC   : register(c60); // x = Film grain color
 static const float3 kLum = float3(0.2126, 0.7152, 0.0722);
 
 // A neighbour or shifted tap for the scene filters: from the scene copy (no UI) when it exists, so a filter that reads
-// around the pixel (deband, prism, sharpen, CRT, 3DFX) never pulls the colour of a button or a panel into the world
+// around the pixel (prism, sharpen, CRT, 3DFX) never pulls the colour of a button or a panel into the world
 float3 CubeFetch(float3 cell) {
     float index = cell.x + cLut.y * (cell.y + cLut.y * cell.z);
     float row = floor(index * cCubeTex.z);
@@ -165,29 +163,6 @@ float3 SceneTap(float2 p)
 float3 Decode(float3 c)
 {
     return pow(max(c, 0.0), 2.2);
-}
-
-// Gradient smoothing (deband): the game's textures are DXT (5-6 bit colour endpoints) and its light maps 8-bit, so
-// smooth gradients arrive as steps. Each pixel averages the neighbours on two rings (fixed directions, no noise) that
-// differ from it by less than a small step; an edge or a texture detail is larger than that and is left alone.
-float3 Deband(float2 uv, float3 c)
-{
-    float3 sum = c;
-    float n = 1.0;
-    [unroll] for (int ring = 0; ring < 2; ring++)
-    {
-        float r = ring == 0 ? cDeband.y : cDeband.z;
-        [unroll] for (int i = 0; i < 8; i++)
-        {
-            float a = (i + ring * 0.5) * 0.7853982;
-            float3 v = SceneTap(uv + float2(cos(a), sin(a)) * r * cSize.xy);
-            float3 dd = abs(v - c);
-            float w = max(dd.r, max(dd.g, dd.b)) < cDeband.x ? 1.0 : 0.0;
-            sum += v * w;
-            n += w;
-        }
-    }
-    return sum / n;
 }
 
 // Cubic B-spline sample of the 1/8 scene from 4 bilinear taps: a smooth local average with no grid pattern
@@ -550,7 +525,6 @@ float4 PicturePS(float2 uv : TEXCOORD0) : COLOR0
         suv = lerp(uv, crtQ * 0.5 + 0.5, cCrt.x);
     }
     float3 fs = (cFlagE.y > 0.5 && scene) ? SceneTap(suv) : f; // the scene under any veil (see the UI mask)
-    fs = (cDeband.w > 0.5 && scene) ? Deband(suv, fs) : fs; // the scene only; the UI keeps its sharp edges
     [branch] if (cFlagD.z > 0.5 && scene) fs = Prism(suv, fs);
     // 3DFX soft pixels: the old cards' output filter blurred each pixel with its horizontal neighbours
     [branch] if (cFlagE.x > 0.5 && cFx2.x > 0.0 && scene)
@@ -736,9 +710,18 @@ float4 PicturePS(float2 uv : TEXCOORD0) : COLOR0
         if (e.x > 1.0 || e.y > 1.0) a = 0.0;
         o = lerp(o, saturate(a), cCrt.x);
     }
-    // a fixed dither (interleaved gradient noise, the same pattern every frame, below one 8-bit step) so the grading does
-    // not turn smooth gradients into steps
-    if (!posterized) o += (frac(52.9829189 * frac(dot(px, float2(0.06711056, 0.00583715)))) - 0.5) / 255.0;
+    // a fixed dither (the same pattern every frame) so the grading does not turn smooth gradients into steps: the Banding
+    // Fix's grain (triangular, uniform above mid-grey, within the clamp) from interleaved gradient noise, which does not
+    // correlate with the scene's or the AO composite's R2 grain (offline); only where the pass changed the pixel by half a
+    // step or more, so an unchanged pixel gets no second grain over the scene's
+    if (!posterized)
+    {
+        float r = 2.0 * frac(52.9829189 * frac(dot(px, float2(0.06711056, 0.00583715)))) - 1.0;
+        float t = sign(r) * (1.0 - sqrt(1.0 - abs(r)));
+        float3 dc = abs(o - f);
+        float a = saturate(max(dc.r, max(dc.g, dc.b)) * 510.0) / 255.0;
+        o += lerp(t, r * 0.5, saturate(2.0 * o - 1.0)) * min(a, min(o, 1.0 - o) + 0.5 / 255.0);
+    }
     o = saturate(o * veil); // a faint veil over the filtered scene again (1 where the UI never drew)
     if (before) o = f;
     if (divider) o = float3(1, 0, 0);
@@ -871,8 +854,8 @@ template <typename T> void SafeRelease(T*& p) {
 // The settings in one line, for the log
 std::string ParamsText(const PictureParams& q) {
     return std::format("on {}, exposure {:.2f}, contrast {:.2f}, midtones {:.2f}, shadows {:.2f}, highlights {:.2f}, blacks {:.2f}, temperature {:.2f}, tint {:.2f}, "
-                       "saturation {:.2f}, vibrance {:.2f}, deband {:.2f}, sharpen {:.2f}, clarity {:.2f}, vignette {:.2f}, compare {}",
-                       q.enabled, q.exposure, q.contrast, q.midtones, q.shadows, q.highlights, q.blacks, q.temperature, q.tint, q.saturation, q.vibrance, q.deband,
+                       "saturation {:.2f}, vibrance {:.2f}, sharpen {:.2f}, clarity {:.2f}, vignette {:.2f}, compare {}",
+                       q.enabled, q.exposure, q.contrast, q.midtones, q.shadows, q.highlights, q.blacks, q.temperature, q.tint, q.saturation, q.vibrance,
                        q.sharpen, q.clarity, q.vignette, q.compare);
 }
 
@@ -1400,7 +1383,7 @@ const FilterArrayKey kFilterArrays[] = {{"technicolor2_dye", &PictureParams::tec
                                         {"filmic_curve", &PictureParams::filmicCurve}};
 
 const char* const kKeys[] = {"enabled", "exposure", "contrast", "midtones", "shadows", "highlights", "blacks", "temperature", "tint", "saturation", "vibrance",
-                             "shadow_hue", "shadow_tint", "highlight_hue", "highlight_tint", "mixer", "deband", "sharpen", "clarity", "vignette", "vignette_size", "basic_enabled", "tones_enabled", "color_enabled", "detail_enabled", "filters_enabled", "filters"};
+                             "shadow_hue", "shadow_tint", "highlight_hue", "highlight_tint", "mixer", "sharpen", "clarity", "vignette", "vignette_size", "basic_enabled", "tones_enabled", "color_enabled", "detail_enabled", "filters_enabled", "filters"};
 
 } // namespace
 
@@ -1552,9 +1535,6 @@ bool Picture::EnsureReducedScene(IDirect3DDevice9* dev) {
 
 // ---- end of frame ----
 
-// Smooth gradients (deband) is on the Banding Fix page (a Color tab from 30/09, its own page since 06/10) and follows the Banding Fix's switch, not
-// Picture's: with Picture off the pass still runs, with only the deband (every other control neutral), while the Banding
-// Fix is on. That smoothing-only pass is skipped in a frame without a copy of the scene (it would smooth the game's menus).
 static PictureParams Effective(const PictureParams& q) {
     PictureParams e = q.enabled ? q : PictureParams{};
     const PictureParams neutral{};
@@ -1569,8 +1549,6 @@ static PictureParams Effective(const PictureParams& q) {
     }
     if (!q.detailEnabled) { e.clarity=neutral.clarity; e.vignette=neutral.vignette; }
     if (!q.filtersEnabled) for (const auto& f : kToggleFilters) if(f.field!=&PictureParams::lut) e.*f.field=false;
-    e.deband = SceneDither::On() ? q.deband : 0.0f;
-    e.enabled = q.enabled || e.deband > 0.001f;
     if (!q.enabled) e.compare = false;
     return e;
 }
@@ -1669,10 +1647,6 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
     if (!WorldSession::InWorld()) { // main menu, load screens: the game's own picture (idle on purpose, not a problem)
         m_skip.store(kSkipNone);
         m_lastApplied.store(now);
-        bb->Release();
-        return;
-    }
-    if (!raw.enabled && !gpu.sceneCopied) { // smoothing only (Picture off): never over the game's menus
         bb->Release();
         return;
     }
@@ -1811,7 +1785,8 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
     dev->SetRenderState(D3DRS_CLIPPLANEENABLE, 0);
     dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0xF);
     for (DWORD s = 0; s < kSamplers; s++) {
-        const DWORD filter = (s == 2 || s == 4 || s == 5 || (s == 6 && !gpu.lutCube)) ? D3DTEXF_LINEAR : D3DTEXF_POINT; // the reduced scene copies bilinear
+        // the reduced scene copies bilinear
+        const DWORD filter = (s == 2 || s == 4 || s == 5 || (s == 6 && !gpu.lutCube)) ? D3DTEXF_LINEAR : D3DTEXF_POINT;
         dev->SetSamplerState(s, D3DSAMP_MINFILTER, filter);
         dev->SetSamplerState(s, D3DSAMP_MAGFILTER, filter);
         dev->SetSamplerState(s, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
@@ -1891,7 +1866,6 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
     const float tt = std::clamp(q.temperature, -1.0f, 1.0f) * 0.08f;
     const float wbG = 1.0f - std::clamp(q.tint, -1.0f, 1.0f) * 0.06f; // tint: + = magenta (less green), - = green
     const float wbR = 1.0f + tt, wbB = 1.0f - tt, wbL = 0.2126f * wbR + 0.7152f * wbG + 0.0722f * wbB;
-    const float pxScale = static_cast<float>(gpu.height) / 2160.0f; // the deband radii were chosen at 4K
     float tintS[3], tintH[3];
     SplitToneColour(q.shadowHue, tintS);
     SplitToneColour(q.highlightHue, tintH);
@@ -1904,7 +1878,7 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
         {1.0f / W, 1.0f / H, W, H},
         {std::exp2(std::clamp(q.exposure, -3.0f, 3.0f)), std::clamp(q.contrast, 0.5f, 1.8f), std::clamp(q.blacks, -1.0f, 1.0f) * 0.02f, 0},
         {wbR / wbL, wbG / wbL, wbB / wbL, 0},
-        {std::clamp(q.deband, 0.0f, 2.0f) * 6.0f / 255.0f, 12.0f * pxScale, 32.0f * pxScale, q.deband > 0.001f ? 1.0f : 0.0f},
+        {0, 0, 0, 0}, // c4: unused (Smooth gradients, removed)
         {1.0f / std::clamp(q.midtones, 0.5f, 2.0f), std::clamp(q.shadows, -1.0f, 1.0f), std::clamp(q.highlights, -1.0f, 1.0f), std::clamp(q.vibrance, -1.0f, 1.0f)},
         {std::clamp(q.sharpen, 0.0f, 1.5f), clarity ? std::clamp(q.clarity, -1.0f, 1.0f) : 0.0f, 0, 0},
         {tintS[0], tintS[1], tintS[2], std::clamp(q.shadowTint, 0.0f, 1.0f)},
@@ -2123,7 +2097,6 @@ void Picture::ParamsToToml(const PictureParams& q, toml::table& qolTable) {
     toml::array mixer;
     for (float m : q.mixer) mixer.push_back(static_cast<double>(m));
     pt.insert("mixer", std::move(mixer));
-    pt.insert("deband", static_cast<double>(q.deband));
     pt.insert("sharpen", static_cast<double>(q.sharpen));
     pt.insert("clarity", static_cast<double>(q.clarity));
     pt.insert("vignette", static_cast<double>(q.vignette));
@@ -2178,7 +2151,7 @@ bool Picture::ParamsFromToml(const toml::table& qolTable, PictureParams& out) {
     f("tint", q.tint);
     f("saturation", q.saturation);
     f("vibrance", q.vibrance);
-    f("deband", q.deband);
+    // "deband" (Smooth gradients, removed) is left in old files and ignored; it is dropped on the next save
     f("sharpen", q.sharpen);
     f("shadow_hue", q.shadowHue);
     f("shadow_tint", q.shadowTint);

@@ -36,6 +36,7 @@
 #include "features/rt_lamp_proxy.h"
 #include "features/rt_lamp_model.h"
 #include "features/rt_lamp_gpu.h"
+#include "features/rt_outdoor_lamps.h"
 #include "features/lamp_reach.h"
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
 // map dither (its relight passes 0), but the compose shader keeps the input, so the harness still checks it
@@ -966,6 +967,8 @@ bool SplitCheck() {
         RtLampModel::TexelIn in;
         float p[3], n[3];
         uint32_t game = 0, model = 0;
+        bool past1 = false; // the sum passes 1: packed with its hue kept (outdoor_delta_model.h KeepHue)
+        float sumMax = 0;   // its largest channel (the outdoor scale gives it back)
     };
     std::vector<Tx> tx;
     std::vector<RtLampGpu::TexelVertex> verts;
@@ -994,6 +997,8 @@ bool SplitCheck() {
             }
             // the game's texel: the plain sum packed (the parts summed in the solve's order)
             float S[3] = {t.in.base[0] + G[0], t.in.base[1] + G[1], t.in.base[2] + G[2]};
+            t.sumMax = std::max({S[0], S[1], S[2]});
+            t.past1 = t.sumMax > 1.0f;
             float alpha = t.in.masked ? OutdoorDeltaModel::MaskAlpha(t.in.baseVis + gVis, t.in.baseAll + gAll, t.in.gated ? t.in.under : -1.0f) : 0.0f;
             float c[4];
             OutdoorDeltaModel::PackInput(S, alpha, c);
@@ -1112,6 +1117,80 @@ bool SplitCheck() {
     Check(exactGame >= static_cast<long>(tx.size() * 0.99), "fewer than 99% of relit texels equal to the game's");
     Check(untouchedBad == 0, "a texel no sample writes changed");
     {
+        long past = 0, pastExact = 0;
+        for (size_t i = 0; i < tx.size(); i++)
+            if (tx[i].past1) {
+                past++;
+                const uint32_t g = got[static_cast<size_t>(verts[i].y) * w + static_cast<size_t>(verts[i].x)];
+                if (OutdoorDeltaModel::MaxLevelDiff(g, tx[i].game) == 0) pastExact++;
+            }
+        std::printf("  of them %ld with a sum past 1 (its hue kept), %ld equal to the game's texel\n", past, pastExact);
+        Check(past > 0 && pastExact == past, "texels with a sum past 1: the compose shader keeps the hue as the solve does");
+    }
+    if (!m.blur) {
+        // the outdoor scale (rt_outdoor_lamps.h ScaleOf): composed again with the second target, the colour is the same and
+        // 2^(kScaleLog2 r) gives back the sum's largest channel past 1 (to 8), 1 within 1 and where no texel lands
+        IDirect3DTexture9* scale = nullptr;
+        g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &scale, nullptr);
+        IDirect3DTexture9* out3 = nullptr;
+        g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &out3, nullptr);
+        for (int k = 0; k < 3; k++)
+            for (int c = 0; c < 3; c++) pos[k][c] = lamps[k].law.pos[c];
+        g_dev->BeginScene();
+        eng.Begin(g_dev);
+        bool ok3 = scale && out3 && eng.RenderShadows(g_dev, pos, 3, 64.0f, err) && eng.Accumulate(g_dev, m, lamps.data(), 3, p, true, err);
+        for (int k = 0; k < 3; k++)
+            for (int c = 0; c < 3; c++) pos[k][c] = lamps[3 + k].law.pos[c];
+        ok3 = ok3 && eng.RenderShadows(g_dev, pos, 3, 64.0f, err) && eng.Accumulate(g_dev, m, lamps.data() + 3, 3, p, false, err) && eng.Compose(g_dev, m, game, out3, p, err, scale);
+        eng.End(g_dev);
+        g_dev->EndScene();
+        Check(ok3, "relight passes with the outdoor scale: " + err);
+        const auto read = [&](IDirect3DTexture9* t, std::vector<uint32_t>& v) {
+            v.assign(static_cast<size_t>(w) * h, 0);
+            IDirect3DSurface9 *s = nullptr, *sys = nullptr;
+            if (!t || FAILED(t->GetSurfaceLevel(0, &s))) return;
+            g_dev->CreateOffscreenPlainSurface(w, h, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr);
+            if (sys && SUCCEEDED(g_dev->GetRenderTargetData(s, sys))) {
+                D3DLOCKED_RECT lr{};
+                sys->LockRect(&lr, nullptr, D3DLOCK_READONLY);
+                for (int y = 0; y < h; y++) std::memcpy(&v[static_cast<size_t>(y) * w], static_cast<BYTE*>(lr.pBits) + lr.Pitch * y, w * 4);
+                sys->UnlockRect();
+            }
+            if (sys) sys->Release();
+            s->Release();
+        };
+        std::vector<uint32_t> col, sc;
+        read(out3, col);
+        read(scale, sc);
+        long same = 0, past = 0, within1 = 0, bad1 = 0;
+        float worst = 0;
+        for (size_t i = 0; i < tx.size(); i++) {
+            const size_t at = static_cast<size_t>(verts[i].y) * w + static_cast<size_t>(verts[i].x);
+            if (col[at] == got[at]) same++;
+            const float k = std::exp2(RtOutdoorLamps::kScaleLog2 * static_cast<float>((sc[at] >> 16) & 0xFF) / 255.0f);
+            if (tx[i].past1) {
+                past++;
+                const float want = std::min(tx[i].sumMax, 8.0f);
+                worst = std::max(worst, std::fabs(k / want - 1.0f));
+            } else {
+                within1++;
+                if (k != 1.0f) bad1++;
+            }
+        }
+        long emptyBad = 0;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                if ((x * 7 + y * 3) % 5 == 0 && sc[static_cast<size_t>(y) * w + x] != 0) emptyBad++;
+        std::printf("  the outdoor scale: colour unchanged on %ld of %zu texels; %ld past 1, the largest channel back within %.2f %%; %ld within 1 at x 1 (%ld not); "
+                    "%ld texels no sample writes not at 0\n",
+                    same, tx.size(), past, 100.0f * worst, within1, bad1, emptyBad);
+        Check(same == static_cast<long>(tx.size()), "the outdoor scale leaves the relit colour as it was");
+        Check(past > 0 && worst <= 0.005f, "the outdoor scale gives back the sum's largest channel past 1 (within half a percent)");
+        Check(bad1 == 0 && emptyBad == 0, "the outdoor scale is 1 within 1 and where no texel lands");
+        if (scale) scale->Release();
+        if (out3) out3->Release();
+    }
+    {
         // the floor mask's "all" of the GPU lamps evaluated by the compose shader (one batch of all six lamps, dyn.x = 0)
         std::vector<RtLampGpu::TexelDyn> dyn2 = dyn;
         for (auto& d : dyn2) d.v[0] = 0.0f;
@@ -1208,9 +1287,12 @@ bool SplitCheck() {
     RtLampGpu::Engine::MakeVb(g_dev, bv.data(), mb.count, &mb.vb);
     RtLampGpu::Engine::MakeDyn(g_dev, bdyn.data(), mb.count, &mb.dyn);
     mb.blur = true, mb.passes = 2, mb.blocks = blocks, mb.preblur = preTex;
+    // (with the outdoor scale: drawn through scratch 3 and copied; the blurred colour must stay the game's)
+    IDirect3DTexture9* scaleB = nullptr;
+    g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &scaleB, nullptr);
     g_dev->BeginScene();
         eng.Begin(g_dev);
-    ok = eng.Compose(g_dev, mb, game, out, p, err);
+    ok = eng.Compose(g_dev, mb, game, out, p, err, scaleB);
     eng.End(g_dev);
         g_dev->EndScene();
     Check(ok, "blur passes: " + err);
@@ -1242,6 +1324,26 @@ bool SplitCheck() {
                 blockTexels, bv.size(), blockBad, outsideBad);
     Check(blockBad == 0, "a blurred block texel differs from the game's blur");
     Check(outsideBad == 0, "a texel outside the blocks changed");
+    {
+        std::vector<uint32_t> sc(static_cast<size_t>(w) * h, 0);
+        IDirect3DSurface9 *s = nullptr, *sys = nullptr;
+        if (scaleB && SUCCEEDED(scaleB->GetSurfaceLevel(0, &s))) {
+            g_dev->CreateOffscreenPlainSurface(w, h, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr);
+            if (sys && SUCCEEDED(g_dev->GetRenderTargetData(s, sys))) {
+                D3DLOCKED_RECT lr{};
+                sys->LockRect(&lr, nullptr, D3DLOCK_READONLY);
+                for (int y = 0; y < h; y++) std::memcpy(&sc[static_cast<size_t>(y) * w], static_cast<BYTE*>(lr.pBits) + lr.Pitch * y, w * 4);
+                sys->UnlockRect();
+            }
+            if (sys) sys->Release();
+            s->Release();
+        }
+        long inScaled = 0, outScaled = 0;
+        for (size_t i = 0; i < sc.size(); i++) (inBlock[i] ? inScaled : outScaled) += sc[i] != 0 ? 1 : 0;
+        std::printf("  the outdoor scale of the blurred atlas: %ld block texels past 1, %ld texels outside the blocks not at 0\n", inScaled, outScaled);
+        Check(inScaled > 0 && outScaled == 0, "the blurred atlas's outdoor scale is written on its texels past 1 only");
+    }
+    if (scaleB) scaleB->Release();
     m.vb->Release(), m.dyn->Release(), mb.vb->Release(), mb.dyn->Release();
     preTex->Release(), game->Release(), out->Release();
     return true;

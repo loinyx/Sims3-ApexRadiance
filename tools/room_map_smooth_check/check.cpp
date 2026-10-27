@@ -241,10 +241,10 @@ void CheckPatch(const std::vector<DWORD>& code, Gpu& gpu, PatchStats& st, const 
     const bool dis = !after.empty();
     st.disasmOk += dis;
     Check(dis, "the copy disassembles");
-    // the read became 4 taps: 3 texld more
-    const bool taps = CountOf(after, "texld") == CountOf(before, "texld") + 3;
+    // the read became 4 taps and the bound the own texel and the 4 x 4 (17 texel reads): 20 texld more
+    const bool taps = CountOf(after, "texld") == CountOf(before, "texld") + 20;
     st.texldOk += taps;
-    Check(taps, "the copy has the game's texture reads less one plus four taps");
+    Check(taps, "the copy has the game's texture reads less one plus four taps and four bound reads");
     Check(t[0] == (code[0] == 0xFFFF0200 ? 0xFFFF0201u : code[0]), "ps_2_0 becomes ps_2_x, ps_3_0 stays");
     Check(p.sizeConst + 3 == p.bandConst, "size and band constants");
     // a shader that also reads the basis maps: both smooth reads in one copy (lot_light_bridge DrawBasisSmooth)
@@ -308,7 +308,7 @@ float Bw(int i, float f) {
     default: return f * f * f / 6.0f;
     }
 }
-void Reference(const std::vector<DWORD>& map, int W, int H, float cx, float cy, int rowLo, int rowHi, float out[4]) {
+void Reference(const std::vector<DWORD>& map, int W, int H, float cx, float cy, int rowLo, int rowHi, float out[4], bool bound = true, bool sides = true) {
     (void)H;
     const float px = cx - 0.5f, py = cy - 0.5f;
     const int ix = static_cast<int>(std::floor(px)), iy = static_cast<int>(std::floor(py));
@@ -324,6 +324,239 @@ void Reference(const std::vector<DWORD>& map, int W, int H, float cx, float cy, 
             out[2] += w * static_cast<float>(v & 0xFF);
             out[3] += w * static_cast<float>(v >> 24);
         }
+    // (PatchRoomMapSmooth) with the pixel's own texel at alpha 0.125 or more, the B-spline of the 4 x 4 texels with alpha
+    // 4/255 or more alone (room 0's beyond a wall left out), its weights over their sum, all four channels; else the
+    // B-spline. sides false: the 2 x 2 bound of 866cfb0, every texel counted (the comparison)
+    const int ox = fx >= 0.5f ? 1 : 0, oy = fy >= 0.5f ? 1 : 0;
+    const float ownA = static_cast<float>(map[static_cast<size_t>(std::clamp(iy + oy, rowLo, rowHi)) * W + std::clamp(ix + ox, 0, W - 1)] >> 24) / 255.0f;
+    if (!bound || (sides && ownA < 0.125f)) return;
+    if (sides) {
+        float sum[4] = {}, ws = 0.0f;
+        for (int j = 0; j < 4; j++)
+            for (int i = 0; i < 4; i++) {
+                const DWORD v = map[static_cast<size_t>(std::clamp(iy - 1 + j, rowLo, rowHi)) * W + std::clamp(ix - 1 + i, 0, W - 1)];
+                if (static_cast<float>(v >> 24) / 255.0f < 4.0f / 255.0f) continue;
+                const float w = Bw(i, fx) * Bw(j, fy);
+                sum[0] += w * static_cast<float>((v >> 16) & 0xFF), sum[1] += w * static_cast<float>((v >> 8) & 0xFF);
+                sum[2] += w * static_cast<float>(v & 0xFF), sum[3] += w * static_cast<float>(v >> 24), ws += w;
+            }
+        for (int c = 0; c < 4; c++) out[c] = sum[c] / ws;
+        return;
+    }
+    float hi[3] = {};
+    const int lo = sides ? -1 : 0, n = sides ? 3 : 2;
+    for (int j = lo; j < n; j++)
+        for (int i = lo; i < n; i++) {
+            const DWORD v = map[static_cast<size_t>(std::clamp(iy + j, rowLo, rowHi)) * W + std::clamp(ix + i, 0, W - 1)];
+            if (sides && static_cast<float>(v >> 24) / 255.0f < 4.0f / 255.0f) continue;
+            hi[0] = std::max(hi[0], static_cast<float>((v >> 16) & 0xFF));
+            hi[1] = std::max(hi[1], static_cast<float>((v >> 8) & 0xFF));
+            hi[2] = std::max(hi[2], static_cast<float>(v & 0xFF));
+        }
+    for (int c = 0; c < 3; c++) out[c] = std::min(out[c], hi[c] + 2.0f);
+}
+
+// The bound of the B-spline (the brightest of the bilinear read's 2 x 2 texels + 2 levels), CPU: a hall's floor texels at 8
+// beside a lit courtyard's at 255 across a wall with no texel row on it (F7 of a hall beside a glass door: a warm band along the
+// wall) take nothing of the courtyard beyond the bilinear read's own half texel; a lamp's falloff (4 texels a metre, the
+// lamp 1 to 2.5 m over the floor) is not changed, the softest shadow edge (1.5 texels) by at most 6 levels on its dark side
+void BoundChecks() {
+    constexpr int W = 16, H = 16, K = 8; // rows < K hall, >= K courtyard
+    std::vector<DWORD> strip(W * H);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) strip[static_cast<size_t>(y) * W + x] = y < K ? 0xFF080808u : 0x008C3C14u | (255u << 16);
+    float worstBefore = 0, worstAfter = 0;
+    for (float cy = 4.0f; cy <= K - 0.5f; cy += 0.05f) { // up to half a texel from the wall line
+        float a[4], b[4];
+        Reference(strip, W, H, 8.3f, cy, 0, H - 1, a, false);
+        Reference(strip, W, H, 8.3f, cy, 0, H - 1, b, true);
+        worstBefore = std::max(worstBefore, a[0] - 8.0f), worstAfter = std::max(worstAfter, b[0] - 8.0f);
+    }
+    std::printf("  hall beside a lit courtyard, beyond the bilinear read's half texel: up to +%.1f levels of red before the bound, +%.1f with it\n", worstBefore, worstAfter);
+    Check(worstBefore > 30.0f && worstAfter <= 2.0f + 1e-3f, "the hall takes no band of the courtyard's light beyond the bilinear read");
+    float lampWorst = 0;
+    for (float h : {1.0f, 1.5f, 2.5f})
+        for (float k : {0.3f, 1.0f, 4.0f}) {
+            std::vector<DWORD> m(48 * 48);
+            for (int y = 0; y < 48; y++)
+                for (int x = 0; x < 48; x++) {
+                    const float dx = (x + 0.5f) / 4.0f - 6.0f, dz = (y + 0.5f) / 4.0f - 6.0f;
+                    const float v = std::min(255.0f, 255.0f * k * h / std::pow(h * h + dx * dx + dz * dz, 1.5f));
+                    const DWORD c = static_cast<DWORD>(std::lround(v));
+                    m[static_cast<size_t>(y) * 48 + x] = 0xFF000000u | c << 16 | c << 8 | c;
+                }
+            for (float cy = 4.0f; cy < 44.0f; cy += 0.37f)
+                for (float cx = 4.0f; cx < 44.0f; cx += 0.37f) {
+                    float a[4], b[4];
+                    Reference(m, 48, 48, cx, cy, 0, 47, a, false);
+                    Reference(m, 48, 48, cx, cy, 0, 47, b, true);
+                    lampWorst = std::max(lampWorst, a[0] - b[0]);
+                }
+        }
+    std::printf("  a lamp's falloff: largest change from the bound %.3f levels\n", lampWorst);
+    Check(lampWorst < 0.01f, "a lamp's falloff inside a room is not changed by the bound");
+    std::vector<DWORD> soft(W * H);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) {
+            const DWORD c = static_cast<DWORD>(std::lround(150.0f / (1.0f + std::exp(-((x + 0.5f) / 4.0f - 2.0f) / 0.09f))));
+            soft[static_cast<size_t>(y) * W + x] = 0xFF000000u | c << 16 | c << 8 | c;
+        }
+    float softWorst = 0;
+    for (float cx = 2.0f; cx < 14.0f; cx += 0.05f) {
+        float a[4], b[4];
+        Reference(soft, W, H, cx, 8.0f, 0, H - 1, a, false);
+        Reference(soft, W, H, cx, 8.0f, 0, H - 1, b, true);
+        softWorst = std::max(softWorst, a[0] - b[0]);
+    }
+    std::printf("  a soft shadow edge (0.375 m): largest change %.2f levels\n", softWorst);
+    Check(softWorst <= 6.0f, "the softest shadow edge (1.5 texels) keeps its B-spline within 6 levels on its dark side");
+}
+
+// The pixel's side of a wall (PatchRoomMapSmooth): a hall's texels (ambient weight 0.75, green 3) beside a courtyard's lit
+// green at 255 (alpha 0, room 0) with no texel row on the wall line (F7 of a hall beside a glass door: a band, then a line
+// of the courtyard's green along the wall). The hall within 2 texels of the wall takes none of it; the courtyard's pixels,
+// light sent out of the hall (alpha 10/255) and a bright hall texel (alpha under 0.125) keep the B-spline. A jamb's
+// penumbra inside the hall (0 to 120 over a texel): the 2 x 2 bound cut the B-spline's tail on its dark side at the texel
+// lines (steps a texel wide beside a glass door, in game); the 4 x 4 of the room's own texels never does.
+std::vector<DWORD> SideMap(int W, int H, int K, DWORD hallA, DWORD yardA) {
+    std::vector<DWORD> m(static_cast<size_t>(W) * H);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) m[static_cast<size_t>(y) * W + x] = y < K ? (hallA << 24) | (2u << 16) | (3u << 8) | 2u : (yardA << 24) | (40u << 16) | (255u << 8) | 20u;
+    return m;
+}
+void SideChecks() {
+    constexpr int W = 16, H = 16, K = 8;
+    const std::vector<DWORD> hall = SideMap(W, H, K, 191, 0), sent = SideMap(W, H, K, 191, 10), bright = SideMap(W, H, K, 25, 0);
+    float plain = 0, square = 0, now = 0, keepMoved = 0;
+    for (float cy = K - 2.0f; cy < K; cy += 0.01f) { // the hall within 2 texels of the wall
+        float a[4], b[4], c[4];
+        Reference(hall, W, H, 7.3f, cy, 0, H - 1, a, false);
+        Reference(hall, W, H, 7.3f, cy, 0, H - 1, b, true, false);
+        Reference(hall, W, H, 7.3f, cy, 0, H - 1, c, true, true);
+        plain = std::max(plain, a[1] - 3.0f), square = std::max(square, b[1] - 3.0f), now = std::max(now, c[1] - 3.0f);
+        for (const std::vector<DWORD>* m : {&sent, &bright}) {
+            Reference(*m, W, H, 7.3f, cy, 0, H - 1, a, false);
+            Reference(*m, W, H, 7.3f, cy, 0, H - 1, c, true, true);
+            for (int k = 0; k < 4; k++) keepMoved = std::max(keepMoved, std::fabs(a[k] - c[k]));
+        }
+    }
+    for (float cy = K; cy < H - 1; cy += 0.05f) { // the courtyard's pixels
+        float a[4], c[4];
+        Reference(hall, W, H, 7.3f, cy, 0, H - 1, a, false);
+        Reference(hall, W, H, 7.3f, cy, 0, H - 1, c, true, true);
+        for (int k = 0; k < 4; k++) keepMoved = std::max(keepMoved, std::fabs(a[k] - c[k]));
+    }
+    std::printf("  a hall within 2 texels of a lit courtyard's wall: up to +%.1f levels of green with the plain B-spline, +%.1f with the 2 x 2 bound, +%.1f now\n",
+                plain, square, now);
+    Check(plain > 30.0f && square > 30.0f && now <= 2.0f + 1e-3f, "a hall's floor takes no band or line of the courtyard's light along the wall");
+    Check(keepMoved < 1e-3f, "the courtyard's own pixels, light sent out of the hall and a bright hall texel keep the B-spline");
+    // a jamb's penumbra inside the hall, along x (0 to 120 over about a texel), every texel the hall's
+    std::vector<DWORD> jamb(W * H);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) {
+            const DWORD v = static_cast<DWORD>(std::lround(120.0f / (1.0f + std::exp(-((x + 0.5f) - 8.0f) / 0.35f))));
+            jamb[static_cast<size_t>(y) * W + x] = (191u << 24) | (v << 8);
+        }
+    float squareCut = 0, nowCut = 0;
+    for (float cx = 3.0f; cx < 13.0f; cx += 0.01f) {
+        float a[4], b[4], c[4];
+        Reference(jamb, W, H, cx, 6.3f, 0, H - 1, a, false);
+        Reference(jamb, W, H, cx, 6.3f, 0, H - 1, b, true, false);
+        Reference(jamb, W, H, cx, 6.3f, 0, H - 1, c, true, true);
+        squareCut = std::max(squareCut, a[1] - b[1]), nowCut = std::max(nowCut, a[1] - c[1]);
+    }
+    std::printf("  a jamb's penumbra in the hall: the B-spline cut by up to %.1f levels at texel lines with the 2 x 2 bound, %.1f now\n", squareCut, nowCut);
+    Check(squareCut > 3.0f && nowCut < 1e-3f, "a jamb's penumbra keeps the B-spline's smooth read (no steps at the texel lines)");
+    // a room's floor under a window (F7: courtyard 255 | wall | 0, 20, 47, 45, 41 of green, alpha 0.84 to 0.69): the wall below
+    // the sill shades the first texels. Held under the brightest texel of the room's side, the B-spline lifted the first with
+    // the courtyard's light and left the second dark (a black line between two lit bands); the room's side alone rises from
+    // the wall and keeps the room's ambient weight to the wall
+    const int prof[6] = {0, 20, 47, 45, 41, 37};
+    const DWORD profA[6] = {214, 196, 173, 176, 179, 181};
+    std::vector<DWORD> win(W * H);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++)
+            win[static_cast<size_t>(y) * W + x] = x < K ? (255u << 8) : (profA[std::min(x - K, 5)] << 24) | (static_cast<DWORD>(prof[std::min(x - K, 5)]) << 8);
+    float oldDip = 0, nowDip = 0, oldLift = 0, nowLift = 0, prevOld = -1, prevNow = -1, peakOld = 0, peakNow = 0;
+    for (float cx = K + 0.01f; cx < K + 2.5f; cx += 0.01f) {
+        float b[4], c[4];
+        Reference(win, W, H, cx, 6.3f, 0, H - 1, c, true, true);
+        // the 4 x 4 bound of eedcb23 (the comparison)
+        Reference(win, W, H, cx, 6.3f, 0, H - 1, b, false);
+        float hi = 0;
+        const int ix = static_cast<int>(std::floor(cx - 0.5f));
+        for (int i = -1; i < 3; i++) {
+            const DWORD v = win[static_cast<size_t>(6) * W + std::clamp(ix + i, 0, W - 1)];
+            if (v >> 24 >= 4) hi = std::max(hi, static_cast<float>((v >> 8) & 0xFF));
+        }
+        b[1] = std::min(b[1], hi + 2.0f);
+        if (prevOld >= 0) peakOld = std::max(peakOld, prevOld), oldDip = std::max(oldDip, peakOld - b[1]);
+        if (prevNow >= 0) peakNow = std::max(peakNow, prevNow), nowDip = std::max(nowDip, peakNow - c[1]);
+        if (cx < K + 0.5f) oldLift = std::max(oldLift, b[1]), nowLift = std::max(nowLift, c[1]);
+        prevOld = b[1], prevNow = c[1];
+        if (cx > K + 2.0f) break;
+    }
+    std::printf("  a room's floor under a window: the 4 x 4 bound lit the wall's half texel to %.0f and fell %.1f levels after it; now %.0f, falling %.1f\n", oldLift, oldDip,
+                nowLift, nowDip);
+    Check(oldDip > 10.0f && nowDip <= 0.5f && nowLift < 10.0f, "a room's floor under a window rises from the wall with no dark line");
+}
+void SidePixelCheck(Gpu& gpu) {
+    if (!gpu.dev) return;
+    const char* src = "sampler2D s0 : register(s0); float4 amb : register(c0);\n"
+                      "float4 main(float2 uv0 : TEXCOORD0, float2 uv1 : TEXCOORD1) : COLOR0 { float4 m = tex2D(s0, uv1); m.rgb = m.a * amb.rgb + m.rgb; return m; }";
+    for (const char* profile : {"ps_2_0"}) { // (the ps_3_0 copies of the game's shaders are created above)
+        std::vector<DWORD> t = Compile(src, profile);
+        ShaderPatches::RoomMapPatch p;
+        if (t.empty() || !ShaderPatches::PatchRoomMapSmooth(t, p)) {
+            Check(false, "the synthetic shader is patched (sides)");
+            continue;
+        }
+        if (!gpu.CapsAllow(p)) continue;
+        IDirect3DPixelShader9* ps = nullptr;
+        Check(SUCCEEDED(gpu.dev->CreatePixelShader(t.data(), &ps)), "the synthetic copy is created (sides)");
+        if (!ps) continue;
+        constexpr int W = 16, H = 16, K = 8;
+        const std::vector<DWORD> map = SideMap(W, H, K, 191, 0);
+        IDirect3DTexture9* tex = nullptr;
+        gpu.dev->CreateTexture(W, H, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, nullptr);
+        if (!tex) {
+            Release(ps);
+            continue;
+        }
+        D3DLOCKED_RECT lr{};
+        if (SUCCEEDED(tex->LockRect(0, &lr, nullptr, 0))) {
+            for (int y = 0; y < H; y++) std::memcpy(static_cast<char*>(lr.pBits) + y * lr.Pitch, &map[static_cast<size_t>(y) * W], W * 4);
+            tex->UnlockRect(0);
+        }
+        gpu.dev->SetTexture(p.sampler, tex);
+        gpu.dev->SetSamplerState(p.sampler, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+        gpu.dev->SetSamplerState(p.sampler, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+        gpu.dev->SetSamplerState(p.sampler, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        gpu.dev->SetSamplerState(p.sampler, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        gpu.dev->SetSamplerState(p.sampler, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+        const float amb[4] = {0, 0, 0, 0}, size[4] = {static_cast<float>(W), static_cast<float>(H), 1.0f / W, 1.0f / H}, bc[4] = {1.0f / 65536.0f, 65536.0f, 0.5f, 65535.0f};
+        gpu.dev->SetPixelShaderConstantF(0, amb, 1);
+        gpu.dev->SetPixelShaderConstantF(p.sizeConst, size, 1);
+        gpu.dev->SetPixelShaderConstantF(p.bandConst, bc, 1);
+        const std::vector<DWORD> px = gpu.Render(ps);
+        int worst = 0, line = 0;
+        for (int y = 0; y < 64; y++)
+            for (int x = 0; x < 64; x++) {
+                const float cx = (x + 0.5f) / 64.0f * W, cy = (y + 0.5f) / 64.0f * H;
+                float ref[4];
+                Reference(map, W, H, cx, cy, 0, H - 1, ref);
+                const DWORD v = px[static_cast<size_t>(y) * 64 + x];
+                const int got[4] = {static_cast<int>((v >> 16) & 0xFF), static_cast<int>((v >> 8) & 0xFF), static_cast<int>(v & 0xFF), static_cast<int>(v >> 24)};
+                for (int c = 0; c < 4; c++) worst = std::max(worst, static_cast<int>(std::lround(std::fabs(got[c] - ref[c]))));
+                if (cy < K && cy > K - 0.5f) line = std::max(line, got[1] - 3);
+            }
+        std::printf("  pixel check, the pixel's side (%s): largest difference from the CPU reference %d LSB; the hall's last half texel at most +%d green\n", profile, worst, line);
+        Check(worst <= 3, "GPU bound with the pixel's side = CPU reference (3 LSB)");
+        Check(line <= 3, "GPU: no line of the courtyard's light along the hall's wall");
+        gpu.dev->SetTexture(p.sampler, nullptr);
+        Release(tex);
+        Release(ps);
+    }
 }
 
 void PixelCheck(Gpu& gpu) {
@@ -558,12 +791,36 @@ int main(int argc, char** argv) {
         std::snprintf(where, sizeof where, "precomp PS blob %u", i);
         CheckPatch(b.code, gpu, st, where);
     }
-    std::printf("Precomp: %d pixel shaders, %d match (%d patched, %d disassemble, %d with 4 taps, %d created natively, %d left to the game by the caps)\n", total, st.matched,
+    std::printf("Precomp: %d pixel shaders, %d match (%d patched, %d disassemble, %d with the taps and bound reads, %d created natively, %d left to the game by the caps)\n", total, st.matched,
                 st.patched, st.disasmOk, st.texldOk, st.created, st.capsRefused);
     std::printf("  with the basis maps too: %d (both reads in one copy, %d created natively)\n", st.combined, st.combinedCreated);
     std::printf("  with the arch ambient (ps_3_0): %d copies, %d created natively\n", st.arch, st.archCreated);
     Check(st.arch > 0 && st.arch == st.archCreated, "every copy with the arch ambient is created natively");
     for (const auto& [n, c] : perTech) std::printf("  %-38s %3d of %3d\n", n.c_str(), c.first, c.second);
+    // The outdoor scale on the outside walls (ShaderPatches::PatchWallScale): every ps_3_0 ExteriorWall pixel shader takes it
+    // and the copy is created natively (the ps_2_x ones, lower shader settings, keep the cut at 1)
+    {
+        const uint32_t ew = Fnv1Lower("ExteriorWall");
+        int walls = 0, patched = 0, created = 0, ps2 = 0;
+        for (uint32_t i = 0; i < blobs.size(); i++) {
+            const Blob& b = blobs[i];
+            const auto tt = techOf.find(i + 1);
+            if (b.vs || b.code.empty() || tt == techOf.end() || !tt->second.count(ew)) continue;
+            if (b.code[0] != 0xFFFF0300) {
+                ps2++;
+                continue;
+            }
+            walls++;
+            std::vector<DWORD> c = b.code;
+            ShaderPatches::WallScalePatch wp;
+            if (!ShaderPatches::PatchWallScale(c, wp)) continue;
+            patched++;
+            if (gpu.dev && gpu.AcceptsPs(c)) created++;
+        }
+        std::printf("  outside walls with the outdoor scale: %d of %d ps_3_0 ExteriorWall shaders patched, %d created natively (%d ps_2_x left as they are)\n", patched, walls,
+                    created, ps2);
+        Check(walls > 0 && patched == walls && (!gpu.dev || created == walls), "every ps_3_0 ExteriorWall shader takes the outdoor scale and is created natively");
+    }
     Check(outside == 0, "no match outside the room-lit techniques");
     Check(perTech["InteriorWall"].first == perTech["InteriorWall"].second && perTech["InteriorWall"].second > 0, "every InteriorWall shader matches");
     Check(perTech["InteriorFloor"].first >= 48, "the InteriorFloor shaders with a room map match (48 of 58: 10 have none)");
@@ -590,7 +847,10 @@ int main(int argc, char** argv) {
     Check(wall > 0 && floor > 0, "wall and floor vertex shaders are told apart by their uv scale");
     Check(other == 0, "no paired vertex shader has another defined uv scale");
     // 4: pixels
+    BoundChecks();
+    SideChecks();
     PixelCheck(gpu);
+    SidePixelCheck(gpu);
     ArchPixelCheck(gpu);
     // 5: captures
     std::set<std::vector<DWORD>> seen;

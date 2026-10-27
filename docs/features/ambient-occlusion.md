@@ -107,6 +107,9 @@ Isolated pixels (leaf edges, thin rails) fade out. Off-screen samples count as s
 
 **Composite.** `v = 1 - saturate((1 - ao - 0.05) / 0.95)`, then per channel
 `m = MultiBounce(v, min(0.9, colour^2.2))` (Jimenez 2016), then `m = lerp(m, 1, saturate((luma - 0.35) * 2.5) * keep)`.
+With the Banding Fix on, `colour x m` then gets the Banding Fix's grain (its Strength and phase, the same clamp-aware
+triangular law; [banding-fix.md](banding-fix.md)) only where the shade changed the pixel, from the R2 pattern with its
+coefficients swapped, `frac(dot(vPos, (0.5698403, 0.7548777)) + phase)`, which does not correlate with the scene's grain.
 
 **Camera.** Near plane, depth scale and field of view come from `PostScene` (vertex-constant votes over the first 24
 scene draws). Fallback: near 0.25, A 1.00008, `tanY = 1/4.293`. See

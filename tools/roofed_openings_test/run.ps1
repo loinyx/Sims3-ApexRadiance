@@ -28,8 +28,13 @@ $parts=@(
  (Between 'struct RoofedDoor {' '// The roofed rooms with doors at their last gather'),
  (Between 'struct WallSeg {' 'constexpr DWORD kPatchRetryMs'),
  (Between 'bool SameGeometry(' "// The story's grid for its walls' patches"),
- (Between 'float SegPass(' '// The share of the lamp')
+ (Between 'float SegPass(' '// The share of the lamp'),
+ (Between 'struct RoofedAt {' '// end of RoofedSendWanted')
 )
+# A lamp edit that marks no room (Instant GPU relight, quick outdoor lamp edits) sends the roofed rooms taking room 0's lamps
+# through their openings from its tail, as the changed-room walk does
+$tail=Between 'int SendRoom0DependentsTry(' '// The finalize''s own steps'
+if(-not ($tail.Contains('SameStoryRoofed(mgrL, L, 0, change, lights, edited') -and $tail.Contains('SameStoryRoofed(mgrU, L + 1, 0, change, lights, edited'))){throw 'SendRoom0DependentsTry no longer sends the roofed rooms of the story and of the story above'}
 Set-Content -LiteralPath (Join-Path $OutDir 'extracted_roofed.h') -Value ($parts -join "`n") -Encoding UTF8
 $wallParts = @(
  (Between 'struct WallBlock {' '// After FUN_006ac070'),

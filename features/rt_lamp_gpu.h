@@ -118,8 +118,11 @@ class Engine {
 
     // One batch of lamps (their shadows in tiles 0 .. n - 1) added to the map's sum; first = the sum starts at 0
     bool Accumulate(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, int n, const Params& p, bool first, std::string& err);
-    // The map composed into out (DEFAULT render target, w x h): the game's texture copied, the texels over it (and the blur)
-    bool Compose(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, std::string& err);
+    // The map composed into out (DEFAULT render target, w x h): the game's texture copied, the texels over it (and the blur).
+    // scale (DEFAULT render target, w x h, or null): cleared to 0 and given each texel's outdoor scale (ComposePS COLOR1) as a
+    // second target of the texels' draw (a blurred atlas: through a scratch map; the scale is not blurred)
+    bool Compose(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, std::string& err,
+                 IDirect3DTexture9* scale = nullptr);
     // The harness: the current sum (w x h float4, row major)
     bool ReadSum(IDirect3DDevice9* dev, int w, int h, std::vector<float>& out);
 
@@ -190,7 +193,8 @@ class Engine {
     IDirect3DTexture9* table_ = nullptr;      // DEFAULT A32B32G32R32F kTableCols x tableRows_
     IDirect3DTexture9* tableSys_ = nullptr;   // its SYSTEMMEM copy
     int tableRows_ = 0, tableCap_ = 0;
-    bool ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, ShaderId ps, std::string& err);
+    bool ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, ShaderId ps, std::string& err,
+                     IDirect3DTexture9* scale = nullptr);
     IDirect3DStateBlock9* saved_ = nullptr;
     IDirect3DSurface9* savedRt_[4] = {};
     IDirect3DSurface9* savedDs_ = nullptr;

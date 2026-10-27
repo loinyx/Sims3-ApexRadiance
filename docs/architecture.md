@@ -133,6 +133,7 @@ One mutex serialises this module's Detours transactions.
 | `IDirect3DDevice9::Reset` | same | device[16] | `Hooked_Reset` |
 | 15 device methods | first EndScene | [3.1](#31-hooked-device-methods) | `framework/d3d9_hooks.cpp` |
 | 6 device methods | first use (`ExtraHooks::EnsureInstalled`) | [4.1](#41-extra-device-hooks) | `framework/d3d9_extra_hooks.cpp` |
+| 3 device methods | High-precision scene turned on (`ExtraHooks::EnsureTargetHooks`) | [4.1](#41-extra-device-hooks) | `framework/d3d9_extra_hooks.cpp` |
 
 ### 2.1 `Direct3DCreate9` and `CreateDevice`
 
@@ -382,6 +383,13 @@ cover:
 - **Depth substitution** (single owner, Depth Blur), `SetDepthSubstitution(substitute, report)`: `substitute` maps the
   surface the game binds to the surface actually bound; `report` maps back for `GetDepthStencilSurface`, so the game never
   sees the swap. `RawSet/GetDepthStencilSurface` bypass it; before `EnsureInstalled` they call the device methods.
+- **Render-target substitution** (single owner, the High-precision scene, `framework/scene_target.cpp`):
+  `EnsureTargetHooks(dev)` detours GetRenderTargetData (32), ColorFill (35) and GetRenderTarget (38), only when that
+  switch first turns on, with the same guard. `SetTargetSubstitution(access, report)`: `access` runs before StretchRect,
+  ColorFill and GetRenderTargetData (the scene is resolved into the back buffer before it is copied or read); `report`
+  makes GetRenderTarget show the back buffer while the 16-bit target is bound. The binding itself is
+  `D3D9Hooks::SetRenderTargetSubstitute`, applied after the SetRenderTarget callbacks and in
+  `CallOriginalSetRenderTarget`. See [features/banding-fix.md](features/banding-fix.md#high-precision-scene).
 - Post-scene effects draw with DrawPrimitiveUP. The registry does not hook it, so the effects never re-trigger the
   post-scene trigger; the DrawUP observer only reports them.
 

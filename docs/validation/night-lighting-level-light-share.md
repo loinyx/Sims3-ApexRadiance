@@ -40,6 +40,9 @@ an FPS gain, complete climate coverage or resolution of texture allocation stall
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-27 | `47ec493` (release 2.16.0 candidate; the cut scaled for opening entries `75f1f5b`, wall lamps `156f092`) | `tools/roofed_openings_test`; `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting` (with the reference law of `render_cost_test`) | 0 failures. In game (F7/F8 sessions): the living room behind the courtyard window lit from 1.5 m to the back wall (9 down to 4 levels), the sill's shade before it, as computed; wall lamps not yet seen in game | Native D3D9 (offline device) |
+| 2026-10-26 | `8b59910` (the outdoor texel's cut at an opening) | `tools/roofed_openings_test` (1,724 and 175 checks; `OpeningShareChecks`); `tools/outdoor_delta_test` (15); `tools/rt_lamps_test` (23); `check.ps1 -Suite Smoke` and `-Suite Lighting`; developer, public and standard Release x86 builds | Passed, 0 failures. The green sconce's replay at the hall's glass door: 0.640 before, 0.207 now (its part of the courtyard's texel there 0.207); two lamps at 1.2 each: the room at the door 2.00 before, 1.00 now. Not checked in game | CPU harness / native D3D9 |
+| 2026-10-26 | Working tree on `d542127` (outdoor texels keep their hue) | `tools/outdoor_delta_test` (15 checks); `tools/rt_lamps_test` before its texels-past-1 count was added (22 checks: the compose shader equal to the pack on 26,214 texels); `check.ps1 -Suite Smoke` and `-Suite Lighting`; `tools/roofed_openings_test` (1,703 and 175 checks); `tools/floor_shade_check` (9,624 checks); `tools/terrain_lighting_test` on the F7 13-00-02; developer, public and standard Release x86 builds | Passed, 0 failures, except the terrain test's two known failures; the courtyard's case packs (255, 38, 15) instead of (255, 255, 105). The added count of texels past 1 in `rt_lamps_test` did not run: Windows refused the rebuilt test program. Not checked in game | CPU harness / native D3D9 |
 | — | `v2.15.6` (implementation `f66e777`) | `room_gather_queue_test; render_cost_test; lighting_prepare_test` | 648 policies; 2048 native set comparisons; 131072 lamp RGB comparisons; 144 wall blur cases passed | CPU fixtures; native layouts |
 | — | `10c8107`; `v2.15.5`, ASI SHA-256 `24A2A83A2B189E7FA5CF88B847E5E9B1F68C36E6428B9FCC744E76735A6E1DAB` | Standard Release x86 startup; i18n check; menu audit | No build warnings; all 21 languages cover the new line; embedded cache supplies 78 shaders with 0 to compile; developer mode off and temporary script probe removed. The exact standard build returns normally from Build/Buy to Edit Town | Steam / DXVK |
 | — | `5dd19f1`; release `v2.15.5` | Room gather queue regression; CPU Lighting suite | Lost-key reproduction and queue guards pass; 92 lighting checks pass. Gameplay reproduction returns to Edit Town with the correction | CPU model / Steam gameplay |
@@ -211,6 +214,28 @@ topology mutation inside a point is not reproduced. This release does not promis
 - Session `2026-10-01 15-26-42`: rooms 23/19/3/20 of lot `27D24720` change their merged ambient during a slider drag.
 
 ## Open checks
+
+- Windows counted by the window built (`ApplyCutPost`, `KeepBuiltWindows`, `UnlitWindows`): a house with windows next
+  to an outdoor lamp at night, developer mode. Rotate the camera round the house and stop on each side. **Expected:** the
+  rooms' light stays the same; the `[RoofedLamps]` gathers of those rooms keep the same number of doors to the outside
+  and no `[Openings] ... windows 6 -> 3` change follows a turn (the line counts window closes marked). Delete a window:
+  its light through the wall goes within about a second; undo, or place it on another wall cell: the light follows.
+  Offline: `tools/roofed_openings_test`.
+
+- Outdoor lamp edits reach the rooms that take the lamp through their openings (`SendRoom0DependentsTry` with
+  `SameStoryRoofed`, `RoofedSendWanted`), Lamp lighting Instant and Classic: the courtyard save, a wall sconce next to the
+  kitchen's glass doors. Change its colour in Buy mode, switch it off and on, move it along the wall, delete it.
+  **Expected:** the kitchen and the rooms behind the glass doors follow within a second each time, with no story change;
+  the log shows a `[RoofedLamps] Room solve` of those rooms right after the edit; rooms that never saw the sconce are
+  not solved again. An indoor lamp of the kitchen recoloured still changes the courtyard floor in front of the doors.
+  Offline: `tools/roofed_openings_test` (the selection, and that the edit's tail sends the roofed rooms).
+- Outdoor lamps through openings at the outdoor scale, and cut closes held 2 s (`opening_lamp_balance.h`,
+  `cut_close_hold.h`): the player's courtyard save with the green sconce, at night, developer mode. **Expected:** the
+  kitchen and the rooms behind the glass doors are no brighter than the courtyard floor at the same distance from the
+  sconce, still lit in green near the doors; turning the camera round the house leaves the rooms' light the same; the
+  `[Openings]` lines count closes reopened within the hold and no `windows 3 -> 0` change follows a camera turn; moving
+  *Ground brightness*, *Lot lamp brightness* or the walls' *Brightness* changes the light through the openings once the
+  slider is let go; indoor lamps, rooms with no opening and daylight look as before. Offline: `tools/roofed_openings_test`.
 
 - Broader lots and other game versions remain unverified. The exact standard build and the development build both complete the reproduced Steam transition; this does not establish every cause of a loading hang.
 

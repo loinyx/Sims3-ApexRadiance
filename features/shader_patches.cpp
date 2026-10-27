@@ -1143,11 +1143,78 @@ bool PatchBakedAtlasPsImpl(std::vector<DWORD>& t, int texcoord, FloorPatch& out,
         out.shadeSampler = static_cast<int>(S);
         out.shadeConst = static_cast<int>(cM);
     }
+    // The outdoor scale (Instant lamp lighting's relit copy: a texel past 1 divided by its largest channel), read at the map's
+    // own uv and multiplied back into the map's colour first, so the max, the shade and the indoor light take the whole sum:
+    // texld rT, vK, sQ; mul rT.x, rT.x, cQ.x; exp rT.x, rT.x; mul rL.xyz, rL, rT.x (cQ.x = 0: x 1). The sampler and the
+    // constant after every one above may take (the shade's sampler E + 1, the indoor light's constants to cH + 5), the same
+    // in every variant of the copy, so the shade and the indoor light stay the same insertions
+    out.outScaleSampler = out.outScaleConst = -1;
+    {
+        constexpr DWORD kExp = 0x0E;
+        const DWORD Q = E + 2, cQ = cH + 6;
+        if (Q <= 15 && cQ < 224) {
+            const std::vector<DWORD> scale = {Op(kTexld, 3), Dst(kTemp, T), t[all[tex].at + 2], Src(kSampler, Q),
+                                              Op(kMul, 3), Dst(kTemp, T, 0x1), Src(kTemp, T, kSwzX), Src(kConst, cQ, kSwzX),
+                                              Op(kExp, 2), Dst(kTemp, T, 0x1), Src(kTemp, T, kSwzX),
+                                              Op(kMul, 3), Dst(kTemp, L, 0x7), Src(kTemp, L), Src(kTemp, T, kSwzX)};
+            code.insert(code.begin(), scale.begin(), scale.end());
+            edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, Q)}});
+            out.outScaleSampler = static_cast<int>(Q);
+            out.outScaleConst = static_cast<int>(cQ);
+            out.mapSampler = Num(t[all[tex].at + 3]);
+        }
+    }
     edits.push_back({all[mad].at, std::move(code)});
     Apply(t, std::move(edits));
     return true;
 }
 } // namespace
+bool PatchWallScale(std::vector<DWORD>& t, WallScalePatch& out) {
+    constexpr DWORD kExp = 0x0E;
+    if (t.empty() || t[0] != 0xFFFF0300) return false;
+    const auto all = Parse(t);
+    if (all.empty()) return false;
+    const Usage u = Scan(t, all);
+    size_t firstFlow = all.size();
+    for (size_t i = 0; i < all.size(); i++)
+        if ((all[i].op >= 0x19 && all[i].op <= 0x1E) || (all[i].op >= 0x26 && all[i].op <= 0x2D)) {
+            firstFlow = i;
+            break;
+        }
+    std::vector<int> is2d(16, 0);
+    for (const Ins& x : all)
+        if (x.op == kDcl && Type(t[x.at + 2]) == kSampler && Num(t[x.at + 2]) < 16) is2d[Num(t[x.at + 2])] = ((t[x.at + 1] >> 27) & 0xF) == 2;
+    int tex = -1, found = 0;
+    for (size_t i = 0; i < firstFlow; i++) {
+        const Ins& x = all[i];
+        if (x.op != kTexld || Type(t[x.at + 1]) != kTemp || Type(t[x.at + 2]) != kInput || Type(t[x.at + 3]) != kSampler || !is2d[Num(t[x.at + 3]) & 15]) continue;
+        const DWORD A = Num(t[x.at + 1]);
+        for (size_t j = i + 1; j < firstFlow; j++) {
+            const Ins& y = all[j];
+            bool reads = false;
+            for (size_t k = 2; k <= y.len; k++) reads |= IsReg(t[y.at + k], kTemp, A) && Swz(t[y.at + k]) != kSwzW;
+            if (reads) {
+                if (y.op == kMad && Type(t[y.at + 1]) == kTemp && WMask(t[y.at + 1]) == 0x7 && IsReg(t[y.at + 2], kTemp, A) && Swz(t[y.at + 2]) == kSwzXYZW &&
+                    Type(t[y.at + 3]) == kConst && Swz(t[y.at + 3]) == kSwzX && Type(t[y.at + 4]) == kTemp) {
+                    tex = static_cast<int>(i);
+                    found++;
+                }
+                break;
+            }
+            if (IsReg(t[y.at + 1], kTemp, A) && (WMask(t[y.at + 1]) & 0x7)) break;
+        }
+    }
+    if (found != 1 || u.maxSampler < 0 || u.maxSampler >= 15 || !u.afterLastSamplerDcl || u.maxConst + 1 >= 224 || u.maxTemp + 1 >= 32) return false;
+    const Ins& x = all[static_cast<size_t>(tex)];
+    const DWORD A = Num(t[x.at + 1]), Q = static_cast<DWORD>(u.maxSampler + 1), cQ = static_cast<DWORD>(u.maxConst + 1), T = static_cast<DWORD>(u.maxTemp + 1);
+    out.sampler = Q, out.constReg = cQ, out.mapSampler = Num(t[x.at + 3]);
+    std::vector<DWORD> code = {Op(kTexld, 3), Dst(kTemp, T), t[x.at + 2], Src(kSampler, Q),
+                               Op(kMul, 3), Dst(kTemp, T, 0x1), Src(kTemp, T, kSwzX), Src(kConst, cQ, kSwzX),
+                               Op(kExp, 2), Dst(kTemp, T, 0x1), Src(kTemp, T, kSwzX),
+                               Op(kMul, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, T, kSwzX)};
+    Apply(t, {{u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, Q)}}, {End(x), std::move(code)}});
+    return true;
+}
 // (2.15.3) exitLight (with groundShade): as PatchFloor
 bool PatchBakedAtlasPs(std::vector<DWORD>& t, int texcoord, FloorPatch& out, bool groundShade, bool exitLight) {
     if (exitLight && groundShade) {
@@ -3083,9 +3150,9 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
     const bool ps3 = t[0] == 0xFFFF0300;
     const Usage u = Scan(t, ins);
     const int constLimit = ps3 ? 224 : 32; // ps_2_x: c0..c31
-    if (u.maxTemp + 11 >= 32 || u.maxConst + 4 >= constLimit) return false;
+    if (u.maxTemp + 14 >= 32 || u.maxConst + 6 >= constLimit) return false;
     const DWORD T = static_cast<DWORD>(u.maxTemp + 1);
-    const DWORD cS = static_cast<DWORD>(u.maxConst + 1), cK = cS + 1, cH = cS + 2, cR = cS + 3;
+    const DWORD cS = static_cast<DWORD>(u.maxConst + 1), cK = cS + 1, cH = cS + 2, cR = cS + 3, cG = cS + 4, cV = cS + 5;
     const DWORD P = T, Fr = T + 1, R = T + 2, A = T + 3, B = T + 4, Wt = T + 10;
     const DWORD X = Sw(0, 0, 0, 0), Y = Sw(1, 1, 1, 1), Z = Sw(2, 2, 2, 2), W = Sw(3, 3, 3, 3);
     // The wall atlas's blocks: row = floor(v H / S) (S = 3n + 1 texel rows a block), the taps' v kept within
@@ -3109,12 +3176,94 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
         if (k == 0) body.insert(body.end(), {Op(kMul, 3), Dst(kTemp, r.L), Src(kTemp, R), Src(kTemp, Wt, X)});
         else body.insert(body.end(), {Op(kMad, 4), Dst(kTemp, r.L), Src(kTemp, R), Src(kTemp, Wt, Sw(c, c, c, c)), Src(kTemp, r.L)});
     }
+    // Light across a wall. The B-spline reads the 4 x 4 texels around the pixel; where they include the texels of room 0
+    // beyond a wall the pixel took that room's light: a hall beside a glass door showed a band of the lit courtyard's light
+    // along its wall (F7: 0.14 of a courtyard texel at 1 beside hall texels at 0.03). Held under the brightest texel of the
+    // room's side it still drew a line: a room's texels along a wall under a window are dark (the wall below the sill
+    // shades them; F7: courtyard 1 | wall | 0, 0.08, 0.18), the B-spline lifted the first to the bound with the courtyard's
+    // light and left the second dark, a black line half a metre from the wall between two lit bands. The solve marks the
+    // sides: a roofed room's texel holds its ambient weight in alpha (0.44 to 0.84 there), room 0's 0 (or the little light
+    // rooms send out of their openings, Indoor light on the ground). When the pixel's own texel (the one it lies in) has
+    // alpha 0.125 or more, the read is the B-spline of the 4 x 4 texels with alpha 4/255 or more alone, its weights over
+    // their sum (the own texel's weight is at least 0.23): room 0's texels beyond the wall add nothing to the colour or to
+    // the ambient weight, and the room's light falls to the wall as the solve has it, smooth across shadow edges and a
+    // jamb's penumbra. A pixel of room 0 or a bright texel with little ambient weight keeps the B-spline. Rows as the taps
+    // (the pixel's wall block). Temps free here: A, B, R, C0..C3, T + 5, Wt, T + 11 .. T + 13.
+    {
+        constexpr DWORD kCmp = 0x58, kDp4 = 0x09;
+        const DWORD C0 = T + 6, Xc = T + 5, Yr = Wt, Wx = T + 11, Wy = T + 12, Acc = T + 13;
+        const std::vector<DWORD> blockLimits(clampV.begin(), clampV.end() - 8); // (lo in A.x, hi in A.y; not the clamp of B)
+        body.insert(body.end(), {
+            Op(kAdd, 3), Dst(kTemp, B, 0x3), Src(kTemp, Fr), Src(kConst, cH, X),                                     // f - 0.5
+            Op(kCmp, 4), Dst(kTemp, B, 0x3), Src(kTemp, B), Src(kConst, cG, Z), Src(kConst, cG, W),                  // f >= 0.5
+            Op(kAdd, 3), Dst(kTemp, B, 0x3), Src(kTemp, B), Src(kTemp, P),
+            Op(kAdd, 3), Dst(kTemp, B, 0x3), Src(kTemp, B), Src(kConst, cK, Z),                                      // the own texel's centre
+            Op(kMul, 3), Dst(kTemp, B, 0x3), Src(kTemp, B), Src(kConst, cS, Sw(2, 3, 2, 3)),
+            Op(kTexld, 3), Dst(kTemp, R), Src(kTemp, B), Src(kSampler, r.S),
+            Op(kAdd, 3), Dst(kTemp, A, 0x8), Src(kTemp, R, W), Neg(Src(kConst, cG, Y)),
+            Op(kCmp, 4), Dst(kTemp, A, 0x8), Src(kTemp, A, W), Src(kConst, cG, W), Src(kConst, cG, Z),              // 1 = the plain B-spline
+            Op(kAdd, 3), Dst(kTemp, Xc), Src(kTemp, P, X), Src(kConst, cV),                                          // columns i - 1 .. i + 2
+            Op(kMul, 3), Dst(kTemp, Xc), Src(kTemp, Xc), Src(kConst, cS, Z),
+            Op(kAdd, 3), Dst(kTemp, Yr), Src(kTemp, P, Y), Src(kConst, cV)});                                        // rows
+        body.insert(body.end(), blockLimits.begin(), blockLimits.end());
+        body.insert(body.end(), {Op(kMax, 3), Dst(kTemp, Yr), Src(kTemp, Yr), Src(kTemp, A, X),
+                                 Op(kMin, 3), Dst(kTemp, Yr), Src(kTemp, Yr), Src(kTemp, A, Y),
+                                 Op(kMul, 3), Dst(kTemp, Yr), Src(kTemp, Yr), Src(kConst, cS, W)});
+        // the B-spline's weights of the columns (Wx) and the rows (Wy): (1 - f)^3 / 6, 0.5 f^3 - f^2 + 2/3, the rest, f^3 / 6
+        const auto weights = [&](DWORD Wv, DWORD S, int fs) {
+            const DWORD f = Sw(fs, fs, fs, fs);
+            body.insert(body.end(), {Op(kMul, 3), Dst(kTemp, S, 0x1), Src(kTemp, Fr, f), Src(kTemp, Fr, f),         // f^2
+                                     Op(kMul, 3), Dst(kTemp, S, 0x2), Src(kTemp, S, X), Src(kTemp, Fr, f),           // f^3
+                                     Op(kAdd, 3), Dst(kTemp, S, 0x4), Neg(Src(kTemp, Fr, f)), Src(kConst, cK, W),    // 1 - f
+                                     Op(kMul, 3), Dst(kTemp, S, 0x8), Src(kTemp, S, Z), Src(kTemp, S, Z),
+                                     Op(kMul, 3), Dst(kTemp, S, 0x8), Src(kTemp, S, W), Src(kTemp, S, Z),            // (1 - f)^3
+                                     Op(kMul, 3), Dst(kTemp, Wv, 0x9), Src(kTemp, S, Sw(3, 3, 3, 1)), Src(kConst, cK, X),
+                                     Op(kMad, 4), Dst(kTemp, Wv, 0x2), Src(kTemp, S, Y), Src(kConst, cK, Z), Neg(Src(kTemp, S, X)),
+                                     Op(kAdd, 3), Dst(kTemp, Wv, 0x2), Src(kTemp, Wv, Y), Src(kConst, cK, Y),
+                                     Op(kAdd, 3), Dst(kTemp, Wv, 0x4), Neg(Src(kTemp, Wv, X)), Src(kConst, cK, W),
+                                     Op(kAdd, 3), Dst(kTemp, Wv, 0x4), Src(kTemp, Wv, Z), Neg(Src(kTemp, Wv, Y)),
+                                     Op(kAdd, 3), Dst(kTemp, Wv, 0x4), Src(kTemp, Wv, Z), Neg(Src(kTemp, Wv, W))});
+        };
+        weights(Wx, Wy, 0);
+        weights(Wy, Acc, 1);
+        for (DWORD row = 0; row < 4; row++) {
+            const DWORD rs = Sw(static_cast<int>(row), static_cast<int>(row), static_cast<int>(row), static_cast<int>(row));
+            body.insert(body.end(), {Op(kMul, 3), Dst(kTemp, B, 0x3), Src(kTemp, Yr, rs), Src(kConst, cG, Sw(3, 2, 3, 2))}); // (0, y)
+            for (DWORD k = 0; k < 4; k++)
+                body.insert(body.end(), {Op(kMad, 4), Dst(kTemp, C0 + k, 0x3), Src(kTemp, Xc, Sw(static_cast<int>(k), static_cast<int>(k), static_cast<int>(k), static_cast<int>(k))),
+                                         Src(kConst, cG, Sw(2, 3, 2, 3)), Src(kTemp, B)});
+            for (DWORD k = 0; k < 4; k++) body.insert(body.end(), {Op(kTexld, 3), Dst(kTemp, C0 + k), Src(kTemp, C0 + k), Src(kSampler, r.S)});
+            body.insert(body.end(), {Op(kMov, 2), Dst(kTemp, R, 0x1), Src(kTemp, C0, W),
+                                     Op(kMov, 2), Dst(kTemp, R, 0x2), Src(kTemp, C0 + 1, W),
+                                     Op(kMov, 2), Dst(kTemp, R, 0x4), Src(kTemp, C0 + 2, W),
+                                     Op(kMov, 2), Dst(kTemp, R, 0x8), Src(kTemp, C0 + 3, W),
+                                     Op(kAdd, 3), Dst(kTemp, R), Src(kTemp, R), Neg(Src(kConst, cG, X)),
+                                     Op(kCmp, 4), Dst(kTemp, R), Src(kTemp, R), Src(kConst, cG, Z), Src(kConst, cG, W), // the room's own texels
+                                     Op(kMul, 3), Dst(kTemp, R), Src(kTemp, R), Src(kTemp, Wx),
+                                     Op(kMul, 3), Dst(kTemp, R), Src(kTemp, R), Src(kTemp, Wy, rs),                    // their weights
+                                     Op(kDp4, 3), Dst(kTemp, B, 0x4), Src(kTemp, R), Src(kConst, cK, W)});
+            if (row == 0) body.insert(body.end(), {Op(kMov, 2), Dst(kTemp, A, 0x1), Src(kTemp, B, Z),
+                                                   Op(kMul, 3), Dst(kTemp, Acc), Src(kTemp, C0), Src(kTemp, R, X)});
+            else body.insert(body.end(), {Op(kAdd, 3), Dst(kTemp, A, 0x1), Src(kTemp, A, X), Src(kTemp, B, Z),
+                                          Op(kMad, 4), Dst(kTemp, Acc), Src(kTemp, C0), Src(kTemp, R, X), Src(kTemp, Acc)});
+            for (DWORD k = 1; k < 4; k++)
+                body.insert(body.end(), {Op(kMad, 4), Dst(kTemp, Acc), Src(kTemp, C0 + k),
+                                         Src(kTemp, R, Sw(static_cast<int>(k), static_cast<int>(k), static_cast<int>(k), static_cast<int>(k))), Src(kTemp, Acc)});
+        }
+        body.insert(body.end(), {Op(kMax, 3), Dst(kTemp, A, 0x1), Src(kTemp, A, X), Src(kConst, cG, X), // (the own texel's weight is 0.23 or more; a
+                                 // texel outside the taps' wall block can leave none: 0, not 0 / 0)
+                                 Op(kRcp, 2), Dst(kTemp, A, 0x1), Src(kTemp, A, X),
+                                 Op(kMul, 3), Dst(kTemp, Acc), Src(kTemp, Acc), Src(kTemp, A, X),
+                                 Op(kCmp, 4), Dst(kTemp, r.L), Neg(Src(kTemp, A, W)), Src(kTemp, Acc), Src(kTemp, r.L)}); // the own side's read
+    }
     // (development builds, arch_ambient) the neighbours' ambient near the room's arches, right after the read (ps_3_0 only;
     // a copy that cannot hold it is made without it)
     std::vector<DWORD> defs = {Op(kDef, 5), Dst(kConst, cK), F(1.0f / 6.0f), F(2.0f / 3.0f), F(0.5f), F(1.0f),
-                               Op(kDef, 5), Dst(kConst, cH), F(-0.5f), F(1.5f), F(0.0f), F(0.0f)};
-    if (archAmb && ps3 && r.ambConst >= 0 && u.maxConst + 6 + 2 * static_cast<int>(kArchCells) < constLimit) {
-        const DWORD cP = cS + 4, cQ = cS + 5, cArch = cS + 6;
+                               Op(kDef, 5), Dst(kConst, cH), F(-0.5f), F(1.5f), F(2.0f / 255.0f), F(0.0f),
+                               Op(kDef, 5), Dst(kConst, cG), F(4.0f / 255.0f), F(0.125f), F(1.0f), F(0.0f),
+                               Op(kDef, 5), Dst(kConst, cV), F(-0.5f), F(0.5f), F(1.5f), F(2.5f)};
+    if (archAmb && ps3 && r.ambConst >= 0 && u.maxConst + 8 + 2 * static_cast<int>(kArchCells) < constLimit) {
+        const DWORD cP = cS + 6, cQ = cS + 7, cArch = cS + 8;
         const std::vector<DWORD> code = ArchAmbientCode(r.uvType, r.uvNum, cS, cP, cQ, cArch, r.L, T, T + 1, T + 2);
         body.insert(body.end(), code.begin(), code.end());
         defs.insert(defs.end(), {Op(kDef, 5), Dst(kConst, cP), F(3.0f), F(-2.0f), F(1.0f), F(0.25f),
@@ -3129,7 +3278,7 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
     out.sampler = r.S;
     out.sizeConst = cS;
     out.bandConst = cR;
-    out.temps = static_cast<int>(T + 11);
+    out.temps = static_cast<int>(T + 14);
     ins = Parse(t);
     for (const Ins& y : ins) out.slots += y.op != kDcl && y.op != kDef && y.op != kDefI && y.op != kDefB ? 1 : 0;
     out.ps2x = !ps3;
@@ -3397,12 +3546,48 @@ bool WorldUvRows(const std::vector<DWORD>& t, int usage, int index, int worldK, 
     return out.row[0] >= 0 && out.row[1] >= 0;
 }
 
+namespace {
+// The Banding Fix's grain (AddDither, AddDither2), one constant per instruction (ps_2_0 rule):
+//   u = frac(dot(pixel, R2) + cA.w)    R2 = (0.7548777, 0.5698403): the R2 low-discrepancy pattern (fixed, no sampler)
+//   r = 2u - 1;  t = sign(r) (1 - sqrt(1 - |r|))    triangular in (-1, 1): the inverse CDF (TPDF, no noise modulation)
+//   n = lerp(t, r / 2, sat(2x - 1))                 above mid-grey the grain tapers to a uniform +-0.5 step
+//   a = min(cA.x, min(x, 1 - x) + 0.5 / 255)        within the clamp: pure black and white get no specks and every grey
+//   dst = x + n a                                   keeps its mean (the noise never passes 0 or 1 by half a step)
+// cK, cL: the defs; cA = (amount, w/2, h/2, phase); pos: the pixel (vPos, or N.xy for ps_2_x); x = rO; N, M: free temps;
+// m: the colour components written (the others of rO may be unwritten)
+constexpr DWORD kGrainMin = 0x0A, kGrainAbs = 0x23, kGrainRsq = 0x07, kGrainCmp = 0x58;
+std::vector<DWORD> GrainDefs(DWORD cK, DWORD cL) {
+    return {Op(kDef, 5), Dst(kConst, cK), F(0.7548777f), F(0.5698403f), F(0.0f), F(0.5f / 255.0f),
+            Op(kDef, 5), Dst(kConst, cL), F(2.0f), F(-1.0f), F(1.0f), F(0.5f)};
+}
+std::vector<DWORD> GrainTail(DWORD pos, DWORD O, DWORD N, DWORD M, DWORD cK, DWORD cL, DWORD cA, DWORD dst, DWORD m) {
+    return {Op(kDp2add, 4), Dst(kTemp, N, 0x1), pos, Src(kConst, cK), Src(kConst, cK, 0xAA),
+            Op(kAdd, 3), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kConst, cA, kSwzW), // + cA.w: 0 still, per frame moving
+            Op(kFrc, 2), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX),                                                     // u
+            Op(kMad, 4), Dst(kTemp, N, 0x8), Src(kTemp, N, kSwzX), Src(kConst, cL, kSwzX), Src(kConst, cL, kSwzY),      // r
+            Op(kGrainAbs, 2), Dst(kTemp, N, 0x2), Src(kTemp, N, kSwzW),
+            Op(kAdd, 3), Dst(kTemp, N, 0x2), Neg(Src(kTemp, N, kSwzY)), Src(kConst, cL, 0xAA),                       // 1 - |r|
+            Op(kGrainRsq, 2), Dst(kTemp, N, 0x4), Src(kTemp, N, kSwzY),
+            Op(kRcp, 2), Dst(kTemp, N, 0x4), Src(kTemp, N, 0xAA),                                                      // sqrt
+            Op(kAdd, 3), Dst(kTemp, N, 0x4), Neg(Src(kTemp, N, 0xAA)), Src(kConst, cL, 0xAA),                       // 1 - sqrt
+            Op(kGrainCmp, 4), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzW), Src(kTemp, N, 0xAA), Neg(Src(kTemp, N, 0xAA)), // t
+            Op(kMad, 4), Dst(kTemp, N, 0x8), Src(kTemp, N, kSwzW), Src(kConst, cL, kSwzW), Neg(Src(kTemp, N, kSwzX)),  // r/2 - t
+            Op(kMad, 4), Dst(kTemp, M, m, true), Src(kTemp, O), Src(kConst, cL, kSwzX), Src(kConst, cL, kSwzY),         // sat(2x - 1)
+            Op(kMad, 4), Dst(kTemp, M, m), Src(kTemp, M), Src(kTemp, N, kSwzW), Src(kTemp, N, kSwzX),                   // n
+            Op(kAdd, 3), Dst(kTemp, N, m), Neg(Src(kTemp, O)), Src(kConst, cL, 0xAA),                                   // 1 - x
+            Op(kGrainMin, 3), Dst(kTemp, N, m), Src(kTemp, N), Src(kTemp, O),
+            Op(kAdd, 3), Dst(kTemp, N, m), Src(kTemp, N), Src(kConst, cK, kSwzW),
+            Op(kGrainMin, 3), Dst(kTemp, N, m), Src(kTemp, N), Src(kConst, cA, kSwzX),                                  // a
+            Op(kMad, 4), dst, Src(kTemp, M), Src(kTemp, N), Src(kTemp, O)};
+}
+} // namespace
+
 DitherResult AddDither(std::vector<DWORD>& t, int* amountConst) {
     if (t.empty() || t[0] != 0xFFFF0300) return DitherResult::NotPs30;
     if (t.back() != 0x0000FFFFu) return DitherResult::Unreadable;
     const auto ins = Parse(t);
     if (ins.empty()) return DitherResult::Unreadable;
-    constexpr DWORD kMisc = 17, kDp2add = 0x5A, kFrc = 0x13, kCall = 0x19, kCallnz = 0x1A, kRet = 0x1C, kLabel = 0x1E;
+    constexpr DWORD kMisc = 17, kCall = 0x19, kCallnz = 0x1A, kRet = 0x1C, kLabel = 0x1E;
     constexpr DWORD kRegBits = 0x70001800u | 0x7FFu, kRelative = 0x2000u;
     bool vPos = false;
     DWORD mask = 0;                // components of oC0 the shader writes
@@ -3427,30 +3612,15 @@ DitherResult AddDither(std::vector<DWORD>& t, int* amountConst) {
     }
     if (writes.empty() || !(mask & 0x7)) return DitherResult::NoColorWrite;
     const Usage u = Scan(t, ins);
-    if (u.maxTemp + 2 >= 32 || u.maxConst + 3 >= 224) return DitherResult::NoFreeRegister;
-    const DWORD O = static_cast<DWORD>(u.maxTemp + 1), N = O + 1, cK = static_cast<DWORD>(u.maxConst + 1), cL = cK + 1, cA = cK + 2;
+    if (u.maxTemp + 3 >= 32 || u.maxConst + 3 >= 224) return DitherResult::NoFreeRegister;
+    const DWORD O = static_cast<DWORD>(u.maxTemp + 1), N = O + 1, M = O + 2, cK = static_cast<DWORD>(u.maxConst + 1), cL = cK + 1, cA = cK + 2;
     for (size_t at : writes) t[at] = (t[at] & ~kRegBits) | (Reg(kTemp, O) & kRegBits); // oC0 -> rO, same mask and modifiers
-    constexpr DWORD kAbs = 0x23, kRsq = 0x07, kRcp = 0x06, kCmp = 0x58;
     std::vector<Edit> edits;
-    std::vector<DWORD> head = {Op(kDef, 5), Dst(kConst, cK), F(0.06711056f), F(0.00583715f), F(0.0f), F(52.9829189f),
-                               Op(kDef, 5), Dst(kConst, cL), F(2.0f), F(-1.0f), F(1.0f), F(0.0f)};
+    std::vector<DWORD> head = GrainDefs(cK, cL);
     if (!vPos) head.insert(head.end(), {Op(kDcl, 2), 0x80000000u, Dst(kMisc, 0, 0x3)});
     edits.push_back({1, head});
-    // u = IGN(vPos) in [0, 1); r = 2u - 1; triangular t = sign(r) (1 - sqrt(1 - |r|)) in (-1, 1): the inverse CDF of the
-    // triangular distribution, so the dither is TPDF (no noise modulation: the steps vanish instead of thinning out)
-    std::vector<DWORD> tail = {Op(kDp2add, 4), Dst(kTemp, N, 0x1), Src(kMisc, 0), Src(kConst, cK), Src(kConst, cK, 0xAA),
-                               Op(kAdd, 3), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kConst, cA, kSwzW), // + cA.w: 0 still, per frame moving
-                               Op(kFrc, 2), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX),
-                               Op(kMul, 3), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kConst, cK, kSwzW),
-                               Op(kFrc, 2), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX),                                                // u
-                               Op(kMad, 4), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kConst, cL, kSwzX), Src(kConst, cL, kSwzY), // r
-                               Op(kAbs, 2), Dst(kTemp, N, 0x2), Src(kTemp, N, kSwzX),
-                               Op(kAdd, 3), Dst(kTemp, N, 0x2), Neg(Src(kTemp, N, kSwzY)), Src(kConst, cL, 0xAA),                  // 1 - |r|
-                               Op(kRsq, 2), Dst(kTemp, N, 0x4), Src(kTemp, N, kSwzY),
-                               Op(kRcp, 2), Dst(kTemp, N, 0x4), Src(kTemp, N, 0xAA),                                                 // sqrt
-                               Op(kAdd, 3), Dst(kTemp, N, 0x4), Neg(Src(kTemp, N, 0xAA)), Src(kConst, cL, 0xAA),                  // 1 - sqrt
-                               Op(kCmp, 4), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kTemp, N, 0xAA), Neg(Src(kTemp, N, 0xAA)), // t
-                               Op(kMad, 4), Dst(kColorOut, 0, mask & 0x7), Src(kTemp, N, kSwzX), Src(kConst, cA, kSwzX), Src(kTemp, O)};
+    const DWORD m = mask & 0x7;
+    std::vector<DWORD> tail = GrainTail(Src(kMisc, 0), O, N, M, cK, cL, cA, Dst(kColorOut, 0, m), m);
     if (mask & 0x8) tail.insert(tail.end(), {Op(kMov, 2), Dst(kColorOut, 0, 0x8), Src(kTemp, O)});
     edits.push_back({t.size() - 1, tail}); // before the end token
     Apply(t, std::move(edits));
@@ -3463,8 +3633,7 @@ DitherResult AddDither2(std::vector<DWORD>& t, int* amountConst, int* texcoordOu
     if (t.back() != 0x0000FFFFu) return DitherResult::Unreadable;
     const auto ins = Parse(t);
     if (ins.empty()) return DitherResult::Unreadable;
-    constexpr DWORD kDp2add = 0x5A, kFrc = 0x13, kCall = 0x19, kCallnz = 0x1A, kRet = 0x1C, kLabel = 0x1E;
-    constexpr DWORD kAbs = 0x23, kRsq = 0x07, kRcp = 0x06, kCmp = 0x58;
+    constexpr DWORD kCall = 0x19, kCallnz = 0x1A, kRet = 0x1C, kLabel = 0x1E;
     constexpr DWORD kRegBits = 0x70001800u | 0x7FFu;
     std::vector<size_t> writes;
     unsigned usedT = 0; // texture coordinates the shader declares or reads
@@ -3486,33 +3655,22 @@ DitherResult AddDither2(std::vector<DWORD>& t, int* amountConst, int* texcoordOu
     const DWORD kT = static_cast<DWORD>(free);
     const Usage u = Scan(t, ins);
     // the copy is ps_2_x (more temps and instruction slots than ps_2_0: the grain does not fit in some ps_2_0 shaders)
-    if (u.maxTemp + 2 >= 32 || u.maxConst + 3 >= 32) return DitherResult::NoFreeRegister;
-    const DWORD O = static_cast<DWORD>(u.maxTemp + 1), N = O + 1, cK = static_cast<DWORD>(u.maxConst + 1), cL = cK + 1, cA = cK + 2;
+    if (u.maxTemp + 3 >= 32 || u.maxConst + 3 >= 32) return DitherResult::NoFreeRegister;
+    const DWORD O = static_cast<DWORD>(u.maxTemp + 1), N = O + 1, M = O + 2, cK = static_cast<DWORD>(u.maxConst + 1), cL = cK + 1, cA = cK + 2;
     for (size_t at : writes) t[at] = (t[at] & ~kRegBits) | (Reg(kTemp, O) & kRegBits); // oC0 -> rO, same mask and modifiers
     std::vector<Edit> edits;
-    edits.push_back({1, {Op(kDef, 5), Dst(kConst, cK), F(0.06711056f), F(0.00583715f), F(0.0f), F(52.9829189f),
-                         Op(kDef, 5), Dst(kConst, cL), F(2.0f), F(-1.0f), F(1.0f), F(0.0f),
-                         Op(kDcl, 2), 0x80000000u, Dst(kTexture, kT)}});
-    // pixel = (ndc.x * w/2 + w/2, -ndc.y * h/2 + h/2), ndc = t7.xy / t7.w; then the same triangular grain as AddDither.
-    // One constant per instruction (ps_2_0).
+    std::vector<DWORD> head = GrainDefs(cK, cL);
+    head.insert(head.end(), {Op(kDcl, 2), 0x80000000u, Dst(kTexture, kT)});
+    edits.push_back({1, head});
+    // pixel = (ndc.x * w/2 + w/2, -ndc.y * h/2 + h/2), ndc = t7.xy / t7.w: the same integer position as vPos (the ps_2_x
+    // and ps_3_0 grains match pixel for pixel on native D3D9 and DXVK, tools/banding_fix_check); then the same grain
     std::vector<DWORD> tail = {Op(kRcp, 2), Dst(kTemp, N, 0x8), Src(kTexture, kT, kSwzW),
                                Op(kMul, 3), Dst(kTemp, N, 0x3), Src(kTemp, N, kSwzW), Src(kTexture, kT),
                                Op(kMad, 4), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kConst, cA, kSwzY), Src(kConst, cA, kSwzY),
-                               Op(kMad, 4), Dst(kTemp, N, 0x2), Neg(Src(kTemp, N, kSwzY)), Src(kConst, cA, 0xAA), Src(kConst, cA, 0xAA),
-                               Op(kDp2add, 4), Dst(kTemp, N, 0x1), Src(kTemp, N), Src(kConst, cK), Src(kConst, cK, 0xAA),
-                               Op(kAdd, 3), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kConst, cA, kSwzW),
-                               Op(kFrc, 2), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX),
-                               Op(kMul, 3), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kConst, cK, kSwzW),
-                               Op(kFrc, 2), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX),
-                               Op(kMad, 4), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kConst, cL, kSwzX), Src(kConst, cL, kSwzY),
-                               Op(kAbs, 2), Dst(kTemp, N, 0x2), Src(kTemp, N, kSwzX),
-                               Op(kAdd, 3), Dst(kTemp, N, 0x2), Neg(Src(kTemp, N, kSwzY)), Src(kConst, cL, 0xAA),
-                               Op(kRsq, 2), Dst(kTemp, N, 0x4), Src(kTemp, N, kSwzY),
-                               Op(kRcp, 2), Dst(kTemp, N, 0x4), Src(kTemp, N, 0xAA),
-                               Op(kAdd, 3), Dst(kTemp, N, 0x4), Neg(Src(kTemp, N, 0xAA)), Src(kConst, cL, 0xAA),
-                               Op(kCmp, 4), Dst(kTemp, N, 0x1), Src(kTemp, N, kSwzX), Src(kTemp, N, 0xAA), Neg(Src(kTemp, N, 0xAA)),
-                               Op(kMad, 4), Dst(kTemp, O, 0x7), Src(kTemp, N, kSwzX), Src(kConst, cA, kSwzX), Src(kTemp, O),
-                               Op(kMov, 2), Dst(kColorOut, 0), Src(kTemp, O)};
+                               Op(kMad, 4), Dst(kTemp, N, 0x2), Neg(Src(kTemp, N, kSwzY)), Src(kConst, cA, 0xAA), Src(kConst, cA, 0xAA)};
+    const std::vector<DWORD> grain = GrainTail(Src(kTemp, N), O, N, M, cK, cL, cA, Dst(kTemp, O, 0x7), 0x7);
+    tail.insert(tail.end(), grain.begin(), grain.end());
+    tail.insert(tail.end(), {Op(kMov, 2), Dst(kColorOut, 0), Src(kTemp, O)});
     edits.push_back({t.size() - 1, tail});
     Apply(t, std::move(edits));
     t[0] = 0xFFFF0201; // ps_2_x

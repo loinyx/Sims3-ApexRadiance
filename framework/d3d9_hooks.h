@@ -141,6 +141,11 @@ void UnregisterAll(const std::string& name);
 // already ran for the game's call of the same draw with the same state, and their nested run changed nothing (14/10). In the development build the driver's time for a re-issued draw is booked
 // as "Re-issued draw (driver)", not as mod time.
 void ObserveReissuedDraws(const std::string& name); // DrawIndexedPrimitive and DrawPrimitive callbacks of this name, now and later
+// Render-target substitution (one owner: the High-precision scene, scene_target.cpp). Every SetRenderTarget callback sees
+// the surface the caller asked for; the device then binds fn(index, requested). CallOriginalSetRenderTarget binds through
+// it too, so a callback that saves render target 0 and puts it back keeps the substitution. nullptr = none.
+using RenderTargetSubstitute = IDirect3DSurface9* (*)(DWORD index, IDirect3DSurface9* requested);
+void SetRenderTargetSubstitute(RenderTargetSubstitute fn);
 void BeginReissue();
 void EndReissue();
 struct ReissueScope {

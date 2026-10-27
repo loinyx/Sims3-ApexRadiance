@@ -771,3 +771,79 @@ An outdoor room can lose its key while unrelated rooms remain in the two work se
 membership in each set and honours the native insertion result. Invalid membership remains a reason to abstain.
 Broader solve-context caching and forced completion are not introduced. Lamp evaluation reuses the exact SSE
 square root; wall blur avoids clearing pixels that are immediately overwritten.
+
+### 2026-10-26: an outdoor sconce brighter indoors than outdoors, and the camera's cut posts
+
+**Context:** a player's light capture and snapshots: a green wall sconce (`L19ABA670`, type 5, intensity 1.7, colour
+(0, 1, 0), story 0, room 0) on a free-standing courtyard wall lit the courtyard faintly and the kitchen behind a glass door
+in saturated green (screen 0.808); the kitchen's light also changed with the camera.
+
+**Finding:** the courtyard's lot pass draws the lot map x 0.75 x 0.756 = 0.567, cut at 1 per channel; the roofed room took
+the lamp twice (its weight in room 0, as intended) with no outdoor scale and no cut, its normalisation on top, and the
+room's mean-based curves let a one-channel colour grow three times further than a white one. Glass (0.765) and the
+opening's share applied; the lamp was not counted more than in room 0 and the reach law is for walls only. The camera
+dependence: the game posted the lot's cuts again on camera turns, and the window cuts closed and reopened 0.18 to 0.67 s
+later, so the roofed room gathered with 2 doors, then 5.
+
+**Outcome:** outdoor lamps through openings take the outdoor cut and scale over the room's normalisation
+(`opening_lamp_balance.h`); a cut's close counts after 2 s (`cut_close_hold.h`). Offline checks in
+`tools/roofed_openings_test`. In-game confirmation pending.
+
+**Follow-up:** a later capture showed the camera keeping a wall's window cuts closed while it stays (`windows 6 -> 3`, 18
+closes past the hold), the kitchen again gathering with 8 or 5 doors. Windows now count by the window built: a close
+marks the cut, and the grid keeps it while a window light stands in its cell (`KeepBuiltWindows`); doors, arches and
+gates keep the hold. In-game confirmation pending.
+
+### 2026-10-26: the red sconce yellow in the courtyard, red behind the glass
+
+**Context:** the same courtyard with the sconce turned red (`L39F18C40`, colour (1.7, 0, 0), story 0, room 0, listed
+twice): the kitchen behind the glass red, the courtyard ground by the lamp and the lattice wall carrying it yellow and
+cream (F7 13-00-02, pixel 2161, 1026: screen (0.557, 0.498, 0.427)).
+
+**Finding:** the pixel is the terrain (draw #17) with the lot pass (#29, Apex's). Its lot map (Real-time outdoor lamps'
+copy) held (1, 1, 0.41) by the lamp; the shade is 1 in the courtyard (0.31 behind the decorative wall, which blocks the
+lamp correctly), the ground atlas holds the lamp's red, and the alpha E is at most 3/255, so the indoor light on the ground
+(`ex`) is at most 1.3 % of the map and luzInternaSomaNoChao on or off gives the same pixel. The red lamp adds no green: the
+yellow is light baked in room 0's sum around the glass doors and windows, at least 1 in green, and the lamp's red, many
+times 1 in red, was cut at 1 channel by channel, so the weaker yellow decided the colour.
+
+**Outcome:** outdoor texels keep their hue past 1 (`OutdoorDeltaModel::KeepHue`, the solve, the deltas and the compose
+shader alike); the same rule the per-pixel object lamps took in 2.15.2. Offline: `tools/outdoor_delta_test`,
+`tools/rt_lamps_test`. Unverified in game; which baked light is yellow (the windows' type 7 lights or another) is not
+read.
+
+### 2026-10-26: light past 1 outdoors, the strip behind a screen wall and a window's light cut short
+
+**Context:** with the courtyard's sconce green, the room behind its glass door still looked brighter than the courtyard
+(F7 sessions of the living room and the kitchen). The light reaching each floor, albedo taken out, was 0.50 inside the
+window against 0.567 outside, the outdoor map's cut at 1 times *Ground brightness* x *Lot lamp brightness*: inside got
+less light, but the courtyard by a 1.7 sconce was flat at the cut for metres while a pale carpet reflected more than the
+stone.
+
+**Finding:** the cut is room 0's 8-bit map itself; no world atlas or terrain map takes room-0 texels (an inventory of
+every writer and reader of room 0's texels). Real-time outdoor lamps already compose each texel from its whole sum.
+
+**Outcome:** the outdoor scale ([rt-outdoor-lamps](../features/night-lighting/rt-outdoor-lamps.md)): a second render target
+of the compose draw holds `log2` of the factor the hue-kept pack took off, read by the lot pass, the summer outdoor
+floors and the ps_3_0 outside walls. Rejected: a soft-knee encoding of the map's own colour (every reader, including
+the game's unpatched shaders and fallbacks, would have read compressed values above the knee); 8-bit scale steps of
+0.8 % show no banding where 7 % steps of a knee would.
+
+**Follow-up 1:** behind a lattice screen wall carrying the sconce, a green strip lay along the wall's foot (F7, "the light
+passes under the floor"). The room-0 solve does not test that wall for this lamp (the game's test does not run for it,
+F8 F7 point), and the lot pass shades the ground with the walls' mask, soft over a texel at the foot: 0.3 to 0.5 there,
+once multiplied by up to 6 times. The part past 1 now takes the shade to the 4th power.
+
+**Follow-up 2:** the walls stayed at the cut beside a ground past it; the wall atlas got its scale (through a scratch
+map, the atlas being blurred) and the ExteriorWall shaders a copy that reads it.
+
+**Follow-up 3:** a living room behind a courtyard window took the red sconce only in a strip 1.75 to 2.75 m in at 8/255
+and nothing past it (F7 and the map). The sill (0.55 m, sized from the panes) shades the first 1.3 m correctly for a lamp
+4 m away at 2.2 m; past the strip, the soft light cut compared the colour scaled after the law (the opening's cut, the
+outdoor factor, the colour response) with the room's threshold of 3/255. The cut now uses the threshold times those
+scales; the light then fades to the back wall (map after the change: 9 down to 4 levels from 1.5 m to 4 m).
+
+**Follow-up 4:** a wall over its sconce stayed dark beside a perpendicular wall lit head on (F7 session of the story
+above). Measured on screen, the wall above was about 80 levels against 100 on the side wall, the ratio N.l and distance
+give: no extra blocking. On request, wall lamps now light their own wall with N.l at least `0.5 x (1 - plane / 0.4)`
+(walls.md).

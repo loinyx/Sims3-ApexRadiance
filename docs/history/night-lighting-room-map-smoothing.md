@@ -38,3 +38,16 @@ wall atlas is 256n x 128n texels with blocks of 3n + 1 rows; a block's row k is 
 relight of real-time outdoor lamps and the quick outdoor lamp edits take the same soft cut and dither. Each part has a
 developer Tester switch. Offline: `tools/room_map_smooth_check` 957 checks, `tools/rt_lamps_test` 22, `tools/outdoor_delta_test`
 11, 0 failures. Not yet checked in game.
+
+### 2026-10-26: a black line half a metre from a wall under a window
+
+**Context:** after the 4 x 4 bound of the pixel's side, an F7 of a room behind a courtyard window showed a dark line
+parallel to the wall between two lit bands.
+
+**Finding:** under a window the wall below the sill shades the room's first texels (courtyard 255 | wall | 0, 20, 47,
+45 levels). The B-spline still mixed the courtyard's texels into the first one, held under the room's brightest texel
+(47), and left the second at its own dark value: 46, 21, 42 across the first three texels.
+
+**Outcome:** with the pixel's own texel a roofed room's, the read is the B-spline of that side's texels alone, its
+weights over their sum, colour and ambient weight alike. `tools/room_map_smooth_check`: the window case falls 30.6 levels
+after the wall with the bound and 0 now; GPU against the CPU reference 1 LSB.

@@ -8,7 +8,7 @@ sun and shadows; only the lamp light baked into each wall is scaled. Part of [Ni
 
 | | |
 |---|---|
-| Availability | Released (present since 2.1.0, the first version in this repository). Daytime lamp term on walls: Released in 2.6.0. The game's bloom alpha kept on lit walls and the rebalanced style brightness (84% for Soft): Released in 2.7.0. Realistic lamp reach and balcony floors blocking a lamp below them (replacing *Light behind balconies*), the shared daytime curve: Released in 2.12.3. Soft edges by the lamp's size (*Shadow softness*) and lamp light through openings: Released in 2.13.0. Outdoor walls drawn below their light base (gables, eaves) lit from their drawn foot: Released in 2.15.3. Adjacent gable cells keep one lighting reference and upper trim avoids the ground lamp pool: Released in 2.15.4. |
+| Availability | Released (present since 2.1.0, the first version in this repository). Daytime lamp term on walls: Released in 2.6.0. The game's bloom alpha kept on lit walls and the rebalanced style brightness (84% for Soft): Released in 2.7.0. Realistic lamp reach and balcony floors blocking a lamp below them (replacing *Light behind balconies*), the shared daytime curve: Released in 2.12.3. Soft edges by the lamp's size (*Shadow softness*) and lamp light through openings: Released in 2.13.0. Outdoor walls drawn below their light base (gables, eaves) lit from their drawn foot: Released in 2.15.3. Adjacent gable cells keep one lighting reference and upper trim avoids the ground lamp pool: Released in 2.15.4. Light past 1 on ps_3_0 outside walls, wall lamps lighting their own wall and the wall shade strip left as the game maps it: Released in 2.16.0. |
 | Default | On, Brightness 30%, Realistic lamp reach on |
 | Menu | Lighting > Buildings > Buildings card, group *WALLS* (lamps of every story: Lighting > Stories) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -29,7 +29,7 @@ one per wall piece. Two defects follow:
 
 Raised short gable cells keep their sample rows and vertex UVs on one drawn-foot reference, including neighboring cells with different top heights.
 
-Two Night Lighting parts act on walls; no wall shader is rewritten.
+Three Night Lighting parts act on walls.
 
 1. **Lamps of every story** ([level-light-share.md](level-light-share.md)) put the outdoor lamps of every story into
    every story's room 0 list and test them against the walls of the lamp's own story, so the light continues past the
@@ -47,6 +47,18 @@ Two Night Lighting parts act on walls; no wall shader is rewritten.
    an alpha-only pass with the game's own constant (no depth or stencil write) writes the game's bloom alpha, then the
    RGB pass with Apex's gain and alpha writes off. Blended wall variants keep the single pass. Found and validated by
    idavidveiga ([day-bloom-fixes.md](day-bloom-fixes.md)).
+
+   With Instant lamp lighting the RGB pass of the 27 ps_3_0 variants is drawn with a copy that multiplies the wall
+   atlas read by the relit atlas's outdoor scale (`ShaderPatches::PatchWallScale`: right after the map's `texld`, the
+   same uv read again from a spare sampler, `x 2^(3 r)`), so a wall beside a strong lamp shows the light past 1 as the
+   ground below it does ([rt-outdoor-lamps](rt-outdoor-lamps.md)). The bloom pass keeps the game's shader; the 31
+   ps_2_x variants keep the cut at 1.
+3. **A lamp on a wall lights that wall.** A sconce a few centimetres in front of its wall reaches the wall above it at
+   5 to 10 degrees (N.l 0.1 to 0.15), and the wall stayed dark beside a perpendicular wall lit head on. On a wall texel
+   (|n.y| < 0.5) with the lamp in front of its plane within 0.4 m, N.l is at least `0.5 x (1 - plane / 0.4)`, the light
+   a real wall shows over its sconce: in the GPU relight's law and its CPU model (`GpuLampLaw::MountedNdl`) and in the
+   game's evaluation in the room solves (the colour scaled by the raised N.l over the game's). Lamps farther than 0.4 m
+   from a wall and every other surface keep the game's law.
 
 ### Drawn wall sample positions
 
@@ -90,6 +102,8 @@ Both apply live (pushed every frame). The lamps of every story are controlled by
 - The gain scales everything baked in the wall map. The map is a lamp and room solve, so window light baked into it, if
   any, is scaled too (inferred).
 - The gain adds no light where the game baked none: no new lamps, no change to wall occlusion.
+- The mounted-lamp floor is visual tuning for wall lamps, not a measured ratio; in the room solves the game's Cmax cut
+  of a lamp touching the wall is not redone after it.
 - Gables, eaves and sloped foundation faces lit from their drawn foot are not yet confirmed in game.
 - Wall variants outside the table (for example `PS_2A74E378`, if it is not one of them) keep the game's look.
 - The daytime curve is visual tuning, not a physical ratio. Brightness below 100% stays lower than the game.
@@ -118,7 +132,8 @@ LightProbe captures `andar2-b` (m44), `andar1-b` (m45), `passo3-parede` (m59) an
 - Wall VS in cutaway / walls-down mode: `max r1.xy, c12.xzzw, v7.xzzw`, `min r1.w, r1.x, c12.y`, `mad r2.y, r1.w, r0.w, r0.z`
   lower the wall (y = lerp(v0.w, v0.y, clamp(v7.x))), while the atlas UV is not lowered.
 - Light rows on the wall mesh: the light-UV writer `0x00C38530` (called per wall cell at `0x00C387B5` / `0x00C387CC`, mode 0
-  / 1 = the V at vertex `+0x12` / `+0x1E`, x 4096) maps the bottom vertices to the light base and the top ones to
+  / 1 = the V at vertex `+0x12` / `+0x1E`, x 4096; mode 1 is TEXCOORD3, the game's wall shade strip (PS `s6`, L8 1024 x 32),
+  which Apex leaves as the game maps it: only mode 0's light rows are recut) maps the bottom vertices to the light base and the top ones to
   base + 3 (1 - f), `f = max(0, int16 +0x0A / 512 - 8)` from the top vertices' wallpaper V (`0x00C385AB..DB`; the wall
   builders write `+0x0A = (V + 8) x 512` at `0x00C3C587` / `0x00C3C8B9`). Walls taller than 3 m get their light samples
   stretched (`StretchTallWall`). Short walls (F8 10-57-41): on a foundation face (story 0, drawn from the

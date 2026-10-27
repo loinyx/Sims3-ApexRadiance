@@ -18,7 +18,7 @@ at any time. In the menu the **Color > Overview** tab owns the *Picture* master 
 |---|---|
 | Availability | Released in 2.1.0 or earlier (present in the first version in this repository). Filters tab and LUT files: Released in 2.7.0. The frame copy shared with the other screen passes: Released in 2.15.3 |
 | Default | Off; every filter off |
-| Menu | Image > Color (tabs Overview, Basic, Tones, Color, Detail, Filters, LUTs); *Smooth gradients* on the Image > Banding Fix page; Overview > Image > Picture |
+| Menu | Image > Color (tabs Overview, Basic, Tones, Color, Detail, Filters, LUTs); Overview > Image > Picture |
 | Configuration | `[qol.picture]` and `[qol.picture.filters]` in `ApexRadiance.toml`; compare key `[ui] picture_compare_key`; LUT files in `Documents\Electronic Arts\The Sims 3\Apex Radiance\LUTs\` |
 | Source | [`features/picture.cpp`](../../features/picture.cpp), [`features/picture.h`](../../features/picture.h), [`framework/d3d9_bootstrap.cpp`](../../framework/d3d9_bootstrap.cpp) (fire points), [`apex_gui.cpp`](../../apex_gui.cpp) (`ColorPage`, `BandingPage`) |
 
@@ -31,8 +31,8 @@ the game's own DXT textures (5 to 6-bit colour endpoints) and 8-bit light maps a
 ## How Apex Radiance solves it
 
 Apex Radiance grades the finished scene as the last effect in the shared post-scene chain, before the game draws its
-interface. The grade and the filters run in linear light and are re-quantised to 8 bits with a fixed dither below one
-step. The end-of-frame scene-copy mask is a fallback, not the normal colour path.
+interface. The grade and the filters run in linear light and are re-quantised to 8 bits with a fixed triangular dither
+of up to one step where the pass changed the pixel. The end-of-frame scene-copy mask is a fallback, not the normal colour path.
 
 The hidden-UI boundary learns the game's scratch-target identity from an already-filtered UI-visible
 frame. It recognises the actual point-filtered 256x256 first-tile rectangles into the 2048x1024 A8R8G8B8 target.
@@ -99,9 +99,9 @@ dragging and save when released. Missing keys keep their defaults.
 | Detail > Clarity | `clarity` | float | 0 | -100 (Softer) to +100 (Crisper) | Local midtone contrast against a 1/8-size copy of the scene |
 | Detail > Vignette | `vignette` | float | 0% | 0 to 100% (stored 0 to 0.8) | Darker corners |
 | Detail > Vignette size | `vignette_size` | float | 50% | 0 to 95% | Radius (0 centre, 1 corner) where the darkening starts |
-| Banding Fix > Smooth gradients | `deband` | float | 8% | 0 to 200% | Deband filter; follows the Banding Fix switch, not Picture's (see [banding-fix.md](banding-fix.md)) |
 
-*Film tones* and *Color mixer* are collapsed *Advanced* groups.
+*Film tones* and *Color mixer* are collapsed *Advanced* groups. `deband` (*Smooth gradients*, removed after 2.15.6: no
+visible difference in game) is ignored when read and dropped on the next save; the pass no longer runs for it.
 
 ### Filters
 
@@ -153,7 +153,7 @@ The Overview tab presents the master switch, GPU cost and
 comparison tools once, followed by five clickable group rows. There are no profiles in this overview. Per-tab
 headers control only their group; the global master still gates all Color processing. Stored values are not reset
 when a group is disabled. Basic, Tones, Color and Detail neutralise only their respective shader inputs; Filters
-disables the 24 filter branches (not the LUT). Banding Fix's deband continues independently of these switches.
+disables the 24 filter branches (not the LUT).
 
 | Menu label | TOML key in `[qol.picture]` | Default | Behaviour |
 |---|---|---|---|
@@ -186,9 +186,6 @@ Filter disclosure buttons point down when closed and up when open.
   copy (Picture's draw hooks run at priority 10, after the post-scene trigger's `Priority::First` hooks; with the game
   UI hidden the post-scene fallback runs before `BeforeOverlay`). Their pixels are inside both the frame and the scene
   copy, so they are graded like the rest of the scene.
-- **Banding Fix:** *Smooth gradients* follows the Banding Fix switch. With Picture off and the Banding Fix on, the pass
-  runs with only the deband (every other control and every filter neutral), and never in a frame without a scene copy,
-  so it cannot smooth the game's menus.
 - **The game's Edge Smoothing (MSAA):** when the game does not draw its scene straight into the back buffer, there is no
   scene copy. The whole picture, menus included, is then graded, and after 2 s the card shows: "Color also tints the
   game's menus here ... turning off the game's own Edge Smoothing (Options > Graphics) usually fixes it". Emphasize
@@ -225,10 +222,11 @@ Filter disclosure buttons point down when closed and up when open.
   same frame are not graded (inferred; not observed).
 - UI pixels that differ from the scene by less than 4 levels are graded as scene; between 4 and 24 levels they are
   partly graded. A faint translucent veil (under 4 levels) is re-applied as a ratio over the graded scene.
-- Deband and sharpening near UI edges: the deband threshold excludes most UI pixels and sharpening clamps to the
-  neighbour range.
+- Sharpening near UI edges: sharpening clamps to the neighbour range.
 - 8-bit output: Brightness and Highlights pushed above white clip at the encode.
-- With Picture on and every slider neutral, the image still changes slightly (the fixed dither).
+- With Picture on and every slider neutral, the dither adds nothing: it applies only where the pass changed a pixel by
+  half a step or more (offline, a flat grey and a stepped gradient come out bit for bit; until 2.15.6 a uniform dither
+  of half a step changed the image slightly).
 - Emphasize needs the shared scene depth (off while the game's Edge Smoothing is on).
 - LUTs accept PNG strips and 3D CUBE files. 1D and combined shaper/3D CUBE files are refused.
 
@@ -260,7 +258,7 @@ SetRenderTarget at `Priority::First`; DIP and DP at priority 10 (after the post-
   `StretchRect(backbuffer -> sceneSurf, D3DTEXF_NONE)`, then the depth copy when requested).
 
 **Pass** (`Picture::OnEndScene`): skipped while precompile is incomplete, while held for compare, when RT0 is not the
-back buffer, outside a loaded world (`WorldSession::InWorld`), or (Picture off, deband only) without a scene copy. Then:
+back buffer, or outside a loaded world (`WorldSession::InWorld`). Then:
 
 1. Read previous timestamps; begin a new set (4 rotating sets, `ms = 0.9 ms + 0.1 v`).
 2. `StretchRect(backbuffer -> frameSurf, D3DTEXF_NONE)`.
@@ -297,43 +295,42 @@ Emphasize), s4 1/2 scene and s5 1/4 scene (bilinear), s6 LUT strip (bilinear), s
 1. **UI mask:** `d = max_channel(|frame - scene|)`; `ui = sceneCopied ? smoothstep(4/255, 24/255, d) : 0`. Without a
    copy the whole frame is graded. A faint veil (`d > 0.25/255`) keeps the ratio
    `veil = min((frame + 1/255) / (scene + 1/255), 4)`, applied again after the encode.
-2. **Sample position and neighbour filters** (scene pixels): CRT curvature moves the sample position; then deband,
+2. **Sample position and neighbour filters** (scene pixels): CRT curvature moves the sample position; then
    Prism, 3DFX soft pixels, sharpening and Adaptive sharpening, each reading the scene copy (`SceneTap`); Tilt-shift
    blends toward the 1/2 and 1/4 copies.
-3. **Deband** (scene pixels, `ui < 0.5`): average with samples on two rings of 8 fixed directions (ring 2 rotated
-   22.5 degrees), radii `12 x H/2160` and `32 x H/2160` px, accepting only samples whose max channel difference is
-   below `deband x 6/255` (gamma-encoded). Deterministic.
-4. **Sharpen** (scene pixels): `fs + s x (fs - mean of 4 neighbours)`, clamped to `[min(neighbours, fs),
+3. **Sharpen** (scene pixels): `fs + s x (fs - mean of 4 neighbours)`, clamped to `[min(neighbours, fs),
    max(neighbours, fs)]`.
-5. **Decode** gamma 2.2: `pow(max(c, 0), 2.2)`; then **Auto exposure** (gain toward the target, clamped to its range).
-6. **Clarity** (scene pixels): `r = log2(Lpixel / Lbase)`, `Lbase` from a cubic B-spline sample of the 1/8 scene (4
+4. **Decode** gamma 2.2: `pow(max(c, 0), 2.2)`; then **Auto exposure** (gain toward the target, clamped to its range).
+5. **Clarity** (scene pixels): `r = log2(Lpixel / Lbase)`, `Lbase` from a cubic B-spline sample of the 1/8 scene (4
    bilinear taps); `g *= exp2(clarity x r / (1 + r^2) x 4e(1 - e))`, `e = saturate(Lpixel^(1/2.2))`. Strong edges get
    almost nothing. Then **Fake HDR**.
-7. **Exposure and white balance:** `g *= exp2(EV) x wb.rgb`. White balance: red `1 + 0.08t`, blue `1 - 0.08t`, green
+6. **Exposure and white balance:** `g *= exp2(EV) x wb.rgb`. White balance: red `1 + 0.08t`, blue `1 - 0.08t`, green
    `1 - 0.06 tint`, normalised by their Rec.709 luminance.
-8. **Contrast:** `g = 0.18 x (g / 0.18)^contrast`.
-9. **Tone zones** on luminance (0.2126, 0.7152, 0.0722), hue kept: `Lm = L < 1 ? L^(1/midtones) : L`;
+7. **Contrast:** `g = 0.18 x (g / 0.18)^contrast`.
+8. **Tone zones** on luminance (0.2126, 0.7152, 0.0722), hue kept: `Lm = L < 1 ? L^(1/midtones) : L`;
    `Lm *= (1 + 0.5 shadows (1 - smoothstep(0, 0.25, Lm))) x (1 + 0.3 highlights smoothstep(0.3, 1, Lm))`; `g *= Lm / L`.
-10. **Blacks:** `b = blacks x 0.02`; `b >= 0: max(g - b, 0) / (1 - b)`, else `g (1 + b) - b`.
-11. **Split toning:** `e = saturate(L^(1/2.2))`; `g *= lerp(1, tintS, amountS (1 - smoothstep(0, 0.55, e))) x
+9. **Blacks:** `b = blacks x 0.02`; `b >= 0: max(g - b, 0) / (1 - b)`, else `g (1 + b) - b`.
+10. **Split toning:** `e = saturate(L^(1/2.2))`; `g *= lerp(1, tintS, amountS (1 - smoothstep(0, 0.55, e))) x
     lerp(1, tintH, amountH smoothstep(0.45, 1, e))`. Tints come from `SplitToneColour` on the CPU: the fully saturated
     hue colour `c`, then `1 + 0.5 (c - lum(c))`, whose luminance is exactly 1.
-12. **Vibrance:** `sat0 = (max - min) / max`; `g = max(lerp(L, g, 1 + vibrance (1 - sat0)), 0)`.
-13. **Saturation and mixer:** `sat = saturation x (mixer on ? MixerSaturation(g) : 1)`, times Tilt-shift's toy colours
+11. **Vibrance:** `sat0 = (max - min) / max`; `g = max(lerp(L, g, 1 + vibrance (1 - sat0)), 0)`.
+12. **Saturation and mixer:** `sat = saturation x (mixer on ? MixerSaturation(g) : 1)`, times Tilt-shift's toy colours
     while it is on; `g = max(lerp(L, g, sat), 0)`. `MixerSaturation`: hue 0..6 on gamma-2.2 values, six triangular bands
     of width 1 whose weights sum to 1; greys (sat < 1e-5) get 1. The mixer is on when any value differs from 1 by more
     than 0.001.
-14. **Colour looks** (`ColorLooks`, in this order: Technicolor 1, Technicolor 2, DPX
+13. **Colour looks** (`ColorLooks`, in this order: Technicolor 1, Technicolor 2, DPX
     Cineon, Colorfulness, Night Mode, Vintage, Cross-process, Black and white, Filmic pass, Tint, Levels, LUT,
     Color-blind mode), then **Emphasize**, then the **light filters** (`LightFilters`: Glow, Halation, Dreamy).
-15. **Vignette:** `q = (uv - 0.5) x (W/H, 1)`, `r = |q| / |(W/H, 1) x 0.5|`, `v = smoothstep(size, 1, r)`,
+14. **Vignette:** `q = (uv - 0.5) x (W/H, 1)`, `r = |q| / |(W/H, 1) x 0.5|`, `v = smoothstep(size, 1, r)`,
     `g *= 1 - amount x v^2 (3 - 2v)`.
-16. **Encode** `o = pow(saturate(g), 1/2.2)`; then Film grain, 3DFX (posterise with a 4x4 Bayer dither and scanlines)
+15. **Encode** `o = pow(saturate(g), 1/2.2)`; then Film grain, 3DFX (posterise with a 4x4 Bayer dither and scanlines)
     and the CRT mask, scanlines and edges.
-17. **Dither** (skipped after 3DFX): `o += (IGN(px) - 0.5) / 255`,
-    `IGN = frac(52.9829189 x frac(dot(px, (0.06711056, 0.00583715))))`, the same pattern every frame. Then
-    `o = saturate(o x veil)`. Compare: the left half `o = frame`, the divider red.
-18. Output `lerp(o, frame, ui)`.
+16. **Dither** (skipped after 3DFX): the Banding Fix's grain law (triangular `t` from `r = 2 IGN(px) - 1`, tapering
+    to `r / 2` above mid-grey, amplitude `min(a, min(o, 1 - o) + 0.5/255)`), with
+    `IGN = frac(52.9829189 x frac(dot(px, (0.06711056, 0.00583715))))`, the same pattern every frame (it does not correlate
+    with the scene's or the AO composite's R2 grain). `a = saturate(max|o - frame| x 510) / 255`: full where the pass
+    changed the pixel by half a step, none where it did not. Then `o = saturate(o x veil)`. Compare: the left half `o = frame`, the divider red.
+17. Output `lerp(o, frame, ui)`.
 
 **Constants** (c0..c12, the grade):
 
@@ -343,7 +340,7 @@ Emphasize), s4 1/2 scene and s5 1/4 scene (bilinear), s6 LUT strip (bilinear), s
 | c1 `cSize` | 1/W | 1/H | W | H |
 | c2 `cGrade` | exp2(exposure), exposure clamped -3 to 3 | contrast (0.5 to 1.8) | blacks x 0.02 | |
 | c3 `cWb` | wbR / wbL | wbG / wbL | wbB / wbL | |
-| c4 `cDeband` | deband x 6/255 (deband 0 to 2) | 12 x H/2160 | 32 x H/2160 | on (deband > 0.001) |
+| c4 | unused (0; the deband of Smooth gradients until it was removed) | | | |
 | c5 `cTone` | 1 / midtones (0.5 to 2) | shadows | highlights | vibrance |
 | c6 `cDetail` | sharpen (0 to 1.5) | clarity (0 when below 0.001) | | |
 | c7 `cTintS` | shadow tint rgb | | | amount (0 to 1) |
@@ -371,8 +368,8 @@ dither note and the GPU cost.
 **Configuration migration.** On first start without `ApexRadiance.toml`, the migration from `S3SS.toml` copies the keys
 `Picture::Keys()` lists from `[qol.picture]` (the grade keys; the filters are new and have no older keys). If there is
 no `[qol.picture]` but there is a `[qol.hdr]` (settings from before the Picture section existed), it builds
-`[qol.picture]` from `[qol.hdr].enabled` and the 12 grade keys `exposure`, `contrast`, `midtones`, `shadows`,
-`highlights`, `blacks`, `temperature`, `tint`, `saturation`, `vibrance`, `deband`, `sharpen`
+`[qol.picture]` from `[qol.hdr].enabled` and the 11 grade keys `exposure`, `contrast`, `midtones`, `shadows`,
+`highlights`, `blacks`, `temperature`, `tint`, `saturation`, `vibrance`, `sharpen`
 ([apex_config.cpp](../../apex_config.cpp)).
 
 **Game code.** None patched. Picture relies only on the frame's draw pattern (at least 20 depth-tested back-buffer
@@ -386,6 +383,8 @@ draws, the bloom composite as one 2-primitive strip right after the scene, the U
 - Copying before the bloom strip: bloom would be treated as UI and stay ungraded.
 - Grading 8-bit data without a dither, or with a temporal dither: banding, or shimmer.
 - Random-sample deband: replaced by fixed rings with a threshold, scene only.
+- The fixed-ring deband (*Smooth gradients*, on the Banding Fix page): no visible difference in game (2026-10-26);
+  removed with its sampler (s8) and constant (c4).
 - A soft UI mask (`difference x 64`): the strong filters half-filtered soft UI edges and text shadows; replaced by the
   4 to 24-level mask with the veil ratio.
 - Sun rays, Cartoon and Light leaks filters: removed from the Filters tab before release.

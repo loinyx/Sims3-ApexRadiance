@@ -9,7 +9,7 @@ story. Interior floors are unchanged. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released (present since 2.1.0, the first version in this repository). The lot's ground lamp shade on story-0 floors (*Walls shade lamp light near the ground*): Released in 2.13.0. Outdoor floors kept off the indoor light on the ground: Released in 2.15.3 |
+| Availability | Released (present since 2.1.0, the first version in this repository). The lot's ground lamp shade on story-0 floors (*Walls shade lamp light near the ground*): Released in 2.13.0. Outdoor floors kept off the indoor light on the ground: Released in 2.15.3. Light past 1 on summer outdoor floors: Released in 2.16.0 |
 | Default | On (follows the Ground & Lots switches) |
 | Menu | No card of its own: Lighting > Ground (*Street lamps light lots*, *Smooth ground light*, *Ground brightness*) and Lighting > Stories |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -42,6 +42,10 @@ The game's lamp scale after that `max` is multiplied by *Ground brightness*, ble
 2. **Summer outdoor floors** (`DrawFloorAtlas`, PS class `FloorAtlas`): a VS copy writes world xz to a free TEXCOORD;
    `PatchBakedAtlasPs` inserts the atlas read and the `max` before the map's scale, for the 261 ExteriorFloors pixel
    shaders in `floor_atlas_table.h`.
+   With Instant lamp lighting the copy also reads the relit floor map's outdoor scale at the map's uv (a sampler and a
+   constant after every other the copy may take, `FloorPatch::outScaleSampler`) and multiplies the map's colour by it
+   before the max, so a patio under a strong lamp shows its light past 1 ([rt-outdoor-lamps](rt-outdoor-lamps.md)). A
+   copy whose atlas sampler leaves no spare one (33 of the 285 shader and TEXCOORD pairs) keeps the cut at 1.
 3. **Floors of upper stories** get the outdoor lamps of every story through [level-light-share.md](level-light-share.md).
 4. **Floors on the ground (story 0)** take the lot's ground lamp shade, the factor the lot pass gives the grass beside
    them ([lot-light-pass.md](lot-light-pass.md)): a deck or path behind a free-standing wall is no longer lit by a

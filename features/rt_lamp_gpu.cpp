@@ -528,8 +528,9 @@ void Engine::Blocks(IDirect3DDevice9* dev, const Map& m) {
     stats_.blurDraws++;
 }
 
-bool Engine::Compose(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, std::string& err) {
-    return ComposeImpl(dev, m, game, out, p, kComposePs, err);
+bool Engine::Compose(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, std::string& err,
+                     IDirect3DTexture9* scale) {
+    return ComposeImpl(dev, m, game, out, p, kComposePs, err, scale);
 }
 bool Engine::ComposeRlg(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, std::string& err) {
     if (!table_ || !tableRows_) {
@@ -538,7 +539,8 @@ bool Engine::ComposeRlg(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTextur
     }
     return ComposeImpl(dev, m, game, out, p, kComposeRlgPs, err);
 }
-bool Engine::ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, ShaderId psId, std::string& err) {
+bool Engine::ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, ShaderId psId, std::string& err,
+                         IDirect3DTexture9* scale) {
     if (!ready_ || !out || !m.vb || !m.count) {
         err = "nothing to compose";
         return false;
@@ -557,6 +559,18 @@ bool Engine::ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTextu
     PointSampler(dev, 0);
     PointSampler(dev, 1);
     c_.SetVertexShader(dev, nullptr);
+    if (psId != kComposePs) scale = nullptr;
+    // 0. the outdoor scale: 0 (x 1) where no texel of the record lands. A blurred atlas's texels are drawn into a scratch
+    // map (its size can pass the map's, and two targets must have one size): its scale into scratch 3 (free until the blur's
+    // columns), copied into `scale` after the texels. The scale itself is not blurred (a smooth factor on the blurred colour)
+    IDirect3DTexture9* const scaleTarget = !scale ? nullptr : m.blur ? scratch_[3] : scale;
+    if (scaleTarget) {
+        if (!Target(dev, scaleTarget, m.w, m.h)) {
+            err = "the outdoor scale could not be targeted";
+            return false;
+        }
+        dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 1.0f, 0);
+    }
     // 1. the game's map as it is (every room of the story writes it; room 0's texels follow)
     if (!Target(dev, out, m.w, m.h)) {
         err = "the relit map could not be targeted";
@@ -598,10 +612,23 @@ bool Engine::ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTextu
         PointSampler(dev, 2);
     }
     TexelTarget(dev, m.w, m.h);
+    IDirect3DSurface9* scaleSurf = scaleTarget ? Surf(scaleTarget) : nullptr;
+    if (scaleSurf) {
+        if (FAILED(c_.SetRenderTarget(dev, 1, scaleSurf))) {
+            scaleSurf->Release();
+            err = "the outdoor scale could not be a second target";
+            return false;
+        }
+        dev->SetRenderState(D3DRS_COLORWRITEENABLE1, 0xF);
+    }
     dev->SetVertexDeclaration(texelDecl_);
     dev->SetStreamSource(0, m.vb, 0, sizeof(TexelVertex));
     dev->SetStreamSource(1, m.dyn ? m.dyn : zeros_, 0, sizeof(TexelDyn));
     const HRESULT hr = c_.DrawPrimitive(dev, D3DPT_POINTLIST, 0, m.count);
+    if (scaleSurf) {
+        c_.SetRenderTarget(dev, 1, nullptr);
+        scaleSurf->Release();
+    }
     dev->SetStreamSource(1, nullptr, 0, 0);
     c_.SetTexture(dev, 1, nullptr);
     c_.SetTexture(dev, 2, nullptr);
@@ -610,6 +637,16 @@ bool Engine::ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTextu
     if (FAILED(hr)) {
         err = std::format("the texels' draw failed ({:08X})", static_cast<unsigned>(hr));
         return false;
+    }
+    if (scaleSurf && scaleTarget != scale) {
+        if (!Target(dev, scale, m.w, m.h)) {
+            err = "the outdoor scale could not be targeted";
+            return false;
+        }
+        c_.SetPixelShader(dev, ps_[kCopyPs]);
+        c_.SetTexture(dev, 0, scaleTarget);
+        Quad(dev, m.w, m.h, static_cast<float>(m.w) / static_cast<float>(scratchW_), static_cast<float>(m.h) / static_cast<float>(scratchH_));
+        c_.SetTexture(dev, 0, nullptr);
     }
     if (!m.blur) return true;
     // 3. the game's wall blur: [passes] x (rows, then columns), and apart the rows only (each block's first and last rows)

@@ -513,6 +513,11 @@ CreatePixelShader_t o_cps = nullptr;
 CreateVertexShader_t o_cvs = nullptr;
 SetShaderConstantF_t o_psc = nullptr;
 SetShaderConstantF_t o_vsc = nullptr;
+std::atomic<RenderTargetSubstitute> g_rtSubstitute{nullptr}; // SetRenderTargetSubstitute
+inline IDirect3DSurface9* BoundFor(DWORD i, IDirect3DSurface9* s) {
+    const RenderTargetSubstitute sub = g_rtSubstitute.load(std::memory_order_relaxed);
+    return sub ? sub(i, s) : s;
+}
 
 std::atomic<bool> g_installed{false};
 
@@ -575,7 +580,7 @@ HRESULT STDMETHODCALLTYPE H_SetRenderTarget(IDirect3DDevice9* d, DWORD i, IDirec
     CountCall(kCallSetRT);
     HRESULT hr = S_OK;
     if (!Run(g_srt, d, hr, i, s)) return hr;
-    return o_srt(d, i, s);
+    return o_srt(d, i, BoundFor(i, s));
 }
 HRESULT STDMETHODCALLTYPE H_SetPixelShader(IDirect3DDevice9* d, IDirect3DPixelShader9* s) {
     CountCall(kCallSetPS);
@@ -759,6 +764,8 @@ void ObserveReissuedDraws(const std::string& name) {
     MarkObserver(g_dp, name);
 }
 
+void SetRenderTargetSubstitute(RenderTargetSubstitute fn) { g_rtSubstitute.store(fn); }
+
 void BeginReissue() { ++t_reissue; }
 void EndReissue() { --t_reissue; }
 
@@ -769,6 +776,7 @@ HRESULT CallOriginalCreateRenderTarget(IDirect3DDevice9* d, UINT w, UINT h, D3DF
 }
 HRESULT CallOriginalSetRenderTarget(IDirect3DDevice9* d, DWORD i, IDirect3DSurface9* s) {
     ++t_origCalls[kOrigSRT];
+    s = BoundFor(i, s);
     return o_srt ? o_srt(d, i, s) : d->SetRenderTarget(i, s);
 }
 HRESULT CallOriginalSetViewport(IDirect3DDevice9* d, const D3DVIEWPORT9* v) {

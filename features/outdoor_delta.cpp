@@ -1139,7 +1139,7 @@ void DirectRun(PendingLot& p) {
     }
     // the rooms that take room 0's lamps (yards, roofed rooms through their openings): sent as the game's walk would
     // (14/10 review: the edit's tail, no urgency, each room once, under the spread budget)
-    const int sent = LevelLightShare::SendRoom0DependentsTail(p.tracker, p.stories);
+    const int sent = LevelLightShare::SendRoom0DependentsTail(p.tracker, p.stories, &lights);
     const double ms = MsSince(t0);
     const double sinceEdit = MsSince(p.at);
     c_direct.fetch_add(1, std::memory_order_relaxed);

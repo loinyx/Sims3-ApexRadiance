@@ -2,8 +2,8 @@
 // The game draws its 3D scene straight into an 8-bit back buffer, so a smooth light gradient (a lamp's pool of light on
 // a wall, the fall-off of a room light map) is rounded to 256 steps per channel, and in the dark range each step is a
 // visible ring. This adds a fixed, invisible grain to every scene pixel shader's colour before the rounding (triangular
-// noise of +-1 step at the default Strength, from interleaved gradient noise of the pixel position), so the rings become
-// a fine grain. The alpha (the bloom mask) is never touched.
+// noise of +-1 step at the default Strength, from the R2 pattern of the pixel position, within half a step of black and
+// white), so the rings become a fine grain. The alpha (the bloom mask) is never touched.
 //
 // How:
 //  - ps_3_0 (ShaderPatches::AddDither): the pixel position is vPos. ps_2_0 / ps_2_x (AddDither2, 30/09 evening: in game
@@ -14,9 +14,10 @@
 //    once, shadow, reflection, UI and bloom ones too, and DXVK keeps every shader for the whole session; the game's memory
 //    grew ~0.3 GB more in 30 min with Apex). At creation (last in the chain) only the old copies of a reused address go.
 //  - At each draw (last in the chain, after every observer): when render target 0 is the back buffer and the depth
-//    test is on (the 3D scene; the UI draws with it off and reads the back buffer back many times per frame, where a
-//    dither would feed on itself), the copies are bound for the draw with the amount constant, then the game's shaders
-//    and the constant's previous value are put back.
+//    test is on and used (the 3D scene; the UI draws with it off, or on with ZFUNC ALWAYS and no depth write, and reads
+//    the back buffer back many times per frame, where a dither would feed on itself), the copies are bound for the draw
+//    with the amount constant, then the game's shaders and the constant's previous value are put back. Additive and
+//    multiply blends get half the grain with a decorrelated phase (they add to a target that already has its grain).
 //  - The mouse-pick pass draws into its own 16x16 target, shadows and reflections into their own targets: untouched.
 // Offline checks (30/09, Shaders_Win32.precomp): ps_3_0 4907 / 4907 and ps_2_0 2996 / 3104 patched, vertex shaders
 // vs_2_0 4035 / 4338, every copy accepted by native D3D9; a grey of 20.40 / 100.70 levels comes out as 20.355 / 100.657
@@ -30,6 +31,7 @@
 #include "render_callbacks.h"
 #include "shader_patches.h"
 #include "scene_dither.h"
+#include "scene_target.h"
 #include "f10_study.h"
 #include "shader_lookup_cache.h"
 #include "imgui.h"
@@ -86,8 +88,6 @@ PsFront g_psFront[kFront];
 VsFront g_vsFront[kFront];
 inline size_t FrontSlot(uint64_t k) { return static_cast<size_t>((static_cast<uint32_t>(k ^ (k >> 32)) * 2654435761u) >> 26) & (kFront - 1); }
 float g_strength = 1.0f;                  // the grain in 8-bit steps (triangular, peak): 1 = +-1 step
-bool g_moving = false;                    // a new grain pattern every frame (high frame rates average it away)
-unsigned g_frameIndex = 0;                // counts frames for the moving grain
 bool g_showCovered = false;               // Developer: a coarse grain where the fix applies (not saved)
 constexpr float kShowCoveredSteps = 24.0f;
 IDirect3DSurface9* g_backBuffer = nullptr; // identity only (render thread)
@@ -97,10 +97,15 @@ IDirect3DSurface9* g_rt0 = nullptr;
 
 // statistics (Developer page, dev log)
 std::atomic<unsigned> g_made{0}, g_madeVs{0}, g_refused[7] = {};
+// blend classes of the dithered draws (Developer page): the grain is halved for additive and multiply blends (BlendOf)
+enum Blend { kOpaque, kAlpha, kAdditive, kMultiply, kOtherBlend, kBlends };
 struct FrameCount {
     unsigned dithered3 = 0, dithered2 = 0; // 3D scene draws with the grain: ps_3_0, ps_2_x
     unsigned ps2NoPair = 0;                // ps_2_x with a copy whose vertex shader could not carry the position
     unsigned ps2Refused = 0, ps3Refused = 0, other = 0;
+    unsigned noDepth = 0;                  // depth on with ZFUNC ALWAYS and no depth write: the UI's passes, left alone
+    unsigned noShader = 0;                 // fixed-function scene draws (no pixel shader): no grain
+    unsigned blend[kBlends] = {};          // dithered draws by blend class
     unsigned jittered = 0, jitterRefused = 0, jitterNoShader = 0; // temporal AA: scene draws moved / whose vertex shader was refused / fixed-function
 };
 FrameCount g_frame, g_last;
@@ -294,17 +299,41 @@ IDirect3DVertexShader9* VsCopyOf(IDirect3DDevice9* dev, IDirect3DVertexShader9* 
     return copy;
 }
 
+// The blend class of a draw, read only for draws that get the grain (no SetRenderState hook follows the blend states)
+Blend BlendOf(IDirect3DDevice9* dev) {
+    DWORD on = FALSE, src = D3DBLEND_ONE, dst = D3DBLEND_ZERO, op = D3DBLENDOP_ADD;
+    dev->GetRenderState(D3DRS_ALPHABLENDENABLE, &on);
+    if (!on) return kOpaque;
+    dev->GetRenderState(D3DRS_SRCBLEND, &src);
+    dev->GetRenderState(D3DRS_DESTBLEND, &dst);
+    dev->GetRenderState(D3DRS_BLENDOP, &op);
+    if (op != D3DBLENDOP_ADD) return kOtherBlend;
+    if (src == D3DBLEND_SRCALPHA && dst == D3DBLEND_INVSRCALPHA) return kAlpha;
+    if (src == D3DBLEND_DESTCOLOR || src == D3DBLEND_ZERO) return kMultiply; // decals: DESTCOLOR / SRCCOLOR, DESTCOLOR / ONE
+    if (dst == D3DBLEND_ONE) return kAdditive;
+    return kOtherBlend;
+}
+
 template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext& ctx, DrawFn draw) {
     IDirect3DDevice9* dev = ctx.device;
-    const bool dither = g_on.load(std::memory_order_relaxed), jitter = g_jitterOn;
+    // (the High-precision scene grains its 16-bit scene once, at its resolve)
+    const bool dither = g_on.load(std::memory_order_relaxed) && !SceneTarget::Substituting(), jitter = g_jitterOn;
     if ((!dither && !jitter) || !g_backBuffer) return D3D9Hooks::HookAction::Continue;
     if (!g_rt0 || g_rt0 != g_backBuffer) return D3D9Hooks::HookAction::Continue;
     if (ctx.ZEnable() == D3DZB_FALSE) return D3D9Hooks::HookAction::Continue; // UI and 2D passes
+    // Depth on with ZFUNC ALWAYS and no depth write uses no depth (PostScene's rule): the UI's ~137 glass passes and
+    // back-buffer copies drawn back (a light capture shows one under a panel: ps_2_0 reading a 2048x1024 copy). The grain
+    // fed on itself there; the jitter already skipped them
+    if (!ctx.ZWriteEnable() && ctx.ZFunc() == D3DCMP_ALWAYS) {
+        g_frame.noDepth++;
+        return D3D9Hooks::HookAction::Continue;
+    }
     // the Banding Fix's pixel copy
     IDirect3DPixelShader9* ps = nullptr;
     Copy copy;
     if (dither) {
         ps = D3D9Hooks::BoundPixelShader(dev); // (followed through Set*Shader; the device keeps it alive)
+        if (!ps) g_frame.noShader++;
         if (ps) {
             copy = CopyOf(dev, ps);
             if (!copy.ps) {
@@ -347,15 +376,21 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
         return D3D9Hooks::HookAction::Continue;
     }
     float before[4] = {};
+    Blend blend = kOpaque;
     if (useDither) {
+        blend = BlendOf(dev);
+        // Additive and multiply blends add their grain on top of the grain already in the target: half of it, with a phase
+        // whose pattern does not correlate with the full one (R2 shifted by 0.19: correlation 0.006, offline)
+        const bool half = blend == kAdditive || blend == kMultiply || blend == kOtherBlend;
         // (2.15.3) the viewport only for ps_2_x copies: the ps_3_0 grain reads the amount's .x and .w alone (AddDither), the
         // ps_2_x one rebuilds the pixel from .y / .z (AddDither2)
         D3DVIEWPORT9 vp{};
         if (k >= 0) dev->GetViewport(&vp);
         dev->GetPixelShaderConstantF(static_cast<UINT>(copy.amountReg), before, 1);
         // Developer "Show covered surfaces": a coarse grain only where the fix applies
-        const float amount[4] = {(g_showCovered ? kShowCoveredSteps : SceneDither::Strength()) / 255.0f, 0.5f * static_cast<float>(vp.Width),
-                                 0.5f * static_cast<float>(vp.Height), SceneDither::GrainPhase()};
+        const float steps = g_showCovered ? kShowCoveredSteps : SceneDither::Strength() * (half ? 0.5f : 1.0f);
+        const float amount[4] = {steps / 255.0f, 0.5f * static_cast<float>(vp.Width), 0.5f * static_cast<float>(vp.Height),
+                                 SceneDither::GrainPhase() + (half ? 0.19f : 0.0f)};
         D3D9Hooks::CallOriginalSetPixelShaderConstantF(dev, static_cast<UINT>(copy.amountReg), amount, 1);
         D3D9Hooks::CallOriginalSetPixelShader(dev, copy.ps);
     }
@@ -370,6 +405,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
         D3D9Hooks::CallOriginalSetPixelShader(dev, ps);
         D3D9Hooks::CallOriginalSetPixelShaderConstantF(dev, static_cast<UINT>(copy.amountReg), before, 1); // the game may cache it
         (k >= 0 ? g_frame.dithered2 : g_frame.dithered3)++;
+        g_frame.blend[blend]++;
     }
     if (useJitter) g_frame.jittered++;
     return D3D9Hooks::HookAction::Skip;
@@ -385,7 +421,6 @@ void OnFrameBoundary(IDirect3DDevice9* dev) {
         g_rt0 = bb;
         bb->Release();
     }
-    g_frameIndex++;
     g_last = g_frame;
     g_frame = {};
     // Development build: the coverage in the log now and then (the first 12 times, every 20 s of scene)
@@ -465,7 +500,8 @@ class SceneDitherPatch : public ApexPatch {
   public:
     SceneDitherPatch() : ApexPatch("SceneDither", nullptr) {
         RegisterFloatSetting(&g_strength, "forca", SettingWidget::Slider, 1.0f, 0.0f, 1.0f, "Grain in 8-bit steps (triangular peak); 1 = +-1 step, 0 = none");
-        RegisterBoolSetting(&g_moving, "graoEmMovimento", false, "A new grain pattern every frame (vanishes at high frame rates)");
+        // "graoEmMovimento" (Moving grain, removed) is left in old files and ignored: the grain is always fixed
+        RegisterBoolSetting(SceneTarget::Setting(), "cenaAltaPrecisao", true, "The 3D scene in a 16-bit target, resolved once (scene_target.cpp)");
     }
 
     bool Install() override {
@@ -493,10 +529,8 @@ class SceneDitherPatch : public ApexPatch {
 
     void RenderCustomUI() override {
         SAFE_IMGUI_BEGIN();
-        bool changed = ApexUi::SliderPercent("Strength", &g_strength, 0.0f, 1.0f, "How much grain hides the color steps; 100% hides them fully, 0% is off", 1.0f);
-        changed |= ApexUi::SwitchRow("Moving grain", &g_moving, "A new grain each frame: invisible at high frame rates, a faint shimmer at low ones",
-                                     false);
-        if (changed) NotifySettingChanged();
+        if (ApexUi::SliderPercent("Strength", &g_strength, 0.0f, 1.0f, "How much grain hides the color steps; 100% hides them fully, 0% is off", 1.0f))
+            NotifySettingChanged();
     }
 
     // Developer page > Debug views
@@ -520,6 +554,10 @@ class SceneDitherPatch : public ApexPatch {
                             "%u ps_3_0 refused, %u other",
                             dithered, total ? 100.0 * dithered / total : 0.0, g_last.dithered3, g_last.dithered2, g_last.ps2NoPair, g_last.ps2Refused,
                             g_last.ps3Refused, g_last.other);
+        ImGui::TextDisabled("Dithered by blend: opaque %u, alpha %u, additive %u (half), multiply %u (half), other %u (half)  |  left alone: "
+                            "%u depth ALWAYS without depth write (UI), %u without a pixel shader",
+                            g_last.blend[kOpaque], g_last.blend[kAlpha], g_last.blend[kAdditive], g_last.blend[kMultiply], g_last.blend[kOtherBlend],
+                            g_last.noDepth, g_last.noShader);
             ApexUi::EndAdvanced();
         }
     }
@@ -533,11 +571,13 @@ APEX_REGISTER_FEATURE(SceneDitherPatch, {.displayName = "Banding Fix",
                                          .experimental = false,
                                          .enabledByDefault = true,
                                          .supportedVersions = VERSION_ALL,
-                                         .technicalDetails = {"A dithered copy of every pixel shader (triangular noise from interleaved gradient noise of the pixel "
-                                                              "position, +-1/255 at Strength 100% on RGB; alpha untouched), made at the shader's first draw in the 3D scene.",
+                                         .technicalDetails = {"A dithered copy of every pixel shader (triangular noise from the R2 pattern of the pixel position, "
+                                                              "+-1/255 at Strength 100% on RGB, within half a step of black and white; alpha untouched), made at the "
+                                                              "shader's first draw in the 3D scene.",
                                                               "ps_2_x copies take the pixel position from a texture coordinate that a copy of the vertex shader fills "
                                                               "with the clip position.",
-                                                              "Bound only for draws into the back buffer with the depth test on (the 3D scene), last in the draw chain; "
+                                                              "Bound only for draws into the back buffer that use the depth test (the 3D scene; not ZFUNC ALWAYS without "
+                                                              "depth write), last in the draw chain, at half strength for additive and multiply blends; "
                                                               "the amount constant's previous value is put back after the draw."}})
 
 namespace SceneBinder {
@@ -561,9 +601,5 @@ Coverage LastCoverage() { return {g_last.jittered, g_last.jitterRefused, g_last.
 namespace SceneDither {
 bool On() { return g_on.load(std::memory_order_relaxed); }
 float Strength() { return std::clamp(g_strength, 0.0f, 1.0f); }
-float GrainPhase() {
-    if (!g_moving) return 0.0f;
-    const double v = g_frameIndex * 0.6180339887498949; // golden ratio steps: every frame a different, even phase
-    return static_cast<float>(v - static_cast<double>(static_cast<unsigned long long>(v)));
-}
+float GrainPhase() { return 0.0f; }
 } // namespace SceneDither

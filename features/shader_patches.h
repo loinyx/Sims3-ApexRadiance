@@ -54,7 +54,7 @@ int BloomThresholdConst(const std::vector<DWORD>& t);
 struct FloorPatch {
     DWORD atlasSampler = 0;
     DWORD atlasConst = 0;
-    DWORD mapSampler = 0; // PatchSnowFloor: the sampler of the room light map it found
+    DWORD mapSampler = 0; // PatchSnowFloor, PatchBakedAtlasPs (with outScaleSampler): the sampler of the room light map it found
     int scaleConst = -1;  // K of the game's lamp scale cK.x applied to max(map, atlas), read by no other instruction; -1 unknown
     int heightConst = -1; // PatchBakedAtlasPs, PatchFloor, PatchSnowFloor: cH, the atlas weight saturate(map.a * cH.y + cH.x) ((1, 0) = always); -1 = none
     bool maskAlpha = false; // map.a is readable at the atlas (the floor visibility mask; the winter floors copy it after the map's texld)
@@ -69,6 +69,11 @@ struct FloorPatch {
     // map its alpha gives (the light lit rooms send through their openings) leaves max(map, atlas) and the shade and is added
     // after them; the shade's rows must then carry the ground gate even while the shade itself is off (a white mask)
     bool exitLight = false;
+    // PatchBakedAtlasPs: the outdoor scale (RtOutdoorLamps::ScaleOf) read at the map's uv from outScaleSampler, the map's colour
+    // multiplied by 2^(c[outScaleConst].x r) before the atlas (c.x = 0: the map as it is). -1: none (no sampler or constant
+    // to spare); the draw then binds nothing more
+    int outScaleSampler = -1;
+    int outScaleConst = -1;
 };
 // Where a vertex shader writes world y to one output component: "mov oK.c, rW.y" with rW.y = "dp4 rW.y, rP, c9" (the
 // last write before it) and rW.x / rW.z from c8 / c10, exactly one such write and nothing else writing oK.c, no flow control.
@@ -95,6 +100,13 @@ bool PatchSnowFloor(std::vector<DWORD>& t, int texcoord, FloorPatch& out, const 
 // ground lamp shade (out.shadeSampler; world y = TEXCOORDn.z, which PatchObjectLampVs writes). groundShade = false gives the
 // bytes of the patch before the shade. exitLight (with groundShade, 2.15.3): as PatchFloor.
 bool PatchBakedAtlasPs(std::vector<DWORD>& t, int texcoord, FloorPatch& out, bool groundShade = true, bool exitLight = false);
+// The outdoor scale on the outside walls (ExteriorWall: "texld rA, vK, sM" whose next rgb reader is "mad rB.xyz, rA, cK.x,
+// rC", before any flow control, ps_3_0): right after the texld, texld rT, vK, sQ; mul rT.x, rT.x, cQ.x; exp rT.x, rT.x;
+// mul rA.xyz, rA, rT.x (cQ.x = 0: the wall as before). sampler = Q, constReg = cQ, mapSampler = M.
+struct WallScalePatch {
+    DWORD sampler = 0, constReg = 0, mapSampler = 0;
+};
+bool PatchWallScale(std::vector<DWORD>& t, WallScalePatch& out);
 
 // Winter foliage with a shadow map: "lrp rD.w, t5.x, cK.y, rS.w" is the moon shadow that also darkens lamp light.
 // After it: rD.w = lerp(rD.w, 1, cN.x), cN.x = night level.
@@ -342,9 +354,11 @@ struct UvRows {
 bool WorldUvRows(const std::vector<DWORD>& vs, int usage, int index, int worldK, UvRows& out);
 
 // Banding Fix (scene dither, scene_dither.cpp): every write to oC0 goes to a free temp rO, and at the end
-// oC0.rgb = rO.rgb + t(vPos) * cA.x, oC0.a = rO.a (the alpha is the bloom mask: untouched). t = triangular noise in
-// (-1, 1) from interleaved gradient noise (a fixed per-pixel pattern, no time); cA.x = the amount in output units, set per
-// draw (cA.w = a phase added to the pattern: 0 = still, a new value each frame = moving grain) (*amountConst = A; 1/255 = one 8-bit step). The 8-bit steps of smooth lighting become an invisible grain.
+// oC0.rgb = rO.rgb + n(vPos) * a, oC0.a = rO.a (the alpha is the bloom mask: untouched). n = triangular noise in
+// (-1, 1) from the R2 pattern of the pixel (fixed, no time), tapering to uniform +-0.5 above mid-grey; a = min(cA.x,
+// min(x, 1 - x) + 0.5 / 255) per channel (no specks at pure black or white); cA.x = the amount in output units, set per
+// draw (cA.w = a phase added to the pattern: 0 = still, a new value each frame = moving grain) (*amountConst = A; 1/255 =
+// one 8-bit step). The 8-bit steps of smooth lighting become an invisible grain.
 // ps_3_0 only (vPos); refused (t unchanged): no oC0 write, subroutines or ret, relative constant addressing, no free
 // temp / constant.
 enum class DitherResult { Ok, NotPs30, NoColorWrite, Subroutines, RelativeConstants, NoFreeRegister, Unreadable };

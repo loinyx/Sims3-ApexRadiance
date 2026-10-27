@@ -24,7 +24,8 @@ its lights, story by story.
 
 ## How Apex Radiance solves it
 
-A room 0 texel is the plain sum of what each light of the list added at it, packed as `min(sum, 1)`. When room 0 of the
+A room 0 texel is the plain sum of what each light of the list added at it, packed as `min(sum, 1)` with its hue kept past 1
+([level-light-share](level-light-share.md#outdoor-texels-keep-their-hue)). When room 0 of the
 active lot is solved, Apex keeps each light's part of every texel, read from the solve's running sum after the game and
 Apex tested that light. A lamp edit then brings every story's room 0 up to date in the frame of the edit:
 
@@ -39,6 +40,9 @@ Apex tested that light. A lamp edit then brings every story's room 0 up to date 
    touched class-2 wall block is blurred again from its texels before the blur.
 5. **The maps.** Only a story whose texels change is written, through the room's own lock step and the finalize's own
    steps. With Real-time outdoor lamps covering the lot, a change of only GPU-drawn lamps writes nothing.
+6. **The rooms that take them.** Room 0's yards and the roofed rooms that saw a door of a changed light through their
+   openings (of the story and of the story above) are sent once after the delta (`SendRoom0DependentsTail`), the roofed
+   rooms at a lamp edit's priority: the delta marks no room, so the game's walk does not send them.
 
 Anything else is solved in full, and its parts are kept again: a first solve, another detail class, changed walls,
 floors or openings, a lighting option changed, more than eight lights changed, a quick pass, a solve off the light tree

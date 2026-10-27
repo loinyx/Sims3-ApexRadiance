@@ -111,11 +111,15 @@
 #include "light_detail.h"
 #include "terrain_lighting_policy.h"
 #include "outdoor_delta.h"
+#include "outdoor_delta_model.h"
 #include "room_map_dither.h"
 #include "rt_outdoor_lamps.h"
 #include "rt_lamp_proxy.h"
 #include "atrium_hold.h"
 #include "inner_retry.h"
+#include "cut_close_hold.h"
+#include "opening_lamp_balance.h"
+#include "gpu_lamp_law.h"
 #include "tester_toggles.h"
 #include "drag_lite.h"
 #include "perf_toggles.h"
@@ -3159,7 +3163,10 @@ void __fastcall WallUvHook(void* geo, void*, uintptr_t mgr, int x, int z, int di
     CellCrop k;
     bool recut = false;
     float f3 = 0.0f, f5 = 0.0f, ref = 0.0f;
-    if ((mode == 0 || mode == 1) && g_foundationWallsOn.load(std::memory_order_relaxed) && ReadWallCell(geo, mgr, x, z, dir, c) && ReadCellCrop(geo, k)) {
+    // mode 0 only: mode 1 (V at +0x1E, TEXCOORD3) is the game's wall shade strip (PS s6, L8 1024 x 32), baked in the game's
+    // own per-cell mapping, continuous from a knee wall's top row into the gable's bottom row; recutting it moved the knee
+    // wall's top onto a dark part of the strip (three light captures: a hard seam along the gable's foot, 30% darker below)
+    if (mode == 0 && g_foundationWallsOn.load(std::memory_order_relaxed) && ReadWallCell(geo, mgr, x, z, dir, c) && ReadCellCrop(geo, k)) {
         const int cell = static_cast<int>(ApexMath::Floor(c.tmid * static_cast<float>(c.len)));
         ref = c.base;
         // (2.15.3) the eave cell of a gable is a triangle whose tip dips under its foot (heights 0.83 / 0.33 / -0.17 at 0.5 m
@@ -3196,7 +3203,7 @@ void __fastcall WallUvHook(void* geo, void*, uintptr_t mgr, int x, int z, int di
                 });
         }
     }
-    // mode 1 writes the second UV set of the same vertices; the note allocates: caught, then off (07/10, players' Runtime Error)
+    // mode 1 writes the shade strip's UVs (left as the game maps them); the note allocates: caught, then off (a players' Runtime Error)
     if (mode == 0) HookGuard::Run("LevelLightShare wall cell note", [=] { NoteWallCell(geo, mgr, x, z, dir); });
 }
 // The drawn height at t (0..len cells along the wall) of a wall's cells; 0 = not known
@@ -3380,13 +3387,42 @@ struct CutRec {
     uint8_t kind = kCutUnknown, orient = 0, piece = 0, count = 0;
     uint32_t flags = 0;   // the product's +0xD0
     uint32_t tgi[4] = {}; // the mask texture (payload +0x18): the opening's exact shape, for a later stage
+    // A window whose cut the game closed again: 1 = still in the grid while a window light stands in its cell, 2 = left out
+    // (none there: the window was deleted). The camera closes the windows of the wall it looks through and keeps them closed
+    // while it stays (in game: 'windows 6 -> 3' at each camera turn, every window light kept), so a window counts for lamp
+    // light by the window built, not by the cuts posted now (KeepBuiltWindows).
+    uint8_t closed = 0;
 };
+// A cut post on a story's cuts (pure: tools/roofed_openings_test). cut = an add of rec, else a close of edge k. Returns 0 =
+// nothing changed, 1 = changed (a new generation), 2 = a close for CutCloseHold (doors, arches, gates and unknown kinds). A
+// window's close only marks it closed; an add clears the mark, a change only when the grid had left it out.
+int ApplyCutPost(std::unordered_map<uint32_t, CutRec>& edges, uint32_t k, bool cut, const CutRec& rec) {
+    const auto e = edges.find(k);
+    if (!cut) {
+        if (e == edges.end()) return 0;
+        if (e->second.kind != kCutWindow) return 2;
+        if (!e->second.closed) e->second.closed = 1;
+        return 0;
+    }
+    const bool leftOut = e != edges.end() && e->second.closed == 2;
+    if (e != edges.end()) e->second.closed = 0;
+    const bool same = e != edges.end() && e->second.kind == rec.kind && e->second.orient == rec.orient && e->second.piece == rec.piece && e->second.count == rec.count &&
+                      e->second.flags == rec.flags && std::memcmp(e->second.tgi, rec.tgi, sizeof rec.tgi) == 0;
+    if (!same) edges[k] = rec;
+    return !same || leftOut ? 1 : 0;
+}
 struct StoryCuts {
     uint32_t gen = 0;
     std::unordered_map<uint32_t, CutRec> edges; // EdgeKey -> its cut
 };
 std::mutex g_cutMx;
 std::atomic<long> g_cutRepeats{0}; // cut posts that changed nothing (the game posts a lot's cuts again when an object moves)
+// Closes of a cut waiting kHoldMs before they count (cut_close_hold.h: a camera move closes and reopens window cuts), under
+// g_cutMx; reopened = closes an add of the same edge cancelled, applied = closes that lasted (RequeueCutStories)
+std::vector<CutCloseHold::Pending> g_cutHeld;
+std::atomic<long> g_cutReopened{0}, g_cutHeldApplied{0};
+std::atomic<long> g_cutWindowCloses{0}; // window cuts closed by a post: marked closed, never held (CutRec::closed)
+std::atomic<long> g_windowPostLogged{0}, g_windowKeepLogged{0}; // developer log lines: window close posts, closed windows at a grid build
 // (lot id of the posts, payload +0x08 / +0x0C = the posting lot's +0x48 / +0x4C, the id the game routes the message by
 // (0x00C52AA0); story) -> its cut cells. Always the post's own id: until 2.12.4 the first post whose lot's story manager
 // carried another id (+0x90 / +0x94, read while the lot was still being built) made a permanent alias and moved every cut of
@@ -3508,6 +3544,7 @@ void NoteCutoutPostImpl(int add, const uintptr_t* siteEsp, uintptr_t frame, uint
     const bool dev = !kPublicBuild;
     int nth = 0;
     bool newAlias = false;
+    std::string windowNote;
     {
         std::lock_guard<std::mutex> lk(g_cutMx);
         if (dev) {
@@ -3523,21 +3560,30 @@ void NoteCutoutPostImpl(int add, const uintptr_t* siteEsp, uintptr_t frame, uint
             }
         }
         if (!reject) {
-            if (g_cuts.size() > 4096) g_cuts.clear(); // (lots of earlier worlds)
+            if (g_cuts.size() > 4096) g_cuts.clear(), g_cutHeld.clear(); // (lots of earlier worlds)
             const uint32_t k = EdgeKey(r.key[0], r.key[1], r.key[3], r.key[4]);
             const bool known = g_cuts.count({r.postLot, story}) != 0;
             StoryCuts& s = g_cuts[{r.postLot, story}];
             // the game posts a lot's cuts again when an object on it moves (a lamp dragged): the same cut changes nothing (no
             // new generation, no story sent to its solve)
             bool changed = !known;
-            if (cut) {
-                const CutRec rec{CutKind(r.flags), r.orient, r.piece, r.count, r.flags, {r.tgi[0], r.tgi[1], r.tgi[2], r.tgi[3]}};
-                const auto e = s.edges.find(k);
-                const bool same = e != s.edges.end() && e->second.kind == rec.kind && e->second.orient == rec.orient && e->second.piece == rec.piece &&
-                                  e->second.count == rec.count && e->second.flags == rec.flags && std::memcmp(e->second.tgi, rec.tgi, sizeof rec.tgi) == 0;
-                if (!same) s.edges[k] = rec, changed = true;
-            } else if (s.edges.erase(k))
+            if (cut && CutCloseHold::Cancel(g_cutHeld, r.postLot, story, k)) g_cutReopened.fetch_add(1, std::memory_order_relaxed);
+            if (!cut && s.edges.count(k) && s.edges[k].kind == kCutWindow && !s.edges[k].closed) g_cutWindowCloses.fetch_add(1, std::memory_order_relaxed);
+            const auto was = s.edges.find(k);
+            const int wasClosed = was != s.edges.end() && was->second.kind == kCutWindow ? was->second.closed : -1; // (-1: not a window)
+            const CutRec rec{CutKind(r.flags), r.orient, r.piece, r.count, r.flags, {r.tgi[0], r.tgi[1], r.tgi[2], r.tgi[3]}};
+            const int post = ApplyCutPost(s.edges, k, cut, rec);
+            // (developer log) a window's close or reopen: the post's path and what it did, to tell the camera's posts in game
+            if (dev && wasClosed >= 0 && (!cut || wasClosed) && g_windowPostLogged.fetch_add(1, std::memory_order_relaxed) < 300)
+                windowNote = std::format("[Openings] lot {:016X} story {}: window ({},{})-({},{}) {} by {}: {}", r.postLot, story, r.key[0], r.key[1], r.key[3], r.key[4],
+                                         cut ? "posted again" : "closed", !add ? "a remove post" : cut ? "an add post" : "an add post with an empty mask",
+                                         cut ? (post ? "a new generation (the grid had left it out)" : "the mark cleared, no new generation")
+                                             : wasClosed ? "already marked closed, nothing changed" : "marked closed, no new generation");
+            if (post == 1) changed = true;
+            else if (post == 2 && !CutCloseHold::NoteClose(g_cutHeld, r.postLot, story, k, GetTickCount())) {
+                s.edges.erase(k); // (the hold is full: closed at once)
                 changed = true;
+            }
             if (changed) {
                 s.gen = g_cutGen.fetch_add(1, std::memory_order_relaxed) + 1;
                 const DWORD now = GetTickCount();
@@ -3555,6 +3601,7 @@ void NoteCutoutPostImpl(int add, const uintptr_t* siteEsp, uintptr_t frame, uint
         if (r.mgrLot != r.postLot) g_cutIdDiffers.fetch_add(1, std::memory_order_relaxed);
     }
     if (!dev) return;
+    if (!windowNote.empty()) LOG_INFO(windowNote);
     // the first posts of each lot, read or not (a lot streamed in after the world gets its own lines)
     const bool doorPost = read && r.flags && !CutOpensForLamps(CutKind(r.flags), true);
     if (nth >= 1 && (nth <= kCutLogPerLot || (doorPost && g_cutDoorLogged.fetch_add(1, std::memory_order_relaxed) < kCutDoorLogs))) {
@@ -3660,6 +3707,17 @@ uint32_t CopyStoryCuts(uint64_t lot, int story, std::vector<std::pair<uint32_t, 
     if (it == g_cuts.end()) return 0;
     if (out) out->assign(it->second.edges.begin(), it->second.edges.end());
     return it->second.gen;
+}
+// The closed windows a grid left out (2: no window light in their cell) or kept (1), noted with the story's cuts: an add of a
+// left-out window then makes a new generation, and the lot's geometry key counts it as gone (StoryCutsContent). A window
+// opened again meanwhile (0) is left as it is. Caller holds g_cutMx.
+void MarkLeftOutLocked(StoryCuts& s, const std::unordered_set<uint32_t>& leftOut) {
+    for (auto& [k, rec] : s.edges)
+        if (rec.kind == kCutWindow && rec.closed) rec.closed = leftOut.count(k) ? 2 : 1;
+}
+void MarkLeftOutWindows(uint64_t lot, int story, const std::unordered_set<uint32_t>& leftOut) {
+    std::lock_guard<std::mutex> lk(g_cutMx);
+    if (const auto it = g_cuts.find({lot, story}); it != g_cuts.end()) MarkLeftOutLocked(it->second, leftOut);
 }
 bool CutsNotedFor(uint64_t lot) {
     if (!lot) return false;
@@ -3819,6 +3877,10 @@ struct StoryGrid {
     std::vector<std::pair<uint32_t, CutRec>> windowCuts;
     uint64_t paneSig = 0;
     int paneSized = 0;          // windows sized from their panes
+    // the window cuts the game closed again, and the stamp (GlazedSig) of those left out for want of a window light
+    // (KeepBuiltWindows): built again when that set changes (a window deleted, or put back)
+    std::vector<std::pair<uint32_t, CutRec>> closedWindows;
+    uint64_t leftOutSig = 0;
     double buildMs = 0;
 };
 int32_t GridZL(const StoryGrid& g, int x, int Z) { return x >= 0 && x < g.w && Z >= 0 && Z <= g.h ? g.zl[static_cast<size_t>(Z) * g.w + x] : -1; }
@@ -4011,6 +4073,68 @@ void WindowPanes(const StoryGrid& g, const std::vector<std::pair<uint32_t, CutRe
         for (float& h : m.head) h = head;
         out.emplace(key, m);
     }
+}
+// Whether a window cut's cell still holds its window: 1 = a window light (type 7 or 8, sized or not) centred in front of the
+// cell, 2 = a sized pane over it (overlapping the cell by kPaneOverlap, as WindowPanes takes it), 0 = none; within
+// kGlassWallNear of the line, between the edge's base and the story's wall height. A window three cells wide has its panes'
+// lights centred in its middle cell only (in game: (26,20)..(26,23), its end cells sized u 0.25..1 and 0..0.75 from a pane
+// over them): a centre test alone left those end cells out at each camera turn ('windows 6 -> 4').
+int WindowLightIn(const StoryGrid& g, uint32_t key, const std::vector<GlassLight>& lights) {
+    const int x0 = static_cast<int8_t>(key & 0xFF), z0 = static_cast<int8_t>(key >> 8 & 0xFF), x1 = static_cast<int8_t>(key >> 16 & 0xFF),
+              z1 = static_cast<int8_t>(key >> 24 & 0xFF);
+    const bool alongZ = x0 == x1;
+    const int32_t idx = alongZ ? GridXL(g, x0, z0) : GridZL(g, x0, z0);
+    if (idx < 0) return 0;
+    const float base = g.edges[static_cast<size_t>(idx)].base;
+    const float line = static_cast<float>(alongZ ? x0 : z0), a = static_cast<float>(alongZ ? z0 : x0), b = static_cast<float>(alongZ ? z1 : x1);
+    int how = 0;
+    for (const GlassLight& l : lights) {
+        const float across = alongZ ? l.x : l.z, along = alongZ ? l.z : l.x, e = alongZ ? l.ez : l.ex;
+        if (ApexMath::Fabs(across - line) > kGlassWallNear || l.y < base || l.y > base + kStoryWallH) continue;
+        if (along >= a - kGlassAlong && along <= b + kGlassAlong) return 1;
+        if (e > 0.0f && std::min(along + e, b) - std::max(along - e, a) > kPaneOverlap) how = 2;
+    }
+    return how;
+}
+// The window cuts the game closed again (CutRec::closed) whose window is still built (WindowLightIn). A camera-hidden window
+// keeps its lights and stays; a deleted one loses them and is left out (its key in leftOut). closedOut: every closed window
+// cut on a wall (EnsureStoryGrid looks at their lights again); notes: each one's decision (developer log). Returns the cuts
+// to place.
+std::vector<std::pair<uint32_t, CutRec>> KeepBuiltWindows(const StoryGrid& g, const std::vector<std::pair<uint32_t, CutRec>>& cuts, const std::vector<GlassLight>& lights,
+                                                          std::unordered_set<uint32_t>& leftOut, std::vector<std::pair<uint32_t, CutRec>>* closedOut,
+                                                          std::string* notes = nullptr) {
+    std::vector<std::pair<uint32_t, CutRec>> keep;
+    leftOut.clear();
+    if (closedOut) closedOut->clear();
+    for (const auto& kv : cuts) {
+        const auto& [key, rec] = kv;
+        const int x0 = static_cast<int8_t>(key & 0xFF), z0 = static_cast<int8_t>(key >> 8 & 0xFF), x1 = static_cast<int8_t>(key >> 16 & 0xFF),
+                  z1 = static_cast<int8_t>(key >> 24 & 0xFF);
+        const bool alongZ = x0 == x1;
+        const int32_t idx = alongZ ? GridXL(g, x0, z0) : GridZL(g, x0, z0);
+        if (rec.kind != kCutWindow || !rec.closed || idx < 0) {
+            keep.push_back(kv);
+            continue;
+        }
+        if (closedOut && closedOut->size() < 4096) closedOut->push_back(kv);
+        const int how = WindowLightIn(g, key, lights);
+        if (how) keep.push_back(kv);
+        else leftOut.insert(key);
+        if (notes && notes->size() < 1500)
+            *notes += std::format("{}({},{})-({},{}) {}", notes->empty() ? "" : "; ", x0, z0, x1, z1,
+                                  how == 1 ? "kept, a window light in its cell" : how == 2 ? "kept, a pane over its cell" : "left out, no window light");
+    }
+    return keep;
+}
+// The grid's window cuts, open or closed again, with no window light in their cell: the stamp of this set (GlazedSig) tells
+// EnsureStoryGrid that a window was deleted (an open one's close may come after the grid was built) or put back
+std::unordered_set<uint32_t> UnlitWindows(const StoryGrid& g, const std::vector<GlassLight>& lights) {
+    std::vector<std::pair<uint32_t, CutRec>> all = g.windowCuts;
+    all.insert(all.end(), g.closedWindows.begin(), g.closedWindows.end());
+    for (auto& kv : all) kv.second.closed = 1;
+    std::unordered_set<uint32_t> unlit;
+    KeepBuiltWindows(g, all, lights, unlit, nullptr);
+    return unlit;
 }
 // A stamp of a set of window shapes (order free; 1 cm steps)
 uint64_t PaneSig(const PaneShapes& panes) {
@@ -4465,9 +4589,19 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
     const bool doorGlass = doorsBlock && std::any_of(cuts.begin(), cuts.end(), [&](const auto& c) { return !CutOpensForLamps(c.second.kind, true); });
     const bool windows = std::any_of(cuts.begin(), cuts.end(), [&](const auto& c) { return c.second.kind == kCutWindow; });
     if (doorGlass || windows) StoryWindowLights(mgr, story, g->xf, glassLights);
+    if (windows) { // the windows the game closed again: kept while built (KeepBuiltWindows)
+        std::unordered_set<uint32_t> leftOut;
+        std::string notes;
+        cuts = KeepBuiltWindows(*g, cuts, glassLights, leftOut, &g->closedWindows, kPublicBuild ? nullptr : &notes);
+        if (lot && !g->closedWindows.empty()) MarkLeftOutWindows(lot, story, leftOut);
+        if (!notes.empty() && g_windowKeepLogged.fetch_add(1, std::memory_order_relaxed) < 300)
+            LOG_INFO(std::format("[Openings] lot {:016X} story {}: {} closed window cuts, {} left out ({} window lights near the story): {}", lot, story,
+                                 g->closedWindows.size(), leftOut.size(), glassLights.size(), notes));
+    }
     if (doorGlass) GlazedCuts(*g, cuts, glassLights, glazed);
     if (windows) WindowPanes(*g, cuts, glassLights, panes);
     PlaceGridOpenings(*g, cuts, doorsBlock, glazed, [](const CutRec& rec, GridOpening& o) { MaskShapeFor(rec, o); }, &panes); // (its mask's shape when one was read; none yet)
+    g->leftOutSig = windows ? GlazedSig(UnlitWindows(*g, glassLights)) : 0;
     g_paneSized.fetch_add(g->paneSized, std::memory_order_relaxed);
     g_paneDefault.fetch_add(static_cast<long>(g->windowCuts.size()) - g->paneSized, std::memory_order_relaxed);
     if (g->glassDoors) g_glassDoorCells.fetch_add(g->glassDoors, std::memory_order_relaxed);
@@ -4542,9 +4676,9 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
             g_openingSetChanges.fetch_add(1, std::memory_order_relaxed);
             if (g_openingSetLogged.fetch_add(1, std::memory_order_relaxed) < (kPublicBuild ? 50 : 1000))
                 LOG_INFO(std::format("[Openings] lot {:016X} story {}: its openings changed: {} -> {} on walls (doors {} -> {}, windows {} -> {}, arches {} -> {}, gates "
-                                     "{} -> {}); its rooms' doors are looked at again (cut posts that changed nothing so far: {})",
+                                     "{} -> {}); its rooms' doors are looked at again (cut posts that changed nothing so far: {}; closes reopened within the hold {}, closes that lasted {}; window closes marked, not held {})",
                                      key.first, story, std::get<0>(was), std::get<0>(now), std::get<1>(was), std::get<1>(now), std::get<2>(was), std::get<2>(now),
-                                     std::get<3>(was), std::get<3>(now), std::get<4>(was), std::get<4>(now), g_cutRepeats.load()));
+                                     std::get<3>(was), std::get<3>(now), std::get<4>(was), std::get<4>(now), g_cutRepeats.load(), g_cutReopened.load(), g_cutHeldApplied.load(), g_cutWindowCloses.load()));
             if (const uintptr_t tracker = MgrTracker(mgr)) {
                 std::lock_guard<std::mutex> lk(g_warmMx);
                 const auto w = std::make_pair(tracker, story);
@@ -4775,7 +4909,7 @@ std::shared_ptr<const StoryGrid> EnsureStoryGridImpl(uintptr_t mgr, bool warm) {
     // lights can register after its cut was posted, or the door was swapped for another with the same cut)
     const auto glassSame = [&](const StoryGrid& o) {
         const bool doorGlass = o.doorsBlock && !o.doorCuts.empty();
-        if (!doorGlass && o.windowCuts.empty()) return true; // (2.15.3) and the windows' panes
+        if (!doorGlass && o.windowCuts.empty() && o.closedWindows.empty()) return true; // (2.15.3) and the windows' panes, and the closed windows
         const DWORD now = GetTickCount();
         if (g_glassCheckAt.size() > 4096) g_glassCheckAt.clear();
         DWORD& at = g_glassCheckAt[o.serial];
@@ -4788,12 +4922,15 @@ std::shared_ptr<const StoryGrid> EnsureStoryGridImpl(uintptr_t mgr, bool warm) {
         if (doorGlass) GlazedCuts(o, o.doorCuts, lights, glazed);
         PaneShapes panes;
         if (!o.windowCuts.empty()) WindowPanes(o, o.windowCuts, lights, panes);
-        if (GlazedSig(glazed) == o.glassSig && PaneSig(panes) == o.paneSig) return true;
+        // a window deleted (its window lights gone) or put back: the set with no light changes
+        const std::unordered_set<uint32_t> leftOut = UnlitWindows(o, lights);
+        if (GlazedSig(glazed) == o.glassSig && PaneSig(panes) == o.paneSig && GlazedSig(leftOut) == o.leftOutSig) return true;
         g_glassRebuilds.fetch_add(1, std::memory_order_relaxed);
         // the story's openings changed for lamps: sent as a story whose cuts changed (its roofless and roofed rooms, its
         // room 0, its walls' copy), as a door switched by "Doors block light" is
         std::lock_guard<std::mutex> lk(g_cutMx);
         if (const auto it = g_cuts.find({o.lot, o.story}); it != g_cuts.end()) {
+            MarkLeftOutLocked(it->second, leftOut); // (the geometry key follows before the sends; only windows closed again)
             it->second.gen = g_cutGen.fetch_add(1, std::memory_order_relaxed) + 1;
             const DWORD due = GetTickCount() - kGlassSendQuietMs;
             const auto key = it->first;
@@ -4919,6 +5056,9 @@ void DrainWarmStories() {
 struct GridWhy {
     bool wall = false, opening = false, over = false, roof = false;
     bool shortTop = false;
+    // the ray's last crossing that passed through an opening or over a wall's top: its share of the way from the lamp (-1 =
+    // none; GridPassImpl, the largest of every grid asked), the opening the light came in by (OpeningLampBalance::OpeningGain)
+    float tOpen = -1.0f;
 };
 // The top of edge e at u (0..1 from its low end)
 inline float GridEdgeTop(const GridEdge& e, float u) {
@@ -5160,13 +5300,22 @@ float GridPassImpl(const StoryGrid& g, const float* A, const float* B, GridWhy& 
     float tz = tdz < kInf ? (sz > 0 ? static_cast<float>(iz + 1) - A[2] : A[2] - static_cast<float>(iz)) * tdz : kInf;
     float pass = 1.0f, t0 = 0.0f;
     const bool hardTops = g_hardWallTops.load(std::memory_order_relaxed);
+    // a crossing's reasons into why, and its place when it passed through an opening or over a wall's top (tOpen)
+    const auto note = [&why](const GridWhy& w, float t) {
+        why.wall |= w.wall, why.opening |= w.opening, why.over |= w.over, why.shortTop |= w.shortTop;
+        if ((w.opening || w.over) && t > why.tOpen) why.tOpen = t;
+    };
     for (int guard = 0; guard < 1024 && pass > 0.0f; guard++) {
         t_gridCapY = 1e30f;
         if (ix >= 0 && iz >= 0 && ix < g.w && iz < g.h) {
             const uint8_t f = g.flags[static_cast<size_t>(iz) * g.w + ix];
             // the ray leaves this tile next: its ceiling caps the walls it crosses there (hard_wall_tops)
             if (hardTops && (f & 0xF0)) t_gridCapY = g.ceil[static_cast<size_t>(iz) * g.w + ix];
-            if (f & 0x03) pass *= GridDiagPass(g, ix, iz, A, dx, dy, dz, tMin, tMax, why, floor, rim);
+            if (f & 0x03) { // (a diagonal crossed inside the tile: placed at the tile's entry)
+                GridWhy w{};
+                pass *= GridDiagPass(g, ix, iz, A, dx, dy, dz, tMin, tMax, w, floor, rim);
+                note(w, std::max(t0, tMin));
+            }
             // (2.15.3) t1 = std::min({tx, tz, 1.0f}) as before (the first of the smallest, NaN included), only where it is read: the
             // initializer-list min was a CRT call on every step
             if (f & 0xF0) {
@@ -5194,18 +5343,25 @@ float GridPassImpl(const StoryGrid& g, const float* A, const float* B, GridWhy& 
                                  GridLinePass(g, false, Z, ix + sx, static_cast<float>(X - ix - sx), y, w1, floor, rz, dir);
                 const float r2 = GridLinePass(g, false, Z, ix, static_cast<float>(X - ix), y, w2, floor, rz, dir) *
                                  GridLinePass(g, true, X, iz + sz, static_cast<float>(Z - iz - sz), y, w2, floor, rx, dir);
-                const GridWhy& w = r1 >= r2 ? w1 : w2;
+                GridWhy w = r1 >= r2 ? w1 : w2;
                 pass *= std::max(r1, r2);
-                why.wall |= w.wall, why.opening |= w.opening, why.over |= w.over;
+                w.shortTop = false; // (a corner's reasons as before: wall, opening, over)
+                note(w, t);
             }
             ix += sx, iz += sz, tx += tdx, tz += tdz;
         } else if (tx < tz) {
-            if (inRange && !LineEmpty(true, sx > 0 ? ix + 1 : ix, iz))
-                pass *= GridLinePass(g, true, sx > 0 ? ix + 1 : ix, iz, A[2] + t * dz - static_cast<float>(iz), y, why, floor, rim.X().At(rim.Half(t)), dir);
+            if (inRange && !LineEmpty(true, sx > 0 ? ix + 1 : ix, iz)) {
+                GridWhy w{};
+                pass *= GridLinePass(g, true, sx > 0 ? ix + 1 : ix, iz, A[2] + t * dz - static_cast<float>(iz), y, w, floor, rim.X().At(rim.Half(t)), dir);
+                note(w, t);
+            }
             ix += sx, tx += tdx;
         } else {
-            if (inRange && !LineEmpty(false, sz > 0 ? iz + 1 : iz, ix))
-                pass *= GridLinePass(g, false, sz > 0 ? iz + 1 : iz, ix, A[0] + t * dx - static_cast<float>(ix), y, why, floor, rim.Z().At(rim.Half(t)), dir);
+            if (inRange && !LineEmpty(false, sz > 0 ? iz + 1 : iz, ix)) {
+                GridWhy w{};
+                pass *= GridLinePass(g, false, sz > 0 ? iz + 1 : iz, ix, A[0] + t * dx - static_cast<float>(ix), y, w, floor, rim.Z().At(rim.Half(t)), dir);
+                note(w, t);
+            }
             iz += sz, tz += tdz;
         }
         t0 = t;
@@ -5892,6 +6048,23 @@ void ShareRoofedOpenings(BYTE* treeLevel, BYTE* room) {
 // off; a flickering lamp no room sees sends none), and for a move or a player's edit (3) also those it can reach now; else
 // (a lamp added or removed, a wall changed) the rooms that took any lamp of room 0 or that any can reach (value changes:
 // those that took one).
+struct RoofedAt {
+    float x, z, reach; // a tested lamp in story space and its reach
+};
+// One roofed room's send for SameStoryRoofed (pure: tools/roofed_openings_test). seen = the lamps that saw one of its doors
+// at its last gather (sorted), took = it took one; at = the tested lamps' places, known only for a move or an add (haveXf)
+bool RoofedSendWanted(bool took, const std::vector<uintptr_t>& seen, const YardBox& box, bool precise, int change, const std::vector<uintptr_t>& tested,
+                      const std::vector<RoofedAt>& at, bool haveXf) {
+    if (precise ? std::any_of(tested.begin(), tested.end(), [&](uintptr_t l) { return std::binary_search(seen.begin(), seen.end(), l); }) : took) return true;
+    if (!(precise ? change == 3 : change != 1)) return false;
+    if (!haveXf) return true; // a lamp moved (or a player's edit) where it cannot be placed: it may see a door now
+    for (const RoofedAt& a : at) {
+        const float ddx = std::max({box.x0 - a.x, 0.0f, a.x - box.x1}), ddz = std::max({box.z0 - a.z, 0.0f, a.z - box.z1});
+        if (ddx * ddx + ddz * ddz <= a.reach * a.reach) return true;
+    }
+    return false;
+}
+// end of RoofedSendWanted
 void SameStoryRoofed(uintptr_t mgrL, int L, int changed, int change, const std::vector<uintptr_t>& lights, const std::vector<uintptr_t>* changedOnly,
                      std::vector<std::pair<int, int>>& out) {
     if (changed != 0) return;
@@ -5899,10 +6072,7 @@ void SameStoryRoofed(uintptr_t mgrL, int L, int changed, int change, const std::
     if (recs.empty()) return;
     const bool precise = changedOnly && !changedOnly->empty() && change != 2;
     const std::vector<uintptr_t>& tested = precise ? *changedOnly : lights;
-    struct At {
-        float x, z, reach;
-    };
-    std::vector<At> at;
+    std::vector<RoofedAt> at;
     Xform xf;
     // (the lamps' positions are the game's call: on the gathers' thread only, as SameStoryYards)
     const bool haveXf = (precise ? change == 3 : change != 1) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed) && ReadXform(mgrL, xf);
@@ -5912,19 +6082,10 @@ void SameStoryRoofed(uintptr_t mgrL, int L, int changed, int change, const std::
             reinterpret_cast<LightPos_t>(kLightPos)(reinterpret_cast<void*>(light), pos);
             float l[3];
             ToLocal(xf, pos, l);
-            at.push_back(At{l[0], l[2], LampReach(light)});
+            at.push_back(RoofedAt{l[0], l[2], LampReach(light)});
         }
     for (const RoofedRec& r : recs) {
-        bool send = precise ? std::any_of(tested.begin(), tested.end(), [&](uintptr_t l) { return std::binary_search(r.lamps.begin(), r.lamps.end(), l); })
-                            : r.took;
-        if (!send && (precise ? change == 3 : change != 1)) { // a lamp moved (or a player's edit): it may see a door now
-            send = !haveXf;
-            for (size_t i = 0; i < at.size() && !send; i++) {
-                const float ddx = std::max({r.box.x0 - at[i].x, 0.0f, at[i].x - r.box.x1}), ddz = std::max({r.box.z0 - at[i].z, 0.0f, at[i].z - r.box.z1});
-                send = ddx * ddx + ddz * ddz <= at[i].reach * at[i].reach;
-            }
-        }
-        if (send) {
+        if (RoofedSendWanted(r.took, r.lamps, r.box, precise, change, tested, at, haveXf)) {
             out.emplace_back(L, r.id);
             g_roofedSends.fetch_add(1, std::memory_order_relaxed);
         }
@@ -9220,10 +9381,12 @@ bool SwapThreshold(BYTE* room, float value, float* was) { // POD (SEH)
         return false;
     }
 }
-// The colour the game is about to sum (after Apex's tests), faded at the room's real threshold (the same sum, the same order)
-void FadeAtThreshold(float* colour) {
+// The colour the game is about to sum (after Apex's tests), faded at the room's real threshold (the same sum, the same order).
+// thrScale (at most 1): the scale Apex put on the colour after the game's law (an outdoor lamp through an opening: its cut,
+// the outdoor surface's factor and the colour response), so the cut stays where the law's light would meet it
+void FadeAtThreshold(float* colour, float thrScale = 1.0f) {
     const float sum = (colour[2] + colour[1]) + colour[0];
-    const float thr = g_ctx.thr;
+    const float thr = g_ctx.thr * thrScale;
     if (!(sum >= thr)) { // the game's drop
         for (int i = 0; i < 4; i++) colour[i] = 0.0f;
         return;
@@ -10619,6 +10782,8 @@ float* __fastcall SolvePointBatch(BYTE* room, void*, float* out, void* list2D, v
         t_odSample = false;
         OutdoorDelta::SampleEnd(room, sample, static_cast<const char*>(flags), out);
     }
+    // an outdoor texel's colour keeps its hue past 1 (the kept sum above stays whole: the deltas and the GPU relight pack it alike)
+    if (out && room[0x18]) OutdoorDeltaModel::KeepHue(out);
     return r;
 }
 float* SolvePointBatchImpl(BYTE* room, float* out, void* list2D, void* list3D, void* flags, void* sample) {
@@ -10971,6 +11136,7 @@ float OpenLampPass(const RoomInfo& info, void* light, const float* pointW, float
 bool FindInner(const RoomInfo& info, uintptr_t light);                                                   // below (indoor light through openings)
 float InnerPass(const RoomInfo& info, void* light, const float* pointW, float* lampW, GridWhy& why);    // below
 float InnerNormScaleAt(const RoomInfo& info, void* light, const BYTE* room); // below
+float OpeningLampFactor(const float* normal, const BYTE* room);            // below (outdoor light through openings: the outdoor scale)
 // The time Apex's own tests take inside the game's room solves (LightEvalHook, this hook; ApexSolveMs)
 std::atomic<uint64_t> g_apexSolveCycles{0};
 // One writer (the gather thread: every caller checks g_gatherThread), so a relaxed load and store, without a locked add
@@ -11057,6 +11223,9 @@ void __fastcall BasisLightHook(BYTE* room, void*, const float* pos, void* light,
             // The floor solve already compensates source/recipient normalisation. The directional
             // maps need the same relative lamp weights, including gains above one, at an arch.
             if(kMemoryOptimizationsEnabled&&inner)openShare*=InnerNormScaleAt(*info,light,room);
+            // a lamp of room 0 at the outdoor ground's scale, as in the room's light maps (whether the game normalises the
+            // directional maps is not read: no normalisation factor here)
+            if (!inner) openShare *= OpeningLampFactor(nullptr, nullptr);
         }
     // one daytime curve (12/10): an outdoor lamp in a roofed room's directional maps (the window glass and the objects of
     // the room read them) x the solve's factor, as in its light maps (RoofedDay)
@@ -12256,12 +12425,14 @@ void IndoorShadow(const RoomInfo& info, void* light, const float* sample, float*
 // stopped by a wall, Roof by a roof, Passed nothing in the way.
 std::atomic<long> g_yardTests{0}, g_yardBlocked{0}, g_yardRoofed{0}, g_yardOpening{0}, g_yardOver{0}, g_yardBypass{0};
 bool FindSame(const RoomInfo& info, uintptr_t light) { return std::binary_search(info.same.begin(), info.same.end(), light); }
-void YardShadow(const RoomInfo& info, void* light, const float* sample, float* colour) {
+// tOpen (when given): the ray's last opening (GridWhy::tOpen)
+void YardShadow(const RoomInfo& info, void* light, const float* sample, float* colour, float* tOpen = nullptr) {
     if (!(colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f)) return;
     const float before[3] = {colour[0], colour[1], colour[2]};
     alignas(16) float pos[4] = {};
     GridWhy why{};
     const float pass = info.openings ? OpenLampPass(info, light, sample, pos, why) : YardPass(info.grid[0].get(), info.grid[1].get(), light, sample, pos, why);
+    if (tOpen) *tOpen = why.tOpen;
     ApexUtil::CountOne(g_yardTests);
     if (info.openings) { // a roofed room's lamp of room 0 (outdoor light through openings)
         ApexUtil::CountOne(g_roofedTests);
@@ -12336,6 +12507,116 @@ float InnerNormScaleAt(const RoomInfo& info, void* light, const BYTE* room) {
     return k;
 }
 float InnerNormScale(const RoomInfo& info, void* light) {return InnerNormScaleAt(info,light,t_solveRoom);}
+
+// Outdoor light through openings: a roofed room's lamp of room 0 at the outdoor surface's brightness and outside the room's
+// normalisation (opening_lamp_balance.h), set from the menu values (SetOpeningLampBalance)
+std::atomic<float> g_openGround{1.0f}, g_openWall{1.0f};
+std::atomic<long> g_openScaled{0}, g_openResponse{0}; // (points scaled; of them, saturated colours given the outdoor response)
+std::atomic<long> g_openCut{0}; // points of such a lamp held under the outdoor cut at its opening (OpeningLampBalance::EntryScale)
+float OpeningLampFactor(const float* normal, const BYTE* room) {
+    OpeningLampBalance::Scales s;
+    s.ground = g_openGround.load(std::memory_order_relaxed), s.wall = g_openWall.load(std::memory_order_relaxed);
+    const float k = room ? OpeningLampBalance::Factor(s, normal, RoomNormOf(room), RoomOutdoorFlag(room)) : (OpeningLampBalance::WallTexel(normal) ? s.wall : s.ground);
+    if (k != 1.0f) ApexUtil::CountOne(g_openScaled);
+    return k;
+}
+
+// The outdoor sum at the opening's outer side (OpeningLampBalance::EntryScale's total): room 0's lights of the room's story
+// at X, each as the game evaluates it (its entries as listed: story 0's lamps twice) and passed through the story's walls
+// as a yard's lamp (YardPass), the window lights left out (the gather leaves them out too); the outdoor lamps at the solve's
+// daytime factor, as the lamp itself. Kept per batch and X (0.125 m, 0.25 m in height, the normal in sevenths), with the
+// parts of the room's lamps of room 0 (`same`) so a lamp's own part is taken out. Light tree thread.
+struct OpenTotalMemo {
+    uint32_t serial = 0;
+    uintptr_t room0 = 0;
+    int32_t q[4] = {};
+    bool ok = false;
+    float total[3] = {};
+    int n = 0;
+    uintptr_t lamp[16] = {};
+    float part[16][3] = {};
+};
+thread_local OpenTotalMemo t_openTotal[64];
+std::atomic<long> g_openShared{0}, g_openTotalFills{0}, g_openTotalFaults{0};
+bool OpenTotalFill(const BYTE* room0, const RoomInfo& info, const StoryGrid* g0, const StoryGrid* g1, const float* X, const float* n, OpenTotalMemo& m) {
+    __try {
+        const uintptr_t* lb = *reinterpret_cast<const uintptr_t* const*>(room0 + 0xC8);
+        const uintptr_t* le = *reinterpret_cast<const uintptr_t* const*>(room0 + 0xCC);
+        if (!lb || le < lb || le - lb > 4096) return false;
+        alignas(16) float s[12] = {X[0], X[1], X[2], 1.0f, n[0], n[1], n[2], 0.0f, 0, 0, 0, 0};
+        for (const uintptr_t* p = lb; p < le; p++) {
+            const uintptr_t l = *p;
+            if (!l) continue;
+            const int type = *reinterpret_cast<const int*>(l + 0xB0);
+            if (type == 7 || type == 8) continue;
+            const uintptr_t vt = *reinterpret_cast<const uintptr_t*>(l);
+            uintptr_t eval = 0;
+            for (size_t i = 0; i < std::size(kClasses); i++)
+                if (kClasses[i].vtable == vt && g_evalOrig[i]) eval = g_evalOrig[i];
+            if (!eval) continue;
+            alignas(16) float c[4] = {};
+            reinterpret_cast<LightEval_t>(eval)(reinterpret_cast<void*>(l), s, s + 4, c);
+            if (!(c[0] > 0.0f || c[1] > 0.0f || c[2] > 0.0f)) continue;
+            alignas(16) float lw[4] = {};
+            GridWhy why{};
+            float pass = YardPass(g0, g1, reinterpret_cast<void*>(l), X, lw, why);
+            if (g_ctx.dayScale < 1.0f && OutdoorLamp(reinterpret_cast<const void*>(l))) pass *= g_ctx.dayScale;
+            if (!(pass > 0.0f)) continue;
+            int slot = -1;
+            if (std::binary_search(info.same.begin(), info.same.end(), l)) {
+                for (int k = 0; k < m.n; k++)
+                    if (m.lamp[k] == l) slot = k;
+                if (slot < 0 && m.n < 16) slot = m.n++, m.lamp[slot] = l;
+            }
+            for (int k = 0; k < 3; k++) {
+                const float v = ApexMath::IsFinite(c[k]) ? std::max(0.0f, c[k] * pass) : 0.0f;
+                m.total[k] += v;
+                if (slot >= 0) m.part[slot][k] += v;
+            }
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_openTotalFaults.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+}
+// The total for one point of the room's solve: the largest channel of (the lamp's colour at X as EntryScale takes it, R, in
+// the hue of `colour`) + (the other lights at X); negative when X or room 0 is not known (the lamp's own cut then)
+float OpeningOutdoorTotal(const RoomInfo& info, void* light, const float* sample, const float* normal, float tOpen, const float colour[3], float R) {
+    if (!(tOpen > 0.0f && tOpen < 1.0f) || !info.grid[0] || !(R > 0.0f)) return -1.0f;
+    const float* L = g_ctx.yardLamp;
+    const float dx = sample[0] - L[0], dz = sample[2] - L[2], len = ApexMath::Sqrt(dx * dx + dz * dz);
+    if (!(len > 0.05f)) return -1.0f;
+    const float t = std::max(0.0f, tOpen - 0.03f / len); // (3 cm out from the opening's line, on the lamp's side)
+    const float X[3] = {L[0] + t * dx, sample[1], L[2] + t * dz};
+    const float up[3] = {0.0f, 1.0f, 0.0f};
+    const float* n = normal ? normal : up;
+    const BYTE* room0 = static_cast<const BYTE*>(LevelLightShare::Room0Of(info.tracker, info.level));
+    if (!room0) return -1.0f;
+    const int32_t q[4] = {static_cast<int32_t>(ApexMath::Floor(X[0] * 8.0f)), static_cast<int32_t>(ApexMath::Floor(X[1] * 4.0f)),
+                          static_cast<int32_t>(ApexMath::Floor(X[2] * 8.0f)),
+                          static_cast<int32_t>(std::lround((n[0] + 1.0f) * 3.5f) + 8 * std::lround((n[1] + 1.0f) * 3.5f) + 64 * std::lround((n[2] + 1.0f) * 3.5f))};
+    const uint32_t h = (static_cast<uint32_t>(q[0]) * 73856093u) ^ (static_cast<uint32_t>(q[1]) * 19349663u) ^ (static_cast<uint32_t>(q[2]) * 83492791u) ^
+                       (static_cast<uint32_t>(q[3]) * 2654435761u);
+    OpenTotalMemo& m = t_openTotal[h >> 26];
+    if (!(m.serial == g_batchSerial && m.room0 == reinterpret_cast<uintptr_t>(room0) && std::memcmp(m.q, q, sizeof q) == 0)) {
+        m = OpenTotalMemo{};
+        m.serial = g_batchSerial, m.room0 = reinterpret_cast<uintptr_t>(room0);
+        std::memcpy(m.q, q, sizeof q);
+        m.ok = OpenTotalFill(room0, info, info.grid[0].get(), info.grid[1].get(), X, n, m);
+        g_openTotalFills.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (!m.ok) return -1.0f;
+    const float* own = nullptr;
+    for (int k = 0; k < m.n; k++)
+        if (m.lamp[k] == reinterpret_cast<uintptr_t>(light)) own = m.part[k];
+    if (!own) return -1.0f; // (its own part not known: the lamp's own cut)
+    const float top = std::max({colour[0], colour[1], colour[2]});
+    if (!(top > 0.0f)) return -1.0f;
+    float T = 0.0f;
+    for (int k = 0; k < 3; k++) T = std::max(T, colour[k] / top * R + std::max(0.0f, m.total[k] - own[k]));
+    return T;
+}
 
 // Indoor light through openings: a lamp of a roofed room taken through an opening (ShareInnerLamps), tested like a yard's
 // (InnerPass); the game's own wall test that follows for it is skipped (GameWallTest)
@@ -12433,6 +12714,7 @@ bool OwnFloorBlocks(const unsigned char* room, void* light, const float* sample)
     return OwnFloorBlocksAt(room, lp, sample);
 }
 
+std::atomic<long> g_mountRaised{0}; // wall texels a lamp on that wall lit at the raised N.l
 template <int I> void __fastcall LightEvalHook(void* light, void*, const float* sample, const float* normal, float* colour) {
     // Quick outdoor lamp edits (Instant only): each light's part of the sums a kept sample adds to (the running sum is read
     // before each light of the outer point solve; t_odSample is set on the light tree thread only)
@@ -12441,8 +12723,9 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
     // colour the game is about to sum, Apex's tests done, fades at the room's real threshold on every way out below
     struct FadeOnExit {
         float* c;
+        float thrScale = 1.0f;
         ~FadeOnExit() {
-            if (c) FadeAtThreshold(c);
+            if (c) FadeAtThreshold(c, thrScale);
         }
     } fadeOnExit{g_ctx.fade && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed) ? colour : nullptr};
     // indoor light through openings: the floor mask's copies of room 0 leave these lamps out (the ground atlas, which the mask
@@ -12465,6 +12748,27 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
         return;
     }
     reinterpret_cast<LightEval_t>(g_evalOrig[I])(light, sample, normal, colour);
+    // a lamp on a wall lights the wall it hangs on (gpu_lamp_law.h MountedNdl, the GPU's law alike): the game's N.l raised to
+    // the floor on a wall texel within kMountReach behind the lamp (the colour scaled by the ratio; the law's Cmax cut, which
+    // only a lamp touching the wall reaches, is not redone)
+    if (normal && (colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f) && ApexMath::Fabs(normal[1]) < 0.5f &&
+        _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) {
+        alignas(16) float lp[4];
+        LampPos(light, lp);
+        const float l[3] = {lp[0] - sample[0], lp[1] - sample[1], lp[2] - sample[2]};
+        const float plane = normal[0] * l[0] + normal[1] * l[1] + normal[2] * l[2];
+        if (plane > 0.0f && plane < GpuLampLaw::kMountReach) {
+            const float d = ApexMath::Sqrt(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]);
+            const float ndl = d > 1e-4f ? plane / d : 1.0f;
+            const float raised = GpuLampLaw::MountedNdl(ndl, plane, normal[1]);
+            if (raised > ndl && ndl > 1e-3f) {
+                // (at most 8 times: the law's Cmax cut, already in the game's colour, is not redone here)
+                const float k = std::min(raised / ndl, 8.0f);
+                for (int i = 0; i < 3; i++) colour[i] *= k;
+                ApexUtil::CountOne(g_mountRaised);
+            }
+        }
+    }
     // a lamp under this story's floor (above): nothing through the floor
     if (t_solveRoom && (colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f) && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) &&
         ThreadId() == g_gatherThread.load(std::memory_order_relaxed) && OwnFloorBlocks(t_solveRoom, light, sample)) {
@@ -12493,8 +12797,48 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
         if (g_ctx.thr > (colour[2] + colour[1]) + colour[0]) return;
         const ApexCycles timed;
         if (innerLamp) InnerShadow(*g_ctx.info, light, sample, colour); // a lamp of a roofed room through an opening (indoor light through openings)
-        else if (openLamp || (g_ctx.info->yard && FindSame(*g_ctx.info, reinterpret_cast<uintptr_t>(light))))
-            YardShadow(*g_ctx.info, light, sample, colour); // a lamp of a roofless room's own story (light through doors and windows), or of a roofed room's doors
+        else if (openLamp || (g_ctx.info->yard && FindSame(*g_ctx.info, reinterpret_cast<uintptr_t>(light)))) {
+            // the outdoor map's cut at 1 for this lamp's entries, its hue kept (story 0's room-0 lamps are listed twice, ShareRoofedOpenings)
+            const int times = g_ctx.info->level == 0 || (g_ctx.info->level == 1 &&
+                                                         std::binary_search(g_ctx.info->lower.begin(), g_ctx.info->lower.end(), reinterpret_cast<uintptr_t>(light)))
+                                  ? 2
+                                  : 1;
+            // (the entry as the law gave it: the cut follows the opening's outer side, known once the walls are passed)
+            const float law = openLamp ? std::max({colour[0], colour[1], colour[2]}) : 0.0f;
+            const float hue[3] = {colour[0], colour[1], colour[2]};
+            float tOpen = -1.0f;
+            YardShadow(*g_ctx.info, light, sample, colour, openLamp ? &tOpen : nullptr); // a lamp of a roofless room's own story (light through doors and windows), or of a roofed room's doors
+            if (openLamp && (colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f)) { // at the outdoor surface's scale
+                // the outdoor cut where the light came in, falling off from there with the law (OpeningLampBalance::EntryScale);
+                // the cut of the outdoor texel there, which every light reaching it shares
+                const float gain = OpeningLampBalance::OpeningGain(g_ctx.yardLamp, sample, normal, tOpen);
+                const float R = law * static_cast<float>(times) * std::max(gain, 1.0f);
+                const float total = R > 0.0f ? OpeningOutdoorTotal(*g_ctx.info, light, sample, normal, tOpen, hue, R) : -1.0f;
+                if (total > R && total > 1.0f) ApexUtil::CountOne(g_openShared);
+                const float cut = OpeningLampBalance::EntryScale(law, times, gain, total);
+                if (cut != 1.0f) {
+                    for (int i = 0; i < 4; i++) colour[i] *= cut;
+                    ApexUtil::CountOne(g_openCut);
+                }
+                const float k = OpeningLampFactor(normal, t_solveRoom);
+                for (int i = 0; i < 4; i++) colour[i] *= k;
+                // The light cut follows these scales: measured on the scaled colour, the room's threshold (3/255) dropped the
+                // window's light where the law still gave it several times that (F7 of a living room behind a courtyard
+                // window: a strip 1.75 to 2.75 m in at 8/255 and nothing past it, the sill's shade before it)
+                float scaled = cut * k;
+                // and the outdoor response to its colour: the indoor curves, on the mean, gave a saturated lamp more than a white
+                // one (a room solved as outdoor packs its hue-kept sum with no curve)
+                if (t_solveRoom && !RoomOutdoorFlag(t_solveRoom)) {
+                    const float q = OpeningLampBalance::MaxResponse(colour, static_cast<float>(times) * InnerLight::Norm(RoomNormOf(t_solveRoom)));
+                    if (q != 1.0f) {
+                        for (int i = 0; i < 4; i++) colour[i] *= q;
+                        ApexUtil::CountOne(g_openResponse);
+                    }
+                    scaled *= q;
+                }
+                if (scaled > 0.0f && scaled < 1.0f && ApexMath::IsFinite(scaled)) fadeOnExit.thrScale = scaled;
+            }
+        }
         else if (!g_ctx.info->indoor) CrossFloorShadow(*g_ctx.info, light, sample, colour);
         else if (const Cross* c = FindCross(*g_ctx.info, reinterpret_cast<uintptr_t>(light)); c && c->outdoor)
             CrossFloorShadow(*g_ctx.info, light, sample, colour); // a roofless room taking an outdoor lamp of another story
@@ -13375,8 +13719,18 @@ void RequeueCutStories() {
     std::vector<std::pair<uint64_t, int>> due, zero;
     {
         std::lock_guard<std::mutex> lk(g_cutMx);
-        if (g_cutDirty.empty()) return;
         const DWORD now = GetTickCount();
+        // the closes that lasted (cut_close_hold.h): the cut leaves its story now, sent once quiet as any other change
+        if (!g_cutHeld.empty())
+            g_cutHeldApplied.fetch_add(CutCloseHold::Due(g_cutHeld, now, [&](uint64_t lot, int story, uint32_t edge) {
+                const auto s = g_cuts.find({lot, story});
+                if (s == g_cuts.end() || !s->second.edges.erase(edge)) return;
+                s->second.gen = g_cutGen.fetch_add(1, std::memory_order_relaxed) + 1;
+                const auto d = std::find_if(g_cutDirty.begin(), g_cutDirty.end(), [&](const auto& e) { return std::get<0>(e) == lot && std::get<1>(e) == story; });
+                if (d != g_cutDirty.end()) std::get<2>(*d) = now;
+                else if (g_cutDirty.size() < 512) g_cutDirty.emplace_back(lot, story, now);
+            }), std::memory_order_relaxed);
+        if (g_cutDirty.empty()) return;
         for (auto it = g_cutDirty.begin(); it != g_cutDirty.end();)
             if (now - std::get<2>(*it) >= kCutQuietMs) {
                 due.emplace_back(std::get<0>(*it), std::get<1>(*it));
@@ -14052,10 +14406,12 @@ std::string OpeningsStatus() {
     const std::string roofedText = std::format(
         " | outdoor light through openings: {} (roofed rooms taking outdoor lamps {}, {} lamps; with no door to the outside {}; lamps beyond reach {}, with no door in "
         "sight {}; points tested {}, lit {}; lamps of the story below tested {}, stopped by this story's floors {}; directional map samples tested {}, blocked {}; rooms "
-        "sent for lamp edits {}, for their doors {}; rig copies published {}; grid walls ending at a floor above them {})",
+        "sent for lamp edits {}, for their doors {}; rig copies published {}; grid walls ending at a floor above them {}; at the outdoor scale x{:.3f} floors, x{:.3f} walls, "
+        "points scaled {}, of them saturated colours at the outdoor response {}, held under the outdoor cut at their opening {}, at the cut of the outdoor texel there (its other light) {} (sums at openings {}, faults {}); cut closes held: reopened {}, lasted {})",
         roofed ? (RoofedOpeningsOn() ? "on" : "on, not ready") : "off", g_roofedRooms.load(), g_roofedAdded.load(), g_roofedNoDoor.load(), g_roofedFar.load(),
         g_roofedHidden.load(), g_roofedTests.load(), g_roofedLit.load(), g_roofedBelowTests.load(), g_roofedBelowSlab.load(), g_roofedBasisTests.load(),
-        g_roofedBasisBlocked.load(), g_roofedSends.load(), g_roofedDoorSends.load(), g_openRigPublished.load(), g_gridCapped.load());
+        g_roofedBasisBlocked.load(), g_roofedSends.load(), g_roofedDoorSends.load(), g_openRigPublished.load(), g_gridCapped.load(), g_openGround.load(), g_openWall.load(),
+        g_openScaled.load(), g_openResponse.load(), g_openCut.load(), g_openShared.load(), g_openTotalFills.load(), g_openTotalFaults.load(), g_cutReopened.load(), g_cutHeldApplied.load());
     const std::string innerText = std::format(
         " | indoor light through openings: {} (rooms taking lamps of roofed rooms {}, {} lamps, {} of them of the story above; lamps beyond reach {}, with no "
         "opening in sight {}; points tested {}, lit {}, stopped where they go down through a floor {}; left out of the floor mask {}; directional map samples tested {}, "
@@ -15794,6 +16150,19 @@ void SetOutdoorThroughOpenings(bool on) {
 }
 bool OutdoorThroughOpeningsActive() { return RoofedOpeningsOn(); }
 
+void SetOpeningLampBalance(float groundBrightness, float lotLampBrightness, bool groundOn, float wallBrightness, bool wallsOn) {
+    const OpeningLampBalance::Scales now = OpeningLampBalance::From(groundBrightness, lotLampBrightness, groundOn, wallBrightness, wallsOn);
+    static bool s_set = false;
+    OpeningLampBalance::Scales was;
+    was.ground = g_openGround.load(std::memory_order_relaxed), was.wall = g_openWall.load(std::memory_order_relaxed);
+    if (s_set && !OpeningLampBalance::Moved(was, now)) return;
+    g_openGround.store(now.ground, std::memory_order_relaxed), g_openWall.store(now.wall, std::memory_order_relaxed);
+    const bool first = !s_set;
+    s_set = true;
+    // (the first value is set before any room is solved; a later one moves the maps of the roofed rooms with openings)
+    if (!first && g_installed.load(std::memory_order_relaxed) && g_indoorReady && RoofedOpeningsOn()) RelightAllRooms("Outdoor light through openings: brightness");
+}
+
 // Shadow softness: every room whose light passes a wall edge the grid walk softens, of every loaded lot and story: room 0,
 // the roofless rooms, the roofed rooms with doors to the outside (their records) and the rooms that took lamps through an
 // opening (theirs). Rooms with no opening and no yard keep their solve (the game's own wall test has no penumbra).
@@ -17398,6 +17767,7 @@ uint64_t StoryCutsContent(uint64_t lot, int story) {
     if (!CopyStoryCuts(lot, story, &cuts)) return 0;
     uint64_t sum = 0;
     for (const auto& [k, c] : cuts) {
+        if (c.closed == 2) continue; // (a window deleted; one the camera closed is still built and counts)
         uint64_t e = 1469598103934665603ull;
         MixGeo(e, k);
         MixGeo(e, static_cast<uint64_t>(c.kind) | static_cast<uint64_t>(c.orient) << 8 | static_cast<uint64_t>(c.piece) << 16 | static_cast<uint64_t>(c.count) << 24 |
@@ -17439,11 +17809,13 @@ bool FirstUnwrappedRead(const unsigned char* room, uintptr_t& light, uintptr_t& 
 // The rooms that take room 0's lamps of the stories in `mask`, each once, as AfterChangedWalk sends them for a room-0 change
 // (the other stories' roofless rooms, this story's yards through its openings, the rooms near an opening that took them);
 // this story's roofless rooms mask their floors with room 0's lamps. tail: a GPU edit's tail (no urgency), else the edit's
-// tier 1. Light tree thread.
-int SendRoom0DependentsTry(uintptr_t tracker, unsigned mask, bool tail) {
+// tier 1. The roofed rooms of the story and of the story above that take room 0's lamps through their openings
+// (SameStoryRoofed; only those that saw a door of one of `edited` when it is given) go with the edit's tier 1 in both: such
+// an edit marks no room, so the game's walk never sends them, and they kept the lamp's old colour. Light tree thread.
+int SendRoom0DependentsTry(uintptr_t tracker, unsigned mask, bool tail, const std::vector<uintptr_t>* edited) {
     const DragLite::WhyScope liteWhy(DragLite::Why::Dependents);
     if (!tracker || !(mask & 0xFFu)) return 0;
-    std::vector<std::pair<int, int>> out, yardsOut;
+    std::vector<std::pair<int, int>> out, yardsOut, roofedNow, roofedKept;
     const bool yards = OpeningsOn() || g_sameHeld.load(std::memory_order_relaxed);
     for (int L = 0; L <= 7; L++) {
         if (!(mask >> L & 1u)) continue;
@@ -17466,6 +17838,11 @@ int SendRoom0DependentsTry(uintptr_t tracker, unsigned mask, bool tail) {
                     for (int k = 0; k < nr; k++) out.emplace_back(S, roofless[k]);
                 }
             if (yards) SameStoryYards(mgrL, L, 0, change, lights, out);
+            // (a lamp removed, change 2: sent stopping a solve that may still read it, as the walk's "now")
+            auto& roofed = change == 2 ? roofedNow : roofedKept;
+            SameStoryRoofed(mgrL, L, 0, change, lights, edited, roofed);
+            if (L < 7)
+                if (const uintptr_t mgrU = SafeStoryManager(tracker, L + 1)) SameStoryRoofed(mgrU, L + 1, 0, change, lights, edited, roofed);
             if (const auto deps = g_deps.find(key); deps != g_deps.end())
                 for (const auto& p : deps->second) out.push_back(p);
         }
@@ -17481,7 +17858,17 @@ int SendRoom0DependentsTry(uintptr_t tracker, unsigned mask, bool tail) {
     out.erase(std::unique(out.begin(), out.end()), out.end());
     if (tail) // (each room once: a yard is not sent again as a dependent)
         std::erase_if(out, [&](const std::pair<int, int>& p) { return std::binary_search(yardsOut.begin(), yardsOut.end(), p); });
+    for (auto* v : {&roofedNow, &roofedKept}) {
+        std::sort(v->begin(), v->end());
+        v->erase(std::unique(v->begin(), v->end()), v->end());
+    }
+    std::erase_if(roofedKept, [&](const std::pair<int, int>& p) { return std::binary_search(roofedNow.begin(), roofedNow.end(), p); });
+    std::erase_if(out, [&](const std::pair<int, int>& p) {
+        return std::binary_search(roofedNow.begin(), roofedNow.end(), p) || std::binary_search(roofedKept.begin(), roofedKept.end(), p);
+    });
     int sent = 0;
+    for (const auto& [S, r] : roofedNow) sent += QueueRoom(tracker, S, r, false, 1, false) ? 1 : 0;
+    for (const auto& [S, r] : roofedKept) sent += QueueRoom(tracker, S, r, true, 1, true) ? 1 : 0;
     struct Restore {
         bool prev;
         ~Restore() { t_tailSend = prev; }
@@ -17732,11 +18119,11 @@ bool QueueRoom0(uintptr_t tracker, int story) {
 }
 int SendRoom0Dependents(uintptr_t tracker, int story) {
     if (!g_installed.load(std::memory_order_relaxed) || !g_indoorReady || ThreadId() != g_gatherThread.load(std::memory_order_relaxed) || story < 0 || story > 7) return 0;
-    return HookGuard::Run("OutdoorDelta sends", 0, [=] { return SendRoom0DependentsTry(tracker, 1u << story, false); });
+    return HookGuard::Run("OutdoorDelta sends", 0, [=] { return SendRoom0DependentsTry(tracker, 1u << story, false, nullptr); });
 }
-int SendRoom0DependentsTail(uintptr_t tracker, unsigned storyMask) {
+int SendRoom0DependentsTail(uintptr_t tracker, unsigned storyMask, const std::vector<uintptr_t>* edited) {
     if (!g_installed.load(std::memory_order_relaxed) || !g_indoorReady || ThreadId() != g_gatherThread.load(std::memory_order_relaxed)) return 0;
-    return HookGuard::Run("GPU edit tail sends", 0, [=] { return SendRoom0DependentsTry(tracker, storyMask, true); });
+    return HookGuard::Run("GPU edit tail sends", 0, [=] { return SendRoom0DependentsTry(tracker, storyMask, true, edited); });
 }
 void NoteGpuEdit() { g_gpuEditAt.store(GetTickCount() | 1, std::memory_order_relaxed); }
 bool RoomMapsFree() { return CheckMapSteps() && RoomMapsFreeTry(); }

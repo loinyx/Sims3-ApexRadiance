@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [2.16.0](2.16.0.md): a high-precision scene against banding, outdoor lamps brightest where they stand and their light through openings.
 - [2.15.6](2.15.6.md): continuous winter terrain light, dusk trees, further loading recovery and less repeated lighting work.
 - [2.15.5](2.15.5.md): return to Edit Town after editing a lot.
 - [2.15.4](2.15.4.md): continuous gable and snow-edge light, measured pillar shadows, lighting restart and safer scene updates.

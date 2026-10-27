@@ -21,6 +21,7 @@ the game's precomp; the table generators above are not maintained in the reposit
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-27 | `47ec493` (release 2.16.0 candidate; the outdoor scale) | `tools/floor_shade_check` (`run.ps1 -Precomp <Shaders_Win32.precomp>`) | 9,909 checks, 0 failures: 285 copies patched, 252 with the outdoor scale (none past s15), its sampler and constant after every other register | Native D3D9 (offline device) |
 | 2026-10-23 | `40f351e` | `tools/floor_shade_check` (`run.ps1 -Precomp <Shaders_Win32.precomp>`) | 7,103 checks, 0 failures: the precomp floor shaders patched with and without the indoor light copies (the copies are not drawn at this commit, `kFloorIndoorLight` off) | Offline, native D3D9 |
 | 2026-09-25 | combined build | `floor_atlas_table.h` generation | 261 of 571 ExteriorFloors PS accepted and valid (235 are ps_2_0); 0 of 58 InteriorFloor PS; all 96 vs_3_0 ExteriorFloors VS export world xz | d3dcompiler |
 | 2026-09-25 | combined build | Captured `.bin` hashes | m60 / m61 / fountain PS (1044 bytes) = `0x9CFC614F`, flat PS (812 bytes) = `0x802006F6`, both in the table | None |

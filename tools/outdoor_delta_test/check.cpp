@@ -391,6 +391,35 @@ int main() {
         }
         Check(ok, "pack: each channel x 255 rounded to nearest, A8R8G8B8");
     }
+    // ---- the outdoor texel's hue past 1 (KeepHue): a sum within 1 as min(sum, 1) bit for bit; past 1, its ratios kept ----
+    {
+        bool same = true, ratios = true;
+        for (int i = 0; i < 100000; i++) {
+            const float S[3] = {U(rng), U(rng), U(rng)};
+            float c[4];
+            PackInput(S, 0.5f, c);
+            for (int k = 0; k < 3; k++) same = same && c[k] == std::min(std::max(S[k], 0.0f), 1.0f);
+            const float T[3] = {S[0] * 6.0f, S[1] * 6.0f, S[2] * 6.0f};
+            PackInput(T, 0.5f, c);
+            const float m = std::max({T[0], T[1], T[2]});
+            for (int k = 0; k < 3; k++) ratios = ratios && (m <= 1.0f ? c[k] == T[k] : std::fabs(c[k] * m - T[k]) <= 1e-5f * m);
+        }
+        Check(same, "hue kept: a sum within 1 packs as min(sum, 1)");
+        Check(ratios, "hue kept: a sum past 1 keeps its channels' ratios, its largest at 1");
+        // a red sconce (two entries of 1.7 x 1.7 near the lamp) over a yellow light at 1 (the F7's courtyard by the lamp):
+        // channel by channel it packed (255, 255, 105), yellow; now red, the yellow adding its share
+        const float red = 2.0f * 1.7f * 1.7f;
+        const float S[3] = {red + 1.0f, 1.0f, 0.41f};
+        float c[4];
+        PackInput(S, 0.0f, c);
+        const uint32_t v = PackModel(c);
+        const int R = static_cast<int>(v >> 16 & 0xFF), G = static_cast<int>(v >> 8 & 0xFF), B = static_cast<int>(v & 0xFF);
+        std::printf("  red sconce over a yellow light: packed (%d, %d, %d) (channel by channel it was (255, 255, 105))\n", R, G, B);
+        Check(R == 255 && G < 64 && B < 32 && G > B, "hue kept: the red lamp dominates the texel, the yellow light adds its share");
+        const float Y[3] = {1.3f, 1.2f, 0.5f}; // the yellow light alone past 1 stays yellow (it went white-yellow, (1, 1, 0.5))
+        PackInput(Y, 0.0f, c);
+        Check(c[0] == 1.0f && std::fabs(c[1] - 1.2f / 1.3f) < 1e-6f && std::fabs(c[2] - 0.5f / 1.3f) < 1e-6f, "hue kept: a yellow light alone past 1 keeps its hue");
+    }
     // ---- the floor mask's alpha ----
     Check(MaskAlpha(0.2f, 0.8f, -1.0f) == std::clamp(1.0f - 0.2f / 0.8f, 0.0f, 1.0f) && MaskAlpha(0.2f, 0.8f, 0.9f) == 0.9f && MaskAlpha(0.7f, 0.8f, 0.9995f) == 1.0f &&
               MaskAlpha(0.0f, 0.00005f, -1.0f) == 0.0f,

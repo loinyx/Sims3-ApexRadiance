@@ -12,7 +12,7 @@ that cannot run it, none of it runs.
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1. Baked lamp records without padding (the frame rate of 2.15.1 while moving the camera): Released in 2.15.2. Shaders from the shader cache: Released in 2.15.3 |
+| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1. Baked lamp records without padding (the frame rate of 2.15.1 while moving the camera): Released in 2.15.2. Shaders from the shader cache: Released in 2.15.3. Light past 1 on the lot ground, outdoor floors and outside walls (the outdoor scale): Released in 2.16.0. |
 | Default | On (Lamp lighting: Instant (GPU); a saved `lampLightingMode` keeps its choice) |
 | Menu | System > Performance > Lamp lighting > Lamp updates: Instant (GPU) |
 | Configuration | `lampLightingMode = "instant"` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -34,7 +34,8 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    bulbs, spots, shaded lamps and lot street lamps (types 3, 4, 5 and 11) listed in room 0 of their own lot.
 2. **The maps.** Each story's own room-0 maps of the class on screen (wall atlas, floor map; ceiling and object maps when
    they hold room-0 texels) get a copy in video memory. Every room-0 texel of the kept solve is relit over the game's map:
-   `pack(min(base + Σ mult × fade(law × shadow), 1))`, with the floor mask's alpha and the class-2 wall blur. The law,
+   `pack(base + Σ mult × fade(law × shadow))`, packed as the solve packs it (its hue kept past 1,
+   [level-light-share](level-light-share.md#outdoor-texels-keep-their-hue)), with the floor mask's alpha and the class-2 wall blur. The law,
    cones and realistic reach are those of the room bake (`rt_lamp_model.h`, `lamp_reach.h`): the game's own cones for
    shaded lamps, the game's hard light cut and no map dither.
 3. **Shadows.** The lot's occluders are read from its story grids on the light tree thread
@@ -46,7 +47,11 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    the first time Instant is chosen), so every draw that reads room 0's light gets the lamps without a shader patch.
 5. **Edits.** The game's lamp entry update (`0x006C7CD6`, LampMarkFilter) asks whether the GPU draws the lamp on every
    story of a lot whose maps are all relit. If so, the edit marks no room and room 0 is not solved again; the rooms that
-   take room 0's lamps (yards, rooms near openings) are sent once, 1.5 s after the story's last edit, with no urgency. The
+   take room 0's lamps (yards, rooms near openings) are sent once, 1.5 s after the story's last move (0.3 s after a value
+   or a switch), with no urgency. The roofed rooms of that story and of the story above that saw a door of the edited lamp
+   at their last gather (outdoor light through openings, `SameStoryRoofed`) go with them at a lamp edit's priority (tier
+   1), as the changed-room walk sends them on Classic: such an edit marks no room, and before this the rooms behind a
+   courtyard sconce's glass doors kept its old colour until something else solved them (a story change, for instance). The
    lamp's own object, which the game marks as an occluder at every drag step (`0x006C7939`), marks no room while the GPU
    draws the lamp. Every 2 s a GPU lamp that is on is checked against the stories it was drawn on: a story whose room 0 no
    longer lists it is sent to gather again, once. A lamp switched on takes the usual path.
@@ -70,10 +75,18 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    Under DXVK the floor mask buffer is written in two copies, alternately: each write fills the one the last draws did not
    read and then becomes the drawn one, since a lock of a buffer the GPU may still read waits there (native D3D9 copies
    a managed buffer at its lock, with one copy as before).
-7. **Rebuilds.** A story's maps are built again only when its base changes (`OutdoorDelta` `BaseHash`). The export and
+7. **Light past 1 (the outdoor scale).** A room-0 texel is packed with the sum's hue kept past 1: divided by its largest
+   channel, so within a strong lamp's reach the ground and the walls were flat at the cut, and a room lit through a door
+   or a window looked as bright as the yard beside it. Each relit copy gets a second A8R8G8B8 texture of its size, written
+   by the compose draw as a second render target: `log2(largest channel) / 3` in 8 bits (1 to 8 times, 0.8 % a level),
+   0 within 1 and on texels no sample writes. A wall atlas's texels go through a scratch map, their scale copied after them
+   (the scale is not blurred). `RtOutdoorLamps::ScaleOf` gives the scale of a bound copy. The lot pass
+   ([lot-light-pass](lot-light-pass.md)), the summer outdoor floors ([floors](floors.md)) and the ps_3_0 outside walls
+   ([walls](walls.md)) multiply the copy's colour by `2^(3 r)`; every other draw reads the copy as before.
+8. **Rebuilds.** A story's maps are built again only when its base changes (`OutdoorDelta` `BaseHash`). The export and
    the texel streams are prepared on a worker thread; the render thread uploads one map a frame, and the old copy stays
    bound meanwhile. An upload that fails waits 1 s, 2 s ... 32 s; an export that fails waits 0.25 s ... 8 s.
-8. **Kept parts.** The memory budget of Quick outdoor lamp edits never drops the active lot's room 0s
+9. **Kept parts.** The memory budget of Quick outdoor lamp edits never drops the active lot's room 0s
    (`OutdoorDelta::PinRooms`, 160 MB ceiling; their drawn lamps' parts kept as one sum per texel, the base this part reads).
    Past the ceiling a new solve of one is not kept and that story is no longer sent to its solve, so the stories do not
    evict one another in a loop ([outdoor-lamp-delta](outdoor-lamp-delta.md#limitations)). A story with no kept solve is sent
@@ -92,7 +105,8 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
 
 - Needs Night Lighting's Outdoor light between floors (the room solve hooks) and the parts of
   [Quick outdoor lamp edits](outdoor-lamp-delta.md), which this option keeps on. Steam 1.67.2 only.
-- Shader model 3 and floating-point render targets (A32B32G32R32F, G16R16F) are required.
+- Shader model 3 and floating-point render targets (A32B32G32R32F, G16R16F) are required. The light past 1 also needs two
+  simultaneous render targets (`NumSimultaneousRTs` 2 or more); without them the maps are relit as before, cut at 1.
 - Classic (or Instant unable to run): nothing of this or of Quick outdoor lamp edits runs, no texture is swapped and no SetTexture
   callback is registered; the solve hooks only test that the option is off.
 - Turned off, the copies are dropped, the game's maps are bound again and the active lot's room 0s are solved again.
@@ -100,7 +114,10 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
 ## Limitations
 
 - Only the active lot. Other lots, the world grass and roads (terrain bake) and the world's street lamps stay baked.
-- Rooms that take room 0's lamps (yards, rooms near openings) and their objects follow at the game's pace.
+- The light past 1 shows on the lot ground, the summer outdoor floors and the ps_3_0 outside walls of the active lot. Classic,
+  other lots, winter and snowy floors, the ps_2_x walls (lower shader settings) and objects keep the cut at 1.
+- Rooms that take room 0's lamps (yards, rooms near openings) and their objects follow at the game's pace, through their
+  own solve after the send above.
 - Objects, Sims and terrain do not cast shadows; roofs are flat at the wall top, as in the solve's own test.
 - A lamp added or removed reaches the GPU set once the game gathers the room's light list again.
 - A map whose walls were blurred by the game's own blur is not relit; the log says so.
@@ -128,6 +145,10 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
   the copy built into the ASI ([shader precompile](../../architecture.md#44-shader-precompile)). The first frame the
   option runs, a worker takes the 13 bytecodes with `ShaderCache::Bytecode`; until they are ready the status says the
   shaders are being compiled, and a shader that failed to compile leaves the option inactive with the compiler's message.
+- **Outdoor scale**: `Slot::scale` (DEFAULT render target, made with the copy, released with it and at a device reset),
+  `Slot::scaled` (the last relight wrote it); `Engine::Compose(..., scale)` clears it to 0, binds it as target 1 for the
+  texels' draw (`ComposePS` COLOR1) and, for a blurred atlas, binds scratch 3 there and copies it into `scale` before
+  the blur; `kScaleLog2 = 3`.
 - **Logs**: `[RtOutdoorLamps]` lines (inactive reasons once each, each story's map identity, each relight and each edit).
 - **Offline check**: `tools/rt_lamps_test/run.ps1` (shadows against a CPU reference on a Direct3D 9 device, the bake split
   and the wall blur).

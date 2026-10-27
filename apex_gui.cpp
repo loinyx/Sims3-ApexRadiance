@@ -34,6 +34,8 @@
 #include "depth_share.h"
 #include "unlit_rooms.h"
 #include "shader_cache.h"
+#include "scene_dither.h"
+#include "scene_target.h"
 #include "sim_occlusion.h"
 #include "ui/i18n.h"
 #include <charconv>
@@ -189,7 +191,10 @@ template <int N> const char* CostChip(float ms, char (&buf)[N]) { return ApexUi:
 // One feature card: header (icon, title, subtitle; the description, which ends with the credit, on hover) with its
 // on/off switch and its GPU cost chip, then (below a divider) its state notes and body(patch) while it is on. In the
 // search results the body is searched even while the feature is off.
-template <typename Body> void FeatureCardWith(const char* patchName, IconId icon, const char* title, const char* subtitle, Body&& body, bool showDivider = true) {
+// bodyWhenOff: the body is also called while the feature is off (it then draws only what it shows while off)
+template <typename Body>
+void FeatureCardWith(const char* patchName, IconId icon, const char* title, const char* subtitle, Body&& body, bool showDivider = true,
+                     bool bodyWhenOff = false) {
     ApexPatch* patch = Find(patchName);
     if (!patch) return;
     ImGui::PushID(patchName);
@@ -199,9 +204,9 @@ template <typename Body> void FeatureCardWith(const char* patchName, IconId icon
         const char* chip = on ? CostChip(patch->GpuCostMs(), chipBuf) : nullptr;
         if (ApexUi::CardHeader(icon, title, subtitle, Description(patch), &on, Switchable(patch), nullptr, chip)) SetPatch(patch, on);
         const bool enabled = patch->IsEnabled();
-        if ((enabled && showDivider) || HasStateNotes(patch)) ApexUi::CardDivider();
+        if (((enabled || bodyWhenOff) && showDivider) || HasStateNotes(patch)) ApexUi::CardDivider();
         StateNotes(patch);
-        if (enabled || ApexUi::FilterActive()) body(patch);
+        if (enabled || bodyWhenOff || ApexUi::FilterActive()) body(patch);
     }
     ApexUi::EndCard();
     ImGui::PopID();
@@ -709,20 +714,110 @@ void PictureRows(int tab) {
     ImGui::PopID();
 }
 
-// Image > Banding Fix (everything against color steps in one place, on its own page): the Banding Fix card (scene_dither.cpp:
-// switch, grain Strength) with Picture's Smooth gradients (the deband), which follows the Banding Fix's switch
+// The Banding Fix card's picture: a dark ramp as the game rounds it to 8 bits (stepped) over the same ramp as it leaves
+// now. Steps are exaggerated (10 across) to be seen at menu size. The grain is the Banding Fix's own law per cell (R2
+// pattern, triangular, Strength x one step); without the High-precision scene every blended pass rounds again, shown as
+// one extra half-step rounding before the grain. Drawn with the draw list; nothing in the search results.
+void BandingPreview(bool on, float strength, bool highPrecision) {
+    if (ApexUi::FilterActive()) return;
+    constexpr float kSteps = 10.0f;
+    const float u = ApexUi::Unit();
+    const bool grain = on && strength > 0.001f;
+    const char* caption = I18n::Tr(!on ? "Off: lamp light shows color steps"
+                                   : !grain ? "Strength is 0%: the color steps stay"
+                                   : highPrecision ? "Drawn in 16-bit and rounded once: the smoothest light"
+                                                   : "A fixed, fine grain blends the color steps into a smooth fade");
+    const char* labels[2] = {I18n::Tr("Before"), I18n::Tr("After")};
+    ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
+    const float fontH = ImGui::GetFontSize();
+    const float pad = ApexUi::kSpace3 * u, barH = 16.0f * u, gap = ApexUi::kSpace2 * u, rounding = 8.0f * u;
+    const float labelW = std::max(ImGui::CalcTextSize(labels[0]).x, ImGui::CalcTextSize(labels[1]).x);
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x, textW = std::max(w - 2.0f * pad, 1.0f);
+    const float captionH = ImGui::CalcTextSize(caption, nullptr, false, textW).y;
+    const float h = pad + 2.0f * barH + gap + ApexUi::kSpace3 * u + captionH + pad;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(Col(VioletTheme::kWindowBg)), rounding);
+    dl->AddRect(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(Col(VioletTheme::kCardBorder)), rounding);
+    const ImVec4 dark = Col(VioletTheme::kWindowBg), light = Col(VioletTheme::kAccent);
+    const auto shade = [&](float level) {
+        const float t = std::clamp(level / kSteps, 0.0f, 1.0f);
+        return ImGui::GetColorU32(ImVec4(dark.x + (light.x - dark.x) * t, dark.y + (light.y - dark.y) * t, dark.z + (light.z - dark.z) * t, 1.0f));
+    };
+    const float barX = p.x + pad + labelW + ApexUi::kSpace3 * u, barW = std::max(p.x + w - pad - barX, 1.0f);
+    const float cell = std::max(2.0f, std::floor(3.0f * u));
+    for (int row = 0; row < 2; row++) {
+        const float y = p.y + pad + static_cast<float>(row) * (barH + gap);
+        dl->AddText(ImVec2(p.x + pad, y + (barH - fontH) * 0.5f), ImGui::GetColorU32(Col(row ? VioletTheme::kText : VioletTheme::kTextMuted)), labels[row]);
+        dl->PushClipRect(ImVec2(barX, y), ImVec2(barX + barW, y + barH), true);
+        for (float x = 0.0f; x < barW; x += cell) {
+            const float s = (x + cell * 0.5f) / barW * kSteps;
+            if (row == 0 || !grain) { // stepped: the level rounded once
+                dl->AddRectFilled(ImVec2(barX + x, y), ImVec2(barX + x + cell, y + barH), shade(std::round(s)));
+                continue;
+            }
+            const float base = highPrecision ? s : std::round(s * 2.0f) * 0.5f;
+            for (float yy = 0.0f; yy < barH; yy += cell) {
+                const float r = std::fmod(x / cell * 0.7548777f + yy / cell * 0.5698403f, 1.0f) * 2.0f - 1.0f;
+                const float t = std::copysign(1.0f - std::sqrt(1.0f - std::fabs(r)), r); // triangular, as the shader
+                dl->AddRectFilled(ImVec2(barX + x, y + yy), ImVec2(barX + x + cell, y + yy + cell), shade(std::round(base + t * strength)));
+            }
+        }
+        dl->PopClipRect();
+        dl->AddRect(ImVec2(barX, y), ImVec2(barX + barW, y + barH), ImGui::GetColorU32(Col(VioletTheme::kCardBorder)));
+    }
+    dl->AddText(ImGui::GetFont(), fontH, ImVec2(p.x + pad, p.y + h - pad - captionH), ImGui::GetColorU32(Col(VioletTheme::kTextMuted)), caption, nullptr, textW);
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(w, h));
+}
+
+// The High-precision scene (scene_target.cpp), saved with the Banding Fix: its switch, then its status (a pill: Active,
+// Starting, Unavailable or Off, with the video memory or the reason under "Status") and, in the development build, its
+// resolves under Live counters
+void HighPrecisionSceneRows(ApexPatch* p) {
+    if (ApexUi::SwitchRow("High-precision scene", SceneTarget::Setting(),
+                          "Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", true))
+        p->NotifySettingChanged();
+    if (ApexUi::FilterActive()) return;
+    using S = SceneTarget::State;
+    const S state = SceneTarget::CurrentState();
+    const bool active = state == S::Active;
+    const char* pill = active ? "Active" : state == S::Off ? "Off" : state == S::Waiting ? "Starting" : "Unavailable";
+    const IconId icon = active ? IconId::CircleCheck : state == S::Off ? IconId::None : state == S::Waiting ? IconId::CircleDashed : IconId::TriangleAlert;
+    // (the row translates the fixed texts; the one with a number is built translated)
+    const std::string detail = active ? I18n::Trf("{} MB of video memory", SceneTarget::VideoMemoryMB())
+                               : state == S::Off ? "Uses no video memory while off"
+                               : state == S::Waiting ? "Starts with the next frame"
+                               : state == S::Multisample ? "Unavailable while the game's own Edge Smoothing is on"
+                               : state == S::BackBufferFormat ? "Unavailable with the game's screen format"
+                               : state == S::NoMemory ? "Unavailable: not enough video memory"
+                                                      : "Unavailable on this graphics card";
+    const ImVec2 pillSize = ApexUi::PillSize(pill, icon != IconId::None);
+    if (ApexUi::BeginControlRow("Status", detail.c_str(), pillSize.x, IconId::None, pillSize.y)) {
+        ApexUi::Pill(pill, active, icon);
+        ApexUi::EndControlRow();
+    }
+    if (!kPublicBuild && ApexUi::BeginAdvanced("LiveCounters", "Live counters")) {
+        const SceneTarget::Stats s = SceneTarget::ReadStats();
+        ImGui::TextDisabled("Resolves: boundary %u, back-buffer copy %u, EndScene %u, Present %u; %.3f ms CPU each", s.atBoundary, s.atCopy, s.atEndScene,
+                            s.atPresent, s.resolveMs);
+        ApexUi::EndAdvanced();
+    }
+}
+
+// Image > Banding Fix: the Banding Fix card (scene_dither.cpp): the picture of what it does (also while off), then Grain
+// (Strength) and Precision (the High-precision scene) while it is on
 void BandingTabContent() {
     FeatureCardWith("SceneDither", IconId::Blend, "Banding Fix", "Smooth light, with no color steps", [](ApexPatch* p) {
+        const bool on = p->IsEnabled();
+        BandingPreview(on, SceneDither::Strength(), SceneTarget::CurrentState() == SceneTarget::State::Active);
+        if (!on && !ApexUi::FilterActive()) return;
+        ApexUi::Gap(ApexUi::kSpace1); // with the item spacing, about the 12 a group label keeps below a row
+        ApexUi::GroupLabel("Grain");
         p->RenderCustomUI();
-        static const PictureParams kDef{};
-        PictureParams q = Picture::Get().GetParams();
-        if (ApexUi::SliderPercent("Smooth gradients", &q.deband, 0.0f, 2.0f, "Softens the steps left in skies and shadows; works with Picture off too; 0% is off",
-                                  kDef.deband))
-            Picture::Get().SetParams(q, ApexUi::SliderCommitted());
-        else if (ApexUi::SliderCommitted())
-            Picture::Get().SetParams(q, true);
-        ApexUi::IconNote(IconId::Info, "Smooth gradients also reaches the sky and other surfaces the grain can't");
-    });
+        ApexUi::GroupLabel("Precision");
+        HighPrecisionSceneRows(p);
+    }, true, true);
 }
 
 // Image > Banding Fix (its own page; not part of the built-in profiles)
