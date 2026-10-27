@@ -57,7 +57,7 @@ start-up (`DevSwitches::Load`) and logs every value. A missing key reads as on; 
 preserves tables it does not write. Each switch can be turned off to compare against the previous behaviour.
 
 In every other build the accessors return `kShipped` (true) for the 29 switches that change the game or free memory, and false for the
-4 diagnostics and the unfinished `foliage_sun_shadow`. A switch therefore never needs a menu option to ship; a shipped behaviour
+4 diagnostics, the unfinished `foliage_sun_shadow` and `restart_settle` (not yet measured in game). A switch therefore never needs a menu option to ship; a shipped behaviour
 follows the setting named on its page.
 
 | Key | Public build | Effect | Page |
@@ -65,6 +65,7 @@ follows the setting named on its page.
 | `measurements` | Developer only | Address-space owners, game allocation categories and the memory CSVs | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
 | `daylight_log` | Developer only | Logs the sky state that sets outdoor darkness every 5 s and adds an F8 section; no lighting change | [light-diag.md](features/dev-tools/light-diag.md#file-sections) |
 | `memory_owners` | Developer only | Apex's own memory by owner (`[ApexMemory]`, F8) | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
+| `restart_settle` | Developer only | A room restarted again within 2 s is picked for its solve once its restarts stop for 300 ms (at most 1 s of hold); a lamp edit's rooms never wait; the maps a room ends with are the same | [room-light-queue.md](features/performance/room-light-queue.md#restart-settle-development-builds) |
 | `room_solve_causes` | Developer only | Counts who sends rooms to the solve: invalidates by caller, finished solves by class and room, camera settled, stopped or moving (`[RoomSolveCauses]` every minute); no lighting change | [room-light-queue.md](features/performance/room-light-queue.md#measuring-who-sends-rooms-to-the-solve) |
 | `release_debug_buffers` | Shipped | Gives back F7, F6 and F8 buffers once they are no longer needed | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
 | `left_lot_release` | Shipped | Gives back Quick outdoor lamp edits' kept parts of rooms no loaded lot holds (two 10 s sweeps in a row), Real-time outdoor lamps' CPU copy of the occluders once uploaded, and the mask texture of a lot not drawn for 2 minutes (made again at its next draw) | [performance/README.md](features/performance/README.md#the-switches) |
@@ -200,7 +201,7 @@ failure; CI runs `Smoke` and `Lighting`.
 | `tools/liveness_prune_test/` | Pruning of per-story caches by live story managers (`features/liveness_prune.h`, `run.ps1`) |
 | `tools/loading_gate_test/` | Loaded-world reader and the extracted start-notice and Depth Blur loading guards (`run.ps1`) |
 | `tools/lot_streaming_test/` | Lot Streaming: the shared lot build time decision and a replay of recorded lot loads, the detailed-lot hysteresis model, the Steam bytes (`run.ps1 [-CsvDir <folder>] [-Exe <TS3W.exe>]`) |
-| `tools/room_solve_causes_test/` | Room solve causes counters: camera state, callers, classes and rooms, full tables (`run.ps1`) |
+| `tools/room_solve_causes_test/` | Room solve causes counters (camera state, callers, classes and rooms, full tables) and the restart settle rule (bursts, quiet, 1 s cap, table overflow) (`run.ps1`) |
 | `tools/memory_owners_test/` | Apex memory by owner: `operator new` counts, container estimates, Direct3D resources on a real device (`run.ps1`, native D3D9 and DXVK) |
 | `tools/mesh_occlusion_test/` | The mesh blockers' collector, BVH and replacement policy (`run.ps1 -OpaqueShader <ps.bin> -CutoutShader <ps.bin> -Standard` or `-Development`) |
 | `tools/opening_bounce_test/` | Bounce light through floor openings (`features/opening_bounce.h`, `run.ps1`) |

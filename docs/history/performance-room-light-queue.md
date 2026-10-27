@@ -270,3 +270,8 @@ class 0 without reaching class 2. Callers: the game's dirty-room loop (`0x006C74
 Apex's `QueueRoom` from `AfterChangedWalk` (the cross-story fan-out after the game's changed walk), `QueueOpeningRooms`,
 `QueueRoomSafe`, `RequeueStory`, `RequeueRoofedDoors`, `RequeueTallWalls` and `AuditTakers`. The cost is rooms
 restarted again and again while the lots near the camera settle, not solves with the camera at rest.
+
+**Next step (same day):** the development switch `restart_settle` holds the pick of a room restarted again within 2 s
+until its restarts stop for 300 ms (at most 1 s; a lamp edit's rooms and single restarts never wait). Not yet measured in
+game; it compares with the switch off on the same route through the `[RoomSolveCauses]` counts and the Frame Profiler's
+"Lot room solve".

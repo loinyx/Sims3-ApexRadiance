@@ -11,4 +11,8 @@ try {
  if($LASTEXITCODE -ne 0){throw 'Room solve causes test compilation failed'}
  & '.\room_solve_causes_checks.exe'
  if($LASTEXITCODE -ne 0){throw 'Room solve causes checks failed'}
+ & cl.exe /nologo /std:c++20 /EHsc /W4 /O2 /MT ('/I'+(Join-Path $repo 'features')) /Ferestart_settle_checks.exe (Join-Path $PSScriptRoot 'settle_check.cpp')
+ if($LASTEXITCODE -ne 0){throw 'Restart settle test compilation failed'}
+ & '.\restart_settle_checks.exe'
+ if($LASTEXITCODE -ne 0){throw 'Restart settle checks failed'}
 } finally {Pop-Location}

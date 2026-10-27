@@ -298,6 +298,17 @@ count, without changing what is solved:
 A `[RoomSolveCauses]` line every minute gives the window's frames, finished solves by class, invalidates, the eight
 callers and four rooms with the most counts. Source: `features/room_solve_causes.{h,cpp}`.
 
+### Restart settle (development builds)
+
+The switch `restart_settle` (`features/restart_settle.h`; off in released builds until measured in game) acts on the rooms
+the measurement above showed restarted again and again within 10 s of a camera move. An invalidate within 2 s of the
+room's previous one makes a burst; while the burst's last invalidate is under 300 ms old, `PriorityHook` gives the room
+priority 0, so it is picked once its restarts stop. The invalidate itself still runs at once (a solve in progress stops,
+as before). A single invalidate is never held, a lamp edit's rooms (`LampUrgency` > 1) are never held, and a room whose
+restarts never stop is let through after 1 s of hold. The last solve comes after the last restart, so the maps a room ends
+with are unchanged; during the settle a room can show its previous light up to about 300 ms longer. A `[RestartSettle]`
+line every minute (with the `[RoomSolveCauses]` line) gives the picks held and let through.
+
 ### Status line
 
 "viewed lot first on (N of M priorities raised), no middle step, requeues keep the class, several rooms per frame

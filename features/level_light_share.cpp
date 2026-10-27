@@ -123,6 +123,7 @@
 #include "tester_toggles.h"
 #include "drag_lite.h"
 #include "room_solve_causes.h"
+#include "restart_settle.h"
 #include "lot_lighting_motion.h"
 #include "perf_toggles.h"
 #include "dev_switches.h"
@@ -7441,12 +7442,14 @@ using InvalidateFlag_t = void(__thiscall*)(void* room, char flag);
 void __fastcall InvalidateNoteHook(BYTE* room, void*, char full, char keep) {
     if (room && DevSwitches::RoomSolveCauses())
         RoomSolveCauses::NoteInvalidate(t_queueCaller ? t_queueCaller : reinterpret_cast<uintptr_t>(_ReturnAddress()), false, t_queueCaller != 0);
+    if (room && DevSwitches::RestartSettle()) RestartSettle::Global().NoteInvalidate(reinterpret_cast<uintptr_t>(room), GetTickCount64());
     if (room && g_installed.load(std::memory_order_relaxed)) NoteSolve(room, 'I', reinterpret_cast<uintptr_t>(_ReturnAddress()));
     reinterpret_cast<Invalidate_t>(EntryChain::Next(EntryChain::Site::RoomInvalidate, EntryChain::Layer::LevelLightShare))(room, full, keep);
 }
 void __fastcall InvalidateFlagNoteHook(BYTE* room, void*, char flag) {
     if (room && *reinterpret_cast<const char*>(room + 0x19) != flag) {
         if (DevSwitches::RoomSolveCauses()) RoomSolveCauses::NoteInvalidate(reinterpret_cast<uintptr_t>(_ReturnAddress()), true);
+        if (DevSwitches::RestartSettle()) RestartSettle::Global().NoteInvalidate(reinterpret_cast<uintptr_t>(room), GetTickCount64());
         if (g_installed.load(std::memory_order_relaxed)) NoteSolve(room, 'F', reinterpret_cast<uintptr_t>(_ReturnAddress()));
     }
     reinterpret_cast<InvalidateFlag_t>(EntryChain::Next(EntryChain::Site::RoomInvalidateFlag, EntryChain::Layer::LevelLightShare))(room, flag);
@@ -15000,7 +15003,13 @@ void OnPresent() {
     if (DevSwitches::kCompiled) MeasureRenderMemory(); // development builds (memory_owners): this file's containers, every 10 s
     if (DevSwitches::RoomSolveCauses()) {
         std::string line;
-        if (RoomSolveCauses::Frame(LotLightingMotion::SampleCameraMoving(), GetTickCount64(), &line)) LOG_INFO("[RoomSolveCauses] " + line);
+        if (RoomSolveCauses::Frame(LotLightingMotion::SampleCameraMoving(), GetTickCount64(), &line)) {
+            LOG_INFO("[RoomSolveCauses] " + line);
+            if (DevSwitches::RestartSettle()) {
+                const auto s = RestartSettle::Global().Take();
+                LOG_INFO(std::format("[RestartSettle] Last minute: {} picks of restarted rooms held, {} let through after 1 s of hold", s.held, s.capped));
+            }
+        }
     }
     // A lot that becomes the high-quality lot (the camera enters it, or comes back) solves all its rooms at once, as after a
     // load: the same settle window (SettlingAfterLoad), checked every 250 ms
