@@ -56,8 +56,8 @@ A development build (`/p:ApexStudyDefines=APEX_DEVELOPMENT_BUILD_FLAVOR`, which 
 start-up (`DevSwitches::Load`) and logs every value. A missing key reads as on (except `restart_settle`, which reads as off); Save keeps the table because it
 preserves tables it does not write. Each switch can be turned off to compare against the previous behaviour.
 
-In every other build the accessors return `kShipped` (true) for the 29 switches that change the game or free memory, and false for the
-4 diagnostics, the unfinished `foliage_sun_shadow`, `restart_settle` (not yet measured in game) and `lamp_edit_lot_only` (not yet checked in game). A switch therefore never needs a menu option to ship; a shipped behaviour
+In every other build the accessors return `kShipped` (true) for the 30 switches that change the game or free memory, and false for the
+4 diagnostics, the unfinished `foliage_sun_shadow` and `restart_settle` (not yet measured in game). A switch therefore never needs a menu option to ship; a shipped behaviour
 follows the setting named on its page.
 
 | Key | Public build | Effect | Page |
@@ -66,7 +66,7 @@ follows the setting named on its page.
 | `daylight_log` | Developer only | Logs the sky state that sets outdoor darkness every 5 s and adds an F8 section; no lighting change | [light-diag.md](features/dev-tools/light-diag.md#file-sections) |
 | `memory_owners` | Developer only | Apex's own memory by owner (`[ApexMemory]`, F8) | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
 | `restart_settle` | Developer only, off unless set to true | A room restarted again within 2 s is picked for its solve once its restarts stop for 300 ms (at most 1 s of hold); a lamp edit's rooms never wait; the maps a room ends with are the same | [room-light-queue.md](features/performance/room-light-queue.md#restart-settle-development-builds) |
-| `lamp_edit_lot_only` | Developer only | A lamp edit sends again the rooms near openings of the edited lamp's lot only, not of every lot; an edit whose lot is not known still sends every lot's |
+| `lamp_edit_lot_only` | Shipped | A lamp edit sends again the rooms near openings of the edited lamp's lot only, not of every lot; an edit whose lot is not known still sends every lot's |
 | `room_solve_causes` | Developer only | Counts who sends rooms to the solve: invalidates by caller, finished solves by class and room, camera settled, stopped or moving (`[RoomSolveCauses]` every minute); no lighting change | [room-light-queue.md](features/performance/room-light-queue.md#measuring-who-sends-rooms-to-the-solve) |
 | `release_debug_buffers` | Shipped | Gives back F7, F6 and F8 buffers once they are no longer needed | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
 | `left_lot_release` | Shipped | Gives back Quick outdoor lamp edits' kept parts of rooms no loaded lot holds (two 10 s sweeps in a row), Real-time outdoor lamps' CPU copy of the occluders once uploaded, and the mask texture of a lot not drawn for 2 minutes (made again at its next draw) | [performance/README.md](features/performance/README.md#the-switches) |

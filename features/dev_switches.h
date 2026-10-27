@@ -89,11 +89,11 @@ inline std::atomic<bool> memoryOwners{false};
 inline std::atomic<bool> releaseDebugBuffers{false};
 inline std::atomic<bool> leftLotRelease{false};
 inline bool MemoryOwners() { return kCompiled && memoryOwners.load(std::memory_order_relaxed); }
-//   lamp_edit_lot_only     (not shipped until checked in game) a lamp edit sends again the rooms near openings of the edited
+//   lamp_edit_lot_only     a lamp edit sends again the rooms near openings of the edited
 //                          lamp's lot only, not of every lot (147 edits sent 1053 rooms in a minute); an edit whose lot is not
 //                          known still sends every lot's
 inline std::atomic<bool> lampEditLotOnly{false};
-inline bool LampEditLotOnly() { return kCompiled && lampEditLotOnly.load(std::memory_order_relaxed); }
+inline bool LampEditLotOnly() { return kCompiled ? lampEditLotOnly.load(std::memory_order_relaxed) : kShipped; }
 inline std::atomic<bool> roomSolveCauses{false};
 inline bool RoomSolveCauses() { return kCompiled && roomSolveCauses.load(std::memory_order_relaxed); }
 //   restart_settle         (not shipped; off unless the key says true: in game a room's restarts came seconds apart and the

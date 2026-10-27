@@ -332,3 +332,7 @@ predicted sends were re-solved and none wrote different texels, so the predictio
 sends (4 %), and the signature ran thousands of times a minute at 50 to 80 us, more frame time than the skipped solves
 would save: `opening_skip` and its signature were removed. The same minute showed the real waste: each lamp edit made
 every lot send its rooms near openings again (147 edits sent 1053 rooms), although only the edited lamp's lot changed.
+
+**Ninth session (2026-10-27, `lamp_edit_lot_only`):** a lamp switched off and on near a stair opening still updated the
+story below, and the minute lines showed no error from the change; the switch ships. The session had too few lamp
+edits (3) to compare the number of rooms sent with the earlier 1053 a minute.

@@ -311,10 +311,10 @@ callers and four rooms with the most counts. Source: `features/room_solve_causes
 
 ### Restart settle (development builds)
 
-The switch `lamp_edit_lot_only` (development builds) limits the resend of the rooms near openings after a lamp edit to the
+The switch `lamp_edit_lot_only` (shipped) limits the resend of the rooms near openings after a lamp edit to the
 edited lamp's lot: in game, each edit made every loaded lot send them again (147 edits sent 1053 rooms in one minute).
-An edit whose lot is not known still sends every lot's. It ships once a lamp switched near a stair opening is seen to
-update the story below.
+An edit whose lot is not known still sends every lot's. Checked in game: a lamp switched near a stair opening still
+updates the story below.
 
 The switch `restart_settle` (`features/restart_settle.h`; off in every build unless `[dev_build]` sets it to true: in game it
 did not reduce the repeated solves, see [history](../../history/performance-room-light-queue.md)) acts on the rooms
