@@ -146,7 +146,7 @@ std::string Line(double seconds) {
     std::sort(causes.begin(), causes.end(), [](const CauseSlot* a, const CauseSlot* b) { return Sum(a->n, kCams) > Sum(b->n, kCams); });
     if (!causes.empty()) s += " | invalidated by";
     for (size_t i = 0; i < causes.size() && i < 8; i++)
-        s += std::format("{} {}{}{} {}, after the room's last <0.3/0.3-1/1-3/3-10/10+ s {}/{}/{}/{}/{}, room 0 {}", i ? ";" : "",
+        s += std::format("{} {}{}{} {}, after the room's last <0.3/0.3-1/1-3/3-10/over 10 s {}/{}/{}/{}/{}, room 0 {}", i ? ";" : "",
                          causes[i]->viaQueue ? "QueueRoom from " : "", CallerText(causes[i]->caller), causes[i]->onFlag ? " (flag)" : "", Split(causes[i]->n),
                          causes[i]->gap[kGap03], causes[i]->gap[kGap1], causes[i]->gap[kGap3], causes[i]->gap[kGap10], causes[i]->gap[kGapLong], causes[i]->room0) +
              std::format(", waiting/mid-solve/solved/other {}/{}/{}/{}", causes[i]->state[kWaiting], causes[i]->state[kMidSolve], causes[i]->state[kSolved],

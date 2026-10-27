@@ -62,9 +62,9 @@ int main() {
     NoteInvalidate(0x006C7451, false, false, outdoor, 0, 233500);       // room 0, 3.5 s
     Check(Frame(false, 260000, &line), "a third line");
     std::printf("  %s\n", line.c_str());
-    Check(Has(line, "0x006c7451 settled 7 stopped 0 moving 0, after the room's last <0.3/0.3-1/1-3/3-10/10+ s 0/1/1/2/3, room 0 2"),
+    Check(Has(line, "0x006c7451 settled 7 stopped 0 moving 0, after the room's last <0.3/0.3-1/1-3/3-10/over 10 s 0/1/1/2/3, room 0 2"),
           "gaps by bucket and room 0 count for the game's caller");
-    Check(Has(line, "QueueRoom from 0x00500000 settled 1 stopped 0 moving 0, after the room's last <0.3/0.3-1/1-3/3-10/10+ s 1/0/0/0/0, room 0 0"),
+    Check(Has(line, "QueueRoom from 0x00500000 settled 1 stopped 0 moving 0, after the room's last <0.3/0.3-1/1-3/3-10/over 10 s 1/0/0/0/0, room 0 0"),
           "the gap counts the room's previous invalidate by any caller");
     // the room's state when invalidated
     Check(StateOf(2, 0) == kWaiting && StateOf(1, 0) == kWaiting && StateOf(3, 0) == kWaiting, "waiting: states 1, 2, and 3 not started");
