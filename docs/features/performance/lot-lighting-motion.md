@@ -89,7 +89,9 @@ stays 1. Only how soon rooms finish changes, not their light. Tester switch *Pac
 (`perf_steady_room_pacing`, on); off, the game's budget every frame.
 
 **Lot build slice.** A streaming lot is built a slice per frame by 0x00AEA680 with a 20 ms budget (35 ms for a priority
-lot). While the camera moves Apex lowers that slice to 6 ms; the loading screen's 2000 ms is never changed.
+lot). While the camera moves Apex lowers that slice to 6 ms; the loading screen's 2000 ms is never changed. The feature
+also starts the [shared lot build time](lot-streaming.md#shared-lot-build-time), which first caps each slice to what the
+frame's shared budget leaves.
 
 ## Settings
 
