@@ -9,6 +9,15 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Italian}
 const I18n::Pair kPairs[] = {
+    {"Banding Fix: High-precision scene for smoother gradients, on by default", "Correzione banding: Scena ad alta precisione per sfumature più morbide, attiva di default"},
+    {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Correzione banding: scheda ridisegnata con una grana più fine che non tocca il menu"},
+    {"Night Lights: strong lamps light the ground and walls beside them at full strength", "Luci notturne: le lampade forti illuminano a piena potenza il terreno e i muri accanto"},
+    {"Night Lights: lamp light through doors and windows fades naturally into rooms", "Luci notturne: la luce che entra da porte e finestre sfuma in modo naturale nelle stanze"},
+    {"Night Lights: wall lamps light the wall they hang on", "Luci notturne: le applique illuminano il muro su cui sono appese"},
+    {"Night Lights: room light has no lines or steps beside walls and door frames", "Luci notturne: la luce delle stanze non forma linee o gradini vicino a muri e stipiti"},
+    {"Night Lights: coloured lamps keep their colour where their light is strongest", "Luci notturne: le lampade colorate mantengono il colore dove la luce è più forte"},
+    {"Night Lights: window light stays the same as the camera turns", "Luci notturne: la luce delle finestre non cambia quando la telecamera ruota"},
+    {"Night Lights: lamp edits update the rooms behind doors and windows", "Luci notturne: modificare una lampada aggiorna le stanze dietro porte e finestre"},
     {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "Luci notturne: i calcoli riutilizzano i dati invariati senza ridurre la qualità"},
     {"Performance: cache compression avoids unnecessary match searches", "Prestazioni: la compressione della cache evita ricerche superflue"},
     {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "Luci notturne: il terreno gelato e in disgelo mantiene la luce continua ai confini dei lotti"},

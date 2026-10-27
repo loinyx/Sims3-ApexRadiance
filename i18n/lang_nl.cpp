@@ -9,6 +9,15 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Dutch}
 const I18n::Pair kPairs[] = {
+    {"Banding Fix: High-precision scene for smoother gradients, on by default", "Banding-fix: Scène met hoge precisie voor zachtere verlopen, standaard aan"},
+    {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Banding-fix: vernieuwde kaart met fijnere korrel die het menu met rust laat"},
+    {"Night Lights: strong lamps light the ground and walls beside them at full strength", "Nachtverlichting: sterke lampen verlichten de grond en muren ernaast op volle kracht"},
+    {"Night Lights: lamp light through doors and windows fades naturally into rooms", "Nachtverlichting: licht door deuren en ramen vervaagt natuurlijk in de kamer"},
+    {"Night Lights: wall lamps light the wall they hang on", "Nachtverlichting: wandlampen verlichten de muur waaraan ze hangen"},
+    {"Night Lights: room light has no lines or steps beside walls and door frames", "Nachtverlichting: kamerlicht toont geen lijnen of treden bij muren en deurkozijnen"},
+    {"Night Lights: coloured lamps keep their colour where their light is strongest", "Nachtverlichting: gekleurde lampen houden hun kleur waar hun licht het sterkst is"},
+    {"Night Lights: window light stays the same as the camera turns", "Nachtverlichting: raamlicht blijft gelijk als de camera draait"},
+    {"Night Lights: lamp edits update the rooms behind doors and windows", "Nachtverlichting: lampen aanpassen werkt de kamers achter deuren en ramen bij"},
     {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "Nachtverlichting: berekeningen hergebruiken ongewijzigde gegevens zonder kwaliteitsverlies"},
     {"Performance: cache compression avoids unnecessary match searches", "Prestaties: cachecompressie vermijdt onnodig zoeken naar overeenkomsten"},
     {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "Nachtverlichting: bevroren en ontdooiende grond blijft doorlopend verlicht langs kavelranden"},

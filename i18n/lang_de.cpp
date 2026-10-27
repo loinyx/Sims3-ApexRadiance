@@ -9,6 +9,15 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), German}
 const I18n::Pair kPairs[] = {
+    {"Banding Fix: High-precision scene for smoother gradients, on by default", "Banding-Korrektur: Hochpräzise Szene für weichere Verläufe, standardmäßig an"},
+    {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Banding-Korrektur: neu gestaltete Karte mit feinerem Korn, das das Menü unberührt lässt"},
+    {"Night Lights: strong lamps light the ground and walls beside them at full strength", "Nachtbeleuchtung: Starke Lampen beleuchten Boden und Wände daneben mit voller Kraft"},
+    {"Night Lights: lamp light through doors and windows fades naturally into rooms", "Nachtbeleuchtung: Licht durch Türen und Fenster läuft natürlich im Raum aus"},
+    {"Night Lights: wall lamps light the wall they hang on", "Nachtbeleuchtung: Wandlampen beleuchten die Wand, an der sie hängen"},
+    {"Night Lights: room light has no lines or steps beside walls and door frames", "Nachtbeleuchtung: Raumlicht zeigt keine Linien oder Stufen an Wänden und Türrahmen"},
+    {"Night Lights: coloured lamps keep their colour where their light is strongest", "Nachtbeleuchtung: Farbige Lampen behalten ihre Farbe, wo ihr Licht am stärksten ist"},
+    {"Night Lights: window light stays the same as the camera turns", "Nachtbeleuchtung: Fensterlicht bleibt gleich, wenn sich die Kamera dreht"},
+    {"Night Lights: lamp edits update the rooms behind doors and windows", "Nachtbeleuchtung: Lampenänderungen aktualisieren die Räume hinter Türen und Fenstern"},
     {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "Nachtbeleuchtung: Berechnungen verwenden unveränderte Daten erneut, ohne die Qualität zu verringern"},
     {"Performance: cache compression avoids unnecessary match searches", "Leistung: Die Cache-Komprimierung vermeidet unnötige Mustersuchen"},
     {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "Nachtbeleuchtung: Gefrorener und tauender Boden bleibt an Grundstücksrändern durchgehend beleuchtet"},

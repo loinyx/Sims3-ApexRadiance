@@ -9,6 +9,15 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Korean}
 const I18n::Pair kPairs[] = {
+    {"Banding Fix: High-precision scene for smoother gradients, on by default", "밴딩 수정: 고정밀 장면으로 더 부드러운 그라데이션, 기본값 켜짐"},
+    {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "밴딩 수정: 메뉴를 건드리지 않는 더 고운 그레인과 새로 디자인한 카드"},
+    {"Night Lights: strong lamps light the ground and walls beside them at full strength", "야간 조명: 강한 조명이 옆의 지면과 벽을 최대 세기로 비춥니다"},
+    {"Night Lights: lamp light through doors and windows fades naturally into rooms", "야간 조명: 문과 창문으로 들어오는 빛이 방 안에서 자연스럽게 옅어집니다"},
+    {"Night Lights: wall lamps light the wall they hang on", "야간 조명: 벽 조명이 걸려 있는 벽을 비춥니다"},
+    {"Night Lights: room light has no lines or steps beside walls and door frames", "야간 조명: 벽과 문틀 옆에서 방 조명에 선이나 계단이 생기지 않습니다"},
+    {"Night Lights: coloured lamps keep their colour where their light is strongest", "야간 조명: 색 조명이 가장 밝은 곳에서도 색을 유지합니다"},
+    {"Night Lights: window light stays the same as the camera turns", "야간 조명: 카메라를 돌려도 창문 빛이 바뀌지 않습니다"},
+    {"Night Lights: lamp edits update the rooms behind doors and windows", "야간 조명: 조명을 편집하면 문과 창문 뒤의 방도 갱신됩니다"},
     {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "야간 조명: 품질 저하 없이 변경되지 않은 데이터를 재사용해 계산"},
     {"Performance: cache compression avoids unnecessary match searches", "성능: 캐시 압축에서 불필요한 일치 검색 생략"},
     {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "야간 조명: 얼거나 녹는 지면에서도 부지 경계의 빛을 연속적으로 유지"},

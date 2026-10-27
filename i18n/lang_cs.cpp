@@ -9,6 +9,15 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Czech}
 const I18n::Pair kPairs[] = {
+    {"Banding Fix: High-precision scene for smoother gradients, on by default", "Oprava pruhů: Scéna s vysokou přesností pro jemnější přechody, ve výchozím stavu zapnutá"},
+    {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Oprava pruhů: přepracovaná karta s jemnějším zrnem, které nechává menu být"},
+    {"Night Lights: strong lamps light the ground and walls beside them at full strength", "Noční osvětlení: silné lampy osvětlují zem a stěny vedle sebe plnou silou"},
+    {"Night Lights: lamp light through doors and windows fades naturally into rooms", "Noční osvětlení: světlo dveřmi a okny přirozeně slábne do místnosti"},
+    {"Night Lights: wall lamps light the wall they hang on", "Noční osvětlení: nástěnná svítidla osvětlují stěnu, na které visí"},
+    {"Night Lights: room light has no lines or steps beside walls and door frames", "Noční osvětlení: světlo v místnostech netvoří čáry ani schody u stěn a zárubní"},
+    {"Night Lights: coloured lamps keep their colour where their light is strongest", "Noční osvětlení: barevné lampy si drží barvu tam, kde svítí nejsilněji"},
+    {"Night Lights: window light stays the same as the camera turns", "Noční osvětlení: světlo z oken se při otáčení kamery nemění"},
+    {"Night Lights: lamp edits update the rooms behind doors and windows", "Noční osvětlení: úprava lampy aktualizuje místnosti za dveřmi a okny"},
     {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "Noční osvětlení: výpočty znovu využívají nezměněná data bez snížení kvality"},
     {"Performance: cache compression avoids unnecessary match searches", "Výkon: komprese mezipaměti vynechává zbytečné hledání shod"},
     {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "Noční osvětlení: zmrzlá a tající půda zachovává souvislé světlo na hranicích pozemků"},

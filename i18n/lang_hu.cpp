@@ -9,6 +9,15 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Hungarian}
 const I18n::Pair kPairs[] = {
+    {"Banding Fix: High-precision scene for smoother gradients, on by default", "Sávosodás javítása: Nagy pontosságú jelenet a simább színátmenetekért, alapból bekapcsolva"},
+    {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Sávosodás javítása: újratervezett kártya finomabb szemcsével, amely a menüt nem érinti"},
+    {"Night Lights: strong lamps light the ground and walls beside them at full strength", "Éjszakai világítás: az erős lámpák teljes erővel világítják meg a mellettük lévő talajt és falakat"},
+    {"Night Lights: lamp light through doors and windows fades naturally into rooms", "Éjszakai világítás: az ajtókon és ablakokon át érkező fény természetesen halványul a szobában"},
+    {"Night Lights: wall lamps light the wall they hang on", "Éjszakai világítás: a fali lámpák megvilágítják a falat, amelyen lógnak"},
+    {"Night Lights: room light has no lines or steps beside walls and door frames", "Éjszakai világítás: a szobák fényében nincs vonal vagy lépcső falak és ajtókeretek mellett"},
+    {"Night Lights: coloured lamps keep their colour where their light is strongest", "Éjszakai világítás: a színes lámpák megtartják színüket ott, ahol a legerősebbek"},
+    {"Night Lights: window light stays the same as the camera turns", "Éjszakai világítás: az ablakfény nem változik a kamera forgatásakor"},
+    {"Night Lights: lamp edits update the rooms behind doors and windows", "Éjszakai világítás: a lámpa szerkesztése frissíti az ajtók és ablakok mögötti szobákat"},
     {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "Éjszakai világítás: a számítások minőségromlás nélkül újrahasználják a változatlan adatokat"},
     {"Performance: cache compression avoids unnecessary match searches", "Teljesítmény: a gyorsítótár tömörítése kihagyja a fölösleges egyezéskereséseket"},
     {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "Éjszakai világítás: a fagyott és olvadó talajon folyamatos marad a fény a telekhatároknál"},

@@ -9,6 +9,15 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Thai}
 const I18n::Pair kPairs[] = {
+    {"Banding Fix: High-precision scene for smoother gradients, on by default", "แก้แถบสี: ฉากความแม่นยำสูงเพื่อการไล่สีที่นุ่มขึ้น เปิดเป็นค่าเริ่มต้น"},
+    {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "แก้แถบสี: การ์ดออกแบบใหม่พร้อมเกรนละเอียดขึ้นที่ไม่ยุ่งกับเมนู"},
+    {"Night Lights: strong lamps light the ground and walls beside them at full strength", "แสงกลางคืน: โคมไฟที่แรงส่องพื้นและผนังข้างๆ ด้วยความแรงเต็มที่"},
+    {"Night Lights: lamp light through doors and windows fades naturally into rooms", "แสงกลางคืน: แสงที่ผ่านประตูและหน้าต่างค่อยๆ จางลงในห้องอย่างเป็นธรรมชาติ"},
+    {"Night Lights: wall lamps light the wall they hang on", "แสงกลางคืน: โคมติดผนังส่องผนังที่มันแขวนอยู่"},
+    {"Night Lights: room light has no lines or steps beside walls and door frames", "แสงกลางคืน: แสงในห้องไม่มีเส้นหรือขั้นบันไดข้างผนังและวงกบประตู"},
+    {"Night Lights: coloured lamps keep their colour where their light is strongest", "แสงกลางคืน: โคมสีคงสีไว้ในจุดที่แสงแรงที่สุด"},
+    {"Night Lights: window light stays the same as the camera turns", "แสงกลางคืน: แสงจากหน้าต่างไม่เปลี่ยนเมื่อหมุนกล้อง"},
+    {"Night Lights: lamp edits update the rooms behind doors and windows", "แสงกลางคืน: การแก้ไขโคมไฟจะอัปเดตห้องที่อยู่หลังประตูและหน้าต่าง"},
     {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "แสงกลางคืน: ใช้ข้อมูลที่ไม่เปลี่ยนซ้ำในการคำนวณโดยไม่ลดคุณภาพ"},
     {"Performance: cache compression avoids unnecessary match searches", "ประสิทธิภาพ: การบีบอัดแคชข้ามการค้นหารูปแบบที่ไม่จำเป็น"},
     {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "แสงกลางคืน: พื้นที่แข็งตัวและกำลังละลายยังได้รับแสงต่อเนื่องตรงขอบที่ดิน"},

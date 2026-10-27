@@ -9,6 +9,15 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Simplified, mainland China)}
 const I18n::Pair kPairs[] = {
+    {"Banding Fix: High-precision scene for smoother gradients, on by default", "色带修复：高精度场景让渐变更平滑，默认开启"},
+    {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "色带修复：重新设计的卡片，颗粒更细且不影响菜单"},
+    {"Night Lights: strong lamps light the ground and walls beside them at full strength", "夜间照明：强光灯以全部强度照亮旁边的地面和墙壁"},
+    {"Night Lights: lamp light through doors and windows fades naturally into rooms", "夜间照明：从门窗进入的灯光在房间内自然减弱"},
+    {"Night Lights: wall lamps light the wall they hang on", "夜间照明：壁灯会照亮其所挂的墙面"},
+    {"Night Lights: room light has no lines or steps beside walls and door frames", "夜间照明：墙边和门框旁的室内光不再出现线条或台阶"},
+    {"Night Lights: coloured lamps keep their colour where their light is strongest", "夜间照明：彩色灯在光线最强处保持颜色"},
+    {"Night Lights: window light stays the same as the camera turns", "夜间照明：旋转镜头时窗户透入的光保持不变"},
+    {"Night Lights: lamp edits update the rooms behind doors and windows", "夜间照明：编辑灯具会更新门窗后面的房间"},
     {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "夜间照明：重复使用未变的数据，保持画质并减少计算"},
     {"Performance: cache compression avoids unnecessary match searches", "性能：缓存压缩跳过不必要的匹配搜索"},
     {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "夜间照明：冻结和解冻中的地面在地段边界保持连续光照"},

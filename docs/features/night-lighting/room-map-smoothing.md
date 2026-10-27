@@ -8,7 +8,7 @@ and openings keep their shape; only the way the baked light is stored and read c
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0 |
+| Availability | Released in 2.13.0. The read of the room's own texels beside walls: Released in 2.16.0. |
 | Default | On |
 | Menu | Lighting > Buildings > Rooms at Night, group LAMP LIGHT (needs *Outdoor light between floors*) |
 | Configuration | `mapasDosComodosSuaves` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -40,19 +40,25 @@ texels per metre by lighting class (twice that with *Light detail* High). Three 
    (1, 0.55, 0.25) beside hall texels at 0.03). Held under the brightest of the 2 x 2 texels of the bilinear read (+2/255),
    a line of it stayed within half a texel of the wall (a courtyard lit green: a green line along the wall's foot), and
    the bound cut the B-spline's tail on the dark side of every shadow edge at the texel lines: beside a glass door the
-   jambs' penumbra and the sill's showed steps a texel wide. The solve marks the sides: a roofed room's texel holds its
-   ambient weight in alpha (0.44 to 0.84 there), room 0's 0 (or the little light rooms send out of their openings). When
-   the pixel's own texel (the one it lies in) has alpha 0.125 or more, the colour is held under the brightest texel of
-   the B-spline's 4 x 4 with alpha 4/255 or more (+2/255): never under the B-spline of the room's own texels, so shadow
-   edges keep the smooth read, while room 0's texels beyond the wall add nothing. A pixel of room 0, a bright room texel
-   with little ambient weight or light sent out of an opening keep the plain B-spline (the alpha the ambient weight, as
-   the B-spline gives it).
+   jambs' penumbra and the sill's showed steps a texel wide; held under the brightest texel of the room's side instead,
+   a room's dark first texels under a window (the wall below the sill shades them) took the courtyard's light on the
+   first and left the second dark, a black line half a metre from the wall between two lit bands. The solve marks the
+   sides: a roofed room's texel holds its ambient weight in alpha (0.44 to 0.84 there), room 0's 0 (or the little light
+   rooms send out of their openings). When the pixel's own texel (the one it lies in) has alpha 0.125 or more, the read
+   is the B-spline of the 4 x 4 texels with alpha 4/255 or more alone, its weights divided by their sum (the own
+   texel's weight is at least 0.23), colour and ambient weight alike: room 0's texels beyond the wall add nothing and the
+   room's light falls to the wall as the solve has it, smooth across shadow edges and a jamb's penumbra. A pixel of room
+   0, a bright room texel with little ambient weight or light sent out of an opening keep the plain B-spline.
 2. **Dither.** Before the game packs a texel, Apex adds up to half an 8-bit level of interleaved gradient noise taken from
    the texel's position: the mean light stays, the rings become a fine grain the B-spline smooths out. The same texel
    always gets the same offset, so a room lit again does not shimmer.
 3. **Soft light cut.** In the solves Apex wraps, the room's threshold is lowered for the game's call and each lamp's
    colour, after Apex's own tests, takes `smoothstep(thr, 2 thr, r + g + b)`: 0 where the game cut it (still dropped
-   before any test), the full colour from twice the threshold.
+   before any test), the full colour from twice the threshold. An outdoor lamp's entry through an opening, which Apex
+   scales after the game's law (the outdoor cut, the outdoor surface's factor, the colour response,
+   [level light share](level-light-share.md)), meets the threshold times those scales (at most 1): measured on the
+   scaled colour, the cut dropped a window's light where the law still gave it several times the threshold, a strip of
+   light a metre into the room and none past it.
 
 ## Settings
 
@@ -112,7 +118,7 @@ unverified in game.
 with the wall mask does not fit the registers, the combined variant without the mask is used, never one that drops the
 room map's smoothing.
 
-Cost: the reads add about 150 ALU and 20 texture instructions per room-lit pixel (the B-spline and its bound: the own texel and the 4 x 4 point reads); the dither one call per texel solved; the
+Cost: the reads add about 200 ALU and 20 texture instructions per room-lit pixel (the B-spline, the own texel and the 4 x 4 point reads with their weights); the copy takes 14 temporaries more than the game's shader; the dither one call per texel solved; the
 soft cut a list walk per solved point and a multiply per lamp kept.
 
 ## Rejected approaches

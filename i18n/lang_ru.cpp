@@ -9,6 +9,15 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Russian}
 const I18n::Pair kPairs[] = {
+    {"Banding Fix: High-precision scene for smoother gradients, on by default", "Исправление полос: Сцена высокой точности для более плавных градиентов, включена по умолчанию"},
+    {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Исправление полос: обновлённая карточка с более мелким зерном, которое не трогает меню"},
+    {"Night Lights: strong lamps light the ground and walls beside them at full strength", "Ночное освещение: яркие лампы освещают землю и стены рядом в полную силу"},
+    {"Night Lights: lamp light through doors and windows fades naturally into rooms", "Ночное освещение: свет через двери и окна естественно затухает в комнатах"},
+    {"Night Lights: wall lamps light the wall they hang on", "Ночное освещение: настенные лампы освещают стену, на которой висят"},
+    {"Night Lights: room light has no lines or steps beside walls and door frames", "Ночное освещение: свет в комнатах без линий и ступенек у стен и дверных коробок"},
+    {"Night Lights: coloured lamps keep their colour where their light is strongest", "Ночное освещение: цветные лампы сохраняют цвет там, где их свет ярче всего"},
+    {"Night Lights: window light stays the same as the camera turns", "Ночное освещение: свет из окон не меняется при повороте камеры"},
+    {"Night Lights: lamp edits update the rooms behind doors and windows", "Ночное освещение: изменение лампы обновляет комнаты за дверями и окнами"},
     {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "Ночное освещение: расчёты повторно используют неизменённые данные без снижения качества"},
     {"Performance: cache compression avoids unnecessary match searches", "Производительность: сжатие кэша пропускает ненужный поиск совпадений"},
     {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "Ночное освещение: замёрзшая и оттаивающая земля сохраняет непрерывный свет на границах участков"},

@@ -9,6 +9,15 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Polish}
 const I18n::Pair kPairs[] = {
+    {"Banding Fix: High-precision scene for smoother gradients, on by default", "Korekta pasmowania: Scena o wysokiej precyzji dla gładszych gradientów, domyślnie włączona"},
+    {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Korekta pasmowania: nowa karta z drobniejszym ziarnem, które omija menu"},
+    {"Night Lights: strong lamps light the ground and walls beside them at full strength", "Oświetlenie nocne: silne lampy oświetlają ziemię i ściany obok z pełną mocą"},
+    {"Night Lights: lamp light through doors and windows fades naturally into rooms", "Oświetlenie nocne: światło przez drzwi i okna naturalnie zanika w pokojach"},
+    {"Night Lights: wall lamps light the wall they hang on", "Oświetlenie nocne: kinkiety oświetlają ścianę, na której wiszą"},
+    {"Night Lights: room light has no lines or steps beside walls and door frames", "Oświetlenie nocne: światło w pokojach nie tworzy linii ani schodków przy ścianach i ościeżnicach"},
+    {"Night Lights: coloured lamps keep their colour where their light is strongest", "Oświetlenie nocne: kolorowe lampy zachowują kolor tam, gdzie świecą najmocniej"},
+    {"Night Lights: window light stays the same as the camera turns", "Oświetlenie nocne: światło z okien nie zmienia się przy obrocie kamery"},
+    {"Night Lights: lamp edits update the rooms behind doors and windows", "Oświetlenie nocne: edycja lampy odświeża pokoje za drzwiami i oknami"},
     {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "Oświetlenie nocne: obliczenia ponownie wykorzystują niezmienione dane bez obniżania jakości"},
     {"Performance: cache compression avoids unnecessary match searches", "Wydajność: kompresja pamięci podręcznej pomija zbędne wyszukiwanie dopasowań"},
     {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "Oświetlenie nocne: zamarznięty i rozmarzający teren zachowuje ciągłe światło na granicach parcel"},

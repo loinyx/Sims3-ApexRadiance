@@ -8,7 +8,7 @@ border. Near the border the two sides blend over 3 m, so a lamp standing next to
 
 | | |
 |---|---|
-| Availability | Released (part of Night Lighting since 0.1.0). Lot UV alignment, daylight terrain term and the constant-read guard: Released in 2.6.0. Rain and other weather variants recognised (exact rain variant and by structure): Released in 2.7.0. Lamp shade on lot ground (*Walls shade lamp light near the ground*) and lamps through the outside walls' openings: Released in 2.13.0. Crown shade from trees and bushes: Released in 2.14.0. A shade that takes only the light of the lamps a wall blocks, closed gates and narrow fence gaps, the room mask and lamp shade on snowy lots, the lot map aligned on each axis, *Indoor light adds to the ground*, and a lot's shade shown with its chunks' texels: Released in 2.15.3. Verified winter terrain layouts and exact fence-gap length reuse: Released in 2.15.6. |
+| Availability | Released (part of Night Lighting since 0.1.0). Lot UV alignment, daylight terrain term and the constant-read guard: Released in 2.6.0. Rain and other weather variants recognised (exact rain variant and by structure): Released in 2.7.0. Lamp shade on lot ground (*Walls shade lamp light near the ground*) and lamps through the outside walls' openings: Released in 2.13.0. Crown shade from trees and bushes: Released in 2.14.0. A shade that takes only the light of the lamps a wall blocks, closed gates and narrow fence gaps, the room mask and lamp shade on snowy lots, the lot map aligned on each axis, *Indoor light adds to the ground*, and a lot's shade shown with its chunks' texels: Released in 2.15.3. Verified winter terrain layouts and exact fence-gap length reuse: Released in 2.15.6. Light past 1 with the walls' shade on it: Released in 2.16.0. |
 | Default | On |
 | Menu | Lighting > Ground > Ground & Lots > *Game fixes* (folded) > *Street lamps light lots* |
 | Configuration | `[patches.NightTerrainRelight]` `luzDoPosteNaGramaDoLote` in `ApexRadiance.toml` |
@@ -138,10 +138,12 @@ piece length once; each derived gap retains its exact length until the geometry 
 | c30 | soft edges and lot uv offset: `(1 / band, bias, offset x, offset z)`: xy `(1/3, 0)` on, `(0, 1)` off (w = 1 everywhere); zw = `-c12.x x 16/63`, `-c12.y x 16/63` for the recognised VS, else 0 (*Lot map uv alignment* below) |
 | c31 | `(lot map gain, daylight terrain term, lot uv scale, 0)`: x = `LotMapGain()` at full night, the lot map's night gain before it; y = 0 (since 2.12.3: before full night c3.x itself is set to ground gain x `LampDay(night)` for one draw, `TerrainLightingPolicy::LotPass`, so the terrain and the lot map follow the shared daytime curve; until 2.12.2 y = `(1 - night) x ground gain`, the full gain by day), z = `1/63` for the recognised VS, else 0 |
 | c34 | `(gate, 0, 0, 0)`: 1 while *Indoor light adds to the ground* is active, else 0 (*Indoor light on the ground* below) |
+| c35 | `(log2 range, 0, 0, 0)`: 3 while s4 holds the lot map's outdoor scale ([rt-outdoor-lamps](rt-outdoor-lamps.md)), else 0; restored after the draw |
 | s0 | sky cube (game) |
 | s1 | lot light map (game) |
 | s3 | room mask (rgb) and lamp shade (alpha), A8R8G8B8, 4 texels a metre; c32 / c33 its uv rows |
 | s2 | terrain light (atlas or chunk map) |
+| s4 | outdoor scale of the relit lot map (`RtOutdoorLamps::ScaleOf`), or nothing |
 | s5 | sun/moon shadow map (game) |
 | TEXCOORD1.xy | terrain uv |
 | TEXCOORD2 | shadow projection |
@@ -157,12 +159,18 @@ lp      = (dot(float3(terrainUv.xy, 1), c28.xyz), dot(float3(terrainUv.xy, 1), c
 e       = min(lp, (c28.w, c29.w) - lp);  w = smoothstep01(saturate(min(e.x, e.y) * c30.x + c30.y))
 lotUv   = lotUv * (1 + c31.z) + c30.zw
 lot     = tex2D(sLot, lotUv);  lm = lot.rgb * c31.x * c3.x                                // game: tex2D(sLot).rgb * c3.x
-a       = lot.a * c34.x;  ex = lm * sat(a / max(lum(lot.rgb), 1/255))                    // indoor light on the ground
-lamps   = lerp(terrain, max(lm - ex, terrain * sat((1 - a) 255)), w) * shade + ex * w
+k       = exp2(tex2D(sScale, lotUv).r * c35.x)                                           // the light past 1 (1 without it)
+a       = lot.a * c34.x;  share = sat(a / max(k lum(lot.rgb), 1/255))                     // indoor light on the ground
+ex      = k lm share;  own = lm (1 - share)
+lamps   = lerp(terrain, max(own, terrain * sat((1 - a) 255)), w) * shade + ex * w + (k - 1) own w shade^4
 col     = sun * c0.rgb + lamps
 col     = texCUBE(sSky, n).rgb * c4.x + col
 return float4(col * 0.5, 0)                                                          // modulate2x
 ```
+
+The light past 1 takes the walls' shade to the 4th power: the shade is soft over a texel at a wall's foot, and behind a
+screen wall its sconce lit the texel straddling the foot at 0.3 to 0.5, a strip of light behind the wall once the
+light past 1 showed. With k = 1 (no scale) the pass is the one of before.
 
 At night c31.y = 0 and the result equals the earlier night shader. By day the terrain term gains
 `(1 - night) x ground gain`, matching the world terrain's daylight term ([world-atlas](world-atlas-and-smoothed-maps.md));

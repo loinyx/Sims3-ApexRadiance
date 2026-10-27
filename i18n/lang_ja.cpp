@@ -9,6 +9,15 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Japanese}
 const I18n::Pair kPairs[] = {
+    {"Banding Fix: High-precision scene for smoother gradients, on by default", "バンディング補正：高精度シーンでグラデーションがより滑らかに（既定でオン）"},
+    {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "バンディング補正：カードを刷新し、メニューに影響しない細かなグレインに"},
+    {"Night Lights: strong lamps light the ground and walls beside them at full strength", "夜間照明：強いランプが隣の地面や壁を本来の強さで照らすように"},
+    {"Night Lights: lamp light through doors and windows fades naturally into rooms", "夜間照明：ドアや窓から入る光が部屋の奥へ自然に弱まるように"},
+    {"Night Lights: wall lamps light the wall they hang on", "夜間照明：壁付けランプが取り付けた壁を照らすように"},
+    {"Night Lights: room light has no lines or steps beside walls and door frames", "夜間照明：壁やドア枠の横で部屋の光に線や段差が出なくなりました"},
+    {"Night Lights: coloured lamps keep their colour where their light is strongest", "夜間照明：色付きランプは光が最も強い場所でも色を保つように"},
+    {"Night Lights: window light stays the same as the camera turns", "夜間照明：カメラを回しても窓からの光が変わらなくなりました"},
+    {"Night Lights: lamp edits update the rooms behind doors and windows", "夜間照明：ランプを編集するとドアや窓の奥の部屋も更新されるように"},
     {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "夜間照明：変化のないデータを再利用し、品質を保ったまま計算を省略"},
     {"Performance: cache compression avoids unnecessary match searches", "パフォーマンス：キャッシュ圧縮で不要な一致検索を省略"},
     {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "夜間照明：凍結・融解中の地面でも区画の境界で光が途切れません"},

@@ -9,6 +9,15 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Finnish}
 const I18n::Pair kPairs[] = {
+    {"Banding Fix: High-precision scene for smoother gradients, on by default", "Raitojen korjaus: Tarkka kohtaus pehmeämpiin liukuväreihin, oletuksena päällä"},
+    {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Raitojen korjaus: uudistettu kortti ja hienompi rae, joka ei koske valikkoon"},
+    {"Night Lights: strong lamps light the ground and walls beside them at full strength", "Yövalaistus: voimakkaat lamput valaisevat viereisen maan ja seinät täydellä teholla"},
+    {"Night Lights: lamp light through doors and windows fades naturally into rooms", "Yövalaistus: ovista ja ikkunoista tuleva valo hiipuu luonnollisesti huoneeseen"},
+    {"Night Lights: wall lamps light the wall they hang on", "Yövalaistus: seinävalaisimet valaisevat seinän, jossa ne roikkuvat"},
+    {"Night Lights: room light has no lines or steps beside walls and door frames", "Yövalaistus: huoneiden valossa ei ole viivoja tai portaita seinien ja karmien vieressä"},
+    {"Night Lights: coloured lamps keep their colour where their light is strongest", "Yövalaistus: värilliset lamput säilyttävät värinsä siellä, missä valo on voimakkainta"},
+    {"Night Lights: window light stays the same as the camera turns", "Yövalaistus: ikkunoiden valo pysyy samana kameraa käännettäessä"},
+    {"Night Lights: lamp edits update the rooms behind doors and windows", "Yövalaistus: lampun muokkaus päivittää ovien ja ikkunoiden takana olevat huoneet"},
     {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "Yövalaistus: laskenta käyttää muuttumattomia tietoja uudelleen laadusta tinkimättä"},
     {"Performance: cache compression avoids unnecessary match searches", "Suorituskyky: välimuistin pakkaus välttää turhat vastaavuushaut"},
     {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "Yövalaistus: jäätynyt ja sulava maa säilyttää yhtenäisen valon tonttien rajoilla"},

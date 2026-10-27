@@ -9,6 +9,15 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Greek}
 const I18n::Pair kPairs[] = {
+    {"Banding Fix: High-precision scene for smoother gradients, on by default", "Διόρθωση Λωρίδων: Σκηνή υψηλής ακρίβειας για πιο ομαλές διαβαθμίσεις, ενεργή από προεπιλογή"},
+    {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Διόρθωση Λωρίδων: ανανεωμένη κάρτα με λεπτότερο κόκκο που αφήνει το μενού ανέγγιχτο"},
+    {"Night Lights: strong lamps light the ground and walls beside them at full strength", "Νυχτερινός φωτισμός: οι δυνατές λάμπες φωτίζουν το έδαφος και τους τοίχους δίπλα τους με όλη τους τη δύναμη"},
+    {"Night Lights: lamp light through doors and windows fades naturally into rooms", "Νυχτερινός φωτισμός: το φως από πόρτες και παράθυρα σβήνει φυσικά μέσα στα δωμάτια"},
+    {"Night Lights: wall lamps light the wall they hang on", "Νυχτερινός φωτισμός: οι απλίκες φωτίζουν τον τοίχο όπου κρέμονται"},
+    {"Night Lights: room light has no lines or steps beside walls and door frames", "Νυχτερινός φωτισμός: το φως των δωματίων δεν δείχνει γραμμές ή σκαλοπάτια δίπλα σε τοίχους και κάσες"},
+    {"Night Lights: coloured lamps keep their colour where their light is strongest", "Νυχτερινός φωτισμός: οι έγχρωμες λάμπες κρατούν το χρώμα τους εκεί που φωτίζουν πιο δυνατά"},
+    {"Night Lights: window light stays the same as the camera turns", "Νυχτερινός φωτισμός: το φως των παραθύρων μένει ίδιο όταν γυρίζει η κάμερα"},
+    {"Night Lights: lamp edits update the rooms behind doors and windows", "Νυχτερινός φωτισμός: η αλλαγή μιας λάμπας ενημερώνει τα δωμάτια πίσω από πόρτες και παράθυρα"},
     {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "Νυχτερινός φωτισμός: οι υπολογισμοί επαναχρησιμοποιούν αμετάβλητα δεδομένα χωρίς μείωση ποιότητας"},
     {"Performance: cache compression avoids unnecessary match searches", "Απόδοση: η συμπίεση της κρυφής μνήμης αποφεύγει περιττές αναζητήσεις αντιστοιχιών"},
     {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "Νυχτερινός φωτισμός: το παγωμένο έδαφος και η απόψυξη διατηρούν συνεχές φως στα όρια οικοπέδων"},

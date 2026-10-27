@@ -6,6 +6,22 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k2160Added[] = {
+    "Banding Fix: High-precision scene for smoother gradients, on by default",
+    nullptr};
+constexpr const char* k2160Improved[] = {
+    "Banding Fix: redesigned card with a finer grain that leaves the menu alone",
+    "Night Lights: strong lamps light the ground and walls beside them at full strength",
+    "Night Lights: lamp light through doors and windows fades naturally into rooms",
+    "Night Lights: wall lamps light the wall they hang on",
+    nullptr};
+constexpr const char* k2160Fixed[] = {
+    "Night Lights: room light has no lines or steps beside walls and door frames",
+    "Night Lights: coloured lamps keep their colour where their light is strongest",
+    "Night Lights: window light stays the same as the camera turns",
+    "Night Lights: lamp edits update the rooms behind doors and windows",
+    nullptr};
+
 constexpr const char* k2156Empty[] = {nullptr};
 constexpr const char* k2156Improved[] = {
     "Night Lights: lighting calculations reuse unchanged data without reducing quality",
@@ -366,6 +382,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"2.16.0", "2026-10-27", k2160Added, k2160Improved, k2160Fixed},
     {"2.15.6", "", k2156Empty, k2156Improved, k2156Fixed},
     {"2.15.5", "", k2155Empty, k2155Empty, k2155Fixed},
     {"2.15.4", "2026-10-24", k2154Added, k2154Improved, k2154Fixed},

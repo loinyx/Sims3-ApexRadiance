@@ -9,6 +9,15 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Danish}
 const I18n::Pair kPairs[] = {
+    {"Banding Fix: High-precision scene for smoother gradients, on by default", "Banding-rettelse: Scene i høj præcision for blødere overgange, slået til som standard"},
+    {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Banding-rettelse: nyt kort med finere korn, der lader menuen være"},
+    {"Night Lights: strong lamps light the ground and walls beside them at full strength", "Natbelysning: stærke lamper lyser jorden og væggene ved siden af op med fuld styrke"},
+    {"Night Lights: lamp light through doors and windows fades naturally into rooms", "Natbelysning: lys gennem døre og vinduer toner naturligt ud i rummet"},
+    {"Night Lights: wall lamps light the wall they hang on", "Natbelysning: væglamper lyser den væg op, de hænger på"},
+    {"Night Lights: room light has no lines or steps beside walls and door frames", "Natbelysning: rumlys viser ingen streger eller trin ved vægge og dørkarme"},
+    {"Night Lights: coloured lamps keep their colour where their light is strongest", "Natbelysning: farvede lamper beholder deres farve, hvor lyset er stærkest"},
+    {"Night Lights: window light stays the same as the camera turns", "Natbelysning: vindueslys forbliver det samme, når kameraet drejer"},
+    {"Night Lights: lamp edits update the rooms behind doors and windows", "Natbelysning: ændringer af lamper opdaterer rummene bag døre og vinduer"},
     {"Night Lights: lighting calculations reuse unchanged data without reducing quality", "Natbelysning: beregninger genbruger uændrede data uden at sænke kvaliteten"},
     {"Performance: cache compression avoids unnecessary match searches", "Ydeevne: komprimering af cache undgår unødvendige søgninger efter gentagelser"},
     {"Night Lights: frozen and melting terrain keeps continuous light at lot edges", "Natbelysning: frossen og optøende jord bevarer sammenhængende lys ved grundkanter"},

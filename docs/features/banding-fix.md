@@ -10,7 +10,7 @@ rounds it once, with one grain, so blended passes no longer add their own roundi
 
 | | |
 |---|---|
-| Availability | Released in 2.2.0 (Experimental, with a "Still being tested" note on its page, until 2.15.0). Its own page, Smooth gradients off by default and copies made at a shader's first scene draw: Released in 2.7.0. Smooth gradients and Moving grain removed, High-precision scene on by default: after 2.15.6, not yet released |
+| Availability | Released in 2.2.0 (Experimental, with a "Still being tested" note on its page, until 2.15.0). Its own page, Smooth gradients off by default and copies made at a shader's first scene draw: Released in 2.7.0. Smooth gradients and Moving grain removed, High-precision scene on by default: Released in 2.16.0 |
 | Default | On for new configurations |
 | Menu | Image > Banding Fix (card *Banding Fix*: a before / after picture of a stepped and a smoothed gradient that follows the current state, then *Grain* with Strength and *Precision* with High-precision scene and its status; Live counters in the development build); Overview > Image > Banding Fix |
 | Configuration | `[patches.SceneDither]` in `ApexRadiance.toml` |
