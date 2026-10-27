@@ -436,7 +436,9 @@ With `janelasLuzDeFora` on: `PickObjectLamps` passes a wall within 0.75 m of the
 (rig mode 0, object VS, basis PS, night level > 0.01, ground atlas ready) draws the part with the patched object VS (TEXCOORD8 = world xzy) and
 `PatchWindowOutdoor`: after the shader's last light `max` before oC0, `rL = max(rL, (ground + lamps x cS.y) x w)` with
 `w = sat(1 - alpha)`, alpha = the basis map's house-plan alpha read at the basis uv moved 0.75 m along the world normal (rows from
-`WorldUvRows`: `dp4 rA.zw, rWorld, c15/c16` then `mul oT0.xy, rA.zwzw, c18.zwzw`). Faces looking into the house keep the game's light exactly.
+`WorldUvRows`: `dp4 rA.zw, rWorld, c15/c16` then `mul oT0.xy, rA.zwzw, c18.zwzw`), and `w = 0` where alpha is over 0.5 (inside
+the plan; the plan's texel edge is the outside wall, and its bilinear read gave faces up to half a metre inside, such as a
+kitchen counter top along that wall, up to half the outdoor light). Faces looking into the house keep the game's light exactly.
 No object catalog identifies windows: the rule is geometric, so any room-rig object drawn with a basis-reading object shader whose faces look
 out of the house plan is affected (in the captures only window parts were). The light in the shader's bloom alpha (`lum - c3.x`) can rise
 slightly with it. Offline: 1 of the 13 captured basis-reading pixel shaders is accepted (the window one), and native D3D9 creates it.

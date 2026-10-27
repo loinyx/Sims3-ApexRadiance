@@ -3450,7 +3450,7 @@ bool PatchWindowOutdoor(std::vector<DWORD>& t, WindowOutdoorPatch& out, bool rea
     out.lampConst = cL;
     out.planConst = cP;
     out.reachConst = reach ? cR : 0;
-    constexpr DWORD kNeg = 0x01000000u;
+    constexpr DWORD kNeg = 0x01000000u, kCmpWin = 0x58; // cmp
     std::vector<DWORD> v = {
         Op(kNrm, 2), Dst(kTemp, N, 0x7), Src(kInput, Nin),
         // w = sat(1 - plan alpha at the basis uv moved by the normal (d in the rows))
@@ -3459,6 +3459,11 @@ bool PatchWindowOutdoor(std::vector<DWORD>& t, WindowOutdoorPatch& out, bool rea
         Op(kAdd, 3), Dst(kTemp, P, 0x3), Src(kTemp, P), Src(kInput, U),
         Op(kTexld, 3), Dst(kTemp, P), Src(kTemp, P), Src(kSampler, static_cast<DWORD>(r.sampler[0])),
         Op(kAdd, 3), Dst(kTemp, P, 0x8, true), Neg(Src(kTemp, P, kSwzW)), Src(kConst, cH, 0xAA /* 1 */),
+        // (2.17.1) inside the plan (alpha over 0.5: the plan's texel edge is the outside wall) w = 0: the bilinear read gave a
+        // face up to half a metre inside, a kitchen counter along the outside wall, up to half the outdoor light (F7 17-31-11);
+        // outside it w is unchanged
+        Op(kAdd, 3), Dst(kTemp, P, 0x1), Src(kTemp, P, kSwzW), Neg(Src(kConst, cH, kSwzX)),
+        Op(kCmpWin, 4), Dst(kTemp, P, 0x8), Src(kTemp, P, kSwzX), Src(kTemp, P, kSwzW), Src(kConst, cH, Sw(3, 3, 3, 3)),
         // ground = atlas(world.xz) x (0.5 + 0.5 N.y) x cB.x (as the outdoor-object patch)
         Op(kMad, 4), Dst(kTemp, T, 0x3), Src(kInput, V, kSwzXYXY), Src(kConst, cA), Src(kConst, cA, kSwzZWZW),
         Op(kTexld, 3), Dst(kTemp, T), Src(kTemp, T), Src(kSampler, E),

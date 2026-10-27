@@ -212,3 +212,14 @@ they lit all round, while the game lights only the side the area faces ([engine]
 **Outcome:** an area light's cone is its third axis `+0x180` normalised with offset 0 and no spill: `sat(l . axis)`,
 the game's facing with the area's centre as its nearest point. Objects, fences and foliage evaluate it; roofs and water
 take their rows without cones, as for spots. Not yet checked in game.
+
+### 2026-10-27: no outdoor light on counters along the outside wall
+
+F7 17-31-11 (night, rain): the top of a kitchen counter against an outside wall showed a lit wedge (screen 0.157, 0.137,
+0.090) in a dark kitchen. Its draw went through the window pass (`DrawWindowOutdoor`: a room-rig object with a
+basis-reading shader), which weighs the outdoor terms by `sat(1 - plan alpha)` read 0.75 m along the normal. The counter
+top faces up, so it read the plan at its own position; the plan is one texel a metre, its edge on the outside wall, and
+its bilinear read fell from 1 to 0.5 over the last half metre inside, giving that strip up to half the light of street
+lamps 20 to 40 m away. The patch now sets `w = 0` where the plan alpha is over 0.5; outside the plan `w` is unchanged.
+Checked on the captured window copy (`PS_62D454D8`): with the two instructions added after its plan weight, the shader
+disassembles (`add r15.x, r15.w, -c17.x`, `cmp r15.w, r15.x, r15.w, c17.w`) and Direct3D 9 creates it.

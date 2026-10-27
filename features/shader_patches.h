@@ -324,8 +324,9 @@ bool PatchCubeTint(std::vector<DWORD>& t, int& tintConst);
 // of the house read the room's directional maps towards the outside, which hold no light (black). The patch keeps the
 // game's light and, after the shader's last light max before oC0 ("max rL.xyz, .., .."), adds
 //   rL = max(rL, (ground atlas(world.xz) x (0.5 + 0.5 N.y) x cB.x + per-pixel lamps x cS.y) x w)
-// with w = sat(1 - plan alpha at (pixel + N x d)): the basis maps' alpha is 1 on the house plan and 0 outside, read
-// at the basis uv moved by the world normal (planConst / planConst + 1 = the rows of world xz -> uv offset, d included,
+// with w = sat(1 - plan alpha at (pixel + N x d)), and 0 where that alpha is over 0.5 (inside the plan: its bilinear edge
+// gave faces up to half a texel inside, a counter along the outside wall, part of the outdoor light): the basis maps' alpha
+// is 1 on the house plan and 0 outside, read at the basis uv moved by the world normal (planConst / planConst + 1 = the rows of world xz -> uv offset, d included,
 // .z = 0, set per draw). So faces looking into the house keep the game's light exactly; faces looking out of it take the
 // outdoor terms the outdoor-object patch uses. World (x, z, y) from TEXCOORD8 (PatchObjectLampVs); ps_3_0 without flow
 // control only; the normal = the input the shader normalizes ("nrm rN.xyz, vK"). False (t unchanged) otherwise.
