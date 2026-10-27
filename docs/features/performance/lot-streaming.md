@@ -56,6 +56,9 @@ Each step is a separate switch that sets the game's own value or flag; no lot lo
    window, the next window posted through the game's own remote-method call. Building and apartment shells, large
    exterior geometry and flora are built in the first window, because the lot's activation fix-ups need them at once.
 
+Every write is guarded: Apex reads the expected native value first, keeps a value only while it still owns it, yields to
+a value another mod set, and restores only what it changed.
+
 ### Shared lot build time
 
 Started with Lot Lighting While Moving (on by default; development switch `lot_build_share`). The load stages of every
@@ -64,11 +67,8 @@ what is left of the budget as its slice. The lot being played always runs, with 
 whose turn comes with less than 1 ms left waits for the next frame, the same answer the stages give when the lot's lock
 is busy; after 6 frames of waiting it runs one stage, one such lot per frame. Stages 17 and later only wait for a job or
 for the lot's lighting and always run, so no lot finishes later because of a wait. The loading screen and the impostor
-builder's synchronous updates are left alone. A recorded set of 158 lot loads replayed through this rule gives 10
-frames over 16 ms instead of 138, at the cost of a build that ends a few frames later (p90 21 frames, about 0.35 s).
-
-Every write is guarded: Apex reads the expected native value first, keeps a value only while it still owns it, yields to
-a value another mod set, and restores only what it changed.
+builder's synchronous updates are left alone. A lot's build ends a few frames later; the replay of recorded loads is in
+the [validation page](../../validation/performance-lot-streaming.md#latest-results).
 
 ## Settings
 
