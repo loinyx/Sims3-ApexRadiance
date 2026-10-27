@@ -316,3 +316,6 @@ near the openings and the openings themselves, as `AuditTakers` compares them) a
 predicted unchanged; their next solves of the same class wrote the same texels 65 times and different ones 2 times, so
 `opening_skip` stays off. The prediction then also reads the light manager's night and manmade levels (`+0xF0` / `+0xF4`)
 and the hash of every other room's last solve (the bounce through openings and the room fill read other rooms' light).
+With those inputs, a second session (four minutes) predicted 68 of 387 sends unchanged; 34 re-solves wrote the same
+texels and 2 different ones. The prediction still misses an input, or the solve is not repeatable to the bit for some
+rooms; `opening_skip` stays off until the cause of those differences is known.
