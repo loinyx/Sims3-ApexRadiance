@@ -11,6 +11,7 @@
 // a touched wall block is blurred again from its texels before the blur.
 //
 // Part of Apex Radiance. Credits: @loinyx
+#include "half_float.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -45,9 +46,9 @@ inline uint16_t ToHalf(float f) {
 inline float FromHalf(uint16_t h) {
     const uint32_t e = (h >> 10) & 0x1Fu, m = h & 0x3FFu;
     float v;
-    if (e == 0) v = std::ldexp(static_cast<float>(m), -24);
+    if (e == 0) v = static_cast<float>(m) * Pow2(-24);
     else if (e == 31) v = 65504.0f;
-    else v = std::ldexp(static_cast<float>(m | 0x400u), static_cast<int>(e) - 25);
+    else v = static_cast<float>(m | 0x400u) * Pow2(static_cast<int>(e) - 25);
     return (h & 0x8000u) ? -v : v;
 }
 

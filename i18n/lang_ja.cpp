@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Japanese}
 const I18n::Pair kPairs[] = {
+    {"Lot Streaming: lots that load together share the work, so panning stutters less", "区画ストリーミング：同時に読み込む区画が作業を分け合い、カメラ移動時のカクつきが減ります"},
+    {"Night Lights: fence shadows on the lawn update in a fraction of the time", "夜間照明：芝生に落ちるフェンスの影の更新がずっと速くなります"},
+    {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "区画ストリーミング：「区画の表示を安定させる」で境界付近の区画が詳細表示のまま保たれます"},
+    {"Lot Streaming: Smooth lot streaming keeps working with up to 16 detailed lots", "区画ストリーミング：「スムーズな区画ストリーミング」が最大16区画の詳細表示でも機能します"},
     {"Night Lights: extra safety so old lamp light cannot stay stuck on the ground", "夜間照明：ランプの古い光が地面に残らないよう保護を追加"},
     {"Banding Fix: High-precision scene for smoother gradients, on by default", "バンディング補正：高精度シーンでグラデーションがより滑らかに（既定でオン）"},
     {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "バンディング補正：カードを刷新し、メニューに影響しない細かなグレインに"},
@@ -389,7 +393,7 @@ const I18n::Pair kPairs[] = {
     {"How far lots stay in full detail; 70 is the game's, 300 the tested maximum", "区画が詳細表示のまま保たれる距離。70がゲームの値、300がテスト済みの最大値"},
     {"How many lots can be in full detail at once; 8 is the game's, 16 the tested maximum. More lots use more memory", "同時に詳細表示できる区画の数。8がゲームの値、16がテスト済みの最大値。区画が多いほどメモリを使います"},
     {"Fewer lots switching detail back and forth while the camera moves", "カメラ移動中に区画の詳細表示が何度も切り替わるのを減らします"},
-    {"The camera's viewing angle alone no longer makes lots load or unload", "カメラの向きだけで区画が読み込まれたり解放されたりしなくなります"},
+    {"Lots in full detail keep it a little farther, so lots at the edge stop switching back and forth", "詳細表示中の区画は少し遠くまで詳細を保つため、境界付近の区画が切り替わり続けなくなります"},
     {"No lot detail streaming while the map view is open; it resumes when it closes", "マップビューを開いている間は区画の詳細ストリーミングを止め、閉じると再開します"},
     {"Spreads the work of building a lot's objects", "区画のオブジェクト生成の負荷を分散します"},
     {"Builds a lot's objects a few at a time instead of all at once", "区画のオブジェクトを一度にではなく、少しずつ生成します"},
@@ -431,7 +435,7 @@ const I18n::Pair kPairs[] = {
     {"Sets the internal lot-streaming transition threshold to 12; this does not change the game's Max Active Lots option", "内部の区画ストリーミング遷移しきい値を12にします。ゲームのMax Active Lotsオプションは変わりません"},
     {"Handled by Sims3SettingsSetter: Apex leaves the LoD active-lot threshold untouched", "Sims3SettingsSetterが処理: ApexはLoDアクティブ区画しきい値には手を加えません"},
     {"Keep lot visibility stable", "区画の表示を安定させる"},
-    {"Stops camera viewing angle alone from making lots load or unload", "カメラの向きだけで区画が読み込まれたり解放されたりするのを防ぎます"},
+    {"Lots in full detail keep it a little farther instead of switching back and forth", "詳細表示中の区画は切り替わり続けずに、少し遠くまで詳細を保ちます"},
     {"Handled by Sims3SettingsSetter: Apex leaves the lot visibility override untouched", "Sims3SettingsSetterが処理: Apexは区画の表示上書きには手を加えません"},
     {"Already applied by another patch: Apex leaves the existing visibility override untouched", "別のパッチで適用済み: Apexは既存の表示上書きには手を加えません"},
     {"Files and objects", "ファイルとオブジェクト"},
@@ -2142,7 +2146,7 @@ const I18n::Pair kPairs[] = {
     {"Loads nearby lots into full detail gradually instead of letting several lot-detail transitions start together. Uses the game's own native Lot LoD throttle and a 5.0 camera-speed threshold; no lot loader is replaced. Part of Apex Radiance. Credits: @loinyx", "近くの区画を、複数の詳細切り替えを同時に始めるのではなく、徐々に詳細表示で読み込みます。ゲーム本来の区画LoDスロットルとカメラ速度しきい値5.0を使い、区画のローダーは置き換えません。Apex Radianceの一部。クレジット: @loinyx"},
     {"Pauses lot-detail streaming while the neighborhood map is open, then resumes it after the map closes. This avoids doing lot streaming work during the map transition. Part of Apex Radiance. Credits: @loinyx", "近所のマップを開いている間は区画の詳細ストリーミングを一時停止し、マップを閉じた後に再開します。マップの切り替え中に区画ストリーミングの処理を行わずに済みます。Apex Radianceの一部。クレジット: @loinyx"},
     {"Builds regular objects of a lot in small continuation windows instead of one large burst when the lot enters detailed view. Building and apartment shells, large exterior geometry and flora stay synchronous. Part of Apex Radiance. Credits: @loinyx", "区画が詳細表示になったとき、区画の通常オブジェクトを一度に大量ではなく小さな継続枠ごとに生成します。建物やアパートの外殻、大きな外装ジオメトリ、植物は同期のままです。Apex Radianceの一部。クレジット: @loinyx"},
-    {"Disables the camera-view distance bias in the lot visibility metric so lots do not load or unload purely because the viewing angle changes. Part of Apex Radiance. Credits: @loinyx", "区画の表示指標からカメラの向きによる距離補正を無効にし、視野角の変化だけで区画が読み込まれたり解放されたりしないようにします。Apex Radianceの一部。クレジット: @loinyx"},
+    {"Lots already in full detail keep it a little farther than where a new lot is promoted, so lots at the edge of the detail distance or of the detailed-lot limit stop switching back and forth. Part of Apex Radiance. Credits: @loinyx", "すでに詳細表示の区画は、新しい区画が詳細表示になる地点より少し遠くまで詳細を保ちます。そのため、距離や詳細表示の区画数の境界にある区画が切り替わり続けなくなります。Apex Radiance の一部。クレジット: @loinyx"},
     {"Remembers which of the game's packages holds each file the game asks for, so it does not search every package again. Fewer small stutters when objects, textures and lots load. Part of Apex Radiance. Credits: @loinyx", "ゲームが要求する各ファイルがどのパッケージにあるかを記憶し、毎回すべてのパッケージを検索し直さないようにします。オブジェクト、テクスチャ、区画の読み込み時の小さなカクつきが減ります。Apex Radianceの一部。クレジット: @loinyx"},
     {"Lets Faster Game File Lookups also remember files that no package has, so the game does not search every package for them again and again. Needs Faster Game File Lookups. Part of Apex Radiance. Credits: @loinyx", "「ゲームファイル検索の高速化」が、どのパッケージにもないファイルも記憶するようにし、ゲームが何度もすべてのパッケージを検索しないようにします。「ゲームファイル検索の高速化」が必要です。Apex Radianceの一部。クレジット: @loinyx"},
     {"Remembers which files of a kind each of the game's packages holds, so Create a Sim and Sim loading do not read the list of every package again. Fewer small stutters when Sims change outfits or load. Part of Apex Radiance. Credits: @loinyx", "ゲームの各パッケージに含まれる種類別のファイルを記憶し、シム作成やシムの読み込みで毎回すべてのパッケージの一覧を読み直さないようにします。シムの着替えや読み込み時の小さなカクつきが減ります。Apex Radianceの一部。クレジット: @loinyx"},

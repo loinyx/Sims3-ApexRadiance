@@ -56,7 +56,7 @@ A development build (`/p:ApexStudyDefines=APEX_DEVELOPMENT_BUILD_FLAVOR`, which 
 start-up (`DevSwitches::Load`) and logs every value. A missing key reads as on; Save keeps the table because it
 preserves tables it does not write. Each switch can be turned off to compare against the previous behaviour.
 
-In every other build the accessors return `kShipped` (true) for the 28 switches that change the game or free memory, and false for the
+In every other build the accessors return `kShipped` (true) for the 29 switches that change the game or free memory, and false for the
 3 diagnostics and the unfinished `foliage_sun_shadow`. A switch therefore never needs a menu option to ship; a shipped behaviour
 follows the setting named on its page.
 
@@ -94,6 +94,7 @@ follows the setting named on its page.
 | `borrowed_light_adapt` | Shipped | Partial adaptation (square root, at most x2) of rooms lit only from another story | [stairwells.md](features/night-lighting/stairwells.md) |
 | `soft_slab_edges` | Shipped | Penumbra of a 0.25 m lamp disc at a floor opening's edge | [stairwells.md](features/night-lighting/stairwells.md) |
 | `room_fill` | Shipped | Rooms lit only from another story take back their own reflected light | [stairwells.md](features/night-lighting/stairwells.md) |
+| `lot_build_share` | Shipped | The load stages of every streaming lot share one build budget per frame | [lot-streaming.md](features/performance/lot-streaming.md#shared-lot-build-time) |
 
 
 ---
@@ -192,10 +193,12 @@ failure; CI runs `Smoke` and `Lighting`.
 | `tools/developer_mode_check/` | Developer-mode persistence and profile handling (`prepare.py` builds the fixture) |
 | `tools/foliage_vertex_test/` | Per-vertex foliage lamps on the captured foliage and trunk vertex shaders against a CPU reference (`run.ps1 -Shader <vs.bin> -Trunk <vs.bin>`, native D3D9) |
 | `tools/game_alloc_categories_test/` | The development flavour's game allocation category tables under concurrency (`run.ps1`) |
+| `tools/crt_math_test/` | CRT math replaced in hot code: `Pow2` against `std::ldexp` over every half value, `ApexMath::Hypot` against `std::hypot` over random pairs (`run.ps1`) |
 | `tools/dxt_test/` | Fast DXT1 / DXT5 encoder against the translation of `0x006152F0` / `0x006154B0` |
 | `tools/i18n_check/` | Translation tables: conflicts, missing languages, placeholder and `##id` mismatches; coverage and stale keys of the other languages; `i18n/keys.tsv` up to date (`tools/i18n_keys.pl` writes it) |
 | `tools/liveness_prune_test/` | Pruning of per-story caches by live story managers (`features/liveness_prune.h`, `run.ps1`) |
 | `tools/loading_gate_test/` | Loaded-world reader and the extracted start-notice and Depth Blur loading guards (`run.ps1`) |
+| `tools/lot_streaming_test/` | Lot Streaming: the shared lot build time decision and a replay of recorded lot loads, the detailed-lot hysteresis model, the Steam bytes (`run.ps1 [-CsvDir <folder>] [-Exe <TS3W.exe>]`) |
 | `tools/memory_owners_test/` | Apex memory by owner: `operator new` counts, container estimates, Direct3D resources on a real device (`run.ps1`, native D3D9 and DXVK) |
 | `tools/mesh_occlusion_test/` | The mesh blockers' collector, BVH and replacement policy (`run.ps1 -OpaqueShader <ps.bin> -CutoutShader <ps.bin> -Standard` or `-Development`) |
 | `tools/opening_bounce_test/` | Bounce light through floor openings (`features/opening_bounce.h`, `run.ps1`) |

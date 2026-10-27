@@ -5,17 +5,26 @@
 #include "memory_patch.h"
 #include "s3ss_detect.h"
 #include <cstdint>
+#include <cstring>
 #include <format>
 #include <mutex>
 
 namespace {
+
+constexpr size_t kBiasOffset = 8; // the subtraction starts 8 bytes after the JZ (74 xx F3 0F 10 44 24 08)
+constexpr size_t kInsnLen = 8;
+constexpr uint8_t kNativeBias[kInsnLen] = {0xF3, 0x0F, 0x5C, 0x87, 0xE0, 0x00, 0x00, 0x00}; // subss xmm0,[edi+0E0h]
+
+// Read by the game's code while the patch is in place: static storage, never freed
+alignas(4) const float g_keepFactor = LotVisibilityOverride::kKeepFactor;
 
 std::mutex g_lock;
 bool g_running = false;
 bool g_externalS3SS = false;
 bool g_externalPatched = false;
 bool g_owned = false;
-uintptr_t g_address = 0;
+uintptr_t g_jz = 0;
+uint8_t g_patched[kInsnLen] = {};
 
 bool S3SSOwnsVisibilityOverride() {
     const S3SSDetect::Info info = S3SSDetect::Scan();
@@ -23,18 +32,15 @@ bool S3SSOwnsVisibilityOverride() {
     return S3SSDetect::S3SSPatchBoolSettingEnabled("LotStreamingOptimizations", "visibilityOverride", true);
 }
 
-bool ReadByte(uintptr_t address, uint8_t& value) {
-    return address && MemPatch::ReadBytes(address, &value, sizeof(value));
-}
-
-bool WriteExpectedByte(uintptr_t address, uint8_t desired, uint8_t expected) {
-    const std::vector<BYTE> bytes{desired};
-    const std::vector<BYTE> expectedBytes{expected};
-    return MemPatch::WriteBytes(address, bytes, nullptr, &expectedBytes);
+// mulss xmm0,[g_keepFactor]
+void MakeKeepInsn(uint8_t out[kInsnLen]) {
+    out[0] = 0xF3; out[1] = 0x0F; out[2] = 0x59; out[3] = 0x05;
+    const uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g_keepFactor));
+    std::memcpy(out + 4, &addr, 4);
 }
 
 void ResetState() {
-    g_address = 0;
+    g_jz = 0;
     g_owned = false;
     g_externalPatched = false;
 }
@@ -47,12 +53,12 @@ bool Start(std::string* error) {
     std::lock_guard<std::mutex> guard(g_lock);
     if (g_running) return true;
 
-    LOG_INFO(std::format("[LotVisibility] Starting camera-bias visibility override on {}", GetGameVersionName()));
+    LOG_INFO(std::format("[LotVisibility] Starting the detailed-lot hysteresis on {}", GetGameVersionName()));
 
     if (S3SSOwnsVisibilityOverride()) {
         g_externalS3SS = true;
         g_running = true;
-        LOG_INFO("[LotVisibility] Official Sims3SettingsSetter owns LotStreamingOptimizations.visibilityOverride; Apex makes no visibility-branch writes");
+        LOG_INFO("[LotVisibility] Official Sims3SettingsSetter owns LotStreamingOptimizations.visibilityOverride; Apex makes no writes");
         return true;
     }
 
@@ -63,41 +69,36 @@ bool Start(std::string* error) {
     }
 
     ResetState();
-    g_address = GameAddr::Get(GameAddr::Id::LotVisibilityCameraBiasJZ);
-    if (!g_address) {
-        if (error) *error = "The lot visibility camera-bias branch is unavailable";
-        return false;
-    }
-
-    uint8_t current = 0;
-    if (!ReadByte(g_address, current)) {
-        if (error) *error = "Could not read the lot visibility camera-bias opcode";
+    g_jz = GameAddr::Get(GameAddr::Id::LotVisibilityCameraBiasJZ);
+    uint8_t jz = 0;
+    uint8_t insn[kInsnLen] = {};
+    if (!g_jz || !MemPatch::ReadBytes(g_jz, &jz, 1) || !MemPatch::ReadBytes(g_jz + kBiasOffset, insn, kInsnLen)) {
+        if (error) *error = "Could not read the lot metric's detailed-lot bias";
         ResetState();
         return false;
     }
 
-    LOG_INFO(std::format("[LotVisibility] Camera-bias branch at {:#010x}: opcode 0x{:02X}", g_address, current));
-
-    if (current == 0x74) {
-        if (!WriteExpectedByte(g_address, 0xEB, 0x74)) {
-            if (error) *error = "Could not patch lot visibility camera-bias JZ to JMP";
+    if (jz == 0xEB) {
+        g_externalPatched = true;
+        LOG_INFO("[LotVisibility] The detailed-lot branch is already a JMP (another mod's visibility override); Apex leaves it as it is");
+    } else if (jz == 0x74 && std::memcmp(insn, kNativeBias, kInsnLen) == 0) {
+        MakeKeepInsn(g_patched);
+        if (!MemPatch::WriteCodeSuspended(g_jz + kBiasOffset, g_patched, kInsnLen)) {
+            if (error) *error = "Could not write the detailed-lot hysteresis";
             ResetState();
             return false;
         }
         g_owned = true;
-        LOG_INFO(std::format("[LotVisibility] Visibility override installed (JZ 0x74 -> JMP 0xEB at {:#010x})", g_address));
-    } else if (current == 0xEB) {
-        g_externalPatched = true;
-        LOG_INFO("[LotVisibility] Camera-bias branch is already JMP 0xEB; another owner has already applied the override, Apex leaves it untouched");
+        LOG_INFO(std::format("[LotVisibility] Detailed lots measured at {:.2f} of their squared distance (bias at {:#010x}; the native 8.0 subtraction is replaced)",
+                             kKeepFactor, g_jz + kBiasOffset));
     } else {
-        if (error) *error = std::format("Unexpected lot visibility opcode 0x{:02X}; expected 0x74 (JZ) or 0xEB (JMP)", current);
+        if (error) *error = std::format("Unexpected code at the lot metric's detailed-lot bias ({:#010x}: {:02X})", g_jz, jz);
         ResetState();
         return false;
     }
 
     g_externalS3SS = false;
     g_running = true;
-    LOG_INFO("[LotVisibility] Camera-bias visibility override active");
     return true;
 }
 
@@ -107,30 +108,28 @@ void Stop() {
 
     if (g_externalS3SS) {
         LOG_INFO("[LotVisibility] Off in Apex; Sims3SettingsSetter remains the owner");
-    } else if (g_owned && g_address) {
-        uint8_t current = 0;
-        if (!ReadByte(g_address, current)) {
-            LOG_WARNING("[LotVisibility] Restore skipped: visibility opcode is unreadable");
-        } else if (current != 0xEB) {
-            LOG_INFO(std::format("[LotVisibility] Restore skipped: another owner changed opcode 0xEB to 0x{:02X}", current));
-        } else if (WriteExpectedByte(g_address, 0x74, 0xEB)) {
-            LOG_INFO(std::format("[LotVisibility] Visibility override restored (JMP 0xEB -> JZ 0x74 at {:#010x})", g_address));
+    } else if (g_owned && g_jz) {
+        uint8_t cur[kInsnLen] = {};
+        if (!MemPatch::ReadBytes(g_jz + kBiasOffset, cur, kInsnLen)) {
+            LOG_WARNING("[LotVisibility] Restore skipped: the bias instruction is unreadable");
+        } else if (std::memcmp(cur, g_patched, kInsnLen) != 0) {
+            LOG_INFO("[LotVisibility] Restore skipped: another module changed the bias instruction after Apex");
+        } else if (MemPatch::WriteCodeSuspended(g_jz + kBiasOffset, kNativeBias, kInsnLen)) {
+            LOG_INFO("[LotVisibility] The native detailed-lot bias is back");
         } else {
-            LOG_WARNING("[LotVisibility] Restore failed; current opcode was left unchanged");
+            // the game keeps reading Apex's factor, which stays valid (static storage)
+            LOG_WARNING("[LotVisibility] Restore failed; the hysteresis stays");
+            return;
         }
-    } else if (g_externalPatched) {
-        LOG_INFO("[LotVisibility] Apex did not own the existing JMP override; opcode left untouched");
     }
 
-    LOG_INFO("[LotVisibility] Camera-bias visibility override stopped");
+    LOG_INFO("[LotVisibility] Stopped");
     g_running = false;
     g_externalS3SS = false;
     ResetState();
 }
 
-void Tick() {
-    // Code branch is installed once, like S3SS. No live-setting maintenance is needed here.
-}
+void Tick() {}
 
 bool Running() {
     std::lock_guard<std::mutex> guard(g_lock);
@@ -151,8 +150,8 @@ std::string StatusText() {
     std::lock_guard<std::mutex> guard(g_lock);
     if (!g_running) return "Off";
     if (g_externalS3SS) return "Handled by Sims3SettingsSetter";
-    if (g_externalPatched) return "On; visibility override already owned externally";
-    if (g_owned) return std::format("On; camera-bias JZ->JMP at {:#010x}", g_address);
+    if (g_externalPatched) return "On; another mod's visibility override is in place";
+    if (g_owned) return "On; detailed lots keep their detail about 11% farther";
     return "On";
 }
 

@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Korean}
 const I18n::Pair kPairs[] = {
+    {"Lot Streaming: lots that load together share the work, so panning stutters less", "부지 스트리밍: 함께 불러오는 부지들이 작업을 나눠, 카메라 이동이 덜 끊겨요"},
+    {"Night Lights: fence shadows on the lawn update in a fraction of the time", "야간 조명: 잔디 위 울타리 그림자가 훨씬 짧은 시간에 갱신돼요"},
+    {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "부지 스트리밍: 부지 표시 안정 유지가 경계의 부지를 전체 디테일로 유지해요"},
+    {"Lot Streaming: Smooth lot streaming keeps working with up to 16 detailed lots", "부지 스트리밍: 부드러운 부지 스트리밍이 최대 16개 디테일 부지에서도 작동해요"},
     {"Night Lights: extra safety so old lamp light cannot stay stuck on the ground", "야간 조명: 예전 조명 빛이 지면에 남지 않도록 보호 추가"},
     {"Banding Fix: High-precision scene for smoother gradients, on by default", "밴딩 수정: 고정밀 장면으로 더 부드러운 그라데이션, 기본값 켜짐"},
     {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "밴딩 수정: 메뉴를 건드리지 않는 더 고운 그레인과 새로 디자인한 카드"},
@@ -389,7 +393,7 @@ const I18n::Pair kPairs[] = {
     {"How far lots stay in full detail; 70 is the game's, 300 the tested maximum", "부지가 전체 디테일로 유지되는 거리. 70은 게임 기본값, 300은 테스트된 최대값"},
     {"How many lots can be in full detail at once; 8 is the game's, 16 the tested maximum. More lots use more memory", "동시에 전체 디테일로 표시할 수 있는 부지 수. 8은 게임 기본값, 16은 테스트된 최대값. 부지가 많을수록 메모리를 더 사용해요"},
     {"Fewer lots switching detail back and forth while the camera moves", "카메라가 움직일 때 디테일이 오락가락하는 부지가 줄어요"},
-    {"The camera's viewing angle alone no longer makes lots load or unload", "카메라 시야각만으로는 더 이상 부지를 불러오거나 내리지 않아요"},
+    {"Lots in full detail keep it a little farther, so lots at the edge stop switching back and forth", "전체 디테일인 부지는 조금 더 멀리까지 유지되어, 경계에 있는 부지가 계속 바뀌지 않아요"},
     {"No lot detail streaming while the map view is open; it resumes when it closes", "지도 보기가 열려 있는 동안 부지 디테일 스트리밍을 멈추고, 닫으면 다시 시작해요"},
     {"Spreads the work of building a lot's objects", "부지 오브젝트 생성 작업을 분산해요"},
     {"Builds a lot's objects a few at a time instead of all at once", "부지의 오브젝트를 한꺼번에가 아니라 몇 개씩 생성해요"},
@@ -431,7 +435,7 @@ const I18n::Pair kPairs[] = {
     {"Sets the internal lot-streaming transition threshold to 12; this does not change the game's Max Active Lots option", "내부 부지 스트리밍 전환 임계값을 12로 설정해요. 게임의 Max Active Lots 옵션은 바뀌지 않아요"},
     {"Handled by Sims3SettingsSetter: Apex leaves the LoD active-lot threshold untouched", "Sims3SettingsSetter가 처리 중: Apex는 LoD 활성 부지 임계값을 건드리지 않아요"},
     {"Keep lot visibility stable", "부지 표시 안정 유지"},
-    {"Stops camera viewing angle alone from making lots load or unload", "카메라 시야각만으로 부지를 불러오거나 내리지 않게 해요"},
+    {"Lots in full detail keep it a little farther instead of switching back and forth", "전체 디테일인 부지는 계속 바뀌지 않고 조금 더 멀리까지 유지돼요"},
     {"Handled by Sims3SettingsSetter: Apex leaves the lot visibility override untouched", "Sims3SettingsSetter가 처리 중: Apex는 부지 표시 재정의를 건드리지 않아요"},
     {"Already applied by another patch: Apex leaves the existing visibility override untouched", "다른 패치가 이미 적용함: Apex는 기존 표시 재정의를 건드리지 않아요"},
     {"Files and objects", "파일과 오브젝트"},
@@ -2142,7 +2146,7 @@ const I18n::Pair kPairs[] = {
     {"Loads nearby lots into full detail gradually instead of letting several lot-detail transitions start together. Uses the game's own native Lot LoD throttle and a 5.0 camera-speed threshold; no lot loader is replaced. Part of Apex Radiance. Credits: @loinyx", "여러 부지 디테일 전환이 한꺼번에 시작되지 않도록 주변 부지를 점진적으로 전체 디테일로 불러와요. 게임 자체의 Lot LoD 제한과 5.0 카메라 속도 임계값을 쓰며, 부지 로더를 대체하지 않아요. Apex Radiance의 일부. 제작: @loinyx"},
     {"Pauses lot-detail streaming while the neighborhood map is open, then resumes it after the map closes. This avoids doing lot streaming work during the map transition. Part of Apex Radiance. Credits: @loinyx", "동네 지도가 열려 있는 동안 부지 디테일 스트리밍을 멈추고 지도를 닫으면 다시 시작해요. 지도 전환 중에 부지 스트리밍 작업을 하지 않게 해요. Apex Radiance의 일부. 제작: @loinyx"},
     {"Builds regular objects of a lot in small continuation windows instead of one large burst when the lot enters detailed view. Building and apartment shells, large exterior geometry and flora stay synchronous. Part of Apex Radiance. Credits: @loinyx", "부지가 디테일 보기에 들어올 때 일반 오브젝트를 한 번에 몰아서가 아니라 작은 연속 구간으로 나눠 생성해요. 건물과 아파트 외형, 큰 외부 지오메트리, 식물은 동기식으로 유지돼요. Apex Radiance의 일부. 제작: @loinyx"},
-    {"Disables the camera-view distance bias in the lot visibility metric so lots do not load or unload purely because the viewing angle changes. Part of Apex Radiance. Credits: @loinyx", "부지 표시 기준에서 카메라 시야 거리 편향을 꺼서, 보는 각도가 바뀐다는 이유만으로 부지를 불러오거나 내리지 않아요. Apex Radiance의 일부. 제작: @loinyx"},
+    {"Lots already in full detail keep it a little farther than where a new lot is promoted, so lots at the edge of the detail distance or of the detailed-lot limit stop switching back and forth. Part of Apex Radiance. Credits: @loinyx", "이미 전체 디테일인 부지는 새 부지가 전환되는 지점보다 조금 더 멀리까지 디테일을 유지해, 거리나 디테일 부지 수의 경계에 있는 부지가 계속 바뀌지 않아요. Apex Radiance의 일부. 제작: @loinyx"},
     {"Remembers which of the game's packages holds each file the game asks for, so it does not search every package again. Fewer small stutters when objects, textures and lots load. Part of Apex Radiance. Credits: @loinyx", "게임이 요청하는 각 파일이 어느 패키지에 있는지 기억해 모든 패키지를 다시 찾지 않아요. 오브젝트, 텍스처, 부지를 불러올 때 작은 끊김이 줄어요. Apex Radiance의 일부. 제작: @loinyx"},
     {"Lets Faster Game File Lookups also remember files that no package has, so the game does not search every package for them again and again. Needs Faster Game File Lookups. Part of Apex Radiance. Credits: @loinyx", "더 빠른 게임 파일 검색이 어떤 패키지에도 없는 파일도 기억하게 해서, 게임이 그 파일을 찾으려고 모든 패키지를 반복해서 뒤지지 않아요. 더 빠른 게임 파일 검색이 필요해요. Apex Radiance의 일부. 제작: @loinyx"},
     {"Remembers which files of a kind each of the game's packages holds, so Create a Sim and Sim loading do not read the list of every package again. Fewer small stutters when Sims change outfits or load. Part of Apex Radiance. Credits: @loinyx", "게임의 각 패키지가 어떤 종류의 파일을 가지고 있는지 기억해서, 심 만들기와 심 불러오기 때 모든 패키지 목록을 다시 읽지 않아요. 심이 의상을 바꾸거나 불러올 때 작은 끊김이 줄어요. Apex Radiance의 일부. 제작: @loinyx"},

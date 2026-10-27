@@ -63,6 +63,7 @@
 // Part of Apex Radiance. Credits: @loinyx
 
 #include "lot_lighting_motion.h"
+#include "lot_build_share.h"
 #include "level_light_share.h"
 #include "room_light_queue.h"
 #include "apex_log.h"
@@ -142,7 +143,8 @@ std::atomic<uint32_t> c_calls{0}, c_scaled{0}, c_eyeFails{0}, c_editMoving{0}, c
 // [[0x011ECBC4]+0x1B4] == 0, the loading screen), then the build steps run until it is spent. While the camera moves
 // the 20 / 35 ms slices made hitches as lots stream in. The 5-byte "mov eax,[0x011ECBC4]" at 0x00AEA6D8, right after the
 // budget is chosen and before the 2000 ms test, becomes a CALL of LotBuildStub: it lowers the budget to kBuildMovingMs
-// while the camera moves (the loading screen's 2000 is still written after it) and loads eax as the original did.
+// while the camera moves (the loading screen's 2000 is still written after it) and loads eax as the original did. First
+// the shared lot build time (lot_build_share.h) caps the slice to what this frame's build budget leaves for the call.
 constexpr uint32_t kBuildMovingMs = 6;
 uintptr_t g_buildSite = 0;
 uintptr_t g_buildGlobal = 0; // the address the original "mov eax,[imm32]" reads
@@ -154,7 +156,9 @@ void SampleCamera(uint64_t now);
 
 void __cdecl LotBuildAdjust(uint32_t* budget) {
     c_buildCalls.fetch_add(1, std::memory_order_relaxed);
-    if (!g_on.load(std::memory_order_acquire) || *budget <= kBuildMovingMs || *budget >= 1000) return;
+    if (!g_on.load(std::memory_order_acquire) || *budget >= 1000) return;
+    *budget = LotBuildShare::CapSlice(*budget);
+    if (*budget <= kBuildMovingMs) return;
     const uint64_t now = GetTickCount64();
     SampleCamera(now);
     if (!MovingAt(now)) return;
@@ -675,6 +679,11 @@ bool Start(std::string* error) {
     }
     g_started = true;
     UpdatePresentSampler();
+    // the share caps each lot's slice through the stub above: without it the first lot would keep its whole slice
+    std::string shareError;
+    if (!g_buildOn) LOG_WARNING("[LotLightingMotion] Shared lot build time left off: the lot build slice is not in place");
+    else if (!LotBuildShare::Start(&shareError)) LOG_WARNING("[LotLightingMotion] Shared lot build time left off: " + shareError);
+    else if (!g_presentRegistered) LOG_WARNING("[LotLightingMotion] Shared lot build time: no per-frame sample, a frame is taken as 50 ms");
     LOG_INFO(std::format("[LotLightingMotion] On: the call at {:#010x} to the lot lighting budget {:#010x} goes through Apex; camera eye [[{:#010x}]+{:#x}]+{:#x}; "
                          "budget while moving {} ms for the current lot; lot build slice {}",
                          call, budget, g_rootGlobal, g_camOff, g_eyeOff, g_budgetMs.load(),
@@ -685,6 +694,7 @@ bool Start(std::string* error) {
 void Stop() {
     std::lock_guard<std::mutex> lock(g_ctrl);
     if (!g_started) return;
+    LotBuildShare::Stop();
     g_on.store(false, std::memory_order_release); // the hook returns the game's budget from now on
     uint8_t cur[5] = {};
     if (MemPatch::ReadBytes(g_call, cur, sizeof cur) && cur[0] == 0xE8 && CallTargetOf(cur, g_call) == reinterpret_cast<uintptr_t>(&Hook_LotLightBudget)) {
@@ -706,6 +716,7 @@ void Stop() {
 }
 
 bool Running() { return g_on.load(std::memory_order_acquire); }
+uint32_t FrameIndex() { return g_frame.load(std::memory_order_relaxed); }
 
 void NoteDrainSpent(float ms) { g_drainSpent.store(std::bit_cast<uint32_t>(ms), std::memory_order_relaxed); }
 float SettleScale() { return g_settleScale.load(std::memory_order_relaxed); }

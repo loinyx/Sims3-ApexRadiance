@@ -36,6 +36,9 @@ an FPS gain, complete climate coverage or resolution of texture allocation stall
 | 2026-10-04 | `2584e01` | Resource restoration and UV fallback | 13,682 passed, 0 failed | Native D3D9 |
 | 2026-10-04 | `92582b6` | 60 GPU scenarios of the production lot HLSL at night vs the previous HLSL | Within one 8-bit LSB, including soft-edge weights | Native D3D9 |
 | 2026-10-04 | `92582b6` | Failure injection of the c28..c31 read | Native draw kept | Native D3D9 |
+| 2026-10-27 | branch `perf/lot-streaming` | `tools/crt_math_test`: `Pow2` against `std::ldexp` over every half value; `ApexMath::Hypot` against `std::hypot(float, float)` over 26 million pairs (262 million in a one-off run), random bit patterns included | Same bits for every half and every pair | Offline CPU check |
+| 2026-10-27 | branch `perf/lot-streaming` | `tools/lighting_prepare_test` with the production `FenceGapsBuild` (now `ApexMath::Hypot`) against its reference | 36 geometry cases exactly equal | Offline CPU check |
+| 2026-10-27 | branch `perf/lot-streaming` | Microbenchmark (x86, /O2 /fp:precise) | `std::hypot` 124.7 ns -> `ApexMath::Hypot` 2.2 ns a call; `std::ldexp` 17.7 ns -> `Pow2` 2.5 ns | Offline CPU check |
 
 Since `0c418a6` the lot UV fixture compiles the replacement at ps_3_0, the profile production uses (`kReplacementPsId`);
 at ps_2_0 it had no c32 and failed since the lot shade's mask rows moved there.

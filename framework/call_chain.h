@@ -15,8 +15,9 @@
 //     Anything else (another module redirected it) makes Install fail and is never overwritten by Remove.
 // Used by the Frame Profiler (dev build, the outer layer, "Scene pending nodes" counter) and the scene node budget
 // (features/scene_budget.h) on Scene::BeginFrame's CALL of the pending-node drain, and by the compositor readback part of
-// Faster Sim building (features/compositor_readback.h) on four calls of the texture builder. Thread-safe (Install / Remove
-// serialise on one mutex; Next is lock-free).
+// Faster Sim building (features/compositor_readback.h) on four calls of the texture builder, and by the shared lot build
+// time (features/lot_build_share.h, outer) and the Frame Profiler's "Lot load stages" on the lot renderer's load stages.
+// Thread-safe (Install / Remove serialise on one mutex; Next is lock-free).
 #include <atomic>
 #include <cstdint>
 #include <string>
@@ -29,9 +30,11 @@ enum class Site : int {
     CompState2,   // CALL 0x005FDFEC in 0x005FDEF0 -> 0x005FDDE0 thiscall(job), ret 4 (render the tile, read it back)
     CompState3,   // CALL 0x005FDFFF in 0x005FDEF0 -> 0x005FD420 thiscall(job), ret 4 (use the locked tile)
     CompReadback, // CALL 0x005FDC8A in 0x005FDBF0 -> 0x005FBCE0 thiscall(format), ret 4 (GetRenderTargetData)
+    LotLoadStages, // CALL 0x00AEB306 in the lot renderer update 0x00AEB2E0 -> 0x00AEA680 thiscall() -> al (a lot's load stages)
+    LotPassRenderer, // CALL 0x00C7CEDF in the lot pass 0x00C7CEA0 -> 0x00AEB2E0 thiscall(float dt), ret 4 (the renderer update)
     Count
 };
-enum class Layer : int { FrameProfiler, SceneBudget, CompositorReadback, Count }; // lower = outer
+enum class Layer : int { LotBuildGate, FrameProfiler, SceneBudget, CompositorReadback, Count }; // lower = outer
 
 // Installs `hook` as `layer` of `site` (true when installed, or already installed). error: why not.
 bool Install(Site site, Layer layer, void* hook, std::string* error);

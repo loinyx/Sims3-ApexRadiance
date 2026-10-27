@@ -281,3 +281,32 @@ arrival relit the rooms: a lamp edit took 5.8 to 7.2 s to settle.
 **Outcome:** the four lot detail switches (Extended lot detail, Smooth lot streaming, Keep lot visibility stable, Pause
 lot streaming in map view) are off by default, and the built-in profiles no longer carry them, so applying a profile
 leaves the Lot Streaming page as the player set it.
+
+### 2026-10-27: native metric, throttle threshold and shared build time
+
+**Context:** a study of the lot streaming path on Steam 1.67.2 (disassembly of 0x00C6D570, 0x00C6C290, 0x00C62D80,
+0x00C69FF0, 0x00C7CEA0, 0x00AEB2E0, 0x00AEA680) with the Frame Profiler hitch reports (6251 hitches) and 11 LotLoadAnalysis
+captures (244 completed lots).
+
+**Finding:**
+
+- The lot metric 0x00C62D80 is a squared distance from the camera's target point (camera +0x230 / +0x240 / +0x200 from
+  0x00961440) to the lot, with no view angle. The JZ at 0x00C63015 only decides whether a detailed lot gets
+  `metric -= Active Lot Bias` (8.0): under 3 m of distance. Sims3SettingsSetter's `JZ` -> `JMP` removed that small
+  hysteresis rather than a view bias.
+- LotLodScoring returns early while the camera target's mean speed over 10 samples exceeds `+0xEC`. The throttle flag
+  applies only while Max Active Lots <= the global 0x01184328 (12): with Extended lot detail at 16 lots the throttle was
+  off. With it on, one lot is promoted per call and none while 0x00C69FF0 reports a promoted lot still building.
+- The renderer update ignores the load stages' result (0x00AEB306), and the stages already return 0 without a state
+  change when their lot's lock is busy.
+- Recorded loads: a lot's build CPU is p50 12.5 ms, p90 30.8 ms, max 117 ms; its time from request to done is p50 2.3 s,
+  p90 8.3 s, of which the lighting wait of stage 20 is p50 1.9 s, p90 7.4 s. Up to 7 lots built in one frame; 96 hitches
+  were dominated by the load stages (55 with the camera still, average 23.5 ms, mostly 7 lots in the frame).
+- "Lot object scene nodes" (the object throttle's per-object call) cost 3.3 ms over 6075 calls in a profiler session: the
+  object throttle saves almost nothing where it acts; the expensive part is the scene drain that the scene node budget
+  already spreads.
+
+**Outcome:** Keep lot visibility stable now multiplies a detailed lot's metric by 0.81 (the same 8 bytes); Smooth lot
+streaming keeps the threshold at Max Active Lots; the lot load stages share one budget per frame (6 ms still, 4 ms
+moving), started with Lot Lighting While Moving. The object throttle is kept as it was; removing it is left to the
+maintainer. Offline evidence in the [validation page](../validation/performance-lot-streaming.md).

@@ -57,6 +57,8 @@
 //                         edge leaves (radius 0.25 m): the edge of its light on the story below is a penumbra, not a line
 //   room_fill             a room lit only through an opening takes back, on its floor and walls, the light its own lit surfaces
 //                         reflect: albedo x the mean light its texels took in its last solve (stairwell_bounce.h RoomFill)
+//   lot_build_share       the load stages of every streaming lot share one build budget per frame (lot_build_share.h); off = each
+//                         lot keeps its own 20 / 35 ms slice (6 ms while the camera moves)
 #include <atomic>
 
 namespace DevSwitches {
@@ -116,6 +118,7 @@ inline std::atomic<bool> stairwellBounce{false};
 inline std::atomic<bool> borrowedLightAdapt{false};
 inline std::atomic<bool> softSlabEdges{false};
 inline std::atomic<bool> roomFill{false};
+inline std::atomic<bool> lotBuildShare{false};
 
 void Load(); // init thread, before the features start; logs the values
 
@@ -148,5 +151,6 @@ inline bool StairwellBounce() { return kCompiled ? stairwellBounce.load(std::mem
 inline bool BorrowedLightAdapt() { return kCompiled ? borrowedLightAdapt.load(std::memory_order_relaxed) : kShipped; }
 inline bool SoftSlabEdges() { return kCompiled ? softSlabEdges.load(std::memory_order_relaxed) : kShipped; }
 inline bool RoomFill() { return kCompiled ? roomFill.load(std::memory_order_relaxed) : kShipped; }
+inline bool LotBuildShare() { return kCompiled ? lotBuildShare.load(std::memory_order_relaxed) : kShipped; }
 
 } // namespace DevSwitches

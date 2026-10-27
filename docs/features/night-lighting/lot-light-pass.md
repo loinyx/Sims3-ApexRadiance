@@ -8,7 +8,7 @@ border. Near the border the two sides blend over 3 m, so a lamp standing next to
 
 | | |
 |---|---|
-| Availability | Released (part of Night Lighting since 0.1.0). Lot UV alignment, daylight terrain term and the constant-read guard: Released in 2.6.0. Rain and other weather variants recognised (exact rain variant and by structure): Released in 2.7.0. Lamp shade on lot ground (*Walls shade lamp light near the ground*) and lamps through the outside walls' openings: Released in 2.13.0. Crown shade from trees and bushes: Released in 2.14.0. A shade that takes only the light of the lamps a wall blocks, closed gates and narrow fence gaps, the room mask and lamp shade on snowy lots, the lot map aligned on each axis, *Indoor light adds to the ground*, and a lot's shade shown with its chunks' texels: Released in 2.15.3. Verified winter terrain layouts and exact fence-gap length reuse: Released in 2.15.6. Light past 1 with the walls' shade on it: Released in 2.16.0. |
+| Availability | Released (part of Night Lighting since 0.1.0). Lot UV alignment, daylight terrain term and the constant-read guard: Released in 2.6.0. Rain and other weather variants recognised (exact rain variant and by structure): Released in 2.7.0. Lamp shade on lot ground (*Walls shade lamp light near the ground*) and lamps through the outside walls' openings: Released in 2.13.0. Crown shade from trees and bushes: Released in 2.14.0. A shade that takes only the light of the lamps a wall blocks, closed gates and narrow fence gaps, the room mask and lamp shade on snowy lots, the lot map aligned on each axis, *Indoor light adds to the ground*, and a lot's shade shown with its chunks' texels: Released in 2.15.3. Verified winter terrain layouts and exact fence-gap length reuse: Released in 2.15.6. Light past 1 with the walls' shade on it: Released in 2.16.0. Fence grid and half-float reads without x87 control-word calls: Released in 2.16.2. |
 | Default | On |
 | Menu | Lighting > Ground > Ground & Lots > *Game fixes* (folded) > *Street lamps light lots* |
 | Configuration | `[patches.NightTerrainRelight]` `luzDoPosteNaGramaDoLote` in `ApexRadiance.toml` |
@@ -270,6 +270,13 @@ tile off; `NoteGate`, from `DrawObjectLamp`, rig modes 1 and 2), fills it with a
 top of the two pieces. A gate stays while its gap does; it goes only when it has not been drawn for 30 s while the fence
 on both sides was drawn in the last 2 s, so off screen it stays closed. Gaps narrower than 0.4 m (a post, pieces a few
 cm short) are always closed. Developer builds log the gaps, the gates and the objects near a gap that were not taken.
+The fence grid is built again whenever a fence group changes, which happens often while the camera pans; its piece
+lengths and end distances use `ApexMath::Hypot` ([`features/fast_math.h`](../../../features/fast_math.h)), a double
+`sqrtsd` of the exact squares, instead of `std::hypot`, whose x87 CRT path sets and restores the FPU control word on
+every call (`__ctrlfp` and `__hypothlp` were the hottest Apex samples of the "Render frame (game)" hitches). The results
+are the same bits. The half-float vertex and texture reads (`ReadElement`, the light probe, the outdoor delta) scale by
+`Pow2` ([`features/half_float.h`](../../../features/half_float.h)) instead of `std::ldexp` for the same reason, with the
+same bits.
 
 **Tree and bush crowns** (2.14.0). The crowns seen in the night foliage draws are porous occluders of the same mask: a
 lamp's ray through a crown keeps exp(-k u s) of its light, so the shade under a tree is soft and partial

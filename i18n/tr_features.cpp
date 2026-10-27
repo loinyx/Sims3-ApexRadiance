@@ -55,13 +55,13 @@ const I18n::Entry kEntries[] = {
      "Las estructuras de edificios y apartamentos, la geometría exterior grande y la vegetación siguen siendo síncronas. Parte de " APEX_PRODUCT_NAME ". Créditos: @loinyx",
      "Construit les objets ordinaires d'un terrain par petites étapes de continuation au lieu d'un gros bloc lors du passage en vue détaillée. "
      "Les structures de bâtiments et d'appartements, la grande géométrie extérieure et la végétation restent synchrones. Fait partie d'" APEX_PRODUCT_NAME ". Crédits : @loinyx"},
-    {"Disables the camera-view distance bias in the lot visibility metric so lots do not load or unload purely because the viewing angle changes. "
+    {"Lots already in full detail keep it a little farther than where a new lot is promoted, so lots at the edge of the detail distance or of the detailed-lot limit stop switching back and forth. "
      "Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
-     "Desativa o viés de distância ligado ao ângulo da câmera na métrica de visibilidade dos lotes, para que eles não carreguem ou descarreguem apenas porque o ângulo mudou. "
+     "Lotes que já estão em detalhe total o mantêm um pouco além do ponto em que um lote novo é promovido, e os lotes no limite da distância ou da quantidade de lotes detalhados param de trocar para lá e para cá. "
      "Parte do " APEX_PRODUCT_NAME ". Créditos: @loinyx",
-     "Desactiva el sesgo de distancia ligado al ángulo de la cámara en la métrica de visibilidad de los solares, para que no se carguen o descarguen solo porque cambió el ángulo. "
+     "Los solares que ya tienen todo el detalle lo mantienen un poco más allá del punto en que se promueve un solar nuevo, y los solares en el límite de la distancia o del número de solares detallados dejan de cambiar una y otra vez. "
      "Parte de " APEX_PRODUCT_NAME ". Créditos: @loinyx",
-     "Désactive le biais de distance lié à l'angle de caméra dans la métrique de visibilité des terrains, afin qu'ils ne se chargent ou déchargent pas uniquement parce que l'angle change. "
+     "Les terrains déjà en détail complet le gardent un peu au-delà du point où un nouveau terrain est promu : ceux à la limite de la distance ou du nombre de terrains détaillés ne changent plus sans arrêt. "
      "Fait partie d'" APEX_PRODUCT_NAME ". Crédits : @loinyx"},
     {"Remembers which of the game's packages holds each file the game asks for, so it does not search every package again. Fewer small "
      "stutters when objects, textures and lots load. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",

@@ -6,6 +6,15 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k2162Improved[] = {
+    "Lot Streaming: lots that load together share the work, so panning stutters less",
+    "Night Lights: fence shadows on the lawn update in a fraction of the time",
+    nullptr};
+constexpr const char* k2162Fixed[] = {
+    "Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail",
+    "Lot Streaming: Smooth lot streaming keeps working with up to 16 detailed lots",
+    nullptr};
+
 constexpr const char* k2161Empty[] = {nullptr};
 constexpr const char* k2161Fixed[] = {
     "Night Lights: extra safety so old lamp light cannot stay stuck on the ground",
@@ -387,6 +396,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"2.16.2", "2026-10-27", nullptr, k2162Improved, k2162Fixed},
     {"2.16.1", "2026-10-27", k2161Empty, k2161Empty, k2161Fixed},
     {"2.16.0", "2026-10-27", k2160Added, k2160Improved, k2160Fixed},
     {"2.15.6", "", k2156Empty, k2156Improved, k2156Fixed},

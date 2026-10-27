@@ -24,6 +24,7 @@
 #define NOMINMAX
 #endif
 #include "lot_light_bridge.h"
+#include "half_float.h"
 #include "terrain_bake_rule.h"
 #include "rt_outdoor_lamps.h"
 #include "game_addresses.h"
@@ -1263,7 +1264,7 @@ void FenceGapsBuild() {
     std::unordered_set<uint64_t> seen;
     std::vector<float> lengths;
     lengths.reserve(g_fenceAll.size());
-    for (const auto& w : g_fenceAll) lengths.push_back(std::hypot(w.x1 - w.x0, w.z1 - w.z0));
+    for (const auto& w : g_fenceAll) lengths.push_back(ApexMath::Hypot(w.x1 - w.x0, w.z1 - w.z0));
     const auto end = [](const GroundShadow::Wall& w, int e, float& x, float& z) { x = e ? w.x1 : w.x0, z = e ? w.z1 : w.z0; };
     for (size_t i = 0; i < g_fenceAll.size(); i++) {
         const GroundShadow::Wall& a = g_fenceAll[i];
@@ -1289,7 +1290,7 @@ void FenceGapsBuild() {
                         for (int eb = 0; eb < 2; eb++) {
                             float bx, bz;
                             end(b, eb, bx, bz);
-                            const float dx = bx - ax, dz = bz - az, d = std::hypot(dx, dz);
+                            const float dx = bx - ax, dz = bz - az, d = ApexMath::Hypot(dx, dz);
                             if (d < kGapNarrow && ApexMath::Fabs(b.y0 - a.y0) < 1.0f) joined = true; // a piece goes on from this end: no gap
                             if (!(d >= kGapNarrow && d < best) || (dx * ox + dz * oz) < 0.98f * d) continue; // in line, ahead of this end
                             float fx, fz;
@@ -1311,7 +1312,7 @@ void FenceGapsBuild() {
             if (!seen.insert(gp.key).second) continue;
             gp.ga = g_fenceAllGroup[i], gp.gb = g_fenceAllGroup[bj];
             gp.closed = best < kGapMin;
-            gp.length = std::hypot(gp.w.x1 - gp.w.x0, gp.w.z1 - gp.w.z0);
+            gp.length = ApexMath::Hypot(gp.w.x1 - gp.w.x0, gp.w.z1 - gp.w.z0);
             const uint32_t k = static_cast<uint32_t>(g_fenceGaps.size());
             g_fenceGaps.push_back(gp);
             for (int ci = FenceCell(std::min(ax, bx) - 0.5f); ci <= FenceCell(std::max(ax, bx) + 0.5f); ci++)
@@ -1459,7 +1460,7 @@ bool ReadElement(const BYTE* p, BYTE type, float out[4]) {
         const uint16_t* hf = reinterpret_cast<const uint16_t*>(p);
         for (int i = 0; i < 4; i++) {
             const uint32_t h = hf[i], sign = (h >> 15) & 1, ex = (h >> 10) & 0x1F, man = h & 0x3FF;
-            float f = ex == 0 ? std::ldexp(static_cast<float>(man), -24) : ex == 31 ? INFINITY : std::ldexp(static_cast<float>(man | 0x400), static_cast<int>(ex) - 25);
+            float f = ex == 0 ? static_cast<float>(man) * Pow2(-24) : ex == 31 ? INFINITY : static_cast<float>(man | 0x400) * Pow2(static_cast<int>(ex) - 25);
             out[i] = sign ? -f : f;
         }
         return true;

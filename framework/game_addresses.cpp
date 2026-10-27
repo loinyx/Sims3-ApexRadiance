@@ -246,6 +246,8 @@ constexpr Info kInfo[] = {
     {"LotDetailRequest", 0x00AC20E0},
     {"LotLodThrottleTest", 0x00C6C695},
     {"LotLodThrottleFlag", 0x011ECBC0},
+    {"LotLodActiveThresholdTest", 0x00C6C6B7},
+    {"LotLodActiveThreshold", 0x01184328},
     {"LotVisibilityCameraBiasJZ", 0x00C63015},
     // Steam 1.67.2 addresses found offline in TS3W.exe with the fork's EA signatures (06/10, each unique; PostRemoteMethodCall: the
     // one called from LotDetailRequest at 0x00AC2117, the other copy has 4 unrelated callers)
@@ -302,6 +304,10 @@ constexpr Info kInfo[] = {
     {"CompReadback", 0x005FBCE0},
     {"CompTileFetch", 0x005FDBF0},
     {"LightObjectRemove", 0x006C7610},
+    {"LotLoadStagesCall", 0x00AEB306},
+    {"LotPassRendererCall", 0x00C7CEDF},
+    {"LotRendererUpdate", 0x00AEB2E0},
+    {"LotLoadStages", 0x00AEA680},
     {"LotBuildBudgetLoad", 0x00AEA6D8},
     {"ProbeDiffuseWrite", 0x006B4720},
     {"ProbeSpecularWrite", 0x006B4B10},
@@ -627,6 +633,9 @@ const Entry kTable[] = {
     {Id::LotDetailRequest, K::Sig, W::Text, None, 0, {{"53 8A 5C 24 08 56 8B F1 8A 86 C1 00 00 00 3A C3 0F 84 ?? ?? ?? ?? 80 BE C9 00 00 00 00", 0, M::At}, NOSIG}},
     {Id::LotLodThrottleTest, K::InRange, W::Text, Id::LotLodScoring, 0x700, {{"80 3D ?? ?? ?? ?? 00", 0, M::At}, NOSIG}},
     {Id::LotLodThrottleFlag, K::Deref, W::Image, Id::LotLodThrottleTest, 2, {NOSIG, NOSIG}},
+    // the throttle only applies while Max Active Lots (edx) <= this threshold: mov edx,[edi]; cmp edx,[imm32]; mov byte [esp+1Ah],1
+    {Id::LotLodActiveThresholdTest, K::InRange, W::Text, Id::LotLodScoring, 0x700, {{"8B 17 3B 15 ?? ?? ?? ?? C6 44 24 ?? 01", 2, M::At}, NOSIG}},
+    {Id::LotLodActiveThreshold, K::Deref, W::Image, Id::LotLodActiveThresholdTest, 2, {NOSIG, NOSIG}},
     // ---- Lot visibility override: camera-view distance bias JZ -> JMP ----
     {Id::LotVisibilityCameraBiasJZ, K::Sig, W::Text, None, 0,
      {{"74 ?? F3 0F 10 44 24 08 F3 0F 5C 87 E0 00 00 00 F3 0F 11 44 24 08 D9 44 24 08 5F 5E 8B E5 5D C2 0C 00", 0, M::At}, NOSIG}},
@@ -664,6 +673,10 @@ const Entry kTable[] = {
     {Id::LampLitCall, K::Sig, W::Text, None, 0, {{"8B CF E8 ?? ?? ?? ?? 8B 44 24 1C 3B 46 1C 74 09 8B 4E 14 50 E8 ?? ?? ?? ?? 8B 4E 1C 51 8B 4E 14 E8", 0, M::At}, NOSIG}},
     {Id::LampMarkCall, K::Sig, W::Text, None, 0, {{"3B 46 1C 74 09 8B 4E 14 50 E8 ?? ?? ?? ?? 8B 4E 1C 51 8B 4E 14 E8", 21, M::At}, NOSIG}},
     {Id::LampMark, K::Target, W::Text, Id::LampMarkCall, 0, {NOSIG, NOSIG}},
+    {Id::LotLoadStagesCall, K::Sig, W::Text, None, 0, {{"80 7E 1E 00 75 0D 80 7E 1F 00 75 07 8B CE E8 ?? ?? ?? ?? 8D 8E 70 03 00 00 E8", 14, M::At}, NOSIG}},
+    {Id::LotPassRendererCall, K::Sig, W::Text, None, 0, {{"8B 4E 08 85 C9 74 0D D9 44 24 10 51 D9 1C 24 E8", 15, M::At}, NOSIG}},
+    {Id::LotRendererUpdate, K::Target, W::Text, Id::LotPassRendererCall, 0, {{"56 8B F1 E8 ?? ?? ?? ?? 80 7E 0C 00 0F 84 ?? ?? ?? ?? 83 7E 2C 00 74 ?? 80 7E 1E 00", 0, M::At}, NOSIG}},
+    {Id::LotLoadStages, K::Target, W::Text, Id::LotLoadStagesCall, 0, {{"81 EC BC 00 00 00 53 56 8B F1 33 DB 38 5E 1E 74", 0, M::At}, NOSIG}},
     {Id::LotBuildBudgetLoad, K::Sig, W::Text, None, 0, {{"C7 44 24 14 14 00 00 00 E8 ?? ?? ?? ?? 3B C3 74 1B 8B 4E 14 8B 56 10 51 52 8B C8 E8 ?? ?? ?? ?? 84 C0 74 08 C7 44 24 14 23 00 00 00 A1 ?? ?? ?? ?? 3B C3 74 10 39 98 B4 01 00 00 75 08 C7 44 24 14 D0 07 00 00", 0x2C, M::At}, NOSIG}},
     {Id::LightObjectRemove, K::Sig, W::Text, None, 0, {{"53 8B 5C 24 08 56 57 8B 7C 24 14 6A 00 6A 01 57 8B F1 53 8D 86 D4 00 00 00 50 E8 ?? ?? ?? ?? 6A 00 6A 01 57 53 8D 8E 90 00 00 00 51 8B CE E8", 0, M::At}, NOSIG}},
     {Id::ProbeDiffuseWrite, K::Sig, W::Text, None, 0, {{"83 EC 28 53 55 56 57 8B F9 80 BF 97 2C 00 00 00 74 ?? 8B B7 58 2C 00 00", 0, M::At}, NOSIG}},
@@ -779,6 +792,8 @@ const Group kGroups[] = {
     {"RoomLightQueue", {Id::RoomPriorityCall, Id::RoomPriority, Id::LodStepSite, Id::KeepClassA, Id::KeepClassB, Id::RoomPickJump, Id::RoomPick, Id::RoomSolveStep,
                         Id::StopwatchCtor, Id::StopwatchStart, Id::StopwatchElapsed, Id::PriorityLotObject, Id::PriorityLotTest}},
     {"LotLodStreaming", {Id::LotLodScoring, Id::LotLodThrottleTest, Id::LotLodThrottleFlag, Id::WorldManagerPtr}},
+    {"LotLodActiveFollow", {Id::LotLodActiveThresholdTest, Id::LotLodActiveThreshold}}, // optional part of LotLodStreaming
+    {"LotBuildShare", {Id::LotLoadStagesCall, Id::LotLoadStages, Id::LotPassRendererCall, Id::LotRendererUpdate, Id::WorldManagerPtr, Id::PriorityLotObject, Id::PriorityLotTest}},
     {"LotLodDistanceProbe", {Id::LotLodScoring, Id::LotDetailRequest}},
     {"LotObjectThrottle", {Id::LotAddObjectsToScene, Id::LotUpdateObjectSceneNode, Id::ScriptMessageScopeCtor, Id::ScriptMessageScopeDtor,
                             Id::PostRemoteMethodCall, Id::IsObjectLargeOrFlora}},

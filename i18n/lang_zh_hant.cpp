@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Traditional, Taiwan / Hong Kong)}
 const I18n::Pair kPairs[] = {
+    {"Lot Streaming: lots that load together share the work, so panning stutters less", "地段串流：同時載入的地段分擔工作，移動鏡頭時卡頓更少"},
+    {"Night Lights: fence shadows on the lawn update in a fraction of the time", "夜間照明：草坪上柵欄陰影的更新只需原本的一小部分時間"},
+    {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "地段串流：「保持地段可見性穩定」讓邊緣地段保持完整細節"},
+    {"Lot Streaming: Smooth lot streaming keeps working with up to 16 detailed lots", "地段串流：「平滑地段串流」在最多 16 個細節地段時依然有效"},
     {"Night Lights: extra safety so old lamp light cannot stay stuck on the ground", "夜間照明：額外保護，避免燈具的舊光殘留在地面"},
     {"Banding Fix: High-precision scene for smoother gradients, on by default", "色帶修正：高精度場景讓漸層更平滑，預設開啟"},
     {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "色帶修正：重新設計的卡片，顆粒更細且不影響選單"},
@@ -389,7 +393,7 @@ const I18n::Pair kPairs[] = {
     {"How far lots stay in full detail; 70 is the game's, 300 the tested maximum", "地段保持完整細節的距離；70 為遊戲預設，300 為測試過的上限"},
     {"How many lots can be in full detail at once; 8 is the game's, 16 the tested maximum. More lots use more memory", "同時能以完整細節顯示的地段數；8 為遊戲預設，16 為測試過的上限。地段越多，記憶體用量越大"},
     {"Fewer lots switching detail back and forth while the camera moves", "鏡頭移動時，減少地段反覆切換細節"},
-    {"The camera's viewing angle alone no longer makes lots load or unload", "僅因鏡頭視角變化不再造成地段載入或卸載"},
+    {"Lots in full detail keep it a little farther, so lots at the edge stop switching back and forth", "已是完整細節的地段會在稍遠處仍保持細節，邊緣地段不再來回切換"},
     {"No lot detail streaming while the map view is open; it resumes when it closes", "開啟地圖檢視時暫停地段細節串流；關閉後恢復"},
     {"Spreads the work of building a lot's objects", "分散建立地段物件的工作"},
     {"Builds a lot's objects a few at a time instead of all at once", "一次建立少量地段物件，而不是一次全部建立"},
@@ -431,7 +435,7 @@ const I18n::Pair kPairs[] = {
     {"Sets the internal lot-streaming transition threshold to 12; this does not change the game's Max Active Lots option", "將內部地段串流轉換門檻設為 12；這不會變更遊戲的 Max Active Lots 選項"},
     {"Handled by Sims3SettingsSetter: Apex leaves the LoD active-lot threshold untouched", "由 Sims3SettingsSetter 處理：Apex 不會變更 LoD 活動地段門檻"},
     {"Keep lot visibility stable", "保持地段可見性穩定"},
-    {"Stops camera viewing angle alone from making lots load or unload", "讓地段不再僅因鏡頭視角而載入或卸載"},
+    {"Lots in full detail keep it a little farther instead of switching back and forth", "已是完整細節的地段會在稍遠處仍保持細節，而不是來回切換"},
     {"Handled by Sims3SettingsSetter: Apex leaves the lot visibility override untouched", "由 Sims3SettingsSetter 處理：Apex 不會變更地段可見性覆寫"},
     {"Already applied by another patch: Apex leaves the existing visibility override untouched", "已由其他修補套用：Apex 不會變更現有的可見性覆寫"},
     {"Files and objects", "檔案與物件"},
@@ -2142,7 +2146,7 @@ const I18n::Pair kPairs[] = {
     {"Loads nearby lots into full detail gradually instead of letting several lot-detail transitions start together. Uses the game's own native Lot LoD throttle and a 5.0 camera-speed threshold; no lot loader is replaced. Part of Apex Radiance. Credits: @loinyx", "逐步將附近地段載入完整細節，而不是讓多個地段細節轉換同時開始。使用遊戲原生的 Lot LoD 節流與 5.0 的鏡頭速度門檻；不會取代任何地段載入器。Apex Radiance 的一部分。製作：@loinyx"},
     {"Pauses lot-detail streaming while the neighborhood map is open, then resumes it after the map closes. This avoids doing lot streaming work during the map transition. Part of Apex Radiance. Credits: @loinyx", "開啟鄰里地圖時暫停地段細節串流，地圖關閉後再恢復。這樣可以避免在地圖轉換期間進行地段串流工作。Apex Radiance 的一部分。製作：@loinyx"},
     {"Builds regular objects of a lot in small continuation windows instead of one large burst when the lot enters detailed view. Building and apartment shells, large exterior geometry and flora stay synchronous. Part of Apex Radiance. Credits: @loinyx", "地段進入詳細檢視時，以小批次延續建立其一般物件，而不是一次大量建立。建築與公寓外殼、大型外部幾何與植物仍同步建立。Apex Radiance 的一部分。製作：@loinyx"},
-    {"Disables the camera-view distance bias in the lot visibility metric so lots do not load or unload purely because the viewing angle changes. Part of Apex Radiance. Credits: @loinyx", "停用地段可見性計算中的鏡頭視角距離偏差，讓地段不會僅因視角變化而載入或卸載。Apex Radiance 的一部分。製作：@loinyx"},
+    {"Lots already in full detail keep it a little farther than where a new lot is promoted, so lots at the edge of the detail distance or of the detailed-lot limit stop switching back and forth. Part of Apex Radiance. Credits: @loinyx", "已是完整細節的地段會比新地段升級的位置稍遠一點仍保持細節，因此處於距離或細節地段數量邊緣的地段不再來回切換。Apex Radiance 的一部分。致謝：@loinyx"},
     {"Remembers which of the game's packages holds each file the game asks for, so it does not search every package again. Fewer small stutters when objects, textures and lots load. Part of Apex Radiance. Credits: @loinyx", "記住遊戲要求的每個檔案位於哪個遊戲套件中，不必再搜尋每個套件。物件、材質與地段載入時小卡頓更少。Apex Radiance 的一部分。製作：@loinyx"},
     {"Lets Faster Game File Lookups also remember files that no package has, so the game does not search every package for them again and again. Needs Faster Game File Lookups. Part of Apex Radiance. Credits: @loinyx", "讓「更快的遊戲檔案查找」也記住沒有任何套件包含的檔案，讓遊戲不必一再搜尋每個套件。需要「更快的遊戲檔案查找」。Apex Radiance 的一部分。製作：@loinyx"},
     {"Remembers which files of a kind each of the game's packages holds, so Create a Sim and Sim loading do not read the list of every package again. Fewer small stutters when Sims change outfits or load. Part of Apex Radiance. Credits: @loinyx", "記住遊戲每個套件包含哪些類型的檔案，讓創造模擬市民與模擬市民載入時不必再讀取每個套件的清單。模擬市民更換服裝或載入時小卡頓更少。Apex Radiance 的一部分。製作：@loinyx"},

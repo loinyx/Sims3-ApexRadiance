@@ -69,7 +69,7 @@ The live settings are registered in the WorldManager constructor (0xC6763C..0xC6
 | Global | Live setting | Default |
 |---|---|---|
 | 0x011ECBC0 (byte) | "Throttle Lot LoD Transitions" | not in the initialized data dump, so presumably 0 (.bss) *(inferred)* |
-| 0x01184328 (int) | "Throttle Lot LoD Transitions Max Active Lot Threshold" | **12**, range 0..12. LSO "sets" it to 12, which is already the default |
+| 0x01184328 (int) | "Throttle Lot LoD Transitions Max Active Lot Threshold" | **12**, range 0..12. LSO "sets" it to 12, which is already the default. The throttle applies only while Max Active Lots (`+0xE4`) is at most this value (`cmp edx,[0x01184328]` at 0x00C6C6B7) |
 | 0x0118432C (int) | "Force LoD Min Priority" | 1, range 0..4 |
 
 "World Stats" (0x01079400) is also registered.
@@ -186,8 +186,10 @@ main loop 0xECA960
        │   ├ terrain heightmap 0xC2A290 (tool/edit paths only)
        │   ├ terrain update 0xC845C0(terrain, &point, lowCameraFlag)   ← Smooth Streaming queue
        │   ├ if !+0x258: lot LOD scoring 0xC6C290(dt, &point, ...)
-       │   │     ├ metric 0xC62D80 per lot (Active Lot Bias for detailed lots; LSO JZ→JMP at 0xC63015)
-       │   │     ├ throttle test [0x11ECBC0], threshold [0x1184328], 0xC69FF0
+       │   │     ├ early out while the point's mean speed (10 samples, +0x310) > +0xEC
+       │   │     ├ metric 0xC62D80 per lot (squared distance; Active Lot Bias for detailed lots, 0xC63015)
+       │   │     ├ rank (priority, metric); the first min(+0xE4, ...) eligible lots stay or get detailed
+       │   │     ├ throttle test [0x11ECBC0] && +0xE4 <= [0x1184328]: one promotion per call, none while 0xC69FF0
        │   │     └ detail request 0xAC20E0 → PostRemoteMethodCall(AddLotObjectsToScene 0xAC1130 / demotion)
        │   └ road network, water, sky, ... updates
        └ lot pass 0xC7CEA0([0x11ECE58], dt)                          ← Smooth Streaming frame gate
@@ -279,8 +281,6 @@ LSO's install log lines, as seen on 28/09:
   *(not checked)*.
 - The default of "Throttle Lot LoD Transitions" (0x011ECBC0 is presumably zero-initialized) and whether the live-setting
   registry loads saved values over the constructor's defaults.
-- What exactly 0xC62D80 measures (it is some distance squared, scaled), and whether LSO's JZ→JMP removes a hysteresis
-  (static reading) or a view-angle bias (LSO's description).
 - The world cache's role in streaming.
 
 ## Address reference
@@ -293,9 +293,12 @@ LSO's install log lines, as seen on 28/09:
 | 0x00C6D570 | `WorldManager::Update` thiscall(float, float), RET 8, called at 0xC7E403 | `f_C6D570.asm`; LSO detours it |
 | 0x00C845C0 | Terrain update, thiscall(terrain, float* camera, char), RET 8, called at 0xC6D68F | Smooth Streaming site, profiler |
 | 0x00C6C290 | Lot LOD scoring, thiscall(4), RET 0x10, called at 0xC6D6E4 (skipped while WorldManager+0x258 != 0) | `f_C6D570.asm`, profiler |
-| 0x00C62D80 | Lot distance/visibility metric (RET 0xC), called from 0xC6C5D7 | `calls.tsv`, disassembly |
+| 0x00C62D80 | Lot metric thiscall(WorldManager; point*, lot, out float*), RET 0xC, called from 0xC6C5D7: the squared distance from the camera's target point to the lot (with [0x011843F8] set, to the lot's rectangle in lot space, else to its centre), no view angle; a detailed lot then gets `-= [WorldManager+0xE0]` | disassembly |
 | 0x00C63015 | `je` in 0xC62D80 that skips `metric -= [WorldManager+0xE0]` when `FUN_00AB1860(lot)` (= lot+0xC1) is 0. LSO patches it to `jmp` | disassembly; LSO `lotVisibilityCameraBiasJZ` |
-| 0x00C69FF0 | Blocks the next promotion while a promoted lot is still loading (LoD throttle) | Smooth Streaming note 2 |
+| 0x00C69FF0 | Blocks the next promotion while a promoted lot is still loading (LoD throttle): 1 when a detailed lot fails 0x00D432E0 or the scene object manager's 0x00700DC0(lot id, -1) | Smooth Streaming note 2, disassembly |
+| 0x00C6C6B7 | `cmp edx,[0x01184328]` (edx = Max Active Lots): the throttle is on only when it is not above the threshold | disassembly |
+| 0x00C7CEDF | The lot pass's CALL of the renderer update 0x00AEB2E0 (other callers: the impostor builder at 0x00AEB3F9 / 0x00AEB41C) | disassembly |
+| 0x00961440 | Camera: the point LotLodScoring and the terrain update use (+0x230 when +0x6DC, else +0x240 when +0x6DD, else +0x200) | disassembly |
 | 0x00C6C695 | `cmp byte [0x011ECBC0],0`: the "Throttle Lot LoD Transitions" test in the scoring | `full.asm` |
 | 0x00AC20E0 | Lot detail request, thiscall(1), RET 4. If lot+0xC1 != arg and lot+0xC9 == 0, stores the flag and posts AddLotObjectsToScene (arg 1) or the demotion (arg 0) through PostRemoteMethodCall. Callers 0xC6A0F9, 0xC6C7C3, 0xC6C7CE, 0xAE61A7 | profiler header |
 | 0x00AC1130 | `Lot::AddLotObjectsToScene` thiscall(lot, char initialLoad, char alwaysVisibleOnly), RET 8. Called from 0xACE1E2 | LSO pattern, PLANO §3, `calls.tsv` |

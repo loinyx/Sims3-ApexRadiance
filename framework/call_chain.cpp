@@ -31,6 +31,8 @@ const SiteInfo kSiteInfo[kSites] = {
     {"texture builder state 2 (render and read back a tile)", GameAddr::Id::CompState2Call, GameAddr::Id::CompTileRender},
     {"texture builder state 3 (use the tile)", GameAddr::Id::CompState3Call, GameAddr::Id::CompTileRead},
     {"texture builder tile readback", GameAddr::Id::CompReadbackCall, GameAddr::Id::CompReadback},
+    {"lot renderer load stages", GameAddr::Id::LotLoadStagesCall, GameAddr::Id::LotLoadStages},
+    {"lot pass renderer update", GameAddr::Id::LotPassRendererCall, GameAddr::Id::LotRendererUpdate},
 };
 static_assert(std::size(kSiteInfo) == static_cast<size_t>(Site::Count), "kSiteInfo must list every Site in order");
 
