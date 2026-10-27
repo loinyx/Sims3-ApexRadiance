@@ -95,6 +95,12 @@ inline bool RoomSolveCauses() { return kCompiled && roomSolveCauses.load(std::me
 //                          hold did not reduce its solves) a room restarted again within 2 s is picked for its solve once its
 //                          restarts stop for 300 ms (at most 1 s of hold); a lamp edit's rooms never wait (restart_settle.h)
 inline std::atomic<bool> restartSettle{false};
+//   opening_skip_check     (measures only) the rooms near openings sent again whose finished solve saw the inputs they have now,
+//                          counted and checked by room_solve_causes' hash of their next solve (level_light_share.cpp, OpeningInputs)
+//   opening_skip           (not shipped; off unless the key says true) those rooms are not sent again
+inline std::atomic<bool> openingSkipCheck{false}, openingSkip{false};
+inline bool OpeningSkipCheck() { return kCompiled && openingSkipCheck.load(std::memory_order_relaxed); }
+inline bool OpeningSkip() { return kCompiled && openingSkip.load(std::memory_order_relaxed); }
 inline bool RestartSettle() { return kCompiled && restartSettle.load(std::memory_order_relaxed); }
 inline bool ReleaseDebugBuffers() { return kCompiled ? releaseDebugBuffers.load(std::memory_order_relaxed) : kShipped; }
 inline bool LeftLotRelease() { return kCompiled ? leftLotRelease.load(std::memory_order_relaxed) : kShipped; }

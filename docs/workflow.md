@@ -53,11 +53,11 @@ In PowerShell use the call operator: `& "C:\Program Files (x86)\...\MSBuild.exe"
 
 A development build (`/p:ApexStudyDefines=APEX_DEVELOPMENT_BUILD_FLAVOR`, which defines `kCompiled` in
 [`features/dev_switches.h`](../features/dev_switches.h)) reads the `[dev_build]` table of `ApexRadiance.toml` once at
-start-up (`DevSwitches::Load`) and logs every value. A missing key reads as on (except `restart_settle`, which reads as off); Save keeps the table because it
+start-up (`DevSwitches::Load`) and logs every value. A missing key reads as on (except `restart_settle` and `opening_skip`, which read as off); Save keeps the table because it
 preserves tables it does not write. Each switch can be turned off to compare against the previous behaviour.
 
 In every other build the accessors return `kShipped` (true) for the 29 switches that change the game or free memory, and false for the
-4 diagnostics, the unfinished `foliage_sun_shadow` and `restart_settle` (not yet measured in game). A switch therefore never needs a menu option to ship; a shipped behaviour
+5 diagnostics, the unfinished `foliage_sun_shadow`, `restart_settle` and `opening_skip` (not yet proven in game). A switch therefore never needs a menu option to ship; a shipped behaviour
 follows the setting named on its page.
 
 | Key | Public build | Effect | Page |
@@ -66,6 +66,8 @@ follows the setting named on its page.
 | `daylight_log` | Developer only | Logs the sky state that sets outdoor darkness every 5 s and adds an F8 section; no lighting change | [light-diag.md](features/dev-tools/light-diag.md#file-sections) |
 | `memory_owners` | Developer only | Apex's own memory by owner (`[ApexMemory]`, F8) | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
 | `restart_settle` | Developer only, off unless set to true | A room restarted again within 2 s is picked for its solve once its restarts stop for 300 ms (at most 1 s of hold); a lamp edit's rooms never wait; the maps a room ends with are the same | [room-light-queue.md](features/performance/room-light-queue.md#restart-settle-development-builds) |
+| `opening_skip_check` | Developer only | Counts the rooms near openings sent again whose finished solve saw the inputs they have now, and books their next solve's comparison apart (`[OpeningSkip]`, `[RoomSolveCauses]`); no lighting change | [room-light-queue.md](features/performance/room-light-queue.md#measuring-who-sends-rooms-to-the-solve) |
+| `opening_skip` | Developer only, off unless set to true | Those rooms are not sent again | [room-light-queue.md](features/performance/room-light-queue.md#measuring-who-sends-rooms-to-the-solve) |
 | `room_solve_causes` | Developer only | Counts who sends rooms to the solve: invalidates by caller, finished solves by class and room, camera settled, stopped or moving (`[RoomSolveCauses]` every minute); no lighting change | [room-light-queue.md](features/performance/room-light-queue.md#measuring-who-sends-rooms-to-the-solve) |
 | `release_debug_buffers` | Shipped | Gives back F7, F6 and F8 buffers once they are no longer needed | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
 | `left_lot_release` | Shipped | Gives back Quick outdoor lamp edits' kept parts of rooms no loaded lot holds (two 10 s sweeps in a row), Real-time outdoor lamps' CPU copy of the occluders once uploaded, and the mask texture of a lot not drawn for 2 minutes (made again at its next draw) | [performance/README.md](features/performance/README.md#the-switches) |

@@ -2507,6 +2507,9 @@ bool ReadSolveNote(const BYTE* room, SolveNote& n) {
 }
 
 using RoomSolveStart_t = void(__thiscall*)(void* room);
+bool OpeningSkipOn();                     // below, with QueueOpeningRooms (opening_skip_check / opening_skip)
+void OpeningSolveStart(const BYTE* room); // (the same)
+void OpeningSolveEnd(const BYTE* room);   // (the same)
 void SyncHardWallTops(); // below (development builds, hard_wall_tops)
 float RoomNormOf(const BYTE* room); // below
 void NoteNormEnd(BYTE* room, float norm); // below (inner_norm_settle)
@@ -2519,6 +2522,7 @@ void __fastcall RoomSolveStartHook(BYTE* room) {
     reinterpret_cast<RoomSolveStart_t>(kRoomSolveStart)(room);
     ++t_bounceSolve;
     if (room && DevSwitches::RoomSolveCauses()) RoomSolveCauses::SolveStart(reinterpret_cast<uintptr_t>(room)); // (its texels come after state 0)
+    if (room && OpeningSkipOn()) OpeningSolveStart(room);
     if (room && ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) DragLite::NoteSolveStarted(room); // (the re-pick throttle while a lamp is dragged)
     if (room) LoadTiming::NoteRoomSolveStart(); // atomics only
     // Quick outdoor lamp edits (Instant only): a room 0 solve's parts are kept from here (light tree thread)
@@ -7471,6 +7475,7 @@ void __fastcall FinalizeHook(BYTE* room) {
     // Quick outdoor lamp edits (Instant only): the last texel the solve packed is read while the maps are still locked
     if (room && OutdoorDelta::Enabled() && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
         HookGuard::Run("OutdoorDelta before finalize", [room] { OutdoorDelta::BeforeFinalize(room); });
+    if (room && OpeningSkipOn()) OpeningSolveEnd(room); // (opening_skip_check) the inputs at its end, before the game's finalize
     // (room_solve_causes) the class this solve wrote, read before the game's finalize moves the room on
     if (room && DevSwitches::RoomSolveCauses()) {
         SolveNote n{};
@@ -7753,6 +7758,103 @@ void ShareIndoorLights(BYTE* treeLevel, BYTE* room) {
     if (!info) NoteIndoorRoom(tracker, S, id, false);
 }
 
+// (development builds: opening_skip_check measures, opening_skip acts) QueueOpeningRooms sends a lot's rooms near openings
+// to solve again, also rooms already solved; in game most of those re-solves rewrote the same texels
+// (docs/history/performance-room-light-queue.md). What such a solve reads that those sends follow, hashed: the light options
+// (PhysicsKey), the lot's geometry (LotGeometryKey), every lamp registered on any story of the lot (the fields
+// RoomLampSignature compares, with its room), and every other room's ambient (+0x110), normalisation (+0x160) and boost.
+// The lamps and rooms are summed, so the order of the game's maps does not matter. A room whose finished solve began and
+// ended with the inputs it has now is predicted to solve to the same texels again.
+uint64_t EntryHash(uintptr_t entry) {
+    uint64_t h = 1469598103934665603ull;
+    const auto mix = [&h](uint64_t v) { h = (h ^ v) * 1099511628211ull; };
+    const auto dwords = [&mix](uintptr_t at, int n) {
+        for (int k = 0; k < n; k++) mix(*reinterpret_cast<const uint32_t*>(at + k * 4));
+    };
+    mix(static_cast<uint32_t>(*reinterpret_cast<const int*>(entry + 0x1C)));
+    const uintptr_t light = *reinterpret_cast<const uintptr_t*>(entry + 0x24);
+    if (!light) return h;
+    mix(light);
+    mix(*reinterpret_cast<const BYTE*>(light + 0x100) & 0x60);
+    if (const uintptr_t info = *reinterpret_cast<const uintptr_t*>(entry + 0x20)) mix(*reinterpret_cast<const BYTE*>(info + 0x90) & 0x6);
+    dwords(light + 0x10, 4);
+    dwords(light + 0xE0, 3);
+    dwords(light + 0x120, 3);
+    dwords(light + 0x130, 1);
+    const int type = *reinterpret_cast<const int*>(light + 0xB0);
+    if (type == 4 || type == 5) dwords(light + 0x170, 13);
+    return h;
+}
+uint64_t OpeningInputs(const BYTE* room) {
+    uintptr_t mgr = 0;
+    int id = -1;
+    if (!room || !RoomKey(room, mgr, id) || !mgr) return 0;
+    const uintptr_t tracker = MgrTracker(mgr);
+    const uint64_t geo = tracker ? LevelLightShare::LotGeometryKey(room) : 0;
+    if (!geo) return 0;
+    uint64_t h = LevelLightShare::PhysicsKey() * 1099511628211ull ^ geo;
+    uint64_t lamps = 0, rooms = 0;
+    for (int S = -4; S <= 7; S++) {
+        const uintptr_t m = SafeStoryManager(tracker, S);
+        if (!m) continue;
+        WalkRegistry(TreeLevel(tracker, S), [&](uintptr_t entry) { lamps += EntryHash(entry) * (static_cast<uint64_t>(S + 5) * 2 + 1); });
+        const uintptr_t rb = *reinterpret_cast<const uintptr_t*>(m + 0x234);
+        const uint32_t rc = *reinterpret_cast<const uint32_t*>(m + 0x238);
+        for (uint32_t b = 0; rb && rc < 100000 && b < rc; b++) {
+            int guard = 0;
+            for (uintptr_t rn = *reinterpret_cast<const uintptr_t*>(rb + b * 4); rn && guard++ < 10000; rn = *reinterpret_cast<const uintptr_t*>(rn + 0x80)) {
+                const int rid = *reinterpret_cast<const int*>(rn);
+                const BYTE* other = *reinterpret_cast<const BYTE* const*>(rn + 0x10);
+                if (!other || other == room) continue;
+                uint64_t r = 1469598103934665603ull;
+                const auto mix = [&r](uint64_t v) { r = (r ^ v) * 1099511628211ull; };
+                mix(static_cast<uint64_t>(S + 5));
+                mix(static_cast<uint32_t>(rid));
+                for (int k = 0; k < 4; k++) mix(*reinterpret_cast<const uint32_t*>(other + (k < 3 ? 0x110 + k * 4 : 0x160)));
+                mix(Boosted(reinterpret_cast<uintptr_t>(other), rid, m) ? 1u : 0u);
+                rooms += r;
+            }
+        }
+    }
+    h = (h ^ lamps) * 1099511628211ull;
+    h = (h ^ rooms) * 1099511628211ull;
+    return h ? h : 1;
+}
+struct OpeningSig {
+    uint64_t start = 0, solved = 0; // the inputs at the solve's start; at its end when they were the same (else 0)
+};
+std::mutex g_openSigMx;
+std::unordered_map<uintptr_t, OpeningSig> g_openSig;
+std::atomic<long> g_openPredicted{0}, g_openSkipped{0}, g_openSent{0};
+bool OpeningSkipOn() { return DevSwitches::OpeningSkipCheck() || DevSwitches::OpeningSkip(); }
+void OpeningSolveStart(const BYTE* room) {
+    const uint64_t sig = HookGuard::Run("LevelLightShare opening inputs (start)", uint64_t{0}, [room] { return OpeningInputs(room); });
+    std::lock_guard<std::mutex> lk(g_openSigMx);
+    if (g_openSig.size() > 8192) g_openSig.clear();
+    OpeningSig& s = g_openSig[reinterpret_cast<uintptr_t>(room)];
+    s.start = sig;
+    s.solved = 0;
+}
+void OpeningSolveEnd(const BYTE* room) {
+    const uint64_t sig = HookGuard::Run("LevelLightShare opening inputs (end)", uint64_t{0}, [room] { return OpeningInputs(room); });
+    std::lock_guard<std::mutex> lk(g_openSigMx);
+    const auto it = g_openSig.find(reinterpret_cast<uintptr_t>(room));
+    if (it != g_openSig.end()) it->second.solved = sig && it->second.start == sig ? sig : 0;
+}
+// A solved room (state 4 or 5) whose last solve saw the inputs it has now
+bool OpeningUnchanged(const BYTE* room) {
+    const int state = *reinterpret_cast<const int*>(room + 0xF0);
+    if (state != 4 && state != 5) return false;
+    uint64_t solved = 0;
+    {
+        std::lock_guard<std::mutex> lk(g_openSigMx);
+        const auto it = g_openSig.find(reinterpret_cast<uintptr_t>(room));
+        if (it == g_openSig.end() || !it->second.solved) return false;
+        solved = it->second.solved;
+    }
+    return HookGuard::Run("LevelLightShare opening inputs (send)", uint64_t{0}, [room] { return OpeningInputs(room); }) == solved;
+}
+
 // Rooms of a lot near a stair opening (receivers on both sides), plus the rooms that took lamps before: they gather again
 void QueueOpeningRooms(uintptr_t tracker, std::vector<std::pair<int, int>>* sent = nullptr) {
     std::vector<std::pair<int, int>> todo;
@@ -7785,8 +7887,21 @@ void QueueOpeningRooms(uintptr_t tracker, std::vector<std::pair<int, int>>* sent
     todo.erase(std::unique(todo.begin(), todo.end()), todo.end());
     if (sent) *sent = todo;
     int queued = 0;
-    for (const auto& [S, r] : todo)
+    for (const auto& [S, r] : todo) {
+        // (opening_skip_check / opening_skip) a solved room whose inputs are those its finished solve saw
+        if (OpeningSkipOn())
+            if (void* mgrS = reinterpret_cast<void*>(StoryManager(tracker, S)))
+                if (const BYTE* room = static_cast<const BYTE*>(reinterpret_cast<RoomById_t>(kRoomById)(mgrS, r)); room && OpeningUnchanged(room)) {
+                    g_openPredicted.fetch_add(1, std::memory_order_relaxed);
+                    if (DevSwitches::OpeningSkip()) {
+                        g_openSkipped.fetch_add(1, std::memory_order_relaxed);
+                        continue;
+                    }
+                    if (DevSwitches::RoomSolveCauses()) RoomSolveCauses::NotePrediction(reinterpret_cast<uintptr_t>(room));
+                }
         if (QueueRoom(tracker, S, r, true)) queued++;
+        g_openSent.fetch_add(1, std::memory_order_relaxed);
+    }
     g_indoorQueued.fetch_add(queued, std::memory_order_relaxed);
     if (!kPublicBuild && (!todo.empty() || !summary.empty()))
         GatherLog(tracker, std::format("rooms near openings sent to gather again: {} of {} (the others were waiting already) |{}", queued, todo.size(), summary));
@@ -15021,6 +15136,9 @@ void OnPresent() {
                 const auto s = RestartSettle::Global().Take();
                 LOG_INFO(std::format("[RestartSettle] Last minute: {} picks of restarted rooms held, {} let through after 1 s of hold", s.held, s.capped));
             }
+            if (OpeningSkipOn())
+                LOG_INFO(std::format("[OpeningSkip] Last minute: {} rooms near openings sent, {} of them solved with the inputs they have now, {} not sent",
+                                     g_openSent.exchange(0), g_openPredicted.exchange(0), g_openSkipped.exchange(0)));
         }
     }
     // A lot that becomes the high-quality lot (the camera enters it, or comes back) solves all its rooms at once, as after a

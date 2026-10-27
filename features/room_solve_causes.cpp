@@ -37,12 +37,13 @@ struct HashSlot {
     uintptr_t room = 0;
     uint64_t at = 0, prev = 0;
     int prevCls = -1;
-    bool hasPrev = false, pending = false, pFlag = false, pQueue = false;
+    bool hasPrev = false, pending = false, pFlag = false, pQueue = false, predictNext = false, pPredicted = false;
     uintptr_t pCaller = 0;
 };
 constexpr int kHashes = 2048;
 HashSlot g_hashes[kHashes];
 uint32_t g_same = 0, g_differ = 0, g_otherClass = 0, g_unhashed = 0;
+uint32_t g_predicted[4] = {}; // the undos predicted to change nothing: same, different, other class, not hashed
 // The solve hashing on this thread (a solve's texels run on the thread that runs it)
 thread_local uintptr_t t_hashRoom = 0;
 thread_local uint64_t t_hash = 0;
@@ -113,6 +114,7 @@ void Clear() {
     for (auto& v : g_invalidates) v = 0;
     for (auto& v : g_states) v = 0;
     g_same = g_differ = g_otherClass = g_unhashed = 0;
+    for (auto& v : g_predicted) v = 0;
     for (auto& v : g_frames) v = 0;
 }
 
@@ -139,7 +141,9 @@ std::string Line(double seconds) {
     s += "; invalidates " + Split(g_invalidates) +
          std::format(" (room waiting {}, mid-solve {}, solved {}, other {})", g_states[kWaiting], g_states[kMidSolve], g_states[kSolved], g_states[kOtherState]) +
          std::format("; finished solves undone, next solve of the same class same {}, different {}, other class {}, not hashed {}", g_same, g_differ,
-                     g_otherClass, g_unhashed);
+                     g_otherClass, g_unhashed) +
+         std::format("; of them predicted unchanged same {}, different {}, other class {}, not hashed {}", g_predicted[0], g_predicted[1], g_predicted[2],
+                     g_predicted[3]);
     std::vector<const CauseSlot*> causes;
     for (const auto& c : g_causes)
         if (c.caller) causes.push_back(&c);
@@ -177,7 +181,9 @@ void NoteInvalidate(uintptr_t caller, bool onFlag, bool viaQueueRoom, uintptr_t 
     // a finished solve undone: its hash waits for the room's next solve (the first undo of it is the one compared)
     if (room && state == kSolved)
         if (HashSlot* h = HashOf(room, nowMs, false); h && h->hasPrev && !h->pending)
-            h->pending = true, h->pCaller = caller, h->pFlag = onFlag, h->pQueue = viaQueueRoom;
+            h->pending = true, h->pCaller = caller, h->pFlag = onFlag, h->pQueue = viaQueueRoom, h->pPredicted = h->predictNext;
+    if (room)
+        if (HashSlot* h = HashOf(room, nowMs, false)) h->predictNext = false;
     for (int k = 0, i = static_cast<int>((caller * 2654435761u + (onFlag ? 1u : 0u)) % kCauses); k < kCauses; k++, i = (i + 1) % kCauses) {
         CauseSlot& c = g_causes[i];
         if (!c.caller) c.caller = caller, c.onFlag = onFlag, c.viaQueue = viaQueueRoom;
@@ -208,6 +214,11 @@ void NoteSolve(uintptr_t mgr, int id, int level, uint32_t lot, int cls) {
     g_roomOverflow++;
 }
 
+void NotePrediction(uintptr_t room) {
+    std::lock_guard<std::mutex> lk(g_mx);
+    if (HashSlot* h = HashOf(room, GetTickCount64(), false)) h->predictNext = true;
+}
+
 void SolveStart(uintptr_t room) {
     t_hashRoom = room;
     t_hash = kFnvBasis;
@@ -231,6 +242,7 @@ void SolveEnd(uintptr_t room, int cls, const float* packing, int n, uint64_t now
         int outcome = !hashed ? 3 : s->prevCls != cls ? 2 : s->prev == h ? 0 : 1; // same, different, other class, not hashed
         uint32_t* const total[4] = {&g_same, &g_differ, &g_otherClass, &g_unhashed};
         (*total[outcome])++;
+        if (s->pPredicted) g_predicted[outcome]++;
         for (auto& c : g_causes)
             if (c.caller == s->pCaller && c.onFlag == s->pFlag && c.viaQueue == s->pQueue) {
                 uint32_t* const mine[4] = {&c.same, &c.differ, &c.otherClass, &c.unhashed};
