@@ -14,6 +14,7 @@
 #include "build_flavor.h"
 #include "game_addresses.h"
 #include "memory_patch.h"
+#include "dev_switches.h"
 #include "imgui.h"
 #include <windows.h>
 #include <atomic>
@@ -75,6 +76,8 @@ constexpr uint64_t kLowBytes = 320ull << 20;    // the largest free block under 
 constexpr uint64_t kLetGoBytes = 160ull << 20;  // under this: the reserve let go too (it is then the largest block left)
 constexpr uint64_t kRoomBytes = 512ull << 20; // free left beside the reserve before it is taken again
 constexpr DWORD kPeriodMs = 4000, kShrinkGapMs = 60000, kRetakeAfterMs = 30000;
+constexpr uint64_t kEarlyIdleBytes = 64ull << 20; // (idle_cache_early) idle files above this: the cache emptied without pressure
+constexpr DWORD kEarlyGapMs = 120000;
 
 std::vector<MemPatch::PatchLocation> g_patches;
 std::atomic<bool> g_running{false};
@@ -85,6 +88,8 @@ DWORD g_releasedAt = 0;
 std::atomic<void*> g_rs{nullptr};      // the ResourceSystem, seen by its update
 std::atomic<DWORD> g_rsThread{0};       // the thread that runs its update
 std::atomic<bool> g_shrinkWanted{false};
+std::atomic<bool> g_earlyShrink{false}; // (idle_cache_early) the wanted shrink is the early one: its log line says so
+uint64_t g_earlyUsedBefore = 0;         // address space in use when it was asked (watch thread)
 std::atomic<uint64_t> g_largest{0}, g_lowest{~0ull};
 std::atomic<long> g_saves{0}, g_saveFails{0}, g_shrinks{0}, g_lets{0}, g_takes{0};
 std::atomic<uint64_t> g_freedBytes{0};
@@ -255,10 +260,16 @@ void __fastcall UpdateHook(void* rs, void*, int arg) {
     }
     if (!saving && g_shrinkWanted.exchange(false, std::memory_order_relaxed)) {
         uint64_t freed = 0;
+        const LARGE_INTEGER t0 = [] { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t; }();
+        const bool early = g_earlyShrink.exchange(false);
         if (ShrinkNow(rs, freed)) {
-            char line[160];
-            std::snprintf(line, sizeof line, "[MemoryGuard] Largest free block low: the game's resource cache emptied (%llu MB of idle files)",
-                          static_cast<unsigned long long>(freed >> 20));
+            LARGE_INTEGER t1, f;
+            QueryPerformanceCounter(&t1);
+            QueryPerformanceFrequency(&f);
+            char line[200];
+            std::snprintf(line, sizeof line, "[MemoryGuard] %s: the game's resource cache emptied (%llu MB of idle files) in %.1f ms",
+                          early ? "Idle files over 64 MB (idle_cache_early)" : "Largest free block low",
+                          static_cast<unsigned long long>(freed >> 20), double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(f.QuadPart));
             LogLine(ApexLog::Level::Info, line);
         }
     }
@@ -332,8 +343,17 @@ int __fastcall SaveDispatchHook(void* owner,void*,void* a,void* b) {
     return result;
 }
 
+// Address space in use: the user range minus its free blocks
+uint64_t UsedOf(const MemoryPolicy::Space& space) {
+    SYSTEM_INFO si{};
+    GetSystemInfo(&si);
+    const uint64_t span = uint64_t(reinterpret_cast<uintptr_t>(si.lpMaximumApplicationAddress)) + 1 - reinterpret_cast<uintptr_t>(si.lpMinimumApplicationAddress);
+    return span > space.free ? span - space.free : 0;
+}
+
 DWORD WINAPI Watch(LPVOID) {
-    DWORD lastShrink = 0;
+    DWORD lastShrink = 0, lastEarly = 0, lastSpaceLog = 0;
+    int earlyTicks = 0; // watch periods since the early shrink was asked (its effect is logged two periods later)
     MemoryPolicy::Pressure pressure;
     for (;;) {
         if (WaitForSingleObject(g_stop, kPeriodMs) != WAIT_TIMEOUT) break;
@@ -349,6 +369,33 @@ DWORD WINAPI Watch(LPVOID) {
             MemoryTelemetry::pressure.store(stressed,std::memory_order_relaxed);
             g_pressureAt.store(now64);
             if (stressed && now64>=g_nextAutoTrim.load()) g_autoTrimWanted.store(true);
+        }
+        if (DevSwitches::IdleCacheEarly()) {
+            const DWORD t = GetTickCount();
+            void* rs = g_rs.load(std::memory_order_relaxed);
+            const uint64_t idle = rs ? IdleBytes(rs) : 0, used = UsedOf(space);
+            if (earlyTicks && ++earlyTicks > 2) { // the early shrink ran (8 s ago at most): what the address space did
+                earlyTicks = 0;
+                char line[200];
+                std::snprintf(line, sizeof line, "[MemoryGuard] After the early empty: address space in use %llu MB (%lld MB since it was asked), idle files %llu MB",
+                              static_cast<unsigned long long>(used >> 20), (static_cast<long long>(used) - static_cast<long long>(g_earlyUsedBefore)) / 1048576,
+                              static_cast<unsigned long long>(idle >> 20));
+                LogLine(ApexLog::Level::Info, line);
+            }
+            if (t - lastSpaceLog >= 60000) {
+                lastSpaceLog = t;
+                char line[200];
+                std::snprintf(line, sizeof line, "[MemoryGuard] Address space in use %llu MB, largest free block %llu MB; resource cache idle files %llu MB",
+                              static_cast<unsigned long long>(used >> 20), static_cast<unsigned long long>(largest >> 20), static_cast<unsigned long long>(idle >> 20));
+                LogLine(ApexLog::Level::Info, line);
+            }
+            if (idle >= kEarlyIdleBytes && !earlyTicks && (!lastEarly || t - lastEarly >= kEarlyGapMs)) {
+                lastEarly = t | 1;
+                earlyTicks = 1;
+                g_earlyUsedBefore = used;
+                g_earlyShrink.store(true);
+                g_shrinkWanted.store(true, std::memory_order_relaxed);
+            }
         }
         g_largest.store(largest, std::memory_order_relaxed);
         if (largest < g_lowest.load(std::memory_order_relaxed)) g_lowest.store(largest, std::memory_order_relaxed);

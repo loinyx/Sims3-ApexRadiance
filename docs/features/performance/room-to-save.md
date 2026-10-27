@@ -52,6 +52,14 @@ Every build adds three steps (`kMemoryOptimizationsEnabled` in [`build_flavor.h`
   ([fast-memory.md](fast-memory.md#allocator-trim-and-top-down-large-blocks)) and the release of the reserve run
   before the dispatch, ahead of the world-save hook.
 
+### Idle files dropped early (development builds)
+
+With the development switch `idle_cache_early`, the watch thread also asks for the game's own shrink of both resource
+caches (the one that runs before every save) whenever their idle files pass 64 MB, at most every 2 minutes, without
+waiting for the address space to run short. Each empty is logged with its time and size, and the address space in use
+is logged every minute and two watch periods after each empty, to measure what dropping idle files gives back and what
+reading them again costs.
+
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
