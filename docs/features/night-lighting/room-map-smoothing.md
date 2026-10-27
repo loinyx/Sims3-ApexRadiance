@@ -8,7 +8,7 @@ and openings keep their shape; only the way the baked light is stored and read c
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0. The read of the room's own texels beside walls: Released in 2.16.0. |
+| Availability | Released in 2.13.0. The read of the room's own texels beside walls: Released in 2.16.0. The ambient-weight floor of roofed rooms: In development (branch `perf/lot-streaming`). |
 | Default | On |
 | Menu | Lighting > Buildings > Rooms at Night, group LAMP LIGHT (needs *Outdoor light between floors*) |
 | Configuration | `mapasDosComodosSuaves` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -48,7 +48,11 @@ texels per metre by lighting class (twice that with *Light detail* High). Three 
    is the B-spline of the 4 x 4 texels with alpha 4/255 or more alone, its weights divided by their sum (the own
    texel's weight is at least 0.23), colour and ambient weight alike: room 0's texels beyond the wall add nothing and the
    room's light falls to the wall as the solve has it, smooth across shadow edges and a jamb's penumbra. A pixel of room
-   0, a bright room texel with little ambient weight or light sent out of an opening keep the plain B-spline.
+   0, a bright room texel with little ambient weight or light sent out of an opening keep the plain B-spline. A roofed
+   room's texel is packed with an ambient weight of at least 5/255 (the room is the solve's own, `[room+0x18] == 0`), so
+   a brightly lit texel of the room is never taken for one beyond a wall: a dimmer texel beside it (under a table, behind
+   a plant) would otherwise drop its light and show as a dark square one texel wide. The added ambient is 5/255 of the
+   room's ambient colour on the brightest texels only, under half an 8-bit level.
 2. **Dither.** Before the game packs a texel, Apex adds up to half an 8-bit level of interleaved gradient noise taken from
    the texel's position: the mean light stays, the rings become a fine grain the B-spline smooths out. The same texel
    always gets the same offset, so a room lit again does not shimmer.
@@ -106,7 +110,7 @@ unverified in game.
 
 | Site | What | Source |
 |---|---|---|
-| `0x006A34DB` (Steam 1.67.2) | CALL of the texel pack `0x0060CD10` in the batch solve `0x006A31D0`; redirected to `PackThunk`, which reads the texel's (x, y) from `edi` (its address) and the map's `{base, pitch}` at `[ebp+0Ch]`, adds the offset and calls the game's pack | `room_map_dither.cpp` |
+| `0x006A34DB` (Steam 1.67.2) | CALL of the texel pack `0x0060CD10` in the batch solve `0x006A31D0`; redirected to `PackThunk`, which reads the texel's (x, y) from `edi` (its address) and the map's `{base, pitch}` at `[ebp+0Ch]`, adds the offset, raises a roofed room's alpha to 5/255 (the room is `ebx`, set by `mov ebx,ecx` at `0x006A31E8`, checked at start) and calls the game's pack | `room_map_dither.cpp` |
 | `0x0069FE40` | `movss xmm0,[ebx+63Ch]; comiss; ja`: the light cut; `room+0x63C` is set to 1e-6 for the wrapped call, its real value restored after | `level_light_share.cpp` `SolvePoint`, `FadeAtThreshold` |
 | Pixel shaders | `texld rL, <TEXCOORD1>, sM` then (after at most one `mul rL, rS.c, rL`) `mad rD.xyz, rL.w, cA, rL`, `cA` not defined: replaced by the B-spline; constants size `(w, h, 1/w, 1/h)` and band `(1/S, S, 0.5, S - 1)` per draw | `shader_patches.cpp` `PatchRoomMapSmooth` |
 | Vertex shaders | `mul o<TEXCOORD1>.xy, v#, cK.c`: 1/4096 wall atlas, 1/32767 floor maps | `shader_patches.cpp` `RoomMapUvScale` |

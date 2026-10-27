@@ -51,3 +51,18 @@ parallel to the wall between two lit bands.
 **Outcome:** with the pixel's own texel a roofed room's, the read is the B-spline of that side's texels alone, its
 weights over their sum, colour and ambient weight alike. `tools/room_map_smooth_check`: the window case falls 30.6 levels
 after the wall with the bound and 0 now; GPU against the CPU reference 1 LSB.
+
+### 2026-10-27: dark squares under furniture beside a lamp
+
+**Context:** a 2.16.2 capture session: dark squares one tile wide, with hard edges, on a lit floor under a table's legs,
+a plant and a floor lamp's foot.
+
+**Finding:** the floor copy's masked read (2.16.0) excludes the 4 x 4 texels with alpha under 4/255, meant as room 0
+beyond a wall. A roofed room's ambient weight falls with its light, so the brightest texels of the room itself had alpha
+near 0 too. A dimmer texel beside them (alpha 0.125 or more: under the furniture) took the masked read and dropped their
+light, while the pixels of the bright texels kept the plain read: a step at the texel's edge. Re-rendering the captured
+atlas with the copy's arithmetic reproduced the squares (7.6% of the pixels off the plain read, up to 0.55).
+
+**Outcome:** the texel pack raises a roofed room's alpha to 5/255 at least (`room_map_dither.cpp`; the solve's room is in
+`ebx`). Room 0 keeps 0, so the wall case is unchanged; the re-render is then identical to the plain read inside the room.
+The added ambient is under half an 8-bit level. Maps already baked keep the squares until their rooms are solved again.
