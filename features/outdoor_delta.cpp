@@ -32,6 +32,7 @@
 #include "game_addresses.h"
 #include "hook_guard.h"
 #include "dev_switches.h"
+#include "build_flavor.h"
 #include "apex_memory.h"
 #include <bit>
 #include <windows.h>
@@ -1596,6 +1597,43 @@ void SolveEnd(unsigned char* room) {
             }
             b.r = rad + 0.01f;
         }
+        // Every light of a texel's sum must be in a light's part: the base Real-time outdoor lamps relights from is the sum less
+        // the drawn lamps' parts, so light the parts miss stays in it whatever the GPU draws (a courtyard kept a recoloured,
+        // then switched-off sconce's old green until Restart lighting, F7 with every lamp of the lot off). A solve whose sum
+        // passes its parts by more than 2 levels at a texel is not kept (the room's edits take the game's solve). Once per
+        // kept solve: one pass over the parts.
+        if (c.ok) {
+            std::vector<float> got(r.texels.size() * 3, 0.0f);
+            for (const LampRec& l : r.lamps)
+                for (const Contrib& p : l.parts)
+                    if (p.texel < r.texels.size())
+                        for (int k = 0; k < 3; k++) got[static_cast<size_t>(p.texel) * 3 + k] += p.rgb[k];
+            size_t over = 0, worstAt = 0;
+            float worst = 0.0f;
+            for (size_t i = 0; i < r.texels.size(); i++) {
+                const float* S = r.texels[i].t.S;
+                const float d = std::max({S[0] - got[i * 3], S[1] - got[i * 3 + 1], S[2] - got[i * 3 + 2]});
+                if (d > worst) worst = d, worstAt = i;
+                if (d > 2.0f / 255.0f) over++;
+            }
+            if (!kPublicBuild) {
+                std::string drawn;
+                for (const LampRec& l : r.lamps) {
+                    if (!l.drawn) continue;
+                    float lum = 0.0f;
+                    for (const Contrib& p : l.parts) lum += Lum3(p.rgb);
+                    drawn += std::format(" {:08X} x{} {} parts lum {:.2f};", l.light, l.mult, l.parts.size(), lum);
+                }
+                LOG_INFO(std::format("[OutdoorDelta] Kept solve of story {} room 0 class {}: {} texels, sum past its parts at {} (largest {:.3f} at texel "
+                                     "{},{} map {}); drawn lamps:{}",
+                                     r.story, r.cls, r.texels.size(), over, worst, r.texels.empty() ? 0 : r.texels[worstAt].x,
+                                     r.texels.empty() ? 0 : r.texels[worstAt].y, r.texels.empty() ? 0 : r.texels[worstAt].map, drawn.empty() ? " none" : drawn));
+            }
+            if (over) Fail("light in a texel's sum that no light's part holds");
+        }
+    }
+    if (c.ok) {
+        Record& r = *c.rec;
         r.used = GetTickCount();
         r.version = g_version.fetch_add(1, std::memory_order_relaxed) + 1;
         r.baseVersion = r.version;

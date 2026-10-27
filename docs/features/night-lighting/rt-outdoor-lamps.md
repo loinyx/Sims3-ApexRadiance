@@ -12,7 +12,7 @@ that cannot run it, none of it runs.
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1. Baked lamp records without padding (the frame rate of 2.15.1 while moving the camera): Released in 2.15.2. Shaders from the shader cache: Released in 2.15.3. Light past 1 on the lot ground, outdoor floors and outside walls (the outdoor scale): Released in 2.16.0. |
+| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1. Baked lamp records without padding (the frame rate of 2.15.1 while moving the camera): Released in 2.15.2. Shaders from the shader cache: Released in 2.15.3. Light past 1 on the lot ground, outdoor floors and outside walls (the outdoor scale): Released in 2.16.0. Kept solves that account for every light: Released in 2.16.1. |
 | Default | On (Lamp lighting: Instant (GPU); a saved `lampLightingMode` keeps its choice) |
 | Menu | System > Performance > Lamp lighting > Lamp updates: Instant (GPU) |
 | Configuration | `lampLightingMode = "instant"` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -32,6 +32,9 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    texel. The parts of the lamps the GPU draws leave the sum (`OutdoorDelta::ExportRoom0`): what remains is the texel
    without them. Window lights, the world's street lamps and other lots' lamps stay in it. The GPU draws a lot's bare
    bulbs, spots, shaded lamps and lot street lamps (types 3, 4, 5 and 11) listed in room 0 of their own lot.
+   A solve is kept only when its lights' parts account for its sum: past 2 levels of light at a texel that no part holds,
+   it is not kept and the room's edits take the game's solve. Light no part holds would stay in the base whatever the GPU
+   draws: a courtyard kept a recoloured, then switched-off sconce's old colour until *Restart lighting*.
 2. **The maps.** Each story's own room-0 maps of the class on screen (wall atlas, floor map; ceiling and object maps when
    they hold room-0 texels) get a copy in video memory. Every room-0 texel of the kept solve is relit over the game's map:
    `pack(base + Σ mult × fade(law × shadow))`, packed as the solve packs it (its hue kept past 1,
@@ -113,6 +116,9 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
 
 ## Limitations
 
+- The cause of the courtyard's stale light (2.16.0) is not confirmed, and the accounting check has not been seen to refuse
+  a solve in game ([validation](../../validation/night-lighting-level-light-share.md)). If old light stays, *Restart
+  lighting* clears it.
 - Only the active lot. Other lots, the world grass and roads (terrain bake) and the world's street lamps stay baked.
 - The light past 1 shows on the lot ground, the summer outdoor floors and the ps_3_0 outside walls of the active lot. Classic,
   other lots, winter and snowy floors, the ps_2_x walls (lower shader settings) and objects keep the cut at 1.

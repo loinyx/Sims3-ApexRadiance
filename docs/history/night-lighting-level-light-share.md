@@ -847,3 +847,18 @@ scales; the light then fades to the back wall (map after the change: 9 down to 4
 above). Measured on screen, the wall above was about 80 levels against 100 on the side wall, the ratio N.l and distance
 give: no extra blocking. On request, wall lamps now light their own wall with N.l at least `0.5 x (1 - plane / 0.4)`
 (walls.md).
+
+### 2026-10-27: old lamp light left on the courtyard after the lamps went off
+
+**Context:** after recolouring the courtyard's sconces several times and moving one, the player switched every lamp of the
+lot off; the courtyard stayed green-white until *Restart lighting* (F8 with every lamp at intensity 0, F7 of the ground).
+
+**Finding:** the lot pass bound the relit copy of story 0's floor map, which held (130, 255, 134) with its outdoor scale up
+to 2.1 at the courtyard. The last full class-2 solve of story 0 came while the green sconce was on; every later edit took
+the Instant path that keeps the record as it is. So the light was in the record's base (the sum less the drawn lamps'
+parts) and in no drawn lamp's part. Which path put it there was not found in the code.
+
+**Outcome:** a solve is kept only when its lights' parts account for its sum (2 levels at a texel). In game the check has
+not refused a solve (21 kept solves over recolours, moves and switches, each logged in development builds with its drawn
+lamps' parts), and the stale light did not come back. The cause stays open.
+

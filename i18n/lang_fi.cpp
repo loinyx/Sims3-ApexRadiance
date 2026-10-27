@@ -9,6 +9,7 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Finnish}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: extra safety so old lamp light cannot stay stuck on the ground", "Yövalaistus: lisäsuoja, ettei lamppujen vanha valo jää maahan"},
     {"Banding Fix: High-precision scene for smoother gradients, on by default", "Raitojen korjaus: Tarkka kohtaus pehmeämpiin liukuväreihin, oletuksena päällä"},
     {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Raitojen korjaus: uudistettu kortti ja hienompi rae, joka ei koske valikkoon"},
     {"Night Lights: strong lamps light the ground and walls beside them at full strength", "Yövalaistus: voimakkaat lamput valaisevat viereisen maan ja seinät täydellä teholla"},
