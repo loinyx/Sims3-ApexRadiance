@@ -9,6 +9,7 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Russian}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: no more dark squares on lit floors under furniture", "Ночное освещение: больше нет тёмных квадратов на освещённом полу под мебелью"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Подгрузка участков: участки, загружаемые вместе, делят работу, и камера меньше подтормаживает"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Ночное освещение: тени заборов на газоне обновляются в разы быстрее"},
     {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "Подгрузка участков: Стабильная видимость участков держит участки на границе в полной детализации"},

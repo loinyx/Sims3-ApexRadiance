@@ -9,6 +9,7 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Simplified, mainland China)}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: no more dark squares on lit floors under furniture", "夜间照明：照亮的地板上，家具下方不再出现暗色方块"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "地块流式加载：同时加载的地块分担工作，移动镜头时卡顿更少"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "夜间照明：草坪上栅栏阴影的更新只需原来的一小部分时间"},
     {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "地块流式加载：“保持地块可见性稳定”让边缘地块保持完整细节"},

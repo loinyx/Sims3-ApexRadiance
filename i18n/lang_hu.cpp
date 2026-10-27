@@ -9,6 +9,7 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Hungarian}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: no more dark squares on lit floors under furniture", "Éjszakai világítás: nincs több sötét négyzet a megvilágított padlón a bútorok alatt"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Telekbetöltés: az egyszerre betöltődő telkek megosztják a munkát, így a kamera kevésbé akad"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Éjszakai világítás: a kerítések árnyéka a gyepen a korábbi idő töredéke alatt frissül"},
     {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "Telekbetöltés: a Stabil telekláthatóság a határon lévő telkeket teljes részletességben tartja"},

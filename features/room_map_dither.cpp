@@ -10,8 +10,9 @@
 //   0x0060CD10 thiscall(DWORD* out, const float4* c) ret 4: c x [0x00FA312C] (255.0, built once into 0x011CECB0), + 1.5 x
 //   2^23 ([0x00FE774C], round to nearest), the low bytes packed A8R8G8B8 into *out. VERIFIED. A channel under -0.5 / 255
 //   would wrap (the game never passes one: light is >= 0); Apex clamps to [0, 1] after its offset.
-// Threads: the solve runs on the light tree thread or the render thread; the thunk reads only the caller's registers and
-// the map descriptor (under SEH) and keeps no state.
+// Threads: the solve runs on the light tree thread or the render thread; the thunk reads only the caller's registers, the
+// map descriptor and the room's roofless flag (under SEH) and keeps no state. ebx is the room ("mov ebx,ecx" at 0x006A31E8,
+// unchanged up to the call; the solve reads [ebx+18h] at 0x006A333B). VERIFIED (capstone, Steam 1.67.2).
 //
 // Part of Apex Radiance. Credits: @loinyx
 
@@ -43,7 +44,9 @@ std::mutex g_ctrl;
 std::vector<MemPatch::PatchLocation> g_patches;
 std::atomic<bool> g_running{false};
 std::atomic<bool> g_on{true};
-std::atomic<long long> c_texels{0}, c_skipped{0};
+std::atomic<long long> c_texels{0}, c_skipped{0}, c_floored{0};
+bool g_roomInEbx = false; // the solve keeps its room in ebx (checked at Start); else no alpha floor
+constexpr float kRoofedAlphaMin = 5.0f / 255.0f; // the smoothed read's "beyond a wall" mark is alpha < 4/255
 std::string g_why;
 
 using Pack_t = void(__fastcall*)(void* out, void* edx, const float* c); // = thiscall ret 4
@@ -66,9 +69,26 @@ bool TexelXY(uintptr_t frame, uintptr_t texel, unsigned& x, unsigned& y) {
     }
 }
 
-void __stdcall DitherPack(DWORD* out, const float* colour, uintptr_t frame, uintptr_t texel) {
+// The room being solved is roofed ([room+0x18] == 0, the test the solve itself makes at 0x006A333B); POD (SEH)
+bool RoofedRoom(uintptr_t room) {
+    __try {
+        return room && *reinterpret_cast<const uint8_t*>(room + 0x18) == 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+void __stdcall DitherPack(DWORD* out, const float* colour, uintptr_t frame, uintptr_t texel, uintptr_t room) {
     alignas(16) float c[4];
     std::memcpy(c, colour, sizeof c);
+    // A roofed room's texel keeps an ambient weight of at least 5/255: the smoothed read tells the texels beyond a wall
+    // (room 0, alpha 0) by alpha under 4/255, and a brightly lit texel of the room itself (ambient weight near 0) was taken
+    // for one, so a dimmer texel beside it (under a table, behind a plant) dropped its light: a dark square one texel wide.
+    // The added light is 5/255 of the room's ambient colour on its brightest (near white) texels: a few 8-bit levels at most.
+    if (g_roomInEbx && std::isfinite(c[3]) && c[3] < kRoofedAlphaMin && RoofedRoom(room)) {
+        c[3] = kRoofedAlphaMin;
+        c_floored.fetch_add(1, std::memory_order_relaxed);
+    }
     unsigned x = 0, y = 0;
     if (g_on.load(std::memory_order_relaxed) && TexelXY(frame, texel, x, y)) {
         const float d = Offset(x, y) / 255.0f;
@@ -82,10 +102,12 @@ void __stdcall DitherPack(DWORD* out, const float* colour, uintptr_t frame, uint
     reinterpret_cast<Pack_t>(kPack)(out, nullptr, c);
 }
 
-// thiscall(ecx = out, [esp+4] = colour) ret 4, with the caller's ebp (its frame) and edi (the texel) as they are at the call
+// thiscall(ecx = out, [esp+4] = colour) ret 4, with the caller's ebp (its frame), edi (the texel) and ebx (the room: the
+// solve's this, kept in ebx from 0x006A31E8 to the call) as they are at the call
 __declspec(naked) void PackThunk() {
     __asm {
         mov eax, [esp + 4]
+        push ebx
         push edi
         push ebp
         push eax
@@ -126,6 +148,7 @@ bool Start(std::string& error) {
                         CodeIs(kTexelAddr, {0x8B, 0x45, 0x0C, 0x0F, 0xB7, 0x56, 0x22, 0x0F, 0xAF, 0x50, 0x04, 0x0F, 0xB7, 0x4E, 0x20, 0x8D, 0x3C, 0x8A, 0x8B,
                                             0x55, 0x10, 0x03, 0x38}) &&
                         CodeIs(kSolveFn, {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0});
+    g_roomInEbx = CodeIs(kSolveFn + 0x18, {0x8B, 0xD9}); // mov ebx,ecx: the room the thunk reads (only the alpha floor needs it)
     const bool packOk = CodeIs(kPack, {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0, 0xB8, 0x01, 0x00, 0x00, 0x00}) && CodeIs(kPack + 0x16, {0xF3, 0x0F, 0x10, 0x05, k255b[0], k255b[1], k255b[2], k255b[3]}) &&
                         CodeIs(kPack + 0x5A, {0xF3, 0x0F, 0x10, 0x05, magicb[0], magicb[1], magicb[2], magicb[3]}); // Steam: 0x00FA312C, 0x00FE774C
     float k255 = 0.0f, magic = 0.0f;
@@ -142,7 +165,8 @@ bool Start(std::string& error) {
     }
     g_running.store(true);
     g_why.clear();
-    LOG_INFO(std::format("[RoomMapDither] On: the room maps' texel pack {:#010x} -> {:#010x} goes through Apex", kPackCall, kPack));
+    LOG_INFO(std::format("[RoomMapDither] On: the room maps' texel pack {:#010x} -> {:#010x} goes through Apex{}", kPackCall, kPack,
+                         g_roomInEbx ? "" : "; the solve's room was not found, roofed texels keep the game's alpha (dark squares beside bright texels may show)"));
     return true;
 }
 
@@ -161,7 +185,7 @@ bool Enabled() { return g_on.load(std::memory_order_relaxed); }
 
 std::string Status() {
     if (!g_running.load()) return g_why.empty() ? "dither off" : g_why;
-    return std::format("dither {}: {} texels, {} left exact", g_on.load() ? "on" : "switched off", c_texels.load(), c_skipped.load());
+    return std::format("dither {}: {} texels, {} left exact; {} roofed texels kept at alpha 5/255", g_on.load() ? "on" : "switched off", c_texels.load(), c_skipped.load(), c_floored.load());
 }
 
 } // namespace RoomMapDither
