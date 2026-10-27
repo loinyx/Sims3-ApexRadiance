@@ -84,6 +84,8 @@ The changelog opened from the version in the menu footer (`apex_changelog.cpp`):
    ```
 
    One short line per item, about 5 to 15 words, no ending period, no area prefix inside the lines (the section names
-   it), related changes merged into one line. The lines follow the in-game What's new.
+   it), related changes merged into one line. The lines follow the in-game What's new. The tone is natural and warm,
+   with a light The Sims flavour (Sims, the lawn, the living room, the neighbourhood at night) and never overdone: no
+   puns, Simlish, emoji, exclamation marks or marketing words; say what the player sees, not how it works.
 5. After publication, verify that the published asset matches the reviewed build (version and SHA-256) and that the
    Nexus workflow succeeded. Publication does not validate gameplay.
