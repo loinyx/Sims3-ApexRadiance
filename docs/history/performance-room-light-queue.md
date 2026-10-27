@@ -292,3 +292,11 @@ Room 0 of a story took 30 to 45 % of the invalidates (the room-0 cascade). Resta
 a minute. An invalidate of a room still waiting for its solve throws no work away; which invalidates stop a solve in
 progress or undo a finished one (the room's state when invalidated) is not yet measured.
 The measurement then adds the room's state right before each invalidate (waiting, mid-solve, solved), by caller.
+
+**Fourth session (2026-10-27, room state):** of 1600 to 1700 invalidates a minute within 10 s of camera moves, 1100 to 1200
+found the room still waiting (no work lost), 0 to 97 mid-solve, and 237 to 426 undid a finished solve. Over three minutes
+the finished solves undone came from the game's dirty-room loop (273), `QueueOpeningRooms` (247), `AfterChangedWalk`
+(196), `QueueRoomSafe` (66) and other Apex requeues (about 50): Apex's requeues about 58 %. `QueueOpeningRooms` runs when a
+lot's floors change, which streaming does every time a lot is built, and again in the lot's settle round, which exists so
+the rooms near openings are lit with the other stories' lamps in place. Skipping a requeue needs proof that the room's
+finished solve already had the same inputs; not done.
