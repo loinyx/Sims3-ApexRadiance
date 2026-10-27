@@ -315,7 +315,7 @@ notices' top-center anchor asks "Keep Room to save on?" with the menu closed. It
 128 MB kept free and handed back before each save, nothing on screen changing), the place to change it later and
 **Turn it off** / **Keep it on** (primary), right-aligned; the note moves above the buttons when a translation does not
 fit beside them. The overlay takes the mouse only over the card (`Overlay::SetInteractive`); keys and every other click
-stay the game's. Either answer sets `[ui] room_to_save_asked`; Reset all settings keeps it. It waits while the menu is
+stay the game's. Either answer sets `[ui] room_to_save_asked`; Reset all settings keeps it. It is not shown when Room to save is already off. It waits while the menu is
 open, while a capture or a startup banner shows, and where Room to save cannot run (game builds other than Steam 1.67.2)
 ([room-to-save.md](features/performance/room-to-save.md)).
 

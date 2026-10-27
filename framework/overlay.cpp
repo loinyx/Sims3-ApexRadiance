@@ -289,7 +289,10 @@ void DrawFrame(IDirect3DDevice9* device) {
     }
     const bool always = g_client && g_client->AlwaysDraw(); // every frame (the client runs its shortcuts there)
     const bool draw = !g_captureSuppressed.load() && (g_visible.load() || always);
-    if (!draw || !g_client) return;
+    if (!draw || !g_client) {
+        SetInteractive(false); // a card that took the mouse (Room to save) is gone: its last frame's capture must not stay
+        return;
+    }
 
     const auto beforeLock = FrameClock::Clock::now();
     std::lock_guard<std::mutex> lock(g_imguiLock);
