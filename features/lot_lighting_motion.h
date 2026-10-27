@@ -30,6 +30,8 @@ void Boost(unsigned ms);
 
 // The camera moved in the last 300 ms (false when unknown or when both this feature and the wall shading gate are off)
 bool CameraMoving();
+// Frames presented while this feature or the wall shading gate is on (the per-frame sampler; it stays still without it)
+uint32_t FrameIndex();
 // Samples the camera eye now and returns whether it moved in the last 300 ms, whether or not this feature is on (the
 // camera offsets are parsed from the game's code on the first call; false while they are unknown). Any thread; called
 // once per frame by the scene node budget (features/scene_budget.h). Same motion test as the rest of this file (eye change

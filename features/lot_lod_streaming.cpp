@@ -6,6 +6,7 @@
 #include "s3ss_detect.h"
 #include "map_view.h"
 #include <Windows.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <format>
@@ -33,6 +34,16 @@ bool g_thresholdOriginalValid = false;
 bool g_thresholdWritten = false;
 bool g_thresholdMaintainLogged = false;
 float g_thresholdOriginal = 0.0f;
+
+// The native throttle only applies while Max Active Lots (WorldManager+0xE4) is at most the "Max Active Lot Threshold"
+// global (12): LotLodScoring tests `MaxActive <= threshold` right after the flag (0x00C6C6B7). With Extended lot detail at
+// 16 lots the throttle would silently stay off, so while this part runs the threshold follows Max Active Lots (never
+// lowered below its own value; restored when Apex stops, if it still holds Apex's value).
+uintptr_t g_activeThreshold = 0;
+bool g_activeOriginalValid = false;
+bool g_activeAbandoned = false;
+int g_activeOriginal = 0;
+int g_activeWritten = -1; // the value Apex wrote last (-1 = none)
 
 // Separate map-view blocker state. This intentionally does not detour WorldManager::Update: Apex already documents
 // that entry as a cooperation point with S3SS. Instead, the existing patch-manager pump maintains the live +0x258
@@ -141,6 +152,40 @@ bool MaintainThrottle(std::string* error) {
         g_throttleMaintainLogged = true;
     }
     return true;
+}
+
+void MaintainActiveThreshold() {
+    if (!g_activeThreshold || g_activeAbandoned || !g_worldManager) return;
+    int maxActive = 0, current = 0;
+    if (!Read(g_worldManager + 0xE4, maxActive) || maxActive < 1 || maxActive > 128) return;
+    if (!Read(g_activeThreshold, current) || current < 0 || current > 128) return;
+    if (!g_activeOriginalValid) {
+        g_activeOriginal = current;
+        g_activeOriginalValid = true;
+    }
+    const int desired = std::max(g_activeOriginal, maxActive);
+    if (current == desired) return;
+    if (current != g_activeOriginal && current != g_activeWritten) {
+        g_activeAbandoned = true;
+        LOG_WARNING(std::format("[LotLod] Another owner set the Max Active Lot Threshold to {}; Apex stops following Max Active Lots", current));
+        return;
+    }
+    if (!WriteExpected(g_activeThreshold, desired, current)) return;
+    g_activeWritten = desired;
+    LOG_INFO(std::format("[LotLod] Max Active Lot Threshold {} -> {} so the transition throttle covers {} detailed lots", current, desired, maxActive));
+}
+
+void RestoreActiveThresholdIfOwned() {
+    if (g_activeThreshold && g_activeWritten >= 0 && g_activeOriginalValid && !g_activeAbandoned) {
+        int current = 0;
+        if (Read(g_activeThreshold, current) && current == g_activeWritten && WriteExpected(g_activeThreshold, g_activeOriginal, current))
+            LOG_INFO(std::format("[LotLod] Max Active Lot Threshold restored to {}", g_activeOriginal));
+        else
+            LOG_INFO("[LotLod] Max Active Lot Threshold left as it is (changed by another owner)");
+    }
+    g_activeOriginalValid = false;
+    g_activeAbandoned = false;
+    g_activeWritten = -1;
 }
 
 bool ApplyCurrentWorld(std::string* error) {
@@ -357,6 +402,8 @@ bool Start(std::string* error) {
     }
 
     g_externalOwner = false;
+    g_activeThreshold = GameAddr::GroupAvailable("LotLodActiveFollow") ? GameAddr::Get(GameAddr::Id::LotLodActiveThreshold) : 0;
+    if (!g_activeThreshold) LOG_WARNING("[LotLod] Max Active Lot Threshold not found: with more than 12 detailed lots the game's throttle stays off");
     if (!ApplyThrottle(error)) return false;
 
     std::string worldError;
@@ -367,6 +414,7 @@ bool Start(std::string* error) {
         return false;
     }
 
+    MaintainActiveThreshold();
     g_running = true;
     LOG_INFO("[LotLod] Smooth Lot Streaming active");
     return true;
@@ -379,6 +427,7 @@ void Stop() {
     if (g_externalOwner) {
         LOG_INFO("[LotLod] Smooth Lot Streaming off in Apex; Sims3SettingsSetter remains the owner");
     } else {
+        RestoreActiveThresholdIfOwned();
         RestoreWorldIfOwned();
         RestoreThrottleIfOwned();
         LOG_INFO("[LotLod] Smooth Lot Streaming stopped");
@@ -387,6 +436,7 @@ void Stop() {
     g_externalOwner = false;
     g_running = false;
     g_throttleFlag = 0;
+    g_activeThreshold = 0;
     g_worldManagerGlobal = 0;
     ClearWorldState();
 }
@@ -408,6 +458,7 @@ void Tick() {
         // transient read failure cannot destroy safe restoration state; a new invalid world is cleared by ApplyCurrentWorld().
         LOG_WARNING("[LotLod] " + error + "; camera threshold left unchanged on this tick");
     }
+    MaintainActiveThreshold();
 }
 
 bool Running() {

@@ -219,6 +219,8 @@ enum class Id : uint16_t {
     LotDetailRequest,          // FUN_00ac20e0: applies Detailed View on/off to one lot
     LotLodThrottleTest,       // Steam 0x00c6c695: cmp byte [Throttle Lot LoD Transitions],0 inside LotLodScoring
     LotLodThrottleFlag,       // global byte tested above; Steam 0x011ecbc0
+    LotLodActiveThresholdTest, // Steam 0x00c6c6b7: cmp edx,[Max Active Lot Threshold] (edx = WorldManager+0xE4) inside LotLodScoring
+    LotLodActiveThreshold,     // the int global compared above ("Throttle Lot LoD Transitions Max Active Lot Threshold"); Steam 0x01184328
     // ---- Lot visibility override (features/lot_visibility_override.cpp; group "LotVisibilityOverride") ----
     LotVisibilityCameraBiasJZ, // JZ in the lot visibility/distance camera-bias metric; 0x74 -> 0xEB
     // ---- Per-lot object streaming throttle (features/lot_object_throttle.cpp; group "LotObjectThrottle") ----
@@ -288,6 +290,9 @@ enum class Id : uint16_t {
     CompReadback,     // FUN_005fbce0 thiscall(builder; format), ret 4: GetRenderTargetData into the staging texture [b+0x20]
     CompTileFetch,    // FUN_005fdbf0 thiscall(builder; job), ret 4: readback, then LockRect of [b+0x20] and [b+0x1C] into the job
     LightObjectRemove, // FUN_006c7610 thiscall(levelLights; idLo, idHi), ret 8: an object's entries out of the five per-level light maps
+    LotLoadStagesCall,  // 0x00AEB306 in FUN_00aeb2e0: call FUN_00aea680, the lot renderer's load stages (its result is not used)
+    LotPassRendererCall, // 0x00C7CEDF in the lot pass FUN_00c7cea0: call FUN_00aeb2e0 (the renderer update); its other callers are the impostor builder's
+    LotLoadStages,      // FUN_00aea680 thiscall(lotRenderer) -> al: runs load stages until its per-call budget is spent
     LotBuildBudgetLoad, // 0x00AEA6D8 in FUN_00aea680 (a lot's per-frame build slice): "mov eax,[0x011ECBC4]" right after its budget [esp+14h] (20 / 35 ms) is set
     ProbeDiffuseWrite,  // 0x006B4720 thiscall(lightProbe), ret: writes the new diffuse cube (+0x2C60, or +0x2C50 when not double-buffered)
     ProbeSpecularWrite, // 0x006B4B10 thiscall(lightProbe, rt), ret 4, al: writes the new specular cube and its mips (+0x2C64 / +0x2C5C)

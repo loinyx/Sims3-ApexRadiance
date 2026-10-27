@@ -30,9 +30,9 @@
 //              demotions with exactly that condition. Callers 0xC6A0F9, 0xC6C7C3, 0xC6C7CE, 0xAE61A7.
 //   0x00AEB2E0 lot renderer update __thiscall(1), ret 4    56 8B F1 E8..       callers 0xC7CEDF, 0xAEB3F9, 0xAEB41C.
 //   0x00AEA680 lot load stages     __thiscall(0), ret     81 EC BC 00 00 00 53 56..  budget 20 ms (35 / 2000 in some
-//              states); only caller 0xAEB306 (inside 0xAEB2E0). Timed at that CALL (E8 rel32 -> hook), not at the entry:
-//              Smooth Streaming detours the entry and verifies its bytes before installing. Site pattern at 0xAEB2F8
-//              "80 7E 1E 00 75 0D 80 7E 1F 00 75 07 8B CE E8 ?? ?? ?? ?? 8D 8E 70 03 00 00 E8" (unique), CALL at +14.
+//              states); only caller 0xAEB306 (inside 0xAEB2E0). Timed at that CALL as a layer of the call chain
+//              (framework/call_chain.h; GameAddr LotLoadStagesCall / LotLoadStages), inside the shared lot build time's
+//              gate (features/lot_build_share.h), so a lot the gate holds back for a frame is not counted.
 //   0x00AD9E30 lot LOD switch      __thiscall(1), ret 4    56 8B F1 8B 4E 28 80 79 1E 00..  "World/LotImpostor/
 //              LODOverrideHook"; calls 0xAEB3F0 (0xAEB2E0 twice + 0xADBAD0). Caller 0xADAEBC.
 //   0x00ADBAD0 lot lighting setup  __thiscall(0), ret     53 55 56 8B F1 8B 46 40.. (pattern extended to 47 bytes: three
@@ -1057,11 +1057,14 @@ uint64_t __fastcall Hook_LotRendererUpdate(void* self, void* edx, uint32_t a) {
     return Orig<T_LotRendererUpdate, FnThis1>()(self, edx, a);
 }
 
+// Inner layer of the call chain at 0x00AEB306 (framework/call_chain.h): the shared lot build time's gate is outside it, so
+// only the calls that run are timed
 uint64_t __fastcall Hook_LotLoadStages(void* self, void* edx) {
+    const FnThis0 next = reinterpret_cast<FnThis0>(CallChain::Next(CallChain::Site::LotLoadStages, CallChain::Layer::FrameProfiler));
     Scope sc(kLotLoadStages);
     const auto before = LotLoadAnalysis::ReadRenderer(self);
     const uint64_t started = LotLoadAnalysis::Clock();
-    const auto result = Orig<T_LotLoadStages, FnThis0>()(self, edx);
+    const auto result = next(self, edx);
     const uint64_t ended = LotLoadAnalysis::Clock();
     const auto after = LotLoadAnalysis::ReadRenderer(self);
     LotLoadAnalysis::Sample(before, after, started, ended);
@@ -1495,8 +1498,8 @@ const TargetInfo kTargets[kTargetCount] = {
         reinterpret_cast<void*>(&Hook_LotDetailRequest), "render (WorldManager::Update)", false},
     {"Lot renderer update (FUN_00AEB2E0)", 0x00AEB2E0, "56 8B F1 E8 ?? ?? ?? ?? 80 7E 0C 00 0F 84 ?? ?? ?? ?? 83 7E 2C 00 74 ?? 80 7E 1E 00", -1, 0,
         reinterpret_cast<void*>(&Hook_LotRendererUpdate), "render (lot pass FUN_00C7CEA0)", false},
-    {"Lot load stages (CALL at 0x00AEB306)", 0x00AEB2F8, "80 7E 1E 00 75 0D 80 7E 1F 00 75 07 8B CE E8 ?? ?? ?? ?? 8D 8E 70 03 00 00 E8", 14, 0x00AEA680,
-        reinterpret_cast<void*>(&Hook_LotLoadStages), "render (lot pass FUN_00C7CEA0)", false},
+    {"Lot load stages (CALL at 0x00AEB306, call chain)", 0x00AEB306, "E8 ?? ?? ?? ?? 8D 8E 70 03 00 00 E8", 0, 0x00AEA680,
+        reinterpret_cast<void*>(&Hook_LotLoadStages), "render (lot pass FUN_00C7CEA0)", false, 0, GameAddr::Id::LotLoadStagesCall, GameAddr::Id::LotLoadStages},
     {"Lot LOD switch (FUN_00AD9E30)", 0x00AD9E30, "56 8B F1 8B 4E 28 80 79 1E 00 75 0F 8B 44 24 08 C7 40 0C 07 00 00 00 5E C2 04 00", -1, 0,
         reinterpret_cast<void*>(&Hook_LotViewSwitch), "lot impostor builder", false},
     {"Lot lighting setup (FUN_00ADBAD0)", 0x00ADBAD0,
@@ -2082,6 +2085,19 @@ bool AttachTarget(int i) {
                                 CallChain::Installed(CallChain::Site::SceneDrain, CallChain::Layer::SceneBudget) ? "; the scene node budget is inside" : "");
         return true;
     }
+    if (i == T_LotLoadStages) {
+        // Shared with the shared lot build time (features/lot_build_share.h): its gate is the outer layer, the profiler inside it
+        std::string error;
+        g_orig[i] = reinterpret_cast<void*>(GameAddr::Get(ti.calleeId)); // display only: the hook calls CallChain::Next
+        if (!CallChain::Install(CallChain::Site::LotLoadStages, CallChain::Layer::FrameProfiler, ti.hook, &error)) {
+            st.status = "Skipped: " + error;
+            return false;
+        }
+        st.attached = true;
+        st.status = std::format("Timed at the CALL {:#010x}, a layer of the call chain ({}; written with all threads checked{})", st.addr, st.how,
+                                CallChain::Installed(CallChain::Site::LotLoadStages, CallChain::Layer::LotBuildGate) ? "; the shared lot build time is outside" : "");
+        return true;
+    }
     if (ti.callOffset >= 0) return AttachCallSite(i);
     if (i == T_ObjectById) {
         // Shared with the object lookup index (features/object_index.h): the profiler is the outer layer of the entry chain
@@ -2155,6 +2171,15 @@ void DetachTarget(int i) {
     }
     if (i == T_SceneDrain) {
         if (!CallChain::Remove(CallChain::Site::SceneDrain, CallChain::Layer::FrameProfiler)) { // the budget's layer, if any, stays
+            st.status = "Restore failed: still timed";
+            return;
+        }
+        st.attached = false;
+        st.status = "Off";
+        return;
+    }
+    if (i == T_LotLoadStages) {
+        if (!CallChain::Remove(CallChain::Site::LotLoadStages, CallChain::Layer::FrameProfiler)) { // the gate's layer, if any, stays
             st.status = "Restore failed: still timed";
             return;
         }

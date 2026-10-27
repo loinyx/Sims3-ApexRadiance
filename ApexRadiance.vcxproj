@@ -150,6 +150,7 @@
     <ClCompile Include="features\drag_lite.cpp" />
     <ClCompile Include="features\tester_toggles.cpp" />
     <ClCompile Include="features\lot_lighting_motion.cpp" />
+    <ClCompile Include="features\lot_build_share.cpp" />
     <ClCompile Include="features\map_view.cpp" />
     <ClCompile Include="features\object_index.cpp" />
     <ClCompile Include="features\object_light_bridge.cpp" />
@@ -307,6 +308,8 @@
     <ClInclude Include="features\light_detail.h" />
     <ClInclude Include="features\room_light_queue.h" />
     <ClInclude Include="features\lot_lighting_motion.h" />
+    <ClInclude Include="features\lot_build_share.h" />
+    <ClInclude Include="features\lot_build_share_policy.h" />
     <ClInclude Include="features\map_view.h" />
     <ClInclude Include="features\object_index.h" />
     <ClInclude Include="features\object_light_bridge.h" />
