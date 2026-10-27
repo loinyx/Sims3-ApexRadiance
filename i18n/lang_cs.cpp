@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Czech}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "Výkon: Místo pro uložení se po aktualizaci jednou zeptá, zda má zůstat zapnuté"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "Výkon: změna lampy už znovu neosvětluje místnosti na jiných parcelách"},
     {"Night Lights: no more dark squares on lit floors under furniture", "Noční osvětlení: žádné tmavé čtverce na osvětlené podlaze pod nábytkem"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Streamování parcel: parcely načítané současně si dělí práci, takže kamera méně trhá"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Noční osvětlení: stíny plotů na trávníku se aktualizují za zlomek času"},
@@ -109,6 +111,11 @@ const I18n::Pair kPairs[] = {
     {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Navštěvujte různé pozemky po dobu 10 minut, vraťte se na první, počkejte, uložte hru a toto uložení znovu načtěte."},
     {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Porovnejte záseky, načítání pozemků a využití RAM s předchozí verzí. Poznamenejte si každou chybu 12 a co jí předcházelo."},
     {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Zkontrolujte světlo lamp u schodů a za uzavřenými podlahami. Podrobný sběr dat je vypnutý."},
+    {"Keep Room to save on?", "Ponechat Místo pro uložení zapnuté?"},
+    {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "Brání tomu, aby ukládání při dlouhém hraní selhalo s chybou 12: drží volných 128 MB paměti hry a uvolní je těsně před každým uložením. Na obrazovce se nic nezmění."},
+    {"You can change it later in Performance › Memory handling", "Později to můžete změnit v části Výkon › Práce s pamětí"},
+    {"Keep it on", "Ponechat zapnuté"},
+    {"Turn it off", "Vypnout"},
     {"The latest lighting features also work on the EA app version 1.69", "Nejnovější funkce osvětlení fungují i ve verzi 1.69 z aplikace EA"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "Stěny stíní světlo lamp i na trávě, ulicích a chodnících mimo pozemek"},
     {"Garden walls and fences shade lamp light on the ground by their height", "Zídky a ploty stíní světlo lamp na zemi podle své výšky"},

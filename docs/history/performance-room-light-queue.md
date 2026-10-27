@@ -244,3 +244,95 @@ edit pacing and the edit hold busy for 16 s; the load screen's lamps registering
 the camera's story; a pending lamp edit counts only the high-quality lot's rooms; lamps registering before the world is
 live are no edit. Not changed: the atrium's stories keep their shared first place (they are shown together), and
 OutdoorDelta's full solves after `steady_indoor_light`'s generation bump (`PhysicsKey`) need their own study.
+
+### 2026-10-27: room solves with the camera still
+
+**Context:** in the 2.16.2 development build's Frame Profiler report, frames without a hitch spent 0.89 ms on average in
+"Lot room solve", and the room solve was the dominant cause of 13 % of the hitches, also with the camera still. The
+existing solve journal keeps only rooms that take light from other stories, so it could not say what sends the others.
+
+**Change:** the development switch `room_solve_causes` counts every invalidate by its caller and every finished solve by
+class and room, camera still or moving, in a `[RoomSolveCauses]` log line every minute. It only counts.
+
+**Outcome:** pending an in-game session; the counts decide which source to study first (a caller that invalidates the same
+rooms again, or the class refinement of rooms already shown).
+
+**First session (2026-10-27, 6 minutes):** with the camera still and the lots settled (9445 frames), 13 solves and 15
+invalidates a minute; after camera moves, 1000 to 3200 invalidates and up to 128 rooms of several lots a minute, also in
+frames counted as still. Two callers made almost all invalidates: the game's dirty-room loop `0x006C7250` (return
+`0x006C7451`) and Apex's `QueueRoom`. No class 1 solve was seen (the direct step 0 to 2). The counts were then split into
+settled (still for 10 s or more), stopped and moving, and `QueueRoom`'s invalidates by its own caller.
+
+**Second session (2026-10-27, `memory_owners` off, 2 minutes):** with the camera settled (still for 10 s or more, 7281
+and 736 frames) no room was invalidated or solved. Every solve came within 10 s of a camera move or during it: 389 and
+360 finished solves a minute while stopped, almost all class 0, and the same room solved up to 15 times a minute at
+class 0 without reaching class 2. Callers: the game's dirty-room loop (`0x006C7451`, 445 and 256 while stopped) and
+Apex's `QueueRoom` from `AfterChangedWalk` (the cross-story fan-out after the game's changed walk), `QueueOpeningRooms`,
+`QueueRoomSafe`, `RequeueStory`, `RequeueRoofedDoors`, `RequeueTallWalls` and `AuditTakers`. The cost is rooms
+restarted again and again while the lots near the camera settle, not solves with the camera at rest.
+
+**Next step (same day):** the development switch `restart_settle` holds the pick of a room restarted again within 2 s
+until its restarts stop for 300 ms (at most 1 s; a lamp edit's rooms and single restarts never wait). Not yet measured in
+game; it compares with the switch off on the same route through the `[RoomSolveCauses]` counts and the Frame Profiler's
+"Lot room solve".
+
+**`restart_settle` in game (2026-10-27, 5 minutes, switch on):** the hold acted (up to 4918 picks a minute held, 69 let
+through after 1 s) but the same rooms were still solved 12 to 18 times a minute at class 0 within 10 s of camera moves,
+as without it. A room's restarts are spaced by more than 300 ms (about one every 3 to 5 s), so a 300 ms quiet does not
+fold them. The switch stays off in released builds; the spacing of a room's restarts needs measuring before any longer
+hold, which would delay the light the player sees.
+`restart_settle` now reads as off when its key is missing. The measurement adds, per caller, the time since the same
+room's previous invalidate and the count of room-0 invalidates, to tell the game's room-0 cascade from rooms restarted by
+lots arriving one after another.
+
+**Third session (2026-10-27, 6 minutes, gaps):** settled frames again almost without solves (2 in 6 minutes). Within 10 s
+of camera moves most invalidates came under 0.3 s after the same room's previous one (in one minute 820 of 1322 from the
+game's dirty-room loop, 355 of 489 from `AfterChangedWalk`): the game and Apex restart the same rooms for the same change.
+Room 0 of a story took 30 to 45 % of the invalidates (the room-0 cascade). Restarts 1 to 10 s apart were about 150 to 200
+a minute. An invalidate of a room still waiting for its solve throws no work away; which invalidates stop a solve in
+progress or undo a finished one (the room's state when invalidated) is not yet measured.
+The measurement then adds the room's state right before each invalidate (waiting, mid-solve, solved), by caller.
+
+**Fourth session (2026-10-27, room state):** of 1600 to 1700 invalidates a minute within 10 s of camera moves, 1100 to 1200
+found the room still waiting (no work lost), 0 to 97 mid-solve, and 237 to 426 undid a finished solve. Over three minutes
+the finished solves undone came from the game's dirty-room loop (273), `QueueOpeningRooms` (247), `AfterChangedWalk`
+(196), `QueueRoomSafe` (66) and other Apex requeues (about 50): Apex's requeues about 58 %. `QueueOpeningRooms` runs when a
+lot's floors change, which streaming does every time a lot is built, and again in the lot's settle round, which exists so
+the rooms near openings are lit with the other stories' lamps in place. Skipping a requeue needs proof that the room's
+finished solve already had the same inputs; not done.
+The rule "skip a room whose finished solve started after the change that sent it" needs that change's time; of the
+sources of `QueueOpeningRooms` (a lot's generation, the floor count checked every 2 s, lamp edits, floor edits, the settle
+round) only floor edits record one. Before any skip, the measurement therefore hashes each room solve and compares the
+re-solve that follows an undone finished solve with it, by caller: how many undone solves wrote the same texels again.
+
+**Fifth session (2026-10-27, the proof):** in the minute with most traffic, 446 finished solves undone were re-solved at the
+same class with the same hash, 73 with a different one and 41 not hashed. By caller: `QueueOpeningRooms` 389 the same and
+32 different, `RequeueStory` 20 and 1, `QueueRoomSafe` 11 and 2, `AfterChangedWalk` 24 and 18, the game's dirty-room loop
+1 and 7. Most of `QueueOpeningRooms`' requeues of finished rooms rewrite what the room already shows, but about 8 % do
+not, so skipping them all would change the lighting; a skip needs a test that tells the two apart (the lamps the room saw
+near the openings and the openings themselves, as `AuditTakers` compares them) and a new proof.
+
+**Sixth session (2026-10-27, the opening-send prediction):** of 464 rooms near openings sent in three minutes, 135 were
+predicted unchanged; their next solves of the same class wrote the same texels 65 times and different ones 2 times, so
+`opening_skip` stays off. The prediction then also reads the light manager's night and manmade levels (`+0xF0` / `+0xF4`)
+and the hash of every other room's last solve (the bounce through openings and the room fill read other rooms' light).
+With those inputs, a second session (four minutes) predicted 68 of 387 sends unchanged; 34 re-solves wrote the same
+texels and 2 different ones. The prediction still misses an input, or the solve is not repeatable to the bit for some
+rooms; `opening_skip` stays off until the cause of those differences is known.
+
+**Seventh session (2026-10-27, diagnostics):** 63 predicted-unchanged sends, 62 re-solved to the same texels. The one
+that did not (story 0, room 12, 100 texels) had the same inputs at its solve's start as at the send; one texel changed by
+less than 0.00001 and its normalisation and ambient changed: the room fill and the normalisation of a room follow its own
+last solve and settle over a few solves. The prediction now includes the room's own last result, so a room is predicted
+only once two of its solves agree. The signature cost 50 to 80 us and ran 459 to 1401 times a minute; the sends came from
+lamp edits, settle rounds, floors counted, floor edits and rebuilt lots, none dominant.
+
+**Eighth session (2026-10-27, the final proof and the outcome):** with the room's own last result as an input, 26
+predicted sends were re-solved and none wrote different texels, so the prediction is sound. It predicted 75 of 1763
+sends (4 %), and the signature ran thousands of times a minute at 50 to 80 us, more frame time than the skipped solves
+would save: `opening_skip` and its signature were removed. The same minute showed the real waste: each lamp edit made
+every lot send its rooms near openings again (147 edits sent 1053 rooms), although only the edited lamp's lot changed.
+
+**Ninth session (2026-10-27, `lamp_edit_lot_only`):** a lamp switched off and on near a stair opening still updated the
+story below, and the minute lines showed no error from the change; the switch ships. The session had too few lamp
+edits (3) to compare the number of rooms sent with the earlier 1053 a minute.

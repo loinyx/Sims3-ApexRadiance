@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), German}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "Leistung: Platz zum Speichern fragt nach dem Update einmal, ob es eingeschaltet bleiben soll"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "Leistung: Eine geänderte Lampe beleuchtet Räume auf anderen Grundstücken nicht mehr neu"},
     {"Night Lights: no more dark squares on lit floors under furniture", "Nachtbeleuchtung: keine dunklen Quadrate mehr auf beleuchteten Böden unter Möbeln"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Grundstücks-Streaming: gleichzeitig ladende Grundstücke teilen sich die Arbeit, die Kamera ruckelt weniger"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Nachtbeleuchtung: Zaunschatten auf dem Rasen aktualisieren sich in einem Bruchteil der Zeit"},
@@ -109,6 +111,11 @@ const I18n::Pair kPairs[] = {
     {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Besuche 10 Minuten lang mehrere Grundstücke, kehre zum ersten zurück, warte, speichere und lade diesen Spielstand erneut."},
     {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Vergleiche Ruckler, das Laden von Grundstücken und den RAM-Verbrauch mit der vorherigen Version. Notiere jeden Fehler 12 und was davor passiert ist."},
     {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Prüfe Lampenlicht an Treppen und hinter geschlossenen Böden. Die detaillierte Datenerfassung ist deaktiviert."},
+    {"Keep Room to save on?", "Platz zum Speichern eingeschaltet lassen?"},
+    {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "Verhindert, dass das Speichern in langen Sitzungen mit Fehler 12 scheitert: hält 128 MB des Spielspeichers frei und gibt sie direkt vor jedem Speichern zurück. Auf dem Bildschirm ändert sich nichts."},
+    {"You can change it later in Performance › Memory handling", "Du kannst das später unter Leistung › Speicherverwaltung ändern"},
+    {"Keep it on", "Eingeschaltet lassen"},
+    {"Turn it off", "Ausschalten"},
     {"The latest lighting features also work on the EA app version 1.69", "Die neuesten Beleuchtungsfunktionen laufen auch in der EA-App-Version 1.69"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "Wände werfen auch auf Rasen, Straßen und Gehwegen außerhalb des Grundstücks Schatten des Lampenlichts"},
     {"Garden walls and fences shade lamp light on the ground by their height", "Gartenmauern und Zäune werfen je nach Höhe Schatten des Lampenlichts auf den Boden"},

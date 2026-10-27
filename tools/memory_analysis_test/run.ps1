@@ -13,6 +13,6 @@ try {
  $csv=Get-ChildItem -LiteralPath $OutDir -Filter 'MemoryAnalysis-*.csv' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
  $samples=@(Import-Csv -LiteralPath $csv.FullName)
  if($samples.Count -ne 4 -or $samples[0].PSObject.Properties.Count -contains 0){throw 'CSV sample count failed'}
- if(@($samples[0].PSObject.Properties).Count -ne 30){throw 'CSV schema failed'}
+ if(@($samples[0].PSObject.Properties).Count -ne 39){throw 'CSV schema failed'}
  & (Join-Path $repo 'tools/development/analyze-memory.ps1') -Csv $csv.FullName
 } finally {Pop-Location}

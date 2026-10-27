@@ -15,6 +15,7 @@ scope cleanup and pre-save buffer ownership without modifying the game.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-27 | `e39db28` | In game, Steam 1.67.2, standard build with `room_to_save_asked` removed | The question card showed with the menu closed; "Keep it on" was logged and saved; lamps were edited with the mouse right after the answer; no errors in the log | DXVK |
 | 2026-10-05 | `3328a4b`, `733a7c5` | Offline: the five sites in Steam TS3W.exe; signatures unique on Steam | Steam addresses and bytes checked; on the EA app build (code encrypted on disk) the signatures are confirmed only by the startup scan's log | None |
 
 ## In-game test plan

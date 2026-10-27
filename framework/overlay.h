@@ -56,6 +56,9 @@ void Shutdown(); // FreeLibrary only: restores the window procedure
 bool IsVisible();
 bool MouseOverMenu(); // the menu is open and the mouse is over one of its windows (render or window thread)
 void SetVisible(bool visible);
+// With the menu closed: ImGui still gets the mouse, which it takes only over its windows (a startup question drawn with the
+// menu closed); keys and every other click stay the game's. Render thread, each frame.
+void SetInteractive(bool interactive);
 void SetCaptureSuppressed(bool suppressed); // skip all Apex ImGui draw data for a player screenshot frame
 bool PostGameKeyPress(WPARAM vk); // post a synthetic key press to the game, bypassing Apex shortcut interception
 HWND Window();

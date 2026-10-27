@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Hungarian}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "Teljesítmény: a Hely a mentéshez frissítés után egyszer megkérdezi, bekapcsolva maradjon-e"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "Teljesítmény: egy lámpa módosítása már nem világítja meg újra más telkek szobáit"},
     {"Night Lights: no more dark squares on lit floors under furniture", "Éjszakai világítás: nincs több sötét négyzet a megvilágított padlón a bútorok alatt"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Telekbetöltés: az egyszerre betöltődő telkek megosztják a munkát, így a kamera kevésbé akad"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Éjszakai világítás: a kerítések árnyéka a gyepen a korábbi idő töredéke alatt frissül"},
@@ -109,6 +111,11 @@ const I18n::Pair kPairs[] = {
     {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Látogass meg több telket 10 percen át, térj vissza az elsőre, várj, majd ments, és töltsd be újra ezt a mentést."},
     {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Hasonlítsd össze az akadásokat, a telkek betöltését és a RAM-használatot az előző verzióval. Jegyezz fel minden 12-es hibát és az előzményeit."},
     {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Ellenőrizd a lámpafényt a lépcsőknél és a zárt padlókon túl. A részletes adatgyűjtés ki van kapcsolva."},
+    {"Keep Room to save on?", "Bekapcsolva maradjon a Hely a mentéshez?"},
+    {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "Megakadályozza, hogy hosszú játék közben a mentés a 12-es hibával meghiúsuljon: 128 MB-ot szabadon tart a játék memóriájából, és közvetlenül minden mentés előtt visszaadja. A képernyőn semmi sem változik."},
+    {"You can change it later in Performance › Memory handling", "Később módosíthatod: Teljesítmény › Memóriakezelés"},
+    {"Keep it on", "Maradjon bekapcsolva"},
+    {"Turn it off", "Kikapcsolás"},
     {"The latest lighting features also work on the EA app version 1.69", "A legújabb világítási funkciók az EA app 1.69-es verzióján is működnek"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "A falak a telken kívüli füvön, utcákon és járdákon is árnyékot vetnek a lámpafényre"},
     {"Garden walls and fences shade lamp light on the ground by their height", "A kerítésfalak és kerítések magasságuk szerint vetnek árnyékot a lámpafényre a talajon"},

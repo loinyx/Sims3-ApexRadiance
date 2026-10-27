@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Finnish}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "Suorituskyky: Tilaa tallentamiselle kysyy päivityksen jälkeen kerran, pidetäänkö se päällä"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "Suorituskyky: lampun muuttaminen ei enää valaise uudelleen muiden tonttien huoneita"},
     {"Night Lights: no more dark squares on lit floors under furniture", "Yövalaistus: ei enää tummia neliöitä valaistulla lattialla huonekalujen alla"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Tonttien suoratoisto: yhtä aikaa latautuvat tontit jakavat työn, joten kamera nykii vähemmän"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Yövalaistus: aitojen varjot nurmikolla päivittyvät murto-osassa ajasta"},
@@ -109,6 +111,11 @@ const I18n::Pair kPairs[] = {
     {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Käy eri tonteilla 10 minuutin ajan, palaa ensimmäiselle, odota, tallenna ja lataa sitten sama tallennus uudelleen."},
     {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Vertaa nykimistä, tonttien lataamista ja RAM-käyttöä edelliseen versioon. Kirjaa jokainen virhe 12 ja sitä edeltäneet tapahtumat."},
     {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Tarkista lamppujen valo portaiden lähellä ja umpinaisten lattioiden takana. Tarkka tiedonkeruu on pois käytöstä."},
+    {"Keep Room to save on?", "Pidetäänkö Tilaa tallentamiselle päällä?"},
+    {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "Estää tallennusta epäonnistumasta virheellä 12 pitkissä pelisessioissa: pitää 128 Mt pelin muistista vapaana ja vapauttaa sen juuri ennen jokaista tallennusta. Näytöllä mikään ei muutu."},
+    {"You can change it later in Performance › Memory handling", "Voit muuttaa tätä myöhemmin kohdassa Suorituskyky › Muistinkäsittely"},
+    {"Keep it on", "Pidä päällä"},
+    {"Turn it off", "Poista käytöstä"},
     {"The latest lighting features also work on the EA app version 1.69", "Uusimmat valaistusominaisuudet toimivat myös EA-sovelluksen versiossa 1.69"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "Seinät varjostavat lamppujen valoa myös nurmella, kaduilla ja jalkakäytävillä tontin ulkopuolella"},
     {"Garden walls and fences shade lamp light on the ground by their height", "Puutarhamuurit ja aidat varjostavat lamppujen valoa maassa korkeutensa mukaan"},

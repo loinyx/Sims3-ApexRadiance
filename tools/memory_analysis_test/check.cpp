@@ -20,6 +20,41 @@ void EndScan(uint64_t) {}
 std::string ReportText() { return {}; }
 }
 namespace GameAllocCategories { void Report(unsigned long long) {} std::string ReportText() { return {}; } }
+GameVersion g_gameVersion = GameVersion::Unknown;
+uint32_t g_exeTimestamp = 0;
+
+// The game's domains: two allocators with core rings and the script heap's globals, at addresses of this process.
+void CheckGameDomains() {
+    const auto put = [](uintptr_t a, uint32_t v) { *reinterpret_cast<uint32_t*>(a) = v; };
+    static uint8_t first[0x500], second[0x500], cores[3][0x20];
+    static uint32_t globals[5];
+    const auto a = reinterpret_cast<uintptr_t>(first), b = reinterpret_cast<uintptr_t>(second);
+    const uintptr_t c0 = reinterpret_cast<uintptr_t>(cores[0]), c1 = reinterpret_cast<uintptr_t>(cores[1]), c2 = reinterpret_cast<uintptr_t>(cores[2]);
+    const auto at = [&](int i) { return reinterpret_cast<uintptr_t>(&globals[i]); };
+    const AddressSpace::GameGlobals g0{{at(0), at(1)}, at(2), at(3), at(4)};
+    put(at(0), uint32_t(a)), put(at(1), uint32_t(b));
+    put(a + 0x460, uint32_t(c0)), put(c0 + 4, 16u << 20), put(c0 + 0x18, uint32_t(c1)), put(c1 + 4, 4u << 20), put(c1 + 0x18, uint32_t(a + 0x448));
+    put(b + 0x460, uint32_t(c2)), put(c2 + 4, 1u << 20), put(c2 + 0x18, uint32_t(b + 0x448));
+    put(at(2), 40u << 20), put(at(3), 10u << 20), put(at(4), 3);
+    AddressSpace::GameDomains g;
+    AddressSpace::ReadGameDomains(g, g0);
+    assert(g.cores && g.coreCount[0] == 2 && g.coreCommit[0] == (20u << 20) && g.coreCount[1] == 1 && g.coreCommit[1] == (1u << 20));
+    assert(g.script && g.scriptHeap == (40u << 20) && g.scriptFree == (10u << 20) && g.scriptSections == 3);
+    assert(AddressSpace::GameLineOf(g) == "game allocator cores 2 = 20 MB committed, second allocator cores 1 = 1 MB; script heap 40 MB in 3 sections, 10 MB of it free blocks");
+    put(at(1), uint32_t(a)); // the same object twice is counted once
+    AddressSpace::GameDomains same;
+    AddressSpace::ReadGameDomains(same, g0);
+    assert(same.cores && same.coreCount[0] == 2 && same.coreCount[1] == 0);
+    put(c1 + 0x18, 0x00001000); // a ring broken by a concurrent change is dropped, not followed
+    AddressSpace::GameDomains broken;
+    AddressSpace::ReadGameDomains(broken, g0);
+    assert(!broken.cores && broken.script);
+    put(at(3), 50u << 20); // free over size: not a consistent read
+    AddressSpace::GameDomains torn;
+    AddressSpace::ReadGameDomains(torn, g0);
+    assert(!torn.script);
+    std::cout << "Game domains: core rings, the second instance, a broken ring and the script heap passed\n";
+}
 
 int main() {
     kPublicBuild=false;
@@ -61,5 +96,6 @@ int main() {
     AddressSpace::WriteMemorySample(after);
     MemoryTelemetry::Mark(2);
     AddressSpace::WriteGameplayTelemetry(after);
+    CheckGameDomains();
     std::cout << "Memory observer: reserve, commit, release, partitions and process/system queries passed\n";
 }

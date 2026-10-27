@@ -51,6 +51,7 @@
 #include "room_ambient_policy.h"
 #include "memory_patch.h"
 #include "drag_lite.h"
+#include "restart_settle.h"
 #include "imgui.h"
 #include <windows.h>
 #include <algorithm>
@@ -324,6 +325,11 @@ float __fastcall PriorityHook(BYTE* room) {
     // its state and its invalidations and is picked once the gap ends, so the scheduler and the drain re-solve the same rooms
     // at most every 400 ms instead of on every step of the drag
     if (room && p > 0.0f && DragLite::HoldRepick(room)) return 0.0f;
+    // (development builds, restart_settle) a room restarted again and again while the lots settle is picked once its restarts
+    // stop (restart_settle.h); a lamp edit's rooms are never held
+    if (room && p > 0.0f && DevSwitches::RestartSettle() && LevelLightShare::LampUrgency(room) <= 1.0f &&
+        RestartSettle::Global().Hold(reinterpret_cast<uintptr_t>(room), GetTickCount64()))
+        return 0.0f;
     if (!room || !g_prioOn) return p;
     return HookGuard::Run("RoomLightQueue room priority", p, [room, p] { return Prioritise(room, p); });
 }

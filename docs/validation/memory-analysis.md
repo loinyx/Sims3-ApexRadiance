@@ -32,6 +32,10 @@ policy is enabled by this instrumentation.
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/memory_owners_test/run.ps1` | 41 checks passed: exact `operator new` counts (`new[]`, `nothrow`, ImGui), separate calling sites, container estimates within 35 bytes of the real count, report cadence, textures and render targets counted at creation and subtracted at destruction on a real device | Native D3D9 and DXVK |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/game_alloc_categories_test/run.ps1` | 21 checks passed under concurrency (103 bucket overflows counted) | None |
 | 2026-10-20 | Working tree on `c22e8d7` | `tools/memory_analysis_test/run.ps1` | Passed | None |
+| 2026-10-27 | Working tree on `7f06996` | `tools/memory_analysis_test/run.ps1` | Passed: the game's domains read from two core rings, a second instance equal to the first, a ring broken by a concurrent change and an inconsistent script heap read; 39-column CSV | None |
+
+The game's domain counters are not yet read in game from the Apex process; the layouts were read from outside the
+running Steam 1.67.2 game ([engine page](../engine/native-allocation-and-script-memory.md#domains-measured-in-game)).
 
 The public binary contains none of the accounting. In game, the owner table, the largest calling sites, the Direct3D
 memory by pool and the amounts given back by `release_debug_buffers` are not yet measured.

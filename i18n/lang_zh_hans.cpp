@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Simplified, mainland China)}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "性能：更新后，“保留存档空间”会询问一次是否保持开启"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "性能：更改灯具后，不再重新计算其他地块房间的光照"},
     {"Night Lights: no more dark squares on lit floors under furniture", "夜间照明：照亮的地板上，家具下方不再出现暗色方块"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "地块流式加载：同时加载的地块分担工作，移动镜头时卡顿更少"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "夜间照明：草坪上栅栏阴影的更新只需原来的一小部分时间"},
@@ -109,6 +111,11 @@ const I18n::Pair kPairs[] = {
     {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "在10分钟内访问多个地段，返回第一个地段，稍等片刻，然后保存并重新载入该存档。"},
     {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "与上一版本比较卡顿、地段载入和RAM使用情况。如果出现错误12，请记录出现前的情况。"},
     {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "检查楼梯附近及封闭楼板另一侧的灯光。详细数据收集已禁用。"},
+    {"Keep Room to save on?", "保持“保留存档空间”开启吗？"},
+    {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "防止长时间游戏时存档因错误 12 而失败：预留 128 MB 游戏内存，并在每次存档前释放出来。画面不会有任何变化。"},
+    {"You can change it later in Performance › Memory handling", "之后可以在“性能 › 内存处理”中更改"},
+    {"Keep it on", "保持开启"},
+    {"Turn it off", "关闭"},
     {"The latest lighting features also work on the EA app version 1.69", "最新的照明功能也适用于 EA app 版本 1.69"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "墙壁也会在地块外的草地、街道和人行道上遮挡灯光"},
     {"Garden walls and fences shade lamp light on the ground by their height", "围墙和栅栏会按高度在地面上遮挡灯光"},

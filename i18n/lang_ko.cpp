@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Korean}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "성능: 업데이트 후 한 번, 저장 공간 확보를 켜 둘지 물어봐요"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "성능: 램프를 바꿔도 다른 부지의 방은 더 이상 다시 조명하지 않아요"},
     {"Night Lights: no more dark squares on lit floors under furniture", "야간 조명: 조명이 비친 바닥의 가구 아래에 어두운 사각형이 더 이상 생기지 않아요"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "부지 스트리밍: 함께 불러오는 부지들이 작업을 나눠, 카메라 이동이 덜 끊겨요"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "야간 조명: 잔디 위 울타리 그림자가 훨씬 짧은 시간에 갱신돼요"},
@@ -109,6 +111,11 @@ const I18n::Pair kPairs[] = {
     {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "10분 동안 여러 부지를 방문하고 첫 부지로 돌아와 잠시 기다린 다음 저장하고 해당 저장 파일을 다시 불러오세요."},
     {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "이전 버전과 끊김, 부지 로딩, RAM 사용량을 비교하세요. 오류 12가 발생하면 직전에 있었던 일을 기록하세요."},
     {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "계단 근처와 막힌 바닥 너머의 조명을 확인하세요. 상세 데이터 수집은 비활성화되어 있습니다."},
+    {"Keep Room to save on?", "저장 공간 확보를 켜 둘까요?"},
+    {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "오래 플레이할 때 저장이 오류 12로 실패하지 않게 합니다. 게임 메모리 중 128MB를 비워 두었다가 저장 직전에 돌려줍니다. 화면에 보이는 것은 바뀌지 않습니다."},
+    {"You can change it later in Performance › Memory handling", "나중에 성능 › 메모리 처리에서 바꿀 수 있습니다"},
+    {"Keep it on", "켜 두기"},
+    {"Turn it off", "끄기"},
     {"The latest lighting features also work on the EA app version 1.69", "최신 조명 기능이 EA 앱 1.69 버전에서도 작동합니다"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "벽이 부지 밖의 잔디, 도로, 보도에서도 램프 빛을 가립니다"},
     {"Garden walls and fences shade lamp light on the ground by their height", "담장과 울타리가 높이에 따라 바닥의 램프 빛을 가립니다"},

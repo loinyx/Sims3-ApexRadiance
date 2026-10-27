@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Thai}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "ประสิทธิภาพ: พื้นที่สำหรับเซฟจะถามครั้งเดียวหลังอัปเดตว่าจะเปิดไว้ต่อไหม"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "ประสิทธิภาพ: การเปลี่ยนโคมไฟจะไม่คำนวณแสงห้องในล็อตอื่นใหม่อีกต่อไป"},
     {"Night Lights: no more dark squares on lit floors under furniture", "แสงกลางคืน: ไม่มีสี่เหลี่ยมมืดบนพื้นที่สว่างใต้เฟอร์นิเจอร์อีกแล้ว"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "การสตรีมที่ดิน: ที่ดินที่โหลดพร้อมกันจะแบ่งงานกัน กล้องจึงกระตุกน้อยลง"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "แสงกลางคืน: เงารั้วบนสนามหญ้าอัปเดตเร็วขึ้นมาก"},
@@ -109,6 +111,11 @@ const I18n::Pair kPairs[] = {
     {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "เยี่ยมชมหลายพื้นที่เป็นเวลา 10 นาที กลับไปยังพื้นที่แรก รอสักครู่ จากนั้นบันทึกและโหลดเซฟนั้นอีกครั้ง"},
     {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "เปรียบเทียบอาการกระตุก การโหลดพื้นที่ และการใช้ RAM กับรุ่นก่อน หากเกิดข้อผิดพลาด 12 ให้จดสิ่งที่เกิดขึ้นก่อนหน้านั้น"},
     {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "ตรวจสอบแสงโคมไฟใกล้บันไดและอีกด้านของพื้นที่ไม่มีช่องเปิด ปิดการเก็บข้อมูลแบบละเอียดแล้ว"},
+    {"Keep Room to save on?", "เปิดพื้นที่สำหรับเซฟไว้ต่อไหม?"},
+    {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "ป้องกันไม่ให้การเซฟล้มเหลวด้วยข้อผิดพลาด 12 เมื่อเล่นนาน ๆ โดยกันหน่วยความจำของเกมไว้ 128 MB และคืนให้ก่อนการเซฟทุกครั้ง ภาพบนหน้าจอไม่เปลี่ยน"},
+    {"You can change it later in Performance › Memory handling", "เปลี่ยนได้ภายหลังที่ ประสิทธิภาพ › การจัดการหน่วยความจำ"},
+    {"Keep it on", "เปิดไว้"},
+    {"Turn it off", "ปิด"},
     {"The latest lighting features also work on the EA app version 1.69", "ฟีเจอร์แสงสว่างล่าสุดใช้ได้กับเวอร์ชัน 1.69 ของแอป EA ด้วย"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "ผนังบังแสงโคมไฟบนหญ้า ถนน และทางเท้านอกที่ดินด้วย"},
     {"Garden walls and fences shade lamp light on the ground by their height", "กำแพงสวนและรั้วบังแสงโคมไฟบนพื้นตามความสูงของมัน"},

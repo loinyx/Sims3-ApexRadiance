@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Russian}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "Производительность: «Место для сохранения» один раз после обновления спрашивает, оставить ли его включённым"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "Производительность: изменение лампы больше не пересчитывает свет в комнатах на других участках"},
     {"Night Lights: no more dark squares on lit floors under furniture", "Ночное освещение: больше нет тёмных квадратов на освещённом полу под мебелью"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Подгрузка участков: участки, загружаемые вместе, делят работу, и камера меньше подтормаживает"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Ночное освещение: тени заборов на газоне обновляются в разы быстрее"},
@@ -109,6 +111,11 @@ const I18n::Pair kPairs[] = {
     {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Посещайте разные участки в течение 10 минут, вернитесь на первый, подождите, сохраните игру и загрузите это сохранение."},
     {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Сравните подтормаживания, загрузку участков и расход ОЗУ с предыдущей версией. Запишите каждую ошибку 12 и события перед ней."},
     {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Проверьте свет ламп у лестниц и за сплошными перекрытиями. Подробный сбор данных отключён."},
+    {"Keep Room to save on?", "Оставить «Место для сохранения» включённым?"},
+    {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "Не даёт сохранениям завершаться ошибкой 12 в долгих сессиях: держит свободными 128 МБ памяти игры и освобождает их прямо перед каждым сохранением. На экране ничего не меняется."},
+    {"You can change it later in Performance › Memory handling", "Это можно изменить позже в разделе «Производительность › Работа с памятью»"},
+    {"Keep it on", "Оставить включённым"},
+    {"Turn it off", "Выключить"},
     {"The latest lighting features also work on the EA app version 1.69", "Новейшие функции освещения работают и в версии 1.69 из приложения EA"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "Стены отбрасывают тень от света ламп и на траву, улицы и тротуары за участком"},
     {"Garden walls and fences shade lamp light on the ground by their height", "Садовые ограды и заборы отбрасывают тень от света ламп на землю по своей высоте"},

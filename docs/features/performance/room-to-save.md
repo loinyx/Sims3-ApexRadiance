@@ -9,7 +9,7 @@ is not using. Nothing on screen changes.
 
 | | |
 |---|---|
-| Availability | Released in 2.7.0 (Experimental until 2.15.0). Earlier buffer release during saving and compatibility with sims3-modernization: Released in 2.14.0 |
+| Availability | Released in 2.7.0 (Experimental until 2.15.0). Earlier buffer release during saving and compatibility with sims3-modernization: Released in 2.14.0. The one-time question card after an update or first install: Released in 2.17.0 |
 | Default | On |
 | Menu | System > Performance > Memory handling > *Room to save* |
 | Configuration | `[patches.MemoryGuard]` in `ApexRadiance.toml` |
@@ -60,6 +60,10 @@ Every build adds three steps (`kMemoryOptimizationsEnabled` in [`build_flavor.h`
 
 The row is part of the Overview's Performance group switch. It is not in the Performance part of profiles: applying a
 profile leaves it as it is.
+
+Once per installation, the first time the menu is available and Room to save is on, a question explains the feature in plain words and asks
+whether to keep it on (**Keep it on** / **Turn it off**); the answer sets the switch and `[ui] room_to_save_asked`
+([ui.md](../../ui.md#startup-and-notices)).
 
 ## Compatibility and interactions
 

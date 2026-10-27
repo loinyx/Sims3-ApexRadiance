@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Norwegian (Bokmal)}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "Ytelse: Plass til å lagre spør én gang etter oppdateringen om den skal forbli slått på"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "Ytelse: når du endrer en lampe, blir rom på andre tomter ikke lenger belyst på nytt"},
     {"Night Lights: no more dark squares on lit floors under furniture", "Nattbelysning: ingen mørke firkanter på opplyste gulv under møbler"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Tomtestrømming: tomter som lastes samtidig deler arbeidet, så kameraet hakker mindre"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Nattbelysning: gjerdeskygger på plenen oppdateres på en brøkdel av tiden"},
@@ -109,6 +111,11 @@ const I18n::Pair kPairs[] = {
     {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Besøk flere tomter i 10 minutter, gå tilbake til den første, vent, lagre og last deretter inn lagringen igjen."},
     {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Sammenlign hakking, tomtlasting og RAM-bruk med forrige versjon. Noter hver feil 12 og hva som skjedde før den."},
     {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Kontroller lampelys ved trapper og bak lukkede gulv. Detaljert datainnsamling er deaktivert."},
+    {"Keep Room to save on?", "Beholde Plass til å lagre slått på?"},
+    {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "Hindrer at lagring mislykkes med feil 12 i lange økter: holder 128 MB av spillets minne ledig og gir dem tilbake rett før hver lagring. Ingenting endres på skjermen."},
+    {"You can change it later in Performance › Memory handling", "Du kan endre dette senere under Ytelse › Minnehåndtering"},
+    {"Keep it on", "La den stå på"},
+    {"Turn it off", "Slå av"},
     {"The latest lighting features also work on the EA app version 1.69", "De nyeste belysningsfunksjonene virker også i EA-appversjon 1.69"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "Vegger skygger også for lampelyset på gress, gater og fortau utenfor tomten"},
     {"Garden walls and fences shade lamp light on the ground by their height", "Hagemurer og gjerder skygger for lampelyset på bakken etter høyden sin"},

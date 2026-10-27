@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Dutch}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "Prestaties: Ruimte om op te slaan vraagt na de update één keer of het aan moet blijven"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "Prestaties: een lamp aanpassen belicht kamers op andere kavels niet meer opnieuw"},
     {"Night Lights: no more dark squares on lit floors under furniture", "Nachtverlichting: geen donkere vierkanten meer op verlichte vloeren onder meubels"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Kavelstreaming: kavels die samen laden verdelen het werk, zodat de camera minder hapert"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Nachtverlichting: schaduwen van hekken op het gazon worden in een fractie van de tijd bijgewerkt"},
@@ -109,6 +111,11 @@ const I18n::Pair kPairs[] = {
     {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Bezoek 10 minuten lang verschillende kavels, keer terug naar de eerste, wacht, sla op en laad dat opgeslagen spel opnieuw."},
     {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Vergelijk haperingen, het laden van kavels en RAM-gebruik met de vorige versie. Noteer elke fout 12 en wat eraan voorafging."},
     {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Controleer lamplicht bij trappen en achter gesloten vloeren. Gedetailleerde gegevensverzameling is uitgeschakeld."},
+    {"Keep Room to save on?", "Ruimte om op te slaan aan laten?"},
+    {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "Voorkomt dat opslaan in lange sessies mislukt met fout 12: houdt 128 MB van het geheugen van het spel vrij en geeft die vlak voor elke keer opslaan terug. Op het scherm verandert niets."},
+    {"You can change it later in Performance › Memory handling", "Je kunt dit later wijzigen bij Prestaties › Geheugenbeheer"},
+    {"Keep it on", "Aan laten"},
+    {"Turn it off", "Uitzetten"},
     {"The latest lighting features also work on the EA app version 1.69", "De nieuwste verlichtingsfuncties werken ook in de EA-app-versie 1.69"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "Muren werpen ook schaduw van lamplicht op gras, straten en stoepen buiten het perceel"},
     {"Garden walls and fences shade lamp light on the ground by their height", "Tuinmuren en hekken werpen schaduw van lamplicht op de grond naar hun hoogte"},

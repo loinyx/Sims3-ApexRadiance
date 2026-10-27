@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Polish}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "Wydajność: Miejsce na zapis pyta raz po aktualizacji, czy ma pozostać włączone"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "Wydajność: zmiana lampy nie oświetla już ponownie pomieszczeń na innych parcelach"},
     {"Night Lights: no more dark squares on lit floors under furniture", "Oświetlenie nocne: koniec z ciemnymi kwadratami na oświetlonej podłodze pod meblami"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Strumieniowanie parcel: parcele wczytywane razem dzielą pracę, więc kamera mniej się zacina"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Oświetlenie nocne: cienie płotów na trawniku odświeżają się w ułamku czasu"},
@@ -109,6 +111,11 @@ const I18n::Pair kPairs[] = {
     {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Odwiedzaj różne parcele przez 10 minut, wróć do pierwszej, poczekaj, zapisz grę i ponownie wczytaj ten zapis."},
     {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Porównaj przycięcia, ładowanie parcel i użycie RAM z poprzednią wersją. Zanotuj każdy błąd 12 oraz to, co go poprzedzało."},
     {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Sprawdź światło lamp przy schodach i za pełnymi podłogami. Szczegółowe zbieranie danych jest wyłączone."},
+    {"Keep Room to save on?", "Pozostawić Miejsce na zapis włączone?"},
+    {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "Zapobiega nieudanym zapisom z błędem 12 w długich sesjach: trzyma wolne 128 MB pamięci gry i oddaje je tuż przed każdym zapisem. Na ekranie nic się nie zmienia."},
+    {"You can change it later in Performance › Memory handling", "Możesz to później zmienić w Wydajność › Obsługa pamięci"},
+    {"Keep it on", "Zostaw włączone"},
+    {"Turn it off", "Wyłącz"},
     {"The latest lighting features also work on the EA app version 1.69", "Najnowsze funkcje oświetlenia działają też w wersji 1.69 z aplikacji EA"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "Ściany rzucają cień światła lamp także na trawę, ulice i chodniki poza działką"},
     {"Garden walls and fences shade lamp light on the ground by their height", "Murki i płoty rzucają cień światła lamp na ziemię zależnie od swojej wysokości"},

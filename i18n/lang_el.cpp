@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Greek}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "Επιδόσεις: ο Χώρος για αποθήκευση ρωτά μία φορά, μετά την ενημέρωση, αν θα μείνει ενεργός"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "Επιδόσεις: η αλλαγή μιας λάμπας δεν φωτίζει πια ξανά δωμάτια σε άλλα οικόπεδα"},
     {"Night Lights: no more dark squares on lit floors under furniture", "Νυχτερινός φωτισμός: όχι πια σκοτεινά τετράγωνα στο φωτισμένο πάτωμα κάτω από τα έπιπλα"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Ροή Οικοπέδων: τα οικόπεδα που φορτώνουν μαζί μοιράζονται τη δουλειά και η κάμερα κολλάει λιγότερο"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Νυχτερινός φωτισμός: οι σκιές των φραχτών στο γκαζόν ενημερώνονται σε ελάχιστο χρόνο"},
@@ -109,6 +111,11 @@ const I18n::Pair kPairs[] = {
     {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Επισκεφθείτε διάφορα οικόπεδα για 10 λεπτά, επιστρέψτε στο πρώτο, περιμένετε, αποθηκεύστε και φορτώστε ξανά την αποθήκευση."},
     {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Συγκρίνετε κολλήματα, φόρτωση οικοπέδων και χρήση RAM με την προηγούμενη έκδοση. Σημειώστε κάθε σφάλμα 12 και τι προηγήθηκε."},
     {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Ελέγξτε το φως των λαμπών κοντά σε σκάλες και πίσω από κλειστά δάπεδα. Η λεπτομερής συλλογή δεδομένων είναι απενεργοποιημένη."},
+    {"Keep Room to save on?", "Να μείνει ενεργός ο Χώρος για αποθήκευση;"},
+    {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "Αποτρέπει την αποτυχία αποθήκευσης με το σφάλμα 12 σε μεγάλες συνεδρίες: κρατά ελεύθερα 128 MB της μνήμης του παιχνιδιού και τα επιστρέφει ακριβώς πριν από κάθε αποθήκευση. Τίποτα δεν αλλάζει στην οθόνη."},
+    {"You can change it later in Performance › Memory handling", "Μπορείτε να το αλλάξετε αργότερα στο Επιδόσεις › Διαχείριση μνήμης"},
+    {"Keep it on", "Να μείνει ενεργός"},
+    {"Turn it off", "Απενεργοποίηση"},
     {"The latest lighting features also work on the EA app version 1.69", "Οι νεότερες λειτουργίες φωτισμού λειτουργούν και στην έκδοση 1.69 της εφαρμογής EA"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "Οι τοίχοι ρίχνουν σκιά στο φως των λαμπτήρων και σε γρασίδι, δρόμους και πεζοδρόμια έξω από το οικόπεδο"},
     {"Garden walls and fences shade lamp light on the ground by their height", "Οι μάντρες και οι φράχτες ρίχνουν σκιά στο φως των λαμπτήρων στο έδαφος ανάλογα με το ύψος τους"},

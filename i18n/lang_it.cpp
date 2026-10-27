@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Italian}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "Prestazioni: Spazio per salvare chiede una volta, dopo l'aggiornamento, se restare attivo"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "Prestazioni: modificare una lampada non riillumina più le stanze di altri lotti"},
     {"Night Lights: no more dark squares on lit floors under furniture", "Luci notturne: niente più quadrati scuri sul pavimento illuminato sotto i mobili"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "Streaming dei lotti: i lotti che si caricano insieme si dividono il lavoro e la telecamera scatta meno"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Luci notturne: le ombre delle recinzioni sul prato si aggiornano in una frazione del tempo"},
@@ -109,6 +111,11 @@ const I18n::Pair kPairs[] = {
     {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "Visita diversi lotti per 10 minuti, torna al primo, attendi, poi salva e ricarica quel salvataggio."},
     {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "Confronta scatti, caricamento dei lotti e uso della RAM con la versione precedente. Annota ogni errore 12 e cosa è successo prima."},
     {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "Controlla la luce delle lampade vicino alle scale e oltre i pavimenti chiusi. La raccolta dettagliata dei dati è disattivata."},
+    {"Keep Room to save on?", "Lasciare attivo Spazio per salvare?"},
+    {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "Evita che i salvataggi falliscano con l'errore 12 nelle sessioni lunghe: tiene liberi 128 MB della memoria del gioco e li restituisce subito prima di ogni salvataggio. Sullo schermo non cambia nulla."},
+    {"You can change it later in Performance › Memory handling", "Puoi cambiarlo in seguito in Prestazioni › Gestione della memoria"},
+    {"Keep it on", "Lascia attivo"},
+    {"Turn it off", "Disattiva"},
     {"The latest lighting features also work on the EA app version 1.69", "Le funzioni di illuminazione più recenti funzionano anche nella versione 1.69 dell'app EA"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "I muri fanno ombra alla luce delle lampade anche su prato, strade e marciapiedi fuori dal lotto"},
     {"Garden walls and fences shade lamp light on the ground by their height", "Muretti e recinzioni fanno ombra alla luce delle lampade a terra in base alla loro altezza"},

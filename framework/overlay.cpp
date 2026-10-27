@@ -27,6 +27,7 @@ Client* g_client = nullptr;
 std::mutex g_imguiLock; // ImGui is fed from the window thread and drawn on the render thread
 std::atomic<bool> g_ready{false};
 std::atomic<bool> g_visible{false};
+std::atomic<bool> g_interactive{false}; // the menu closed, a startup question drawn: ImGui takes the mouse over it (SetInteractive)
 std::atomic<bool> g_captureSuppressed{false};
 std::atomic<bool> g_clearInput{false};
 std::atomic<bool> g_wndProcInstalled{false};
@@ -156,7 +157,9 @@ WndDecision Decide(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     const bool claimedChar = (msg == WM_CHAR || msg == WM_SYSCHAR) && g_eatChar;
     if (claimedChar || keyDown) g_eatChar = false;
 
-    if (g_visible.load() && g_ready.load() && !g_frameFailed.load() && (IsMouseMessage(msg) || IsKeyboardMessage(msg) || msg == WM_SETFOCUS || msg == WM_KILLFOCUS)) {
+    const bool menuInput = g_visible.load();
+    const bool cardInput = !menuInput && g_interactive.load() && (IsMouseMessage(msg) || msg == WM_SETFOCUS || msg == WM_KILLFOCUS); // mouse only
+    if ((menuInput || cardInput) && g_ready.load() && !g_frameFailed.load() && (IsMouseMessage(msg) || IsKeyboardMessage(msg) || msg == WM_SETFOCUS || msg == WM_KILLFOCUS)) {
         bool wantMouse = false, wantKeyboard = false;
         {
             std::lock_guard<std::mutex> lock(g_imguiLock);
@@ -165,7 +168,7 @@ WndDecision Decide(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             wantMouse = io.WantCaptureMouse;
             wantKeyboard = io.WantCaptureKeyboard || io.WantTextInput;
         }
-        if (keyDown && wp < 256 && g_client && g_client->CaptureKey(wp)) {
+        if (menuInput && keyDown && wp < 256 && g_client && g_client->CaptureKey(wp)) {
             g_eatUp[wp] = true;
             g_eatChar = true;
             return eat;
@@ -286,7 +289,10 @@ void DrawFrame(IDirect3DDevice9* device) {
     }
     const bool always = g_client && g_client->AlwaysDraw(); // every frame (the client runs its shortcuts there)
     const bool draw = !g_captureSuppressed.load() && (g_visible.load() || always);
-    if (!draw || !g_client) return;
+    if (!draw || !g_client) {
+        SetInteractive(false); // a card that took the mouse (Room to save) is gone: its last frame's capture must not stay
+        return;
+    }
 
     const auto beforeLock = FrameClock::Clock::now();
     std::lock_guard<std::mutex> lock(g_imguiLock);
@@ -373,6 +379,10 @@ bool MouseOverMenu() {
 void SetVisible(bool visible) {
     if (visible && g_client && !g_client->CanOpen()) return;
     if (g_visible.exchange(visible) != visible && !visible) g_clearInput.store(true); // no stuck keys when it opens again
+}
+
+void SetInteractive(bool interactive) {
+    if (g_interactive.exchange(interactive) != interactive && !interactive) g_clearInput.store(true);
 }
 
 void SetCaptureSuppressed(bool suppressed) { g_captureSuppressed.store(suppressed); }

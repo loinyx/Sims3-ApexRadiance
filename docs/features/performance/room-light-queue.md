@@ -9,7 +9,7 @@ frame, once the new light is ready. The final lighting is the game's own.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lamp switches all at once and Quick update for lamp switches (Experimental until 2.15.0), an atrium's stories changing together and the quick return of empty light object removals: Released in 2.7.0. Lamp edits all at once (was *Lamp switches all at once*; every lamp edit, the lamp's own story shown first) and shorter waits for an edit's rooms: Released in 2.12.3. Classic: show all floors together (Lamp lighting Classic): Released in 2.13.0. Automatic lamps first and the step budget of the extra solves: Released in 2.14.0 |
+| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lamp switches all at once and Quick update for lamp switches (Experimental until 2.15.0), an atrium's stories changing together and the quick return of empty light object removals: Released in 2.7.0. Lamp edits all at once (was *Lamp switches all at once*; every lamp edit, the lamp's own story shown first) and shorter waits for an edit's rooms: Released in 2.12.3. Classic: show all floors together (Lamp lighting Classic): Released in 2.13.0. Automatic lamps first and the step budget of the extra solves: Released in 2.14.0. A lamp edit resends only its own lot's rooms near openings: Released in 2.17.0 |
 | Default | On |
 | Menu | System > Performance > Camera and lighting > *Faster room lighting* |
 | Configuration | `[patches.RoomLightQueue]` in `ApexRadiance.toml` |
@@ -282,6 +282,50 @@ In [`features/level_light_share.cpp`](../../../features/level_light_share.cpp):
   sums in the same order).
 - Night Lighting does not relight every lot 3 s after a world loads at night (the game has just solved them).
 
+### Measuring who sends rooms to the solve
+
+Development builds with the switch `room_solve_causes` ([workflow.md](../../workflow.md#development-switches-dev_build))
+count, without changing what is solved:
+
+- every invalidate (`0x0069EED0`, or `0x0069F160` when the flag changes) by the return address of its caller, printed as
+  `ApexRadiance.asi+RVA` inside Apex and as the game address otherwise; an invalidate made by Apex's `QueueRoom` is
+  counted by `QueueRoom`'s own caller ("QueueRoom from ..."); each caller also gets the time since the same room's
+  previous invalidate by any caller (under 0.3 s, 0.3-1 s, 1-3 s, 3-10 s, 10 s or more or first) and how many of its
+  invalidates were a story's room 0 (the outdoor room the game's room-0 cascade at `0x006C7250` restarts on every story),
+  and the room's state right before it: waiting (state 1 or 2, or 3 with sub-step `+0xEC` 0: no work lost), mid-solve
+  (3 started: the solve so far is thrown away) or solved (4 or 5: a finished solve is undone);
+- every finished solve (the finalize hook, before `0x006A0E00`) by the class it wrote and by room (lot, story, id). A room
+  solved several times without an invalidate is the class refinement of `0x0069EA70`;
+- all split by the camera: settled (still for 10 s or more), stopped (still for less, the rooms of a move still settling)
+  or moving (it moved in the last 300 ms; `LotLightingMotion::SampleCameraMoving`, once a frame).
+
+For the proof that a re-solve could be skipped, each room solve is hashed: every texel the solve computed (its position
+and the light Apex and the game left on it, before packing) with what the packing reads (normalisation `room+0x160`,
+ambient `room+0x110`). When an invalidate undoes a finished solve, the room's next solve of the same class is compared
+with it and booked to that invalidate's caller: the same hash, a different one, another class, or not hashed (another
+room's solve ran in between on the thread). Seams that later passes take from other stories (wall blur's ghost rows) are
+not in the hash. Measuring only: nothing is skipped.
+
+A `[RoomSolveCauses]` line every minute gives the window's frames, finished solves by class, invalidates, the eight
+callers and four rooms with the most counts. Source: `features/room_solve_causes.{h,cpp}`.
+
+### Restart settle (development builds)
+
+The switch `lamp_edit_lot_only` (shipped) limits the resend of the rooms near openings after a lamp edit to the
+edited lamp's lot: in game, each edit made every loaded lot send them again (147 edits sent 1053 rooms in one minute).
+An edit whose lot is not known still sends every lot's. Checked in game: a lamp switched near a stair opening still
+updates the story below.
+
+The switch `restart_settle` (`features/restart_settle.h`; off in every build unless `[dev_build]` sets it to true: in game it
+did not reduce the repeated solves, see [history](../../history/performance-room-light-queue.md)) acts on the rooms
+the measurement above showed restarted again and again within 10 s of a camera move. An invalidate within 2 s of the
+room's previous one makes a burst; while the burst's last invalidate is under 300 ms old, `PriorityHook` gives the room
+priority 0, so it is picked once its restarts stop. The invalidate itself still runs at once (a solve in progress stops,
+as before). A single invalidate is never held, a lamp edit's rooms (`LampUrgency` > 1) are never held, and a room whose
+restarts never stop is let through after 1 s of hold. The last solve comes after the last restart, so the maps a room ends
+with are unchanged; during the settle a room can show its previous light up to about 300 ms longer. A `[RestartSettle]`
+line every minute (with the `[RoomSolveCauses]` line) gives the picks held and let through.
+
 ### Status line
 
 "viewed lot first on (N of M priorities raised), no middle step, requeues keep the class, several rooms per frame
@@ -296,6 +340,9 @@ In [`features/level_light_share.cpp`](../../../features/level_light_share.cpp):
 
 ## Rejected approaches
 
+- Skipping the opening sends whose inputs a room's finished solve already saw (`opening_skip`, development builds): proven
+  in game (no predicted room re-solved differently once a room's own last result was an input), but it predicted 4 % of
+  the sends and its input hash cost more frame time than the solves it saved ([history](../../history/performance-room-light-queue.md)).
 - Smooth light changes indoors (the room maps fading over 250 ms during lamp edits): removed before release; the light
   changes at once. An old `lightFade` key is ignored.
 - Holding every story's maps until an edit's first solves end: the lamp's story waited for a cascade of 2 to 4 s;

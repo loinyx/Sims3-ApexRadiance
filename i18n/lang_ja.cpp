@@ -9,6 +9,8 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Japanese}
 const I18n::Pair kPairs[] = {
+    {"Performance: Room to save asks once, after updating, whether to keep it on", "パフォーマンス：アップデート後に一度だけ「セーブ用の余裕」をオンのままにするか確認します"},
+    {"Performance: changing a lamp no longer relights rooms on other lots", "パフォーマンス：ランプを変更しても、ほかの区画の部屋は再計算されなくなりました"},
     {"Night Lights: no more dark squares on lit floors under furniture", "夜間照明：照らされた床の家具の下に暗い四角が出なくなりました"},
     {"Lot Streaming: lots that load together share the work, so panning stutters less", "区画ストリーミング：同時に読み込む区画が作業を分け合い、カメラ移動時のカクつきが減ります"},
     {"Night Lights: fence shadows on the lawn update in a fraction of the time", "夜間照明：芝生に落ちるフェンスの影の更新がずっと速くなります"},
@@ -109,6 +111,11 @@ const I18n::Pair kPairs[] = {
     {"Visit several lots for 10 minutes, return to the first lot, wait, then save and reopen that save.", "10分間いくつかの区画を訪れ、最初の区画に戻って少し待ち、セーブしてからそのセーブを読み直してください。"},
     {"Compare pauses, lot loading and RAM use with the previous build. Note any Error 12 and what happened before it.", "前のバージョンと比べて、カクつき、区画の読み込み、RAM使用量を確認してください。エラー12が出た場合は直前の状況を記録してください。"},
     {"Check lamp light near stairs and behind closed floors. Detailed collectors are disabled.", "階段付近や、開口部のない床の向こう側の照明を確認してください。詳細なデータ収集は無効です。"},
+    {"Keep Room to save on?", "「セーブ用の余裕」をオンのままにしますか？"},
+    {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "長時間プレイでセーブがエラー 12 で失敗するのを防ぎます。ゲームのメモリのうち 128 MB を空けておき、セーブの直前に返します。画面の見た目は変わりません。"},
+    {"You can change it later in Performance › Memory handling", "あとから「パフォーマンス › メモリ処理」で変更できます"},
+    {"Keep it on", "オンのままにする"},
+    {"Turn it off", "オフにする"},
     {"The latest lighting features also work on the EA app version 1.69", "最新の照明機能は EA アプリ版 1.69 でも動作します"},
     {"Walls shade lamp light on grass, streets and sidewalks outside the lot too", "壁が区画の外の芝生・道路・歩道でもランプの光を遮ります"},
     {"Garden walls and fences shade lamp light on the ground by their height", "塀やフェンスが高さに応じて地面のランプの光を遮ります"},

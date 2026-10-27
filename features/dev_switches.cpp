@@ -16,6 +16,11 @@ void Load() {
     memoryOwners.store(get("memory_owners"));
     releaseDebugBuffers.store(get("release_debug_buffers"));
     leftLotRelease.store(get("left_lot_release"));
+    roomSolveCauses.store(get("room_solve_causes"));
+    restartSettle.store(t ? (*t)["restart_settle"].value_or(false) : false); // off unless set: measured in game without effect
+    lampEditLotOnly.store(get("lamp_edit_lot_only"));
+    LOG_INFO(std::format("[DevBuild] Room solve switches: room_solve_causes {}, restart_settle {}, lamp_edit_lot_only {}", roomSolveCauses.load() ? "on" : "off",
+                         restartSettle.load() ? "on" : "off", lampEditLotOnly.load() ? "on" : "off"));
     LOG_INFO(std::format("[DevBuild] Memory switches: memory_owners {}, release_debug_buffers {}, left_lot_release {}", memoryOwners.load() ? "on" : "off", releaseDebugBuffers.load() ? "on" : "off", leftLotRelease.load() ? "on" : "off"));
     measurements.store(get("measurements"));
     drawReadsNoWait.store(get("draw_reads_nowait"));

@@ -122,6 +122,9 @@
 #include "gpu_lamp_law.h"
 #include "tester_toggles.h"
 #include "drag_lite.h"
+#include "room_solve_causes.h"
+#include "restart_settle.h"
+#include "lot_lighting_motion.h"
 #include "perf_toggles.h"
 #include "dev_switches.h"
 #include "arch_ambient.h"
@@ -739,6 +742,7 @@ using MarkRoom_t = void(__thiscall*)(void* treeLevel, int room);
 thread_local bool t_queueForce = false;
 thread_local bool t_tailSend = false;
 std::atomic<DWORD> g_gpuEditAt{0}; // the last lamp edit the GPU or the delta took (NoteGpuEdit; 0 = none, always while Classic)
+thread_local uintptr_t t_queueCaller = 0; // (room_solve_causes) QueueRoom's caller, while its invalidate runs
 bool QueueRoom(uintptr_t tracker, int level, int id, bool defer = false, int urgentTier = -1, bool soon = false) {
     const uintptr_t tl = TreeLevel(tracker, level);
     void* mgr = *reinterpret_cast<void* const*>(tl);
@@ -774,7 +778,9 @@ bool QueueRoom(uintptr_t tracker, int level, int id, bool defer = false, int urg
             if (!known) NoteSolve(room, 'H');
         return true;
     }
+    t_queueCaller = reinterpret_cast<uintptr_t>(_ReturnAddress());
     reinterpret_cast<InvalidateRoom_t>(kInvalidateRoom)(room, 1, 0);
+    t_queueCaller = 0;
     alignas(16) BYTE out[16] = {};
     reinterpret_cast<SetInsert_t>(kSetInsert)(reinterpret_cast<void*>(tl + 0x28), out, &id, 0);
     if (urgentSoon) GatherSoon(room);
@@ -930,6 +936,19 @@ void FloorOutdoorLights(uintptr_t tracker, uintptr_t tl, int floor, std::vector<
 
 std::atomic<long> g_indoorGen{1}; // bumped when every lot's rooms near openings must gather again (4.: option switched, install)
 std::atomic<long> g_editGen{1};   // bumped once a lamp edit is quiet: the edited lot's rooms near openings gather again (not PhysicsKey)
+// (lamp_edit_lot_only) the lots whose lamps were edited since the last bump, and those released by it; an edit with no known
+// lot releases every lot (g_editAllGen)
+std::mutex g_editLotsMx;
+std::vector<uintptr_t> g_editLotsPending, g_editLotsReady;
+bool g_editAllPending = false;
+long g_editAllGen = 0;
+bool EditedLot(uintptr_t tracker, long lastGen) {
+    std::lock_guard<std::mutex> lk(g_editLotsMx);
+    const auto it = std::find(g_editLotsReady.begin(), g_editLotsReady.end(), tracker);
+    const bool edited = it != g_editLotsReady.end();
+    if (edited) g_editLotsReady.erase(it);
+    return edited || lastGen < g_editAllGen;
+}
 
 // What an indoor room saw, at its last gather, of the lamps of the other stories' rooms near the openings between them
 // (ShareIndoorLights; light tree thread): each lamp with where it was and whether it was taken. AuditTakers compares it with
@@ -2512,6 +2531,7 @@ void __fastcall RoomSolveStartHook(BYTE* room) {
     SyncHardWallTops();
     reinterpret_cast<RoomSolveStart_t>(kRoomSolveStart)(room);
     ++t_bounceSolve;
+    if (room && DevSwitches::RoomSolveCauses()) RoomSolveCauses::SolveStart(reinterpret_cast<uintptr_t>(room)); // (its texels come after state 0)
     if (room && ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) DragLite::NoteSolveStarted(room); // (the re-pick throttle while a lamp is dragged)
     if (room) LoadTiming::NoteRoomSolveStart(); // atomics only
     // Quick outdoor lamp edits (Instant only): a room 0 solve's parts are kept from here (light tree thread)
@@ -7434,12 +7454,23 @@ void NoteSolve(BYTE* room, char event, uintptr_t caller) {
 using Invalidate_t = void(__thiscall*)(void* room, char full, char keep);
 using InvalidateFlag_t = void(__thiscall*)(void* room, char flag);
 void __fastcall InvalidateNoteHook(BYTE* room, void*, char full, char keep) {
+    if (room && DevSwitches::RoomSolveCauses())
+        RoomSolveCauses::NoteInvalidate(t_queueCaller ? t_queueCaller : reinterpret_cast<uintptr_t>(_ReturnAddress()), false, t_queueCaller != 0,
+                                        reinterpret_cast<uintptr_t>(room), *reinterpret_cast<const int*>(room + 0xC), GetTickCount64(),
+                                        RoomSolveCauses::StateOf(*reinterpret_cast<const int*>(room + 0xF0), *reinterpret_cast<const int*>(room + 0xEC)));
+    if (room && DevSwitches::RestartSettle()) RestartSettle::Global().NoteInvalidate(reinterpret_cast<uintptr_t>(room), GetTickCount64());
     if (room && g_installed.load(std::memory_order_relaxed)) NoteSolve(room, 'I', reinterpret_cast<uintptr_t>(_ReturnAddress()));
     reinterpret_cast<Invalidate_t>(EntryChain::Next(EntryChain::Site::RoomInvalidate, EntryChain::Layer::LevelLightShare))(room, full, keep);
 }
 void __fastcall InvalidateFlagNoteHook(BYTE* room, void*, char flag) {
-    if (room && g_installed.load(std::memory_order_relaxed) && *reinterpret_cast<const char*>(room + 0x19) != flag)
-        NoteSolve(room, 'F', reinterpret_cast<uintptr_t>(_ReturnAddress()));
+    if (room && *reinterpret_cast<const char*>(room + 0x19) != flag) {
+        if (DevSwitches::RoomSolveCauses())
+            RoomSolveCauses::NoteInvalidate(reinterpret_cast<uintptr_t>(_ReturnAddress()), true, false, reinterpret_cast<uintptr_t>(room),
+                                            *reinterpret_cast<const int*>(room + 0xC), GetTickCount64(),
+                                            RoomSolveCauses::StateOf(*reinterpret_cast<const int*>(room + 0xF0), *reinterpret_cast<const int*>(room + 0xEC)));
+        if (DevSwitches::RestartSettle()) RestartSettle::Global().NoteInvalidate(reinterpret_cast<uintptr_t>(room), GetTickCount64());
+        if (g_installed.load(std::memory_order_relaxed)) NoteSolve(room, 'F', reinterpret_cast<uintptr_t>(_ReturnAddress()));
+    }
     reinterpret_cast<InvalidateFlag_t>(EntryChain::Next(EntryChain::Site::RoomInvalidateFlag, EntryChain::Layer::LevelLightShare))(room, flag);
 }
 
@@ -7453,6 +7484,15 @@ void __fastcall FinalizeHook(BYTE* room) {
     // Quick outdoor lamp edits (Instant only): the last texel the solve packed is read while the maps are still locked
     if (room && OutdoorDelta::Enabled() && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
         HookGuard::Run("OutdoorDelta before finalize", [room] { OutdoorDelta::BeforeFinalize(room); });
+    // (room_solve_causes) the class this solve wrote, read before the game's finalize moves the room on
+    if (room && DevSwitches::RoomSolveCauses()) {
+        SolveNote n{};
+        if (ReadSolveNote(room, n)) {
+            RoomSolveCauses::NoteSolve(n.mgr, n.id, n.level, n.lot, n.cls);
+            const float packing[4] = {n.norm, n.c4[0], n.c4[1], n.c4[2]}; // what the packing reads besides the texels
+            RoomSolveCauses::SolveEnd(reinterpret_cast<uintptr_t>(room), n.cls, packing, 4, GetTickCount64());
+        }
+    }
     reinterpret_cast<Finalize_t>(kFinalize)(room);
     if (!room) return;
     // Quick outdoor lamp edits: the solve's parts are kept (or the delta's record closed), the maps now unlocked
@@ -8193,12 +8233,12 @@ void BeforeRoomUpdate(BYTE* tl) {
             lot.gen = gen;
             due = true;
         }
-        // (steady_indoor_light) a lamp edit's resend of the rooms near openings (every lot, as before: a Sim's switch on a lot
-        // the camera is not on needs it too), no longer through g_indoorGen, which PhysicsKey reads (each edit made every
-        // story's room 0 lose its kept parts: "the lighting options changed", a full solve of each)
+        // (steady_indoor_light) a lamp edit's resend of the rooms near openings (a Sim's switch on a lot the camera is not on
+        // needs it too), no longer through g_indoorGen, which PhysicsKey reads (each edit made every story's room 0 lose its
+        // kept parts: "the lighting options changed", a full solve of each). lamp_edit_lot_only: the edited lamp's lot only
         if (const long editGen = g_editGen.load(std::memory_order_relaxed); lot.editGen != editGen) {
+            if (!DevSwitches::LampEditLotOnly() || EditedLot(tracker, lot.editGen)) due = true;
             lot.editGen = editGen;
-            due = true;
         }
         const DWORD now = GetTickCount();
         const uintptr_t ground = StoryManager(tracker, 0);
@@ -9846,6 +9886,8 @@ float* SolvePoint(BYTE* room, float* out, void* list2D, void* list3D, void* flag
                 if (any) g_roomFillTexels.fetch_add(1, std::memory_order_relaxed);
             }
     }
+    // (room_solve_causes) the texel as the solve leaves it, for the solve's hash (after every Apex term above)
+    if (measureTexel && DevSwitches::RoomSolveCauses()) RoomSolveCauses::SolveTexel(reinterpret_cast<uintptr_t>(room), static_cast<const float*>(sample), out);
     // (borrowed_light_adapt) the brightest light this indoor room's texels took in this solve (RoomNormHook)
     if (measureTexel && DevSwitches::BorrowedLightAdapt()) NoteRoomTook(room, out);
     if (batch && !g_ghostSolve && !t_replay && g_recordSeams.load(std::memory_order_relaxed)) RecordRequestedSeam(room, out, static_cast<const float*>(sample));
@@ -14984,6 +15026,16 @@ void PublishVisSnap(); // below, with LampVisibilityShared
 } // namespace
 void OnPresent() {
     if (DevSwitches::kCompiled) MeasureRenderMemory(); // development builds (memory_owners): this file's containers, every 10 s
+    if (DevSwitches::RoomSolveCauses()) {
+        std::string line;
+        if (RoomSolveCauses::Frame(LotLightingMotion::SampleCameraMoving(), GetTickCount64(), &line)) {
+            LOG_INFO("[RoomSolveCauses] " + line);
+            if (DevSwitches::RestartSettle()) {
+                const auto s = RestartSettle::Global().Take();
+                LOG_INFO(std::format("[RestartSettle] Last minute: {} picks of restarted rooms held, {} let through after 1 s of hold", s.held, s.capped));
+            }
+        }
+    }
     // A lot that becomes the high-quality lot (the camera enters it, or comes back) solves all its rooms at once, as after a
     // load: the same settle window (SettlingAfterLoad), checked every 250 ms
     {
@@ -15019,6 +15071,15 @@ void OnPresent() {
         const DWORD edit = g_lampEditAt.load(std::memory_order_relaxed);
         if (edit && edit != s_edit && GetTickCount() - edit >= kEditRelightQuietMs) {
             s_edit = edit;
+            {
+                std::lock_guard<std::mutex> lk(g_editLotsMx);
+                for (const uintptr_t t : g_editLotsPending)
+                    if (std::find(g_editLotsReady.begin(), g_editLotsReady.end(), t) == g_editLotsReady.end()) g_editLotsReady.push_back(t);
+                g_editLotsPending.clear();
+                if (g_editLotsReady.size() > 256) g_editLotsReady.clear(), g_editAllPending = true; // lots gone without a visit
+                if (g_editAllPending) g_editAllGen = g_editGen.load(std::memory_order_relaxed) + 1;
+                g_editAllPending = false;
+            }
             g_editGen.fetch_add(1, std::memory_order_relaxed);
             g_editRelights.fetch_add(1, std::memory_order_relaxed);
         }
@@ -16983,7 +17044,12 @@ bool LampEditPending() {
 // one go once it ends: that made 300-1300 ms frames while lamps were moved in Build mode)
 std::atomic<DWORD> g_continuousEditAt{0};
 constexpr DWORD kDragQuietMs = 200;
-void NoteLampEditing(bool continuous) {
+void NoteLampEditing(bool continuous, uintptr_t tracker) {
+    {
+        std::lock_guard<std::mutex> lk(g_editLotsMx);
+        if (!tracker) g_editAllPending = true;
+        else if (std::find(g_editLotsPending.begin(), g_editLotsPending.end(), tracker) == g_editLotsPending.end()) g_editLotsPending.push_back(tracker);
+    }
     // (a move of the lamp is also noted as a move by LampMarkFilter; this mark may be a colour or intensity change)
     if (continuous) DragLite::NoteLampStep("lamp mark", DragLite::StepKind::Value);
     const DWORD now = GetTickCount() | 1;
