@@ -57,7 +57,7 @@ start-up (`DevSwitches::Load`) and logs every value. A missing key reads as on (
 preserves tables it does not write. Each switch can be turned off to compare against the previous behaviour.
 
 In every other build the accessors return `kShipped` (true) for the 30 switches that change the game or free memory, and false for the
-4 diagnostics, the unfinished `foliage_sun_shadow`, `restart_settle` and `idle_cache_early` (not yet measured in game). A switch therefore never needs a menu option to ship; a shipped behaviour
+4 diagnostics, the unfinished `foliage_sun_shadow` and `restart_settle` (not yet measured in game). A switch therefore never needs a menu option to ship; a shipped behaviour
 follows the setting named on its page.
 
 | Key | Public build | Effect | Page |
@@ -66,7 +66,6 @@ follows the setting named on its page.
 | `daylight_log` | Developer only | Logs the sky state that sets outdoor darkness every 5 s and adds an F8 section; no lighting change | [light-diag.md](features/dev-tools/light-diag.md#file-sections) |
 | `memory_owners` | Developer only | Apex's own memory by owner (`[ApexMemory]`, F8) | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
 | `restart_settle` | Developer only, off unless set to true | A room restarted again within 2 s is picked for its solve once its restarts stop for 300 ms (at most 1 s of hold); a lamp edit's rooms never wait; the maps a room ends with are the same | [room-light-queue.md](features/performance/room-light-queue.md#restart-settle-development-builds) |
-| `idle_cache_early` | Developer only | The game's resource cache drops its idle files once they pass 64 MB (at most every 2 minutes), not only when the address space is short; the address space in use is logged every minute and after each empty | [room-to-save.md](features/performance/room-to-save.md#idle-files-dropped-early-development-builds) |
 | `lamp_edit_lot_only` | Shipped | A lamp edit sends again the rooms near openings of the edited lamp's lot only, not of every lot; an edit whose lot is not known still sends every lot's |
 | `room_solve_causes` | Developer only | Counts who sends rooms to the solve: invalidates by caller, finished solves by class and room, camera settled, stopped or moving (`[RoomSolveCauses]` every minute); no lighting change | [room-light-queue.md](features/performance/room-light-queue.md#measuring-who-sends-rooms-to-the-solve) |
 | `release_debug_buffers` | Shipped | Gives back F7, F6 and F8 buffers once they are no longer needed | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |

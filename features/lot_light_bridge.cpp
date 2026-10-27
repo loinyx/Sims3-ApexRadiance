@@ -4633,7 +4633,7 @@ int PickFenceLampsImpl(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
 // (2.15.3) A group's pick kept, as PickMemo keeps an object's (its comment has the rules): keyed by the group (its entry and
 // the generation of its positions, moved at every read of them) and the law, valid while the lamp list (g_lampMemoGen) and
 // everything the wall and slab test reads (LampVisibilityState, before and after the pick) are the same. A hit writes exactly what the pick would: the same rows, lampTop and share, the
-// counters and the candidate count. 256 entries, direct-mapped; the same switches and checks as PickMemo.
+// counters and the candidate count. 1024 entries, direct-mapped; the same switches and checks as PickMemo.
 constexpr unsigned kFenceRows = 4 * ShaderPatches::kObjectPixelLamps + 2; // rows 1 .. 2 + 4N of the caller's array
 struct FencePickMemo {
     const GroupCentre* g = nullptr;
@@ -4645,7 +4645,7 @@ struct FencePickMemo {
     float lampTop = 0.0f, share = 0.0f;
     float rows[kFenceRows][4] = {};
 };
-FencePickMemo g_fencePick[256];
+FencePickMemo g_fencePick[1024];
 uint32_t g_fencePickHits = 0, g_fencePickMisses = 0, g_fencePickChecks = 0;
 uint32_t g_fenceMissWhy[5] = {}; // (development builds) PickFenceLampsMemo's misses by reason, and picks not kept
 bool g_fencePickOff = false;
@@ -4666,7 +4666,8 @@ int PickFenceLamps(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float
 int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share) {
     if (!DevSwitches::LampVisibilityMemo() || g_fencePickOff || LevelLightShare::VisibilityDiagArmed() || LightProbe::Capturing())
         return PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share);
-    FencePickMemo& e = g_fencePick[(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g)) * 2654435761u ^ g.read * 0x85EBCA77u) >> 24];
+    // (the law in the slot too: a group drawn with both laws kept evicting itself)
+    FencePickMemo& e = g_fencePick[(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g)) * 2654435761u ^ g.read * 0x85EBCA77u ^ (reachLaw ? 0x9E3779B9u : 0u)) >> 22];
     const uint64_t state = LevelLightShare::LampVisibilityState();
     if (e.gen == g_lampMemoGen && e.g == &g && e.read == g.read && e.reachLaw == reachLaw && e.state == state) {
         g_fencePickHits++;

@@ -92,11 +92,6 @@ inline bool MemoryOwners() { return kCompiled && memoryOwners.load(std::memory_o
 //   lamp_edit_lot_only     a lamp edit sends again the rooms near openings of the edited
 //                          lamp's lot only, not of every lot (147 edits sent 1053 rooms in a minute); an edit whose lot is not
 //                          known still sends every lot's
-//   idle_cache_early       (measures and changes; not shipped) the game's resource cache drops its idle files when they pass
-//                          64 MB (at most every 2 min), not only when the address space is short; logs the address space in
-//                          use every minute and after each empty (memory_guard.cpp)
-inline std::atomic<bool> idleCacheEarly{false};
-inline bool IdleCacheEarly() { return kCompiled && idleCacheEarly.load(std::memory_order_relaxed); }
 inline std::atomic<bool> lampEditLotOnly{false};
 inline bool LampEditLotOnly() { return kCompiled ? lampEditLotOnly.load(std::memory_order_relaxed) : kShipped; }
 inline std::atomic<bool> roomSolveCauses{false};

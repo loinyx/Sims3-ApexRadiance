@@ -19,8 +19,6 @@ void Load() {
     roomSolveCauses.store(get("room_solve_causes"));
     restartSettle.store(t ? (*t)["restart_settle"].value_or(false) : false); // off unless set: measured in game without effect
     lampEditLotOnly.store(get("lamp_edit_lot_only"));
-    idleCacheEarly.store(get("idle_cache_early"));
-    LOG_INFO(std::format("[DevBuild] Address space switches: idle_cache_early {}", idleCacheEarly.load() ? "on" : "off"));
     LOG_INFO(std::format("[DevBuild] Room solve switches: room_solve_causes {}, restart_settle {}, lamp_edit_lot_only {}", roomSolveCauses.load() ? "on" : "off",
                          restartSettle.load() ? "on" : "off", lampEditLotOnly.load() ? "on" : "off"));
     LOG_INFO(std::format("[DevBuild] Memory switches: memory_owners {}, release_debug_buffers {}, left_lot_release {}", memoryOwners.load() ? "on" : "off", releaseDebugBuffers.load() ? "on" : "off", leftLotRelease.load() ? "on" : "off"));

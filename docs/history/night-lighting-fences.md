@@ -151,3 +151,8 @@ every pick that weighed a lamp shining out of a house was left out of the memo, 
 of the walls. That copy is a snapshot replaced whole when it changes (`g_exitSnap`), so its generation (`g_exitGen`) now
 moves with every replacement and is part of `LampVisibilityState`; the fence and object pick memos keep those picks.
 Development builds still compare one hit in 64 with a fresh pick bit for bit.
+
+Measured in game the same evening on a development install with `story_samples` and `memory_owners` off (the F8 story
+samples turn every lamp pick memo off): the fence fix cost 2 to 5 us a draw (15 to 22 us with them on), its lamp pick
+0.3 to 1 us, outdoor objects 1.5 us; about 90 % of the fence picks were reused. Most of the rest landed in a slot another
+group held: the memo grew to 1024 entries and its slot now includes the law.
