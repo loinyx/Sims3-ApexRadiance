@@ -27,6 +27,7 @@ an FPS gain, complete climate coverage or resolution of texture allocation stall
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-27 | `47ec493` (release 2.16.0 candidate; the outdoor scale and its shade) | `fxc /T ps_3_0` on `kReplacementHlsl` (dry and `WET`); `tools/rt_lamps_test` | both compile; the scale gives back the sum's largest channel within 0.41 % on 5,427 texels past 1, colour unchanged on 26,214. In game: the courtyard ground past 1 (F7 "outdoor scale: on"); the strip behind the screen wall after the shade change not yet seen | Native D3D9 (offline device) |
 | — | `v2.15.6` (implementation `f66e777`) | `world_terrain_layout_test; lighting_prepare_test` | 405 package terrain pairs checked; exact gap and cell results; unknown or capacity-limited paths retain fallback | CPU fixtures; native D3D9 shader creation |
 | 2026-10-23 | `40f351e` | `tools/ground_shade_test` (`run.ps1`) | 240 checks, 0 failures: the whole chunk gives the bytes it gave before; after each of 240 random lot changes (added, moved, reshaded, gone, turned grids, over the chunk's edges) and then every lot gone, `ChunkUpdate` gives `ChunkFull`'s bytes at every mip; the lot build's mask and stamp weight equal the previous header's on a synthetic 40 m lot | CPU harness |
 | 2026-10-23 | `40f351e` | `lot_uv_fixture.cpp` (`run_lot_uv_checks.ps1`), compiled at ps_3_0 as in production, with a non-square lot map check | 130,699 passed, 0 failed | Native D3D9 |
