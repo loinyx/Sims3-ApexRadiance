@@ -304,3 +304,10 @@ The rule "skip a room whose finished solve started after the change that sent it
 sources of `QueueOpeningRooms` (a lot's generation, the floor count checked every 2 s, lamp edits, floor edits, the settle
 round) only floor edits record one. Before any skip, the measurement therefore hashes each room solve and compares the
 re-solve that follows an undone finished solve with it, by caller: how many undone solves wrote the same texels again.
+
+**Fifth session (2026-10-27, the proof):** in the minute with most traffic, 446 finished solves undone were re-solved at the
+same class with the same hash, 73 with a different one and 41 not hashed. By caller: `QueueOpeningRooms` 389 the same and
+32 different, `RequeueStory` 20 and 1, `QueueRoomSafe` 11 and 2, `AfterChangedWalk` 24 and 18, the game's dirty-room loop
+1 and 7. Most of `QueueOpeningRooms`' requeues of finished rooms rewrite what the room already shows, but about 8 % do
+not, so skipping them all would change the lighting; a skip needs a test that tells the two apart (the lamps the room saw
+near the openings and the openings themselves, as `AuditTakers` compares them) and a new proof.
