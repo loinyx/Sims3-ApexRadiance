@@ -31,6 +31,14 @@ inline RoomState StateOf(int state, int step) {
 void NoteInvalidate(uintptr_t caller, bool onFlagChange, bool viaQueueRoom, uintptr_t room, int roomId, uint64_t nowMs, RoomState state = kOtherState);
 void NoteSolve(uintptr_t mgr, int id, int level, uint32_t lot, int cls);
 
+// The proof of a skipped re-solve (measures only): each room solve's texels (the light it computed at each texel, before
+// the game packs it) are hashed with what the packing reads (normalisation, ambient). When an invalidate undoes a finished
+// solve, the room's next solve of the same class is compared with it and counted by the caller of that invalidate: the same
+// hash means the re-solve wrote what the room already showed. SolveStart / SolveTexel / SolveEnd run on the solve's thread.
+void SolveStart(uintptr_t room);
+void SolveTexel(uintptr_t room, const float* position, const float* colour);
+void SolveEnd(uintptr_t room, int cls, const float* packing, int n, uint64_t nowMs);
+
 // Render thread, once a frame: the camera state for the counts until the next call. Returns true with the window's line in
 // *line once windowMs have passed since the window started (the counts start again).
 bool Frame(bool cameraMoving, uint64_t nowMs, std::string* line, uint64_t windowMs = 60000);

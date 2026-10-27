@@ -76,6 +76,38 @@ int main() {
     Check(Frame(false, 330000, &line), "a fourth line");
     Check(Has(line, "invalidates settled 4 stopped 0 moving 0 (room waiting 1, mid-solve 1, solved 2, other 0)"), "states in the totals");
     Check(Has(line, "waiting/mid-solve/solved/other 1/1/1/0") && Has(line, "waiting/mid-solve/solved/other 0/0/1/0"), "states by caller");
+    // the proof: a finished solve undone, compared with the room's next solve of the same class
+    const float pos[3] = {1.0f, 2.0f, 3.0f}, lit[3] = {0.5f, 0.25f, 0.125f}, other[3] = {0.5f, 0.25f, 0.126f}, pack[4] = {1.0f, 0.01f, 0.02f, 0.03f};
+    const auto solve = [&](uintptr_t r, int cls, const float* colour, uint64_t at) {
+        SolveStart(r);
+        SolveTexel(r, pos, colour);
+        SolveTexel(r, pos, lit);
+        SolveEnd(r, cls, pack, 4, at);
+    };
+    const uintptr_t a = 0xB000000, b = 0xB100000, c = 0xB200000, d = 0xB300000;
+    solve(a, 2, lit, 400000);
+    NoteInvalidate(0x00700000, false, true, a, 3, 400100, kSolved);   // undone by a QueueRoom caller
+    NoteInvalidate(0x006C7451, false, false, a, 3, 400150, kWaiting); // a second invalidate: the first undo is the one compared
+    solve(a, 2, lit, 400200);                                         // the same texels: same
+    solve(b, 2, lit, 400000);
+    NoteInvalidate(0x006C7451, false, false, b, 2, 400100, kSolved);
+    solve(b, 2, other, 400200);                                       // one colour differs: different
+    solve(c, 0, lit, 400000);
+    NoteInvalidate(0x006C7451, false, false, c, 2, 400100, kSolved);
+    solve(c, 2, lit, 400200);                                         // another class: not comparable
+    solve(d, 2, lit, 400000);
+    NoteInvalidate(0x006C7451, false, false, d, 2, 400100, kSolved);
+    SolveStart(d);
+    SolveStart(a);                                                     // another room's solve interleaved on the thread
+    SolveTexel(d, pos, lit);
+    SolveEnd(d, 2, pack, 4, 400200);                                   // not hashed
+    NoteInvalidate(0x006C7451, false, false, d, 2, 400300, kWaiting); // waiting: nothing to compare
+    Check(Frame(false, 460000, &line), "a fifth line");
+    std::printf("  %s\n", line.c_str());
+    Check(Has(line, "finished solves undone, next solve of the same class same 1, different 1, other class 1, not hashed 1"), "the proof's totals");
+    Check(Has(line, "QueueRoom from 0x00700000") && Has(line, "undone solves redone same/different/other class/not hashed 1/0/0/0"),
+          "the same re-solve booked to the caller of the first undo");
+    Check(Has(line, "undone solves redone same/different/other class/not hashed 0/1/1/1"), "the game's caller: different, other class, not hashed");
     std::printf(g_fail ? "%d checks FAILED\n" : "Room solve causes: all checks passed\n", g_fail);
     return g_fail ? 1 : 0;
 }

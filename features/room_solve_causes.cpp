@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <format>
 #include <mutex>
 #include <vector>
@@ -27,7 +28,34 @@ struct CauseSlot {
     uint32_t gap[kGaps] = {};
     uint32_t room0 = 0; // invalidates of a story's room 0 (the outdoor room; the game's room-0 cascade restarts them)
     uint32_t state[kRoomStates] = {};
+    // finished solves this caller undid, by what the room's next solve of the same class wrote: the same hash, a different
+    // one, another class (not comparable), or not hashed (its texels ran interleaved with another room's solve on the thread)
+    uint32_t same = 0, differ = 0, otherClass = 0, unhashed = 0;
 };
+// Each room's last finished solve: its hash and class, and the undo waiting for the next solve's comparison
+struct HashSlot {
+    uintptr_t room = 0;
+    uint64_t at = 0, prev = 0;
+    int prevCls = -1;
+    bool hasPrev = false, pending = false, pFlag = false, pQueue = false;
+    uintptr_t pCaller = 0;
+};
+constexpr int kHashes = 2048;
+HashSlot g_hashes[kHashes];
+uint32_t g_same = 0, g_differ = 0, g_otherClass = 0, g_unhashed = 0;
+// The solve hashing on this thread (a solve's texels run on the thread that runs it)
+thread_local uintptr_t t_hashRoom = 0;
+thread_local uint64_t t_hash = 0;
+thread_local uint32_t t_texels = 0;
+constexpr uint64_t kFnvBasis = 1469598103934665603ull, kFnvPrime = 1099511628211ull;
+uint64_t Fold(uint64_t h, const float* v, int n) {
+    for (int i = 0; i < n; i++) {
+        uint32_t bits;
+        std::memcpy(&bits, &v[i], 4);
+        for (int b = 0; b < 4; b++) h = (h ^ ((bits >> (8 * b)) & 0xFF)) * kFnvPrime;
+    }
+    return h;
+}
 // The last invalidate of each room (fixed table; a room address reused 10 s later starts as "first")
 struct LastSlot {
     uintptr_t room = 0;
@@ -56,6 +84,21 @@ uint64_t g_windowStart = 0, g_lastMoving = 0;
 bool g_everMoved = false;
 std::atomic<int> g_cam{kSettled};
 
+// under g_mx; a room idle for a minute is free again
+HashSlot* HashOf(uintptr_t room, uint64_t now, bool create) {
+    const int home = static_cast<int>((static_cast<uint32_t>(room) * 2654435761u) >> 21); // 11 bits
+    HashSlot* free = nullptr;
+    for (int k = 0, i = home; k < 16; k++, i = (i + 1) & (kHashes - 1)) {
+        if (g_hashes[i].room == room) return &g_hashes[i];
+        if (!free && (!g_hashes[i].room || now - g_hashes[i].at >= 60000)) free = &g_hashes[i];
+    }
+    if (!create) return nullptr;
+    HashSlot* s = free ? free : &g_hashes[home];
+    *s = HashSlot{};
+    s->room = room;
+    return s;
+}
+
 uint32_t Sum(const uint32_t* v, int n) {
     uint32_t s = 0;
     for (int i = 0; i < n; i++) s += v[i];
@@ -69,6 +112,7 @@ void Clear() {
     for (auto& s : g_solves) for (auto& v : s) v = 0;
     for (auto& v : g_invalidates) v = 0;
     for (auto& v : g_states) v = 0;
+    g_same = g_differ = g_otherClass = g_unhashed = 0;
     for (auto& v : g_frames) v = 0;
 }
 
@@ -93,7 +137,9 @@ std::string Line(double seconds) {
         s += std::format("{} {} {} (class 0/1/2 {}/{}/{}{})", c ? "," : "", names[c], Sum(g_solves[c], 4), g_solves[c][0], g_solves[c][1], g_solves[c][2],
                          g_solves[c][3] ? std::format(" +{} other", g_solves[c][3]) : "");
     s += "; invalidates " + Split(g_invalidates) +
-         std::format(" (room waiting {}, mid-solve {}, solved {}, other {})", g_states[kWaiting], g_states[kMidSolve], g_states[kSolved], g_states[kOtherState]);
+         std::format(" (room waiting {}, mid-solve {}, solved {}, other {})", g_states[kWaiting], g_states[kMidSolve], g_states[kSolved], g_states[kOtherState]) +
+         std::format("; finished solves undone, next solve of the same class same {}, different {}, other class {}, not hashed {}", g_same, g_differ,
+                     g_otherClass, g_unhashed);
     std::vector<const CauseSlot*> causes;
     for (const auto& c : g_causes)
         if (c.caller) causes.push_back(&c);
@@ -104,7 +150,9 @@ std::string Line(double seconds) {
                          causes[i]->viaQueue ? "QueueRoom from " : "", CallerText(causes[i]->caller), causes[i]->onFlag ? " (flag)" : "", Split(causes[i]->n),
                          causes[i]->gap[kGap03], causes[i]->gap[kGap1], causes[i]->gap[kGap3], causes[i]->gap[kGap10], causes[i]->gap[kGapLong], causes[i]->room0) +
              std::format(", waiting/mid-solve/solved/other {}/{}/{}/{}", causes[i]->state[kWaiting], causes[i]->state[kMidSolve], causes[i]->state[kSolved],
-                         causes[i]->state[kOtherState]);
+                         causes[i]->state[kOtherState]) +
+             std::format(", undone solves redone same/different/other class/not hashed {}/{}/{}/{}", causes[i]->same, causes[i]->differ, causes[i]->otherClass,
+                         causes[i]->unhashed);
     if (g_causeOverflow) s += std::format("; {} invalidates by callers not listed", g_causeOverflow);
     std::vector<const RoomSlot*> rooms;
     for (const auto& r : g_rooms)
@@ -126,6 +174,10 @@ void NoteInvalidate(uintptr_t caller, bool onFlag, bool viaQueueRoom, uintptr_t 
     g_invalidates[m]++;
     g_states[state]++;
     const int gap = room ? GapOf(room, nowMs) : kGapLong;
+    // a finished solve undone: its hash waits for the room's next solve (the first undo of it is the one compared)
+    if (room && state == kSolved)
+        if (HashSlot* h = HashOf(room, nowMs, false); h && h->hasPrev && !h->pending)
+            h->pending = true, h->pCaller = caller, h->pFlag = onFlag, h->pQueue = viaQueueRoom;
     for (int k = 0, i = static_cast<int>((caller * 2654435761u + (onFlag ? 1u : 0u)) % kCauses); k < kCauses; k++, i = (i + 1) % kCauses) {
         CauseSlot& c = g_causes[i];
         if (!c.caller) c.caller = caller, c.onFlag = onFlag, c.viaQueue = viaQueueRoom;
@@ -154,6 +206,42 @@ void NoteSolve(uintptr_t mgr, int id, int level, uint32_t lot, int cls) {
         }
     }
     g_roomOverflow++;
+}
+
+void SolveStart(uintptr_t room) {
+    t_hashRoom = room;
+    t_hash = kFnvBasis;
+    t_texels = 0;
+}
+
+void SolveTexel(uintptr_t room, const float* position, const float* colour) {
+    if (room != t_hashRoom) return;
+    t_hash = Fold(Fold(t_hash, position, 3), colour, 3);
+    t_texels++;
+}
+
+void SolveEnd(uintptr_t room, int cls, const float* packing, int n, uint64_t nowMs) {
+    const bool hashed = room == t_hashRoom && t_texels > 0;
+    const uint64_t h = hashed ? Fold(t_hash, packing, n) ^ t_texels : 0;
+    t_hashRoom = 0;
+    std::lock_guard<std::mutex> lk(g_mx);
+    HashSlot* s = HashOf(room, nowMs, true);
+    s->at = nowMs;
+    if (s->pending) {
+        int outcome = !hashed ? 3 : s->prevCls != cls ? 2 : s->prev == h ? 0 : 1; // same, different, other class, not hashed
+        uint32_t* const total[4] = {&g_same, &g_differ, &g_otherClass, &g_unhashed};
+        (*total[outcome])++;
+        for (auto& c : g_causes)
+            if (c.caller == s->pCaller && c.onFlag == s->pFlag && c.viaQueue == s->pQueue) {
+                uint32_t* const mine[4] = {&c.same, &c.differ, &c.otherClass, &c.unhashed};
+                (*mine[outcome])++;
+                break;
+            }
+        s->pending = false;
+    }
+    s->hasPrev = hashed;
+    s->prev = h;
+    s->prevCls = cls;
 }
 
 bool Frame(bool cameraMoving, uint64_t nowMs, std::string* line, uint64_t windowMs) {

@@ -299,6 +299,13 @@ count, without changing what is solved:
 - all split by the camera: settled (still for 10 s or more), stopped (still for less, the rooms of a move still settling)
   or moving (it moved in the last 300 ms; `LotLightingMotion::SampleCameraMoving`, once a frame).
 
+For the proof that a re-solve could be skipped, each room solve is hashed: every texel the solve computed (its position
+and the light Apex and the game left on it, before packing) with what the packing reads (normalisation `room+0x160`,
+ambient `room+0x110`). When an invalidate undoes a finished solve, the room's next solve of the same class is compared
+with it and booked to that invalidate's caller: the same hash, a different one, another class, or not hashed (another
+room's solve ran in between on the thread). Seams that later passes take from other stories (wall blur's ghost rows) are
+not in the hash. Measuring only: nothing is skipped.
+
 A `[RoomSolveCauses]` line every minute gives the window's frames, finished solves by class, invalidates, the eight
 callers and four rooms with the most counts. Source: `features/room_solve_causes.{h,cpp}`.
 

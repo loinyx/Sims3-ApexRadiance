@@ -2518,6 +2518,7 @@ void __fastcall RoomSolveStartHook(BYTE* room) {
     SyncHardWallTops();
     reinterpret_cast<RoomSolveStart_t>(kRoomSolveStart)(room);
     ++t_bounceSolve;
+    if (room && DevSwitches::RoomSolveCauses()) RoomSolveCauses::SolveStart(reinterpret_cast<uintptr_t>(room)); // (its texels come after state 0)
     if (room && ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) DragLite::NoteSolveStarted(room); // (the re-pick throttle while a lamp is dragged)
     if (room) LoadTiming::NoteRoomSolveStart(); // atomics only
     // Quick outdoor lamp edits (Instant only): a room 0 solve's parts are kept from here (light tree thread)
@@ -7473,7 +7474,11 @@ void __fastcall FinalizeHook(BYTE* room) {
     // (room_solve_causes) the class this solve wrote, read before the game's finalize moves the room on
     if (room && DevSwitches::RoomSolveCauses()) {
         SolveNote n{};
-        if (ReadSolveNote(room, n)) RoomSolveCauses::NoteSolve(n.mgr, n.id, n.level, n.lot, n.cls);
+        if (ReadSolveNote(room, n)) {
+            RoomSolveCauses::NoteSolve(n.mgr, n.id, n.level, n.lot, n.cls);
+            const float packing[4] = {n.norm, n.c4[0], n.c4[1], n.c4[2]}; // what the packing reads besides the texels
+            RoomSolveCauses::SolveEnd(reinterpret_cast<uintptr_t>(room), n.cls, packing, 4, GetTickCount64());
+        }
     }
     reinterpret_cast<Finalize_t>(kFinalize)(room);
     if (!room) return;
@@ -9868,6 +9873,8 @@ float* SolvePoint(BYTE* room, float* out, void* list2D, void* list3D, void* flag
                 if (any) g_roomFillTexels.fetch_add(1, std::memory_order_relaxed);
             }
     }
+    // (room_solve_causes) the texel as the solve leaves it, for the solve's hash (after every Apex term above)
+    if (measureTexel && DevSwitches::RoomSolveCauses()) RoomSolveCauses::SolveTexel(reinterpret_cast<uintptr_t>(room), static_cast<const float*>(sample), out);
     // (borrowed_light_adapt) the brightest light this indoor room's texels took in this solve (RoomNormHook)
     if (measureTexel && DevSwitches::BorrowedLightAdapt()) NoteRoomTook(room, out);
     if (batch && !g_ghostSolve && !t_replay && g_recordSeams.load(std::memory_order_relaxed)) RecordRequestedSeam(room, out, static_cast<const float*>(sample));

@@ -300,3 +300,7 @@ the finished solves undone came from the game's dirty-room loop (273), `QueueOpe
 lot's floors change, which streaming does every time a lot is built, and again in the lot's settle round, which exists so
 the rooms near openings are lit with the other stories' lamps in place. Skipping a requeue needs proof that the room's
 finished solve already had the same inputs; not done.
+The rule "skip a room whose finished solve started after the change that sent it" needs that change's time; of the
+sources of `QueueOpeningRooms` (a lot's generation, the floor count checked every 2 s, lamp edits, floor edits, the settle
+round) only floor edits record one. Before any skip, the measurement therefore hashes each room solve and compares the
+re-solve that follows an undone finished solve with it, by caller: how many undone solves wrote the same texels again.
