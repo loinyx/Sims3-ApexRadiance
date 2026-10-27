@@ -66,6 +66,16 @@ int main() {
           "gaps by bucket and room 0 count for the game's caller");
     Check(Has(line, "QueueRoom from 0x00500000 settled 1 stopped 0 moving 0, after the room's last <0.3/0.3-1/1-3/3-10/10+ s 1/0/0/0/0, room 0 0"),
           "the gap counts the room's previous invalidate by any caller");
+    // the room's state when invalidated
+    Check(StateOf(2, 0) == kWaiting && StateOf(1, 0) == kWaiting && StateOf(3, 0) == kWaiting, "waiting: states 1, 2, and 3 not started");
+    Check(StateOf(3, 4) == kMidSolve && StateOf(4, 9) == kSolved && StateOf(5, 0) == kSolved && StateOf(0, 0) == kOtherState, "mid-solve, solved, other");
+    NoteInvalidate(0x006C7451, false, false, room, 4, 300000, kWaiting);
+    NoteInvalidate(0x006C7451, false, false, room, 4, 300100, kMidSolve);
+    NoteInvalidate(0x006C7451, false, false, room, 4, 300200, kSolved);
+    NoteInvalidate(0x00500000, false, true, room, 4, 300300, kSolved);
+    Check(Frame(false, 330000, &line), "a fourth line");
+    Check(Has(line, "invalidates settled 4 stopped 0 moving 0 (room waiting 1, mid-solve 1, solved 2, other 0)"), "states in the totals");
+    Check(Has(line, "waiting/mid-solve/solved/other 1/1/1/0") && Has(line, "waiting/mid-solve/solved/other 0/0/1/0"), "states by caller");
     std::printf(g_fail ? "%d checks FAILED\n" : "Room solve causes: all checks passed\n", g_fail);
     return g_fail ? 1 : 0;
 }

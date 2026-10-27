@@ -291,3 +291,4 @@ game's dirty-room loop, 355 of 489 from `AfterChangedWalk`): the game and Apex r
 Room 0 of a story took 30 to 45 % of the invalidates (the room-0 cascade). Restarts 1 to 10 s apart were about 150 to 200
 a minute. An invalidate of a room still waiting for its solve throws no work away; which invalidates stop a solve in
 progress or undo a finished one (the room's state when invalidated) is not yet measured.
+The measurement then adds the room's state right before each invalidate (waiting, mid-solve, solved), by caller.

@@ -26,6 +26,7 @@ struct CauseSlot {
     uint32_t n[kCams] = {};
     uint32_t gap[kGaps] = {};
     uint32_t room0 = 0; // invalidates of a story's room 0 (the outdoor room; the game's room-0 cascade restarts them)
+    uint32_t state[kRoomStates] = {};
 };
 // The last invalidate of each room (fixed table; a room address reused 10 s later starts as "first")
 struct LastSlot {
@@ -49,6 +50,7 @@ RoomSlot g_rooms[kRooms];
 uint32_t g_causeOverflow = 0, g_roomOverflow = 0;
 uint32_t g_solves[kCams][4] = {}; // [camera][class 0, 1, 2, other]
 uint32_t g_invalidates[kCams] = {};
+uint32_t g_states[kRoomStates] = {};
 uint32_t g_frames[kCams] = {};
 uint64_t g_windowStart = 0, g_lastMoving = 0;
 bool g_everMoved = false;
@@ -66,6 +68,7 @@ void Clear() {
     g_causeOverflow = g_roomOverflow = 0;
     for (auto& s : g_solves) for (auto& v : s) v = 0;
     for (auto& v : g_invalidates) v = 0;
+    for (auto& v : g_states) v = 0;
     for (auto& v : g_frames) v = 0;
 }
 
@@ -89,7 +92,8 @@ std::string Line(double seconds) {
     for (int c = 0; c < kCams; c++)
         s += std::format("{} {} {} (class 0/1/2 {}/{}/{}{})", c ? "," : "", names[c], Sum(g_solves[c], 4), g_solves[c][0], g_solves[c][1], g_solves[c][2],
                          g_solves[c][3] ? std::format(" +{} other", g_solves[c][3]) : "");
-    s += "; invalidates " + Split(g_invalidates);
+    s += "; invalidates " + Split(g_invalidates) +
+         std::format(" (room waiting {}, mid-solve {}, solved {}, other {})", g_states[kWaiting], g_states[kMidSolve], g_states[kSolved], g_states[kOtherState]);
     std::vector<const CauseSlot*> causes;
     for (const auto& c : g_causes)
         if (c.caller) causes.push_back(&c);
@@ -98,7 +102,9 @@ std::string Line(double seconds) {
     for (size_t i = 0; i < causes.size() && i < 8; i++)
         s += std::format("{} {}{}{} {}, after the room's last <0.3/0.3-1/1-3/3-10/10+ s {}/{}/{}/{}/{}, room 0 {}", i ? ";" : "",
                          causes[i]->viaQueue ? "QueueRoom from " : "", CallerText(causes[i]->caller), causes[i]->onFlag ? " (flag)" : "", Split(causes[i]->n),
-                         causes[i]->gap[kGap03], causes[i]->gap[kGap1], causes[i]->gap[kGap3], causes[i]->gap[kGap10], causes[i]->gap[kGapLong], causes[i]->room0);
+                         causes[i]->gap[kGap03], causes[i]->gap[kGap1], causes[i]->gap[kGap3], causes[i]->gap[kGap10], causes[i]->gap[kGapLong], causes[i]->room0) +
+             std::format(", waiting/mid-solve/solved/other {}/{}/{}/{}", causes[i]->state[kWaiting], causes[i]->state[kMidSolve], causes[i]->state[kSolved],
+                         causes[i]->state[kOtherState]);
     if (g_causeOverflow) s += std::format("; {} invalidates by callers not listed", g_causeOverflow);
     std::vector<const RoomSlot*> rooms;
     for (const auto& r : g_rooms)
@@ -114,10 +120,11 @@ std::string Line(double seconds) {
 
 } // namespace
 
-void NoteInvalidate(uintptr_t caller, bool onFlag, bool viaQueueRoom, uintptr_t room, int roomId, uint64_t nowMs) {
+void NoteInvalidate(uintptr_t caller, bool onFlag, bool viaQueueRoom, uintptr_t room, int roomId, uint64_t nowMs, RoomState state) {
     const int m = g_cam.load(std::memory_order_relaxed);
     std::lock_guard<std::mutex> lk(g_mx);
     g_invalidates[m]++;
+    g_states[state]++;
     const int gap = room ? GapOf(room, nowMs) : kGapLong;
     for (int k = 0, i = static_cast<int>((caller * 2654435761u + (onFlag ? 1u : 0u)) % kCauses); k < kCauses; k++, i = (i + 1) % kCauses) {
         CauseSlot& c = g_causes[i];
@@ -125,6 +132,7 @@ void NoteInvalidate(uintptr_t caller, bool onFlag, bool viaQueueRoom, uintptr_t 
         if (c.caller == caller && c.onFlag == onFlag && c.viaQueue == viaQueueRoom) {
             c.n[m]++;
             c.gap[gap]++;
+            c.state[state]++;
             if (roomId == 0) c.room0++;
             return;
         }

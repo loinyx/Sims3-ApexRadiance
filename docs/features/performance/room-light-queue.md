@@ -291,7 +291,9 @@ count, without changing what is solved:
   `ApexRadiance.asi+RVA` inside Apex and as the game address otherwise; an invalidate made by Apex's `QueueRoom` is
   counted by `QueueRoom`'s own caller ("QueueRoom from ..."); each caller also gets the time since the same room's
   previous invalidate by any caller (under 0.3 s, 0.3-1 s, 1-3 s, 3-10 s, 10 s or more or first) and how many of its
-  invalidates were a story's room 0 (the outdoor room the game's room-0 cascade at `0x006C7250` restarts on every story);
+  invalidates were a story's room 0 (the outdoor room the game's room-0 cascade at `0x006C7250` restarts on every story),
+  and the room's state right before it: waiting (state 1 or 2, or 3 with sub-step `+0xEC` 0: no work lost), mid-solve
+  (3 started: the solve so far is thrown away) or solved (4 or 5: a finished solve is undone);
 - every finished solve (the finalize hook, before `0x006A0E00`) by the class it wrote and by room (lot, story, id). A room
   solved several times without an invalidate is the class refinement of `0x0069EA70`;
 - all split by the camera: settled (still for 10 s or more), stopped (still for less, the rooms of a move still settling)
