@@ -53,7 +53,7 @@ In PowerShell use the call operator: `& "C:\Program Files (x86)\...\MSBuild.exe"
 
 A development build (`/p:ApexStudyDefines=APEX_DEVELOPMENT_BUILD_FLAVOR`, which defines `kCompiled` in
 [`features/dev_switches.h`](../features/dev_switches.h)) reads the `[dev_build]` table of `ApexRadiance.toml` once at
-start-up (`DevSwitches::Load`) and logs every value. A missing key reads as on; Save keeps the table because it
+start-up (`DevSwitches::Load`) and logs every value. A missing key reads as on (except `restart_settle`, which reads as off); Save keeps the table because it
 preserves tables it does not write. Each switch can be turned off to compare against the previous behaviour.
 
 In every other build the accessors return `kShipped` (true) for the 29 switches that change the game or free memory, and false for the
@@ -65,7 +65,7 @@ follows the setting named on its page.
 | `measurements` | Developer only | Address-space owners, game allocation categories and the memory CSVs | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
 | `daylight_log` | Developer only | Logs the sky state that sets outdoor darkness every 5 s and adds an F8 section; no lighting change | [light-diag.md](features/dev-tools/light-diag.md#file-sections) |
 | `memory_owners` | Developer only | Apex's own memory by owner (`[ApexMemory]`, F8) | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
-| `restart_settle` | Developer only | A room restarted again within 2 s is picked for its solve once its restarts stop for 300 ms (at most 1 s of hold); a lamp edit's rooms never wait; the maps a room ends with are the same | [room-light-queue.md](features/performance/room-light-queue.md#restart-settle-development-builds) |
+| `restart_settle` | Developer only, off unless set to true | A room restarted again within 2 s is picked for its solve once its restarts stop for 300 ms (at most 1 s of hold); a lamp edit's rooms never wait; the maps a room ends with are the same | [room-light-queue.md](features/performance/room-light-queue.md#restart-settle-development-builds) |
 | `room_solve_causes` | Developer only | Counts who sends rooms to the solve: invalidates by caller, finished solves by class and room, camera settled, stopped or moving (`[RoomSolveCauses]` every minute); no lighting change | [room-light-queue.md](features/performance/room-light-queue.md#measuring-who-sends-rooms-to-the-solve) |
 | `release_debug_buffers` | Shipped | Gives back F7, F6 and F8 buffers once they are no longer needed | [memory-analysis.md](features/memory-analysis.md#development-flavour-measurements) |
 | `left_lot_release` | Shipped | Gives back Quick outdoor lamp edits' kept parts of rooms no loaded lot holds (two 10 s sweeps in a row), Real-time outdoor lamps' CPU copy of the occluders once uploaded, and the mask texture of a lot not drawn for 2 minutes (made again at its next draw) | [performance/README.md](features/performance/README.md#the-switches) |

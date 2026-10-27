@@ -7441,14 +7441,17 @@ using Invalidate_t = void(__thiscall*)(void* room, char full, char keep);
 using InvalidateFlag_t = void(__thiscall*)(void* room, char flag);
 void __fastcall InvalidateNoteHook(BYTE* room, void*, char full, char keep) {
     if (room && DevSwitches::RoomSolveCauses())
-        RoomSolveCauses::NoteInvalidate(t_queueCaller ? t_queueCaller : reinterpret_cast<uintptr_t>(_ReturnAddress()), false, t_queueCaller != 0);
+        RoomSolveCauses::NoteInvalidate(t_queueCaller ? t_queueCaller : reinterpret_cast<uintptr_t>(_ReturnAddress()), false, t_queueCaller != 0,
+                                        reinterpret_cast<uintptr_t>(room), *reinterpret_cast<const int*>(room + 0xC), GetTickCount64());
     if (room && DevSwitches::RestartSettle()) RestartSettle::Global().NoteInvalidate(reinterpret_cast<uintptr_t>(room), GetTickCount64());
     if (room && g_installed.load(std::memory_order_relaxed)) NoteSolve(room, 'I', reinterpret_cast<uintptr_t>(_ReturnAddress()));
     reinterpret_cast<Invalidate_t>(EntryChain::Next(EntryChain::Site::RoomInvalidate, EntryChain::Layer::LevelLightShare))(room, full, keep);
 }
 void __fastcall InvalidateFlagNoteHook(BYTE* room, void*, char flag) {
     if (room && *reinterpret_cast<const char*>(room + 0x19) != flag) {
-        if (DevSwitches::RoomSolveCauses()) RoomSolveCauses::NoteInvalidate(reinterpret_cast<uintptr_t>(_ReturnAddress()), true);
+        if (DevSwitches::RoomSolveCauses())
+            RoomSolveCauses::NoteInvalidate(reinterpret_cast<uintptr_t>(_ReturnAddress()), true, false, reinterpret_cast<uintptr_t>(room),
+                                            *reinterpret_cast<const int*>(room + 0xC), GetTickCount64());
         if (DevSwitches::RestartSettle()) RestartSettle::Global().NoteInvalidate(reinterpret_cast<uintptr_t>(room), GetTickCount64());
         if (g_installed.load(std::memory_order_relaxed)) NoteSolve(room, 'F', reinterpret_cast<uintptr_t>(_ReturnAddress()));
     }

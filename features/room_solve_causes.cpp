@@ -18,11 +18,22 @@ enum Cam { kSettled, kStopped, kMoving, kCams };
 constexpr uint64_t kSettledMs = 10000;
 
 // Fixed tables (no allocation while counting): a caller or a room that finds its table full is counted in the overflow
+// The time since the same room's previous invalidate (any caller): under 0.3 s, 0.3-1 s, 1-3 s, 3-10 s, 10 s or more / first
+enum Gap { kGap03, kGap1, kGap3, kGap10, kGapLong, kGaps };
 struct CauseSlot {
     uintptr_t caller = 0;
     bool onFlag = false, viaQueue = false;
     uint32_t n[kCams] = {};
+    uint32_t gap[kGaps] = {};
+    uint32_t room0 = 0; // invalidates of a story's room 0 (the outdoor room; the game's room-0 cascade restarts them)
 };
+// The last invalidate of each room (fixed table; a room address reused 10 s later starts as "first")
+struct LastSlot {
+    uintptr_t room = 0;
+    uint64_t at = 0;
+};
+constexpr int kLast = 2048;
+LastSlot g_last[kLast];
 struct RoomSlot {
     uintptr_t mgr = 0;
     int id = 0, level = 0;
@@ -58,6 +69,18 @@ void Clear() {
     for (auto& v : g_frames) v = 0;
 }
 
+int GapOf(uintptr_t room, uint64_t now) { // under g_mx
+    const int home = static_cast<int>((static_cast<uint32_t>(room) * 2654435761u) >> 21); // 11 bits
+    LastSlot *slot = nullptr, *free = nullptr;
+    for (int k = 0, i = home; k < 16 && !slot; k++, i = (i + 1) & (kLast - 1))
+        if (g_last[i].room == room) slot = &g_last[i];
+        else if (!free && (!g_last[i].room || now - g_last[i].at >= 10000)) free = &g_last[i];
+    if (!slot) slot = free ? free : &g_last[home];
+    const uint64_t gap = slot->room == room && slot->at ? now - slot->at : ~0ull;
+    slot->room = room, slot->at = now;
+    return gap < 300 ? kGap03 : gap < 1000 ? kGap1 : gap < 3000 ? kGap3 : gap < 10000 ? kGap10 : kGapLong;
+}
+
 std::string Split(const uint32_t* n) { return std::format("settled {} stopped {} moving {}", n[kSettled], n[kStopped], n[kMoving]); }
 
 std::string Line(double seconds) {
@@ -73,8 +96,9 @@ std::string Line(double seconds) {
     std::sort(causes.begin(), causes.end(), [](const CauseSlot* a, const CauseSlot* b) { return Sum(a->n, kCams) > Sum(b->n, kCams); });
     if (!causes.empty()) s += " | invalidated by";
     for (size_t i = 0; i < causes.size() && i < 8; i++)
-        s += std::format("{} {}{}{} {}", i ? ";" : "", causes[i]->viaQueue ? "QueueRoom from " : "", CallerText(causes[i]->caller), causes[i]->onFlag ? " (flag)" : "",
-                         Split(causes[i]->n));
+        s += std::format("{} {}{}{} {}, after the room's last <0.3/0.3-1/1-3/3-10/10+ s {}/{}/{}/{}/{}, room 0 {}", i ? ";" : "",
+                         causes[i]->viaQueue ? "QueueRoom from " : "", CallerText(causes[i]->caller), causes[i]->onFlag ? " (flag)" : "", Split(causes[i]->n),
+                         causes[i]->gap[kGap03], causes[i]->gap[kGap1], causes[i]->gap[kGap3], causes[i]->gap[kGap10], causes[i]->gap[kGapLong], causes[i]->room0);
     if (g_causeOverflow) s += std::format("; {} invalidates by callers not listed", g_causeOverflow);
     std::vector<const RoomSlot*> rooms;
     for (const auto& r : g_rooms)
@@ -90,15 +114,18 @@ std::string Line(double seconds) {
 
 } // namespace
 
-void NoteInvalidate(uintptr_t caller, bool onFlag, bool viaQueueRoom) {
+void NoteInvalidate(uintptr_t caller, bool onFlag, bool viaQueueRoom, uintptr_t room, int roomId, uint64_t nowMs) {
     const int m = g_cam.load(std::memory_order_relaxed);
     std::lock_guard<std::mutex> lk(g_mx);
     g_invalidates[m]++;
+    const int gap = room ? GapOf(room, nowMs) : kGapLong;
     for (int k = 0, i = static_cast<int>((caller * 2654435761u + (onFlag ? 1u : 0u)) % kCauses); k < kCauses; k++, i = (i + 1) % kCauses) {
         CauseSlot& c = g_causes[i];
         if (!c.caller) c.caller = caller, c.onFlag = onFlag, c.viaQueue = viaQueueRoom;
         if (c.caller == caller && c.onFlag == onFlag && c.viaQueue == viaQueueRoom) {
             c.n[m]++;
+            c.gap[gap]++;
+            if (roomId == 0) c.room0++;
             return;
         }
     }

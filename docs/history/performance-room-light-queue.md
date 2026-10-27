@@ -281,3 +281,6 @@ through after 1 s) but the same rooms were still solved 12 to 18 times a minute 
 as without it. A room's restarts are spaced by more than 300 ms (about one every 3 to 5 s), so a 300 ms quiet does not
 fold them. The switch stays off in released builds; the spacing of a room's restarts needs measuring before any longer
 hold, which would delay the light the player sees.
+`restart_settle` now reads as off when its key is missing. The measurement adds, per caller, the time since the same
+room's previous invalidate and the count of room-0 invalidates, to tell the game's room-0 cascade from rooms restarted by
+lots arriving one after another.

@@ -91,8 +91,9 @@ inline std::atomic<bool> leftLotRelease{false};
 inline bool MemoryOwners() { return kCompiled && memoryOwners.load(std::memory_order_relaxed); }
 inline std::atomic<bool> roomSolveCauses{false};
 inline bool RoomSolveCauses() { return kCompiled && roomSolveCauses.load(std::memory_order_relaxed); }
-//   restart_settle         (not shipped yet) a room restarted again within 2 s is picked for its solve once its restarts
-//                          stop for 300 ms (at most 1 s of hold); a lamp edit's rooms never wait (restart_settle.h)
+//   restart_settle         (not shipped; off unless the key says true: in game a room's restarts came seconds apart and the
+//                          hold did not reduce its solves) a room restarted again within 2 s is picked for its solve once its
+//                          restarts stop for 300 ms (at most 1 s of hold); a lamp edit's rooms never wait (restart_settle.h)
 inline std::atomic<bool> restartSettle{false};
 inline bool RestartSettle() { return kCompiled && restartSettle.load(std::memory_order_relaxed); }
 inline bool ReleaseDebugBuffers() { return kCompiled ? releaseDebugBuffers.load(std::memory_order_relaxed) : kShipped; }

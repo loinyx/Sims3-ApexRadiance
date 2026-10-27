@@ -289,7 +289,9 @@ count, without changing what is solved:
 
 - every invalidate (`0x0069EED0`, or `0x0069F160` when the flag changes) by the return address of its caller, printed as
   `ApexRadiance.asi+RVA` inside Apex and as the game address otherwise; an invalidate made by Apex's `QueueRoom` is
-  counted by `QueueRoom`'s own caller ("QueueRoom from ...");
+  counted by `QueueRoom`'s own caller ("QueueRoom from ..."); each caller also gets the time since the same room's
+  previous invalidate by any caller (under 0.3 s, 0.3-1 s, 1-3 s, 3-10 s, 10 s or more or first) and how many of its
+  invalidates were a story's room 0 (the outdoor room the game's room-0 cascade at `0x006C7250` restarts on every story);
 - every finished solve (the finalize hook, before `0x006A0E00`) by the class it wrote and by room (lot, story, id). A room
   solved several times without an invalidate is the class refinement of `0x0069EA70`;
 - all split by the camera: settled (still for 10 s or more), stopped (still for less, the rooms of a move still settling)
@@ -300,7 +302,8 @@ callers and four rooms with the most counts. Source: `features/room_solve_causes
 
 ### Restart settle (development builds)
 
-The switch `restart_settle` (`features/restart_settle.h`; off in released builds until measured in game) acts on the rooms
+The switch `restart_settle` (`features/restart_settle.h`; off in every build unless `[dev_build]` sets it to true: in game it
+did not reduce the repeated solves, see [history](../../history/performance-room-light-queue.md)) acts on the rooms
 the measurement above showed restarted again and again within 10 s of a camera move. An invalidate within 2 s of the
 room's previous one makes a burst; while the burst's last invalidate is under 300 ms old, `PriorityHook` gives the room
 priority 0, so it is picked once its restarts stop. The invalidate itself still runs at once (a solve in progress stops,
