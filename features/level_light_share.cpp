@@ -7775,8 +7775,9 @@ void ShareIndoorLights(BYTE* treeLevel, BYTE* room) {
 // to solve again, also rooms already solved; in game most of those re-solves rewrote the same texels
 // (docs/history/performance-room-light-queue.md). What such a solve reads that those sends follow, hashed: the light options
 // (PhysicsKey), the lot's geometry (LotGeometryKey), every lamp registered on any story of the lot (the fields
-// RoomLampSignature compares, with its room), every other room's ambient (+0x110), normalisation (+0x160), boost and the
-// hash of what its last solve wrote (the bounce through openings and the room fill read the light of other rooms), and the
+// RoomLampSignature compares, with its room), every room's ambient (+0x110), normalisation (+0x160), boost and the hash of
+// what its last solve wrote (the bounce through openings reads the light of other rooms; the room fill and the
+// normalisation of a room follow its own last solve, so a room is predicted only once two of its solves agree), and the
 // light manager's night and manmade levels (+0xF0 / +0xF4: the ambient and every lamp's fade follow them).
 // The lamps and rooms are summed, so the order of the game's maps does not matter. A room whose finished solve began and
 // ended with the inputs it has now is predicted to solve to the same texels again.
@@ -7842,7 +7843,7 @@ uint64_t OpeningInputs(const BYTE* room, InputParts* parts = nullptr) {
             for (uintptr_t rn = *reinterpret_cast<const uintptr_t*>(rb + b * 4); rn && guard++ < 10000; rn = *reinterpret_cast<const uintptr_t*>(rn + 0x80)) {
                 const int rid = *reinterpret_cast<const int*>(rn);
                 const BYTE* other = *reinterpret_cast<const BYTE* const*>(rn + 0x10);
-                if (!other || other == room) continue;
+                if (!other) continue; // the room itself too: its fill and normalisation follow its own last solve (converged when two agree)
                 uint64_t r = 1469598103934665603ull;
                 const auto mix = [&r](uint64_t v) { r = (r ^ v) * 1099511628211ull; };
                 mix(static_cast<uint64_t>(S + 5));

@@ -319,3 +319,10 @@ and the hash of every other room's last solve (the bounce through openings and t
 With those inputs, a second session (four minutes) predicted 68 of 387 sends unchanged; 34 re-solves wrote the same
 texels and 2 different ones. The prediction still misses an input, or the solve is not repeatable to the bit for some
 rooms; `opening_skip` stays off until the cause of those differences is known.
+
+**Seventh session (2026-10-27, diagnostics):** 63 predicted-unchanged sends, 62 re-solved to the same texels. The one
+that did not (story 0, room 12, 100 texels) had the same inputs at its solve's start as at the send; one texel changed by
+less than 0.00001 and its normalisation and ambient changed: the room fill and the normalisation of a room follow its own
+last solve and settle over a few solves. The prediction now includes the room's own last result, so a room is predicted
+only once two of its solves agree. The signature cost 50 to 80 us and ran 459 to 1401 times a minute; the sends came from
+lamp edits, settle rounds, floors counted, floor edits and rebuilt lots, none dominant.
