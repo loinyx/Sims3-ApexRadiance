@@ -9,6 +9,7 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Greek}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: extra safety so old lamp light cannot stay stuck on the ground", "Νυχτερινός φωτισμός: επιπλέον προστασία ώστε το παλιό φως των λαμπών να μη μένει κολλημένο στο έδαφος"},
     {"Banding Fix: High-precision scene for smoother gradients, on by default", "Διόρθωση Λωρίδων: Σκηνή υψηλής ακρίβειας για πιο ομαλές διαβαθμίσεις, ενεργή από προεπιλογή"},
     {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Διόρθωση Λωρίδων: ανανεωμένη κάρτα με λεπτότερο κόκκο που αφήνει το μενού ανέγγιχτο"},
     {"Night Lights: strong lamps light the ground and walls beside them at full strength", "Νυχτερινός φωτισμός: οι δυνατές λάμπες φωτίζουν το έδαφος και τους τοίχους δίπλα τους με όλη τους τη δύναμη"},
