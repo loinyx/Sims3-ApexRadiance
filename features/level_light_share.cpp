@@ -2510,6 +2510,7 @@ using RoomSolveStart_t = void(__thiscall*)(void* room);
 bool OpeningSkipOn();                     // below, with QueueOpeningRooms (opening_skip_check / opening_skip)
 void OpeningSolveStart(const BYTE* room); // (the same)
 void OpeningSolveEnd(const BYTE* room);   // (the same)
+std::string OpeningPredictionParts(const BYTE* room); // (the same; diagnostics)
 void SyncHardWallTops(); // below (development builds, hard_wall_tops)
 float RoomNormOf(const BYTE* room); // below
 void NoteNormEnd(BYTE* room, float norm); // below (inner_norm_settle)
@@ -7482,7 +7483,19 @@ void __fastcall FinalizeHook(BYTE* room) {
         if (ReadSolveNote(room, n)) {
             RoomSolveCauses::NoteSolve(n.mgr, n.id, n.level, n.lot, n.cls);
             const float packing[4] = {n.norm, n.c4[0], n.c4[1], n.c4[2]}; // what the packing reads besides the texels
-            RoomSolveCauses::SolveEnd(reinterpret_cast<uintptr_t>(room), n.cls, packing, 4, GetTickCount64());
+            const RoomSolveCauses::Diff d = RoomSolveCauses::SolveEnd(reinterpret_cast<uintptr_t>(room), n.cls, packing, 4, GetTickCount64());
+            // (opening_skip_check) a send predicted to change nothing whose solve wrote something else: what and why
+            if (d.predicted && d.outcome == 1 && OpeningSkipOn()) {
+                static std::atomic<int> s_lines{0};
+                const std::string why = HookGuard::Run("LevelLightShare opening prediction parts", std::string(), [room] { return OpeningPredictionParts(room); });
+                if (s_lines.fetch_add(1, std::memory_order_relaxed) < 300)
+                    LOG_INFO(std::format("[OpeningSkip] Predicted unchanged but solved differently: lot {} story {} room {} class {}: {} texels (before {}), "
+                                         "{} changed, largest channel change {:.5f}, positions {}, normalisation and ambient {}; {}",
+                                         n.lot, n.level, n.id, n.cls, d.texels, d.before, d.differing, d.largest, d.positionsSame ? "the same" : "moved",
+                                         d.packingSame ? "the same" : "changed", why));
+            } else if (d.predicted && OpeningSkipOn()) {
+                HookGuard::Run("LevelLightShare opening prediction parts", std::string(), [room] { return OpeningPredictionParts(room); });
+            }
         }
     }
     reinterpret_cast<Finalize_t>(kFinalize)(room);
@@ -7787,7 +7800,29 @@ uint64_t EntryHash(uintptr_t entry) {
     if (type == 4 || type == 5) dwords(light + 0x170, 13);
     return h;
 }
-uint64_t OpeningInputs(const BYTE* room) {
+// (opening_skip_check) what made a lot send its rooms near openings again, and how many rooms each send held
+constexpr int kDueSources = 6;
+const char* const kDueNames[kDueSources] = {"lot rebuilt", "options or install", "lamp edit", "floors or openings counted", "floor edit", "settle round"};
+std::atomic<long> g_dueBy[kDueSources]{}, g_dueRooms[kDueSources]{};
+std::atomic<long long> g_inputsTicks{0};
+std::atomic<long> g_inputsCalls{0};
+// The signature's parts (the diagnostics name the part that changed)
+enum InputPart { kPartRules, kPartGeometry, kPartLamps, kPartRooms, kPartNight, kParts };
+struct InputParts {
+    uint64_t part[kParts] = {};
+};
+const char* const kPartNames[kParts] = {"light options", "lot geometry", "the lot's lamps", "other rooms' ambient or results", "night level"};
+uint64_t OpeningInputs(const BYTE* room, InputParts* parts = nullptr) {
+    struct Timed { // (opening_skip_check) what the signature costs
+        LARGE_INTEGER t0;
+        Timed() { QueryPerformanceCounter(&t0); }
+        ~Timed() {
+            LARGE_INTEGER t1;
+            QueryPerformanceCounter(&t1);
+            g_inputsTicks.fetch_add(t1.QuadPart - t0.QuadPart, std::memory_order_relaxed);
+            g_inputsCalls.fetch_add(1, std::memory_order_relaxed);
+        }
+    } timed;
     uintptr_t mgr = 0;
     int id = -1;
     if (!room || !RoomKey(room, mgr, id) || !mgr) return 0;
@@ -7824,24 +7859,53 @@ uint64_t OpeningInputs(const BYTE* room) {
     const uintptr_t root = kRootPtr ? *reinterpret_cast<const uintptr_t*>(kRootPtr) : 0;
     const uintptr_t lightMgr = root ? *reinterpret_cast<const uintptr_t*>(root + 0x1C0) : 0;
     if (!lightMgr) return 0;
-    h = (h ^ *reinterpret_cast<const uint32_t*>(lightMgr + 0xF0)) * 1099511628211ull;
-    h = (h ^ *reinterpret_cast<const uint32_t*>(lightMgr + 0xF4)) * 1099511628211ull;
+    const uint64_t night = (static_cast<uint64_t>(*reinterpret_cast<const uint32_t*>(lightMgr + 0xF0)) << 32) | *reinterpret_cast<const uint32_t*>(lightMgr + 0xF4);
+    h = (h ^ night) * 1099511628211ull;
+    if (parts) {
+        parts->part[kPartRules] = LevelLightShare::PhysicsKey();
+        parts->part[kPartGeometry] = geo;
+        parts->part[kPartLamps] = lamps;
+        parts->part[kPartRooms] = rooms;
+        parts->part[kPartNight] = night;
+    }
     return h ? h : 1;
 }
 struct OpeningSig {
     uint64_t start = 0, solved = 0; // the inputs at the solve's start; at its end when they were the same (else 0)
+    // (diagnostics) a send predicted to change nothing: the parts then, and the parts at the next solve's start
+    bool predicted = false, startKnown = false;
+    InputParts atSend, atStart;
 };
 std::mutex g_openSigMx;
 std::unordered_map<uintptr_t, OpeningSig> g_openSig;
 std::atomic<long> g_openPredicted{0}, g_openSkipped{0}, g_openSent{0};
 bool OpeningSkipOn() { return DevSwitches::OpeningSkipCheck() || DevSwitches::OpeningSkip(); }
 void OpeningSolveStart(const BYTE* room) {
-    const uint64_t sig = HookGuard::Run("LevelLightShare opening inputs (start)", uint64_t{0}, [room] { return OpeningInputs(room); });
+    InputParts parts;
+    const uint64_t sig = HookGuard::Run("LevelLightShare opening inputs (start)", uint64_t{0}, [room, &parts] { return OpeningInputs(room, &parts); });
     std::lock_guard<std::mutex> lk(g_openSigMx);
     if (g_openSig.size() > 8192) g_openSig.clear();
     OpeningSig& s = g_openSig[reinterpret_cast<uintptr_t>(room)];
     s.start = sig;
     s.solved = 0;
+    if (s.predicted && !s.startKnown) {
+        s.atStart = parts;
+        s.startKnown = true;
+    }
+}
+// (diagnostics) Which parts changed between a predicted send and the start of the room's next solve; clears the prediction
+std::string OpeningPredictionParts(const BYTE* room) {
+    std::lock_guard<std::mutex> lk(g_openSigMx);
+    const auto it = g_openSig.find(reinterpret_cast<uintptr_t>(room));
+    if (it == g_openSig.end() || !it->second.predicted) return "no prediction kept";
+    OpeningSig& s = it->second;
+    std::string what;
+    if (!s.startKnown) what = "its solve's start was not seen";
+    else
+        for (int k = 0; k < kParts; k++)
+            if (s.atSend.part[k] != s.atStart.part[k]) what += std::format("{}{}", what.empty() ? "changed after the send: " : ", ", kPartNames[k]);
+    s.predicted = s.startKnown = false;
+    return what.empty() ? "the same inputs at its start as at the send" : what;
 }
 void OpeningSolveEnd(const BYTE* room) {
     const uint64_t sig = HookGuard::Run("LevelLightShare opening inputs (end)", uint64_t{0}, [room] { return OpeningInputs(room); });
@@ -7860,7 +7924,14 @@ bool OpeningUnchanged(const BYTE* room) {
         if (it == g_openSig.end() || !it->second.solved) return false;
         solved = it->second.solved;
     }
-    return HookGuard::Run("LevelLightShare opening inputs (send)", uint64_t{0}, [room] { return OpeningInputs(room); }) == solved;
+    InputParts parts;
+    if (HookGuard::Run("LevelLightShare opening inputs (send)", uint64_t{0}, [room, &parts] { return OpeningInputs(room, &parts); }) != solved) return false;
+    std::lock_guard<std::mutex> lk(g_openSigMx);
+    OpeningSig& s = g_openSig[reinterpret_cast<uintptr_t>(room)];
+    s.predicted = true;
+    s.startKnown = false;
+    s.atSend = parts;
+    return true;
 }
 
 // Rooms of a lot near a stair opening (receivers on both sides), plus the rooms that took lamps before: they gather again
@@ -8325,6 +8396,7 @@ void BeforeRoomUpdate(BYTE* tl) {
         FlushDeferred(tracker);
         FlushDepWaits(tracker);
         bool due = false;
+        unsigned why = 0; // (opening_skip_check) the sources that set due, bit k = kDueNames[k]
         const long gen = g_indoorGen.load(std::memory_order_relaxed);
         if (g_lots.size() > 4096) g_lots.clear();
         LotState& lot = g_lots[tracker];
@@ -8336,19 +8408,19 @@ void BeforeRoomUpdate(BYTE* tl) {
             lot = LotState{};
             lot.gen = keepGen;
             std::memcpy(lot.mgrs, mgrs, sizeof mgrs);
-            due = true;
+            due = true, why |= 1u;
             g_lotRebuilds.fetch_add(1, std::memory_order_relaxed);
         }
         if (lot.gen != gen) {
             lot.gen = gen;
-            due = true;
+            due = true, why |= 2u;
         }
         // (steady_indoor_light) a lamp edit's resend of the rooms near openings (every lot, as before: a Sim's switch on a lot
         // the camera is not on needs it too), no longer through g_indoorGen, which PhysicsKey reads (each edit made every
         // story's room 0 lose its kept parts: "the lighting options changed", a full solve of each)
         if (const long editGen = g_editGen.load(std::memory_order_relaxed); lot.editGen != editGen) {
             lot.editGen = editGen;
-            due = true;
+            due = true, why |= 4u;
         }
         const DWORD now = GetTickCount();
         const uintptr_t ground = StoryManager(tracker, 0);
@@ -8357,7 +8429,7 @@ void BeforeRoomUpdate(BYTE* tl) {
             lot.nextCheck = now + 2000;
             const int known = FloorObjectsKnown(tracker);
             const int openings = known ? OpeningCount(tracker) : 0;
-            if (known > lot.floorsKnown || (openings != lot.openings && lot.openings >= 0)) due = true;
+            if (known > lot.floorsKnown || (openings != lot.openings && lot.openings >= 0)) due = true, why |= 8u;
             lot.floorsKnown = known;
             lot.openings = openings;
         }
@@ -8368,7 +8440,7 @@ void BeforeRoomUpdate(BYTE* tl) {
                 auto it = m ? std::find(g_dirtyMgrs.begin(), g_dirtyMgrs.end(), m) : g_dirtyMgrs.end();
                 if (it != g_dirtyMgrs.end()) {
                     g_dirtyMgrs.erase(it);
-                    due = true;
+                    due = true, why |= 16u;
                 }
             }
             if (g_dirtyMgrs.empty()) g_dirtyReady = false;
@@ -8392,7 +8464,7 @@ void BeforeRoomUpdate(BYTE* tl) {
             }
             if (fire) {
                 lot.settleAt = 0;
-                due = true;
+                due = true, why |= 32u;
                 g_settles.fetch_add(1, std::memory_order_relaxed);
                 if (now - lot.armedAt < kSettleMax - 50) g_settlesEarly.fetch_add(1, std::memory_order_relaxed);
             }
@@ -8420,7 +8492,12 @@ void BeforeRoomUpdate(BYTE* tl) {
             for (const DepKey& k : go)
                 if (QueueRoom(tracker, k.level, k.room, true)) g_indoorQueued.fetch_add(1, std::memory_order_relaxed);
         }
-        if (due) QueueOpeningRooms(tracker, &lot.watch);
+        if (due) {
+            QueueOpeningRooms(tracker, &lot.watch);
+            if (OpeningSkipOn())
+                for (int k = 0; k < kDueSources; k++)
+                    if (why & (1u << k)) g_dueBy[k].fetch_add(1, std::memory_order_relaxed), g_dueRooms[k].fetch_add(static_cast<long>(lot.watch.size()), std::memory_order_relaxed);
+        }
         else if (!lot.auditAt || static_cast<int32_t>(now - lot.auditAt) >= 0) { // (the rooms near openings just sent record again anyway)
             lot.auditAt = (now + kAuditEveryMs) | 1;
             AuditTakers(tracker, now);
@@ -15145,8 +15222,18 @@ void OnPresent() {
                 LOG_INFO(std::format("[RestartSettle] Last minute: {} picks of restarted rooms held, {} let through after 1 s of hold", s.held, s.capped));
             }
             if (OpeningSkipOn())
-                LOG_INFO(std::format("[OpeningSkip] Last minute: {} rooms near openings sent, {} of them solved with the inputs they have now, {} not sent",
-                                     g_openSent.exchange(0), g_openPredicted.exchange(0), g_openSkipped.exchange(0)));
+            {
+                std::string by;
+                for (int k = 0; k < kDueSources; k++)
+                    if (const long n = g_dueBy[k].exchange(0)) by += std::format("{}{} x{} ({} rooms)", by.empty() ? "" : ", ", kDueNames[k], n, g_dueRooms[k].exchange(0));
+                LARGE_INTEGER f;
+                QueryPerformanceFrequency(&f);
+                const long calls = g_inputsCalls.exchange(0);
+                const double us = calls ? static_cast<double>(g_inputsTicks.exchange(0)) * 1e6 / static_cast<double>(f.QuadPart) / calls : 0.0;
+                LOG_INFO(std::format("[OpeningSkip] Last minute: {} rooms near openings sent, {} of them solved with the inputs they have now, {} not sent; "
+                                     "sends by {}; the inputs' signature {} times, {:.1f} us each",
+                                     g_openSent.exchange(0), g_openPredicted.exchange(0), g_openSkipped.exchange(0), by.empty() ? "nothing" : by, calls, us));
+            }
         }
     }
     // A lot that becomes the high-quality lot (the camera enters it, or comes back) solves all its rooms at once, as after a
