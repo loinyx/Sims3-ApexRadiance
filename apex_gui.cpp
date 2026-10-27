@@ -3540,9 +3540,12 @@ void PublicTestWelcome() {
 // (the menu stays closed; the game keeps its keys and every click outside the card) explains the feature and asks whether
 // to keep it on. Either answer is remembered; the switch stays on Performance > Memory handling.
 bool RoomToSavePending() {
-    if (PublicTestPending() || WelcomeActive() || ApexConfig::GetUi().roomToSaveAsked) return false;
+    static bool s_asked = false; // (no copy of the UI settings every frame once answered)
+    if (s_asked || PublicTestPending() || WelcomeActive()) return false;
+    if (ApexConfig::GetUi().roomToSaveAsked) return !(s_asked = true);
     const ApexPatch* patch = Find(Performance::kMemoryGuardName);
-    return patch && patch->IsCompatibleWithCurrentVersion() && Switchable(patch);
+    // a player who turned it off is not asked to keep it on
+    return patch && patch->IsEnabled() && patch->IsCompatibleWithCurrentVersion() && Switchable(patch);
 }
 void RoomToSaveAnswer(bool keep) {
     if (ApexPatch* patch = Find(Performance::kMemoryGuardName); patch && patch->IsEnabled() != keep) SetPatch(patch, keep);
@@ -4884,6 +4887,7 @@ class GuiClient final : public Overlay::Client {
   public:
     void Draw() override {
         if (!g_menuAvailable.load()) {
+            Overlay::SetInteractive(false);
             if (HintVisible() && !Captures::ScreenshotPending()) Hint();
             return;
         }
