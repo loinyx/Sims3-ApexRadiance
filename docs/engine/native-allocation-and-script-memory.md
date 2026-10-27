@@ -54,6 +54,25 @@ The byte at allocator `+0x498` makes large reservations come from the top of the
 Steam 1.67.2 ([fast-memory.md](../features/performance/fast-memory.md#allocator-trim-and-top-down-large-blocks)). In one
 measured session the trim returned 0 bytes, because the allocator already returns core tops when it frees them.
 
+## Domains measured in game
+
+Read from a running Steam 1.67.2 process from outside (VirtualQueryEx and ReadProcessMemory, nothing written or
+suspended) and checked against the disassembly.
+
+| Domain | Layout | Observed |
+|---|---|---|
+| General allocator cores | `AddCore` `0x004E4E30`: a core starts with `[+0]` first chunk, `[+4]` committed bytes, `[+8]` reserved bytes; cores form a ring through `+0x18` (next) / `+0x1C` (previous) whose head is allocator `+0x448` (first core at `+0x460`). A chunk header is `{previous size, size \| flags}`; the size is `& 0x7FFFFFF8`, bit 0 of the next chunk's header marks this chunk in use; the ring ends in two fences (`8`, `9`) | 46 cores (724 MB) after a load, 57 cores (906 MB) after a longer session with 164 MB free inside them (112 MB of whole free pages). Eleven 16 MB cores were 70 to 84 % free, each held by a few live chunks |
+| Second allocator instance | Global `0x011D4BC8`, the same code with 4 MB cores and a 1 MB commit step | 119 to 134 cores, 156 to 171 MB, under 1 % free |
+| Large blocks | `0x004E50F0`, counters `+0x488` / `+0x48C`; a block's header is `{0, size \| 2}` | 153 blocks, 207 to 213 MB |
+| Script heap | Sections in `GC_heap_sects` `0x0122D714` (start, bytes), count `0x011F2FC0`; growth `0x00E4A1C0` adds heap size / (4096 x divisor) blocks, divisor `0x01194810` = 5; minimum step 2048 blocks (8 MB) | 368 MB in 10 sections, the first one 352 MB; 97 to 101 MB of it free heap blocks |
+| Windows heap | One process heap (PEB), about 300 MB busy in 32 to 35 segments, most of it low-fragmentation-heap user blocks (signature `0xF0E0D0C0`) | Owners not attributable from outside |
+
+Free heap blocks of the script collector stay committed: its sections come from `0x00D70900`
+(`MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH`, `PAGE_EXECUTE_READWRITE`), and the only release in that code is
+`MEM_RELEASE` at `0x00D70A00`; no decommit path exists. The block allocator returns its block at `0x00E4971D` (block in
+`ebp`, bytes subtracted from the free count at `0x00E49715`). Interior pages of free allocator chunks were not returned
+to Windows ([history](../history/performance-fast-memory.md)).
+
 ## Limitations
 
 Captures are sequential while the process continues; neither stable reads nor signatures make them atomic. No game

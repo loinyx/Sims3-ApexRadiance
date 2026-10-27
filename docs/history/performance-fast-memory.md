@@ -33,3 +33,22 @@ logs of the previous 20 days.
 
 **Outcome:** no change. Both switches are on in 2.14.0 with no setting. If the crash repeats, the first test is a
 development build with `allocator_top_down` and `allocator_trim` off.
+
+### 2026-10-27: memory map of a 2.16.2 session and the free memory inside the game's domains
+
+**Context:** a read-only map of a running game (address space walk, the allocator's core ring and chunks, the script
+collector's sections, thread stacks, the Windows heap) to find large reductions that leave the lighting as it is
+([engine page](../engine/native-allocation-and-script-memory.md#domains-measured-in-game)).
+
+**Finding:** of about 2.4 GB of private memory, the general allocator held 906 MB in 57 cores with 164 MB free inside
+them, the script heap 368 MB with 101 MB of free blocks, the Windows heap about 300 MB, the graphics driver's own heaps
+and write-combined mappings about 350 MB, and Apex Radiance about 60 MB (image, C++ heap, high buffers). The free space
+inside the allocator's cores grew from 46 MB after a load to 164 MB later in the session, mostly in eleven high cores
+that a few live chunks keep from being released.
+
+**Outcome:** no decommit of free memory inside the game's domains. In the allocator, a split or a coalesce writes chunk
+headers into the free range and kernel-mode reads into a freshly returned buffer would fail on a decommitted page, so
+every path that hands out or splits a chunk would need a recommit hook. The script collector has no decommit path at
+all; its block allocator would need a recommit at `0x00E4971D` and the collector's thread ownership is not established.
+The measurement of both domains was added to the memory analysis instead, so a later change can be judged on in-game
+numbers.

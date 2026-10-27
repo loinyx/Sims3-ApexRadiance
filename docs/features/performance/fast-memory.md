@@ -117,7 +117,10 @@ A/B with the Frame Profiler's sampling run: the "system code called from" rows 0
 
 ## Rejected approaches
 
-None recorded. The trim freed nothing in one development session; it is kept until measured in game
+- Returning the free pages inside the allocator's cores to Windows: splits and coalesces write headers into the free
+  range, so every path that hands out a chunk would need a recommit ([history](../../history/performance-fast-memory.md)).
+
+The trim freed nothing in one development session; it is kept until measured in game
 ([history](../../history/performance-fast-memory.md)).
 
 ## See also

@@ -27,6 +27,13 @@ physical memory and commit usage/limit, free virtual bytes and largest free regi
 image/mapped/private regions, reserved ranges, private executable pages, cumulative page faults and I/O bytes,
 tracked Apex high-allocator bytes, net private growth from baseline, scan duration and API validity flags.
 
+On Steam 1.67.2 each sample also counts the game's own memory domains: the cores of the general allocator and of its
+second instance (number and committed bytes) and the script collector's heap (size, free heap blocks, sections). These
+are word reads of the game's globals and core ring, without locks or chunk walks, so a sample never makes a game thread
+wait; a ring read under a concurrent change is dropped for that sample. The once-a-minute log line and the Frame
+Profiler's address-space section carry the same numbers. Layouts and addresses:
+[native allocation and script memory](../engine/native-allocation-and-script-memory.md#domains-measured-in-game).
+
 ## Settings
 
 There is no menu control. Builds without development tools do not start the observer. In development-flavour builds,
