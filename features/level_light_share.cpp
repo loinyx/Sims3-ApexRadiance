@@ -741,6 +741,7 @@ using MarkRoom_t = void(__thiscall*)(void* treeLevel, int room);
 thread_local bool t_queueForce = false;
 thread_local bool t_tailSend = false;
 std::atomic<DWORD> g_gpuEditAt{0}; // the last lamp edit the GPU or the delta took (NoteGpuEdit; 0 = none, always while Classic)
+thread_local uintptr_t t_queueCaller = 0; // (room_solve_causes) QueueRoom's caller, while its invalidate runs
 bool QueueRoom(uintptr_t tracker, int level, int id, bool defer = false, int urgentTier = -1, bool soon = false) {
     const uintptr_t tl = TreeLevel(tracker, level);
     void* mgr = *reinterpret_cast<void* const*>(tl);
@@ -776,7 +777,9 @@ bool QueueRoom(uintptr_t tracker, int level, int id, bool defer = false, int urg
             if (!known) NoteSolve(room, 'H');
         return true;
     }
+    t_queueCaller = reinterpret_cast<uintptr_t>(_ReturnAddress());
     reinterpret_cast<InvalidateRoom_t>(kInvalidateRoom)(room, 1, 0);
+    t_queueCaller = 0;
     alignas(16) BYTE out[16] = {};
     reinterpret_cast<SetInsert_t>(kSetInsert)(reinterpret_cast<void*>(tl + 0x28), out, &id, 0);
     if (urgentSoon) GatherSoon(room);
@@ -7436,7 +7439,8 @@ void NoteSolve(BYTE* room, char event, uintptr_t caller) {
 using Invalidate_t = void(__thiscall*)(void* room, char full, char keep);
 using InvalidateFlag_t = void(__thiscall*)(void* room, char flag);
 void __fastcall InvalidateNoteHook(BYTE* room, void*, char full, char keep) {
-    if (room && DevSwitches::RoomSolveCauses()) RoomSolveCauses::NoteInvalidate(reinterpret_cast<uintptr_t>(_ReturnAddress()), false);
+    if (room && DevSwitches::RoomSolveCauses())
+        RoomSolveCauses::NoteInvalidate(t_queueCaller ? t_queueCaller : reinterpret_cast<uintptr_t>(_ReturnAddress()), false, t_queueCaller != 0);
     if (room && g_installed.load(std::memory_order_relaxed)) NoteSolve(room, 'I', reinterpret_cast<uintptr_t>(_ReturnAddress()));
     reinterpret_cast<Invalidate_t>(EntryChain::Next(EntryChain::Site::RoomInvalidate, EntryChain::Layer::LevelLightShare))(room, full, keep);
 }

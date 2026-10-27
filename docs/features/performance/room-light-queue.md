@@ -288,13 +288,15 @@ Development builds with the switch `room_solve_causes` ([workflow.md](../../work
 count, without changing what is solved:
 
 - every invalidate (`0x0069EED0`, or `0x0069F160` when the flag changes) by the return address of its caller, printed as
-  `ApexRadiance.asi+RVA` for Apex's requeues and as the game address otherwise;
+  `ApexRadiance.asi+RVA` inside Apex and as the game address otherwise; an invalidate made by Apex's `QueueRoom` is
+  counted by `QueueRoom`'s own caller ("QueueRoom from ...");
 - every finished solve (the finalize hook, before `0x006A0E00`) by the class it wrote and by room (lot, story, id). A room
   solved several times without an invalidate is the class refinement of `0x0069EA70`;
-- both split by whether the camera moved in the last 300 ms (`LotLightingMotion::SampleCameraMoving`, once a frame).
+- all split by the camera: settled (still for 10 s or more), stopped (still for less, the rooms of a move still settling)
+  or moving (it moved in the last 300 ms; `LotLightingMotion::SampleCameraMoving`, once a frame).
 
-A `[RoomSolveCauses]` line every minute gives the window's frames, finished solves by class, invalidates, the six callers
-and four rooms with the most counts. Source: `features/room_solve_causes.{h,cpp}`.
+A `[RoomSolveCauses]` line every minute gives the window's frames, finished solves by class, invalidates, the eight
+callers and four rooms with the most counts. Source: `features/room_solve_causes.{h,cpp}`.
 
 ### Status line
 

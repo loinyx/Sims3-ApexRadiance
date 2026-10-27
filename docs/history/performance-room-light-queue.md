@@ -256,3 +256,9 @@ class and room, camera still or moving, in a `[RoomSolveCauses]` log line every 
 
 **Outcome:** pending an in-game session; the counts decide which source to study first (a caller that invalidates the same
 rooms again, or the class refinement of rooms already shown).
+
+**First session (2026-10-27, 6 minutes):** with the camera still and the lots settled (9445 frames), 13 solves and 15
+invalidates a minute; after camera moves, 1000 to 3200 invalidates and up to 128 rooms of several lots a minute, also in
+frames counted as still. Two callers made almost all invalidates: the game's dirty-room loop `0x006C7250` (return
+`0x006C7451`) and Apex's `QueueRoom`. No class 1 solve was seen (the direct step 0 to 2). The counts were then split into
+settled (still for 10 s or more), stopped and moving, and `QueueRoom`'s invalidates by its own caller.
