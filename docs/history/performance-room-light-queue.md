@@ -244,3 +244,15 @@ edit pacing and the edit hold busy for 16 s; the load screen's lamps registering
 the camera's story; a pending lamp edit counts only the high-quality lot's rooms; lamps registering before the world is
 live are no edit. Not changed: the atrium's stories keep their shared first place (they are shown together), and
 OutdoorDelta's full solves after `steady_indoor_light`'s generation bump (`PhysicsKey`) need their own study.
+
+### 2026-10-27: room solves with the camera still
+
+**Context:** in the 2.16.2 development build's Frame Profiler report, frames without a hitch spent 0.89 ms on average in
+"Lot room solve", and the room solve was the dominant cause of 13 % of the hitches, also with the camera still. The
+existing solve journal keeps only rooms that take light from other stories, so it could not say what sends the others.
+
+**Change:** the development switch `room_solve_causes` counts every invalidate by its caller and every finished solve by
+class and room, camera still or moving, in a `[RoomSolveCauses]` log line every minute. It only counts.
+
+**Outcome:** pending an in-game session; the counts decide which source to study first (a caller that invalidates the same
+rooms again, or the class refinement of rooms already shown).

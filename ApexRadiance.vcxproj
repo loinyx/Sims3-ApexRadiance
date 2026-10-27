@@ -114,6 +114,7 @@
     <ClCompile Include="features\captures.cpp" />
     <ClCompile Include="features\vulkan_driver_guard.cpp" />
     <ClCompile Include="features\address_space.cpp" />
+    <ClCompile Include="features\room_solve_causes.cpp" />
     <ClCompile Include="features\va_ledger.cpp" />
     <ClCompile Include="features\dev_switches.cpp" />
     <ClCompile Include="features\apex_memory.cpp" />
@@ -253,6 +254,7 @@
     <ClInclude Include="features\captures.h" />
     <ClInclude Include="features\vulkan_driver_guard.h" />
     <ClInclude Include="features\address_space.h" />
+    <ClInclude Include="features\room_solve_causes.h" />
     <ClInclude Include="features\va_ledger.h" />
     <ClInclude Include="features\dev_switches.h" />
     <ClInclude Include="features\apex_memory.h" />

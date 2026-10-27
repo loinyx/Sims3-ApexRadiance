@@ -33,6 +33,8 @@ try {
 & (Join-Path $repo 'tools/scene_target_test/run.ps1') -OutDir (Join-Path $out 'scene_target') | Tee-Object -FilePath (Join-Path $out 'scene_target.txt')
 # Lot Streaming: the shared lot build time's decision, its replay over a synthetic burst, the detailed-lot hysteresis model
 & (Join-Path $repo 'tools/lot_streaming_test/run.ps1') -OutDir (Join-Path $out 'lot_streaming') | Tee-Object -FilePath (Join-Path $out 'lot_streaming.txt')
+# Room solve causes (development builds): the counters by camera state, caller, class and room, and their full tables
+& (Join-Path $repo 'tools/room_solve_causes_test/run.ps1') -OutDir (Join-Path $out 'room_solve_causes') | Tee-Object -FilePath (Join-Path $out 'room_solve_causes.txt')
 # CRT math replaced in hot code (half-float decode, hypot): same bits as the CRT
 & (Join-Path $repo 'tools/crt_math_test/run.ps1') -OutDir (Join-Path $out 'crt_math') | Tee-Object -FilePath (Join-Path $out 'crt_math.txt')
 Write-Output "CPU $Suite suite passed. Gameplay and D3D9/DXVK validation remain separate."

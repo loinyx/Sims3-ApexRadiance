@@ -282,6 +282,20 @@ In [`features/level_light_share.cpp`](../../../features/level_light_share.cpp):
   sums in the same order).
 - Night Lighting does not relight every lot 3 s after a world loads at night (the game has just solved them).
 
+### Measuring who sends rooms to the solve
+
+Development builds with the switch `room_solve_causes` ([workflow.md](../../workflow.md#development-switches-dev_build))
+count, without changing what is solved:
+
+- every invalidate (`0x0069EED0`, or `0x0069F160` when the flag changes) by the return address of its caller, printed as
+  `ApexRadiance.asi+RVA` for Apex's requeues and as the game address otherwise;
+- every finished solve (the finalize hook, before `0x006A0E00`) by the class it wrote and by room (lot, story, id). A room
+  solved several times without an invalidate is the class refinement of `0x0069EA70`;
+- both split by whether the camera moved in the last 300 ms (`LotLightingMotion::SampleCameraMoving`, once a frame).
+
+A `[RoomSolveCauses]` line every minute gives the window's frames, finished solves by class, invalidates, the six callers
+and four rooms with the most counts. Source: `features/room_solve_causes.{h,cpp}`.
+
 ### Status line
 
 "viewed lot first on (N of M priorities raised), no middle step, requeues keep the class, several rooms per frame

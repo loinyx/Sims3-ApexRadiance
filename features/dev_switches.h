@@ -82,10 +82,15 @@ inline constexpr bool kShipped = true;
 //                          lamp edits' kept parts of rooms whose story manager no loaded lot holds (two 10 s sweeps in a row),
 //                          Real-time outdoor lamps' CPU copy of the occluders once uploaded, and the lot mask texture of a lot
 //                          not drawn for 2 minutes (made again from its kept masks at its next draw, the same texels)
+//   room_solve_causes      (measures only) who sends rooms to the solve: every invalidate by its caller, every finished solve by
+//                          class and by room, camera still or moving; a [RoomSolveCauses] log line every minute
+//                          (room_solve_causes.h)
 inline std::atomic<bool> memoryOwners{false};
 inline std::atomic<bool> releaseDebugBuffers{false};
 inline std::atomic<bool> leftLotRelease{false};
 inline bool MemoryOwners() { return kCompiled && memoryOwners.load(std::memory_order_relaxed); }
+inline std::atomic<bool> roomSolveCauses{false};
+inline bool RoomSolveCauses() { return kCompiled && roomSolveCauses.load(std::memory_order_relaxed); }
 inline bool ReleaseDebugBuffers() { return kCompiled ? releaseDebugBuffers.load(std::memory_order_relaxed) : kShipped; }
 inline bool LeftLotRelease() { return kCompiled ? leftLotRelease.load(std::memory_order_relaxed) : kShipped; }
 

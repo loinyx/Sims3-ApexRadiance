@@ -16,6 +16,8 @@ void Load() {
     memoryOwners.store(get("memory_owners"));
     releaseDebugBuffers.store(get("release_debug_buffers"));
     leftLotRelease.store(get("left_lot_release"));
+    roomSolveCauses.store(get("room_solve_causes"));
+    LOG_INFO(std::format("[DevBuild] Measurement switch: room_solve_causes {}", roomSolveCauses.load() ? "on" : "off"));
     LOG_INFO(std::format("[DevBuild] Memory switches: memory_owners {}, release_debug_buffers {}, left_lot_release {}", memoryOwners.load() ? "on" : "off", releaseDebugBuffers.load() ? "on" : "off", leftLotRelease.load() ? "on" : "off"));
     measurements.store(get("measurements"));
     drawReadsNoWait.store(get("draw_reads_nowait"));

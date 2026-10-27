@@ -122,6 +122,8 @@
 #include "gpu_lamp_law.h"
 #include "tester_toggles.h"
 #include "drag_lite.h"
+#include "room_solve_causes.h"
+#include "lot_lighting_motion.h"
 #include "perf_toggles.h"
 #include "dev_switches.h"
 #include "arch_ambient.h"
@@ -7434,12 +7436,15 @@ void NoteSolve(BYTE* room, char event, uintptr_t caller) {
 using Invalidate_t = void(__thiscall*)(void* room, char full, char keep);
 using InvalidateFlag_t = void(__thiscall*)(void* room, char flag);
 void __fastcall InvalidateNoteHook(BYTE* room, void*, char full, char keep) {
+    if (room && DevSwitches::RoomSolveCauses()) RoomSolveCauses::NoteInvalidate(reinterpret_cast<uintptr_t>(_ReturnAddress()), false);
     if (room && g_installed.load(std::memory_order_relaxed)) NoteSolve(room, 'I', reinterpret_cast<uintptr_t>(_ReturnAddress()));
     reinterpret_cast<Invalidate_t>(EntryChain::Next(EntryChain::Site::RoomInvalidate, EntryChain::Layer::LevelLightShare))(room, full, keep);
 }
 void __fastcall InvalidateFlagNoteHook(BYTE* room, void*, char flag) {
-    if (room && g_installed.load(std::memory_order_relaxed) && *reinterpret_cast<const char*>(room + 0x19) != flag)
-        NoteSolve(room, 'F', reinterpret_cast<uintptr_t>(_ReturnAddress()));
+    if (room && *reinterpret_cast<const char*>(room + 0x19) != flag) {
+        if (DevSwitches::RoomSolveCauses()) RoomSolveCauses::NoteInvalidate(reinterpret_cast<uintptr_t>(_ReturnAddress()), true);
+        if (g_installed.load(std::memory_order_relaxed)) NoteSolve(room, 'F', reinterpret_cast<uintptr_t>(_ReturnAddress()));
+    }
     reinterpret_cast<InvalidateFlag_t>(EntryChain::Next(EntryChain::Site::RoomInvalidateFlag, EntryChain::Layer::LevelLightShare))(room, flag);
 }
 
@@ -7453,6 +7458,11 @@ void __fastcall FinalizeHook(BYTE* room) {
     // Quick outdoor lamp edits (Instant only): the last texel the solve packed is read while the maps are still locked
     if (room && OutdoorDelta::Enabled() && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
         HookGuard::Run("OutdoorDelta before finalize", [room] { OutdoorDelta::BeforeFinalize(room); });
+    // (room_solve_causes) the class this solve wrote, read before the game's finalize moves the room on
+    if (room && DevSwitches::RoomSolveCauses()) {
+        SolveNote n{};
+        if (ReadSolveNote(room, n)) RoomSolveCauses::NoteSolve(n.mgr, n.id, n.level, n.lot, n.cls);
+    }
     reinterpret_cast<Finalize_t>(kFinalize)(room);
     if (!room) return;
     // Quick outdoor lamp edits: the solve's parts are kept (or the delta's record closed), the maps now unlocked
@@ -14984,6 +14994,10 @@ void PublishVisSnap(); // below, with LampVisibilityShared
 } // namespace
 void OnPresent() {
     if (DevSwitches::kCompiled) MeasureRenderMemory(); // development builds (memory_owners): this file's containers, every 10 s
+    if (DevSwitches::RoomSolveCauses()) {
+        std::string line;
+        if (RoomSolveCauses::Frame(LotLightingMotion::SampleCameraMoving(), GetTickCount64(), &line)) LOG_INFO("[RoomSolveCauses] " + line);
+    }
     // A lot that becomes the high-quality lot (the camera enters it, or comes back) solves all its rooms at once, as after a
     // load: the same settle window (SettlingAfterLoad), checked every 250 ms
     {
