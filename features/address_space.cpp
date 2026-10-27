@@ -11,6 +11,7 @@
 #include "high_alloc.h"
 #include "va_ledger.h"
 #include "game_alloc_categories.h"
+#include "game_version.h"
 #include <windows.h>
 #include <psapi.h>
 #include <cstdio>
@@ -39,6 +40,12 @@ struct Image {
     uint64_t size = 0;
     std::string name;
 };
+// The game's memory domains, read without locks (word reads; a list read under a concurrent change is dropped).
+struct GameDomains {
+    bool cores = false, script = false;
+    uint32_t coreCount[2] = {}, scriptSections = 0;
+    uint64_t coreCommit[2] = {}, scriptHeap = 0, scriptFree = 0;
+};
 struct Snapshot {
     std::string when;
     uint64_t free = 0, freeLow = 0, freeHigh = 0, largest = 0, largestLow = 0, largestHigh = 0;
@@ -51,6 +58,7 @@ struct Snapshot {
     uint32_t gameBigBlocks = 0;
     uint64_t gameBigBytes = 0;
     bool haveGame = false;
+    GameDomains game; // Steam 1.67.2 only: the game's cores and script heap
     uint64_t sampledAt = 0, elapsedMs = 0, privateBytes = 0, workingSet = 0, peakWorkingSet = 0;
     uint64_t systemPhysicalAvailable = 0, systemCommitBytes = 0, systemCommitLimit = 0;
     uint64_t readBytes = 0, writeBytes = 0, pageFaults = 0, apexHighBytes = 0, queryEnd = 0;
@@ -75,6 +83,33 @@ bool ReadU32(uintptr_t a, uint32_t* out) {
         *out = *reinterpret_cast<const uint32_t*>(a);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+// Steam 1.67.2: the general allocator 0x011CB864 and the second instance 0x011D4BC8 keep their cores in a ring whose
+// head is allocator+0x448 (next at core+0x18, committed bytes at core+0x4); the script collector's heap size, free
+// heap blocks and section count are 0x012225A0, 0x012225B4 and 0x011F2FC0 (docs/engine/native-allocation-and-script-memory.md).
+struct GameGlobals {
+    uintptr_t alloc[2], scriptHeap, scriptFree, scriptSections;
+};
+constexpr GameGlobals kSteamGlobals{{0x011CB864, 0x011D4BC8}, 0x012225A0, 0x012225B4, 0x011F2FC0};
+void ReadGameDomains(GameDomains& g, const GameGlobals& at = kSteamGlobals) {
+    const uintptr_t* kAlloc = at.alloc;
+    g.cores = true;
+    uint32_t first = 0;
+    for (int i = 0; i < 2 && g.cores; i++) {
+        uint32_t a = 0, c = 0, commit = 0;
+        if (!ReadU32(kAlloc[i], &a) || !a || !ReadU32(a + 0x460, &c)) { g.cores = false; break; }
+        if (i == 0) first = a;
+        else if (a == first) break; // the same object
+        for (uint32_t n = 0; c && c != a + 0x448; n++) {
+            if (n >= 4096 || !ReadU32(c + 4, &commit) || !ReadU32(c + 0x18, &c)) { g.cores = false; break; }
+            g.coreCount[i]++;
+            g.coreCommit[i] += commit;
+        }
+    }
+    uint32_t heap = 0, free = 0, sections = 0;
+    g.script = ReadU32(at.scriptHeap, &heap) && ReadU32(at.scriptFree, &free) && ReadU32(at.scriptSections, &sections) && free <= heap;
+    if (g.script) { g.scriptHeap = heap; g.scriptFree = free; g.scriptSections = sections; }
 }
 
 std::string NowText() {
@@ -180,6 +215,7 @@ Snapshot Take() {
             s.gameBigBlocks = n;
             s.gameBigBytes = bytes;
         }
+        if (g_exeTimestamp == 0x52DEC247) ReadGameDomains(s.game);
     }
     PROCESS_MEMORY_COUNTERS_EX process{};
     process.cb = sizeof process;
@@ -208,6 +244,17 @@ Snapshot Take() {
 
 constexpr double MB(uint64_t b) { return static_cast<double>(b) / (1024.0 * 1024.0); }
 
+std::string GameLineOf(const GameDomains& g) {
+    std::string t;
+    if (g.cores)
+        t += std::format("game allocator cores {} = {:.0f} MB committed, second allocator cores {} = {:.0f} MB", g.coreCount[0], MB(g.coreCommit[0]),
+                         g.coreCount[1], MB(g.coreCommit[1]));
+    if (g.script)
+        t += std::format("{}script heap {:.0f} MB in {} sections, {:.0f} MB of it free blocks", t.empty() ? "" : "; ", MB(g.scriptHeap),
+                         g.scriptSections, MB(g.scriptFree));
+    return t;
+}
+
 std::string LineOf(const Snapshot& s) {
     return std::format("free {:.0f} MB (below 2 GB {:.0f}, above {:.0f}), largest free block {:.0f} MB (below 2 GB {:.0f}, above {:.0f}); committed: images {:.0f}, "
                        "mapped {:.0f}, private {:.0f} MB (private executable {:.0f}, ownership unknown); reserved only: {:.0f} MB; {} allocations",
@@ -230,13 +277,14 @@ void WriteMemorySample(const Snapshot& s) {
     }
     if (s.processValid && !haveBaseline) { baseline = s.privateBytes; haveBaseline = true; }
     const int64_t growth = s.processValid && haveBaseline ? int64_t(s.privateBytes) - int64_t(baseline) : 0;
-    const std::string row = std::format("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+    const std::string row = std::format("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
         s.sampledAt, s.elapsedMs, s.scanComplete, s.queryEnd, s.processValid, s.privateBytes, s.workingSet, s.peakWorkingSet,
         s.free, s.largest, s.freeLow, s.largestLow, s.freeHigh, s.largestHigh,
         s.committed[0], s.committed[1], s.committed[2], s.reserved[0]+s.reserved[1]+s.reserved[2], s.privateExec,
         s.systemValid, s.systemPhysicalAvailable, s.systemCommitBytes, s.systemCommitLimit, s.ioValid, s.readBytes, s.writeBytes,
-        s.pageFaults, s.apexHighBytes, growth, s.regions);
-    constexpr const char* header = "uptime_ms,scan_ms,scan_complete,address_end_exclusive,process_valid,private_bytes,working_set_bytes,peak_working_set_bytes,free_va_bytes,largest_free_va_bytes,free_below_2g_bytes,largest_below_2g_bytes,free_above_2g_bytes,largest_above_2g_bytes,image_commit_bytes,mapped_commit_bytes,private_commit_bytes,reserved_bytes,private_executable_bytes,system_valid,system_available_physical_bytes,system_commit_bytes,system_commit_limit_bytes,io_valid,read_bytes,write_bytes,page_fault_count,apex_high_allocator_bytes,private_growth_since_baseline_bytes,regions\n";
+        s.pageFaults, s.apexHighBytes, growth, s.regions, s.game.cores, s.game.coreCount[0], s.game.coreCommit[0], s.game.coreCount[1],
+        s.game.coreCommit[1], s.game.script, s.game.scriptHeap, s.game.scriptFree, s.game.scriptSections);
+    constexpr const char* header = "uptime_ms,scan_ms,scan_complete,address_end_exclusive,process_valid,private_bytes,working_set_bytes,peak_working_set_bytes,free_va_bytes,largest_free_va_bytes,free_below_2g_bytes,largest_below_2g_bytes,free_above_2g_bytes,largest_above_2g_bytes,image_commit_bytes,mapped_commit_bytes,private_commit_bytes,reserved_bytes,private_executable_bytes,system_valid,system_available_physical_bytes,system_commit_bytes,system_commit_limit_bytes,io_valid,read_bytes,write_bytes,page_fault_count,apex_high_allocator_bytes,private_growth_since_baseline_bytes,regions,game_cores_valid,game_cores,game_core_commit_bytes,second_cores,second_core_commit_bytes,script_heap_valid,script_heap_bytes,script_free_bytes,script_sections\n";
     if (bytesWritten + row.size() + strlen(header) > 16ull*1024*1024) { disabled = true; LOG_WARNING("[MemoryAnalysis] Session CSV reached its 16 MiB cap; sampling continues in the log"); return; }
     FILE* out = nullptr;
     if (_wfopen_s(&out, file.c_str(), bytesWritten ? L"ab" : L"wb") || !out) { disabled = true; LOG_WARNING("[MemoryAnalysis] CSV could not be opened"); return; }
@@ -319,6 +367,7 @@ DWORD WINAPI Proc(LPVOID) {
         if (n % kLogEvery == 0) GameAllocCategories::Report(s.sampledAt);
         if (n++ % kLogEvery == 0) {
             LOG_INFO("[AddressSpace] " + LineOf(s));
+            if (const std::string g = GameLineOf(s.game); !g.empty()) LOG_INFO("[AddressSpace] " + g);
             LOG_INFO(std::format("[MemoryAnalysis] {} | private {:.0f} MiB, working set {:.0f} MiB, system available physical {:.0f} MiB | scan {} in {} ms | Apex high allocator {:.1f} MiB (not all Apex memory)",
                 APEX_VERSION_STRING, MB(s.privateBytes), MB(s.workingSet), MB(s.systemPhysicalAvailable), s.scanComplete ? "complete" : "incomplete", s.elapsedMs, MB(s.apexHighBytes)));
         }
