@@ -309,7 +309,7 @@ not in the hash. Measuring only: nothing is skipped.
 The switches `opening_skip_check` (measuring, on in development builds) and `opening_skip` (off unless `[dev_build]` sets
 it to true) act on `QueueOpeningRooms`, the source of most finished solves undone. Each room solve hashes its inputs at
 its start and at its end (`OpeningInputs`: `PhysicsKey`, `LotGeometryKey`, every lamp registered on any story of the lot
-with the fields `RoomLampSignature` compares, every other room's ambient, normalisation, boost and last solve's hash, and the light manager's night and manmade levels, summed so the order
+with the fields `RoomLampSignature` compares, every room's ambient, normalisation, boost and last solve's hash (the room's own too: a room is predicted once two of its solves agree), and the light manager's night and manmade levels, summed so the order
 of the game's maps does not matter); when both are equal they are what the finished solve saw. At a send, a solved room
 (state 4 or 5) whose inputs are those is predicted to solve to the same texels: the check counts it and books its next
 solve's comparison apart, the skip leaves it unsent. An `[OpeningSkip]` line every minute gives the rooms sent, predicted
