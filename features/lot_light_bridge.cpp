@@ -4647,6 +4647,7 @@ struct FencePickMemo {
 };
 FencePickMemo g_fencePick[256];
 uint32_t g_fencePickHits = 0, g_fencePickMisses = 0, g_fencePickChecks = 0;
+uint32_t g_fenceMissWhy[5] = {}; // (development builds) PickFenceLampsMemo's misses by reason, and picks not kept
 bool g_fencePickOff = false;
 int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share);
 // (development builds) the draw cost log's timed draws (DrawCostSampled): the fence picks' own time, and the arch rows' below
@@ -4691,8 +4692,15 @@ int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
         return e.used;
     }
     g_fencePickMisses++;
+    // (development builds) why: the slot held another group or nothing, the group's positions were read again, the lamp list
+    // changed, the walls or slabs changed; and kept or not
+    if (!kPublicBuild) {
+        const int why = e.gen == 0 || e.g != &g || e.reachLaw != reachLaw ? 0 : e.read != g.read ? 1 : e.gen != g_lampMemoGen ? 2 : 3;
+        g_fenceMissWhy[why]++;
+    }
     const uint32_t gen = g_lampMemoGen, leftOut0 = g_fenceLampsLeftOut, dimmed0 = g_fenceLampsDimmed;
     const int used = PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share);
+    if (!kPublicBuild && !(gen == g_lampMemoGen && LevelLightShare::LampVisibilityState() == state)) g_fenceMissWhy[4]++;
     if (gen == g_lampMemoGen && LevelLightShare::LampVisibilityState() == state) {
         e.g = &g, e.read = g.read, e.gen = gen, e.state = state, e.reachLaw = reachLaw;
         e.used = used, e.candidates = g_lastLampCandidates;
@@ -8595,6 +8603,17 @@ void LogDrawCost() {
     if (g_fencePickCalls)
         arch += std::format(" | of it the fence lamp picks: {:.0f} a frame, {:.2f} us each", g_fencePickCalls * scale,
                             static_cast<double>(g_fencePickTicks) * msPerTick * 1000.0 / g_fencePickCalls);
+    {
+        // (development builds) the fence pick memo since the last line, and how often its keys moved
+        static uint32_t s_hits = 0, s_misses = 0, s_gen = 0;
+        static uint64_t s_state = 0;
+        arch += std::format(" | fence pick memo: {} reused, {} computed (other group or empty {}, positions read again {}, lamp list changed {}, walls or slabs "
+                            "changed {}; not kept {}); lamp list generation +{}, wall state {}",
+                            g_fencePickHits - s_hits, g_fencePickMisses - s_misses, g_fenceMissWhy[0], g_fenceMissWhy[1], g_fenceMissWhy[2], g_fenceMissWhy[3],
+                            g_fenceMissWhy[4], g_lampMemoGen - s_gen, LevelLightShare::LampVisibilityState() == s_state ? "same" : "changed");
+        s_hits = g_fencePickHits, s_misses = g_fencePickMisses, s_gen = g_lampMemoGen, s_state = LevelLightShare::LampVisibilityState();
+        for (uint32_t& w : g_fenceMissWhy) w = 0;
+    }
     g_archRowsTicks = 0, g_archRowsCalls = 0, g_fencePickTicks = 0, g_fencePickCalls = 0;
     LOG_INFO(std::format("[LotLightBridge] Draw cost by fix over {} frames (1 draw in 16 timed, the fixes' own time): {:.3f} ms a frame in all, {:.3f} ms a frame "
                          "in the driver for the game draws the fixes made; {}{}",
