@@ -443,7 +443,15 @@ the story's wall mask is known ([stairs.md](stairs.md)), the copy also moves the
 (`PatchBasisSmooth` with `wallMask` and `smooth = false`: the game's bilinear reads, never across a walled side of the
 pixel's tile, the lower of the two texels in a wall's thickness), as the stairs' reads are: the bilinear read took the
 texel of the room beyond a wall into a face against it (a counter along the wall of a room lit red took the red on its
-back half metre). Without a mask, or where the copy does not fit (5 more temps), the copy without it draws.
+back half metre). The same copy's own read of the floor light map through the uv's zw (4 texels a metre, bilinear) is
+kept off the walls too (`PatchRoomMapReadWalls`: half a floor texel inside the pixel's tile on a walled side, the lower
+of the two sides in a wall's thickness): it gave a counter top's back strip, a few centimetres wide, the next room's
+floor light. Without a mask, or where the copy does not fit (5 more temps), the copy without it draws.
+
+Room-mode objects drawn by the game's shader through the Rooms at Night furniture path that read the floor light map
+for their upward faces ("texld rL, vU, sF" times the normal's y; a door frame, a shelf's top) draw with the same read
+off the walls where the map's story is known (`FurnitureFloorMap`, `PatchRoomMapReadWalls`): a door frame in the wall
+between a lit room and a dark hall read the map on the wall's line, half of each side.
 No object catalog identifies windows: the rule is geometric, so any room-rig object drawn with a basis-reading object shader whose faces look
 out of the house plan is affected (in the captures only window parts were). The light in the shader's bloom alpha (`lum - c3.x`) can rise
 slightly with it. Offline: 1 of the 13 captured basis-reading pixel shaders is accepted (the window one), and native D3D9 creates it.

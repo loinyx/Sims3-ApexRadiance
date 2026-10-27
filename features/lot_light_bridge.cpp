@@ -350,6 +350,8 @@ struct PsFacts {
     uint16_t declared = 0; // bit s = sampler s declared (0: not read)
     int8_t lastLm = -1;    // DrawIndoorObject: the sampler of the room light map at the last draw that found one
     bool ps3 = false;      // ps_3_0 (PatchIndoorBasis patches nothing else: DrawIndoorObject skips its sampler scan)
+    int8_t floorMap = -1;  // (2.17.1) OnDrawFurniture: the sampler where a floor map of a known story was last found
+    uint32_t floorScanAt = 0; // (2.17.1) the frame of its last scan that found none
 };
 std::unordered_map<IDirect3DPixelShader9*, PsFacts> g_psFacts;
 // (2.15.3) 32 recent shaders' entries (pointers into g_psFacts / g_vsInfo: stable until Shutdown clears the maps, and these)
@@ -4238,6 +4240,7 @@ struct PatchedPs {
     ShaderPatches::RoomMapPatch room;
     ShaderPatches::WindowOutdoorPatch window;
     ShaderPatches::WallScalePatch wall;
+    ShaderPatches::RoomReadWallsPatch roomRead; // (2.17.1) a floor map's read off the walls (PatchRoomMapReadWalls)
     DWORD nightConst = 0;
     int cubeTint = -1; // PatchCubeTint
     DWORD nativeAlphaSampler = 0;
@@ -5933,6 +5936,39 @@ struct WallMaskBind {
     }
 };
 
+bool MapSize(IDirect3DBaseTexture9* t, float out[4]); // below
+// (2.17.1) The constants and the story's wall mask of a copy with a floor map's read off the walls (PatchRoomMapReadWalls)
+// for one draw, put back at its end. ok = false: the floor map's size is not known and the copy cannot draw. A map with no
+// known story or another layout draws with the read off (maskConst.z = 0: the game's read).
+std::atomic<long> g_roomReadOn{0}, g_roomReadOff{0};
+struct RoomReadBind {
+    IDirect3DDevice9* dev;
+    const ShaderPatches::RoomReadWallsPatch& p;
+    float old[3][4] = {};
+    std::optional<WallMaskBind> mask;
+    bool ok = false;
+    RoomReadBind(IDirect3DDevice9* d, const ShaderPatches::RoomReadWallsPatch& pp) : dev(d), p(pp) {
+        if (p.maskSampler < 0 || p.sampler < 0) return;
+        IDirect3DBaseTexture9* const map = D3D9Hooks::BoundTexture(dev, static_cast<DWORD>(p.sampler));
+        float c[3][4] = {};
+        if (!MapSize(map, c[0])) return;
+        IDirect3DTexture9* const tex = FloorWallMaskTexture(dev, map, c[0], c[1]);
+        if (!tex) c[1][0] = 0.25f, c[1][1] = c[0][0], c[1][2] = 0.0f, c[1][3] = 1.0f / 64.0f;
+        const float n = 1.0f / c[1][0];
+        c[2][0] = n, c[2][1] = n - 0.5f, c[2][2] = 0.5f, c[2][3] = 0.0f;
+        dev->GetPixelShaderConstantF(p.sizeConst, &old[0][0], 3); // (sizeConst, maskConst and tileConst follow each other)
+        SetPsConst(dev, p.sizeConst, &c[0][0], 3);
+        if (tex) mask.emplace(dev, static_cast<DWORD>(p.maskSampler), tex);
+        ApexUtil::CountOne(tex ? g_roomReadOn : g_roomReadOff);
+        ok = true;
+    }
+    ~RoomReadBind() {
+        if (!ok) return;
+        mask.reset();
+        SetPsConst(dev, p.sizeConst, &old[0][0], 3);
+    }
+};
+
 IDirect3DTexture9* AmbientMapTextureFor(IDirect3DDevice9* dev, uintptr_t key) {
     if (!DevSwitches::StairRoomFill() || dev != g_wallMaskDev || !key) return nullptr; // (WallMaskTexture set the device for this draw)
     if (g_ambMapTex.size() > 256) {
@@ -5997,8 +6033,12 @@ template <typename DrawFn> bool DrawWindowOutdoor(IDirect3DDevice9* dev, DrawFn 
         return [reach, walls](std::vector<DWORD>& t, PatchedPs& pp) {
             // Rooms at Night's blue tint on the cube, as the game's draw of this part gets it (OnDrawFurniture), when the shader has it
             if (!ShaderPatches::PatchCubeTint(t, pp.cubeTint)) pp.cubeTint = -1;
-            return ShaderPatches::PatchWindowOutdoor(t, pp.window, reach) &&
-                   (!walls || ShaderPatches::PatchBasisSmooth(t, pp.smooth, {.wallMask = true, .smooth = false}));
+            if (!ShaderPatches::PatchWindowOutdoor(t, pp.window, reach)) return false;
+            if (!walls) return true;
+            if (!ShaderPatches::PatchBasisSmooth(t, pp.smooth, {.wallMask = true, .smooth = false})) return false;
+            // (2.17.1) its floor map read through the uv's zw too (a counter top's back strip took the next room's floor light)
+            if (!ShaderPatches::PatchRoomMapReadWalls(t, pp.roomRead, -1)) pp.roomRead = {};
+            return true;
         };
     };
     IDirect3DTexture9* wallMask = nullptr;
@@ -6022,6 +6062,10 @@ template <typename DrawFn> bool DrawWindowOutdoor(IDirect3DDevice9* dev, DrawFn 
     PatchedPs& p = *chosen;
     float basisSize[4] = {};
     if (p.smooth.maskSampler < 0 || !MapSize(D3D9Hooks::BoundTexture(dev, p.smooth.sizeSampler), basisSize)) wallMask = nullptr; // (the reach copy without the walls)
+    if (wallMask && p.roomRead.maskSampler >= 0) { // (its floor read needs the floor map's size)
+        float floorSize[4];
+        if (!MapSize(D3D9Hooks::BoundTexture(dev, static_cast<DWORD>(p.roomRead.sampler)), floorSize)) wallMask = nullptr;
+    }
     if (!wallMask && p.smooth.maskSampler >= 0) return false; // (a walls copy with no size: the plain path next draw, never unset constants)
     const bool reach = p.window.reachConst != 0;
     IDirect3DVertexShader9* vs = ObjectVsFor(dev, g_curVs);
@@ -6123,10 +6167,12 @@ template <typename DrawFn> bool DrawWindowOutdoor(IDirect3DDevice9* dev, DrawFn 
         if (p.cubeTint >= 0) SetPsConst(dev, static_cast<UINT>(p.cubeTint), tint, 1);
         float oldSize[4] = {};
         std::optional<WallMaskBind> maskBind;
+        std::optional<RoomReadBind> floorRead;
         if (wallMask) {
             dev->GetPixelShaderConstantF(p.smooth.sizeConst, oldSize, 1);
             SetPsConst(dev, p.smooth.sizeConst, basisSize, 1);
             maskBind.emplace(dev, static_cast<DWORD>(p.smooth.maskSampler), wallMask);
+            if (p.roomRead.maskSampler >= 0) floorRead.emplace(dev, p.roomRead);
             g_windowWallDraws.fetch_add(1, std::memory_order_relaxed);
         }
         SetVs(dev, vs);
@@ -6135,6 +6181,7 @@ template <typename DrawFn> bool DrawWindowOutdoor(IDirect3DDevice9* dev, DrawFn 
         SetPs(dev, originalPs);
         SetVs(dev, originalVs);
         if (wallMask) {
+            floorRead.reset();
             maskBind.reset();
             SetPsConst(dev, p.smooth.sizeConst, oldSize, 1);
         }
@@ -7927,6 +7974,31 @@ bool RoomAmbientChroma(const void* room, float* chroma) {
 }
 // The furniture draw with the rig's unlit-room lights, the vertex lights and the cube weight turned (rig = PS c0..c7 or
 // null when the shader has no rig chain; chroma: the room's ambient hue for the fill, or null)
+// (2.17.1) The sampler where the current ps_3_0 object shader reads a floor map of a story whose walls are known, -1 for none:
+// the one found last for it first, every declared sampler otherwise, scanned again at most every 60 frames when none was found.
+std::map<int, std::unordered_map<IDirect3DPixelShader9*, PatchedPs>> g_furnitureFloorPs; // by that sampler
+int FurnitureFloorMap(IDirect3DDevice9* dev) {
+    if (!DevSwitches::BasisWallFilter() || !g_curPs) return -1;
+    PsFacts* f = g_curFactsKnown ? g_curFacts : nullptr;
+    if (!f)
+        if (const auto it = g_psFacts.find(g_curPs); it != g_psFacts.end()) f = &it->second;
+    if (!f || !f->ps3 || !f->declared) return -1;
+    const auto isFloor = [dev](int s) {
+        IDirect3DBaseTexture9* const t = D3D9Hooks::BoundTexture(dev, static_cast<DWORD>(s));
+        float size[4], k[4];
+        return t && t->GetType() == D3DRTYPE_TEXTURE && MapSizeThisFrame(t, size) && FloorWallMaskTexture(dev, t, size, k) != nullptr;
+    };
+    if (f->floorMap >= 0 && (f->declared & (1u << f->floorMap)) && isFloor(f->floorMap)) return f->floorMap;
+    if (f->floorMap < 0 && g_roomMapFrame - f->floorScanAt < 60u && f->floorScanAt) return -1;
+    f->floorScanAt = g_roomMapFrame;
+    f->floorMap = -1;
+    for (int s = 0; s < 16; s++)
+        if ((f->declared & (1u << s)) && isFloor(s)) {
+            f->floorMap = static_cast<int8_t>(s);
+            return s;
+        }
+    return -1;
+}
 template <typename DrawFn> D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice9* dev, DrawFn draw, const ShaderPatches::RigPsInfo& info, const float (*rig)[4], const float* chroma) {
     float psOld[4][4] = {}, vsOld[4][4] = {}, cubeOld[4] = {}, t[4][4], cube[4];
     bool psSet = false, vsSet = false, cubeSet = false;
@@ -7968,25 +8040,52 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice
             UnlitRooms::FurnitureCubeColour(cubeColour);
             const bool coloured = ApexMath::Fabs(cubeColour[0] - 1.0f) > 1e-3f || ApexMath::Fabs(cubeColour[1] - 1.0f) > 1e-3f || ApexMath::Fabs(cubeColour[2] - 1.0f) > 1e-3f;
             PatchedPs* tinted = nullptr;
-            if (cubeSet && (ApexMath::Fabs(tint - 1.0f) > 1e-3f || coloured)) {
+            const bool wantTint = cubeSet && (ApexMath::Fabs(tint - 1.0f) > 1e-3f || coloured);
+            // (2.17.1) the floor map read of the object's upward faces, off the walls (PatchRoomMapReadWalls): a door frame in the
+            // wall between a lit room and a dark hall read the floor map on the wall's line, half of each side (F7 20-03-24)
+            const int floorMap = FurnitureFloorMap(dev);
+            if (floorMap >= 0) {
+                PatchedPs& p = PatchedFor(dev, g_furnitureFloorPs[floorMap], "Indoor object (floor light off the walls)", [floorMap](std::vector<DWORD>& t, PatchedPs& pp) {
+                    if (!ShaderPatches::PatchCubeTint(t, pp.cubeTint)) pp.cubeTint = -1;
+                    return ShaderPatches::PatchRoomMapReadWalls(t, pp.roomRead, floorMap);
+                }, true);
+                if (p.ps && (!wantTint || p.cubeTint >= 0)) tinted = &p;
+            }
+            if (!tinted && wantTint) {
                 PatchedPs& p = PatchedFor(dev, g_cubeTintPs, "Indoor object (blue tint)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchCubeTint(t, pp.cubeTint); });
                 if (p.ps && p.cubeTint >= 0) tinted = &p;
             }
             IDirect3DPixelShader9* original = g_curPs;
             float tintOld[4] = {};
             g_inOwnCall = true;
+            std::optional<RoomReadBind> floorRead;
+            if (tinted && tinted->roomRead.maskSampler >= 0) {
+                floorRead.emplace(dev, tinted->roomRead);
+                if (!floorRead->ok) {
+                    floorRead.reset();
+                    tinted = nullptr;
+                    if (wantTint) {
+                        PatchedPs& p = PatchedFor(dev, g_cubeTintPs, "Indoor object (blue tint)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchCubeTint(t, pp.cubeTint); });
+                        if (p.ps && p.cubeTint >= 0) tinted = &p;
+                    }
+                }
+            }
             if (tinted) {
+                const float identity[4] = {1.0f, 1.0f, 1.0f, 1.0f};
                 const float c[4] = {tint, cubeColour[0], cubeColour[1], cubeColour[2]};
-                dev->GetPixelShaderConstantF(static_cast<UINT>(tinted->cubeTint), tintOld, 1);
-                SetPsConst(dev, static_cast<UINT>(tinted->cubeTint), c, 1);
+                if (tinted->cubeTint >= 0) {
+                    dev->GetPixelShaderConstantF(static_cast<UINT>(tinted->cubeTint), tintOld, 1);
+                    SetPsConst(dev, static_cast<UINT>(tinted->cubeTint), wantTint ? c : identity, 1);
+                }
                 SetPs(dev, tinted->ps);
             }
             draw();
             if (tinted) {
                 SetPs(dev, original);
-                SetPsConst(dev, static_cast<UINT>(tinted->cubeTint), tintOld, 1);
-                g_nightFurnitureTinted.fetch_add(1, std::memory_order_relaxed);
+                if (tinted->cubeTint >= 0) SetPsConst(dev, static_cast<UINT>(tinted->cubeTint), tintOld, 1);
+                if (wantTint) g_nightFurnitureTinted.fetch_add(1, std::memory_order_relaxed);
             }
+            floorRead.reset();
             g_inOwnCall = false;
             r = D3D9Hooks::HookAction::Skip;
         }
@@ -9233,9 +9332,9 @@ void SetIndoorSmooth(bool on) { g_indoorSmooth = on; }
 void SetSmoothRoomMaps(bool on) { g_roomMapSmooth = on; }
 std::string RoomMapSmoothStatus() {
     return std::format("B-spline reads {}: {} room-lit shaders, walls {} draws, floors {} draws | left to the game: caps {}, unknown vertex shader {}, wall blocks off the grid {}, "
-                       "point filter {} | draws with the arch copy {}, with the copy without arches {} | floor draws read off the walls {}",
+                       "point filter {} | draws with the arch copy {}, with the copy without arches {} | floor draws read off the walls {} | object floor reads off the walls {} (story or layout not known {})",
                        g_roomMapSmooth.load() ? "on" : "off", g_roomMapPs.size(), g_roomWallDrawn.load(), g_roomFloorDrawn.load(), g_roomCapsRefused.load(),
-                       g_roomUnknownVs.load(), g_roomBandsOff.load(), g_roomPointFilter.load(), g_archCopyDraws.load(), g_archPlainDraws.load(), g_roomFloorWallDraws.load());
+                       g_roomUnknownVs.load(), g_roomBandsOff.load(), g_roomPointFilter.load(), g_archCopyDraws.load(), g_archPlainDraws.load(), g_roomFloorWallDraws.load(), g_roomReadOn.load(), g_roomReadOff.load());
 }
 
 std::string IndoorSmoothStatus() {

@@ -299,6 +299,18 @@ constexpr float kArchReach = 1.5f; // = ArchAmbient::kReach
 // wall of the pixel's own tile (the story's wall mask, the directional maps' layout: r -x, g +x, b -z, a +z walled), so two
 // roofed rooms either side of a wall never mix while an arch or a doorway keeps its smooth read. maskConst.z = 0 turns it off.
 bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb = false, bool wallMask = false);
+// (basis_wall_filter, 2.17.1) An object shader's own bilinear read of a floor light map ("texld rD, <input uv>, sS", ps_3_0):
+// the point is kept half a floor texel inside its tile on each walled side (the story's wall mask at maskSampler), and in a
+// wall's thickness (within 6 cm of a walled tile edge) the read takes the lower of it and the first texel beyond, as the
+// directional maps' reads do. sampler -1: the read through the uv's zw (the basis-reading shaders' "texld rD, vU.zwzw, sS").
+// Per draw: sizeConst = the floor map (w, h, 1/w, 1/h); maskConst = (1 / n, first split-atlas column, on, 1 / 64);
+// tileConst = (n, n - 0.5, 0.5, 0), n = texels per tile. maskConst.z = 0: the game's read.
+struct RoomReadWallsPatch {
+    int sampler = -1;     // the floor map's sampler
+    int maskSampler = -1; // bind the story's wall mask here (point filter, clamp)
+    DWORD sizeConst = 0, maskConst = 0, tileConst = 0;
+};
+bool PatchRoomMapReadWalls(std::vector<DWORD>& t, RoomReadWallsPatch& out, int sampler);
 // The scale of the room map uv a vertex shader writes: "mul o<TEXCOORD1>.xy, v#, cK.c" (either order), the only write of
 // that output's xy. The game's room-lit vertex shaders: 1/4096 for the wall atlas, 1/32767 for the floor maps (a def in
 // vs_3_0, a constant it may set in vs_2_0: read it at the draw when not defined).

@@ -234,3 +234,23 @@ window copy now takes the same uv block on its 4 reads, without the bicubic (`Ba
 temps at `T .. T + 4` so a copy that already uses 16 fits). Offline on the captured window copy (`PS_2EBEA1F8`): patched,
 16 texture reads instead of 11 (the mask, and the beyond texel of each read in a wall's thickness), the plan read
 untouched, created by Direct3D 9; `tools/basis_shadow_check` 262 checks, 0 failures. Not yet checked in game.
+
+### 2026-10-27: the lamp of the next room on objects, at its source
+
+**Context:** after the window copy's reads were moved off the walls, three F7 captures still showed the next room's
+light: with the wall between a bedroom and the kitchen opened, every object of the kitchen took the bedroom's red lamp
+(F7 20-02-46: the counter at (0.137, 0.012, 0.012) with the walls copy drawing it); a green strip a few centimetres wide on
+the counter top's back edge with the wall closed (F7 20-03-29); green on a door frame facing the hall (F7 20-03-24).
+
+**Finding:** three paths. (1) The directional maps themselves: the counter's tile held the red lamp's light (41 against
+149 in the bedroom, falling off across the kitchen), written by the room's own solve: opened, the two rooms are one, and
+`FUN_006a09f0` adds every lamp of the room's list with no wall test (Apex's `BasisLightHook` tested only the lamps it
+imports). (2) The window copy also reads the floor light map through the uv's zw ("texld r1, v0.zwzw, s2"), bilinear at
+4 texels a metre across the wall line: the green strip. (3) The door frame is drawn by the game's shader (rig lamps all
+grey) with the floor map read for upward faces ("texld r2, v1, s2" times the normal's y) on the wall's line.
+
+**Outcome:** (1) `OwnLampPass`: the room's own-story lamps tested against the story's walls in the directional solve,
+as the floor solve does. (2) and (3) `PatchRoomMapReadWalls` on the window copy's zw read and on the furniture path's
+floor reads. Offline: the three captured copies patched and created by Direct3D 9; `tools/room_map_smooth_check` 1674
+checks, 0 failures (the object read: +0 green through a wall, was +49; the doorway the game's read within 0 LSB);
+`tools/basis_shadow_check` 262 checks, 0 failures. Not yet checked in game.

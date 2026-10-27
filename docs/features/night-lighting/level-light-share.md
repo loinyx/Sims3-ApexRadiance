@@ -456,7 +456,16 @@ For a lamp of another story (`FindCross`):
 - Blocked, the lamp adds nothing; partly transmitted, the game's function runs into a temporary accumulator and only
   that lamp's contribution is scaled.
 
-Status: *directional maps: lamps of another story tested N, behind a floor M*. While this hook is installed and the
+A lamp of a roofed room's own story (`OwnLampPass`: the lamp's story `+0xD0` is the room's, not a street lamp, not of
+room 0, and none of the imports above) is tested against the walls of the story from the lamp to the sample (`YardPass`
+on the story's grid: walls with their openings and tops, the lamp's penumbra). The game's floor and wall solve tests
+these walls (`0x0069FC40`), the directional maps never did: in a room shaped like an L, or two rooms made one by
+opening a wall between them, every object took the lamp behind the part of the wall that still stands (a counter
+against that wall lit by the next part's red lamp while the floor in front of it stayed dark). Blocked, the lamp adds
+nothing; in the penumbra, its contribution alone is scaled.
+
+Status: *directional maps: lamps of another story tested N, behind a floor M*; *own-story lamps tested N, behind a wall
+M, in its penumbra K*. While this hook is installed and the
 indoor part is ready (`BasisFloorGuardReady`), the indoor-object shader omits its floor-map cap; see
 [objects-and-rigs.md](objects-and-rigs.md).
 

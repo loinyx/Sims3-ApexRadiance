@@ -708,6 +708,134 @@ void WallPixelCheck(Gpu& gpu) {
     }
 }
 
+// (2.17.1) An object shader's own bilinear read of the floor map, off the walls (PatchRoomMapReadWalls): the same two rooms
+// and doorway. CPU: the point kept half a texel inside its tile on a walled side, and within 6 cm (0.06 of a tile) of a
+// walled edge the lower of that read and the first texel beyond, against the GPU copy of "texld r0, v0, s0".
+float Bilinear(const std::vector<DWORD>& map, int W, int H, float px, float py, int c) {
+    const float x = px - 0.5f, y = py - 0.5f;
+    const int ix = static_cast<int>(std::floor(x)), iy = static_cast<int>(std::floor(y));
+    const float fx = x - ix, fy = y - iy;
+    const auto at = [&](int i, int j) { return static_cast<float>((map[static_cast<size_t>(std::clamp(j, 0, H - 1)) * W + std::clamp(i, 0, W - 1)] >> (c == 3 ? 24 : 16 - 8 * c)) & 0xFF); };
+    return (at(ix, iy) * (1 - fx) + at(ix + 1, iy) * fx) * (1 - fy) + (at(ix, iy + 1) * (1 - fx) + at(ix + 1, iy + 1) * fx) * fy;
+}
+void RefReadWalls(const std::vector<DWORD>& map, int W, int H, float px, float py, const std::vector<TileWalls>& walls, int tiles, int n, float out[4]) {
+    const int tx = static_cast<int>(std::floor(px / n)), tz = static_cast<int>(std::floor(py / n));
+    const TileWalls w = walls[static_cast<size_t>(std::clamp(tz, 0, tiles - 1)) * tiles + std::clamp(tx, 0, tiles - 1)];
+    const float lox = tx * n + 0.5f, hix = tx * n + n - 0.5f, loz = tz * n + 0.5f, hiz = tz * n + n - 0.5f;
+    float x = px, y = py;
+    if (w.xm) x = std::max(x, lox);
+    if (w.xp) x = std::min(x, hix);
+    if (w.zm) y = std::max(y, loz);
+    if (w.zp) y = std::min(y, hiz);
+    const float fx = px / n - tx, fz = py / n - tz;
+    const bool bxm = w.xm && fx < 0.06f, bxp = w.xp && fx >= 0.94f, bzm = w.zm && fz < 0.06f, bzp = w.zp && fz >= 0.94f;
+    float bx = x + (bxm ? lox - 1.0f - x : 0.0f) + (bxp ? hix + 1.0f - x : 0.0f), by = y + (bzm ? loz - 1.0f - y : 0.0f) + (bzp ? hiz + 1.0f - y : 0.0f);
+    for (int c = 0; c < 4; c++) {
+        out[c] = Bilinear(map, W, H, x, y, c);
+        if (bxm || bxp || bzm || bzp) out[c] = std::min(out[c], Bilinear(map, W, H, bx, by, c));
+    }
+}
+void ReadWallsPixelCheck(Gpu& gpu) {
+    if (!gpu.dev) return;
+    const char* asmSrc = "ps_3_0\ndcl_texcoord1 v0.xy\ndcl_2d s0\ntexld r0, v0, s0\nmov oC0, r0\n";
+    std::vector<DWORD> code;
+    {
+        using Assemble = HRESULT(WINAPI*)(LPCVOID, SIZE_T, LPCSTR, const D3D_SHADER_MACRO*, ID3DInclude*, UINT, ID3DBlob**, ID3DBlob**);
+        const auto lib = LoadLibraryW(L"d3dcompiler_47.dll");
+        const auto assemble = lib ? reinterpret_cast<Assemble>(GetProcAddress(lib, "D3DAssemble")) : nullptr;
+        ID3DBlob *blob = nullptr, *err = nullptr;
+        if (assemble && SUCCEEDED(assemble(asmSrc, std::strlen(asmSrc), nullptr, nullptr, nullptr, 0, &blob, &err)) && blob) {
+            code.resize(blob->GetBufferSize() / 4);
+            std::memcpy(code.data(), blob->GetBufferPointer(), blob->GetBufferSize());
+        }
+        Release(blob), Release(err);
+        if (lib) FreeLibrary(lib);
+    }
+    std::vector<DWORD> t = code;
+    ShaderPatches::RoomReadWallsPatch p;
+    if (code.empty() || !ShaderPatches::PatchRoomMapReadWalls(t, p, 0)) {
+        Check(false, "the synthetic object read is patched (walls)");
+        return;
+    }
+    IDirect3DPixelShader9* ps = nullptr;
+    Check(SUCCEEDED(gpu.dev->CreatePixelShader(t.data(), &ps)), "the object read copy is created");
+    if (!ps) std::printf("%s\n", Disasm(t).c_str());
+    constexpr int W = 32, H = 32, n = 4, tiles = 8;
+    std::vector<DWORD> map(W * H);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) map[static_cast<size_t>(y) * W + x] = x < 16 ? (5u << 24) | (200u << 8) | 30u : (191u << 24) | (3u << 8) | 2u;
+    std::vector<TileWalls> walls(tiles * tiles);
+    for (int z = 0; z < tiles; z++)
+        if (z != 3 && z != 4) walls[static_cast<size_t>(z) * tiles + 3].xp = walls[static_cast<size_t>(z) * tiles + 4].xm = true;
+    std::vector<DWORD> mask(64 * 64, 0);
+    for (int z = 0; z < tiles; z++)
+        for (int x = 0; x < tiles; x++) {
+            const TileWalls& w = walls[static_cast<size_t>(z) * tiles + x];
+            mask[static_cast<size_t>(z) * 64 + x] = (w.zp ? 0xFF000000u : 0) | (w.xm ? 0x00FF0000u : 0) | (w.xp ? 0x0000FF00u : 0) | (w.zm ? 0x000000FFu : 0);
+        }
+    IDirect3DTexture9 *tex = nullptr, *mtex = nullptr;
+    gpu.dev->CreateTexture(W, H, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, nullptr);
+    gpu.dev->CreateTexture(64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &mtex, nullptr);
+    if (!ps || !tex || !mtex) {
+        Release(ps), Release(tex), Release(mtex);
+        return;
+    }
+    D3DLOCKED_RECT lr{};
+    if (SUCCEEDED(tex->LockRect(0, &lr, nullptr, 0))) {
+        for (int y = 0; y < H; y++) std::memcpy(static_cast<char*>(lr.pBits) + y * lr.Pitch, &map[static_cast<size_t>(y) * W], W * 4);
+        tex->UnlockRect(0);
+    }
+    if (SUCCEEDED(mtex->LockRect(0, &lr, nullptr, 0))) {
+        for (int y = 0; y < 64; y++) std::memcpy(static_cast<char*>(lr.pBits) + y * lr.Pitch, &mask[static_cast<size_t>(y) * 64], 64 * 4);
+        mtex->UnlockRect(0);
+    }
+    const auto bind = [&](DWORD s, IDirect3DTexture9* x, DWORD filter) {
+        gpu.dev->SetTexture(s, x);
+        gpu.dev->SetSamplerState(s, D3DSAMP_MINFILTER, filter);
+        gpu.dev->SetSamplerState(s, D3DSAMP_MAGFILTER, filter);
+        gpu.dev->SetSamplerState(s, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        gpu.dev->SetSamplerState(s, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        gpu.dev->SetSamplerState(s, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+    };
+    bind(0, tex, D3DTEXF_LINEAR);
+    bind(static_cast<DWORD>(p.maskSampler), mtex, D3DTEXF_POINT);
+    const float c[3][4] = {{static_cast<float>(W), static_cast<float>(H), 1.0f / W, 1.0f / H}, {1.0f / n, static_cast<float>(W), 1.0f, 1.0f / 64.0f}, {static_cast<float>(n), n - 0.5f, 0.5f, 0.0f}};
+    for (int mode = 0; mode < 2; mode++) { // on, off (maskConst.z = 0: the game's bilinear read)
+        float k[3][4];
+        std::memcpy(k, c, sizeof k);
+        if (mode == 1) k[1][2] = 0.0f;
+        gpu.dev->SetPixelShaderConstantF(p.sizeConst, &k[0][0], 3);
+        const std::vector<DWORD> px = gpu.Render(ps);
+        int worst = 0, walled = 0, door = 0, doorRef = 0;
+        for (int y = 0; y < 64; y++)
+            for (int x = 0; x < 64; x++) {
+                const float cx = (x + 0.5f) / 64.0f * W, cy = (y + 0.5f) / 64.0f * H;
+                float ref[4];
+                if (mode == 1)
+                    for (int ch = 0; ch < 4; ch++) ref[ch] = Bilinear(map, W, H, cx, cy, ch);
+                else RefReadWalls(map, W, H, cx, cy, walls, tiles, n, ref);
+                const DWORD v = px[static_cast<size_t>(y) * 64 + x];
+                const int got[4] = {static_cast<int>((v >> 16) & 0xFF), static_cast<int>((v >> 8) & 0xFF), static_cast<int>(v & 0xFF), static_cast<int>(v >> 24)};
+                for (int ch = 0; ch < 4; ch++) worst = std::max(worst, static_cast<int>(std::lround(std::fabs(got[ch] - ref[ch]))));
+                const int tz = static_cast<int>(cy / n);
+                if (cx >= 16.0f && cx < 17.0f) {
+                    if (tz != 2 && tz != 3 && tz != 4 && tz != 5) walled = std::max(walled, got[1] - 3);
+                    if (tz == 3 || tz == 4) door = std::max(door, std::abs(got[1] - static_cast<int>(std::lround(Bilinear(map, W, H, cx, cy, 1))))), doorRef = std::max(doorRef, got[1]);
+                }
+            }
+        std::printf("  object read pixel check (%s): largest difference from the CPU reference %d LSB; the dark room's first quarter metre +%d green; the doorway %d LSB from the game's read (reaching %d)\n",
+                    mode == 0 ? "on" : "off", worst, walled, door, doorRef);
+        Check(worst <= 3, "GPU object read off the walls = CPU reference (3 LSB)");
+        if (mode == 0) {
+            Check(walled <= 3, "GPU object read: the dark room takes no light through the wall");
+            Check(door <= 3 && doorRef > 30, "GPU object read: the doorway keeps the game's read");
+        } else Check(walled > 30, "with the read off, the bilinear bleed through the wall is there (the test shows it)");
+    }
+    gpu.dev->SetTexture(0, nullptr);
+    gpu.dev->SetTexture(static_cast<DWORD>(p.maskSampler), nullptr);
+    Release(tex), Release(mtex), Release(ps);
+}
+
 void PixelCheck(Gpu& gpu) {
     if (!gpu.dev) return;
     // the pattern: texld r0, t1, s0; mad r0.xyz, r0.w, c0, r0 (c0 = 0 here, so the output is the map read; alpha kept)
@@ -1003,6 +1131,7 @@ int main(int argc, char** argv) {
     PixelCheck(gpu);
     SidePixelCheck(gpu);
     WallPixelCheck(gpu);
+    ReadWallsPixelCheck(gpu);
     ArchPixelCheck(gpu);
     // 5: captures
     std::set<std::vector<DWORD>> seen;

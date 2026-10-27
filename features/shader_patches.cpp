@@ -3332,6 +3332,90 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb, 
     return !ins.empty();
 }
 
+bool PatchRoomMapReadWalls(std::vector<DWORD>& t, RoomReadWallsPatch& out, int sampler) {
+    out = RoomReadWallsPatch{};
+    if (t.empty() || t[0] != 0xFFFF0300) return false;
+    const auto ins = Parse(t);
+    if (ins.empty()) return false;
+    int basis[4] = {-1, -1, -1, -1};
+    if (sampler < 0) BasisSamplers(t, basis);
+    int at = -1;
+    for (size_t i = 0; i < ins.size() && at < 0; i++) {
+        const Ins& x = ins[i];
+        if (x.op != kTexld || x.len != 3 || Type(t[x.at + 1]) != kTemp || Type(t[x.at + 3]) != kSampler) continue;
+        const DWORD uv = t[x.at + 2], s = Num(t[x.at + 3]);
+        if ((Type(uv) != kInput && Type(uv) != kTexture) || (uv & 0x0F000000u)) continue;
+        if (sampler >= 0 ? s == static_cast<DWORD>(sampler) : Swz(uv) == kSwzZWZW && static_cast<int>(s) != basis[0] && static_cast<int>(s) != basis[1] &&
+                                                                    static_cast<int>(s) != basis[2] && static_cast<int>(s) != basis[3])
+            at = static_cast<int>(i);
+    }
+    if (at < 0) return false;
+    const Usage u = Scan(t, ins);
+    if (u.maxTemp + 6 >= 32 || u.maxConst + 5 >= 224 || u.maxSampler + 1 >= 16 || !u.afterLastSamplerDcl) return false;
+    constexpr DWORD kCmp = 0x58;
+    const DWORD X = Sw(0, 0, 0, 0), Y = Sw(1, 1, 1, 1), Z = Sw(2, 2, 2, 2), W = Sw(3, 3, 3, 3);
+    const DWORD T = static_cast<DWORD>(u.maxTemp + 1), U = T, Tt = T + 1, Mk = T + 2, R = T + 3, Q = T + 4;
+    const DWORD cSz = static_cast<DWORD>(u.maxConst + 1), cM = cSz + 1, cN = cSz + 2, cD = cSz + 3;
+    const DWORD sMask = static_cast<DWORD>(u.maxSampler + 1);
+    const Ins& x = ins[static_cast<size_t>(at)];
+    const DWORD uvSrc = t[x.at + 2], S = Num(t[x.at + 3]), D = Num(t[x.at + 1]), m = WMask(t[x.at + 1]);
+    const std::vector<DWORD> before = {
+        Op(kMul, 3), Dst(kTemp, U, 0x3), uvSrc, Src(kConst, cSz),                                    // p (texels)
+        Op(kMul, 3), Dst(kTemp, Tt, 0x3), Src(kTemp, U), Src(kConst, cM, X),
+        Op(kFrc, 2), Dst(kTemp, Tt, 0xC), Src(kTemp, Tt, Sw(0, 1, 0, 1)),                            // f: the place in its tile
+        Op(kAdd, 3), Dst(kTemp, Tt, 0x3), Src(kTemp, Tt), Neg(Src(kTemp, Tt, Sw(2, 3, 2, 3))),         // the tile
+        Op(kAdd, 3), Dst(kTemp, Mk, 0x3), Src(kTemp, Tt), Src(kConst, cN, Z),
+        Op(kMul, 3), Dst(kTemp, Mk, 0x3), Src(kTemp, Mk), Src(kConst, cM, W),
+        Op(kTexld, 3), Dst(kTemp, Mk), Src(kTemp, Mk), Src(kSampler, sMask),                         // its walls: -x, +x, -z, +z
+        Op(kAdd, 3), Dst(kTemp, R, 0x1), Neg(Src(kTemp, U, X)), Src(kConst, cM, Y),
+        Op(kCmp, 4), Dst(kTemp, R, 0x1), Src(kTemp, R, X), Src(kConst, cD, X), Src(kConst, cD, Y),    // not in the split tiles' atlas
+        Op(kMul, 3), Dst(kTemp, R, 0x1), Src(kTemp, R, X), Src(kConst, cM, Z),                        // x on
+        Op(kMul, 3), Dst(kTemp, Mk), Src(kTemp, Mk), Src(kTemp, R, X),
+        Op(kMad, 4), Dst(kTemp, R), Src(kTemp, Tt, Sw(0, 1, 0, 1)), Src(kConst, cN, X), Src(kConst, cN, Sw(2, 2, 1, 1)), // lo .xy, hi .zw
+        Op(kMax, 3), Dst(kTemp, Q, 0x3), Src(kTemp, U), Src(kTemp, R),
+        Op(kAdd, 3), Dst(kTemp, Q, 0x3), Src(kTemp, Q), Neg(Src(kTemp, U)),
+        Op(kMad, 4), Dst(kTemp, U, 0x3), Src(kTemp, Q), Src(kTemp, Mk, Sw(0, 2, 0, 2)), Src(kTemp, U), // a walled -x / -z: not past lo
+        Op(kMin, 3), Dst(kTemp, Q, 0x3), Src(kTemp, U), Src(kTemp, R, Sw(2, 3, 2, 3)),
+        Op(kAdd, 3), Dst(kTemp, Q, 0x3), Src(kTemp, Q), Neg(Src(kTemp, U)),
+        Op(kMad, 4), Dst(kTemp, U, 0x3), Src(kTemp, Q), Src(kTemp, Mk, Sw(1, 3, 1, 3)), Src(kTemp, U), // a walled +x / +z: not past hi
+        // in a wall's thickness: f within cD.z of a walled edge (Q.xy the - sides, Q.zw the + sides)
+        Op(kAdd, 3), Dst(kTemp, Q, 0x3), Src(kTemp, Tt, Sw(2, 3, 2, 3)), Neg(Src(kConst, cD, Z)),
+        Op(kCmp, 4), Dst(kTemp, Q, 0x3), Src(kTemp, Q), Src(kConst, cD, Y), Src(kConst, cD, X),
+        Op(kMul, 3), Dst(kTemp, Q, 0x3), Src(kTemp, Q), Src(kTemp, Mk, Sw(0, 2, 0, 2)),
+        Op(kAdd, 3), Dst(kTemp, Q, 0xC), Src(kTemp, Tt), Neg(Src(kConst, cD, W)),
+        Op(kCmp, 4), Dst(kTemp, Q, 0xC), Src(kTemp, Q), Src(kConst, cD, X), Src(kConst, cD, Y),
+        Op(kMul, 3), Dst(kTemp, Q, 0xC), Src(kTemp, Q), Src(kTemp, Mk, Sw(0, 0, 1, 3)),
+        // the first texel beyond that side: lo - 1 / hi + 1
+        Op(kAdd, 3), Dst(kTemp, R, 0x3), Src(kTemp, R), Neg(Src(kConst, cD, X)),
+        Op(kAdd, 3), Dst(kTemp, R, 0xC), Src(kTemp, R), Src(kConst, cD, X),
+        Op(kAdd, 3), Dst(kTemp, R), Src(kTemp, R), Neg(Src(kTemp, U, Sw(0, 1, 0, 1))),
+        Op(kMul, 3), Dst(kTemp, R), Src(kTemp, R), Src(kTemp, Q),
+        Op(kAdd, 3), Dst(kTemp, Tt, 0x3), Src(kTemp, U), Src(kTemp, R),
+        Op(kAdd, 3), Dst(kTemp, Tt, 0x3), Src(kTemp, Tt), Src(kTemp, R, Sw(2, 3, 2, 3)),
+        Op(kMax, 3), Dst(kTemp, Q, 0x3), Src(kTemp, Q), Src(kTemp, Q, Sw(2, 3, 2, 3)),
+        Op(kMax, 3), Dst(kTemp, Q, 0x1), Src(kTemp, Q, X), Src(kTemp, Q, Y),                          // in a wall's thickness
+        Op(kMul, 3), Dst(kTemp, U, 0x3), Src(kTemp, U), Src(kConst, cSz, Sw(2, 3, 2, 3)),
+        Op(kMul, 3), Dst(kTemp, Tt, 0x3), Src(kTemp, Tt), Src(kConst, cSz, Sw(2, 3, 2, 3)),
+    };
+    const std::vector<DWORD> after = {
+        Op(kTexld, 3), Dst(kTemp, R), Src(kTemp, Tt), Src(kSampler, S),
+        Op(kMin, 3), Dst(kTemp, R, m), Src(kTemp, R), Src(kTemp, D),
+        Op(kAdd, 3), Dst(kTemp, R, m), Src(kTemp, R), Neg(Src(kTemp, D)),
+        Op(kMad, 4), Dst(kTemp, D, m), Src(kTemp, Q, X), Src(kTemp, R), Src(kTemp, D),               // D + band x (min - D)
+    };
+    t[x.at + 2] = Src(kTemp, U); // (same length: before the inserts)
+    Apply(t, {{1, {Op(kDef, 5), Dst(kConst, cD), F(1.0f), F(0.0f), F(kWallBand), F(1.0f - kWallBand)}},
+              {x.at, before},
+              {End(x), after},
+              {u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, sMask)}}}); // (lands before `before` when both are at the read)
+    out.sampler = static_cast<int>(S);
+    out.maskSampler = static_cast<int>(sMask);
+    out.sizeConst = cSz;
+    out.maskConst = cM;
+    out.tileConst = cN;
+    return true;
+}
+
 bool RoomMapUvScale(const std::vector<DWORD>& vs, RoomMapUv& out) {
     out = RoomMapUv{};
     if (vs.empty() || (vs[0] != 0xFFFE0300 && vs[0] != 0xFFFE0200 && vs[0] != 0xFFFE0201)) return false;

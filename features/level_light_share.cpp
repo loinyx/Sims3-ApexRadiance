@@ -11211,6 +11211,40 @@ bool UnderFloorOpening(const RoomInfo& info, const float* pos) {
         return false;
     }
 }
+// (2.17.1) The share of a lamp of a roofed room's own story reaching a directional map's sample (pos: the tile's centre 0.5 m
+// up) past the story's walls (YardPass: the walls with their openings and tops, the lamp's penumbra); 1 for a lamp of another
+// story, of room 0, or one Apex took through an opening or a floor (tested above), and when the story's grid is not known.
+// Light tree thread.
+std::atomic<long> g_ownBasisTests{0}, g_ownBasisBlocked{0}, g_ownBasisDimmed{0};
+bool OwnLampOf(BYTE* room, void* light, uintptr_t& mgr) { // POD (SEH): a lamp of the roofed room's story, not outdoors
+    __try {
+        if (!RoofedRoom(room)) return false;
+        mgr = *reinterpret_cast<const uintptr_t*>(room);
+        const BYTE* L = static_cast<const BYTE*>(light);
+        return mgr && *reinterpret_cast<const int*>(L + 0xD0) == *reinterpret_cast<const int*>(mgr + 0x88) && *reinterpret_cast<const int*>(L + 0xB0) != 0xB &&
+               *reinterpret_cast<const int*>(L + 0x08) != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+float OwnLampPass(BYTE* room, void* light, const float* pos) {
+    uintptr_t mgr = 0;
+    if (!OwnLampOf(room, light, mgr)) return 1.0f;
+    if (const RoomInfo* info = SolveInfo(room))
+        if (FindCross(*info, reinterpret_cast<uintptr_t>(light)) || FindInner(*info, reinterpret_cast<uintptr_t>(light)) || FindSame(*info, reinterpret_cast<uintptr_t>(light))) return 1.0f;
+    const std::shared_ptr<const StoryGrid> g = EnsureStoryGrid(mgr); // (kept per frame and walls' generation: g_gridMemo)
+    if (!g) return 1.0f;
+    alignas(16) float lampW[4] = {};
+    GridWhy why{};
+    if (++g_pointGen == 0) g_pointGen = 1;
+    const uint64_t timedFrom = __rdtsc();
+    const float pass = YardPass(g.get(), nullptr, light, pos, lampW, why);
+    AddSolveCycles(__rdtsc() - timedFrom);
+    g_ownBasisTests.fetch_add(1, std::memory_order_relaxed);
+    if (!(pass > 0.0f)) g_ownBasisBlocked.fetch_add(1, std::memory_order_relaxed);
+    else if (pass < 1.0f) g_ownBasisDimmed.fetch_add(1, std::memory_order_relaxed);
+    return pass;
+}
 void __fastcall BasisLightHook(BYTE* room, void*, const float* pos, void* light, float* acc) {
     // Quick outdoor lamp edits (Instant only): a directional map written by this solve is not kept (that solve cannot be a delta's base)
     if (room && OutdoorDelta::Enabled()) OutdoorDelta::NoteDirectional(room);
@@ -11297,6 +11331,19 @@ void __fastcall BasisLightHook(BYTE* room, void*, const float* pos, void* light,
             }
             const float k = std::min(scale, 1.0f) * openShare;
             for (int i = 0; i < 16; ++i) acc[i] += contribution[i] * k;
+            return;
+        }
+    // (2.17.1) A lamp of the roofed room's own story, not one Apex took through an opening or a floor: the walls of the story
+    // between it and the tile (OwnLampPass). The game's floor and wall solve tests them (0x0069FC40); the directional maps
+    // never did, so in a room whose wall was opened (one room now: a bedroom and a kitchen beside it) or shaped like an L,
+    // every object took the lamp behind the wall that still stands (F7 20-02-46: the kitchen's counter red from the
+    // bedroom's lamp, the floor in front of it dark).
+    if (openShare == 1.0f && g_installed.load(std::memory_order_relaxed) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
+        if (const float own = OwnLampPass(room, light, pos); own < 1.0f) {
+            if (!(own > 0.0f)) return; // behind a wall: this lamp adds nothing to the texel
+            alignas(16) float contribution[16] = {};
+            reinterpret_cast<BasisLight_t>(kBasisLight)(pos, light, contribution);
+            for (int i = 0; i < 16; ++i) acc[i] += contribution[i] * own;
             return;
         }
     if (openShare != 1.0f) { // Keep earlier lamps unchanged when an imported lamp needs a different weight.
@@ -17711,7 +17758,7 @@ std::string ArchAmbientStatus() {
 }
 std::string Status() {
     return std::format("Colour groups committed {} ({} native fallbacks) | ", g_groupCommits.load(), g_groupFallbacks.load()) + SlabStatus() + " | " + std::format("{} | outdoor lights carried to other stories: {} | stories updated: {} | walls of the light's story: {}/{} classes, {} tests, {} blocked | indoor "
-                       "lamps through stair openings: {} | seamless walls between floors: {}{}{}{}{}",
+                       "lamps through stair openings: {} | seamless walls between floors: {}{}{}{}{}{}",
                        g_installed ? "Active" : "Off", g_shared.load(), g_queued.load(), g_evalClasses.load(), std::size(kClasses), g_wallTests.load(), g_wallBlocked.load(),
                        !g_indoorReady ? std::string("not installed")
                                       : std::format("{}, {} taken, {} points tested ({} behind a floor, {} behind a wall), {} rooms updated, lighting detail {} ({} raised)",
@@ -17737,6 +17784,7 @@ std::string Status() {
                            ? std::format(" | rooms lit only by lamps of another story given no boost: {} (normalisation not finite: {})", g_normCrossOnly.load(), g_normNotFinite.load())
                            : "",
                        g_basisTests.load() ? std::format(" | directional maps: lamps of another story tested {}, behind a floor {}", g_basisTests.load(), g_basisBlocked.load()) : "",
+                       g_ownBasisTests.load() ? std::format(" | directional maps: own-story lamps tested {}, behind a wall {}, in its penumbra {}", g_ownBasisTests.load(), g_ownBasisBlocked.load(), g_ownBasisDimmed.load()) : "",
                        g_faults.load() ? std::format(" | failures: {}", g_faults.load()) : "") + OpeningsStatus() + " | " + WallOpeningsText(false) +
            std::format(" | daytime curve in roofed rooms: outdoor lamps x {:.3f} in solves now, lamp points scaled {}, rooms gathered again at a settled day or night {}",
                        g_roomLampDay.load(), g_dayScaled.load(), g_dayRoomsSent.load()) +
