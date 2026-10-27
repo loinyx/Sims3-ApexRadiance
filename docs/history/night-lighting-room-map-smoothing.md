@@ -65,4 +65,4 @@ atlas with the copy's arithmetic reproduced the squares (7.6% of the pixels off 
 
 **Outcome:** the texel pack raises a roofed room's alpha to 5/255 at least (`room_map_dither.cpp`; the solve's room is in
 `ebx`). Room 0 keeps 0, so the wall case is unchanged; the re-render is then identical to the plain read inside the room.
-The added ambient is under half an 8-bit level. Maps already baked keep the squares until their rooms are solved again.
+The added ambient is 5/255 of the room's ambient colour on near-white texels, a few 8-bit levels at most. Maps already baked keep the squares until their rooms are solved again.

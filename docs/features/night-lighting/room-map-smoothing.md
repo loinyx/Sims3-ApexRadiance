@@ -52,7 +52,7 @@ texels per metre by lighting class (twice that with *Light detail* High). Three 
    room's texel is packed with an ambient weight of at least 5/255 (the room is the solve's own, `[room+0x18] == 0`), so
    a brightly lit texel of the room is never taken for one beyond a wall: a dimmer texel beside it (under a table, behind
    a plant) would otherwise drop its light and show as a dark square one texel wide. The added ambient is 5/255 of the
-   room's ambient colour on the brightest texels only, under half an 8-bit level.
+   room's ambient colour on the brightest (near white) texels only, a few 8-bit levels at most.
 2. **Dither.** Before the game packs a texel, Apex adds up to half an 8-bit level of interleaved gradient noise taken from
    the texel's position: the mean light stays, the rings become a fine grain the B-spline smooths out. The same texel
    always gets the same offset, so a room lit again does not shimmer.

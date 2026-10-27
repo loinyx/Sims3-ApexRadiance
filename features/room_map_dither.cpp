@@ -45,6 +45,7 @@ std::vector<MemPatch::PatchLocation> g_patches;
 std::atomic<bool> g_running{false};
 std::atomic<bool> g_on{true};
 std::atomic<long long> c_texels{0}, c_skipped{0}, c_floored{0};
+bool g_roomInEbx = false; // the solve keeps its room in ebx (checked at Start); else no alpha floor
 constexpr float kRoofedAlphaMin = 5.0f / 255.0f; // the smoothed read's "beyond a wall" mark is alpha < 4/255
 std::string g_why;
 
@@ -83,8 +84,8 @@ void __stdcall DitherPack(DWORD* out, const float* colour, uintptr_t frame, uint
     // A roofed room's texel keeps an ambient weight of at least 5/255: the smoothed read tells the texels beyond a wall
     // (room 0, alpha 0) by alpha under 4/255, and a brightly lit texel of the room itself (ambient weight near 0) was taken
     // for one, so a dimmer texel beside it (under a table, behind a plant) dropped its light: a dark square one texel wide.
-    // The added light is 5/255 of the room's ambient colour on the brightest texels, under half an 8-bit level.
-    if (std::isfinite(c[3]) && c[3] < kRoofedAlphaMin && RoofedRoom(room)) {
+    // The added light is 5/255 of the room's ambient colour on its brightest (near white) texels: a few 8-bit levels at most.
+    if (g_roomInEbx && std::isfinite(c[3]) && c[3] < kRoofedAlphaMin && RoofedRoom(room)) {
         c[3] = kRoofedAlphaMin;
         c_floored.fetch_add(1, std::memory_order_relaxed);
     }
@@ -146,8 +147,8 @@ bool Start(std::string& error) {
                         CodeIs(kStore, {0x8B, 0x4C, 0x24, 0x54, 0x83, 0x44, 0x24, 0x0C, 0x30, 0x83, 0x6C, 0x24, 0x18, 0x01, 0x89, 0x0F}) &&
                         CodeIs(kTexelAddr, {0x8B, 0x45, 0x0C, 0x0F, 0xB7, 0x56, 0x22, 0x0F, 0xAF, 0x50, 0x04, 0x0F, 0xB7, 0x4E, 0x20, 0x8D, 0x3C, 0x8A, 0x8B,
                                             0x55, 0x10, 0x03, 0x38}) &&
-                        CodeIs(kSolveFn, {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0}) &&
-                        CodeIs(kSolveFn + 0x18, {0x8B, 0xD9}); // mov ebx,ecx: the room the thunk reads
+                        CodeIs(kSolveFn, {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0});
+    g_roomInEbx = CodeIs(kSolveFn + 0x18, {0x8B, 0xD9}); // mov ebx,ecx: the room the thunk reads (only the alpha floor needs it)
     const bool packOk = CodeIs(kPack, {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0, 0xB8, 0x01, 0x00, 0x00, 0x00}) && CodeIs(kPack + 0x16, {0xF3, 0x0F, 0x10, 0x05, k255b[0], k255b[1], k255b[2], k255b[3]}) &&
                         CodeIs(kPack + 0x5A, {0xF3, 0x0F, 0x10, 0x05, magicb[0], magicb[1], magicb[2], magicb[3]}); // Steam: 0x00FA312C, 0x00FE774C
     float k255 = 0.0f, magic = 0.0f;
@@ -164,7 +165,8 @@ bool Start(std::string& error) {
     }
     g_running.store(true);
     g_why.clear();
-    LOG_INFO(std::format("[RoomMapDither] On: the room maps' texel pack {:#010x} -> {:#010x} goes through Apex", kPackCall, kPack));
+    LOG_INFO(std::format("[RoomMapDither] On: the room maps' texel pack {:#010x} -> {:#010x} goes through Apex{}", kPackCall, kPack,
+                         g_roomInEbx ? "" : "; the solve's room was not found, roofed texels keep the game's alpha (dark squares beside bright texels may show)"));
     return true;
 }
 
