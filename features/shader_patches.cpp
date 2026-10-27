@@ -2497,15 +2497,17 @@ int CubeWeightRead(const std::vector<DWORD>& t, const std::vector<Ins>& ins, int
 bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out, const BasisSmoothOptions& options) {
     const bool preserveShadows = options.preserveShadows, wallMask = options.wallMask, floorWall = options.floorWall;
     const bool stairRoomFill = options.stairRoomFill, floorTone = options.floorTone, storyBlend = options.storyBlend;
+    const bool bicubic = options.smooth || !wallMask;
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto ins = Parse(t);
     if (ins.empty()) return false;
     BasisReads r;
     if (!FindBasisReads(t, ins, r) || (r.uvType != static_cast<int>(kInput) && r.uvType != static_cast<int>(kTexture))) return false;
     const Usage u = Scan(t, ins);
-    if (u.maxTemp + (wallMask ? 17 : 12) >= 32 || u.maxConst + (wallMask ? 4 : 3) >= 224) return false;
+    if (u.maxTemp + (wallMask ? (bicubic ? 17 : 6) : 12) >= 32 || u.maxConst + (wallMask ? 4 : 3) >= 224) return false;
     if (wallMask && (u.maxSampler + 1 >= 16 || !u.afterLastSamplerDcl)) return false;
     const DWORD T = static_cast<DWORD>(u.maxTemp + 1), cS = static_cast<DWORD>(u.maxConst + 1), cK = cS + 1, cH = cS + 2;
+    const DWORD Tw = bicubic ? T + 11 : T; // the walls' temps Tw .. Tw + 4 (after the bicubic's T .. T + 10 when there is one)
     out.sizeConst = cS;
     out.sizeSampler = static_cast<DWORD>(r.sampler[0]);
     out.maskSampler = wallMask ? u.maxSampler + 1 : -1;
@@ -2515,7 +2517,7 @@ bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out, const BasisS
     for (int d = 1; d < 4; d++) first = std::min(first, r.texld[d]);
     // (floorWall) the floor light map read through the uv's zw after the basis reads (FloorWallRegs): where it fits
     int floorRead = -1;
-    if (wallMask && floorWall && u.maxTemp + 19 < 32 && u.maxConst + 6 < 224)
+    if (wallMask && floorWall && bicubic && u.maxTemp + 19 < 32 && u.maxConst + 6 < 224)
         for (size_t i = static_cast<size_t>(first) + 1; i < ins.size(); i++) {
             const Ins& x = ins[i];
             if (x.op != kTexld || x.len != 3 || Type(t[x.at + 1]) != kTemp || Type(t[x.at + 3]) != kSampler) continue;
@@ -2549,9 +2551,9 @@ bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out, const BasisS
     std::vector<DWORD> wallUv;
     FloorWallRegs fl{T + 16, T + 17, cS + 4, cS + 5};
     if (wallMask) {
-        const DWORD U = T + 11;
+        const DWORD U = Tw;
         const DWORD cB = cS + 3;
-        wallUv = BasisWallUv(uvType, uvNum, cS, cK, cB, static_cast<DWORD>(out.maskSampler), U, T + 12, T + 13, T + 14, floorRead >= 0 ? &fl : nullptr);
+        wallUv = BasisWallUv(uvType, uvNum, cS, cK, cB, static_cast<DWORD>(out.maskSampler), U, Tw + 1, Tw + 2, Tw + 3, floorRead >= 0 ? &fl : nullptr);
         // the game's own reads (kept: the guard's reference) read the moved uv too (same length: before the inserts)
         for (int d = 0; d < 4; d++) t[ins[static_cast<size_t>(r.texld[d])].at + 2] = Src(kTemp, U);
         if (floorRead >= 0) {
@@ -2575,7 +2577,7 @@ bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out, const BasisS
                          Op(kDef, 5), Dst(kConst, cH), F(-0.5f), F(1.5f), F(1.0f / 64.0f), F(0.0f)}});
     if (wallMask) edits.push_back({1, {Op(kDef, 5), Dst(kConst, cS + 3), F(0.5f - kWallBand), F(-1.0f), F(1.0f), F(0.0f)}}); // cB (BasisWallUv)
     if (floorRead >= 0) edits.push_back({1, {Op(kDef, 5), Dst(kConst, fl.cF), F(0.5f - kFloorHalf), F(0.5f + kFloorHalf), F(1e-4f), F(0.0f)}});
-    edits.push_back({ins[static_cast<size_t>(first)].at, BicubicSetup(uvType, uvNum, cS, cK, cH, T)});
+    if (bicubic) edits.push_back({ins[static_cast<size_t>(first)].at, BicubicSetup(uvType, uvNum, cS, cK, cH, T)});
     if (wallMask) {
         // edits at one position land in the reverse order of this list: the uv block before the setup, and the mask's dcl
         // (its position can be that same one, the first basis read right after the last dcl) before both
@@ -2585,8 +2587,8 @@ bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out, const BasisS
     }
     for (int d = 0; d < 4; d++) {
         const Ins& x = ins[static_cast<size_t>(r.texld[d])];
-        edits.push_back({End(x), BicubicTaps(static_cast<DWORD>(r.sampler[d]), Num(t[x.at + 1]), T, cH,preserveShadows)});
-        if (wallMask) edits.push_back({End(x), BasisWallMin(static_cast<DWORD>(r.sampler[d]), Num(t[x.at + 1]), T + 12, T + 15)}); // (before the taps: their reference)
+        if (bicubic) edits.push_back({End(x), BicubicTaps(static_cast<DWORD>(r.sampler[d]), Num(t[x.at + 1]), T, cH,preserveShadows)});
+        if (wallMask) edits.push_back({End(x), BasisWallMin(static_cast<DWORD>(r.sampler[d]), Num(t[x.at + 1]), Tw + 1, Tw + 4)}); // (before the taps: their reference)
     }
     if (floorRead >= 0) {
         const Ins& x = ins[static_cast<size_t>(floorRead)];
@@ -3142,7 +3144,7 @@ std::vector<DWORD> ArchAmbientCode(DWORD uvType, DWORD uvNum, DWORD cS, DWORD cP
     return v;
 }
 
-bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) {
+bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb, bool wallMask) {
     out = RoomMapPatch{};
     auto ins = Parse(t);
     RoomMapRead r;
@@ -3150,9 +3152,12 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
     const bool ps3 = t[0] == 0xFFFF0300;
     const Usage u = Scan(t, ins);
     const int constLimit = ps3 ? 224 : 32; // ps_2_x: c0..c31
-    if (u.maxTemp + 14 >= 32 || u.maxConst + 6 >= constLimit) return false;
+    const int maskConsts = wallMask ? 1 : 0;
+    if (u.maxTemp + (wallMask ? 16 : 14) >= 32 || u.maxConst + 6 + maskConsts >= constLimit) return false;
+    if (wallMask && (u.maxSampler + 1 >= 16 || !u.afterLastSamplerDcl)) return false;
     const DWORD T = static_cast<DWORD>(u.maxTemp + 1);
     const DWORD cS = static_cast<DWORD>(u.maxConst + 1), cK = cS + 1, cH = cS + 2, cR = cS + 3, cG = cS + 4, cV = cS + 5;
+    const DWORD cM = cS + 6, Mt = T + 14, Mk = T + 15, sMask = static_cast<DWORD>(u.maxSampler + 1); // (wallMask)
     const DWORD P = T, Fr = T + 1, R = T + 2, A = T + 3, B = T + 4, Wt = T + 10;
     const DWORD X = Sw(0, 0, 0, 0), Y = Sw(1, 1, 1, 1), Z = Sw(2, 2, 2, 2), W = Sw(3, 3, 3, 3);
     // The wall atlas's blocks: row = floor(v H / S) (S = 3n + 1 texel rows a block), the taps' v kept within
@@ -3199,7 +3204,22 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
             Op(kAdd, 3), Dst(kTemp, B, 0x3), Src(kTemp, Fr), Src(kConst, cH, X),                                     // f - 0.5
             Op(kCmp, 4), Dst(kTemp, B, 0x3), Src(kTemp, B), Src(kConst, cG, Z), Src(kConst, cG, W),                  // f >= 0.5
             Op(kAdd, 3), Dst(kTemp, B, 0x3), Src(kTemp, B), Src(kTemp, P),
-            Op(kAdd, 3), Dst(kTemp, B, 0x3), Src(kTemp, B), Src(kConst, cK, Z),                                      // the own texel's centre
+            Op(kAdd, 3), Dst(kTemp, B, 0x3), Src(kTemp, B), Src(kConst, cK, Z)});                                    // the own texel's centre
+        // (wallMask) the own tile (Mt.xy = floor(centre / n)) and its walls (Mk: -x, +x, -z, +z), 0 when off or when the
+        // texel lies in the split tiles' atlas (u >= cM.y: diagonal walls, not laid out by tile)
+        if (wallMask)
+            body.insert(body.end(), {
+                Op(kMul, 3), Dst(kTemp, Mt, 0x3), Src(kTemp, B), Src(kConst, cM, X),
+                Op(kFrc, 2), Dst(kTemp, Mt, 0xC), Src(kTemp, Mt, Sw(0, 1, 0, 1)),
+                Op(kAdd, 3), Dst(kTemp, Mt, 0x3), Src(kTemp, Mt), Neg(Src(kTemp, Mt, Sw(2, 3, 2, 3))),
+                Op(kAdd, 3), Dst(kTemp, Mt, 0x4), Neg(Src(kTemp, B, X)), Src(kConst, cM, Y),
+                Op(kCmp, 4), Dst(kTemp, Mt, 0x4), Src(kTemp, Mt, Z), Src(kConst, cG, Z), Src(kConst, cG, W),
+                Op(kMul, 3), Dst(kTemp, Mt, 0x4), Src(kTemp, Mt, Z), Src(kConst, cM, Z),
+                Op(kAdd, 3), Dst(kTemp, Mk, 0x3), Src(kTemp, Mt), Src(kConst, cK, Z),
+                Op(kMul, 3), Dst(kTemp, Mk, 0x3), Src(kTemp, Mk), Src(kConst, cM, W),
+                Op(kTexld, 3), Dst(kTemp, Mk), Src(kTemp, Mk), Src(kSampler, sMask),
+                Op(kMul, 3), Dst(kTemp, Mk), Src(kTemp, Mk), Src(kTemp, Mt, Z)});
+        body.insert(body.end(), {
             Op(kMul, 3), Dst(kTemp, B, 0x3), Src(kTemp, B), Src(kConst, cS, Sw(2, 3, 2, 3)),
             Op(kTexld, 3), Dst(kTemp, R), Src(kTemp, B), Src(kSampler, r.S),
             Op(kAdd, 3), Dst(kTemp, A, 0x8), Src(kTemp, R, W), Neg(Src(kConst, cG, Y)),
@@ -3228,6 +3248,25 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
         };
         weights(Wx, Wy, 0);
         weights(Wy, Acc, 1);
+        // (wallMask) a column (row) whose tile lies beyond a walled side of the own tile weighs 0: per column, dx = its tile x
+        // - the own tile's; blocked = (dx < 0) x wall -x + (dx > 0) x wall +x; Wx x= 1 - blocked (rows: z, Wy). R is free here.
+        const auto wallWeights = [&](DWORD Wv, DWORD centres, int sizeComp, int own, int lo, int hi) {
+            body.insert(body.end(), {Op(kMul, 3), Dst(kTemp, Acc), Src(kTemp, centres), Src(kConst, cS, Sw(sizeComp, sizeComp, sizeComp, sizeComp)), // texels
+                                     Op(kMul, 3), Dst(kTemp, Acc), Src(kTemp, Acc), Src(kConst, cM, X),
+                                     Op(kFrc, 2), Dst(kTemp, R), Src(kTemp, Acc),
+                                     Op(kAdd, 3), Dst(kTemp, Acc), Src(kTemp, Acc), Neg(Src(kTemp, R)),                               // the tiles
+                                     Op(kAdd, 3), Dst(kTemp, Acc), Src(kTemp, Acc), Neg(Src(kTemp, Mt, Sw(own, own, own, own))),      // dx
+                                     Op(kCmp, 4), Dst(kTemp, R), Src(kTemp, Acc), Src(kConst, cG, W), Src(kConst, cG, Z),           // dx < 0
+                                     Op(kMul, 3), Dst(kTemp, R), Src(kTemp, R), Src(kTemp, Mk, Sw(lo, lo, lo, lo)),
+                                     Op(kCmp, 4), Dst(kTemp, Acc), Neg(Src(kTemp, Acc)), Src(kConst, cG, W), Src(kConst, cG, Z),     // dx > 0
+                                     Op(kMad, 4), Dst(kTemp, Acc), Src(kTemp, Acc), Src(kTemp, Mk, Sw(hi, hi, hi, hi)), Src(kTemp, R),
+                                     Op(kAdd, 3), Dst(kTemp, Acc), Neg(Src(kTemp, Acc)), Src(kConst, cG, Z),
+                                     Op(kMul, 3), Dst(kTemp, Wv), Src(kTemp, Wv), Src(kTemp, Acc)});
+        };
+        if (wallMask) {
+            wallWeights(Wx, Xc, 0, 0, 0, 1);
+            wallWeights(Wy, Yr, 1, 1, 2, 3);
+        }
         for (DWORD row = 0; row < 4; row++) {
             const DWORD rs = Sw(static_cast<int>(row), static_cast<int>(row), static_cast<int>(row), static_cast<int>(row));
             body.insert(body.end(), {Op(kMul, 3), Dst(kTemp, B, 0x3), Src(kTemp, Yr, rs), Src(kConst, cG, Sw(3, 2, 3, 2))}); // (0, y)
@@ -3264,8 +3303,12 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
                                Op(kDef, 5), Dst(kConst, cH), F(-0.5f), F(1.5f), F(2.0f / 255.0f), F(0.0f),
                                Op(kDef, 5), Dst(kConst, cG), F(4.0f / 255.0f), F(0.125f), F(1.0f), F(0.0f),
                                Op(kDef, 5), Dst(kConst, cV), F(-0.5f), F(0.5f), F(1.5f), F(2.5f)};
-    if (archAmb && ps3 && r.ambConst >= 0 && u.maxConst + 8 + 2 * static_cast<int>(kArchCells) < constLimit) {
-        const DWORD cP = cS + 6, cQ = cS + 7, cArch = cS + 8;
+    if (wallMask) { // (cM is set per draw, never def'd: a def would win over it)
+        out.maskSampler = static_cast<int>(sMask);
+        out.maskConst = static_cast<int>(cM);
+    }
+    if (archAmb && ps3 && r.ambConst >= 0 && u.maxConst + 8 + maskConsts + 2 * static_cast<int>(kArchCells) < constLimit) {
+        const DWORD cP = cS + 6 + maskConsts, cQ = cS + 7 + maskConsts, cArch = cS + 8 + maskConsts;
         const std::vector<DWORD> code = ArchAmbientCode(r.uvType, r.uvNum, cS, cP, cQ, cArch, r.L, T, T + 1, T + 2);
         body.insert(body.end(), code.begin(), code.end());
         defs.insert(defs.end(), {Op(kDef, 5), Dst(kConst, cP), F(3.0f), F(-2.0f), F(1.0f), F(0.25f),
@@ -3275,12 +3318,14 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb) 
     }
     const Ins x = ins[static_cast<size_t>(r.texld)];
     t.erase(t.begin() + static_cast<ptrdiff_t>(x.at), t.begin() + static_cast<ptrdiff_t>(End(x))); // the game's read goes
-    Apply(t, {{1, defs}, {x.at, body}});
+    std::vector<Edit> edits = {{1, defs}, {x.at, body}};
+    if (wallMask) edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, sMask)}}); // (lands before the body)
+    Apply(t, std::move(edits));
     if (!ps3) t[0] = 0xFFFF0201; // ps_2_x: more temps and instruction slots than ps_2_0, arbitrary swizzles
     out.sampler = r.S;
     out.sizeConst = cS;
     out.bandConst = cR;
-    out.temps = static_cast<int>(T + 14);
+    out.temps = static_cast<int>(T + (wallMask ? 16 : 14));
     ins = Parse(t);
     for (const Ins& y : ins) out.slots += y.op != kDcl && y.op != kDef && y.op != kDefI && y.op != kDefB ? 1 : 0;
     out.ps2x = !ps3;

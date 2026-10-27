@@ -53,6 +53,14 @@ texels per metre by lighting class (twice that with *Light detail* High). Three 
    a brightly lit texel of the room is never taken for one beyond a wall: a dimmer texel beside it (under a table, behind
    a plant) would otherwise drop its light and show as a dark square one texel wide. The added ambient is 5/255 of the
    room's ambient colour on the brightest (near white) texels only, a few 8-bit levels at most.
+   On floor and ceiling maps, that read of the room's own texels also leaves out the texels of a tile beyond a wall of
+   the pixel's own tile, from the story's wall mask (the one the directional maps use, [stairs.md](stairs.md): a full
+   wall with no opening in that cell). Two roofed rooms either side of a wall no longer mix (in game a dark hall's floor
+   took a band about 0.4 m wide of the lit living room's warm light along their wall), while an arch or a doorway, which
+   the mask does not mark, keeps the smooth read across it. It applies where the map is a class-2 one laid out by tile
+   (4 texels a tile, 8 with *Light detail* High, the size n x the lot's tiles rounded up to a power of two, twice as wide
+   with the split tiles' atlas after it); the atlas of tiles split by diagonal walls, the lower classes and a story with
+   no mask keep the read without walls.
 2. **Dither.** Before the game packs a texel, Apex adds up to half an 8-bit level of interleaved gradient noise taken from
    the texel's position: the mean light stays, the rings become a fine grain the B-spline smooths out. The same texel
    always gets the same offset, so a room lit again does not shimmer.
@@ -87,7 +95,7 @@ texels per metre by lighting class (twice that with *Light detail* High). Three 
 
 ## Limitations
 
-- Where the alpha does not tell the sides apart (two roofed rooms, room 0 beside room 0, light sent out of an opening, a bright room texel) the B-spline still blends the texels beyond a wall within 1.5 texels of it, as before the bound.
+- Where neither the alpha nor the wall mask tells the sides apart (a pixel whose own texel is bright, with little ambient weight; room 0 beside room 0; light sent out of an opening; a wall map, a lower class, a diagonal wall) the B-spline still blends the texels beyond a wall within 1.5 texels of it. A bright room's floor along a dark neighbour's wall is therefore slightly darker there, never lighter.
 - A room solved on the render thread (the room queue solving at once) keeps the game's hard cut.
 - A room whose light list holds a light of a class whose evaluation Apex does not wrap keeps the hard cut.
 - Walls are drawn with the bilinear read again for the session if a wall block is seen off the 3n + 1 grid.
@@ -115,6 +123,7 @@ unverified in game.
 | Pixel shaders | `texld rL, <TEXCOORD1>, sM` then (after at most one `mul rL, rS.c, rL`) `mad rD.xyz, rL.w, cA, rL`, `cA` not defined: replaced by the B-spline; constants size `(w, h, 1/w, 1/h)` and band `(1/S, S, 0.5, S - 1)` per draw | `shader_patches.cpp` `PatchRoomMapSmooth` |
 | Vertex shaders | `mul o<TEXCOORD1>.xy, v#, cK.c`: 1/4096 wall atlas, 1/32767 floor maps | `shader_patches.cpp` `RoomMapUvScale` |
 | Wall blocks | `wall + cls*0x20 + 0x58` `{x0, y0, x1, y1}`; `y0 % rows` checked for every piece laid out | `level_light_share.cpp` `NoteWallBand` |
+| Floor walls | The floor map's story: the manager whose room map sets (`+0x16C` + class x 64) hold the bound texture; its wall mask and grid size (`FloorWallMaskFor`). Per draw `cM = (1 / n, first split-atlas column, on, 1 / 64)`; the copy adds the mask sampler, 2 temps and about 35 ALU and 1 texld per pixel | `level_light_share.cpp`, `lot_light_bridge.cpp` `DrawRoomMapWalls`, `shader_patches.cpp` `PatchRoomMapSmooth` (wallMask) |
 
 **Arch variant.** Floor copies also come in a variant that adds the neighbour's ambient near arches
 ([arches.md](arches.md)): up to 6 segments (`kArchCells`), each two constant rows (a.x, a.z, e.x, e.z) and

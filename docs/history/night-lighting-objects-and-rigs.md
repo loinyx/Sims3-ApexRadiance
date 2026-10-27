@@ -223,3 +223,14 @@ its bilinear read fell from 1 to 0.5 over the last half metre inside, giving tha
 lamps 20 to 40 m away. The patch now sets `w = 0` where the plan alpha is over 0.5; outside the plan `w` is unchanged.
 Checked on the captured window copy (`PS_62D454D8`): with the two instructions added after its plan weight, the shader
 disassembles (`add r15.x, r15.w, -c17.x`, `cmp r15.w, r15.x, r15.w, c17.w`) and Direct3D 9 creates it.
+
+### 2026-10-27: a neighbour room's lamp on a counter through the wall
+
+F7 19-25-57: with the outdoor light gone, the back half metre of the same counter took the red of the room on the other
+side of the wall (counter at 0.45 m from the wall; the room's directional maps hold the red room's light in the texel
+beyond). The window pass draws the counter with the game's bilinear reads of those maps, which blend that texel in; the
+stairs' copies already move their reads off the walls with the story's wall mask (`basis_wall_filter`, shipped). The
+window copy now takes the same uv block on its 4 reads, without the bicubic (`BasisSmoothOptions::smooth = false`, its
+temps at `T .. T + 4` so a copy that already uses 16 fits). Offline on the captured window copy (`PS_2EBEA1F8`): patched,
+16 texture reads instead of 11 (the mask, and the beyond texel of each read in a wall's thickness), the plan read
+untouched, created by Direct3D 9; `tools/basis_shadow_check` 262 checks, 0 failures. Not yet checked in game.

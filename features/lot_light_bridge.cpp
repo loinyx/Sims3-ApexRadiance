@@ -5837,6 +5837,136 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
     return true;
 }
 
+// ---- Walls in the directional maps (development builds, basis_wall_filter) ----
+// The draw's directional maps name their story (LevelLightShare::WallMaskFor); its wall mask is kept here as a 64 x 64
+// texture (managed pool), uploaded again when the story's walls change, and bound at the patch's mask sampler (point, clamp)
+// for the wall-aware copy of the shader (ShaderPatches::PatchBasisSmooth wallMask). No mask known: the plain copy draws.
+std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_basisSmoothWallPs, g_basisRoomWallPs, g_basisSmoothFillPs;
+struct WallMaskTex {
+    IDirect3DTexture9* tex = nullptr;
+    uint32_t gen = 0;
+};
+std::unordered_map<uintptr_t, WallMaskTex> g_wallMaskTex; // by the directional map's D3D texture
+IDirect3DDevice9* g_wallMaskDev = nullptr;
+std::atomic<long> g_wallMaskDraws{0};
+// (development builds, stair_room_fill) the story's ambient per tile (LevelLightShare::AmbientMapFor), 64 x 64 A32B32G32R32F in the
+// managed pool by the directional map's texture, written again when the rooms' ambients change; point-sampled
+struct AmbMapTex {
+    IDirect3DTexture9* tex = nullptr;
+    uint64_t sig = 0;
+};
+std::unordered_map<uintptr_t, AmbMapTex> g_ambMapTex;
+std::atomic<long> g_ambFillDraws{0};
+void ReleaseWallMasks() {
+    for (auto& [k, m] : g_wallMaskTex)
+        if (m.tex) m.tex->Release();
+    g_wallMaskTex.clear();
+    for (auto& [k, m] : g_ambMapTex)
+        if (m.tex) m.tex->Release();
+    g_ambMapTex.clear();
+}
+// The mask texture kept for `key` (a directional map or a floor map), filled by fetch(knownGen, gen, px) when its story's
+// walls changed; nullptr when fetch knows no story for it
+template <typename Fetch> IDirect3DTexture9* WallMaskTextureFor(IDirect3DDevice9* dev, uintptr_t key, Fetch fetch) {
+    if (dev != g_wallMaskDev) {
+        ReleaseWallMasks();
+        g_wallMaskDev = dev;
+    }
+    if (g_wallMaskTex.size() > 256) ReleaseWallMasks();
+    WallMaskTex& m = g_wallMaskTex[key];
+    static uint8_t px[64 * 64 * 4];
+    uint32_t gen = 0;
+    if (!fetch(m.tex ? m.gen : 0, gen, px)) return nullptr;
+    if (!m.tex) {
+        if (FAILED(dev->CreateTexture(64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &m.tex, nullptr)) || !m.tex) return nullptr;
+        m.gen = 0;
+    }
+    if (gen != m.gen) {
+        D3DLOCKED_RECT lock{};
+        if (FAILED(m.tex->LockRect(0, &lock, nullptr, 0)) || !lock.pBits) return nullptr;
+        for (int y = 0; y < 64; y++) std::memcpy(static_cast<BYTE*>(lock.pBits) + y * lock.Pitch, px + y * 64 * 4, 64 * 4);
+        m.tex->UnlockRect(0);
+        m.gen = gen;
+    }
+    return m.tex;
+}
+IDirect3DTexture9* WallMaskTexture(IDirect3DDevice9* dev, DWORD basisSampler) {
+    if (!DevSwitches::BasisWallFilter()) return nullptr;
+    IDirect3DBaseTexture9* b = nullptr;
+    if (FAILED(D3D9Hooks::GetBoundTexture(dev, basisSampler, &b)) || !b) return nullptr;
+    const uintptr_t key = reinterpret_cast<uintptr_t>(b);
+    b->Release();
+    return WallMaskTextureFor(dev, key, [key](uint32_t known, uint32_t& gen, uint8_t* px) { return LevelLightShare::WallMaskFor(key, known, gen, px); });
+}
+// (Smooth light maps' floor read) the story's wall mask for the floor map `map` of size (w, h), and the read's constant: (1 /
+// texels per tile, the first texel column of the split tiles, 1 = on, 1 / 64); nullptr when its story or layout is not known
+IDirect3DTexture9* FloorWallMaskTexture(IDirect3DDevice9* dev, IDirect3DBaseTexture9* map, const float size[4], float k[4]) {
+    if (!DevSwitches::BasisWallFilter() || !map) return nullptr;
+    const uintptr_t key = reinterpret_cast<uintptr_t>(map);
+    float perTile = 0.0f, split = 0.0f;
+    IDirect3DTexture9* tex = WallMaskTextureFor(dev, key, [&](uint32_t known, uint32_t& gen, uint8_t* px) {
+        return LevelLightShare::FloorWallMaskFor(key, static_cast<int>(size[0]), static_cast<int>(size[1]), known, gen, px, perTile, split);
+    });
+    if (!tex) return nullptr;
+    k[0] = 1.0f / perTile, k[1] = split, k[2] = 1.0f, k[3] = 1.0f / 64.0f;
+    return tex;
+}
+// Binds the mask at `sampler` (point filter, clamp, linear read: no sRGB decode) for one draw and puts the stage back after it
+struct WallMaskBind {
+    static constexpr int kCount = 6;
+    IDirect3DDevice9* dev;
+    DWORD s;
+    IDirect3DBaseTexture9* old = nullptr;
+    DWORD st[kCount] = {};
+    static constexpr D3DSAMPLERSTATETYPE kStates[kCount] = {D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_SRGBTEXTURE};
+    WallMaskBind(IDirect3DDevice9* d, DWORD sampler, IDirect3DTexture9* mask) : dev(d), s(sampler) {
+        D3D9Hooks::GetBoundTexture(dev, s, &old);
+        for (int i = 0; i < kCount; i++) dev->GetSamplerState(s, kStates[i], &st[i]);
+        const DWORD want[kCount] = {D3DTEXF_POINT, D3DTEXF_POINT, D3DTEXF_NONE, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, FALSE};
+        SetTex(dev, s, mask);
+        for (int i = 0; i < kCount; i++) dev->SetSamplerState(s, kStates[i], want[i]);
+    }
+    ~WallMaskBind() {
+        SetTex(dev, s, old);
+        if (old) old->Release();
+        for (int i = 0; i < kCount; i++) dev->SetSamplerState(s, kStates[i], st[i]);
+    }
+};
+
+IDirect3DTexture9* AmbientMapTextureFor(IDirect3DDevice9* dev, uintptr_t key) {
+    if (!DevSwitches::StairRoomFill() || dev != g_wallMaskDev || !key) return nullptr; // (WallMaskTexture set the device for this draw)
+    if (g_ambMapTex.size() > 256) {
+        for (auto& [k, m] : g_ambMapTex)
+            if (m.tex) m.tex->Release();
+        g_ambMapTex.clear();
+    }
+    AmbMapTex& m = g_ambMapTex[key];
+    static float rgba[64 * 64 * 4];
+    uint64_t sig = 0;
+    if (!LevelLightShare::AmbientMapFor(key, m.tex ? m.sig : 0, sig, rgba)) return nullptr;
+    if (!m.tex) {
+        if (FAILED(dev->CreateTexture(64, 64, 1, 0, D3DFMT_A32B32G32R32F, D3DPOOL_MANAGED, &m.tex, nullptr)) || !m.tex) return nullptr;
+        m.sig = 0;
+    }
+    if (sig != m.sig) {
+        D3DLOCKED_RECT lock{};
+        if (FAILED(m.tex->LockRect(0, &lock, nullptr, 0)) || !lock.pBits) return nullptr;
+        for (int y = 0; y < 64; y++) { // A32B32G32R32F: r, g, b, a floats in memory
+            float* row = reinterpret_cast<float*>(static_cast<BYTE*>(lock.pBits) + y * lock.Pitch);
+            std::memcpy(row, rgba + y * 64 * 4, 64 * 4 * sizeof(float));
+        }
+        m.tex->UnlockRect(0);
+        m.sig = sig;
+    }
+    return m.tex;
+}
+IDirect3DTexture9* AmbientMapTexture(IDirect3DDevice9* dev, DWORD basisSampler) {
+    IDirect3DBaseTexture9* b = nullptr;
+    if (FAILED(D3D9Hooks::GetBoundTexture(dev, basisSampler, &b)) || !b) return nullptr;
+    const uintptr_t key = reinterpret_cast<uintptr_t>(b);
+    b->Release();
+    return AmbientMapTextureFor(dev, key);
+}
 // ---- Windows take outdoor light (experimental, "janelasLuzDeFora", off by default). F7 capture (06/10):
 // a window's origin is the centre of the tile in front of it, half a metre from its wall; turned the other way, the origin
 // is inside the room, and the window's sash and glass part gets a room-mode rig (RigTracker mode 0) and is drawn by a
@@ -5848,8 +5978,10 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
 // the outdoor-object patch: the ground atlas and the per-pixel lamps around the window, at the same strengths, never
 // darker than the game. By day those outdoor terms take the daytime curve (TerrainLightingPolicy::LampDay). The frame of the same window (an outdoor rig, mode 2)
 // lost every lamp to its own wall; DrawObjectLamp passes a wall within kWindowWallSkip while the option is on. ----
-std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_windowPs, g_windowPsReach;
+std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_windowPs, g_windowPsReach, g_windowWallPs, g_windowWallPsReach;
 std::atomic<int> g_windowDrawn{0}, g_windowRefused{0};
+std::atomic<long> g_windowWallDraws{0};
+bool MapSize(IDirect3DBaseTexture9* t, float out[4]); // below
 
 template <typename DrawFn> bool DrawWindowOutdoor(IDirect3DDevice9* dev, DrawFn draw) {
     if (!g_windowOutdoor.load(std::memory_order_relaxed) || !g_objPixel.load(std::memory_order_relaxed) || !g_curVsInfo || RigMode() != 0) return false;
@@ -5858,27 +5990,39 @@ template <typename DrawFn> bool DrawWindowOutdoor(IDirect3DDevice9* dev, DrawFn 
     float atlasMap[4];
     IDirect3DTexture9* atlas = LightmapSmooth::Atlas(atlasMap);
     if (!atlas) return false;
-    PatchedPs* chosen = &PatchedFor(dev, g_windowPs, "Window (outdoor light)", [](std::vector<DWORD>& t, PatchedPs& pp) {
-        // Rooms at Night's blue tint on the cube, as the game's draw of this part gets it (OnDrawFurniture), when the shader has it
-        if (!ShaderPatches::PatchCubeTint(t, pp.cubeTint)) pp.cubeTint = -1;
-        return ShaderPatches::PatchWindowOutdoor(t, pp.window);
-    });
+    // (basis_wall_filter, 2.17.1) the copy whose 4 directional reads keep off the walls (BasisSmoothOptions::smooth = false):
+    // the game's bilinear read took the texel beyond a wall into a face against it (F7 19-25-57: a kitchen counter along the
+    // wall of a room lit red, the red on its back half metre). No mask known for the draw's story, or no room for it: the plain copy.
+    const auto window = [](bool reach, bool walls) {
+        return [reach, walls](std::vector<DWORD>& t, PatchedPs& pp) {
+            // Rooms at Night's blue tint on the cube, as the game's draw of this part gets it (OnDrawFurniture), when the shader has it
+            if (!ShaderPatches::PatchCubeTint(t, pp.cubeTint)) pp.cubeTint = -1;
+            return ShaderPatches::PatchWindowOutdoor(t, pp.window, reach) &&
+                   (!walls || ShaderPatches::PatchBasisSmooth(t, pp.smooth, {.wallMask = true, .smooth = false}));
+        };
+    };
+    IDirect3DTexture9* wallMask = nullptr;
+    PatchedPs* chosen = nullptr;
+    if (DevSwitches::BasisWallFilter()) {
+        PatchedPs& w = PatchedFor(dev, g_windowWallPs, "Window (outdoor light, walls)", window(false, true), true);
+        if (w.ps && w.smooth.maskSampler >= 0 && (wallMask = WallMaskTexture(dev, w.smooth.sizeSampler)) != nullptr) chosen = &w;
+    }
+    if (!chosen) chosen = &PatchedFor(dev, g_windowPs, "Window (outdoor light)", window(false, false));
     if (!chosen->ps) return false;
     // realistic reach (12/10): the copy with the outdoor walls' law, made only from a shader the first law takes; refused
     // (no room for its 2 rows), the first law stays (g_reachLawRefused)
     bool reachRefused = false;
     if (g_objPixelLamps.load(std::memory_order_relaxed) && LevelLightShare::RealisticReachActive()) {
-        PatchedPs& r = PatchedFor(
-            dev, g_windowPsReach, "Window (outdoor light, realistic reach)",
-            [](std::vector<DWORD>& t, PatchedPs& pp) {
-                if (!ShaderPatches::PatchCubeTint(t, pp.cubeTint)) pp.cubeTint = -1;
-                return ShaderPatches::PatchWindowOutdoor(t, pp.window, true);
-            },
-            true);
-        if (r.ps) chosen = &r;
+        PatchedPs* r = wallMask ? &PatchedFor(dev, g_windowWallPsReach, "Window (outdoor light, realistic reach, walls)", window(true, true), true) : nullptr;
+        if (r && (!r->ps || r->smooth.maskSampler < 0)) r = nullptr;
+        if (!r) r = &PatchedFor(dev, g_windowPsReach, "Window (outdoor light, realistic reach)", window(true, false), true);
+        if (r->ps) chosen = r;
         else reachRefused = true, g_reachLawRefused++;
     }
     PatchedPs& p = *chosen;
+    float basisSize[4] = {};
+    if (p.smooth.maskSampler < 0 || !MapSize(D3D9Hooks::BoundTexture(dev, p.smooth.sizeSampler), basisSize)) wallMask = nullptr; // (the reach copy without the walls)
+    if (!wallMask && p.smooth.maskSampler >= 0) return false; // (a walls copy with no size: the plain path next draw, never unset constants)
     const bool reach = p.window.reachConst != 0;
     IDirect3DVertexShader9* vs = ObjectVsFor(dev, g_curVs);
     if (!vs) return false;
@@ -5954,6 +6098,7 @@ template <typename DrawFn> bool DrawWindowOutdoor(IDirect3DDevice9* dev, DrawFn 
                                     "(share not behind buildings {:.2f}, height gate {:.2f}) | lamp strength {:.2f} | object position ({:.2f} {:.2f} {:.2f}) | house plan read {:.2f} m out along the normal",
                                     nLamps, g_lastLampCandidates, strength[0], groundShare, gate, lamps[0][1], m[0][3], m[1][3], m[2][3], kWindowPlanReach);
         g_objDrawInfo += ReachLawText(reach, reachRefused, placed, lamps[0][1], reachRows, nLamps);
+        g_objDrawInfo += wallMask ? " | directional maps read off the walls (story wall mask)" : " | directional maps read as the game does (no wall mask)";
     }
     if (reach && placed) g_reachWindowDraws++;
     float oldA[4] = {}, oldB[4] = {}, oldPlan[2][4] = {}, oldTint[4] = {};
@@ -5976,11 +6121,23 @@ template <typename DrawFn> bool DrawWindowOutdoor(IDirect3DDevice9* dev, DrawFn 
         SetPsConst(dev, w.planConst, &plan[0][0], 2);
         if (reach) SetPsConst(dev, w.reachConst, &reachRows[0][0], 2);
         if (p.cubeTint >= 0) SetPsConst(dev, static_cast<UINT>(p.cubeTint), tint, 1);
+        float oldSize[4] = {};
+        std::optional<WallMaskBind> maskBind;
+        if (wallMask) {
+            dev->GetPixelShaderConstantF(p.smooth.sizeConst, oldSize, 1);
+            SetPsConst(dev, p.smooth.sizeConst, basisSize, 1);
+            maskBind.emplace(dev, static_cast<DWORD>(p.smooth.maskSampler), wallMask);
+            g_windowWallDraws.fetch_add(1, std::memory_order_relaxed);
+        }
         SetVs(dev, vs);
         SetPs(dev, p.ps);
         draw();
         SetPs(dev, originalPs);
         SetVs(dev, originalVs);
+        if (wallMask) {
+            maskBind.reset();
+            SetPsConst(dev, p.smooth.sizeConst, oldSize, 1);
+        }
         if (p.cubeTint >= 0) SetPsConst(dev, static_cast<UINT>(p.cubeTint), oldTint, 1);
         if (reach) SetPsConst(dev, w.reachConst, &oldReach[0][0], 2);
         SetPsConst(dev, w.planConst, &oldPlan[0][0], 2);
@@ -6185,6 +6342,33 @@ template <typename DrawFn> void DrawWithRoomMap(IDirect3DDevice9* dev, IDirect3D
     g_inOwnCall = false;
     ApexUtil::CountOne(arch ? g_archCopyDraws : g_archPlainDraws);
 }
+// (basis_wall_filter, 2.17.1) A floor map's read that also leaves out the tiles beyond a wall (ShaderPatches::PatchRoomMapSmooth
+// wallMask): the B-spline took a lit room's texels on the far side of a wall shared by two roofed rooms (F7 19-26-24: a dark
+// hall's floor along the wall of a lit living room, a warm band about 0.4 m wide). Floors only, where the map's story and
+// class-2 layout are known (FloorWallMaskTexture); else the copy without it.
+std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_roomMapWallPs;
+std::atomic<long> g_roomFloorWallDraws{0};
+template <typename DrawFn> bool DrawRoomMapWalls(IDirect3DDevice9* dev, DWORD mapSampler, const float size[4], const float band[4], DrawFn draw) {
+    float k[4];
+    IDirect3DTexture9* mask = FloorWallMaskTexture(dev, D3D9Hooks::BoundTexture(dev, mapSampler), size, k);
+    if (!mask) return false;
+    PatchedPs& p = PatchedFor(dev, g_roomMapWallPs, "Smooth light maps (walls)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchRoomMapSmooth(t, pp.room, false, true); }, true);
+    if (!p.ps || p.room.maskSampler < 0 || !RoomMapCapsOk(dev, p.room)) return false;
+    float old[4] = {};
+    dev->GetPixelShaderConstantF(static_cast<UINT>(p.room.maskConst), old, 1);
+    g_inOwnCall = true;
+    SetPsConst(dev, static_cast<UINT>(p.room.maskConst), k, 1);
+    {
+        const WallMaskBind bind(dev, static_cast<DWORD>(p.room.maskSampler), mask);
+        g_inOwnCall = false;
+        DrawWithRoomMap(dev, p.ps, p.room, size, band, nullptr, draw);
+        g_inOwnCall = true; // (the bind's restore, at its end of scope)
+    }
+    SetPsConst(dev, static_cast<UINT>(p.room.maskConst), old, 1);
+    g_inOwnCall = false;
+    g_roomFloorWallDraws.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
 template <typename DrawFn> bool DrawRoomMapSmooth(IDirect3DDevice9* dev, DrawFn draw) {
     if (!g_roomMapSmooth.load(std::memory_order_relaxed)) return false;
     PatchedPs& p = PatchedFor(dev, g_roomMapSmoothPs, "Smooth light maps", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchRoomMapSmooth(t, pp.room, false); });
@@ -6202,123 +6386,11 @@ template <typename DrawFn> bool DrawRoomMapSmooth(IDirect3DDevice9* dev, DrawFn 
     float rows[kArchRows * 4] = {};
     const int cells = a ? ArchRowsFor(dev, a->room, band, 0, rows) : 0;
     if (a && (cells > 0 || !plainOk)) DrawWithRoomMap(dev, a->ps, a->room, size, band, rows, draw);
-    else DrawWithRoomMap(dev, p.ps, p.room, size, band, nullptr, draw);
+    else if (wall || !DrawRoomMapWalls(dev, p.room.sampler, size, band, draw)) DrawWithRoomMap(dev, p.ps, p.room, size, band, nullptr, draw);
     ApexUtil::CountOne(wall ? g_roomWallDrawn : g_roomFloorDrawn);
     return true;
 }
 
-// ---- Walls in the directional maps (development builds, basis_wall_filter) ----
-// The draw's directional maps name their story (LevelLightShare::WallMaskFor); its wall mask is kept here as a 64 x 64
-// texture (managed pool), uploaded again when the story's walls change, and bound at the patch's mask sampler (point, clamp)
-// for the wall-aware copy of the shader (ShaderPatches::PatchBasisSmooth wallMask). No mask known: the plain copy draws.
-std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_basisSmoothWallPs, g_basisRoomWallPs, g_basisSmoothFillPs;
-struct WallMaskTex {
-    IDirect3DTexture9* tex = nullptr;
-    uint32_t gen = 0;
-};
-std::unordered_map<uintptr_t, WallMaskTex> g_wallMaskTex; // by the directional map's D3D texture
-IDirect3DDevice9* g_wallMaskDev = nullptr;
-std::atomic<long> g_wallMaskDraws{0};
-// (development builds, stair_room_fill) the story's ambient per tile (LevelLightShare::AmbientMapFor), 64 x 64 A32B32G32R32F in the
-// managed pool by the directional map's texture, written again when the rooms' ambients change; point-sampled
-struct AmbMapTex {
-    IDirect3DTexture9* tex = nullptr;
-    uint64_t sig = 0;
-};
-std::unordered_map<uintptr_t, AmbMapTex> g_ambMapTex;
-std::atomic<long> g_ambFillDraws{0};
-void ReleaseWallMasks() {
-    for (auto& [k, m] : g_wallMaskTex)
-        if (m.tex) m.tex->Release();
-    g_wallMaskTex.clear();
-    for (auto& [k, m] : g_ambMapTex)
-        if (m.tex) m.tex->Release();
-    g_ambMapTex.clear();
-}
-IDirect3DTexture9* WallMaskTexture(IDirect3DDevice9* dev, DWORD basisSampler) {
-    if (!DevSwitches::BasisWallFilter()) return nullptr;
-    IDirect3DBaseTexture9* b = nullptr;
-    if (FAILED(D3D9Hooks::GetBoundTexture(dev, basisSampler, &b)) || !b) return nullptr;
-    const uintptr_t key = reinterpret_cast<uintptr_t>(b);
-    b->Release();
-    if (dev != g_wallMaskDev) {
-        ReleaseWallMasks();
-        g_wallMaskDev = dev;
-    }
-    if (g_wallMaskTex.size() > 256) ReleaseWallMasks();
-    WallMaskTex& m = g_wallMaskTex[key];
-    static uint8_t px[64 * 64 * 4];
-    uint32_t gen = 0;
-    if (!LevelLightShare::WallMaskFor(key, m.tex ? m.gen : 0, gen, px)) return nullptr;
-    if (!m.tex) {
-        if (FAILED(dev->CreateTexture(64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &m.tex, nullptr)) || !m.tex) return nullptr;
-        m.gen = 0;
-    }
-    if (gen != m.gen) {
-        D3DLOCKED_RECT lock{};
-        if (FAILED(m.tex->LockRect(0, &lock, nullptr, 0)) || !lock.pBits) return nullptr;
-        for (int y = 0; y < 64; y++) std::memcpy(static_cast<BYTE*>(lock.pBits) + y * lock.Pitch, px + y * 64 * 4, 64 * 4);
-        m.tex->UnlockRect(0);
-        m.gen = gen;
-    }
-    return m.tex;
-}
-// Binds the mask at `sampler` (point filter, clamp, linear read: no sRGB decode) for one draw and puts the stage back after it
-struct WallMaskBind {
-    static constexpr int kCount = 6;
-    IDirect3DDevice9* dev;
-    DWORD s;
-    IDirect3DBaseTexture9* old = nullptr;
-    DWORD st[kCount] = {};
-    static constexpr D3DSAMPLERSTATETYPE kStates[kCount] = {D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_SRGBTEXTURE};
-    WallMaskBind(IDirect3DDevice9* d, DWORD sampler, IDirect3DTexture9* mask) : dev(d), s(sampler) {
-        D3D9Hooks::GetBoundTexture(dev, s, &old);
-        for (int i = 0; i < kCount; i++) dev->GetSamplerState(s, kStates[i], &st[i]);
-        const DWORD want[kCount] = {D3DTEXF_POINT, D3DTEXF_POINT, D3DTEXF_NONE, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, FALSE};
-        SetTex(dev, s, mask);
-        for (int i = 0; i < kCount; i++) dev->SetSamplerState(s, kStates[i], want[i]);
-    }
-    ~WallMaskBind() {
-        SetTex(dev, s, old);
-        if (old) old->Release();
-        for (int i = 0; i < kCount; i++) dev->SetSamplerState(s, kStates[i], st[i]);
-    }
-};
-
-IDirect3DTexture9* AmbientMapTextureFor(IDirect3DDevice9* dev, uintptr_t key) {
-    if (!DevSwitches::StairRoomFill() || dev != g_wallMaskDev || !key) return nullptr; // (WallMaskTexture set the device for this draw)
-    if (g_ambMapTex.size() > 256) {
-        for (auto& [k, m] : g_ambMapTex)
-            if (m.tex) m.tex->Release();
-        g_ambMapTex.clear();
-    }
-    AmbMapTex& m = g_ambMapTex[key];
-    static float rgba[64 * 64 * 4];
-    uint64_t sig = 0;
-    if (!LevelLightShare::AmbientMapFor(key, m.tex ? m.sig : 0, sig, rgba)) return nullptr;
-    if (!m.tex) {
-        if (FAILED(dev->CreateTexture(64, 64, 1, 0, D3DFMT_A32B32G32R32F, D3DPOOL_MANAGED, &m.tex, nullptr)) || !m.tex) return nullptr;
-        m.sig = 0;
-    }
-    if (sig != m.sig) {
-        D3DLOCKED_RECT lock{};
-        if (FAILED(m.tex->LockRect(0, &lock, nullptr, 0)) || !lock.pBits) return nullptr;
-        for (int y = 0; y < 64; y++) { // A32B32G32R32F: r, g, b, a floats in memory
-            float* row = reinterpret_cast<float*>(static_cast<BYTE*>(lock.pBits) + y * lock.Pitch);
-            std::memcpy(row, rgba + y * 64 * 4, 64 * 4 * sizeof(float));
-        }
-        m.tex->UnlockRect(0);
-        m.sig = sig;
-    }
-    return m.tex;
-}
-IDirect3DTexture9* AmbientMapTexture(IDirect3DDevice9* dev, DWORD basisSampler) {
-    IDirect3DBaseTexture9* b = nullptr;
-    if (FAILED(D3D9Hooks::GetBoundTexture(dev, basisSampler, &b)) || !b) return nullptr;
-    const uintptr_t key = reinterpret_cast<uintptr_t>(b);
-    b->Release();
-    return AmbientMapTextureFor(dev, key);
-}
 // (development builds, stair_story_blend) whether the current VS passes the world height in TEXCOORD2.w (by shader, render thread)
 std::unordered_map<IDirect3DVertexShader9*, bool> g_vsWorldY;
 bool CurVsPassesWorldY() {
@@ -9161,9 +9233,9 @@ void SetIndoorSmooth(bool on) { g_indoorSmooth = on; }
 void SetSmoothRoomMaps(bool on) { g_roomMapSmooth = on; }
 std::string RoomMapSmoothStatus() {
     return std::format("B-spline reads {}: {} room-lit shaders, walls {} draws, floors {} draws | left to the game: caps {}, unknown vertex shader {}, wall blocks off the grid {}, "
-                       "point filter {} | draws with the arch copy {}, with the copy without arches {}",
+                       "point filter {} | draws with the arch copy {}, with the copy without arches {} | floor draws read off the walls {}",
                        g_roomMapSmooth.load() ? "on" : "off", g_roomMapPs.size(), g_roomWallDrawn.load(), g_roomFloorDrawn.load(), g_roomCapsRefused.load(),
-                       g_roomUnknownVs.load(), g_roomBandsOff.load(), g_roomPointFilter.load(), g_archCopyDraws.load(), g_archPlainDraws.load());
+                       g_roomUnknownVs.load(), g_roomBandsOff.load(), g_roomPointFilter.load(), g_archCopyDraws.load(), g_archPlainDraws.load(), g_roomFloorWallDraws.load());
 }
 
 std::string IndoorSmoothStatus() {
@@ -9217,7 +9289,8 @@ void SetObjectPixelLights(bool on, float strength) {
 void SetWindowOutdoor(bool on) { g_windowOutdoor = on; }
 
 std::string WindowOutdoorStatus() {
-    return std::format("{} | window parts lit outdoors: {} | left to the game (no basis uv rows): {}", g_windowOutdoor.load() ? "on" : "off", g_windowDrawn.load(), g_windowRefused.load());
+    return std::format("{} | window parts lit outdoors: {} ({} with the directional maps read off the walls) | left to the game (no basis uv rows): {}", g_windowOutdoor.load() ? "on" : "off",
+                       g_windowDrawn.load(), g_windowWallDraws.load(), g_windowRefused.load());
 }
 
 void SetFenceGroundLight(bool on, float strength) {

@@ -438,7 +438,12 @@ With `janelasLuzDeFora` on: `PickObjectLamps` passes a wall within 0.75 m of the
 `w = sat(1 - alpha)`, alpha = the basis map's house-plan alpha read at the basis uv moved 0.75 m along the world normal (rows from
 `WorldUvRows`: `dp4 rA.zw, rWorld, c15/c16` then `mul oT0.xy, rA.zwzw, c18.zwzw`), and `w = 0` where alpha is over 0.5 (inside
 the plan; the plan's texel edge is the outside wall, and its bilinear read gave faces up to half a metre inside, such as a
-kitchen counter top along that wall, up to half the outdoor light). Faces looking into the house keep the game's light exactly.
+kitchen counter top along that wall, up to half the outdoor light). Faces looking into the house keep the game's light. Where
+the story's wall mask is known ([stairs.md](stairs.md)), the copy also moves the uv of its 4 directional reads off the walls
+(`PatchBasisSmooth` with `wallMask` and `smooth = false`: the game's bilinear reads, never across a walled side of the
+pixel's tile, the lower of the two texels in a wall's thickness), as the stairs' reads are: the bilinear read took the
+texel of the room beyond a wall into a face against it (a counter along the wall of a room lit red took the red on its
+back half metre). Without a mask, or where the copy does not fit (5 more temps), the copy without it draws.
 No object catalog identifies windows: the rule is geometric, so any room-rig object drawn with a basis-reading object shader whose faces look
 out of the house plan is affected (in the captures only window parts were). The light in the shader's bloom alpha (`lum - c3.x`) can rise
 slightly with it. Offline: 1 of the 13 captured basis-reading pixel shaders is accepted (the window one), and native D3D9 creates it.

@@ -4850,11 +4850,13 @@ struct WallMaskRec {
     std::array<uint8_t, 64 * 64> roomIdx{};
     std::vector<std::pair<uintptr_t, int>> rooms; // (room, id)
     uintptr_t mgr = 0;
+    int w = 0, h = 0; // the story grid's tiles (FloorWallMaskFor: the floor maps' layout)
 };
 std::mutex g_wallMaskMx;
 std::unordered_map<uintptr_t, std::shared_ptr<const WallMaskRec>> g_wallMasks; // by story manager, under g_wallMaskMx
 std::atomic<uint32_t> g_wallMaskGen{1};
 std::atomic<long> g_wallMaskBuilt{0}, g_wallMaskFound{0}, g_wallMaskMissed{0};
+std::atomic<long> g_floorMaskFound{0}, g_floorMaskMissed{0}, g_floorMaskLayout{0}; // (FloorWallMaskFor)
 void NoteWallMask(uintptr_t mgr, const StoryGrid& g) {
     if (!DevSwitches::BasisWallFilter() || !mgr) return;
     auto m = std::make_shared<WallMaskRec>();
@@ -4872,6 +4874,7 @@ void NoteWallMask(uintptr_t mgr, const StoryGrid& g) {
             p[3] = blocks(GridZL(g, i, j + 1)) ? 255 : 0;
         }
     m->mgr = mgr;
+    m->w = g.w, m->h = g.h;
     m->roomIdx.fill(255);
     if (DevSwitches::StairRoomFill())
         for (int j = 0; j < std::min(64, g.h); j++)
@@ -4897,7 +4900,9 @@ void NoteWallMask(uintptr_t mgr, const StoryGrid& g) {
             }
     std::lock_guard<std::mutex> lk(g_wallMaskMx);
     const auto it = g_wallMasks.find(mgr);
-    if (it != g_wallMasks.end() && it->second->px == m->px && it->second->roomIdx == m->roomIdx && it->second->rooms == m->rooms) return;
+    if (it != g_wallMasks.end() && it->second->px == m->px && it->second->roomIdx == m->roomIdx && it->second->rooms == m->rooms && it->second->w == m->w &&
+        it->second->h == m->h)
+        return;
     m->gen = g_wallMaskGen.fetch_add(1, std::memory_order_relaxed);
     if (g_wallMasks.size() > 256) g_wallMasks.clear();
     g_wallMasks[mgr] = std::move(m);
@@ -17424,8 +17429,9 @@ std::string WallMaskStatus() {
         std::lock_guard<std::mutex> lk(g_wallMaskMx);
         n = g_wallMasks.size();
     }
-    return std::format("walls in the directional maps: {} story masks (built {} times), a draw's maps matched to a story {} times, not matched {}; ambient maps read {} (a room not readable {}); stair draws blended with the story above {} (no story above known {})", n,
-                       g_wallMaskBuilt.load(), g_wallMaskFound.load(), g_wallMaskMissed.load(), g_ambMapReads.load(), g_ambMapFails.load(), g_storyBlendDraws.load(), g_storyBlendNone.load());
+    return std::format("walls in the directional maps: {} story masks (built {} times), a draw's maps matched to a story {} times, not matched {}; ambient maps read {} (a room not readable {}); stair draws blended with the story above {} (no story above known {}); floor maps matched to a story {} times, not matched {}, another layout {}", n,
+                       g_wallMaskBuilt.load(), g_wallMaskFound.load(), g_wallMaskMissed.load(), g_ambMapReads.load(), g_ambMapFails.load(), g_storyBlendDraws.load(), g_storyBlendNone.load(),
+                       g_floorMaskFound.load(), g_floorMaskMissed.load(), g_floorMaskLayout.load());
 }
 // POD (SEH): whether the D3D texture tex is one of the story manager's room light maps (its sets at +0x16C + class x 64, four
 // maps each; 0x006A7700 binds the floor's from there, as the directional maps from +0x220: the wrapper's texture at +0x30
@@ -17462,6 +17468,54 @@ bool StoryMapsInclude(uintptr_t mgr, uintptr_t tex, StoryMapSlot& slot) {
 // rooms were solved again and the arch's step came back on the floor, a straight line on the arch's wall line, the two
 // floors' ambients apart again; exact float equality is what the match asked for)
 bool SameAmbient(const float* a, const float* b) { return ArchAmbient::Same(a, b); }
+// (basis_wall_filter) The floor maps' wall mask (LevelLightShare.h). The class-2 layout (light_detail.cpp): a tile's texels
+// start at (tile x n, tile z n) from the lot's origin, n = 4 (8 with Light detail High); the map is n x the lot's tiles
+// rounded up to a power of two, twice as wide where the split tiles' atlas follows. Other classes (1 or 2 texels a tile)
+// are not laid out from a tile origin the game writes with that n: they keep the read without walls.
+bool FloorWallMaskFor(uintptr_t floorTex, int w, int h, uint32_t knownGen, uint32_t& gen, uint8_t* px, float& perTile, float& splitU) {
+    if (!DevSwitches::BasisWallFilter() || !floorTex || w <= 0 || h <= 0) return false;
+    struct Memo {
+        uintptr_t tex = 0, mgr = 0;
+        StoryMapSlot slot;
+        uint32_t frame = 0; // (no story found: looked for again 60 frames later)
+    };
+    static Memo s_memo[16]; // render thread
+    Memo& m = s_memo[(static_cast<uint32_t>(floorTex) * 2654435761u) >> 28];
+    const uint32_t frame = g_presentFrame.load(std::memory_order_relaxed);
+    if (m.tex == floorTex && !m.mgr && frame - m.frame < 60) return false;
+    std::lock_guard<std::mutex> lk(g_wallMaskMx);
+    if (m.tex != floorTex || !m.mgr || !g_wallMasks.count(m.mgr) || !StoryMapSlotMatches(m.slot, floorTex)) {
+        m = Memo{floorTex, 0, {}, frame};
+        for (const auto& [mgr, rec] : g_wallMasks)
+            if (StoryMapsInclude(mgr, floorTex, m.slot)) {
+                m.mgr = mgr;
+                break;
+            }
+        if (!m.mgr) {
+            g_floorMaskMissed.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+        g_floorMaskFound.fetch_add(1, std::memory_order_relaxed);
+    }
+    const WallMaskRec& rec = *g_wallMasks.find(m.mgr)->second;
+    const int n = LightDetail::Active() ? 8 : 4;
+    const auto pow2 = [](int v) {
+        int p = 1;
+        while (p < v) p <<= 1;
+        return p;
+    };
+    const int pw = rec.w > 0 && rec.w <= 64 ? pow2(n * rec.w) : 0, ph = rec.h > 0 && rec.h <= 64 ? pow2(n * rec.h) : 0;
+    if (!pw || !ph || pw > 2048 || h != ph || (w != pw && w != 2 * pw)) {
+        g_floorMaskLayout.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    perTile = static_cast<float>(n);
+    splitU = static_cast<float>(pw);
+    gen = rec.gen;
+    if (gen != knownGen && px) std::memcpy(px, rec.px.data(), rec.px.size());
+    return true;
+}
+
 std::atomic<long> g_archUnion{0};
 // (the draw's story: found by its room map's set, +0x16C, UNVERIFIED; or by its directional maps, +0x220, confirmed by the wall
 // masks; off-story: the draw matched by value only rooms of another story or lot, which give nothing; spread: no story known
