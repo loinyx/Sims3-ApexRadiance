@@ -20,6 +20,7 @@ not identified.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-27 | `0b99a6a`, `94c616e` | In game, Steam 1.67.2, development and standard builds | `lamp_edit_lot_only`: a lamp switched off and on near a stair opening updated the story below; lamp edits on the release build settled in 234 to 3187 ms; Smoke and Lighting suites passed | DXVK |
 | 2026-10-13 | Release preparation tree for 2.12.3; final SHA in the release PR | Developer and public Release x86 builds: 0 errors, 0 warnings; `tools/room_ambient_test`; `run_lamp_state_checks.ps1` | Builds passed; room ambient policy 102 checks, 0 failures (hold decision, urgency, safety-net gap, 200 ms move delay); lamp edit state 12 assertions, 0 failures. The map hold itself has no offline harness | None (mocks) / x86 build |
 | 2026-10-01 | Test005 build | Floor priority policy checks | All-floor x4000 with the policy on, camera-floor / below rule with it off; other lots and zero priority unchanged; drain limits and lot lighting budgets unchanged. No FPS improvement inferred | None |
 
