@@ -48,11 +48,12 @@ static void PolicyChecks() {
     d = P::Decide(30.0, false, false, 6, P::kMaxSkips);
     CHECK(d.run && d.sliceMs == 1, "after %d skips it runs one stage", P::kMaxSkips);
     CHECK(!P::Decide(30.0, false, false, 6, P::kMaxSkips + 3, true).run, "only one waiting lot is forced per frame");
-    // the lot being played always runs, with at least half the budget
+    // the lot being played always runs, with the game's own slice
     d = P::Decide(30.0, false, true, 0, 0);
-    CHECK(d.run && d.sliceMs == 3, "priority lot keeps half of 6, got %u", d.sliceMs);
-    d = P::Decide(0.0, false, true, 0, 0);
-    CHECK(d.run && d.sliceMs == 6, "priority lot first in frame gets 6, got %u", d.sliceMs);
+    CHECK(d.run && d.sliceMs == 0, "priority lot keeps the game's slice, got %u", d.sliceMs);
+    // a lot that waited less than the longest waiter is not forced
+    CHECK(!P::Decide(30.0, false, false, 6, P::kMaxSkips + 1, false, P::kMaxSkips + 4).run, "only the longest waiter is forced");
+    CHECK(P::Decide(30.0, false, false, 6, P::kMaxSkips + 4, false, P::kMaxSkips + 4).forced, "the longest waiter is forced");
     // a negative or unknown stage is never held
     CHECK(P::Decide(30.0, false, false, -1, 0).run, "unknown stage must pass");
 }
@@ -87,18 +88,21 @@ static Replay Simulate(const std::vector<std::vector<Lot>>& sessions, bool share
         std::vector<size_t> next(lots.size(), 0);
         std::vector<int> start(lots.size()), skips(lots.size(), 0), done(lots.size(), -1);
         bool forced = false;
+        int longest = 0, longestNext = 0;
         for (size_t i = 0; i < lots.size(); i++) start[i] = static_cast<int>((lots[i].arriveMs - t0) / kFrameMs);
         size_t left = lots.size();
         for (int frame = 0; left > 0 && frame < 10000000; frame++) {
             double spent = 0;
             forced = false;
+            longest = longestNext;
+            longestNext = 0;
             for (size_t i = 0; i < lots.size(); i++) {
                 if (done[i] >= 0 || start[i] > frame) continue;
                 double slice = 20.0;
                 if (share) {
-                    const auto d = P::Decide(spent, false, false, 0, skips[i], forced);
+                    const auto d = P::Decide(spent, false, false, 0, skips[i], forced, longest);
                     if (!d.run) {
-                        skips[i]++;
+                        longestNext = std::max(longestNext, ++skips[i]);
                         continue;
                     }
                     forced = forced || d.forced;
@@ -206,6 +210,35 @@ static void SyntheticReplay() {
     CHECK(share.frameMs.size() <= 40, "7 lots build within 40 frames (%zu)", share.frameMs.size());
 }
 
+// The lot being played spends the whole budget every frame while 10 other lots wait: every lot still runs, and none
+// waits more than kMaxSkips + (lots - 1) frames
+static void WaitBound() {
+    constexpr int kLots = 10;
+    int skips[kLots] = {}, worst = 0, longest = 0, longestNext = 0, runs[kLots] = {};
+    for (int frame = 0; frame < 2000; frame++) {
+        const double spent = 30.0; // the played lot's slice
+        bool forced = false;
+        longest = longestNext;
+        longestNext = 0;
+        for (int i = 0; i < kLots; i++) {
+            const auto d = P::Decide(spent, false, false, 3, skips[i], forced, longest);
+            if (!d.run) {
+                longestNext = std::max(longestNext, ++skips[i]);
+                worst = std::max(worst, skips[i]);
+                continue;
+            }
+            forced = forced || d.forced;
+            skips[i] = 0;
+            runs[i]++;
+        }
+    }
+    int fewest = runs[0];
+    for (int r : runs) fewest = std::min(fewest, r);
+    std::printf("wait bound: %d waiting lots, longest wait %d frames, every lot ran at least %d times in 2000 frames\n", kLots, worst, fewest);
+    CHECK(worst <= P::kMaxSkips + kLots - 1, "a lot waited %d frames", worst);
+    CHECK(fewest > 2000 / (P::kMaxSkips + kLots), "a lot ran only %d times", fewest);
+}
+
 // ---- 3. detailed-lot hysteresis ----
 // LotLodScoring: metric = squared distance from the camera target; a detailed lot's metric gets the bias; the lots are
 // ranked by metric and the first maxActive below distance^2 are detailed (priority lots left out of the model).
@@ -308,6 +341,7 @@ int main(int argc, char** argv) {
     }
     PolicyChecks();
     SyntheticReplay();
+    WaitBound();
     HysteresisChecks();
     if (!csvDir.empty()) ReplayChecks(csvDir);
     if (!exe.empty()) ExeChecks(exe);

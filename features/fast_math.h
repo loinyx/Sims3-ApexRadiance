@@ -57,7 +57,7 @@ __forceinline bool IsNaN(float x) {
     std::memcpy(&b, &x, sizeof b);
     return (b & 0x7FFFFFFFu) > 0x7F800000u;
 }
-// == std::hypot(float, float): the CRT's hypotf goes through the x87 _hypot, which sets and restores the FPU control word
+// == std::hypot(float, float) for finite inputs (hypot(inf, NaN) is inf, this gives NaN): the CRT's hypotf goes through the x87 _hypot, which sets and restores the FPU control word
 // on every call (__ctrlfp). The squares of two floats are exact in double, so one rounded sum and one correctly rounded
 // sqrtsd give the same float (no difference over 262 million pairs, random bit patterns included: tools/crt_math_test).
 __forceinline float Hypot(float x, float y) {

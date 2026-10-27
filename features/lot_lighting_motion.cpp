@@ -679,8 +679,11 @@ bool Start(std::string* error) {
     }
     g_started = true;
     UpdatePresentSampler();
+    // the share caps each lot's slice through the stub above: without it the first lot would keep its whole slice
     std::string shareError;
-    if (!LotBuildShare::Start(&shareError)) LOG_WARNING("[LotLightingMotion] Shared lot build time left off: " + shareError);
+    if (!g_buildOn) LOG_WARNING("[LotLightingMotion] Shared lot build time left off: the lot build slice is not in place");
+    else if (!LotBuildShare::Start(&shareError)) LOG_WARNING("[LotLightingMotion] Shared lot build time left off: " + shareError);
+    else if (!g_presentRegistered) LOG_WARNING("[LotLightingMotion] Shared lot build time: no per-frame sample, a frame is taken as 50 ms");
     LOG_INFO(std::format("[LotLightingMotion] On: the call at {:#010x} to the lot lighting budget {:#010x} goes through Apex; camera eye [[{:#010x}]+{:#x}]+{:#x}; "
                          "budget while moving {} ms for the current lot; lot build slice {}",
                          call, budget, g_rootGlobal, g_camOff, g_eyeOff, g_budgetMs.load(),

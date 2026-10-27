@@ -31,9 +31,9 @@ enum class Site : int {
     CompState3,   // CALL 0x005FDFFF in 0x005FDEF0 -> 0x005FD420 thiscall(job), ret 4 (use the locked tile)
     CompReadback, // CALL 0x005FDC8A in 0x005FDBF0 -> 0x005FBCE0 thiscall(format), ret 4 (GetRenderTargetData)
     LotLoadStages, // CALL 0x00AEB306 in the lot renderer update 0x00AEB2E0 -> 0x00AEA680 thiscall() -> al (a lot's load stages)
+    LotPassRenderer, // CALL 0x00C7CEDF in the lot pass 0x00C7CEA0 -> 0x00AEB2E0 thiscall(float dt), ret 4 (the renderer update)
     Count
 };
-// LotBuildGate is outermost: it reads its own return address to tell the lot pass from the impostor builder (lot_build_share.h)
 enum class Layer : int { LotBuildGate, FrameProfiler, SceneBudget, CompositorReadback, Count }; // lower = outer
 
 // Installs `hook` as `layer` of `site` (true when installed, or already installed). error: why not.

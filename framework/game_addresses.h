@@ -292,6 +292,7 @@ enum class Id : uint16_t {
     LightObjectRemove, // FUN_006c7610 thiscall(levelLights; idLo, idHi), ret 8: an object's entries out of the five per-level light maps
     LotLoadStagesCall,  // 0x00AEB306 in FUN_00aeb2e0: call FUN_00aea680, the lot renderer's load stages (its result is not used)
     LotPassRendererCall, // 0x00C7CEDF in the lot pass FUN_00c7cea0: call FUN_00aeb2e0 (the renderer update); its other callers are the impostor builder's
+    LotRendererUpdate,  // FUN_00aeb2e0 thiscall(lotRenderer, float dt), ret 4: the renderer update (target of LotPassRendererCall)
     LotLoadStages,      // FUN_00aea680 thiscall(lotRenderer) -> al: runs load stages until its per-call budget is spent
     LotBuildBudgetLoad, // 0x00AEA6D8 in FUN_00aea680 (a lot's per-frame build slice): "mov eax,[0x011ECBC4]" right after its budget [esp+14h] (20 / 35 ms) is set
     ProbeDiffuseWrite,  // 0x006B4720 thiscall(lightProbe), ret: writes the new diffuse cube (+0x2C60, or +0x2C50 when not double-buffered)

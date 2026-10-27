@@ -3,9 +3,10 @@
 //
 // Each frame the load stages of every streaming lot (0x00AEA680, per lot, 20 ms; 35 for the lot being played) share one
 // budget: kStillMs with the camera still, kMovingMs while it moves. A lot's call gets what is left of it as its slice; the
-// lot being played always runs, with at least half the budget; another lot whose turn comes with less than kRunFloorMs
-// left waits for a later frame (the game's own "stage busy" answer: return 0, no state change); after kMaxSkips frames in a
-// row it runs one stage, one such lot per frame (several waiting lots forced together would rebuild the burst). Stages
+// lot being played always runs with the game's own slice (its time still counts); another lot whose turn comes with less
+// than kRunFloorMs left waits for a later frame (the game's own "stage busy" answer: return 0, no state change); once it
+// has waited kMaxSkips frames and longest of the waiting lots it runs one stage, one such lot per frame (several waiting
+// lots forced together would rebuild the burst; forcing the longest waiter keeps every lot's wait bounded). Stages
 // from kFirstWaitStage on only wait for a job or for the lot's lighting (about 1 us a call): they always run, so a lot
 // never finishes later because of the share.
 #include <cstdint>
@@ -25,16 +26,12 @@ struct Decision {
     bool forced = false;  // runs only because it waited kMaxSkips frames
 };
 
-inline Decision Decide(double spentMs, bool moving, bool priority, int stage, int skips, bool forcedThisFrame = false) {
-    if (stage < 0 || stage >= kFirstWaitStage) return {};
-    const double budget = moving ? kMovingMs : kStillMs;
-    const double left = budget - spentMs;
-    if (priority) {
-        const double slice = left > budget * 0.5 ? left : budget * 0.5;
-        return {true, static_cast<uint32_t>(slice + 0.5)};
-    }
+// longestWait: the most frames any lot had waited when this frame began
+inline Decision Decide(double spentMs, bool moving, bool priority, int stage, int skips, bool forcedThisFrame = false, int longestWait = 0) {
+    if (stage < 0 || stage >= kFirstWaitStage || priority) return {};
+    const double left = (moving ? kMovingMs : kStillMs) - spentMs;
     if (left >= kRunFloorMs) return {true, static_cast<uint32_t>(left)}; // floor, at least 1
-    if (skips >= kMaxSkips && !forcedThisFrame) return {true, 1, true};
+    if (skips >= kMaxSkips && skips >= longestWait && !forcedThisFrame) return {true, 1, true};
     return {false, 0};
 }
 

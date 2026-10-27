@@ -7,7 +7,6 @@
 #include "dev_switches.h"
 #include "game_addresses.h"
 #include <windows.h>
-#include <intrin.h>
 #include <atomic>
 #include <format>
 #include <mutex>
@@ -29,7 +28,6 @@ constexpr double kFallbackFrameMs = 50.0;
 
 std::mutex g_ctrl;
 std::atomic<bool> g_on{false};
-uintptr_t g_lotPassReturn = 0; // the return address of the lot pass's CALL of the renderer update
 uintptr_t g_worldGlobal = 0;
 SomGetterFn g_somGetter = nullptr;
 PriorityTestFn g_priorityTest = nullptr;
@@ -40,6 +38,7 @@ uint32_t g_frame = 0xFFFFFFFFu;
 int64_t g_frameStart = 0;  // QPC; without the per-frame sampler a "frame" ends kFallbackFrameMs after it started
 double g_spentMs = 0.0;
 bool g_forcedThisFrame = false; // a lot that had waited kMaxSkips frames ran this frame
+int g_longestWait = 0, g_longestWaitNext = 0; // the most frames a lot had waited: when this frame began / so far in it
 struct Slot {
     void* renderer = nullptr;
     uint32_t frame = 0;
@@ -47,6 +46,7 @@ struct Slot {
 };
 Slot g_slots[kSlots];
 thread_local uint32_t t_slice = 0; // the slice of the call in progress on this thread (0 = none)
+thread_local bool t_inLotPass = false; // inside the lot pass's renderer update (CALL 0x00C7CEDF)
 
 std::atomic<uint32_t> c_gated{0}, c_skipped{0}, c_capped{0}, c_forced{0}, c_overBudgetFrames{0};
 std::atomic<uint32_t> g_maxFrameUs{0};
@@ -62,11 +62,14 @@ Slot& SlotOf(void* renderer) {
     return *free;
 }
 
-bool FromLotPass() {
-    // At the outermost layer the CALL at 0x00AEB306 lands here: [ret] is in 0x00AEB2E0, which pushed only esi before it,
-    // so [ret + 8] is the return address of 0x00AEB2E0's own caller
-    const uintptr_t* ret = static_cast<const uintptr_t*>(_AddressOfReturnAddress());
-    return ret[2] == g_lotPassReturn;
+// The lot pass's CALL of the renderer update: marks the calls the gate may hold (the impostor builder's own updates,
+// 0x00AEB3F9 / 0x00AEB41C, are not marked). A marker rather than a return address: the Frame Profiler, or another mod,
+// may detour the renderer update's entry.
+void __fastcall PassHook(void* renderer, void* edx, float dt) {
+    const auto next = reinterpret_cast<void(__fastcall*)(void*, void*, float)>(CallChain::Next(Site::LotPassRenderer, Layer::LotBuildGate));
+    t_inLotPass = true;
+    next(renderer, edx, dt);
+    t_inLotPass = false;
 }
 
 bool LoadingScreen() {
@@ -89,7 +92,7 @@ void NoteFrameEnd() {
 
 uint64_t __fastcall Hook(void* renderer, void* edx) {
     const auto next = reinterpret_cast<StagesFn>(CallChain::Next(Site::LotLoadStages, Layer::LotBuildGate));
-    if (!g_on.load(std::memory_order_acquire) || !DevSwitches::LotBuildShare() || !renderer || !FromLotPass() || LoadingScreen())
+    if (!g_on.load(std::memory_order_acquire) || !DevSwitches::LotBuildShare() || !renderer || !t_inLotPass || LoadingScreen())
         return next(renderer, edx);
 
     LARGE_INTEGER t0, t1;
@@ -101,15 +104,18 @@ uint64_t __fastcall Hook(void* renderer, void* edx) {
         g_frameStart = t0.QuadPart;
         g_spentMs = 0.0;
         g_forcedThisFrame = false;
+        g_longestWait = g_longestWaitNext;
+        g_longestWaitNext = 0;
     }
     const uint8_t* r = static_cast<const uint8_t*>(renderer);
     const int stage = *reinterpret_cast<const int*>(r + kOffStage);
     Slot& slot = SlotOf(renderer);
     slot.frame = frame;
-    const auto d = LotBuildSharePolicy::Decide(g_spentMs, LotLightingMotion::CameraMoving(), Priority(r), stage, slot.skips, g_forcedThisFrame);
+    const auto d = LotBuildSharePolicy::Decide(g_spentMs, LotLightingMotion::CameraMoving(), Priority(r), stage, slot.skips, g_forcedThisFrame, g_longestWait);
     if (stage < LotBuildSharePolicy::kFirstWaitStage) c_gated.fetch_add(1, std::memory_order_relaxed);
     if (!d.run) {
         slot.skips++;
+        if (slot.skips > g_longestWaitNext) g_longestWaitNext = slot.skips;
         c_skipped.fetch_add(1, std::memory_order_relaxed);
         return 0; // al = 0: not done; the renderer update ignores it, the stages run again next frame
     }
@@ -138,7 +144,6 @@ bool Start(std::string* error) {
         if (error) *error = GameAddr::NotAvailable(missing);
         return false;
     }
-    g_lotPassReturn = GameAddr::Get(GameAddr::Id::LotPassRendererCall) + 5;
     g_worldGlobal = GameAddr::Get(GameAddr::Id::WorldManagerPtr);
     g_somGetter = reinterpret_cast<SomGetterFn>(GameAddr::Get(GameAddr::Id::PriorityLotObject));
     g_priorityTest = reinterpret_cast<PriorityTestFn>(GameAddr::Get(GameAddr::Id::PriorityLotTest));
@@ -152,6 +157,12 @@ bool Start(std::string* error) {
         if (error) *error = "the lot load stages call: " + chainError;
         return false;
     }
+    if (!CallChain::Install(Site::LotPassRenderer, Layer::LotBuildGate, reinterpret_cast<void*>(&PassHook), &chainError)) {
+        g_on.store(false, std::memory_order_release);
+        CallChain::Remove(Site::LotLoadStages, Layer::LotBuildGate);
+        if (error) *error = "the lot pass call: " + chainError;
+        return false;
+    }
     LOG_INFO(std::format("[LotBuildShare] On: one build budget per frame for every streaming lot ({:.0f} ms, {:.0f} ms while the camera moves){}",
                          LotBuildSharePolicy::kStillMs, LotBuildSharePolicy::kMovingMs, DevSwitches::LotBuildShare() ? "" : "; development switch lot_build_share is off"));
     return true;
@@ -161,7 +172,7 @@ void Stop() {
     std::lock_guard<std::mutex> lock(g_ctrl);
     if (!g_on.load(std::memory_order_acquire)) return;
     g_on.store(false, std::memory_order_release); // the hook passes through from now on, even if the CALL stays
-    if (!CallChain::Remove(Site::LotLoadStages, Layer::LotBuildGate))
+    if (!CallChain::Remove(Site::LotPassRenderer, Layer::LotBuildGate) || !CallChain::Remove(Site::LotLoadStages, Layer::LotBuildGate))
         LOG_ERROR("[LotBuildShare] The lot load stages call could not be put back; the gate stays in place and passes every call through");
     LOG_INFO(std::format("[LotBuildShare] Off ({} build calls shared, {} waited a frame, {} ran after {} waits, {} slices shortened; {} frames over {:.0f} ms, longest {:.2f} ms)",
                          c_gated.load(), c_skipped.load(), c_forced.load(), LotBuildSharePolicy::kMaxSkips, c_capped.load(), c_overBudgetFrames.load(),

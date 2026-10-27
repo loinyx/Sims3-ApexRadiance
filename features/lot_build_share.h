@@ -10,8 +10,9 @@
 // frame (lot_build_share_policy.h): each call's slice is what is left of it (passed to the slice stub of Lot Lighting
 // While Moving through CapSlice), and a lot whose turn comes once the budget is spent waits for a later frame by
 // returning 0 without calling the game, exactly as the stages do when their lot's lock is busy (the renderer update
-// ignores the result). Only calls from the lot pass are gated (the impostor builder's synchronous updates and the
-// loading screen's 2000 ms pass through), the lot being played always runs, and the waiting stages (17 on) are never held.
+// ignores the result). Only calls inside the lot pass are gated (a second gate layer on its CALL 0x00C7CEDF marks them;
+// the impostor builder's synchronous updates and the loading screen's 2000 ms pass through), the lot being played
+// keeps the game's own slice, and the waiting stages (17 on) are never held.
 #include <cstdint>
 #include <string>
 

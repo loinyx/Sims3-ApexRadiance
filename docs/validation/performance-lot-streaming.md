@@ -11,8 +11,9 @@ The feature is described in [features/performance/lot-streaming.md](../features/
 - Raise "Max Active Lot Threshold" to Max Active Lots while Smooth lot streaming runs, never lower it, and restore it only
   while it holds Apex's value.
 - Share one load-stage budget per frame among the streaming lots (6 ms still, 4 ms moving): never hold the lot being
-  played, a waiting stage (17 on), the loading screen or the impostor builder's updates; hold any other lot at most 6
-  frames in a row, one forced lot per frame.
+  played (it keeps the game's slice), a waiting stage (17 on), the loading screen or the impostor builder's updates;
+  force the longest waiter after 6 frames, one lot per frame, so no lot waits more than 5 + N frames with N waiting;
+  stay effective with the Frame Profiler on.
 - Hold the map-view "skip lot streaming" gate (`+0x258`) only while the map is open and 1 s after, then restore it.
 - Make no write at all for a part that official Sims3SettingsSetter already handles.
 - Keep building and apartment shells, large exterior geometry and flora in the first object window.
@@ -44,6 +45,9 @@ powershell -File tools/lot_streaming_test/run.ps1 [-CsvDir <folder with LotLoadA
 | 2026-10-27 | branch `perf/lot-streaming` | `tools/lot_streaming_test` hysteresis model (5 seeds, 3000 frames) | Detail switches at 70 / 8, 300 / 16 and 150 / 12: 6652 -> 1344, 5522 -> 1732, 6062 -> 1540 | None |
 | 2026-10-27 | branch `perf/lot-streaming` | `tools/lot_streaming_test -Exe` on Steam TS3W.exe (SHA-256 10b2423e...0609) | All six sites match; threshold 12 | None |
 | 2026-10-27 | branch `perf/lot-streaming` | Smoke and Lighting suites, three builds (development, public, standard) | Passed; builds without warnings | None |
+| 2026-10-27 | branch `perf/lot-streaming` | Independent review of the release diff | Fixed: the gate passed every call through while the Frame Profiler detoured the renderer update (now a marker on the lot pass's CALL); a lot could wait far longer than 6 frames with 8 or more waiting (the longest waiter is forced); the played lot lost its own slice; the share started without the slice stub. Rejected with evidence: a negative metric (its only caller is 0x00C6C5D7 and the value is a square) | None |
+| 2026-10-27 | branch `perf/lot-streaming` | `tools/lot_streaming_test` after the review fixes, 12 CSVs (195 lots) | Frames over 16 ms 162 -> 10, time over 8 ms 3412 -> 383 ms; 10 lots waiting behind the played lot: longest wait 15 frames, each ran at least 199 times in 2000 frames | None |
+| 2026-10-27 | 2.16.2-dev.1 | In game (log) | `[LotVisibility] Detailed lots measured at 0.81`, `[LotLod] Max Active Lot Threshold 12 -> 16`, `[LotBuildShare] On` | In game |
 
 ## In-game test plan
 

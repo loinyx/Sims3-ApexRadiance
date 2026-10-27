@@ -63,11 +63,14 @@ a value another mod set, and restores only what it changed.
 
 Started with Lot Lighting While Moving (on by default; development switch `lot_build_share`). The load stages of every
 streaming lot share one build budget per frame: 6 ms with the camera still, 4 ms while it moves. Each lot's call gets
-what is left of the budget as its slice. The lot being played always runs, with at least half the budget. Another lot
-whose turn comes with less than 1 ms left waits for the next frame, the same answer the stages give when the lot's lock
-is busy; after 6 frames of waiting it runs one stage, one such lot per frame. Stages 17 and later only wait for a job or
-for the lot's lighting and always run, so no lot finishes later because of a wait. The loading screen and the impostor
-builder's synchronous updates are left alone. A lot's build ends a few frames later; the replay of recorded loads is in
+what is left of the budget as its slice. The lot being played always runs with the game's own slice; its time counts
+against the budget. Another lot whose turn comes with less than 1 ms left waits for the next frame, the same answer the
+stages give when the lot's lock is busy; once it has waited 6 frames and longest of the waiting lots it runs one stage,
+one such lot per frame, so with N lots waiting none waits more than 5 + N frames. Stages 17 and later only wait for a job
+or for the lot's lighting and always run. Only the lot pass's own updates are gated: a second gate layer on its CALL
+(0x00C7CEDF) marks them, so the impostor builder's synchronous updates, the loading screen and a detour of the renderer
+update's entry (the Frame Profiler's) leave it working. Without Lot Lighting While Moving's slice stub the share stays
+off. A lot's build ends a few frames later; the replay of recorded loads is in
 the [validation page](../../validation/performance-lot-streaming.md#latest-results).
 
 ## Settings
@@ -119,7 +122,7 @@ the player set them.
 | Extended lot detail | WorldManager `[0x011ECBC4]`: `+0xDC` Lot LOD distance (70), `+0xE4` Max Active Lots (8); `+0xE0` Active Lot Bias (8.0) and `+0xE8` terrain-height threshold (600) are left alone | The two values per live WorldManager, captured first and maintained by `Tick` while still owned |
 | Smooth lot streaming | Throttle test 0x00C6C695 (inside LotLodScoring 0x00C6C290) on the flag byte 0x011ECBC0; `+0xEC` camera-speed threshold (32); `cmp edx,[0x01184328]` at 0x00C6C6B7 (Max Active Lots against the threshold, 12) | Flag on; `+0xEC` = 5.0 after checking a finite value in 0 to 100; the threshold raised to Max Active Lots while it is lower, restored only while it holds Apex's value |
 | Keep lot visibility stable | `JZ` (0x74) at 0x00C63015 in the lot metric 0x00C62D80, then `subss xmm0,[edi+0E0h]` (8 bytes at 0x00C6301D) | That instruction becomes `mulss xmm0,[factor]` (0.81), only when the JZ reads 0x74 and the 8 bytes match |
-| Shared lot build time | CALL 0x00AEB306 (renderer update 0x00AEB2E0 -> load stages 0x00AEA680, result unused); lot pass CALL 0x00C7CEDF; slice load 0x00AEA6D8 | `CallChain` layer `LotBuildGate` (outermost) on 0x00AEB306; the slice cap through Lot Lighting While Moving's stub at 0x00AEA6D8 |
+| Shared lot build time | CALL 0x00AEB306 (renderer update 0x00AEB2E0 -> load stages 0x00AEA680, result unused); lot pass CALL 0x00C7CEDF; slice load 0x00AEA6D8 | `CallChain` layer `LotBuildGate` on 0x00AEB306 (the gate) and on 0x00C7CEDF (the lot pass marker); the slice cap through Lot Lighting While Moving's stub at 0x00AEA6D8 |
 | Pause in map view | `+0x258` "skip lot streaming"; map view from `Camera_IsMapViewModeEnabled` | The gate while the map is open and 1000 ms after |
 | Spread lot objects | LotAddObjectsToScene 0x00AC1130, LotUpdateObjectSceneNode 0x00ABFAC0, ScriptMessageScope 0x007D2DB0 / 0x007D2DF0, PostRemoteMethodCall 0x00ABE9C0, IsObjectLargeOrFlora 0x00B088C0 | `EntryChain` layer `LotObjectThrottle` on AddLotObjectsToScene |
 
