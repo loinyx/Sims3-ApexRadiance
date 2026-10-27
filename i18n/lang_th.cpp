@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Thai}
 const I18n::Pair kPairs[] = {
+    {"Lot Streaming: lots that load together share the work, so panning stutters less", "การสตรีมที่ดิน: ที่ดินที่โหลดพร้อมกันจะแบ่งงานกัน กล้องจึงกระตุกน้อยลง"},
+    {"Night Lights: fence shadows on the lawn update in a fraction of the time", "แสงกลางคืน: เงารั้วบนสนามหญ้าอัปเดตเร็วขึ้นมาก"},
+    {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "การสตรีมที่ดิน: คงการมองเห็นที่ดินให้เสถียร ทำให้ที่ดินตรงขอบคงรายละเอียดเต็ม"},
+    {"Lot Streaming: Smooth lot streaming keeps working with up to 16 detailed lots", "การสตรีมที่ดิน: สตรีมที่ดินอย่างลื่นไหล ใช้ได้กับที่ดินแสดงรายละเอียดสูงสุด 16 แปลง"},
     {"Night Lights: extra safety so old lamp light cannot stay stuck on the ground", "แสงกลางคืน: ป้องกันเพิ่มเติมไม่ให้แสงเก่าของโคมค้างอยู่บนพื้น"},
     {"Banding Fix: High-precision scene for smoother gradients, on by default", "แก้แถบสี: ฉากความแม่นยำสูงเพื่อการไล่สีที่นุ่มขึ้น เปิดเป็นค่าเริ่มต้น"},
     {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "แก้แถบสี: การ์ดออกแบบใหม่พร้อมเกรนละเอียดขึ้นที่ไม่ยุ่งกับเมนู"},

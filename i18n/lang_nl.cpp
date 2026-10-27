@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Dutch}
 const I18n::Pair kPairs[] = {
+    {"Lot Streaming: lots that load together share the work, so panning stutters less", "Kavelstreaming: kavels die samen laden verdelen het werk, zodat de camera minder hapert"},
+    {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Nachtverlichting: schaduwen van hekken op het gazon worden in een fractie van de tijd bijgewerkt"},
+    {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "Kavelstreaming: Kavelzichtbaarheid stabiel houden laat kavels aan de rand in volledig detail"},
+    {"Lot Streaming: Smooth lot streaming keeps working with up to 16 detailed lots", "Kavelstreaming: Vloeiende kavelstreaming werkt met tot 16 gedetailleerde kavels"},
     {"Night Lights: extra safety so old lamp light cannot stay stuck on the ground", "Nachtverlichting: extra beveiliging zodat oud lamplicht niet op de grond blijft hangen"},
     {"Banding Fix: High-precision scene for smoother gradients, on by default", "Banding-fix: Scène met hoge precisie voor zachtere verlopen, standaard aan"},
     {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Banding-fix: vernieuwde kaart met fijnere korrel die het menu met rust laat"},

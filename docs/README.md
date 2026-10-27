@@ -79,7 +79,7 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 | [Faster room lighting](features/performance/room-light-queue.md) with *Lamp edits all at once* (was *Lamp switches all at once*): the lamp's own story at once, the other stories together in a single frame | Released (lamp switches all at once: Experimental, 2.7.0); Released in 2.12.3: every lamp edit, own story first; Released in 2.13.0: Classic shows all floors together; Released in 2.14.0: automatic lamps first, step budget after loads |
 | [Room to save](features/performance/room-to-save.md), [Lighter window updates](features/performance/lighter-window-updates.md), [Faster scripts](features/performance/faster-scripts.md) | Experimental (released in 2.7.0); Room to save: Released in 2.14.0: earlier buffer release and compatibility with sims3-modernization |
 | [Faster memory handling](features/performance/fast-memory.md): allocator spin and background release | Released in 2.4.0; Released in 2.14.0: allocator trim and top-down large blocks |
-| [Lot Streaming](features/performance/lot-streaming.md): lot detail farther away and smoother lot streaming (idavidveiga), off by default | Experimental (released in 2.7.0) |
+| [Lot Streaming](features/performance/lot-streaming.md): lot detail farther away and smoother lot streaming (idavidveiga), off by default | Experimental (released in 2.7.0); Released in 2.16.2: shared lot build time, detailed-lot hysteresis, throttle threshold follow |
 
 ### Reports and diagnostics
 

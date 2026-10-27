@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Russian}
 const I18n::Pair kPairs[] = {
+    {"Lot Streaming: lots that load together share the work, so panning stutters less", "Подгрузка участков: участки, загружаемые вместе, делят работу, и камера меньше подтормаживает"},
+    {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Ночное освещение: тени заборов на газоне обновляются в разы быстрее"},
+    {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "Подгрузка участков: Стабильная видимость участков держит участки на границе в полной детализации"},
+    {"Lot Streaming: Smooth lot streaming keeps working with up to 16 detailed lots", "Подгрузка участков: Плавная подгрузка участков работает с числом детализированных участков до 16"},
     {"Night Lights: extra safety so old lamp light cannot stay stuck on the ground", "Ночное освещение: дополнительная защита, чтобы старый свет ламп не застревал на земле"},
     {"Banding Fix: High-precision scene for smoother gradients, on by default", "Исправление полос: Сцена высокой точности для более плавных градиентов, включена по умолчанию"},
     {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Исправление полос: обновлённая карточка с более мелким зерном, которое не трогает меню"},

@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Norwegian (Bokmal)}
 const I18n::Pair kPairs[] = {
+    {"Lot Streaming: lots that load together share the work, so panning stutters less", "Tomtestrømming: tomter som lastes samtidig deler arbeidet, så kameraet hakker mindre"},
+    {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Nattbelysning: gjerdeskygger på plenen oppdateres på en brøkdel av tiden"},
+    {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "Tomtestrømming: Hold tomtesynlighet stabil holder tomter ved kanten i full detalj"},
+    {"Lot Streaming: Smooth lot streaming keeps working with up to 16 detailed lots", "Tomtestrømming: Jevn tomtestrømming virker med opptil 16 detaljerte tomter"},
     {"Night Lights: extra safety so old lamp light cannot stay stuck on the ground", "Nattbelysning: ekstra sikring slik at gammelt lampelys ikke blir hengende på bakken"},
     {"Banding Fix: High-precision scene for smoother gradients, on by default", "Båndfjerning: Scene med høy presisjon for mykere overganger, på som standard"},
     {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Båndfjerning: nytt kort med finere korn som lar menyen være"},

@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Simplified, mainland China)}
 const I18n::Pair kPairs[] = {
+    {"Lot Streaming: lots that load together share the work, so panning stutters less", "地块流式加载：同时加载的地块分担工作，移动镜头时卡顿更少"},
+    {"Night Lights: fence shadows on the lawn update in a fraction of the time", "夜间照明：草坪上栅栏阴影的更新只需原来的一小部分时间"},
+    {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "地块流式加载：“保持地块可见性稳定”让边缘地块保持完整细节"},
+    {"Lot Streaming: Smooth lot streaming keeps working with up to 16 detailed lots", "地块流式加载：“平滑地块流式加载”在最多 16 个细节地块时依然有效"},
     {"Night Lights: extra safety so old lamp light cannot stay stuck on the ground", "夜间照明：额外保护，避免灯具的旧光残留在地面"},
     {"Banding Fix: High-precision scene for smoother gradients, on by default", "色带修复：高精度场景让渐变更平滑，默认开启"},
     {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "色带修复：重新设计的卡片，颗粒更细且不影响菜单"},

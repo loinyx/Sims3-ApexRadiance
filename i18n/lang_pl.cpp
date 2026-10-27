@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Polish}
 const I18n::Pair kPairs[] = {
+    {"Lot Streaming: lots that load together share the work, so panning stutters less", "Strumieniowanie parcel: parcele wczytywane razem dzielą pracę, więc kamera mniej się zacina"},
+    {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Oświetlenie nocne: cienie płotów na trawniku odświeżają się w ułamku czasu"},
+    {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "Strumieniowanie parcel: Stabilna widoczność parcel utrzymuje parcele na granicy w pełnym detalu"},
+    {"Lot Streaming: Smooth lot streaming keeps working with up to 16 detailed lots", "Strumieniowanie parcel: Płynne strumieniowanie parcel działa przy maksymalnie 16 szczegółowych parcelach"},
     {"Night Lights: extra safety so old lamp light cannot stay stuck on the ground", "Oświetlenie nocne: dodatkowe zabezpieczenie, by stare światło lamp nie zostawało na ziemi"},
     {"Banding Fix: High-precision scene for smoother gradients, on by default", "Korekta pasmowania: Scena o wysokiej precyzji dla gładszych gradientów, domyślnie włączona"},
     {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Korekta pasmowania: nowa karta z drobniejszym ziarnem, które omija menu"},

@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Traditional, Taiwan / Hong Kong)}
 const I18n::Pair kPairs[] = {
+    {"Lot Streaming: lots that load together share the work, so panning stutters less", "地段串流：同時載入的地段分擔工作，移動鏡頭時卡頓更少"},
+    {"Night Lights: fence shadows on the lawn update in a fraction of the time", "夜間照明：草坪上柵欄陰影的更新只需原本的一小部分時間"},
+    {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "地段串流：「保持地段可見性穩定」讓邊緣地段保持完整細節"},
+    {"Lot Streaming: Smooth lot streaming keeps working with up to 16 detailed lots", "地段串流：「平滑地段串流」在最多 16 個細節地段時依然有效"},
     {"Night Lights: extra safety so old lamp light cannot stay stuck on the ground", "夜間照明：額外保護，避免燈具的舊光殘留在地面"},
     {"Banding Fix: High-precision scene for smoother gradients, on by default", "色帶修正：高精度場景讓漸層更平滑，預設開啟"},
     {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "色帶修正：重新設計的卡片，顆粒更細且不影響選單"},

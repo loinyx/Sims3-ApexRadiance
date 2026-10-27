@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Finnish}
 const I18n::Pair kPairs[] = {
+    {"Lot Streaming: lots that load together share the work, so panning stutters less", "Tonttien suoratoisto: yhtä aikaa latautuvat tontit jakavat työn, joten kamera nykii vähemmän"},
+    {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Yövalaistus: aitojen varjot nurmikolla päivittyvät murto-osassa ajasta"},
+    {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "Tonttien suoratoisto: Vakaa tonttien näkyvyys pitää rajalla olevat tontit täysin yksityiskohtaisina"},
+    {"Lot Streaming: Smooth lot streaming keeps working with up to 16 detailed lots", "Tonttien suoratoisto: Sujuva tonttien suoratoisto toimii jopa 16 yksityiskohtaisella tontilla"},
     {"Night Lights: extra safety so old lamp light cannot stay stuck on the ground", "Yövalaistus: lisäsuoja, ettei lamppujen vanha valo jää maahan"},
     {"Banding Fix: High-precision scene for smoother gradients, on by default", "Raitojen korjaus: Tarkka kohtaus pehmeämpiin liukuväreihin, oletuksena päällä"},
     {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Raitojen korjaus: uudistettu kortti ja hienompi rae, joka ei koske valikkoon"},

@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Hungarian}
 const I18n::Pair kPairs[] = {
+    {"Lot Streaming: lots that load together share the work, so panning stutters less", "Telekbetöltés: az egyszerre betöltődő telkek megosztják a munkát, így a kamera kevésbé akad"},
+    {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Éjszakai világítás: a kerítések árnyéka a gyepen a korábbi idő töredéke alatt frissül"},
+    {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "Telekbetöltés: a Stabil telekláthatóság a határon lévő telkeket teljes részletességben tartja"},
+    {"Lot Streaming: Smooth lot streaming keeps working with up to 16 detailed lots", "Telekbetöltés: a Sima telekbetöltés legfeljebb 16 részletes telekkel is működik"},
     {"Night Lights: extra safety so old lamp light cannot stay stuck on the ground", "Éjszakai világítás: extra védelem, hogy a lámpák régi fénye ne ragadjon a talajon"},
     {"Banding Fix: High-precision scene for smoother gradients, on by default", "Sávosodás javítása: Nagy pontosságú jelenet a simább színátmenetekért, alapból bekapcsolva"},
     {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Sávosodás javítása: újratervezett kártya finomabb szemcsével, amely a menüt nem érinti"},

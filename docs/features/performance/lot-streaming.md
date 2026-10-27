@@ -11,7 +11,7 @@ detailed-lot hysteresis, throttle threshold follow and shared build time by @loi
 
 | | |
 |---|---|
-| Availability | Experimental: Released in 2.7.0. Detailed-lot hysteresis, throttle threshold follow and shared lot build time: In development (branch `perf/lot-streaming`) |
+| Availability | Experimental: Released in 2.7.0. Detailed-lot hysteresis, throttle threshold follow and shared lot build time: Released in 2.16.2 |
 | Default | Off (every switch); the shared lot build time is part of Lot Lighting While Moving, on by default |
 | Menu | System > Lot Streaming (cards *Lot detail streaming* and *Object streaming*) |
 | Configuration | `[patches.LotDetailRange]`, `[patches.LotLodStreaming]`, `[patches.LotVisibilityOverride]`, `[patches.MapViewStreamingBlocker]`, `[patches.LotObjectThrottle]` in `ApexRadiance.toml` |

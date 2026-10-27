@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Greek}
 const I18n::Pair kPairs[] = {
+    {"Lot Streaming: lots that load together share the work, so panning stutters less", "Ροή Οικοπέδων: τα οικόπεδα που φορτώνουν μαζί μοιράζονται τη δουλειά και η κάμερα κολλάει λιγότερο"},
+    {"Night Lights: fence shadows on the lawn update in a fraction of the time", "Νυχτερινός φωτισμός: οι σκιές των φραχτών στο γκαζόν ενημερώνονται σε ελάχιστο χρόνο"},
+    {"Lot Streaming: Keep lot visibility stable keeps lots at the edge in full detail", "Ροή Οικοπέδων: η Σταθερή ορατότητα οικοπέδων κρατά τα οικόπεδα στο όριο σε πλήρη λεπτομέρεια"},
+    {"Lot Streaming: Smooth lot streaming keeps working with up to 16 detailed lots", "Ροή Οικοπέδων: η Ομαλή ροή οικοπέδων λειτουργεί με έως 16 λεπτομερή οικόπεδα"},
     {"Night Lights: extra safety so old lamp light cannot stay stuck on the ground", "Νυχτερινός φωτισμός: επιπλέον προστασία ώστε το παλιό φως των λαμπών να μη μένει κολλημένο στο έδαφος"},
     {"Banding Fix: High-precision scene for smoother gradients, on by default", "Διόρθωση Λωρίδων: Σκηνή υψηλής ακρίβειας για πιο ομαλές διαβαθμίσεις, ενεργή από προεπιλογή"},
     {"Banding Fix: redesigned card with a finer grain that leaves the menu alone", "Διόρθωση Λωρίδων: ανανεωμένη κάρτα με λεπτότερο κόκκο που αφήνει το μενού ανέγγιχτο"},
