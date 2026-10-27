@@ -275,3 +275,9 @@ restarted again and again while the lots near the camera settle, not solves with
 until its restarts stop for 300 ms (at most 1 s; a lamp edit's rooms and single restarts never wait). Not yet measured in
 game; it compares with the switch off on the same route through the `[RoomSolveCauses]` counts and the Frame Profiler's
 "Lot room solve".
+
+**`restart_settle` in game (2026-10-27, 5 minutes, switch on):** the hold acted (up to 4918 picks a minute held, 69 let
+through after 1 s) but the same rooms were still solved 12 to 18 times a minute at class 0 within 10 s of camera moves,
+as without it. A room's restarts are spaced by more than 300 ms (about one every 3 to 5 s), so a 300 ms quiet does not
+fold them. The switch stays off in released builds; the spacing of a room's restarts needs measuring before any longer
+hold, which would delay the light the player sees.
