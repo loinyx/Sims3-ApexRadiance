@@ -308,6 +308,15 @@ the Attention page) and **Start playing**. The first draw sets `[ui] start_profi
 counts as done), so the page is shown once; opening another page from the sidebar ends it and keeps a previewed preset with
 Undo. Legacy `[ui] welcome_done` and `key_chosen` are kept but unused.
 
+**Room to save question.** Once per installation, the first time the menu is available after the public test
+instructions and the welcome page (a new installation or an update to a version with the question), the menu opens a
+modal "Keep Room to save on?" with the Save icon. It explains in four short paragraphs what the feature does (the 4 GB
+limit and Error 12, the 128 MB kept free and handed back before each save, the idle cache emptied when memory is low,
+nothing on screen changing) and where the switch lives, with **Turn it off** and **Keep it on** (primary). Either
+answer sets `[ui] room_to_save_asked`; Reset all settings keeps it. It is not shown where Room to save cannot run
+(game builds other than Steam 1.67.2) and is deferred like the test instructions by captures and startup banners
+([room-to-save.md](features/performance/room-to-save.md)).
+
 **Notices.** Capture, recording, comparison and startup pills share one top-center anchor 20 scaled units below the top,
 one at a time: capture or recording first, then compare, then the startup hint. Startup banners suppress routine
 notices, and captures hide them in their screenshot. Each pill sets its width from the measured text before `Begin`, so

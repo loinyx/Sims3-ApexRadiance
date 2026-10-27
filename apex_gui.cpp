@@ -2025,6 +2025,7 @@ void ResetAllRow() {
             uiDefaults.startProfileDone = previousUi.startProfileDone; // the welcome is not repeated
             uiDefaults.changelogSeen = previousUi.changelogSeen; // nor the What's new dot
             uiDefaults.testBuildSeen = previousUi.testBuildSeen;
+            uiDefaults.roomToSaveAsked = previousUi.roomToSaveAsked; // nor the Room to save question
             ApexConfig::SetUi(uiDefaults);
             LOG_INFO("[Menu] All settings reset to their defaults");
             ShowToast(I18n::Tr("All settings reset"), std::move(before), "All settings reset");
@@ -3534,6 +3535,53 @@ void PublicTestWelcome() {
         ImGui::EndPopup();
     }
 }
+// Room to save, asked once ([ui] room_to_save_asked): the first time the menu is available after installing or updating to
+// a version with this question, after the public test instructions and the welcome page, it explains the feature and asks
+// whether to keep it on. Either answer is remembered; the switch stays on Performance > Memory handling.
+bool RoomToSavePending() {
+    if (PublicTestPending() || WelcomeActive() || ApexConfig::GetUi().roomToSaveAsked) return false;
+    const ApexPatch* patch = Find(Performance::kMemoryGuardName);
+    return patch && patch->IsCompatibleWithCurrentVersion() && Switchable(patch);
+}
+void RoomToSaveQuestion() {
+    if (RoomToSavePending() && !ImGui::IsPopupOpen("##RoomToSaveQuestion")) ImGui::OpenPopup("##RoomToSaveQuestion");
+    const auto* vp=ImGui::GetMainViewport();
+    const float u=ApexUi::Unit();
+    const ImVec2 size(std::max(1.f,std::min(560.f*u,vp->Size.x-32.f*u)),
+                      std::max(1.f,std::min(420.f*u,vp->Size.y-32.f*u)));
+    ImGui::SetNextWindowSize(size,ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImVec2(vp->Pos.x+(vp->Size.x-size.x)*.5f,vp->Pos.y+(vp->Size.y-size.y)*.5f),ImGuiCond_Always);
+    if (ImGui::BeginPopupModal("##RoomToSaveQuestion",nullptr,ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoSavedSettings)) {
+        ApexUi::CardHeader(IconId::Save,"Keep Room to save on?",nullptr,nullptr,nullptr);
+        ApexUi::CardDivider();
+        const float bodyHeight=std::max(1.f,ImGui::GetContentRegionAvail().y-52.f*u);
+        if (ImGui::BeginChild("##RoomToSaveText",ImVec2(0,bodyHeight))) {
+            ApexUi::MutedText("The Sims 3 can use only 4 GB of memory. In long sessions a save can fail with Error 12 because no large free space is left for it.");
+            ApexUi::Gap(ApexUi::kSpace2);
+            ApexUi::MutedText("Room to save sets 128 MB of that space aside while you play and gives it back right before each save, so the save has room. When memory gets low, it also empties the game's cache of files it is not using.");
+            ApexUi::Gap(ApexUi::kSpace2);
+            ApexUi::MutedText("Nothing on screen changes. Keep it on if you play long sessions or a save ever failed; turn it off to leave those 128 MB to the game.");
+            ApexUi::Gap(ApexUi::kSpace2);
+            ApexUi::MutedText("You can change this later on the Performance page, under Memory handling.");
+        }
+        ImGui::EndChild();
+        ApexUi::Gap(ApexUi::kSpace2);
+        {
+            const ApexUi::ControlSizeScope controls(ApexUi::ControlSize::Primary);
+            int answer=-1; // 1 keep on, 0 turn off
+            if (ApexUi::IconTextButton("Turn it off",IconId::X,nullptr,ButtonKind::Secondary)) answer=0;
+            ImGui::SameLine(0.f,ApexUi::kSpace3*u);
+            if (ApexUi::IconTextButton("Keep it on",IconId::Check,nullptr,ButtonKind::Primary)) answer=1;
+            if (answer>=0) {
+                if (ApexPatch* patch=Find(Performance::kMemoryGuardName); patch && patch->IsEnabled()!=(answer==1)) SetPatch(patch,answer==1);
+                auto ui=ApexConfig::GetUi();ui.roomToSaveAsked=true;ApexConfig::SetUi(ui);
+                LOG_INFO(std::format("[Menu] Room to save question: {}",answer==1?"kept on":"turned off"));
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::EndPopup();
+    }
+}
 std::string VisibleVersionLabel(float maxTextWidth=FLT_MAX) {
     const std::string version=std::string("v")+APEX_VERSION_STRING;
     if (kMemoryOptimizationTest) {
@@ -3857,6 +3905,7 @@ void MainWindow() {
         DeveloperConfirmation();
         ImGui::EndDisabled();
         PublicTestWelcome();
+        RoomToSaveQuestion();
 
         // Hold to compare: the eye button, or the configured key while the pointer is over the menu.
         const bool holdKey = g_menuHovered && !peek && !io.WantTextInput && HoldShortcutDown(uiKeys.pictureCompareKey);
@@ -4837,7 +4886,7 @@ class GuiClient final : public Overlay::Client {
         UpdateMenuAvailability();
         UpdateHint();
         if (!g_menuAvailable.load()) { Overlay::SetVisible(false); return HintVisible(); }
-        if (PublicTestPending() && !BannerNeeded() && !Captures::ScreenshotPending()) Overlay::SetVisible(true);
+        if ((PublicTestPending() || RoomToSavePending()) && !BannerNeeded() && !Captures::ScreenshotPending()) Overlay::SetVisible(true);
         RunShortcuts();
         // the capture notes (recording, saved, an open session) show with the menu closed too
         return BannerNeeded() || HintVisible() || PresetPillVisible() || g_comparing || Recorder::SecondsRecorded() >= 0 || Captures::CurrentNote().visible ||

@@ -61,6 +61,10 @@ Every build adds three steps (`kMemoryOptimizationsEnabled` in [`build_flavor.h`
 The row is part of the Overview's Performance group switch. It is not in the Performance part of profiles: applying a
 profile leaves it as it is.
 
+Once per installation, the first time the menu is available, a question explains the feature in plain words and asks
+whether to keep it on (**Keep it on** / **Turn it off**); the answer sets the switch and `[ui] room_to_save_asked`
+([ui.md](../../ui.md#startup-and-notices)).
+
 ## Compatibility and interactions
 
 - **Faster memory handling** ([fast-memory.md](fast-memory.md)) changes the allocator lock and big-block releases; the
