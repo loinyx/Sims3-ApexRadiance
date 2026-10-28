@@ -9,6 +9,7 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Danish}
 const I18n::Pair kPairs[] = {
+    {"Compatibility: offers to turn off Sims 3 Performance Patch options that freeze Sims with Sims 3 Modernization", "Kompatibilitet: tilbyder at slå de Sims 3 Performance Patch-indstillinger fra, der fryser Sims med Sims 3 Modernization"},
     {"Performance: lamp light on fences and outdoor objects is reused instead of worked out again", "Ydeevne: lampelys på hegn og udendørs genstande genbruges i stedet for at blive beregnet igen"},
     {"Night Lights: a lamp no longer lights the next room's floor and furniture through the wall", "Natbelysning: en lampe lyser ikke længere gennem væggen på gulvet og møblerne i rummet ved siden af"},
     {"Night Lights: street light no longer reaches counters and furniture inside the house", "Natbelysning: gadelys når ikke længere køkkenborde og møbler inde i huset"},
