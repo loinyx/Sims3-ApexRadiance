@@ -66,3 +66,23 @@ atlas with the copy's arithmetic reproduced the squares (7.6% of the pixels off 
 **Outcome:** the texel pack raises a roofed room's alpha to 5/255 at least (`room_map_dither.cpp`; the solve's room is in
 `ebx`). Room 0 keeps 0, so the wall case is unchanged; the re-render is then identical to the plain read inside the room.
 The added ambient is 5/255 of the room's ambient colour on near-white texels, a few 8-bit levels at most. Maps already baked keep the squares until their rooms are solved again.
+
+### 2026-10-27: two roofed rooms either side of a wall
+
+**Context:** F7 19-26-24: a dark hall's floor along the wall of a lit living room showed a warm band (screen 0.090,
+0.051, 0.027). The floor copy (`PS_6478B620`, the room map's B-spline) read the 4 x 4 texels around the pixel; the
+living room's texels beyond the wall have alpha 5/255 (bright texels have little ambient weight, and roofed ones are
+kept at 5/255 or more), so the read of the room's own texels (alpha 4/255 or more) took them in.
+
+**Finding:** the alpha cannot tell two roofed rooms apart: it falls with the light (`(1 - sat(lum k)) x ambient`). A tag
+of the room in the alpha's low bits was considered and rejected: rooms joined by an arch or a doorway would then never
+mix, a hard line across every opening where the B-spline is smooth today. The story's wall mask (the stairs', one texel
+per tile, a full wall with no opening in that cell) marks walls and not openings. The class-2 floor maps lay a tile's
+texels from `(tile x n, tile z n)` (`light_detail.cpp`), so a texel's tile is its column and row over n.
+
+**Outcome:** a copy of the floor read that drops the columns and rows of the 4 x 4 whose tile lies beyond a walled side
+of the pixel's own tile (their B-spline weights set to 0 before the sum), used on floor maps whose story and class-2
+layout are found (`FloorWallMaskFor`). Offline (`tools/room_map_smooth_check`, 1666 checks, 0 failures): all 186 copies
+take the variant and are created natively; on a synthetic map (lit room alpha 5, dark room alpha 191, a wall with a
+doorway) the dark room's first half metre takes +0 green instead of +63, the doorway stays within 1 LSB of the read
+without walls, and the GPU matches the CPU reference within 1 LSB. Not yet checked in game.

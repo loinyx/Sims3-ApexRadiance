@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Korean}
 const I18n::Pair kPairs[] = {
+    {"Performance: lamp light on fences and outdoor objects is reused instead of worked out again", "성능: 울타리와 실외 오브젝트에 비치는 램프 빛을 다시 계산하지 않고 재사용해요"},
+    {"Night Lights: a lamp no longer lights the next room's floor and furniture through the wall", "야간 조명: 램프 빛이 더 이상 벽을 통과해 옆방의 바닥과 가구를 비추지 않아요"},
+    {"Night Lights: street light no longer reaches counters and furniture inside the house", "야간 조명: 가로등 빛이 더 이상 집 안의 조리대와 가구에 닿지 않아요"},
     {"Performance: Room to save asks once, after updating, whether to keep it on", "성능: 업데이트 후 한 번, 저장 공간 확보를 켜 둘지 물어봐요"},
     {"Performance: changing a lamp no longer relights rooms on other lots", "성능: 램프를 바꿔도 다른 부지의 방은 더 이상 다시 조명하지 않아요"},
     {"Night Lights: no more dark squares on lit floors under furniture", "야간 조명: 조명이 비친 바닥의 가구 아래에 어두운 사각형이 더 이상 생기지 않아요"},

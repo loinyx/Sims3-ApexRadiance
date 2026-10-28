@@ -262,6 +262,7 @@ struct BasisSmoothOptions {
     bool stairRoomFill = false; // takes effect with floorWall (stair_room_fill)
     bool floorTone = false;     // takes effect with stairRoomFill
     bool storyBlend = false;    // takes effect with stairRoomFill
+    bool smooth = true;         // false (with wallMask): the game's own bilinear reads, only moved off walls (no bicubic)
 };
 bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out, const BasisSmoothOptions& options = {});
 // Whether the vertex shader passes the world height in its TEXCOORD2.w ("mov oN.w, rX.y" after "mov oM.zw, rX.xyxz", oN the
@@ -286,13 +287,30 @@ struct RoomMapPatch {
     bool ps2x = false;
     int archConst = -1; // archAmb: kArchCells x 2 rows set per draw: (a.x, a.z, e.x, e.z), (D.rgb, 1 / |e|^2); -1 = none
     int ambConst = -1;  // archAmb: the constant holding the room's ambient colour (cA)
+    int maskSampler = -1; // wallMask: bind the story's wall mask here (point filter, clamp), -1 = none
+    int maskConst = -1;   // wallMask: set per draw: (1 / texels per tile, the first texel column of the split tiles, on, 1 / 64)
 };
 bool IsRoomMapPs(const std::vector<DWORD>& t);
 // archAmb (development builds, arch_ambient): after the read, the share of the neighbours' ambient near the room's arches
 // (lot position from the floor map uv, 4 texels a metre; arch_ambient.h's law), from archConst; all D = 0: no change
 constexpr unsigned kArchCells = 6; // (6 since dev.31: the edges of a floor opening go with the arches, opening_bounce)
 constexpr float kArchReach = 1.5f; // = ArchAmbient::kReach
-bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb = false);
+// wallMask (floor maps, basis_wall_filter): the read of the room's own texels also leaves out the texels of a tile beyond a
+// wall of the pixel's own tile (the story's wall mask, the directional maps' layout: r -x, g +x, b -z, a +z walled), so two
+// roofed rooms either side of a wall never mix while an arch or a doorway keeps its smooth read. maskConst.z = 0 turns it off.
+bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb = false, bool wallMask = false);
+// (basis_wall_filter, 2.17.1) An object shader's own bilinear read of a floor light map ("texld rD, <input uv>, sS", ps_3_0):
+// the point is kept half a floor texel inside its tile on each walled side (the story's wall mask at maskSampler), and in a
+// wall's thickness (within 6 cm of a walled tile edge) the read takes the lower of it and the first texel beyond, as the
+// directional maps' reads do. sampler -1: the read through the uv's zw (the basis-reading shaders' "texld rD, vU.zwzw, sS").
+// Per draw: sizeConst = the floor map (w, h, 1/w, 1/h); maskConst = (1 / n, first split-atlas column, on, 1 / 64);
+// tileConst = (n, n - 0.5, 0.5, 0), n = texels per tile. maskConst.z = 0: the game's read.
+struct RoomReadWallsPatch {
+    int sampler = -1;     // the floor map's sampler
+    int maskSampler = -1; // bind the story's wall mask here (point filter, clamp)
+    DWORD sizeConst = 0, maskConst = 0, tileConst = 0;
+};
+bool PatchRoomMapReadWalls(std::vector<DWORD>& t, RoomReadWallsPatch& out, int sampler);
 // The scale of the room map uv a vertex shader writes: "mul o<TEXCOORD1>.xy, v#, cK.c" (either order), the only write of
 // that output's xy. The game's room-lit vertex shaders: 1/4096 for the wall atlas, 1/32767 for the floor maps (a def in
 // vs_3_0, a constant it may set in vs_2_0: read it at the draw when not defined).
@@ -324,8 +342,9 @@ bool PatchCubeTint(std::vector<DWORD>& t, int& tintConst);
 // of the house read the room's directional maps towards the outside, which hold no light (black). The patch keeps the
 // game's light and, after the shader's last light max before oC0 ("max rL.xyz, .., .."), adds
 //   rL = max(rL, (ground atlas(world.xz) x (0.5 + 0.5 N.y) x cB.x + per-pixel lamps x cS.y) x w)
-// with w = sat(1 - plan alpha at (pixel + N x d)): the basis maps' alpha is 1 on the house plan and 0 outside, read
-// at the basis uv moved by the world normal (planConst / planConst + 1 = the rows of world xz -> uv offset, d included,
+// with w = sat(1 - plan alpha at (pixel + N x d)), and 0 where that alpha is over 0.5 (inside the plan: its bilinear edge
+// gave faces up to half a texel inside, a counter along the outside wall, part of the outdoor light): the basis maps' alpha
+// is 1 on the house plan and 0 outside, read at the basis uv moved by the world normal (planConst / planConst + 1 = the rows of world xz -> uv offset, d included,
 // .z = 0, set per draw). So faces looking into the house keep the game's light exactly; faces looking out of it take the
 // outdoor terms the outdoor-object patch uses. World (x, z, y) from TEXCOORD8 (PatchObjectLampVs); ps_3_0 without flow
 // control only; the normal = the input the shader normalizes ("nrm rN.xyz, vK"). False (t unchanged) otherwise.

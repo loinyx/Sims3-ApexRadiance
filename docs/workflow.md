@@ -82,7 +82,7 @@ follows the setting named on its page.
 | `lamp_visibility_memo` | Shipped | A lamp's wall and slab test is kept while its inputs are unchanged | [level-light-share.md](features/night-lighting/level-light-share.md#cost) |
 | `indoor_lamp_walls` | Shipped | A lamp taken through a floor opening is also stopped by the walls of its own story and of the receiving story | [stairwells.md](features/night-lighting/stairwells.md), [level-light-share.md](features/night-lighting/level-light-share.md) |
 | `arch_ambient` | Shipped | A floor near an arch takes the neighbour's higher ambient, fading over 1.5 m | [arches.md](features/night-lighting/arches.md) |
-| `basis_wall_filter` | Shipped | Directional maps read without blending across a wall | [stairs.md](features/night-lighting/stairs.md) |
+| `basis_wall_filter` | Shipped | Directional maps read without blending across a wall (stairs, window parts, furniture's floor reads); floor maps' smooth read off the walls; a room's own lamps tested against its walls in the directional maps | [stairs.md](features/night-lighting/stairs.md) |
 | `hard_wall_tops` | Shipped | A full wall under a ceiling has a hard top in the grid walk | [arches.md](features/night-lighting/arches.md) |
 | `stair_height_light` | Shipped | A lamp of the story above lights the stairwell tiles from 1.5 m higher | [stairwells.md](features/night-lighting/stairwells.md) |
 | `steady_indoor_light` | Shipped | Indoor light no longer tests the screen-collected meshes; one resend per lamp edit | [arches.md](features/night-lighting/arches.md) |

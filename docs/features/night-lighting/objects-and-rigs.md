@@ -9,7 +9,7 @@ shadows. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released (present since 2.1.0, the first version in this repository). Daytime response of the per-pixel terms: Released in 2.6.0. Walls blocking per-pixel lamps outdoors, indoor objects lit by lamps of another story, furniture keeping its light until its room changes at a lamp switch, and the game's own lighting in full daylight: Released in 2.7.0. Lighting corrections: Released in 2.12.1. The outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and the ground-light height gate: Released in 2.12.3. *Buildings block lamp light on trees and objects* on rigs (trees, bushes, rig objects), indoor and outdoor lamps through openings on objects, a lamp through an arch on objects inside it, disabled lamps no longer lighting objects: Released in 2.13.0. The reach law's lamp sum held under 1 by its brightest channel, loose outdoor objects (gates) at the fences' lamp scale, ceiling lamps of the story below kept off the furniture above: Released in 2.15.3. Loose architectural objects follow the walls' lamp gain; elevated structures avoid the ground lamp pool: Released in 2.15.4. |
+| Availability | Released (present since 2.1.0, the first version in this repository). Daytime response of the per-pixel terms: Released in 2.6.0. Walls blocking per-pixel lamps outdoors, indoor objects lit by lamps of another story, furniture keeping its light until its room changes at a lamp switch, and the game's own lighting in full daylight: Released in 2.7.0. Lighting corrections: Released in 2.12.1. The outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and the ground-light height gate: Released in 2.12.3. *Buildings block lamp light on trees and objects* on rigs (trees, bushes, rig objects), indoor and outdoor lamps through openings on objects, a lamp through an arch on objects inside it, disabled lamps no longer lighting objects: Released in 2.13.0. The reach law's lamp sum held under 1 by its brightest channel, loose outdoor objects (gates) at the fences' lamp scale, ceiling lamps of the story below kept off the furniture above: Released in 2.15.3. Loose architectural objects follow the walls' lamp gain; elevated structures avoid the ground lamp pool: Released in 2.15.4. The window pass without outdoor light inside the house plan, window parts and furniture reading the light maps on their own side of a wall: Released in 2.17.1. |
 | Default | On (all switches), Brightness 75%, Seamless light brightness 75% (the Soft light style) |
 | Menu | Lighting > Objects > *Objects* card (its folded *Game fixes* holds the stairs, doors, windows, pieces, fences and indoor rows); *Realistic lamp reach* on Lighting > Overview |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -436,7 +436,22 @@ With `janelasLuzDeFora` on: `PickObjectLamps` passes a wall within 0.75 m of the
 (rig mode 0, object VS, basis PS, night level > 0.01, ground atlas ready) draws the part with the patched object VS (TEXCOORD8 = world xzy) and
 `PatchWindowOutdoor`: after the shader's last light `max` before oC0, `rL = max(rL, (ground + lamps x cS.y) x w)` with
 `w = sat(1 - alpha)`, alpha = the basis map's house-plan alpha read at the basis uv moved 0.75 m along the world normal (rows from
-`WorldUvRows`: `dp4 rA.zw, rWorld, c15/c16` then `mul oT0.xy, rA.zwzw, c18.zwzw`). Faces looking into the house keep the game's light exactly.
+`WorldUvRows`: `dp4 rA.zw, rWorld, c15/c16` then `mul oT0.xy, rA.zwzw, c18.zwzw`), and `w = 0` where alpha is over 0.5 (inside
+the plan; the plan's texel edge is the outside wall, and its bilinear read gave faces up to half a metre inside, such as a
+kitchen counter top along that wall, up to half the outdoor light). Faces looking into the house keep the game's light. Where
+the story's wall mask is known ([stairs.md](stairs.md)), the copy also moves the uv of its 4 directional reads off the walls
+(`PatchBasisSmooth` with `wallMask` and `smooth = false`: the game's bilinear reads, never across a walled side of the
+pixel's tile, the lower of the two texels in a wall's thickness), as the stairs' reads are: the bilinear read took the
+texel of the room beyond a wall into a face against it (a counter along the wall of a room lit red took the red on its
+back half metre). The same copy's own read of the floor light map through the uv's zw (4 texels a metre, bilinear) is
+kept off the walls too (`PatchRoomMapReadWalls`: half a floor texel inside the pixel's tile on a walled side, the lower
+of the two sides in a wall's thickness): it gave a counter top's back strip, a few centimetres wide, the next room's
+floor light. Without a mask, or where the copy does not fit (5 more temps), the copy without it draws.
+
+Room-mode objects drawn by the game's shader through the Rooms at Night furniture path that read the floor light map
+for their upward faces ("texld rL, vU, sF" times the normal's y; a door frame, a shelf's top) draw with the same read
+off the walls where the map's story is known (`FurnitureFloorMap`, `PatchRoomMapReadWalls`): a door frame in the wall
+between a lit room and a dark hall read the map on the wall's line, half of each side.
 No object catalog identifies windows: the rule is geometric, so any room-rig object drawn with a basis-reading object shader whose faces look
 out of the house plan is affected (in the captures only window parts were). The light in the shader's bloom alpha (`lum - c3.x`) can rise
 slightly with it. Offline: 1 of the 13 captured basis-reading pixel shaders is accepted (the window one), and native D3D9 creates it.

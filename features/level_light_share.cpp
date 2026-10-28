@@ -4850,11 +4850,13 @@ struct WallMaskRec {
     std::array<uint8_t, 64 * 64> roomIdx{};
     std::vector<std::pair<uintptr_t, int>> rooms; // (room, id)
     uintptr_t mgr = 0;
+    int w = 0, h = 0; // the story grid's tiles (FloorWallMaskFor: the floor maps' layout)
 };
 std::mutex g_wallMaskMx;
 std::unordered_map<uintptr_t, std::shared_ptr<const WallMaskRec>> g_wallMasks; // by story manager, under g_wallMaskMx
 std::atomic<uint32_t> g_wallMaskGen{1};
 std::atomic<long> g_wallMaskBuilt{0}, g_wallMaskFound{0}, g_wallMaskMissed{0};
+std::atomic<long> g_floorMaskFound{0}, g_floorMaskMissed{0}, g_floorMaskLayout{0}; // (FloorWallMaskFor)
 void NoteWallMask(uintptr_t mgr, const StoryGrid& g) {
     if (!DevSwitches::BasisWallFilter() || !mgr) return;
     auto m = std::make_shared<WallMaskRec>();
@@ -4872,6 +4874,7 @@ void NoteWallMask(uintptr_t mgr, const StoryGrid& g) {
             p[3] = blocks(GridZL(g, i, j + 1)) ? 255 : 0;
         }
     m->mgr = mgr;
+    m->w = g.w, m->h = g.h;
     m->roomIdx.fill(255);
     if (DevSwitches::StairRoomFill())
         for (int j = 0; j < std::min(64, g.h); j++)
@@ -4897,7 +4900,9 @@ void NoteWallMask(uintptr_t mgr, const StoryGrid& g) {
             }
     std::lock_guard<std::mutex> lk(g_wallMaskMx);
     const auto it = g_wallMasks.find(mgr);
-    if (it != g_wallMasks.end() && it->second->px == m->px && it->second->roomIdx == m->roomIdx && it->second->rooms == m->rooms) return;
+    if (it != g_wallMasks.end() && it->second->px == m->px && it->second->roomIdx == m->roomIdx && it->second->rooms == m->rooms && it->second->w == m->w &&
+        it->second->h == m->h)
+        return;
     m->gen = g_wallMaskGen.fetch_add(1, std::memory_order_relaxed);
     if (g_wallMasks.size() > 256) g_wallMasks.clear();
     g_wallMasks[mgr] = std::move(m);
@@ -6235,6 +6240,7 @@ struct ExitLamp {
 using ExitMap = std::unordered_map<uintptr_t, ExitLamp>;
 std::mutex g_exitMx;
 std::shared_ptr<const ExitMap> g_exitSnap;
+std::atomic<uint32_t> g_exitGen{1}; // moved whenever g_exitSnap is replaced (under g_exitMx): part of LampVisibilityState
 std::unordered_map<uintptr_t, std::pair<ExitLamp, std::vector<uintptr_t>>> g_exitTakers; // gather thread: light -> (its record, the rooms taking it)
 std::atomic<long> g_exitPublished{0}, g_exitTests{0}, g_exitBlocked{0};
 std::shared_ptr<const ExitMap> ExitSnap() {
@@ -6267,6 +6273,7 @@ void NoteExitLamps(uintptr_t room, const std::vector<std::pair<uintptr_t, ExitLa
     {
         std::lock_guard<std::mutex> lk(g_exitMx);
         g_exitSnap = std::move(next);
+        g_exitGen.fetch_add(1, std::memory_order_relaxed);
     }
     g_exitPublished.fetch_add(1, std::memory_order_relaxed);
 }
@@ -6768,6 +6775,7 @@ void ClearInnerState() { // MaybeClearRooms (a new world): light tree thread
     g_exitTakers.clear();
     std::lock_guard<std::mutex> lk(g_exitMx);
     g_exitSnap.reset();
+    g_exitGen.fetch_add(1, std::memory_order_relaxed);
 }
 void ClearRoofedState() { // MaybeClearRooms (a new world): light tree thread
     g_roofedLogged.clear();
@@ -11203,6 +11211,41 @@ bool UnderFloorOpening(const RoomInfo& info, const float* pos) {
         return false;
     }
 }
+// (2.17.1) The share of a lamp of a roofed room's own story reaching a directional map's sample (pos: the tile's centre 0.5 m
+// up) past the story's walls (YardPass: the walls with their openings and tops, the lamp's penumbra); 1 for a lamp of another
+// story, of room 0, or one Apex took through an opening or a floor (tested above), and when the story's grid is not known.
+// Light tree thread.
+std::atomic<long> g_ownBasisTests{0}, g_ownBasisBlocked{0}, g_ownBasisDimmed{0};
+bool OwnLampOf(BYTE* room, void* light, uintptr_t& mgr) { // POD (SEH): a lamp of the roofed room's story, not outdoors
+    __try {
+        if (!RoofedRoom(room)) return false;
+        mgr = *reinterpret_cast<const uintptr_t*>(room);
+        const BYTE* L = static_cast<const BYTE*>(light);
+        // (+0x08, the lamp's room id, is valid with +0x100 bit 0x04: engine/light-objects-and-rigs.md)
+        return mgr && *reinterpret_cast<const int*>(L + 0xD0) == *reinterpret_cast<const int*>(mgr + 0x88) && *reinterpret_cast<const int*>(L + 0xB0) != 0xB &&
+               (L[0x100] & 0x04) && *reinterpret_cast<const int*>(L + 0x08) != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+float OwnLampPass(BYTE* room, void* light, const float* pos) {
+    uintptr_t mgr = 0;
+    if (!DevSwitches::BasisWallFilter() || !OwnLampOf(room, light, mgr)) return 1.0f; // (part of the walls in the directional maps)
+    if (const RoomInfo* info = SolveInfo(room))
+        if (FindCross(*info, reinterpret_cast<uintptr_t>(light)) || FindInner(*info, reinterpret_cast<uintptr_t>(light)) || FindSame(*info, reinterpret_cast<uintptr_t>(light))) return 1.0f;
+    const std::shared_ptr<const StoryGrid> g = EnsureStoryGrid(mgr); // (kept per frame and walls' generation: g_gridMemo)
+    if (!g) return 1.0f;
+    alignas(16) float lampW[4] = {};
+    GridWhy why{};
+    if (++g_pointGen == 0) g_pointGen = 1;
+    const uint64_t timedFrom = __rdtsc();
+    const float pass = YardPass(g.get(), nullptr, light, pos, lampW, why);
+    AddSolveCycles(__rdtsc() - timedFrom);
+    g_ownBasisTests.fetch_add(1, std::memory_order_relaxed);
+    if (!(pass > 0.0f)) g_ownBasisBlocked.fetch_add(1, std::memory_order_relaxed);
+    else if (pass < 1.0f) g_ownBasisDimmed.fetch_add(1, std::memory_order_relaxed);
+    return pass;
+}
 void __fastcall BasisLightHook(BYTE* room, void*, const float* pos, void* light, float* acc) {
     // Quick outdoor lamp edits (Instant only): a directional map written by this solve is not kept (that solve cannot be a delta's base)
     if (room && OutdoorDelta::Enabled()) OutdoorDelta::NoteDirectional(room);
@@ -11289,6 +11332,19 @@ void __fastcall BasisLightHook(BYTE* room, void*, const float* pos, void* light,
             }
             const float k = std::min(scale, 1.0f) * openShare;
             for (int i = 0; i < 16; ++i) acc[i] += contribution[i] * k;
+            return;
+        }
+    // (2.17.1) A lamp of the roofed room's own story, not one Apex took through an opening or a floor: the walls of the story
+    // between it and the tile (OwnLampPass). The game's floor and wall solve tests them (0x0069FC40); the directional maps
+    // never did, so in a room whose wall was opened (one room now: a bedroom and a kitchen beside it) or shaped like an L,
+    // every object took the lamp behind the wall that still stands (an F7 capture: the kitchen's counter red from the
+    // bedroom's lamp, the floor in front of it dark).
+    if (openShare == 1.0f && g_installed.load(std::memory_order_relaxed) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
+        if (const float own = OwnLampPass(room, light, pos); own < 1.0f) {
+            if (!(own > 0.0f)) return; // behind a wall: this lamp adds nothing to the texel
+            alignas(16) float contribution[16] = {};
+            reinterpret_cast<BasisLight_t>(kBasisLight)(pos, light, contribution);
+            for (int i = 0; i < 16; ++i) acc[i] += contribution[i] * own;
             return;
         }
     if (openShare != 1.0f) { // Keep earlier lamps unchanged when an imported lamp needs a different weight.
@@ -15701,16 +15757,18 @@ uint64_t LampVisibilityState() {
     uint32_t rb;
     std::memcpy(&rb, &r, 4);
     const uint32_t wall = g_wallSnapGen.load(std::memory_order_relaxed), floor = g_floorSnapGen.load(std::memory_order_relaxed);
+    // (the lamps shining out of a house: ExitLampVisibility reads only the snapshot g_exitGen names, which is never changed in place)
+    const uint32_t exits = g_exitGen.load(std::memory_order_relaxed);
     const uint32_t flags = (g_objectWallsOn.load(std::memory_order_relaxed) ? 1u : 0u) | (g_installed.load(std::memory_order_relaxed) ? 2u : 0u) |
                            (Penumbra::g_on.load(std::memory_order_relaxed) ? 4u : 0u);
     // (2.15.3) asked twice per lamp per object draw: the last value while its inputs are the same (the 64-bit multiply is a
     // CRT call, __allmul, on x86)
-    thread_local uint32_t t_wall = ~0u, t_floor = ~0u, t_rb = ~0u, t_flags = ~0u;
+    thread_local uint32_t t_wall = ~0u, t_floor = ~0u, t_rb = ~0u, t_flags = ~0u, t_exits = ~0u;
     thread_local uint64_t t_state = 0;
-    if (wall == t_wall && floor == t_floor && rb == t_rb && flags == t_flags) return t_state;
+    if (wall == t_wall && floor == t_floor && rb == t_rb && flags == t_flags && exits == t_exits) return t_state;
     uint64_t s = (uint64_t(wall) * 1099511628211ull) ^ (uint64_t(floor) << 21) ^ (uint64_t(rb) << 7);
-    s ^= flags;
-    t_wall = wall, t_floor = floor, t_rb = rb, t_flags = flags, t_state = s;
+    s ^= flags ^ (uint64_t(exits) * 0xC2B2AE3D27D4EB4Full);
+    t_wall = wall, t_floor = floor, t_rb = rb, t_flags = flags, t_exits = exits, t_state = s;
     return s;
 }
 bool VisibilityDiagArmed() { return g_diagArmed.load(std::memory_order_relaxed); } // F8 records each test: no memo then
@@ -17419,8 +17477,9 @@ std::string WallMaskStatus() {
         std::lock_guard<std::mutex> lk(g_wallMaskMx);
         n = g_wallMasks.size();
     }
-    return std::format("walls in the directional maps: {} story masks (built {} times), a draw's maps matched to a story {} times, not matched {}; ambient maps read {} (a room not readable {}); stair draws blended with the story above {} (no story above known {})", n,
-                       g_wallMaskBuilt.load(), g_wallMaskFound.load(), g_wallMaskMissed.load(), g_ambMapReads.load(), g_ambMapFails.load(), g_storyBlendDraws.load(), g_storyBlendNone.load());
+    return std::format("walls in the directional maps: {} story masks (built {} times), a draw's maps matched to a story {} times, not matched {}; ambient maps read {} (a room not readable {}); stair draws blended with the story above {} (no story above known {}); floor maps matched to a story {} times, not matched {}, another layout {}", n,
+                       g_wallMaskBuilt.load(), g_wallMaskFound.load(), g_wallMaskMissed.load(), g_ambMapReads.load(), g_ambMapFails.load(), g_storyBlendDraws.load(), g_storyBlendNone.load(),
+                       g_floorMaskFound.load(), g_floorMaskMissed.load(), g_floorMaskLayout.load());
 }
 // POD (SEH): whether the D3D texture tex is one of the story manager's room light maps (its sets at +0x16C + class x 64, four
 // maps each; 0x006A7700 binds the floor's from there, as the directional maps from +0x220: the wrapper's texture at +0x30
@@ -17457,6 +17516,54 @@ bool StoryMapsInclude(uintptr_t mgr, uintptr_t tex, StoryMapSlot& slot) {
 // rooms were solved again and the arch's step came back on the floor, a straight line on the arch's wall line, the two
 // floors' ambients apart again; exact float equality is what the match asked for)
 bool SameAmbient(const float* a, const float* b) { return ArchAmbient::Same(a, b); }
+// (basis_wall_filter) The floor maps' wall mask (LevelLightShare.h). The class-2 layout (light_detail.cpp): a tile's texels
+// start at (tile x n, tile z n) from the lot's origin, n = 4 (8 with Light detail High); the map is n x the lot's tiles
+// rounded up to a power of two, twice as wide where the split tiles' atlas follows. Other classes (1 or 2 texels a tile)
+// are not laid out from a tile origin the game writes with that n: they keep the read without walls.
+bool FloorWallMaskFor(uintptr_t floorTex, int w, int h, uint32_t knownGen, uint32_t& gen, uint8_t* px, float& perTile, float& splitU) {
+    if (!DevSwitches::BasisWallFilter() || !floorTex || w <= 0 || h <= 0) return false;
+    struct Memo {
+        uintptr_t tex = 0, mgr = 0;
+        StoryMapSlot slot;
+        uint32_t frame = 0; // (no story found: looked for again 60 frames later)
+    };
+    static Memo s_memo[16]; // render thread
+    Memo& m = s_memo[(static_cast<uint32_t>(floorTex) * 2654435761u) >> 28];
+    const uint32_t frame = g_presentFrame.load(std::memory_order_relaxed);
+    if (m.tex == floorTex && !m.mgr && frame - m.frame < 60) return false;
+    std::lock_guard<std::mutex> lk(g_wallMaskMx);
+    if (m.tex != floorTex || !m.mgr || !g_wallMasks.count(m.mgr) || !StoryMapSlotMatches(m.slot, floorTex)) {
+        m = Memo{floorTex, 0, {}, frame};
+        for (const auto& [mgr, rec] : g_wallMasks)
+            if (StoryMapsInclude(mgr, floorTex, m.slot)) {
+                m.mgr = mgr;
+                break;
+            }
+        if (!m.mgr) {
+            g_floorMaskMissed.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+        g_floorMaskFound.fetch_add(1, std::memory_order_relaxed);
+    }
+    const WallMaskRec& rec = *g_wallMasks.find(m.mgr)->second;
+    const int n = LightDetail::Active() ? 8 : 4;
+    const auto pow2 = [](int v) {
+        int p = 1;
+        while (p < v) p <<= 1;
+        return p;
+    };
+    const int pw = rec.w > 0 && rec.w <= 64 ? pow2(n * rec.w) : 0, ph = rec.h > 0 && rec.h <= 64 ? pow2(n * rec.h) : 0;
+    if (!pw || !ph || pw > 2048 || h != ph || (w != pw && w != 2 * pw)) {
+        g_floorMaskLayout.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    perTile = static_cast<float>(n);
+    splitU = static_cast<float>(pw);
+    gen = rec.gen;
+    if (gen != knownGen && px) std::memcpy(px, rec.px.data(), rec.px.size());
+    return true;
+}
+
 std::atomic<long> g_archUnion{0};
 // (the draw's story: found by its room map's set, +0x16C, UNVERIFIED; or by its directional maps, +0x220, confirmed by the wall
 // masks; off-story: the draw matched by value only rooms of another story or lot, which give nothing; spread: no story known
@@ -17652,7 +17759,7 @@ std::string ArchAmbientStatus() {
 }
 std::string Status() {
     return std::format("Colour groups committed {} ({} native fallbacks) | ", g_groupCommits.load(), g_groupFallbacks.load()) + SlabStatus() + " | " + std::format("{} | outdoor lights carried to other stories: {} | stories updated: {} | walls of the light's story: {}/{} classes, {} tests, {} blocked | indoor "
-                       "lamps through stair openings: {} | seamless walls between floors: {}{}{}{}{}",
+                       "lamps through stair openings: {} | seamless walls between floors: {}{}{}{}{}{}",
                        g_installed ? "Active" : "Off", g_shared.load(), g_queued.load(), g_evalClasses.load(), std::size(kClasses), g_wallTests.load(), g_wallBlocked.load(),
                        !g_indoorReady ? std::string("not installed")
                                       : std::format("{}, {} taken, {} points tested ({} behind a floor, {} behind a wall), {} rooms updated, lighting detail {} ({} raised)",
@@ -17678,6 +17785,7 @@ std::string Status() {
                            ? std::format(" | rooms lit only by lamps of another story given no boost: {} (normalisation not finite: {})", g_normCrossOnly.load(), g_normNotFinite.load())
                            : "",
                        g_basisTests.load() ? std::format(" | directional maps: lamps of another story tested {}, behind a floor {}", g_basisTests.load(), g_basisBlocked.load()) : "",
+                       g_ownBasisTests.load() ? std::format(" | directional maps: own-story lamps tested {}, behind a wall {}, in its penumbra {}", g_ownBasisTests.load(), g_ownBasisBlocked.load(), g_ownBasisDimmed.load()) : "",
                        g_faults.load() ? std::format(" | failures: {}", g_faults.load()) : "") + OpeningsStatus() + " | " + WallOpeningsText(false) +
            std::format(" | daytime curve in roofed rooms: outdoor lamps x {:.3f} in solves now, lamp points scaled {}, rooms gathered again at a settled day or night {}",
                        g_roomLampDay.load(), g_dayScaled.load(), g_dayRoomsSent.load()) +

@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Greek}
 const I18n::Pair kPairs[] = {
+    {"Performance: lamp light on fences and outdoor objects is reused instead of worked out again", "Επιδόσεις: το φως των λαμπών σε φράχτες και εξωτερικά αντικείμενα επαναχρησιμοποιείται αντί να υπολογίζεται ξανά"},
+    {"Night Lights: a lamp no longer lights the next room's floor and furniture through the wall", "Νυχτερινός φωτισμός: μια λάμπα δεν φωτίζει πια μέσα από τον τοίχο το πάτωμα και τα έπιπλα του διπλανού δωματίου"},
+    {"Night Lights: street light no longer reaches counters and furniture inside the house", "Νυχτερινός φωτισμός: το φως του δρόμου δεν φτάνει πια στους πάγκους και στα έπιπλα μέσα στο σπίτι"},
     {"Performance: Room to save asks once, after updating, whether to keep it on", "Επιδόσεις: ο Χώρος για αποθήκευση ρωτά μία φορά, μετά την ενημέρωση, αν θα μείνει ενεργός"},
     {"Performance: changing a lamp no longer relights rooms on other lots", "Επιδόσεις: η αλλαγή μιας λάμπας δεν φωτίζει πια ξανά δωμάτια σε άλλα οικόπεδα"},
     {"Night Lights: no more dark squares on lit floors under furniture", "Νυχτερινός φωτισμός: όχι πια σκοτεινά τετράγωνα στο φωτισμένο πάτωμα κάτω από τα έπιπλα"},

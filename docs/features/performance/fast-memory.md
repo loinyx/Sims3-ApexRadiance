@@ -119,6 +119,10 @@ A/B with the Frame Profiler's sampling run: the "system code called from" rows 0
 
 - Returning the free pages inside the allocator's cores to Windows: splits and coalesces write headers into the free
   range, so every path that hands out a chunk would need a recommit ([history](../../history/performance-fast-memory.md)).
+- Returning the free pages of the script heap and of the allocator's cores to Windows, committed again by the internal
+  malloc and realloc and by a fault handler (development builds, 2026-10-27): it worked in game (120 to 245 MB of private
+  memory given back, no fault) but leaves the address space as it is, which is what runs out in a 32-bit session; the
+  measure players watch (address space in use) did not change ([history](../../history/performance-fast-memory.md)).
 
 The trim freed nothing in one development session; it is kept until measured in game
 ([history](../../history/performance-fast-memory.md)).

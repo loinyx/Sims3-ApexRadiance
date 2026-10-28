@@ -190,6 +190,11 @@ std::string ArchAmbientStatus();
 // walled) of the story whose directional maps include the D3D texture basisTex (render thread). gen = the mask's version;
 // px (16384 bytes) is written when it differs from knownGen. False: no mask known for that story.
 bool WallMaskFor(uintptr_t basisTex, uint32_t knownGen, uint32_t& gen, uint8_t* px);
+// (basis_wall_filter) The same mask for a floor or ceiling map (D3D texture floorTex, w x h texels) of a story's room maps, when
+// its layout is the class-2 one: perTile texels per tile from the lot's origin (4, 8 with Light detail High), the lot's
+// width x perTile rounded up to a power of two, and the split tiles' atlas from splitU (that width, when the map is twice it).
+// False: no story known for the map, or another layout. Render thread.
+bool FloorWallMaskFor(uintptr_t floorTex, int w, int h, uint32_t knownGen, uint32_t& gen, uint8_t* px, float& perTile, float& splitU);
 // (development builds, stair_room_fill) the story's ambient per tile (64 x 64 x 4 floats; its room's +0x110), for the draw's
 // directional maps; sig changes with the values. False: no story or an unreadable room.
 bool AmbientMapFor(uintptr_t basisTex, uint64_t knownSig, uint64_t& sig, float* rgba);

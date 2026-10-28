@@ -350,6 +350,8 @@ struct PsFacts {
     uint16_t declared = 0; // bit s = sampler s declared (0: not read)
     int8_t lastLm = -1;    // DrawIndoorObject: the sampler of the room light map at the last draw that found one
     bool ps3 = false;      // ps_3_0 (PatchIndoorBasis patches nothing else: DrawIndoorObject skips its sampler scan)
+    int8_t floorMap = -1;  // (2.17.1) OnDrawFurniture: the sampler where a floor map of a known story was last found
+    uint32_t floorScanAt = 0; // (2.17.1) the frame of its last scan that found none
 };
 std::unordered_map<IDirect3DPixelShader9*, PsFacts> g_psFacts;
 // (2.15.3) 32 recent shaders' entries (pointers into g_psFacts / g_vsInfo: stable until Shutdown clears the maps, and these)
@@ -4238,6 +4240,7 @@ struct PatchedPs {
     ShaderPatches::RoomMapPatch room;
     ShaderPatches::WindowOutdoorPatch window;
     ShaderPatches::WallScalePatch wall;
+    ShaderPatches::RoomReadWallsPatch roomRead; // (2.17.1) a floor map's read off the walls (PatchRoomMapReadWalls)
     DWORD nightConst = 0;
     int cubeTint = -1; // PatchCubeTint
     DWORD nativeAlphaSampler = 0;
@@ -4632,9 +4635,8 @@ int PickFenceLampsImpl(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
 
 // (2.15.3) A group's pick kept, as PickMemo keeps an object's (its comment has the rules): keyed by the group (its entry and
 // the generation of its positions, moved at every read of them) and the law, valid while the lamp list (g_lampMemoGen) and
-// everything the wall and slab test reads (LampVisibilityState, before and after the pick) are the same; a pick that weighed
-// a lamp shining out of a house is not kept. A hit writes exactly what the pick would: the same rows, lampTop and share, the
-// counters and the candidate count. 256 entries, direct-mapped; the same switches and checks as PickMemo.
+// everything the wall and slab test reads (LampVisibilityState, before and after the pick) are the same. A hit writes exactly what the pick would: the same rows, lampTop and share, the
+// counters and the candidate count. 1024 entries, direct-mapped; the same switches and checks as PickMemo.
 constexpr unsigned kFenceRows = 4 * ShaderPatches::kObjectPixelLamps + 2; // rows 1 .. 2 + 4N of the caller's array
 struct FencePickMemo {
     const GroupCentre* g = nullptr;
@@ -4646,8 +4648,9 @@ struct FencePickMemo {
     float lampTop = 0.0f, share = 0.0f;
     float rows[kFenceRows][4] = {};
 };
-FencePickMemo g_fencePick[256];
+FencePickMemo g_fencePick[1024];
 uint32_t g_fencePickHits = 0, g_fencePickMisses = 0, g_fencePickChecks = 0;
+uint32_t g_fenceMissWhy[5] = {}; // (development builds) PickFenceLampsMemo's misses by reason, and picks not kept
 bool g_fencePickOff = false;
 int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share);
 // (development builds) the draw cost log's timed draws (DrawCostSampled): the fence picks' own time, and the arch rows' below
@@ -4666,7 +4669,8 @@ int PickFenceLamps(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float
 int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share) {
     if (!DevSwitches::LampVisibilityMemo() || g_fencePickOff || LevelLightShare::VisibilityDiagArmed() || LightProbe::Capturing())
         return PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share);
-    FencePickMemo& e = g_fencePick[(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g)) * 2654435761u ^ g.read * 0x85EBCA77u) >> 24];
+    // (the law in the slot too: a group drawn with both laws kept evicting itself)
+    FencePickMemo& e = g_fencePick[(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g)) * 2654435761u ^ g.read * 0x85EBCA77u ^ (reachLaw ? 0x9E3779B9u : 0u)) >> 22];
     const uint64_t state = LevelLightShare::LampVisibilityState();
     if (e.gen == g_lampMemoGen && e.g == &g && e.read == g.read && e.reachLaw == reachLaw && e.state == state) {
         g_fencePickHits++;
@@ -4692,11 +4696,16 @@ int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
         return e.used;
     }
     g_fencePickMisses++;
+    // (development builds) why: the slot held another group or nothing, the group's positions were read again, the lamp list
+    // changed, the walls or slabs changed; and kept or not
+    if (!kPublicBuild) {
+        const int why = e.gen == 0 || e.g != &g || e.reachLaw != reachLaw ? 0 : e.read != g.read ? 1 : e.gen != g_lampMemoGen ? 2 : 3;
+        g_fenceMissWhy[why]++;
+    }
     const uint32_t gen = g_lampMemoGen, leftOut0 = g_fenceLampsLeftOut, dimmed0 = g_fenceLampsDimmed;
     const int used = PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share);
-    bool exitLamp = false; // (the lamps SelectLamps returned: g_lampCone[0 .. n) of this pick)
-    for (int k = 0; k < g_lastLampPicked && k < 16; k++) exitLamp = exitLamp || g_lampCone[k].light != 0;
-    if (gen == g_lampMemoGen && !exitLamp && LevelLightShare::LampVisibilityState() == state) {
+    if (!kPublicBuild && !(gen == g_lampMemoGen && LevelLightShare::LampVisibilityState() == state)) g_fenceMissWhy[4]++;
+    if (gen == g_lampMemoGen && LevelLightShare::LampVisibilityState() == state) {
         e.g = &g, e.read = g.read, e.gen = gen, e.state = state, e.reachLaw = reachLaw;
         e.used = used, e.candidates = g_lastLampCandidates;
         e.leftOut = g_fenceLampsLeftOut - leftOut0, e.dimmed = g_fenceLampsDimmed - dimmed0;
@@ -4984,15 +4993,12 @@ std::string ReachLawText(bool reach, bool refused, bool placed, float scale, con
 // exitLamps (outdoor objects, 2.12.4): also the indoor lamps shining out of a house through an opening (not for windows: their
 // outdoor face would take the lamp of the room behind them)
 int PickObjectLampsImpl(float x, float y, float z, float (*lamps)[4], float& groundShare, float nearSkip, float (*cones)[4], float* lampTop, float (*reachRows)[4],
-                        bool exitLamps, bool* exitPicked) {
+                        bool exitLamps) {
     constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
     int nLamps = 0;
     const int n = SelectLamps(x, z, 40.0f, exitLamps);
     const float obj[3] = {x, y + 0.5f, z};
     float seen = 0.0f, all = 0.0f;
-    if (exitPicked)
-        for (int k = 0; k < n; k++)
-            if (g_lampCone[k].light) *exitPicked = true;
     for (int k = 0; k < n; k++) {
         const float* pr = g_lampData[k];
         const float* col = g_lampData[16 + k];
@@ -5047,8 +5053,8 @@ int PickObjectLampsImpl(float x, float y, float z, float (*lamps)[4], float& gro
 // object at one place): keyed by the exact float bits of every input and valid while the lamp list (g_lampMemoGen, the
 // SelectLamps memo's generation; cleared with that memo when a world change starts the generation again) and everything
 // the wall and slab test reads (LampVisibilityState) are the same, read before
-// and after the pick (a change during it keeps nothing). A pick with a lamp shining out of a house is not kept (its test
-// reads that lamp's own copy of the walls). A hit writes exactly what the pick would: the same lamp rows, cones and reach
+// and after the pick (a change during it keeps nothing). A lamp shining out of a house is tested on its own copy of the walls,
+// a snapshot that is replaced, never changed, and whose generation LampVisibilityState includes. A hit writes exactly what the pick would: the same lamp rows, cones and reach
 // rows, the ground share only when the pick set it, lampTop, the counters and the candidate count. With the lamp
 // visibility memo (the development switch lamp_visibility_memo; on in released builds), and never while F8 records tests or a
 // light probe captures. 1024 entries, direct-mapped.
@@ -5076,7 +5082,7 @@ int PickObjectLamps(float x, float y, float z, float (*lamps)[4], float& groundS
                     float (*reachRows)[4] = nullptr, bool exitLamps = false) {
     constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
     if (!DevSwitches::LampVisibilityMemo() || g_pickMemoOff || LevelLightShare::VisibilityDiagArmed() || LightProbe::Capturing())
-        return PickObjectLampsImpl(x, y, z, lamps, groundShare, nearSkip, cones, lampTop, reachRows, exitLamps, nullptr);
+        return PickObjectLampsImpl(x, y, z, lamps, groundShare, nearSkip, cones, lampTop, reachRows, exitLamps);
     const uint32_t flags = (cones ? 1u : 0u) | (lampTop ? 2u : 0u) | (reachRows ? 4u : 0u) | (exitLamps ? 8u : 0u);
     const uint32_t key[6] = {FloatBits(x), FloatBits(y), FloatBits(z), FloatBits(nearSkip), lampTop ? FloatBits(*lampTop) : 0u, flags};
     uint32_t h = 2166136261u;
@@ -5095,7 +5101,7 @@ int PickObjectLamps(float x, float y, float z, float (*lamps)[4], float& groundS
             if (reachRows) std::memcpy(chkReach, reachRows, sizeof chkReach);
             const uint32_t leftOut0 = g_objLampsLeftOut, dimmed0 = g_objLampsDimmed;
             chkN = PickObjectLampsImpl(x, y, z, chkLamps, chkShare, nearSkip, cones ? chkCones : nullptr, lampTop ? &chkTop : nullptr, reachRows ? chkReach : nullptr,
-                                       exitLamps, nullptr);
+                                       exitLamps);
             g_objLampsLeftOut = leftOut0, g_objLampsDimmed = dimmed0; // (counted once, below)
         }
         for (int slot = 0; slot < e.nLamps; slot++) {
@@ -5131,11 +5137,10 @@ int PickObjectLamps(float x, float y, float z, float (*lamps)[4], float& groundS
     constexpr uint32_t kUnset = 0x7FC0DEADu;
     float share;
     std::memcpy(&share, &kUnset, 4);
-    bool exitPicked = false;
-    const int n = PickObjectLampsImpl(x, y, z, lamps, share, nearSkip, cones, lampTop, reachRows, exitLamps, &exitPicked);
+    const int n = PickObjectLampsImpl(x, y, z, lamps, share, nearSkip, cones, lampTop, reachRows, exitLamps);
     const bool shareSet = FloatBits(share) != kUnset;
     if (shareSet) groundShare = share;
-    if (exitPicked || gen != g_lampMemoGen || state != LevelLightShare::LampVisibilityState() || n > static_cast<int>(N)) return n;
+    if (gen != g_lampMemoGen || state != LevelLightShare::LampVisibilityState() || n > static_cast<int>(N)) return n;
     e.gen = gen;
     e.state = state;
     std::memcpy(e.key, key, sizeof key);
@@ -5835,6 +5840,170 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
     return true;
 }
 
+// ---- Walls in the directional maps (development builds, basis_wall_filter) ----
+// The draw's directional maps name their story (LevelLightShare::WallMaskFor); its wall mask is kept here as a 64 x 64
+// texture (managed pool), uploaded again when the story's walls change, and bound at the patch's mask sampler (point, clamp)
+// for the wall-aware copy of the shader (ShaderPatches::PatchBasisSmooth wallMask). No mask known: the plain copy draws.
+std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_basisSmoothWallPs, g_basisRoomWallPs, g_basisSmoothFillPs;
+struct WallMaskTex {
+    IDirect3DTexture9* tex = nullptr;
+    uint32_t gen = 0;
+};
+std::unordered_map<uintptr_t, WallMaskTex> g_wallMaskTex; // by the directional map's D3D texture
+IDirect3DDevice9* g_wallMaskDev = nullptr;
+std::atomic<long> g_wallMaskDraws{0};
+// (development builds, stair_room_fill) the story's ambient per tile (LevelLightShare::AmbientMapFor), 64 x 64 A32B32G32R32F in the
+// managed pool by the directional map's texture, written again when the rooms' ambients change; point-sampled
+struct AmbMapTex {
+    IDirect3DTexture9* tex = nullptr;
+    uint64_t sig = 0;
+};
+std::unordered_map<uintptr_t, AmbMapTex> g_ambMapTex;
+std::atomic<long> g_ambFillDraws{0};
+void ReleaseWallMasks() {
+    for (auto& [k, m] : g_wallMaskTex)
+        if (m.tex) m.tex->Release();
+    g_wallMaskTex.clear();
+    for (auto& [k, m] : g_ambMapTex)
+        if (m.tex) m.tex->Release();
+    g_ambMapTex.clear();
+}
+// The mask texture kept for `key` (a directional map or a floor map), filled by fetch(knownGen, gen, px) when its story's
+// walls changed; nullptr when fetch knows no story for it
+template <typename Fetch> IDirect3DTexture9* WallMaskTextureFor(IDirect3DDevice9* dev, uintptr_t key, Fetch fetch) {
+    if (dev != g_wallMaskDev) {
+        ReleaseWallMasks();
+        g_wallMaskDev = dev;
+    }
+    if (g_wallMaskTex.size() > 256) ReleaseWallMasks();
+    static uint8_t px[64 * 64 * 4];
+    uint32_t gen = 0;
+    const auto found = g_wallMaskTex.find(key);
+    if (!fetch(found != g_wallMaskTex.end() && found->second.tex ? found->second.gen : 0, gen, px)) return nullptr; // (no entry for a texture with no story)
+    WallMaskTex& m = found != g_wallMaskTex.end() ? found->second : g_wallMaskTex[key];
+    if (!m.tex) {
+        if (FAILED(dev->CreateTexture(64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &m.tex, nullptr)) || !m.tex) return nullptr;
+        m.gen = 0;
+    }
+    if (gen != m.gen) {
+        D3DLOCKED_RECT lock{};
+        if (FAILED(m.tex->LockRect(0, &lock, nullptr, 0)) || !lock.pBits) return nullptr;
+        for (int y = 0; y < 64; y++) std::memcpy(static_cast<BYTE*>(lock.pBits) + y * lock.Pitch, px + y * 64 * 4, 64 * 4);
+        m.tex->UnlockRect(0);
+        m.gen = gen;
+    }
+    return m.tex;
+}
+IDirect3DTexture9* WallMaskTexture(IDirect3DDevice9* dev, DWORD basisSampler) {
+    if (!DevSwitches::BasisWallFilter()) return nullptr;
+    IDirect3DBaseTexture9* b = nullptr;
+    if (FAILED(D3D9Hooks::GetBoundTexture(dev, basisSampler, &b)) || !b) return nullptr;
+    const uintptr_t key = reinterpret_cast<uintptr_t>(b);
+    b->Release();
+    return WallMaskTextureFor(dev, key, [key](uint32_t known, uint32_t& gen, uint8_t* px) { return LevelLightShare::WallMaskFor(key, known, gen, px); });
+}
+// (Smooth light maps' floor read) the story's wall mask for the floor map `map` of size (w, h), and the read's constant: (1 /
+// texels per tile, the first texel column of the split tiles, 1 = on, 1 / 64); nullptr when its story or layout is not known
+IDirect3DTexture9* FloorWallMaskTexture(IDirect3DDevice9* dev, IDirect3DBaseTexture9* map, const float size[4], float k[4]) {
+    if (!DevSwitches::BasisWallFilter() || !map) return nullptr;
+    const uintptr_t key = reinterpret_cast<uintptr_t>(map);
+    float perTile = 0.0f, split = 0.0f;
+    IDirect3DTexture9* tex = WallMaskTextureFor(dev, key, [&](uint32_t known, uint32_t& gen, uint8_t* px) {
+        return LevelLightShare::FloorWallMaskFor(key, static_cast<int>(size[0]), static_cast<int>(size[1]), known, gen, px, perTile, split);
+    });
+    if (!tex) return nullptr;
+    k[0] = 1.0f / perTile, k[1] = split, k[2] = 1.0f, k[3] = 1.0f / 64.0f;
+    return tex;
+}
+// Binds the mask at `sampler` (point filter, clamp, linear read: no sRGB decode) for one draw and puts the stage back after it
+struct WallMaskBind {
+    static constexpr int kCount = 6;
+    IDirect3DDevice9* dev;
+    DWORD s;
+    IDirect3DBaseTexture9* old = nullptr;
+    DWORD st[kCount] = {};
+    static constexpr D3DSAMPLERSTATETYPE kStates[kCount] = {D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_SRGBTEXTURE};
+    WallMaskBind(IDirect3DDevice9* d, DWORD sampler, IDirect3DTexture9* mask) : dev(d), s(sampler) {
+        D3D9Hooks::GetBoundTexture(dev, s, &old);
+        for (int i = 0; i < kCount; i++) dev->GetSamplerState(s, kStates[i], &st[i]);
+        const DWORD want[kCount] = {D3DTEXF_POINT, D3DTEXF_POINT, D3DTEXF_NONE, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, FALSE};
+        SetTex(dev, s, mask);
+        for (int i = 0; i < kCount; i++) dev->SetSamplerState(s, kStates[i], want[i]);
+    }
+    ~WallMaskBind() {
+        SetTex(dev, s, old);
+        if (old) old->Release();
+        for (int i = 0; i < kCount; i++) dev->SetSamplerState(s, kStates[i], st[i]);
+    }
+};
+
+bool MapSize(IDirect3DBaseTexture9* t, float out[4]); // below
+// (2.17.1) The constants and the story's wall mask of a copy with a floor map's read off the walls (PatchRoomMapReadWalls)
+// for one draw, put back at its end. ok = false: the floor map's size is not known and the copy cannot draw. A map with no
+// known story or another layout draws with the read off (maskConst.z = 0: the game's read).
+std::atomic<long> g_roomReadOn{0}, g_roomReadOff{0};
+struct RoomReadBind {
+    IDirect3DDevice9* dev;
+    const ShaderPatches::RoomReadWallsPatch& p;
+    float old[3][4] = {};
+    std::optional<WallMaskBind> mask;
+    bool ok = false;
+    RoomReadBind(IDirect3DDevice9* d, const ShaderPatches::RoomReadWallsPatch& pp) : dev(d), p(pp) {
+        if (p.maskSampler < 0 || p.sampler < 0) return;
+        IDirect3DBaseTexture9* const map = D3D9Hooks::BoundTexture(dev, static_cast<DWORD>(p.sampler));
+        float c[3][4] = {};
+        if (!MapSize(map, c[0])) return;
+        IDirect3DTexture9* const tex = FloorWallMaskTexture(dev, map, c[0], c[1]);
+        if (!tex) c[1][0] = 0.25f, c[1][1] = c[0][0], c[1][2] = 0.0f, c[1][3] = 1.0f / 64.0f;
+        const float n = 1.0f / c[1][0];
+        c[2][0] = n, c[2][1] = n - 0.5f, c[2][2] = 0.5f, c[2][3] = 0.0f;
+        dev->GetPixelShaderConstantF(p.sizeConst, &old[0][0], 3); // (sizeConst, maskConst and tileConst follow each other)
+        SetPsConst(dev, p.sizeConst, &c[0][0], 3);
+        if (tex) mask.emplace(dev, static_cast<DWORD>(p.maskSampler), tex);
+        ApexUtil::CountOne(tex ? g_roomReadOn : g_roomReadOff);
+        ok = true;
+    }
+    ~RoomReadBind() {
+        if (!ok) return;
+        mask.reset();
+        SetPsConst(dev, p.sizeConst, &old[0][0], 3);
+    }
+};
+
+IDirect3DTexture9* AmbientMapTextureFor(IDirect3DDevice9* dev, uintptr_t key) {
+    if (!DevSwitches::StairRoomFill() || dev != g_wallMaskDev || !key) return nullptr; // (WallMaskTexture set the device for this draw)
+    if (g_ambMapTex.size() > 256) {
+        for (auto& [k, m] : g_ambMapTex)
+            if (m.tex) m.tex->Release();
+        g_ambMapTex.clear();
+    }
+    AmbMapTex& m = g_ambMapTex[key];
+    static float rgba[64 * 64 * 4];
+    uint64_t sig = 0;
+    if (!LevelLightShare::AmbientMapFor(key, m.tex ? m.sig : 0, sig, rgba)) return nullptr;
+    if (!m.tex) {
+        if (FAILED(dev->CreateTexture(64, 64, 1, 0, D3DFMT_A32B32G32R32F, D3DPOOL_MANAGED, &m.tex, nullptr)) || !m.tex) return nullptr;
+        m.sig = 0;
+    }
+    if (sig != m.sig) {
+        D3DLOCKED_RECT lock{};
+        if (FAILED(m.tex->LockRect(0, &lock, nullptr, 0)) || !lock.pBits) return nullptr;
+        for (int y = 0; y < 64; y++) { // A32B32G32R32F: r, g, b, a floats in memory
+            float* row = reinterpret_cast<float*>(static_cast<BYTE*>(lock.pBits) + y * lock.Pitch);
+            std::memcpy(row, rgba + y * 64 * 4, 64 * 4 * sizeof(float));
+        }
+        m.tex->UnlockRect(0);
+        m.sig = sig;
+    }
+    return m.tex;
+}
+IDirect3DTexture9* AmbientMapTexture(IDirect3DDevice9* dev, DWORD basisSampler) {
+    IDirect3DBaseTexture9* b = nullptr;
+    if (FAILED(D3D9Hooks::GetBoundTexture(dev, basisSampler, &b)) || !b) return nullptr;
+    const uintptr_t key = reinterpret_cast<uintptr_t>(b);
+    b->Release();
+    return AmbientMapTextureFor(dev, key);
+}
 // ---- Windows take outdoor light (experimental, "janelasLuzDeFora", off by default). F7 capture (06/10):
 // a window's origin is the centre of the tile in front of it, half a metre from its wall; turned the other way, the origin
 // is inside the room, and the window's sash and glass part gets a room-mode rig (RigTracker mode 0) and is drawn by a
@@ -5846,8 +6015,10 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
 // the outdoor-object patch: the ground atlas and the per-pixel lamps around the window, at the same strengths, never
 // darker than the game. By day those outdoor terms take the daytime curve (TerrainLightingPolicy::LampDay). The frame of the same window (an outdoor rig, mode 2)
 // lost every lamp to its own wall; DrawObjectLamp passes a wall within kWindowWallSkip while the option is on. ----
-std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_windowPs, g_windowPsReach;
+std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_windowPs, g_windowPsReach, g_windowWallPs, g_windowWallPsReach;
 std::atomic<int> g_windowDrawn{0}, g_windowRefused{0};
+std::atomic<long> g_windowWallDraws{0};
+bool MapSize(IDirect3DBaseTexture9* t, float out[4]); // below
 
 template <typename DrawFn> bool DrawWindowOutdoor(IDirect3DDevice9* dev, DrawFn draw) {
     if (!g_windowOutdoor.load(std::memory_order_relaxed) || !g_objPixel.load(std::memory_order_relaxed) || !g_curVsInfo || RigMode() != 0) return false;
@@ -5856,26 +6027,57 @@ template <typename DrawFn> bool DrawWindowOutdoor(IDirect3DDevice9* dev, DrawFn 
     float atlasMap[4];
     IDirect3DTexture9* atlas = LightmapSmooth::Atlas(atlasMap);
     if (!atlas) return false;
-    PatchedPs* chosen = &PatchedFor(dev, g_windowPs, "Window (outdoor light)", [](std::vector<DWORD>& t, PatchedPs& pp) {
-        // Rooms at Night's blue tint on the cube, as the game's draw of this part gets it (OnDrawFurniture), when the shader has it
-        if (!ShaderPatches::PatchCubeTint(t, pp.cubeTint)) pp.cubeTint = -1;
-        return ShaderPatches::PatchWindowOutdoor(t, pp.window);
-    });
+    // (basis_wall_filter, 2.17.1) the copy whose 4 directional reads keep off the walls (BasisSmoothOptions::smooth = false):
+    // the game's bilinear read took the texel beyond a wall into a face against it (an F7 capture: a kitchen counter along the
+    // wall of a room lit red, the red on its back half metre). No mask known for the draw's story, or no room for it: the plain copy.
+    const auto window = [](bool reach, bool walls) {
+        return [reach, walls](std::vector<DWORD>& t, PatchedPs& pp) {
+            // Rooms at Night's blue tint on the cube, as the game's draw of this part gets it (OnDrawFurniture), when the shader has it
+            if (!ShaderPatches::PatchCubeTint(t, pp.cubeTint)) pp.cubeTint = -1;
+            if (!ShaderPatches::PatchWindowOutdoor(t, pp.window, reach)) return false;
+            if (!walls) return true;
+            if (!ShaderPatches::PatchBasisSmooth(t, pp.smooth, {.wallMask = true, .smooth = false})) return false;
+            // (2.17.1) its floor map read through the uv's zw too (a counter top's back strip took the next room's floor light)
+            if (!ShaderPatches::PatchRoomMapReadWalls(t, pp.roomRead, -1)) pp.roomRead = {};
+            return true;
+        };
+    };
+    IDirect3DTexture9* wallMask = nullptr;
+    PatchedPs* chosen = nullptr;
+    if (DevSwitches::BasisWallFilter()) {
+        PatchedPs& w = PatchedFor(dev, g_windowWallPs, "Window (outdoor light, walls)", window(false, true), true);
+        if (w.ps && w.smooth.maskSampler >= 0 && (wallMask = WallMaskTexture(dev, w.smooth.sizeSampler)) != nullptr) chosen = &w;
+    }
+    if (!chosen) chosen = &PatchedFor(dev, g_windowPs, "Window (outdoor light)", window(false, false));
     if (!chosen->ps) return false;
     // realistic reach (12/10): the copy with the outdoor walls' law, made only from a shader the first law takes; refused
     // (no room for its 2 rows), the first law stays (g_reachLawRefused)
     bool reachRefused = false;
     if (g_objPixelLamps.load(std::memory_order_relaxed) && LevelLightShare::RealisticReachActive()) {
-        PatchedPs& r = PatchedFor(
-            dev, g_windowPsReach, "Window (outdoor light, realistic reach)",
-            [](std::vector<DWORD>& t, PatchedPs& pp) {
-                if (!ShaderPatches::PatchCubeTint(t, pp.cubeTint)) pp.cubeTint = -1;
-                return ShaderPatches::PatchWindowOutdoor(t, pp.window, true);
-            },
-            true);
-        if (r.ps) chosen = &r;
+        PatchedPs* r = wallMask ? &PatchedFor(dev, g_windowWallPsReach, "Window (outdoor light, realistic reach, walls)", window(true, true), true) : nullptr;
+        if (r && (!r->ps || r->smooth.maskSampler < 0)) r = nullptr;
+        if (!r) r = &PatchedFor(dev, g_windowPsReach, "Window (outdoor light, realistic reach)", window(true, false), true);
+        if (r->ps) chosen = r;
         else reachRefused = true, g_reachLawRefused++;
     }
+    // a walls copy needs the sizes of the maps it reads (never unset constants): when one is not known, the copy without the
+    // walls draws (the window keeps its outdoor light)
+    float basisSize[4] = {};
+    if (chosen->smooth.maskSampler >= 0) {
+        bool sized = wallMask && MapSize(D3D9Hooks::BoundTexture(dev, chosen->smooth.sizeSampler), basisSize);
+        if (sized && chosen->roomRead.maskSampler >= 0) {
+            float floorSize[4];
+            sized = MapSize(D3D9Hooks::BoundTexture(dev, static_cast<DWORD>(chosen->roomRead.sampler)), floorSize);
+        }
+        if (!sized) {
+            const bool wantReach = chosen->window.reachConst != 0;
+            PatchedPs* plain = wantReach ? &PatchedFor(dev, g_windowPsReach, "Window (outdoor light, realistic reach)", window(true, false), true) : nullptr;
+            if (!plain || !plain->ps) plain = &PatchedFor(dev, g_windowPs, "Window (outdoor light)", window(false, false));
+            if (!plain->ps) return false;
+            chosen = plain;
+        }
+    }
+    if (chosen->smooth.maskSampler < 0) wallMask = nullptr; // (a copy without the walls)
     PatchedPs& p = *chosen;
     const bool reach = p.window.reachConst != 0;
     IDirect3DVertexShader9* vs = ObjectVsFor(dev, g_curVs);
@@ -5952,6 +6154,7 @@ template <typename DrawFn> bool DrawWindowOutdoor(IDirect3DDevice9* dev, DrawFn 
                                     "(share not behind buildings {:.2f}, height gate {:.2f}) | lamp strength {:.2f} | object position ({:.2f} {:.2f} {:.2f}) | house plan read {:.2f} m out along the normal",
                                     nLamps, g_lastLampCandidates, strength[0], groundShare, gate, lamps[0][1], m[0][3], m[1][3], m[2][3], kWindowPlanReach);
         g_objDrawInfo += ReachLawText(reach, reachRefused, placed, lamps[0][1], reachRows, nLamps);
+        g_objDrawInfo += wallMask ? " | directional maps read off the walls (story wall mask)" : " | directional maps read as the game does (no wall mask)";
     }
     if (reach && placed) g_reachWindowDraws++;
     float oldA[4] = {}, oldB[4] = {}, oldPlan[2][4] = {}, oldTint[4] = {};
@@ -5974,11 +6177,26 @@ template <typename DrawFn> bool DrawWindowOutdoor(IDirect3DDevice9* dev, DrawFn 
         SetPsConst(dev, w.planConst, &plan[0][0], 2);
         if (reach) SetPsConst(dev, w.reachConst, &reachRows[0][0], 2);
         if (p.cubeTint >= 0) SetPsConst(dev, static_cast<UINT>(p.cubeTint), tint, 1);
+        float oldSize[4] = {};
+        std::optional<WallMaskBind> maskBind;
+        std::optional<RoomReadBind> floorRead;
+        if (wallMask) {
+            dev->GetPixelShaderConstantF(p.smooth.sizeConst, oldSize, 1);
+            SetPsConst(dev, p.smooth.sizeConst, basisSize, 1);
+            maskBind.emplace(dev, static_cast<DWORD>(p.smooth.maskSampler), wallMask);
+            if (p.roomRead.maskSampler >= 0) floorRead.emplace(dev, p.roomRead);
+            g_windowWallDraws.fetch_add(1, std::memory_order_relaxed);
+        }
         SetVs(dev, vs);
         SetPs(dev, p.ps);
         draw();
         SetPs(dev, originalPs);
         SetVs(dev, originalVs);
+        if (wallMask) {
+            floorRead.reset();
+            maskBind.reset();
+            SetPsConst(dev, p.smooth.sizeConst, oldSize, 1);
+        }
         if (p.cubeTint >= 0) SetPsConst(dev, static_cast<UINT>(p.cubeTint), oldTint, 1);
         if (reach) SetPsConst(dev, w.reachConst, &oldReach[0][0], 2);
         SetPsConst(dev, w.planConst, &oldPlan[0][0], 2);
@@ -6183,6 +6401,33 @@ template <typename DrawFn> void DrawWithRoomMap(IDirect3DDevice9* dev, IDirect3D
     g_inOwnCall = false;
     ApexUtil::CountOne(arch ? g_archCopyDraws : g_archPlainDraws);
 }
+// (basis_wall_filter, 2.17.1) A floor map's read that also leaves out the tiles beyond a wall (ShaderPatches::PatchRoomMapSmooth
+// wallMask): the B-spline took a lit room's texels on the far side of a wall shared by two roofed rooms (an F7 capture: a dark
+// hall's floor along the wall of a lit living room, a warm band about 0.4 m wide). Floors only, where the map's story and
+// class-2 layout are known (FloorWallMaskTexture); else the copy without it.
+std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_roomMapWallPs;
+std::atomic<long> g_roomFloorWallDraws{0};
+template <typename DrawFn> bool DrawRoomMapWalls(IDirect3DDevice9* dev, DWORD mapSampler, const float size[4], const float band[4], DrawFn draw) {
+    float k[4];
+    IDirect3DTexture9* mask = FloorWallMaskTexture(dev, D3D9Hooks::BoundTexture(dev, mapSampler), size, k);
+    if (!mask) return false;
+    PatchedPs& p = PatchedFor(dev, g_roomMapWallPs, "Smooth light maps (walls)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchRoomMapSmooth(t, pp.room, false, true); }, true);
+    if (!p.ps || p.room.maskSampler < 0 || !RoomMapCapsOk(dev, p.room)) return false;
+    float old[4] = {};
+    dev->GetPixelShaderConstantF(static_cast<UINT>(p.room.maskConst), old, 1);
+    g_inOwnCall = true;
+    SetPsConst(dev, static_cast<UINT>(p.room.maskConst), k, 1);
+    {
+        const WallMaskBind bind(dev, static_cast<DWORD>(p.room.maskSampler), mask);
+        g_inOwnCall = false;
+        DrawWithRoomMap(dev, p.ps, p.room, size, band, nullptr, draw);
+        g_inOwnCall = true; // (the bind's restore, at its end of scope)
+    }
+    SetPsConst(dev, static_cast<UINT>(p.room.maskConst), old, 1);
+    g_inOwnCall = false;
+    g_roomFloorWallDraws.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
 template <typename DrawFn> bool DrawRoomMapSmooth(IDirect3DDevice9* dev, DrawFn draw) {
     if (!g_roomMapSmooth.load(std::memory_order_relaxed)) return false;
     PatchedPs& p = PatchedFor(dev, g_roomMapSmoothPs, "Smooth light maps", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchRoomMapSmooth(t, pp.room, false); });
@@ -6200,123 +6445,11 @@ template <typename DrawFn> bool DrawRoomMapSmooth(IDirect3DDevice9* dev, DrawFn 
     float rows[kArchRows * 4] = {};
     const int cells = a ? ArchRowsFor(dev, a->room, band, 0, rows) : 0;
     if (a && (cells > 0 || !plainOk)) DrawWithRoomMap(dev, a->ps, a->room, size, band, rows, draw);
-    else DrawWithRoomMap(dev, p.ps, p.room, size, band, nullptr, draw);
+    else if (wall || !DrawRoomMapWalls(dev, p.room.sampler, size, band, draw)) DrawWithRoomMap(dev, p.ps, p.room, size, band, nullptr, draw);
     ApexUtil::CountOne(wall ? g_roomWallDrawn : g_roomFloorDrawn);
     return true;
 }
 
-// ---- Walls in the directional maps (development builds, basis_wall_filter) ----
-// The draw's directional maps name their story (LevelLightShare::WallMaskFor); its wall mask is kept here as a 64 x 64
-// texture (managed pool), uploaded again when the story's walls change, and bound at the patch's mask sampler (point, clamp)
-// for the wall-aware copy of the shader (ShaderPatches::PatchBasisSmooth wallMask). No mask known: the plain copy draws.
-std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_basisSmoothWallPs, g_basisRoomWallPs, g_basisSmoothFillPs;
-struct WallMaskTex {
-    IDirect3DTexture9* tex = nullptr;
-    uint32_t gen = 0;
-};
-std::unordered_map<uintptr_t, WallMaskTex> g_wallMaskTex; // by the directional map's D3D texture
-IDirect3DDevice9* g_wallMaskDev = nullptr;
-std::atomic<long> g_wallMaskDraws{0};
-// (development builds, stair_room_fill) the story's ambient per tile (LevelLightShare::AmbientMapFor), 64 x 64 A32B32G32R32F in the
-// managed pool by the directional map's texture, written again when the rooms' ambients change; point-sampled
-struct AmbMapTex {
-    IDirect3DTexture9* tex = nullptr;
-    uint64_t sig = 0;
-};
-std::unordered_map<uintptr_t, AmbMapTex> g_ambMapTex;
-std::atomic<long> g_ambFillDraws{0};
-void ReleaseWallMasks() {
-    for (auto& [k, m] : g_wallMaskTex)
-        if (m.tex) m.tex->Release();
-    g_wallMaskTex.clear();
-    for (auto& [k, m] : g_ambMapTex)
-        if (m.tex) m.tex->Release();
-    g_ambMapTex.clear();
-}
-IDirect3DTexture9* WallMaskTexture(IDirect3DDevice9* dev, DWORD basisSampler) {
-    if (!DevSwitches::BasisWallFilter()) return nullptr;
-    IDirect3DBaseTexture9* b = nullptr;
-    if (FAILED(D3D9Hooks::GetBoundTexture(dev, basisSampler, &b)) || !b) return nullptr;
-    const uintptr_t key = reinterpret_cast<uintptr_t>(b);
-    b->Release();
-    if (dev != g_wallMaskDev) {
-        ReleaseWallMasks();
-        g_wallMaskDev = dev;
-    }
-    if (g_wallMaskTex.size() > 256) ReleaseWallMasks();
-    WallMaskTex& m = g_wallMaskTex[key];
-    static uint8_t px[64 * 64 * 4];
-    uint32_t gen = 0;
-    if (!LevelLightShare::WallMaskFor(key, m.tex ? m.gen : 0, gen, px)) return nullptr;
-    if (!m.tex) {
-        if (FAILED(dev->CreateTexture(64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &m.tex, nullptr)) || !m.tex) return nullptr;
-        m.gen = 0;
-    }
-    if (gen != m.gen) {
-        D3DLOCKED_RECT lock{};
-        if (FAILED(m.tex->LockRect(0, &lock, nullptr, 0)) || !lock.pBits) return nullptr;
-        for (int y = 0; y < 64; y++) std::memcpy(static_cast<BYTE*>(lock.pBits) + y * lock.Pitch, px + y * 64 * 4, 64 * 4);
-        m.tex->UnlockRect(0);
-        m.gen = gen;
-    }
-    return m.tex;
-}
-// Binds the mask at `sampler` (point filter, clamp, linear read: no sRGB decode) for one draw and puts the stage back after it
-struct WallMaskBind {
-    static constexpr int kCount = 6;
-    IDirect3DDevice9* dev;
-    DWORD s;
-    IDirect3DBaseTexture9* old = nullptr;
-    DWORD st[kCount] = {};
-    static constexpr D3DSAMPLERSTATETYPE kStates[kCount] = {D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_SRGBTEXTURE};
-    WallMaskBind(IDirect3DDevice9* d, DWORD sampler, IDirect3DTexture9* mask) : dev(d), s(sampler) {
-        D3D9Hooks::GetBoundTexture(dev, s, &old);
-        for (int i = 0; i < kCount; i++) dev->GetSamplerState(s, kStates[i], &st[i]);
-        const DWORD want[kCount] = {D3DTEXF_POINT, D3DTEXF_POINT, D3DTEXF_NONE, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, FALSE};
-        SetTex(dev, s, mask);
-        for (int i = 0; i < kCount; i++) dev->SetSamplerState(s, kStates[i], want[i]);
-    }
-    ~WallMaskBind() {
-        SetTex(dev, s, old);
-        if (old) old->Release();
-        for (int i = 0; i < kCount; i++) dev->SetSamplerState(s, kStates[i], st[i]);
-    }
-};
-
-IDirect3DTexture9* AmbientMapTextureFor(IDirect3DDevice9* dev, uintptr_t key) {
-    if (!DevSwitches::StairRoomFill() || dev != g_wallMaskDev || !key) return nullptr; // (WallMaskTexture set the device for this draw)
-    if (g_ambMapTex.size() > 256) {
-        for (auto& [k, m] : g_ambMapTex)
-            if (m.tex) m.tex->Release();
-        g_ambMapTex.clear();
-    }
-    AmbMapTex& m = g_ambMapTex[key];
-    static float rgba[64 * 64 * 4];
-    uint64_t sig = 0;
-    if (!LevelLightShare::AmbientMapFor(key, m.tex ? m.sig : 0, sig, rgba)) return nullptr;
-    if (!m.tex) {
-        if (FAILED(dev->CreateTexture(64, 64, 1, 0, D3DFMT_A32B32G32R32F, D3DPOOL_MANAGED, &m.tex, nullptr)) || !m.tex) return nullptr;
-        m.sig = 0;
-    }
-    if (sig != m.sig) {
-        D3DLOCKED_RECT lock{};
-        if (FAILED(m.tex->LockRect(0, &lock, nullptr, 0)) || !lock.pBits) return nullptr;
-        for (int y = 0; y < 64; y++) { // A32B32G32R32F: r, g, b, a floats in memory
-            float* row = reinterpret_cast<float*>(static_cast<BYTE*>(lock.pBits) + y * lock.Pitch);
-            std::memcpy(row, rgba + y * 64 * 4, 64 * 4 * sizeof(float));
-        }
-        m.tex->UnlockRect(0);
-        m.sig = sig;
-    }
-    return m.tex;
-}
-IDirect3DTexture9* AmbientMapTexture(IDirect3DDevice9* dev, DWORD basisSampler) {
-    IDirect3DBaseTexture9* b = nullptr;
-    if (FAILED(D3D9Hooks::GetBoundTexture(dev, basisSampler, &b)) || !b) return nullptr;
-    const uintptr_t key = reinterpret_cast<uintptr_t>(b);
-    b->Release();
-    return AmbientMapTextureFor(dev, key);
-}
 // (development builds, stair_story_blend) whether the current VS passes the world height in TEXCOORD2.w (by shader, render thread)
 std::unordered_map<IDirect3DVertexShader9*, bool> g_vsWorldY;
 bool CurVsPassesWorldY() {
@@ -7853,6 +7986,38 @@ bool RoomAmbientChroma(const void* room, float* chroma) {
 }
 // The furniture draw with the rig's unlit-room lights, the vertex lights and the cube weight turned (rig = PS c0..c7 or
 // null when the shader has no rig chain; chroma: the room's ambient hue for the fill, or null)
+// (2.17.1) The sampler where the current ps_3_0 object shader reads a floor map of a story whose walls are known, -1 for none:
+// the one found last for it first, every declared sampler otherwise, scanned again at most every 60 frames when none was found.
+std::map<int, std::unordered_map<IDirect3DPixelShader9*, PatchedPs>> g_furnitureFloorPs; // by that sampler
+int FurnitureFloorMap(IDirect3DDevice9* dev) {
+    if (!DevSwitches::BasisWallFilter() || !g_curPs) return -1;
+    PsFacts* f = g_curFactsKnown ? g_curFacts : nullptr;
+    if (!f)
+        if (const auto it = g_psFacts.find(g_curPs); it != g_psFacts.end()) f = &it->second;
+    if (!f || !f->ps3 || !f->declared) return -1;
+    const auto isFloor = [dev](int s) {
+        IDirect3DBaseTexture9* const t = D3D9Hooks::BoundTexture(dev, static_cast<DWORD>(s));
+        if (!t || t->GetType() != D3DRTYPE_TEXTURE) return false;
+        // a room light map is an A8R8G8B8 map with power-of-two sides (the game's floor maps): the object's other textures
+        // (DXT colour and normal maps) are never looked up as one
+        D3DSURFACE_DESC d{};
+        if (FAILED(static_cast<IDirect3DTexture9*>(t)->GetLevelDesc(0, &d)) || d.Format != D3DFMT_A8R8G8B8 || !d.Width || !d.Height || (d.Width & (d.Width - 1)) ||
+            (d.Height & (d.Height - 1)))
+            return false;
+        float size[4], k[4];
+        return MapSizeThisFrame(t, size) && FloorWallMaskTexture(dev, t, size, k) != nullptr;
+    };
+    if (f->floorMap >= 0 && (f->declared & (1u << f->floorMap)) && isFloor(f->floorMap)) return f->floorMap;
+    if (f->floorMap < 0 && g_roomMapFrame - f->floorScanAt < 60u && f->floorScanAt) return -1;
+    f->floorScanAt = g_roomMapFrame;
+    f->floorMap = -1;
+    for (int s = 0; s < 16; s++)
+        if ((f->declared & (1u << s)) && isFloor(s)) {
+            f->floorMap = static_cast<int8_t>(s);
+            return s;
+        }
+    return -1;
+}
 template <typename DrawFn> D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice9* dev, DrawFn draw, const ShaderPatches::RigPsInfo& info, const float (*rig)[4], const float* chroma) {
     float psOld[4][4] = {}, vsOld[4][4] = {}, cubeOld[4] = {}, t[4][4], cube[4];
     bool psSet = false, vsSet = false, cubeSet = false;
@@ -7894,25 +8059,52 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice
             UnlitRooms::FurnitureCubeColour(cubeColour);
             const bool coloured = ApexMath::Fabs(cubeColour[0] - 1.0f) > 1e-3f || ApexMath::Fabs(cubeColour[1] - 1.0f) > 1e-3f || ApexMath::Fabs(cubeColour[2] - 1.0f) > 1e-3f;
             PatchedPs* tinted = nullptr;
-            if (cubeSet && (ApexMath::Fabs(tint - 1.0f) > 1e-3f || coloured)) {
+            const bool wantTint = cubeSet && (ApexMath::Fabs(tint - 1.0f) > 1e-3f || coloured);
+            // (2.17.1) the floor map read of the object's upward faces, off the walls (PatchRoomMapReadWalls): a door frame in the
+            // wall between a lit room and a dark hall read the floor map on the wall's line, half of each side (an F7 capture)
+            const int floorMap = FurnitureFloorMap(dev);
+            if (floorMap >= 0) {
+                PatchedPs& p = PatchedFor(dev, g_furnitureFloorPs[floorMap], "Indoor object (floor light off the walls)", [floorMap](std::vector<DWORD>& t, PatchedPs& pp) {
+                    if (!ShaderPatches::PatchCubeTint(t, pp.cubeTint)) pp.cubeTint = -1;
+                    return ShaderPatches::PatchRoomMapReadWalls(t, pp.roomRead, floorMap);
+                }, true);
+                if (p.ps && (!wantTint || p.cubeTint >= 0)) tinted = &p;
+            }
+            if (!tinted && wantTint) {
                 PatchedPs& p = PatchedFor(dev, g_cubeTintPs, "Indoor object (blue tint)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchCubeTint(t, pp.cubeTint); });
                 if (p.ps && p.cubeTint >= 0) tinted = &p;
             }
             IDirect3DPixelShader9* original = g_curPs;
             float tintOld[4] = {};
             g_inOwnCall = true;
+            std::optional<RoomReadBind> floorRead;
+            if (tinted && tinted->roomRead.maskSampler >= 0) {
+                floorRead.emplace(dev, tinted->roomRead);
+                if (!floorRead->ok) {
+                    floorRead.reset();
+                    tinted = nullptr;
+                    if (wantTint) {
+                        PatchedPs& p = PatchedFor(dev, g_cubeTintPs, "Indoor object (blue tint)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchCubeTint(t, pp.cubeTint); });
+                        if (p.ps && p.cubeTint >= 0) tinted = &p;
+                    }
+                }
+            }
             if (tinted) {
+                const float identity[4] = {1.0f, 1.0f, 1.0f, 1.0f};
                 const float c[4] = {tint, cubeColour[0], cubeColour[1], cubeColour[2]};
-                dev->GetPixelShaderConstantF(static_cast<UINT>(tinted->cubeTint), tintOld, 1);
-                SetPsConst(dev, static_cast<UINT>(tinted->cubeTint), c, 1);
+                if (tinted->cubeTint >= 0) {
+                    dev->GetPixelShaderConstantF(static_cast<UINT>(tinted->cubeTint), tintOld, 1);
+                    SetPsConst(dev, static_cast<UINT>(tinted->cubeTint), wantTint ? c : identity, 1);
+                }
                 SetPs(dev, tinted->ps);
             }
             draw();
             if (tinted) {
                 SetPs(dev, original);
-                SetPsConst(dev, static_cast<UINT>(tinted->cubeTint), tintOld, 1);
-                g_nightFurnitureTinted.fetch_add(1, std::memory_order_relaxed);
+                if (tinted->cubeTint >= 0) SetPsConst(dev, static_cast<UINT>(tinted->cubeTint), tintOld, 1);
+                if (wantTint) g_nightFurnitureTinted.fetch_add(1, std::memory_order_relaxed);
             }
+            floorRead.reset();
             g_inOwnCall = false;
             r = D3D9Hooks::HookAction::Skip;
         }
@@ -8602,6 +8794,17 @@ void LogDrawCost() {
     if (g_fencePickCalls)
         arch += std::format(" | of it the fence lamp picks: {:.0f} a frame, {:.2f} us each", g_fencePickCalls * scale,
                             static_cast<double>(g_fencePickTicks) * msPerTick * 1000.0 / g_fencePickCalls);
+    {
+        // (development builds) the fence pick memo since the last line, and how often its keys moved
+        static uint32_t s_hits = 0, s_misses = 0, s_gen = 0;
+        static uint64_t s_state = 0;
+        arch += std::format(" | fence pick memo: {} reused, {} computed (other group or empty {}, positions read again {}, lamp list changed {}, walls or slabs "
+                            "changed {}; not kept {}); lamp list generation +{}, wall state {}",
+                            g_fencePickHits - s_hits, g_fencePickMisses - s_misses, g_fenceMissWhy[0], g_fenceMissWhy[1], g_fenceMissWhy[2], g_fenceMissWhy[3],
+                            g_fenceMissWhy[4], g_lampMemoGen - s_gen, LevelLightShare::LampVisibilityState() == s_state ? "same" : "changed");
+        s_hits = g_fencePickHits, s_misses = g_fencePickMisses, s_gen = g_lampMemoGen, s_state = LevelLightShare::LampVisibilityState();
+        for (uint32_t& w : g_fenceMissWhy) w = 0;
+    }
     g_archRowsTicks = 0, g_archRowsCalls = 0, g_fencePickTicks = 0, g_fencePickCalls = 0;
     LOG_INFO(std::format("[LotLightBridge] Draw cost by fix over {} frames (1 draw in 16 timed, the fixes' own time): {:.3f} ms a frame in all, {:.3f} ms a frame "
                          "in the driver for the game draws the fixes made; {}{}",
@@ -9148,9 +9351,9 @@ void SetIndoorSmooth(bool on) { g_indoorSmooth = on; }
 void SetSmoothRoomMaps(bool on) { g_roomMapSmooth = on; }
 std::string RoomMapSmoothStatus() {
     return std::format("B-spline reads {}: {} room-lit shaders, walls {} draws, floors {} draws | left to the game: caps {}, unknown vertex shader {}, wall blocks off the grid {}, "
-                       "point filter {} | draws with the arch copy {}, with the copy without arches {}",
+                       "point filter {} | draws with the arch copy {}, with the copy without arches {} | floor draws read off the walls {} | object floor reads off the walls {} (story or layout not known {})",
                        g_roomMapSmooth.load() ? "on" : "off", g_roomMapPs.size(), g_roomWallDrawn.load(), g_roomFloorDrawn.load(), g_roomCapsRefused.load(),
-                       g_roomUnknownVs.load(), g_roomBandsOff.load(), g_roomPointFilter.load(), g_archCopyDraws.load(), g_archPlainDraws.load());
+                       g_roomUnknownVs.load(), g_roomBandsOff.load(), g_roomPointFilter.load(), g_archCopyDraws.load(), g_archPlainDraws.load(), g_roomFloorWallDraws.load(), g_roomReadOn.load(), g_roomReadOff.load());
 }
 
 std::string IndoorSmoothStatus() {
@@ -9204,7 +9407,8 @@ void SetObjectPixelLights(bool on, float strength) {
 void SetWindowOutdoor(bool on) { g_windowOutdoor = on; }
 
 std::string WindowOutdoorStatus() {
-    return std::format("{} | window parts lit outdoors: {} | left to the game (no basis uv rows): {}", g_windowOutdoor.load() ? "on" : "off", g_windowDrawn.load(), g_windowRefused.load());
+    return std::format("{} | window parts lit outdoors: {} ({} with the directional maps read off the walls) | left to the game (no basis uv rows): {}", g_windowOutdoor.load() ? "on" : "off",
+                       g_windowDrawn.load(), g_windowWallDraws.load(), g_windowRefused.load());
 }
 
 void SetFenceGroundLight(bool on, float strength) {
@@ -9669,7 +9873,7 @@ void Shutdown(bool keepChunkMaps) {
     g_meltTried = false;
     g_patchedGen++; // (PatchedFor's front answers and RoomMapConsts' last shader)
     for (auto* cache : {&g_terrainAlphaPs, &g_wallScalePs, &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs, &g_windowPs,
-                        &g_objLampPsReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_windowPsReach}) {
+                        &g_objLampPsReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_windowPsReach, &g_windowWallPs, &g_windowWallPsReach, &g_roomMapWallPs}) {
         for (auto& [k, p] : *cache)
             if (p.ps) p.ps->Release();
         cache->clear();
@@ -9678,6 +9882,10 @@ void Shutdown(bool keepChunkMaps) {
         for (auto& [k, p] : cache)
             if (p.ps) p.ps->Release();
     g_indoorPs.clear();
+    for (auto& [s, cache] : g_furnitureFloorPs)
+        for (auto& [k, p] : cache)
+            if (p.ps) p.ps->Release();
+    g_furnitureFloorPs.clear();
     ReleaseWallMasks(); // (development builds, basis_wall_filter)
     g_wallMaskDev = nullptr;
     for (auto& [k, info] : g_vsInfo) { // patched copies: foliage / objects, and the outdoor floors of summer
@@ -9796,9 +10004,10 @@ void MeasureMemoryImpl() {
     const auto ps = [&](const std::unordered_map<IDirect3DPixelShader9*, PatchedPs>& m) { patched += Hash(m), patchedItems += m.size(); };
     for (const auto* m : {&g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_terrainAlphaPs, &g_wallScalePs,
                           &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_objLampPsReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_windowPs, &g_windowPsReach,
-                          &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs})
+                          &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs,
+                          &g_windowWallPs, &g_windowWallPsReach, &g_roomMapWallPs})
         ps(*m);
-    for (const auto* t : {&g_floorShadePs, &g_indoorPs, &g_floorAtlasPs}) {
+    for (const auto* t : {&g_floorShadePs, &g_indoorPs, &g_floorAtlasPs, &g_furnitureFloorPs}) {
         patched += Tree(*t);
         for (const auto& [k, m] : *t) ps(m);
     }

@@ -9,7 +9,7 @@ same switch and strength. By day the lamp term fades to 3% of its night strength
 
 | | |
 |---|---|
-| Availability | Released (present since 1.0.0). Subdued daytime lamp response: Released in 2.6.0. Per-pixel lamps, walls blocking them and the game's own lighting in full daylight: Released in 2.7.0. Lighting corrections: Released in 2.12.1. The outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and tops above the lamp heads without ground light: Released in 2.12.3. The lot's ground lamp shade on pieces near the ground (*Walls shade lamp light near the ground*), upper-story railing and parapet tops without a ground lamp's pool, lamps tested from the piece nearest them: Released in 2.13.0. The reach law's scale without the outdoor walls' gain, the lamp sum held under 1 by its brightest channel, faces reading the ground lamp shade in front of them, gates closing their fence's gap in the lot shade: Released in 2.15.3. Elevated structures follow the architectural lamp gain and keep the ground pool out: Released in 2.15.4. |
+| Availability | Released (present since 1.0.0). Subdued daytime lamp response: Released in 2.6.0. Per-pixel lamps, walls blocking them and the game's own lighting in full daylight: Released in 2.7.0. Lighting corrections: Released in 2.12.1. The outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and tops above the lamp heads without ground light: Released in 2.12.3. The lot's ground lamp shade on pieces near the ground (*Walls shade lamp light near the ground*), upper-story railing and parapet tops without a ground lamp's pool, lamps tested from the piece nearest them: Released in 2.13.0. The reach law's scale without the outdoor walls' gain, the lamp sum held under 1 by its brightest channel, faces reading the ground lamp shade in front of them, gates closing their fence's gap in the lot shade: Released in 2.15.3. Elevated structures follow the architectural lamp gain and keep the ground pool out: Released in 2.15.4. A larger lamp pick memo, kept with lamps shining out of a house: Released in 2.17.1. |
 | Default | On |
 | Menu | Lighting > Objects > Objects card > Game fixes (folded) > *Fences and stairs catch light*, *Fence brightness* |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -216,11 +216,12 @@ Reached from `OnDrawInner` when the VS is class 7, after the *Street lamps light
    and the gate, or why there is none).
 
 **Lamp pick memo** (`PickFenceLamps`, `FencePickMemo`). The group's lamp pick (`PickFenceLampsImpl`: the lamps, their
-cones and reach rows, the highest atlas lamp head and the ground share) is kept in 256 direct-mapped entries keyed by
+cones and reach rows, the highest atlas lamp head and the ground share) is kept in 1024 direct-mapped entries keyed by
 the group's entry, the generation of its positions (moved at every read of them) and the law, with the rules of the
 outdoor objects' pick memo: an entry is valid while the lamp list (`g_lampMemoGen`) and everything the wall and slab
-test reads (`LevelLightShare::LampVisibilityState`, the same before and after the pick) are unchanged, and a pick that
-weighed a lamp shining out of a house is not kept. A hit writes exactly what the pick would: the same rows, head
+test reads (`LevelLightShare::LampVisibilityState`, the same before and after the pick) are unchanged. A lamp shining
+out of a house is tested on its own copy of the walls, a snapshot that is replaced and never changed; its generation is
+part of `LampVisibilityState`, so picks with such lamps are kept too. A hit writes exactly what the pick would: the same rows, head
 height, share, counters and candidate count. The memo follows the development switch `lamp_visibility_memo` and is not
 used while F8 records the wall and slab tests or a light capture runs. Development builds pick one hit in 64 again on a copy and
 compare it bit for bit; a difference turns the memo off for the session

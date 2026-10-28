@@ -44,3 +44,11 @@ on.
 **Outcome:** a first build accepted any `jmp` at the entry; the kept version accepts it only when `ts3native.asi` is
 loaded and the jump lands inside it. The call site `0x00AB12AF` is still verified, and Apex's wrapper reaches the game
 through ts3native's detour. Not yet confirmed with a save in game.
+
+### 2026-10-27: idle files dropped early, measured and removed
+
+A development switch (`idle_cache_early`) asked for the game's shrink of its two resource caches whenever their idle files
+passed 64 MB, and logged the address space in use every minute. In game the idle files passed 64 MB once, during the
+world load (94 MB, emptied in 7.4 ms, while the load kept raising the address space), and stayed between 9 and 24 MB for
+the rest of the session; the address space reached 3.4 GB within five minutes either way. Dropping idle files early gives
+nothing back, so the switch was removed.

@@ -225,7 +225,7 @@ std::vector<DWORD> Compile(const char* src, const char* profile) {
 }
 
 struct PatchStats {
-    int matched = 0, patched = 0, disasmOk = 0, created = 0, capsRefused = 0, texldOk = 0, combined = 0, combinedCreated = 0, arch = 0, archCreated = 0;
+    int matched = 0, patched = 0, disasmOk = 0, created = 0, capsRefused = 0, texldOk = 0, combined = 0, combinedCreated = 0, arch = 0, archCreated = 0, walls = 0, wallsCreated = 0;
 };
 // one match: patch it and check the copy
 void CheckPatch(const std::vector<DWORD>& code, Gpu& gpu, PatchStats& st, const char* where) {
@@ -282,6 +282,22 @@ void CheckPatch(const std::vector<DWORD>& code, Gpu& gpu, PatchStats& st, const 
                 const bool made = gpu.AcceptsPs(both);
                 st.archCreated += made;
                 Check(made, "native D3D9 creates the combined copy with the arch ambient");
+            }
+        }
+    }
+    // (basis_wall_filter) the floor copy that leaves out the tiles beyond a wall: one texld more (the own tile's walls)
+    {
+        std::vector<DWORD> w = code;
+        ShaderPatches::RoomMapPatch wp;
+        if (ShaderPatches::PatchRoomMapSmooth(w, wp, false, true)) {
+            st.walls++;
+            const std::string wd = Disasm(w);
+            Check(!wd.empty() && CountOf(wd, "texld") == CountOf(after, "texld") + 1, "the walls copy disassembles, with one texld more than the copy");
+            Check(wp.maskSampler >= 0 && wp.maskConst >= 0 && wp.sizeConst == p.sizeConst && wp.bandConst == p.bandConst, "the walls copy's sampler and constants");
+            if (gpu.dev && gpu.CapsAllow(wp)) {
+                const bool made = gpu.AcceptsPs(w);
+                st.wallsCreated += made;
+                Check(made, "native D3D9 creates the walls copy");
             }
         }
     }
@@ -559,6 +575,267 @@ void SidePixelCheck(Gpu& gpu) {
     }
 }
 
+// (basis_wall_filter) Two roofed rooms either side of a wall (an F7 capture: a dark hall's floor along the wall of a lit living
+// room, a warm band about 0.4 m wide): a 32 x 32 floor map at 4 texels a tile (8 x 8 tiles), the lit room in tiles x 0..3
+// (green 200, alpha 5: a bright texel has little ambient weight), the dark one in tiles x 4..7 (green 3, alpha 191), a wall
+// between them except at tiles z 3..4 (a doorway). CPU: the room's own texels as before, less the taps of a tile beyond a
+// walled side of the pixel's own tile; the GPU copy against it, and the dark room takes nothing through the wall while the
+// doorway keeps the read without walls.
+struct TileWalls {
+    bool xm = false, xp = false, zm = false, zp = false;
+};
+void RefWalls(const std::vector<DWORD>& map, int W, int H, float cx, float cy, const std::vector<TileWalls>& walls, int tiles, int n, float split, float out[4]) {
+    Reference(map, W, H, cx, cy, 0, H - 1, out); // (the read without walls: kept where the pixel's own texel is a bright one)
+    const float px = cx - 0.5f, py = cy - 0.5f;
+    const int ix = static_cast<int>(std::floor(px)), iy = static_cast<int>(std::floor(py));
+    const float fx = px - static_cast<float>(ix), fy = py - static_cast<float>(iy);
+    const int ox = ix + (fx >= 0.5f ? 1 : 0), oy = iy + (fy >= 0.5f ? 1 : 0);
+    const float ownA = static_cast<float>(map[static_cast<size_t>(std::clamp(oy, 0, H - 1)) * W + std::clamp(ox, 0, W - 1)] >> 24) / 255.0f;
+    if (ownA < 0.125f) return;
+    const int tx = static_cast<int>(std::floor((ox + 0.5f) / n)), tz = static_cast<int>(std::floor((oy + 0.5f) / n));
+    const bool on = ox + 0.5f < split;
+    const TileWalls w = on ? walls[static_cast<size_t>(std::clamp(tz, 0, tiles - 1)) * tiles + std::clamp(tx, 0, tiles - 1)] : TileWalls{};
+    float sum[4] = {}, ws = 0.0f;
+    for (int j = 0; j < 4; j++)
+        for (int i = 0; i < 4; i++) {
+            const int x = ix - 1 + i, y = iy - 1 + j;
+            const int dx = static_cast<int>(std::floor((x + 0.5f) / n)) - tx, dz = static_cast<int>(std::floor((y + 0.5f) / n)) - tz;
+            if ((dx < 0 && w.xm) || (dx > 0 && w.xp) || (dz < 0 && w.zm) || (dz > 0 && w.zp)) continue;
+            const DWORD v = map[static_cast<size_t>(std::clamp(y, 0, H - 1)) * W + std::clamp(x, 0, W - 1)];
+            if (static_cast<float>(v >> 24) / 255.0f < 4.0f / 255.0f) continue;
+            const float wt = Bw(i, fx) * Bw(j, fy);
+            sum[0] += wt * static_cast<float>((v >> 16) & 0xFF), sum[1] += wt * static_cast<float>((v >> 8) & 0xFF);
+            sum[2] += wt * static_cast<float>(v & 0xFF), sum[3] += wt * static_cast<float>(v >> 24), ws += wt;
+        }
+    for (int c = 0; c < 4; c++) out[c] = sum[c] / ws;
+}
+void WallPixelCheck(Gpu& gpu) {
+    if (!gpu.dev) return;
+    const char* src = "sampler2D s0 : register(s0); float4 amb : register(c0);\n"
+                      "float4 main(float2 uv0 : TEXCOORD0, float2 uv1 : TEXCOORD1) : COLOR0 { float4 m = tex2D(s0, uv1); m.rgb = m.a * amb.rgb + m.rgb; return m; }";
+    constexpr int W = 32, H = 32, n = 4, tiles = 8;
+    std::vector<DWORD> map(W * H);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) map[static_cast<size_t>(y) * W + x] = x < 16 ? (5u << 24) | (200u << 8) | 30u : (191u << 24) | (3u << 8) | 2u;
+    std::vector<TileWalls> walls(tiles * tiles);
+    for (int z = 0; z < tiles; z++)
+        if (z != 3 && z != 4) walls[static_cast<size_t>(z) * tiles + 3].xp = walls[static_cast<size_t>(z) * tiles + 4].xm = true;
+    std::vector<DWORD> mask(64 * 64, 0); // A8R8G8B8: r -x, g +x, b -z, a +z
+    for (int z = 0; z < tiles; z++)
+        for (int x = 0; x < tiles; x++) {
+            const TileWalls& t = walls[static_cast<size_t>(z) * tiles + x];
+            mask[static_cast<size_t>(z) * 64 + x] = (t.zp ? 0xFF000000u : 0) | (t.xm ? 0x00FF0000u : 0) | (t.xp ? 0x0000FF00u : 0) | (t.zm ? 0x000000FFu : 0);
+        }
+    for (const char* profile : {"ps_2_0"}) { // (the ps_3_0 walls copies of the game's shaders are created above)
+        std::vector<DWORD> t = Compile(src, profile);
+        ShaderPatches::RoomMapPatch p;
+        if (t.empty() || !ShaderPatches::PatchRoomMapSmooth(t, p, false, true)) {
+            Check(false, "the synthetic shader is patched (walls)");
+            continue;
+        }
+        if (!gpu.CapsAllow(p)) continue;
+        IDirect3DPixelShader9* ps = nullptr;
+        Check(SUCCEEDED(gpu.dev->CreatePixelShader(t.data(), &ps)), "the synthetic walls copy is created");
+        IDirect3DTexture9 *tex = nullptr, *mtex = nullptr;
+        gpu.dev->CreateTexture(W, H, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, nullptr);
+        gpu.dev->CreateTexture(64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &mtex, nullptr);
+        if (!ps || !tex || !mtex) {
+            Release(ps), Release(tex), Release(mtex);
+            continue;
+        }
+        D3DLOCKED_RECT lr{};
+        if (SUCCEEDED(tex->LockRect(0, &lr, nullptr, 0))) {
+            for (int y = 0; y < H; y++) std::memcpy(static_cast<char*>(lr.pBits) + y * lr.Pitch, &map[static_cast<size_t>(y) * W], W * 4);
+            tex->UnlockRect(0);
+        }
+        if (SUCCEEDED(mtex->LockRect(0, &lr, nullptr, 0))) {
+            for (int y = 0; y < 64; y++) std::memcpy(static_cast<char*>(lr.pBits) + y * lr.Pitch, &mask[static_cast<size_t>(y) * 64], 64 * 4);
+            mtex->UnlockRect(0);
+        }
+        const auto bind = [&](DWORD s, IDirect3DTexture9* x, DWORD filter) {
+            gpu.dev->SetTexture(s, x);
+            gpu.dev->SetSamplerState(s, D3DSAMP_MINFILTER, filter);
+            gpu.dev->SetSamplerState(s, D3DSAMP_MAGFILTER, filter);
+            gpu.dev->SetSamplerState(s, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+            gpu.dev->SetSamplerState(s, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+            gpu.dev->SetSamplerState(s, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+        };
+        bind(p.sampler, tex, D3DTEXF_LINEAR);
+        bind(static_cast<DWORD>(p.maskSampler), mtex, D3DTEXF_POINT);
+        const float amb[4] = {0, 0, 0, 0}, size[4] = {static_cast<float>(W), static_cast<float>(H), 1.0f / W, 1.0f / H}, bc[4] = {1.0f / 65536.0f, 65536.0f, 0.5f, 65535.0f};
+        gpu.dev->SetPixelShaderConstantF(0, amb, 1);
+        gpu.dev->SetPixelShaderConstantF(p.sizeConst, size, 1);
+        gpu.dev->SetPixelShaderConstantF(p.bandConst, bc, 1);
+        // on, the whole map laid out by tile; off (cM.z = 0); on with the split tiles' atlas from column 16 (the dark room's
+        // texels then keep the read without walls)
+        for (int mode = 0; mode < 3; mode++) {
+            const float split = mode == 2 ? 16.0f : static_cast<float>(W);
+            const float k[4] = {1.0f / n, split, mode == 1 ? 0.0f : 1.0f, 1.0f / 64.0f};
+            gpu.dev->SetPixelShaderConstantF(static_cast<UINT>(p.maskConst), k, 1);
+            const std::vector<DWORD> px = gpu.Render(ps);
+            int worst = 0, walled = 0, door = 0, doorRef = 0;
+            for (int y = 0; y < 64; y++)
+                for (int x = 0; x < 64; x++) {
+                    const float cx = (x + 0.5f) / 64.0f * W, cy = (y + 0.5f) / 64.0f * H;
+                    float ref[4];
+                    if (mode == 1) Reference(map, W, H, cx, cy, 0, H - 1, ref);
+                    else RefWalls(map, W, H, cx, cy, walls, tiles, n, split, ref);
+                    const DWORD v = px[static_cast<size_t>(y) * 64 + x];
+                    const int got[4] = {static_cast<int>((v >> 16) & 0xFF), static_cast<int>((v >> 8) & 0xFF), static_cast<int>(v & 0xFF), static_cast<int>(v >> 24)};
+                    for (int c = 0; c < 4; c++) worst = std::max(worst, static_cast<int>(std::lround(std::fabs(got[c] - ref[c]))));
+                    const int tz = static_cast<int>(cy / n);
+                    if (cx >= 16.0f && cx < 18.0f) {
+                        if (tz != 3 && tz != 4 && tz != 2 && tz != 5) walled = std::max(walled, got[1] - 3); // (away from the doorway's tiles)
+                        if (tz == 3 || tz == 4) {
+                            float plain[4];
+                            Reference(map, W, H, cx, cy, 0, H - 1, plain);
+                            door = std::max(door, static_cast<int>(std::lround(std::fabs(got[1] - plain[1])))), doorRef = std::max(doorRef, static_cast<int>(plain[1]));
+                        }
+                    }
+                }
+            const char* what[3] = {"on", "off", "on, atlas from column 16"};
+            std::printf("  walls pixel check (%s, %s): largest difference from the CPU reference %d LSB; the dark room's first half metre along the wall +%d green; at the doorway %d LSB from the read without walls (which reaches %d)\n",
+                        profile, what[mode], worst, walled, door, doorRef);
+            Check(worst <= 3, "GPU walls read = CPU reference (3 LSB)");
+            if (mode == 0) {
+                Check(walled <= 3, "GPU: the dark room takes no light through the wall");
+                Check(door <= 3 && doorRef > 30, "GPU: the doorway keeps the read without walls (the lit room's light comes through it)");
+            } else Check(walled > 30, "with the walls off, the band through the wall is there (the test shows it)");
+        }
+        gpu.dev->SetTexture(p.sampler, nullptr);
+        gpu.dev->SetTexture(static_cast<DWORD>(p.maskSampler), nullptr);
+        Release(tex), Release(mtex), Release(ps);
+    }
+}
+
+// (2.17.1) An object shader's own bilinear read of the floor map, off the walls (PatchRoomMapReadWalls): the same two rooms
+// and doorway. CPU: the point kept half a texel inside its tile on a walled side, and within 6 cm (0.06 of a tile) of a
+// walled edge the lower of that read and the first texel beyond, against the GPU copy of "texld r0, v0, s0".
+float Bilinear(const std::vector<DWORD>& map, int W, int H, float px, float py, int c) {
+    const float x = px - 0.5f, y = py - 0.5f;
+    const int ix = static_cast<int>(std::floor(x)), iy = static_cast<int>(std::floor(y));
+    const float fx = x - ix, fy = y - iy;
+    const auto at = [&](int i, int j) { return static_cast<float>((map[static_cast<size_t>(std::clamp(j, 0, H - 1)) * W + std::clamp(i, 0, W - 1)] >> (c == 3 ? 24 : 16 - 8 * c)) & 0xFF); };
+    return (at(ix, iy) * (1 - fx) + at(ix + 1, iy) * fx) * (1 - fy) + (at(ix, iy + 1) * (1 - fx) + at(ix + 1, iy + 1) * fx) * fy;
+}
+void RefReadWalls(const std::vector<DWORD>& map, int W, int H, float px, float py, const std::vector<TileWalls>& walls, int tiles, int n, float out[4]) {
+    const int tx = static_cast<int>(std::floor(px / n)), tz = static_cast<int>(std::floor(py / n));
+    const TileWalls w = walls[static_cast<size_t>(std::clamp(tz, 0, tiles - 1)) * tiles + std::clamp(tx, 0, tiles - 1)];
+    const float lox = tx * n + 0.5f, hix = tx * n + n - 0.5f, loz = tz * n + 0.5f, hiz = tz * n + n - 0.5f;
+    float x = px, y = py;
+    if (w.xm) x = std::max(x, lox);
+    if (w.xp) x = std::min(x, hix);
+    if (w.zm) y = std::max(y, loz);
+    if (w.zp) y = std::min(y, hiz);
+    const float fx = px / n - tx, fz = py / n - tz;
+    const bool bxm = w.xm && fx < 0.06f, bxp = w.xp && fx >= 0.94f, bzm = w.zm && fz < 0.06f, bzp = w.zp && fz >= 0.94f;
+    float bx = x + (bxm ? lox - 1.0f - x : 0.0f) + (bxp ? hix + 1.0f - x : 0.0f), by = y + (bzm ? loz - 1.0f - y : 0.0f) + (bzp ? hiz + 1.0f - y : 0.0f);
+    for (int c = 0; c < 4; c++) {
+        out[c] = Bilinear(map, W, H, x, y, c);
+        if (bxm || bxp || bzm || bzp) out[c] = std::min(out[c], Bilinear(map, W, H, bx, by, c));
+    }
+}
+void ReadWallsPixelCheck(Gpu& gpu) {
+    if (!gpu.dev) return;
+    const char* asmSrc = "ps_3_0\ndcl_texcoord1 v0.xy\ndcl_2d s0\ntexld r0, v0, s0\nmov oC0, r0\n";
+    std::vector<DWORD> code;
+    {
+        using Assemble = HRESULT(WINAPI*)(LPCVOID, SIZE_T, LPCSTR, const D3D_SHADER_MACRO*, ID3DInclude*, UINT, ID3DBlob**, ID3DBlob**);
+        const auto lib = LoadLibraryW(L"d3dcompiler_47.dll");
+        const auto assemble = lib ? reinterpret_cast<Assemble>(GetProcAddress(lib, "D3DAssemble")) : nullptr;
+        ID3DBlob *blob = nullptr, *err = nullptr;
+        if (assemble && SUCCEEDED(assemble(asmSrc, std::strlen(asmSrc), nullptr, nullptr, nullptr, 0, &blob, &err)) && blob) {
+            code.resize(blob->GetBufferSize() / 4);
+            std::memcpy(code.data(), blob->GetBufferPointer(), blob->GetBufferSize());
+        }
+        Release(blob), Release(err);
+        if (lib) FreeLibrary(lib);
+    }
+    std::vector<DWORD> t = code;
+    ShaderPatches::RoomReadWallsPatch p;
+    if (code.empty() || !ShaderPatches::PatchRoomMapReadWalls(t, p, 0)) {
+        Check(false, "the synthetic object read is patched (walls)");
+        return;
+    }
+    IDirect3DPixelShader9* ps = nullptr;
+    Check(SUCCEEDED(gpu.dev->CreatePixelShader(t.data(), &ps)), "the object read copy is created");
+    if (!ps) std::printf("%s\n", Disasm(t).c_str());
+    constexpr int W = 32, H = 32, n = 4, tiles = 8;
+    std::vector<DWORD> map(W * H);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) map[static_cast<size_t>(y) * W + x] = x < 16 ? (5u << 24) | (200u << 8) | 30u : (191u << 24) | (3u << 8) | 2u;
+    std::vector<TileWalls> walls(tiles * tiles);
+    for (int z = 0; z < tiles; z++)
+        if (z != 3 && z != 4) walls[static_cast<size_t>(z) * tiles + 3].xp = walls[static_cast<size_t>(z) * tiles + 4].xm = true;
+    std::vector<DWORD> mask(64 * 64, 0);
+    for (int z = 0; z < tiles; z++)
+        for (int x = 0; x < tiles; x++) {
+            const TileWalls& w = walls[static_cast<size_t>(z) * tiles + x];
+            mask[static_cast<size_t>(z) * 64 + x] = (w.zp ? 0xFF000000u : 0) | (w.xm ? 0x00FF0000u : 0) | (w.xp ? 0x0000FF00u : 0) | (w.zm ? 0x000000FFu : 0);
+        }
+    IDirect3DTexture9 *tex = nullptr, *mtex = nullptr;
+    gpu.dev->CreateTexture(W, H, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, nullptr);
+    gpu.dev->CreateTexture(64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &mtex, nullptr);
+    if (!ps || !tex || !mtex) {
+        Release(ps), Release(tex), Release(mtex);
+        return;
+    }
+    D3DLOCKED_RECT lr{};
+    if (SUCCEEDED(tex->LockRect(0, &lr, nullptr, 0))) {
+        for (int y = 0; y < H; y++) std::memcpy(static_cast<char*>(lr.pBits) + y * lr.Pitch, &map[static_cast<size_t>(y) * W], W * 4);
+        tex->UnlockRect(0);
+    }
+    if (SUCCEEDED(mtex->LockRect(0, &lr, nullptr, 0))) {
+        for (int y = 0; y < 64; y++) std::memcpy(static_cast<char*>(lr.pBits) + y * lr.Pitch, &mask[static_cast<size_t>(y) * 64], 64 * 4);
+        mtex->UnlockRect(0);
+    }
+    const auto bind = [&](DWORD s, IDirect3DTexture9* x, DWORD filter) {
+        gpu.dev->SetTexture(s, x);
+        gpu.dev->SetSamplerState(s, D3DSAMP_MINFILTER, filter);
+        gpu.dev->SetSamplerState(s, D3DSAMP_MAGFILTER, filter);
+        gpu.dev->SetSamplerState(s, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        gpu.dev->SetSamplerState(s, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        gpu.dev->SetSamplerState(s, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+    };
+    bind(0, tex, D3DTEXF_LINEAR);
+    bind(static_cast<DWORD>(p.maskSampler), mtex, D3DTEXF_POINT);
+    const float c[3][4] = {{static_cast<float>(W), static_cast<float>(H), 1.0f / W, 1.0f / H}, {1.0f / n, static_cast<float>(W), 1.0f, 1.0f / 64.0f}, {static_cast<float>(n), n - 0.5f, 0.5f, 0.0f}};
+    for (int mode = 0; mode < 2; mode++) { // on, off (maskConst.z = 0: the game's bilinear read)
+        float k[3][4];
+        std::memcpy(k, c, sizeof k);
+        if (mode == 1) k[1][2] = 0.0f;
+        gpu.dev->SetPixelShaderConstantF(p.sizeConst, &k[0][0], 3);
+        const std::vector<DWORD> px = gpu.Render(ps);
+        int worst = 0, walled = 0, door = 0, doorRef = 0;
+        for (int y = 0; y < 64; y++)
+            for (int x = 0; x < 64; x++) {
+                const float cx = (x + 0.5f) / 64.0f * W, cy = (y + 0.5f) / 64.0f * H;
+                float ref[4];
+                if (mode == 1)
+                    for (int ch = 0; ch < 4; ch++) ref[ch] = Bilinear(map, W, H, cx, cy, ch);
+                else RefReadWalls(map, W, H, cx, cy, walls, tiles, n, ref);
+                const DWORD v = px[static_cast<size_t>(y) * 64 + x];
+                const int got[4] = {static_cast<int>((v >> 16) & 0xFF), static_cast<int>((v >> 8) & 0xFF), static_cast<int>(v & 0xFF), static_cast<int>(v >> 24)};
+                for (int ch = 0; ch < 4; ch++) worst = std::max(worst, static_cast<int>(std::lround(std::fabs(got[ch] - ref[ch]))));
+                const int tz = static_cast<int>(cy / n);
+                if (cx >= 16.0f && cx < 17.0f) {
+                    if (tz != 2 && tz != 3 && tz != 4 && tz != 5) walled = std::max(walled, got[1] - 3);
+                    if (tz == 3 || tz == 4) door = std::max(door, std::abs(got[1] - static_cast<int>(std::lround(Bilinear(map, W, H, cx, cy, 1))))), doorRef = std::max(doorRef, got[1]);
+                }
+            }
+        std::printf("  object read pixel check (%s): largest difference from the CPU reference %d LSB; the dark room's first quarter metre +%d green; the doorway %d LSB from the game's read (reaching %d)\n",
+                    mode == 0 ? "on" : "off", worst, walled, door, doorRef);
+        Check(worst <= 3, "GPU object read off the walls = CPU reference (3 LSB)");
+        if (mode == 0) {
+            Check(walled <= 3, "GPU object read: the dark room takes no light through the wall");
+            Check(door <= 3 && doorRef > 30, "GPU object read: the doorway keeps the game's read");
+        } else Check(walled > 30, "with the read off, the bilinear bleed through the wall is there (the test shows it)");
+    }
+    gpu.dev->SetTexture(0, nullptr);
+    gpu.dev->SetTexture(static_cast<DWORD>(p.maskSampler), nullptr);
+    Release(tex), Release(mtex), Release(ps);
+}
+
 void PixelCheck(Gpu& gpu) {
     if (!gpu.dev) return;
     // the pattern: texld r0, t1, s0; mad r0.xyz, r0.w, c0, r0 (c0 = 0 here, so the output is the map read; alpha kept)
@@ -796,6 +1073,8 @@ int main(int argc, char** argv) {
     std::printf("  with the basis maps too: %d (both reads in one copy, %d created natively)\n", st.combined, st.combinedCreated);
     std::printf("  with the arch ambient (ps_3_0): %d copies, %d created natively\n", st.arch, st.archCreated);
     Check(st.arch > 0 && st.arch == st.archCreated, "every copy with the arch ambient is created natively");
+    std::printf("  with the walls (floors, basis_wall_filter): %d copies of %d patched, %d created natively\n", st.walls, st.patched, st.wallsCreated);
+    Check(st.walls > 0 && st.walls == st.wallsCreated, "every walls copy made is created natively");
     for (const auto& [n, c] : perTech) std::printf("  %-38s %3d of %3d\n", n.c_str(), c.first, c.second);
     // The outdoor scale on the outside walls (ShaderPatches::PatchWallScale): every ps_3_0 ExteriorWall pixel shader takes it
     // and the copy is created natively (the ps_2_x ones, lower shader settings, keep the cut at 1)
@@ -851,6 +1130,8 @@ int main(int argc, char** argv) {
     SideChecks();
     PixelCheck(gpu);
     SidePixelCheck(gpu);
+    WallPixelCheck(gpu);
+    ReadWallsPixelCheck(gpu);
     ArchPixelCheck(gpu);
     // 5: captures
     std::set<std::vector<DWORD>> seen;

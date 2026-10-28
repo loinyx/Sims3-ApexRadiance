@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Hungarian}
 const I18n::Pair kPairs[] = {
+    {"Performance: lamp light on fences and outdoor objects is reused instead of worked out again", "Teljesítmény: a lámpák fénye a kerítéseken és a kültéri tárgyakon újrahasznosul, nem számolódik újra"},
+    {"Night Lights: a lamp no longer lights the next room's floor and furniture through the wall", "Éjszakai világítás: egy lámpa már nem világítja meg a falon át a szomszéd szoba padlóját és bútorait"},
+    {"Night Lights: street light no longer reaches counters and furniture inside the house", "Éjszakai világítás: az utcai fény már nem éri el a pultokat és a bútorokat a házban"},
     {"Performance: Room to save asks once, after updating, whether to keep it on", "Teljesítmény: a Hely a mentéshez frissítés után egyszer megkérdezi, bekapcsolva maradjon-e"},
     {"Performance: changing a lamp no longer relights rooms on other lots", "Teljesítmény: egy lámpa módosítása már nem világítja meg újra más telkek szobáit"},
     {"Night Lights: no more dark squares on lit floors under furniture", "Éjszakai világítás: nincs több sötét négyzet a megvilágított padlón a bútorok alatt"},

@@ -52,3 +52,20 @@ every path that hands out or splits a chunk would need a recommit hook. The scri
 all; its block allocator would need a recommit at `0x00E4971D` and the collector's thread ownership is not established.
 The measurement of both domains was added to the memory analysis instead, so a later change can be judged on in-game
 numbers.
+
+### 2026-10-27: private memory release, tried and removed
+
+Two development switches gave free memory back to Windows (branch `perf/ram-release`, not merged). `script_heap_release`
+hooked the script collector's block allocator (`GC_allochblk_nth`, `0x00E49320`): the collector has no lock (its
+allocation entry points `0x00E4BDC0` and `0x00E4BCE0` take none), so every 30 s, on its own thread, it decommitted the
+blocks of its free lists (`0x011F2DA0`, headers in the table at `0x01233318`) that were free at two passes, and committed
+a block again before returning it. `allocator_release` walked one general-allocator core a second under its lock
+(`[allocator+0x4E4]`) and decommitted the whole pages inside chunks free at two walks, keeping each chunk's first 64 bytes;
+the internal malloc `0x004E5E40` and realloc `0x004E6710` committed what they returned. A vectored handler committed a
+page the allocators wrote before that.
+
+In a walk of a running session the collector's free lists held 6885 blocks and 104.1 MB, its own free count. In game
+(12 minutes, both switches) 120 to 245 MB were given back at any time, every core walk added up, about 4500 pages were
+committed on first touch and nothing failed. Private memory fell by that amount, but the address space in use stayed
+the same: the reservations are still held. That is the measure that runs out in a 32-bit session and the one players
+watch (Sims3SettingsSetter's memory monitor), so both switches were removed.
