@@ -29,6 +29,7 @@
 #include "light_diag.h"
 #include "light_probe.h"
 #include "hotkeys.h"
+#include "s3pp_settings.h"
 #include "s3ss_detect.h"
 #include "platform.h"
 #include "depth_share.h"
@@ -265,6 +266,8 @@ void SetShore(bool on) {
 constexpr const char* kRecommendText = APEX_PRODUCT_NAME " works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame "
                                        "rate limiter, fewer stutters and many extra game settings.";
 constexpr const char* kDxvkText = "Runs the game on Vulkan: fewer stutters, and " APEX_PRODUCT_NAME " is made and tested with it.";
+constexpr const char* kS3PPText = "With Sims 3 Modernization, its author recommends turning off Short Wait Spin and Thread Stack Diet in "
+                                  "Sims 3 Performance Patch: spin keeps the CPU busy while Sims' routes are planned and can freeze the simulation for minutes.";
 constexpr const wchar_t* kS3SSReleasesUrl = L"https://github.com/sims3fiend/Sims3SettingsSetter/releases";
 constexpr const wchar_t* kDxvkReleasesUrl = L"https://github.com/doitsujin/dxvk/releases";
 constexpr const wchar_t* kApexReleasesUrl = L"https://github.com/loinyx/Sims3-ApexRadiance/releases";
@@ -301,7 +304,10 @@ bool DxvkLoaded() {
 }
 // (under Wine / Proton never: Proton ships its DXVK, and a d3d9.dll put in Game\Bin there needs a DLL override)
 bool DxvkMissing() { return g_startup.load() != Startup::Loading && !Platform::UnderWine() && !DxvkLoaded(); }
-bool AnythingRecommended() { return S3SSMissing() || DxvkMissing(); }
+// Sims 3 Performance Patch's spin settings next to sims3-modernization: suggested until the file is changed, and the result
+// stays in place of the buttons until the game restarts
+bool S3PPShown() { return S3PPSettings::Recommended() || S3PPSettings::Get().turnedOff; }
+bool AnythingRecommended() { return S3SSMissing() || DxvkMissing() || S3PPShown(); }
 
 // Opens a page in the default browser, on a short-lived thread (ShellExecute can take a moment and wants COM on its
 // thread; the render thread must not wait for it).
@@ -318,6 +324,20 @@ void OpenPage(const wchar_t* url) {
 void DownloadS3SSButton() {
     if (ApexUi::IconTextButton("Download##S3SS", IconId::Download, "Opens the Sims3SettingsSetter releases page on GitHub in your browser", ButtonKind::Primary))
         OpenPage(kS3SSReleasesUrl);
+}
+void S3PPItem() {
+    const S3PPSettings::State& s3pp = S3PPSettings::Get();
+    ImGui::TextUnformatted("Sims 3 Performance Patch");
+    if (s3pp.turnedOff) {
+        ApexUi::MutedText("Turned off. Restart the game to apply; the old file is kept as Sims3Performance.ini.apex-backup.");
+        return;
+    }
+    ApexUi::MutedText(kS3PPText);
+    if (!s3pp.error.empty()) ApexUi::MutedText("Could not change Sims3Performance.ini. Open it and set ShortWaitSpin and ThreadStackDiet to 0.");
+    if (ApexUi::IconTextButton("Turn them off##S3PP", IconId::Check, "Sets ShortWaitSpin and ThreadStackDiet to 0 and keeps a copy of the old file", ButtonKind::Primary))
+        S3PPSettings::Apply();
+    ImGui::SameLine(0.0f, ApexUi::kSpace3 * ApexUi::Unit());
+    if (ApexUi::IconTextButton("Open Sims3Performance.ini", IconId::ExternalLink, "Opens the file in your text editor")) OpenPage(s3pp.ini.c_str());
 }
 void DownloadDxvkButton() {
     if (ApexUi::IconTextButton("Download##DXVK", IconId::Download, "Opens the DXVK releases page on GitHub in your browser", ButtonKind::Primary))
@@ -336,6 +356,10 @@ void RecommendedItems() {
         ImGui::TextUnformatted("Sims3SettingsSetter");
         ApexUi::MutedText(kRecommendText);
         DownloadS3SSButton();
+        ApexUi::Gap(ApexUi::kSpace2);
+    }
+    if (S3PPShown()) {
+        S3PPItem();
         ApexUi::Gap(ApexUi::kSpace2);
     }
 }
@@ -2026,6 +2050,7 @@ void ResetAllRow() {
             uiDefaults.changelogSeen = previousUi.changelogSeen; // nor the What's new dot
             uiDefaults.testBuildSeen = previousUi.testBuildSeen;
             uiDefaults.roomToSaveAsked = previousUi.roomToSaveAsked; // nor the Room to save question
+            uiDefaults.s3ppSpinAsked = previousUi.s3ppSpinAsked; // nor the Sims 3 Performance Patch one
             ApexConfig::SetUi(uiDefaults);
             LOG_INFO("[Menu] All settings reset to their defaults");
             ShowToast(I18n::Tr("All settings reset"), std::move(before), "All settings reset");
@@ -2937,6 +2962,14 @@ void CompatibilityTab() {
         const bool dxvk = DxvkLoaded();
         InfoRow("DXVK", dxvk ? "Installed" : Platform::UnderWine() ? "Not in use (WineD3D)" : "Not installed", dxvk ? IconId::CircleCheck : IconId::Info,
                 dxvk ? VioletTheme::kAccent : VioletTheme::kTextMuted);
+        // other performance mods: a row only when installed (Apex does not suggest them)
+        const S3PPSettings::State& s3pp = S3PPSettings::Get();
+        if (s3pp.ts3native) InfoRow("Sims 3 Modernization", "Installed", IconId::CircleCheck, VioletTheme::kAccent);
+        if (s3pp.s3pp) {
+            const bool change = S3PPSettings::Recommended();
+            InfoRow("Sims 3 Performance Patch", s3pp.turnedOff ? "Restart the game to apply" : change ? "Settings to change" : "Installed",
+                    change ? IconId::TriangleAlert : IconId::CircleCheck, change ? VioletTheme::kWarning : VioletTheme::kAccent);
+        }
         InfoRow("Features", startup == Startup::Running ? "Running" : startup == Startup::Loading ? "Starting\xE2\x80\xA6" : "Off (old combined build found)");
         if (Platform::SteamDeck()) { // the Deck's graphics share its memory bandwidth: the screen effects cost the most there
             ApexUi::GroupLabel("STEAM DECK");
@@ -3554,9 +3587,12 @@ void RoomToSaveAnswer(bool keep) {
     ApexConfig::SetUi(ui);
     LOG_INFO(std::format("[Menu] Room to save question: {}", keep ? "kept on" : "turned off"));
 }
-// Drawn with the menu closed (Draw), at the notices' top-center anchor: an icon compartment as the notice pills have, the
-// question in bold, one paragraph, then the place to change it later and the two answers, right-aligned
-void RoomToSaveCard() {
+// A one-time question drawn with the menu closed (Draw), at the notices' top-center anchor: an icon compartment as the
+// notice pills have, the question in bold, one paragraph, then the place to change it later and the two answers,
+// right-aligned. Returns 1 for the primary answer, 0 for the other, -1 while unanswered (English texts, translated here).
+int QuestionCard(const char* id, IconId icon, const char* question, const char* text, const char* later, const char* otherAnswer,
+                 const char* primaryAnswer) {
+    int answer = -1;
     const auto* vp = ImGui::GetMainViewport();
     const float u = ApexUi::Unit();
     const float margin = (ApexUi::kSpace4 + ApexUi::kSpace1) * u;
@@ -3569,7 +3605,7 @@ void RoomToSaveCard() {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, Col(VioletTheme::kCardBg, 0.97f));
     ImGui::PushStyleColor(ImGuiCol_Border, Col(VioletTheme::kCardBorder));
-    if (ImGui::Begin("##RoomToSaveCard", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize |
+    if (ImGui::Begin(id, nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize |
                                                      ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove)) {
         const ImVec2 pos = ImGui::GetWindowPos();
         const float height = ImGui::GetWindowHeight();
@@ -3577,25 +3613,25 @@ void RoomToSaveCard() {
         dl->AddRectFilled(pos, ImVec2(pos.x + compartment, pos.y + height), ImGui::GetColorU32(Col(VioletTheme::kAccentDark, 0.22f)), rounding,
                           ImDrawFlags_RoundCornersLeft);
         dl->AddLine(ImVec2(pos.x + compartment, pos.y), ImVec2(pos.x + compartment, pos.y + height), ImGui::GetColorU32(Col(VioletTheme::kCardBorder)), 1.0f);
-        ApexUi::Icon(IconId::Save, ImVec2(pos.x + (compartment - iconSize) * 0.5f, pos.y + 20.0f * u), iconSize, ImGui::GetColorU32(Col(VioletTheme::kAccent)));
+        ApexUi::Icon(icon, ImVec2(pos.x + (compartment - iconSize) * 0.5f, pos.y + 20.0f * u), iconSize, ImGui::GetColorU32(Col(VioletTheme::kAccent)));
         ImGui::Indent(compartment);
         const float right = width - pad; // the content's right edge, in window coordinates
         ImGui::PushTextWrapPos(right);
         ImGui::PushFont(VioletTheme::BoldFont(), VioletTheme::BaseFontSize() * 1.1f);
-        ImGui::TextUnformatted(I18n::Tr("Keep Room to save on?"));
+        ImGui::TextUnformatted(I18n::Tr(question));
         ImGui::PopFont();
         ApexUi::Gap(ApexUi::kSpace2);
         ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kText, 0.86f));
-        ImGui::TextWrapped("%s", I18n::Tr("Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes."));
+        ImGui::TextWrapped("%s", I18n::Tr(text));
         ImGui::PopStyleColor();
         ApexUi::Gap(ApexUi::kSpace3);
         {
             const ApexUi::ControlSizeScope controls(ApexUi::ControlSize::Compact);
-            const char* off = I18n::Tr("Turn it off");
-            const char* keep = I18n::Tr("Keep it on");
+            const char* off = I18n::Tr(otherAnswer);
+            const char* keep = I18n::Tr(primaryAnswer);
             const float gap = ApexUi::kSpace3 * u;
             const float buttons = ApexUi::ButtonWidth(off, false) + gap + ApexUi::ButtonWidth(keep, false);
-            const char* note = I18n::Tr("You can change it later in Performance \xE2\x80\xBA Memory handling");
+            const char* note = I18n::Tr(later);
             const float left = ImGui::GetCursorPosX();
             const bool sameRow = ImGui::CalcTextSize(note).x + gap + buttons <= right - left;
             if (sameRow) {
@@ -3609,9 +3645,9 @@ void RoomToSaveCard() {
                 ApexUi::Gap(ApexUi::kSpace2);
                 ImGui::SetCursorPosX(std::max(left, right - buttons));
             }
-            if (ApexUi::TextButton(off, nullptr, ButtonKind::Secondary)) RoomToSaveAnswer(false);
+            if (ApexUi::TextButton(off, nullptr, ButtonKind::Secondary)) answer = 0;
             ImGui::SameLine(0.0f, gap);
-            if (ApexUi::TextButton(keep, nullptr, ButtonKind::Primary)) RoomToSaveAnswer(true);
+            if (ApexUi::TextButton(keep, nullptr, ButtonKind::Primary)) answer = 1;
         }
         ImGui::PopTextWrapPos();
         ImGui::Unindent(compartment);
@@ -3619,6 +3655,32 @@ void RoomToSaveCard() {
     ImGui::End();
     ImGui::PopStyleColor(2);
     ImGui::PopStyleVar(3);
+    return answer;
+}
+void RoomToSaveCard() {
+    const int answer = QuestionCard("##RoomToSaveCard", IconId::Save, "Keep Room to save on?",
+                                    "Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.",
+                                    "You can change it later in Performance \xE2\x80\xBA Memory handling", "Turn it off", "Keep it on");
+    if (answer >= 0) RoomToSaveAnswer(answer == 1);
+}
+// Sims 3 Performance Patch's spin next to sims3-modernization, asked once ([ui] s3pp_spin_asked) after the Room to save question;
+// the item in Settings > Compatibility stays until the file is changed
+bool S3PPQuestionPending() {
+    static bool s_done = false;
+    if (s_done || PublicTestPending() || WelcomeActive()) return false;
+    if (ApexConfig::GetUi().s3ppSpinAsked || !S3PPSettings::Recommended()) return !(s_done = true);
+    return true;
+}
+void S3PPQuestionCard() {
+    const int answer = QuestionCard("##S3PPSpinCard", IconId::Gauge, "Turn off spin in Sims 3 Performance Patch?",
+                                    "Short Wait Spin or Thread Stack Diet is on in Sims 3 Performance Patch. With Sims 3 Modernization, its author recommends both off: spin keeps the CPU busy while Sims' routes are planned and can freeze the simulation for minutes. Apex changes these two lines in Sims3Performance.ini and keeps a copy of the old file. It applies the next time the game starts.",
+                                    "You can change it later in Settings \xE2\x80\xBA Compatibility", "Keep as is", "Turn them off");
+    if (answer < 0) return;
+    if (answer == 1) S3PPSettings::Apply();
+    auto ui = ApexConfig::GetUi();
+    ui.s3ppSpinAsked = true;
+    ApexConfig::SetUi(ui);
+    LOG_INFO(std::format("[Menu] Sims 3 Performance Patch spin question: {}", answer == 1 ? "turned off" : "kept as is"));
 }
 std::string VisibleVersionLabel(float maxTextWidth=FLT_MAX) {
     const std::string version=std::string("v")+APEX_VERSION_STRING;
@@ -4910,8 +4972,10 @@ class GuiClient final : public Overlay::Client {
         if (BannerNeeded()) { Banner(); noticeShown = true; }
         // the Room to save question: with the menu closed, before the routine pills (the overlay takes the mouse over it)
         const bool roomCard = !Overlay::IsVisible() && noticesAllowed && !noticeShown && RoomToSavePending();
-        Overlay::SetInteractive(roomCard);
+        const bool s3ppCard = !Overlay::IsVisible() && noticesAllowed && !noticeShown && !roomCard && S3PPQuestionPending();
+        Overlay::SetInteractive(roomCard || s3ppCard);
         if (roomCard) { RoomToSaveCard(); noticeShown = true; }
+        if (s3ppCard) { S3PPQuestionCard(); noticeShown = true; }
         if (!Overlay::IsVisible()) {
             if (!noticeShown && PresetPillVisible() && !Captures::ScreenshotPending()) { PresetPill(); noticeShown = true; }
             if (!noticeShown && HintVisible() && !Captures::ScreenshotPending()) Hint();
