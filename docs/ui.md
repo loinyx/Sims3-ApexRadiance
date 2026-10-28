@@ -325,12 +325,12 @@ loaded and `ShortWaitSpin` or `ThreadStackDiet` set to 1 in `[Patches]` of `Sims
 first look), the Sims 3 Performance Patch row shows Settings to change with an amber triangle, and the RECOMMENDED group
 (also on the Overview card) explains why: Sims 3 Modernization's author recommends both off, since spin keeps the CPU
 busy while Sims' routes are planned and, with route planning on Sims 3 Modernization's worker thread, can freeze the
-simulation for minutes. **Turn them off** copies the file to `Sims3Performance.ini.apex-backup`, then writes 0 in
+simulation for minutes. **Turn off** copies the file to `Sims3Performance.ini.apex-backup`, then writes 0 in
 those two values only (every other byte stays, through a temporary file); **Open Sims3Performance.ini** opens it in the
 text editor. After the change the item and the row say to restart the game, since Sims 3 Performance Patch reads the
 file only at start; a failed write shows how to change it by hand. Once per installation, after the Room to save
-question, the same choice is asked with the menu closed in the same card layout (Gauge icon, "Turn off spin in Sims 3
-Performance Patch?", **Keep as is** / **Turn them off**); either answer sets `[ui] s3pp_spin_asked`, which Reset all
+question, the same choice is asked with the menu closed in the same card layout (Gauge icon, "Turn off Short Wait
+Spin?", **Not now** / **Turn off**); either answer sets `[ui] s3pp_spin_asked`, which Reset all
 settings keeps. Apex never changes the file without that click.
 
 **Notices.** Capture, recording, comparison and startup pills share one top-center anchor 20 scaled units below the top,

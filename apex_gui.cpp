@@ -266,8 +266,7 @@ void SetShore(bool on) {
 constexpr const char* kRecommendText = APEX_PRODUCT_NAME " works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame "
                                        "rate limiter, fewer stutters and many extra game settings.";
 constexpr const char* kDxvkText = "Runs the game on Vulkan: fewer stutters, and " APEX_PRODUCT_NAME " is made and tested with it.";
-constexpr const char* kS3PPText = "With Sims 3 Modernization, its author recommends turning off Short Wait Spin and Thread Stack Diet in "
-                                  "Sims 3 Performance Patch: spin keeps the CPU busy while Sims' routes are planned and can freeze the simulation for minutes.";
+constexpr const char* kS3PPText = "With Sims 3 Modernization installed, Short Wait Spin and Thread Stack Diet can freeze your Sims for minutes.";
 constexpr const wchar_t* kS3SSReleasesUrl = L"https://github.com/sims3fiend/Sims3SettingsSetter/releases";
 constexpr const wchar_t* kDxvkReleasesUrl = L"https://github.com/doitsujin/dxvk/releases";
 constexpr const wchar_t* kApexReleasesUrl = L"https://github.com/loinyx/Sims3-ApexRadiance/releases";
@@ -329,12 +328,12 @@ void S3PPItem() {
     const S3PPSettings::State& s3pp = S3PPSettings::Get();
     ImGui::TextUnformatted("Sims 3 Performance Patch");
     if (s3pp.turnedOff) {
-        ApexUi::MutedText("Turned off. Restart the game to apply; the old file is kept as Sims3Performance.ini.apex-backup.");
+        ApexUi::MutedText("Turned off. Restart the game to apply.");
         return;
     }
     ApexUi::MutedText(kS3PPText);
     if (!s3pp.error.empty()) ApexUi::MutedText("Could not change Sims3Performance.ini. Open it and set ShortWaitSpin and ThreadStackDiet to 0.");
-    if (ApexUi::IconTextButton("Turn them off##S3PP", IconId::Check, "Sets ShortWaitSpin and ThreadStackDiet to 0 and keeps a copy of the old file", ButtonKind::Primary))
+    if (ApexUi::IconTextButton("Turn off##S3PP", IconId::Check, "Sets ShortWaitSpin and ThreadStackDiet to 0 and keeps a copy of the old file", ButtonKind::Primary))
         S3PPSettings::Apply();
     ImGui::SameLine(0.0f, ApexUi::kSpace3 * ApexUi::Unit());
     if (ApexUi::IconTextButton("Open Sims3Performance.ini", IconId::ExternalLink, "Opens the file in your text editor")) OpenPage(s3pp.ini.c_str());
@@ -3672,9 +3671,9 @@ bool S3PPQuestionPending() {
     return true;
 }
 void S3PPQuestionCard() {
-    const int answer = QuestionCard("##S3PPSpinCard", IconId::Gauge, "Turn off spin in Sims 3 Performance Patch?",
-                                    "Short Wait Spin or Thread Stack Diet is on in Sims 3 Performance Patch. With Sims 3 Modernization, its author recommends both off: spin keeps the CPU busy while Sims' routes are planned and can freeze the simulation for minutes. Apex changes these two lines in Sims3Performance.ini and keeps a copy of the old file. It applies the next time the game starts.",
-                                    "You can change it later in Settings \xE2\x80\xBA Compatibility", "Keep as is", "Turn them off");
+    const int answer = QuestionCard("##S3PPSpinCard", IconId::Gauge, "Turn off Short Wait Spin?",
+                                    "With Sims 3 Modernization installed, Short Wait Spin and Thread Stack Diet in Sims 3 Performance Patch can freeze your Sims for minutes. Apex can turn both off for you, and the change applies after a restart.",
+                                    "You can change it later in Settings \xE2\x80\xBA Compatibility", "Not now", "Turn off");
     if (answer < 0) return;
     if (answer == 1) S3PPSettings::Apply();
     auto ui = ApexConfig::GetUi();
