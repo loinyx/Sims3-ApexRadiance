@@ -328,7 +328,7 @@ busy while Sims' routes are planned and, with route planning on Sims 3 Moderniza
 simulation for minutes. **Turn off** copies the file to `Sims3Performance.ini.apex-backup`, then writes 0 in
 those two values only (every other byte stays, through a temporary file); **Open Sims3Performance.ini** opens it in the
 text editor. After the change the item and the row say to restart the game, since Sims 3 Performance Patch reads the
-file only at start; a failed write shows how to change it by hand. Once per installation, after the Room to save
+file only at start; a failed write shows how to change it by hand (from the question, the menu opens on that tab). Once per installation, after the Room to save
 question, the same choice is asked with the menu closed in the same card layout (Gauge icon, "Turn off Short Wait
 Spin?", **Not now** / **Turn off**); either answer sets `[ui] s3pp_spin_asked`, which Reset all
 settings keeps. Apex never changes the file without that click.

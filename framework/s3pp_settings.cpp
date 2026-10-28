@@ -61,6 +61,7 @@ bool Apply() {
         std::ofstream out(temp, std::ios::binary | std::ios::trunc);
         out.write(changed.data(), static_cast<std::streamsize>(changed.size()));
         out.close();
+        SetFileAttributesW(backup.c_str(), FILE_ATTRIBUTE_NORMAL); // CopyFile keeps a read-only ini's flag: a retry must still replace it
         if (!CopyFileW(s.ini.c_str(), backup.c_str(), FALSE)) s.error = std::format("could not copy it (error {})", GetLastError());
         else if (!out) s.error = "could not write the new file";
         else if (!MoveFileExW(temp.c_str(), s.ini.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))

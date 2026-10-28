@@ -26,6 +26,9 @@ int main() {
     Check(ReadPatch(twice, "ShortWaitSpin") == 1 && TurnOff(twice) == "[Patches]\nShortWaitSpin=0\nShortWaitSpin=0\n",
           "a key written twice counts as on and both lines change");
     Check(ReadPatch("[Patches] ; note\nShortWaitSpin=1", "ShortWaitSpin") == 1, "a section header with a comment, no final newline");
+    const std::string bom = "\xEF\xBB\xBF[ patches ]\n  ShortWaitSpin=1#spins\n";
+    Check(ReadPatch(bom, "ShortWaitSpin") == 1, "a UTF-8 BOM, spaces and lower case in the header, an indented key, a # comment");
+    Check(TurnOff(bom) == "\xEF\xBB\xBF[ patches ]\n  ShortWaitSpin=0#spins\n", "TurnOff keeps the BOM and the # comment");
     std::printf("%s\n", g_fail ? "s3pp_settings: FAILED" : "s3pp_settings: all checks passed");
     return g_fail ? 1 : 0;
 }

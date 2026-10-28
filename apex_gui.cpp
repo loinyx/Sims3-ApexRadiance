@@ -3675,11 +3675,16 @@ void S3PPQuestionCard() {
                                     "With Sims 3 Modernization installed, Short Wait Spin and Thread Stack Diet in Sims 3 Performance Patch can freeze your Sims for minutes. Apex can turn both off for you, and the change applies after a restart.",
                                     "You can change it later in Settings \xE2\x80\xBA Compatibility", "Not now", "Turn off");
     if (answer < 0) return;
-    if (answer == 1) S3PPSettings::Apply();
+    const bool failed = answer == 1 && !S3PPSettings::Apply();
     auto ui = ApexConfig::GetUi();
     ui.s3ppSpinAsked = true;
     ApexConfig::SetUi(ui);
-    LOG_INFO(std::format("[Menu] Sims 3 Performance Patch spin question: {}", answer == 1 ? "turned off" : "kept as is"));
+    LOG_INFO(std::format("[Menu] Sims 3 Performance Patch spin question: {}", answer == 0 ? "kept as is" : failed ? "turn off failed" : "turned off"));
+    if (failed) { // the reason and the way to change it by hand are in Settings > Compatibility
+        g_page = PageSettings;
+        g_settingsTab = SettingsCompatibility;
+        Overlay::SetVisible(true);
+    }
 }
 std::string VisibleVersionLabel(float maxTextWidth=FLT_MAX) {
     const std::string version=std::string("v")+APEX_VERSION_STRING;
@@ -4994,7 +4999,7 @@ class GuiClient final : public Overlay::Client {
         if (PublicTestPending() && !BannerNeeded() && !Captures::ScreenshotPending()) Overlay::SetVisible(true);
         RunShortcuts();
         // the capture notes (recording, saved, an open session) show with the menu closed too
-        return BannerNeeded() || HintVisible() || RoomToSavePending() || PresetPillVisible() || g_comparing || Recorder::SecondsRecorded() >= 0 || Captures::CurrentNote().visible ||
+        return BannerNeeded() || HintVisible() || RoomToSavePending() || S3PPQuestionPending() || PresetPillVisible() || g_comparing || Recorder::SecondsRecorded() >= 0 || Captures::CurrentNote().visible ||
                NoticeAnimationsPending() || (!g_profiles.loading.empty() && ImGui::GetTime() - g_profiles.applyOpenedAt < 0.14) || LightProbe::Aiming() || g_returnFromProbe.load();
     }
 

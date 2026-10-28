@@ -46,18 +46,21 @@ inline bool SameText(std::string_view a, std::string_view b) {
 // Calls f(line, valueStart, valueEnd) for each "key = value" line of [Patches] whose key matches (offsets into ini)
 template <class F> void ForPatchKey(std::string_view ini, std::string_view key, F&& f) {
     bool inPatches = false;
-    for (size_t at = 0; at < ini.size();) {
+    for (size_t at = ini.substr(0, 3) == "\xEF\xBB\xBF" ? 3 : 0; at < ini.size();) { // (after a UTF-8 BOM)
         size_t end = ini.find('\n', at);
         if (end == std::string_view::npos) end = ini.size();
         const std::string_view line = Trim(ini.substr(at, end - at));
-        if (!line.empty() && line.front() == '[') inPatches = SameText(Trim(line.substr(0, line.find(']') + 1)), "[Patches]"); // "[Patches] ; note" too
+        if (!line.empty() && line.front() == '[') {
+            const size_t close = line.find(']');
+            inPatches = close != std::string_view::npos && SameText(Trim(line.substr(1, close - 1)), "Patches"); // "[ Patches ] ; note" too
+        }
         else if (inPatches && !line.empty() && line.front() != ';' && line.front() != '#') {
             const size_t eq = ini.find('=', at);
             if (eq < end && SameText(Trim(ini.substr(at, eq - at)), key)) {
                 size_t v = eq + 1;
                 while (v < end && (ini[v] == ' ' || ini[v] == '\t')) v++;
                 size_t ve = v;
-                while (ve < end && ini[ve] != ' ' && ini[ve] != '\t' && ini[ve] != '\r' && ini[ve] != ';') ve++;
+                while (ve < end && ini[ve] != ' ' && ini[ve] != '\t' && ini[ve] != '\r' && ini[ve] != ';' && ini[ve] != '#') ve++;
                 f(v, ve);
             }
         }
