@@ -883,6 +883,7 @@ struct GpuLamp {
     RtLampModel::Lamp lamp; // lot space; mult per story is set per map
     float esum, spill;
     int mult[8] = {};
+    uint32_t listed = 0; // the stories whose room-0 list holds it (mult also covers the stories it is drawn on before they gather it)
     bool liftable = false; // drawn from kLowLampLift on story 0's floor map when it lies on the ground
 };
 struct BakeLampW {
@@ -1437,6 +1438,7 @@ void Frame(IDirect3DDevice9* dev) {
                 it = lamps.end() - 1;
             }
             it->mult[S]++;
+            it->listed |= 1u << S;
             Mix(allSig, &L, sizeof L);
             Mix(allSig, &it->lamp.law, sizeof it->lamp.law);
         }
@@ -1444,6 +1446,22 @@ void Frame(IDirect3DDevice9* dev) {
         for (const auto& b : bake[S]) Mix(h, &b, sizeof b);
         for (uintptr_t L : bakeLights[S]) Mix(h, &L, sizeof L);
         bakeSig[S] = h;
+    }
+    // A lamp that is on and listed on some story is drawn on every story where it is drawable, as its gather will list it
+    // there (the consistency repair below never found a gather that left one out). A new or picked-up lamp is listed on its
+    // own story at once, but the other stories' room 0s gather it only at their next solve, which a drag defers: before,
+    // the walls between floors showed no lamp for the whole drag and up to 4 s after it
+    for (GpuLamp& g : lamps) {
+        uint32_t missing = 0;
+        int mult = 0;
+        for (int S = 0; S <= 7; S++) {
+            if (rooms[S] && !g.mult[S]) missing |= 1u << S;
+            mult = std::max(mult, g.mult[S]);
+        }
+        LampRead r;
+        if (!missing || !ReadLamp(g.light, r) || !(r.f.flags & 0x20)) continue;
+        for (int S = 0; S <= 7; S++)
+            if ((missing >> S & 1) && RtLampModel::Drawn(r.f, rns[S].lot)) g.mult[S] = mult;
     }
     std::vector<uint64_t> bakeKeys[8];
     for (int S = 0; S <= 7; S++) {
@@ -1507,9 +1525,7 @@ void Frame(IDirect3DDevice9* dev) {
         const DWORD checkNow = GetTickCount();
         std::unordered_map<uintptr_t, uint32_t> nowMask;
         for (const GpuLamp& g : lamps) {
-            uint32_t m = 0;
-            for (int S = 0; S <= 7; S++)
-                if (g.mult[S]) m |= 1u << S;
+            const uint32_t m = g.listed; // (the lists: a story it is drawn on before its gather still gathers it again)
             nowMask[g.light] = m;
             Seen& e = s_seen[g.light];
             LampRead gr;
@@ -1913,7 +1929,8 @@ void Frame(IDirect3DDevice9* dev) {
     {
         // (14/10) not a lamp a covering slot keeps baked in its base (kept when it was not drawn): its edits must reach the
         // game's solve, the GPU does not draw it there
-        // nor a lamp missing from the list of a story where it is drawable: the GPU does not draw it there either
+        // nor a lamp missing from the list of a story where it is drawable: until that story gathers it, the solves where it
+        // is listed keep it baked (the GPU draws it only where no base holds it)
         std::vector<uintptr_t> covered;
         covered.reserve(lamps.size());
         uint32_t storyBits = 0;
@@ -1922,9 +1939,7 @@ void Frame(IDirect3DDevice9* dev) {
         for (const GpuLamp& g : lamps) {
             bool baked = false;
             for (const auto& s : g_slots) baked = baked || (s->used && s->kept.count(g.light) && !s->drawn.count(g.light));
-            uint32_t listed = 0;
-            for (int S = 0; S <= 7; S++)
-                if (g.mult[S]) listed |= 1u << S;
+            const uint32_t listed = g.listed;
             if (!baked && (listed & storyBits) != storyBits) {
                 LampRead r;
                 if (!ReadLamp(g.light, r)) baked = true;

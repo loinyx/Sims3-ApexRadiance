@@ -139,6 +139,8 @@ struct Record {
     // (a solve or a delta that changed only drawn lamps keeps it: the GPU's relit maps stand as they are)
     uint64_t baseHash = 0;
     uint32_t baseVersion = 0;
+    // a lamp edit sent the room to its full solve: kept only as Real-time outdoor lamps' base until that solve ends (no delta)
+    bool stale = false;
     uintptr_t room = 0, mgr = 0;
     int story = 0, cls = 0;
     uint64_t lot = 0;
@@ -298,6 +300,11 @@ void EraseLocked(uint64_t key) {
     g_bytes.fetch_sub(std::min(g_bytes.load(), it->second->bytes));
     g_records.erase(it);
     c_records.store(static_cast<long>(g_records.size()));
+}
+void EraseStale(const void* room, int cls) {
+    std::lock_guard<std::recursive_mutex> lk(g_mx);
+    const auto it = g_records.find(KeyOf(room, cls));
+    if (it != g_records.end() && it->second->stale) EraseLocked(it->first);
 }
 void ClearLocked() {
     g_records.clear();
@@ -733,6 +740,7 @@ enum class Delta { Fail, NoChange, Ok };
 
 // The changed lights' new parts and the texels they change (no map is touched); the record takes them
 constexpr size_t kMaxEditBatches = 200;
+constexpr const char* kWhyEditBatches = "too many batches to solve again in one step during an edit (the full solve is sliced)";
 std::atomic<long> c_batchRefused{0};
 bool LampEditRecent() {
     const unsigned long edit = LampMarkFilter::EditLastTick();
@@ -829,7 +837,7 @@ Delta ComputeDelta(BYTE* room, const RoomRead& rr, Record& r, const char*& why, 
         }
         if (inReach > kMaxEditBatches) {
             c_batchRefused.fetch_add(1, std::memory_order_relaxed);
-            why = "too many batches to solve again in one step during an edit (the full solve is sliced)";
+            why = kWhyEditBatches;
             return Delta::Fail;
         }
     }
@@ -1047,7 +1055,7 @@ const char* DirectReady(uintptr_t tracker) { // under g_mx
         RoomRead rr;
         if (!Idle(room, cls) || !ReadRoom(room, rr)) return "a story's room 0 is being solved";
         const auto it = g_records.find(KeyOf(room, cls));
-        if (it == g_records.end()) return "a story's room 0 has no kept parts";
+        if (it == g_records.end() || it->second->stale) return "a story's room 0 has no kept parts";
         if (const char* why = ValidateBasic(*it->second, room, rr)) return why;
     }
     return rooms ? nullptr : "no room 0";
@@ -1077,7 +1085,7 @@ void DirectRun(PendingLot& p) {
         std::unique_lock<std::recursive_mutex> lk(g_mx);
         auto it = g_records.end();
         if (!ReadRoom(room, rr) || !Idle(room, cls)) why = "being solved";
-        else if ((it = g_records.find(KeyOf(room, cls))) == g_records.end()) why = "no kept parts";
+        else if ((it = g_records.find(KeyOf(room, cls))) == g_records.end() || it->second->stale) why = "no kept parts";
         else if (!(why = ValidateBasic(*it->second, room, rr))) {
             if (!geo) geo = LevelLightShare::LotGeometryKey(room);
             if (!geo || geo != it->second->geo) why = "walls, floors or openings changed";
@@ -1113,7 +1121,11 @@ void DirectRun(PendingLot& p) {
         }
         if (ok && it != g_records.end()) UpdateBytes(*it->second);
         if (!ok) {
-            if (it != g_records.end()) EraseLocked(it->first);
+            // (a lamp-only refusal keeps the base the GPU's until its solve ends, as at the lock step)
+            if (it != g_records.end()) {
+                if (it->second->stale || (why && (std::strcmp(why, kWhyEditBatches) == 0 || std::strcmp(why, "too many lights changed") == 0))) it->second->stale = true;
+                else EraseLocked(it->first);
+            }
             lk.unlock();
             c_directFallbacks.fetch_add(1, std::memory_order_relaxed);
             LogDrop(rr.story, cls, "solved in full after a lamp edit", why ? why : "?");
@@ -1277,7 +1289,7 @@ bool UpToDate(const void* roomPtr) {
     if (!UniqueList(room, list)) return false;
     std::lock_guard<std::recursive_mutex> lk(g_mx);
     const auto it = g_records.find(KeyOf(room, cls));
-    if (it == g_records.end()) return false;
+    if (it == g_records.end() || it->second->stale) return false;
     const Record& r = *it->second;
     if (ValidateBasic(r, room, rr) || r.lamps.size() != list.size()) return false;
     for (const ListLight& l : list) {
@@ -1335,6 +1347,7 @@ void SolveStart(unsigned char* room) {
                                      LevelLightShare::FirstUnwrappedLight(room)));
         }
         LogDrop(rr.story, rr.cls, "its parts are not kept from this solve", refuse);
+        EraseStale(room, rr.cls);
         return;
     }
     Capture& c = g_cap;
@@ -1382,7 +1395,7 @@ void SolveStart(unsigned char* room) {
     if (check) {
         std::lock_guard<std::recursive_mutex> lk(g_mx);
         const auto it = g_records.find(KeyOf(room, rr.cls));
-        if (it != g_records.end()) {
+        if (it != g_records.end() && !it->second->stale) {
             const Record& o = *it->second;
             c.check = true;
             c.checkLightsSame = o.lamps.size() == c.startList.size();
@@ -1414,7 +1427,7 @@ bool AtLockStep(unsigned char* room, bool gather) {
     const char* why = nullptr;
     if (!gather) why = "a solve on another thread";
     else if (g_cap.active && g_cap.room == room && g_cap.check) why = "the self-check's full solve";
-    else if (it == g_records.end()) why = "no kept parts for this room and class yet";
+    else if (it == g_records.end() || it->second->stale) why = "no kept parts for this room and class yet";
     LARGE_INTEGER t0{};
     QueryPerformanceCounter(&t0);
     Plan plan;
@@ -1435,7 +1448,9 @@ bool AtLockStep(unsigned char* room, bool gather) {
     if (!done) {
         // a full solve rewrites the maps: what was kept of this room and class is no longer what they hold
         const bool had = it != g_records.end();
-        EraseLocked(key);
+        // (a lamp-only refusal: its base stays the GPU's until the solve's own parts replace it, so the stories do not wait)
+        if (had && (it->second->stale || (why && (std::strcmp(why, kWhyEditBatches) == 0 || std::strcmp(why, "too many lights changed") == 0)))) it->second->stale = true;
+        else EraseLocked(key);
         lk.unlock();
         c_full.fetch_add(1, std::memory_order_relaxed);
         NoteReason(why ? why : "?");
@@ -1543,8 +1558,10 @@ void SolveEnd(unsigned char* room) {
                 l.sig = 0;
                 unsure++;
             }
-        if (c.ok && (LevelLightShare::LotGeometryKey(room) != r.geo || LevelLightShare::PhysicsKey() != r.physics || r.gen != g_gen.load()))
-            Fail("walls, floors, openings or options changed during the solve");
+        // (one reason each: a lamp drag lost its kept parts here and the joint reason could not say which key moved)
+        if (c.ok && LevelLightShare::LotGeometryKey(room) != r.geo) Fail("walls, floors or openings changed during the solve");
+        if (c.ok && LevelLightShare::PhysicsKey() != r.physics) Fail("the light rules (PhysicsKey) changed during the solve");
+        if (c.ok && r.gen != g_gen.load()) Fail("the lighting options changed during the solve");
         if (c.ok && r.texels.empty()) Fail("no texel");
     }
     if (c.ok) {
@@ -1728,7 +1745,7 @@ void SolveEnd(unsigned char* room) {
         }
     } else {
         RoomRead rr;
-        if (ReadRoom(room, rr)) LogDrop(rr.story, rr.cls, "its parts are not kept from this solve", c.why ? c.why : "?");
+        if (ReadRoom(room, rr)) LogDrop(rr.story, rr.cls, "its parts are not kept from this solve", c.why ? c.why : "?"), EraseStale(room, rr.cls);
         if (c.check) LOG_INFO(std::format("[OutdoorDelta] Self-check of a room 0: its full solve was not kept ({}), not compared", c.why ? c.why : "?"));
     }
     DropCapture();
