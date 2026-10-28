@@ -6,6 +6,10 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k2172Added[] = {
+    "Compatibility: offers to turn off Sims 3 Performance Patch options that freeze Sims with Sims 3 Modernization",
+    nullptr};
+
 constexpr const char* k2171Improved[] = {
     "Performance: lamp light on fences and outdoor objects is reused instead of worked out again",
     nullptr};
@@ -415,6 +419,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"2.17.2", "2026-10-28", k2172Added, nullptr, nullptr},
     {"2.17.1", "2026-10-27", nullptr, k2171Improved, k2171Fixed},
     {"2.17.0", "2026-10-27", k2170Added, k2170Improved, nullptr},
     {"2.16.3", "2026-10-27", nullptr, nullptr, k2163Fixed},

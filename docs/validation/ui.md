@@ -17,6 +17,7 @@ The menu is described in [ui.md](../ui.md). It must:
 | [`tools/report_check/control_layout_check.cpp`](../../tools/report_check/control_layout_check.cpp) | Shared control geometry and the profile picker: popup style stacks, adjacent heights, text ink centres, EN/PT/ES/FR at two scales | README | x86 MSVC, ImGui |
 | [`tools/report_check/menu_253_check.cpp`](../../tools/report_check/menu_253_check.cpp) | The Report page and the notice layout (24 cases: four languages, three widths, two font sizes) | README | x86 MSVC, ImGui |
 | [`tools/i18n_check`](../../tools/i18n_check/i18n_check.cpp) | Translation tables: conflicting duplicates, missing languages, placeholder mismatches | Build line in the source header | x86 MSVC |
+| [`tools/s3pp_settings_test`](../../tools/s3pp_settings_test/run.ps1) | The `Sims3Performance.ini` reader and the two-line change behind the Compatibility item (sections, case, comments, duplicates, unchanged bytes); in the Smoke suite | `run.ps1` | x86 MSVC |
 | [`tools/menu_audit.pl`](../../tools/menu_audit.pl) | Heuristic audit: untranslated texts, copy-guideline breaks, undocumented keys, settings missing from ResetDefaults | `perl tools/menu_audit.pl .` | Perl |
 | [`tools/developer_mode_check`](../../tools/developer_mode_check/check.cpp) | Profile part bits and filtering | See [validation/developer-mode.md](developer-mode.md) | x86 MSVC |
 
@@ -26,6 +27,7 @@ Native checks are geometric evidence; they do not replace inspecting every page 
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-28 | `28dc5b3` (2.17.2 release) | `tools/i18n_check`, CPU Smoke suite with `tools/s3pp_settings_test`, `menu_audit.pl`, Release and public x86 builds | OK, 2340 of 2340 keys; Smoke passed, 10 of 10 ini checks; no audit finding on the new texts; both built | MSBuild / None |
 | 2026-10-22 | `715a410` (the Tester labels *Window light channel memo* and *Paced relight while moving*) | `tools/i18n_check` | OK, 2243 of 2243 keys | None |
 | 2026-10-03 | PR #2 (control sizing) | `control_layout_check` | 40 multi-frame cases passed across EN/PT/ES/FR and scales 1.0 / 1.4: popup style stacks, stable neighbouring heights, button glyph centres within 1.1 px, one-pixel divider origins | None |
 | 2026-10-03 | PR #2 (control sizing) | `menu_253_check` | 24 notice and 40 page cases passed | None |
@@ -56,6 +58,11 @@ Native checks are geometric evidence; they do not replace inspecting every page 
 
 ## Confirmed in game
 
+- 2026-10-28, `b206084` and `f8a90b8` (DXVK, Sims 3 Modernization 0.36.37, Sims 3 Performance Patch 1.0.0-beta2 with
+  `ShortWaitSpin` and `ThreadStackDiet` on): the question showed once after the world loaded, with the menu closed;
+  **Turn off** changed only those two lines to 0, kept the old file as `Sims3Performance.ini.apex-backup` and set
+  `[ui] s3pp_spin_asked`; the log recorded the detection and the change. Shown on the first build's texts and again on
+  the revised ones.
 - 2.5.5 and 2.5.6: the menu layout, Report page and Settings tabs were used in play; the control sizing went through two
   revisions after in-game feedback (36/44, then 34/40, then 30/36 units).
 

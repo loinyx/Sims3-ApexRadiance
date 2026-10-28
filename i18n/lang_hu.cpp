@@ -9,6 +9,7 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Hungarian}
 const I18n::Pair kPairs[] = {
+    {"Compatibility: offers to turn off Sims 3 Performance Patch options that freeze Sims with Sims 3 Modernization", "Kompatibilitás: felajánlja a Sims 3 Performance Patch azon beállításainak kikapcsolását, amelyek a Sims 3 Modernizationnel megfagyasztják a simeket"},
     {"Performance: lamp light on fences and outdoor objects is reused instead of worked out again", "Teljesítmény: a lámpák fénye a kerítéseken és a kültéri tárgyakon újrahasznosul, nem számolódik újra"},
     {"Night Lights: a lamp no longer lights the next room's floor and furniture through the wall", "Éjszakai világítás: egy lámpa már nem világítja meg a falon át a szomszéd szoba padlóját és bútorait"},
     {"Night Lights: street light no longer reaches counters and furniture inside the house", "Éjszakai világítás: az utcai fény már nem éri el a pultokat és a bútorokat a házban"},
@@ -117,6 +118,19 @@ const I18n::Pair kPairs[] = {
     {"Keep Room to save on?", "Bekapcsolva maradjon a Hely a mentéshez?"},
     {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "Megakadályozza, hogy hosszú játék közben a mentés a 12-es hibával meghiúsuljon: 128 MB-ot szabadon tart a játék memóriájából, és közvetlenül minden mentés előtt visszaadja. A képernyőn semmi sem változik."},
     {"You can change it later in Performance › Memory handling", "Később módosíthatod: Teljesítmény › Memóriakezelés"},
+    {"Sims 3 Modernization", "Sims 3 Modernization"},
+    {"Sims 3 Performance Patch", "Sims 3 Performance Patch"},
+    {"Settings to change", "Módosítandó beállítások"},
+    {"With Sims 3 Modernization installed, Short Wait Spin and Thread Stack Diet can freeze your Sims for minutes.", "Telepített Sims 3 Modernization mellett a Short Wait Spin és a Thread Stack Diet percekre megfagyaszthatja a simeidet."},
+    {"Turned off. Restart the game to apply.", "Kikapcsolva. Indítsd újra a játékot az alkalmazáshoz."},
+    {"Could not change Sims3Performance.ini. Open it and set ShortWaitSpin and ThreadStackDiet to 0.", "Nem sikerült módosítani a Sims3Performance.ini fájlt. Nyisd meg, és állítsd a ShortWaitSpin és a ThreadStackDiet értékét 0-ra."},
+    {"Turn off", "Kikapcsolás"},
+    {"Sets ShortWaitSpin and ThreadStackDiet to 0 and keeps a copy of the old file", "0-ra állítja a ShortWaitSpin és a ThreadStackDiet értékét, és megőrzi a régi fájl másolatát"},
+    {"Open Sims3Performance.ini", "Sims3Performance.ini megnyitása"},
+    {"Opens the file in your text editor", "Megnyitja a fájlt a szövegszerkesztődben"},
+    {"Turn off Short Wait Spin?", "Kikapcsolod a Short Wait Spint?"},
+    {"With Sims 3 Modernization installed, Short Wait Spin and Thread Stack Diet in Sims 3 Performance Patch can freeze your Sims for minutes. Apex can turn both off for you, and the change applies after a restart.", "Telepített Sims 3 Modernization mellett a Sims 3 Performance Patch Short Wait Spin és Thread Stack Diet beállítása percekre megfagyaszthatja a simeidet. Az Apex kikapcsolhatja mindkettőt helyetted; a változás újraindítás után érvényes."},
+    {"You can change it later in Settings › Compatibility", "Később módosíthatod: Beállítások › Kompatibilitás"},
     {"Keep it on", "Maradjon bekapcsolva"},
     {"Turn it off", "Kikapcsolás"},
     {"The latest lighting features also work on the EA app version 1.69", "A legújabb világítási funkciók az EA app 1.69-es verzióján is működnek"},

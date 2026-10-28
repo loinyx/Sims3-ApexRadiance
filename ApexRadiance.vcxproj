@@ -186,6 +186,7 @@
     <ClCompile Include="framework\memory_patch.cpp" />
     <ClCompile Include="framework\overlay.cpp" />
     <ClCompile Include="framework\patch_base.cpp" />
+    <ClCompile Include="framework\s3pp_settings.cpp" />
     <ClCompile Include="framework\s3ss_detect.cpp" />
     <ClCompile Include="framework\scene_copy.cpp" />
     <ClCompile Include="framework\scene_target.cpp" />
@@ -353,6 +354,7 @@
     <ClInclude Include="framework\overlay.h" />
     <ClInclude Include="framework\patch_base.h" />
     <ClInclude Include="framework\render_callbacks.h" />
+    <ClInclude Include="framework\s3pp_settings.h" />
     <ClInclude Include="framework\s3ss_detect.h" />
     <ClInclude Include="framework\s3ss_ambient_policy.h" />
     <ClInclude Include="framework\scene_copy.h" />

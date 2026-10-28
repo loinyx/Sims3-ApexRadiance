@@ -9,6 +9,7 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Russian}
 const I18n::Pair kPairs[] = {
+    {"Compatibility: offers to turn off Sims 3 Performance Patch options that freeze Sims with Sims 3 Modernization", "Совместимость: предлагает выключить параметры Sims 3 Performance Patch, из-за которых симы замирают вместе с Sims 3 Modernization"},
     {"Performance: lamp light on fences and outdoor objects is reused instead of worked out again", "Производительность: свет ламп на заборах и уличных объектах используется повторно, а не пересчитывается"},
     {"Night Lights: a lamp no longer lights the next room's floor and furniture through the wall", "Ночное освещение: лампа больше не освещает сквозь стену пол и мебель соседней комнаты"},
     {"Night Lights: street light no longer reaches counters and furniture inside the house", "Ночное освещение: уличный свет больше не попадает на столешницы и мебель внутри дома"},
@@ -117,6 +118,19 @@ const I18n::Pair kPairs[] = {
     {"Keep Room to save on?", "Оставить «Место для сохранения» включённым?"},
     {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "Не даёт сохранениям завершаться ошибкой 12 в долгих сессиях: держит свободными 128 МБ памяти игры и освобождает их прямо перед каждым сохранением. На экране ничего не меняется."},
     {"You can change it later in Performance › Memory handling", "Это можно изменить позже в разделе «Производительность › Работа с памятью»"},
+    {"Sims 3 Modernization", "Sims 3 Modernization"},
+    {"Sims 3 Performance Patch", "Sims 3 Performance Patch"},
+    {"Settings to change", "Нужно изменить настройки"},
+    {"With Sims 3 Modernization installed, Short Wait Spin and Thread Stack Diet can freeze your Sims for minutes.", "Если установлен Sims 3 Modernization, Short Wait Spin и Thread Stack Diet могут заморозить ваших симов на несколько минут."},
+    {"Turned off. Restart the game to apply.", "Выключено. Перезапустите игру, чтобы применить."},
+    {"Could not change Sims3Performance.ini. Open it and set ShortWaitSpin and ThreadStackDiet to 0.", "Не удалось изменить Sims3Performance.ini. Откройте его и установите ShortWaitSpin и ThreadStackDiet в 0."},
+    {"Turn off", "Выключить"},
+    {"Sets ShortWaitSpin and ThreadStackDiet to 0 and keeps a copy of the old file", "Устанавливает ShortWaitSpin и ThreadStackDiet в 0 и сохраняет копию старого файла"},
+    {"Open Sims3Performance.ini", "Открыть Sims3Performance.ini"},
+    {"Opens the file in your text editor", "Открывает файл в текстовом редакторе"},
+    {"Turn off Short Wait Spin?", "Выключить Short Wait Spin?"},
+    {"With Sims 3 Modernization installed, Short Wait Spin and Thread Stack Diet in Sims 3 Performance Patch can freeze your Sims for minutes. Apex can turn both off for you, and the change applies after a restart.", "Если установлен Sims 3 Modernization, Short Wait Spin и Thread Stack Diet в Sims 3 Performance Patch могут заморозить ваших симов на несколько минут. Apex может выключить оба, изменение вступит в силу после перезапуска."},
+    {"You can change it later in Settings › Compatibility", "Это можно изменить позже в разделе «Настройки › Совместимость»"},
     {"Keep it on", "Оставить включённым"},
     {"Turn it off", "Выключить"},
     {"The latest lighting features also work on the EA app version 1.69", "Новейшие функции освещения работают и в версии 1.69 из приложения EA"},

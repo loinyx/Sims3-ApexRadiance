@@ -9,6 +9,7 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Korean}
 const I18n::Pair kPairs[] = {
+    {"Compatibility: offers to turn off Sims 3 Performance Patch options that freeze Sims with Sims 3 Modernization", "호환성: Sims 3 Modernization과 함께 쓰면 심이 멈추는 Sims 3 Performance Patch 옵션을 끄도록 안내해요"},
     {"Performance: lamp light on fences and outdoor objects is reused instead of worked out again", "성능: 울타리와 실외 오브젝트에 비치는 램프 빛을 다시 계산하지 않고 재사용해요"},
     {"Night Lights: a lamp no longer lights the next room's floor and furniture through the wall", "야간 조명: 램프 빛이 더 이상 벽을 통과해 옆방의 바닥과 가구를 비추지 않아요"},
     {"Night Lights: street light no longer reaches counters and furniture inside the house", "야간 조명: 가로등 빛이 더 이상 집 안의 조리대와 가구에 닿지 않아요"},
@@ -117,6 +118,19 @@ const I18n::Pair kPairs[] = {
     {"Keep Room to save on?", "저장 공간 확보를 켜 둘까요?"},
     {"Stops saves from failing with Error 12 in long sessions: it keeps 128 MB of the game's memory free and hands it back right before each save. Nothing on screen changes.", "오래 플레이할 때 저장이 오류 12로 실패하지 않게 합니다. 게임 메모리 중 128MB를 비워 두었다가 저장 직전에 돌려줍니다. 화면에 보이는 것은 바뀌지 않습니다."},
     {"You can change it later in Performance › Memory handling", "나중에 성능 › 메모리 처리에서 바꿀 수 있습니다"},
+    {"Sims 3 Modernization", "Sims 3 Modernization"},
+    {"Sims 3 Performance Patch", "Sims 3 Performance Patch"},
+    {"Settings to change", "변경할 설정"},
+    {"With Sims 3 Modernization installed, Short Wait Spin and Thread Stack Diet can freeze your Sims for minutes.", "Sims 3 Modernization이 설치되어 있으면 Short Wait Spin과 Thread Stack Diet 때문에 심이 몇 분 동안 멈출 수 있습니다."},
+    {"Turned off. Restart the game to apply.", "껐습니다. 게임을 다시 시작하면 적용됩니다."},
+    {"Could not change Sims3Performance.ini. Open it and set ShortWaitSpin and ThreadStackDiet to 0.", "Sims3Performance.ini를 바꾸지 못했습니다. 파일을 열어 ShortWaitSpin과 ThreadStackDiet를 0으로 설정하세요."},
+    {"Turn off", "끄기"},
+    {"Sets ShortWaitSpin and ThreadStackDiet to 0 and keeps a copy of the old file", "ShortWaitSpin과 ThreadStackDiet를 0으로 설정하고 이전 파일의 사본을 보관합니다"},
+    {"Open Sims3Performance.ini", "Sims3Performance.ini 열기"},
+    {"Opens the file in your text editor", "텍스트 편집기에서 파일을 엽니다"},
+    {"Turn off Short Wait Spin?", "Short Wait Spin을 끌까요?"},
+    {"With Sims 3 Modernization installed, Short Wait Spin and Thread Stack Diet in Sims 3 Performance Patch can freeze your Sims for minutes. Apex can turn both off for you, and the change applies after a restart.", "Sims 3 Modernization이 설치되어 있으면 Sims 3 Performance Patch의 Short Wait Spin과 Thread Stack Diet 때문에 심이 몇 분 동안 멈출 수 있습니다. Apex가 둘 다 꺼 드릴 수 있으며, 변경 사항은 다시 시작한 뒤 적용됩니다."},
+    {"You can change it later in Settings › Compatibility", "나중에 설정 › 호환성에서 바꿀 수 있습니다"},
     {"Keep it on", "켜 두기"},
     {"Turn it off", "끄기"},
     {"The latest lighting features also work on the EA app version 1.69", "최신 조명 기능이 EA 앱 1.69 버전에서도 작동합니다"},
