@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Traditional, Taiwan / Hong Kong)}
 const I18n::Pair kPairs[] = {
+    {"Performance: lamp light on fences and outdoor objects is reused instead of worked out again", "效能：柵欄和戶外物件上的燈光會被重複使用，而不再重新計算"},
+    {"Night Lights: a lamp no longer lights the next room's floor and furniture through the wall", "夜間照明：燈光不再穿過牆壁照亮隔壁房間的地板和家具"},
+    {"Night Lights: street light no longer reaches counters and furniture inside the house", "夜間照明：路燈的光不再照到屋內的檯面和家具"},
     {"Performance: Room to save asks once, after updating, whether to keep it on", "效能：更新後，「存檔空間」會詢問一次是否保持開啟"},
     {"Performance: changing a lamp no longer relights rooms on other lots", "效能：變更燈具後，不再重新計算其他地段房間的光照"},
     {"Night Lights: no more dark squares on lit floors under furniture", "夜間照明：照亮的地板上，家具下方不再出現暗色方塊"},
