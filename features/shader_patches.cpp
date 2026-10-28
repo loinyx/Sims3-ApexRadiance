@@ -3589,7 +3589,7 @@ bool PatchWindowOutdoor(std::vector<DWORD>& t, WindowOutdoorPatch& out, bool rea
         Op(kTexld, 3), Dst(kTemp, P), Src(kTemp, P), Src(kSampler, static_cast<DWORD>(r.sampler[0])),
         Op(kAdd, 3), Dst(kTemp, P, 0x8, true), Neg(Src(kTemp, P, kSwzW)), Src(kConst, cH, 0xAA /* 1 */),
         // (2.17.1) inside the plan (alpha over 0.5: the plan's texel edge is the outside wall) w = 0: the bilinear read gave a
-        // face up to half a metre inside, a kitchen counter along the outside wall, up to half the outdoor light (F7 17-31-11);
+        // face up to half a metre inside, a kitchen counter along the outside wall, up to half the outdoor light (an F7 capture);
         // outside it w is unchanged
         Op(kAdd, 3), Dst(kTemp, P, 0x1), Src(kTemp, P, kSwzW), Neg(Src(kConst, cH, kSwzX)),
         Op(kCmpWin, 4), Dst(kTemp, P, 0x8), Src(kTemp, P, kSwzX), Src(kTemp, P, kSwzW), Src(kConst, cH, Sw(3, 3, 3, 3)),

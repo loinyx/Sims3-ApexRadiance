@@ -6028,7 +6028,7 @@ template <typename DrawFn> bool DrawWindowOutdoor(IDirect3DDevice9* dev, DrawFn 
     IDirect3DTexture9* atlas = LightmapSmooth::Atlas(atlasMap);
     if (!atlas) return false;
     // (basis_wall_filter, 2.17.1) the copy whose 4 directional reads keep off the walls (BasisSmoothOptions::smooth = false):
-    // the game's bilinear read took the texel beyond a wall into a face against it (F7 19-25-57: a kitchen counter along the
+    // the game's bilinear read took the texel beyond a wall into a face against it (an F7 capture: a kitchen counter along the
     // wall of a room lit red, the red on its back half metre). No mask known for the draw's story, or no room for it: the plain copy.
     const auto window = [](bool reach, bool walls) {
         return [reach, walls](std::vector<DWORD>& t, PatchedPs& pp) {
@@ -6402,7 +6402,7 @@ template <typename DrawFn> void DrawWithRoomMap(IDirect3DDevice9* dev, IDirect3D
     ApexUtil::CountOne(arch ? g_archCopyDraws : g_archPlainDraws);
 }
 // (basis_wall_filter, 2.17.1) A floor map's read that also leaves out the tiles beyond a wall (ShaderPatches::PatchRoomMapSmooth
-// wallMask): the B-spline took a lit room's texels on the far side of a wall shared by two roofed rooms (F7 19-26-24: a dark
+// wallMask): the B-spline took a lit room's texels on the far side of a wall shared by two roofed rooms (an F7 capture: a dark
 // hall's floor along the wall of a lit living room, a warm band about 0.4 m wide). Floors only, where the map's story and
 // class-2 layout are known (FloorWallMaskTexture); else the copy without it.
 std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_roomMapWallPs;
@@ -8061,7 +8061,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice
             PatchedPs* tinted = nullptr;
             const bool wantTint = cubeSet && (ApexMath::Fabs(tint - 1.0f) > 1e-3f || coloured);
             // (2.17.1) the floor map read of the object's upward faces, off the walls (PatchRoomMapReadWalls): a door frame in the
-            // wall between a lit room and a dark hall read the floor map on the wall's line, half of each side (F7 20-03-24)
+            // wall between a lit room and a dark hall read the floor map on the wall's line, half of each side (an F7 capture)
             const int floorMap = FurnitureFloorMap(dev);
             if (floorMap >= 0) {
                 PatchedPs& p = PatchedFor(dev, g_furnitureFloorPs[floorMap], "Indoor object (floor light off the walls)", [floorMap](std::vector<DWORD>& t, PatchedPs& pp) {

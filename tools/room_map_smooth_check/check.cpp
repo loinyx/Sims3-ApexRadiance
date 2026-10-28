@@ -575,7 +575,7 @@ void SidePixelCheck(Gpu& gpu) {
     }
 }
 
-// (basis_wall_filter) Two roofed rooms either side of a wall (F7 19-26-24: a dark hall's floor along the wall of a lit living
+// (basis_wall_filter) Two roofed rooms either side of a wall (an F7 capture: a dark hall's floor along the wall of a lit living
 // room, a warm band about 0.4 m wide): a 32 x 32 floor map at 4 texels a tile (8 x 8 tiles), the lit room in tiles x 0..3
 // (green 200, alpha 5: a bright texel has little ambient weight), the dark one in tiles x 4..7 (green 3, alpha 191), a wall
 // between them except at tiles z 3..4 (a doorway). CPU: the room's own texels as before, less the taps of a tile beyond a

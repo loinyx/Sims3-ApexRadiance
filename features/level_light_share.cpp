@@ -11337,7 +11337,7 @@ void __fastcall BasisLightHook(BYTE* room, void*, const float* pos, void* light,
     // (2.17.1) A lamp of the roofed room's own story, not one Apex took through an opening or a floor: the walls of the story
     // between it and the tile (OwnLampPass). The game's floor and wall solve tests them (0x0069FC40); the directional maps
     // never did, so in a room whose wall was opened (one room now: a bedroom and a kitchen beside it) or shaped like an L,
-    // every object took the lamp behind the wall that still stands (F7 20-02-46: the kitchen's counter red from the
+    // every object took the lamp behind the wall that still stands (an F7 capture: the kitchen's counter red from the
     // bedroom's lamp, the floor in front of it dark).
     if (openShare == 1.0f && g_installed.load(std::memory_order_relaxed) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
         if (const float own = OwnLampPass(room, light, pos); own < 1.0f) {
