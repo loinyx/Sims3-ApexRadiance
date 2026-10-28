@@ -5876,10 +5876,11 @@ template <typename Fetch> IDirect3DTexture9* WallMaskTextureFor(IDirect3DDevice9
         g_wallMaskDev = dev;
     }
     if (g_wallMaskTex.size() > 256) ReleaseWallMasks();
-    WallMaskTex& m = g_wallMaskTex[key];
     static uint8_t px[64 * 64 * 4];
     uint32_t gen = 0;
-    if (!fetch(m.tex ? m.gen : 0, gen, px)) return nullptr;
+    const auto found = g_wallMaskTex.find(key);
+    if (!fetch(found != g_wallMaskTex.end() && found->second.tex ? found->second.gen : 0, gen, px)) return nullptr; // (no entry for a texture with no story)
+    WallMaskTex& m = found != g_wallMaskTex.end() ? found->second : g_wallMaskTex[key];
     if (!m.tex) {
         if (FAILED(dev->CreateTexture(64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &m.tex, nullptr)) || !m.tex) return nullptr;
         m.gen = 0;
@@ -6059,14 +6060,25 @@ template <typename DrawFn> bool DrawWindowOutdoor(IDirect3DDevice9* dev, DrawFn 
         if (r->ps) chosen = r;
         else reachRefused = true, g_reachLawRefused++;
     }
-    PatchedPs& p = *chosen;
+    // a walls copy needs the sizes of the maps it reads (never unset constants): when one is not known, the copy without the
+    // walls draws (the window keeps its outdoor light)
     float basisSize[4] = {};
-    if (p.smooth.maskSampler < 0 || !MapSize(D3D9Hooks::BoundTexture(dev, p.smooth.sizeSampler), basisSize)) wallMask = nullptr; // (the reach copy without the walls)
-    if (wallMask && p.roomRead.maskSampler >= 0) { // (its floor read needs the floor map's size)
-        float floorSize[4];
-        if (!MapSize(D3D9Hooks::BoundTexture(dev, static_cast<DWORD>(p.roomRead.sampler)), floorSize)) wallMask = nullptr;
+    if (chosen->smooth.maskSampler >= 0) {
+        bool sized = wallMask && MapSize(D3D9Hooks::BoundTexture(dev, chosen->smooth.sizeSampler), basisSize);
+        if (sized && chosen->roomRead.maskSampler >= 0) {
+            float floorSize[4];
+            sized = MapSize(D3D9Hooks::BoundTexture(dev, static_cast<DWORD>(chosen->roomRead.sampler)), floorSize);
+        }
+        if (!sized) {
+            const bool wantReach = chosen->window.reachConst != 0;
+            PatchedPs* plain = wantReach ? &PatchedFor(dev, g_windowPsReach, "Window (outdoor light, realistic reach)", window(true, false), true) : nullptr;
+            if (!plain || !plain->ps) plain = &PatchedFor(dev, g_windowPs, "Window (outdoor light)", window(false, false));
+            if (!plain->ps) return false;
+            chosen = plain;
+        }
     }
-    if (!wallMask && p.smooth.maskSampler >= 0) return false; // (a walls copy with no size: the plain path next draw, never unset constants)
+    if (chosen->smooth.maskSampler < 0) wallMask = nullptr; // (a copy without the walls)
+    PatchedPs& p = *chosen;
     const bool reach = p.window.reachConst != 0;
     IDirect3DVertexShader9* vs = ObjectVsFor(dev, g_curVs);
     if (!vs) return false;
@@ -7985,8 +7997,15 @@ int FurnitureFloorMap(IDirect3DDevice9* dev) {
     if (!f || !f->ps3 || !f->declared) return -1;
     const auto isFloor = [dev](int s) {
         IDirect3DBaseTexture9* const t = D3D9Hooks::BoundTexture(dev, static_cast<DWORD>(s));
+        if (!t || t->GetType() != D3DRTYPE_TEXTURE) return false;
+        // a room light map is an A8R8G8B8 map with power-of-two sides (the game's floor maps): the object's other textures
+        // (DXT colour and normal maps) are never looked up as one
+        D3DSURFACE_DESC d{};
+        if (FAILED(static_cast<IDirect3DTexture9*>(t)->GetLevelDesc(0, &d)) || d.Format != D3DFMT_A8R8G8B8 || !d.Width || !d.Height || (d.Width & (d.Width - 1)) ||
+            (d.Height & (d.Height - 1)))
+            return false;
         float size[4], k[4];
-        return t && t->GetType() == D3DRTYPE_TEXTURE && MapSizeThisFrame(t, size) && FloorWallMaskTexture(dev, t, size, k) != nullptr;
+        return MapSizeThisFrame(t, size) && FloorWallMaskTexture(dev, t, size, k) != nullptr;
     };
     if (f->floorMap >= 0 && (f->declared & (1u << f->floorMap)) && isFloor(f->floorMap)) return f->floorMap;
     if (f->floorMap < 0 && g_roomMapFrame - f->floorScanAt < 60u && f->floorScanAt) return -1;
@@ -9854,7 +9873,7 @@ void Shutdown(bool keepChunkMaps) {
     g_meltTried = false;
     g_patchedGen++; // (PatchedFor's front answers and RoomMapConsts' last shader)
     for (auto* cache : {&g_terrainAlphaPs, &g_wallScalePs, &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs, &g_windowPs,
-                        &g_objLampPsReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_windowPsReach}) {
+                        &g_objLampPsReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_windowPsReach, &g_windowWallPs, &g_windowWallPsReach, &g_roomMapWallPs}) {
         for (auto& [k, p] : *cache)
             if (p.ps) p.ps->Release();
         cache->clear();
@@ -9863,6 +9882,10 @@ void Shutdown(bool keepChunkMaps) {
         for (auto& [k, p] : cache)
             if (p.ps) p.ps->Release();
     g_indoorPs.clear();
+    for (auto& [s, cache] : g_furnitureFloorPs)
+        for (auto& [k, p] : cache)
+            if (p.ps) p.ps->Release();
+    g_furnitureFloorPs.clear();
     ReleaseWallMasks(); // (development builds, basis_wall_filter)
     g_wallMaskDev = nullptr;
     for (auto& [k, info] : g_vsInfo) { // patched copies: foliage / objects, and the outdoor floors of summer
@@ -9981,9 +10004,10 @@ void MeasureMemoryImpl() {
     const auto ps = [&](const std::unordered_map<IDirect3DPixelShader9*, PatchedPs>& m) { patched += Hash(m), patchedItems += m.size(); };
     for (const auto* m : {&g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_terrainAlphaPs, &g_wallScalePs,
                           &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_objLampPsReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_windowPs, &g_windowPsReach,
-                          &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs})
+                          &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs,
+                          &g_windowWallPs, &g_windowWallPsReach, &g_roomMapWallPs})
         ps(*m);
-    for (const auto* t : {&g_floorShadePs, &g_indoorPs, &g_floorAtlasPs}) {
+    for (const auto* t : {&g_floorShadePs, &g_indoorPs, &g_floorAtlasPs, &g_furnitureFloorPs}) {
         patched += Tree(*t);
         for (const auto& [k, m] : *t) ps(m);
     }

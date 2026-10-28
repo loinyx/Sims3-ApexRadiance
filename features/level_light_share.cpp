@@ -11221,15 +11221,16 @@ bool OwnLampOf(BYTE* room, void* light, uintptr_t& mgr) { // POD (SEH): a lamp o
         if (!RoofedRoom(room)) return false;
         mgr = *reinterpret_cast<const uintptr_t*>(room);
         const BYTE* L = static_cast<const BYTE*>(light);
+        // (+0x08, the lamp's room id, is valid with +0x100 bit 0x04: engine/light-objects-and-rigs.md)
         return mgr && *reinterpret_cast<const int*>(L + 0xD0) == *reinterpret_cast<const int*>(mgr + 0x88) && *reinterpret_cast<const int*>(L + 0xB0) != 0xB &&
-               *reinterpret_cast<const int*>(L + 0x08) != 0;
+               (L[0x100] & 0x04) && *reinterpret_cast<const int*>(L + 0x08) != 0;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
 }
 float OwnLampPass(BYTE* room, void* light, const float* pos) {
     uintptr_t mgr = 0;
-    if (!OwnLampOf(room, light, mgr)) return 1.0f;
+    if (!DevSwitches::BasisWallFilter() || !OwnLampOf(room, light, mgr)) return 1.0f; // (part of the walls in the directional maps)
     if (const RoomInfo* info = SolveInfo(room))
         if (FindCross(*info, reinterpret_cast<uintptr_t>(light)) || FindInner(*info, reinterpret_cast<uintptr_t>(light)) || FindSame(*info, reinterpret_cast<uintptr_t>(light))) return 1.0f;
     const std::shared_ptr<const StoryGrid> g = EnsureStoryGrid(mgr); // (kept per frame and walls' generation: g_gridMemo)
