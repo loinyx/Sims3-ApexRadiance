@@ -51,6 +51,10 @@ void NoteChunkRendered(int ix, int iz);
 // before the switch until every batch held is released (or after 1.5 s), then all of them, with their borders and atlas
 // cells, change in the same frame. GPU path only; a chunk with no smoothed map yet is not held.
 void HoldChunks(int batch, const std::vector<std::pair<int, int>>& cells);
+// Dragged lamps (TerrainStamps): the chunks a rect {minX, minZ, maxX, maxZ} touches (grown by 1 m, as the local relight)
+// are built again with the lamps' stamps; and those chunks with their re-render counts (a same map counts)
+void BumpStamps(const float rect[4]);
+std::vector<std::pair<Key, uint64_t>> ChunkVersions(const float rect[4]);
 // That batch is done (0: every batch, e.g. the queue failed)
 void ReleaseHold(int batch);
 // A lamp switch's chunks are still being re-rendered (a switch shown all at once waits for them, AtriumHold). Render thread.

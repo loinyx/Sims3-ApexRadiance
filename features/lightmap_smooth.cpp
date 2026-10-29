@@ -35,6 +35,7 @@
 #include "build_flavor.h"
 #include "d3d9_extra_hooks.h"
 #include "lightmap_smooth_hlsl.h"
+#include "terrain_stamps.h"
 #include "recorder.h"
 #include "atrium_hold.h"
 #include "shader_cache.h"
@@ -106,6 +107,8 @@ struct Entry {
     bool gNoHash = false;              // the map cannot be locked (not a managed DXT5): changes only by notice / pointer
     uint32_t gTryFrame = UINT32_MAX;   // frame of the last build attempt
     bool held = false;                 // a lamp switch's chunk: gtex (from before the switch) shown until the batch is done
+    uint64_t sver = 0, gBuiltSver = 0; // dragged lamps over it (TerrainStamps): +1 at each move; built when they differ
+    uint64_t rver = 0; // re-renders seen, a same map too (TerrainStamps waits for one, not for a change)
 };
 
 struct SharedSrc { // what the worker reads when it starts a job (guarded by g_mx)
@@ -993,10 +996,10 @@ constexpr double kBackgroundMs = 1.0;    // GPU budget per frame: chunks out of 
 constexpr float kDefaultChunkMs = 0.5f;  // cost estimate until the timestamp queries measured one
 
 enum class GpuState { Unknown, Ready, Failed };
-enum PsId { PsGather, PsHBlur, PsVBlur, PsHUpYA, PsHUpChroma, PsVUp, PsDown, PsCopy, PsCount };
-constexpr const char* kPsEntries[PsCount] = {"GatherPS", "HBlurPS", "VBlurPS", "HUpYAPS", "HUpChromaPS", "VUpPS", "DownPS", "CopyPS"};
+enum PsId { PsGather, PsHBlur, PsVBlur, PsHUpYA, PsHUpChroma, PsVUp, PsDown, PsCopy, PsStamp, PsCount };
+constexpr const char* kPsEntries[PsCount] = {"GatherPS", "HBlurPS", "VBlurPS", "HUpYAPS", "HUpChromaPS", "VUpPS", "DownPS", "CopyPS", "StampPS"};
 constexpr const char* kPsTags[PsCount] = {"LightmapSmooth GatherPS", "LightmapSmooth HBlurPS", "LightmapSmooth VBlurPS", "LightmapSmooth HUpYAPS",
-                                          "LightmapSmooth HUpChromaPS", "LightmapSmooth VUpPS", "LightmapSmooth DownPS", "LightmapSmooth CopyPS"};
+                                          "LightmapSmooth HUpChromaPS", "LightmapSmooth VUpPS", "LightmapSmooth DownPS", "LightmapSmooth CopyPS", "LightmapSmooth StampPS"};
 
 // Compiled at start-up on a background thread (framework/shader_cache.h); InitGpu only creates the shader objects.
 ShaderCache::Id AddSmoothShader(int i) {
@@ -1011,8 +1014,9 @@ ShaderCache::Id AddSmoothShader(int i) {
     return ShaderCache::Add(std::move(d));
 }
 const ShaderCache::Id kPsIds[PsCount] = {AddSmoothShader(0), AddSmoothShader(1), AddSmoothShader(2), AddSmoothShader(3),
-                                         AddSmoothShader(4), AddSmoothShader(5), AddSmoothShader(6), AddSmoothShader(7)};
-static_assert(PsCount == 8, "kPsIds lists every PsId");
+                                         AddSmoothShader(4), AddSmoothShader(5), AddSmoothShader(6), AddSmoothShader(7),
+                                         AddSmoothShader(8)};
+static_assert(PsCount == 9, "kPsIds lists every PsId");
 
 bool g_gpuPreferred = true;               // developer setting (A/B); render thread
 bool g_gpuActive = false;                 // the path in use (switching clears everything, see ResolveMode)
@@ -1032,13 +1036,14 @@ struct Scratch {
         tex = nullptr;
     }
 };
-Scratch g_raw, g_hb, g_ch, g_huYA, g_huC; // float intermediates (D3DPOOL_DEFAULT render targets)
+Scratch g_raw, g_raw2, g_hb, g_ch, g_huYA, g_huC; // float intermediates (g_raw2: g_raw with dragged lamps, TerrainStamps) (D3DPOOL_DEFAULT render targets)
 Scratch g_mip[kLevels];                   // A8R8G8B8, one level each: g_mip[l] is (1024 >> l)^2, l = 1..10
 
 uint32_t g_servicedFrame = UINT32_MAX;
 uint64_t g_changeEpoch = 1, g_serviceEpoch = 0; // a change seen since the last service runs it again in the same frame
 
 int g_gpuBuilds = 0, g_gpuInView = 0, g_gpuOutOfView = 0, g_gpuBorders = 0, g_gpuCells = 0, g_gpuFailures = 0;
+long g_stampBuilds = 0; // builds with dragged lamps (TerrainStamps)
 int g_gpuHashChecks = 0, g_sameMapNotices = 0;
 
 // ---- The ground of a lamp switch in one frame (as clean as the walls' update) ----
@@ -1093,6 +1098,7 @@ bool HashMap(IDirect3DTexture9* tex, uint64_t& h) {
 
 void BumpVersion(const LightmapSmooth::Key& k, Entry& e, const char* via) {
     e.gver++;
+    e.rver++;
     e.awaiting = false; // (re-)rendered
     g_changeEpoch++;
     NoteChange(k, e, via);
@@ -1121,6 +1127,7 @@ void DrainNotices() {
             if (HashMap(e.src, h)) {
                 if (e.ghash != 0 && h == e.ghash) {
                     e.awaiting = false;
+                    e.rver++;
                     g_sameMapNotices++;
                     continue;
                 }
@@ -1215,14 +1222,14 @@ bool CreateScratch(IDirect3DDevice9* dev, UINT w, UINT h, D3DFORMAT fmt, Scratch
 
 // Scratch render targets, created on first use and after a device reset (about 13 MB of video memory with 32-bit floats).
 bool EnsureGpuRes(IDirect3DDevice9* dev) {
-    bool ok = CreateScratch(dev, kP, kP, g_floatFmt, g_raw) && CreateScratch(dev, kP, kP, g_floatFmt, g_hb) && CreateScratch(dev, kP, kP, g_floatFmt, g_ch) &&
+    bool ok = CreateScratch(dev, kP, kP, g_floatFmt, g_raw) && CreateScratch(dev, kP, kP, g_floatFmt, g_raw2) && CreateScratch(dev, kP, kP, g_floatFmt, g_hb) && CreateScratch(dev, kP, kP, g_floatFmt, g_ch) &&
               CreateScratch(dev, kOut, kP, g_floatFmt, g_huYA) && CreateScratch(dev, kOut, kP, g_floatFmt, g_huC);
     for (UINT l = 1; ok && l < kLevels; l++) ok = CreateScratch(dev, kOut >> l, kOut >> l, D3DFMT_A8R8G8B8, g_mip[l]);
     return ok;
 }
 
 void ReleaseGpuRes() {
-    for (Scratch* s : {&g_raw, &g_hb, &g_ch, &g_huYA, &g_huC}) s->Release();
+    for (Scratch* s : {&g_raw, &g_raw2, &g_hb, &g_ch, &g_huYA, &g_huC}) s->Release();
     for (auto& s : g_mip) s.Release();
 }
 
@@ -1499,10 +1506,33 @@ bool BuildOne(IDirect3DDevice9* dev, const LightmapSmooth::Key& key, Entry& e) {
             DrawRect(dev, static_cast<float>(x0), static_cast<float>(y0), static_cast<float>(x1), static_cast<float>(y1), tx0 * inv, tz0 * inv, (tx0 + x1 - x0) * inv,
                      (tz0 + y1 - y0) * inv);
         }
+    // 1b. Dragged lamps (TerrainStamps): their ground light with the bake's law, into a copy of the P grid, so the passes
+    // below smooth it as they would the bake's (P texel (0, 0) = source texel -4, the chunk's west / north edge at the key
+    // minus 128 m, one texel a metre)
+    std::vector<TerrainStamps::Lamp> stamps;
+    TerrainStamps::ForChunk(key, e.rver, stamps);
+    const Scratch& raw = stamps.empty() ? g_raw : g_raw2;
+    if (!stamps.empty()) {
+        if (!Target(dev, g_raw2.surf)) return false;
+        dev->SetPixelShader(g_ps[PsStamp]);
+        dev->SetTexture(0, g_raw.tex);
+        InSize(dev, 0, kP, kP);
+        const size_t n = std::min<size_t>(stamps.size(), 8);
+        const float o[4] = {static_cast<float>(key.first) - kSrc / 2 - 3.5f, static_cast<float>(key.second) - kSrc / 2 - 3.5f, stamps[0].ground, static_cast<float>(n)};
+        dev->SetPixelShaderConstantF(2, o, 1);
+        float lc[64] = {};
+        for (size_t k = 0; k < n; k++) {
+            std::memcpy(lc + k * 8, stamps[k].col, 16);
+            std::memcpy(lc + k * 8 + 4, stamps[k].pos, 12);
+        }
+        dev->SetPixelShaderConstantF(4, lc, 16);
+        DrawPixels(dev, kP, kP);
+        g_stampBuilds++;
+    }
     // 2-3. Chroma cleanup
     if (!Target(dev, g_hb.surf)) return false;
     dev->SetPixelShader(g_ps[PsHBlur]);
-    dev->SetTexture(0, g_raw.tex);
+    dev->SetTexture(0, raw.tex);
     InSize(dev, 0, kP, kP);
     DrawPixels(dev, kP, kP);
     if (!Target(dev, g_ch.surf)) return false;
@@ -1512,7 +1542,7 @@ bool BuildOne(IDirect3DDevice9* dev, const LightmapSmooth::Key& key, Entry& e) {
     // 4. Enlarge, horizontal
     if (!Target(dev, g_huYA.surf)) return false;
     dev->SetPixelShader(g_ps[PsHUpYA]);
-    dev->SetTexture(0, g_raw.tex);
+    dev->SetTexture(0, raw.tex);
     DrawPixels(dev, kOut, kP);
     if (!Target(dev, g_huC.surf)) return false;
     dev->SetPixelShader(g_ps[PsHUpChroma]);
@@ -1552,6 +1582,7 @@ bool BuildOne(IDirect3DDevice9* dev, const LightmapSmooth::Key& key, Entry& e) {
     }
     dev->SetTexture(0, nullptr);
     e.gBuiltVer = e.gver;
+    e.gBuiltSver = e.sver;
     return true;
 }
 
@@ -1647,7 +1678,7 @@ void GpuService(IDirect3DDevice9* dev) {
             }
             continue;
         }
-        const bool own = e.gBuiltVer != e.gver;
+        const bool own = e.gBuiltVer != e.gver || e.gBuiltSver != e.sver;
         if (own && e.gTryFrame == g_frame) continue; // failed this frame: the game's map is shown, next frame again
         POINT pt{};
         if (own && Visible(e) && urgent < kUrgentCap) {
@@ -1671,7 +1702,7 @@ void GpuService(IDirect3DDevice9* dev) {
                 if (!e.src || e.held || e.gTryFrame == g_frame) continue;
                 if (spent > 0.0 && spent + est > kBackgroundMs) break;
                 if (std::any_of(items.begin(), items.end(), [&](const BuildItem& b) { return b.e == &e && b.kind != 3; })) continue;
-                const bool own = e.gBuiltVer != e.gver;
+                const bool own = e.gBuiltVer != e.gver || e.gBuiltSver != e.sver;
                 if (pass == 0 ? !own : (own || !e.gtex || g_sweepOn || settling || e.gBuiltSig == GpuSig(kv->first))) continue;
                 items.push_back({&kv->first, &e, pass == 0 ? 1 : 2});
                 spent += est;
@@ -1880,6 +1911,23 @@ IDirect3DTexture9* Find(const Key& key) {
     }
     auto it = g_entries.find(key);
     return it == g_entries.end() ? nullptr : Current(it->second);
+}
+
+// A chunk (256 m centred at its key) and a rect {minX, minZ, maxX, maxZ} grown by 1 m (the local relight's test)
+static bool ChunkTouches(const Key& k, const float rect[4]) {
+    const float x0 = static_cast<float>(k.first) - kSrc / 2, z0 = static_cast<float>(k.second) - kSrc / 2;
+    return rect[0] - 1 <= x0 + kSrc && x0 <= rect[2] + 1 && rect[1] - 1 <= z0 + kSrc && z0 <= rect[3] + 1;
+}
+void BumpStamps(const float rect[4]) {
+    for (auto& [k, e] : g_entries)
+        if (e.src && ChunkTouches(k, rect)) e.sver++;
+    g_changeEpoch++;
+}
+std::vector<std::pair<Key, uint64_t>> ChunkVersions(const float rect[4]) {
+    std::vector<std::pair<Key, uint64_t>> out;
+    for (const auto& [k, e] : g_entries)
+        if (e.src && ChunkTouches(k, rect)) out.emplace_back(k, e.rver);
+    return out;
 }
 
 void NoteKick(const char* reason) {
@@ -2177,6 +2225,7 @@ std::string Status() {
         AppendTimingStatus(s, awaiting);
         s += std::format(" | lamp switches shown in one frame: {} ({} chunks built, the last {}, {} after {} ms){}", g_holds, g_holdBuilds, g_holdLastChunks,
                          g_holdTimeouts, kHoldMaxMs, g_holdBatches.empty() ? "" : " | holding the ground of a lamp switch");
+        s += std::format(" | {} ({} chunk builds with stamps)", TerrainStamps::Status(), g_stampBuilds);
         if (!kPublicBuild) s += " | GPU vs CPU: " + g_compareResult;
         return s;
     }

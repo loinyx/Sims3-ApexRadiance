@@ -165,6 +165,7 @@
     <ClCompile Include="features\scene_dither.cpp" />
     <ClCompile Include="features\shader_patches.cpp" />
     <ClCompile Include="features\terrain_chunk_relight.cpp" />
+    <ClCompile Include="features\terrain_stamps.cpp" />
     <ClCompile Include="framework\apex_log.cpp" />
     <ClCompile Include="framework\apex_paths.cpp" />
     <ClCompile Include="framework\apex_util.cpp" />
@@ -326,6 +327,7 @@
     <ClInclude Include="features\scene_budget.h" />
     <ClInclude Include="features\shader_patches.h" />
     <ClInclude Include="features\terrain_chunk_relight.h" />
+    <ClInclude Include="features\terrain_stamps.h" />
     <ClInclude Include="framework\apex_log.h" />
     <ClInclude Include="framework\apex_paths.h" />
     <ClInclude Include="framework\apex_util.h" />

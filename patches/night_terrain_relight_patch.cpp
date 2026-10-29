@@ -62,6 +62,7 @@
 #include "lot_lighting_motion.h"
 #include "outdoor_delta.h"
 #include "rt_outdoor_lamps.h"
+#include "terrain_stamps.h"
 #include "imgui.h"
 #include "ui/widgets.h"
 #include "ui/i18n.h"
@@ -461,6 +462,10 @@ const std::vector<BYTE> kBakeColourOrig = {0x0F, 0x28, 0x87, 0xF0, 0x00, 0x00, 0
 volatile bool g_bakeConeSpill = true;
 // (2.15.1) area lights (types 9, 10) at the share of the ground below they face (TerrainBakeRule::AreaGroundShare)
 const float g_areaHalf = 0.5f, g_areaZero = 0.0f, g_areaOne = 1.0f;
+// Lamps being dragged whose ground light TerrainStamps draws on the GPU: the bake gives them no colour (render thread,
+// where the bake runs too; NightTerrainBake::SetExcluded)
+uintptr_t g_bakeExcluded[NightTerrainBake::kMaxExcluded] = {};
+int g_bakeExcludedCount = 0;
 bool g_bakeGainInstalled = false;
 float g_bakeGainSeen[2] = {1.0f, 1.0f}; // street / lot gains the multipliers hold
 float g_tintSeen[2] = {1.0f, 1.0f};     // street / lot lamp colours the stock lamps were last re-coloured with
@@ -468,6 +473,16 @@ float g_tintSeen[2] = {1.0f, 1.0f};     // street / lot lamp colours the stock l
 __declspec(naked) void BakeColourStub() {
     __asm {
         movaps xmm0, xmmword ptr [edi+0xF0]
+        mov eax, dword ptr [g_bakeExcludedCount]
+    excluded:                                 // a lamp being dragged: no colour (TerrainStamps draws it)
+        test eax, eax
+        jz kept
+        dec eax
+        cmp edi, dword ptr [g_bakeExcluded + eax*4]
+        jne excluded
+        xorps xmm0, xmm0
+        ret
+    kept:
         mov eax, dword ptr [edi+0xC0]
         or eax, dword ptr [edi+0xC4]
         jnz lot
@@ -919,24 +934,86 @@ bool __stdcall ArmTest(BYTE* light) {
     return true;
 }
 
-// Replaces the vfunc+0x20 test in the terrain light bake collector. Lot lamps only while switched on.
-bool __stdcall TerrainLightTest(BYTE* light) {
+// The bake's light test without its counters: 0 rejected, 1 taken by the original test, 2 a lot lamp switched off, 3 a lot
+// lamp taken
+int BakeTest(BYTE* light) {
     // Type-11 vfunc+0x20 is FUN_007EAEA0 (always true). For a lot-owned outdoor
     // lamp, respect the observed enabled/lit state before accepting that original test.
     // World-owned lights and other classes keep their original behavior.
     if (*reinterpret_cast<const int*>(light + 0xB0) == 11 &&
         (*reinterpret_cast<const uint32_t*>(light + 0xC0) | *reinterpret_cast<const uint32_t*>(light + 0xC4)) != 0 &&
         (light[0x100] & 0x04) && *reinterpret_cast<const int*>(light + 0x08) == 0 &&
-        (light[0x100] & 0x61) != 0x61) return false;
-    if (OriginalWorldLightTest(light)) return true;
-    if (!g_lotLamps || !IsOutdoorLotLamp(light)) return false;
-    if (!(light[0x100] & 0x20)) {
-        g_lotLampsSkippedOff.fetch_add(1, std::memory_order_relaxed);
+        (light[0x100] & 0x61) != 0x61) return 0;
+    if (OriginalWorldLightTest(light)) return 1;
+    if (!g_lotLamps || !IsOutdoorLotLamp(light)) return 0;
+    return (light[0x100] & 0x20) ? 3 : 2;
+}
+// Replaces the vfunc+0x20 test in the terrain light bake collector. Lot lamps only while switched on.
+bool __stdcall TerrainLightTest(BYTE* light) {
+    const int t = BakeTest(light);
+    if (t == 2) g_lotLampsSkippedOff.fetch_add(1, std::memory_order_relaxed);
+    if (t == 3) g_lotLampsBaked.fetch_add(1, std::memory_order_relaxed);
+    return t == 1 || t == 3;
+}
+
+// A light's bake fields (SEH: the light may be gone)
+struct BakeFields {
+    float colour[4], spill[4], pos[3], rect[4], range, intensity, axisY;
+    int type;
+    uint64_t lot;
+    bool taken;
+};
+bool ReadBakeFields(BYTE* light, BakeFields& f) {
+    __try {
+        const int t = BakeTest(light);
+        f.taken = t == 1 || t == 3;
+        std::memcpy(f.colour, light + 0xF0, 16);
+        std::memcpy(f.spill, light + 0x150, 16);
+        std::memcpy(f.pos, light + 0x120, 12);
+        std::memcpy(f.rect, light + 0x134, 16);
+        f.range = *reinterpret_cast<const float*>(light + 0x130);
+        f.intensity = *reinterpret_cast<const float*>(light + 0x10);
+        f.axisY = *reinterpret_cast<const float*>(light + 0x184);
+        f.type = *reinterpret_cast<const int*>(light + 0xB0);
+        f.lot = *reinterpret_cast<const uint32_t*>(light + 0xC0) | static_cast<uint64_t>(*reinterpret_cast<const uint32_t*>(light + 0xC4)) << 32;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
-    g_lotLampsBaked.fetch_add(1, std::memory_order_relaxed);
+}
+} // namespace
+
+namespace NightTerrainBake {
+void SetExcluded(const std::vector<uintptr_t>& lights) {
+    int n = 0;
+    for (uintptr_t L : lights)
+        if (L && n < kMaxExcluded) g_bakeExcluded[n++] = L;
+    g_bakeExcludedCount = n;
+}
+// What BakeColourStub and BakePosStub give the bake for this light (0xC2950F colour x the kind's gain x the area share or
+// the cone spill; .w = range x intensity x 0.2 as at 0xC29523 .. 0xC29586; the position with the low-lamp lift)
+bool StampOf(uintptr_t light, float col[4], float pos[3], float rect[4], float& ground) {
+    BakeFields f{};
+    if (!g_bakeGainInstalled || !light || !ReadBakeFields(reinterpret_cast<BYTE*>(light), f) || !f.taken || !f.lot) return false; // (lot lamps only)
+    for (int k = 0; k < 3; k++) col[k] = f.colour[k] * g_bakeLotMul[k];
+    if (f.type == 9 || f.type == 10) {
+        const float share = std::clamp(f.axisY * g_areaHalf + g_areaHalf, g_areaZero, g_areaOne);
+        for (int k = 0; k < 3; k++) col[k] *= share;
+    } else if (g_bakeConeSpill && f.type == 5)
+        for (int k = 0; k < 3; k++) col[k] *= f.spill[k];
+    col[3] = f.range * f.intensity * 0.2f;
+    std::memcpy(pos, f.pos, sizeof f.pos);
+    std::memcpy(rect, f.rect, sizeof f.rect);
+    if (!LotLightBridge::LotGroundY(f.lot, ground)) return false;
+    if (g_bakePosInstalled && TerrainBakeRule::LowLampLift() && TerrainBakeRule::LotLampType(f.type)) { // as BakeLiftHead
+        const float h = pos[1] - ground, s = TerrainBakeRule::StampHeight(h);
+        if (std::isfinite(s) && s != h) pos[1] = ground + s;
+    }
     return true;
 }
+} // namespace NightTerrainBake
+
+namespace {
 
 // ---- game state access ----
 struct LightState {
@@ -1183,9 +1260,28 @@ bool LocalLamps(std::vector<ChunkRelight::Lamp>& out) {
     return true;
 }
 
+// A change of a lamp being dragged whose ground light TerrainStamps draws on the GPU (the bake excludes it): the lot and
+// the type of an excluded lamp (a dragged lamp is a removal at its last place and an addition at the new one in the diff)
+bool StampedChange(const LotLightBridge::BakeChange& c) {
+    if (!c.user) return false;
+    for (int i = 0; i < g_bakeExcludedCount; i++) {
+        int type = 0;
+        uint64_t lot = 0;
+        if (ReadLightLot(reinterpret_cast<const BYTE*>(g_bakeExcluded[i]), type, lot) && lot == c.lot && type == c.type) return true;
+    }
+    return false;
+}
+
 // The pending change through the local relight. 1 = queued (FinishEdit called), 2 = waiting (WaitEdit called), 0 = not
 // possible (`why`): the caller takes the full path with its own limits.
 int TryLocal(Clock::time_point now, const std::vector<uint64_t>& newLots, const std::string& diffText, std::string& why) {
+    // a dragged lamp the GPU draws on the terrain: no relight while it moves (the stamp follows it; TerrainStamps relights
+    // where it was when the drag starts and where it stays when it ends), and the drag's countdown stays idle
+    if (g_bakeExcludedCount > 0 && !g_editDiff.changes.empty() && std::all_of(g_editDiff.changes.begin(), g_editDiff.changes.end(), StampedChange)) {
+        g_localRelitAt = now;
+        FinishEdit(std::format("{} ({}): skipped: drawn on the GPU while dragged ({})", g_editReason, EditKind(), diffText));
+        return 1;
+    }
     // A lot the last rebuild did not have: its lamps may have been baked since (LOD transitions re-bake chunks with every
     // registered lamp, chunkrelight.md 1.4), but their old places are unknown, so a removed or moved lamp would leave its
     // old light on the ground.

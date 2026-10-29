@@ -131,4 +131,29 @@ float4 DownPS(PSIn i) : COLOR0 {
 }
 
 float4 CopyPS(PSIn i) : COLOR0 { return Bytes0(floor(i.uv)) / 255.0; }
+
+// StampPS: the ground light of lamps being dragged, added to the P grid (s0 = RAW) before the chroma blur and the
+// enlargement, so it is smoothed exactly as the game's bake of the same lamps would be. The law is the game's bake
+// pixel shader (technique StaticTerrainLightmap in Shaders_Win32.precomp): per light
+//   colour.rgb x sat(w / d2) x (cos >= 0 ? sat(sqrt(cos)) : 0), d2 = horizontal distance squared + 1e-4 (the compiled
+//   shader drops the height term), cos = N . (direction to the light), w = range x intensity x 0.2,
+// one additive pass per light into an 8-bit target (the sum is clamped at 1 here). Flat ground: N = up, the texel at
+// the lamp's ground height. The alpha (sun visibility) is kept.
+float4 stampOrigin : register(c2);    // world x, z of the centre of P texel (0, 0); y = ground height; w = lamp count
+float4 stampLamps[16] : register(c4); // per lamp k: c[4 + 2k] = (colour rgb, w), c[5 + 2k] = (position xyz, 0)
+float4 StampPS(PSIn i) : COLOR0 {
+    const float2 p = floor(i.uv);
+    const float4 base = Fetch0(p);
+    const float3 P = float3(stampOrigin.x + p.x, stampOrigin.z, stampOrigin.y + p.y);
+    float3 sum = 0;
+    for (int k = 0; k < 8; k++) {
+        if (k >= stampOrigin.w) break;
+        const float4 c = stampLamps[2 * k], pos = stampLamps[2 * k + 1];
+        const float3 L = P - pos.xyz;
+        const float d2 = L.x * L.x + L.z * L.z + 1e-4;
+        const float cosv = dot(-normalize(L), float3(0, 1, 0));
+        if (cosv >= 0) sum += c.rgb * saturate(c.w / d2) * saturate(sqrt(cosv));
+    }
+    return float4(min(base.rgb + sum, 1), base.a);
+}
 )RAW";

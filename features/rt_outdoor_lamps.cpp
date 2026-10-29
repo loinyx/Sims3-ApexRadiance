@@ -37,6 +37,7 @@
 #include "d3d9_hooks.h"
 #include "d3d9_extra_hooks.h"
 #include "render_callbacks.h"
+#include "terrain_stamps.h"
 #include <windows.h>
 #include <d3dcompiler.h>
 #include <algorithm>
@@ -504,6 +505,7 @@ uint32_t g_meshGen = 0;
 uint64_t g_atlasKey = 0;
 uint64_t g_lastParams = 0;
 DWORD g_frame = 0, g_lastFrame = 0;
+std::vector<uintptr_t> g_stampLights; // this frame's GPU lamps, for TerrainStamps (none when Frame stops early)
 bool g_installed = false;
 IDirect3DDevice9* g_dev = nullptr; // the game's device (render thread)
 int g_ps3 = -1; // the device runs shader model 3 (1), not (0), not read yet (-1) (render thread)
@@ -973,6 +975,7 @@ void OnEndScene(IDirect3DDevice9* dev) {
     g_lastFrame = g_frame;
     LARGE_INTEGER a{}, b{};
     QueryPerformanceCounter(&a);
+    g_stampLights.clear();
     if (!HookGuard::Run("RtOutdoorLamps frame", [dev] { Frame(dev); }) && (g_on.load() || !g_slots.empty())) {
         // Frame threw (now or before: it is off for the session): the game's maps are bound again and edits go to its solves
         g_on.store(false);
@@ -986,6 +989,7 @@ void OnEndScene(IDirect3DDevice9* dev) {
             g_inactive = "stopped after an error (see ApexRadiance_LOG.txt)";
         });
     }
+    HookGuard::Try("TerrainStamps update", [] { TerrainStamps::Update(g_stampLights); });
     RebuildSwap();
     QueryPerformanceCounter(&b);
     const double fm = Ms(a, b);
@@ -2008,6 +2012,7 @@ void Frame(IDirect3DDevice9* dev) {
             }
             if (!baked) covered.push_back(g.light);
         }
+        g_stampLights = covered;
         std::lock_guard<std::mutex> lk(g_coverMx);
         g_cover.tracker = tracker;
         g_cover.full = full;
