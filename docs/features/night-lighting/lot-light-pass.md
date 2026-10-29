@@ -268,8 +268,9 @@ shadow at once. A fence type removed whole leaves no new group and goes with the
 
 **Mesh fences** (chain-link, lattices, railings). A fence whose pixel shader cuts its mesh out with the texture's alpha
 lets lamp light through its holes. `ShaderPatches::FindCutout` traces the shader's `texkill` back to its texture read
-(`mad rK, rA.w, rS, -cR` from `texld rA, vT, sN`, optionally tinted), and `FenceOpenShare` reads that texture once per
-texture (the first level at most 512 texels wide; DXT1, DXT3, DXT5 or A8R8G8B8, managed pool) and takes the share of its
+(`mad rK, rA.w, rS, -cR` from `texld rA, vT, sN`, optionally tinted), and `FenceOpenShare` reads that texture at each
+read of the group (its first draw, then every 60 s; the first level at most 512 texels wide; DXT1, DXT3, DXT5 or
+A8R8G8B8, managed pool) and takes the share of its
 texels under half alpha (`FenceCutout::OpenShare`). The fence's walls pass that share (`GroundShadow::Wall::pass`): a
 ray through the wall's body keeps `pass` of its light, the same in the hard and soft tests. The share is fixed at half
 alpha because the game draws one fence with more than one alpha reference (150 and 50 in the log), which made the share
