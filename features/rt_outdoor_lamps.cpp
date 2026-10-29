@@ -1936,8 +1936,9 @@ void Frame(IDirect3DDevice9* dev) {
     {
         // (14/10) not a lamp a covering slot keeps baked in its base (kept when it was not drawn): its edits must reach the
         // game's solve, the GPU does not draw it there
-        // nor a lamp missing from the list of a story where it is drawable: until that story gathers it, the solves where it
-        // is listed keep it baked (the GPU draws it only where no base holds it)
+        // nor a lamp not drawn on a story where it is drawable (switched off there). A lamp drawn on a story before it gathers
+        // it counts: before, a picked-up lamp took the game's solve until the consistency repair (about 4 s), and a drag of it
+        // held the per-pixel lamps of doors, windows and outdoor objects, and the furniture, until the release
         std::vector<uintptr_t> covered;
         covered.reserve(lamps.size());
         uint32_t storyBits = 0;
@@ -1946,12 +1947,14 @@ void Frame(IDirect3DDevice9* dev) {
         for (const GpuLamp& g : lamps) {
             bool baked = false;
             for (const auto& s : g_slots) baked = baked || (s->used && s->kept.count(g.light) && !s->drawn.count(g.light));
-            const uint32_t listed = g.listed;
-            if (!baked && (listed & storyBits) != storyBits) {
+            uint32_t drawnOn = 0;
+            for (int S = 0; S <= 7; S++)
+                if (g.mult[S]) drawnOn |= 1u << S;
+            if (!baked && (drawnOn & storyBits) != storyBits) {
                 LampRead r;
                 if (!ReadLamp(g.light, r)) baked = true;
                 for (int S = 0; S <= 7 && !baked; S++)
-                    if ((storyBits & ~listed) >> S & 1) baked = RtLampModel::Drawn(r.f, rns[S].lot);
+                    if ((storyBits & ~drawnOn) >> S & 1) baked = RtLampModel::Drawn(r.f, rns[S].lot);
             }
             if (!baked) covered.push_back(g.light);
         }
