@@ -4784,9 +4784,13 @@ int PickFenceLamps(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float
     g_fencePickTicks += b.QuadPart - a.QuadPart, g_fencePickCalls++;
     return used;
 }
+uint32_t g_fencePickBypass[4] = {}; // memo not used: switch off, turned off, F8 records asked for, a capture
 int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share) {
-    if (!DevSwitches::LampVisibilityMemo() || g_fencePickOff || LevelLightShare::VisibilityDiagArmed() || LightProbe::Capturing())
+    const int bypass = !DevSwitches::LampVisibilityMemo() ? 0 : g_fencePickOff ? 1 : LevelLightShare::VisibilityDiagArmed() ? 2 : LightProbe::Capturing() ? 3 : -1;
+    if (bypass >= 0) {
+        g_fencePickBypass[bypass]++;
         return PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share);
+    }
     // (the law in the slot too: a group drawn with both laws kept evicting itself)
     FencePickMemo& e = g_fencePick[(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g)) * 2654435761u ^ g.read * 0x85EBCA77u ^ (reachLaw ? 0x9E3779B9u : 0u)) >> 22];
     const uint64_t state = LevelLightShare::LampVisibilityState();
@@ -8943,9 +8947,11 @@ void LogDrawCost() {
         static uint32_t s_hits = 0, s_misses = 0, s_gen = 0;
         static uint64_t s_state = 0;
         arch += std::format(" | fence pick memo: {} reused, {} computed (other group or empty {}, positions read again {}, lamp list changed {}, walls or slabs "
-                            "changed {}; not kept {}); lamp list generation +{}, wall state {}",
+                            "changed {}; not kept {}); lamp list generation +{}, wall state {}; not used: switch off {}, turned off {}, F8 records {}, capture {}",
                             g_fencePickHits - s_hits, g_fencePickMisses - s_misses, g_fenceMissWhy[0], g_fenceMissWhy[1], g_fenceMissWhy[2], g_fenceMissWhy[3],
-                            g_fenceMissWhy[4], g_lampMemoGen - s_gen, LevelLightShare::LampVisibilityState() == s_state ? "same" : "changed");
+                            g_fenceMissWhy[4], g_lampMemoGen - s_gen, LevelLightShare::LampVisibilityState() == s_state ? "same" : "changed", g_fencePickBypass[0],
+                            g_fencePickBypass[1], g_fencePickBypass[2], g_fencePickBypass[3]);
+        for (uint32_t& b : g_fencePickBypass) b = 0;
         s_hits = g_fencePickHits, s_misses = g_fencePickMisses, s_gen = g_lampMemoGen, s_state = LevelLightShare::LampVisibilityState();
         for (uint32_t& w : g_fenceMissWhy) w = 0;
     }
