@@ -90,9 +90,10 @@ static Scene MakeScene(float turn, bool soft, float tx = 1000.0f, float tz = 200
     return s;
 }
 
-// The scene's inputs as another copy of the header's types (the reference's: the same members, bit for bit)
+// The scene's inputs as another copy of the header's types (the reference's: the same members, bit for bit; an older
+// reference may lack members added at the end, such as Wall::pass)
 template <class T, class S> static T As(const S& s) {
-    static_assert(sizeof(T) == sizeof(S) && std::is_trivially_copyable_v<S>);
+    static_assert(sizeof(T) <= sizeof(S) && std::is_trivially_copyable_v<S>);
     T t;
     std::memcpy(static_cast<void*>(&t), &s, sizeof t);
     return t;

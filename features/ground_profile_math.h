@@ -1,5 +1,5 @@
 #pragma once
-// The ground profile's camera math (ground_profile.cpp; tools/ground_profile_test checks it): a 4x4 inverse, the pixel of a
+// The ground profile's camera math (ground_profile.cpp; tools/terrain_stamp_test/ground_math_check.cpp checks it): a 4x4 inverse, the pixel of a
 // world point and the ground point under a pixel, for a world -> clip matrix of rows (PostScene::CameraViewProj).
 #include <windows.h>
 #include <cmath>
