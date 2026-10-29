@@ -40,6 +40,9 @@ uint32_t FrameIndex();
 bool SampleCameraMoving();
 // The camera eye now (world); false while its location in the game's data is unknown. Any thread.
 bool CameraEye(float out[3]);
+// Samples the camera eye now and returns whether it has not moved since `tick` (GetTickCount64); false while the eye is
+// unknown. Render thread (the fence groups' sweep: with the camera still, every group on screen is drawn each frame).
+bool CameraStillSince(uint64_t tick);
 
 // The flush after a lamp drag (DragLite::SolveCapMs): Faster room lighting's drain takes what it needs up to the spread cap
 // (DrainBudget) and books what it spent (NoteDrainSpent, 0 at each pick); the lot being played gets the rest of the cap

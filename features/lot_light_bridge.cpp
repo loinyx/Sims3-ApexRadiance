@@ -1040,7 +1040,10 @@ void SendChunk(const std::pair<int, int>& key, ChunkShade& c, uint64_t group) {
 // The chunk's shade texture, or null where no lot shades it (the terrain draw is then left as it was). A changed chunk is
 // sent to the worker; its texture (or none) stays until the new one is uploaded (ShadeApply).
 void ShadeApply(IDirect3DDevice9* dev);
+extern uint32_t g_roomMapFrame;  // (below: OnPresent counts frames)
+uint32_t g_terrainDrawFrame = 0; // the frame a world terrain chunk was last drawn (the world is on screen: FenceGroupsGone)
 IDirect3DTexture9* ChunkShadeTexture(IDirect3DDevice9* dev, const std::pair<int, int>& key) {
+    g_terrainDrawFrame = g_roomMapFrame;
     if (!g_shadeOn) return nullptr;
     ShadeApply(dev);
     const auto it = g_chunkShades.find(key);
@@ -1997,6 +2000,30 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
                 if (!it->second.walls.empty()) g_fenceGen++;
                 it = g_fenceGroups.erase(it);
             } else ++it;
+    }
+}
+// Render thread, once a frame (OnPresent). A fence type removed whole leaves no new group to replace its own, so its
+// shadow stayed until the 20 s sweep above. With the camera still since a group's last draw and the world drawn, every
+// group on screen is drawn each frame: one missing for kFenceGoneMs and two frames was removed. (While the camera moves, a
+// group may only have left the screen: it stays.)
+constexpr DWORD kFenceGoneMs = 500;
+void FenceGroupsGone() {
+    if (g_fenceGroups.empty() || g_roomMapFrame - g_terrainDrawFrame > 1) return;
+    const DWORD now = GetTickCount();
+    const uint64_t now64 = GetTickCount64();
+    for (auto it = g_fenceGroups.begin(); it != g_fenceGroups.end();) {
+        const FenceGroup& g = it->second;
+        const bool gone = now - g.seen > kFenceGoneMs && g_roomMapFrame - g.seenFrame >= 2 &&
+                          LotLightingMotion::CameraStillSince(now64 - (now - g.seen)); // (the eye unmoved since its last draw)
+        if (gone) {
+            static int s_logs = 0;
+            if (!kPublicBuild && s_logs < 30 && ++s_logs)
+                LOG_INFO(std::format("[GroundShadow] fence group gone: not drawn for {} ms ({} frames) with the camera still; {} walls over ({:.1f} {:.1f})-({:.1f} {:.1f})",
+                                     now - g.seen, g_roomMapFrame - g.seenFrame, g.walls.size(), g.x0, g.z0, g.x1, g.z1));
+            g_fenceWalls.fetch_sub(static_cast<long>(g.walls.size()), std::memory_order_relaxed);
+            if (!g.walls.empty()) g_fenceGen++;
+            it = g_fenceGroups.erase(it);
+        } else ++it;
     }
 }
 // What the shade is made from: the lot's place and grid, its lamps (place; light in about 20% steps) and the outside walls in
@@ -9669,6 +9696,7 @@ void OnPresent() {
     if (DevSwitches::kCompiled) MeasureMemory(); // development builds (memory_owners)
     PumpSolidMeshes();
     ReleaseIdleMaskTextures(); // (left_lot_release, every 10 s)
+    FenceGroupsGone();
     ++g_roomMapFrame; // (the room map size memo is per frame)
     g_lotDrawTick = GetTickCount();
     // the furniture's lamp edit episode is over once no switch, edit hold or trailing room remains (2.13.1: one log line)

@@ -748,6 +748,12 @@ bool SampleCameraMoving() {
     return MovingAt(now);
 }
 
+bool CameraStillSince(uint64_t tick) {
+    if (!EnsureCamera()) return false;
+    SampleCamera(GetTickCount64());
+    return g_haveEye && g_lastMoveTick.load(std::memory_order_relaxed) < tick;
+}
+
 std::string StatusText() {
     if (!Running()) return "Off";
     if (!c_calls.load()) return "On (no lot lighting work yet)";
