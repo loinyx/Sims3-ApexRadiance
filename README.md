@@ -4,7 +4,7 @@
 
 **A brighter world. A night worth looking at.**
 
-Apex Radiance changes how The Sims 3 lights the world after dark. Lamps light the lawn, the street and the lot next door, the walls beside them, the floors above and below, and the rooms behind doors and windows. Move a lamp in Build mode and its light follows it while you drag. Around the lighting sit image effects (ambient occlusion, edge smoothing, depth blur, banding fix, colour grading with filters and LUTs), fifteen optional fixes for stutters and one in-game menu in 21 languages.
+Apex Radiance reworks the whole lighting system of The Sims 3, making it more realistic and fixing the game's lighting bugs. Lamp light is continuous across floors, walls, rooms, objects and everything else in the game, from the furniture indoors to the lawn, the street and the lot next door, instead of stopping at lot borders, jumping between stories or breaking into blocks. Alongside the lighting come image effects (ambient occlusion, edge smoothing, depth blur, banding fix, colour grading with filters and LUTs), fifteen optional fixes for stutters and an in-game menu in 21 languages.
 
 **[Download the latest version](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest)** · [Installation](#installation) · [Release notes](https://github.com/loinyx/Sims3-ApexRadiance/releases) · [Report a problem](#reporting-a-problem)
 
