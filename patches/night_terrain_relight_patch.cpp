@@ -580,13 +580,19 @@ bool ReadConeFields(const BYTE* light, TerrainBakeCone::Fields& f) {
         return false;
     }
 }
+// c5..c7 as they were before a bake's first light wrote its cone rows: given back when the game binds another pixel shader
+// (the bake shader does not read them; a shader after it may)
+float g_bakeRowsSaved[3][4] = {};
+bool g_bakeRowsHeld = false;
 // The light about to be drawn: its cone rows into c5..c7 for Apex's bake shader (every light, so none keeps another's)
 void BakeLightRows(const BYTE* light) {
     TerrainBakeCone::Fields f;
     if (!ReadConeFields(light, f)) f = {};
     float r[3][4];
     TerrainBakeCone::Rows(f, g_coneScale5, r);
-    if (g_bakeDevice) D3D9Hooks::CallOriginalSetPixelShaderConstantF(g_bakeDevice, 5, &r[0][0], 3);
+    if (!g_bakeDevice) return;
+    if (!g_bakeRowsHeld) g_bakeRowsHeld = SUCCEEDED(g_bakeDevice->GetPixelShaderConstantF(5, &g_bakeRowsSaved[0][0], 3));
+    D3D9Hooks::CallOriginalSetPixelShaderConstantF(g_bakeDevice, 5, &r[0][0], 3);
 }
 const ShaderCache::Id kBakeConePs = [] {
     ShaderCache::Desc d;
@@ -2686,6 +2692,10 @@ class NightTerrainRelightPatch : public ApexPatch {
         if (g_bakeGainInstalled && g_bakePosInstalled) {
             g_coneScale5 = ReadConeScale5();
             D3D9Hooks::RegisterSetPixelShader("NightTerrainRelight", [](D3D9Hooks::DeviceContext& ctx, IDirect3DPixelShader9* ps) {
+                if (g_bakeRowsHeld && (!ps || ps != g_gameBakePs)) { // the bake's passes are over
+                    D3D9Hooks::CallOriginalSetPixelShaderConstantF(ctx.device, 5, &g_bakeRowsSaved[0][0], 3);
+                    g_bakeRowsHeld = false;
+                }
                 if (!ps || g_coneFailed || (ps != g_gameBakePs && (g_gameBakePs || !g_inBakeLight))) return D3D9Hooks::HookAction::Continue;
                 g_inBakeLight = false;
                 return BindConeShader(ctx.device, ps) ? D3D9Hooks::HookAction::Skip : D3D9Hooks::HookAction::Continue;
@@ -2934,6 +2944,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_bakePosInstalled = false;
         g_bakeConeHooked = false; // (the hook went with UnregisterAll: the game's shader binds again)
         g_bakeConeShader = false;
+        g_bakeRowsHeld = false;
         NightLevel::g_timesHooked = false;
         g_sunTimesCall = 0;
         LevelLightShare::SetBakeConeSpill(false);
