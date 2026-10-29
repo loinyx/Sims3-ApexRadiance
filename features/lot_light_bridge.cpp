@@ -1216,7 +1216,9 @@ struct FenceGroup {
     std::vector<GroundShadow::Wall> walls;
     float x0 = 0, z0 = 0, x1 = 0, z1 = 0;
     DWORD read = 0, seen = 0;
+    uint32_t seenFrame = 0;
 };
+extern uint32_t g_roomMapFrame; // (below: OnPresent counts frames)
 std::unordered_map<uint64_t, FenceGroup> g_fenceGroups;
 std::vector<std::pair<uint64_t, DWORD>> g_fenceBirths; // new groups (key, first draw) whose replaced groups are not looked at yet
 constexpr DWORD kFenceSwapMs = 300;
@@ -1383,8 +1385,9 @@ bool NoteGate(float x, float y, float z) {
         const float t = ((x - gp.w.x0) * dx + (z - gp.w.z0) * dz) / l, side = ApexMath::Fabs((x - gp.w.x0) * dz - (z - gp.w.z0) * dx) / l;
         // a gate stands on the ground: an object over the line (a lamp carried across the fence's top) is none; and inside
         // an open gap, not at its ends, where the fence's posts stand (a post at a gap's end was taken for its gate)
-        const float inset = gp.closed ? -0.1f : 0.2f;
-        if (t < inset || t > l - inset || side > kGateOff || y < gp.w.y0 - 1.0f || y > gp.w.y0 + 0.5f) {
+        // (a closed gap's object only keeps the fence's lamp scale: up to the fence's top, as before)
+        const float inset = gp.closed ? -0.1f : 0.2f, top = gp.closed ? gp.w.y1 : gp.w.y0 + 0.5f;
+        if (t < inset || t > l - inset || side > kGateOff || y < gp.w.y0 - 1.0f || y > top) {
             if (!kPublicBuild && g_gateMissLogs < 30 && t > -1.5f && t < l + 1.5f && side < 1.5f) {
                 g_gateMissLogs++;
                 LOG_INFO(std::format("[GroundShadow] object at ({:.2f} {:.2f} {:.2f}) near the fence gap ({:.2f} {:.2f})-({:.2f} {:.2f}) y {:.2f}..{:.2f}: "
@@ -1807,11 +1810,14 @@ bool FencePieceWalls(const BYTE* p, UINT count, UINT stride, const FenceLayout& 
 // DrawInstanced: the group being drawn (an instanced DrawIndexedPrimitive)
 // The share of lamp light the current fence draw lets through (GroundShadow::Wall::pass): the open share of the texture its
 // pixel shader cuts the mesh out with (ShaderPatches::FindCutout), at half alpha; 0 for a solid fence or one that
-// cannot be read. Per shader and per texture, read once (render thread).
+// cannot be read. Per shader and per texture, read once (render thread); emptied on a world change, as an address can be
+// reused by another shader or texture.
 std::vector<DWORD> ShaderCode(IDirect3DPixelShader9* ps);
+std::unordered_map<IDirect3DPixelShader9*, ShaderPatches::Cutout> g_fenceCuts;
+std::unordered_map<uint64_t, float> g_fenceOpen;
 float FenceOpenShare(IDirect3DDevice9* dev) {
-    static std::unordered_map<IDirect3DPixelShader9*, ShaderPatches::Cutout> s_cut;
-    static std::unordered_map<uint64_t, float> s_open;
+    auto& s_cut = g_fenceCuts;
+    auto& s_open = g_fenceOpen;
     if (!g_curPs) return 0.0f;
     auto it = s_cut.find(g_curPs);
     if (it == s_cut.end()) {
@@ -1837,8 +1843,8 @@ float FenceOpenShare(IDirect3DDevice9* dev) {
         const FenceCutout::Fmt f = d.Format == D3DFMT_DXT1 ? FenceCutout::Fmt::Dxt1 : d.Format == D3DFMT_DXT3 ? FenceCutout::Fmt::Dxt3
                                  : d.Format == D3DFMT_DXT5 ? FenceCutout::Fmt::Dxt5 : FenceCutout::Fmt::Argb;
         const bool readable = d.Pool != D3DPOOL_DEFAULT && (f != FenceCutout::Fmt::Argb || d.Format == D3DFMT_A8R8G8B8);
-        const uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(base)) << 20) ^ (static_cast<uint64_t>(keep) << 8) ^
-                             (static_cast<uint64_t>(d.Width) << 40) ^ static_cast<uint64_t>(d.Format);
+        const uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(base)) << 32) | (static_cast<uint64_t>(d.Width & 0xFFFFFF) << 8) |
+                             static_cast<uint64_t>(f); // (32-bit addresses: the fields apart)
         if (const auto o = s_open.find(key); o != s_open.end()) open = o->second;
         else if (readable) {
             D3DLOCKED_RECT lr{};
@@ -1878,6 +1884,7 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
     const DWORD now = GetTickCount();
     FenceGroup& g = g_fenceGroups[key];
     g.seen = now ? now : 1;
+    g.seenFrame = g_roomMapFrame;
     if (!g.read || now - g.read > 60000) {
         // draw_reads_nowait: the 60 s refresh of a group already read does not wait for the GPU; while its instance buffer is
         // busy the walls read last time stay in use and the next draw tries again (three busy answers: it waits, as before)
@@ -1900,7 +1907,7 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
         g_fenceGroupReads.fetch_add(1, std::memory_order_relaxed);
         const FenceLayout L = ReadFenceLayout(dev);
         FenceGroup fresh;
-        fresh.read = g.read, fresh.seen = g.seen;
+        fresh.read = g.read, fresh.seen = g.seen, fresh.seenFrame = g.seenFrame;
         float lo[3] = {}, hi[3] = {};
         void *p0 = nullptr, *p1 = nullptr;
         const UINT first = g_curDipBase + g_curDipMin;
@@ -1936,10 +1943,10 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
     }
     vb0->Release();
     vb1->Release();
-    // (15/10: the ground took minutes to change after a fence was removed) a new group replaces the groups over the same place
-    // that are not drawn any more (the game makes a group again when a piece is added or removed). Looked at kFenceSwapMs after
-    // its first draw: at that draw the old group had been drawn the frame before, so it stayed until the 20 s sweep below
-    // and a removed piece kept its shadow (and closed an opening made in a fence) that long
+    // A new group replaces the groups over the same place that are not drawn any more (the game makes a group again when a
+    // piece is added or removed). Looked at kFenceSwapMs after its first draw: at that draw the old group had been drawn the
+    // frame before, so it stayed until the 20 s sweep below and a removed piece kept its shadow (and closed an opening made
+    // in a fence) that long. Not drawn means missing from the last two frames too, so a slow frame erases no group in use
     for (size_t b = 0; b < g_fenceBirths.size();) {
         const auto [bornKey, at] = g_fenceBirths[b];
         if (now - at < kFenceSwapMs) {
@@ -1952,7 +1959,7 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
         const FenceGroup ng = born->second;
         for (auto it = g_fenceGroups.begin(); it != g_fenceGroups.end();) {
             const FenceGroup& o = it->second;
-            const bool stale = it->first != bornKey && now - o.seen > kFenceSwapMs - 100 && // (review: 100 ms let two groups erase each other below 10 fps)
+            const bool stale = it->first != bornKey && now - o.seen > kFenceSwapMs - 100 && g_roomMapFrame - o.seenFrame >= 2 &&
                                !(o.x1 < ng.x0 - 0.5f || o.x0 > ng.x1 + 0.5f || o.z1 < ng.z0 - 0.5f || o.z0 > ng.z1 + 0.5f);
             if (stale) {
                 g_fenceWalls.fetch_sub(static_cast<long>(o.walls.size()), std::memory_order_relaxed);
@@ -9496,6 +9503,8 @@ void OnWorldChanged() {
     g_shadeQueue.clear(); // the lamp shades waiting or building belong to the previous world's lots
     g_fenceGroups.clear(); // (garden walls of the old world)
     g_fenceBirths.clear();
+    g_fenceCuts.clear();
+    g_fenceOpen.clear();
     g_gates.clear();
     g_fenceBusy.clear();
     g_fenceGen++;
@@ -10031,6 +10040,8 @@ void Shutdown(bool keepChunkMaps) {
     ReleaseLotMasks();
     g_fenceGroups.clear();
     g_fenceBirths.clear();
+    g_fenceCuts.clear();
+    g_fenceOpen.clear();
     g_gates.clear();
     g_fenceBusy.clear();
     g_fenceGen++;

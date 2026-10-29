@@ -3256,7 +3256,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                 changed |= ApexUi::SwitchRow("Lamp colors stay near lamps", &g_neutralProbe, "A colored lamp no longer tints far floors, roofs and shiny objects", true);
                 return changed;
             });
-            // Smooth ground light only chooses which map the draws read (idavidveiga's fork, 04/10): no lighting refresh, no
+            // Smooth ground light only chooses which map the draws read (idavidveiga's fork): no lighting refresh, no
             // terrain, lot, room or wall solve and no object rig gather; the next draw reads the smoothed or the raw map
             if (ApexUi::SwitchRow("Smooth ground light", &g_smoothMaps, "Soft lamp light on the ground, without blocky steps or specks", true)) {
                 NotifySettingChanged();
