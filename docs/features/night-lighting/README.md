@@ -56,7 +56,7 @@ atlas** that any surface knowing its world position can sample. Each sub-part be
 |---|---|---|
 | Lot light pass | Lot grass draws `max(lot map, terrain light)`, with a 3 m soft edge, so street-lamp light has no cut at lot borders | [lot-light-pass.md](lot-light-pass.md) |
 | World atlas and smoothed maps | Chunk light maps upscaled 4x and cleaned of DXT noise; one world atlas for every consumer; daytime terrain composition | [world-atlas-and-smoothed-maps.md](world-atlas-and-smoothed-maps.md) |
-| Terrain relight | Lot lamps in the terrain bake, dusk and daylight rebuilds, local per-lamp relights and paced sweeps | [terrain-relight.md](terrain-relight.md) |
+| Terrain relight | Lot lamps in the terrain bake with their cones, dusk and daylight rebuilds, local per-lamp relights and paced sweeps; a dragged lamp's ground light drawn on the GPU | [terrain-relight.md](terrain-relight.md) |
 | World lamp response | Edits of world-owned street lamps reach the terrain and native object rigs | [world-lamp-response.md](world-lamp-response.md) |
 | Level light share | Outdoor and indoor lamps light every story, with the game's wall test | [level-light-share.md](level-light-share.md) |
 | Real-time outdoor lamps (Lamp lighting: Instant) | The active lot's outdoor lamps drawn on the GPU into every story's outside maps, with shadows | [rt-outdoor-lamps.md](rt-outdoor-lamps.md) |
@@ -403,18 +403,18 @@ Native solar and sky constants are never raised.
 
 ### Brightness controls
 
-- **Ground brightness / Roads and sidewalks** (live): for one draw, the game's lamp scale constant of a light-map term is
+- **Ground light** (live; `luzNoChao`, applied as 0.6 x the slider, the Soft balance): for one draw, the game's lamp scale constant of a light-map term is
   scaled: the terrain chunk PS (`TerrainLampConst` via `ShaderPatches::LightMapScaleConst`, c7 in the captured single
   pass chunks, c3 squared in the summer multi-pass, a squared c4.x in the recognised winter multi-pass layout; -1 = that
   shader keeps the game's brightness), the lot pass c3.x, the snowy lot pass c4.x, the floors' `FloorPatch.scaleConst`
-  and the roads' `RoadPatch.scaleConst` (x the road factor). Only while *Street lamps light lots* is on.
-- **Street lamp / Lot lamp brightness** (on the ground): `BakeColourStub` replaces `movaps xmm0,[edi+0F0h]`
-  (`0F 28 87 F0 00 00 00`) at 0x00C2950F in the terrain bake: the colour copied to the bake's shader parameter is
-  multiplied by `g_bakeStreetMul` (lot id +0xC0/+0xC4 = 0) or `g_bakeLotMul`. Lamp objects, rigs, room solves and the
-  lamp tracking keep the real colour. A change applies on slider release as one forced terrain update (`NoteEdit` switch
-  path). Lot lamps also scale the lot's own light map on its grass (lot pass c31.x, live), because lot grass is
-  `max(lot map, terrain)` and the bake alone cannot dim a lot's own lamps there. Objects, walls and roofs use their own
-  sliders.
+  and the roads' `RoadPatch.scaleConst`. Only while *Street lamps light lots* is on. It replaces the four controls of
+  earlier versions (ground, roads and sidewalks, street lamps, lot lamps); a configuration, profile or look saved with
+  them is migrated to ground x lot lamps / 0.6 (`MigrateGround`).
+- **Bake colour** (on the ground): `BakeColourStub` replaces `movaps xmm0,[edi+0F0h]` (`0F 28 87 F0 00 00 00`) at
+  0x00C2950F in the terrain bake: the colour copied to the bake's shader parameter is multiplied by `g_bakeStreetMul`
+  (lot id +0xC0/+0xC4 = 0) or `g_bakeLotMul`, both 1: every lamp enters the bake and the lot's own map (lot pass c31.x)
+  at its full colour, so the ground has the same light on both sides of a lot border. Lamp objects, rigs, room solves
+  and the lamp tracking keep the real colour. Objects, walls and roofs use their own sliders.
 - **Lamp colour, own colour for lot lamps**: the colour thunks record every stock-pink light (pink + written colour); on
   release `RetintLamps` rewrites those that still hold the written colour through `FUN_006bc3e0` (+0xF0 / +0xE0), then
   the rigs regather, one terrain update and one lot re-solve (room 0). Street lamp = class 0xB with lot id 0. Interiors

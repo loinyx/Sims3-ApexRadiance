@@ -223,7 +223,9 @@ test reads (`LevelLightShare::LampVisibilityState`, the same before and after th
 out of a house is tested on its own copy of the walls, a snapshot that is replaced and never changed; its generation is
 part of `LampVisibilityState`, so picks with such lamps are kept too. A hit writes exactly what the pick would: the same rows, head
 height, share, counters and candidate count. The memo follows the development switch `lamp_visibility_memo` and is not
-used while F8 records the wall and slab tests or a light capture runs. Development builds pick one hit in 64 again on a copy and
+used while the developer switch *Record story light samples for the diagnostics* has F8 record the wall and slab tests,
+or while a light capture runs; an F8 dump or an F7 no longer turns it off for the rest of the session. The draw-cost log
+counts the draws that did not use it, by reason. Development builds pick one hit in 64 again on a copy and
 compare it bit for bit; a difference turns the memo off for the session
 (`[LotLightBridge] Fence lamp pick memo: a kept pick differed from a new one ...`). A world change empties it. The
 developer roof status line counts `fence lamp picks: N reused, M computed` (with `(off: a kept pick differed)` after a

@@ -776,14 +776,14 @@ floor mask.
   only borrowed lamps (other stories' or these) gets no boost.
 - **At the outdoor scale** ([`opening_lamp_balance.h`](../../../features/opening_lamp_balance.h)): outside, the same lamp
   is drawn from room 0's map, its sum divided by its largest channel past 1, times the outdoor surface's brightness (the lot pass: *Ground
-  brightness* x *Lot lamp brightness*; outside walls: the walls' *Brightness*), and room 0 is not normalised. Inside, the
+  light*; outside walls: the walls' *Brightness*), and room 0 is not normalised. Inside, the
   room solve summed it whole, with no cut before the room's curve, and the room's normalisation multiplied it. A light
   capture of a green sconce (intensity 1.7, colour (0, 1, 0), a story-0 room-0 lamp listed twice) beside a courtyard: the
   kitchen behind its glass door showed 0.808 on screen, the courtyard at the same distance at most 0.567 of its map.
   Each entry of such a lamp is now held under 1 / its entries at its largest channel, its hue kept (the outdoor cut,
   taken at the opening it came in by: *The cut at the opening* below), then takes the opening's
-  share and glass, then the outdoor scale: floors, ceilings and the directional maps the ground's (`Ground brightness x
-  Lot lamp brightness` while *Street lamps light lots* is on, else 1), wall texels the walls' (*Lamps light walls* on,
+  share and glass, then the outdoor scale: floors, ceilings and the directional maps the ground's (the gain of *Ground
+  light* while *Street lamps light lots* is on, else 1), wall texels the walls' (*Lamps light walls* on,
   else 1), over the room's normalisation (`InnerLight::NormScale(1, room+0x160)`; the directional maps take no
   normalisation factor, as whether the game normalises them is not read). Offline (`tools/roofed_openings_test`) the
   kitchen pixel replayed through the room solve's curve and the room-lit floor shader's (PS `44ECECA0`, `c2.z` 4.2) was
@@ -1282,7 +1282,7 @@ Source: `level_light_share.cpp` `InnerNormScaleAt`, `BasisLightHook`, `InnerPass
   room solve gives both sides the same law (room 2's normalisation was 1.000, no boost, and the lamp was an outdoor
   lamp, not *Indoor light through openings*). The step at the arch comes from the 8-bit map clipping the sum at 1 (4 to
   5 within 3 m of that post) and from the surface shaders: interior floors apply the tanh curve (gain about 1.35 to 1.46)
-  while outdoor floors and lot grass take `c3.x` x *Ground brightness* (and *Lot lamp brightness*). A factor between them
+  while outdoor floors and lot grass take `c3.x` x *Ground light*. A factor between them
   would be an artistic share, not physics. Unverified: which map (the GPU relight or the game's solve) the outside showed
   at the capture, since that capture's Instant mode kept dropping the active lot's kept parts (over the 128 MB budget) and
   sending its room 0s back to the game's solve.

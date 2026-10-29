@@ -11,7 +11,7 @@ own pages (see [See also](#see-also)). Part of [Night Lighting](README.md).
 |---|---|
 | Availability | Released in 1.0.0. Subdued daytime response on snow on objects and *Ground brightness* on the squared terrain variant: Released in 2.6.0. The melting-snow lot pass, the daytime lamp term on snowy lots, the wet world pass left to the game in snow and the game's own snow on objects in full daylight: Released in 2.7.0. The room mask and lamp shade on snowy lots, and the indoor light on the ground on the snowy lot passes: Released in 2.15.3. Snow and melting-snow edge blending and visible-lot updates: Released in 2.15.4 |
 | Default | On (with Night Lighting and *Street lamps light lots*) |
-| Menu | No snow-specific switch; World > Water & Snow > Snow holds *Sidewalk visibility*. Uses Lighting > Game fixes > Ground & Lots (*Street lamps light lots*, *Smooth ground light*), Lighting > Outside > Ground & Lots, *Brightness* group (*Ground brightness*) and Lighting > Outside > Objects > Objects > Game fixes (*Fences and stairs catch light*, *Fence brightness*) |
+| Menu | No snow-specific switch; World > Water & Snow > Snow holds *Sidewalk visibility*. Uses Lighting > Game fixes > Ground & Lots (*Street lamps light lots*, *Smooth ground light*), Lighting > Outside > Ground & Lots, *Brightness* group (*Ground light*) and Lighting > Outside > Objects > Objects > Game fixes (*Fences and stairs catch light*, *Fence brightness*) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawLotSnow`, `DrawLotMelt`, `DrawSnowFloor`, `DrawSnowOnObject`), [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`PatchSnowFloor`, `PatchSnowCover`, `PatchSnowRelief`) |
 
@@ -49,7 +49,7 @@ brighter of it and the game's term, or adds it where the game has no lamp term.
 4. **Snow on fence tops and props:** atlas x strength added to the moon and sky light before the snow texture multiply.
 
 Fixes 3 and 4 follow the fence switch and strength, including the subdued daytime response of
-[fences.md](fences.md). Fixes 1 and 2 use the game's own lamp scale, multiplied by *Ground brightness*.
+[fences.md](fences.md). Fixes 1 and 2 use the game's own lamp scale, multiplied by *Ground light*.
 
 ## Settings
 
@@ -72,7 +72,7 @@ Snow has no setting of its own besides sidewalk snow. It uses these Night Lighti
 - [roads.md](roads.md): snowy roads and sidewalk snow.
 - [foliage.md](foliage.md): winter bushes and trees. [water.md](water.md): ponds in snow.
   [lamp-colour.md](lamp-colour.md): the stock pink lamps that show on white snow.
-- **Ground brightness on terrain variants:** *Ground brightness* also reaches a world terrain shader whose lamp map is
+- **Ground light on terrain variants:** *Ground light* also reaches a world terrain shader whose lamp map is
   multiplied by `c4.x x c4.x` through a scalar temporary, next to the linear `c7.x` path. Without this, snow and grass
   drawn by the two variants showed a boundary whenever the gain was not 100%. The classifier decides by bytecode, never
   by snow or lot names; shared constants and unknown layouts keep the game's brightness. See *Technical reference*.
@@ -159,7 +159,8 @@ snow, and in snow the wet world terrain pass is left to the game.
   up), or from the "not LotLight" fallback. Runtime guard: the map sampler found by the patch must hold an A8R8G8B8,
   non-DEFAULT pool texture of at most 1024x1024 (a room map); terrain maps are DXT5.
 - `PatchSnowFloor(t, tc, FloorPatch&)` (`ps_3_0`, no flow control): the single `texld rL, vK, sM` whose next reader is
-  `mul rB.xyz, rS.s, rL` with a replicated swizzle on `rS` (writes to `.w` between them are ignored: m69 has `max r0.w`).
+  `mul rB.xyz, rS.s, rL` with a replicated swizzle on `rS` (writes to `.w` between them are ignored: m69 has `max r0.w`;
+  a read of `rL.w` alone, the map's alpha, is not a reader: two weather variants test it first).
   tc 7: new input `dcl_texcoord7 vV.xy` (refused if TEXCOORD7 is already read); tc 0: the TEXCOORD0 declaration is
   widened to `.xyzw`. After the `mul`:
   ```
@@ -195,8 +196,9 @@ snow, and in snow the wet world terrain pass is left to the game.
   `mov oT3.xy, rW.xzzw` with `rW.x` / `rW.z` from `dp4` with `c8` / `c10` (the VS morphs between two positions, `v0` and
   TEXCOORD0).
 - `PatchSnowCover` (`ps_3_0`, refuses any flow control): the single `mul oC0.xyz, rP, rQ`; of the two operands, the one
-  whose last writer is a `texld` is the snow texture, and the other (`rL`) must be written by `mad rL.xyz, rX.w, c0, rY`
-  (moon x shadow + sky). Before that `mul`:
+  whose last writer is a `texld` is the snow texture, and the other (`rL`) must be written by `mad rL.xyz, rX.s, c0, rY`
+  (moon x shadow, one component, + sky). A variant that mixes the lit snow with the fog in its last instructions has no
+  such `mul`: its single light `mad` is taken directly and the code below goes right after it. Before that `mul`:
   ```
   mad   T.xy, vT3.xyxy, cA, cA.zwzw
   texld T, T, sE

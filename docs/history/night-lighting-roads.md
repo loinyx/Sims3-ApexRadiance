@@ -77,3 +77,14 @@ alpha-blended sidewalk match.
 
 **Outcome:** the `.xyzw` form is accepted only with the validated opacity-UV `mul`, unit-scale `def` and
 texture-coordinate input. Released in 2.5.6. An earlier note that the scale constant was HDR-only was superseded.
+
+### 2026-10-29: wet roads grey at night
+
+**Context:** a light capture of a wet road and sidewalk at night (F7).
+
+**Finding:** the wet road shader reflects a fixed daylight sky cube that the game never darkens; about 0.6 of it was
+reflected, more than the road's own light, so the whole road and sidewalk turned grey. The game darkens its other sky
+cube by the sky colours at night.
+
+**Outcome:** `PatchRoad` scales that reflection by the daylight, 1 - night level (`91af563`). The light capture now
+writes each cube texture's mean colour per face. Not yet checked in game.

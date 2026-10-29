@@ -31,7 +31,11 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
 1. **The base.** [Quick outdoor lamp edits](outdoor-lamp-delta.md) keep each room 0's sum and each light's part of it per
    texel. The parts of the lamps the GPU draws leave the sum (`OutdoorDelta::ExportRoom0`): what remains is the texel
    without them. Window lights, the world's street lamps and other lots' lamps stay in it. The GPU draws a lot's bare
-   bulbs, spots, shaded lamps and lot street lamps (types 3, 4, 5 and 11) listed in room 0 of their own lot.
+   bulbs, spots, shaded lamps and lot street lamps (types 3, 4, 5 and 11) listed in room 0 of their own lot. A lamp that
+   is on and listed on one story is drawn on every story where it can be drawn: a new or picked-up lamp is listed at once
+   only on its own story, and the other stories' room 0s gather it at their next solve, which a drag defers. A story
+   whose lamp-edit delta was refused keeps its record as this base until its own solve ends
+   ([outdoor-lamp-delta](outdoor-lamp-delta.md#limitations)).
    A solve is kept only when its lights' parts account for its sum: past 2 levels of light at a texel that no part holds,
    it is not kept and the room's edits take the game's solve. Light no part holds would stay in the base whatever the GPU
    draws: a courtyard kept a recoloured, then switched-off sconce's old colour until *Restart lighting*.
@@ -40,7 +44,11 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    `pack(base + Σ mult × fade(law × shadow))`, packed as the solve packs it (its hue kept past 1,
    [level-light-share](level-light-share.md#outdoor-texels-keep-their-hue)), with the floor mask's alpha and the class-2 wall blur. The law,
    cones and realistic reach are those of the room bake (`rt_lamp_model.h`, `lamp_reach.h`): the game's own cones for
-   shaded lamps, the game's hard light cut and no map dither.
+   shaded lamps, the game's hard light cut and no map dither. `mult` is the lamp's count in the story's list (room 0's
+   list can hold an outdoor lamp twice), except on floor maps, which count each lamp once, as the terrain bake does under
+   the grass, sidewalks and roads beside them. A room's own map can be smaller than the class's working map the solve
+   wrote ([engine/room-light-maps.md](../../engine/room-light-maps.md)): its texels are relit at their place and those
+   past it fall outside the viewport. A larger own map is not relit, and a blurred wall atlas must have the exact size.
 3. **Shadows.** The lot's occluders are read from its story grids on the light tree thread
    (`LevelLightShare::ExportLotProxy`): walls from 0.1 m below their foot to their top with their door and window holes,
    roofed quadrants at the ceiling (stopped at the floor of the story above), placed floors of upper stories as 0.2 m
@@ -56,12 +64,19 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    1), as the changed-room walk sends them on Classic: such an edit marks no room, and before this the rooms behind a
    courtyard sconce's glass doors kept its old colour until something else solved them (a story change, for instance). The
    lamp's own object, which the game marks as an occluder at every drag step (`0x006C7939`), marks no room while the GPU
-   draws the lamp. Every 2 s a GPU lamp that is on is checked against the stories it was drawn on: a story whose room 0 no
-   longer lists it is sent to gather again, once. A lamp switched on takes the usual path.
-6. **Drags.** While a lamp keeps changing (within 300 ms of its last change) its maps are relit with a cheaper shadow
-   estimate (`AccFastPS`), at most one relight every 200 ms, no map is uploaded, and the floor mask's under-floor share is
-   computed on a worker thread (the map keeps its last copy until it arrives); once the lamp stays put every map is relit
-   with the full estimate. Each frame starts maps only while its relight work stays under about 2 ms of CPU.
+   draws the lamp. Every 2 s a GPU lamp that is on is checked against the room-0 lists of the stories that listed it and,
+   once any story lists it, of every story where it can be drawn: a story whose list misses it at two checks in a row is
+   sent to gather again, once. A lamp switched on takes the usual path.
+6. **Drags.** While a lamp keeps changing (within 300 ms of its last change) its maps are relit at every move with a
+   cheaper shadow estimate (`AccFastPS`), as the ground past the lot follows it
+   ([terrain relight](terrain-relight.md#dragged-lamps-on-the-gpu)); no map is uploaded, and the floor mask's under-floor
+   share is computed on a worker thread (the map keeps its last copy until it arrives). Once the lamp stays put every map
+   is relit with the full estimate. Each frame starts maps only while its relight work stays under about 2 ms of CPU, and
+   each round takes the maps without floor-mask texels (wall atlases, ceilings) first: every story's walls are relit in
+   the same frame, so the seam between stories never shows two lamp positions, and the floors follow. When a lamp stays
+   put between steps, the render thread updates the under-floor share from the changed lamps only (`UnderDelta`), four
+   texels at a time (`RtLampModel::BakeStamp4`, SSE: `BakeStamp`'s single-precision operations in the same order, so each
+   lane equals it bit for bit, and each texel's sums take the lamps in the same order).
    A map the game writes again and again (its room solves, for instance while a lot stays loading) is relit for those
    writes at most every 0.5 s; a single write after a rest is relit at once (since 2.15.1; an F8 session: 105 writes in 10 s,
    each relight 45 ms of floor mask with 28 lamps, logged as "relights for repeated game writes moved later").
@@ -119,14 +134,18 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
 - The cause of the courtyard's stale light (2.16.0) is not confirmed, and the accounting check has not been seen to refuse
   a solve in game ([validation](../../validation/night-lighting-level-light-share.md)). If old light stays, *Restart
   lighting* clears it.
-- Only the active lot. Other lots, the world grass and roads (terrain bake) and the world's street lamps stay baked.
+- Only the active lot. Other lots, the world grass and roads (terrain bake) and the world's street lamps stay baked;
+  while one of the active lot's lamps is dragged, its light on the ground past the lot is drawn on the GPU too
+  ([terrain relight](terrain-relight.md#dragged-lamps-on-the-gpu)).
 - The light past 1 shows on the lot ground, the summer outdoor floors and the ps_3_0 outside walls of the active lot. Classic,
   other lots, winter and snowy floors, the ps_2_x walls (lower shader settings) and objects keep the cut at 1.
 - Rooms that take room 0's lamps (yards, rooms near openings) and their objects follow at the game's pace, through their
   own solve after the send above.
 - Objects, Sims and terrain do not cast shadows; roofs are flat at the wall top, as in the solve's own test.
-- A lamp added or removed reaches the GPU set once the game gathers the room's light list again.
-- A map whose walls were blurred by the game's own blur is not relit; the log says so.
+- A lamp added or removed reaches the GPU set once the game gathers a story's room-0 light list again (a new lamp's own
+  story does so at once; from then on it is drawn on every story).
+- A map whose walls were blurred by the game's own blur is not relit, nor a room's own map larger than the solve's
+  working map; the log says so, and that lot's edits take the game's solve.
 - The lot geometry key counts wall tops that rose and floor edits of every lot together: such an edit on another lot
   rebuilds the active lot's occluders and solves its room 0s in full once.
 
@@ -138,9 +157,13 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
 - **Self-measure.** Every 10 s while the option is on: the average and largest cost a frame on the render thread, the
   relights and why the maps were relit.
 - **Coverage.** Lamp edits mark no room only while every story's maps are relit; the log says when that starts and
-  stops (`Every story covered` / `Not every story covered (...)`). A lamp drawn on the GPU that is still missing from a
-  story's light list where it can be drawn does not count as covered: its edit also goes to the game's solve, and the
-  consistency check asks those stories to gather their lights again.
+  stops (`Every story covered` / `Not every story covered (...)`). A lamp counts as covered on the stories it is drawn
+  on, a story that draws it before its room 0 gathers it included. A lamp not drawn on a story where it can be drawn, or
+  kept baked in a relit map's base, is not covered: its edit also goes to the game's solve. The consistency check reads
+  the stories' real lists, so a story that draws a lamp it has not gathered is still sent to gather it.
+- **Terrain stamps.** Each frame hands every lamp of the lot's room-0 lists, drawn on every story or not, to
+  `TerrainStamps::Update` ([terrain relight](terrain-relight.md#dragged-lamps-on-the-gpu)); none when the frame stops
+  before it reads the lists.
 - **GPU passes**, in the `EndScene` pass before the overlay, with the device state saved: shadow atlas 1536 × 4096
   G16R16F with D24X8 depth, 16 lamps an atlas, near 0.005 m, far 64 m; the relight accumulates 16 lamps a draw into an
   A32B32G32R32F target at each texel, then composes and packs into the copy; the wall blur runs on the GPU with the
@@ -156,8 +179,10 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
   texels' draw (`ComposePS` COLOR1) and, for a blurred atlas, binds scratch 3 there and copies it into `scale` before
   the blur; `kScaleLog2 = 3`.
 - **Logs**: `[RtOutdoorLamps]` lines (inactive reasons once each, each story's map identity, each relight and each edit).
-- **Offline check**: `tools/rt_lamps_test/run.ps1` (shadows against a CPU reference on a Direct3D 9 device, the bake split
-  and the wall blur).
+  A relight line gives its phases; the floor mask is split into the worker jobs started and taken, the share computed on
+  the render thread, the buffer lock and the buffer fill.
+- **Offline check**: `tools/rt_lamps_test/run.ps1` (shadows against a CPU reference on a Direct3D 9 device, the bake split,
+  the wall blur, and `BakeStamp4` against `BakeStamp` lane by lane).
 
 ## See also
 

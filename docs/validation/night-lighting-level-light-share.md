@@ -28,6 +28,7 @@ It must:
 | `tools/mesh_occlusion_test/` | The retired mesh blockers' collector, BVH and replacement policy, in the standard and development configurations | `run.ps1 -OpaqueShader <ps.bin> -CutoutShader <ps.bin> -Standard` or `-Development` | MSVC x86, two captured pixel shaders |
 | `tools/liveness_prune_test/` | `liveness_prune.h`: an entry survives one miss and is erased after two sweeps in a row without its key; key 0 is never live | `run.ps1` | MSVC x86 |
 | [`tools/basis_test/basis_test.cpp`](../../tools/basis_test/basis_test.cpp) | `PatchBasisSmooth` / `PatchIndoorBasis` on a captured pixel shader, disassembled with d3dcompiler_47 | `basis_test <ps.bin> [lmSampler]` | d3dcompiler_47, a captured shader |
+| `tools/rt_lamps_test/` (`check.cpp`) | Real-time outdoor lamps: shadows against a CPU reference, the bake split, the wall blur, the compose shader against the pack, and `RtLampModel::BakeStamp4` against `BakeStamp` over 16,000 lanes (bit for bit) | `run.ps1` | MSVC x86, Direct3D 9 device |
 
 These harnesses do not validate the game's room topology, lamp falloff, visual convergence or performance. They read
 only the repository and print to the console.
@@ -40,6 +41,8 @@ an FPS gain, complete climate coverage or resolution of texture allocation stall
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-28 | `ddb9e44` (walls relit first, floor mask four texels at a time) | Developer recording of lamp drags | The under-floor share's update about 1.6 ms a relight round before, 0.65 ms on average after; every round fit in one frame (before: rounds of up to 20 maps over 5 to 8 frames, the seam between stories showing two lamp positions) | In game, backend not recorded |
+| 2026-10-28 | `ea376c0` (a room floor map smaller than its solve) | Developer recording on a 20 x 30 m lot (own floor maps 256x128 and 256x256 under a 512x256 working map) | Every lamp move relit all stories without a room-0 solve; the game's room solves during a drag fell from 5.0 ms to 0.6 ms a frame | In game, backend not recorded |
 | 2026-10-27 | `5006c39` (kept solves account for every light) | `tools/outdoor_delta_test`; `tools/development/check.ps1 -Suite Smoke`; dev build in game | 0 failures. In game: 21 kept room-0 solves over lamp recolours, moves and switches, none with light past its parts (the check never refused); the stale courtyard light of 2.16.0 not reproduced. Its cause is not confirmed | DXVK 3.1.1 in game |
 | 2026-10-27 | `47ec493` (release 2.16.0 candidate; the cut scaled for opening entries `75f1f5b`, wall lamps `156f092`) | `tools/roofed_openings_test`; `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting` (with the reference law of `render_cost_test`) | 0 failures. In game (F7/F8 sessions): the living room behind the courtyard window lit from 1.5 m to the back wall (9 down to 4 levels), the sill's shade before it, as computed; wall lamps not yet seen in game | Native D3D9 (offline device) |
 | 2026-10-26 | `8b59910` (the outdoor texel's cut at an opening) | `tools/roofed_openings_test` (1,724 and 175 checks; `OpeningShareChecks`); `tools/outdoor_delta_test` (15); `tools/rt_lamps_test` (23); `check.ps1 -Suite Smoke` and `-Suite Lighting`; developer, public and standard Release x86 builds | Passed, 0 failures. The green sconce's replay at the hall's glass door: 0.640 before, 0.207 now (its part of the courtyard's texel there 0.207); two lamps at 1.2 each: the room at the door 2.00 before, 1.00 now. Not checked in game | CPU harness / native D3D9 |
@@ -215,6 +218,19 @@ topology mutation inside a point is not reproduced. This release does not promis
 - Session `2026-10-01 15-26-42`: rooms 23/19/3/20 of lot `27D24720` change their merged ambient during a slider drag.
 
 ## Open checks
+
+- Real-time outdoor lamps during a drag (`27d6232`, `5603402`, `ddb9e44`, `91af563`), Lamp lighting Instant, a house with
+  two or more stories and an outdoor lamp beside its walls. Pick the lamp up (or place a new one) and drag it along the
+  walls, then put it down. **Expected:** the walls of every story, the seam between floors included, keep the lamp's
+  light during the drag and after it with no gap of seconds and no two lamp positions at the seam; the drag solves no
+  room 0; the per-pixel lamps of doors, windows and outdoor objects and the
+  furniture follow during the drag, not at the release; the lot's floors and walls keep pace with the ground past the lot.
+  Not yet checked in game; only the recordings in *Latest results* exist.
+- Lot floors counting each lamp once (`91af563`): a patio or deck beside grass, a sidewalk or a road, one lot lamp at
+  night. **Expected:** no step of brightness at the patio's edge. Not yet checked in game.
+- A lamp edit whose delta is refused (more than 200 batches, or more than eight lights) keeps the story's record as the
+  GPU's base (`27d6232`): the `[OutdoorDelta]` log names the refusal and the story keeps its lamps until its solve ends.
+  Not yet seen in a log.
 
 - Windows counted by the window built (`ApplyCutPost`, `KeepBuiltWindows`, `UnlitWindows`): a house with windows next
   to an outdoor lamp at night, developer mode. Rotate the camera round the house and stop on each side. **Expected:** the

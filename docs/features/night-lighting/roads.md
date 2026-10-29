@@ -35,8 +35,11 @@ light as the ground next to them.
    map also in place of the road's own copy, so roads get exactly the clean light of the ground beside them.
 4. **Sidewalk snow:** where the shader has the snow blend, mix the plain road texture back in on its bright parts by the
    *Sidewalk visibility* amount.
-5. **Brightness:** scale the road's lamp constant by *Ground brightness* x *Roads and sidewalks*, weighted by the night
+5. **Brightness:** scale the road's lamp constant by *Ground light*, weighted by the night
    level.
+6. **Wet roads:** in rain the road shader also reflects a fixed daylight sky cube that the game never darkens, which
+   turns the whole road and sidewalk grey at night. The patch scales that reflection by the daylight (1 - night level),
+   as the game's sky colours follow it.
 
 ## Settings
 
@@ -123,6 +126,15 @@ height = `sat(2 c15.z - 1)`.
 5. `scaleConst` = `LampScaleAfter(...)`: the lamp-scale constant `K` when the next reader of the map value is
    `mul`/`mad rY.xyz, rX, cK.x` and `cK` is read nowhere else, never through relative addressing and not from a `def`;
    otherwise -1 (the road keeps the game's brightness).
+6. **Wet sky reflection** (`WetSkyReflection`, `reflectConst`): the one `texld rR` of a cube sampler whose first read of
+   `rR.rgb`, before `rR.rgb` is written again and before any flow control, is `mul rY.xyz, rR, rW.s` or
+   `mad rY.xyz, rR, rW.s, rZ` (either factor order, `rW` a temp read through one component). Two such reads: not the
+   known layout, nothing inserted. `cW` = `cS + 3` when the sidewalk blend took constants, else highest const + 1
+   (refused at 224); right after the `texld`:
+   ```
+   mul rR.xyz, rR, cW.x
+   ```
+   The game's other sky cube, which it darkens by the sky colours at night, is not touched.
 
 Patched PS sizes seen in captures: 130C52EF/1284 and E7A8295D/1364.
 
@@ -135,8 +147,8 @@ Patched PS sizes seen in captures: 130C52EF/1284 and E7A8295D/1364.
    per chunk, so the chunk key is exact.
 4. `SamplerBind` the chunk texture (`ChunkTexture`: smoothed when ready) to `sE` (CLAMP, LINEAR, mip LINEAR).
 5. If `LightmapSmooth::Find` returns the smoothed map, it also replaces the road's own copy in `sL`.
-6. Sidewalk constant `cS.x` = `g_sidewalkClear` when the shader has the blend.
-7. `ConstGain` multiplies `cK.x` (`scaleConst`) by `RoadGain() = 1 + (ground x road - 1) x night`.
+6. Sidewalk constant `cS.x` = `g_sidewalkClear` when the shader has the blend; wet roads: `cW.x` = 1 - night level.
+7. `ConstGain` multiplies `cK.x` (`scaleConst`) by `RoadGain() = 1 + (ground - 1) x night` (ground = 0.6 x *Ground light*).
 8. Swap the pixel shader, draw, restore every touched state. Counter: "roads: N" in the developer status line.
 
 ### Registers
@@ -150,6 +162,7 @@ Patched PS sizes seen in captures: 130C52EF/1284 and E7A8295D/1364.
 | PS `sL` (`s6`, `s4`, `s2`) | Road's own map copy |
 | PS `sE` (new) | Chunk terrain map (smoothed when ready) |
 | PS `cS`, `cS+1`, `cS+2` (new) | Sidewalk amount, luma weights, (4, -1) |
+| PS `cW` (new, wet roads) | `.x` = daylight (1 - night level), the fixed sky cube's reflection scale |
 
 Road world matrices were observed unrotated: `c8/c9/c10` = (1,0,0,896), (0,1,0,500), (0,0,1,1150) in three captures (m01,
 m43, calcada-verao).
@@ -158,7 +171,7 @@ m43, calcada-verao).
 
 | File | Symbols | Role |
 |---|---|---|
-| `features/shader_patches.cpp` | `IsRoadVs`, `PatchRoad`, `LampScaleAfter`, `RoadPatch {lightSampler, extraSampler, sidewalkConst, scaleConst}` | Bytecode |
+| `features/shader_patches.cpp` | `IsRoadVs`, `PatchRoad`, `LampScaleAfter`, `WetSkyReflection`, `HasWetSkyReflection`, `RoadPatch {lightSampler, extraSampler, sidewalkConst, scaleConst, reflectConst}` | Bytecode |
 | `features/lot_light_bridge.cpp` | `DrawRoad`, `g_roadPs`, `g_curRoadMap`, `SetSidewalkClear`, `SamplerBind`, `ChunkTexture`, `RoadGain` | Draw |
 | `features/lightmap_smooth.cpp` | `Find` | Smoothed chunk map |
 

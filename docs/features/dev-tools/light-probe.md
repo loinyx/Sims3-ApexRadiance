@@ -41,7 +41,8 @@ only the draws that really reach that pixel are reported.
    render states, constants and Night Lighting's description of the draw. A second copy of the draw, with colour and
    depth writes off and a 1x1 scissor, runs inside an occlusion query.
 3. **Finish.** At the following Present the queries are read; draws with samples > 0 are written to
-   `Light capture.txt` with their shaders and textures, in a new dated capture folder.
+   `Light capture.txt` with their shaders and textures, in a new dated capture folder, followed by a
+   [ground light profile](#ground-light-profile) through the lot lamp nearest the mouse.
 4. **One capture per request.** No capture is taken automatically: a floor change does not start another one.
 5. **Compare.** Two consecutive captures (piece A, then piece B) end with a register-by-register comparison of the
    object draw chosen at each pixel.
@@ -127,6 +128,22 @@ render target, then `GetRenderTargetData`). Writes the report, dumps shaders and
 calls `Captures::Finish(folder, ..., CaptureKind::LightCapture)`. Status line:
 `Measured: N draws cover pixel (x, y), M textures saved in Captures\<folder>.`, also logged as `[LightProbe] ...`.
 
+### Ground light profile
+
+`GroundProfile::Write` ([`features/ground_profile.cpp`](../../../features/ground_profile.cpp)), after the screen colour,
+adds a `GROUND LIGHT PROFILE` section and `Ground profile.csv`. The camera's view-projection comes from the post-scene
+camera vote, asked for from the capture request until the report is written (`PostScene::WantCamera`; the last frame's
+when the current one has none, `RecentCameraViewProj`). The mouse pixel is taken to the ground at the lamps' lot ground
+height (`GroundProfileMath::GroundUnder`); among the active lot's listed lamps (the last frame's list of
+[Real-time outdoor lamps](../night-lighting/rt-outdoor-lamps.md)) the one nearest that point is the target. Points every
+0.25 m from 4 m behind the lamp to 12 m past it, along the line through the mouse point (so across the lot edge when the
+mouse is beyond it), each with: the lot it is on, its screen pixel and colour, the game's terrain map texel and the
+smoothed copy's (`LightmapSmooth::SampleChunk`, both read back once a frame per chunk), the dragged lamps stamped there,
+the nearest texel of the lot's story-0 floor map (packed and base, from the kept solve), and what the lamps within 25 m
+should give there by the terrain bake's law (with cones) and by the room solve's law (once). Then each nearby lamp's bake
+state (taken, colour, rect, cones, ever baked, excluded, stamp state), the chunks on the line with their versions, the
+law constants and the ground gains. Nothing is listed without an active lot (or with Lamp lighting on Classic).
+
 ### No automatic captures
 
 `OnPresent` clears the `Watch` state on every capture request and nothing arms it, so the floor-change follow-ups
@@ -166,8 +183,11 @@ files every capture gets and the cleanup.
 | `VS_<ptr>.txt`, `PS_<ptr>.txt` | `D3DDisassemble` output from `d3dcompiler_47.dll` (loaded once with `LoadLibraryA`); without it the report says `.bin (no disassembler)` |
 | `T<n>_<W>x<H>_<FMT>.bmp` | level 0 of each 2D texture, 32-bit BMP; RGB scaled by 1/peak when a channel exceeds 1 (FP targets) |
 | `T<n>_<W>x<H>_<FMT>_alpha.bmp` | the alpha channel as grey, when it carries data (for example room light maps) |
+| `Ground profile.csv` | the [ground light profile](#ground-light-profile)'s points: t, x, z, lot, pixel, screen, terrain map, smoothed map, stamps, floor map and its base, the bake's and the room's expected light |
 
-Texture dump rules (`DumpTexture`): cube and volume textures are listed but not saved; DEFAULT-pool textures are read
+Texture dump rules (`DumpTexture`): a cube texture is not saved, but its level 0's mean colour per face is written
+(`CubeMeans`: the sky cubes that ambient light and wet-road reflections read; DEFAULT pool only when a render target); volume
+textures are listed but not saved; DEFAULT-pool textures are read
 only when they are render targets (`GetRenderTargetData`); DXT1/3/5 are decoded (`DecodeDxt`) when not in DEFAULT pool
 and at most 2048x2048; INTZ, ATI2 and unknown formats are skipped. Texel formats: A8R8G8B8, X8R8G8B8, A16B16G16R16F,
 A32B32G32R32F, R32F, R16F, G16R16F, G32R32F, L8, A8L8, A8, A16B16G16R16, A2R10G10B10, R5G6B5.
@@ -246,7 +266,8 @@ Projection layout: row2 = A x row3 + (0, 0, 0, -near), A = 1.00008; near is abou
 | | `OnDraw<DrawFn>` | per-draw recording, occlusion copy, texture replacement |
 | | `RegisterHooks` / `UnregisterHooks` | draw hooks |
 | | `FinishCapture`, `StartCaptureFolder` | query collection, report, pick, comparison, capture folder |
-| | `DumpShader<S>`, `DumpTexture`, `DecodeDxt`, `Texel`, `HalfToFloat`, `WriteBmp` | dumps |
+| | `DumpShader<S>`, `DumpTexture`, `CubeMeans`, `DecodeDxt`, `Texel`, `HalfToFloat`, `WriteBmp` | dumps |
+| `ground_profile.cpp`, `ground_profile_math.h` | `GroundProfile::Write`; `GroundProfileMath::Invert4`, `Project`, `GroundUnder` | ground light profile, its camera math |
 | | `ReadScreenPixel`, `WriteComparison`, `ShownStories` | final colour, register diff, shown stories |
 | | `RenderUI` | status and replacement checkboxes (Developer page) |
 | `lot_light_bridge.cpp` | `DescribeDraw`, `DescribeObjectDraw`, `g_objDrawInfo` | the `mod:` line |

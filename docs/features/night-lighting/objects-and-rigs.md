@@ -296,12 +296,13 @@ classified shader is AddRef-pinned until shutdown so a freed address cannot inhe
   rX.xyz, rS.s, cD+4` whose last step writes or feeds COLOR0; c4, c8, c184 or c188 in all 588 SM3 VS).
 
 **Pixel shader** (`PatchObjectLampPs`, ps_3_0 only; everything read or inserted comes before the first flow-control
-instruction; TEXCOORD8 must not be read already; max input register < 9). Three shapes:
+instruction; TEXCOORD8 must not be read already; max input register < 9). Three shapes, and a variant of A:
 
 | Shape | Recognised by | Where the code goes |
 |---|---|---|
 | A | rig lamp chain ending `mad rD.xyz, rS.s, c7, rP`, then sky `mad rA.xyz, rCube, cK.s, rD` (rCube from a cube `texld` at the normal), optionally `add rX.xyz, rA, vC` (COLOR0 vertex lights; destination may differ, for example `add r4.xyz, r0, v0`); also the no-COLOR0 variant (PS_298DF5B8) and the 4-light specular variant (c0..c3 / c4..c7, PS_2D041628) | ground and lamp code before the cube `texld`; combine before the sky `mad` |
 | B | 4-light chain c0..c3 / c4..c7, no cube, no COLOR0 (8 Counters, Counters_PS_440) | ground and lamp code before the chain end (which may overwrite the normal); combine right after it. Normal = the unique register used in `dp3` with c1 and with c0/c9/c13 |
+| A2 | (only where neither A nor C takes the shader: wet and glossy variants) the vertex lights scaled and added to the rig chain's end before the sky, the single `mad rX.xyz, cK.s, vC, rP` (either factor order), then the single sky `mad rA.xyz, rCube, cK.s, rX` | as A, with `rD = rX`: the vertex lights are already in it, so the ground term keeps them |
 | C | no lamps in the PS: light = `max(vC, per-object light map, sky)` (32 Phong, for example Phong_PS_3095): the single `max rX.xyz, vC, rY` and the single cube `texld` | at the cube `texld` if it comes first (Phong_PS_3113 overwrites the normal before the max), else at the max; the max reads the new register instead of vC |
 
 For A and B the normal register must also be used with c1 (first lamp) and with the sun (c9, c0 or c13), and hold the same
@@ -322,7 +323,7 @@ Resources added (refused if `maxConst + 4 + 16 >= 224`, `maxTemp + 5 >= 32` or s
 
 Per pixel:
 
-1. Ground term `G = atlas(world.xz) x (0.5 + 0.5 N.y) x cB.x` in fallback mode; valid direct-pixel mode uses `sat(N.y)` instead of the wrapped factor. Shape A with COLOR0: `G -= vC` (vC is added after the
+1. Ground term `G = atlas(world.xz) x (0.5 + 0.5 N.y) x cB.x` in fallback mode; valid direct-pixel mode uses `sat(N.y)` instead of the wrapped factor. Shape A with COLOR0 (not A2): `G -= vC` (vC is added after the
    combine).
 2. Per-pixel lamps `Q = sum_k colour_k x sat(N.l_k) x sat(1 - d²/R_k²)²`, d = 3D distance from the pixel to the lamp
    head, `d² >= 1e-4`. The `1 - d²/R²` term is computed in two instructions because native D3D9 accepts one constant

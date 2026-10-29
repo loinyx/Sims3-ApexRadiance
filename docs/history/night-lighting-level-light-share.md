@@ -862,3 +862,46 @@ parts) and in no drawn lamp's part. Which path put it there was not found in the
 not refused a solve (21 kept solves over recolours, moves and switches, each logged in development builds with its drawn
 lamps' parts), and the stale light did not come back. The cause stays open.
 
+### 2026-10-28: a dragged lamp's light between floors, and a lot that was never covered
+
+**Context:** developer recordings of outdoor lamp drags with Lamp lighting Instant, on a house with several stories and
+on a 20 x 30 m lot.
+
+**Finding:**
+
+- A delta refused during an edit (too many batches to solve again, or too many lights changed) erased the story's kept
+  room-0 solve: Real-time outdoor lamps had no base for that story until the game's sliced solve ended, and each later
+  edit of the drag fell back to a full solve.
+- A picked-up or new lamp is listed at once only on its own story; the other stories' room 0s gather it at their next
+  solve, which a drag defers. The GPU drew a lamp only where it was listed, so the walls between floors lost it for the
+  whole drag and for up to 4 s after it.
+- A lamp counted as covered only once every story's list held it, so a picked-up lamp's drag took the game's room solve
+  until the consistency repair, about 4 s later: each step marked rooms, the per-pixel lamps of doors, windows and outdoor
+  objects kept their list until the release, and the furniture kept its old lights (5.8 s in one recording).
+- On the 20 x 30 m lot the rooms' own floor maps (256x128, 256x256) were smaller than the 512x256 working map. The maps
+  were refused, so the lot was never covered: room 0 was solved for the whole drag, its floor maps held until the
+  release, and the furniture kept its old lights for up to 22 s.
+- A relight round stops starting maps past about 2 ms of CPU. A floor map's under-floor share (about 1.6 ms) could go
+  first and send the next stories' wall atlases to later frames: rounds of up to 20 maps over 5 to 8 frames, the seam
+  between stories showing two lamp positions.
+
+**Outcome:** a lamp-only refusal keeps the record as the GPU's base, marked stale (`27d6232`); a lamp listed on one story
+is drawn on every story where it can be drawn, and the covered set reads the stories it is drawn on (`5603402`); a
+smaller own map is relit with its texels at their place (`ea376c0`); each round relights the walls first and the
+under-floor share stamps four texels at a time (`ddb9e44`). Results in
+[validation](../validation/night-lighting-level-light-share.md#latest-results).
+
+### 2026-10-29: the lot's maps relit at every move of a drag; floors count a lamp once
+
+**Context:** with the ground past the lot drawn on the GPU at every move of a drag
+([terrain relight](night-lighting-terrain-relight.md)), the lot's floors and walls were compared with the ground beside
+them.
+
+**Finding:** a relight started at most every 200 ms during a drag (`kDragRelightMs`) left the lot's floors and walls up
+to that far behind the ground beside them; a relight cost 0.3 to 1.1 ms of CPU and under 1 ms of GPU in a recording. The
+floor maps took room 0's list as it is, which holds an outdoor lamp twice, while the terrain bake counts it once under
+the grass, sidewalks and roads beside them: patios were up to 45% brighter than the ground next to them.
+
+**Outcome:** the throttle is removed: the maps are relit at every move, still within the 2 ms a frame. Floor maps count
+each lamp once (`91af563`).
+

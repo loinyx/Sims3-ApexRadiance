@@ -15,7 +15,10 @@ The feature is described in [features/night-lighting/floors.md](../features/nigh
 
 [`tools/floor_shade_check`](../../tools/floor_shade_check/README.md) (`run.ps1 -Precomp <Shaders_Win32.precomp>`, native
 D3D9) covers the floors' ground lamp shade patches, the instanced structure (fence) copies and the snowy lot passes over
-the game's precomp; the table generators above are not maintained in the repository.
+the game's precomp; the table generators above are not maintained in the repository. Since `91af563` it fails unless
+every winter floor pixel shader of the precomp takes `PatchFloor` (with the atlas, or gain only keeping the game's bytes
+and naming its lamp scale), and it draws the weather floors' map-into-scale layout on the device:
+`max(map, atlas x weight) x k` within 2 levels of 255.
 
 ## Latest results
 
@@ -47,3 +50,6 @@ the game's precomp; the table generators above are not maintained in the reposit
 - 2.15.3: a porch deck on a foundation beside a pillar at night, *Indoor light adds to the ground* on. **Expected:** no square steps of light and no dark square beside the pillar; a patio or path beside a lit window as bright as in 2.15.2.
 - Ground brightness on floors (the `scaleConst` gain) has no recorded in-game check.
 - ps_2_0 ExteriorFloors coverage (235 variants).
+- Weather variants of the winter floors (`91af563`): a patio or deck near a lamp at night, dry and in rain. **Expected:**
+  the same lamp light in both (before, rain drew the patio at the game's lamp scale, several times brighter). No run of
+  the updated `floor_shade_check` is recorded, nor how many weather variants lack a sampler for the ground lamp shade.

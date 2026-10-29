@@ -218,8 +218,11 @@ whole lamp term (lot map, atlas and the soft edge's target) by it; the snowy pas
 max, rM a temp the game's shader does not use (its highest + 1, at least r8; it was r6, which the game's snowy lot shader
 uses, so the masked copy was always refused and snowy lots drew with no mask or shade beside shaded world grass). The
 build runs on the shade worker (*Worker thread* below) and again only when the lot's place, its lamps (place, about 20%
-of light, in or out of the bake) or the outside walls, fences and crowns in its box changed, at most every 750 ms
-(`kShadeMinEveryMs`).
+of light, in or out of the bake) or the outside walls, fences and crowns in its box changed. The inputs are checked every
+100 ms while a fence group changed since the lot's last check or a lamp is dragged (`kShadeCheckMs`), else every 500 ms
+(the key reads every bake lamp and the walls' copy), and a lot is built at most every 250 ms
+(`kShadeMinEveryMs`; a build takes 1 to 30 ms on the worker), so a fence edit or a dragged lamp shows its shadow without
+half-second steps.
 It follows *Walls shade lamp light near the ground* (Lighting > Outside > Ground & Lots, `paredesSombreiamOChao`). Status (developer page): *Walls shade lamps on lot ground*. The lot's
 ground height is taken from room 0's matrix (`m13`, unverified as the ground under every texel).
 
@@ -257,18 +260,33 @@ read again every 60 s, dropped after 20 s unseen): the mesh's box over the draw'
 instance, its place (POSITION1) and turn (POSITION2 = cos, slope, sin; world = (px c - pz s, py + px k, px s + pz c) + place,
 VS_21C41B90 of F7 2026-10-13 11-50-47). Each piece becomes a wall along its longer side from its base to its top, so the
 shade follows each wall's own height (the lamp is tested over every wall's top). Posts (under 0.3 m both ways) and thick
-pieces (over 0.6 m deep: stairs, decks) are left out; a railing with gaps shades as a solid wall (unverified look).
-`ShadeWalls` gives the job both lists. A fence group's buffers are read without waiting for the GPU: a busy buffer is
-retried on a later draw and waited for after three busy answers. A group made again over the same fence is listed once.
+pieces (over 0.6 m deep: stairs, decks) are left out. `ShadeWalls` gives the job both lists. A fence group's buffers are
+read without waiting for the GPU: a busy buffer is retried on a later draw and waited for after three busy answers. The
+game draws a fence again as a new group when a piece is added or removed; 300 ms after a new group's first draw
+(`kFenceSwapMs`), the groups over the same place that are no longer drawn (nor in the last two frames) are dropped, so a removed piece loses its
+shadow at once. A fence type removed whole leaves no new group and goes with the 20 s sweep.
+
+**Mesh fences** (chain-link, lattices, railings). A fence whose pixel shader cuts its mesh out with the texture's alpha
+lets lamp light through its holes. `ShaderPatches::FindCutout` traces the shader's `texkill` back to its texture read
+(`mad rK, rA.w, rS, -cR` from `texld rA, vT, sN`, optionally tinted), and `FenceOpenShare` reads that texture once per
+texture (the first level at most 512 texels wide; DXT1, DXT3, DXT5 or A8R8G8B8, managed pool) and takes the share of its
+texels under half alpha (`FenceCutout::OpenShare`). The fence's walls pass that share (`GroundShadow::Wall::pass`): a
+ray through the wall's body keeps `pass` of its light, the same in the hard and soft tests. The share is fixed at half
+alpha because the game draws one fence with more than one alpha reference (150 and 50 in the log), which made the share
+depend on the draw that read it. The share covers the whole texture, so a texture with unused transparent texels around
+the fence's own area gives a share that is too high (*Open checks*).
 
 **Gates and fence gaps** (2.15.3). A fence gate is an object, not an instanced piece, so the fence line had a gap where
 it stands and a post's light passed through the closed gate. With the fence grid (`FenceGapsBuild`), every gap between
-two pieces in line (ends 0.4 to 2.5 m apart, facing each other) is found from either end and kept once by its key. An
-outdoor object drawn with its origin in a gap, at most 0.6 m off its line (a gate's origin is its tile's centre, half a
-tile off; `NoteGate`, from `DrawObjectLamp`, rig modes 1 and 2), fills it with a wall from the higher base to the lower
-top of the two pieces. A gate stays while its gap does; it goes only when it has not been drawn for 30 s while the fence
-on both sides was drawn in the last 2 s, so off screen it stays closed. Gaps narrower than 0.4 m (a post, pieces a few
-cm short) are always closed. Developer builds log the gaps, the gates and the objects near a gap that were not taken.
+two pieces in line (ends 0.4 to 2.5 m apart, facing each other) is found from either end and kept once by its key. An end
+covered by another piece in line joins it: brick fence meshes overlap by their posts (0.12 m), and each overlapped end
+listed a gap over the next piece. An outdoor object drawn with its origin in a gap, at most 0.6 m off its line (a gate's
+origin is its tile's centre, half a tile off; `NoteGate`, from `DrawObjectLamp`, rig modes 1 and 2), at least 0.2 m from
+the gap's ends (the fence's posts stand there) and no more than 0.5 m over the gap's base, fills it with a wall from the
+higher base to the lower top of the two pieces; no new gate is noted while a lamp is dragged, so a lamp carried through
+or over a gap does not close it. A gap between two mesh fences passes the lower of their open shares. A gate stays while
+its gap does; it goes only when it has not been drawn for 30 s while the fence on both sides was drawn in the last 2 s, so
+off screen it stays closed. Gaps narrower than 0.4 m (a post, pieces a few cm short) are always closed. Developer builds log the gaps, the gates and the objects near a gap that were not taken.
 The fence grid is built again whenever a fence group changes, which happens often while the camera pans; its piece
 lengths and end distances use `ApexMath::Hypot` ([`features/fast_math.h`](../../../features/fast_math.h)), a double
 `sqrtsd` of the exact squares, instead of `std::hypot`, whose x87 CRT path sets and restores the FPU control word on
@@ -285,7 +303,7 @@ is built again when its crowns change.
 **Worker thread** (2.13.1). The lot builds (`GroundShadow::ShadeJob`) and the chunk textures' texels and mips run on one
 worker thread (`ShadeWorker`, below-normal priority); the render thread makes the inputs, uploads and applies. Before, a
 build ran 1 ms a frame on the render thread and a shade could take seconds to show. At most two lots in flight, the lot
-nearest the camera first; a lot is checked again at most every 500 ms. Results carry an epoch; `ReleaseLotMasks` starts
+nearest the camera first; a lot's inputs are checked every 100 ms while they change, else every 500 ms. Results carry an epoch; `ReleaseLotMasks` starts
 a new one and also releases the chunks' shades. A chunk's build goes before the lots' builds waiting. A lot's finished
 shade is held, its old one still shown, while the chunks under its old and new shade are made with it; then its mask and
 their texels are applied in the same frame, at the first draw that reads either (`ShadeApply`). One lot is held at a

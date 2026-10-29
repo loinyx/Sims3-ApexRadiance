@@ -20,6 +20,7 @@ It must:
 | Scratch `test5.cpp` | Accepted and refused captured object shaders (the lists in the feature's *Shader coverage*) | Scratch | d3dcompiler, captures |
 | [`tools/terrain_lighting_test`](../../tools/terrain_lighting_test/README.md) `run_resource_checks.ps1` | Extracted production `DrawObjectLamp` and `DrawInstanced` against D3D9 fixtures: the strength written, native drawing when disabled, indoor objects excluded from the daytime outdoor balance, missing atlas stays native, state restoration | `powershell -File tools/terrain_lighting_test/run_resource_checks.ps1 [-OutDir <dir>]` | MSVC x86, native D3D9 |
 | same, `run.ps1 -WallCapture / -InstancedCapture` | `SurfaceLampGain` over night levels and gains; the captured instanced bench shader `PS_3019F738` (912 bytes, FNV `0xC0F5CCD7`) on the GPU: night and lamp-free sunlight pixels identical, daytime lamp term reduced, lamp attenuation separate from sunlight | `run.ps1 -Captures <session> -InstancedCapture <dir>` | same, captures |
+| same, `run.ps1` (`check.cpp`, since `91af563`) | Shape A2: a fixture pixel shader whose scaled vertex lights join the rig chain before the sky takes `PatchObjectLampPs`; drawn on the GPU, a black ground leaves the game's light, a ground over the vertex lights replaces them (0.5, not 0.4: they stay in the max), a ground under them leaves them | `run.ps1 -Captures <dir> -OutDir <dir>` | Native D3D9 GPU |
 | Scratch test008 checks | The uncapped indoor-object variant (`PatchIndoorBasis` without `kBasisCap`) over captured pixel shaders | Scratch | d3dcompiler, captures |
 
 The harnesses only read captures and print results; they do not attach to the game or install files.
@@ -99,6 +100,9 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
   objects, optional COLOR1 packing for the 34 full-input PS.
 - One lamp model for all surfaces (roofs, water and objects use `clamp(1.2 sqrt(range), 2, 25)` and `(1 - d²/R²)²`).
 - Sims under street lamps.
+- Shape A2 (`91af563`): wet or glossy outdoor objects near a lamp at night (the variants of the saved refusals).
+  **Expected:** they take the ground light like their dry variants; F7 shows the object path on them. Which objects
+  and weathers draw these variants is not identified, and no run of the fixture is recorded.
 - Whether the combined build's bake-matched law should be ported; it was fixed for a gate darker than vanilla
   ([history](../history/night-lighting-objects-and-rigs.md)).
 

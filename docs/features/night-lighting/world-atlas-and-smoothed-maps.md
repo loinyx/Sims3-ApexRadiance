@@ -77,7 +77,8 @@ registered and neither smoothed maps nor the atlas exist. This is why the atlas 
 - World terrain variants other than the recognised ones keep the blocky DXT5 look (and the game's daytime lamp factor).
   The daylight range adjustment applies only to the exact captured single-pass shader.
 - TerrainLow (distant terrain, DXT5 map in s3, census FF6760A8) is not smoothed.
-- A shader whose light-map read cannot be patched for native alpha keeps the game's unsmoothed map.
+- A shader whose light-map read cannot be patched for native alpha (the rain variants: all 16 samplers in use) keeps the
+  game's unsmoothed map, except at full night, where it draws the smoothed map without the walls' shade.
 
 ## Technical reference
 
@@ -119,7 +120,10 @@ chunk terrain geometry and world lamp-map uvs.
    the lamp sampler with full-mask temp destination, 2D declaration, no relative addressing, no flow control, free
    temp and sampler. `NativeTerrainSampler` binds the game's map on the spare sampler, cloning its 11 sampler states
    (filter, LOD, addressing, sRGB) and restoring them, and any partial change, afterwards. An unsupported layout or a
-   failed creation keeps the game's unsmoothed map. Cost: one texture read and one move per smoothed draw.
+   failed creation keeps the game's unsmoothed map, except at full night (night level 1): the alpha weighs only the sun,
+   black then, so the smoothed map is bound in the game's own shader for the draw, without the walls' shade (no sampler
+   for it). The rain variants take this path: they use all 16 samplers. Cost: one texture read and one
+   move per smoothed draw.
 3. **Lamp scale** (`TerrainConst`): constant k from `TerrainLampConst` (multi-pass: c3, squared). For night level n and
    ground gain g, `TerrainLightingPolicy::LampScale` writes `K w + (1 - n) g` (linear) or `sqrt(K^2 w + (1 - n) g)`
    (squared), `w = 1 + (g - 1) n`; at n = 1 exactly the previous night value. Skipped when n = 1 and g = 1.
@@ -139,7 +143,7 @@ chunk terrain geometry and world lamp-map uvs.
 
 The smoothed map of the game's current map is on screen in the frame the game's map changes, with the same look as the
 CPU path (expected within 1/255 per channel), no CPU readback, decode, upload or worker. Shaders:
-`shaders/lightmap_smooth_ps.hlsl` (the run-time copy `lightmap_smooth_hlsl.h` must stay identical); the eight entry
+`shaders/lightmap_smooth_ps.hlsl` (the run-time copy `lightmap_smooth_hlsl.h` must stay identical); the nine entry
 points are compiled at start-up on a background thread and `InitGpu` creates the objects.
 
 **Passes per chunk** (`BuildOne`; one `DrawPrimitiveUP` quad each, `D3DFVF_XYZRHW | D3DFVF_TEX1` with ps_3_0; every
@@ -150,6 +154,7 @@ the neighbours (blur 3 + B-spline 1); the CPU's `kBorder` = 6 only pads.
 | # | Entry point | Input -> target | Math (identical to `Process`) |
 |---|---|---|---|
 | 1 | `GatherPS` | the game's DXT5 maps -> RAW (264x264 float) | 9 quads, one per neighbour region (x: [0,4) left, [4,260) chunk, [260,264) right; same in z), each with that map on s0. A missing neighbour draws the centre map with coordinates outside [0, 1]: CLAMP = the CPU's clamp to the centre chunk (a missing diagonal clamps both axes). The GPU's DXT5 decoder replaces `DecodeDxt5` |
+| 1b | `StampPS` | RAW -> RAW2 (264x264 float) | Only for a chunk under a lamp dragged on the GPU ([terrain relight](terrain-relight.md#dragged-lamps-on-the-gpu)), up to 8 lamps: each lamp's ground light with the bake's law and cones (colour x sat(w / d²) x sat(sqrt(cos)) x cone factor, d² horizontal + 1e-4, flat ground at the lot's height) added to RGB, clamped at 1, alpha kept. Steps 2 and 4a then read RAW2, so the stamp is smoothed as the bake's light would be. The batch saves and restores PS c0 to c43, the stamp rows included |
 | 2 | `HBlurPS` | RAW -> HB (264x264 float) | 7-tap Gaussian (0.0366, 0.1112, 0.2167, 0.2710, ...) of (R, G, B, Y), Y = 0.299 R + 0.587 G + 0.114 B |
 | 3 | `VBlurPS` | HB -> CH (264x264 float) | Vertical 7 taps; ratio = RGB / Y clamped 0..4 (1 when Y <= 1e-4), faded to 1 by saturate(Y / 0.03) |
 | 4a | `HUpYAPS` | RAW -> HUYA (1024x264 float) | s = (x + 0.5)/4 - 0.5, f = floor(s): cubic B-spline of Y and A over P f+3..f+6 |
@@ -162,8 +167,8 @@ The split, the order of enlargement and of every sum follow the CPU code, so flo
 order / FMA (about 1e-7 relative). Constants: c0 (s0 size: 1/w, 1/h, w, h), c1 (s1 size, `VUpPS` only).
 
 **Formats and memory.** Chunk maps: 1024x1024 A8R8G8B8, 11 levels, `D3DUSAGE_RENDERTARGET`, `D3DPOOL_DEFAULT` (5.6 MB
-of video memory each). Scratch (shared, one chunk at a time): RAW, HB, CH (264x264) and HUYA, HUC (1024x264) in
-`A32B32G32R32F` (3 x 1.1 + 2 x 4.3 MB), else `A16B16G16R16F`, plus MIP[1..10] A8R8G8B8 (1.4 MB): about 13.4 MB (7.4 MB
+of video memory each). Scratch (shared, one chunk at a time): RAW, RAW2, HB, CH (264x264) and HUYA, HUC (1024x264) in
+`A32B32G32R32F` (4 x 1.1 + 2 x 4.3 MB), else `A16B16G16R16F`, plus MIP[1..10] A8R8G8B8 (1.4 MB): about 14.4 MB (7.9 MB
 with 16-bit floats). No system memory (the developer compare allocates about 20 MB briefly). Formats checked with
 `CheckDeviceFormat(D3DUSAGE_RENDERTARGET, D3DRTYPE_TEXTURE)`. `D3DUSAGE_AUTOGENMIPMAP` is not used: its filter is up to
 the driver (DXVK blits with linear filtering), not the integer `(sum + 2) / 4`.
@@ -174,7 +179,9 @@ the driver (DXVK blits with linear filtering), not the integer `(sum + 2) / 4`.
   not rebuilt: "same map"; the pending flag is read with a plain load before the locked exchange), (b) a new texture
   pointer in `Get` (also a new chunk), (c) the fallback hash checks at Present (`GpuHashCheck`: round robin 1 per
   frame, 4 chunks in view per frame while boosted; only lockable managed DXT5 maps, `gNoHash` for others). Each bumps
-  `gver`.
+  `gver`. Each re-render seen, a same map included, also bumps `rver`, the count a dragged lamp's stamp waits for
+  (`ChunkVersions`). A chunk under a lamp dragged on the GPU is built again when its stamp version `sver` changes
+  (`BumpStamps`, for the chunks a light rect touches, grown by 1 m), as for a new map.
 - `Get` builds a chunk whose version is not built yet before its draw. `Find` and `Atlas(forDraw)` run the same service
   first. The first service of a frame, and any later one after a new change, builds every chunk in view with its own
   change (cap 32), refills atlas cells from existing smoothed maps (cap 64, after growth or a failed copy), and spends
@@ -216,7 +223,7 @@ An exception inside turns the feature off (`g_failed`, released at the next Pres
 first draws after the reset rebuild every chunk.
 
 **Fallback.** `InitGpu` (first Present with the feature on, once per session) needs pixel shader 3.0, A8R8G8B8
-render-target textures, a float render-target format and the 8 shaders. Failure: log `[LightmapSmooth] GPU smoothing
+render-target textures, a float render-target format and the 9 shaders. Failure: log `[LightmapSmooth] GPU smoothing
 unavailable (why): using the CPU path`, status `CPU (GPU unavailable: why)`. Later scratch failure: `GPU smoothing
 failed (why): switching to the CPU path`. Success: `GPU smoothing ready (intermediates F, PS 3.0 N instruction slots)`
 and `Smoothing on the GPU`. A path switch (`ResolveMode`) calls `Clear()`.

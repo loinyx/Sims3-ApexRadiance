@@ -20,6 +20,8 @@ It must:
 | `queue_check_fixture.cpp` | Extracted `Attach`, `QueueSweep`, `OnPresent`, completion and refusal helpers and limits against fake native memory and timing: 3,000 randomized phase handoffs, an old completed bake awaiting consumption, nearest-first order, preserved batch ownership, non-mutating sweep refusals, native rebuild and render gates, rolling caps, terrain-owner changes | `run_queue_checks.ps1 -OutDir ...` | None |
 | `edit_dispatch_fixture.cpp` | The real `DecideEdit` guards up to the snapshot compare: both former early exits, the priority route, snapshot wait, automatic serialization, load/phase merge; optional `-Baseline` reproduces the old behaviour | `run_dispatch_checks.ps1` | None |
 | `resource_paths_fixture.cpp` | Resource restoration around the extracted draw paths | `run_resource_checks.ps1` | Native D3D9 GPU |
+| `tools/terrain_stamp_test` (`check.cpp`) | The game's bake pixel shader against the CPU law and its recognition (size, FNV-1a); `StampPS` against the game's shader on flat ground, 8 lamps in one pass against 8 additive 8-bit passes, chunk borders, the base kept, its GPU time; `BakeConePS` without cones against the game's shader and with spot and shaded-lamp cones against the CPU law times the cone factor; `StampPS` with cones against `BakeConePS` (T0 to T9) | `run.ps1 -Precomp <Shaders_Win32.precomp>` | MSVC x86, Direct3D 9 device, the game's precomp (read only) |
+| `tools/terrain_stamp_test` (`state_check.cpp`) | The dragged-lamp states of `terrain_stamps.cpp` against a simulated terrain: a drag across a chunk border, pauses, a slow drag, same-map re-renders, deletion, the GPU smoothing off, refused relights, a lamp dragged again while it returns, two lamps, a lamp never baked, a lamp picked up again mid-drag, a lamp out of the list for good (S1 to S12) | same `run.ps1` | MSVC x86 |
 
 These fixtures execute extracted production logic, not the TS3 engine or driver. They do not establish gameplay latency,
 FPS or absence of visible flicker.
@@ -28,6 +30,8 @@ FPS or absence of visible flicker.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-29 | `8d13e95` (a dragged lamp's ground light on the GPU) | Developer recordings of lot lamp drags, before and after | Local terrain relights during the drags: 127 (2,155 ms of CPU in 73 s) before, 7 (94 ms in 101 s) after | In game, backend not recorded |
+| 2026-10-28 | `373445c` (a dragged lot lamp reaches the ground past the lot edge) | Developer recording of a drag of a lamp Real-time outdoor lamps draws | The terrain relit 23 times in 20 s of drag (before: up to 7.3 s without a relight, and the ground could keep the lamp's old light after it was put down) | In game, backend not recorded |
 | 2026-10-04 | `92582b6` | Full terrain lighting suite (policy, cycle, GPU, resources) | 2,017,393 passed, 0 failed (2,003,751 GPU/policy + 13,642 resource) | Native D3D9 |
 | 2026-10-04 | `92582b6` | Edit dispatch fixture | Compiled; execution cancelled by the system, not run | None |
 | 2026-10-04 | after `92582b6` (priority follow-up) | Queue and resource fixtures | Passed; native D3D9 device creation failed, so GPU pixel checks were not run | None |
@@ -75,6 +79,12 @@ Lamp changes (night and Build-mode day preview; stationary and moving camera):
 
 ## Open checks
 
+- A lamp deleted within about 1.5 s after another lamp of the same type on the same lot was dropped from a GPU drag.
+  **Expected:** its ground light leaves the terrain. A pending change is matched to the dragged lamp by lot and type only
+  (`StampedChange`), so the deletion may be skipped as drawn on the GPU until something else relights that chunk.
+- Night Lighting turned on mid-session, then a lamp dragged. **Expected:** no old light beside the GPU stamp. Lamps the
+  game baked before the hook are not in `g_everBaked`, so the drag start does not relight their old place.
+
 - PR #2: endpoint rebuilds in Build mode preview, near-camera priority, final state after rapid reversals, fallback
   frequency and hitches; priority edits merged with an armed countdown; the edit dispatch fixture run.
 - Gameplay input-to-screen latency and FPS for every route; universal latency is not guaranteed (render gates, caps and
@@ -85,6 +95,15 @@ Lamp changes (night and Build-mode day preview; stationary and moving camera):
 - Interaction with the official Split-Level Lighting Fix: inferred from the decompile, not tested in game
   ([level light share](../features/night-lighting/level-light-share.md)).
 - Winter variants, unverified lot shader variants and DXVK.
+- Dragged lamps on the GPU (`8d13e95`, `91af563`), Lamp lighting Instant, at night: drag a lot lamp across the lot edge
+  and across a chunk border (x or z = k x 256), pause, go on, put it down; then drag a lamp new from the catalog, and
+  pick a lamp up again mid-drag. **Expected:** the grass and road past the lot follow the lamp at every move, with no
+  frame where its light is doubled or missing beyond a few frames when a chunk changes from the bake to the stamp and
+  back; once the lamp is still the ground keeps its light where it stands. `tools/terrain_stamp_test` runs these states
+  on a simulated terrain only; sloped ground (the stamp lights flat ground) is not covered.
+- Lamp cones in the bake (`91af563`): a spot and a shaded wall lamp near a lot border, after a terrain rebuild.
+  **Expected:** the pool under the shade continues past the border with no straight cut; no light on the ground behind
+  the spot; the log line `Terrain bake: lamps light the ground through their cones` once. Not yet checked in game.
 - Lamps the game switches on the load screen (`8172a29`): load a save at dusk or night with lamps on a timer.
   **Expected:** no lot's rooms solve at the lamp edit budget during or right after the load (no run of 36 ms frames),
   while a lamp switched by the player after the world is live still relights at once.

@@ -15,7 +15,7 @@ The feature is described in [features/night-lighting/snow.md](../features/night-
 |---|---|---|---|
 | [`tools/terrain_lighting_test/ground_scale_check.cpp`](../../tools/terrain_lighting_test/README.md) | Reads the captured `s7`/`s11` terrain shaders; linear versus squared classification; refusal of shared, mixed or saturated multipliers; native D3D9 readback comparing both multiplier equations at five day/night weights and eight brightness gains | `run_ground_scale_checks.ps1 -Captures <2026-10-04 15-33-55 session>` | D3D9 GPU, F7 capture |
 | `tools/terrain_lighting_test/check.cpp` | `LampScale` for single-pass and squared multi-pass factors: 101 night levels, 120 gains, 21 native scales, previous night rounding, invalid values; `SurfaceLampGain` (snow on objects) | `run.ps1 -Captures <dir> -OutDir <dir>` | D3D9 GPU for the shader parts |
-| `tools/floor_shade_check` | Snow, rug-cut snow and melting-snow boundary blending; native shader readback; unchanged interiors, malformed bytecode refusal | `run.ps1 -Precomp <Shaders_Win32.precomp>` | Native D3D9 |
+| `tools/floor_shade_check` | Snow, rug-cut snow and melting-snow boundary blending; native shader readback; unchanged interiors, malformed bytecode refusal; since `91af563`, snow on objects mixed with the fog (`PatchSnowCover` without the final `mul`): the atlas term after the light `mad`, drawn within 2 of 255 | `run.ps1 -Precomp <Shaders_Win32.precomp>` | Native D3D9 |
 | Offline captured-shader scans (combined build, not kept in `tools/`) | `IsSnowReliefVs`, `IsSnowCoverVs`, `PatchSnowBytecode` over all captured shaders | Not kept as a repository harness | Captured shader set |
 
 The ground scale harness only reads captures and prints results; it does not install files.
@@ -56,3 +56,6 @@ The ground scale harness only reads captures and prints results; it does not ins
 - 2.15.3: a snowy lot beside shaded world grass at night. **Expected:** no step at the lot border; lamp light through fence openings the same on snow and on grass.
 - *Ground brightness* on the squared terrain variant (PR #2): visual validation on snow and grass pending.
 - Daytime response on snow on objects (PR #2): gameplay appearance pending.
+- Fog-mixed snow on objects and the snow floor variants that test the map's alpha (`91af563`): snow on fence tops, props
+  and door sills near a lamp at night, in the weather that draws these variants (not identified in game). **Expected:**
+  the same ground light as the other snow variants. No run of the updated harness is recorded; not yet checked in game.
