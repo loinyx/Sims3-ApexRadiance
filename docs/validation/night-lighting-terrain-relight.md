@@ -79,6 +79,9 @@ Lamp changes (night and Build-mode day preview; stationary and moving camera):
 
 ## Open checks
 
+- A full terrain rebuild or a lot load. **Expected:** no object drawn just after it with wrong rig lamps. The cone rows
+  (c5..c7) of a bake that does not run inside the chunk render call are given back only at the game's next other pixel
+  shader; whether those bakes go through that call has not been checked.
 - A lamp deleted within about 1.5 s after another lamp of the same type on the same lot was dropped from a GPU drag.
   **Expected:** its ground light leaves the terrain. A pending change is matched to the dragged lamp by lot and type only
   (`StampedChange`), so the deletion may be skipped as drawn on the GPU until something else relights that chunk.

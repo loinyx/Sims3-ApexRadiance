@@ -1824,12 +1824,15 @@ struct FenceShare {
     float open = 0.0f;
 };
 std::unordered_map<IDirect3DBaseTexture9*, FenceShare> g_fenceOpen;
-// FNV-1a over four 64-byte spans of a locked level (start, thirds, end)
+// FNV-1a over seventeen 64-byte spans of a locked level (every sixteenth of it and its end: sparse fence textures that
+// differ only between four spans matched)
 uint32_t LevelSig(const uint8_t* p, size_t bytes) {
     uint32_t h = 2166136261u;
     const size_t span = std::min<size_t>(64, bytes);
-    for (size_t at : {size_t{0}, bytes / 3, bytes * 2 / 3, bytes - span})
+    for (size_t k = 0; k <= 16; k++) {
+        const size_t at = k < 16 ? bytes * k / 16 : bytes - span;
         for (size_t i = 0; i < span && at + i < bytes; i++) h = (h ^ p[at + i]) * 16777619u;
+    }
     return h;
 }
 float FenceOpenShare(IDirect3DDevice9* dev) {
