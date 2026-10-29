@@ -19,6 +19,7 @@
 #include <d3d9.h>
 #include <d3dcompiler.h>
 #include "../../features/ground_lamp_shadow.h"
+#include "../../features/fence_cutout.h"
 #include "../../features/lamp_cap_shadow.h"
 #include "../../features/shader_patches.h"
 #include "../../shaders/floor_atlas_table.h"
@@ -604,6 +605,58 @@ void Pixels(Gpu& gpu) {
     Release(white);
     Release(mask);
     std::printf("Floor shade pixels: %d checks\n", g_checks - before);
+}
+
+// ---- 6b. Mesh fences let the lamps' light through (GroundShadow::Wall::pass): the cutout of every precomp instanced pixel
+// shader with a texkill (ShaderPatches::FindCutout), the open share of a texture's alpha (FenceCutout::OpenShare) in each
+// format, and a wall's pass in the ground shade, hard and soft
+void FenceCutoutChecks(const std::vector<std::vector<DWORD>>& shaders) {
+    const int before = g_checks;
+    int kills = 0, found = 0, tinted = 0;
+    std::map<float, int> scales;
+    for (const auto& ps : shaders) {
+        const std::string text = Disasm(ps);
+        if (text.find("texkill") == std::string::npos) continue;
+        kills++;
+        ShaderPatches::Cutout c;
+        if (!ShaderPatches::FindCutout(ps, c)) continue;
+        found++;
+        tinted += c.tintConst >= 0;
+        scales[c.scale]++;
+        // the sampler found is the one a texld of the shader reads
+        Check(text.find(", s" + std::to_string(c.sampler) + "\n") != std::string::npos || text.find(", s" + std::to_string(c.sampler) + "\r") != std::string::npos,
+              "fence cutout: the sampler is one the shader reads");
+    }
+    Check(kills > 0 && found == kills, "fence cutout: every instanced pixel shader with a texkill has its cutout found");
+    std::printf("Fence cutouts: %d of %d instanced pixel shaders with a texkill (%d tinted); scales:", found, kills, tinted);
+    for (auto [s, n] : scales) std::printf(" %.0f x%d", s, n);
+    std::printf("\n");
+    // the open share: half the texels under the kept alpha, in each format
+    using FenceCutout::Fmt;
+    uint8_t argb[4 * 4 * 4] = {};
+    for (int i = 0; i < 16; i++) argb[i * 4 + 3] = i < 8 ? 0 : 255;
+    Check(std::fabs(FenceCutout::OpenShare(Fmt::Argb, argb, 16, 4, 4, 128) - 0.5f) < 1e-6f, "fence open share: A8R8G8B8, half transparent");
+    const uint8_t dxt1[8] = {0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00}; // c0 < c1: index 3 transparent; rows 0-1 index 3, rows 2-3 index 0
+    Check(std::fabs(FenceCutout::OpenShare(Fmt::Dxt1, dxt1, 8, 4, 4, 128) - 0.5f) < 1e-6f, "fence open share: DXT1, half transparent");
+    uint8_t dxt3[16] = {0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF};
+    Check(std::fabs(FenceCutout::OpenShare(Fmt::Dxt3, dxt3, 16, 4, 4, 128) - 0.5f) < 1e-6f, "fence open share: DXT3, half transparent");
+    uint8_t dxt5[16] = {255, 0}; // a0 > a1: index 0 = 255, index 1 = 0; texels 8..15 take index 1
+    for (int i = 8; i < 16; i++) {
+        const int bit = 16 + 3 * i;
+        dxt5[bit >> 3] |= static_cast<uint8_t>(1u << (bit & 7));
+    }
+    Check(std::fabs(FenceCutout::OpenShare(Fmt::Dxt5, dxt5, 16, 4, 4, 128) - 0.5f) < 1e-6f, "fence open share: DXT5, half transparent");
+    // the ground shade: a lamp 3 m up at the origin, a 2 m fence at x = 2, the point at x = 4 behind it
+    GroundShadow::Lamp L{0.0f, 3.0f, 0.0f, 1.0f};
+    GroundShadow::Wall w{2.0f, -5.0f, 2.0f, 5.0f, 0.0f, 2.0f};
+    Check(GroundShadow::Pass(L, 4.0f, 0.0f, 0.0f, w) == 0.0f, "fence pass: a solid wall blocks (hard)");
+    w.pass = 0.8f;
+    Check(std::fabs(GroundShadow::Pass(L, 4.0f, 0.0f, 0.0f, w) - 0.8f) < 1e-6f, "fence pass: a mesh fence lets its open share through (hard)");
+    w.free0 = w.free1 = true;
+    const float soft = GroundShadow::Pass(L, 4.0f, 0.0f, 0.0f, w, nullptr, true);
+    Check(std::fabs(soft - 0.8f) < 0.01f, "fence pass: and the same in the middle of its soft shadow");
+    Check(GroundShadow::Pass(L, 1.0f, 0.0f, 0.0f, w) == 1.0f, "fence pass: in front of the fence the light is whole");
+    std::printf("Fence pass: %d checks (soft middle %.3f)\n", g_checks - before, soft);
 }
 
 // ---- 4c. Snow on objects mixed with the fog in its last instructions (PatchSnowCover without the final "mul oC0.xyz"): the
@@ -1445,6 +1498,7 @@ int main(int argc, char** argv) {
     SnowCoverFogPixels(gpu);
     ExitPixels(gpu);
     Check(Instanced(gpu, InstancedPs(blobs, techs), "precomp") > 0, "instanced: the precomp has instanced shaders that take the shade");
+    FenceCutoutChecks(InstancedPs(blobs, techs));
     InstancedPixels(gpu);
     SnowLotPasses(gpu, blobs);
     for (int i = 2; i < argc; i++) {

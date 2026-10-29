@@ -364,6 +364,76 @@ bool HasWetSkyReflection(const std::vector<DWORD>& t) {
     return !ins.empty() && WetSkyReflection(t, ins) >= 0;
 }
 
+bool FindCutout(const std::vector<DWORD>& t, Cutout& out) {
+    out = Cutout{};
+    if (t.empty() || (t[0] & 0xFFFF0000u) != 0xFFFF0000u) return false;
+    const auto ins = Parse(t);
+    int kill = -1;
+    for (size_t i = 0; i < ins.size(); i++) {
+        if (IsFlow(ins[i].op)) return false;
+        if (ins[i].op == kTexkill) {
+            if (kill >= 0) return false;
+            kill = static_cast<int>(i);
+        }
+    }
+    if (kill < 0 || Type(t[ins[kill].at + 1]) != kTemp) return false;
+    // the last write of `mask` of temp r before instruction i
+    const auto writer = [&](DWORD r, int i, DWORD mask) {
+        for (int k = i - 1; k >= 0; k--) {
+            const Ins& x = ins[k];
+            if (x.op == kDcl || x.op == kDef || x.op == kDefI || x.op == kDefB || x.op == kTexkill || x.len == 0) continue;
+            if (IsReg(t[x.at + 1], kTemp, r) && (WMask(t[x.at + 1]) & mask)) return k;
+        }
+        return -1;
+    };
+    const auto defValue = [&](DWORD c, DWORD comp, float& v) {
+        for (const Ins& d : ins)
+            if (d.op == kDef && IsReg(t[d.at + 1], kConst, c)) {
+                std::memcpy(&v, &t[d.at + 2 + comp], 4);
+                return true;
+            }
+        return false;
+    };
+    const int m = writer(Num(t[ins[kill].at + 1]), kill, 0xF);
+    if (m < 0) return false;
+    const Ins& M = ins[m];
+    const DWORD a = t[M.at + 2], s = t[M.at + 3], r = M.len == 4 ? t[M.at + 4] : 0;
+    const auto replicate = [](DWORD z) { return z == 0x00 || z == 0x55 || z == 0xAA || z == 0xFF; };
+    if (M.op != kMad || M.len != 4 || Type(a) != kTemp || Swz(a) != kSwzW || (a & 0x0F000000u) || Type(r) != kConst || !replicate(Swz(r)) ||
+        (r & 0x0F000000u) != 0x01000000u /* -cR */ || !replicate(Swz(s)) || (s & 0x0F000000u))
+        return false;
+    // the scale: a def, or a temp last written by "mov rS.c, cX.s" from one
+    float scale = 0.0f;
+    if (Type(s) == kConst) {
+        if (!defValue(Num(s), Swz(s) & 3, scale)) return false;
+    } else if (Type(s) == kTemp) {
+        const int w = writer(Num(s), m, 1u << (Swz(s) & 3));
+        if (w < 0 || ins[w].op != kMov || Type(t[ins[w].at + 2]) != kConst || !replicate(Swz(t[ins[w].at + 2])) ||
+            !defValue(Num(t[ins[w].at + 2]), Swz(t[ins[w].at + 2]) & 3, scale))
+            return false;
+    } else
+        return false;
+    if (!(scale > 0.0f)) return false;
+    // the alpha: "texld rA, vT, sN", maybe tinted by "mul rA, rA, cT"
+    int w = writer(Num(a), m, 0x8);
+    if (w < 0) return false;
+    int tint = -1;
+    if (ins[w].op == kMul && Type(t[ins[w].at + 2]) == kTemp && Swz(t[ins[w].at + 2]) == kSwzXYZW && Type(t[ins[w].at + 3]) == kConst &&
+        Swz(t[ins[w].at + 3]) == kSwzXYZW) {
+        tint = static_cast<int>(Num(t[ins[w].at + 3]));
+        w = writer(Num(t[ins[w].at + 2]), w, 0x8);
+        if (w < 0) return false;
+    }
+    const Ins& X = ins[w];
+    if (X.op != kTexld || Type(t[X.at + 2]) != kInput || Type(t[X.at + 3]) != kSampler) return false;
+    out.sampler = static_cast<int>(Num(t[X.at + 3]));
+    out.tintConst = tint;
+    out.refConst = static_cast<int>(Num(r));
+    out.refComp = static_cast<int>(Swz(r) & 3);
+    out.scale = scale;
+    return true;
+}
+
 bool PatchRoad(std::vector<DWORD>& t, RoadPatch& out, bool shade) {
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto ins = Parse(t);

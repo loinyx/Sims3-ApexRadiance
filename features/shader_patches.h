@@ -32,6 +32,18 @@ bool PatchRoad(std::vector<DWORD>& t, RoadPatch& out, bool shade = false);
 // The wet road's sky reflection read (RoadPatch::reflectConst) in a pixel shader, patched by PatchRoad or not
 bool HasWetSkyReflection(const std::vector<DWORD>& t);
 
+// A mesh cut out by its texture's alpha (the instanced fences, railings, lattices): the single "texkill rK" whose rK comes
+// from "mad rK, rA.w, rS.s, -cR.s" (rS.s = a shader-defined scale, 255), rA from "texld rA, vT, sN", optionally tinted by
+// "mul rA, rA, cT" in between. A texel is kept where tex.a x cT.w x scale >= cR.s (FenceCutout).
+struct Cutout {
+    int sampler = -1;
+    int tintConst = -1; // -1: no tint
+    int refConst = -1;
+    int refComp = 0;    // the component of cR read
+    float scale = 0.0f;
+};
+bool FindCutout(const std::vector<DWORD>& t, Cutout& out);
+
 // World terrain chunks: an exclusive cK.x lamp-map multiplier, either linear or
 // squared through a scalar temporary. Unknown/shared layouts return -1.
 int LightMapScaleConst(const std::vector<DWORD>& t, DWORD sampler, bool* squared = nullptr);

@@ -50,6 +50,7 @@
 #include "room_map_padding.h"
 #include "level_light_share.h"
 #include "ground_lamp_shadow.h"
+#include "fence_cutout.h"
 #include "ground_light_gate.h"
 #include "unlit_rooms.h"
 #include "light_probe.h"
@@ -1308,6 +1309,7 @@ void FenceGapsBuild() {
             end(b, be, bx, bz);
             FenceGap gp;
             gp.w = {ax, az, bx, bz, std::max(a.y0, b.y0), std::min(a.y1, b.y1)};
+            gp.w.pass = std::min(a.pass, b.pass); // a gate between two mesh fences is one of them
             if (!(gp.w.y1 > gp.w.y0 + 0.3f)) continue;
             gp.key = GapKey(ax, az, bx, bz);
             // each gap once, whichever end found it (it is found from both: the walls' order follows a hash map)
@@ -1791,6 +1793,61 @@ bool FencePieceWalls(const BYTE* p, UINT count, UINT stride, const FenceLayout& 
     }
 }
 // DrawInstanced: the group being drawn (an instanced DrawIndexedPrimitive)
+// The share of lamp light the current fence draw lets through (GroundShadow::Wall::pass): the open share of the texture its
+// pixel shader cuts the mesh out with (ShaderPatches::FindCutout), at half alpha; 0 for a solid fence or one that
+// cannot be read. Per shader and per texture, read once (render thread).
+std::vector<DWORD> ShaderCode(IDirect3DPixelShader9* ps);
+float FenceOpenShare(IDirect3DDevice9* dev) {
+    static std::unordered_map<IDirect3DPixelShader9*, ShaderPatches::Cutout> s_cut;
+    static std::unordered_map<uint64_t, float> s_open;
+    if (!g_curPs) return 0.0f;
+    auto it = s_cut.find(g_curPs);
+    if (it == s_cut.end()) {
+        if (s_cut.size() > 1024) s_cut.clear();
+        ShaderPatches::Cutout c;
+        const std::vector<DWORD> code = ShaderCode(g_curPs);
+        if (code.empty() || !ShaderPatches::FindCutout(code, c)) c.sampler = -1;
+        it = s_cut.emplace(g_curPs, c).first;
+    }
+    const ShaderPatches::Cutout& c = it->second;
+    if (c.sampler < 0) return 0.0f;
+    // the texture's own coverage, at half alpha: the game draws one fence with alpha refs 150 and 50 (log), so the share at
+    // the draw's ref changed with the draw that read it (0.26 / 0.10) and the shade was made again each 60 s re-read
+    constexpr int keep = 128;
+    IDirect3DBaseTexture9* base = nullptr;
+    if (FAILED(D3D9Hooks::GetBoundTexture(dev, static_cast<DWORD>(c.sampler), &base)) || !base) return 0.0f;
+    float open = 0.0f;
+    if (base->GetType() == D3DRTYPE_TEXTURE) {
+        auto* tex = static_cast<IDirect3DTexture9*>(base);
+        D3DSURFACE_DESC d{};
+        UINT level = 0; // the first level of at most 512 texels across (one read per texture)
+        while (SUCCEEDED(tex->GetLevelDesc(level, &d)) && d.Width > 512 && level + 1 < tex->GetLevelCount()) level++;
+        const FenceCutout::Fmt f = d.Format == D3DFMT_DXT1 ? FenceCutout::Fmt::Dxt1 : d.Format == D3DFMT_DXT3 ? FenceCutout::Fmt::Dxt3
+                                 : d.Format == D3DFMT_DXT5 ? FenceCutout::Fmt::Dxt5 : FenceCutout::Fmt::Argb;
+        const bool readable = d.Pool != D3DPOOL_DEFAULT && (f != FenceCutout::Fmt::Argb || d.Format == D3DFMT_A8R8G8B8);
+        const uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(base)) << 20) ^ (static_cast<uint64_t>(keep) << 8) ^
+                             (static_cast<uint64_t>(d.Width) << 40) ^ static_cast<uint64_t>(d.Format);
+        if (const auto o = s_open.find(key); o != s_open.end()) open = o->second;
+        else if (readable) {
+            D3DLOCKED_RECT lr{};
+            if (SUCCEEDED(tex->LockRect(level, &lr, nullptr, D3DLOCK_READONLY))) {
+                open = FenceCutout::OpenShare(f, static_cast<const uint8_t*>(lr.pBits), lr.Pitch, static_cast<int>(d.Width), static_cast<int>(d.Height), keep);
+                tex->UnlockRect(level);
+            }
+            if (s_open.size() > 1024) s_open.clear();
+            s_open[key] = open;
+            static int s_logs = 0;
+            if (!kPublicBuild && s_logs < 100 && ++s_logs)
+                LOG_INFO(std::format("[GroundShadow] Mesh fence: shader {:08X} cuts out with s{} ({}x{} {}, level {}, texture {:08X}): open share {:.3f}",
+                                     reinterpret_cast<uintptr_t>(g_curPs), c.sampler, d.Width, d.Height,
+                                     f == FenceCutout::Fmt::Dxt1 ? "DXT1" : f == FenceCutout::Fmt::Dxt3 ? "DXT3" : f == FenceCutout::Fmt::Dxt5 ? "DXT5" : "ARGB", level,
+                                     reinterpret_cast<uintptr_t>(base), open));
+        }
+    }
+    base->Release();
+    return open;
+}
+
 void NoteFenceGroup(IDirect3DDevice9* dev) {
     if (!g_shadeOn || !g_curDipNum) return;
     UINT freq = 0;
@@ -1854,6 +1911,10 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
         ok = ok && SUCCEEDED(vb1->Lock(off1, count * stride1, &p1, D3DLOCK_READONLY)) && p1 && FencePieceWalls(static_cast<const BYTE*>(p1), count, stride1, L, lo, hi, fresh);
         if (p1) vb1->Unlock();
         if (!ok) fresh.walls.clear();
+        if (!fresh.walls.empty()) { // a mesh fence (chain-link, lattice) lets the lamps' light through its open share
+            const float pass = FenceOpenShare(dev);
+            for (GroundShadow::Wall& w : fresh.walls) w.pass = pass;
+        }
         g_fenceWalls.fetch_add(static_cast<long>(fresh.walls.size()) - static_cast<long>(g.walls.size()), std::memory_order_relaxed);
         const bool newGroup = g.walls.empty() && !fresh.walls.empty();
         if (fresh.walls.size() != g.walls.size() || (!fresh.walls.empty() && std::memcmp(fresh.walls.data(), g.walls.data(), fresh.walls.size() * sizeof(GroundShadow::Wall)) != 0))
@@ -1923,7 +1984,7 @@ uint64_t ShadeKey(const LotRect& r, int w, int h) {
         uint64_t sum = 0; // in any order (the copy's order follows a hash map)
         for (const GroundShadow::Wall& wl : walls) {
             uint64_t e = 1469598103934665603ull;
-            for (float f : {wl.x0, wl.z0, wl.x1, wl.z1, wl.y0, wl.y1}) e = (e ^ static_cast<uint64_t>(static_cast<int64_t>(std::lround(f * 100.0f)))) * 1099511628211ull;
+            for (float f : {wl.x0, wl.z0, wl.x1, wl.z1, wl.y0, wl.y1, wl.pass}) e = (e ^ static_cast<uint64_t>(static_cast<int64_t>(std::lround(f * 100.0f)))) * 1099511628211ull;
             // its openings and lower cells (a door placed or a grid read later builds the shade again)
             for (uint32_t k = 0; k < wl.pn && static_cast<uint64_t>(wl.p0) + k < patches.size(); k++) {
                 const WallOpenings::Patch& pt = patches[wl.p0 + k];

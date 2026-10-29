@@ -32,6 +32,8 @@ struct Wall {
     // its ends: free (no wall of the list goes on in line from it, MarkFreeEnds), so a soft shadow spreads past it; a joint
     // in line keeps the shadow whole across it
     bool free0 = false, free1 = false;
+    // the share of the light its body lets through: 0 a wall; a mesh fence the open share of its cutout texture
+    float pass = 0.0f;
 };
 struct Lamp {
     float x, y, z; // the head, world
@@ -180,7 +182,7 @@ inline float SoftPass(const Lamp& L, float groundY, const Wall& w, const WallOpe
                                          WallOpenings::AcrossOf(rx, py - L.y, rz, sx, sz));
     else
         inside = 1.0f - Penumbra::Cover((w.y1 - 0.02f) - y, rim.up); // the wall's top, softened
-    return std::clamp(1.0f - along * (1.0f - inside), 0.0f, 1.0f);
+    return std::clamp(1.0f - along * (1.0f - inside) * (1.0f - w.pass), 0.0f, 1.0f);
 }
 inline float Pass(const Lamp& L, float x, float groundY, float z, const Wall& w, const WallOpenings::Patch* patches = nullptr, bool soft = false) {
     const float ax = L.x, az = L.z;
@@ -199,11 +201,12 @@ inline float Pass(const Lamp& L, float x, float groundY, float z, const Wall& w,
     const float py = std::fabs(w.y0 - groundY) < 1.0f ? std::max(groundY, w.y0) : groundY;
     const float y = L.y + t * (py - L.y); // the ray's height where it crosses the wall line
     if (!(y > w.y0 - 0.05f && y < w.y1 - 0.02f)) return 1.0f;
-    if (!w.pn || !patches) return 0.0f;
+    if (!w.pn || !patches) return w.pass;
     // within the wall's band: its patches decide (the base margin above stays the wall's: a ray to the wall's own foot), with
     // the lamp's penumbra at the crossing (penumbra.h)
-    return WallOpenings::CrossPass(patches + w.p0, static_cast<int>(w.pn), ApexMath::Sqrt(sx * sx + sz * sz), std::min(w.y0, y) - 1.0f, w.y1, u, y, nullptr,
-                                   WallOpenings::RimAt(t, rx, py - L.y, rz, sx, sz, Penumbra::Radius()), WallOpenings::AcrossOf(rx, py - L.y, rz, sx, sz));
+    const float p = WallOpenings::CrossPass(patches + w.p0, static_cast<int>(w.pn), ApexMath::Sqrt(sx * sx + sz * sz), std::min(w.y0, y) - 1.0f, w.y1, u, y, nullptr,
+                                            WallOpenings::RimAt(t, rx, py - L.y, rz, sx, sz, Penumbra::Radius()), WallOpenings::AcrossOf(rx, py - L.y, rz, sx, sz));
+    return p + (1.0f - p) * w.pass;
 }
 inline bool Blocks(const Lamp& L, float x, float groundY, float z, const Wall& w, const WallOpenings::Patch* patches = nullptr) {
     return Pass(L, x, groundY, z, w, patches) <= 0.0f;
