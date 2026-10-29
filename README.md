@@ -1,224 +1,213 @@
-<p align="center">
-  <img src="docs/images/logo-256.png" width="120" alt="Apex Radiance logo">
-</p>
+<p align="center"><img src="docs/images/logo-256.png" width="140" alt="Apex Radiance logo"></p>
 
-<h1 align="center">Apex Radiance</h1>
+# Apex Radiance for The Sims 3
 
-<p align="center"><b>A lighting overhaul and graphics mod for The Sims 3</b></p>
+**A brighter world. A night worth looking at.**
 
-<p align="center">
-  <a href="https://github.com/loinyx/Sims3-ApexRadiance/releases/latest"><img alt="Latest version" src="https://img.shields.io/github/v/release/loinyx/Sims3-ApexRadiance?label=version&color=7F77DD"></a>
-  <a href="https://github.com/loinyx/Sims3-ApexRadiance/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/loinyx/Sims3-ApexRadiance/total?color=534AB7"></a>
-  <img alt="The Sims 3: Steam 1.67.2 or EA app 1.69" src="https://img.shields.io/badge/The%20Sims%203-Steam%201.67.2%20%7C%20EA%20app%201.69-534AB7">
-  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/github/license/loinyx/Sims3-ApexRadiance?color=534AB7"></a>
-</p>
+Bring your Sims' neighbourhoods to life after dark. Apex Radiance changes how The Sims 3 calculates lamp lighting, helping light reach nearby roads and terrain, walls, upper floors and objects. Streetlights can cast light across lot borders, balcony lights can reach the ground below, and supported water and snow respond to nearby lamps. The in-game menu also brings together lighting controls, colour adjustments, film-inspired filters, softer shadows, camera effects and optional performance tweaks.
 
-<p align="center">
-  <a href="https://github.com/loinyx/Sims3-ApexRadiance/releases/latest"><b>Download</b></a> ·
-  <a href="https://www.nexusmods.com/thesims3/mods/247">Nexus Mods</a> ·
-  <a href="#installation">Installation</a> ·
-  <a href="#compatibility">Compatibility</a> ·
-  <a href="#reporting-a-problem">Report a problem</a>
-</p>
+**Supported menu languages (21):** English, Portuguese, Spanish, French, German, Italian, Dutch, Swedish, Norwegian, Danish, Finnish, Czech, Polish, Hungarian, Greek, Russian, Japanese, Korean, Thai, Simplified Chinese and Traditional Chinese. Select a language in Settings or let the menu follow your Windows language.
 
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/82856ded-a8b7-4c23-a3e9-5c3ed1631b40" width="100%" alt="A community lot at night, before and after Apex Radiance">
-</p>
+**[Download the latest version](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest)** · [Installation](#installation) · [Release notes](https://github.com/loinyx/Sims3-ApexRadiance/releases) · [Report a problem](#reporting-a-problem)
 
-The Sims 3 lights its world in separate pieces: the ground, each lot, every floor of a house, the objects, the roofs and the water all get their lamp light from a different system. That is why street light stops in a straight line at the edge of a lot, why a balcony lamp leaves the porch below it dark, and why roofs and ponds turn black at night.
+## See the lighting
 
-Apex Radiance rebuilds that lighting so it works as one. A lamp lights everything around it, from the furniture in its room to the floors above and below, the lawn, the street and the lot next door. On top of that come graphics effects the game never had: ambient occlusion, water reflections, a banding fix, colour filters, edge smoothing and depth of field.
-
-## Lighting
+<div align="center">
 
 <table>
 <tr>
-<td width="50%"><img src="https://github.com/user-attachments/assets/c2fb9c34-8545-49f4-a3ac-a65e9086de86" width="100%" alt="A neighbourhood at night, before and after"></td>
-<td width="50%"><img src="https://github.com/user-attachments/assets/5902b18d-f29a-44b3-9cec-6817192344ac" width="100%" alt="A street lamp beside a lot, before and after"></td>
-</tr>
-<tr>
-<td align="center"><sub>Street and lot lamps light the whole neighbourhood</sub></td>
-<td align="center"><sub>Street light reaches the lawn and the houses past the lot edge</sub></td>
-</tr>
-</table>
-
-### Outside
-
-- Street lamps light the lots beside them, and lot lamps light the grass, roads and sidewalks past the lot edge.
-- The ground gets soft, round pools of light instead of the game's 1-metre blocks.
-- Walls, foundations, roofs, trees and garden objects take the light of the lamps near them.
-- Walls cast lamp shadows on the ground; chain-link fences, lattices and railings let the light through their gaps.
-- Rain, snow and wet roads keep the right lamp light, and the ground relights when the lamps come on at dusk.
-
-### Inside and between floors
-
-<table>
-<tr>
-<td width="55%" valign="top">
-
-- Indoor light reaches the floors above and below through stairwells and open floors, and stops at solid floors.
-- Lamps on balconies and upper floors light the ground below them.
-- Light passes through doors, windows and arches and fades across the next room.
-- Furniture, stairs, railings and columns light up evenly, and walls meet between floors without seams.
-
+<td>
+<img src="https://github.com/user-attachments/assets/c2fb9c34-8545-49f4-a3ac-a65e9086de86" width="100%">
 </td>
-<td width="45%" valign="top"><img src="https://github.com/user-attachments/assets/3b748f76-115e-414e-831c-c55fc2e14134" width="100%" alt="Rooms of a building at night, before and after"><br><sub>Light fills the rooms and floors of a building</sub></td>
-</tr>
-</table>
-
-### While you build
-
-Move, add or delete a lamp in Build mode and the light follows right away: walls, floors, furniture and the ground update while you drag. This runs on your graphics card (**Lamp updates: Instant**, the default); on a weaker PC, **Classic** relights once you put the lamp down.
-
-### Make it your own
-
-Pick a lighting balance (**Subtle**, **Soft**, **Natural** or your own), then fine-tune the ground, walls, roofs, objects, light between floors and rooms at night. The corrections to the game's own lighting bugs sit on a separate **Game fixes** tab, on by default.
-
-[How the lighting works, in detail →](docs/features/night-lighting/README.md)
-
-## Water reflections
-
-<table>
-<tr>
-<td width="45%" valign="top"><img src="https://github.com/user-attachments/assets/3d287975-5231-475e-9cb8-37342915c7db" width="100%" alt="A lake at night, before and after"><br><sub>Trees on the shore reflected in the lake</sub></td>
-<td width="55%" valign="top">
-
-In the base game, ponds and lakes reflect only a fixed picture of the sky, so they never show what stands around them.
-
-With Apex Radiance they mirror the trees, houses and lamps along their shore, by day and by night, including the water of Twinbrook, Bridgeport and Moonlight Falls. At night, lamps near the water also add glints and a soft glow on its surface.
-
-Water Reflections needs Depth Blur or Ambient Occlusion turned on.
-
+<td>
+<img src="https://github.com/user-attachments/assets/3d287975-5231-475e-9cb8-37342915c7db" width="100%">
 </td>
 </tr>
+
+<tr>
+<td>
+<img src="https://github.com/user-attachments/assets/3b748f76-115e-414e-831c-c55fc2e14134" width="100%">
+</td>
+<td>
+<img src="https://github.com/user-attachments/assets/5902b18d-f29a-44b3-9cec-6817192344ac" width="100%">
+</td>
+</tr>
+
+<tr>
+<td colspan="2">
+<img src="https://github.com/user-attachments/assets/82856ded-a8b7-4c23-a3e9-5c3ed1631b40" width="100%">
+</td>
+</tr>
+
 </table>
 
-## Ambient Occlusion
+</div>
 
-The Sims 3 has no ambient occlusion, so furniture looks like it floats and rooms look flat. Apex Radiance adds soft shadows where surfaces meet: under furniture, in room corners, where walls touch the floor and around houses and trees.
+## Lighting that reaches your world
 
-- The picture stays steady when the camera is still, and lamp-lit surfaces keep their light and colour.
-- Five quality levels, and it also works in map view.
-- **Sim Occlusion** recognises Sims, custom content included, and gives their body and hair a lighter shade of their own, so faces never look dirty.
+Lighting is the main focus of Apex Radiance. Streetlights can spill over lot borders, lot lamps can brighten nearby roads and terrain, and lights around the house can reach walls, upper floors and outdoor details.
 
-## Banding Fix
+### Streets, terrain and lots
 
-The game draws its world with only 256 shades per colour, so the soft pool of light a lamp throws on a wall breaks into rings, most of all in dark scenes and on OLED screens. Banding Fix draws the 3D world with far more shades and finishes it with a fine, invisible grain, so light fades smoothly across walls, floors, shadows and skies.
+- **Light across lot borders:** street lamps illuminate nearby lots, and lot lamps contribute to the surrounding terrain and roads.
+- **Smoother ground lighting:** grass, sidewalks, streets and lot floors receive softer pools of lamp light.
+- **Lamps on upper floors:** balcony and terrace lamps can illuminate the ground below.
+- **Weather and snow:** lighting corrections cover snowy surfaces and rain/snow variants; walked-on sidewalks remain visible through snow.
 
-## Color, filters and LUTs
+### Houses, rooms and objects
 
-**Filters never touch the game's interface.** They apply to the 3D world only, so pie menus, the HUD, tooltips and plumbobs keep their own colours and stay sharp.
+- **Walls, foundations and roofs:** exterior surfaces receive nearby lamp light, including walls above ground-floor lamps and surfaces around balconies.
+- **Openings and enclosed spaces:** walls block outdoor lamp light, while the lighting fix accounts for doors and windows around enclosed yards.
+- **Light between stories:** indoor lamps illuminate through stairwells and open floors, while solid floors and walls block their light.
+- **Objects and foliage:** nearby lamp light brings gardens, fences, furniture and outdoor details into the scene.
+- **Windows:** outward-facing window surfaces can receive the light of outdoor lamps.
 
-The Color page goes from small corrections (brightness, contrast, saturation, temperature, tones, a six-colour mixer, clarity, vignette) to a completely new look. Turn on as many of its 24 filters as you like and they add up:
+### Make the night your own
 
-| Family | Filters |
-|---|---|
-| Film looks | Technicolor 1 and 2, DPX Cineon, Vintage, Cross-process, Filmic pass, Black and white, Tint |
-| Color and mood | Colorfulness, Night Mode, Levels |
-| Light and detail | Auto exposure, Adaptive sharpening, Glow, Halation, Dreamy, Fake HDR |
-| Camera | Emphasize, Tilt-shift, Prism, Film grain |
-| Retro and style | 3DFX, CRT |
-| Accessibility | Color-blind mode (red, green or blue colour blindness) |
+Pick **Subtle**, **Soft** or **Natural**, then adjust how bright the ground, roads, objects, buildings and other surfaces should be. The Lighting page also lets you change lamp colour, moonlight and the background light in unlit rooms.
 
-**LUTs** give the game a ready-made colour grade, the same kind photographers and film editors use. Put a 3D CUBE file (the format Photoshop, DaVinci Resolve and most LUT packs export) or a PNG strip (the layout ReShade LUTs use) in the Apex `LUTs` folder, pick it and set how strongly it applies.
+[Read how the lighting works →](docs/features/night-lighting/README.md)
 
-Every filter has its own switch and keyboard shortcut (right-click it), and with the menu open, holding **B** shows the picture without your colour changes.
+## Water, reflections and snow
 
-## Edge Smoothing and Depth Blur
+At night, lamps can light up ponds and lakes, and supported shorelines can reflect nearby trees and buildings. Reflections on world water are also restored in Twinbrook, Bridgeport and Moonlight Falls. On snowy lots, walked-on sidewalks remain visible. The **Water & Snow** page keeps these controls together.
 
-**Neither touches the game's interface.** Both run before the game draws it, so pie menus, tooltips, plumbobs and the HUD stay sharp.
+## Colour and image effects
 
-- **Edge Smoothing** removes the jagged edges of roofs, fences, walls and furniture with FXAA (lighter) or SMAA (cleaner long edges), plus optional texture sharpening. Turn off the game's own Edge Smoothing under **Options > Graphics** when you use it.
-- **Depth Blur** softens the distant background like a camera lens. Lamps in the background stay bright, and the blur fades out in map view.
+Use the Color page to adjust the image to your taste. Its controls are grouped by what they affect, and you can switch each group off without losing its saved settings.
 
-## Performance
+### Color
 
-Fifteen optional switches make the game's heaviest work faster or spread it over several frames, without changing how it looks:
+Start from **Overview** to see the image groups at a glance. The main Image switch turns off all colour adjustments together; each group's switch can also be used on its own, without erasing its saved values.
 
-- faster file and object lookups (the game searches around 290 files for each thing it loads);
-- room lights that settle sooner, and lot and wall updates spread out while the camera moves;
-- faster texture and cache compression, and faster sorting in Create a Sim;
-- lighter memory handling, window redraws and scripts.
+- **Basic:** brightness, contrast, saturation, temperature and sharpness.
+- **Tones:** control midtones, shadows, highlights and black levels.
+- **Color:** shape the mood with split tones, a six-colour mixer and a vignette.
+- **Detail:** adjust clarity, sharpness and darker corners.
+- **Filters:** layer 25 looks such as Technicolor, DPX Cineon, Vintage, Cross-process, black and white, Night Mode, LUT, Auto exposure, Glow, Halation, Film grain, CRT and colour-blind mode. Each has a separate switch, strength and expandable controls.
 
-**Room to save** keeps a block of memory free and hands it back right before each save, which makes Error 12 less likely (no mod can rule it out). **Lot Streaming**, experimental and off by default, keeps lots detailed farther away.
+Filters are off by default. To set a shortcut, right-click a filter and choose the key combination you want to use to toggle it. Shortcuts are never assigned automatically; once set, yours appears beside the filter. The dedicated **LUTs** area loads PNG and 3D CUBE LUTs from the Apex `LUTs` folder, with an adjustable strength.
 
-[All performance options →](docs/features/performance/README.md)
+Use the before/after controls to compare your adjustments with the game's original image.
 
-## Presets and shortcuts
+### Presets and sharing
 
-Start from a built-in preset (**Performance**, **Balanced** or **Quality**), save your own looks, and share them as a TOML file or a ZIP with their LUT. A preset shows **Applied** while your settings still match it.
+The **Presets** sidebar page keeps your saved looks above the built-in Apex presets. Save your current adjustments, choose which settings to apply, or share a preset as TOML. A preset with a selected LUT exports as one ZIP containing both files; Apex imports that ZIP directly. Existing TOML presets remain supported.
 
-| Key | What it does |
-|---|---|
-| **Ctrl+Shift+F11** | Open the menu, once a world has loaded |
-| **Ctrl+Shift+F10** | Turn Apex's effects off and on, to compare with the game |
-| **Ctrl+Shift+F9** | Refresh the lighting |
-| **F8** | Save a screenshot with Apex's effects |
-| **F10** | Hide the game interface |
+[More about presets →](docs/features/presets.md)
 
-The menu is in 21 languages and follows your Windows language until you pick one in Settings. Click its version number to see **What's new**.
+### Ambient Occlusion and Sims
+
+Ambient Occlusion adds soft contact shadows under furniture, in corners, around buildings and where surfaces meet. Choose one of five quality levels, then adjust its strength and distance. AO also works in map view.
+
+**Sim Occlusion** has separate controls for the body and hair. You can limit how dark the added shading gets and enable support for compatible transparent hair, softening shadows on Sims while keeping the room's contact shadows.
+
+### Depth Blur, Edge Smoothing and Banding Fix
+
+- **Depth Blur** softens scenery outside the area you focus on. Adjust the focus to get the look you want; the effect fades out in map view.
+- **Edge Smoothing** offers FXAA and SMAA to clean up jagged roof, fence, wall and furniture edges. Optional sharpening restores fine texture detail.
+- **Banding Fix** helps smooth visible steps in gradual light and shadow, with an optional setting for smoother sky gradients.
+
+For the best compatibility with depth-based effects, turn off the game's **Edge Smoothing** under **Options > Graphics** and use the Apex version. The menu will point out combinations that may need attention.
+
+## Performance options
+
+If small pauses are interrupting play, Apex includes **15 optional performance settings** you can try. Each one can be toggled on its own:
+
+- **Camera and lighting:** room lights settle sooner; lot and wall updates are spread out while the camera moves; and new objects are processed in smaller batches.
+- **Files and objects:** cut down on repeated searches for game files, missing files and objects, and build file lists faster.
+- **Textures and Sims:** speed up texture and cache compression, as well as sorting while Sims are being created.
+- **Memory:** improve memory handling and use **Room to save**, which reserves space for a save when memory runs low.
+- **Game and scripts:** reduce unnecessary window redraws and speed up selected script operations.
+
+Every setting is optional. Keep the ones that help on your system and turn off any that don't.
+
+Experimental options are clearly marked. **Lot Streaming** is off by default; if you turn it on, you can adjust how far away lots stay detailed and how they appear as you move.
+
+[Explore the performance options →](docs/features/performance/README.md)
+
+## Screenshots and the in-game menu
+
+Once a world has loaded, press **Ctrl+Shift+F11** to open the menu. From there, you can search settings, save or apply profiles, choose which profile sections to use, undo a change, or restore a setting to its default. Hold **Alt** over the menu to see the game behind it, or click the version number to read **What's new**.
+
+Press **F8** to save a screenshot with Apex effects applied. You can choose whether the game's interface appears in the picture and where the file is saved. Press **F10** to hide the interface while you play.
 
 ## Installation
 
-1. Install an ASI loader in `The Sims 3\Game\Bin`, such as [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader).
-2. Close the game, then copy `ApexRadiance.asi` from the [latest release](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest) into the same folder, replacing the old file when you update.
-3. Load a world and press **Ctrl+Shift+F11**.
+### Requirements
 
-Apex Radiance supports Steam **1.67.2** (`TS3W.exe`) and EA app **1.69** (`TS3.exe`). Updating keeps your settings, which live in `Documents\Electronic Arts\The Sims 3\Apex Radiance\`.
+- The Sims 3 for Windows: Steam **1.67.2** (`TS3W.exe`) or EA app **1.69** (`TS3.exe`). The menu reports when a feature is unavailable on your game version.
+- An ASI loader in the game's `Game\Bin` folder, such as [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader).
 
-<details>
-<summary><b>Steam Deck and Linux</b></summary>
+### Install or update
 
-Apex runs through Proton with the same file. Add the loader's DLL override to the game's launch options in Steam, as described in [Steam Deck and Proton](docs/features/steam-deck.md#installing-on-steam-deck-or-linux).
+1. Close the game and launcher.
+2. Download `ApexRadiance.asi` from the [latest release](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest).
+3. Copy it into `The Sims 3\Game\Bin\`, replacing the previous Apex Radiance file when updating.
+4. Load a world and press **Ctrl+Shift+F11** to open the menu.
 
-</details>
+Updating Apex won't remove your settings. Settings, profiles, LUTs and reports are stored here:
 
-<details>
-<summary><b>Something looks broken after a change</b></summary>
+```text
+Documents\Electronic Arts\The Sims 3\Apex Radiance\
+```
 
-**Settings → Compatibility → Recovery → Restart Apex** rebuilds the image effects without touching your settings. It does not uninstall the mod or reset the lighting.
+The main settings file is `ApexRadiance.toml`. Saved presets remain in `Profiles`, and color tables in `LUTs`; the folders stay separate so older versions can still find your files.
 
-</details>
+**Settings → Compatibility → Recovery → Restart Apex** recreates the image-effect resources while keeping your settings. It does not uninstall the mod or reset lighting hooks. Close the game before replacing or removing the ASI.
 
-<details>
-<summary><b>Coming from an older combined build</b></summary>
-
-Remove the old combined ASI or `S3SSApex.asi` from `Game\Bin`, and keep the official standalone `Sims3SettingsSetter.asi` if you use it. Apex imports your old settings on its first start.
-
-</details>
+**Upgrading from an older combined build?** Remove the old combined ASI or `S3SSApex.asi` from `Game\Bin`. Keep the official standalone `Sims3SettingsSetter.asi` if you use it. Apex imports recognised legacy settings on its first start.
 
 ## Compatibility
 
-Recommended together with Apex Radiance:
+- **Sims3SettingsSetter:** works alongside Apex. Apex detects its active Split-Level Lighting Fix and avoids applying the same fix twice.
+- **Sims 3 Performance Patch:** can run alongside Apex; the mods target different game operations.
+- **DXVK:** supported, though results can vary between graphics backends. If you report a visual issue, let us know which backend you use.
 
-- **[Sims3SettingsSetter](https://github.com/sims3fiend/Sims3SettingsSetter/releases)**: Apex detects its Split-Level Lighting Fix and doesn't apply it twice. Don't use its experimental features together with Apex.
-- **[Sims 3 Modernization](https://github.com/rodneypantonial/sims3-modernization/releases)**: Room to save recognises its save hook and still prepares the save before it.
-- **[Sims 3 Performance Patch](https://www.nexusmods.com/thesims3/mods/235)**: with Sims 3 Modernization, turn off its `ShortWaitSpin` and `ThreadStackDiet`; Apex's **Settings > Compatibility** offers to do it for you.
-- **[DXVK](https://github.com/doitsujin/dxvk/releases)**: supported, though results can vary between graphics backends.
+Bounded compression storage and save preparation release eligible idle buffers while protecting pending writes.
+These safeguards do not guarantee prevention of Error 12 or a particular FPS improvement.
 
 ## Reporting a problem
 
-Open **Report a problem** in the Apex menu to save a report, record a short clip or capture the lighting on a surface. Zip its folder from `Documents\Electronic Arts\The Sims 3\Apex Radiance\Captures\` and attach it to a [GitHub issue](https://github.com/loinyx/Sims3-ApexRadiance/issues) or the Bugs tab on [Nexus Mods](https://www.nexusmods.com/thesims3/mods/247), with what happened, how to make it happen again, your game version and whether you use DXVK.
+If something looks wrong, open **Report a problem** in the Apex menu. You can save a report, record a short reproduction, capture lighting on a surface, or save a lighting snapshot. Add a title and description to a capture if you like.
+
+Reports are stored in dated folders under:
+
+```text
+Documents\Electronic Arts\The Sims 3\Apex Radiance\Captures\
+```
+
+Zip the folder for the issue and attach it to a [GitHub issue](https://github.com/loinyx/Sims3-ApexRadiance/issues) or post it in the mod's Bugs tab on Nexus Mods. Please describe what happened, how to reproduce it, your game version, and whether you use DXVK or other graphics mods.
+
+## Documentation and development
+
+The [documentation index](docs/README.md) covers feature settings, compatibility, engine research and validation. [Release notes](docs/releases/README.md) describe changes between versions.
+
+<details>
+<summary>Building from source</summary>
+
+Use Visual Studio 2022 Build Tools (v143), C++20 and the x86 Release target. The project uses a static CRT and vcpkg's `x86-windows-static` dependencies: Dear ImGui, Microsoft Detours and toml++.
+
+Follow the [build workflow](docs/workflow.md#1-build) for dependency paths, public/developer flavours and validation requirements.
+
+</details>
 
 ## Credits
 
 - **Apex Radiance** by [@loinyx](https://github.com/loinyx).
-- Sims3SettingsSetter by sims3fiend.
+- Sims3SettingsSetter by sims3fiend
 - Every-Story Ground Light (lamps on upper floors lighting the ground) uses a technique from [Arro](https://arro-now.tumblr.com/)'s Split-Level Lighting Fix.
 - Lot Streaming and the daytime bloom fixes: research and code by [idavidveiga](https://github.com/idavidveiga).
 - Edge Smoothing's FXAA mode follows FXAA 3.11 by Timothy Lottes (NVIDIA).
-- Scene update safety for effects and animal fur by [@rodneypantonial](https://github.com/rodneypantonial) ([PR #38](https://github.com/loinyx/Sims3-ApexRadiance/pull/38)).
 - Thanks to @boringbones for testing every build.
+- Third-party code: [Dear ImGui](https://github.com/ocornut/imgui) (MIT), [Microsoft Detours](https://github.com/microsoft/Detours) (MIT), [toml++](https://github.com/marzer/tomlplusplus) (MIT), [SMAA](https://github.com/iryoku/smaa) by Jorge Jimenez et al. (see `third_party/smaa/LICENSE.txt`), the texture sharpening after [AMD FidelityFX CAS](https://github.com/GPUOpen-Effects/FidelityFX-CAS) (MIT), [Lucide](https://lucide.dev) icons (ISC, see `third_party/lucide/LICENSE`).
 
-<details>
-<summary><b>Third-party code, documentation and building from source</b></summary>
+### Contributors
 
-Third-party code: [Dear ImGui](https://github.com/ocornut/imgui) (MIT), [Microsoft Detours](https://github.com/microsoft/Detours) (MIT), [toml++](https://github.com/marzer/tomlplusplus) (MIT), [SMAA](https://github.com/iryoku/smaa) by Jorge Jimenez et al. (see `third_party/smaa/LICENSE.txt`), the texture sharpening after [AMD FidelityFX CAS](https://github.com/GPUOpen-Effects/FidelityFX-CAS) (MIT), [Lucide](https://lucide.dev) icons (ISC, see `third_party/lucide/LICENSE`).
+- [@rodneypantonial](https://github.com/rodneypantonial): scene update safety for effects and animal fur ([PR #38](https://github.com/loinyx/Sims3-ApexRadiance/pull/38)).
 
-The [documentation](docs/README.md) explains every feature, its settings and how it was tested; the [release notes](docs/releases/README.md) list the changes in each version.
+The Sims is a trademark of Electronic Arts Inc. This is a fan-made mod, not affiliated with or endorsed by Electronic Arts.
 
-To build, use Visual Studio 2022 Build Tools (v143), C++20 and the x86 Release target, with a static CRT and vcpkg's `x86-windows-static` dependencies (Dear ImGui, Microsoft Detours, toml++). The [build workflow](docs/workflow.md#1-build) has the details.
+## License
 
-</details>
-
-The Sims is a trademark of Electronic Arts Inc. This is a fan-made mod, not affiliated with or endorsed by Electronic Arts. Licensed under [MIT](LICENSE).
+[MIT](LICENSE)
