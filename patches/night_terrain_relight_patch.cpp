@@ -281,6 +281,10 @@ __declspec(naked) void LotPassStub() {
 }
 int g_stuckFrames = 0;
 Clock::time_point g_lastStuckKick{};
+// the last lamp change the local relight took (TryLocal): a drag's rebuild countdown is left idle only within
+// kDragIdleProof of one, so a drag whose moves the local path never sees still gets the game's own rebuild
+Clock::time_point g_localRelitAt{};
+constexpr auto kDragIdleProof = std::chrono::milliseconds(3000);
 int g_armsAtLastStuckKick = 0;
 int g_lastLampEdits = 0;
 int g_lastUserEdits = 0;
@@ -1236,6 +1240,7 @@ int TryLocal(Clock::time_point now, const std::vector<uint64_t>& newLots, const 
     }
     // the "lights changed" fallback must not fire again for the same arms
     g_lastStuckKick = now;
+    g_localRelitAt = now;
     g_armsAtLastStuckKick = g_lotLampArms.load();
     (user ? g_decLocalUser : g_decLocalAuto)++;
     FinishEdit(std::format("{} ({}): relit locally ({}; {})", g_editReason, EditKind(), diffText, b.what));
@@ -1536,8 +1541,12 @@ void OnPresent() {
         static bool s_logged = false;
         if (DragLite::Engaged()) s_dragArmUntil = now + std::chrono::milliseconds(2000);
         else if (now >= s_dragArmUntil) s_logged = false;
+        // (only while the local path has relit a lamp change lately: a drag of a lamp the GPU draws rereads the list every
+        // 33 ms and its moves could go unseen, and the countdown it armed was left idle, so the ground kept the lamp's
+        // old light, a recording: 13 s of drag, no local relight)
         if (TesterToggles::dragTerrainIdle.load(std::memory_order_relaxed) && night && c38 > 0 && c3C <= 0 && g_pendingReason.empty() && now < s_dragArmUntil &&
-            g_haveBaked && !g_editLocalRefused && ChunkRelight::LikelyAvailable() && !ChunkRelight::RebuildActive() && CancelCountdown(s.cells)) {
+            g_haveBaked && !g_editLocalRefused && now - g_localRelitAt < kDragIdleProof && ChunkRelight::LikelyAvailable() && !ChunkRelight::RebuildActive() &&
+            CancelCountdown(s.cells)) {
             c38 = -1;
             g_counter38 = -1;
             g_prevCounter = -1;

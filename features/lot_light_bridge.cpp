@@ -3360,11 +3360,27 @@ void ReadEnumeratedLamps(bool rebuildAll) {
     g_lotLampCur.erase(std::unique(g_lotLampCur.begin(), g_lotLampCur.end(), [](const LampSig& a, const LampSig& b) { return a.first == b.first; }), g_lotLampCur.end());
 }
 
+// (recordings) what the lamp list reads made of the lamps the GPU draws (Real-time outdoor lamps), logged once a second:
+// a drag the GPU draws reached the ground past the lot edge only now and then, and the reason did not show
+struct GpuLampTrace {
+    int reads = 0, same = 0, moved = 0, otherCounted = 0, below = 0, notBaked = 0, animated = 0, added = 0, gone = 0;
+    std::string last;
+    Clock::time_point at{};
+};
+GpuLampTrace g_gpuTrace;
+void TraceGpuLamp(int GpuLampTrace::*field, uintptr_t L, const LotLampState& s, bool pBaked) {
+    if (!Recorder::Verbose() || !LampMarkFilter::HandledLately(L, 1500)) return;
+    g_gpuTrace.*field += 1;
+    g_gpuTrace.last = std::format("L{:08X} type {} at ({:.2f} {:.2f} {:.2f}) flags {:02X} baked {}->{}", L, s.type, s.pos[0], s.pos[1], s.pos[2], s.flags,
+                                  pBaked ? 1 : 0, s.baked ? 1 : 0);
+}
+
 // Compares g_lotLampCur (just read) with g_lotLampSig (the previous enumeration), then keeps the new one.
 std::vector<uint64_t> g_disabledLots; // lots with a lamp disabled in this enumeration (TrackLotLampEdits)
 void TrackLotLampEdits() {
     const auto now = Clock::now();
     g_disabledLots.clear();
+    g_gpuTrace.reads++;
     const bool editing = ChunkRelight::Editing();
     std::vector<LampSig>& cur = g_lotLampCur;
     g_lotsNow.clear();
@@ -3412,6 +3428,7 @@ void TrackLotLampEdits() {
                 total++;
                 if (Recorder::Verbose()) AddDetail(c.detail, c.details, std::format("L{:08X} type {}: added", L, s.type));
             }
+            TraceGpuLamp(&GpuLampTrace::added, L, s, false);
             continue;
         }
         const LotLampState& p = prev->second;
@@ -3424,6 +3441,7 @@ void TrackLotLampEdits() {
             // the rect follows position and range (FUN_006BDDF0); should the game update it an enumeration later, the
             // snapshot still gets the current one (it never counts as a change by itself)
             if (std::memcmp(p.rect, s.rect, sizeof s.rect) != 0) snapDirty = true;
+            TraceGpuLamp(&GpuLampTrace::same, L, s, p.baked);
             continue;
         }
         snapDirty = true;
@@ -3487,10 +3505,19 @@ void TrackLotLampEdits() {
         } else if (p.baked || s.baked) {
             why = "below the threshold";
             g_lampChangesNoise++;
+            // a move under kMoveTol keeps the place last compared (and its rect), so the steps add up and count once the lamp
+            // has moved kMoveTol in all: a drag the GPU draws rereads the list every 33 ms, 1-2 cm a read, and the ground past
+            // the lot edge never followed the lamp (one log line: "moved 0.015 m (below the threshold)")
+            if (p.baked && s.baked) std::memcpy(s.pos, p.pos, sizeof s.pos), std::memcpy(s.rect, p.rect, sizeof s.rect);
         } else {
             why = "not in the bake";
             g_lampChangesOutside++;
         }
+        TraceGpuLamp(counts ? (moved ? &GpuLampTrace::moved : &GpuLampTrace::otherCounted)
+                     : why && std::strcmp(why, "animated") == 0 ? &GpuLampTrace::animated
+                     : why && std::strcmp(why, "not in the bake") == 0 ? &GpuLampTrace::notBaked
+                                                                         : &GpuLampTrace::below,
+                     L, s, p.baked);
         if (counts) {
             Change& c = changes[s.lot];
             c.edited++;
@@ -3522,6 +3549,7 @@ void TrackLotLampEdits() {
             total++;
             if (Recorder::Verbose()) AddDetail(c.detail, c.details, std::format("L{:08X} type {}: removed", L, p.type));
         }
+        TraceGpuLamp(&GpuLampTrace::gone, L, p, p.baked);
     }
     g_lotLampSig.swap(cur); // g_lotLampCur keeps the old list's memory for the next read
     for (uint64_t lot : g_disabledLots) LevelLightShare::RelightLotById(lot, "a lamp disabled or enabled again (sold, deleted, undo)");
@@ -3578,7 +3606,10 @@ void TrackLotLampEdits() {
         const bool settled = now - seen.firstSeen >= std::chrono::seconds(10) && now - seen.lastUncounted >= std::chrono::seconds(5);
         // (2.15.3) not before the world is live: a lamp the game switches on the load screen made the lot's rooms solve at
         // the edit budget (4.4 s of 36 ms frames in a log), as the add / remove path already guards (LevelLightShare)
-        const bool observedValueEdit = c.userEdited && c.added == 0 && c.removed == 0 && LevelLightShare::WorldIsLive();
+        // A known lamp moved is such an edit too: during a drag every read moves it, and an unsettled lot (a pick-up, or a
+        // neighbour's 8 lamps switching in the same read: bulk) reset lastUncounted at each move, so the ground never took
+        // the drag nor, once it stopped, the lamp's last place (a recording: 20 s, no move counted for the lot)
+        const bool observedValueEdit = (c.userEdited || c.moved > 0) && c.added == 0 && c.removed == 0 && LevelLightShare::WorldIsLive();
         // Streaming on another lot must not hide a real edit of this lot's known
         // lamps. Additions/removals on this lot still require the streaming guards.
         if (observedValueEdit) seen.explicitEdit = true;
@@ -3621,6 +3652,15 @@ void TrackLotLampEdits() {
             at = now;
             LOG_INFO(std::format("[LotLightBridge] Lamp changes that do not rebuild the terrain, lot {:016X}: {}", lot, q.detail));
         }
+    }
+    if (now - g_gpuTrace.at >= std::chrono::seconds(1)) {
+        GpuLampTrace& t = g_gpuTrace;
+        if (Recorder::Verbose() && !t.last.empty())
+            LOG_INFO(std::format("[LotLightBridge] GPU-drawn lamps in the lamp list reads (last {} reads): moved and counted {}, other counted {}, below the threshold {}, "
+                                 "not in the bake {}, animated {}, unchanged {}, added {}, gone {}; last {}",
+                                 t.reads, t.moved, t.otherCounted, t.below, t.notBaked, t.animated, t.same, t.added, t.gone, t.last));
+        t = GpuLampTrace{};
+        t.at = now;
     }
 
     // snapshot for the terrain relight: every tracked lamp (baked or not, so a lamp switched off still matches its
