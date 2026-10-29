@@ -107,8 +107,9 @@ void ShortcutsContent();
 void ShortcutsTab();
 void LanguageRow();
 double g_whatsNewOpenedAt = -1.0; // when the What's new popover opened (its rise-in)
-// What's new, measured on the last frame: the popover's content, the release list's content and the footer below the list
-float g_whatsNewContentH = 0.0f, g_whatsNewListH = 0.0f, g_whatsNewFooterH = 0.0f;
+// What's new, measured on the last frame, none of them from the popover's own height: the header (window top to the
+// list), the release list's content and the footer below the list
+float g_whatsNewHeadH = 0.0f, g_whatsNewListH = 0.0f, g_whatsNewFooterH = 0.0f;
 int g_whatsNewSettle = 0; // frames the popover is laid out unseen after it opens, while its height settles
 void ScreenshotCaptureCard();
 void RecoveryRow();
@@ -3834,14 +3835,17 @@ void VersionButton(float x, float y, float h) {
     // The popover opens above the button, centred on it, as tall as its content up to the room above the button (at most
     // 560 units; its bottom stays put, so opening a release grows it upwards). Past that only the release list scrolls,
     // inside the padding, clear of the rounded corners; the popover itself never scrolls, so there is one bar at most.
-    // Its height comes from the content measured the frame before, so it is laid out unseen for its first frames (it showed
-    // at the full height and shrank), then rises in over 0.16 s (alpha and 8 units) from g_whatsNewOpenedAt.
+    // Its height is the header, the list's content and the footer measured the frame before (not the content measured
+    // inside the popover: that depends on its own height, and a pixel lost each frame shrank it to its minimum), so it
+    // is laid out unseen for its first frames, then rises in over 0.16 s (alpha and 8 units) from g_whatsNewOpenedAt.
     const bool settling = g_whatsNewSettle > 0;
     if (settling) g_whatsNewOpenedAt = ImGui::GetTime();
     const float rise = std::clamp(static_cast<float>(ImGui::GetTime() - g_whatsNewOpenedAt) / 0.16f, 0.0f, 1.0f);
     const float riseEased = 1.0f - (1.0f - rise) * (1.0f - rise);
     const float popMax = std::floor(std::fmin(560.0f * u, std::fmax(240.0f * u, p.y - ImGui::GetMainViewport()->Pos.y - 24.0f * u)));
-    const float popH = g_whatsNewContentH > 0.0f ? std::fmin(popMax, std::ceil(g_whatsNewContentH)) : popMax;
+    const float padY = ApexUi::kSpace4 * u;
+    const float wanted = g_whatsNewHeadH + g_whatsNewListH + g_whatsNewFooterH + padY + 2.0f; // (2 px: the list never scrolls for a pixel)
+    const float popH = g_whatsNewHeadH > 0.0f && g_whatsNewListH > 0.0f && g_whatsNewFooterH > 0.0f ? std::fmin(popMax, std::ceil(wanted)) : popMax;
     ImGui::SetNextWindowPos(ImVec2(p.x + w * 0.5f, p.y - ApexUi::kSpace2 * u + (1.0f - riseEased) * 8.0f * u), ImGuiCond_Always, ImVec2(0.5f, 1.0f));
     ImGui::SetNextWindowSize(ImVec2(420.0f * u, popH));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ApexUi::kSpace4 * u, ApexUi::kSpace4 * u));
@@ -3880,6 +3884,7 @@ void VersionButton(float x, float y, float h) {
         const float footerH = g_whatsNewFooterH > 0.0f ? g_whatsNewFooterH
                                                        : style.ItemSpacing.y * 3.0f + 1.0f + ApexUi::kSpace1 * u + ImGui::GetFrameHeight();
         const float room = std::fmax(80.0f * u, ImGui::GetContentRegionAvail().y - footerH);
+        g_whatsNewHeadH = ImGui::GetCursorScreenPos().y - ImGui::GetWindowPos().y;
         if (ImGui::BeginChild("##WhatsNewList", ImVec2(0.0f, g_whatsNewListH > 0.0f ? std::fmin(g_whatsNewListH, room) : room), ImGuiChildFlags_None,
                               ImGuiWindowFlags_NoBackground)) {
             ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -4057,9 +4062,7 @@ void VersionButton(float x, float y, float h) {
             if (ApexUi::IconTextButton(label, IconId::ExternalLink, "Opens the Apex Radiance releases page on GitHub in your browser", ButtonKind::Secondary))
                 OpenPage(kApexReleasesUrl);
         }
-        const float bottom = ImGui::GetItemRectMax().y;
-        g_whatsNewFooterH = bottom - listBottom;
-        g_whatsNewContentH = bottom - ImGui::GetWindowPos().y + style.WindowPadding.y;
+        g_whatsNewFooterH = ImGui::GetItemRectMax().y - listBottom;
         ImGui::EndPopup();
     }
     if (settling) g_whatsNewSettle--; // (every frame after the click, drawn or not, so it always ends)
