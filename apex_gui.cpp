@@ -107,6 +107,8 @@ void ShortcutsContent();
 void ShortcutsTab();
 void LanguageRow();
 double g_whatsNewOpenedAt = -1.0; // when the What's new popover opened (its rise-in)
+// What's new, measured on the last frame: the popover's content, the release list's content and the footer below the list
+float g_whatsNewContentH = 0.0f, g_whatsNewListH = 0.0f, g_whatsNewFooterH = 0.0f;
 void ScreenshotCaptureCard();
 void RecoveryRow();
 
@@ -3827,21 +3829,22 @@ void VersionButton(float x, float y, float h) {
             ApexConfig::SetUi(ui);
         }
     }
-    // The popover opens above the button, centred on it, with a fixed height (opening a release never resizes it: its
-    // content scrolls). It rises in over 0.16 s (alpha and 8 units); g_whatsNewOpenedAt is set when it opens.
+    // The popover opens above the button, centred on it, as tall as its content up to the room above the button (at most
+    // 560 units; its bottom stays put, so opening a release grows it upwards). Past that only the release list scrolls,
+    // inside the padding, clear of the rounded corners; the popover itself never scrolls, so there is one bar at most.
+    // It rises in over 0.16 s (alpha and 8 units); g_whatsNewOpenedAt is set when it opens.
     const float rise = std::clamp(static_cast<float>(ImGui::GetTime() - g_whatsNewOpenedAt) / 0.16f, 0.0f, 1.0f);
     const float riseEased = 1.0f - (1.0f - rise) * (1.0f - rise);
-    const float popH = std::floor(std::fmin(560.0f * u, std::fmax(240.0f * u, p.y - ImGui::GetMainViewport()->Pos.y - 24.0f * u)));
+    const float popMax = std::floor(std::fmin(560.0f * u, std::fmax(240.0f * u, p.y - ImGui::GetMainViewport()->Pos.y - 24.0f * u)));
+    const float popH = g_whatsNewContentH > 0.0f ? std::fmin(popMax, std::ceil(g_whatsNewContentH)) : popMax;
     ImGui::SetNextWindowPos(ImVec2(p.x + w * 0.5f, p.y - ApexUi::kSpace2 * u + (1.0f - riseEased) * 8.0f * u), ImGuiCond_Always, ImVec2(0.5f, 1.0f));
     ImGui::SetNextWindowSize(ImVec2(420.0f * u, popH));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ApexUi::kSpace4 * u, ApexUi::kSpace4 * u));
     ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 18.0f * u);
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * (0.25f + 0.75f * riseEased));
-    // One thin scrollbar, the popover's own (the list had a scrolling child too, and the popover showed a second bar
-    // whenever the header and the footer did not fit exactly)
     ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 6.0f * u);
     ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, Col(0, 0.0f));
-    if (ImGui::BeginPopup("##WhatsNew")) {
+    if (ImGui::BeginPopup("##WhatsNew", ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
         // A header with the installed version; then the last kShown versions, newest first: the newest open, each older one
         // a row with its counts that opens on a click. Inside a release, the lines of one area ("Night Lights: ...") are
         // grouped under the area's name, so every line starts at the same edge.
@@ -3865,7 +3868,13 @@ void VersionButton(float x, float y, float h) {
             ImGui::EndGroup();
             ImGui::SetCursorScreenPos(ImVec2(b.x, std::fmax(b.y + badge, ImGui::GetItemRectMax().y) + ApexUi::kSpace3 * u));
         }
-        {
+        // The list: as tall as its releases, at most what the header and the footer leave
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float footerH = g_whatsNewFooterH > 0.0f ? g_whatsNewFooterH
+                                                       : style.ItemSpacing.y * 3.0f + 1.0f + ApexUi::kSpace1 * u + ImGui::GetFrameHeight();
+        const float room = std::fmax(80.0f * u, ImGui::GetContentRegionAvail().y - footerH);
+        if (ImGui::BeginChild("##WhatsNewList", ImVec2(0.0f, g_whatsNewListH > 0.0f ? std::fmin(g_whatsNewListH, room) : room), ImGuiChildFlags_None,
+                              ImGuiWindowFlags_NoBackground)) {
             ImDrawList* dl = ImGui::GetWindowDrawList();
             const float pad = ApexUi::kSpace3 * u;
             const float width = ImGui::GetContentRegionAvail().x - (ImGui::GetScrollMaxY() > 0.0f ? ApexUi::kSpace1 * u : 0.0f); // clear of the scrollbar
@@ -3894,13 +3903,14 @@ void VersionButton(float x, float y, float h) {
                     open = !open;
                     st->SetBool(openKey, open);
                 }
-                // Hover: a box around the release (its whole card while it is open) and the chevron lit. The popover's
-                // background is kHoverBg, so the menu's usual hover fill did not show here
+                // Every release is a box with a soft outline (its whole card while it is open); hovered, the box fills a step
+                // lighter, the outline strengthens and the chevron lights. The popover's background is kHoverBg, so the
+                // menu's usual hover fill did not show here
                 const bool rowHovered = ImGui::IsItemHovered();
-                if (rowHovered) {
+                {
                     const ImVec2 bottom(top.x + width, top.y + rowH + (anim > 0.0f ? bodyH : 0.0f));
-                    if (anim <= 0.0f) dl->AddRectFilled(top, bottom, ImGui::GetColorU32(Col(VioletTheme::kSelectedBg)), 14.0f * u);
-                    dl->AddRect(top, bottom, ImGui::GetColorU32(Col(VioletTheme::kToggleOff)), 14.0f * u, 0, 1.0f * u);
+                    if (rowHovered && anim <= 0.0f) dl->AddRectFilled(top, bottom, ImGui::GetColorU32(Col(VioletTheme::kSelectedBg)), 14.0f * u);
+                    dl->AddRect(top, bottom, ImGui::GetColorU32(Col(rowHovered ? VioletTheme::kToggleOff : VioletTheme::kSelectedBg)), 14.0f * u, 0, 1.0f * u);
                 }
                 const float cy = top.y + rowH * 0.5f, is = 14.0f * u;
                 float x = top.x + pad;
@@ -4019,7 +4029,10 @@ void VersionButton(float x, float y, float h) {
                 ImGui::Dummy(ImVec2(0.0f, 0.0f));
                 ImGui::PopID();
             }
+            g_whatsNewListH = ImGui::GetCursorPosY();
         }
+        ImGui::EndChild();
+        const float listBottom = ImGui::GetItemRectMax().y;
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0.0f, ApexUi::kSpace1 * u));
         {
@@ -4037,6 +4050,9 @@ void VersionButton(float x, float y, float h) {
             if (ApexUi::IconTextButton(label, IconId::ExternalLink, "Opens the Apex Radiance releases page on GitHub in your browser", ButtonKind::Secondary))
                 OpenPage(kApexReleasesUrl);
         }
+        const float bottom = ImGui::GetItemRectMax().y;
+        g_whatsNewFooterH = bottom - listBottom;
+        g_whatsNewContentH = bottom - ImGui::GetWindowPos().y + style.WindowPadding.y;
         ImGui::EndPopup();
     }
     ImGui::PopStyleColor();
