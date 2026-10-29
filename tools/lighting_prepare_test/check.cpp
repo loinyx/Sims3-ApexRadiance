@@ -12,7 +12,7 @@
 #include <iostream>
 #include <cassert>
 namespace ApexMath { float Fabs(float x){return std::fabs(x);} float Floor(float x){return std::floor(x);} }
-namespace GroundShadow { struct Wall{float x0,z0,x1,z1,y0,y1;}; }
+namespace GroundShadow { struct Wall{float x0,z0,x1,z1,y0,y1; float pass=0.0f;}; }
 struct FenceGap {GroundShadow::Wall w;float length=0;uint64_t key;uint64_t ga=0,gb=0;bool closed=false;};
 constexpr float kFenceCell=8.0f,kGapMax=2.5f,kGapMin=.4f,kGapNarrow=.02f;
 std::vector<GroundShadow::Wall> g_fenceAll;std::vector<uint64_t> g_fenceAllGroup;
@@ -33,7 +33,7 @@ bool Equal(const std::vector<FenceGap>& a,const std::vector<FenceGap>& b){
  if(a.size()!=b.size())return false;
  for(size_t i=0;i<a.size();++i){const auto&x=a[i];const auto&y=b[i];
  if(x.key!=y.key||x.ga!=y.ga||x.gb!=y.gb||x.closed!=y.closed||
- x.w.x0!=y.w.x0||x.w.z0!=y.w.z0||x.w.x1!=y.w.x1||x.w.z1!=y.w.z1||x.w.y0!=y.w.y0||x.w.y1!=y.w.y1)return false;}
+ x.w.x0!=y.w.x0||x.w.z0!=y.w.z0||x.w.x1!=y.w.x1||x.w.z1!=y.w.z1||x.w.y0!=y.w.y0||x.w.y1!=y.w.y1||x.w.pass!=y.w.pass)return false;}
  return true;
 }
 void FenceChecks(){

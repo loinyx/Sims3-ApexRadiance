@@ -25,11 +25,14 @@ void ReferenceGapsBuild() {
                         const GroundShadow::Wall& b = g_fenceAll[j];
                         const float lb = CountedHypot(b.x1 - b.x0, b.z1 - b.z0);
                         if (!(lb > 0.05f) || ApexMath::Fabs((b.x1 - b.x0) / lb * ux + (b.z1 - b.z0) / lb * uz) < 0.98f) continue;
+                        // a piece goes on from this end, also over it (overlapping meshes): no gap
+                        const float along = ((ax - b.x0) * (b.x1 - b.x0) + (az - b.z0) * (b.z1 - b.z0)) / lb;
+                        const float off = ApexMath::Fabs((ax - b.x0) * (b.z1 - b.z0) - (az - b.z0) * (b.x1 - b.x0)) / lb;
+                        if (off < kGapNarrow && along > -kGapNarrow && along < lb + kGapNarrow && ApexMath::Fabs(b.y0 - a.y0) < 1.0f) joined = true;
                         for (int eb = 0; eb < 2; eb++) {
                             float bx, bz;
                             end(b, eb, bx, bz);
                             const float dx = bx - ax, dz = bz - az, d = CountedHypot(dx, dz);
-                            if (d < kGapNarrow && ApexMath::Fabs(b.y0 - a.y0) < 1.0f) joined = true; // a piece goes on from this end: no gap
                             if (!(d >= kGapNarrow && d < best) || (dx * ox + dz * oz) < 0.98f * d) continue; // in line, ahead of this end
                             float fx, fz;
                             end(b, 1 - eb, fx, fz);
@@ -44,6 +47,7 @@ void ReferenceGapsBuild() {
             end(b, be, bx, bz);
             FenceGap gp;
             gp.w = {ax, az, bx, bz, std::max(a.y0, b.y0), std::min(a.y1, b.y1)};
+            gp.w.pass = std::min(a.pass, b.pass);
             if (!(gp.w.y1 > gp.w.y0 + 0.3f)) continue;
             gp.key = GapKey(ax, az, bx, bz);
             // each gap once, whichever end found it (it is found from both: the walls' order follows a hash map)
