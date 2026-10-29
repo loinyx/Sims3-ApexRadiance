@@ -27,6 +27,7 @@ an FPS gain, complete climate coverage or resolution of texture allocation stall
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-29 | `06a3258` | `tools/lighting_prepare_test` with the overlapped-end rule and `Wall::pass` (built as a DLL) | 36 geometry cases exactly equal to the reference gap search; 16 map slots and 144 wall blur cases pass | CPU, x86 /O2 |
 | 2026-10-29 | `59201ad` | One-off timing of `FenceCutout::OpenShare` on random DXT5 levels (built as a DLL) | 0.73 ms a decode at 256 x 256, 2.70 ms at 512 x 512: the share is kept per texture and decoded again only when its size, format or sampled bytes change | CPU, x86 /O2 |
 | 2026-10-29 | `d8501f2` | `tools/ground_shade_test` with `-Reference v2.17.2` (built as a DLL: new executables were blocked on the test machine) | 248 checks, 0 failures: with solid walls (`pass` 0) the lot build gives the bytes of `v2.17.2`, soft and hard, turned and not; build time unchanged (3.05 ms against 3.05 ms) | CPU, x86 /O2 |
 | 2026-10-29 | `6f12188` (mesh fence open share) | `tools/floor_shade_check` (`run.ps1`) with the fence cutout checks | 10,982 checks, 0 failures: `FindCutout` traces all 59 instanced cutout pixel shaders of the precomp; `OpenShare` gives 0.5 on a half-open texture in DXT1, DXT3, DXT5 and A8R8G8B8; a wall with `pass` 0.8 passes 0.8 in the hard and soft tests | CPU fixtures, D3DCompiler on the precomp |
