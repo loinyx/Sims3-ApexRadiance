@@ -1290,11 +1290,15 @@ void FenceGapsBuild() {
                         const GroundShadow::Wall& b = g_fenceAll[j];
                         const float lb = lengths[j];
                         if (!(lb > 0.05f) || ApexMath::Fabs((b.x1 - b.x0) / lb * ux + (b.z1 - b.z0) / lb * uz) < 0.98f) continue;
+                        // a piece goes on from this end, also over it (meshes overlap by their posts, 0.12 m): no gap. Before,
+                        // only ends within kGapNarrow joined, and each overlapped end listed a gap over the next piece
+                        const float along = ((ax - b.x0) * (b.x1 - b.x0) + (az - b.z0) * (b.z1 - b.z0)) / lb;
+                        const float off = ApexMath::Fabs((ax - b.x0) * (b.z1 - b.z0) - (az - b.z0) * (b.x1 - b.x0)) / lb;
+                        if (off < kGapNarrow && along > -kGapNarrow && along < lb + kGapNarrow && ApexMath::Fabs(b.y0 - a.y0) < 1.0f) joined = true;
                         for (int eb = 0; eb < 2; eb++) {
                             float bx, bz;
                             end(b, eb, bx, bz);
                             const float dx = bx - ax, dz = bz - az, d = ApexMath::Hypot(dx, dz);
-                            if (d < kGapNarrow && ApexMath::Fabs(b.y0 - a.y0) < 1.0f) joined = true; // a piece goes on from this end: no gap
                             if (!(d >= kGapNarrow && d < best) || (dx * ox + dz * oz) < 0.98f * d) continue; // in line, ahead of this end
                             float fx, fz;
                             end(b, 1 - eb, fx, fz);
@@ -1374,7 +1378,10 @@ bool NoteGate(float x, float y, float z) {
         const FenceGap& gp = g_fenceGaps[k];
         const float dx = gp.w.x1 - gp.w.x0, dz = gp.w.z1 - gp.w.z0, l = gp.length;
         const float t = ((x - gp.w.x0) * dx + (z - gp.w.z0) * dz) / l, side = ApexMath::Fabs((x - gp.w.x0) * dz - (z - gp.w.z0) * dx) / l;
-        if (t < -0.1f || t > l + 0.1f || side > kGateOff || y < gp.w.y0 - 1.0f || y > gp.w.y1) {
+        // a gate stands on the ground: an object over the line (a lamp carried across the fence's top) is none; and inside
+        // an open gap, not at its ends, where the fence's posts stand (a post at a gap's end was taken for its gate)
+        const float inset = gp.closed ? -0.1f : 0.2f;
+        if (t < inset || t > l - inset || side > kGateOff || y < gp.w.y0 - 1.0f || y > gp.w.y0 + 0.5f) {
             if (!kPublicBuild && g_gateMissLogs < 30 && t > -1.5f && t < l + 1.5f && side < 1.5f) {
                 g_gateMissLogs++;
                 LOG_INFO(std::format("[GroundShadow] object at ({:.2f} {:.2f} {:.2f}) near the fence gap ({:.2f} {:.2f})-({:.2f} {:.2f}) y {:.2f}..{:.2f}: "
@@ -1387,6 +1394,8 @@ bool NoteGate(float x, float y, float z) {
             closedMatch = true;
             continue; // retain the scale without skipping another gap that still needs its gate noted
         }
+        // a lamp dragged through a gap is no gate: noted, it closed the opening for kGateKeepMs after the drag
+        if (DragLite::Engaged() && !g_gates.count(gp.key)) continue;
         const DWORD now = GetTickCount();
         const auto [g, fresh] = g_gates.try_emplace(gp.key, now);
         if (fresh) ApexUtil::CountOne(g_gatesFilled);
