@@ -675,6 +675,7 @@ struct LotMask {
     IDirect3DTexture9* tex = nullptr;
     uint64_t sig = 0;
     DWORD checked = 0, shadeChecked = 0;
+    uint32_t fenceGenSeen = 0;      // g_fenceGen at its last shade check
     int w = 0, h = 0;               // texels of the room mask
     std::vector<uint8_t> room;      // the room mask (255 outside rooms)
     std::vector<uint8_t> shade;     // the lamp shade (empty: none yet, 255 everywhere)
@@ -712,7 +713,7 @@ IDirect3DTexture9* WhiteMask(IDirect3DDevice9* dev) {
 // passes (story 0 only) add the indoor light
 constexpr bool kFloorIndoorLight = false;
 constexpr DWORD kShadeMinEveryMs = 250; // (2.15.3: 2000, then 750; a build takes 1-30 ms on the worker, log)
-constexpr DWORD kShadeCheckMs = 100;    // a lot's shade inputs looked at this often (LotMaskTexture)
+constexpr DWORD kShadeCheckMs = 100;    // a lot's shade inputs looked at this often while they change (LotMaskTexture)
 struct ShadeWant {
     uint64_t lot = 0, key = 0;
     LotRect rect{};
@@ -2377,10 +2378,14 @@ IDirect3DTexture9* LotMaskTexture(IDirect3DDevice9* dev, const LotRect& rect) {
             m.dirty = true;
         }
     }
-    // the shade's inputs every kShadeCheckMs, apart from the room mask's walk: at its 500 ms a fence edit or a lamp step
-    // waited up to that long to be seen, then up to kShadeMinEveryMs more (log: "500 ms to its build sent"), the light in steps
-    if (!m.shadeChecked || now - m.shadeChecked >= kShadeCheckMs) {
+    // the shade's inputs every kShadeCheckMs while a fence group changed since the lot's last check or a lamp is dragged,
+    // else every 500 ms: at the room mask's 500 ms a fence edit or a lamp step waited up to that long to be seen, then up to
+    // kShadeMinEveryMs more (log: "500 ms to its build sent"), the light in steps; at rest the key (every bake lamp, the
+    // walls' copy) is not worked out more often than before
+    const bool changing = m.fenceGenSeen != g_fenceGen || DragLite::Engaged();
+    if (!m.shadeChecked || now - m.shadeChecked >= (changing ? kShadeCheckMs : 500u)) {
         m.shadeChecked = now;
+        m.fenceGenSeen = g_fenceGen;
         // the shade's grid is the room mask's (4 texels a metre over room 0's tiles); the lot rectangle must agree with it
         if (g_shadeOn && m.w > 0 && m.w == static_cast<int>(std::lround(r->w * GroundShadow::kTexelsPerMetre)) &&
             m.h == static_cast<int>(std::lround(r->d * GroundShadow::kTexelsPerMetre)))
