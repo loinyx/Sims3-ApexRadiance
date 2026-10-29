@@ -1206,11 +1206,8 @@ void SimOcclusion::RenderUI(ApexPatch* patch) {
                                             "Shade on recognized hair; 0% removes it, 100% keeps the original", defaults.hairStrength);
             changed |= ApexUi::SliderPercent("Maximum darkening", &g.p.simMaxShade, 0.0f, 1.0f,
                                             "Caps how dark Sims and hair can get", defaults.simMaxShade);
-            if (ApexUi::BeginAdvanced("Advanced##SimOcclusion")) {
-                changed |= ApexUi::SwitchRow("Transparent hair", &g.p.transparentHair,
-                                            "Also adjust supported transparent hair strands", defaults.transparentHair);
-                ApexUi::EndAdvanced();
-            }
+            changed |= ApexUi::SwitchRow("Transparent hair", &g.p.transparentHair,
+                                        "Also adjust supported transparent hair strands", defaults.transparentHair);
             if (WantSimMask() && simMask.failed)
                 ApexUi::IconNote(ApexUi::IconId::TriangleAlert, "Sim shading control is unavailable; original shade is kept", VioletTheme::kWarning);
             ImGui::EndDisabled();
@@ -1331,8 +1328,15 @@ class AmbientOcclusionPatch : public ApexPatch {
         if (g.status.rfind("ERROR: ", 0) == 0) ApexUi::IconNote(IconId::TriangleAlert, g.status.c_str() + 7, VioletTheme::kError);
         else if (g.status.rfind(kDepthError, 0) == 0) ApexUi::IconNote(IconId::TriangleAlert, g.status.c_str() + kDepthError.size(), VioletTheme::kError);
 
+        // Grouped like Depth Blur: how the shade looks, how far and how fine, map view. Reach and Keep lamp light were
+        // under Advanced; they shape the look as much as Strength, so they sit beside it
+        ApexUi::CardGroup("How the shade looks");
         changed |= ApexUi::SliderPercent("Strength", &g.p.strength, 0.0f, 2.0f, "How dark the shade gets where things meet",
                                          kDefaults.strength);
+        changed |= ApexUi::SliderPercent("Reach", &g.p.reach, 0.5f, 2.0f, "How far the shade spreads from where things meet", kDefaults.reach);
+        changed |= ApexUi::SliderPercent("Keep lamp light", &g.p.protect, 0.0f, 1.0f, "Lamp-lit and bright spots keep more of their light; 0% shades everything alike",
+                                         kDefaults.protect);
+        ApexUi::CardGroup("Distance and quality");
         changed |= ApexUi::Slider("Distance", &g.p.distance, 25.0f, 1000.0f,
                                  {.format = "%.0f m", .tooltip = "The shade fades out beyond this distance; not used in map view", .defaultValue = kDefaults.distance});
         // Quality: shown from the lightest to the smoothest; the saved value keeps 2.1.0's indices (kQualityShown)
@@ -1346,13 +1350,8 @@ class AmbientOcclusionPatch : public ApexPatch {
             g.p.quality = kQualityShown[std::clamp(shown, 0, kQualityCount - 1)];
             changed = true;
         }
+        ApexUi::CardGroup("Map view");
         changed |= ApexUi::SwitchRow("Also in map view", &g.p.inMapView, "Soft shade around houses and trees when the map view is open", kDefaults.inMapView);
-        if (ApexUi::BeginAdvanced("Advanced##AmbientOcclusion")) {
-            changed |= ApexUi::SliderPercent("Reach", &g.p.reach, 0.5f, 2.0f, "How far the shade spreads from where things meet", kDefaults.reach);
-            changed |= ApexUi::SliderPercent("Keep lamp light", &g.p.protect, 0.0f, 1.0f, "Lamp-lit and bright spots keep more of their light; 0% shades everything alike",
-                                             kDefaults.protect);
-            ApexUi::EndAdvanced();
-        }
         if (changed) NotifySettingChanged();
     }
 

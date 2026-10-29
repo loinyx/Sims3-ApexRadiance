@@ -43,9 +43,11 @@ struct BoolDefault {
     BoolDefault(bool on) : value(on ? 1 : 0) {}
 };
 
-// The next row (SwitchRow, Slider, SliderPercent, SegmentedRow) gets a small amber chip after its label, with a tooltip.
-// Consumed by that row. Used for "Reload save".
-void SetNextRowBadge(const char* text, const char* tooltip);
+// The next row (SwitchRow, Slider, SliderPercent, SegmentedRow, BeginControlRow) gets a small chip after its label, with
+// a tooltip. Consumed by that row. Amber for "Reload save"; the Presets page uses success green for "Applied".
+void SetNextRowBadge(const char* text, const char* tooltip, unsigned rgb = 0xE0A84F);
+// The next row shows the changed dot with this tooltip, without a Reset button (a preset changed since it was applied)
+void SetNextRowChangedDot(const char* tooltip);
 // The next row's label is user data (a profile name): shown and searched as it is, never translated
 void SetNextRowUntranslated();
 
@@ -108,6 +110,9 @@ void MutedText(const char* text);
 void SectionLabel(const char* text);
 // Group label inside a card: regular menu font, muted, without letter spacing
 void GroupLabel(const char* text);
+// A quiet label that opens a group of rows inside a card ("What stays sharp"): the row divider above it when it follows
+// a row, small muted text, and no divider between it and the group's first row
+void CardGroup(const char* text);
 // A note: a small icon and wrapped text in a subtly tinted rounded box, in the given colour (0xRRGGBB). Info notes use
 // IconId::Info and the default muted colour, warnings IconId::TriangleAlert and VioletTheme::kWarning, errors
 // IconId::TriangleAlert and VioletTheme::kError. The box is one item: hover it for a Tooltip.

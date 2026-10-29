@@ -48,8 +48,8 @@ Each frame:
 | Distance | `distance` | float | 351 m | 25 to 1000 m | View distance where the shade fades out (fade starts at 37.5% of it). Not used in map view |
 | Quality | `qualidade` | enum | High | Very Low, Low, Medium, High, Ultra | Directions per pixel: 2, 4, 6, 8, 12. Stored as 4, 0, 1, 2, 3 for compatibility with 2.1.0 |
 | Also in map view | `noMapa` | bool | on | | Shades the map view with radii sized for houses and trees (contact 4 m, large 15 m, no distance fade) |
-| Advanced > Reach | `alcance` | float | 130% | 50 to 200% | Scales all radii |
-| Advanced > Keep lamp light | `protegerLuz` | float | 38% | 0 to 100% | Share of light that bright and lamp-lit pixels keep |
+| Reach | `alcance` | float | 130% | 50 to 200% | Scales all radii |
+| Keep lamp light | `protegerLuz` | float | 38% | 0 to 100% | Share of light that bright and lamp-lit pixels keep |
 | Developer > Visual effects > Ambient shadows > Show the shade alone | (not saved) | bool | off | | Shows only the shade, in grey (developer mode) |
 | (none) | `revisao` | int | 9 | | Settings revision. Older files keep every saved value and only gain missing keys |
 

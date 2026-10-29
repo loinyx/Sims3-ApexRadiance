@@ -46,7 +46,7 @@ Custom content that uses the standard Sim materials is covered automatically. Cu
 | Sim intensity | `simStrength` | float | 40% | 0 to 100% | Shade on body, face and clothes. 0% removes it, 100% keeps the scene shade |
 | Hair intensity | `hairStrength` | float | 0% | 0 to 100% | Shade on recognised hair, independent of the body |
 | Maximum darkening | `simMaxShade` | float | 11% | 0 to 100% | Caps the shade added to Sims and hair, before the light protection of the composite |
-| Advanced > Transparent hair | `transparentHair` | bool | on | | Also adjusts recognised transparent hair strands. Blended body layers always follow Sim intensity |
+| Transparent hair | `transparentHair` | bool | on | | Also adjusts recognised transparent hair strands. Blended body layers always follow Sim intensity |
 | Developer > Visual effects > Ambient shadows > Show Sim coverage | (not saved) | bool | off | | Preview: blue = Sim controls, green = hair controls, black = scene shade (developer mode; needs Sim Occlusion on) |
 
 Settings apply immediately and are included in profiles. The preview is never saved.

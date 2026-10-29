@@ -2243,28 +2243,24 @@ void Picture::RenderUI(int tab) {
     case TabColor: {
         signedAmount("Tint", &q.tint, kDef.tint, "Shift colors toward green or magenta", "Green", "Magenta");
         signedAmount("Vibrance", &q.vibrance, kDef.vibrance, "Boosts dull colors and keeps skin tones natural");
-        if (ApexUi::BeginAdvanced("FilmTones", "Film tones")) {
-            hue("Shadow color", &q.shadowHue, kDef.shadowHue, "Teal or blue is the classic film look");
-            percent("Shadow amount", &q.shadowTint, 0.0f, 1.0f, "How strongly shadows take that color; 0% is off", kDef.shadowTint);
-            hue("Highlight color", &q.highlightHue, kDef.highlightHue, "Orange or gold is the classic film look");
-            percent("Highlight amount", &q.highlightTint, 0.0f, 1.0f, "How strongly highlights take that color; 0% is off", kDef.highlightTint);
-            ApexUi::EndAdvanced();
-        }
-        if (ApexUi::BeginAdvanced("ColorMixer", "Color mixer")) {
-            static const char* const names[6] = {"Reds", "Yellows", "Greens", "Cyans", "Blues", "Magentas"};
-            static const char* const descs[6] = {"Red flowers, brick and clothing", "Sunlight, sand and autumn leaves", "Grass and leaves; lower it for less neon plants",
-                                                 "Pools and pale skies", "Sky and water", "Pink and purple flowers and clothing"};
-            static const float hues[6] = {0.0f, 60.0f, 120.0f, 180.0f, 240.0f, 300.0f};
-            for (int i = 0; i < 6; i++) {
-                ApexUi::SliderOptions o;
-                o.format = "%.0f%%";
-                o.displayScale = 100.0f;
-                o.swatch = HueSwatch(hues[i]);
-                o.tooltip = descs[i];
-                o.defaultValue = kDef.mixer[i];
-                slide(names[i], &q.mixer[i], 0.0f, 2.0f, o);
-            }
-            ApexUi::EndAdvanced();
+        ApexUi::CardGroup("Film tones");
+        hue("Shadow color", &q.shadowHue, kDef.shadowHue, "Teal or blue is the classic film look");
+        percent("Shadow amount", &q.shadowTint, 0.0f, 1.0f, "How strongly shadows take that color; 0% is off", kDef.shadowTint);
+        hue("Highlight color", &q.highlightHue, kDef.highlightHue, "Orange or gold is the classic film look");
+        percent("Highlight amount", &q.highlightTint, 0.0f, 1.0f, "How strongly highlights take that color; 0% is off", kDef.highlightTint);
+        ApexUi::CardGroup("Color mixer");
+        static const char* const names[6] = {"Reds", "Yellows", "Greens", "Cyans", "Blues", "Magentas"};
+        static const char* const descs[6] = {"Red flowers, brick and clothing", "Sunlight, sand and autumn leaves", "Grass and leaves; lower it for less neon plants",
+                                             "Pools and pale skies", "Sky and water", "Pink and purple flowers and clothing"};
+        static const float hues[6] = {0.0f, 60.0f, 120.0f, 180.0f, 240.0f, 300.0f};
+        for (int i = 0; i < 6; i++) {
+            ApexUi::SliderOptions o;
+            o.format = "%.0f%%";
+            o.displayScale = 100.0f;
+            o.swatch = HueSwatch(hues[i]);
+            o.tooltip = descs[i];
+            o.defaultValue = kDef.mixer[i];
+            slide(names[i], &q.mixer[i], 0.0f, 2.0f, o);
         }
 
         break;
@@ -2277,7 +2273,8 @@ void Picture::RenderUI(int tab) {
         o.tooltip = "Darker corners that draw the eye inward; 0% is off";
         o.defaultValue = kDef.vignette;
         slide("Vignette", &q.vignette, 0.0f, 0.8f, o);
-        percent("Vignette size", &q.vignetteSize, 0.0f, 0.95f, "Where the darkening starts; lower is closer to the center", kDef.vignetteSize);
+        if (q.vignette > 0.0f || ApexUi::FilterActive())
+            percent("Vignette size", &q.vignetteSize, 0.0f, 0.95f, "Where the darkening starts; lower is closer to the center", kDef.vignetteSize);
         break;
     }
     default: {
@@ -2347,12 +2344,49 @@ void Picture::RenderFiltersUI(bool lutOnly) {
         }
     };
     // One panel per family; every filter keeps its complete controls behind an independent disclosure.
+    // Every filter by family (the LUT has its own tab): the In use card lists the ones that are on, each family label
+    // says how many of its filters are on
+    struct FilterEntry { const char* name; const bool* on; int family; };
+    const FilterEntry kFilters[] = {
+        {"Technicolor 1", &q.tech1, 0}, {"Technicolor 2", &q.tech2, 0}, {"DPX Cineon", &q.dpx, 0}, {"Vintage", &q.vintage, 0},
+        {"Cross-process", &q.crossProcess, 0}, {"Filmic pass", &q.filmic, 0}, {"Black and white", &q.bw, 0}, {"Tint", &q.tintFilter, 0},
+        {"Colorfulness", &q.colourful, 1}, {"Night Mode", &q.night, 1}, {"Levels", &q.levels, 1},
+        {"Auto exposure", &q.autoExposure, 2}, {"Adaptive sharpening", &q.cas, 2}, {"Glow", &q.glow, 2}, {"Halation", &q.halation, 2},
+        {"Dreamy", &q.dreamy, 2}, {"Fake HDR", &q.fakeHdr, 2},
+        {"Emphasize", &q.emphasize, 3}, {"Tilt-shift", &q.tiltShift, 3}, {"Prism", &q.prism, 3}, {"Film grain", &q.grain, 3},
+        {"3DFX", &q.retro3dfx, 4}, {"CRT", &q.crt, 4}, {"Color-blind mode", &q.daltonize, 5},
+    };
+    static const char* const kFamilies[] = {"Film looks", "Color and mood", "Light and detail", "Camera", "Retro and style", "Accessibility"};
+    if (!lutOnly && !ApexUi::FilterActive()) {
+        int onCount = 0;
+        for (const auto& f : kFilters) onCount += *f.on ? 1 : 0;
+        const std::string sub = onCount ? I18n::Trf("{} of {} on", onCount, IM_COUNTOF(kFilters)) : std::string(I18n::Tr("No filter is on"));
+        if (ApexUi::BeginCard("##InUse")) {
+            ApexUi::CardHeader(IconId::ListChecks, "In use", sub.c_str(), nullptr, nullptr);
+            if (onCount) {
+                ApexUi::CardDivider();
+                // The names as chips, flowing onto the next line when the card is full
+                const float gap = ApexUi::kSpace2 * ApexUi::Unit(), right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+                bool first = true;
+                for (const auto& f : kFilters) {
+                    if (!*f.on) continue;
+                    if (!first && ImGui::GetItemRectMax().x + gap + ApexUi::ChipSize(f.name).x <= right) ImGui::SameLine(0.0f, gap);
+                    ApexUi::Chip(f.name, 0xCECBF6); // accent light (violet_theme.h)
+                    first = false;
+                }
+            }
+        }
+        ApexUi::EndCard();
+    }
     bool familyOpen=false, familyVisible=false;
-    auto family=[&](const char* label) {
+    auto family=[&](int index) {
         if(lutOnly) {if(!familyOpen) {familyVisible=ApexUi::BeginCard("##Luts");familyOpen=true;} return;}
         if(familyOpen) ApexUi::EndCard();
-        ApexUi::SectionLabel(label);
-        familyVisible=ApexUi::BeginCard(label); familyOpen=true;
+        int on = 0;
+        for (const auto& f : kFilters) on += f.family == index && *f.on ? 1 : 0;
+        const std::string label = on ? I18n::Trf("{} ({} on)", I18n::Tr(kFamilies[index]), on) : std::string(I18n::Tr(kFamilies[index]));
+        ApexUi::SectionLabel(label.c_str());
+        familyVisible=ApexUi::BeginCard(kFamilies[index]); familyOpen=true;
     };
     auto card = [&](const char* id, IconId icon, const char* name, const char* what, bool* on, auto&& controls) {
         if(!familyVisible || (lutOnly != (on==&q.lut))) return;
@@ -2410,7 +2444,7 @@ void Picture::RenderFiltersUI(bool lutOnly) {
 
 
 
-    family("FILM LOOKS");
+    family(0);
     card("Technicolor1", IconId::Palette, "Technicolor 1", "Classic two-strip film: everything turns red or cyan", &q.tech1, [&] {
         percent("Amount", &q.tech1Amount, 0.0f, 1.0f, "How much of the look is mixed in", kDef.tech1Amount);
         signedAmount("Cyan side", &q.tech1Cyan, kDef.tech1Cyan, "What the cyan half of the picture leans to", "Greener", "Bluer");
@@ -2493,13 +2527,10 @@ void Picture::RenderFiltersUI(bool lutOnly) {
                      "Shadows", "Highlights");
         resetFilter(&P::tintFilterAmount, &P::tintFilterHue, &P::tintPreserve, &P::tintBalance);
     });
-    family("COLOR AND MOOD");
+    family(1);
     card("Colourfulness", IconId::Rainbow, "Colorfulness", "Livelier colors without blowing out the bright ones", &q.colourful, [&] {
         signedAmount("Amount", &q.colourfulAmount, kDef.colourfulAmount, "More vivid, or more muted", "Muted", "Vivid");
-        if (ApexUi::BeginAdvanced("ColourfulnessAdvanced")) {
-            percent("Protect bright colors", &q.colourfulProtect, 0.0f, 1.0f, "Keeps strong and bright colors from going over the top", kDef.colourfulProtect);
-            ApexUi::EndAdvanced();
-        }
+        percent("Protect bright colors", &q.colourfulProtect, 0.0f, 1.0f, "Keeps strong and bright colors from going over the top", kDef.colourfulProtect);
         resetFilter(&P::colourfulAmount, &P::colourfulProtect);
     });
     card("NightMode", IconId::Moon, "Night Mode", "A cooler, darker evening tone; lamp light stays warm", &q.night, [&] {
@@ -2571,7 +2602,7 @@ void Picture::RenderFiltersUI(bool lutOnly) {
         if (ApexUi::IconTextButton("Open the LUTs folder", IconId::ExternalLink, "Opens Apex Radiance\\LUTs in Explorer (created if needed)")) ShowLutFolder();
     });
 
-    family("LIGHT AND DETAIL");
+    family(2);
     card("AutoExposure", IconId::SunMedium, "Auto exposure", "The picture slowly adapts to dark and bright views, like your eyes", &q.autoExposure, [&] {
         percent("Amount", &q.autoAmount, 0.0f, 1.0f, "How much the brightness follows the view", kDef.autoAmount);
         percent("Target brightness", &q.autoTarget, 0.0f, 1.0f, "The brightness the picture adapts toward", kDef.autoTarget);
@@ -2602,10 +2633,7 @@ void Picture::RenderFiltersUI(bool lutOnly) {
         percent("Amount", &q.halationAmount, 0.0f, 1.0f, "How strong the halo is", kDef.halationAmount);
         percent("Threshold", &q.halationThreshold, 0.0f, 0.95f, "Only light brighter than this gets the halo", kDef.halationThreshold);
         percent("Size", &q.halationSize, 0.0f, 1.0f, "How far the halo reaches around the light", kDef.halationSize);
-        if (ApexUi::BeginAdvanced("HalationAdvanced")) {
-            hue("Halo color", &q.halationHue, kDef.halationHue, "Red-orange is how real film looks");
-            ApexUi::EndAdvanced();
-        }
+        hue("Halo color", &q.halationHue, kDef.halationHue, "Red-orange is how real film looks");
         resetFilter(&P::halationAmount, &P::halationThreshold, &P::halationSize, &P::halationHue);
     });
     card("Dreamy", IconId::Sparkles, "Dreamy", "A soft, glowing, slightly more colorful picture", &q.dreamy, [&] {
@@ -2627,23 +2655,20 @@ void Picture::RenderFiltersUI(bool lutOnly) {
         resetFilter(&P::hdrAmount, &P::hdrRadius, &P::hdrShadows, &P::hdrHighlights, &P::hdrHalo, &P::hdrSaturation);
     });
 
-    family("CAMERA");
+    family(3);
     card("Emphasize", IconId::Crosshair, "Emphasize", "Full color on what you look at, the rest fades to grey", &q.emphasize, [&] {
         percent("Amount", &q.emphAmount, 0.0f, 1.0f, "How strong the effect is", kDef.emphAmount);
         percent("Focus depth", &q.emphWidth, 0.0f, 2.0f, "How deep the colorful zone is, compared with its distance", kDef.emphWidth);
         percent("Grey amount", &q.emphGrey, 0.0f, 1.0f, "How grey the areas outside the zone get", kDef.emphGrey);
-        if (ApexUi::BeginAdvanced("EmphasizeAdvanced")) {
-            toggle("Automatic focus", &q.emphAuto, "The colorful zone follows what is at the center of the screen", kDef.emphAuto);
-            if (!q.emphAuto) {
-                ApexUi::SliderOptions o;
-                o.format = "%.0f m";
-                o.tooltip = "How far from the camera the colorful zone is";
-                o.defaultValue = kDef.emphDistance;
-                slide("Focus distance", &q.emphDistance, 1.0f, 300.0f, o);
-            }
-            percent("Edge softness", &q.emphSoftness, 0.05f, 1.0f, "How gently color fades out past the zone", kDef.emphSoftness);
-            ApexUi::EndAdvanced();
+        toggle("Automatic focus", &q.emphAuto, "The colorful zone follows what is at the center of the screen", kDef.emphAuto);
+        if (!q.emphAuto) {
+            ApexUi::SliderOptions o;
+            o.format = "%.0f m";
+            o.tooltip = "How far from the camera the colorful zone is";
+            o.defaultValue = kDef.emphDistance;
+            slide("Focus distance", &q.emphDistance, 1.0f, 300.0f, o);
         }
+        percent("Edge softness", &q.emphSoftness, 0.05f, 1.0f, "How gently color fades out past the zone", kDef.emphSoftness);
         depthNote();
         resetFilter(&P::emphAmount, &P::emphWidth, &P::emphGrey, &P::emphAuto, &P::emphDistance, &P::emphSoftness);
     });
@@ -2652,23 +2677,17 @@ void Picture::RenderFiltersUI(bool lutOnly) {
         percent("Position", &q.tiltCenter, 0.0f, 1.0f, "Where the sharp band sits: 0% is the top, 100% the bottom", kDef.tiltCenter);
         percent("Sharp band", &q.tiltWidth, 0.0f, 1.0f, "How tall the sharp band is", kDef.tiltWidth);
         percent("Blur strength", &q.tiltBlur, 1.0f, 2.0f, "Above 100% blurs the top and bottom even more", kDef.tiltBlur);
-        if (ApexUi::BeginAdvanced("TiltShiftAdvanced")) {
-            percent("Toy colors", &q.tiltSaturation, 0.0f, 1.0f, "Extra saturation that makes the scene look like a model", kDef.tiltSaturation);
-            ApexUi::EndAdvanced();
-        }
+        percent("Toy colors", &q.tiltSaturation, 0.0f, 1.0f, "Extra saturation that makes the scene look like a model", kDef.tiltSaturation);
         resetFilter(&P::tiltAmount, &P::tiltCenter, &P::tiltWidth, &P::tiltBlur, &P::tiltSaturation);
     });
     card("Prism", IconId::Diamond, "Prism", "Colored fringes toward the edges, like a real lens", &q.prism, [&] {
         percent("Amount", &q.prismAmount, 0.0f, 1.0f, "How far the colors split at the corners", kDef.prismAmount);
         percent("Edge start", &q.prismStart, 0.0f, 0.95f, "Where the fringes begin; lower reaches closer to the center", kDef.prismStart);
-        if (ApexUi::BeginAdvanced("PrismAdvanced")) {
-            ApexUi::SliderOptions o;
-            o.valueText = q.prismQuality < 0.34f ? I18n::Tr("Low") : (q.prismQuality < 0.67f ? I18n::Tr("Medium") : I18n::Tr("High"));
-            o.tooltip = "Smoother color fringes cost a little more";
-            o.defaultValue = kDef.prismQuality;
-            slide("Quality", &q.prismQuality, 0.0f, 1.0f, o);
-            ApexUi::EndAdvanced();
-        }
+        ApexUi::SliderOptions o;
+        o.valueText = q.prismQuality < 0.34f ? I18n::Tr("Low") : (q.prismQuality < 0.67f ? I18n::Tr("Medium") : I18n::Tr("High"));
+        o.tooltip = "Smoother color fringes cost a little more";
+        o.defaultValue = kDef.prismQuality;
+        slide("Quality", &q.prismQuality, 0.0f, 1.0f, o);
         resetFilter(&P::prismAmount, &P::prismStart, &P::prismQuality);
     });
     card("Grain", IconId::Scan, "Film grain", "Fine film grain over the picture", &q.grain, [&] {
@@ -2683,7 +2702,7 @@ void Picture::RenderFiltersUI(bool lutOnly) {
         resetFilter(&P::grainAmount, &P::grainSize, &P::grainAnimated, &P::grainShadows, &P::grainColor);
     });
 
-    family("RETRO AND STYLE");
+    family(4);
     card("3DFX", IconId::Gamepad2, "3DFX", "Late-90s 3D card: 16-bit color, dithering and fine lines", &q.retro3dfx, [&] {
         percent("Amount", &q.fxAmount, 0.0f, 1.0f, "How much of the look is mixed in", kDef.fxAmount);
         {
@@ -2710,13 +2729,10 @@ void Picture::RenderFiltersUI(bool lutOnly) {
         percent("Curvature", &q.crtCurvature, 0.0f, 1.0f, "How curved the glass is", kDef.crtCurvature);
         percent("Phosphor mask", &q.crtMask, 0.0f, 1.0f, "The red, green and blue stripes of the screen", kDef.crtMask);
         percent("Scanlines", &q.crtScanlines, 0.0f, 1.0f, "Dark lines between rows", kDef.crtScanlines);
-        if (ApexUi::BeginAdvanced("CRTAdvanced")) {
-            percent("Dark edges", &q.crtEdges, 0.0f, 1.0f, "Darker corners of the glass", kDef.crtEdges);
-            ApexUi::EndAdvanced();
-        }
+        percent("Dark edges", &q.crtEdges, 0.0f, 1.0f, "Darker corners of the glass", kDef.crtEdges);
         resetFilter(&P::crtAmount, &P::crtCurvature, &P::crtMask, &P::crtScanlines, &P::crtEdges);
     });
-    family("ACCESSIBILITY");
+    family(5);
     card("ColorBlind", IconId::Eye, "Color-blind mode", "Moves the colors you cannot tell apart into ones you can", &q.daltonize, [&] {
         static const char* const kTypes[] = {"Red (protanopia)", "Green (deuteranopia)", "Blue (tritanopia)"};
         int type = static_cast<int>(std::lround(std::clamp(q.daltonType, 0.0f, 2.0f)));

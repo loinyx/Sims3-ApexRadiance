@@ -54,10 +54,10 @@ with a per-pixel radius that grows with distance from the focus, and blended bac
 | Transition (Fixed) | `transicao` | float | 58% (0.288) | 2 to 100% (stored 0.01 to 0.5) | Ramp length after the start; lower gives a sharper line |
 | Sharp in map view | `offInMapView` | bool | on | | Fades the blur out over 0.3 s while the map view is open |
 | Advanced > Strength | `forca` | float | 100% | 0 to 100% | Multiplies the blur amount everywhere (both modes) |
-| Advanced > Quality | `qualidade` | enum | Medium (1) | Low, Medium, High, Ultra | Gather taps per side: 4, 6, 8, 12 (9, 13, 17, 25 per axis) |
-| Advanced > Focus speed (Auto) | `velocidadeFoco` | float | 0.1 s | 0.1 to 1.0 s | Easing time constant of the focus |
-| Advanced > Blur the sky | `blurSky` | bool | on | | Sky pixels get full blur (on) or none (off) |
-| Advanced > Glowing lights | `realceLuzes` | bool | on | | Near-white taps weigh more in blurred areas, so lamps stay bright (at most 1.4x) |
+| How the blur looks > Quality | `qualidade` | enum | Medium (1) | Low, Medium, High, Ultra | Gather taps per side: 4, 6, 8, 12 (9, 13, 17, 25 per axis) |
+| How the blur looks > Focus speed (Auto) | `velocidadeFoco` | float | 0.1 s | 0.1 to 1.0 s | Easing time constant of the focus |
+| How the blur looks > Blur the sky | `blurSky` | bool | on | | Sky pixels get full blur (on) or none (off) |
+| How the blur looks > Glowing lights | `realceLuzes` | bool | on | | Near-white taps weigh more in blurred areas, so lamps stay bright (at most 1.4x) |
 | (not shown) | `tamanho` | float | 0.8 | 0.5 to 6.0 | Legacy spread of the old blur. Still registered so old configurations and profiles round-trip; not used |
 | Developer > Far plane | `farPlane` | float | 1000 | 10 to 10000 | Fixed focus only: a parameter of the heuristic curve, not the game's far plane |
 | Developer > Show blur amount | `debugView` | bool | off | | Paints the blur amount in grey (white = blurred); the Auto focus window is tinted violet. Runs even at amount 0 and in map view (developer mode only) |

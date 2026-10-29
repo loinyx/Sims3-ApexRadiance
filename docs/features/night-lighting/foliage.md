@@ -13,7 +13,7 @@ same fixes apply to the snowy winter variants and to the fences that share the b
 |---|---|
 | Availability | Released in 1.0.0. The daytime curve on foliage lamp colours and garden lamps blocked by buildings: Released in 2.13.0. Per-vertex lamps and crown shade on lot ground: Released in 2.14.0. Trees kept on the normal light rig instead of the underground one: Released in 2.15.3. Lamp brightness and saturation aligned with dusk and dawn: Released in 2.15.6. |
 | Default | On |
-| Menu | Lighting > Objects > *Objects* card; the reach law also needs *Realistic lamp reach* (Lighting > Overview) and *Outdoor light between floors* (Lighting > Stories) |
+| Menu | Lighting > Outside > Objects > *Objects* card; the reach law also needs *Realistic lamp reach* (Lighting > Overview) and *Outdoor light between floors* (Lighting > Inside & floors > Stories) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawObjectRig`, `FoliageVsFor`, `FoliageVertexVsFor`, `DrawLeafShadow`, `NoteCrown`, `CrownsIn`), [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`PatchFoliageVs`, `PatchLeafShadow`), [`features/foliage_vertex_lamps.h`](../../../features/foliage_vertex_lamps.h), [`features/foliage_canopy.h`](../../../features/foliage_canopy.h) |
 

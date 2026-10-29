@@ -10,7 +10,7 @@ upper steps of a stair take the light of the floor they lead to. Part of [Night 
 |---|---|
 | Availability | Released in 2.14.0 |
 | Default | On |
-| Menu | None. Follows Night Lights and Lighting > Objects > *Objects* card > Game fixes > *Smooth indoor light* |
+| Menu | None. Follows Night Lights and Lighting > Game fixes > Objects > *Smooth indoor light* |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml`, read through `bordasDosMapasDeLuz` |
 | Source | [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`PatchBasisSmooth`, `BasisSmoothOptions`: `wallMask`, `floorWall`, `stairRoomFill`, `floorTone`, `storyBlend`), [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawBasisSmooth`), [`features/level_light_share.cpp`](../../../features/level_light_share.cpp) (wall masks and ambient maps) |
 

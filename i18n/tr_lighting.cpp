@@ -238,6 +238,8 @@ const I18n::Entry kEntries[] = {
     {"Needs \"Street lamps light lots\"", "Requer \"Postes iluminam os lotes\"", "Requiere \"Las farolas iluminan los solares\"",
      "Nécessite « Les réverbères éclairent les terrains »"},
     {"Ground brightness", "Brilho no chão", "Brillo en el suelo", "Luminosité au sol"},
+    {"Ground light", "Luz do chão", "Luz del suelo", "Lumière au sol"},
+    {"Lamp light on grass, roads, sidewalks, lots, patios and snow", "Luz das lâmpadas na grama, ruas, calçadas, lotes, pátios e neve", "Luz de las lámparas en césped, calles, aceras, solares, patios y nieve", "Lumière des lampes sur l'herbe, les routes, les trottoirs, les terrains, les patios et la neige"},
     {"Lamp light on grass, lots and patios; 100% is the default", "Luz das lâmpadas na grama, lotes e pátios; 100% é o padrão",
      "Luz de lámparas en césped, solares y patios; 100% es el predeterminado", "Lumière des lampes sur l'herbe, les terrains et les patios ; 100% par défaut"},
     {"Roads and sidewalks", "Ruas e calçadas", "Calles y aceras", "Routes et trottoirs"},

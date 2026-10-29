@@ -212,6 +212,13 @@ Apply after import	tr_menu.cpp:kEntries	Aplicar após importar	Aplicar tras impo
 No saved presets yet	tr_menu.cpp:kEntries	Nenhum preset salvo ainda	Aún no hay preajustes guardados	Aucun préréglage enregistré	
 Open the presets folder	tr_menu.cpp:kEntries	Abrir a pasta de presets	Abrir la carpeta de preajustes	Ouvrir le dossier des préréglages	
 Delete this preset?	tr_menu.cpp:kEntries	Excluir este preset?	¿Eliminar este preajuste?	Supprimer ce préréglage ?	
+Applied	tr_menu.cpp:kEntries	Aplicado	Aplicado	Appliqué	
+Your current setup matches this preset	tr_menu.cpp:kEntries	Seu setup atual corresponde a este preset	Tu configuración actual coincide con este preajuste	Votre configuration actuelle correspond à ce préréglage	
+Changed since you applied it	tr_menu.cpp:kEntries	Alterado desde que você o aplicou	Cambiado desde que lo aplicaste	Modifié depuis son application	
+Update with current setup	tr_menu.cpp:kEntries	Atualizar com o setup atual	Actualizar con la configuración actual	Mettre à jour avec la configuration actuelle	
+Replace this preset with your current setup?	tr_menu.cpp:kEntries	Substituir este preset pelo seu setup atual?	¿Reemplazar este preajuste por tu configuración actual?	Remplacer ce préréglage par votre configuration actuelle ?	
+Update	tr_menu.cpp:kEntries	Atualizar	Actualizar	Mettre à jour	
+Updated "{}"	tr_menu.cpp:kEntries	"{}" atualizado	"{}" actualizado	"{}" mis à jour	{}
 Choose a new preset name	tr_menu.cpp:kEntries	Escolha outro nome para o preset	Elige otro nombre para el preajuste	Choisissez un autre nom de préréglage	
 LUTs	tr_menu.cpp:kEntries	LUTs	LUTs	LUTs	
 Applies a color treatment defined in a file	tr_menu.cpp:kEntries	Aplica um tratamento de cor definido em um arquivo	Aplica un tratamiento de color definido en un archivo	Applique un traitement des couleurs défini dans un fichier	
@@ -1389,6 +1396,60 @@ Match connected pieces to the surrounding light	tr_menu.cpp:kOrganizationEntries
 Indoor objects	tr_menu.cpp:kOrganizationEntries	Objetos internos	Objetos interiores	Objets intérieurs	
 Furniture and stairs inside rooms	tr_menu.cpp:kOrganizationEntries	Móveis e escadas dentro dos cômodos	Muebles y escaleras dentro de las habitaciones	Meubles et escaliers dans les pièces	
 Game fixes	tr_menu.cpp:kOrganizationEntries	Correções do jogo	Correcciones del juego	Corrections du jeu	
+You have version {}, released {}	tr_menu.cpp:kOrganizationEntries	Você tem a versão {}, lançada em {}	Tienes la versión {}, publicada el {}	Vous avez la version {}, sortie le {}	{} {}
+You have version {}	tr_menu.cpp:kOrganizationEntries	Você tem a versão {}	Tienes la versión {}	Vous avez la version {}	{}
+{} new	tr_menu.cpp:kOrganizationEntries	{} novo	{} nuevo	{} nouveau	{}
+{} improved	tr_menu.cpp:kOrganizationEntries	{} melhorado	{} mejorado	{} amélioré	{}
+{} fixed	tr_menu.cpp:kOrganizationEntries	{} corrigido	{} corregido	{} corrigé	{}
+New	tr_menu.cpp:kOrganizationEntries	Novo	Nuevo	Nouveau	
+Improved	tr_menu.cpp:kOrganizationEntries	Melhorado	Mejorado	Amélioré	
+The last {} versions	tr_menu.cpp:kOrganizationEntries	As últimas {} versões	Las últimas {} versiones	Les {} dernières versions	{}
+Needs "Street lamps light lots", a lighting fix	tr_menu.cpp:kOrganizationEntries	Requer "Postes iluminam os lotes", uma correção de iluminação	Requiere "Las farolas iluminan los solares", una corrección de iluminación	Nécessite « Les réverbères éclairent les terrains », une correction d'éclairage	
+Lamp Glow, Water Reflections and Snow need Night Lights	tr_menu.cpp:kOrganizationEntries	Brilho das lâmpadas, Reflexos na água e Neve precisam de Luzes noturnas	Brillo de lámparas, Reflejos en el agua y Nieve necesitan Luces nocturnas	Lueur des lampes, Reflets sur l'eau et Neige nécessitent Lumières de nuit	
+Fine grain and 16-bit color against color steps	tr_menu.cpp:kOrganizationEntries	Grão fino e cor de 16 bits contra degraus de cor	Grano fino y color de 16 bits contra los escalones de color	Grain fin et couleur 16 bits contre les paliers de couleur	
+Every option on this page is experimental: if anything looks wrong or the game crashes, turn it off	tr_menu.cpp:kOrganizationEntries	Todas as opções desta página são experimentais: se algo parecer errado ou o jogo travar, desligue-as	Todas las opciones de esta página son experimentales: si algo se ve mal o el juego se cierra, desactívalas	Toutes les options de cette page sont expérimentales : si quelque chose semble faux ou si le jeu plante, désactivez-les	
+Handled by Sims3SettingsSetter, so Apex leaves it alone	tr_menu.cpp:kOrganizationEntries	Já feito pelo Sims3SettingsSetter, então o Apex não mexe	Ya lo hace Sims3SettingsSetter, así que Apex no lo toca	Déjà géré par Sims3SettingsSetter, Apex n'y touche pas	
+{} of {} on	tr_menu.cpp:kOrganizationEntries	{} de {} ligados	{} de {} activados	{} sur {} activés	{} {}
+Lot streaming	tr_menu.cpp:kOrganizationEntries	Streaming de lotes	Carga de solares	Chargement des terrains	
+Lot detail	tr_menu.cpp:kOrganizationEntries	Detalhe dos lotes	Detalle de solares	Détail des terrains	
+Objects per step	tr_menu.cpp:kOrganizationEntries	Objetos por etapa	Objetos por paso	Objets par étape	
+Delay between steps	tr_menu.cpp:kOrganizationEntries	Intervalo entre etapas	Espera entre pasos	Délai entre étapes	
+While you play	tr_menu.cpp:kOrganizationEntries	Enquanto você joga	Mientras juegas	Pendant que vous jouez	
+All effects are off; Room to save stays on	tr_menu.cpp:kOrganizationEntries	Todos os efeitos estão desligados; Espaço para salvar continua ligado	Todos los efectos están desactivados; Espacio para guardar sigue activo	Tous les effets sont désactivés ; Place pour sauvegarder reste activé	
+Some effects are on; off: {}	tr_menu.cpp:kOrganizationEntries	Alguns efeitos estão ligados; desligados: {}	Algunos efectos están activados; desactivados: {}	Certains effets sont activés ; désactivés : {}	{}
+Saving, reset and recovery	tr_menu.cpp:kOrganizationEntries	Salvar, redefinir e recuperar	Guardar, restablecer y recuperar	Sauvegarde, réinitialisation et récupération	
+Menu, shortcuts, compatibility and credits	tr_menu.cpp:kOrganizationEntries	Menu, atalhos, compatibilidade e créditos	Menú, atajos, compatibilidad y créditos	Menu, raccourcis, compatibilité et crédits	
+Steam Deck	tr_menu.cpp:kOrganizationEntries	Steam Deck	Steam Deck	Steam Deck	
+Credits	tr_menu.cpp:kOrganizationEntries	Créditos	Créditos	Crédits	
+Turn on Color	tr_menu.cpp:kOrganizationEntries	Ligar Cor	Activar Color	Activer Couleur	
+Color turned on	tr_menu.cpp:kOrganizationEntries	Cor ligada	Color activado	Couleur activée	
+In use	tr_menu.cpp:kOrganizationEntries	Em uso	En uso	Utilisés	
+No filter is on	tr_menu.cpp:kOrganizationEntries	Nenhum filtro ligado	Ningún filtro activado	Aucun filtre activé	
+{} ({} on)	tr_menu.cpp:kOrganizationEntries	{} ({} ligados)	{} ({} activados)	{} ({} activés)	{} {}
+Film looks	tr_menu.cpp:kOrganizationEntries	Visuais de filme	Looks de película	Looks cinéma	
+Color and mood	tr_menu.cpp:kOrganizationEntries	Cor e clima	Color y ambiente	Couleur et ambiance	
+Light and detail	tr_menu.cpp:kOrganizationEntries	Luz e detalhe	Luz y detalle	Lumière et détail	
+Camera	tr_menu.cpp:kOrganizationEntries	Câmera	Cámara	Caméra	
+Retro and style	tr_menu.cpp:kOrganizationEntries	Retrô e estilo	Retro y estilo	Rétro et style	
+Accessibility	tr_menu.cpp:kOrganizationEntries	Acessibilidade	Accesibilidad	Accessibilité	
+Apply some parts…	tr_menu.cpp:kOrganizationEntries	Aplicar só algumas partes…	Aplicar solo algunas partes…	Appliquer seulement certaines parties…	
+{} applied	tr_menu.cpp:kOrganizationEntries	{} aplicado	{} aplicado	{} appliqué	{}
+How the shade looks	tr_menu.cpp:kOrganizationEntries	Como a sombra fica	Cómo se ve la sombra	L'aspect de l'ombre	
+Distance and quality	tr_menu.cpp:kOrganizationEntries	Distância e qualidade	Distancia y calidad	Distance et qualité	
+Method and quality	tr_menu.cpp:kOrganizationEntries	Método e qualidade	Método y calidad	Méthode et qualité	
+Edges and textures	tr_menu.cpp:kOrganizationEntries	Bordas e texturas	Bordes y texturas	Bords et textures	
+Outside	tr_menu.cpp:kOrganizationEntries	Exterior	Exterior	Extérieur	
+Inside & floors	tr_menu.cpp:kOrganizationEntries	Interior e andares	Interior y plantas	Intérieur et étages	
+Where the light goes	tr_menu.cpp:kOrganizationEntries	Para onde a luz vai	Adónde va la luz	Où va la lumière	
+Walls	tr_menu.cpp:kOrganizationEntries	Paredes	Paredes	Murs	
+Roofs	tr_menu.cpp:kOrganizationEntries	Telhados	Tejados	Toits	
+Background light	tr_menu.cpp:kOrganizationEntries	Luz de fundo	Luz de fondo	Lumière de fond	
+Lamp light	tr_menu.cpp:kOrganizationEntries	Luz das lâmpadas	Luz de las lámparas	Lumière des lampes	
+Fixes for game bugs. They are on by default; turn one off only to compare with the game.	tr_menu.cpp:kOrganizationEntries	Correções de bugs do jogo. Ficam ligadas por padrão; desligue uma só para comparar com o jogo.	Correcciones de errores del juego. Vienen activadas; desactiva una solo para comparar con el juego.	Corrections de bugs du jeu. Elles sont activées par défaut ; n'en désactivez une que pour comparer avec le jeu.	
+Needs "Street lamps light lots" and "Smooth ground light"	tr_menu.cpp:kOrganizationEntries	Requer "Postes iluminam os lotes" e "Luz suave no chão"	Requiere "Las farolas iluminan los solares" y "Luz suave en el suelo"	Nécessite « Les réverbères éclairent les terrains » et « Lumière douce au sol »	
+Needs "Smooth ground light"	tr_menu.cpp:kOrganizationEntries	Requer "Luz suave no chão"	Requiere "Luz suave en el suelo"	Nécessite « Lumière douce au sol »	
+Needs "Street lamps light lots" (Game fixes tab)	tr_menu.cpp:kOrganizationEntries	Requer "Postes iluminam os lotes" (aba Correções do jogo)	Requiere "Las farolas iluminan los solares" (pestaña Correcciones del juego)	Nécessite « Les réverbères éclairent les terrains » (onglet Corrections du jeu)	
+Needs "Street lamps light lots" (Lighting page, Game fixes tab)	tr_menu.cpp:kOrganizationEntries	Requer "Postes iluminam os lotes" (página Iluminação, aba Correções do jogo)	Requiere "Las farolas iluminan los solares" (página Iluminación, pestaña Correcciones del juego)	Nécessite « Les réverbères éclairent les terrains » (page Éclairage, onglet Corrections du jeu)	
 Film tones	tr_menu.cpp:kOrganizationEntries	Tons de cinema	Tonos de cine	Tons cinématographiques	
 Color mixer	tr_menu.cpp:kOrganizationEntries	Misturador de cores	Mezclador de colores	Mélangeur de couleurs	
 Lamp light on grass, lots and patios	tr_menu.cpp:kOrganizationEntries	Luz das lâmpadas na grama, nos lotes e nos pátios	Luz de las lámparas en césped, solares y patios	Lumière des lampes sur l’herbe, les terrains et les patios	
@@ -1919,6 +1980,9 @@ Fixed	tr_image.cpp:kEntries	Fixo	Fijo	Fixe
 Keeps what the camera looks at sharp	tr_image.cpp:kEntries	Mantém nítido o que a câmera olha	Mantiene nítido lo que mira la cámara	Garde net ce que regarde la caméra	
 Blur starts at a set distance, like before	tr_image.cpp:kEntries	O desfoque começa a uma distância fixa, como antes	El desenfoque empieza a una distancia fija, como antes	Le flou commence à une distance fixe, comme avant	
 Blur amount	tr_image.cpp:kEntries	Quantidade de desfoque	Cantidad de desenfoque	Intensité du flou	
+What stays sharp	tr_image.cpp:kEntries	O que fica nítido	Lo que queda nítido	Ce qui reste net	
+How the blur looks	tr_image.cpp:kEntries	Como o desfoque fica	Cómo se ve el desenfoque	L'aspect du flou	
+Map view	tr_image.cpp:kEntries	Vista do mapa	Vista de mapa	Vue de la carte	
 How soft the background gets	tr_image.cpp:kEntries	O quanto o fundo fica suave	Qué tan suave queda el fondo	À quel point l'arrière-plan s'adoucit	
 Sharp area	tr_image.cpp:kEntries	Área nítida	Área nítida	Zone nette	
 How much around the focus stays sharp	tr_image.cpp:kEntries	O quanto ao redor do foco fica nítido	Cuánto alrededor del enfoque queda nítido	La part autour de la mise au point qui reste nette	
@@ -2226,6 +2290,8 @@ Soft lamp light on the ground, without blocky steps or specks	tr_lighting.cpp:kE
 BRIGHTNESS	tr_lighting.cpp:kEntries	BRILHO	BRILLO	LUMINOSITÉ	
 Needs "Street lamps light lots"	tr_lighting.cpp:kEntries	Requer "Postes iluminam os lotes"	Requiere "Las farolas iluminan los solares"	Nécessite « Les réverbères éclairent les terrains »	
 Ground brightness	tr_lighting.cpp:kEntries	Brilho no chão	Brillo en el suelo	Luminosité au sol	
+Ground light	tr_lighting.cpp:kEntries	Luz do chão	Luz del suelo	Lumière au sol	
+Lamp light on grass, roads, sidewalks, lots, patios and snow	tr_lighting.cpp:kEntries	Luz das lâmpadas na grama, ruas, calçadas, lotes, pátios e neve	Luz de las lámparas en césped, calles, aceras, solares, patios y nieve	Lumière des lampes sur l'herbe, les routes, les trottoirs, les terrains, les patios et la neige	
 Lamp light on grass, lots and patios; 100% is the default	tr_lighting.cpp:kEntries	Luz das lâmpadas na grama, lotes e pátios; 100% é o padrão	Luz de lámparas en césped, solares y patios; 100% es el predeterminado	Lumière des lampes sur l'herbe, les terrains et les patios ; 100% par défaut	
 Roads and sidewalks	tr_lighting.cpp:kEntries	Ruas e calçadas	Calles y aceras	Routes et trottoirs	
 Compared with the ground around them; 100% is the same	tr_lighting.cpp:kEntries	Em relação ao chão em volta; 100% é igual	Respecto al suelo que las rodea; 100% es igual	Par rapport au sol autour ; 100% = pareil	

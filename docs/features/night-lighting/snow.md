@@ -11,7 +11,7 @@ own pages (see [See also](#see-also)). Part of [Night Lighting](README.md).
 |---|---|
 | Availability | Released in 1.0.0. Subdued daytime response on snow on objects and *Ground brightness* on the squared terrain variant: Released in 2.6.0. The melting-snow lot pass, the daytime lamp term on snowy lots, the wet world pass left to the game in snow and the game's own snow on objects in full daylight: Released in 2.7.0. The room mask and lamp shade on snowy lots, and the indoor light on the ground on the snowy lot passes: Released in 2.15.3. Snow and melting-snow edge blending and visible-lot updates: Released in 2.15.4 |
 | Default | On (with Night Lighting and *Street lamps light lots*) |
-| Menu | No snow-specific switch; World > Water & Snow > Snow holds *Sidewalk visibility*. Uses Lighting > Ground > Ground & Lots > Game fixes (*Street lamps light lots*, *Smooth ground light*), Lighting > Ground > Ground intensity (*Ground brightness*) and Lighting > Objects > Objects > Game fixes (*Fences and stairs catch light*, *Fence brightness*) |
+| Menu | No snow-specific switch; World > Water & Snow > Snow holds *Sidewalk visibility*. Uses Lighting > Game fixes > Ground & Lots (*Street lamps light lots*, *Smooth ground light*), Lighting > Outside > Ground & Lots, *Brightness* group (*Ground brightness*) and Lighting > Outside > Objects > Objects > Game fixes (*Fences and stairs catch light*, *Fence brightness*) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawLotSnow`, `DrawLotMelt`, `DrawSnowFloor`, `DrawSnowOnObject`), [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`PatchSnowFloor`, `PatchSnowCover`, `PatchSnowRelief`) |
 
@@ -59,7 +59,7 @@ Snow has no setting of its own besides sidewalk snow. It uses these Night Lighti
 |---|---|---|---|---|---|
 | Street lamps light lots | `luzDoPosteNaGramaDoLote` | bool | on | | Dispatch gate for every snow fix ([lot-light-pass.md](lot-light-pass.md)) |
 | Smooth ground light | `mapaDeLuzSuavizado` | bool | on | | Builds the world atlas that every snow fix reads |
-| Ground brightness | `brilhoNoChao` | float | 75% | 25 to 300% | Scales the lot snow pass (`c4.x`) and snow on floors, weighted by the night level |
+| Ground light | `luzNoChao` | float | 100% | 25 to 300% | Scales the lot snow pass (`c4.x`) and snow on floors, weighted by the night level |
 | Fences and stairs catch light | `cercasComLuzDoChao` | bool | on | | Snow on fence tops (class 8) and stair tops (class 9) |
 | Fence brightness | `forcaNasCercas` | float | 75% | 25 to 200% | Strength of the atlas term on class 8 and 9 snow |
 | Sidewalk visibility | `calcadaComNevePisada` | float | 50% | 0 to 100% | How much sidewalk shows where Sims have walked ([roads.md](roads.md)) |

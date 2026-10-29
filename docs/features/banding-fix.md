@@ -199,7 +199,7 @@ instead of hiding them.
 6. **Hooks.** `GetRenderTargetData`, `ColorFill` and `GetRenderTarget` are detoured (`ExtraHooks::EnsureTargetHooks`)
    only when the switch first turns on. With the switch off the frame callbacks return at once.
 
-**Status.** The card's *Status* row shows a pill (Active, Starting, Unavailable or Off) with the video memory of the
+**Status.** The *High-precision scene* switch shows its state as a chip after its label (Active, Starting or Unavailable; none while off) with the video memory of the
 target or the reason it is not used. The development build adds the resolves by cause and the CPU time to issue one,
 under *Live counters*. The texture is counted in Apex's Direct3D memory (developer
 `memory_owners`).

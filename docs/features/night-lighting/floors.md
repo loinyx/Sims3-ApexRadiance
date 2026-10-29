@@ -11,7 +11,7 @@ story. Interior floors are unchanged. Part of [Night Lighting](README.md).
 |---|---|
 | Availability | Released (present since 2.1.0, the first version in this repository). The lot's ground lamp shade on story-0 floors (*Walls shade lamp light near the ground*): Released in 2.13.0. Outdoor floors kept off the indoor light on the ground: Released in 2.15.3. Light past 1 on summer outdoor floors: Released in 2.16.0 |
 | Default | On (follows the Ground & Lots switches) |
-| Menu | No card of its own: Lighting > Ground (*Street lamps light lots*, *Smooth ground light*, *Ground brightness*) and Lighting > Stories |
+| Menu | No card of its own: Lighting > Game fixes (*Street lamps light lots*, *Smooth ground light*), Lighting > Outside (*Ground brightness*) and Lighting > Inside & floors > Stories |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawFloor`, `DrawFloorAtlas`, `FloorShadeBind`), [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`PatchFloor`, `PatchBakedAtlasPs`, `WorldYOutput`), [`features/ground_lamp_shadow.h`](../../../features/ground_lamp_shadow.h) (`FloorShadeRows`), [`shaders/floor_atlas_table.h`](../../../shaders/floor_atlas_table.h), [`shaders/shader_ids.h`](../../../shaders/shader_ids.h) |
 
@@ -59,7 +59,7 @@ Floors have no setting of their own. They depend on:
 |---|---|---|
 | Street lamps light lots | `luzDoPosteNaGramaDoLote` | The floor handlers sit after the bridge-enabled check in the draw dispatch |
 | Smooth ground light | `mapaDeLuzSuavizado` | The atlas exists only with it |
-| Ground brightness | `brilhoNoChao` | Scales the floor's lamp constant after the `max` (`GroundGain`, `1 + (gain - 1) x night`) |
+| Ground light | `luzNoChao` | Scales the floor's lamp constant after the `max` (`GroundGain`, `1 + (gain - 1) x night`) |
 | Outdoor light between floors | `luzExternaEntreAndares` | Floors of other stories get the outdoor lamps |
 | Walls shade lamp light near the ground | `paredesSombreiamOChao` | The lot's ground lamp shade, on story-0 floors too (off: gate 0, the floor as before) |
 | Indoor light adds to the ground | `luzInternaSomaNoChao` | None on floors: they keep the plain patch, and the texels under a story-0 floor tile keep alpha 0 (*Indoor light on the ground* below) |

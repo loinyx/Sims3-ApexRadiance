@@ -12,7 +12,7 @@ and [Smooth light maps](room-map-smoothing.md).
 |---|---|
 | Availability | Released in 2.14.0. The story memo of 16 room maps and the kept segments of the matched rooms: Released in 2.15.3. Direct map-slot validation and room shader state batching: Released in 2.15.6. |
 | Default | On |
-| Menu | None. Follows Lighting > Buildings > Rooms at Night > *Indoor light through openings* and *Smooth light maps* |
+| Menu | None. Follows Lighting > Inside & floors > Rooms at Night > *Indoor light through openings* and *Smooth light maps* |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml`, read through `luzInternaPelasAberturas` and `mapasDosComodosSuaves` |
 | Source | [`features/arch_ambient.h`](../../../features/arch_ambient.h), [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`PatchRoomMapSmooth`, arch variant), [`features/level_light_share.cpp`](../../../features/level_light_share.cpp) (`InnerPass`, `GridPassImpl`, `GridEdgeSpot`, `kFloorSill`, `InnerNormScaleAt`) |
 

@@ -10,7 +10,7 @@ setting lets the sidewalk concrete show through where Sims have walked. Part of 
 |---|---|
 | Availability | Released in 1.0.0. Alpha-blended sidewalk variant: released in 2.5.6 |
 | Default | On (with Night Lighting and *Street lamps light lots*) |
-| Menu | Lighting > Ground > *Ground intensity* (brightness); World > Water & Snow > *Snow* (sidewalk visibility) |
+| Menu | Lighting > Outside > Ground & Lots, *Brightness* group; World > Water & Snow > *Snow* (sidewalk visibility) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`IsRoadVs`, `PatchRoad`), [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawRoad`) |
 
@@ -42,13 +42,13 @@ light as the ground next to them.
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| Roads and sidewalks (Ground intensity card) | `brilhoNasRuas` | float | 100% | 25 to 300% | Road lamp brightness relative to the ground; multiplied by *Ground brightness* (`brilhoNoChao`). Needs *Street lamps light lots* |
+| Ground light (Outside > Brightness) | `luzNoChao` | float | 100% | 25 to 300% | Road lamp brightness, the same as every other ground ([README](README.md)). Needs *Street lamps light lots* |
 | Sidewalk visibility (Snow card) | `calcadaComNevePisada` | float | 50% | 0 to 100% | How much sidewalk concrete shows through snow; 0% keeps the game's look. Needs *Street lamps light lots* (`SetSidewalkClear` clamps 0 to 1) |
 
 Roads also depend on *Street lamps light lots* (`luzDoPosteNaGramaDoLote`, the dispatch gate) and use *Smooth ground
 light* (`mapaDeLuzSuavizado`) when it is on. Both are documented in [lot-light-pass.md](lot-light-pass.md) and
-[world-atlas-and-smoothed-maps.md](world-atlas-and-smoothed-maps.md). The Lighting balance styles (Subtle, Soft,
-Natural) keep `brilhoNasRuas` at 100%.
+[world-atlas-and-smoothed-maps.md](world-atlas-and-smoothed-maps.md). Roads take the ground's lamp scale with no factor of
+their own.
 
 ## Compatibility and interactions
 

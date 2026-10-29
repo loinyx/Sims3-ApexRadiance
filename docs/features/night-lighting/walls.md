@@ -10,7 +10,7 @@ sun and shadows; only the lamp light baked into each wall is scaled. Part of [Ni
 |---|---|
 | Availability | Released (present since 2.1.0, the first version in this repository). Daytime lamp term on walls: Released in 2.6.0. The game's bloom alpha kept on lit walls and the rebalanced style brightness (84% for Soft): Released in 2.7.0. Realistic lamp reach and balcony floors blocking a lamp below them (replacing *Light behind balconies*), the shared daytime curve: Released in 2.12.3. Soft edges by the lamp's size (*Shadow softness*) and lamp light through openings: Released in 2.13.0. Outdoor walls drawn below their light base (gables, eaves) lit from their drawn foot: Released in 2.15.3. Adjacent gable cells keep one lighting reference and upper trim avoids the ground lamp pool: Released in 2.15.4. Light past 1 on ps_3_0 outside walls, wall lamps lighting their own wall and the wall shade strip left as the game maps it: Released in 2.16.0. |
 | Default | On, Brightness 30%, Realistic lamp reach on |
-| Menu | Lighting > Buildings > Buildings card, group *WALLS* (lamps of every story: Lighting > Stories) |
+| Menu | Lighting > Outside > Buildings card, group *Walls* (lamps of every story: Lighting > Inside & floors > Stories) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawWallGain`), [`shaders/wall_lamp_table.h`](../../../shaders/wall_lamp_table.h), [`features/terrain_lighting_policy.h`](../../../features/terrain_lighting_policy.h); lamps of every story in [`features/level_light_share.cpp`](../../../features/level_light_share.cpp) |
 

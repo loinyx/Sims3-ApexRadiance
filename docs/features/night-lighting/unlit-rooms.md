@@ -12,7 +12,7 @@ tone. Part of [Night Lighting](README.md).
 |---|---|
 | Availability | Released (present since 2.1.0, the first version in this repository). The 10 to 80% Brightness range, the 0% Blue tint default, the structure-change recovery: Released in 2.6.0. The card's *Background light* and *Lamp light* groups: Released in 2.13.0 |
 | Default | On; Brightness 20% (35% until 2.15.0); Blue tint 0%; the same in the Performance, Balanced and Quality presets |
-| Menu | Lighting > Buildings > Rooms at Night |
+| Menu | Lighting > Inside & floors > Rooms at Night |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/unlit_rooms.cpp`](../../../features/unlit_rooms.cpp), [`features/room_ambient_policy.h`](../../../features/room_ambient_policy.h), [`framework/s3ss_detect.cpp`](../../../framework/s3ss_detect.cpp), [`framework/s3ss_ambient_policy.h`](../../../framework/s3ss_ambient_policy.h); furniture side in [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) and [`features/shader_patches.cpp`](../../../features/shader_patches.cpp); card in [`patches/night_terrain_relight_patch.cpp`](../../../patches/night_terrain_relight_patch.cpp) (`DrawRoomsCard`) |
 

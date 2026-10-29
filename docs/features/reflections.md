@@ -48,7 +48,7 @@ screen-space reflection of the shore.
 |---|---|---|---|---|---|
 | Water Reflections (card switch) | `reflexoNoLago` | float | on (156%) | | Off stores 0; on restores the last brightness (156% when there is none). Not a separate key |
 | Reflection brightness | `reflexoNoLago` | float | 156% | 5 to 300% (stored 0 to 3) | Strength of the shore reflection (PS `c58.x`) |
-| Lamp Glow > Lamps glow on ponds | `lagosRefletemLampadas` | bool | on | | Lamp glints and glow on ponds |
+| Lamp Glow (card switch) | `lagosRefletemLampadas` | bool | on | | Lamp glints and glow on ponds |
 | Lamp Glow > Glow brightness | `brilhoNaAgua` | float | 40% | 10 to 40% | Lamp glow strength (PS `c52.x`); 0 is sent while the glow is off |
 | Developer > Water highlights > Stabilize lamp sparkles on water | `waterSpecularFilter` | bool | on | | Filters tiny highlights (no temporal smoothing) |
 | Developer > Water highlights > Preserve bright lamp colors on water | `waterPreserveLampColors` | bool | on | | Softens excessive lamp brightness while keeping its colour |

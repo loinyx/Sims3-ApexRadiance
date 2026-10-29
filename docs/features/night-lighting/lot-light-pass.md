@@ -10,7 +10,7 @@ border. Near the border the two sides blend over 3 m, so a lamp standing next to
 |---|---|
 | Availability | Released (part of Night Lighting since 0.1.0). Lot UV alignment, daylight terrain term and the constant-read guard: Released in 2.6.0. Rain and other weather variants recognised (exact rain variant and by structure): Released in 2.7.0. Lamp shade on lot ground (*Walls shade lamp light near the ground*) and lamps through the outside walls' openings: Released in 2.13.0. Crown shade from trees and bushes: Released in 2.14.0. A shade that takes only the light of the lamps a wall blocks, closed gates and narrow fence gaps, the room mask and lamp shade on snowy lots, the lot map aligned on each axis, *Indoor light adds to the ground*, and a lot's shade shown with its chunks' texels: Released in 2.15.3. Verified winter terrain layouts and exact fence-gap length reuse: Released in 2.15.6. Light past 1 with the walls' shade on it: Released in 2.16.0. Fence grid and half-float reads without x87 control-word calls: Released in 2.16.2. |
 | Default | On |
-| Menu | Lighting > Ground > Ground & Lots > *Game fixes* (folded) > *Street lamps light lots* |
+| Menu | Lighting > Game fixes > Ground & Lots > *Street lamps light lots* |
 | Configuration | `[patches.NightTerrainRelight]` `luzDoPosteNaGramaDoLote` in `ApexRadiance.toml` |
 | Source | [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`kReplacementHlsl`, lot branch of `OnDrawInnerCore`), [`patches/night_terrain_relight_patch.cpp`](../../../patches/night_terrain_relight_patch.cpp) (game patches in Individual options) |
 
@@ -67,8 +67,7 @@ kept, never the game's bytecode. The snowy and melting-snow lot passes are separ
 |---|---|---|---|---|---|
 | Street lamps light lots | `luzDoPosteNaGramaDoLote` | bool | on | | This pass; off also disables roads, floors, fences, snow and per-pixel objects (everything after the wall handler in the dispatch) |
 | Smooth ground light | `mapaDeLuzSuavizado` | bool | on | | Needed for the atlas; without it the pass uses the home chunk's game map |
-| Ground brightness | `brilhoNoChao` | float | 75% | 25 to 300% | Night-weighted scale of c3.x |
-| Lot lamp brightness | `forcaDasLampadasDoLote` | float | 80% | 25 to 300% | Night-weighted scale of the lot's own map (c31.x) |
+| Ground light | `luzNoChao` | float | 100% | 25 to 300% | Night-weighted scale of c3.x (60% of it at 100%); the lot's own map (c31.x) at its full colour |
 | Rooms at Night > Indoor light adds to the ground | `luzInternaSomaNoChao` | bool | on | | The lot map's indoor light added after the max and the shade (c34, *Indoor light on the ground* below) |
 | Developer: Soft lot edges (A/B) | `bordaSuaveLote` | bool | on | | Registered only in developer mode (always on otherwise); pushed every frame (`SetSoftLotEdges`) |
 | Individual options | `gramaDoLoteUsaLuzDoLote` | bool | on | | See *Game patches in Individual options* |
@@ -221,7 +220,7 @@ uses, so the masked copy was always refused and snowy lots drew with no mask or 
 build runs on the shade worker (*Worker thread* below) and again only when the lot's place, its lamps (place, about 20%
 of light, in or out of the bake) or the outside walls, fences and crowns in its box changed, at most every 750 ms
 (`kShadeMinEveryMs`).
-It follows *Walls shade lamp light near the ground* (Lighting > Ground, `paredesSombreiamOChao`). Status (developer page): *Walls shade lamps on lot ground*. The lot's
+It follows *Walls shade lamp light near the ground* (Lighting > Outside > Ground & Lots, `paredesSombreiamOChao`). Status (developer page): *Walls shade lamps on lot ground*. The lot's
 ground height is taken from room 0's matrix (`m13`, unverified as the ground under every texel).
 
 Outdoor floors on the ground (story 0) read the same texture: their shaders multiply `max(floor map, atlas)` by the

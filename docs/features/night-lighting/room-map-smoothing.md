@@ -10,7 +10,7 @@ and openings keep their shape; only the way the baked light is stored and read c
 |---|---|
 | Availability | Released in 2.13.0. The read of the room's own texels beside walls: Released in 2.16.0. The ambient-weight floor of roofed rooms: Released in 2.16.3. Floor reads off the walls (the story's wall mask): Released in 2.17.1. |
 | Default | On |
-| Menu | Lighting > Buildings > Rooms at Night, group LAMP LIGHT (needs *Outdoor light between floors*) |
+| Menu | Lighting > Inside & floors > Rooms at Night, group *Lamp light* (needs *Outdoor light between floors*) |
 | Configuration | `mapasDosComodosSuaves` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/room_map_dither.cpp`](../../../features/room_map_dither.cpp), [`features/level_light_share.cpp`](../../../features/level_light_share.cpp) (`FadeAtThreshold`), [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`PatchRoomMapSmooth`), [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawRoomMapSmooth`) |
 

@@ -11,7 +11,7 @@ shadows. Part of [Night Lighting](README.md).
 |---|---|
 | Availability | Released (present since 2.1.0, the first version in this repository). Daytime response of the per-pixel terms: Released in 2.6.0. Walls blocking per-pixel lamps outdoors, indoor objects lit by lamps of another story, furniture keeping its light until its room changes at a lamp switch, and the game's own lighting in full daylight: Released in 2.7.0. Lighting corrections: Released in 2.12.1. The outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and the ground-light height gate: Released in 2.12.3. *Buildings block lamp light on trees and objects* on rigs (trees, bushes, rig objects), indoor and outdoor lamps through openings on objects, a lamp through an arch on objects inside it, disabled lamps no longer lighting objects: Released in 2.13.0. The reach law's lamp sum held under 1 by its brightest channel, loose outdoor objects (gates) at the fences' lamp scale, ceiling lamps of the story below kept off the furniture above: Released in 2.15.3. Loose architectural objects follow the walls' lamp gain; elevated structures avoid the ground lamp pool: Released in 2.15.4. The window pass without outdoor light inside the house plan, window parts and furniture reading the light maps on their own side of a wall: Released in 2.17.1. |
 | Default | On (all switches), Brightness 75%, Seamless light brightness 75% (the Soft light style) |
-| Menu | Lighting > Objects > *Objects* card (its folded *Game fixes* holds the stairs, doors, windows, pieces, fences and indoor rows); *Realistic lamp reach* on Lighting > Overview |
+| Menu | Lighting > Outside > *Objects* card (Lighting > Game fixes > Objects holds the stairs, doors, windows, pieces, fences and indoor rows); *Realistic lamp reach* on Lighting > Overview |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/object_light_bridge.cpp`](../../../features/object_light_bridge.cpp), [`features/rig_tracker.cpp`](../../../features/rig_tracker.cpp), [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`PatchObjectLampVs`, `PatchObjectLampPs`), [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawObjectLamp`), [`features/terrain_lighting_policy.h`](../../../features/terrain_lighting_policy.h) |
 
@@ -53,7 +53,7 @@ the shared daytime curve (`SurfaceLampGain` = strength x `LampDay(night)`: 3% by
 colours x `LampDay(night)` for that draw. Until 2.12.2 the patch was skipped in full daylight, which left the game's rig
 lamps and the CPU rig boost at night strength by day. The moon-shadow and leaf-shadow passes stay night-only. Outdoor
 objects and windows drop a per-pixel lamp hidden behind an outside wall of the lot, or below a balcony or upper floor
-they stand above, and keep part of one seen past a slab's edge (Lighting > Objects > *Buildings block lamp light on trees and
+they stand above, and keep part of one seen past a slab's edge (Lighting > Outside > Objects > *Buildings block lamp light on trees and
 objects*, see [level-light-share.md](level-light-share.md#walls-block-light-outdoors)). An object or window standing
 above every lamp head around takes no ground light: it fades over the first 1.5 m above the highest head within 15 m.
 

@@ -99,10 +99,7 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 | Ground > Game fixes > Smooth ground light | `mapaDeLuzSuavizado` | bool | on | | Smoothed chunk maps and the world atlas ([world-atlas](world-atlas-and-smoothed-maps.md)) |
 | Ground > Game fixes > Update at dusk | `automaticoAoAnoitecer` | bool | on | | Rebuild the terrain light at the settled day and night endpoints |
 | Ground > Game fixes > Delay after dusk | `atrasoSegundos` | float | 2.0 s | 0.5 to 10 s | Wait before the endpoint rebuild (none while Build mode editing) |
-| Ground intensity > Ground brightness | `brilhoNoChao` | float | 75% | 25 to 300% | Lamp scale on terrain, lot grass, snowy lot grass and floors; needs *Street lamps light lots* |
-| Ground intensity > Roads and sidewalks | `brilhoNasRuas` | float | 100% | 25 to 300% | Road lamp scale, multiplied by the ground brightness ([roads](roads.md)) |
-| Ground intensity > Street lamp brightness | `forcaDosPostes` | float | 80% | 25 to 300% | Street-lamp colour in the terrain bake; one terrain rebuild on slider release |
-| Ground intensity > Lot lamp brightness | `forcaDasLampadasDoLote` | float | 80% | 25 to 300% | Lot-lamp colour in the terrain bake (rebuild on release) and the lot's own light map on its grass (live) |
+| Outside > Brightness > Ground light | `luzNoChao` | float | 100% | 25 to 300% | Lamp light on every ground: terrain, roads, sidewalks, lot grass, floors and snow, all from the same terrain light (every lamp enters the terrain bake and the lot's own map at its full colour). 100% is the Soft balance of the four controls it replaced (`brilhoNoChao` x `forcaDasLampadasDoLote`, read from old configs); needs *Street lamps light lots* |
 | Objects > Lamps light objects | `postesNosObjetos` | bool | on | | Rig lamp boost and moon-shadow fix ([objects-and-rigs](objects-and-rigs.md), [foliage](foliage.md)) |
 | Objects > Brightness | `forcaNosObjetos` | float | 75% | 25 to 300% | Strength of the ground light floor on outdoor objects (*Doors and windows stay lit*) and of the rig lamp boost. With *Realistic lamp reach* (and *Doors and windows stay lit* and *Seamless light on pieces* on) the lamps on objects follow the walls' brightness x *Seamless light brightness* instead (`LotLightBridge::ObjectReachLawScale`, `ObjectLightBridge` `ReachLawRec`) |
 | Objects > Game fixes > Light stairs, railings, columns | `lampadasEmTodosObjetos` | bool | on | | Objects the game leaves without lamp light; applies when a world loads ("Reload save" badge) |
@@ -138,7 +135,7 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 | Stories > Game fixes > Every floor in full detail | `todosOsAndaresEmDetalhe` | bool | on | | Every floor of the active lot solved in full detail |
 | Performance > Lamp lighting > Lamp updates | `lampLightingMode` | string | `"instant"` | `"classic"`, `"instant"` | Instant: [Real-time outdoor lamps](rt-outdoor-lamps.md) on the parts of [Quick outdoor lamp edits](outdoor-lamp-delta.md); Classic: every room solved by the game, a dragged lamp's rooms once after the release ([lamp-drags](lamp-drags.md)) and an edit's stories shown together. A saved value is kept; a file without the key starts on Instant. Instant on a device that cannot run it shows a warning and works as Classic |
 | Developer > Compare lighting paths > Check quick lamp edits | `outdoorLampDeltaCheck` | bool | off | | Developer only, with Instant: each room 0 a delta brought up to date is solved in full again and compared ([outdoor-lamp-delta](outdoor-lamp-delta.md)) |
-| Water & Snow > Lamp Glow > Lamps glow on ponds | `lagosRefletemLampadas` | bool | on | | Pond lamp pass ([water](water.md)) |
+| Water & Snow > Lamp Glow (card switch) | `lagosRefletemLampadas` | bool | on | | Pond lamp pass ([water](water.md)) |
 | Water & Snow > Lamp Glow > Glow brightness | `brilhoNaAgua` | float | 40% | 10 to 40% | Lamp glow and sparkles on ponds |
 | Water & Snow > Water Reflections > Reflection brightness | `reflexoNoLago` | float | 156% | 0 to 300% (slider from 5%) | Shore reflection; needs Depth Blur ([../reflections.md](../reflections.md)) |
 | Water & Snow > Snow > Sidewalk visibility | `calcadaComNevePisada` | float | 50% | 0 to 100% | Sidewalk concrete showing through trodden snow; needs *Street lamps light lots* ([roads](roads.md)) |
@@ -211,7 +208,7 @@ has been corrected.
 
 ## Compatibility and interactions
 
-- **Every-Story Ground Light** (`SplitLevelGroundLight`, Lighting > Stories > "Upper floors light the ground") zeroes
+- **Every-Story Ground Light** (`SplitLevelGroundLight`, Lighting > Inside & floors > Stories > "Upper floors light the ground") zeroes
   `GetLotID` (0x006BC020) for the terrain bake so lot lamps on any story enter it. When the official Sims3SettingsSetter
   already applies its Split-Level Lighting Fix, the row shows on and locked. Inferred from the decompile of
   `FUN_00C292B0` (`re/out/fn_00c292b0.c` line 114: `GetLotID() == 0 || light+0xD0 == 0`): with lot id 0 every lamp the

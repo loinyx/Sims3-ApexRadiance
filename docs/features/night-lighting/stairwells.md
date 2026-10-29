@@ -13,7 +13,7 @@ leaks through its walls onto the story above. Part of [Night Lighting](README.md
 |---|---|
 | Availability | Released in 2.14.0 |
 | Default | On |
-| Menu | None. Follows Lighting > Stories > *Indoor light between floors* (which needs *Outdoor light between floors* and Night Lights) |
+| Menu | None. Follows Lighting > Inside & floors > Stories > *Indoor light between floors* (which needs *Outdoor light between floors* and Night Lights) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml`, read through `luzInternaEntreAndares` |
 | Source | [`features/level_light_share.cpp`](../../../features/level_light_share.cpp), [`features/stairwell_bounce.h`](../../../features/stairwell_bounce.h), [`features/opening_bounce.h`](../../../features/opening_bounce.h), [`features/penumbra.h`](../../../features/penumbra.h) |
 
@@ -79,7 +79,7 @@ the game's behaviour, so the shape of the light through those openings is preser
 
 ## Compatibility and interactions
 
-- Parent options: *Indoor light between floors* and *Every floor in full detail* (Lighting > Stories). With the first
+- Parent options: *Indoor light between floors* and *Every floor in full detail* (Lighting > Inside & floors > Stories). With the first
   off, none of these steps runs.
 - [Rooms at Night](unlit-rooms.md) supplies the room ambients that step 4 shares.
 - Rooms joined by an opening larger than 30% of the smaller room are merged into one atrium (`MergeStackedAmbient`,

@@ -22,7 +22,11 @@ Export packages the selected preset and its LUT in one ZIP when Color is include
 
 ## Settings
 
-The modals select the source preset, name, icon and setting categories. Shortcuts are optional and start unchecked. Applying a preset changes only the selected categories. Personal preset rows display their name without a category summary; their action menu sits before Apply.
+The modals select the source preset, name, icon and setting categories. Shortcuts are optional and start unchecked. Applying a preset changes only the selected categories. Personal preset rows show their categories under the name; their action menu sits before Apply. Apply applies them in one click (without Shortcuts and Developer); "Apply some parts…" in the menu chooses categories.
+
+A green **Applied** chip follows the name of every preset whose values match the current setup (tooltip "Your current setup matches this preset"). The check runs at most twice a second while the page is drawn: it compares the preset's parts other than Shortcuts and Developer with `CaptureProfileState`, numbers within 1/100000, and for the preset applied last only the parts that were applied. Keys the current setup does not have (retired settings, ones the build leaves out) are skipped; when the last applied preset differs, the log names the first differing key once (`[Menu] Preset <name> differs from the current setup at <key>`). It is computed, not stored, so it stays right after a restart or a manual change. When the last applied preset no longer matches, its row shows the changed dot instead ("Changed since you applied it"); that memory lasts for the session.
+
+Personal presets have **Update with current setup** at the top of their action menu. After the inline confirmation "Replace this preset with your current setup?", it saves the current values with the same parts, icon and shortcut.
 
 ## Shortcuts
 
