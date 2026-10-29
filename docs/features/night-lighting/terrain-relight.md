@@ -339,7 +339,7 @@ lot's room map, so the pool stopped in a straight line at the lot border. Apex b
 (`BakeConePS`, from the shader cache) wherever the game binds its own in a bake: the same law times the cone factor
 `S - S t + t` the room solve gives the lamp (`gpu_lamp_law.h`), from rows c5..c7 that `BakePosStub` writes for every
 light it bakes (`BakeLightRows`, `TerrainBakeCone::Rows`; c7.w carries a mark, without which the copy keeps the game's
-law); the c5..c7 they held before the bake's first light are given back when the game binds another pixel shader. Lot and world lights alike: spots and shaded lamps take their cones, other lights none. The game's shader is
+law); the c5..c7 they held before the bake's first light are given back after the chunk render that ran the bake (or, for a bake outside it, when the game binds another pixel shader). Lot and world lights alike: spots and shaded lamps take their cones, other lights none. The game's shader is
 recognised by its size and FNV-1a 64 (`TerrainBakeCone::kGamePsFnv`) and replaced through a last-priority
 `SetPixelShader` hook. With the copy bound, `BakeColourStub` leaves a type-5 lamp's spill to the shader. It needs both bake
 stubs; a copy that cannot be made leaves the game's shader and the spill (`Terrain bake: the shader with lamp cones could
