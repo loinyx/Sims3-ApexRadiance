@@ -3846,7 +3846,9 @@ void VersionButton(float x, float y, float h) {
     ImGui::SetNextWindowSize(ImVec2(420.0f * u, popH));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ApexUi::kSpace4 * u, ApexUi::kSpace4 * u));
     ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 18.0f * u);
-    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, settling ? 0.0f : ImGui::GetStyle().Alpha * (0.25f + 0.75f * riseEased));
+    // (unseen = a tiny alpha, not 0: ImGui skips a window whose alpha is 0 at its Begin, so it was never laid out and
+    // never appeared)
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, settling ? 0.001f : ImGui::GetStyle().Alpha * (0.25f + 0.75f * riseEased));
     ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 6.0f * u);
     ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, Col(0, 0.0f));
     if (ImGui::BeginPopup("##WhatsNew", ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
@@ -4058,9 +4060,9 @@ void VersionButton(float x, float y, float h) {
         const float bottom = ImGui::GetItemRectMax().y;
         g_whatsNewFooterH = bottom - listBottom;
         g_whatsNewContentH = bottom - ImGui::GetWindowPos().y + style.WindowPadding.y;
-        if (g_whatsNewSettle > 0) g_whatsNewSettle--;
         ImGui::EndPopup();
     }
+    if (settling) g_whatsNewSettle--; // (every frame after the click, drawn or not, so it always ends)
     ImGui::PopStyleColor();
     ImGui::PopStyleVar(4);
 }
