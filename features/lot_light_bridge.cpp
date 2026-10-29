@@ -7892,9 +7892,12 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
                 return ShaderPatches::PatchTerrainNativeAlpha(t, s, p.nativeAlphaSampler);
             });
             if (!alpha->ps || alpha->nativeAlphaSource != s) { // unsupported variant: preserve the game's shadow map
-                // the rain variants use all 16 samplers (no room for the game's alpha); the alpha weighs only the sun, black at
-                // full night, so there the smoothed map draws through the game's own shader (no wall shade: no sampler for it)
-                nightSmooth = smooth && g_night.load(std::memory_order_relaxed) >= 1.0f;
+                // the rain variants use all 16 samplers (no room for the game's alpha); the alpha weighs only the sun, so from
+                // the first rise of the night level the smoothed map draws through the game's own shader (its alpha is the
+                // game's, B-spline smoothed). Then the lamps' light on the ground is at its faintest and rain clouds dim the sun;
+                // at full night, as before, the lamp pools changed from blocky to smooth in one step at the end of dusk. (No
+                // wall shade: no sampler for it)
+                nightSmooth = smooth && g_night.load(std::memory_order_relaxed) > 0.0f;
                 if (!nightSmooth) smooth = nullptr;
                 shade = nullptr;
             }
