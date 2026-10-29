@@ -71,7 +71,7 @@ Lamp changes (night and Build-mode day preview; stationary and moving camera):
 
 ## Confirmed in game
 
-- 2026-10-29, developer build of `e3ababa` (2.18.1): a lamp deleted right after another lamp of the same type on the
+- 2026-10-29, developer build of `7839649` (2.18.1): a lamp deleted right after another lamp of the same type on the
   same lot was dropped from a GPU drag lost its ground light at once (player report); the drag steps kept being skipped
   (log: `skipped: drawn on the GPU while dragged`).
 

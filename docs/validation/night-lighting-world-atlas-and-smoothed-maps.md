@@ -88,7 +88,7 @@ Both paths:
 
 ## Confirmed in game
 
-- 2026-10-29, developer build of `e3ababa` (2.18.1): rainy ground through dusk shows no step when the rain variants
+- 2026-10-29, developer build of `7839649` (2.18.1): rainy ground through dusk shows no step when the rain variants
   move to the smoothed map (player report).
 
 - Smoothing (decode, colour cleanup, 4x B-spline, mips) since the v0.1.0 baseline (`b84d5f1`): blocks and specks

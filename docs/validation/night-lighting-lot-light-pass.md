@@ -68,7 +68,7 @@ at ps_2_0 it had no c32 and failed since the lot shade's mask rows moved there.
 
 ## Confirmed in game
 
-- 2026-10-29, developer build of `e3ababa` (2.18.1): a brick fence type removed whole with the camera still lost its
+- 2026-10-29, developer build of `7839649` (2.18.1): a brick fence type removed whole with the camera still lost its
   shadow at once (log: `fence group gone: not drawn for 516 ms`; player report). The same session also dropped groups
   with no walls and one wall of another lot together, most likely hidden by a view change; they are read again when
   drawn.
