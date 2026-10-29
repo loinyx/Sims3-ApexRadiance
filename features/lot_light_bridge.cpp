@@ -674,7 +674,7 @@ struct LotShadeTiming {
 struct LotMask {
     IDirect3DTexture9* tex = nullptr;
     uint64_t sig = 0;
-    DWORD checked = 0;
+    DWORD checked = 0, shadeChecked = 0;
     int w = 0, h = 0;               // texels of the room mask
     std::vector<uint8_t> room;      // the room mask (255 outside rooms)
     std::vector<uint8_t> shade;     // the lamp shade (empty: none yet, 255 everywhere)
@@ -711,7 +711,8 @@ IDirect3DTexture9* WhiteMask(IDirect3DDevice9* dev) {
 // the atlas texel by texel (an F8: square steps of light on a porch). Story 0's floors keep the plain patch; the lot and snow
 // passes (story 0 only) add the indoor light
 constexpr bool kFloorIndoorLight = false;
-constexpr DWORD kShadeMinEveryMs = 750; // (2.15.3: 2000; with the nearest lot first a change shows sooner)
+constexpr DWORD kShadeMinEveryMs = 250; // (2.15.3: 2000, then 750; a build takes 1-30 ms on the worker, log)
+constexpr DWORD kShadeCheckMs = 100;    // a lot's shade inputs looked at this often (LotMaskTexture)
 struct ShadeWant {
     uint64_t lot = 0, key = 0;
     LotRect rect{};
@@ -1217,6 +1218,8 @@ struct FenceGroup {
     DWORD read = 0, seen = 0;
 };
 std::unordered_map<uint64_t, FenceGroup> g_fenceGroups;
+std::vector<std::pair<uint64_t, DWORD>> g_fenceBirths; // new groups (key, first draw) whose replaced groups are not looked at yet
+constexpr DWORD kFenceSwapMs = 300;
 std::unordered_map<uint64_t, uint8_t> g_fenceBusy; // draw_reads_nowait: busy answers per fence group since its last read
 // mesh boxes by buffer, range and layout (a buffer address can be reused: emptied with the lots and on a world change)
 std::unordered_map<uint64_t, std::array<float, 7>> g_meshBoxes;
@@ -1929,24 +1932,35 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
         if (fresh.walls.size() != g.walls.size() || (!fresh.walls.empty() && std::memcmp(fresh.walls.data(), g.walls.data(), fresh.walls.size() * sizeof(GroundShadow::Wall)) != 0))
             g_fenceGen++;
         g = std::move(fresh);
-        // (15/10: the ground took minutes to change after a fence was removed) a new group replaces at once the groups over the
-        // same place that are not drawn any more (the game makes a group again when a piece is added or removed)
-        if (newGroup) {
-            const FenceGroup& ng = g;
-            for (auto it = g_fenceGroups.begin(); it != g_fenceGroups.end();) {
-                const FenceGroup& o = it->second;
-                const bool stale = it->first != key && now - o.seen > 500 && // (review: 100 ms let two groups erase each other below 10 fps)
-                                    !(o.x1 < ng.x0 - 0.5f || o.x0 > ng.x1 + 0.5f || o.z1 < ng.z0 - 0.5f || o.z0 > ng.z1 + 0.5f);
-                if (stale) {
-                    g_fenceWalls.fetch_sub(static_cast<long>(o.walls.size()), std::memory_order_relaxed);
-                    g_fenceGen++;
-                    it = g_fenceGroups.erase(it);
-                } else ++it;
-            }
-        }
+        if (newGroup && g_fenceBirths.size() < 16) g_fenceBirths.emplace_back(key, now);
     }
     vb0->Release();
     vb1->Release();
+    // (15/10: the ground took minutes to change after a fence was removed) a new group replaces the groups over the same place
+    // that are not drawn any more (the game makes a group again when a piece is added or removed). Looked at kFenceSwapMs after
+    // its first draw: at that draw the old group had been drawn the frame before, so it stayed until the 20 s sweep below
+    // and a removed piece kept its shadow (and closed an opening made in a fence) that long
+    for (size_t b = 0; b < g_fenceBirths.size();) {
+        const auto [bornKey, at] = g_fenceBirths[b];
+        if (now - at < kFenceSwapMs) {
+            b++;
+            continue;
+        }
+        g_fenceBirths.erase(g_fenceBirths.begin() + static_cast<ptrdiff_t>(b));
+        const auto born = g_fenceGroups.find(bornKey);
+        if (born == g_fenceGroups.end()) continue;
+        const FenceGroup ng = born->second;
+        for (auto it = g_fenceGroups.begin(); it != g_fenceGroups.end();) {
+            const FenceGroup& o = it->second;
+            const bool stale = it->first != bornKey && now - o.seen > kFenceSwapMs - 100 && // (review: 100 ms let two groups erase each other below 10 fps)
+                               !(o.x1 < ng.x0 - 0.5f || o.x0 > ng.x1 + 0.5f || o.z1 < ng.z0 - 0.5f || o.z0 > ng.z1 + 0.5f);
+            if (stale) {
+                g_fenceWalls.fetch_sub(static_cast<long>(o.walls.size()), std::memory_order_relaxed);
+                g_fenceGen++;
+                it = g_fenceGroups.erase(it);
+            } else ++it;
+        }
+    }
     // groups not drawn for 20 s go (a fence removed whole; at most once a second)
     static DWORD s_swept = 0;
     if (now - s_swept > 1000) {
@@ -2148,7 +2162,7 @@ void CommitPending() {
     if (m.ext) m.extGrid = p.grid, m.ex0 = p.box.x0, m.ez0 = p.box.z0, m.ex1 = p.box.x1, m.ez1 = p.box.z1;
     if (!m.shade.empty()) g_shadeLastMin = p.lo;
     g_shadeBuilt.fetch_add(1, std::memory_order_relaxed);
-    if (DevSwitches::kCompiled && p.seen) { // (developer log, LotMaskTexture: when the mask is shown)
+    if (!kPublicBuild && p.seen) { // (developer log, LotMaskTexture: when the mask is shown)
         m.timing = LotShadeTiming{p.seen, p.sent, p.arrived, GetTickCount(), p.buildMs, static_cast<int>(p.chunks.size())};
     }
     m.changeSeen = 0;
@@ -2198,7 +2212,7 @@ void ShadeApply(IDirect3DDevice9* dev) {
 // again; a running build is not cancelled by a key change: it finishes and the new one follows)
 void WantShade(uint64_t lot, LotMask& m, const LotRect& r, DWORD now) {
     const uint64_t key = ShadeKey(r, m.w, m.h);
-    if (DevSwitches::kCompiled && key != m.shadeKey && !m.changeSeen) m.changeSeen = now | 1; // (2.15.3, developer log)
+    if (!kPublicBuild && key != m.shadeKey && !m.changeSeen) m.changeSeen = now | 1; // (2.15.3, developer log)
     if (key == m.shadeKey || key == m.queuedKey) return;
     if (m.shadeAt && now - m.shadeAt < kShadeMinEveryMs) return; // again at a later check
     m.shadeAt = now;
@@ -2273,14 +2287,14 @@ bool MakeMaskTexture(IDirect3DDevice9* dev, LotMask& m) {
     m.tex = tex;
     m.dirty = false;
     g_maskBuilds.fetch_add(1, std::memory_order_relaxed);
-    if (DevSwitches::kCompiled && m.timing.seen) { // (2.15.3) the in-game time from a change of the lot's inputs to its new shade shown
+    if (!kPublicBuild && m.timing.seen) { // (2.15.3) the in-game time from a change of the lot's inputs to its new shade shown
         static int s_logs = 0;
         const LotShadeTiming t = m.timing;
         m.timing = {};
         const auto ms = [](DWORD from, DWORD to) { return static_cast<long>(to - from); };
         if (s_logs < 400) {
             s_logs++;
-            LOG_INFO(std::format("[LotLightBridge] Lamp shade on lot ground: shown {} ms after its inputs changed (seen at a check every 500 ms; then {} ms to "
+            LOG_INFO(std::format("[LotLightBridge] Lamp shade on lot ground: shown {} ms after its inputs changed (seen at a check every 100 ms; then {} ms to "
                                  "its build sent, {} ms building on the worker, {} ms to taken, {} ms held for its {} chunks, {} ms to its draw){}",
                                  ms(t.seen, GetTickCount()), ms(t.seen, t.sent), static_cast<long>(t.buildMs + 0.5), ms(t.sent, t.taken), ms(t.taken, t.applied),
                                  t.chunks, ms(t.applied, GetTickCount()), s_logs == 400 ? " (last such line)" : ""));
@@ -2355,6 +2369,11 @@ IDirect3DTexture9* LotMaskTexture(IDirect3DDevice9* dev, const LotRect& rect) {
             m.sig = gm.sig;
             m.dirty = true;
         }
+    }
+    // the shade's inputs every kShadeCheckMs, apart from the room mask's walk: at its 500 ms a fence edit or a lamp step
+    // waited up to that long to be seen, then up to kShadeMinEveryMs more (log: "500 ms to its build sent"), the light in steps
+    if (!m.shadeChecked || now - m.shadeChecked >= kShadeCheckMs) {
+        m.shadeChecked = now;
         // the shade's grid is the room mask's (4 texels a metre over room 0's tiles); the lot rectangle must agree with it
         if (g_shadeOn && m.w > 0 && m.w == static_cast<int>(std::lround(r->w * GroundShadow::kTexelsPerMetre)) &&
             m.h == static_cast<int>(std::lround(r->d * GroundShadow::kTexelsPerMetre)))
@@ -9476,6 +9495,7 @@ void OnWorldChanged() {
     g_haveLastEdgeRect = false;
     g_shadeQueue.clear(); // the lamp shades waiting or building belong to the previous world's lots
     g_fenceGroups.clear(); // (garden walls of the old world)
+    g_fenceBirths.clear();
     g_gates.clear();
     g_fenceBusy.clear();
     g_fenceGen++;
@@ -10010,6 +10030,7 @@ void Shutdown(bool keepChunkMaps) {
     g_shadeWorker.Stop();
     ReleaseLotMasks();
     g_fenceGroups.clear();
+    g_fenceBirths.clear();
     g_gates.clear();
     g_fenceBusy.clear();
     g_fenceGen++;
