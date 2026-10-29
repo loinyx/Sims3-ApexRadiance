@@ -95,8 +95,9 @@ Both paths:
 
 ## Open checks
 
-- Rain terrain at the end of dusk and at dawn. **Expected:** no visible step. The variants that reach the smoothed map
-  only at full night switch from the game's blocky map to the smoothed one in one frame when the night level reaches 1.
+- Rain terrain at the start of dusk and at the end of dawn. **Expected:** no visible step. The variants that reach the
+  smoothed map only through the game's shader switch to it in one frame when the night level first rises above 0 (it
+  was at full night, a step at the end of dusk). Not yet checked in game.
 
 - GPU path log lines, compare result and per-chunk GPU time have not been recorded in a test report.
 - GPU path assumptions: the instruction limits of the largest entry point `VUpPS` (about 6 texld + 60 ALU); DXVK 3.1.1

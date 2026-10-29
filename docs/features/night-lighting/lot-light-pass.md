@@ -264,7 +264,7 @@ pieces (over 0.6 m deep: stairs, decks) are left out. `ShadeWalls` gives the job
 read without waiting for the GPU: a busy buffer is retried on a later draw and waited for after three busy answers. The
 game draws a fence again as a new group when a piece is added or removed; 300 ms after a new group's first draw
 (`kFenceSwapMs`), the groups over the same place that are no longer drawn (nor in the last two frames) are dropped, so a removed piece loses its
-shadow at once. A fence type removed whole leaves no new group and goes with the 20 s sweep.
+shadow at once. A fence type removed whole leaves no new group: with the camera eye unmoved since a group's last draw (`LotLightingMotion::CameraStillSince`) and the world drawn, every group on screen is drawn each frame, so a group missing for 500 ms and two frames is dropped (`FenceGroupsGone`, once a frame; developer builds log each one). While the camera moves a group may only have left the screen: it goes with the 20 s sweep.
 
 **Mesh fences** (chain-link, lattices, railings). A fence whose pixel shader cuts its mesh out with the texture's alpha
 lets lamp light through its holes. `ShaderPatches::FindCutout` traces the shader's `texkill` back to its texture read

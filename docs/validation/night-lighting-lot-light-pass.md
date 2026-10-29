@@ -88,7 +88,7 @@ at ps_2_0 it had no c32 and failed since the lot shade's mask rows moved there.
   ground in front of the gap. An offline build of the shade with the logged pieces gives the beam (194 to 255 in front
   of the gap); a screenshot of the scene before the gap fixes showed that ground as dark as the shadow. Not checked again
   since.
-- A fence type removed whole. **Expected today:** its shadow stays up to 20 s (no new group replaces it).
+- A fence type removed whole, the camera still. **Expected:** its shadow goes within about half a second (the developer log reads `fence group gone`), and never while the fence is still there (for example under a Build mode tool hovering it). Not yet checked in game.
 - The cost of the 100 ms shade input checks per drawn lot has not been measured.
 - 2.15.3: a fence lit by one garden post on grass and on snow. **Expected:** the shadow behind it ends where the post's light on the ground ends and is never darker than the ground no lamp of the lot reaches.
 - 2.15.3: a closed gate in a fence line beside a garden post, after shade updates, after a few minutes on screen and after the camera returns. **Expected:** no light through the gate; gaps under 0.4 m closed; developer log lines for the gaps and gates.
