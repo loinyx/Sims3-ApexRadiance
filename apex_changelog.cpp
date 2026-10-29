@@ -6,6 +6,12 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k2181Fixed[] = {
+    "Night Lights: a fence removed whole takes its shadow with it at once",
+    "Night Lights: a lamp deleted right after a drag no longer leaves light on the ground",
+    "Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk",
+    nullptr};
+
 constexpr const char* k2180Added[] = {
     "Lighting: options split into Overview, Outside, Inside & floors and Game fixes tabs",
     "Lighting: Overview sums up every area and its options on one page",
@@ -446,6 +452,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"2.18.1", "2026-10-29", nullptr, nullptr, k2181Fixed},
     {"2.18.0", "2026-10-29", k2180Added, k2180Improved, k2180Fixed},
     {"2.17.2", "2026-10-28", k2172Added, nullptr, nullptr},
     {"2.17.1", "2026-10-27", nullptr, k2171Improved, k2171Fixed},

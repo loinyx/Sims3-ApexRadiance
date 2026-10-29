@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Hungarian}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: a fence removed whole takes its shadow with it at once", "Éjszakai fények: az egészében eltávolított kerítés azonnal viszi az árnyékát is"},
+    {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "Éjszakai fények: a húzás után rögtön törölt lámpa már nem hagy fényt a földön"},
+    {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "Éjszakai fények: esőben a talaj már nem ugrik át a lágy lámpafényre a szürkület végén"},
     {"Lighting: options split into Overview, Outside, Inside & floors and Game fixes tabs", "Világítás: a beállítások az Áttekintés, Kint, Bent és szintek, valamint Játékjavítások lapokra oszlanak"},
     {"Lighting: Overview sums up every area and its options on one page", "Világítás: az Áttekintés egy oldalon összegzi az összes területet és beállításaikat"},
     {"Lighting: one Ground light slider replaces the four ground and lamp sliders", "Világítás: egyetlen Talajfény csúszka váltja fel a négy talaj- és lámpacsúszkát"},

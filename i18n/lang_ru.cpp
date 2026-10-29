@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Russian}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: a fence removed whole takes its shadow with it at once", "Ночное освещение: забор, удалённый целиком, сразу забирает свою тень"},
+    {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "Ночное освещение: лампа, удалённая сразу после перетаскивания, больше не оставляет свет на земле"},
+    {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "Ночное освещение: земля под дождём больше не переключается рывком на мягкий свет в конце сумерек"},
     {"Lighting: options split into Overview, Outside, Inside & floors and Game fixes tabs", "Освещение: параметры разделены на вкладки «Обзор», «Снаружи», «Внутри и этажи» и «Исправления игры»"},
     {"Lighting: Overview sums up every area and its options on one page", "Освещение: «Обзор» показывает все области и их параметры на одной странице"},
     {"Lighting: one Ground light slider replaces the four ground and lamp sliders", "Освещение: один ползунок «Свет на земле» заменяет четыре ползунка для земли и ламп"},

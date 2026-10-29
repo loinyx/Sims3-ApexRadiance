@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Polish}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: a fence removed whole takes its shadow with it at once", "Nocne światła: płot usunięty w całości od razu zabiera swój cień"},
+    {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "Nocne światła: lampa usunięta tuż po przeciągnięciu nie zostawia już światła na ziemi"},
+    {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "Nocne światła: ziemia w deszczu nie przeskakuje już do miękkiego światła pod koniec zmierzchu"},
     {"Lighting: options split into Overview, Outside, Inside & floors and Game fixes tabs", "Oświetlenie: opcje podzielone na karty Przegląd, Na zewnątrz, Wnętrza i piętra oraz Poprawki gry"},
     {"Lighting: Overview sums up every area and its options on one page", "Oświetlenie: Przegląd podsumowuje każdy obszar i jego opcje na jednej stronie"},
     {"Lighting: one Ground light slider replaces the four ground and lamp sliders", "Oświetlenie: jeden suwak Światło na podłożu zastępuje cztery suwaki podłoża i lamp"},

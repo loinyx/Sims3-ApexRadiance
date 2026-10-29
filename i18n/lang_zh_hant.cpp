@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Traditional, Taiwan / Hong Kong)}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: a fence removed whole takes its shadow with it at once", "夜間燈光：整段刪除的柵欄會立即帶走它的陰影"},
+    {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "夜間燈光：拖曳後立即刪除的燈具不再在地面上留下光線"},
+    {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "夜間燈光：雨天地面在黃昏結束時不再突然切換為柔和燈光"},
     {"Lighting: options split into Overview, Outside, Inside & floors and Game fixes tabs", "照明：選項分為「總覽」「室外」「室內與樓層」「遊戲修復」四個分頁"},
     {"Lighting: Overview sums up every area and its options on one page", "照明：「總覽」在一頁中彙整所有區域及其選項"},
     {"Lighting: one Ground light slider replaces the four ground and lamp sliders", "照明：一個「地面光」滑桿取代原本四個地面與燈具滑桿"},

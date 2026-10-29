@@ -10,7 +10,7 @@ game's own sunlight and shadows untouched. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released (part of Night Lighting since 0.1.0; GPU path default). Native solar alpha, daylight range and squared terrain lamp scales: Released in 2.6.0. A lamp switch's ground in one frame, and *Smooth ground light* switched without relighting: Released in 2.7.0 Released in 2.18.0: dragged lamps stamped on the GPU, rain variants smoothed at night. |
+| Availability | Released (part of Night Lighting since 0.1.0; GPU path default). Native solar alpha, daylight range and squared terrain lamp scales: Released in 2.6.0. A lamp switch's ground in one frame, and *Smooth ground light* switched without relighting: Released in 2.7.0 Released in 2.18.0: dragged lamps stamped on the GPU, rain variants smoothed at night. Released in 2.18.1: rain variants smoothed from the first rise of the night level. |
 | Default | On |
 | Menu | Lighting > Game fixes > Ground & Lots > *Smooth ground light* |
 | Configuration | `[patches.NightTerrainRelight]` `mapaDeLuzSuavizado` in `ApexRadiance.toml` |
