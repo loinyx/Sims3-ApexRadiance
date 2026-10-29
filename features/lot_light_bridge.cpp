@@ -4446,7 +4446,7 @@ template <typename DrawFn> bool DrawRoad(IDirect3DDevice9* dev, DrawFn draw) {
     }, true) : nullptr;
     const bool useShade = shaded && shaded->ps && shaded->road.shadeSampler >= 0 && shaded->road.lightSampler == p.road.lightSampler &&
                           shaded->road.extraSampler == p.road.extraSampler && shaded->road.sidewalkConst == p.road.sidewalkConst &&
-                          shaded->road.scaleConst == p.road.scaleConst;
+                          shaded->road.scaleConst == p.road.scaleConst && shaded->road.reflectConst == p.road.reflectConst;
     // With the smoothed map ready, the road's own copy (the blocky DXT5 one) is replaced by it too, so roads and
     // sidewalks get exactly the same clean light as the ground next to them.
     IDirect3DTexture9* smooth = LightmapSmooth::Find(it->first);
@@ -4456,6 +4456,12 @@ template <typename DrawFn> bool DrawRoad(IDirect3DDevice9* dev, DrawFn draw) {
     const bool sidewalk = p.road.sidewalkConst >= 0;
     if (sidewalk) dev->GetPixelShaderConstantF(p.road.sidewalkConst, oldC, 1);
     const float c[4] = {g_sidewalkClear.load(std::memory_order_relaxed), 0, 0, 0};
+    // Wet roads reflect a fixed daylight sky cube that the game never darkens: at night the whole road and sidewalk turned grey
+    // (F7: about 0.6 of it reflected, more than the road's own light). It follows the daylight, as the game's sky colours do.
+    float oldW[4] = {};
+    const bool wet = p.road.reflectConst >= 0;
+    if (wet) dev->GetPixelShaderConstantF(p.road.reflectConst, oldW, 1);
+    const float sky[4] = {1.0f - g_night.load(std::memory_order_relaxed), 0, 0, 0};
     IDirect3DPixelShader9* original = g_curPs;
     g_inOwnCall = true;
     {
@@ -4464,10 +4470,12 @@ template <typename DrawFn> bool DrawRoad(IDirect3DDevice9* dev, DrawFn draw) {
         if (useShade) shadeMap.emplace(dev, static_cast<DWORD>(shaded->road.shadeSampler), shade, D3DTEXF_LINEAR);
         if (smooth) SetTex(dev, p.road.lightSampler, smooth);
         if (sidewalk) SetPsConst(dev, p.road.sidewalkConst, c, 1);
+        if (wet) SetPsConst(dev, p.road.reflectConst, sky, 1);
         SetPs(dev, useShade ? shaded->ps : p.ps);
         ConstGain lampGain(dev, p.road.scaleConst, RoadDayGain()); // the road's lamp scale, after the max with the terrain
         draw();
         SetPs(dev, original);
+        if (wet) SetPsConst(dev, p.road.reflectConst, oldW, 1);
         if (sidewalk) SetPsConst(dev, p.road.sidewalkConst, oldC, 1);
         if (smooth) SetTex(dev, p.road.lightSampler, oldLight);
     }
@@ -7025,6 +7033,21 @@ template <typename DrawFn> bool DrawFloor(IDirect3DDevice9* dev, DrawFn draw) {
                                   : PatchedFor(dev, g_floorShadePs[FloorShadeKey(0, y)], "Floor (ground lamp shade)",
                                                [y](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchFloor(t, pp.floor, y); });
     if (!p.ps) return false;
+    if (p.floor.gainOnly) { // (a weather variant with all 16 samplers in use) at least the ground's gain, not the game's lamp scale
+        IDirect3DPixelShader9* original = g_curPs;
+        g_inOwnCall = true;
+        {
+            SetPs(dev, p.ps);
+            ConstGain lampGain(dev, p.floor.scaleConst, FloorDayGain());
+            if (LightProbe::Capturing()) g_objDrawInfo = "mod draw: winter floor tile | lamp scale only (no sampler for the atlas)";
+            draw();
+            g_objDrawInfo.clear();
+            SetPs(dev, original);
+        }
+        g_inOwnCall = false;
+        ApexUtil::CountOne(g_floorDrawn);
+        return true;
+    }
     LogWinterMask(p, "Snowy floor");
     float oldC[4] = {}, oldH[4] = {}, weight[4];
     WinterAtlasWeight(p, kSnowTileMask, weight);
@@ -7712,17 +7735,24 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
         IDirect3DTexture9* shade = ChunkShadeTexture(dev, key);
         // Native terrain alpha carries solar visibility. Smooth lamp RGB only.
         PatchedPs* alpha = nullptr;
+        bool nightSmooth = false; // the smoothed map through the game's own shader (below)
         if (smooth || shade) {
             alpha = &PatchedFor(dev, g_terrainAlphaPs, "Terrain native solar alpha", [s](std::vector<DWORD>& t, PatchedPs& p) {
                 p.nativeAlphaSource = s;
                 return ShaderPatches::PatchTerrainNativeAlpha(t, s, p.nativeAlphaSampler);
             });
-            if (!alpha->ps || alpha->nativeAlphaSource != s) smooth = nullptr, shade = nullptr; // unsupported variant: preserve the game's shadow map
+            if (!alpha->ps || alpha->nativeAlphaSource != s) { // unsupported variant: preserve the game's shadow map
+                // the rain variants use all 16 samplers (no room for the game's alpha); the alpha weighs only the sun, black at
+                // full night, so there the smoothed map draws through the game's own shader (no wall shade: no sampler for it)
+                nightSmooth = smooth && g_night.load(std::memory_order_relaxed) >= 1.0f;
+                if (!nightSmooth) smooth = nullptr;
+                shade = nullptr;
+            }
         }
         const float gain = GroundGain();
         const float dayWeight = 1.0f - g_night.load(std::memory_order_relaxed);
         PatchedPs* daylight = nullptr;
-        if ((smooth || shade) && !multi && dayWeight > 0.0f) {
+        if ((smooth || shade) && !nightSmooth && !multi && dayWeight > 0.0f) {
             daylight = &PatchedFor(dev, g_terrainDayPs, "Terrain daylight range", [s](std::vector<DWORD>& t, PatchedPs& p) {
                 p.nativeAlphaSource = s;
                 return ShaderPatches::PatchTerrainNativeAlpha(t, s, p.nativeAlphaSampler) &&
@@ -7766,7 +7796,11 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
         g_inOwnCall = true;
         {
             TerrainConst lampGain(dev, k, squared);
-            if (lampMap) {
+            if (nightSmooth && lampMap) {
+                SetTex(dev, s, lampMap);
+                draw();
+                SetTex(dev, s, old);
+            } else if (lampMap) {
                 NativeTerrainSampler native(dev, s, alpha->nativeAlphaSampler, old, D3D9Hooks::CallOriginalSetTexture);
                 if (native) {
                     float savedDay[4]{};
@@ -9612,6 +9646,15 @@ std::string LotLampStatus() {
 }
 
 const BakeSnapshot& CurrentBakeLamps() { return g_bakeSnap; }
+uint64_t LotAt(float x, float z) {
+    const LotRect* r = FindLotAt(x, z);
+    return r ? static_cast<uint64_t>(r->lotHi) << 32 | r->lotLo : 0;
+}
+std::string GainText() {
+    return std::format("night {:.2f}; ground {:.3f} (terrain c3.x / lot pass), roads {:.3f}, lot map {:.3f} (lot pass c31.x), floors {:.3f}, roads by day curve {:.3f}",
+                       g_night.load(), GroundGain(), RoadGain(), LotMapGain(), FloorDayGain(), RoadDayGain());
+}
+
 bool LotGroundY(uint64_t lot, float& y) {
     auto find = [&]() {
         for (const LotRect& r : g_lotRects)

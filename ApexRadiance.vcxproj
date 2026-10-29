@@ -133,6 +133,7 @@
     <ClCompile Include="features\screen_watch.cpp" />
     <ClCompile Include="hotkeys.cpp" />
     <ClCompile Include="features\light_probe.cpp" />
+    <ClCompile Include="features\ground_profile.cpp" />
     <ClCompile Include="features\lightmap_smooth.cpp" />
     <ClCompile Include="features\lot_light_bridge.cpp" />
     <ClCompile Include="features\bloom_alpha_probe.cpp" />
@@ -296,6 +297,8 @@
     <ClInclude Include="features\wall_heights.h" />
     <ClInclude Include="features\light_diag.h" />
     <ClInclude Include="features\light_probe.h" />
+    <ClInclude Include="features\ground_profile.h" />
+    <ClInclude Include="features\ground_profile_math.h" />
     <ClInclude Include="features\lightmap_smooth.h" />
     <ClInclude Include="features\lot_light_bridge.h" />
     <ClInclude Include="features\bloom_alpha_probe.h" />
@@ -328,6 +331,7 @@
     <ClInclude Include="features\shader_patches.h" />
     <ClInclude Include="features\terrain_chunk_relight.h" />
     <ClInclude Include="features\terrain_stamps.h" />
+    <ClInclude Include="features\terrain_bake_cone.h" />
     <ClInclude Include="framework\apex_log.h" />
     <ClInclude Include="framework\apex_paths.h" />
     <ClInclude Include="framework\apex_util.h" />
@@ -368,6 +372,7 @@
     <ClInclude Include="patches\performance.h" />
     <ClInclude Include="shaders\floor_atlas_table.h" />
     <ClInclude Include="shaders\lightmap_smooth_hlsl.h" />
+    <ClInclude Include="shaders\terrain_bake_hlsl.h" />
     <ClInclude Include="shaders\roof_ps_hlsl.h" />
     <ClInclude Include="shaders\roof_snow_lamps_hlsl.h" />
     <ClInclude Include="shaders\shader_ids.h" />
@@ -386,6 +391,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="shaders\lightmap_smooth_ps.hlsl" />
+    <None Include="shaders\terrain_bake_ps.hlsl" />
     <None Include="shaders\roof_ps.hlsl" />
     <None Include="shaders\roof_snow_lamps_ps.hlsl" />
     <None Include="shaders\water_lamps_ps.hlsl" />

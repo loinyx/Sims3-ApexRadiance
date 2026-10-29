@@ -19,4 +19,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Terrain stamp state test did not compile' }
     & $state
     if ($LASTEXITCODE -ne 0) { throw 'Terrain stamp state test failed' }
+    # the ground profile's camera math (features/ground_profile_math.h)
+    $math = Join-Path $OutDir 'ground_math_check.exe'
+    & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /O2 /MT /DNOMINMAX ('/I' + $repo) ('/Fe' + $math) (Join-Path $PSScriptRoot 'ground_math_check.cpp') user32.lib
+    if ($LASTEXITCODE -ne 0) { throw 'Ground math test did not compile' }
+    & $math
+    if ($LASTEXITCODE -ne 0) { throw 'Ground math test failed' }
 } finally { Pop-Location }

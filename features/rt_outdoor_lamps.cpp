@@ -71,8 +71,6 @@ constexpr DWORD kHoldQuietMs = 1500;     // the rooms that take room 0's lamps a
                                          // (a Build mode drag moves in grid steps with pauses of up to about a second)
 constexpr DWORD kCheckEveryMs = 2000;    // the consistency check of the GPU lamps' stories
 constexpr DWORD kRepairWaitMs = 4000;    // a story sent to gather a lamp is checked again after this
-constexpr DWORD kDragRelightMs = 200;    // while dragged: at most one relight start this often (14/10, drag solves: was 66; 5 a second,
-                                         // the exact relight once the drag ends; a recording: 1-13 ms of CPU a relight)
 constexpr uint64_t kGameWriteGapMs = 500; // a relight made only for a game write: at most this often per map
 // (2.15.1) A lamp lying on the lot's ground (its light 5 cm over the lawn, F8 capture) lit a tree above it and left the
 // lawn dark: the law's light falls with its angle of incidence, and from 5 cm the lawn 2 m away takes about 1 % of what it
@@ -465,7 +463,7 @@ std::unordered_map<const IDirect3DBaseTexture9*, Slot*> g_swap; // the game's ma
 uintptr_t g_swapLo = ~uintptr_t{0}, g_swapHi = 0;               // the address range of its keys (most binds end at this test)
 uint64_t g_swapSig = 0;
 uint64_t g_lampSigAll = 0;
-DWORD g_lampChangedAt = 0, g_lastRelightAt = 0;
+DWORD g_lampChangedAt = 0;
 size_t g_rr = 0;                 // the first slot looked at (round robin over frames)
 long g_pinDrops = 0;
 bool g_budgetOut = false;        // the active lot's kept parts do not fit the memory budget (logged once)
@@ -505,7 +503,7 @@ uint32_t g_meshGen = 0;
 uint64_t g_atlasKey = 0;
 uint64_t g_lastParams = 0;
 DWORD g_frame = 0, g_lastFrame = 0;
-std::vector<uintptr_t> g_stampLights; // this frame's GPU lamps, for TerrainStamps (none when Frame stops early)
+std::vector<uintptr_t> g_stampLights; // this frame's lamps of the lot, for TerrainStamps (none when Frame stops before it reads them)
 bool g_installed = false;
 IDirect3DDevice9* g_dev = nullptr; // the game's device (render thread)
 int g_ps3 = -1; // the device runs shader model 3 (1), not (0), not read yet (-1) (render thread)
@@ -1491,6 +1489,9 @@ void Frame(IDirect3DDevice9* dev) {
         for (int S = 0; S <= 7; S++)
             if ((missing >> S & 1) && RtLampModel::Drawn(r.f, rns[S].lot)) g.mult[S] = mult;
     }
+    // every lamp listed here, drawn on every story or not: its terrain stamp needs no room map (a picked-up lamp drawn
+    // only on the upper stories kept the CPU terrain relight for its whole drag)
+    for (const GpuLamp& g : lamps) g_stampLights.push_back(g.light);
     std::vector<uint64_t> bakeKeys[8];
     for (int S = 0; S <= 7; S++) {
         if (!rooms[S]) continue;
@@ -1691,9 +1692,10 @@ void Frame(IDirect3DDevice9* dev) {
         }
     } endOnThrow{dev, begun};
     std::string failNote;
-    // while a lamp is dragged: a relight starts at most every kDragRelightMs, with the cheaper shadows; every frame's work
-    // stops past kFrameCpuMs or kFrameWork (the maps left are relit the next frames)
-    const bool throttled = !g_roundOpen && dragging && g_lastRelightAt && nowTick - g_lastRelightAt < kDragRelightMs;
+    // while a lamp is dragged the maps are relit at every move with the cheaper shadows, as the ground outside the lot is
+    // (a relight start every 200 ms left the lot's floors and walls up to that far behind the ground beside them; a relight
+    // is 0.3-1.1 ms of CPU and under 1 ms of GPU in a recording); every frame's work stops past kFrameCpuMs or kFrameWork
+    // (the maps left are relit the next frames)
     double work = 0, maskMs = 0, drawMs = 0;
     double maskJobsMs = 0, maskShareMs = 0, maskLockMs = 0, maskFillMs = 0; // (the floor mask's parts)
     const size_t nSlots = g_slots.size();
@@ -1724,7 +1726,9 @@ void Frame(IDirect3DDevice9* dev) {
                 if (d > 0.0f && d * d > b2) continue;
             }
             RtLampModel::Lamp l = g.lamp;
-            l.mult = static_cast<float>(g.mult[s.story]);
+            // a floor map counts the lamp once, as the terrain bake does under the grass, sidewalks and roads beside it (the
+            // list's second entry made patios up to 45% brighter than the ground next to them)
+            l.mult = s.m == 1 ? 1.0f : static_cast<float>(g.mult[s.story]);
             if (s.story == 0 && s.m == 1 && g.liftable && TerrainBakeRule::LowLampLift()) {
                 // the lot's ground in lot space (its base is world y; lots turn about y only)
                 const float base[3] = {0.0f, rns[0].lotBase, 0.0f};
@@ -1809,7 +1813,7 @@ void Frame(IDirect3DDevice9* dev) {
         LARGE_INTEGER tn{};
         QueryPerformanceCounter(&tn);
         const double units = static_cast<double>(s.map.count) * static_cast<double>(std::max<size_t>(mine.size(), 1)) * (dragging ? 1.0 : 7.0);
-        if (throttled || (relit > 0 && (Ms(t0, tn) > kFrameCpuMs || work + units > kFrameWork))) {
+        if (relit > 0 && (Ms(t0, tn) > kFrameCpuMs || work + units > kFrameWork)) {
             left++; // (it keeps its last copy and stays dirty until its turn)
             continue;
         }
@@ -2012,7 +2016,6 @@ void Frame(IDirect3DDevice9* dev) {
             }
             if (!baked) covered.push_back(g.light);
         }
-        g_stampLights = covered;
         std::lock_guard<std::mutex> lk(g_coverMx);
         g_cover.tracker = tracker;
         g_cover.full = full;
@@ -2040,7 +2043,6 @@ void Frame(IDirect3DDevice9* dev) {
         c_tiles.fetch_add(tiles, std::memory_order_relaxed);
         if (!g_roundOpen) {
             g_roundOpen = true;
-            g_lastRelightAt = nowTick | 1;
             g_roundCpuMs = 0, g_roundMaps = 0, g_roundFrames = 0, g_roundTiles = 0;
             g_roundStories.clear();
             g_ph = Phases{};

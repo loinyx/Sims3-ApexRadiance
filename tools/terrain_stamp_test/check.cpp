@@ -7,6 +7,10 @@
 //   T3  a chunk border: the P grid's 4 texels into the neighbour equal the neighbour's own texels, bit for bit
 //   T4  the base kept: rgb = min(base + stamps, 1), alpha untouched
 //   T5  GPU time of StampPS over a 264 x 264 P grid with 8 lamps
+//   T6  the game's bake pixel shader is the one the mod recognises (size and FNV-1a, features/terrain_bake_cone.h)
+//   T7  BakeConePS (shaders/terrain_bake_ps.hlsl) without cones against the game's shader, sloped ground: the same law
+//   T8  BakeConePS with spot and shaded-lamp cones against the CPU law times TerrainBakeCone::Factor, sloped ground
+//   T9  StampPS with the same cones against BakeConePS on flat ground
 #include <windows.h>
 #include <d3d9.h>
 #include <d3dcompiler.h>
@@ -20,6 +24,8 @@
 #include <string>
 #include <vector>
 #include "shaders/lightmap_smooth_hlsl.h"
+#include "shaders/terrain_bake_hlsl.h"
+#include "features/terrain_bake_cone.h"
 
 namespace {
 int checks = 0, failures = 0;
@@ -188,20 +194,22 @@ void CommonState() {
 
 // ---------------------------------------------------------------- the game's bake pass and StampPS
 IDirect3DVertexShader9* g_gameVs = nullptr;
-IDirect3DPixelShader9 *g_gamePs = nullptr, *g_stampPs = nullptr;
+IDirect3DPixelShader9 *g_gamePs = nullptr, *g_stampPs = nullptr, *g_conePs = nullptr;
 IDirect3DVertexDeclaration9* g_decl = nullptr;
 
 struct Lamp {
     float col[3], w; // colour, range x intensity x 0.2
     float pos[3];
+    float cone[3][4] = {{0, 0, 0, 1}, {-1, 0, 0, 0}, {0, 0, 0, TerrainBakeCone::kMagic}}; // no cone
 };
 constexpr float kHeightScale = 0.01f;       // PS c2.x: height = (255 g + b) x scale (bytes)
 constexpr float kNmZero = 2.0f * 128 / 255; // (alpha, green) byte 128: 2 x 128 / 255 - 1.0039 ~ 0
 
 // One game pass: chunk rect (x0, z0, size) on a w x h target; s0 normal map, s1 height map
-void GamePass(int w, int h, float x0, float z0, float size, const Lamp& l) {
+void GamePass(int w, int h, float x0, float z0, float size, const Lamp& l, IDirect3DPixelShader9* ps = nullptr) {
     g_dev->SetVertexShader(g_gameVs);
-    g_dev->SetPixelShader(g_gamePs);
+    g_dev->SetPixelShader(ps ? ps : g_gamePs);
+    g_dev->SetPixelShaderConstantF(5, &l.cone[0][0], 3); // (BakeConePS; the game's shader reads none of them)
     g_dev->SetVertexDeclaration(g_decl);
     const float vc[12] = {0.5f, -0.5f, 0.5f, 0.5f, 1, 1, -1.0f / w, 1.0f / h, x0, z0, size, size};
     g_dev->SetVertexShaderConstantF(0, vc, 3);
@@ -220,13 +228,14 @@ void StampPass(int w, int h, float ox, float oz, float gy, const std::vector<Lam
     g_dev->SetPixelShaderConstantF(0, in, 1);
     const float o[4] = {ox, oz, gy, static_cast<float>(lamps.size())};
     g_dev->SetPixelShaderConstantF(2, o, 1);
-    float lc[64] = {};
+    float lc[160] = {};
     for (size_t k = 0; k < lamps.size() && k < 8; k++) {
-        float* c = lc + k * 8;
+        float* c = lc + k * 20;
         c[0] = lamps[k].col[0], c[1] = lamps[k].col[1], c[2] = lamps[k].col[2], c[3] = lamps[k].w;
         c[4] = lamps[k].pos[0], c[5] = lamps[k].pos[1], c[6] = lamps[k].pos[2];
+        std::memcpy(c + 8, lamps[k].cone, 48);
     }
-    g_dev->SetPixelShaderConstantF(4, lc, 16);
+    g_dev->SetPixelShaderConstantF(4, lc, 40);
     struct V { float x, y, z, rhw, u, v; };
     const float fw = static_cast<float>(w), fh = static_cast<float>(h);
     const V q[4] = {{-0.5f, -0.5f, 0, 1, 0, 0}, {fw - 0.5f, -0.5f, 0, 1, fw, 0}, {-0.5f, fh - 0.5f, 0, 1, 0, fh}, {fw - 0.5f, fh - 0.5f, 0, 1, fw, fh}};
@@ -245,6 +254,36 @@ void LawCpu(const Lamp& l, float wx, float wz, uint8_t nmA, uint8_t nmG, uint8_t
     const float d2 = L[0] * L[0] + L[2] * L[2] + 1e-4f;
     const float a = std::min(1.0f, l.w / d2) * (c >= 0 ? std::min(1.0f, std::sqrt(c)) : 0.0f);
     for (int k = 0; k < 3; k++) out[k] = l.col[k] * a;
+}
+
+// The law times the light's cone factor at the direction from the point (at its height) to the light
+void LawConeCpu(const Lamp& l, float wx, float wz, uint8_t nmA, uint8_t nmG, uint8_t hmG, uint8_t hmB, float out[3]) {
+    LawCpu(l, wx, wz, nmA, nmG, hmG, hmB, out);
+    const float y = (hmG * 255.0f + hmB) * kHeightScale;
+    float d[3] = {l.pos[0] - wx, l.pos[1] - y, l.pos[2] - wz};
+    const float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    for (float& v : d) v /= len;
+    float f[3];
+    TerrainBakeCone::Factor(l.cone, d, f);
+    for (int k = 0; k < 3; k++) out[k] *= f[k];
+}
+// A spot (type 4) or a shaded lamp (type 5) aimed roughly down, with the game's fields
+void RandomCone(std::mt19937& rng, Lamp& l) {
+    std::uniform_real_distribution<float> U(0, 1);
+    float a[3] = {U(rng) - 0.5f, -0.5f - U(rng), U(rng) - 0.5f};
+    const float n = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+    for (float& v : a) v /= n;
+    TerrainBakeCone::Fields f;
+    if (U(rng) < 0.5f) {
+        f.type = 4;
+        for (int i = 0; i < 3; i++) f.axis4[i] = a[i];
+        f.off4 = 0.5f + 0.4f * U(rng), f.scale4 = 2 + 6 * U(rng);
+    } else {
+        f.type = 5;
+        for (int i = 0; i < 3; i++) f.a1[i] = a[i], f.a2[i] = -a[i], f.S[i] = 0.05f + 0.45f * U(rng);
+        f.o1 = 0.2f + 0.6f * U(rng), f.o2 = 0.5f + 0.45f * U(rng);
+    }
+    TerrainBakeCone::Rows(f, 5.0f, l.cone);
 }
 
 Lamp RandomLamp(std::mt19937& rng, float x0, float z0, float gy) {
@@ -282,7 +321,12 @@ int main(int argc, char** argv) {
         return 1;
     }
     g_dev->CreatePixelShader(static_cast<const DWORD*>(code->GetBufferPointer()), &g_stampPs);
-    Check(g_gameVs && g_gamePs && g_stampPs && g_decl, "shaders made");
+    if (FAILED(D3DCompile(kTerrainBakeHlsl, std::strlen(kTerrainBakeHlsl), "terrain_bake_ps.hlsl", nullptr, nullptr, "BakeConePS", "ps_2_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &err))) {
+        std::printf("BakeConePS: %s\n", err ? static_cast<const char*>(err->GetBufferPointer()) : "?");
+        return 1;
+    }
+    g_dev->CreatePixelShader(static_cast<const DWORD*>(code->GetBufferPointer()), &g_conePs);
+    Check(g_gameVs && g_gamePs && g_stampPs && g_conePs && g_decl, "shaders made");
     CommonState();
     g_dev->BeginScene();
 
@@ -481,6 +525,107 @@ int main(int argc, char** argv) {
         for (IDirect3DQuery9* q : {dj, fq, t0, t1})
             if (q) q->Release();
         rtP->Release(), zeroP->Release();
+    }
+
+    // ---- T6: the shader the mod swaps is this one
+    {
+        const uint64_t h = TerrainBakeCone::Fnv(psCode.data(), psCode.size());
+        std::printf("\n[T6] the game's bake pixel shader: %zu bytes, FNV-1a %016llx\n", psCode.size(), static_cast<unsigned long long>(h));
+        Check(psCode.size() == TerrainBakeCone::kGamePsBytes && h == TerrainBakeCone::kGamePsFnv, "the mod recognises the game's bake pixel shader");
+    }
+
+    // sloped maps for T7 and T8
+    std::vector<uint8_t> nmS(static_cast<size_t>(N) * N * 4), hmS(static_cast<size_t>(N) * N * 4);
+    {
+        std::uniform_int_distribution<int> tilt(128 - 80, 128 + 80), dh(-500, 500);
+        for (size_t i = 0; i < static_cast<size_t>(N) * N; i++) {
+            nmS[i * 4 + 3] = static_cast<uint8_t>(tilt(rng)), nmS[i * 4 + 1] = static_cast<uint8_t>(tilt(rng));
+            const int u = std::clamp(units + dh(rng), 0, 255 * 255 + 254);
+            hmS[i * 4 + 1] = static_cast<uint8_t>(u / 255), hmS[i * 4 + 2] = static_cast<uint8_t>(u % 255);
+        }
+        FillBytes(nm, N, N, nmS);
+        FillBytes(hm, N, N, hmS);
+    }
+
+    // ---- T7: BakeConePS without cones (no-cone rows; rows without the stub's mark) against the game's shader
+    {
+        double worst = 0;
+        for (int t = 0; t < 24; t++) {
+            Lamp l = RandomLamp(rng, x0, z0, gy);
+            if (t % 2) RandomCone(rng, l), l.cone[2][3] = 0; // cone rows, but no mark: the game's law
+            g_dev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+            g_dev->SetTexture(0, nm), g_dev->SetTexture(1, hm);
+            Target(rtF);
+            g_dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 0, 0);
+            GamePass(N, N, x0, z0, static_cast<float>(N), l);
+            const std::vector<float> g = ReadFloat(rtF, N, N);
+            Target(rtF);
+            g_dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 0, 0);
+            GamePass(N, N, x0, z0, static_cast<float>(N), l, g_conePs);
+            const std::vector<float> c = ReadFloat(rtF, N, N);
+            for (size_t i = 0; i < g.size(); i++) worst = std::max(worst, static_cast<double>(std::fabs(g[i] - c[i])));
+        }
+        std::printf("\n[T7] BakeConePS without cones against the game's bake shader (24 lamps, sloped ground): largest difference %.2e\n", worst);
+        Check(worst < 1e-5, "BakeConePS without cones is the game's law");
+    }
+
+    // ---- T8: BakeConePS with cones against the CPU law times the cone factor
+    {
+        double worst = 0;
+        long lit = 0, dark = 0;
+        for (int t = 0; t < 48; t++) {
+            Lamp l = RandomLamp(rng, x0, z0, gy);
+            l.pos[0] = x0 + 40 + 176 * (t % 7) / 6.0f, l.pos[2] = z0 + 40 + 176 * (t % 5) / 4.0f; // over the chunk
+            RandomCone(rng, l);
+            g_dev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+            g_dev->SetTexture(0, nm), g_dev->SetTexture(1, hm);
+            Target(rtF);
+            g_dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 0, 0);
+            GamePass(N, N, x0, z0, static_cast<float>(N), l, g_conePs);
+            const std::vector<float> c = ReadFloat(rtF, N, N);
+            for (int y = 0; y < N; y++)
+                for (int x = 0; x < N; x++) {
+                    const size_t i = static_cast<size_t>(y) * N + x;
+                    float ref[3], plain[3];
+                    LawConeCpu(l, x0 + x + 0.5f, z0 + y + 0.5f, nmS[i * 4 + 3], nmS[i * 4 + 1], hmS[i * 4 + 1], hmS[i * 4 + 2], ref);
+                    LawCpu(l, x0 + x + 0.5f, z0 + y + 0.5f, nmS[i * 4 + 3], nmS[i * 4 + 1], hmS[i * 4 + 1], hmS[i * 4 + 2], plain);
+                    if (plain[0] > 0.05f) (ref[0] > 0.9f * plain[0] ? lit : dark)++;
+                    for (int k = 0; k < 3; k++) worst = std::max(worst, static_cast<double>(std::fabs(c[i * 4 + k] - ref[k])));
+                }
+        }
+        std::printf("\n[T8] BakeConePS with cones against the CPU law x the cone factor (48 spots and shaded lamps, sloped ground): largest difference "
+                    "%.2e; lit texels %ld inside the cones, %ld dimmed outside\n",
+                    worst, lit, dark);
+        Check(worst < 2e-3 && lit > 0 && dark > 0, "BakeConePS gives the law times the cones");
+    }
+
+    // ---- T9: StampPS with the same cones against BakeConePS, flat ground
+    {
+        std::vector<uint8_t> nmB(static_cast<size_t>(N) * N * 4, 0), hmB(static_cast<size_t>(N) * N * 4, 0);
+        for (size_t i = 0; i < static_cast<size_t>(N) * N; i++) {
+            nmB[i * 4 + 3] = 128, nmB[i * 4 + 1] = 128;
+            hmB[i * 4 + 1] = flatG, hmB[i * 4 + 2] = flatB;
+        }
+        FillBytes(nm, N, N, nmB);
+        FillBytes(hm, N, N, hmB);
+        double worst = 0;
+        for (int t = 0; t < 48; t++) {
+            Lamp l = RandomLamp(rng, x0, z0, flatY);
+            RandomCone(rng, l);
+            g_dev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+            Target(rtF);
+            g_dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 0, 0);
+            g_dev->SetTexture(0, nm), g_dev->SetTexture(1, hm);
+            GamePass(N, N, x0, z0, static_cast<float>(N), l, g_conePs);
+            const std::vector<float> g = ReadFloat(rtF, N, N);
+            Target(rtF);
+            StampPass(N, N, x0 + 0.5f, z0 + 0.5f, flatY, {l}, zero);
+            const std::vector<float> s = ReadFloat(rtF, N, N);
+            for (size_t i = 0; i < g.size(); i++)
+                if (i % 4 != 3) worst = std::max(worst, static_cast<double>(std::fabs(std::min(g[i], 1.0f) - s[i])));
+        }
+        std::printf("\n[T9] StampPS with cones against BakeConePS (48 lamps, flat ground, float target): largest difference %.2e\n", worst);
+        Check(worst < 2e-3, "StampPS gives the bake's cones");
     }
 
     g_dev->EndScene();

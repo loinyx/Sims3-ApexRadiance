@@ -14,6 +14,9 @@
 // S7  the relight refused when the drag starts / when it ends (retried)
 // S8  dragged again while it returns to the bake
 // S9  two lamps dragged at once, a slow re-render queue
+// S10 a lamp new from the catalog (never baked) dragged at once, a slow queue: drawn at once, no relight at the start
+// S11 picked up again mid-drag: out of the list for a few frames, a slow queue
+// S12 out of the list for good (another lot): back in the bake after kGoneMs
 #include <windows.h>
 static DWORD g_tick = 1000;
 static DWORD FakeTick() { return g_tick; }
@@ -42,7 +45,7 @@ struct FakeLamp {
 };
 std::map<Key, Chunk> W;
 std::map<uintptr_t, FakeLamp> lamps;
-std::set<uintptr_t> excluded;
+std::set<uintptr_t> excluded, everBaked;
 std::deque<Key> queue;
 int renderEvery = 1, frame = 0, refuse = 0; // refuse: the next n QueueLocal calls fail
 bool gpu = true, engaged = false;
@@ -97,7 +100,8 @@ bool Engaged() { return engaged; }
 } // namespace DragLite
 namespace NightTerrainBake {
 void SetExcluded(const std::vector<uintptr_t>& lights) { excluded = {lights.begin(), lights.end()}; }
-bool StampOf(uintptr_t light, float col[4], float pos[3], float rect[4], float& ground) {
+bool EverBaked(uintptr_t light) { return everBaked.count(light) != 0; }
+bool StampOf(uintptr_t light, float col[4], float pos[3], float rect[4], float& ground, float (*)[4]) {
     const auto it = lamps.find(light);
     if (it == lamps.end() || !it->second.exists) return false;
     col[0] = col[2] = 1, col[1] = static_cast<float>(light), col[3] = it->second.range * 0.2f; // (green: the lamp's id)
@@ -119,11 +123,12 @@ void Check(bool ok, const std::string& text) {
 void Bake(Chunk& c, const Key& k) { // what the game's chunk bake takes now
     c.baked.clear();
     for (const auto& [L, l] : lamps)
-        if (l.exists && !excluded.count(L) && Overlaps(k, l.x, l.z, l.range)) c.baked[L] = {l.x, l.z};
+        if (l.exists && !excluded.count(L) && Overlaps(k, l.x, l.z, l.range)) c.baked[L] = {l.x, l.z}, everBaked.insert(L);
 }
 void Reset() {
     TerrainStamps::Clear();
     lamps.clear();
+    everBaked.clear();
     queue.clear();
     W.clear();
     for (int i = 0; i < kN; i++)
@@ -325,6 +330,65 @@ int main() {
         Check(excluded.size() == 2, "S9: both drawn on the GPU");
         Settled("S9", st);
         Gap("S9", st, 4);
+    }
+    std::printf("[S10] a new lamp (never baked), slow queue\n");
+    {
+        Reset();
+        Place(B, 700, 700); // another lamp of the lot, far away
+        renderEvery = 20;    // about 3 chunk renders a second, as when renders are slow
+        lamps[A].x = 300, lamps[A].z = 300; // new from the catalog: in no chunk's map
+        Stats st;
+        const long q0 = queued;
+        Run(st, 1); // first seen
+        Drag(st, A, 0.2f, 0, 60);
+        Check(excluded.count(A) == 1 && queued == q0, std::format("S10: drawn on the GPU at once, no relight at the drag start ({} relights)", queued - q0));
+        Gap("S10 dragged", st, 4);
+        Settled("S10", st);
+        Gap("S10 released", st, 4);
+    }
+    std::printf("[S11] picked up again: out of the list for a few frames\n");
+    {
+        Reset();
+        Place(A, 300, 300);
+        Stats st;
+        renderEvery = 6;
+        Drag(st, A, 0.2f, 0, 30);
+        const long q0 = queued, e0 = TerrainStamps::g_entered;
+        lamps[A].listed = false;
+        Drag(st, A, 0.2f, 0, 12); // about 0.2 s out of the list, still moving
+        lamps[A].listed = true;
+        Run(st, 1); // seen again (this frame still shows the place it left the list at)
+        Stats back;
+        Drag(back, A, 0.2f, 0, 30);
+        Check(queued == q0 && TerrainStamps::g_entered == e0 && excluded.count(A) == 1,
+              std::format("S11: no relight and no new entry for a short absence ({} relights, {} entries)", queued - q0, TerrainStamps::g_entered - e0));
+        Check(back.maxLag <= 0.2f * (TerrainStamps::kBumpMs / kFrameMs + 2) + 1e-3 && back.doubled == 0,
+              std::format("S11: back in the list, the stamp follows at once ({:.2f} m behind at most)", back.maxLag));
+        Gap("S11 out", st, 4);
+        Gap("S11 back", back, 4);
+        Run(st, 10);             // still a moment (every stamp build done), still dragged
+        lamps[A].listed = false; // out again, put down 2 m away while out, back and still
+        Drag(st, A, 0.2f, 0, 10);
+        lamps[A].listed = true;
+        Run(st, 2);
+        Stats still;
+        Run(still, 30);
+        Check(still.maxLag < 1e-3, std::format("S11: back elsewhere and still, the stamp is where it stands ({:.2f} m off)", still.maxLag));
+        Settled("S11", st);
+    }
+    std::printf("[S12] out of the list for good\n");
+    {
+        Reset();
+        Place(A, 300, 300);
+        Stats st;
+        Drag(st, A, 0.2f, 0, 30);
+        lamps[A].listed = false; // still in the world, no longer the lot's (its stamp stays for kGoneMs)
+        Run(st, static_cast<int>(TerrainStamps::kGoneMs / kFrameMs) - 2);
+        Check(excluded.count(A) == 1, "S12: kept drawn while out of the list for less than kGoneMs");
+        Run(st, 6);
+        Check(excluded.empty(), "S12: back in the bake once out of the list for kGoneMs");
+        Settled("S12", st);
+        Gap("S12", st, 4);
     }
     std::printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

@@ -378,7 +378,7 @@ void WinterFloors(Gpu& gpu, const std::vector<Blob>& blobs, const std::vector<Te
             if (ps >= 1 && ps <= blobs.size() && vs >= 1 && vs <= blobs.size()) psOf[vs].insert(ps);
     for (int kind = 0; kind < 2; kind++) {
         const char* name = kind == 0 ? "Winter floor tiles" : "Snow on floors";
-        int vsN = 0, vsY = 0, psN = 0, psShaded = 0, psRefusedBoth = 0, psNoRoom = 0, psExit = 0;
+        int vsN = 0, vsY = 0, psN = 0, psShaded = 0, psRefusedBoth = 0, psNoRoom = 0, psExit = 0, psGainOnly = 0;
         std::set<uint32_t> seenVs;
         std::map<std::string, int> yAt;
         for (size_t i = 0; i < blobs.size(); i++) {
@@ -409,6 +409,11 @@ void WinterFloors(Gpu& gpu, const std::vector<Blob>& blobs, const std::vector<Te
                     continue;
                 }
                 psN++;
+                if (kind == 0 && fn.gainOnly) { // no sampler left for the atlas: the game's bytes, the lamp scale known
+                    psGainOnly++;
+                    Check(fa.gainOnly && a == ps && n == ps && fn.scaleConst >= 0 && fa.scaleConst == fn.scaleConst, "winter: a gain-only floor keeps the game's bytes and names its lamp scale");
+                    continue;
+                }
                 Check(fn.shadeSampler == -1, "winter: no shade without world y");
                 Check(fa.atlasSampler == fn.atlasSampler && fa.atlasConst == fn.atlasConst && fa.heightConst == fn.heightConst && fa.scaleConst == fn.scaleConst,
                       "winter: the shade leaves the atlas, weight and scale registers alone");
@@ -449,10 +454,11 @@ void WinterFloors(Gpu& gpu, const std::vector<Blob>& blobs, const std::vector<Te
                 Check(gpu.AcceptsPs(n), "winter: native D3D9 accepts the copy without the shade");
             }
         }
+        Check(psRefusedBoth == 0, "winter: every pixel shader of these floors takes the patch (no weather variant left at the game's lamp scale)");
         std::printf("%s: %d vertex shaders, %d write world y (", name, vsN, vsY);
         for (auto& [k, v] : yAt) std::printf(" %s x%d", k.c_str(), v);
-        std::printf(" ); pixel shaders patched %d, shaded %d (no sampler to spare %d), refused by the patch %d; indoor light on the ground %d\n", psN, psShaded,
-                    psNoRoom, psRefusedBoth, psExit);
+        std::printf(" ); pixel shaders patched %d (lamp scale only %d), shaded %d (no sampler to spare %d), refused by the patch %d; indoor light on the ground %d\n", psN,
+                    psGainOnly, psShaded, psNoRoom, psRefusedBoth, psExit);
     }
 }
 
@@ -598,6 +604,145 @@ void Pixels(Gpu& gpu) {
     Release(white);
     Release(mask);
     std::printf("Floor shade pixels: %d checks\n", g_checks - before);
+}
+
+// ---- 4c. Snow on objects mixed with the fog in its last instructions (PatchSnowCover without the final "mul oC0.xyz"): the
+// ground atlas x strength is added to the moon light right after "mad rL.xyz, rX.w, c0, rY", on native D3D9
+void SnowCoverFogPixels(Gpu& gpu) {
+    if (!gpu.dev) return;
+    const int before = g_checks;
+    const std::vector<DWORD> ps = Compile("sampler2D snow:register(s0); float4 moon:register(c0); float4 sky:register(c1); float4 mixv:register(c2); float4 k:register(c3);\n"
+                                          "float4 main(float4 col:COLOR0, float2 uv:TEXCOORD0, float2 w:TEXCOORD3):COLOR0{float sh=saturate(col.a*k.x+w.x*k.y+w.y*k.z);"
+                                          "float3 l=sh*moon.rgb+col.rgb*sky.rgb; float3 s=tex2D(snow,uv).rgb*l; return float4(lerp(col.rgb,s,mixv.w),1);}",
+                                          "ps_3_0");
+    std::vector<DWORD> code = ps;
+    ShaderPatches::SnowCoverPatch p;
+    const bool ok = !code.empty() && ShaderPatches::PatchSnowCover(code, p);
+    Check(ok, "snow cover with the fog mix: the light mad takes the ground atlas");
+    if (!ok) {
+        std::printf("%s\n", Disasm(ps).c_str());
+        return;
+    }
+    IDirect3DPixelShader9* shader = nullptr;
+    IDirect3DVertexShader9* vs = nullptr;
+    Check(SUCCEEDED(gpu.dev->CreatePixelShader(code.data(), &shader)), "snow cover fog: D3D9 accepts the copy");
+    const std::vector<DWORD> vsCode = Compile("struct O{float4 p:POSITION;float4 c:COLOR0;float2 uv:TEXCOORD0;float2 w:TEXCOORD3;};\n"
+                                              "O main(float4 p:POSITION,float2 uv:TEXCOORD0){O o;o.p=p;o.c=float4(0,0,0,0.5);o.uv=uv;o.w=uv;return o;}",
+                                              "vs_3_0");
+    Check(!vsCode.empty() && SUCCEEDED(gpu.dev->CreateVertexShader(vsCode.data(), &vs)), "snow cover fog: fixture vertex shader");
+    const auto solid = [&](DWORD argb) {
+        IDirect3DTexture9* t = nullptr;
+        if (FAILED(gpu.dev->CreateTexture(4, 4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &t, nullptr))) return t;
+        D3DLOCKED_RECT r{};
+        t->LockRect(0, &r, nullptr, 0);
+        for (int y = 0; y < 4; y++)
+            for (int x = 0; x < 4; x++) reinterpret_cast<DWORD*>(static_cast<char*>(r.pBits) + y * r.Pitch)[x] = argb;
+        t->UnlockRect(0);
+        return t;
+    };
+    IDirect3DTexture9 *snow = solid(0xFFFFFFFFu), *atlas = solid(0xFF666666u);
+    if (shader && vs && snow && atlas) {
+        gpu.dev->SetTexture(0, snow);
+        gpu.dev->SetTexture(p.atlasSampler, atlas);
+        const float zero[4] = {}, mixv[4] = {0, 0, 0, 1}, kc[4] = {2, 0, 0, 0}, atlasC[4] = {1, 1, 0, 0};
+        gpu.dev->SetPixelShaderConstantF(0, zero, 1);
+        gpu.dev->SetPixelShaderConstantF(1, zero, 1);
+        gpu.dev->SetPixelShaderConstantF(2, mixv, 1);
+        gpu.dev->SetPixelShaderConstantF(3, kc, 1);
+        gpu.dev->SetPixelShaderConstantF(p.atlasConst, atlasC, 1);
+        for (float s : {1.0f, 0.5f, 0.0f}) {
+            const float sc[4] = {s, 0, 0, 0};
+            gpu.dev->SetPixelShaderConstantF(p.strengthConst, sc, 1);
+            const auto px = gpu.Render(shader, vs);
+            int worst = 0;
+            for (DWORD q : px) worst = std::max(worst, std::abs(static_cast<int>((q >> 8) & 255) - static_cast<int>(std::lround(0.4f * s * 255.0f))));
+            char what[112];
+            std::snprintf(what, sizeof what, "snow cover fog pixels: snow x (atlas 0.4 x strength %.1f) within 2 LSB (worst %d)", s, worst);
+            Check(worst <= 2, what);
+            if (worst > 2) std::printf("  %s\n", what);
+        }
+    } else {
+        Check(false, "snow cover fog: fixture resources");
+    }
+    for (DWORD s = 0; s < 16; s++) gpu.dev->SetTexture(s, nullptr);
+    gpu.dev->SetPixelShader(nullptr);
+    gpu.dev->SetVertexShader(nullptr);
+    Release(shader);
+    Release(vs);
+    Release(snow);
+    Release(atlas);
+    std::printf("Snow cover fog pixels: %d checks\n", g_checks - before);
+}
+
+// ---- 4a. The weather floors' map read (PatchFloor, the map straight into the lamp scale: "mad rY.xyz, rM, cK.x, rZ"):
+// out = max(map, atlas x weight) x k + base, with the atlas at TEXCOORD0.zw, on native D3D9
+void WeatherFloorPixels(Gpu& gpu) {
+    if (!gpu.dev) return;
+    const int before = g_checks;
+    const std::vector<DWORD> ps = Compile("sampler2D map:register(s0); sampler2D base:register(s1); float4 k:register(c0); float4 d:register(c1);\n"
+                                          "float4 main(float4 uv:TEXCOORD0, float2 muv:TEXCOORD2):COLOR0{float3 l=tex2D(map,muv).rgb*k.x+tex2D(base,uv.xy).rgb;"
+                                          "return float4(l/(1+uv.x*d.x),1);}",
+                                          "ps_3_0");
+    std::vector<DWORD> code = ps;
+    ShaderPatches::FloorPatch f;
+    const bool ok = !code.empty() && ShaderPatches::PatchFloor(code, f) && f.scaleConst == 0 && f.heightConst >= 0;
+    Check(ok, "weather floor pixels: the map-into-scale shader takes the patch, lamp scale c0");
+    if (!ok) {
+        std::printf("%s\n", Disasm(ps).c_str());
+        return;
+    }
+    IDirect3DPixelShader9* shader = nullptr;
+    IDirect3DVertexShader9* vs = nullptr;
+    Check(SUCCEEDED(gpu.dev->CreatePixelShader(code.data(), &shader)), "weather floor pixels: D3D9 accepts the copy");
+    const std::vector<DWORD> vsCode = Compile("struct O{float4 p:POSITION;float4 uv:TEXCOORD0;float2 m:TEXCOORD2;};\n"
+                                              "O main(float4 p:POSITION,float2 uv:TEXCOORD0){O o;o.p=p;o.uv=float4(uv,uv);o.m=uv;return o;}",
+                                              "vs_3_0");
+    Check(!vsCode.empty() && SUCCEEDED(gpu.dev->CreateVertexShader(vsCode.data(), &vs)), "weather floor pixels: fixture vertex shader");
+    const auto solid = [&](DWORD argb) {
+        IDirect3DTexture9* t = nullptr;
+        if (FAILED(gpu.dev->CreateTexture(4, 4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &t, nullptr))) return t;
+        D3DLOCKED_RECT r{};
+        t->LockRect(0, &r, nullptr, 0);
+        for (int y = 0; y < 4; y++)
+            for (int x = 0; x < 4; x++) reinterpret_cast<DWORD*>(static_cast<char*>(r.pBits) + y * r.Pitch)[x] = argb;
+        t->UnlockRect(0);
+        return t;
+    };
+    IDirect3DTexture9 *map = solid(0x00333333u), *base = solid(0xFF000000u), *atlasHigh = solid(0xFF999999u), *atlasLow = solid(0xFF1A1A1Au);
+    if (shader && vs && map && base && atlasHigh && atlasLow) {
+        gpu.dev->SetTexture(0, map);
+        gpu.dev->SetTexture(1, base);
+        const float atlasC[4] = {1, 1, 0, 0}, weight[4] = {1, 0, 0, 0}, none[4] = {};
+        gpu.dev->SetPixelShaderConstantF(f.atlasConst, atlasC, 1);
+        gpu.dev->SetPixelShaderConstantF(static_cast<UINT>(f.heightConst), weight, 1);
+        gpu.dev->SetPixelShaderConstantF(1, none, 1);
+        for (IDirect3DTexture9* atlas : {atlasHigh, atlasLow})
+            for (float k : {1.0f, 0.263f}) {
+                gpu.dev->SetTexture(f.atlasSampler, atlas);
+                const float kc[4] = {k, 0, 0, 0};
+                gpu.dev->SetPixelShaderConstantF(0, kc, 1);
+                const auto px = gpu.Render(shader, vs);
+                const float want = std::max(0.2f, atlas == atlasHigh ? 0.6f : 0.102f) * k;
+                int worst = 0;
+                for (DWORD p : px) worst = std::max(worst, std::abs(static_cast<int>((p >> 8) & 255) - static_cast<int>(std::lround(want * 255.0f))));
+                char what[128];
+                std::snprintf(what, sizeof what, "weather floor pixels: max(map 0.2, atlas %.1f) x %.3f within 2 LSB (worst %d)", atlas == atlasHigh ? 0.6f : 0.1f, k, worst);
+                Check(worst <= 2, what);
+                if (worst > 2) std::printf("  %s\n", what);
+            }
+    } else {
+        Check(false, "weather floor pixels: fixture resources");
+    }
+    for (DWORD s = 0; s < 16; s++) gpu.dev->SetTexture(s, nullptr);
+    gpu.dev->SetPixelShader(nullptr);
+    gpu.dev->SetVertexShader(nullptr);
+    Release(shader);
+    Release(vs);
+    Release(map);
+    Release(base);
+    Release(atlasHigh);
+    Release(atlasLow);
+    std::printf("Weather floor pixels: %d checks\n", g_checks - before);
 }
 
 // ---- 4b. (2.15.3) GPU pixels of the indoor light on the ground: the synthetic floor shader patched with exitLight, a map
@@ -1296,6 +1441,8 @@ int main(int argc, char** argv) {
     WinterFloors(gpu, blobs, techs);
     Rows();
     Pixels(gpu);
+    WeatherFloorPixels(gpu);
+    SnowCoverFogPixels(gpu);
     ExitPixels(gpu);
     Check(Instanced(gpu, InstancedPs(blobs, techs), "precomp") > 0, "instanced: the precomp has instanced shaders that take the shade");
     InstancedPixels(gpu);

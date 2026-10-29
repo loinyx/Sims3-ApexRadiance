@@ -30,6 +30,7 @@
 #include "game_addresses.h"
 #include "apex_log.h"
 #include "d3d9_hooks.h"
+#include "d3d9_bootstrap.h"
 #include "depth_share.h"
 #include "light_diag.h"
 #include "daylight_probe.h"
@@ -63,6 +64,9 @@
 #include "outdoor_delta.h"
 #include "rt_outdoor_lamps.h"
 #include "terrain_stamps.h"
+#include "terrain_bake_cone.h"
+#include "terrain_bake_hlsl.h"
+#include "shader_cache.h"
 #include "imgui.h"
 #include "ui/widgets.h"
 #include "ui/i18n.h"
@@ -79,8 +83,11 @@
 #include <climits>
 #include <cmath>
 #include <cstring>
+#include <d3dcompiler.h>
 #include <format>
+#include <mutex>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 void RequestRefreshAfterLoad(); // below the patch's helpers: every room and lot once more, a moment after a load
@@ -460,6 +467,15 @@ const std::vector<BYTE> kBakeColourOrig = {0x0F, 0x28, 0x87, 0xF0, 0x00, 0x00, 0
 // stamps type-5 lot lamps at their spill. The pool right under the lamp comes from the room-solve map, which has the cones.
 // The upper-floor gate mirrors it (LevelLightShare::SetBakeConeSpill).
 volatile bool g_bakeConeSpill = true;
+// The bake runs Apex's copy of its pixel shader (features/terrain_bake_cone.h), which takes each light's cones and spill
+// from c5..c7 (BakeLightRows, from the position stub): the colour stub then leaves the spill to it. The game makes its
+// shader long before Night Lighting installs, so the copy is bound in its place whenever the game binds it (render thread).
+volatile bool g_bakeConeShader = false;
+IDirect3DDevice9* g_bakeDevice = nullptr;
+IDirect3DPixelShader9* g_gameBakePs = nullptr; // the game's bake pixel shader, found bound in a bake
+IDirect3DPixelShader9* g_conePs = nullptr;     // Apex's copy (kept for the session: shaders survive a device reset)
+bool g_coneFailed = false, g_bakeLogged = false;
+float g_coneScale5 = 5.0f; // the shaded lamp's cone scale [0x011D11A0]
 // (2.15.1) area lights (types 9, 10) at the share of the ground below they face (TerrainBakeRule::AreaGroundShare)
 const float g_areaHalf = 0.5f, g_areaZero = 0.0f, g_areaOne = 1.0f;
 // Lamps being dragged whose ground light TerrainStamps draws on the GPU: the bake gives them no colour (render thread,
@@ -497,6 +513,8 @@ __declspec(naked) void BakeColourStub() {
         je area
         cmp byte ptr [g_bakeConeSpill], 0
         je done
+        cmp byte ptr [g_bakeConeShader], 0    // the shader gives its cones and spill
+        jne done
         cmp eax, 5                            // type 5: a lamp with cones
         jne done
         mulps xmm0, xmmword ptr [edi+0x150]   // its spill, per channel
@@ -540,7 +558,97 @@ bool ReadLightLot(const BYTE* light, int& type, uint64_t& lot) {
         return false;
     }
 }
+// A light's cone fields (SEH: the light may be gone)
+bool ReadConeFields(const BYTE* light, TerrainBakeCone::Fields& f) {
+    __try {
+        f.type = *reinterpret_cast<const int*>(light + 0xB0);
+        if (f.type == 4) {
+            for (int i = 0; i < 3; i++) f.axis4[i] = reinterpret_cast<const float*>(light + 0x170)[i];
+            f.off4 = *reinterpret_cast<const float*>(light + 0x158);
+            f.scale4 = *reinterpret_cast<const float*>(light + 0x154);
+        } else if (f.type == 5) {
+            for (int i = 0; i < 3; i++) {
+                f.a1[i] = reinterpret_cast<const float*>(light + 0x1A0)[i];
+                f.a2[i] = reinterpret_cast<const float*>(light + 0x190)[i];
+                f.S[i] = reinterpret_cast<const float*>(light + 0x150)[i];
+            }
+            f.o1 = *reinterpret_cast<const float*>(light + 0x174);
+            f.o2 = *reinterpret_cast<const float*>(light + 0x170);
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+// The light about to be drawn: its cone rows into c5..c7 for Apex's bake shader (every light, so none keeps another's)
+void BakeLightRows(const BYTE* light) {
+    TerrainBakeCone::Fields f;
+    if (!ReadConeFields(light, f)) f = {};
+    float r[3][4];
+    TerrainBakeCone::Rows(f, g_coneScale5, r);
+    if (g_bakeDevice) D3D9Hooks::CallOriginalSetPixelShaderConstantF(g_bakeDevice, 5, &r[0][0], 3);
+}
+const ShaderCache::Id kBakeConePs = [] {
+    ShaderCache::Desc d;
+    d.tag = "NightTerrainRelight BakeConePS";
+    d.source = kTerrainBakeHlsl;
+    d.sourceName = "terrain_bake_ps.hlsl";
+    d.entry = "BakeConePS";
+    d.target = "ps_2_0"; // the game's vertex shader is vs_2_0
+    d.flags = D3DCOMPILE_OPTIMIZATION_LEVEL3;
+    return ShaderCache::Add(std::move(d));
+}();
+bool IsGameBakePs(IDirect3DPixelShader9* ps) {
+    UINT n = 0;
+    if (!ps || FAILED(ps->GetFunction(nullptr, &n)) || n != TerrainBakeCone::kGamePsBytes) return false;
+    std::vector<BYTE> code(n);
+    return SUCCEEDED(ps->GetFunction(code.data(), &n)) && TerrainBakeCone::Fnv(code.data(), n) == TerrainBakeCone::kGamePsFnv;
+}
+// ps is about to draw a bake pass: the game's bake shader is found (once) and Apex's copy bound in its place; false
+// when it is another shader or the copy cannot be made
+bool BindConeShader(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps) {
+    if (!ps || g_coneFailed) return false;
+    if (ps != g_conePs) {
+        if (ps != g_gameBakePs) {
+            if (g_gameBakePs || !IsGameBakePs(ps)) return false;
+            std::string err;
+            if (!g_conePs && ShaderCache::CreatePixelShader(dev, kBakeConePs, &g_conePs, &err) != ShaderCache::Result::Ok) {
+                g_coneFailed = true;
+                LOG_WARNING("[NightTerrainRelight] Terrain bake: the shader with lamp cones could not be made (" + (err.empty() ? std::string("create failed") : err) +
+                            "): lamps with cones keep their spill on the ground");
+                return false;
+            }
+            g_gameBakePs = ps;
+            LOG_INFO("[NightTerrainRelight] Terrain bake: lamps light the ground through their cones, as on lots (Apex's copy of the bake shader)");
+        }
+        if (FAILED(D3D9Hooks::CallOriginalSetPixelShader(dev, g_conePs))) return false;
+    }
+    g_bakeDevice = dev;
+    g_bakeConeShader = true;
+    return true;
+}
+float ReadConeScale5() {
+    const uintptr_t at = GameAddr::Get(GameAddr::Id::ConeScale5);
+    __try {
+        const float s = at ? *reinterpret_cast<const float*>(at) : 0.0f;
+        return s > 0.0f && s < 100.0f ? s : 5.0f;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 5.0f;
+    }
+}
+volatile bool g_bakeConeHooked = false; // the SetPixelShader hook is in (Install)
+bool g_inBakeLight = false;              // a bake light's position was just set: the next shader bound may be the bake's
 void __cdecl BakeLiftHead(const BYTE* light, float* head) {
+    if (g_bakeConeHooked && !g_coneFailed) { // the bake's shader may already be bound (a pass before): Apex's copy instead
+        IDirect3DDevice9* dev = g_bakeDevice ? g_bakeDevice : ApexD3D::Device();
+        IDirect3DPixelShader9* bound = nullptr;
+        if (dev && SUCCEEDED(dev->GetPixelShader(&bound)) && bound) {
+            BindConeShader(dev, bound);
+            bound->Release();
+        }
+        g_inBakeLight = !g_gameBakePs;
+        if (g_bakeConeShader) BakeLightRows(light);
+    }
     int type = 0;
     uint64_t lot = 0;
     if (!TerrainBakeRule::LowLampLift() || !ReadLightLot(light, type, lot) || !lot || !TerrainBakeRule::LotLampType(type)) return;
@@ -558,7 +666,10 @@ __declspec(naked) void BakePosStub() {
         movaps xmmword ptr [esi+0x110], xmm0
         mov edx, dword ptr [edi+0xC0]
         or edx, dword ptr [edi+0xC4]
-        jz street                              // a street lamp: as the game
+        jnz helper                             // a lot lamp: maybe lifted (and its cone rows)
+        cmp byte ptr [g_bakeConeShader], 0
+        je street                              // a street lamp with no cone rows to write: as the game
+    helper:
         sub esp, 112
         movups xmmword ptr [esp], xmm1
         movups xmmword ptr [esp+16], xmm2
@@ -948,11 +1059,25 @@ int BakeTest(BYTE* light) {
     if (!g_lotLamps || !IsOutdoorLotLamp(light)) return 0;
     return (light[0x100] & 0x20) ? 3 : 2;
 }
+// The lot lights the bake has given colour to (NightTerrainBake::EverBaked: a lamp new from the catalog is in no chunk's
+// map yet). shortcut: never shrinks; it holds the lot lights of the session, a few thousand at most
+std::mutex g_everBakedMx;
+std::unordered_set<uintptr_t> g_everBaked;
+std::atomic<bool> g_bakeTestSeen{false};
+void NoteBaked(BYTE* light) {
+    if ((*reinterpret_cast<const uint32_t*>(light + 0xC0) | *reinterpret_cast<const uint32_t*>(light + 0xC4)) == 0) return; // a street lamp
+    for (int i = 0; i < g_bakeExcludedCount; i++)
+        if (g_bakeExcluded[i] == reinterpret_cast<uintptr_t>(light)) return; // given no colour (BakeColourStub)
+    std::lock_guard<std::mutex> lk(g_everBakedMx);
+    g_everBaked.insert(reinterpret_cast<uintptr_t>(light));
+}
 // Replaces the vfunc+0x20 test in the terrain light bake collector. Lot lamps only while switched on.
 bool __stdcall TerrainLightTest(BYTE* light) {
     const int t = BakeTest(light);
     if (t == 2) g_lotLampsSkippedOff.fetch_add(1, std::memory_order_relaxed);
     if (t == 3) g_lotLampsBaked.fetch_add(1, std::memory_order_relaxed);
+    g_bakeTestSeen.store(true, std::memory_order_relaxed);
+    if (t == 1 || t == 3) NoteBaked(light);
     return t == 1 || t == 3;
 }
 
@@ -990,17 +1115,32 @@ void SetExcluded(const std::vector<uintptr_t>& lights) {
         if (L && n < kMaxExcluded) g_bakeExcluded[n++] = L;
     g_bakeExcludedCount = n;
 }
+bool Excluded(uintptr_t light) {
+    for (int i = 0; i < g_bakeExcludedCount; i++)
+        if (g_bakeExcluded[i] == light) return true;
+    return false;
+}
+bool ConeShader() { return g_bakeConeShader; }
+bool EverBaked(uintptr_t light) {
+    if (!g_bakeTestSeen.load(std::memory_order_relaxed)) return true; // the collector test is not in: unknown, so yes
+    std::lock_guard<std::mutex> lk(g_everBakedMx);
+    return g_everBaked.count(light) != 0;
+}
 // What BakeColourStub and BakePosStub give the bake for this light (0xC2950F colour x the kind's gain x the area share or
 // the cone spill; .w = range x intensity x 0.2 as at 0xC29523 .. 0xC29586; the position with the low-lamp lift)
-bool StampOf(uintptr_t light, float col[4], float pos[3], float rect[4], float& ground) {
+bool StampOf(uintptr_t light, float col[4], float pos[3], float rect[4], float& ground, float cone[3][4]) {
     BakeFields f{};
     if (!g_bakeGainInstalled || !light || !ReadBakeFields(reinterpret_cast<BYTE*>(light), f) || !f.taken || !f.lot) return false; // (lot lamps only)
     for (int k = 0; k < 3; k++) col[k] = f.colour[k] * g_bakeLotMul[k];
     if (f.type == 9 || f.type == 10) {
         const float share = std::clamp(f.axisY * g_areaHalf + g_areaHalf, g_areaZero, g_areaOne);
         for (int k = 0; k < 3; k++) col[k] *= share;
-    } else if (g_bakeConeSpill && f.type == 5)
+    } else if (g_bakeConeSpill && f.type == 5 && !g_bakeConeShader)
         for (int k = 0; k < 3; k++) col[k] *= f.spill[k];
+    // its cone rows as BakeLightRows gives the bake (none while the bake has no cones)
+    TerrainBakeCone::Fields cf;
+    if (!g_bakeConeShader || !ReadConeFields(reinterpret_cast<const BYTE*>(light), cf)) cf = {};
+    TerrainBakeCone::Rows(cf, g_coneScale5, cone);
     col[3] = f.range * f.intensity * 0.2f;
     std::memcpy(pos, f.pos, sizeof f.pos);
     std::memcpy(rect, f.rect, sizeof f.rect);
@@ -2540,6 +2680,18 @@ class NightTerrainRelightPatch : public ApexPatch {
         }
         if (g_bakePosInstalled) LOG_INFO("[NightTerrainRelight] Terrain bake: lot lamps on the ground are stamped from 40 cm over their lot's ground");
         else LOG_WARNING("[NightTerrainRelight] Terrain bake position code differs or was not found: lamps on the ground light the lawn from their real height");
+        // the bake's lamp cones: Apex's copy of its pixel shader is bound wherever the game binds its own in a bake (both stubs
+        // needed: the position stub writes each light's cone rows, the colour stub then leaves the spill to the shader).
+        // Last: the other features saw the game's shader first.
+        if (g_bakeGainInstalled && g_bakePosInstalled) {
+            g_coneScale5 = ReadConeScale5();
+            D3D9Hooks::RegisterSetPixelShader("NightTerrainRelight", [](D3D9Hooks::DeviceContext& ctx, IDirect3DPixelShader9* ps) {
+                if (!ps || g_coneFailed || (ps != g_gameBakePs && (g_gameBakePs || !g_inBakeLight))) return D3D9Hooks::HookAction::Continue;
+                g_inBakeLight = false;
+                return BindConeShader(ctx.device, ps) ? D3D9Hooks::HookAction::Skip : D3D9Hooks::HookAction::Continue;
+            }, D3D9Hooks::Priority::Last);
+            g_bakeConeHooked = true;
+        }
         LevelLightShare::SetBakeConeSpill(g_bakeGainInstalled && g_bakeConeSpill);
         if (g_bakeGainInstalled && g_bakeConeSpill) LOG_INFO("[NightTerrainRelight] Terrain bake: lamps with cones (type 5) are stamped at their spill");
         if (!g_bakeGainInstalled) LOG_WARNING("[NightTerrainRelight] Terrain bake colour code differs or was not found: street / lot lamp brightness on the ground not available");
@@ -2780,6 +2932,8 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_chunkHookInstalled = false;
         g_bakeGainInstalled = false;
         g_bakePosInstalled = false;
+        g_bakeConeHooked = false; // (the hook went with UnregisterAll: the game's shader binds again)
+        g_bakeConeShader = false;
         NightLevel::g_timesHooked = false;
         g_sunTimesCall = 0;
         LevelLightShare::SetBakeConeSpill(false);

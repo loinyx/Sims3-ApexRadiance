@@ -59,4 +59,14 @@ std::vector<std::pair<Key, uint64_t>> ChunkVersions(const float rect[4]);
 void ReleaseHold(int batch);
 // A lamp switch's chunks are still being re-rendered (a switch shown all at once waits for them, AtriumHold). Render thread.
 bool HoldPending();
+// Developer capture (GroundProfile, render thread): the chunk holding world (x, z) there. src: the game's map texel (0..1,
+// alpha = sun visibility); smooth: the smoothed map's (GPU path, read back once a frame per chunk); the versions; how many
+// dragged lamps its build stamps now. False when no chunk is known there.
+struct ChunkSample {
+    bool src = false, smooth = false;
+    float srcRgba[4] = {}, smoothRgba[4] = {};
+    uint64_t gver = 0, built = 0, rver = 0, sver = 0, builtS = 0;
+    int stamps = 0;
+};
+bool SampleChunk(IDirect3DDevice9* dev, float x, float z, ChunkSample& out, bool texels = true); // texels false: versions only (cheap)
 }

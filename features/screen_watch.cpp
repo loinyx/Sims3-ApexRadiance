@@ -84,6 +84,7 @@ bool Begin(IDirect3DDevice9* dev) {
             g_x[i] = std::clamp<int>(static_cast<int>(kGridXAt[gx] * static_cast<float>(bd.Width)), 0, g_w - 1);
             g_y[i] = std::clamp<int>(static_cast<int>(kGridYAt[gy] * static_cast<float>(bd.Height)), 0, g_h - 1);
         }
+    GroundProfile::WatchBegin(pixel, g_w, g_h);
     for (Slot& s : g_ring)
         if (FAILED(dev->CreateRenderTarget(ScreenWatch::kPoints, 1, bd.Format, D3DMULTISAMPLE_NONE, 0, FALSE, &s.rt, nullptr)) ||
             FAILED(dev->CreateQuery(D3DQUERYTYPE_EVENT, &s.done))) {
@@ -130,6 +131,8 @@ void Copy(IDirect3DDevice9* dev) {
     if (s.pending) return;
     IDirect3DSurface9* bb = nullptr;
     if (FAILED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb) return;
+    if (!GroundProfile::WatchPoints(g_x + ScreenWatch::kGrid, g_y + ScreenWatch::kGrid))
+        std::fill(g_x + ScreenWatch::kGrid, g_x + ScreenWatch::kPoints, 0), std::fill(g_y + ScreenWatch::kGrid, g_y + ScreenWatch::kPoints, 0);
     bool ok = true;
     for (int i = 0; i < ScreenWatch::kPoints && ok; i++) {
         const RECT src{g_x[i], g_y[i], g_x[i] + 1, g_y[i] + 1}, dst{i, 0, i + 1, 1};
@@ -172,6 +175,7 @@ void OnPresent(IDirect3DDevice9* dev) {
     if (!recording && g_watching) {
         RenderCallbacks::Remove(RenderCallbacks::filteredSceneBeforeOverlay, BeforeOverlay);
         g_watching = false;
+        GroundProfile::WatchEnd();
         if (dev && !g_failed) Collect(dev); // the copies already done
         Free();
         return;

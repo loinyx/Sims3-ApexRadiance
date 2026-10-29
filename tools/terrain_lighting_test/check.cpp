@@ -1100,6 +1100,160 @@ void RoadShadePixels(Gpu& gpu) {
     Release(psA); Release(psB); Release(light); Release(terrain); Release(map);
 }
 
+// Wet roads (PatchRoad reflectConst): the fixed sky cube's reflection x cW.x, the road's own light untouched; and which
+// captured pixel shaders take it (only the wet road layout: cube read, then x a scalar temp)
+void WetRoadReflectionPixels(Gpu& gpu, const std::filesystem::path& captures) {
+    int wet = 0, scanned = 0;
+    if (std::filesystem::exists(captures)) for (const auto& e : std::filesystem::recursive_directory_iterator(captures)) {
+        const std::string name = e.path().filename().string();
+        if (!e.is_regular_file() || name.rfind("PS_", 0) != 0 || e.path().extension() != ".bin") continue;
+        std::ifstream f(e.path(), std::ios::binary);
+        std::vector<char> bytes((std::istreambuf_iterator<char>(f)), {});
+        if (bytes.size() < 8 || bytes.size() % 4) continue;
+        std::vector<DWORD> code(bytes.size() / 4);
+        std::memcpy(code.data(), bytes.data(), bytes.size());
+        scanned++;
+        if (ShaderPatches::HasWetSkyReflection(code)) { // (captured as drawn: the road ones already carry PatchRoad's max)
+            wet++;
+            std::printf("  wet road sky reflection: %s\n", e.path().string().c_str());
+        }
+    }
+    std::printf("Wet road reflection: %d of %d captured pixel shaders\n", wet, scanned);
+    if (!gpu.dev) return;
+    auto code = Compile("sampler2D light:register(s0); samplerCUBE sky:register(s1); float4 k:register(c0);"
+                        "float4 main(float4 c:COLOR0, float2 uv:TEXCOORD0):COLOR0{float3 l=tex2D(light,uv).rgb*k.x;"
+                        "float w=uv.x*uv.y; float3 r=texCUBE(sky,float3(uv*2-1,1)).rgb*w; return float4(l/(1+c.rgb*k.y)+r,c.a);}", "ps_3_0");
+    if (code.empty()) { Check(false, "wet road fixture compiles"); return; }
+    auto patched = code;
+    ShaderPatches::RoadPatch rp;
+    Check(ShaderPatches::PatchRoad(patched, rp) && rp.reflectConst > 0, "wet road fixture: the sky reflection found and scaled");
+    if (rp.reflectConst <= 0) {
+        ID3DBlob* dis = nullptr; D3DDisassemble(code.data(), code.size() * 4, 0, nullptr, &dis);
+        if (dis) { std::printf("%s\n", static_cast<char*>(dis->GetBufferPointer())); dis->Release(); }
+        return;
+    }
+    IDirect3DCubeTexture9* cube = nullptr;
+    Check(SUCCEEDED(gpu.dev->CreateCubeTexture(4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &cube, nullptr)), "wet road cube texture");
+    for (int fc = 0; cube && fc < 6; fc++) {
+        D3DLOCKED_RECT lr;
+        if (FAILED(cube->LockRect(static_cast<D3DCUBEMAP_FACES>(fc), 0, &lr, nullptr, 0))) continue;
+        for (int j = 0; j < 4; j++)
+            for (int i = 0; i < 4; i++) reinterpret_cast<DWORD*>(static_cast<BYTE*>(lr.pBits) + j * lr.Pitch)[i] = 0xFF808080u;
+        cube->UnlockRect(static_cast<D3DCUBEMAP_FACES>(fc), 0);
+    }
+    auto* light = gpu.Texture(false);
+    const float k[4] = {0.5f, 0, 0, 0};
+    gpu.dev->SetPixelShaderConstantF(0, k, 1);
+    gpu.dev->SetTexture(0, light); gpu.dev->SetTexture(1, cube);
+    auto* psO = gpu.Shader(code); auto* psP = gpu.Shader(patched);
+    const auto render = [&](float s) { const float c[4] = {s, 0, 0, 0}; gpu.dev->SetPixelShaderConstantF(rp.reflectConst, c, 1); return gpu.Render(psP); };
+    const auto orig = gpu.Render(psO), day = render(1.0f), night = render(0.0f), dusk = render(0.25f);
+    int worstDay = 0, worstDusk = 0, lit = 0;
+    for (size_t px = 0; px < orig.size(); ++px)
+        for (int ch = 0; ch < 3; ch++) {
+            const int o = (orig[px] >> (8 * ch)) & 0xFF, d = (day[px] >> (8 * ch)) & 0xFF, n = (night[px] >> (8 * ch)) & 0xFF, h = (dusk[px] >> (8 * ch)) & 0xFF;
+            worstDay = std::max(worstDay, std::abs(d - o));
+            worstDusk = std::max(worstDusk, std::abs(h - static_cast<int>(std::lround(n + 0.25 * (o - n)))));
+            lit += o - n > 8;
+        }
+    Check(worstDay <= 1, "wet road by day (cW.x = 1): as the game draws it");
+    Check(worstDusk <= 2 && lit > 0, "wet road: the sky reflection alone scales with cW.x (within 2 of 255)");
+    std::printf("Wet road fixture: c%d, day error %d, x0.25 error %d of 255, %d channels with reflection\n", rp.reflectConst, worstDay, worstDusk, lit);
+    gpu.dev->SetTexture(0, nullptr); gpu.dev->SetTexture(1, nullptr);
+    Release(psO); Release(psP); Release(light); Release(cube);
+}
+
+// Outdoor objects whose scaled vertex lights join the rig chain before the sky (PatchObjectLampPs A2: "mad rX.xyz, cK.s, vC,
+// rChainEnd", then "mad rA.xyz, rCube, cK.s, rX"): out = max(rig + vertex lights, ground) + sky, the vertex lights kept in the max
+void ObjectA2Pixels(Gpu& gpu) {
+    if (!gpu.dev) return;
+    constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
+    const auto ps = Compile(R"(
+samplerCUBE sky:register(s0);
+float4 d1:register(c1); float4 d2:register(c2); float4 d3:register(c3);
+float4 col1:register(c5); float4 col2:register(c6); float4 col3:register(c7); float4 sunc:register(c8); float4 sund:register(c9);
+float4 k:register(c10);
+float4 main(float4 vc:COLOR0, float3 n:TEXCOORD0):COLOR0 {
+  float3 N = normalize(n);
+  float4 d = saturate(float4(dot(N, sund.xyz), dot(N, d1.xyz), dot(N, d2.xyz), dot(N, d3.xyz)));
+  float3 l = d.y * col1.rgb;
+  l = d.x * sunc.rgb + l;
+  l = d.z * col2.rgb + l;
+  l = d.w * col3.rgb + l;
+  l = k.y * vc.rgb + l;
+  float3 s = texCUBE(sky, N).rgb;
+  float3 o = s * k.x + l;
+  return float4(o / (1 + o * k.z), 1);
+}
+)", "ps_3_0");
+    const auto vsCode = Compile(R"(
+struct O{float4 p:POSITION;float4 c:COLOR0;float3 n:TEXCOORD0;float3 w:TEXCOORD8;};
+O main(float4 p:POSITION,float2 uv:TEXCOORD0){O o;o.p=p;o.c=float4(0.1,0.1,0.1,1);o.n=float3(0,1,0);o.w=float3(uv.x*8,uv.y*8,0);return o;}
+)", "vs_3_0");
+    auto code = ps;
+    ShaderPatches::ObjectLampPatch o;
+    const bool ok = !ps.empty() && ShaderPatches::PatchObjectLampPs(code, o) && o.rigLamps;
+    Check(ok, "object A2 fixture: scaled vertex lights before the sky take the patch");
+    if (!ok) {
+        ID3DBlob* d = nullptr;
+        if (!ps.empty() && SUCCEEDED(D3DDisassemble(ps.data(), ps.size() * 4, 0, nullptr, &d))) { std::printf("%s\n", static_cast<char*>(d->GetBufferPointer())); d->Release(); }
+        return;
+    }
+    IDirect3DVertexShader9* vs = nullptr;
+    Check(!vsCode.empty() && SUCCEEDED(gpu.dev->CreateVertexShader(vsCode.data(), &vs)), "object A2: fixture VS");
+    auto* original = gpu.Shader(ps);
+    auto* patched = gpu.Shader(code);
+    IDirect3DCubeTexture9* cube = nullptr;
+    gpu.dev->CreateCubeTexture(4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &cube, nullptr);
+    for (int f = 0; cube && f < 6; f++) {
+        D3DLOCKED_RECT lr;
+        if (FAILED(cube->LockRect(static_cast<D3DCUBEMAP_FACES>(f), 0, &lr, nullptr, 0))) continue;
+        for (int j = 0; j < 4; j++) for (int i = 0; i < 4; i++) reinterpret_cast<DWORD*>(static_cast<BYTE*>(lr.pBits) + j * lr.Pitch)[i] = 0xFF000000u;
+        cube->UnlockRect(static_cast<D3DCUBEMAP_FACES>(f), 0);
+    }
+    IDirect3DTexture9 *white = nullptr, *black = nullptr;
+    for (auto [tex, argb] : {std::pair{&white, 0xFFFFFFFFu}, std::pair{&black, 0xFF000000u}}) {
+        if (FAILED(gpu.dev->CreateTexture(1, 1, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, tex, nullptr))) continue;
+        D3DLOCKED_RECT r{};
+        (*tex)->LockRect(0, &r, nullptr, 0);
+        *static_cast<DWORD*>(r.pBits) = argb;
+        (*tex)->UnlockRect(0);
+    }
+    if (vs && original && patched && cube && white && black) {
+        // the rig off (its colours 0), sun and first lamp straight up, the sky black: the light is the vertex lights x 1 = 0.1
+        const float up[4] = {0, 1, 0, 0}, zero[4] = {}, k[4] = {1, 1, 0, 0};
+        for (UINT r : {1u, 9u}) gpu.dev->SetPixelShaderConstantF(r, up, 1);
+        for (UINT r : {2u, 3u, 5u, 6u, 7u, 8u}) gpu.dev->SetPixelShaderConstantF(r, zero, 1);
+        gpu.dev->SetPixelShaderConstantF(10, k, 1);
+        gpu.dev->SetTexture(0, cube);
+        // no per-pixel lamp: far away, colour 0; neutral cones (as the fence fixture)
+        float lamps[1 + 4 * N][4] = {};
+        lamps[0][0] = 1; lamps[0][3] = 1e-4f;
+        for (unsigned i = 0; i < N; ++i) { lamps[1 + 2 * i][0] = lamps[1 + 2 * i][2] = 1e6f; lamps[2 + 2 * i][3] = lamps[1 + 2 * N + 2 * i][3] = lamps[2 + 2 * N + 2 * i][3] = 1; }
+        gpu.dev->SetPixelShaderConstantF(o.lampParamConst, lamps[0], 1 + 4 * N);
+        const float atlasC[4] = {1, 1, 0, 0};
+        gpu.dev->SetPixelShaderConstantF(o.atlasConst, atlasC, 1);
+        const auto lumaOf = [](const std::vector<DWORD>& px) { int mx = 0; for (DWORD p : px) mx = std::max(mx, static_cast<int>((p >> 8) & 255)); return mx; };
+        gpu.dev->SetTexture(o.atlasSampler, black);
+        const float s1[4] = {1, 0, 0, 0};
+        gpu.dev->SetPixelShaderConstantF(o.strengthConst, s1, 1);
+        const int game = lumaOf(gpu.Render(original, vs)), dark = lumaOf(gpu.Render(patched, vs));
+        Check(std::abs(game - 26) <= 1 && std::abs(dark - game) <= 1, "object A2: a black ground leaves the game's light (vertex lights 0.1)");
+        gpu.dev->SetTexture(o.atlasSampler, white);
+        const float sHigh[4] = {0.5f, 0, 0, 0}, sLow[4] = {0.05f, 0, 0, 0};
+        gpu.dev->SetPixelShaderConstantF(o.strengthConst, sHigh, 1);
+        const int high = lumaOf(gpu.Render(patched, vs));
+        gpu.dev->SetPixelShaderConstantF(o.strengthConst, sLow, 1);
+        const int low = lumaOf(gpu.Render(patched, vs));
+        Check(std::abs(high - 128) <= 2, "object A2: ground 0.5 over the vertex lights 0.1 gives 0.5 (not 0.4: they stay in the max)");
+        Check(std::abs(low - game) <= 1, "object A2: ground 0.05 under the vertex lights 0.1 leaves 0.1");
+        std::printf("Object A2 pixels: game %d, black ground %d, ground 0.5 -> %d, ground 0.05 -> %d (of 255)\n", game, dark, high, low);
+    } else
+        Check(false, "object A2: fixture resources");
+    for (DWORD s = 0; s < 16; s++) gpu.dev->SetTexture(s, nullptr);
+    Release(original); Release(patched); Release(vs); Release(cube); Release(white); Release(black);
+}
+
 int wmain(int argc, wchar_t** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     const auto start = std::chrono::steady_clock::now();
@@ -1110,6 +1264,8 @@ int wmain(int argc, wchar_t** argv) {
     SamplerRestoration(); std::printf("Sampler restoration complete\n"); Gpu gpu;
     Patches(gpu, argc > 1 ? std::filesystem::path(argv[1]) : std::filesystem::path());
     RoadShadePixels(gpu);
+    WetRoadReflectionPixels(gpu, argc > 1 ? std::filesystem::path(argv[1]) : std::filesystem::path());
+    ObjectA2Pixels(gpu);
     if (argc > 3 && argv[2][0] && argv[3][0]) LotPixels(gpu, argv[2], argv[3]);
     if (argc > 4 && argv[4][0]) WallPixels(gpu, argv[4]);
     if (argc > 5 && argv[5][0]) InstancedPixels(gpu, argv[5]);

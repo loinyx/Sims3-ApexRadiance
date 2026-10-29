@@ -6,6 +6,7 @@
 // before the Apex menu and notices are drawn (the first recording measured the menu's own pixels). The
 // recorder writes the samples ("Screen pixels.csv") and, for every lamp edit, when each point began to change, when it
 // settled and whether it went the wrong way first (Recording.txt, "Light updates").
+#include "ground_profile.h"
 #include <d3d9.h>
 #include <string>
 #include <vector>
@@ -13,7 +14,8 @@
 namespace ScreenWatch {
 constexpr int kColumn = 9;            // around the mouse: points 0..8, the mouse's is kColumn / 2
 constexpr int kGridX = 6, kGridY = 4; // over the screen: points kColumn.., row by row
-constexpr int kPoints = kColumn + kGridX * kGridY;
+constexpr int kGrid = kColumn + kGridX * kGridY; // then the ground points around a lamp (GroundProfile::WatchPoints), moving with it
+constexpr int kPoints = kGrid + GroundProfile::kWatchPoints;
 struct Sample {
     unsigned long tick; // GetTickCount of the frame the pixels were copied in
     unsigned char rgb[kPoints][3];

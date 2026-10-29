@@ -1520,12 +1520,13 @@ bool BuildOne(IDirect3DDevice9* dev, const LightmapSmooth::Key& key, Entry& e) {
         const size_t n = std::min<size_t>(stamps.size(), 8);
         const float o[4] = {static_cast<float>(key.first) - kSrc / 2 - 3.5f, static_cast<float>(key.second) - kSrc / 2 - 3.5f, stamps[0].ground, static_cast<float>(n)};
         dev->SetPixelShaderConstantF(2, o, 1);
-        float lc[64] = {};
+        float lc[160] = {};
         for (size_t k = 0; k < n; k++) {
-            std::memcpy(lc + k * 8, stamps[k].col, 16);
-            std::memcpy(lc + k * 8 + 4, stamps[k].pos, 12);
+            std::memcpy(lc + k * 20, stamps[k].col, 16);
+            std::memcpy(lc + k * 20 + 4, stamps[k].pos, 12);
+            std::memcpy(lc + k * 20 + 8, stamps[k].cone, 48);
         }
-        dev->SetPixelShaderConstantF(4, lc, 16);
+        dev->SetPixelShaderConstantF(4, lc, 40);
         DrawPixels(dev, kP, kP);
         g_stampBuilds++;
     }
@@ -1911,6 +1912,63 @@ IDirect3DTexture9* Find(const Key& key) {
     }
     auto it = g_entries.find(key);
     return it == g_entries.end() ? nullptr : Current(it->second);
+}
+
+bool SampleChunk(IDirect3DDevice9* dev, float x, float z, ChunkSample& out, bool texels) {
+    const Key key{static_cast<int>(std::floor(x / kSrc)) * kSrc + kSrc / 2, static_cast<int>(std::floor(z / kSrc)) * kSrc + kSrc / 2};
+    const auto it = g_entries.find(key);
+    if (it == g_entries.end()) return false;
+    Entry& e = it->second;
+    out.gver = e.gver, out.built = e.gBuiltVer, out.rver = e.rver, out.sver = e.sver, out.builtS = e.gBuiltSver;
+    std::vector<TerrainStamps::Lamp> stamps;
+    TerrainStamps::ForChunk(key, e.rver, stamps);
+    out.stamps = static_cast<int>(stamps.size());
+    if (!texels) return true;
+    // (both maps read back once a frame per chunk: a capture samples dozens of points)
+    static uint32_t s_frame = UINT32_MAX;
+    static std::map<Key, std::vector<uint32_t>> s_src, s_smooth;
+    if (s_frame != g_frame) s_frame = g_frame, s_src.clear(), s_smooth.clear();
+    const float lx = x - (key.first - kSrc / 2), lz = z - (key.second - kSrc / 2);
+    const auto unpack = [](uint32_t c, float rgba[4]) {
+        rgba[0] = ((c >> 16) & 0xFF) / 255.0f, rgba[1] = ((c >> 8) & 0xFF) / 255.0f, rgba[2] = (c & 0xFF) / 255.0f, rgba[3] = (c >> 24) / 255.0f;
+    };
+    auto& src = s_src[key];
+    if (src.empty() && e.src) {
+        uint64_t hash = 0;
+        RawPtr raw;
+        if (ReadMap(e.src, 0, hash, raw) == 1 && raw) {
+            src.resize(static_cast<size_t>(kSrc) * kSrc);
+            DecodeDxt5Argb(raw->data(), src.data());
+        }
+    }
+    if (!src.empty()) {
+        unpack(src[static_cast<size_t>(std::clamp(static_cast<int>(lz), 0, kSrc - 1)) * kSrc + std::clamp(static_cast<int>(lx), 0, kSrc - 1)], out.srcRgba);
+        out.src = true;
+    }
+    auto& sm = s_smooth[key];
+    if (sm.empty() && dev && e.gtex && e.gBuiltVer == e.gver) {
+        IDirect3DSurface9 *level = nullptr, *sys = nullptr;
+        D3DSURFACE_DESC d{};
+        if (SUCCEEDED(e.gtex->GetSurfaceLevel(0, &level)) && SUCCEEDED(level->GetDesc(&d)) && d.Format == D3DFMT_A8R8G8B8 &&
+            SUCCEEDED(dev->CreateOffscreenPlainSurface(d.Width, d.Height, d.Format, D3DPOOL_SYSTEMMEM, &sys, nullptr)) && SUCCEEDED(dev->GetRenderTargetData(level, sys))) {
+            D3DLOCKED_RECT lr{};
+            if (SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY))) {
+                sm.resize(static_cast<size_t>(d.Width) * d.Height + 1);
+                for (UINT r = 0; r < d.Height; r++) std::memcpy(sm.data() + static_cast<size_t>(r) * d.Width, static_cast<const uint8_t*>(lr.pBits) + static_cast<size_t>(r) * lr.Pitch, d.Width * 4);
+                sm.back() = d.Width; // (the row length)
+                sys->UnlockRect();
+            }
+        }
+        if (sys) sys->Release();
+        if (level) level->Release();
+    }
+    if (sm.size() > 1) {
+        const int w = static_cast<int>(sm.back()), per = w / kSrc; // texels a metre
+        const int tx = std::clamp(static_cast<int>(lx * per), 0, w - 1), tz = std::clamp(static_cast<int>(lz * per), 0, w - 1);
+        unpack(sm[static_cast<size_t>(tz) * w + tx], out.smoothRgba);
+        out.smooth = true;
+    }
+    return true;
 }
 
 // A chunk (256 m centred at its key) and a rect {minX, minZ, maxX, maxZ} grown by 1 m (the local relight's test)

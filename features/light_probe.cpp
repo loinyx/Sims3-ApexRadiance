@@ -4,6 +4,8 @@
 #define NOMINMAX
 #endif
 #include "light_probe.h"
+#include "ground_profile.h"
+#include "post_scene.h"
 #include "half_float.h"
 #include "captures.h"
 #include "build_flavor.h"
@@ -191,6 +193,7 @@ std::filesystem::path OutDir() { return std::filesystem::path(ApexPaths::ApexDir
 // Every capture gets its own folder in Captures\ ("<date time> Light capture", features/captures.h: the report, the
 // textures and shaders, the log and settings), so a capture never overwrites another one; nothing is deleted by itself.
 std::filesystem::path g_capDir; // the capture being written (empty: none yet)
+bool g_wantCamera = false;      // PostScene's camera asked for while a capture runs (GroundProfile)
 std::string g_capName;
 
 std::filesystem::path CapDir() { return g_capDir.empty() ? Captures::Root() : g_capDir; }
@@ -350,8 +353,53 @@ std::vector<BYTE> DecodeDxt(D3DFORMAT f, const BYTE* bits, INT pitch, UINT w, UI
 // Saves level 0 of a 2D texture as a lossless PNG (RGB, scaled so the brightest channel is visible; the alpha as its own grey
 // PNG when it varies), encoded on the capture writer thread, and returns a stats line. Developer mode only (07/10: these
 // maps reach 5632x5632; for players F7 writes the text, the logs and the screenshot).
+// A cube's level 0, each face's mean colour (no image): the sky cubes that ambient light and wet-road reflections read
+std::string CubeMeans(IDirect3DDevice9* dev, IDirect3DCubeTexture9* cube) {
+    D3DSURFACE_DESC d{};
+    if (FAILED(cube->GetLevelDesc(0, &d))) return "GetLevelDesc failed";
+    std::string s = std::format("{}px {} {}{} mips={}; mean RGB per face +x -x +y(up) -y +z -z:", d.Width, FmtStr(d.Format),
+                                d.Pool == D3DPOOL_DEFAULT ? "DEFAULT" : "MANAGED/SYS", (d.Usage & D3DUSAGE_RENDERTARGET) ? " RT" : "", cube->GetLevelCount());
+    float probe[4];
+    BYTE zero[16] = {};
+    if (IsDxt(d.Format) || !Texel(d.Format, zero, probe)) return s + " format not read";
+    const UINT bpp = Bpp(d.Format);
+    for (int f = 0; f < 6; f++) {
+        IDirect3DSurface9 *src = nullptr, *sys = nullptr;
+        if (FAILED(cube->GetCubeMapSurface(static_cast<D3DCUBEMAP_FACES>(f), 0, &src))) return s + " GetCubeMapSurface failed";
+        IDirect3DSurface9* readable = src;
+        if (d.Pool == D3DPOOL_DEFAULT &&
+            (!(d.Usage & D3DUSAGE_RENDERTARGET) || FAILED(dev->CreateOffscreenPlainSurface(d.Width, d.Height, d.Format, D3DPOOL_SYSTEMMEM, &sys, nullptr)) ||
+             FAILED(dev->GetRenderTargetData(src, sys)))) {
+            if (sys) sys->Release();
+            src->Release();
+            return s + " not readable";
+        }
+        if (sys) readable = sys;
+        D3DLOCKED_RECT lr{};
+        if (FAILED(readable->LockRect(&lr, nullptr, D3DLOCK_READONLY))) {
+            if (sys) sys->Release();
+            src->Release();
+            return s + " LockRect failed";
+        }
+        double sum[3] = {};
+        for (UINT y = 0; y < d.Height; y++)
+            for (UINT x = 0; x < d.Width; x++) {
+                float t[4];
+                Texel(d.Format, static_cast<const BYTE*>(lr.pBits) + static_cast<size_t>(y) * lr.Pitch + x * bpp, t);
+                for (int c = 0; c < 3; c++) sum[c] += std::isfinite(t[c]) ? t[c] : 0;
+            }
+        readable->UnlockRect();
+        if (sys) sys->Release();
+        src->Release();
+        const double n = static_cast<double>(d.Width) * d.Height;
+        s += std::format(" ({:.3f} {:.3f} {:.3f})", sum[0] / n, sum[1] / n, sum[2] / n);
+    }
+    return s;
+}
+
 std::string DumpTexture(IDirect3DDevice9* dev, IDirect3DBaseTexture9* base, const std::string& name, std::string& fileOut) {
-    if (base->GetType() != D3DRTYPE_TEXTURE) return "not a 2D texture (cube/volume), not saved";
+    if (base->GetType() == D3DRTYPE_CUBETEXTURE) return CubeMeans(dev, static_cast<IDirect3DCubeTexture9*>(base));
+    if (base->GetType() != D3DRTYPE_TEXTURE) return "not a 2D texture (volume), not saved";
     auto* tex = static_cast<IDirect3DTexture9*>(base);
     D3DSURFACE_DESC d{};
     if (FAILED(tex->GetLevelDesc(0, &d))) return "GetLevelDesc failed";
@@ -1037,6 +1085,8 @@ void FinishCapture(IDirect3DDevice9* dev) {
         std::memcpy(now.color, screen, sizeof screen);
     }
     out << std::format("== COR NA TELA NO PIXEL: {}\n\n", hasColor ? std::format("({:.3f} {:.3f} {:.3f})", screen[0], screen[1], screen[2]) : std::string("(not read)"));
+    GroundProfile::Write(dev, g_pixel, g_bbWidth, g_bbHeight, CapDir(), out);
+    if (g_wantCamera) PostScene::WantCamera(false), g_wantCamera = false;
     // the wall under the pixel: the topmost covering draw with the wall shader's matrices
     for (auto it = g_draws.rbegin(); it != g_draws.rend(); ++it) {
         if (it->samples == 0 || it->prims <= 2) continue;
@@ -1141,6 +1191,7 @@ void OnPresent(IDirect3DDevice9* dev) {
         g_captureWhy = why;
         ReleaseDraws();
         RegisterHooks();
+        if (!g_wantCamera) PostScene::WantCamera(true), g_wantCamera = true; // (the ground profile's view-projection)
         g_state = State::Armed;
         g_status = std::format("Measuring pixel ({}, {})...", g_pixel.x, g_pixel.y);
         LOG_INFO("[LightProbe] Capture requested: " + g_status + " (" + why + ")");

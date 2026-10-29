@@ -23,9 +23,14 @@ struct RoadPatch {
     int sidewalkConst = -1;
     int scaleConst = -1; // N of the lamp scale cN.x after the inserted max, when no other instruction reads cN, else -1
     int shadeSampler = -1; // shade: the walls' shade map read at the light map's uv after the max (PatchTerrainShade), else -1
+    // wet roads: N of cN.x scaling the reflection of a fixed sky cube (the one cube read whose colour is next multiplied only by
+    // a scalar temp, "mul|mad rY.xyz, rR, rW.s"); the game darkens its other sky cube by the sky colours at night, not this one
+    int reflectConst = -1;
 };
 // shade (15/10): also "texld rT, v1, s<E+1>; mul rX.xyz, rX, rT.x" after the max, the walls' shade on the lamp light around lots
 bool PatchRoad(std::vector<DWORD>& t, RoadPatch& out, bool shade = false);
+// The wet road's sky reflection read (RoadPatch::reflectConst) in a pixel shader, patched by PatchRoad or not
+bool HasWetSkyReflection(const std::vector<DWORD>& t);
 
 // World terrain chunks: an exclusive cK.x lamp-map multiplier, either linear or
 // squared through a scalar temporary. Unknown/shared layouts return -1.
@@ -74,6 +79,9 @@ struct FloorPatch {
     // to spare); the draw then binds nothing more
     int outScaleSampler = -1;
     int outScaleConst = -1;
+    // PatchFloor: the map and its lamp scale found but no sampler left for the atlas (16 in use): the copy is the game's bytes
+    // and the draw only sets the lamp scale (scaleConst), so the floor still takes the ground's gain
+    bool gainOnly = false;
 };
 // Where a vertex shader writes world y to one output component: "mov oK.c, rW.y" with rW.y = "dp4 rW.y, rP, c9" (the
 // last write before it) and rW.x / rW.z from c8 / c10, exactly one such write and nothing else writing oK.c, no flow control.
