@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Greek}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: a fence removed whole takes its shadow with it at once", "Νυχτερινά Φώτα: ένας φράχτης που αφαιρείται ολόκληρος παίρνει αμέσως μαζί και τη σκιά του"},
+    {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "Νυχτερινά Φώτα: μια λάμπα που διαγράφεται αμέσως μετά από μετακίνηση δεν αφήνει πια φως στο έδαφος"},
+    {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "Νυχτερινά Φώτα: το έδαφος στη βροχή δεν πηδά πια σε απαλό φως στο τέλος του σούρουπου"},
     {"Lighting: options split into Overview, Outside, Inside & floors and Game fixes tabs", "Φωτισμός: οι επιλογές χωρίζονται στις καρτέλες Επισκόπηση, Έξω, Μέσα και όροφοι και Διορθώσεις του παιχνιδιού"},
     {"Lighting: Overview sums up every area and its options on one page", "Φωτισμός: η Επισκόπηση συνοψίζει κάθε περιοχή και τις επιλογές της σε μία σελίδα"},
     {"Lighting: one Ground light slider replaces the four ground and lamp sliders", "Φωτισμός: ένα ρυθμιστικό Φως εδάφους αντικαθιστά τα τέσσερα ρυθμιστικά εδάφους και λαμπών"},

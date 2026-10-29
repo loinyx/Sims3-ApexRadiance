@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Korean}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: a fence removed whole takes its shadow with it at once", "야간 조명: 울타리를 통째로 지우면 그림자도 바로 사라져요"},
+    {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "야간 조명: 드래그 직후 삭제한 램프의 빛이 더 이상 바닥에 남지 않아요"},
+    {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "야간 조명: 비 오는 날 땅이 해질녘 끝에 갑자기 부드러운 빛으로 바뀌지 않아요"},
     {"Lighting: options split into Overview, Outside, Inside & floors and Game fixes tabs", "조명: 옵션이 개요, 실외, 실내와 층, 게임 수정 탭으로 나뉘어요"},
     {"Lighting: Overview sums up every area and its options on one page", "조명: 개요에서 모든 영역과 그 옵션을 한 페이지에 요약해요"},
     {"Lighting: one Ground light slider replaces the four ground and lamp sliders", "조명: 지면 조명 슬라이더 하나가 지면과 램프 슬라이더 네 개를 대신해요"},

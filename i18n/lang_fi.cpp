@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Finnish}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: a fence removed whole takes its shadow with it at once", "Yövalot: kokonaan poistettu aita vie varjonsa heti mukanaan"},
+    {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "Yövalot: heti siirron jälkeen poistettu lamppu ei enää jätä valoa maahan"},
+    {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "Yövalot: sateinen maa ei enää hyppää pehmeään lampunvaloon hämärän lopussa"},
     {"Lighting: options split into Overview, Outside, Inside & floors and Game fixes tabs", "Valaistus: asetukset on jaettu välilehtiin Yleiskatsaus, Ulkona, Sisällä ja kerrokset sekä Pelin korjaukset"},
     {"Lighting: Overview sums up every area and its options on one page", "Valaistus: Yleiskatsaus kokoaa kaikki alueet ja niiden asetukset yhdelle sivulle"},
     {"Lighting: one Ground light slider replaces the four ground and lamp sliders", "Valaistus: yksi Maavalo-liukusäädin korvaa neljä maan ja lamppujen liukusäädintä"},

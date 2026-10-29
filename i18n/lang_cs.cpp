@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Czech}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: a fence removed whole takes its shadow with it at once", "Noční osvětlení: celý odstraněný plot hned odnese svůj stín"},
+    {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "Noční osvětlení: lampa smazaná hned po přetažení už nenechává světlo na zemi"},
+    {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "Noční osvětlení: zem v dešti už na konci soumraku neskočí na měkké světlo lamp"},
     {"Lighting: options split into Overview, Outside, Inside & floors and Game fixes tabs", "Osvětlení: volby rozdělené do karet Přehled, Venku, Uvnitř a patra a Opravy hry"},
     {"Lighting: Overview sums up every area and its options on one page", "Osvětlení: Přehled shrnuje každou oblast a její volby na jedné stránce"},
     {"Lighting: one Ground light slider replaces the four ground and lamp sliders", "Osvětlení: jeden posuvník Světlo na zemi nahrazuje čtyři posuvníky země a lamp"},

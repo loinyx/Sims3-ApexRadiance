@@ -10,7 +10,7 @@ game's own sunlight and shadows untouched. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released (part of Night Lighting since 0.1.0; GPU path default). Native solar alpha, daylight range and squared terrain lamp scales: Released in 2.6.0. A lamp switch's ground in one frame, and *Smooth ground light* switched without relighting: Released in 2.7.0 Released in 2.18.0: dragged lamps stamped on the GPU, rain variants smoothed at night. |
+| Availability | Released (part of Night Lighting since 0.1.0; GPU path default). Native solar alpha, daylight range and squared terrain lamp scales: Released in 2.6.0. A lamp switch's ground in one frame, and *Smooth ground light* switched without relighting: Released in 2.7.0 Released in 2.18.0: dragged lamps stamped on the GPU, rain variants smoothed at night. Released in 2.18.1: rain variants smoothed from the first rise of the night level. |
 | Default | On |
 | Menu | Lighting > Game fixes > Ground & Lots > *Smooth ground light* |
 | Configuration | `[patches.NightTerrainRelight]` `mapaDeLuzSuavizado` in `ApexRadiance.toml` |
@@ -78,7 +78,7 @@ registered and neither smoothed maps nor the atlas exist. This is why the atlas 
   The daylight range adjustment applies only to the exact captured single-pass shader.
 - TerrainLow (distant terrain, DXT5 map in s3, census FF6760A8) is not smoothed.
 - A shader whose light-map read cannot be patched for native alpha (the rain variants: all 16 samplers in use) keeps the
-  game's unsmoothed map, except at full night, where it draws the smoothed map without the walls' shade.
+  game's unsmoothed map by day; from the first rise of the night level it draws the smoothed map without the walls' shade.
 
 ## Technical reference
 
@@ -120,8 +120,9 @@ chunk terrain geometry and world lamp-map uvs.
    the lamp sampler with full-mask temp destination, 2D declaration, no relative addressing, no flow control, free
    temp and sampler. `NativeTerrainSampler` binds the game's map on the spare sampler, cloning its 11 sampler states
    (filter, LOD, addressing, sRGB) and restoring them, and any partial change, afterwards. An unsupported layout or a
-   failed creation keeps the game's unsmoothed map, except at full night (night level 1): the alpha weighs only the sun,
-   black then, so the smoothed map is bound in the game's own shader for the draw, without the walls' shade (no sampler
+   failed creation keeps the game's unsmoothed map by day; from the first rise of the night level the alpha (the game's, smoothed) weighs only a sun dimmed by dusk and rain clouds,
+   and the lamps' light is at its faintest then, so the smoothed map is bound in the game's own shader for the draw
+   (the switch at full night made the lamp pools change in one step at the end of dusk), without the walls' shade (no sampler
    for it). The rain variants take this path: they use all 16 samplers. Cost: one texture read and one
    move per smoothed draw.
 3. **Lamp scale** (`TerrainConst`): constant k from `TerrainLampConst` (multi-pass: c3, squared). For night level n and

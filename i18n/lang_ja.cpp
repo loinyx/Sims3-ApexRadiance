@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Japanese}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: a fence removed whole takes its shadow with it at once", "ナイトライト：フェンスを丸ごと削除すると影もすぐに消えます"},
+    {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "ナイトライト：ドラッグ直後に削除したランプの光が地面に残らなくなりました"},
+    {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "ナイトライト：雨の日の地面が夕暮れの終わりに急に柔らかい光へ切り替わらなくなりました"},
     {"Lighting: options split into Overview, Outside, Inside & floors and Game fixes tabs", "ライティング：オプションを「概要」「屋外」「屋内と階」「ゲームの修正」の各タブに分けました"},
     {"Lighting: Overview sums up every area and its options on one page", "ライティング：「概要」で各エリアとそのオプションを1ページで確認できます"},
     {"Lighting: one Ground light slider replaces the four ground and lamp sliders", "ライティング：「地面の光」スライダー1つが、地面とランプの4つのスライダーに代わります"},

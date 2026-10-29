@@ -1415,16 +1415,34 @@ bool LocalLamps(std::vector<ChunkRelight::Lamp>& out) {
     return true;
 }
 
-// A change of a lamp being dragged whose ground light TerrainStamps draws on the GPU (the bake excludes it): the lot and
-// the type of an excluded lamp (a dragged lamp is a removal at its last place and an addition at the new one in the diff)
-bool StampedChange(const LotLightBridge::BakeChange& c) {
-    if (!c.user) return false;
-    for (int i = 0; i < g_bakeExcludedCount; i++) {
-        int type = 0;
-        uint64_t lot = 0;
-        if (ReadLightLot(reinterpret_cast<const BYTE*>(g_bakeExcluded[i]), type, lot) && lot == c.lot && type == c.type) return true;
+// Every change of the diff is a lamp being dragged whose ground light TerrainStamps draws on the GPU (the bake excludes
+// it). A dragged lamp is a removal at its last baked place and an addition at its new one: each addition stands within
+// kStampedNear of an excluded lamp of its lot and type now, and each removal is paired with such an addition. A lamp of the
+// same type deleted or placed beside the drag is left over and goes through the local relight (before, lot and type alone
+// were matched, and a lamp deleted within the drag's last moments kept its ground light until its chunk was relit)
+constexpr float kStampedNear = 1.5f; // m (the diff's place and the light's place now may be a step of the drag apart: a tile, 1.4 m diagonally)
+bool AllStamped(const std::vector<LotLightBridge::BakeChange>& changes) {
+    struct Pair { uint64_t lot; int type; int added, removed; };
+    std::vector<Pair> pairs;
+    const auto pairOf = [&pairs](uint64_t lot, int type) -> Pair& {
+        for (Pair& p : pairs)
+            if (p.lot == lot && p.type == type) return p;
+        return pairs.emplace_back(Pair{lot, type, 0, 0});
+    };
+    for (const LotLightBridge::BakeChange& c : changes) {
+        if (!c.user || c.hasOld == c.hasNew) return false; // (a light change or a switch: no drag)
+        bool nearby = false, sameKind = false;
+        for (int i = 0; i < g_bakeExcludedCount && !nearby; i++) {
+            BakeFields f{};
+            if (!ReadBakeFields(reinterpret_cast<BYTE*>(g_bakeExcluded[i]), f) || f.lot != c.lot || f.type != c.type) continue;
+            sameKind = true;
+            const float dx = f.pos[0] - c.pos[0], dy = f.pos[1] - c.pos[1], dz = f.pos[2] - c.pos[2];
+            nearby = dx * dx + dy * dy + dz * dz <= kStampedNear * kStampedNear;
+        }
+        if (!sameKind || (c.hasNew && !nearby)) return false;
+        (c.hasNew ? pairOf(c.lot, c.type).added : pairOf(c.lot, c.type).removed)++;
     }
-    return false;
+    return std::all_of(pairs.begin(), pairs.end(), [](const Pair& p) { return p.removed <= p.added; });
 }
 
 // The pending change through the local relight. 1 = queued (FinishEdit called), 2 = waiting (WaitEdit called), 0 = not
@@ -1432,7 +1450,7 @@ bool StampedChange(const LotLightBridge::BakeChange& c) {
 int TryLocal(Clock::time_point now, const std::vector<uint64_t>& newLots, const std::string& diffText, std::string& why) {
     // a dragged lamp the GPU draws on the terrain: no relight while it moves (the stamp follows it; TerrainStamps relights
     // where it was when the drag starts and where it stays when it ends), and the drag's countdown stays idle
-    if (g_bakeExcludedCount > 0 && !g_editDiff.changes.empty() && std::all_of(g_editDiff.changes.begin(), g_editDiff.changes.end(), StampedChange)) {
+    if (g_bakeExcludedCount > 0 && !g_editDiff.changes.empty() && AllStamped(g_editDiff.changes)) {
         g_localRelitAt = now;
         FinishEdit(std::format("{} ({}): skipped: drawn on the GPU while dragged ({})", g_editReason, EditKind(), diffText));
         return 1;

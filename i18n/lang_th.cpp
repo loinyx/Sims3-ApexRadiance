@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Thai}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: a fence removed whole takes its shadow with it at once", "ไฟกลางคืน: รั้วที่ถูกลบทั้งแนวจะพาเงาของมันหายไปทันที"},
+    {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "ไฟกลางคืน: โคมไฟที่ลบทันทีหลังการลากจะไม่ทิ้งแสงไว้บนพื้นอีกต่อไป"},
+    {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "ไฟกลางคืน: พื้นดินตอนฝนตกไม่กระโดดไปเป็นแสงนุ่มตอนปลายพลบค่ำอีกต่อไป"},
     {"Lighting: options split into Overview, Outside, Inside & floors and Game fixes tabs", "แสง: ตัวเลือกแบ่งเป็นแท็บภาพรวม ภายนอก ภายในและชั้น และการแก้ไขของเกม"},
     {"Lighting: Overview sums up every area and its options on one page", "แสง: ภาพรวมสรุปทุกส่วนและตัวเลือกของแต่ละส่วนไว้ในหน้าเดียว"},
     {"Lighting: one Ground light slider replaces the four ground and lamp sliders", "แสง: แถบเลื่อนแสงพื้นดินอันเดียวแทนแถบเลื่อนพื้นและโคมไฟทั้งสี่อัน"},

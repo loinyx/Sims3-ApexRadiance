@@ -71,6 +71,10 @@ Lamp changes (night and Build-mode day preview; stationary and moving camera):
 
 ## Confirmed in game
 
+- 2026-10-29, developer build of `7839649` (2.18.1): a lamp deleted right after another lamp of the same type on the
+  same lot was dropped from a GPU drag lost its ground light at once (player report); the drag steps kept being skipped
+  (log: `skipped: drawn on the GPU while dragged`).
+
 - Combined build, 2026-09-24: visitor patch, arm sites and dusk rebuild put lot lamps on the world grass.
 - test007 build (before 2.5.3): the paced sweep, adopted as the default in 2.5.3.
 - 2026-10-02, private response build `76B4C32DD5749D6FB6516971D3FDB30092259D805CE97D0B20B8E3363558C300` (released as the
@@ -82,9 +86,6 @@ Lamp changes (night and Build-mode day preview; stationary and moving camera):
 - A full terrain rebuild or a lot load. **Expected:** no object drawn just after it with wrong rig lamps. The cone rows
   (c5..c7) of a bake that does not run inside the chunk render call are given back only at the game's next other pixel
   shader; whether those bakes go through that call has not been checked.
-- A lamp deleted within about 1.5 s after another lamp of the same type on the same lot was dropped from a GPU drag.
-  **Expected:** its ground light leaves the terrain. A pending change is matched to the dragged lamp by lot and type only
-  (`StampedChange`), so the deletion may be skipped as drawn on the GPU until something else relights that chunk.
 - Night Lighting turned on mid-session, then a lamp dragged. **Expected:** no old light beside the GPU stamp. Lamps the
   game baked before the hook are not in `g_everBaked`, so the drag start does not relight their old place.
 

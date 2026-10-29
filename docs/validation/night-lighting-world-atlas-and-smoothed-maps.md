@@ -88,6 +88,9 @@ Both paths:
 
 ## Confirmed in game
 
+- 2026-10-29, developer build of `7839649` (2.18.1): rainy ground through dusk shows no step when the rain variants
+  move to the smoothed map (player report).
+
 - Smoothing (decode, colour cleanup, 4x B-spline, mips) since the v0.1.0 baseline (`b84d5f1`): blocks and specks
   removed.
 - 2026-10-02, terrain-variant build `C1257AF4...`: with the summer multi-pass pair recognised, the reported lot/world
@@ -95,8 +98,6 @@ Both paths:
 
 ## Open checks
 
-- Rain terrain at the end of dusk and at dawn. **Expected:** no visible step. The variants that reach the smoothed map
-  only at full night switch from the game's blocky map to the smoothed one in one frame when the night level reaches 1.
 
 - GPU path log lines, compare result and per-chunk GPU time have not been recorded in a test report.
 - GPU path assumptions: the instruction limits of the largest entry point `VUpPS` (about 6 texld + 60 ALU); DXVK 3.1.1
@@ -115,7 +116,8 @@ Both paths:
 - Winter multi-pass variants and other untested scenes for the multi-pass and compact corrections.
 - Rain at night (`91af563`): world grass beside a lot with lamps, at full night in rain and during the dusk in rain.
   **Expected:** at full night the ground shows the smoothed lamp light (no blocky DXT look), without the walls' shade
-  around lots; before full night the rain variants keep the game's unsmoothed map. Not yet checked in game.
+  around lots; by day the rain variants keep the game's unsmoothed map (since 2.18.1 they move to the smoothed map at
+  the first rise of the night level; the dusk itself is confirmed in game, the full night look is not yet).
 - Planned, not started: PASSO3 increment 5, re-rendering the terrain stamp at 4 texels/m with the game's formula from
   `FUN_00C292B0` (`E = c0.rgb * sat(c0.w / d^2) * (N.L >= 0 ? sat(sqrt(N.L)) : 0)`, the per-pixel plan (private notes) section 4), delivered
   through `LightmapSmooth::Find` and validated against the original at 256^2. Pre-sizing the atlas to the whole terrain

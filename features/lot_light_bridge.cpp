@@ -1040,7 +1040,10 @@ void SendChunk(const std::pair<int, int>& key, ChunkShade& c, uint64_t group) {
 // The chunk's shade texture, or null where no lot shades it (the terrain draw is then left as it was). A changed chunk is
 // sent to the worker; its texture (or none) stays until the new one is uploaded (ShadeApply).
 void ShadeApply(IDirect3DDevice9* dev);
+extern uint32_t g_roomMapFrame;  // (below: OnPresent counts frames)
+uint32_t g_terrainDrawFrame = 0; // the frame a world terrain chunk was last drawn (the world is on screen: FenceGroupsGone)
 IDirect3DTexture9* ChunkShadeTexture(IDirect3DDevice9* dev, const std::pair<int, int>& key) {
+    g_terrainDrawFrame = g_roomMapFrame;
     if (!g_shadeOn) return nullptr;
     ShadeApply(dev);
     const auto it = g_chunkShades.find(key);
@@ -1997,6 +2000,30 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
                 if (!it->second.walls.empty()) g_fenceGen++;
                 it = g_fenceGroups.erase(it);
             } else ++it;
+    }
+}
+// Render thread, once a frame (OnPresent). A fence type removed whole leaves no new group to replace its own, so its
+// shadow stayed until the 20 s sweep above. With the camera still since a group's last draw and the world drawn, every
+// group on screen is drawn each frame: one missing for kFenceGoneMs and two frames was removed. (While the camera moves, a
+// group may only have left the screen: it stays.)
+constexpr DWORD kFenceGoneMs = 500;
+void FenceGroupsGone() {
+    if (!g_shadeOn || g_fenceGroups.empty() || g_roomMapFrame - g_terrainDrawFrame > 1) return; // (shade off: groups are not seen)
+    const uint64_t now64 = GetTickCount64();
+    const DWORD now = static_cast<DWORD>(now64); // (GetTickCount, from the same reading)
+    for (auto it = g_fenceGroups.begin(); it != g_fenceGroups.end();) {
+        const FenceGroup& g = it->second;
+        const bool gone = now - g.seen > kFenceGoneMs && g_roomMapFrame - g.seenFrame >= 2 &&
+                          LotLightingMotion::CameraStillSince(now64 - (now - g.seen)); // (the eye unmoved since its last draw)
+        if (gone) {
+            static int s_logs = 0;
+            if (!kPublicBuild && s_logs < 30 && ++s_logs)
+                LOG_INFO(std::format("[GroundShadow] fence group gone: not drawn for {} ms ({} frames) with the camera still; {} walls over ({:.1f} {:.1f})-({:.1f} {:.1f})",
+                                     now - g.seen, g_roomMapFrame - g.seenFrame, g.walls.size(), g.x0, g.z0, g.x1, g.z1));
+            g_fenceWalls.fetch_sub(static_cast<long>(g.walls.size()), std::memory_order_relaxed);
+            if (!g.walls.empty()) g_fenceGen++;
+            it = g_fenceGroups.erase(it);
+        } else ++it;
     }
 }
 // What the shade is made from: the lot's place and grid, its lamps (place; light in about 20% steps) and the outside walls in
@@ -7865,9 +7892,12 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
                 return ShaderPatches::PatchTerrainNativeAlpha(t, s, p.nativeAlphaSampler);
             });
             if (!alpha->ps || alpha->nativeAlphaSource != s) { // unsupported variant: preserve the game's shadow map
-                // the rain variants use all 16 samplers (no room for the game's alpha); the alpha weighs only the sun, black at
-                // full night, so there the smoothed map draws through the game's own shader (no wall shade: no sampler for it)
-                nightSmooth = smooth && g_night.load(std::memory_order_relaxed) >= 1.0f;
+                // the rain variants use all 16 samplers (no room for the game's alpha); the alpha weighs only the sun, so from
+                // the first rise of the night level the smoothed map draws through the game's own shader (its alpha is the
+                // game's, B-spline smoothed). Then the lamps' light on the ground is at its faintest and rain clouds dim the sun;
+                // at full night, as before, the lamp pools changed from blocky to smooth in one step at the end of dusk. (No
+                // wall shade: no sampler for it)
+                nightSmooth = smooth && g_night.load(std::memory_order_relaxed) > 0.0f;
                 if (!nightSmooth) smooth = nullptr;
                 shade = nullptr;
             }
@@ -9669,6 +9699,7 @@ void OnPresent() {
     if (DevSwitches::kCompiled) MeasureMemory(); // development builds (memory_owners)
     PumpSolidMeshes();
     ReleaseIdleMaskTextures(); // (left_lot_release, every 10 s)
+    FenceGroupsGone();
     ++g_roomMapFrame; // (the room map size memo is per frame)
     g_lotDrawTick = GetTickCount();
     // the furniture's lamp edit episode is over once no switch, edit hold or trailing room remains (2.13.1: one log line)

@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Swedish}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: a fence removed whole takes its shadow with it at once", "Nattbelysning: ett staket som tas bort helt tar genast med sig sin skugga"},
+    {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "Nattbelysning: en lampa som tas bort direkt efter en dragning lämnar inte längre ljus på marken"},
+    {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "Nattbelysning: marken i regn hoppar inte längre till mjukt lampljus i slutet av skymningen"},
     {"Lighting: options split into Overview, Outside, Inside & floors and Game fixes tabs", "Belysning: alternativen delas upp i flikarna Översikt, Ute, Inne och våningar och Spelkorrigeringar"},
     {"Lighting: Overview sums up every area and its options on one page", "Belysning: Översikt sammanfattar varje område och dess alternativ på en sida"},
     {"Lighting: one Ground light slider replaces the four ground and lamp sliders", "Belysning: ett enda Markljus-reglage ersätter de fyra reglagen för mark och lampor"},
