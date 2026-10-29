@@ -825,7 +825,14 @@ bool UploadSlot(IDirect3DDevice9* dev, Slot& s, const Job& j, Prepared& p) {
     s.dynCurrent = false;
     s.map = RtLampGpu::Map{};
     D3DSURFACE_DESC d{};
-    if (!s.game || FAILED(s.game->GetLevelDesc(0, &d)) || d.Format != D3DFMT_A8R8G8B8 || s.game->GetLevelCount() != 1 || d.Width != p.w || d.Height != p.h) {
+    // A room's own map may be smaller than the class's working map the solve wrote: the commit's copy 0x006191D0 takes
+    // min(width) x min(height) and copies those rows (memcpy per row, no filter), so the own map is the working map's
+    // top-left corner, texel for texel. The texels are drawn at their place in a map of the own size (the ones past it
+    // fall outside the viewport). A larger own map is refused: the commit leaves the rest of it as it was. A blurred map
+    // (the class-2 wall atlas) keeps the exact size: its wall blocks before the blur are laid out at the working map's.
+    // (A 20 x 30 m lot: own floor maps 256x128 and 256x256 under a 512x256 working map, so the lot was never covered.)
+    if (!s.game || FAILED(s.game->GetLevelDesc(0, &d)) || d.Format != D3DFMT_A8R8G8B8 || s.game->GetLevelCount() != 1 ||
+        !(p.blur ? d.Width == p.w && d.Height == p.h : d.Width <= p.w && d.Height <= p.h)) {
         s.why = std::format("its own map is not the kept solve's ({}x{} format {} levels {}; kept {}x{})", d.Width, d.Height, static_cast<int>(d.Format),
                             s.game ? s.game->GetLevelCount() : 0, p.w, p.h);
         return false;
