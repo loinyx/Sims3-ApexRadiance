@@ -369,8 +369,14 @@ separator, a 14-unit gap and an 18-unit right inset. They enter over 140 ms with
 Click the version in the menu footer to open the latest eight releases, newest first, in a scrollable list. The popover
 has a header (gift badge, "What's new", "You have version X, released DATE"); the newest release is open on a card and
 marked Installed, each older one is a row with a coloured dot and a count per kind ("2 fixed") that opens on a click.
-The popover has a fixed height (560 units, less in a short window): opening a release never resizes it, only the list
-scrolls, with the menu's thin scrollbar kept clear of the cards. It rises in over 0.16 s; a release opens and closes
+Every release is a box with a soft outline (around its whole card while open); hovered, a closed one fills a step
+lighter, the outline strengthens and the chevron lights (the popover's background is the menu's hover colour, so the
+usual hover fill would not show). The popover is as tall as its content, up to the room above the button (at most
+560 units), and its bottom stays put, so opening a release grows it upwards; past that only the release list scrolls,
+with the menu's thin scrollbar inside the padding, clear of the rounded corners and of the cards; the popover itself
+never scrolls. Its height is the header, the list's content and the footer measured apart on the frame before (not
+its own content, which depends on its height), so it is laid out unseen for its first three frames (at alpha 0.001:
+ImGui skips a window whose alpha is 0) and then rises in over 0.16 s at its final height; a release opens and closes
 with a 0.22 s height change while its text fades in. Sections are New, Improved and Fixed, each with an icon; inside
 one, the lines of an area (the text before ": ", or a full-width colon in CJK) are grouped under the area's name in
 violet, as bullets starting at the same edge, so write each line as "Area: what changed". The footer reads "The last
