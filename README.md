@@ -4,7 +4,7 @@
 
 **A brighter world. A night worth looking at.**
 
-Apex Radiance reworks the whole lighting system of The Sims 3, making it more realistic and fixing the game's lighting bugs. Lamp light is continuous across floors, walls, rooms, objects and everything else in the game, from the furniture indoors to the lawn, the street and the lot next door, instead of stopping at lot borders, jumping between stories or breaking into blocks. Alongside the lighting come image effects (ambient occlusion, edge smoothing, depth blur, banding fix, colour grading with filters and LUTs), fifteen optional fixes for stutters and an in-game menu in 21 languages.
+Apex Radiance reworks the whole lighting system of The Sims 3, making it more realistic and fixing the game's lighting bugs. Lamp light is continuous across floors, walls, rooms, objects and everything else in the game, from the furniture indoors to the lawn, the street and the lot next door, instead of stopping at lot borders, jumping between stories or breaking into blocks. Alongside the lighting come effects that change the look of the whole game: ambient occlusion with its own control for Sims, a banding fix that draws the world in 16-bit colour, colour grading with 24 stackable filters and LUTs, edge smoothing and depth blur. Fifteen optional fixes go after stutters, and the in-game menu speaks 21 languages.
 
 **[Download the latest version](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest)** · [Installation](#installation) · [Release notes](https://github.com/loinyx/Sims3-ApexRadiance/releases) · [Report a problem](#reporting-a-problem)
 
@@ -76,14 +76,40 @@ At night, lamps light ponds and lakes and glow softly around their bulbs. **Wate
 
 ## Image effects
 
-- **Color:** brightness, contrast, saturation, temperature, tones, split toning, a colour mixer, clarity and a vignette. Each group has its own switch and keeps its values while off.
-- **Filters and LUTs:** 24 stackable filters, such as Technicolor, DPX Cineon, Vintage, Cross-process, black and white, Night Mode, Glow, Halation, Film grain, CRT and a colour-blind mode, plus PNG and 3D CUBE LUTs from the Apex `LUTs` folder. Right-click a filter to give it a keyboard shortcut.
-- **Ambient Occlusion:** soft contact shadows where surfaces meet, at five quality levels, also in map view. **Sim Occlusion** has separate controls for bodies and hair.
-- **Edge Smoothing:** SMAA or FXAA for jagged roofs, fences, walls and furniture, with optional texture sharpening.
-- **Depth Blur:** softens the scenery outside your focus and fades out in map view.
-- **Banding Fix:** smooths the visible steps in skies, shadows and glows; its High-precision scene is on by default.
+Every effect works on the 3D world only and runs before the game draws its interface, so pie menus, tooltips and the HUD stay sharp and keep their colours.
 
-Use the before/after controls to compare with the game's own image. For the depth-based effects, turn off the game's **Edge Smoothing** under **Options > Graphics** and use the Apex version; the menu points out combinations that need attention.
+### Ambient Occlusion and Sim Occlusion
+
+The Sims 3 has no ambient occlusion of its own: furniture seems to float and rooms look flat. **Ambient Occlusion** adds full-resolution contact shade under furniture, in room corners, where walls meet the floor and around houses and trees. A still camera always gives the same image, with no shimmer, and lamp-lit surfaces keep their light and colour instead of turning grey. Choose from five quality levels; it also works in map view.
+
+The same shade on a Sim's face reads as dirt, so **Sim Occlusion** recognises Sims by their game materials, custom content that uses them included, and gives body and hair their own strength, with a cap on how dark a Sim can get. Transparent hair is covered too. Faces stay clean while rooms keep their full contact shadows.
+
+### Banding Fix
+
+The game draws its world in 8-bit colour, so the soft pool of a lamp on a wall breaks into rings, most visible on OLED screens. **Banding Fix** draws the 3D scene in 16-bit colour (High-precision scene, on by default) and adds a fixed, invisible grain before the colours are rounded, so light fades smoothly across walls, floors and skies, with nothing flickering.
+
+### Color, filters and LUTs
+
+The **Color** page grades the finished picture in linear light and can change the whole look of the game:
+
+- **Basic, Tones, Color and Detail:** brightness, contrast, saturation, temperature, midtones, shadows, highlights, blacks, tint, vibrance, film tones for shadows and highlights, a six-colour mixer (calm the neon greens of plants, for example), clarity and a vignette.
+- **24 filters in six families,** as many at once as you like:
+  - *Film looks:* Technicolor 1 and 2, DPX Cineon, Vintage, Cross-process, Filmic pass, Black and white, Tint.
+  - *Color and mood:* Colorfulness, Night Mode, Levels.
+  - *Light and detail:* Auto exposure, Adaptive sharpening, Glow, Halation, Dreamy, Fake HDR.
+  - *Camera:* Emphasize, Tilt-shift, Prism, Film grain.
+  - *Retro and style:* 3DFX, CRT.
+  - *Accessibility:* a colour-blind mode for red, green or blue colour blindness.
+- **LUTs:** PNG strips and 3D CUBE files from the `LUTs` folder, with their own amount.
+
+Each group and each filter has its own switch and keeps its values while off, and a filter that is off costs nothing. Right-click a filter to give it a keyboard shortcut. Hold **B** or use the before/after split to see the game's original picture.
+
+### Edge Smoothing and Depth Blur
+
+- **Edge Smoothing:** FXAA (lighter on the graphics card) or SMAA (cleaner long edges) removes the jagged edges of roofs, fences, walls and furniture, with optional texture sharpening. It replaces the game's own Edge Smoothing: turn that one off under **Options > Graphics**.
+- **Depth Blur:** softens the distant background like a camera lens focused on the scene in front of it. Lamps in the blurred background stay bright, and the blur fades out in map view.
+
+The menu points out game settings that get in the way of an effect.
 
 ## Presets
 
