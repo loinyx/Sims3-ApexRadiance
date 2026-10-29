@@ -3894,11 +3894,14 @@ void VersionButton(float x, float y, float h) {
                     open = !open;
                     st->SetBool(openKey, open);
                 }
-                // Hover, as the menu's rows: the hover fill (on an open release, over its card's top only) and the chevron lit
+                // Hover: a box around the release (its whole card while it is open) and the chevron lit. The popover's
+                // background is kHoverBg, so the menu's usual hover fill did not show here
                 const bool rowHovered = ImGui::IsItemHovered();
-                if (rowHovered)
-                    dl->AddRectFilled(top, ImVec2(top.x + width, top.y + rowH), ImGui::GetColorU32(Col(VioletTheme::kHoverBg)), 14.0f * u,
-                                      anim > 0.0f ? ImDrawFlags_RoundCornersTop : ImDrawFlags_None);
+                if (rowHovered) {
+                    const ImVec2 bottom(top.x + width, top.y + rowH + (anim > 0.0f ? bodyH : 0.0f));
+                    if (anim <= 0.0f) dl->AddRectFilled(top, bottom, ImGui::GetColorU32(Col(VioletTheme::kSelectedBg)), 14.0f * u);
+                    dl->AddRect(top, bottom, ImGui::GetColorU32(Col(VioletTheme::kToggleOff)), 14.0f * u, 0, 1.0f * u);
+                }
                 const float cy = top.y + rowH * 0.5f, is = 14.0f * u;
                 float x = top.x + pad;
                 ApexUi::DrawIcon(dl, eased > 0.5f ? IconId::ChevronDown : IconId::ChevronRight, ImVec2(x, cy - is * 0.5f), is,
