@@ -100,7 +100,8 @@ The **Color** page grades the finished picture in linear light and can change th
   - *Camera:* Emphasize, Tilt-shift, Prism, Film grain.
   - *Retro and style:* 3DFX, CRT.
   - *Accessibility:* a colour-blind mode for red, green or blue colour blindness.
-- **LUTs:** PNG strips and 3D CUBE files from the `LUTs` folder, with their own amount.
+
+**LUTs** give the game a ready-made colour grade, the same kind photographers and film editors use. Put a 3D CUBE file (the format Photoshop, DaVinci Resolve and most LUT packs export) or a PNG strip (8 to 128 pixels tall and as wide as its height squared, the layout ReShade LUTs use) in the Apex `LUTs` folder, pick it on the LUTs tab and set how strongly it applies. The LUT has its own switch and works together with the filters and the other Color groups. Exporting a preset packs its LUT into the same ZIP, so a shared look arrives complete.
 
 Each group and each filter has its own switch and keeps its values while off, and a filter that is off costs nothing. Right-click a filter to give it a keyboard shortcut. Hold **B** or use the before/after split to see the game's original picture.
 
