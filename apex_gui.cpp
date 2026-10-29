@@ -3827,8 +3827,8 @@ void VersionButton(float x, float y, float h) {
             ApexConfig::SetUi(ui);
         }
     }
-    // The popover opens above the button, centred on it, with a fixed height (opening a release never resizes it: only
-    // the list scrolls). It rises in over 0.16 s (alpha and 8 units); g_whatsNewOpenedAt is set when it opens.
+    // The popover opens above the button, centred on it, with a fixed height (opening a release never resizes it: its
+    // content scrolls). It rises in over 0.16 s (alpha and 8 units); g_whatsNewOpenedAt is set when it opens.
     const float rise = std::clamp(static_cast<float>(ImGui::GetTime() - g_whatsNewOpenedAt) / 0.16f, 0.0f, 1.0f);
     const float riseEased = 1.0f - (1.0f - rise) * (1.0f - rise);
     const float popH = std::floor(std::fmin(560.0f * u, std::fmax(240.0f * u, p.y - ImGui::GetMainViewport()->Pos.y - 24.0f * u)));
@@ -3837,6 +3837,10 @@ void VersionButton(float x, float y, float h) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ApexUi::kSpace4 * u, ApexUi::kSpace4 * u));
     ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 18.0f * u);
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * (0.25f + 0.75f * riseEased));
+    // One thin scrollbar, the popover's own (the list had a scrolling child too, and the popover showed a second bar
+    // whenever the header and the footer did not fit exactly)
+    ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 6.0f * u);
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, Col(0, 0.0f));
     if (ImGui::BeginPopup("##WhatsNew")) {
         // A header with the installed version; then the last kShown versions, newest first: the newest open, each older one
         // a row with its counts that opens on a click. Inside a release, the lines of one area ("Night Lights: ...") are
@@ -3861,12 +3865,7 @@ void VersionButton(float x, float y, float h) {
             ImGui::EndGroup();
             ImGui::SetCursorScreenPos(ImVec2(b.x, std::fmax(b.y + badge, ImGui::GetItemRectMax().y) + ApexUi::kSpace3 * u));
         }
-        // The list takes what the header and the footer leave
-        const float footerH = ImGui::GetFrameHeight() + ApexUi::kSpace3 * u + 1.0f;
-        const float listH = std::fmax(80.0f * u, ImGui::GetContentRegionAvail().y - footerH);
-        ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 6.0f * u);
-        ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, Col(0, 0.0f));
-        if (ImGui::BeginChild("##WhatsNewList", ImVec2(0.0f, listH), ImGuiChildFlags_None, 0)) {
+        {
             ImDrawList* dl = ImGui::GetWindowDrawList();
             const float pad = ApexUi::kSpace3 * u;
             const float width = ImGui::GetContentRegionAvail().x - (ImGui::GetScrollMaxY() > 0.0f ? ApexUi::kSpace1 * u : 0.0f); // clear of the scrollbar
@@ -3895,11 +3894,15 @@ void VersionButton(float x, float y, float h) {
                     open = !open;
                     st->SetBool(openKey, open);
                 }
-                if (ImGui::IsItemHovered() && anim <= 0.0f)
-                    dl->AddRectFilled(top, ImVec2(top.x + width, top.y + rowH), ImGui::GetColorU32(Col(VioletTheme::kHoverBg)), 14.0f * u);
+                // Hover, as the menu's rows: the hover fill (on an open release, over its card's top only) and the chevron lit
+                const bool rowHovered = ImGui::IsItemHovered();
+                if (rowHovered)
+                    dl->AddRectFilled(top, ImVec2(top.x + width, top.y + rowH), ImGui::GetColorU32(Col(VioletTheme::kHoverBg)), 14.0f * u,
+                                      anim > 0.0f ? ImDrawFlags_RoundCornersTop : ImDrawFlags_None);
                 const float cy = top.y + rowH * 0.5f, is = 14.0f * u;
                 float x = top.x + pad;
-                ApexUi::DrawIcon(dl, eased > 0.5f ? IconId::ChevronDown : IconId::ChevronRight, ImVec2(x, cy - is * 0.5f), is, ImGui::GetColorU32(Col(VioletTheme::kTextMuted)));
+                ApexUi::DrawIcon(dl, eased > 0.5f ? IconId::ChevronDown : IconId::ChevronRight, ImVec2(x, cy - is * 0.5f), is,
+                                 ImGui::GetColorU32(Col(rowHovered ? VioletTheme::kText : VioletTheme::kTextMuted)));
                 x += is + ApexUi::kSpace2 * u;
                 ImGui::PushFont(VioletTheme::BoldFont(), VioletTheme::BaseFontSize());
                 dl->AddText(ImVec2(x, cy - ImGui::GetTextLineHeight() * 0.5f), ImGui::GetColorU32(Col(VioletTheme::kText)), r.version);
@@ -4014,9 +4017,6 @@ void VersionButton(float x, float y, float h) {
                 ImGui::PopID();
             }
         }
-        ImGui::EndChild();
-        ImGui::PopStyleColor();
-        ImGui::PopStyleVar();
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0.0f, ApexUi::kSpace1 * u));
         {
@@ -4036,7 +4036,8 @@ void VersionButton(float x, float y, float h) {
         }
         ImGui::EndPopup();
     }
-    ImGui::PopStyleVar(3);
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(4);
 }
 
 // The version button's width (the label and, while What's new is unread, its dot)
