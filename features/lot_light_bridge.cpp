@@ -1811,14 +1811,13 @@ bool FencePieceWalls(const BYTE* p, UINT count, UINT stride, const FenceLayout& 
 // DrawInstanced: the group being drawn (an instanced DrawIndexedPrimitive)
 // The share of lamp light the current fence draw lets through (GroundShadow::Wall::pass): the open share of the texture its
 // pixel shader cuts the mesh out with (ShaderPatches::FindCutout), at half alpha; 0 for a solid fence or one that
-// cannot be read. Per shader and per texture, read once (render thread); emptied on a world change, as an address can be
-// reused by another shader or texture.
+// cannot be read. The shader's cutout is kept per shader (emptied on a world change, as an address can be reused); the
+// texture is read at each read of the group (its first draw, then every 60 s: a 256 x 256 DXT5 is 64 KB), as a texture
+// freed with a lot can leave its address to another one (render thread).
 std::vector<DWORD> ShaderCode(IDirect3DPixelShader9* ps);
 std::unordered_map<IDirect3DPixelShader9*, ShaderPatches::Cutout> g_fenceCuts;
-std::unordered_map<uint64_t, float> g_fenceOpen;
 float FenceOpenShare(IDirect3DDevice9* dev) {
     auto& s_cut = g_fenceCuts;
-    auto& s_open = g_fenceOpen;
     if (!g_curPs) return 0.0f;
     auto it = s_cut.find(g_curPs);
     if (it == s_cut.end()) {
@@ -1844,17 +1843,12 @@ float FenceOpenShare(IDirect3DDevice9* dev) {
         const FenceCutout::Fmt f = d.Format == D3DFMT_DXT1 ? FenceCutout::Fmt::Dxt1 : d.Format == D3DFMT_DXT3 ? FenceCutout::Fmt::Dxt3
                                  : d.Format == D3DFMT_DXT5 ? FenceCutout::Fmt::Dxt5 : FenceCutout::Fmt::Argb;
         const bool readable = d.Pool != D3DPOOL_DEFAULT && (f != FenceCutout::Fmt::Argb || d.Format == D3DFMT_A8R8G8B8);
-        const uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(base)) << 32) | (static_cast<uint64_t>(d.Width & 0xFFFFFF) << 8) |
-                             static_cast<uint64_t>(f); // (32-bit addresses: the fields apart)
-        if (const auto o = s_open.find(key); o != s_open.end()) open = o->second;
-        else if (readable) {
+        if (readable) {
             D3DLOCKED_RECT lr{};
             if (SUCCEEDED(tex->LockRect(level, &lr, nullptr, D3DLOCK_READONLY))) {
                 open = FenceCutout::OpenShare(f, static_cast<const uint8_t*>(lr.pBits), lr.Pitch, static_cast<int>(d.Width), static_cast<int>(d.Height), keep);
                 tex->UnlockRect(level);
             }
-            if (s_open.size() > 1024) s_open.clear();
-            s_open[key] = open;
             static int s_logs = 0;
             if (!kPublicBuild && s_logs < 100 && ++s_logs)
                 LOG_INFO(std::format("[GroundShadow] Mesh fence: shader {:08X} cuts out with s{} ({}x{} {}, level {}, texture {:08X}): open share {:.3f}",
@@ -9509,7 +9503,6 @@ void OnWorldChanged() {
     g_fenceGroups.clear(); // (garden walls of the old world)
     g_fenceBirths.clear();
     g_fenceCuts.clear();
-    g_fenceOpen.clear();
     g_gates.clear();
     g_fenceBusy.clear();
     g_fenceGen++;
@@ -10046,7 +10039,6 @@ void Shutdown(bool keepChunkMaps) {
     g_fenceGroups.clear();
     g_fenceBirths.clear();
     g_fenceCuts.clear();
-    g_fenceOpen.clear();
     g_gates.clear();
     g_fenceBusy.clear();
     g_fenceGen++;
