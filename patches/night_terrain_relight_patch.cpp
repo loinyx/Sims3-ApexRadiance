@@ -153,10 +153,12 @@ bool ReadRenderedChunk(const BYTE* chunk, int& ix, int& iz) {
 // __fastcall with two stack arguments = __thiscall(terrain, chunk, force) for the caller (ECX = terrain, callee pops 8).
 // Also the completion signal (and QPC timing) of the chunks the local terrain relight releases (ChunkRelight): this is
 // the game's one-chunk-per-update sweep branch they go through (chunk+0x54).
+void GiveBackBakeRows();
 void __fastcall ChunkRenderThunk(void* terrain, void* /*edx*/, BYTE* chunk, int force) {
     LARGE_INTEGER t0, t1;
     QueryPerformanceCounter(&t0);
     reinterpret_cast<ChunkRender_t>(kChunkRenderFn)(terrain, chunk, static_cast<char>(force));
+    GiveBackBakeRows();
     QueryPerformanceCounter(&t1);
     int ix = 0, iz = 0;
     const bool rendered = ReadRenderedChunk(chunk, ix, iz);
@@ -593,6 +595,13 @@ void BakeLightRows(const BYTE* light) {
     if (!g_bakeDevice) return;
     if (!g_bakeRowsHeld) g_bakeRowsHeld = SUCCEEDED(g_bakeDevice->GetPixelShaderConstantF(5, &g_bakeRowsSaved[0][0], 3));
     D3D9Hooks::CallOriginalSetPixelShaderConstantF(g_bakeDevice, 5, &r[0][0], 3);
+}
+// The saved c5..c7 back: after the chunk render that ran the bake (ChunkRenderThunk), before the game sets the next draw's
+// constants; else at the game's next other pixel shader (a bake outside that call)
+void GiveBackBakeRows() {
+    if (!g_bakeRowsHeld || !g_bakeDevice) return;
+    D3D9Hooks::CallOriginalSetPixelShaderConstantF(g_bakeDevice, 5, &g_bakeRowsSaved[0][0], 3);
+    g_bakeRowsHeld = false;
 }
 const ShaderCache::Id kBakeConePs = [] {
     ShaderCache::Desc d;
@@ -2692,10 +2701,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         if (g_bakeGainInstalled && g_bakePosInstalled) {
             g_coneScale5 = ReadConeScale5();
             D3D9Hooks::RegisterSetPixelShader("NightTerrainRelight", [](D3D9Hooks::DeviceContext& ctx, IDirect3DPixelShader9* ps) {
-                if (g_bakeRowsHeld && (!ps || ps != g_gameBakePs)) { // the bake's passes are over
-                    D3D9Hooks::CallOriginalSetPixelShaderConstantF(ctx.device, 5, &g_bakeRowsSaved[0][0], 3);
-                    g_bakeRowsHeld = false;
-                }
+                if (g_bakeRowsHeld && (!ps || ps != g_gameBakePs)) GiveBackBakeRows(); // the bake's passes are over
                 if (!ps || g_coneFailed || (ps != g_gameBakePs && (g_gameBakePs || !g_inBakeLight))) return D3D9Hooks::HookAction::Continue;
                 g_inBakeLight = false;
                 return BindConeShader(ctx.device, ps) ? D3D9Hooks::HookAction::Skip : D3D9Hooks::HookAction::Continue;
