@@ -109,6 +109,7 @@ void LanguageRow();
 double g_whatsNewOpenedAt = -1.0; // when the What's new popover opened (its rise-in)
 // What's new, measured on the last frame: the popover's content, the release list's content and the footer below the list
 float g_whatsNewContentH = 0.0f, g_whatsNewListH = 0.0f, g_whatsNewFooterH = 0.0f;
+int g_whatsNewSettle = 0; // frames the popover is laid out unseen after it opens, while its height settles
 void ScreenshotCaptureCard();
 void RecoveryRow();
 
@@ -3823,6 +3824,7 @@ void VersionButton(float x, float y, float h) {
     if (clicked) {
         ImGui::OpenPopup(kMemoryOptimizationTest ? "##PublicTestWelcome" : "##WhatsNew");
         g_whatsNewOpenedAt = ImGui::GetTime();
+        g_whatsNewSettle = 3;
         if (unseen && !kMemoryOptimizationTest) {
             ApexConfig::UiSettings ui = ApexConfig::GetUi();
             ui.changelogSeen = ApexChangelog::Get(0).version; // [ui] changelog_seen
@@ -3832,7 +3834,10 @@ void VersionButton(float x, float y, float h) {
     // The popover opens above the button, centred on it, as tall as its content up to the room above the button (at most
     // 560 units; its bottom stays put, so opening a release grows it upwards). Past that only the release list scrolls,
     // inside the padding, clear of the rounded corners; the popover itself never scrolls, so there is one bar at most.
-    // It rises in over 0.16 s (alpha and 8 units); g_whatsNewOpenedAt is set when it opens.
+    // Its height comes from the content measured the frame before, so it is laid out unseen for its first frames (it showed
+    // at the full height and shrank), then rises in over 0.16 s (alpha and 8 units) from g_whatsNewOpenedAt.
+    const bool settling = g_whatsNewSettle > 0;
+    if (settling) g_whatsNewOpenedAt = ImGui::GetTime();
     const float rise = std::clamp(static_cast<float>(ImGui::GetTime() - g_whatsNewOpenedAt) / 0.16f, 0.0f, 1.0f);
     const float riseEased = 1.0f - (1.0f - rise) * (1.0f - rise);
     const float popMax = std::floor(std::fmin(560.0f * u, std::fmax(240.0f * u, p.y - ImGui::GetMainViewport()->Pos.y - 24.0f * u)));
@@ -3841,7 +3846,7 @@ void VersionButton(float x, float y, float h) {
     ImGui::SetNextWindowSize(ImVec2(420.0f * u, popH));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ApexUi::kSpace4 * u, ApexUi::kSpace4 * u));
     ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 18.0f * u);
-    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * (0.25f + 0.75f * riseEased));
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, settling ? 0.0f : ImGui::GetStyle().Alpha * (0.25f + 0.75f * riseEased));
     ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 6.0f * u);
     ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, Col(0, 0.0f));
     if (ImGui::BeginPopup("##WhatsNew", ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
@@ -4053,6 +4058,7 @@ void VersionButton(float x, float y, float h) {
         const float bottom = ImGui::GetItemRectMax().y;
         g_whatsNewFooterH = bottom - listBottom;
         g_whatsNewContentH = bottom - ImGui::GetWindowPos().y + style.WindowPadding.y;
+        if (g_whatsNewSettle > 0) g_whatsNewSettle--;
         ImGui::EndPopup();
     }
     ImGui::PopStyleColor();
