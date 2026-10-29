@@ -153,12 +153,12 @@ bool ReadRenderedChunk(const BYTE* chunk, int& ix, int& iz) {
 // __fastcall with two stack arguments = __thiscall(terrain, chunk, force) for the caller (ECX = terrain, callee pops 8).
 // Also the completion signal (and QPC timing) of the chunks the local terrain relight releases (ChunkRelight): this is
 // the game's one-chunk-per-update sweep branch they go through (chunk+0x54).
-void GiveBackBakeRowsAfterChunk();
+void GiveBackBakeRows();
 void __fastcall ChunkRenderThunk(void* terrain, void* /*edx*/, BYTE* chunk, int force) {
     LARGE_INTEGER t0, t1;
     QueryPerformanceCounter(&t0);
     reinterpret_cast<ChunkRender_t>(kChunkRenderFn)(terrain, chunk, static_cast<char>(force));
-    GiveBackBakeRowsAfterChunk();
+    GiveBackBakeRows();
     QueryPerformanceCounter(&t1);
     int ix = 0, iz = 0;
     const bool rendered = ReadRenderedChunk(chunk, ix, iz);
@@ -597,20 +597,11 @@ void BakeLightRows(const BYTE* light) {
     D3D9Hooks::CallOriginalSetPixelShaderConstantF(g_bakeDevice, 5, &r[0][0], 3);
 }
 // The saved c5..c7 back: after the chunk render that ran the bake (ChunkRenderThunk), before the game sets the next draw's
-// constants; for a bake outside that call, at the game's next render target change (a pass ends there, before the next
-// pass sets its constants), else at its next other pixel shader (which could follow the next draw's constants). The
-// developer status counts each way (BakeRowsText)
-enum class RowsBack { ChunkRender, Target, Shader };
-long g_rowsBack[3] = {};
-void GiveBackBakeRows(RowsBack why) {
+// constants; else at the game's next other pixel shader (a bake outside that call)
+void GiveBackBakeRows() {
     if (!g_bakeRowsHeld || !g_bakeDevice) return;
     D3D9Hooks::CallOriginalSetPixelShaderConstantF(g_bakeDevice, 5, &g_bakeRowsSaved[0][0], 3);
     g_bakeRowsHeld = false;
-    g_rowsBack[static_cast<int>(why)]++;
-}
-void GiveBackBakeRowsAfterChunk() { GiveBackBakeRows(RowsBack::ChunkRender); } // (ChunkRenderThunk, above)
-std::string BakeRowsText() {
-    return std::format("cone rows given back {} after a chunk render, {} at a target change, {} at another shader", g_rowsBack[0], g_rowsBack[1], g_rowsBack[2]);
 }
 const ShaderCache::Id kBakeConePs = [] {
     ShaderCache::Desc d;
@@ -1429,7 +1420,7 @@ bool LocalLamps(std::vector<ChunkRelight::Lamp>& out) {
 // kStampedNear of an excluded lamp of its lot and type now, and each removal is paired with such an addition. A lamp of the
 // same type deleted or placed beside the drag is left over and goes through the local relight (before, lot and type alone
 // were matched, and a lamp deleted within the drag's last moments kept its ground light until its chunk was relit)
-constexpr float kStampedNear = 0.5f; // m (the diff's place and the light's place now may be a step of the drag apart)
+constexpr float kStampedNear = 1.5f; // m (the diff's place and the light's place now may be a step of the drag apart: a tile, 1.4 m diagonally)
 bool AllStamped(const std::vector<LotLightBridge::BakeChange>& changes) {
     struct Pair { uint64_t lot; int type; int added, removed; };
     std::vector<Pair> pairs;
@@ -2728,14 +2719,10 @@ class NightTerrainRelightPatch : public ApexPatch {
         if (g_bakeGainInstalled && g_bakePosInstalled) {
             g_coneScale5 = ReadConeScale5();
             D3D9Hooks::RegisterSetPixelShader("NightTerrainRelight", [](D3D9Hooks::DeviceContext& ctx, IDirect3DPixelShader9* ps) {
-                if (g_bakeRowsHeld && (!ps || ps != g_gameBakePs)) GiveBackBakeRows(RowsBack::Shader); // the bake's passes are over
+                if (g_bakeRowsHeld && (!ps || ps != g_gameBakePs)) GiveBackBakeRows(); // the bake's passes are over
                 if (!ps || g_coneFailed || (ps != g_gameBakePs && (g_gameBakePs || !g_inBakeLight))) return D3D9Hooks::HookAction::Continue;
                 g_inBakeLight = false;
                 return BindConeShader(ctx.device, ps) ? D3D9Hooks::HookAction::Skip : D3D9Hooks::HookAction::Continue;
-            }, D3D9Hooks::Priority::Last);
-            D3D9Hooks::RegisterSetRenderTarget("NightTerrainRelight", [](D3D9Hooks::DeviceContext&, DWORD, IDirect3DSurface9*) {
-                if (g_bakeRowsHeld) GiveBackBakeRows(RowsBack::Target); // a pass ends: the bake's, before the next sets its constants
-                return D3D9Hooks::HookAction::Continue;
             }, D3D9Hooks::Priority::Last);
             g_bakeConeHooked = true;
         }
@@ -3689,7 +3676,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         ImGui::TextWrapped("Room light map edges: %s", RoomMapPadding::Status().c_str());
         ImGui::TextWrapped("Smooth indoor light: %s", LotLightBridge::IndoorSmoothStatus().c_str());
         ImGui::TextWrapped("Windows take outdoor light: %s", LotLightBridge::WindowOutdoorStatus().c_str());
-        ImGui::TextWrapped("Terrain bake: %s | moonlight: %s", g_bakeGainInstalled ? std::format("street lamps x{:.2f}, lot lamps x{:.2f}; {}", g_bakeStreetMul[0], g_bakeLotMul[0], BakeRowsText()).c_str() : "not installed",
+        ImGui::TextWrapped("Terrain bake: %s | moonlight: %s", g_bakeGainInstalled ? std::format("street lamps x{:.2f}, lot lamps x{:.2f}", g_bakeStreetMul[0], g_bakeLotMul[0]).c_str() : "not installed",
                            g_sunlightBase < 0.0f ? (kSunlightScale ? "waiting for a world" : "not available")
                                                  : std::format("sunlight scale {:.3f} (base {:.3f}, moonlight x{:.2f}; light height {:.1f} deg, moon height {})", g_moonWritten, g_sunlightBase, g_moonlight,
                                                              g_moonHeightNow, g_moonLift ? std::format("at least {:.0f} deg at night", g_moonHeightDeg) : std::string("the game's")).c_str());

@@ -84,9 +84,8 @@ Lamp changes (night and Build-mode day preview; stationary and moving camera):
 ## Open checks
 
 - A full terrain rebuild or a lot load. **Expected:** no object drawn just after it with wrong rig lamps. The cone rows
-  (c5..c7) of a bake outside the chunk render call come back at the game's next render target change or other pixel
-  shader; the developer status (Terrain bake) counts each way, so a session shows whether the shader fallback is ever
-  used. Not yet read in game.
+  (c5..c7) of a bake that does not run inside the chunk render call are given back only at the game's next other pixel
+  shader; whether those bakes go through that call has not been checked.
 - Night Lighting turned on mid-session, then a lamp dragged. **Expected:** no old light beside the GPU stamp. Lamps the
   game baked before the hook are not in `g_everBaked`, so the drag start does not relight their old place.
 

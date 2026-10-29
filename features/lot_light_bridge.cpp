@@ -2008,9 +2008,9 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
 // group may only have left the screen: it stays.)
 constexpr DWORD kFenceGoneMs = 500;
 void FenceGroupsGone() {
-    if (g_fenceGroups.empty() || g_roomMapFrame - g_terrainDrawFrame > 1) return;
-    const DWORD now = GetTickCount();
+    if (!g_shadeOn || g_fenceGroups.empty() || g_roomMapFrame - g_terrainDrawFrame > 1) return; // (shade off: groups are not seen)
     const uint64_t now64 = GetTickCount64();
+    const DWORD now = static_cast<DWORD>(now64); // (GetTickCount, from the same reading)
     for (auto it = g_fenceGroups.begin(); it != g_fenceGroups.end();) {
         const FenceGroup& g = it->second;
         const bool gone = now - g.seen > kFenceGoneMs && g_roomMapFrame - g.seenFrame >= 2 &&
