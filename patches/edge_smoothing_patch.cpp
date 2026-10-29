@@ -1122,6 +1122,8 @@ class EdgeSmoothingPatch : public ApexPatch {
         bool changed = false;
         if (g.status.rfind("ERROR: ", 0) == 0) ApexUi::IconNote(IconId::TriangleAlert, g.status.c_str() + 7, VioletTheme::kError);
 
+        // Grouped like Depth Blur: the method with its own quality and tuning, then what both methods share
+        ApexUi::CardGroup("Method and quality");
         // Method: FXAA first; UI order matches the stored method values.
         static const char* const kMethods[] = {"FXAA", "SMAA"};
         static const char* const kMethodTips[] = {"Lighter on your graphics card, a little blurrier", "Clean, smooth edges while textures stay sharp"};
@@ -1150,6 +1152,7 @@ class EdgeSmoothingPatch : public ApexPatch {
             }
         }
         // both methods (30/09): object edges from the scene depth, and texture sharpening where nothing was smoothed
+        ApexUi::CardGroup("Edges and textures");
         changed |= ApexUi::SwitchRow("Edges from depth", &g.p.depthEdges, "Also smooths faint edges of objects, while textures stay sharp", kDefaults.depthEdges);
         if (g.p.depthEdges && g.ready && g.framesSmoothed > 60 && !g.depthUsed)
             ApexUi::IconNote(IconId::Info, "The scene depth is not available right now: edges use color only");

@@ -14,6 +14,7 @@ The feature is described in [features/night-lighting/roads.md](../features/night
 | Harness | Covers | Run | Needs |
 |---|---|---|---|
 | Offline captured-shader scan (ad hoc, not in `tools/`) | `IsRoadVs` and `PatchRoad` over all captured shaders; patched output disassembles | Not kept as a repository harness | Captured shader set |
+| [`tools/terrain_lighting_test`](../../tools/terrain_lighting_test/README.md) (`check.cpp`, since `91af563`) | Wet roads: which captured pixel shaders have the fixed sky cube's reflection (`HasWetSkyReflection`); a fixture road shader patched by `PatchRoad`, drawn with a cube texture: by day (`cW.x` = 1) as the game draws it, and only the sky reflection scaled by `cW.x` (within 2 of 255) | `run.ps1 -Captures <dir> -OutDir <dir>` | Native D3D9 GPU |
 
 No repository harness exercises `DrawRoad` directly. The road gain path (`ConstGain`, `RoadGain`) is extracted by
 [`tools/terrain_lighting_test/run_resource_checks.ps1`](../../tools/terrain_lighting_test/README.md) together with the
@@ -52,3 +53,6 @@ The 2.5.6 scan recognises a shader variant; it does not certify every sidewalk o
 
 - Summer roads: every summer road capture predates the summer fix; no capture shows the patched summer shaders.
 - Alpha-blended sidewalk variant (2.5.6): recognised offline only; its in-game appearance is unverified.
+- Wet roads (`91af563`): roads and sidewalks in rain at night, at dusk and by day. **Expected:** no grey film at night;
+  by day the reflection as in the game; lamp light on the wet road as on the dry one. No run of the wet road fixture is
+  recorded, and no capture yet shows the patched wet road in game.

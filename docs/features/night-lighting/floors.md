@@ -9,9 +9,9 @@ story. Interior floors are unchanged. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released (present since 2.1.0, the first version in this repository). The lot's ground lamp shade on story-0 floors (*Walls shade lamp light near the ground*): Released in 2.13.0. Outdoor floors kept off the indoor light on the ground: Released in 2.15.3. Light past 1 on summer outdoor floors: Released in 2.16.0 |
+| Availability | Released (present since 2.1.0, the first version in this repository). The lot's ground lamp shade on story-0 floors (*Walls shade lamp light near the ground*): Released in 2.13.0. Outdoor floors kept off the indoor light on the ground: Released in 2.15.3. Light past 1 on summer outdoor floors: Released in 2.16.0 Released in 2.18.0: every weather floor variant, each lamp counted once. |
 | Default | On (follows the Ground & Lots switches) |
-| Menu | No card of its own: Lighting > Ground (*Street lamps light lots*, *Smooth ground light*, *Ground brightness*) and Lighting > Stories |
+| Menu | No card of its own: Lighting > Game fixes (*Street lamps light lots*, *Smooth ground light*), Lighting > Outside (*Ground light*) and Lighting > Inside & floors > Stories |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawFloor`, `DrawFloorAtlas`, `FloorShadeBind`), [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`PatchFloor`, `PatchBakedAtlasPs`, `WorldYOutput`), [`features/ground_lamp_shadow.h`](../../../features/ground_lamp_shadow.h) (`FloorShadeRows`), [`shaders/floor_atlas_table.h`](../../../shaders/floor_atlas_table.h), [`shaders/shader_ids.h`](../../../shaders/shader_ids.h) |
 
@@ -35,10 +35,12 @@ The 1044-byte PS (m60, m61, fountain) hashes to `0x9CFC614F` and the 812-byte PS
 
 Patched copies of the floor shaders take `max(floor map, world light atlas)` at each pixel, where the atlas is the
 smoothed ground light that grass and lots use ([world-atlas-and-smoothed-maps.md](world-atlas-and-smoothed-maps.md)).
-The game's lamp scale after that `max` is multiplied by *Ground brightness*, blended by the night level.
+The game's lamp scale after that `max` is multiplied by *Ground light*, blended by the night level.
 
 1. **Winter floors and the pool edge** (`DrawFloor`, VS class 5): the floor VS already outputs world xz; `PatchFloor`
-   inserts the atlas read and the `max` after the lot-map term.
+   inserts the atlas read and the `max` after the lot-map term. The weather variants of these floors (all 104 pixel
+   shaders drawn with these vertex shaders in the game's precomp) take the same patch, so a patio keeps its lamp light
+   in every weather; two that use every sampler keep the game's bytes and take only the floor's lamp-scale gain.
 2. **Summer outdoor floors** (`DrawFloorAtlas`, PS class `FloorAtlas`): a VS copy writes world xz to a free TEXCOORD;
    `PatchBakedAtlasPs` inserts the atlas read and the `max` before the map's scale, for the 261 ExteriorFloors pixel
    shaders in `floor_atlas_table.h`.
@@ -59,7 +61,7 @@ Floors have no setting of their own. They depend on:
 |---|---|---|
 | Street lamps light lots | `luzDoPosteNaGramaDoLote` | The floor handlers sit after the bridge-enabled check in the draw dispatch |
 | Smooth ground light | `mapaDeLuzSuavizado` | The atlas exists only with it |
-| Ground brightness | `brilhoNoChao` | Scales the floor's lamp constant after the `max` (`GroundGain`, `1 + (gain - 1) x night`) |
+| Ground light | `luzNoChao` | Scales the floor's lamp constant after the `max` (`GroundGain`, `1 + (gain - 1) x night`) |
 | Outdoor light between floors | `luzExternaEntreAndares` | Floors of other stories get the outdoor lamps |
 | Walls shade lamp light near the ground | `paredesSombreiamOChao` | The lot's ground lamp shade, on story-0 floors too (off: gate 0, the floor as before) |
 | Indoor light adds to the ground | `luzInternaSomaNoChao` | None on floors: they keep the plain patch, and the texels under a story-0 floor tile keep alpha 0 (*Indoor light on the ground* below) |
@@ -81,8 +83,9 @@ These settings are documented on their own pages ([lot-light-pass.md](lot-light-
 
 - The game never occlusion-tests floor samples (1179 floor samples observed, none tested), and the atlas has no walls.
   Story 0 floors take the lot's ground lamp shade, stories 1 and up the floor map's alpha; floors not covered:
-  12 of the 285 summer (shader, TEXCOORD) pairs and 2 of the 8 winter floor pixel shaders the patch takes use every
-  sampler up to s14 (no room for the mask); snow lying on floors (its 2 vertex shaders write no world y); 4 of the 16
+  12 of the 285 summer (shader, TEXCOORD) pairs and the winter floor pixel shaders that use every sampler up to s14
+  (no room for the mask: 2 of the 8 dry-weather ones; the count among the weather variants is not recorded), and the 2
+  gain-only weather variants; snow lying on floors (its 2 vertex shaders write no world y); 4 of the 16
   winter floor vertex shaders write no world y; a floor draw whose world rows match no lot. These keep the light of before.
 - The ground lamp shade is the lot ground's (outside walls only, computed at the lot's ground height): a floor raised on a
   foundation (within 1 m of the ground) is shaded as the ground under it; fences, plants and objects do not shade. It is
@@ -113,6 +116,11 @@ These settings are documented on their own pages ([lot-light-pass.md](lot-light-
      max  rB.xyz, rB, T
      ```
   Refused if a piece is missing, samplers >= 15 or constants >= 224.
+- Weather variants, when step 1 finds no such pair: the map read from any input and sampler (`texld rM`) whose colour
+  reaches the game's exclusive lamp scale (`LampScaleAfter`) either through the factor `mul rB.xyz, rW.s, rM` (either
+  order, one component of a temp) or directly (`mad rY.xyz, rM, cK.x, rZ`: then B = rM and the atlas `max` goes right
+  after the read, in the same insertion as the map alpha copy). With no sampler or constant to spare the copy is the
+  game's bytes (`FloorPatch::gainOnly`) and `DrawFloor` only scales its `scaleConst`.
 - `LampScaleAfter` finds the game's lamp scale after the `max` (m08: `mul r0.xyz, r2, c2.x`, read once) as `scaleConst`.
 - `DrawFloor` binds the atlas to sE (CLAMP, LINEAR, mip NONE), sets cA = atlas mapping, swaps the PS, multiplies
   `scaleConst.x` by `GroundGain()` (`ConstGain`, skipped at 1), draws and restores.

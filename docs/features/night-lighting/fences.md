@@ -11,7 +11,7 @@ same switch and strength. By day the lamp term fades to 3% of its night strength
 |---|---|
 | Availability | Released (present since 1.0.0). Subdued daytime lamp response: Released in 2.6.0. Per-pixel lamps, walls blocking them and the game's own lighting in full daylight: Released in 2.7.0. Lighting corrections: Released in 2.12.1. The outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and tops above the lamp heads without ground light: Released in 2.12.3. The lot's ground lamp shade on pieces near the ground (*Walls shade lamp light near the ground*), upper-story railing and parapet tops without a ground lamp's pool, lamps tested from the piece nearest them: Released in 2.13.0. The reach law's scale without the outdoor walls' gain, the lamp sum held under 1 by its brightest channel, faces reading the ground lamp shade in front of them, gates closing their fence's gap in the lot shade: Released in 2.15.3. Elevated structures follow the architectural lamp gain and keep the ground pool out: Released in 2.15.4. A larger lamp pick memo, kept with lamps shining out of a house: Released in 2.17.1. |
 | Default | On |
-| Menu | Lighting > Objects > Objects card > Game fixes (folded) > *Fences and stairs catch light*, *Fence brightness* |
+| Menu | Lighting > Game fixes > Objects > *Fences and stairs catch light*, *Fence brightness* |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/shader_patches.cpp`](../../../features/shader_patches.cpp) (`IsInstancedStructureVs`, `PatchInstancedLamps`, `AppendGroundShade`), [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawInstanced`, `FindLotAt`, `FloorShadeBind`), [`features/ground_lamp_shadow.h`](../../../features/ground_lamp_shadow.h) (`FloorShadeRows`), [`features/terrain_lighting_policy.h`](../../../features/terrain_lighting_policy.h) (`SurfaceLampGain`) |
 
@@ -83,7 +83,7 @@ This page covers the `vs_3_0` instanced structure family.
 | Fence brightness | `forcaNasCercas` | float | 75% | 25 to 200% | Multiplies the atlas term and the per-pixel lamps; 100% = the same light as the ground. With *Realistic lamp reach* on, the per-pixel lamps take the outdoor walls' native lamp scale (not the walls' *Brightness*) and this value (with *Seamless light brightness*) is a trim over its 75% default. Shown when the switch is on |
 
 Both apply live (`LotLightBridge::SetFenceGroundLight`, every frame). The Game fixes section disables these rows unless
-*Street lamps light lots* and *Smooth ground light* (Ground tab) are both on (the atlas exists only with both) and offers
+*Street lamps light lots* and *Smooth ground light* (Lighting > Game fixes) are both on (the atlas exists only with both) and offers
 a button to turn them on.
 The Lighting balance styles set `forcaNasCercas` to 67.5% (Subtle), 75% (Soft) or 100% (Natural).
 
@@ -97,7 +97,7 @@ The Lighting balance styles set `forcaNasCercas` to 67.5% (Subtle), 75% (Soft) o
   dispatched first.
 - Per-pixel lamps follow *Seamless light on pieces* (`luzPorPixelNosObjetos`) and its brightness
   (`forcaLuzPorPixelNosObjetos`) in the same Game fixes section ([objects-and-rigs.md](objects-and-rigs.md)); walls, and the placed
-  floors of upper stories above a lamp, block them only while Lighting > Objects > *Buildings block lamp light on trees and objects* is
+  floors of upper stories above a lamp, block them only while Lighting > Outside > Objects > *Buildings block lamp light on trees and objects* is
   on ([level-light-share.md](level-light-share.md)).
 - No game code is patched for the shader part; recognition is by instruction shape.
 
@@ -223,7 +223,9 @@ test reads (`LevelLightShare::LampVisibilityState`, the same before and after th
 out of a house is tested on its own copy of the walls, a snapshot that is replaced and never changed; its generation is
 part of `LampVisibilityState`, so picks with such lamps are kept too. A hit writes exactly what the pick would: the same rows, head
 height, share, counters and candidate count. The memo follows the development switch `lamp_visibility_memo` and is not
-used while F8 records the wall and slab tests or a light capture runs. Development builds pick one hit in 64 again on a copy and
+used while the developer switch *Record story light samples for the diagnostics* has F8 record the wall and slab tests,
+or while a light capture runs; an F8 dump or an F7 no longer turns it off for the rest of the session. The draw-cost log
+counts the draws that did not use it, by reason. Development builds pick one hit in 64 again on a copy and
 compare it bit for bit; a difference turns the memo off for the session
 (`[LotLightBridge] Fence lamp pick memo: a kept pick differed from a new one ...`). A world change empties it. The
 developer roof status line counts `fence lamp picks: N reused, M computed` (with `(off: a kept pick differed)` after a

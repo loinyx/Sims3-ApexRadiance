@@ -313,7 +313,10 @@ solve).
   textures from there; step 8 unlocks them and gives them back (`0x006A8FD0`). A room solved at another class than the
   one on screen therefore writes maps that are NOT shown and that still hold what that class showed last: the quick
   pass's refinement writes the class-2 maps, which hold the light from before the edit until the solve ends and the room
-  switches to them.
+  switches to them. A room's own map can be smaller than the working map: on a 20 x 30 m lot the own floor maps were
+  256x128 and 256x256 under a 512x256 working map. The commit's copy (`0x006191D0`) takes the smaller width and height
+  and copies those rows unfiltered, so the own map holds the working map's top-left corner texel for texel; the rest of
+  a larger own map is left as it was (read from the code's use in `RtOutdoorLamps::UploadSlot`).
 - **Per-class switches** (index `idx = classEntry+8`): `0x006A8CB0` wall mode `0xFF36A4[idx]` = 0 0 1; `0x006A8CE0(pass)`
   2D walls `0xFF36C4[3 × pass + idx]`; `0x006A8D00(pass)` 3D occluders `0xFF36D0[3 × pass + idx]`; passes 0 floor, 1
   ceiling, 2 objects (copied by state 0), 3 walls (read by the wall pass at every step). 2D walls: pass 0 = 0 1 1, 1 =

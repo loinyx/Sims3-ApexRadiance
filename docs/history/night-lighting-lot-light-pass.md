@@ -186,3 +186,32 @@ Both CRT functions save and restore the x87 control word on every call.
 **Outcome:** `ApexMath::Hypot` (float squares are exact in double; one sum and one `sqrtsd`) and `Pow2` (a half is
 m x 2^k) replace them with the same bits ([validation](../validation/night-lighting-lot-light-pass.md)). No lighting
 result changes.
+
+### 2026-10-29: mesh fences, fence gaps and the shade's update time
+
+**Context:** brick and chain-link fence scenes beside a garden lamp, with Light captures, F8 snapshots and recordings on a
+developer build.
+
+**Findings:**
+
+- A mesh fence (chain-link, lattice, railing) cast the shadow of a solid wall. Its pixel shader cuts the mesh out with
+  the texture's alpha; reading that texture's open share gives the light it lets through. The share at the draw's own
+  alpha reference changed with the draw that read it (references 150 and 50 for one texture: 0.258 and 0.099), so it is
+  taken at half alpha.
+- Brick fence meshes overlap by their posts (0.12 m). Only ends within 2 cm joined, so each overlapped end listed a gap
+  of 1.88 m over the next piece; an object in it filled the real opening too.
+- Objects taken for gates: a fence post at a gap's end (0.05 m from it), a lamp dragged through a gap (0.60 m off the
+  line) and an object carried over the fence's top (1.8 m over its base). Each kept the opening dark for 30 s.
+- With F7 or F8 used once, developer builds kept the fence and object lamp-pick memo off for the session (about 21,000
+  fence draws in 10 s without it), as each dump and each F7 on a wall re-armed the recording.
+- When a fence piece was added or removed, the old group still counted as drawn at the new group's first draw, so it
+  stayed until the 20 s sweep with the removed piece's shadow.
+- The developer timing log showed the shade built in 1 to 30 ms but seen at a 500 ms check and built at most every
+  750 ms: changes showed in half-second steps.
+- An offline build of `ground_lamp_shadow.h` with the logged brick pieces and lamp of one scene gave the beam through
+  the opening (194 to 255 in front of it, 0 to 20 behind the walls), while the screenshot showed that ground dark; the
+  cause of the difference was not found before the gap fixes.
+
+**Outcome:** the open share at half alpha, overlapped ends joined, gates only on the ground inside a gap and not while a
+lamp is dragged, the memo off only with the story samples switch, groups replaced 300 ms after a new group's first draw,
+inputs checked every 100 ms and builds every 250 ms ([validation](../validation/night-lighting-lot-light-pass.md)).

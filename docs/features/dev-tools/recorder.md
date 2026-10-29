@@ -99,8 +99,8 @@ then `==== ApexRadiance.toml at the start of the recording ====` and the setting
 
 Three parts measure how the light updates on screen after a lamp edit, all inside the recording, nothing to arm:
 
-- **Screen pixels** (`features/screen_watch.{h,cpp}`, started from Night Lighting's Present next to the Light Probe): 33
-  points copied from the back buffer at every frame with `StretchRect` into a 33×1 render target (a ring of 4, each with an
+- **Screen pixels** (`features/screen_watch.{h,cpp}`, started from Night Lighting's Present next to the Light Probe): 50
+  points copied from the back buffer at every frame with `StretchRect` into a 50×1 render target (a ring of 4, each with an
   event query) and read back with `GetRenderTargetData` only once its query is done, so the frame never waits. Up to 4000
   samples. Released at the end and before a device Reset (`RenderCallbacks::preReset`).
   - A column of 9 at the mouse's pixel when the recording starts (±0.7, 1.85, 3.75, 7.5% of the height: ±15, 40, 81, 162 px
@@ -108,11 +108,21 @@ Three parts measure how the light updates on screen after a lamp edit, all insid
     the mouse is outside the game or over the Apex menu (`Overlay::MouseOverMenu`: ImGui wants the mouse).
   - A grid of 6 × 4 over the screen (x 10, 26, 42, 58, 74, 90%; y 18, 38, 58, 78%, above the game's bottom bar), so a
     recording started from the menu still measures the house.
+  - 17 ground points (`GroundProfile::WatchPoints`, [`features/ground_profile.cpp`](../../../features/ground_profile.cpp)):
+    at the first frame with a camera and listed lamps, the active lot's lamp nearest the mouse's ground point is chosen,
+    and the points lie every metre from 4 m behind it to 12 m past it on the line towards that point, at its lot's
+    ground height, following the lamp as it moves. Their pixels come from the post-scene camera vote, asked for while the
+    recording runs (`PostScene::WantCamera`); a point off screen reads pixel (0, 0).
   - Copied at `RenderCallbacks::filteredSceneBeforeOverlay` (the first EndScene of the frame, right before the Apex menu
     and notices are drawn, as the report screenshot does), at Present only when no EndScene reached the overlay that frame,
     so a recording started from the open menu measures the game and not the menu's own pixels.
   - `Screen pixels.csv`: elapsed ms, then luma, r, g, b per point; the column's names carry the row offset (`luma+0` = the
-    mouse or the centre), the grid's their place in percent (`luma_x26y38`).
+    mouse or the centre), the grid's their place in percent (`luma_x26y38`), the ground points' their distance from the
+    lamp (`luma_ground+3` = 3 m past it).
+  - `Ground timeline.csv` (when a lamp was chosen; at most 4000 rows): per frame, the elapsed ms, the lamp's place, the
+    versions of the chunk under it (game map, smoothed build, re-renders, stamp version and build, stamps now), whether
+    the bake excludes the lamp, its [terrain stamp](../night-lighting/terrain-relight.md#dragged-lamps-on-the-gpu) state
+    and each ground point's pixel (-1 off screen).
 - **Room solve ends**: `FUN_006a0e00` (step 8 of the budgeted solve, its call at `0x6A3E65` in `FUN_006a3c90`, Steam,
   checked at install) unlocks the maps the solve wrote and gives them to the room, which shows them from the next frame.
   It is noted `E` in the solve journal, and during a recording the journal keeps every room (not only those sharing light
@@ -176,6 +186,7 @@ discards samples from a previous recording.
 | | `Start`, `Stop`, `Status`, `FurnitureLine`, `CameraLine` (keeps `g_views`), `Clock` | Lifecycle and lines |
 | | `LightUpdates`, `TellPoint`, `PixelCsv`, `StoryShown` | Light updates summary, `Screen pixels.csv` |
 | `features/screen_watch.h/.cpp` | `ScreenWatch::OnPresent`, `Samples`, `PointX`, `PointY`, `Width`, `Height`, `ColumnAtCentre` | Screen pixels |
+| `features/ground_profile.cpp` | `GroundProfile::WatchBegin`, `WatchPoints`, `WatchEnd`, `WatchCsv` | Ground points, `Ground timeline.csv` |
 | `features/level_light_share.cpp` | `BeginSeamRecording`, `EndSeamRecording`, `RecordRequestedSeam`, `MakeSeamRec`, `TraceRooms`, `JournalSince` | Seams, rooms, solve journal |
 | `features/lot_light_bridge.cpp` | `FurnitureTraceReset`, `FurnitureDiag`, furniture trace | `[furniture]` lines |
 | `apex_gui.cpp` | Report page row, top notice | UI |

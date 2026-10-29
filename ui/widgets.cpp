@@ -20,8 +20,8 @@ using VioletTheme::Col;
 // The text in the menu's language (i18n.h): every text a widget draws goes through these
 inline const char* T(const char* s) { return I18n::Tr(s); }
 
-constexpr unsigned kFrameBg = 0x26272D;      // the style's FrameBg (segmented track)
-constexpr unsigned kButtonBorder = 0x34353D; // secondary button border
+constexpr unsigned kFrameBg = 0x1A1B20;      // the style's FrameBg (segmented track)
+constexpr unsigned kButtonBorder = 0x212228; // secondary button border
 
 ImU32 U32(unsigned rgb, float alpha = 1.0f) { return ImGui::GetColorU32(Col(rgb, alpha)); }
 
@@ -113,6 +113,8 @@ std::string g_changeEnglish; // for the log
 // ---- next row badge ----
 const char* g_nextBadge = nullptr;
 const char* g_nextBadgeTip = nullptr;
+unsigned g_nextBadgeRgb = VioletTheme::kWarning;
+const char* g_nextDotTip = nullptr;
 
 // ---- slider drag state ----
 int g_sliderActiveFrame = -10;
@@ -190,6 +192,14 @@ void PadAfterRow(float units = kSpace2) {
     if (!FollowsRow(ImGui::GetCursorPosY())) return;
     ImGui::SetCursorPosY(g_rowEndY + units * Unit() - Spacing());
     ImGui::Dummy(ImVec2(0.0f, 0.0f));
+}
+
+// Sliders and segmented rows put their control on the right of the label, in a column of this width (pixels), when the
+// row leaves at least 160 units for the text; 0 = too narrow, the control goes under the label
+float InlineControlWidth(float rowWidth) {
+    const float u = Unit();
+    const float w = std::clamp(rowWidth * 0.42f, 180.0f * u, 280.0f * u);
+    return rowWidth - w - kSpace4 * u < 160.0f * u ? 0.0f : w;
 }
 
 // The description under a row's label: smaller, muted, wrapped at wrapX (window coordinates)
@@ -400,16 +410,21 @@ bool RowVisible(const char* label, const char* description) {
 struct RowDecor {
     const char* badge = nullptr;
     const char* badgeTip = nullptr;
+    unsigned badgeRgb = VioletTheme::kWarning;
+    const char* dotTip = nullptr; // SetNextRowChangedDot: a dot without Reset
     bool hasDefault = false;
     bool changed = false;
 };
 
-// Takes the pending SetNextRowBadge (every row consumes it, drawn or not)
+// Takes the pending SetNextRowBadge / SetNextRowChangedDot (every row consumes them, drawn or not)
 RowDecor TakeDecor() {
     RowDecor d;
     d.badge = g_nextBadge;
     d.badgeTip = g_nextBadgeTip;
-    g_nextBadge = g_nextBadgeTip = nullptr;
+    d.badgeRgb = g_nextBadgeRgb;
+    d.dotTip = g_nextDotTip;
+    g_nextBadge = g_nextBadgeTip = g_nextDotTip = nullptr;
+    g_nextBadgeRgb = VioletTheme::kWarning;
     return d;
 }
 
@@ -421,6 +436,7 @@ float DecorWidth(const RowDecor& d) {
     float w = 0.0f;
     if (d.badge) w += 6.0f * u + ChipSize(d.badge).x;
     if (d.hasDefault) w += 6.0f * u + 6.0f * u + 4.0f * u + kResetButton * u;
+    else if (d.dotTip) w += 6.0f * u + 6.0f * u;
     return w;
 }
 
@@ -430,23 +446,25 @@ void ChipImpl(const char* text, unsigned rgb);
 // Draws the decorations after the label (li) of a row spanning rowMin..rowMax (screen). True when Reset was clicked.
 // Submits items at their own positions: call it before RowFinish (which puts the cursor back).
 bool RowDecorations(const RowDecor& d, const LabelInfo& li, ImVec2 rowMin, ImVec2 rowMax) {
-    if (!d.badge && !(d.hasDefault && d.changed)) return false;
+    const bool resettable = d.hasDefault && d.changed;
+    if (!d.badge && !resettable && !d.dotTip) return false;
     const float u = Unit();
     float x = li.right + 6.0f * u;
     const float cy = li.top + li.lineH * 0.5f;
     if (d.badge) {
         const ImVec2 cs = ChipSize(d.badge);
         ImGui::SetCursorScreenPos(ImVec2(x, cy - cs.y * 0.5f));
-        ChipImpl(d.badge, VioletTheme::kWarning);
+        ChipImpl(d.badge, d.badgeRgb);
         Tooltip(d.badgeTip);
         x += cs.x + 6.0f * u;
     }
-    if (!(d.hasDefault && d.changed)) return false;
+    if (!resettable && !d.dotTip) return false;
     const float r = 3.0f * u;
     ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(x + r, cy), r, U32(VioletTheme::kAccent));
     ImGui::SetCursorScreenPos(ImVec2(x, cy - r));
     ImGui::Dummy(ImVec2(2.0f * r, 2.0f * r));
-    Tooltip("Changed from the default");
+    Tooltip(resettable ? "Changed from the default" : d.dotTip);
+    if (!resettable) return false;
     x += 2.0f * r + 4.0f * u;
     const bool rowHovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) && ImGui::IsMouseHoveringRect(rowMin, rowMax, false);
     if (!rowHovered) return false;
@@ -483,10 +501,13 @@ float Unit() {
 
 void SetNextRowUntranslated() { g_nextRaw = true; }
 
-void SetNextRowBadge(const char* text, const char* tooltip) {
+void SetNextRowBadge(const char* text, const char* tooltip, unsigned rgb) {
     g_nextBadge = text;
     g_nextBadgeTip = tooltip;
+    g_nextBadgeRgb = rgb;
 }
+
+void SetNextRowChangedDot(const char* tooltip) { g_nextDotTip = tooltip; }
 
 void BeginFilter(const char* query) {
     g_filter.active = true;
@@ -584,6 +605,22 @@ void GroupLabel(const char* text) {
     SectionLabelText(text, 0.0f, 3.0f * Unit());
 }
 
+void CardGroup(const char* text) {
+    if (Hidden()) return;
+    const float u = Unit();
+    const float startX = ImGui::GetCursorPosX();
+    ImGui::SetCursorPos(ImVec2(startX, RowTop()));
+    PushSized(nullptr, kSmallScale);
+    ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kTextMuted));
+    const std::string_view shown = I18n::TrLabel(text);
+    ImGui::TextUnformatted(shown.data(), shown.data() + shown.size());
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    // The first row starts right under the label: not a row end, so it draws no divider of its own
+    ImGui::SetCursorPos(ImVec2(startX, LocalY(ImGui::GetItemRectMax().y) + kSpace2 * u - ImGui::GetStyle().ItemSpacing.y));
+    ImGui::Dummy(ImVec2(0.0f, 0.0f));
+}
+
 void IconNote(IconId icon, const char* text, unsigned rgb) {
     if (Hidden()) return;
     text = T(text);
@@ -600,7 +637,7 @@ void IconNote(IconId icon, const char* text, unsigned rgb) {
     const float h = std::fmax(ts.y, lineH) + 2.0f * padY;
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(p, ImVec2(p.x + width, p.y + h), U32(rgb, 0.10f), 6.0f * u);
+    dl->AddRectFilled(p, ImVec2(p.x + width, p.y + h), U32(rgb, 0.10f), 10.0f * u);
     if(ts.y <= lineH + 0.5f) {
         const float cy=p.y+h*0.5f;
         DrawIcon(dl,icon,ImVec2(p.x+padX,cy-s*0.5f),s,U32(rgb));
@@ -736,6 +773,7 @@ bool SwitchRow(const char* label, bool* v, const char* tooltip, BoolDefault def,
 }
 
 bool BeginControlRow(const char* label, const char* description, float controlsWidth, IconId icon, float controlsHeight) {
+    const RowDecor d = TakeDecor();
     if (!RowVisible(label, description)) return false;
     g_inControlRow = true;
     const float u = Unit();
@@ -751,7 +789,11 @@ bool BeginControlRow(const char* label, const char* description, float controlsW
     const float iconBox = 22.0f * u;
     const float textX = startX + (hasIcon ? iconBox + kSpace3 * u : 0.0f);
     ImGui::SetCursorPos(ImVec2(textX, top));
-    const float rowH = std::fmax(RowText(label, description, std::fmax(wrapX, textX + 40.0f * u), -1.0f, nullptr, stacked ? 0.0f : minimumHeight), stacked ? 0.0f : minimumHeight);
+    const float textWrapX = std::fmax(wrapX, textX + 40.0f * u);
+    LabelInfo li;
+    const float rowH = std::fmax(RowText(label, description, textWrapX, std::fmax(textWrapX - DecorWidth(d), textX + 40.0f * u), &li,
+                                         stacked ? 0.0f : minimumHeight), stacked ? 0.0f : minimumHeight);
+    RowDecorations(d, li, ToScreen(startX, top), ToScreen(startX + width, top + rowH)); // no Reset: hasDefault is never set here
     if (hasIcon) {
         const float size = kIconMedium * u;
         DrawIcon(ImGui::GetWindowDrawList(), icon,
@@ -867,7 +909,7 @@ bool IconButtonImpl(const char* id, IconId icon, const char* tooltip, bool activ
     const bool hovered = ImGui::IsItemHovered(), held = ImGui::IsItemActive();
     Tooltip(tooltip);
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    if (hovered || held) dl->AddRectFilled(p, ImVec2(p.x + s, p.y + s), U32(held ? VioletTheme::kToggleOff : VioletTheme::kSelectedBg), 6.0f * u);
+    if (hovered || held) dl->AddRectFilled(p, ImVec2(p.x + s, p.y + s), U32(held ? VioletTheme::kToggleOff : VioletTheme::kSelectedBg), 8.0f * u);
     const ImU32 col = active ? U32(VioletTheme::kAccent) : hovered ? U32(VioletTheme::kText) : U32(VioletTheme::kTextMuted);
     const float is = (sizeUnits >= 24.0f ? kIconMedium : kIconSmall) * u;
     DrawIcon(dl, icon, ImVec2(p.x + (s - is) * 0.5f, p.y + (s - is) * 0.5f), is, col);
@@ -947,7 +989,7 @@ bool DrawButton(const char* label, IconId icon, const char* tooltip, ButtonKind 
         textCol = U32(0xFFFFFF);
         iconCol = U32(0xFFFFFF);
     } else {
-        const ImVec4 fill = held ? Col(VioletTheme::kAccentDark, 0.35f) : hovered ? Col(0x2A2B33) : Col(VioletTheme::kSelectedBg);
+        const ImVec4 fill = held ? Col(VioletTheme::kAccentDark, 0.35f) : hovered ? Col(0x222329) : Col(VioletTheme::kSelectedBg);
         dl->AddRectFilled(p, q, ImGui::GetColorU32(fill), r);
         dl->AddRect(p, q, hovered || held ? U32(VioletTheme::kAccent) : U32(kButtonBorder), r, 0, 1.0f);
         textCol = U32(VioletTheme::kText);
@@ -1044,7 +1086,7 @@ bool SidebarItem(IconId icon, const char* label, bool selected, bool collapsed) 
         Tooltip(label);
         ImDrawList* dl = ImGui::GetWindowDrawList();
         const ImVec2 q(p.x + size.x, p.y + size.y);
-        const float rounding = kSpace2 * u;
+        const float rounding = 10.0f * u;
         if (selected) {
             dl->AddRectFilled(p, q, U32(VioletTheme::kSelectedBg), rounding);
             dl->AddRectFilled(ImVec2(p.x, p.y + kSpace2 * u), ImVec2(p.x + 3.0f * u, q.y - kSpace2 * u), U32(VioletTheme::kAccent), 1.5f * u);
@@ -1061,7 +1103,7 @@ bool SidebarItem(IconId icon, const char* label, bool selected, bool collapsed) 
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 q(p.x + size.x, p.y + size.y);
-    const float rounding = kSpace2 * u;
+    const float rounding = 10.0f * u;
     if (selected) {
         dl->AddRectFilled(p, q, U32(VioletTheme::kSelectedBg), rounding);
         dl->AddRectFilled(ImVec2(p.x, p.y + kSpace2 * u), ImVec2(p.x + 3.0f * u, q.y - kSpace2 * u), U32(VioletTheme::kAccent), 1.5f * u);
@@ -1234,7 +1276,7 @@ bool Segmented(const char* id, int* current, const char* const* labels, int coun
         // One row on a rounded track; the segments share the whole width
         const float extra = (avail - natural) / static_cast<float>(count);
         const ImVec2 origin = ImGui::GetCursorScreenPos();
-        dl->AddRectFilled(origin, ImVec2(origin.x + avail, origin.y + h), U32(kFrameBg), 6.0f * u);
+        dl->AddRectFilled(origin, ImVec2(origin.x + avail, origin.y + h), U32(kFrameBg), 10.0f * u);
         for (int i = 0; i < count; i++) {
             if (i > 0) ImGui::SameLine(0.0f, 0.0f);
             segment(i, ImVec2(widths[i] + extra, h), 5.0f * u);
@@ -1244,7 +1286,7 @@ bool Segmented(const char* id, int* current, const char* const* labels, int coun
         ImGui::PushStyleVarY(ImGuiStyleVar_ItemSpacing, 2.0f * u);
         for (int i = 0; i < count; i++) {
             const ImVec2 p = ImGui::GetCursorScreenPos();
-            dl->AddRectFilled(p, ImVec2(p.x + avail, p.y + h), U32(kFrameBg), 5.0f * u);
+            dl->AddRectFilled(p, ImVec2(p.x + avail, p.y + h), U32(kFrameBg), 9.0f * u);
             segment(i, ImVec2(avail, h), 5.0f * u);
         }
         ImGui::PopStyleVar();
@@ -1263,12 +1305,29 @@ bool SegmentedRow(const char* label, const char* description, const char* id, in
     const float startX = ImGui::GetCursorPosX();
     const float width = ImGui::GetContentRegionAvail().x;
     const float top = RowTop();
+    // On the right of the label when the choices fit the control column at their natural width
+    float ctrlW = InlineControlWidth(width);
+    if (ctrlW > 0.0f) {
+        const float padX = ImGui::GetStyle().FramePadding.x;
+        float natural = 0.0f;
+        for (int i = 0; i < count; i++)
+            natural += ImGui::CalcTextSize(T(labels[i])).x + 2.0f * padX +
+                       (icons && icons[i] != IconId::None ? (VioletTheme::kControlIcon + VioletTheme::kControlIconGap) * u : 0.0f);
+        if (natural > ctrlW) ctrlW = 0.0f;
+    }
+    const float textRight = ctrlW > 0.0f ? startX + width - ctrlW - kSpace4 * u : startX + width;
     ImGui::SetCursorPos(ImVec2(startX, top));
     LabelInfo li;
-    RowText(label, description, startX + width, std::fmax(startX + width - DecorWidth(d), startX + 40.0f * u), &li);
+    const float textH = RowText(label, description, textRight, std::fmax(textRight - DecorWidth(d), startX + 40.0f * u), &li);
     ImGui::PushID(label);
+    float rowBottom = 0.0f;
+    if (ctrlW > 0.0f) {
+        const float rowH = std::fmax(textH, ImGui::GetFrameHeight());
+        ImGui::SetCursorPos(ImVec2(startX + width - ctrlW, top + (rowH - ImGui::GetFrameHeight()) * 0.5f));
+        rowBottom = top + rowH;
+    }
     bool changed = Segmented(id, current, labels, count, tooltips, false, icons);
-    const float bottom = LocalY(ImGui::GetItemRectMax().y);
+    const float bottom = std::fmax(LocalY(ImGui::GetItemRectMax().y), rowBottom);
     const ImVec2 rowMin = ToScreen(startX, top);
     if (RowDecorations(d, li, rowMin, ImVec2(rowMin.x + width, ToScreen(startX, bottom).y))) {
         *current = defaultIndex;
@@ -1437,10 +1496,18 @@ bool Slider(const char* label, float* v, float min, float max, const SliderOptio
     const float swatchS = o.swatch ? lineH * 0.7f : 0.0f;
     const float swatchW = o.swatch ? swatchS + 6.0f * u : 0.0f;
     const float right = lineP.x + width;
-    if (o.swatch)
-        dl->AddRectFilled(ImVec2(right - valueW - swatchW, lineP.y + (lineH - swatchS) * 0.5f), ImVec2(right - valueW - swatchW + swatchS, lineP.y + (lineH + swatchS) * 0.5f),
-                          WithStyleAlpha(o.swatch), 3.0f * u);
-    dl->AddText(ImVec2(right - valueW, lineP.y), U32(VioletTheme::kTextMuted), value);
+    // Wide rows: the track and its value on the right of the label (InlineControlWidth); narrow ones keep the track
+    // under the label with the value on the label's line
+    const float ctrlW = InlineControlWidth(width);
+    const bool inl = ctrlW > 0.0f;
+    auto drawValue = [&](float y) {
+        if (o.swatch)
+            dl->AddRectFilled(ImVec2(right - valueW - swatchW, y + (lineH - swatchS) * 0.5f), ImVec2(right - valueW - swatchW + swatchS, y + (lineH + swatchS) * 0.5f),
+                              WithStyleAlpha(o.swatch), 3.0f * u);
+        dl->AddText(ImVec2(right - valueW, y), U32(VioletTheme::kTextMuted), value);
+    };
+    if (!inl) drawValue(lineP.y);
+    const float textRight = inl ? startX + width - ctrlW - kSpace4 * u : startX + width;
 
     // Label (after the optional icon), the description under it
     float textX = startX;
@@ -1455,22 +1522,36 @@ bool Slider(const char* label, float* v, float min, float max, const SliderOptio
         const std::string_view shown = g_rowRaw ? std::string_view(label, VisibleEnd(label) - label) : I18n::TrLabel(label);
         ImGui::BeginGroup();
         ImGui::PushStyleVarY(ImGuiStyleVar_ItemSpacing, 2.0f * u);
-        ImGui::PushTextWrapPos(std::fmax(startX + width - valueW - swatchW - kSpace3 * u - DecorWidth(d), textX + 40.0f * u));
+        ImGui::PushTextWrapPos(std::fmax(inl ? textRight - DecorWidth(d) : startX + width - valueW - swatchW - kSpace3 * u - DecorWidth(d), textX + 40.0f * u));
         ImGui::TextWrapped("%.*s", static_cast<int>(shown.size()), shown.data());
         li.right = ImGui::GetItemRectMax().x;
         li.top = ImGui::GetItemRectMin().y;
         li.lineH = lineH;
         ImGui::PopTextWrapPos();
-        RowDescription(o.tooltip, startX + width);
+        RowDescription(o.tooltip, textRight);
         ImGui::PopStyleVar();
         ImGui::EndGroup();
     }
+    const float textBottom = LocalY(ImGui::GetItemRectMax().y);
 
     // The stock slider does the input (drag, keyboard, deactivate-after-edit); only its look is replaced
-    ImGui::SetCursorPosX(startX);
+    const bool endLabels = o.leftLabel || o.rightLabel;
+    float trackW = width, rowBottom = 0.0f;
+    if (inl) {
+        PushSized(nullptr, kSmallScale);
+        const float endH = endLabels ? ImGui::GetFontSize() : 0.0f;
+        ImGui::PopFont();
+        const float blockH = ImGui::GetFrameHeight() + endH;
+        const float rowH = std::fmax(textBottom - top, blockH);
+        trackW = std::fmax(ctrlW - valueW - swatchW - kSpace3 * u, 60.0f * u);
+        ImGui::SetCursorPos(ImVec2(startX + width - ctrlW, top + (rowH - blockH) * 0.5f));
+        rowBottom = top + rowH;
+    } else {
+        ImGui::SetCursorPosX(startX);
+    }
     const ImGuiCol hidden[] = {ImGuiCol_FrameBg, ImGuiCol_FrameBgHovered, ImGuiCol_FrameBgActive, ImGuiCol_SliderGrab, ImGuiCol_SliderGrabActive};
     for (ImGuiCol c : hidden) ImGui::PushStyleColor(c, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-    ImGui::SetNextItemWidth(width);
+    ImGui::SetNextItemWidth(trackW);
     bool changed = ImGui::SliderFloat("##Slider", v, min, max, "", ImGuiSliderFlags_NoInput | ImGuiSliderFlags_AlwaysClamp);
     ImGui::PopStyleColor(IM_COUNTOF(hidden));
     g_lastSliderCommitted = ImGui::IsItemDeactivatedAfterEdit();
@@ -1510,6 +1591,7 @@ bool Slider(const char* label, float* v, float min, float max, const SliderOptio
     const float grabR = std::fmax(ImGui::GetStyle().GrabMinSize * 0.5f, 6.0f * u) + (active ? 1.0f : hovered ? 0.5f : 0.0f) * u;
     if (o.hueTrack || (o.trackFrom && o.trackTo)) dl->AddCircle(ImVec2(gx, cy), grabR + 1.0f * u, U32(0x000000, 0.35f), 0, 1.5f * u); // readable on light colours
     dl->AddCircleFilled(ImVec2(gx, cy), grabR, U32(0xFFFFFF));
+    if (inl) drawValue(cy - lineH * 0.5f); // right of the track, centred on it
 
     // End labels under the track
     if (o.leftLabel || o.rightLabel) {
@@ -1517,7 +1599,7 @@ bool Slider(const char* label, float* v, float min, float max, const SliderOptio
         PushSized(nullptr, kSmallScale);
         const float fs = ImGui::GetFontSize();
         ImGui::SetCursorScreenPos(ImVec2(a.x, b.y));
-        ImGui::Dummy(ImVec2(width, fs));
+        ImGui::Dummy(ImVec2(trackW, fs));
         const ImU32 col = U32(VioletTheme::kTextMuted);
         // Long translations of the two end labels must not run into each other: when both do not fit with a gap,
         // each gets half the track and is cut with "…" (full text on hover)
@@ -1542,7 +1624,7 @@ bool Slider(const char* label, float* v, float min, float max, const SliderOptio
         }
         ImGui::PopFont();
     }
-    const float bottom = LocalY(ImGui::GetItemRectMax().y);
+    const float bottom = std::fmax(LocalY(ImGui::GetItemRectMax().y), rowBottom);
     if (g_lastSliderCommitted) ReportLabel(label, "{} changed");
     const ImVec2 rowMin = ToScreen(startX, top);
     if (RowDecorations(d, li, rowMin, ImVec2(rowMin.x + width, ToScreen(startX, bottom).y))) {
@@ -1592,7 +1674,7 @@ bool BeginCard(const char* id, bool warning) {
     }
     ImGui::PushStyleColor(ImGuiCol_ChildBg, background);
     ImGui::PushStyleColor(ImGuiCol_Border, border);
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 10.0f * u);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 16.0f * u);
     ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(kSpace4 * u, kSpace3 * u));
     // Wheel scrolling goes on to the page (the card never scrolls itself)

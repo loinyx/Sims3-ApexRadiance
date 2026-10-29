@@ -27,6 +27,11 @@ an FPS gain, complete climate coverage or resolution of texture allocation stall
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-29 | `06a3258` | `tools/lighting_prepare_test` with the overlapped-end rule and `Wall::pass` (built as a DLL) | 36 geometry cases exactly equal to the reference gap search; 16 map slots and 144 wall blur cases pass | CPU, x86 /O2 |
+| 2026-10-29 | `59201ad` | One-off timing of `FenceCutout::OpenShare` on random DXT5 levels (built as a DLL) | 0.73 ms a decode at 256 x 256, 2.70 ms at 512 x 512: the share is kept per texture and decoded again only when its size, format or sampled bytes change | CPU, x86 /O2 |
+| 2026-10-29 | `d8501f2` | `tools/ground_shade_test` with `-Reference v2.17.2` (built as a DLL: new executables were blocked on the test machine) | 248 checks, 0 failures: with solid walls (`pass` 0) the lot build gives the bytes of `v2.17.2`, soft and hard, turned and not; build time unchanged (3.05 ms against 3.05 ms) | CPU, x86 /O2 |
+| 2026-10-29 | `6f12188` (mesh fence open share) | `tools/floor_shade_check` (`run.ps1`) with the fence cutout checks | 10,982 checks, 0 failures: `FindCutout` traces all 59 instanced cutout pixel shaders of the precomp; `OpenShare` gives 0.5 on a half-open texture in DXT1, DXT3, DXT5 and A8R8G8B8; a wall with `pass` 0.8 passes 0.8 in the hard and soft tests | CPU fixtures, D3DCompiler on the precomp |
+| 2026-10-29 | `d8501f2` (developer build) | Developer log of the lot shade's time to screen, fence edits and lamp drags beside a brick fence | 388 shade updates: median 233 ms, 90th percentile 266 ms from a change of the inputs to the mask at a draw; 1 to 30 ms on the worker; the fence grid lists only the real gap of the test fence | In game, DXVK |
 | 2026-10-27 | `47ec493` (release 2.16.0 candidate; the outdoor scale and its shade) | `fxc /T ps_3_0` on `kReplacementHlsl` (dry and `WET`); `tools/rt_lamps_test` | both compile; the scale gives back the sum's largest channel within 0.41 % on 5,427 texels past 1, colour unchanged on 26,214. In game: the courtyard ground past 1 (F7 "outdoor scale: on"); the strip behind the screen wall after the shade change not yet seen | Native D3D9 (offline device) |
 | — | `v2.15.6` (implementation `f66e777`) | `world_terrain_layout_test; lighting_prepare_test` | 405 package terrain pairs checked; exact gap and cell results; unknown or capacity-limited paths retain fallback | CPU fixtures; native D3D9 shader creation |
 | 2026-10-23 | `40f351e` | `tools/ground_shade_test` (`run.ps1`) | 240 checks, 0 failures: the whole chunk gives the bytes it gave before; after each of 240 random lot changes (added, moved, reshaded, gone, turned grids, over the chunk's edges) and then every lot gone, `ChunkUpdate` gives `ChunkFull`'s bytes at every mip; the lot build's mask and stamp weight equal the previous header's on a synthetic 40 m lot | CPU harness |
@@ -63,6 +68,12 @@ at ps_2_0 it had no c32 and failed since the lot shade's mask rows moved there.
 
 ## Confirmed in game
 
+- 2026-10-29, developer build of `d8501f2`: adding and removing brick fence pieces and dragging a lamp beside them update
+  the ground shade without the earlier half-second steps; rare stalls reported before the 100 ms checks (player report).
+- 2026-10-29, developer build of `ee3cc46`, F7 on a brick garden wall: its instanced draw's pixel shader (`PS_A2C73090`,
+  diffuse 512 x 256 DXT1) has no `texkill`, so `FindCutout` finds no cutout and its walls pass no light, as before the
+  mesh fence share. The two 256 x 256 DXT5 cutout textures with an open share of 0.258 in that scene belong to another
+  fence's shader.
 - Combined build (notes section 1): the lot pass with `max(lot, terrain)` removes the straight cut.
 - 2026-10-02, terrain-variant build `C1257AF49C613DF227B5EBAD639D795665D77E378A0FB3744DB948AFA0883B39`: the reported lot/world
   cutoff resolved in the tested scene (observed in game, no new GPU comparison). The earlier lamp-off package
@@ -70,6 +81,15 @@ at ps_2_0 it had no c32 and failed since the lot shade's mask rows moved there.
 
 ## Open checks
 
+- Mesh fences: a fence that looks solid but is drawn with a cutout shader. **Expected:** its shadow as dark as a wall's.
+  The share covers the whole texture, so unused transparent texels around the fence's own area would let light through;
+  not seen yet (the brick garden wall has no cutout).
+- A fence opening in front of a lamp (brick fence, lamp 1.5 m behind the gap). **Expected:** the lamp's light on the
+  ground in front of the gap. An offline build of the shade with the logged pieces gives the beam (194 to 255 in front
+  of the gap); a screenshot of the scene before the gap fixes showed that ground as dark as the shadow. Not checked again
+  since.
+- A fence type removed whole. **Expected today:** its shadow stays up to 20 s (no new group replaces it).
+- The cost of the 100 ms shade input checks per drawn lot has not been measured.
 - 2.15.3: a fence lit by one garden post on grass and on snow. **Expected:** the shadow behind it ends where the post's light on the ground ends and is never darker than the ground no lamp of the lot reaches.
 - 2.15.3: a closed gate in a fence line beside a garden post, after shade updates, after a few minutes on screen and after the camera returns. **Expected:** no light through the gate; gaps under 0.4 m closed; developer log lines for the gaps and gates.
 - 2.15.3: a lot's shade after a wall or lamp change. **Expected:** the lot and the world grass beside it change in the same frame (no seam at the lot's edge), the lot nearest the camera first; the developer log's time to show is plausible.

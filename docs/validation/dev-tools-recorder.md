@@ -40,3 +40,7 @@ The feature is described in [features/dev-tools/recorder.md](../features/dev-too
 - `Wall seams.csv` in game: confirm samples appear on an atrium house and that their values match the seam seen on
   screen.
 - No menu control calls `RequestStop` or `RequestCancel`; cancellation is exercised only by the offline check.
+- Ground points (`91af563`): a recording started with the mouse on the grass past a lot's edge, Lamp lighting Instant,
+  while a lot lamp is dragged. **Expected:** `Ground timeline.csv` follows the lamp (its place, the chunk's versions,
+  `excluded` 1 and a stamp state while dragged, back to 0 after the release) and `Screen pixels.csv` has 17
+  `luma_ground` columns whose pixels move with the lamp. Not yet seen in a recording.

@@ -54,3 +54,16 @@ outside them): the deck passed the ground gate, read that 1 as indoor light and 
 **Outcome:** the floors keep the plain patch (`kFloorIndoorLight` off, `40f351e`); the lot pass and the snowy lot passes,
 which draw story 0 only, still add the indoor light. A review fix then keeps alpha 0 under every story-0 floor
 tile, so the floors' `1 - alpha` atlas weight no longer takes the garden lamps' light off patios and paths.
+
+### 2026-10-29: weather variants of the winter floors
+
+**Context:** a patio compared in dry weather and in rain at night.
+
+**Finding:** 96 of the 104 pixel shaders drawn with the winter floor vertex shaders in the precomp are weather variants
+that `PatchFloor`'s pattern did not take: their map is read from another input or sampler and reaches the lamp scale
+through the usual factor or directly. The
+game drew them at its own lamp scale, and rain turned the patio 3.8 times brighter. Two of them use every sampler.
+
+**Outcome:** `PatchFloor` takes the weather layouts; the two with no free sampler keep the game's bytes and take only the
+floor's lamp-scale gain (`91af563`). `tools/floor_shade_check` now fails if any winter floor pixel shader of the precomp
+is left unpatched. Not yet checked in game.

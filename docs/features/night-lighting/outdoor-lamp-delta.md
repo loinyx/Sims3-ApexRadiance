@@ -9,7 +9,7 @@ takes its base from the parts kept here ([Real-time outdoor lamps](rt-outdoor-la
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0, as part of Performance > Lamp lighting > Instant (GPU) |
+| Availability | Released in 2.13.0, as part of Performance > Lamp lighting > Instant (GPU) Released in 2.18.0: a refused delta keeps the story's record as the GPU base. |
 | Default | On (Lamp lighting: Instant (GPU)); with Classic every room 0 is solved in full |
 | Menu | No switch of its own (System > Performance > Lamp lighting); its check: Developer > Lighting > Compare lighting paths > Check quick lamp edits |
 | Configuration | `lampLightingMode`, `outdoorLampDeltaCheck` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -71,6 +71,10 @@ thread.
   time the kept parts pass 85% of the ceiling, split into samples, texels, baked lights' parts, drawn parts and sums;
   Developer > Tester > Frame time shows *Instant (GPU) kept data* (MB kept / ceiling, rooms).
 - While a lamp is edited, a delta with more than 200 batches to solve again is refused: the room takes its full solve.
+  After such a refusal, or one for more than eight lights changed, the room's record stays as Real-time outdoor lamps'
+  base only, marked stale, so its story keeps the GPU's lamps until that solve ends: no delta, direct lot update or
+  self-check uses it, and the solve's own parts replace it, or it is erased when they cannot be kept. A change of the
+  walls, floors or openings, or of the lighting options, erases it at once.
 - (2.15.3) With *Indoor light adds to the ground* active, a delta whose changed light is a roofed room's lamp that story 0's
   room 0 took through an opening is refused: the ground texels' alpha holds that lamp's light too
   ([level-light-share](level-light-share.md#indoor-light-on-the-ground)).
@@ -85,7 +89,7 @@ thread.
 | Maps written outside a solve | `[0x011D0508]` = 0, the lock step `0x0069FA40`, then `0x006A8CA0` / `0x0069EFC0`, `0x0069E950(1)`, `0x006A08E0` |
 | Delta in the lock step | `LockStepHook` -> `OutdoorDelta::AtLockStep`; returning 0 at `0x006A3D2B` sends the solve to its finalize |
 | Validity | the room and class, the lighting options (`LevelLightShare::PhysicsKey`), the lot's geometry (`LotGeometryKey`), the threshold and wall mode, the maps' textures and sizes |
-| Log | `[OutdoorDelta]` lines per delta, per full solve and per edit |
+| Log | `[OutdoorDelta]` lines per delta, per full solve and per edit; a solve whose parts are not kept names the key that changed during it (walls, floors or openings; the light rules, `PhysicsKey`; the lighting options) |
 | Offline check | `tools/outdoor_delta_test/run.ps1` (deltas against full solves of a model) |
 
 ## See also

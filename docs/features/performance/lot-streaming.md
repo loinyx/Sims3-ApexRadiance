@@ -84,8 +84,8 @@ the [validation page](../../validation/performance-lot-streaming.md#latest-resul
 | Keep lot visibility stable (Experimental) | `[patches.LotVisibilityOverride] enabled` | bool | off | | Lots in full detail keep it about 11% farther, so lots at the edge stop switching back and forth |
 | Pause lot streaming in map view (Experimental) | `[patches.MapViewStreamingBlocker] enabled` | bool | off | | No lot detail streaming while the map view is open |
 | Spread lot objects while loading (Experimental) | `[patches.LotObjectThrottle] enabled` | bool | off | | Builds a lot's objects a few at a time |
-| Objects per lot window (shown while on) | `[patches.LotObjectThrottle] objectsPerLot` | int | 2 | 1 to 64 | Regular objects built per window; 2 matches Sims3SettingsSetter |
-| Delay between lot windows (shown while on) | `[patches.LotObjectThrottle] delayMs` | int | 16 ms | 0 to 500 ms | Minimum wait between two windows of the same lot |
+| Objects per step (shown while on) | `[patches.LotObjectThrottle] objectsPerLot` | int | 2 | 1 to 64 | Regular objects built per window; 2 matches Sims3SettingsSetter |
+| Delay between steps (shown while on) | `[patches.LotObjectThrottle] delayMs` | int | 16 ms | 0 to 500 ms | Minimum wait between two windows of the same lot |
 | (no menu row) | `[patches.LotActiveThreshold] enabled` | bool | off | | EA app build only: sets the internal transition threshold "Throttle Lot LoD Transitions Max Active Lot Threshold" to 12, as Sims3SettingsSetter does. Not Max Active Lots |
 
 A missing key reads as off. None of these switches is part of a profile part, and the built-in profiles leave them as

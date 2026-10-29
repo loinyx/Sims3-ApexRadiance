@@ -12,7 +12,7 @@ their own story. Part of [Night Lighting](README.md).
 |---|---|
 | Availability | Missing outdoor gather entries restored: Released in 2.15.5.  Outdoor and indoor light between stories: Released (present since 2.1.0, the first version in this repository). Indoor light through openings across more than one floor, the raised-room wall veto, structure-change refresh and the *Wall seams.csv* recording: Released in 2.6.0. Walls block light on floors and objects, indoor objects lit by lamps of another story and an atrium's stories changing together, and the lit story's wall test from where an outdoor lamp's ray enters it (upper half walls): Released in 2.7.0. Placed floors of balconies and upper stories block a lamp below them (walls, floors, windows, objects, fences) and *Buildings block light on objects* (was *Walls block light on objects*): Released in 2.12.3. Lighting corrections: Released in 2.12.1. Outdoor light through openings into roofed rooms (garden lamps of the story below included), indoor light through openings, *Doors block light*, lamp light through openings in the outside walls' copies and room 0's own wall test, *Walls shade lamp light near the ground*, *Buildings block lamp light on trees and objects*, *Shadow softness*, walls ending at a floor above: Released in 2.13.0. Closed-floor support-row guards, walls of the lamp's own story for light through floor openings, hard wall tops under a ceiling, floor-level sills without a soft rim, and indoor light independent of the camera: Released in 2.14.0. *Indoor light adds to the ground*, pane-sized windows, ceiling lamps kept out of closed rooms above, story boundaries at tile floors and gables sampled from their drawn foot: Released in 2.15.3. Adjacent gable samples stay consistent; short pillar blockers use their measured top, and verified floor tiles under emitters cast per-lamp soft shadows on instanced structures: Released in 2.15.4. Per-key outdoor queue recovery and exact lamp evaluation optimisation: Released in 2.15.6. Outdoor lamps through openings at the outdoor scale and cut, falling off from the opening and fading into the room; windows kept by the window built; lamp edits sending the rooms behind openings: Released in 2.16.0. A roofed room's own lamps tested against the story's walls in the directional maps: Released in 2.17.1. |
 | Default | On (every switch; *Light through doors and windows* follows `kRealisticOpeningsDefault` in `build_flavor.h`, on) |
-| Menu | Lighting > Stories (*Wall lamps at the right height*, *Seamless walls between floors* and *Every floor in full detail* under the folded *Game fixes*); Lighting > Buildings > Rooms at Night (group LAMP LIGHT: *Outdoor light through openings*, *Indoor light through openings*, *Indoor light adds to the ground*, *Doors block light*; then *Shadow softness*, and *Smooth light maps* under *Game fixes*); Lighting > Objects (*Buildings block lamp light on trees and objects*); Lighting > Ground (*Walls shade lamp light near the ground*) |
+| Menu | Lighting > Game fixes > Stories (*Wall lamps at the right height*, *Seamless walls between floors*, *Every floor in full detail*, *Smooth light maps*); Lighting > Inside & floors > Stories; Lighting > Inside & floors > Rooms at Night (group *Lamp light*: *Outdoor light through openings*, *Indoor light through openings*, *Indoor light adds to the ground*, *Doors block light*; then *Shadow softness*); Lighting > Outside > Objects (*Buildings block lamp light on trees and objects*); Lighting > Outside > Ground & Lots (*Walls shade lamp light near the ground*) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/level_light_share.cpp`](../../../features/level_light_share.cpp), [`features/lamp_visibility.h`](../../../features/lamp_visibility.h), [`features/lamp_mark_filter.cpp`](../../../features/lamp_mark_filter.cpp), [`features/room_ambient_policy.h`](../../../features/room_ambient_policy.h), driven by [`patches/night_terrain_relight_patch.cpp`](../../../patches/night_terrain_relight_patch.cpp) |
 
@@ -100,7 +100,7 @@ Before each native room update, an active, lit outdoor room 0 waiting for a gath
 
 All are applied live (`LevelLightShare::Install`/`Uninstall`, `SetIndoor`, `SetWallAlign`, `SetAllFloors`,
 `SetObjectWalls`, `SetRealisticOpenings`, `SetOutdoorThroughOpenings`, `SetDoorsBlockLight`, `SetIndoorThroughOpenings`) and reset to their defaults (all on). There is no strength: borrowed lamps keep the game's weight. The module is installed only while Night
-Lighting is on. The *Lighting > Stories* card also hosts *Every-Story Ground Light* (`SplitLevelGroundLight`), a separate
+Lighting is on. The *Lighting > Inside & floors > Stories* card also hosts *Every-Story Ground Light* (`SplitLevelGroundLight`), a separate
 patch.
 
 ## Compatibility and interactions
@@ -126,7 +126,7 @@ patch.
 - **Sims3SettingsSetter Lighting Quality** (detour of `LightPointWithAllLights` at `0x0069FD60`, original called N times
   on jittered samples): no byte overlap (Apex redirects the call sites, and the return address `0x0069FE19` still
   matches inside the re-entered body), but the cross-story wall tests then run N times.
-- **Refresh the lighting** (Lighting > Buildings, shortcut) and the automatic refresh after any lighting setting relight
+- **Refresh the lighting** (Lighting > Inside & floors > Rooms at Night, shortcut) and the automatic refresh after any lighting setting relight
   every room of every loaded lot, basements included.
 - **Daytime curve** (2.12.3, [day-bloom-fixes.md](day-bloom-fixes.md)): in the solves of a roofed room (id > 0,
   `room+0x18` = 0), an outdoor lamp (a street lamp, type 11, or a lot lamp of room 0 with flag `0x04`) takes
@@ -776,14 +776,14 @@ floor mask.
   only borrowed lamps (other stories' or these) gets no boost.
 - **At the outdoor scale** ([`opening_lamp_balance.h`](../../../features/opening_lamp_balance.h)): outside, the same lamp
   is drawn from room 0's map, its sum divided by its largest channel past 1, times the outdoor surface's brightness (the lot pass: *Ground
-  brightness* x *Lot lamp brightness*; outside walls: the walls' *Brightness*), and room 0 is not normalised. Inside, the
+  light*; outside walls: the walls' *Brightness*), and room 0 is not normalised. Inside, the
   room solve summed it whole, with no cut before the room's curve, and the room's normalisation multiplied it. A light
   capture of a green sconce (intensity 1.7, colour (0, 1, 0), a story-0 room-0 lamp listed twice) beside a courtyard: the
   kitchen behind its glass door showed 0.808 on screen, the courtyard at the same distance at most 0.567 of its map.
   Each entry of such a lamp is now held under 1 / its entries at its largest channel, its hue kept (the outdoor cut,
   taken at the opening it came in by: *The cut at the opening* below), then takes the opening's
-  share and glass, then the outdoor scale: floors, ceilings and the directional maps the ground's (`Ground brightness x
-  Lot lamp brightness` while *Street lamps light lots* is on, else 1), wall texels the walls' (*Lamps light walls* on,
+  share and glass, then the outdoor scale: floors, ceilings and the directional maps the ground's (the gain of *Ground
+  light* while *Street lamps light lots* is on, else 1), wall texels the walls' (*Lamps light walls* on,
   else 1), over the room's normalisation (`InnerLight::NormScale(1, room+0x160)`; the directional maps take no
   normalisation factor, as whether the game normalises them is not read). Offline (`tools/roofed_openings_test`) the
   kitchen pixel replayed through the room solve's curve and the room-lit floor shader's (PS `44ECECA0`, `c2.z` 4.2) was
@@ -1282,7 +1282,7 @@ Source: `level_light_share.cpp` `InnerNormScaleAt`, `BasisLightHook`, `InnerPass
   room solve gives both sides the same law (room 2's normalisation was 1.000, no boost, and the lamp was an outdoor
   lamp, not *Indoor light through openings*). The step at the arch comes from the 8-bit map clipping the sum at 1 (4 to
   5 within 3 m of that post) and from the surface shaders: interior floors apply the tanh curve (gain about 1.35 to 1.46)
-  while outdoor floors and lot grass take `c3.x` x *Ground brightness* (and *Lot lamp brightness*). A factor between them
+  while outdoor floors and lot grass take `c3.x` x *Ground light*. A factor between them
   would be an artistic share, not physics. Unverified: which map (the GPU relight or the game's solve) the outside showed
   at the capture, since that capture's Instant mode kept dropping the active lot's kept parts (over the 128 MB budget) and
   sending its room 0s back to the game's solve.

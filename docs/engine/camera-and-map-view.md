@@ -22,6 +22,8 @@ Consumers in Apex Radiance:
 - **Edge Smoothing**: "Edges from depth" reads `PostScene::CameraNear()` and `CameraDepthA()` (fallback near 0.25) to
   linearise depth; it does not request the camera vote itself.
 - **Reflections**: water depth linearisation from the water shader's own projection.
+- **Light capture and recordings**: the camera vote's view-projection (`PostScene::RecentCameraViewProj`) places the
+  ground light points on screen ([light-probe.md](../features/dev-tools/light-probe.md#ground-light-profile)).
 - **Performance**: Lot Lighting While Moving, Wall Shading While Moving and Spread New Objects Over Frames read the camera
   eye through the camera ids (`CameraRootCall`, `CameraGetterCall`, `CameraRootGetter`, `CameraGetter`;
   [game-versions.md](game-versions.md#features-and-the-addresses-they-need)).
@@ -91,7 +93,7 @@ Scheduler's) stops updating; both have / had a second source (below).
 |---|---|---|
 | Camera point, arg 2 of `0x00C6C290` (copied to WorldManager+0x3A0) | Frame Profiler (`Hook_LotLodScoring`, render thread, moved if any component changes by > 1e-3); GC Scheduler (combined build only, removed: read WorldManager+0x3A0 from `[0x011ECBC4]`, SEH-guarded, every 50 ms) | Not updated while WorldManager+0x258 is set (map view blocker, loading) |
 | Camera eye `[[0x011D1860]+0x24]+0x60` | Performance: Lot Lighting While Moving, Wall Shading While Moving and Spread New Objects Over Frames (camera ids parsed from the `0x00C6D5BD` call sequence); GC Scheduler (combined build only, removed; its second source) | On Steam the resolved chain must equal `[0x011D1860]+0x24+0x60` or it is not used |
-| View-projection `c40..c43` of the scene draws | Ambient Occlusion (`PostScene::CameraViewProj`, through the camera vote below); combined build only: Frame Profiler fallback (element change > 1e-5 relative) | Apex Radiance's frame_profiler.cpp does not use the vote and counts frames without the lot LOD call as "unknown" |
+| View-projection `c40..c43` of the scene draws | Ambient Occlusion (`PostScene::CameraViewProj`, through the camera vote below); the light capture's and recordings' ground light points (`RecentCameraViewProj`); combined build only: Frame Profiler fallback (element change > 1e-5 relative) | Apex Radiance's frame_profiler.cpp does not use the vote and counts frames without the lot LOD call as "unknown" |
 
 GC Scheduler (removed): moving when either point exceeded `cameraSpeedThreshold` (default 0.25 m/s); see
 [../removed-features.md](../removed-features.md) and [mono-gc.md](mono-gc.md). Frame Profiler: see
@@ -140,8 +142,9 @@ ground changes by a few 2^-24 steps per pixel and turns into stairs (hypothesis 
 
 #### Camera vote (`post_scene.cpp`, back since 30/09 for Ambient Occlusion)
 
-Restored from the combined build (tag `combined-final`) as `VoteCamera`; it runs only while an effect asked for it with
-`PostScene::WantCamera(true)` (reference counted; today only Ambient Occlusion). Depth Blur's Auto focus does not need
+Restored from the combined build (tag `combined-final`) as `VoteCamera`; it runs only while a caller asked for it with
+`PostScene::WantCamera(true)` (reference counted: Ambient Occlusion, and the light capture's and recordings' ground light
+points, [light-probe.md](../features/dev-tools/light-probe.md#ground-light-profile)). Depth Blur's Auto focus does not need
 it (depth ratios, the near plane cancels):
 - For each of the first `kNearDraws` = 24 scene draws of a frame (backbuffer RT0, ZENABLE on, not an internal pass),
   `VoteNear` reads the VS constants of blocks `{0, 4, 40, 180, 192, 216}` with `GetVertexShaderConstantF` and runs

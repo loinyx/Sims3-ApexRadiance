@@ -1196,6 +1196,8 @@ class DepthBlurPatch : public ApexPatch {
         bool changed = false;
         if (g.status.rfind("ERROR: ", 0) == 0) ApexUi::IconNote(IconId::TriangleAlert, g.status.c_str() + 7, VioletTheme::kError);
 
+        // Grouped in the order a player sets it up: what stays sharp, how the blur looks, map view
+        ApexUi::CardGroup("What stays sharp");
         // Focus: Auto (follows the camera) or Fixed (the original distance curve)
         static const char* const kFocusModes[] = {"Auto", "Fixed"};
         static const char* const kFocusTips[] = {"Keeps what the camera looks at sharp", "Blur starts at a set distance, like before"};
@@ -1204,7 +1206,6 @@ class DepthBlurPatch : public ApexPatch {
             g.p.autoFocus = focusMode == 0;
             changed = true;
         }
-        changed |= ApexUi::SliderPercent("Blur amount", &g.p.amount, 0.0f, 1.0f, "How soft the background gets", kDefaults.amount);
 
         if (g.p.autoFocus) {
             static const char* const kAreas[] = {"Small", "Medium", "Large"};
@@ -1231,33 +1232,42 @@ class DepthBlurPatch : public ApexPatch {
                 o.defaultValue = kDefaults.start;
                 changed |= ApexUi::Slider("Fine-tune distance", &g.p.start, 0.0f, 0.5f, o);
             }
-            {
-                ApexUi::SliderOptions o;
-                o.format = "%.0f%%";
-                o.displayScale = 200.0f;
-                o.tooltip = "How gradually the blur fades in; lower gives a sharper line";
-                o.defaultValue = kDefaults.range;
-                changed |= ApexUi::Slider("Transition", &g.p.range, 0.01f, 0.5f, o);
-            }
         }
-        changed |= ApexUi::SwitchRow("Sharp in map view", &g.p.offInMapView, "Fades the blur out in map view so lots stay sharp", kDefaults.offInMapView);
-        if (g.p.offInMapView && !MapView::Available()) ApexUi::IconNote(IconId::Info, "Map view can't be detected on this game version");
 
-        // The rare knobs of the look
-        if (ApexUi::BeginAdvanced("Advanced##DepthBlur")) {
-            changed |= ApexUi::SliderPercent("Strength", &g.p.strength, 0.0f, 1.0f, "Scales the blur everywhere; 100% is the default", kDefaults.strength);
+        ApexUi::CardGroup("How the blur looks");
+        changed |= ApexUi::SliderPercent("Blur amount", &g.p.amount, 0.0f, 1.0f, "How soft the background gets", kDefaults.amount);
+        if (!g.p.autoFocus) {
+            ApexUi::SliderOptions o;
+            o.format = "%.0f%%";
+            o.displayScale = 200.0f;
+            o.tooltip = "How gradually the blur fades in; lower gives a sharper line";
+            o.defaultValue = kDefaults.range;
+            changed |= ApexUi::Slider("Transition", &g.p.range, 0.01f, 0.5f, o);
+        }
+        if (g.p.autoFocus) {
+            // How quickly Auto focus follows the camera (it was under Advanced)
+            ApexUi::SliderOptions o;
+            o.format = "%.1f s";
+            o.tooltip = "How long the focus takes to catch up; lower is quicker";
+            o.defaultValue = kDefaults.focusSpeed;
+            changed |= ApexUi::Slider("Focus speed", &g.p.focusSpeed, 0.1f, 1.0f, o);
+        }
+        {
             static const char* const kQualities[] = {"Low", "Medium", "High", "Ultra"};
             static const char* const kQualityTips[] = {"Fastest", "The default; smoother", "Smoother still", "Smoothest large blur; costs the most"};
             changed |= ApexUi::SegmentedRow("Quality", "Higher is smoother and costs a bit more", "##Quality", &g.p.quality, kQualities, 4, kQualityTips, nullptr, kDefaults.quality);
-            if (g.p.autoFocus) {
-                ApexUi::SliderOptions o;
-                o.format = "%.1f s";
-                o.tooltip = "How long the focus takes to catch up; lower is quicker";
-                o.defaultValue = kDefaults.focusSpeed;
-                changed |= ApexUi::Slider("Focus speed", &g.p.focusSpeed, 0.1f, 1.0f, o);
-            }
-            changed |= ApexUi::SwitchRow("Blur the sky", &g.p.blurSky, "Also blur the sky behind the scenery", kDefaults.blurSky);
-            changed |= ApexUi::SwitchRow("Glowing lights", &g.p.glowLights, "Lamps stay bright in the blur", kDefaults.glowLights);
+        }
+        changed |= ApexUi::SwitchRow("Blur the sky", &g.p.blurSky, "Also blur the sky behind the scenery", kDefaults.blurSky);
+        changed |= ApexUi::SwitchRow("Glowing lights", &g.p.glowLights, "Lamps stay bright in the blur", kDefaults.glowLights);
+
+        ApexUi::CardGroup("Map view");
+        changed |= ApexUi::SwitchRow("Sharp in map view", &g.p.offInMapView, "Fades the blur out in map view so lots stay sharp", kDefaults.offInMapView);
+        if (g.p.offInMapView && !MapView::Available()) ApexUi::IconNote(IconId::Info, "Map view can't be detected on this game version");
+
+        // The rare knob: Strength scales what Blur amount already sets (Quality, the sky, the lamps and the focus speed
+        // were here too; they change the look or the cost, so they sit in their groups above)
+        if (ApexUi::BeginAdvanced("Advanced##DepthBlur")) {
+            changed |= ApexUi::SliderPercent("Strength", &g.p.strength, 0.0f, 1.0f, "Scales the blur everywhere; 100% is the default", kDefaults.strength);
             ApexUi::EndAdvanced();
         }
 

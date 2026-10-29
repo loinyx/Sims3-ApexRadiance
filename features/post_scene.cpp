@@ -174,6 +174,8 @@ struct VpVote {
 std::vector<VpVote> g_vpVotes;
 float g_vp[4][4] = {};
 bool g_vpValid = false;
+float g_lastVp[4][4] = {}; // the last frame's (read at its Present, after the boundary cleared g_vp)
+bool g_lastVpValid = false;
 
 bool NearFromBlock(const float m[4][4], float& nearZ) {
     const float *r0 = m[0], *r1 = m[1], *r2 = m[2], *r3 = m[3];
@@ -272,6 +274,8 @@ void OnFrameBoundary(IDirect3DDevice9* dev) {
     g_nearDraws = 0;
     g_nearVotes.clear();
     g_vpVotes.clear();
+    if (g_vpValid) std::memcpy(g_lastVp, g_vp, sizeof g_vp);
+    g_lastVpValid = g_vpValid;
     g_vpValid = false;
 }
 
@@ -369,28 +373,17 @@ void RegisterHooks() {
 
 namespace PostScene {
 
-void Add(int order, Effect fn, bool needsDepth) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    if (!needsDepth && std::find(g_noDepth.begin(), g_noDepth.end(), fn) == g_noDepth.end()) g_noDepth.push_back(fn);
-    for (const auto& e : g_effects)
-        if (e.second == fn) return;
-    g_effects.push_back({order, fn});
-    std::stable_sort(g_effects.begin(), g_effects.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-    if (!g_hooks) {
+// The draw hooks run while an effect is registered or someone wants the camera (caller holds g_mutex)
+void SyncHooks() {
+    const bool want = !g_effects.empty() || g_cameraWanted.load() > 0;
+    if (want && !g_hooks) {
         g_hooks = true;
         g_curRT0 = nullptr;
         g_backBuffer = nullptr;
         g_sceneDraws = 0;
         g_done = true; // start at the next frame boundary
         RegisterHooks();
-    }
-}
-
-void Remove(Effect fn) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    g_effects.erase(std::remove_if(g_effects.begin(), g_effects.end(), [&](const auto& e) { return e.second == fn; }), g_effects.end());
-    g_noDepth.erase(std::remove(g_noDepth.begin(), g_noDepth.end(), fn), g_noDepth.end());
-    if (g_effects.empty() && g_hooks) {
+    } else if (!want && g_hooks) {
         g_hooks = false;
         D3D9Hooks::UnregisterAll(kHookName);
         RenderCallbacks::Remove(RenderCallbacks::endSceneBeforeOverlay, AtEndSceneBeforeOverlay);
@@ -400,9 +393,28 @@ void Remove(Effect fn) {
     }
 }
 
+void Add(int order, Effect fn, bool needsDepth) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!needsDepth && std::find(g_noDepth.begin(), g_noDepth.end(), fn) == g_noDepth.end()) g_noDepth.push_back(fn);
+    for (const auto& e : g_effects)
+        if (e.second == fn) return;
+    g_effects.push_back({order, fn});
+    std::stable_sort(g_effects.begin(), g_effects.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    SyncHooks();
+}
+
+void Remove(Effect fn) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_effects.erase(std::remove_if(g_effects.begin(), g_effects.end(), [&](const auto& e) { return e.second == fn; }), g_effects.end());
+    g_noDepth.erase(std::remove(g_noDepth.begin(), g_noDepth.end(), fn), g_noDepth.end());
+    SyncHooks();
+}
+
 void WantCamera(bool on) {
+    std::lock_guard<std::mutex> lock(g_mutex);
     if (on) g_cameraWanted.fetch_add(1);
     else if (g_cameraWanted.fetch_sub(1) <= 0) g_cameraWanted.store(0);
+    SyncHooks();
 }
 
 float CameraNear() { return g_near; }
@@ -441,6 +453,12 @@ float CameraDepthA() {
 bool CameraViewProj(float vp[4][4]) {
     if (!g_vpValid) return false;
     std::memcpy(vp, g_vp, sizeof g_vp);
+    return true;
+}
+bool RecentCameraViewProj(float vp[4][4]) {
+    if (CameraViewProj(vp)) return true;
+    if (!g_lastVpValid) return false;
+    std::memcpy(vp, g_lastVp, sizeof g_lastVp);
     return true;
 }
 

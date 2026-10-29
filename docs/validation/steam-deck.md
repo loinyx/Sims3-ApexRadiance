@@ -19,6 +19,7 @@ None specific. The platform detection reads the running process and has no offli
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-29 | `3839ebc` (2.18.0 release) | Windows start of the release build with no player cache, then one with the rebuilt resource | The first start compiled the 10 shaders the old resource lacked and saved 81; with that file built in, a start with no player cache took all 81 from the ASI, 0 to compile | Windows, DXVK |
 | 2026-10-20 | Working tree on `a4b0b99` | Build, `tools/i18n_check` | Public build compiles with the shader cache resource (8,596,480 bytes); 21 languages, 2,167 keys | None |
 
 ## In-game test plan

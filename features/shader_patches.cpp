@@ -323,6 +323,117 @@ bool IsRoadVs(const std::vector<DWORD>& t, DWORD& mapConst) {
     return found == 1 && (tc1Mask == 0x3 || alphaUv == 1);
 }
 
+// The wet road's sky reflection (RoadPatch::reflectConst): the one texld of a cube sampler into rR whose first read of rR.rgb,
+// before rR.rgb is written again and before any flow control, is "mul rY.xyz, rR, rW.s" or "mad rY.xyz, rR, rW.s, rZ" (either
+// factor order) with rW a temp read through one component (rR.w included: the captured shaders put the weight there). Returns
+// its index, or -1.
+int WetSkyReflection(const std::vector<DWORD>& t, const std::vector<Ins>& ins) {
+    bool cube[16] = {};
+    for (const Ins& x : ins)
+        if (x.op == kDcl && x.len == 2 && Type(t[x.at + 2]) == kSampler && Num(t[x.at + 2]) < 16) cube[Num(t[x.at + 2])] = ((t[x.at + 1] >> 27) & 0xF) == 3;
+    const auto replicate = [](DWORD s) { return s == 0x00 || s == 0x55 || s == 0xAA || s == 0xFF; };
+    int found = -1;
+    for (size_t i = 0; i < ins.size(); i++) {
+        const Ins& x = ins[i];
+        if (x.op != kTexld || Type(t[x.at + 1]) != kTemp || (WMask(t[x.at + 1]) & 0x7) != 0x7 || Type(t[x.at + 3]) != kSampler || !cube[Num(t[x.at + 3]) & 15]) continue;
+        const DWORD R = Num(t[x.at + 1]);
+        for (size_t j = i + 1; j < ins.size(); j++) {
+            const Ins& y = ins[j];
+            if (IsFlow(y.op)) break;
+            bool reads = false;
+            for (size_t k = 2; k <= y.len; k++) reads |= IsReg(t[y.at + k], kTemp, R) && Swz(t[y.at + k]) != kSwzW;
+            if (reads) {
+                const bool shape = ((y.op == kMul && y.len == 3) || (y.op == kMad && y.len == 4)) && Type(t[y.at + 1]) == kTemp && WMask(t[y.at + 1]) == 0x7;
+                const DWORD a = shape ? t[y.at + 2] : 0, b = shape ? t[y.at + 3] : 0;
+                const bool aR = IsReg(a, kTemp, R) && Swz(a) == kSwzXYZW, bR = IsReg(b, kTemp, R) && Swz(b) == kSwzXYZW;
+                const DWORD w = aR ? b : a;
+                if ((aR || bR) && Type(w) == kTemp && replicate(Swz(w)) && (Num(w) != R || Swz(w) == kSwzW) && !(y.op == kMad && IsReg(t[y.at + 4], kTemp, R))) {
+                    if (found >= 0) return -1; // two such reads: not the known layout
+                    found = static_cast<int>(i);
+                }
+                break;
+            }
+            if (y.len >= 1 && IsReg(t[y.at + 1], kTemp, R) && (WMask(t[y.at + 1]) & 0x7)) break;
+        }
+    }
+    return found;
+}
+
+bool HasWetSkyReflection(const std::vector<DWORD>& t) {
+    const auto ins = Parse(t);
+    return !ins.empty() && WetSkyReflection(t, ins) >= 0;
+}
+
+bool FindCutout(const std::vector<DWORD>& t, Cutout& out) {
+    out = Cutout{};
+    if (t.empty() || (t[0] & 0xFFFF0000u) != 0xFFFF0000u) return false;
+    const auto ins = Parse(t);
+    int kill = -1;
+    for (size_t i = 0; i < ins.size(); i++) {
+        if (IsFlow(ins[i].op)) return false;
+        if (ins[i].op == kTexkill) {
+            if (kill >= 0) return false;
+            kill = static_cast<int>(i);
+        }
+    }
+    if (kill < 0 || Type(t[ins[kill].at + 1]) != kTemp) return false;
+    // the last write of `mask` of temp r before instruction i
+    const auto writer = [&](DWORD r, int i, DWORD mask) {
+        for (int k = i - 1; k >= 0; k--) {
+            const Ins& x = ins[k];
+            if (x.op == kDcl || x.op == kDef || x.op == kDefI || x.op == kDefB || x.op == kTexkill || x.len == 0) continue;
+            if (IsReg(t[x.at + 1], kTemp, r) && (WMask(t[x.at + 1]) & mask)) return k;
+        }
+        return -1;
+    };
+    const auto defValue = [&](DWORD c, DWORD comp, float& v) {
+        for (const Ins& d : ins)
+            if (d.op == kDef && IsReg(t[d.at + 1], kConst, c)) {
+                std::memcpy(&v, &t[d.at + 2 + comp], 4);
+                return true;
+            }
+        return false;
+    };
+    const int m = writer(Num(t[ins[kill].at + 1]), kill, 0xF);
+    if (m < 0) return false;
+    const Ins& M = ins[m];
+    const DWORD a = t[M.at + 2], s = t[M.at + 3], r = M.len == 4 ? t[M.at + 4] : 0;
+    const auto replicate = [](DWORD z) { return z == 0x00 || z == 0x55 || z == 0xAA || z == 0xFF; };
+    if (M.op != kMad || M.len != 4 || Type(a) != kTemp || Swz(a) != kSwzW || (a & 0x0F000000u) || Type(r) != kConst || !replicate(Swz(r)) ||
+        (r & 0x0F000000u) != 0x01000000u /* -cR */ || !replicate(Swz(s)) || (s & 0x0F000000u))
+        return false;
+    // the scale: a def, or a temp last written by "mov rS.c, cX.s" from one
+    float scale = 0.0f;
+    if (Type(s) == kConst) {
+        if (!defValue(Num(s), Swz(s) & 3, scale)) return false;
+    } else if (Type(s) == kTemp) {
+        const int w = writer(Num(s), m, 1u << (Swz(s) & 3));
+        if (w < 0 || ins[w].op != kMov || Type(t[ins[w].at + 2]) != kConst || !replicate(Swz(t[ins[w].at + 2])) ||
+            !defValue(Num(t[ins[w].at + 2]), Swz(t[ins[w].at + 2]) & 3, scale))
+            return false;
+    } else
+        return false;
+    if (!(scale > 0.0f)) return false;
+    // the alpha: "texld rA, vT, sN", maybe tinted by "mul rA, rA, cT"
+    int w = writer(Num(a), m, 0x8);
+    if (w < 0) return false;
+    int tint = -1;
+    if (ins[w].op == kMul && Type(t[ins[w].at + 2]) == kTemp && Swz(t[ins[w].at + 2]) == kSwzXYZW && Type(t[ins[w].at + 3]) == kConst &&
+        Swz(t[ins[w].at + 3]) == kSwzXYZW) {
+        tint = static_cast<int>(Num(t[ins[w].at + 3]));
+        w = writer(Num(t[ins[w].at + 2]), w, 0x8);
+        if (w < 0) return false;
+    }
+    const Ins& X = ins[w];
+    if (X.op != kTexld || Type(t[X.at + 2]) != kInput || Type(t[X.at + 3]) != kSampler) return false;
+    out.sampler = static_cast<int>(Num(t[X.at + 3]));
+    out.tintConst = tint;
+    out.refConst = static_cast<int>(Num(r));
+    out.refComp = static_cast<int>(Swz(r) & 3);
+    out.scale = scale;
+    return true;
+}
+
 bool PatchRoad(std::vector<DWORD>& t, RoadPatch& out, bool shade) {
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto ins = Parse(t);
@@ -394,6 +505,16 @@ bool PatchRoad(std::vector<DWORD>& t, RoadPatch& out, bool shade) {
                                            Op(kMul, 3), Dst(kTemp, T1, 0x8), Src(kTemp, T1, kSwzW), Src(kConst, cS, kSwzX),
                                            Op(kLrp, 4), Dst(kTemp, T2, 0x7), Src(kTemp, T1, kSwzW), Src(kTemp, T1), Src(kTemp, 1),
                                            Op(kMov, 2), Dst(kTemp, 1, 0x7), Src(kTemp, T2)}});
+    }
+    // Wet roads: the fixed sky cube's reflection x cW.x right after its read
+    out.reflectConst = -1;
+    if (const int r = WetSkyReflection(t, ins); r >= 0) {
+        const DWORD cW = static_cast<DWORD>(out.sidewalkConst >= 0 ? out.sidewalkConst + 3 : u.maxConst + 1);
+        const DWORD R = Num(t[ins[r].at + 1]);
+        if (cW < 224) {
+            edits.push_back({End(ins[r]), {Op(kMul, 3), Dst(kTemp, R, 0x7), Src(kTemp, R), Src(kConst, cW, kSwzX)}});
+            out.reflectConst = static_cast<int>(cW);
+        }
     }
     Apply(t, std::move(edits));
     return true;
@@ -811,7 +932,50 @@ bool PatchFloorImpl(std::vector<DWORD>& t, FloorPatch& out, const WorldY& worldY
             Type(t[x.at + 2]) == kTemp && Swz(t[x.at + 2]) == kSwzW && IsReg(t[x.at + 3], kTemp, Num(t[ins[fetch].at + 1])))
             scale = static_cast<int>(i);
     }
-    if (!v0Dcl || fetch < 0 || scale < 0 || u.maxSampler < 0 || u.maxSampler >= 15 || !u.afterLastSamplerDcl || u.maxConst + 1 >= 224) return false;
+    // The weather variants of the same floors (96 of the 104 pixel shaders paired with these vertex shaders in the precomp;
+    // rain turned a patio 3.8x brighter, drawn by the game at its own lamp scale): the map read from any input and sampler,
+    // whose rgb goes to the game's exclusive lamp scale cK.x (LampScaleAfter) either through the normal factor
+    // "mul rB.xyz, rW.s, rM" (either order, any one component) as above, or directly, "mad rY.xyz, rM, cK.x, rZ" (B = rM:
+    // the atlas max right after the read)
+    if (fetch < 0 || scale < 0) {
+        const auto factor = [&](DWORD r, DWORD M) { // a temp read through one component, not the map's rgb
+            const DWORD s = Swz(r);
+            return Type(r) == kTemp && !(r & 0x0F002000u) && (s == 0x00 || s == 0x55 || s == 0xAA || s == 0xFF) && (Num(r) != M || s == 0xFF);
+        };
+        fetch = scale = -1;
+        for (size_t i = 0; i < ins.size() && fetch < 0; i++) {
+            const Ins& x = ins[i];
+            if (x.op != kTexld || Type(t[x.at + 1]) != kTemp || (WMask(t[x.at + 1]) & 0x7) != 0x7 || Type(t[x.at + 2]) != kInput || Type(t[x.at + 3]) != kSampler) continue;
+            const DWORD M = Num(t[x.at + 1]);
+            if (LampScaleAfter(t, ins, i, M) >= 0) {
+                fetch = scale = static_cast<int>(i);
+                break;
+            }
+            for (size_t j = i + 1; j < ins.size(); j++) { // the first reader of rM.rgb: the normal factor, then the lamp scale
+                const Ins& y = ins[j];
+                if (IsFlow(y.op)) break;
+                bool reads = false;
+                for (size_t k = 2; k <= y.len; k++) reads |= IsReg(t[y.at + k], kTemp, M) && Swz(t[y.at + k]) != kSwzW;
+                if (reads) {
+                    const DWORD a = y.len == 3 ? t[y.at + 2] : 0, b = y.len == 3 ? t[y.at + 3] : 0;
+                    const bool mA = IsReg(a, kTemp, M) && Swz(a) == kSwzXYZW && !(a & 0x0F002000u), mB = IsReg(b, kTemp, M) && Swz(b) == kSwzXYZW && !(b & 0x0F002000u);
+                    if (y.op == kMul && y.len == 3 && Type(t[y.at + 1]) == kTemp && WMask(t[y.at + 1]) == 0x7 && !(t[y.at + 1] & 0x00100000u) &&
+                        ((mB && factor(a, M)) || (mA && factor(b, M))) && LampScaleAfter(t, ins, j, Num(t[y.at + 1])) >= 0) {
+                        fetch = static_cast<int>(i);
+                        scale = static_cast<int>(j);
+                    }
+                    break;
+                }
+                if (y.len >= 1 && IsReg(t[y.at + 1], kTemp, M) && (WMask(t[y.at + 1]) & 0x7)) break;
+            }
+        }
+    }
+    if (!v0Dcl || fetch < 0 || scale < 0) return false;
+    if (u.maxSampler < 0 || u.maxSampler >= 15 || !u.afterLastSamplerDcl || u.maxConst + 1 >= 224) {
+        out.scaleConst = LampScaleAfter(t, ins, static_cast<size_t>(scale), Num(t[ins[scale].at + 1]));
+        out.gainOnly = out.scaleConst >= 0;
+        return out.gainOnly;
+    }
     const DWORD B = Num(t[ins[scale].at + 1]);
     const DWORD E = static_cast<DWORD>(u.maxSampler + 1);
     const DWORD T = static_cast<DWORD>(u.maxTemp + 1);
@@ -834,7 +998,10 @@ bool PatchFloorImpl(std::vector<DWORD>& t, FloorPatch& out, const WorldY& worldY
         WinterShade(t, ins, u, worldY, B, T, E, cA, Src(kInput, 0, 0xAA), Src(kInput, 0, kSwzW), edits, atlas, out);
     }
     if (out.shadeSampler >= 0) t[v0Dcl] &= ~0x00200000u; // world xz at full precision
-    edits.push_back({End(ins[scale]), std::move(atlas)});
+    // (scale == fetch: after the map alpha copy AtlasWeight / WinterExit insert at the same place, so in that edit)
+    const auto same = std::find_if(edits.begin(), edits.end(), [at = End(ins[scale])](const Edit& e) { return e.at == at; });
+    if (same != edits.end()) same->tok.insert(same->tok.end(), atlas.begin(), atlas.end());
+    else edits.push_back({End(ins[scale]), std::move(atlas)});
     Apply(t, std::move(edits));
     return true;
 }
@@ -961,8 +1128,8 @@ bool PatchSnowFloorImpl(std::vector<DWORD>& t, int texcoord, FloorPatch& out, co
         const DWORD L = Num(t[x.at + 1]);
         for (size_t j = i + 1; j < ins.size(); j++) {
             const Ins& y = ins[j];
-            bool reads = false;
-            for (size_t k = 2; k <= y.len; k++) reads |= IsReg(t[y.at + k], kTemp, L);
+            bool reads = false; // (a read of rL.w alone, the map's alpha, is not the map: the two weather variants test it first)
+            for (size_t k = 2; k <= y.len; k++) reads |= IsReg(t[y.at + k], kTemp, L) && Swz(t[y.at + k]) != kSwzW;
             if (reads) {
                 const DWORD s = Type(t[y.at + 2]) == kTemp ? Swz(t[y.at + 2]) : 0x1B;
                 if (y.op == kMul && Type(t[y.at + 1]) == kTemp && WMask(t[y.at + 1]) == 0x7 && Type(t[y.at + 2]) == kTemp && (s == 0x00 || s == 0x55 || s == 0xAA || s == 0xFF) &&
@@ -1575,31 +1742,48 @@ bool PatchSnowCover(std::vector<DWORD>& t, SnowCoverPatch& out) {
             found++;
         }
     }
-    if (found != 1) return false;
-    auto lastWriter = [&](DWORD reg) {
-        for (int i = mul - 1; i >= 0; i--) {
-            const Ins& x = ins[i];
-            if (x.op == kDcl || x.op == kDef || x.op == kDefI || x.op == kDefB || x.op == kTexkill || x.len == 0) continue;
-            if (IsReg(t[x.at + 1], kTemp, reg)) return i;
-        }
-        return -1;
+    const auto isLight = [&](const Ins& M) { // "mad rL.xyz, rX.s, c0, rY" (moon x the shadow, one component + sky)
+        const DWORD s = Swz(t[M.at + 2]);
+        return M.op == kMad && Type(t[M.at + 1]) == kTemp && WMask(t[M.at + 1]) == 0x7 && Type(t[M.at + 2]) == kTemp &&
+               (s == 0x00 || s == 0x55 || s == 0xAA || s == 0xFF) && IsReg(t[M.at + 3], kConst, 0);
     };
-    const DWORD P = Num(t[ins[mul].at + 2]), Q = Num(t[ins[mul].at + 3]);
-    const int wP = lastWriter(P), wQ = lastWriter(Q);
-    if (wP < 0 || wQ < 0) return false;
-    // the snow texture comes from a texld, the light from "mad rL.xyz, rX.w, c0, rY" (moon x shadow + sky)
     int wL = -1;
     DWORD L = 0;
-    if (ins[wQ].op == kTexld) {
-        wL = wP;
-        L = P;
-    } else if (ins[wP].op == kTexld) {
-        wL = wQ;
-        L = Q;
+    size_t at = 0; // where the atlas term goes: before the final mul, else right after the light
+    if (found == 1) {
+        auto lastWriter = [&](DWORD reg) {
+            for (int i = mul - 1; i >= 0; i--) {
+                const Ins& x = ins[i];
+                if (x.op == kDcl || x.op == kDef || x.op == kDefI || x.op == kDefB || x.op == kTexkill || x.len == 0) continue;
+                if (IsReg(t[x.at + 1], kTemp, reg)) return i;
+            }
+            return -1;
+        };
+        const DWORD P = Num(t[ins[mul].at + 2]), Q = Num(t[ins[mul].at + 3]);
+        const int wP = lastWriter(P), wQ = lastWriter(Q);
+        if (wP < 0 || wQ < 0) return false;
+        // the snow texture comes from a texld, the light from the moon mad
+        if (ins[wQ].op == kTexld) {
+            wL = wP;
+            L = P;
+        } else if (ins[wP].op == kTexld) {
+            wL = wQ;
+            L = Q;
+        } else
+            return false;
+        at = ins[mul].at;
+    } else if (found == 0) { // (a variant that mixes the lit snow with the fog in its last two mads) the one light mad
+        for (size_t i = 0; i < ins.size(); i++)
+            if (isLight(ins[i])) {
+                if (wL >= 0) return false;
+                wL = static_cast<int>(i);
+            }
+        if (wL < 0) return false;
+        L = Num(t[ins[wL].at + 1]);
+        at = End(ins[wL]);
     } else
         return false;
-    const Ins& M = ins[wL];
-    if (M.op != kMad || WMask(t[M.at + 1]) != 0x7 || Type(t[M.at + 2]) != kTemp || Swz(t[M.at + 2]) != kSwzW || !IsReg(t[M.at + 3], kConst, 0)) return false;
+    if (!isLight(ins[wL])) return false;
     if (u.maxSampler < 0 || u.maxSampler >= 15 || !u.afterLastSamplerDcl || u.maxConst + 2 >= 224 || u.maxTemp + 1 >= 32) return false;
     const DWORD E = static_cast<DWORD>(u.maxSampler + 1), T = static_cast<DWORD>(u.maxTemp + 1);
     const DWORD cA = static_cast<DWORD>(u.maxConst + 1), cB = cA + 1, V = static_cast<DWORD>(tc3);
@@ -1607,7 +1791,7 @@ bool PatchSnowCover(std::vector<DWORD>& t, SnowCoverPatch& out) {
     out.atlasConst = cA;
     out.strengthConst = cB;
     Apply(t, {{u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E)}},
-              {ins[mul].at, {Op(kMad, 4), Dst(kTemp, T, 0x3), Src(kInput, V, kSwzXYXY), Src(kConst, cA), Src(kConst, cA, kSwzZWZW),
+              {at, {Op(kMad, 4), Dst(kTemp, T, 0x3), Src(kInput, V, kSwzXYXY), Src(kConst, cA), Src(kConst, cA, kSwzZWZW),
                              Op(kTexld, 3), Dst(kTemp, T), Src(kTemp, T), Src(kSampler, E),
                              Op(kMad, 4), Dst(kTemp, L, 0x7), Src(kTemp, T), Src(kConst, cB, kSwzX), Src(kTemp, L)}}});
     return true;
@@ -1890,6 +2074,7 @@ bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach) 
     enum { kA, kB, kC } shape = kA;
     int gi = -1, ref = -1, anchor = -1;
     DWORD Nrm = 0, D = 0;
+    bool vcInD = false; // the vertex lights are already in rD where the max goes (A2 below): nothing to take out of the ground
     if (colorReg >= 0) {
         // with vertex lights: the single "add rX.xyz, rA, vC" (the destination may be another register: generic objects
         // write r4 from r0); the sky mad is rA's last writer
@@ -1911,6 +2096,39 @@ bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach) 
             anchor = lastWriter(A, add, 0x7);
             if (anchor >= 0) ref = skyAt(anchor);
         }
+        int a2Sky = -1, a2Cube = -1;
+        if (found == 0) {
+            // A2 (the wet and glossy object variants of the saved refusals): the vertex lights scaled and added to the chain
+            // end before the sky, "mad rX.xyz, cK.s, vC, rP" (either factor order, rP = the chain end), then the sky mad
+            // "mad rA.xyz, rCube, cK.s, rX": the max goes at the sky mad with rD = rX, vertex lights included
+            int vc = -1, nVc = 0;
+            for (size_t i = 0; i < ins.size(); i++) {
+                const Ins& x = ins[i];
+                if (x.op != kMad || x.len != 4 || Type(t[x.at + 1]) != kTemp || WMask(t[x.at + 1]) != 0x7 || Type(t[x.at + 4]) != kTemp) continue;
+                const DWORD a = t[x.at + 2], b = t[x.at + 3];
+                const bool cv = Type(a) == kConst && isReplicate(Swz(a)) && IsReg(b, kInput, C) && Swz(b) == kSwzXYZW && !(b & 0x0F000000u);
+                const bool vcf = Type(b) == kConst && isReplicate(Swz(b)) && IsReg(a, kInput, C) && Swz(a) == kSwzXYZW && !(a & 0x0F000000u);
+                const int w = (cv || vcf) ? lastWriter(Num(t[x.at + 4]), static_cast<int>(i), 0x7) : -1;
+                if (w >= 0 && chainEnd(w)) {
+                    vc = static_cast<int>(i);
+                    nVc++;
+                }
+            }
+            if (nVc == 1) {
+                int nSky = 0, sky = -1, cube = -1;
+                for (size_t i = static_cast<size_t>(vc) + 1; i < ins.size(); i++) {
+                    const Ins& S = ins[i];
+                    if (S.op != kMad || Type(t[S.at + 1]) != kTemp || WMask(t[S.at + 1]) != 0x7 || Type(t[S.at + 2]) != kTemp || Type(t[S.at + 3]) != kConst ||
+                        !isReplicate(Swz(t[S.at + 3])) || Type(t[S.at + 4]) != kTemp || lastWriter(Num(t[S.at + 4]), static_cast<int>(i), 0x7) != vc)
+                        continue;
+                    const int wCube = lastWriter(Num(t[S.at + 2]), static_cast<int>(i), 0x7);
+                    if (wCube < 0 || !isCubeTexld(wCube)) continue;
+                    sky = static_cast<int>(i), cube = wCube;
+                    nSky++;
+                }
+                if (nSky == 1) a2Sky = sky, a2Cube = cube;
+            }
+        }
         if (found != 1 || ref < 0) {
             // shape C: the single "max rX.xyz, vC, rY" (either order) and the single cube texld (its coordinate: the normal)
             if (found != 0) return false;
@@ -1928,13 +2146,20 @@ bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach) 
                         nMax++;
                     }
             }
-            if (nMax != 1 || nCube != 1) return false;
-            shape = kC;
-            anchor = mx;
-            // the lamp code goes at the cube texld when it comes first (Phong_PS_3113 overwrites the normal before the max)
-            gi = cube < mx ? cube : mx;
-            ref = cube;
-            Nrm = Num(t[ins[cube].at + 2]);
+            if (nMax == 1 && nCube == 1) {
+                shape = kC;
+                anchor = mx;
+                // the lamp code goes at the cube texld when it comes first (Phong_PS_3113 overwrites the normal before the max)
+                gi = cube < mx ? cube : mx;
+                ref = cube;
+                Nrm = Num(t[ins[cube].at + 2]);
+            } else if (a2Sky >= 0) { // A2 (only where C does not take the shader)
+                anchor = a2Sky, ref = gi = a2Cube;
+                Nrm = Num(t[ins[ref].at + 2]);
+                D = Num(t[ins[anchor].at + 4]);
+                vcInD = true;
+            } else
+                return false;
         } else {
             gi = ref;
             Nrm = Num(t[ins[ref].at + 2]);
@@ -2031,7 +2256,7 @@ bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach) 
                                  Op(kLrp, 4), Dst(kTemp, A, 0x8), Src(kConst, cS, kSwzX), Src(kTemp, A, kSwzW), Src(kTemp, Fr, kSwzW),
                                  Op(kMul, 3), Dst(kTemp, Fr, 0x8), Src(kTemp, A, kSwzW), Src(kConst, cB, kSwzX),
                                  Op(kMul, 3), Dst(kTemp, T, 0x7), Src(kTemp, T), Src(kTemp, Fr, kSwzW)};
-    if (shape == kA && colorReg >= 0) // the vertex lights are added after the max: take them out of the ground light first
+    if (shape == kA && colorReg >= 0 && !vcInD) // the vertex lights are added after the max: take them out of the ground light first
         ground.insert(ground.end(), {Op(kAdd, 3), Dst(kTemp, T, 0x7), Src(kTemp, T), Src(kInput, static_cast<DWORD>(colorReg)) | 0x01000000u /* -vC */});
     // Per-pixel lamps (requested for Counters): each piece of a modular object gets its own rig
     // evaluated at the piece's centre (3 lamps in c5..c7 here, 4 more as vertex lights), so neighbouring pieces differ.

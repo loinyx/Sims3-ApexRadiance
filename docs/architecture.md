@@ -431,10 +431,13 @@ One shared trigger runs effects on the finished 3D scene, before any game UI
 - **Known limitation:** interiors can have depth-off back-buffer draws in the middle of the scene, so the first such
   draw can precede the finished scene (Picture re-copies at every depth-on to depth-off transition for that reason). The
   EndScene fallback does not change that.
-- **Camera:** while an effect asks for it (`PostScene::WantCamera`, reference counted; Ambient Occlusion), the scene
-  draws' vertex constants vote for the near plane (`CameraNear`, 0.2 to 0.3 m with zoom and height), the view-projection
-  (`CameraViewProj`, rows `c40..c43`) and A of the projection (`CameraDepthA`; device depth `d = A - near * A / z`,
-  A = 1.00008 measured, far plane about 3 km). Recipe: [engine/camera-and-map-view.md](engine/camera-and-map-view.md).
+- **Camera:** while a caller asks for it (`PostScene::WantCamera`, reference counted: Ambient Occlusion, and the light
+  capture and recordings for their ground light points), the scene draws' vertex constants vote for the near plane
+  (`CameraNear`, 0.2 to 0.3 m with zoom and height), the view-projection (`CameraViewProj`, rows `c40..c43`;
+  `RecentCameraViewProj` gives the last frame's when the current one has none yet) and A of the projection
+  (`CameraDepthA`; device depth `d = A - near * A / z`, A = 1.00008 measured, far plane about 3 km). The draw hooks stay
+  registered while an effect is registered or the camera is wanted. Recipe:
+  [engine/camera-and-map-view.md](engine/camera-and-map-view.md).
 - **INTZ swap (`DepthShare`, owned by `patches/depth_blur_patch.cpp`):** the game's auto depth-stencil (D24S8 or D24X8,
   back-buffer size, not multisampled) is swapped for an INTZ texture with `D3DUSAGE_DEPTHSTENCIL` through the ExtraHooks
   substitution. `DepthShare::Texture()` / `Surface()` are null unless the swap is ready; `Status()` says why.

@@ -10,7 +10,7 @@ the same way. Part of [Night Lighting](README.md).
 |---|---|
 | Availability | Released in 1.0.0 |
 | Default | On |
-| Menu | Lighting > Buildings > *Buildings* card, ROOFS group |
+| Menu | Lighting > Outside > Buildings card, *Roofs* group |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) (`DrawRoof`, `DrawRoofSnow`, `SelectLamps`), [`shaders/roof_ps.hlsl`](../../../shaders/roof_ps.hlsl), [`shaders/roof_snow_lamps_ps.hlsl`](../../../shaders/roof_snow_lamps_ps.hlsl) |
 

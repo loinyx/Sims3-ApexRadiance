@@ -84,7 +84,7 @@ std::string g_oldStandaloneModule;        // under g_detailLock
 
 // Sidebar pages and the tabs of each page. The selected page and tabs are kept while the game runs (not saved).
 enum Page : int { PageOverview, PageLighting, PageWaterSnow, PageColor, PageAmbientOcclusion, PageDepthBlur, PageEdgeSmoothing, PagePerformance, PageDeveloper, PageSettings, PageReport, PageConflicts, PageBanding, PageLotStreaming, PageProfiles };
-enum LightingTab : int { LightingLamps, LightingGround, LightingObjects, LightingBuildings, LightingStories };
+enum LightingTab : int { LightingLamps, LightingOutside, LightingInside, LightingFixes };
 enum SettingsTab : int { SettingsMenu, SettingsShortcuts, SettingsProfiles, SettingsCompatibility, SettingsAbout };
 int g_page = PageOverview;
 int g_lightingTab = LightingLamps;
@@ -106,7 +106,13 @@ int g_recRow = -1;                // Shortcuts: the row whose key is being recor
 void ShortcutsContent();
 void ShortcutsTab();
 void LanguageRow();
+double g_whatsNewOpenedAt = -1.0; // when the What's new popover opened (its rise-in)
+// What's new, measured on the last frame, none of them from the popover's own height: the header (window top to the
+// list), the release list's content and the footer below the list
+float g_whatsNewHeadH = 0.0f, g_whatsNewListH = 0.0f, g_whatsNewFooterH = 0.0f;
+int g_whatsNewSettle = 0; // frames the popover is laid out unseen after it opens, while its height settles
 void ScreenshotCaptureCard();
+void RecoveryRow();
 
 // Undo: the feature state at the last click / key activation in the menu (before any widget saw it), and the toast
 toml::table g_clickSnapshot;
@@ -422,6 +428,18 @@ bool PerformanceGroupEnabled() {
     return true;
 }
 
+// "12 of 15 on": the Performance options this game version has, and how many of them are on
+std::string PerformanceCountText() {
+    int on = 0, total = 0;
+    for (const char* name : kOverviewPerformancePatches) {
+        const ApexPatch* patch = Find(name);
+        if (!patch || !patch->IsCompatibleWithCurrentVersion()) continue;
+        ++total;
+        if (patch->IsEnabled()) ++on;
+    }
+    return I18n::Trf("{} of {} on", on, total);
+}
+
 // (exceptSaveGuard: Room to save is left out, as All effects keeps it)
 bool PerformanceGroupAnyEnabled(bool exceptSaveGuard = false) {
     for (const char* name : kOverviewPerformancePatches)
@@ -491,17 +509,29 @@ void OverviewPage() {
     ApexUi::PageTitle("Overview", "See what is in use; click a resource to open its settings");
     RecommendS3SSCard();
     ImGui::PushID("Overview");
+    // One card: the All effects switch heads it, Lighting, Image and Performance are its groups (they were four cards)
     if (ApexUi::BeginCard("##AllEffects")) {
         const bool anyEffectOn = AnyOverviewEffectEnabled();
-        const char* state = AllOverviewEffectsEnabled() ? "All effects are on" : anyEffectOn ? "Some effects are on" : "All effects are off";
+        // "Some effects are on" names the ones that are off; "off" says Room to save stays (it was only a tooltip)
+        std::string state;
+        if (AllOverviewEffectsEnabled()) state = I18n::Tr("All effects are on");
+        else if (!anyEffectOn) state = I18n::Tr("All effects are off; Room to save stays on");
+        else {
+            static const std::pair<const char*, const char*> kNames[] = {{kNightLighting, "Night Lights"}, {"AmbientOcclusion", "Ambient Occlusion"},
+                {"SceneDither", "Banding Fix"}, {"DepthBlur", "Depth Blur"}, {"EdgeSmoothing", "Edge Smoothing"}};
+            std::string off;
+            const auto add = [&](const char* name) { off += off.empty() ? "" : ", "; off += I18n::Tr(name); };
+            if (!Picture::Get().GetParams().enabled) add("Color");
+            for (const auto& [patchName, name] : kNames)
+                if (const ApexPatch* p = Find(patchName); p && p->IsCompatibleWithCurrentVersion() && !p->IsEnabled()) add(name);
+            state = off.empty() ? std::string(I18n::Tr("Some effects are on")) : I18n::Trf("Some effects are on; off: {}", off);
+        }
         bool allEffects = AllOverviewEffectsEnabled();
-        if (ApexUi::CardHeader(IconId::ListChecks, "All effects", state, "Turn all effects on or off together; Room to save stays on", &allEffects,
+        if (ApexUi::CardHeader(IconId::ListChecks, "All effects", state.c_str(), "Turn all effects on or off together; Room to save stays on", &allEffects,
                                AllOverviewEffectsSwitchable()))
             SetAllOverviewEffects(allEffects);
-    }
-    ApexUi::EndCard();
-    ApexUi::GroupLabel("Lighting");
-    if (ApexUi::BeginCard("##Lighting")) {
+        ApexUi::CardDivider();
+        ApexUi::CardGroup("Lighting");
         bool nameClicked = false;
         OverviewPatchRow(kNightLighting, IconId::MoonStar, "Night Lights", "Lamps light up your neighborhood at night", PageLighting, &g_lightingTab, LightingLamps);
         if (ApexPatch* ntr = Find(kNightLighting)) {
@@ -512,12 +542,9 @@ void OverviewPage() {
                 SetShore(on);
             if (nameClicked) Go(PageWaterSnow);
         }
-    }
-    ApexUi::EndCard();
-    ApexUi::GroupLabel("Image");
-    if (ApexUi::BeginCard("##Image")) {
-        bool nameClicked = false;
+        ApexUi::CardGroup("Image");
         {
+            nameClicked = false;
             PictureParams p = Picture::Get().GetParams();
             bool on = p.enabled;
             char chipBuf[24];
@@ -532,15 +559,16 @@ void OverviewPage() {
         OverviewPatchRow("SceneDither", IconId::Blend, "Banding Fix", "No color steps in light and shadows", PageBanding);
         OverviewPatchRow("DepthBlur", IconId::Aperture, "Depth Blur", "Softly blurs the distant background", PageDepthBlur);
         OverviewPatchRow("EdgeSmoothing", IconId::Spline, "Edge Smoothing", "Clean, smooth edges on the world", PageEdgeSmoothing);
-    }
-    ApexUi::EndCard();
-    ApexUi::GroupLabel("Performance");
-    if (ApexUi::BeginCard("##PerformanceScreen")) {
-        bool on = PerformanceGroupEnabled(), nameClicked = false;
-        if (ApexUi::OverviewRow("PerformanceGroup", IconId::Gauge, "Performance", "One switch for every option on the Performance page",
-                                nullptr, &on, PerformanceGroupSwitchable(), nullptr, &nameClicked))
-            SetPerformanceGroup(on);
-        if (nameClicked) Go(PagePerformance);
+        ApexUi::CardGroup("Performance");
+        {
+            // How many of the 15 are on, instead of a sentence pointing at the Performance page
+            bool on = PerformanceGroupEnabled(), perfClicked = false;
+            const std::string count = PerformanceCountText();
+            if (ApexUi::OverviewRow("PerformanceGroup", IconId::Gauge, "Performance", count.c_str(),
+                                    nullptr, &on, PerformanceGroupSwitchable(), nullptr, &perfClicked))
+                SetPerformanceGroup(on);
+            if (perfClicked) Go(PagePerformance);
+        }
     }
     ApexUi::EndCard();
     ImGui::PopID();
@@ -591,34 +619,33 @@ void LampsTabContent() {
 
 }
 
-void GroundTabContent() {
-    if (NightLightsReady("the ground and lots")) NightLighting::DrawGroundCard();
-}
-
-void StoriesTabContent() {
-    if (NightLightsReady("the stories")) NightLighting::DrawStoriesCard(&UpperFloorRow);
-}
-
-void ObjectsTabContent() {
-    if (NightLightsReady("objects")) NightLighting::DrawObjectsCard();
-}
-
-void BuildingsTabContent() {
-    if (!NightLightsReady("walls, roofs and rooms")) return;
+void OutsideTabContent() {
+    if (!NightLightsReady("the ground and lots")) return;
+    NightLighting::DrawGroundCard();
     NightLighting::DrawBuildingsCard();
+    NightLighting::DrawObjectsCard();
+}
+
+// The Stories card first: the rooms below depend on its "Outdoor light between floors"
+void InsideTabContent() {
+    if (!NightLightsReady("the stories")) return;
+    NightLighting::DrawStoriesCard(&UpperFloorRow);
     NightLighting::DrawRoomsCard();
     NightLighting::DrawLightDetailCard();
 }
 
+void FixesTabContent() {
+    if (NightLightsReady("the ground and lots")) NightLighting::DrawGameFixes();
+}
+
 void LightingPage() {
     ApexUi::PageTitle("Lighting", "Warm lamp light around your lots at night");
-    static const char* const kTabs[] = {"Overview", "Ground", "Objects", "Buildings", "Stories"};
+    static const char* const kTabs[] = {"Overview", "Outside", "Inside & floors", "Game fixes"};
     ApexUi::TabBar("##LightingTabs", &g_lightingTab, kTabs, IM_COUNTOF(kTabs));
     switch (g_lightingTab) {
-    case LightingGround: GroundTabContent(); break;
-    case LightingObjects: ObjectsTabContent(); break;
-    case LightingBuildings: BuildingsTabContent(); break;
-    case LightingStories: StoriesTabContent(); break;
+    case LightingOutside: OutsideTabContent(); break;
+    case LightingInside: InsideTabContent(); break;
+    case LightingFixes: FixesTabContent(); break;
     default: LampsTabContent(); break;
     }
 }
@@ -627,7 +654,8 @@ void LightingPage() {
 
 void GameEdgeSmoothingNote(const char* forWhat); // Image > Depth Blur, below
 
-void WaterReflectionsCard() {
+// pageNote: the Water & Snow page already says, once above the cards, that Night Lights is off
+void WaterReflectionsCard(bool pageNote = false) {
     ApexPatch* ntr = Find(kNightLighting);
     if (!ntr) return;
     ApexPatch* blur = Find("DepthBlur");
@@ -637,10 +665,10 @@ void WaterReflectionsCard() {
         if (ApexUi::CardHeader(IconId::MirrorRound, "Water Reflections", "Ponds mirror trees, houses and lamps", kShoreDescription, &on, !Loading())) SetShore(on);
         // The reflection is drawn by Night Lights' water pass and reads the shared scene depth (Depth Blur, Ambient Occlusion
         // or Edge Smoothing's depth edges keep it)
-        const bool needLights = !ntr->IsEnabled(), needBlur = blur && !blur->IsEnabled() && !DepthShare::Texture();
+        const bool needLights = !ntr->IsEnabled() && !pageNote, needBlur = blur && !blur->IsEnabled() && !DepthShare::Texture();
         if (needLights || needBlur || on) ApexUi::CardDivider();
         if (needLights) {
-            CardNote("Needs Night Lights (Lighting page)");
+            CardNote("Needs Night Lights");
             TurnOnButton(ntr, "Turn on Night Lights", IconId::MoonStar, "Night Lights turned on");
         }
         if (needBlur) {
@@ -661,27 +689,25 @@ void WaterReflectionsCard() {
     ImGui::PopID();
 }
 
-void WaterTabContent() {
-    // The lamp glow needs Night Lights; the Water Reflections card below says so with its own button
+// While Night Lights is off, one note and one button above the cards say it for Lamp Glow, Water Reflections and Snow
+// (each card used to repeat them); Lamp Glow and Snow are not drawn then, Water Reflections stays (its own switch)
+void WaterSnowContent() {
     ApexPatch* ntr = Find(kNightLighting);
-    if (ntr && (ntr->IsEnabled() || ApexUi::FilterActive())) {
-        NightLighting::DrawWaterCard();
-    } else if (ntr) {
-        CardNote("Lamp glow on ponds needs Night Lights");
-        TurnOnButton(ntr, "Turn on Night Lights", IconId::MoonStar, "Night Lights turned on");
+    const bool lightsOn = ntr && (ntr->IsEnabled() || ApexUi::FilterActive());
+    if (ntr && !lightsOn) {
+        if (!ntr->IsCompatibleWithCurrentVersion()) NotAvailableNote(ntr);
+        else {
+            CardNote("Lamp Glow, Water Reflections and Snow need Night Lights");
+            TurnOnButton(ntr, "Turn on Night Lights", IconId::MoonStar, "Night Lights turned on");
+        }
         ApexUi::Gap(ApexUi::kSpace2);
     }
-    WaterReflectionsCard();
-}
-
-void SnowTabContent() {
-    if (NightLightsReady("snow")) NightLighting::DrawSnowCard();
-}
-
-void WaterSnowContent() {
-    WaterTabContent();
-    if (!ApexUi::FilterActive()) ApexUi::Gap(ApexUi::kSpace3);
-    SnowTabContent();
+    if (lightsOn) NightLighting::DrawWaterCard();
+    WaterReflectionsCard(ntr && !lightsOn);
+    if (lightsOn) {
+        if (!ApexUi::FilterActive()) ApexUi::Gap(ApexUi::kSpace3);
+        NightLighting::DrawSnowCard();
+    }
 }
 
 void WaterSnowPage() {
@@ -708,7 +734,7 @@ void PictureHeaderCard() {
         extra.holdTooltip = "Hold to compare: the game without Color while you hold it";
         char chipBuf[24];
         const char* chip = p.enabled ? CostChip(Picture::Get().GpuMs(), chipBuf) : nullptr;
-        const bool switched = ApexUi::CardHeader(IconId::Palette, "Overview", "Brightness, contrast, color and sharpness", kPictureDescription, &on, true, &extra, chip);
+        const bool switched = ApexUi::CardHeader(IconId::Palette, "Color", "Brightness, contrast, color and sharpness", kPictureDescription, &on, true, &extra, chip);
         if (extra.held) g_holdCompare = true;
         if (switched || extra.clicked) {
             p.enabled = on;
@@ -797,11 +823,13 @@ void BandingPreview(bool on, float strength, bool highPrecision) {
 // The High-precision scene (scene_target.cpp), saved with the Banding Fix: its switch, then its status (a pill: Active,
 // Starting, Unavailable or Off, with the video memory or the reason under "Status") and, in the development build, its
 // resolves under Live counters
+// The switch carries its live state (the former Status row): a chip after the label, and the state in its description
 void HighPrecisionSceneRows(ApexPatch* p) {
-    if (ApexUi::SwitchRow("High-precision scene", SceneTarget::Setting(),
-                          "Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory", true))
-        p->NotifySettingChanged();
-    if (ApexUi::FilterActive()) return;
+    static constexpr const char* kDescription = "Draws the 3D world in 16-bit color and rounds it once: smoother light, more video memory";
+    if (ApexUi::FilterActive()) {
+        if (ApexUi::SwitchRow("High-precision scene", SceneTarget::Setting(), kDescription, true)) p->NotifySettingChanged();
+        return;
+    }
     using S = SceneTarget::State;
     const S state = SceneTarget::CurrentState();
     const bool active = state == S::Active;
@@ -815,11 +843,11 @@ void HighPrecisionSceneRows(ApexPatch* p) {
                                : state == S::BackBufferFormat ? "Unavailable with the game's screen format"
                                : state == S::NoMemory ? "Unavailable: not enough video memory"
                                                       : "Unavailable on this graphics card";
-    const ImVec2 pillSize = ApexUi::PillSize(pill, icon != IconId::None);
-    if (ApexUi::BeginControlRow("Status", detail.c_str(), pillSize.x, IconId::None, pillSize.y)) {
-        ApexUi::Pill(pill, active, icon);
-        ApexUi::EndControlRow();
-    }
+    (void)icon;
+    if (state != S::Off) ApexUi::SetNextRowBadge(pill, nullptr, active ? VioletTheme::kSuccess : state == S::Waiting ? VioletTheme::kTextMuted : VioletTheme::kWarning);
+    // (built translated: the row looks the text up again and keeps it as it is)
+    const std::string description = std::format("{} ({})", I18n::Tr(kDescription), I18n::Tr(detail.c_str()));
+    if (ApexUi::SwitchRow("High-precision scene", SceneTarget::Setting(), description.c_str(), true)) p->NotifySettingChanged();
     if (!kPublicBuild && ApexUi::BeginAdvanced("LiveCounters", "Live counters")) {
         const SceneTarget::Stats s = SceneTarget::ReadStats();
         ImGui::TextDisabled("Resolves: boundary %u, back-buffer copy %u, EndScene %u, Present %u; %.3f ms CPU each", s.atBoundary, s.atCopy, s.atEndScene,
@@ -831,14 +859,14 @@ void HighPrecisionSceneRows(ApexPatch* p) {
 // Image > Banding Fix: the Banding Fix card (scene_dither.cpp): the picture of what it does (also while off), then Grain
 // (Strength) and Precision (the High-precision scene) while it is on
 void BandingTabContent() {
-    FeatureCardWith("SceneDither", IconId::Blend, "Banding Fix", "Smooth light, with no color steps", [](ApexPatch* p) {
+    FeatureCardWith("SceneDither", IconId::Blend, "Banding Fix", "Fine grain and 16-bit color against color steps", [](ApexPatch* p) {
         const bool on = p->IsEnabled();
         BandingPreview(on, SceneDither::Strength(), SceneTarget::CurrentState() == SceneTarget::State::Active);
         if (!on && !ApexUi::FilterActive()) return;
         ApexUi::Gap(ApexUi::kSpace1); // with the item spacing, about the 12 a group label keeps below a row
-        ApexUi::GroupLabel("Grain");
+        ApexUi::CardGroup("Grain");
         p->RenderCustomUI();
-        ApexUi::GroupLabel("Precision");
+        ApexUi::CardGroup("Precision");
         HighPrecisionSceneRows(p);
     }, true, true);
 }
@@ -854,6 +882,8 @@ const char* const kColorGroupDescriptions[]={"Brightness, contrast, saturation, 
     "Midtones, shadows, highlights and blacks","Tint, vibrance, film tones and color mixer",
     "Clarity and darker corners","Film looks, light, camera and retro effects"};
 const IconId kColorGroupIcons[]={IconId::SunMedium,IconId::Contrast,IconId::Palette,IconId::Gem,IconId::Layers};
+// The group's switch in its card header; Basic, Tones, Color and Detail draw their rows in the same card (they were two
+// cards, one holding only the switch). While Color is off, a note turns it on in place.
 void ColorGroupHeader(int tab) {
     auto p=Picture::Get().GetParams();
     bool on=p.enabled && p.Group(tab);
@@ -864,7 +894,14 @@ void ColorGroupHeader(int tab) {
             p.Group(tab)=on;Picture::Get().SetParams(p,true);
         }
         ImGui::EndDisabled();
-        if(!p.enabled) ApexUi::IconNote(IconId::Info,"Color is off (Overview tab); your adjustments are kept");
+        if(!p.enabled) {
+            ApexUi::IconNote(IconId::Info,"Color is off; your adjustments are kept");
+            if(ApexUi::IconTextButton("Turn on Color",IconId::Palette,nullptr,ApexUi::ButtonKind::Primary)) {
+                ApexUi::ReportChange("Color turned on");
+                p.enabled=true;Picture::Get().SetParams(p,true);
+            }
+        }
+        if(tab!=Picture::TabFilters) {ApexUi::CardDivider();Picture::Get().RenderUI(tab);} // greyed out while Picture is off
     }
     ApexUi::EndCard();ImGui::PopID();
 }
@@ -896,8 +933,7 @@ void ColorPage() {
     if(g_colorTab==Picture::TabOverview) {ColorOverview();return;}
     if(g_colorTab==Picture::TabLuts) {Picture::Get().RenderFiltersUI(true);return;}
     ColorGroupHeader(g_colorTab);
-    if (g_colorTab == Picture::TabFilters) {Picture::Get().RenderFiltersUI();return;}
-    PictureRows(g_colorTab);
+    if (g_colorTab == Picture::TabFilters) Picture::Get().RenderFiltersUI();
 }
 
 // Depth Blur and Edge Smoothing both need the game's own (multisampled) Edge Smoothing off
@@ -1049,7 +1085,7 @@ void LampLightingCard() {
         // Instant runs inside Night Lights
         ApexPatch* ntr = Find(kNightLighting);
         if (ntr && !ntr->IsEnabled() && !ApexUi::FilterActive() && mode == kInstant) {
-            CardNote("Needs Night Lights (Lighting page)");
+            CardNote("Needs Night Lights");
             TurnOnButton(ntr, "Turn on Night Lights", IconId::MoonStar, "Night Lights turned on");
         }
     }
@@ -1059,10 +1095,13 @@ void LampLightingCard() {
 
 void PerformanceCard() {
     LampLightingCard();
+    // The 15 options in one card, in the groups that were five cards; the subtitle says how many are on
+    const std::string count = PerformanceCountText();
     ImGui::PushID("PerformanceLighting");
     if (ApexUi::BeginCard("##Card")) {
-        ApexUi::CardHeader(IconId::Gauge, "Camera and lighting", "Smoother movement while rooms and lots update", nullptr, nullptr);
+        ApexUi::CardHeader(IconId::Gauge, "While you play", count.c_str(), nullptr, nullptr);
         ApexUi::CardDivider();
+        ApexUi::CardGroup("Camera and lighting");
         if (FeatureSwitchRow(Performance::kRoomLightQueueName, "Faster room lighting", "Rooms light up sooner when you enter a lot or change floors")) {
             bool together = Performance::RoomAllAtOnce();
             if (ApexUi::SwitchRow("Lamp edits all at once", &together, "After a lamp edit, floors change together instead of one by one", true))
@@ -1087,25 +1126,12 @@ void PerformanceCard() {
         }
         FeatureSwitchRow(Performance::kWallShadingName, "Wall shading waits while moving", "New lots' walls get their shading when you stop (at most 2 s)");
         FeatureSwitchRow(Performance::kSceneBudgetName, "Spread new objects over frames", "Fewer hitches while a lot streams in; objects may appear a frame later");
-    }
-    ApexUi::EndCard();
-    ImGui::PopID();
-
-    ImGui::PushID("PerformanceFiles");
-    if (ApexUi::BeginCard("##Card")) {
-        ApexUi::CardHeader(IconId::Search, "Files and objects", "Less repeated searching as content loads", nullptr, nullptr);
-        ApexUi::CardDivider();
+        ApexUi::CardGroup("Files and objects");
         if (FeatureSwitchRow(Performance::kResourceCacheName, "Faster game file lookups", "Fewer small stutters when objects and textures load"))
             FeatureSwitchRow(Performance::kLookupMissesName, "Remember missing files", "Skips repeated searches for files no package has");
         FeatureSwitchRow(Performance::kFileListName, "Faster file lists", "Fewer stutters when Sims load outfits and shapes");
         FeatureSwitchRow(Performance::kObjectIndexName, "Faster object lookups", "Fewer hitches when lot lights update; less script work");
-    }
-    ApexUi::EndCard();
-    ImGui::PopID();
-    ImGui::PushID("PerformanceTextures");
-    if (ApexUi::BeginCard("##Card")) {
-        ApexUi::CardHeader(IconId::Layers, "Textures and Sims", "Fewer pauses when textures and Sims are built", nullptr, nullptr);
-        ApexUi::CardDivider();
+        ApexUi::CardGroup("Textures and Sims");
         if (FeatureSwitchRow(Performance::kFastTextureName, "Faster texture compression", "Fewer hitches when the game builds terrain, Sim and lot textures")) {
             bool cores = Performance::FastTextureSeveralCores();
             if (ApexUi::SwitchRow("Use several cores", &cores, "Large textures are shared out over several processor cores, with the same result"))
@@ -1113,22 +1139,10 @@ void PerformanceCard() {
         }
         FeatureSwitchRow(Performance::kFastCacheName, "Faster cache compression", "Fewer hitches when the game stores Sims and objects in its caches");
         FeatureSwitchRow(Performance::kFastCasName, "Faster Sim building", "Fewer hitches when Sims are edited or change outfits");
-    }
-    ApexUi::EndCard();
-    ImGui::PopID();
-    ImGui::PushID("PerformanceMemory");
-    if (ApexUi::BeginCard("##Card")) {
-        ApexUi::CardHeader(IconId::Activity, "Memory handling", "Less waiting on memory, and room left for saving in long sessions", nullptr, nullptr);
-        ApexUi::CardDivider();
+        ApexUi::CardGroup("Memory handling");
         FeatureSwitchRow(Performance::kFastMemoryName, "Faster memory handling", "Less waiting when the game hands out and frees memory");
         FeatureSwitchRow(Performance::kMemoryGuardName, "Room to save", "Keeps memory free for saving (Error 12); clears the game's idle cache when low");
-    }
-    ApexUi::EndCard();
-    ImGui::PopID();
-    ImGui::PushID("PerformanceGame");
-    if (ApexUi::BeginCard("##Card")) {
-        ApexUi::CardHeader(IconId::Monitor, "Game and scripts", "Less work for the game every frame", nullptr, nullptr);
-        ApexUi::CardDivider();
+        ApexUi::CardGroup("Game and scripts");
         FeatureSwitchRow(Performance::kWindowRepaintName, "Lighter window updates", "Less work for the game each frame; nothing on screen changes");
         FeatureSwitchRow(Performance::kScriptMathName, "Faster scripts", "The game's scripts compare numbers and look up types with less work");
     }
@@ -1139,13 +1153,26 @@ void PerformanceCard() {
 // ---- System > Lot Streaming (06/10, its own page) ----
 void LotStreamingCards() {
     // Lot detail and object streaming: research and code by idavidveiga's fork (02-04/10, docs/features/lot-streaming.md)
+    // Every option here is experimental: one note for the page (the search results, shown without it, keep the badges)
+    const bool badges = ApexUi::FilterActive();
+    if (!badges)
+        ApexUi::IconNote(IconId::FlaskConical, "Every option on this page is experimental: if anything looks wrong or the game crashes, turn it off", VioletTheme::kWarning);
+    static constexpr const char* kHandled = "Handled by Sims3SettingsSetter, so Apex leaves it alone";
+    // One card in two groups (the former Lot detail streaming and Object streaming cards), its subtitle how many are on
+    static const char* const kLotOptions[] = {Performance::kLotDetailRangeName, Performance::kLotLodStreamingName, Performance::kLotVisibilityOverrideName,
+                                              Performance::kMapViewStreamingBlockerName, Performance::kLotObjectThrottleName};
+    int lotOn = 0;
+    for (const char* name : kLotOptions)
+        if (ApexPatch* p = Find(name); p && p->IsEnabled()) ++lotOn;
+    const std::string lotCount = I18n::Trf("{} of {} on", lotOn, IM_COUNTOF(kLotOptions));
     ImGui::PushID("PerformanceLotDetailStreaming");
     if (ApexUi::BeginCard("##Card")) {
-        ApexUi::CardHeader(IconId::Layers, "Lot detail streaming", "How far, how many and how smoothly lots enter full detail", nullptr, nullptr);
+        ApexUi::CardHeader(IconId::Layers, "Lot streaming", lotCount.c_str(), nullptr, nullptr);
         ApexUi::CardDivider();
+        ApexUi::CardGroup("Lot detail");
 
         const bool rangeOn = FeatureSwitchRow(Performance::kLotDetailRangeName, "Extended lot detail",
-                                              "More lots in full detail, and farther away; uses more memory", true);
+                                              "More lots in full detail, and farther away; uses more memory", badges);
         if (rangeOn) {
             float distance = static_cast<float>(Performance::LotDetailDistance());
             char distanceValue[24];
@@ -1175,34 +1202,25 @@ void LotStreamingCards() {
         }
 
         const bool streamingOn = FeatureSwitchRow(Performance::kLotLodStreamingName, "Smooth lot streaming",
-                                                  "Fewer lots switching detail back and forth while the camera moves", true);
-        if (streamingOn && Performance::LotLodStreamingHandledByS3SS())
-            CardNote("Handled by Sims3SettingsSetter: Apex leaves the same streaming settings untouched");
+                                                  "Fewer lots switching detail back and forth while the camera moves", badges);
+        if (streamingOn && Performance::LotLodStreamingHandledByS3SS()) CardNote(kHandled);
 
         const bool visibilityOn = FeatureSwitchRow(Performance::kLotVisibilityOverrideName, "Keep lot visibility stable",
-                                                   "Lots in full detail keep it a little farther, so lots at the edge stop switching back and forth", true);
+                                                   "Lots in full detail keep it a little farther, so lots at the edge stop switching back and forth", badges);
         if (visibilityOn && Performance::LotVisibilityOverrideHandledByS3SS())
-            CardNote("Handled by Sims3SettingsSetter: Apex leaves the lot visibility override untouched");
+            CardNote(kHandled);
         else if (visibilityOn && Performance::LotVisibilityOverrideAlreadyExternal())
             CardNote("Already applied by another patch: Apex leaves the existing visibility override untouched");
 
         const bool mapBlockerOn = FeatureSwitchRow(Performance::kMapViewStreamingBlockerName, "Pause lot streaming in map view",
-                                                   "No lot detail streaming while the map view is open; it resumes when it closes", true);
-        if (mapBlockerOn && Performance::MapViewStreamingBlockerHandledByS3SS())
-            CardNote("Handled by Sims3SettingsSetter: Apex leaves the map-view streaming blocker untouched");
-    }
-    ApexUi::EndCard();
-    ImGui::PopID();
+                                                   "No lot detail streaming while the map view is open; it resumes when it closes", badges);
+        if (mapBlockerOn && Performance::MapViewStreamingBlockerHandledByS3SS()) CardNote(kHandled);
 
-    ImGui::PushID("PerformanceObjectStreaming");
-    if (ApexUi::BeginCard("##Card")) {
-        ApexUi::CardHeader(IconId::Layers, "Object streaming", "Spreads the work of building a lot's objects", nullptr, nullptr);
-        ApexUi::CardDivider();
-
+        ApexUi::CardGroup("Objects");
         const bool objectThrottleOn = FeatureSwitchRow(Performance::kLotObjectThrottleName, "Spread lot objects while loading",
-                                                       "Builds a lot's objects a few at a time instead of all at once", true);
+                                                       "Builds a lot's objects a few at a time instead of all at once", badges);
         if (objectThrottleOn && Performance::LotObjectThrottleHandledByS3SS()) {
-            CardNote("Handled by Sims3SettingsSetter: Apex leaves the lot object throttle untouched");
+            CardNote(kHandled);
         } else if (objectThrottleOn) {
             float objects = static_cast<float>(Performance::LotObjectThrottleObjectsPerWindow());
             char objectValue[24];
@@ -1213,7 +1231,7 @@ void LotStreamingCards() {
             objectOptions.leftLabel = "Smoother";
             objectOptions.rightLabel = "Loads sooner";
             objectOptions.defaultValue = 2.0f;
-            if (ApexUi::Slider("Objects per lot window", &objects, 1.0f, 64.0f, objectOptions))
+            if (ApexUi::Slider("Objects per step", &objects, 1.0f, 64.0f, objectOptions))
                 Performance::SetLotObjectThrottleObjectsPerWindow(static_cast<int>(std::lround(objects)));
 
             float delay = static_cast<float>(Performance::LotObjectThrottleDelayMs());
@@ -1225,7 +1243,7 @@ void LotStreamingCards() {
             delayOptions.leftLabel = "Loads sooner";
             delayOptions.rightLabel = "More spread";
             delayOptions.defaultValue = 16.0f;
-            if (ApexUi::Slider("Delay between lot windows", &delay, 0.0f, 500.0f, delayOptions))
+            if (ApexUi::Slider("Delay between steps", &delay, 0.0f, 500.0f, delayOptions))
                 Performance::SetLotObjectThrottleDelayMs(static_cast<int>(std::lround(delay)));
         }
     }
@@ -2134,7 +2152,7 @@ void DeveloperConfirmation() {
                 auto ui = ApexConfig::GetUi(); ui.developerMode = true; ApexConfig::SetUi(ui);
                 if (!g_developerPendingProfile.empty()) {
                     ApexConfig::ApplyFeatureState(g_developerPendingProfile);
-                    ShowToast(I18n::Tr("Profile loaded"), std::move(before), "Profile loaded: " + g_developerPendingProfileName);
+                    ShowToast(I18n::Trf("{} applied", g_developerPendingProfileName), std::move(before), "Profile loaded: " + g_developerPendingProfileName);
                     g_developerPendingProfile = {};
                 }
                 ImGui::CloseCurrentPopup();
@@ -2160,11 +2178,12 @@ void MenuTab() {
     ApexUi::EndCard();
     ScreenshotCaptureCard();
     if (ApexUi::BeginCard("##Maintenance")) {
-        ApexUi::CardHeader(IconId::Wrench, "Settings and maintenance", "Saving, reset and optional developer tools", nullptr, nullptr);
+        ApexUi::CardHeader(IconId::Wrench, "Settings and maintenance", "Saving, reset and recovery", nullptr, nullptr);
         ApexUi::CardDivider();
         SaveRow();
         DeveloperModeRow();
         ResetAllRow();
+        RecoveryRow();
     }
     ApexUi::EndCard();
     ImGui::PopID();
@@ -2177,6 +2196,8 @@ struct ProfileItem {
     IconId icon = IconId::Bookmark;
     unsigned parts = 0; // what the file has (ApexConfig::ProfilePartsOf)
     int builtin = -1;   // ApexPresets index (shipped with the mod, no file, cannot be deleted); -1 = a file in the Profiles folder
+    toml::table state;  // as read, for the "Applied" chip
+    bool applied = false; // its parts match the current setup (PresetMatches)
     std::string Key() const { return builtin >= 0 ? std::format("#builtin{}", builtin) : name; } // file names cannot contain '#'
 };
 struct ProfilesState {
@@ -2188,6 +2209,10 @@ struct ProfilesState {
     std::string message; // the result of the last action
     bool messageError = false;
     std::string confirmDelete;  // a profile waiting for "Delete?"
+    std::string confirmUpdate;  // a profile waiting for "Update with current setup?"
+    std::string appliedKey;     // the last preset applied this session (Key()) and the parts applied
+    unsigned appliedParts = 0;
+    double matchedAt = -1.0;    // when the "Applied" chips were last computed; < 0 = now
     std::string confirmReplace; // a name that exists, waiting for "Replace?"
     std::string loading;        // a profile whose parts are being picked before "Load"
     unsigned loadParts = 0;
@@ -2368,8 +2393,8 @@ void SaveProfileNow(const std::string& name) {
     g_profiles.listDirty = true;
 }
 
-// name: the file's name or a built-in profile's English name (log); shown: as the menu shows it
-void ApplyProfileState(const std::string& name, const std::string& shown, toml::table state, unsigned parts) {
+// name: the file's name or a built-in profile's English name (log); shown: as the menu shows it; key: ProfileItem::Key()
+void ApplyProfileState(const std::string& name, const std::string& shown, const std::string& key, toml::table state, unsigned parts) {
     ApexConfig::KeepProfileParts(state, parts);
     if (!kDevToolsBuild) state.erase("developer"); // the players' build: a profile's developer part is not asked about
     if (const auto* d = state["developer"].as_table(); d && (*d)["enabled"].value_or(true) && !ApexConfig::GetUi().developerMode) {
@@ -2383,7 +2408,10 @@ void ApplyProfileState(const std::string& name, const std::string& shown, toml::
     ApexConfig::ApplyFeatureState(state);
     LOG_INFO(std::format("[Menu] Profile loaded: {} (parts {:#x})", name, parts));
     ProfileMessage(I18n::Trf("Loaded \"{}\"", shown), false);
-    ShowToast(I18n::Tr("Profile loaded"), std::move(before), "Profile loaded: " + name);
+    ShowToast(I18n::Trf("{} applied", shown), std::move(before), "Profile loaded: " + name);
+    g_profiles.appliedKey = key;
+    g_profiles.appliedParts = parts;
+    g_profiles.matchedAt = -1.0;
 }
 
 void LoadProfileNow(const std::string& name, unsigned parts) {
@@ -2393,7 +2421,7 @@ void LoadProfileNow(const std::string& name, unsigned parts) {
         ProfileMessage(I18n::Trf("Could not load \"{}\": {}", name, err), true);
         return;
     }
-    ApplyProfileState(name, name, std::move(state), parts);
+    ApplyProfileState(name, name, name, std::move(state), parts);
 }
 
 void LoadBuiltinProfileNow(int index, unsigned parts) {
@@ -2404,7 +2432,7 @@ void LoadBuiltinProfileNow(int index, unsigned parts) {
         ProfileMessage(I18n::Trf("Could not load \"{}\": {}", I18n::Tr(preset.name), err), true);
         return;
     }
-    ApplyProfileState(preset.name, I18n::Tr(preset.name), std::move(state), parts);
+    ApplyProfileState(preset.name, I18n::Tr(preset.name), std::format("#builtin{}", index), std::move(state), parts);
 }
 
 void LoadProfileItem(const ProfileItem& item, unsigned parts) {
@@ -2714,7 +2742,7 @@ void RunPresetShortcut() {
     }
     const unsigned parts = ApexConfig::ProfilePartsOf(state) & kPresetKeyParts;
     if (!parts) return;
-    ApplyProfileState(logName, shown, std::move(state), parts);
+    ApplyProfileState(logName, shown, preset, std::move(state), parts);
     LOG_INFO(std::format("[Menu] Preset shortcut applied {}", logName));
     if (!Overlay::IsVisible()) {
         g_presetPillName = shown;
@@ -2824,21 +2852,70 @@ void PresetShortcutEditor() {
     }
 }
 
+// Every value the preset has equals the current one ([meta] aside); numbers within 1/100000, as saved TOML round-trips.
+// Keys the current setup does not have (retired settings, ones this build leaves out) cannot be applied and are skipped.
+// mismatch (optional) = the path of the first value that differs.
+bool PresetValuesMatch(const toml::table& current, const toml::table& preset, std::string* mismatch=nullptr, const std::string& path={}) {
+    for(const auto& [key,value]:preset) {
+        if(key.str()=="meta") continue;
+        const toml::node* now=current.get(key.str());
+        if(!now) continue;
+        const std::string at=path.empty()?std::string(key.str()):path+"."+std::string(key.str());
+        bool same=true;
+        if(const auto* t=value.as_table()) {if(!now->is_table() || !PresetValuesMatch(*now->as_table(),*t,mismatch,at)) return false; continue;}
+        if(value.is_number() && now->is_number()) {
+            const double a=value.value_or(0.0), b=now->value_or(0.0);
+            same=std::fabs(a-b)<=1e-5*std::fmax(1.0,std::fabs(a));
+        }
+        else if(value.type()!=now->type()) same=false;
+        else if(const auto* v=value.as_string()) same=v->get()==now->as_string()->get();
+        else if(const auto* v=value.as_boolean()) same=v->get()==now->as_boolean()->get();
+        else if(const auto* v=value.as_array()) same=*v==*now->as_array();
+        if(!same) {if(mismatch) *mismatch=at; return false;}
+    }
+    return true;
+}
+
+// The "Applied" chips: which presets the current setup matches. Shortcuts and Developer are left out (Apply leaves
+// them unchecked); for the last applied preset only the parts that were applied count. Twice a second at most.
+void UpdatePresetMatches(ProfilesState& s) {
+    const double now=ImGui::GetTime();
+    if(s.matchedAt>=0.0 && now-s.matchedAt<0.5) return;
+    s.matchedAt=now;
+    toml::table current; ApexConfig::CaptureProfileState(current);
+    for(auto& item:s.list) {
+        unsigned parts=item.parts & ~(ApexConfig::kPartShortcuts | ApexConfig::kPartDeveloper);
+        if(item.Key()==s.appliedKey) parts&=s.appliedParts;
+        toml::table state=item.state; ApexConfig::KeepProfileParts(state,parts);
+        std::string mismatch;
+        item.applied=parts!=0 && PresetValuesMatch(current,state,&mismatch);
+        // The last applied preset: log once what keeps it from matching (a setting that does not apply as saved)
+        static std::string logged;
+        if(item.Key()==s.appliedKey && !item.applied && !mismatch.empty() && logged!=s.appliedKey+mismatch) {
+            logged=s.appliedKey+mismatch;
+            LOG_INFO(std::format("[Menu] Preset {} differs from the current setup at {}",item.name,mismatch));
+        }
+    }
+}
+
 void ProfilesTab() {
     auto& s=g_profiles;
     if(s.listDirty) {
         s.list.clear();
         for(const auto& name:ApexConfig::ListProfiles()) {
             ProfileItem item{name,IconId::Bookmark,0}; toml::table state;
-            if(ApexConfig::ReadProfile(name,state)) {item.parts=ApexConfig::ProfilePartsOf(state);item.icon=ApexUi::IconFromName(state["meta"]["icon"].value_or(std::string("bookmark")));}
+            if(ApexConfig::ReadProfile(name,state)) {item.parts=ApexConfig::ProfilePartsOf(state);item.icon=ApexUi::IconFromName(state["meta"]["icon"].value_or(std::string("bookmark")));item.state=std::move(state);}
             s.list.push_back(std::move(item));
         }
         for(int i=0;i<ApexPresets::kCount;++i) {
             const auto& preset=ApexPresets::Get(i); toml::table state; ApexPresets::Read(i,state);
-            s.list.push_back({preset.name,ApexUi::IconFromName(preset.icon),ApexConfig::ProfilePartsOf(state),i});
+            const unsigned parts=ApexConfig::ProfilePartsOf(state);
+            s.list.push_back({preset.name,ApexUi::IconFromName(preset.icon),parts,i,std::move(state)});
         }
         s.listDirty=false;
+        s.matchedAt=-1.0;
     }
+    UpdatePresetMatches(s);
     ImGui::PushID("Profiles");
     {
         const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
@@ -2849,6 +2926,8 @@ void ProfilesTab() {
         action("Save current",IconId::Save,ProfilesState::Save,ButtonKind::Primary,false);
         action("Import",IconId::Download,ProfilesState::Import,ButtonKind::Secondary,true);
         action("Export",IconId::ExternalLink,ProfilesState::Export,ButtonKind::Secondary,true);
+        if(ImGui::GetItemRectMax().x+ImGui::GetStyle().ItemSpacing.x+ApexUi::ButtonWidth("Open the presets folder",true)<=ImGui::GetWindowPos().x+ImGui::GetWindowContentRegionMax().x) ImGui::SameLine();
+        if(ApexUi::IconTextButton("Open the presets folder",IconId::FolderOpen)) OpenProfilesFolder();
     }
     if(!s.message.empty() && s.dialog==ProfilesState::None) ApexUi::IconNote(s.messageError?IconId::TriangleAlert:IconId::CircleCheck,s.message.c_str());
     ApexUi::Gap(ApexUi::kSpace2);
@@ -2871,7 +2950,9 @@ void ProfilesTab() {
                 const float tagW=tag.empty()?0.0f:ApexUi::ChipSize(tag.c_str()).x+gap;
                 const ImVec2 rowStart=ImGui::GetCursorScreenPos();
                 if(!builtin) ApexUi::SetNextRowUntranslated();
-                if(ApexUi::BeginControlRow(item.name.c_str(),builtin?description.c_str():nullptr,fixed+tagW,item.icon)) {
+                if(item.applied) ApexUi::SetNextRowBadge("Applied","Your current setup matches this preset",VioletTheme::kSuccess);
+                else if(key==s.appliedKey) ApexUi::SetNextRowChangedDot("Changed since you applied it");
+                if(ApexUi::BeginControlRow(item.name.c_str(),description.empty()?nullptr:description.c_str(),fixed+tagW,item.icon)) {
                     const ImVec2 applyPos=ImGui::GetCursorScreenPos();
                     const float frameH=ImGui::GetFrameHeight();
                     if(!tag.empty()) {
@@ -2885,7 +2966,12 @@ void ProfilesTab() {
                     ImGui::SameLine();
                     ImGui::SetCursorScreenPos(ImVec2(applyPos.x+tagW+24.0f*u+gap,applyPos.y));
                     ImGui::BeginDisabled(Loading() || !item.parts);
-                    if(ApexUi::IconTextButton("Apply",IconId::Download)) StartPresetDialog(ProfilesState::Apply,&item);
+                    // One click applies the parts Apply would preselect (not Shortcuts or Developer); Undo is in the toast and
+                    // "Apply some parts…" in the menu opens the category choice
+                    if(ApexUi::IconTextButton("Apply",IconId::Download)) {
+                        const unsigned parts=item.parts & ~(ApexConfig::kPartShortcuts|ApexConfig::kPartDeveloper);
+                        if(parts) LoadProfileItem(item,parts); else StartPresetDialog(ProfilesState::Apply,&item);
+                    }
                     ImGui::EndDisabled();
                     ApexUi::EndControlRow();
                     // Right-click anywhere on the row opens the same actions as the "..." button
@@ -2894,13 +2980,18 @@ void ProfilesTab() {
                        ImGui::IsMouseClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("Actions");
                     if(ApexUi::BeginActionMenu("Actions",shownName)) {
                         {const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+                            if(ApexUi::ActionMenuItem("Apply some parts…",IconId::Layers,item.parts!=0 && !Loading())) {StartPresetDialog(ProfilesState::Apply,&item);ImGui::CloseCurrentPopup();}
+                            if(!builtin) {
+                                if(ApexUi::ActionMenuItem("Update with current setup",IconId::Save,item.parts!=0)) {s.confirmUpdate=key;s.confirmDelete.clear();ImGui::CloseCurrentPopup();}
+                                ImGui::Separator(); ApexUi::Gap(ApexUi::kSpace1);
+                            }
                             if(ApexUi::ActionMenuItem(keys.empty()?"Assign shortcut":"Change shortcut",IconId::Keyboard,item.parts!=0)) {
                                 g_presetKeyEditing=key; g_presetKeyEditingName=shownName; g_presetKeyOpenEditor=true; ImGui::CloseCurrentPopup();
                             }
                             if(ApexUi::ActionMenuItem("Remove shortcut",IconId::X,!keys.empty())) {SetPresetShortcut(key,{});ImGui::CloseCurrentPopup();}
                             ImGui::Separator(); ApexUi::Gap(ApexUi::kSpace1);
                             if(ApexUi::ActionMenuItem("Export",IconId::ExternalLink)) {StartPresetDialog(ProfilesState::Export,&item);ImGui::CloseCurrentPopup();}
-                            if(!builtin && ApexUi::ActionMenuItem("Delete",IconId::Trash2)) {s.confirmDelete=key;ImGui::CloseCurrentPopup();}
+                            if(!builtin && ApexUi::ActionMenuItem("Delete",IconId::Trash2)) {s.confirmDelete=key;s.confirmUpdate.clear();ImGui::CloseCurrentPopup();}
                         } ApexUi::EndActionMenu();
                     }
                     if(s.confirmDelete==key) {
@@ -2916,29 +3007,39 @@ void ProfilesTab() {
                             s.confirmDelete.clear();s.listDirty=true;
                         }
                     }
+                    if(s.confirmUpdate==key) {
+                        // Same parts, icon and shortcut (keyed by name); only the values change
+                        ApexUi::MutedText("Replace this preset with your current setup?");
+                        if(ApexUi::TextButton("Cancel##Update")) s.confirmUpdate.clear(); ImGui::SameLine();
+                        if(ApexUi::IconTextButton("Update",IconId::Save,nullptr,ButtonKind::Primary)) {
+                            std::string error;
+                            if(ApexConfig::SaveProfile(item.name,item.parts,&error,ApexUi::IconName(item.icon))) {
+                                ProfileMessage(I18n::Trf("Updated \"{}\"",item.name),false);
+                                s.appliedKey=key; s.appliedParts=item.parts;
+                            }
+                            else ProfileMessage(I18n::Trf("Could not save \"{}\": {}",item.name,error),true);
+                            s.confirmUpdate.clear();s.listDirty=true;
+                        }
+                    }
                 } ImGui::PopID();
             }
             if(!any) ApexUi::MutedText("No saved presets yet");
         } ApexUi::EndCard();
     }
-    {const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
-        if(ApexUi::IconTextButton("Open the presets folder",IconId::ExternalLink)) OpenProfilesFolder();
-    }
     PresetDialog(); PresetShortcutEditor(); ImGui::PopID();
 }
 
-void RecoveryCard() {
-    if (ApexUi::BeginCard("##Recovery")) {
-        ApexUi::CardHeader(IconId::RotateCcw, "Recovery", "Restarts graphics resources while keeping your settings", nullptr, nullptr);
-        ApexUi::CardDivider();
-        ApexUi::MutedText("Restarts graphics resources while keeping your settings. This does not uninstall Apex.");
-        const bool pending = ApexD3D::EffectsRestartPending();
+// Settings > Menu > Settings and maintenance: the former Recovery card (Compatibility tab) as one row
+void RecoveryRow() {
+    const bool pending = ApexD3D::EffectsRestartPending();
+    const char* label = pending ? "Restart pending" : "Restart Apex";
+    if (ApexUi::BeginControlRow("Restart Apex##Recovery", "Restarts graphics resources while keeping your settings. This does not uninstall Apex.",
+                                ApexUi::ButtonWidth(label, true))) { // the label shown, so the button stays right-aligned
         ImGui::BeginDisabled(Loading() || !ApexD3D::Device() || pending);
-        if (ApexUi::IconTextButton(pending ? "Restart pending" : "Restart Apex", IconId::RotateCcw)) ApexD3D::RequestEffectsRestart();
+        if (ApexUi::IconTextButton(label, IconId::RotateCcw)) ApexD3D::RequestEffectsRestart();
         ImGui::EndDisabled();
-
+        ApexUi::EndControlRow();
     }
-    ApexUi::EndCard();
 }
 
 void CompatibilityTab() {
@@ -2971,7 +3072,7 @@ void CompatibilityTab() {
         }
         InfoRow("Features", startup == Startup::Running ? "Running" : startup == Startup::Loading ? "Starting\xE2\x80\xA6" : "Off (old combined build found)");
         if (Platform::SteamDeck()) { // the Deck's graphics share its memory bandwidth: the screen effects cost the most there
-            ApexUi::GroupLabel("STEAM DECK");
+            ApexUi::CardGroup("Steam Deck");
             ApexUi::MutedText("The Performance preset turns off Ambient Occlusion, Depth Blur and the picture filters, which cost the most on "
                               "the Steam Deck. Night Lights stays as it is.");
             if (ApexUi::IconTextButton("Load Performance##Deck", IconId::SlidersHorizontal, "Loads the Performance preset, without its lighting part"))
@@ -2980,7 +3081,7 @@ void CompatibilityTab() {
             ApexUi::Gap(ApexUi::kSpace2);
         }
         if (AnythingRecommended()) { // shown even after the Overview card and the start note were dismissed
-            ApexUi::GroupLabel("RECOMMENDED");
+            ApexUi::CardGroup("Recommended");
             RecommendedItems();
         }
         if (ApexUi::BeginAdvanced("Details##Compatibility", "Details")) {
@@ -2990,7 +3091,6 @@ void CompatibilityTab() {
         }
     }
     ApexUi::EndCard();
-    RecoveryCard();
     ImGui::PopID();
 }
 
@@ -3000,7 +3100,7 @@ void AboutTab() {
         const std::string versionLine = I18n::Trf(kPublicBuild ? "Version {}" : "Version {} - Developer mode", APEX_VERSION_STRING);
         ApexUi::CardHeader(IconId::Info, APEX_PRODUCT_NAME " " APEX_PRODUCT_TAGLINE, versionLine.c_str(), nullptr, nullptr);
         ApexUi::CardDivider();
-        ApexUi::GroupLabel("CREDITS");
+        ApexUi::CardGroup("Credits");
         CreditLine(APEX_PRODUCT_NAME " by @loinyx.");
         CreditLine("Sims3SettingsSetter by sims3fiend: project origin and framework reference.");
         CreditLine("FXAA 3.11: Timothy Lottes (NVIDIA).");
@@ -3016,7 +3116,7 @@ void AboutTab() {
 }
 
 void SettingsPage() {
-    ApexUi::PageTitle("Settings", "Menu, compatibility and credits");
+    ApexUi::PageTitle("Settings", "Menu, shortcuts, compatibility and credits");
     static const char* const kTabs[] = {"Menu", "Shortcuts", "Compatibility", "About"};
     int visibleTab=g_settingsTab>SettingsProfiles?g_settingsTab-1:g_settingsTab;
     if(g_settingsTab==SettingsProfiles) visibleTab=0;
@@ -3047,10 +3147,9 @@ struct SearchPart {
 const SearchPart* SearchParts(int& count) {
     static const SearchPart kParts[] = {
         {"Lighting", "Overview", PageLighting, &g_lightingTab, LightingLamps, LampsTabContent},
-        {"Lighting", "Ground", PageLighting, &g_lightingTab, LightingGround, GroundTabContent},
-        {"Lighting", "Objects", PageLighting, &g_lightingTab, LightingObjects, ObjectsTabContent},
-        {"Lighting", "Buildings", PageLighting, &g_lightingTab, LightingBuildings, BuildingsTabContent},
-        {"Lighting", "Stories", PageLighting, &g_lightingTab, LightingStories, StoriesTabContent},
+        {"Lighting", "Outside", PageLighting, &g_lightingTab, LightingOutside, OutsideTabContent},
+        {"Lighting", "Inside & floors", PageLighting, &g_lightingTab, LightingInside, InsideTabContent},
+        {"Lighting", "Game fixes", PageLighting, &g_lightingTab, LightingFixes, FixesTabContent},
         {"Water & Snow", nullptr, PageWaterSnow, nullptr, 0, WaterSnowContent},
         {"Banding Fix", nullptr, PageBanding, nullptr, 0, BandingTabContent},
         {"Color", "Overview", PageColor, &g_colorTab, Picture::TabOverview, ColorOverview},
@@ -3367,7 +3466,7 @@ int g_welcomePreviewed = -1;    // the profile currently applied by the welcome,
 void FinishWelcomePreview() {
     if (g_welcomePreviewed < 0) return;
     LOG_INFO(std::format("[Menu] Welcome: {} kept on leaving", ApexPresets::Get(g_welcomePreviewed).name));
-    ShowToast(I18n::Tr("Profile loaded"), g_welcomeBefore, std::string("Profile loaded: ") + ApexPresets::Get(g_welcomePreviewed).name);
+    ShowToast(I18n::Trf("{} applied", I18n::Tr(ApexPresets::Get(g_welcomePreviewed).name)), g_welcomeBefore, std::string("Profile loaded: ") + ApexPresets::Get(g_welcomePreviewed).name);
     g_welcomePreviewed = -1;
 }
 
@@ -3426,7 +3525,7 @@ void WelcomeProfileStep() {
                                        ButtonKind::Primary)) {
                 if (g_welcomePreviewed >= 0) {
                     LOG_INFO(std::format("[Menu] Welcome: {} chosen", ApexPresets::Get(g_welcomePreviewed).name));
-                    ShowToast(I18n::Tr("Profile loaded"), g_welcomeBefore, std::string("Profile loaded: ") + ApexPresets::Get(g_welcomePreviewed).name);
+                    ShowToast(I18n::Trf("{} applied", I18n::Tr(ApexPresets::Get(g_welcomePreviewed).name)), g_welcomeBefore, std::string("Profile loaded: ") + ApexPresets::Get(g_welcomePreviewed).name);
                     g_welcomePreviewed = -1;
                 }
                 g_welcomeState = 2;
@@ -3711,8 +3810,8 @@ void VersionButton(float x, float y, float h) {
     const bool open = ImGui::IsPopupOpen("##WhatsNew");
     ImDrawList* dl = ImGui::GetWindowDrawList();
     if (hovered || open) {
-        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(Col(VioletTheme::kCardBg)), 6.0f * u);
-        dl->AddRect(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(Col(VioletTheme::kCardBorder)), 6.0f * u);
+        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(Col(VioletTheme::kCardBg)), 10.0f * u);
+        dl->AddRect(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(Col(VioletTheme::kCardBorder)), 10.0f * u);
     }
     float cx = p.x + padX;
     if (unseen) {
@@ -3725,70 +3824,250 @@ void VersionButton(float x, float y, float h) {
     if (!open) ApexUi::Tooltip(tip.c_str());
     if (clicked) {
         ImGui::OpenPopup(kMemoryOptimizationTest ? "##PublicTestWelcome" : "##WhatsNew");
+        g_whatsNewOpenedAt = ImGui::GetTime();
+        g_whatsNewSettle = 3;
         if (unseen && !kMemoryOptimizationTest) {
             ApexConfig::UiSettings ui = ApexConfig::GetUi();
             ui.changelogSeen = ApexChangelog::Get(0).version; // [ui] changelog_seen
             ApexConfig::SetUi(ui);
         }
     }
-    // The popover opens above the button, centred on it
-    ImGui::SetNextWindowPos(ImVec2(p.x + w * 0.5f, p.y - ApexUi::kSpace2 * u), ImGuiCond_Always, ImVec2(0.5f, 1.0f));
-    ImGui::SetNextWindowSize(ImVec2(380.0f * u, 0.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ApexUi::kSpace4 * u, ApexUi::kSpace3 * u));
-    ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 12.0f * u);
-    if (ImGui::BeginPopup("##WhatsNew")) {
-        // The last kShown versions, newest first, in a list that scrolls past kListH (always the last 8)
+    // The popover opens above the button, centred on it, as tall as its content up to the room above the button (at most
+    // 560 units; its bottom stays put, so opening a release grows it upwards). Past that only the release list scrolls,
+    // inside the padding, clear of the rounded corners; the popover itself never scrolls, so there is one bar at most.
+    // Its height is the header, the list's content and the footer measured the frame before (not the content measured
+    // inside the popover: that depends on its own height, and a pixel lost each frame shrank it to its minimum), so it
+    // is laid out unseen for its first frames, then rises in over 0.16 s (alpha and 8 units) from g_whatsNewOpenedAt.
+    const bool settling = g_whatsNewSettle > 0;
+    if (settling) g_whatsNewOpenedAt = ImGui::GetTime();
+    const float rise = std::clamp(static_cast<float>(ImGui::GetTime() - g_whatsNewOpenedAt) / 0.16f, 0.0f, 1.0f);
+    const float riseEased = 1.0f - (1.0f - rise) * (1.0f - rise);
+    const float popMax = std::floor(std::fmin(560.0f * u, std::fmax(240.0f * u, p.y - ImGui::GetMainViewport()->Pos.y - 24.0f * u)));
+    const float padY = ApexUi::kSpace4 * u;
+    const float wanted = g_whatsNewHeadH + g_whatsNewListH + g_whatsNewFooterH + padY + 2.0f; // (2 px: the list never scrolls for a pixel)
+    const float popH = g_whatsNewHeadH > 0.0f && g_whatsNewListH > 0.0f && g_whatsNewFooterH > 0.0f ? std::fmin(popMax, std::ceil(wanted)) : popMax;
+    ImGui::SetNextWindowPos(ImVec2(p.x + w * 0.5f, p.y - ApexUi::kSpace2 * u + (1.0f - riseEased) * 8.0f * u), ImGuiCond_Always, ImVec2(0.5f, 1.0f));
+    ImGui::SetNextWindowSize(ImVec2(420.0f * u, popH));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ApexUi::kSpace4 * u, ApexUi::kSpace4 * u));
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 18.0f * u);
+    // (unseen = a tiny alpha, not 0: ImGui skips a window whose alpha is 0 at its Begin, so it was never laid out and
+    // never appeared)
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, settling ? 0.001f : ImGui::GetStyle().Alpha * (0.25f + 0.75f * riseEased));
+    ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 6.0f * u);
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, Col(0, 0.0f));
+    if (ImGui::BeginPopup("##WhatsNew", ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+        // A header with the installed version; then the last kShown versions, newest first: the newest open, each older one
+        // a row with its counts that opens on a click. Inside a release, the lines of one area ("Night Lights: ...") are
+        // grouped under the area's name, so every line starts at the same edge.
         constexpr int kShown = 8;
-        const float kListH = 520.0f * u;
-        const float wrap = ImGui::GetContentRegionAvail().x - ApexUi::kSpace4 * u - ImGui::GetStyle().ScrollbarSize;
-        auto section = [&](const char* title, const char* const* lines) {
-            if (!lines || !lines[0]) return;
-            ImGui::Dummy(ImVec2(0.0f, ApexUi::kSpace1 * u));
-            ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * 0.8f);
-            ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kTextMuted));
-            ImGui::TextUnformatted(I18n::Tr(title));
-            ImGui::PopStyleColor();
+        const int shown = std::min(kShown, ApexChangelog::Count());
+        ImDrawList* pdl = ImGui::GetWindowDrawList();
+        auto count = [](const char* const* lines) { int n = 0; for (const char* const* l = lines; l && *l; ++l) ++n; return n; };
+        {
+            const ApexChangelog::Release& now = ApexChangelog::Get(0);
+            const float badge = 40.0f * u;
+            const ImVec2 b = ImGui::GetCursorScreenPos();
+            pdl->AddRectFilled(b, ImVec2(b.x + badge, b.y + badge), ImGui::GetColorU32(Col(VioletTheme::kAccentDark)), 12.0f * u);
+            const float is = 20.0f * u;
+            ApexUi::DrawIcon(pdl, IconId::Gift, ImVec2(b.x + (badge - is) * 0.5f, b.y + (badge - is) * 0.5f), is, ImGui::GetColorU32(Col(0xFFFFFF)));
+            ImGui::SetCursorScreenPos(ImVec2(b.x + badge + ApexUi::kSpace3 * u, b.y + 1.0f * u));
+            ImGui::BeginGroup();
+            ImGui::PushFont(VioletTheme::BoldFont(), VioletTheme::BaseFontSize() * 1.05f);
+            ImGui::TextUnformatted(I18n::Tr("What's new"));
             ImGui::PopFont();
-            for (const char* const* line = lines; *line; ++line) {
-                const ImVec2 b = ImGui::GetCursorScreenPos();
-                const float lh = ImGui::GetTextLineHeight();
-                ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(b.x + 4.0f * u, b.y + lh * 0.5f), 2.5f * u, ImGui::GetColorU32(Col(VioletTheme::kAccent)));
-                ImGui::SetCursorScreenPos(ImVec2(b.x + ApexUi::kSpace4 * u, b.y));
-                ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrap);
-                ImGui::TextUnformatted(I18n::Tr(*line));
-                ImGui::PopTextWrapPos();
-            }
-        };
-        ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(FLT_MAX, kListH));
-        if (ImGui::BeginChild("##WhatsNewList", ImVec2(0.0f, 0.0f), ImGuiChildFlags_AutoResizeY, 0)) {
-            const int shown = std::min(kShown, ApexChangelog::Count());
+            ApexUi::MutedText(now.date[0] ? I18n::Trf("You have version {}, released {}", now.version, now.date).c_str() : I18n::Trf("You have version {}", now.version).c_str());
+            ImGui::EndGroup();
+            ImGui::SetCursorScreenPos(ImVec2(b.x, std::fmax(b.y + badge, ImGui::GetItemRectMax().y) + ApexUi::kSpace3 * u));
+        }
+        // The list: as tall as its releases, at most what the header and the footer leave
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float footerH = g_whatsNewFooterH > 0.0f ? g_whatsNewFooterH
+                                                       : style.ItemSpacing.y * 3.0f + 1.0f + ApexUi::kSpace1 * u + ImGui::GetFrameHeight();
+        const float room = std::fmax(80.0f * u, ImGui::GetContentRegionAvail().y - footerH);
+        g_whatsNewHeadH = ImGui::GetCursorScreenPos().y - ImGui::GetWindowPos().y;
+        if (ImGui::BeginChild("##WhatsNewList", ImVec2(0.0f, g_whatsNewListH > 0.0f ? std::fmin(g_whatsNewListH, room) : room), ImGuiChildFlags_None,
+                              ImGuiWindowFlags_NoBackground)) {
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            const float pad = ApexUi::kSpace3 * u;
+            const float width = ImGui::GetContentRegionAvail().x - (ImGui::GetScrollMaxY() > 0.0f ? ApexUi::kSpace1 * u : 0.0f); // clear of the scrollbar
+            const float dt = ImGui::GetIO().DeltaTime;
             for (int i = 0; i < shown; i++) {
                 const ApexChangelog::Release& r = ApexChangelog::Get(i);
-                if (i > 0) {
-                    ImGui::Dummy(ImVec2(0.0f, ApexUi::kSpace2 * u));
-                    ImGui::Separator();
-                    ImGui::Dummy(ImVec2(0.0f, ApexUi::kSpace1 * u));
+                ImGui::PushID(i);
+                ImGuiStorage* st = ImGui::GetStateStorage();
+                const ImGuiID openKey = ImGui::GetID("Open"), animKey = ImGui::GetID("Anim"), heightKey = ImGui::GetID("Height");
+                bool open = st->GetBool(openKey, i == 0);
+                // 0..1 towards open over 0.22 s, eased; the body's height comes from the last frame it was drawn in full
+                float anim = st->GetFloat(animKey, open ? 1.0f : 0.0f);
+                anim = std::clamp(anim + (open ? 1.0f : -1.0f) * dt / 0.22f, 0.0f, 1.0f);
+                st->SetFloat(animKey, anim);
+                const float eased = anim * anim * (3.0f - 2.0f * anim);
+                const float bodyFull = st->GetFloat(heightKey, 0.0f);
+                const float bodyH = anim >= 1.0f ? bodyFull : bodyFull * eased;
+                const ImVec2 top = ImGui::GetCursorScreenPos();
+                const float rowH = 40.0f * u;
+                // The card under the open release (drawn first, the rows on top of it)
+                if (anim > 0.0f) {
+                    const ImU32 card = ImGui::GetColorU32(Col(VioletTheme::kCardBg, std::fmin(1.0f, eased * 1.5f)));
+                    dl->AddRectFilled(top, ImVec2(top.x + width, top.y + rowH + bodyH), card, 14.0f * u);
                 }
-                ImGui::PushFont(VioletTheme::BoldFont(), VioletTheme::BaseFontSize() * (i == 0 ? 1.1f : 1.0f));
-                ImGui::TextUnformatted(i == 0 ? I18n::Trf("What's new in {}", r.version).c_str() : I18n::Trf("Version {}", r.version).c_str());
+                if (ImGui::InvisibleButton("##Release", ImVec2(width, rowH), ImGuiButtonFlags_EnableNav)) {
+                    open = !open;
+                    st->SetBool(openKey, open);
+                }
+                // Every release is a box with a soft outline (its whole card while it is open); hovered, the box fills a step
+                // lighter, the outline strengthens and the chevron lights. The popover's background is kHoverBg, so the
+                // menu's usual hover fill did not show here
+                const bool rowHovered = ImGui::IsItemHovered();
+                {
+                    const ImVec2 bottom(top.x + width, top.y + rowH + (anim > 0.0f ? bodyH : 0.0f));
+                    if (rowHovered && anim <= 0.0f) dl->AddRectFilled(top, bottom, ImGui::GetColorU32(Col(VioletTheme::kSelectedBg)), 14.0f * u);
+                    dl->AddRect(top, bottom, ImGui::GetColorU32(Col(rowHovered ? VioletTheme::kToggleOff : VioletTheme::kSelectedBg)), 14.0f * u, 0, 1.0f * u);
+                }
+                const float cy = top.y + rowH * 0.5f, is = 14.0f * u;
+                float x = top.x + pad;
+                ApexUi::DrawIcon(dl, eased > 0.5f ? IconId::ChevronDown : IconId::ChevronRight, ImVec2(x, cy - is * 0.5f), is,
+                                 ImGui::GetColorU32(Col(rowHovered ? VioletTheme::kText : VioletTheme::kTextMuted)));
+                x += is + ApexUi::kSpace2 * u;
+                ImGui::PushFont(VioletTheme::BoldFont(), VioletTheme::BaseFontSize());
+                dl->AddText(ImVec2(x, cy - ImGui::GetTextLineHeight() * 0.5f), ImGui::GetColorU32(Col(VioletTheme::kText)), r.version);
+                x += ImGui::CalcTextSize(r.version).x + ApexUi::kSpace2 * u;
                 ImGui::PopFont();
-                if (r.date[0]) {
-                    ImGui::SameLine(0.0f, ApexUi::kSpace2 * u);
-                    ApexUi::MutedText(r.date);
+                ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
+                const float sh = ImGui::GetTextLineHeight();
+                if (r.date[0]) dl->AddText(ImVec2(x, cy - sh * 0.5f), ImGui::GetColorU32(Col(VioletTheme::kTextMuted)), r.date);
+                // Right: "Installed" on the newest; else a coloured dot and a count per kind ("2 fixed")
+                float rx = top.x + width - pad;
+                if (i == 0) {
+                    ImGui::PopFont();
+                    const char* inst = I18n::Tr("Installed");
+                    const ImVec2 cs = ApexUi::ChipSize(inst);
+                    const ImVec2 after = ImGui::GetCursorScreenPos();
+                    ImGui::SetCursorScreenPos(ImVec2(rx - cs.x, cy - cs.y * 0.5f));
+                    ApexUi::Chip(inst, VioletTheme::kAccentLight);
+                    ImGui::SetCursorScreenPos(after);
+                } else {
+                    const struct { int n; const char* fmt; unsigned rgb; } kinds[] = {
+                        {count(r.fixed), "{} fixed", 0x5F606A}, {count(r.improved), "{} improved", VioletTheme::kSuccess}, {count(r.added), "{} new", VioletTheme::kAccent}};
+                    for (const auto& k : kinds) { // right to left
+                        if (!k.n) continue;
+                        const std::string t = I18n::Trf(k.fmt, k.n);
+                        const float tw = ImGui::CalcTextSize(t.c_str()).x;
+                        rx -= tw;
+                        dl->AddText(ImVec2(rx, cy - sh * 0.5f), ImGui::GetColorU32(Col(VioletTheme::kTextMuted)), t.c_str());
+                        rx -= 4.0f * u + 3.0f * u;
+                        dl->AddCircleFilled(ImVec2(rx + 3.0f * u, cy), 3.0f * u, ImGui::GetColorU32(Col(k.rgb)));
+                        rx -= ApexUi::kSpace3 * u;
+                    }
+                    ImGui::PopFont();
                 }
-                section("NEW", r.added);
-                section("IMPROVEMENTS", r.improved);
-                section("FIXES", r.fixed);
+                if (anim > 0.0f) {
+                    // The body in a child as tall as the animation allows (clipped while it grows); in full, it measures itself
+                    const float indent = pad + is + ApexUi::kSpace2 * u;
+                    ImGui::SetCursorScreenPos(ImVec2(top.x, top.y + rowH));
+                    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+                    const bool full = anim >= 1.0f || bodyFull <= 0.0f;
+                    ImGui::BeginChild("##Body", ImVec2(width, full ? 0.0f : std::fmax(1.0f, bodyH)), full ? ImGuiChildFlags_AutoResizeY : ImGuiChildFlags_None,
+                                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBackground);
+                    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * eased);
+                    const float textW = width - indent - pad;
+                    auto section = [&](IconId icon, unsigned rgb, const char* title, const char* const* lines) {
+                        if (!lines || !lines[0]) return;
+                        ImDrawList* bdl = ImGui::GetWindowDrawList();
+                        ImGui::SetCursorPosX(indent);
+                        const ImVec2 h = ImGui::GetCursorScreenPos();
+                        const float hs = 14.0f * u;
+                        ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
+                        const float lh = ImGui::GetTextLineHeight();
+                        ApexUi::DrawIcon(bdl, icon, ImVec2(h.x, h.y + (lh - hs) * 0.5f), hs, ImGui::GetColorU32(Col(rgb)));
+                        bdl->AddText(ImVec2(h.x + hs + 6.0f * u, h.y), ImGui::GetColorU32(Col(VioletTheme::kTextMuted)), I18n::Tr(title));
+                        ImGui::Dummy(ImVec2(textW, lh));
+                        ImGui::PopFont();
+                        // The lines grouped by area, in the order the areas first appear
+                        struct Line { std::string area; std::string text; };
+                        std::vector<Line> parsed;
+                        for (const char* const* line = lines; *line; ++line) {
+                            std::string_view text = I18n::Tr(*line);
+                            std::string area;
+                            for (std::string_view sep : {std::string_view(": "), std::string_view("\xEF\xBC\x9A")}) { // also a CJK full-width colon
+                                const size_t at = text.find(sep);
+                                if (at != std::string_view::npos && at > 0 && at <= 32) {
+                                    area.assign(text.substr(0, at));
+                                    text.remove_prefix(at + sep.size());
+                                    break;
+                                }
+                            }
+                            std::string t(text);
+                            if (!t.empty() && t[0] >= 'a' && t[0] <= 'z') t[0] = static_cast<char>(t[0] - 'a' + 'A'); // a sentence of its own
+                            parsed.push_back({std::move(area), std::move(t)});
+                        }
+                        std::vector<bool> done(parsed.size(), false);
+                        for (size_t a = 0; a < parsed.size(); ++a) {
+                            if (done[a]) continue;
+                            ImGui::Dummy(ImVec2(0.0f, 2.0f * u));
+                            if (!parsed[a].area.empty()) {
+                                ImGui::SetCursorPosX(indent);
+                                ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
+                                ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kAccentLight));
+                                ImGui::TextUnformatted(parsed[a].area.c_str());
+                                ImGui::PopStyleColor();
+                                ImGui::PopFont();
+                            }
+                            for (size_t b = a; b < parsed.size(); ++b) {
+                                if (done[b] || parsed[b].area != parsed[a].area) continue;
+                                done[b] = true;
+                                ImGui::SetCursorPosX(indent);
+                                const ImVec2 l = ImGui::GetCursorScreenPos();
+                                const float bh = ImGui::GetTextLineHeight();
+                                bdl->AddCircleFilled(ImVec2(l.x + 4.0f * u, l.y + bh * 0.5f), 2.0f * u, ImGui::GetColorU32(Col(0x5F606A)));
+                                ImGui::SetCursorPosX(indent + 14.0f * u);
+                                ImGui::PushTextWrapPos(indent + textW);
+                                ImGui::TextWrapped("%s", parsed[b].text.c_str());
+                                ImGui::PopTextWrapPos();
+                            }
+                        }
+                        ImGui::Dummy(ImVec2(0.0f, ApexUi::kSpace2 * u));
+                    };
+                    section(IconId::Sparkles, VioletTheme::kAccent, "New", r.added);
+                    section(IconId::Rocket, VioletTheme::kSuccess, "Improved", r.improved);
+                    section(IconId::Wrench, VioletTheme::kTextMuted, "Fixed", r.fixed);
+                    ImGui::Dummy(ImVec2(0.0f, ApexUi::kSpace1 * u));
+                    if (full) st->SetFloat(heightKey, ImGui::GetCursorPosY());
+                    ImGui::PopStyleVar();
+                    ImGui::EndChild();
+                    ImGui::PopStyleVar();
+                }
+                ImGui::SetCursorScreenPos(ImVec2(top.x, top.y + rowH + (anim > 0.0f ? bodyH : 0.0f) + ApexUi::kSpace1 * u));
+                ImGui::Dummy(ImVec2(0.0f, 0.0f));
+                ImGui::PopID();
             }
+            g_whatsNewListH = ImGui::GetCursorPosY();
         }
         ImGui::EndChild();
-        ImGui::Dummy(ImVec2(0.0f, ApexUi::kSpace1 * u));
+        const float listBottom = ImGui::GetItemRectMax().y;
         ImGui::Separator();
-        if (ApexUi::IconTextButton("See all versions", IconId::ExternalLink, "Opens the Apex Radiance releases page on GitHub in your browser", ButtonKind::Secondary))
-            OpenPage(kApexReleasesUrl);
+        ImGui::Dummy(ImVec2(0.0f, ApexUi::kSpace1 * u));
+        {
+            // The list size on the left, the full list on the right
+            const char* label = "See all versions";
+            const float bw = ApexUi::ButtonWidth(label, true);
+            const ImVec2 f = ImGui::GetCursorScreenPos();
+            const float fw = ImGui::GetContentRegionAvail().x;
+            const std::string hint = I18n::Trf("The last {} versions", shown);
+            ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
+            const float hh = ImGui::GetTextLineHeight();
+            pdl->AddText(ImVec2(f.x, f.y + (ImGui::GetFrameHeight() - hh) * 0.5f), ImGui::GetColorU32(Col(VioletTheme::kTextMuted)), hint.c_str());
+            ImGui::PopFont();
+            ImGui::SetCursorScreenPos(ImVec2(f.x + fw - bw, f.y));
+            if (ApexUi::IconTextButton(label, IconId::ExternalLink, "Opens the Apex Radiance releases page on GitHub in your browser", ButtonKind::Secondary))
+                OpenPage(kApexReleasesUrl);
+        }
+        g_whatsNewFooterH = ImGui::GetItemRectMax().y - listBottom;
         ImGui::EndPopup();
     }
-    ImGui::PopStyleVar(2);
+    if (settling) g_whatsNewSettle--; // (every frame after the click, drawn or not, so it always ends)
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(4);
 }
 
 // The version button's width (the label and, while What's new is unread, its dot)
@@ -3983,8 +4262,11 @@ void MainWindow() {
 
         ImGui::SetCursorScreenPos(ImVec2(wp.x, bodyTop));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ApexUi::kSpace2 * u, ApexUi::kSpace3 * u));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, VioletTheme::Col(VioletTheme::kSidebarBg));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 0.0f); // a flat band between the header and the footer
         ImGui::BeginChild("##Sidebar", ImVec2(sidebarW, bodyH), ImGuiChildFlags_AlwaysUseWindowPadding, 0);
-        ImGui::PopStyleVar();
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor();
         Sidebar(collapsed);
         ImGui::EndChild();
         ImGui::SetCursorScreenPos(ImVec2(wp.x + sidebarW + 1.0f, bodyTop));
@@ -4680,15 +4962,7 @@ void ScreenshotCaptureCard() {
                 ApexUi::EndControlRow();
             }
         }
-        if (ApexUi::BeginControlRow(RowName(RowScreenshot),
-                                    I18n::Trf("Press {} to save one screenshot with Apex's effects", ApexConfig::KeyChordText(Hotkeys::Key(Hotkeys::Action::Screenshot))).c_str(),
-                                    KeyChipWidth(RowScreenshot))) {
-            KeyChip(RowScreenshot);
-            ApexUi::EndControlRow();
-        }
-        if (g_recRow == RowScreenshot)
-            ApexUi::IconNote(IconId::Keyboard, g_recNote.empty() ? I18n::Tr("Press the new combination now; Esc cancels") : g_recNote.c_str(),
-                             g_recNote.empty() ? VioletTheme::kAccent : VioletTheme::kWarning);
+        // (its key is set once, on the Shortcuts tab)
         if (ApexUi::SwitchRow("Hide game UI in screenshots", &ui.screenshotHideGameUi,
                               "Hides the game interface for the photo, then restores it; turn off to include it", true)) ApexConfig::SetUi(ui);
     }
@@ -4766,38 +5040,18 @@ void ShortcutsTab() {
     }
     ApexUi::EndCard();
 
-    const bool narrowExtras = ImGui::GetContentRegionAvail().x < 700.0f * ApexUi::Unit();
-    if (ImGui::BeginTable("##ShortcutExtras", narrowExtras ? 1 : 2, ImGuiTableFlags_SizingStretchProp, ImVec2(0.0f, 0.0f))) {
-        if (!narrowExtras) {
-            ImGui::TableSetupColumn("menu", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-            ImGui::TableSetupColumn("help", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+    // One column like every other card (the side-by-side table and its Personalize card are gone: the startup hint is
+    // the Startup menu hint switch on the Menu tab)
+    if (ApexUi::BeginCard("##InMenu")) {
+        ApexUi::CardHeader(IconId::AppWindow, "While Apex is open", "Quick ways to navigate and compare", nullptr, nullptr);
+        ApexUi::CardDivider();
+        for (int row : {RowSearch, RowPeek, RowPictureCompare}) {
+            if (!ApexUi::BeginControlRow(RowName(row), RowText(row), KeyChipWidth(row))) continue;
+            KeyChip(row);
+            ApexUi::EndControlRow();
         }
-        ImGui::TableNextColumn();
-        if (ApexUi::BeginCard("##InMenu")) {
-            ApexUi::CardHeader(IconId::AppWindow, "While Apex is open", "Quick ways to navigate and compare", nullptr, nullptr);
-            ApexUi::CardDivider();
-            for (int row : {RowSearch, RowPeek, RowPictureCompare}) {
-                if (!ApexUi::BeginControlRow(RowName(row), RowText(row), KeyChipWidth(row))) continue;
-                KeyChip(row);
-                ApexUi::EndControlRow();
-            }
-        }
-        ApexUi::EndCard();
-        ImGui::TableNextColumn();
-        if (ApexUi::BeginCard("##PersonalizeShortcuts")) {
-            ApexUi::CardHeader(IconId::SlidersHorizontal, "Personalize", "Your settings stay yours", nullptr, nullptr);
-            ApexUi::CardDivider();
-            ApexUi::MutedText("Presets change only after you select one. Custom key choices are saved and stay in place.");
-            ApexUi::Gap(ApexUi::kSpace2);
-            if (ApexUi::TextButton("Show the startup hint next time##Shortcuts", "Shows the menu shortcut at the top center of the screen at the next start")) {
-                ApexConfig::UiSettings ui = ApexConfig::GetUi();
-                ui.startNote = true;
-                ApexConfig::SetUi(ui);
-            }
-        }
-        ApexUi::EndCard();
-        ImGui::EndTable();
     }
+    ApexUi::EndCard();
     ImGui::PopID();
 }
 

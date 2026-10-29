@@ -3,17 +3,19 @@
 Outdoor lamps on lots light the world grass outside the lot, and the ground light follows the lamps: it is rebuilt when
 lamps switch on at dusk and off at dawn, after a world loads, and when a lamp is placed, moved, removed, switched,
 dimmed or recoloured. Changes are applied to the few terrain chunks under the changed lamps when possible, one chunk at
-a time, so the game does not freeze for a full terrain rebuild. Part of [Night Lighting](README.md).
+a time, so the game does not freeze for a full terrain rebuild. While a lamp of the active lot is dragged, its ground light
+is drawn on the graphics card, so the grass and roads past the lot edge follow it at every move. Spots and shaded lamps
+light the ground through their cones, as they light the lot. Part of [Night Lighting](README.md).
 
 ## Status
 
 | | |
 |---|---|
-| Availability | Released (visitor patch, arm sites and dusk rebuild since 0.1.0; paced sweep default since 2.5.3; local relight of user and visible-lot edits since 2.5.4; world-owned type-11 lamps since 2.5.6; day/night endpoint rebuilds, Build-mode phase response, priority re-queue of in-flight chunks and the world-lamp rig request on early completion since 2.6.0). Changed in 2.7.0: the world-load and Refresh terrain rebuilds run one chunk per frame, nearest first; a lamp switch's ground changes in one frame; urgent chunks go back to back. Lot area lights in the bake and lamps on the ground stamped from 40 cm: Released in 2.15.1. No lamp edit budget for lamps switched on the load screen: Released in 2.15.3 |
+| Availability | Released (visitor patch, arm sites and dusk rebuild since 0.1.0; paced sweep default since 2.5.3; local relight of user and visible-lot edits since 2.5.4; world-owned type-11 lamps since 2.5.6; day/night endpoint rebuilds, Build-mode phase response, priority re-queue of in-flight chunks and the world-lamp rig request on early completion since 2.6.0). Changed in 2.7.0: the world-load and Refresh terrain rebuilds run one chunk per frame, nearest first; a lamp switch's ground changes in one frame; urgent chunks go back to back. Lot area lights in the bake and lamps on the ground stamped from 40 cm: Released in 2.15.1. No lamp edit budget for lamps switched on the load screen: Released in 2.15.3 Released in 2.18.0: lamp cones in the bake, a dragged lamp's ground light drawn on the GPU, moves under 5 cm added up. |
 | Default | On |
-| Menu | Lighting > Ground > Ground & Lots > *Lot lamps light the street*; Lighting > Ground > Ground & Lots > *Game fixes* (folded: *Update at dusk*, *Delay after dusk*); Lighting > Overview > Refresh lighting |
+| Menu | Lighting > Outside > Ground & Lots > *Lot lamps light the street*; Lighting > Game fixes > Ground & Lots (*Update at dusk*, *Delay after dusk*); Lighting > Overview > Refresh lighting |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` (keys below) |
-| Source | [`patches/night_terrain_relight_patch.cpp`](../../../patches/night_terrain_relight_patch.cpp), [`features/terrain_chunk_relight.cpp`](../../../features/terrain_chunk_relight.cpp), [`features/terrain_lighting_policy.h`](../../../features/terrain_lighting_policy.h), lamp tracking in [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp) |
+| Source | [`patches/night_terrain_relight_patch.cpp`](../../../patches/night_terrain_relight_patch.cpp), [`features/terrain_chunk_relight.cpp`](../../../features/terrain_chunk_relight.cpp), [`features/terrain_lighting_policy.h`](../../../features/terrain_lighting_policy.h), lamp tracking in [`features/lot_light_bridge.cpp`](../../../features/lot_light_bridge.cpp), dragged lamps in [`features/terrain_stamps.cpp`](../../../features/terrain_stamps.cpp), lamp cones in [`features/terrain_bake_cone.h`](../../../features/terrain_bake_cone.h) and [`shaders/terrain_bake_ps.hlsl`](../../../shaders/terrain_bake_ps.hlsl) |
 
 ## The problem
 
@@ -57,6 +59,11 @@ Reverse-engineering summary (Steam 1.67.2.024037; details in
 6. **One frame for a lamp switch.** The chunks of a player's lamp switch are re-rendered back to back, and their
    smoothed maps are held until the last one is done and then shown together (see
    [world-atlas-and-smoothed-maps.md](world-atlas-and-smoothed-maps.md)), so the ground does not change in pieces.
+7. **Lamp cones.** The bake draws with Apex's copy of its pixel shader, which applies each lamp's cones (see
+   [Lamp cones in the bake](#lamp-cones-in-the-bake)).
+8. **Dragged lamps on the GPU.** While a lamp of the active lot moves, the bake leaves it out and the GPU smoothing draws
+   its ground light into the chunk maps; once it stays put, one local relight bakes it again (see
+   [Dragged lamps on the GPU](#dragged-lamps-on-the-gpu)).
 
 ## Settings
 
@@ -137,6 +144,11 @@ terrain rebuild of the lamp's chunks (placing or moving a lamp rebuilds them).
 - The developer status line *Rebuild pending: the game only rebuilds the terrain at night (or in Build mode)* and the
   wait text *rate-limited (automatic: 30 s after the last rebuild)* are stale wording (see *Countdown consume* and
   *Decision rules*).
+- Dragged lamps are drawn on the GPU only with Lamp lighting: Instant, the GPU smoothing and the bake colour stub, at
+  most 8 at once; others keep the local relight. The stamp lights flat ground at the lot's ground height, so on sloped
+  ground it can differ from the bake until the lamp has been still for 1.5 s.
+- A shaded lamp whose two cone axes are not opposite keeps its spill all round in the bake; without Apex's copy of the
+  bake shader (it could not be made, or a bake stub is missing) every lamp is stamped all round, type 5 at its spill.
 
 ## Technical reference
 
@@ -211,12 +223,12 @@ assumed (a save loaded by day keeps a lamps-off terrain light).
 
 | Rule | Value |
 |---|---|
-| Moved | More than 5 cm (`kMoveTol`), both in the bake: user-driven |
+| Moved | More than 5 cm (`kMoveTol`), both in the bake: user-driven. A smaller move of a lamp in the bake keeps the place and rect last compared, so the small steps of a drag add up and count once the lamp has moved 5 cm in all |
 | Light changed (automatic) | More than 5% relative per channel with an absolute floor of 0.05 (`kLightRel`, `kLightAbs`) |
 | Priority value edit | Exact comparison (`LightChanged`) for: Build mode editing; type-11 edits on the same lot (lot-owned any change, world-owned light, enable or zero-intensity change); ordinary enable switches (0x40 or intensity through 0, `ObservedEnableSwitch`); any change of a plain lamp on a visible lot. Resets the animated state |
 | Animated | 3 automatic changes within 60 s; expires after 120 s without one |
 | Settled lot | Seen for 10 s and no uncounted change for 5 s; required unless the change is an observed value edit with no addition or removal on that lot |
-| Observed value edit | A player-driven value change of a known lamp with no addition or removal on its lot. Counts only once the world is live (`LevelLightShare::WorldIsLive`, set by `OnWorldLive`), as the addition and removal path already requires: a lamp the game switches on the load screen is not taken as an edit and does not put the lot's rooms on the lamp edit budget |
+| Observed value edit | A player-driven value change, or a counted move, of a known lamp with no addition or removal on its lot. Moves count so that a drag reaches the ground on a lot that would not settle: its ignored changes (a pick-up, or a neighbour's lamps switching in the same read) restart the 5 s settle time at every move. Counts only once the world is live (`LevelLightShare::WorldIsLive`, set by `OnWorldLive`), as the addition and removal path already requires: a lamp the game switches on the load screen is not taken as an edit and does not put the lot's rooms on the lamp edit budget |
 | Bulk | More than 8 changes in one enumeration, unless all are switches of one lot; ignored unless observed value edits |
 | Removal | Confirmed at the next enumeration if the lot is still there and lost no more lamps |
 | World lamps (lot 0) | `WorldLampPolicy::AcceptEdit`: observed value edits only, no additions or removals |
@@ -319,6 +331,50 @@ when Apex set it and no rebuild is in progress, queue dropped, one full rebuild 
 Frames count Presents, so the first timeout in a world keeps the local path; the second, or "the terrain changed under
 the queue", turns it off for this world. A consumed rebuild drops the queue; a world change resets it.
 
+### Lamp cones in the bake
+
+The game's bake pixel shader (technique StaticTerrainLightmap) stamps every light all round: a spot
+(type 4) lit the ground behind it, and a shaded lamp (type 5), stamped at its spill, left the pool under its shade to the
+lot's room map, so the pool stopped in a straight line at the lot border. Apex binds its copy of that shader
+(`BakeConePS`, from the shader cache) wherever the game binds its own in a bake: the same law times the cone factor
+`S - S t + t` the room solve gives the lamp (`gpu_lamp_law.h`), from rows c5..c7 that `BakePosStub` writes for every
+light it bakes (`BakeLightRows`, `TerrainBakeCone::Rows`; c7.w carries a mark, without which the copy keeps the game's
+law); the c5..c7 they held before the bake's first light are given back after the chunk render that ran the bake (or, for a bake outside it, when the game binds another pixel shader). Lot and world lights alike: spots and shaded lamps take their cones, other lights none. The game's shader is
+recognised by its size and FNV-1a 64 (`TerrainBakeCone::kGamePsFnv`) and replaced through a last-priority
+`SetPixelShader` hook. With the copy bound, `BakeColourStub` leaves a type-5 lamp's spill to the shader. It needs both bake
+stubs; a copy that cannot be made leaves the game's shader and the spill (`Terrain bake: the shader with lamp cones could
+not be made`). The law itself: [engine/terrain-and-light-bake.md](../../engine/terrain-and-light-bake.md#the-bake-0x00c292b0-type-5-staticterrainlightmap).
+
+### Dragged lamps on the GPU
+
+`TerrainStamps` (render thread) receives every frame the lamps of the active lot's room-0 lists from
+[Real-time outdoor lamps](rt-outdoor-lamps.md) and draws a moving lamp's ground light on the GPU instead of relighting
+whole chunks on the CPU:
+
+- **Enter.** A lamp the bake takes (`NightTerrainBake::StampOf`) that moved more than 1 cm since its last counted place
+  joins the bake's exclusion list (`NightTerrainBake::SetExcluded`, at most 8; `BakeColourStub` gives it no colour), and
+  one local relight re-renders the chunks that baked it at its last place without it. Each of those chunks takes the
+  stamp in the build that shows its re-rendered map; chunks it moves onto, which never baked it, take it at once, and so
+  do all of them for a lamp the bake never gave colour (new from the catalog: no relight, nothing to wait for;
+  `NightTerrainBake::EverBaked`, noted by `TerrainLightTest`). A refused relight leaves the lamp in the bake, and no lamp
+  enters while the local relight is unavailable (`ChunkRelight::LikelyAvailable`).
+- **Move.** The chunks under its old and new light rects are built again at most every 50 ms (`kBumpMs`). `StampPS` adds
+  the lamp's light to the chunk's grid before the smoothing
+  ([world atlas](world-atlas-and-smoothed-maps.md#gpu-path-default)) with the bake's law: the colour with the lot-lamp
+  gain and the area share, `range x intensity x 0.2` over the horizontal distance squared, the low-lamp lift and the
+  bake's cone rows, on flat ground at the lot's ground height. A terrain lamp change whose every lamp is drawn this way
+  takes no local relight (`skipped: drawn on the GPU while dragged`).
+- **Release.** Still for 1.5 s (`kQuietMs`) with no drag engaged (`DragLite::Engaged`), the lamp leaves the exclusion
+  list and one local relight bakes it where it stays; each chunk under it keeps the stamp until the build that shows its
+  re-rendered map (a re-render that leaves the map the same counts; 3 s at most, `kGateMaxMs`). A refused relight keeps
+  the stamp and is tried again 1.5 s later. Dragged again while it returns, the lamp enters again from there.
+- **Out of the list.** A lamp picked up again is out of the list for a few frames and keeps its state; out of it for
+  1 s (`kGoneMs`: another lot, deleted) it returns to the bake where it was last seen, as at a release. With the GPU
+  smoothing off every lamp is back in the bake at once; a new world forgets them all (its bake takes every lamp).
+
+Each chunk changes between the bake and the stamp in the build that first shows its re-rendered map, so the lamp is
+never drawn twice or missing for more than a few frames.
+
 ### Lot relight (`QueueAllLotOutdoorRooms`)
 
 Walks the lot tree (lightMgr+0xD4, buckets +0x58, count +0x5C, node+8 = tracker, next +0x10) and, for levels -4..7 whose
@@ -368,6 +424,9 @@ The root getter, visitor, arm sites, room queue and light enumeration are listed
 | terrain_lighting_policy.h | `DeferDayEdit`, `PhaseDelay`, `PreviewPriorityChunks`, `Phase`, `LevelPhase`, `Cycle` | Day/night policy |
 | lot_light_bridge.cpp | `ReadLotLamp`, `InBake`, `TrackLotLampEdits`, `ObservedEnableSwitch`, `DiffBake`, `AdoptNewLots`, `LampsOfLots`, `CoverLots`, `BakeTakes`, `TakeLotArrivals`, `LotVisible`, `RequestLampEditRefresh`, `LampSwitches` | Lamp tracking and snapshot |
 | world_lamp_policy.h | `Eligible`, `AcceptEdit`, `Track` | [World lamp response](world-lamp-response.md) |
+| night_terrain_relight_patch.cpp | `BakeTest`, `BakeLiftHead`, `BakeLightRows`, `BindConeShader`, `IsGameBakePs`, `StampedChange`; `NightTerrainBake::SetExcluded`, `Excluded`, `EverBaked`, `ConeShader`, `StampOf` | Bake exclusion list, cone shader |
+| terrain_stamps.cpp | `TerrainStamps::Update`, `ForChunk`, `Clear`, `Status`, `LastLights`, `LampState` | Dragged lamps on the GPU |
+| terrain_bake_cone.h, terrain_bake_ps.hlsl | `TerrainBakeCone::Rows`, `Factor`, `kGamePsFnv`; `BakeConePS` | Lamp cones in the bake |
 
 ### Diagnostics
 
@@ -387,7 +446,15 @@ Developer mode adds `World live`, `Night level crossed 0.99 upwards|downwards`, 
 with verbose logging, one line per decision (`Lamp change: <reason> (<kind>): rebuilt | relit locally | skipped |
 deferred | rate-limited | merged ... | left to the dusk rebuild (day)`), per-lamp change text from the bridge
 (`L... type T: lit 1->0, intensity 1.000->0.000 [leaves the bake]`) and, at most once a minute per lot, `Lamp changes
-that do not rebuild the terrain`.
+that do not rebuild the terrain`. With verbose logging (developer mode or a recording), once a second while a lamp the
+lamp entry filter handled is in the list: `[LotLightBridge] GPU-drawn lamps in the lamp list reads (last N reads): moved
+and counted, other counted, below the threshold, not in the bake, animated, unchanged, added, gone; last ...`.
+
+Dragged lamps: the smoothing status line ([world atlas](world-atlas-and-smoothed-maps.md)) ends with `terrain stamps: N
+lamps drawn on the GPU (M returning to the bake); entered, released, refused (last: ...) (C chunk builds with stamps)`;
+the log gives the first 20 `[TerrainStamps] Lamp ... dragged: its ground light drawn on the GPU (...)` and `... still for
+N ms: back to the bake (...)` lines. The cone shader logs `Terrain bake: lamps light the ground through their cones, as
+on lots` once.
 
 ## Rejected approaches
 
@@ -400,6 +467,8 @@ that do not rebuild the terrain`.
 - Fixed 30 s rate for automatic changes: lamps switched by Sims stayed on the ground too long.
 - Skipping the daytime world-load rebuild when no baked lamp is lit: the bake's lamp light ignores the night level, and
   the skip would leave the bake snapshot unset for later lamp edit decisions, for one frame saved per load.
+- A dragged lamp's ground through the CPU relight alone: about 4.9 ms a chunk, 2 to 4 chunks a relight, and the ground
+  still 0.3 to 1 s behind the lamp; replaced by the GPU stamps.
 
 Details in [history](../../history/night-lighting-terrain-relight.md).
 

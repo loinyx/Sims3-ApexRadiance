@@ -29,19 +29,20 @@ bool WorldLive();
 // screen, which already draws terrain. Gates the start note, the menu and Depth Blur. Render thread.
 bool LoadSettled();
 
-// ---- menu: Lighting page (tabs Lamps / Ground / Objects / Buildings / Stories) and Water & Snow page (tabs Water / Snow) ----
+// ---- menu: Lighting page (tabs Overview / Outside / Inside & floors / Game fixes) and Water & Snow page (tabs Water / Snow) ----
 // Overview tab: three balanced intensity choices, custom status and explicit choice undo.
 void DrawLightingBalance();
 void DrawRefreshCard();
-// Ground tab
+// Outside tab: ground and lots, with its brightness group
 void DrawGroundCard();
-// Stories tab: lamp light between the floors of a house. drawUpperFloorRow draws the "Upper floors light the ground" row
+// Inside & floors tab: lamp light between the floors of a house. drawUpperFloorRow draws the "Upper floors light the ground" row
 // (the SplitLevelGroundLight feature's own switch, owned by the menu), first in the card.
 void DrawStoriesCard(void (*drawUpperFloorRow)());
-void DrawObjectsCard();   // Objects tab (every option shown, in two groups)
-void DrawBuildingsCard(); // Buildings tab (walls and roofs)
-void DrawRoomsCard();     // Buildings tab (rooms with every lamp off)
-void DrawLightDetailCard(); // Buildings tab (lamp light detail on walls and floors, read at startup)
+void DrawObjectsCard();   // Outside tab (objects and trees)
+void DrawBuildingsCard(); // Outside tab (walls and roofs)
+void DrawRoomsCard();     // Inside & floors tab (rooms at night, below the Stories card)
+void DrawLightDetailCard(); // Inside & floors tab (lamp light detail on walls and floors, read at startup)
+void DrawGameFixes();     // Game fixes tab: the corrections of game bugs, one card per area
 void DrawWaterCard();     // Water tab: lamp glow on ponds (not the shore reflection)
 void DrawSnowCard();      // Snow tab
 

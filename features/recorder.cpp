@@ -429,7 +429,7 @@ std::string LightUpdates(DWORD start, DWORD end) {
         int changed = 0, reversing = 0, wrong = 0;
         DWORD settledMin = 0, settledMax = 0;
         std::string list, wrongList;
-        for (int i = ScreenWatch::kColumn; i < ScreenWatch::kPoints; i++) {
+        for (int i = ScreenWatch::kColumn; i < ScreenWatch::kGrid; i++) {
             const PointStory p = TellPoint(samples, i, t0, t1);
             if (!p.changed) continue;
             changed++;
@@ -444,10 +444,10 @@ std::string LightUpdates(DWORD start, DWORD end) {
             list += std::format("{}{} {:.0f} -> {:.0f} settled {}{}", list.empty() ? "" : "; ", GridPlace(i), p.from, p.to, Seconds(t0, p.settled),
                                 p.reversals ? std::format(" ({} reversal(s))", p.reversals) : std::string());
         }
-        if (!changed) s += std::format("   screen grid ({} points): none changed\n", ScreenWatch::kPoints - ScreenWatch::kColumn);
+        if (!changed) s += std::format("   screen grid ({} points): none changed\n", ScreenWatch::kGrid - ScreenWatch::kColumn);
         else {
             s += std::format("   screen grid ({} points): {} changed, settled {} .. {}; {} with reversals; RIGHT THEN WRONG at {}{}\n",
-                             ScreenWatch::kPoints - ScreenWatch::kColumn, changed, Seconds(t0, settledMin), Seconds(t0, settledMax), reversing, wrong,
+                             ScreenWatch::kGrid - ScreenWatch::kColumn, changed, Seconds(t0, settledMin), Seconds(t0, settledMax), reversing, wrong,
                              wrong ? ": " + wrongList : std::string());
             s += "   grid points that changed: " + list + "\n";
         }
@@ -463,8 +463,10 @@ std::string PixelCsv(DWORD start) {
     const int w = std::max(1, ScreenWatch::Width()), h = std::max(1, ScreenWatch::Height());
     for (int i = 0; i < ScreenWatch::kPoints; i++) {
         // the column by its row offset (luma+0 = the mouse or the centre), the grid by its place in percent (luma_x26y38)
+        // (the ground points by their distance from the lamp along its line: luma_ground+3 = 3 m past it)
         const std::string name = i < ScreenWatch::kColumn ? std::format("{:+}", ScreenWatch::PointY(i) - mouseRow)
-                                                          : std::format("_x{}y{}", (ScreenWatch::PointX(i) * 100 + w / 2) / w, (ScreenWatch::PointY(i) * 100 + h / 2) / h);
+                                 : i < ScreenWatch::kGrid ? std::format("_x{}y{}", (ScreenWatch::PointX(i) * 100 + w / 2) / w, (ScreenWatch::PointY(i) * 100 + h / 2) / h)
+                                                          : std::format("_ground{:+.0f}", GroundProfile::WatchT(i - ScreenWatch::kGrid));
         s += std::format(",luma{0},r{0},g{0},b{0}", name);
     }
     s += "\n";
@@ -619,6 +621,7 @@ void Stop() {
     Captures::WriteText(folder / L"Recording.txt", out.str());
     Captures::WriteText(folder / L"Wall seams.csv", wallSeams);
     if (const std::string pixels = PixelCsv(g_startTick); !pixels.empty()) Captures::WriteText(folder / L"Screen pixels.csv", pixels);
+    if (const std::string ground = GroundProfile::WatchCsv(g_startTick); !ground.empty()) Captures::WriteText(folder / L"Ground timeline.csv", ground);
     LOG_INFO(std::format("[Recorder] Saved {} lines to Captures\\{}", all.size(), name));
     Captures::Finish(folder, std::format("a recording of {:.0f} s of the lighting", (end - g_startTick) / 1000.0), Captures::CaptureKind::Recording);
     g_saved = name;

@@ -44,6 +44,8 @@ std::string DiagText();
 bool EffectsPending();
 // The camera's view-projection of the current frame (world -> clip, rows = c40..c43), false when not seen this frame
 bool CameraViewProj(float vp[4][4]);
+// The same, or the last frame's when this frame has none yet (at a Present: the frame just drawn)
+bool RecentCameraViewProj(float vp[4][4]);
 // A of the projection (d = A - near * A / z, so view z / near = A / (A - d)); 1.00008 when unknown
 float CameraDepthA();
 }

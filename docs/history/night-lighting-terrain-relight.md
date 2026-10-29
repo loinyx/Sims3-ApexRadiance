@@ -317,3 +317,49 @@ would also leave the bake snapshot (`g_baked`) unset, which the later lamp edit 
 
 **Outcome:** rejected. The saving is one frame per load, against a risk of stale terrain light and of wrong lamp edit
 decisions after the load.
+
+### 2026-10-28: the ground past the lot edge during a drag the GPU draws
+
+**Context:** within 3 m of a lot edge the lot ground blends into the terrain light map, which the local relight brings up
+to date after a lamp change. Developer recordings of lot lamp drags that Real-time outdoor lamps draws.
+
+**Finding:** the terrain went up to 7.3 s without a relight during such a drag, and once the lamp was put down the
+ground could keep its old light. Three causes:
+
+- The lamp list read each moved the lamp 1 to 2 cm, under the 5 cm a move needs to count, and each read was compared with
+  the last one, so the steps never added up (one log line: `moved 0.015 m (below the threshold)`).
+- A lot whose changes were ignored (a pick-up, or a neighbour's 8 lamps switching in the same read) stayed unsettled,
+  since every ignored move restarted its 5 s settle time, and the terrain diff reads only settled lots: in one recording,
+  20 s with no move counted for the lot.
+- The drag's own rebuild countdown was left idle although the local path never saw the moves (13 s of drag, no local
+  relight).
+
+**Outcome:** a move under 5 cm keeps the place last compared; a move of a known lamp with nothing added or removed counts
+as an explicit edit; the countdown is left idle only within 3 s of a lamp change the local relight took (`373445c`). In a
+recording the terrain was then relit 23 times in 20 s of drag
+([validation](../validation/night-lighting-terrain-relight.md#latest-results)).
+
+### 2026-10-29: a dragged lamp's ground light on the GPU
+
+**Context:** after the fixes above, the terrain followed a dragged lamp only through the local relight on the CPU.
+
+**Finding:** about 4.9 ms a chunk, 2 to 4 chunks a relight, and the ground still 0.3 to 1 s behind the lamp.
+
+**Outcome:** the CPU relight at every step is superseded: while the lamp moves the bake gives it no colour and the GPU
+smoothing draws its ground light into the chunk maps with the bake's own law (`StampPS`); one local relight takes it out
+of its last place when the drag starts and one bakes it where it stays (`8d13e95`). Drag relights went from 127 (2,155 ms
+of CPU in 73 s) to 7 (94 ms in 101 s). Follow-ups (`91af563`): every lamp of the lot's lists takes the stamp, not only
+those drawn on every story (a picked-up lamp drawn only on the upper stories kept the CPU relight for its whole drag); a
+lamp out of the list for a moment (picked up again) keeps its state for 1 s instead of going back to the bake at once;
+a lamp the bake never took (new from the catalog) enters with no relight.
+
+### 2026-10-29: lamp cones in the terrain bake
+
+**Context:** the ground past a lot compared with the lot's own ground under spots and shaded lamps.
+
+**Finding:** the game's bake pixel shader stamps every light all round: a spot lit the ground behind it, and a shaded
+lamp, stamped at its spill since 2.15, left the pool under its shade to the lot's room map, so the pool stopped in a
+straight line at the lot border.
+
+**Outcome:** the bake runs Apex's copy of its pixel shader with each lamp's cones, the rows written by the position stub;
+the dragged lamps' stamp takes the same rows (`91af563`). Not yet checked in game.

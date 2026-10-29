@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [2.18.0](2.18.0.md): live lamp edits on the GPU with far less CPU work, a reorganized Lighting menu, one Ground light, light through mesh fences.
 - [2.17.2](2.17.2.md): Sims 3 Modernization and Sims 3 Performance Patch in Compatibility, with an offer to turn off the options that freeze Sims.
 - [2.17.1](2.17.1.md): a lamp's light stays in its own room on floors and objects, no street light inside the house.
 - [2.17.0](2.17.0.md): a lamp edit relights only its own lot, a one-time Room to save question, a measured memory map.
@@ -51,6 +52,7 @@ tests, publication) is in [workflow.md](../workflow.md#6-release).
 
 | Version | Published | Headline |
 |---|---|---|
+| [2.18.0](2.18.0.md) | — | Live lamp edits with far less CPU work, and a reorganized menu |
 | [2.17.0](2.17.0.md) | — | Lamp edits stay on their own lot |
 | [2.16.3](2.16.3.md) | 2026-10-27 | No more dark squares on lit floors under furniture |
 | [2.16.2](2.16.2.md) | 2026-10-27 | Smoother panning as the neighbourhood fills in |

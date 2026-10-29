@@ -15771,7 +15771,11 @@ uint64_t LampVisibilityState() {
     t_wall = wall, t_floor = floor, t_rb = rb, t_flags = flags, t_exits = exits, t_state = s;
     return s;
 }
-bool VisibilityDiagArmed() { return g_diagArmed.load(std::memory_order_relaxed); } // F8 records each test: no memo then
+// Every test recorded for the F8 (no memo then) only while the story samples switch asks for it. The re-arming each F8 dump
+// and each F7 on a wall do kept the memo off for the rest of the session (fence draws about 4x slower), and a player's build
+// records nothing at all.
+std::atomic<bool> g_visDiagWanted{false};
+bool VisibilityDiagArmed() { return !kPublicBuild && g_visDiagWanted.load(std::memory_order_relaxed); }
 
 // ---- The same test from any thread (the object rigs' gather, ObjectLightBridge): an immutable copy of the render thread's
 // wall grid and slab groups, published by OnPresent when either changed (PublishVisSnap). A query takes the current copy
@@ -17191,6 +17195,7 @@ void ReserveDiagLocked() noexcept {
 }
 void SetDiagArmed(bool on) {
     g_diagArmed = on;
+    g_visDiagWanted = on;
     if (on) {
         std::lock_guard<std::mutex> lk(g_diagMx);
         ReserveDiagLocked();

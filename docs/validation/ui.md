@@ -27,6 +27,8 @@ Native checks are geometric evidence; they do not replace inspecting every page 
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-29 | `f613873` (2.18.0 release, What's new fixes) | Release x86 build, in-game check of the What's new popover (maintainer) | One scrollbar, inside the list and clear of the rounded corners; outlined release boxes with a visible hover; no empty space under the footer; the popover appears at its final height and keeps it | Windows, DXVK |
+| 2026-10-29 | `3839ebc` (2.18.0 release) | `tools/i18n_check` (built as a DLL: new executables were blocked on the test machine), `menu_audit.pl`, Release x86 build, in-game start | OK, 2426 of 2426 keys in every language; menu audit: 4 copy guideline notes, all older than this release; the footer shows 2.18.0 and What's new lists the 2.18.0 lines | Windows, DXVK |
 | 2026-10-28 | `28dc5b3` (2.17.2 release) | `tools/i18n_check`, CPU Smoke suite with `tools/s3pp_settings_test`, `menu_audit.pl`, Release and public x86 builds | OK, 2340 of 2340 keys; Smoke passed, 10 of 10 ini checks; no audit finding on the new texts; both built | MSBuild / None |
 | 2026-10-22 | `715a410` (the Tester labels *Window light channel memo* and *Paced relight while moving*) | `tools/i18n_check` | OK, 2243 of 2243 keys | None |
 | 2026-10-03 | PR #2 (control sizing) | `control_layout_check` | 40 multi-frame cases passed across EN/PT/ES/FR and scales 1.0 / 1.4: popup style stacks, stable neighbouring heights, button glyph centres within 1.1 px, one-pixel divider origins | None |

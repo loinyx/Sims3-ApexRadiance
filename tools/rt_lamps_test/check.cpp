@@ -1726,6 +1726,43 @@ void UnderDeltaCheck() {
     Check(worst < 1e-4, "the dragged lamp's under-floor share drifts from UnderShare");
 }
 
+// UnderDelta stamps 4 texels at a time (BakeStamp4): every lane must be BakeStamp's, bit for bit (lamps on the lawn, below the
+// base, right over a texel where the stamp is clamped at 1, and far away)
+void BakeStamp4Check() {
+    std::printf("\n[under-floor share] BakeStamp4 against BakeStamp, bit for bit\n");
+    std::mt19937 rng(91);
+    std::uniform_real_distribution<float> U(0.0f, 1.0f);
+    long lanes = 0, differ = 0, stamped = 0;
+    for (int t = 0; t < 4000; t++) {
+        RtLampModel::BakeLamp L;
+        L.head[0] = 60 * U(rng) - 10, L.head[1] = -1.0f + 10.0f * U(rng), L.head[2] = 60 * U(rng) - 10;
+        L.range = 1 + 40 * U(rng), L.intensity = 0.1f + 3 * U(rng), L.colour = 3 * U(rng);
+        L.liftable = (t & 1) ? 1u : 0u;
+        const float base = (t % 7 == 0) ? 2.0f : 0.0f, eps = 0.02f;
+        float sx[4], sy[4], sz[4];
+        for (int k = 0; k < 4; k++) {
+            const bool atLamp = (t + k) % 5 == 0; // (right under the lamp: the stamp past 1)
+            sx[k] = atLamp ? L.head[0] + 0.01f * U(rng) : 50 * U(rng);
+            sy[k] = 3.0f * static_cast<float>(static_cast<int>(3 * U(rng)));
+            sz[k] = atLamp ? L.head[2] + 0.01f * U(rng) : 50 * U(rng);
+        }
+        float v4[4];
+        bool u4[4], ok4[4];
+        RtLampModel::BakeStamp4(L, sx, sy, sz, base, eps, v4, u4, ok4);
+        for (int k = 0; k < 4; k++) {
+            const float s[3] = {sx[k], sy[k], sz[k]};
+            float v = 0;
+            bool u = false;
+            const bool ok = RtLampModel::BakeStamp(L, s, base, eps, v, u);
+            lanes++;
+            stamped += ok ? 1 : 0;
+            if (ok != ok4[k] || (ok && (std::memcmp(&v, &v4[k], sizeof v) != 0 || u != u4[k]))) differ++;
+        }
+    }
+    std::printf("  %ld lanes (%ld stamped): %ld differ\n", lanes, stamped, differ);
+    Check(differ == 0 && stamped > 0, "BakeStamp4 differs from BakeStamp");
+}
+
 
 // ---------------------------------------------------------------- --probe: where every lamp head sits against the occluders
 // (GPU lamps for every room: a head on the far side of a nearby plane, a ceiling lamp above the proxy's ceiling, puts the
@@ -1844,6 +1881,7 @@ int main(int argc, char** argv) {
     ObjectParityCheck();
 #endif
     UnderDeltaCheck();
+    BakeStamp4Check();
     std::vector<Scene> scenes;
     scenes.push_back(Synthetic());
     scenes.push_back(IndoorRooms());

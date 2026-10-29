@@ -50,6 +50,7 @@
 #include "room_map_padding.h"
 #include "level_light_share.h"
 #include "ground_lamp_shadow.h"
+#include "fence_cutout.h"
 #include "ground_light_gate.h"
 #include "unlit_rooms.h"
 #include "light_probe.h"
@@ -673,7 +674,8 @@ struct LotShadeTiming {
 struct LotMask {
     IDirect3DTexture9* tex = nullptr;
     uint64_t sig = 0;
-    DWORD checked = 0;
+    DWORD checked = 0, shadeChecked = 0;
+    uint32_t fenceGenSeen = 0;      // g_fenceGen at its last shade check
     int w = 0, h = 0;               // texels of the room mask
     std::vector<uint8_t> room;      // the room mask (255 outside rooms)
     std::vector<uint8_t> shade;     // the lamp shade (empty: none yet, 255 everywhere)
@@ -710,7 +712,8 @@ IDirect3DTexture9* WhiteMask(IDirect3DDevice9* dev) {
 // the atlas texel by texel (an F8: square steps of light on a porch). Story 0's floors keep the plain patch; the lot and snow
 // passes (story 0 only) add the indoor light
 constexpr bool kFloorIndoorLight = false;
-constexpr DWORD kShadeMinEveryMs = 750; // (2.15.3: 2000; with the nearest lot first a change shows sooner)
+constexpr DWORD kShadeMinEveryMs = 250; // (2.15.3: 2000, then 750; a build takes 1-30 ms on the worker, log)
+constexpr DWORD kShadeCheckMs = 100;    // a lot's shade inputs looked at this often while they change (LotMaskTexture)
 struct ShadeWant {
     uint64_t lot = 0, key = 0;
     LotRect rect{};
@@ -1214,8 +1217,12 @@ struct FenceGroup {
     std::vector<GroundShadow::Wall> walls;
     float x0 = 0, z0 = 0, x1 = 0, z1 = 0;
     DWORD read = 0, seen = 0;
+    uint32_t seenFrame = 0;
 };
+extern uint32_t g_roomMapFrame; // (below: OnPresent counts frames)
 std::unordered_map<uint64_t, FenceGroup> g_fenceGroups;
+std::vector<std::pair<uint64_t, DWORD>> g_fenceBirths; // new groups (key, first draw) whose replaced groups are not looked at yet
+constexpr DWORD kFenceSwapMs = 300;
 std::unordered_map<uint64_t, uint8_t> g_fenceBusy; // draw_reads_nowait: busy answers per fence group since its last read
 // mesh boxes by buffer, range and layout (a buffer address can be reused: emptied with the lots and on a world change)
 std::unordered_map<uint64_t, std::array<float, 7>> g_meshBoxes;
@@ -1289,11 +1296,15 @@ void FenceGapsBuild() {
                         const GroundShadow::Wall& b = g_fenceAll[j];
                         const float lb = lengths[j];
                         if (!(lb > 0.05f) || ApexMath::Fabs((b.x1 - b.x0) / lb * ux + (b.z1 - b.z0) / lb * uz) < 0.98f) continue;
+                        // a piece goes on from this end, also over it (meshes overlap by their posts, 0.12 m): no gap. Before,
+                        // only ends within kGapNarrow joined, and each overlapped end listed a gap over the next piece
+                        const float along = ((ax - b.x0) * (b.x1 - b.x0) + (az - b.z0) * (b.z1 - b.z0)) / lb;
+                        const float off = ApexMath::Fabs((ax - b.x0) * (b.z1 - b.z0) - (az - b.z0) * (b.x1 - b.x0)) / lb;
+                        if (off < kGapNarrow && along > -kGapNarrow && along < lb + kGapNarrow && ApexMath::Fabs(b.y0 - a.y0) < 1.0f) joined = true;
                         for (int eb = 0; eb < 2; eb++) {
                             float bx, bz;
                             end(b, eb, bx, bz);
                             const float dx = bx - ax, dz = bz - az, d = ApexMath::Hypot(dx, dz);
-                            if (d < kGapNarrow && ApexMath::Fabs(b.y0 - a.y0) < 1.0f) joined = true; // a piece goes on from this end: no gap
                             if (!(d >= kGapNarrow && d < best) || (dx * ox + dz * oz) < 0.98f * d) continue; // in line, ahead of this end
                             float fx, fz;
                             end(b, 1 - eb, fx, fz);
@@ -1308,6 +1319,7 @@ void FenceGapsBuild() {
             end(b, be, bx, bz);
             FenceGap gp;
             gp.w = {ax, az, bx, bz, std::max(a.y0, b.y0), std::min(a.y1, b.y1)};
+            gp.w.pass = std::min(a.pass, b.pass); // a gate between two mesh fences is one of them
             if (!(gp.w.y1 > gp.w.y0 + 0.3f)) continue;
             gp.key = GapKey(ax, az, bx, bz);
             // each gap once, whichever end found it (it is found from both: the walls' order follows a hash map)
@@ -1372,7 +1384,11 @@ bool NoteGate(float x, float y, float z) {
         const FenceGap& gp = g_fenceGaps[k];
         const float dx = gp.w.x1 - gp.w.x0, dz = gp.w.z1 - gp.w.z0, l = gp.length;
         const float t = ((x - gp.w.x0) * dx + (z - gp.w.z0) * dz) / l, side = ApexMath::Fabs((x - gp.w.x0) * dz - (z - gp.w.z0) * dx) / l;
-        if (t < -0.1f || t > l + 0.1f || side > kGateOff || y < gp.w.y0 - 1.0f || y > gp.w.y1) {
+        // a gate stands on the ground: an object over the line (a lamp carried across the fence's top) is none; and inside
+        // an open gap, not at its ends, where the fence's posts stand (a post at a gap's end was taken for its gate)
+        // (a closed gap's object only keeps the fence's lamp scale: up to the fence's top, as before)
+        const float inset = gp.closed ? -0.1f : 0.2f, top = gp.closed ? gp.w.y1 : gp.w.y0 + 0.5f;
+        if (t < inset || t > l - inset || side > kGateOff || y < gp.w.y0 - 1.0f || y > top) {
             if (!kPublicBuild && g_gateMissLogs < 30 && t > -1.5f && t < l + 1.5f && side < 1.5f) {
                 g_gateMissLogs++;
                 LOG_INFO(std::format("[GroundShadow] object at ({:.2f} {:.2f} {:.2f}) near the fence gap ({:.2f} {:.2f})-({:.2f} {:.2f}) y {:.2f}..{:.2f}: "
@@ -1385,6 +1401,8 @@ bool NoteGate(float x, float y, float z) {
             closedMatch = true;
             continue; // retain the scale without skipping another gap that still needs its gate noted
         }
+        // a lamp dragged through a gap is no gate: noted, it closed the opening for kGateKeepMs after the drag
+        if (DragLite::Engaged() && !g_gates.count(gp.key)) continue;
         const DWORD now = GetTickCount();
         const auto [g, fresh] = g_gates.try_emplace(gp.key, now);
         if (fresh) ApexUtil::CountOne(g_gatesFilled);
@@ -1791,6 +1809,82 @@ bool FencePieceWalls(const BYTE* p, UINT count, UINT stride, const FenceLayout& 
     }
 }
 // DrawInstanced: the group being drawn (an instanced DrawIndexedPrimitive)
+// The share of lamp light the current fence draw lets through (GroundShadow::Wall::pass): the open share of the texture its
+// pixel shader cuts the mesh out with (ShaderPatches::FindCutout), at half alpha; 0 for a solid fence or one that
+// cannot be read. The shader's cutout is kept per shader and the share per texture (both emptied on a world change, as an
+// address can be reused); a texture's share is kept while its size, format and a few of its bytes are the same, as a
+// texture freed with a lot can leave its address to another one, and a decode at every group read costs the render thread
+// 0.7 ms a group for a 256 x 256 DXT5 texture, 2.7 ms at 512 x 512 (x86 /O2, offline) (render thread).
+std::vector<DWORD> ShaderCode(IDirect3DPixelShader9* ps);
+std::unordered_map<IDirect3DPixelShader9*, ShaderPatches::Cutout> g_fenceCuts;
+struct FenceShare {
+    UINT w = 0, h = 0;
+    FenceCutout::Fmt f = FenceCutout::Fmt::Argb;
+    uint32_t sig = 0;
+    float open = 0.0f;
+};
+std::unordered_map<IDirect3DBaseTexture9*, FenceShare> g_fenceOpen;
+// FNV-1a over seventeen 64-byte spans of a locked level (every sixteenth of it and its end: sparse fence textures that
+// differ only between four spans matched)
+uint32_t LevelSig(const uint8_t* p, size_t bytes) {
+    uint32_t h = 2166136261u;
+    const size_t span = std::min<size_t>(64, bytes);
+    for (size_t k = 0; k <= 16; k++) {
+        const size_t at = k < 16 ? bytes * k / 16 : bytes - span;
+        for (size_t i = 0; i < span && at + i < bytes; i++) h = (h ^ p[at + i]) * 16777619u;
+    }
+    return h;
+}
+float FenceOpenShare(IDirect3DDevice9* dev) {
+    auto& s_cut = g_fenceCuts;
+    if (!g_curPs) return 0.0f;
+    auto it = s_cut.find(g_curPs);
+    if (it == s_cut.end()) {
+        if (s_cut.size() > 1024) s_cut.clear();
+        ShaderPatches::Cutout c;
+        const std::vector<DWORD> code = ShaderCode(g_curPs);
+        if (code.empty() || !ShaderPatches::FindCutout(code, c)) c.sampler = -1;
+        it = s_cut.emplace(g_curPs, c).first;
+    }
+    const ShaderPatches::Cutout& c = it->second;
+    if (c.sampler < 0) return 0.0f;
+    // the texture's own coverage, at half alpha: the game draws one fence with alpha refs 150 and 50 (log), so the share at
+    // the draw's ref changed with the draw that read it (0.26 / 0.10) and the shade was made again each 60 s re-read
+    constexpr int keep = 128;
+    IDirect3DBaseTexture9* base = nullptr;
+    if (FAILED(D3D9Hooks::GetBoundTexture(dev, static_cast<DWORD>(c.sampler), &base)) || !base) return 0.0f;
+    float open = 0.0f;
+    if (base->GetType() == D3DRTYPE_TEXTURE) {
+        auto* tex = static_cast<IDirect3DTexture9*>(base);
+        D3DSURFACE_DESC d{};
+        UINT level = 0; // the first level of at most 512 texels across (one read per texture)
+        while (SUCCEEDED(tex->GetLevelDesc(level, &d)) && d.Width > 512 && level + 1 < tex->GetLevelCount()) level++;
+        const FenceCutout::Fmt f = d.Format == D3DFMT_DXT1 ? FenceCutout::Fmt::Dxt1 : d.Format == D3DFMT_DXT3 ? FenceCutout::Fmt::Dxt3
+                                 : d.Format == D3DFMT_DXT5 ? FenceCutout::Fmt::Dxt5 : FenceCutout::Fmt::Argb;
+        const bool readable = d.Pool != D3DPOOL_DEFAULT && (f != FenceCutout::Fmt::Argb || d.Format == D3DFMT_A8R8G8B8);
+        D3DLOCKED_RECT lr{};
+        if (readable && SUCCEEDED(tex->LockRect(level, &lr, nullptr, D3DLOCK_READONLY))) {
+            const auto* bits = static_cast<const uint8_t*>(lr.pBits);
+            const size_t rows = f == FenceCutout::Fmt::Argb ? d.Height : (d.Height + 3) / 4;
+            const uint32_t sig = LevelSig(bits, static_cast<size_t>(lr.Pitch) * rows);
+            FenceShare& s = g_fenceOpen[base];
+            const bool same = s.w == d.Width && s.h == d.Height && s.f == f && s.sig == sig;
+            if (!same) s = {d.Width, d.Height, f, sig, FenceCutout::OpenShare(f, bits, lr.Pitch, static_cast<int>(d.Width), static_cast<int>(d.Height), keep)};
+            open = s.open;
+            if (g_fenceOpen.size() > 1024) g_fenceOpen.clear(); // (s is not read after this)
+            tex->UnlockRect(level);
+            static int s_logs = 0;
+            if (!same && !kPublicBuild && s_logs < 100 && ++s_logs)
+                LOG_INFO(std::format("[GroundShadow] Mesh fence: shader {:08X} cuts out with s{} ({}x{} {}, level {}, texture {:08X}): open share {:.3f}",
+                                     reinterpret_cast<uintptr_t>(g_curPs), c.sampler, d.Width, d.Height,
+                                     f == FenceCutout::Fmt::Dxt1 ? "DXT1" : f == FenceCutout::Fmt::Dxt3 ? "DXT3" : f == FenceCutout::Fmt::Dxt5 ? "DXT5" : "ARGB", level,
+                                     reinterpret_cast<uintptr_t>(base), open));
+        }
+    }
+    base->Release();
+    return open;
+}
+
 void NoteFenceGroup(IDirect3DDevice9* dev) {
     if (!g_shadeOn || !g_curDipNum) return;
     UINT freq = 0;
@@ -1809,6 +1903,7 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
     const DWORD now = GetTickCount();
     FenceGroup& g = g_fenceGroups[key];
     g.seen = now ? now : 1;
+    g.seenFrame = g_roomMapFrame;
     if (!g.read || now - g.read > 60000) {
         // draw_reads_nowait: the 60 s refresh of a group already read does not wait for the GPU; while its instance buffer is
         // busy the walls read last time stay in use and the next draw tries again (three busy answers: it waits, as before)
@@ -1831,7 +1926,7 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
         g_fenceGroupReads.fetch_add(1, std::memory_order_relaxed);
         const FenceLayout L = ReadFenceLayout(dev);
         FenceGroup fresh;
-        fresh.read = g.read, fresh.seen = g.seen;
+        fresh.read = g.read, fresh.seen = g.seen, fresh.seenFrame = g.seenFrame;
         float lo[3] = {}, hi[3] = {};
         void *p0 = nullptr, *p1 = nullptr;
         const UINT first = g_curDipBase + g_curDipMin;
@@ -1854,29 +1949,44 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
         ok = ok && SUCCEEDED(vb1->Lock(off1, count * stride1, &p1, D3DLOCK_READONLY)) && p1 && FencePieceWalls(static_cast<const BYTE*>(p1), count, stride1, L, lo, hi, fresh);
         if (p1) vb1->Unlock();
         if (!ok) fresh.walls.clear();
+        if (!fresh.walls.empty()) { // a mesh fence (chain-link, lattice) lets the lamps' light through its open share
+            const float pass = FenceOpenShare(dev);
+            for (GroundShadow::Wall& w : fresh.walls) w.pass = pass;
+        }
         g_fenceWalls.fetch_add(static_cast<long>(fresh.walls.size()) - static_cast<long>(g.walls.size()), std::memory_order_relaxed);
         const bool newGroup = g.walls.empty() && !fresh.walls.empty();
         if (fresh.walls.size() != g.walls.size() || (!fresh.walls.empty() && std::memcmp(fresh.walls.data(), g.walls.data(), fresh.walls.size() * sizeof(GroundShadow::Wall)) != 0))
             g_fenceGen++;
         g = std::move(fresh);
-        // (15/10: the ground took minutes to change after a fence was removed) a new group replaces at once the groups over the
-        // same place that are not drawn any more (the game makes a group again when a piece is added or removed)
-        if (newGroup) {
-            const FenceGroup& ng = g;
-            for (auto it = g_fenceGroups.begin(); it != g_fenceGroups.end();) {
-                const FenceGroup& o = it->second;
-                const bool stale = it->first != key && now - o.seen > 500 && // (review: 100 ms let two groups erase each other below 10 fps)
-                                    !(o.x1 < ng.x0 - 0.5f || o.x0 > ng.x1 + 0.5f || o.z1 < ng.z0 - 0.5f || o.z0 > ng.z1 + 0.5f);
-                if (stale) {
-                    g_fenceWalls.fetch_sub(static_cast<long>(o.walls.size()), std::memory_order_relaxed);
-                    g_fenceGen++;
-                    it = g_fenceGroups.erase(it);
-                } else ++it;
-            }
-        }
+        if (newGroup && g_fenceBirths.size() < 16) g_fenceBirths.emplace_back(key, now);
     }
     vb0->Release();
     vb1->Release();
+    // A new group replaces the groups over the same place that are not drawn any more (the game makes a group again when a
+    // piece is added or removed). Looked at kFenceSwapMs after its first draw: at that draw the old group had been drawn the
+    // frame before, so it stayed until the 20 s sweep below and a removed piece kept its shadow (and closed an opening made
+    // in a fence) that long. Not drawn means missing from the last two frames too, so a slow frame erases no group in use
+    for (size_t b = 0; b < g_fenceBirths.size();) {
+        const auto [bornKey, at] = g_fenceBirths[b];
+        if (now - at < kFenceSwapMs) {
+            b++;
+            continue;
+        }
+        g_fenceBirths.erase(g_fenceBirths.begin() + static_cast<ptrdiff_t>(b));
+        const auto born = g_fenceGroups.find(bornKey);
+        if (born == g_fenceGroups.end()) continue;
+        const FenceGroup ng = born->second;
+        for (auto it = g_fenceGroups.begin(); it != g_fenceGroups.end();) {
+            const FenceGroup& o = it->second;
+            const bool stale = it->first != bornKey && now - o.seen > kFenceSwapMs - 100 && g_roomMapFrame - o.seenFrame >= 2 &&
+                               !(o.x1 < ng.x0 - 0.5f || o.x0 > ng.x1 + 0.5f || o.z1 < ng.z0 - 0.5f || o.z0 > ng.z1 + 0.5f);
+            if (stale) {
+                g_fenceWalls.fetch_sub(static_cast<long>(o.walls.size()), std::memory_order_relaxed);
+                g_fenceGen++;
+                it = g_fenceGroups.erase(it);
+            } else ++it;
+        }
+    }
     // groups not drawn for 20 s go (a fence removed whole; at most once a second)
     static DWORD s_swept = 0;
     if (now - s_swept > 1000) {
@@ -1923,7 +2033,7 @@ uint64_t ShadeKey(const LotRect& r, int w, int h) {
         uint64_t sum = 0; // in any order (the copy's order follows a hash map)
         for (const GroundShadow::Wall& wl : walls) {
             uint64_t e = 1469598103934665603ull;
-            for (float f : {wl.x0, wl.z0, wl.x1, wl.z1, wl.y0, wl.y1}) e = (e ^ static_cast<uint64_t>(static_cast<int64_t>(std::lround(f * 100.0f)))) * 1099511628211ull;
+            for (float f : {wl.x0, wl.z0, wl.x1, wl.z1, wl.y0, wl.y1, wl.pass}) e = (e ^ static_cast<uint64_t>(static_cast<int64_t>(std::lround(f * 100.0f)))) * 1099511628211ull;
             // its openings and lower cells (a door placed or a grid read later builds the shade again)
             for (uint32_t k = 0; k < wl.pn && static_cast<uint64_t>(wl.p0) + k < patches.size(); k++) {
                 const WallOpenings::Patch& pt = patches[wl.p0 + k];
@@ -2078,7 +2188,7 @@ void CommitPending() {
     if (m.ext) m.extGrid = p.grid, m.ex0 = p.box.x0, m.ez0 = p.box.z0, m.ex1 = p.box.x1, m.ez1 = p.box.z1;
     if (!m.shade.empty()) g_shadeLastMin = p.lo;
     g_shadeBuilt.fetch_add(1, std::memory_order_relaxed);
-    if (DevSwitches::kCompiled && p.seen) { // (developer log, LotMaskTexture: when the mask is shown)
+    if (!kPublicBuild && p.seen) { // (developer log, LotMaskTexture: when the mask is shown)
         m.timing = LotShadeTiming{p.seen, p.sent, p.arrived, GetTickCount(), p.buildMs, static_cast<int>(p.chunks.size())};
     }
     m.changeSeen = 0;
@@ -2128,7 +2238,7 @@ void ShadeApply(IDirect3DDevice9* dev) {
 // again; a running build is not cancelled by a key change: it finishes and the new one follows)
 void WantShade(uint64_t lot, LotMask& m, const LotRect& r, DWORD now) {
     const uint64_t key = ShadeKey(r, m.w, m.h);
-    if (DevSwitches::kCompiled && key != m.shadeKey && !m.changeSeen) m.changeSeen = now | 1; // (2.15.3, developer log)
+    if (!kPublicBuild && key != m.shadeKey && !m.changeSeen) m.changeSeen = now | 1; // (2.15.3, developer log)
     if (key == m.shadeKey || key == m.queuedKey) return;
     if (m.shadeAt && now - m.shadeAt < kShadeMinEveryMs) return; // again at a later check
     m.shadeAt = now;
@@ -2203,14 +2313,14 @@ bool MakeMaskTexture(IDirect3DDevice9* dev, LotMask& m) {
     m.tex = tex;
     m.dirty = false;
     g_maskBuilds.fetch_add(1, std::memory_order_relaxed);
-    if (DevSwitches::kCompiled && m.timing.seen) { // (2.15.3) the in-game time from a change of the lot's inputs to its new shade shown
+    if (!kPublicBuild && m.timing.seen) { // (2.15.3) the in-game time from a change of the lot's inputs to its new shade shown
         static int s_logs = 0;
         const LotShadeTiming t = m.timing;
         m.timing = {};
         const auto ms = [](DWORD from, DWORD to) { return static_cast<long>(to - from); };
         if (s_logs < 400) {
             s_logs++;
-            LOG_INFO(std::format("[LotLightBridge] Lamp shade on lot ground: shown {} ms after its inputs changed (seen at a check every 500 ms; then {} ms to "
+            LOG_INFO(std::format("[LotLightBridge] Lamp shade on lot ground: shown {} ms after its inputs changed (seen at a check every 100 ms; then {} ms to "
                                  "its build sent, {} ms building on the worker, {} ms to taken, {} ms held for its {} chunks, {} ms to its draw){}",
                                  ms(t.seen, GetTickCount()), ms(t.seen, t.sent), static_cast<long>(t.buildMs + 0.5), ms(t.sent, t.taken), ms(t.taken, t.applied),
                                  t.chunks, ms(t.applied, GetTickCount()), s_logs == 400 ? " (last such line)" : ""));
@@ -2285,6 +2395,15 @@ IDirect3DTexture9* LotMaskTexture(IDirect3DDevice9* dev, const LotRect& rect) {
             m.sig = gm.sig;
             m.dirty = true;
         }
+    }
+    // the shade's inputs every kShadeCheckMs while a fence group changed since the lot's last check or a lamp is dragged,
+    // else every 500 ms: at the room mask's 500 ms a fence edit or a lamp step waited up to that long to be seen, then up to
+    // kShadeMinEveryMs more (log: "500 ms to its build sent"), the light in steps; at rest the key (every bake lamp, the
+    // walls' copy) is not worked out more often than before
+    const bool changing = m.fenceGenSeen != g_fenceGen || DragLite::Engaged();
+    if (!m.shadeChecked || now - m.shadeChecked >= (changing ? kShadeCheckMs : 500u)) {
+        m.shadeChecked = now;
+        m.fenceGenSeen = g_fenceGen;
         // the shade's grid is the room mask's (4 texels a metre over room 0's tiles); the lot rectangle must agree with it
         if (g_shadeOn && m.w > 0 && m.w == static_cast<int>(std::lround(r->w * GroundShadow::kTexelsPerMetre)) &&
             m.h == static_cast<int>(std::lround(r->d * GroundShadow::kTexelsPerMetre)))
@@ -3360,11 +3479,27 @@ void ReadEnumeratedLamps(bool rebuildAll) {
     g_lotLampCur.erase(std::unique(g_lotLampCur.begin(), g_lotLampCur.end(), [](const LampSig& a, const LampSig& b) { return a.first == b.first; }), g_lotLampCur.end());
 }
 
+// (recordings) what the lamp list reads made of the lamps the GPU draws (Real-time outdoor lamps), logged once a second:
+// a drag the GPU draws reached the ground past the lot edge only now and then, and the reason did not show
+struct GpuLampTrace {
+    int reads = 0, same = 0, moved = 0, otherCounted = 0, below = 0, notBaked = 0, animated = 0, added = 0, gone = 0;
+    std::string last;
+    Clock::time_point at{};
+};
+GpuLampTrace g_gpuTrace;
+void TraceGpuLamp(int GpuLampTrace::*field, uintptr_t L, const LotLampState& s, bool pBaked) {
+    if (!Recorder::Verbose() || !LampMarkFilter::HandledLately(L, 1500)) return;
+    g_gpuTrace.*field += 1;
+    g_gpuTrace.last = std::format("L{:08X} type {} at ({:.2f} {:.2f} {:.2f}) flags {:02X} baked {}->{}", L, s.type, s.pos[0], s.pos[1], s.pos[2], s.flags,
+                                  pBaked ? 1 : 0, s.baked ? 1 : 0);
+}
+
 // Compares g_lotLampCur (just read) with g_lotLampSig (the previous enumeration), then keeps the new one.
 std::vector<uint64_t> g_disabledLots; // lots with a lamp disabled in this enumeration (TrackLotLampEdits)
 void TrackLotLampEdits() {
     const auto now = Clock::now();
     g_disabledLots.clear();
+    g_gpuTrace.reads++;
     const bool editing = ChunkRelight::Editing();
     std::vector<LampSig>& cur = g_lotLampCur;
     g_lotsNow.clear();
@@ -3412,6 +3547,7 @@ void TrackLotLampEdits() {
                 total++;
                 if (Recorder::Verbose()) AddDetail(c.detail, c.details, std::format("L{:08X} type {}: added", L, s.type));
             }
+            TraceGpuLamp(&GpuLampTrace::added, L, s, false);
             continue;
         }
         const LotLampState& p = prev->second;
@@ -3424,6 +3560,7 @@ void TrackLotLampEdits() {
             // the rect follows position and range (FUN_006BDDF0); should the game update it an enumeration later, the
             // snapshot still gets the current one (it never counts as a change by itself)
             if (std::memcmp(p.rect, s.rect, sizeof s.rect) != 0) snapDirty = true;
+            TraceGpuLamp(&GpuLampTrace::same, L, s, p.baked);
             continue;
         }
         snapDirty = true;
@@ -3487,10 +3624,19 @@ void TrackLotLampEdits() {
         } else if (p.baked || s.baked) {
             why = "below the threshold";
             g_lampChangesNoise++;
+            // a move under kMoveTol keeps the place last compared (and its rect), so the steps add up and count once the lamp
+            // has moved kMoveTol in all: a drag the GPU draws rereads the list every 33 ms, 1-2 cm a read, and the ground past
+            // the lot edge never followed the lamp (one log line: "moved 0.015 m (below the threshold)")
+            if (p.baked && s.baked) std::memcpy(s.pos, p.pos, sizeof s.pos), std::memcpy(s.rect, p.rect, sizeof s.rect);
         } else {
             why = "not in the bake";
             g_lampChangesOutside++;
         }
+        TraceGpuLamp(counts ? (moved ? &GpuLampTrace::moved : &GpuLampTrace::otherCounted)
+                     : why && std::strcmp(why, "animated") == 0 ? &GpuLampTrace::animated
+                     : why && std::strcmp(why, "not in the bake") == 0 ? &GpuLampTrace::notBaked
+                                                                         : &GpuLampTrace::below,
+                     L, s, p.baked);
         if (counts) {
             Change& c = changes[s.lot];
             c.edited++;
@@ -3522,6 +3668,7 @@ void TrackLotLampEdits() {
             total++;
             if (Recorder::Verbose()) AddDetail(c.detail, c.details, std::format("L{:08X} type {}: removed", L, p.type));
         }
+        TraceGpuLamp(&GpuLampTrace::gone, L, p, p.baked);
     }
     g_lotLampSig.swap(cur); // g_lotLampCur keeps the old list's memory for the next read
     for (uint64_t lot : g_disabledLots) LevelLightShare::RelightLotById(lot, "a lamp disabled or enabled again (sold, deleted, undo)");
@@ -3578,7 +3725,10 @@ void TrackLotLampEdits() {
         const bool settled = now - seen.firstSeen >= std::chrono::seconds(10) && now - seen.lastUncounted >= std::chrono::seconds(5);
         // (2.15.3) not before the world is live: a lamp the game switches on the load screen made the lot's rooms solve at
         // the edit budget (4.4 s of 36 ms frames in a log), as the add / remove path already guards (LevelLightShare)
-        const bool observedValueEdit = c.userEdited && c.added == 0 && c.removed == 0 && LevelLightShare::WorldIsLive();
+        // A known lamp moved is such an edit too: during a drag every read moves it, and an unsettled lot (a pick-up, or a
+        // neighbour's 8 lamps switching in the same read: bulk) reset lastUncounted at each move, so the ground never took
+        // the drag nor, once it stopped, the lamp's last place (a recording: 20 s, no move counted for the lot)
+        const bool observedValueEdit = (c.userEdited || c.moved > 0) && c.added == 0 && c.removed == 0 && LevelLightShare::WorldIsLive();
         // Streaming on another lot must not hide a real edit of this lot's known
         // lamps. Additions/removals on this lot still require the streaming guards.
         if (observedValueEdit) seen.explicitEdit = true;
@@ -3621,6 +3771,15 @@ void TrackLotLampEdits() {
             at = now;
             LOG_INFO(std::format("[LotLightBridge] Lamp changes that do not rebuild the terrain, lot {:016X}: {}", lot, q.detail));
         }
+    }
+    if (now - g_gpuTrace.at >= std::chrono::seconds(1)) {
+        GpuLampTrace& t = g_gpuTrace;
+        if (Recorder::Verbose() && !t.last.empty())
+            LOG_INFO(std::format("[LotLightBridge] GPU-drawn lamps in the lamp list reads (last {} reads): moved and counted {}, other counted {}, below the threshold {}, "
+                                 "not in the bake {}, animated {}, unchanged {}, added {}, gone {}; last {}",
+                                 t.reads, t.moved, t.otherCounted, t.below, t.notBaked, t.animated, t.same, t.added, t.gone, t.last));
+        t = GpuLampTrace{};
+        t.at = now;
     }
 
     // snapshot for the terrain relight: every tracked lamp (baked or not, so a lamp switched off still matches its
@@ -4406,7 +4565,7 @@ template <typename DrawFn> bool DrawRoad(IDirect3DDevice9* dev, DrawFn draw) {
     }, true) : nullptr;
     const bool useShade = shaded && shaded->ps && shaded->road.shadeSampler >= 0 && shaded->road.lightSampler == p.road.lightSampler &&
                           shaded->road.extraSampler == p.road.extraSampler && shaded->road.sidewalkConst == p.road.sidewalkConst &&
-                          shaded->road.scaleConst == p.road.scaleConst;
+                          shaded->road.scaleConst == p.road.scaleConst && shaded->road.reflectConst == p.road.reflectConst;
     // With the smoothed map ready, the road's own copy (the blocky DXT5 one) is replaced by it too, so roads and
     // sidewalks get exactly the same clean light as the ground next to them.
     IDirect3DTexture9* smooth = LightmapSmooth::Find(it->first);
@@ -4416,6 +4575,12 @@ template <typename DrawFn> bool DrawRoad(IDirect3DDevice9* dev, DrawFn draw) {
     const bool sidewalk = p.road.sidewalkConst >= 0;
     if (sidewalk) dev->GetPixelShaderConstantF(p.road.sidewalkConst, oldC, 1);
     const float c[4] = {g_sidewalkClear.load(std::memory_order_relaxed), 0, 0, 0};
+    // Wet roads reflect a fixed daylight sky cube that the game never darkens: at night the whole road and sidewalk turned grey
+    // (F7: about 0.6 of it reflected, more than the road's own light). It follows the daylight, as the game's sky colours do.
+    float oldW[4] = {};
+    const bool wet = p.road.reflectConst >= 0;
+    if (wet) dev->GetPixelShaderConstantF(p.road.reflectConst, oldW, 1);
+    const float sky[4] = {1.0f - g_night.load(std::memory_order_relaxed), 0, 0, 0};
     IDirect3DPixelShader9* original = g_curPs;
     g_inOwnCall = true;
     {
@@ -4424,10 +4589,12 @@ template <typename DrawFn> bool DrawRoad(IDirect3DDevice9* dev, DrawFn draw) {
         if (useShade) shadeMap.emplace(dev, static_cast<DWORD>(shaded->road.shadeSampler), shade, D3DTEXF_LINEAR);
         if (smooth) SetTex(dev, p.road.lightSampler, smooth);
         if (sidewalk) SetPsConst(dev, p.road.sidewalkConst, c, 1);
+        if (wet) SetPsConst(dev, p.road.reflectConst, sky, 1);
         SetPs(dev, useShade ? shaded->ps : p.ps);
         ConstGain lampGain(dev, p.road.scaleConst, RoadDayGain()); // the road's lamp scale, after the max with the terrain
         draw();
         SetPs(dev, original);
+        if (wet) SetPsConst(dev, p.road.reflectConst, oldW, 1);
         if (sidewalk) SetPsConst(dev, p.road.sidewalkConst, oldC, 1);
         if (smooth) SetTex(dev, p.road.lightSampler, oldLight);
     }
@@ -4666,9 +4833,13 @@ int PickFenceLamps(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float
     g_fencePickTicks += b.QuadPart - a.QuadPart, g_fencePickCalls++;
     return used;
 }
+uint32_t g_fencePickBypass[4] = {}; // memo not used: switch off, turned off, F8 records asked for, a capture
 int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share) {
-    if (!DevSwitches::LampVisibilityMemo() || g_fencePickOff || LevelLightShare::VisibilityDiagArmed() || LightProbe::Capturing())
+    const int bypass = !DevSwitches::LampVisibilityMemo() ? 0 : g_fencePickOff ? 1 : LevelLightShare::VisibilityDiagArmed() ? 2 : LightProbe::Capturing() ? 3 : -1;
+    if (bypass >= 0) {
+        g_fencePickBypass[bypass]++;
         return PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share);
+    }
     // (the law in the slot too: a group drawn with both laws kept evicting itself)
     FencePickMemo& e = g_fencePick[(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g)) * 2654435761u ^ g.read * 0x85EBCA77u ^ (reachLaw ? 0x9E3779B9u : 0u)) >> 22];
     const uint64_t state = LevelLightShare::LampVisibilityState();
@@ -6985,6 +7156,21 @@ template <typename DrawFn> bool DrawFloor(IDirect3DDevice9* dev, DrawFn draw) {
                                   : PatchedFor(dev, g_floorShadePs[FloorShadeKey(0, y)], "Floor (ground lamp shade)",
                                                [y](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchFloor(t, pp.floor, y); });
     if (!p.ps) return false;
+    if (p.floor.gainOnly) { // (a weather variant with all 16 samplers in use) at least the ground's gain, not the game's lamp scale
+        IDirect3DPixelShader9* original = g_curPs;
+        g_inOwnCall = true;
+        {
+            SetPs(dev, p.ps);
+            ConstGain lampGain(dev, p.floor.scaleConst, FloorDayGain());
+            if (LightProbe::Capturing()) g_objDrawInfo = "mod draw: winter floor tile | lamp scale only (no sampler for the atlas)";
+            draw();
+            g_objDrawInfo.clear();
+            SetPs(dev, original);
+        }
+        g_inOwnCall = false;
+        ApexUtil::CountOne(g_floorDrawn);
+        return true;
+    }
     LogWinterMask(p, "Snowy floor");
     float oldC[4] = {}, oldH[4] = {}, weight[4];
     WinterAtlasWeight(p, kSnowTileMask, weight);
@@ -7672,17 +7858,24 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
         IDirect3DTexture9* shade = ChunkShadeTexture(dev, key);
         // Native terrain alpha carries solar visibility. Smooth lamp RGB only.
         PatchedPs* alpha = nullptr;
+        bool nightSmooth = false; // the smoothed map through the game's own shader (below)
         if (smooth || shade) {
             alpha = &PatchedFor(dev, g_terrainAlphaPs, "Terrain native solar alpha", [s](std::vector<DWORD>& t, PatchedPs& p) {
                 p.nativeAlphaSource = s;
                 return ShaderPatches::PatchTerrainNativeAlpha(t, s, p.nativeAlphaSampler);
             });
-            if (!alpha->ps || alpha->nativeAlphaSource != s) smooth = nullptr, shade = nullptr; // unsupported variant: preserve the game's shadow map
+            if (!alpha->ps || alpha->nativeAlphaSource != s) { // unsupported variant: preserve the game's shadow map
+                // the rain variants use all 16 samplers (no room for the game's alpha); the alpha weighs only the sun, black at
+                // full night, so there the smoothed map draws through the game's own shader (no wall shade: no sampler for it)
+                nightSmooth = smooth && g_night.load(std::memory_order_relaxed) >= 1.0f;
+                if (!nightSmooth) smooth = nullptr;
+                shade = nullptr;
+            }
         }
         const float gain = GroundGain();
         const float dayWeight = 1.0f - g_night.load(std::memory_order_relaxed);
         PatchedPs* daylight = nullptr;
-        if ((smooth || shade) && !multi && dayWeight > 0.0f) {
+        if ((smooth || shade) && !nightSmooth && !multi && dayWeight > 0.0f) {
             daylight = &PatchedFor(dev, g_terrainDayPs, "Terrain daylight range", [s](std::vector<DWORD>& t, PatchedPs& p) {
                 p.nativeAlphaSource = s;
                 return ShaderPatches::PatchTerrainNativeAlpha(t, s, p.nativeAlphaSampler) &&
@@ -7726,7 +7919,11 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
         g_inOwnCall = true;
         {
             TerrainConst lampGain(dev, k, squared);
-            if (lampMap) {
+            if (nightSmooth && lampMap) {
+                SetTex(dev, s, lampMap);
+                draw();
+                SetTex(dev, s, old);
+            } else if (lampMap) {
                 NativeTerrainSampler native(dev, s, alpha->nativeAlphaSampler, old, D3D9Hooks::CallOriginalSetTexture);
                 if (native) {
                     float savedDay[4]{};
@@ -8799,9 +8996,11 @@ void LogDrawCost() {
         static uint32_t s_hits = 0, s_misses = 0, s_gen = 0;
         static uint64_t s_state = 0;
         arch += std::format(" | fence pick memo: {} reused, {} computed (other group or empty {}, positions read again {}, lamp list changed {}, walls or slabs "
-                            "changed {}; not kept {}); lamp list generation +{}, wall state {}",
+                            "changed {}; not kept {}); lamp list generation +{}, wall state {}; not used: switch off {}, turned off {}, F8 records {}, capture {}",
                             g_fencePickHits - s_hits, g_fencePickMisses - s_misses, g_fenceMissWhy[0], g_fenceMissWhy[1], g_fenceMissWhy[2], g_fenceMissWhy[3],
-                            g_fenceMissWhy[4], g_lampMemoGen - s_gen, LevelLightShare::LampVisibilityState() == s_state ? "same" : "changed");
+                            g_fenceMissWhy[4], g_lampMemoGen - s_gen, LevelLightShare::LampVisibilityState() == s_state ? "same" : "changed", g_fencePickBypass[0],
+                            g_fencePickBypass[1], g_fencePickBypass[2], g_fencePickBypass[3]);
+        for (uint32_t& b : g_fencePickBypass) b = 0;
         s_hits = g_fencePickHits, s_misses = g_fencePickMisses, s_gen = g_lampMemoGen, s_state = LevelLightShare::LampVisibilityState();
         for (uint32_t& w : g_fenceMissWhy) w = 0;
     }
@@ -9326,6 +9525,9 @@ void OnWorldChanged() {
     g_haveLastEdgeRect = false;
     g_shadeQueue.clear(); // the lamp shades waiting or building belong to the previous world's lots
     g_fenceGroups.clear(); // (garden walls of the old world)
+    g_fenceBirths.clear();
+    g_fenceCuts.clear();
+    g_fenceOpen.clear();
     g_gates.clear();
     g_fenceBusy.clear();
     g_fenceGen++;
@@ -9572,6 +9774,15 @@ std::string LotLampStatus() {
 }
 
 const BakeSnapshot& CurrentBakeLamps() { return g_bakeSnap; }
+uint64_t LotAt(float x, float z) {
+    const LotRect* r = FindLotAt(x, z);
+    return r ? static_cast<uint64_t>(r->lotHi) << 32 | r->lotLo : 0;
+}
+std::string GainText() {
+    return std::format("night {:.2f}; ground {:.3f} (terrain c3.x / lot pass), roads {:.3f}, lot map {:.3f} (lot pass c31.x), floors {:.3f}, roads by day curve {:.3f}",
+                       g_night.load(), GroundGain(), RoadGain(), LotMapGain(), FloorDayGain(), RoadDayGain());
+}
+
 bool LotGroundY(uint64_t lot, float& y) {
     auto find = [&]() {
         for (const LotRect& r : g_lotRects)
@@ -9851,6 +10062,9 @@ void Shutdown(bool keepChunkMaps) {
     g_shadeWorker.Stop();
     ReleaseLotMasks();
     g_fenceGroups.clear();
+    g_fenceBirths.clear();
+    g_fenceCuts.clear();
+    g_fenceOpen.clear();
     g_gates.clear();
     g_fenceBusy.clear();
     g_fenceGen++;

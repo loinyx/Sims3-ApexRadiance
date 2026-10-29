@@ -10,7 +10,7 @@ in Build mode and at dusk. By day, lamps that the game keeps lit add a subdued g
 
 | | |
 |---|---|
-| Availability | Released (standalone since 0.1.0). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: Released in 2.6.0. Light detail, walls blocking lamp light outdoors, lamp switches in one frame, weather variants of the lot and terrain passes, and idavidveiga's daytime bloom fixes: Released in 2.7.0. Lamp lighting (Instant (GPU) with real-time outdoor lamps and quick outdoor lamp edits; Classic with lamp drags and floors shown together), outdoor and indoor light through openings, doors block light, walls shade lamp light near the ground, buildings block lamp light on trees and objects, shadow softness and smooth light maps: Released in 2.13.0. Light through stairwells, stairs on the directional maps, light through arches and doorways, foliage lit per vertex with crown shade on lot ground, and moonlight scaled at its reader: Released in 2.14.0. Moon at least 20 degrees high, Build mode keeping the season's sun times and smooth dusk: Released in 2.15.1. No moonlight by default, *Indoor light adds to the ground*, closed gates and fence gaps in the lot shade, trees kept on the normal light rig, windows at the size of their panes: Released in 2.15.3. Gable sampling, elevated trim gain, measured pillar blockers, per-lamp floor shadows on instanced structures, snowy lot edge blending and Restart lighting: Released in 2.15.4. Winter terrain layout recognition, foliage dusk synchronisation and reduced repeated work: Released in 2.15.6. |
+| Availability | Released (standalone since 0.1.0). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: Released in 2.6.0. Light detail, walls blocking lamp light outdoors, lamp switches in one frame, weather variants of the lot and terrain passes, and idavidveiga's daytime bloom fixes: Released in 2.7.0. Lamp lighting (Instant (GPU) with real-time outdoor lamps and quick outdoor lamp edits; Classic with lamp drags and floors shown together), outdoor and indoor light through openings, doors block light, walls shade lamp light near the ground, buildings block lamp light on trees and objects, shadow softness and smooth light maps: Released in 2.13.0. Light through stairwells, stairs on the directional maps, light through arches and doorways, foliage lit per vertex with crown shade on lot ground, and moonlight scaled at its reader: Released in 2.14.0. Moon at least 20 degrees high, Build mode keeping the season's sun times and smooth dusk: Released in 2.15.1. No moonlight by default, *Indoor light adds to the ground*, closed gates and fence gaps in the lot shade, trees kept on the normal light rig, windows at the size of their panes: Released in 2.15.3. Gable sampling, elevated trim gain, measured pillar blockers, per-lamp floor shadows on instanced structures, snowy lot edge blending and Restart lighting: Released in 2.15.4. Winter terrain layout recognition, foliage dusk synchronisation and reduced repeated work: Released in 2.15.6. Released in 2.18.0: the Lighting page in four tabs (Overview, Outside, Inside & floors, Game fixes), grouped cards and one Ground light slider. |
 | Default | On (`enabledByDefault = true`; the feature metadata keeps `experimental = true`) |
 | Menu | Lighting page (tabs Overview, Ground, Objects, Buildings, Stories); World > Water & Snow page (Lamp Glow, Water Reflections, Snow); developer options under Developer > Lighting |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -56,7 +56,7 @@ atlas** that any surface knowing its world position can sample. Each sub-part be
 |---|---|---|
 | Lot light pass | Lot grass draws `max(lot map, terrain light)`, with a 3 m soft edge, so street-lamp light has no cut at lot borders | [lot-light-pass.md](lot-light-pass.md) |
 | World atlas and smoothed maps | Chunk light maps upscaled 4x and cleaned of DXT noise; one world atlas for every consumer; daytime terrain composition | [world-atlas-and-smoothed-maps.md](world-atlas-and-smoothed-maps.md) |
-| Terrain relight | Lot lamps in the terrain bake, dusk and daylight rebuilds, local per-lamp relights and paced sweeps | [terrain-relight.md](terrain-relight.md) |
+| Terrain relight | Lot lamps in the terrain bake with their cones, dusk and daylight rebuilds, local per-lamp relights and paced sweeps; a dragged lamp's ground light drawn on the GPU | [terrain-relight.md](terrain-relight.md) |
 | World lamp response | Edits of world-owned street lamps reach the terrain and native object rigs | [world-lamp-response.md](world-lamp-response.md) |
 | Level light share | Outdoor and indoor lamps light every story, with the game's wall test | [level-light-share.md](level-light-share.md) |
 | Real-time outdoor lamps (Lamp lighting: Instant) | The active lot's outdoor lamps drawn on the GPU into every story's outside maps, with shadows | [rt-outdoor-lamps.md](rt-outdoor-lamps.md) |
@@ -99,10 +99,7 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 | Ground > Game fixes > Smooth ground light | `mapaDeLuzSuavizado` | bool | on | | Smoothed chunk maps and the world atlas ([world-atlas](world-atlas-and-smoothed-maps.md)) |
 | Ground > Game fixes > Update at dusk | `automaticoAoAnoitecer` | bool | on | | Rebuild the terrain light at the settled day and night endpoints |
 | Ground > Game fixes > Delay after dusk | `atrasoSegundos` | float | 2.0 s | 0.5 to 10 s | Wait before the endpoint rebuild (none while Build mode editing) |
-| Ground intensity > Ground brightness | `brilhoNoChao` | float | 75% | 25 to 300% | Lamp scale on terrain, lot grass, snowy lot grass and floors; needs *Street lamps light lots* |
-| Ground intensity > Roads and sidewalks | `brilhoNasRuas` | float | 100% | 25 to 300% | Road lamp scale, multiplied by the ground brightness ([roads](roads.md)) |
-| Ground intensity > Street lamp brightness | `forcaDosPostes` | float | 80% | 25 to 300% | Street-lamp colour in the terrain bake; one terrain rebuild on slider release |
-| Ground intensity > Lot lamp brightness | `forcaDasLampadasDoLote` | float | 80% | 25 to 300% | Lot-lamp colour in the terrain bake (rebuild on release) and the lot's own light map on its grass (live) |
+| Outside > Brightness > Ground light | `luzNoChao` | float | 100% | 25 to 300% | Lamp light on every ground: terrain, roads, sidewalks, lot grass, floors and snow, all from the same terrain light (every lamp enters the terrain bake and the lot's own map at its full colour). 100% is the Soft balance of the four controls it replaced (`brilhoNoChao` x `forcaDasLampadasDoLote`, read from old configs); needs *Street lamps light lots* |
 | Objects > Lamps light objects | `postesNosObjetos` | bool | on | | Rig lamp boost and moon-shadow fix ([objects-and-rigs](objects-and-rigs.md), [foliage](foliage.md)) |
 | Objects > Brightness | `forcaNosObjetos` | float | 75% | 25 to 300% | Strength of the ground light floor on outdoor objects (*Doors and windows stay lit*) and of the rig lamp boost. With *Realistic lamp reach* (and *Doors and windows stay lit* and *Seamless light on pieces* on) the lamps on objects follow the walls' brightness x *Seamless light brightness* instead (`LotLightBridge::ObjectReachLawScale`, `ObjectLightBridge` `ReachLawRec`) |
 | Objects > Game fixes > Light stairs, railings, columns | `lampadasEmTodosObjetos` | bool | on | | Objects the game leaves without lamp light; applies when a world loads ("Reload save" badge) |
@@ -138,7 +135,7 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 | Stories > Game fixes > Every floor in full detail | `todosOsAndaresEmDetalhe` | bool | on | | Every floor of the active lot solved in full detail |
 | Performance > Lamp lighting > Lamp updates | `lampLightingMode` | string | `"instant"` | `"classic"`, `"instant"` | Instant: [Real-time outdoor lamps](rt-outdoor-lamps.md) on the parts of [Quick outdoor lamp edits](outdoor-lamp-delta.md); Classic: every room solved by the game, a dragged lamp's rooms once after the release ([lamp-drags](lamp-drags.md)) and an edit's stories shown together. A saved value is kept; a file without the key starts on Instant. Instant on a device that cannot run it shows a warning and works as Classic |
 | Developer > Compare lighting paths > Check quick lamp edits | `outdoorLampDeltaCheck` | bool | off | | Developer only, with Instant: each room 0 a delta brought up to date is solved in full again and compared ([outdoor-lamp-delta](outdoor-lamp-delta.md)) |
-| Water & Snow > Lamp Glow > Lamps glow on ponds | `lagosRefletemLampadas` | bool | on | | Pond lamp pass ([water](water.md)) |
+| Water & Snow > Lamp Glow (card switch) | `lagosRefletemLampadas` | bool | on | | Pond lamp pass ([water](water.md)) |
 | Water & Snow > Lamp Glow > Glow brightness | `brilhoNaAgua` | float | 40% | 10 to 40% | Lamp glow and sparkles on ponds |
 | Water & Snow > Water Reflections > Reflection brightness | `reflexoNoLago` | float | 156% | 0 to 300% (slider from 5%) | Shore reflection; needs Depth Blur ([../reflections.md](../reflections.md)) |
 | Water & Snow > Snow > Sidewalk visibility | `calcadaComNevePisada` | float | 50% | 0 to 100% | Sidewalk concrete showing through trodden snow; needs *Street lamps light lots* ([roads](roads.md)) |
@@ -211,7 +208,7 @@ has been corrected.
 
 ## Compatibility and interactions
 
-- **Every-Story Ground Light** (`SplitLevelGroundLight`, Lighting > Stories > "Upper floors light the ground") zeroes
+- **Every-Story Ground Light** (`SplitLevelGroundLight`, Lighting > Inside & floors > Stories > "Upper floors light the ground") zeroes
   `GetLotID` (0x006BC020) for the terrain bake so lot lamps on any story enter it. When the official Sims3SettingsSetter
   already applies its Split-Level Lighting Fix, the row shows on and locked. Inferred from the decompile of
   `FUN_00C292B0` (`re/out/fn_00c292b0.c` line 114: `GetLotID() == 0 || light+0xD0 == 0`): with lot id 0 every lamp the
@@ -406,18 +403,18 @@ Native solar and sky constants are never raised.
 
 ### Brightness controls
 
-- **Ground brightness / Roads and sidewalks** (live): for one draw, the game's lamp scale constant of a light-map term is
+- **Ground light** (live; `luzNoChao`, applied as 0.6 x the slider, the Soft balance): for one draw, the game's lamp scale constant of a light-map term is
   scaled: the terrain chunk PS (`TerrainLampConst` via `ShaderPatches::LightMapScaleConst`, c7 in the captured single
   pass chunks, c3 squared in the summer multi-pass, a squared c4.x in the recognised winter multi-pass layout; -1 = that
   shader keeps the game's brightness), the lot pass c3.x, the snowy lot pass c4.x, the floors' `FloorPatch.scaleConst`
-  and the roads' `RoadPatch.scaleConst` (x the road factor). Only while *Street lamps light lots* is on.
-- **Street lamp / Lot lamp brightness** (on the ground): `BakeColourStub` replaces `movaps xmm0,[edi+0F0h]`
-  (`0F 28 87 F0 00 00 00`) at 0x00C2950F in the terrain bake: the colour copied to the bake's shader parameter is
-  multiplied by `g_bakeStreetMul` (lot id +0xC0/+0xC4 = 0) or `g_bakeLotMul`. Lamp objects, rigs, room solves and the
-  lamp tracking keep the real colour. A change applies on slider release as one forced terrain update (`NoteEdit` switch
-  path). Lot lamps also scale the lot's own light map on its grass (lot pass c31.x, live), because lot grass is
-  `max(lot map, terrain)` and the bake alone cannot dim a lot's own lamps there. Objects, walls and roofs use their own
-  sliders.
+  and the roads' `RoadPatch.scaleConst`. Only while *Street lamps light lots* is on. It replaces the four controls of
+  earlier versions (ground, roads and sidewalks, street lamps, lot lamps); a configuration, profile or look saved with
+  them is migrated to ground x lot lamps / 0.6 (`MigrateGround`).
+- **Bake colour** (on the ground): `BakeColourStub` replaces `movaps xmm0,[edi+0F0h]` (`0F 28 87 F0 00 00 00`) at
+  0x00C2950F in the terrain bake: the colour copied to the bake's shader parameter is multiplied by `g_bakeStreetMul`
+  (lot id +0xC0/+0xC4 = 0) or `g_bakeLotMul`, both 1: every lamp enters the bake and the lot's own map (lot pass c31.x)
+  at its full colour, so the ground has the same light on both sides of a lot border. Lamp objects, rigs, room solves
+  and the lamp tracking keep the real colour. Objects, walls and roofs use their own sliders.
 - **Lamp colour, own colour for lot lamps**: the colour thunks record every stock-pink light (pink + written colour); on
   release `RetintLamps` rewrites those that still hold the written colour through `FUN_006bc3e0` (+0xF0 / +0xE0), then
   the rigs regather, one terrain update and one lot re-solve (room 0). Street lamp = class 0xB with lot id 0. Interiors

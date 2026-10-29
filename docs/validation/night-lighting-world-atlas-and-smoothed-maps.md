@@ -22,7 +22,8 @@ It must:
 | [`tools/terrain_lighting_test`](../../tools/terrain_lighting_test/README.md) (`check.cpp`) | `TerrainLightingPolicy` (day zero factors, single-pass and squared multi-pass factors, 101 night levels, 120 gains, 21 native scales, previous night rounding, invalid values); native-alpha patch on SM2 and SM3 bytecode, malformed, truncated, ambiguous and unsupported layouts; GPU readback: smoothed RGB kept, solar alpha identical to the native map; exact `NativeTerrainSampler` restoration after every injected read/set failure and no redundant writes; captured shader patching and creation; exclusive c7 constant identification | `run.ps1 -Captures ... -OutDir ...` | Native D3D9 GPU; fixtures `PS_2BA33118.bin` (world s7) and `PS_2BA62940.bin` (multi-pass s2) from the 2026-10-04 02-05-41 session |
 | `check.cpp` with `-CompositionCapture` | Daylight range: the 11-52-03 single and multi-pass shaders with equal material, normal, sun and lamp inputs; all RGB pixels at six lamp levels, lamp-free pixels preserved, three twilight weights, zero-weight night identity, rejection of foreign or mutated bytecode | `run.ps1 ... -CompositionCapture '<11-52-03 F7 folder>'` | Native D3D9 GPU |
 | `ground_scale_check.cpp` | Linear vs squared constant classification on the captured s7/s11 shaders; refusal of shared, mixed or saturated multipliers; GPU readback of both multiplier equations at five day/night weights and eight gains | `run_ground_scale_checks.ps1 -Captures '<2026-10-04 15-33-55 session>'` | Native D3D9 GPU |
-| `fxc` | Each smoothing entry point compiles alone: `fxc /T ps_3_0 /E GatherPS /O3 lightmap_smooth_ps.hlsl`, and the same for `HBlurPS`, `VBlurPS`, `HUpYAPS`, `HUpChromaPS`, `VUpPS`, `DownPS`, `CopyPS` | manual | Windows SDK |
+| `fxc` | Each smoothing entry point compiles alone: `fxc /T ps_3_0 /E GatherPS /O3 lightmap_smooth_ps.hlsl`, and the same for `HBlurPS`, `VBlurPS`, `HUpYAPS`, `HUpChromaPS`, `VUpPS`, `DownPS`, `CopyPS`, `StampPS` | manual | Windows SDK |
+| [`tools/terrain_stamp_test`](night-lighting-terrain-relight.md#automated-tests) | `StampPS` (the dragged lamps' pass) against the game's bake shader and `BakeConePS` | `run.ps1 -Precomp <Shaders_Win32.precomp>` | Direct3D 9 device |
 
 The composition fixture is not an exact replay of scene vertices, textures, depth or all material layers. The
 sampler-guard cost it reports is an isolated driver CPU benchmark, not game FPS.
@@ -94,6 +95,9 @@ Both paths:
 
 ## Open checks
 
+- Rain terrain at the end of dusk and at dawn. **Expected:** no visible step. The variants that reach the smoothed map
+  only at full night switch from the game's blocky map to the smoothed one in one frame when the night level reaches 1.
+
 - GPU path log lines, compare result and per-chunk GPU time have not been recorded in a test report.
 - GPU path assumptions: the instruction limits of the largest entry point `VUpPS` (about 6 texld + 60 ALU); DXVK 3.1.1
   support for `A32B32G32R32F` (else `A16B16G16R16F`) render-target textures with point sampling and for mipmapped
@@ -109,6 +113,9 @@ Both paths:
 - PR #2: native solar alpha, the daylight range candidate and squared ground scales in gameplay (same-lot scene, snow,
   seasons) and under DXVK. No FPS change is claimed.
 - Winter multi-pass variants and other untested scenes for the multi-pass and compact corrections.
+- Rain at night (`91af563`): world grass beside a lot with lamps, at full night in rain and during the dusk in rain.
+  **Expected:** at full night the ground shows the smoothed lamp light (no blocky DXT look), without the walls' shade
+  around lots; before full night the rain variants keep the game's unsmoothed map. Not yet checked in game.
 - Planned, not started: PASSO3 increment 5, re-rendering the terrain stamp at 4 texels/m with the game's formula from
   `FUN_00C292B0` (`E = c0.rgb * sat(c0.w / d^2) * (N.L >= 0 ? sat(sqrt(N.L)) : 0)`, the per-pixel plan (private notes) section 4), delivered
   through `LightmapSmooth::Find` and validated against the original at 256^2. Pre-sizing the atlas to the whole terrain

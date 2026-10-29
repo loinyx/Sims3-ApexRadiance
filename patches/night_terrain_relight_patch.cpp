@@ -30,6 +30,7 @@
 #include "game_addresses.h"
 #include "apex_log.h"
 #include "d3d9_hooks.h"
+#include "d3d9_bootstrap.h"
 #include "depth_share.h"
 #include "light_diag.h"
 #include "daylight_probe.h"
@@ -62,6 +63,10 @@
 #include "lot_lighting_motion.h"
 #include "outdoor_delta.h"
 #include "rt_outdoor_lamps.h"
+#include "terrain_stamps.h"
+#include "terrain_bake_cone.h"
+#include "terrain_bake_hlsl.h"
+#include "shader_cache.h"
 #include "imgui.h"
 #include "ui/widgets.h"
 #include "ui/i18n.h"
@@ -78,8 +83,11 @@
 #include <climits>
 #include <cmath>
 #include <cstring>
+#include <d3dcompiler.h>
 #include <format>
+#include <mutex>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 void RequestRefreshAfterLoad(); // below the patch's helpers: every room and lot once more, a moment after a load
@@ -145,10 +153,12 @@ bool ReadRenderedChunk(const BYTE* chunk, int& ix, int& iz) {
 // __fastcall with two stack arguments = __thiscall(terrain, chunk, force) for the caller (ECX = terrain, callee pops 8).
 // Also the completion signal (and QPC timing) of the chunks the local terrain relight releases (ChunkRelight): this is
 // the game's one-chunk-per-update sweep branch they go through (chunk+0x54).
+void GiveBackBakeRows();
 void __fastcall ChunkRenderThunk(void* terrain, void* /*edx*/, BYTE* chunk, int force) {
     LARGE_INTEGER t0, t1;
     QueryPerformanceCounter(&t0);
     reinterpret_cast<ChunkRender_t>(kChunkRenderFn)(terrain, chunk, static_cast<char>(force));
+    GiveBackBakeRows();
     QueryPerformanceCounter(&t1);
     int ix = 0, iz = 0;
     const bool rendered = ReadRenderedChunk(chunk, ix, iz);
@@ -230,13 +240,13 @@ bool g_water = true;
 bool g_waterFilter = true, g_waterColorCompression = true;
 float g_waterStrengthSetting = 0.4f;
 float g_waterReflSetting = 1.56f; // the tuned default
-// Brightness controls (Lamps and Ground tabs). Ground / roads / lot lamps on lot grass apply live in the ground shaders
-// (LotLightBridge::SetGroundBrightness); street / lot lamps in the terrain light bake (BakeColourStub) need a terrain
-// rebuild, done once when the slider is let go; the moonlight scales the game's sun / moon colour at night.
-float g_groundBrightness = 0.75f;
-float g_roadBrightness = 1.0f;  // x the ground brightness
-float g_streetLampGain = 0.8f;  // street lamps on the ground (terrain bake)
-float g_lotLampGain = 0.8f;     // lot lamps on the ground (terrain bake + the lot's own light map)
+// Ground light: one control for lamp light on every ground (grass, roads, sidewalks, lots, patios, floors, snow), applied
+// live in the ground shaders (LotLightBridge::SetGroundBrightness). Every lamp enters the terrain bake and the lot's own
+// map at its full colour (the bake gains stay 1), so the ground looks the same on both sides of a lot border. 1 = the
+// Soft balance of the four controls it replaces (ground 75% x lamps 80%); MigrateGround reads them from old configs.
+float g_groundLight = 1.0f;
+constexpr float kGroundSoft = 0.6f;
+float GroundGain() { return kGroundSoft * g_groundLight; }
 float g_moonlight = 0.0f;     // the moon's light at night
 bool g_edgePad = true;          // pad the room light maps' edges (RoomMapPadding): no dark side on things along walls
 bool g_lotTintOwn = false;      // lot lamps have their own colour
@@ -281,6 +291,10 @@ __declspec(naked) void LotPassStub() {
 }
 int g_stuckFrames = 0;
 Clock::time_point g_lastStuckKick{};
+// the last lamp change the local relight took (TryLocal): a drag's rebuild countdown is left idle only within
+// kDragIdleProof of one, so a drag whose moves the local path never sees still gets the game's own rebuild
+Clock::time_point g_localRelitAt{};
+constexpr auto kDragIdleProof = std::chrono::milliseconds(3000);
 int g_armsAtLastStuckKick = 0;
 int g_lastLampEdits = 0;
 int g_lastUserEdits = 0;
@@ -455,8 +469,21 @@ const std::vector<BYTE> kBakeColourOrig = {0x0F, 0x28, 0x87, 0xF0, 0x00, 0x00, 0
 // stamps type-5 lot lamps at their spill. The pool right under the lamp comes from the room-solve map, which has the cones.
 // The upper-floor gate mirrors it (LevelLightShare::SetBakeConeSpill).
 volatile bool g_bakeConeSpill = true;
+// The bake runs Apex's copy of its pixel shader (features/terrain_bake_cone.h), which takes each light's cones and spill
+// from c5..c7 (BakeLightRows, from the position stub): the colour stub then leaves the spill to it. The game makes its
+// shader long before Night Lighting installs, so the copy is bound in its place whenever the game binds it (render thread).
+volatile bool g_bakeConeShader = false;
+IDirect3DDevice9* g_bakeDevice = nullptr;
+IDirect3DPixelShader9* g_gameBakePs = nullptr; // the game's bake pixel shader, found bound in a bake
+IDirect3DPixelShader9* g_conePs = nullptr;     // Apex's copy (kept for the session: shaders survive a device reset)
+bool g_coneFailed = false, g_bakeLogged = false;
+float g_coneScale5 = 5.0f; // the shaded lamp's cone scale [0x011D11A0]
 // (2.15.1) area lights (types 9, 10) at the share of the ground below they face (TerrainBakeRule::AreaGroundShare)
 const float g_areaHalf = 0.5f, g_areaZero = 0.0f, g_areaOne = 1.0f;
+// Lamps being dragged whose ground light TerrainStamps draws on the GPU: the bake gives them no colour (render thread,
+// where the bake runs too; NightTerrainBake::SetExcluded)
+uintptr_t g_bakeExcluded[NightTerrainBake::kMaxExcluded] = {};
+int g_bakeExcludedCount = 0;
 bool g_bakeGainInstalled = false;
 float g_bakeGainSeen[2] = {1.0f, 1.0f}; // street / lot gains the multipliers hold
 float g_tintSeen[2] = {1.0f, 1.0f};     // street / lot lamp colours the stock lamps were last re-coloured with
@@ -464,6 +491,16 @@ float g_tintSeen[2] = {1.0f, 1.0f};     // street / lot lamp colours the stock l
 __declspec(naked) void BakeColourStub() {
     __asm {
         movaps xmm0, xmmword ptr [edi+0xF0]
+        mov eax, dword ptr [g_bakeExcludedCount]
+    excluded:                                 // a lamp being dragged: no colour (TerrainStamps draws it)
+        test eax, eax
+        jz kept
+        dec eax
+        cmp edi, dword ptr [g_bakeExcluded + eax*4]
+        jne excluded
+        xorps xmm0, xmm0
+        ret
+    kept:
         mov eax, dword ptr [edi+0xC0]
         or eax, dword ptr [edi+0xC4]
         jnz lot
@@ -478,6 +515,8 @@ __declspec(naked) void BakeColourStub() {
         je area
         cmp byte ptr [g_bakeConeSpill], 0
         je done
+        cmp byte ptr [g_bakeConeShader], 0    // the shader gives its cones and spill
+        jne done
         cmp eax, 5                            // type 5: a lamp with cones
         jne done
         mulps xmm0, xmmword ptr [edi+0x150]   // its spill, per channel
@@ -521,7 +560,110 @@ bool ReadLightLot(const BYTE* light, int& type, uint64_t& lot) {
         return false;
     }
 }
+// A light's cone fields (SEH: the light may be gone)
+bool ReadConeFields(const BYTE* light, TerrainBakeCone::Fields& f) {
+    __try {
+        f.type = *reinterpret_cast<const int*>(light + 0xB0);
+        if (f.type == 4) {
+            for (int i = 0; i < 3; i++) f.axis4[i] = reinterpret_cast<const float*>(light + 0x170)[i];
+            f.off4 = *reinterpret_cast<const float*>(light + 0x158);
+            f.scale4 = *reinterpret_cast<const float*>(light + 0x154);
+        } else if (f.type == 5) {
+            for (int i = 0; i < 3; i++) {
+                f.a1[i] = reinterpret_cast<const float*>(light + 0x1A0)[i];
+                f.a2[i] = reinterpret_cast<const float*>(light + 0x190)[i];
+                f.S[i] = reinterpret_cast<const float*>(light + 0x150)[i];
+            }
+            f.o1 = *reinterpret_cast<const float*>(light + 0x174);
+            f.o2 = *reinterpret_cast<const float*>(light + 0x170);
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+// c5..c7 as they were before a bake's first light wrote its cone rows: given back when the game binds another pixel shader
+// (the bake shader does not read them; a shader after it may)
+float g_bakeRowsSaved[3][4] = {};
+bool g_bakeRowsHeld = false;
+// The light about to be drawn: its cone rows into c5..c7 for Apex's bake shader (every light, so none keeps another's)
+void BakeLightRows(const BYTE* light) {
+    TerrainBakeCone::Fields f;
+    if (!ReadConeFields(light, f)) f = {};
+    float r[3][4];
+    TerrainBakeCone::Rows(f, g_coneScale5, r);
+    if (!g_bakeDevice) return;
+    if (!g_bakeRowsHeld) g_bakeRowsHeld = SUCCEEDED(g_bakeDevice->GetPixelShaderConstantF(5, &g_bakeRowsSaved[0][0], 3));
+    D3D9Hooks::CallOriginalSetPixelShaderConstantF(g_bakeDevice, 5, &r[0][0], 3);
+}
+// The saved c5..c7 back: after the chunk render that ran the bake (ChunkRenderThunk), before the game sets the next draw's
+// constants; else at the game's next other pixel shader (a bake outside that call)
+void GiveBackBakeRows() {
+    if (!g_bakeRowsHeld || !g_bakeDevice) return;
+    D3D9Hooks::CallOriginalSetPixelShaderConstantF(g_bakeDevice, 5, &g_bakeRowsSaved[0][0], 3);
+    g_bakeRowsHeld = false;
+}
+const ShaderCache::Id kBakeConePs = [] {
+    ShaderCache::Desc d;
+    d.tag = "NightTerrainRelight BakeConePS";
+    d.source = kTerrainBakeHlsl;
+    d.sourceName = "terrain_bake_ps.hlsl";
+    d.entry = "BakeConePS";
+    d.target = "ps_2_0"; // the game's vertex shader is vs_2_0
+    d.flags = D3DCOMPILE_OPTIMIZATION_LEVEL3;
+    return ShaderCache::Add(std::move(d));
+}();
+bool IsGameBakePs(IDirect3DPixelShader9* ps) {
+    UINT n = 0;
+    if (!ps || FAILED(ps->GetFunction(nullptr, &n)) || n != TerrainBakeCone::kGamePsBytes) return false;
+    std::vector<BYTE> code(n);
+    return SUCCEEDED(ps->GetFunction(code.data(), &n)) && TerrainBakeCone::Fnv(code.data(), n) == TerrainBakeCone::kGamePsFnv;
+}
+// ps is about to draw a bake pass: the game's bake shader is found (once) and Apex's copy bound in its place; false
+// when it is another shader or the copy cannot be made
+bool BindConeShader(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps) {
+    if (!ps || g_coneFailed) return false;
+    if (ps != g_conePs) {
+        if (ps != g_gameBakePs) {
+            if (g_gameBakePs || !IsGameBakePs(ps)) return false;
+            std::string err;
+            if (!g_conePs && ShaderCache::CreatePixelShader(dev, kBakeConePs, &g_conePs, &err) != ShaderCache::Result::Ok) {
+                g_coneFailed = true;
+                LOG_WARNING("[NightTerrainRelight] Terrain bake: the shader with lamp cones could not be made (" + (err.empty() ? std::string("create failed") : err) +
+                            "): lamps with cones keep their spill on the ground");
+                return false;
+            }
+            g_gameBakePs = ps;
+            LOG_INFO("[NightTerrainRelight] Terrain bake: lamps light the ground through their cones, as on lots (Apex's copy of the bake shader)");
+        }
+        if (FAILED(D3D9Hooks::CallOriginalSetPixelShader(dev, g_conePs))) return false;
+    }
+    g_bakeDevice = dev;
+    g_bakeConeShader = true;
+    return true;
+}
+float ReadConeScale5() {
+    const uintptr_t at = GameAddr::Get(GameAddr::Id::ConeScale5);
+    __try {
+        const float s = at ? *reinterpret_cast<const float*>(at) : 0.0f;
+        return s > 0.0f && s < 100.0f ? s : 5.0f;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 5.0f;
+    }
+}
+volatile bool g_bakeConeHooked = false; // the SetPixelShader hook is in (Install)
+bool g_inBakeLight = false;              // a bake light's position was just set: the next shader bound may be the bake's
 void __cdecl BakeLiftHead(const BYTE* light, float* head) {
+    if (g_bakeConeHooked && !g_coneFailed) { // the bake's shader may already be bound (a pass before): Apex's copy instead
+        IDirect3DDevice9* dev = g_bakeDevice ? g_bakeDevice : ApexD3D::Device();
+        IDirect3DPixelShader9* bound = nullptr;
+        if (dev && SUCCEEDED(dev->GetPixelShader(&bound)) && bound) {
+            BindConeShader(dev, bound);
+            bound->Release();
+        }
+        g_inBakeLight = !g_gameBakePs;
+        if (g_bakeConeShader) BakeLightRows(light);
+    }
     int type = 0;
     uint64_t lot = 0;
     if (!TerrainBakeRule::LowLampLift() || !ReadLightLot(light, type, lot) || !lot || !TerrainBakeRule::LotLampType(type)) return;
@@ -539,7 +681,10 @@ __declspec(naked) void BakePosStub() {
         movaps xmmword ptr [esi+0x110], xmm0
         mov edx, dword ptr [edi+0xC0]
         or edx, dword ptr [edi+0xC4]
-        jz street                              // a street lamp: as the game
+        jnz helper                             // a lot lamp: maybe lifted (and its cone rows)
+        cmp byte ptr [g_bakeConeShader], 0
+        je street                              // a street lamp with no cone rows to write: as the game
+    helper:
         sub esp, 112
         movups xmmword ptr [esp], xmm1
         movups xmmword ptr [esp+16], xmm2
@@ -915,24 +1060,115 @@ bool __stdcall ArmTest(BYTE* light) {
     return true;
 }
 
-// Replaces the vfunc+0x20 test in the terrain light bake collector. Lot lamps only while switched on.
-bool __stdcall TerrainLightTest(BYTE* light) {
+// The bake's light test without its counters: 0 rejected, 1 taken by the original test, 2 a lot lamp switched off, 3 a lot
+// lamp taken
+int BakeTest(BYTE* light) {
     // Type-11 vfunc+0x20 is FUN_007EAEA0 (always true). For a lot-owned outdoor
     // lamp, respect the observed enabled/lit state before accepting that original test.
     // World-owned lights and other classes keep their original behavior.
     if (*reinterpret_cast<const int*>(light + 0xB0) == 11 &&
         (*reinterpret_cast<const uint32_t*>(light + 0xC0) | *reinterpret_cast<const uint32_t*>(light + 0xC4)) != 0 &&
         (light[0x100] & 0x04) && *reinterpret_cast<const int*>(light + 0x08) == 0 &&
-        (light[0x100] & 0x61) != 0x61) return false;
-    if (OriginalWorldLightTest(light)) return true;
-    if (!g_lotLamps || !IsOutdoorLotLamp(light)) return false;
-    if (!(light[0x100] & 0x20)) {
-        g_lotLampsSkippedOff.fetch_add(1, std::memory_order_relaxed);
+        (light[0x100] & 0x61) != 0x61) return 0;
+    if (OriginalWorldLightTest(light)) return 1;
+    if (!g_lotLamps || !IsOutdoorLotLamp(light)) return 0;
+    return (light[0x100] & 0x20) ? 3 : 2;
+}
+// The lot lights the bake has given colour to (NightTerrainBake::EverBaked: a lamp new from the catalog is in no chunk's
+// map yet). shortcut: never shrinks; it holds the lot lights of the session, a few thousand at most
+std::mutex g_everBakedMx;
+std::unordered_set<uintptr_t> g_everBaked;
+std::atomic<bool> g_bakeTestSeen{false};
+void NoteBaked(BYTE* light) {
+    if ((*reinterpret_cast<const uint32_t*>(light + 0xC0) | *reinterpret_cast<const uint32_t*>(light + 0xC4)) == 0) return; // a street lamp
+    for (int i = 0; i < g_bakeExcludedCount; i++)
+        if (g_bakeExcluded[i] == reinterpret_cast<uintptr_t>(light)) return; // given no colour (BakeColourStub)
+    std::lock_guard<std::mutex> lk(g_everBakedMx);
+    g_everBaked.insert(reinterpret_cast<uintptr_t>(light));
+}
+// Replaces the vfunc+0x20 test in the terrain light bake collector. Lot lamps only while switched on.
+bool __stdcall TerrainLightTest(BYTE* light) {
+    const int t = BakeTest(light);
+    if (t == 2) g_lotLampsSkippedOff.fetch_add(1, std::memory_order_relaxed);
+    if (t == 3) g_lotLampsBaked.fetch_add(1, std::memory_order_relaxed);
+    g_bakeTestSeen.store(true, std::memory_order_relaxed);
+    if (t == 1 || t == 3) NoteBaked(light);
+    return t == 1 || t == 3;
+}
+
+// A light's bake fields (SEH: the light may be gone)
+struct BakeFields {
+    float colour[4], spill[4], pos[3], rect[4], range, intensity, axisY;
+    int type;
+    uint64_t lot;
+    bool taken;
+};
+bool ReadBakeFields(BYTE* light, BakeFields& f) {
+    __try {
+        const int t = BakeTest(light);
+        f.taken = t == 1 || t == 3;
+        std::memcpy(f.colour, light + 0xF0, 16);
+        std::memcpy(f.spill, light + 0x150, 16);
+        std::memcpy(f.pos, light + 0x120, 12);
+        std::memcpy(f.rect, light + 0x134, 16);
+        f.range = *reinterpret_cast<const float*>(light + 0x130);
+        f.intensity = *reinterpret_cast<const float*>(light + 0x10);
+        f.axisY = *reinterpret_cast<const float*>(light + 0x184);
+        f.type = *reinterpret_cast<const int*>(light + 0xB0);
+        f.lot = *reinterpret_cast<const uint32_t*>(light + 0xC0) | static_cast<uint64_t>(*reinterpret_cast<const uint32_t*>(light + 0xC4)) << 32;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
-    g_lotLampsBaked.fetch_add(1, std::memory_order_relaxed);
+}
+} // namespace
+
+namespace NightTerrainBake {
+void SetExcluded(const std::vector<uintptr_t>& lights) {
+    int n = 0;
+    for (uintptr_t L : lights)
+        if (L && n < kMaxExcluded) g_bakeExcluded[n++] = L;
+    g_bakeExcludedCount = n;
+}
+bool Excluded(uintptr_t light) {
+    for (int i = 0; i < g_bakeExcludedCount; i++)
+        if (g_bakeExcluded[i] == light) return true;
+    return false;
+}
+bool ConeShader() { return g_bakeConeShader; }
+bool EverBaked(uintptr_t light) {
+    if (!g_bakeTestSeen.load(std::memory_order_relaxed)) return true; // the collector test is not in: unknown, so yes
+    std::lock_guard<std::mutex> lk(g_everBakedMx);
+    return g_everBaked.count(light) != 0;
+}
+// What BakeColourStub and BakePosStub give the bake for this light (0xC2950F colour x the kind's gain x the area share or
+// the cone spill; .w = range x intensity x 0.2 as at 0xC29523 .. 0xC29586; the position with the low-lamp lift)
+bool StampOf(uintptr_t light, float col[4], float pos[3], float rect[4], float& ground, float cone[3][4]) {
+    BakeFields f{};
+    if (!g_bakeGainInstalled || !light || !ReadBakeFields(reinterpret_cast<BYTE*>(light), f) || !f.taken || !f.lot) return false; // (lot lamps only)
+    for (int k = 0; k < 3; k++) col[k] = f.colour[k] * g_bakeLotMul[k];
+    if (f.type == 9 || f.type == 10) {
+        const float share = std::clamp(f.axisY * g_areaHalf + g_areaHalf, g_areaZero, g_areaOne);
+        for (int k = 0; k < 3; k++) col[k] *= share;
+    } else if (g_bakeConeSpill && f.type == 5 && !g_bakeConeShader)
+        for (int k = 0; k < 3; k++) col[k] *= f.spill[k];
+    // its cone rows as BakeLightRows gives the bake (none while the bake has no cones)
+    TerrainBakeCone::Fields cf;
+    if (!g_bakeConeShader || !ReadConeFields(reinterpret_cast<const BYTE*>(light), cf)) cf = {};
+    TerrainBakeCone::Rows(cf, g_coneScale5, cone);
+    col[3] = f.range * f.intensity * 0.2f;
+    std::memcpy(pos, f.pos, sizeof f.pos);
+    std::memcpy(rect, f.rect, sizeof f.rect);
+    if (!LotLightBridge::LotGroundY(f.lot, ground)) return false;
+    if (g_bakePosInstalled && TerrainBakeRule::LowLampLift() && TerrainBakeRule::LotLampType(f.type)) { // as BakeLiftHead
+        const float h = pos[1] - ground, s = TerrainBakeRule::StampHeight(h);
+        if (std::isfinite(s) && s != h) pos[1] = ground + s;
+    }
     return true;
 }
+} // namespace NightTerrainBake
+
+namespace {
 
 // ---- game state access ----
 struct LightState {
@@ -1179,9 +1415,28 @@ bool LocalLamps(std::vector<ChunkRelight::Lamp>& out) {
     return true;
 }
 
+// A change of a lamp being dragged whose ground light TerrainStamps draws on the GPU (the bake excludes it): the lot and
+// the type of an excluded lamp (a dragged lamp is a removal at its last place and an addition at the new one in the diff)
+bool StampedChange(const LotLightBridge::BakeChange& c) {
+    if (!c.user) return false;
+    for (int i = 0; i < g_bakeExcludedCount; i++) {
+        int type = 0;
+        uint64_t lot = 0;
+        if (ReadLightLot(reinterpret_cast<const BYTE*>(g_bakeExcluded[i]), type, lot) && lot == c.lot && type == c.type) return true;
+    }
+    return false;
+}
+
 // The pending change through the local relight. 1 = queued (FinishEdit called), 2 = waiting (WaitEdit called), 0 = not
 // possible (`why`): the caller takes the full path with its own limits.
 int TryLocal(Clock::time_point now, const std::vector<uint64_t>& newLots, const std::string& diffText, std::string& why) {
+    // a dragged lamp the GPU draws on the terrain: no relight while it moves (the stamp follows it; TerrainStamps relights
+    // where it was when the drag starts and where it stays when it ends), and the drag's countdown stays idle
+    if (g_bakeExcludedCount > 0 && !g_editDiff.changes.empty() && std::all_of(g_editDiff.changes.begin(), g_editDiff.changes.end(), StampedChange)) {
+        g_localRelitAt = now;
+        FinishEdit(std::format("{} ({}): skipped: drawn on the GPU while dragged ({})", g_editReason, EditKind(), diffText));
+        return 1;
+    }
     // A lot the last rebuild did not have: its lamps may have been baked since (LOD transitions re-bake chunks with every
     // registered lamp, chunkrelight.md 1.4), but their old places are unknown, so a removed or moved lamp would leave its
     // old light on the ground.
@@ -1236,6 +1491,7 @@ int TryLocal(Clock::time_point now, const std::vector<uint64_t>& newLots, const 
     }
     // the "lights changed" fallback must not fire again for the same arms
     g_lastStuckKick = now;
+    g_localRelitAt = now;
     g_armsAtLastStuckKick = g_lotLampArms.load();
     (user ? g_decLocalUser : g_decLocalAuto)++;
     FinishEdit(std::format("{} ({}): relit locally ({}; {})", g_editReason, EditKind(), diffText, b.what));
@@ -1536,8 +1792,12 @@ void OnPresent() {
         static bool s_logged = false;
         if (DragLite::Engaged()) s_dragArmUntil = now + std::chrono::milliseconds(2000);
         else if (now >= s_dragArmUntil) s_logged = false;
+        // (only while the local path has relit a lamp change lately: a drag of a lamp the GPU draws rereads the list every
+        // 33 ms and its moves could go unseen, and the countdown it armed was left idle, so the ground kept the lamp's
+        // old light, a recording: 13 s of drag, no local relight)
         if (TesterToggles::dragTerrainIdle.load(std::memory_order_relaxed) && night && c38 > 0 && c3C <= 0 && g_pendingReason.empty() && now < s_dragArmUntil &&
-            g_haveBaked && !g_editLocalRefused && ChunkRelight::LikelyAvailable() && !ChunkRelight::RebuildActive() && CancelCountdown(s.cells)) {
+            g_haveBaked && !g_editLocalRefused && now - g_localRelitAt < kDragIdleProof && ChunkRelight::LikelyAvailable() && !ChunkRelight::RebuildActive() &&
+            CancelCountdown(s.cells)) {
             c38 = -1;
             g_counter38 = -1;
             g_prevCounter = -1;
@@ -1795,13 +2055,9 @@ void OnPresent() {
         }
     }
 
-    // Street / lot lamp brightness in the terrain bake and the lamp colours: once the slider is let go, one terrain rebuild
-    // (a switch: no snapshot compare) with the new values; the colours also re-solve the lots' outdoor light once.
+    // The lamp colours: once the slider is let go, one terrain rebuild (a switch: no snapshot compare) with the new values;
+    // they also re-solve the lots' outdoor light once.
     const bool dragging = MenuSliderHeld();
-    if (!dragging && g_bakeGainInstalled && (g_streetLampGain != g_bakeGainSeen[0] || g_lotLampGain != g_bakeGainSeen[1])) {
-        SetBakeGains(g_streetLampGain, g_lotLampGain);
-        NoteEdit(now, true, true, "lamp brightness on the ground changed", true);
-    }
     if (g_bakePosInstalled && TerrainBakeRule::LowLampLift() != g_lowLiftSeen) {
         g_lowLiftSeen = TerrainBakeRule::LowLampLift();
         NoteEdit(now, true, true, "height of lamps on the ground changed", true);
@@ -2246,14 +2502,8 @@ class NightTerrainRelightPatch : public ApexPatch {
         RegisterFloatSetting(&g_waterReflSetting, "reflexoNoLago", SettingWidget::Slider, 1.56f, 0.0f, 3.0f,
             S3SS_TR("Forca do reflexo da margem (arvores, casas, postes) na agua dos lagos.",
                     "Strength of the shore reflection (trees, houses, lamps) on ponds (needs Depth Blur)."));
-        RegisterFloatSetting(&g_groundBrightness, "brilhoNoChao", SettingWidget::Slider, 0.75f, 0.25f, 3.0f,
-            "How bright lamp light is on grass, lots and outdoor floors (1 = the default).");
-        RegisterFloatSetting(&g_roadBrightness, "brilhoNasRuas", SettingWidget::Slider, 1.0f, 0.25f, 3.0f,
-            "How bright lamp light is on roads and sidewalks, relative to the ground (1 = the same).");
-        RegisterFloatSetting(&g_streetLampGain, "forcaDosPostes", SettingWidget::Slider, 0.8f, 0.25f, 3.0f,
-            "How strongly street lamps light the ground (1 = the default; the ground light is rebuilt when it changes).");
-        RegisterFloatSetting(&g_lotLampGain, "forcaDasLampadasDoLote", SettingWidget::Slider, 0.8f, 0.25f, 3.0f,
-            "How strongly outdoor lot lamps light the ground (1 = the default; the ground light is rebuilt when it changes).");
+        RegisterFloatSetting(&g_groundLight, "luzNoChao", SettingWidget::Slider, 1.0f, 0.25f, 3.0f,
+            "How bright lamp light is on every ground: grass, roads, sidewalks, lots, outdoor floors and snow (1 = the default).");
         RegisterFloatSetting(&g_moonlight, "luar", SettingWidget::Slider, 0.0f, 0.0f, 2.0f,
             "How strong the moonlight is at night (1 = the game; 0 = no moonlight, only lamps and the sky's glow).");
         RegisterBoolSetting(&g_edgePad, "bordasDosMapasDeLuz", true,
@@ -2402,7 +2652,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         installedLotLampCode = lotCodeOk;
         // "Street lamps" / "Lot lamps" on the ground (optional: without it those two sliders do nothing and say so)
         g_bakeGainInstalled = false;
-        SetBakeGains(g_streetLampGain, g_lotLampGain);
+        SetBakeGains(1.0f, 1.0f);
         if (kBakeColourSite && Missing({Id::BakeColourSite}).empty() &&
             MemPatch::ValidateBytes(reinterpret_cast<LPVOID>(kBakeColourSite), kBakeColourOrig.data(), kBakeColourOrig.size())) {
             // call BakeColourStub; nop x2
@@ -2445,6 +2695,19 @@ class NightTerrainRelightPatch : public ApexPatch {
         }
         if (g_bakePosInstalled) LOG_INFO("[NightTerrainRelight] Terrain bake: lot lamps on the ground are stamped from 40 cm over their lot's ground");
         else LOG_WARNING("[NightTerrainRelight] Terrain bake position code differs or was not found: lamps on the ground light the lawn from their real height");
+        // the bake's lamp cones: Apex's copy of its pixel shader is bound wherever the game binds its own in a bake (both stubs
+        // needed: the position stub writes each light's cone rows, the colour stub then leaves the spill to the shader).
+        // Last: the other features saw the game's shader first.
+        if (g_bakeGainInstalled && g_bakePosInstalled) {
+            g_coneScale5 = ReadConeScale5();
+            D3D9Hooks::RegisterSetPixelShader("NightTerrainRelight", [](D3D9Hooks::DeviceContext& ctx, IDirect3DPixelShader9* ps) {
+                if (g_bakeRowsHeld && (!ps || ps != g_gameBakePs)) GiveBackBakeRows(); // the bake's passes are over
+                if (!ps || g_coneFailed || (ps != g_gameBakePs && (g_gameBakePs || !g_inBakeLight))) return D3D9Hooks::HookAction::Continue;
+                g_inBakeLight = false;
+                return BindConeShader(ctx.device, ps) ? D3D9Hooks::HookAction::Skip : D3D9Hooks::HookAction::Continue;
+            }, D3D9Hooks::Priority::Last);
+            g_bakeConeHooked = true;
+        }
         LevelLightShare::SetBakeConeSpill(g_bakeGainInstalled && g_bakeConeSpill);
         if (g_bakeGainInstalled && g_bakeConeSpill) LOG_INFO("[NightTerrainRelight] Terrain bake: lamps with cones (type 5) are stamped at their spill");
         if (!g_bakeGainInstalled) LOG_WARNING("[NightTerrainRelight] Terrain bake colour code differs or was not found: street / lot lamp brightness on the ground not available");
@@ -2504,7 +2767,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             LevelLightShare::SetRealisticOpenings(g_realisticOpenings);
             LevelLightShare::SetOutdoorThroughOpenings(g_outdoorOpenings);
             if (!MenuSliderHeld()) // (applied once the slider is let go: a change relights every room)
-                LevelLightShare::SetOpeningLampBalance(g_groundBrightness, g_lotLampGain, g_bridge, g_wallStrength, g_walls);
+                LevelLightShare::SetOpeningLampBalance(GroundGain(), 1.0f, g_bridge, g_wallStrength, g_walls);
             LevelLightShare::SetDoorsBlockLight(g_doorsBlock);
             LevelLightShare::SetIndoorThroughOpenings(g_indoorOpenings);
             LevelLightShare::SetIndoorLightOnGround(g_indoorGround);
@@ -2589,7 +2852,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             }
             LightmapSmooth::SetEnabled(g_smoothMaps);
             LotLightBridge::SetSidewalkClear(g_sidewalkClear);
-            LotLightBridge::SetGroundBrightness(g_groundBrightness, g_roadBrightness, g_lotLampGain);
+            LotLightBridge::SetGroundBrightness(GroundGain(), 1.0f, 1.0f);
             RoomMapPadding::SetEnabled(g_edgePad);
             LotLightBridge::SetIndoorSmooth(g_edgePad);
             HookGuard::Run("RoomMapPadding frame update", [] { RoomMapPadding::OnPresent(); });
@@ -2685,6 +2948,9 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_chunkHookInstalled = false;
         g_bakeGainInstalled = false;
         g_bakePosInstalled = false;
+        g_bakeConeHooked = false; // (the hook went with UnregisterAll: the game's shader binds again)
+        g_bakeConeShader = false;
+        g_bakeRowsHeld = false;
         NightLevel::g_timesHooked = false;
         g_sunTimesCall = 0;
         LevelLightShare::SetBakeConeSpill(false);
@@ -2783,10 +3049,25 @@ class NightTerrainRelightPatch : public ApexPatch {
 
     // Profiles, looks and undo: the settings (and on / off) of a saved table, with the parts that follow their option
     // installed or removed live, like a change in the menu
+    // A config, profile or look saved with the four ground controls (ground, roads, street lamps, lot lamps): the ground
+    // light they gave the terrain (ground x lot lamps) over Soft's; roads and street lamps follow the ground now
+    static void MigrateGround(const toml::table& table) {
+        if (table.contains("luzNoChao") || !(table.contains("brilhoNoChao") || table.contains("forcaDasLampadasDoLote"))) return;
+        const double ground = table["brilhoNoChao"].value_or(0.75), lot = table["forcaDasLampadasDoLote"].value_or(0.8);
+        g_groundLight = std::clamp(static_cast<float>(ground * lot / kGroundSoft), 0.25f, 3.0f);
+    }
+    bool LoadFromToml(const toml::table& table) override {
+        MigrateGround(table); // before the base: it may install, which applies the ground light
+        return ApexPatch::LoadFromToml(table);
+    }
+
     void ApplyTableLive(const toml::table& table) override {
         const bool wasEnabled = isEnabled.load();
         const auto changedBefore = lastSettingChange.load();
         const bool bridgeBefore = g_bridge, objBefore = g_objLamps, shareBefore = g_levelShare, objPixelBefore = g_objPixel;
+        const float groundBefore = g_groundLight;
+        MigrateGround(table);
+        if (g_groundLight != groundBefore) NotifySettingChanged();
         ApexPatch::ApplyTableLive(table);
         if (wasEnabled && isEnabled.load()) ApplyLive(bridgeBefore, objBefore, shareBefore, objPixelBefore);
         if (wasEnabled && isEnabled.load() && lastSettingChange.load() != changedBefore) RequestAutoRefresh(); // a profile, look or undo
@@ -2826,10 +3107,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_lotTintOwn = false;
         g_lotLampTint = 1.0f;
         g_edgePad = true;
-        g_groundBrightness = 0.75f;
-        g_roadBrightness = 1.0f;
-        g_streetLampGain = 0.8f;
-        g_lotLampGain = 0.8f;
+        g_groundLight = 1.0f;
         g_moonlight = 0.0f;
         g_objLamps = true;
         g_objStrength = 0.75f;
@@ -2875,26 +3153,27 @@ class NightTerrainRelightPatch : public ApexPatch {
     // Every row goes through ApexUi::SwitchRow / Slider with its label as the stable id (unique within its card).
 
     // Light styles: every brightness setting on the Lighting page at once (the moonlight and colors are not part of a style)
-    // each: ground, roads, street lamps, lot lamps, objects, pieces, fences, walls, roofs (the StyleValue order)
+    // each: ground light, objects, pieces, fences, walls, roofs (the StyleValue order)
+    static constexpr int kStyleValues = 6;
     struct LightStyle {
-        float v[9];
+        float v[kStyleValues];
     };
-    // Preserve the approved Soft surface ratios; variants change intensity conservatively.
+    // Preserve the approved Soft surface ratios; variants change intensity conservatively. Ground light: the four ground
+    // controls' product (ground x lot lamps) over Soft's 0.6.
     static constexpr LightStyle kStyles[] = {
-        {{0.675f, 1.0f, 0.72f, 0.72f, 0.675f, 0.675f, 0.675f, 0.27f, 0.405f}}, // Subtle (walls 27%, Soft 30% scaled; the others keep the ratio)
-        {{0.75f, 1.0f, 0.8f, 0.8f, 0.75f, 0.75f, 0.75f, 0.30f, 0.45f}},        // Soft reference (the defaults; walls 30%)
-        {{1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.56f, 0.6f}},            // Natural (walls 56%)
+        {{0.81f, 0.675f, 0.675f, 0.675f, 0.27f, 0.405f}}, // Subtle (walls 27%, Soft 30% scaled; the others keep the ratio)
+        {{1.0f, 0.75f, 0.75f, 0.75f, 0.30f, 0.45f}},      // Soft reference (the defaults; walls 30%)
+        {{1.67f, 1.0f, 1.0f, 1.0f, 0.56f, 0.6f}},         // Natural (walls 56%)
     };
     static float* StyleValue(int i) {
-        float* const v[] = {&g_groundBrightness, &g_roadBrightness, &g_streetLampGain, &g_lotLampGain, &g_objStrength,
-                            &g_objPixelLightStrength, &g_fenceGroundStrength, &g_wallStrength, &g_roofStrengthSetting};
+        float* const v[] = {&g_groundLight, &g_objStrength, &g_objPixelLightStrength, &g_fenceGroundStrength, &g_wallStrength, &g_roofStrengthSetting};
         return v[i];
     }
     static int CurrentStyle() {
         for (int s = 0; s < static_cast<int>(std::size(kStyles)); s++) {
             const float* want = kStyles[s].v;
             bool same = true;
-            for (int i = 0; i < 9 && same; i++) same = std::fabs(*StyleValue(i) - want[i]) < 0.005f;
+            for (int i = 0; i < kStyleValues && same; i++) same = std::fabs(*StyleValue(i) - want[i]) < 0.005f;
             if (same) return s;
         }
         return -1; // custom
@@ -2917,7 +3196,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                 ImGui::PushID(i);
                 const bool clicked = ApexUi::ProfileChoiceRow("LightingStyle", icons[i], name, tip, selected);
                 if (clicked && i < 3 && !selected) {
-                    for (int j = 0; j < 9; ++j) { previous.v[j] = *StyleValue(j); *StyleValue(j) = kStyles[i].v[j]; }
+                    for (int j = 0; j < kStyleValues; ++j) { previous.v[j] = *StyleValue(j); *StyleValue(j) = kStyles[i].v[j]; }
                     canUndo = true;
                     style = i;
                     changed = true;
@@ -2933,7 +3212,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             }
             if (canUndo) {
                 if (ApexUi::IconTextButton("Undo choice", ApexUi::IconId::Undo2)) {
-                    for (int j = 0; j < 9; ++j) *StyleValue(j) = previous.v[j];
+                    for (int j = 0; j < kStyleValues; ++j) *StyleValue(j) = previous.v[j];
                     canUndo = false;
                     changed = true;
                     ApexUi::ReportChange("Lighting balance restored");
@@ -2970,16 +3249,109 @@ class NightTerrainRelightPatch : public ApexPatch {
                 changed |= ApexUi::SwitchRow("Light through doors and windows", &g_realisticOpenings, "Lamps light walled yards only through openings or over the walls",
                                              kRealisticOpeningsDefault);
                 ImGui::EndDisabled();
-                // (the light through openings, doors, shadow softness and smooth light maps: Buildings tab, Rooms at Night)
-                if (ApexUi::BeginAdvanced("StoryDetail", "Game fixes")) {
-                    changed |= ApexUi::SwitchRow("Wall lamps at the right height", &g_foundationWalls, "Fixes a game bug: wall light too high on tall walls and foundations", true);
-                    changed |= ApexUi::SwitchRow("Seamless walls between floors", &g_wallAlign, "Walls above and below the floor line meet with no step in the light", true);
-                    changed |= ApexUi::SwitchRow("Every floor in full detail", &g_allFloors, "Changing floors keeps the light; entering a lot takes a little longer", true);
-                    ApexUi::EndAdvanced();
-                }
+                // (the light through openings, doors and shadow softness: Rooms at Night, right below; the fixes: Game fixes tab)
                 ImGui::EndDisabled();
                 return changed;
             });
+        }
+        ApexUi::EndCard();
+        ImGui::PopID();
+    }
+
+    // Lighting > Game fixes: one card per area. These correct game bugs, are on by default and stay switchable, so the
+    // look tabs keep only the choices that change the look.
+    void DrawGameFixes() {
+        using ApexUi::IconId;
+        ApexUi::MutedText("Fixes for game bugs. They are on by default; turn one off only to compare with the game.");
+        ApexUi::Gap(ApexUi::kSpace2);
+        ImGui::PushID("NightGroundFixes");
+        if (ApexUi::BeginCard("##Card")) {
+            ApexUi::CardHeader(IconId::LandPlot, "Ground & Lots", "Lamp light on grass, streets and lots", nullptr, nullptr);
+            ApexUi::CardDivider();
+            Edit([] {
+                bool changed = ApexUi::SwitchRow("Street lamps light lots", &g_bridge, "Street lamp light flows onto lots with no hard edge", true);
+                changed |= ApexUi::SwitchRow("Lamp colors stay near lamps", &g_neutralProbe, "A colored lamp no longer tints far floors, roofs and shiny objects", true);
+                return changed;
+            });
+            // Smooth ground light only chooses which map the draws read (idavidveiga's fork): no lighting refresh, no
+            // terrain, lot, room or wall solve and no object rig gather; the next draw reads the smoothed or the raw map
+            if (ApexUi::SwitchRow("Smooth ground light", &g_smoothMaps, "Soft lamp light on the ground, without blocky steps or specks", true)) {
+                NotifySettingChanged();
+                LOG_INFO("[NightTerrainRelight] Smooth ground light changed: draw maps only; object rigs, terrain, lots, rooms and walls left untouched");
+            }
+            // When the ground light is rebuilt (lamp changes are always followed; this is the rebuild at dusk)
+            Edit([] {
+                bool changed = ApexUi::SwitchRow("Update at dusk", &g_autoDusk, "When night falls, the ground light is rebuilt with every lamp on", true);
+                ImGui::BeginDisabled(!g_autoDusk);
+                ApexUi::SliderOptions o;
+                o.format = "%.1f s";
+                o.tooltip = "Waits after dusk so every lamp has switched on first";
+                o.defaultValue = 2.0f;
+                changed |= ApexUi::Slider("Delay after dusk", &g_delaySec, 0.5f, 10.0f, o);
+                ImGui::EndDisabled();
+                return changed;
+            });
+        }
+        ApexUi::EndCard();
+        ImGui::PopID();
+
+        // The game's fixes on stairs, doors, counters, fences and indoor furniture
+        ImGui::PushID("NightObjectFixes");
+        if (ApexUi::BeginCard("##Card")) {
+            ApexUi::CardHeader(IconId::Armchair, "Objects", "Lamp light on plants and outdoor furniture", nullptr, nullptr);
+            ApexUi::CardDivider();
+            Edit([] {
+                ImGui::BeginDisabled(!g_objLamps);
+                ApexUi::SetNextRowBadge(kReloadBadge, kReloadTip); // the game builds these pieces' light when a world loads
+                bool changed = ApexUi::SwitchRow("Light stairs, railings, columns", &g_objAll, "Pieces the game leaves unlit", true);
+                ImGui::EndDisabled();
+                // These read the ground light of two ground fixes (lot light bridge + smoothed maps), in the card above
+                const bool groundLight = g_bridge && g_smoothMaps;
+                if (!groundLight) {
+                    const bool both = !g_bridge && !g_smoothMaps;
+                    ApexUi::IconNote(ApexUi::IconId::Info, both ? "Needs \"Street lamps light lots\" and \"Smooth ground light\""
+                                                                : !g_bridge ? "Needs \"Street lamps light lots\"" : "Needs \"Smooth ground light\"");
+                    if (ApexUi::IconTextButton(both ? "Turn both on##GroundLight" : "Turn it on##GroundLight", ApexUi::IconId::LandPlot, nullptr, ApexUi::ButtonKind::Primary)) {
+                        ApexUi::ReportChange(both ? "Ground light turned on" : !g_bridge ? "Street lamps light lots turned on" : "Smooth ground light turned on");
+                        g_bridge = true;
+                        g_smoothMaps = true;
+                        changed = true;
+                    }
+                }
+                ImGui::BeginDisabled(!groundLight);
+                changed |= ApexUi::SwitchRow("Doors and windows stay lit", &g_objPixel, "A front door is never darker than the wall around it", true);
+                ImGui::BeginDisabled(!g_objPixel);
+                changed |= ApexUi::SwitchRow("Windows take outdoor light", &g_windowOutdoor, "The outer side of windows lit by the room takes the outdoor light", true);
+                ImGui::EndDisabled();
+                changed |= ApexUi::SwitchRow("Seamless light on pieces", &g_objPixelLights, "Counters and modular pieces outside show no color steps", true);
+                if (g_objPixelLights)
+                    changed |= ApexUi::SliderPercent("Seamless light brightness", &g_objPixelLightStrength, 0.25f, 3.0f, "Lamp light on outdoor objects and trees, over the walls' brightness", 0.75f);
+                changed |= ApexUi::SwitchRow("Fences and stairs catch light", &g_fenceGround, "Fences, posts, stairs and their snow match the lit ground", true);
+                if (g_fenceGround)
+                    changed |= ApexUi::SliderPercent("Fence brightness", &g_fenceGroundStrength, 0.25f, 2.0f, "Balance fences against the surrounding ground", 0.75f);
+                ImGui::EndDisabled();
+                changed |= ApexUi::SwitchRow("Smooth indoor light", &g_edgePad, "Stairs, curtains and furniture take their room's light and color smoothly; no dark sides", true);
+                return changed;
+            });
+        }
+        ApexUi::EndCard();
+        ImGui::PopID();
+
+        // Walls and light maps between floors: off with "Outdoor light between floors" (Inside & floors tab), as before
+        ImGui::PushID("NightStoryFixes");
+        if (ApexUi::BeginCard("##Card")) {
+            ApexUi::CardHeader(IconId::Layers, "Stories", "Lamp light between the floors of a house", nullptr, nullptr);
+            ApexUi::CardDivider();
+            if (!g_levelShare) ApexUi::IconNote(ApexUi::IconId::Info, "Needs \"Outdoor light between floors\"");
+            ImGui::BeginDisabled(!g_levelShare);
+            Edit([] {
+                bool changed = ApexUi::SwitchRow("Wall lamps at the right height", &g_foundationWalls, "Fixes a game bug: wall light too high on tall walls and foundations", true);
+                changed |= ApexUi::SwitchRow("Seamless walls between floors", &g_wallAlign, "Walls above and below the floor line meet with no step in the light", true);
+                changed |= ApexUi::SwitchRow("Every floor in full detail", &g_allFloors, "Changing floors keeps the light; entering a lot takes a little longer", true);
+                changed |= ApexUi::SwitchRow("Smooth light maps", &g_smoothRoomMaps, "Lamp light in rooms without blocks, bands or rings; floors blend across arches", true);
+                return changed;
+            });
+            ImGui::EndDisabled();
         }
         ApexUi::EndCard();
         ImGui::PopID();
@@ -2992,54 +3364,18 @@ class NightTerrainRelightPatch : public ApexPatch {
             ApexUi::CardHeader(IconId::LandPlot, "Ground & Lots", "Lamp light on grass, streets and lots", nullptr, nullptr);
             ApexUi::CardDivider();
             Edit([] {
+                ApexUi::CardGroup("Where the light goes");
                 bool changed = ApexUi::SwitchRow("Lot lamps light the street", &g_lotLamps, "Outdoor lot lamps also light the grass and street nearby", true);
                 changed |= ApexUi::SwitchRow("Walls shade lamp light near the ground", &g_groundShade, "Walls, garden walls, trees and bushes shade lamp light on the ground, also past the lot", true);
                 return changed;
             });
-            // (2.13.1) the game's fixes and the dusk update: on by default, kept switchable in one folded block
-            if (ApexUi::BeginAdvanced("Updates##NightGround", "Game fixes")) {
-                Edit([] {
-                    bool changed = ApexUi::SwitchRow("Street lamps light lots", &g_bridge, "Street lamp light flows onto lots with no hard edge", true);
-                    changed |= ApexUi::SwitchRow("Lamp colors stay near lamps", &g_neutralProbe, "A colored lamp no longer tints far floors, roofs and shiny objects", true);
-                    return changed;
-                });
-                // Smooth ground light only chooses which map the draws read (idavidveiga's fork, 04/10): no lighting refresh, no
-                // terrain, lot, room or wall solve and no object rig gather; the next draw reads the smoothed or the raw map
-                if (ApexUi::SwitchRow("Smooth ground light", &g_smoothMaps, "Soft lamp light on the ground, without blocky steps or specks", true)) {
-                    NotifySettingChanged();
-                    LOG_INFO("[NightTerrainRelight] Smooth ground light changed: draw maps only; object rigs, terrain, lots, rooms and walls left untouched");
-                }
-                // When the ground light is rebuilt (lamp changes are always followed; this is the rebuild at dusk)
-                Edit([] {
-                    bool changed = ApexUi::SwitchRow("Update at dusk", &g_autoDusk, "When night falls, the ground light is rebuilt with every lamp on", true);
-                    ImGui::BeginDisabled(!g_autoDusk);
-                    ApexUi::SliderOptions o;
-                    o.format = "%.1f s";
-                    o.tooltip = "Waits after dusk so every lamp has switched on first";
-                    o.defaultValue = 2.0f;
-                    changed |= ApexUi::Slider("Delay after dusk", &g_delaySec, 0.5f, 10.0f, o);
-                    ImGui::EndDisabled();
-                    return changed;
-                });
-                ApexUi::EndAdvanced();
-            }
-        }
-        ApexUi::EndCard();
-        if (ApexUi::BeginCard("##GroundIntensity")) {
-            ApexUi::CardHeader(IconId::SlidersHorizontal, "Ground intensity", "Balance surfaces and lamp brightness", nullptr, nullptr);
-            ApexUi::CardDivider();
+            // (the game's fixes and the dusk update: Game fixes tab). The former Ground intensity card, as a group
             Edit([] {
+                ApexUi::CardGroup("Brightness");
                 // The ground and road gains are applied in the draws of "Street lamps light lots"
-                if (!g_bridge) ApexUi::IconNote(ApexUi::IconId::Info, "Needs \"Street lamps light lots\"");
+                if (!g_bridge) ApexUi::IconNote(ApexUi::IconId::Info, "Needs \"Street lamps light lots\" (Game fixes tab)");
                 ImGui::BeginDisabled(!g_bridge);
-                bool changed = ApexUi::SliderPercent("Ground brightness", &g_groundBrightness, 0.25f, 3.0f, "Lamp light on grass, lots and patios", 0.75f);
-                changed |= ApexUi::SliderPercent("Roads and sidewalks", &g_roadBrightness, 0.25f, 3.0f, "Balance roads against the surrounding ground", 1.0f);
-                ImGui::EndDisabled();
-                // In the terrain light bake: the ground is rebuilt once the slider is let go
-                const char* bakeTip = g_bakeGainInstalled ? nullptr : "Not available on this game version";
-                ImGui::BeginDisabled(!g_bakeGainInstalled);
-                changed |= ApexUi::SliderPercent("Street lamp brightness", &g_streetLampGain, 0.25f, 3.0f, bakeTip ? bakeTip : "Ground light cast by street lamps", 0.8f);
-                changed |= ApexUi::SliderPercent("Lot lamp brightness", &g_lotLampGain, 0.25f, 3.0f, bakeTip ? bakeTip : "Ground light cast by lamps on lots", 0.8f);
+                const bool changed = ApexUi::SliderPercent("Ground light", &g_groundLight, 0.25f, 3.0f, "Lamp light on grass, roads, sidewalks, lots, patios and snow", 1.0f);
                 ImGui::EndDisabled();
                 return changed;
             });
@@ -3063,43 +3399,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                 changed |= ApexUi::SwitchRow("Buildings block lamp light on trees and objects", &g_objectWalls, "Trees, objects and fences behind a wall or balcony get no lamp light", true);
                 return changed;
             });
-            // (2.13.1) the game's fixes on stairs, doors, counters, fences and indoor furniture: on by default, folded
-            if (ApexUi::BeginAdvanced("ObjectFixes##NightObjects", "Game fixes")) {
-                Edit([] {
-                    ImGui::BeginDisabled(!g_objLamps);
-                    ApexUi::SetNextRowBadge(kReloadBadge, kReloadTip); // the game builds these pieces' light when a world loads
-                    bool changed = ApexUi::SwitchRow("Light stairs, railings, columns", &g_objAll, "Pieces the game leaves unlit", true);
-                    ImGui::EndDisabled();
-                    // These read the ground light of two Ground options (lot light bridge + smoothed maps)
-                    const bool groundLight = g_bridge && g_smoothMaps;
-                    if (!groundLight) {
-                        const bool both = !g_bridge && !g_smoothMaps;
-                        ApexUi::IconNote(ApexUi::IconId::Info, both ? "Needs \"Street lamps light lots\" and \"Smooth ground light\" (Ground tab)"
-                                                                    : !g_bridge ? "Needs \"Street lamps light lots\" (Ground tab)" : "Needs \"Smooth ground light\" (Ground tab)");
-                        if (ApexUi::IconTextButton(both ? "Turn both on##GroundLight" : "Turn it on##GroundLight", ApexUi::IconId::LandPlot, nullptr, ApexUi::ButtonKind::Primary)) {
-                            ApexUi::ReportChange(both ? "Ground light turned on" : !g_bridge ? "Street lamps light lots turned on" : "Smooth ground light turned on");
-                            g_bridge = true;
-                            g_smoothMaps = true;
-                            changed = true;
-                        }
-                    }
-                    ImGui::BeginDisabled(!groundLight);
-                    changed |= ApexUi::SwitchRow("Doors and windows stay lit", &g_objPixel, "A front door is never darker than the wall around it", true);
-                    ImGui::BeginDisabled(!g_objPixel);
-                    changed |= ApexUi::SwitchRow("Windows take outdoor light", &g_windowOutdoor, "The outer side of windows lit by the room takes the outdoor light", true);
-                    ImGui::EndDisabled();
-                    changed |= ApexUi::SwitchRow("Seamless light on pieces", &g_objPixelLights, "Counters and modular pieces outside show no color steps", true);
-                    if (g_objPixelLights)
-                        changed |= ApexUi::SliderPercent("Seamless light brightness", &g_objPixelLightStrength, 0.25f, 3.0f, "Lamp light on outdoor objects and trees, over the walls' brightness", 0.75f);
-                    changed |= ApexUi::SwitchRow("Fences and stairs catch light", &g_fenceGround, "Fences, posts, stairs and their snow match the lit ground", true);
-                    if (g_fenceGround)
-                        changed |= ApexUi::SliderPercent("Fence brightness", &g_fenceGroundStrength, 0.25f, 2.0f, "Balance fences against the surrounding ground", 0.75f);
-                    ImGui::EndDisabled();
-                    changed |= ApexUi::SwitchRow("Smooth indoor light", &g_edgePad, "Stairs, curtains and furniture take their room's light and color smoothly; no dark sides", true);
-                    return changed;
-                });
-                ApexUi::EndAdvanced();
-            }
+            // (the game's fixes on stairs, doors, counters, fences and indoor furniture: Game fixes tab)
         }
         ApexUi::EndCard();
         ImGui::PopID();
@@ -3112,11 +3412,11 @@ class NightTerrainRelightPatch : public ApexPatch {
             ApexUi::CardHeader(ApexUi::IconId::House, "Buildings", "Outside walls and roofs", nullptr, nullptr);
             ApexUi::CardDivider();
             Edit([] {
-                ApexUi::GroupLabel("WALLS");
+                ApexUi::CardGroup("Walls");
                 bool changed = ApexUi::SwitchRow("Lamps light walls", &g_walls, "Outside walls near lamps get brighter; off keeps the game's dim walls", true);
                 if (g_walls)
                     changed |= ApexUi::SliderPercent("Brightness##Walls", &g_wallStrength, 0.25f, 4.0f, "Lamp light on outside walls; trees and objects too with Realistic lamp reach", 0.30f);
-                ApexUi::GroupLabel("ROOFS");
+                ApexUi::CardGroup("Roofs");
                 changed |= ApexUi::SwitchRow("Lamps light roofs", &g_roofs, "Roofs no longer stay black at night; softer roof shadows too", true);
                 if (g_roofs)
                     changed |= ApexUi::SliderPercent("Brightness##Roofs", &g_roofStrengthSetting, 0.05f, 2.0f, "Intensity of lamp light on roofs", 0.45f);
@@ -3155,7 +3455,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             ApexUi::CardHeader(ApexUi::IconId::Moon, "Rooms at Night", "Background and lamp light inside rooms", nullptr, nullptr);
             ApexUi::CardDivider();
             Edit([] {
-                ApexUi::GroupLabel("BACKGROUND LIGHT");
+                ApexUi::CardGroup("Background light");
                 bool changed = ApexUi::SwitchRow("Adjust the background light", &g_unlitOn, "Set the ambient glow indoors, with lamps on or off", true);
                 if (g_unlitOn) {
                     changed |= ApexUi::SliderPercent("Brightness##Unlit", &g_unlitLight, 0.1f, 0.8f, "How bright that background light is, on walls and furniture", 0.20f);
@@ -3169,11 +3469,11 @@ class NightTerrainRelightPatch : public ApexPatch {
             // 14/10, the approved player structure: lamp light through openings and its look. Each switch is one setting; the
             // parts inside them (roofed rooms taking the story below's lamps; the fade at the light cut, the dither and the
             // smooth reads) stay switchable only on Developer > Tester, on by default.
-            // (they shape the light shared between stories: off with "Outdoor light between floors", as on the Stories tab)
-            if (!g_levelShare) ApexUi::IconNote(ApexUi::IconId::Info, "Needs \"Outdoor light between floors\" (Stories tab)");
+            // (they shape the light shared between stories: off with "Outdoor light between floors", in the Stories card above)
+            ApexUi::CardGroup("Lamp light");
+            if (!g_levelShare) ApexUi::IconNote(ApexUi::IconId::Info, "Needs \"Outdoor light between floors\"");
             ImGui::BeginDisabled(!g_levelShare);
             Edit([] {
-                ApexUi::GroupLabel("LAMP LIGHT");
                 bool changed = ApexUi::SwitchRow("Outdoor light through openings", &g_outdoorOpenings, "Garden lamps light rooms through doors, windows and arches", true);
                 changed |= ApexUi::SwitchRow("Indoor light through openings", &g_indoorOpenings, "Lit rooms shine through arches and windows onto the garden and the next room", true);
                 ImGui::BeginDisabled(!g_indoorOpenings || !g_floorWalls); // (2.15.3) a part of the light above, kept in the floor maps' alpha
@@ -3196,12 +3496,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                 o.defaultValue = 0.15f;
                 if (ApexUi::Slider("Shadow softness", &g_shadowSoftness, 0.02f, 0.5f, o)) NotifySettingChanged();
             }
-            if (ApexUi::BeginAdvanced("RoomFixes##NightRooms", "Game fixes")) {
-                ImGui::BeginDisabled(!g_levelShare);
-                Edit([] { return ApexUi::SwitchRow("Smooth light maps", &g_smoothRoomMaps, "Lamp light in rooms without blocks, bands or rings; floors blend across arches", true); });
-                ImGui::EndDisabled();
-                ApexUi::EndAdvanced();
-            }
+            // (Smooth light maps: Game fixes tab, Stories card)
             // A button to recalculate the lights when they go wrong: the "Refresh the lighting" shortcut as a button
             const std::string key = ApexConfig::KeyChordText(Hotkeys::Key(Hotkeys::Action::Refresh));
             const float gap = ImGui::GetStyle().ItemSpacing.x;
@@ -3221,12 +3516,13 @@ class NightTerrainRelightPatch : public ApexPatch {
     void DrawWaterCard() {
         ImGui::PushID("NightWater");
         if (ApexUi::BeginCard("##Card")) {
-            ApexUi::CardHeader(ApexUi::IconId::WavesHorizontal, "Lamp Glow", "Lamp light on ponds at night", nullptr, nullptr);
-            ApexUi::CardDivider();
+            // The on / off sits in the header, like Water Reflections (the former "Lamps glow on ponds" row)
             Edit([] {
-                bool changed = ApexUi::SwitchRow("Lamps glow on ponds", &g_water, "Ponds glow and sparkle near lamps at night", true);
-                if (g_water)
+                bool changed = ApexUi::CardHeader(ApexUi::IconId::WavesHorizontal, "Lamp Glow", "Ponds glow and sparkle near lamps at night", nullptr, &g_water);
+                if (g_water) {
+                    ApexUi::CardDivider();
                     changed |= ApexUi::SliderPercent("Glow brightness", &g_waterStrengthSetting, 0.1f, 0.4f, "Intensity of lamp glow and sparkles on ponds", 0.4f);
+                }
                 return changed;
             });
         }
@@ -3247,7 +3543,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                     "How much sidewalk shows where Sims have walked; 0% keeps the game's original look", 0.5f);
                 ImGui::EndDisabled();
                 if (!g_bridge) {
-                    ApexUi::IconNote(IconId::Info, "Needs \"Street lamps light lots\" (Lighting page, Ground tab)");
+                    ApexUi::IconNote(IconId::Info, "Needs \"Street lamps light lots\", a lighting fix");
                     if (ApexUi::IconTextButton("Turn it on##StreetLamps", IconId::LandPlot, nullptr, ApexUi::ButtonKind::Primary)) {
                         ApexUi::ReportChange("Street lamps light lots turned on");
                         g_bridge = true;
@@ -3545,6 +3841,9 @@ void NightLighting::DrawBuildingsCard() {
 }
 void NightLighting::DrawRoomsCard() {
     if (auto* p = MenuPatch()) p->DrawRoomsCard();
+}
+void NightLighting::DrawGameFixes() {
+    if (auto* p = MenuPatch()) p->DrawGameFixes();
 }
 void NightLighting::DrawLightDetailCard() {
     if (auto* p = MenuPatch()) p->DrawLightDetailCard();
