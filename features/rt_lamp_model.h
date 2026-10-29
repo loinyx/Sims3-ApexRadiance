@@ -21,6 +21,7 @@
 // The floor mask of an outdoor floor texel of a story >= 1 (LevelLightShare SolvePointBatchImpl): alpha = max(1 - vis / all,
 // under), vis and all the luminance of room 0's lamps at the texel with N.l ignored, with and without the walls (the
 // threshold drop, no fade); under = the share of the ground atlas the lamps under the floor's plane put there (UnderShare).
+#include <xmmintrin.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -121,6 +122,31 @@ inline bool BakeStamp(const BakeLamp& L, const float s[3], float base, float eps
     if (!(v > 0.0f)) return false;
     under = L.head[1] <= s[1] + eps;
     return true;
+}
+// BakeStamp at 4 points (x, y, z by lane): the same single-precision operations in the same order, the distance and the
+// stamp 4 at a time (SSE), so each lane equals BakeStamp bit for bit (/fp:precise, no FMA; rt_lamps_test checks it).
+// ok[k] is false where BakeStamp returns false
+inline void BakeStamp4(const BakeLamp& L, const float sx[4], const float sy[4], const float sz[4], float base, float eps, float v[4], bool under[4],
+                       bool ok[4]) {
+    const float h = TerrainBakeRule::StampHeight(L.head[1] - base, L.liftable != 0);
+    if (!(h > 0.0f)) {
+        ok[0] = ok[1] = ok[2] = ok[3] = false;
+        return;
+    }
+    const __m128 dx = _mm_sub_ps(_mm_set1_ps(L.head[0]), _mm_loadu_ps(sx)), dz = _mm_sub_ps(_mm_set1_ps(L.head[2]), _mm_loadu_ps(sz));
+    const __m128 d2 = _mm_add_ps(_mm_add_ps(_mm_mul_ps(dx, dx), _mm_set1_ps(h * h)), _mm_mul_ps(dz, dz));
+    float stamp[4];
+    _mm_storeu_ps(stamp, _mm_div_ps(_mm_set1_ps(0.4f * L.range * L.intensity * h), _mm_mul_ps(d2, _mm_sqrt_ps(d2))));
+    for (int k = 0; k < 4; k++) {
+        ok[k] = false;
+        float st = stamp[k];
+        if (!(st > 0.0f)) continue;
+        if (st > 1.0f) st = 1.0f;
+        v[k] = L.colour * st;
+        if (!(v[k] > 0.0f)) continue;
+        under[k] = L.head[1] <= sy[k] + eps;
+        ok[k] = true;
+    }
 }
 // The share of the stamps at s from lamps whose head is at most eps over s; -1 when nothing stamps there
 inline float UnderShare(const BakeLamp* lamps, int n, const float s[3], float base, float eps) {
