@@ -90,23 +90,23 @@ static Scene MakeScene(float turn, bool soft, float tx = 1000.0f, float tz = 200
     return s;
 }
 
-// The scene's inputs as another copy of the header's types (the reference's: the same members, bit for bit; an older
-// reference may lack members added at the end, such as Wall::pass)
-template <class T, class S> static T As(const S& s) {
-    static_assert(sizeof(T) <= sizeof(S) && std::is_trivially_copyable_v<S>);
+// The scene's inputs as another copy of the header's types (the reference's: the same members, bit for bit). Prefix: an
+// older reference may lack members added at the end (Wall::pass); every other type must match in size.
+template <class T, bool Prefix = false, class S> static T As(const S& s) {
+    static_assert((Prefix ? sizeof(T) <= sizeof(S) : sizeof(T) == sizeof(S)) && std::is_trivially_copyable_v<S>);
     T t;
     std::memcpy(static_cast<void*>(&t), &s, sizeof t);
     return t;
 }
-template <class T, class S> static std::vector<T> As(const std::vector<S>& v) {
+template <class T, bool Prefix = false, class S> static std::vector<T> As(const std::vector<S>& v) {
     std::vector<T> out;
-    for (const S& s : v) out.push_back(As<T>(s));
+    for (const S& s : v) out.push_back(As<T, Prefix>(s));
     return out;
 }
 template <class Job, class Grid, class Lamp, class Wall> static void Run(const Scene& s, std::vector<uint8_t>& res, std::vector<float>& den, double& ms) {
     const auto t0 = std::chrono::steady_clock::now();
     Job job;
-    job.Init(As<Grid>(s.grid), As<Lamp>(s.lamps), As<Wall>(s.walls), s.patches, {}, As<Lamp>(s.others));
+    job.Init(As<Grid>(s.grid), As<Lamp>(s.lamps), As<Wall, true>(s.walls), s.patches, {}, As<Lamp>(s.others));
     job.Step([] { return true; });
     ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     res = job.Result();
