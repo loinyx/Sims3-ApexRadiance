@@ -9,7 +9,7 @@ own pages (see [See also](#see-also)). Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released in 1.0.0. Subdued daytime response on snow on objects and *Ground brightness* on the squared terrain variant: Released in 2.6.0. The melting-snow lot pass, the daytime lamp term on snowy lots, the wet world pass left to the game in snow and the game's own snow on objects in full daylight: Released in 2.7.0. The room mask and lamp shade on snowy lots, and the indoor light on the ground on the snowy lot passes: Released in 2.15.3. Snow and melting-snow edge blending and visible-lot updates: Released in 2.15.4 |
+| Availability | Released in 1.0.0. Subdued daytime response on snow on objects and *Ground brightness* on the squared terrain variant: Released in 2.6.0. The melting-snow lot pass, the daytime lamp term on snowy lots, the wet world pass left to the game in snow and the game's own snow on objects in full daylight: Released in 2.7.0. The room mask and lamp shade on snowy lots, and the indoor light on the ground on the snowy lot passes: Released in 2.15.3. Snow and melting-snow edge blending and visible-lot updates: Released in 2.15.4 Released in 2.18.0: the fog-mixed snow layout on objects and floors. |
 | Default | On (with Night Lighting and *Street lamps light lots*) |
 | Menu | No snow-specific switch; World > Water & Snow > Snow holds *Sidewalk visibility*. Uses Lighting > Game fixes > Ground & Lots (*Street lamps light lots*, *Smooth ground light*), Lighting > Outside > Ground & Lots, *Brightness* group (*Ground light*) and Lighting > Outside > Objects > Objects > Game fixes (*Fences and stairs catch light*, *Fence brightness*) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |

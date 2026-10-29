@@ -9,7 +9,7 @@ story. Interior floors are unchanged. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released (present since 2.1.0, the first version in this repository). The lot's ground lamp shade on story-0 floors (*Walls shade lamp light near the ground*): Released in 2.13.0. Outdoor floors kept off the indoor light on the ground: Released in 2.15.3. Light past 1 on summer outdoor floors: Released in 2.16.0 |
+| Availability | Released (present since 2.1.0, the first version in this repository). The lot's ground lamp shade on story-0 floors (*Walls shade lamp light near the ground*): Released in 2.13.0. Outdoor floors kept off the indoor light on the ground: Released in 2.15.3. Light past 1 on summer outdoor floors: Released in 2.16.0 Released in 2.18.0: every weather floor variant, each lamp counted once. |
 | Default | On (follows the Ground & Lots switches) |
 | Menu | No card of its own: Lighting > Game fixes (*Street lamps light lots*, *Smooth ground light*), Lighting > Outside (*Ground light*) and Lighting > Inside & floors > Stories |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |

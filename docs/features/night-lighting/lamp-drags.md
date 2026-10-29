@@ -7,7 +7,7 @@ causes to the lamp's own rooms and spreads the rest over the frames after the la
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0. Fast own-room relight, let go, the own room at once, the furniture with its room: In development (branch `fix/2.13.1-indoor-speed`) |
+| Availability | Released in 2.13.0. Fast own-room relight, let go, the own room at once, the furniture with its room: In development (branch `fix/2.13.1-indoor-speed`) Released in 2.18.0: a lamp drawn on the GPU while dragged takes no local relight. |
 | Default | On; each measure has a switch on Developer > [Tester](../dev-tools/tester.md) |
 | Source (2.13.1) | Also [`features/atrium_hold.cpp`](../../../features/atrium_hold.cpp), [`features/level_light_share.cpp`](../../../features/level_light_share.cpp) (`OwnRoomsPending`) |
 | Menu | None (developer switches only) |

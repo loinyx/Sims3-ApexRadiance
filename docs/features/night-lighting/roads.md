@@ -8,7 +8,7 @@ setting lets the sidewalk concrete show through where Sims have walked. Part of 
 
 | | |
 |---|---|
-| Availability | Released in 1.0.0. Alpha-blended sidewalk variant: released in 2.5.6 |
+| Availability | Released in 1.0.0. Alpha-blended sidewalk variant: released in 2.5.6 Released in 2.18.0: the wet road's sky reflection follows the daylight. |
 | Default | On (with Night Lighting and *Street lamps light lots*) |
 | Menu | Lighting > Outside > Ground & Lots, *Brightness* group; World > Water & Snow > *Snow* (sidewalk visibility) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |

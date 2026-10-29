@@ -9,7 +9,7 @@ takes its base from the parts kept here ([Real-time outdoor lamps](rt-outdoor-la
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0, as part of Performance > Lamp lighting > Instant (GPU) |
+| Availability | Released in 2.13.0, as part of Performance > Lamp lighting > Instant (GPU) Released in 2.18.0: a refused delta keeps the story's record as the GPU base. |
 | Default | On (Lamp lighting: Instant (GPU)); with Classic every room 0 is solved in full |
 | Menu | No switch of its own (System > Performance > Lamp lighting); its check: Developer > Lighting > Compare lighting paths > Check quick lamp edits |
 | Configuration | `lampLightingMode`, `outdoorLampDeltaCheck` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |

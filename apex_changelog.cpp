@@ -6,6 +6,33 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k2180Added[] = {
+    "Lighting: options split into Overview, Outside, Inside & floors and Game fixes tabs",
+    "Lighting: Overview sums up every area and its options on one page",
+    "Lighting: one Ground light slider replaces the four ground and lamp sliders",
+    "Presets: an Applied chip while your setup still matches the preset",
+    "Night Lights: chain-link fences, lattices and railings let lamp light through their gaps",
+    nullptr};
+constexpr const char* k2180Improved[] = {
+    "Menu: cards on every page use named groups instead of Advanced folds",
+    "Lighting: game fixes have their own tab and stay on by default",
+    "Performance: a dragged lamp's ground light is drawn on the GPU, 97% less CPU",
+    "Performance: room light work in a lamp drag falls from 5.0 to 0.6 ms a frame",
+    "Night Lights: furniture, doors and windows follow a picked-up lamp at once",
+    "Night Lights: new or moved lamps light every story at once, with no seam flicker",
+    "Night Lights: the lot and the grass beside it follow every step of a lamp drag",
+    "Night Lights: spotlights and shaded lamps light the lawn through their cones",
+    "Night Lights: fence shadows follow added or removed pieces in about a quarter second",
+    nullptr};
+constexpr const char* k2180Fixed[] = {
+    "Night Lights: wet roads stay dark at night in the rain",
+    "Night Lights: patios and floors keep the right lamp light in rain and snow",
+    "Night Lights: snowy objects and outdoor objects in bad weather take lamp light",
+    "Night Lights: patios count each lamp once and match the grass beside them",
+    "Night Lights: openings in fences let lamp light through",
+    "Night Lights: lamp light no longer stays on the ground after a lamp is dropped",
+    nullptr};
+
 constexpr const char* k2172Added[] = {
     "Compatibility: offers to turn off Sims 3 Performance Patch options that freeze Sims with Sims 3 Modernization",
     nullptr};
@@ -419,6 +446,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"2.18.0", "2026-10-29", k2180Added, k2180Improved, k2180Fixed},
     {"2.17.2", "2026-10-28", k2172Added, nullptr, nullptr},
     {"2.17.1", "2026-10-27", nullptr, k2171Improved, k2171Fixed},
     {"2.17.0", "2026-10-27", k2170Added, k2170Improved, nullptr},

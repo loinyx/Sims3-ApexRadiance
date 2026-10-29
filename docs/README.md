@@ -40,7 +40,7 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 
 | Feature | Status |
 |---|---|
-| [Night Lighting](features/night-lighting/README.md): lamps that really light the world at night | Released; Released in 2.15.6: winter terrain layout recognition, foliage dusk synchronisation and less repeated lighting work; Released in 2.16.0: lamp light past 1 outdoors, outdoor light through openings balanced, room light map edges at walls, wall lamps lighting their wall; Released in 2.16.1: kept solves that account for every light; Released in 2.17.1: a lamp's light stays in its own room on floors and objects, no street light inside the house |
+| [Night Lighting](features/night-lighting/README.md): lamps that really light the world at night | Released; Released in 2.15.6: winter terrain layout recognition, foliage dusk synchronisation and less repeated lighting work; Released in 2.16.0: lamp light past 1 outdoors, outdoor light through openings balanced, room light map edges at walls, wall lamps lighting their wall; Released in 2.16.1: kept solves that account for every light; Released in 2.17.1: a lamp's light stays in its own room on floors and objects, no street light inside the house; Released in 2.18.0: live lamp edits drawn on the GPU on every story and the ground, every weather floor and wet road variant, light through mesh fences and fence openings, a single Ground light |
 | [Lot light pass](features/night-lighting/lot-light-pass.md): lot and street lamps on lot grass | Released; Released in 2.13.0: lamp shade on lot ground (walls shade lamp light near the ground); Released in 2.13.1: the shade past the lot (world grass, roads), garden walls and fences, smooth ground shade with Instant; Released in 2.15.3: a shade that takes only the light of the lamps a wall blocks, closed gates and fence gaps, snowy lots shaded, indoor light added to the ground |
 | [World atlas and smoothed maps](features/night-lighting/world-atlas-and-smoothed-maps.md): smooth terrain light maps | Released |
 | [Terrain relight](features/night-lighting/terrain-relight.md): rebuilding terrain lighting at dusk and after edits | Released |
@@ -129,7 +129,7 @@ Project-wide history: [architecture](history/architecture.md), [workflow](histor
 
 ## Presets and recovery
 
-- [Presets](features/presets.md): saved settings, portable ZIP packages with a LUT and keyboard shortcuts (Released in 2.12.2).
+- [Presets](features/presets.md): saved settings, portable ZIP packages with a LUT and keyboard shortcuts (Released in 2.12.2) and the Applied chip (Released in 2.18.0).
 - [Graphics recovery](features/graphics-recovery.md): restart image-effect resources without resetting settings.
 - [Steam Deck and Proton](features/steam-deck.md): Proton, Steam Deck and DXVK detection, built-in shaders, installing on Linux.
 - [2.14.0](releases/2.14.0.md): Released in 2.14.0 (pending publication); light through stairwells, stairs and arches, trees lit leaf by leaf, steady moonlight.
