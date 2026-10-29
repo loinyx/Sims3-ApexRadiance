@@ -69,6 +69,10 @@ at ps_2_0 it had no c32 and failed since the lot shade's mask rows moved there.
 
 - 2026-10-29, developer build of `d8501f2`: adding and removing brick fence pieces and dragging a lamp beside them update
   the ground shade without the earlier half-second steps; rare stalls reported before the 100 ms checks (player report).
+- 2026-10-29, developer build of `ee3cc46`, F7 on a brick garden wall: its instanced draw's pixel shader (`PS_A2C73090`,
+  diffuse 512 x 256 DXT1) has no `texkill`, so `FindCutout` finds no cutout and its walls pass no light, as before the
+  mesh fence share. The two 256 x 256 DXT5 cutout textures with an open share of 0.258 in that scene belong to another
+  fence's shader.
 - Combined build (notes section 1): the lot pass with `max(lot, terrain)` removes the straight cut.
 - 2026-10-02, terrain-variant build `C1257AF49C613DF227B5EBAD639D795665D77E378A0FB3744DB948AFA0883B39`: the reported lot/world
   cutoff resolved in the tested scene (observed in game, no new GPU comparison). The earlier lamp-off package
@@ -76,9 +80,9 @@ at ps_2_0 it had no c32 and failed since the lot shade's mask rows moved there.
 
 ## Open checks
 
-- Mesh fences: a brick fence beside a lamp. **Expected:** its shadow as dark as a wall's. The test scene logged two
-  256 x 256 DXT5 cutout textures with an open share of 0.258; whether one is the brick fence's (unused transparent texels
-  around the fence's own area) is not known.
+- Mesh fences: a fence that looks solid but is drawn with a cutout shader. **Expected:** its shadow as dark as a wall's.
+  The share covers the whole texture, so unused transparent texels around the fence's own area would let light through;
+  not seen yet (the brick garden wall has no cutout).
 - A fence opening in front of a lamp (brick fence, lamp 1.5 m behind the gap). **Expected:** the lamp's light on the
   ground in front of the gap. An offline build of the shade with the logged pieces gives the beam (194 to 255 in front
   of the gap); a screenshot of the scene before the gap fixes showed that ground as dark as the shadow. Not checked again
