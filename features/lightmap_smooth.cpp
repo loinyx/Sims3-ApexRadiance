@@ -1315,7 +1315,7 @@ constexpr int kPassRsN = static_cast<int>(sizeof(kPassRs) / sizeof(kPassRs[0]));
 constexpr int kPassSsN = static_cast<int>(sizeof(kPassSs) / sizeof(kPassSs[0]));
 static_assert(kPassRsN == sizeof(kPassRsValue) / sizeof(kPassRsValue[0]) && kPassSsN == sizeof(kPassSsValue) / sizeof(kPassSsValue[0]));
 constexpr DWORD kPassSamplers = 2; // s0, s1
-constexpr UINT kPassConsts = 2;    // c0, c1
+constexpr UINT kPassConsts = 44;   // c0 .. c43: the passes' c0, c1 and the dragged lamps' stamp rows (c2, c4 .. c43)
 constexpr DWORD kMaxRts = 4;
 
 struct PassState {
