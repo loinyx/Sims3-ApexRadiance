@@ -14796,9 +14796,20 @@ void CrossLotLightChanged(const unsigned char* light, CrossLotChange what) {
 void SetCrossLotSafe(bool on) {
     g_xlotSafe.store(on, std::memory_order_relaxed);
     if (on) return;
-    std::lock_guard<std::mutex> lk(g_xlotMx); // (the rooms keep the posts until they gather again: the arm sites are going away)
-    g_xlotHeld.clear();
-    g_xlotEvents.clear();
+    // the arm sites are going away (a reinstall or an uninstall): the rooms that hold another lot's post gather again now, without
+    // it, so no list keeps a post whose removal nothing would report any more
+    decltype(g_xlotHeld) held;
+    {
+        std::lock_guard<std::mutex> lk(g_xlotMx);
+        held.swap(g_xlotHeld);
+        g_xlotEvents.clear();
+    }
+    std::vector<std::pair<uintptr_t, int>> rooms;
+    for (const auto& [post, holders] : held)
+        for (const auto& h : holders)
+            if (std::find(rooms.begin(), rooms.end(), h) == rooms.end()) rooms.push_back(h);
+    for (const auto& [tracker, story] : rooms)
+        if (TrackerLive(tracker) && SendRoomZero(tracker, story)) g_xlotSent.fetch_add(1, std::memory_order_relaxed);
 }
 void TakeCrossLotEvents(std::vector<CrossLotEvent>& out) {
     out.clear();
@@ -14820,6 +14831,16 @@ uintptr_t TrackerOfLot(uint64_t lot) {
         if ((static_cast<uint64_t>(LotIdPart(trackers[t], 0x94)) << 32 | LotIdPart(trackers[t], 0x90)) == lot) return trackers[t];
     return 0;
 }
+// (render thread, as QueueRoomSafe: a lot torn down meanwhile faults here, not in the game)
+static bool QueueOutdoorRegatherSafe(uintptr_t tracker) {
+    __try {
+        QueueOutdoorRegather(tracker, 2, true);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_faults.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+}
 bool RegatherOutdoorById(uint64_t lot) {
     uintptr_t trackers[256];
     const int n = AllTrackers(trackers, 256);
@@ -14827,7 +14848,7 @@ bool RegatherOutdoorById(uint64_t lot) {
         if ((static_cast<uint64_t>(LotIdPart(trackers[t], 0x94)) << 32 | LotIdPart(trackers[t], 0x90)) == lot) {
             // as a lamp edit's safety net (tier 2): after the edit's own rooms, before any other, held with them by the edit
             // hold so the stories change together; gathered at once (the post is already in the light cells)
-            QueueOutdoorRegather(trackers[t], 2, true);
+            if (!QueueOutdoorRegatherSafe(trackers[t])) return false;
             g_xlotRegathers.fetch_add(1, std::memory_order_relaxed);
             return true;
         }

@@ -613,20 +613,23 @@ void SendNeighbours() {
 // The lots next to `active` relit now (nearest first); a lot joining or leaving gathers again (regather false: a paced restart
 // solves every room anyway)
 void PublishNeighbours(uint64_t active, const std::vector<std::pair<uint64_t, uintptr_t>>& want, bool regather = true) {
+    // (a lot is the lot and its tracker: a lot loaded again under the same id is a new one, its old tracker dead)
     bool same = active == g_nbActive && want.size() == g_nb.size();
-    for (size_t i = 0; same && i < want.size(); i++) same = want[i].first == g_nb[i].lot;
+    for (size_t i = 0; same && i < want.size(); i++) same = want[i].first == g_nb[i].lot && want[i].second == g_nb[i].tracker;
     if (same) return;
-    const auto had = [](const std::vector<Neighbour>& v, uint64_t lot) { return std::any_of(v.begin(), v.end(), [lot](const Neighbour& n) { return n.lot == lot; }); };
+    const auto had = [](const std::vector<Neighbour>& v, const Neighbour& m) {
+        return std::any_of(v.begin(), v.end(), [&m](const Neighbour& n) { return n.lot == m.lot && n.tracker == m.tracker; });
+    };
     std::vector<Neighbour> next;
     for (const auto& [lot, tracker] : want) {
-        const auto it = std::find_if(g_nb.begin(), g_nb.end(), [lot](const Neighbour& n) { return n.lot == lot; });
+        const auto it = std::find_if(g_nb.begin(), g_nb.end(), [lot, tracker](const Neighbour& n) { return n.lot == lot && n.tracker == tracker; });
         next.push_back(it != g_nb.end() && active == g_nbActive ? *it : Neighbour{lot, tracker, 0});
     }
     std::vector<Neighbour> moved;
     for (const auto& n : g_nb)
-        if (active != g_nbActive || !had(next, n.lot)) moved.push_back(n);
+        if (active != g_nbActive || !had(next, n)) moved.push_back(n);
     for (const auto& n : next)
-        if (active != g_nbActive || !had(g_nb, n.lot)) moved.push_back(n);
+        if (active != g_nbActive || !had(g_nb, n)) moved.push_back(n);
     g_nb = std::move(next);
     g_nbActive = active;
     SendNeighbours();
@@ -1060,7 +1063,7 @@ void OnEndScene(IDirect3DDevice9* dev) {
     LARGE_INTEGER a{}, b{};
     QueryPerformanceCounter(&a);
     g_stampLights.clear();
-    if (!HookGuard::Run("RtOutdoorLamps frame", [dev] { Frame(dev); }) && (g_on.load() || !g_slots.empty())) {
+    if (!HookGuard::Run("RtOutdoorLamps frame", [dev] { Frame(dev); }) && (g_on.load() || !g_slots.empty() || !g_nb.empty())) {
         // Frame threw (now or before: it is off for the session): the game's maps are bound again and edits go to its solves
         g_on.store(false);
         g_watch.store(false);
@@ -1345,7 +1348,9 @@ void Frame(IDirect3DDevice9* dev) {
                                      "edits go through the game's solve until it keeps one",
                                      who(), cls, g_budgetOut ? "the lot's kept parts overflow the memory budget" : std::format("sent {} times", kSolveAsks)));
             }
-            if (!act) return had || !(a.count >= kSolveAsks || g_budgetOut);
+            // (a lot next to it: its last copies stand in only while a solve renews its kept solve; idle with none, e.g. dropped
+            // by the memory budget, it gathers the posts again once its sends are spent)
+            if (!act) return (had && rn.state != 4 && rn.state != 5) || !(a.count >= kSolveAsks || g_budgetOut);
             if (!(had && all)) {
                 if (RestartSolveTerminal(a, rn.state, g_budgetOut)) g_restartGpuFallback = true;
                 else g_restartGpuPending = true;
@@ -1681,6 +1686,10 @@ void Frame(IDirect3DDevice9* dev) {
                 it = g_slots.erase(it);
             } else
                 ++it;
+        // (a story no longer served: its finished job would stay with its prepared buffers)
+        std::erase_if(g_jobs, [&](const std::shared_ptr<Job>& j) {
+            return j->lot && j->state.load() != 1 && std::none_of(nbRooms.begin(), nbRooms.end(), [&](const auto& r) { return r.first == j->room; });
+        });
         for (auto it = g_nbBake.begin(); it != g_nbBake.end();)
             if (std::none_of(nbRooms.begin(), nbRooms.end(), [&](const auto& r) { return r.second == it->first; })) it = g_nbBake.erase(it);
             else ++it;
@@ -1890,12 +1899,13 @@ void Frame(IDirect3DDevice9* dev) {
     if (g_rr >= nSlots) g_rr = 0;
     // the maps without floor-mask texels (wall atlases, ceilings) first: they cost little, so every story's walls are relit in
     // the same frame and the seam between stories never shows two lamp positions. A floor map's under-floor share (about 1.6 ms
-    // in a recording) went first in some rounds and sent the next stories' walls to the next frames (a flicker at the seam)
+    // in a recording) went first in some rounds and sent the next stories' walls to the next frames (a flicker at the seam).
+    // In each, the active lot's maps before those of the lots next to it, which never take its frame budget first
     std::vector<Slot*> order;
     order.reserve(nSlots);
-    for (int pass = 0; pass < 2; pass++)
+    for (int pass = 0; pass < 4; pass++)
         for (size_t si = 0; si < nSlots; si++)
-            if (Slot* sp = g_slots[(g_rr + si) % nSlots].get(); sp->masked.empty() == (pass == 0)) order.push_back(sp);
+            if (Slot* sp = g_slots[(g_rr + si) % nSlots].get(); sp->masked.empty() == (pass < 2) && (sp->mgr != 0) == (pass % 2 == 1)) order.push_back(sp);
     for (Slot* sp : order) {
         Slot& s = *sp;
         if (!s.ok || !s.game) continue;
@@ -2378,8 +2388,10 @@ void OnWorldChanged() {
 }
 
 void RestartLighting() { g_restartRequested = true; }
+// The active lot's stories being prepared (the lots next to it never hold the restart)
+bool ActiveJobs() { return std::any_of(g_jobs.begin(), g_jobs.end(), [](const std::shared_ptr<Job>& j) { return !j->lot; }); }
 bool RestartIncomplete() {
-    if (!g_option.load(std::memory_order_relaxed) || !g_watch.load(std::memory_order_relaxed) || !g_jobs.empty() || g_restartGpuPending) return false;
+    if (!g_option.load(std::memory_order_relaxed) || !g_watch.load(std::memory_order_relaxed) || ActiveJobs() || g_restartGpuPending) return false;
     if (std::any_of(g_slots.begin(), g_slots.end(), [](const auto& slot) { return !slot->mgr && slot->used && slot->built && slot->ok && !slot->relit; })) return false;
     if (g_restartGpuFallback) return true;
     if (std::any_of(g_slots.begin(), g_slots.end(), [](const auto& slot) { return !slot->mgr && slot->used && slot->built && !slot->ok; })) return true;
@@ -2390,7 +2402,7 @@ bool RestartPending() {
     if (g_restartRequested) return true;
     if (RestartIncomplete()) return false;
     if (!g_option.load(std::memory_order_relaxed) || !g_watch.load(std::memory_order_relaxed)) return false;
-    if (g_restartGpuPending || !g_jobs.empty() || !g_proxyUsed || !g_on.load(std::memory_order_relaxed)) return true;
+    if (g_restartGpuPending || ActiveJobs() || !g_proxyUsed || !g_on.load(std::memory_order_relaxed)) return true;
     if (std::any_of(g_slots.begin(), g_slots.end(), [](const auto& slot) { return !slot->mgr && slot->used && !slot->relit; })) return true;
     std::lock_guard<std::mutex> lock(g_coverMx);
     return !g_cover.full;

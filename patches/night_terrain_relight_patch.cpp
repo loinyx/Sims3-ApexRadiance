@@ -1062,15 +1062,15 @@ bool __stdcall ArmTest(BYTE* light) {
 // Each site also tells the story share that a lot's lamp post was placed, removed or moved: other lots' outdoor rooms hold
 // it as a world light (LevelLightShare::CrossLotLightChanged)
 bool __stdcall ArmTestPlaced(BYTE* light) {
-    LevelLightShare::CrossLotLightChanged(light, LevelLightShare::CrossLotChange::Placed);
+    HookGuard::Try("Lamp post of another lot", [light] { LevelLightShare::CrossLotLightChanged(light, LevelLightShare::CrossLotChange::Placed); });
     return ArmTest(light);
 }
 bool __stdcall ArmTestRemoved(BYTE* light) {
-    LevelLightShare::CrossLotLightChanged(light, LevelLightShare::CrossLotChange::Removed);
+    HookGuard::Try("Lamp post of another lot", [light] { LevelLightShare::CrossLotLightChanged(light, LevelLightShare::CrossLotChange::Removed); });
     return ArmTest(light);
 }
 bool __stdcall ArmTestMoved(BYTE* light) {
-    LevelLightShare::CrossLotLightChanged(light, LevelLightShare::CrossLotChange::Moved);
+    HookGuard::Try("Lamp post of another lot", [light] { LevelLightShare::CrossLotLightChanged(light, LevelLightShare::CrossLotChange::Moved); });
     return ArmTest(light);
 }
 

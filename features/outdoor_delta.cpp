@@ -1457,6 +1457,9 @@ bool AtLockStep(unsigned char* room, bool gather) {
     if (!gather) why = "a solve on another thread";
     else if (g_cap.active && g_cap.room == room && g_cap.check) why = "the self-check's full solve";
     else if (it == g_records.end() || it->second->stale) why = "no kept parts for this room and class yet";
+    // (a lot that was active and is now next to the active one: its full record is not the base this solve keeps; a delta on it
+    // would end the capture and leave the GPU with no base for that story)
+    else if (g_cap.active && g_cap.room == room && g_cap.rec && g_cap.rec->baseOnly && !it->second->baseOnly) why = kWhyBaseOnly;
     LARGE_INTEGER t0{};
     QueryPerformanceCounter(&t0);
     Plan plan;
