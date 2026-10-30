@@ -268,6 +268,29 @@ int WorldTerrainMapConstant(const std::vector<DWORD>& t) {
     return mapping;
 }
 
+uint32_t ConstantsRead(const std::vector<DWORD>& t) {
+    if (t.empty() || ((t[0] >> 8) & 0xFF) < 2) return ~0u; // (before shader model 2 the instruction length is not in the token)
+    const auto ins = Parse(t);
+    if (ins.empty()) return ~0u;
+    uint32_t read = 0, defined = 0;
+    for (const auto& x : ins) {
+        if (x.op == kDcl || x.op == kDefI || x.op == kDefB) continue;
+        if (x.op == kDef) {
+            if (Num(t[x.at + 1]) < 32) defined |= 1u << Num(t[x.at + 1]);
+            continue;
+        }
+        // m4x4, m4x3, m3x4, m3x3, m3x2 read their matrix operand's next rows too (the last operand: after a predicate or a0 token)
+        const DWORD rows = x.op == 0x14 || x.op == 0x16 ? 4 : x.op == 0x15 || x.op == 0x17 ? 3 : x.op == 0x18 ? 2 : 1;
+        for (size_t k = 1; k <= x.len; k++) {
+            const DWORD r = t[x.at + k];
+            if (!(r & 0x80000000u) || Type(r) != kConst || (r & 0x2000u)) continue;
+            for (DWORD i = 0; i < (k == x.len ? rows : 1u); i++)
+                if (Num(r) + i < 32) read |= 1u << (Num(r) + i);
+        }
+    }
+    return read & ~defined;
+}
+
 bool IsRoadVs(const std::vector<DWORD>& t, DWORD& mapConst) {
     if (t.empty() || t[0] != 0xFFFE0300) return false;
     const auto ins = Parse(t);

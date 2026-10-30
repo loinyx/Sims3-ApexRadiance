@@ -23,8 +23,8 @@ New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 Initialize-TerrainCompiler
 Push-Location -LiteralPath $OutDir
 try {
-    & cl.exe /nologo /std:c++20 /EHsc /W4 /O2 /MT ('/I' + $Repo) /Fe:dispatch_checks.exe dispatch.generated.cpp
+    & cl.exe /nologo /std:c++20 /EHsc /W4 /O2 /MT ('/I' + $Repo) /Fe:edit_decide_checks.exe dispatch.generated.cpp
     if ($LASTEXITCODE -ne 0) { throw 'Dispatch checks failed to compile' }
-    & './dispatch_checks.exe'
+    & './edit_decide_checks.exe' # (no "patch" in the name: Windows asks to elevate such programs)
     if ($LASTEXITCODE -ne 0) { throw 'Dispatch checks failed' }
 } finally { Pop-Location }

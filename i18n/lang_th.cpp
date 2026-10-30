@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Thai}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: sidewalks keep the lamps' light from every camera angle", "ไฟกลางคืน: ทางเท้ายังคงได้รับแสงจากโคมไฟในทุกมุมกล้อง"},
+    {"Night Lights: lamp light on the grass by lots no longer changes with the camera", "ไฟกลางคืน: แสงโคมไฟบนหญ้าข้างล็อตไม่เปลี่ยนไปตามกล้องอีกต่อไป"},
+    {"Night Lights: objects light up without delay as the camera moves between lots", "ไฟกลางคืน: วัตถุสว่างขึ้นทันทีเมื่อกล้องเคลื่อนระหว่างล็อต"},
+    {"Night Lights: a wall's shadow on the grass continues past a lot's edge without a cut", "ไฟกลางคืน: เงาของกำแพงบนหญ้าต่อเนื่องเลยขอบล็อตไปโดยไม่ขาด"},
     {"Night Lights: lamp posts light the walls of neighbouring lots, on every story", "ไฟกลางคืน: เสาไฟส่องผนังของล็อตข้างเคียงทุกชั้น"},
     {"Night Lights: Instant (GPU) relights the 4 nearest lots in the same frame as a dragged post", "ไฟกลางคืน: ทันที (GPU) คำนวณแสง 4 ล็อตที่ใกล้ที่สุดใหม่ในเฟรมเดียวกับเสาไฟที่กำลังลาก"},
     {"Night Lights: upper steps of outdoor stairs no longer take light from lamps behind a wall", "ไฟกลางคืน: ขั้นบนของบันไดนอกบ้านไม่ได้รับแสงจากโคมไฟหลังผนังอีกต่อไป"},

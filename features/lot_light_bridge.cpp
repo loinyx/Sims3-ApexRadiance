@@ -382,6 +382,8 @@ bool g_curPsRoomMap = false;
 // video: those fixes switching off and on together as the camera moved). g_chunkStraySkipped counts the declared-sampler
 // textures skipped because they already are the map of another chunk.
 std::unordered_map<IDirect3DPixelShader9*, uint16_t> g_worldSamplers;
+std::unordered_map<IDirect3DPixelShader9*, DWORD> g_worldMapSampler; // where each terrain PS was last seen reading its chunk map
+std::string g_terrainWhy; // (light capture) why the current terrain-like draw was left to the game
 std::atomic<int> g_chunkStraySkipped{0};
 IDirect3DPixelShader9* g_replacementPs = nullptr;
 IDirect3DPixelShader9* g_replacementWetPs = nullptr;            // kReplacementWetPsId, for the rain lot light pass
@@ -470,6 +472,11 @@ std::string g_status = "Off";
 
 struct ChunkTex {
     IDirect3DBaseTexture9* tex = nullptr; // AddRef'd
+    bool rebuilt = false;                 // tex is the chunk's rebuilt map +0xD8 (ChunkRelight::RebuiltLightMapMatch)
+    uint32_t checkedFrame = 0;            // the frame and texture of the last check of another map drawn for this chunk
+    const void* checkedTex = nullptr;
+    DWORD sampler = 0;                    // (developer log) where the draw that recorded it found it, and its pixel shader
+    const void* ps = nullptr;
 };
 std::map<std::pair<int, int>, ChunkTex> g_chunks; // key: chunk center (x, z) rounded
 std::unordered_map<IDirect3DBaseTexture9*, std::pair<int, int>> g_chunkOfTexture; // each registered map -> its chunk
@@ -2830,6 +2837,7 @@ struct VsInfo {
     bool worldMultiLight = false; // exact captured summer multi-pass light VS
     bool worldCompact = false; // exact captured single-layer WORLD VS (not an object rig)
     int worldMap = -1; // mapping constant of a structurally verified world terrain VS
+    uint32_t constsRead = ~0u; // c0..c31 its code reads (ShaderPatches::ConstantsRead); every bit when not looked at
     bool contractedLotUv = false; // exact regular lot VS; CPU floor samples use uncontracted local xz
     bool cinemaMarqueeDay = false; // exact EA 1.69 cinema/theatre marquee VS paired with kCinemaMarqueeDayPs
     uint8_t cls = 0;      // 0 other, 1 roof, 2 lake, 3 snow lot, 4 road, 5 floor, 6 foliage, 7 fence/stairs, 8 snow on objects,
@@ -2908,6 +2916,7 @@ VsInfo* ClassifyVs(IDirect3DVertexShader9* vs) {
                 std::memcpy(t.data(), code.data(), t.size() * 4);
                 info.packedRoomFloor = ShaderPatches::IsPackedRoomFloorVs(t);
                 info.worldMap = ShaderPatches::WorldTerrainMapConstant(t);
+                info.constsRead = ShaderPatches::ConstantsRead(t);
                 DWORD mapConst = 0;
                 if (ShaderPatches::IsRoadVs(t, mapConst)) {
                     info.roadMap = mapConst; // c16 in winter, c14 in summer
@@ -7669,16 +7678,38 @@ template <typename DrawFn> bool DrawTreeSunShadow(IDirect3DDevice9* dev, DrawFn 
 }
 
 // Returns the sampler that holds the chunk light map (0 = not a terrain chunk draw), the chunk key and its g_chunks entry
-// (std::map: the reference stays valid; the caller no longer looks the key up a second time).
-DWORD RecordWorldChunk(IDirect3DDevice9* dev, std::pair<int, int>& key, ChunkTex*& chunk, UINT mapConst = 15, UINT fallbackConst = 15) {
+// (std::map: the reference stays valid; the caller no longer looks the key up a second time). `why` (light capture): why a
+// draw was not taken.
+DWORD RecordWorldChunk(IDirect3DDevice9* dev, std::pair<int, int>& key, ChunkTex*& chunk, UINT mapConst = 15, UINT fallbackConst = 15,
+                       std::string* why = nullptr) {
     float c[16];
     if (FAILED(dev->GetVertexShaderConstantF(8, c, 3))) return 0; // c8..c10 = world matrix rows
+    // The light map mapping (1/256, 1/256, 0.5, 0.5) in a constant this vertex shader reads: the others keep whatever an
+    // earlier draw set. A sidewalk shader reading it at c14, with no known mapping constant, was checked at c15, which held
+    // a previous terrain draw's mapping or not depending on the draw order: the sidewalk was lit or left dark as the
+    // camera moved. A shader whose mapping constant is not known is checked at every constant it reads.
+    const uint32_t reads = g_curVsInfo ? g_curVsInfo->constsRead : ~0u;
+    const auto read = [&](UINT at) { return at >= 32 || (reads >> at & 1u); };
+    const auto isMapping = [](const float* v) { return Near(v[0], 1.0f / 256.0f) && Near(v[1], 1.0f / 256.0f) && Near(v[2], 0.5f) && Near(v[3], 0.5f); };
     float m[4];
-    const auto mapping = [&](UINT at) {
-        return SUCCEEDED(dev->GetVertexShaderConstantF(at, m, 1)) && Near(m[0], 1.0f / 256.0f) &&
-               Near(m[1], 1.0f / 256.0f) && Near(m[2], 0.5f) && Near(m[3], 0.5f);
-    };
-    if (!mapping(mapConst) && (mapConst == fallbackConst || !mapping(fallbackConst))) return 0;
+    const auto mapping = [&](UINT at) { return read(at) && SUCCEEDED(dev->GetVertexShaderConstantF(at, m, 1)) && isMapping(m); };
+    bool mapped = mapping(mapConst) || (mapConst != fallbackConst && mapping(fallbackConst)), scanned = false;
+    if (!mapped && g_curVsInfo && g_curVsInfo->worldMap < 0 && reads != ~0u) {
+        float k[24][4];
+        if (SUCCEEDED(dev->GetVertexShaderConstantF(8, &k[0][0], 24)))
+            for (UINT at = 8; at < 32 && !mapped; at++) mapped = scanned = read(at) && isMapping(k[at - 8]);
+    }
+    if (!mapped) {
+        if (why) *why = std::format("no light map mapping in the constants its VS reads (c{} first)", mapConst);
+        return 0;
+    }
+    const std::pair<int, int> here = Key(c[3], c[11]);
+    // found that way, only a draw placed at a chunk's centre (256 m chunks from 0): an object lit from the terrain map has its
+    // own position there, and would make a chunk entry and a smoothed map of its own
+    if (scanned && ((here.first - 128) % 256 || (here.second - 128) % 256)) {
+        if (why) *why = std::format("placed at ({}, {}), not at a chunk's centre", here.first, here.second);
+        return 0;
+    }
     // The terrain light map is the 256x256 texture with few mips: the world file's map and a rebuilt one are both DXT5 with
     // 4 mips (the rebuild reads the render target back and CPU-encodes 4 mips into the same texture, 0x00C29AB6 ->
     // 0x00618CD0; research\perf2\chunkrelight.md 1.3, 512 DXT calls = 128 textures x 4 mips). Which sampler holds it
@@ -7688,9 +7719,9 @@ DWORD RecordWorldChunk(IDirect3DDevice9* dev, std::pair<int, int>& key, ChunkTex
     // hold textures of earlier draws (another chunk's map). Unknown shader (not classified yet): every sampler, as before.
     const auto declared = g_worldSamplers.find(g_curPs);
     const uint16_t mask = declared != g_worldSamplers.end() ? declared->second : 0xFFFE;
-    const std::pair<int, int> here = Key(c[3], c[11]);
     IDirect3DBaseTexture9* t = nullptr;
-    DWORD sampler = 0;
+    DWORD sampler = 0, straySampler = 0;
+    std::pair<int, int> strayOwner;
     for (DWORD s = 15; s >= 1 && !t; s--) {
         if (!(mask & (1u << s))) continue;
         IDirect3DBaseTexture9* cand = nullptr;
@@ -7706,6 +7737,7 @@ DWORD RecordWorldChunk(IDirect3DDevice9* dev, std::pair<int, int>& key, ChunkTex
             const auto owner = g_chunkOfTexture.find(cand);
             if (owner != g_chunkOfTexture.end() && owner->second != here) {
                 ok = false;
+                strayOwner = owner->second, straySampler = s;
                 g_chunkStraySkipped.fetch_add(1, std::memory_order_relaxed);
             }
         }
@@ -7715,18 +7747,94 @@ DWORD RecordWorldChunk(IDirect3DDevice9* dev, std::pair<int, int>& key, ChunkTex
         }
         else cand->Release();
     }
-    if (!t) return 0;
+    const auto known = g_chunks.find(here);
+    if (!t) {
+        // No map of this chunk bound: a chunk whose rebuilt map is known is drawn with it at the sampler this shader reads
+        // its map from (else the game draws it with what it bound)
+        const auto at = g_worldMapSampler.find(g_curPs);
+        const bool own = known != g_chunks.end() && known->second.rebuilt && at != g_worldMapSampler.end();
+        if ((why && !own) || (straySampler && !kPublicBuild)) {
+            const std::string text = straySampler ? std::format("s{} holds the map of chunk ({}, {})", straySampler, strayOwner.first, strayOwner.second)
+                                                  : std::string("no chunk light map in its samplers");
+            if (why && !own) *why = std::format("chunk ({}, {}): {}", here.first, here.second, text);
+            static int s_logged = 0; // (developer log) what a draw bound in place of its chunk's map
+            if (straySampler && !kPublicBuild && s_logged < 30) {
+                s_logged++;
+                LOG_INFO(std::format("[LotLightBridge] Terrain chunk ({}, {}): {} (PS {:08X}); {}", here.first, here.second, text,
+                                     reinterpret_cast<uintptr_t>(g_curPs), own ? std::format("its own rebuilt map drawn at s{}", at->second) : std::string("left to the game")));
+            }
+        }
+        if (!own) return 0;
+        key = here;
+        chunk = &known->second;
+        ApexUtil::CountOne(g_worldSeen);
+        return at->second;
+    }
+    g_worldMapSampler[g_curPs] = sampler;
     key = here;
-    auto& slot = g_chunks[key];
+    auto& slot = known != g_chunks.end() ? known->second : g_chunks[key];
+    // Two maps for one chunk: the world file's and the rebuilt one +0xD8, which the game renders with the current lamps.
+    // Some variants of the terrain shader still read the world file's after a rebuild (the s2 variant of sidewalks and of
+    // grass by the lots, while the paint layers read the rebuilt one at s3..s8), so the chunk's map changed draw by draw:
+    // its smoothed copy was built again about 30 times a second and the ground showed the lamps or not as the camera moved.
+    // Once seen, the rebuilt map stays the chunk's map and every draw of the chunk is drawn with it or its smoothed copy in
+    // place of the other one (the caller binds it at this sampler). A draw of another map checks at most once a frame per
+    // texture whether that one is now the rebuilt map, and whether the kept one still is.
     if (slot.tex != t) {
+        int match = -1;
+        if (!slot.rebuilt || slot.checkedFrame != g_roomMapFrame || slot.checkedTex != t) {
+            slot.checkedFrame = g_roomMapFrame, slot.checkedTex = t;
+            match = ChunkRelight::RebuiltLightMapMatch(key.first, key.second, t);
+            if (match < 0 && slot.tex) // (a moment the chunk cannot be read leaves it as it was)
+                if (const int kept = ChunkRelight::RebuiltLightMapMatch(key.first, key.second, slot.tex); kept != -2) slot.rebuilt = kept >= 0;
+        }
+        if (match < 0 && slot.rebuilt) {
+            static bool s_told = false;
+            if (!s_told) {
+                s_told = true;
+                LOG_INFO(std::format("[LotLightBridge] Terrain chunk ({}, {}): two light maps in use; the rebuilt one (+0xD8) is drawn in place of the world "
+                                     "file's on every terrain variant",
+                                     key.first, key.second));
+            }
+            t->Release();
+            chunk = &slot;
+            ApexUtil::CountOne(g_worldSeen);
+            return sampler;
+        }
+        if (slot.tex && !kPublicBuild) { // (developer log) a chunk's map that changes: which draw found which texture
+            static int s_logged = 0;
+            if (s_logged < 60) {
+                s_logged++;
+                const auto desc = [](IDirect3DBaseTexture9* x) {
+                    D3DSURFACE_DESC d{};
+                    if (!x || x->GetType() != D3DRTYPE_TEXTURE || FAILED(static_cast<IDirect3DTexture9*>(x)->GetLevelDesc(0, &d))) return std::string("?");
+                    return std::format("{}x{} format {} levels {}", d.Width, d.Height, static_cast<int>(d.Format), x->GetLevelCount());
+                };
+                std::string bound;
+                for (DWORD s2 = 0; s2 < 16; s2++) {
+                    IDirect3DBaseTexture9* b = nullptr;
+                    if (SUCCEEDED(D3D9Hooks::GetBoundTexture(dev, s2, &b)) && b) {
+                        if (b == slot.tex) bound += std::format(" (the old one at s{})", s2);
+                        b->Release();
+                    }
+                }
+                LOG_INFO(std::format("[LotLightBridge] Terrain chunk ({}, {}) map changed: {:08X} ({}, found at s{} by PS {:08X}) -> {:08X} ({}) at s{} by PS {:08X} "
+                                     "class {}, declared samplers {:04X}{}",
+                                     key.first, key.second, reinterpret_cast<uintptr_t>(slot.tex), desc(slot.tex), slot.sampler,
+                                     reinterpret_cast<uintptr_t>(slot.ps), reinterpret_cast<uintptr_t>(t), desc(t), sampler,
+                                     reinterpret_cast<uintptr_t>(g_curPs), static_cast<int>(g_curClass), mask, bound));
+            }
+        }
         if (slot.tex) {
             g_chunkOfTexture.erase(slot.tex);
             slot.tex->Release();
         }
         slot.tex = t; // keep the reference from GetTexture
+        slot.rebuilt = match >= 0;
         g_chunkOfTexture[t] = key;
     } else
         t->Release();
+    slot.sampler = sampler, slot.ps = g_curPs;
     chunk = &slot;
     ApexUtil::CountOne(g_worldSeen);
     return sampler;
@@ -7825,6 +7933,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
     constexpr auto kContinue = D3D9Hooks::HookAction::Continue;
     const bool terrainPair = g_curVsInfo && g_curVsInfo->worldMap >= 0 &&
         (g_curClass == PsClass::ObjectRig || g_curClass == PsClass::Other) && g_worldSamplers.count(g_curPs) != 0;
+    if (!g_terrainWhy.empty()) g_terrainWhy.clear(); // (light capture: set below for this draw only)
     if (g_curPsBasis) RoomMapPadding::NoteDraw(dev, g_curPs); // note the room light maps it binds (edge padding)
     // the frame's sun shadow map, from the draws that read it (the trees' shadow, DrawTreeSunShadow)
     if (DevSwitches::FoliageSunShadow() && (g_curClass == PsClass::ObjectRig || g_curClass == PsClass::Roof || g_curClass == PsClass::LotLight || g_curClass == PsClass::Lake))
@@ -7874,7 +7983,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
         std::pair<int, int> key;
         ChunkTex* chunk = nullptr;
         const UINT map = g_curVsInfo && g_curVsInfo->worldMap >= 0 ? static_cast<UINT>(g_curVsInfo->worldMap) : multi ? 13u : 15u;
-        const DWORD s = RecordWorldChunk(dev, key, chunk, map, multi ? 13u : 15u);
+        const DWORD s = RecordWorldChunk(dev, key, chunk, map, multi ? 13u : 15u, LightProbe::Capturing() ? &g_terrainWhy : nullptr);
         if (!s) {
             // not a world terrain chunk: the snow-on-floor pixel shaders (m69, m71) also declare s6+ and land here
             if (g_curVsIsSnowFloor && DrawSnowFloor(dev, draw)) return NoteClaim(ClaimSource::SnowFloorLight);
@@ -7937,16 +8046,29 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
         }
         bool squared = multi;
         const int k = multi ? 3 : TerrainLampConst(g_curPs, s, squared);
-        if (!smooth && !shade && k < 0) return D3D9Hooks::HookAction::Continue;
-        IDirect3DBaseTexture9* old = nullptr;
-        if ((smooth || shade) && FAILED(D3D9Hooks::GetBoundTexture(dev, s, &old))) smooth = nullptr, shade = nullptr, old = nullptr;
-        // the light map the patched shader reads: the smoothed one, else the game's own (bound already)
-        IDirect3DBaseTexture9* const lampMap = smooth ? smooth : (shade ? old : nullptr);
+        IDirect3DBaseTexture9* old = nullptr; // the map this draw binds
+        D3D9Hooks::GetBoundTexture(dev, s, &old);
+        // the chunk's rebuilt map when this draw binds the world file's (RecordWorldChunk): drawn in its place on every path
+        // below, for the lamps' colour and for the sun's alpha
+        IDirect3DBaseTexture9* const game = chunk->rebuilt && chunk->tex ? chunk->tex : old;
+        if (!smooth && !shade && k < 0 && game == old) {
+            if (old) old->Release();
+            return D3D9Hooks::HookAction::Continue;
+        }
+        // the light map the patched shader reads: the smoothed one, else the game's own
+        IDirect3DBaseTexture9* const lampMap = smooth ? smooth : (shade ? game : nullptr);
         if (!lampMap) shade = nullptr;
         if (LightProbe::Capturing())
-            g_objDrawInfo = std::format("mod draw: world terrain | compact {} | multi-pass {} | lamp sampler s{} | gain {:.3f} | smoothed {} | daylight range candidate {} | wall shade {}",
+            g_objDrawInfo = std::format("mod draw: world terrain | compact {} | multi-pass {} | lamp sampler s{} | gain {:.3f} | smoothed {} | daylight range candidate {} | wall shade {}{}",
                                        g_curClass == PsClass::WorldCompact, multi, s, gain, smooth != nullptr, daylight != nullptr,
-                                       shade ? std::format("chunk ({}, {}), sampler s{}", key.first, key.second, alphaShade->shadeSampler) : std::string("none"));
+                                       shade ? std::format("chunk ({}, {}), sampler s{}", key.first, key.second, alphaShade->shadeSampler) : std::string("none"),
+                                       game != old ? " | the chunk's rebuilt map in place of the bound one" : "");
+        // the game's shader with the rebuilt map in place of the bound one
+        const auto plain = [&] {
+            if (game != old) SetTex(dev, s, game);
+            draw();
+            if (game != old) SetTex(dev, s, old);
+        };
         g_inOwnCall = true;
         {
             TerrainConst lampGain(dev, k, squared);
@@ -7955,7 +8077,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
                 draw();
                 SetTex(dev, s, old);
             } else if (lampMap) {
-                NativeTerrainSampler native(dev, s, alpha->nativeAlphaSampler, old, D3D9Hooks::CallOriginalSetTexture);
+                NativeTerrainSampler native(dev, s, alpha->nativeAlphaSampler, game, D3D9Hooks::CallOriginalSetTexture);
                 if (native) {
                     float savedDay[4]{};
                     bool daySet = false;
@@ -7973,8 +8095,8 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
                     SetPs(dev, g_curPs);
                     shadeMap.reset();
                     if (daySet) SetPsConst(dev, daylight->terrainDayConst, savedDay, 1);
-                } else draw();
-            } else draw();
+                } else plain();
+            } else plain();
         }
         g_inOwnCall = false;
         g_objDrawInfo.clear();
@@ -10092,6 +10214,7 @@ std::string DescribeDraw() {
     const int rig = RigTracker::CurrentMode();
     std::string s = std::format("game (the mod did not replace this draw) | VS {} | PS {} | rig mode {}", vc < 0 || static_cast<size_t>(vc) >= std::size(kVs) ? "not classified" : kVs[vc], PsClassName(pc),
                                 rig);
+    if (!g_terrainWhy.empty()) s += " | world terrain not taken: " + g_terrainWhy;
     if (vc == 10) {
         const FoliageVs& o = itv->second.patched;
         s += std::format(" | object: world c{}, vertex lights c{}", o.worldK, o.vertexLight);
@@ -10256,6 +10379,7 @@ void Shutdown(bool keepChunkMaps) {
     g_curPsRoomMap = false;
     RoomMapPadding::Clear();
     g_worldSamplers.clear();
+    g_worldMapSampler.clear();
     g_terrainLampConst.clear();
     for (auto*& m : g_magenta)
         if (m) {
@@ -10317,7 +10441,7 @@ void MeasureMemoryImpl() {
     }
     Set(sPatched, patched, patchedItems);
     Set(sShaderFacts,
-        Hash(g_classCache) + Hash(g_basisPs) + Hash(g_psFacts) + Hash(g_roomMapPs) + Hash(g_worldSamplers) + Hash(g_wetLotPs) + Hash(g_vsInfo) + Hash(g_roomUvVs) +
+        Hash(g_classCache) + Hash(g_basisPs) + Hash(g_psFacts) + Hash(g_roomMapPs) + Hash(g_worldSamplers) + Hash(g_worldMapSampler) + Hash(g_wetLotPs) + Hash(g_vsInfo) + Hash(g_roomUvVs) +
             Hash(g_terrainLampConst) + Hash(g_rigPsInfo) + Hash(g_solidPs) + Hash(g_psIs3) + Hash(g_wallConst) + Hash(g_cinemaMarqueeDayPs) + Hash(g_cinemaMarqueePanelDayPs) + Vec(g_pinned),
         g_classCache.size() + g_psFacts.size() + g_vsInfo.size());
     Set(sLotMasks, Hash(g_lotMasks, [](const auto& kv) {

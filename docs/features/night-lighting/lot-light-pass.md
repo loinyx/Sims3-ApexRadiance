@@ -8,7 +8,7 @@ border. Near the border the two sides blend over 3 m, so a lamp standing next to
 
 | | |
 |---|---|
-| Availability | Released (part of Night Lighting since 0.1.0). Lot UV alignment, daylight terrain term and the constant-read guard: Released in 2.6.0. Rain and other weather variants recognised (exact rain variant and by structure): Released in 2.7.0. Lamp shade on lot ground (*Walls shade lamp light near the ground*) and lamps through the outside walls' openings: Released in 2.13.0. Crown shade from trees and bushes: Released in 2.14.0. A shade that takes only the light of the lamps a wall blocks, closed gates and narrow fence gaps, the room mask and lamp shade on snowy lots, the lot map aligned on each axis, *Indoor light adds to the ground*, and a lot's shade shown with its chunks' texels: Released in 2.15.3. Verified winter terrain layouts and exact fence-gap length reuse: Released in 2.15.6. Light past 1 with the walls' shade on it: Released in 2.16.0. Fence grid and half-float reads without x87 control-word calls: Released in 2.16.2. Released in 2.18.0: mesh fences pass their open share, fence gaps and gates only for real gates, shade updates within a quarter second. Released in 2.18.1: a fence type removed whole drops its shadow with the camera still. |
+| Availability | Released (part of Night Lighting since 0.1.0). Lot UV alignment, daylight terrain term and the constant-read guard: Released in 2.6.0. Rain and other weather variants recognised (exact rain variant and by structure): Released in 2.7.0. Lamp shade on lot ground (*Walls shade lamp light near the ground*) and lamps through the outside walls' openings: Released in 2.13.0. Crown shade from trees and bushes: Released in 2.14.0. A shade that takes only the light of the lamps a wall blocks, closed gates and narrow fence gaps, the room mask and lamp shade on snowy lots, the lot map aligned on each axis, *Indoor light adds to the ground*, and a lot's shade shown with its chunks' texels: Released in 2.15.3. Verified winter terrain layouts and exact fence-gap length reuse: Released in 2.15.6. Light past 1 with the walls' shade on it: Released in 2.16.0. Fence grid and half-float reads without x87 control-word calls: Released in 2.16.2. Released in 2.18.0: mesh fences pass their open share, fence gaps and gates only for real gates, shade updates within a quarter second. Released in 2.18.1: a fence type removed whole drops its shadow with the camera still. Released in 2.18.3: a wall's shade on the world grass continuous past the lot's edge. |
 | Default | On |
 | Menu | Lighting > Game fixes > Ground & Lots > *Street lamps light lots* |
 | Configuration | `[patches.NightTerrainRelight]` `luzDoPosteNaGramaDoLote` in `ApexRadiance.toml` |
@@ -242,8 +242,12 @@ light that reaches past the lot lay over it). The world grass takes the bake lam
 with no wall. The shade is now built on the lot's grid grown on each side as far as its lamps reach past the lot
 (`GroundShadow::Reach`, at most 24 m; `ShadeGrid`), at the same texel centres: the lot's part feeds the mask's alpha as
 before, and the whole grid, when it shades any texel, goes to the world pass. One texture per terrain chunk (`ChunkShade`,
-L8, 1024 x 1024 over the chunk's 256 m, CPU mips) holds the shades of the lots over it weighed by their lamps' light
-there (`sum w M / sum w`, the lots taken in lot order; 255 where none); it shares the chunk light
+L8, 1024 x 1024 over the chunk's 256 m, CPU mips) holds `1 - max(lost) / max(W)` over the lots there, with
+`W = max(stamp weight, kOtherLight)` and `lost = (1 - M) W` the light that lot's walls take (255 where no lot is):
+over one lot it is that lot's shade, the lot pass's value on its side of the edge. Each lot tests only its own walls, so
+weighing the shades (`sum W M / sum W`) let a lot next door that sees the same lamp but not the wall lighten the shadow
+past the edge, a straight step there (a garden post 1.5 m inside a lot beside a low wall: 0.12 inside, 0.55 outside); a
+wall two lots both know is not counted twice. It shares the chunk light
 map's uv (`(world xz - centre) / 256 + 0.5`), so the world terrain shader only reads it at the light map's uv and multiplies
 the lamp RGB (`ShaderPatches::PatchTerrainShade`, after the native-alpha patch and the daylight-range patch; the solar alpha
 is untouched). When a lot's shade over a chunk changes, only the texels over the changed box and the mip texels over them

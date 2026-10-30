@@ -1622,9 +1622,13 @@ void Frame(IDirect3DDevice9* dev) {
         float box[4];
         if (!dragNow && (g_nbActive != g_lotId || GetTickCount() - s_pickAt >= 1000) && space && LotLightBridge::LotWorldBox(g_lotId, box)) {
             s_pickAt = GetTickCount();
+            // (none while the active lot has no lamp post: nothing to draw there, and each lot joining or leaving solves its
+            // outdoor rooms again, which a camera moving between lots did over and over)
+            const bool posts = std::any_of(lamps.begin(), lamps.end(), [](const GpuLamp& g) { return g.post; });
             uint64_t hits[kMaxNeighbours + 1];
-            const int n = LotLightBridge::LotsNear(box[0] - kNeighbourReach, box[1] - kNeighbourReach, box[2] + kNeighbourReach, box[3] + kNeighbourReach, hits,
-                                                   kMaxNeighbours + 1);
+            const int n = posts ? LotLightBridge::LotsNear(box[0] - kNeighbourReach, box[1] - kNeighbourReach, box[2] + kNeighbourReach,
+                                                           box[3] + kNeighbourReach, hits, kMaxNeighbours + 1)
+                                : 0;
             std::vector<std::pair<uint64_t, uintptr_t>> want;
             for (int i = 0; i < n && static_cast<int>(want.size()) < kMaxNeighbours; i++)
                 if (hits[i] != g_lotId)

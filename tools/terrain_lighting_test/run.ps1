@@ -21,6 +21,7 @@ try {
     & (Join-Path $OutDir 'world_lamp_test.exe')
     if ($LASTEXITCODE -ne 0) { throw 'World lamp checks failed' }
     & (Join-Path $PSScriptRoot 'run_queue_checks.ps1') -Repo $repo -OutDir (Join-Path $OutDir 'queue')
+    & (Join-Path $PSScriptRoot 'run_chunk_map_checks.ps1') -Repo $repo -OutDir (Join-Path $OutDir 'chunk-map')
     & (Join-Path $PSScriptRoot 'run_resource_checks.ps1') -Repo $repo -OutDir (Join-Path $OutDir 'resource')
     & (Join-Path $PSScriptRoot 'run_lamp_state_checks.ps1') -Repo $repo -OutDir (Join-Path $OutDir 'edit') -Baseline $EditReferenceSource
     & (Join-Path $PSScriptRoot 'run_dispatch_checks.ps1') -Repo $repo -OutDir (Join-Path $OutDir 'dispatch')

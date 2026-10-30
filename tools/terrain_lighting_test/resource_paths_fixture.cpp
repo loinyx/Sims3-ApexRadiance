@@ -12,6 +12,7 @@
 #include <cstring>
 #include <format>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <unordered_map>
@@ -129,8 +130,10 @@ constexpr unsigned kObjectPixelLamps=8;
 struct ObjectPatch {UINT atlasConst=40,strengthConst=41,lampParamConst=42,atlasSampler=9;bool rigLamps=true,pixelLamps=true;UINT groundWeightConst=39;UINT reachConst=0,capConst=0;int shadeSampler=-1,shadeConst=-1;};
 bool PatchObjectLampPs(std::vector<DWORD>&,ObjectPatch&,bool=false){return true;}
 bool PatchInstancedLamps(std::vector<DWORD>&,ObjectPatch&,bool=false,bool=true,bool=false){return true;}
+struct WallScalePatch {DWORD sampler=0,constReg=0,mapSampler=0;};
+bool PatchWallScale(std::vector<DWORD>&,WallScalePatch&){return true;}
 }
-struct PatchedPs { FakeShader* ps=&replacementPs;ShaderPatches::ObjectPatch obj,inst; } objectPatch,reachPatch,refusedPatch{nullptr};
+struct PatchedPs { FakeShader* ps=&replacementPs;ShaderPatches::ObjectPatch obj,inst;ShaderPatches::WallScalePatch wall; } objectPatch,reachPatch,refusedPatch{nullptr};
 int g_objLampPs=0,g_objLampPsReach=0;
 int g_fencePs=0,g_fencePsReach=0,g_fenceCapPs[2]{};
 FakeShader capShader{5};PatchedPs capPatch;
@@ -174,6 +177,9 @@ void NoteFenceGroup(FakeDevice*){}
 bool NoteGate(float,float,float){return false;}
 float fixtureVisibility=1;
 int visCalls=0;float firstVis[3]{}; // the first point a draw tests (fences: the piece nearest the lamp, 12/10)
+// Instant lamp lighting off: no relit copy, so the wall and lot paths keep the game's scale (their outdoor scale is not covered here)
+int g_wallScalePs=0;
+namespace RtOutdoorLamps {bool Enabled(){return false;} FakeTexture* ScaleOf(const void*){return nullptr;} constexpr float kScaleLog2=3.0f;}
 namespace LevelLightShare {bool WallBlocks(const float*,const float*,float=0){return false;}
 float LampVisibility(const float*,const float* p,float=.2f){if(visCalls++==0)std::memcpy(firstVis,p,12);return fixtureVisibility;}
 float ExitLampVisibility(const void*,const float*,const float*,float=.2f){return -1;}

@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Czech}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: sidewalks keep the lamps' light from every camera angle", "Noční osvětlení: chodníky si drží světlo lamp z každého úhlu kamery"},
+    {"Night Lights: lamp light on the grass by lots no longer changes with the camera", "Noční osvětlení: světlo lamp na trávě u parcel se už nemění s kamerou"},
+    {"Night Lights: objects light up without delay as the camera moves between lots", "Noční osvětlení: objekty se rozsvítí bez prodlevy, když se kamera pohybuje mezi parcelami"},
+    {"Night Lights: a wall's shadow on the grass continues past a lot's edge without a cut", "Noční osvětlení: stín zdi na trávě pokračuje za okraj parcely bez přerušení"},
     {"Night Lights: lamp posts light the walls of neighbouring lots, on every story", "Noční osvětlení: pouliční lampy osvětlují stěny sousedních parcel ve všech podlažích"},
     {"Night Lights: Instant (GPU) relights the 4 nearest lots in the same frame as a dragged post", "Noční osvětlení: Okamžitý (GPU) znovu osvětlí 4 nejbližší parcely ve stejném snímku jako taženou lampu"},
     {"Night Lights: upper steps of outdoor stairs no longer take light from lamps behind a wall", "Noční osvětlení: horní schody venkovních schodišť už neberou světlo od lamp za zdí"},

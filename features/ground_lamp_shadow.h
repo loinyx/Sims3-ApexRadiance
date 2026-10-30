@@ -512,11 +512,15 @@ private:
 
 
 // ---- (2.15.3) The shade on the world grass around lots: one terrain chunk's texture (lot_light_bridge.cpp ChunkShade; L8,
-// kChunkTexels a side over the chunk's kChunkSize metres, full mips). A texel is the shades of the lots over it weighed by
-// their lamps' light there (sum w M / sum w; 255 where none), a mip texel the rounded mean of the four under it. ChunkFull
-// makes the whole chunk; ChunkUpdate makes again only the texels over a changed box and the mip texels over them, from the
-// texture's own texels around that box. Both give the same bytes (tools/ground_shade_test): a texel sums its lots in the
-// order of the list (sorted by lot), and a texel past the box has the same lots as when the texture was made.
+// kChunkTexels a side over the chunk's kChunkSize metres, full mips). A texel is 1 - the most light a lot's walls take
+// there / the most lamp light a lot sees there (W = max(stamp weight, kOtherLight): (1 - M) W is the light that lot's walls
+// take; 255 where no lot is over it), so over one lot it is that lot's shade, the lot pass's on its side of the edge. Each
+// lot tests only its own walls: weighing the shades (sum W M / sum W) let a lot next door that sees the same lamp but not the
+// wall lighten the shadow past the edge, a straight step at the lot's edge. A mip texel is the rounded mean of the four
+// under it. ChunkFull makes the whole chunk; ChunkUpdate makes again only the texels over a changed box and the mip texels
+// over them, from the texture's own texels around that box. Both give the same bytes (tools/ground_shade_test): a texel
+// takes the same maxima whatever the order of the lots, and a texel past the box has the same lots as when the texture was
+// made.
 struct ExtData { // one lot's shade over its grid (ShadeJob::Result) and the lamps' stamp weight it is a share of
     std::vector<uint8_t> v;
     std::vector<float> w;
@@ -577,27 +581,27 @@ inline int ChunkTexels(const std::vector<ExtSrc>& srcs, float wx0, float wz0, co
     constexpr float tpm = kChunkTexels / kChunkSize;
     px.assign(r.Size(), 255);
     if (r.Empty()) return 0;
-    std::vector<float> sumW, sumMW;
+    std::vector<float> lost, seen; // per texel: the most light a lot's walls take there, the most lamp light a lot sees there
     for (const ExtSrc& m : srcs) {
         const size_t n = static_cast<size_t>(m.grid.w) * m.grid.h;
         if (!m.v || m.v->v.size() != n || m.v->w.size() != n) continue;
-        if (sumW.empty()) sumW.assign(r.Size(), 0.0f), sumMW.assign(r.Size(), 0.0f);
+        if (seen.empty()) lost.assign(r.Size(), 0.0f), seen.assign(r.Size(), 0.0f);
         TexRect s = ChunkRectOf(wx0, wz0, m.x0, m.z0, m.x1, m.z1);
         s.i0 = std::max(s.i0, r.i0), s.i1 = std::min(s.i1, r.i1), s.j0 = std::max(s.j0, r.j0), s.j1 = std::min(s.j1, r.j1);
         for (int j = s.j0; j <= s.j1; j++)
             for (int i = s.i0; i <= s.i1; i++) {
                 float v, wt;
                 if (!ExtShadeAt(m, wx0 + (i + 0.5f) / tpm, wz0 + (j + 0.5f) / tpm, v, wt)) continue;
-                const float w = std::max(wt, 0.0f) + 1e-4f; // (a lot with no lamp here weighs almost nothing)
+                const float w = std::max(wt, kOtherLight); // (as the lot's own shade: 1 - lost / max(total, kOtherLight))
                 const size_t at = static_cast<size_t>(j - r.j0) * r.W() + (i - r.i0);
-                sumW[at] += w;
-                sumMW[at] += w * v;
+                lost[at] = std::max(lost[at], (1.0f - v / 255.0f) * w);
+                seen[at] = std::max(seen[at], w);
             }
     }
     int shaded = 0;
-    for (size_t k = 0; k < sumW.size(); k++)
-        if (sumW[k] > 0.0f) {
-            const uint8_t q = ToByte(std::clamp(sumMW[k] / sumW[k], 0.0f, 255.0f));
+    for (size_t k = 0; k < seen.size(); k++)
+        if (seen[k] > 0.0f) {
+            const uint8_t q = ToByte(std::clamp(255.0f * (1.0f - lost[k] / seen[k]), 0.0f, 255.0f));
             if (q < 255) px[k] = q, shaded++;
         }
     return shaded;

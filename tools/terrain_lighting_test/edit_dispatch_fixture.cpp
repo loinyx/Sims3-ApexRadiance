@@ -17,7 +17,7 @@ TerrainLightingPolicy::Cycle g_cycle;
 bool busy = false;
 int finished = 0, waited = 0, dispatched = 0;
 int assertions = 0, failures = 0;
-namespace ChunkRelight { bool Busy() { return busy; } }
+namespace ChunkRelight { bool Busy() { return busy; } bool RebuildActive() { return false; } } // (no paced full rebuild running)
 void FinishEdit(const std::string&) { finished++; }
 void WaitEdit(EditWait, const std::string&) { waited++; }
 /* PRODUCTION_DISPATCH */
