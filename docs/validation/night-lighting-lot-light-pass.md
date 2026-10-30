@@ -93,6 +93,11 @@ at ps_2_0 it had no c32 and failed since the lot shade's mask rows moved there.
 - 2.18.3: right after a world loads, the ground shows the lamps without the walls' shade until each lot's shade is built
   (174 lots in about 50 s in the tested neighbourhood), then dims where walls block a lamp; more visible since the shade
   past a lot's edge is no longer lightened by the lots next door (player report).
+- 2.18.3 review: a wall's shadow that crosses the grass onto the ground of a lot next door now reaches that lot's edge
+  at full strength, while that lot's own pass tests only its own walls: the step can move to its edge (a wall about 2 m
+  from a shared lot edge would show it). A lot's shade built before a lamp was moved or removed shows at full strength
+  over the grass until it is built again. Two lots' walls blocking different lamps at one texel give the larger loss,
+  not the sum (lighter than true, darker than before).
 - 2.18.3: why the shade inside that lot was as low as 0.12 two metres from the post on its lawn side, where no wall
   stands between them, was not found: the captures do not list the walls the shade build saw.
 - Mesh fences: a fence that looks solid but is drawn with a cutout shader. **Expected:** its shadow as dark as a wall's.

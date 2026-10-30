@@ -517,10 +517,10 @@ private:
 // take; 255 where no lot is over it), so over one lot it is that lot's shade, the lot pass's on its side of the edge. Each
 // lot tests only its own walls: weighing the shades (sum W M / sum W) let a lot next door that sees the same lamp but not the
 // wall lighten the shadow past the edge, a straight step at the lot's edge. A mip texel is the rounded mean of the four
-// under it. ChunkFull
-// makes the whole chunk; ChunkUpdate makes again only the texels over a changed box and the mip texels over them, from the
-// texture's own texels around that box. Both give the same bytes (tools/ground_shade_test): a texel sums its lots in the
-// order of the list (sorted by lot), and a texel past the box has the same lots as when the texture was made.
+// under it. ChunkFull makes the whole chunk; ChunkUpdate makes again only the texels over a changed box and the mip texels
+// over them, from the texture's own texels around that box. Both give the same bytes (tools/ground_shade_test): a texel
+// takes the same maxima whatever the order of the lots, and a texel past the box has the same lots as when the texture was
+// made.
 struct ExtData { // one lot's shade over its grid (ShadeJob::Result) and the lamps' stamp weight it is a share of
     std::vector<uint8_t> v;
     std::vector<float> w;
