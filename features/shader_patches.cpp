@@ -1652,28 +1652,31 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
         // amplify overlapping illumination. Use pixel lamps when the group is valid,
         // otherwise retain the native rig.
         code.insert(code.end(), {Op(kMul, 3), Dst(kTemp, LA, 0x7), Src(kTemp, Q), Src(kConst, cS, kSwzY),
-                                 Op(kLrp, 4), Dst(kTemp, LA, 0x7), Src(kConst, cS, kSwzX), Src(kTemp, LA), Src(kInput, C),
-                                 Op(kMax, 3), Dst(kTemp, T, 0x7), Src(kTemp, LA), Src(kTemp, T)});
+                                 Op(kLrp, 4), Dst(kTemp, LA, 0x7), Src(kConst, cS, kSwzX), Src(kTemp, LA), Src(kInput, C)});
         std::vector<Edit> edits = {{u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E)}}};
         if (capShadows) edits.push_back({1, {Op(kDef, 5), Dst(kConst, cCapParams + 1), F(3.0f), F(-2.0f), F(0.0f), F(0.0f)}});
         // The ground lamp shade (13/10, F7 2026-10-13 09-31-30 #268: the wooden curbs of a flowerbed behind a free-standing wall
         // stayed lit by the garden post on the other side, while the grass and the paths beside them were shaded). One lamp
         // list serves the whole group, so a group running past the wall keeps the lamp for every piece, and neither the lamps
-        // here nor the atlas test a wall. The sum (atlas on faces turned up and the lamps) is multiplied by the lot ground's
-        // shade, as the outdoor floors' (AppendGroundShade): x 1 + gate (M - 1), M = the lot mask's alpha at the pixel's world
-        // xz, gate 1 within about 1 m of the lot's ground (P = world x, y, z). LA and LB are free after the max. Only with a
-        // sampler and 3 constants to spare (after the reach rows): otherwise the bytes of the patch without it.
+        // here nor the atlas test a wall. Both take the lot ground's shade before the max, M = the lot mask's alpha at the
+        // pixel's world xz (P = world x, y, z): the lamps x 1 + gate (M - 1), gate 1 within about 1 m of the lot's ground, as the
+        // outdoor floors' (AppendGroundShade); the atlas, the light lying on the ground, x M at every height (F7 2026-10-29
+        // 17-35-27: the steps of an outdoor stair above 1.25 m took the pool of lamps behind the house wall beside it, a bright
+        // flat band over the shaded steps below). Within the gate it is the max x the shade, as before. Q and G are free after
+        // the lamps. Only with a sampler and 3 constants to spare (after the reach rows): otherwise the bytes without it.
         const DWORD cM = cR + (reach ? 2u : 0u);
         if (groundShade && E + 1 <= 15 && cM + 2 < 224) {
             const DWORD S = E + 1;
             edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, S)}});
             // (2.15.3) the mask in front of the face: xz + N.xz x rows[10] (cM + 2 .z; 0.6 m, kFenceShadeReach). The fence is a
             // wall in the mask, so its own footprint lies on the edge of its shadow; tops (N.xz = 0) read where they stand
-            code.insert(code.end(), {Op(kMad, 4), Dst(kTemp, LA, 0x5), Src(kTemp, N), Src(kConst, cM + 2, 0xAA), Src(kTemp, P)});
-            AppendGroundShade(code, T, LA, LB, Src(kTemp, LA, kSwzX), Src(kTemp, LA, 0xAA), Src(kTemp, P, kSwzY), cM, S);
+            code.insert(code.end(), {Op(kMad, 4), Dst(kTemp, Q, 0x5), Src(kTemp, N), Src(kConst, cM + 2, 0xAA), Src(kTemp, P)});
+            AppendGroundShade(code, LA, Q, G, Src(kTemp, Q, kSwzX), Src(kTemp, Q, 0xAA), Src(kTemp, P, kSwzY), cM, S);
+            code.insert(code.end(), {Op(kMad, 4), Dst(kTemp, T, 0x7), Src(kTemp, T), Src(kTemp, Q, kSwzW), Src(kTemp, T)}); // atlas x M (Q.w = M - 1)
             out.shadeSampler = static_cast<int>(S);
             out.shadeConst = static_cast<int>(cM);
         }
+        code.insert(code.end(), {Op(kMax, 3), Dst(kTemp, T, 0x7), Src(kTemp, LA), Src(kTemp, T)});
         edits.push_back({A.at, std::move(code)});
         Apply(t, std::move(edits));
         return true;
