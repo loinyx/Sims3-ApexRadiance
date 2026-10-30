@@ -26,6 +26,8 @@ void Update(const std::vector<uintptr_t>& lights);
 // The lamps StampPS adds to the chunk centred at `key` (x, z) whose game map was re-rendered `rver` times, and their signature
 // (0 = none)
 uint64_t ForChunk(const std::pair<int, int>& key, uint64_t rver, std::vector<Lamp>& out);
+// This light is drawn here (Active) and moved within ms (the walls' shade on the ground leaves it out of its wall test)
+bool MovedWithin(uintptr_t light, unsigned long ms);
 void Clear(); // forget every lamp (a new world: its bake takes them all again)
 std::string Status();
 // Developer capture (GroundProfile): the lights of the last Update, and one lamp's state ("" when it has none)

@@ -47,6 +47,7 @@
 #include <wrl/client.h>
 #include "lightmap_smooth.h"
 #include "terrain_chunk_relight.h"
+#include "terrain_stamps.h"
 #include "room_map_padding.h"
 #include "level_light_share.h"
 #include "ground_lamp_shadow.h"
@@ -677,6 +678,8 @@ struct LotShadeTiming {
     DWORD seen = 0, sent = 0, taken = 0, applied = 0;
     double buildMs = 0.0;
     int chunks = 0;
+    uint64_t lot = 0;
+    int live = 0; // moving lamps in its total only (ShadeLamps)
 };
 struct LotMask {
     IDirect3DTexture9* tex = nullptr;
@@ -725,7 +728,9 @@ struct ShadeWant {
     uint64_t lot = 0, key = 0;
     LotRect rect{};
     int w = 0, h = 0;
+    size_t live = 0; // moving lamps in its key (ShadeLamps)
 };
+int g_shadeTimingLogs = 0; // (developer log) "Lamp shade on lot ground: ... shown" lines in this recording (MakeMaskTexture)
 std::vector<ShadeWant> g_shadeQueue; // render thread; one entry per lot
 std::atomic<long> g_shadeBuilt{0}, g_shadeDropped{0};
 long long g_shadeTests = 0, g_shadeThrough = 0; // texel tests; of them crossing a wall with patches (openings, lower cells) and keeping light
@@ -750,6 +755,7 @@ struct ShadeTask {
     uint64_t lot = 0, key = 0;
     int w = 0, h = 0, ox = 0, oz = 0;
     DWORD sent = 0; // (developer log) when it was sent
+    int live = 0;   // (developer log) moving lamps among others
     GroundShadow::Grid grid;
     std::vector<GroundShadow::Lamp> lamps, others; // others: in the shade's total only (ShadeLamps)
     std::vector<GroundShadow::Wall> walls;
@@ -770,6 +776,7 @@ struct ShadeResult {
     uint64_t lot = 0, key = 0;
     int w = 0, h = 0, ox = 0, oz = 0;
     DWORD sent = 0;
+    int live = 0;
     GroundShadow::Grid grid;
     std::vector<uint8_t> res;
     std::vector<float> den;
@@ -863,7 +870,7 @@ private:
                     r.group = t.group;
                     BuildChunkMips(t, r);
                 } else {
-                    r.lot = t.lot, r.key = t.key, r.w = t.w, r.h = t.h, r.ox = t.ox, r.oz = t.oz, r.grid = t.grid, r.sent = t.sent;
+                    r.lot = t.lot, r.key = t.key, r.w = t.w, r.h = t.h, r.ox = t.ox, r.oz = t.oz, r.grid = t.grid, r.sent = t.sent, r.live = t.live;
                     GroundShadow::ShadeJob job;
                     job.Init(t.grid, std::move(t.lamps), std::move(t.walls), std::move(t.patches), std::move(t.crowns), std::move(t.others));
                     job.Step([this] { return !stop_; });
@@ -945,6 +952,7 @@ struct LotPending {
     DWORD at = 0;
     DWORD seen = 0, sent = 0, arrived = 0; // (developer log)
     double buildMs = 0.0;
+    int live = 0;
 };
 LotPending g_pend;
 std::vector<ShadeResult> g_lotResults; // lots' results waiting for the held one
@@ -1121,47 +1129,85 @@ void LotBox(const LotRect& r, float& x0, float& z0, float& x1, float& z1) {
 // total (GroundShadow::ShadeJob::Init)
 constexpr size_t kMaxOtherLamps = 96;
 constexpr float kShadeMargin = 24.0f; // m
-std::vector<GroundShadow::Lamp> ShadeLamps(const LotRect& r, std::vector<GroundShadow::Lamp>* others = nullptr) {
+// A lot lamp's place and light rect now, while the light is still that lot's lamp of that type (SEH: it may be gone)
+bool LampPlaceNow(uintptr_t L, uint64_t lot, int type, float pos[3], float rect[4]) {
+    __try {
+        const uint64_t at = *reinterpret_cast<const uint32_t*>(L + 0xC0) | static_cast<uint64_t>(*reinterpret_cast<const uint32_t*>(L + 0xC4)) << 32;
+        if (at != lot || *reinterpret_cast<const int*>(L + 0xB0) != type) return false;
+        std::memcpy(pos, reinterpret_cast<const void*>(L + 0x120), 12);
+        std::memcpy(rect, reinterpret_cast<const void*>(L + 0x134), 16);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool MovedApart(const float* a, const float* b); // (below)
+// (drag) A lamp TerrainStamps draws on the GPU (NightTerrainBake::Excluded) moving now (TerrainStamps::MovedWithin, and the
+// button not let go of: DragLite::LampMoving) is taken at its place now, not the list's (read every 250 ms while dragged),
+// and in the total only, first of `others` (live: how many): its ground light follows it with no wall test, and a shade
+// built a step late cast its walls' shadows from where it was, over the light where it is (stale wedges and dark patches).
+// It is still picked with the others for the kMaxLamps cut, so the lamps tested are those at rest less the moving ones: the
+// shade is never darker than at rest (more light in the total, the same light lost). Its walls' shadows come back with the
+// build after the drag, at its place now until the list has it (within kMoveTol: the list's, as at rest).
+std::vector<GroundShadow::Lamp> ShadeLamps(const LotRect& r, std::vector<GroundShadow::Lamp>* others = nullptr, size_t* live = nullptr) {
     float x0, z0, x1, z1;
     LotBox(r, x0, z0, x1, z1);
-    std::vector<std::pair<float, GroundShadow::Lamp>> c, o;
+    struct Pick {
+        float w;
+        GroundShadow::Lamp L;
+        bool moving;
+    };
+    std::vector<Pick> c, o;
+    // (the drag as the hold sees it: a drag the Classic rules hold ends 400 ms after its last step, and the shade frozen until
+    // then is built at rest, not once more without the lamp's walls)
+    const bool dragging = DragLite::LampMoving() && DragLite::Engaged();
     for (const LotLightBridge::BakeLamp& b : LotLightBridge::CurrentBakeLamps().lamps) {
-        const bool overLot = !(b.rect[0] > x1 || b.rect[2] < x0 || b.rect[1] > z1 || b.rect[3] < z0);
-        const bool overMargin = !(b.rect[0] > x1 + kShadeMargin || b.rect[2] < x0 - kShadeMargin || b.rect[1] > z1 + kShadeMargin || b.rect[3] < z0 - kShadeMargin);
+        const float* pos = b.pos;
+        const float* rect = b.rect;
+        float nowPos[3], nowRect[4];
+        const bool stamped = b.baked && b.id && NightTerrainBake::Excluded(b.id) && LampPlaceNow(b.id, b.lot, b.type, nowPos, nowRect);
+        const bool moving = stamped && dragging && TerrainStamps::MovedWithin(b.id, DragLite::kStillMs);
+        if (moving || (stamped && MovedApart(b.pos, nowPos))) pos = nowPos, rect = nowRect;
+        const bool overLot = !(rect[0] > x1 || rect[2] < x0 || rect[1] > z1 || rect[3] < z0);
+        const bool overMargin = !(rect[0] > x1 + kShadeMargin || rect[2] < x0 - kShadeMargin || rect[1] > z1 + kShadeMargin || rect[3] < z0 - kShadeMargin);
         if (!b.baked || !(overLot || (others && overMargin))) continue;
         const float lum = b.light[0] * 0.2126f + b.light[1] * 0.7152f + b.light[2] * 0.0722f;
-        GroundShadow::Lamp L{b.pos[0], b.pos[1], b.pos[2], 0.4f * lum};
+        GroundShadow::Lamp L{pos[0], pos[1], pos[2], 0.4f * lum};
         L.liftable = TerrainBakeRule::Liftable(b.lot != 0, b.type);
-        L.rx0 = b.rect[0], L.rz0 = b.rect[1], L.rx1 = b.rect[2], L.rz1 = b.rect[3];
+        L.rx0 = rect[0], L.rz0 = rect[1], L.rx1 = rect[2], L.rz1 = rect[3];
         if (!(L.rx1 >= L.rx0 && L.rz1 >= L.rz0)) L.rx0 = L.rz0 = -1e30f, L.rx1 = L.rz1 = 1e30f; // (no rectangle read)
         if (!(L.k > 0.0f) || !ApexMath::IsFinite(L.k) || !ApexMath::IsFinite(L.x) || !ApexMath::IsFinite(L.y) || !ApexMath::IsFinite(L.z)) continue;
         if (!overLot) { // the margin only: by its weight at its own stamp's nearest point to the lot
             const float nx = std::clamp(std::clamp(L.x, x0, x1), L.rx0, L.rx1), nz = std::clamp(std::clamp(L.z, z0, z1), L.rz0, L.rz1);
-            o.emplace_back(GroundShadow::Weight(L, nx, r.ty, nz), L);
+            o.push_back(Pick{GroundShadow::Weight(L, nx, r.ty, nz), L, moving});
             continue;
         }
         const float nx = std::clamp(std::clamp(L.x, x0, x1), L.rx0, L.rx1), nz = std::clamp(std::clamp(L.z, z0, z1), L.rz0, L.rz1);
         const float wgt = GroundShadow::Weight(L, nx, r.ty, nz);
         if (!(wgt >= GroundShadow::kMinWeight)) { // (release review) faint over the lot, maybe strong on the margin: in the total
-            o.emplace_back(wgt, L);
+            o.push_back(Pick{wgt, L, moving});
             continue;
         }
-        c.emplace_back(wgt, L);
+        c.push_back(Pick{wgt, L, moving});
     }
-    const auto strongest = [](const auto& a, const auto& b) { return a.first > b.first; };
+    const auto strongest = [](const Pick& a, const Pick& b) { return a.w > b.w; };
     std::stable_sort(c.begin(), c.end(), strongest);
     if (c.size() > static_cast<size_t>(GroundShadow::kMaxLamps)) {
         o.insert(o.end(), c.begin() + GroundShadow::kMaxLamps, c.end());
         c.resize(GroundShadow::kMaxLamps);
     }
-    std::vector<GroundShadow::Lamp> out;
+    std::vector<GroundShadow::Lamp> out, first;
     out.reserve(c.size());
-    for (const auto& [w, L] : c) out.push_back(L);
+    for (const Pick& p : c) (p.moving ? first : out).push_back(p.L);
     if (others) {
+        for (const Pick& p : o)
+            if (p.moving) first.push_back(p.L);
+        std::erase_if(o, [](const Pick& p) { return p.moving; });
         std::stable_sort(o.begin(), o.end(), strongest);
-        if (o.size() > kMaxOtherLamps) o.resize(kMaxOtherLamps);
-        others->clear();
-        for (const auto& [w, L] : o) others->push_back(L);
+        if (o.size() + first.size() > kMaxOtherLamps) o.resize(kMaxOtherLamps - std::min(first.size(), kMaxOtherLamps));
+        if (live) *live = first.size();
+        *others = std::move(first);
+        for (const Pick& p : o) others->push_back(p.L);
     }
     return out;
 }
@@ -2035,7 +2081,7 @@ void FenceGroupsGone() {
 }
 // What the shade is made from: the lot's place and grid, its lamps (place; light in about 20% steps) and the outside walls in
 // its box (their copy, so walls changed on another lot do not build this one again). Render thread.
-uint64_t ShadeKey(const LotRect& r, int w, int h) {
+uint64_t ShadeKey(const LotRect& r, int w, int h, size_t* liveOut = nullptr) {
     uint64_t s = 1469598103934665603ull;
     const auto mix = [&s](uint64_t v) { s = (s ^ v) * 1099511628211ull; };
     const auto mixf = [&](float f, float q) { mix(static_cast<uint64_t>(static_cast<int64_t>(std::lround(f * q)))); };
@@ -2044,11 +2090,14 @@ uint64_t ShadeKey(const LotRect& r, int w, int h) {
     mixf(Penumbra::Radius(), 1000.0f); // the openings' penumbra (Shadow softness)
     mix(TesterToggles::groundSoftEdges.load(std::memory_order_relaxed) ? 0x50F7ull : 0ull); // soft wall ends and tops on the mask (GroundShadow::Grid::soft)
     std::vector<GroundShadow::Lamp> others;
-    const std::vector<GroundShadow::Lamp> lamps = ShadeLamps(r, &others);
-    for (const GroundShadow::Lamp& L : others) { // (their light stays in the total)
+    size_t live = 0;
+    const std::vector<GroundShadow::Lamp> lamps = ShadeLamps(r, &others, &live);
+    if (liveOut) *liveOut = live;
+    const auto mixOther = [&](const GroundShadow::Lamp& L) {
         mixf(L.x, 50.0f), mixf(L.z, 50.0f);
         mix(static_cast<uint64_t>(static_cast<int64_t>(std::lround(std::log2(std::max(L.k, 1e-6f)) * 4.0f))));
-    }
+    };
+    for (size_t i = live; i < others.size(); i++) mixOther(others[i]); // (their light stays in the total)
     {
         int ox, oz;
         const GroundShadow::Grid g = ShadeGrid(r, w, h, lamps, ox, oz);
@@ -2079,6 +2128,7 @@ uint64_t ShadeKey(const LotRect& r, int w, int h) {
         }
         mix(sum);
         mix(walls.size());
+        bool shades = !walls.empty();
         if (DevSwitches::CanopyGroundShadow()) { // the crowns over the lot (sorted by CrownsIn: the same set gives the same key)
             static std::vector<Canopy::Ellipsoid> crowns;
             crowns.clear();
@@ -2086,7 +2136,12 @@ uint64_t ShadeKey(const LotRect& r, int w, int h) {
             for (const Canopy::Ellipsoid& e : crowns)
                 for (float f : {e.cx, e.cy, e.cz, e.rx, e.ry, e.lad}) mixf(f, 10.0f);
             mix(crowns.size());
+            shades = shades || !crowns.empty();
         }
+        // a moving lamp only thins the other lamps' shadows: where nothing shades, the shade is 255 wherever it is (ShadeTick),
+        // so a lot with no other lamp to test keeps its key while one is dragged
+        if (shades)
+            for (size_t i = 0; i < live; i++) mixOther(others[i]);
     }
     return s | 1;
 }
@@ -2095,6 +2150,9 @@ uint64_t ShadeKey(const LotRect& r, int w, int h) {
 void HoldLotResult(ShadeResult& r);
 void DropPending();
 void ShadeTick() {
+    static bool s_recording = false; // (developer log: each recording gets its own shade timing lines)
+    if (Recorder::Active() && !s_recording) g_shadeTimingLogs = 0;
+    s_recording = Recorder::Active();
     for (ShadeResult& r : g_shadeWorker.Take()) {
         if (r.epoch != g_shadeEpoch) continue;
         if (r.chunk) {
@@ -2142,7 +2200,13 @@ void ShadeTick() {
         g_shadeQueue.erase(g_shadeQueue.begin() + static_cast<ptrdiff_t>(pick));
         ShadeTask t;
         t.epoch = g_shadeEpoch;
-        t.lamps = ShadeLamps(want.rect, &t.others);
+        size_t live = 0;
+        t.lamps = ShadeLamps(want.rect, &t.others, &live);
+        if (live != want.live) { // a lamp started or stopped moving since its key: asked again at a later check with its new key
+            if (const auto it = g_lotMasks.find(want.lot); it != g_lotMasks.end() && it->second.queuedKey == want.key) it->second.queuedKey = 0;
+            continue;
+        }
+        t.live = static_cast<int>(live);
         t.grid = ShadeGrid(want.rect, want.w, want.h, t.lamps, t.ox, t.oz);
         t.grid.soft = TesterToggles::groundSoftEdges.load(std::memory_order_relaxed);
         float x0, z0, x1, z1;
@@ -2152,7 +2216,7 @@ void ShadeTick() {
         g_shadeLastLamps = static_cast<int>(t.lamps.size());
         g_shadeLastWalls = static_cast<int>(t.walls.size());
         g_shadeLastPatches = static_cast<int>(t.patches.size());
-        if (t.walls.empty() && t.crowns.empty()) t.lamps.clear(), t.others.clear(); // nothing shades: 255 everywhere at once
+        if (t.walls.empty() && t.crowns.empty()) t.lamps.clear(), t.others.clear(), t.live = 0; // nothing shades: 255 everywhere at once
         t.lot = want.lot, t.key = want.key, t.w = want.w, t.h = want.h;
         t.sent = GetTickCount() | 1;
         g_shadeWorker.Submit(std::move(t));
@@ -2171,7 +2235,7 @@ void HoldLotResult(ShadeResult& r) {
     LotMask& m = it->second;
     g_pend = {};
     g_pend.lot = r.lot, g_pend.key = r.key, g_pend.w = r.w, g_pend.h = r.h;
-    g_pend.seen = m.changeSeen, g_pend.sent = r.sent, g_pend.arrived = GetTickCount(), g_pend.buildMs = r.ms;
+    g_pend.seen = m.changeSeen, g_pend.sent = r.sent, g_pend.arrived = GetTickCount(), g_pend.buildMs = r.ms, g_pend.live = r.live;
     const GroundShadow::Grid& eg = r.grid;
     const int W = r.w, H = r.h, ox = r.ox, oz = r.oz;
     // the lot's part for the lot passes; the whole grid for the world grass when it shades any texel
@@ -2223,7 +2287,7 @@ void CommitPending() {
     if (!m.shade.empty()) g_shadeLastMin = p.lo;
     g_shadeBuilt.fetch_add(1, std::memory_order_relaxed);
     if (!kPublicBuild && p.seen) { // (developer log, LotMaskTexture: when the mask is shown)
-        m.timing = LotShadeTiming{p.seen, p.sent, p.arrived, GetTickCount(), p.buildMs, static_cast<int>(p.chunks.size())};
+        m.timing = LotShadeTiming{p.seen, p.sent, p.arrived, GetTickCount(), p.buildMs, static_cast<int>(p.chunks.size()), p.lot, p.live};
     }
     m.changeSeen = 0;
 }
@@ -2271,19 +2335,24 @@ void ShadeApply(IDirect3DDevice9* dev) {
 // (14/10: the built key is set when the build is applied, the queued one apart, so a dropped or cancelled build is asked
 // again; a running build is not cancelled by a key change: it finishes and the new one follows)
 void WantShade(uint64_t lot, LotMask& m, const LotRect& r, DWORD now) {
-    const uint64_t key = ShadeKey(r, m.w, m.h);
+    // a drag the Classic rules hold (DragLite::ClassicHolding: Classic lamp lighting, or with Instant a lamp the game solves):
+    // the ground keeps the lamp where it was until the release (the terrain relight and the rooms wait for it), so its shade
+    // does too
+    if (m.shadeKey && DragLite::ClassicHolding()) return;
+    size_t live = 0;
+    const uint64_t key = ShadeKey(r, m.w, m.h, &live);
     if (!kPublicBuild && key != m.shadeKey && !m.changeSeen) m.changeSeen = now | 1; // (2.15.3, developer log)
     if (key == m.shadeKey || key == m.queuedKey) return;
     if (m.shadeAt && now - m.shadeAt < kShadeMinEveryMs) return; // again at a later check
     m.shadeAt = now;
     for (ShadeWant& q : g_shadeQueue)
         if (q.lot == lot) {
-            q = ShadeWant{lot, key, r, m.w, m.h};
+            q = ShadeWant{lot, key, r, m.w, m.h, live};
             m.queuedKey = key;
             return;
         }
     if (g_shadeQueue.size() < 64) {
-        g_shadeQueue.push_back(ShadeWant{lot, key, r, m.w, m.h});
+        g_shadeQueue.push_back(ShadeWant{lot, key, r, m.w, m.h, live});
         m.queuedKey = key;
         return;
     }
@@ -2348,16 +2417,16 @@ bool MakeMaskTexture(IDirect3DDevice9* dev, LotMask& m) {
     m.dirty = false;
     g_maskBuilds.fetch_add(1, std::memory_order_relaxed);
     if (!kPublicBuild && m.timing.seen) { // (2.15.3) the in-game time from a change of the lot's inputs to its new shade shown
-        static int s_logs = 0;
         const LotShadeTiming t = m.timing;
         m.timing = {};
         const auto ms = [](DWORD from, DWORD to) { return static_cast<long>(to - from); };
-        if (s_logs < 400) {
-            s_logs++;
-            LOG_INFO(std::format("[LotLightBridge] Lamp shade on lot ground: shown {} ms after its inputs changed (seen at a check every 100 ms; then {} ms to "
-                                 "its build sent, {} ms building on the worker, {} ms to taken, {} ms held for its {} chunks, {} ms to its draw){}",
-                                 ms(t.seen, GetTickCount()), ms(t.seen, t.sent), static_cast<long>(t.buildMs + 0.5), ms(t.sent, t.taken), ms(t.taken, t.applied),
-                                 t.chunks, ms(t.applied, GetTickCount()), s_logs == 400 ? " (last such line)" : ""));
+        if (g_shadeTimingLogs < 400) {
+            g_shadeTimingLogs++;
+            LOG_INFO(std::format("[LotLightBridge] Lamp shade on lot ground: lot {:016X} shown {} ms after its inputs changed (seen at a check every 100 ms; then {} ms to "
+                                 "its build sent, {} ms building on the worker, {} ms to taken, {} ms held for its {} chunks, {} ms to its draw; {} moving lamps in its "
+                                 "total only){}",
+                                 t.lot, ms(t.seen, GetTickCount()), ms(t.seen, t.sent), static_cast<long>(t.buildMs + 0.5), ms(t.sent, t.taken), ms(t.taken, t.applied),
+                                 t.chunks, ms(t.applied, GetTickCount()), t.live, g_shadeTimingLogs == 400 ? " (last such line)" : ""));
         }
     }
     return true;
@@ -2434,7 +2503,8 @@ IDirect3DTexture9* LotMaskTexture(IDirect3DDevice9* dev, const LotRect& rect) {
     // else every 500 ms: at the room mask's 500 ms a fence edit or a lamp step waited up to that long to be seen, then up to
     // kShadeMinEveryMs more (log: "500 ms to its build sent"), the light in steps; at rest the key (every bake lamp, the
     // walls' copy) is not worked out more often than before
-    const bool changing = m.fenceGenSeen != g_fenceGen || DragLite::Engaged();
+    // (the fast checks go on 200 ms past the drag, so one of them sees the key at rest when the drag hold and the moving lamp end)
+    const bool changing = m.fenceGenSeen != g_fenceGen || DragLite::Engaged() || DragLite::StepWithin(DragLite::kStillMs + 2 * kShadeCheckMs);
     if (!m.shadeChecked || now - m.shadeChecked >= (changing ? kShadeCheckMs : 500u)) {
         m.shadeChecked = now;
         m.fenceGenSeen = g_fenceGen;
@@ -3833,6 +3903,7 @@ void TrackLotLampEdits() {
             for (int c = 0; c < 3; c++) b.light[c] = LampLight(s, c);
             b.baked = s.baked;
             b.animated = s.animated;
+            b.id = L;
             g_bakeSnap.lamps.push_back(b);
         }
         std::stable_sort(g_bakeSnap.lamps.begin(), g_bakeSnap.lamps.end(), [](const LotLightBridge::BakeLamp& a, const LotLightBridge::BakeLamp& b) { return a.lot < b.lot; });
@@ -10049,6 +10120,7 @@ BakeDiff DiffBake(const BakeSnapshot& baked, const BakeSnapshot& now, bool plain
         const BakeLamp& at = b ? *b : *a;
         c.lot = at.lot;
         c.type = at.type;
+        c.id = at.id;
         std::memcpy(c.pos, at.pos, sizeof c.pos);
         c.user = user;
         if (a) {

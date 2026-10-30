@@ -363,9 +363,13 @@ whole chunks on the CPU:
   ([world atlas](world-atlas-and-smoothed-maps.md#gpu-path-default)) with the bake's law: the colour with the lot-lamp
   gain and the area share, `range x intensity x 0.2` over the horizontal distance squared, the low-lamp lift and the
   bake's cone rows, on flat ground at the lot's ground height. A terrain lamp change whose every lamp is drawn this way
-  takes no local relight (`skipped: drawn on the GPU while dragged`): each addition stands within 1.5 m (a tile step) of an excluded
-  lamp of its lot and type, and each removal is paired with such an addition (`AllStamped`), so a lamp of the same type
-  deleted or placed beside the drag goes through the local relight.
+  takes no local relight (`skipped: drawn on the GPU while dragged`): each addition is an excluded light itself
+  (`BakeChange::id`) or stands within 1.5 m (a tile step) of an excluded lamp of its lot and type, and each removal is
+  paired with such an addition (`AllStamped`), so a lamp of the same type deleted or placed beside the drag goes through
+  the local relight. The diff's place is the lamp list's, read every 250 ms while dragged: a fast drag left it 1.6 to
+  3.6 m behind the light, and each such step re-rendered its chunk to the same map (4 to 45 ms on the render thread)
+  before the light was matched by its id. The walls' shade on the ground leaves a moving lamp out of its wall test
+  ([lot light pass](lot-light-pass.md#lamp-shade-on-lot-ground-groundshadow)).
 - **Release.** Still for 1.5 s (`kQuietMs`) with no drag engaged (`DragLite::Engaged`), the lamp leaves the exclusion
   list and one local relight bakes it where it stays; each chunk under it keeps the stamp until the build that shows its
   re-rendered map (a re-render that leaves the map the same counts; 3 s at most, `kGateMaxMs`). A refused relight keeps

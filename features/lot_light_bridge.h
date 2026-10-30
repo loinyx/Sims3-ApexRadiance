@@ -35,6 +35,7 @@ struct BakeLamp {
     float rect[4] = {};     // light rect +0x134 {minX, minZ, maxX, maxZ}: the bake draws the lamp into the chunks it overlaps
     bool baked = false;     // the bake takes it now: lit, enabled, and its light is not zero
     bool animated = false;  // switches / dims by itself (3+ automatic changes within 60 s): its changes never trigger
+    uintptr_t id = 0;       // the light (its address when read; NightTerrainBake::Excluded takes the same)
 };
 struct BakeSnapshot {
     std::vector<BakeLamp> lamps;       // lamps of type 3..6 or 0xB on lots (outdoors, alive), sorted by lot
@@ -65,6 +66,7 @@ struct BakeChange {
     bool user = false;       // added / removed / moved (Build mode); else switched on / off or relit (automatic)
     bool hasOld = false, hasNew = false;
     float oldRect[4] = {}, newRect[4] = {};
+    uintptr_t id = 0;        // the light, as BakeLamp::id
 };
 struct BakeDiff {
     int added = 0, removed = 0, switchedOn = 0, switchedOff = 0, light = 0, lots = 0, animated = 0;

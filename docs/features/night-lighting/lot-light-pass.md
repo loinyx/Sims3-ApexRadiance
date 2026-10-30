@@ -224,8 +224,24 @@ build runs on the shade worker (*Worker thread* below) and again only when the l
 of light, in or out of the bake) or the outside walls, fences and crowns in its box changed. The inputs are checked every
 100 ms while a fence group changed since the lot's last check or a lamp is dragged (`kShadeCheckMs`), else every 500 ms
 (the key reads every bake lamp and the walls' copy), and a lot is built at most every 250 ms
-(`kShadeMinEveryMs`; a build takes 1 to 30 ms on the worker), so a fence edit or a dragged lamp shows its shadow without
-half-second steps.
+(`kShadeMinEveryMs`; a build takes 1 to 30 ms on the worker), so a fence edit shows its shadow without half-second steps.
+
+A dragged lamp whose ground light the GPU draws (`NightTerrainBake::Excluded`,
+[terrain relight](terrain-relight.md#dragged-lamps-on-the-gpu)) that is moving (it moved within 0.75 s,
+`TerrainStamps::MovedWithin`, the mouse button has not let go of it since, `DragLite::LampMoving`, and the drag is not over, `DragLite::Engaged`: a
+drag the Classic rules hold ends 0.4 s after its last step, with the frozen shade then built at rest) is taken at its
+place now (`LampPlaceNow`), not the lamp list's, which is read every 250 ms while it is dragged, and enters the total
+only, first of the others: it casts no wall, fence or crown shadow, `M = 1 - lost / max(total + w, 0.05)`. It is still
+picked with the others for the 32-lamp cut, so the lamps tested are those at rest less the moving ones and the shade is
+never darker than at rest. The lot and world grass shade followed the lamp a build behind (0.3 to 0.8 s), with the
+wedges cast from where it was, over its light where it is. The input key holds the moving lamp only when the lot has
+another lamp to test and something that shades it; a lot with none keeps its key, so it is built once when the drag
+starts and once after it. A lamp that stopped, or that another drag keeps in the exclusion list, is tested again at its
+place now until the list has it within 5 cm (then at the list's, as at rest). A queued build whose moving lamps changed
+before it was sent is asked again with its new key. The inputs are checked every 100 ms until 0.95 s after the last
+lamp step, so the build at rest follows the drag's end at once. With a drag the Classic rules hold
+(`DragLite::ClassicHolding`: Classic lamp lighting, or a lamp the game solves) the shade is not built again until the
+release: the ground keeps the lamp where it was until then.
 It follows *Walls shade lamp light near the ground* (Lighting > Outside > Ground & Lots, `paredesSombreiamOChao`). Status (developer page): *Walls shade lamps on lot ground*. The lot's
 ground height is taken from room 0's matrix (`m13`, unverified as the ground under every texel).
 

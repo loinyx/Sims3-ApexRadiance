@@ -246,6 +246,11 @@ uint64_t ForChunk(const std::pair<int, int>& key, uint64_t rver, std::vector<Lam
     return sig;
 }
 
+bool MovedWithin(uintptr_t light, unsigned long ms) {
+    const auto it = g_states.find(light);
+    return it != g_states.end() && it->second.phase == Phase::Active && GetTickCount() - it->second.movedAt < ms;
+}
+
 void Clear() {
     g_states.clear();
     g_seen.clear();
