@@ -52,7 +52,7 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
 
 ## Open checks
 
-- Ground light on stair tops (not yet committed; build D220A07F), F7 2026-10-29 17-35-27 and 17-35-29: an outdoor stair
+- Ground light on stair tops (`04e5f3e`), F7 2026-10-29 17-35-27 and 17-35-29: an outdoor stair
   beside a house wall, at night. **Expected:** the steps above 1.25 m take the same wall shade as the grass beside the stair
   (no bright flat band over the shaded lower steps); the lamp at the top of the stair still lights the upper steps.
   Offline: `tools/floor_shade_check`, 10,854 checks, 0 failures (the 116 instanced pixel shaders of the precomp, both laws).

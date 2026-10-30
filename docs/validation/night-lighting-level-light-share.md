@@ -223,7 +223,7 @@ topology mutation inside a point is not reproduced. This release does not promis
 
 ## Open checks
 
-- Lamp posts of other lots (not yet committed; build D220A07F). A lamp post placed near a neighbouring lot, dragged along it
+- Lamp posts of other lots (`358a394`). A lamp post placed near a neighbouring lot, dragged along it
   for about 10 s, put down, then deleted. **Expected:** about 1 s after it stops, the neighbour's outside walls take its
   light on every story, at the brightness the post gives its own lot's walls at the same distance; no solve of the
   neighbour during the drag; deleting it clears that light at once with no crash (a solve of the neighbour running at that
