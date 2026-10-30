@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), German}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: lamp posts light the walls of neighbouring lots, on every story", "Nachtbeleuchtung: Laternen beleuchten die Wände der Nachbargrundstücke auf allen Etagen"},
+    {"Night Lights: Instant (GPU) relights the 4 nearest lots in the same frame as a dragged post", "Nachtbeleuchtung: Sofort (GPU) beleuchtet die 4 nächsten Grundstücke im selben Bild wie eine gezogene Laterne neu"},
+    {"Night Lights: upper steps of outdoor stairs no longer take light from lamps behind a wall", "Nachtbeleuchtung: Obere Stufen von Außentreppen bekommen kein Licht mehr von Lampen hinter einer Wand"},
     {"Night Lights: a fence removed whole takes its shadow with it at once", "Nachtbeleuchtung: Ein ganz entfernter Zaun nimmt seinen Schatten sofort mit"},
     {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "Nachtbeleuchtung: Eine direkt nach dem Verschieben gelöschte Lampe hinterlässt kein Licht mehr am Boden"},
     {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "Nachtbeleuchtung: Der Boden bei Regen springt am Ende der Dämmerung nicht mehr zu weichem Lampenlicht"},

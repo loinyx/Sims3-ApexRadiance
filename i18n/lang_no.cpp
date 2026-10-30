@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Norwegian (Bokmal)}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: lamp posts light the walls of neighbouring lots, on every story", "Nattlys: lyktestolper lyser opp veggene på nabotomter, i alle etasjer"},
+    {"Night Lights: Instant (GPU) relights the 4 nearest lots in the same frame as a dragged post", "Nattlys: Umiddelbar (GPU) belyser de 4 nærmeste tomtene på nytt i samme bilde som en lyktestolpe som dras"},
+    {"Night Lights: upper steps of outdoor stairs no longer take light from lamps behind a wall", "Nattlys: de øverste trinnene i utetrapper får ikke lenger lys fra lamper bak en vegg"},
     {"Night Lights: a fence removed whole takes its shadow with it at once", "Nattlys: et gjerde som fjernes helt, tar skyggen sin med seg med en gang"},
     {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "Nattlys: en lampe som slettes rett etter et drag, etterlater ikke lenger lys på bakken"},
     {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "Nattlys: bakken i regn hopper ikke lenger til mykt lampelys på slutten av skumringen"},

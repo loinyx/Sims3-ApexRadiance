@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Finnish}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: lamp posts light the walls of neighbouring lots, on every story", "Yövalot: lyhtypylväät valaisevat naapuritonttien seinät kaikissa kerroksissa"},
+    {"Night Lights: Instant (GPU) relights the 4 nearest lots in the same frame as a dragged post", "Yövalot: Välitön (GPU) valaisee 4 lähintä tonttia uudelleen samassa kuvassa kuin vedetyn lyhtypylvään"},
+    {"Night Lights: upper steps of outdoor stairs no longer take light from lamps behind a wall", "Yövalot: ulkoportaiden ylimmät askelmat eivät enää saa valoa seinän takana olevista lampuista"},
     {"Night Lights: a fence removed whole takes its shadow with it at once", "Yövalot: kokonaan poistettu aita vie varjonsa heti mukanaan"},
     {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "Yövalot: heti siirron jälkeen poistettu lamppu ei enää jätä valoa maahan"},
     {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "Yövalot: sateinen maa ei enää hyppää pehmeään lampunvaloon hämärän lopussa"},

@@ -41,6 +41,7 @@ an FPS gain, complete climate coverage or resolution of texture allocation stall
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-29 | `79c87e1` (release 2.18.2 candidate: lamp posts on neighbouring lots `358a394`, picked by place `28975fe`, review fixes) | Standard Release x86 build; `tools/i18n_check`; `perl tools/menu_audit.pl .`; developer builds `C23EDBE4` and `907C47DA` in game | Build with no errors; i18n OK (21 languages, 2432 keys); menu audit: no new findings. In game: each move of a post relit every story of the neighbouring lots in 7.5 to 31 ms with no room solves, those lots 0.006 to 0.014 ms a frame; no visible delay after placing or dropping a post. The review fixes of `79c87e1` were not seen in game | In game, backend not recorded |
 | 2026-10-28 | `ddb9e44` (walls relit first, floor mask four texels at a time) | Developer recording of lamp drags | The under-floor share's update about 1.6 ms a relight round before, 0.65 ms on average after; every round fit in one frame (before: rounds of up to 20 maps over 5 to 8 frames, the seam between stories showing two lamp positions) | In game, backend not recorded |
 | 2026-10-28 | `ea376c0` (a room floor map smaller than its solve) | Developer recording on a 20 x 30 m lot (own floor maps 256x128 and 256x256 under a 512x256 working map) | Every lamp move relit all stories without a room-0 solve; the game's room solves during a drag fell from 5.0 ms to 0.6 ms a frame | In game, backend not recorded |
 | 2026-10-27 | `5006c39` (kept solves account for every light) | `tools/outdoor_delta_test`; `tools/development/check.ps1 -Suite Smoke`; dev build in game | 0 failures. In game: 21 kept room-0 solves over lamp recolours, moves and switches, none with light past its parts (the check never refused); the stale courtyard light of 2.16.0 not reproduced. Its cause is not confirmed | DXVK 3.1.1 in game |
@@ -232,7 +233,10 @@ topology mutation inside a point is not reproduced. This release does not promis
   neighbour during the drag; deleting it clears that light at once with no crash (a solve of the neighbour running at that
   moment included). Record the room solves of the neighbour and the frame times around the stop.
 - Lamp posts on the lots next to the active one on the GPU, still open: when a neighbour becomes the active lot, its lamps
-  stay lit with no gap; the idle cost of those lots in the self-measure line (`the lots next to it`) with no lamp moving.
+  stay lit with no gap; the idle cost of those lots in the self-measure line (`the lots next to it`) with no lamp moving;
+  the review fixes of `79c87e1` (a lighting restart with lots next door, a lot reloaded under the same id, a reinstall
+  followed by a post deleted). Known: a one-frame drop of the active lot clears and publishes the set again, so each lot
+  next door gathers its outdoor rooms twice (the release review, not fixed in 2.18.2).
 
 - Real-time outdoor lamps during a drag (`27d6232`, `5603402`, `ddb9e44`, `91af563`), Lamp lighting Instant, a house with
   two or more stories and an outdoor lamp beside its walls. Pick the lamp up (or place a new one) and drag it along the

@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Simplified, mainland China)}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: lamp posts light the walls of neighbouring lots, on every story", "夜间灯光：路灯会照亮相邻地块所有楼层的墙壁"},
+    {"Night Lights: Instant (GPU) relights the 4 nearest lots in the same frame as a dragged post", "夜间灯光：即时（GPU）会在拖动路灯的同一帧重新照亮最近的 4 个地块"},
+    {"Night Lights: upper steps of outdoor stairs no longer take light from lamps behind a wall", "夜间灯光：室外楼梯的上层台阶不再受到墙后灯具的光照"},
     {"Night Lights: a fence removed whole takes its shadow with it at once", "夜间灯光：整段删除的栅栏会立即带走它的阴影"},
     {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "夜间灯光：拖动后立即删除的灯具不再在地面上留下光线"},
     {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "夜间灯光：雨天地面在黄昏结束时不再突然切换为柔和灯光"},

@@ -12,7 +12,7 @@ that cannot run it, none of it runs.
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1. Baked lamp records without padding (the frame rate of 2.15.1 while moving the camera): Released in 2.15.2. Shaders from the shader cache: Released in 2.15.3. Light past 1 on the lot ground, outdoor floors and outside walls (the outdoor scale): Released in 2.16.0. Kept solves that account for every light: Released in 2.16.1. Released in 2.18.0: a lamp drawn on every story at once, floor maps smaller than their solve relit, walls relit first, each lamp counted once on floors. |
+| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1. Baked lamp records without padding (the frame rate of 2.15.1 while moving the camera): Released in 2.15.2. Shaders from the shader cache: Released in 2.15.3. Light past 1 on the lot ground, outdoor floors and outside walls (the outdoor scale): Released in 2.16.0. Kept solves that account for every light: Released in 2.16.1. Released in 2.18.0: a lamp drawn on every story at once, floor maps smaller than their solve relit, walls relit first, each lamp counted once on floors. Released in 2.18.2: the active lot's lamp posts drawn on the four lots next to it. |
 | Default | On (Lamp lighting: Instant (GPU); a saved `lampLightingMode` keeps its choice) |
 | Menu | System > Performance > Lamp lighting > Lamp updates: Instant (GPU) |
 | Configuration | `lampLightingMode = "instant"` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -179,7 +179,10 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
   its story-0 ground marked by its own ground height. Each of its stories' lamps of the bake are read from its room-0 list
   (`NbBake`, by story manager; `FillBake` as for the active lot) when its kept solve or the active lot's lamps change, else
   once a second. A neighbour's maps share the one upload a
-  frame after the active lot's, take watch slots from the upper half, and never count for coverage or the restart.
+  frame after the active lot's, come after its maps in each pass of the relight order, take watch slots from the upper
+  half, and never count for coverage or the restart (their jobs included; a finished job of a story no longer served is
+  dropped). A story idle with no kept solve keeps its last copies only until its sends are spent, then gathers the posts
+  again. A lot loaded again under the same id (a new tracker) leaves and joins the set.
   `LotLightBridge::LotsNear` around the active lot's box (`LotWorldBox`) picks the lots, nearest first, once a second;
   `LevelLightShare::SetGpuNeighbourLots` (with each lot's stories left to the CPU) and `OutdoorDelta::SetNeighbourLots`
   publish them. A kept solve of the other kind (base only on the active lot, full on a neighbour, after the active lot

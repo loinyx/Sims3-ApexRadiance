@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Russian}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: lamp posts light the walls of neighbouring lots, on every story", "Ночное освещение: фонари освещают стены соседних участков на всех этажах"},
+    {"Night Lights: Instant (GPU) relights the 4 nearest lots in the same frame as a dragged post", "Ночное освещение: «Мгновенный» (GPU) пересчитывает свет 4 ближайших участков в том же кадре, что и перетаскиваемый фонарь"},
+    {"Night Lights: upper steps of outdoor stairs no longer take light from lamps behind a wall", "Ночное освещение: верхние ступени наружных лестниц больше не получают свет от ламп за стеной"},
     {"Night Lights: a fence removed whole takes its shadow with it at once", "Ночное освещение: забор, удалённый целиком, сразу забирает свою тень"},
     {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "Ночное освещение: лампа, удалённая сразу после перетаскивания, больше не оставляет свет на земле"},
     {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "Ночное освещение: земля под дождём больше не переключается рывком на мягкий свет в конце сумерек"},
