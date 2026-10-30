@@ -150,12 +150,13 @@ static void LotBuildChecks(int reps) {
 // ---- The chunk texture (GroundShadow::ChunkFull, ChunkUpdate)
 using GroundShadow::ExtSrc;
 using GroundShadow::TexRect;
-// The whole chunk as lot_light_bridge.cpp BuildChunkMips made it before 2.15.3 (std::lround), for the lots in the given order
+// The whole chunk texel by texel, independently of ChunkTexels (std::lround), for the lots in the given order: 1 - the most
+// light a lot's walls take / the most lamp light a lot sees (W = max(stamp weight, kOtherLight))
 static std::vector<std::vector<uint8_t>> OldChunkMips(const std::vector<ExtSrc>& srcs, float wx0, float wz0) {
     constexpr int N = GroundShadow::kChunkTexels;
     constexpr float tpm = N / GroundShadow::kChunkSize;
     std::vector<std::vector<uint8_t>> mips;
-    std::vector<float> sumW, sumMW;
+    std::vector<float> sumW, sumMW; // (here: the most lamp light seen, the most light lost)
     bool any = false;
     for (const ExtSrc& m : srcs) {
         const size_t n = static_cast<size_t>(m.grid.w) * m.grid.h;
@@ -167,17 +168,17 @@ static std::vector<std::vector<uint8_t>> OldChunkMips(const std::vector<ExtSrc>&
             for (int i = i0; i <= i1; i++) {
                 float v, wt;
                 if (!GroundShadow::ExtShadeAt(m, wx0 + (i + 0.5f) / tpm, wz0 + (j + 0.5f) / tpm, v, wt)) continue;
-                const float w = std::max(wt, 0.0f) + 1e-4f;
+                const float w = std::max(wt, GroundShadow::kOtherLight);
                 const size_t at = static_cast<size_t>(j) * N + i;
-                sumW[at] += w;
-                sumMW[at] += w * v;
+                sumW[at] = std::max(sumW[at], w);
+                sumMW[at] = std::max(sumMW[at], (1.0f - v / 255.0f) * w);
             }
     }
     if (sumW.empty()) return mips;
     std::vector<uint8_t> px(static_cast<size_t>(N) * N, 255);
     for (size_t k = 0; k < px.size(); k++)
         if (sumW[k] > 0.0f) {
-            const uint8_t q = static_cast<uint8_t>(std::lround(std::clamp(sumMW[k] / sumW[k], 0.0f, 255.0f)));
+            const uint8_t q = static_cast<uint8_t>(std::lround(std::clamp(255.0f * (1.0f - sumMW[k] / sumW[k]), 0.0f, 255.0f)));
             if (q < 255) px[k] = q, any = true;
         }
     if (!any) return mips;
@@ -261,7 +262,29 @@ static void ChunkChecks() {
         const auto old = OldChunkMips(srcs, wx0, wz0);
         bool same = old.size() == full.levels.size();
         for (size_t l = 0; same && l < old.size(); l++) same = old[l] == full.levels[l];
-        Check(same && !old.empty(), "chunk: the whole chunk gives the bytes it gave before (every mip)");
+        Check(same && !old.empty(), "chunk: the whole chunk gives the bytes of the reference (every mip)");
+    }
+    // two lots over the same ground, one knowing a wall there (shade 30) and one not (255): the wall's shade stays whole
+    // (weighing the shades gave about 142 there, a straight step at the edge of the lot that knows the wall)
+    {
+        const auto lot = [&](uint8_t v, float w, uint64_t id) {
+            ExtSrc s;
+            s.grid.w = s.grid.h = 40, s.grid.tx = wx0 + 100.0f, s.grid.tz = wz0 + 100.0f;
+            auto d = std::make_shared<ExtData>();
+            d->v.assign(1600, v), d->w.assign(1600, w);
+            s.v = d, s.x0 = wx0 + 100.0f, s.z0 = wz0 + 100.0f, s.x1 = wx0 + 110.0f, s.z1 = wz0 + 110.0f, s.lot = id;
+            return s;
+        };
+        const TexRect r{420, 420, 420, 420}; // (105 m from the chunk's corner: under both)
+        std::vector<uint8_t> px;
+        ChunkTexels({lot(30, 1.0f, 1), lot(255, 1.0f, 2)}, wx0, wz0, r, px);
+        Check(px.size() == 1 && px[0] == 30, "chunk: a lot next door that does not know the wall leaves its shadow whole");
+        ChunkTexels({lot(30, 1.0f, 1)}, wx0, wz0, r, px);
+        Check(px[0] == 30, "chunk: one lot alone gives its own shade");
+        ChunkTexels({lot(128, 1.0f, 1), lot(128, 1.0f, 2)}, wx0, wz0, r, px);
+        Check(px[0] == 128, "chunk: a wall both lots know is not counted twice");
+        ChunkTexels({lot(30, 0.001f, 1), lot(255, 1.0f, 2)}, wx0, wz0, r, px);
+        Check(px[0] >= 240, "chunk: a faint lamp's shadow barely darkens a lot next door's strong light");
     }
     // a lot's change made over its box only: the same bytes as the whole chunk made again, after every change
     std::vector<ExtSrc> lots;

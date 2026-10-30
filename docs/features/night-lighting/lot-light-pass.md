@@ -242,8 +242,12 @@ light that reaches past the lot lay over it). The world grass takes the bake lam
 with no wall. The shade is now built on the lot's grid grown on each side as far as its lamps reach past the lot
 (`GroundShadow::Reach`, at most 24 m; `ShadeGrid`), at the same texel centres: the lot's part feeds the mask's alpha as
 before, and the whole grid, when it shades any texel, goes to the world pass. One texture per terrain chunk (`ChunkShade`,
-L8, 1024 x 1024 over the chunk's 256 m, CPU mips) holds the shades of the lots over it weighed by their lamps' light
-there (`sum w M / sum w`, the lots taken in lot order; 255 where none); it shares the chunk light
+L8, 1024 x 1024 over the chunk's 256 m, CPU mips) holds `1 - max(lost) / max(W)` over the lots there, with
+`W = max(stamp weight, kOtherLight)` and `lost = (1 - M) W` the light that lot's walls take (255 where no lot is):
+over one lot it is that lot's shade, the lot pass's value on its side of the edge. Each lot tests only its own walls, so
+weighing the shades (`sum W M / sum W`) let a lot next door that sees the same lamp but not the wall lighten the shadow
+past the edge, a straight step there (a garden post 1.5 m inside a lot beside a low wall: 0.12 inside, 0.55 outside); a
+wall two lots both know is not counted twice. It shares the chunk light
 map's uv (`(world xz - centre) / 256 + 0.5`), so the world terrain shader only reads it at the light map's uv and multiplies
 the lamp RGB (`ShaderPatches::PatchTerrainShade`, after the native-alpha patch and the daylight-range patch; the solar alpha
 is untouched). When a lot's shade over a chunk changes, only the texels over the changed box and the mip texels over them
