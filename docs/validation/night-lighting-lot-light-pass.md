@@ -27,6 +27,7 @@ an FPS gain, complete climate coverage or resolution of texture allocation stall
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-30 | `5537a83` | `tools/ground_shade_test` with the chunk shade taken as the most light a lot's walls take over the most light a lot sees (a lot next door that does not know the wall, a wall both lots know, a faint lamp) | 244 passed, 0 failed; a chunk made again over a changed box gives the whole chunk's bytes | MSVC x86 |
 | 2026-10-29 | `06a3258` | `tools/lighting_prepare_test` with the overlapped-end rule and `Wall::pass` (built as a DLL) | 36 geometry cases exactly equal to the reference gap search; 16 map slots and 144 wall blur cases pass | CPU, x86 /O2 |
 | 2026-10-29 | `59201ad` | One-off timing of `FenceCutout::OpenShare` on random DXT5 levels (built as a DLL) | 0.73 ms a decode at 256 x 256, 2.70 ms at 512 x 512: the share is kept per texture and decoded again only when its size, format or sampled bytes change | CPU, x86 /O2 |
 | 2026-10-29 | `d8501f2` | `tools/ground_shade_test` with `-Reference v2.17.2` (built as a DLL: new executables were blocked on the test machine) | 248 checks, 0 failures: with solid walls (`pass` 0) the lot build gives the bytes of `v2.17.2`, soft and hard, turned and not; build time unchanged (3.05 ms against 3.05 ms) | CPU, x86 /O2 |
@@ -68,6 +69,9 @@ at ps_2_0 it had no c32 and failed since the lot shade's mask rows moved there.
 
 ## Confirmed in game
 
+- 2026-10-30, developer build `70320F96` of `5537a83`: a garden post 1.5 m inside a lot beside a low terrace wall no longer leaves
+  a straight cut along the lot's edge; before, the lot's shade was 0.12 just inside and the world grass's 0.55 just
+  outside (light captures with both textures; player report).
 - 2026-10-29, developer build of `7839649` (2.18.1): a brick fence type removed whole with the camera still lost its
   shadow at once (log: `fence group gone: not drawn for 516 ms`; player report). The same session also dropped groups
   with no walls and one wall of another lot together, most likely hidden by a view change; they are read again when
@@ -86,6 +90,11 @@ at ps_2_0 it had no c32 and failed since the lot shade's mask rows moved there.
 
 ## Open checks
 
+- 2.18.3: right after a world loads, the ground shows the lamps without the walls' shade until each lot's shade is built
+  (174 lots in about 50 s in the tested neighbourhood), then dims where walls block a lamp; more visible since the shade
+  past a lot's edge is no longer lightened by the lots next door (player report).
+- 2.18.3: why the shade inside that lot was as low as 0.12 two metres from the post on its lawn side, where no wall
+  stands between them, was not found: the captures do not list the walls the shade build saw.
 - Mesh fences: a fence that looks solid but is drawn with a cutout shader. **Expected:** its shadow as dark as a wall's.
   The share covers the whole texture, so unused transparent texels around the fence's own area would let light through;
   not seen yet (the brick garden wall has no cutout).

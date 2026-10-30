@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Hungarian}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: sidewalks keep the lamps' light from every camera angle", "Éjszakai fények: a járdák minden kameraszögből megtartják a lámpák fényét"},
+    {"Night Lights: lamp light on the grass by lots no longer changes with the camera", "Éjszakai fények: a lámpafény a telkek melletti füvön már nem változik a kamerával"},
+    {"Night Lights: objects light up without delay as the camera moves between lots", "Éjszakai fények: a tárgyak késlekedés nélkül kivilágosodnak, amikor a kamera telkek között mozog"},
+    {"Night Lights: a wall's shadow on the grass continues past a lot's edge without a cut", "Éjszakai fények: egy fal árnyéka a füvön megszakítás nélkül folytatódik a telek szélén túl"},
     {"Night Lights: lamp posts light the walls of neighbouring lots, on every story", "Éjszakai fények: a kandeláberek megvilágítják a szomszédos telkek falait minden szinten"},
     {"Night Lights: Instant (GPU) relights the 4 nearest lots in the same frame as a dragged post", "Éjszakai fények: az Azonnali (GPU) a 4 legközelebbi telket ugyanabban a képkockában világítja újra, mint a húzott kandelábert"},
     {"Night Lights: upper steps of outdoor stairs no longer take light from lamps behind a wall", "Éjszakai fények: a kültéri lépcsők felső fokai már nem kapnak fényt a fal mögötti lámpáktól"},

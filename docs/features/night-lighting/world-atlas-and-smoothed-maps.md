@@ -10,7 +10,7 @@ game's own sunlight and shadows untouched. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released (part of Night Lighting since 0.1.0; GPU path default). Native solar alpha, daylight range and squared terrain lamp scales: Released in 2.6.0. A lamp switch's ground in one frame, and *Smooth ground light* switched without relighting: Released in 2.7.0 Released in 2.18.0: dragged lamps stamped on the GPU, rain variants smoothed at night. Released in 2.18.1: rain variants smoothed from the first rise of the night level. |
+| Availability | Released (part of Night Lighting since 0.1.0; GPU path default). Native solar alpha, daylight range and squared terrain lamp scales: Released in 2.6.0. A lamp switch's ground in one frame, and *Smooth ground light* switched without relighting: Released in 2.7.0 Released in 2.18.0: dragged lamps stamped on the GPU, rain variants smoothed at night. Released in 2.18.1: rain variants smoothed from the first rise of the night level. Released in 2.18.3: one light map per chunk (the rebuilt one) on every terrain variant, and the uv mapping read only from constants the vertex shader reads. |
 | Default | On |
 | Menu | Lighting > Game fixes > Ground & Lots > *Smooth ground light* |
 | Configuration | `[patches.NightTerrainRelight]` `mapaDeLuzSuavizado` in `ApexRadiance.toml` |
@@ -85,13 +85,30 @@ registered and neither smoothed maps nor the atlas exist. This is why the atlas 
 ### Registration (`RecordWorldChunk`, render thread, per draw)
 
 For every draw whose PS is `WorldCandidate` (declares s6+), `WorldCompact` (with `kWorldCompactVs`) or `WorldMultiLight`
-(with `kWorldMultiLightVs`), the terrain uv mapping constant must be (1/256, 1/256, 0.5, 0.5): VS c15, or c13 for the
-multi-pass. The light map is found by scanning s15 down to s1, only among the samplers the PS declares
-(`g_worldSamplers`, recorded by `Classify`; unknown shader = every sampler), for a 2D texture of 256x256 with at most
-5 levels and format != Q8W8V8U8 (the normal map is also 256x256 but has 9 mips and Q8W8V8U8; paint layers are
-1024x1024). A texture already registered for another chunk (`g_chunkOfTexture`) is skipped and counted. The key is
-`Key(c8.w, c10.w)` rounded (chunk centre, 256 m steps, centre = 256 i + 128); the texture is kept AddRef'd in
-`g_chunks`, then `LightmapSmooth::Get(key, gameTexture)`:
+(with `kWorldMultiLightVs`), the terrain uv mapping (1/256, 1/256, 0.5, 0.5) must be in a constant the vertex shader
+reads (`VsInfo::constsRead` from `ShaderPatches::ConstantsRead`: c0..c31 read by number, with the rows of the m4x4..m3x2
+matrices, not through a0 and not `def`'d; code older than shader model 2 counts as reading every constant;
+a VS classified by its exact bytes counts as reading every constant). The constant checked first is the one the VS
+structure gives (`WorldTerrainMapConstant`), else c15, or c13 for the multi-pass. A VS with no known mapping constant (the
+sidewalk pieces drawn with an object-rig VS keep the mapping in c14) is checked at every constant from c8 to c31 it reads,
+and a draw found that way is taken only at a chunk centre: an object lit from the terrain map carries its own position.
+Constants a VS does not read keep an earlier draw's values; checking those made the sidewalks lit or dark with the draw
+order.
+
+The light map is found by scanning s15 down to s1, only among the samplers the PS declares (`g_worldSamplers`, recorded
+by `Classify`; unknown shader = every sampler), for a 2D texture of 256x256 with at most 5 levels and format !=
+Q8W8V8U8 (the normal map is also 256x256 but has 9 mips and Q8W8V8U8; paint layers are 1024x1024). A texture registered
+to another chunk (`g_chunkOfTexture`) is skipped as a leftover and counted. When nothing usable is bound and the chunk's rebuilt
+map is known, the chunk is drawn with it at the sampler the pixel shader was last seen reading its map from
+(`g_worldMapSampler`). The key is `Key(c8.w, c10.w)` rounded (chunk centre, 256 m steps, centre = 256 i + 128).
+
+**One map per chunk.** A chunk has two light maps: the world file's and the one the game rebuilds with the current
+lamps (chunk +0xD8; `ChunkRelight::RebuiltLightMapMatch` finds the texture in the object +0xD8 holds, at the offset
+that matched in two holders, +0x30 on Steam 1.67.2; only chunk centres are looked up). The paint-layer variants read the rebuilt map; the s2 variant of sidewalks and
+of grass by the lots reads the world file's, with the lamps as the world was made. Once a draw shows the rebuilt map it
+stays the chunk's map; a draw of the other map checks at most once a frame per texture whether that one is now the
+rebuilt map (a new texture) and whether the kept one still is. Before the world's first rebuild (no rebuilt map to read) the last map seen is kept. The texture is
+kept AddRef'd in `g_chunks`, then `LightmapSmooth::Get(key, chunkMap)`:
 
 - creates or updates the `Entry` for the key; stores the game texture AddRef'd; a new texture pointer resets `hash = 0`
   (CPU path) or bumps the version `gver` (GPU path);
@@ -137,8 +154,12 @@ chunk terrain geometry and world lamp-map uvs.
    accumulator at 2.0 before albedo, the ceiling the multi-pass composition has (it writes half the light to an 8-bit
    target and doubles it in material blending). Twilight blends smoothly; at full night the alpha-only shader is used.
    Three ALU instructions, two temps, no texture read, no extra draw.
-5. Smoothed texture swapped into the lamp sampler, draw, game texture and PS restored. F7 text:
-   `mod draw: world terrain | compact | multi-pass | lamp sampler | gain | smoothed | daylight range candidate`.
+5. Smoothed texture swapped into the lamp sampler, draw, game texture and PS restored. When the draw binds the world
+   file's map, the chunk's rebuilt map takes its place on every path: as the native alpha source beside the smoothed
+   map, and bound itself in the game's shader when there is no smoothed map (not built yet, smoothing off, rain by
+   day). F7 text: `mod draw: world terrain | compact | multi-pass | lamp sampler | gain | smoothed | daylight range
+   candidate | wall shade`, with `the chunk's rebuilt map in place of the bound one` when it swapped; a terrain-like
+   draw left to the game shows `world terrain not taken: <reason>`.
 
 ### GPU path (default)
 
@@ -351,6 +372,8 @@ own copy and the extra sampler) and the lot passes when the atlas is not ready (
 | Chunk = 256 m, uv = (pos - centre)/256 + 0.5, centre in VS c8.w / c10.w | notes section 1 |
 | The terrain map is `FUN_00C292B0` ("staticTerrainLightmap") output, chunk+0xD8 ("Terrain/LightmapTexture") | [engine/terrain-and-light-bake.md](../../engine/terrain-and-light-bake.md) |
 | Light-map alpha = sun visibility, read by both captured world variants | F7 2026-10-04 captures |
+| Two maps per chunk after a rebuild: the paint-layer variants read the rebuilt one, the s2 variant of sidewalks and lot-edge grass the world file's (an older lamp layout); the rebuilt texture is at +0x30 of the object chunk+0xD8 holds | Light captures of one chunk with both maps saved; log `[ChunkRelight] Rebuilt light map: the texture is at +0x30` |
+| A sidewalk piece drawn with an object-rig VS keeps its terrain uv mapping in c14 and does not read c15, which holds an earlier draw's values | Light captures of the same piece taken and refused, with c14 and c15 recorded |
 
 ### Files and functions
 
@@ -365,9 +388,10 @@ own copy and the extra sampler) and the lot passes when the atlas is not ready (
 | | `DrainNotices`, `BumpVersion`, `GpuHashCheck`, `HashMap`, `GpuSig`, `OnPresentGpu` | GPU change detection |
 | | `BeginTiming`, `EndTiming`, `ReadTimings`, `RunCompare` | GPU timing, compare |
 | | `LightmapSmooth::Get / Find / Atlas / OnPresent / OnPreReset / Clear / Status / SetEnabled / Enabled / SetGpuPreferred / GpuActive / RequestCompare / CompareStatus / NoteKick / OnTerrainRebuilt / ExpectRebuild / NoteChunkRendered` | API |
-| lot_light_bridge.cpp | `RecordWorldChunk`, `ChunkTexture`, `ClearChunks`, `SamplerBind`, `ChunkCount`, `TerrainLampConst`, `TerrainConst`, `g_terrainAlphaPs`, `g_terrainDayPs` | Registration, world terrain draw |
+| lot_light_bridge.cpp | `RecordWorldChunk`, `ChunkTex` (`rebuilt`, `checkedFrame`), `g_worldMapSampler`, `VsInfo::constsRead`, `ChunkTexture`, `ClearChunks`, `SamplerBind`, `ChunkCount`, `TerrainLampConst`, `TerrainConst`, `g_terrainAlphaPs`, `g_terrainDayPs` | Registration, world terrain draw |
 | native_terrain_sampler.h | `NativeTerrainSampler` | Spare-sampler alias of the native map |
-| shader_patches.cpp | `LightMapScaleConst`, `PatchTerrainNativeAlpha`, `PatchTerrainDaylightRange` | Terrain bytecode |
+| terrain_chunk_relight.cpp | `RebuiltLightMapMatch`, `MatchRebuilt` | The chunk's rebuilt map |
+| shader_patches.cpp | `LightMapScaleConst`, `PatchTerrainNativeAlpha`, `PatchTerrainDaylightRange`, `ConstantsRead` | Terrain bytecode |
 | night_terrain_relight_patch.cpp | `ChunkRenderThunk` at 0x00C8504C; `RenderCallbacks::Add(preReset, OnPreReset)`; developer A/B and compare | Driver |
 
 ## Rejected approaches
@@ -378,6 +402,10 @@ own copy and the extra sampler) and the lot passes when the atlas is not ready (
 - Unbounded result queue and per-chunk float buffers: out of memory in the 32-bit process.
 - `D3DUSAGE_AUTOGENMIPMAP`: driver-defined filter.
 - Smoothing the light-map alpha with the lamp RGB: changes solar shading.
+- The chunk's map taken from the last draw that bound one: the world file's and the rebuilt map alternated, the
+  smoothed copy was built again many times a second and the ground light changed as the camera moved.
+- Checking the uv mapping at a fixed constant the vertex shader may not read: another draw's leftover decided whether
+  the draw was taken.
 
 Details in [history](../../history/night-lighting-world-atlas-and-smoothed-maps.md).
 

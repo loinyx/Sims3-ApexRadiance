@@ -9,6 +9,10 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Korean}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: sidewalks keep the lamps' light from every camera angle", "야간 조명: 보도가 어떤 카메라 각도에서도 램프 빛을 유지해요"},
+    {"Night Lights: lamp light on the grass by lots no longer changes with the camera", "야간 조명: 부지 옆 잔디의 램프 빛이 더 이상 카메라에 따라 바뀌지 않아요"},
+    {"Night Lights: objects light up without delay as the camera moves between lots", "야간 조명: 카메라가 부지 사이를 이동할 때 오브젝트가 지연 없이 밝아져요"},
+    {"Night Lights: a wall's shadow on the grass continues past a lot's edge without a cut", "야간 조명: 잔디에 드리운 벽 그림자가 부지 경계에서 끊기지 않고 이어져요"},
     {"Night Lights: lamp posts light the walls of neighbouring lots, on every story", "야간 조명: 가로등이 이웃 부지의 벽을 모든 층에서 비춰요"},
     {"Night Lights: Instant (GPU) relights the 4 nearest lots in the same frame as a dragged post", "야간 조명: 즉시 (GPU)는 끌고 있는 가로등과 같은 프레임에 가장 가까운 부지 4곳을 다시 비춰요"},
     {"Night Lights: upper steps of outdoor stairs no longer take light from lamps behind a wall", "야간 조명: 야외 계단 윗단이 벽 뒤 램프의 빛을 더 이상 받지 않아요"},

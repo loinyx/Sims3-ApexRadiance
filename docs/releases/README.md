@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [2.18.3](2.18.3.md): a hotfix: lamp light on sidewalks, lot-edge grass and lot ground no longer changes with the camera; objects light up without delay between lots; a wall's shadow continues past a lot's edge.
 - [2.18.2](2.18.2.md): lamp posts light neighbouring lots, relit on the GPU with Instant; no light on stair tops from lamps behind a wall.
 - [2.18.1](2.18.1.md): a hotfix: a removed fence takes its shadow at once, no light left by a lamp deleted after a drag, no step on rainy ground at dusk.
 - [2.18.0](2.18.0.md): live lamp edits on the GPU with far less CPU work, a reorganized Lighting menu, one Ground light, light through mesh fences.

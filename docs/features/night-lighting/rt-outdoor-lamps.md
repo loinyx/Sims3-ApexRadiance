@@ -12,7 +12,7 @@ that cannot run it, none of it runs.
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1. Baked lamp records without padding (the frame rate of 2.15.1 while moving the camera): Released in 2.15.2. Shaders from the shader cache: Released in 2.15.3. Light past 1 on the lot ground, outdoor floors and outside walls (the outdoor scale): Released in 2.16.0. Kept solves that account for every light: Released in 2.16.1. Released in 2.18.0: a lamp drawn on every story at once, floor maps smaller than their solve relit, walls relit first, each lamp counted once on floors. Released in 2.18.2: the active lot's lamp posts drawn on the four lots next to it. |
+| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1. Baked lamp records without padding (the frame rate of 2.15.1 while moving the camera): Released in 2.15.2. Shaders from the shader cache: Released in 2.15.3. Light past 1 on the lot ground, outdoor floors and outside walls (the outdoor scale): Released in 2.16.0. Kept solves that account for every light: Released in 2.16.1. Released in 2.18.0: a lamp drawn on every story at once, floor maps smaller than their solve relit, walls relit first, each lamp counted once on floors. Released in 2.18.2: the active lot's lamp posts drawn on the four lots next to it. Released in 2.18.3: no lots next to it while the active lot has no lamp post. |
 | Default | On (Lamp lighting: Instant (GPU); a saved `lampLightingMode` keeps its choice) |
 | Menu | System > Performance > Lamp lighting > Lamp updates: Instant (GPU) |
 | Configuration | `lampLightingMode = "instant"` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -114,9 +114,10 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    occluders. Those lots' gathers leave the posts out ([level light share](level-light-share.md#lamp-posts-of-other-lots)),
    and their kept solves hold only the base: the texels' sums with every light of the list, no light's part
    ([outdoor-lamp-delta](outdoor-lamp-delta.md)). A post counts as many times as the active lot lists it, once on a floor
-   map. The set follows the lots' places only, so a post placed or moved changes nothing of it and the lots next door
-   follow it in the same frame; it is checked once a second, never while a lamp is dragged, and a lot that joins or leaves
-   it gathers its outdoor rooms again (the posts left out or taken back). Their outdoor floors over another story take the under-floor share from their own
+   map. The set follows the lots' places, so a post moved changes nothing of it and the lots next door follow it in the
+   same frame; it is empty while the active lot has no lamp post (nothing of it to draw there), so a camera moving between
+   lots without posts does not make their rooms gather again. It is checked once a second, never while a lamp is
+   dragged, and a lot that joins or leaves it gathers its outdoor rooms again (the posts left out or taken back). Their outdoor floors over another story take the under-floor share from their own
    story's lamps of the bake, with the active lot's posts in the bake added as their gather took them before. A story the
    GPU cannot relight (a map refused, no kept solve after its three sends) takes the posts in its own gather again until
    the lot leaves the set.

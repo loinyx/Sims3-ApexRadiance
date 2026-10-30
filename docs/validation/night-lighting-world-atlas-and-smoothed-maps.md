@@ -23,6 +23,7 @@ It must:
 | `check.cpp` with `-CompositionCapture` | Daylight range: the 11-52-03 single and multi-pass shaders with equal material, normal, sun and lamp inputs; all RGB pixels at six lamp levels, lamp-free pixels preserved, three twilight weights, zero-weight night identity, rejection of foreign or mutated bytecode | `run.ps1 ... -CompositionCapture '<11-52-03 F7 folder>'` | Native D3D9 GPU |
 | `ground_scale_check.cpp` | Linear vs squared constant classification on the captured s7/s11 shaders; refusal of shared, mixed or saturated multipliers; GPU readback of both multiplier equations at five day/night weights and eight gains | `run_ground_scale_checks.ps1 -Captures '<2026-10-04 15-33-55 session>'` | Native D3D9 GPU |
 | `fxc` | Each smoothing entry point compiles alone: `fxc /T ps_3_0 /E GatherPS /O3 lightmap_smooth_ps.hlsl`, and the same for `HBlurPS`, `VBlurPS`, `HUpYAPS`, `HUpChromaPS`, `VUpPS`, `DownPS`, `CopyPS`, `StampPS` | manual | Windows SDK |
+| `run_chunk_map_checks.ps1` (`chunk_map_fixture.cpp`) | The production `RecordWorldChunk` with a fake device and rebuilt-map lookup: the rebuilt map kept once seen, leftovers and maps registered to other keys (no take-over), a new rebuilt texture (also after another check in the same frame), the uv mapping only in constants the VS reads (c14 read with a leftover in c15), objects off a chunk centre refused, reference counts; `ShaderPatches::ConstantsRead` on synthetic code (def'd, relative, m4x4 rows, vs_1_1) | `tools/terrain_lighting_test/run_chunk_map_checks.ps1 -OutDir ...` | MSVC x86 |
 | [`tools/terrain_stamp_test`](night-lighting-terrain-relight.md#automated-tests) | `StampPS` (the dragged lamps' pass) against the game's bake shader and `BakeConePS` | `run.ps1 -Precomp <Shaders_Win32.precomp>` | Direct3D 9 device |
 
 The composition fixture is not an exact replay of scene vertices, textures, depth or all material layers. The
@@ -32,6 +33,9 @@ sampler-guard cost it reports is an isolated driver CPU benchmark, not game FPS.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-30 | `ceea6ab` | Chunk map checks after the release review (strict refusal, per-texture check, unreadable moment, matrix rows) | 31 passed, 0 failed | Fake D3D9 |
+| 2026-10-29 | `26be84e` | Chunk map checks (`run_chunk_map_checks.ps1`): the production `RecordWorldChunk` and `ShaderPatches::ConstantsRead` against a fake device and rebuilt-map lookup | 23 passed, 0 failed | Fake D3D9 |
+| 2026-10-29 | `7eca05b` | Extracted resource suite, brought up to date with the outdoor scale stubs | 14,649 passed, 0 failed | Fake D3D9 |
 | 2026-10-04 | `92582b6` | GPU and policy suite including the daylight range candidate | 2,003,751 passed, 0 failed | Native D3D9 |
 | 2026-10-04 | `92582b6` | Extracted resource suite | 13,642 passed, 0 failed | Native D3D9 |
 | 2026-10-04 | `92582b6` | Composition fixture, 0.2 material and 1.35 sunlight, full lamp-map RGB at the captured gain | Native: single pass 131, multi-pass 102; both 69 without lamps; candidate matches the multi-pass ceiling | Native D3D9 |
@@ -88,6 +92,11 @@ Both paths:
 
 ## Confirmed in game
 
+- 2026-10-29, developer build `B53B6C77` of `26be84e`: at night in the rain, the sidewalks and the grass by a lot keep the
+  street and garden lamps' light as the camera turns and moves; before, the same sidewalk piece was lit or dark from one
+  view to the next (player report with light captures of both states). With the earlier build `8DA6EA88`
+  (the rebuilt map kept, before the mapping fix) the lamps' strength on a lot's ground stopped changing with the
+  camera (player report).
 - 2026-10-29, developer build of `7839649` (2.18.1): rainy ground through dusk shows no step when the rain variants
   move to the smoothed map (player report).
 
@@ -98,6 +107,12 @@ Both paths:
 
 ## Open checks
 
+- 2.18.3: by day, the sidewalks and the grass by the lots take the sun's alpha from the rebuilt map; no day capture
+  compares them with before. Dry weather and snow use the same code but were checked in game only at night in the rain.
+- 2.18.3 review: the world file's map of a chunk whose rebuilt map is confirmed is not registered, so a shader whose
+  sampler mask is not narrowed could take a neighbour's world file map left in a higher sampler as its own (found with
+  a synthetic scenario, not seen in game). An object off a chunk centre that registers a chunk's map before that
+  chunk does keeps it refused there; the chunk then draws its own rebuilt map once that is confirmed.
 
 - GPU path log lines, compare result and per-chunk GPU time have not been recorded in a test report.
 - GPU path assumptions: the instruction limits of the largest entry point `VUpPS` (about 6 texld + 60 ALU); DXVK 3.1.1

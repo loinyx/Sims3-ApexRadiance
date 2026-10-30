@@ -30,6 +30,8 @@ FPS or absence of visible flicker.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-29 | `7eca05b` | Edit dispatch fixture, with a `RebuildActive` stub and its executable renamed (Windows asked to elevate a program named `dispatch_checks.exe`, which is why it was cancelled before) | 194 passed, 0 failed | None |
+| 2026-10-29 | `7eca05b` | Terrain queue fixture (`run_queue_checks.ps1`) | Does not compile: the paced full rebuild (`g_rb`, `StepRebuild`, `kSlowMs`) is not in its extracted code; with it added, 386 of 11,963 assertions fail on the release rules of chunks changed since. Not updated in this release | None |
 | 2026-10-29 | `8d13e95` (a dragged lamp's ground light on the GPU) | Developer recordings of lot lamp drags, before and after | Local terrain relights during the drags: 127 (2,155 ms of CPU in 73 s) before, 7 (94 ms in 101 s) after | In game, backend not recorded |
 | 2026-10-28 | `373445c` (a dragged lot lamp reaches the ground past the lot edge) | Developer recording of a drag of a lamp Real-time outdoor lamps draws | The terrain relit 23 times in 20 s of drag (before: up to 7.3 s without a relight, and the ground could keep the lamp's old light after it was put down) | In game, backend not recorded |
 | 2026-10-04 | `92582b6` | Full terrain lighting suite (policy, cycle, GPU, resources) | 2,017,393 passed, 0 failed (2,003,751 GPU/policy + 13,642 resource) | Native D3D9 |
@@ -90,7 +92,8 @@ Lamp changes (night and Build-mode day preview; stationary and moving camera):
   game baked before the hook are not in `g_everBaked`, so the drag start does not relight their old place.
 
 - PR #2: endpoint rebuilds in Build mode preview, near-camera priority, final state after rapid reversals, fallback
-  frequency and hitches; priority edits merged with an armed countdown; the edit dispatch fixture run.
+  frequency and hitches; priority edits merged with an armed countdown.
+- The terrain queue fixture brought up to the paced rebuild and the current release rules of chunks.
 - Gameplay input-to-screen latency and FPS for every route; universal latency is not guaranteed (render gates, caps and
   timeouts remain).
 - Roads after a local relight (`+0x54` does not set the road partition mark).
