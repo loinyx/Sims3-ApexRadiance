@@ -109,13 +109,14 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    Past the ceiling a new solve of one is not kept and that story is no longer sent to its solve, so the stories do not
    evict one another in a loop ([outdoor-lamp-delta](outdoor-lamp-delta.md#limitations)). A story with no kept solve is sent
    to its solve at most three times in a row.
-10. **The lots next to it.** The active lot's lamp posts (type 11) are drawn on the room-0 maps of the three nearest lots
-   whose box comes within 20 m of one of them, the way the active lot's own maps are relit, with the active lot's
+10. **The lots next to it.** The active lot's lamp posts (type 11) are drawn on the room-0 maps of the four nearest lots
+   whose box comes within 20 m of the active lot's, the way the active lot's own maps are relit, with the active lot's
    occluders. Those lots' gathers leave the posts out ([level light share](level-light-share.md#lamp-posts-of-other-lots)),
    and their kept solves hold only the base: the texels' sums with every light of the list, no light's part
    ([outdoor-lamp-delta](outdoor-lamp-delta.md)). A post counts as many times as the active lot lists it, once on a floor
-   map. The set changes only while no lamp is dragged; a lot that joins or leaves it gathers its outdoor rooms again
-   (the posts left out or taken back). Their outdoor floors over another story take the under-floor share from their own
+   map. The set follows the lots' places only, so a post placed or moved changes nothing of it and the lots next door
+   follow it in the same frame; it is checked once a second, never while a lamp is dragged, and a lot that joins or leaves
+   it gathers its outdoor rooms again (the posts left out or taken back). Their outdoor floors over another story take the under-floor share from their own
    story's lamps of the bake, with the active lot's posts in the bake added as their gather took them before. A story the
    GPU cannot relight (a map refused, no kept solve after its three sends) takes the posts in its own gather again until
    the lot leaves the set.
@@ -179,7 +180,7 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
   (`NbBake`, by story manager; `FillBake` as for the active lot) when its kept solve or the active lot's lamps change, else
   once a second. A neighbour's maps share the one upload a
   frame after the active lot's, take watch slots from the upper half, and never count for coverage or the restart.
-  `LotLightBridge::LotsNear` picks the lots (per post, nearest first), at most once a second or when a lamp changes;
+  `LotLightBridge::LotsNear` around the active lot's box (`LotWorldBox`) picks the lots, nearest first, once a second;
   `LevelLightShare::SetGpuNeighbourLots` (with each lot's stories left to the CPU) and `OutdoorDelta::SetNeighbourLots`
   publish them. A kept solve of the other kind (base only on the active lot, full on a neighbour, after the active lot
   changed) counts as none until the story's next solve. The relight line ends with how many of its maps were a

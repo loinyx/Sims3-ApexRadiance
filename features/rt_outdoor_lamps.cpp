@@ -79,9 +79,10 @@ constexpr uint64_t kGameWriteGapMs = 500; // a relight made only for a game writ
 // drawn from that height, as a fixture's glow would spread; walls, ceilings, objects and trees keep its real place. The
 // terrain bake stamps it from the same height (TerrainBakeRule::StampHeight), so the lawn beyond the lot and the atlas agree.
 std::atomic<long> g_lowLampLifted{0};
-// The lots next to the active one whose room-0 maps take the active lot's lamps too (lamp posts on the walls of the house
-// next door): the nearest kMaxNeighbours lots whose box comes within kNeighbourReach of one of its GPU lamps
-constexpr int kMaxNeighbours = 3;
+// The lots next to the active one whose room-0 maps take the active lot's lamp posts too (on the walls of the house next
+// door): the nearest kMaxNeighbours lots whose box comes within kNeighbourReach of the active lot's (at most the 4 lots
+// LevelLightShare::SetGpuNeighbourLots and OutdoorDelta::SetNeighbourLots hold)
+constexpr int kMaxNeighbours = 4;
 constexpr float kNeighbourReach = 20.0f; // m
 constexpr double kFrameCpuMs = 2.0;      // a frame's relight work stops starting maps past this (the rest next frame)
 constexpr double kFrameWork = 1.0e6;     // ... or past this many units (texel x lamp: 7 exact, 1 dragged; about 2 ns of GPU each, tools/rt_lamps_test)
@@ -983,7 +984,6 @@ struct GpuLamp {
     uint32_t listed = 0; // the stories whose room-0 list holds it (mult also covers the stories it is drawn on before they gather it)
     bool liftable = false; // drawn from kLowLampLift on story 0's floor map when it lies on the ground
     bool post = false;     // a lamp post (the street-lamp class 11): drawn on the lots next to the active one too
-    float world[3] = {};   // its place (world)
     bool inBake = false;   // (a post) in the terrain bake: a lot next to it counts it under its outdoor floors as its gather did
     RtLampModel::BakeLamp bake;
 };
@@ -1562,7 +1562,6 @@ void Frame(IDirect3DDevice9* dev) {
                 g.spill = r.f.type == 5 ? std::max({1.0f, r.S[0], r.S[1], r.S[2]}) : 1.0f;
                 g.liftable = TerrainBakeRule::Liftable(r.f.lot != 0, r.f.type); // a lot's street-lamp class (11) is not
                 g.post = r.f.type == 11;
-                std::memcpy(g.world, r.pos, sizeof g.world);
                 if (g.post && InTerrainBake(r)) g.inBake = true, FillBake(r, coneSpill, g.bake);
                 lamps.push_back(g);
                 it = lamps.end() - 1;
@@ -1606,35 +1605,25 @@ void Frame(IDirect3DDevice9* dev) {
             bakeKeys[S] = g_bakeKeysLast[S];
     }
     // ---- the lots next to it: their room-0 maps take the active lot's lamp posts (the nearest kMaxNeighbours lots within
-    // kNeighbourReach of a post; the set changes only while no lamp is dragged) ----
+    // kNeighbourReach of the active lot, picked by the lots' places only: a post placed or moved changes nothing of the set,
+    // which would make a lot joining it solve its outdoor rooms again; checked once a second, never while a lamp is dragged) ----
     LARGE_INTEGER tn0{};
     QueryPerformanceCounter(&tn0);
     {
         const Xform* space = nullptr;
         for (int S = 0; S <= 7 && !space; S++)
             if (rooms[S]) space = &rns[S].xf;
-        static uint64_t s_pickSig = 0;
         static DWORD s_pickAt = 0;
-        if (!dragNow && (allSig != s_pickSig || g_nbActive != g_lotId || GetTickCount() - s_pickAt >= 1000)) {
-            s_pickSig = allSig, s_pickAt = GetTickCount();
-            std::vector<std::pair<int, uint64_t>> rank; // (its best place in a post's list, lot)
-            for (const GpuLamp& g : lamps) {
-                if (!g.post || !space) continue;
-                uint64_t hits[kMaxNeighbours + 1];
-                const int n = LotLightBridge::LotsNear(g.world[0] - kNeighbourReach, g.world[2] - kNeighbourReach, g.world[0] + kNeighbourReach,
-                                                       g.world[2] + kNeighbourReach, hits, kMaxNeighbours + 1);
-                for (int i = 0; i < n; i++) {
-                    if (hits[i] == g_lotId) continue;
-                    const auto it = std::find_if(rank.begin(), rank.end(), [&](const auto& r) { return r.second == hits[i]; });
-                    if (it == rank.end()) rank.emplace_back(i, hits[i]);
-                    else it->first = std::min(it->first, i);
-                }
-            }
-            std::stable_sort(rank.begin(), rank.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        float box[4];
+        if (!dragNow && (g_nbActive != g_lotId || GetTickCount() - s_pickAt >= 1000) && space && LotLightBridge::LotWorldBox(g_lotId, box)) {
+            s_pickAt = GetTickCount();
+            uint64_t hits[kMaxNeighbours + 1];
+            const int n = LotLightBridge::LotsNear(box[0] - kNeighbourReach, box[1] - kNeighbourReach, box[2] + kNeighbourReach, box[3] + kNeighbourReach, hits,
+                                                   kMaxNeighbours + 1);
             std::vector<std::pair<uint64_t, uintptr_t>> want;
-            for (const auto& [i, lot] : rank)
-                if (static_cast<int>(want.size()) < kMaxNeighbours)
-                    if (const uintptr_t t = LevelLightShare::TrackerOfLot(lot)) want.emplace_back(lot, t);
+            for (int i = 0; i < n && static_cast<int>(want.size()) < kMaxNeighbours; i++)
+                if (hits[i] != g_lotId)
+                    if (const uintptr_t t = LevelLightShare::TrackerOfLot(hits[i])) want.emplace_back(hits[i], t);
             PublishNeighbours(g_lotId, want);
         }
         std::vector<std::pair<const void*, uintptr_t>> nbRooms; // (room, story manager) of their stories relit

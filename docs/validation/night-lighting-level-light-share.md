@@ -220,6 +220,9 @@ topology mutation inside a point is not reproduced. This release does not promis
   three lots next door. Their outside walls followed it on every story; each move relit 20 maps of stories 0 to 3 in 7.5 to
   31 ms with no room 0 solved, and no story of those lots was refused. With the per-story cache (build `5E20B164`) those
   lots cost 0.006 to 0.014 ms a frame during drags.
+- 2026-10-29 (build `907C47DA`, the set picked by the lots' places): a post placed and dragged beside the house next door
+  lit its walls and objects with no visible delay; before, a lot joining the set at a placement or a release showed the
+  post about 0.6 s late (session `21-03-29`: its room 0s solved in full 563 ms after the edit).
 
 ## Open checks
 

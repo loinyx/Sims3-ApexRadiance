@@ -9856,6 +9856,14 @@ int LotsNear(float x0, float z0, float x1, float z1, uint64_t* out, int max) {
         if (n < max) out[n++] = lot;
     return n;
 }
+bool LotWorldBox(uint64_t lot, float box[4]) {
+    for (const LotRect& r : g_lotRects)
+        if ((static_cast<uint64_t>(r.lotHi) << 32 | r.lotLo) == lot) {
+            LotBox(r, box[0], box[1], box[2], box[3]);
+            return true;
+        }
+    return false;
+}
 uint64_t LotAt(float x, float z) {
     const LotRect* r = FindLotAt(x, z);
     return r ? static_cast<uint64_t>(r->lotHi) << 32 | r->lotLo : 0;
