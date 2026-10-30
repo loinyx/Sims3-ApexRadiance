@@ -268,6 +268,24 @@ int WorldTerrainMapConstant(const std::vector<DWORD>& t) {
     return mapping;
 }
 
+uint32_t ConstantsRead(const std::vector<DWORD>& t) {
+    const auto ins = Parse(t);
+    if (ins.empty()) return ~0u;
+    uint32_t read = 0, defined = 0;
+    for (const auto& x : ins) {
+        if (x.op == kDcl || x.op == kDefI || x.op == kDefB) continue;
+        if (x.op == kDef) {
+            if (Num(t[x.at + 1]) < 32) defined |= 1u << Num(t[x.at + 1]);
+            continue;
+        }
+        for (size_t k = 1; k <= x.len; k++) {
+            const DWORD r = t[x.at + k];
+            if ((r & 0x80000000u) && Type(r) == kConst && !(r & 0x2000u) && Num(r) < 32) read |= 1u << Num(r);
+        }
+    }
+    return read & ~defined;
+}
+
 bool IsRoadVs(const std::vector<DWORD>& t, DWORD& mapConst) {
     if (t.empty() || t[0] != 0xFFFE0300) return false;
     const auto ins = Parse(t);

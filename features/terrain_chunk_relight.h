@@ -42,6 +42,10 @@ struct Lamp {
 
 // Cheap check (flags only, no game memory read): the prerequisites that do not change frame to frame hold.
 bool LikelyAvailable();
+// Render thread: whether `texture` is the rebuilt light map +0xD8 of the chunk centred at (centreX, centreZ): the byte
+// offset in +0xD8's object where it was found (0: +0xD8 is the texture itself), -1 when it is not, -2 when the chunk or its
+// rebuilt map cannot be read (none yet: only the world file's map exists)
+int RebuiltLightMapMatch(int centreX, int centreZ, const void* texture);
 bool Editing(); // resolved WorldManager mode 2 (editInGameMode); unknown modes return false
 // Queues the chunks whose bake rect overlaps a lamp rect (+1 m), each lamp's own chunk first, then its neighbours.
 // Returns a batch id > 0, or 0 with `why` when the caller must use the full rebuild: terrain or grid layout not as

@@ -48,6 +48,10 @@ Coverage includes:
 - With the reference: 60 GPU scenarios of the production lot HLSL at night,
   compared within one 8-bit LSB, plus day continuity across forced lot-edge weights
   with native window/lot scaling left at zero.
+- Chunk map choice (`run_chunk_map_checks.ps1`): the extracted `RecordWorldChunk` with a fake device and a fake
+  rebuilt-map lookup. The rebuilt map stays the chunk's map once seen, a world file's map registered to another key is
+  not refused, an unconfirmed map moves to the drawing chunk, another chunk's rebuilt map left in the sampler gives way
+  to the chunk's own at the shader's sampler, a new rebuilt texture is taken, and references stay balanced.
 - Extracted wall and regular lot draw paths against D3D9 fixtures: exact wall gain
   and no-op writes, atlas/chunk fallback, failed original-constant reads, texture
   reference balance and restoration of all touched state. This is not a wall

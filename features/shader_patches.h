@@ -17,6 +17,9 @@ bool IsRoadVs(const std::vector<DWORD>& t, DWORD& mapConst);
 // World terrain UV in TEXCOORD1, with the chunk transform in c8/c10.
 // Returns its mapping constant, or -1 for an unknown/ambiguous layout.
 int WorldTerrainMapConstant(const std::vector<DWORD>& t);
+// The constants c0..c31 the code reads by number, a bit each (reads through a0 and constants set by def are left out);
+// every bit when the code cannot be parsed.
+uint32_t ConstantsRead(const std::vector<DWORD>& t);
 struct RoadPatch {
     DWORD lightSampler = 0;
     DWORD extraSampler = 0;
