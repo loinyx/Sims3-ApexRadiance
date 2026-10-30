@@ -33,6 +33,7 @@ sampler-guard cost it reports is an isolated driver CPU benchmark, not game FPS.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-30 | `38a1c5e` (released as 2.18.3, tag `v2.18.3` on merge `b944d26`, ASI SHA-256 `D2934864D337521EF860617309FA340B12BF37055FC5D38BC3A6E371B2C99D4A`; later commits documentation only) | Standard Release x86 build; Public flavour build; CI build and public text on PR 54; `tools/i18n_check`; `perl tools/menu_audit.pl .`; developer builds of the same code in game | Builds with no errors; CI passed; i18n OK (21 languages, 2436 keys); menu audit: no new findings. In game: sidewalks and lot-edge grass steady with the camera at night in the rain, no cut at a lot edge beside a low wall | In game, backend not recorded |
 | 2026-10-30 | `ceea6ab` | Chunk map checks after the release review (strict refusal, per-texture check, unreadable moment, matrix rows) | 31 passed, 0 failed | Fake D3D9 |
 | 2026-10-29 | `26be84e` | Chunk map checks (`run_chunk_map_checks.ps1`): the production `RecordWorldChunk` and `ShaderPatches::ConstantsRead` against a fake device and rebuilt-map lookup | 23 passed, 0 failed | Fake D3D9 |
 | 2026-10-29 | `7eca05b` | Extracted resource suite, brought up to date with the outdoor scale stubs | 14,649 passed, 0 failed | Fake D3D9 |
