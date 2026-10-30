@@ -141,6 +141,9 @@ struct Record {
     uint32_t baseVersion = 0;
     // a lamp edit sent the room to its full solve: kept only as Real-time outdoor lamps' base until that solve ends (no delta)
     bool stale = false;
+    // a room 0 of a lot next to the active one (SetNeighbourLots): Real-time outdoor lamps' base only, every light of its list
+    // kept with no part (collapsed, not drawn); no delta takes it
+    bool baseOnly = false;
     uintptr_t room = 0, mgr = 0;
     int story = 0, cls = 0;
     uint64_t lot = 0;
@@ -741,12 +744,17 @@ enum class Delta { Fail, NoChange, Ok };
 // The changed lights' new parts and the texels they change (no map is touched); the record takes them
 constexpr size_t kMaxEditBatches = 200;
 constexpr const char* kWhyEditBatches = "too many batches to solve again in one step during an edit (the full solve is sliced)";
+constexpr const char* kWhyBaseOnly = "a lot next to the active one keeps only the GPU's base";
 std::atomic<long> c_batchRefused{0};
 bool LampEditRecent() {
     const unsigned long edit = LampMarkFilter::EditLastTick();
     return LevelLightShare::LampDragging() || (edit && GetTickCount() - edit < kEditWindowMs);
 }
 Delta ComputeDelta(BYTE* room, const RoomRead& rr, Record& r, const char*& why, Plan& plan) {
+    if (r.baseOnly) { // (no light's part to take out or to skip as drawn)
+        why = kWhyBaseOnly;
+        return Delta::Fail;
+    }
     std::vector<ListLight> list;
     if (!UniqueList(room, list)) {
         why = "the light list could not be read";
@@ -1056,6 +1064,7 @@ const char* DirectReady(uintptr_t tracker) { // under g_mx
         if (!Idle(room, cls) || !ReadRoom(room, rr)) return "a story's room 0 is being solved";
         const auto it = g_records.find(KeyOf(room, cls));
         if (it == g_records.end() || it->second->stale) return "a story's room 0 has no kept parts";
+        if (it->second->baseOnly) return kWhyBaseOnly;
         if (const char* why = ValidateBasic(*it->second, room, rr)) return why;
     }
     return rooms ? nullptr : "no room 0";
@@ -1289,7 +1298,8 @@ bool UpToDate(const void* roomPtr) {
     if (!UniqueList(room, list)) return false;
     std::lock_guard<std::recursive_mutex> lk(g_mx);
     const auto it = g_records.find(KeyOf(room, cls));
-    if (it == g_records.end() || it->second->stale) return false;
+    // (a base-only record does not hold the lights that left the list during its solve)
+    if (it == g_records.end() || it->second->stale || it->second->baseOnly) return false;
     const Record& r = *it->second;
     if (ValidateBasic(r, room, rr) || r.lamps.size() != list.size()) return false;
     for (const ListLight& l : list) {
@@ -1320,6 +1330,20 @@ uint64_t ActiveLot() {
     if (const void* room0 = t ? LevelLightShare::Room0Of(t, 0) : nullptr; room0 && ReadRoom(static_cast<const unsigned char*>(room0), r0)) s_lot = r0.lot;
     return s_lot;
 }
+namespace {
+std::mutex g_neighbourMx; // the lots next to the active one (the render thread sets them, SolveStart reads them)
+uint64_t g_neighbours[4] = {};
+int g_neighbourN = 0;
+bool NeighbourLot(uint64_t lot) {
+    std::lock_guard<std::mutex> lk(g_neighbourMx);
+    return lot && std::find(g_neighbours, g_neighbours + g_neighbourN, lot) != g_neighbours + g_neighbourN;
+}
+} // namespace
+void SetNeighbourLots(const uint64_t* lots, int n) {
+    std::lock_guard<std::mutex> lk(g_neighbourMx);
+    g_neighbourN = lots ? std::clamp(n, 0, 4) : 0;
+    std::copy_n(lots, g_neighbourN, g_neighbours);
+}
 void SolveStart(unsigned char* room) {
     if (g_clear.exchange(false)) DropCapture();
     if (g_cap.active) DropCapture(); // the solve it kept was abandoned (restarted, or another room's)
@@ -1333,12 +1357,16 @@ void SolveStart(unsigned char* room) {
         return;
     }
     if (!rr.outdoor || rr.cls < 0 || rr.cls > 2) return;
-    if (rr.lot != ActiveLot()) return; // (14/10: parts of every lot's room 0 took 206 MB; edits elsewhere solve in full)
+    // only the active lot's room 0s keep their parts (every lot's took 206 MB; edits elsewhere solve in full); a lot next to
+    // it keeps Real-time outdoor lamps' base: the texels and their sums, no light's part
+    const bool baseOnly = rr.lot != ActiveLot();
+    if (baseOnly && !NeighbourLot(rr.lot)) return;
     // the conditions a delta needs, checked again at its lock step
     const char* refuse = !LevelLightShare::DeltaReady() ? "the room solve hooks are not in"
                          : RoomLightQueue::QuickPassTarget(room) > 0  ? "a quick pass"
                          : !LevelLightShare::ListAllWrapped(room)     ? "a light whose evaluation is not wrapped"
                                                                       : nullptr;
+    if (refuse && baseOnly) return EraseStale(room, rr.cls); // (quietly: the drop readout and its log lines are the active lot's)
     if (refuse) {
         if (refuse[0] == 'a' && std::strcmp(refuse, "a light whose evaluation is not wrapped") == 0) {
             static std::atomic<int> s_lines{0};
@@ -1366,6 +1394,7 @@ void SolveStart(unsigned char* room) {
     r.dither = DitherNow();
     r.thr = rr.thr;
     r.wallMode = rr.wallMode;
+    r.baseOnly = baseOnly;
     // (14/10: the vectors at the size this room and class kept last time, so they grow once)
     // (14/10 review: only when the records are free; a sizing hint is not worth a wait)
     if (std::unique_lock<std::recursive_mutex> lk(g_mx, std::try_to_lock); lk.owns_lock()) {
@@ -1392,7 +1421,7 @@ void SolveStart(unsigned char* room) {
         std::lock_guard<std::mutex> lk(g_sideMx);
         check = g_checkPending.erase(room) > 0;
     }
-    if (check) {
+    if (check && !baseOnly) {
         std::lock_guard<std::recursive_mutex> lk(g_mx);
         const auto it = g_records.find(KeyOf(room, rr.cls));
         if (it != g_records.end() && !it->second->stale) {
@@ -1428,6 +1457,9 @@ bool AtLockStep(unsigned char* room, bool gather) {
     if (!gather) why = "a solve on another thread";
     else if (g_cap.active && g_cap.room == room && g_cap.check) why = "the self-check's full solve";
     else if (it == g_records.end() || it->second->stale) why = "no kept parts for this room and class yet";
+    // (a lot that was active and is now next to the active one: its full record is not the base this solve keeps; a delta on it
+    // would end the capture and leave the GPU with no base for that story)
+    else if (g_cap.active && g_cap.room == room && g_cap.rec && g_cap.rec->baseOnly && !it->second->baseOnly) why = kWhyBaseOnly;
     LARGE_INTEGER t0{};
     QueryPerformanceCounter(&t0);
     Plan plan;
@@ -1447,9 +1479,12 @@ bool AtLockStep(unsigned char* room, bool gather) {
     const double ms = MsSince(t0);
     if (!done) {
         // a full solve rewrites the maps: what was kept of this room and class is no longer what they hold
-        const bool had = it != g_records.end();
-        // (a lamp-only refusal: its base stays the GPU's until the solve's own parts replace it, so the stories do not wait)
-        if (had && (it->second->stale || (why && (std::strcmp(why, kWhyEditBatches) == 0 || std::strcmp(why, "too many lights changed") == 0)))) it->second->stale = true;
+        const bool had = it != g_records.end(), base = had && it->second->baseOnly;
+        // (a lamp-only refusal: its base stays the GPU's until the solve's own parts replace it, so the stories do not wait; a
+        // base-only record, while this solve is kept in its place)
+        if (had && (it->second->stale || (why && (std::strcmp(why, kWhyEditBatches) == 0 || std::strcmp(why, "too many lights changed") == 0 ||
+                                                  (std::strcmp(why, kWhyBaseOnly) == 0 && g_cap.active && g_cap.room == room)))))
+            it->second->stale = true;
         else EraseLocked(key);
         lk.unlock();
         c_full.fetch_add(1, std::memory_order_relaxed);
@@ -1460,7 +1495,7 @@ bool AtLockStep(unsigned char* room, bool gather) {
             g_fullWhy[room] = why ? why : "?";
         }
         const unsigned long edit = LampMarkFilter::EditLastTick();
-        if (had || (edit && GetTickCount() - edit < kEditWindowMs))
+        if ((had && !base) || (edit && GetTickCount() - edit < kEditWindowMs))
             if (LogAllowed()) LOG_INFO(std::format("[OutdoorDelta] Outdoor lamp delta: story {} room 0 class {} solved in full ({})", rr.story, rr.cls, why ? why : "?"));
         return false;
     }
@@ -1541,7 +1576,8 @@ void SolveEnd(unsigned char* room) {
             if (li == c.lampIdx.end()) {
                 c.lampIdx[list[i].light] = static_cast<int>(r.lamps.size());
                 r.lamps.push_back(LampRec{});
-                r.lamps.back().drawn = DrawnLight(list[i].light, r.lot);
+                r.lamps.back().drawn = !r.baseOnly && DrawnLight(list[i].light, r.lot); // (the GPU draws none of a base-only room's lights)
+                r.lamps.back().collapsed = r.baseOnly;
                 r.lamps.back().exit = LevelLightShare::ExitLampOf(room, list[i].light);
             }
             LampRec& l = r.lamps[static_cast<size_t>(c.lampIdx[list[i].light])];
@@ -1618,8 +1654,8 @@ void SolveEnd(unsigned char* room) {
         // the drawn lamps' parts, so light the parts miss stays in it whatever the GPU draws (a courtyard kept a recoloured,
         // then switched-off sconce's old green until Restart lighting, F7 with every lamp of the lot off). A solve whose sum
         // passes its parts by more than 2 levels at a texel is not kept (the room's edits take the game's solve). Once per
-        // kept solve: one pass over the parts.
-        if (c.ok) {
+        // kept solve: one pass over the parts. (A base-only record has none: its base is the whole sum.)
+        if (c.ok && !r.baseOnly) {
             std::vector<float> got(r.texels.size() * 3, 0.0f);
             for (const LampRec& l : r.lamps)
                 for (const Contrib& p : l.parts)
@@ -1658,6 +1694,7 @@ void SolveEnd(unsigned char* room) {
         ShrinkRecord(r); // (outside g_mx: the copies take a while on a large room)
         const uint64_t key = KeyOf(room, r.cls);
         const int story = r.story, cls = r.cls;
+        const bool baseOnly = r.baseOnly;
         {
             std::lock_guard<std::recursive_mutex> lk(g_mx);
             // (14/10) a room of the active lot Real-time outdoor lamps relights keeps its drawn lamps as one sum (the base is
@@ -1676,11 +1713,12 @@ void SolveEnd(unsigned char* room) {
             // A pinned room never drops another pinned room: if the pinned rooms with it would pass kMaxPinnedBytes, this solve
             // is not kept (the others stay, so the active lot's stories do not evict one another in a loop). Nor is another
             // room's solve that would pass it beside the pinned rooms: the loop below never drops the new record, so it would
-            // stay over the ceiling (with no pinned room the check never refuses: a record is at most kMaxRecordBytes)
+            // stay over the ceiling (with no pinned room the check never refuses: a record is at most kMaxRecordBytes). A base-only
+            // record is neither counted nor refused here: the loop below drops it first, the new one too
             size_t pinnedBytes = 0;
             for (const auto& [k2, rec] : g_records)
-                if (PinnedLocked(rec->room)) pinnedBytes += rec->bytes;
-            const bool refused = pinnedBytes + r.bytes > kMaxPinnedBytes;
+                if (PinnedLocked(rec->room) && !rec->baseOnly) pinnedBytes += rec->bytes;
+            const bool refused = !baseOnly && pinnedBytes + r.bytes > kMaxPinnedBytes;
             if (refused) {
                 LOG_INFO(std::format("[OutdoorDelta] Story {} room 0 class {}: not kept ({:.1f} MB; the active lot's rooms already keep {:.1f} MB of {} MB allowed; "
                                      "{} texels: samples {:.1f} MB, texels {:.1f} MB, baked lights' parts {:.1f} MB, drawn lamps {:.1f} MB before their sum)",
@@ -1696,12 +1734,14 @@ void SolveEnd(unsigned char* room) {
                 g_bytes.fetch_add(r.bytes);
                 g_records[key] = std::move(c.rec);
             }
-            // the oldest rooms go past the budget: never a pinned one (the active lot's room 0s, bounded above)
+            // the oldest rooms go past the budget: never a pinned one (the active lot's room 0s, bounded above). The base-only
+            // records go first, and only they make room for a new one (it goes last of them): the other records are as without them
             while (g_bytes.load() > kMaxBytes && g_records.size() > 1) {
                 auto oldest = g_records.end();
                 for (auto it = g_records.begin(); it != g_records.end(); ++it)
-                    if (it->first != key && !PinnedLocked(it->second->room) &&
-                        (oldest == g_records.end() || static_cast<int32_t>(it->second->used - oldest->second->used) < 0))
+                    if ((it->second->baseOnly || (!baseOnly && it->first != key && !PinnedLocked(it->second->room))) &&
+                        (oldest == g_records.end() || (it->second->baseOnly != oldest->second->baseOnly ? it->second->baseOnly
+                                                                                                        : static_cast<int32_t>(it->second->used - oldest->second->used) < 0)))
                         oldest = it;
                 if (oldest == g_records.end()) break;
                 LOG_INFO(std::format("[OutdoorDelta] Story {} room 0 class {}: kept parts dropped (memory budget: {:.1f} MB of {:.1f} MB kept in {} rooms, {} MB allowed)",
@@ -1711,6 +1751,9 @@ void SolveEnd(unsigned char* room) {
                 c_budgetDrops.fetch_add(1, std::memory_order_relaxed);
                 EraseLocked(oldest->first);
             }
+            if (baseOnly && g_records.count(key) && LogAllowed())
+                LOG_INFO(std::format("[OutdoorDelta] Story {} room 0 class {} of a lot next to the active one: kept as Real-time outdoor lamps' base only ({} texels, {:.1f} MB)",
+                                     story, cls, r.texels.size(), static_cast<double>(r.bytes) / (1 << 20)));
             // tight: logged once each time the kept parts pass kTightBytes, with what fills them
             static bool s_tight = false;
             const size_t total = g_bytes.load();
@@ -1729,7 +1772,7 @@ void SolveEnd(unsigned char* room) {
             s_tight = total > kTightBytes * 9 / 10 && (s_tight || total > kTightBytes); // (re-armed once it falls 10% under)
             c_records.store(static_cast<long>(g_records.size()));
         }
-        if (unsure && LogAllowed())
+        if (unsure && !baseOnly && LogAllowed())
             LOG_INFO(std::format("[OutdoorDelta] Story {} room 0 class {}: parts kept, {} lights changed during the solve (the next delta takes them as changed)", story, cls, unsure));
         if (c.check) {
             c_checks.fetch_add(1, std::memory_order_relaxed);
@@ -1745,7 +1788,10 @@ void SolveEnd(unsigned char* room) {
         }
     } else {
         RoomRead rr;
-        if (ReadRoom(room, rr)) LogDrop(rr.story, rr.cls, "its parts are not kept from this solve", c.why ? c.why : "?"), EraseStale(room, rr.cls);
+        if (ReadRoom(room, rr)) {
+            if (!c.rec->baseOnly) LogDrop(rr.story, rr.cls, "its parts are not kept from this solve", c.why ? c.why : "?"); // (the active lot's readout)
+            EraseStale(room, rr.cls);
+        }
         if (c.check) LOG_INFO(std::format("[OutdoorDelta] Self-check of a room 0: its full solve was not kept ({}), not compared", c.why ? c.why : "?"));
     }
     DropCapture();
@@ -1798,7 +1844,7 @@ void FlushTap() {
 } // namespace
 void Tap(int which, const float* sum) {
     SampleState& s = g_s;
-    if (!s.on) return;
+    if (!s.on || g_cap.rec->baseOnly) return; // (a base-only capture keeps no light's part: OnEval finds no tap)
     s.tap = which;
     s.sum = sum;
     s.pending = 0;
@@ -1819,7 +1865,7 @@ void OnEval(uintptr_t light) {
 }
 void OnFuse(uintptr_t light, const float* before, const float* after) {
     SampleState& s = g_s;
-    if (!s.on) return;
+    if (!s.on || g_cap.rec->baseOnly) return;
     const float d[3] = {after[0] - before[0], after[1] - before[1], after[2] - before[2]};
     if (d[0] == 0.0f && d[1] == 0.0f && d[2] == 0.0f) return;
     if (Acc* a = AccFor(light)) a->all += Lum3(d);
@@ -2084,7 +2130,7 @@ long PinRooms(const void* const* rooms, int n) {
 }
 size_t KeptBytes() { return g_bytes.load(); }
 std::string MemoryText() {
-    size_t samples = 0, texels = 0, baked = 0, drawn = 0, sums = 0, other = 0, n = 0;
+    size_t samples = 0, texels = 0, baked = 0, drawn = 0, sums = 0, other = 0, n = 0, baseN = 0, baseBytes = 0;
     {
         std::unique_lock<std::recursive_mutex> lk(g_mx, std::try_to_lock); // (the render thread never waits for a worker's export copy)
         if (!lk.owns_lock()) return std::format("{:.1f} MB (the records were busy)", static_cast<double>(g_bytes.load()) / (1 << 20));
@@ -2092,14 +2138,16 @@ std::string MemoryText() {
             samples += rec->samples.capacity(), texels += rec->texels.capacity() * sizeof(TexelRec);
             baked += PartsBytes(*rec, false), drawn += PartsBytes(*rec, true), sums += rec->drawnSum.capacity() * sizeof(DrawnSum);
             other += rec->batches.capacity() * sizeof(BatchRec) + rec->blocks.capacity() * sizeof(BlockRec) + rec->preblur.capacity() * 4;
+            if (rec->baseOnly) baseN++, baseBytes += rec->bytes;
         }
         n = g_records.size();
     }
     const auto mb = [](size_t b) { return static_cast<double>(b) / (1 << 20); };
     return std::format("{:.1f} MB in {} rooms (samples {:.1f}, texels {:.1f}, baked lights' parts {:.1f}, drawn lamps' parts {:.1f}, drawn sums {:.1f}, batches and "
-                       "wall blocks {:.1f}); dropped by the budget {}, given back after their lot left {} ({:.1f} MB)",
-                       mb(g_bytes.load()), n, mb(samples), mb(texels), mb(baked), mb(drawn), mb(sums), mb(other), c_budgetDrops.load(), c_leftLotDrops.load(),
-                       mb(c_leftLotBytes.load()));
+                       "wall blocks {:.1f}); {} rooms of lots next to the active one, {:.1f} MB (base only); dropped by the budget {}, given back after their lot "
+                       "left {} ({:.1f} MB)",
+                       mb(g_bytes.load()), n, mb(samples), mb(texels), mb(baked), mb(drawn), mb(sums), mb(other), baseN, mb(baseBytes), c_budgetDrops.load(),
+                       c_leftLotDrops.load(), mb(c_leftLotBytes.load()));
 }
 size_t PinnedBudgetBytes() { return kMaxPinnedBytes; }
 int KeptRooms() { return static_cast<int>(c_records.load()); }
@@ -2108,28 +2156,32 @@ int KeptRooms() { return static_cast<int>(c_records.load()); }
 // room's address inherited another room's texels until its first solve)
 bool RecordOfRoom(const Record& r, const RoomRead& now) { return r.mgr == now.mgr && r.story == now.story; }
 std::mutex g_versionMx;
-std::unordered_map<uint64_t, uint32_t> g_versionSeen; // under g_versionMx: the last answer per key (when g_mx is busy)
-uint32_t RecordVersion(const void* room, int cls) {
+std::unordered_map<uint64_t, uint64_t> g_versionSeen; // under g_versionMx: the last answer per key (when g_mx is busy; bit 32: base only)
+uint32_t RecordVersion(const void* room, int cls, bool* baseOnly) {
+    if (baseOnly) *baseOnly = false;
     if (!room || cls < 0 || cls > 2) return 0;
     RoomRead now;
     if (!ReadRoom(static_cast<const unsigned char*>(room), now)) return 0;
     const uint64_t key = KeyOf(room, cls);
-    uint32_t v = 0;
+    uint64_t v = 0;
     {
         // (14/10) the render thread asks every frame: a worker's export copy holding g_mx (tens of ms) gets the last answer
         std::unique_lock<std::recursive_mutex> lk(g_mx, std::try_to_lock);
         if (!lk.owns_lock()) {
             std::lock_guard<std::mutex> vk(g_versionMx);
             const auto s = g_versionSeen.find(key);
-            return s == g_versionSeen.end() ? 0 : s->second;
+            v = s == g_versionSeen.end() ? 0 : s->second;
+            if (baseOnly) *baseOnly = (v >> 32) != 0;
+            return static_cast<uint32_t>(v);
         }
         const auto it = g_records.find(key);
-        v = it == g_records.end() || !RecordOfRoom(*it->second, now) ? 0 : it->second->baseVersion;
+        if (it != g_records.end() && RecordOfRoom(*it->second, now)) v = it->second->baseVersion | static_cast<uint64_t>(it->second->baseOnly) << 32;
     }
     std::lock_guard<std::mutex> vk(g_versionMx);
     if (g_versionSeen.size() > 256) g_versionSeen.clear();
     g_versionSeen[key] = v;
-    return v;
+    if (baseOnly) *baseOnly = (v >> 32) != 0;
+    return static_cast<uint32_t>(v);
 }
 bool ExportRoom0(const void* room, int cls, Room0Export& out) {
     out = Room0Export{};

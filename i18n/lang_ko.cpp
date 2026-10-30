@@ -9,6 +9,9 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Korean}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: lamp posts light the walls of neighbouring lots, on every story", "야간 조명: 가로등이 이웃 부지의 벽을 모든 층에서 비춰요"},
+    {"Night Lights: Instant (GPU) relights the 4 nearest lots in the same frame as a dragged post", "야간 조명: 즉시 (GPU)는 끌고 있는 가로등과 같은 프레임에 가장 가까운 부지 4곳을 다시 비춰요"},
+    {"Night Lights: upper steps of outdoor stairs no longer take light from lamps behind a wall", "야간 조명: 야외 계단 윗단이 벽 뒤 램프의 빛을 더 이상 받지 않아요"},
     {"Night Lights: a fence removed whole takes its shadow with it at once", "야간 조명: 울타리를 통째로 지우면 그림자도 바로 사라져요"},
     {"Night Lights: a lamp deleted right after a drag no longer leaves light on the ground", "야간 조명: 드래그 직후 삭제한 램프의 빛이 더 이상 바닥에 남지 않아요"},
     {"Night Lights: rainy ground no longer jumps to smooth lamp light at the end of dusk", "야간 조명: 비 오는 날 땅이 해질녘 끝에 갑자기 부드러운 빛으로 바뀌지 않아요"},

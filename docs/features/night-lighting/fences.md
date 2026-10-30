@@ -9,7 +9,7 @@ same switch and strength. By day the lamp term fades to 3% of its night strength
 
 | | |
 |---|---|
-| Availability | Released (present since 1.0.0). Subdued daytime lamp response: Released in 2.6.0. Per-pixel lamps, walls blocking them and the game's own lighting in full daylight: Released in 2.7.0. Lighting corrections: Released in 2.12.1. The outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and tops above the lamp heads without ground light: Released in 2.12.3. The lot's ground lamp shade on pieces near the ground (*Walls shade lamp light near the ground*), upper-story railing and parapet tops without a ground lamp's pool, lamps tested from the piece nearest them: Released in 2.13.0. The reach law's scale without the outdoor walls' gain, the lamp sum held under 1 by its brightest channel, faces reading the ground lamp shade in front of them, gates closing their fence's gap in the lot shade: Released in 2.15.3. Elevated structures follow the architectural lamp gain and keep the ground pool out: Released in 2.15.4. A larger lamp pick memo, kept with lamps shining out of a house: Released in 2.17.1. |
+| Availability | Released (present since 1.0.0). Subdued daytime lamp response: Released in 2.6.0. Per-pixel lamps, walls blocking them and the game's own lighting in full daylight: Released in 2.7.0. Lighting corrections: Released in 2.12.1. The outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and tops above the lamp heads without ground light: Released in 2.12.3. The lot's ground lamp shade on pieces near the ground (*Walls shade lamp light near the ground*), upper-story railing and parapet tops without a ground lamp's pool, lamps tested from the piece nearest them: Released in 2.13.0. The reach law's scale without the outdoor walls' gain, the lamp sum held under 1 by its brightest channel, faces reading the ground lamp shade in front of them, gates closing their fence's gap in the lot shade: Released in 2.15.3. Elevated structures follow the architectural lamp gain and keep the ground pool out: Released in 2.15.4. A larger lamp pick memo, kept with lamps shining out of a house: Released in 2.17.1. The ground light on stair tops shaded at every height: Released in 2.18.2. |
 | Default | On |
 | Menu | Lighting > Game fixes > Objects > *Fences and stairs catch light*, *Fence brightness* |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -56,9 +56,12 @@ falls back to the brighter of the game's vertex lights and the world ground-ligh
    Each lamp keeps the game's cones: a face off a wall sconce's cones takes only its spill, as the game's own
    cone law gives it (`0x006BC940`; see the pixel shader patch below), so a brick fence face beside a sconce aimed down
    its wall is no longer lit at full strength. Shared group brightness does not set a minimum for valid spatial groups.
-   **Pieces near the ground take the lot's ground lamp shade**: the lamp sum is multiplied per pixel by the shade
+   **Pieces near the ground take the lot's ground lamp shade**: the lamps are multiplied per pixel by the shade
    the lot pass gives the grass under them ([lot-light-pass.md](lot-light-pass.md), as the story-0 outdoor floors,
-   [floors.md](floors.md)), within about 1 m of the lot's ground. A curb or low fence behind a free-standing wall no longer
+   [floors.md](floors.md)), within about 1 m of the lot's ground; the ground light on faces turned up (the atlas, the light
+   lying on the ground) takes that shade at every height, so the upper steps of an outdoor stair beside a house wall no
+   longer take the pool of the lamps behind the wall (a bright flat band over the shaded steps below). A curb or low fence
+   behind a free-standing wall no longer
    keeps a lamp on the other side because another part of its group sees it; balcony railings and stair tops higher up
    keep the per-group test alone. A face reads the shade 0.6 m in front of it along its normal
    (`GroundShadow::kFenceShadeReach`); tops read it where they stand. The fence is itself a wall in the lot's mask, so at
@@ -110,7 +113,8 @@ The Lighting balance styles set `forcaNasCercas` to 67.5% (Subtle), 75% (Soft) o
 - One lamp list serves a whole fence group (up to 8 lamps around its centre); a very long group can miss a lamp near one
   end. Walls and slabs block a lamp only when they hide it from the piece nearest it and both ends of the group;
   otherwise it keeps the largest share of the three (a slab's edge dims it). Within about 1 m of the lot's ground the
-  ground lamp shade corrects this per pixel; higher up (balconies, stair tops) it does not.
+  ground lamp shade corrects this per pixel; higher up (balconies, stair tops) it does not for the lamps, only for the
+  ground light the tops take.
 - The ground lamp shade is one factor for all lamps together (the lot mask's alpha, the share of lamp light the outside
   walls leave on the grass): a curb lit by a second lamp that no wall hides is dimmed as much as the first lamp's shade
   there. It is the lot ground's shade (outside walls only, at the lot's ground height, unverified as the ground under

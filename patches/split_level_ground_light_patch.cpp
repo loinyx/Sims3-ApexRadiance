@@ -8,9 +8,10 @@
 //
 // Patches:
 // - the first 5 bytes of GetLotID become "xor eax,eax; xor edx,edx; ret" (skipped when official S3SS's fix already did it);
-// - the outdoor-room gather's call at 0x006B635D goes to VanillaGetLotId (the original body), also when S3SS zeroes
-//   GetLotID: with lot id 0 there, every lot street lamp was listed a third time in its lot's room maps, and the lot
-//   ground was ~1.5x brighter than the terrain next to it (a straight step at the lot edge; research\borda2).
+// - the outdoor-room gather's call at 0x006B635D goes to LevelLightShare::GatherLotId (the real lot id), also when S3SS
+//   zeroes GetLotID: with lot id 0 there, every lot street lamp was listed a third time in its lot's room maps, and the lot
+//   ground was ~1.5x brighter than the terrain next to it (a straight step at the lot edge; research\borda2). It answers 0
+//   only for the lamp posts of other lots, which then light this lot's outside walls as world lamps do.
 // Original bytes are checked before writing and put back on uninstall, only where Apex wrote them.
 //
 // Part of Apex Radiance. Credits: @loinyx
@@ -20,6 +21,7 @@
 #include "night_lighting.h"
 #include "s3ss_detect.h"
 #include "game_addresses.h"
+#include "level_light_share.h"
 #include "ui/i18n.h"
 #include <atomic>
 #include <cstring>
@@ -39,8 +41,8 @@ const std::vector<BYTE> kReturnZero = {0x33, 0xC0, 0x33, 0xD2, 0xC3};
 // The outdoor-room light gather's call to GetLotID ("mov ecx,esi; call GetLotID; or eax,edx; jnz"). That gather keeps
 // world lights only (lot id 0); with the zeroed GetLotID every lot street lamp passed it too and was listed a third time
 // in its lot's room light maps (the game already lists lot lamps twice), making the lot map ~1.5x the terrain stamp: a
-// straight light step at the lot edge (research\borda2). The call is sent to a copy of the original body, so only the
-// terrain bake (0x00C294D0) sees lot id 0.
+// straight light step at the lot edge (research\borda2). The call is sent to LevelLightShare::GatherLotId (the original
+// body, but lot id 0 for another lot's lamp post), so only the terrain bake (0x00C294D0) sees lot id 0 for every lamp.
 uintptr_t kGatherCall = 0; // 0x006B635D on Steam
 // From kGatherCall - 2: mov ecx,esi; call GetLotID; or eax,edx; jnz +23h (Steam: 8B CE E8 BE 5C 00 00 0B C2 75 23)
 std::vector<BYTE> GatherContext() {
@@ -50,15 +52,6 @@ std::vector<BYTE> GatherContext() {
     BYTE jnz = 0; // other builds: the jnz distance is not checked (the signature matched the rest)
     if (!GameAddr::IsFixed() && MemPatch::ReadBytes(kGatherCall + 8, &jnz, 1)) b[10] = jnz;
     return b;
-}
-
-// The original GetLotID body (thiscall, lot id in EDX:EAX)
-__declspec(naked) void VanillaGetLotId() {
-    __asm {
-        mov eax, [ecx + 0C0h]
-        mov edx, [ecx + 0C4h]
-        ret
-    }
 }
 
 } // namespace
@@ -80,7 +73,7 @@ class SplitLevelGroundLightPatch : public ApexPatch {
         if (!MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kGatherCall - 2), kGatherContext.data(), kGatherContext.size()))
             return Fail(std::format("The outdoor-room light gather differs at 0x{:X} (different game version or another mod)", kGatherCall));
         std::vector<BYTE> call = {0xE8, 0, 0, 0, 0};
-        const int32_t rel = MemPatch::CalculateRelativeOffset(kGatherCall, reinterpret_cast<uintptr_t>(&VanillaGetLotId));
+        const int32_t rel = MemPatch::CalculateRelativeOffset(kGatherCall, reinterpret_cast<uintptr_t>(&LevelLightShare::GatherLotId));
         std::memcpy(call.data() + 1, &rel, sizeof rel);
         const std::vector<BYTE> callExpected(kGatherContext.begin() + 2, kGatherContext.begin() + 7);
         if (!MemPatch::WriteBytes(kGatherCall, call, &written_, &callExpected)) return Fail("Could not patch the outdoor-room light gather");
@@ -139,7 +132,7 @@ APEX_REGISTER_FEATURE(SplitLevelGroundLightPatch, {.displayName = "Every-Story G
                                             .experimental = false,
                                             .enabledByDefault = true,
                                             .supportedVersions = VERSION_STEAM,
-                                            .technicalDetails = {"GetLotID (0x6BC020) returns 0 for the terrain bake (0xC294D0); the outdoor-room light gather's call (0x6B635D) goes to a copy of the original body, so lot lamps are not listed a third time in their lot's room maps.",
+                                            .technicalDetails = {"GetLotID (0x6BC020) returns 0 for the terrain bake (0xC294D0); the outdoor-room light gather's call (0x6B635D) keeps the real lot id, so lot lamps are not listed a third time in their lot's room maps; it reports 0 only for the lamp posts of other lots.",
                                                                  "Original bytes checked before writing; restored on uninstall only when Apex wrote them.",
                                                                  "Skipped when official S3SS's Split-Level Lighting Fix is already on."},
                                             .gameCodeGroup = "SplitLevel"});

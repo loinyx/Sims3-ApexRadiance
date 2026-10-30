@@ -9,7 +9,7 @@ takes its base from the parts kept here ([Real-time outdoor lamps](rt-outdoor-la
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0, as part of Performance > Lamp lighting > Instant (GPU) Released in 2.18.0: a refused delta keeps the story's record as the GPU base. |
+| Availability | Released in 2.13.0, as part of Performance > Lamp lighting > Instant (GPU) Released in 2.18.0: a refused delta keeps the story's record as the GPU base. Released in 2.18.2: base-only kept solves of the lots next to the active one. |
 | Default | On (Lamp lighting: Instant (GPU)); with Classic every room 0 is solved in full |
 | Menu | No switch of its own (System > Performance > Lamp lighting); its check: Developer > Lighting > Compare lighting paths > Check quick lamp edits |
 | Configuration | `lampLightingMode`, `outdoorLampDeltaCheck` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -48,6 +48,12 @@ Anything else is solved in full, and its parts are kept again: a first solve, an
 floors or openings, a lighting option changed, more than eight lights changed, a quick pass, a solve off the light tree
 thread.
 
+The room 0s of the lots next to the active one that Real-time outdoor lamps relights with the active lot's posts
+(`SetNeighbourLots`, at most four) keep their texels and sums only, every light of the list kept with no part
+(`Record::baseOnly`): their sum is the GPU's base. No delta takes them (an edit there is a full solve), and the memory
+budget drops them first; they make room only for one another. While a base-only capture of a room runs, a delta on that
+room's full record (a lot that was active) is refused, so the capture ends with the new base.
+
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
@@ -57,7 +63,7 @@ thread.
 
 ## Limitations
 
-- Runs only with Lamp lighting > Instant (GPU), and only on the active lot.
+- Runs only with Lamp lighting > Instant (GPU), and only on the active lot (the lots next to it keep their base only).
 - The first edit after a room 0 was solved without its parts kept (a load, another class, an option change) is a full
   solve; the edits after it are quick.
 - A texel can differ from a full solve by one 8-bit level (rounding of the kept parts).

@@ -257,6 +257,30 @@ bool ShadeIsExactInsertion(const std::vector<DWORD>& with, const std::vector<DWO
     rest.erase(rest.begin() + static_cast<ptrdiff_t>(j), rest.begin() + static_cast<ptrdiff_t>(j + tokens));
     return rest == without;
 }
+// The fences' shade (PatchInstancedLamps): with = without + the sampler dcl + a block right before the lamp max: the mad that
+// moves the sample in front of the face (5), the shade block multiplying the max's lamp source (kShadeTokens), then the mad
+// that multiplies the max's atlas source (its destination) by M (5). The max itself and everything else unchanged.
+bool ShadeIsInsertionBeforeMax(const std::vector<DWORD>& with, const std::vector<DWORD>& without, DWORD S) {
+    constexpr size_t lead = 5, tail = 5, tokens = lead + kShadeTokens + tail;
+    if (with.size() != without.size() + 3 + tokens) return false;
+    size_t i = 0;
+    while (i < without.size() && with[i] == without[i]) i++;
+    if (i >= 2 && with[i - 2] == kDclSampler && with[i - 1] == 0x90000000u) i -= 2;
+    std::vector<DWORD> rest(with.begin(), with.end());
+    if (i + 3 > rest.size() || rest[i] != kDclSampler || rest[i + 1] != 0x90000000u || (rest[i + 2] & 0x7FF) != S) return false;
+    rest.erase(rest.begin() + static_cast<ptrdiff_t>(i), rest.begin() + static_cast<ptrdiff_t>(i) + 3);
+    size_t j = 0;
+    while (j < without.size() && rest[j] == without[j]) j++;
+    if (j + 3 > without.size() || j + tokens > rest.size() || without[j] != kMaxOp) return false;
+    const DWORD maxDst = without[j + 1] & 0x7FF, lampSrc = without[j + 2] & 0x7FF;
+    const DWORD* blk = &rest[j];
+    const size_t mul = lead + kShadeTokens - 4, mad = lead + kShadeTokens;
+    if (blk[0] != kMadOp || blk[lead] != kMadOp || blk[mul] != kMulOp || (blk[mul + 1] & 0x7FF) != lampSrc || ((blk[mul + 1] >> 16) & 0xF) != 0x7 ||
+        blk[mad] != kMadOp || (blk[mad + 1] & 0x7FF) != maxDst || ((blk[mad + 1] >> 16) & 0xF) != 0x7)
+        return false;
+    rest.erase(rest.begin() + static_cast<ptrdiff_t>(j), rest.begin() + static_cast<ptrdiff_t>(j + tokens));
+    return rest == without;
+}
 
 // ---- 1. summer outdoor floors ----
 void SummerFloors(Gpu& gpu, const std::vector<Blob>& blobs, const std::vector<Tech>& techs) {
@@ -1000,8 +1024,8 @@ int Instanced(Gpu& gpu, const std::vector<std::vector<DWORD>>& shaders, const ch
             Check(ia.shadeSampler == static_cast<int>(ia.atlasSampler) + 1 &&
                       ia.shadeConst == static_cast<int>(reach ? ia.reachConst + 2 : ia.coneConst + 2 * N),
                   "instanced: shade registers after the atlas sampler and after the last lamp rows (one more upload)");
-            Check(ShadeIsExactInsertion(a, n, static_cast<DWORD>(ia.shadeSampler), 5),
-                  "instanced: the shade is the sampler dcl plus the block after the lamp max (the sample moved in front of the face first)");
+            Check(ShadeIsInsertionBeforeMax(a, n, static_cast<DWORD>(ia.shadeSampler)),
+                  "instanced: the shade is the sampler dcl plus the block before the lamp max (lamps x the gated shade, atlas x M)");
             const std::string text = Disasm(a);
             const int slots = Slots(text);
             maxSlots = std::max(maxSlots, slots);
@@ -1158,16 +1182,16 @@ void InstancedPixels(Gpu& gpu) {
                     for (int pxi = 0; pxi < 64; pxi++) {
                         const float lx = lx0 + du * pxi / 64.0f, lz = lz0 + dv * py / 64.0f;
                         const int i = std::min(159, static_cast<int>(lx * 4.0f)), j = std::min(119, static_cast<int>(lz * 4.0f));
-                        const float f = 1.0f + gate * (alphaOf(i, j) / 255.0f - 1.0f);
+                        const float m = alphaOf(i, j) / 255.0f, f = 1.0f + gate * (m - 1.0f);
                         const int r = static_cast<int>((ref[py * 64 + pxi] >> 8) & 255);
                         lit += r > 8;
-                        const float want = lampMode ? r / 255.0f * f : 0.8f * f;
+                        const float want = lampMode ? r / 255.0f * f : 0.8f * m; // the ground light takes M at every height
                         if (!lampMode) worst = std::max(worst, std::abs(r - 204)); // the white mask: the sum unchanged
                         worst = std::max(worst, std::abs(static_cast<int>((px[py * 64 + pxi] >> 8) & 255) - static_cast<int>(std::lround(want * 255.0f))));
                     }
                 char what[200];
-                std::snprintf(what, sizeof what, "instanced pixels: %s law, %s, %.1f m over the ground: out = sum x (1 + gate (M - 1)) within 2 LSB (worst %d, lit %d)",
-                              reach ? "reach" : "first", lampMode ? "one lamp" : "ground light", dy, worst, lit);
+                std::snprintf(what, sizeof what, "instanced pixels: %s law, %s, %.1f m over the ground: out = %s within 2 LSB (worst %d, lit %d)",
+                              reach ? "reach" : "first", lampMode ? "one lamp" : "ground light", dy, lampMode ? "lamp x (1 + gate (M - 1))" : "ground light x M", worst, lit);
                 Check(worst <= 2 && lit > 1000, what);
                 if (worst > 2 || lit <= 1000) std::printf("  %s\n", what);
             }

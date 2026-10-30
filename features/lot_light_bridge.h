@@ -42,6 +42,10 @@ struct BakeSnapshot {
     std::vector<uint64_t> lots;        // every lot with a tracked lamp (sorted)
 };
 const BakeSnapshot& CurrentBakeLamps();
+// Render thread: the lots whose world box overlaps (x0, z0)-(x1, z1), nearest the box's centre first; how many written
+int LotsNear(float x0, float z0, float x1, float z1, uint64_t* out, int max);
+// Render thread: a loaded lot's world box {x0, z0, x1, z1}; false when the lot table does not hold it
+bool LotWorldBox(uint64_t lot, float box[4]);
 // (2.15.1) The ground (lot base, world y) of a lot the soft lot edges' table holds; render thread (the terrain bake's low lamps)
 bool LotGroundY(uint64_t lot, float& y);
 // Developer capture (GroundProfile, render thread): the lot holding world (x, z) (0 = none) and the ground gains now

@@ -10,7 +10,7 @@ their own story. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Missing outdoor gather entries restored: Released in 2.15.5.  Outdoor and indoor light between stories: Released (present since 2.1.0, the first version in this repository). Indoor light through openings across more than one floor, the raised-room wall veto, structure-change refresh and the *Wall seams.csv* recording: Released in 2.6.0. Walls block light on floors and objects, indoor objects lit by lamps of another story and an atrium's stories changing together, and the lit story's wall test from where an outdoor lamp's ray enters it (upper half walls): Released in 2.7.0. Placed floors of balconies and upper stories block a lamp below them (walls, floors, windows, objects, fences) and *Buildings block light on objects* (was *Walls block light on objects*): Released in 2.12.3. Lighting corrections: Released in 2.12.1. Outdoor light through openings into roofed rooms (garden lamps of the story below included), indoor light through openings, *Doors block light*, lamp light through openings in the outside walls' copies and room 0's own wall test, *Walls shade lamp light near the ground*, *Buildings block lamp light on trees and objects*, *Shadow softness*, walls ending at a floor above: Released in 2.13.0. Closed-floor support-row guards, walls of the lamp's own story for light through floor openings, hard wall tops under a ceiling, floor-level sills without a soft rim, and indoor light independent of the camera: Released in 2.14.0. *Indoor light adds to the ground*, pane-sized windows, ceiling lamps kept out of closed rooms above, story boundaries at tile floors and gables sampled from their drawn foot: Released in 2.15.3. Adjacent gable samples stay consistent; short pillar blockers use their measured top, and verified floor tiles under emitters cast per-lamp soft shadows on instanced structures: Released in 2.15.4. Per-key outdoor queue recovery and exact lamp evaluation optimisation: Released in 2.15.6. Outdoor lamps through openings at the outdoor scale and cut, falling off from the opening and fading into the room; windows kept by the window built; lamp edits sending the rooms behind openings: Released in 2.16.0. A roofed room's own lamps tested against the story's walls in the directional maps: Released in 2.17.1. |
+| Availability | Missing outdoor gather entries restored: Released in 2.15.5.  Outdoor and indoor light between stories: Released (present since 2.1.0, the first version in this repository). Indoor light through openings across more than one floor, the raised-room wall veto, structure-change refresh and the *Wall seams.csv* recording: Released in 2.6.0. Walls block light on floors and objects, indoor objects lit by lamps of another story and an atrium's stories changing together, and the lit story's wall test from where an outdoor lamp's ray enters it (upper half walls): Released in 2.7.0. Placed floors of balconies and upper stories block a lamp below them (walls, floors, windows, objects, fences) and *Buildings block light on objects* (was *Walls block light on objects*): Released in 2.12.3. Lighting corrections: Released in 2.12.1. Outdoor light through openings into roofed rooms (garden lamps of the story below included), indoor light through openings, *Doors block light*, lamp light through openings in the outside walls' copies and room 0's own wall test, *Walls shade lamp light near the ground*, *Buildings block lamp light on trees and objects*, *Shadow softness*, walls ending at a floor above: Released in 2.13.0. Closed-floor support-row guards, walls of the lamp's own story for light through floor openings, hard wall tops under a ceiling, floor-level sills without a soft rim, and indoor light independent of the camera: Released in 2.14.0. *Indoor light adds to the ground*, pane-sized windows, ceiling lamps kept out of closed rooms above, story boundaries at tile floors and gables sampled from their drawn foot: Released in 2.15.3. Adjacent gable samples stay consistent; short pillar blockers use their measured top, and verified floor tiles under emitters cast per-lamp soft shadows on instanced structures: Released in 2.15.4. Per-key outdoor queue recovery and exact lamp evaluation optimisation: Released in 2.15.6. Outdoor lamps through openings at the outdoor scale and cut, falling off from the opening and fading into the room; windows kept by the window built; lamp edits sending the rooms behind openings: Released in 2.16.0. A roofed room's own lamps tested against the story's walls in the directional maps: Released in 2.17.1. Lamp posts of other lots: Released in 2.18.2. |
 | Default | On (every switch; *Light through doors and windows* follows `kRealisticOpeningsDefault` in `build_flavor.h`, on) |
 | Menu | Lighting > Game fixes > Stories (*Wall lamps at the right height*, *Seamless walls between floors*, *Every floor in full detail*, *Smooth light maps*); Lighting > Inside & floors > Stories; Lighting > Inside & floors > Rooms at Night (group *Lamp light*: *Outdoor light through openings*, *Indoor light through openings*, *Indoor light adds to the ground*, *Doors block light*; then *Shadow softness*); Lighting > Outside > Objects (*Buildings block lamp light on trees and objects*); Lighting > Outside > Ground & Lots (*Walls shade lamp light near the ground*) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -70,6 +70,11 @@ test. The light solve itself, lamp ranges and attenuation are the game's.
    story below, for a house on a foundation), onto its roofless yards, onto the objects and fences outside, and into a
    roofed room next door through an opening between them. Each point is lit only through the opening's hole and past every
    wall of the story; one opening only.
+10. **Lamp posts of other lots.** A lamp post (light type 11) lights the outside walls, the outdoor floors and the lot
+    ground of the lots around it, not only its own: the outdoor rooms take the posts of other lots as they take the
+    world's street lamps, on every story, with the weight the post has on its own lot. A post placed, moved or switched
+    reaches them as it is let go, solved first and shown with the stories of its own lot; a post deleted leaves their light
+    lists at once.
 
 Stairwells, stairs and arches have their own pages: [Light through stairwells](stairwells.md) (the lamp's own walls,
 soft slab edges, bounce light and partial adaptation), [Stairs on the directional maps](stairs.md) and
@@ -140,6 +145,11 @@ patch.
 ## Limitations
 
 - Final release-build gameplay confirmation is pending; offline checks do not establish identical material appearance or frame-time cost.
+- Lamp posts of other lots: only lamp posts (type 11) reach another lot; sconces, spots and shaded lamps of a lot light that
+  lot only (the game's cell filter asks the street-lamp class alone). Like a street lamp, the post is tested against the
+  walls of the lot it lights, not against those of its own lot. A lot around it takes a placed or moved post when it
+  gathers again, at the game's pace for a lot that is not the one played; lots more than 24 m from the post wait for their
+  next gather. Off while the light cells' removal hook is not in (*Lot lamps light the street* code not found).
 
 - Daytime curve in roofed rooms: their maps are baked, so between the endpoints they keep the factor of their last solve
   (a lamp switched at dusk solves at its twilight factor); a dawn or dusk sends the noted rooms to gather again once.
@@ -267,6 +277,41 @@ Lot load (`FUN_006c54e0`, `0x006C5525`) gathers room 0 of every story through le
 (`FUN_006c7250`) gather it through the room's own story. `FUN_006c7250` already refreshes room 0 of levels 0..7 when room
 0 of level 0 changes (`0x006C73B6..0x006C7426`: `FUN_006a6550(mgr, 0)`, `FUN_0069eed0(room, 1, 0)`, insert 0 into
 `+0x28`), which suggests the game intended upper stories to see ground lamps.
+
+### Lamp posts of other lots
+
+The world-light gather (`FUN_006b66b0`, ±2 light cells of 32 m around the lot centre) runs each cell through
+`FUN_006b6320`, which keeps a light when its class test (vfunc `+0x20`: true only for the street-lamp class `0x00FF42F8`,
+type 11) passes and `GetLotID()` is 0 (`mov ecx, esi; call GetLotID; or eax, edx; jnz` at `0x006B635D`). Every-Story
+Ground Light already sends that call to its own function, so the gather keeps the real lot id
+(`split_level_ground_light_patch.cpp`); that function is now `LevelLightShare::GatherLotId` (fastcall, light in `ecx`, lot
+id in `edx:eax`):
+
+- `OutdoorGather` sets a thread-local lot id (the room's manager `+0x90 / +0x94`) around the game's gather of a room 0 and
+  clears it after. `GatherLotId` answers 0 only while it is set, for a light of another lot with type 11, flags `+0x100`
+  alive, room known and enabled (`& 0x45`) and room `+0x08` = 0. Its own lot's lamps and every other caller (no lot set)
+  get the real id, so no lamp is listed a third time.
+- `TakeCrossLotLamps` (after `DropDisabledLotLights`): each other lot's post found in the list is noted with the room's
+  tracker and story; a post on story 0 of its lot (`+0xD0` = 0) listed once is added once more with `FUN_006a2060`, the
+  weight it has in its own lot's lists.
+- The other lots hold the post's pointer, and the game marks only its own lot when it changes. The light cells' three arm
+  sites (`ArmTestPlaced`, `ArmTestRemoved`, `ArmTestMoved`, night_terrain_relight) report it: on removal the noted
+  rooms are sent at once with `QueueRoom` (forced past the outdoor delta's up-to-date test), which stops a solve whose list
+  lost a lamp; a placement (once the world is live) or a move or switch is queued for the render thread.
+  `LotLightBridge::CrossLotTick` gathers the outdoor rooms (`QueueOutdoorRegather`) of every lot whose box lies within
+  24 m of such a post once no drag is engaged and no post has changed for 200 ms, as a lamp edit's safety net (urgent tier
+  2, gathered at once): solved after the edit's own rooms and before any other, and held with them by the edit hold, so
+  their stories change together; a drag sends them once, with the post where it stopped.
+- With Lamp updates on Instant, the active lot's posts are drawn on the GPU on the lots next to it
+  ([real-time outdoor lamps](rt-outdoor-lamps.md)): `GatherLotId` keeps their real lot id while such a lot's room 0
+  gathers (`SetGpuNeighbourLots`; `OutdoorGather` also notes the room's story, manager `+0x88`), except on the stories
+  the GPU cannot relight, and `CrossLotTick` leaves those lots out when one of those posts changes.
+- `SetCrossLotSafe`: on only while the arm sites are installed (NightTerrainRelight), off before they are removed; turned
+  off (a reinstall or an uninstall), it sends the rooms that hold another lot's post to gather again without it, so no
+  list keeps a post whose removal nothing reports. The arm sites report a change through `HookGuard::Try`.
+- Developer status and recordings: `Lamp posts of other lots: ... | taken, second entries, rooms sent when one moved or
+  went, lots gathered again, posts held`; development builds log `Lamp posts of other lots changed: N lot(s) around them
+  gather their outdoor rooms again`.
 
 ### Part 1: outdoor sharing
 

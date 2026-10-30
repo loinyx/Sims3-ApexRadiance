@@ -26,6 +26,7 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-29 | `04e5f3e` (release 2.18.2: the ground light on stair tops shaded at every height) | `tools/floor_shade_check` (`run.ps1 -Precomp <Shaders_Win32.precomp>`) | 10,854 checks, 0 failures (the shade inserted before the max, on the atlas at every height; both laws over the 116 instanced pixel shaders) | Offline; in game not confirmed |
 | 2026-10-23 | `4802ed9` (ASI SHA-256 `FC2D565C0F003F0DD9DF2BC56DFC5F047CA6FCDAC508B2DA66A83D032258ECFB`) | Standard Release x86 build; `tools/terrain_lighting_test/run_resource_checks.ps1`; `tools/floor_shade_check`; `tools/ground_shade_test/run.ps1` | Build: 0 warnings. Resource paths: 14,637 checks, 0 failures, including `DrawInstanced` (85) and realistic reach (388). Floor shade: 7,885 checks, 0 failures, including the per-lamp cap shader. Ground shade: 240 checks, 0 failures. Release gameplay remains unverified | MSBuild x86 / fake D3D9 / native D3D9 |
 | 2026-10-23 | `40f351e` | `tools/floor_shade_check` (`run.ps1 -Precomp <Shaders_Win32.precomp>`) | 7,103 checks, 0 failures (the fence copy's mask read in front of the face). No harness covers the reach scale without the walls' gain or the gates in the lot shade | Offline, native D3D9 |
 | 2026-10-22 | `d625404` | None: `run_resource_checks.ps1` (which extracts `DrawInstanced`) was not re-run; no harness covers the lamp pick memo | Not run | not run in game yet |
@@ -51,6 +52,11 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
 - Ground term on fences, railings and stairs (combined build, 2026-09-25).
 
 ## Open checks
+
+- Ground light on stair tops (`04e5f3e`), F7 2026-10-29 17-35-27 and 17-35-29: an outdoor stair
+  beside a house wall, at night. **Expected:** the steps above 1.25 m take the same wall shade as the grass beside the stair
+  (no bright flat band over the shaded lower steps); the lamp at the top of the stair still lights the upper steps.
+  Offline: `tools/floor_shade_check`, 10,854 checks, 0 failures (the 116 instanced pixel shaders of the precomp, both laws).
 
 - Exact release ASI in game: compare a raised railing, elevated fence run and stairs below an emitter with nearby walls;
   verify that the floor shadow stops at open stair treads and that elevated structures keep the ground atlas pool out.

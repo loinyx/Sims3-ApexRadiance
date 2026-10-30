@@ -120,12 +120,18 @@ struct Room0Export {
     std::vector<uintptr_t> kept;  // every light with parts kept (the others' parts stay in the base)
     int lamps = 0;                // lights kept
 };
-uint32_t RecordVersion(const void* room, int cls); // 0 = nothing kept for that room and class
+// 0 = nothing kept for that room and class; baseOnly: the kept solve is a lot next to the active one's (SetNeighbourLots)
+uint32_t RecordVersion(const void* room, int cls, bool* baseOnly = nullptr);
 bool ExportRoom0(const void* room, int cls, Room0Export& out);
 // The active lot's room 0s (render thread, once a frame): the memory budget never drops them; past kMaxPinnedBytes a new
 // solve of one is not kept instead, and their drawn lamps' parts are kept as one sum per texel. Returns how many of their
 // solves the budget has not kept so far (logged with their sizes)
 long PinRooms(const void* const* rooms, int n);
+// The lots next to the active one whose room 0s Real-time outdoor lamps relights with the active lot's lamps (render thread,
+// every frame; at most 4, n = 0 clears): a solve of one of their room 0s keeps only its texels and their sums (every light of
+// its list kept, none drawn, no light's part), so ExportRoom0's base is the whole sum and a delta solves the room in full.
+// Never pinned: the memory budget drops them first, and they make room only for one another
+void SetNeighbourLots(const uint64_t* lots, int n);
 size_t KeptBytes();
 // What the kept parts are made of, and what the budget and the left-lot sweep dropped (the memory report and its log line)
 std::string MemoryText();
