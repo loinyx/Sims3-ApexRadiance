@@ -473,7 +473,8 @@ std::string g_status = "Off";
 struct ChunkTex {
     IDirect3DBaseTexture9* tex = nullptr; // AddRef'd
     bool rebuilt = false;                 // tex is the chunk's rebuilt map +0xD8 (ChunkRelight::RebuiltLightMapMatch)
-    uint32_t checkedFrame = 0;            // the frame a draw of another map last checked whether that one is now the rebuilt map
+    uint32_t checkedFrame = 0;            // the frame and texture of the last check of another map drawn for this chunk
+    const void* checkedTex = nullptr;
     DWORD sampler = 0;                    // (developer log) where the draw that recorded it found it, and its pixel shader
     const void* ps = nullptr;
 };
@@ -7730,18 +7731,14 @@ DWORD RecordWorldChunk(IDirect3DDevice9* dev, std::pair<int, int>& key, ChunkTex
             D3DSURFACE_DESC d{};
             ok = SUCCEEDED(static_cast<IDirect3DTexture9*>(cand)->GetLevelDesc(0, &d)) && d.Width == 256 && d.Height == 256 && d.Format != D3DFMT_Q8W8V8U8;
         }
-        // Already the rebuilt map of another chunk (g_chunks holds a reference, so its address cannot belong to a new
-        // texture): a leftover, not this chunk's map. Only a confirmed rebuilt map is refused: a world file's map may be
-        // registered to a chunk whose rebuilt map was not seen yet
+        // Already the map of another chunk (g_chunks holds a reference, so its address cannot belong to a new texture):
+        // a leftover, not this chunk's map
         if (ok) {
             const auto owner = g_chunkOfTexture.find(cand);
             if (owner != g_chunkOfTexture.end() && owner->second != here) {
-                const auto o = g_chunks.find(owner->second);
-                if (o != g_chunks.end() && o->second.rebuilt) {
-                    ok = false;
-                    strayOwner = owner->second, straySampler = s;
-                    g_chunkStraySkipped.fetch_add(1, std::memory_order_relaxed);
-                }
+                ok = false;
+                strayOwner = owner->second, straySampler = s;
+                g_chunkStraySkipped.fetch_add(1, std::memory_order_relaxed);
             }
         }
         if (ok) {
@@ -7757,7 +7754,7 @@ DWORD RecordWorldChunk(IDirect3DDevice9* dev, std::pair<int, int>& key, ChunkTex
         const auto at = g_worldMapSampler.find(g_curPs);
         const bool own = known != g_chunks.end() && known->second.rebuilt && at != g_worldMapSampler.end();
         if ((why && !own) || (straySampler && !kPublicBuild)) {
-            const std::string text = straySampler ? std::format("s{} holds the rebuilt map of chunk ({}, {})", straySampler, strayOwner.first, strayOwner.second)
+            const std::string text = straySampler ? std::format("s{} holds the map of chunk ({}, {})", straySampler, strayOwner.first, strayOwner.second)
                                                   : std::string("no chunk light map in its samplers");
             if (why && !own) *why = std::format("chunk ({}, {}): {}", here.first, here.second, text);
             static int s_logged = 0; // (developer log) what a draw bound in place of its chunk's map
@@ -7781,14 +7778,14 @@ DWORD RecordWorldChunk(IDirect3DDevice9* dev, std::pair<int, int>& key, ChunkTex
     // grass by the lots, while the paint layers read the rebuilt one at s3..s8), so the chunk's map changed draw by draw:
     // its smoothed copy was built again about 30 times a second and the ground showed the lamps or not as the camera moved.
     // Once seen, the rebuilt map stays the chunk's map and every draw of the chunk is drawn with it or its smoothed copy in
-    // place of the other one (the caller binds it at this sampler). A draw of another map checks at most once a frame
-    // whether that one is now the rebuilt map.
+    // place of the other one (the caller binds it at this sampler). A draw of another map checks at most once a frame per
+    // texture whether that one is now the rebuilt map, and whether the kept one still is.
     if (slot.tex != t) {
         int match = -1;
-        if (!slot.rebuilt || slot.checkedFrame != g_roomMapFrame) {
-            slot.checkedFrame = g_roomMapFrame;
+        if (!slot.rebuilt || slot.checkedFrame != g_roomMapFrame || slot.checkedTex != t) {
+            slot.checkedFrame = g_roomMapFrame, slot.checkedTex = t;
             match = ChunkRelight::RebuiltLightMapMatch(key.first, key.second, t);
-            if (match < 0 && slot.tex && !slot.rebuilt) slot.rebuilt = ChunkRelight::RebuiltLightMapMatch(key.first, key.second, slot.tex) >= 0;
+            if (match < 0 && slot.tex) slot.rebuilt = ChunkRelight::RebuiltLightMapMatch(key.first, key.second, slot.tex) >= 0;
         }
         if (match < 0 && slot.rebuilt) {
             static bool s_told = false;
@@ -7831,13 +7828,6 @@ DWORD RecordWorldChunk(IDirect3DDevice9* dev, std::pair<int, int>& key, ChunkTex
             g_chunkOfTexture.erase(slot.tex);
             slot.tex->Release();
         }
-        // registered to another chunk without being its rebuilt map (else skipped above): it moves here, that chunk takes
-        // its map again at its next draw
-        if (const auto o = g_chunkOfTexture.find(t); o != g_chunkOfTexture.end())
-            if (const auto other = g_chunks.find(o->second); other != g_chunks.end() && other->second.tex == t) {
-                other->second.tex->Release();
-                other->second = ChunkTex{};
-            }
         slot.tex = t; // keep the reference from GetTexture
         slot.rebuilt = match >= 0;
         g_chunkOfTexture[t] = key;
@@ -10388,6 +10378,7 @@ void Shutdown(bool keepChunkMaps) {
     g_curPsRoomMap = false;
     RoomMapPadding::Clear();
     g_worldSamplers.clear();
+    g_worldMapSampler.clear();
     g_terrainLampConst.clear();
     for (auto*& m : g_magenta)
         if (m) {

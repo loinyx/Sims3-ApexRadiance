@@ -544,10 +544,11 @@ bool RebuildActive() { return g_rb.active; }
 bool LikelyAvailable() { return g_resolved && g_hooked && g_rebuiltThisWorld && !g_offThisWorld; }
 
 namespace {
-// The texture `tex` is the object +0xD8 holds or one of its first 32 dwords (the game's texture holder); SEH. The offset of
-// the first match is the holder's texture field and is the only one read afterwards: past the holder's end the scan could
-// reach a neighbouring object holding another texture.
-int g_holderOffset = 0;
+// The texture `tex` is the object +0xD8 holds or one of its first 32 dwords (the game's texture holder); SEH. Once the same
+// offset matched in two holders it is taken as the holder's texture field and is the only one read afterwards: past the
+// holder's end the scan could reach a neighbouring object holding another texture.
+int g_holderOffset = 0, g_holderSeen = 0; // (g_holderSeen: the offset matched once, in g_holderFirst)
+uintptr_t g_holderFirst = 0;
 int ScanHolder(uintptr_t lm, uintptr_t tex) {
     __try {
         const auto at = reinterpret_cast<const uintptr_t*>(lm);
@@ -562,14 +563,20 @@ int MatchRebuilt(uintptr_t lm, uintptr_t tex) {
     if (lm == tex) return 0;
     const int found = ScanHolder(lm, tex);
     if (found > 0 && !g_holderOffset) {
-        g_holderOffset = found;
-        LOG_INFO(std::format("[ChunkRelight] Rebuilt light map: the texture is at +0x{:X} of the object +0xD8 holds", found));
+        if (found != g_holderSeen) g_holderSeen = found, g_holderFirst = lm;
+        else if (lm != g_holderFirst) {
+            g_holderOffset = found;
+            LOG_INFO(std::format("[ChunkRelight] Rebuilt light map: the texture is at +0x{:X} of the object +0xD8 holds", found));
+        }
     }
     return found;
 }
 } // namespace
 int RebuiltLightMapMatch(int centreX, int centreZ, const void* texture) {
-    if (!texture || centreX < static_cast<int>(kCell / 2) || centreZ < static_cast<int>(kCell / 2)) return -2;
+    // (only chunk centres: another position would be floored into the chunk around it)
+    if (!texture || centreX < static_cast<int>(kCell / 2) || centreZ < static_cast<int>(kCell / 2) || (centreX - static_cast<int>(kCell / 2)) % static_cast<int>(kCell) ||
+        (centreZ - static_cast<int>(kCell / 2)) % static_cast<int>(kCell))
+        return -2;
     View v;
     std::string why;
     if (!ReadView(v, why)) return -2;

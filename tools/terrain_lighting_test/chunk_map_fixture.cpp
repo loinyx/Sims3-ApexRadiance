@@ -112,19 +112,22 @@ int main() {
     Check(!g_chunkOfTexture.count(&A) && g_chunkOfTexture[&B] == K, "only the rebuilt map is registered");
     Check(A.refs == 1 && B.refs == 2, "references: the chunk holds the rebuilt map only");
 
-    // the world file's map registered to another key first (an object drawn with a terrain shader): no longer refused
+    // the world file's map registered to another key first (an object drawn with a terrain shader): refused as that key's,
+    // the chunk's own rebuilt map drawn at the shader's sampler
     Reset();
     fixtureRebuilt[K] = &B;
     Draw(&sidewalk, 2, &A, 900, 1140);
     Draw(&paint, 3, &B, 896, 1152);
     std::string why;
-    Check(Draw(&sidewalk, 2, &A, 896, 1152, &c, &why) == 2 && c->tex == &B && why.empty(), "a world file's map registered elsewhere is not a leftover");
+    Check(Draw(&sidewalk, 2, &A, 896, 1152, &c, &why) == 2 && c->tex == &B && why.empty(), "a map registered elsewhere: own rebuilt map drawn");
+    Check(g_chunkOfTexture[&A] == std::make_pair(900, 1140) && A.refs == 2, "the other key keeps its map");
 
-    // both unconfirmed: the map moves to the drawing chunk and the other key lets it go
+    // nothing confirmed (before the world's first rebuild): a map registered to another key is refused, never moved, so two
+    // keys cannot take it from each other draw by draw
     Reset();
     Draw(&sidewalk, 2, &A, 900, 1140);
-    Check(Draw(&sidewalk, 2, &A, 896, 1152, &c) == 2 && c->tex == &A, "unconfirmed map taken over");
-    Check(g_chunkOfTexture[&A] == K && !g_chunks[{900, 1140}].tex && A.refs == 2, "the other key released it");
+    for (int i = 0; i < 3; i++) Check(Draw(&sidewalk, 2, &A, 896, 1152, &c) == 0 && Draw(&sidewalk, 2, &A, 900, 1140) == 2, "no take-over back and forth");
+    Check(g_chunkOfTexture[&A] == std::make_pair(900, 1140) && A.refs == 2 && !g_chunks.count(K), "registration and references unchanged");
 
     // another chunk's rebuilt map left in the sampler: refused, the chunk's own rebuilt map is drawn at the shader's sampler
     Reset();
@@ -132,14 +135,15 @@ int main() {
     Draw(&paint, 3, &B2, 1152, 1152);
     Draw(&sidewalk, 2, &A2, 1152, 1152);
     Draw(&paint, 3, &B, 896, 1152);
+    const int strays = g_chunkStraySkipped.load();
     Check(Draw(&sidewalk, 2, &B2, 896, 1152, &c) == 2 && c->tex == &B, "leftover rebuilt map: own rebuilt map at the learned sampler");
-    Check(g_chunkStraySkipped.load() == 1, "leftover counted");
+    Check(g_chunkStraySkipped.load() == strays + 1, "leftover counted");
     // ...and left to the game, with the reason, while the chunk's rebuilt map is unknown
     Reset();
     fixtureRebuilt[K2] = &B2;
     Draw(&paint, 3, &B2, 1152, 1152);
     why.clear();
-    Check(Draw(&sidewalk, 2, &B2, 896, 1152, &c, &why) == 0 && why.find("s2 holds the rebuilt map of chunk (1152, 1152)") != std::string::npos,
+    Check(Draw(&sidewalk, 2, &B2, 896, 1152, &c, &why) == 0 && why.find("s2 holds the map of chunk (1152, 1152)") != std::string::npos,
           "leftover with no known own map: refused with its reason");
 
     // the game makes a new rebuilt texture: taken at the first draw of it in a later frame
@@ -149,6 +153,15 @@ int main() {
     fixtureRebuilt[K] = &B3;
     g_roomMapFrame++;
     Check(Draw(&paint, 3, &B3, 896, 1152, &c) == 3 && c->tex == &B3 && c->rebuilt && B.refs == 1, "new rebuilt texture taken");
+    // ...also when a world file's draw of the chunk checked first in that frame
+    Reset();
+    fixtureRebuilt[K] = &B;
+    Draw(&paint, 3, &B, 896, 1152);
+    g_roomMapFrame++;
+    Draw(&sidewalk, 2, &A, 896, 1152);
+    fixtureRebuilt[K] = &B3;
+    Draw(&sidewalk, 2, &A, 896, 1152);
+    Check(Draw(&paint, 3, &B3, 896, 1152, &c) == 3 && c->tex == &B3 && c->rebuilt, "new rebuilt texture taken after another check that frame");
 
     // no rebuilt map readable (before the world's first rebuild): the last map seen, as before
     Reset();
@@ -176,6 +189,10 @@ int main() {
                                  0x02000001u, 0x800F0002u, 0xA0E40014u, 0x03000001u, 0x800F0003u, 0xA0E4201Eu, 0xB0000000u, 0x0000FFFFu};
     Check(ShaderPatches::ConstantsRead(vs3) == 1u << 14, "constants read: c14 only (def'd and relative left out)");
     Check(ShaderPatches::ConstantsRead({}) == ~0u, "constants read: unparsable code gives every bit");
+    // m4x4 r0, v0, c12 reads c12..c15; vs_1_1 code is not parsed
+    const std::vector<DWORD> matrix{0xFFFE0300u, 0x03000014u, 0x800F0000u, 0x90E40000u, 0xA0E4000Cu, 0x0000FFFFu};
+    Check(ShaderPatches::ConstantsRead(matrix) == 0xFu << 12, "constants read: the four rows of an m4x4");
+    Check(ShaderPatches::ConstantsRead({0xFFFE0101u, 0x00000001u, 0x0000FFFFu}) == ~0u, "constants read: vs_1_1 gives every bit");
 
     Reset();
     std::printf("%d checks, %d failures\n", checks, failures);
