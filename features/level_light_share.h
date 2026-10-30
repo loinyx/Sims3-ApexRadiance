@@ -234,6 +234,33 @@ int RelightLot(uintptr_t tracker, const char* why, unsigned long changedAt = 0, 
 // in Build mode (07/10): no lamp entry update runs, so neither LampMarkFilter nor AfterChangedWalk's cross-story sends
 // always see it, and the outdoor rooms of the other stories (the walls) kept the deleted lamp in their light lists.
 int RelightLotById(uint64_t lot, const char* why);
+// ---- Lamp posts of other lots on a lot's outside walls ----
+// The outdoor-room light gather's call of GetLotID (0x6B635D, SplitLevelGroundLight): the light's lot id, or 0 for another
+// lot's lamp post while a room 0 gathers, so it comes in as a world light does (fastcall: the light in ecx, the id in edx:eax)
+uint64_t __fastcall GatherLotId(const unsigned char* light);
+enum class CrossLotChange { Placed, Removed, Moved };
+// The light cells' registration, removal and move (NightTerrainRelight's arm sites, any thread): the rooms that hold another
+// lot's post that moved or went gather again at once; a post placed or moved is noted for CrossLotTick
+void CrossLotLightChanged(const unsigned char* light, CrossLotChange what);
+// On while the arm sites are in: without the removal hook no room takes another lot's post (its pointer could outlive it)
+void SetCrossLotSafe(bool on);
+struct CrossLotEvent {
+    uint64_t lot = 0;      // the post's lot
+    float rect[4] = {};    // its light rect: minX, minZ, maxX, maxZ
+    unsigned long at = 0;  // GetTickCount
+};
+// Render thread: the posts placed or moved since the last call
+void TakeCrossLotEvents(std::vector<CrossLotEvent>& out);
+// Render thread: the outdoor rooms of a loaded lot gather again (room 0 of each story, its roofless rooms); false = not loaded
+bool RegatherOutdoorById(uint64_t lot);
+// Real-time outdoor lamps draws the active lot's lamp posts on these lots' room-0 maps (render thread, when the set changes;
+// at most 4): their gathers no longer take those posts, except on the stories of cpuStories[i] (bit per story) it cannot relight
+void SetGpuNeighbourLots(uint64_t active, const uint64_t* lots, const uint8_t* cpuStories, int n);
+// The GPU draws the posts of lot postLot on every story of lot (CrossLotTick: its gathers need not take them again)
+bool GpuDrawsPosts(uint64_t postLot, uint64_t lot);
+// Render thread: a loaded lot's tracker by its lot id (0 = not loaded)
+uintptr_t TrackerOfLot(uint64_t lot);
+std::string CrossLotText(); // developer status
 // The lamps are held by indoor rooms of two stories or more (taken through a stair opening): a lamp edit then relights the
 // whole lot at once (a targeted refresh left a closed room lit for seconds). Render thread.
 bool LampsCrossStories(uintptr_t tracker, const uintptr_t* lamps, int lampCount);

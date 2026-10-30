@@ -48,6 +48,11 @@ Anything else is solved in full, and its parts are kept again: a first solve, an
 floors or openings, a lighting option changed, more than eight lights changed, a quick pass, a solve off the light tree
 thread.
 
+The room 0s of the lots next to the active one that Real-time outdoor lamps relights with the active lot's posts
+(`SetNeighbourLots`, at most four) keep their texels and sums only, every light of the list kept with no part
+(`Record::baseOnly`): their sum is the GPU's base. No delta takes them (an edit there is a full solve), and the memory
+budget drops them first; they make room only for one another.
+
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
@@ -57,7 +62,7 @@ thread.
 
 ## Limitations
 
-- Runs only with Lamp lighting > Instant (GPU), and only on the active lot.
+- Runs only with Lamp lighting > Instant (GPU), and only on the active lot (the lots next to it keep their base only).
 - The first edit after a room 0 was solved without its parts kept (a load, another class, an option change) is a full
   solve; the edits after it are quick.
 - A texel can differ from a full solve by one 8-bit level (rounding of the kept parts).

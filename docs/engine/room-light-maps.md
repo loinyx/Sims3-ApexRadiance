@@ -129,7 +129,8 @@ written at `Y × pitch + X × 4`).
      the story share's two entries, none from the world-light gather).
    - Only for room 0: world lights around the lot centre, `0x006B66B0` (±2 cells of 32 m), added with `0x006A2060`.
      The per-cell filter keeps lights with `GetLotID() == 0` (world lights). With the Split-Level Lighting Fix
-     (`GetLotID` → 0) lot lights of type 11 also enter here, on every story.
+     (`GetLotID` → 0) lot lights of type 11 also enter here, on every story. Apex Radiance answers 0 there only for the lamp
+     posts of other lots ([level-light-share.md](../features/night-lighting/level-light-share.md#lamp-posts-of-other-lots)).
 2. 3D blockers: `0x006C6A20` + `0x0069E5E0`, own story only. The container starts at room+0x30;
    its 3D vector is container+0x10, therefore room+0x40.
 

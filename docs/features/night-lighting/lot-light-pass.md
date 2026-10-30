@@ -105,6 +105,9 @@ The full table is in the [Night Lighting overview](README.md#settings).
   in it, and gates are seen only while the per-pixel object lamps draw (*Lamps light objects* and *Doors and windows
   stay lit*); any outdoor object standing there (a plant, a sign) closes it too, and an open gate shades as a closed one.
   Narrower gaps are always closed. Unverified in game.
+- A lamp post standing just past its lot's edge (one tile between an outside wall and the edge) can leave the grass around
+  it dark: the shade shown there held about 0.2 where the shade worked out from the same lamps and walls gave about 0.7
+  (the post unblocked). Whether the shade shown was stale or the build differs at the lot's edge is not established.
 - The winter lot pass with VS 436BB272 (m58, "prefeitura") is not handled ([snow.md](snow.md)).
 - The snowy lot pass has no soft edge.
 - A porch lamp within 3 m of the edge fades towards the atlas near the edge (with *Lot lamps light the street* the atlas

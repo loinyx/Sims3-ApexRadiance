@@ -25,6 +25,7 @@
 #include "outdoor_delta.h"
 #include "outdoor_delta_model.h"
 #include "level_light_share.h"
+#include "lot_light_bridge.h"
 #include "lamp_reach.h"
 #include "penumbra.h"
 #include "room_map_dither.h"
@@ -78,6 +79,10 @@ constexpr uint64_t kGameWriteGapMs = 500; // a relight made only for a game writ
 // drawn from that height, as a fixture's glow would spread; walls, ceilings, objects and trees keep its real place. The
 // terrain bake stamps it from the same height (TerrainBakeRule::StampHeight), so the lawn beyond the lot and the atlas agree.
 std::atomic<long> g_lowLampLifted{0};
+// The lots next to the active one whose room-0 maps take the active lot's lamps too (lamp posts on the walls of the house
+// next door): the nearest kMaxNeighbours lots whose box comes within kNeighbourReach of one of its GPU lamps
+constexpr int kMaxNeighbours = 3;
+constexpr float kNeighbourReach = 20.0f; // m
 constexpr double kFrameCpuMs = 2.0;      // a frame's relight work stops starting maps past this (the rest next frame)
 constexpr double kFrameWork = 1.0e6;     // ... or past this many units (texel x lamp: 7 exact, 1 dragged; about 2 ns of GPU each, tools/rt_lamps_test)
 
@@ -403,6 +408,7 @@ std::atomic<uintptr_t> g_switchOn{0}; // a GPU lamp switched on (LampMarkFilter,
 // ---- the maps (render thread) ----
 struct Slot {
     int story = 0, m = 0, cls = 0;
+    uintptr_t mgr = 0; // 0: a map of the active lot; else of a lot next to it (its story manager), relit with the active lot's lamp posts
     int retries = 0;   // uploads that failed for a buffer in a row (UploadSlot)
     DWORD retryAt = 0; // not built again before this tick (0 = no wait)
     const BYTE* room = nullptr;
@@ -476,13 +482,14 @@ struct Phases {
 };
 bool g_roundOpen = false;        // a relight spread over frames is under way
 double g_roundCpuMs = 0;         // its CPU time so far
-int g_roundMaps = 0, g_roundFrames = 0, g_roundTiles = 0;
+int g_roundMaps = 0, g_roundFrames = 0, g_roundTiles = 0, g_roundNb = 0; // (g_roundNb: of the maps, those of the lots next to it)
 std::vector<int> g_roundStories;
 // What made maps relit, and the frame's own cost, over the last 10 s (the self-measure line; render thread)
 struct Why {
     long first = 0, lamp = 0, base = 0, params = 0, occluders = 0, gameWrite = 0, exact = 0, build = 0, writeGap = 0;
     long relights = 0;
     double frameMs = 0, frameMax = 0;
+    double nbMs = 0, loopMs = 0; // of frameMs: the lots next to it, the relight loop (its checks of every map included)
     long frames = 0;
     DWORD since = 0;
 };
@@ -572,9 +579,70 @@ void RebuildSwap() {
             g_swapLo = std::min(g_swapLo, a), g_swapHi = std::max(g_swapHi, a);
         }
 }
+// ---- the lots next to the active one (render thread) ----
+// Their room-0 maps are relit with the active lot's lamp posts: their gathers leave those posts out (LevelLightShare::GatherLotId)
+// and their kept solves are the base alone (OutdoorDelta::SetNeighbourLots). A story the GPU cannot relight gathers them again.
+struct Neighbour {
+    uint64_t lot = 0;
+    uintptr_t tracker = 0;
+    uint8_t cpu = 0; // its stories the GPU cannot relight (their gathers take the posts)
+};
+std::vector<Neighbour> g_nb; // nearest first
+uint64_t g_nbActive = 0;
+// A story of one of them: its lamps of the terrain bake, for its outdoor floors' under-floor share (as the active lot's
+// stories: bake, keys, signature, lot base)
+struct NbBake {
+    std::vector<RtLampModel::BakeLamp> bake;
+    std::vector<uint64_t> keys;
+    uint64_t sig = 0;
+    float base = 0.0f;
+    DWORD at = 0;         // read last (0: never)
+    uint32_t kept = 0;    // with this kept solve's version
+    uint64_t lampSig = 0; // and the active lot's lamps (Frame's allSig)
+};
+std::unordered_map<uintptr_t, NbBake> g_nbBake; // story manager ->
+void SendNeighbours() {
+    uint64_t lots[kMaxNeighbours];
+    uint8_t cpu[kMaxNeighbours];
+    const int n = static_cast<int>(std::min<size_t>(g_nb.size(), kMaxNeighbours));
+    for (int i = 0; i < n; i++) lots[i] = g_nb[i].lot, cpu[i] = g_nb[i].cpu;
+    LevelLightShare::SetGpuNeighbourLots(g_nbActive, lots, cpu, n);
+    OutdoorDelta::SetNeighbourLots(lots, n);
+}
+// The lots next to `active` relit now (nearest first); a lot joining or leaving gathers again (regather false: a paced restart
+// solves every room anyway)
+void PublishNeighbours(uint64_t active, const std::vector<std::pair<uint64_t, uintptr_t>>& want, bool regather = true) {
+    bool same = active == g_nbActive && want.size() == g_nb.size();
+    for (size_t i = 0; same && i < want.size(); i++) same = want[i].first == g_nb[i].lot;
+    if (same) return;
+    const auto had = [](const std::vector<Neighbour>& v, uint64_t lot) { return std::any_of(v.begin(), v.end(), [lot](const Neighbour& n) { return n.lot == lot; }); };
+    std::vector<Neighbour> next;
+    for (const auto& [lot, tracker] : want) {
+        const auto it = std::find_if(g_nb.begin(), g_nb.end(), [lot](const Neighbour& n) { return n.lot == lot; });
+        next.push_back(it != g_nb.end() && active == g_nbActive ? *it : Neighbour{lot, tracker, 0});
+    }
+    std::vector<Neighbour> moved;
+    for (const auto& n : g_nb)
+        if (active != g_nbActive || !had(next, n.lot)) moved.push_back(n);
+    for (const auto& n : next)
+        if (active != g_nbActive || !had(g_nb, n.lot)) moved.push_back(n);
+    g_nb = std::move(next);
+    g_nbActive = active;
+    SendNeighbours();
+    int sent = 0;
+    for (const auto& n : moved)
+        if (regather && LevelLightShare::TrackerLive(n.tracker)) sent += LevelLightShare::RegatherOutdoorById(n.lot) ? 1 : 0;
+    if (!moved.empty() && LogAllowed()) {
+        std::string list;
+        for (const auto& n : g_nb) list += std::format("{}{:08X}", list.empty() ? "" : " ", static_cast<uint32_t>(n.lot));
+        LOG_INFO(std::format("[RtOutdoorLamps] Lots next to the active one relit with its lamp posts: {} ({} lot{} gather their outdoor rooms again)",
+                             list.empty() ? std::string("none") : list, sent, sent == 1 ? "" : "s"));
+    }
+}
 struct Job;
 std::vector<std::shared_ptr<Job>> g_jobs; // render thread: the stories whose maps are being prepared (a worker thread each, one at a time)
 void DropAll(IDirect3DDevice9* dev, const char* why, bool requeue = true) {
+    PublishNeighbours(0, {}, requeue); // (their maps are the game's again: their gathers take the posts back)
     g_jobs.clear(); // (a job still running finishes on its own)
     g_swap.clear();
     g_swapLo = ~uintptr_t{0}, g_swapHi = 0;
@@ -718,8 +786,10 @@ struct Prepared {
 struct Job {
     const void* room = nullptr;
     int story = 0, cls = 0;
+    int lot = 0; // 1: a lot next to the active one
     uint32_t ver = 0;
     RoomNow rn;
+    Xform space{}; // the texels' space: the active lot's (rn.xf for its own stories)
     std::atomic<int> state{0}; // 1 running, 2 done, 3 failed
     uint32_t version = 0;
     float thr = 0.0f;
@@ -757,15 +827,18 @@ void PrepareJob(Job& j) {
             if (t.map != m) continue;
             RtLampGpu::TexelVertex tv{};
             tv.x = t.x, tv.y = t.y, tv.w = 1.0f;
-            ToLot(j.rn.xf, t.pos, tv.p);
+            ToLot(j.space, t.pos, tv.p);
             float n[3];
-            DirToLot(j.rn.xf, t.nrm, n);
+            DirToLot(j.space, t.nrm, n);
             const float nl = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
             for (int k = 0; k < 3; k++) tv.n[k] = nl > 1e-6f ? n[k] / nl : 0.0f;
             tv.p[3] = static_cast<float>(t.bits & 3);
             // (15/10) the lot's ground on story 0 (turned up, within 1 m of the lot's ground, not a masked floor): bit 4, no wall
-            // test on the GPU; the lot passes shade it with the smooth ground shade (unverified: lot space y 0 = the lot's ground)
-            if (groundShade && j.story == 0 && !(t.bits & 1) && tv.n[1] > 0.9f && std::fabs(tv.p[1]) < 1.0f) tv.p[3] += 4.0f;
+            // test on the GPU; the lot passes shade it with the smooth ground shade (unverified: lot space y 0 = the lot's ground;
+            // a lot next to the active one: its own ground, and its lot pass's shade takes the active lot's posts too, unverified)
+            float own[3] = {0.0f, tv.p[1], 0.0f};
+            if (j.lot > 0) ToLot(j.rn.xf, t.pos, own);
+            if (groundShade && j.story == 0 && !(t.bits & 1) && tv.n[1] > 0.9f && std::fabs(own[1]) < 1.0f) tv.p[3] += 4.0f;
             tv.n[3] = static_cast<float>(t.packed >> 24) / 255.0f;
             for (int k = 0; k < 3; k++) tv.base[k] = std::isfinite(t.base[k]) ? t.base[k] : 0.0f;
             tv.base[3] = ex.dither ? RoomMapDither::Offset(t.x, t.y) / 255.0f : 0.0f;
@@ -909,7 +982,20 @@ struct GpuLamp {
     int mult[8] = {};
     uint32_t listed = 0; // the stories whose room-0 list holds it (mult also covers the stories it is drawn on before they gather it)
     bool liftable = false; // drawn from kLowLampLift on story 0's floor map when it lies on the ground
+    bool post = false;     // a lamp post (the street-lamp class 11): drawn on the lots next to the active one too
+    float world[3] = {};   // its place (world)
+    bool inBake = false;   // (a post) in the terrain bake: a lot next to it counts it under its outdoor floors as its gather did
+    RtLampModel::BakeLamp bake;
 };
+// A lamp of the terrain bake as the floor mask's under-floor share takes it
+void FillBake(const LampRead& r, bool coneSpill, RtLampModel::BakeLamp& b) {
+    for (int k = 0; k < 3; k++) b.head[k] = r.pos[k];
+    b.range = r.range, b.intensity = r.intensity;
+    const bool spill = coneSpill && r.f.type == 5;
+    for (int k = 0; k < 3; k++) b.colour += std::max(r.f0[k], 0.0f) * (spill ? std::clamp(r.S[k], 0.0f, 1.0f) : 1.0f);
+    b.colour *= r.areaShare;
+    b.liftable = TerrainBakeRule::Liftable(r.f.lot != 0, r.f.type) ? 1u : 0u;
+}
 struct BakeLampW {
     RtLampModel::BakeLamp b; // world space (the gate is measured in world y against the lot base)
 };
@@ -1002,9 +1088,11 @@ void OnEndScene(IDirect3DDevice9* dev) {
             const Why& w = g_why;
             LOG_INFO(std::format("[RtOutdoorLamps] Cost over {:.0f} s: {:.3f} ms a frame on average (largest {:.2f} ms) on the render thread; {} relights, maps relit "
                                  "because: first {}, a lamp within reach changed {}, the kept base changed {}, the game wrote the map {}, exact after a drag {}, "
-                                 "options {}, occluders {}; {} relights for repeated game writes moved later; {} story maps prepared ({:.1f} ms on a worker thread){}",
+                                 "options {}, occluders {}; {} relights for repeated game writes moved later; {} story maps prepared ({:.1f} ms on a worker thread); "
+                                 "of a frame: the lots next to it {:.3f} ms, the maps' checks and relights {:.3f} ms{}",
                                  (now - w.since) / 1000.0, w.frames ? w.frameMs / static_cast<double>(w.frames) : 0.0, w.frameMax, w.relights, w.first, w.lamp,
                                  w.base, w.gameWrite, w.exact, w.params, w.occluders, w.writeGap, w.build, g_buildMs,
+                                 w.frames ? w.nbMs / static_cast<double>(w.frames) : 0.0, w.frames ? w.loopMs / static_cast<double>(w.frames) : 0.0,
                                  g_inactive.empty() ? std::string() : " | inactive: " + g_inactive));
         }
         g_why = Why{};
@@ -1030,6 +1118,7 @@ void Frame(IDirect3DDevice9* dev) {
     ReadGpuTime();
     // what makes the option do nothing now, logged once each
     if (!g_option.load(std::memory_order_relaxed)) {
+        PublishNeighbours(0, {}); // (before any slot: a lot next to it may be listed with none built yet)
         if (!g_slots.empty()) {
             // the game's room-0 maps may lack lamp edits the GPU stood in for (OutdoorDelta left their deltas out): each
             // story's room 0 is solved again
@@ -1045,6 +1134,7 @@ void Frame(IDirect3DDevice9* dev) {
         return;
     }
     const auto off = [&](const std::string& why) {
+        PublishNeighbours(0, {});
         if (!g_slots.empty()) DropAll(dev, why.c_str());
         g_on.store(false);
         g_watch.store(false);
@@ -1131,6 +1221,7 @@ void Frame(IDirect3DDevice9* dev) {
         proxyWhy = g_proxyWhy;
     }
     if (!proxy) {
+        PublishNeighbours(0, {});
         g_restartGpuPending = true;
         g_proxyWanted.store(tracker);
         g_on.store(false);
@@ -1213,17 +1304,17 @@ void Frame(IDirect3DDevice9* dev) {
     int stories = 0;
     const void* rooms[8] = {};
     RoomNow rns[8];
-    for (int S = 0; S <= 7; S++) {
-        const BYTE* room = static_cast<const BYTE*>(LevelLightShare::Room0Of(tracker, S));
-        if (!room) continue;
-        RoomNow rn;
-        if (!ReadRoomNow(room, rn) || rn.id != 0 || !rn.outdoor) continue;
-        stories++;
-        rooms[S] = room;
-        rns[S] = rn;
-        g_lotId = rn.lot;
+    // A story's room 0: its slots built from its kept solve of the class it shows. mgr 0: the active lot's; else the story
+    // manager of a lot next to it, its texels placed in the active lot's space (`space`). False: (a lot next to it) the GPU
+    // cannot relight that story (no kept solve after its sends, a map refused); its gather takes the lamp posts again
+    const auto serve = [&](const BYTE* room, const RoomNow& rn, int S, uintptr_t mgr, const Xform& space) -> bool {
+        const bool act = !mgr;
+        const auto who = [&] { return act ? std::format("Story {}", S) : std::format("Lot {:08X} story {}", static_cast<uint32_t>(rn.lot), S); };
         const int cls = rn.shown;
-        const uint32_t ver = cls >= 0 && cls <= 2 ? OutdoorDelta::RecordVersion(room, cls) : 0;
+        bool baseOnly = false;
+        uint32_t ver = cls >= 0 && cls <= 2 ? OutdoorDelta::RecordVersion(room, cls, &baseOnly) : 0;
+        // a kept solve of the other kind (the lot was next to the active one, or active): its maps wait for the next one
+        if (baseOnly == act) ver = 0;
         if (ver) {
             auto at = g_askedSolve.find(room);
             if (at != g_askedSolve.end()) g_askedSolve.erase(at); // (kept: its sends start again if it loses it)
@@ -1234,7 +1325,7 @@ void Frame(IDirect3DDevice9* dev) {
             bool had = false, all = true;
             for (const auto& sl : g_slots)
                 if (sl->story == S && sl->room == room && sl->cls == cls && sl->used) had = true, all = all && sl->ok && sl->relit;
-            if (!(had && all)) {
+            if (!(had && all) && act) {
                 allReady = false;
                 const std::string last = OutdoorDelta::LastDrop(S, cls);
                 waiting.push_back(std::format("story {}: no kept solve of class {}{}", S, cls, last.empty() ? std::string() : " - last: " + last));
@@ -1246,19 +1337,20 @@ void Frame(IDirect3DDevice9* dev) {
                 a.at = GetTickCount() | 1;
                 a.count++;
                 const bool sent = LevelLightShare::QueueRoomAgain(room);
-                LOG_INFO(std::format("[RtOutdoorLamps] Story {} room 0 shows class {} with no kept solve: {} ({} of {})", S, cls,
+                LOG_INFO(std::format("[RtOutdoorLamps] {} room 0 shows class {} with no kept solve: {} ({} of {})", who(), cls,
                                      sent ? "sent to its solve" : "could not be sent to its solve", a.count, kSolveAsks));
             } else if ((a.count >= kSolveAsks || g_budgetOut) && !a.logged) {
                 a.logged = true;
-                LOG_INFO(std::format("[RtOutdoorLamps] Story {} room 0 class {}: no kept solve and no more sends to its solve ({}); its maps stay the game's and lamp "
+                LOG_INFO(std::format("[RtOutdoorLamps] {} room 0 class {}: no kept solve and no more sends to its solve ({}); its maps stay the game's and lamp "
                                      "edits go through the game's solve until it keeps one",
-                                     S, cls, g_budgetOut ? "the lot's kept parts overflow the memory budget" : std::format("sent {} times", kSolveAsks)));
+                                     who(), cls, g_budgetOut ? "the lot's kept parts overflow the memory budget" : std::format("sent {} times", kSolveAsks)));
             }
+            if (!act) return had || !(a.count >= kSolveAsks || g_budgetOut);
             if (!(had && all)) {
                 if (RestartSolveTerminal(a, rn.state, g_budgetOut)) g_restartGpuFallback = true;
                 else g_restartGpuPending = true;
             }
-            continue;
+            return true;
         }
         // the slots of this story: built again when its kept base or its class changed (prepared on a worker thread, then
         // uploaded a map a frame; the old copies stay bound meanwhile)
@@ -1266,7 +1358,7 @@ void Frame(IDirect3DDevice9* dev) {
         for (int m = 0; m < 4; m++) {
             Slot* slot = nullptr;
             for (auto& sl : g_slots)
-                if (sl->story == S && sl->m == m) slot = sl.get();
+                if (sl->mgr == mgr && sl->story == S && sl->m == m) slot = sl.get();
             if (slot && (slot->room != room || slot->cls != cls)) { // another class on screen, or the room was made again
                 ReleaseSlot(*slot);
                 slot->built = false, slot->relit = false, slot->room = room, slot->cls = cls;
@@ -1275,19 +1367,20 @@ void Frame(IDirect3DDevice9* dev) {
             uintptr_t setAt = 0;
             if (slot && !slot->built && slot->retryAt && static_cast<int32_t>(GetTickCount() - slot->retryAt) < 0) { // (an upload's backoff)
                 covered = false;
-                g_restartGpuPending = true;
+                if (act) g_restartGpuPending = true;
                 continue;
             }
             needs[m] = !(slot && slot->built && slot->version == ver && (!slot->used || OwnMap(room, cls, kSetIdx[m], setAt) == slot->game));
             need = need || needs[m];
             if (needs[m] && !(slot && (!slot->used || (slot->relit && slot->ok)))) covered = false; // (the old copy stays bound meanwhile)
+            if (!act && slot && slot->built && slot->used && !slot->ok) return false; // (refused: UploadSlot's backoff leaves it unbuilt)
         }
         auto jit = std::find_if(g_jobs.begin(), g_jobs.end(), [room](const std::shared_ptr<Job>& j) { return j->room == room; });
         if (!need) {
             if (jit != g_jobs.end() && (*jit)->state.load() != 1) g_jobs.erase(jit);
-            continue;
+            return true;
         }
-        g_restartGpuPending = true; // includes preparation/export backoff without an in-flight job
+        if (act) g_restartGpuPending = true; // includes preparation/export backoff without an in-flight job
         if (jit != g_jobs.end() && (*jit)->state.load() != 1 && ((*jit)->cls != cls || (*jit)->ver != ver)) { // (stale: the base changed again)
             g_jobs.erase(jit);
             jit = g_jobs.end();
@@ -1298,30 +1391,31 @@ void Frame(IDirect3DDevice9* dev) {
             const bool waitExport = back != g_exportBackoff.end() && static_cast<int32_t>(GetTickCount() - back->second.at) < 0;
             if (!running && !waitExport) {
                 auto j = std::make_shared<Job>();
-                j->room = room, j->story = S, j->cls = cls, j->ver = ver, j->rn = rn;
-                j->bake = g_bakeLast[S], j->bakeKeys = g_bakeKeysLast[S], j->base = rn.lotBase;
+                j->room = room, j->story = S, j->cls = cls, j->ver = ver, j->rn = rn, j->space = space, j->lot = act ? 0 : 1;
+                if (act) j->bake = g_bakeLast[S], j->bakeKeys = g_bakeKeysLast[S];
+                else if (const auto nk = g_nbBake.find(mgr); nk != g_nbBake.end()) j->bake = nk->second.bake, j->bakeKeys = nk->second.keys;
+                j->base = rn.lotBase;
                 g_jobs.push_back(j);
                 StartJob(j);
                 g_why.build++;
             }
-            if (!covered) allReady = false, waiting.push_back(std::format("story {}: its maps are being prepared", S));
-            continue;
+            if (!covered && act) allReady = false, waiting.push_back(std::format("story {}: its maps are being prepared", S));
+            return true;
         }
         Job& job = **jit;
         const int st = job.state.load();
         if (st == 1) {
-            if (!covered) allReady = false, waiting.push_back(std::format("story {}: its maps are being prepared", S));
-            continue;
+            if (!covered && act) allReady = false, waiting.push_back(std::format("story {}: its maps are being prepared", S));
+            return true;
         }
         if (st == 3) {
             g_jobs.erase(jit);
-            allReady = false;
-            waiting.push_back(std::format("story {}: its kept solve could not be read", S));
+            if (act) allReady = false, waiting.push_back(std::format("story {}: its kept solve could not be read", S));
             ExportBackoff& b = g_exportBackoff[room];
             b.fails = std::min(b.fails + 1, 6);
             b.at = (GetTickCount() + (250u << (b.fails - 1))) | 1; // 0.25 s ... 8 s
-            if (b.fails == 1 || b.fails == 6) LOG_INFO(std::format("[RtOutdoorLamps] Story {}: its kept solve could not be read ({} time{}); tried again later", S, b.fails, b.fails == 1 ? "" : "s"));
-            continue;
+            if (b.fails == 1 || b.fails == 6) LOG_INFO(std::format("[RtOutdoorLamps] {}: its kept solve could not be read ({} time{}); tried again later", who(), b.fails, b.fails == 1 ? "" : "s"));
+            return act || b.fails < 6;
         }
         g_exportBackoff.erase(room);
         g_buildMs += job.ms;
@@ -1335,13 +1429,13 @@ void Frame(IDirect3DDevice9* dev) {
             }
             Slot* slot = nullptr;
             for (auto& sl : g_slots)
-                if (sl->story == S && sl->m == m) slot = sl.get();
+                if (sl->mgr == mgr && sl->story == S && sl->m == m) slot = sl.get();
             Prepared& p = job.maps[m];
             if (!p.used) { // (no texel of room 0 in this map: nothing to relight there; a slot notes it, so it is not prepared again)
                 if (!slot) {
                     g_slots.push_back(std::make_unique<Slot>());
                     slot = g_slots.back().get();
-                    slot->story = S, slot->m = m, slot->cls = cls, slot->room = room;
+                    slot->story = S, slot->m = m, slot->cls = cls, slot->room = room, slot->mgr = mgr;
                 }
                 ReleaseSlot(*slot);
                 slot->built = true, slot->used = false, slot->version = job.version, slot->ok = false, slot->relit = false;
@@ -1350,7 +1444,7 @@ void Frame(IDirect3DDevice9* dev) {
             if (!slot) {
                 g_slots.push_back(std::make_unique<Slot>());
                 slot = g_slots.back().get();
-                slot->story = S, slot->m = m, slot->cls = cls, slot->room = room;
+                slot->story = S, slot->m = m, slot->cls = cls, slot->room = room, slot->mgr = mgr;
             }
             slot->used = true;
             uintptr_t setAt = 0;
@@ -1366,17 +1460,17 @@ void Frame(IDirect3DDevice9* dev) {
             }
             if (!slot->logged) {
                 slot->logged = true;
-                LOG_INFO(std::format("[RtOutdoorLamps] Story {} class {} {}: the room's own map {:08X} (texture set at {:08X}, manager +0x{:X}), {}x{}", S, cls, kMapName[m],
+                LOG_INFO(std::format("[RtOutdoorLamps] {} class {} {}: the room's own map {:08X} (texture set at {:08X}, manager +0x{:X}), {}x{}", who(), cls, kMapName[m],
                                      reinterpret_cast<uintptr_t>(tex), setAt, setAt - rn.mgr, p.w, p.h));
             }
             uploads++;
             if (!UploadSlot(dev, *slot, job, p)) {
-                allReady = false;
-                LOG_INFO(std::format("[RtOutdoorLamps] Story {} class {} {}: not relit ({})", S, cls, kMapName[m], slot->why));
+                if (act) allReady = false;
+                LOG_INFO(std::format("[RtOutdoorLamps] {} class {} {}: not relit ({})", who(), cls, kMapName[m], slot->why));
             }
-            // watched for writes
+            // watched for writes (a lot next to it from the upper half: the active lot's maps keep theirs)
             if (slot->watch < 0)
-                for (int w = 0; w < kMaxWatch; w++)
+                for (int w = act ? 0 : kMaxWatch / 2; w < kMaxWatch; w++)
                     if (!g_watchTex[w].load()) {
                         slot->watch = w;
                         break;
@@ -1384,18 +1478,30 @@ void Frame(IDirect3DDevice9* dev) {
             if (slot->watch >= 0) g_watchTex[slot->watch].store(slot->game);
         }
         if (done) g_jobs.erase(std::find_if(g_jobs.begin(), g_jobs.end(), [room](const std::shared_ptr<Job>& j) { return j->room == room; }));
-        else if (!covered) allReady = false, waiting.push_back(std::format("story {}: its maps are being uploaded", S));
+        else if (!covered && act) allReady = false, waiting.push_back(std::format("story {}: its maps are being uploaded", S));
+        return true;
+    };
+    for (int S = 0; S <= 7; S++) {
+        const BYTE* room = static_cast<const BYTE*>(LevelLightShare::Room0Of(tracker, S));
+        if (!room) continue;
+        RoomNow rn;
+        if (!ReadRoomNow(room, rn) || rn.id != 0 || !rn.outdoor) continue;
+        stories++;
+        rooms[S] = room;
+        rns[S] = rn;
+        g_lotId = rn.lot;
+        serve(room, rn, S, 0, rn.xf);
     }
-    // slots of stories gone
+    // slots of stories gone (the active lot's; the lots next to it below)
     for (auto it = g_slots.begin(); it != g_slots.end();)
-        if (!rooms[(*it)->story] || (*it)->room != rooms[(*it)->story]) {
+        if (!(*it)->mgr && (!rooms[(*it)->story] || (*it)->room != rooms[(*it)->story])) {
             ReleaseSlot(**it);
             it = g_slots.erase(it);
         } else
             ++it;
     LARGE_INTEGER tp1{};
     QueryPerformanceCounter(&tp1);
-    const double slotsMs = Ms(tp0, tp1);
+    double slotsMs = Ms(tp0, tp1); // (and the lots next to it, below)
     // writes noted since the last frame (each map keeps its own until it is relit)
     const uint64_t dirtyBits = g_watchDirty.exchange(0);
     std::vector<std::pair<uintptr_t, int>> solved;
@@ -1436,12 +1542,7 @@ void Frame(IDirect3DDevice9* dev) {
             if (!L || !ReadLamp(L, r)) continue;
             if (InTerrainBake(r)) {
                 RtLampModel::BakeLamp b;
-                for (int k = 0; k < 3; k++) b.head[k] = r.pos[k];
-                b.range = r.range, b.intensity = r.intensity;
-                const bool spill = coneSpill && r.f.type == 5;
-                for (int k = 0; k < 3; k++) b.colour += std::max(r.f0[k], 0.0f) * (spill ? std::clamp(r.S[k], 0.0f, 1.0f) : 1.0f);
-                b.colour *= r.areaShare;
-                b.liftable = TerrainBakeRule::Liftable(r.f.lot != 0, r.f.type) ? 1u : 0u;
+                FillBake(r, coneSpill, b);
                 bake[S].push_back(b);
                 bakeLights[S].push_back(L);
             }
@@ -1460,6 +1561,9 @@ void Frame(IDirect3DDevice9* dev) {
                 g.esum = std::max(r.colour[0], 0.0f) + std::max(r.colour[1], 0.0f) + std::max(r.colour[2], 0.0f);
                 g.spill = r.f.type == 5 ? std::max({1.0f, r.S[0], r.S[1], r.S[2]}) : 1.0f;
                 g.liftable = TerrainBakeRule::Liftable(r.f.lot != 0, r.f.type); // a lot's street-lamp class (11) is not
+                g.post = r.f.type == 11;
+                std::memcpy(g.world, r.pos, sizeof g.world);
+                if (g.post && InTerrainBake(r)) g.inBake = true, FillBake(r, coneSpill, g.bake);
                 lamps.push_back(g);
                 it = lamps.end() - 1;
             }
@@ -1501,6 +1605,101 @@ void Frame(IDirect3DDevice9* dev) {
         } else
             bakeKeys[S] = g_bakeKeysLast[S];
     }
+    // ---- the lots next to it: their room-0 maps take the active lot's lamp posts (the nearest kMaxNeighbours lots within
+    // kNeighbourReach of a post; the set changes only while no lamp is dragged) ----
+    LARGE_INTEGER tn0{};
+    QueryPerformanceCounter(&tn0);
+    {
+        const Xform* space = nullptr;
+        for (int S = 0; S <= 7 && !space; S++)
+            if (rooms[S]) space = &rns[S].xf;
+        static uint64_t s_pickSig = 0;
+        static DWORD s_pickAt = 0;
+        if (!dragNow && (allSig != s_pickSig || g_nbActive != g_lotId || GetTickCount() - s_pickAt >= 1000)) {
+            s_pickSig = allSig, s_pickAt = GetTickCount();
+            std::vector<std::pair<int, uint64_t>> rank; // (its best place in a post's list, lot)
+            for (const GpuLamp& g : lamps) {
+                if (!g.post || !space) continue;
+                uint64_t hits[kMaxNeighbours + 1];
+                const int n = LotLightBridge::LotsNear(g.world[0] - kNeighbourReach, g.world[2] - kNeighbourReach, g.world[0] + kNeighbourReach,
+                                                       g.world[2] + kNeighbourReach, hits, kMaxNeighbours + 1);
+                for (int i = 0; i < n; i++) {
+                    if (hits[i] == g_lotId) continue;
+                    const auto it = std::find_if(rank.begin(), rank.end(), [&](const auto& r) { return r.second == hits[i]; });
+                    if (it == rank.end()) rank.emplace_back(i, hits[i]);
+                    else it->first = std::min(it->first, i);
+                }
+            }
+            std::stable_sort(rank.begin(), rank.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+            std::vector<std::pair<uint64_t, uintptr_t>> want;
+            for (const auto& [i, lot] : rank)
+                if (static_cast<int>(want.size()) < kMaxNeighbours)
+                    if (const uintptr_t t = LevelLightShare::TrackerOfLot(lot)) want.emplace_back(lot, t);
+            PublishNeighbours(g_lotId, want);
+        }
+        std::vector<std::pair<const void*, uintptr_t>> nbRooms; // (room, story manager) of their stories relit
+        std::vector<std::pair<uintptr_t, int>> toCpu;
+        for (Neighbour& nb : g_nb) {
+            if (!space || !LevelLightShare::TrackerLive(nb.tracker)) continue;
+            for (int S = 0; S <= 7; S++) {
+                const BYTE* room = static_cast<const BYTE*>(LevelLightShare::Room0Of(nb.tracker, S));
+                RoomNow rn;
+                if (!room || (nb.cpu >> S & 1) || !ReadRoomNow(room, rn) || rn.id != 0 || !rn.outdoor || rn.lot != nb.lot) continue;
+                nbRooms.emplace_back(room, rn.mgr);
+                // its lamps of the bake, and the active lot's posts in the bake as its gather took them before (they left its list):
+                // read again when its kept solve or the active lot's lamps changed, else once a second (a list changes at a gather)
+                NbBake& nk = g_nbBake[rn.mgr];
+                const uint32_t kept = rn.shown >= 0 && rn.shown <= 2 ? OutdoorDelta::RecordVersion(room, rn.shown) : 0;
+                if (!nk.at || kept != nk.kept || allSig != nk.lampSig || GetTickCount() - nk.at >= 1000) {
+                    nk.at = GetTickCount() | 1, nk.kept = kept, nk.lampSig = allSig;
+                    std::vector<RtLampModel::BakeLamp> bk;
+                    std::vector<uintptr_t> bl;
+                    const int n = ReadList(room, list, 1024);
+                    for (int i = 0; i < n; i++) {
+                        LampRead r;
+                        if (!list[i] || !ReadLamp(list[i], r) || !InTerrainBake(r)) continue;
+                        RtLampModel::BakeLamp b;
+                        FillBake(r, coneSpill, b);
+                        bk.push_back(b), bl.push_back(list[i]);
+                    }
+                    for (const GpuLamp& g : lamps) {
+                        if (!g.inBake || std::find(bl.begin(), bl.end(), g.light) != bl.end()) continue;
+                        int mult = 0;
+                        for (int k = 0; k <= 7; k++) mult = std::max(mult, g.mult[k]);
+                        for (int k = 0; k < mult; k++) bk.push_back(g.bake), bl.push_back(g.light);
+                    }
+                    uint64_t h = 1469598103934665603ull;
+                    for (const auto& b : bk) Mix(h, &b, sizeof b);
+                    for (uintptr_t L : bl) Mix(h, &L, sizeof L);
+                    if (n < 0) nk.at = 0; // (read again next frame)
+                    else if (UnderSig(h, rn.lotBase) != UnderSig(nk.sig, nk.base) || nk.keys.size() != bk.size())
+                        nk.keys = BakeKeys(bl), nk.bake = std::move(bk), nk.sig = h, nk.base = rn.lotBase;
+                }
+                if (!serve(room, rn, S, rn.mgr, *space)) nb.cpu |= 1u << S, toCpu.emplace_back(nb.tracker, S);
+            }
+        }
+        if (!toCpu.empty()) {
+            SendNeighbours(); // (before their gathers)
+            for (const auto& [t, S] : toCpu) {
+                const bool sent = LevelLightShare::QueueRoom0(t, S);
+                LOG_INFO(std::format("[RtOutdoorLamps] Tracker {:08X} story {}: its maps cannot be relit here; its room 0 takes the active lot's lamp posts in its own "
+                                     "gather again ({})", t, S, sent ? "sent" : "could not be sent"));
+            }
+        }
+        for (auto it = g_slots.begin(); it != g_slots.end();)
+            if ((*it)->mgr && std::find(nbRooms.begin(), nbRooms.end(), std::make_pair(static_cast<const void*>((*it)->room), (*it)->mgr)) == nbRooms.end()) {
+                ReleaseSlot(**it);
+                it = g_slots.erase(it);
+            } else
+                ++it;
+        for (auto it = g_nbBake.begin(); it != g_nbBake.end();)
+            if (std::none_of(nbRooms.begin(), nbRooms.end(), [&](const auto& r) { return r.second == it->first; })) it = g_nbBake.erase(it);
+            else ++it;
+    }
+    LARGE_INTEGER tn1{};
+    QueryPerformanceCounter(&tn1);
+    slotsMs += Ms(tn0, tn1);
+    g_why.nbMs += Ms(tn0, tn1);
     // the stories each GPU lamp is drawn on: a change is logged (a switch, a lamp leaving or joining a story's list)
     {
         static std::unordered_map<uintptr_t, uint32_t> s_drawn;
@@ -1665,7 +1864,7 @@ void Frame(IDirect3DDevice9* dev) {
     const bool dragging = g_lampChangedAt && nowTick - g_lampChangedAt < kDragQuietMs;
     LARGE_INTEGER tp2{};
     QueryPerformanceCounter(&tp2);
-    const double lampsMs = Ms(tp1, tp2);
+    const double lampsMs = Ms(tp1, tp2) - Ms(tn0, tn1); // (the lots next to it count in slotsMs)
     if (g_slots.empty() || !allReady) {
         g_on.store(!g_slots.empty());
         Inactive(waiting.empty() ? (g_slots.empty() ? "no room-0 map of the active lot could be relit (see the lines above)" : "")
@@ -1677,7 +1876,7 @@ void Frame(IDirect3DDevice9* dev) {
     // ---- relight what changed ----
     LARGE_INTEGER t0{};
     QueryPerformanceCounter(&t0);
-    int relit = 0, tilesBefore = static_cast<int>(g_eng->GetStats().shadowTiles), storiesRelit = 0, left = 0;
+    int relit = 0, tilesBefore = static_cast<int>(g_eng->GetStats().shadowTiles), storiesRelit = 0, left = 0, nbRelit = 0;
     std::vector<int> storyList;
     bool begun = false, timing = false;
     // (an exception between Begin and End still restores the device state Begin saved)
@@ -1711,11 +1910,23 @@ void Frame(IDirect3DDevice9* dev) {
     for (Slot* sp : order) {
         Slot& s = *sp;
         if (!s.ok || !s.game) continue;
+        // its story's lamps of the bake (the floor mask's under-floor share): the active lot's story, or a lot next to it's
+        static const NbBake s_noBake;
+        const auto nkIt = s.mgr ? g_nbBake.find(s.mgr) : g_nbBake.end();
+        const NbBake* nk = nkIt != g_nbBake.end() ? &nkIt->second : s.mgr ? &s_noBake : nullptr;
+        const std::vector<RtLampModel::BakeLamp>& sBake = nk ? nk->bake : bake[s.story];
+        const std::vector<uint64_t>& sKeys = nk ? nk->keys : bakeKeys[s.story];
+        const uint64_t sBakeSig = nk ? nk->sig : bakeSig[s.story];
+        const float sBase = nk ? nk->base : rns[s.story].lotBase;
         // its GPU lamps: drawn now, in its story's list, and in its kept solve only as lamps whose parts left the base
         std::vector<RtLampModel::Lamp> mine;
         std::vector<const GpuLamp*> mineRef;
         for (const GpuLamp& g : lamps) {
-            if (!g.mult[s.story]) continue;
+            // (a lot next to it: the posts only, as many times as the active lot lists them, as its gather took them)
+            int mult = s.mgr ? 0 : g.mult[s.story];
+            if (s.mgr && g.post)
+                for (int S = 0; S <= 7; S++) mult = std::max(mult, g.mult[S]);
+            if (!mult) continue;
             if (s.kept.count(g.light) && !s.drawn.count(g.light)) continue; // baked in its base
             // within its reach of the texels (the lamp law's distance where it falls under the threshold)
             const float b2 = OutdoorDeltaModel::ReachBound2(g.lamp.law.W, g.esum, g.spill, s.thr);
@@ -1728,8 +1939,8 @@ void Frame(IDirect3DDevice9* dev) {
             RtLampModel::Lamp l = g.lamp;
             // a floor map counts the lamp once, as the terrain bake does under the grass, sidewalks and roads beside it (the
             // list's second entry made patios up to 45% brighter than the ground next to them)
-            l.mult = s.m == 1 ? 1.0f : static_cast<float>(g.mult[s.story]);
-            if (s.story == 0 && s.m == 1 && g.liftable && TerrainBakeRule::LowLampLift()) {
+            l.mult = s.m == 1 ? 1.0f : static_cast<float>(mult);
+            if (!s.mgr && s.story == 0 && s.m == 1 && g.liftable && TerrainBakeRule::LowLampLift()) {
                 // the lot's ground in lot space (its base is world y; lots turn about y only)
                 const float base[3] = {0.0f, rns[0].lotBase, 0.0f};
                 float baseLot[3];
@@ -1747,7 +1958,7 @@ void Frame(IDirect3DDevice9* dev) {
         // floor mask, the rules, the occluders, its kept solve
         uint64_t sig = 1469598103934665603ull;
         Mix(sig, &params, 8), Mix(sig, &g_meshGen, 4), Mix(sig, &s.version, 4);
-        if (!s.masked.empty()) Mix(sig, &bakeSig[s.story], 8);
+        if (!s.masked.empty()) Mix(sig, &sBakeSig, 8);
         for (const auto& l : mine) Mix(sig, &l, sizeof l);
         // the under-floor share from a worker (exact, UnderShare's sums): once no lamp is dragged, and (14/10) while one is,
         // in place of the render thread's UnderDelta below (up to 152 ms of a drag's relight; 26.8 ms in one frame): the last
@@ -1757,8 +1968,8 @@ void Frame(IDirect3DDevice9* dev) {
             LARGE_INTEGER jt0{}, jt1{};
             QueryPerformanceCounter(&jt0);
             auto j = std::make_shared<UnderJob>();
-            j->pos = s.maskedPos, j->gated = s.gated, j->bake = bake[s.story], j->ids = bakeKeys[s.story], j->base = rns[s.story].lotBase;
-            j->sig = UnderSig(bakeSig[s.story], j->base);
+            j->pos = s.maskedPos, j->gated = s.gated, j->bake = sBake, j->ids = sKeys, j->base = sBase;
+            j->sig = UnderSig(sBakeSig, j->base);
             s.uJob = j;
             if (!HookGuard::StartDetached("RtOutdoorLamps under-floor job", [j] {
                     try {
@@ -1778,7 +1989,7 @@ void Frame(IDirect3DDevice9* dev) {
             LARGE_INTEGER jt0{}, jt1{};
             QueryPerformanceCounter(&jt0);
             const auto j = std::move(s.uJob);
-            const bool current = j->sig == UnderSig(bakeSig[s.story], rns[s.story].lotBase);
+            const bool current = j->sig == UnderSig(sBakeSig, sBase);
             if ((current || (dragging && j->sig != s.underSig)) && j->under.size() == s.masked.size()) {
                 s.under = j->under, s.uA = j->A, s.uU = j->U, s.uSnap = j->bake, s.uIds = j->ids, s.uBase = j->base;
                 s.underSig = j->sig, s.underExact = current, s.underDirty = true, s.dynCurrent = false;
@@ -1790,7 +2001,7 @@ void Frame(IDirect3DDevice9* dev) {
         const bool wrote = s.watch >= 0 && (dirtyBits >> s.watch & 1);
         bool solvedHere = false;
         for (const auto& [mgr, cls] : solved)
-            if (rns[s.story].mgr == mgr && cls == s.cls) solvedHere = true;
+            if ((s.mgr ? s.mgr : rns[s.story].mgr) == mgr && cls == s.cls) solvedHere = true;
         if (solvedHere) s.pendingWrite = true;
         if (wrote) s.pendingWrite = true;
         const bool exactUnder = s.underDirty;
@@ -1808,7 +2019,7 @@ void Frame(IDirect3DDevice9* dev) {
         }
         uint64_t lampsSig = 1469598103934665603ull;
         for (const auto& l : mine) Mix(lampsSig, &l, sizeof l);
-        if (!s.masked.empty()) Mix(lampsSig, &bakeSig[s.story], 8);
+        if (!s.masked.empty()) Mix(lampsSig, &sBakeSig, 8);
         // the budget: the first map of a frame always goes; later ones while there is time and work left
         LARGE_INTEGER tn{};
         QueryPerformanceCounter(&tn);
@@ -1852,21 +2063,21 @@ void Frame(IDirect3DDevice9* dev) {
         // under-floor share changed; more lamps: "all" from the CPU every relight
         const bool maskGpu = mine.size() <= static_cast<size_t>(RtLampGpu::kAtlasLamps);
         if (s.dyn && !s.masked.empty()) {
-            const uint64_t us = UnderSig(bakeSig[s.story], rns[s.story].lotBase);
+            const uint64_t us = UnderSig(sBakeSig, sBase);
             bool write = !maskGpu || !s.dynCurrent;
             if (s.underSig != us) {
-                if (dragging && (s.under.size() != s.masked.size() || s.uA.size() != s.masked.size() || s.uBase != rns[s.story].lotBase)) {
+                if (dragging && (s.under.size() != s.masked.size() || s.uA.size() != s.masked.size() || s.uBase != sBase)) {
                     // (14/10, drag solves) never the whole share on this thread while a lamp is dragged (10-30 ms a relight in a
                     // recording): the worker computes it, this map waits for it with its last copy bound
                     if (!s.uJob) startUnderJob();
                     maskWait = true;
-                } else if (s.under.size() != s.masked.size() || s.uA.size() != s.masked.size() || s.uBase != rns[s.story].lotBase) {
+                } else if (s.under.size() != s.masked.size() || s.uA.size() != s.masked.size() || s.uBase != sBase) {
                     // (no sums to start from: the whole share, once; a slot from the worker always has them)
                     LARGE_INTEGER st0{}, st1{};
                     QueryPerformanceCounter(&st0);
-                    s.uBase = rns[s.story].lotBase;
-                    FullUnder(s.maskedPos, s.gated, bake[s.story], s.uBase, s.under, s.uA, s.uU);
-                    s.uSnap = bake[s.story], s.uIds = bakeKeys[s.story];
+                    s.uBase = sBase;
+                    FullUnder(s.maskedPos, s.gated, sBake, s.uBase, s.under, s.uA, s.uU);
+                    s.uSnap = sBake, s.uIds = sKeys;
                     s.underExact = true;
                     s.underSig = us;
                     write = true;
@@ -1877,7 +2088,7 @@ void Frame(IDirect3DDevice9* dev) {
                 } else {
                     LARGE_INTEGER st0{}, st1{};
                     QueryPerformanceCounter(&st0);
-                    if (UnderDelta(s, bake[s.story], bakeKeys[s.story])) {
+                    if (UnderDelta(s, sBake, sKeys)) {
                         s.underExact = false; // (exact again from the worker)
                         s.uJob.reset();
                     }
@@ -1977,7 +2188,8 @@ void Frame(IDirect3DDevice9* dev) {
         LARGE_INTEGER td{};
         QueryPerformanceCounter(&td);
         drawMs += Ms(tm1, td);
-        if (std::find(storyList.begin(), storyList.end(), s.story) == storyList.end()) storyList.push_back(s.story);
+        if (s.mgr) nbRelit++;
+        else if (std::find(storyList.begin(), storyList.end(), s.story) == storyList.end()) storyList.push_back(s.story);
     }
     if (begun) {
         begun = false; // (ended here, not by endOnThrow)
@@ -1988,9 +2200,10 @@ void Frame(IDirect3DDevice9* dev) {
     LARGE_INTEGER t1{};
     QueryPerformanceCounter(&t1);
     const double ms = Ms(t0, t1);
+    g_why.loopMs += ms;
     // coverage: every story's maps relit and swapped (lamp edits mark no room then)
     bool full = allReady && stories > 0;
-    for (const auto& s : g_slots) full = full && (!s->used || (s->ok && s->relit));
+    for (const auto& s : g_slots) full = full && (s->mgr || !s->used || (s->ok && s->relit));
     {
         // (14/10) not a lamp a covering slot keeps baked in its base (kept when it was not drawn): its edits must reach the
         // game's solve, the GPU does not draw it there
@@ -2004,7 +2217,7 @@ void Frame(IDirect3DDevice9* dev) {
             if (rooms[S]) storyBits |= 1u << S;
         for (const GpuLamp& g : lamps) {
             bool baked = false;
-            for (const auto& s : g_slots) baked = baked || (s->used && s->kept.count(g.light) && !s->drawn.count(g.light));
+            for (const auto& s : g_slots) baked = baked || (!s->mgr && s->used && s->kept.count(g.light) && !s->drawn.count(g.light));
             uint32_t drawnOn = 0;
             for (int S = 0; S <= 7; S++)
                 if (g.mult[S]) drawnOn |= 1u << S;
@@ -2030,7 +2243,7 @@ void Frame(IDirect3DDevice9* dev) {
         if (!full) {
             if (!waiting.empty()) why = waiting.front() + (waiting.size() > 1 ? std::format(" (+{} more)", waiting.size() - 1) : "");
             for (const auto& s : g_slots)
-                if (why.empty() && s->used && !(s->ok && s->relit))
+                if (why.empty() && !s->mgr && s->used && !(s->ok && s->relit))
                     why = std::format("story {} {} {}", s->story, kMapName[s->m], s->ok ? "not relit yet" : "not relit: " + s->why);
         }
         LOG_INFO(full ? std::string("[RtOutdoorLamps] Every story covered: edits of the lot's GPU lamps mark no room")
@@ -2043,12 +2256,12 @@ void Frame(IDirect3DDevice9* dev) {
         c_tiles.fetch_add(tiles, std::memory_order_relaxed);
         if (!g_roundOpen) {
             g_roundOpen = true;
-            g_roundCpuMs = 0, g_roundMaps = 0, g_roundFrames = 0, g_roundTiles = 0;
+            g_roundCpuMs = 0, g_roundMaps = 0, g_roundFrames = 0, g_roundTiles = 0, g_roundNb = 0;
             g_roundStories.clear();
             g_ph = Phases{};
         }
         g_roundCpuMs += ms + slotsMs + lampsMs;
-        g_roundMaps += relit, g_roundFrames++, g_roundTiles += tiles;
+        g_roundMaps += relit, g_roundFrames++, g_roundTiles += tiles, g_roundNb += nbRelit;
         g_ph.slots += slotsMs, g_ph.lamps += lampsMs, g_ph.mask += maskMs, g_ph.draw += drawMs;
         g_ph.maskJobs += maskJobsMs, g_ph.maskShare += maskShareMs, g_ph.maskLock += maskLockMs, g_ph.maskFill += maskFillMs;
         for (int S : storyList)
@@ -2066,10 +2279,11 @@ void Frame(IDirect3DDevice9* dev) {
         const int s0 = g_roundStories.empty() ? 0 : g_roundStories.front(), s1 = g_roundStories.empty() ? 0 : g_roundStories.back();
         const std::string gpu = g_lastGpuMs.load() >= 0.0f ? std::format("{:.2f}", g_lastGpuMs.load()) : std::string("-");
         const std::string phases = std::format("phases: maps read {:.2f}, lamps read {:.2f}, floor mask {:.2f} (worker jobs started and taken {:.2f}, share here {:.2f}, "
-                                               "buffer lock {:.2f}, buffer fill {:.2f}), shadows {:.2f}, draws {:.2f} ms; {} frame{}{}",
+                                               "buffer lock {:.2f}, buffer fill {:.2f}), shadows {:.2f}, draws {:.2f} ms; {} frame{}{}{}",
                                                g_ph.slots, g_ph.lamps, g_ph.mask, g_ph.maskJobs, g_ph.maskShare, g_ph.maskLock, g_ph.maskFill,
                                                g_ph.shadows, g_ph.draw - g_ph.shadows, g_roundFrames,
-                                               g_roundFrames == 1 ? "" : "s", dragging ? ", dragged (cheaper shadows)" : "");
+                                               g_roundFrames == 1 ? "" : "s", dragging ? ", dragged (cheaper shadows)" : "",
+                                               g_roundNb ? std::format("; {} of the maps on the lots next to it", g_roundNb) : std::string());
         // the lamp edits this relight shows
         std::vector<EditNote> shown;
         {
@@ -2154,6 +2368,7 @@ void OnWorldChanged() {
     // previous world's lots are gone, and the new world's lots solve their rooms as they load)
     g_tracker = 0;
     g_restartRequested = false;
+    PublishNeighbours(0, {}, false);
     DropAll(g_dev, "the world changed");
     g_proxyUsed.reset();
     {
@@ -2176,9 +2391,9 @@ void OnWorldChanged() {
 void RestartLighting() { g_restartRequested = true; }
 bool RestartIncomplete() {
     if (!g_option.load(std::memory_order_relaxed) || !g_watch.load(std::memory_order_relaxed) || !g_jobs.empty() || g_restartGpuPending) return false;
-    if (std::any_of(g_slots.begin(), g_slots.end(), [](const auto& slot) { return slot->used && slot->built && slot->ok && !slot->relit; })) return false;
+    if (std::any_of(g_slots.begin(), g_slots.end(), [](const auto& slot) { return !slot->mgr && slot->used && slot->built && slot->ok && !slot->relit; })) return false;
     if (g_restartGpuFallback) return true;
-    if (std::any_of(g_slots.begin(), g_slots.end(), [](const auto& slot) { return slot->used && slot->built && !slot->ok; })) return true;
+    if (std::any_of(g_slots.begin(), g_slots.end(), [](const auto& slot) { return !slot->mgr && slot->used && slot->built && !slot->ok; })) return true;
     std::lock_guard<std::mutex> lock(g_coverMx);
     return g_budgetOut && !g_cover.full;
 }
@@ -2187,7 +2402,7 @@ bool RestartPending() {
     if (RestartIncomplete()) return false;
     if (!g_option.load(std::memory_order_relaxed) || !g_watch.load(std::memory_order_relaxed)) return false;
     if (g_restartGpuPending || !g_jobs.empty() || !g_proxyUsed || !g_on.load(std::memory_order_relaxed)) return true;
-    if (std::any_of(g_slots.begin(), g_slots.end(), [](const auto& slot) { return slot->used && !slot->relit; })) return true;
+    if (std::any_of(g_slots.begin(), g_slots.end(), [](const auto& slot) { return !slot->mgr && slot->used && !slot->relit; })) return true;
     std::lock_guard<std::mutex> lock(g_coverMx);
     return !g_cover.full;
 }

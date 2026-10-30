@@ -1059,6 +1059,20 @@ bool __stdcall ArmTest(BYTE* light) {
     g_lotLampArms.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
+// Each site also tells the story share that a lot's lamp post was placed, removed or moved: other lots' outdoor rooms hold
+// it as a world light (LevelLightShare::CrossLotLightChanged)
+bool __stdcall ArmTestPlaced(BYTE* light) {
+    LevelLightShare::CrossLotLightChanged(light, LevelLightShare::CrossLotChange::Placed);
+    return ArmTest(light);
+}
+bool __stdcall ArmTestRemoved(BYTE* light) {
+    LevelLightShare::CrossLotLightChanged(light, LevelLightShare::CrossLotChange::Removed);
+    return ArmTest(light);
+}
+bool __stdcall ArmTestMoved(BYTE* light) {
+    LevelLightShare::CrossLotLightChanged(light, LevelLightShare::CrossLotChange::Moved);
+    return ArmTest(light);
+}
 
 // The bake's light test without its counters: 0 rejected, 1 taken by the original test, 2 a lot lamp switched off, 3 a lot
 // lamp taken
@@ -2598,9 +2612,11 @@ class NightTerrainRelightPatch : public ApexPatch {
                 MemPatch::RestoreAll(patchedLocations);
                 return Fail(S3SS_TR("Falha ao alterar a coleta de luzes do terreno", "Could not patch the terrain light gathering"));
             }
-            for (const auto& s : kArmSites) {
-                // push edi; call ArmTest; nop x3
-                const auto armBytes = CallPatch(s.addr, 1, {0x57}, reinterpret_cast<void*>(&ArmTest), kArmOrig.size());
+            void* const tests[] = {reinterpret_cast<void*>(&ArmTestPlaced), reinterpret_cast<void*>(&ArmTestRemoved), reinterpret_cast<void*>(&ArmTestMoved)};
+            for (size_t i = 0; i < std::size(kArmSites); i++) {
+                const ArmSite& s = kArmSites[i];
+                // push edi; call ArmTest...; nop x3
+                const auto armBytes = CallPatch(s.addr, 1, {0x57}, tests[i], kArmOrig.size());
                 if (!MemPatch::WriteBytes(s.addr, armBytes, &patchedLocations, &kArmOrig)) {
                     MemPatch::RestoreAll(patchedLocations);
                     return Fail(std::format(S3SS_TR("Falha ao alterar {}", "Could not patch {}"), s.name));
@@ -2933,6 +2949,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             std::string ditherErr;
             if (!RoomMapDither::Start(ditherErr)) LOG_WARNING("[NightTerrainRelight] " + ditherErr);
         }
+        LevelLightShare::SetCrossLotSafe(lotCodeOk); // (the arm sites hold the removal hook: other lots may take a lamp post)
         isEnabled = true;
         LOG_INFO(std::format("[NightTerrainRelight] Installed (at dusk={}, lot lamps on the ground={}, delay={}s, root={:#x})", g_autoDusk, g_lotLamps, g_delaySec, g_rootPtrAddr));
         return true;
@@ -2941,6 +2958,7 @@ class NightTerrainRelightPatch : public ApexPatch {
     bool Uninstall() override {
         if (!isEnabled) return true;
         lastError.clear();
+        LevelLightShare::SetCrossLotSafe(false); // before the arm sites go
         D3D9Hooks::UnregisterAll("NightTerrainRelight");
         RestoreMoonlight();
         LightProbe::Shutdown();

@@ -5038,8 +5038,9 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
         // wall stayed lit by the garden post on the other side). The group's one lamp list keeps a lamp that any of its points
         // sees, and the pixel has no wall test; the copy multiplies its lamp sum by the shade the lot pass gives the grass
         // (FloorShadeBind, as the story-0 floors), gated to about 1 m over the lot's ground per pixel, so balcony railings and
-        // stair tops above it keep their own lamps. The lot: the one under the group's centre; none (or no group read): white
-        // and gate 0, the draw as before.
+        // stair tops above it keep their own lamps; the ground light it takes on faces turned up (the atlas) takes that shade at
+        // every height (ShaderPatches::PatchInstancedLamps). The lot: the one under the group's centre; none (or no group read):
+        // white and gate 0, the draw as before.
         // (2.15.3) A face reads the shade of the ground it faces, kFenceShadeReach in front of it: the fence is a wall in the lot
         // mask, so its own footprint lies on its shadow's edge (F7: a dark band under 1 m on the face turned to the lamp)
         FloorShadeBind shade(dev, p.inst.shadeSampler, p.inst.shadeConst, groupLot, 1.0f, g_fenceShadeLot, g_fenceShadeNoLot,
@@ -9695,11 +9696,45 @@ void RequestExteriorCapture() {
 
 std::string ExteriorCaptureStatus() { return g_exteriorPending ? "capturing..." : "ready"; }
 
+// Lamp posts of other lots (LevelLightShare::GatherLotId): a post placed, moved or switched reaches the outdoor rooms of
+// the lots around it only when they gather again (the game sends the post's own lot only). The lots whose box lies within
+// kCrossLotReach of a post that changed gather once no drag is engaged and no post has changed for kCrossLotQuietMs: a drag
+// sends them once, as it is let go, with the post where it stopped (a lot it left included), inside the edit hold that
+// shows them with the post's own lot.
+constexpr DWORD kCrossLotQuietMs = 200;
+constexpr float kCrossLotReach = 24.0f; // m (the lot shade's widest lamp reach, ShadeGrid)
+std::vector<LevelLightShare::CrossLotEvent> g_crossLotEvents;
+std::vector<uint64_t> g_crossLotDue;
+DWORD g_crossLotLast = 0;
+void CrossLotTick(DWORD now) {
+    LevelLightShare::TakeCrossLotEvents(g_crossLotEvents);
+    for (const auto& ev : g_crossLotEvents) {
+        g_crossLotLast = now;
+        const float px = 0.5f * (ev.rect[0] + ev.rect[2]), pz = 0.5f * (ev.rect[1] + ev.rect[3]);
+        for (const LotRect& r : g_lotRects) {
+            const uint64_t lot = static_cast<uint64_t>(r.lotHi) << 32 | r.lotLo;
+            if (lot == ev.lot || LevelLightShare::GpuDrawsPosts(ev.lot, lot)) continue; // (Real-time outdoor lamps draws them there)
+            float x0 = 1e30f, z0 = 1e30f, x1 = -1e30f, z1 = -1e30f;
+            for (int c = 0; c < 4; c++) {
+                const float lx = (c & 1) ? r.w : 0.0f, lz = (c & 2) ? r.d : 0.0f, wx = r.m0 * lx + r.m8 * lz + r.tx, wz = r.m2 * lx + r.m10 * lz + r.tz;
+                x0 = std::min(x0, wx), x1 = std::max(x1, wx), z0 = std::min(z0, wz), z1 = std::max(z1, wz);
+            }
+            if (px < x0 - kCrossLotReach || px > x1 + kCrossLotReach || pz < z0 - kCrossLotReach || pz > z1 + kCrossLotReach) continue;
+            if (std::find(g_crossLotDue.begin(), g_crossLotDue.end(), lot) == g_crossLotDue.end()) g_crossLotDue.push_back(lot);
+        }
+    }
+    if (g_crossLotDue.empty() || now - g_crossLotLast < kCrossLotQuietMs || DragLite::Engaged()) return;
+    for (uint64_t lot : g_crossLotDue) LevelLightShare::RegatherOutdoorById(lot);
+    if (!kPublicBuild) LOG_INFO(std::format("[LotLightBridge] Lamp posts of other lots changed: {} lot(s) around them gather their outdoor rooms again", g_crossLotDue.size()));
+    g_crossLotDue.clear();
+}
+
 void OnPresent() {
     if (DevSwitches::kCompiled) MeasureMemory(); // development builds (memory_owners)
     PumpSolidMeshes();
     ReleaseIdleMaskTextures(); // (left_lot_release, every 10 s)
     FenceGroupsGone();
+    CrossLotTick(GetTickCount());
     ++g_roomMapFrame; // (the room map size memo is per frame)
     g_lotDrawTick = GetTickCount();
     // the furniture's lamp edit episode is over once no switch, edit hold or trailing room remains (2.13.1: one log line)
@@ -9805,6 +9840,22 @@ std::string LotLampStatus() {
 }
 
 const BakeSnapshot& CurrentBakeLamps() { return g_bakeSnap; }
+int LotsNear(float x0, float z0, float x1, float z1, uint64_t* out, int max) {
+    const float cx = 0.5f * (x0 + x1), cz = 0.5f * (z0 + z1);
+    std::vector<std::pair<float, uint64_t>> hits;
+    for (const LotRect& r : g_lotRects) {
+        float bx0, bz0, bx1, bz1;
+        LotBox(r, bx0, bz0, bx1, bz1);
+        if (bx0 > x1 || bx1 < x0 || bz0 > z1 || bz1 < z0) continue;
+        const float dx = std::clamp(cx, bx0, bx1) - cx, dz = std::clamp(cz, bz0, bz1) - cz;
+        hits.emplace_back(dx * dx + dz * dz, static_cast<uint64_t>(r.lotHi) << 32 | r.lotLo);
+    }
+    std::sort(hits.begin(), hits.end());
+    int n = 0;
+    for (const auto& [d, lot] : hits)
+        if (n < max) out[n++] = lot;
+    return n;
+}
 uint64_t LotAt(float x, float z) {
     const LotRect* r = FindLotAt(x, z);
     return r ? static_cast<uint64_t>(r->lotHi) << 32 | r->lotLo : 0;

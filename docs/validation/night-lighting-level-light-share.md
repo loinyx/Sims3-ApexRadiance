@@ -216,8 +216,20 @@ topology mutation inside a point is not reproduced. This release does not promis
   and story 2 room 20 converge to identical ambient RGB after lamp edits; queued at 18:11:30.743, matching ambient at
   18:11:31.399. This measures queue-to-ambient convergence, not visible latency.
 - Session `2026-10-01 15-26-42`: rooms 23/19/3/20 of lot `27D24720` change their merged ambient during a slider drag.
+- 2026-10-29, session `20-08-28` (build `C23EDBE4`), Lamp lighting Instant: a post of the active lot dragged beside the
+  three lots next door. Their outside walls followed it on every story; each move relit 20 maps of stories 0 to 3 in 7.5 to
+  31 ms with no room 0 solved, and no story of those lots was refused. With the per-story cache (build `5E20B164`) those
+  lots cost 0.006 to 0.014 ms a frame during drags.
 
 ## Open checks
+
+- Lamp posts of other lots (not yet committed; build D220A07F). A lamp post placed near a neighbouring lot, dragged along it
+  for about 10 s, put down, then deleted. **Expected:** about 1 s after it stops, the neighbour's outside walls take its
+  light on every story, at the brightness the post gives its own lot's walls at the same distance; no solve of the
+  neighbour during the drag; deleting it clears that light at once with no crash (a solve of the neighbour running at that
+  moment included). Record the room solves of the neighbour and the frame times around the stop.
+- Lamp posts on the lots next to the active one on the GPU, still open: when a neighbour becomes the active lot, its lamps
+  stay lit with no gap; the idle cost of those lots in the self-measure line (`the lots next to it`) with no lamp moving.
 
 - Real-time outdoor lamps during a drag (`27d6232`, `5603402`, `ddb9e44`, `91af563`), Lamp lighting Instant, a house with
   two or more stories and an outdoor lamp beside its walls. Pick the lamp up (or place a new one) and drag it along the

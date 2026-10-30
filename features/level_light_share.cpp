@@ -818,14 +818,15 @@ void FlushDeferred(uintptr_t tracker) {
 }
 
 int RooflessRoomIds(uintptr_t mgr, int* ids, int max); // below
-// The outdoor rooms of floors 0..7: room 0, and the roofless rooms when the room update hooks send them (05/10)
-void QueueOutdoorRegather(uintptr_t tracker) {
+// The outdoor rooms of floors 0..7: room 0, and the roofless rooms when the room update hooks send them (05/10).
+// urgentTier, soon: as QueueRoom (a lamp post of another lot: tier 2, gathered at once)
+void QueueOutdoorRegather(uintptr_t tracker, int urgentTier = -1, bool soon = false) {
     for (int level = 0; level <= 7; level++) {
-        if (QueueRoom(tracker, level, 0)) g_queued.fetch_add(1, std::memory_order_relaxed);
+        if (QueueRoom(tracker, level, 0, false, urgentTier, soon)) g_queued.fetch_add(1, std::memory_order_relaxed);
         int roofless[256];
         const int nr = g_indoorReady ? RooflessRoomIds(StoryManager(tracker, level), roofless, static_cast<int>(std::size(roofless))) : 0;
         for (int k = 0; k < nr; k++)
-            if (QueueRoom(tracker, level, roofless[k])) g_queued.fetch_add(1, std::memory_order_relaxed);
+            if (QueueRoom(tracker, level, roofless[k], false, urgentTier, soon)) g_queued.fetch_add(1, std::memory_order_relaxed);
     }
 }
 
@@ -8928,12 +8929,113 @@ int DropDisabledLotLights(BYTE* room) {
     if (dropped) *reinterpret_cast<uintptr_t**>(room + 0xCC) = out;
     return dropped;
 }
+// ---- lamp posts of other lots on a lot's outside walls ----
+// The game gives the outdoor rooms of a lot (room 0 of each story) the world lights around the lot (FUN_006b66b0; its
+// per-cell filter FUN_006b6320 keeps the street-lamp class with lot id 0), so a lamp post lit the outside walls of its own
+// lot only, never the house next door. While a room 0 gathers, that filter's GetLotID (GatherLotId) answers 0 for the lamp
+// posts of other lots (outdoors, alive, enabled): they come in as world lights do, on every story. A post on story 0 of its
+// lot is in that lot's lists twice (FUN_006c6ab0): TakeCrossLotLamps gives it the same weight here. The game marks only the
+// post's own lot when it changes, and the other lots' lists hold its pointer: CrossLotLightChanged sends the outdoor rooms
+// that hold it at once when it moves or goes (QueueRoom stops a solve whose list lost a lamp), and the render thread gathers
+// the lots its light reaches again once a placed or moved post is still (lot_light_bridge CrossLotTick).
+thread_local uint64_t t_gatherLot = 0; // the lot whose room 0 gathers on this thread (OutdoorGather), else 0
+std::atomic<bool> g_xlotSafe{false};   // the light cells' removal hook is in (SetCrossLotSafe)
+std::mutex g_xlotMx;
+std::unordered_map<uintptr_t, std::vector<std::pair<uintptr_t, int>>> g_xlotHeld; // post -> (tracker, story) whose room 0 holds it
+std::vector<LevelLightShare::CrossLotEvent> g_xlotEvents;                                         // posts placed or moved, for the render thread
+// the lots whose room-0 maps the GPU relights with the active lot's lamps (SetGpuNeighbourLots): their gathers leave the active
+// lot's posts out (a torn read between frames only shifts one gather by a frame)
+std::atomic<uint64_t> g_gpuActive{0}, g_gpuNeighbour[4]{};
+std::atomic<uint8_t> g_gpuCpuStories[4]{}; // of each, the stories whose gathers still take the posts
+thread_local int t_gatherStory = -1;       // the story of the room 0 that gathers (OutdoorGather)
+// The stories of a lot whose maps the GPU relights with the posts of postLot (bit per story; 0: none)
+unsigned GpuPostStories(uint64_t postLot, uint64_t lot) {
+    if (!postLot || postLot != g_gpuActive.load(std::memory_order_relaxed)) return 0;
+    for (int i = 0; i < 4; i++)
+        if (g_gpuNeighbour[i].load(std::memory_order_relaxed) == lot) return 0xFFu & ~g_gpuCpuStories[i].load(std::memory_order_relaxed);
+    return 0;
+}
+std::atomic<long> g_xlotTaken{0}, g_xlotDoubled{0}, g_xlotSent{0}, g_xlotRegathers{0};
+
+uint64_t LightLot(const BYTE* L) {
+    return *reinterpret_cast<const uint32_t*>(L + 0xC0) | static_cast<uint64_t>(*reinterpret_cast<const uint32_t*>(L + 0xC4)) << 32;
+}
+uint64_t RoomZeroLot(const BYTE* room, int* story) {
+    __try {
+        if (*reinterpret_cast<const int*>(room + 0xC) != 0) return 0;
+        const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(room);
+        if (mgr) *story = *reinterpret_cast<const int*>(mgr + 0x88);
+        return mgr ? *reinterpret_cast<const uint32_t*>(mgr + 0x90) | static_cast<uint64_t>(*reinterpret_cast<const uint32_t*>(mgr + 0x94)) << 32 : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+// After the game's gather of room 0 of lot `me` (light tree thread): the other lots' posts it took, noted for
+// CrossLotLightChanged, and a story-0 post given its second entry
+void TakeCrossLotLamps(BYTE* treeLevel, BYTE* room, uint64_t me) {
+    uintptr_t* b = *reinterpret_cast<uintptr_t**>(room + 0xC8);
+    uintptr_t* e = *reinterpret_cast<uintptr_t**>(room + 0xCC);
+    if (!b || e <= b || e - b > 4096) return;
+    std::vector<uintptr_t> posts;
+    for (uintptr_t* p = b; p < e; p++) {
+        const uint64_t lot = *p ? LightLot(reinterpret_cast<const BYTE*>(*p)) : 0;
+        if (lot && lot != me) posts.push_back(*p);
+    }
+    if (posts.empty()) return;
+    std::sort(posts.begin(), posts.end());
+    const uintptr_t tracker = *reinterpret_cast<const uintptr_t*>(treeLevel + 4);
+    const int story = *reinterpret_cast<const int*>(*reinterpret_cast<const uintptr_t*>(room) + 0x88);
+    {
+        std::lock_guard<std::mutex> lk(g_xlotMx);
+        for (size_t i = 0; i < posts.size(); i++) {
+            if (i && posts[i] == posts[i - 1]) continue;
+            auto& held = g_xlotHeld[posts[i]];
+            if (std::find(held.begin(), held.end(), std::make_pair(tracker, story)) == held.end()) held.emplace_back(tracker, story);
+        }
+    }
+    for (size_t i = 0; i < posts.size();) {
+        size_t n = 1;
+        while (i + n < posts.size() && posts[i + n] == posts[i]) n++;
+        if (n == 1 && kAddRoomLight && *reinterpret_cast<const int*>(posts[i] + 0xD0) == 0) {
+            reinterpret_cast<AddRoomLight_t>(kAddRoomLight)(room, reinterpret_cast<void*>(posts[i]));
+            g_xlotDoubled.fetch_add(1, std::memory_order_relaxed);
+        }
+        i += n;
+    }
+}
+// A post's lot id and light rect (+0x134: minX, minZ, maxX, maxZ); false when it is not a lot's lamp post
+bool ReadPost(const BYTE* L, LevelLightShare::CrossLotEvent& ev) {
+    __try {
+        ev.lot = LightLot(L);
+        if (!ev.lot || *reinterpret_cast<const int*>(L + 0xB0) != 11) return false;
+        std::memcpy(ev.rect, L + 0x134, sizeof ev.rect);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool SendRoomZero(uintptr_t tracker, int story) {
+    __try {
+        t_queueForce = true; // (Instant: a room 0 whose kept parts look current still lost or moved a lamp)
+        const bool sent = QueueRoom(tracker, story, 0);
+        t_queueForce = false;
+        return sent;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        t_queueForce = false;
+        return false;
+    }
+}
+
 void __fastcall OutdoorGather(BYTE* treeLevel, void*, BYTE* room) {
     const DWORD started = GetTickCount();
+    const uint64_t me = g_installed.load(std::memory_order_relaxed) && room ? RoomZeroLot(room, &t_gatherStory) : 0; // (GatherLotId)
+    t_gatherLot = me;
     reinterpret_cast<AddWorldLights_t>(kAddWorldLights)(treeLevel, room);
+    t_gatherLot = 0;
     if (!g_installed.load(std::memory_order_relaxed) || !room) return;
     __try {
         if (const int n = DropDisabledLotLights(room)) g_disabledDropped.fetch_add(n, std::memory_order_relaxed);
+        if (me && g_xlotSafe.load(std::memory_order_relaxed)) TakeCrossLotLamps(treeLevel, room, me);
         NoteRoomStructure(room);
         ShareOutdoorLights(treeLevel, room);
         ShareIndoorLights(treeLevel, room);
@@ -14651,6 +14753,97 @@ std::string OpeningsDiagText() {
 } // namespace
 
 namespace LevelLightShare {
+// ---- lamp posts of other lots (see TakeCrossLotLamps) ----
+uint64_t __fastcall GatherLotId(const unsigned char* light) {
+    uint64_t lot = 0;
+    __try {
+        lot = LightLot(light);
+        const uint64_t me = t_gatherLot;
+        if (!lot || !me || lot == me || !g_xlotSafe.load(std::memory_order_relaxed)) return lot;
+        // (the cell filter asks only the street-lamp class) outdoors, alive, enabled
+        if (*reinterpret_cast<const int*>(light + 0xB0) != 11 || (light[0x100] & 0x45) != 0x45 || *reinterpret_cast<const int*>(light + 0x08) != 0) return lot;
+        // the GPU draws the active lot's posts on this story's maps
+        if (const int S = t_gatherStory; S >= 0 && S <= 7 && (GpuPostStories(lot, me) >> S & 1)) return lot;
+        g_xlotTaken.fetch_add(1, std::memory_order_relaxed);
+        return 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return lot;
+    }
+}
+void CrossLotLightChanged(const unsigned char* light, CrossLotChange what) {
+    CrossLotEvent ev{};
+    if (!light || !g_xlotSafe.load(std::memory_order_relaxed) || !ReadPost(light, ev)) return;
+    // removed: the rooms that hold it gather again now (a moved or switched post stays valid; the render thread sends the
+    // lots around it once the posts are still, so a drag does not solve them at every step)
+    if (what == CrossLotChange::Removed) {
+        std::vector<std::pair<uintptr_t, int>> held;
+        {
+            std::lock_guard<std::mutex> lk(g_xlotMx);
+            if (auto it = g_xlotHeld.find(reinterpret_cast<uintptr_t>(light)); it != g_xlotHeld.end()) {
+                held.swap(it->second);
+                g_xlotHeld.erase(it);
+            }
+        }
+        for (const auto& [tracker, story] : held)
+            if (TrackerLive(tracker) && SendRoomZero(tracker, story)) g_xlotSent.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    if (what == CrossLotChange::Placed && !WorldIsLive()) return; // (a world loading: every lot gathers anyway)
+    ev.at = GetTickCount();
+    std::lock_guard<std::mutex> lk(g_xlotMx);
+    if (g_xlotEvents.size() < 4096) g_xlotEvents.push_back(ev);
+}
+void SetCrossLotSafe(bool on) {
+    g_xlotSafe.store(on, std::memory_order_relaxed);
+    if (on) return;
+    std::lock_guard<std::mutex> lk(g_xlotMx); // (the rooms keep the posts until they gather again: the arm sites are going away)
+    g_xlotHeld.clear();
+    g_xlotEvents.clear();
+}
+void TakeCrossLotEvents(std::vector<CrossLotEvent>& out) {
+    out.clear();
+    std::lock_guard<std::mutex> lk(g_xlotMx);
+    out.swap(g_xlotEvents);
+}
+void SetGpuNeighbourLots(uint64_t active, const uint64_t* lots, const uint8_t* cpuStories, int n) {
+    g_gpuActive.store(active, std::memory_order_relaxed);
+    for (int i = 0; i < 4; i++) {
+        g_gpuCpuStories[i].store(i < n ? cpuStories[i] : 0, std::memory_order_relaxed);
+        g_gpuNeighbour[i].store(i < n ? lots[i] : 0, std::memory_order_relaxed);
+    }
+}
+bool GpuDrawsPosts(uint64_t postLot, uint64_t lot) { return GpuPostStories(postLot, lot) == 0xFFu; }
+uintptr_t TrackerOfLot(uint64_t lot) {
+    uintptr_t trackers[256];
+    const int n = AllTrackers(trackers, 256);
+    for (int t = 0; t < n; t++)
+        if ((static_cast<uint64_t>(LotIdPart(trackers[t], 0x94)) << 32 | LotIdPart(trackers[t], 0x90)) == lot) return trackers[t];
+    return 0;
+}
+bool RegatherOutdoorById(uint64_t lot) {
+    uintptr_t trackers[256];
+    const int n = AllTrackers(trackers, 256);
+    for (int t = 0; t < n; t++)
+        if ((static_cast<uint64_t>(LotIdPart(trackers[t], 0x94)) << 32 | LotIdPart(trackers[t], 0x90)) == lot) {
+            // as a lamp edit's safety net (tier 2): after the edit's own rooms, before any other, held with them by the edit
+            // hold so the stories change together; gathered at once (the post is already in the light cells)
+            QueueOutdoorRegather(trackers[t], 2, true);
+            g_xlotRegathers.fetch_add(1, std::memory_order_relaxed);
+            return true;
+        }
+    return false;
+}
+std::string CrossLotText() {
+    size_t held = 0;
+    {
+        std::lock_guard<std::mutex> lk(g_xlotMx);
+        held = g_xlotHeld.size();
+    }
+    return std::format("Lamp posts of other lots: {} | taken {}, second entries {}, rooms sent when one moved or went {}, lots gathered again {}, posts held {}",
+                       g_xlotSafe.load(std::memory_order_relaxed) ? "on" : "off (no removal hook)", g_xlotTaken.load(), g_xlotDoubled.load(), g_xlotSent.load(),
+                       g_xlotRegathers.load(), held);
+}
+
 void BeginSeamRecording() {
     std::lock_guard<std::mutex> lock(g_recordedSeamMx);
     g_recordedSeams.clear();

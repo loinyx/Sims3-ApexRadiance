@@ -109,6 +109,16 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    Past the ceiling a new solve of one is not kept and that story is no longer sent to its solve, so the stories do not
    evict one another in a loop ([outdoor-lamp-delta](outdoor-lamp-delta.md#limitations)). A story with no kept solve is sent
    to its solve at most three times in a row.
+10. **The lots next to it.** The active lot's lamp posts (type 11) are drawn on the room-0 maps of the three nearest lots
+   whose box comes within 20 m of one of them, the way the active lot's own maps are relit, with the active lot's
+   occluders. Those lots' gathers leave the posts out ([level light share](level-light-share.md#lamp-posts-of-other-lots)),
+   and their kept solves hold only the base: the texels' sums with every light of the list, no light's part
+   ([outdoor-lamp-delta](outdoor-lamp-delta.md)). A post counts as many times as the active lot lists it, once on a floor
+   map. The set changes only while no lamp is dragged; a lot that joins or leaves it gathers its outdoor rooms again
+   (the posts left out or taken back). Their outdoor floors over another story take the under-floor share from their own
+   story's lamps of the bake, with the active lot's posts in the bake added as their gather took them before. A story the
+   GPU cannot relight (a map refused, no kept solve after its three sends) takes the posts in its own gather again until
+   the lot leaves the set.
 
 ## Settings
 
@@ -134,7 +144,9 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
 - The cause of the courtyard's stale light (2.16.0) is not confirmed, and the accounting check has not been seen to refuse
   a solve in game ([validation](../../validation/night-lighting-level-light-share.md)). If old light stays, *Restart
   lighting* clears it.
-- Only the active lot. Other lots, the world grass and roads (terrain bake) and the world's street lamps stay baked;
+- On the lots next to the active one, only the active lot's lamp posts are drawn, and their own walls cast no shadow yet
+  (the occluders are the active lot's).
+- Only the active lot's lamps. Other lots, the world grass and roads (terrain bake) and the world's street lamps stay baked;
   while one of the active lot's lamps is dragged, its light on the ground past the lot is drawn on the GPU too
   ([terrain relight](terrain-relight.md#dragged-lamps-on-the-gpu)).
 - The light past 1 shows on the lot ground, the summer outdoor floors and the ps_3_0 outside walls of the active lot. Classic,
@@ -155,12 +167,23 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
   room's own set `[room+4] + class × 64 + 0xC` (index 0 floor, 1 ceiling, 2 objects, 3 walls); a wrapper's texture is
   `[wrapper+0x30]` while `[wrapper+0x2C] == 0` ([engine/room-light-maps.md](../../engine/room-light-maps.md)).
 - **Self-measure.** Every 10 s while the option is on: the average and largest cost a frame on the render thread, the
-  relights and why the maps were relit.
+  relights and why the maps were relit, and of a frame's cost the lots next to it and the relight loop.
 - **Coverage.** Lamp edits mark no room only while every story's maps are relit; the log says when that starts and
   stops (`Every story covered` / `Not every story covered (...)`). A lamp counts as covered on the stories it is drawn
   on, a story that draws it before its room 0 gathers it included. A lamp not drawn on a story where it can be drawn, or
   kept baked in a relit map's base, is not covered: its edit also goes to the game's solve. The consistency check reads
   the stories' real lists, so a story that draws a lamp it has not gathered is still sent to gather it.
+- **Lots next to it.** `Slot::mgr` is 0 for the active lot's maps and the story manager for a neighbour's; the same
+  per-story code (`serve` in `Frame`) builds both, a neighbour's texels placed in the active lot's space (`Job::space`),
+  its story-0 ground marked by its own ground height. Each of its stories' lamps of the bake are read from its room-0 list
+  (`NbBake`, by story manager; `FillBake` as for the active lot) when its kept solve or the active lot's lamps change, else
+  once a second. A neighbour's maps share the one upload a
+  frame after the active lot's, take watch slots from the upper half, and never count for coverage or the restart.
+  `LotLightBridge::LotsNear` picks the lots (per post, nearest first), at most once a second or when a lamp changes;
+  `LevelLightShare::SetGpuNeighbourLots` (with each lot's stories left to the CPU) and `OutdoorDelta::SetNeighbourLots`
+  publish them. A kept solve of the other kind (base only on the active lot, full on a neighbour, after the active lot
+  changed) counts as none until the story's next solve. The relight line ends with how many of its maps were a
+  neighbour's.
 - **Terrain stamps.** Each frame hands every lamp of the lot's room-0 lists, drawn on every story or not, to
   `TerrainStamps::Update` ([terrain relight](terrain-relight.md#dragged-lamps-on-the-gpu)); none when the frame stops
   before it reads the lists.

@@ -57,7 +57,7 @@ struct Line {
     std::string text;
 };
 std::vector<Line> g_lines;
-std::string g_lastStatusText[9];
+std::string g_lastStatusText[10];
 std::string g_settingsAtStart; // ApexRadiance.toml as it was when the recording started
 size_t g_notes = 0;            // lines added by other modules (Note: furniture, probe), capped
 constexpr size_t kMaxNotes = 40000;
@@ -509,13 +509,13 @@ std::string CameraLine(DWORD now) {
 }
 
 void Status(DWORD now) {
-    const std::string texts[9] = {"Indoor light between stories: " + LevelLightShare::Status(), "Rooms at Night: " + UnlitRooms::Status(),
+    const std::string texts[10] = {"Indoor light between stories: " + LevelLightShare::Status(), LevelLightShare::CrossLotText(), "Rooms at Night: " + UnlitRooms::Status(),
                                   "Faster Room Lighting: " + RoomLightQueue::StatusText(), "Indoor object maps: " + RoomMapPadding::Status(), FurnitureLine(),
                                   CameraLine(now), "Rooms at Night sliders: " + UnlitRooms::SettingsText(),
                                   "Rooms keep their light: " + LampMarkFilter::Status(),
                                   // (development builds, arch_ambient) the arches' floor draws: matched or not, and why
                                   DevSwitches::ArchAmbient() ? LevelLightShare::ArchAmbientStatus() : std::string()};
-    for (int i = 0; i < 9; i++)
+    for (int i = 0; i < 10; i++)
         if (texts[i] != g_lastStatusText[i]) {
             g_lastStatusText[i] = texts[i];
             g_lines.push_back({now, "[status] " + texts[i]});
