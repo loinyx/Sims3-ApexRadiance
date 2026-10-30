@@ -1660,10 +1660,10 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
         // list serves the whole group, so a group running past the wall keeps the lamp for every piece, and neither the lamps
         // here nor the atlas test a wall. Both take the lot ground's shade before the max, M = the lot mask's alpha at the
         // pixel's world xz (P = world x, y, z): the lamps x 1 + gate (M - 1), gate 1 within about 1 m of the lot's ground, as the
-        // outdoor floors' (AppendGroundShade); the atlas, the light lying on the ground, x M at every height (F7 2026-10-29
-        // 17-35-27: the steps of an outdoor stair above 1.25 m took the pool of lamps behind the house wall beside it, a bright
-        // flat band over the shaded steps below). Within the gate it is the max x the shade, as before. Q and G are free after
-        // the lamps. Only with a sampler and 3 constants to spare (after the reach rows): otherwise the bytes without it.
+        // outdoor floors' (AppendGroundShade); the atlas, the light lying on the ground, x M at every height (the steps of an
+        // outdoor stair above 1.25 m took the pool of lamps behind the house wall beside it, a bright flat band over the shaded
+        // steps below). Within the gate it is the max x the shade, as before. Q and G are free after the lamps. Only with a
+        // sampler and 3 constants to spare (after the reach rows): otherwise the bytes without it.
         const DWORD cM = cR + (reach ? 2u : 0u);
         if (groundShade && E + 1 <= 15 && cM + 2 < 224) {
             const DWORD S = E + 1;

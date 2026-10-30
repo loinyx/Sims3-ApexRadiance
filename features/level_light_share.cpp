@@ -818,7 +818,7 @@ void FlushDeferred(uintptr_t tracker) {
 }
 
 int RooflessRoomIds(uintptr_t mgr, int* ids, int max); // below
-// The outdoor rooms of floors 0..7: room 0, and the roofless rooms when the room update hooks send them (05/10).
+// The outdoor rooms of floors 0..7: room 0, and the roofless rooms when the room update hooks send them.
 // urgentTier, soon: as QueueRoom (a lamp post of another lot: tier 2, gathered at once)
 void QueueOutdoorRegather(uintptr_t tracker, int urgentTier = -1, bool soon = false) {
     for (int level = 0; level <= 7; level++) {
