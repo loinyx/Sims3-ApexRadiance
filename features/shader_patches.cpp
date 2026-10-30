@@ -279,12 +279,12 @@ uint32_t ConstantsRead(const std::vector<DWORD>& t) {
             if (Num(t[x.at + 1]) < 32) defined |= 1u << Num(t[x.at + 1]);
             continue;
         }
-        // m4x4, m4x3, m3x4, m3x3, m3x2 read their matrix operand's next rows too
+        // m4x4, m4x3, m3x4, m3x3, m3x2 read their matrix operand's next rows too (the last operand: after a predicate or a0 token)
         const DWORD rows = x.op == 0x14 || x.op == 0x16 ? 4 : x.op == 0x15 || x.op == 0x17 ? 3 : x.op == 0x18 ? 2 : 1;
         for (size_t k = 1; k <= x.len; k++) {
             const DWORD r = t[x.at + k];
             if (!(r & 0x80000000u) || Type(r) != kConst || (r & 0x2000u)) continue;
-            for (DWORD i = 0; i < (k == 3 ? rows : 1u); i++)
+            for (DWORD i = 0; i < (k == x.len ? rows : 1u); i++)
                 if (Num(r) + i < 32) read |= 1u << (Num(r) + i);
         }
     }

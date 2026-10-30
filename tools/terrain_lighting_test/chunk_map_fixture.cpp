@@ -162,6 +162,13 @@ int main() {
     fixtureRebuilt[K] = &B3;
     Draw(&sidewalk, 2, &A, 896, 1152);
     Check(Draw(&paint, 3, &B3, 896, 1152, &c) == 3 && c->tex == &B3 && c->rebuilt, "new rebuilt texture taken after another check that frame");
+    // ...and a moment the chunk cannot be read does not drop the confirmed rebuilt map
+    Reset();
+    fixtureRebuilt[K] = &B;
+    Draw(&paint, 3, &B, 896, 1152);
+    g_roomMapFrame++;
+    fixtureRebuilt.erase(K);
+    Check(Draw(&sidewalk, 2, &A, 896, 1152, &c) == 2 && c->tex == &B && c->rebuilt, "unreadable for a frame: the rebuilt map kept");
 
     // no rebuilt map readable (before the world's first rebuild): the last map seen, as before
     Reset();
@@ -192,6 +199,9 @@ int main() {
     // m4x4 r0, v0, c12 reads c12..c15; vs_1_1 code is not parsed
     const std::vector<DWORD> matrix{0xFFFE0300u, 0x03000014u, 0x800F0000u, 0x90E40000u, 0xA0E4000Cu, 0x0000FFFFu};
     Check(ShaderPatches::ConstantsRead(matrix) == 0xFu << 12, "constants read: the four rows of an m4x4");
+    // (p0) m4x4 r0, v0, c12: the predicate token sits before the sources
+    const std::vector<DWORD> predicated{0xFFFE0300u, 0x14000014u, 0x800F0000u, 0xB0E41000u, 0x90E40000u, 0xA0E4000Cu, 0x0000FFFFu};
+    Check(ShaderPatches::ConstantsRead(predicated) == 0xFu << 12, "constants read: the rows of a predicated m4x4");
     Check(ShaderPatches::ConstantsRead({0xFFFE0101u, 0x00000001u, 0x0000FFFFu}) == ~0u, "constants read: vs_1_1 gives every bit");
 
     Reset();

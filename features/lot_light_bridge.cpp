@@ -7785,7 +7785,8 @@ DWORD RecordWorldChunk(IDirect3DDevice9* dev, std::pair<int, int>& key, ChunkTex
         if (!slot.rebuilt || slot.checkedFrame != g_roomMapFrame || slot.checkedTex != t) {
             slot.checkedFrame = g_roomMapFrame, slot.checkedTex = t;
             match = ChunkRelight::RebuiltLightMapMatch(key.first, key.second, t);
-            if (match < 0 && slot.tex) slot.rebuilt = ChunkRelight::RebuiltLightMapMatch(key.first, key.second, slot.tex) >= 0;
+            if (match < 0 && slot.tex) // (a moment the chunk cannot be read leaves it as it was)
+                if (const int kept = ChunkRelight::RebuiltLightMapMatch(key.first, key.second, slot.tex); kept != -2) slot.rebuilt = kept >= 0;
         }
         if (match < 0 && slot.rebuilt) {
             static bool s_told = false;
