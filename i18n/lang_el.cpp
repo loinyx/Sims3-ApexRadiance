@@ -9,6 +9,11 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Greek}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: wall and fence shadows on the ground follow a dragged lamp at once", "Νυχτερινά Φώτα: οι σκιές τοίχων και φρακτών στο έδαφος ακολουθούν αμέσως μια λάμπα που σέρνετε"},
+    {"Night Lights: the ground no longer flashes when you let go of a lamp", "Νυχτερινά Φώτα: το έδαφος δεν αναβοσβήνει πια όταν αφήνετε μια λάμπα"},
+    {"Night Lights: a lamp post beside a bush or tree lights the ground around it", "Νυχτερινά Φώτα: ένας φανοστάτης δίπλα σε θάμνο ή δέντρο φωτίζει το έδαφος γύρω του"},
+    {"Night Lights: a lamp held from the catalog leaves no light where it passed", "Νυχτερινά Φώτα: μια λάμπα από τον κατάλογο δεν αφήνει φως από όπου πέρασε"},
+    {"Night Lights: picking a lamp up again right after placing it keeps its light", "Νυχτερινά Φώτα: μια λάμπα που σηκώνετε ξανά μόλις την τοποθετήσετε κρατά το φως της"},
     {"Night Lights: sidewalks keep the lamps' light from every camera angle", "Νυχτερινά Φώτα: τα πεζοδρόμια κρατούν το φως των λαμπών από κάθε γωνία της κάμερας"},
     {"Night Lights: lamp light on the grass by lots no longer changes with the camera", "Νυχτερινά Φώτα: το φως των λαμπών στο γρασίδι δίπλα στα οικόπεδα δεν αλλάζει πια με την κάμερα"},
     {"Night Lights: objects light up without delay as the camera moves between lots", "Νυχτερινά Φώτα: τα αντικείμενα φωτίζονται χωρίς καθυστέρηση όταν η κάμερα κινείται ανάμεσα σε οικόπεδα"},

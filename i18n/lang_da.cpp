@@ -9,6 +9,11 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Danish}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: wall and fence shadows on the ground follow a dragged lamp at once", "Natlys: skygger fra mure og hegn på jorden følger en lampe, du trækker, med det samme"},
+    {"Night Lights: the ground no longer flashes when you let go of a lamp", "Natlys: jorden blinker ikke længere, når du slipper en lampe"},
+    {"Night Lights: a lamp post beside a bush or tree lights the ground around it", "Natlys: en lygtepæl ved en busk eller et træ lyser jorden op omkring sig"},
+    {"Night Lights: a lamp held from the catalog leaves no light where it passed", "Natlys: en lampe holdt fra kataloget efterlader intet lys, hvor den kom forbi"},
+    {"Night Lights: picking a lamp up again right after placing it keeps its light", "Natlys: en lampe, du løfter igen lige efter at have placeret den, beholder sit lys"},
     {"Night Lights: sidewalks keep the lamps' light from every camera angle", "Natlys: fortove beholder lampernes lys fra alle kameravinkler"},
     {"Night Lights: lamp light on the grass by lots no longer changes with the camera", "Natlys: lampelyset på græsset ved grundene ændrer sig ikke længere med kameraet"},
     {"Night Lights: objects light up without delay as the camera moves between lots", "Natlys: genstande lyser op uden forsinkelse, når kameraet flytter sig mellem grunde"},

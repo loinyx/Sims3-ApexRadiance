@@ -9,6 +9,11 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Traditional, Taiwan / Hong Kong)}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: wall and fence shadows on the ground follow a dragged lamp at once", "夜間燈光：地面上牆壁與柵欄的陰影會立即跟隨拖動的燈"},
+    {"Night Lights: the ground no longer flashes when you let go of a lamp", "夜間燈光：放開燈時地面不再閃爍"},
+    {"Night Lights: a lamp post beside a bush or tree lights the ground around it", "夜間燈光：灌木或樹旁的路燈會照亮周圍的地面"},
+    {"Night Lights: a lamp held from the catalog leaves no light where it passed", "夜間燈光：從目錄拿起的燈不會在經過的地方留下光"},
+    {"Night Lights: picking a lamp up again right after placing it keeps its light", "夜間燈光：放下後立即再次拿起的燈會保留它的光"},
     {"Night Lights: sidewalks keep the lamps' light from every camera angle", "夜間燈光：人行道在任何鏡頭角度下都保持燈光"},
     {"Night Lights: lamp light on the grass by lots no longer changes with the camera", "夜間燈光：地段旁草地上的燈光不再隨鏡頭變化"},
     {"Night Lights: objects light up without delay as the camera moves between lots", "夜間燈光：鏡頭在地段之間移動時，物體會立即亮起"},
