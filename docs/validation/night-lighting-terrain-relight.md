@@ -31,6 +31,7 @@ FPS or absence of visible flicker.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-31 | `acd352e` (release 2.18.4; code `3171fc1`) | Stamped fixture, terrain stamp state checks (S8b), edit dispatch fixture | 7, 84 and 194 checks, 0 failures; a catalog copy held over the house followed by the stamps, checked in game on a developer build of the same code | MSVC x86; NVIDIA through DXVK |
 | 2026-10-29 | `7eca05b` | Edit dispatch fixture, with a `RebuildActive` stub and its executable renamed (Windows asked to elevate a program named `dispatch_checks.exe`, which is why it was cancelled before) | 194 passed, 0 failed | None |
 | 2026-10-29 | `7eca05b` | Terrain queue fixture (`run_queue_checks.ps1`) | Does not compile: the paced full rebuild (`g_rb`, `StepRebuild`, `kSlowMs`) is not in its extracted code; with it added, 386 of 11,963 assertions fail on the release rules of chunks changed since. Not updated in this release | None |
 | 2026-10-29 | `8d13e95` (a dragged lamp's ground light on the GPU) | Developer recordings of lot lamp drags, before and after | Local terrain relights during the drags: 127 (2,155 ms of CPU in 73 s) before, 7 (94 ms in 101 s) after | In game, backend not recorded |
