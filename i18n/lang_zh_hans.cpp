@@ -9,6 +9,11 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Chinese (Simplified, mainland China)}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: wall and fence shadows on the ground follow a dragged lamp at once", "夜间灯光：地面上墙壁和栅栏的阴影会立即跟随拖动的灯"},
+    {"Night Lights: the ground no longer flashes when you let go of a lamp", "夜间灯光：放开灯时地面不再闪烁"},
+    {"Night Lights: a lamp post beside a bush or tree lights the ground around it", "夜间灯光：灌木或树旁的路灯会照亮周围的地面"},
+    {"Night Lights: a lamp held from the catalog leaves no light where it passed", "夜间灯光：从目录拿起的灯不会在经过的地方留下光"},
+    {"Night Lights: picking a lamp up again right after placing it keeps its light", "夜间灯光：放下后立即再次拿起的灯会保留它的光"},
     {"Night Lights: sidewalks keep the lamps' light from every camera angle", "夜间灯光：人行道在任何镜头角度下都保持灯光"},
     {"Night Lights: lamp light on the grass by lots no longer changes with the camera", "夜间灯光：地块旁草地上的灯光不再随镜头变化"},
     {"Night Lights: objects light up without delay as the camera moves between lots", "夜间灯光：镜头在地块之间移动时，物体会立即亮起"},
@@ -2416,6 +2421,8 @@ const I18n::Pair kPairs[] = {
     {"Room light maps are read as a smooth curve instead of texel steps", "房间光照贴图以平滑曲线读取，而不是纹素台阶"},
     {"Soft ground shade", "柔和的地面阴影"},
     {"The shade of walls on lot ground has soft edges, without texel steps", "墙在地块地面上的阴影边缘柔和，没有纹素台阶"},
+    {"Ground shade on the GPU", "在 GPU 上生成地面阴影"},
+    {"The shade of walls on the ground follows a dragged lamp at once; off, it is built on a worker thread", "墙在地面上的阴影立即跟随被拖动的灯；关闭时在工作线程中生成"},
     {"Lamps through arches on indoor objects", "穿过拱门的灯光照到室内物体"},
     {"An object inside an arcade keeps a garden lamp's dim light", "拱廊内的物体保留花园灯的微弱光线"},
     {"Background and lamp light inside rooms", "房间内的背景光和灯光"},

@@ -8,9 +8,11 @@
 // engaged), it leaves the exclusion list and one local relight bakes it where it stays; each chunk under it keeps the
 // stamp until the build that shows its re-rendered map (a re-render that leaves the map the same counts). A chunk the
 // relight does not re-render within kGateMaxMs is taken as done. Dragged again while it returns, it enters again from
-// there. A lamp out of the list (picked up again: for a few frames) stays as it was; out of it for kGoneMs (another lot,
-// deleted) it goes back to the bake where it was last seen, as at a release (a deleted one is then baked nowhere). With
-// the GPU smoothing off every lamp is back in the bake at once.
+// there: a chunk the return's relight has not re-rendered yet (no lamp in its map) takes the stamp at once, one re-rendered
+// since (the lamp baked where it was let go) waits for the new relight. A lamp out of the list (picked up again: for a
+// few frames) stays as it was; out of it for kGoneMs (another lot, deleted) it goes back to the bake where it was last
+// seen, as at a release (a deleted one is then baked nowhere). With the GPU smoothing off every lamp is back in the bake
+// at once.
 //
 // Part of Apex Radiance. Credits: @loinyx
 
@@ -19,6 +21,7 @@
 #include "terrain_chunk_relight.h"
 #include "drag_lite.h"
 #include "apex_log.h"
+#include "build_flavor.h"
 #include <windows.h>
 #include <algorithm>
 #include <cmath>
@@ -107,6 +110,10 @@ void Update(const std::vector<uintptr_t>& all) {
         }
         LightmapSmooth::BumpStamps(s.builtRect);
         if (gpu) { // out for kGoneMs: back in the bake where it was last seen, as at a release (gone: the relight takes it out)
+            static int s_logs = 0; // (developer log; the light itself is not read: it may be gone)
+            if (!kPublicBuild && ++s_logs <= 40)
+                LOG_INFO(std::format("[TerrainStamps] Lamp {:08X} out of the lamp list for {} ms: back to the bake where it was last seen ({:.2f} {:.2f} {:.2f})",
+                                     it->first, now - s.goneAt, s.lamp.pos[0], s.lamp.pos[1], s.lamp.pos[2]));
             std::string why;
             if (!Relight(s.lamp.pos, s.rect, why)) g_lastRefusal = why;
             s.phase = Phase::Releasing;
@@ -142,8 +149,11 @@ void Update(const std::vector<uintptr_t>& all) {
             std::memcpy(now_.rect, rect, sizeof now_.rect);
         }
         auto st = g_states.find(L);
+        State released; // (dragged again while it returns: its release state, gate included)
+        bool regrab = false;
         if (st != g_states.end() && st->second.phase == Phase::Releasing && moved) { // dragged again: enters again from there
             LightmapSmooth::BumpStamps(st->second.builtRect);
+            released = std::move(st->second), regrab = true;
             g_states.erase(st);
             st = g_states.end();
         }
@@ -157,12 +167,20 @@ void Update(const std::vector<uintptr_t>& all) {
             std::memcpy(s.rect, rect, sizeof s.rect);
             std::memcpy(s.builtRect, rect, sizeof s.builtRect);
             if (!unbaked) SetGate(s, before.rect);
+            if (regrab) { // a chunk the release relight has not re-rendered yet still bakes it nowhere: stamped at once; one
+                          // re-rendered since bakes it at its last place and waits for the relight below (queued again for all)
+                std::erase_if(s.gate, [&](const std::pair<Key, uint64_t>& g) {
+                    return std::any_of(released.gate.begin(), released.gate.end(), [&](const std::pair<Key, uint64_t>& r) { return r.first == g.first && g.second <= r.second; });
+                });
+                s.gateLeft = s.gate.size();
+            }
             s.since = s.movedAt = s.bumpAt = now;
             g_states[L] = std::move(s);
             PushExcluded();
             std::string why;
             if (!unbaked && !Relight(before.pos, before.rect, why)) {
                 g_states.erase(L);
+                if (regrab) g_states[L] = std::move(released); // still drawn where the release bake has not landed
                 PushExcluded();
                 g_refused++;
                 g_lastRefusal = why;
@@ -244,6 +262,11 @@ uint64_t ForChunk(const std::pair<int, int>& key, uint64_t rver, std::vector<Lam
         sig = sig * 1099511628211ull ^ static_cast<uint64_t>(L);
     }
     return sig;
+}
+
+bool MovedWithin(uintptr_t light, unsigned long ms) {
+    const auto it = g_states.find(light);
+    return it != g_states.end() && it->second.phase == Phase::Active && GetTickCount() - it->second.movedAt < ms;
 }
 
 void Clear() {

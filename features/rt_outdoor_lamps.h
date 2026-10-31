@@ -25,7 +25,15 @@
 #include <cstdint>
 #include <string>
 
+namespace RtLampGpu {
+struct DeviceCalls;
+}
+
 namespace RtOutdoorLamps {
+
+// The device calls Apex's own hooks never see (Apex's CallOriginal*), for other GPU passes (lot_light_bridge.cpp: the
+// ground shade)
+RtLampGpu::DeviceCalls DeviceCallsOfGame();
 
 // Render thread, every frame (Night Lighting's Present): the Instant lamp lighting, and Quick outdoor lamp edits keeping parts
 void SetEnabled(bool on);

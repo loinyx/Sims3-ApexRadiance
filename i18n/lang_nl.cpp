@@ -9,6 +9,11 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Dutch}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: wall and fence shadows on the ground follow a dragged lamp at once", "Nachtverlichting: schaduwen van muren en hekken op de grond volgen een gesleepte lamp meteen"},
+    {"Night Lights: the ground no longer flashes when you let go of a lamp", "Nachtverlichting: de grond knippert niet meer als je een lamp loslaat"},
+    {"Night Lights: a lamp post beside a bush or tree lights the ground around it", "Nachtverlichting: een lantaarnpaal naast een struik of boom verlicht de grond eromheen"},
+    {"Night Lights: a lamp held from the catalog leaves no light where it passed", "Nachtverlichting: een lamp uit de catalogus laat geen licht achter waar hij langskwam"},
+    {"Night Lights: picking a lamp up again right after placing it keeps its light", "Nachtverlichting: een lamp die je direct na het plaatsen weer oppakt, houdt zijn licht"},
     {"Night Lights: sidewalks keep the lamps' light from every camera angle", "Nachtverlichting: stoepen houden het lamplicht vanuit elke camerahoek"},
     {"Night Lights: lamp light on the grass by lots no longer changes with the camera", "Nachtverlichting: lamplicht op het gras bij kavels verandert niet meer met de camera"},
     {"Night Lights: objects light up without delay as the camera moves between lots", "Nachtverlichting: objecten lichten zonder vertraging op als de camera tussen kavels beweegt"},
@@ -2416,6 +2421,8 @@ const I18n::Pair kPairs[] = {
     {"Room light maps are read as a smooth curve instead of texel steps", "Lichtkaarten van kamers worden als zachte curve gelezen in plaats van texeltreden"},
     {"Soft ground shade", "Zachte grondschaduw"},
     {"The shade of walls on lot ground has soft edges, without texel steps", "De schaduw van muren op de kavelgrond heeft zachte randen, zonder texeltreden"},
+    {"Ground shade on the GPU", "Grondschaduw op de GPU"},
+    {"The shade of walls on the ground follows a dragged lamp at once; off, it is built on a worker thread", "De schaduw van muren op de grond volgt een versleepte lamp meteen; uit: hij wordt in een werkthread gemaakt"},
     {"Lamps through arches on indoor objects", "Lampen door bogen op binnenobjecten"},
     {"An object inside an arcade keeps a garden lamp's dim light", "Een object in een arcade houdt het zwakke licht van een tuinlamp"},
     {"Background and lamp light inside rooms", "Achtergrond- en lamplicht in kamers"},

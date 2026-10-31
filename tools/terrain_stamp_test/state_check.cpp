@@ -13,6 +13,8 @@
 // S6  the GPU smoothing off while dragged
 // S7  the relight refused when the drag starts / when it ends (retried)
 // S8  dragged again while it returns to the bake
+// S8b dragged again 2-5 frames after its release, before the release relight lands (a slow queue): stamped at once where the
+//     bake has not taken it back yet, never twice
 // S9  two lamps dragged at once, a slow re-render queue
 // S10 a lamp new from the catalog (never baked) dragged at once, a slow queue: drawn at once, no relight at the start
 // S11 picked up again mid-drag: out of the list for a few frames, a slow queue
@@ -315,6 +317,41 @@ int main() {
         Check(excluded.count(A) == 1, "S8: entered again");
         Settled("S8", st);
         Gap("S8", st, 4);
+    }
+    std::printf("[S8b] dragged again 2-5 frames after its release, a slow queue (the release relight not landed)\n");
+    for (int after = 2; after <= 5; after++) {
+        Reset();
+        Place(A, 300, 300);
+        Stats st;
+        renderEvery = 30 + after; // (a chunk of the release relight lands after the re-grab, at a different frame each run)
+        Drag(st, A, 0.2f, 0, 30);
+        while (TerrainStamps::g_states.count(A) && TerrainStamps::g_states[A].phase == TerrainStamps::Phase::Active) Run(st, 1);
+        Check(TerrainStamps::g_states.count(A) == 1, std::format("S8b+{}: released, returning to the bake", after));
+        Run(st, after);
+        Stats again;
+        Drag(again, A, 0, 0.2f, 60);
+        Check(again.maxGap <= 1, std::format("S8b+{}: re-grabbed, a chunk under the lamp misses it for at most 1 frame ({})", after, again.maxGap));
+        Check(again.doubled == 0, std::format("S8b+{}: re-grabbed, never shown twice ({} chunk frames doubled)", after, again.doubled));
+        Settled(std::format("S8b+{}", after).c_str(), st);
+        Gap(std::format("S8b+{}", after).c_str(), st, 4);
+    }
+    std::printf("[S8c] as S8b, the re-grab's relight refused once: the return goes on, never missing or doubled\n");
+    {
+        Reset();
+        Place(A, 300, 300);
+        Stats st;
+        renderEvery = 33;
+        Drag(st, A, 0.2f, 0, 30);
+        while (TerrainStamps::g_states.count(A) && TerrainStamps::g_states[A].phase == TerrainStamps::Phase::Active) Run(st, 1);
+        Run(st, 3);
+        Stats again;
+        refuse = 1;
+        Drag(again, A, 0, 0.2f, 60);
+        Check(refuse == 0 && excluded.count(A) == 1, "S8c: entered again after the refusal");
+        Check(again.maxGap <= 1, std::format("S8c: a chunk under the lamp misses it for at most 1 frame ({})", again.maxGap));
+        Check(again.doubled == 0, std::format("S8c: never shown twice ({} chunk frames doubled)", again.doubled));
+        Settled("S8c", st);
+        Gap("S8c", st, 4);
     }
     std::printf("[S9] two lamps, slow queue\n");
     {

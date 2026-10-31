@@ -11,7 +11,7 @@ light the ground through their cones, as they light the lot. Part of [Night Ligh
 
 | | |
 |---|---|
-| Availability | Released (visitor patch, arm sites and dusk rebuild since 0.1.0; paced sweep default since 2.5.3; local relight of user and visible-lot edits since 2.5.4; world-owned type-11 lamps since 2.5.6; day/night endpoint rebuilds, Build-mode phase response, priority re-queue of in-flight chunks and the world-lamp rig request on early completion since 2.6.0). Changed in 2.7.0: the world-load and Refresh terrain rebuilds run one chunk per frame, nearest first; a lamp switch's ground changes in one frame; urgent chunks go back to back. Lot area lights in the bake and lamps on the ground stamped from 40 cm: Released in 2.15.1. No lamp edit budget for lamps switched on the load screen: Released in 2.15.3 Released in 2.18.0: lamp cones in the bake, a dragged lamp's ground light drawn on the GPU, moves under 5 cm added up. Released in 2.18.1: only the dragged lamps' own changes skip the relight. |
+| Availability | Released (visitor patch, arm sites and dusk rebuild since 0.1.0; paced sweep default since 2.5.3; local relight of user and visible-lot edits since 2.5.4; world-owned type-11 lamps since 2.5.6; day/night endpoint rebuilds, Build-mode phase response, priority re-queue of in-flight chunks and the world-lamp rig request on early completion since 2.6.0). Changed in 2.7.0: the world-load and Refresh terrain rebuilds run one chunk per frame, nearest first; a lamp switch's ground changes in one frame; urgent chunks go back to back. Lot area lights in the bake and lamps on the ground stamped from 40 cm: Released in 2.15.1. No lamp edit budget for lamps switched on the load screen: Released in 2.15.3 Released in 2.18.0: lamp cones in the bake, a dragged lamp's ground light drawn on the GPU, moves under 5 cm added up. Released in 2.18.1: only the dragged lamps' own changes skip the relight. Released in 2.18.4: a lamp picked up again during its release keeps its stamp; the stamps follow the lot's baked lamps no room-0 list holds. |
 | Default | On |
 | Menu | Lighting > Outside > Ground & Lots > *Lot lamps light the street*; Lighting > Game fixes > Ground & Lots (*Update at dusk*, *Delay after dusk*); Lighting > Overview > Refresh lighting |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` (keys below) |
@@ -363,16 +363,32 @@ whole chunks on the CPU:
   ([world atlas](world-atlas-and-smoothed-maps.md#gpu-path-default)) with the bake's law: the colour with the lot-lamp
   gain and the area share, `range x intensity x 0.2` over the horizontal distance squared, the low-lamp lift and the
   bake's cone rows, on flat ground at the lot's ground height. A terrain lamp change whose every lamp is drawn this way
-  takes no local relight (`skipped: drawn on the GPU while dragged`): each addition stands within 1.5 m (a tile step) of an excluded
-  lamp of its lot and type, and each removal is paired with such an addition (`AllStamped`), so a lamp of the same type
-  deleted or placed beside the drag goes through the local relight.
+  takes no local relight (`skipped: drawn on the GPU while dragged`): each addition is an excluded light itself
+  (`BakeChange::id`) or stands within 1.5 m (a tile step) of an excluded lamp of its lot and type, and each removal is
+  paired with such an addition (`AllStamped`), so a lamp of the same type deleted or placed beside the drag goes through
+  the local relight. The diff's place is the lamp list's, read every 250 ms while dragged: a fast drag left it 1.6 to
+  3.6 m behind the light, and each such step re-rendered its chunk to the same map (4 to 45 ms on the render thread)
+  before the light was matched by its id. The walls' shade on the ground leaves a moving lamp out of its wall test
+  ([lot light pass](lot-light-pass.md#lamp-shade-on-lot-ground-groundshadow)).
 - **Release.** Still for 1.5 s (`kQuietMs`) with no drag engaged (`DragLite::Engaged`), the lamp leaves the exclusion
   list and one local relight bakes it where it stays; each chunk under it keeps the stamp until the build that shows its
   re-rendered map (a re-render that leaves the map the same counts; 3 s at most, `kGateMaxMs`). A refused relight keeps
-  the stamp and is tried again 1.5 s later. Dragged again while it returns, the lamp enters again from there.
+  the stamp and is tried again 1.5 s later. Dragged again while it returns, the lamp enters again from there: a chunk the
+  return's relight has not re-rendered yet (no lamp in its map) takes the stamp at once, and one re-rendered since (the
+  lamp baked where it was let go) waits for the new relight, queued over the whole rect (the bake reads the exclusion
+  list when it runs; the re-render notices posted since the last draw are read first, `LightmapSmooth::ChunkVersions`). If
+  that relight is refused, the return goes on as it was (still drawn where its relight has not landed) and the next moving
+  frame tries again. Before, every chunk waited, and those still without the lamp drew neither stamp nor bake for about
+  0.5 s (`tools/terrain_stamp_test/state_check.cpp` S8b).
+- **The list.** The lamps Real-time outdoor lamps draws on the active lot's room-0 maps, and the active lot's lamps the
+  terrain bake takes that no room-0 list holds now (a copy held from the catalog, a post over the house; read from the
+  lamp list, checked to be still that lot's lamp of that type). Before, such a lamp went back to the bake after 1 s out
+  of the list and was never followed again: each later re-render of its chunk baked it wherever it stood then, and the
+  light stayed there while it moved on.
 - **Out of the list.** A lamp picked up again is out of the list for a few frames and keeps its state; out of it for
-  1 s (`kGoneMs`: another lot, deleted) it returns to the bake where it was last seen, as at a release. With the GPU
-  smoothing off every lamp is back in the bake at once; a new world forgets them all (its bake takes every lamp).
+  1 s (`kGoneMs`: another lot, deleted) it returns to the bake where it was last seen, as at a release (developer log:
+  where it was last seen). With the GPU smoothing off every lamp is back in the bake at
+  once; a new world forgets them all (its bake takes every lamp).
 
 Each chunk changes between the bake and the stamp in the build that first shows its re-rendered map, so the lamp is
 never drawn twice or missing for more than a few frames.

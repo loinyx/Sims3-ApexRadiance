@@ -35,6 +35,7 @@ struct BakeLamp {
     float rect[4] = {};     // light rect +0x134 {minX, minZ, maxX, maxZ}: the bake draws the lamp into the chunks it overlaps
     bool baked = false;     // the bake takes it now: lit, enabled, and its light is not zero
     bool animated = false;  // switches / dims by itself (3+ automatic changes within 60 s): its changes never trigger
+    uintptr_t id = 0;       // the light (its address when read; NightTerrainBake::Excluded takes the same)
 };
 struct BakeSnapshot {
     std::vector<BakeLamp> lamps;       // lamps of type 3..6 or 0xB on lots (outdoors, alive), sorted by lot
@@ -51,6 +52,8 @@ bool LotGroundY(uint64_t lot, float& y);
 // Developer capture (GroundProfile, render thread): the lot holding world (x, z) (0 = none) and the ground gains now
 uint64_t LotAt(float x, float z);
 std::string GainText();
+// Developer capture (GroundProfile): the walls' shade on the ground around a lamp at pos, lot by lot (render thread)
+std::string ShadeProbeText(const float pos[3]);
 // What differs in the bake between two snapshots: only on lots settled in `now` that were already in `baked` (lots that
 // streamed in later were never baked, and streaming never rebuilds). Lamps are matched by type and place (5 cm), not by
 // pointer. Light changes under 5 % per channel are noise; animated lamps are counted apart and never make Any() true.
@@ -65,6 +68,7 @@ struct BakeChange {
     bool user = false;       // added / removed / moved (Build mode); else switched on / off or relit (automatic)
     bool hasOld = false, hasNew = false;
     float oldRect[4] = {}, newRect[4] = {};
+    uintptr_t id = 0;        // the light, as BakeLamp::id
 };
 struct BakeDiff {
     int added = 0, removed = 0, switchedOn = 0, switchedOff = 0, light = 0, lots = 0, animated = 0;

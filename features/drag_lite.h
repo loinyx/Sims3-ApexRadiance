@@ -93,6 +93,9 @@ unsigned long LastReleaseTick();
 bool LastReleaseLetGo();
 // A lamp step within kDragMs (any source, also LevelLightShare::LampDragging)
 bool Dragging();
+// A lamp move within kStillMs that the button has not let go of since (dragLetGo: the let go ends it at once, and the
+// placement's steps after it do not bring it back; a move kPlaceGraceMs on is a new drag). Any thread
+bool LampMoving();
 // A lamp step within kStillMs (the drag and its settle time; kReleaseMs while ClassicReleaseOn)
 bool Engaged();
 // The flush after a drag (any thread): from the drag's end while a lamp edit's rooms still wait, at most kSettleMs; the

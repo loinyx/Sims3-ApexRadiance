@@ -9,6 +9,11 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Russian}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: wall and fence shadows on the ground follow a dragged lamp at once", "Ночное освещение: тени стен и заборов на земле сразу следуют за перетаскиваемой лампой"},
+    {"Night Lights: the ground no longer flashes when you let go of a lamp", "Ночное освещение: земля больше не мигает, когда вы отпускаете лампу"},
+    {"Night Lights: a lamp post beside a bush or tree lights the ground around it", "Ночное освещение: фонарь рядом с кустом или деревом освещает землю вокруг себя"},
+    {"Night Lights: a lamp held from the catalog leaves no light where it passed", "Ночное освещение: лампа из каталога в руке не оставляет света там, где прошла"},
+    {"Night Lights: picking a lamp up again right after placing it keeps its light", "Ночное освещение: лампа, поднятая сразу после установки, сохраняет свой свет"},
     {"Night Lights: sidewalks keep the lamps' light from every camera angle", "Ночное освещение: тротуары сохраняют свет ламп при любом ракурсе камеры"},
     {"Night Lights: lamp light on the grass by lots no longer changes with the camera", "Ночное освещение: свет ламп на траве у участков больше не меняется вместе с камерой"},
     {"Night Lights: objects light up without delay as the camera moves between lots", "Ночное освещение: объекты освещаются без задержки, когда камера перемещается между участками"},
@@ -2416,6 +2421,8 @@ const I18n::Pair kPairs[] = {
     {"Room light maps are read as a smooth curve instead of texel steps", "Карты освещения комнат читаются плавной кривой вместо ступенек текселей"},
     {"Soft ground shade", "Мягкая тень на земле"},
     {"The shade of walls on lot ground has soft edges, without texel steps", "Тень стен на земле участка имеет мягкие края без ступенек текселей"},
+    {"Ground shade on the GPU", "Тень на земле на GPU"},
+    {"The shade of walls on the ground follows a dragged lamp at once; off, it is built on a worker thread", "Тень стен на земле сразу следует за перетаскиваемой лампой; выключено: она строится в рабочем потоке"},
     {"Lamps through arches on indoor objects", "Лампы через арки на предметах внутри"},
     {"An object inside an arcade keeps a garden lamp's dim light", "Предмет внутри аркады сохраняет слабый свет садового фонаря"},
     {"Background and lamp light inside rooms", "Фоновый свет и свет ламп в комнатах"},

@@ -8,7 +8,7 @@ border. Near the border the two sides blend over 3 m, so a lamp standing next to
 
 | | |
 |---|---|
-| Availability | Released (part of Night Lighting since 0.1.0). Lot UV alignment, daylight terrain term and the constant-read guard: Released in 2.6.0. Rain and other weather variants recognised (exact rain variant and by structure): Released in 2.7.0. Lamp shade on lot ground (*Walls shade lamp light near the ground*) and lamps through the outside walls' openings: Released in 2.13.0. Crown shade from trees and bushes: Released in 2.14.0. A shade that takes only the light of the lamps a wall blocks, closed gates and narrow fence gaps, the room mask and lamp shade on snowy lots, the lot map aligned on each axis, *Indoor light adds to the ground*, and a lot's shade shown with its chunks' texels: Released in 2.15.3. Verified winter terrain layouts and exact fence-gap length reuse: Released in 2.15.6. Light past 1 with the walls' shade on it: Released in 2.16.0. Fence grid and half-float reads without x87 control-word calls: Released in 2.16.2. Released in 2.18.0: mesh fences pass their open share, fence gaps and gates only for real gates, shade updates within a quarter second. Released in 2.18.1: a fence type removed whole drops its shadow with the camera still. Released in 2.18.3: a wall's shade on the world grass continuous past the lot's edge. |
+| Availability | Released (part of Night Lighting since 0.1.0). Lot UV alignment, daylight terrain term and the constant-read guard: Released in 2.6.0. Rain and other weather variants recognised (exact rain variant and by structure): Released in 2.7.0. Lamp shade on lot ground (*Walls shade lamp light near the ground*) and lamps through the outside walls' openings: Released in 2.13.0. Crown shade from trees and bushes: Released in 2.14.0. A shade that takes only the light of the lamps a wall blocks, closed gates and narrow fence gaps, the room mask and lamp shade on snowy lots, the lot map aligned on each axis, *Indoor light adds to the ground*, and a lot's shade shown with its chunks' texels: Released in 2.15.3. Verified winter terrain layouts and exact fence-gap length reuse: Released in 2.15.6. Light past 1 with the walls' shade on it: Released in 2.16.0. Fence grid and half-float reads without x87 control-word calls: Released in 2.16.2. Released in 2.18.0: mesh fences pass their open share, fence gaps and gates only for real gates, shade updates within a quarter second. Released in 2.18.1: a fence type removed whole drops its shadow with the camera still. Released in 2.18.3: a wall's shade on the world grass continuous past the lot's edge. Released in 2.18.4: the lamp shade built on the GPU, a dragged lamp's wall shadows every frame, crowns holding a lamp's head left out. |
 | Default | On |
 | Menu | Lighting > Game fixes > Ground & Lots > *Street lamps light lots* |
 | Configuration | `[patches.NightTerrainRelight]` `luzDoPosteNaGramaDoLote` in `ApexRadiance.toml` |
@@ -224,8 +224,28 @@ build runs on the shade worker (*Worker thread* below) and again only when the l
 of light, in or out of the bake) or the outside walls, fences and crowns in its box changed. The inputs are checked every
 100 ms while a fence group changed since the lot's last check or a lamp is dragged (`kShadeCheckMs`), else every 500 ms
 (the key reads every bake lamp and the walls' copy), and a lot is built at most every 250 ms
-(`kShadeMinEveryMs`; a build takes 1 to 30 ms on the worker), so a fence edit or a dragged lamp shows its shadow without
-half-second steps.
+(`kShadeMinEveryMs`; a build takes 1 to 30 ms on the worker), so a fence edit shows its shadow without half-second steps.
+
+On the worker (*On the GPU* below: a lot past the shader's bounds, or the path off), a dragged lamp whose ground light the GPU draws (`NightTerrainBake::Excluded`,
+[terrain relight](terrain-relight.md#dragged-lamps-on-the-gpu)) that is moving (it moved within 0.75 s,
+`TerrainStamps::MovedWithin`, the mouse button has not let go of it since, `DragLite::LampMoving`, and the drag is not over, `DragLite::Engaged`: a
+drag the Classic rules hold ends 0.4 s after its last step, with the frozen shade then built at rest) is taken at its
+place now (`LampPlaceNow`), not the lamp list's, which is read every 250 ms while it is dragged, and enters the total
+only, first of the others: it casts no wall, fence or crown shadow, `M = 1 - lost / max(total + w, 0.05)`. It is still
+picked with the others for the 32-lamp cut, so the lamps tested are those at rest less the moving ones and the shade is
+never darker than at rest. The lot and world grass shade followed the lamp a build behind (0.3 to 0.8 s), with the
+wedges cast from where it was, over its light where it is. The input key holds the moving lamp only when the lot has
+another lamp to test and something that shades it; a lot with none keeps its key, so it is built once when the drag
+starts and once after it. A lamp that stopped, or that another drag keeps in the exclusion list, is tested again at its
+place now until the list has it within 5 cm (then at the list's, as at rest). A queued build whose moving lamps changed
+before it was sent is asked again with its new key. The inputs are checked every 100 ms until 0.95 s after the last
+lamp step, so the build at rest follows the drag's end at once. With a drag the Classic rules hold
+(`DragLite::ClassicHolding`: Classic lamp lighting, or a lamp the game solves) a worker's lot is not built again until the
+release, and a build sent before the hold that lands during it with inputs changed since is dropped and asked again
+after it (`HoldLotResult`), so the held shade does not change mid drag. During the hold and 0.75 s after it
+(`g_classicHeldAt`) the worker's lots take no lamp as moving, so the build at the release is the walled one (a total-only
+build first made the dragged lamp's shadows vanish and come back). A lot on the GPU path is not held: the terrain stamp
+draws the dragged lamp where it is, so its walls' shadows follow it as below.
 It follows *Walls shade lamp light near the ground* (Lighting > Outside > Ground & Lots, `paredesSombreiamOChao`). Status (developer page): *Walls shade lamps on lot ground*. The lot's
 ground height is taken from room 0's matrix (`m13`, unverified as the ground under every texel).
 
@@ -307,7 +327,8 @@ same bits.
 **Tree and bush crowns** (2.14.0). The crowns seen in the night foliage draws are porous occluders of the same mask: a
 lamp's ray through a crown keeps exp(-k u s) of its light, so the shade under a tree is soft and partial
 ([foliage.md](foliage.md#per-vertex-lamps-and-crown-shade)). The crown set is part of the lot's input key, so a lot
-is built again when its crowns change.
+is built again when its crowns change. A crown that holds a lamp's head casts no shade for that lamp, and copies of one
+plant recorded at drifted places are merged (foliage.md).
 
 **Worker thread** (2.13.1). The lot builds (`GroundShadow::ShadeJob`) and the chunk textures' texels and mips run on one
 worker thread (`ShadeWorker`, below-normal priority); the render thread makes the inputs, uploads and applies. Before, a
@@ -319,6 +340,63 @@ their texels are applied in the same frame, at the first draw that reads either 
 time, and a held shade is shown after 3 s even with a chunk missing (`kHoldMaxMs`). Otherwise at most one chunk's texels
 are uploaded a frame. The developer status adds the last chunk upload's size and whether a shade is held; developer
 builds log, per lot whose inputs changed, the time to its new mask at a draw, by stage (at most 400 lines).
+
+**On the GPU** (`features/ground_shade_gpu.cpp`, `shaders/ground_shade_hlsl.h`; a dragged lamp's wall shadows followed it
+0.3 to 0.8 s late, the build's 1 to 43 ms on the worker plus its queues). The same build as ps_3_0 passes, function by
+function with the same float math: `ShadePS` (per grid texel, the lamps tested against the walls, their patches, the
+crowns, and the others in the total: `M` and the stamp weight), Finish's four `[1 2 1]` passes clamped at the grid's edges,
+the last one straight to `ToByte`'s value with the stamp weight into the lot's ext texture (G32R32F, (w + 1) x h; texel
+(w, 0) holds the grid's lowest byte), and `MaskPS` (rgb the room mask, alpha the shade, 255 inside rooms: what
+`MakeMaskTexture` writes). The CPU sends the job's inputs as float textures with each lamp's boxes (`GroundShadeGpu::Prepare`:
+`LampBox`, `WallBox`, `CrownBox`, the boxes `ShadeJob` itself uses; `MarkFreeEnds`), 0.01 to 0.25 ms. A chunk is made from
+the lots' ext textures by `ChunkPS` (6 lots a pass, max lost and max seen carried in a G32R32F target between passes),
+`ChunkBytePS` and `MipPS`: level 0 only over the changed box (a scissor) and each mip only over the texels above it, drawn
+from the level below into a scratch target and copied into the level, the same bytes as the whole chunk made again. Its
+texture is L8, or A8R8G8B8 with the byte in every channel where L8 is no render target. A lot whose grid shades nothing
+leaves the chunks as on the worker: the chunk pass skips it by its lowest byte, and an occlusion query (one texel kept when
+under 255) tells the render thread a frame or two later, which then drops a chunk no lot shades (until then it keeps a
+texture of 255, a multiply by 1). Nothing is read back to the CPU.
+
+`ShadeGpuFrame` runs at the first draw of a frame that reads a lot mask or a chunk shade (`ShadeApply`): the lots asked for
+since the last frame are built (at most 8 a frame), then every chunk whose lots changed, so a lot and the world grass
+beside it change in the same frame, before either is drawn; the mask is drawn at the lot's next draw. The inputs are
+checked as on the worker (every 100 or 500 ms, at most one build every 250 ms at rest); while a drag is engaged a lot whose
+last check found a moving lamp is checked every frame with no 250 ms wait (every 100 ms when its last GPU build took over
+2 ms on the render thread), and the moving lamp stays with the lamps tested
+against the walls at its place now (`ShadeLamps(..., gpu)`): its walls' shadows follow it. Measured offline on an RTX 4070
+Ti SUPER: 0.05 to 0.07 ms of GPU for a 40 m lot, 0.24 to 0.28 ms for an 88 m stress lot (32 lamps, 96 others, 190 walls,
+20 crowns; 31 to 44 ms on the CPU), a chunk changed over a lot's box 0.3 to 0.4 ms with the CPU's wait, the whole chunk 0.2
+ms. A device reset releases every lot's mask and shade (made again at their next draw).
+
+The worker builds a lot whose inputs pass the shader's bounds (255 lamp rows, 255 others, 32 patches on a wall, 4000
+lamp-wall and lamp-crown pairs over the tested lamps, kept under ps_3_0's 65535 executed instructions). A tested
+lamp with over 255 walls or crowns in its reach takes more rows (its walls in rows of 255, the last with its first 255
+crowns, then the rest), summed when its next lamp starts, in `ShadeJob`'s order with no entry left out (a loop over
+blocks would nest four loops deep, which drew wrong on the test GPU); walls, patches and crowns past 4096 go into
+column blocks of 4096 rows (`AtW`). Measured offline on the RTX 4070 Ti SUPER (native D3D9), one lamp with 300, 600 and
+1000 walls and crowns in reach: 0.11, 0.18 and about 0.28 ms of GPU (13 to 33 ms on the CPU), bytes within 1/255 of
+`ShadeJob`; a set of 4470 walls, 4239 patches and 4230 crowns matched too. A refused lot is logged once and stays on the
+worker while its occluders are the same (`ShadeKey`'s occluder key: walls, patches, crowns, the grid's size; no lamp
+place), so a drag does not try the GPU again each step; the refused try gives back its 250 ms slot and the worker's build
+is asked for in the same frame. Its shade is uploaded for the chunk passes. The worker builds every lot when
+the path is off: a device without ps_3_0 or the float targets, the shaders not compiled yet or refused, a GPU pass that
+failed (off for the session), *Walls shade lamp light near the ground* off, or Developer > Tester > *Ground shade on the
+GPU* off (`ground_shade_gpu`). A switch between the two remakes every lot's shade. The shaders are compiled by the shader
+cache in the background (`ShadePS` without optimisation, as every optimisation level runs it past ps_3_0's 32
+temporaries: 2441 instruction slots, about 0.2 s to compile); the CPU builds until they are there. The *Shadow softness*
+Tester switch off (the narrowest rim) is mirrored. Developer status: *GPU: N lot builds (last ms render thread, ms GPU),
+chunk builds; on the worker: lot builds, lots over the shader's bounds*, or *GPU: off (reason)*; the developer log's time to a lot's
+mask says *built on the GPU*.
+
+Every reader takes the GPU textures as it took the CPU ones, through `LotMaskTexture` and `ChunkShadeTexture` (no other
+caller): the lot pass (`kReplacementHlsl`, `LotMaskFor`) and its snowy and melting passes (`MaskBind`, `mul r0.xyz, r0,
+rM.w`) read the mask's alpha,
+story-0 floors and snow on floors (`FloorShadeBind`) and the fences, curbs and stairs of instanced groups its alpha, the
+world terrain copies (`PatchTerrainShade`: smoothed, plain, daylight range, multi-pass) and the road and sidewalk copy
+(`PatchRoad(..., shade = true)`, with or without snow on sidewalks) the chunk's red channel, with the sampler states their
+binds set (CLAMP; LINEAR; mips NONE for the mask, LINEAR for the chunk). The textures are the same size, levels and
+channels; a variant switched by the weather or the season binds the same texture, so wet, snowy and dry draws keep the
+shade. The rain terrain variants that use all 16 samplers draw no wall shade on the world grass, on either path.
 
 ### Soft lot edges
 
@@ -379,6 +457,10 @@ any of them reinstalls the patch.
 | | `VisibleLot`, `LotVisible`, `TakeLotArrivals` | Visible lots for the arrival relight |
 | | `LotMapGain`, `GroundGain`, `ConstGain` | Gains |
 | | `LotMask`, `LotMaskFor`, `LotMaskTexture`, `ShadeTick`; `FindFloorLot`, `FindLotAt`, `FloorShadeBind` | Room mask and lamp shade; the shade on story-0 floors and instanced groups |
+| | `ShadeGpuFrame`, `ShadeGpuLot`, `ShadeGpuChunk`, `ShadeGpuMask`, `ShadeGpuReady`, `ShadeGpuPreReset`, `ShadeGpuStatusText`, `kGroundShadeIds` | The lamp shade on the GPU |
+| ground_shade_gpu.cpp | `GroundShadeGpu::Prepare`, `Engine::BuildLot`, `BuildMask`, `BuildChunk`, `UploadExt` | The GPU passes (no game access; `tools/ground_shade_gpu_test`) |
+| shaders/ground_shade_hlsl.h | `ShadePS`, `BlurHPS`, `BlurVPS`, `BytePS`, `MinPS`, `MaskPS`, `ChunkPS`, `ChunkBytePS`, `MipPS` | The shade's passes |
+| ground_lamp_shadow.h | `ShadeJob`, `LampBox`, `WallBox`, `CrownBox`, `ChunkFull`, `ChunkUpdate` | The CPU build and the boxes both builds use |
 | | `LotLightBridge::SetEnabled`, `Status`, `OnWorldChanged` (`ClearChunks`), `Shutdown(keepChunkMaps)`, `ChunkCount` | Lifecycle |
 | shader_ids.h | `kLotLightPs` {568, 0xFDAD274B}, `kLotLightVs` {680, 0x0C8CC5E8} | Exact gates |
 | lightmap_smooth.cpp | `LightmapSmooth::Atlas`, `Find`, `Get` | Terrain light source |

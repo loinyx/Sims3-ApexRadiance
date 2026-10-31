@@ -50,6 +50,7 @@ inline std::atomic<bool> smoothCut{true};       // lamps fade out at the room li
 inline std::atomic<bool> smoothDither{true};    // room light map texels dithered before the pack (RoomMapDither)
 inline std::atomic<bool> smoothBSpline{true};   // room-lit shaders read the room light map as a B-spline (LotLightBridge)
 inline std::atomic<bool> groundSoftEdges{true}; // the lot ground shade takes the lamp's penumbra at wall ends and tops (GroundShadow)
+inline std::atomic<bool> groundShadeGpu{true};  // the lot ground shade and the world grass's are built on the GPU (GroundShadeGpu), off: on the worker thread
 inline std::atomic<bool> openingLampCut{true};  // a lamp through an opening stays on an indoor object under the game's cut (ObjectLightBridge)
 // Performance
 inline std::atomic<bool> gridMemo{true};         // a story's grid asked again in the same frame is not looked up again

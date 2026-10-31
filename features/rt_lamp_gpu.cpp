@@ -325,15 +325,16 @@ bool Engine::MakePreblur(IDirect3DDevice9* dev, int w, int h, const uint32_t* px
     return true;
 }
 
-void Engine::Begin(IDirect3DDevice9* dev) {
-    if (!saved_) dev->CreateStateBlock(D3DSBT_ALL, &saved_);
-    if (saved_) saved_->Capture();
+bool Engine::Begin(IDirect3DDevice9* dev) {
+    if (!saved_ && (FAILED(dev->CreateStateBlock(D3DSBT_ALL, &saved_)) || !saved_)) return saved_ = nullptr, false; // (nothing to restore: nothing is touched)
+    saved_->Capture();
     for (DWORD i = 0; i < 4; i++)
         if (FAILED(dev->GetRenderTarget(i, &savedRt_[i]))) savedRt_[i] = nullptr;
     if (!c_.GetDepthStencil || FAILED(c_.GetDepthStencil(dev, &savedDs_))) savedDs_ = nullptr;
     // nothing of ours stays bound while it becomes a render target (the swapped maps are bound by the game's draws)
     for (DWORD s = 0; s < 16; s++) c_.SetTexture(dev, s, nullptr);
     for (DWORD s = D3DVERTEXTEXTURESAMPLER0; s <= D3DVERTEXTEXTURESAMPLER3; s++) c_.SetTexture(dev, s, nullptr);
+    return true;
 }
 void Engine::End(IDirect3DDevice9* dev) {
     c_.SetRenderTarget(dev, 0, savedRt_[0]);

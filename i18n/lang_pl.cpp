@@ -9,6 +9,11 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Polish}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: wall and fence shadows on the ground follow a dragged lamp at once", "Nocne światła: cienie ścian i płotów na ziemi od razu podążają za przeciąganą lampą"},
+    {"Night Lights: the ground no longer flashes when you let go of a lamp", "Nocne światła: ziemia nie miga już, gdy puszczasz lampę"},
+    {"Night Lights: a lamp post beside a bush or tree lights the ground around it", "Nocne światła: latarnia przy krzaku lub drzewie oświetla ziemię wokół siebie"},
+    {"Night Lights: a lamp held from the catalog leaves no light where it passed", "Nocne światła: lampa trzymana z katalogu nie zostawia światła tam, gdzie przeszła"},
+    {"Night Lights: picking a lamp up again right after placing it keeps its light", "Nocne światła: lampa podniesiona zaraz po postawieniu zachowuje swoje światło"},
     {"Night Lights: sidewalks keep the lamps' light from every camera angle", "Nocne światła: chodniki zachowują światło lamp pod każdym kątem kamery"},
     {"Night Lights: lamp light on the grass by lots no longer changes with the camera", "Nocne światła: światło lamp na trawie przy parcelach nie zmienia się już z kamerą"},
     {"Night Lights: objects light up without delay as the camera moves between lots", "Nocne światła: obiekty rozświetlają się bez opóźnienia, gdy kamera przesuwa się między parcelami"},
@@ -2416,6 +2421,8 @@ const I18n::Pair kPairs[] = {
     {"Room light maps are read as a smooth curve instead of texel steps", "Mapy światła pomieszczeń są odczytywane gładką krzywą zamiast schodków tekseli"},
     {"Soft ground shade", "Miękki cień na ziemi"},
     {"The shade of walls on lot ground has soft edges, without texel steps", "Cień ścian na ziemi działki ma miękkie krawędzie bez schodków tekseli"},
+    {"Ground shade on the GPU", "Cień na ziemi na GPU"},
+    {"The shade of walls on the ground follows a dragged lamp at once; off, it is built on a worker thread", "Cień ścian na ziemi od razu podąża za przeciąganą lampą; wyłączone: jest liczony w wątku roboczym"},
     {"Lamps through arches on indoor objects", "Lampy przez łuki na obiektach wewnątrz"},
     {"An object inside an arcade keeps a garden lamp's dim light", "Obiekt wewnątrz arkady zachowuje słabe światło lampy ogrodowej"},
     {"Background and lamp light inside rooms", "Światło tła i lamp w pomieszczeniach"},

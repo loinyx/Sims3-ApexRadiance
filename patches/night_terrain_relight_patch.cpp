@@ -1433,8 +1433,10 @@ bool LocalLamps(std::vector<ChunkRelight::Lamp>& out) {
 // it). A dragged lamp is a removal at its last baked place and an addition at its new one: each addition stands within
 // kStampedNear of an excluded lamp of its lot and type now, and each removal is paired with such an addition. A lamp of the
 // same type deleted or placed beside the drag is left over and goes through the local relight (before, lot and type alone
-// were matched, and a lamp deleted within the drag's last moments kept its ground light until its chunk was relit)
-constexpr float kStampedNear = 1.5f; // m (the diff's place and the light's place now may be a step of the drag apart: a tile, 1.4 m diagonally)
+// were matched, and a lamp deleted within the drag's last moments kept its ground light until its chunk was relit). An
+// addition that is the excluded light itself counts at any distance: the diff's place is the lamp list's, read every 250 ms
+// while dragged, and a fast drag left it 1.6-3.6 m behind (each such step re-rendered its chunk to the same map, 4-45 ms)
+constexpr float kStampedNear = 1.5f; // m (a light the list did not name: a step of the drag apart, a tile, 1.4 m diagonally)
 bool AllStamped(const std::vector<LotLightBridge::BakeChange>& changes) {
     struct Pair { uint64_t lot; int type; int added, removed; };
     std::vector<Pair> pairs;
@@ -1451,7 +1453,7 @@ bool AllStamped(const std::vector<LotLightBridge::BakeChange>& changes) {
             if (!ReadBakeFields(reinterpret_cast<BYTE*>(g_bakeExcluded[i]), f) || f.lot != c.lot || f.type != c.type) continue;
             sameKind = true;
             const float dx = f.pos[0] - c.pos[0], dy = f.pos[1] - c.pos[1], dz = f.pos[2] - c.pos[2];
-            nearby = dx * dx + dy * dy + dz * dz <= kStampedNear * kStampedNear;
+            nearby = (c.id && c.id == g_bakeExcluded[i]) || dx * dx + dy * dy + dz * dz <= kStampedNear * kStampedNear;
         }
         if (!sameKind || (c.hasNew && !nearby)) return false;
         (c.hasNew ? pairOf(c.lot, c.type).added : pairOf(c.lot, c.type).removed)++;

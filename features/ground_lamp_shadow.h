@@ -241,6 +241,88 @@ inline void MarkFreeEnds(std::vector<Wall>& walls) {
         }
 }
 
+// The boxes a lot's build works over (ShadeJob; GroundShadeGpu::Prepare sends the same boxes to the GPU): texels [i0, i1] x
+// [j0, j1] as out[0..3]. The texels a lamp's light is summed over (its reach around its head along each lot axis); false
+// when it adds nothing
+inline bool LampBox(const Grid& g, const Lamp& L, float reach, int out[4]) {
+    if (!(reach > 0.0f)) return false;
+    float ci, cj;
+    if (!WorldTexel(g, L.x, L.z, ci, cj)) return false;
+    // the reach in texels along each lot axis (rotation keeps lengths: the lot matrix's rows are unit for a lot)
+    const float sc = std::sqrt(std::max(g.m0 * g.m0 + g.m2 * g.m2, g.m8 * g.m8 + g.m10 * g.m10));
+    const float rt = reach * kTexelsPerMetre / (sc > 1e-3f ? sc : 1.0f) + 1.0f;
+    out[0] = std::max(0, static_cast<int>(std::floor(ci - rt))), out[1] = std::min(g.w - 1, static_cast<int>(std::ceil(ci + rt)));
+    out[2] = std::max(0, static_cast<int>(std::floor(cj - rt))), out[3] = std::min(g.h - 1, static_cast<int>(std::ceil(cj + rt)));
+    return true;
+}
+// The texels a crown's shadow from the lamp can fall on; false: none
+inline bool CrownBox(const Grid& g, const Lamp& L, float reach, const Canopy::Ellipsoid& e, int out[4]) {
+    if (!(reach > 0.0f)) return false;
+    float x0, z0, x1, z1;
+    if (!Canopy::ShadowBox(e, L.x, L.y, L.z, g.ty, reach, x0, z0, x1, z1)) return false;
+    float i0 = 1e30f, i1 = -1e30f, j0 = 1e30f, j1 = -1e30f; // the four corners: the lot grid can be turned
+    for (const float px : {x0, x1})
+        for (const float pz : {z0, z1}) {
+            float fi, fj;
+            if (!WorldTexel(g, px, pz, fi, fj)) return false;
+            i0 = std::min(i0, fi), i1 = std::max(i1, fi), j0 = std::min(j0, fj), j1 = std::max(j1, fj);
+        }
+    out[0] = std::max(0, static_cast<int>(std::floor(i0))), out[1] = std::min(g.w - 1, static_cast<int>(std::ceil(i1)));
+    out[2] = std::max(0, static_cast<int>(std::floor(j0))), out[3] = std::min(g.h - 1, static_cast<int>(std::ceil(j1)));
+    return true;
+}
+// The texels a wall's shadow from the lamp can fall on; false: none (a wall over the head, under the ground or past the reach)
+inline bool WallBox(const Grid& g, const Lamp& L, float reach, const Wall& w, int out[4]) {
+    if (!(reach > 0.0f) || !(w.y0 < L.y) || !(w.y1 > g.ty - 2.0f)) return false;
+    // the wall's distance from the head (xz): past the reach it shades nothing that weighs
+    const float sx = w.x1 - w.x0, sz = w.z1 - w.z0, s2 = sx * sx + sz * sz;
+    float u = s2 > 1e-9f ? ((L.x - w.x0) * sx + (L.z - w.z0) * sz) / s2 : 0.0f;
+    u = std::clamp(u, 0.0f, 1.0f);
+    const float cx = w.x0 + u * sx - L.x, cz = w.z0 + u * sz - L.z;
+    if (cx * cx + cz * cz >= reach * reach) return false;
+    // the shadow lies in the wedge from the head through both ends, out to the reach: its box (ends, the ends pushed to the
+    // reach, and the reach circle's extreme points inside the wedge)
+    float px[8], pz[8];
+    int n = 0;
+    float ends[2][2] = {{w.x0, w.z0}, {w.x1, w.z1}};
+    if (g.soft && s2 > 1e-9f) { // a free end's penumbra reaches past it (at most kMaxHalf along the wall)
+        const float sl = std::sqrt(s2), ex = sx / sl * Penumbra::kMaxHalf, ez = sz / sl * Penumbra::kMaxHalf;
+        if (w.free0) ends[0][0] -= ex, ends[0][1] -= ez;
+        if (w.free1) ends[1][0] += ex, ends[1][1] += ez;
+    }
+    float dir[2][2];
+    for (int e = 0; e < 2; e++) {
+        const float dx = ends[e][0] - L.x, dz = ends[e][1] - L.z, d = std::sqrt(dx * dx + dz * dz);
+        px[n] = ends[e][0];
+        pz[n++] = ends[e][1];
+        if (d < 1e-4f) return false; // the head on the wall's end: no shadow to speak of
+        dir[e][0] = dx / d;
+        dir[e][1] = dz / d;
+        px[n] = L.x + dir[e][0] * reach;
+        pz[n++] = L.z + dir[e][1] * reach;
+    }
+    const float c01 = dir[0][0] * dir[1][1] - dir[0][1] * dir[1][0];
+    const float axes[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    for (const auto& a : axes) { // inside the (under 180 degree) wedge between dir0 and dir1
+        const float c0a = dir[0][0] * a[1] - dir[0][1] * a[0], ca1 = a[0] * dir[1][1] - a[1] * dir[1][0];
+        const bool inside = c01 >= 0.0f ? (c0a >= 0.0f && ca1 >= 0.0f) : (c0a <= 0.0f && ca1 <= 0.0f);
+        const bool forward = a[0] * (dir[0][0] + dir[1][0]) + a[1] * (dir[0][1] + dir[1][1]) > 0.0f;
+        if (inside && forward) {
+            px[n] = L.x + a[0] * reach;
+            pz[n++] = L.z + a[1] * reach;
+        }
+    }
+    float i0 = 1e30f, i1 = -1e30f, j0 = 1e30f, j1 = -1e30f;
+    for (int k = 0; k < n; k++) {
+        float fi, fj;
+        if (!WorldTexel(g, px[k], pz[k], fi, fj)) return false;
+        i0 = std::min(i0, fi), i1 = std::max(i1, fi), j0 = std::min(j0, fj), j1 = std::max(j1, fj);
+    }
+    out[0] = std::max(0, static_cast<int>(std::floor(i0)) - 1), out[1] = std::min(g.w - 1, static_cast<int>(std::ceil(i1)) + 1);
+    out[2] = std::max(0, static_cast<int>(std::floor(j0)) - 1), out[3] = std::min(g.h - 1, static_cast<int>(std::ceil(j1)) + 1);
+    return true;
+}
+
 // The incremental build of one lot's shade mask. Init copies the inputs; Step runs until more() is false or the build is
 // done (true). Result(): w x h bytes, 255 = every nearby lamp reaches the texel.
 class ShadeJob {
@@ -331,18 +413,9 @@ private:
     // The share of the lamp's light that passes the crown, per texel of its shadow box (vis_ multiplies: walls and crowns
     // are transmissions in series on the same ray, in any order)
     void CanopyOf(const Lamp& L, const Canopy::Ellipsoid& e) {
-        if (!(reach_ > 0.0f)) return;
-        float x0, z0, x1, z1;
-        if (!Canopy::ShadowBox(e, L.x, L.y, L.z, grid_.ty, reach_, x0, z0, x1, z1)) return;
-        float i0 = 1e30f, i1 = -1e30f, j0 = 1e30f, j1 = -1e30f; // the four corners: the lot grid can be turned
-        for (const float px : {x0, x1})
-            for (const float pz : {z0, z1}) {
-                float fi, fj;
-                if (!WorldTexel(grid_, px, pz, fi, fj)) return;
-                i0 = std::min(i0, fi), i1 = std::max(i1, fi), j0 = std::min(j0, fj), j1 = std::max(j1, fj);
-            }
-        int a0 = std::max(0, static_cast<int>(std::floor(i0))), a1 = std::min(grid_.w - 1, static_cast<int>(std::ceil(i1)));
-        int b0 = std::max(0, static_cast<int>(std::floor(j0))), b1 = std::min(grid_.h - 1, static_cast<int>(std::ceil(j1)));
+        int bx[4];
+        if (!CrownBox(grid_, L, reach_, e, bx)) return;
+        int a0 = bx[0], a1 = bx[1], b0 = bx[2], b1 = bx[3];
         if (!Clip(a0, a1, b0, b1)) return;
         const float r2 = reach_ * reach_;
         for (int j = b0; j <= b1; j++)
@@ -358,53 +431,9 @@ private:
             }
     }
     void ShadowOf(const Lamp& L, const Wall& w) {
-        if (!(reach_ > 0.0f) || !(w.y0 < L.y) || !(w.y1 > grid_.ty - 2.0f)) return; // a wall over the head or under the ground
-        // the wall's distance from the head (xz): past the reach it shades nothing that weighs
-        const float sx = w.x1 - w.x0, sz = w.z1 - w.z0, s2 = sx * sx + sz * sz;
-        float u = s2 > 1e-9f ? ((L.x - w.x0) * sx + (L.z - w.z0) * sz) / s2 : 0.0f;
-        u = std::clamp(u, 0.0f, 1.0f);
-        const float cx = w.x0 + u * sx - L.x, cz = w.z0 + u * sz - L.z;
-        if (cx * cx + cz * cz >= reach_ * reach_) return;
-        // the shadow lies in the wedge from the head through both ends, out to the reach: its box (ends, the ends pushed
-        // to the reach, and the reach circle's extreme points inside the wedge)
-        float px[8], pz[8];
-        int n = 0;
-        float ends[2][2] = {{w.x0, w.z0}, {w.x1, w.z1}};
-        if (grid_.soft && s2 > 1e-9f) { // a free end's penumbra reaches past it (at most kMaxHalf along the wall)
-            const float sl = std::sqrt(s2), ex = sx / sl * Penumbra::kMaxHalf, ez = sz / sl * Penumbra::kMaxHalf;
-            if (w.free0) ends[0][0] -= ex, ends[0][1] -= ez;
-            if (w.free1) ends[1][0] += ex, ends[1][1] += ez;
-        }
-        float dir[2][2];
-        for (int e = 0; e < 2; e++) {
-            const float dx = ends[e][0] - L.x, dz = ends[e][1] - L.z, d = std::sqrt(dx * dx + dz * dz);
-            px[n] = ends[e][0];
-            pz[n++] = ends[e][1];
-            if (d < 1e-4f) return; // the head on the wall's end: no shadow to speak of
-            dir[e][0] = dx / d;
-            dir[e][1] = dz / d;
-            px[n] = L.x + dir[e][0] * reach_;
-            pz[n++] = L.z + dir[e][1] * reach_;
-        }
-        const float c01 = dir[0][0] * dir[1][1] - dir[0][1] * dir[1][0];
-        const float axes[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-        for (const auto& a : axes) { // inside the (under 180 degree) wedge between dir0 and dir1
-            const float c0a = dir[0][0] * a[1] - dir[0][1] * a[0], ca1 = a[0] * dir[1][1] - a[1] * dir[1][0];
-            const bool inside = c01 >= 0.0f ? (c0a >= 0.0f && ca1 >= 0.0f) : (c0a <= 0.0f && ca1 <= 0.0f);
-            const bool forward = a[0] * (dir[0][0] + dir[1][0]) + a[1] * (dir[0][1] + dir[1][1]) > 0.0f;
-            if (inside && forward) {
-                px[n] = L.x + a[0] * reach_;
-                pz[n++] = L.z + a[1] * reach_;
-            }
-        }
-        float i0 = 1e30f, i1 = -1e30f, j0 = 1e30f, j1 = -1e30f;
-        for (int k = 0; k < n; k++) {
-            float fi, fj;
-            if (!WorldTexel(grid_, px[k], pz[k], fi, fj)) return;
-            i0 = std::min(i0, fi), i1 = std::max(i1, fi), j0 = std::min(j0, fj), j1 = std::max(j1, fj);
-        }
-        int a0 = std::max(0, static_cast<int>(std::floor(i0)) - 1), a1 = std::min(grid_.w - 1, static_cast<int>(std::ceil(i1)) + 1);
-        int b0 = std::max(0, static_cast<int>(std::floor(j0)) - 1), b1 = std::min(grid_.h - 1, static_cast<int>(std::ceil(j1)) + 1);
+        int bx[4];
+        if (!WallBox(grid_, L, reach_, w, bx)) return;
+        int a0 = bx[0], a1 = bx[1], b0 = bx[2], b1 = bx[3];
         if (!Clip(a0, a1, b0, b1)) return; // (2.15.3) only the texels the lamp's light is summed over
         const float r2 = reach_ * reach_;
         for (int j = b0; j <= b1; j++)
@@ -426,14 +455,9 @@ private:
     // share past the walls is never read), so a build does fewer tests and gives the same bits
     void Weights(const Lamp& L) {
         box_[0] = box_[2] = 0, box_[1] = box_[3] = -1;
-        if (!(reach_ > 0.0f)) return;
-        float ci, cj;
-        if (!WorldTexel(grid_, L.x, L.z, ci, cj)) return;
-        // the reach in texels along each lot axis (rotation keeps lengths: the lot matrix's rows are unit for a lot)
-        const float sc = std::sqrt(std::max(grid_.m0 * grid_.m0 + grid_.m2 * grid_.m2, grid_.m8 * grid_.m8 + grid_.m10 * grid_.m10));
-        const float rt = reach_ * kTexelsPerMetre / (sc > 1e-3f ? sc : 1.0f) + 1.0f;
-        const int a0 = std::max(0, static_cast<int>(std::floor(ci - rt))), a1 = std::min(grid_.w - 1, static_cast<int>(std::ceil(ci + rt)));
-        const int b0 = std::max(0, static_cast<int>(std::floor(cj - rt))), b1 = std::min(grid_.h - 1, static_cast<int>(std::ceil(cj + rt)));
+        int bx[4];
+        if (!LampBox(grid_, L, reach_, bx)) return;
+        const int a0 = bx[0], a1 = bx[1], b0 = bx[2], b1 = bx[3];
         for (int j = b0; j <= b1; j++)
             for (int i = a0; i <= a1; i++) {
                 float x, z;

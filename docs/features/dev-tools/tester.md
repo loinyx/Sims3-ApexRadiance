@@ -34,6 +34,7 @@ and off, for frame time and for look, without another build.
 | | Smooth light maps | (player option `mapasDosComodosSuaves`) | |
 | | Fade at the light cut, Dither the light maps, Smooth light map reads | `smooth_cut`, `smooth_dither`, `smooth_bspline` | Sub-parts of *Smooth light maps* |
 | | Soft ground shade | `ground_soft_edges` | Sub-part of *Walls shade lamp light near the ground*: soft edges at wall ends and tops |
+| | Ground shade on the GPU | `ground_shade_gpu` | Sub-part of *Walls shade lamp light near the ground*: the lot shade and the world grass's built on the GPU in the frame their inputs change; off, on the worker thread ([lot-light-pass](../night-lighting/lot-light-pass.md#lamp-shade-on-lot-ground-groundshadow)) |
 | While a lamp is dragged | Classic: relight only after release | `classic_after_release` | Classic lamp lighting only: no room solve while a lamp is dragged, every room of the drag solved once after the release ([lamp-drags](../night-lighting/lamp-drags.md#classic-relight-only-after-release)) |
 | | Classic: show all floors together | `classic_together` | Classic lamp lighting only: after an edit the lamp's own story waits with the others and every story changes in one frame ([room-light-queue](../performance/room-light-queue.md#classic-show-all-floors-together)) |
 | | Defer extra room sends | `drag_defer_sends` | `DragLite::DeferSend` |
@@ -64,7 +65,7 @@ the switch):
 
 | Player option | Tester sub-parts |
 |---|---|
-| Walls shade lamp light near the ground (`paredesSombreiamOChao`) | Walls shade ground and curbs, Soft ground shade |
+| Walls shade lamp light near the ground (`paredesSombreiamOChao`) | Walls shade ground and curbs, Soft ground shade, Ground shade on the GPU |
 | Buildings block lamp light on trees and objects (`paredesBloqueiamLuzNosObjetos`) | Buildings block light on trees and objects |
 | Outdoor light through openings (`luzDeForaPelasAberturas`) | Roofed rooms take lamps from the story below |
 | Smooth light maps (`mapasDosComodosSuaves`) | Fade at the light cut, Dither the light maps, Smooth light map reads |

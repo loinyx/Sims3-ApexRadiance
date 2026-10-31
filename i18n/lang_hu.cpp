@@ -9,6 +9,11 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Hungarian}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: wall and fence shadows on the ground follow a dragged lamp at once", "Éjszakai fények: a falak és kerítések árnyéka a talajon azonnal követi a húzott lámpát"},
+    {"Night Lights: the ground no longer flashes when you let go of a lamp", "Éjszakai fények: a talaj már nem villan fel, amikor elengeded a lámpát"},
+    {"Night Lights: a lamp post beside a bush or tree lights the ground around it", "Éjszakai fények: a bokor vagy fa melletti lámpaoszlop megvilágítja maga körül a talajt"},
+    {"Night Lights: a lamp held from the catalog leaves no light where it passed", "Éjszakai fények: a katalógusból tartott lámpa nem hagy fényt ott, ahol elhaladt"},
+    {"Night Lights: picking a lamp up again right after placing it keeps its light", "Éjszakai fények: a lerakás után azonnal újra felvett lámpa megtartja a fényét"},
     {"Night Lights: sidewalks keep the lamps' light from every camera angle", "Éjszakai fények: a járdák minden kameraszögből megtartják a lámpák fényét"},
     {"Night Lights: lamp light on the grass by lots no longer changes with the camera", "Éjszakai fények: a lámpafény a telkek melletti füvön már nem változik a kamerával"},
     {"Night Lights: objects light up without delay as the camera moves between lots", "Éjszakai fények: a tárgyak késlekedés nélkül kivilágosodnak, amikor a kamera telkek között mozog"},
@@ -2416,6 +2421,8 @@ const I18n::Pair kPairs[] = {
     {"Room light maps are read as a smooth curve instead of texel steps", "A szobák fénytérképei sima görbeként olvasódnak texellépcsők helyett"},
     {"Soft ground shade", "Lágy talajárnyék"},
     {"The shade of walls on lot ground has soft edges, without texel steps", "A falak árnyéka a telek talaján lágy szélű, texellépcsők nélkül"},
+    {"Ground shade on the GPU", "Talajárnyék a GPU-n"},
+    {"The shade of walls on the ground follows a dragged lamp at once; off, it is built on a worker thread", "A falak árnyéka a talajon azonnal követi a húzott lámpát; kikapcsolva egy munkaszálon készül"},
     {"Lamps through arches on indoor objects", "Lámpák íveken át a belső tárgyakon"},
     {"An object inside an arcade keeps a garden lamp's dim light", "Egy árkád belsejében álló tárgy megtartja a kerti lámpa halvány fényét"},
     {"Background and lamp light inside rooms", "Háttér- és lámpafény a szobákban"},

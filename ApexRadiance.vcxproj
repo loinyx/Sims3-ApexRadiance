@@ -127,6 +127,7 @@
     <ClCompile Include="features\outdoor_delta.cpp" />
     <ClCompile Include="features\rt_outdoor_lamps.cpp" />
     <ClCompile Include="features\rt_lamp_gpu.cpp" />
+    <ClCompile Include="features\ground_shade_gpu.cpp" />
     <ClCompile Include="features\wall_heights.cpp" />
     <ClCompile Include="features\light_diag.cpp" />
     <ClCompile Include="features\recorder.cpp" />
@@ -276,6 +277,7 @@
     <ClInclude Include="features\outdoor_delta_model.h" />
     <ClInclude Include="features\rt_outdoor_lamps.h" />
     <ClInclude Include="features\rt_lamp_gpu.h" />
+    <ClInclude Include="features\ground_shade_gpu.h" />
     <ClInclude Include="features\rt_lamp_model.h" />
     <ClInclude Include="features\rt_lamp_proxy.h" />
     <ClInclude Include="features\gpu_lamp_law.h" />
@@ -373,6 +375,7 @@
     <ClInclude Include="patches\performance.h" />
     <ClInclude Include="shaders\floor_atlas_table.h" />
     <ClInclude Include="shaders\lightmap_smooth_hlsl.h" />
+    <ClInclude Include="shaders\ground_shade_hlsl.h" />
     <ClInclude Include="shaders\terrain_bake_hlsl.h" />
     <ClInclude Include="shaders\roof_ps_hlsl.h" />
     <ClInclude Include="shaders\roof_snow_lamps_hlsl.h" />

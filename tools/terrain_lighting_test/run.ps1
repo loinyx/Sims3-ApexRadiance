@@ -25,5 +25,7 @@ try {
     & (Join-Path $PSScriptRoot 'run_resource_checks.ps1') -Repo $repo -OutDir (Join-Path $OutDir 'resource')
     & (Join-Path $PSScriptRoot 'run_lamp_state_checks.ps1') -Repo $repo -OutDir (Join-Path $OutDir 'edit') -Baseline $EditReferenceSource
     & (Join-Path $PSScriptRoot 'run_dispatch_checks.ps1') -Repo $repo -OutDir (Join-Path $OutDir 'dispatch')
+    & (Join-Path $PSScriptRoot 'run_stamped_checks.ps1') -Repo $repo -OutDir (Join-Path $OutDir 'stamped')
+    & (Join-Path $PSScriptRoot 'run_shade_lamps_checks.ps1') -Repo $repo -OutDir (Join-Path $OutDir 'shade-lamps')
     & (Join-Path $PSScriptRoot 'run_world_pool_checks.ps1') -Repo $repo -OutDir (Join-Path $OutDir 'world') -Baseline $WorldReferenceSource
 } finally { Pop-Location }

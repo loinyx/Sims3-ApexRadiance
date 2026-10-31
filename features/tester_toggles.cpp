@@ -15,6 +15,7 @@ const Item kItems[] = {
     {"smooth_dither", &smoothDither, Effect::None},
     {"smooth_bspline", &smoothBSpline, Effect::None},
     {"ground_soft_edges", &groundSoftEdges, Effect::None},
+    {"ground_shade_gpu", &groundShadeGpu, Effect::None},
     {"opening_lamp_cut", &openingLampCut, Effect::Rigs},
     {"disabled_lamp_fix", &disabledLampFix, Effect::Rigs},
     {"foliage_day_fix", &foliageDayFix, Effect::None},

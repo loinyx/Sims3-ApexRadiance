@@ -153,6 +153,11 @@ bool HoldUntilRelease(const void* room, bool onPlayedLot) {
 }
 
 bool Dragging() { return StepWithin(kDragMs) || LevelLightShare::LampDragging(); }
+bool LampMoving() {
+    if (!Within(g_lastMove, kStillMs)) return false;
+    const DWORD at = g_letGoAt.load(std::memory_order_relaxed), move = g_lastMove.load(std::memory_order_relaxed);
+    return !(at && LetGoOn() && static_cast<int32_t>(move - at) < static_cast<int32_t>(kPlaceGraceMs));
+}
 bool Engaged() {
     // (the release rule's shorter still time: Classic, or with fastOwnRelight a drag of a lamp the game solves)
     const bool release = ClassicReleaseOn() && (!FastOwn() || ClassicRulesForDrag());

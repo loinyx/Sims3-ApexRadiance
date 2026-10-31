@@ -1,6 +1,7 @@
 // Ground light profile (see ground_profile.h). Part of Apex Radiance. Credits: @loinyx
 
 #include "ground_profile.h"
+#include "build_flavor.h"
 #include "ground_profile_math.h"
 #include "captures.h"
 #include "game_addresses.h"
@@ -200,6 +201,11 @@ void Write(IDirect3DDevice9* dev, POINT pixel, unsigned bbWidth, unsigned bbHeig
     out << "law constants: k1 " << k1 << ", k2 " << k2 << ", Cmax " << cmax << ", street x" << street << ", cone scale " << s5 << " | terrain bake with cones: "
         << (NightTerrainBake::ConeShader() ? "yes" : "no") << "\n";
     out << "gains: " << LotLightBridge::GainText() << "\n";
+    for (const LampInfo& i : lamps) // (developer builds: every lamp post of the lot, the mouse can miss the one in question)
+        if (&i == target || (i.type == 11 && !kPublicBuild)) {
+            out << std::format("-- lamp L{:08X} type {} at ({:.2f} {:.2f} {:.2f}){}\n", i.light, i.type, i.pos[0], i.pos[1], i.pos[2], &i == target ? " (the target)" : "");
+            out << LotLightBridge::ShadeProbeText(i.pos);
+        }
 
     // the nearby lamps: the bake's stamp of each and its states
     struct Near {
@@ -361,7 +367,10 @@ bool WatchPoints(int x[kWatchPoints], int y[kWatchPoints]) {
         float ground = 0.0f, mouse[3] = {};
         LotLightBridge::LotGroundY(lamps[0].lot, ground);
         if (!GroundUnder(vp, g_watch.mouse, w, h, ground, mouse)) return false;
-        const LampInfo& t = lamps[Nearest(lamps, mouse)];
+        int pick = Nearest(lamps, mouse);
+        for (size_t k = 0; k < lamps.size(); k++) // a lamp being dragged (drawn on the GPU, moved within 2 s) before the nearest
+            if (TerrainStamps::MovedWithin(lamps[k].light, 2000)) pick = static_cast<int>(k);
+        const LampInfo& t = lamps[pick];
         const float dx = mouse[0] - t.pos[0], dz = mouse[2] - t.pos[2], d = std::sqrt(dx * dx + dz * dz);
         if (d > 0.25f) g_watch.dir[0] = dx / d, g_watch.dir[1] = dz / d;
         g_watch.light = t.light, g_watch.type = t.type, g_watch.chosen = true;

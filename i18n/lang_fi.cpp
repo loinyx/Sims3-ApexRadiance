@@ -9,6 +9,11 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Finnish}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: wall and fence shadows on the ground follow a dragged lamp at once", "Yövalot: seinien ja aitojen varjot maassa seuraavat raahattavaa lamppua heti"},
+    {"Night Lights: the ground no longer flashes when you let go of a lamp", "Yövalot: maa ei enää välähdä, kun päästät lampusta irti"},
+    {"Night Lights: a lamp post beside a bush or tree lights the ground around it", "Yövalot: pensaan tai puun vieressä oleva lyhtypylväs valaisee maan ympärillään"},
+    {"Night Lights: a lamp held from the catalog leaves no light where it passed", "Yövalot: luettelosta pidetty lamppu ei jätä valoa reitilleen"},
+    {"Night Lights: picking a lamp up again right after placing it keeps its light", "Yövalot: heti asettamisen jälkeen uudelleen nostettu lamppu säilyttää valonsa"},
     {"Night Lights: sidewalks keep the lamps' light from every camera angle", "Yövalot: jalkakäytävät säilyttävät lamppujen valon kaikista kamerakulmista"},
     {"Night Lights: lamp light on the grass by lots no longer changes with the camera", "Yövalot: lamppujen valo tonttien vieressä olevalla nurmella ei enää muutu kameran mukana"},
     {"Night Lights: objects light up without delay as the camera moves between lots", "Yövalot: esineet syttyvät viiveettä, kun kamera liikkuu tonttien välillä"},
@@ -2416,6 +2421,8 @@ const I18n::Pair kPairs[] = {
     {"Room light maps are read as a smooth curve instead of texel steps", "Huoneiden valokartat luetaan pehmeänä käyränä texelportaiden sijaan"},
     {"Soft ground shade", "Pehmeä varjo maassa"},
     {"The shade of walls on lot ground has soft edges, without texel steps", "Seinien varjolla tontin maassa on pehmeät reunat ilman texelportaita"},
+    {"Ground shade on the GPU", "Maan varjo GPU:lla"},
+    {"The shade of walls on the ground follows a dragged lamp at once; off, it is built on a worker thread", "Seinien varjo maassa seuraa vedettyä lamppua heti; pois päältä se lasketaan työsäikeessä"},
     {"Lamps through arches on indoor objects", "Lamput kaarien läpi sisäesineisiin"},
     {"An object inside an arcade keeps a garden lamp's dim light", "Pylväikön sisällä oleva esine säilyttää puutarhalampun himmeän valon"},
     {"Background and lamp light inside rooms", "Tausta- ja lampunvalo huoneissa"},

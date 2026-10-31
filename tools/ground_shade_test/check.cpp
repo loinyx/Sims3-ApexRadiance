@@ -145,6 +145,40 @@ static void LotBuildChecks(int reps) {
                   "lot build: the stamp weight equals the reference's, bit for bit");
 #endif
         }
+    // A dragged lamp in the total only (lot_light_bridge.cpp ShadeLamps, first of the others): never darker than with it
+    // tested, nor than without it, on any texel; with every lamp moving, nothing is shaded
+    const Scene s = MakeScene(0.5235988f, true);
+    std::vector<uint8_t> tested, moving, without, none;
+    std::vector<float> den;
+    double ms;
+    Run<GroundShadow::ShadeJob, GroundShadow::Grid, GroundShadow::Lamp, GroundShadow::Wall>(s, tested, den, ms);
+    bool brighter = true;
+    for (size_t k = 0; k < s.lamps.size(); k++) {
+        Scene m = s, w = s;
+        m.lamps.erase(m.lamps.begin() + static_cast<ptrdiff_t>(k));
+        m.others.insert(m.others.begin(), s.lamps[k]);
+        w.lamps.erase(w.lamps.begin() + static_cast<ptrdiff_t>(k));
+        Run<GroundShadow::ShadeJob, GroundShadow::Grid, GroundShadow::Lamp, GroundShadow::Wall>(m, moving, den, ms);
+        Run<GroundShadow::ShadeJob, GroundShadow::Grid, GroundShadow::Lamp, GroundShadow::Wall>(w, without, den, ms);
+        for (size_t i = 0; i < tested.size(); i++) brighter = brighter && moving[i] >= tested[i] && moving[i] >= without[i];
+    }
+    Check(brighter, "lot build: a lamp in the total only never darkens a texel (against it tested, and against it left out)");
+    Scene all = s;
+    all.others.insert(all.others.begin(), s.lamps.begin(), s.lamps.end());
+    all.lamps.clear();
+    Run<GroundShadow::ShadeJob, GroundShadow::Grid, GroundShadow::Lamp, GroundShadow::Wall>(all, none, den, ms);
+    Check(std::all_of(none.begin(), none.end(), [](uint8_t v) { return v == 255; }), "lot build: with every lamp in the total only, nothing is shaded");
+    // a lamp head inside a crown's ellipsoid: that crown casts no shade for it; the head just outside it: it does
+    for (const float off : {2.6f, 4.5f}) {
+        GroundShadow::Lamp L = s.lamps[0];
+        const Canopy::Ellipsoid e{L.x - off, L.y - 0.4f, L.z, 3.9f, 1.8f, 3.9f, 1.0f, 0.0f, Canopy::LadFor(3.6f)};
+        GroundShadow::ShadeJob job;
+        job.Init(s.grid, {L}, {}, {}, {e});
+        job.Step([] { return true; });
+        const auto& r = job.Result();
+        const bool lit = std::all_of(r.begin(), r.end(), [](uint8_t v) { return v == 255; });
+        Check(off < 3.0f ? lit : !lit, off < 3.0f ? "crown: a head inside it is not shaded by it" : "crown: a head outside it is shaded by it");
+    }
 }
 
 // ---- The chunk texture (GroundShadow::ChunkFull, ChunkUpdate)

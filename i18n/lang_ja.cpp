@@ -9,6 +9,11 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Japanese}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: wall and fence shadows on the ground follow a dragged lamp at once", "ナイトライト：地面の壁やフェンスの影が、ドラッグ中のランプにすぐ追従します"},
+    {"Night Lights: the ground no longer flashes when you let go of a lamp", "ナイトライト：ランプを放したときに地面が点滅しなくなりました"},
+    {"Night Lights: a lamp post beside a bush or tree lights the ground around it", "ナイトライト：茂みや木のそばの街灯が周りの地面を照らします"},
+    {"Night Lights: a lamp held from the catalog leaves no light where it passed", "ナイトライト：カタログから持ったランプが通った場所に光を残さなくなりました"},
+    {"Night Lights: picking a lamp up again right after placing it keeps its light", "ナイトライト：置いた直後に再び持ち上げたランプが光を保ちます"},
     {"Night Lights: sidewalks keep the lamps' light from every camera angle", "ナイトライト：どのカメラ角度でも歩道にランプの光が残るようになりました"},
     {"Night Lights: lamp light on the grass by lots no longer changes with the camera", "ナイトライト：区画そばの芝生のランプの光がカメラで変わらなくなりました"},
     {"Night Lights: objects light up without delay as the camera moves between lots", "ナイトライト：カメラが区画間を移動しても、オブジェクトがすぐに照らされるようになりました"},
@@ -2416,6 +2421,8 @@ const I18n::Pair kPairs[] = {
     {"Room light maps are read as a smooth curve instead of texel steps", "部屋のライトマップをテクセルの段差ではなくなめらかな曲線で読み取ります"},
     {"Soft ground shade", "地面のやわらかい影"},
     {"The shade of walls on lot ground has soft edges, without texel steps", "敷地の地面に落ちる壁の影がテクセルの段差なしのやわらかい縁になります"},
+    {"Ground shade on the GPU", "地面の影をGPUで"},
+    {"The shade of walls on the ground follows a dragged lamp at once; off, it is built on a worker thread", "地面に落ちる壁の影が、ドラッグしたランプにすぐ追従します。オフにするとワーカースレッドで作成されます"},
     {"Lamps through arches on indoor objects", "アーチ越しのランプを屋内オブジェクトに"},
     {"An object inside an arcade keeps a garden lamp's dim light", "アーケード内のオブジェクトが庭のランプのかすかな光を保ちます"},
     {"Background and lamp light inside rooms", "部屋の中の背景光とランプの光"},

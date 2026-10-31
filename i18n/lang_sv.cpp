@@ -9,6 +9,11 @@ namespace {
 
 // {English (exactly as in i18n/keys.tsv), Swedish}
 const I18n::Pair kPairs[] = {
+    {"Night Lights: wall and fence shadows on the ground follow a dragged lamp at once", "Nattbelysning: skuggor från väggar och staket på marken följer en lampa du drar direkt"},
+    {"Night Lights: the ground no longer flashes when you let go of a lamp", "Nattbelysning: marken blinkar inte längre när du släpper en lampa"},
+    {"Night Lights: a lamp post beside a bush or tree lights the ground around it", "Nattbelysning: en lyktstolpe vid en buske eller ett träd lyser upp marken runt sig"},
+    {"Night Lights: a lamp held from the catalog leaves no light where it passed", "Nattbelysning: en lampa du håller från katalogen lämnar inget ljus där den passerat"},
+    {"Night Lights: picking a lamp up again right after placing it keeps its light", "Nattbelysning: en lampa du lyfter igen direkt efter att ha placerat den behåller sitt ljus"},
     {"Night Lights: sidewalks keep the lamps' light from every camera angle", "Nattbelysning: trottoarer behåller lampornas ljus från alla kameravinklar"},
     {"Night Lights: lamp light on the grass by lots no longer changes with the camera", "Nattbelysning: lampljuset på gräset vid tomterna ändras inte längre med kameran"},
     {"Night Lights: objects light up without delay as the camera moves between lots", "Nattbelysning: föremål lyses upp utan fördröjning när kameran flyttas mellan tomter"},
@@ -2416,6 +2421,8 @@ const I18n::Pair kPairs[] = {
     {"Room light maps are read as a smooth curve instead of texel steps", "Rummens ljuskartor läses som en mjuk kurva i stället för texeltrappsteg"},
     {"Soft ground shade", "Mjuk skugga på marken"},
     {"The shade of walls on lot ground has soft edges, without texel steps", "Väggarnas skugga på tomtens mark har mjuka kanter utan texeltrappsteg"},
+    {"Ground shade on the GPU", "Markskugga på GPU:n"},
+    {"The shade of walls on the ground follows a dragged lamp at once; off, it is built on a worker thread", "Väggarnas skugga på marken följer genast en lampa som dras; avstängt görs den i en arbetstråd"},
     {"Lamps through arches on indoor objects", "Lampor genom valv på inomhusobjekt"},
     {"An object inside an arcade keeps a garden lamp's dim light", "Ett objekt inne i en arkad behåller en trädgårdslampas svaga ljus"},
     {"Background and lamp light inside rooms", "Bakgrunds- och lampljus i rum"},
