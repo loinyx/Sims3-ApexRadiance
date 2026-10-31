@@ -1,0 +1,51 @@
+{
+  "id": "repro-object-lookups",
+  "description": "Faster Object Lookups at night: the camera jumps across 10 far lots, 6 s at each (about 100 jumps in 10 minutes), so lots load and their lights update; 2 new Sims per jump add objects. Needs the night save. A/B metric: simulation hitches per minute and visible freezes (-Profiler Both), frames over 50 ms per minute.",
+  "save": "ApexTest-Night",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.ObjectLookupIndex": {
+          "enabled": false
+        }
+      },
+      "fail": [
+        "\\[ObjectIndex\\] On:"
+      ]
+    },
+    "on": {
+      "toml": {
+        "patches.ObjectLookupIndex": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[ObjectIndex\\] On:"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "fast"
+    },
+    {
+      "do": "camera_jumps",
+      "order": "far",
+      "lots": 10,
+      "dwellS": 6,
+      "spawn": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 15,
+      "measure": true,
+      "until": {
+        "jumps": 100
+      }
+    },
+    {
+      "do": "stop_repros"
+    }
+  ]
+}

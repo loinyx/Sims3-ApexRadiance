@@ -1,0 +1,52 @@
+{
+  "id": "repro-file-lists",
+  "description": "Faster File Lists under Sim loading: the camera jumps between the 6 most populated lots, 6 s at each (about 100 jumps in 10 minutes); per jump 4 Sims change outfit and 3 new Sims are built in view (removed again each loop). A/B metric: frames over 50 ms per minute, slow frames led by services (CAS/SimService).",
+  "save": "ApexTest-Town",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.FileListCache": {
+          "enabled": false
+        }
+      },
+      "fail": [
+        "\\[FileListCache\\] On:"
+      ]
+    },
+    "on": {
+      "toml": {
+        "patches.FileListCache": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[FileListCache\\] On:"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_jumps",
+      "order": "populated",
+      "lots": 6,
+      "dwellS": 6,
+      "outfits": 4,
+      "spawn": 3
+    },
+    {
+      "do": "wait",
+      "minutes": 15,
+      "measure": true,
+      "until": {
+        "jumps": 100
+      }
+    },
+    {
+      "do": "stop_repros"
+    }
+  ]
+}

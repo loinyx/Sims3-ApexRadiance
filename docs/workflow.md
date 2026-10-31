@@ -155,8 +155,8 @@ feature's validation page (`docs/validation/<feature>.md`) lists its harnesses, 
 | Convention | Rule |
 |---|---|
 | Location | One folder per harness, `tools/<name>_test/` or `tools/<name>_check/`, with a `README.md` when it needs arguments or fixtures |
-| Read-only | A harness never writes into the game folder, the capture folders or the repository. It prints to stdout. Compiler outputs and any scratch file go to an `-OutDir` / scratch directory (default under `%TEMP%`). Never write many files from a test executable: security software may flag it |
-| Game closed | Harnesses do not attach to `TS3W.exe` and never install anything into the game. Run them with the game closed so the GPU and the shader package are not in use |
+| Read-only | A harness never writes into the game folder, the capture folders or the repository. The [in-game runner](#in-game-runner) is the exception: it installs into the game and user folders for the length of a run and puts every file back. It prints to stdout. Compiler outputs and any scratch file go to an `-OutDir` / scratch directory (default under `%TEMP%`). Never write many files from a test executable: security software may flag it |
+| Game closed | Harnesses do not attach to `TS3W.exe` and never install anything into the game. Run them with the game closed so the GPU and the shader package are not in use. The [in-game runner](#in-game-runner) is the exception, with its own safety rules |
 | Runner | `run.ps1`, or `run_<topic>.ps1` for a sub-suite (for example `tools/terrain_lighting_test/run_queue_checks.ps1`). The runner compiles the harness with `cl.exe` and runs it, throwing on a compile error or a non-zero exit code |
 | Compiler | MSVC x86 (`cl.exe`). Runners dot-source `tools/terrain_lighting_test/compiler_env.ps1` and call `Initialize-TerrainCompiler`, which finds Visual Studio with `vswhere`, runs `VsDevCmd.bat -arch=x86 -host_arch=x64` once and imports `PATH`, `INCLUDE`, `LIB` and `LIBPATH` (nested suites reuse an already initialised toolchain). Harnesses without a runner give their `cl` command in their README, to run from an x86 developer prompt |
 | Production code | Harnesses compile the production source (`features/shader_patches.cpp`, policy headers) or extract the exact production function from it at run time. An extraction fails loudly when the source boundaries change, so the fixture never silently tests stale code |
@@ -219,6 +219,17 @@ failure; CI runs `Smoke` and `Lighting`.
 | `tools/terrain_lighting_test/` | Terrain lighting policies, shader patches, sampler guard, queue, resources, lamp state, dispatch, world pool, indoor stories, lot UV, ground scale (`run.ps1` and `run_*.ps1`) |
 | `tools/water_lamp_check/` | Water lamp shader equivalence and highlights |
 | `tools/world_lamp_test/` | World lamp eligibility policy |
+
+### In-game runner
+
+[`tools/ingame_runner/`](../tools/ingame_runner/README.md) runs features in the real game, unattended: it installs a
+built ASI and a test agent (a script mod), starts the game once per load with that load's `ApexRadiance.toml`, loads
+a test save, drives the job's steps (speed, camera pan, saves, reloads), checks `ApexRadiance_LOG.txt` against the
+job's expected and failure lines, records frame times when asked and restores every file it replaced. A feature is
+compared as separate game starts in ABBA order. It is the one tool that starts the game; it refuses to run while the
+game or the launcher is open, and after an interrupted run until `run.ps1 -Restore` put the player's files back. How
+to run it, write a job and add a step is in its README; how a feature is triggered and compared is in
+[METHODOLOGY.md](../tools/ingame_runner/METHODOLOGY.md). `tools/ingame_runner/selftest.ps1` checks it offline.
 
 ### Shader-patch changes
 

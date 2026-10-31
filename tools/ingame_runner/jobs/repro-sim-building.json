@@ -1,0 +1,52 @@
+{
+  "id": "repro-sim-building",
+  "description": "Faster Sim Building: as repro-file-lists with more outfit changes (6 per jump) and 4 new Sims per jump, each a Sim build with its see-through layer sort. A/B metric: frames over 50 ms per minute, services lead (CAS/SimService, CAS/TextureCompositor).",
+  "save": "ApexTest-Town",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.FastCasSort": {
+          "enabled": false
+        }
+      },
+      "fail": [
+        "\\[FastCas\\] On:"
+      ]
+    },
+    "on": {
+      "toml": {
+        "patches.FastCasSort": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[FastCas\\] On:"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_jumps",
+      "order": "populated",
+      "lots": 6,
+      "dwellS": 5,
+      "outfits": 6,
+      "spawn": 4
+    },
+    {
+      "do": "wait",
+      "minutes": 15,
+      "measure": true,
+      "until": {
+        "jumps": 120
+      }
+    },
+    {
+      "do": "stop_repros"
+    }
+  ]
+}
