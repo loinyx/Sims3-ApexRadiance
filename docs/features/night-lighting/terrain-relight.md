@@ -11,7 +11,7 @@ light the ground through their cones, as they light the lot. Part of [Night Ligh
 
 | | |
 |---|---|
-| Availability | Released (visitor patch, arm sites and dusk rebuild since 0.1.0; paced sweep default since 2.5.3; local relight of user and visible-lot edits since 2.5.4; world-owned type-11 lamps since 2.5.6; day/night endpoint rebuilds, Build-mode phase response, priority re-queue of in-flight chunks and the world-lamp rig request on early completion since 2.6.0). Changed in 2.7.0: the world-load and Refresh terrain rebuilds run one chunk per frame, nearest first; a lamp switch's ground changes in one frame; urgent chunks go back to back. Lot area lights in the bake and lamps on the ground stamped from 40 cm: Released in 2.15.1. No lamp edit budget for lamps switched on the load screen: Released in 2.15.3 Released in 2.18.0: lamp cones in the bake, a dragged lamp's ground light drawn on the GPU, moves under 5 cm added up. Released in 2.18.1: only the dragged lamps' own changes skip the relight. |
+| Availability | Released (visitor patch, arm sites and dusk rebuild since 0.1.0; paced sweep default since 2.5.3; local relight of user and visible-lot edits since 2.5.4; world-owned type-11 lamps since 2.5.6; day/night endpoint rebuilds, Build-mode phase response, priority re-queue of in-flight chunks and the world-lamp rig request on early completion since 2.6.0). Changed in 2.7.0: the world-load and Refresh terrain rebuilds run one chunk per frame, nearest first; a lamp switch's ground changes in one frame; urgent chunks go back to back. Lot area lights in the bake and lamps on the ground stamped from 40 cm: Released in 2.15.1. No lamp edit budget for lamps switched on the load screen: Released in 2.15.3 Released in 2.18.0: lamp cones in the bake, a dragged lamp's ground light drawn on the GPU, moves under 5 cm added up. Released in 2.18.1: only the dragged lamps' own changes skip the relight. Released in 2.18.4: a lamp picked up again during its release keeps its stamp; the stamps follow the lot's baked lamps no room-0 list holds. |
 | Default | On |
 | Menu | Lighting > Outside > Ground & Lots > *Lot lamps light the street*; Lighting > Game fixes > Ground & Lots (*Update at dusk*, *Delay after dusk*); Lighting > Overview > Refresh lighting |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` (keys below) |
@@ -387,7 +387,7 @@ whole chunks on the CPU:
   light stayed there while it moved on.
 - **Out of the list.** A lamp picked up again is out of the list for a few frames and keeps its state; out of it for
   1 s (`kGoneMs`: another lot, deleted) it returns to the bake where it was last seen, as at a release (developer log:
-  where it was last seen and where the bake takes it now). With the GPU smoothing off every lamp is back in the bake at
+  where it was last seen). With the GPU smoothing off every lamp is back in the bake at
   once; a new world forgets them all (its bake takes every lamp).
 
 Each chunk changes between the bake and the stamp in the build that first shows its re-rendered map, so the lamp is

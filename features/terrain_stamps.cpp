@@ -21,6 +21,7 @@
 #include "terrain_chunk_relight.h"
 #include "drag_lite.h"
 #include "apex_log.h"
+#include "build_flavor.h"
 #include <windows.h>
 #include <algorithm>
 #include <cmath>
@@ -109,17 +110,10 @@ void Update(const std::vector<uintptr_t>& all) {
         }
         LightmapSmooth::BumpStamps(s.builtRect);
         if (gpu) { // out for kGoneMs: back in the bake where it was last seen, as at a release (gone: the relight takes it out)
-            {
-                Lamp now_;
-                float rect[4];
-                const bool takes = NightTerrainBake::StampOf(it->first, now_.col, now_.pos, rect, now_.ground, now_.cone);
-                static int s_logs = 0;
-                if (++s_logs <= 40)
-                    LOG_INFO(std::format("[TerrainStamps] Lamp {:08X} out of the lamp list for {} ms: back to the bake where it was last seen ({:.2f} {:.2f} {:.2f}); the bake "
-                                         "{}",
-                                         it->first, now - s.goneAt, s.lamp.pos[0], s.lamp.pos[1], s.lamp.pos[2],
-                                         takes ? std::format("takes it now at ({:.2f} {:.2f} {:.2f})", now_.pos[0], now_.pos[1], now_.pos[2]) : std::string("no longer takes it")));
-            }
+            static int s_logs = 0; // (developer log; the light itself is not read: it may be gone)
+            if (!kPublicBuild && ++s_logs <= 40)
+                LOG_INFO(std::format("[TerrainStamps] Lamp {:08X} out of the lamp list for {} ms: back to the bake where it was last seen ({:.2f} {:.2f} {:.2f})",
+                                     it->first, now - s.goneAt, s.lamp.pos[0], s.lamp.pos[1], s.lamp.pos[2]));
             std::string why;
             if (!Relight(s.lamp.pos, s.rect, why)) g_lastRefusal = why;
             s.phase = Phase::Releasing;

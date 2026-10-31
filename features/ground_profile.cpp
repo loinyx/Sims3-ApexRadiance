@@ -1,6 +1,7 @@
 // Ground light profile (see ground_profile.h). Part of Apex Radiance. Credits: @loinyx
 
 #include "ground_profile.h"
+#include "build_flavor.h"
 #include "ground_profile_math.h"
 #include "captures.h"
 #include "game_addresses.h"
@@ -200,8 +201,8 @@ void Write(IDirect3DDevice9* dev, POINT pixel, unsigned bbWidth, unsigned bbHeig
     out << "law constants: k1 " << k1 << ", k2 " << k2 << ", Cmax " << cmax << ", street x" << street << ", cone scale " << s5 << " | terrain bake with cones: "
         << (NightTerrainBake::ConeShader() ? "yes" : "no") << "\n";
     out << "gains: " << LotLightBridge::GainText() << "\n";
-    for (const LampInfo& i : lamps) // (every lamp post of the lot: the mouse can miss the one in question)
-        if (i.type == 11 || &i == target) {
+    for (const LampInfo& i : lamps) // (developer builds: every lamp post of the lot, the mouse can miss the one in question)
+        if (&i == target || (i.type == 11 && !kPublicBuild)) {
             out << std::format("-- lamp L{:08X} type {} at ({:.2f} {:.2f} {:.2f}){}\n", i.light, i.type, i.pos[0], i.pos[1], i.pos[2], &i == target ? " (the target)" : "");
             out << LotLightBridge::ShadeProbeText(i.pos);
         }
