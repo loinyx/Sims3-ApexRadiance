@@ -2328,6 +2328,8 @@ const I18n::Pair kPairs[] = {
     {"Instant could not start its outdoor lamp edits; see ApexRadiance_LOG.txt", "Az Azonnali mód nem tudta elindítani a kültéri lámpák szerkesztését; lásd ApexRadiance_LOG.txt"},
     {"Check quick lamp edits", "Gyors lámpamódosítások ellenőrzése"},
     {"Solves those floors in full again later and logs the largest texel difference", "Később újra teljesen kiszámolja ezeket a szinteket, és a naplóba írja a legnagyobb texeleltérést"},
+    {"Check indoor lamps against the GPU law", "Beltéri lámpák összevetése a GPU törvényével"},
+    {"Logs how each lamp's light in the active lot's rooms differs from what the GPU would draw", "Naplózza, hogyan tér el az aktív telek szobáiban minden lámpa fénye attól, amit a GPU rajzolna"},
     {"Tester", "Tesztek"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Kapcsold ki és be az egyes átvett részeket ugyanabban a jelenetben, és hasonlítsd össze a képkockaidőt és a látványt. A változások azonnal érvényesek, és mentődnek."},
     {"Frame time", "Képkockaidő"},

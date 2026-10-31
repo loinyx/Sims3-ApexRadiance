@@ -406,6 +406,16 @@ int main() {
         }
         Check(same, "hue kept: a sum within 1 packs as min(sum, 1)");
         Check(ratios, "hue kept: a sum past 1 keeps its channels' ratios, its largest at 1");
+        {
+            constexpr float L = 1.0f / 255.0f;
+            const auto cls = [](float g, float m) {
+                const float a[3] = {g, g, g}, b[3] = {m, m, m};
+                return ProbeClassify(a, b);
+            };
+            Check(cls(0.0f, 0.4f * L) == ProbeClass::Unlit && cls(0.1f, 0.1f + 2.0f * L) == ProbeClass::Match && cls(0.0f, 0.2f) == ProbeClass::Dark &&
+                      cls(0.2f, 0.5f * L) == ProbeClass::Extra && cls(0.2f, 0.1f) == ProbeClass::Strength,
+                  "room lamp probe: unlit, within 2 levels, dark in the solve, lit only by the solve, another strength");
+        }
         // a red sconce (two entries of 1.7 x 1.7 near the lamp) over a yellow light at 1 (the F7's courtyard by the lamp):
         // channel by channel it packed (255, 255, 105), yellow; now red, the yellow adding its share
         const float red = 2.0f * 1.7f * 1.7f;

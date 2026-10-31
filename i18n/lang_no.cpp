@@ -2328,6 +2328,8 @@ const I18n::Pair kPairs[] = {
     {"Instant could not start its outdoor lamp edits; see ApexRadiance_LOG.txt", "Umiddelbar kunne ikke starte endringene av utendørslamper; se ApexRadiance_LOG.txt"},
     {"Check quick lamp edits", "Kontroller raske lampeendringer"},
     {"Solves those floors in full again later and logs the largest texel difference", "Beregner disse etasjene helt på nytt litt senere og skriver den største texelforskjellen til loggen"},
+    {"Check indoor lamps against the GPU law", "Sammenlign innendørslamper med GPU-loven"},
+    {"Logs how each lamp's light in the active lot's rooms differs from what the GPU would draw", "Logger hvordan lyset fra hver lampe i rommene på den aktive tomten avviker fra det GPU-en ville tegnet"},
     {"Tester", "Tester"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Slå hver overført del av og på i samme scene for å sammenligne bildetid og utseende. Endringer gjelder med en gang og lagres."},
     {"Frame time", "Bildetid"},

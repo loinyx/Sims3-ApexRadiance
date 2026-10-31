@@ -77,6 +77,7 @@ constexpr DWORD kSummaryQuietMs = 400;  // a lot's edit summary is written once 
 constexpr uint16_t kNoBlock = 0xFFFF, kBadBlock = 0xFFFE;
 
 std::atomic<bool> g_on{false}, g_check{false}, g_clear{false};
+std::atomic<bool> g_probe{false}; // the developer's room lamp probe (SetRoomProbe)
 std::atomic<uint32_t> g_gen{1};
 std::atomic<uint32_t> g_version{1}; // Record::version's source
 std::atomic<const void*> g_deltaRoom{nullptr};
@@ -573,6 +574,7 @@ struct Capture {
     int pending = -1; // the texel to read back
     const char* why = nullptr;
     bool directional = false;
+    bool probe = false; // a room other than room 0, for the room lamp probe: compared at its end and dropped
     // a self-check solve: the texels the delta wrote, by (map, x, y)
     bool check = false, checkLightsSame = false;
     std::unordered_map<uint64_t, uint32_t> checkOld;
@@ -1192,6 +1194,12 @@ void SetEnabled(bool on) {
                 : "[OutdoorDelta] Off: every room 0 is solved in full");
 }
 bool Enabled() { return g_on.load(std::memory_order_relaxed); }
+void SetRoomProbe(bool on) {
+    if (g_probe.exchange(on) == on) return;
+    LOG_INFO(on ? "[RoomLampProbe] On: each solve of the active lot's rooms other than room 0 is compared with the GPU's lamp law"
+                : "[RoomLampProbe] Off");
+}
+bool RoomProbe() { return g_probe.load(std::memory_order_relaxed); }
 void SetSelfCheck(bool on) {
     if (g_check.exchange(on) == on) return;
     LOG_INFO(on ? "[OutdoorDelta] Self-check on: each room brought up to date is solved in full once more and compared" : "[OutdoorDelta] Self-check off");
@@ -1344,6 +1352,145 @@ void SetNeighbourLots(const uint64_t* lots, int n) {
     g_neighbourN = lots ? std::clamp(n, 0, 4) : 0;
     std::copy_n(lots, g_neighbourN, g_neighbours);
 }
+// ---- the developer's room lamp probe (SetRoomProbe; light tree thread) ----
+// A room other than room 0 is captured with the same hooks (each light's part of its sum, before the roofed rooms' tone), then
+// each lot lamp's part is compared, texel by texel, with the law the GPU draws it with and no shadow: what the GPU would have
+// to reproduce. Nothing of it is kept.
+namespace {
+std::atomic<int> g_probeLines{0};
+constexpr int kProbeLines = 600; // (a session's log: every room of a few lots, with their lamps)
+bool ProbeLog() {
+    const int n = g_probeLines.fetch_add(1, std::memory_order_relaxed);
+    if (n == kProbeLines) LOG_INFO("[RoomLampProbe] Line limit reached: later probes are not logged");
+    return n < kProbeLines;
+}
+void ProbeStart(unsigned char* room, const RoomRead& rr) {
+    const char* refuse = !LevelLightShare::DeltaReady() ? "the room solve hooks are not in"
+                         : RoomLightQueue::QuickPassTarget(room) > 0  ? "a quick pass"
+                         : !LevelLightShare::ListAllWrapped(room)     ? "a light whose evaluation is not wrapped"
+                                                                      : nullptr;
+    if (refuse) {
+        if (ProbeLog()) LOG_INFO(std::format("[RoomLampProbe] Story {} room {} class {}: not probed ({})", rr.story, rr.id, rr.cls, refuse));
+        return;
+    }
+    Capture& c = g_cap;
+    c.active = c.ok = c.probe = true;
+    c.room = room;
+    c.rec = std::make_unique<Record>();
+    Record& r = *c.rec;
+    r.room = reinterpret_cast<uintptr_t>(room);
+    r.mgr = rr.mgr, r.story = rr.story, r.lot = rr.lot, r.cls = rr.cls;
+    r.thr = rr.thr, r.wallMode = rr.wallMode;
+}
+inline float Max3(const float* c) { return std::max({c[0], c[1], c[2]}); }
+void ProbeEnd(const BYTE* room) {
+    const Capture& c = g_cap;
+    const Record& r = *c.rec;
+    RoomRead rr;
+    if (!ReadRoom(room, rr)) return;
+    const char* kind = rr.outdoor ? "roofless" : "roofed";
+    std::vector<ListLight> list;
+    if (c.ok && !UniqueList(room, list)) Fail("the light list could not be read");
+    if (c.ok && r.samples.size() != r.texels.size() * 0x30) Fail("the samples do not match the texels");
+    if (!c.ok) {
+        if (ProbeLog()) LOG_INFO(std::format("[RoomLampProbe] Story {} room {} class {} ({}): not compared ({})", rr.story, rr.id, rr.cls, kind, c.why ? c.why : "?"));
+        return;
+    }
+    LARGE_INTEGER t0{};
+    QueryPerformanceCounter(&t0);
+    const bool reachOn = LevelLightShare::RealisticReachActive(), fade = LevelLightShare::SoftLightCutOn();
+    const size_t n = r.texels.size();
+    constexpr float kLevel = 1.0f / 255.0f;
+    std::unordered_map<uintptr_t, const LampRec*> parts;
+    for (const LampRec& l : r.lamps) parts[l.light] = &l;
+    // light no part holds (the GPU's base would keep it whatever it draws)
+    std::vector<float> got(n * 3, 0.0f), measAll(n * 3, 0.0f), lawAll(n * 3, 0.0f);
+    for (const LampRec& l : r.lamps)
+        for (const Contrib& p : l.parts)
+            if (p.texel < n)
+                for (int k = 0; k < 3; k++) got[p.texel * 3 + k] += p.rgb[k];
+    long unheld = 0;
+    for (size_t i = 0; i < n; i++)
+        if (std::max({r.texels[i].t.S[0] - got[i * 3], r.texels[i].t.S[1] - got[i * 3 + 1], r.texels[i].t.S[2] - got[i * 3 + 2]}) > 2.0f * kLevel) unheld++;
+    std::vector<std::string> rows;
+    int drawn = 0;
+    for (const ListLight& li : list) {
+        GpuLampLaw::Lamp law;
+        int type = 0, reg = -1;
+        if (!RtOutdoorLamps::WorldLaw(li.light, r.lot, false, law, type, reg)) continue;
+        // (realistic reach as the GPU path of the experiment applied it: rooms without a roof and lamps registered outdoors)
+        const bool reach = reachOn && (rr.outdoor || reg == 0);
+        if (reach) RtOutdoorLamps::WorldLaw(li.light, r.lot, true, law, type, reg);
+        drawn++;
+        std::fill(got.begin(), got.end(), 0.0f);
+        if (const auto it = parts.find(li.light); it != parts.end())
+            for (const Contrib& p : it->second->parts)
+                if (p.texel < n)
+                    for (int k = 0; k < 3; k++) got[p.texel * 3 + k] = p.rgb[k];
+        const RtLampModel::Lamp L{law, static_cast<float>(li.mult)};
+        long lit = 0, match = 0, dark = 0, extra = 0;
+        std::vector<float> ratios;
+        float darkWorst = 0.0f, offWorst = 0.0f;
+        size_t darkAt = 0, offAt = 0;
+        float offMeas[3] = {}, offLaw[3] = {};
+        for (size_t i = 0; i < n; i++) {
+            const float* s = reinterpret_cast<const float*>(r.samples.data() + i * 0x30);
+            float m[3] = {};
+            RtLampModel::Add(L, s, s + 4, 1.0f, reach, r.thr, fade, m);
+            const float* g = &got[i * 3];
+            for (int k = 0; k < 3; k++) measAll[i * 3 + k] += g[k], lawAll[i * 3 + k] += m[k];
+            const OutdoorDeltaModel::ProbeClass pc = OutdoorDeltaModel::ProbeClassify(g, m);
+            if (pc == OutdoorDeltaModel::ProbeClass::Unlit) continue;
+            lit++;
+            const float d = std::max({std::fabs(g[0] - m[0]), std::fabs(g[1] - m[1]), std::fabs(g[2] - m[2])});
+            if (pc == OutdoorDeltaModel::ProbeClass::Match) match++;
+            else if (pc == OutdoorDeltaModel::ProbeClass::Dark) {
+                dark++;
+                if (Max3(m) > darkWorst) darkWorst = Max3(m), darkAt = i;
+            } else if (pc == OutdoorDeltaModel::ProbeClass::Extra) extra++;
+            else {
+                const float lm = OutdoorDeltaModel::Lum3(m);
+                if (lm > 0.0f) ratios.push_back(OutdoorDeltaModel::Lum3(g) / lm);
+                if (d > offWorst) {
+                    offWorst = d, offAt = i;
+                    std::memcpy(offMeas, g, sizeof offMeas), std::memcpy(offLaw, m, sizeof offLaw);
+                }
+            }
+        }
+        float median = 0.0f;
+        if (!ratios.empty()) {
+            std::nth_element(ratios.begin(), ratios.begin() + ratios.size() / 2, ratios.end());
+            median = ratios[ratios.size() / 2];
+        }
+        const auto pct = [lit](long v) { return lit ? 100.0 * static_cast<double>(v) / static_cast<double>(lit) : 0.0; };
+        const auto at = [&](size_t i) {
+            const float* s = reinterpret_cast<const float*>(r.samples.data() + i * 0x30);
+            return std::format("({:.2f} {:.2f} {:.2f}) n ({:.2f} {:.2f} {:.2f}) {:.2f} m from it", s[0], s[1], s[2], s[4], s[5], s[6],
+                               std::sqrt((s[0] - law.pos[0]) * (s[0] - law.pos[0]) + (s[1] - law.pos[1]) * (s[1] - law.pos[1]) + (s[2] - law.pos[2]) * (s[2] - law.pos[2])));
+        };
+        std::string row = std::format("[RoomLampProbe]   lamp {:08X} type {} x{} (registered in room {}{}): {} texels lit, {:.1f}% within 2/255, {:.1f}% dark in the solve, "
+                                      "{:.1f}% lit only by the solve, {:.1f}% other strength (median solve/law {:.3f})",
+                                      li.light, type, li.mult, reg, reg == rr.id ? ", this one" : "", lit, pct(match), pct(dark), pct(extra), pct(static_cast<long>(ratios.size())), median);
+        if (dark) row += std::format("; darkest miss: law {:.3f} at {}", darkWorst, at(darkAt));
+        if (offWorst > 0.0f)
+            row += std::format("; largest other: solve ({:.3f} {:.3f} {:.3f}) law ({:.3f} {:.3f} {:.3f}) at {}", offMeas[0], offMeas[1], offMeas[2], offLaw[0], offLaw[1], offLaw[2], at(offAt));
+        rows.push_back(std::move(row));
+    }
+    long lit = 0, within = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (Max3(&measAll[i * 3]) < 0.5f * kLevel && Max3(&lawAll[i * 3]) < 0.5f * kLevel) continue;
+        lit++;
+        within += std::max({std::fabs(measAll[i * 3] - lawAll[i * 3]), std::fabs(measAll[i * 3 + 1] - lawAll[i * 3 + 1]), std::fabs(measAll[i * 3 + 2] - lawAll[i * 3 + 2])}) <= 2.0f * kLevel;
+    }
+    if (!ProbeLog()) return;
+    LOG_INFO(std::format("[RoomLampProbe] Story {} room {} class {} ({}): {} texels, {} lot lamps of {} lights listed; their light {:.1f}% within 2/255 of the GPU law "
+                         "unshadowed ({} texels lit by either); light no part holds at {} texels; {:.1f} ms",
+                         rr.story, rr.id, rr.cls, kind, n, drawn, list.size(), lit ? 100.0 * static_cast<double>(within) / static_cast<double>(lit) : 100.0, lit, unheld,
+                         MsSince(t0)));
+    for (const std::string& row : rows) LOG_INFO(row);
+}
+} // namespace
+
 void SolveStart(unsigned char* room) {
     if (g_clear.exchange(false)) DropCapture();
     if (g_cap.active) DropCapture(); // the solve it kept was abandoned (restarted, or another room's)
@@ -1352,8 +1499,11 @@ void SolveStart(unsigned char* room) {
     if (!ReadRoom(room, rr)) return;
     if (rr.id != 0) { // another room of a lot with a lamp edit going on: its solve time (the log)
         const DWORD now = GetTickCount();
-        std::lock_guard<std::mutex> lk(g_sideMx);
-        if (g_lotEdits.count(rr.lot) && g_otherStart.size() < 512) g_otherStart[room] = {rr.lot, now};
+        {
+            std::lock_guard<std::mutex> lk(g_sideMx);
+            if (g_lotEdits.count(rr.lot) && g_otherStart.size() < 512) g_otherStart[room] = {rr.lot, now};
+        }
+        if (g_probe.load(std::memory_order_relaxed) && rr.cls >= 0 && rr.cls <= 2 && rr.lot == ActiveLot()) ProbeStart(room, rr);
         return;
     }
     if (!rr.outdoor || rr.cls < 0 || rr.cls > 2) return;
@@ -1556,6 +1706,10 @@ void SolveEnd(unsigned char* room) {
     if (!g_cap.active || g_cap.room != room) return;
     FlushPending();
     Capture& c = g_cap;
+    if (c.probe) {
+        ProbeEnd(room);
+        return DropCapture();
+    }
     std::vector<ListLight> list;
     if (c.ok && !UniqueList(room, list)) Fail("the light list could not be read");
     if (c.ok && c.directional) Fail("a directional map");

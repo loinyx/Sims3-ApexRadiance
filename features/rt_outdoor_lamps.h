@@ -28,6 +28,9 @@
 namespace RtLampGpu {
 struct DeviceCalls;
 }
+namespace GpuLampLaw {
+struct Lamp;
+}
 
 namespace RtOutdoorLamps {
 
@@ -59,6 +62,10 @@ bool RestartIncomplete(); // terminal map fallback, rather than work still runni
 // The lamp entry update of `light` (registered in `room` of tree level `treeLevel`): true = the GPU draws it on every story
 // of its lot now, so its edit marks no room
 bool HandlesLamp(uintptr_t treeLevel, uintptr_t light, int room);
+// Any thread: the law the GPU draws `light` with, in world space (the lamp classes 3, 4, 5 and 11 of lot `lot`, alive, a
+// shade the law describes); false for any other light. regRoom = the room it is registered in (0 outdoors). For the
+// developer's room lamp probe (OutdoorDelta::SetRoomProbe)
+bool WorldLaw(uintptr_t light, uint64_t lot, bool reachOn, GpuLampLaw::Lamp& out, int& type, int& regRoom);
 // Any thread: `room` is a room 0 of the active lot while every story's maps are relit (OutdoorDelta's lock step leaves the
 // deltas of drawn lamps out then)
 bool CoversRoom(const void* room);

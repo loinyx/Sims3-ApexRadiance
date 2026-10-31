@@ -195,4 +195,18 @@ inline float ReachBound2(float W, float esum, float spill, float thr, float marg
     return std::isfinite(d2) ? d2 : -1.0f;
 }
 
+// The room lamp probe (OutdoorDelta::SetRoomProbe): one lamp's part of a texel as the solve gave it (g) against the GPU's law
+// unshadowed (m). Unlit = both under half a level; Match = within 2 levels; Dark = the solve gave under a level (a test the law
+// has no shadow for shaded it); Extra = the law gives under a level; Strength = both lit, a different amount
+enum class ProbeClass { Unlit, Match, Dark, Extra, Strength };
+inline ProbeClass ProbeClassify(const float g[3], const float m[3]) {
+    constexpr float kLevel = 1.0f / 255.0f;
+    const float gm = std::max({g[0], g[1], g[2]}), mm = std::max({m[0], m[1], m[2]});
+    if (gm < 0.5f * kLevel && mm < 0.5f * kLevel) return ProbeClass::Unlit;
+    if (std::max({std::fabs(g[0] - m[0]), std::fabs(g[1] - m[1]), std::fabs(g[2] - m[2])}) <= 2.0f * kLevel) return ProbeClass::Match;
+    if (gm < kLevel) return ProbeClass::Dark;
+    if (mm < kLevel) return ProbeClass::Extra;
+    return ProbeClass::Strength;
+}
+
 } // namespace OutdoorDeltaModel

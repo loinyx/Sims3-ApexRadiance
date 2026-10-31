@@ -2328,6 +2328,8 @@ const I18n::Pair kPairs[] = {
     {"Instant could not start its outdoor lamp edits; see ApexRadiance_LOG.txt", "即時模式無法啟動室外燈具編輯；請參閱 ApexRadiance_LOG.txt"},
     {"Check quick lamp edits", "核對快速燈具編輯"},
     {"Solves those floors in full again later and logs the largest texel difference", "稍後再完整計算這些樓層一次，並將最大的紋素差異寫入日誌"},
+    {"Check indoor lamps against the GPU law", "對照 GPU 規律檢查室內燈"},
+    {"Logs how each lamp's light in the active lot's rooms differs from what the GPU would draw", "在日誌中記錄目前地段各房間內每盞燈的光與 GPU 將繪製的結果有何不同"},
     {"Tester", "測試"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "在同一場景中逐一關閉再開啟每個移植的部分，比較其影格時間與外觀。變更會立即套用並儲存。"},
     {"Frame time", "影格時間"},

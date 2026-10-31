@@ -61,6 +61,7 @@ atlas** that any surface knowing its world position can sample. Each sub-part be
 | Level light share | Outdoor and indoor lamps light every story, with the game's wall test | [level-light-share.md](level-light-share.md) |
 | Real-time outdoor lamps (Lamp lighting: Instant) | The active lot's outdoor lamps drawn on the GPU into every story's outside maps, with shadows | [rt-outdoor-lamps.md](rt-outdoor-lamps.md) |
 | Quick outdoor lamp edits (with Instant) | Room 0 of every story brought up to date from each lamp's kept part | [outdoor-lamp-delta.md](outdoor-lamp-delta.md) |
+| Room lamp probe (developer) | Each room solve's lamp light compared with the law the GPU would draw it with, before indoor lamps move to the GPU | [gpu-room-lamps-probe.md](gpu-room-lamps-probe.md) |
 | Lamp drags | The room solves a dragged lamp causes kept to its own rooms; the rest sent once it stops, spread over frames | [lamp-drags.md](lamp-drags.md) |
 | Walls | Exterior walls get a configurable lamp gain, also by day | [walls.md](walls.md) |
 | Floors | Outdoor floors read the world atlas | [floors.md](floors.md) |
@@ -135,6 +136,7 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 | Stories > Game fixes > Every floor in full detail | `todosOsAndaresEmDetalhe` | bool | on | | Every floor of the active lot solved in full detail |
 | Performance > Lamp lighting > Lamp updates | `lampLightingMode` | string | `"instant"` | `"classic"`, `"instant"` | Instant: [Real-time outdoor lamps](rt-outdoor-lamps.md) on the parts of [Quick outdoor lamp edits](outdoor-lamp-delta.md); Classic: every room solved by the game, a dragged lamp's rooms once after the release ([lamp-drags](lamp-drags.md)) and an edit's stories shown together. A saved value is kept; a file without the key starts on Instant. Instant on a device that cannot run it shows a warning and works as Classic |
 | Developer > Compare lighting paths > Check quick lamp edits | `outdoorLampDeltaCheck` | bool | off | | Developer only, with Instant: each room 0 a delta brought up to date is solved in full again and compared ([outdoor-lamp-delta](outdoor-lamp-delta.md)) |
+| Developer > Compare lighting paths > Check indoor lamps against the GPU law | `roomLampProbe` | bool | off | | Developer only, with Instant: each solve of the active lot's rooms other than room 0 is compared with the GPU's lamp law and logged ([gpu-room-lamps-probe](gpu-room-lamps-probe.md)) |
 | Water & Snow > Lamp Glow (card switch) | `lagosRefletemLampadas` | bool | on | | Pond lamp pass ([water](water.md)) |
 | Water & Snow > Lamp Glow > Glow brightness | `brilhoNaAgua` | float | 40% | 10 to 40% | Lamp glow and sparkles on ponds |
 | Water & Snow > Water Reflections > Reflection brightness | `reflexoNoLago` | float | 156% | 0 to 300% (slider from 5%) | Shore reflection; needs Depth Blur ([../reflections.md](../reflections.md)) |

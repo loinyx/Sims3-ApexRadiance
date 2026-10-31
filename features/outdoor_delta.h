@@ -30,6 +30,12 @@ bool Enabled();
 // Developer self-check: a room brought up to date by a delta is solved in full once more 1.5 s after its last delta, and
 // the texels the full solve packs are compared with the ones the delta wrote (log: the largest difference in 8-bit levels)
 void SetSelfCheck(bool on);
+// Developer probe for GPU room lamps (docs/features/night-lighting/gpu-room-lamps-probe.md): every solve of a room other than
+// room 0 of the active lot is captured as room 0's are (the sum and each light's part per texel), compared with the law the
+// GPU draws each lot lamp with (unshadowed) and dropped; the log gives per room and lamp how the two differ. Nothing is kept,
+// drawn or written
+void SetRoomProbe(bool on);
+bool RoomProbe();
 
 // ---- the direct path (light tree thread; LevelLightShare's hooks) ----
 // The lamp entry update of story tl's room 0 (LevelLightShare::HoldLampMark, a lamp that moved or changed a value in the same

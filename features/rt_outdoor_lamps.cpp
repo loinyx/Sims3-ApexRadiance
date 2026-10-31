@@ -1007,6 +1007,18 @@ struct BakeLampW {
 
 RtLampGpu::DeviceCalls DeviceCallsOfGame() { return GameCalls(); }
 
+bool WorldLaw(uintptr_t light, uint64_t lot, bool reachOn, GpuLampLaw::Lamp& out, int& type, int& regRoom) {
+    LampRead r;
+    if (!ReadLamp(light, r)) return false;
+    const bool cls = r.f.type == 3 || r.f.type == 4 || r.f.type == 5 || r.f.type == 11;
+    if (!cls || r.f.unmodelled || r.f.lot == 0 || r.f.lot != lot || !(r.f.flags & 0x01)) return false;
+    Xform id{};
+    for (int k = 0; k < 4; k++) id.r[k][k] = 1.0f;
+    ToLaw(r, ReadConsts(), id, reachOn, out);
+    type = r.f.type, regRoom = r.f.room;
+    return true;
+}
+
 bool LowLampLift() { return TerrainBakeRule::LowLampLift(); }
 void SetLowLampLift(bool on) { TerrainBakeRule::g_lowLampLift.store(on, std::memory_order_relaxed); }
 long LowLampLifted() { return g_lowLampLifted.load(std::memory_order_relaxed); }
