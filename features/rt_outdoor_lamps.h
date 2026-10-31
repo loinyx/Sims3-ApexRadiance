@@ -66,6 +66,9 @@ bool HandlesLamp(uintptr_t treeLevel, uintptr_t light, int room);
 // shade the law describes); false for any other light. regRoom = the room it is registered in (0 outdoors). For the
 // developer's room lamp probe (OutdoorDelta::SetRoomProbe)
 bool WorldLaw(uintptr_t light, uint64_t lot, bool reachOn, GpuLampLaw::Lamp& out, int& type, int& regRoom);
+// Any thread: the story tracker of the lot this path draws when `room` belongs to it (else 0; for the room lamp probe's
+// occluders, LevelLightShare::ExportLotProxy)
+uintptr_t TrackerOf(const void* room);
 // Any thread: `room` is a room 0 of the active lot while every story's maps are relit (OutdoorDelta's lock step leaves the
 // deltas of drawn lamps out then)
 bool CoversRoom(const void* room);

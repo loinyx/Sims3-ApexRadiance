@@ -24,6 +24,7 @@
 #include "outdoor_delta_model.h"
 #include "rt_lamp_model.h"
 #include "rt_outdoor_lamps.h"
+#include "rt_lamp_proxy.h"
 #include "level_light_share.h"
 #include "room_light_queue.h"
 #include "room_map_dither.h"
@@ -1383,6 +1384,31 @@ void ProbeStart(unsigned char* room, const RoomRead& rr) {
     r.thr = rr.thr, r.wallMode = rr.wallMode;
 }
 inline float Max3(const float* c) { return std::max({c[0], c[1], c[2]}); }
+// The occluders the GPU path would shadow a room's lamps with (LevelLightShare::ExportLotProxy, ceilings left open over the
+// rooms as the GPU room lamps build had them), read again when the lot or its geometry changes
+struct ProbeMesh {
+    uintptr_t tracker = 0;
+    uint64_t geo = 0;
+    RtLampProxy::Lot lot;
+    RtLampProxy::Mesh mesh;
+    bool ok = false;
+    std::string why;
+};
+ProbeMesh g_probeMesh; // light tree thread
+const ProbeMesh& ProbeOccluders(const void* room) {
+    const uintptr_t tracker = RtOutdoorLamps::TrackerOf(room);
+    const uint64_t geo = LevelLightShare::LotGeometryKey(room);
+    ProbeMesh& p = g_probeMesh;
+    if (tracker && geo && p.tracker == tracker && p.geo == geo) return p;
+    p = ProbeMesh{};
+    p.tracker = tracker, p.geo = geo;
+    if (!tracker) p.why = "the lot's story tracker is not known yet";
+    else if (LevelLightShare::ExportLotProxy(tracker, p.lot, p.why)) {
+        RtLampProxy::Build(p.lot, p.mesh, true);
+        p.ok = true;
+    }
+    return p;
+}
 void ProbeEnd(const BYTE* room) {
     const Capture& c = g_cap;
     const Record& r = *c.rec;
@@ -1414,6 +1440,10 @@ void ProbeEnd(const BYTE* room) {
         if (std::max({r.texels[i].t.S[0] - got[i * 3], r.texels[i].t.S[1] - got[i * 3 + 1], r.texels[i].t.S[2] - got[i * 3 + 2]}) > 2.0f * kLevel) unheld++;
     std::vector<std::string> rows;
     int drawn = 0;
+    const ProbeMesh& occ = ProbeOccluders(room);
+    // shortcut: only every stride-th texel takes the occluder test (about 200,000 rays a solve at most); test all if the shares look noisy
+    const size_t stride = std::max<size_t>(1, n * std::max<size_t>(list.size(), 1) / 200000);
+    std::vector<float> shadowAll(occ.ok ? n * 3 : 0, 0.0f);
     for (const ListLight& li : list) {
         GpuLampLaw::Lamp law;
         int type = 0, reg = -1;
@@ -1429,6 +1459,7 @@ void ProbeEnd(const BYTE* room) {
                     for (int k = 0; k < 3; k++) got[p.texel * 3 + k] = p.rgb[k];
         const RtLampModel::Lamp L{law, static_cast<float>(li.mult)};
         long lit = 0, match = 0, dark = 0, extra = 0;
+        long rays = 0, shadowMatch = 0, shadedOk = 0, leak = 0, over = 0; // (the tested texels against the occluders)
         std::vector<float> ratios;
         float darkWorst = 0.0f, offWorst = 0.0f;
         size_t darkAt = 0, offAt = 0;
@@ -1440,8 +1471,28 @@ void ProbeEnd(const BYTE* room) {
             const float* g = &got[i * 3];
             for (int k = 0; k < 3; k++) measAll[i * 3 + k] += g[k], lawAll[i * 3 + k] += m[k];
             const OutdoorDeltaModel::ProbeClass pc = OutdoorDeltaModel::ProbeClassify(g, m);
-            if (pc == OutdoorDeltaModel::ProbeClass::Unlit) continue;
+            const bool tested = occ.ok && i % stride == 0;
+            if (pc == OutdoorDeltaModel::ProbeClass::Unlit) {
+                if (tested)
+                    for (int k = 0; k < 3; k++) shadowAll[i * 3 + k] += m[k];
+                continue;
+            }
             lit++;
+            if (tested) { // the occluders the GPU would shadow it with (hard: one ray to the lamp's centre)
+                float a[3], b[3], nl[3];
+                RtLampProxy::ToLot(occ.lot, law.pos, a);
+                RtLampProxy::ToLot(occ.lot, s, b);
+                RtLampProxy::DirToLot(occ.lot, s + 4, nl);
+                for (int k = 0; k < 3; k++) b[k] += 0.02f * nl[k];
+                const bool clear = RtLampProxy::Clear(occ.mesh, a, b, 0.05f, 0.01f);
+                const bool solveDark = pc == OutdoorDeltaModel::ProbeClass::Dark;
+                rays++;
+                shadedOk += solveDark && !clear, leak += solveDark && clear, over += !solveDark && !clear;
+                const float ms[3] = {clear ? m[0] : 0.0f, clear ? m[1] : 0.0f, clear ? m[2] : 0.0f};
+                for (int k = 0; k < 3; k++) shadowAll[i * 3 + k] += ms[k];
+                const OutdoorDeltaModel::ProbeClass ps = OutdoorDeltaModel::ProbeClassify(g, ms);
+                shadowMatch += ps == OutdoorDeltaModel::ProbeClass::Match || ps == OutdoorDeltaModel::ProbeClass::Unlit;
+            }
             const float d = std::max({std::fabs(g[0] - m[0]), std::fabs(g[1] - m[1]), std::fabs(g[2] - m[2])});
             if (pc == OutdoorDeltaModel::ProbeClass::Match) match++;
             else if (pc == OutdoorDeltaModel::ProbeClass::Dark) {
@@ -1474,6 +1525,12 @@ void ProbeEnd(const BYTE* room) {
         if (dark) row += std::format("; darkest miss: law {:.3f} at {}", darkWorst, at(darkAt));
         if (offWorst > 0.0f)
             row += std::format("; largest other: solve ({:.3f} {:.3f} {:.3f}) law ({:.3f} {:.3f} {:.3f}) at {}", offMeas[0], offMeas[1], offMeas[2], offLaw[0], offLaw[1], offLaw[2], at(offAt));
+        if (rays) {
+            const auto of = [rays](long v) { return 100.0 * static_cast<double>(v) / static_cast<double>(rays); };
+            row += std::format("; with the occluders ({} texels tested): {:.1f}% within 2/255, {:.1f}% dark in both, {:.1f}% dark in the solve only (the GPU "
+                               "lights them), {:.1f}% shaded by the occluders only (the GPU darkens them)",
+                               rays, of(shadowMatch), of(shadedOk), of(leak), of(over));
+        }
         rows.push_back(std::move(row));
     }
     long lit = 0, within = 0;
@@ -1482,11 +1539,21 @@ void ProbeEnd(const BYTE* room) {
         lit++;
         within += std::max({std::fabs(measAll[i * 3] - lawAll[i * 3]), std::fabs(measAll[i * 3 + 1] - lawAll[i * 3 + 1]), std::fabs(measAll[i * 3 + 2] - lawAll[i * 3 + 2])}) <= 2.0f * kLevel;
     }
+    long sLit = 0, sWithin = 0;
+    if (occ.ok)
+        for (size_t i = 0; i < n; i += stride) {
+            if (Max3(&measAll[i * 3]) < 0.5f * kLevel && Max3(&shadowAll[i * 3]) < 0.5f * kLevel) continue;
+            sLit++;
+            sWithin += std::max({std::fabs(measAll[i * 3] - shadowAll[i * 3]), std::fabs(measAll[i * 3 + 1] - shadowAll[i * 3 + 1]),
+                                 std::fabs(measAll[i * 3 + 2] - shadowAll[i * 3 + 2])}) <= 2.0f * kLevel;
+        }
     if (!ProbeLog()) return;
-    LOG_INFO(std::format("[RoomLampProbe] Story {} room {} class {} ({}): {} texels, {} lot lamps of {} lights listed; their light {:.1f}% within 2/255 of the GPU law "
-                         "unshadowed ({} texels lit by either); light no part holds at {} texels; {:.1f} ms",
-                         rr.story, rr.id, rr.cls, kind, n, drawn, list.size(), lit ? 100.0 * static_cast<double>(within) / static_cast<double>(lit) : 100.0, lit, unheld,
-                         MsSince(t0)));
+    const std::string shadowed = occ.ok ? std::format("{:.1f}% with the occluders ({} texels tested)", sLit ? 100.0 * static_cast<double>(sWithin) / static_cast<double>(sLit) : 100.0, sLit)
+                                        : std::format("occluders not compared ({})", occ.why);
+    LOG_INFO(std::format("[RoomLampProbe] Story {} room {} class {} ({}): {} texels, {} lot lamps of {} lights listed; their light within 2/255 of the GPU law: "
+                         "{:.1f}% unshadowed ({} texels lit by either), {}; light no part holds at {} texels; {:.1f} ms",
+                         rr.story, rr.id, rr.cls, kind, n, drawn, list.size(), lit ? 100.0 * static_cast<double>(within) / static_cast<double>(lit) : 100.0, lit, shadowed,
+                         unheld, MsSince(t0)));
     for (const std::string& row : rows) LOG_INFO(row);
 }
 } // namespace

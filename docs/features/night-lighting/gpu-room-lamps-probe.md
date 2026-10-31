@@ -11,7 +11,7 @@ or written.
 |---|---|
 | Availability | Developer build only, not released |
 | Default | Off |
-| Menu | Developer > Compare lighting paths > Check indoor lamps against the GPU law (with Lamp lighting: Instant) |
+| Menu | Developer > Compare lighting paths > Compare indoor lamps with GPU (with Lamp lighting: Instant) |
 | Configuration | `roomLampProbe` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
 | Source | [`features/outdoor_delta.cpp`](../../../features/outdoor_delta.cpp) (`ProbeStart`, `ProbeEnd`), [`features/outdoor_delta_model.h`](../../../features/outdoor_delta_model.h) (`ProbeClassify`), [`features/rt_outdoor_lamps.cpp`](../../../features/rt_outdoor_lamps.cpp) (`WorldLaw`) |
 
@@ -35,30 +35,37 @@ give.
    lamps registered outdoors). Each texel the solve or the law lights falls in one class: within 2/255, dark in the
    solve (a test the law has no shadow for), lit only by the solve, or another strength (the median ratio solve / law is
    logged).
-4. The capture is dropped.
+4. The same texels are tested against the occluders the GPU path would use (`LevelLightShare::ExportLotProxy`, built with
+   the ceilings left open over the rooms, as the earlier GPU room lamps build had them): one ray from the lamp's centre to
+   the texel, 2 cm off its surface. The log gives the share within 2/255 with that hard shadow, the texels dark in both,
+   dark in the solve only (the GPU would light them) and shaded by the occluders only (the GPU would darken them). At most
+   about 200,000 rays a solve: on a larger one every n-th texel is tested.
+5. The capture is dropped.
 
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| Check indoor lamps against the GPU law | `roomLampProbe` | bool | off | | Developer only, with Lamp lighting: Instant. Compares each room solve of the active lot with the GPU's lamp law and logs the result |
+| Compare indoor lamps with GPU | `roomLampProbe` | bool | off | | Developer only, with Lamp lighting: Instant. Compares each room solve of the active lot with the GPU's lamp law and logs the result |
 
 ## Limitations
 
-- No shadow: "dark in the solve" counts every texel a test of the solve shades (walls, floors, Apex's opening tests). The
-  next step compares those texels with the occluders the GPU would use.
+- The occluder test is a hard shadow from the lamp's centre; the GPU path takes the share of the lamp's 0.15 m ball, so
+  texels at a shadow's rim can differ. The occluders are read again only when the lot's geometry key changes.
 - Only solves on the light tree thread with Lamp lighting: Instant (the hooks of Quick outdoor lamp edits run only then);
-  quick passes and rooms with a light whose evaluation is not wrapped are not probed (logged once each).
-- Each probe costs about one model evaluation per texel and lamp on the light tree thread (the log gives its time).
+  quick passes and rooms with a light whose evaluation is not wrapped are not probed (logged).
+- Each probe costs one model evaluation per texel and lamp, and the rays, on the light tree thread (the log gives its time).
 - At most 600 log lines a session.
 
 ## Technical reference
 
 - **Logs** (`[RoomLampProbe]`): `Story S room R class C (roofed|roofless): N texels, K lot lamps of L lights listed;
-  their light P% within 2/255 of the GPU law unshadowed (M texels lit by either); light no part holds at U texels; T ms`,
+  their light within 2/255 of the GPU law: P% unshadowed (M texels lit by either), Q% with the occluders (K texels tested);
+  light no part holds at U texels; T ms`,
   then per lamp `lamp A type T xM (registered in room R): N texels lit, a% within 2/255, b% dark in the solve, c% lit only
-  by the solve, d% other strength (median solve/law r); darkest miss: ...; largest other: ...` with the texel's position,
-  normal and distance to the lamp. `not probed (...)` and `not compared (...)` give why a solve was left out.
+  by the solve, d% other strength (median solve/law r); darkest miss: ...; largest other: ...; with the occluders (K texels
+  tested): e% within 2/255, f% dark in both, g% dark in the solve only, h% shaded by the occluders only` with the texel's
+  position, normal and distance to the lamp. `not probed (...)` and `not compared (...)` give why a solve was left out.
 - **Sample layout**: the batch sample's position at +0x00 and normal at +0x10, world space, as `ExportRoom0` reads them.
 - **Test**: `tools/outdoor_delta_test` checks `ProbeClassify`'s five classes.
 

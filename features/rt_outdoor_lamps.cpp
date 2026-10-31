@@ -2511,6 +2511,11 @@ void BuildProxy(uintptr_t tracker, const void* room0) {
 }
 } // namespace
 
+uintptr_t TrackerOf(const void* room) {
+    int story = -99, id = -1, cls = -1;
+    uintptr_t mgr = 0;
+    return room ? TrackerOfRoom(room, story, id, cls, mgr) : 0;
+}
 bool CoversRoom(const void* room) {
     if (!g_on.load(std::memory_order_relaxed) || !room) return false;
     int story = -99, id = -1, cls = -1;

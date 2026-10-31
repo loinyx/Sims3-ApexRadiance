@@ -3685,7 +3685,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         if (g_lampMode == kLampInstant && ApexUi::SwitchRow("Check quick lamp edits", &g_outdoorDeltaCheck,
                                                             "Solves those floors in full again later and logs the largest texel difference", false))
             NotifySettingChanged();
-        if (g_lampMode == kLampInstant && ApexUi::SwitchRow("Check indoor lamps against the GPU law", &g_roomLampProbe,
+        if (g_lampMode == kLampInstant && ApexUi::SwitchRow("Compare indoor lamps with GPU", &g_roomLampProbe,
                                                             "Logs how each lamp's light in the active lot's rooms differs from what the GPU would draw", false))
             NotifySettingChanged();
         if (ApexUi::Checkbox("Smooth the ground light maps on the GPU (A/B: off = CPU worker)", &g_smoothMapsGpu)) NotifySettingChanged();
