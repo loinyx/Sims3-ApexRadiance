@@ -168,6 +168,17 @@ static void LotBuildChecks(int reps) {
     all.lamps.clear();
     Run<GroundShadow::ShadeJob, GroundShadow::Grid, GroundShadow::Lamp, GroundShadow::Wall>(all, none, den, ms);
     Check(std::all_of(none.begin(), none.end(), [](uint8_t v) { return v == 255; }), "lot build: with every lamp in the total only, nothing is shaded");
+    // a lamp head inside a crown's ellipsoid: that crown casts no shade for it; the head just outside it: it does
+    for (const float off : {2.6f, 4.5f}) {
+        GroundShadow::Lamp L = s.lamps[0];
+        const Canopy::Ellipsoid e{L.x - off, L.y - 0.4f, L.z, 3.9f, 1.8f, 3.9f, 1.0f, 0.0f, Canopy::LadFor(3.6f)};
+        GroundShadow::ShadeJob job;
+        job.Init(s.grid, {L}, {}, {}, {e});
+        job.Step([] { return true; });
+        const auto& r = job.Result();
+        const bool lit = std::all_of(r.begin(), r.end(), [](uint8_t v) { return v == 255; });
+        Check(off < 3.0f ? lit : !lit, off < 3.0f ? "crown: a head inside it is not shaded by it" : "crown: a head outside it is shaded by it");
+    }
 }
 
 // ---- The chunk texture (GroundShadow::ChunkFull, ChunkUpdate)

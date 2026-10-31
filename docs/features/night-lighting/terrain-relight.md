@@ -373,10 +373,22 @@ whole chunks on the CPU:
 - **Release.** Still for 1.5 s (`kQuietMs`) with no drag engaged (`DragLite::Engaged`), the lamp leaves the exclusion
   list and one local relight bakes it where it stays; each chunk under it keeps the stamp until the build that shows its
   re-rendered map (a re-render that leaves the map the same counts; 3 s at most, `kGateMaxMs`). A refused relight keeps
-  the stamp and is tried again 1.5 s later. Dragged again while it returns, the lamp enters again from there.
+  the stamp and is tried again 1.5 s later. Dragged again while it returns, the lamp enters again from there: a chunk the
+  return's relight has not re-rendered yet (no lamp in its map) takes the stamp at once, and one re-rendered since (the
+  lamp baked where it was let go) waits for the new relight, queued over the whole rect (the bake reads the exclusion
+  list when it runs; the re-render notices posted since the last draw are read first, `LightmapSmooth::ChunkVersions`). If
+  that relight is refused, the return goes on as it was (still drawn where its relight has not landed) and the next moving
+  frame tries again. Before, every chunk waited, and those still without the lamp drew neither stamp nor bake for about
+  0.5 s (`tools/terrain_stamp_test/state_check.cpp` S8b).
+- **The list.** The lamps Real-time outdoor lamps draws on the active lot's room-0 maps, and the active lot's lamps the
+  terrain bake takes that no room-0 list holds now (a copy held from the catalog, a post over the house; read from the
+  lamp list, checked to be still that lot's lamp of that type). Before, such a lamp went back to the bake after 1 s out
+  of the list and was never followed again: each later re-render of its chunk baked it wherever it stood then, and the
+  light stayed there while it moved on.
 - **Out of the list.** A lamp picked up again is out of the list for a few frames and keeps its state; out of it for
-  1 s (`kGoneMs`: another lot, deleted) it returns to the bake where it was last seen, as at a release. With the GPU
-  smoothing off every lamp is back in the bake at once; a new world forgets them all (its bake takes every lamp).
+  1 s (`kGoneMs`: another lot, deleted) it returns to the bake where it was last seen, as at a release (developer log:
+  where it was last seen and where the bake takes it now). With the GPU smoothing off every lamp is back in the bake at
+  once; a new world forgets them all (its bake takes every lamp).
 
 Each chunk changes between the bake and the stamp in the build that first shows its re-rendered map, so the lamp is
 never drawn twice or missing for more than a few frames.

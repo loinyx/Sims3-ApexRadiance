@@ -1813,6 +1813,7 @@ void DevTesterTab() {
         TesterSwitch("Dither the light maps", "A fine grain instead of 8-bit bands", TesterToggles::smoothDither, Effect::None);
         TesterSwitch("Smooth light map reads", "Room light maps are read as a smooth curve instead of texel steps", TesterToggles::smoothBSpline, Effect::None);
         TesterSwitch("Soft ground shade", "The shade of walls on lot ground has soft edges, without texel steps", TesterToggles::groundSoftEdges, Effect::None);
+        TesterSwitch("Ground shade on the GPU", "The shade of walls on the ground follows a dragged lamp at once; off, it is built on a worker thread", TesterToggles::groundShadeGpu, Effect::None);
     });
     DevCard("TesterDrag", IconId::Gauge, "While a lamp is dragged", "Each measure that keeps a drag smooth", night, [] {
         TesterSwitch("Classic: relight only after release", "A dragged lamp's rooms are solved once, after it is let go", TesterToggles::classicAfterRelease, Effect::None);

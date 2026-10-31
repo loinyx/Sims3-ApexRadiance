@@ -109,7 +109,8 @@ Three parts measure how the light updates on screen after a lamp edit, all insid
   - A grid of 6 × 4 over the screen (x 10, 26, 42, 58, 74, 90%; y 18, 38, 58, 78%, above the game's bottom bar), so a
     recording started from the menu still measures the house.
   - 17 ground points (`GroundProfile::WatchPoints`, [`features/ground_profile.cpp`](../../../features/ground_profile.cpp)):
-    at the first frame with a camera and listed lamps, the active lot's lamp nearest the mouse's ground point is chosen,
+    at the first frame with a camera and listed lamps, the active lot's lamp being dragged (`TerrainStamps::MovedWithin`
+    2 s), else the one nearest the mouse's ground point, is chosen,
     and the points lie every metre from 4 m behind it to 12 m past it on the line towards that point, at its lot's
     ground height, following the lamp as it moves. Their pixels come from the post-scene camera vote, asked for while the
     recording runs (`PostScene::WantCamera`); a point off screen reads pixel (0, 0).

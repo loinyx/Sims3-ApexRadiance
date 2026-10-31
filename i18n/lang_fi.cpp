@@ -2416,6 +2416,8 @@ const I18n::Pair kPairs[] = {
     {"Room light maps are read as a smooth curve instead of texel steps", "Huoneiden valokartat luetaan pehmeänä käyränä texelportaiden sijaan"},
     {"Soft ground shade", "Pehmeä varjo maassa"},
     {"The shade of walls on lot ground has soft edges, without texel steps", "Seinien varjolla tontin maassa on pehmeät reunat ilman texelportaita"},
+    {"Ground shade on the GPU", "Maan varjo GPU:lla"},
+    {"The shade of walls on the ground follows a dragged lamp at once; off, it is built on a worker thread", "Seinien varjo maassa seuraa vedettyä lamppua heti; pois päältä se lasketaan työsäikeessä"},
     {"Lamps through arches on indoor objects", "Lamput kaarien läpi sisäesineisiin"},
     {"An object inside an arcade keeps a garden lamp's dim light", "Pylväikön sisällä oleva esine säilyttää puutarhalampun himmeän valon"},
     {"Background and lamp light inside rooms", "Tausta- ja lampunvalo huoneissa"},

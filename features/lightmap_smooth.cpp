@@ -1982,6 +1982,7 @@ void BumpStamps(const float rect[4]) {
     g_changeEpoch++;
 }
 std::vector<std::pair<Key, uint64_t>> ChunkVersions(const float rect[4]) {
+    if (g_gpuActive) DrainNotices(); // re-renders posted since the last draw count before a gate is read (render thread)
     std::vector<std::pair<Key, uint64_t>> out;
     for (const auto& [k, e] : g_entries)
         if (e.src && ChunkTouches(k, rect)) out.emplace_back(k, e.rver);

@@ -2416,6 +2416,8 @@ const I18n::Pair kPairs[] = {
     {"Room light maps are read as a smooth curve instead of texel steps", "房间光照贴图以平滑曲线读取，而不是纹素台阶"},
     {"Soft ground shade", "柔和的地面阴影"},
     {"The shade of walls on lot ground has soft edges, without texel steps", "墙在地块地面上的阴影边缘柔和，没有纹素台阶"},
+    {"Ground shade on the GPU", "在 GPU 上生成地面阴影"},
+    {"The shade of walls on the ground follows a dragged lamp at once; off, it is built on a worker thread", "墙在地面上的阴影立即跟随被拖动的灯；关闭时在工作线程中生成"},
     {"Lamps through arches on indoor objects", "穿过拱门的灯光照到室内物体"},
     {"An object inside an arcade keeps a garden lamp's dim light", "拱廊内的物体保留花园灯的微弱光线"},
     {"Background and lamp light inside rooms", "房间内的背景光和灯光"},

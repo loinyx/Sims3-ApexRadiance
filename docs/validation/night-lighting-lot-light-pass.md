@@ -19,6 +19,7 @@ It must:
 | [`tools/ground_shade_test`](../../tools/ground_shade_test/check.cpp) | `ground_lamp_shadow.h`: the lot build timed on a synthetic 40 m lot (8 lamps, 20 walls, soft and hard edges, turned and not) and, with `-Reference <revision>`, compared bit for bit with that revision's header; `ChunkUpdate` against `ChunkFull` after random lot changes; the byte rounding against `lround` over the range; a lamp in the total only (a moving lamp) never darkens a texel against it tested or left out, and with every lamp moving nothing is shaded | `run.ps1 [-Reference <revision>]` | None (CPU) |
 | [`shade_lamps_fixture.cpp`](../../tools/terrain_lighting_test/shade_lamps_fixture.cpp) | The real `ShadeLamps`, `MovedApart` and `DragLite::LampMoving`: a moving lamp first in the total at its place now, a still or let-go one tested at its place now, the list within 5 cm and nothing excluded give the lamps at rest bit for bit, past 32 lamps the tested ones are those at rest less the moving one, the 96-lamp cut keeps the moving ones; the let go ends a move and placement steps do not bring it back | `tools/terrain_lighting_test/run_shade_lamps_checks.ps1` | None |
 | `tools/terrain_lighting_test/resource_paths_fixture.cpp` | UV fallback and resource restoration | `run_resource_checks.ps1` | Native D3D9 GPU |
+| [`tools/ground_shade_gpu_test`](../../tools/ground_shade_gpu_test/check.cpp) | The production GPU path (`ground_shade_gpu.cpp`, `shaders/ground_shade_hlsl.h`) against `ground_lamp_shadow.h`: per lot the bytes of `ShadeJob::Result`, the stamp weight, the lowest byte and the occlusion query, the lot mask against `MakeMaskTexture`'s texels (rooms, soft room edges, outside); scenes: the 40 m lot turned and not, soft and hard, mesh fences and crowns, the edge rules (a sconce on its own wall, a raised foundation, an upper story, walls over the head and under the ground, a balcony lamp), the *Shadow softness* Tester switch off, an 88 m stress lot, a lot whose walls shade nothing. Chunks: the whole chunk from 15 lots against `ChunkFull` at every level, 39 changed-box updates (a lot moved, new, or shading nothing) against the whole chunk made again and `ChunkFull`, bit for bit at every level, the chunk from the GPU's own lot textures, both chunk formats (L8 and the A8R8G8B8 fallback), and the chunk read as the terrain and road copies read it (red, CLAMP, LINEAR with LINEAR mips at lods 0 to 10) against the CPU's L8 texture | `run.ps1` (DXVK: the game's `d3d9.dll` next to `ground_shade_gpu.exe` in the output folder) | D3D9 GPU |
 
 ## Latest results
 
@@ -28,6 +29,10 @@ an FPS gain, complete climate coverage or resolution of texture allocation stall
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-10-30 | uncommitted on `6db9dfb` (lamp shade on the GPU) | `tools/ground_shade_gpu_test` (`run.ps1`) | 117 checks, 0 failures. Lots: the bytes equal `ShadeJob::Result` but for 3 texels of 1/255 over the 13 scenes (1 on the soft 40 m lot, 2 on the soft stress lot); stamp weight within 4.5e-7 relative on the 40 m lots, 2e-4 on the stress lot (GPU square roots and divisions are not correctly rounded; the bytes are not affected); lowest byte and occlusion query right on every scene, 0 on the lot that shades nothing; masks bit for bit. Chunks: the whole chunk and 39 changed-box updates bit for bit at all 11 levels, against the whole chunk made again and `ChunkFull`, in L8 and in A8R8G8B8; the chunk from the GPU's own lot textures equal to `ChunkFull` of the CPU's shades; the readers' sampling equal to the CPU's L8 texture (0 difference). Timing: GPU 0.05 to 0.07 ms a 40 m lot, 0.24 to 0.28 ms the 88 m stress lot (CPU `ShadeJob` 2 to 5.8 ms and 31 to 44 ms), CPU setup 0.01 to 0.25 ms; a changed box 0.28 to 0.39 ms with the CPU's wait, the whole chunk 0.16 to 0.24 ms (CPU `ChunkFull` 13 ms). Shaders: `ShadePS` 2441 slots (190 ms to compile, without optimisation), `ChunkPS` 528 | Native D3D9, RTX 4070 Ti SUPER |
+| 2026-10-30 | uncommitted on `6db9dfb` | `tools/ground_shade_gpu_test` with the game's DXVK `d3d9.dll` | 117 checks, 0 failures; the same differences; GPU 0.05 to 0.07 ms a 40 m lot, 0.23 to 0.27 ms the stress lot; a changed box 0.41 ms (L8) and 0.75 ms (A8R8G8B8) with the wait | DXVK, RTX 4070 Ti SUPER |
+| 2026-10-30 | uncommitted on `6db9dfb` | `tools/ground_shade_test` (`run.ps1 -Reference HEAD -Reps 3`) after `LampBox`, `WallBox` and `CrownBox` moved out of `ShadeJob`; `run_shade_lamps_checks.ps1` with the GPU path's `ShadeLamps`; `run_stamped_checks.ps1`, `run_dispatch_checks.ps1`, `run_chunk_map_checks.ps1` | 254 checks, 0 failures (the lot build bit for bit with `HEAD`'s header, 2.0 to 3.1 ms); 20 shade lamp assertions (the GPU path keeps a moving lamp tested at its place now, the total as at rest), 7 stamped, 194 dispatch, 31 chunk map: 0 failures | MSVC x86 |
+| 2026-10-30 | uncommitted on `6db9dfb` | Standard and Public Release x86 builds; `tools/i18n_check`; `perl tools/menu_audit.pl .` | Both build with no warnings; i18n OK (2440 keys, 21 languages); menu audit: no new finding | MSVC |
 | 2026-10-30 | `38a1c5e` (released as 2.18.3, tag `v2.18.3` on merge `b944d26`, ASI SHA-256 `D2934864D337521EF860617309FA340B12BF37055FC5D38BC3A6E371B2C99D4A`; later commits documentation only) | Standard Release x86 build; Public flavour build; CI build and public text on PR 54; `tools/i18n_check`; `perl tools/menu_audit.pl .`; developer builds of the same code in game | Builds with no errors; CI passed; i18n OK (21 languages, 2436 keys); menu audit: no new findings. In game: sidewalks and lot-edge grass steady with the camera at night in the rain, no cut at a lot edge beside a low wall | In game, backend not recorded |
 | 2026-10-30 | `5537a83` | `tools/ground_shade_test` with the chunk shade taken as the most light a lot's walls take over the most light a lot sees (a lot next door that does not know the wall, a wall both lots know, a faint lamp) | 244 passed, 0 failed; a chunk made again over a changed box gives the whole chunk's bytes | MSVC x86 |
 | 2026-10-29 | `06a3258` | `tools/lighting_prepare_test` with the overlapped-end rule and `Wall::pass` (built as a DLL) | 36 geometry cases exactly equal to the reference gap search; 16 map slots and 144 wall blur cases pass | CPU, x86 /O2 |
@@ -68,6 +73,24 @@ at ps_2_0 it had no c32 and failed since the lot shade's mask rows moved there.
    the wall (lot UV alignment).
 7. Daytime in Build mode with lamps lit. **Expected:** lot and world grass show the same subdued lamp term across the
    border.
+8. Lamp shade on the GPU (not checked in game yet). Developer status of *Walls shade lamps on lot ground*: **Expected:**
+   *GPU: N lot builds ...* and the log line *Lamp shade on lot ground: built on the GPU (chunk shade L8)*; on a device
+   without the formats, *GPU: off (reason)* and the shade as before.
+9. Drag a garden post along a free-standing wall, a fence with a gate and a tree, Instant lamp lighting. **Expected:** the
+   wall's, fence's and crown's shadows follow the lamp every frame, on the lot and on the world grass past its edge, with
+   no seam at the lot's edge; at rest the same picture as Developer > Tester > *Ground shade on the GPU* off (A/B
+   screenshots of the same view); frame time while dragging no worse than with the switch off.
+10. The same at rest in each variant that reads the shade, switching weather and season mid-game without moving the camera.
+    **Expected:** the shade unchanged by each switch, the same as with the switch off:
+    - world grass around a lot: smoothed maps on and off (plain and smoothed terrain copies), daylight dusk (daylight
+      range copy), multi-pass terrain, dry, wet (light rain), and snow at each level (no snow, light, deep);
+    - heavy rain on the terrain variants that use every sampler: no wall shade on the world grass on either path;
+    - the lot pass and its snowy and melting passes (lot grass under fresh snow, melting snow);
+    - story-0 paths and decks, and snow on floors (`FloorShadeBind`);
+    - roads and sidewalks next to a shaded lot, with and without snow on sidewalks;
+    - fences, curbs and stairs (instanced groups) within 1 m of the ground.
+11. Alt-tab out of full screen, or change the resolution, with shaded lots on screen. **Expected:** every lot's shade back
+    within a second (the masks and shades are made again after the reset), no white or black ground.
 
 ## Confirmed in game
 

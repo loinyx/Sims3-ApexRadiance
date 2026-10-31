@@ -2416,6 +2416,8 @@ const I18n::Pair kPairs[] = {
     {"Room light maps are read as a smooth curve instead of texel steps", "Οι χάρτες φωτός των δωματίων διαβάζονται ως ομαλή καμπύλη αντί για σκαλοπάτια texel"},
     {"Soft ground shade", "Απαλή σκιά στο έδαφος"},
     {"The shade of walls on lot ground has soft edges, without texel steps", "Η σκιά των τοίχων στο έδαφος του οικοπέδου έχει απαλές άκρες, χωρίς σκαλοπάτια texel"},
+    {"Ground shade on the GPU", "Σκιά εδάφους στη GPU"},
+    {"The shade of walls on the ground follows a dragged lamp at once; off, it is built on a worker thread", "Η σκιά των τοίχων στο έδαφος ακολουθεί αμέσως μια λάμπα που σύρεται· όταν είναι ανενεργό, υπολογίζεται σε νήμα εργασίας"},
     {"Lamps through arches on indoor objects", "Λάμπες μέσα από καμάρες σε εσωτερικά αντικείμενα"},
     {"An object inside an arcade keeps a garden lamp's dim light", "Ένα αντικείμενο μέσα σε στοά κρατά το αμυδρό φως μιας λάμπας κήπου"},
     {"Background and lamp light inside rooms", "Φως φόντου και λαμπτήρων στα δωμάτια"},

@@ -2416,6 +2416,8 @@ const I18n::Pair kPairs[] = {
     {"Room light maps are read as a smooth curve instead of texel steps", "A szobák fénytérképei sima görbeként olvasódnak texellépcsők helyett"},
     {"Soft ground shade", "Lágy talajárnyék"},
     {"The shade of walls on lot ground has soft edges, without texel steps", "A falak árnyéka a telek talaján lágy szélű, texellépcsők nélkül"},
+    {"Ground shade on the GPU", "Talajárnyék a GPU-n"},
+    {"The shade of walls on the ground follows a dragged lamp at once; off, it is built on a worker thread", "A falak árnyéka a talajon azonnal követi a húzott lámpát; kikapcsolva egy munkaszálon készül"},
     {"Lamps through arches on indoor objects", "Lámpák íveken át a belső tárgyakon"},
     {"An object inside an arcade keeps a garden lamp's dim light", "Egy árkád belsejében álló tárgy megtartja a kerti lámpa halvány fényét"},
     {"Background and lamp light inside rooms", "Háttér- és lámpafény a szobákban"},

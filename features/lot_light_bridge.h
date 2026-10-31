@@ -52,6 +52,8 @@ bool LotGroundY(uint64_t lot, float& y);
 // Developer capture (GroundProfile, render thread): the lot holding world (x, z) (0 = none) and the ground gains now
 uint64_t LotAt(float x, float z);
 std::string GainText();
+// Developer capture (GroundProfile): the walls' shade on the ground around a lamp at pos, lot by lot (render thread)
+std::string ShadeProbeText(const float pos[3]);
 // What differs in the bake between two snapshots: only on lots settled in `now` that were already in `baked` (lots that
 // streamed in later were never baked, and streaming never rebuilds). Lamps are matched by type and place (5 cm), not by
 // pointer. Light changes under 5 % per channel are noise; animated lamps are counted apart and never make Any() true.

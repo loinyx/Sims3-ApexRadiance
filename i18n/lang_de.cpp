@@ -2416,6 +2416,8 @@ const I18n::Pair kPairs[] = {
     {"Room light maps are read as a smooth curve instead of texel steps", "Die Lichtkarten der Räume werden als weiche Kurve statt in Texelstufen gelesen"},
     {"Soft ground shade", "Weicher Bodenschatten"},
     {"The shade of walls on lot ground has soft edges, without texel steps", "Der Schatten der Wände auf dem Grundstücksboden hat weiche Kanten ohne Texelstufen"},
+    {"Ground shade on the GPU", "Bodenschatten auf der GPU"},
+    {"The shade of walls on the ground follows a dragged lamp at once; off, it is built on a worker thread", "Der Schatten der Wände auf dem Boden folgt einer gezogenen Lampe sofort; aus: er wird in einem Worker-Thread berechnet"},
     {"Lamps through arches on indoor objects", "Lampen durch Bögen auf Innenobjekten"},
     {"An object inside an arcade keeps a garden lamp's dim light", "Ein Objekt in einer Arkade behält das schwache Licht einer Gartenlampe"},
     {"Background and lamp light inside rooms", "Hintergrund- und Lampenlicht in Räumen"},

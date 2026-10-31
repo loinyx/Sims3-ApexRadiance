@@ -1,5 +1,5 @@
 param([string]$Repo = (Join-Path $PSScriptRoot '../..'), [string]$OutDir = (Join-Path $env:TEMP 'ApexShadeLampTests'))
-# The production ShadeLamps and MovedApart (features/lot_light_bridge.cpp) and LampMoving (features/drag_lite.cpp) with a
+# The production ShadeLamps, MovedApart and RefusalHolds (features/lot_light_bridge.cpp) and LampMoving (features/drag_lite.cpp) with a
 # fake lamp list, fake lights and a fake clock (shade_lamps_fixture.cpp). Read-only: writes only the generated source and the
 # compiler outputs to -OutDir.
 $ErrorActionPreference = 'Stop'
@@ -23,6 +23,8 @@ $production = @(
     (Read-Line $bridge 'constexpr float kMoveTol = '),
     (Read-Line $bridge 'constexpr size_t kMaxOtherLamps = '),
     (Read-Line $bridge 'constexpr float kShadeMargin = '),
+    (Read-Line $bridge 'DWORD g_classicHeldAt = '),
+    (Read-Function $bridge 'bool RefusalHolds(uint64_t& refusedKey, uint64_t occ) {'),
     (Read-Function $bridge 'bool MovedApart(const float* a, const float* b) {'),
     (Read-Function $bridge 'std::vector<GroundShadow::Lamp> ShadeLamps(')
 ) -join "`n"

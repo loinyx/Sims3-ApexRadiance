@@ -153,7 +153,7 @@ class Engine {
     static bool ReadFloat4(IDirect3DDevice9* dev, IDirect3DTexture9* t, int w, int h, std::vector<float>& out);
 
     // The state of the device around a series of passes (render targets, depth, every state a state block holds)
-    void Begin(IDirect3DDevice9* dev);
+    bool Begin(IDirect3DDevice9* dev); // false: no state block could be made, nothing was changed (End is not called)
     void End(IDirect3DDevice9* dev);
 
     const Stats& GetStats() const { return stats_; }

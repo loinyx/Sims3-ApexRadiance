@@ -2416,6 +2416,8 @@ const I18n::Pair kPairs[] = {
     {"Room light maps are read as a smooth curve instead of texel steps", "Lichtkaarten van kamers worden als zachte curve gelezen in plaats van texeltreden"},
     {"Soft ground shade", "Zachte grondschaduw"},
     {"The shade of walls on lot ground has soft edges, without texel steps", "De schaduw van muren op de kavelgrond heeft zachte randen, zonder texeltreden"},
+    {"Ground shade on the GPU", "Grondschaduw op de GPU"},
+    {"The shade of walls on the ground follows a dragged lamp at once; off, it is built on a worker thread", "De schaduw van muren op de grond volgt een versleepte lamp meteen; uit: hij wordt in een werkthread gemaakt"},
     {"Lamps through arches on indoor objects", "Lampen door bogen op binnenobjecten"},
     {"An object inside an arcade keeps a garden lamp's dim light", "Een object in een arcade houdt het zwakke licht van een tuinlamp"},
     {"Background and lamp light inside rooms", "Achtergrond- en lamplicht in kamers"},

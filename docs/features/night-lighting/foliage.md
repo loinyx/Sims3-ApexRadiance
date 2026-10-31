@@ -183,10 +183,15 @@ daytime F8 (`2026-10-20 21-18-03`) shows a house's shadow on the lawn and none u
 not draw into the shadow map, so no tree can shade another through it; receiving it gives trees the shadows of houses
 and other casters only. UNVERIFIED until the shadow pass log above.
 
-**Crown shade on lot ground.** Tree and bush crowns seen in those draws are recorded as ellipsoids (merged by place, kept
-while near the camera, starting above a tree's clear trunk). With *Walls shade lamp light near the ground*, the lot
-ground's lamp shade mask treats them as porous occluders: a ray through a crown keeps exp(-k u s) of its light, so the
-shadow is soft and partial. The mask is built off the render thread ([lot-light-pass.md](lot-light-pass.md)).
+**Crown shade on lot ground.** Tree and bush crowns seen in those draws are recorded as ellipsoids (kept while near the
+camera, starting above a tree's clear trunk). A crown within 0.5 m across, 2.5 m up or down and 15% of the size of one
+already recorded is the same plant and keeps the higher place: the camera's drift moves a plant's place up to 0.35 m
+across and by about half-metre steps in height, and at 0.25 m in 3D one plant was recorded again and again (7962 crowns
+for 821 places), each copy taking the light once more. With *Walls shade lamp light near the ground*, the lot ground's
+lamp shade mask treats them as porous occluders: a ray through a crown keeps exp(-k u s) of its light, so the shadow is
+soft and partial. A crown whose ellipsoid holds a lamp's head casts no shade for that lamp (`Canopy::ShadowBox`): a lamp
+is never inside a plant's leaves, and a post beside a bush under a wide crown shape lost its ground light all round. The
+mask is built on the GPU, or off the render thread on the CPU ([lot-light-pass.md](lot-light-pass.md)).
 
 ## Settings
 

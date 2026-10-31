@@ -142,7 +142,11 @@ smoothed copy's (`LightmapSmooth::SampleChunk`, both read back once a frame per 
 the nearest texel of the lot's story-0 floor map (packed and base, from the kept solve), and what the lamps within 25 m
 should give there by the terrain bake's law (with cones) and by the room solve's law (once). Then each nearby lamp's bake
 state (taken, colour, rect, cones, ever baked, excluded, stamp state), the chunks on the line with their versions, the
-law constants and the ground gains. Nothing is listed without an active lot (or with Lamp lighting on Classic).
+law constants and the ground gains. Then, for every lamp post of the lot and the target (`LotLightBridge::ShadeProbeText`),
+each lot whose walls' shade grid holds it: whether the lamp is tested against the walls, in the total only or absent,
+the crowns within 4 m (and how many have another within 1 m), and a CPU build of the lot's inputs now at 16 points 1 m
+and 2.5 m around it, each with the walls and crowns that cut the lamp's light there. Nothing is listed without an active
+lot (or with Lamp lighting on Classic).
 
 ### No automatic captures
 

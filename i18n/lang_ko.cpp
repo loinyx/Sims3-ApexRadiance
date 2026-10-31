@@ -2416,6 +2416,8 @@ const I18n::Pair kPairs[] = {
     {"Room light maps are read as a smooth curve instead of texel steps", "방의 라이트맵을 텍셀 계단 대신 부드러운 곡선으로 읽습니다"},
     {"Soft ground shade", "부드러운 지면 그림자"},
     {"The shade of walls on lot ground has soft edges, without texel steps", "부지 지면에 드리운 벽 그림자가 텍셀 계단 없이 부드러운 가장자리를 가집니다"},
+    {"Ground shade on the GPU", "GPU 지면 그림자"},
+    {"The shade of walls on the ground follows a dragged lamp at once; off, it is built on a worker thread", "지면에 드리운 벽 그림자가 드래그하는 램프를 즉시 따라갑니다. 끄면 작업 스레드에서 만들어집니다"},
     {"Lamps through arches on indoor objects", "아치를 통한 램프 빛을 실내 오브젝트에"},
     {"An object inside an arcade keeps a garden lamp's dim light", "아케이드 안의 오브젝트가 정원 램프의 희미한 빛을 유지합니다"},
     {"Background and lamp light inside rooms", "방 안의 배경광과 램프 빛"},

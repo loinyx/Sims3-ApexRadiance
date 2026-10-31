@@ -1005,6 +1005,8 @@ struct BakeLampW {
 
 } // namespace
 
+RtLampGpu::DeviceCalls DeviceCallsOfGame() { return GameCalls(); }
+
 bool LowLampLift() { return TerrainBakeRule::LowLampLift(); }
 void SetLowLampLift(bool on) { TerrainBakeRule::g_lowLampLift.store(on, std::memory_order_relaxed); }
 long LowLampLifted() { return g_lowLampLifted.load(std::memory_order_relaxed); }
@@ -1600,6 +1602,14 @@ void Frame(IDirect3DDevice9* dev) {
     // every lamp listed here, drawn on every story or not: its terrain stamp needs no room map (a picked-up lamp drawn
     // only on the upper stories kept the CPU terrain relight for its whole drag)
     for (const GpuLamp& g : lamps) g_stampLights.push_back(g.light);
+    // and the lot's lamps the terrain bake takes that no room-0 list holds now (a copy held from the catalog, a post over the
+    // house): out of the stamps' list for a second they went back to the bake, and every later re-render of their chunk baked
+    // them wherever they stood then, the light left there while they moved on
+    for (const LotLightBridge::BakeLamp& b : LotLightBridge::CurrentBakeLamps().lamps) {
+        if (b.lot != g_lotId || !b.baked || !b.id || std::find(g_stampLights.begin(), g_stampLights.end(), b.id) != g_stampLights.end()) continue;
+        LampRead r; // (the list is read every 20 frames: still that lot's lamp of that type)
+        if (ReadLamp(b.id, r) && r.f.lot == b.lot && r.f.type == b.type) g_stampLights.push_back(b.id);
+    }
     std::vector<uint64_t> bakeKeys[8];
     for (int S = 0; S <= 7; S++) {
         if (!rooms[S]) continue;
@@ -1727,7 +1737,14 @@ void Frame(IDirect3DDevice9* dev) {
                                      stories(was), stories(m)));
         }
         for (const auto& [L, m] : s_drawn)
-            if (!now.count(L) && LogAllowed()) LOG_INFO(std::format("[RtOutdoorLamps] GPU lamp {:08X}: drawn on stories {} -> none (switched off, or out of the lists)", L, stories(m)));
+            if (!now.count(L) && LogAllowed()) {
+                LampRead r;
+                const bool read = ReadLamp(L, r);
+                LOG_INFO(std::format("[RtOutdoorLamps] GPU lamp {:08X}: drawn on stories {} -> none (switched off, or out of the lists){}", L, stories(m),
+                                     read ? std::format("; now room {}, flags {:02X}, lot {:016X}, at ({:.2f} {:.2f} {:.2f}), {}", r.f.room, r.f.flags, r.f.lot, r.pos[0], r.pos[1],
+                                                        r.pos[2], InTerrainBake(r) ? "in the terrain bake" : "out of the terrain bake")
+                                          : std::string("; unreadable")));
+            }
         if (sw && !now.count(sw) && LogAllowed())
             LOG_INFO(std::format("[RtOutdoorLamps] GPU lamp {:08X} switched on: not in any story's list yet (its stories gather it again)", sw));
         s_drawn.swap(now);
@@ -2033,13 +2050,16 @@ void Frame(IDirect3DDevice9* dev) {
         }
         work += units;
         if (!begun) {
+            if (!g_eng->Begin(dev)) { // (no state block: nothing drawn this frame, the stories stay dirty)
+                left++;
+                break;
+            }
             if (!g_qDisjoint && SUCCEEDED(dev->CreateQuery(D3DQUERYTYPE_TIMESTAMPDISJOINT, nullptr))) {
                 dev->CreateQuery(D3DQUERYTYPE_TIMESTAMPDISJOINT, &g_qDisjoint), dev->CreateQuery(D3DQUERYTYPE_TIMESTAMPFREQ, &g_qFreq);
                 dev->CreateQuery(D3DQUERYTYPE_TIMESTAMP, &g_qBegin), dev->CreateQuery(D3DQUERYTYPE_TIMESTAMP, &g_qEnd);
             }
             timing = !g_qPending && g_qDisjoint && g_qFreq && g_qBegin && g_qEnd;
             if (timing) g_qDisjoint->Issue(D3DISSUE_BEGIN), g_qBegin->Issue(D3DISSUE_END);
-            g_eng->Begin(dev);
             begun = true;
         }
         if (!s.copy &&

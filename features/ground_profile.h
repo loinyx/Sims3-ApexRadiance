@@ -16,8 +16,9 @@ namespace GroundProfile {
 void Write(IDirect3DDevice9* dev, POINT pixel, unsigned bbWidth, unsigned bbHeight, const std::filesystem::path& folder, std::ostream& out);
 
 // During a recording (ScreenWatch reads their screen pixels with its own): kWatchPoints ground points at t = -4 .. +12 m
-// along the line from the lot lamp nearest the mouse's ground point (when the recording starts) to that point, following
-// the lamp as it moves; each frame also the lamp's place, the versions of the chunk under it and its stamp state
+// along the line from the lot lamp nearest the mouse's ground point (when the recording starts; a lamp being dragged first)
+// to that point, following the lamp as it moves; each frame also the lamp's place, the versions of the chunk under it and
+// its stamp state
 // ("Ground timeline.csv"). Render thread.
 constexpr int kWatchPoints = 17;
 inline float WatchT(int i) { return -4.0f + static_cast<float>(i); }

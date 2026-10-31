@@ -69,9 +69,16 @@ inline float Transmission(const Ellipsoid& e, float lx, float ly, float lz, floa
 
 // A conservative xz box of a crown's shadow on the ground plane gy for a lamp of reach R. false: no shadow (the head
 // below the crown's base lights the ground without crossing it).
+// Nor does a crown the head stands inside: a lamp is never in a plant's leaves, the ellipsoid only wraps them (a post beside a
+// bush under a wide crown shape lost its light on the ground all round)
 inline bool ShadowBox(const Ellipsoid& e, float lx, float ly, float lz, float gy, float R, float& x0, float& z0, float& x1, float& z1) {
     const float rxz = std::max(e.rx, e.rz), bottom = e.cy - e.ry;
     if (!(ly > bottom)) return false;
+    {
+        const float dx = lx - e.cx, dz = lz - e.cz;
+        const float u = (dx * e.c + dz * e.s) / e.rx, v = (ly - e.cy) / e.ry, w = (-dx * e.s + dz * e.c) / e.rz;
+        if (u * u + v * v + w * w < 1.0f) return false;
+    }
     const float dx = e.cx - lx, dz = e.cz - lz, d = std::sqrt(dx * dx + dz * dz);
     if (d - rxz >= R) return false;
     if (d <= rxz || ly <= e.cy + e.ry) { // the head beside or inside the crown: the shadow can fall anywhere within R

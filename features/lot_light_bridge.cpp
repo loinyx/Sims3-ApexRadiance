@@ -51,6 +51,8 @@
 #include "room_map_padding.h"
 #include "level_light_share.h"
 #include "ground_lamp_shadow.h"
+#include "ground_shade_gpu.h"
+#include "ground_shade_hlsl.h"
 #include "fence_cutout.h"
 #include "ground_light_gate.h"
 #include "unlit_rooms.h"
@@ -680,6 +682,7 @@ struct LotShadeTiming {
     int chunks = 0;
     uint64_t lot = 0;
     int live = 0; // moving lamps in its total only (ShadeLamps)
+    bool gpu = false; // built on the GPU (buildMs: the render thread's time for it)
 };
 struct LotMask {
     IDirect3DTexture9* tex = nullptr;
@@ -692,6 +695,8 @@ struct LotMask {
     uint64_t shadeKey = 0;          // the inputs the shade shown was made from (set when a build is applied)
     uint64_t queuedKey = 0;         // the inputs of the build queued or running for it (0 = none)
     DWORD shadeAt = 0;              // when the last build for this lot was queued
+    double gpuMs = 0;               // the render thread's time for its last GPU build (a costly one does not follow a drag every frame)
+    LotRect rect{};                 // its rectangle at its last shade check (a worker result taken during a drag hold, HoldLotResult)
     DWORD lastUse = 0;              // when a draw last asked for its texture (the cache drops the oldest, EvictLotMasks)
     bool dirty = false;             // room or shade changed: the texture is made again at the next draw
     // (15/10) the shade on the grid it was built on: the lot and the world grass around it its lamps reach (ShadeGrid), for
@@ -701,7 +706,37 @@ struct LotMask {
     float ex0 = 0, ez0 = 0, ex1 = 0, ez1 = 0; // its world box
     DWORD changeSeen = 0;  // (2.15.3, developer log) the check that saw its inputs change (WantShade)
     LotShadeTiming timing; // (developer log) the shade applied, logged when its mask is made (MakeMaskTexture)
+    // The GPU path (GroundShadeGpu, ShadeGpuFrame): its shade over the ext grid as a texture the chunk passes read (DEFAULT when
+    // built on the GPU, extGpu: no CPU copy then; MANAGED when a CPU build's ext was uploaded), the lot's texels on that grid
+    // from (ox, oz), whether it shades any texel (an occlusion query's answer; -1 not known yet), the mask a render target
+    IDirect3DTexture9* extTex = nullptr;
+    bool extGpu = false, texGpu = false;
+    int ox = 0, oz = 0;
+    int extShades = -1;
+    IDirect3DQuery9* shadesQuery = nullptr;
+    bool gpuRefused = false;   // its inputs passed the shader's bounds: built on the CPU until its occluders change (refusedKey)
+    bool refusalLogged = false; // (its first refusal logged)
+    uint64_t refusedKey = 0;   // ShadeKey's occluder key it was refused with (walls, patches, crowns, grid; 0: recorded at its next check)
+    bool moving = false;       // its last key had a lamp moving (checked every frame while a drag is engaged, GPU only)
+    uint32_t shadeFrame = 0;   // the frame of its last shade check
 };
+template <class T> void ReleaseCom(T*& p) {
+    if (p) p->Release();
+    p = nullptr;
+}
+// The lot's shade over the world grass dropped (its CPU copy, its texture and query)
+void DropExt(LotMask& m) {
+    m.ext.reset();
+    ReleaseCom(m.extTex);
+    ReleaseCom(m.shadesQuery);
+    m.extGpu = false;
+    m.extShades = -1;
+}
+void ReleaseLotMask(LotMask& m) {
+    ReleaseCom(m.tex);
+    DropExt(m);
+    m.texGpu = false;
+}
 std::unordered_map<uint64_t, LotMask> g_lotMasks;
 IDirect3DTexture9* g_whiteMask = nullptr;
 std::atomic<long> g_maskBuilds{0}, g_maskWhite{0};
@@ -724,12 +759,38 @@ IDirect3DTexture9* WhiteMask(IDirect3DDevice9* dev) {
 constexpr bool kFloorIndoorLight = false;
 constexpr DWORD kShadeMinEveryMs = 250; // (2.15.3: 2000, then 750; a build takes 1-30 ms on the worker, log)
 constexpr DWORD kShadeCheckMs = 100;    // a lot's shade inputs looked at this often while they change (LotMaskTexture)
+// The last shade check that saw a Classic drag hold (DragLite::ClassicHolding; 0 none): until kStillMs after it the worker's
+// lots take no lamp as moving (ShadeLamps), so the hold's end builds the walls' shade at once, not a total-only one first
+DWORD g_classicHeldAt = 0;
+// A lot the GPU path refused stays on the worker while its occluders are the same (lamp places left out: a drag that moves
+// its lamps does not try the GPU again each step); refusedKey 0 takes this occluder key
+bool RefusalHolds(uint64_t& refusedKey, uint64_t occ) {
+    if (!refusedKey) refusedKey = occ;
+    if (occ == refusedKey) return true;
+    refusedKey = 0;
+    return false;
+}
+// (GPU) What ShadeKey gathered for a lot's key, built by ShadeGpuLot as is (no second gather; the mask matches its key)
+struct GpuShadeInputs {
+    std::vector<GroundShadow::Lamp> lamps, others;
+    size_t live = 0;
+    GroundShadow::Grid grid;
+    int ox = 0, oz = 0;
+    std::vector<GroundShadow::Wall> walls;
+    std::vector<WallOpenings::Patch> patches;
+    std::vector<Canopy::Ellipsoid> crowns;
+};
 struct ShadeWant {
     uint64_t lot = 0, key = 0;
     LotRect rect{};
     int w = 0, h = 0;
     size_t live = 0; // moving lamps in its key (ShadeLamps)
+    bool gpu = false; // its key is the GPU path's (a moving lamp tested at its place now): built by ShadeGpuFrame
+    std::shared_ptr<GpuShadeInputs> in; // (GPU) the inputs its key was made from
 };
+// (GPU) The lots' shades and the chunks are made on the GPU this frame (ShadeGpuFrame); the worker builds only the lots
+// whose inputs pass the shader's bounds
+bool g_gpuMode = false;
 int g_shadeTimingLogs = 0; // (developer log) "Lamp shade on lot ground: ... shown" lines in this recording (MakeMaskTexture)
 std::vector<ShadeWant> g_shadeQueue; // render thread; one entry per lot
 std::atomic<long> g_shadeBuilt{0}, g_shadeDropped{0};
@@ -965,8 +1026,7 @@ void ReleaseChunkShades() {
     g_pend = {};
 }
 void ReleaseLotMasks() {
-    for (auto& [lot, m] : g_lotMasks)
-        if (m.tex) m.tex->Release();
+    for (auto& [lot, m] : g_lotMasks) ReleaseLotMask(m);
     g_lotMasks.clear();
     ReleaseChunkShades();
     g_lotResults.clear();
@@ -993,7 +1053,7 @@ void MarkChunkShades(float x0, float z0, float x1, float z1) {
     });
 }
 void MarkLotChunkShades(const LotMask& m) {
-    if (m.ext) MarkChunkShades(m.ex0, m.ez0, m.ex1, m.ez1);
+    if (m.ext || m.extTex) MarkChunkShades(m.ex0, m.ez0, m.ex1, m.ez1);
 }
 // (2.15.3) The chunk's builds in flight dropped: what they make is made again at its next draw
 void ForgetChunkBuilds(ChunkShade& c) {
@@ -1064,7 +1124,7 @@ IDirect3DTexture9* ChunkShadeTexture(IDirect3DDevice9* dev, const std::pair<int,
     const auto it = g_chunkShades.find(key);
     if (it == g_chunkShades.end()) return nullptr;
     ChunkShade& c = it->second;
-    if (c.dirty && !c.building) SendChunk(key, c, 0);
+    if (c.dirty && !c.building && !g_gpuMode) SendChunk(key, c, 0); // (GPU: made at the next frame's first reader, ShadeGpuFrame)
     return c.tex;
 }
 // Render thread: a chunk's new texels into its texture, each level's changed rect locked (the whole level when it is all
@@ -1149,7 +1209,10 @@ bool MovedApart(const float* a, const float* b); // (below)
 // It is still picked with the others for the kMaxLamps cut, so the lamps tested are those at rest less the moving ones: the
 // shade is never darker than at rest (more light in the total, the same light lost). Its walls' shadows come back with the
 // build after the drag, at its place now until the list has it (within kMoveTol: the list's, as at rest).
-std::vector<GroundShadow::Lamp> ShadeLamps(const LotRect& r, std::vector<GroundShadow::Lamp>* others = nullptr, size_t* live = nullptr) {
+// gpu (the GPU path, built in the frame its inputs change): a moving lamp stays with the lamps tested against the walls, at its
+// place now, so its shadows follow it; moving: how many lamps of either list move.
+std::vector<GroundShadow::Lamp> ShadeLamps(const LotRect& r, std::vector<GroundShadow::Lamp>* others = nullptr, size_t* live = nullptr, bool gpu = false,
+                                           size_t* moving = nullptr) {
     float x0, z0, x1, z1;
     LotBox(r, x0, z0, x1, z1);
     struct Pick {
@@ -1159,8 +1222,10 @@ std::vector<GroundShadow::Lamp> ShadeLamps(const LotRect& r, std::vector<GroundS
     };
     std::vector<Pick> c, o;
     // (the drag as the hold sees it: a drag the Classic rules hold ends 400 ms after its last step, and the shade frozen until
-    // then is built at rest, not once more without the lamp's walls)
-    const bool dragging = DragLite::LampMoving() && DragLite::Engaged();
+    // then is built at rest, not once more without the lamp's walls). The worker's lots: none moving during a Classic hold and
+    // until kStillMs after it (g_classicHeldAt), so the shade built when the hold ends is the walled one
+    const bool heldLately = !gpu && g_classicHeldAt && static_cast<long>(GetTickCount() - g_classicHeldAt) < static_cast<long>(DragLite::kStillMs); // (signed: the stamp is now | 1)
+    const bool dragging = !heldLately && DragLite::LampMoving() && DragLite::Engaged();
     for (const LotLightBridge::BakeLamp& b : LotLightBridge::CurrentBakeLamps().lamps) {
         const float* pos = b.pos;
         const float* rect = b.rect;
@@ -1196,13 +1261,17 @@ std::vector<GroundShadow::Lamp> ShadeLamps(const LotRect& r, std::vector<GroundS
         o.insert(o.end(), c.begin() + GroundShadow::kMaxLamps, c.end());
         c.resize(GroundShadow::kMaxLamps);
     }
+    if (moving) *moving = static_cast<size_t>(std::count_if(c.begin(), c.end(), [](const Pick& p) { return p.moving; }) +
+                                              std::count_if(o.begin(), o.end(), [](const Pick& p) { return p.moving; }));
+    if (gpu)
+        for (Pick& p : c) p.moving = false; // (tested where it is now)
     std::vector<GroundShadow::Lamp> out, first;
     out.reserve(c.size());
     for (const Pick& p : c) (p.moving ? first : out).push_back(p.L);
     if (others) {
         for (const Pick& p : o)
-            if (p.moving) first.push_back(p.L);
-        std::erase_if(o, [](const Pick& p) { return p.moving; });
+            if (p.moving && !gpu) first.push_back(p.L);
+        if (!gpu) std::erase_if(o, [](const Pick& p) { return p.moving; });
         std::stable_sort(o.begin(), o.end(), strongest);
         if (o.size() + first.size() > kMaxOtherLamps) o.resize(kMaxOtherLamps - std::min(first.size(), kMaxOtherLamps));
         if (live) *live = first.size();
@@ -2081,18 +2150,24 @@ void FenceGroupsGone() {
 }
 // What the shade is made from: the lot's place and grid, its lamps (place; light in about 20% steps) and the outside walls in
 // its box (their copy, so walls changed on another lot do not build this one again). Render thread.
-uint64_t ShadeKey(const LotRect& r, int w, int h, size_t* liveOut = nullptr) {
-    uint64_t s = 1469598103934665603ull;
+// occOut: the occluders alone (walls, their patches, crowns, the grid's size; no lamp place), what the GPU path's bounds hang on
+uint64_t ShadeKey(const LotRect& r, int w, int h, size_t* liveOut = nullptr, bool gpu = false, size_t* movingOut = nullptr, GpuShadeInputs* keep = nullptr,
+                  uint64_t* occOut = nullptr) {
+    uint64_t s = 1469598103934665603ull, o = s;
     const auto mix = [&s](uint64_t v) { s = (s ^ v) * 1099511628211ull; };
+    const auto mixOcc = [&](uint64_t v) { mix(v), o = (o ^ v) * 1099511628211ull; };
     const auto mixf = [&](float f, float q) { mix(static_cast<uint64_t>(static_cast<int64_t>(std::lround(f * q)))); };
     mix(static_cast<uint64_t>(w) << 32 | static_cast<uint32_t>(h));
     for (float f : {r.tx, r.tz, r.ty, r.m0, r.m2, r.m8, r.m10}) mixf(f, 100.0f);
     mixf(Penumbra::Radius(), 1000.0f); // the openings' penumbra (Shadow softness)
+    mix(Penumbra::g_on.load(std::memory_order_relaxed) ? 0x9E11ull : 0ull); // (the Tester switch: the narrowest rim)
     mix(TesterToggles::groundSoftEdges.load(std::memory_order_relaxed) ? 0x50F7ull : 0ull); // soft wall ends and tops on the mask (GroundShadow::Grid::soft)
+    mix(gpu ? 0x69F0ull : 0ull);
     std::vector<GroundShadow::Lamp> others;
     size_t live = 0;
-    const std::vector<GroundShadow::Lamp> lamps = ShadeLamps(r, &others, &live);
+    const std::vector<GroundShadow::Lamp> lamps = ShadeLamps(r, &others, &live, gpu, movingOut);
     if (liveOut) *liveOut = live;
+    if (keep) keep->lamps = lamps, keep->others = others, keep->live = live;
     const auto mixOther = [&](const GroundShadow::Lamp& L) {
         mixf(L.x, 50.0f), mixf(L.z, 50.0f);
         mix(static_cast<uint64_t>(static_cast<int64_t>(std::lround(std::log2(std::max(L.k, 1e-6f)) * 4.0f))));
@@ -2102,6 +2177,8 @@ uint64_t ShadeKey(const LotRect& r, int w, int h, size_t* liveOut = nullptr) {
         int ox, oz;
         const GroundShadow::Grid g = ShadeGrid(r, w, h, lamps, ox, oz);
         mix(static_cast<uint64_t>(g.w) << 48 | static_cast<uint64_t>(g.h) << 32 | static_cast<uint64_t>(ox) << 16 | static_cast<uint32_t>(oz));
+        o = (o ^ (static_cast<uint64_t>(g.w) << 32 | static_cast<uint32_t>(g.h))) * 1099511628211ull;
+        if (keep) keep->grid = g, keep->ox = ox, keep->oz = oz;
     }
     for (const GroundShadow::Lamp& L : lamps) {
         mixf(L.x, 50.0f), mixf(L.y, 50.0f), mixf(L.z, 50.0f);
@@ -2112,7 +2189,28 @@ uint64_t ShadeKey(const LotRect& r, int w, int h, size_t* liveOut = nullptr) {
         ShadeBox(r, lamps, x0, z0, x1, z1);
         static std::vector<GroundShadow::Wall> walls;
         static std::vector<WallOpenings::Patch> patches;
-        ShadeWalls(x0, z0, x1, z1, walls, patches);
+        ShadeWalls(x0, z0, x1, z1, walls, patches, keep ? &g_shadeLastFences : nullptr);
+        if (keep) keep->walls = walls, keep->patches = patches;
+        if (!kPublicBuild) { // (developer log) a tested lamp within 1 m of a wall: where its head is on the lot and against that wall
+            static std::unordered_set<uint64_t> s_seen;
+            for (const GroundShadow::Lamp& L : lamps)
+                for (const GroundShadow::Wall& wl : walls) {
+                    const float sx = wl.x1 - wl.x0, sz = wl.z1 - wl.z0, s2 = sx * sx + sz * sz;
+                    const float u = s2 > 1e-9f ? std::clamp(((L.x - wl.x0) * sx + (L.z - wl.z0) * sz) / s2, 0.0f, 1.0f) : 0.0f;
+                    const float dx = wl.x0 + u * sx - L.x, dz = wl.z0 + u * sz - L.z, d = std::sqrt(dx * dx + dz * dz);
+                    if (!(d < 1.0f) || s_seen.size() >= 200) continue;
+                    const uint64_t id = (static_cast<uint64_t>(std::lround(L.x * 100.0f)) * 1000003ull + static_cast<uint64_t>(std::lround(L.z * 100.0f))) * 1000003ull +
+                                        static_cast<uint64_t>(std::lround((wl.x0 + wl.z1) * 100.0f));
+                    if (!s_seen.insert(id ^ (static_cast<uint64_t>(r.lotLo) << 1)).second) continue;
+                    const double det = static_cast<double>(r.m0) * r.m10 - static_cast<double>(r.m8) * r.m2;
+                    const double ldx = L.x - r.tx, ldz = L.z - r.tz;
+                    const float lx = det != 0.0 ? static_cast<float>((r.m10 * ldx - r.m8 * ldz) / det) : 0.0f, lz = det != 0.0 ? static_cast<float>((-r.m2 * ldx + r.m0 * ldz) / det) : 0.0f;
+                    const float side = sx * (L.z - wl.z0) - sz * (L.x - wl.x0); // > 0: left of the wall's direction
+                    LOG_INFO(std::format("[GroundShadow] lot {:08X}{:08X} ({:.1f} x {:.1f} m): lamp head ({:.2f} {:.2f} {:.2f}) at lot ({:.2f} {:.2f}), {:.3f} m from wall "
+                                         "({:.2f} {:.2f})-({:.2f} {:.2f}) y {:.2f}..{:.2f} pass {:.2f} patches {}, head on its {} side, nearest at {:.2f} along it",
+                                         r.lotHi, r.lotLo, r.w, r.d, L.x, L.y, L.z, lx, lz, d, wl.x0, wl.z0, wl.x1, wl.z1, wl.y0, wl.y1, wl.pass, wl.pn, side > 0 ? "left" : "right", u));
+                }
+        }
         uint64_t sum = 0; // in any order (the copy's order follows a hash map)
         for (const GroundShadow::Wall& wl : walls) {
             uint64_t e = 1469598103934665603ull;
@@ -2126,23 +2224,25 @@ uint64_t ShadeKey(const LotRect& r, int w, int h, size_t* liveOut = nullptr) {
             }
             sum += e;
         }
-        mix(sum);
-        mix(walls.size());
+        mixOcc(sum);
+        mixOcc(walls.size());
         bool shades = !walls.empty();
         if (DevSwitches::CanopyGroundShadow()) { // the crowns over the lot (sorted by CrownsIn: the same set gives the same key)
             static std::vector<Canopy::Ellipsoid> crowns;
             crowns.clear();
             CrownsIn(x0, z0, x1, z1, crowns);
             for (const Canopy::Ellipsoid& e : crowns)
-                for (float f : {e.cx, e.cy, e.cz, e.rx, e.ry, e.lad}) mixf(f, 10.0f);
-            mix(crowns.size());
+                for (float f : {e.cx, e.cy, e.cz, e.rx, e.ry, e.lad}) mixOcc(static_cast<uint64_t>(static_cast<int64_t>(std::lround(f * 10.0f))));
+            mixOcc(crowns.size());
             shades = shades || !crowns.empty();
+            if (keep) keep->crowns = crowns;
         }
         // a moving lamp only thins the other lamps' shadows: where nothing shades, the shade is 255 wherever it is (ShadeTick),
         // so a lot with no other lamp to test keeps its key while one is dragged
         if (shades)
             for (size_t i = 0; i < live; i++) mixOther(others[i]);
     }
+    if (occOut) *occOut = o | 1;
     return s | 1;
 }
 // Render thread, every frame: the worker's results taken (a lot's held, LotPending; a chunk's kept for ShadeApply), the next
@@ -2183,13 +2283,15 @@ void ShadeTick() {
         g_lotResults.erase(g_lotResults.begin());
         HoldLotResult(r);
     }
-    while (g_lotsInFlight < 2 && !g_shadeQueue.empty()) {
+    // (the GPU path's lots are built by ShadeGpuFrame at the next frame's first reader)
+    while (g_lotsInFlight < 2 && std::any_of(g_shadeQueue.begin(), g_shadeQueue.end(), [](const ShadeWant& q) { return !q.gpu; })) {
         // (2.15.3) the lot nearest the camera first: the one the player looks at waited behind every lot queued before it
-        size_t pick = 0;
+        size_t pick = static_cast<size_t>(std::find_if(g_shadeQueue.begin(), g_shadeQueue.end(), [](const ShadeWant& q) { return !q.gpu; }) - g_shadeQueue.begin());
         float eye[3];
         if (g_shadeQueue.size() > 1 && LotLightingMotion::CameraEye(eye)) {
             float best = 1e30f;
             for (size_t i = 0; i < g_shadeQueue.size(); i++) {
+                if (g_shadeQueue[i].gpu) continue;
                 float x0, z0, x1, z1;
                 LotBox(g_shadeQueue[i].rect, x0, z0, x1, z1);
                 const float dx = std::max({x0 - eye[0], 0.0f, eye[0] - x1}), dz = std::max({z0 - eye[2], 0.0f, eye[2] - z1}), d = dx * dx + dz * dz;
@@ -2233,6 +2335,14 @@ void HoldLotResult(ShadeResult& r) {
         return;
     }
     LotMask& m = it->second;
+    // a build sent before a Classic drag hold, landing during it with inputs that changed since: dropped, so the held shade does
+    // not change mid drag; the lot asks again when the hold ends (WantShade). (Outside a hold a late build still lands: dropping
+    // each one while the inputs keep changing would starve the lot)
+    if (m.shadeKey && DragLite::ClassicHolding() && r.key != ShadeKey(m.rect, m.w, m.h)) {
+        if (m.queuedKey == r.key) m.queuedKey = 0;
+        g_shadeDropped.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
     g_pend = {};
     g_pend.lot = r.lot, g_pend.key = r.key, g_pend.w = r.w, g_pend.h = r.h;
     g_pend.seen = m.changeSeen, g_pend.sent = r.sent, g_pend.arrived = GetTickCount(), g_pend.buildMs = r.ms, g_pend.live = r.live;
@@ -2253,10 +2363,12 @@ void HoldLotResult(ShadeResult& r) {
         }
     } // (else no texel: 255 everywhere)
     WorldBox all = g_pend.box;
-    if (m.ext) all.Add(m.ex0, m.ez0, m.ex1, m.ez1); // the shade shown so far
+    if (m.ext || m.extTex) all.Add(m.ex0, m.ez0, m.ex1, m.ez1); // the shade shown so far
     g_pend.active = true;
     g_pend.at = GetTickCount();
-    if (!all.Empty())
+    if (g_gpuMode) { // (its chunks made on the GPU at the next frame's first reader, before its mask is drawn: shown at once)
+        if (!all.Empty()) MarkChunkShades(all.x0, all.z0, all.x1, all.z1);
+    } else if (!all.Empty())
         ForChunksOver(all.x0, all.z0, all.x1, all.z1, [&](const std::pair<int, int>& key) {
             ChunkShade& c = g_chunkShades[key];
             c.changed.Add(all);
@@ -2282,6 +2394,7 @@ void CommitPending() {
     if (m.queuedKey == p.key) m.queuedKey = 0;
     m.shade = std::move(p.shade);
     m.dirty = true;
+    DropExt(m); // (GPU: uploaded again from the new one at its chunks' build)
     m.ext = std::move(p.ext);
     if (m.ext) m.extGrid = p.grid, m.ex0 = p.box.x0, m.ez0 = p.box.z0, m.ex1 = p.box.x1, m.ez1 = p.box.z1;
     if (!m.shade.empty()) g_shadeLastMin = p.lo;
@@ -2300,6 +2413,319 @@ void DropPending() {
     if (const auto it = g_lotMasks.find(g_pend.lot); it != g_lotMasks.end() && it->second.queuedKey == g_pend.key) it->second.queuedKey = 0;
     g_pend = {};
 }
+// ---- (GPU) Walls shade lamp light near the ground on the GPU (GroundShadeGpu; the worker's bytes within 1/255,
+// tools/ground_shade_gpu_test). A lot whose inputs changed is built at the next frame's first draw that reads a lot mask or a
+// chunk shade (ShadeApply, before any of them is drawn), with the chunks under its old and new shade made again over what
+// changed, so the lot and the world grass beside it change in the same frame; its lot-to-chunk chain stays on the GPU (the
+// chunk passes read the lots' ext textures). A dragged lamp keeps its walls' shadows (ShadeLamps gpu) and its lots are
+// checked every frame while the drag is engaged (LotMaskTexture). The worker builds a lot whose inputs pass the shader's
+// bounds (logged once per reason; its shade uploaded for the chunk passes), and every lot when the path is off: no ps_3_0 or
+// float targets, the shaders not compiled, a GPU build that failed, the Tester switch "Ground shade on the GPU" off. A device
+// reset releases every lot's mask and shade (made again at their next draw).
+ShaderCache::Id AddGroundShadeShader(int i) {
+    const auto id = static_cast<GroundShadeGpu::ShaderId>(i);
+    ShaderCache::Desc d;
+    d.tag = GroundShadeGpu::EntryOf(id);
+    d.source = kGroundShadeHlsl;
+    d.sourceName = "ground_shade";
+    d.entry = GroundShadeGpu::EntryOf(id);
+    d.target = GroundShadeGpu::IsVertex(id) ? "vs_3_0" : "ps_3_0";
+    d.flags = GroundShadeGpu::FlagsOf(id);
+    return ShaderCache::Add(std::move(d));
+}
+const ShaderCache::Id kGroundShadeIds[GroundShadeGpu::kShaderCount] = {AddGroundShadeShader(0), AddGroundShadeShader(1), AddGroundShadeShader(2), AddGroundShadeShader(3),
+                                                                       AddGroundShadeShader(4), AddGroundShadeShader(5), AddGroundShadeShader(6), AddGroundShadeShader(7),
+                                                                       AddGroundShadeShader(8), AddGroundShadeShader(9)};
+static_assert(GroundShadeGpu::kShaderCount == 10, "kGroundShadeIds lists every GroundShadeGpu::ShaderId");
+constexpr int kGpuLotsPerFrame = 8;
+std::unique_ptr<GroundShadeGpu::Engine> g_gpuEng;
+int g_gpuState = 0; // 0 not made yet, 1 ready, 2 off for the session (g_gpuWhy)
+std::string g_gpuWhy, g_gpuRefusedWhy;
+std::atomic<long> g_gpuLotBuilds{0}, g_gpuChunkBuilds{0}, g_gpuRefusedLots{0};
+double g_gpuLastMs = 0.0; // the render thread's time for the last GPU lot build (inputs, setup, passes)
+bool g_gpuBegun = false;
+// The device's state saved around the GPU passes of one call (once, however many builds)
+struct GpuScope {
+    IDirect3DDevice9* dev;
+    bool mine = false;
+    explicit GpuScope(IDirect3DDevice9* d) : dev(d) {}
+    bool Begin() { // false: the device's state could not be saved, nothing was changed
+        if (!g_gpuBegun) {
+            if (!g_gpuEng->Begin(dev)) return false;
+            g_gpuBegun = mine = true;
+        }
+        return true;
+    }
+    ~GpuScope() {
+        if (mine) g_gpuEng->End(dev), g_gpuBegun = false;
+    }
+    GpuScope(const GpuScope&) = delete;
+    GpuScope& operator=(const GpuScope&) = delete;
+};
+// A device reset: only the GPU path's DEFAULT objects go; the rooms, the CPU-built shades and the MANAGED uploads stay
+void ShadeGpuPreReset(IDirect3DDevice9*) {
+    if (g_gpuMode) {
+        for (auto& [lot, m] : g_lotMasks) {
+            if (m.texGpu) ReleaseCom(m.tex), m.texGpu = false, m.dirty = true;
+            if (m.extGpu) {
+                MarkLotChunkShades(m); // (its chunks made again without it until it is built again)
+                DropExt(m);
+                m.shadeKey = 0, m.queuedKey = 0, m.shadeAt = 0, m.dirty = true; // (asked again at its next check)
+            }
+        }
+        for (auto& [key, c] : g_chunkShades) // (GPU chunks are all DEFAULT: made again whole at the next frame)
+            if (c.tex) ReleaseCom(c.tex), c.full = true, c.dirty = true, c.changed = {};
+    }
+    if (g_gpuEng) g_gpuEng->ReleaseDefault();
+}
+// A GPU pass failed: the path is off for the session (the lots go to the worker from the next frame), unless the device is
+// lost (a reset follows; the lot is asked again)
+void ShadeGpuFail(IDirect3DDevice9* dev, const std::string& why) {
+    if (FAILED(dev->TestCooperativeLevel())) return;
+    g_gpuState = 2;
+    g_gpuWhy = why;
+    LOG_WARNING("[LotLightBridge] Lamp shade on lot ground: the GPU path is off for this session (" + why + "); the shade is built on the worker thread");
+}
+bool ShadeGpuReady(IDirect3DDevice9* dev) {
+    if (g_gpuState) return g_gpuState == 1;
+    if (!ShaderCache::PrecompileComplete()) return false; // (the CPU until the shaders are there)
+    static const bool s_registered = (RenderCallbacks::preReset.Add(ShadeGpuPreReset), true);
+    (void)s_registered;
+    void* made[GroundShadeGpu::kShaderCount] = {};
+    std::string err;
+    bool ok = true;
+    for (int i = 0; i < GroundShadeGpu::kShaderCount && ok; i++) {
+        std::vector<DWORD> code;
+        const auto id = static_cast<GroundShadeGpu::ShaderId>(i);
+        ok = ShaderCache::Bytecode(kGroundShadeIds[i], code, &err) &&
+             (GroundShadeGpu::IsVertex(id) ? SUCCEEDED(dev->CreateVertexShader(code.data(), reinterpret_cast<IDirect3DVertexShader9**>(&made[i])))
+                                           : SUCCEEDED(dev->CreatePixelShader(code.data(), reinterpret_cast<IDirect3DPixelShader9**>(&made[i]))));
+        if (!ok && err.empty()) err = std::string(GroundShadeGpu::EntryOf(id)) + " was refused by the device";
+    }
+    if (ok) {
+        g_gpuEng = std::make_unique<GroundShadeGpu::Engine>(RtOutdoorLamps::DeviceCallsOfGame());
+        ok = g_gpuEng->Init(dev, made, err);
+    }
+    for (void* p : made)
+        if (p) static_cast<IUnknown*>(p)->Release();
+    g_gpuState = ok ? 1 : 2;
+    if (ok) {
+        LOG_INFO(std::format("[LotLightBridge] Lamp shade on lot ground: built on the GPU (chunk shade {})", g_gpuEng->ChunkFormat() == D3DFMT_L8 ? "L8" : "A8R8G8B8"));
+    } else {
+        g_gpuEng.reset();
+        g_gpuWhy = err;
+        LOG_INFO("[LotLightBridge] Lamp shade on lot ground: built on the worker thread (" + err + ")");
+    }
+    return ok;
+}
+// The lot's mask drawn on the GPU from its ext texture (MakeMaskTexture)
+bool ShadeGpuMask(IDirect3DDevice9* dev, LotMask& m) {
+    if (!g_gpuMode || g_gpuState != 1 || !m.extTex) return false;
+    GpuScope scope(dev);
+    if (!scope.Begin()) return false; // (no state block: the CPU mask)
+    D3DSURFACE_DESC d{};
+    m.extTex->GetLevelDesc(0, &d);
+    if (!m.texGpu) ReleaseCom(m.tex);
+    std::string err;
+    if (!g_gpuEng->BuildMask(dev, m.extTex, static_cast<int>(d.Width), static_cast<int>(d.Height), m.ox, m.oz, m.w, m.h, m.room, m.tex, err)) {
+        ShadeGpuFail(dev, "a lot mask: " + err);
+        return false;
+    }
+    m.texGpu = true;
+    return true;
+}
+void WantShade(uint64_t lot, LotMask& m, const LotRect& r, DWORD now); // (below)
+// One lot's shade on the GPU from the inputs the worker's build takes (ShadeTick); false: not built (the lot is asked again)
+void ShadeGpuLot(GpuScope& scope, const ShadeWant& want) {
+    const auto it = g_lotMasks.find(want.lot);
+    if (it == g_lotMasks.end() || it->second.w != want.w || it->second.h != want.h) {
+        g_shadeDropped.fetch_add(1, std::memory_order_relaxed); // the lot left, or its grid changed meanwhile
+        return;
+    }
+    LotMask& m = it->second;
+    LARGE_INTEGER f, t0, t1;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&t0);
+    GpuShadeInputs gathered;
+    if (!want.in) { // (no inputs kept with the key: gathered now)
+        gathered.lamps = ShadeLamps(want.rect, &gathered.others, &gathered.live, true);
+        gathered.grid = ShadeGrid(want.rect, want.w, want.h, gathered.lamps, gathered.ox, gathered.oz);
+        if (!gathered.lamps.empty()) {
+            float x0, z0, x1, z1;
+            ShadeBox(want.rect, gathered.lamps, x0, z0, x1, z1);
+            ShadeWalls(x0, z0, x1, z1, gathered.walls, gathered.patches, &g_shadeLastFences);
+            if (DevSwitches::CanopyGroundShadow()) CrownsIn(x0, z0, x1, z1, gathered.crowns);
+        }
+    }
+    GpuShadeInputs& src = want.in ? *want.in : gathered;
+    const std::vector<GroundShadow::Lamp>& lamps = src.lamps;
+    const std::vector<GroundShadow::Lamp>& others = src.others;
+    const int ox = src.ox, oz = src.oz;
+    GroundShadow::Grid grid = src.grid;
+    grid.soft = TesterToggles::groundSoftEdges.load(std::memory_order_relaxed);
+    std::vector<GroundShadow::Wall> walls = std::move(src.walls); // (the want is built once: its inputs are taken)
+    const std::vector<WallOpenings::Patch>& patches = src.patches;
+    const std::vector<Canopy::Ellipsoid>& crowns = src.crowns;
+    g_shadeLastLamps = static_cast<int>(lamps.size());
+    g_shadeLastWalls = static_cast<int>(walls.size());
+    g_shadeLastPatches = static_cast<int>(patches.size());
+    GroundShadeGpu::Inputs in;
+    std::string why;
+    const bool shades = !walls.empty() || !crowns.empty(); // (nothing shades: 255 everywhere, as the worker's)
+    if (shades && !GroundShadeGpu::Prepare(grid, lamps, others, std::move(walls), patches, crowns, in, why)) {
+        // on the worker until its occluders change (refusedKey, taken now); the refused try gives its slot back, so the worker's
+        // build is asked for in this frame
+        m.gpuRefused = true, m.refusedKey = 0;
+        if (m.queuedKey == want.key) m.queuedKey = 0;
+        m.shadeAt = 0; // (once per occluder change, RefusalHolds)
+        g_gpuRefusedLots.fetch_add(1, std::memory_order_relaxed);
+        static int s_logs = 0;
+        if (!m.refusalLogged && s_logs < 64) {
+            m.refusalLogged = true, s_logs++;
+            LOG_INFO(std::format("[LotLightBridge] Lamp shade on lot ground: lot {:016X} is built on the worker thread ({})", want.lot, why));
+        }
+        g_gpuRefusedWhy = why;
+        WantShade(want.lot, m, want.rect, GetTickCount());
+        return;
+    }
+    if (shades && !scope.Begin()) { // (no state block: its old shade stays, asked again at its next check)
+        if (m.queuedKey == want.key) m.queuedKey = 0;
+        m.shadeKey = 0, m.shadeAt = 0, m.dirty = true;
+        return;
+    }
+    const bool had = m.ext || m.extTex || !m.shade.empty(); // (a lot with nothing to shade before and now: its mask stays)
+    MarkLotChunkShades(m); // (the chunks under its old shade)
+    if (shades) {
+        if (!m.extGpu) ReleaseCom(m.extTex); // (an uploaded CPU shade: a target is made)
+        m.ext.reset();
+        std::string err;
+        if (!g_gpuEng->BuildLot(scope.dev, in, m.extTex, err, &m.shadesQuery)) {
+            if (m.queuedKey == want.key) m.queuedKey = 0;
+            m.shadeKey = 0, m.shadeAt = 0, m.dirty = true; // (asked again: no shade until then)
+            DropExt(m);
+            ShadeGpuFail(scope.dev, "a lot's build: " + err);
+            return;
+        }
+        m.extGpu = true;
+        m.extShades = -1;
+        m.extGrid = grid, m.ox = ox, m.oz = oz;
+        GridBox(grid, m.ex0, m.ez0, m.ex1, m.ez1);
+        MarkLotChunkShades(m); // (and under its new shade)
+    } else {
+        DropExt(m);
+    }
+    m.shade.clear();
+    m.shadeKey = want.key;
+    if (m.queuedKey == want.key) m.queuedKey = 0;
+    m.dirty = m.dirty || had || shades;
+    g_shadeBuilt.fetch_add(1, std::memory_order_relaxed);
+    g_gpuLotBuilds.fetch_add(1, std::memory_order_relaxed);
+    QueryPerformanceCounter(&t1);
+    g_gpuLastMs = m.gpuMs = static_cast<double>(t1.QuadPart - t0.QuadPart) * 1000.0 / static_cast<double>(f.QuadPart);
+    if (!kPublicBuild && m.changeSeen) {
+        const DWORD now = GetTickCount();
+        m.timing = LotShadeTiming{m.changeSeen, now, now, now, g_gpuLastMs, 0, want.lot, 0, true};
+    }
+    m.changeSeen = 0;
+}
+// A chunk's shade on the GPU from the lots' ext textures over it, over what changed (the whole chunk when it has no texture);
+// a chunk no lot shades loses its texture
+void ShadeGpuChunk(GpuScope& scope, const std::pair<int, int>& key) {
+    const auto it = g_chunkShades.find(key);
+    if (it == g_chunkShades.end()) return;
+    ChunkShade& c = it->second;
+    const float wx0 = key.first - kChunkSize * 0.5f, wz0 = key.second - kChunkSize * 0.5f;
+    std::vector<GroundShadeGpu::ChunkSrc> srcs;
+    for (auto& [lot, m] : g_lotMasks) {
+        if ((!m.ext && !m.extTex) || m.extShades == 0) continue; // (a lot whose shade is 255 everywhere: none, as on the worker)
+        if (m.ex1 < wx0 || m.ez1 < wz0 || m.ex0 > wx0 + kChunkSize || m.ez0 > wz0 + kChunkSize) continue;
+        if (!m.extTex && !GroundShadeGpu::Engine::UploadExt(scope.dev, m.extGrid, m.ext->v, m.ext->w, m.extTex)) continue; // (a CPU build's)
+        if (!m.extGpu) m.extShades = 1; // (a CPU build keeps its shade only when a texel is under 255)
+        srcs.push_back(GroundShadeGpu::ChunkSrc{m.extTex, m.extGrid, GroundShadow::ChunkRectOf(wx0, wz0, m.ex0, m.ez0, m.ex1, m.ez1)});
+    }
+    const GroundShadow::TexRect whole{0, 0, kChunkShadeTexels - 1, kChunkShadeTexels - 1};
+    const GroundShadow::TexRect r0 = c.tex && !c.full && !c.changed.Empty() ? GroundShadow::ChunkRectOf(wx0, wz0, c.changed.x0, c.changed.z0, c.changed.x1, c.changed.z1) : whole;
+    c.dirty = false, c.building = false, c.changed = {}, c.flight = {};
+    if (srcs.empty()) { // no lot shades it: the draw as before
+        ReleaseCom(c.tex);
+        g_chunkShades.erase(it);
+        return;
+    }
+    if (!scope.Begin()) { // (no state block: its texture stays, made again whole at the next frame)
+        c.dirty = true, c.full = true;
+        return;
+    }
+    std::string err;
+    if (!g_gpuEng->BuildChunk(scope.dev, srcs, wx0, wz0, r0, c.tex, err)) {
+        ReleaseCom(c.tex);
+        c.full = true, c.dirty = true;
+        ShadeGpuFail(scope.dev, "a chunk's build: " + err);
+        return;
+    }
+    c.full = false;
+    g_gpuChunkBuilds.fetch_add(1, std::memory_order_relaxed);
+    g_chunkShadeBuilds.fetch_add(1, std::memory_order_relaxed);
+}
+// (developer status) " | GPU: ..." after LotShadeStatusText
+std::string ShadeGpuStatusText() {
+    if (!g_gpuMode)
+        return std::format(" | GPU: off ({})", g_gpuState == 2 ? g_gpuWhy
+                                               : !TesterToggles::groundShadeGpu.load(std::memory_order_relaxed) ? std::string("Tester switch")
+                                               : g_gpuState == 0 ? std::string("waiting for the shaders")
+                                                                 : std::string("shade off"));
+    const double gpuMs = g_gpuEng ? g_gpuEng->LastGpuMs() : -1.0;
+    return std::format(" | GPU: {} lot builds (last {:.2f} ms render thread, {} GPU), {} chunk builds; on the worker: {} lot builds, {} lots over the shader's bounds{}",
+                       g_gpuLotBuilds.load(), g_gpuLastMs, gpuMs >= 0.0 ? std::format("{:.3f} ms", gpuMs) : std::string("-"), g_gpuChunkBuilds.load(),
+                       g_shadeBuilt.load() - g_gpuLotBuilds.load(), g_gpuRefusedLots.load(), g_gpuRefusedWhy.empty() ? std::string() : " (last: " + g_gpuRefusedWhy + ")");
+}
+// Once a frame at the first reader (ShadeApply): the path chosen, the queries read, the lots asked for and the chunks they
+// changed built
+void ShadeGpuFrame(IDirect3DDevice9* dev) {
+    const bool want = g_shadeOn && TesterToggles::groundShadeGpu.load(std::memory_order_relaxed) && ShadeGpuReady(dev);
+    if (want != g_gpuMode) {
+        if (!kPublicBuild) LOG_INFO(want ? "[LotLightBridge] Lamp shade on lot ground: on the GPU" : "[LotLightBridge] Lamp shade on lot ground: on the worker thread");
+        if (!want) { // (the GPU's DEFAULT targets go: every lot made again on the worker)
+            ReleaseLotMasks();
+            g_gpuMode = false;
+            return;
+        }
+        // CPU to GPU: the lots keep their CPU shade until their next check (the gpu bit in the key); only the MANAGED chunks
+        // go, made again on the GPU below from the lots' shades
+        ReleaseChunkShades(); // (also drops the held lot result: asked again, its key was not set)
+        g_shadeQueue.clear(); // (the worker's queued keys: asked again with the GPU key)
+        g_shadeEpoch++;       // (the worker's builds in flight are dropped when they come back)
+        g_lotsInFlight = 0;
+        g_gpuMode = true;
+        for (const auto& [lot, m] : g_lotMasks) MarkLotChunkShades(m);
+    }
+    if (!g_gpuMode || g_gpuState != 1) return;
+    GpuScope scope(dev);
+    // a lot that shades nothing leaves the chunks (a CPU build keeps no shade then)
+    for (auto& [lot, m] : g_lotMasks)
+        if (m.shadesQuery && m.extGpu && m.extShades < 0) {
+            DWORD n = 0;
+            const HRESULT hr = m.shadesQuery->GetData(&n, sizeof n, 0);
+            if (hr == S_FALSE) continue;
+            m.extShades = hr != S_OK || n > 0 ? 1 : 0;
+            if (!m.extShades) MarkLotChunkShades(m);
+        }
+    for (size_t i = 0, built = 0; i < g_shadeQueue.size() && built < kGpuLotsPerFrame && g_gpuState == 1;) {
+        if (!g_shadeQueue[i].gpu) {
+            i++;
+            continue;
+        }
+        const ShadeWant w = g_shadeQueue[i];
+        g_shadeQueue.erase(g_shadeQueue.begin() + static_cast<ptrdiff_t>(i));
+        ShadeGpuLot(scope, w);
+        built++;
+    }
+    std::vector<std::pair<int, int>> dirty;
+    for (const auto& [key, c] : g_chunkShades)
+        if (c.dirty) dirty.push_back(key);
+    for (const auto& key : dirty)
+        if (g_gpuState == 1) ShadeGpuChunk(scope, key);
+}
+
 // Render thread, once a frame at the first draw that reads a lot's mask or a chunk's shade: the held lot shade shown with
 // its chunks' texels when they are all back (or after kHoldMaxMs), else one chunk's texels with no held shade. At most one
 // chunk upload a frame, or one lot's chunks together.
@@ -2308,6 +2734,7 @@ void ShadeApply(IDirect3DDevice9* dev) {
     static uint32_t s_frame = 0;
     if (s_frame == g_roomMapFrame) return;
     s_frame = g_roomMapFrame;
+    ShadeGpuFrame(dev); // (GPU)
     if (g_pend.active) {
         const bool all = g_pend.ready.size() >= g_pend.chunks.size();
         if (all || GetTickCount() - g_pend.at > kHoldMaxMs) {
@@ -2337,22 +2764,37 @@ void ShadeApply(IDirect3DDevice9* dev) {
 void WantShade(uint64_t lot, LotMask& m, const LotRect& r, DWORD now) {
     // a drag the Classic rules hold (DragLite::ClassicHolding: Classic lamp lighting, or with Instant a lamp the game solves):
     // the ground keeps the lamp where it was until the release (the terrain relight and the rooms wait for it), so its shade
-    // does too
-    if (m.shadeKey && DragLite::ClassicHolding()) return;
-    size_t live = 0;
-    const uint64_t key = ShadeKey(r, m.w, m.h, &live);
+    // does too. A lot on the GPU path is not held: TerrainStamps draws the dragged lamp's ground light where it is now, so its
+    // walls' shadows follow it (a held shade left them where the lamp was, under its light now)
+    const bool held = DragLite::ClassicHolding();
+    if (held) g_classicHeldAt = now | 1;
+    m.rect = r;
+    if (m.shadeKey && held && !(g_gpuMode && !m.gpuRefused)) return;
+    size_t live = 0, moving = 0;
+    uint64_t occ = 0;
+    bool gpu = g_gpuMode && !m.gpuRefused;
+    auto in = gpu ? std::make_shared<GpuShadeInputs>() : nullptr;
+    uint64_t key = ShadeKey(r, m.w, m.h, &live, gpu, &moving, in.get(), &occ);
+    if (g_gpuMode && m.gpuRefused && !RefusalHolds(m.refusedKey, occ)) { // its occluders changed: the shader's bounds are checked again
+        m.gpuRefused = false, gpu = true;
+        moving = 0;
+        in = std::make_shared<GpuShadeInputs>();
+        key = ShadeKey(r, m.w, m.h, &live, true, &moving, in.get());
+    }
+    m.moving = moving > 0;
     if (!kPublicBuild && key != m.shadeKey && !m.changeSeen) m.changeSeen = now | 1; // (2.15.3, developer log)
     if (key == m.shadeKey || key == m.queuedKey) return;
-    if (m.shadeAt && now - m.shadeAt < kShadeMinEveryMs) return; // again at a later check
+    // (GPU: a drag's steps are built as they come, at most once a frame; at rest as before)
+    if (m.shadeAt && now - m.shadeAt < kShadeMinEveryMs && !(gpu && DragLite::Engaged())) return; // again at a later check
     m.shadeAt = now;
     for (ShadeWant& q : g_shadeQueue)
         if (q.lot == lot) {
-            q = ShadeWant{lot, key, r, m.w, m.h, live};
+            q = ShadeWant{lot, key, r, m.w, m.h, live, gpu, in};
             m.queuedKey = key;
             return;
         }
     if (g_shadeQueue.size() < 64) {
-        g_shadeQueue.push_back(ShadeWant{lot, key, r, m.w, m.h, live});
+        g_shadeQueue.push_back(ShadeWant{lot, key, r, m.w, m.h, live, gpu, std::move(in)});
         m.queuedKey = key;
         return;
     }
@@ -2382,38 +2824,43 @@ void EvictLotMasks() {
     for (const auto& [age, lot] : old) {
         if (g_lotMasks.size() <= target) break;
         const auto it = g_lotMasks.find(lot);
-        if (it->second.tex) it->second.tex->Release();
         if (g_pend.active && g_pend.lot == lot) DropPending(); // (2.15.3)
         MarkLotChunkShades(it->second);
+        ReleaseLotMask(it->second);
         g_lotMasks.erase(it);
         std::erase_if(g_shadeQueue, [lot](const ShadeWant& q) { return q.lot == lot; });
     }
     if (g_lotMasks.size() > kMaxLotMasks * 2) ReleaseLotMasks(); // (every lot drawn in the last 30 s: as before, all at once)
 }
 // The texture from the room mask and the shade (255 inside rooms, and everywhere while no shade was built)
+bool ShadeGpuMask(IDirect3DDevice9* dev, LotMask& m); // (the GPU path, below)
 bool MakeMaskTexture(IDirect3DDevice9* dev, LotMask& m) {
     if (m.w <= 0 || m.h <= 0 || m.room.size() != static_cast<size_t>(m.w) * m.h) return false;
-    const bool shaded = g_shadeOn && m.shade.size() == m.room.size();
-    IDirect3DTexture9* tex = nullptr;
     m.dirty = false; // a failure waits for the next change or check (the room mask is read again: sig 0)
-    D3DLOCKED_RECT lr;
-    if (FAILED(dev->CreateTexture(m.w, m.h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, nullptr)) || FAILED(tex->LockRect(0, &lr, nullptr, 0))) {
-        if (tex) tex->Release();
-        m.sig = 0;
-        return false;
-    }
-    for (int y = 0; y < m.h; y++) {
-        DWORD* row = reinterpret_cast<DWORD*>(static_cast<BYTE*>(lr.pBits) + static_cast<size_t>(y) * lr.Pitch);
-        for (int x = 0; x < m.w; x++) {
-            const size_t i = static_cast<size_t>(y) * m.w + x;
-            const DWORD l = m.room[i];
-            const DWORD a = shaded && l ? m.shade[i] : 255u;
-            row[x] = a << 24 | l << 16 | l << 8 | l;
+    // (GPU) a shade built on the GPU: the same texels drawn there from its ext texture (a failure: no shade, as before one is built)
+    if (!(g_shadeOn && m.extGpu && m.extTex && ShadeGpuMask(dev, m))) {
+        const bool shaded = g_shadeOn && m.shade.size() == m.room.size();
+        IDirect3DTexture9* tex = nullptr;
+        D3DLOCKED_RECT lr;
+        if (FAILED(dev->CreateTexture(m.w, m.h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, nullptr)) || FAILED(tex->LockRect(0, &lr, nullptr, 0))) {
+            if (tex) tex->Release();
+            m.sig = 0;
+            return false;
         }
+        for (int y = 0; y < m.h; y++) {
+            DWORD* row = reinterpret_cast<DWORD*>(static_cast<BYTE*>(lr.pBits) + static_cast<size_t>(y) * lr.Pitch);
+            for (int x = 0; x < m.w; x++) {
+                const size_t i = static_cast<size_t>(y) * m.w + x;
+                const DWORD l = m.room[i];
+                const DWORD a = shaded && l ? m.shade[i] : 255u;
+                row[x] = a << 24 | l << 16 | l << 8 | l;
+            }
+        }
+        tex->UnlockRect(0);
+        if (m.tex) m.tex->Release();
+        m.tex = tex;
+        m.texGpu = false;
     }
-    tex->UnlockRect(0);
-    if (m.tex) m.tex->Release();
-    m.tex = tex;
     m.dirty = false;
     g_maskBuilds.fetch_add(1, std::memory_order_relaxed);
     if (!kPublicBuild && m.timing.seen) { // (2.15.3) the in-game time from a change of the lot's inputs to its new shade shown
@@ -2422,11 +2869,17 @@ bool MakeMaskTexture(IDirect3DDevice9* dev, LotMask& m) {
         const auto ms = [](DWORD from, DWORD to) { return static_cast<long>(to - from); };
         if (g_shadeTimingLogs < 400) {
             g_shadeTimingLogs++;
-            LOG_INFO(std::format("[LotLightBridge] Lamp shade on lot ground: lot {:016X} shown {} ms after its inputs changed (seen at a check every 100 ms; then {} ms to "
-                                 "its build sent, {} ms building on the worker, {} ms to taken, {} ms held for its {} chunks, {} ms to its draw; {} moving lamps in its "
-                                 "total only){}",
-                                 t.lot, ms(t.seen, GetTickCount()), ms(t.seen, t.sent), static_cast<long>(t.buildMs + 0.5), ms(t.sent, t.taken), ms(t.taken, t.applied),
-                                 t.chunks, ms(t.applied, GetTickCount()), t.live, g_shadeTimingLogs == 400 ? " (last such line)" : ""));
+            if (t.gpu)
+                LOG_INFO(std::format("[LotLightBridge] Lamp shade on lot ground: lot {:016X} shown {} ms after its inputs changed (seen at a check; built on the GPU "
+                                     "{} ms after, {:.2f} ms of the render thread, with its chunks; {} ms to its draw){}",
+                                     t.lot, ms(t.seen, GetTickCount()), ms(t.seen, t.sent), t.buildMs, ms(t.applied, GetTickCount()),
+                                     g_shadeTimingLogs == 400 ? " (last such line)" : ""));
+            else
+                LOG_INFO(std::format("[LotLightBridge] Lamp shade on lot ground: lot {:016X} shown {} ms after its inputs changed (seen at a check every 100 ms; then {} ms to "
+                                     "its build sent, {} ms building on the worker, {} ms to taken, {} ms held for its {} chunks, {} ms to its draw; {} moving lamps in its "
+                                     "total only){}",
+                                     t.lot, ms(t.seen, GetTickCount()), ms(t.seen, t.sent), static_cast<long>(t.buildMs + 0.5), ms(t.sent, t.taken), ms(t.taken, t.applied),
+                                     t.chunks, ms(t.applied, GetTickCount()), t.live, g_shadeTimingLogs == 400 ? " (last such line)" : ""));
         }
     }
     return true;
@@ -2490,7 +2943,7 @@ IDirect3DTexture9* LotMaskTexture(IDirect3DDevice9* dev, const LotRect& rect) {
                 if (g_pend.active && g_pend.lot == lot) DropPending(); // (2.15.3: nor the held one)
                 m.shade.clear();
                 MarkLotChunkShades(m);
-                m.ext.reset();
+                DropExt(m);
             }
             m.w = gm.w;
             m.h = gm.h;
@@ -2505,8 +2958,13 @@ IDirect3DTexture9* LotMaskTexture(IDirect3DDevice9* dev, const LotRect& rect) {
     // walls' copy) is not worked out more often than before
     // (the fast checks go on 200 ms past the drag, so one of them sees the key at rest when the drag hold and the moving lamp end)
     const bool changing = m.fenceGenSeen != g_fenceGen || DragLite::Engaged() || DragLite::StepWithin(DragLite::kStillMs + 2 * kShadeCheckMs);
-    if (!m.shadeChecked || now - m.shadeChecked >= (changing ? kShadeCheckMs : 500u)) {
+    // (GPU) a lot a dragged lamp moves over: every frame, so its walls' shadows follow the lamp (built at the next frame's first
+    // reader with its chunks); a lot whose GPU build took over kEveryFrameMaxMs follows it at kShadeCheckMs
+    constexpr double kEveryFrameMaxMs = 2.0;
+    const bool everyFrame = g_gpuMode && !m.gpuRefused && m.moving && DragLite::Engaged() && m.gpuMs < kEveryFrameMaxMs && m.shadeFrame != g_roomMapFrame;
+    if (!m.shadeChecked || everyFrame || now - m.shadeChecked >= (changing ? kShadeCheckMs : 500u)) {
         m.shadeChecked = now;
+        m.shadeFrame = g_roomMapFrame;
         m.fenceGenSeen = g_fenceGen;
         // the shade's grid is the room mask's (4 texels a metre over room 0's tiles); the lot rectangle must agree with it
         if (g_shadeOn && m.w > 0 && m.w == static_cast<int>(std::lround(r->w * GroundShadow::kTexelsPerMetre)) &&
@@ -2531,7 +2989,8 @@ std::string LotShadeStatusText() {
                        g_shadeOn ? "on" : "off", g_shadeBuilt.load(), g_shadeDropped.load(), g_shadeQueue.size(), g_lotsInFlight ? " (building)" : "",
                        g_shadeLastLamps, g_shadeLastWalls, g_shadeLastFences, g_fenceWalls.load(), g_gates.size(), g_gatesFilled.load(), g_shadeLastMs, g_shadeMaxMs, g_shadeLastMin * 100.0f, g_shadeLastPatches, g_shadeTests,
                        g_shadeThrough, g_chunkShades.size(), g_chunkShadeBuilds.load(), g_chunkShadeLastMs, (g_chunkShadeLastBytes + 1023) / 1024,
-                       g_pend.active ? ", a lot's new shade held for its chunks" : "");
+                       g_pend.active ? ", a lot's new shade held for its chunks" : "") +
+           ShadeGpuStatusText();
 }
 
 // ---- The same shade on the outdoor floors of story 0 (13/10, F7 2026-10-13 08-16-00: a paved path behind a free-standing
@@ -5645,11 +6104,17 @@ bool MatchLamps(const float (*dirs)[4], const float (*cols)[4], FoliageInstance&
     return any;
 }
 
-// One crown into g_crowns: merged with a crown already there within 0.25 m and 15% of its size
+// One crown into g_crowns: merged with a crown already there within 0.5 m across, 2.5 m up or down and 15% of its size, at
+// the higher of the two places. The camera's drift moves a plant's place up to 0.35 m across and by about half-metre steps
+// in height (copies of one bush down to 1.5 m under its ground): at 0.25 m in 3D one plant was noted again and again, 7962
+// crowns for 821 places, each copy taking the light once more
 void NoteCrown(const FoliageInstance& f) {
     for (CrownSeen& c : g_crowns) {
         const float dx = c.e.cx - f.centre[0], dy = c.e.cy - f.centre[1], dz = c.e.cz - f.centre[2];
-        if (dx * dx + dy * dy + dz * dz < 0.25f * 0.25f && ApexMath::Fabs(c.e.rx - f.rx) < 0.15f * f.rx && ApexMath::Fabs(c.e.ry - f.ry) < 0.15f * f.ry) return;
+        if (dx * dx + dz * dz < 0.5f * 0.5f && ApexMath::Fabs(dy) < 2.5f && ApexMath::Fabs(c.e.rx - f.rx) < 0.15f * f.rx && ApexMath::Fabs(c.e.ry - f.ry) < 0.15f * f.ry) {
+            c.e.cy = std::max(c.e.cy, f.centre[1]);
+            return;
+        }
     }
     if (g_crowns.size() >= kMaxCrowns) return;
     CrownSeen c;
@@ -10061,6 +10526,94 @@ uint64_t LotAt(float x, float z) {
     const LotRect* r = FindLotAt(x, z);
     return r ? static_cast<uint64_t>(r->lotHi) << 32 | r->lotLo : 0;
 }
+std::string ShadeProbeText(const float pos[3]) {
+    // (developer capture) every lot whose shade grid holds the lamp at pos: is it tested, in the total only or absent, the shade
+    // a CPU build of the lot's inputs now gives around it, and the walls and crowns that cut its light to those points
+    std::string out = "walls' shade on the ground around the target (a CPU build of each lot's inputs now; 255 = no shade):\n";
+    const bool soft = TesterToggles::groundSoftEdges.load(std::memory_order_relaxed);
+    for (const LotRect& r : g_lotRects) {
+        const uint64_t lot = static_cast<uint64_t>(r.lotHi) << 32 | r.lotLo;
+        const auto mi = g_lotMasks.find(lot);
+        if (mi == g_lotMasks.end() || mi->second.w <= 0) continue;
+        std::vector<GroundShadow::Lamp> others;
+        size_t live = 0;
+        const std::vector<GroundShadow::Lamp> lamps = ShadeLamps(r, &others, &live, g_gpuMode);
+        int ox, oz;
+        GroundShadow::Grid g = ShadeGrid(r, mi->second.w, mi->second.h, lamps, ox, oz);
+        g.soft = soft;
+        float fi, fj;
+        if (!GroundShadow::WorldTexel(g, pos[0], pos[2], fi, fj) || fi < 0 || fj < 0 || fi >= g.w || fj >= g.h) continue;
+        const auto isTarget = [&](const GroundShadow::Lamp& L) { return ApexMath::Fabs(L.x - pos[0]) < 0.3f && ApexMath::Fabs(L.z - pos[2]) < 0.3f; };
+        int tested = -1, other = -1;
+        for (size_t i = 0; i < lamps.size(); i++)
+            if (isTarget(lamps[i])) tested = static_cast<int>(i);
+        for (size_t i = 0; i < others.size(); i++)
+            if (isTarget(others[i])) other = static_cast<int>(i);
+        float x0, z0, x1, z1;
+        ShadeBox(r, lamps, x0, z0, x1, z1);
+        std::vector<GroundShadow::Wall> walls;
+        std::vector<WallOpenings::Patch> patches;
+        std::vector<Canopy::Ellipsoid> crowns;
+        if (!lamps.empty()) ShadeWalls(x0, z0, x1, z1, walls, patches);
+        if (!lamps.empty() && DevSwitches::CanopyGroundShadow()) CrownsIn(x0, z0, x1, z1, crowns);
+        out += std::format("  lot {:016X} ({:.0f} x {:.0f} m, grid {} x {}): the target {} | {} tested lamps, {} in the total, {} walls, {} crowns{}\n", lot, r.w, r.d, g.w, g.h,
+                           tested >= 0 ? std::format("tested (#{}, head y {:.2f}, k {:.2f})", tested, lamps[tested].y, lamps[tested].k)
+                                       : other >= 0 ? std::string("in the total only") : std::string("ABSENT from its lists"),
+                           lamps.size(), others.size(), walls.size(), crowns.size(), g_gpuMode ? " (GPU mode)" : "");
+        { // the crowns over the lamp's ground within 4 m, and how many of them stand within 1 m of another (the same plant noted twice?)
+            int n = 0, twins = 0;
+            std::string list;
+            for (size_t a = 0; a < crowns.size(); a++) {
+                const Canopy::Ellipsoid& e = crowns[a];
+                if (std::hypot(e.cx - pos[0], e.cz - pos[2]) > 4.0f + e.rx) continue;
+                n++;
+                for (size_t b = 0; b < crowns.size(); b++)
+                    if (b != a && std::hypot(crowns[b].cx - e.cx, crowns[b].cz - e.cz) < 1.0f && ApexMath::Fabs(crowns[b].cy - e.cy) < 1.0f) {
+                        twins++;
+                        break;
+                    }
+                if (n <= 24) list += std::format(" ({:.2f} {:.2f} {:.2f} r {:.2f}/{:.2f})", e.cx, e.cy, e.cz, e.rx, e.ry);
+            }
+            out += std::format("    crowns within 4 m: {} ({} with another within 1 m){}\n", n, twins, list);
+        }
+        if (walls.empty() && crowns.empty()) continue;
+        GroundShadow::ShadeJob job;
+        job.Init(g, lamps, walls, patches, crowns, others);
+        job.Step([] { return true; });
+        const std::vector<uint8_t>& res = job.Result();
+        const std::vector<float>& den = job.StampWeight();
+        std::vector<GroundShadow::Wall> marked = walls;
+        if (soft) GroundShadow::MarkFreeEnds(marked);
+        for (const float d : {1.0f, 2.5f})
+            for (int a = 0; a < 8; a++) {
+                const float ang = a * 0.7853982f, px = pos[0] + d * std::cos(ang), pz = pos[2] + d * std::sin(ang);
+                float pi, pj;
+                if (!GroundShadow::WorldTexel(g, px, pz, pi, pj)) continue;
+                const int ii = static_cast<int>(pi), jj = static_cast<int>(pj);
+                if (ii < 0 || jj < 0 || ii >= g.w || jj >= g.h) continue;
+                const size_t at = static_cast<size_t>(jj) * g.w + ii;
+                std::string cuts;
+                if (tested >= 0) {
+                    const GroundShadow::Lamp& L = lamps[tested];
+                    for (size_t k = 0; k < marked.size(); k++) {
+                        const float p = GroundShadow::Pass(L, px, g.ty, pz, marked[k], patches.data(), soft);
+                        if (p < 0.99f)
+                            cuts += std::format(" wall ({:.2f} {:.2f})-({:.2f} {:.2f}) y {:.2f}..{:.2f} lets {:.2f};", marked[k].x0, marked[k].z0, marked[k].x1, marked[k].z1,
+                                                marked[k].y0, marked[k].y1, p);
+                    }
+                    for (const Canopy::Ellipsoid& e : crowns) {
+                        float b0, b1, b2, b3;
+                        if (!Canopy::ShadowBox(e, L.x, L.y, L.z, g.ty, 1e6f, b0, b1, b2, b3)) continue; // (as the build: none past it, none holding the head)
+                        const float t = Canopy::Transmission(e, L.x, L.y, L.z, px, g.ty, pz);
+                        if (t < 0.99f) cuts += std::format(" crown at ({:.2f} {:.2f} {:.2f}) radii ({:.2f} {:.2f}) lets {:.2f};", e.cx, e.cy, e.cz, e.rx, e.ry, t);
+                    }
+                }
+                out += std::format("    {:.1f} m at {:3d} deg ({:.2f} {:.2f}): shade {:3d}, lamps' weight there {:.3f}{}\n", d, a * 45, px, pz, res[at], den[at],
+                                   cuts.empty() ? std::string() : " | the target's light cut by:" + cuts);
+            }
+    }
+    return out;
+}
 std::string GainText() {
     return std::format("night {:.2f}; ground {:.3f} (terrain c3.x / lot pass), roads {:.3f}, lot map {:.3f} (lot pass c31.x), floors {:.3f}, roads by day curve {:.3f}",
                        g_night.load(), GroundGain(), RoadGain(), LotMapGain(), FloorDayGain(), RoadDayGain());
@@ -10346,6 +10899,8 @@ void Shutdown(bool keepChunkMaps) {
     }
     g_shadeWorker.Stop();
     ReleaseLotMasks();
+    g_gpuEng.reset(); // (GPU: its shaders and targets; made again at the next first reader)
+    g_gpuState = 0, g_gpuMode = false;
     g_fenceGroups.clear();
     g_fenceBirths.clear();
     g_fenceCuts.clear();

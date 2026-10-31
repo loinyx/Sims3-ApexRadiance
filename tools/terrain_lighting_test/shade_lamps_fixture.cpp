@@ -90,6 +90,15 @@ int main() {
     Assert(lamps.size() == 1 && lamps[0].x == 30.0f, "moving: A leaves the wall test");
     Assert(live == 1 && others.size() == 2 && others[0].x == 12.0f && others[1].x == 60.0f, "moving: A first in the total, at its place now");
 
+    { // the GPU path: A stays tested, at its place now; nothing in the total only
+        size_t moving = 0;
+        std::vector<GroundShadow::Lamp> gpuOthers;
+        live = 99;
+        const std::vector<GroundShadow::Lamp> gpuLamps = ShadeLamps(lot, &gpuOthers, &live, true, &moving);
+        Assert(gpuLamps.size() == 2 && Has(gpuLamps, 12.0f) && Has(gpuLamps, 30.0f) && live == 0 && moving == 1 && Same(gpuOthers, restOthers),
+               "GPU path, moving: A tested at its place now, counted as moving, the total as at rest");
+    }
+
     g_moved.clear(); // A excluded and still while another lamp moves
     lamps = run(others, live);
     Assert(live == 0 && Has(lamps, 12.0f) && Same(others, restOthers), "still while another lamp moves: A tested at its place now");
@@ -117,6 +126,16 @@ int main() {
     std::erase_if(expected, [](const GroundShadow::Lamp& L) { return L.x == 1.0f; });
     Assert(rest34.size() == 32 && Same(lamps, expected), "past 32 lamps: the tested ones are those at rest less the moving one");
     Assert(live == 1 && others.size() == restOthers.size() + 1 && others[0].x == 1.0f, "past 32 lamps: the moving one first in the total");
+    {
+        std::vector<GroundShadow::Lamp> gpuOthers;
+        const std::vector<GroundShadow::Lamp> gpuLamps = ShadeLamps(lot, &gpuOthers, &live, true);
+        const auto fields = [](const std::vector<GroundShadow::Lamp>& a, const std::vector<GroundShadow::Lamp>& b) { // (by field: a struct's padding is not compared)
+            return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](const GroundShadow::Lamp& p, const GroundShadow::Lamp& q) {
+                       return p.x == q.x && p.y == q.y && p.z == q.z && p.k == q.k && p.liftable == q.liftable && p.rx0 == q.rx0 && p.rz0 == q.rz0 && p.rx1 == q.rx1 && p.rz1 == q.rz1;
+                   });
+        };
+        Assert(fields(gpuLamps, rest34) && fields(gpuOthers, restOthers) && live == 0, "GPU path, past 32 lamps: the 32 strongest tested as at rest (the moving one at its place)");
+    }
 
     // 8 moving and 100 over the margin: the moving ones first, 96 in all
     g_snap.lamps.clear(), g_excluded.clear(), g_moved.clear(), g_places.clear();
@@ -134,6 +153,25 @@ int main() {
     lamps = run(others, live);
     Assert(live == 0 && Has(lamps, 12.0f), "the drag over for its hold (Engaged false): tested at its place now, not in the total only");
     DragLite::g_engaged = true;
+    { // a Classic drag hold seen lately (g_classicHeldAt): the worker's lots take no lamp as moving, the GPU path's still do
+        g_classicHeldAt = g_now | 1;
+        lamps = run(others, live);
+        Assert(live == 0 && Has(lamps, 12.0f), "Classic hold seen lately: A tested at its place now, not in the total only");
+        size_t moving = 0;
+        std::vector<GroundShadow::Lamp> gpuOthers;
+        ShadeLamps(lot, &gpuOthers, &live, true, &moving);
+        Assert(moving == 1, "Classic hold seen lately, GPU path: A still counted as moving");
+        g_now += DragLite::kStillMs + 1, DragLite::g_lastMove = g_now - 100;
+        lamps = run(others, live);
+        Assert(live == 1 && !Has(lamps, 12.0f), "kStillMs after the hold: a moving A is in the total only again");
+        g_classicHeldAt = 0;
+    }
+    { // a GPU refusal holds while the occluder key is the same (lamp places are not in it)
+        uint64_t refused = 0;
+        Assert(RefusalHolds(refused, 0x51) && refused == 0x51, "refusal: the first check takes the occluder key");
+        Assert(RefusalHolds(refused, 0x51), "refusal: the same occluders, still refused");
+        Assert(!RefusalHolds(refused, 0x77) && refused == 0, "refusal: other occluders, the GPU is tried again");
+    }
     // LampMoving: a move within 0.75 s that the button has not let go of since
     using namespace DragLite;
     g_lastMove = 1000, g_letGoAt = 0, g_now = 1500;
