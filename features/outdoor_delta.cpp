@@ -553,6 +553,9 @@ struct Acc {
     float vis, all;
     float hook[3]; // (the room lamp probe) the evaluations' colour before the game's tests
     float wall[3]; // (the room lamp probe) that colour after the game's 2D wall test
+    float from[3]; // (the room lamp probe) the game's own wall test: where its ray starts, its answer (raw: 0 not run, 1 ok, 2 dropped)
+    float rawT;
+    uint8_t raw;
 };
 struct SampleState {
     bool on = false;
@@ -586,6 +589,8 @@ struct Capture {
         uintptr_t light;
         float rgb[3];
         float wall[3];
+        float from[3], rawT;
+        uint8_t raw;
     };
     std::vector<ProbeHook> probeHook; // (the probe) each light's colour at each texel before the game's tests
     // a self-check solve: the texels the delta wrote, by (map, x, y)
@@ -1415,7 +1420,8 @@ void ProbeDump(const BYTE* room, const RoomRead& rr, const std::string& texels) 
         LOG_INFO(s_file ? "[RoomLampProbe] Dump: RoomLampProbe-<time>.txt in the Apex Radiance folder" : "[RoomLampProbe] Dump: the file could not be made");
         if (s_file) { // the 3D test's constants (0x0069D910, 0x0069FCE0, the blockers' vfunc+0x14 and their helpers 0x0069B4C0..0x0069B72A)
             static constexpr uint32_t kConsts[] = {0x00F98964, 0x00F98A58, 0x00F9A5AC, 0x00FAA210, 0x00FB2F6C, 0x00FBD498, 0x00FECE18, 0x00FF31AC, 0x0106B4B4, 0x0106D6CC,
-                                                   0x0107A538, 0x011CB864, 0x011D01B0, 0x011D01C0, 0x011D01D0, 0x011D01E0, 0x011D01F0, 0x011D0200, 0x011D0240};
+                                                   0x0107A538, 0x011CB864, 0x011D01B0, 0x011D01C0, 0x011D01D0, 0x011D01E0, 0x011D01F0, 0x011D0200, 0x011D0240,
+                                                   0x00FF30A0, 0x00FF307C, 0x0106E33C, 0x00F9896C, 0x01158A50, 0x011D0190}; // (and the 2D wall test's)
             std::string c;
             for (uint32_t at : kConsts) {
                 uint32_t v[4] = {};
@@ -1455,6 +1461,34 @@ void ProbeDump(const BYTE* room, const RoomRead& rr, const std::string& texels) 
             }
         }
     } else out += "RECORDS none\n";
+    // the 2D wall test 0x0069FC40 -> 0x0069D4C0: the mode byte +0x639, the walls (room+0x30..+0x34, pointers; 0x100 bytes each),
+    // the default index vectors (2D room+0x78..+0x7C, 3D room+0x88..+0x8C)
+    uint8_t mode = 0;
+    CopyBytes(&mode, room + 0x639, 1);
+    uintptr_t wv[2] = {}, i2[2] = {}, i3[2] = {};
+    CopyBytes(wv, room + 0x30, sizeof wv), CopyBytes(i2, room + 0x78, sizeof i2), CopyBytes(i3, room + 0x88, sizeof i3);
+    const size_t nw = wv[0] && wv[1] >= wv[0] ? std::min<size_t>((wv[1] - wv[0]) / 4, 1024) : 0;
+    out += std::format("WALLS {} mode {}\n", nw, static_cast<int>(mode));
+    for (size_t i = 0; i < nw; i++) {
+        uintptr_t w = 0;
+        if (!CopyBytes(&w, reinterpret_cast<const void*>(wv[0] + i * 4), 4) || !w) continue;
+        uint32_t raw[64] = {};
+        CopyBytes(raw, reinterpret_cast<const void*>(w), sizeof raw);
+        out += std::format("W {} {:08X} raw", i, w);
+        for (uint32_t x : raw) out += std::format(" {:08X}", x);
+        out += '\n';
+    }
+    for (int v = 0; v < 2; v++) {
+        const uintptr_t* iv = v ? i3 : i2;
+        const size_t ni = iv[0] && iv[1] >= iv[0] ? std::min<size_t>((iv[1] - iv[0]) / 4, 4096) : 0;
+        out += std::format("{} {}", v ? "IDX3D" : "IDX2D", ni);
+        for (size_t i = 0; i < ni; i++) {
+            int32_t x = 0;
+            CopyBytes(&x, reinterpret_cast<const void*>(iv[0] + i * 4), 4);
+            out += std::format(" {}", x);
+        }
+        out += '\n';
+    }
     out += texels;
     s_bytes += std::fwrite(out.data(), 1, out.size(), s_file);
     std::fflush(s_file);
@@ -1507,6 +1541,17 @@ void ProbeEnd(const BYTE* room) {
     std::unordered_map<uintptr_t, std::vector<const Capture::ProbeHook*>> hooks;
     for (const Capture::ProbeHook& h : c.probeHook)
         if (h.texel < n) hooks[h.light].push_back(&h);
+    // (the dump) each texel's batch: its index, size, the pass's switches (flags[0] walls, flags[1] 3D) and centroid
+    std::vector<uint32_t> batchOf(n, 0xFFFFFFFFu);
+    std::vector<float> centroid(r.batches.size() * 3, 0.0f);
+    for (size_t b = 0; b < r.batches.size(); b++) {
+        const BatchRec& br = r.batches[b];
+        for (uint32_t k = 0; k < br.count && br.first + k < n; k++) {
+            batchOf[br.first + k] = static_cast<uint32_t>(b);
+            const float* p = reinterpret_cast<const float*>(r.samples.data() + static_cast<size_t>(br.first + k) * 0x30);
+            for (int q = 0; q < 3; q++) centroid[b * 3 + q] += p[q] / static_cast<float>(br.count);
+        }
+    }
     // light no part holds (the GPU's base would keep it whatever it draws)
     std::vector<float> got(n * 3, 0.0f), measAll(n * 3, 0.0f), lawAll(n * 3, 0.0f);
     for (const LampRec& l : r.lamps)
@@ -1541,10 +1586,13 @@ void ProbeEnd(const BYTE* room) {
         // (11/01 game tests: the solve gave 0.4 to 0.7 of the law, and neither realistic reach indoors nor the cap explained it)
         // the colour each evaluation left before the game's own wall and object tests: the law apart from those tests
         std::vector<float> hk, wl; // the colour before the game's tests, and after its 2D wall test
+        std::vector<const Capture::ProbeHook*> hp; // (the dump) the texel's last evaluation of this lamp
         if (const auto it = hooks.find(li.light); it != hooks.end()) {
-            hk.assign(n * 3, 0.0f), wl.assign(n * 3, 0.0f);
-            for (const Capture::ProbeHook* h : it->second)
+            hk.assign(n * 3, 0.0f), wl.assign(n * 3, 0.0f), hp.assign(n, nullptr);
+            for (const Capture::ProbeHook* h : it->second) {
                 for (int k = 0; k < 3; k++) hk[h->texel * 3 + k] += h->rgb[k], wl[h->texel * 3 + k] += h->wall[k];
+                hp[h->texel] = h;
+            }
         }
         long lit = 0, match = 0, dark = 0, extra = 0;
         long rays = 0, shadowMatch = 0, shadedOk = 0, leak = 0, over = 0; // (the tested texels against the occluders)
@@ -1647,6 +1695,14 @@ void ProbeEnd(const BYTE* room) {
                                               "got {:.5f} {:.5f} {:.5f}\n",
                                               li.light, s[0], s[1], s[2], s[4], s[5], s[6], law.pos[0], law.pos[1], law.pos[2], h[0], h[1], h[2], wl[i * 3], wl[i * 3 + 1],
                                               wl[i * 3 + 2], got[i * 3], got[i * 3 + 1], got[i * 3 + 2]);
+                    dumpTexels.pop_back(); // (the line goes on: the game's own wall test and the batch)
+                    if (const Capture::ProbeHook* ph = hp[i]; ph && ph->raw)
+                        dumpTexels += std::format(" from {:.4f} {:.4f} {:.4f} raw {} {:.5f}", ph->from[0], ph->from[1], ph->from[2], ph->raw == 1 ? 1 : 0, ph->rawT);
+                    else dumpTexels += " raw none";
+                    if (const uint32_t b = batchOf[i]; b < r.batches.size())
+                        dumpTexels += std::format(" batch {} n {} flags {} {} c {:.4f} {:.4f} {:.4f}", b, r.batches[b].count, static_cast<int>(r.batches[b].flags[0]),
+                                                  static_cast<int>(r.batches[b].flags[1]), centroid[b * 3], centroid[b * 3 + 1], centroid[b * 3 + 2]);
+                    dumpTexels += '\n';
                 }
             }
             float lm = 0.0f;
@@ -2182,7 +2238,7 @@ Acc* AccFor(uintptr_t light) {
         return nullptr;
     }
     Acc& a = s.acc[s.n++];
-    a = Acc{light, {0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
+    a = Acc{light, {0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, 1.0f, 0};
     return &a;
 }
 void FlushTap() {
@@ -2229,6 +2285,14 @@ void OnWallTest(bool passed, float t) {
     if (Acc* a = AccFor(s.lastLight))
         for (int i = 0; i < 3; i++) a->wall[i] -= s.last[i] * (1.0f - share);
     s.lastLight = 0;
+}
+void OnWallTestRaw(const float* from, bool ok, float t) {
+    SampleState& s = g_s;
+    if (!s.on || s.tap != 0 || !g_cap.probe || !s.lastLight || !from) return;
+    if (Acc* a = AccFor(s.lastLight)) {
+        for (int i = 0; i < 3; i++) a->from[i] = from[i];
+        a->rawT = t, a->raw = ok ? 1 : 2;
+    }
 }
 void OnEval(uintptr_t light) {
     SampleState& s = g_s;
@@ -2321,7 +2385,7 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
             p.vis = s.masked ? ToHalf(a.vis) : 0;
             p.all = s.masked ? ToHalf(a.all) : 0;
             if (c.probe && (a.hook[0] != 0.0f || a.hook[1] != 0.0f || a.hook[2] != 0.0f))
-                c.probeHook.push_back(Capture::ProbeHook{texel, a.light, {a.hook[0], a.hook[1], a.hook[2]}, {a.wall[0], a.wall[1], a.wall[2]}});
+                c.probeHook.push_back(Capture::ProbeHook{texel, a.light, {a.hook[0], a.hook[1], a.hook[2]}, {a.wall[0], a.wall[1], a.wall[2]}, {a.from[0], a.from[1], a.from[2]}, a.rawT, a.raw});
             if (!Nonzero(p)) continue;
             auto [it, fresh] = c.lampIdx.try_emplace(a.light, static_cast<int>(r.lamps.size()));
             if (fresh) {

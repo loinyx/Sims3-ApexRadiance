@@ -13182,6 +13182,7 @@ bool GameWallTestImpl(BYTE* room, void* idx, const float* lightPos, const void* 
         g_ctx.enterHard = false;
     }
     bool ok = reinterpret_cast<WallTest_t>(kWallTest)(room, idx, from, sample, t);
+    if (t_odSample && OutdoorDelta::RoomProbe()) OutdoorDelta::OnWallTestRaw(from, ok, t ? *t : 1.0f); // (the probe: the game's own answer)
     if (from == lightPos && lightPos && sample && t && (!ok || *t < 1.0f) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed) && g_ctx.info &&
         g_ctx.info->openGrid[0] && !g_ctx.info->indoor && !g_ctx.info->yard && !g_ctx.info->openings) {
         g_zeroOpenTests.fetch_add(1, std::memory_order_relaxed);

@@ -72,6 +72,9 @@ give.
   3D blockers as the game's 3D test `0x0069D910` reads them (room+0x40: 64-byte records with a centre and a squared radius,
   their blocker pointers at +0x30; each blocker's vtable, vfunc+0x14 and first 0x100 bytes; once a file, the 19 globals the 3D test and the blockers' functions read) and up to 1,800 sample texels
   (position, normal, lamp, colour before the tests, after the wall test, final), for an offline replay of the 3D test.
+- **Dump, the 2D wall test**: per room the mode byte +0x639, its walls (room+0x30..+0x34, 0x100 bytes each) and the default 2D
+  and 3D index vectors (+0x78, +0x88); per sample texel the game's own wall test inside Apex's wrapper (the ray's start and
+  its answer before Apex's overrides) and the texel's batch (size, the pass's two switches, centroid).
 - **Sample layout**: the batch sample's position at +0x00 and normal at +0x10, world space, as `ExportRoom0` reads them.
 - **Test**: `tools/outdoor_delta_test` checks `ProbeClassify`'s five classes.
 

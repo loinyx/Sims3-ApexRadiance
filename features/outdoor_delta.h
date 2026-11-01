@@ -70,6 +70,8 @@ void OnEval(uintptr_t light);
 void OnEvalOut(uintptr_t light, const float* colour);
 // The room lamp probe: the game's 2D wall test of that evaluation (passed = not skipped; t its transmission)
 void OnWallTest(bool passed, float t);
+// The room lamp probe: the game's own wall test inside it, before Apex's overrides (from = the point the ray starts at)
+void OnWallTestRaw(const float* from, bool ok, float t);
 // The floor mask's fused copy took `light`'s no-wall-test colour: its sum before and after
 void OnFuse(uintptr_t light, const float* before, const float* after);
 void DropFused(); // the fused copy is not used (the copy is solved apart): the parts it gave go
