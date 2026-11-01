@@ -200,6 +200,7 @@ constexpr int kLampClassic = 0, kLampInstant = 1;
 int g_lampMode = kLampInstant; // (14/10: Instant by default; a saved lampLightingMode keeps its choice)
 bool g_outdoorDeltaCheck = false; // the delta's self-check (developer)
 bool g_roomLampProbe = false;     // the room lamp probe against the GPU's law (developer)
+bool g_gpuRoomLampsCapture = false; // GPU room lamps stage 1: the active lot's room solves kept for the GPU (developer)
 float g_sidewalkClear = 0.5f;
 float g_lampTint = 1.0f;
 bool g_fenceGround = true;
@@ -2431,6 +2432,10 @@ class NightTerrainRelightPatch : public ApexPatch {
             RegisterBoolSetting(&g_roomLampProbe, "roomLampProbe", false,
                 "Developer: each solve of the active lot's rooms other than room 0 is compared with the law the GPU would draw its lamps with "
                 "(no shadow), and the log gives per room and lamp how they differ. Nothing is drawn.");
+        if (!kPublicBuild) // developer only
+            RegisterBoolSetting(&g_gpuRoomLampsCapture, "gpuRoomLampsCapture", false,
+                "Developer: each solve of the active lot's rooms other than room 0 is kept for the GPU (the light without the lot's lamps, and each "
+                "lamp's share per texel), within a memory budget. With roomLampProbe on too, each kept solve is recomposed and compared. Nothing is drawn.");
         if (!kPublicBuild) // developer A/B only; the public build always has soft lot edges
             RegisterBoolSetting(&g_softLotEdges, "bordaSuaveLote", true,
                 "Developer: within 3 m of a lot edge, lot grass fades its lamp light to the ground light the world grass shows "
@@ -2899,6 +2904,16 @@ class NightTerrainRelightPatch : public ApexPatch {
                         LOG_INFO(std::format("[RoomLampProbe] {} rooms of the active lot sent to their solve", sent));
                     }
                 }
+                if (const bool keep = rtOn && kDevToolsBuild && !kPublicBuild && g_gpuRoomLampsCapture; keep != OutdoorDelta::RoomLampCapture()) {
+                    OutdoorDelta::SetRoomLampCapture(keep);
+                    if (keep) { // every room of the active lot is solved once, so each solve is kept
+                        uintptr_t trackers[4];
+                        const int n = LevelLightShare::ActiveLotTrackers(trackers, 4);
+                        int sent = 0;
+                        for (int i = 0; i < n; i++) sent += std::max(0, LevelLightShare::RelightLot(trackers[i], "GPU room lamps capture"));
+                        LOG_INFO(std::format("[GpuRoomLamps] {} rooms of the active lot sent to their solve", sent));
+                    }
+                }
                 if (rtOn || OutdoorDelta::Enabled()) HookGuard::Run("OutdoorDelta frame update", [] { OutdoorDelta::OnPresent(); });
             }
             LightmapSmooth::SetEnabled(g_smoothMaps);
@@ -3157,6 +3172,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_lampMode = kLampInstant;
         g_outdoorDeltaCheck = false;
         g_roomLampProbe = false;
+        g_gpuRoomLampsCapture = false;
         g_lampTint = 1.0f;
         g_lotTintOwn = false;
         g_lotLampTint = 1.0f;
@@ -3687,6 +3703,9 @@ class NightTerrainRelightPatch : public ApexPatch {
             NotifySettingChanged();
         if (g_lampMode == kLampInstant && ApexUi::SwitchRow("Compare indoor lamps with GPU", &g_roomLampProbe,
                                                             "Logs how each lamp's light in the active lot's rooms differs from what the GPU would draw", false))
+            NotifySettingChanged();
+        if (g_lampMode == kLampInstant && ApexUi::SwitchRow("Keep indoor lamps for GPU", &g_gpuRoomLampsCapture,
+                                                            "Keeps the active lot's room solves for the GPU; logs a self-check with the comparison on", false))
             NotifySettingChanged();
         if (ApexUi::Checkbox("Smooth the ground light maps on the GPU (A/B: off = CPU worker)", &g_smoothMapsGpu)) NotifySettingChanged();
         ImGui::SameLine();

@@ -2330,6 +2330,8 @@ const I18n::Pair kPairs[] = {
     {"Solves those floors in full again later and logs the largest texel difference", "少し後にそれらの階をもう一度すべて計算し、最大のテクセル差をログに記録します"},
     {"Compare indoor lamps with GPU", "室内ランプを GPU と比較"},
     {"Logs how each lamp's light in the active lot's rooms differs from what the GPU would draw", "アクティブな区画の部屋で各ランプの光が GPU の描画とどう異なるかをログに記録"},
+    {"Keep indoor lamps for GPU", "室内ランプを GPU 用に保持"},
+    {"Keeps the active lot's room solves for the GPU; logs a self-check with the comparison on", "アクティブな区画の各部屋の計算を GPU 用に保持します。比較がオンのとき、自己チェックをログに記録します"},
     {"Tester", "テスト"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "移植した各部分を同じシーンでオフ・オンにして、フレーム時間と見た目を比べます。変更はすぐに適用され、保存されます。"},
     {"Frame time", "フレーム時間"},

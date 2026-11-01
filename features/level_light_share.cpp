@@ -12961,7 +12961,7 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
             if (c) OutdoorDelta::OnEvalOut(l, c);
         }
     } probeOnExit{reinterpret_cast<uintptr_t>(light),
-                  t_odSample && t_odDepth == 1 && OutdoorDelta::RoomProbe() && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) ? colour : nullptr};
+                  t_odSample && t_odDepth == 1 && OutdoorDelta::RoomHooks() && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) ? colour : nullptr};
     // (the room lamp probe) this evaluation's record (t_pe), from the game's evaluation on; the previous one put back on every way out
     struct ProbeEvalScope {
         OutdoorDelta::ProbeEval* prev = t_pe;
@@ -12975,6 +12975,7 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
         float thrScale = 1.0f;
         ~FadeOnExit() {
             if (!c) return;
+            if (t_pe) t_pe->preFade = (c[2] + c[1]) + c[0], t_pe->thrScale = thrScale; // (the room lamp probe, kept captures)
             const float f = FadeAtThreshold(c, thrScale);
             if (t_pe) t_pe->fade = f, t_pe->fadeThr = g_ctx.thr * thrScale, t_pe->has |= 8; // (the room lamp probe)
         }
@@ -13061,7 +13062,7 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
             return;
         }
         const ApexCycles timed;
-        if (t_odSample && OutdoorDelta::RoomProbe()) { // (the room lamp probe) which of Apex's paths this lamp takes, and its colour before it
+        if (t_odSample && OutdoorDelta::RoomHooks()) { // (the room lamp probe) which of Apex's paths this lamp takes, and its colour before it
             const bool yardSame = g_ctx.info->yard && FindSame(*g_ctx.info, reinterpret_cast<uintptr_t>(light));
             const Cross* pc = innerLamp || openLamp || yardSame || !g_ctx.info->indoor ? nullptr : FindCross(*g_ctx.info, reinterpret_cast<uintptr_t>(light));
             const int path = innerLamp ? 1 : openLamp || yardSame ? 2 : !g_ctx.info->indoor || (pc && pc->outdoor) ? 3 : pc ? 4 : 0;
@@ -13206,7 +13207,7 @@ bool GameWallTestImpl(BYTE* room, void* idx, const float* lightPos, const void* 
 // (the room lamp probe) each wall test's answer for the evaluation before it
 bool __fastcall GameWallTest(BYTE* room, void*, void* idx, const float* lightPos, const void* sample, float* t) {
     const bool ok = GameWallTestImpl(room, idx, lightPos, sample, t);
-    if (t_odSample && OutdoorDelta::RoomProbe()) OutdoorDelta::OnWallTest(ok, t ? *t : 1.0f);
+    if (t_odSample && OutdoorDelta::RoomHooks()) OutdoorDelta::OnWallTest(ok, t ? *t : 1.0f);
     return ok;
 }
 bool GameWallTestImpl(BYTE* room, void* idx, const float* lightPos, const void* sample, float* t) {
@@ -13247,7 +13248,7 @@ bool GameWallTestImpl(BYTE* room, void* idx, const float* lightPos, const void* 
         g_ctx.enterHard = false;
     }
     bool ok = reinterpret_cast<WallTest_t>(kWallTest)(room, idx, from, sample, t);
-    if (t_odSample && OutdoorDelta::RoomProbe()) OutdoorDelta::OnWallTestRaw(from, ok, t ? *t : 1.0f); // (the probe: the game's own answer)
+    if (t_odSample && OutdoorDelta::RoomHooks()) OutdoorDelta::OnWallTestRaw(from, ok, t ? *t : 1.0f); // (the probe: the game's own answer)
     if (from == lightPos && lightPos && sample && t && (!ok || *t < 1.0f) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed) && g_ctx.info &&
         g_ctx.info->openGrid[0] && !g_ctx.info->indoor && !g_ctx.info->yard && !g_ctx.info->openings) {
         g_zeroOpenTests.fetch_add(1, std::memory_order_relaxed);

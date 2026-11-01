@@ -69,6 +69,16 @@ inline void Fade(float c[3], float thr, bool fade) {
     const float f = x * x * (3.0f - 2.0f * x);
     for (int i = 0; i < 3; i++) c[i] *= f;
 }
+// GPU room lamps, stage 1 (outdoor_delta.cpp KeepEnd): one kept part of a room's texel recomposed with the lamp's law there.
+// A: the colour Apex's tests left before the soft light cut over the law (r + g + b); B: the game's 2D wall x 3D share (0:
+// dropped, or never tested); early: Apex's threshold early-out returned (under the threshold the colour stays dark); fade:
+// the soft light cut ran, at thr x thrScale (off: the game's drop under thr). Adds mult x fade(law x A) x B.
+inline void KeptAdd(const float law[3], float A, float B, float thrScale, float mult, bool early, bool fade, float thr, float out[3]) {
+    float c[3] = {law[0] * A, law[1] * A, law[2] * A};
+    if (early && thr > (c[2] + c[1]) + c[0]) return;
+    Fade(c, fade ? thr * thrScale : thr, fade);
+    for (int i = 0; i < 3; i++) out[i] += mult * c[i] * B;
+}
 // What one GPU lamp adds to a texel at p (normal n) with shadow share vis: mult x fade(law x vis)
 inline void Add(const Lamp& L, const float p[3], const float n[3], float vis, bool reachOn, float thr, bool fade, float out[3]) {
     float law[3];

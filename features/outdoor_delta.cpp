@@ -71,6 +71,12 @@ constexpr size_t kMaxRecordBytes = size_t{96} << 20;
 // floor cut stopped (about 300 B each), and the evaluations kept although Apex left them dark (the dump's Z lines)
 constexpr size_t kProbeEvalMax = 65536;
 constexpr long kProbeZeroMax = 200000;
+// (GPU room lamps stage 1) the kept room solves of the active lot together; past it a new solve is not kept (never one kept
+// room dropped for another: the rooms would evict one another in a loop, as the pinned room 0s did)
+constexpr size_t kMaxKeptBytes = size_t{192} << 20;
+// shortcut: an evaluation darker than this share of the threshold before the soft light cut is not kept (a lamp brightened
+// more than 4 times misses those texels); lower it if instant edits brighten lamps further
+constexpr float kKeepFloor = 0.25f;
 // past kMaxBytes only the pinned rooms (Real-time outdoor lamps' active lot) are left. 14/10: 160 MB, with the drawn lamps'
 // parts of those rooms kept as one sum per texel (CollapseDrawn), which is what Real-time outdoor lamps reads; a pinned room
 // never drops another pinned room (that made the active lot's stories evict one another in a loop: dropped, sent to their
@@ -84,6 +90,8 @@ constexpr uint16_t kNoBlock = 0xFFFF, kBadBlock = 0xFFFE;
 
 std::atomic<bool> g_on{false}, g_check{false}, g_clear{false};
 std::atomic<bool> g_probe{false}; // the developer's room lamp probe (SetRoomProbe)
+std::atomic<bool> g_capture{false}; // GPU room lamps stage 1: the active lot's room solves kept (SetRoomLampCapture)
+std::atomic<bool> g_keptClear{false}; // the kept room solves go (the capture switched off; done on the light tree thread)
 std::atomic<uint32_t> g_gen{1};
 std::atomic<uint32_t> g_version{1}; // Record::version's source
 std::atomic<const void*> g_deltaRoom{nullptr};
@@ -551,6 +559,8 @@ bool UniqueList(const BYTE* room, std::vector<ListLight>& out) {
 }
 
 // ---- the solve being kept (light tree thread) ----
+// (kept captures) an evaluation's bits: Apex's threshold early-out returned; the soft light cut ran (its threshold x thrScale)
+enum : uint8_t { kKeptEarly = 1, kKeptNoB = 2, kKeptFade = 4 }; // kKeptNoB (a kept part): the game never tested it (B = 0)
 struct Acc {
     uintptr_t light;
     float rgb[3];
@@ -564,6 +574,9 @@ struct Acc {
     uint8_t paths;
     float c0[3];    // (the room lamp probe) the game's evaluations, before any of Apex's steps (SampleState::accEv: the last one's record)
     uint8_t evals;
+    float preSum;   // (kept captures) r + g + b of the evaluations' colour before the soft light cut, the last one's threshold scale and bits
+    float thrScale;
+    uint8_t kbits;
 };
 struct SampleState {
     bool on = false;
@@ -597,6 +610,7 @@ struct Capture {
     const char* why = nullptr;
     bool directional = false;
     bool probe = false; // a room other than room 0, for the room lamp probe: compared at its end and dropped
+    bool keep = false;  // (GPU room lamps stage 1) that capture is kept at its end (KeepEnd)
     struct ProbeHook {
         uint32_t texel;
         uintptr_t light;
@@ -609,6 +623,8 @@ struct Capture {
         float c0[3];
         uint32_t ev;    // into probeEval (UINT32_MAX: none)
         uint8_t evals;
+        float preSum, thrScale; // (kept captures) Acc's
+        uint8_t kbits;
     };
     std::vector<ProbeHook> probeHook; // (the probe) each light's colour at each texel before the game's tests
     std::vector<ProbeEval> probeEval; // (the probe) the last evaluation's steps, for lamps of another room or story (kProbeEvalMax)
@@ -1239,6 +1255,13 @@ void SetRoomProbe(bool on) {
                 : "[RoomLampProbe] Off");
 }
 bool RoomProbe() { return g_probe.load(std::memory_order_relaxed); }
+void SetRoomLampCapture(bool on) {
+    if (g_capture.exchange(on) == on) return;
+    if (!on) g_keptClear.store(true);
+    LOG_INFO(on ? "[GpuRoomLamps] Capture on: each solve of the active lot's rooms other than room 0 is kept for the GPU" : "[GpuRoomLamps] Capture off: the kept rooms go");
+}
+bool RoomLampCapture() { return g_capture.load(std::memory_order_relaxed); }
+bool RoomHooks() { return g_probe.load(std::memory_order_relaxed) || g_capture.load(std::memory_order_relaxed); }
 void SetSelfCheck(bool on) {
     if (g_check.exchange(on) == on) return;
     LOG_INFO(on ? "[OutdoorDelta] Self-check on: each room brought up to date is solved in full once more and compared" : "[OutdoorDelta] Self-check off");
@@ -1414,6 +1437,7 @@ void ProbeStart(unsigned char* room, const RoomRead& rr) {
     }
     Capture& c = g_cap;
     c.active = c.ok = c.probe = true;
+    c.keep = g_capture.load(std::memory_order_relaxed);
     c.room = room;
     c.rec = std::make_unique<Record>();
     Record& r = *c.rec;
@@ -1841,10 +1865,219 @@ void ProbeEnd(const BYTE* room) {
     for (const std::string& row : rows) LOG_INFO(row);
     ProbeDump(room, rr, dumpTexels);
 }
+
+// ---- GPU room lamps, stage 1 (docs/features/night-lighting/gpu-room-lamps.md): a room's solve kept for the GPU ----
+// Per texel and lamp the GPU draws: part = mult x fade(law x A) x B (RtLampModel::KeptAdd), A the colour Apex's tests left
+// before the soft light cut over the lamp's law, B the game's 2D wall x 3D share. The texel's base is its sum less those
+// parts. Light tree thread only (kept, recomposed and cleared there).
+struct KeptPart {
+    uint32_t texel = 0;
+    uint16_t a = 0, b = 0, thrScale = 0; // halves
+    uint8_t mult = 1, bits = 0;          // kKeptEarly, kKeptNoB, kKeptFade
+};
+struct KeptLamp {
+    uintptr_t light = 0;
+    int type = 0;
+    std::vector<KeptPart, ApexMem::HighAllocator<KeptPart>> parts; // by texel, ascending
+};
+struct KeptRoom {
+    uintptr_t room = 0;
+    uint64_t lot = 0;
+    int story = 0, id = 0, cls = 0;
+    float thr = 0.0f;
+    std::vector<uint8_t, ApexMem::HighAllocator<uint8_t>> samples; // the capture's: 0x30 per texel
+    std::vector<TexelRec, ApexMem::HighAllocator<TexelRec>> texels; // the capture's: map, place, the solve's sum, the packed texel
+    std::vector<float, ApexMem::HighAllocator<float>> base;         // 3 per texel
+    std::vector<KeptLamp> lamps;
+    size_t bytes = 0;
+};
+std::unordered_map<uint64_t, std::unique_ptr<KeptRoom>> g_kept;
+size_t g_keptBytes = 0;
+bool g_keptFull = false; // (the log: once per crossing of the budget)
+std::atomic<int> g_keptLines{0};
+bool KeptLog() { return g_keptLines.fetch_add(1, std::memory_order_relaxed) < 2000; }
+size_t KeptBytes(const KeptRoom& k) {
+    size_t b = sizeof(KeptRoom) + k.samples.capacity() + k.texels.capacity() * sizeof(TexelRec) + k.base.capacity() * sizeof(float);
+    for (const KeptLamp& l : k.lamps) b += sizeof(KeptLamp) + l.parts.capacity() * sizeof(KeptPart);
+    return b;
+}
+void ClearKept() {
+    g_kept.clear();
+    g_keptBytes = 0;
+    g_keptFull = false;
+}
+// The kept solve recomposed from what was kept, with the lamps' laws as they are now, against the solve's own sum (before the
+// tone): the share within 2/255 and the worst texels (the log)
+void KeptSelfCheck(const KeptRoom& k) {
+    const size_t n = k.texels.size();
+    std::vector<float> sum(k.base.begin(), k.base.end());
+    std::vector<GpuLampLaw::Lamp> laws(k.lamps.size());
+    std::vector<char> lawOk(k.lamps.size(), 0);
+    int lost = 0;
+    for (size_t li = 0; li < k.lamps.size(); li++) {
+        int type = 0, reg = -1;
+        lawOk[li] = RtOutdoorLamps::WorldLaw(k.lamps[li].light, k.lot, false, laws[li], type, reg) ? 1 : 0;
+        if (!lawOk[li]) {
+            lost++;
+            continue;
+        }
+        for (const KeptPart& p : k.lamps[li].parts) {
+            if (p.texel >= n) continue;
+            const float* s = reinterpret_cast<const float*>(k.samples.data() + static_cast<size_t>(p.texel) * 0x30);
+            float law[3];
+            GpuLampLaw::Eval(laws[li], s, s + 4, 0.0f, law);
+            RtLampModel::KeptAdd(law, FromHalf(p.a), FromHalf(p.b), FromHalf(p.thrScale), static_cast<float>(p.mult), (p.bits & kKeptEarly) != 0,
+                                 (p.bits & kKeptFade) != 0, k.thr, &sum[static_cast<size_t>(p.texel) * 3]);
+        }
+    }
+    constexpr float kTol = 2.0f / 255.0f;
+    long lit = 0, within = 0;
+    std::vector<std::pair<float, uint32_t>> worst; // the worst three
+    for (size_t i = 0; i < n; i++) {
+        const float* S = k.texels[i].t.S;
+        const float* R = &sum[i * 3];
+        if (std::max({S[0], S[1], S[2], R[0], R[1], R[2]}) < 0.5f / 255.0f) continue;
+        lit++;
+        const float d = std::max({std::fabs(S[0] - R[0]), std::fabs(S[1] - R[1]), std::fabs(S[2] - R[2])});
+        within += d <= kTol;
+        if (d > kTol && (worst.size() < 3 || d > worst.back().first)) {
+            worst.emplace_back(d, static_cast<uint32_t>(i));
+            std::sort(worst.begin(), worst.end(), std::greater<>());
+            if (worst.size() > 3) worst.pop_back();
+        }
+    }
+    if (!KeptLog()) return;
+    std::string w;
+    for (const auto& [d, i] : worst) {
+        const float* s = reinterpret_cast<const float*>(k.samples.data() + static_cast<size_t>(i) * 0x30);
+        const TexelRec& t = k.texels[i];
+        w += std::format("; texel ({:.2f} {:.2f} {:.2f}) {} map: solve ({:.4f} {:.4f} {:.4f}) recomposed ({:.4f} {:.4f} {:.4f})", s[0], s[1], s[2], kMapName[t.map & 3],
+                         t.t.S[0], t.t.S[1], t.t.S[2], sum[i * 3], sum[i * 3 + 1], sum[i * 3 + 2]);
+        // its largest kept part: the lamp, A, B and the law there
+        float best = -1.0f;
+        std::string lamp;
+        for (size_t li = 0; li < k.lamps.size(); li++) {
+            if (!lawOk[li]) continue;
+            const auto& parts = k.lamps[li].parts;
+            const auto it = std::lower_bound(parts.begin(), parts.end(), i, [](const KeptPart& p, uint32_t x) { return p.texel < x; });
+            if (it == parts.end() || it->texel != i) continue;
+            float law[3];
+            GpuLampLaw::Eval(laws[li], s, s + 4, 0.0f, law);
+            const float m = (law[2] + law[1] + law[0]) * FromHalf(it->a) * FromHalf(it->b) * static_cast<float>(it->mult);
+            if (m > best)
+                best = m, lamp = std::format(", lamp {:08X} x{} A {:.4f} B {:.4f} law ({:.4f} {:.4f} {:.4f}) bits {}", k.lamps[li].light, static_cast<int>(it->mult),
+                                             FromHalf(it->a), FromHalf(it->b), law[0], law[1], law[2], static_cast<int>(it->bits));
+        }
+        w += lamp;
+    }
+    LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} self-check: {} texels lit, {:.2f}% within 2/255 of the solve's sum recomposed from the kept "
+                         "parts ({} lamps without a law now){}",
+                         k.story, k.id, k.cls, lit, lit ? 100.0 * static_cast<double>(within) / static_cast<double>(lit) : 100.0, lost, w));
+}
+void KeepEnd(const BYTE* room) {
+    Capture& c = g_cap;
+    Record& r = *c.rec;
+    RoomRead rr;
+    if (!ReadRoom(room, rr)) return;
+    if (g_keptClear.exchange(false)) ClearKept();
+    if (!c.ok || r.samples.size() != r.texels.size() * 0x30) {
+        if (KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: not kept ({})", rr.story, rr.id, rr.cls, c.ok ? "the samples do not match the texels" : c.why ? c.why : "?"));
+        return;
+    }
+    // the rooms of another lot (the active lot changed) go first
+    for (auto it = g_kept.begin(); it != g_kept.end();)
+        if (it->second->lot != r.lot) g_keptBytes -= std::min(g_keptBytes, it->second->bytes), it = g_kept.erase(it);
+        else ++it;
+    const size_t n = r.texels.size();
+    auto k = std::make_unique<KeptRoom>();
+    k->room = reinterpret_cast<uintptr_t>(room), k->lot = r.lot, k->story = rr.story, k->id = rr.id, k->cls = rr.cls, k->thr = r.thr;
+    long parts = 0, noB = 0;
+    try {
+        k->base.resize(n * 3);
+        for (size_t i = 0; i < n; i++)
+            for (int q = 0; q < 3; q++) k->base[i * 3 + q] = r.texels[i].t.S[q];
+        std::unordered_map<uintptr_t, const LampRec*> got;
+        for (const LampRec& l : r.lamps) got[l.light] = &l;
+        std::unordered_map<uintptr_t, std::vector<const Capture::ProbeHook*>> hooks;
+        for (const Capture::ProbeHook& h : c.probeHook)
+            if (h.texel < n) hooks[h.light].push_back(&h);
+        std::vector<float> gotSum(n, 0.0f);
+        for (const auto& [light, hs] : hooks) {
+            GpuLampLaw::Lamp law;
+            int type = 0, reg = -1;
+            if (!RtOutdoorLamps::WorldLaw(light, r.lot, false, law, type, reg)) continue; // (not drawn: its light stays in the base)
+            const LampRec* lr = got.count(light) ? got[light] : nullptr;
+            if (lr)
+                for (const Contrib& p : lr->parts)
+                    if (p.texel < n) {
+                        for (int q = 0; q < 3; q++) k->base[static_cast<size_t>(p.texel) * 3 + q] -= p.rgb[q];
+                        gotSum[p.texel] = (p.rgb[2] + p.rgb[1]) + p.rgb[0];
+                    }
+            KeptLamp kl;
+            kl.light = light, kl.type = type;
+            kl.parts.reserve(hs.size());
+            for (const Capture::ProbeHook* h : hs) {
+                const int mult = std::max<int>(1, h->evals);
+                const float pre = h->preSum / static_cast<float>(mult);
+                if (!(pre > 0.0f)) continue;
+                const float* s = reinterpret_cast<const float*>(r.samples.data() + static_cast<size_t>(h->texel) * 0x30);
+                float lw[3];
+                GpuLampLaw::Eval(law, s, s + 4, 0.0f, lw);
+                const float ls = (lw[2] + lw[1]) + lw[0];
+                const float hs3 = (h->rgb[2] + h->rgb[1]) + h->rgb[0];
+                KeptPart p;
+                p.texel = h->texel;
+                p.a = ToHalf(ls > 1e-9f ? std::min(pre / ls, 60000.0f) : 0.0f);
+                p.b = ToHalf(hs3 > 0.0f ? std::clamp(gotSum[h->texel] / hs3, 0.0f, 1.0f) : 0.0f);
+                p.thrScale = ToHalf(h->thrScale);
+                p.mult = static_cast<uint8_t>(std::min(mult, 255));
+                p.bits = static_cast<uint8_t>(h->kbits | (hs3 > 0.0f ? 0 : kKeptNoB));
+                noB += hs3 > 0.0f ? 0 : 1;
+                kl.parts.push_back(p);
+            }
+            if (lr)
+                for (const Contrib& p : lr->parts)
+                    if (p.texel < n) gotSum[p.texel] = 0.0f;
+            parts += static_cast<long>(kl.parts.size());
+            ShrinkExact(kl.parts);
+            k->lamps.push_back(std::move(kl));
+        }
+        // the capture's texels and samples move into the kept room (the capture is dropped next)
+        k->samples = std::move(r.samples);
+        k->texels = std::move(r.texels);
+        ShrinkExact(k->samples), ShrinkExact(k->texels);
+    } catch (...) {
+        if (KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: not kept (no memory)", rr.story, rr.id, rr.cls));
+        return;
+    }
+    k->bytes = KeptBytes(*k);
+    const uint64_t key = KeyOf(room, rr.cls);
+    const auto old = g_kept.find(key);
+    const size_t oldBytes = old != g_kept.end() ? old->second->bytes : 0;
+    const size_t after = g_keptBytes - std::min(g_keptBytes, oldBytes) + k->bytes;
+    const auto mb = [](size_t b) { return static_cast<double>(b) / (1024.0 * 1024.0); };
+    if (after > kMaxKeptBytes) { // (the room's earlier kept solve, if any, goes: it no longer holds what its maps hold)
+        if (old != g_kept.end()) g_keptBytes -= std::min(g_keptBytes, oldBytes), g_kept.erase(old);
+        if (!g_keptFull && KeptLog())
+            LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: not kept (the {:.0f} MB budget: {:.1f} MB kept in {} rooms, this one {:.1f} MB)", rr.story, rr.id, rr.cls,
+                                 mb(kMaxKeptBytes), mb(g_keptBytes), g_kept.size(), mb(k->bytes)));
+        g_keptFull = true;
+        return;
+    }
+    g_keptFull = false;
+    g_keptBytes = after;
+    const KeptRoom& kept = *(g_kept[key] = std::move(k));
+    if (KeptLog())
+        LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: kept {} texels, {} drawn lamps, {} parts ({} never tested by the game), {:.1f} MB; {} rooms kept, "
+                             "{:.1f} MB of {:.0f} MB",
+                             kept.story, kept.id, kept.cls, kept.texels.size(), kept.lamps.size(), parts, noB, mb(kept.bytes), g_kept.size(), mb(g_keptBytes), mb(kMaxKeptBytes)));
+    if (g_probe.load(std::memory_order_relaxed)) KeptSelfCheck(kept);
+}
 } // namespace
 
 void SolveStart(unsigned char* room) {
     if (g_clear.exchange(false)) DropCapture();
+    if (g_keptClear.exchange(false)) ClearKept(); // (the capture switched off)
     if (g_cap.active) DropCapture(); // the solve it kept was abandoned (restarted, or another room's)
     if (!g_on.load(std::memory_order_relaxed) || !room) return;
     RoomRead rr;
@@ -1855,7 +2088,7 @@ void SolveStart(unsigned char* room) {
             std::lock_guard<std::mutex> lk(g_sideMx);
             if (g_lotEdits.count(rr.lot) && g_otherStart.size() < 512) g_otherStart[room] = {rr.lot, now};
         }
-        if (g_probe.load(std::memory_order_relaxed) && rr.cls >= 0 && rr.cls <= 2 && rr.lot == ActiveLot()) ProbeStart(room, rr);
+        if ((g_probe.load(std::memory_order_relaxed) || g_capture.load(std::memory_order_relaxed)) && rr.cls >= 0 && rr.cls <= 2 && rr.lot == ActiveLot()) ProbeStart(room, rr);
         return;
     }
     if (!rr.outdoor || rr.cls < 0 || rr.cls > 2) return;
@@ -2059,7 +2292,8 @@ void SolveEnd(unsigned char* room) {
     FlushPending();
     Capture& c = g_cap;
     if (c.probe) {
-        ProbeEnd(room);
+        if (g_probe.load(std::memory_order_relaxed)) ProbeEnd(room);
+        if (c.keep) KeepEnd(room); // (after the probe: it takes the capture's texels)
         return DropCapture();
     }
     std::vector<ListLight> list;
@@ -2330,7 +2564,7 @@ Acc* AccFor(uintptr_t light) {
         return nullptr;
     }
     Acc& a = s.acc[s.n++];
-    a = Acc{light, {0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, 1.0f, 0, {0.0f, 0.0f, 0.0f}, 0, {0.0f, 0.0f, 0.0f}, 0};
+    a = Acc{light, {0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, 1.0f, 0, {0.0f, 0.0f, 0.0f}, 0, {0.0f, 0.0f, 0.0f}, 0, 0.0f, 1.0f, 0};
     return &a;
 }
 void FlushTap() {
@@ -2373,6 +2607,10 @@ void OnEvalOut(uintptr_t light, const float* colour) {
         if (s.cur.light == light) { // the evaluation's record (ProbeEvalBegin): its game colour, and the record as the last one
             for (int i = 0; i < 3; i++) a->c0[i] += s.cur.c0[i];
             if (a->evals < 255) a->evals++;
+            // (kept captures) the colour before the soft light cut (the colour passed here when the cut did not run)
+            a->preSum += (s.cur.has & 8) ? s.cur.preFade : (colour[2] + colour[1]) + colour[0];
+            a->thrScale = s.cur.thrScale;
+            a->kbits = static_cast<uint8_t>((s.cur.early ? kKeptEarly : 0) | ((s.cur.has & 8) ? kKeptFade : 0));
             s.accEv[a - s.acc] = s.cur;
         }
     }
@@ -2508,7 +2746,9 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
                 const bool apex = ev && (ev->set || ev->cut); // a lamp of another room or story, or one the floor cut stopped
                 // (an evaluation the game lit and Apex left dark is kept too, at most kProbeZeroMax a solve)
                 const bool zero = !lit && apex && std::max({a.c0[0], a.c0[1], a.c0[2]}) >= 1.0f / 255.0f && c.probeZero < kProbeZeroMax;
-                if (lit || zero) {
+                // (kept captures) every evaluation lit before the soft light cut down to kKeepFloor of its threshold, dark or not
+                const bool keep = c.keep && a.evals && a.preSum / static_cast<float>(a.evals) >= kKeepFloor * r.thr * a.thrScale;
+                if (lit || zero || keep) {
                     c.probeZero += zero ? 1 : 0;
                     uint32_t evIdx = UINT32_MAX;
                     if (apex && c.probeEval.size() < kProbeEvalMax) {
@@ -2516,7 +2756,8 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
                         c.probeEval.push_back(*ev);
                     } else if (apex) c.probeEvalDropped++;
                     c.probeHook.push_back(Capture::ProbeHook{texel, a.light, {a.hook[0], a.hook[1], a.hook[2]}, {a.wall[0], a.wall[1], a.wall[2]}, {a.from[0], a.from[1], a.from[2]},
-                                                             a.rawT, a.raw, {a.pre[0], a.pre[1], a.pre[2]}, a.paths, {a.c0[0], a.c0[1], a.c0[2]}, evIdx, a.evals});
+                                                             a.rawT, a.raw, {a.pre[0], a.pre[1], a.pre[2]}, a.paths, {a.c0[0], a.c0[1], a.c0[2]}, evIdx, a.evals,
+                                                             a.preSum, a.thrScale, a.kbits});
                 }
             }
             if (!Nonzero(p)) continue;

@@ -2330,6 +2330,8 @@ const I18n::Pair kPairs[] = {
     {"Solves those floors in full again later and logs the largest texel difference", "Υπολογίζει ξανά πλήρως αυτούς τους ορόφους λίγο αργότερα και καταγράφει τη μεγαλύτερη διαφορά texel"},
     {"Compare indoor lamps with GPU", "Σύγκριση εσωτερικών λαμπτήρων με GPU"},
     {"Logs how each lamp's light in the active lot's rooms differs from what the GPU would draw", "Καταγράφει πώς το φως κάθε λαμπτήρα στα δωμάτια της ενεργής παρτίδας διαφέρει από αυτό που θα σχεδίαζε η GPU"},
+    {"Keep indoor lamps for GPU", "Εσωτερικοί λαμπτήρες για GPU"},
+    {"Keeps the active lot's room solves for the GPU; logs a self-check with the comparison on", "Κρατά κάθε υπολογισμό δωματίου του ενεργού οικοπέδου για την GPU· με τη σύγκριση ενεργή, καταγράφει έναν αυτοέλεγχο"},
     {"Tester", "Δοκιμές"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Απενεργοποίησε και ενεργοποίησε κάθε μεταφερμένο μέρος στην ίδια σκηνή για να συγκρίνεις τον χρόνο καρέ και την εμφάνιση. Οι αλλαγές ισχύουν αμέσως και αποθηκεύονται."},
     {"Frame time", "Χρόνος καρέ"},

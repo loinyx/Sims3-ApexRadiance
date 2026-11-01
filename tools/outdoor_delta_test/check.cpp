@@ -11,6 +11,7 @@
 #include <random>
 #include <vector>
 #include "features/outdoor_delta_model.h"
+#include "features/rt_lamp_model.h"
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
 // map dither (its relight passes 0), but the compose shader keeps the input, so the harness still checks it
 namespace RoomMapDither {
@@ -545,6 +546,33 @@ int main() {
         Check(total.max <= 1, "delta vs full solve: no texel more than 1/255 off");
         Check(total.at1 <= total.n / 1000, "delta vs full solve: at most 1 texel in 1000 off by 1/255");
         Check(evaluated * 5 < full, "delta: far fewer evaluations than solving every light again");
+    }
+    { // GPU room lamps, stage 1: a kept part recomposed (RtLampModel::KeptAdd)
+        const float thr = 3.0f / 255.0f, law[3] = {0.04f, 0.03f, 0.02f}; // r + g + b = 0.09
+        float o[3] = {};
+        RtLampModel::KeptAdd(law, 0.5f, 0.8f, 1.0f, 2.0f, false, true, thr, o); // 0.045 >= 2 thr: whole
+        Check(std::fabs(o[0] - 2.0f * 0.02f * 0.8f) < 1e-7f && std::fabs(o[2] - 2.0f * 0.01f * 0.8f) < 1e-7f, "kept part: mult x law x A x B over twice the threshold");
+        float f[3] = {};
+        const float A = 1.5f * thr / 0.09f; // r + g + b = 1.5 thr: the soft cut's middle, smoothstep 0.5
+        RtLampModel::KeptAdd(law, A, 1.0f, 1.0f, 1.0f, false, true, thr, f);
+        Check(std::fabs((f[0] + f[1] + f[2]) - 0.5f * 1.5f * thr) < 1e-6f, "kept part: the soft light cut at its threshold");
+        float s[3] = {};
+        RtLampModel::KeptAdd(law, A, 1.0f, 0.5f, 1.0f, false, true, thr, s); // threshold x 0.5: 1.5 thr is over twice it
+        Check(std::fabs((s[0] + s[1] + s[2]) - 1.5f * thr) < 1e-6f, "kept part: the threshold scale of a lamp through an opening");
+        float e[3] = {}, g[3] = {}, d[3] = {};
+        RtLampModel::KeptAdd(law, 0.9f * thr / 0.09f, 1.0f, 1.0f, 1.0f, true, true, thr, e);
+        RtLampModel::KeptAdd(law, 0.9f * thr / 0.09f, 1.0f, 1.0f, 1.0f, false, false, thr, g);
+        RtLampModel::KeptAdd(law, 1.2f * thr / 0.09f, 1.0f, 1.0f, 1.0f, false, false, thr, d);
+        Check(e[0] == 0.0f && g[0] == 0.0f && std::fabs((d[0] + d[1] + d[2]) - 1.2f * thr) < 1e-6f, "kept part: the early-out and the game's drop under the threshold, whole over it");
+        float z[3] = {};
+        RtLampModel::KeptAdd(law, 0.5f, 0.0f, 1.0f, 2.0f, false, true, thr, z);
+        Check(z[0] == 0.0f && z[1] == 0.0f && z[2] == 0.0f, "kept part: B = 0 (dropped by the wall and 3D tests) adds nothing");
+        // A and B kept as halves: the recomposed part within 1e-3 of the exact one
+        float h[3] = {}, x[3] = {};
+        const float a = 3.217f, b = 0.6137f;
+        RtLampModel::KeptAdd(law, FromHalf(ToHalf(a)), FromHalf(ToHalf(b)), FromHalf(ToHalf(1.0f)), 2.0f, false, true, thr, h);
+        RtLampModel::KeptAdd(law, a, b, 1.0f, 2.0f, false, true, thr, x);
+        Check(std::fabs((h[0] + h[1] + h[2]) - (x[0] + x[1] + x[2])) <= 1e-3f * (x[0] + x[1] + x[2]), "kept part: half-float A and B within 1e-3");
     }
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

@@ -2330,6 +2330,8 @@ const I18n::Pair kPairs[] = {
     {"Solves those floors in full again later and logs the largest texel difference", "Později znovu celé přepočítá tato podlaží a zapíše do protokolu největší rozdíl texelu"},
     {"Compare indoor lamps with GPU", "Porovnat vnitřní lampy s GPU"},
     {"Logs how each lamp's light in the active lot's rooms differs from what the GPU would draw", "Zapíše do protokolu, jak se světlo každé lampy v místnostech aktivního pozemku liší od toho, co by vykreslila GPU"},
+    {"Keep indoor lamps for GPU", "Uchovat vnitřní lampy (GPU)"},
+    {"Keeps the active lot's room solves for the GPU; logs a self-check with the comparison on", "Uchová každý výpočet místnosti aktivního pozemku pro GPU; se zapnutým porovnáním zapíše do logu kontrolu"},
     {"Tester", "Testy"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Vypínej a zapínej každou přenesenou část ve stejné scéně a porovnej dobu snímku a vzhled. Změny platí hned a ukládají se."},
     {"Frame time", "Doba snímku"},

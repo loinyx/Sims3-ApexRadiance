@@ -36,6 +36,14 @@ void SetSelfCheck(bool on);
 // drawn or written
 void SetRoomProbe(bool on);
 bool RoomProbe();
+// Developer, GPU room lamps stage 1 (docs/features/night-lighting/gpu-room-lamps.md): every solve of a room other than room 0
+// of the active lot is captured as the probe captures it and kept per room and class (the base without the lot lamps the GPU
+// draws, and per texel and drawn lamp the share Apex's tests and the game's tests left of the lamp's law), within a memory
+// budget. With the probe on too, each kept solve is recomposed from what was kept and compared with the solve (the log)
+void SetRoomLampCapture(bool on);
+bool RoomLampCapture();
+// The room solve hooks record for the probe or the kept captures (either is on)
+bool RoomHooks();
 
 // ---- the direct path (light tree thread; LevelLightShare's hooks) ----
 // The lamp entry update of story tl's room 0 (LevelLightShare::HoldLampMark, a lamp that moved or changed a value in the same
@@ -94,6 +102,7 @@ struct ProbeEval {
         float t0 = 0.0f, t1 = 0.0f, keep = -1.0f;
     } seg[8];
     float fade = 1.0f, fadeThr = -1.0f; // the soft light cut's factor and the threshold it used
+    float preFade = -1.0f, thrScale = 1.0f; // r + g + b of the colour before the soft light cut, and its threshold's scale
 };
 // After the game's evaluation (c0) of `light` in a probed room's own sum: the record LightEvalHook fills, null otherwise
 ProbeEval* ProbeEvalBegin(uintptr_t light, const float* c0, int set);
