@@ -78,6 +78,22 @@ give.
 - **Apex's paths**: each lamp row ends with the path Apex's hook took for it (own, InnerShadow, opening, CrossFloorShadow,
   IndoorShadow), how the law matches the colour before that path, and that path's factor (unchanged, zero, other with its
   median); the dump's sample texels carry the path bits and that colour (`path P pre r g b`).
+- **Dump, Apex's steps per evaluation**: each sample texel line ends with `c0 r g b evals N` (the game's evaluation summed over
+  the lamp's entries) and, for a lamp of the room's record (`set` 1 inner, 2 same, 3 cross) or one the floor cut stopped, the
+  last evaluation's record: `ev set S e0 r g b mount k day k reach k cut 0|1 early 0|1`, then per step taken `p6 pass kNorm
+  srcNorm roomNorm` (InnerShadow), `p7 pass tOpen times law gain total cut k q thrScale` (the opening), `p8 mine slabShare
+  transmission why W stage G nseg N` with `seg story room t0 t1 keep passed` per ray segment (passed 255: not tested) and
+  `ent x y z` (where the game's wall test then starts) (IndoorShadow), and `fade f thr` (the soft light cut). -1: not reached.
+  `Z` lines (same fields; at most 800 a room, 200 a lamp) are texels the game lit and Apex left dark. At most 65,536 records
+  and 200,000 such dark evaluations are kept a solve (`PROBE evals E dropped D zero Z`).
+- **Dump, the room's state**: after each `ROOM` line `APEX` (threshold, the lowered one, the soft light cut, the wall mode
+  byte, the daytime factor, +0x160 at the solve's start and end, the half texel, the shadow softness, the opening sliders,
+  realistic reach and the development switches the tests read), `INFO` and the record's sets (`XC` cross lamps with their
+  story, room and floor object, `XS` same, `XL` lower, `XI` inner, `XU` innerUp, `XN` innerSrc with the source room's
+  +0x160); the story grids the tests walk (`GRIDHASH H role R serial S story K`, then `GRID`, `GZ`/`GX` wall edges per row,
+  `GT` per tile diagonals, flags and ceiling, `GE` edges, `GO` openings; floats as their bits) and per story the tiles' floor
+  height and quadrant rooms (`FT`) and the floor object's quadrant keys (`FK`) under `FLOORHASH H story K`. A block already in
+  the file is written as `GRIDREF` / `FLOORREF` with its hash.
 - **Sample layout**: the batch sample's position at +0x00 and normal at +0x10, world space, as `ExportRoom0` reads them.
 - **Test**: `tools/outdoor_delta_test` checks `ProbeClassify`'s five classes.
 

@@ -71,6 +71,32 @@ void OnEvalOut(uintptr_t light, const float* colour);
 // The room lamp probe: Apex's path for that evaluation (0 the room's own lamp, 1 InnerShadow, 2 an outdoor lamp through an
 // opening, 3 CrossFloorShadow, 4 IndoorShadow) and the colour before it (after MountedNdl, the floor cut, RoofedDay, reach)
 void OnEvalPath(uintptr_t light, int path, const float* colour);
+// The room lamp probe: what each of Apex's steps in LevelLightShare's LightEvalHook did to one evaluation, for an offline
+// replay (docs/features/night-lighting/gpu-room-lamps-probe.md, the "ev" tokens of the dump). -1 = not reached.
+struct ProbeEval {
+    uintptr_t light = 0;
+    uint8_t set = 0;            // the lamp's set in the room's record: 0 none, 1 inner, 2 same (outdoor through openings), 3 cross
+    uint8_t cut = 0, early = 0; // the floor-under-this-story cut returned; the threshold early-out returned
+    uint8_t has = 0;            // 1 InnerShadow, 2 the opening, 4 IndoorShadow, 8 the soft light cut ran
+    float c0[3] = {};           // the game's evaluation
+    float mount = 1.0f, day = 1.0f, reach = 1.0f; // the factors applied (1: none)
+    float p6[4] = {-1.0f, -1.0f, -1.0f, -1.0f};   // InnerShadow: pass, its norm scale, the source room's +0x160, this room's
+    // the opening: pass, tOpen, times, law, gain, total, cut, k, q, thrScale
+    float p7[10] = {-1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f};
+    float p8[3] = {-1.0f, -1.0f, -1.0f}; // IndoorShadow: mine, the slabs' share, the walls' transmission
+    int8_t why = -1, stage = -1;         // PassWhy, PassStage (the test that stopped the ray)
+    uint8_t nseg = 0, entry = 0;
+    float ent[3] = {};                   // where the game's own wall test then starts (entry = 1)
+    struct Seg {
+        int8_t story = -1;
+        uint8_t passed = 255; // 255 = not tested
+        int16_t room = -1;
+        float t0 = 0.0f, t1 = 0.0f, keep = -1.0f;
+    } seg[8];
+    float fade = 1.0f, fadeThr = -1.0f; // the soft light cut's factor and the threshold it used
+};
+// After the game's evaluation (c0) of `light` in a probed room's own sum: the record LightEvalHook fills, null otherwise
+ProbeEval* ProbeEvalBegin(uintptr_t light, const float* c0, int set);
 // The room lamp probe: the game's 2D wall test of that evaluation (passed = not skipped; t its transmission)
 void OnWallTest(bool passed, float t);
 // The room lamp probe: the game's own wall test inside it, before Apex's overrides (from = the point the ray starts at)
@@ -162,3 +188,9 @@ void InvalidateAll(const char* why); // options that change how rooms are lit (e
 std::string Status();
 
 } // namespace OutdoorDelta
+
+namespace LevelLightShare {
+// The room lamp probe's dump (level_light_share.cpp): the room's solve state, its record's lamp sets, and the story grids and
+// floors its lamps' tests read (each block once per content, then referred to by its hash)
+std::string ProbeRoomText(const unsigned char* room, uintptr_t tracker, float normStart);
+} // namespace LevelLightShare

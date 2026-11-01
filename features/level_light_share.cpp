@@ -9183,6 +9183,9 @@ thread_local bool t_maskCopy = false; // this thread solves one of the floor mas
 // floor mask of the last batch sample (its luminances), for the replay. All false / 0 while Lamp lighting is Classic.
 thread_local bool t_odSample = false;
 thread_local int t_odDepth = 0;
+// (the room lamp probe) the record of the evaluation LightEvalHook is in while the probe keeps it (outdoor_delta.h ProbeEval);
+// null otherwise, and then nothing below reads or writes it
+thread_local OutdoorDelta::ProbeEval* t_pe = nullptr;
 thread_local bool t_replay = false;
 struct LastMask {
     bool masked = false;
@@ -9534,18 +9537,19 @@ bool SwapThreshold(BYTE* room, float value, float* was) { // POD (SEH)
 // The colour the game is about to sum (after Apex's tests), faded at the room's real threshold (the same sum, the same order).
 // thrScale (at most 1): the scale Apex put on the colour after the game's law (an outdoor lamp through an opening: its cut,
 // the outdoor surface's factor and the colour response), so the cut stays where the law's light would meet it
-void FadeAtThreshold(float* colour, float thrScale = 1.0f) {
+float FadeAtThreshold(float* colour, float thrScale = 1.0f) { // (the factor it applied: the room lamp probe)
     const float sum = (colour[2] + colour[1]) + colour[0];
     const float thr = g_ctx.thr * thrScale;
     if (!(sum >= thr)) { // the game's drop
         for (int i = 0; i < 4; i++) colour[i] = 0.0f;
-        return;
+        return 0.0f;
     }
-    if (sum >= 2.0f * thr) return;
+    if (sum >= 2.0f * thr) return 1.0f;
     const float x = (sum - thr) / thr;
     const float f = x * x * (3.0f - 2.0f * x);
     for (int i = 0; i < 4; i++) colour[i] *= f;
     ApexUtil::CountOne(g_softCutFaded);
+    return f;
 }
 // The game's point solve with the soft light cut's state put back however it ends (a structured exception the caller's
 // guard catches would leave the room's threshold lowered for good): POD, __finally
@@ -12305,6 +12309,7 @@ void CrossFloorShadow(const RoomInfo& info, void* light, const float* sample, fl
 float IndoorBoundaryPass(const RoomInfo& info, uintptr_t floorLevel, int B, const float* P, const float* Q, float& crossing, PassWhy& why) {
     const auto blocked = [&why, B](PassWhy reason, PassStage stage) {
         why = reason;
+        if (t_pe) t_pe->stage = static_cast<int8_t>(stage);
         if (!kPublicBuild) g_passDbg.stage = static_cast<int>(stage), g_passDbg.segStory = B;
         return 0.0f;
     };
@@ -12395,6 +12400,7 @@ float IndoorPassImpl(const RoomInfo& info, const Cross& c, void* light, const fl
     // stage: which test stopped the ray, for the F8 record (PassDebug::stage; None = the one IndoorBoundaryPass recorded is kept)
     const auto blocked = [&why](PassWhy reason, PassStage stage = PassStage::None, int seg = -1) {
         why = reason;
+        if (t_pe && stage != PassStage::None) t_pe->stage = static_cast<int8_t>(stage);
         if (!kPublicBuild && stage != PassStage::None) g_passDbg.stage = static_cast<int>(stage), g_passDbg.segStory = seg;
         return 0.0f;
     };
@@ -12452,6 +12458,14 @@ float IndoorPassImpl(const RoomInfo& info, const Cross& c, void* light, const fl
     // A native batch can omit its own wall test. That exemption does not cover
     // borrowed lamps: their source, intermediate and recipient segments still need walls.
     if (currentStory != info.level || g_ctx.basis || !nativeWalls) raySegments[count++] = RaySegment{currentStory, previous, 1.0f};
+    if (t_pe) { // (the room lamp probe) the slabs' share and the segments to test
+        t_pe->p8[1] = slabShare, t_pe->p8[2] = 1.0f;
+        t_pe->nseg = static_cast<uint8_t>(std::min(count, 8));
+        for (int i = 0; i < count && i < 8; ++i) {
+            t_pe->seg[i].story = static_cast<int8_t>(raySegments[i].story);
+            t_pe->seg[i].t0 = raySegments[i].begin, t_pe->seg[i].t1 = raySegments[i].end;
+        }
+    }
     // Where the ray enters the solving room's story: its last floor crossing. The game's own 2D wall test of the solving
     // room, which follows in the point solve (0x69FE93), tests the ray from there (GameWallTest) instead of from the lamp:
     // this story's walls stand on that floor, and a lamp of another story that lies behind one of them only in plan (under
@@ -12521,6 +12535,7 @@ float IndoorPassImpl(const RoomInfo& info, const Cross& c, void* light, const fl
             if (!tile) return blocked(PassWhy::StoryWall, PassStage::SegmentTile, story);
             roomId = TileRoom(tile, Quadrant(local[0] - x, local[2] - z));
         }
+        if (t_pe && i < 8) t_pe->seg[i].room = static_cast<int16_t>(roomId);
         BYTE* home = static_cast<BYTE*>(RoomByIdCached(reinterpret_cast<void*>(manager), roomId));
         if (!home) return blocked(PassWhy::StoryWall, PassStage::SegmentRoom, story);
         // (development builds, indoor_lamp_walls) The lamp's own story, from the bulb to where the ray crosses the floor above:
@@ -12555,8 +12570,10 @@ float IndoorPassImpl(const RoomInfo& info, const Cross& c, void* light, const fl
         const bool passed = reinterpret_cast<WallTest_t>(kWallTest)(home, nullptr, from, to, &keep);
         *g_swapAt = g_swapSaved;
         g_swapAt = nullptr;
+        if (t_pe && i < 8) t_pe->seg[i].keep = keep, t_pe->seg[i].passed = passed ? 1 : 0;
         if (!passed || !ApexMath::IsFinite(keep)) return blocked(PassWhy::StoryWall, PassStage::GameWallTest, story);
         transmission *= std::clamp(keep, 0.0f, 1.0f);
+        if (t_pe) t_pe->p8[2] = transmission;
         if (transmission <= 0.0f) return blocked(PassWhy::StoryWall, PassStage::NothingTransmitted, story);
     }
     if(kMemoryOptimizationsEnabled && !DevSwitches::SteadyIndoorLight() && MeshOcclusion::Blocked(pos,sample))return blocked(PassWhy::StoryWall, PassStage::Mesh); // (steady_indoor_light: not tested)
@@ -12589,6 +12606,15 @@ void IndoorShadow(const RoomInfo& info, void* light, const float* sample, float*
         ApexUtil::CountOne(g_indoorTests);
         RayEntry entry;
         mine = IndoorPass(info, *c, light, sample, why, g_enterReady ? &entry : nullptr);
+        if (t_pe) { // (the room lamp probe)
+            t_pe->has |= 4;
+            t_pe->p8[0] = mine;
+            t_pe->why = static_cast<int8_t>(why);
+            if (mine > 0.0f && entry.valid) {
+                t_pe->entry = 1;
+                std::memcpy(t_pe->ent, entry.at, sizeof t_pe->ent);
+            }
+        }
         if (why == PassWhy::Floor) ApexUtil::CountOne(g_indoorFloorBlocked);
         else if (why == PassWhy::StoryWall) ApexUtil::CountOne(g_indoorWallBlocked);
         if (mine < 1.0f)
@@ -12633,6 +12659,7 @@ void YardShadow(const RoomInfo& info, void* light, const float* sample, float* c
     GridWhy why{};
     const float pass = info.openings ? OpenLampPass(info, light, sample, pos, why) : YardPass(info.grid[0].get(), info.grid[1].get(), light, sample, pos, why);
     if (tOpen) *tOpen = why.tOpen;
+    if (t_pe) t_pe->p7[0] = pass; // (the room lamp probe)
     ApexUtil::CountOne(g_yardTests);
     if (info.openings) { // a roofed room's lamp of room 0 (outdoor light through openings)
         ApexUtil::CountOne(g_roofedTests);
@@ -12832,6 +12859,13 @@ void InnerShadow(const RoomInfo& info, void* light, const float* sample, float* 
     const float k = pass > 0.0f ? InnerNormScale(info, light) : 1.0f;
     if (pass < 1.0f || k != 1.0f)
         for (int i = 0; i < 4; i++) colour[i] *= std::max(0.0f, pass) * k;
+    if (t_pe) { // (the room lamp probe) the pass, the norm scale and the two norms it read
+        t_pe->has |= 1;
+        t_pe->p6[0] = pass, t_pe->p6[1] = k;
+        const auto it = std::lower_bound(info.innerSrc.begin(), info.innerSrc.end(), std::make_pair(reinterpret_cast<uintptr_t>(light), static_cast<const BYTE*>(nullptr)));
+        t_pe->p6[2] = it != info.innerSrc.end() && it->first == reinterpret_cast<uintptr_t>(light) && it->second ? RoomNormOf(it->second) : -1.0f;
+        t_pe->p6[3] = t_solveRoom ? RoomNormOf(t_solveRoom) : -1.0f;
+    }
     g_ctx.yardLight = reinterpret_cast<uintptr_t>(light);
     std::memcpy(g_ctx.yardLamp, pos, sizeof g_ctx.yardLamp);
     if (!kPublicBuild) {
@@ -12928,13 +12962,21 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
         }
     } probeOnExit{reinterpret_cast<uintptr_t>(light),
                   t_odSample && t_odDepth == 1 && OutdoorDelta::RoomProbe() && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) ? colour : nullptr};
+    // (the room lamp probe) this evaluation's record (t_pe), from the game's evaluation on; the previous one put back on every way out
+    struct ProbeEvalScope {
+        OutdoorDelta::ProbeEval* prev = t_pe;
+        ~ProbeEvalScope() { t_pe = prev; }
+    } probeEvalScope;
+    t_pe = nullptr;
     // Smooth light maps: the soft light cut (the threshold the game compares with is lowered for this solve, SolvePoint): the
     // colour the game is about to sum, Apex's tests done, fades at the room's real threshold on every way out below
     struct FadeOnExit {
         float* c;
         float thrScale = 1.0f;
         ~FadeOnExit() {
-            if (c) FadeAtThreshold(c, thrScale);
+            if (!c) return;
+            const float f = FadeAtThreshold(c, thrScale);
+            if (t_pe) t_pe->fade = f, t_pe->fadeThr = g_ctx.thr * thrScale, t_pe->has |= 8; // (the room lamp probe)
         }
     } fadeOnExit{g_ctx.fade && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed) ? colour : nullptr};
     // indoor light through openings: the floor mask's copies of room 0 leave these lamps out (the ground atlas, which the mask
@@ -12957,6 +12999,12 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
         return;
     }
     reinterpret_cast<LightEval_t>(g_evalOrig[I])(light, sample, normal, colour);
+    if (probeOnExit.c) { // (the room lamp probe) the game's evaluation, and the lamp's set in the room's record
+        const uintptr_t l = reinterpret_cast<uintptr_t>(light);
+        const RoomInfo* pi = g_ctx.info;
+        const int set = !pi ? 0 : FindInner(*pi, l) ? 1 : FindSame(*pi, l) ? 2 : FindCross(*pi, l) ? 3 : 0;
+        t_pe = OutdoorDelta::ProbeEvalBegin(l, colour, set);
+    }
     // a lamp on a wall lights the wall it hangs on (gpu_lamp_law.h MountedNdl, the GPU's law alike): the game's N.l raised to
     // the floor on a wall texel within kMountReach behind the lamp (the colour scaled by the ratio; the law's Cmax cut, which
     // only a lamp touching the wall reaches, is not redone)
@@ -12974,6 +13022,7 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
                 // (at most 8 times: the law's Cmax cut, already in the game's colour, is not redone here)
                 const float k = std::min(raised / ndl, 8.0f);
                 for (int i = 0; i < 3; i++) colour[i] *= k;
+                if (t_pe) t_pe->mount = k;
                 ApexUtil::CountOne(g_mountRaised);
             }
         }
@@ -12982,12 +13031,15 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
     if (t_solveRoom && (colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f) && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) &&
         ThreadId() == g_gatherThread.load(std::memory_order_relaxed) && OwnFloorBlocks(t_solveRoom, light, sample)) {
         for (int i = 0; i < 4; i++) colour[i] = 0.0f;
+        if (t_pe) t_pe->cut = 1;
         ApexUtil::CountOne(g_underFloorBlocked);
         return;
     }
     // one daytime curve: an outdoor lamp in a roofed room's solve (any roofed room, recorded or not), before every other test
-    if (g_ctx.roofed && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
+    if (g_ctx.roofed && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) {
+        if (t_pe && g_ctx.dayScale < 1.0f && (colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f) && OutdoorLamp(light)) t_pe->day = g_ctx.dayScale;
         RoofedDay(light, colour);
+    }
     if (g_ctx.info && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) {
         g_ctx.enterLight = 0; // a lamp's entry point serves its own wall test only
         g_ctx.yardLight = 0;  // and so does a lamp's skipped wall test (light through doors and windows)
@@ -12999,11 +13051,15 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
             (colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f)) {
             const float m = ReachShare(light, sample);
             for (int i = 0; i < 4; i++) colour[i] *= m;
+            if (t_pe) t_pe->reach = m;
             ApexUtil::CountOne(g_reachDimmed);
         }
         // A light the game is about to drop (0x69FE40: threshold > (b + g) + r, the same sums in the same order) needs no
         // test of ours: our tests only lower the colour, so it is dropped either way (bit-identical; most far lamps end here)
-        if (g_ctx.thr > (colour[2] + colour[1]) + colour[0]) return;
+        if (g_ctx.thr > (colour[2] + colour[1]) + colour[0]) {
+            if (t_pe) t_pe->early = 1;
+            return;
+        }
         const ApexCycles timed;
         if (t_odSample && OutdoorDelta::RoomProbe()) { // (the room lamp probe) which of Apex's paths this lamp takes, and its colour before it
             const bool yardSame = g_ctx.info->yard && FindSame(*g_ctx.info, reinterpret_cast<uintptr_t>(light));
@@ -13023,6 +13079,7 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
             const float hue[3] = {colour[0], colour[1], colour[2]};
             float tOpen = -1.0f;
             YardShadow(*g_ctx.info, light, sample, colour, openLamp ? &tOpen : nullptr); // a lamp of a roofless room's own story (light through doors and windows), or of a roofed room's doors
+            if (t_pe) t_pe->has |= 2, t_pe->p7[1] = tOpen, t_pe->p7[2] = static_cast<float>(times), t_pe->p7[3] = law; // (the room lamp probe)
             if (openLamp && (colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f)) { // at the outdoor surface's scale
                 // the outdoor cut where the light came in, falling off from there with the law (OpeningLampBalance::EntryScale);
                 // the cut of the outdoor texel there, which every light reaching it shares
@@ -13050,8 +13107,10 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
                         ApexUtil::CountOne(g_openResponse);
                     }
                     scaled *= q;
+                    if (t_pe) t_pe->p7[8] = q;
                 }
                 if (scaled > 0.0f && scaled < 1.0f && ApexMath::IsFinite(scaled)) fadeOnExit.thrScale = scaled;
+                if (t_pe) t_pe->p7[4] = gain, t_pe->p7[5] = total, t_pe->p7[6] = cut, t_pe->p7[7] = k, t_pe->p7[9] = fadeOnExit.thrScale; // (the room lamp probe)
             }
         }
         else if (!g_ctx.info->indoor) CrossFloorShadow(*g_ctx.info, light, sample, colour);
@@ -18428,6 +18487,205 @@ float UnderFloorShareAt(const unsigned char* room, const float* sample) {
     return room0 ? UnderFloorShare(room0, sample, base) : -1.0f;
 }
 bool ListAllWrapped(const unsigned char* room) { return room && AllEvalWrapped(room); }
+
+// ---- The room lamp probe's dump (outdoor_delta.h ProbeRoomText; light tree thread) ----
+namespace {
+std::string ProbeHex(float f) { return std::format("{:08X}", std::bit_cast<uint32_t>(f)); }
+uint64_t ProbeFnv(const std::string& s) {
+    uint64_t h = 1469598103934665603ull;
+    for (unsigned char ch : s) h = (h ^ ch) * 1099511628211ull;
+    return h;
+}
+struct ProbeRoomRead { // POD (SEH)
+    float thr = 0.0f, norm = 0.0f;
+    uint8_t soft = 0, outdoor = 0;
+    int cls = -1, story = -99;
+    uintptr_t mgr = 0;
+};
+bool ProbeReadRoom(const unsigned char* room, ProbeRoomRead& r) {
+    __try {
+        r.mgr = *reinterpret_cast<const uintptr_t*>(room);
+        r.thr = *reinterpret_cast<const float*>(room + 0x63C);
+        r.norm = *reinterpret_cast<const float*>(room + 0x160);
+        r.soft = room[0x639], r.outdoor = room[0x18];
+        r.cls = *reinterpret_cast<const int*>(room + 0xF4);
+        r.story = r.mgr ? *reinterpret_cast<const int*>(r.mgr + 0x88) : -99;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+struct ProbeStoryRead { // POD (SEH): a story's tile grid (LightTile) and its floor object's key grid (FloorAt)
+    uintptr_t level = 0;
+    float h = 0.0f; // its lowest floor, lot space (mgr+0x98 - mgr+0xD4)
+    int tw = 0, th = 0, kw = 0, kh = 0;
+    Xform xf{};
+};
+bool ProbeReadStory(uintptr_t mgr, ProbeStoryRead& s) {
+    __try {
+        s.level = LevelFor(mgr);
+        s.h = *reinterpret_cast<const float*>(mgr + 0x98) - *reinterpret_cast<const float*>(mgr + 0xD4);
+        s.tw = *reinterpret_cast<const int*>(mgr + 0x264), s.th = *reinterpret_cast<const int*>(mgr + 0x268);
+        if (s.tw < 0 || s.th < 0 || s.tw > 1024 || s.th > 1024) s.tw = s.th = 0;
+        std::memcpy(&s.xf, reinterpret_cast<const void*>(mgr + 0xE0), sizeof s.xf);
+        if (const uintptr_t grid = s.level ? *reinterpret_cast<const uintptr_t*>(s.level + 0x264) : 0; grid && *reinterpret_cast<const uintptr_t*>(grid)) {
+            s.kw = *reinterpret_cast<const int*>(grid + 0x10), s.kh = *reinterpret_cast<const int*>(grid + 0x14);
+            if (s.kw < 0 || s.kh < 0 || s.kw > 1024 || s.kh > 1024) s.kw = s.kh = 0;
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool ProbeReadTile(uintptr_t mgr, int x, int z, float& h, int* rooms) { // false: no tile
+    __try {
+        const uintptr_t t = LightTile(mgr, x, z);
+        if (!t) return false;
+        h = *reinterpret_cast<const float*>(t + 0x78);
+        for (int q = 0; q < 4; q++) rooms[q] = TileRoom(t, q);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool ProbeReadKeys(uintptr_t level, int x, int z, int w, uint32_t* keys) { // the 4 quadrants' keys (lo, hi)
+    __try {
+        const uintptr_t data = *reinterpret_cast<const uintptr_t*>(*reinterpret_cast<const uintptr_t*>(level + 0x264));
+        std::memcpy(keys, reinterpret_cast<const void*>(data + (static_cast<size_t>(z) * w + x) * 40 + 8), 32);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+// A story grid (StoryGrid) as GridPassImpl / GridWallHitHard walk it; floats as their bits (hex)
+std::string ProbeGridBody(const StoryGrid& g) {
+    std::string t = std::format("GRID serial {} story {} mgr {:08X} w {} h {} minFoot {} plane {} cutGen {} edges {} openings {} xf", g.serial, g.story, g.mgr, g.w, g.h,
+                                ProbeHex(g.minFoot), ProbeHex(g.plane), g.cutGen, g.edges.size(), g.openings.size());
+    for (const auto& row : g.xf.r)
+        for (float v : row) t += ' ' + ProbeHex(v);
+    t += '\n';
+    const auto at = [](const auto& v, size_t i) { return i < v.size() ? static_cast<long long>(v[i]) : -9; };
+    for (int Z = 0; Z <= g.h; Z++) { // zl: edge (x, Z)-(x + 1, Z)
+        t += std::format("GZ {}", Z);
+        for (int x = 0; x < g.w; x++) t += std::format(" {}", at(g.zl, static_cast<size_t>(Z) * g.w + x));
+        t += '\n';
+    }
+    for (int z = 0; z < g.h; z++) { // xl: edge (X, z)-(X, z + 1)
+        t += std::format("GX {}", z);
+        for (int X = 0; X <= g.w; X++) t += std::format(" {}", at(g.xl, static_cast<size_t>(z) * (g.w + 1) + X));
+        t += '\n';
+    }
+    for (int z = 0; z < g.h; z++) { // per tile: dg[0] dg[1], flags, ceil
+        t += std::format("GT {}", z);
+        for (int x = 0; x < g.w; x++) {
+            const size_t i = static_cast<size_t>(z) * g.w + x;
+            t += std::format(" {},{},{},{}", at(g.dg, i * 2), at(g.dg, i * 2 + 1), at(g.flags, i), i < g.ceil.size() ? ProbeHex(g.ceil[i]) : std::string("-"));
+        }
+        t += '\n';
+    }
+    for (size_t i = 0; i < g.edges.size(); i++) {
+        const GridEdge& e = g.edges[i];
+        t += std::format("GE {} {} {} {} {} {} {} {} {} {}\n", i, ProbeHex(e.foot), ProbeHex(e.base), ProbeHex(e.topL), ProbeHex(e.topM), ProbeHex(e.topR), e.open,
+                         static_cast<int>(e.faces), e.half ? 1 : 0, e.shortTop ? 1 : 0);
+    }
+    for (size_t i = 0; i < g.openings.size(); i++) {
+        const GridOpening& o = g.openings[i];
+        t += std::format("GO {} {}", i, ProbeHex(o.sill));
+        for (float v : o.head) t += ' ' + ProbeHex(v);
+        t += std::format(" {} {} {} {} {}\n", ProbeHex(o.u0), ProbeHex(o.u1), static_cast<int>(o.kind), static_cast<int>(o.shaped), ProbeHex(o.glass));
+    }
+    return t;
+}
+// A story's tiles (floor height, the quadrants' rooms) and its floor object's keys, as OwnFloorBlocksAt, IndoorBoundaryPass and
+// the slab gate read them (FloorAt, PlacedFloorAt)
+std::string ProbeFloorBody(int story, uintptr_t mgr) {
+    ProbeStoryRead s;
+    if (!mgr || !ProbeReadStory(mgr, s)) return {};
+    std::string t = std::format("FLOOR story {} mgr {:08X} level {:08X} h {} tiles {} {} keys {} {} xf", story, mgr, s.level, ProbeHex(s.h), s.tw, s.th, s.kw, s.kh);
+    for (const auto& row : s.xf.r)
+        for (float v : row) t += ' ' + ProbeHex(v);
+    t += '\n';
+    for (int z = 0; z < s.th; z++) { // per tile: height,room0,room1,room2,room3 ("-": no tile)
+        t += std::format("FT {}", z);
+        for (int x = 0; x < s.tw; x++) {
+            float h = 0.0f;
+            int rooms[4] = {};
+            t += ProbeReadTile(mgr, x, z, h, rooms) ? std::format(" {},{},{},{},{}", ProbeHex(h), rooms[0], rooms[1], rooms[2], rooms[3]) : std::string(" -");
+        }
+        t += '\n';
+    }
+    for (int z = 0; z < s.kh; z++) { // per tile: the 4 quadrants' keys lo.hi
+        t += std::format("FK {}", z);
+        for (int x = 0; x < s.kw; x++) {
+            uint32_t k[8] = {};
+            t += ProbeReadKeys(s.level, x, z, s.kw, k) ? std::format(" {:08X}.{:08X},{:08X}.{:08X},{:08X}.{:08X},{:08X}.{:08X}", k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7])
+                                                       : std::string(" -");
+        }
+        t += '\n';
+    }
+    return t;
+}
+// Each block once per content in the dump (the file of the session); later uses refer to its hash
+std::unordered_set<uint64_t> g_probeBlocks;
+std::string ProbeBlock(const char* kind, const std::string& body, const std::string& ref) {
+    if (body.empty()) return {};
+    const uint64_t h = ProbeFnv(body);
+    if (!g_probeBlocks.insert(h).second) return std::format("{}REF hash {:016X} {}\n", kind, h, ref);
+    return std::format("{}HASH {:016X} {}\n", kind, h, ref) + body;
+}
+} // namespace
+
+std::string ProbeRoomText(const unsigned char* room, uintptr_t tracker, float normStart) {
+    ProbeRoomRead rr;
+    if (!room || !ProbeReadRoom(room, rr)) return "APEX unreadable\n";
+    std::string t = std::format(
+        "APEX thr {:.9g} lowThr {:.9g} softCut {} soft {} day {:.9g} norm0 {:.9g} norm1 {:.9g} outdoor {} cls {} aa {:.9g} pen {:.9g} penOn {} spread {:.9g} "
+        "openWall {:.9g} openGround {:.9g} reach {} hardTops {} dev indoorLampWalls {} softSlabEdges {} softOpeningEdges {} steadyIndoorLight {} innerNormSettle {} "
+        "meshOcclusion {}\n",
+        rr.thr, kFadeGameThr, g_softCut.load() ? 1 : 0, static_cast<int>(rr.soft), g_roomLampDay.load(), normStart, rr.norm, static_cast<int>(rr.outdoor), rr.cls,
+        MapHalfTexelSafe(room), Penumbra::Radius(), Penumbra::g_on.load() ? 1 : 0, kInnerSoftSpread, g_openWall.load(), g_openGround.load(), g_reachOn.load() ? 1 : 0,
+        g_hardWallTops.load() ? 1 : 0, DevSwitches::IndoorLampWalls() ? 1 : 0, DevSwitches::SoftSlabEdges() ? 1 : 0, DevSwitches::SoftOpeningEdges() ? 1 : 0,
+        DevSwitches::SteadyIndoorLight() ? 1 : 0, DevSwitches::InnerNormSettle() ? 1 : 0, kMemoryOptimizationsEnabled ? 1 : 0);
+    const auto it = g_rooms.find(reinterpret_cast<uintptr_t>(room));
+    const RoomInfo* info = it != g_rooms.end() ? &it->second : nullptr;
+    int lo = rr.story - 1, hi = rr.story + 1;
+    if (!info) t += "INFO none\n";
+    else {
+        if (!tracker) tracker = info->tracker;
+        t += std::format("INFO level {} id {} indoor {} yard {} openings {} cross {} same {} lower {} inner {} innerUp {}\n", info->level, info->id, info->indoor ? 1 : 0,
+                         info->yard ? 1 : 0, info->openings ? 1 : 0, info->cross.size(), info->same.size(), info->lower.size(), info->inner.size(), info->innerUp.size());
+        for (const Cross& c : info->cross) {
+            t += std::format("XC {:08X} floor {} room {} level {:08X} outdoor {} headroom {:.9g}\n", c.light, c.floor, c.room, c.level, c.outdoor ? 1 : 0, c.upwardHeadroom);
+            lo = std::min(lo, c.floor), hi = std::max(hi, c.floor);
+        }
+        const auto list = [&t](const char* tag, const std::vector<uintptr_t>& v) {
+            for (uintptr_t l : v) t += std::format("{} {:08X}\n", tag, l);
+        };
+        list("XS", info->same), list("XL", info->lower), list("XI", info->inner), list("XU", info->innerUp);
+        for (const auto& [l, src] : info->innerSrc) t += std::format("XN {:08X} src {:08X} norm {:.9g}\n", l, reinterpret_cast<uintptr_t>(src), src ? RoomNormOf(src) : -1.0f);
+    }
+    lo = std::clamp(lo, 0, 7), hi = std::clamp(hi, 0, 7);
+    // the story grids its tests read: the record's, and the grids of the stories around it
+    std::vector<std::pair<std::string, const StoryGrid*>> grids;
+    if (info) {
+        const auto add = [&grids](std::string role, const std::shared_ptr<const StoryGrid>& g) {
+            if (g) grids.emplace_back(std::move(role), g.get());
+        };
+        add("grid0", info->grid[0]), add("grid1", info->grid[1]), add("below", info->below), add("open0", info->openGrid[0]), add("open1", info->openGrid[1]);
+        add("inner0", info->innerGrid[0]), add("inner1", info->innerGrid[1]), add("up0", info->upGrid[0]), add("up1", info->upGrid[1]);
+        for (int k = 0; k < 8; k++) add(std::format("mid{}", k), info->mid[k]), add(std::format("lamp{}", k), info->lampGrid[k]);
+    }
+    for (int k = lo; k <= hi; k++)
+        if (const uintptr_t mgr = tracker ? StoryManager(tracker, k) : (k == rr.story ? rr.mgr : 0))
+            if (const auto g = g_grids.find(mgr); g != g_grids.end() && g->second) grids.emplace_back(std::format("story{}", k), g->second.get());
+    for (const auto& [role, g] : grids)
+        t += ProbeBlock("GRID", ProbeGridBody(*g), std::format("role {} serial {} story {}", role, g->serial, g->story));
+    for (int k = lo; k <= hi; k++) {
+        const uintptr_t mgr = tracker ? StoryManager(tracker, k) : (k == rr.story ? rr.mgr : 0);
+        if (mgr) t += ProbeBlock("FLOOR", ProbeFloorBody(k, mgr), std::format("story {} mgr {:08X}", k, mgr));
+    }
+    return t;
+}
 std::string FirstUnwrappedLight(const unsigned char* room) {
     uintptr_t light = 0, vt = 0;
     int type = -1;

@@ -67,6 +67,10 @@ constexpr int kMaxChanged = 8;                    // more changed lights: solved
 // kept above 2 GB (HighAllocator) and within a lower budget)
 constexpr size_t kMaxBytes = size_t{96} << 20;    // every room's kept parts together; past it the oldest go
 constexpr size_t kMaxRecordBytes = size_t{96} << 20;
+// (the room lamp probe) per probed solve: the evaluation records kept for lamps of another room or story and for lamps the
+// floor cut stopped (about 300 B each), and the evaluations kept although Apex left them dark (the dump's Z lines)
+constexpr size_t kProbeEvalMax = 65536;
+constexpr long kProbeZeroMax = 200000;
 // past kMaxBytes only the pinned rooms (Real-time outdoor lamps' active lot) are left. 14/10: 160 MB, with the drawn lamps'
 // parts of those rooms kept as one sum per texel (CollapseDrawn), which is what Real-time outdoor lamps reads; a pinned room
 // never drops another pinned room (that made the active lot's stories evict one another in a loop: dropped, sent to their
@@ -558,6 +562,8 @@ struct Acc {
     uint8_t raw;
     float pre[3];   // (the room lamp probe) the colour before Apex's path for it (path bits: 1 << path)
     uint8_t paths;
+    float c0[3];    // (the room lamp probe) the game's evaluations, before any of Apex's steps (SampleState::accEv: the last one's record)
+    uint8_t evals;
 };
 struct SampleState {
     bool on = false;
@@ -575,6 +581,8 @@ struct SampleState {
     uintptr_t pathLight = 0; // (the room lamp probe) the evaluation whose path was noted, its path and colour before it
     int path = 0;
     float pre[3] = {};
+    ProbeEval cur;         // (the room lamp probe) the evaluation in progress (ProbeEvalBegin)
+    ProbeEval accEv[128];  // the last evaluation's record of each acc[]
 };
 SampleState g_s; // light tree thread only
 
@@ -598,8 +606,14 @@ struct Capture {
         uint8_t raw;
         float pre[3];
         uint8_t paths;
+        float c0[3];
+        uint32_t ev;    // into probeEval (UINT32_MAX: none)
+        uint8_t evals;
     };
     std::vector<ProbeHook> probeHook; // (the probe) each light's colour at each texel before the game's tests
+    std::vector<ProbeEval> probeEval; // (the probe) the last evaluation's steps, for lamps of another room or story (kProbeEvalMax)
+    long probeZero = 0, probeEvalDropped = 0;
+    float normStart = -1.0f; // the room's normalisation (+0x160) when its solve started
     // a self-check solve: the texels the delta wrote, by (map, x, y)
     bool check = false, checkLightsSame = false;
     std::unordered_map<uint64_t, uint32_t> checkOld;
@@ -1406,6 +1420,7 @@ void ProbeStart(unsigned char* room, const RoomRead& rr) {
     r.room = reinterpret_cast<uintptr_t>(room);
     r.mgr = rr.mgr, r.story = rr.story, r.lot = rr.lot, r.cls = rr.cls;
     r.thr = rr.thr, r.wallMode = rr.wallMode;
+    CopyBytes(&c.normStart, room + 0x160, sizeof c.normStart);
 }
 inline float Max3(const float* c) { return std::max({c[0], c[1], c[2]}); }
 // The probe's dump (one file a session in the Apex Radiance folder): each probed room's 3D blockers as the game's 3D test
@@ -1440,6 +1455,9 @@ void ProbeDump(const BYTE* room, const RoomRead& rr, const std::string& texels) 
     }
     if (!s_file || s_bytes > kMaxBytes) return;
     std::string out = std::format("ROOM story {} id {} class {} roofed {} room {:08X}\n", rr.story, rr.id, rr.cls, rr.outdoor ? 0 : 1, reinterpret_cast<uintptr_t>(room));
+    // Apex's state for the room's solve, its record's lamp sets and the grids and floors their tests read
+    out += LevelLightShare::ProbeRoomText(room, RtOutdoorLamps::TrackerOf(room), g_cap.normStart);
+    out += std::format("PROBE evals {} dropped {} zero {}\n", g_cap.probeEval.size(), g_cap.probeEvalDropped, g_cap.probeZero);
     uintptr_t rb[2] = {};
     float tail[4] = {};
     if (CopyBytes(rb, room + 0x40, sizeof rb) && rb[0] && rb[1] >= rb[0] && (rb[1] - rb[0]) % 64 == 0) {
@@ -1525,6 +1543,30 @@ const ProbeMesh& ProbeOccluders(const void* room) {
     }
     return p;
 }
+// (the dump) the evaluation's steps on a T or Z line: the game's colour summed over the lamp's entries, then the last
+// evaluation's record when kept (docs/features/night-lighting/gpu-room-lamps-probe.md)
+std::string EvTokens(const Capture::ProbeHook& ph, const std::vector<ProbeEval>& evs) {
+    std::string t = std::format(" c0 {:.9g} {:.9g} {:.9g} evals {}", ph.c0[0], ph.c0[1], ph.c0[2], static_cast<int>(ph.evals));
+    if (ph.ev >= evs.size()) return t;
+    const ProbeEval& e = evs[ph.ev];
+    t += std::format(" ev set {} e0 {:.9g} {:.9g} {:.9g} mount {:.9g} day {:.9g} reach {:.9g} cut {} early {}", static_cast<int>(e.set), e.c0[0], e.c0[1], e.c0[2], e.mount,
+                     e.day, e.reach, static_cast<int>(e.cut), static_cast<int>(e.early));
+    if (e.has & 1) t += std::format(" p6 {:.9g} {:.9g} {:.9g} {:.9g}", e.p6[0], e.p6[1], e.p6[2], e.p6[3]);
+    if (e.has & 2) {
+        t += " p7";
+        for (float v : e.p7) t += std::format(" {:.9g}", v);
+    }
+    if (e.has & 4) {
+        t += std::format(" p8 {:.9g} {:.9g} {:.9g} why {} stage {} nseg {}", e.p8[0], e.p8[1], e.p8[2], static_cast<int>(e.why), static_cast<int>(e.stage), static_cast<int>(e.nseg));
+        for (int k = 0; k < e.nseg && k < 8; k++) {
+            const ProbeEval::Seg& g = e.seg[k];
+            t += std::format(" seg {} {} {:.9g} {:.9g} {:.9g} {}", static_cast<int>(g.story), static_cast<int>(g.room), g.t0, g.t1, g.keep, static_cast<int>(g.passed));
+        }
+        if (e.entry) t += std::format(" ent {:.9g} {:.9g} {:.9g}", e.ent[0], e.ent[1], e.ent[2]);
+    }
+    if (e.has & 8) t += std::format(" fade {:.9g} {:.9g}", e.fade, e.fadeThr);
+    return t;
+}
 void ProbeEnd(const BYTE* room) {
     const Capture& c = g_cap;
     const Record& r = *c.rec;
@@ -1575,7 +1617,7 @@ void ProbeEnd(const BYTE* room) {
     const size_t stride = std::max<size_t>(1, n * std::max<size_t>(list.size(), 1) / 200000);
     std::vector<float> shadowAll(occ.ok ? n * 3 : 0, 0.0f);
     std::string dumpTexels; // (the dump) sample texels: position, normal, lamp, colour before the tests, after the walls, final
-    int dumpShaded = 0, dumpOpen = 0;
+    int dumpShaded = 0, dumpOpen = 0, dumpZero = 0;
     for (const ListLight& li : list) {
         GpuLampLaw::Lamp law;
         int type = 0, reg = -1;
@@ -1677,6 +1719,26 @@ void ProbeEnd(const BYTE* room) {
             std::vector<float> factors;
             long wOpen = 0, wBlocked = 0, wPartly = 0, oOpen = 0, oBlocked = 0, oPartly = 0; // the wall test, the 3D (object) test
             std::vector<float> lawRatios;
+            int lampZero = 0;
+            // (the dump) one texel's line: T a lit one, Z one the game lit and Apex left dark (the same fields)
+            const auto dumpLine = [&](char tag, size_t i) {
+                const float* s = reinterpret_cast<const float*>(r.samples.data() + i * 0x30);
+                const float* h = &hk[i * 3];
+                dumpTexels += std::format("{} {:08X} p {:.4f} {:.4f} {:.4f} n {:.3f} {:.3f} {:.3f} L {:.4f} {:.4f} {:.4f} hook {:.5f} {:.5f} {:.5f} wall {:.5f} {:.5f} {:.5f} "
+                                          "got {:.5f} {:.5f} {:.5f}",
+                                          tag, li.light, s[0], s[1], s[2], s[4], s[5], s[6], law.pos[0], law.pos[1], law.pos[2], h[0], h[1], h[2], wl[i * 3], wl[i * 3 + 1],
+                                          wl[i * 3 + 2], got[i * 3], got[i * 3 + 1], got[i * 3 + 2]);
+                if (const Capture::ProbeHook* ph = hp[i]; ph && ph->raw)
+                    dumpTexels += std::format(" from {:.4f} {:.4f} {:.4f} raw {} {:.5f}", ph->from[0], ph->from[1], ph->from[2], ph->raw == 1 ? 1 : 0, ph->rawT);
+                else dumpTexels += " raw none";
+                if (const Capture::ProbeHook* ph = hp[i])
+                    dumpTexels += std::format(" path {} pre {:.5f} {:.5f} {:.5f}", static_cast<int>(ph->paths), pr[i * 3], pr[i * 3 + 1], pr[i * 3 + 2]);
+                if (const uint32_t b = batchOf[i]; b < r.batches.size())
+                    dumpTexels += std::format(" batch {} n {} flags {} {} c {:.4f} {:.4f} {:.4f}", b, r.batches[b].count, static_cast<int>(r.batches[b].flags[0]),
+                                              static_cast<int>(r.batches[b].flags[1]), centroid[b * 3], centroid[b * 3 + 1], centroid[b * 3 + 2]);
+                if (const Capture::ProbeHook* ph = hp[i]) dumpTexels += EvTokens(*ph, c.probeEval);
+                dumpTexels += '\n';
+            };
             for (size_t i = 0; i < n; i++) {
                 const float* s = reinterpret_cast<const float*>(r.samples.data() + i * 0x30);
                 float m[3] = {};
@@ -1700,6 +1762,11 @@ void ProbeEnd(const BYTE* room) {
                         if (std::fabs(f - 1.0f) >= 0.01f && f >= 0.01f) factors.push_back(f);
                     }
                 }
+                // (the dump) an evaluation the game lit and Apex left dark (the floor cut, a slab, a wall of another story)
+                if (const Capture::ProbeHook* ph = hp[i]; Max3(h) < kLevel && ph && Max3(ph->c0) >= kLevel && dumpZero < 800 && lampZero < 200) {
+                    dumpZero++, lampZero++;
+                    dumpLine('Z', i);
+                }
                 const float lh = OutdoorDeltaModel::Lum3(h);
                 if (Max3(h) < kLevel || !(lh > 0.0f)) continue;
                 const float lw = OutdoorDeltaModel::Lum3(&wl[i * 3]);
@@ -1714,20 +1781,7 @@ void ProbeEnd(const BYTE* room) {
                 const bool shaded = to < 0.98f;
                 if (shaded ? dumpShaded < 1500 : (dumpOpen < 300 && i % 7 == 0)) {
                     (shaded ? dumpShaded : dumpOpen)++;
-                    dumpTexels += std::format("T {:08X} p {:.4f} {:.4f} {:.4f} n {:.3f} {:.3f} {:.3f} L {:.4f} {:.4f} {:.4f} hook {:.5f} {:.5f} {:.5f} wall {:.5f} {:.5f} {:.5f} "
-                                              "got {:.5f} {:.5f} {:.5f}\n",
-                                              li.light, s[0], s[1], s[2], s[4], s[5], s[6], law.pos[0], law.pos[1], law.pos[2], h[0], h[1], h[2], wl[i * 3], wl[i * 3 + 1],
-                                              wl[i * 3 + 2], got[i * 3], got[i * 3 + 1], got[i * 3 + 2]);
-                    dumpTexels.pop_back(); // (the line goes on: the game's own wall test and the batch)
-                    if (const Capture::ProbeHook* ph = hp[i]; ph && ph->raw)
-                        dumpTexels += std::format(" from {:.4f} {:.4f} {:.4f} raw {} {:.5f}", ph->from[0], ph->from[1], ph->from[2], ph->raw == 1 ? 1 : 0, ph->rawT);
-                    else dumpTexels += " raw none";
-                    if (const Capture::ProbeHook* ph = hp[i])
-                        dumpTexels += std::format(" path {} pre {:.5f} {:.5f} {:.5f}", static_cast<int>(ph->paths), pr[i * 3], pr[i * 3 + 1], pr[i * 3 + 2]);
-                    if (const uint32_t b = batchOf[i]; b < r.batches.size())
-                        dumpTexels += std::format(" batch {} n {} flags {} {} c {:.4f} {:.4f} {:.4f}", b, r.batches[b].count, static_cast<int>(r.batches[b].flags[0]),
-                                                  static_cast<int>(r.batches[b].flags[1]), centroid[b * 3], centroid[b * 3 + 1], centroid[b * 3 + 2]);
-                    dumpTexels += '\n';
+                    dumpLine('T', i);
                 }
             }
             float lm = 0.0f;
@@ -2276,7 +2330,7 @@ Acc* AccFor(uintptr_t light) {
         return nullptr;
     }
     Acc& a = s.acc[s.n++];
-    a = Acc{light, {0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, 1.0f, 0, {0.0f, 0.0f, 0.0f}, 0};
+    a = Acc{light, {0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, 1.0f, 0, {0.0f, 0.0f, 0.0f}, 0, {0.0f, 0.0f, 0.0f}, 0};
     return &a;
 }
 void FlushTap() {
@@ -2316,8 +2370,14 @@ void OnEvalOut(uintptr_t light, const float* colour) {
         const bool noted = s.pathLight == light; // (no path noted: the threshold dropped it before, or it is not a roofed room's)
         for (int i = 0; i < 3; i++) a->pre[i] += noted ? s.pre[i] : colour[i];
         a->paths |= static_cast<uint8_t>(1u << (noted ? s.path : 0));
+        if (s.cur.light == light) { // the evaluation's record (ProbeEvalBegin): its game colour, and the record as the last one
+            for (int i = 0; i < 3; i++) a->c0[i] += s.cur.c0[i];
+            if (a->evals < 255) a->evals++;
+            s.accEv[a - s.acc] = s.cur;
+        }
     }
     s.pathLight = 0;
+    s.cur.light = 0;
     for (int i = 0; i < 3; i++) s.last[i] = colour[i];
     s.lastLight = light;
 }
@@ -2328,6 +2388,15 @@ void OnWallTest(bool passed, float t) {
     if (Acc* a = AccFor(s.lastLight))
         for (int i = 0; i < 3; i++) a->wall[i] -= s.last[i] * (1.0f - share);
     s.lastLight = 0;
+}
+ProbeEval* ProbeEvalBegin(uintptr_t light, const float* c0, int set) {
+    SampleState& s = g_s;
+    if (!s.on || s.tap != 0 || !g_cap.probe || !c0) return nullptr;
+    s.cur = ProbeEval{};
+    s.cur.light = light;
+    s.cur.set = static_cast<uint8_t>(std::clamp(set, 0, 255));
+    for (int i = 0; i < 3; i++) s.cur.c0[i] = c0[i];
+    return &s.cur;
 }
 void OnEvalPath(uintptr_t light, int path, const float* colour) {
     SampleState& s = g_s;
@@ -2433,8 +2502,23 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
             for (int q = 0; q < 3; q++) p.rgb[q] = a.rgb[q];
             p.vis = s.masked ? ToHalf(a.vis) : 0;
             p.all = s.masked ? ToHalf(a.all) : 0;
-            if (c.probe && (a.hook[0] != 0.0f || a.hook[1] != 0.0f || a.hook[2] != 0.0f))
-                c.probeHook.push_back(Capture::ProbeHook{texel, a.light, {a.hook[0], a.hook[1], a.hook[2]}, {a.wall[0], a.wall[1], a.wall[2]}, {a.from[0], a.from[1], a.from[2]}, a.rawT, a.raw, {a.pre[0], a.pre[1], a.pre[2]}, a.paths});
+            if (c.probe) {
+                const bool lit = a.hook[0] != 0.0f || a.hook[1] != 0.0f || a.hook[2] != 0.0f;
+                const ProbeEval* ev = a.evals ? &s.accEv[i] : nullptr;
+                const bool apex = ev && (ev->set || ev->cut); // a lamp of another room or story, or one the floor cut stopped
+                // (an evaluation the game lit and Apex left dark is kept too, at most kProbeZeroMax a solve)
+                const bool zero = !lit && apex && std::max({a.c0[0], a.c0[1], a.c0[2]}) >= 1.0f / 255.0f && c.probeZero < kProbeZeroMax;
+                if (lit || zero) {
+                    c.probeZero += zero ? 1 : 0;
+                    uint32_t evIdx = UINT32_MAX;
+                    if (apex && c.probeEval.size() < kProbeEvalMax) {
+                        evIdx = static_cast<uint32_t>(c.probeEval.size());
+                        c.probeEval.push_back(*ev);
+                    } else if (apex) c.probeEvalDropped++;
+                    c.probeHook.push_back(Capture::ProbeHook{texel, a.light, {a.hook[0], a.hook[1], a.hook[2]}, {a.wall[0], a.wall[1], a.wall[2]}, {a.from[0], a.from[1], a.from[2]},
+                                                             a.rawT, a.raw, {a.pre[0], a.pre[1], a.pre[2]}, a.paths, {a.c0[0], a.c0[1], a.c0[2]}, evIdx, a.evals});
+                }
+            }
             if (!Nonzero(p)) continue;
             auto [it, fresh] = c.lampIdx.try_emplace(a.light, static_cast<int>(r.lamps.size()));
             if (fresh) {
