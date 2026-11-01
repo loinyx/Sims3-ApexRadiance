@@ -68,6 +68,10 @@ give.
   2/255 (j% other strength, median k); the game's wall test at N texels: o% open, p% blocked, q% partly; its 3D
   (object) test at N texels past the walls: ...` (the wall test's answer comes from `GameWallTest`; the 3D share is what is left) with the texel's
   position, normal and distance to the lamp. `not probed (...)` and `not compared (...)` give why a solve was left out.
+- **Dump**: one file a session, `RoomLampProbe-<time>.txt` in the Apex Radiance folder (at most 64 MB): per probed room its
+  3D blockers as the game's 3D test `0x0069D910` reads them (room+0x40: 64-byte records with a centre and a squared radius,
+  their blocker pointers at +0x30; each blocker's vtable, vfunc+0x14 and first 0x80 bytes) and up to 1,800 sample texels
+  (position, normal, lamp, colour before the tests, after the wall test, final), for an offline replay of the 3D test.
 - **Sample layout**: the batch sample's position at +0x00 and normal at +0x10, world space, as `ExportRoom0` reads them.
 - **Test**: `tools/outdoor_delta_test` checks `ProbeClassify`'s five classes.
 

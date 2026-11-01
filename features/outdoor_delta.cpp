@@ -30,6 +30,7 @@
 #include "room_map_dither.h"
 #include "lamp_mark_filter.h"
 #include "apex_log.h"
+#include "apex_paths.h"
 #include "game_addresses.h"
 #include "hook_guard.h"
 #include "dev_switches.h"
@@ -1395,6 +1396,58 @@ void ProbeStart(unsigned char* room, const RoomRead& rr) {
     r.thr = rr.thr, r.wallMode = rr.wallMode;
 }
 inline float Max3(const float* c) { return std::max({c[0], c[1], c[2]}); }
+// The probe's dump (one file a session in the Apex Radiance folder): each probed room's 3D blockers as the game's 3D test
+// 0x0069D910 reads them (room+0x40..+0x44: 64-byte records, the blocker pointers at record+0x30..+0x34; each blocker's
+// vtable, its vfunc+0x14 = the transmission, and its first 0x80 bytes) and the sample texels ProbeEnd picked
+void ProbeDump(const BYTE* room, const RoomRead& rr, const std::string& texels) {
+    static std::FILE* s_file = nullptr;
+    static bool s_tried = false;
+    static size_t s_bytes = 0;
+    constexpr size_t kMaxBytes = 64u << 20; // (one file, at most 64 MB a session)
+    if (!s_tried) {
+        s_tried = true;
+        SYSTEMTIME t{};
+        GetLocalTime(&t);
+        if (ApexPaths::EnsureApexDirectory())
+            s_file = _wfopen((ApexPaths::ApexDirectory() + std::format(L"RoomLampProbe-{:04}{:02}{:02}-{:02}{:02}{:02}.txt", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute,
+                                                                       t.wSecond)).c_str(),
+                             L"wb");
+        LOG_INFO(s_file ? "[RoomLampProbe] Dump: RoomLampProbe-<time>.txt in the Apex Radiance folder" : "[RoomLampProbe] Dump: the file could not be made");
+    }
+    if (!s_file || s_bytes > kMaxBytes) return;
+    std::string out = std::format("ROOM story {} id {} class {} roofed {} room {:08X}\n", rr.story, rr.id, rr.cls, rr.outdoor ? 0 : 1, reinterpret_cast<uintptr_t>(room));
+    uintptr_t rb[2] = {};
+    float tail[4] = {};
+    if (CopyBytes(rb, room + 0x40, sizeof rb) && rb[0] && rb[1] >= rb[0] && (rb[1] - rb[0]) % 64 == 0) {
+        const size_t nr = std::min<size_t>((rb[1] - rb[0]) / 64, 512);
+        CopyBytes(tail, room + 0x9C, sizeof tail); // (+0xA0: the scale the 3D test's answer takes)
+        out += std::format("RECORDS {} scaleA0 {:.6f}\n", nr, tail[1]);
+        for (size_t i = 0; i < nr; i++) {
+            float rec[16] = {};
+            if (!CopyBytes(rec, reinterpret_cast<const void*>(rb[0] + i * 64), 64)) break;
+            uintptr_t bl[2] = {};
+            std::memcpy(bl, &rec[12], sizeof bl);
+            out += std::format("R {} c {:.4f} {:.4f} {:.4f} {:.4f} r {:.4f} {:.4f} {:.4f} {:.4f} w8 {:.4f} {:.4f} {:.4f} {:.4f}", i, rec[0], rec[1], rec[2], rec[3], rec[4], rec[5],
+                               rec[6], rec[7], rec[8], rec[9], rec[10], rec[11]);
+            const size_t nb = bl[0] && bl[1] >= bl[0] ? std::min<size_t>((bl[1] - bl[0]) / 4, 64) : 0;
+            out += std::format(" blockers {}\n", nb);
+            for (size_t j = 0; j < nb; j++) {
+                uintptr_t b = 0, vt = 0, f14 = 0;
+                if (!CopyBytes(&b, reinterpret_cast<const void*>(bl[0] + j * 4), 4) || !b || !CopyBytes(&vt, reinterpret_cast<const void*>(b), 4) || !vt ||
+                    !CopyBytes(&f14, reinterpret_cast<const void*>(vt + 0x14), 4))
+                    continue;
+                uint32_t raw[32] = {};
+                CopyBytes(raw, reinterpret_cast<const void*>(b), sizeof raw);
+                out += std::format("B {:08X} vt {:08X} f14 {:08X} raw", b, vt, f14);
+                for (uint32_t w : raw) out += std::format(" {:08X}", w);
+                out += '\n';
+            }
+        }
+    } else out += "RECORDS none\n";
+    out += texels;
+    s_bytes += std::fwrite(out.data(), 1, out.size(), s_file);
+    std::fflush(s_file);
+}
 // The occluders the GPU path would shadow a room's lamps with (LevelLightShare::ExportLotProxy, ceilings left open over the
 // rooms as the GPU room lamps build had them), read again when the lot or its geometry changes
 struct ProbeMesh {
@@ -1458,6 +1511,8 @@ void ProbeEnd(const BYTE* room) {
     // shortcut: only every stride-th texel takes the occluder test (about 200,000 rays a solve at most); test all if the shares look noisy
     const size_t stride = std::max<size_t>(1, n * std::max<size_t>(list.size(), 1) / 200000);
     std::vector<float> shadowAll(occ.ok ? n * 3 : 0, 0.0f);
+    std::string dumpTexels; // (the dump) sample texels: position, normal, lamp, colour before the tests, after the walls, final
+    int dumpShaded = 0, dumpOpen = 0;
     for (const ListLight& li : list) {
         GpuLampLaw::Lamp law;
         int type = 0, reg = -1;
@@ -1573,6 +1628,15 @@ void ProbeEnd(const BYTE* room) {
                 const float to = OutdoorDeltaModel::Lum3(&got[i * 3]) / lw; // the 3D test's share (and the threshold's drop)
                 seen3++;
                 oOpen += to >= 0.98f, oBlocked += to <= 0.02f, oPartly += to > 0.02f && to < 0.98f;
+                // (the dump: the shaded texels first, a few open ones, for an offline replay of the 3D test)
+                const bool shaded = to < 0.98f;
+                if (shaded ? dumpShaded < 1500 : (dumpOpen < 300 && i % 7 == 0)) {
+                    (shaded ? dumpShaded : dumpOpen)++;
+                    dumpTexels += std::format("T {:08X} p {:.4f} {:.4f} {:.4f} n {:.3f} {:.3f} {:.3f} L {:.4f} {:.4f} {:.4f} hook {:.5f} {:.5f} {:.5f} wall {:.5f} {:.5f} {:.5f} "
+                                              "got {:.5f} {:.5f} {:.5f}\n",
+                                              li.light, s[0], s[1], s[2], s[4], s[5], s[6], law.pos[0], law.pos[1], law.pos[2], h[0], h[1], h[2], wl[i * 3], wl[i * 3 + 1],
+                                              wl[i * 3 + 2], got[i * 3], got[i * 3 + 1], got[i * 3 + 2]);
+                }
             }
             float lm = 0.0f;
             if (!lawRatios.empty()) {
@@ -1616,6 +1680,7 @@ void ProbeEnd(const BYTE* room) {
                          rr.story, rr.id, rr.cls, kind, n, drawn, list.size(), lit ? 100.0 * static_cast<double>(within) / static_cast<double>(lit) : 100.0, lit, shadowed,
                          unheld, MsSince(t0)));
     for (const std::string& row : rows) LOG_INFO(row);
+    ProbeDump(room, rr, dumpTexels);
 }
 } // namespace
 
