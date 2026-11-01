@@ -13137,7 +13137,14 @@ bool OpenWallRetest(const RoomInfo& info, const float* lampW, const float* point
         return false; // the game's answer stands
     }
 }
+bool GameWallTestImpl(BYTE* room, void* idx, const float* lightPos, const void* sample, float* t);
+// (the room lamp probe) each wall test's answer for the evaluation before it
 bool __fastcall GameWallTest(BYTE* room, void*, void* idx, const float* lightPos, const void* sample, float* t) {
+    const bool ok = GameWallTestImpl(room, idx, lightPos, sample, t);
+    if (t_odSample && OutdoorDelta::RoomProbe()) OutdoorDelta::OnWallTest(ok, t ? *t : 1.0f);
+    return ok;
+}
+bool GameWallTestImpl(BYTE* room, void* idx, const float* lightPos, const void* sample, float* t) {
     // Light through doors and windows: a lamp of a roofless room's own story was just tested against every wall of the story
     // (YardShadow, its share already in the colour); the game's test, which sees whole walls, is skipped
     if (g_ctx.yardLight && ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) {

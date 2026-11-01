@@ -551,6 +551,7 @@ struct Acc {
     float rgb[3];
     float vis, all;
     float hook[3]; // (the room lamp probe) the evaluations' colour before the game's tests
+    float wall[3]; // (the room lamp probe) that colour after the game's 2D wall test
 };
 struct SampleState {
     bool on = false;
@@ -563,6 +564,8 @@ struct SampleState {
     bool overflow = false;
     bool masked = false, gated = false;
     float visLum = 0.0f, allLum = 0.0f;
+    float last[3] = {}; // (the room lamp probe) the last evaluation's colour, for its wall test
+    uintptr_t lastLight = 0;
 };
 SampleState g_s; // light tree thread only
 
@@ -581,6 +584,7 @@ struct Capture {
         uint32_t texel;
         uintptr_t light;
         float rgb[3];
+        float wall[3];
     };
     std::vector<ProbeHook> probeHook; // (the probe) each light's colour at each texel before the game's tests
     // a self-check solve: the texels the delta wrote, by (map, x, y)
@@ -1470,11 +1474,11 @@ void ProbeEnd(const BYTE* room) {
         const RtLampModel::Lamp L{law, static_cast<float>(li.mult)};
         // (11/01 game tests: the solve gave 0.4 to 0.7 of the law, and neither realistic reach indoors nor the cap explained it)
         // the colour each evaluation left before the game's own wall and object tests: the law apart from those tests
-        std::vector<float> hk;
+        std::vector<float> hk, wl; // the colour before the game's tests, and after its 2D wall test
         if (const auto it = hooks.find(li.light); it != hooks.end()) {
-            hk.assign(n * 3, 0.0f);
+            hk.assign(n * 3, 0.0f), wl.assign(n * 3, 0.0f);
             for (const Capture::ProbeHook* h : it->second)
-                for (int k = 0; k < 3; k++) hk[h->texel * 3 + k] += h->rgb[k];
+                for (int k = 0; k < 3; k++) hk[h->texel * 3 + k] += h->rgb[k], wl[h->texel * 3 + k] += h->wall[k];
         }
         long lit = 0, match = 0, dark = 0, extra = 0;
         long rays = 0, shadowMatch = 0, shadedOk = 0, leak = 0, over = 0; // (the tested texels against the occluders)
@@ -1544,7 +1548,8 @@ void ProbeEnd(const BYTE* room) {
         if (offWorst > 0.0f)
             row += std::format("; largest other: solve ({:.3f} {:.3f} {:.3f}) law ({:.3f} {:.3f} {:.3f}) at {}", offMeas[0], offMeas[1], offMeas[2], offLaw[0], offLaw[1], offLaw[2], at(offAt));
         if (!hk.empty()) {
-            long lawLit = 0, lawMatch = 0, open = 0, blocked = 0, partly = 0, seen = 0;
+            long lawLit = 0, lawMatch = 0, seen = 0, seen3 = 0;
+            long wOpen = 0, wBlocked = 0, wPartly = 0, oOpen = 0, oBlocked = 0, oPartly = 0; // the wall test, the 3D (object) test
             std::vector<float> lawRatios;
             for (size_t i = 0; i < n; i++) {
                 const float* s = reinterpret_cast<const float*>(r.samples.data() + i * 0x30);
@@ -1560,9 +1565,14 @@ void ProbeEnd(const BYTE* room) {
                 }
                 const float lh = OutdoorDeltaModel::Lum3(h);
                 if (Max3(h) < kLevel || !(lh > 0.0f)) continue;
-                const float t = OutdoorDeltaModel::Lum3(&got[i * 3]) / lh; // the game's wall and object tests' share
+                const float lw = OutdoorDeltaModel::Lum3(&wl[i * 3]);
+                const float tw = std::clamp(lw / lh, 0.0f, 1.0f); // the 2D wall test's share
                 seen++;
-                open += t >= 0.98f, blocked += t <= 0.02f, partly += t > 0.02f && t < 0.98f;
+                wOpen += tw >= 0.98f, wBlocked += tw <= 0.02f, wPartly += tw > 0.02f && tw < 0.98f;
+                if (!(lw > 0.0f) || Max3(&wl[i * 3]) < kLevel) continue;
+                const float to = OutdoorDeltaModel::Lum3(&got[i * 3]) / lw; // the 3D test's share (and the threshold's drop)
+                seen3++;
+                oOpen += to >= 0.98f, oBlocked += to <= 0.02f, oPartly += to > 0.02f && to < 0.98f;
             }
             float lm = 0.0f;
             if (!lawRatios.empty()) {
@@ -1571,8 +1581,10 @@ void ProbeEnd(const BYTE* room) {
             }
             const auto of = [](long v, long of) { return of ? 100.0 * static_cast<double>(v) / static_cast<double>(of) : 0.0; };
             row += std::format("; the law alone (the colour before the game's wall and object tests): {:.1f}% of {} texels within 2/255 ({:.1f}% other strength, "
-                               "median {:.3f}); the game's tests at {} texels: {:.1f}% open, {:.1f}% blocked, {:.1f}% partly",
-                               of(lawMatch, lawLit), lawLit, of(static_cast<long>(lawRatios.size()), lawLit), lm, seen, of(open, seen), of(blocked, seen), of(partly, seen));
+                               "median {:.3f}); the game's wall test at {} texels: {:.1f}% open, {:.1f}% blocked, {:.1f}% partly; its 3D (object) test at {} texels "
+                               "past the walls: {:.1f}% open, {:.1f}% blocked, {:.1f}% partly",
+                               of(lawMatch, lawLit), lawLit, of(static_cast<long>(lawRatios.size()), lawLit), lm, seen, of(wOpen, seen), of(wBlocked, seen), of(wPartly, seen),
+                               seen3, of(oOpen, seen3), of(oBlocked, seen3), of(oPartly, seen3));
         }
         if (rays) {
             const auto of = [rays](long v) { return 100.0 * static_cast<double>(v) / static_cast<double>(rays); };
@@ -2094,7 +2106,7 @@ Acc* AccFor(uintptr_t light) {
         return nullptr;
     }
     Acc& a = s.acc[s.n++];
-    a = Acc{light, {0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, {0.0f, 0.0f, 0.0f}};
+    a = Acc{light, {0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
     return &a;
 }
 void FlushTap() {
@@ -2130,7 +2142,17 @@ void OnEvalOut(uintptr_t light, const float* colour) {
     SampleState& s = g_s;
     if (!s.on || s.tap != 0 || !g_cap.probe || !colour) return;
     if (Acc* a = AccFor(light))
-        for (int i = 0; i < 3; i++) a->hook[i] += colour[i];
+        for (int i = 0; i < 3; i++) a->hook[i] += colour[i], a->wall[i] += colour[i]; // (as passed until its wall test says otherwise)
+    for (int i = 0; i < 3; i++) s.last[i] = colour[i];
+    s.lastLight = light;
+}
+void OnWallTest(bool passed, float t) {
+    SampleState& s = g_s;
+    if (!s.on || s.tap != 0 || !g_cap.probe || !s.lastLight) return;
+    const float share = passed ? std::clamp(t, 0.0f, 1.0f) : 0.0f;
+    if (Acc* a = AccFor(s.lastLight))
+        for (int i = 0; i < 3; i++) a->wall[i] -= s.last[i] * (1.0f - share);
+    s.lastLight = 0;
 }
 void OnEval(uintptr_t light) {
     SampleState& s = g_s;
@@ -2223,7 +2245,7 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
             p.vis = s.masked ? ToHalf(a.vis) : 0;
             p.all = s.masked ? ToHalf(a.all) : 0;
             if (c.probe && (a.hook[0] != 0.0f || a.hook[1] != 0.0f || a.hook[2] != 0.0f))
-                c.probeHook.push_back(Capture::ProbeHook{texel, a.light, {a.hook[0], a.hook[1], a.hook[2]}});
+                c.probeHook.push_back(Capture::ProbeHook{texel, a.light, {a.hook[0], a.hook[1], a.hook[2]}, {a.wall[0], a.wall[1], a.wall[2]}});
             if (!Nonzero(p)) continue;
             auto [it, fresh] = c.lampIdx.try_emplace(a.light, static_cast<int>(r.lamps.size()));
             if (fresh) {

@@ -65,7 +65,8 @@ give.
   then per lamp `lamp A type T xM (registered in room R): N texels lit, a% within 2/255, b% dark in the solve, c% lit only
   by the solve, d% other strength (median solve/law r); darkest miss: ...; largest other: ...; with the occluders (K texels
   tested): e% within 2/255, f% dark in both, g% dark in the solve only, h% shaded by the occluders only; the law alone (the colour before the game's wall and object tests): i% of N texels within
-  2/255 (j% other strength, median k); the game's tests at N texels: o% open, p% blocked, q% partly` with the texel's
+  2/255 (j% other strength, median k); the game's wall test at N texels: o% open, p% blocked, q% partly; its 3D
+  (object) test at N texels past the walls: ...` (the wall test's answer comes from `GameWallTest`; the 3D share is what is left) with the texel's
   position, normal and distance to the lamp. `not probed (...)` and `not compared (...)` give why a solve was left out.
 - **Sample layout**: the batch sample's position at +0x00 and normal at +0x10, world space, as `ExportRoom0` reads them.
 - **Test**: `tools/outdoor_delta_test` checks `ProbeClassify`'s five classes.
