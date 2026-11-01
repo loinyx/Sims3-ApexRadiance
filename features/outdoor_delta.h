@@ -68,6 +68,9 @@ void TapEnd();
 void OnEval(uintptr_t light);
 // The room lamp probe: the colour that evaluation leaves (Apex's tests done), before the game's own wall and object tests
 void OnEvalOut(uintptr_t light, const float* colour);
+// The room lamp probe: Apex's path for that evaluation (0 the room's own lamp, 1 InnerShadow, 2 an outdoor lamp through an
+// opening, 3 CrossFloorShadow, 4 IndoorShadow) and the colour before it (after MountedNdl, the floor cut, RoofedDay, reach)
+void OnEvalPath(uintptr_t light, int path, const float* colour);
 // The room lamp probe: the game's 2D wall test of that evaluation (passed = not skipped; t its transmission)
 void OnWallTest(bool passed, float t);
 // The room lamp probe: the game's own wall test inside it, before Apex's overrides (from = the point the ray starts at)

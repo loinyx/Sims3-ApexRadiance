@@ -556,6 +556,8 @@ struct Acc {
     float from[3]; // (the room lamp probe) the game's own wall test: where its ray starts, its answer (raw: 0 not run, 1 ok, 2 dropped)
     float rawT;
     uint8_t raw;
+    float pre[3];   // (the room lamp probe) the colour before Apex's path for it (path bits: 1 << path)
+    uint8_t paths;
 };
 struct SampleState {
     bool on = false;
@@ -570,6 +572,9 @@ struct SampleState {
     float visLum = 0.0f, allLum = 0.0f;
     float last[3] = {}; // (the room lamp probe) the last evaluation's colour, for its wall test
     uintptr_t lastLight = 0;
+    uintptr_t pathLight = 0; // (the room lamp probe) the evaluation whose path was noted, its path and colour before it
+    int path = 0;
+    float pre[3] = {};
 };
 SampleState g_s; // light tree thread only
 
@@ -591,6 +596,8 @@ struct Capture {
         float wall[3];
         float from[3], rawT;
         uint8_t raw;
+        float pre[3];
+        uint8_t paths;
     };
     std::vector<ProbeHook> probeHook; // (the probe) each light's colour at each texel before the game's tests
     // a self-check solve: the texels the delta wrote, by (map, x, y)
@@ -1587,11 +1594,14 @@ void ProbeEnd(const BYTE* room) {
         // the colour each evaluation left before the game's own wall and object tests: the law apart from those tests
         std::vector<float> hk, wl; // the colour before the game's tests, and after its 2D wall test
         std::vector<const Capture::ProbeHook*> hp; // (the dump) the texel's last evaluation of this lamp
+        std::vector<float> pr; // the colour before Apex's path (InnerShadow, the opening, IndoorShadow...)
+        uint8_t pathsSeen = 0;
         if (const auto it = hooks.find(li.light); it != hooks.end()) {
-            hk.assign(n * 3, 0.0f), wl.assign(n * 3, 0.0f), hp.assign(n, nullptr);
+            hk.assign(n * 3, 0.0f), wl.assign(n * 3, 0.0f), hp.assign(n, nullptr), pr.assign(n * 3, 0.0f);
             for (const Capture::ProbeHook* h : it->second) {
-                for (int k = 0; k < 3; k++) hk[h->texel * 3 + k] += h->rgb[k], wl[h->texel * 3 + k] += h->wall[k];
+                for (int k = 0; k < 3; k++) hk[h->texel * 3 + k] += h->rgb[k], wl[h->texel * 3 + k] += h->wall[k], pr[h->texel * 3 + k] += h->pre[k];
                 hp[h->texel] = h;
+                pathsSeen |= h->paths;
             }
         }
         long lit = 0, match = 0, dark = 0, extra = 0;
@@ -1663,6 +1673,8 @@ void ProbeEnd(const BYTE* room) {
             row += std::format("; largest other: solve ({:.3f} {:.3f} {:.3f}) law ({:.3f} {:.3f} {:.3f}) at {}", offMeas[0], offMeas[1], offMeas[2], offLaw[0], offLaw[1], offLaw[2], at(offAt));
         if (!hk.empty()) {
             long lawLit = 0, lawMatch = 0, seen = 0, seen3 = 0;
+            long preLit = 0, preMatch = 0, fSeen = 0, fSame = 0, fZero = 0; // the law vs the colour before Apex's path; the path's factor
+            std::vector<float> factors;
             long wOpen = 0, wBlocked = 0, wPartly = 0, oOpen = 0, oBlocked = 0, oPartly = 0; // the wall test, the 3D (object) test
             std::vector<float> lawRatios;
             for (size_t i = 0; i < n; i++) {
@@ -1676,6 +1688,17 @@ void ProbeEnd(const BYTE* room) {
                     lawMatch += ph == OutdoorDeltaModel::ProbeClass::Match;
                     if (ph == OutdoorDeltaModel::ProbeClass::Strength && OutdoorDeltaModel::Lum3(m) > 0.0f)
                         lawRatios.push_back(OutdoorDeltaModel::Lum3(h) / OutdoorDeltaModel::Lum3(m));
+                }
+                {
+                    const float* pv = &pr[i * 3];
+                    const OutdoorDeltaModel::ProbeClass pp = OutdoorDeltaModel::ProbeClassify(pv, m);
+                    if (pp != OutdoorDeltaModel::ProbeClass::Unlit) preLit++, preMatch += pp == OutdoorDeltaModel::ProbeClass::Match;
+                    const float lp = OutdoorDeltaModel::Lum3(pv);
+                    if (Max3(pv) >= kLevel && lp > 0.0f) {
+                        const float f = OutdoorDeltaModel::Lum3(h) / lp;
+                        fSeen++, fSame += std::fabs(f - 1.0f) < 0.01f, fZero += f < 0.01f;
+                        if (std::fabs(f - 1.0f) >= 0.01f && f >= 0.01f) factors.push_back(f);
+                    }
                 }
                 const float lh = OutdoorDeltaModel::Lum3(h);
                 if (Max3(h) < kLevel || !(lh > 0.0f)) continue;
@@ -1699,6 +1722,8 @@ void ProbeEnd(const BYTE* room) {
                     if (const Capture::ProbeHook* ph = hp[i]; ph && ph->raw)
                         dumpTexels += std::format(" from {:.4f} {:.4f} {:.4f} raw {} {:.5f}", ph->from[0], ph->from[1], ph->from[2], ph->raw == 1 ? 1 : 0, ph->rawT);
                     else dumpTexels += " raw none";
+                    if (const Capture::ProbeHook* ph = hp[i])
+                        dumpTexels += std::format(" path {} pre {:.5f} {:.5f} {:.5f}", static_cast<int>(ph->paths), pr[i * 3], pr[i * 3 + 1], pr[i * 3 + 2]);
                     if (const uint32_t b = batchOf[i]; b < r.batches.size())
                         dumpTexels += std::format(" batch {} n {} flags {} {} c {:.4f} {:.4f} {:.4f}", b, r.batches[b].count, static_cast<int>(r.batches[b].flags[0]),
                                                   static_cast<int>(r.batches[b].flags[1]), centroid[b * 3], centroid[b * 3 + 1], centroid[b * 3 + 2]);
@@ -1716,6 +1741,19 @@ void ProbeEnd(const BYTE* room) {
                                "past the walls: {:.1f}% open, {:.1f}% blocked, {:.1f}% partly",
                                of(lawMatch, lawLit), lawLit, of(static_cast<long>(lawRatios.size()), lawLit), lm, seen, of(wOpen, seen), of(wBlocked, seen), of(wPartly, seen),
                                seen3, of(oOpen, seen3), of(oBlocked, seen3), of(oPartly, seen3));
+            float fm = 0.0f;
+            if (!factors.empty()) {
+                std::nth_element(factors.begin(), factors.begin() + factors.size() / 2, factors.end());
+                fm = factors[factors.size() / 2];
+            }
+            static constexpr const char* kPath[5] = {"own", "InnerShadow", "opening", "CrossFloorShadow", "IndoorShadow"};
+            std::string names;
+            for (int p = 0; p < 5; p++)
+                if (pathsSeen >> p & 1) names += std::string(names.empty() ? "" : "+") + kPath[p];
+            row += std::format("; Apex's path {}: the law vs the colour before it {:.1f}% of {} within 2/255; its factor at {} texels: {:.1f}% unchanged, "
+                               "{:.1f}% zero, {:.1f}% other (median {:.3f})",
+                               names.empty() ? "none" : names, of(preMatch, preLit), preLit, fSeen, of(fSame, fSeen), of(fZero, fSeen),
+                               of(static_cast<long>(factors.size()), fSeen), fm);
         }
         if (rays) {
             const auto of = [rays](long v) { return 100.0 * static_cast<double>(v) / static_cast<double>(rays); };
@@ -2238,7 +2276,7 @@ Acc* AccFor(uintptr_t light) {
         return nullptr;
     }
     Acc& a = s.acc[s.n++];
-    a = Acc{light, {0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, 1.0f, 0};
+    a = Acc{light, {0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, 1.0f, 0, {0.0f, 0.0f, 0.0f}, 0};
     return &a;
 }
 void FlushTap() {
@@ -2273,8 +2311,13 @@ void TapEnd() {
 void OnEvalOut(uintptr_t light, const float* colour) {
     SampleState& s = g_s;
     if (!s.on || s.tap != 0 || !g_cap.probe || !colour) return;
-    if (Acc* a = AccFor(light))
+    if (Acc* a = AccFor(light)) {
         for (int i = 0; i < 3; i++) a->hook[i] += colour[i], a->wall[i] += colour[i]; // (as passed until its wall test says otherwise)
+        const bool noted = s.pathLight == light; // (no path noted: the threshold dropped it before, or it is not a roofed room's)
+        for (int i = 0; i < 3; i++) a->pre[i] += noted ? s.pre[i] : colour[i];
+        a->paths |= static_cast<uint8_t>(1u << (noted ? s.path : 0));
+    }
+    s.pathLight = 0;
     for (int i = 0; i < 3; i++) s.last[i] = colour[i];
     s.lastLight = light;
 }
@@ -2285,6 +2328,12 @@ void OnWallTest(bool passed, float t) {
     if (Acc* a = AccFor(s.lastLight))
         for (int i = 0; i < 3; i++) a->wall[i] -= s.last[i] * (1.0f - share);
     s.lastLight = 0;
+}
+void OnEvalPath(uintptr_t light, int path, const float* colour) {
+    SampleState& s = g_s;
+    if (!s.on || s.tap != 0 || !g_cap.probe || !colour) return;
+    s.pathLight = light, s.path = std::clamp(path, 0, 7);
+    for (int i = 0; i < 3; i++) s.pre[i] = colour[i];
 }
 void OnWallTestRaw(const float* from, bool ok, float t) {
     SampleState& s = g_s;
@@ -2385,7 +2434,7 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
             p.vis = s.masked ? ToHalf(a.vis) : 0;
             p.all = s.masked ? ToHalf(a.all) : 0;
             if (c.probe && (a.hook[0] != 0.0f || a.hook[1] != 0.0f || a.hook[2] != 0.0f))
-                c.probeHook.push_back(Capture::ProbeHook{texel, a.light, {a.hook[0], a.hook[1], a.hook[2]}, {a.wall[0], a.wall[1], a.wall[2]}, {a.from[0], a.from[1], a.from[2]}, a.rawT, a.raw});
+                c.probeHook.push_back(Capture::ProbeHook{texel, a.light, {a.hook[0], a.hook[1], a.hook[2]}, {a.wall[0], a.wall[1], a.wall[2]}, {a.from[0], a.from[1], a.from[2]}, a.rawT, a.raw, {a.pre[0], a.pre[1], a.pre[2]}, a.paths});
             if (!Nonzero(p)) continue;
             auto [it, fresh] = c.lampIdx.try_emplace(a.light, static_cast<int>(r.lamps.size()));
             if (fresh) {

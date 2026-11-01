@@ -13005,6 +13005,12 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
         // test of ours: our tests only lower the colour, so it is dropped either way (bit-identical; most far lamps end here)
         if (g_ctx.thr > (colour[2] + colour[1]) + colour[0]) return;
         const ApexCycles timed;
+        if (t_odSample && OutdoorDelta::RoomProbe()) { // (the room lamp probe) which of Apex's paths this lamp takes, and its colour before it
+            const bool yardSame = g_ctx.info->yard && FindSame(*g_ctx.info, reinterpret_cast<uintptr_t>(light));
+            const Cross* pc = innerLamp || openLamp || yardSame || !g_ctx.info->indoor ? nullptr : FindCross(*g_ctx.info, reinterpret_cast<uintptr_t>(light));
+            const int path = innerLamp ? 1 : openLamp || yardSame ? 2 : !g_ctx.info->indoor || (pc && pc->outdoor) ? 3 : pc ? 4 : 0;
+            OutdoorDelta::OnEvalPath(reinterpret_cast<uintptr_t>(light), path, colour);
+        }
         if (innerLamp) InnerShadow(*g_ctx.info, light, sample, colour); // a lamp of a roofed room through an opening (indoor light through openings)
         else if (openLamp || (g_ctx.info->yard && FindSame(*g_ctx.info, reinterpret_cast<uintptr_t>(light)))) {
             // the outdoor map's cut at 1 for this lamp's entries, its hue kept (story 0's room-0 lamps are listed twice, ShareRoofedOpenings)

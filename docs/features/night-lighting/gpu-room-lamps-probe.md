@@ -75,6 +75,9 @@ give.
 - **Dump, the 2D wall test**: per room the mode byte +0x639, its walls (room+0x30..+0x34, 0x100 bytes each) and the default 2D
   and 3D index vectors (+0x78, +0x88); per sample texel the game's own wall test inside Apex's wrapper (the ray's start and
   its answer before Apex's overrides) and the texel's batch (size, the pass's two switches, centroid).
+- **Apex's paths**: each lamp row ends with the path Apex's hook took for it (own, InnerShadow, opening, CrossFloorShadow,
+  IndoorShadow), how the law matches the colour before that path, and that path's factor (unchanged, zero, other with its
+  median); the dump's sample texels carry the path bits and that colour (`path P pre r g b`).
 - **Sample layout**: the batch sample's position at +0x00 and normal at +0x10, world space, as `ExportRoom0` reads them.
 - **Test**: `tools/outdoor_delta_test` checks `ProbeClassify`'s five classes.
 
