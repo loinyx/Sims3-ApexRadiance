@@ -1359,7 +1359,7 @@ void SetNeighbourLots(const uint64_t* lots, int n) {
 // to reproduce. Nothing of it is kept.
 namespace {
 std::atomic<int> g_probeLines{0};
-constexpr int kProbeLines = 600; // (a session's log: every room of a few lots, with their lamps)
+constexpr int kProbeLines = 2000; // (a session's log: every room of a few lots, with their lamps)
 bool ProbeLog() {
     const int n = g_probeLines.fetch_add(1, std::memory_order_relaxed);
     if (n == kProbeLines) LOG_INFO("[RoomLampProbe] Line limit reached: later probes are not logged");
@@ -1458,6 +1458,17 @@ void ProbeEnd(const BYTE* room) {
                 if (p.texel < n)
                     for (int k = 0; k < 3; k++) got[p.texel * 3 + k] = p.rgb[k];
         const RtLampModel::Lamp L{law, static_cast<float>(li.mult)};
+        // (11/01 game test: indoors the solve gave 0.4 to 0.7 of the law at 2 to 4 m and twice the cap near a shade) the law's
+        // variants, to tell which one the solve follows: [0] realistic reach for every lamp, [1] that and no cap (Cmax)
+        RtLampModel::Lamp V[2] = {L, L};
+        if (reachOn && !reach) {
+            GpuLampLaw::Lamp lr;
+            RtOutdoorLamps::WorldLaw(li.light, r.lot, true, lr, type, reg);
+            V[0].law = V[1].law = lr;
+        }
+        V[1].law.cmax = 1e30f;
+        long vWithin[2] = {};
+        std::vector<float> vRatios[2];
         long lit = 0, match = 0, dark = 0, extra = 0;
         long rays = 0, shadowMatch = 0, shadedOk = 0, leak = 0, over = 0; // (the tested texels against the occluders)
         std::vector<float> ratios;
@@ -1478,6 +1489,14 @@ void ProbeEnd(const BYTE* room) {
                 continue;
             }
             lit++;
+            for (int v = 0; v < 2; v++) {
+                float mv[3] = {};
+                RtLampModel::Add(V[v], s, s + 4, 1.0f, true, r.thr, fade, mv);
+                const OutdoorDeltaModel::ProbeClass pv = OutdoorDeltaModel::ProbeClassify(g, mv);
+                vWithin[v] += pv == OutdoorDeltaModel::ProbeClass::Match || pv == OutdoorDeltaModel::ProbeClass::Unlit;
+                const float lv = OutdoorDeltaModel::Lum3(mv);
+                if (pv == OutdoorDeltaModel::ProbeClass::Strength && lv > 0.0f) vRatios[v].push_back(OutdoorDeltaModel::Lum3(g) / lv);
+            }
             if (tested) { // the occluders the GPU would shadow it with (hard: one ray to the lamp's centre)
                 float a[3], b[3], nl[3];
                 RtLampProxy::ToLot(occ.lot, law.pos, a);
@@ -1525,6 +1544,16 @@ void ProbeEnd(const BYTE* room) {
         if (dark) row += std::format("; darkest miss: law {:.3f} at {}", darkWorst, at(darkAt));
         if (offWorst > 0.0f)
             row += std::format("; largest other: solve ({:.3f} {:.3f} {:.3f}) law ({:.3f} {:.3f} {:.3f}) at {}", offMeas[0], offMeas[1], offMeas[2], offLaw[0], offLaw[1], offLaw[2], at(offAt));
+        {
+            float vm[2] = {};
+            for (int v = 0; v < 2; v++)
+                if (!vRatios[v].empty()) {
+                    std::nth_element(vRatios[v].begin(), vRatios[v].begin() + vRatios[v].size() / 2, vRatios[v].end());
+                    vm[v] = vRatios[v][vRatios[v].size() / 2];
+                }
+            row += std::format("; variants: reach indoors too {:.1f}% within 2/255 ({:.1f}% other strength, median {:.3f}), and no cap {:.1f}% ({:.1f}%, median {:.3f})",
+                               pct(vWithin[0]), pct(static_cast<long>(vRatios[0].size())), vm[0], pct(vWithin[1]), pct(static_cast<long>(vRatios[1].size())), vm[1]);
+        }
         if (rays) {
             const auto of = [rays](long v) { return 100.0 * static_cast<double>(v) / static_cast<double>(rays); };
             row += std::format("; with the occluders ({} texels tested): {:.1f}% within 2/255, {:.1f}% dark in both, {:.1f}% dark in the solve only (the GPU "

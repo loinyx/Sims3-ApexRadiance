@@ -55,7 +55,7 @@ give.
 - Only solves on the light tree thread with Lamp lighting: Instant (the hooks of Quick outdoor lamp edits run only then);
   quick passes and rooms with a light whose evaluation is not wrapped are not probed (logged).
 - Each probe costs one model evaluation per texel and lamp, and the rays, on the light tree thread (the log gives its time).
-- At most 600 log lines a session.
+- At most 2000 log lines a session.
 
 ## Technical reference
 
