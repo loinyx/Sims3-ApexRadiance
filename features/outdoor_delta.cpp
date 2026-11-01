@@ -1398,7 +1398,7 @@ void ProbeStart(unsigned char* room, const RoomRead& rr) {
 inline float Max3(const float* c) { return std::max({c[0], c[1], c[2]}); }
 // The probe's dump (one file a session in the Apex Radiance folder): each probed room's 3D blockers as the game's 3D test
 // 0x0069D910 reads them (room+0x40..+0x44: 64-byte records, the blocker pointers at record+0x30..+0x34; each blocker's
-// vtable, its vfunc+0x14 = the transmission, and its first 0x80 bytes) and the sample texels ProbeEnd picked
+// vtable, its vfunc+0x14 = the transmission, and its first 0x100 bytes; once, the globals the 3D test reads) and the sample texels ProbeEnd picked
 void ProbeDump(const BYTE* room, const RoomRead& rr, const std::string& texels) {
     static std::FILE* s_file = nullptr;
     static bool s_tried = false;
@@ -1413,6 +1413,17 @@ void ProbeDump(const BYTE* room, const RoomRead& rr, const std::string& texels) 
                                                                        t.wSecond)).c_str(),
                              L"wb");
         LOG_INFO(s_file ? "[RoomLampProbe] Dump: RoomLampProbe-<time>.txt in the Apex Radiance folder" : "[RoomLampProbe] Dump: the file could not be made");
+        if (s_file) { // the 3D test's constants (0x0069D910, 0x0069FCE0, the blockers' vfunc+0x14 and their helpers 0x0069B4C0..0x0069B72A)
+            static constexpr uint32_t kConsts[] = {0x00F98964, 0x00F98A58, 0x00F9A5AC, 0x00FAA210, 0x00FB2F6C, 0x00FBD498, 0x00FECE18, 0x00FF31AC, 0x0106B4B4, 0x0106D6CC,
+                                                   0x0107A538, 0x011CB864, 0x011D01B0, 0x011D01C0, 0x011D01D0, 0x011D01E0, 0x011D01F0, 0x011D0200, 0x011D0240};
+            std::string c;
+            for (uint32_t at : kConsts) {
+                uint32_t v[4] = {};
+                CopyBytes(v, reinterpret_cast<const void*>(static_cast<uintptr_t>(at)), sizeof v);
+                c += std::format("CONST {:08X} {:08X} {:08X} {:08X} {:08X}\n", at, v[0], v[1], v[2], v[3]);
+            }
+            s_bytes += std::fwrite(c.data(), 1, c.size(), s_file);
+        }
     }
     if (!s_file || s_bytes > kMaxBytes) return;
     std::string out = std::format("ROOM story {} id {} class {} roofed {} room {:08X}\n", rr.story, rr.id, rr.cls, rr.outdoor ? 0 : 1, reinterpret_cast<uintptr_t>(room));
@@ -1436,7 +1447,7 @@ void ProbeDump(const BYTE* room, const RoomRead& rr, const std::string& texels) 
                 if (!CopyBytes(&b, reinterpret_cast<const void*>(bl[0] + j * 4), 4) || !b || !CopyBytes(&vt, reinterpret_cast<const void*>(b), 4) || !vt ||
                     !CopyBytes(&f14, reinterpret_cast<const void*>(vt + 0x14), 4))
                     continue;
-                uint32_t raw[32] = {};
+                uint32_t raw[64] = {}; // (0x0069BEA0 reads the blocker up to +0xFF)
                 CopyBytes(raw, reinterpret_cast<const void*>(b), sizeof raw);
                 out += std::format("B {:08X} vt {:08X} f14 {:08X} raw", b, vt, f14);
                 for (uint32_t w : raw) out += std::format(" {:08X}", w);
