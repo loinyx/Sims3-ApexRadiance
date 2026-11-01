@@ -12919,6 +12919,15 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
     // Quick outdoor lamp edits (Instant only): each light's part of the sums a kept sample adds to (the running sum is read
     // before each light of the outer point solve; t_odSample is set on the light tree thread only)
     if (t_odSample && t_odDepth == 1 && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn)) OutdoorDelta::OnEval(reinterpret_cast<uintptr_t>(light));
+    // (the room lamp probe) the colour this evaluation leaves, after the soft light cut below, before the game's wall and object tests
+    struct ProbeOnExit {
+        uintptr_t l;
+        const float* c;
+        ~ProbeOnExit() {
+            if (c) OutdoorDelta::OnEvalOut(l, c);
+        }
+    } probeOnExit{reinterpret_cast<uintptr_t>(light),
+                  t_odSample && t_odDepth == 1 && OutdoorDelta::RoomProbe() && _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) ? colour : nullptr};
     // Smooth light maps: the soft light cut (the threshold the game compares with is lowered for this solve, SolvePoint): the
     // colour the game is about to sum, Apex's tests done, fades at the room's real threshold on every way out below
     struct FadeOnExit {

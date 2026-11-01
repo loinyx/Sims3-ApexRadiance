@@ -550,6 +550,7 @@ struct Acc {
     uintptr_t light;
     float rgb[3];
     float vis, all;
+    float hook[3]; // (the room lamp probe) the evaluations' colour before the game's tests
 };
 struct SampleState {
     bool on = false;
@@ -576,6 +577,12 @@ struct Capture {
     const char* why = nullptr;
     bool directional = false;
     bool probe = false; // a room other than room 0, for the room lamp probe: compared at its end and dropped
+    struct ProbeHook {
+        uint32_t texel;
+        uintptr_t light;
+        float rgb[3];
+    };
+    std::vector<ProbeHook> probeHook; // (the probe) each light's colour at each texel before the game's tests
     // a self-check solve: the texels the delta wrote, by (map, x, y)
     bool check = false, checkLightsSame = false;
     std::unordered_map<uint64_t, uint32_t> checkOld;
@@ -1429,6 +1436,9 @@ void ProbeEnd(const BYTE* room) {
     constexpr float kLevel = 1.0f / 255.0f;
     std::unordered_map<uintptr_t, const LampRec*> parts;
     for (const LampRec& l : r.lamps) parts[l.light] = &l;
+    std::unordered_map<uintptr_t, std::vector<const Capture::ProbeHook*>> hooks;
+    for (const Capture::ProbeHook& h : c.probeHook)
+        if (h.texel < n) hooks[h.light].push_back(&h);
     // light no part holds (the GPU's base would keep it whatever it draws)
     std::vector<float> got(n * 3, 0.0f), measAll(n * 3, 0.0f), lawAll(n * 3, 0.0f);
     for (const LampRec& l : r.lamps)
@@ -1458,17 +1468,14 @@ void ProbeEnd(const BYTE* room) {
                 if (p.texel < n)
                     for (int k = 0; k < 3; k++) got[p.texel * 3 + k] = p.rgb[k];
         const RtLampModel::Lamp L{law, static_cast<float>(li.mult)};
-        // (11/01 game test: indoors the solve gave 0.4 to 0.7 of the law at 2 to 4 m and twice the cap near a shade) the law's
-        // variants, to tell which one the solve follows: [0] realistic reach for every lamp, [1] that and no cap (Cmax)
-        RtLampModel::Lamp V[2] = {L, L};
-        if (reachOn && !reach) {
-            GpuLampLaw::Lamp lr;
-            RtOutdoorLamps::WorldLaw(li.light, r.lot, true, lr, type, reg);
-            V[0].law = V[1].law = lr;
+        // (11/01 game tests: the solve gave 0.4 to 0.7 of the law, and neither realistic reach indoors nor the cap explained it)
+        // the colour each evaluation left before the game's own wall and object tests: the law apart from those tests
+        std::vector<float> hk;
+        if (const auto it = hooks.find(li.light); it != hooks.end()) {
+            hk.assign(n * 3, 0.0f);
+            for (const Capture::ProbeHook* h : it->second)
+                for (int k = 0; k < 3; k++) hk[h->texel * 3 + k] += h->rgb[k];
         }
-        V[1].law.cmax = 1e30f;
-        long vWithin[2] = {};
-        std::vector<float> vRatios[2];
         long lit = 0, match = 0, dark = 0, extra = 0;
         long rays = 0, shadowMatch = 0, shadedOk = 0, leak = 0, over = 0; // (the tested texels against the occluders)
         std::vector<float> ratios;
@@ -1489,14 +1496,6 @@ void ProbeEnd(const BYTE* room) {
                 continue;
             }
             lit++;
-            for (int v = 0; v < 2; v++) {
-                float mv[3] = {};
-                RtLampModel::Add(V[v], s, s + 4, 1.0f, true, r.thr, fade, mv);
-                const OutdoorDeltaModel::ProbeClass pv = OutdoorDeltaModel::ProbeClassify(g, mv);
-                vWithin[v] += pv == OutdoorDeltaModel::ProbeClass::Match || pv == OutdoorDeltaModel::ProbeClass::Unlit;
-                const float lv = OutdoorDeltaModel::Lum3(mv);
-                if (pv == OutdoorDeltaModel::ProbeClass::Strength && lv > 0.0f) vRatios[v].push_back(OutdoorDeltaModel::Lum3(g) / lv);
-            }
             if (tested) { // the occluders the GPU would shadow it with (hard: one ray to the lamp's centre)
                 float a[3], b[3], nl[3];
                 RtLampProxy::ToLot(occ.lot, law.pos, a);
@@ -1544,15 +1543,36 @@ void ProbeEnd(const BYTE* room) {
         if (dark) row += std::format("; darkest miss: law {:.3f} at {}", darkWorst, at(darkAt));
         if (offWorst > 0.0f)
             row += std::format("; largest other: solve ({:.3f} {:.3f} {:.3f}) law ({:.3f} {:.3f} {:.3f}) at {}", offMeas[0], offMeas[1], offMeas[2], offLaw[0], offLaw[1], offLaw[2], at(offAt));
-        {
-            float vm[2] = {};
-            for (int v = 0; v < 2; v++)
-                if (!vRatios[v].empty()) {
-                    std::nth_element(vRatios[v].begin(), vRatios[v].begin() + vRatios[v].size() / 2, vRatios[v].end());
-                    vm[v] = vRatios[v][vRatios[v].size() / 2];
+        if (!hk.empty()) {
+            long lawLit = 0, lawMatch = 0, open = 0, blocked = 0, partly = 0, seen = 0;
+            std::vector<float> lawRatios;
+            for (size_t i = 0; i < n; i++) {
+                const float* s = reinterpret_cast<const float*>(r.samples.data() + i * 0x30);
+                float m[3] = {};
+                RtLampModel::Add(L, s, s + 4, 1.0f, reach, r.thr, fade, m);
+                const float* h = &hk[i * 3];
+                const OutdoorDeltaModel::ProbeClass ph = OutdoorDeltaModel::ProbeClassify(h, m);
+                if (ph != OutdoorDeltaModel::ProbeClass::Unlit) {
+                    lawLit++;
+                    lawMatch += ph == OutdoorDeltaModel::ProbeClass::Match;
+                    if (ph == OutdoorDeltaModel::ProbeClass::Strength && OutdoorDeltaModel::Lum3(m) > 0.0f)
+                        lawRatios.push_back(OutdoorDeltaModel::Lum3(h) / OutdoorDeltaModel::Lum3(m));
                 }
-            row += std::format("; variants: reach indoors too {:.1f}% within 2/255 ({:.1f}% other strength, median {:.3f}), and no cap {:.1f}% ({:.1f}%, median {:.3f})",
-                               pct(vWithin[0]), pct(static_cast<long>(vRatios[0].size())), vm[0], pct(vWithin[1]), pct(static_cast<long>(vRatios[1].size())), vm[1]);
+                const float lh = OutdoorDeltaModel::Lum3(h);
+                if (Max3(h) < kLevel || !(lh > 0.0f)) continue;
+                const float t = OutdoorDeltaModel::Lum3(&got[i * 3]) / lh; // the game's wall and object tests' share
+                seen++;
+                open += t >= 0.98f, blocked += t <= 0.02f, partly += t > 0.02f && t < 0.98f;
+            }
+            float lm = 0.0f;
+            if (!lawRatios.empty()) {
+                std::nth_element(lawRatios.begin(), lawRatios.begin() + lawRatios.size() / 2, lawRatios.end());
+                lm = lawRatios[lawRatios.size() / 2];
+            }
+            const auto of = [](long v, long of) { return of ? 100.0 * static_cast<double>(v) / static_cast<double>(of) : 0.0; };
+            row += std::format("; the law alone (the colour before the game's wall and object tests): {:.1f}% of {} texels within 2/255 ({:.1f}% other strength, "
+                               "median {:.3f}); the game's tests at {} texels: {:.1f}% open, {:.1f}% blocked, {:.1f}% partly",
+                               of(lawMatch, lawLit), lawLit, of(static_cast<long>(lawRatios.size()), lawLit), lm, seen, of(open, seen), of(blocked, seen), of(partly, seen));
         }
         if (rays) {
             const auto of = [rays](long v) { return 100.0 * static_cast<double>(v) / static_cast<double>(rays); };
@@ -2074,7 +2094,7 @@ Acc* AccFor(uintptr_t light) {
         return nullptr;
     }
     Acc& a = s.acc[s.n++];
-    a = Acc{light, {0.0f, 0.0f, 0.0f}, 0.0f, 0.0f};
+    a = Acc{light, {0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, {0.0f, 0.0f, 0.0f}};
     return &a;
 }
 void FlushTap() {
@@ -2105,6 +2125,12 @@ void TapEnd() {
     FlushTap();
     s.tap = -1;
     s.sum = nullptr;
+}
+void OnEvalOut(uintptr_t light, const float* colour) {
+    SampleState& s = g_s;
+    if (!s.on || s.tap != 0 || !g_cap.probe || !colour) return;
+    if (Acc* a = AccFor(light))
+        for (int i = 0; i < 3; i++) a->hook[i] += colour[i];
 }
 void OnEval(uintptr_t light) {
     SampleState& s = g_s;
@@ -2196,6 +2222,8 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
             for (int q = 0; q < 3; q++) p.rgb[q] = a.rgb[q];
             p.vis = s.masked ? ToHalf(a.vis) : 0;
             p.all = s.masked ? ToHalf(a.all) : 0;
+            if (c.probe && (a.hook[0] != 0.0f || a.hook[1] != 0.0f || a.hook[2] != 0.0f))
+                c.probeHook.push_back(Capture::ProbeHook{texel, a.light, {a.hook[0], a.hook[1], a.hook[2]}});
             if (!Nonzero(p)) continue;
             auto [it, fresh] = c.lampIdx.try_emplace(a.light, static_cast<int>(r.lamps.size()));
             if (fresh) {
