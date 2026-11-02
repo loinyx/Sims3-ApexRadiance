@@ -41,6 +41,10 @@ give.
    dark in the solve only (the GPU would light them) and shaded by the occluders only (the GPU would darken them). At most
    about 200,000 rays a solve: on a larger one every n-th texel is tested.
 5. The capture is dropped.
+6. A room 0 solve of the active lot (with Lamp lighting: Instant) records the lot lamps of its list Real-time outdoor lamps
+   does not draw (indoor lamps carried outdoors) as steps 2 and 3 do, with their floor mask parts and the exit ground
+   texels, and is dumped with its whole light list (once a session per room 0 and class). Nothing is kept for it unless
+   Keep indoor lamps for GPU is on too.
 
 ## Settings
 
@@ -56,6 +60,9 @@ give.
   quick passes and rooms with a light whose evaluation is not wrapped are not probed (logged).
 - Each probe costs one model evaluation per texel and lamp, and the rays, on the light tree thread (the log gives its time).
 - At most 2000 log lines a session.
+- Room 0: CrossFloorShadow has no per-evaluation record (its lines are counted apart, not replayed); the floor mask replay
+  tests walls with room 0's whole list where the copy used Apex's culled list (UNVERIFIED that the cull never changes the
+  answer). Neither room 0's records nor the fills have been seen in a game dump yet (UNVERIFIED).
 
 ## Technical reference
 
@@ -96,6 +103,25 @@ give.
   the file is written as `GRIDREF` / `FLOORREF` with its hash.
 - **Every light of a room**: `LIGHT <light> type T vt <vtable> xM colour r g b at x y z drawn 0|1` for each light of the probed room's
   list, and for a light the GPU does not draw up to about 600 `N <light> p .. n .. hook .. wall .. got ..` lines (its lit texels).
+- **The opening's outdoor total**: a `p7` record ends with `tf I` when `OpeningOutdoorTotal` filled or reused a fill in the
+  probed solve; the room's block holds `TF I serial S X x y z n x y z q a b c d lights N`, then per light of room 0's list
+  that `OpenTotalFill` evaluated at X (lit there, window lights left out, at most 64) `l <light> pos x y z c r g b pass p
+  day d slot s` (its place as `YardPass` read it, the game's evaluation at X, `YardPass`, the daytime factor applied, its
+  slot among the record's `same` lamps, -1 none). At most 20,000 fills a solve.
+- **Other rooms' walls**: after the room's own `RECORDS`/`WALLS`/`IDX` lines, for each other room a `p8` ray segment was
+  tested in (the game's 2D test of that room), `OTHER story S id R room <ptr>` and that room's lines with an `O` in front
+  (`ORECORDS`, `OR`, `OB`, `OWALLS`, `OW`, `OIDX2D`, `OIDX3D`; same fields).
+- **The GPU law**: a `LIGHT` line of a light with a GPU law ends with `law` and `GpuLampLaw::Lamp`'s 20 floats as bits.
+- **Room 0** (`ROOM ... id 0`, then the same blocks): `T`/`Z` lines of the lamps it recorded end with `r0 bits B vis v all a
+  tvis V tall A exit e` (the texel's bits: 1 masked, 2 gated, 8 exit ground; the lamp's floor mask parts and the texel's
+  totals as luminances; e = an exit lamp); `M <light> p .. n .. L .. law 0|1 vis v all a tvis V tall A bits B batch ..`
+  per masked texel where it has a floor mask part (at most 1000 a lamp, 4000 a solve); `E <texel> p .. n .. bits B packed
+  P sum r g b exitParts` then `<light> r g b` per exit lamp lit there, per exit ground texel (at most 4000 a solve, evenly
+  sampled).
+- **Replay**: `tools/apex_paths_replay/run.ps1 -Dump <file>` recomputes these: the other rooms' wall tests with their dumped
+  walls (the recorded answer where a room is not dumped), the outdoor total from its fill, each fill light's `YardPass` and
+  GPU law at X, room 0's chain per path, its floor mask copies (the law with N.l ignored, the wall test with room 0's whole
+  wall list) and its exit ground texels (not under a floor tile, `ExitAlpha` of the exit parts against the map's alpha).
 - **Sample layout**: the batch sample's position at +0x00 and normal at +0x10, world space, as `ExportRoom0` reads them.
 - **Test**: `tools/outdoor_delta_test` checks `ProbeClassify`'s five classes.
 

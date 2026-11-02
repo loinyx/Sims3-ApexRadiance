@@ -12804,10 +12804,20 @@ struct OpenTotalMemo {
     int n = 0;
     uintptr_t lamp[16] = {};
     float part[16][3] = {};
+    int probe = -1; // (the room lamp probe) its TF line in the dump (OutdoorDelta::ProbeTotalLine)
+};
+// (the room lamp probe) each light OpenTotalFill took at X: its place, its colour there, its pass and daytime factor, its slot
+struct OpenTotalProbe {
+    int n = 0;
+    struct L {
+        uintptr_t light;
+        float pos[3], c[3], pass, day;
+        int slot;
+    } l[64];
 };
 thread_local OpenTotalMemo t_openTotal[64];
 std::atomic<long> g_openShared{0}, g_openTotalFills{0}, g_openTotalFaults{0};
-bool OpenTotalFill(const BYTE* room0, const RoomInfo& info, const StoryGrid* g0, const StoryGrid* g1, const float* X, const float* n, OpenTotalMemo& m) {
+bool OpenTotalFill(const BYTE* room0, const RoomInfo& info, const StoryGrid* g0, const StoryGrid* g1, const float* X, const float* n, OpenTotalMemo& m, OpenTotalProbe* pr) {
     __try {
         const uintptr_t* lb = *reinterpret_cast<const uintptr_t* const*>(room0 + 0xC8);
         const uintptr_t* le = *reinterpret_cast<const uintptr_t* const*>(room0 + 0xCC);
@@ -12829,6 +12839,8 @@ bool OpenTotalFill(const BYTE* room0, const RoomInfo& info, const StoryGrid* g0,
             alignas(16) float lw[4] = {};
             GridWhy why{};
             float pass = YardPass(g0, g1, reinterpret_cast<void*>(l), X, lw, why);
+            OpenTotalProbe::L* rec = pr && pr->n < 64 ? &pr->l[pr->n++] : nullptr;
+            if (rec) *rec = OpenTotalProbe::L{l, {lw[0], lw[1], lw[2]}, {c[0], c[1], c[2]}, pass, 1.0f, -1};
             if (g_ctx.dayScale < 1.0f && OutdoorLamp(reinterpret_cast<const void*>(l))) pass *= g_ctx.dayScale;
             if (!(pass > 0.0f)) continue;
             int slot = -1;
@@ -12837,6 +12849,7 @@ bool OpenTotalFill(const BYTE* room0, const RoomInfo& info, const StoryGrid* g0,
                     if (m.lamp[k] == l) slot = k;
                 if (slot < 0 && m.n < 16) slot = m.n++, m.lamp[slot] = l;
             }
+            if (rec) rec->day = g_ctx.dayScale < 1.0f && OutdoorLamp(reinterpret_cast<const void*>(l)) ? g_ctx.dayScale : 1.0f, rec->slot = slot;
             for (int k = 0; k < 3; k++) {
                 const float v = ApexMath::IsFinite(c[k]) ? std::max(0.0f, c[k] * pass) : 0.0f;
                 m.total[k] += v;
@@ -12872,9 +12885,21 @@ float OpeningOutdoorTotal(const RoomInfo& info, void* light, const float* sample
         m = OpenTotalMemo{};
         m.serial = g_batchSerial, m.room0 = reinterpret_cast<uintptr_t>(room0);
         std::memcpy(m.q, q, sizeof q);
-        m.ok = OpenTotalFill(room0, info, info.grid[0].get(), info.grid[1].get(), X, n, m);
+        OpenTotalProbe pr;
+        m.ok = OpenTotalFill(room0, info, info.grid[0].get(), info.grid[1].get(), X, n, m, t_pe ? &pr : nullptr);
+        if (t_pe && m.ok) { // (the room lamp probe) the fill, for an offline replay of the total
+            std::string b = std::format("serial {} X {:.9g} {:.9g} {:.9g} n {:.9g} {:.9g} {:.9g} q {} {} {} {} lights {}", m.serial, X[0], X[1], X[2], n[0], n[1], n[2], q[0], q[1], q[2],
+                                        q[3], pr.n);
+            for (int k = 0; k < pr.n; k++) {
+                const OpenTotalProbe::L& e = pr.l[k];
+                b += std::format(" l {:08X} pos {:.9g} {:.9g} {:.9g} c {:.9g} {:.9g} {:.9g} pass {:.9g} day {:.9g} slot {}", e.light, e.pos[0], e.pos[1], e.pos[2], e.c[0], e.c[1],
+                                 e.c[2], e.pass, e.day, e.slot);
+            }
+            m.probe = OutdoorDelta::ProbeTotalLine(b);
+        }
         g_openTotalFills.fetch_add(1, std::memory_order_relaxed);
     }
+    if (t_pe) t_pe->tf = m.probe;
     if (!m.ok) return -1.0f;
     const float* own = nullptr;
     for (int k = 0; k < m.n; k++)
@@ -18491,10 +18516,10 @@ bool FinishRoomMapsTry(void* room) {
         return false;
     }
 }
-void* Room0OfTry(uintptr_t tracker, int story) { // POD (SEH)
+void* RoomOfTry(uintptr_t tracker, int story, int id = 0) { // POD (SEH)
     __try {
         void* mgr = *reinterpret_cast<void* const*>(TreeLevel(tracker, story));
-        return mgr ? reinterpret_cast<RoomById_t>(kRoomById)(mgr, 0) : nullptr;
+        return mgr ? reinterpret_cast<RoomById_t>(kRoomById)(mgr, id) : nullptr;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return nullptr;
     }
@@ -18845,7 +18870,8 @@ bool QueueRoomAgain(const void* room) {
     t_queueForce = false;
     return sent;
 }
-void* Room0Of(uintptr_t tracker, int story) { return tracker && story >= -4 && story <= 7 && kRoomById ? Room0OfTry(tracker, story) : nullptr; }
+void* Room0Of(uintptr_t tracker, int story) { return tracker && story >= -4 && story <= 7 && kRoomById ? RoomOfTry(tracker, story) : nullptr; }
+void* RoomOf(uintptr_t tracker, int story, int id) { return tracker && story >= 0 && story <= 7 && id >= 0 && kRoomById ? RoomOfTry(tracker, story, id) : nullptr; }
 int MovePath(const void* room, uintptr_t light, const float* lp, const char*& why) {
     BYTE* r = static_cast<BYTE*>(const_cast<void*>(room));
     if (OutdoorLamp(reinterpret_cast<const void*>(light))) return why = "an outdoor lamp (the daytime curve, the reach)", -1;

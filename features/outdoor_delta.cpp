@@ -679,6 +679,7 @@ struct Capture {
     bool probe = false; // a room other than room 0, for the room lamp probe: compared at its end and dropped
     bool keep = false;  // (GPU room lamps stage 1) that capture is kept at its end (KeepEnd)
     bool keep0 = false; // (GPU room lamps) a room 0's: the lights of keep0Lights are captured as a kept room's (BuildKept0)
+    bool probe0 = false; // (the room lamp probe) a room 0 of the active lot: the lights of keep0Lights are recorded and dumped (ProbeEnd)
     std::unordered_set<uintptr_t> keep0Lights;
     struct ProbeHook {
         uint32_t texel;
@@ -698,6 +699,7 @@ struct Capture {
     std::vector<ProbeHook> probeHook; // (the probe) each light's colour at each texel before the game's tests
     std::vector<ProbeEval> probeEval; // (the probe) the last evaluation's steps, for lamps of another room or story (kProbeEvalMax)
     long probeZero = 0, probeEvalDropped = 0;
+    std::vector<std::string> probeTotals; // (the probe) the fills of the opening's outdoor total (ProbeTotalLine), TF lines
     float normStart = -1.0f; // the room's normalisation (+0x160) when its solve started
     // a self-check solve: the texels the delta wrote, by (map, x, y)
     bool check = false, checkLightsSame = false;
@@ -1615,6 +1617,67 @@ void ProbeStart(unsigned char* room, const RoomRead& rr) {
     if (c.keep) r.geo = RoomGeoKey(room, r.geoParts);
 }
 inline float Max3(const float* c) { return std::max({c[0], c[1], c[2]}); }
+// What the game's 3D and 2D tests read of a room (the dump's RECORDS, R, B, WALLS, W, IDX2D and IDX3D lines; tag: their prefix)
+std::string ProbeRoomTests(const BYTE* room, const char* tag) {
+    std::string out;
+    uintptr_t rb[2] = {};
+    float tail[4] = {};
+    if (CopyBytes(rb, room + 0x40, sizeof rb) && rb[0] && rb[1] >= rb[0] && (rb[1] - rb[0]) % 64 == 0) {
+        const size_t nr = std::min<size_t>((rb[1] - rb[0]) / 64, 512);
+        CopyBytes(tail, room + 0x9C, sizeof tail); // (+0xA0: the scale the 3D test's answer takes)
+        out += std::format("{}RECORDS {} scaleA0 {:.6f}\n", tag, nr, tail[1]);
+        for (size_t i = 0; i < nr; i++) {
+            float rec[16] = {};
+            if (!CopyBytes(rec, reinterpret_cast<const void*>(rb[0] + i * 64), 64)) break;
+            uintptr_t bl[2] = {};
+            std::memcpy(bl, &rec[12], sizeof bl);
+            out += std::format("{}R {} c {:.4f} {:.4f} {:.4f} {:.4f} r {:.4f} {:.4f} {:.4f} {:.4f} w8 {:.4f} {:.4f} {:.4f} {:.4f}", tag, i, rec[0], rec[1], rec[2], rec[3], rec[4], rec[5],
+                               rec[6], rec[7], rec[8], rec[9], rec[10], rec[11]);
+            const size_t nb = bl[0] && bl[1] >= bl[0] ? std::min<size_t>((bl[1] - bl[0]) / 4, 64) : 0;
+            out += std::format(" blockers {}\n", nb);
+            for (size_t j = 0; j < nb; j++) {
+                uintptr_t b = 0, vt = 0, f14 = 0;
+                if (!CopyBytes(&b, reinterpret_cast<const void*>(bl[0] + j * 4), 4) || !b || !CopyBytes(&vt, reinterpret_cast<const void*>(b), 4) || !vt ||
+                    !CopyBytes(&f14, reinterpret_cast<const void*>(vt + 0x14), 4))
+                    continue;
+                uint32_t raw[64] = {}; // (0x0069BEA0 reads the blocker up to +0xFF)
+                CopyBytes(raw, reinterpret_cast<const void*>(b), sizeof raw);
+                out += std::format("{}B {:08X} vt {:08X} f14 {:08X} raw", tag, b, vt, f14);
+                for (uint32_t w : raw) out += std::format(" {:08X}", w);
+                out += '\n';
+            }
+        }
+    } else out += std::format("{}RECORDS none\n", tag);
+    // the 2D wall test 0x0069FC40 -> 0x0069D4C0: the mode byte +0x639, the walls (room+0x30..+0x34, pointers; 0x100 bytes each),
+    // the default index vectors (2D room+0x78..+0x7C, 3D room+0x88..+0x8C)
+    uint8_t mode = 0;
+    CopyBytes(&mode, room + 0x639, 1);
+    uintptr_t wv[2] = {}, i2[2] = {}, i3[2] = {};
+    CopyBytes(wv, room + 0x30, sizeof wv), CopyBytes(i2, room + 0x78, sizeof i2), CopyBytes(i3, room + 0x88, sizeof i3);
+    const size_t nw = wv[0] && wv[1] >= wv[0] ? std::min<size_t>((wv[1] - wv[0]) / 4, 1024) : 0;
+    out += std::format("{}WALLS {} mode {}\n", tag, nw, static_cast<int>(mode));
+    for (size_t i = 0; i < nw; i++) {
+        uintptr_t w = 0;
+        if (!CopyBytes(&w, reinterpret_cast<const void*>(wv[0] + i * 4), 4) || !w) continue;
+        uint32_t raw[64] = {};
+        CopyBytes(raw, reinterpret_cast<const void*>(w), sizeof raw);
+        out += std::format("{}W {} {:08X} raw", tag, i, w);
+        for (uint32_t x : raw) out += std::format(" {:08X}", x);
+        out += '\n';
+    }
+    for (int v = 0; v < 2; v++) {
+        const uintptr_t* iv = v ? i3 : i2;
+        const size_t ni = iv[0] && iv[1] >= iv[0] ? std::min<size_t>((iv[1] - iv[0]) / 4, 4096) : 0;
+        out += std::format("{}{} {}", tag, v ? "IDX3D" : "IDX2D", ni);
+        for (size_t i = 0; i < ni; i++) {
+            int32_t x = 0;
+            CopyBytes(&x, reinterpret_cast<const void*>(iv[0] + i * 4), 4);
+            out += std::format(" {}", x);
+        }
+        out += '\n';
+    }
+    return out;
+}
 // The probe's dump (one file a session in the Apex Radiance folder): each probed room's 3D blockers as the game's 3D test
 // 0x0069D910 reads them (room+0x40..+0x44: 64-byte records, the blocker pointers at record+0x30..+0x34; each blocker's
 // vtable, its vfunc+0x14 = the transmission, and its first 0x100 bytes; once, the globals the 3D test reads) and the sample texels ProbeEnd picked
@@ -1646,66 +1709,28 @@ void ProbeDump(const BYTE* room, const RoomRead& rr, const std::string& texels) 
         }
     }
     if (!s_file || s_bytes > kMaxBytes) return;
+    static std::unordered_set<uint64_t> s_room0; // (room 0: once a session per room and class, its walls and records are the lot's largest)
+    if (rr.id == 0 && !s_room0.insert(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(room)) << 2 | static_cast<uint64_t>(rr.cls & 3)).second) return;
     std::string out = std::format("ROOM story {} id {} class {} roofed {} room {:08X}\n", rr.story, rr.id, rr.cls, rr.outdoor ? 0 : 1, reinterpret_cast<uintptr_t>(room));
     // Apex's state for the room's solve, its record's lamp sets and the grids and floors their tests read
     out += LevelLightShare::ProbeRoomText(room, RtOutdoorLamps::TrackerOf(room), g_cap.normStart);
     out += std::format("PROBE evals {} dropped {} zero {}\n", g_cap.probeEval.size(), g_cap.probeEvalDropped, g_cap.probeZero);
-    uintptr_t rb[2] = {};
-    float tail[4] = {};
-    if (CopyBytes(rb, room + 0x40, sizeof rb) && rb[0] && rb[1] >= rb[0] && (rb[1] - rb[0]) % 64 == 0) {
-        const size_t nr = std::min<size_t>((rb[1] - rb[0]) / 64, 512);
-        CopyBytes(tail, room + 0x9C, sizeof tail); // (+0xA0: the scale the 3D test's answer takes)
-        out += std::format("RECORDS {} scaleA0 {:.6f}\n", nr, tail[1]);
-        for (size_t i = 0; i < nr; i++) {
-            float rec[16] = {};
-            if (!CopyBytes(rec, reinterpret_cast<const void*>(rb[0] + i * 64), 64)) break;
-            uintptr_t bl[2] = {};
-            std::memcpy(bl, &rec[12], sizeof bl);
-            out += std::format("R {} c {:.4f} {:.4f} {:.4f} {:.4f} r {:.4f} {:.4f} {:.4f} {:.4f} w8 {:.4f} {:.4f} {:.4f} {:.4f}", i, rec[0], rec[1], rec[2], rec[3], rec[4], rec[5],
-                               rec[6], rec[7], rec[8], rec[9], rec[10], rec[11]);
-            const size_t nb = bl[0] && bl[1] >= bl[0] ? std::min<size_t>((bl[1] - bl[0]) / 4, 64) : 0;
-            out += std::format(" blockers {}\n", nb);
-            for (size_t j = 0; j < nb; j++) {
-                uintptr_t b = 0, vt = 0, f14 = 0;
-                if (!CopyBytes(&b, reinterpret_cast<const void*>(bl[0] + j * 4), 4) || !b || !CopyBytes(&vt, reinterpret_cast<const void*>(b), 4) || !vt ||
-                    !CopyBytes(&f14, reinterpret_cast<const void*>(vt + 0x14), 4))
-                    continue;
-                uint32_t raw[64] = {}; // (0x0069BEA0 reads the blocker up to +0xFF)
-                CopyBytes(raw, reinterpret_cast<const void*>(b), sizeof raw);
-                out += std::format("B {:08X} vt {:08X} f14 {:08X} raw", b, vt, f14);
-                for (uint32_t w : raw) out += std::format(" {:08X}", w);
-                out += '\n';
-            }
-        }
-    } else out += "RECORDS none\n";
-    // the 2D wall test 0x0069FC40 -> 0x0069D4C0: the mode byte +0x639, the walls (room+0x30..+0x34, pointers; 0x100 bytes each),
-    // the default index vectors (2D room+0x78..+0x7C, 3D room+0x88..+0x8C)
-    uint8_t mode = 0;
-    CopyBytes(&mode, room + 0x639, 1);
-    uintptr_t wv[2] = {}, i2[2] = {}, i3[2] = {};
-    CopyBytes(wv, room + 0x30, sizeof wv), CopyBytes(i2, room + 0x78, sizeof i2), CopyBytes(i3, room + 0x88, sizeof i3);
-    const size_t nw = wv[0] && wv[1] >= wv[0] ? std::min<size_t>((wv[1] - wv[0]) / 4, 1024) : 0;
-    out += std::format("WALLS {} mode {}\n", nw, static_cast<int>(mode));
-    for (size_t i = 0; i < nw; i++) {
-        uintptr_t w = 0;
-        if (!CopyBytes(&w, reinterpret_cast<const void*>(wv[0] + i * 4), 4) || !w) continue;
-        uint32_t raw[64] = {};
-        CopyBytes(raw, reinterpret_cast<const void*>(w), sizeof raw);
-        out += std::format("W {} {:08X} raw", i, w);
-        for (uint32_t x : raw) out += std::format(" {:08X}", x);
-        out += '\n';
+    out += ProbeRoomTests(room, "");
+    // (IndoorShadow) the other rooms a lamp's ray segments were tested in by the game's 2D test: their walls and records
+    std::vector<std::pair<int, int>> others;
+    for (const ProbeEval& e : g_cap.probeEval)
+        for (int k = 0; k < e.nseg && k < 8; k++)
+            if (e.seg[k].passed != 255 && e.seg[k].story >= 0 && e.seg[k].room >= 0) others.emplace_back(e.seg[k].story, e.seg[k].room);
+    std::sort(others.begin(), others.end());
+    others.erase(std::unique(others.begin(), others.end()), others.end());
+    const uintptr_t tracker = RtOutdoorLamps::TrackerOf(room);
+    for (const auto& [story, id] : others) {
+        const BYTE* o = static_cast<const BYTE*>(LevelLightShare::RoomOf(tracker, story, id));
+        if (o == room) continue;
+        out += std::format("OTHER story {} id {} room {:08X}\n", story, id, reinterpret_cast<uintptr_t>(o));
+        if (o) out += ProbeRoomTests(o, "O");
     }
-    for (int v = 0; v < 2; v++) {
-        const uintptr_t* iv = v ? i3 : i2;
-        const size_t ni = iv[0] && iv[1] >= iv[0] ? std::min<size_t>((iv[1] - iv[0]) / 4, 4096) : 0;
-        out += std::format("{} {}", v ? "IDX3D" : "IDX2D", ni);
-        for (size_t i = 0; i < ni; i++) {
-            int32_t x = 0;
-            CopyBytes(&x, reinterpret_cast<const void*>(iv[0] + i * 4), 4);
-            out += std::format(" {}", x);
-        }
-        out += '\n';
-    }
+    for (const std::string& l : g_cap.probeTotals) out += l; // (the opening's outdoor totals)
     out += texels;
     s_bytes += std::fwrite(out.data(), 1, out.size(), s_file);
     std::fflush(s_file);
@@ -1747,6 +1772,7 @@ std::string EvTokens(const Capture::ProbeHook& ph, const std::vector<ProbeEval>&
     if (e.has & 2) {
         t += " p7";
         for (float v : e.p7) t += std::format(" {:.9g}", v);
+        if (e.tf >= 0) t += std::format(" tf {}", e.tf); // (the TF line of the outdoor total's fill)
     }
     if (e.has & 4) {
         t += std::format(" p8 {:.9g} {:.9g} {:.9g} why {} stage {} nseg {}", e.p8[0], e.p8[1], e.p8[2], static_cast<int>(e.why), static_cast<int>(e.stage), static_cast<int>(e.nseg));
@@ -1765,6 +1791,7 @@ void ProbeEnd(const BYTE* room) {
     RoomRead rr;
     if (!ReadRoom(room, rr)) return;
     const char* kind = rr.outdoor ? "roofless" : "roofed";
+    const bool r0 = rr.id == 0; // (room 0: only the lights its capture recorded, keep0Lights, are compared and dumped)
     std::vector<ListLight> list;
     if (c.ok && !UniqueList(room, list)) Fail("the light list could not be read");
     if (c.ok && r.samples.size() != r.texels.size() * 0x30) Fail("the samples do not match the texels");
@@ -1811,6 +1838,7 @@ void ProbeEnd(const BYTE* room) {
     std::string dumpTexels; // (the dump) sample texels: position, normal, lamp, colour before the tests, after the walls, final
     int dumpShaded = 0, dumpOpen = 0, dumpZero = 0;
     for (const ListLight& li : list) {
+        if (r0 && !hooks.count(li.light)) continue;
         GpuLampLaw::Lamp law;
         int type = 0, reg = -1;
         if (!RtOutdoorLamps::WorldLaw(li.light, r.lot, false, law, type, reg)) continue;
@@ -1823,6 +1851,13 @@ void ProbeEnd(const BYTE* room) {
             for (const Contrib& p : it->second->parts)
                 if (p.texel < n)
                     for (int k = 0; k < 3; k++) got[p.texel * 3 + k] = p.rgb[k];
+        std::vector<float> mv, ma; // (room 0) its floor mask parts: the walls-tested and the no-walls copy's luminance
+        bool exitLamp = false;
+        if (const auto it = parts.find(li.light); r0 && it != parts.end()) {
+            mv.assign(n, 0.0f), ma.assign(n, 0.0f), exitLamp = it->second->exit;
+            for (const Contrib& p : it->second->parts)
+                if (p.texel < n) mv[p.texel] = FromHalf(p.vis), ma[p.texel] = FromHalf(p.all);
+        }
         const RtLampModel::Lamp L{law, static_cast<float>(li.mult)};
         // (11/01 game tests: the solve gave 0.4 to 0.7 of the law, and neither realistic reach indoors nor the cap explained it)
         // the colour each evaluation left before the game's own wall and object tests: the law apart from those tests
@@ -1929,6 +1964,9 @@ void ProbeEnd(const BYTE* room) {
                     dumpTexels += std::format(" batch {} n {} flags {} {} c {:.4f} {:.4f} {:.4f}", b, r.batches[b].count, static_cast<int>(r.batches[b].flags[0]),
                                               static_cast<int>(r.batches[b].flags[1]), centroid[b * 3], centroid[b * 3 + 1], centroid[b * 3 + 2]);
                 if (const Capture::ProbeHook* ph = hp[i]) dumpTexels += EvTokens(*ph, c.probeEval);
+                if (r0)
+                    dumpTexels += std::format(" r0 bits {} vis {:.6g} all {:.6g} tvis {:.6g} tall {:.6g} exit {}", static_cast<int>(r.texels[i].bits), mv.empty() ? 0.0f : mv[i],
+                                              ma.empty() ? 0.0f : ma[i], r.texels[i].t.vis, r.texels[i].t.all, exitLamp ? 1 : 0);
                 dumpTexels += '\n';
             };
             for (size_t i = 0; i < n; i++) {
@@ -2044,8 +2082,16 @@ void ProbeEnd(const BYTE* room) {
         GpuLampLaw::Lamp law;
         int lawType = 0, reg = -1;
         const bool drawnLight = RtOutdoorLamps::WorldLaw(li.light, r.lot, false, law, lawType, reg);
-        dumpTexels += std::format("LIGHT {:08X} type {} vt {:08X} x{} colour {:.3f} {:.3f} {:.3f} at {:.3f} {:.3f} {:.3f} drawn {}\n", li.light, type, vt, li.mult, col[0],
+        dumpTexels += std::format("LIGHT {:08X} type {} vt {:08X} x{} colour {:.3f} {:.3f} {:.3f} at {:.3f} {:.3f} {:.3f} drawn {}", li.light, type, vt, li.mult, col[0],
                                   col[1], col[2], pos[0], pos[1], pos[2], drawnLight ? 1 : 0);
+        if (drawnLight) { // (its GPU law: GpuLampLaw::Lamp's 20 floats as bits, for an offline replay)
+            static_assert(sizeof(GpuLampLaw::Lamp) == 20 * 4);
+            uint32_t lw[20];
+            std::memcpy(lw, &law, sizeof lw);
+            dumpTexels += " law";
+            for (uint32_t v : lw) dumpTexels += std::format(" {:08X}", v);
+        }
+        dumpTexels += '\n';
         const auto hk = hooks.find(li.light);
         if (drawnLight || hk == hooks.end()) continue;
         const auto pt = parts.find(li.light);
@@ -2062,6 +2108,55 @@ void ProbeEnd(const BYTE* room) {
             const float* s = reinterpret_cast<const float*>(r.samples.data() + static_cast<size_t>(h.texel) * 0x30);
             dumpTexels += std::format("N {:08X} p {:.4f} {:.4f} {:.4f} n {:.3f} {:.3f} {:.3f} hook {:.5f} {:.5f} {:.5f} wall {:.5f} {:.5f} {:.5f} got {:.5f} {:.5f} {:.5f}\n",
                                       li.light, s[0], s[1], s[2], s[4], s[5], s[6], h.rgb[0], h.rgb[1], h.rgb[2], h.wall[0], h.wall[1], h.wall[2], g[0], g[1], g[2]);
+        }
+    }
+    // (room 0) the floor mask's parts of the lamps it recorded (M: per masked texel the walls-tested and no-walls copy's
+    // luminance, the texel's totals) and the exit ground texels (E: tapped, not under a floor tile; the exit lamps' parts and
+    // the texel the map holds), at most 4000 lines of each a solve
+    if (r0) {
+        int mLines = 0;
+        for (const LampRec& l : r.lamps) {
+            if (!c.keep0Lights.count(l.light) || mLines >= 4000) continue;
+            GpuLampLaw::Lamp law;
+            int type = 0, reg = -1;
+            const bool hasLaw = RtOutdoorLamps::WorldLaw(l.light, r.lot, false, law, type, reg);
+            size_t masked = 0;
+            for (const Contrib& p : l.parts) masked += p.texel < n && (p.vis || p.all);
+            const size_t step = masked / 1000 + 1;
+            size_t k = 0;
+            for (const Contrib& p : l.parts) {
+                if (p.texel >= n || !(p.vis || p.all) || k++ % step || mLines >= 4000) continue;
+                mLines++;
+                const float* s = reinterpret_cast<const float*>(r.samples.data() + static_cast<size_t>(p.texel) * 0x30);
+                const TexelRec& t = r.texels[p.texel];
+                dumpTexels += std::format("M {:08X} p {:.4f} {:.4f} {:.4f} n {:.3f} {:.3f} {:.3f} L {:.4f} {:.4f} {:.4f} law {} vis {:.6g} all {:.6g} tvis {:.6g} tall {:.6g} bits {}",
+                                          l.light, s[0], s[1], s[2], s[4], s[5], s[6], law.pos[0], law.pos[1], law.pos[2], hasLaw ? 1 : 0, FromHalf(p.vis), FromHalf(p.all),
+                                          t.t.vis, t.t.all, static_cast<int>(t.bits));
+                if (const uint32_t b = batchOf[p.texel]; b < r.batches.size())
+                    dumpTexels += std::format(" batch {} n {} flags {} {} c {:.4f} {:.4f} {:.4f}", b, r.batches[b].count, static_cast<int>(r.batches[b].flags[0]),
+                                              static_cast<int>(r.batches[b].flags[1]), centroid[b * 3], centroid[b * 3 + 1], centroid[b * 3 + 2]);
+                dumpTexels += '\n';
+            }
+        }
+        size_t exits = 0;
+        for (size_t i = 0; i < n; i++) exits += (r.texels[i].bits & kExitGround) != 0;
+        const size_t step = exits / 4000 + 1;
+        std::unordered_map<uint32_t, std::string> eLine; // texel -> its exit lamps' parts
+        for (size_t i = 0, k = 0; i < n; i++)
+            if ((r.texels[i].bits & kExitGround) && k++ % step == 0) eLine[static_cast<uint32_t>(i)];
+        for (const LampRec& l : r.lamps) {
+            if (!l.exit) continue;
+            for (const Contrib& p : l.parts)
+                if (const auto it = eLine.find(p.texel); it != eLine.end())
+                    it->second += std::format(" {:08X} {:.6g} {:.6g} {:.6g}", l.light, p.rgb[0], p.rgb[1], p.rgb[2]);
+        }
+        std::vector<uint32_t> order;
+        for (const auto& [i, s] : eLine) order.push_back(i);
+        std::sort(order.begin(), order.end());
+        for (uint32_t i : order) {
+            const float* s = reinterpret_cast<const float*>(r.samples.data() + static_cast<size_t>(i) * 0x30);
+            dumpTexels += std::format("E {} p {:.4f} {:.4f} {:.4f} n {:.3f} {:.3f} {:.3f} bits {} packed {:08X} sum {:.6g} {:.6g} {:.6g} exitParts{}\n", i, s[0], s[1], s[2], s[4],
+                                      s[5], s[6], static_cast<int>(r.texels[i].bits), r.texels[i].packed, r.texels[i].t.S[0], r.texels[i].t.S[1], r.texels[i].t.S[2], eLine[i]);
         }
     }
     ProbeDump(room, rr, dumpTexels);
@@ -2890,12 +2985,14 @@ void SolveStart(unsigned char* room) {
     }
     // GPU room lamps (developer): the lot lamps of its list Real-time outdoor lamps does not draw (indoor lamps through openings)
     // are captured as a kept room's, so that the GPU can draw them from their parts (BuildKept0)
-    if (g_capture.load(std::memory_order_relaxed) && !baseOnly)
+    // (the room lamp probe: the same lights, recorded and dumped at the solve's end; with it alone nothing is kept)
+    if ((g_capture.load(std::memory_order_relaxed) || g_probe.load(std::memory_order_relaxed)) && !baseOnly)
         for (const ListLight& l : c.startList) {
             KeptLamp kl;
             if (!DrawnLight(l.light, rr.lot) && LawOfLight(l.light, rr.lot, kl)) c.keep0Lights.insert(l.light);
         }
-    c.keep0 = !c.keep0Lights.empty();
+    c.keep0 = g_capture.load(std::memory_order_relaxed) && !c.keep0Lights.empty();
+    c.probe0 = g_probe.load(std::memory_order_relaxed) && !baseOnly;
     // a self-check: the full solve's texels are compared with what the delta wrote
     bool check = false;
     {
@@ -3171,6 +3268,8 @@ void SolveEnd(unsigned char* room) {
             if (over) Fail("light in a texel's sum that no light's part holds");
         }
     }
+    // (the room lamp probe) room 0's lamps carried outdoors, its floor mask and exit ground parts and its whole light list, dumped
+    if (c.probe0 && g_probe.load(std::memory_order_relaxed)) HookGuard::Run("RoomLampProbe room 0", [&] { ProbeEnd(room); });
     if (c.ok) {
         Record& r = *c.rec;
         r.used = GetTickCount();
@@ -3363,7 +3462,7 @@ bool Sample(const unsigned char* room) {
     s.visLum = s.allLum = 0.0f;
     return true;
 }
-bool KeepsGround() { return g_cap.active && g_cap.ok && g_cap.keep0; }
+bool KeepsGround() { return g_cap.active && g_cap.ok && (g_cap.keep0 || g_cap.probe0); }
 void ExitGround(bool on) {
     if (g_s.on) g_s.exitGround = on;
 }
@@ -3411,7 +3510,7 @@ void TapEnd() {
 }
 void OnEvalOut(uintptr_t light, const float* colour) {
     SampleState& s = g_s;
-    if (!s.on || s.tap != 0 || !(g_cap.probe || g_cap.keep0) || !colour) return;
+    if (!s.on || s.tap != 0 || !(g_cap.probe || g_cap.keep0 || g_cap.probe0) || !colour) return;
     if (Acc* a = AccFor(light)) {
         for (int i = 0; i < 3; i++) a->hook[i] += colour[i], a->wall[i] += colour[i]; // (as passed until its wall test says otherwise)
         const bool noted = s.pathLight == light; // (no path noted: the threshold dropped it before, or it is not a roofed room's)
@@ -3434,7 +3533,7 @@ void OnEvalOut(uintptr_t light, const float* colour) {
 }
 void OnWallTest(bool passed, float t) {
     SampleState& s = g_s;
-    if (!s.on || s.tap != 0 || !(g_cap.probe || g_cap.keep0) || !s.lastLight) return;
+    if (!s.on || s.tap != 0 || !(g_cap.probe || g_cap.keep0 || g_cap.probe0) || !s.lastLight) return;
     const float share = passed ? std::clamp(t, 0.0f, 1.0f) : 0.0f;
     if (Acc* a = AccFor(s.lastLight))
         for (int i = 0; i < 3; i++) a->wall[i] -= s.last[i] * (1.0f - share);
@@ -3442,22 +3541,32 @@ void OnWallTest(bool passed, float t) {
 }
 ProbeEval* ProbeEvalBegin(uintptr_t light, const float* c0, int set) {
     SampleState& s = g_s;
-    if (!s.on || s.tap != 0 || !(g_cap.probe || g_cap.keep0) || !c0) return nullptr;
+    if (!s.on || s.tap != 0 || !(g_cap.probe || g_cap.keep0 || g_cap.probe0) || !c0) return nullptr;
     s.cur = ProbeEval{};
     s.cur.light = light;
     s.cur.set = static_cast<uint8_t>(std::clamp(set, 0, 255));
     for (int i = 0; i < 3; i++) s.cur.c0[i] = c0[i];
     return &s.cur;
 }
+int ProbeTotalLine(const std::string& body) {
+    Capture& c = g_cap;
+    if (!g_s.on || !c.probe || !c.ok || c.probeTotals.size() >= 20000) return -1; // (a solve's fills: one a batch and place)
+    try {
+        c.probeTotals.push_back(std::format("TF {} {}\n", c.probeTotals.size(), body));
+    } catch (...) {
+        return -1;
+    }
+    return static_cast<int>(c.probeTotals.size()) - 1;
+}
 void OnEvalPath(uintptr_t light, int path, const float* colour) {
     SampleState& s = g_s;
-    if (!s.on || s.tap != 0 || !(g_cap.probe || g_cap.keep0) || !colour) return;
+    if (!s.on || s.tap != 0 || !(g_cap.probe || g_cap.keep0 || g_cap.probe0) || !colour) return;
     s.pathLight = light, s.path = std::clamp(path, 0, 7);
     for (int i = 0; i < 3; i++) s.pre[i] = colour[i];
 }
 void OnWallTestRaw(const float* from, bool ok, float t) {
     SampleState& s = g_s;
-    if (!s.on || s.tap != 0 || !(g_cap.probe || g_cap.keep0) || !s.lastLight || !from) return;
+    if (!s.on || s.tap != 0 || !(g_cap.probe || g_cap.keep0 || g_cap.probe0) || !s.lastLight || !from) return;
     if (Acc* a = AccFor(s.lastLight)) {
         for (int i = 0; i < 3; i++) a->from[i] = from[i];
         a->rawT = t, a->raw = ok ? 1 : 2;
@@ -3554,7 +3663,7 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
             for (int q = 0; q < 3; q++) p.rgb[q] = a.rgb[q];
             p.vis = s.masked ? ToHalf(a.vis) : 0;
             p.all = s.masked ? ToHalf(a.all) : 0;
-            if (c.probe || (c.keep0 && c.keep0Lights.count(a.light))) {
+            if (c.probe || ((c.keep0 || c.probe0) && c.keep0Lights.count(a.light))) {
                 const bool lit = a.hook[0] != 0.0f || a.hook[1] != 0.0f || a.hook[2] != 0.0f;
                 const ProbeEval* ev = a.evals ? &s.accEv[i] : nullptr;
                 const bool apex = ev && (ev->set || ev->cut); // a lamp of another room or story, or one the floor cut stopped

@@ -393,6 +393,8 @@ uint64_t PhysicsKey();
 bool QueueRoomAgain(const void* room);
 // Room 0 of a story of a lot (tracker), null when none; any thread
 void* Room0Of(uintptr_t tracker, int story);
+// (the room lamp probe) room `id` of a story of a lot, null when none; any thread
+void* RoomOf(uintptr_t tracker, int story, int id);
 // Every room of a lot (stories -4 to 7: room 0 and the rooms its lighting tiles name), any thread
 void LotRooms(uintptr_t tracker, std::vector<void*>& out);
 // (GPU room lamps, a lamp moved; the light tree thread) Apex's path for `light` at lp in `room`'s solve, when a copy can redo it

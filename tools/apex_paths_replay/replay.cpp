@@ -131,23 +131,7 @@ uintptr_t LevelManager(uintptr_t level) {
     const auto it = g_byLevel.find(level);
     return it != g_byLevel.end() ? it->second->Mgr() : 0;
 }
-void* RoomByIdCached(void*, int) { return g_dummyRoom.data(); }
 void LampPos(void*, float* out) { std::memcpy(out, g_lamp, sizeof g_lamp); }
-
-// The game's wall test of a ray segment's room (IndoorPassImpl): the answer the game test recorded for that segment
-const OutdoorDelta::ProbeEval* g_recEv = nullptr;
-int g_segCall = 0;
-long g_segMissing = 0;
-bool __fastcall RecordedWallTest(void*, void*, void*, const float*, const void*, float* t) { // (= thiscall, ret 0x10)
-    const int i = g_segCall++;
-    if (!g_recEv || i >= g_recEv->nseg || i >= 8 || g_recEv->seg[i].passed == 255) {
-        g_segMissing++;
-        *t = 1.0f;
-        return true;
-    }
-    *t = g_recEv->seg[i].keep;
-    return g_recEv->seg[i].passed != 0;
-}
 
 // ---- the dump ----
 using Tok = std::vector<std::string_view>;
@@ -214,6 +198,20 @@ struct DumpRoom {
     std::map<std::string, uint64_t> gridRole;
     std::map<int, uint64_t> floorStory;
     r3d::Room r3;
+    // (IndoorShadow) the other rooms its lamps' ray segments were tested in (OTHER blocks), by story and id
+    std::map<std::pair<int, int>, r3d::Room> other;
+    r3d::Room* curOther = nullptr;
+    // the fills of the opening's outdoor total (TF lines), by index
+    struct FillL {
+        uint32_t light;
+        float pos[3], c[3], pass, day;
+        int slot;
+    };
+    struct Fill {
+        float X[3], n[3];
+        std::vector<FillL> l;
+    };
+    std::map<int, Fill> tf;
     float A(const char* k, float d = 0.0f) const {
         const auto it = apex.find(k);
         return it != apex.end() ? F(it->second) : d;
@@ -230,7 +228,34 @@ struct Smp {
     int paths = 0, batch = -1, count = 0, f0 = 1, f1 = 1, evals = 0;
     bool hasEv = false;
     OutdoorDelta::ProbeEval ev;
+    int tf = -1; // (P7) the fill of its outdoor total
+    // (room 0) M: a floor mask part (vis, all, the lamp's law dumped); E: an exit ground texel (the map's texel, the exit parts' luminance)
+    float mVis = 0.0f, mAll = 0.0f, eLum = 0.0f;
+    bool lawOk = false;
+    uint32_t packed = 0;
 };
+std::unordered_map<uint32_t, GpuLampLaw::Lamp> g_laws; // (LIGHT lines) each light's GPU law
+
+// ---- the game's wall test of a ray segment's room (IndoorPassImpl) ----
+// The rooms the dump holds the walls of (the solving room's and its OTHER blocks), by story and id: their memory (the mode
+// byte at +0x639 IndoorPassImpl sets) and walls. Any other room: the answer the game test recorded for that segment.
+struct FakeRoom {
+    std::array<uint8_t, 0x700> mem{};
+    r3d::Room room;
+};
+std::map<std::pair<int, int>, FakeRoom> g_fakeRooms;
+void* RoomByIdCached(void* mgr, int id) {
+    if (const auto s = g_byMgr.find(reinterpret_cast<uintptr_t>(mgr)); s != g_byMgr.end())
+        if (const auto it = g_fakeRooms.find({s->second->story, id}); it != g_fakeRooms.end()) return it->second.mem.data();
+    return g_dummyRoom.data();
+}
+const OutdoorDelta::ProbeEval* g_recEv = nullptr;
+int g_segCall = 0;
+long g_segMissing = 0, g_segReplayed = 0, g_segRecorded = 0;
+size_t g_line = 0;
+struct Cmp;
+Cmp* g_cSegKeep = nullptr;
+Cmp* g_cSegPassed = nullptr;
 
 // ---- comparisons ----
 struct Cmp {
@@ -283,6 +308,29 @@ struct Fin { // the final colour of an evaluation, within 2/255
         for (const W& w : worst) std::printf("      line %zu: off %.4f (recorded r+g+b %.5f, replay %.5f)\n", w.line, w.err, w.rec, w.rep);
     }
 };
+bool __fastcall RecordedWallTest(void* room, void*, void*, const float* from, const void* to, float* t) { // (= thiscall, ret 0x10)
+    const int i = g_segCall++;
+    const bool rec = g_recEv && i < g_recEv->nseg && i < 8 && g_recEv->seg[i].passed != 255;
+    for (auto& [key, f] : g_fakeRooms)
+        if (f.mem.data() == room) { // the game's 2D test of that room with its dumped walls, in the mode IndoorPassImpl set
+            f.room.mode = f.mem[0x639];
+            const float* b = static_cast<const float*>(to);
+            float k = 1.0f;
+            const bool ok = r3d::wallTest(f.room, f.room.idx2d, r3d::V{from[0], from[1], from[2]}, r3d::V{b[0], b[1], b[2]}, &k);
+            g_segReplayed++;
+            if (rec) g_cSegKeep->Add(g_recEv->seg[i].keep, k, g_line), g_cSegPassed->Add(g_recEv->seg[i].passed, ok ? 1.0f : 0.0f, g_line);
+            *t = k;
+            return ok;
+        }
+    if (!rec) {
+        g_segMissing++;
+        *t = 1.0f;
+        return true;
+    }
+    g_segRecorded++;
+    *t = g_recEv->seg[i].keep;
+    return g_recEv->seg[i].passed != 0;
+}
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -337,6 +385,13 @@ int main(int argc, char** argv) {
         }
         if (rooms.empty()) continue;
         DumpRoom& R = rooms.back();
+        // (OTHER blocks) another room's walls and records: the same lines with an O
+        std::string_view kk = k;
+        r3d::Room* tg = &R.r3;
+        if (k.size() > 1 && k[0] == 'O' && (k == "OR" || k == "OB" || k == "OWALLS" || k == "OW" || k == "OIDX2D")) {
+            if (!R.curOther) continue;
+            kk = k.substr(1), tg = R.curOther;
+        }
         if (k == "APEX") {
             for (size_t i = 1; i + 1 < n;) {
                 if (t[i] == "dev") {
@@ -450,24 +505,56 @@ int main(int argc, char** argv) {
                     cf->Put(cf->data, c * 40 + 8 + q * 8, H(kv[0])), cf->Put(cf->data, c * 40 + 12 + q * 8, H(kv[1]));
                 }
             }
-        } else if (k == "R" && n >= 10) { // (the 3D blockers and the walls, as tools/room_lamp_3d_replay reads them)
+        } else if (kk == "R" && n >= 10) { // (the 3D blockers and the walls, as tools/room_lamp_3d_replay reads them)
             r3d::Record r;
             r.c = {F(t[3]), F(t[4]), F(t[5])};
             r.r2 = F(t[8]);
-            R.r3.rec.push_back(r);
-        } else if (k == "B" && n >= 71 && !R.r3.rec.empty()) {
+            tg->rec.push_back(r);
+        } else if (kk == "B" && n >= 71 && !tg->rec.empty()) {
             r3d::Blocker b;
             b.vt = H(t[3]);
             for (int i = 0; i < 64; ++i) b.f[i] = HF(t[7 + i]);
-            R.r3.rec.back().b.push_back(b);
-        } else if (k == "WALLS" && n >= 4) {
-            R.r3.mode = I(t[3]);
-        } else if (k == "W" && n >= 68) {
+            tg->rec.back().b.push_back(b);
+        } else if (kk == "WALLS" && n >= 4) {
+            tg->mode = I(t[3]);
+        } else if (kk == "W" && n >= 68) {
             r3d::Wall w;
             for (int i = 0; i < 64; ++i) w.f[i] = HF(t[4 + i]);
-            R.r3.walls.push_back(w);
-        } else if (k == "IDX2D" && n >= 2) {
-            for (size_t i = 2; i < n; ++i) R.r3.idx2d.push_back(I(t[i]));
+            tg->walls.push_back(w);
+        } else if (kk == "IDX2D" && n >= 2) {
+            for (size_t i = 2; i < n; ++i) tg->idx2d.push_back(I(t[i]));
+        } else if (k == "OTHER" && n >= 5) {
+            R.curOther = &R.other[{I(t[2]), I(t[4])}];
+        } else if (k == "TF" && n >= 19) {
+            DumpRoom::Fill& fl = R.tf[I(t[1])];
+            for (int q = 0; q < 3; q++) fl.X[q] = F(t[5 + q]), fl.n[q] = F(t[9 + q]);
+            for (size_t i = 19; i + 15 < n && t[i] == "l"; i += 16) {
+                DumpRoom::FillL e{H(t[i + 1])};
+                for (int q = 0; q < 3; q++) e.pos[q] = F(t[i + 3 + q]), e.c[q] = F(t[i + 7 + q]);
+                e.pass = F(t[i + 11]), e.day = F(t[i + 13]), e.slot = I(t[i + 15]);
+                fl.l.push_back(e);
+            }
+        } else if (k == "LIGHT" && n >= 38 && t[17] == "law") {
+            uint32_t w[20];
+            for (int q = 0; q < 20; q++) w[q] = H(t[18 + q]);
+            static_assert(sizeof(GpuLampLaw::Lamp) == sizeof w);
+            std::memcpy(&g_laws[H(t[1])], w, sizeof w);
+        } else if (k == "M" && n >= 26) { // (room 0) a floor mask part
+            Smp s;
+            s.room = static_cast<int>(rooms.size()) - 1, s.line = ln, s.tag = 'M', s.light = H(t[1]);
+            for (int i = 0; i < 3; i++) s.p[i] = F(t[3 + i]), s.n[i] = F(t[7 + i]), s.L[i] = F(t[11 + i]);
+            s.lawOk = I(t[15]) != 0, s.mVis = F(t[17]), s.mAll = F(t[19]);
+            S.push_back(s);
+        } else if (k == "E" && n >= 19) { // (room 0) an exit ground texel
+            Smp s;
+            s.room = static_cast<int>(rooms.size()) - 1, s.line = ln, s.tag = 'E';
+            for (int i = 0; i < 3; i++) s.p[i] = F(t[3 + i]), s.n[i] = F(t[7 + i]);
+            s.packed = H(t[13]);
+            for (size_t i = 19; i + 3 < n; i += 4) {
+                const float c[3] = {F(t[i + 1]), F(t[i + 2]), F(t[i + 3])};
+                s.eLum += OutdoorDeltaModel::Lum3(c);
+            }
+            S.push_back(s);
         } else if ((k == "T" || k == "Z") && n >= 26) {
             Smp s;
             s.room = static_cast<int>(rooms.size()) - 1, s.line = ln, s.tag = k[0], s.light = H(t[1]);
@@ -511,16 +598,28 @@ int main(int argc, char** argv) {
                     }
                 } else if (w == "ent" && has(3)) e.entry = 1, e.ent[0] = F(t[i + 1]), e.ent[1] = F(t[i + 2]), e.ent[2] = F(t[i + 3]);
                 else if (w == "fade" && has(2)) e.has |= 8, e.fade = F(t[i + 1]), e.fadeThr = F(t[i + 2]);
+                else if (w == "tf" && has(1)) s.tf = I(t[i + 1]);
             }
             S.push_back(s);
         }
     }
     for (auto& [h, g] : grids) NoteNearEdges(*g);
     long nT = 0, nZ = 0, nEv = 0;
-    for (const Smp& s : S) (s.tag == 'T' ? nT : nZ)++, nEv += s.hasEv;
+    long nM = 0, nE = 0;
+    for (const Smp& s : S) (s.tag == 'T' ? nT : s.tag == 'Z' ? nZ : s.tag == 'M' ? nM : nE)++, nEv += s.hasEv;
     std::printf("rooms %zu, grids %zu, floors %zu, texel lines %zu (T %ld, Z %ld), with Apex's record %ld\n", rooms.size(), grids.size(), floors.size(), S.size(), nT, nZ, nEv);
+    if (nM || nE) std::printf("(room 0: floor mask lines %ld, exit ground lines %ld, among the texel lines above)\n", nM, nE);
 
     kWallTest = reinterpret_cast<uintptr_t>(&RecordedWallTest);
+    Cmp cSegKeep{"P8 other room's wall test keep (dumped walls)"}, cSegPassed{"P8 other room's wall test passed (0/1)"};
+    g_cSegKeep = &cSegKeep, g_cSegPassed = &cSegPassed;
+    Cmp c7total{"P7 total recomputed from its TF fill"}, c7cutRe{"P7 entry cut (recomputed total)"}, cTfPass{"TF a room-0 light's pass at X (YardPass)"};
+    Fin fTfLaw{"TF a room-0 light at X: GPU law vs the game"};
+    long tfFills = 0, tfNoLaw = 0;
+    Fin m0Inner{"room 0: model got, InnerShadow (set 1)"}, m0Own{"room 0: model got, no Apex record"}, m0Other{"room 0: model got, CrossFloorShadow (not replayed)"};
+    Cmp cMall{"room 0 mask: no-walls copy vs the law (KeptWrapLum)"}, cMvis{"room 0 mask: walls-tested copy vs law x wall test"};
+    Cmp cEtile{"room 0 exit ground: under a floor tile (0 expected)"}, cEalpha{"room 0 exit ground: ExitAlpha vs the map's alpha"};
+    long mNoLaw = 0;
     Cmp cMount{"P1 MountedNdl factor"}, cCut{"P2 floor cut (0/1)"}, cEarly{"P5 threshold early-out (0/1)"};
     Cmp c6pass{"P6 InnerShadow pass"}, c6k{"P6 norm scale"};
     Cmp c7pass{"P7 opening pass"}, c7t{"P7 tOpen"}, c7times{"P7 times"}, c7law{"P7 law"}, c7gain{"P7 gain"}, c7cut{"P7 entry cut (recorded total)"},
@@ -598,9 +697,47 @@ int main(int argc, char** argv) {
             t_solveRoom = room.data();
             listKey = -1;
             if (!R.hasInfo) noInfo++;
+            g_fakeRooms.clear();
+            g_fakeRooms[{R.story, R.id}].room = R.r3;
+            for (const auto& [key, o] : R.other) g_fakeRooms[key].room = o;
+            for (const auto& [idx, fl] : R.tf) { // each fill once: its lights' pass at X, and their GPU law there
+                tfFills++;
+                for (const DumpRoom::FillL& e : fl.l) {
+                    std::memcpy(g_lamp, e.pos, sizeof e.pos), g_lamp[3] = 1.0f;
+                    alignas(16) float lw[4] = {};
+                    GridWhy why{};
+                    cTfPass.Add(e.pass, YardPass(info.grid[0].get(), info.grid[1].get(), reinterpret_cast<void*>(static_cast<uintptr_t>(e.light)), fl.X, lw, why), 0);
+                    const auto lawIt = g_laws.find(e.light);
+                    if (lawIt == g_laws.end()) {
+                        tfNoLaw++;
+                        continue;
+                    }
+                    float out[3];
+                    GpuLampLaw::Eval(lawIt->second, fl.X, fl.n, 0.0f, out);
+                    fTfLaw.Add(e.c, out, 0);
+                }
+            }
         }
         const char flags[2] = {static_cast<char>(s.f0), static_cast<char>(s.f1)};
         g_ctx.flags = flags;
+        g_line = s.line;
+        if (s.tag == 'M') { // (room 0) the floor mask's copies: the no-walls one is the law's luminance (N.l ignored), the walls-tested one x the game's wall test
+            const auto lawIt = g_laws.find(s.light);
+            if (!s.lawOk || lawIt == g_laws.end()) {
+                mNoLaw++;
+                continue;
+            }
+            const float all = RtLampModel::KeptWrapLum(lawIt->second, false, s.p);
+            float t = 1.0f;
+            const bool ok = r3d::wallTest(R.r3, R.r3.idx2d, r3d::V{s.L[0], s.L[1], s.L[2]}, r3d::V{s.p[0], s.p[1], s.p[2]}, &t);
+            cMall.Add(s.mAll, all, s.line), cMvis.Add(s.mVis, ok ? all * t : 0.0f, s.line);
+            continue;
+        }
+        if (s.tag == 'E') { // (room 0) an exit ground texel: not under a floor tile, its alpha the exit lamps' light
+            cEtile.Add(0.0f, GroundFloorTileAt(room.data(), s.p) ? 1.0f : 0.0f, s.line);
+            cEalpha.Add(static_cast<float>(s.packed >> 24) / 255.0f, RtLampModel::ExitAlpha(s.eLum), s.line);
+            continue;
+        }
         float hookModel[3] = {s.hook[0], s.hook[1], s.hook[2]};
         const bool foreign = s.hasEv;
         if (s.hasEv) {
@@ -664,6 +801,7 @@ int main(int argc, char** argv) {
                 } else if (openLamp || (info.yard && same)) { // P7 the opening
                     const int times = info.level == 0 || (info.level == 1 && std::binary_search(info.lower.begin(), info.lower.end(), l)) ? 2 : 1;
                     const float law = openLamp ? std::max({c[0], c[1], c[2]}) : 0.0f;
+                    const float hue[3] = {c[0], c[1], c[2]};
                     alignas(16) float lw[4] = {};
                     GridWhy why{};
                     const float pass = info.openings ? OpenLampPass(info, light, s.p, lw, why) : YardPass(info.grid[0].get(), info.grid[1].get(), light, s.p, lw, why);
@@ -688,6 +826,26 @@ int main(int argc, char** argv) {
                         }
                         if (scaled > 0.0f && scaled < 1.0f && ApexMath::IsFinite(scaled)) thrScale = scaled;
                         c7gain.Add(e.p7[4], gain, L), c7cut.Add(e.p7[6], cut, L), c7k.Add(e.p7[7], k, L), c7kEnd.Add(e.p7[7], kEnd, L), c7q.Add(e.p7[8], q, L);
+                        if (const auto fi = R.tf.find(s.tf); fi != R.tf.end()) { // the total from the fill (OpeningOutdoorTotal)
+                            float tot[3] = {}, own[3] = {};
+                            bool hasOwn = false;
+                            for (const DumpRoom::FillL& f : fi->second.l) {
+                                const float p = f.pass * f.day;
+                                if (!(p > 0.0f)) continue;
+                                for (int q = 0; q < 3; q++) {
+                                    const float v = std::isfinite(f.c[q]) ? std::max(0.0f, f.c[q] * p) : 0.0f;
+                                    tot[q] += v;
+                                    if (f.slot >= 0 && f.light == s.light) own[q] += v, hasOwn = true;
+                                }
+                            }
+                            const float R7 = law * static_cast<float>(times) * std::max(gain, 1.0f), top = std::max({hue[0], hue[1], hue[2]});
+                            float T = -1.0f;
+                            if (hasOwn && top > 0.0f && R7 > 0.0f) {
+                                T = 0.0f;
+                                for (int q = 0; q < 3; q++) T = std::max(T, hue[q] / top * R7 + std::max(0.0f, tot[q] - own[q]));
+                            }
+                            c7total.Add(e.p7[5], T, L), c7cutRe.Add(e.p7[6], OpeningLampBalance::EntryScale(law, times, gain, T), L);
+                        }
                         c7thr.Add(e.p7[9], thrScale, L);
                     }
                     if (lit(cr) && e.p7[4] >= 0.0f) {
@@ -748,6 +906,11 @@ int main(int argc, char** argv) {
         }
         float model[3], modelRecHook[3];
         for (int i = 0; i < 3; i++) model[i] = hookModel[i] * F3, modelRecHook[i] = s.hook[i] * F3;
+        if (R.id == 0) { // (room 0) its lamps carried outdoors apart; out of the move worker's scope
+            ((s.paths & 8) ? m0Other : s.hasEv && s.ev.set == 1 ? m0Inner : m0Own).Add(s.got, model, s.line);
+            mvOut++;
+            continue;
+        }
         mAll.Add(s.got, model, s.line);
         (foreign ? mForeign : mOwn).Add(s.got, model, s.line);
         if (foreign) mForeignHook.Add(s.got, modelRecHook, s.line);
@@ -787,5 +950,13 @@ int main(int argc, char** argv) {
                 "daytime or reach factor: %ld, with the floor cut: %ld; unknown blocker vtables: %d):\n",
                 mvOut, mvDayReach, mvCut, mvUnknown);
     for (const Fin* x : {&mMoveOwn, &mMoveForeign, &mMoveT}) x->Print();
+    std::printf("\nIndoorShadow's other-room wall tests with the dumped walls (segments replayed %ld, left to the recorded answer %ld):\n", g_segReplayed, g_segRecorded);
+    for (const Cmp* c : {&cSegKeep, &cSegPassed}) c->Print();
+    std::printf("\nthe opening's outdoor total from the dumped fills (TF fills %ld, lights without a dumped law %ld):\n", tfFills, tfNoLaw);
+    for (const Cmp* c : {&c7total, &c7cutRe, &cTfPass}) c->Print();
+    fTfLaw.Print();
+    std::printf("\nroom 0's lamps carried outdoors (mask lines without a law: %ld):\n", mNoLaw);
+    for (const Fin* x : {&m0Inner, &m0Own, &m0Other}) x->Print();
+    for (const Cmp* c : {&cMall, &cMvis, &cEtile, &cEalpha}) c->Print();
     return 0;
 }

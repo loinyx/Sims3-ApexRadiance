@@ -34,7 +34,7 @@ $parts = @(
     (Between '// 4.: a lamp of another story reaches the point only through' 'float IndoorPass(const RoomInfo& info, const Cross& c'),
     (Between 'float RoomNormOf(const BYTE* room) {' 'float InnerNormScaleAt('),
     (Between 'std::atomic<float> g_openGround{1.0f}, g_openWall{1.0f};' '// The outdoor sum at the opening'),
-    (Between 'bool OwnFloorBlocksAt(' 'bool OwnFloorBlocks(const unsigned char* room, void* light')
+    (Between 'bool GroundFloorTileAt(const unsigned char* room, const float* sample) {' 'bool OwnFloorBlocks(const unsigned char* room, void* light')
 )
 . (Join-Path $repo 'tools/terrain_lighting_test/compiler_env.ps1')
 Initialize-TerrainCompiler

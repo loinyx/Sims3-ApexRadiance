@@ -138,9 +138,13 @@ struct ProbeEval {
     } seg[8];
     float fade = 1.0f, fadeThr = -1.0f; // the soft light cut's factor and the threshold it used
     float preFade = -1.0f, thrScale = 1.0f; // r + g + b of the colour before the soft light cut, and its threshold's scale
+    int32_t tf = -1; // the opening's outdoor total: the fill it took (its TF line in the dump, ProbeTotalLine), -1 none
 };
 // After the game's evaluation (c0) of `light` in a probed room's own sum: the record LightEvalHook fills, null otherwise
 ProbeEval* ProbeEvalBegin(uintptr_t light, const float* c0, int set);
+// The room lamp probe: one fill of the opening's outdoor total (LevelLightShare's OpenTotalFill) in a probed room's sum, as
+// the dump's TF line after its index; the index it is given (-1: not probing, or past the solve's cap)
+int ProbeTotalLine(const std::string& body);
 // The room lamp probe: the game's 2D wall test of that evaluation (passed = not skipped; t its transmission)
 void OnWallTest(bool passed, float t);
 // The room lamp probe: the game's own wall test inside it, before Apex's overrides (from = the point the ray starts at)
