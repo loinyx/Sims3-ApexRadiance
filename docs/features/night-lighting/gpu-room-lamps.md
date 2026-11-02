@@ -194,7 +194,7 @@ lamp's position, not on its colour or intensity.
   UNVERIFIED, as is that the lamp object's own 3D records change only after the edit (the move compares them with the kept
   solve's at the edit; the settle's solve takes them in either way). The lamp's occluder marks are dropped as Real-time
   outdoor lamps drops them for a move. A switch on after a moved copy was kept takes the solves (its rooms' versions
-  changed). A copy is a whole kept room (about 0.5 MB) made per job landed; the 192 MB budget is not checked for it.
+  changed). A copy is a whole kept room (about 0.5 MB) made per job landed; it replaces the room's kept solve within the 192 MB budget as a solve is kept (past it the move is left to the room's solve: `move: lamp L story S room R: left to the room solve (the 192 MB budget: ...)`).
 - Directional maps (stage 4): written into the game's own textures of the set, on the light tree thread, as the game's
   unlock writes them; between two of the four maps' writes a frame may draw with some maps written and others not (as
   with the game's own copy). A solve that locks the working maps on another thread between the check and the write would copy
@@ -281,6 +281,7 @@ lamp's position, not on its colour or intensity.
   `RoomGeoKey`, read with `ReadRoomTests`, kept with its three parts) is the same and non-zero, the texels'
   (x, y, map) and the 0x30 samples are equal, and `LawOfLight` gives the same position (a tube: the same signature). The lamp
   is copied with `carried` set and its `g_takenOff` entry moves to the new version.
+- **The lamp's own object** (switch and value edits): `FUN_006c7250` updates the occluder entries (tl+0xD4) before the light entries (tl+0x90), so the occluder mark of a lamp's object (`0x006C7939`) comes before `MarkDecideImpl` takes its edit; the game then gathered and solved that room and the changed-room walk sent the rooms of other stories taking its lamps (in game, 2026-11-02 11:55:20: a switch off taken, story 2 room 5 and story 1 room 2 solved before the settle, their kept solves replaced). With the option on, `OccDecide` drops an occluder mark within 1.5 m of a lamp of the story whose values differ from its last update, that did not move, and whose edit `TakesLampEdit(..., dry)` would take (`[LampMarkFilter] Occluder mark of room R dropped: the object of a lamp whose switch or value edit the GPU room lamps take`); a value edit then refused still marks the lamp's room through its own update. UNVERIFIED in game: that the message changes what `Signature` reads before that update.
 - **Edit logs**: `[GpuRoomLamps] switch on|switch off|value: lamp L, R rooms on stories S, no room solved, relit in N ms (wall
   atlas X ms +F, floor ...)` (from the mark to the first relight of every map of its rooms holding its parts, then per map
   kind that time and the relight round it came in, +0 the edit's own; a map without its parts changes nothing and is not

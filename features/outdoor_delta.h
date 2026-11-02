@@ -71,8 +71,9 @@ void RoomFinalized(const void* room);
 // room (the GPU shows it). A switch on is taken only while the rooms listing it keep the solves they had at its switch off
 // (stage 3) move: a move within its room, taken when every room listing it is a kept room (no room 0) where a copy of the
 // game's tests can redo its parts (LevelLightShare::MovePath, the same geometry, known 3D blockers): one job per room for the
-// move worker, which keeps a copy of the room with the lamp's new parts
-bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move = false);
+// move worker, which keeps a copy of the room with the lamp's new parts. dry: only whether a value or switch edit would be
+// taken now (no log, nothing noted or queued; LampMarkFilter's occluder mark of the lamp's object, made just before)
+bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move = false, bool dry = false);
 
 // ---- the direct path (light tree thread; LevelLightShare's hooks) ----
 // The lamp entry update of story tl's room 0 (LevelLightShare::HoldLampMark, a lamp that moved or changed a value in the same

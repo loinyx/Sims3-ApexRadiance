@@ -85,6 +85,7 @@ struct LampState {
     float editable[5] = {}; // base RGB, intensity, enabled; excludes animated fade
     DWORD editUntil = 0;    // an edit (move, switch, colour) is going on until then: its next changes are part of it
     DWORD lastAuto = 0;     // (auto_light_priority) its latest quiet mark: at most one every 5 s
+    uintptr_t entry = 0;    // its light entry at its last update (GPU room lamps: OwnObjectEditTaken)
 };
 std::atomic<long> g_autoSelfOn{0}, g_autoDuskOn{0}; // automatic switch-ons left out of the lamp edits (counters)
 constexpr DWORD kEditHoldMs = 2000;
@@ -282,8 +283,50 @@ bool OccluderPoint(uintptr_t entry, float& x, float& z) { // POD (SEH)
         return false;
     }
 }
+// GPU room lamps (developer): FUN_006c7250 updates the occluder entries (tl+0xD4, the NewOccluder entries flagged with the
+// light entries by FUN_006c4cf0) before the light entries (tl+0x90; dumpbin 2026-11-02), so a lamp's switch or value edit
+// marks the room under its object here before LampMarkFilter takes the edit itself; the game then gathers that room and the
+// changed-room walk sends the rooms of other stories taking its lamps (a switch off taken at 11:55:20: story 2 room 5 and
+// story 1 room 2 solved before the settle, their kept solves replaced). True: the occluder point is within kOwnObjectM of
+// such a lamp on story tl whose values differ from its last update, did not move, and whose edit OutdoorDelta would take now
+// (TakesLampEdit dry). A value edit it then refuses still marks the lamp's room through the lamp entry update.
+// UNVERIFIED in game: that the message handler changes what Signature reads before this update (the object record's
+// +0x90 bits, the enable bit), and that the occluder point is the lamp's own object.
+bool OwnObjectEditTaken(uintptr_t tl, float x, float z) {
+    struct Pending { uintptr_t light; bool wasOn; };
+    Pending pend[8];
+    int np = 0;
+    {
+        std::lock_guard<std::mutex> lk(g_mx);
+        for (const auto& [key, was] : g_sig) {
+            if (key.tl != tl || !was.entry || np >= static_cast<int>(std::size(pend))) continue;
+            const float dx = was.pos[0] - x, dz = was.pos[2] - z;
+            if (dx * dx + dz * dz > kOwnObjectM * kOwnObjectM) continue;
+            uint64_t h = 0;
+            int type = 0;
+            bool on = false;
+            float pos[3] = {}, editable[5] = {};
+            if (!Signature(was.entry, key.light, was.room, h, type, on, pos, editable) || h == was.sig || !((type >= 3 && type <= 6) || type == 11)) continue;
+            const float mx = pos[0] - was.pos[0], my = pos[1] - was.pos[1], mz = pos[2] - was.pos[2];
+            if (mx * mx + my * my + mz * mz > kMoveMin * kMoveMin) continue;
+            pend[np++] = Pending{key.light, was.on};
+        }
+    }
+    for (int i = 0; i < np; i++) // (its lit bit is rewritten only by its own update: an edit of a lamp off is taken as a switch on)
+        if (OutdoorDelta::TakesLampEdit(tl, pend[i].light, pend[i].wasOn, !pend[i].wasOn, false, true)) return true;
+    return false;
+}
 // true = mark the room (the game's call)
 bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
+    if (OutdoorDelta::RoomLampCapture()) {
+        float x = 0.0f, z = 0.0f;
+        if (OccluderPoint(entry, x, z) && OwnObjectEditTaken(tl, x, z)) {
+            const long n = g_occDropped.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (n <= 3 || (n & (n - 1)) == 0)
+                LOG_INFO(std::format("[LampMarkFilter] Occluder mark of room {} dropped: the object of a lamp whose switch or value edit the GPU room lamps take ({} so far)", room, n));
+            return false;
+        }
+    }
     const DWORD last = g_handledAt.load(std::memory_order_relaxed);
     if (!last) return true; // (no GPU-handled edit yet: always while Classic)
     g_occMarks.fetch_add(1, std::memory_order_relaxed);
@@ -307,7 +350,7 @@ bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
     return false;
 }
 bool __cdecl OccDecide(uintptr_t tl, int room, uintptr_t entry) {
-    if (!g_handledAt.load(std::memory_order_relaxed)) return true; // (Classic: the game's mark, nothing else)
+    if (!g_handledAt.load(std::memory_order_relaxed) && !OutdoorDelta::RoomLampCapture()) return true; // (Classic: the game's mark, nothing else)
     return HookGuard::Run("LampMarkFilter occluder mark", true, [=] { return OccDecideImpl(tl, room, entry); });
 }
 
@@ -374,6 +417,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             if (it != g_sig.end()) {
                 known = true;
                 LampState& was = it->second;
+                was.entry = entry;
                 const float dx = pos[0] - was.pos[0], dy = pos[1] - was.pos[1], dz = pos[2] - was.pos[2];
                 const bool moved = dx * dx + dy * dy + dz * dz > kMoveMin * kMoveMin;
                 const bool valueChanged = std::memcmp(was.editable, editable, sizeof editable) != 0 || was.on != on;
@@ -426,6 +470,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
                 std::lock_guard<std::mutex> lk(g_mx);
                 if (const auto it = g_sig.find(Key{tl, light}); it != g_sig.end()) {
                     LampState& was = it->second;
+                    was.entry = entry;
                     if (kind == 1) std::memcpy(was.pos, pos, sizeof was.pos);
                     std::memcpy(was.editable, editable, sizeof editable);
                     was.on = on;
@@ -458,6 +503,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
         const bool lamp = (type >= 3 && type <= 6) || type == 11;
         if (fresh) {
             std::memcpy(it->second.editable, editable, sizeof editable);
+            it->second.entry = entry;
             if (lamp) g_editRefresh.store(true, std::memory_order_relaxed);
             g_first.fetch_add(1, std::memory_order_relaxed);
             if (lamp) { // moved in from another story of the same lot: every room of the lot again, none kept
@@ -483,6 +529,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             return true;
         }
         LampState& was = it->second;
+        was.entry = entry;
         const DWORD tick = GetTickCount();
         if (std::memcmp(was.editable, editable, sizeof editable) != 0) {
             std::memcpy(was.editable, editable, sizeof editable);

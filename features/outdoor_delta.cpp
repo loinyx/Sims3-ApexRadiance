@@ -3797,12 +3797,17 @@ void MoveWorker() {
             if (l.light == kl.light) l = kl, found = true;
         if (!found) nk->lamps.push_back(kl);
         nk->bytes = KeptBytes(*nk);
-        bool put = false;
+        bool put = false, full = false;
         uint32_t version = 0;
+        size_t keptBytes = 0;
         {
             std::lock_guard<std::mutex> lk(g_keptMx);
             const auto it = g_kept.find(KeyOf(reinterpret_cast<const void*>(k.room), k.cls));
-            if (it != g_kept.end() && it->second == job.k) {
+            keptBytes = g_keptBytes;
+            // (the copy replaces the room's kept solve: within the budget as KeepEnd keeps a solve; past it the room keeps the
+            // copy it has, drawn with the lamp's law as kept, and is sent to its solve below)
+            full = it != g_kept.end() && it->second == job.k && g_keptBytes - std::min(g_keptBytes, k.bytes) + nk->bytes > kMaxKeptBytes;
+            if (!full && it != g_kept.end() && it->second == job.k) {
                 version = nk->version = g_keptVersion.fetch_add(1, std::memory_order_relaxed) + 1;
                 // (the drawing this one continues: TakesLampEdit takes the next move while the GPU has not drawn it yet)
                 nk->movedFrom = GpuRoomLamps::Drawn(reinterpret_cast<const void*>(k.room), k.version, k.maps) ? k.version : k.movedFrom;
@@ -3810,6 +3815,15 @@ void MoveWorker() {
                 it->second = nk;
                 put = true;
             }
+        }
+        if (full) {
+            c_moveFailed.fetch_add(1, std::memory_order_relaxed);
+            const bool queued = LevelLightShare::QueueRoomId(job.tracker, k.story, k.id, -1);
+            if (KeptLog())
+                LOG_INFO(std::format("[GpuRoomLamps] move: lamp {:08X} story {} room {}: left to the room solve (the {:.0f} MB budget: {:.1f} MB kept, this copy {:.1f} MB){}", kl.light,
+                                     k.story, k.id, static_cast<double>(kMaxKeptBytes) / 1048576.0, static_cast<double>(keptBytes) / 1048576.0,
+                                     static_cast<double>(nk->bytes) / 1048576.0, queued ? "" : " (the room queue refused it)"));
+            continue;
         }
         (put ? c_moveDone : c_moveStale).fetch_add(1, std::memory_order_relaxed);
         if (put) GpuRoomLamps::NoteEdit(kl.light, "move", {reinterpret_cast<const void*>(k.room)}, std::to_string(k.story));
@@ -4043,8 +4057,8 @@ void BasisDue() {
     }
 }
 
-bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move) {
-    if (!g_capture.load(std::memory_order_relaxed) || !tl || !light) return false;
+bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move, bool dry) {
+    if (!g_capture.load(std::memory_order_relaxed) || !tl || !light || (dry && move)) return false;
     const char* kind = move ? "move" : wasOn == on ? "value" : on ? "switch on" : "switch off";
     std::vector<std::pair<uint64_t, MoveJob>> jobs; // (a move) one per kept room listing it
     std::string moveWhy;
@@ -4063,7 +4077,7 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move
     int carriedRooms = 0; // (a switch on) rooms whose kept solve holds the lamp's parts carried from an earlier one (CarryOff)
     uintptr_t raw[1024];
     const auto refuse = [&](const RoomRead& rr, const char* why) {
-        if (KeptLog())
+        if (KeptLog() && !dry)
             LOG_INFO(std::format("[GpuRoomLamps] {}: lamp {:08X} left to the room solves (story {} room {}: {})", kind, light, rr.story, rr.id, why));
         return false;
     };
@@ -4110,6 +4124,11 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move
     }
     if (kept.empty()) return false; // (no indoor room lists it: not this path's)
     std::sort(kept.begin(), kept.end());
+    if (dry) { // (a switch on as below, without its log or erase)
+        if (wasOn || !on) return true;
+        const auto it = g_takenOff.find(light);
+        return it != g_takenOff.end() && it->second == kept;
+    }
     if (!wasOn && on) { // (while it was off, a room that gathered or was solved again does not hold it as its kept solve does)
         const auto it = g_takenOff.find(light);
         const bool same = it != g_takenOff.end() && it->second == kept;
