@@ -66,7 +66,7 @@ bool HandlesLamp(uintptr_t treeLevel, uintptr_t light, int room);
 // room lamps: an indoor lamp's edit skips the solves only when every room 0 listing it is covered so)
 bool CoversLamp(const void* room0, uintptr_t light);
 // Any thread: the law the GPU draws `light` with, in world space (the lamp classes 3, 4, 5 and 11 of lot `lot`, alive, a
-// shade the law describes; a TubeLight 6 with a segment, GpuLampLaw::Tube, which only the kept rooms draw); false for any other light. regRoom = the room it is registered in (0 outdoors). For the
+// shade the law describes; a TubeLight 6 with a segment, GpuLampLaw::Tube, and the area lights 9 and 10, GpuLampLaw::Area, which only the kept rooms draw); false for any other light. regRoom = the room it is registered in (0 outdoors). For the
 // developer's room lamp probe (OutdoorDelta::SetRoomProbe)
 bool WorldLaw(uintptr_t light, uint64_t lot, bool reachOn, GpuLampLaw::Lamp& out, int& type, int& regRoom);
 // Any thread (GPU room lamps): a lamp of lot `lot` WorldLaw gives no law (a tube without a segment) whose evaluation is its colour (+0xE0) times a share its

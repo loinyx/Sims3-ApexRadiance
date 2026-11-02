@@ -104,6 +104,18 @@ lamp's position, not on its colour or intensity.
    two functions (`tools/outdoor_delta_test` TubeChecks, same SSE approximations) gives the law at 200,000 points.
    A tube whose segment cannot be read (non-finite, or shorter than 1 mm) keeps the earlier fallback: its colour as its law
    (`ColourLaw`; exact for a switch or a colour edit, its share's inputs kept as a signature whose change takes the solves).
+   The area lights (RectangleAreaLight 9 and DiscAreaLight 10) have one too (`GpuLampLaw::Area`, read 02/11 with dumpbin:
+   `0x006BFBA0`, `0x006BFDC0` with `0x006BD7C0`, both over `0x006BFAF0`): E0 x min(Cmax, k2 x range x intensity / (k1 |D|^2)) x
+   sat(D.z / |D|), no N.l, where L = (U.v, V.v, N.v) for v = A - p (U +0x170, V +0x190, N +0x180) and D = L minus its first two
+   lanes held in the rectangle (+-(+0x1A0, +0x1A4)) or the disc (scaled to radius +0x1A4 past +0x1A0 = radius^2), third lane 0.
+   The law keeps axis = U, spill = V, (sc1, off1, off2) = N, (r0sq, invR2) = the two sizes and sc2 = kRect (-2) or kDisc (-3)
+   (`KeptLaw` takes `AreaLaw` on that mark; no reach, `GameOverLaw` 1). At |D| = 0 the game's evaluation is NaN (its texel
+   too; the hook keeps no part there): the law gives 0. Kept, edited and moved like a tube; a turn or a resize is a move
+   (`GpuLampLaw::Moved` compares U, V, N and the sizes). An area light with a non-finite axis or a size outside 0 to 1e6 has
+   no law and stays in the base, as before. Checked only offline: a replica of the three functions (`tools/outdoor_delta_test`
+   AreaChecks, the same SSE approximations, turned, scaled and skewed frames, points 1 mm to 5 cm off the area) gives the law
+   at 200,000 points of each kind (largest relative difference 1.6e-5); the test lot has no area light, so the probe (which
+   now dumps their laws) checks them on the next dump of a lot with one.
 13. A lamp moved (its law's position differs from the one its parts were kept with) is drawn in the rooms holding it with the
    law its parts were kept with (the room's last complete parts as they were, never its law now over them; room 0 alike), until
    a copy of the room with its parts at its new place is kept or the room is solved.
@@ -290,6 +302,8 @@ lamp's position, not on its colour or intensity.
 - **Maps without room-0 texels**: a slot with no room-0 texel (`used` false) of the active lot takes the game's own map
   (`OwnMap`), a copy (`CopyTexture` of the game's map), then `ComposeOver`, while `GpuRoomLamps::Sig` has rooms for it; its
   copy goes when none is left.
+- **Area lights**: `WorldLaw` reads +0x170, +0x190, +0x180, +0x1A0 and +0x1A4 for types 9 and 10 (`ReadLamp`, `ToLaw`,
+  `GpuLampLaw::AreaShape`, after the reach).
 - **TubeLights**: `RtOutdoorLamps::WorldLaw` reads +0x170 and +0x1A0 for type 6 (`ReadLamp`, `ToLaw`, `GpuLampLaw::TubeShape`);
   without a segment, `RtOutdoorLamps::ColourLaw` (type 6, of the lot, alive): its colour +0xE0 and a signature of
   +0x10, +0x120..+0x130, +0x170..+0x17C and +0x1A0 (`ReadTubeShare`). `KeptLamp::colourOnly`; `AccKeptPS` takes the colour
@@ -388,14 +402,14 @@ lamp's position, not on its colour or intensity.
   room on a floor (copies, restores; its own map 48x40 under a 64x64 working map, copies from past the corner) and a class-2
   wall atlas (three blocks, rows beyond above, below, both, none) with the production passes on a Direct3D 9 device and
   compares every texel of the own map with `KeptAdd` + `KeptTexel` + the pack + `BlurBlock`, one of its lamps a light with its
-  colour alone and one a TubeLight; a wall atlas of another size and a map larger than the working map are refused. Room 0: two kept lamps (one
+  colour alone, one a TubeLight and one a RectangleAreaLight; a wall atlas of another size and a map larger than the working map are refused. Room 0: two kept lamps (one
   its colour alone) added by `AddKeptParts` between `Accumulate` and `ComposePS`, against `KeptAdd` + `PackInput` + the pack.
   Room 0's exit and floor mask lamps (`Room0KeptXCheck`): masked, exit ground and plain texels, two exit lamps with floor mask
-  parts (one its colour alone), the laws as kept, dimmed and recoloured, one switched off, and the first as a TubeLight, through `AddKeptParts(extra)`
-  and `ComposeK0PS` against `KeptAdd`, `KeptWrapLum` and `RtLampModel::Compose` with the exit light: 8192 texels, all exact
+  parts (one its colour alone), the laws as kept, dimmed and recoloured, one switched off, and the first as a TubeLight, a RectangleAreaLight and a DiscAreaLight, through `AddKeptParts(extra)`
+  and `ComposeK0PS` against `KeptAdd`, `KeptWrapLum` and `RtLampModel::Compose` with the exit light: 12,288 texels, all exact
   (0/255). `tools/apex_paths_replay` also compares the dumped law x `GameOverLaw` with the game's evaluation at
   every T and Z line (dumps 135710 and 145922: 131,290 and 122,547 lines, all within 2/255); a TubeLight's lines are
-  counted apart (the probe dumps a tube's law since the tube law: the next dump checks it).
+  counted apart (the probe dumps a tube's law since the tube law, and an area light's since the area law: the next dump checks them; area lights fall in the first line).
   A moved lamp (`KeptGpuCheck`, lamp 4): its parts from `RoomLampMove::PartAt` at its new place behind a wall and over a
   disc blocker, drawn on the GPU against the CPU: 0/255. Offline, `tools/apex_paths_replay` runs `PartAt` with the game's
   evaluation as the law and `KeptAdd` at every recorded texel of the plain path (`RoomLampProbe-20261101-165037`): own lamps

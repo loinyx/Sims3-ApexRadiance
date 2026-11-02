@@ -1876,6 +1876,10 @@ bool KeptGpuCheck() {
         const float s[3] = {1.2f, 0.5f, 0.0f};
         GpuLampLaw::TubeShape(laws[3], s, 1.3f);
     }
+    { // (lamp 1: a RectangleAreaLight 1.2 x 0.8 m facing down: KeptLaw's AreaLaw)
+        const float u[3] = {1.0f, 0.0f, 0.0f}, v[3] = {0.0f, 0.0f, 1.0f}, nrm[3] = {0.0f, 1.0f, 0.0f};
+        GpuLampLaw::AreaShape(laws[1], u, v, nrm, 0.6f, 0.4f, false);
+    }
     const auto packCpu = [](float c[4]) { return OutdoorDeltaModel::PackModel(c); };
     long n = 0, within1 = 0, maxDiff = 0, untouchedBad = 0;
     for (const int m : {1, 0}) { // a floor (copies, restores) and a class-2 wall atlas (blocks before the blur)
@@ -2317,8 +2321,12 @@ bool Room0KeptXCheck() {
                       RtLampGpu::Engine::MakeVb(g_dev, parts.data(), static_cast<UINT>(parts.size()), &pvb) &&
                       SUCCEEDED(g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &out, nullptr));
     long n = 0, exact = 0, maxDiff = 0, alphaLit = 0, alphaMax = 0;
-    for (int round = 0; made && round < 4; round++) {
+    for (int round = 0; made && round < 6; round++) {
         GpuLampLaw::Lamp laws[nk] = {kept[0], kept[1]};
+        if (round >= 4) { // (the first a RectangleAreaLight 1 x 0.6 m, then a DiscAreaLight of radius 0.6, facing down: KeptLaw's AreaLaw, KeptWrapLum)
+            const float u[3] = {1.0f, 0.0f, 0.0f}, v[3] = {0.0f, 0.0f, 1.0f}, nrm[3] = {0.0f, 1.0f, 0.0f};
+            GpuLampLaw::AreaShape(laws[0], u, v, nrm, round == 4 ? 0.5f : 0.36f, round == 4 ? 0.3f : 0.6f, round == 5);
+        }
         if (round == 3) { // (the first a TubeLight standing 1 m tall: KeptLaw's TubeLaw, KeptWrapLum toward its position)
             const float s[3] = {0.0f, 1.0f, 0.0f};
             GpuLampLaw::TubeShape(laws[0], s, 1.0f);
@@ -2373,7 +2381,7 @@ bool Room0KeptXCheck() {
     if (pvb) pvb->Release();
     if (out) out->Release();
     Check(made, "room-0 kept exit/mask buffers could not be made");
-    std::printf("  %ld texels over 4 rounds of laws (as kept, changed, one lamp off, one a TubeLight), %zu kept points of 2 exit lamps (one its colour alone): %.2f%% exact, "
+    std::printf("  %ld texels over 6 rounds of laws (as kept, changed, one lamp off, one a TubeLight, a RectangleAreaLight, a DiscAreaLight), %zu kept points of 2 exit lamps (one its colour alone): %.2f%% exact, "
                 "largest difference %ld/255; %ld masked or exit ground texels with an alpha (up to %ld/255)\n",
                 n, parts.size(), n ? 100.0 * exact / n : 100.0, maxDiff, alphaLit, alphaMax);
     Check(n > 0 && maxDiff == 0, "room-0 kept exit/mask parts: the GPU's texels are the CPU's (0/255)");

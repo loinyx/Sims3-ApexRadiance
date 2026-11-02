@@ -793,6 +793,113 @@ void TubeChecks() {
     Check(RoomLampMove::GameOverLaw(a, p, wall) == 1.0f, "TubeLight: its law has no mount floor (GameOverLaw 1)");
 }
 
+// ---- The area lights' law (gpu_lamp_law.h Area) against the game's code: 0x006BFBA0 (rectangle), 0x006BFDC0 with 0x006BD7C0
+// (disc), both over 0x006BFAF0, as dumpbin gives them (Steam 1.67.2, read 02/11): sqrtps for |D|, rcpps + 1 Newton step for
+// 1 / (k1 d^2) and the disc's 1 / |xy|, rsqrtps + 2 for the facing ----
+namespace GameArea {
+// the light at p of an area at A with axes U (+0x170), V (+0x190), N (+0x180), e0 (+0x1A0), e1 (+0x1A4)
+void Eval(bool disc, const float A[3], const float U[3], const float V[3], const float N[3], float e0, float e1, float ri, const float E[3], float k1, float k2, float cmax,
+          const float p[3], float out[3]) {
+    const float v[3] = {A[0] - p[0], A[1] - p[1], A[2] - p[2]};
+    const float L[3] = {(U[2] * v[2] + U[1] * v[1]) + U[0] * v[0], (V[2] * v[2] + V[1] * v[1]) + V[0] * v[0], (N[2] * v[2] + N[1] * v[1]) + N[0] * v[0]};
+    float C[3] = {std::min(std::max(L[0], -e0), e0), std::min(std::max(L[1], -e1), e1), std::min(std::max(L[2], 0.0f), 0.0f)};
+    if (disc) { // 0x006BD7C0
+        C[0] = L[0], C[1] = L[1], C[2] = 0.0f;
+        const float s = (0.0f * 0.0f + L[1] * L[1]) + L[0] * L[0];
+        if (s > e0) {
+            const float sq = std::sqrt(s), r = _mm_cvtss_f32(_mm_rcp_ss(_mm_set_ss(sq))), inv = (2.0f - r * sq) * r;
+            for (int i = 0; i < 2; i++) C[i] = inv * L[i] * e1;
+        }
+    }
+    const float D[3] = {L[0] - C[0], L[1] - C[1], L[2] - C[2]};
+    const float d2 = (D[2] * D[2] + D[1] * D[1]) + D[0] * D[0], d = std::sqrt(d2);
+    const float x = d * d * k1, r = _mm_cvtss_f32(_mm_rcp_ss(_mm_set_ss(x))), inv = (2.0f - x * r) * r;
+    float val = k2 * (ri * 1.0f * inv);
+    if (val > cmax) val = cmax;
+    const float f = std::min(1.0f, std::max(0.0f, GameTube::Rsqrt2(d2) * D[2]));
+    for (int i = 0; i < 3; i++) out[i] = val * (f * E[i]);
+}
+} // namespace GameArea
+void AreaChecks() {
+    std::mt19937 rng(910);
+    std::uniform_real_distribution<float> U(0.0f, 1.0f);
+    const float k1 = 1.0f, k2 = 0.075f, cmax = 2.0f;
+    long n[2] = {}, within[2] = {}, lit[2] = {}, near[2] = {};
+    float worst[2] = {};
+    const auto unit = [](float a[3]) {
+        const float l = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]) + 1e-6f;
+        for (int i = 0; i < 3; i++) a[i] /= l;
+    };
+    for (int lamp = 0; lamp < 800; lamp++) {
+        const bool disc = lamp & 1;
+        const float A[3] = {10.0f * U(rng), 1.0f + 2.0f * U(rng), 10.0f * U(rng)};
+        // (a frame turned at random; every third one scaled and skewed, as an object's matrix could leave it)
+        float N[3] = {U(rng) - 0.5f, U(rng) - 0.5f, U(rng) - 0.5f}, Ua[3] = {U(rng) - 0.5f, U(rng) - 0.5f, U(rng) - 0.5f};
+        if (lamp % 4 == 0) N[0] = 0.0f, N[1] = 1.0f, N[2] = 0.0f, Ua[0] = 1.0f, Ua[1] = 0.0f, Ua[2] = 0.0f; // (a ceiling panel)
+        unit(N);
+        const float dn = Ua[0] * N[0] + Ua[1] * N[1] + Ua[2] * N[2];
+        for (int i = 0; i < 3; i++) Ua[i] -= dn * N[i];
+        unit(Ua);
+        float Va[3] = {N[1] * Ua[2] - N[2] * Ua[1], N[2] * Ua[0] - N[0] * Ua[2], N[0] * Ua[1] - N[1] * Ua[0]};
+        if (lamp % 3 == 0)
+            for (int i = 0; i < 3; i++) Ua[i] *= 1.3f, Va[i] = Va[i] * 0.8f + 0.1f * N[i];
+        const float r = 0.1f + 1.4f * U(rng);
+        const float e0 = disc ? r * r * (lamp % 5 == 1 ? 0.8f : 1.0f) : 0.1f + 1.4f * U(rng), e1 = disc ? r : 0.1f + 1.4f * U(rng);
+        const float ri = (10.0f + 90.0f * U(rng)) * (0.5f + 1.5f * U(rng)), E[3] = {U(rng), U(rng), U(rng)};
+        GpuLampLaw::Lamp L;
+        std::memcpy(L.pos, A, sizeof A);
+        L.W = k2 * ri / k1, L.cmax = cmax;
+        std::memcpy(L.colour, E, sizeof E);
+        GpuLampLaw::AreaShape(L, Ua, Va, N, e0, e1, disc);
+        for (int j = 0; j < 500; j++) {
+            float p[3] = {A[0] + 8.0f * (U(rng) - 0.5f), A[1] + 4.0f * (U(rng) - 0.5f), A[2] + 8.0f * (U(rng) - 0.5f)};
+            if (j % 5 == 0) { // (a point 1 mm to 5 cm off the area's plane, on either side: a ceiling texel at the panel)
+                const float off = (j % 10 ? 1.0f : -1.0f) * (0.001f + 0.05f * U(rng)), a = 2.0f * (U(rng) - 0.5f), b = 2.0f * (U(rng) - 0.5f);
+                for (int i = 0; i < 3; i++) p[i] = A[i] - off * N[i] + a * e1 * Ua[i] + b * e1 * Va[i];
+            }
+            float game[3], law[3];
+            GameArea::Eval(disc, A, Ua, Va, N, e0, e1, ri, E, k1, k2, cmax, p, game);
+            GpuLampLaw::Eval(L, p, N, 0.0f, law);
+            if (!std::isfinite(game[0]) || game[0] + game[1] + game[2] > 1e30f) continue; // (a point on the area)
+            const float dmax = std::max({std::fabs(game[0] - law[0]), std::fabs(game[1] - law[1]), std::fabs(game[2] - law[2])});
+            const float rel = dmax / std::max({game[0], game[1], game[2], 1e-3f});
+            n[disc]++, lit[disc] += game[0] + game[1] + game[2] > 0.0f, near[disc] += j % 5 == 0;
+            within[disc] += dmax <= 2.0f / 255.0f && rel < 1e-3f;
+            worst[disc] = std::max(worst[disc], rel);
+        }
+    }
+    for (int d = 0; d < 2; d++) {
+        std::printf("%s law vs the game's code: %ld points (%ld lit, %ld by its plane), %ld within 2/255 and 1e-3 relative, worst relative %.2g\n",
+                    d ? "disc area" : "rectangle area", n[d], lit[d], near[d], within[d], worst[d]);
+        Check(n[d] > 150000 && lit[d] > n[d] / 4 && within[d] == n[d],
+              d ? "DiscAreaLight: the law is the game's evaluation (0x006BFDC0) at every point" : "RectangleAreaLight: the law is the game's evaluation (0x006BFBA0) at every point");
+    }
+    // at |D| = 0 (on the area: the game's NaN) the law gives 0; the rows carry the mark, U, V, N and the size; a turn or a resize is
+    // a move; its law is the game's (A x 1)
+    GpuLampLaw::Lamp a;
+    const float u[3] = {1.0f, 0.0f, 0.0f}, v[3] = {0.0f, 0.0f, 1.0f}, nu[3] = {0.0f, 1.0f, 0.0f}, u2[3] = {0.0f, 0.0f, 1.0f}, v2[3] = {-1.0f, 0.0f, 0.0f};
+    a.W = 5.0f, a.colour[0] = a.colour[1] = a.colour[2] = 1.0f;
+    GpuLampLaw::AreaShape(a, u, v, nu, 0.5f, 0.3f, false);
+    float on[3];
+    const float at[3] = {0.2f, 0.0f, 0.1f}, wall[3] = {-1.0f, 0.0f, 0.0f};
+    GpuLampLaw::Eval(a, at, nu, 0.0f, on);
+    float rows[5][4];
+    GpuLampLaw::Rows(a, rows);
+    GpuLampLaw::Lamp turned = a, bigger = a, disc = a, tube;
+    GpuLampLaw::AreaShape(turned, u2, v2, nu, 0.5f, 0.3f, false);
+    GpuLampLaw::AreaShape(bigger, u, v, nu, 0.6f, 0.3f, false);
+    GpuLampLaw::AreaShape(disc, u, v, nu, 0.25f, 0.5f, true);
+    GpuLampLaw::TubeShape(tube, u, 1.0f);
+    Check(on[0] == 0.0f && on[1] == 0.0f && on[2] == 0.0f, "area light: a point on the area (the game's NaN) takes 0");
+    Check(rows[3][1] == GpuLampLaw::kRect && rows[2][0] == 1.0f && rows[4][2] == 1.0f && rows[3][2] == 0.0f && rows[2][3] == 0.0f && rows[3][0] == 1.0f && rows[3][3] == 0.5f &&
+              rows[4][3] == 0.3f && GpuLampLaw::Kind(a) == 2 && GpuLampLaw::Kind(disc) == 3 && GpuLampLaw::Kind(tube) == 1 && !GpuLampLaw::IsTube(a),
+          "area light: its rows carry the mark, U, V, N and its size");
+    Check(GpuLampLaw::Moved(a, turned, 1e-4f) && GpuLampLaw::Moved(a, bigger, 1e-4f) && GpuLampLaw::Moved(a, disc, 1e-4f) && !GpuLampLaw::Moved(a, a, 1e-4f) &&
+              !GpuLampLaw::Moved(tube, tube, 1e-4f),
+          "area light: a turn or a resize about its position is a move");
+    Check(RoomLampMove::GameOverLaw(a, at, wall) == 1.0f && RoomLampMove::GameOverLaw(disc, at, wall) == 1.0f, "area light: its law has no mount floor (GameOverLaw 1)");
+}
+
 int main() {
     std::mt19937 rng(20261013);
     std::uniform_real_distribution<float> U(0.0f, 1.0f);
@@ -1085,6 +1192,7 @@ int main() {
         Check(floorOne && farOne, "moved lamps: GameOverLaw is 1 where the law raises nothing");
     }
     TubeChecks();
+    AreaChecks();
     BasisChecks();
     OpenAboveChecks();
     std::printf("%d checks, %d failures\n", checks, failures);

@@ -157,10 +157,24 @@ float3 TubeLaw(LampRegs L, float3 p, float3 n) {
     const float facing = max(-dot(n, e) * inv, 0.0);
     return min((inv * inv) * L.pos.w, L.col.w) * facing * L.col.xyz;
 }
-// A kept part's law (lamp 0): the colour alone (gA.z 1), a tube's or the GPU's
+// gpu_lamp_law.h Area (an area light; gOff.y = kRect -2 or kDisc -3): L = (U.v, V.v, N.v) for v = A - p (U = axis.xyz, V =
+// spill.xyz, N = (axis.w, off.x, off.z)), its first two lanes held in the rectangle (+-(off.w, spill.w)) or the disc (length
+// spill.w past off.w), D = L - held; no N.l, no reach
+float3 AreaLaw(LampRegs L, float3 p) {
+    const float3 v = L.pos.xyz - p;
+    const float3 l = float3(dot(L.axis.xyz, v), dot(L.spill.xyz, v), dot(float3(L.axis.w, L.off.x, L.off.z), v));
+    const float2 e = float2(L.off.w, L.spill.w);
+    const float s = dot(l.xy, l.xy);
+    const float2 c = L.off.y < -2.5 ? l.xy * (s > e.x ? rsqrt(s) * e.y : 1.0) : min(max(l.xy, -e), e);
+    const float3 D = float3(l.xy - c, l.z);
+    const float d2 = max(dot(D, D), 1e-20);
+    const float inv = rsqrt(d2);
+    return min((inv * inv) * L.pos.w, L.col.w) * Sat(D.z * inv) * L.col.xyz;
+}
+// A kept part's law (lamp 0): the colour alone (gA.z 1), an area light's, a tube's or the GPU's
 float3 KeptLaw(float3 p, float3 n) {
     const LampRegs L = ReadLamp(0);
-    return gA.z > 0.5 ? gCol[0].rgb : L.off.y < -0.5 ? TubeLaw(L, p, n) : Law(L, p, n, 0.0);
+    return gA.z > 0.5 ? gCol[0].rgb : L.off.y < -1.5 ? AreaLaw(L, p) : L.off.y < -0.5 ? TubeLaw(L, p, n) : Law(L, p, n, 0.0);
 }
 
 // The atlas along direction d from lamp tile k (m): x = the nearest surface's distance, y = how far its plane passes from the

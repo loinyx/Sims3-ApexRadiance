@@ -10,7 +10,8 @@
 // street-lamp class), the spot (FUN_006bffb0) and the shaded lamp (FUN_006be1c0) times their cone blends
 // (docs/engine/light-objects-and-rigs.md, lamp_shape.h), and on outdoor wall texels Apex's realistic reach share
 // (lamp_reach.h). Every factor after that (walls, slabs, openings, the soft light cut, a lamp listed twice) is in vis.
-// A TubeLight (type 6, 0x006BFA70 over 0x006BD100, read 02/11 with dumpbin) has its own law (Tube below).
+// A TubeLight (type 6, 0x006BFA70 over 0x006BD100, read 02/11 with dumpbin) has its own law (Tube below), and so do the area
+// lights (types 9 and 10, Area below).
 #include "fast_math.h"
 #include <algorithm>
 #include <cmath>
@@ -52,16 +53,48 @@ inline float MountedNdl(float ndl, float plane, float ny) {
 // the game's evaluation (in A), so the law is the game's evaluation itself (RoomLampMove::GameOverLaw 1).
 // Checked against the probe's hook colours of every TubeLight of dumps 135710 and 145922 (78048 texels, all within 2/255).
 constexpr float kTube = -1.0f;
-inline bool IsTube(const Lamp& L) { return L.sc2 < -0.5f; }
+// A RectangleAreaLight (type 9, 0x006BFBA0) or DiscAreaLight (type 10, 0x006BFDC0; both over 0x006BFAF0, read 02/11 with
+// dumpbin): with v = A - p (A its position +0x120), L = (U.v, V.v, N.v) (U +0x170, V +0x190, N +0x180, dots summed (z + y) + x);
+// C = L's first two lanes held in the area (the rectangle: each within +-e (e0 +0x1A0, e1 +0x1A4); the disc 0x006BD7C0: scaled
+// to length e1 when their x^2 + y^2 is over e0) and 0; D = L - C; out = E0 x min(Cmax, k2 x range x intensity.x / (k1 |D|^2))
+// x sat(D.z / |D|): no N.l, the cap before the facing. The law keeps it with axis = U, spill = V, (sc1, off1, off2) = N,
+// (r0sq, invR2) = (e0, e1) and sc2 = kRect or kDisc (no reach: an area light is never drawn with one). At |D| = 0 (a point on
+// the area) the game's evaluation is NaN, and the room's sum and texel with it (the hook keeps no part there): the law gives 0.
+constexpr float kRect = -2.0f, kDisc = -3.0f;
+// 0 a lamp, 1 a tube, 2 a rectangle, 3 a disc (sc2's mark)
+inline int Kind(const Lamp& L) { return L.sc2 < -0.5f ? static_cast<int>(0.5f - L.sc2) : 0; }
+inline bool IsTube(const Lamp& L) { return Kind(L) == 1; }
 inline void TubeShape(Lamp& L, const float s[3], float len) {
     for (int i = 0; i < 3; i++) L.axis[i] = s[i], L.spill[i] = 0.0f;
     L.sc1 = len * len, L.off1 = 0.0f, L.sc2 = kTube, L.off2 = 0.0f;
 }
-// Its place (and a tube's end) differs by more than eps from b's: a move
+inline void AreaShape(Lamp& L, const float u[3], const float v[3], const float nrm[3], float e0, float e1, bool disc) {
+    for (int i = 0; i < 3; i++) L.axis[i] = u[i], L.spill[i] = v[i];
+    L.sc1 = nrm[0], L.off1 = nrm[1], L.off2 = nrm[2], L.sc2 = disc ? kDisc : kRect;
+    L.r0sq = e0, L.invR2 = e1;
+}
+// Its place (a tube's end, an area's axes and size: a turn too) differs by more than eps from b's: a move
 inline bool Moved(const Lamp& a, const Lamp& b, float eps) {
-    bool m = IsTube(a) != IsTube(b);
-    for (int i = 0; i < 3; i++) m = m || std::fabs(a.pos[i] - b.pos[i]) > eps || (IsTube(a) && std::fabs(a.axis[i] - b.axis[i]) > eps);
-    return m || (IsTube(a) && std::fabs(a.sc1 - b.sc1) > eps);
+    const int k = Kind(a);
+    const auto apart = [eps](float x, float y) { return std::fabs(x - y) > eps; };
+    bool m = k != Kind(b) || (k && apart(a.sc1, b.sc1)) || (k > 1 && (apart(a.off1, b.off1) || apart(a.off2, b.off2) || apart(a.r0sq, b.r0sq) || apart(a.invR2, b.invR2)));
+    for (int i = 0; i < 3; i++) m = m || apart(a.pos[i], b.pos[i]) || (k && apart(a.axis[i], b.axis[i])) || (k > 1 && apart(a.spill[i], b.spill[i]));
+    return m;
+}
+inline void Area(const Lamp& L, const float p[3], float out[3]) {
+    const float v[3] = {L.pos[0] - p[0], L.pos[1] - p[1], L.pos[2] - p[2]};
+    const float lx = (L.axis[2] * v[2] + L.axis[1] * v[1]) + L.axis[0] * v[0], ly = (L.spill[2] * v[2] + L.spill[1] * v[1]) + L.spill[0] * v[0];
+    const float lz = (L.off2 * v[2] + L.off1 * v[1]) + L.sc1 * v[0];
+    float cx = std::min(std::max(lx, -L.r0sq), L.r0sq), cy = std::min(std::max(ly, -L.invR2), L.invR2);
+    if (Kind(L) == 3) {
+        const float s = ly * ly + lx * lx, k = s > L.r0sq ? 1.0f / ApexMath::Sqrt(s) * L.invR2 : 1.0f;
+        cx = lx * k, cy = ly * k;
+    }
+    const float dx = lx - cx, dy = ly - cy;
+    const float d2 = std::max((lz * lz + dy * dy) + dx * dx, 1e-20f);
+    const float inv = 1.0f / ApexMath::Sqrt(d2);
+    const float f = std::min((inv * inv) * L.W, L.cmax) * Sat(lz * inv);
+    for (int c = 0; c < 3; c++) out[c] = f * L.colour[c];
 }
 inline void Tube(const Lamp& L, const float p[3], const float n[3], float wallReach, float out[3]) {
     const float v[3] = {p[0] - L.pos[0], p[1] - L.pos[1], p[2] - L.pos[2]};
@@ -85,6 +118,7 @@ inline void Tube(const Lamp& L, const float p[3], const float n[3], float wallRe
 // wallReach: the reach share's weight (1 on an outdoor wall pixel with the reach on, 0 otherwise).
 inline void Eval(const Lamp& L, const float p[3], const float n[3], float wallReach, float out[3]) {
     if (IsTube(L)) return Tube(L, p, n, wallReach, out);
+    if (Kind(L) > 1) return Area(L, p, out);
     float l[3] = {L.pos[0] - p[0], L.pos[1] - p[1], L.pos[2] - p[2]};
     const float plane = n[0] * l[0] + n[1] * l[1] + n[2] * l[2];
     const float d2 = std::max(l[0] * l[0] + l[1] * l[1] + l[2] * l[2], 1e-4f);

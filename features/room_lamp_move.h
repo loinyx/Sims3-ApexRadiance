@@ -41,9 +41,9 @@ inline void PartAt(const RoomLightTests::Room& r, bool built, const std::vector<
 // MountedNdl's floor (gpu_lamp_law.h Eval) where the game's evaluation does not (LightEvalHook raises it after, MountFactor), so
 // an A over the game's evaluation is taken over the law as A x this: min(N.l W / d^2, Cmax) / min(raised W / d^2, Cmax); 1 where
 // the law raises nothing. (Until stage 3b the moved parts' A was MountFactor over the law itself: such a wall texel took the
-// raise twice.) A tube's law is the game's evaluation (gpu_lamp_law.h Tube): 1.
+// raise twice.) A tube's and an area light's law is the game's evaluation (gpu_lamp_law.h Tube, Area): 1.
 inline float GameOverLaw(const GpuLampLaw::Lamp& L, const float* p, const float* n) {
-    if (GpuLampLaw::IsTube(L)) return 1.0f;
+    if (GpuLampLaw::Kind(L)) return 1.0f;
     float l[3] = {L.pos[0] - p[0], L.pos[1] - p[1], L.pos[2] - p[2]};
     const float plane = n[0] * l[0] + n[1] * l[1] + n[2] * l[2];
     const float d2 = std::max(l[0] * l[0] + l[1] * l[1] + l[2] * l[2], 1e-4f);
