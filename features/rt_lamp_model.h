@@ -79,6 +79,27 @@ inline void KeptAdd(const float law[3], float A, float B, float thrScale, float 
     Fade(c, fade ? thr * thrScale : thr, fade);
     for (int i = 0; i < 3; i++) out[i] += mult * c[i] * B;
 }
+// GPU room lamps, room 0's kept lamps (outdoor_delta.cpp BuildKept0, AccKept0PS): the luminance of a kept lamp's law at p with N.l
+// ignored, as the floor mask's copies evaluate it (the normal toward the lamp, no reach; colourOnly: its colour). A floor mask
+// part is kept as its luminance over this, and added back as this now x that share
+inline float KeptWrapLum(const GpuLampLaw::Lamp& l, bool colourOnly, const float p[3]) {
+    float law[3];
+    if (colourOnly) {
+        for (int i = 0; i < 3; i++) law[i] = l.colour[i];
+        return OutdoorDeltaModel::Lum3(law);
+    }
+    float d[3] = {l.pos[0] - p[0], l.pos[1] - p[1], l.pos[2] - p[2]};
+    const float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (len > 1e-6f)
+        for (float& v : d) v /= len;
+    else
+        d[0] = 0, d[1] = 1, d[2] = 0;
+    GpuLampLaw::Eval(l, p, d, 0.0f, law);
+    return OutdoorDeltaModel::Lum3(law);
+}
+// The ground alpha an exit lamp's light gives a story-0 ground texel (LevelLightShare SolveGroundTexel): E = the luminance of
+// the exit lamps' light there, min(E, 254 / 255), 0 when none (a texel under a floor tile is not one: it keeps alpha 0)
+inline float ExitAlpha(float E) { return E > 0.0f && std::isfinite(E) ? std::min(E, 254.0f / 255.0f) : 0.0f; }
 // GPU room lamps, stage 2a (outdoor_delta.cpp KeptFinalCheck): the colour the game's pack 0x0060CD10 takes for a kept texel
 // whose sum is now R. S and p: the solve's sum there and its pack input before the clamp (FUN_006a31d0 [esp+60h]); norm: the
 // room's +0x160 the solve toned it with. Roofed: the solve's tail (gpu_lamp_law.h IndoorTexel) with the ramp x ambient and the
@@ -200,11 +221,16 @@ struct TexelIn {
     bool masked = false, gated = false;
     float baseVis = 0.0f, baseAll = 0.0f, under = -1.0f;
     float dither = 0.0f; // levels / 255 (RoomMapDither::Offset / 255), 0 when the dither is off
+    // (GPU room lamps) a story-0 ground texel whose alpha is the exit lamps' light: ExitAlpha(exitBase + gExit), exitBase the
+    // luminance of the exit lamps' light left in the base
+    bool exitGround = false;
+    float exitBase = 0.0f;
 };
-inline uint32_t Compose(const TexelIn& t, const float G[3], float gVis, float gAll) {
+inline uint32_t Compose(const TexelIn& t, const float G[3], float gVis, float gAll, float gExit = 0.0f) {
     float S[3] = {t.base[0] + G[0], t.base[1] + G[1], t.base[2] + G[2]};
     float alpha = t.alpha;
     if (t.masked) alpha = OutdoorDeltaModel::MaskAlpha(t.baseVis + gVis, t.baseAll + gAll, t.gated ? t.under : -1.0f);
+    else if (t.exitGround) alpha = ExitAlpha(t.exitBase + gExit);
     float c[4];
     OutdoorDeltaModel::PackInput(S, alpha, c);
     if (t.dither != 0.0f) OutdoorDeltaModel::Dither(c, t.dither);

@@ -142,6 +142,10 @@ void DropFused(); // the fused copy is not used (the copy is solved apart): the 
 // The floor mask of the sample: masked = an outdoor floor texel of a story >= 1; gated = more than 2 m over its lot base
 // (the share of lamps under its plane applies); visLum / allLum = the luminance of its two copies
 void Mask(bool masked, bool gated, float visLum, float allLum);
+// (GPU room lamps) the capture keeps room 0 lamps (KeepsGround): a story-0 ground texel the exit light was tapped at, on = not
+// under a floor tile (its alpha is the exit lamps' light)
+bool KeepsGround();
+void ExitGround(bool on);
 // After the sample's point solve (out = what the batch packs from; flags = the batch's test switches). The texel the batch
 // then packs is read back from its map at the next sample, before the wall blur and before the finalize.
 void SampleEnd(unsigned char* room, const void* sample, const char* flags, const float* out);
@@ -184,7 +188,10 @@ struct Room0Export {
         uint32_t packed;
         uint16_t x, y;
         uint8_t map;  // 0 wall atlas, 1 floor, 2 ceiling, 3 objects
-        uint8_t bits; // 1 masked (an outdoor floor of a story >= 1), 2 gated (over its lot base: the under-floor share applies)
+        uint8_t bits; // 1 masked (an outdoor floor of a story >= 1), 2 gated (over its lot base: the under-floor share applies), 4 exit ground
+        // (GPU room lamps, bit 4: a story-0 ground texel whose alpha is the exit lamps' light, set only when a kept lamp is an
+        // exit lamp) the luminance of the exit lamps' light left in the base
+        float exitBase;
     };
     std::vector<Texel> texels;
     struct Block {
@@ -212,6 +219,12 @@ struct Room0Export {
         float pos[3] = {};       // where it was
         GpuLampLaw::Lamp law;    // its law when kept
         std::vector<KeptPart0> parts;
+        bool exit = false; // its parts are also the exit ground texels' alpha (bit 4)
+        struct Mask0 {
+            uint32_t texel; // into texels
+            float vis, all; // the floor mask's luminances over its law's then with N.l ignored (rt_lamp_model.h KeptWrapLum)
+        };
+        std::vector<Mask0> mask;
     };
     std::vector<KeptLamp0> kept0;
 };

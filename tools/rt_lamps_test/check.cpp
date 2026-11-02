@@ -2196,6 +2196,155 @@ bool Room0KeptCheck() {
     return true;
 }
 
+// ---------------------------------------------------------------- 7. GPU room lamps: room 0's exit lamps and floor mask lamps
+// Room 0's kept lamps with floor mask parts and exit parts (AddKeptParts extra, ComposeK0PS): masked texels (their alpha from
+// the floor mask's two luminances, the kept lamps' shares x KeptWrapLum now), exit ground texels (ExitAlpha of the exit lamps'
+// light left in the base + the kept exit lamps' KeptAdd light), plain texels; one lamp with a GPU law, one its colour alone,
+// both exits. Against the CPU: KeptAdd, KeptWrapLum, RtLampModel::Compose (with gExit), the laws as kept, changed (dimmed,
+// recoloured) and one switched off. The bar is 0/255: every texel the CPU's
+bool Room0KeptXCheck() {
+    std::printf("\n[GPU room lamps] room 0's exit and floor mask lamps against KeptAdd + KeptWrapLum + Compose on the CPU\n");
+    std::mt19937 rng(91);
+    std::uniform_real_distribution<float> U(0.0f, 1.0f);
+    const int w = 64, h = 32, nk = 2;
+    const float thr = 3.0f / 255.0f;
+    GpuLampLaw::Lamp kept[nk];
+    for (GpuLampLaw::Lamp& L : kept) {
+        L.pos[0] = 16.0f * U(rng), L.pos[1] = 1.0f + U(rng), L.pos[2] = 8.0f * U(rng), L.W = 3.0f + 4.0f * U(rng);
+        for (float& c : L.colour) c = 0.3f + 0.7f * U(rng);
+        GpuLampLaw::NoCone(L);
+    }
+    const char lawOk[nk] = {1, 2}; // (the second: its colour alone)
+    std::vector<RtLampGpu::TexelVertex> verts, parts;
+    std::vector<std::pair<UINT, UINT>> ranges(nk);
+    std::vector<RtLampModel::TexelIn> in(static_cast<size_t>(w) * h);
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            const int i = y * w + x;
+            RtLampGpu::TexelVertex v{};
+            v.x = static_cast<float>(x), v.y = static_cast<float>(y), v.w = 1.0f;
+            v.p[0] = x * 0.25f, v.p[1] = 0.0f, v.p[2] = y * 0.25f, v.n[1] = 1.0f;
+            RtLampModel::TexelIn& t = in[i];
+            const int kind = i % 3; // 0 masked, 1 exit ground, 2 plain
+            v.n[3] = kind == 2 ? U(rng) * 0.5f : 0.0f;
+            for (int c = 0; c < 3; c++) v.base[c] = t.base[c] = U(rng) < 0.3f ? 1.2f * U(rng) : 0.2f * U(rng);
+            v.base[3] = t.dither = (x + y) % 3 ? RoomMapDither::Offset(x, y) / 255.0f : 0.0f;
+            t.alpha = v.n[3];
+            if (kind == 0) {
+                v.p[3] = 1.0f, t.masked = true;
+                t.baseAll = v.mask[1] = U(rng) < 0.3f ? 0.0f : 0.5f * U(rng);
+                t.baseVis = v.mask[0] = t.baseAll * U(rng);
+            } else if (kind == 1) {
+                t.exitGround = true, v.mask[3] = 1.0f;
+                t.exitBase = v.mask[2] = U(rng) < 0.5f ? 0.0f : 0.3f * U(rng);
+            }
+            verts.push_back(v);
+        }
+    // each lamp: light parts at 3 texels of 4 (exit parts), floor mask parts at most masked texels (shares as BuildKept0 keeps them)
+    const size_t nPairs = static_cast<size_t>(w) * h * nk;
+    std::vector<float> visShare(nPairs, 0.0f), allShare(nPairs, 0.0f), A(nPairs, -1.0f), B(nPairs, 0.0f), mult(nPairs, 1.0f);
+    std::vector<int> bits(nPairs, 0);
+    for (int l = 0; l < nk; l++) {
+        ranges[l].first = static_cast<UINT>(parts.size());
+        for (int i = 0; i < w * h; i++) {
+            const RtLampGpu::TexelVertex& t = verts[i];
+            const size_t k = static_cast<size_t>(i) * nk + l;
+            if ((i + l) % 4 != 0) {
+                RtLampGpu::TexelVertex v{};
+                v.x = t.x, v.y = t.y, v.w = 1.0f;
+                for (int c = 0; c < 3; c++) v.p[c] = t.p[c], v.n[c] = t.n[c];
+                A[k] = OutdoorDeltaModel::FromHalf(OutdoorDeltaModel::ToHalf(0.2f + U(rng))), B[k] = OutdoorDeltaModel::FromHalf(OutdoorDeltaModel::ToHalf(U(rng)));
+                bits[k] = (U(rng) < 0.2f ? 1 : 0) | (U(rng) < 0.8f ? 4 : 0), mult[k] = U(rng) < 0.2f ? 2.0f : 1.0f;
+                v.p[3] = static_cast<float>(bits[k]), v.n[3] = mult[k], v.base[0] = A[k], v.base[1] = B[k], v.base[2] = 1.0f, v.mask[2] = 1.0f;
+                parts.push_back(v);
+            }
+            if (in[i].masked && U(rng) < 0.8f) {
+                RtLampGpu::TexelVertex v{};
+                v.x = t.x, v.y = t.y, v.w = 1.0f;
+                for (int c = 0; c < 3; c++) v.p[c] = t.p[c], v.n[c] = t.n[c];
+                v.n[3] = 1.0f;
+                allShare[k] = 0.5f + U(rng), visShare[k] = allShare[k] * (U(rng) < 0.3f ? 0.0f : U(rng));
+                v.mask[0] = visShare[k], v.mask[1] = allShare[k];
+                parts.push_back(v);
+            }
+        }
+        ranges[l].second = static_cast<UINT>(parts.size()) - ranges[l].first;
+    }
+    RtLampGpu::Engine eng(RtLampGpu::PlainCalls());
+    std::string err;
+    RtLampProxy::Mesh empty;
+    if (!eng.Init(g_dev, g_shaders, 64, err) || !eng.SetProxy(g_dev, empty, err)) {
+        Check(false, "room-0 kept exit/mask engine: " + err);
+        return false;
+    }
+    RtLampGpu::Map m;
+    m.w = w, m.h = h, m.count = static_cast<UINT>(verts.size());
+    IDirect3DVertexBuffer9* pvb = nullptr;
+    IDirect3DTexture9* out = nullptr;
+    const bool made = RtLampGpu::Engine::MakeVb(g_dev, verts.data(), m.count, &m.vb) &&
+                      RtLampGpu::Engine::MakeVb(g_dev, parts.data(), static_cast<UINT>(parts.size()), &pvb) &&
+                      SUCCEEDED(g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &out, nullptr));
+    long n = 0, exact = 0, maxDiff = 0, alphaLit = 0, alphaMax = 0;
+    for (int round = 0; made && round < 3; round++) {
+        GpuLampLaw::Lamp laws[nk] = {kept[0], kept[1]};
+        if (round == 1)
+            for (GpuLampLaw::Lamp& L : laws) L.colour[0] *= 0.4f, L.colour[2] *= 1.7f, L.W *= 0.6f;
+        if (round == 2) laws[0].colour[0] = laws[0].colour[1] = laws[0].colour[2] = 0.0f; // (switched off)
+        std::vector<uint32_t> want(static_cast<size_t>(w) * h);
+        for (int i = 0; i < w * h; i++) {
+            float G[3] = {}, gVis = 0.0f, gAll = 0.0f, gExit = 0.0f;
+            for (int l = 0; l < nk; l++) {
+                const size_t k = static_cast<size_t>(i) * nk + l;
+                if (A[k] >= 0.0f) {
+                    float law[3], add[3] = {};
+                    if (lawOk[l] == 2) std::memcpy(law, laws[l].colour, sizeof law);
+                    else GpuLampLaw::Eval(laws[l], verts[i].p, verts[i].n, 0.0f, law);
+                    RtLampModel::KeptAdd(law, A[k], B[k], 1.0f, mult[k], bits[k] & 1, (bits[k] & 4) != 0, thr, add);
+                    for (int c = 0; c < 3; c++) G[c] += add[c];
+                    gExit += OutdoorDeltaModel::Lum3(add);
+                }
+                if (allShare[k] != 0.0f) {
+                    const float wl = RtLampModel::KeptWrapLum(laws[l], lawOk[l] == 2, verts[i].p);
+                    gVis += wl * visShare[k], gAll += wl * allShare[k];
+                }
+            }
+            want[i] = RtLampModel::Compose(in[i], G, gVis, gAll, gExit);
+        }
+        RtLampGpu::Params p;
+        p.thr = thr, p.mask = true, p.keptX = true;
+        std::vector<uint32_t> got;
+        bool ok = true;
+        g_dev->BeginScene();
+        if (eng.Begin(g_dev)) {
+            ok = eng.Accumulate(g_dev, m, nullptr, 0, p, true, err) && eng.AddKeptParts(g_dev, pvb, ranges, laws, lawOk, thr, w, h, err, true) &&
+                 eng.Compose(g_dev, m, nullptr, out, p, err);
+            eng.End(g_dev);
+        } else
+            ok = false;
+        g_dev->EndScene();
+        ok = ok && RtLampGpu::Engine::ReadTexture(g_dev, out, w, h, got);
+        Check(ok, "room-0 kept exit/mask parts on the GPU: " + err);
+        if (!ok) break;
+        for (int i = 0; i < w * h; i++) {
+            const int d = OutdoorDeltaModel::MaxLevelDiff(want[i], got[i]);
+            n++, exact += d == 0, maxDiff = std::max<long>(maxDiff, d);
+            if (!in[i].masked && !in[i].exitGround) continue;
+            alphaLit += (want[i] >> 24) != 0;
+            alphaMax = std::max<long>(alphaMax, static_cast<long>(want[i] >> 24));
+        }
+    }
+    if (m.vb) m.vb->Release();
+    if (pvb) pvb->Release();
+    if (out) out->Release();
+    Check(made, "room-0 kept exit/mask buffers could not be made");
+    std::printf("  %ld texels over 3 rounds of laws (as kept, changed, one lamp off), %zu kept points of 2 exit lamps (one its colour alone): %.2f%% exact, "
+                "largest difference %ld/255; %ld masked or exit ground texels with an alpha (up to %ld/255)\n",
+                n, parts.size(), n ? 100.0 * exact / n : 100.0, maxDiff, alphaLit, alphaMax);
+    Check(n > 0 && maxDiff == 0, "room-0 kept exit/mask parts: the GPU's texels are the CPU's (0/255)");
+    Check(alphaLit > 0, "room-0 kept exit/mask parts: no texel took an alpha from them");
+    return true;
+}
+
 int main(int argc, char** argv) {
     std::vector<std::string> worlds;
     int maxLamps = 12;
@@ -2224,6 +2373,7 @@ int main(int argc, char** argv) {
     RoomLampsCheck();
     KeptGpuCheck();
     Room0KeptCheck();
+    Room0KeptXCheck();
 #ifdef RT_OBJECT_SHAPES
     ObjectParityCheck();
 #endif

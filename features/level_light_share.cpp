@@ -10896,11 +10896,12 @@ bool ExitGroundOn() {
     return g_exitGroundOn.load(std::memory_order_relaxed) && g_floorMaskReady && g_floorWallsOn.load(std::memory_order_relaxed) && InnerOpeningsOn();
 }
 // The point solve of an unmasked outdoor sample, with the exit part tapped when it is a story-0 ground texel; E in alpha
-float* SolveGroundTexel(BYTE* room, float* out, void* list2D, void* list3D, void* flags, void* sample, float& alpha) {
+float* SolveGroundTexel(BYTE* room, float* out, void* list2D, void* list3D, void* flags, void* sample, float& alpha, bool& tapped) {
     alpha = 0.0f;
     const float* s = static_cast<const float*>(sample);
     const bool tap = room[0x18] && s[5] >= 0.9f && !t_replay && !t_maskCopy && ThreadId() == g_gatherThread.load(std::memory_order_relaxed) && ExitGroundOn() &&
                      ExitGroundRoom(room);
+    tapped = tap;
     if (!tap) return SolvePoint(room, out, list2D, list3D, flags, sample, true);
     struct Reset {
         ~Reset() { t_exit = ExitTap{}; }
@@ -10979,7 +10980,8 @@ float* SolvePointBatchImpl(BYTE* room, float* out, void* list2D, void* list3D, v
     if (!room0) {
         if (t_odSample) OutdoorDelta::Tap(0, out);
         float exitAlpha = 0.0f; // (2.15.3) story 0's ground: the indoor light through openings in it (SolveGroundTexel)
-        float* r = SolveGroundTexel(room, out, list2D, list3D, flags, sample, exitAlpha);
+        bool tapped = false;
+        float* r = SolveGroundTexel(room, out, list2D, list3D, flags, sample, exitAlpha, tapped);
         if (t_odSample) {
             OutdoorDelta::TapEnd();
             OutdoorDelta::Mask(false, false, 0.0f, 0.0f);
@@ -10988,7 +10990,11 @@ float* SolvePointBatchImpl(BYTE* room, float* out, void* list2D, void* list3D, v
         // (2.15.3, release review) a texel under a floor tile of story 0 (a patio, a path) keeps alpha 0: the outdoor floors
         // weight the atlas by 1 - alpha and do not add the indoor light (kFloorIndoorLight), so E there took the garden lamps'
         // light off the tile; the lot pass and the snowy passes (grass and snow) take E
-        if (exitAlpha > 0.0f && GroundFloorTileAt(room, static_cast<const float*>(sample))) exitAlpha = 0.0f;
+        // (GPU room lamps, developer: a room 0 keeping lamps) whether a tapped texel is under a floor tile, its exit light or not
+        const bool keepGround = tapped && t_odSample && OutdoorDelta::KeepsGround();
+        const bool tile = (exitAlpha > 0.0f || keepGround) && GroundFloorTileAt(room, static_cast<const float*>(sample));
+        if (exitAlpha > 0.0f && tile) exitAlpha = 0.0f;
+        if (keepGround) OutdoorDelta::ExitGround(!tile);
         if (g_floorMaskReady && room[0x18]) out[3] = exitAlpha; // outdoor: the game's alpha 0
         return r;
     }

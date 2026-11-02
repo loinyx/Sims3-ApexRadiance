@@ -43,7 +43,7 @@ DeviceCalls PlainCalls(); // the device's own methods (the harness)
 // The shader objects (made by the caller: the game from its shader cache, the harness with D3DCompile)
 enum ShaderId {
     kShadowVs, kTexelVs, kShadowPs, kAccPs, kComposePs, kCopyPs, kBlurRowPs, kBlurColPs, kBlockPs, kAccFastPs, kAccRlgPs, kAccRlgFastPs, kComposeRlgPs,
-    kAccKeptPs, kComposeKeptPs, kCopyAtPs, kBlockKeptPs, kShaderCount
+    kAccKeptPs, kComposeKeptPs, kCopyAtPs, kBlockKeptPs, kAccKept0Ps, kAccKept0XPs, kComposeK0Ps, kShaderCount
 };
 const char* EntryOf(ShaderId id);
 bool IsVertex(ShaderId id);
@@ -77,6 +77,9 @@ struct Params {
     float farDist = 64.0f;
     bool fast = false;         // AccFastPS: fewer shadow taps (a lamp being dragged)
     bool maskAllGpu = false;   // Compose: the floor mask's "all" of the GPU lamps from the last Accumulate's lamps (its only batch), not dyn.x
+    // Compose (GPU room lamps): room 0's kept lamps were added with their floor mask and exit parts (AddKeptParts, extra): ComposeK0PS
+    // with the second sum (texels: mask.z = the exit lamps' light left in the base, mask.w = 1 an exit ground texel)
+    bool keptX = false;
     int debugLamp = -1;        // >= 0: AccPS writes that lamp's shadow share (r) and law luminance (g), -1 when it adds nothing
 };
 
@@ -214,9 +217,11 @@ class Engine {
     // laws / lawOk: per range of parts (0: no law, adds nothing; 1 the GPU's law; 2 the lamp's colour alone, rt_lamp_model.h
     // KeptAdd's law = that colour); game: the game's own map (the restores' source)
     // Room 0's kept lamps (Real-time outdoor lamps, between its Accumulate and Compose): their parts (TexelVertex as `parts`
-    // above, at their texels' places in a w x h map) added into the current sum; laws / lawOk per range (lawOk 2: the colour alone)
+    // above, at their texels' places in a w x h map) added into the current sum; laws / lawOk per range (lawOk 2: the colour alone).
+    // extra: their floor mask parts (mask.x, mask.y) and exit lamps' parts (mask.z) too: AccKept0PS, and AccKept0XPS into the
+    // other sum ("all", the exit light) that Compose with Params::keptX reads
     bool AddKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, const std::vector<std::pair<UINT, UINT>>& ranges, const GpuLampLaw::Lamp* laws,
-                      const char* lawOk, float thr, int w, int h, std::string& err);
+                      const char* lawOk, float thr, int w, int h, std::string& err, bool extra = false);
     // out: w x h, the room's own map (at most the working map's size: its top-left corner; a blurred wall atlas exactly)
     bool RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLampLaw::Lamp* laws, const char* lawOk, float thr, IDirect3DBaseTexture9* game,
                      IDirect3DTexture9* out, int w, int h, std::string& err);
@@ -237,7 +242,7 @@ class Engine {
     void TexelTarget(IDirect3DDevice9* dev, int w, int h);
     void Blocks(IDirect3DDevice9* dev, const Map& m);
     bool DrawKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, const std::vector<std::pair<UINT, UINT>>& ranges, const GpuLampLaw::Lamp* laws,
-                       const char* lawOk, float thr, int w, int h);
+                       const char* lawOk, float thr, int w, int h, ShaderId ps = kAccKeptPs);
 
     DeviceCalls c_;
     bool ready_ = false;

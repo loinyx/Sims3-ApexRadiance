@@ -533,4 +533,64 @@ float4 BlockKeptPS(float2 pix : TEXCOORD0, float4 rect : TEXCOORD1) : COLOR0 {
     const bool edge = (p.y <= rect.x + 0.5 && rect.z < 0.5) || (p.y >= rect.y - 0.5 && rect.w < 0.5);
     return edge ? tex2Dlod(sSrc2, float4(uv, 0, 0)) : tex2Dlod(sSrc, float4(uv, 0, 0));
 }
+)RAW"
+R"RAW(// ---------------------------------------------------------------- GPU room lamps: room 0's kept lamps (rt_outdoor_lamps.cpp)
+// Real-time outdoor lamps' passes with room 0's kept lamps of the floor mask or exits (rt_lamp_model.h KeptWrapLum, ExitAlpha,
+// Compose with gExit: keep them in step). Points as AccKeptPS's (one range per lamp); mask.x / mask.y = a floor mask part's
+// walls-tested / no-walls luminance over its law's with N.l ignored (its A then 0), mask.z = 1 an exit lamp's part.
+// AccKept0PS   into the sum: AccKeptPS's light, a = the walls-tested luminance (the floor mask's "vis")
+// AccKept0XPS  into the second sum (cleared first): x = the no-walls luminance ("all"), y = an exit lamp's light's luminance
+// ComposeK0PS  ComposePS with the second sum (sAcc2): "all" + its x; an exit ground texel (mask.w = 1, mask.z = the exit lamps'
+//              light left in the base) takes ExitAlpha(mask.z + its y) as its alpha
+sampler2D sAcc2 : register(s3);
+float3 KeptLight(TexelIn i) {
+    const float3 law = gA.z > 0.5 ? gCol[0].rgb : Law(ReadLamp(0), i.p.xyz, i.n.xyz, 0.0);
+    float3 c = law * i.base.x;
+    const float thr = gA.y;
+    const float cs = (c.b + c.g) + c.r;
+    const bool early = fmod(i.p.w, 2.0) >= 1.0, fade = fmod(floor(i.p.w / 4.0), 2.0) >= 1.0;
+    const float t = fade ? thr * i.base.z : thr;
+    if ((early && thr > cs) || !(cs >= t)) c = 0;
+    else if (fade && cs < 2.0 * t) {
+        const float x = (cs - t) / t;
+        c *= x * x * (3.0 - 2.0 * x);
+    }
+    return i.n.w * c * i.base.y;
+}
+float KeptWrapLum(TexelIn i) {
+    const float3 toL = normalize(gPos[0].xyz - i.p.xyz);
+    return Lum3(gA.z > 0.5 ? gCol[0].rgb : Law(ReadLamp(0), i.p.xyz, toL, 0.0));
+}
+float4 AccKept0PS(TexelIn i) : COLOR0 { return float4(KeptLight(i), i.mask.x != 0 ? KeptWrapLum(i) * i.mask.x : 0.0); }
+float4 AccKept0XPS(TexelIn i) : COLOR0 { return float4(i.mask.y != 0 ? KeptWrapLum(i) * i.mask.y : 0.0, i.mask.z > 0.5 ? Lum3(KeptLight(i)) : 0.0, 0, 0); }
+ComposeOut ComposeK0PS(TexelIn i, float2 vpos : VPOS) {
+    const float4 acc = tex2Dlod(sAcc, float4((vpos + 0.5) * gD.zw, 0, 0));
+    const float4 acc2 = tex2Dlod(sAcc2, float4((vpos + 0.5) * gD.zw, 0, 0));
+    const float3 S = i.base.rgb + acc.rgb;
+    float alpha = i.n.w;
+    const float flags = i.p.w;
+    if (fmod(flags, 2.0) >= 1.0) {
+        const float under = fmod(flags, 4.0) >= 2.0 ? i.dyn.y : -1.0;
+        const float vis = i.mask.x + acc.a, all = i.mask.y + (gF.x > 0.5 ? MaskAll(i.p.xyz) : i.dyn.x) + acc2.x;
+        if (under >= 0.999) alpha = 1.0;
+        else {
+            float a = 0.0;
+            if (all > 1e-4) a = clamp(1.0 - vis / all, 0.0, 1.0);
+            if (under > a) a = under;
+            alpha = a;
+        }
+    } else if (i.mask.w > 0.5) {
+        const float E = i.mask.z + acc2.y;
+        alpha = (E > 0 && E == E && E < 1e30) ? min(E, 254.0 / 255.0) : 0.0;
+    }
+    float3 s = max(float3(Fin(S.r), Fin(S.g), Fin(S.b)), 0.0);
+    const float sm = max(s.r, max(s.g, s.b));
+    if (sm > 1.0) s /= sm;
+    float4 c = float4(min(s, 1.0), min(max(Fin(alpha), 0.0), 1.0));
+    if (i.base.w != 0) c.rgb = clamp(c.rgb + i.base.w, 0.0, 1.0);
+    ComposeOut o;
+    o.c = float4(Rne(c.r * 255.0), Rne(c.g * 255.0), Rne(c.b * 255.0), Rne(c.a * 255.0)) / 255.0;
+    o.k = (sm > 1.0 ? Rne(saturate(log2(sm) / 3.0) * 255.0) / 255.0 : 0.0).xxxx;
+    return o;
+}
 )RAW";

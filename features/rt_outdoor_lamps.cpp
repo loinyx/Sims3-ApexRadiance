@@ -123,8 +123,8 @@ ShaderCache::Id AddRtLampShader(int i) {
 const ShaderCache::Id kRtLampShaderIds[RtLampGpu::kShaderCount] = {
     AddRtLampShader(0), AddRtLampShader(1), AddRtLampShader(2), AddRtLampShader(3), AddRtLampShader(4), AddRtLampShader(5), AddRtLampShader(6),
     AddRtLampShader(7), AddRtLampShader(8), AddRtLampShader(9), AddRtLampShader(10), AddRtLampShader(11), AddRtLampShader(12), AddRtLampShader(13),
-    AddRtLampShader(14), AddRtLampShader(15), AddRtLampShader(16)};
-static_assert(RtLampGpu::kShaderCount == 17, "kRtLampShaderIds lists every RtLampGpu::ShaderId");
+    AddRtLampShader(14), AddRtLampShader(15), AddRtLampShader(16), AddRtLampShader(17), AddRtLampShader(18), AddRtLampShader(19)};
+static_assert(RtLampGpu::kShaderCount == 20, "kRtLampShaderIds lists every RtLampGpu::ShaderId");
 void CompileAll() {
     for (int i = 0; i < RtLampGpu::kShaderCount; i++) {
         std::string err;
@@ -484,6 +484,7 @@ struct Slot {
     std::vector<std::pair<UINT, UINT>> kRanges;
     std::vector<KeptInfo> kLamps;
     std::vector<GpuLampLaw::Lamp> kLaws;
+    bool kX = false; // their floor mask or exit parts too (AddKeptParts extra, ComposeK0PS)
     uint64_t roomsRelit = 0; // GpuRoomLamps::Sig at its last relight
     std::vector<char> kOk;
 };
@@ -826,6 +827,7 @@ struct Prepared {
     std::vector<RtLampGpu::TexelVertex> kv; // (GPU room lamps) room 0's kept lamps' parts, by lamp
     std::vector<std::pair<UINT, UINT>> kRanges;
     std::vector<KeptInfo> kLamps;
+    bool kX = false;
 };
 struct Job {
     const void* room = nullptr;
@@ -887,6 +889,7 @@ void PrepareJob(Job& j) {
             for (int k = 0; k < 3; k++) tv.base[k] = std::isfinite(t.base[k]) ? t.base[k] : 0.0f;
             tv.base[3] = ex.dither ? RoomMapDither::Offset(t.x, t.y) / 255.0f : 0.0f;
             tv.mask[0] = t.vis, tv.mask[1] = t.all;
+            if (t.bits & 4) tv.mask[2] = t.exitBase, tv.mask[3] = 1.0f; // (GPU room lamps) an exit ground texel: ComposeK0PS
             if (t.bits & 1) {
                 p.masked.push_back(static_cast<uint32_t>(p.v.size()));
                 p.maskedPos.insert(p.maskedPos.end(), {tv.p[0], tv.p[1], tv.p[2], t.pos[0], t.pos[1], t.pos[2]});
@@ -913,8 +916,24 @@ void PrepareJob(Job& j) {
                     for (int k = 0; k < 3; k++) v.p[k] = t.pos[k], v.n[k] = t.nrm[k];
                     v.p[3] = kp.bits, v.n[3] = kp.mult;
                     v.base[0] = kp.A, v.base[1] = kp.B, v.base[2] = kp.thrScale;
+                    v.mask[2] = kl.exit ? 1.0f : 0.0f;
                     p.kv.push_back(v);
                 }
+                // its floor mask parts: points of no light (A 0) carrying the walls-tested and no-walls shares
+                for (const OutdoorDelta::Room0Export::KeptLamp0::Mask0& mp : kl.mask) {
+                    if (mp.texel >= ex.texels.size()) continue;
+                    const OutdoorDelta::Room0Export::Texel& t = ex.texels[mp.texel];
+                    const auto at = lastAt.find(static_cast<uint32_t>(t.y) << 16 | t.x);
+                    if (t.map != m || at == lastAt.end() || at->second != mp.texel) continue;
+                    RtLampGpu::TexelVertex v{};
+                    v.x = t.x, v.y = t.y, v.w = 1.0f;
+                    for (int k = 0; k < 3; k++) v.p[k] = t.pos[k], v.n[k] = t.nrm[k];
+                    v.n[3] = 1.0f;
+                    v.mask[0] = mp.vis, v.mask[1] = mp.all;
+                    p.kv.push_back(v);
+                    p.kX = true;
+                }
+                p.kX = p.kX || (kl.exit && p.kv.size() > first);
                 if (p.kv.size() == first) continue;
                 p.kRanges.emplace_back(first, static_cast<UINT>(p.kv.size()) - first);
                 KeptInfo ki;
@@ -983,7 +1002,7 @@ bool UploadSlot(IDirect3DDevice9* dev, Slot& s, const Job& j, Prepared& p) {
     if (s.dynNext) s.dynNext->Release(), s.dynNext = nullptr;
     if (s.preblur) s.preblur->Release(), s.preblur = nullptr;
     if (s.kvb) s.kvb->Release(), s.kvb = nullptr;
-    s.kRanges.clear(), s.kLamps.clear();
+    s.kRanges.clear(), s.kLamps.clear(), s.kX = false;
     s.masked.clear(), s.maskedPos.clear(), s.gated.clear(), s.under.clear(), s.uA.clear(), s.uU.clear(), s.uSnap.clear(), s.uIds.clear();
     s.underSig = 0, s.underExact = false, s.underDirty = false, s.uJob.reset();
     s.dynCurrent = false;
@@ -1015,7 +1034,7 @@ bool UploadSlot(IDirect3DDevice9* dev, Slot& s, const Job& j, Prepared& p) {
     };
     if (!RtLampGpu::Engine::MakeVb(dev, p.v.data(), static_cast<UINT>(p.v.size()), &s.vb)) return retryLater("its texel buffer could not be made");
     if (!p.kv.empty() && !RtLampGpu::Engine::MakeVb(dev, p.kv.data(), static_cast<UINT>(p.kv.size()), &s.kvb)) return retryLater("its kept lamps' parts could not be made");
-    s.kRanges = std::move(p.kRanges), s.kLamps = std::move(p.kLamps);
+    s.kRanges = std::move(p.kRanges), s.kLamps = std::move(p.kLamps), s.kX = p.kX;
     p.kv = {};
     s.map.w = static_cast<int>(d.Width), s.map.h = static_cast<int>(d.Height);
     s.map.vb = s.vb;
@@ -2331,7 +2350,8 @@ void Frame(IDirect3DDevice9* dev) {
         }
         // (GPU room lamps) room 0's kept lamps added to the sum before the compose
         if (!roomsOnly && ok && s.kvb && !s.kRanges.empty())
-            ok = g_eng->AddKeptParts(dev, s.kvb, s.kRanges, s.kLaws.data(), s.kOk.data(), s.thr, s.map.w, s.map.h, err);
+            ok = g_eng->AddKeptParts(dev, s.kvb, s.kRanges, s.kLaws.data(), s.kOk.data(), s.thr, s.map.w, s.map.h, err, s.kX);
+        p.keptX = !roomsOnly && s.kvb && !s.kRanges.empty() && s.kX;
         ok = ok && (roomsOnly ? g_eng->CopyTexture(dev, s.game, s.copy, s.map.w, s.map.h, err) : g_eng->Compose(dev, s.map, s.game, s.copy, p, err, s.scale));
         if (ok && !s.mgr) GpuRoomLamps::ComposeOver(dev, *g_eng, rns[s.story].mgr, s.cls, s.m, s.game, s.copy, s.map.w, s.map.h);
         s.scaled = ok && s.scale;

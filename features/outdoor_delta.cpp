@@ -133,7 +133,9 @@ struct BatchRec {
     char flags[2] = {};
     float c[3] = {}, r = 0.0f;
 };
-enum : uint8_t { kMasked = 1, kGated = 2, kDup = 4 }; // kDup: another sample of the solve writes the same texel
+// kDup: another sample of the solve writes the same texel; kExitGround (GPU room lamps, a room 0 keeping lamps): a story-0
+// ground texel whose alpha is the exit lamps' light (LevelLightShare SolveGroundTexel), not under a floor tile
+enum : uint8_t { kMasked = 1, kGated = 2, kDup = 4, kExitGround = 8 };
 struct TexelRec {
     Totals t;
     uint32_t packed = 0; // what the map holds (a wall at class 2: before the blur)
@@ -173,6 +175,16 @@ struct KeptLamp {
     uint64_t geo = 0;
     GpuLampLaw::Lamp law;
     std::vector<KeptPart, ApexMem::HighAllocator<KeptPart>> parts; // by texel, ascending
+    // (room 0's kept lamps) an exit lamp: its parts are also the ground texels' alpha (kExitGround); its floor mask parts: per
+    // masked texel the walls-tested and no-walls luminance over its law's luminance there with N.l ignored (RtLampModel::KeptWrapLum)
+    bool exit = false;
+    struct Mask {
+        uint32_t texel;
+        float vis, all;
+    };
+    std::vector<Mask> mask;
+    // (a kept room) its parts were carried from the room's earlier kept solve while it was switched off (CarryOff)
+    bool carried = false;
 };
 struct Record {
     uint32_t version = 0; // (Real-time outdoor lamps) changes whenever the kept parts or texels change
@@ -220,7 +232,7 @@ size_t BytesOf(const Record& r) {
     size_t b = sizeof(Record) + r.samples.capacity() + r.texels.capacity() * sizeof(TexelRec) + r.batches.capacity() * sizeof(BatchRec) +
                r.blocks.capacity() * sizeof(BlockRec) + r.preblur.capacity() * 4 + r.drawnSum.capacity() * sizeof(DrawnSum);
     for (const LampRec& l : r.lamps) b += sizeof(LampRec) + l.parts.capacity() * sizeof(Contrib);
-    for (const KeptLamp& l : r.kept0) b += sizeof(KeptLamp) + l.parts.capacity() * sizeof(KeptPart);
+    for (const KeptLamp& l : r.kept0) b += sizeof(KeptLamp) + l.parts.capacity() * sizeof(KeptPart) + l.mask.capacity() * sizeof(KeptLamp::Mask);
     return b;
 }
 // A record's buffers at their exact size (BytesOf counts capacity, and growth leaves up to half a buffer unused). A buffer
@@ -619,6 +631,7 @@ struct SampleState {
     int n = 0;
     bool overflow = false;
     bool masked = false, gated = false;
+    bool exitGround = false; // (GPU room lamps) ExitGround: its alpha is the exit lamps' light
     float visLum = 0.0f, allLum = 0.0f;
     float last[3] = {}; // (the room lamp probe) the last evaluation's colour, for its wall test
     uintptr_t lastLight = 0;
@@ -1512,6 +1525,22 @@ void ProbeStart(unsigned char* room, const RoomRead& rr) {
     r.mgr = rr.mgr, r.story = rr.story, r.lot = rr.lot, r.cls = rr.cls;
     r.thr = rr.thr, r.wallMode = rr.wallMode;
     CopyBytes(&c.normStart, room + 0x160, sizeof c.normStart);
+    // (GPU room lamps, CarryOff) the lot's geometry key and the room's 3D blocker records (room+0x40..+0x44, 64 bytes each) as
+    // the solve starts: the parts of a lamp kept by an earlier solve still hold while both are the same (UNVERIFIED that a moved
+    // object always changes its record)
+    if (c.keep) {
+        r.geo = LevelLightShare::LotGeometryKey(room);
+        uintptr_t rb[2] = {};
+        if (r.geo && CopyBytes(rb, room + 0x40, sizeof rb) && rb[0] && rb[1] >= rb[0] && (rb[1] - rb[0]) % 64 == 0 && rb[1] - rb[0] <= 512 * 64) {
+            std::vector<uint8_t> recs(rb[1] - rb[0]);
+            if (recs.empty() || CopyBytes(recs.data(), reinterpret_cast<const void*>(rb[0]), recs.size())) {
+                for (const uint8_t b : recs) r.geo = (r.geo ^ b) * 1099511628211ull;
+                r.geo |= 1;
+            } else
+                r.geo = 0;
+        } else if (!(rb[0] == 0 && rb[1] == 0))
+            r.geo = 0;
+    }
 }
 inline float Max3(const float* c) { return std::max({c[0], c[1], c[2]}); }
 // The probe's dump (one file a session in the Apex Radiance folder): each probed room's 3D blockers as the game's 3D test
@@ -1995,6 +2024,7 @@ struct KeptRoom {
     const char* tailWhy = nullptr;
     long killed = 0;
     float toneK = 0.0f, amb[3] = {}, ambPass[3] = {};
+    uint64_t geo = 0; // the lot's geometry key and the room's 3D blockers at its solve's start (CarryOff; 0: not read)
     size_t bytes = 0;
 };
 // (stage 2b) g_kept and g_keptBytes: the light tree thread changes them, the render thread reads them (gpu_room_lamps.cpp) and
@@ -2003,6 +2033,12 @@ std::mutex g_keptMx;
 std::unordered_map<uint64_t, std::shared_ptr<const KeptRoom>> g_kept;
 std::atomic<uint32_t> g_keptVersion{0};
 size_t g_keptBytes = 0;
+// (under g_keptMx) the kept solves the last finalize that dropped any dropped (RoomFinalized): the room's next kept solve on the
+// light tree thread carries their switched-off lamps (CarryOff), then they go
+std::vector<std::shared_ptr<const KeptRoom>> g_finalized;
+// The lamp edits taken (TakesLampEdit, light tree thread): a lamp switched off -> the kept solves (room, version) of the rooms
+// listing it then; its switch on is taken only while they are the same (CarryOff moves a room's entry to its next kept solve)
+std::unordered_map<uintptr_t, std::vector<std::pair<const void*, uint32_t>>> g_takenOff;
 bool g_keptFull = false; // (the log: once per crossing of the budget)
 std::atomic<int> g_keptLines{0};
 bool KeptLog() { return g_keptLines.fetch_add(1, std::memory_order_relaxed) < 2000; }
@@ -2015,6 +2051,7 @@ size_t KeptBytes(const KeptRoom& k) {
 void ClearKept() {
     std::lock_guard<std::mutex> lk(g_keptMx);
     g_kept.clear();
+    g_finalized.clear();
     g_keptBytes = 0;
     g_keptFull = false;
 }
@@ -2088,26 +2125,48 @@ long KeptPartsOf(KeptLamp& kl, const std::vector<const Capture::ProbeHook*>& hs,
     return static_cast<long>(kl.parts.size());
 }
 // Room 0's lamps Real-time outdoor lamps does not draw (indoor lamps its list takes through openings), kept as a kept room's
-// (GPU room lamps): each one whose light is all in the room's own sum (no exit lamp, whose part is also in a ground texel's
-// alpha; no part of the floor mask's two copies). Their parts leave Real-time outdoor lamps' base, and the GPU adds them back
-// (ExportRoom0); the others stay in the base (their edits take the solves)
+// (GPU room lamps): their parts leave Real-time outdoor lamps' base, and the GPU adds them back (ExportRoom0). An exit lamp's
+// parts are also the alpha of the ground texels (kExitGround: the luminance of the exit lamps' light); a part in the floor mask's
+// two copies is kept as its luminance over the lamp's law there with N.l ignored (KeptWrapLum). A lamp with a mask part where
+// that law is dark stays in the base (its edits take the solves)
 void BuildKept0(Capture& c, Record& r) {
     const size_t n = r.texels.size();
     std::unordered_map<uintptr_t, std::vector<const Capture::ProbeHook*>> hooks;
     for (const Capture::ProbeHook& h : c.probeHook)
         if (h.texel < n && c.keep0Lights.count(h.light)) hooks[h.light].push_back(&h);
     std::vector<float> gotSum(n, 0.0f);
-    long noB = 0;
+    long noB = 0, exits = 0, masks = 0, maskParts = 0;
+    std::string left;
     static const std::vector<const Capture::ProbeHook*> s_none;
     for (const LampRec& l : r.lamps) {
-        if (!c.keep0Lights.count(l.light) || l.drawn || l.exit || l.collapsed || l.mult <= 0) continue;
-        if (std::any_of(l.parts.begin(), l.parts.end(), [](const Contrib& p) { return p.vis != 0 || p.all != 0; })) continue;
+        if (!c.keep0Lights.count(l.light) || l.drawn || l.collapsed || l.mult <= 0) continue;
         KeptLamp kl;
         if (!LawOfLight(l.light, r.lot, kl)) continue;
+        bool dark = false;
+        for (const Contrib& p : l.parts) {
+            if ((p.vis == 0 && p.all == 0) || p.texel >= n) continue;
+            const float wl = RtLampModel::KeptWrapLum(kl.law, kl.colourOnly, reinterpret_cast<const float*>(r.samples.data() + static_cast<size_t>(p.texel) * 0x30));
+            if (!(wl > 1e-9f)) {
+                dark = true;
+                break;
+            }
+            kl.mask.push_back(KeptLamp::Mask{p.texel, FromHalf(p.vis) / wl, FromHalf(p.all) / wl});
+        }
+        if (dark) {
+            left += std::format("{}{:08X}", left.empty() ? "" : ", ", l.light);
+            continue;
+        }
+        kl.exit = l.exit;
+        exits += l.exit ? 1 : 0, masks += kl.mask.empty() ? 0 : 1, maskParts += static_cast<long>(kl.mask.size());
+        ShrinkExact(kl.mask);
         const auto it = hooks.find(l.light);
         KeptPartsOf(kl, it != hooks.end() ? it->second : s_none, &l, r.samples.data(), n, gotSum, noB);
         r.kept0.push_back(std::move(kl));
     }
+    if ((!r.kept0.empty() || !left.empty()) && KeptLog())
+        LOG_INFO(std::format("[GpuRoomLamps] Story {} room 0 class {}: {} lamps kept for the GPU ({} exit lamps, {} with floor mask parts: {} parts){}", r.story, r.cls,
+                             r.kept0.size(), exits, masks, maskParts,
+                             left.empty() ? std::string() : std::format("; left in the base (a floor mask part where its law is dark): {}", left)));
 }
 // The kept solve recomposed from what was kept, with the lamps' laws as they are now, against the solve's own sum (before the
 // tone): the share within 2/255 and the worst texels (the log)
@@ -2416,6 +2475,63 @@ void KeptFinalCheck(const KeptRoom& k, const std::vector<float>& sum, const LARG
                          n ? k.tail[0].norm : 0.0f, k.toneK, k.amb[0], k.amb[1], k.amb[2], k.ambPass[0], k.ambPass[1], k.ambPass[2], k.copies.size(), killed,
                          wallLost, noSplit, MsSince(t0)));
 }
+// A room kept again while lamps of it are switched off by a taken edit (its settle's solve, or any solve): its new kept solve
+// holds none of their parts, so each such lamp's parts are carried over from the room's earlier kept solve (the one its switch
+// off was taken with) when the texels are the same places with the same samples, the lot's geometry key and the room's 3D
+// blockers are the same, and the lamp has not moved (a tube: what its share reads is the same). Its switch on is then drawn
+// from them (TakesLampEdit). Light tree thread, before k is kept (k.version set)
+void CarryOff(KeptRoom& k, uint64_t key) {
+    std::shared_ptr<const KeptRoom> old;
+    {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        for (const auto& f : g_finalized)
+            if (KeyOf(reinterpret_cast<const void*>(f->room), f->cls) == key) old = f;
+        g_finalized.clear();
+        if (const auto it = g_kept.find(key); !old && it != g_kept.end()) old = it->second;
+    }
+    if (!old || g_takenOff.empty()) return;
+    const void* room = reinterpret_cast<const void*>(k.room);
+    std::vector<const KeptLamp*> off;
+    for (const KeptLamp& kl : old->lamps) {
+        const auto it = g_takenOff.find(kl.light);
+        if (it == g_takenOff.end() || std::find(it->second.begin(), it->second.end(), std::make_pair(room, old->version)) == it->second.end()) continue;
+        if (std::any_of(k.lamps.begin(), k.lamps.end(), [&](const KeptLamp& n) { return n.light == kl.light; }) ||
+            std::find(k.baked.begin(), k.baked.end(), kl.light) != k.baked.end())
+            continue; // (the new solve has it: its own parts stand)
+        off.push_back(&kl);
+    }
+    if (off.empty()) return;
+    const char* why = nullptr;
+    if (!k.geo || old->geo != k.geo) why = "the lot's geometry or the room's 3D blockers changed";
+    else if (old->texels.size() != k.texels.size() || old->samples.size() != k.samples.size() ||
+             std::memcmp(old->samples.data(), k.samples.data(), k.samples.size()) != 0 ||
+             !std::equal(old->texels.begin(), old->texels.end(), k.texels.begin(), [](const TexelRec& a, const TexelRec& b) { return a.x == b.x && a.y == b.y && a.map == b.map; }))
+        why = "its texels or samples changed";
+    std::string carried, dropped;
+    for (const KeptLamp* kl : off) {
+        const char* lampWhy = why;
+        if (!lampWhy) {
+            KeptLamp now;
+            if (!LawOfLight(kl->light, k.lot, now) || now.colourOnly != kl->colourOnly) lampWhy = "it has no law now";
+            else if (kl->colourOnly ? now.geo != kl->geo : std::fabs(now.pos[0] - kl->pos[0]) > 1e-4f || std::fabs(now.pos[1] - kl->pos[1]) > 1e-4f || std::fabs(now.pos[2] - kl->pos[2]) > 1e-4f)
+                lampWhy = "it moved or its shape changed";
+        }
+        auto& rooms = g_takenOff[kl->light];
+        if (lampWhy) {
+            dropped += std::format("{}{:08X} ({})", dropped.empty() ? "" : ", ", kl->light, lampWhy);
+            continue; // (its entry keeps the earlier version: its switch on takes the solves)
+        }
+        k.lamps.push_back(*kl);
+        k.lamps.back().carried = true;
+        std::replace(rooms.begin(), rooms.end(), std::make_pair(room, old->version), std::make_pair(room, k.version));
+        std::sort(rooms.begin(), rooms.end());
+        carried += std::format("{}{:08X}", carried.empty() ? "" : ", ", kl->light);
+    }
+    if (KeptLog())
+        LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: switched-off lamps' parts{}{}", k.story, k.id, k.cls,
+                             carried.empty() ? std::string() : std::format(" carried from its last kept solve: {}", carried),
+                             dropped.empty() ? std::string() : std::format("{} not carried: {}", carried.empty() ? "" : ";", dropped)));
+}
 void KeepEnd(const BYTE* room) {
     Capture& c = g_cap;
     Record& r = *c.rec;
@@ -2498,9 +2614,11 @@ void KeepEnd(const BYTE* room) {
         if (KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: not kept (no memory)", rr.story, rr.id, rr.cls));
         return;
     }
-    k->bytes = KeptBytes(*k);
-    k->version = g_keptVersion.fetch_add(1, std::memory_order_relaxed) + 1;
+    k->geo = r.geo;
     const uint64_t key = KeyOf(room, rr.cls);
+    k->version = g_keptVersion.fetch_add(1, std::memory_order_relaxed) + 1;
+    HookGuard::Run("OutdoorDelta carry switched-off lamps", [&] { CarryOff(*k, key); });
+    k->bytes = KeptBytes(*k);
     const auto mb = [](size_t b) { return static_cast<double>(b) / (1024.0 * 1024.0); };
     std::shared_ptr<const KeptRoom> kept;
     size_t rooms = 0, total = 0;
@@ -3015,8 +3133,13 @@ bool Sample(const unsigned char* room) {
     s.n = 0;
     s.overflow = false;
     s.masked = s.gated = false;
+    s.exitGround = false;
     s.visLum = s.allLum = 0.0f;
     return true;
+}
+bool KeepsGround() { return g_cap.active && g_cap.ok && g_cap.keep0; }
+void ExitGround(bool on) {
+    if (g_s.on) g_s.exitGround = on;
 }
 namespace {
 Acc* AccFor(uintptr_t light) {
@@ -3189,7 +3312,7 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
     std::memcpy(&t.y, raw + 0x22, 2);
     if (t.x >= g.w || t.y >= g.h) return Fail("a texel outside its map");
     t.map = static_cast<uint8_t>(m);
-    t.bits = static_cast<uint8_t>((s.masked ? kMasked : 0) | (s.gated ? kGated : 0));
+    t.bits = static_cast<uint8_t>((s.masked ? kMasked : 0) | (s.gated ? kGated : 0) | (s.exitGround && !s.masked ? kExitGround : 0));
     for (int i = 0; i < 3; i++) t.t.S[i] = out[i];
     t.t.vis = s.masked ? s.visLum : 0.0f;
     t.t.all = s.masked ? s.allLum : 0.0f;
@@ -3250,13 +3373,16 @@ void BeforeFinalize(unsigned char* room) {
 }
 void RoomFinalized(const void* room) {
     std::lock_guard<std::mutex> lk(g_keptMx);
+    bool first = true;
     for (auto it = g_kept.begin(); it != g_kept.end();)
-        if (it->second->room == reinterpret_cast<uintptr_t>(room)) g_keptBytes -= std::min(g_keptBytes, it->second->bytes), it = g_kept.erase(it);
-        else ++it;
+        if (it->second->room == reinterpret_cast<uintptr_t>(room)) {
+            g_keptBytes -= std::min(g_keptBytes, it->second->bytes);
+            if (first) g_finalized.clear(), first = false;
+            g_finalized.push_back(std::move(it->second)); // (the next kept solve of the room may carry its switched-off lamps: CarryOff)
+            it = g_kept.erase(it);
+        } else
+            ++it;
 }
-// The lamp edits taken (TakesLampEdit, light tree thread): a lamp switched off -> the kept solves (room, version) of the rooms
-// listing it then; its switch on is taken only while they are the same
-std::unordered_map<uintptr_t, std::vector<std::pair<const void*, uint32_t>>> g_takenOff;
 // The settles due (SettleDue, light tree thread): per lamp whose edit was taken, its lot, its rooms (story, id) and the tick of
 // its last edit taken (one per lamp: a drag's or a slider's edits coalesce)
 constexpr DWORD kSettleMs = 2000;
@@ -3287,6 +3413,7 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on) {
     uint64_t geoNow = 0;
     bool haveGeo = false, geoRead = false;
     std::vector<int> stories;
+    int carriedRooms = 0; // (a switch on) rooms whose kept solve holds the lamp's parts carried from an earlier one (CarryOff)
     uintptr_t raw[1024];
     const auto refuse = [&](const RoomRead& rr, const char* why) {
         if (KeptLog())
@@ -3300,7 +3427,7 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on) {
         if (!ReadRoom(static_cast<const BYTE*>(room), rr)) return false;
         if (!geoRead) haveGeo = RtOutdoorLamps::ColourLaw(light, rr.lot, colourNow, geoNow), geoRead = true;
         if (rr.id == 0) {
-            if (!RtOutdoorLamps::CoversLamp(room, light)) return refuse(rr, "a room 0 Real-time outdoor lamps does not draw it in (an exit lamp, or a part in its floor mask)");
+            if (!RtOutdoorLamps::CoversLamp(room, light)) return refuse(rr, "a room 0 Real-time outdoor lamps does not draw it in (no law, or a floor mask part where its law is dark)");
             // (a tube kept there with another share than now: drawn as its solve gave it, so its edit is not shown)
             std::lock_guard<std::recursive_mutex> lk(g_mx);
             if (const auto it = g_records.find(KeyOf(room, rr.cls)); it != g_records.end())
@@ -3316,8 +3443,10 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on) {
         if (!k) return refuse(rr, "no kept solve of its class");
         if (!k->editable) return refuse(rr, k->tailWhy ? k->tailWhy : "a wall texel the GPU does not blur");
         if (std::find(k->baked.begin(), k->baked.end(), light) != k->baked.end()) return refuse(rr, "its kept solve has the lamp in its base");
-        for (const KeptLamp& kl : k->lamps)
+        for (const KeptLamp& kl : k->lamps) {
             if (kl.light == light && kl.colourOnly && on && (!haveGeo || kl.geo != geoNow)) return refuse(rr, "a light without a GPU law whose intensity or shape changed");
+            carriedRooms += kl.light == light && kl.carried ? 1 : 0;
+        }
         if (!GpuRoomLamps::Drawn(room, k->version, k->maps)) return refuse(rr, "a map of it not drawn on the GPU");
         kept.emplace_back(room, k->version);
         ids.emplace_back(rr.story, rr.id);
@@ -3333,6 +3462,8 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on) {
             if (KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] switch on: lamp {:08X} left to the room solves (its rooms changed since it was switched off)", light));
             return false;
         }
+        if (carriedRooms && KeptLog())
+            LOG_INFO(std::format("[GpuRoomLamps] switch on: lamp {:08X} drawn from its parts carried into {} of its {} rooms' later kept solves", light, carriedRooms, kept.size()));
     } else if (wasOn && !on) {
         if (g_takenOff.size() > 1024) g_takenOff.clear();
         g_takenOff[light] = kept;
@@ -3786,11 +3917,21 @@ bool ExportRoom0(const void* room, int cls, Room0Export& out) {
             e.packed = t.packed;
             e.x = t.x, e.y = t.y, e.map = t.map;
             e.bits = static_cast<uint8_t>(((t.bits & kMasked) ? 1 : 0) | ((t.bits & kGated) ? 2 : 0));
+            e.exitBase = 0.0f;
         }
+        // (GPU room lamps) a kept exit lamp: the exit ground texels' alpha is drawn from the exit lamps' light (bit 4), those left
+        // in the base giving exitBase
+        const bool exits = std::any_of(r.kept0.begin(), r.kept0.end(), [](const KeptLamp& k) { return k.exit; });
+        if (exits)
+            for (size_t i = 0; i < r.texels.size(); i++)
+                if (r.texels[i].bits & kExitGround) out.texels[i].bits |= 4;
         for (const LampRec& l : r.lamps) {
             out.lamps++;
             out.kept.push_back(l.light);
             const bool k0 = std::any_of(r.kept0.begin(), r.kept0.end(), [&](const KeptLamp& k) { return k.light == l.light; });
+            if (exits && l.exit && !k0)
+                for (const Contrib& p : l.parts)
+                    if (p.texel < out.texels.size()) out.texels[p.texel].exitBase += Lum3(p.rgb);
             if (!l.drawn && !k0) continue;
             if (l.drawn) out.drawn.push_back(l.light);
             for (const Contrib& p : l.parts) {
@@ -3808,6 +3949,8 @@ bool ExportRoom0(const void* room, int cls, Room0Export& out) {
             e.parts.reserve(k.parts.size());
             for (const KeptPart& p : k.parts)
                 e.parts.push_back(Room0Export::KeptPart0{p.texel, FromHalf(p.a), FromHalf(p.b), FromHalf(p.thrScale), p.mult, static_cast<uint8_t>(p.bits & (kKeptEarly | kKeptFade))});
+            e.exit = k.exit;
+            for (const KeptLamp::Mask& q : k.mask) e.mask.push_back(Room0Export::KeptLamp0::Mask0{q.texel, q.vis, q.all});
             out.kept0.push_back(std::move(e));
         }
         for (const BlockRec& b : r.blocks) out.blocks.push_back(Room0Export::Block{b.x0, b.y0, b.x1, b.y1, b.ok, b.off});

@@ -55,7 +55,8 @@ DeviceCalls PlainCalls() {
 const char* EntryOf(ShaderId id) {
     static const char* const kNames[kShaderCount] = {"ShadowVS", "TexelVS",   "ShadowPS",  "AccPS",        "ComposePS",    "CopyPS",
                                                      "BlurRowPS", "BlurColPS", "BlockPS",   "AccFastPS",    "AccRlgPS",     "AccRlgFastPS",
-                                                     "ComposeRlgPS", "AccKeptPS", "ComposeKeptPS", "CopyAtPS", "BlockKeptPS"};
+                                                     "ComposeRlgPS", "AccKeptPS", "ComposeKeptPS", "CopyAtPS", "BlockKeptPS",
+                                                     "AccKept0PS", "AccKept0XPS", "ComposeK0PS"};
     return id >= 0 && id < kShaderCount ? kNames[id] : "";
 }
 bool IsVertex(ShaderId id) { return id == kShadowVs || id == kTexelVs; }
@@ -606,8 +607,13 @@ bool Engine::ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTextu
         const float flags[4] = {p.maskAllGpu ? 1.0f : 0.0f, 0, 0, 0};
         c_.SetPsConst(dev, 101, flags, 1);
     }
-    c_.SetPixelShader(dev, ps_[psId]);
+    const bool keptX = psId == kComposePs && p.keptX;
+    c_.SetPixelShader(dev, ps_[keptX ? kComposeK0Ps : psId]);
     c_.SetTexture(dev, 1, acc_[accCur_]);
+    if (keptX) {
+        c_.SetTexture(dev, 3, acc_[1 - accCur_]);
+        PointSampler(dev, 3);
+    }
     if (psId == kComposeRlgPs) {
         const float t[4] = {1.0f / static_cast<float>(kTableCols), 1.0f / static_cast<float>(tableRows_), 0, 0};
         c_.SetPsConst(dev, 102, t, 1);
@@ -635,6 +641,7 @@ bool Engine::ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTextu
     dev->SetStreamSource(1, nullptr, 0, 0);
     c_.SetTexture(dev, 1, nullptr);
     c_.SetTexture(dev, 2, nullptr);
+    if (keptX) c_.SetTexture(dev, 3, nullptr);
     c_.SetVertexShader(dev, nullptr);
     stats_.composeDraws++;
     if (FAILED(hr)) {
@@ -1013,13 +1020,13 @@ bool FloatBlend(IDirect3DDevice9* dev) {
 // Each range's parts (one lamp) added at their places of the bound target (w x h): mult x fade(law x A) x B, the law the
 // GPU's or (lawOk 2) the lamp's colour alone
 bool Engine::DrawKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, const std::vector<std::pair<UINT, UINT>>& ranges, const GpuLampLaw::Lamp* laws,
-                           const char* lawOk, float thr, int w, int h) {
+                           const char* lawOk, float thr, int w, int h, ShaderId ps) {
     dev->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
     dev->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, FALSE);
     dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
     dev->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
     dev->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
-    c_.SetPixelShader(dev, ps_[kAccKeptPs]);
+    c_.SetPixelShader(dev, ps_[ps]);
     dev->SetVertexDeclaration(texelDecl_);
     dev->SetStreamSource(0, vb, 0, sizeof(TexelVertex));
     dev->SetStreamSource(1, zeros_, 0, sizeof(TexelDyn));
@@ -1043,7 +1050,7 @@ bool Engine::DrawKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, co
     return ok;
 }
 bool Engine::AddKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, const std::vector<std::pair<UINT, UINT>>& ranges, const GpuLampLaw::Lamp* laws,
-                          const char* lawOk, float thr, int w, int h, std::string& err) {
+                          const char* lawOk, float thr, int w, int h, std::string& err, bool extra) {
     if (!ready_ || !vb || !acc_[accCur_] || w > scratchW_ || h > scratchH_) return err = "no sum to add the kept parts to", false;
     if (blendOk_ < 0) blendOk_ = FloatBlend(dev) ? 1 : 0;
     if (!blendOk_) return err = "the device cannot add into an A32B32G32R32F target", false;
@@ -1053,7 +1060,12 @@ bool Engine::AddKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, con
     if (!Target(dev, acc_[accCur_], w, h)) return err = "the sum could not be targeted", false;
     c_.SetDepthStencil(dev, nullptr);
     PassStates(dev);
-    if (!DrawKeptParts(dev, vb, ranges, laws, lawOk, thr, w, h)) return err = "the kept parts' draw failed", false;
+    if (!DrawKeptParts(dev, vb, ranges, laws, lawOk, thr, w, h, extra ? kAccKept0Ps : kAccKeptPs)) return err = "the kept parts' draw failed", false;
+    if (!extra) return true;
+    // the floor mask's "all" and the exit light into the other sum (free after the last Accumulate; Compose with keptX reads it)
+    if (!Target(dev, acc_[1 - accCur_], w, h)) return err = "the second sum could not be targeted", false;
+    dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 1.0f, 0);
+    if (!DrawKeptParts(dev, vb, ranges, laws, lawOk, thr, w, h, kAccKept0XPs)) return err = "the kept parts' second draw failed", false;
     return true;
 }
 // 1. the sum: base-less, every lamp's parts added at their texels' places in the sum's layout; 2. the texels composed into the
