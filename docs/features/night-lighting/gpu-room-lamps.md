@@ -5,7 +5,7 @@ room 0 is kept, split into the light the GPU will not draw and, per texel and lo
 Apex's tests and the game's tests let through, with the room's tail (tone, ambient, dither, pack, wall blur, tile-edge
 copies). The kept rooms are drawn on the GPU over Real-time outdoor lamps' copy of each story map with the lot lamps as they
 are now, so a lamp's colour, intensity or switch shows in the frame of the edit, and such an edit solves no room until a settle 2 s
-after it when every room listing the lamp is drawn so. A lamp moved within its room is relit the same way once a worker thread has redone its parts there from a copy of the game's tests (only for lamps whose light reaches those rooms by the plain path). With [the room lamp
+after it when every room listing the lamp is drawn so. The four directional maps objects and Sims read follow such an edit at the end of the same room update: the edited lamp's part of each directional sample is computed again with the game's own step and the room's samples are packed again into the game's maps. A lamp moved within its room is relit the same way once a worker thread has redone its parts there from a copy of the game's tests (only for lamps whose light reaches those rooms by the plain path). With [the room lamp
 probe](gpu-room-lamps-probe.md) on too, each kept solve is recomposed on the CPU and on the GPU and compared with the game's.
 
 ## Status
@@ -16,7 +16,7 @@ probe](gpu-room-lamps-probe.md) on too, each kept solve is recomposed on the CPU
 | Default | Off |
 | Menu | Developer > Compare lighting paths > Keep indoor lamps for GPU (with Lamp lighting: Instant) |
 | Configuration | `gpuRoomLampsCapture` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
-| Source | [`features/outdoor_delta.cpp`](../../../features/outdoor_delta.cpp) (`KeepEnd`, `KeptSelfCheck`, `KeepFinals`, `KeptFinalCheck`, `BuildKeptMap`, `RoomFinalized`), [`features/rt_lamp_model.h`](../../../features/rt_lamp_model.h) (`KeptAdd`, `KeptTexel`), [`features/gpu_room_lamps.cpp`](../../../features/gpu_room_lamps.cpp), [`features/rt_lamp_gpu.cpp`](../../../features/rt_lamp_gpu.cpp) (`RelightKept`), [`shaders/rt_lamps_hlsl.h`](../../../shaders/rt_lamps_hlsl.h) (`AccKeptPS`, `ComposeKeptPS`, `CopyAtPS`, `BlockKeptPS`), [`features/room_map_dither.cpp`](../../../features/room_map_dither.cpp) (the pack input), [`features/level_light_share.cpp`](../../../features/level_light_share.cpp) (`LightEvalHook`, `FinalizeHook`, `LotRooms`), [`features/lamp_mark_filter.cpp`](../../../features/lamp_mark_filter.cpp) (`MarkDecideImpl`), [`features/room_lamp_move.h`](../../../features/room_lamp_move.h) and [`features/room_light_tests.h`](../../../features/room_light_tests.h) (lamp moves) |
+| Source | [`features/outdoor_delta.cpp`](../../../features/outdoor_delta.cpp) (`KeepEnd`, `KeptSelfCheck`, `KeepFinals`, `KeptFinalCheck`, `BuildKeptMap`, `RoomFinalized`), [`features/rt_lamp_model.h`](../../../features/rt_lamp_model.h) (`KeptAdd`, `KeptTexel`), [`features/gpu_room_lamps.cpp`](../../../features/gpu_room_lamps.cpp), [`features/rt_lamp_gpu.cpp`](../../../features/rt_lamp_gpu.cpp) (`RelightKept`), [`shaders/rt_lamps_hlsl.h`](../../../shaders/rt_lamps_hlsl.h) (`AccKeptPS`, `ComposeKeptPS`, `CopyAtPS`, `BlockKeptPS`), [`features/room_map_dither.cpp`](../../../features/room_map_dither.cpp) (the pack input), [`features/level_light_share.cpp`](../../../features/level_light_share.cpp) (`LightEvalHook`, `FinalizeHook`, `LotRooms`), [`features/lamp_mark_filter.cpp`](../../../features/lamp_mark_filter.cpp) (`MarkDecideImpl`), [`features/room_lamp_move.h`](../../../features/room_lamp_move.h) and [`features/room_light_tests.h`](../../../features/room_light_tests.h) (lamp moves), [`features/outdoor_delta_model.h`](../../../features/outdoor_delta_model.h) (`BasisPass`, `BasisPartNow`, `BasisPackInput`: directional maps) |
 
 ## The problem
 
@@ -122,12 +122,23 @@ lamp's position, not on its colour or intensity.
    room's 3D blocker records are the same as at that solve's start, and the lamp has not moved (a tube: what its share reads
    is the same). The switch on is then taken and drawn from them in the frame; anything else drops them, and the switch on
    takes the solves.
+15. Directional maps (stage 4): the four maps objects and Sims read (`FUN_006a09f0`, one sample a tile) are written only by
+   the room solves. A kept solve also keeps, per directional sample, its texel and position and each light's part of its
+   accumulator (the accumulator before and after the light in `BasisLightHook`), with its share of the game's step
+   `FUN_0069f280` called again there (the part over the step: 1 where Apex's tests leave the step as it is); lights kept in
+   the room's base are summed. At the solve's end the parts are packed again and compared with the texels the game wrote:
+   only a room where every texel is within 1/255 takes edits. An edit taken (switch, colour, intensity, a move) queues the
+   lamp; at the end of the room update, while no solve holds the working maps, each of its rooms gets the lamp's part again
+   (switched off: 0; otherwise its share times the game's step called now, which reads the rig colour and place the lamp has
+   now; a move's share is 1, the plain path's) and its samples are packed and written into the game's own textures of
+   the set [room+8] (only texels that still hold what the capture or Apex's last write left). A switched-off lamp's part is
+   carried into the room's next kept solve with its other parts (`CarryOff`), so its switch on is written too.
 
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| Keep indoor lamps for GPU | `gpuRoomLampsCapture` | bool | off | | Developer only, with Lamp lighting: Instant. Keeps each room solve of the active lot and draws its lamps on the GPU; colour, intensity and switch edits of lamps drawn in every room listing them solve no room at once (their rooms are solved 2 s after the last edit); with the probe on, logs the self-checks |
+| Keep indoor lamps for GPU | `gpuRoomLampsCapture` | bool | off | | Developer only, with Lamp lighting: Instant. Keeps each room solve of the active lot and draws its lamps on the GPU; colour, intensity and switch edits of lamps drawn in every room listing them solve no room at once (the directional maps objects read are written again at the end of the room update) (their rooms are solved 2 s after the last edit); with the probe on, logs the self-checks |
 
 ## Limitations
 
@@ -178,6 +189,16 @@ lamp's position, not on its colour or intensity.
   solve's at the edit; the settle's solve takes them in either way). The lamp's occluder marks are dropped as Real-time
   outdoor lamps drops them for a move. A switch on after a moved copy was kept takes the solves (its rooms' versions
   changed). A copy is a whole kept room (about 0.5 MB) made per job landed; the 192 MB budget is not checked for it.
+- Directional maps (stage 4): written into the game's own textures of the set, on the light tree thread, as the game's
+  unlock writes them; between two of the four maps' writes a frame may draw with some maps written and others not (as
+  with the game's own copy). A solve that locks the working maps on another thread between the check and the write would copy
+  the set it read back over the write (UNVERIFIED that solves run on another thread while the light tree thread updates).
+  Rooms whose capture did not pack back exactly, a room whose solve was not kept, a part that is not the game's step times
+  a share (stair-height samples of a lamp of the story above) where the step is lit, a lamp the capture never saw in the
+  room (unless carried) and moves with basis_wall_filter on keep the game's directional texels until the settle's solve
+  (logged). That the step's rig colour (vfunc+0x10) already holds the edit at the end of the room update, and is 0 while
+  the lamp is off, is UNVERIFIED (switch off is written as 0 without it). Waits at most 1 s for the working maps, then
+  leaves the maps to the settle. Not checked in game yet.
 - The sum is added with post-pixel-shader blending into an A32B32G32R32F target; a device without it draws nothing (logged).
 - Each part is a 80-byte point in a DEFAULT vertex buffer (estimated, not measured: 0.5 to 6 MB of video memory a room).
 
@@ -288,6 +309,29 @@ lamp's position, not on its colour or intensity.
   under the room's story floor, a roofless room, through openings or from another story, a light without a GPU law, the
   geometry or 3D blockers changed, a 3D blocker of a kind the copy does not know, ...). The game's tests' constants are read
   once from the game (`RoomLightTests::kConstAt`).
+- **Directional maps** (stage 4, verified with dumpbin on Steam 1.67.2): state 7 of the solve calls `FUN_006a3b80` on
+  room+0x540, which calls `FUN_006a09f0` (this = room, the pass); it lays the samples into the vector `[0x01158AC8,
+  0x01158ACC)` (0x30 each, texel x / y at +0x20 / +0x22), and per sample zeroes 16 floats, calls `FUN_0069f280`
+  stdcall(sample + (0, 0.5, 0, 0), light, acc) for each light of room+0xC8..+0xCC (the call at 0x006A0C56, LevelLightShare's
+  `BasisLightHook`), then per map i packs min(max(acc_i, 0), 1) with alpha [0x0107A538] through 0x0060CD10 into the lock
+  record at the pass + 0x44 + i x 0x28 = room+0x584. `FUN_0069f280`: the light's place (vfunc+0x24), its rig colour at the
+  point (vfunc+0x10, not the wrapped evaluation +0x4C), the unit direction d (rsqrt with two Newton steps), w_i = clamp(b_i .
+  d, 0, 1) for the four constant directions, acc_i += w_i x colour / sum w. The lock step 0x0069FA40 copies the set [room+8]
+  into the working set 0x01158AF0; the finalize's unlock 0x0069E950 (0x006A0E3D) copies it back when room+0x629 is set
+  (0x006A8FD0: per map 0x00619A00, LockRect / UnlockRect of [wrapper+0x30]). Apex: `LevelLightShare::BasisSamplesVec` reads the
+  vector from `mov eax,[0x01158AC8]` at the hooked call - 0x86; `BasisLightHook` (with the capture on, on the light tree
+  thread, for a kept capture) runs Apex's body, calls the step again with a zero accumulator and hands both to
+  `OutdoorDelta::NoteBasis`; `KeepBasisFinal` (BeforeFinalize) reads the four lock records and each sample's texels;
+  `BuildBasis` (KeepEnd) sums the baked lights into the base, keeps each other light's part and share (`BasisPass`,
+  `outdoor_delta_model.h`) and packs back (`PackBasis`: `BasisPackInput` and the game's pack). Edits: `TakesLampEdit` queues
+  (`QueueBasis`), `AfterRoomUpdate` runs `BasisDue` (waits for `LevelLightShare::RoomMapsFree`), `LampBasisNow` (the step
+  through `LevelLightShare::BasisStep`, `BasisPartNow`), `WriteBasis` (`WriteBasisMapTry`: [set + 4m], [wrapper+0x2C] 0, an
+  A8R8G8B8 texture of the captured size, each texel that holds the expected value). Logs: `Story S room R class C: D
+  directional samples, L lamps (P parts, Q of them the game's step called again times a share) packed again from their
+  parts: K of M texels within 1/255 (largest X/255)[; its directional maps take no edit]`; per edit taken `<kind>: lamp L
+  directional maps written in N of R rooms T ms after the edit (W texels[, S left as another solve wrote them])[; not
+  written: story S room R: why, ... (they follow its rooms' solves)]`; `... directional maps not written (another room's maps
+  stayed locked for 1 s; ...)`.
 - **Test**: `tools/outdoor_delta_test` checks `KeptAdd` (the soft light cut and its scaled threshold, the early-out, the
   game's drop, half-float A and B) and `KeptTexel` (20000 roofed texels against the game's tail at their own sum and after
   an edit, weight-0 texels, the alpha floor, a roofless texel's hue and alpha). `tools/rt_lamps_test` draws a synthetic kept
@@ -304,7 +348,12 @@ lamp's position, not on its colour or intensity.
   disc blocker, drawn on the GPU against the CPU: 0/255. Offline, `tools/apex_paths_replay` runs `PartAt` with the game's
   evaluation as the law and `KeptAdd` at every recorded texel of the plain path (`RoomLampProbe-20261101-165037`): own lamps
   72,534 lines, 55,139 lit, 100.00% within 2/255 of the measured part; the 28,044 lines of other rooms' lamps are all out of
-  its scope (floor cut, openings, between stories). `tools/room_lamp_3d_replay` runs the same `room_light_tests.h`.
+  its scope (floor cut, openings, between stories). `tools/room_lamp_3d_replay` runs the same `room_light_tests.h`. The directional maps (`BasisChecks` in
+  `tools/outdoor_delta_test`): 300 samples of a model of the game's fill with six lights (one scaled by Apex's share, one
+  blocked, one listed twice, one in the base): the parts pack back to the game's texels and each share is found (1200 of 1200
+  texels, 1500 of 1500 shares); a switch off, a scaled lamp recoloured and dimmed, a lamp listed twice made brighter and a plain
+  lamp moved, each part computed again and packed, against the model's fill with the edit: 1200 of 1200 texels exact each;
+  a part that is not a multiple of the step has no share, an unknown share is refused only where the step is lit.
 - **In game** (2026-11-02, stage 2a): final self-check 61 room solves, 207,425 texels, 100.00% within 2/255, alpha within
   1/255, at most 2.6 ms; 23 solves not checked (no free tag range, fixed since). Stage 2b (09:50-09:52): GPU self-check 148
   maps, 273,754 texels, 100.00% within 2/255 (alpha within 1/255), all of them wall atlases: floors and ceilings were refused

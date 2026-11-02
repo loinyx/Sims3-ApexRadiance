@@ -415,6 +415,11 @@ void NoteGpuEdit();
 // class's working maps locked (0x011D0508); the room's lock step 0x0069FA40; the class-2 edge copies, the unlock
 // 0x0069E950(1) with the copy back and the room's lighting message 0x006A08E0
 bool RoomMapsFree();
+// (GPU room lamps stage 4) the directional maps' samples vector FUN_006a09f0 reads ([0x01158AC8, 0x01158ACC) on Steam 1.67.2,
+// read from its `mov eax, [vec]` at the hooked call - 0x86), 0 when the directional hook is not installed; and the game's step
+// FUN_0069f280 (pos, light, acc16) called alone on the light tree thread (false elsewhere, or when not installed)
+uintptr_t BasisSamplesVec();
+bool BasisStep(const float* pos, uintptr_t light, float* acc16);
 bool LockRoomMaps(void* room);
 bool FinishRoomMaps(void* room);
 // The lot's occluders from its story grids (every wall with its openings, the roofed quadrants, each story's placed floors),

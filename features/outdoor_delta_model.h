@@ -209,4 +209,45 @@ inline ProbeClass ProbeClassify(const float g[3], const float m[3]) {
     return ProbeClass::Strength;
 }
 
+// ---- GPU room lamps stage 4: the directional maps (FUN_006a09f0; docs/features/night-lighting/gpu-room-lamps.md) ----
+// A sample's accumulator is 16 floats, map i's r, g, b, w at 4i: zero, then FUN_0069f280 (the game's step) adds each light of
+// the room's list. A light's part (the accumulator after it less before) is kept with its share of the step called again
+// there: part = pass x step. False when the step is dark there or the part is not such a multiple (Apex's tests did more
+// than scale it); pass is then NaN.
+inline bool BasisPass(const float part[16], const float step[16], float& pass) {
+    pass = std::nanf("");
+    float ss = 0.0f, ps = 0.0f, top = 0.0f;
+    for (int i = 0; i < 16; i++) {
+        if ((i & 3) == 3) continue; // (w is not packed)
+        ss += step[i] * step[i], ps += part[i] * step[i], top = std::max({top, std::fabs(step[i]), std::fabs(part[i])});
+    }
+    if (!(ss > 1e-24f) || !std::isfinite(ss) || !std::isfinite(ps)) return false;
+    const float p = ps / ss;
+    for (int i = 0; i < 16; i++)
+        if ((i & 3) != 3 && !(std::fabs(part[i] - p * step[i]) <= 2e-6f + 1e-4f * top)) return false; // (the game's acc += rounds)
+    pass = p;
+    return true;
+}
+// A lamp's part again from the step now: pass x step (mult: how often the list holds it). False when the step is lit and
+// the pass is not known
+inline bool BasisPartNow(float pass, int mult, const float step[16], float out[16]) {
+    bool lit = false;
+    for (int i = 0; i < 16; i++) lit = lit || ((i & 3) != 3 && step[i] != 0.0f);
+    if (!lit) {
+        std::fill(out, out + 16, 0.0f);
+        return true;
+    }
+    if (!std::isfinite(pass)) return false;
+    for (int i = 0; i < 16; i++) out[i] = pass * static_cast<float>(mult) * step[i];
+    return true;
+}
+// Map m's pack input of an accumulator: r, g, b in [0, 1], alpha 1 (0x006A0C93..0x006A0CB6), then the game's pack 0x0060CD10
+inline void BasisPackInput(const float acc[16], int m, float out[4]) {
+    for (int i = 0; i < 3; i++) {
+        const float v = acc[4 * m + i];
+        out[i] = std::isfinite(v) ? std::clamp(v, 0.0f, 1.0f) : 0.0f;
+    }
+    out[3] = 1.0f;
+}
+
 } // namespace OutdoorDeltaModel

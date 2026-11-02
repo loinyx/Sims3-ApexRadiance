@@ -4,6 +4,7 @@
 // the parts keep, the floor mask's alpha, the pack, the shared wall blur against the code it replaced, and the reach bound
 // against the lamp law. Read-only: prints to stdout, writes no file.
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -360,6 +361,146 @@ void Compare(const Maps& a, const Maps& b, Diff& d) {
     }
 }
 
+// ---- GPU room lamps stage 4: the directional maps packed again from their parts (OutdoorDelta BuildBasis, LampBasisNow,
+// WriteBasis) against a model of the game's fill: FUN_0069f280 adds w_i x colour / sum w for the four basis directions
+// (+-0.8944, 0.4472, 0), (0, 0.4472, +-0.8944), w_i = clamp(b_i . d, 0, 1), d the unit direction to the light ----
+struct BasisLight {
+    float pos[3], colour[3];
+    float share = 1.0f; // Apex's tests: 1 the game's step in place, else contribution x share
+    int mult = 1;
+    bool baked = false; // a light the GPU does not draw (kept in the base)
+};
+void GameStep(const float* p, const BasisLight& L, float acc[16]) {
+    static const float b[4][3] = {{0.8944f, 0.4472f, 0.0f}, {-0.8944f, 0.4472f, 0.0f}, {0.0f, 0.4472f, 0.8944f}, {0.0f, 0.4472f, -0.8944f}};
+    float d[3] = {L.pos[0] - p[0], L.pos[1] - p[1], L.pos[2] - p[2]};
+    const float d2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2], inv = 1.0f / std::sqrt(d2);
+    for (float& v : d) v *= inv;
+    const float fall = 1.0f / (1.0f + d2); // (the rig colour at p: any law of the place will do here)
+    float w[4], sum = 0.0f;
+    for (int i = 0; i < 4; i++) sum += w[i] = std::clamp(b[i][0] * d[0] + b[i][1] * d[1] + b[i][2] * d[2], 0.0f, 1.0f);
+    if (!(sum > 1e-6f)) return;
+    for (int i = 0; i < 4; i++)
+        for (int c = 0; c < 4; c++) acc[4 * i + c] += w[i] * (c < 3 ? L.colour[c] * fall : 1.0f) / sum;
+}
+// The game's sample: every listing of every light in turn (Apex's share as LevelLightShare's BasisLightHook applies it)
+void GameSample(const float* p, const std::vector<BasisLight>& ls, float acc[16], std::vector<std::array<float, 16>>* parts, std::vector<std::array<float, 16>>* steps) {
+    std::fill(acc, acc + 16, 0.0f);
+    for (size_t j = 0; j < ls.size(); j++) {
+        std::array<float, 16> before{}, step{};
+        std::copy(acc, acc + 16, before.begin());
+        for (int k = 0; k < ls[j].mult; k++) {
+            if (ls[j].share == 1.0f) GameStep(p, ls[j], acc);
+            else {
+                float c[16] = {};
+                GameStep(p, ls[j], c);
+                for (int i = 0; i < 16; i++) acc[i] += c[i] * ls[j].share;
+            }
+            GameStep(p, ls[j], step.data());
+        }
+        if (parts) {
+            std::array<float, 16> d{};
+            for (int i = 0; i < 16; i++) d[i] = acc[i] - before[i];
+            parts->push_back(d), steps->push_back(step);
+        }
+    }
+}
+void BasisChecks() {
+    std::mt19937 rng(20261102);
+    std::uniform_real_distribution<float> U(0.0f, 1.0f);
+    std::vector<BasisLight> ls(6);
+    for (BasisLight& L : ls) L = BasisLight{{U(rng) * 8.0f, 1.5f + U(rng), U(rng) * 8.0f}, {0.2f + U(rng), 0.2f + U(rng), 0.2f + U(rng)}};
+    ls[1].share = 0.6f;  // (a lamp through an opening: Apex scales its step)
+    ls[2].share = 0.0f;  // (behind the floor here: it adds nothing)
+    ls[3].mult = 2;      // (listed twice)
+    ls[5].baked = true;  // (no GPU law: in the base)
+    const int n = 300;
+    std::vector<std::array<float, 4>> pos(n);
+    for (auto& p : pos) p = {U(rng) * 8.0f, 0.5f, U(rng) * 8.0f, 1.0f};
+    // the capture: the base, each lamp's part and share; the check that the parts pack back to the game's texels
+    std::vector<float> base(static_cast<size_t>(n) * 16, 0.0f), part(ls.size() * n * 16, 0.0f), pass(ls.size() * n, 0.0f);
+    std::vector<uint32_t> game(static_cast<size_t>(n) * 4);
+    long passKnown = 0, passRight = 0, packedBack = 0;
+    for (int s = 0; s < n; s++) {
+        float acc[16];
+        std::vector<std::array<float, 16>> parts, steps;
+        GameSample(pos[s].data(), ls, acc, &parts, &steps);
+        for (int m = 0; m < 4; m++) {
+            float in[4];
+            BasisPackInput(acc, m, in);
+            game[s * 4 + m] = PackModel(in);
+        }
+        for (size_t j = 0; j < ls.size(); j++) {
+            if (ls[j].baked) {
+                for (int i = 0; i < 16; i++) base[s * 16 + i] += parts[j][i];
+                continue;
+            }
+            std::copy(parts[j].begin(), parts[j].end(), &part[(j * n + s) * 16]);
+            float p = 0.0f;
+            if (BasisPass(parts[j].data(), steps[j].data(), p)) passKnown++, passRight += std::fabs(p - ls[j].share) < 1e-4f;
+            pass[j * n + s] = p;
+        }
+    }
+    const auto repack = [&](const std::vector<float>& parts, int s, int m) {
+        float acc[16];
+        for (int i = 0; i < 16; i++) acc[i] = base[s * 16 + i];
+        for (size_t j = 0; j < ls.size(); j++)
+            for (int i = 0; i < 16; i++) acc[i] += parts[(j * n + s) * 16 + i];
+        float in[4];
+        BasisPackInput(acc, m, in);
+        return PackModel(in);
+    };
+    for (int s = 0; s < n; s++)
+        for (int m = 0; m < 4; m++) packedBack += MaxLevelDiff(repack(part, s, m), game[s * 4 + m]) <= 1;
+    std::printf("  directional maps: %ld of %d texels packed back within 1/255, %ld of %ld shares right\n", packedBack, n * 4, passRight, passKnown);
+    Check(packedBack == n * 4, "directional maps: a capture's parts pack back to the game's texels");
+    Check(passKnown >= static_cast<long>((ls.size() - 1) * n) * 9 / 10 && passRight == passKnown, "directional maps: each part is the game's step times Apex's share");
+    // edits: each lamp's part again from the step now (LampBasisNow), packed again against the game's fill with the edit
+    const auto edit = [&](const char* what, size_t j, const BasisLight& now, bool off, bool move) {
+        std::vector<BasisLight> after = ls;
+        after[j] = now;
+        if (off) after[j].colour[0] = after[j].colour[1] = after[j].colour[2] = 0.0f; // (the rig colour of a lamp switched off)
+        std::vector<float> parts = part;
+        long ok = 0, exact = 0;
+        bool known = true;
+        for (int s = 0; s < n; s++) {
+            float one[16] = {}, v[16];
+            GameStep(pos[s].data(), after[j], one); // (the game's step called once now)
+            const float p = move ? 1.0f : pass[j * n + s];
+            if (off) std::fill(v, v + 16, 0.0f);
+            else known = known && BasisPartNow(p, now.mult, one, v);
+            std::copy(v, v + 16, &parts[(j * n + s) * 16]);
+            float acc[16];
+            GameSample(pos[s].data(), after, acc, nullptr, nullptr);
+            for (int m = 0; m < 4; m++) {
+                float in[4];
+                BasisPackInput(acc, m, in);
+                const int d = MaxLevelDiff(repack(parts, s, m), PackModel(in));
+                ok += d <= 1, exact += d == 0;
+            }
+        }
+        std::printf("  %s: %ld of %d texels within 1/255 (%ld exact)\n", what, ok, n * 4, exact);
+        Check(known && ok == n * 4, what);
+    };
+    BasisLight L0 = ls[0];
+    edit("directional maps: a lamp switched off", 0, L0, true, false);
+    BasisLight L1 = ls[1];
+    for (float& c : L1.colour) c *= 0.37f;
+    L1.colour[2] = 0.9f;
+    edit("directional maps: a scaled lamp recoloured and dimmed", 1, L1, false, false);
+    BasisLight L3 = ls[3];
+    for (float& c : L3.colour) c *= 1.8f;
+    edit("directional maps: a lamp listed twice made brighter", 3, L3, false, false);
+    BasisLight L4 = ls[4];
+    L4.pos[0] += 2.5f, L4.pos[2] -= 1.25f;
+    edit("directional maps: a plain lamp moved", 4, L4, false, true);
+    // a part that is not a multiple of the step, and a dark step, are refused / zero
+    float step[16] = {}, partNot[16] = {}, out[16], p = 0.0f;
+    step[0] = 0.5f, step[5] = 0.25f, partNot[0] = 0.5f, partNot[5] = 0.5f;
+    Check(!BasisPass(partNot, step, p) && std::isnan(p), "directional maps: a part not the step times a share has no share");
+    const float dark[16] = {};
+    Check(BasisPartNow(std::nanf(""), 1, dark, out) && out[0] == 0.0f && !BasisPartNow(std::nanf(""), 1, step, out), "directional maps: an unknown share is refused only where the step is lit");
+}
+
 int main() {
     std::mt19937 rng(20261013);
     std::uniform_real_distribution<float> U(0.0f, 1.0f);
@@ -628,6 +769,7 @@ int main() {
         RtLampModel::KeptTexel(Sr, Sr, pr, 1.0f, k, false, floorA, 0.0f, c);
         Check(c[0] == 1.0f && std::fabs(c[1] - 0.25f) < 1e-6f && std::fabs(c[2] - 0.125f) < 1e-6f && c[3] == 0.37f, "kept tail: a roofless texel keeps its hue and the solve's alpha");
     }
+    BasisChecks();
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

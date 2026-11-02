@@ -11362,9 +11362,41 @@ float OwnLampPass(BYTE* room, void* light, const float* pos) {
     else if (pass < 1.0f) g_ownBasisDimmed.fetch_add(1, std::memory_order_relaxed);
     return pass;
 }
+void BasisLightBody(BYTE* room, const float* pos, void* light, float* acc);
+uintptr_t g_basisSamplesVec = 0; // (GPU room lamps stage 4) FUN_006a09f0's samples vector, read at install
 void __fastcall BasisLightHook(BYTE* room, void*, const float* pos, void* light, float* acc) {
     // Quick outdoor lamp edits (Instant only): a directional map written by this solve is not kept (that solve cannot be a delta's base)
     if (room && OutdoorDelta::Enabled()) OutdoorDelta::NoteDirectional(room);
+    // GPU room lamps (developer): a kept solve takes each light's part of the sample and the game's step called again there
+    if (room && OutdoorDelta::RoomLampCapture() && ThreadId() == g_gatherThread.load(std::memory_order_relaxed) && OutdoorDelta::KeepsBasis(room)) {
+        alignas(16) float before[16], step[16] = {};
+        std::memcpy(before, acc, sizeof before);
+        BasisLightBody(room, pos, light, acc);
+        reinterpret_cast<BasisLight_t>(kBasisLight)(pos, light, step);
+        OutdoorDelta::NoteBasis(room, pos, reinterpret_cast<uintptr_t>(light), before, acc, step);
+        return;
+    }
+    BasisLightBody(room, pos, light, acc);
+}
+uintptr_t BasisSamplesVecImpl() { return g_basisGuardReady.load(std::memory_order_relaxed) ? g_basisSamplesVec : 0; }
+bool BasisStepTry(const float* pos, void* light, float* acc) { // POD (SEH)
+    __try {
+        reinterpret_cast<BasisLight_t>(kBasisLight)(pos, light, acc);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_faults.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+}
+bool BasisStepImpl(const float* pos, uintptr_t light, float* acc16) {
+    if (!g_basisGuardReady.load(std::memory_order_relaxed) || !light || ThreadId() != g_gatherThread.load(std::memory_order_relaxed)) return false;
+    alignas(16) float p[4], a[16] = {};
+    std::memcpy(p, pos, sizeof p);
+    if (!BasisStepTry(p, reinterpret_cast<void*>(light), a)) return false;
+    std::memcpy(acc16, a, sizeof a);
+    return true;
+}
+void BasisLightBody(BYTE* room, const float* pos, void* light, float* acc) {
     if (g_installed.load(std::memory_order_relaxed) && g_indoorReady && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
         if (const RoomInfo* info = SolveInfo(room); info && info->indoor && FindCross(*info, reinterpret_cast<uintptr_t>(light)) &&
                                                      !FindCross(*info, reinterpret_cast<uintptr_t>(light))->outdoor) {
@@ -13498,6 +13530,8 @@ bool InstallIndoor(std::string& why) {
                        CallsTarget(kBasisLightCall, kBasisLight) &&
                        Redirect(kBasisLightCall, kBasisLight, reinterpret_cast<const void*>(&BasisLightHook), &basisPatches);
     g_basisGuardReady.store(basis, std::memory_order_relaxed);
+    // (GPU room lamps stage 4) the samples vector: 0x006A0BD0 mov eax, [0x01158AC8] (A1 imm32), 0x86 bytes before the call
+    if (basis && *reinterpret_cast<const BYTE*>(kBasisLightCall - 0x86) == 0xA1) g_basisSamplesVec = *reinterpret_cast<const uintptr_t*>(kBasisLightCall - 0x85);
     if (basis) g_lodPatches.insert(g_lodPatches.end(), basisPatches.begin(), basisPatches.end());
     else {
         MemPatch::RestoreAll(basisPatches);
@@ -17264,6 +17298,8 @@ bool StackedWithEdit(const void* room) {
     return false;
 }
 
+uintptr_t BasisSamplesVec() { return BasisSamplesVecImpl(); }
+bool BasisStep(const float* pos, uintptr_t light, float* acc16) { return pos && acc16 && BasisStepImpl(pos, light, acc16); }
 float CrossLampReach(const void* room, const void* light, const float* point) {
     if (!room || !light || !point) return -1.0f;
     return CrossLampReachImpl(static_cast<BYTE*>(const_cast<void*>(room)), const_cast<void*>(light), point);

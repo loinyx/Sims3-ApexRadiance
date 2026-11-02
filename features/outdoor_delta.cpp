@@ -41,6 +41,7 @@
 #include "apex_memory.h"
 #include <bit>
 #include <windows.h>
+#include <d3d9.h>
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -48,6 +49,7 @@
 #include <cstring>
 #include <format>
 #include <map>
+#include <set>
 #include <memory>
 #include <tuple>
 #include <thread>
@@ -709,6 +711,25 @@ struct Capture {
     long killed = 0;    // kept texels a copy of a texel no capture holds overwrote
     float toneK = 0.0f; // the roofed tail's k ([0x011D0BA0])
     float amb[3] = {}, ambPass[3] = {}; // +0x110 and the pass's +0x650 at the solve's end (the log; the GPU's compose)
+    // (GPU room lamps stage 4, kept captures) the directional maps (FUN_006a09f0): per sample its texel and position; per light
+    // of the list at each sample its part (the accumulator after it less before), the game's step called again there (summed
+    // over its listings) and how often it was listed; at the solve's end the set [room+8] and the working set's texels
+    struct BasisSample {
+        uint16_t x = 0, y = 0;
+        float pos[4] = {};
+    };
+    struct BasisPart {
+        uint32_t sample = 0;
+        uintptr_t light = 0;
+        float c[16] = {}, step[16] = {};
+        uint8_t mult = 0;
+    };
+    std::vector<BasisSample> basis;
+    std::vector<BasisPart> basisParts;
+    std::vector<uint32_t> basisGame; // 4 per sample (map m at 4i + m)
+    uintptr_t basisSet = 0;
+    uint32_t basisW = 0, basisH = 0, basisHint = 0;
+    const char* basisWhy = nullptr;
 };
 Capture g_cap; // light tree thread only
 // (GPU room lamps stage 2a) the kept capture's texel whose pack comes next (SampleEnd -> NotePack, light tree thread)
@@ -1399,8 +1420,10 @@ bool TakeEdit(uintptr_t tl) {
     return true;
 }
 void SettleDue(); // below (GPU room lamps: the rooms of the lamp edits taken, 2 s after a lamp's last one)
+void BasisDue();  // below (GPU room lamps stage 4: the directional maps of the lamp edits taken)
 void AfterRoomUpdate(const void* tl) {
     SettleDue();
+    BasisDue();
     if (g_dropPending.exchange(false)) g_pending.clear();
     if (g_pending.empty() || !tl) return;
     if (!g_on.load(std::memory_order_relaxed)) { // switched off with edits taken: through the room solve
@@ -2032,6 +2055,22 @@ struct KeptRoom {
     // version whose drawing it continues until the GPU drew it
     std::vector<BatchRec> batches;
     uint32_t movedFrom = 0;
+    // (stage 4) the directional maps: per sample its texel and position, the lights the GPU does not draw summed (basisBase, 16
+    // per sample), every other light of the list with its part and its share of the game's step (NaN: not a multiple), the
+    // texels at the solve's end, the set they went to; basisWhy: not usable (kNoBasis: the room writes none); basisId: the
+    // version whose capture they are (a move's copy keeps it)
+    struct BasisLamp {
+        uintptr_t light = 0;
+        uint8_t mult = 1;
+        std::vector<float> c, pass; // 16 / 1 per sample
+    };
+    std::vector<Capture::BasisSample> basis;
+    std::vector<float> basisBase;
+    std::vector<BasisLamp> basisLamps;
+    std::vector<uint32_t> basisGame;
+    uintptr_t basisSet = 0;
+    uint32_t basisW = 0, basisH = 0, basisId = 0;
+    const char* basisWhy = nullptr;
     size_t bytes = 0;
 };
 // (stage 2b) g_kept and g_keptBytes: the light tree thread changes them, the render thread reads them (gpu_room_lamps.cpp) and
@@ -2052,8 +2091,9 @@ bool KeptLog() { return g_keptLines.fetch_add(1, std::memory_order_relaxed) < 20
 size_t KeptBytes(const KeptRoom& k) {
     size_t b = sizeof(KeptRoom) + k.samples.capacity() + k.texels.capacity() * sizeof(TexelRec) + k.base.capacity() * sizeof(float) +
                k.tail.capacity() * sizeof(KeptTail) + k.copies.capacity() * sizeof(KeptCopy) + k.blocks.capacity() * sizeof(BlockRec) + k.preblur.capacity() * 4 +
-               k.batches.capacity() * sizeof(BatchRec);
+               k.batches.capacity() * sizeof(BatchRec) + k.basis.capacity() * sizeof(Capture::BasisSample) + k.basisBase.capacity() * 4 + k.basisGame.capacity() * 4;
     for (const KeptLamp& l : k.lamps) b += sizeof(KeptLamp) + l.parts.capacity() * sizeof(KeptPart);
+    for (const KeptRoom::BasisLamp& l : k.basisLamps) b += sizeof l + (l.c.capacity() + l.pass.capacity()) * 4;
     return b;
 }
 void ClearKept() {
@@ -2531,6 +2571,13 @@ void CarryOff(KeptRoom& k, uint64_t key) {
         }
         k.lamps.push_back(*kl);
         k.lamps.back().carried = true;
+        // (stage 4) its directional part too, from the same samples (the switch on is then written from it)
+        const auto ob = std::find_if(old->basisLamps.begin(), old->basisLamps.end(), [&](const KeptRoom::BasisLamp& b) { return b.light == kl->light; });
+        if (ob != old->basisLamps.end() && !k.basisWhy && !old->basisWhy && old->basis.size() == k.basis.size() &&
+            std::equal(old->basis.begin(), old->basis.end(), k.basis.begin(),
+                       [](const Capture::BasisSample& a, const Capture::BasisSample& b) { return a.x == b.x && a.y == b.y && std::memcmp(a.pos, b.pos, sizeof a.pos) == 0; }) &&
+            std::none_of(k.basisLamps.begin(), k.basisLamps.end(), [&](const KeptRoom::BasisLamp& b) { return b.light == kl->light; }))
+            k.basisLamps.push_back(*ob);
         std::replace(rooms.begin(), rooms.end(), std::make_pair(room, old->version), std::make_pair(room, k.version));
         std::sort(rooms.begin(), rooms.end());
         carried += std::format("{}{:08X}", carried.empty() ? "" : ", ", kl->light);
@@ -2540,6 +2587,65 @@ void CarryOff(KeptRoom& k, uint64_t key) {
                              carried.empty() ? std::string() : std::format(" carried from its last kept solve: {}", carried),
                              dropped.empty() ? std::string() : std::format("{} not carried: {}", carried.empty() ? "" : ";", dropped)));
 }
+// ---- (stage 4) the directional maps (docs/features/night-lighting/gpu-room-lamps.md "Directional maps") ----
+constexpr const char* kNoBasis = "it writes no directional map";
+// A directional texel as FUN_006a09f0 packs it: map m of the accumulator in [0, 1] with alpha 1, the game's pack 0x0060CD10
+uint32_t PackBasis(const float* acc16, int m) {
+    alignas(16) float in[4];
+    BasisPackInput(acc16, m, in);
+    return PackGame(in, 0, 0, false);
+}
+// The kept solve's directional parts: the lights it keeps in its base summed, every other light's part with its share of the
+// game's step, and the check that every texel packed again from them is the game's (only a room that passes takes edits)
+void BuildBasis(Capture& c, KeptRoom& k) {
+    const size_t n = c.basis.size();
+    k.basisWhy = c.basisWhy                                ? c.basisWhy
+                 : !LevelLightShare::BasisSamplesVec()     ? "the directional maps' hook is not installed"
+                 : n == 0                                  ? kNoBasis
+                 : c.basisGame.size() != n * 4             ? "its directional maps were not read at the solve's end"
+                                                           : nullptr;
+    if (k.basisWhy) return;
+    k.basisBase.assign(n * 16, 0.0f);
+    std::unordered_map<uintptr_t, size_t> idx;
+    long parts = 0, known = 0;
+    for (const Capture::BasisPart& p : c.basisParts) {
+        if (p.sample >= n) continue;
+        if (std::find(k.baked.begin(), k.baked.end(), p.light) != k.baked.end()) {
+            for (int i = 0; i < 16; i++) k.basisBase[static_cast<size_t>(p.sample) * 16 + i] += p.c[i];
+            continue;
+        }
+        const auto [it, fresh] = idx.try_emplace(p.light, k.basisLamps.size());
+        if (fresh) {
+            KeptRoom::BasisLamp& bl = k.basisLamps.emplace_back();
+            bl.light = p.light, bl.mult = std::max<uint8_t>(p.mult, 1);
+            bl.c.assign(n * 16, 0.0f), bl.pass.assign(n, std::nanf(""));
+        }
+        KeptRoom::BasisLamp& bl = k.basisLamps[it->second];
+        std::memcpy(&bl.c[static_cast<size_t>(p.sample) * 16], p.c, sizeof p.c);
+        float pass = 0.0f;
+        known += BasisPass(p.c, p.step, pass) ? 1 : 0;
+        bl.pass[p.sample] = pass;
+        parts++;
+    }
+    std::vector<float> acc(k.basisBase);
+    for (const KeptRoom::BasisLamp& bl : k.basisLamps)
+        for (size_t q = 0; q < acc.size(); q++) acc[q] += bl.c[q];
+    long within = 0;
+    int worst = 0;
+    for (size_t i = 0; i < n; i++)
+        for (int m = 0; m < 4; m++) {
+            const int d = MaxLevelDiff(PackBasis(&acc[i * 16], m), c.basisGame[i * 4 + m]);
+            within += d <= 1 ? 1 : 0, worst = std::max(worst, d);
+        }
+    if (within != static_cast<long>(n * 4)) k.basisWhy = "its directional texels packed again from their parts differ from the game's";
+    if (KeptLog())
+        LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: {} directional samples, {} lamps ({} parts, {} of them the game's step called again times a "
+                             "share) packed again from their parts: {} of {} texels within 1/255 (largest {}/255){}",
+                             k.story, k.id, k.cls, n, k.basisLamps.size(), parts, known, within, n * 4, worst, k.basisWhy ? "; its directional maps take no edit" : ""));
+    k.basis = std::move(c.basis), k.basisGame = std::move(c.basisGame), k.basisSet = c.basisSet, k.basisW = c.basisW, k.basisH = c.basisH;
+    ShrinkExact(k.basis), ShrinkExact(k.basisBase), ShrinkExact(k.basisGame);
+}
+
 void KeepEnd(const BYTE* room) {
     Capture& c = g_cap;
     Record& r = *c.rec;
@@ -2602,6 +2708,7 @@ void KeepEnd(const BYTE* room) {
             ShrinkExact(k->tail), ShrinkExact(k->copies), ShrinkExact(k->blocks), ShrinkExact(k->preblur);
         }
         // the capture's texels and samples move into the kept room (the capture is dropped next)
+        BuildBasis(c, *k); // (stage 4; after `baked`)
         k->batches = r.batches;
         k->samples = std::move(r.samples);
         k->texels = std::move(r.texels);
@@ -2626,6 +2733,7 @@ void KeepEnd(const BYTE* room) {
     k->geo = r.geo;
     const uint64_t key = KeyOf(room, rr.cls);
     k->version = g_keptVersion.fetch_add(1, std::memory_order_relaxed) + 1;
+    k->basisId = k->version;
     HookGuard::Run("OutdoorDelta carry switched-off lamps", [&] { CarryOff(*k, key); });
     k->bytes = KeptBytes(*k);
     const auto mb = [](size_t b) { return static_cast<double>(b) / (1024.0 * 1024.0); };
@@ -3132,6 +3240,67 @@ bool DeltaSolving(const void* room) { return room && g_deltaRoom.load(std::memor
 void NoteDirectional(const void* room) {
     if (g_cap.active && g_cap.room == room) g_cap.directional = true;
 }
+namespace {
+constexpr size_t kMaxBasisSamples = 8192, kMaxBasisParts = 65536; // per kept solve
+// The sample FUN_006a09f0 passes `pos` for (its sample 0.5 m up, 0x006A0C2F): its texel (+0x20, +0x22). POD (SEH)
+bool FindBasisTexel(uintptr_t vec, const float* pos, uint16_t& x, uint16_t& y, uint32_t& hint) {
+    __try {
+        const uintptr_t b = *reinterpret_cast<const uintptr_t*>(vec), e = *reinterpret_cast<const uintptr_t*>(vec + 4);
+        if (!b || e <= b || (e - b) % 0x30 || (e - b) / 0x30 > 65536) return false;
+        const uint32_t n = static_cast<uint32_t>((e - b) / 0x30);
+        for (uint32_t k = 0; k < n; k++) {
+            const uint32_t i = (hint + k) % n;
+            const uintptr_t s = b + static_cast<uintptr_t>(i) * 0x30;
+            const float* f = reinterpret_cast<const float*>(s);
+            if (f[0] == pos[0] && f[2] == pos[2] && std::fabs(pos[1] - f[1] - 0.5f) < 1e-3f) {
+                x = *reinterpret_cast<const uint16_t*>(s + 0x20), y = *reinterpret_cast<const uint16_t*>(s + 0x22);
+                hint = i + 1;
+                return true;
+            }
+        }
+        return false;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+} // namespace
+bool KeepsBasis(const void* room) { return g_cap.active && g_cap.ok && g_cap.keep && g_cap.room == room && !g_cap.basisWhy; }
+void NoteBasis(const void* room, const float* pos, uintptr_t light, const float* before, const float* after, const float* step) {
+    if (!KeepsBasis(room) || !pos || !light || !before || !after || !step) return;
+    Capture& c = g_cap;
+    const auto fail = [&c](const char* why) {
+        c.basisWhy = why;
+        std::vector<Capture::BasisSample>().swap(c.basis);
+        std::vector<Capture::BasisPart>().swap(c.basisParts);
+    };
+    try {
+        if (c.basis.empty() || std::memcmp(c.basis.back().pos, pos, sizeof c.basis.back().pos) != 0) { // (the next sample: every light of the list in turn)
+            if (c.basis.size() >= kMaxBasisSamples) return fail("too many directional samples");
+            const uintptr_t vec = LevelLightShare::BasisSamplesVec();
+            Capture::BasisSample s;
+            std::memcpy(s.pos, pos, sizeof s.pos);
+            if (!vec || !FindBasisTexel(vec, pos, s.x, s.y, c.basisHint)) return fail("a directional sample's texel was not found");
+            c.basis.push_back(s);
+        }
+        const uint32_t si = static_cast<uint32_t>(c.basis.size() - 1);
+        Capture::BasisPart* p = nullptr;
+        for (size_t j = c.basisParts.size(); j-- > 0 && c.basisParts[j].sample == si;)
+            if (c.basisParts[j].light == light) p = &c.basisParts[j];
+        if (!p) {
+            if (c.basisParts.size() >= kMaxBasisParts) return fail("too many directional parts");
+            p = &c.basisParts.emplace_back();
+            p->sample = si, p->light = light;
+        }
+        for (int i = 0; i < 16; i++) {
+            const float d = after[i] - before[i];
+            p->c[i] += std::isfinite(d) ? d : 0.0f;
+            p->step[i] += std::isfinite(step[i]) ? step[i] : 0.0f;
+        }
+        p->mult = static_cast<uint8_t>(std::min(p->mult + 1, 255));
+    } catch (...) {
+        fail("no memory");
+    }
+}
 
 bool Sample(const unsigned char* room) {
     if (!g_cap.active || !g_cap.ok || g_cap.room != room) return false;
@@ -3375,10 +3544,52 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
     if ((texel & 4095) == 0 && BytesOf(r) > kMaxRecordBytes) Fail("a room too large to keep");
 }
 
+namespace {
+// (stage 4) the directional maps' working set as the finalize's unlock 0x0069E950 is about to copy it into the set [room+8]
+// (when room+0x629 is set, 0x0069EA3A): the 4 lock records at room+0x584 + i x 0x28 (FUN_006a09f0's pass +0x540, + 0x44). POD (SEH)
+bool ReadBasisDesc(const BYTE* room, uintptr_t& set, Desc d[4]) {
+    __try {
+        if (!room[0x629]) return false;
+        set = *reinterpret_cast<const uintptr_t*>(room + 8);
+        for (int i = 0; i < 4; i++) {
+            const BYTE* rec = room + 0x584 + i * 0x28;
+            d[i].base = *reinterpret_cast<const uintptr_t*>(rec);
+            d[i].pitch = *reinterpret_cast<const uint32_t*>(rec + 4);
+            d[i].w = *reinterpret_cast<const uint32_t*>(rec + 0x18);
+            d[i].h = *reinterpret_cast<const uint32_t*>(rec + 0x1C);
+        }
+        return set != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+void KeepBasisFinal(const BYTE* room) {
+    Capture& c = g_cap;
+    if (c.basisWhy || c.basis.empty()) return;
+    uintptr_t set = 0;
+    Desc d[4];
+    if (!ReadBasisDesc(room, set, d)) return void(c.basisWhy = "its directional maps are not locked at the solve's end");
+    for (int i = 0; i < 4; i++)
+        if (!d[i].base || d[i].w != d[0].w || d[i].h != d[0].h || d[i].pitch < d[i].w * 4 || d[i].w > 512 || d[i].h > 512)
+            return void(c.basisWhy = "a directional map is not locked as the others");
+    try {
+        c.basisGame.assign(c.basis.size() * 4, 0u);
+    } catch (...) {
+        return void(c.basisWhy = "no memory");
+    }
+    for (size_t i = 0; i < c.basis.size(); i++)
+        for (int m = 0; m < 4; m++)
+            if (c.basis[i].x >= d[m].w || c.basis[i].y >= d[m].h ||
+                !ReadTexel(d[m].base + static_cast<uintptr_t>(d[m].pitch) * c.basis[i].y + static_cast<uintptr_t>(c.basis[i].x) * 4, c.basisGame[i * 4 + m]))
+                return void(c.basisWhy = "a directional texel could not be read at the solve's end");
+    c.basisSet = set, c.basisW = d[0].w, c.basisH = d[0].h;
+}
+} // namespace
 void BeforeFinalize(unsigned char* room) {
     if (!g_cap.active || g_cap.room != room) return;
     FlushPending();
     if (g_cap.keep && g_cap.ok) KeepFinals(room);
+    if (g_cap.keep && g_cap.ok) KeepBasisFinal(room);
 }
 void RoomFinalized(const void* room) {
     std::lock_guard<std::mutex> lk(g_keptMx);
@@ -3595,6 +3806,194 @@ const char* MoveJobFor(const void* room, const RoomRead& rr, const std::shared_p
     QueryPerformanceCounter(&job.at);
     return nullptr;
 }
+// ---- GPU room lamps stage 4: the directional maps of an edit taken (docs/features/night-lighting/gpu-room-lamps.md) ----
+// The objects and Sims read the story's four directional maps (the set [room+8]), which only the room solves write. An edit
+// taken (TakesLampEdit) queues the lamp; at the end of the room update (BasisDue, light tree thread) each of its kept rooms
+// whose capture packed again exactly gets the lamp's part again (0 switched off, else its share of the game's step FUN_0069f280
+// called now: the rig colour and place the step reads now; a move's share is 1, the plain path's) and its samples are packed
+// again and written into the game's own textures of the set: the game itself locks and writes them on this thread (the unlock
+// 0x0069E950 copies the working set in with 0x00619A00: LockRect / UnlockRect), and only while no solve holds the working maps
+// (its unlock would copy the set it read before back over the write). A texel is written only while it holds what the room's
+// capture or Apex's last write left there (another room's solve may have written it since).
+struct BasisRoomRef {
+    uint64_t key = 0;
+    int story = 0, id = 0;
+};
+struct BasisEdit {
+    const char* kind = "";
+    bool off = false, move = false;
+    std::vector<BasisRoomRef> rooms;
+    LARGE_INTEGER at{};
+    DWORD tick = 0;
+};
+std::map<uintptr_t, BasisEdit> g_basisEdits; // lamp -> its last edit taken, not yet written (light tree thread)
+struct BasisNow {
+    uint32_t id = 0;                                         // KeptRoom::basisId these hold for
+    std::unordered_map<uintptr_t, std::vector<float>> parts; // the lamps edited since: their part now (16 per sample)
+    std::vector<uint32_t> expect;                            // what each texel holds: the capture's, then Apex's last write
+};
+std::unordered_map<uint64_t, BasisNow> g_basisNow; // kept room key -> (light tree thread)
+struct BasisTexelWrite {
+    uint16_t x, y;
+    uint32_t want, expect;
+    uint8_t done;
+};
+uintptr_t RoomSet(uintptr_t room) { // POD (SEH): the room's directional set [room+8]
+    __try {
+        return *reinterpret_cast<const uintptr_t*>(room + 8);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+// Map m of a set (the wrapper [set + 4m]; a 2D texture [wrapper+0x30] while [wrapper+0x2C] is 0, as 0x00618DF0 locks it): each
+// texel holding `expect` takes `want`. POD (SEH); false: the map is not the captured one or could not be locked
+bool WriteBasisMapTry(uintptr_t set, int m, uint32_t w, uint32_t h, BasisTexelWrite* t, size_t n) {
+    __try {
+        const uintptr_t wrapper = *reinterpret_cast<const uintptr_t*>(set + static_cast<uintptr_t>(m) * 4);
+        if (!wrapper || *reinterpret_cast<const uint32_t*>(wrapper + 0x2C) != 0) return false;
+        IDirect3DTexture9* tex = *reinterpret_cast<IDirect3DTexture9* const*>(wrapper + 0x30);
+        D3DSURFACE_DESC dd{};
+        if (!tex || FAILED(tex->GetLevelDesc(0, &dd)) || dd.Format != D3DFMT_A8R8G8B8 || dd.Width != w || dd.Height != h) return false;
+        D3DLOCKED_RECT lr{};
+        if (FAILED(tex->LockRect(0, &lr, nullptr, 0)) || !lr.pBits) return false;
+        for (size_t i = 0; i < n; i++) {
+            uint32_t* p = reinterpret_cast<uint32_t*>(static_cast<BYTE*>(lr.pBits) + static_cast<size_t>(lr.Pitch) * t[i].y) + t[i].x;
+            t[i].done = *p == t[i].expect ? 1 : 0;
+            if (t[i].done) *p = t[i].want;
+        }
+        tex->UnlockRect(0);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+void QueueBasis(uintptr_t light, const char* kind, bool off, bool move, const std::vector<BasisRoomRef>& rooms) {
+    BasisEdit& e = g_basisEdits[light];
+    e.kind = kind, e.off = off, e.move = move;
+    for (const BasisRoomRef& r : rooms)
+        if (std::none_of(e.rooms.begin(), e.rooms.end(), [&](const BasisRoomRef& x) { return x.key == r.key; })) e.rooms.push_back(r);
+    QueryPerformanceCounter(&e.at);
+    e.tick = GetTickCount();
+}
+// The lamp's part of each sample of the kept room now (into g_basisNow); null, or why not
+const char* LampBasisNow(uint64_t key, const KeptRoom& k, uintptr_t light, const BasisEdit& e) {
+    BasisNow& bn = g_basisNow[key];
+    if (bn.id != k.basisId) bn = BasisNow{}, bn.id = k.basisId, bn.expect = k.basisGame;
+    const size_t n = k.basis.size();
+    const auto bl = std::find_if(k.basisLamps.begin(), k.basisLamps.end(), [&](const KeptRoom::BasisLamp& b) { return b.light == light; });
+    if (e.move && DevSwitches::BasisWallFilter()) return "the walls in the directional maps (basis_wall_filter) are not redone for a move";
+    std::vector<float> v(n * 16, 0.0f);
+    if (!e.off)
+        for (size_t i = 0; i < n; i++) {
+            float step[16];
+            if (!LevelLightShare::BasisStep(k.basis[i].pos, light, step)) return "the game's step could not be called";
+            float pass = bl != k.basisLamps.end() ? bl->pass[i] : std::nanf("");
+            if (e.move) { // (the plain path: Apex's basis tests leave such a lamp's step as it is)
+                if (std::isfinite(pass) && std::fabs(pass - 1.0f) > 1e-3f) return "Apex's tests scale its directional part (not redone for a move)";
+                pass = 1.0f;
+            }
+            if (!BasisPartNow(pass, bl != k.basisLamps.end() ? bl->mult : 1, step, &v[i * 16])) return "its directional part there is not the game's step times a share";
+        }
+    bn.parts[light] = std::move(v);
+    return nullptr;
+}
+// The kept room's samples packed again (its base, each lamp's part now or as kept) and written into its set
+const char* WriteBasis(uint64_t key, const KeptRoom& k, long& written, long& left) {
+    const uintptr_t set = RoomSet(k.room);
+    if (!set || set != k.basisSet) return "its directional set changed";
+    const BasisNow& bn = g_basisNow[key];
+    const size_t n = k.basis.size();
+    std::vector<float> acc(k.basisBase);
+    const auto add = [&](const std::vector<float>& p) {
+        if (p.size() == acc.size())
+            for (size_t q = 0; q < acc.size(); q++) acc[q] += p[q];
+    };
+    for (const KeptRoom::BasisLamp& bl : k.basisLamps) {
+        const auto it = bn.parts.find(bl.light);
+        add(it != bn.parts.end() ? it->second : bl.c);
+    }
+    for (const auto& [L, p] : bn.parts) // (a lamp with no part at the capture)
+        if (std::none_of(k.basisLamps.begin(), k.basisLamps.end(), [&](const KeptRoom::BasisLamp& b) { return b.light == L; })) add(p);
+    std::vector<BasisTexelWrite> t(n);
+    for (int m = 0; m < 4; m++) {
+        for (size_t i = 0; i < n; i++) t[i] = BasisTexelWrite{k.basis[i].x, k.basis[i].y, PackBasis(&acc[i * 16], m), bn.expect[i * 4 + m], 0};
+        if (!WriteBasisMapTry(set, m, k.basisW, k.basisH, t.data(), n)) return "a directional map of its set is not the captured one";
+        for (size_t i = 0; i < n; i++) {
+            if (t[i].done) g_basisNow[key].expect[i * 4 + m] = t[i].want;
+            (t[i].done ? written : left)++;
+        }
+    }
+    return nullptr;
+}
+void BasisDue() {
+    if (g_basisEdits.empty()) return;
+    if (!g_capture.load(std::memory_order_relaxed)) return void(g_basisEdits.clear());
+    const DWORD now = GetTickCount();
+    if (!LevelLightShare::RoomMapsFree()) { // (a solve between its lock and unlock: the next update, at most 1 s)
+        for (auto it = g_basisEdits.begin(); it != g_basisEdits.end();) {
+            if (now - it->second.tick <= 1000) {
+                ++it;
+                continue;
+            }
+            if (KeptLog())
+                LOG_INFO(std::format("[GpuRoomLamps] {}: lamp {:08X} directional maps not written (another room's maps stayed locked for 1 s; they follow its rooms' solves)",
+                                     it->second.kind, it->first));
+            it = g_basisEdits.erase(it);
+        }
+        return;
+    }
+    const std::map<uintptr_t, BasisEdit> edits = std::move(g_basisEdits);
+    g_basisEdits.clear();
+    std::unordered_map<uint64_t, std::shared_ptr<const KeptRoom>> kept;
+    {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        for (const auto& [light, e] : edits)
+            for (const BasisRoomRef& r : e.rooms)
+                if (const auto it = g_kept.find(r.key); it != g_kept.end()) kept[r.key] = it->second;
+    }
+    std::map<uintptr_t, std::string> why; // lamp -> its rooms not written
+    std::set<uint64_t> dirty;
+    std::map<uintptr_t, std::vector<uint64_t>> ok; // lamp -> its rooms whose part was computed again
+    const auto note = [&](uintptr_t light, const BasisRoomRef& r, const char* w) { why[light] += std::format("{}story {} room {}: {}", why[light].empty() ? "" : ", ", r.story, r.id, w); };
+    for (const auto& [light, e] : edits)
+        for (const BasisRoomRef& r : e.rooms) {
+            const auto it = kept.find(r.key);
+            const char* w = it == kept.end() ? "its kept solve was dropped" : it->second->basisWhy;
+            if (w == kNoBasis) continue; // (nothing of it to show)
+            if (!w) w = LampBasisNow(r.key, *it->second, light, e);
+            if (w) note(light, r, w);
+            else dirty.insert(r.key), ok[light].push_back(r.key);
+        }
+    std::map<uint64_t, std::pair<long, long>> wrote; // key -> texels written, left as another solve wrote them
+    std::map<uint64_t, const char*> failed;
+    for (const uint64_t key : dirty) {
+        long w = 0, l = 0;
+        if (const char* f = WriteBasis(key, *kept[key], w, l)) failed[key] = f;
+        else wrote[key] = {w, l};
+    }
+    if (!KeptLog()) return;
+    LARGE_INTEGER t1{}, f{};
+    QueryPerformanceCounter(&t1);
+    QueryPerformanceFrequency(&f);
+    for (const auto& [light, e] : edits) {
+        int rooms = 0, done = 0;
+        long w = 0, l = 0;
+        for (const BasisRoomRef& r : e.rooms) {
+            const auto it = kept.find(r.key);
+            if (it != kept.end() && it->second->basisWhy == kNoBasis) continue;
+            rooms++;
+            if (std::find(ok[light].begin(), ok[light].end(), r.key) == ok[light].end()) continue;
+            if (const auto fw = failed.find(r.key); fw != failed.end()) note(light, r, fw->second);
+            else done++, w += wrote[r.key].first, l += wrote[r.key].second;
+        }
+        if (!rooms) continue;
+        LOG_INFO(std::format("[GpuRoomLamps] {}: lamp {:08X} directional maps written in {} of {} rooms {:.1f} ms after the edit ({} texels{}){}", e.kind, light, done, rooms,
+                             1000.0 * static_cast<double>(t1.QuadPart - e.at.QuadPart) / static_cast<double>(f.QuadPart), w,
+                             l ? std::format(", {} left as another solve wrote them", l) : std::string(),
+                             why[light].empty() ? std::string() : std::format("; not written: {} (they follow its rooms' solves)", why[light])));
+    }
+}
+
 bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move) {
     if (!g_capture.load(std::memory_order_relaxed) || !tl || !light) return false;
     const char* kind = move ? "move" : wasOn == on ? "value" : on ? "switch on" : "switch off";
@@ -3606,6 +4005,7 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move
     LevelLightShare::LotRooms(tracker, rooms);
     std::vector<std::pair<const void*, uint32_t>> kept; // the rooms (id > 0) listing it, with their kept solve's version
     std::vector<std::pair<int, int>> ids;               // the same rooms: (story, id)
+    std::vector<BasisRoomRef> basisRooms;                // (stage 4) the same rooms, for their directional maps
     // a light without a GPU law (a tube): its share now (an intensity or shape edit changes it: such an edit takes the solves)
     float colourNow[3] = {};
     uint64_t geoNow = 0;
@@ -3656,6 +4056,7 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move
         }
         kept.emplace_back(room, k->version);
         ids.emplace_back(rr.story, rr.id);
+        basisRooms.push_back(BasisRoomRef{KeyOf(room, rr.cls), rr.story, rr.id});
         if (std::find(stories.begin(), stories.end(), rr.story) == stories.end()) stories.push_back(rr.story);
     }
     if (kept.empty()) return false; // (no indoor room lists it: not this path's)
@@ -3684,6 +4085,7 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move
         for (auto& [key, job] : jobs) QueueMove(key, std::move(job));
     } else
         GpuRoomLamps::NoteEdit(light, kind, list, st);
+    QueueBasis(light, kind, wasOn && !on, move, basisRooms); // (written at the end of this room update: BasisDue)
     // the settle: those rooms are solved once kSettleMs after the lamp's last edit taken (a drag's edits make one settle)
     Settle& s = g_settle[light];
     s.tracker = tracker, s.at = GetTickCount();

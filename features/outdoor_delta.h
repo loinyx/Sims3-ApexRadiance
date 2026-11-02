@@ -96,6 +96,11 @@ bool AtLockStep(unsigned char* room, bool gather);
 void SolveEnd(unsigned char* room);             // after the game's finalize
 bool DeltaSolving(const void* room);            // any thread: the room's current solve is a delta (AtriumHold)
 void NoteDirectional(const void* room);         // the solve wrote a directional map (not kept: that solve is not a delta's base)
+// (GPU room lamps stage 4, light tree thread) the kept capture of `room` takes its directional parts (LevelLightShare's
+// BasisLightHook): for each light of the list at each sample, the accumulator before and after it and the game's step
+// FUN_0069f280 called again there with a zero accumulator
+bool KeepsBasis(const void* room);
+void NoteBasis(const void* room, const float* pos, uintptr_t light, const float* before, const float* after, const float* step);
 // One batch sample of the room's solve (SolvePointBatch): Sample returns true when its sums are kept
 bool Sample(const unsigned char* room);
 // The sum the next point solve adds to: 0 the room's own, 1 the floor mask's copy with walls tested, 2 its copy with none
