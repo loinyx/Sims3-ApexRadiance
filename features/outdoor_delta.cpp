@@ -3919,7 +3919,9 @@ std::mutex g_requeueMx;
 std::vector<const void*> g_requeue;
 // (stage 4) the active lot's registered lights (LotLamps): the light tree thread writes, the render thread reads
 constexpr DWORD kLotLampsMs = 250;
+constexpr DWORD kLotGoneMs = 1000; // a lamp missing from the registry this long has left it
 std::mutex g_lotLampsMx;
+std::map<uintptr_t, uint32_t> g_lotMissing; // (under g_lotLampsMx) PhysLampPick::CarryMissing
 std::vector<LotLamp> g_lotLamps;
 uint32_t g_lotLampsVer = 0;
 std::vector<uintptr_t> g_lotGone;    // (under g_lotLampsMx) PhysLampPick::NoteGone
@@ -3949,6 +3951,10 @@ void RefreshLotLamps() {
         out.push_back(l);
     }
     std::lock_guard<std::mutex> lk(g_lotLampsMx);
+    // (a lamp of the last snapshot the registry lacks now stays in it for kLotGoneMs: the registry drops a lamp for a few
+    // frames while it is dragged and every lamp of the lot while build mode edits it (02/11 log: 709 lamps "left" in 3 min,
+    // 175 at once within 50 ms, none deleted), which took them off every map and rewrote the directional maps without them)
+    PhysLampPick::CarryMissing(g_lotLamps, out, tracker == g_lotLampsTracker, now, kLotGoneMs, g_lotMissing);
     if (out == g_lotLamps) return;
     // (a lamp deleted: the object removal marks its rooms, 0x006C75A1 for its light and occluder entries, which stay the game's:
     // its room's light list holds the removed light until that room gathers again, and its object's 3D blockers are gone. A kept

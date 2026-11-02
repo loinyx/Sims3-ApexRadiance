@@ -18553,7 +18553,8 @@ bool AllEvalWrapped(const BYTE* room) {
     __try {
         const uintptr_t* b = *reinterpret_cast<const uintptr_t* const*>(room + 0xC8);
         const uintptr_t* e = *reinterpret_cast<const uintptr_t* const*>(room + 0xCC);
-        if (!b || e < b || e - b > 4096) return false;
+        if (!b) return !e; // (an empty list holds no buffer: nothing in it is unwrapped; 02/11 log: rooms 13, 8, 4, 9, 11 and 10 never kept)
+        if (e < b || e - b > 4096) return false;
         for (const uintptr_t* p = b; p < e; p++)
             if (*p && !EvalWrapped(*p)) return false;
         return true;
@@ -19237,7 +19238,14 @@ bool ExportLotProxy(uintptr_t tracker, RtLampProxy::Lot& out, std::string& why) 
         st.ceil.assign(nt, RtLampProxy::kNoFloor);
         st.roofed.assign(nt, 0);
         for (size_t t = 0; t < nt && t < g.ceil.size() && t < g.flags.size(); t++) {
-            if (g.ceil[t] < 1e8f) st.ceil[t] = g.ceil[t], st.floorY[t] = g.ceil[t] - kStoryWallH;
+            // (the floor from the tile: the grid's ceiling may be the story above's floor, so ceil - 3 m is not this story's floor
+            // there; 02/11 lot C49C: story 3's 4.74 m tiles made story 2's floor 1.74 m and cut story 1's rooms 2 and 8 at 0.75 m
+            // over their floor through CeilingsUnderAbove)
+            GridTileRead tile{};
+            if (g.ceil[t] < 1e8f)
+                st.ceil[t] = g.ceil[t],
+                st.floorY[t] = ReadGridTile(mgr, static_cast<int>(t % g.w), static_cast<int>(t / g.w), tile) && ApexMath::IsFinite(tile.floor) ? tile.floor
+                                                                                                                                  : g.ceil[t] - kStoryWallH;
             st.roofed[t] = static_cast<uint8_t>(g.flags[t] >> 4);
         }
         float plane = 0.0f;

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <map>
 #include <set>
 #include <tuple>
 #include <utility>
@@ -93,6 +94,22 @@ inline void NoteGone(const std::vector<uintptr_t>& before, const std::vector<uin
     for (const uintptr_t l : before)
         if (std::find(now.begin(), now.end(), l) == now.end() && std::find(gone.begin(), gone.end(), l) == gone.end()) gone.push_back(l);
     if (gone.size() > max) gone.erase(gone.begin(), gone.end() - static_cast<std::ptrdiff_t>(max));
+}
+// A lamp of the last snapshot (`before`) missing from the registry now stays in `now` with its last entry until it has been
+// missing for graceMs (the registry drops a dragged lamp for a few frames, and every lamp while build mode edits the lot), so
+// it is neither undrawn nor gone meanwhile. `missing`: light -> the tick it was first missed; a lamp seen again or past its
+// grace leaves it. Another lot (sameLot false): nothing carried
+template <class Lamp>
+inline void CarryMissing(const std::vector<Lamp>& before, std::vector<Lamp>& now, bool sameLot, uint32_t tick, uint32_t graceMs, std::map<uintptr_t, uint32_t>& missing) {
+    if (!sameLot) return missing.clear();
+    const size_t seen = now.size();
+    const auto inNow = [&](uintptr_t l) { return std::any_of(now.begin(), now.begin() + static_cast<std::ptrdiff_t>(seen), [&](const Lamp& x) { return x.light == l; }); };
+    std::erase_if(missing, [&](const auto& kv) { return inNow(kv.first); });
+    for (const Lamp& l : before) {
+        if (inNow(l.light)) continue;
+        if (tick - missing.try_emplace(l.light, tick).first->second < graceMs) now.push_back(l);
+        else missing.erase(l.light);
+    }
 }
 
 // (stage 5) a lamp's physical share at a directional sample, as the room's maps take it: the open-top proxy's visibility of the

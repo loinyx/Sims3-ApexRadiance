@@ -314,6 +314,17 @@ lamp's position, not on its colour or intensity.
    probe flag is per thread; `RetakeAmbient` writes nothing when the room's state or ambient changed during the probe. An
    empty open-top proxy leaves the tiles without occluders, and a failed upload is tried again 5 s later.
    `outdoor_delta_test` 97 checks, `rt_lamps_test` 75.
+27. Physical model, first game test fixes (02/11): a room whose light list is empty (no buffer) counts as wrapped, so it is
+   kept and drawn (the log: story 0 room 13, story 1 rooms 4 and 8, story 2 rooms 9 and 11, story 3 room 10 were never kept, and
+   every lamp edit took the room solves: `story 0 room 13: no kept physical solve of the class it shows`, 616 times, 0 edits
+   taken). A lamp missing from the registry stays in the lamp snapshot for 1 s (`PhysLampPick::CarryMissing`): the registry
+   drops a dragged lamp for a few frames and every lamp of the lot while build mode edits it (709 `left the lot's registry`
+   lines in 3 minutes, 175 at once within 50 ms, none deleted), which took them off every map and rewrote the directional
+   maps without them. `ExportLotProxy` takes each tile's floor from the tile instead of its grid ceiling less 3 m: where the
+   grid ceiling is the story above's floor (story 3's 4.74 m tiles over story 2), story 2's floor came out at 1.74 m and
+   `CeilingsUnderAbove` put a ceiling 0.75 m over story 1's rooms 2 and 8 (35 tiles; the probe: 24-27% of room 8's texels
+   the game lit shaded by the occluders only), the square patches and the diagonal checkerboard on their floors. This also
+   applies to Real-time outdoor lamps' occluders. `outdoor_delta_test` 98 checks, `rt_lamps_test` 75.
 
 ## Settings
 

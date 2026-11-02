@@ -1175,6 +1175,30 @@ void PhysPickChecks() {
         ok = ok && gone == std::vector<uintptr_t>{4, 5, 6};
         Check(ok, "physical pick: the lamps gone from the registry (deleted), back when seen again, bounded");
     }
+    // a lamp the registry drops for a moment stays in the snapshot (its last entry) until it has been missing for the grace;
+    // one seen again is forgotten; another lot carries nothing
+    {
+        struct L {
+            uintptr_t light;
+            int story;
+            bool operator==(const L&) const = default;
+        };
+        std::map<uintptr_t, uint32_t> missing;
+        std::vector<L> was = {{1, 1}, {2, 1}, {3, 2}}, now = {{1, 1}};
+        CarryMissing(was, now, true, 100, 1000, missing); // (2 and 3 missed at 100: carried)
+        bool ok = now == std::vector<L>{{1, 1}, {2, 1}, {3, 2}} && missing.size() == 2;
+        was = now, now = {{1, 1}, {3, 2}};
+        CarryMissing(was, now, true, 600, 1000, missing); // (3 back; 2 still within its grace)
+        ok = ok && now == std::vector<L>{{1, 1}, {3, 2}, {2, 1}} && missing.size() == 1 && missing.count(2);
+        was = now, now = {{1, 1}, {3, 2}};
+        CarryMissing(was, now, true, 1100, 1000, missing); // (2 missing for 1000 ms: dropped, then NoteGone takes it)
+        ok = ok && now == std::vector<L>{{1, 1}, {3, 2}} && missing.empty();
+        was = {{1, 1}, {5, 1}}, now = {{7, 1}};
+        missing[9] = 0;
+        CarryMissing(was, now, false, 2000, 1000, missing);
+        ok = ok && now == std::vector<L>{{7, 1}} && missing.empty();
+        Check(ok, "physical pick: a lamp the registry drops for a moment is carried for its grace, then gone; another lot carries none");
+    }
     // the rooms an edit taken without their solve leaves stale in the game's maps: the rooms listing it, its own and every room 0;
     // forgotten at their solve, each sent once on a fallback, all on a full drop
     {
