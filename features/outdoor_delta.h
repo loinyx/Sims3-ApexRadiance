@@ -49,7 +49,8 @@ void SetRoomLampCapture(bool on);
 bool RoomLampCapture();
 // (physical indoor lamps, stage 1) the kept rooms' model: replica (per-lamp parts, as above) or physical (the base without
 // every lot lamp with a GPU law, the tail, samples, batches and the room's 3D test records; no parts, no room-0 kept lamps).
-// A change drops the kept rooms; the caller sends the lot to its solves. Physical rooms are not drawn yet (the game's texels)
+// A change drops the kept rooms; the caller sends the lot to its solves. Physical rooms > 0 are drawn from their lamps (stage 3b,
+// gpu_room_lamps.cpp); room 0 and lamp edits still take the game's path
 void SetRoomLampPhysical(bool on);
 bool RoomLampPhysical();
 // The room solve hooks record for the probe or the kept captures (either is on)

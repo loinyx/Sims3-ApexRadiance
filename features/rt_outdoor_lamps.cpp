@@ -131,6 +131,11 @@ void CompileAll() {
     for (int i = 0; i < RtLampGpu::kShaderCount; i++) {
         std::string err;
         if (!ShaderCache::Bytecode(kRtLampShaderIds[i], g_compiled.code[i], &err)) {
+            if (RtLampGpu::IsPhysical(static_cast<RtLampGpu::ShaderId>(i))) { // (optional: the physical indoor lamps stay off, the game's maps shown)
+                g_compiled.code[i].clear();
+                LOG_WARNING(std::format("[RtOutdoorLamps] {} is not available ({}): physical indoor lamps keep the game's maps", RtLampGpu::EntryOf(static_cast<RtLampGpu::ShaderId>(i)), err));
+                continue;
+            }
             g_compiled.error = std::format("{} does not compile: {}", RtLampGpu::EntryOf(static_cast<RtLampGpu::ShaderId>(i)), err);
             g_compiled.state.store(3);
             return;
@@ -570,6 +575,8 @@ std::unordered_set<uint64_t> g_lotNoted;            // lots whose lamp lot id di
 std::shared_ptr<const Proxy> g_proxyUsed;
 RtLampProxy::Mesh g_mesh;
 uint32_t g_meshGen = 0;
+std::shared_ptr<const Proxy> g_openUsed; // (physical indoor lamps) the proxy whose open-top build is the kept atlas's occluders
+std::atomic<uint32_t> g_openGen{0};      // its generation (0: none uploaded)
 uint64_t g_atlasKey = 0;
 uint64_t g_lastParams = 0;
 DWORD g_frame = 0, g_lastFrame = 0;
@@ -1125,7 +1132,7 @@ struct BakeLampW {
 
 RtLampGpu::DeviceCalls DeviceCallsOfGame() { return GameCalls(); }
 
-bool WorldLaw(uintptr_t light, uint64_t lot, bool reachOn, GpuLampLaw::Lamp& out, int& type, int& regRoom) {
+bool WorldLaw(uintptr_t light, uint64_t lot, bool reachOn, GpuLampLaw::Lamp& out, int& type, int& regRoom, const float* lotXf) {
     LampRead r;
     if (!ReadLamp(light, r)) return false;
     // (a tube: a segment the law reads, else its colour alone, ColourLaw; Real-time outdoor lamps' own draw takes no tube, Drawn)
@@ -1140,10 +1147,24 @@ bool WorldLaw(uintptr_t light, uint64_t lot, bool reachOn, GpuLampLaw::Lamp& out
     if (!cls || r.f.unmodelled || r.f.lot == 0 || r.f.lot != lot || !(r.f.flags & 0x01)) return false;
     Xform id{};
     for (int k = 0; k < 4; k++) id.r[k][k] = 1.0f;
+    if (lotXf) std::memcpy(&id, lotXf, sizeof id);
     ToLaw(r, ReadConsts(), id, reachOn, out);
     type = r.f.type, regRoom = r.f.room;
     return true;
 }
+
+bool LotXform(uintptr_t mgr, float out[16]) {
+    if (!mgr) return false;
+    __try {
+        std::memcpy(out, reinterpret_cast<const void*>(mgr + 0xE0), 64);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    for (int i = 0; i < 16; i++)
+        if (!std::isfinite(out[i])) return false;
+    return true;
+}
+uint32_t KeptMeshGen() { return g_openGen.load(std::memory_order_relaxed); }
 
 bool LowLampLift() { return TerrainBakeRule::LowLampLift(); }
 void SetLowLampLift(bool on) { TerrainBakeRule::g_lowLampLift.store(on, std::memory_order_relaxed); }
@@ -1317,6 +1338,7 @@ void Frame(IDirect3DDevice9* dev) {
         bool ok = true;
         for (int i = 0; i < RtLampGpu::kShaderCount && ok; i++) {
             const auto id = static_cast<RtLampGpu::ShaderId>(i);
+            if (g_compiled.code[i].empty() && RtLampGpu::IsPhysical(id)) continue; // (CompileAll logged it)
             ok = RtLampGpu::IsVertex(id) ? SUCCEEDED(dev->CreateVertexShader(g_compiled.code[i].data(), reinterpret_cast<IDirect3DVertexShader9**>(&made[i])))
                                          : SUCCEEDED(dev->CreatePixelShader(g_compiled.code[i].data(), reinterpret_cast<IDirect3DPixelShader9**>(&made[i])));
         }
@@ -1332,6 +1354,7 @@ void Frame(IDirect3DDevice9* dev) {
             return off("its shaders could not be made (tried " + std::to_string(g_makeFails) + " of 5 times): " + why);
         }
         g_eng = std::move(eng);
+        g_openUsed.reset(), g_openGen.store(0); // (a new engine: no kept atlas occluders yet)
         LOG_INFO("[RtOutdoorLamps] Shaders made: cube shadow maps 6 x 256^2 per lamp, 16 lamps an atlas");
     }
     // the active lot
@@ -1409,6 +1432,17 @@ void Frame(IDirect3DDevice9* dev) {
             g_mesh = RtLampProxy::Mesh{};
             ApexMemory::NoteReleased("Real-time outdoor lamps: the occluders' CPU copy once uploaded", bytes);
         }
+    }
+    // (physical indoor lamps) the kept shadow tiles' occluders: the same lot with open tops over rooms open to above
+    if (OutdoorDelta::RoomLampPhysical() && proxy != g_openUsed) {
+        RtLampProxy::Mesh open;
+        RtLampProxy::Build(proxy->lot, open, true);
+        std::string err;
+        g_openUsed = proxy;
+        const bool up = g_eng->SetProxy(dev, open, err, true);
+        g_openGen.store(up ? proxy->gen : 0);
+        LOG_INFO(up ? std::format("[RtOutdoorLamps] Physical indoor lamps' occluders: {} triangles with open tops, generation {}", open.tris.size(), proxy->gen)
+                    : "[RtOutdoorLamps] Physical indoor lamps' occluders could not be uploaded: " + err);
     }
     // the rules every relit texel follows (a change relights every map)
     const GameConsts gc = ReadConsts();
@@ -2399,7 +2433,7 @@ void Frame(IDirect3DDevice9* dev) {
             ok = g_eng->AddKeptParts(dev, s.kvb, s.kRanges, s.kLaws.data(), s.kOk.data(), s.thr, s.map.w, s.map.h, err, s.kX);
         p.keptX = !roomsOnly && s.kvb && !s.kRanges.empty() && s.kX;
         ok = ok && (roomsOnly ? g_eng->CopyTexture(dev, s.game, s.copy, s.map.w, s.map.h, err) : g_eng->Compose(dev, s.map, s.game, s.copy, p, err, s.scale));
-        if (ok && !s.mgr) GpuRoomLamps::ComposeOver(dev, *g_eng, rns[s.story].mgr, s.cls, s.m, s.game, s.copy, s.map.w, s.map.h);
+        if (ok && !s.mgr) GpuRoomLamps::ComposeOver(dev, *g_eng, rns[s.story].mgr, s.cls, s.m, s.game, s.copy, s.map.w, s.map.h, p);
         s.scaled = ok && s.scale;
         if (!ok) {
             s.relit = false;
@@ -2562,6 +2596,7 @@ void OnPresent(IDirect3DDevice9* dev) {
         DropAll(dev, "lighting restart", false); // the paced restart owns room scheduling
         g_on.store(false);
         g_proxyUsed.reset();
+        g_openUsed.reset(), g_openGen.store(0);
         {
             std::lock_guard<std::mutex> lock(g_proxyMx);
             g_proxyEpoch.fetch_add(1, std::memory_order_relaxed);
@@ -2614,6 +2649,7 @@ void OnWorldChanged() {
     PublishNeighbours(0, {}, false);
     DropAll(g_dev, "the world changed");
     g_proxyUsed.reset();
+    g_openUsed.reset(), g_openGen.store(0);
     {
         std::lock_guard<std::mutex> lk(g_proxyMx);
         g_proxyEpoch.fetch_add(1, std::memory_order_relaxed);

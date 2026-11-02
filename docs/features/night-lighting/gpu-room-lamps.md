@@ -202,13 +202,25 @@ lamp's position, not on its colour or intensity.
    out of the cube map: its soft shadows are the game's 3D test, evaluated analytically. `rt_lamps_test` `PhysKeptCheck`:
    Occlude3D within 0.00003 of `RoomLightTests::occlude` at 12,952 tested point x lamp pairs (98.4% bit for bit), shadow shares
    within 2/255 of the reference at 97.4-100% per lamp, 5,472 relit texels 0/255 from the CPU (floor and blurred wall atlas).
+19. Physical model, stage 3b, part 1 (02/11): physical kept rooms > 0 are drawn. `KeptRooms` lists them again; `BuildKeptMap`
+   gives one phys point per texel (world position; bit 8 when its batch ran the 3D test), every lamp of the solve with a law
+   (cross-room ones included, so every lamp the base lacks is drawn) with mult x norm scale (`KeepEnd`: a lamp registered in
+   another room of the story scales by `InnerLight::NormScale` of the two rooms' normalisations), and the room's blocker table.
+   `GpuRoomLamps` takes the points and laws to the lot's space (the story manager's +0xE0, `RtOutdoorLamps::LotXform`), keeps
+   16 shadow tiles (least recently used, kept while the lamp stays put and the occluders are the same) rendered from the
+   open-top occluders (`RtLampProxy::Build(lot, mesh, true)`, uploaded as the engine's tile proxy, `SetProxy(..., true)`), and
+   draws with `RelightKeptPhys` (no reach: indoor maps). Any failure (more than 16 lamps, no occluders, a device error) logs
+   `not drawn (why)` and leaves the game's map. The three physical shaders are optional: missing from the shader cache with no
+   compiler, the engine still runs the outdoor lamps and physical rooms keep the game's maps. Lamp edits of physical rooms
+   still take the solves; room 0 is not physical yet. `rt_lamps_test` 58 checks (the tiles from the tile proxy, the engine
+   without the physical shaders).
 
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Keep indoor lamps for GPU | `gpuRoomLampsCapture` | bool | off | | Developer only, with Lamp lighting: Instant. Keeps each room solve of the active lot and draws its lamps on the GPU; colour, intensity and switch edits of lamps drawn in every room listing them solve no room at once (the directional maps objects read are written again at the end of the room update) (their rooms are solved 2 s after the last edit); with the probe on, logs the self-checks |
-| Indoor lamp model | `roomLampModel` | enum | replica | replica, physical | Developer only, shown with Keep indoor lamps for GPU on. Replica: everything above. Physical (stage 1 of the physical model): see 16; nothing is drawn from it yet. A change drops the kept rooms and sends the active lot's rooms to their solve |
+| Indoor lamp model | `roomLampModel` | enum | replica | replica, physical | Developer only, shown with Keep indoor lamps for GPU on. Replica: everything above. Physical: see 16 to 19; rooms > 0 drawn from their lamps' laws, room 0 and lamp edits still the game's. A change drops the kept rooms and sends the active lot's rooms to their solve |
 
 ## Limitations
 
@@ -281,7 +293,9 @@ lamp's position, not on its colour or intensity.
 - **Logs** (`[GpuRoomLamps]`): `Story S room R class C: kept N texels, K drawn lamps, P parts (U never tested by the game),
   X MB; M rooms kept, Y MB of 192 MB`; physical: `Story S room R class C: kept N texels (physical: no parts), X MB; M rooms, Y
   MB of 192`, `Story S room 0: base without K lot lamps (physical)` (from `ExportRoom0`), `Model physical|replica: ...`, `not
-  kept (the model changed during its solve)`; `not kept (the 192 MB budget: ...)`, `not kept (no memory)`, `not kept (why)`; with
+  kept (the model changed during its solve)`; `Story S room R class C <map>: not drawn (physical: ...)`; with the probe,
+  `... physical vs the game's last solve: N texels, P% within 2/255, mean M levels, X% brighter > 8 levels, Y% darker > 8
+  levels`; `not kept (the 192 MB budget: ...)`, `not kept (no memory)`, `not kept (why)`; with
   the probe on, `Story S room R class C self-check: N texels lit, P% within 2/255 of the solve's sum recomposed from the kept
   parts (L lamps without a law now)`, then up to three of the worst texels: position, map, the solve's sum and the
   recomposed one, and the texel's largest kept part (lamp, entries, A, B, the law there, bits: 1 early-out, 2 never tested,

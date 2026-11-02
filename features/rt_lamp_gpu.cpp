@@ -60,6 +60,7 @@ const char* EntryOf(ShaderId id) {
     return id >= 0 && id < kShaderCount ? kNames[id] : "";
 }
 bool IsVertex(ShaderId id) { return id == kShadowVs || id == kTexelVs; }
+bool IsPhysical(ShaderId id) { return id == kAccPhysPs || id == kAccPhysFastPs || id == kT3dPs; }
 
 void FaceTexel(const float d[3], int face, int& f, int& x, int& y) {
     const float ax = std::fabs(d[0]), ay = std::fabs(d[1]), az = std::fabs(d[2]);
@@ -85,6 +86,7 @@ bool Engine::Init(IDirect3DDevice9* dev, void* const* shaders, int face, std::st
     for (int i = 0; i < kShaderCount; i++) {
         if (IsVertex(static_cast<ShaderId>(i))) continue;
         ps_[i] = static_cast<IDirect3DPixelShader9*>(shaders[i]);
+        if (!ps_[i] && IsPhysical(static_cast<ShaderId>(i))) continue; // (optional: RelightKeptPhys refuses without them)
         if (!ps_[i]) {
             err = std::format("shader {} missing", EntryOf(static_cast<ShaderId>(i)));
             ReleaseAll();
@@ -145,6 +147,8 @@ void Engine::ReleaseAll() {
     Rel(texelDecl_);
     Rel(shadowDecl_);
     Rel(proxy_);
+    Rel(tileProxy_);
+    tileProxyTris_ = 0;
     Rel(zeros_);
     Rel(tableSys_);
     tableCap_ = 0;
@@ -161,22 +165,25 @@ size_t Engine::DefaultBytes() const {
     if (acc_[0]) b += static_cast<size_t>(scratchW_) * scratchH_ * 16 * 2;
     if (scratch_[0]) b += static_cast<size_t>(scratchW_) * scratchH_ * 4 * 5;
     b += static_cast<size_t>(blkW_) * blkH_ * 16 + static_cast<size_t>(t3W_) * t3H_ * 16;
+    if (tiles_) b += static_cast<size_t>(6 * face_) * tileRows_ * face_ * ((tilesFmt_ == D3DFMT_G32R32F ? 8 : 4) + 4); // the kept atlas + D24X8
     return b;
 }
 
-bool Engine::SetProxy(IDirect3DDevice9* dev, const RtLampProxy::Mesh& mesh, std::string& err) {
-    Rel(proxy_);
-    proxyTris_ = 0;
+bool Engine::SetProxy(IDirect3DDevice9* dev, const RtLampProxy::Mesh& mesh, std::string& err, bool tiles) {
+    IDirect3DVertexBuffer9*& vb = tiles ? tileProxy_ : proxy_;
+    size_t& count = tiles ? tileProxyTris_ : proxyTris_;
+    Rel(vb);
+    count = 0;
     if (mesh.tris.empty()) return true;
     // each vertex: its position and its triangle's normal (the shadow keeps how far the surface's plane passes from the lamp)
     const UINT bytes = static_cast<UINT>(mesh.tris.size() * 3 * 24);
-    if (FAILED(dev->CreateVertexBuffer(bytes, D3DUSAGE_WRITEONLY, 0, D3DPOOL_MANAGED, &proxy_, nullptr)) || !proxy_) {
+    if (FAILED(dev->CreateVertexBuffer(bytes, D3DUSAGE_WRITEONLY, 0, D3DPOOL_MANAGED, &vb, nullptr)) || !vb) {
         err = "proxy vertex buffer not created";
         return false;
     }
     void* p = nullptr;
-    if (FAILED(proxy_->Lock(0, bytes, &p, 0)) || !p) {
-        Rel(proxy_);
+    if (FAILED(vb->Lock(0, bytes, &p, 0)) || !p) {
+        Rel(vb);
         err = "proxy vertex buffer not locked";
         return false;
     }
@@ -192,8 +199,8 @@ bool Engine::SetProxy(IDirect3DDevice9* dev, const RtLampProxy::Mesh& mesh, std:
             for (int c = 0; c < 3; c++) *out++ = n[c];
         }
     }
-    proxy_->Unlock();
-    proxyTris_ = mesh.tris.size();
+    vb->Unlock();
+    count = mesh.tris.size();
     return true;
 }
 
@@ -732,7 +739,7 @@ bool Engine::EnsureTiles(IDirect3DDevice9* dev, int rows, std::string& err) {
     return true;
 }
 bool Engine::RenderShadowTile(IDirect3DDevice9* dev, const float pos[3], int tile, float farDist, std::string& err) {
-    return RenderShadowTileRanges(dev, pos, tile, farDist, {{0u, static_cast<UINT>(proxyTris_)}}, err);
+    return RenderShadowTileRanges(dev, pos, tile, farDist, {{0u, static_cast<UINT>(tileProxy_ ? tileProxyTris_ : proxyTris_)}}, err);
 }
 bool Engine::RenderShadowTileRanges(IDirect3DDevice9* dev, const float pos[3], int tile, float farDist, const std::vector<std::pair<UINT, UINT>>& ranges, std::string& err) {
     if (!ready_ || !tiles_ || !tilesDepth_ || tile < 0 || tile >= tileRows_) {
@@ -753,12 +760,15 @@ bool Engine::RenderShadowTileRanges(IDirect3DDevice9* dev, const float pos[3], i
     const D3DVIEWPORT9 row{0, static_cast<DWORD>(tile * face_), static_cast<DWORD>(6 * face_), static_cast<DWORD>(face_), 0.0f, 1.0f};
     c_.SetViewport(dev, &row);
     dev->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0xFFFFFFFF, 1.0f, 0);
-    if (proxy_ && proxyTris_) {
+    // (the tiles' own occluders when set: physical indoor lamps' proxy with open tops; else the outdoor one)
+    IDirect3DVertexBuffer9* const vb = tileProxy_ ? tileProxy_ : proxy_;
+    const size_t tris = tileProxy_ ? tileProxyTris_ : proxyTris_;
+    if (vb && tris) {
         dev->SetRenderState(D3DRS_ZENABLE, TRUE);
         dev->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
         dev->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
         dev->SetVertexDeclaration(shadowDecl_);
-        dev->SetStreamSource(0, proxy_, 0, 24);
+        dev->SetStreamSource(0, vb, 0, 24);
         c_.SetVertexShader(dev, vs_);
         c_.SetPixelShader(dev, ps_[kShadowPs]);
         const float A = farDist / (farDist - kNear), B = -kNear * farDist / (farDist - kNear);
@@ -773,8 +783,8 @@ bool Engine::RenderShadowTileRanges(IDirect3DDevice9* dev, const float pos[3], i
             const D3DVIEWPORT9 vp{static_cast<DWORD>(f * face_), static_cast<DWORD>(tile * face_), static_cast<DWORD>(face_), static_cast<DWORD>(face_), 0.0f, 1.0f};
             c_.SetViewport(dev, &vp);
             for (const auto& [first, count] : ranges) {
-                if (!count || first >= proxyTris_) continue;
-                c_.DrawPrimitive(dev, D3DPT_TRIANGLELIST, first * 3, static_cast<UINT>(std::min<size_t>(count, proxyTris_ - first)));
+                if (!count || first >= tris) continue;
+                c_.DrawPrimitive(dev, D3DPT_TRIANGLELIST, first * 3, static_cast<UINT>(std::min<size_t>(count, tris - first)));
                 stats_.shadowDraws++;
             }
         }
@@ -1164,6 +1174,7 @@ bool Engine::RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLa
 bool Engine::RelightKeptPhys(IDirect3DDevice9* dev, const KeptMapGpu& k, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,
                              const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err) {
     if (!out) return err = "nothing to relight", false;
+    if (!ps_[kAccPhysPs] || !ps_[kAccPhysFastPs] || !ps_[kT3dPs]) return err = "the physical shaders are missing (not in the shader cache, no compiler)", false;
     if (!KeptReady(dev, k, w, h, err)) return false;
     if (!tiles_ || !blk_) return err = "the kept shadow atlas or the blocker table is missing", false;
     if (rooms.empty()) return err = "no room table", false;

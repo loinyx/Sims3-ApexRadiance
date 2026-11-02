@@ -2558,7 +2558,7 @@ bool PhysKeptCheck() {
     for (int l = 0; l < nL; l++) tiles[l] = l;
     RtLampGpu::Params prm;
     prm.thr = 3.0f / 255.0f;
-    bool ok = eng.Init(g_dev, g_shaders, 256, err) && eng.SetProxy(g_dev, mesh, err);
+    bool ok = eng.Init(g_dev, g_shaders, 256, err) && eng.SetProxy(g_dev, RtLampProxy::Mesh{}, err) && eng.SetProxy(g_dev, mesh, err, true); // (as in game: the tiles' own occluders)
     std::vector<std::vector<float>> t3gpu(nL), lawSh(nL);
     std::vector<RtLampGpu::TexelVertex> untested = d.phys;
     for (RtLampGpu::TexelVertex& v : untested) v.p[3] = static_cast<float>(16 * (static_cast<int>(v.p[3]) / 16));
@@ -2785,6 +2785,21 @@ bool PhysKeptCheck() {
     Check(n > 0 && within1 >= static_cast<long>(0.999 * n) && maxDiff <= 2, "physical: the GPU's texels within 1/255 of the CPU's (99.9%), none past 2/255");
     Check(clearN > 0 && clearWithin1 >= static_cast<long>(0.995 * clearN), "physical: fewer than 99.5% of unshadowed texels within 1/255 of the CPU's");
     Check(untouchedBad == 0, "physical: a texel no kept texel holds changed");
+    // without the physical shaders (not in the shader cache, no compiler): the engine still starts (the outdoor lamps) and
+    // RelightKeptPhys refuses, so the game's map stays
+    {
+        void* some[RtLampGpu::kShaderCount];
+        for (int i = 0; i < RtLampGpu::kShaderCount; i++) some[i] = RtLampGpu::IsPhysical(static_cast<RtLampGpu::ShaderId>(i)) ? nullptr : g_shaders[i];
+        RtLampGpu::Engine bare(RtLampGpu::PlainCalls());
+        std::string why;
+        RtLampGpu::KeptMapGpu none;
+        none.w = none.h = none.accW = none.accH = 1;
+        const bool init = bare.Init(g_dev, some, 64, why);
+        const bool refused = init && !bare.RelightKeptPhys(g_dev, none, nullptr, nullptr, nullptr, 0, rooms, prm, nullptr, reinterpret_cast<IDirect3DTexture9*>(1), 1, 1, why) &&
+                             why.find("physical shaders") != std::string::npos;
+        std::printf("  without the physical shaders: Init %s, RelightKeptPhys %s (%s)\n", init ? "ok" : "failed", refused ? "refused" : "ran", why.c_str());
+        Check(init && refused, "physical: the engine without the physical shaders");
+    }
     return true;
 }
 

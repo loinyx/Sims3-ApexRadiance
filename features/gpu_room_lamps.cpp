@@ -6,6 +6,7 @@
 #include "rt_lamp_gpu.h"
 #include "rt_outdoor_lamps.h"
 #include "outdoor_delta.h"
+#include "rt_lamp_model.h"
 #include "apex_log.h"
 #include <windows.h>
 #include <algorithm>
@@ -44,7 +45,25 @@ struct Entry {
     std::vector<char> colourOnly; // per lamp of `lamps`: its law is its colour alone (a TubeLight without a segment)
     LARGE_INTEGER relitAt{};
     uint32_t relitFrame = 0;
+    // (physical indoor lamps) lamps' mult x norm scale, their laws in the lot's space (shadow tiles, law) and positions in the
+    // world's (the game's 3D test), the furniture blockers, the lot's space
+    bool physical = false;
+    std::vector<float> physMult;
+    std::vector<RtLampModel::Lamp> lotLaws;
+    std::vector<std::array<float, 3>> world;
+    RtLampGpu::BlockerTable blockers;
+    float blkHeader = -1.0f;
+    float xf[16] = {};
 };
+// (physical indoor lamps) the kept shadow atlas: a tile per lamp, kept while the lamp stays put and the occluders are the same
+constexpr int kTiles = 16; // (6 x 256 by 16 x 256: within a 4096 texture limit)
+struct Tile {
+    uintptr_t light = 0;
+    float pos[3] = {};
+    uint32_t gen = 0, used = 0;
+};
+std::array<Tile, kTiles> g_tiles;
+uint32_t g_tileUse = 0;
 std::atomic<uint32_t> g_frame{0}; // Real-time outdoor lamps' relight rounds (BeginFrame)
 std::map<std::tuple<const void*, int, int>, Entry> g_entries; // (room, class, map); render thread
 std::vector<OutdoorDelta::KeptRef> g_refs;
@@ -96,7 +115,8 @@ void SelfCheck(IDirect3DDevice9* dev, const Entry& e, IDirect3DTexture9* out, in
         if (LogAllowed()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {} GPU self-check: the relit map could not be read back", e.story, e.id, e.cls, kMapName[e.m]));
         return;
     }
-    long n = 0, within = 0;
+    long n = 0, within = 0, brighter = 0, darker = 0;
+    double sumD = 0.0;
     int alphaMax = 0;
     std::vector<std::pair<int, size_t>> worst;
     for (size_t j = 0; j < e.expect.size(); j++) {
@@ -109,6 +129,10 @@ void SelfCheck(IDirect3DDevice9* dev, const Entry& e, IDirect3DTexture9* out, in
         alphaMax = std::max(alphaMax, std::abs(static_cast<int>(game >> 24) - static_cast<int>(got >> 24)));
         n++;
         within += d <= 2;
+        int sd = 0; // (the channel furthest from the game's, signed: GPU brighter > 0)
+        for (int s = 0; s < 24; s += 8)
+            if (const int v = static_cast<int>((got >> s) & 0xFFu) - static_cast<int>((game >> s) & 0xFFu); std::abs(v) > std::abs(sd)) sd = v;
+        sumD += d, brighter += sd > 8, darker += sd < -8;
         if (d > 2 && (worst.size() < 3 || d > worst.back().first)) {
             worst.emplace_back(d, j);
             std::sort(worst.begin(), worst.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
@@ -119,6 +143,14 @@ void SelfCheck(IDirect3DDevice9* dev, const Entry& e, IDirect3DTexture9* out, in
     for (const auto& [d, j] : worst) {
         const uint32_t x = e.expect[j].first & 0xFFFFu, y = e.expect[j].first >> 16;
         ws += std::format("; {} levels at ({}, {}): game {:08X} GPU {:08X}", d, x, y, e.expect[j].second, px[static_cast<size_t>(y) * w + x]);
+    }
+    const auto pct = [&](long k) { return n ? 100.0 * static_cast<double>(k) / static_cast<double>(n) : 100.0; };
+    if (e.physical) {
+        if (LogAllowed())
+            LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {} physical vs the game's last solve: {} texels, {:.2f}% within 2/255, mean {:.2f} levels, "
+                                 "{:.2f}% brighter > 8 levels, {:.2f}% darker > 8 levels{}",
+                                 e.story, e.id, e.cls, kMapName[e.m], n, pct(within), n ? sumD / static_cast<double>(n) : 0.0, pct(brighter), pct(darker), ws));
+        return;
     }
     if (LogAllowed())
         LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {} GPU self-check: {} texels, {:.2f}% within 2/255 (alpha within {}/255) of the texels the game left{}",
@@ -204,8 +236,24 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
             RtLampGpu::KeptMapData d;
             std::string why;
             if (OutdoorDelta::BuildKeptMap(r.room, cls, r.version, m, d, why)) { // (else nothing of it in this map: an entry that draws nothing)
-                e.story = d.story, e.lot = d.lot, e.thr = d.thr;
-                if (RtLampGpu::Engine::UploadKept(dev, d, e.gpu)) {
+                e.story = d.story, e.lot = d.lot, e.thr = d.thr, e.physical = d.physical;
+                const bool space = !d.physical || RtOutdoorLamps::LotXform(mgr, e.xf);
+                if (space && d.physical) // (the points to the lot's space; base keeps the world position)
+                    for (RtLampGpu::TexelVertex& v : d.phys) {
+                        float p[3], n[3];
+                        for (int k = 0; k < 3; k++)
+                            p[k] = v.base[0] * e.xf[k] + v.base[1] * e.xf[4 + k] + v.base[2] * e.xf[8 + k] + e.xf[12 + k],
+                            n[k] = v.n[0] * e.xf[k] + v.n[1] * e.xf[4 + k] + v.n[2] * e.xf[8 + k];
+                        std::memcpy(v.p, p, sizeof p), std::memcpy(v.n, n, sizeof n);
+                    }
+                if (!space) {
+                    if (LogAllowed())
+                        LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: physical: the lot's space could not be read (left as the game's)", d.story, r.id, cls,
+                                             kMapName[m]));
+                } else if (RtLampGpu::Engine::UploadKept(dev, d, e.gpu)) {
+                    e.physMult = std::move(d.physMult);
+                    e.blockers = std::move(d.blockers);
+                    e.blkHeader = d.blkHeader;
                     e.ok = true;
                     e.lamps = std::move(d.lamps);
                     e.colourOnly = std::move(d.colourOnly);
@@ -218,6 +266,26 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
         }
         if (!e.ok) continue;
         int type = 0, reg = -1;
+        if (e.physical) { // (every lamp with its law now: a lamp gone or without a law adds nothing; no parts, so no move rule)
+            const uint32_t gen = RtOutdoorLamps::KeptMeshGen();
+            Mix(sig, &e.version, sizeof e.version), Mix(sig, &gen, sizeof gen);
+            any = true;
+            e.lotLaws.assign(e.lamps.size(), RtLampModel::Lamp{});
+            e.world.assign(e.lamps.size(), {});
+            e.lawOk.assign(e.lamps.size(), 0);
+            for (size_t l = 0; l < e.lamps.size(); l++) {
+                GpuLampLaw::Lamp w;
+                if (!RtOutdoorLamps::WorldLaw(e.lamps[l], e.lot, false, w, type, reg) ||
+                    !RtOutdoorLamps::WorldLaw(e.lamps[l], e.lot, false, e.lotLaws[l].law, type, reg, e.xf))
+                    continue;
+                e.lawOk[l] = 1;
+                e.lotLaws[l].mult = l < e.physMult.size() ? e.physMult[l] : 1.0f;
+                std::memcpy(e.world[l].data(), w.pos, sizeof w.pos);
+                Mix(sig, &e.lotLaws[l], sizeof e.lotLaws[l]);
+            }
+            Mix(sig, e.lawOk.data(), e.lawOk.size());
+            continue;
+        }
         // a lamp moved since its parts were kept (their shares follow its place): drawn with the law its parts were kept with (the
         // room's last parts as they were, never its law now over them) until a copy with its parts at its new place is kept (the
         // move worker) or the room is solved
@@ -258,7 +326,57 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
     return any || !g_refs.empty() ? sig : 0;
 }
 
-void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h) {
+namespace {
+// (physical indoor lamps) the entry's lamps drawn from their laws over its phys points (rt_lamp_gpu.h RelightKeptPhys): a shadow
+// tile per lamp with a law (rendered unless the atlas holds it), the room's furniture blockers, one room row (mult x norm scale,
+// no reach: indoor maps). False (err) leaves the game's map
+bool RelightPhys(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, Entry& e, const RtLampGpu::Params& base, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h,
+                 std::string& err) {
+    const uint32_t gen = RtOutdoorLamps::KeptMeshGen();
+    if (!gen) return err = "physical: no occluders with open tops uploaded", false;
+    std::vector<RtLampModel::Lamp> lamps;
+    std::vector<std::array<float, 3>> world;
+    std::vector<uintptr_t> lights;
+    for (size_t l = 0; l < e.lamps.size(); l++)
+        if (e.lawOk[l]) lamps.push_back(e.lotLaws[l]), world.push_back(e.world[l]), lights.push_back(e.lamps[l]);
+    const int n = static_cast<int>(lamps.size());
+    if (n > kTiles) return err = std::format("physical: {} lamps, the shadow atlas holds {}", n, kTiles), false;
+    if (eng.TileRows() == 0) g_tiles = {}; // (made again: no tile holds a shadow)
+    if (!eng.EnsureTiles(dev, kTiles, err)) return false;
+    std::vector<int> tiles(n, -1);
+    std::array<bool, kTiles> taken{};
+    g_tileUse++;
+    for (int i = 0; i < n; i++) // (a lamp's own tile when it holds its shadow now)
+        for (int t = 0; t < kTiles; t++)
+            if (const Tile& g = g_tiles[t]; !taken[t] && g.light == lights[i] && g.gen == gen && std::memcmp(g.pos, lamps[i].law.pos, sizeof g.pos) == 0) {
+                tiles[i] = t, taken[t] = true;
+                break;
+            }
+    for (int i = 0; i < n; i++) {
+        if (tiles[i] >= 0) continue;
+        int t = -1; // the least recently used tile no lamp of this map holds
+        for (int c = 0; c < kTiles; c++)
+            if (!taken[c] && (t < 0 || g_tiles[c].used < g_tiles[t].used)) t = c;
+        Tile& g = g_tiles[t];
+        g = Tile{};
+        if (!eng.RenderShadowTile(dev, lamps[i].law.pos, t, base.farDist, err)) return false;
+        g.light = lights[i], g.gen = gen;
+        std::memcpy(g.pos, lamps[i].law.pos, sizeof g.pos);
+        tiles[i] = t, taken[t] = true;
+    }
+    for (int i = 0; i < n; i++) g_tiles[tiles[i]].used = g_tileUse;
+    if (!eng.SetBlockers(dev, e.blockers, err)) return false;
+    std::vector<RtLampGpu::Engine::PhysRoom> rooms(1);
+    rooms[0].header = e.blkHeader;
+    for (const RtLampModel::Lamp& L : lamps) rooms[0].lamp.push_back({L.mult, 0.0f});
+    RtLampGpu::Params p = base;
+    p.thr = e.thr, p.reachOn = false, p.mask = false, p.maskAllGpu = false, p.keptX = false, p.debugLamp = -1;
+    return eng.RelightKeptPhys(dev, e.gpu, lamps.data(), tiles.data(), reinterpret_cast<const float (*)[3]>(world.data()), n, rooms, p, game, out, w, h, err);
+}
+} // namespace
+
+void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h,
+                 const RtLampGpu::Params& p) {
     for (auto& [key, e] : g_entries) {
         if (!e.ok || e.mgr != mgr || e.cls != cls || e.m != m) continue;
         const void* room = std::get<0>(key);
@@ -271,7 +389,7 @@ void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
             continue;
         }
         std::string err;
-        if (!eng.RelightKept(dev, e.gpu, e.laws.data(), e.lawOk.data(), e.thr, game, out, w, h, err)) {
+        if (e.physical ? !RelightPhys(dev, eng, e, p, game, out, w, h, err) : !eng.RelightKept(dev, e.gpu, e.laws.data(), e.lawOk.data(), e.thr, game, out, w, h, err)) {
             if (LogAllowed()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: not drawn ({})", e.story, e.id, e.cls, kMapName[m], err));
             Drop(e, room);
             continue;
@@ -292,6 +410,7 @@ void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
 }
 
 void ReleaseAll() {
+    g_tiles = {};
     for (auto& [key, e] : g_entries) e.gpu.Release();
     g_entries.clear();
     g_bytes = 0;

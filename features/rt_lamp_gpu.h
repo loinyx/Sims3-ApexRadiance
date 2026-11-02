@@ -48,6 +48,8 @@ enum ShaderId {
 };
 const char* EntryOf(ShaderId id);
 bool IsVertex(ShaderId id);
+// The physical indoor lamps' shaders: optional (Init without them; RelightKeptPhys then refuses and the game's map stays)
+bool IsPhysical(ShaderId id);
 
 #pragma pack(push, 1)
 struct TexelVertex {
@@ -137,6 +139,12 @@ struct KeptMapData {
         GpuLampLaw::Lamp law;
     };
     std::vector<RoomLamp> roomLamps;
+    // (physical indoor lamps) phys points instead of parts; `lamps` = every lamp of the solve with a law, physMult = its mult x norm
+    // scale there; the room's furniture blockers (its records' header row, blkHeader)
+    bool physical = false;
+    std::vector<float> physMult;
+    BlockerTable blockers;
+    float blkHeader = -1.0f;
 };
 struct KeptMapGpu { // DEFAULT pool (made again after a device reset)
     int w = 0, h = 0, accW = 0, accH = 0, layoutW = 0, layoutH = 0;
@@ -168,8 +176,9 @@ class Engine {
     D3DFORMAT AtlasFormat() const { return atlasFmt_; }
     int Face() const { return face_; }
 
-    // The proxy (lot space); false when it has no triangle
-    bool SetProxy(IDirect3DDevice9* dev, const RtLampProxy::Mesh& mesh, std::string& err);
+    // The proxy (lot space); false when it has no triangle. tiles: the kept atlas's own occluders instead (physical indoor lamps:
+    // RtLampProxy::Build with open tops); RenderShadowTile* use them when set, else the proxy
+    bool SetProxy(IDirect3DDevice9* dev, const RtLampProxy::Mesh& mesh, std::string& err, bool tiles = false);
     size_t ProxyTris() const { return proxyTris_; }
     // Lamps 0 .. n - 1 (n <= kAtlasLamps; lot space) into the atlas tiles
     bool RenderShadows(IDirect3DDevice9* dev, const float (*pos)[3], int n, float farDist, std::string& err);
@@ -278,6 +287,8 @@ class Engine {
     IDirect3DVertexDeclaration9* shadowDecl_ = nullptr;
     IDirect3DVertexBuffer9* proxy_ = nullptr; // MANAGED
     size_t proxyTris_ = 0;
+    IDirect3DVertexBuffer9* tileProxy_ = nullptr; // MANAGED (SetProxy tiles)
+    size_t tileProxyTris_ = 0;
     IDirect3DTexture9* atlas_ = nullptr;      // G16R16F (or G32R32F) render target
     D3DFORMAT atlasFmt_ = D3DFMT_UNKNOWN;
     IDirect3DSurface9* atlasDepth_ = nullptr; // D24X8

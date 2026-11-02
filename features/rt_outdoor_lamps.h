@@ -68,7 +68,12 @@ bool CoversLamp(const void* room0, uintptr_t light);
 // Any thread: the law the GPU draws `light` with, in world space (the lamp classes 3, 4, 5 and 11 of lot `lot`, alive, a
 // shade the law describes; a TubeLight 6 with a segment, GpuLampLaw::Tube, and the area lights 9 and 10, GpuLampLaw::Area, which only the kept rooms draw); false for any other light. regRoom = the room it is registered in (0 outdoors). For the
 // developer's room lamp probe (OutdoorDelta::SetRoomProbe)
-bool WorldLaw(uintptr_t light, uint64_t lot, bool reachOn, GpuLampLaw::Lamp& out, int& type, int& regRoom);
+// lotXf (16 floats, LotXform): the law in that lot space instead (physical indoor lamps' shadow tiles)
+bool WorldLaw(uintptr_t light, uint64_t lot, bool reachOn, GpuLampLaw::Lamp& out, int& type, int& regRoom, const float* lotXf = nullptr);
+// Any thread: a story manager's lot space (its +0xE0 row-major 4x4: world row vector x it = lot), false when unreadable
+bool LotXform(uintptr_t mgr, float out[16]);
+// Render thread: the generation of the occluders the kept shadow tiles use (physical indoor lamps' open tops), 0 none
+uint32_t KeptMeshGen();
 // Any thread (GPU room lamps): a lamp of lot `lot` WorldLaw gives no law (a tube without a segment) whose evaluation is its colour (+0xE0) times a share its
 // colour does not change: a TubeLight (type 6, 0x006BFA70). colour: that colour now; geo: a signature of what the share reads
 // (intensity, the tube's ends and length, range): an edit that changes it is not a colour edit. False for any other light

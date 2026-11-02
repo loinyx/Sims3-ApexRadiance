@@ -31,6 +31,7 @@
 #include "room_light_queue.h"
 #include "room_map_dither.h"
 #include "room_lamp_move.h"
+#include "inner_retry.h"
 #include "lamp_mark_filter.h"
 #include "apex_log.h"
 #include "apex_paths.h"
@@ -191,6 +192,10 @@ struct KeptLamp {
     std::vector<Mask> mask;
     // (a kept room) its parts were carried from the room's earlier kept solve while it was switched off (CarryOff)
     bool carried = false;
+    // (physical indoor lamps) its evaluations per texel (the list's count, LampRec::mult) and its scale in this room: a lamp
+    // registered in another room of the story shines at its own room's normalisation (InnerLight::NormScale, InnerNormScaleAt)
+    uint8_t mult = 1;
+    float normK = 1.0f;
 };
 struct Record {
     uint32_t version = 0; // (Real-time outdoor lamps) changes whenever the kept parts or texels change
@@ -1382,7 +1387,7 @@ bool RoomLampCapture() { return g_capture.load(std::memory_order_relaxed); }
 void SetRoomLampPhysical(bool on) {
     if (g_physical.exchange(on) == on) return;
     g_keptClear.store(true); // (the other model's kept rooms go; each room is kept again at its next solve)
-    LOG_INFO(on ? "[GpuRoomLamps] Model physical: kept rooms keep no parts; physical: drawing not implemented yet (the game's texels stay shown)"
+    LOG_INFO(on ? "[GpuRoomLamps] Model physical: kept rooms keep no parts and are drawn from their lamps' laws (rooms > 0; room 0 and lamp edits still the game's)"
                 : "[GpuRoomLamps] Model replica: kept rooms keep each lamp's parts");
 }
 bool RoomLampPhysical() { return g_physical.load(std::memory_order_relaxed); }
@@ -2278,10 +2283,11 @@ void ClearKept() {
 // The law a light is kept with (any thread): the GPU's law (RtOutdoorLamps::WorldLaw; a TubeLight's: GpuLampLaw::Tube), else its
 // colour alone (RtOutdoorLamps::ColourLaw: a TubeLight without a segment, whose evaluation 0x006BFA70 is its colour +0xE0 x a share its colour does not
 // change); false: it has neither (its light stays in the base)
-bool LawOfLight(uintptr_t light, uint64_t lot, KeptLamp& kl) {
+bool LawOfLight(uintptr_t light, uint64_t lot, KeptLamp& kl, int* regRoom = nullptr) {
     int type = 0, reg = -1;
     kl.light = light;
     if (RtOutdoorLamps::WorldLaw(light, lot, false, kl.law, type, reg)) {
+        if (regRoom) *regRoom = reg;
         kl.type = type, kl.colourOnly = false, kl.geo = 0;
         std::memcpy(kl.pos, kl.law.pos, sizeof kl.pos);
         return true;
@@ -2861,14 +2867,30 @@ void KeepEnd(const BYTE* room) {
         for (const Capture::ProbeHook& h : c.probeHook)
             if (h.texel < n) hooks[h.light].push_back(&h);
         std::vector<float> gotSum(n, 0.0f);
+        float normHere = 1.0f;
+        if (c.phys && !rr.outdoor) CopyBytes(&normHere, room + 0x160, sizeof normHere);
+        const uintptr_t tracker = c.phys ? RtOutdoorLamps::TrackerOf(room) : 0;
         for (const auto& [light, hs] : hooks) {
             KeptLamp kl;
+            int reg = -1;
             // (not drawn: its light stays in the base; physical: so does a light whose law is its colour alone, it has no place)
-            if (!LawOfLight(light, r.lot, kl) || (c.phys && kl.colourOnly)) {
+            if (!LawOfLight(light, r.lot, kl, &reg) || (c.phys && kl.colourOnly)) {
                 k->baked.push_back(light);
                 continue;
             }
             const LampRec* lr = got.count(light) ? got[light] : nullptr;
+            if (c.phys) {
+                int evals = 1;
+                for (const Capture::ProbeHook* h : hs) evals = std::max(evals, static_cast<int>(h->evals));
+                kl.mult = static_cast<uint8_t>(std::clamp(lr ? lr->mult : evals, 1, 255));
+                // shortcut: the lamp's room is looked up on this story only (a lamp of another story keeps 1), until S4 reads the record's innerSrc
+                if (reg > 0 && reg != rr.id && tracker)
+                    if (const void* src = LevelLightShare::RoomOf(tracker, rr.story, reg)) {
+                        float normSrc = 1.0f;
+                        if (CopyBytes(&normSrc, static_cast<const BYTE*>(src) + 0x160, sizeof normSrc))
+                            kl.normK = std::isfinite(normSrc) && std::isfinite(normHere) ? InnerLight::NormScale(normSrc, normHere, rr.outdoor) : 1.0f;
+                    }
+            }
             if (lr)
                 for (const Contrib& p : lr->parts)
                     if (p.texel < n)
@@ -4398,7 +4420,7 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move
             if (const auto it = g_kept.find(KeyOf(room, rr.cls)); it != g_kept.end()) k = it->second;
         }
         if (!k) return refuse(rr, "no kept solve of its class");
-        if (k->physical) return refuse(rr, "physical: drawing not implemented yet");
+        if (k->physical) return refuse(rr, "physical: lamp edits are not taken yet (the room's solve redraws it)");
         if (!k->editable) return refuse(rr, k->tailWhy ? k->tailWhy : "a wall texel the GPU does not blur");
         if (std::find(k->baked.begin(), k->baked.end(), light) != k->baked.end()) return refuse(rr, "its kept solve has the lamp in its base");
         for (const KeptLamp& kl : k->lamps) {
@@ -4495,8 +4517,7 @@ void KeptRooms(uintptr_t mgr, int cls, std::vector<KeptRef>& out) {
     out.clear();
     std::lock_guard<std::mutex> lk(g_keptMx);
     for (const auto& [key, k] : g_kept)
-        // (physical: drawing not implemented yet; with no parts its maps keep the game's texels)
-        if (k->mgr == mgr && k->cls == cls && !k->physical && !k->tailWhy && k->tail.size() == k->texels.size())
+        if (k->mgr == mgr && k->cls == cls && !k->tailWhy && k->tail.size() == k->texels.size())
             out.push_back(KeptRef{reinterpret_cast<const void*>(k->room), k->id, k->version});
 }
 // What the GPU draws of map m of a kept room (render thread; the kept room is never changed once kept, so it is read without
@@ -4542,6 +4563,25 @@ bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu:
         }
         if (d.parts.size() > first)
             d.lamps.push_back(l.light), d.colourOnly.push_back(l.colourOnly ? 1 : 0), d.ranges.emplace_back(first, static_cast<UINT>(d.parts.size()) - first);
+    }
+    // (physical) every texel of the map at its place in the sum's layout, in world space (gpu_room_lamps.cpp takes p and n to the
+    // lot's space): its batch's 3D test switch (bit 8), one room slot; every lamp of the solve with a law, its mult x norm scale
+    if (k.physical) {
+        d.physical = true;
+        std::vector<uint8_t> tested(n, 0);
+        for (const BatchRec& b : k.batches)
+            for (uint32_t j = 0; j < b.count && b.first + j < n; j++) tested[b.first + j] = b.flags[1] != 0;
+        for (uint32_t i = 0; i < n; i++) {
+            if (local[i] == kNoSrc) continue;
+            const float* s = sample(i);
+            RtLampGpu::TexelVertex v{};
+            v.x = accX(i), v.y = accY(i), v.w = 1.0f;
+            for (int q = 0; q < 3; q++) v.p[q] = v.base[q] = s[q], v.n[q] = s[4 + q];
+            v.p[3] = tested[i] ? 8.0f : 0.0f;
+            d.phys.push_back(v);
+        }
+        d.blkHeader = static_cast<float>(d.blockers.Append(k.tests));
+        for (const KeptLamp& l : k.lamps) d.lamps.push_back(l.light), d.physMult.push_back(static_cast<float>(l.mult) * l.normK);
     }
     // a texel's compose point at (x, y) of its target (RtLampModel::KeptTexel's inputs)
     const auto texel = [&](uint32_t i, int x, int y) {
