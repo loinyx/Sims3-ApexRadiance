@@ -359,6 +359,17 @@ uint64_t BaseHash(const Record& r) {
                 }
         }
     }
+    // (GPU room lamps) room 0's kept lamps are exported with the base (Room0Export::kept0): a solve that keeps another set of
+    // them, or their parts elsewhere, over the same base is a new export. Without them a lamp that came into room 0's list over
+    // an unchanged base was never uploaded, so every later edit of it was refused (2026-11-02, a drag)
+    for (const KeptLamp& k : r.kept0) {
+        mix(k.light), mix(k.colourOnly ? 1 : 0), mix(k.exit ? 1 : 0), mix(k.geo);
+        const auto* lw = reinterpret_cast<const uint32_t*>(&k.law);
+        for (size_t q = 0; q < sizeof k.law / 4; q++) mix(lw[q]);
+        for (const KeptPart& p : k.parts)
+            mix(static_cast<uint64_t>(p.texel) | static_cast<uint64_t>(p.a) << 32 | static_cast<uint64_t>(p.b) << 48), mix(p.thrScale | p.mult << 16 | p.bits << 24);
+        for (const KeptLamp::Mask& m : k.mask) mix(m.texel), mix(std::bit_cast<uint32_t>(m.vis)), mix(std::bit_cast<uint32_t>(m.all));
+    }
     return h;
 }
 void EraseLocked(uint64_t key) {
@@ -2197,6 +2208,7 @@ struct KeptRoom {
     // version whose drawing it continues until the GPU drew it
     std::vector<BatchRec> batches;
     uint32_t movedFrom = 0;
+    bool moveCopy = false; // (a copy a lamp move made: its texels are not the game's, so it has no GPU self-check)
     // (stage 4) the directional maps: per sample its texel and position, the lights the GPU does not draw summed (basisBase, 16
     // per sample), every other light of the list with its part and its share of the game's step (NaN: not a multiple), the
     // texels at the solve's end, the set they went to; basisWhy: not usable (kNoBasis: the room writes none); basisId: the
@@ -3988,6 +4000,7 @@ void MoveWorker() {
             continue;
         }
         auto nk = std::make_shared<KeptRoom>(k);
+        nk->moveCopy = true;
         bool found = false;
         for (KeptLamp& l : nk->lamps)
             if (l.light == kl.light) l = kl, found = true;
@@ -4328,13 +4341,18 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move
         if (!ReadRoom(static_cast<const BYTE*>(room), rr)) return false;
         if (!geoRead) haveGeo = RtOutdoorLamps::ColourLaw(light, rr.lot, colourNow, geoNow), geoRead = true;
         if (rr.id == 0) {
-            if (!RtOutdoorLamps::CoversLamp(room, light)) return refuse(rr, "a room 0 Real-time outdoor lamps does not draw it in (no law, or a floor mask part where its law is dark)");
             if (move) { // (stage 3b) its parts there redone on the move worker
+                // (room 0 covered, and its kept record holding the lamp: MoveJobFor0, not the maps drawn. No slot is uploaded
+                // during a drag, so a lamp that came into room 0's list mid-drag was in no drawn map: every step was refused and
+                // sent room 0 to the game's solve, whose maps were not shown either (2026-11-02). Room 0's maps show the record's
+                // parts once the drag ends, as for a lamp they already drew)
+                if (!RtOutdoorLamps::CoversRoom(room)) return refuse(rr, "Real-time outdoor lamps does not cover room 0 now (a story's maps not relit)");
                 MoveJob job;
                 if (const char* why = MoveJobFor0(room, rr, light, tracker, job, moveWhy)) return refuse(rr, why);
                 jobs.emplace_back(KeyOf(room, rr.cls), std::move(job));
                 continue;
             }
+            if (!RtOutdoorLamps::CoversLamp(room, light)) return refuse(rr, "a room 0 Real-time outdoor lamps does not draw it in (no law, or a floor mask part where its law is dark)");
             // (a tube kept there with another share than now: drawn as its solve gave it, so its edit is not shown)
             std::lock_guard<std::recursive_mutex> lk(g_mx);
             if (const auto it = g_records.find(KeyOf(room, rr.cls)); it != g_records.end())
@@ -4574,6 +4592,7 @@ bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu:
         }
         d.passes = k.passes;
     }
+    if (k.moveCopy) d.expect.clear();
     if (d.texels.empty() && d.wallTexels.empty()) return why = "no texel drawn in that map", false;
     return true;
 }

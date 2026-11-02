@@ -2047,7 +2047,13 @@ void Frame(IDirect3DDevice9* dev) {
             std::any_of(sp->kLamps.begin(), sp->kLamps.end(), [](const KeptInfo& k) { return GpuRoomLamps::EditPending(k.light); }))
             edited.insert(sp.get());
     }
-    std::stable_partition(order.begin(), order.end(), [&](const Slot* sp) { return edited.count(sp) != 0; });
+    // the maps of an edit not yet shown there (a move's copy, a switch) before them, the floor first, and past every budget: a
+    // moved lamp's floor waited 6 rounds (260 ms) behind other rooms' new kept solves and the wall atlases (2026-11-02)
+    std::unordered_set<const Slot*> urgent;
+    for (const auto& sp : g_slots)
+        if (!sp->mgr && sp->built && GpuRoomLamps::ShowsEdit(rns[sp->story].mgr, sp->cls, sp->m)) urgent.insert(sp.get());
+    const auto rank = [&](const Slot* sp) { return urgent.count(sp) ? (sp->m == 1 ? 0 : 1) : edited.count(sp) ? 2 : 3; };
+    std::stable_sort(order.begin(), order.end(), [&](const Slot* a, const Slot* b) { return rank(a) < rank(b); });
     for (Slot* sp : order) {
         Slot& s = *sp;
         // GPU room lamps (developer): a map of the active lot without room-0 texels that kept rooms wrote gets a copy of its own
@@ -2214,7 +2220,7 @@ void Frame(IDirect3DDevice9* dev) {
         LARGE_INTEGER tn{};
         QueryPerformanceCounter(&tn);
         const double units = static_cast<double>(s.map.count) * static_cast<double>(std::max<size_t>(mine.size(), 1)) * (dragging ? 1.0 : 7.0);
-        const bool editFits = edited.count(sp) && Ms(t0, tn) < kEditFrameCpuMs;
+        const bool editFits = urgent.count(sp) || (edited.count(sp) && Ms(t0, tn) < kEditFrameCpuMs);
         if (relit > 0 && !editFits && (Ms(t0, tn) > kFrameCpuMs || work + units > kFrameWork)) {
             left++; // (it keeps its last copy and stays dirty until its turn)
             continue;

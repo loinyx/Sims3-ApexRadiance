@@ -337,7 +337,15 @@ lamp's position, not on its colour or intensity.
   with its parts; `move: lamp L left to the room solves (story S room R: why)` (room 0: a lamp not of its own story's inner list, floor mask parts, no kept record holding it, the lot's geometry changed; an outdoor lamp, the lamp
   under the room's story floor, a roofless room, through openings or from another story, a light without a GPU law, the
   lot's geometry, the room's walls or its 3D blockers changed since its solve, a 3D blocker of a kind the copy does not know, ...). The game's tests' constants are read
-  once from the game (`RoomLightTests::kConstAt`).
+  once from the game (`RoomLightTests::kConstAt`). A room 0 move asks only that Real-time outdoor lamps covers room 0
+  (`CoversRoom`) and that its kept record holds the lamp (`MoveJobFor0`), not the maps drawn: no slot is uploaded during a
+  drag, so a lamp that came into room 0's list mid-drag was refused at every step (`a room 0 Real-time outdoor lamps does not
+  draw it in`, 263 times in one test) and each step sent room 0 to the game's solve (12-15 ms of delta) and the lamp's own
+  room to the game's path. Room 0's kept lamps are part of `BaseHash` (a solve that keeps another set of them over the same
+  base is a new export; before, such a lamp was never uploaded). The maps of an edit not yet shown (`GpuRoomLamps::ShowsEdit`)
+  are relit first, the floor first, past every frame budget (a moved lamp's floor waited 6 rounds, 260 ms, behind other
+  rooms' new kept solves); a move's copy has no GPU self-check (its texels are not the game's; the read-back stalled the
+  frame). Room 0's own maps still show a move only once the drag ends (UNVERIFIED in game).
 - **Directional maps** (stage 4, verified with dumpbin on Steam 1.67.2): state 7 of the solve calls `FUN_006a3b80` on
   room+0x540, which calls `FUN_006a09f0` (this = room, the pass); it lays the samples into the vector `[0x01158AC8,
   0x01158ACC)` (0x30 each, texel x / y at +0x20 / +0x22), and per sample zeroes 16 floats, calls `FUN_0069f280`

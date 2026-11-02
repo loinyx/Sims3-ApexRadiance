@@ -284,7 +284,7 @@ void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
             if (d.first != e.version) d = {e.version, 0u};
             d.second |= 1u << m;
         }
-        if (!e.checked && OutdoorDelta::RoomProbe()) {
+        if (!e.checked && !e.expect.empty() && OutdoorDelta::RoomProbe()) { // (a move's copy has none: no read-back stall)
             e.checked = true;
             SelfCheck(dev, e, out, w, h);
         }
@@ -303,6 +303,16 @@ void BeginFrame() { g_frame.fetch_add(1, std::memory_order_relaxed); }
 bool EditPending(uintptr_t light) {
     std::lock_guard<std::mutex> lk(g_editMx);
     return std::any_of(g_edits.begin(), g_edits.end(), [&](const Edit& e) { return e.light == light; });
+}
+bool ShowsEdit(uintptr_t mgr, int cls, int m) {
+    std::lock_guard<std::mutex> lk(g_editMx);
+    for (const Edit& ed : g_edits)
+        for (const auto& [key, e] : g_entries)
+            if (e.ok && e.mgr == mgr && e.cls == cls && e.m == m && e.relitAt.QuadPart <= ed.at.QuadPart &&
+                std::find(ed.rooms.begin(), ed.rooms.end(), std::get<0>(key)) != ed.rooms.end() &&
+                std::find(e.lamps.begin(), e.lamps.end(), ed.light) != e.lamps.end())
+                return true;
+    return false;
 }
 bool Drawn(const void* room, uint32_t version, unsigned maps) {
     std::lock_guard<std::mutex> lk(g_drawnMx);

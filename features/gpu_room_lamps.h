@@ -44,5 +44,8 @@ bool Drawn(const void* room, uint32_t version, unsigned maps);
 void NoteEdit(uintptr_t light, const char* kind, const std::vector<const void*>& rooms, const std::string& stories);
 // Any thread: an edit of that lamp taken and not yet shown in every map of its rooms holding its parts (its maps go first)
 bool EditPending(uintptr_t light);
+// Render thread, after Sig: map m of that story manager and class draws a room of an edit taken that holds the lamp's parts and
+// was not relit since the edit (Real-time outdoor lamps relights such maps first, the floor first)
+bool ShowsEdit(uintptr_t mgr, int cls, int m);
 
 } // namespace GpuRoomLamps
