@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "gpu_lamp_law.h"
 
 namespace RtLampGpu {
 struct KeptMapData;
@@ -196,6 +197,23 @@ struct Room0Export {
     std::vector<uintptr_t> drawn; // the lights whose parts left the base
     std::vector<uintptr_t> kept;  // every light with parts kept (the others' parts stay in the base)
     int lamps = 0;                // lights kept
+    // (GPU room lamps, developer) the lamps of its list Real-time outdoor lamps does not draw, kept as a kept room's: their parts
+    // are out of the base, and are added back from A and B (rt_lamp_model.h KeptAdd) with the lamp's law when kept, at the
+    // sample's world position and normal (pos, nrm above)
+    struct KeptPart0 {
+        uint32_t texel; // into texels
+        float A, B, thrScale;
+        uint8_t mult, bits; // bits: 1 the early-out, 4 the soft light cut
+    };
+    struct KeptLamp0 {
+        uintptr_t light = 0;
+        bool colourOnly = false; // its law is its colour alone (a TubeLight)
+        uint64_t geo = 0;        // (colourOnly) the signature of what its share reads
+        float pos[3] = {};       // where it was
+        GpuLampLaw::Lamp law;    // its law when kept
+        std::vector<KeptPart0> parts;
+    };
+    std::vector<KeptLamp0> kept0;
 };
 // 0 = nothing kept for that room and class; baseOnly: the kept solve is a lot next to the active one's (SetNeighbourLots)
 uint32_t RecordVersion(const void* room, int cls, bool* baseOnly = nullptr);

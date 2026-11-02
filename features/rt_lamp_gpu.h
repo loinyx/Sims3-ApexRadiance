@@ -112,6 +112,7 @@ struct KeptMapData {
     int w = 0, h = 0, accW = 0, accH = 0;
     std::vector<TexelVertex> parts, texels, wallTexels, copies, restores;
     std::vector<uintptr_t> lamps;               // the lamp of each range of parts
+    std::vector<char> colourOnly;               // its law is its colour alone (a TubeLight)
     std::vector<std::pair<UINT, UINT>> ranges;  // first, count
     int layoutW = 0, layoutH = 0;
     std::vector<uint32_t> layout;               // the class-2 blocks before the blur with their rows beyond, layoutW x layoutH
@@ -119,8 +120,15 @@ struct KeptMapData {
     std::vector<KeptBlockOut> outs;
     UINT passes = 0;
     std::vector<std::pair<uint32_t, uint32_t>> expect; // (y << 16 | x, the texel the game left there) for the self-check
-    // every lamp of the room's kept solve the GPU draws, with its position then (a lamp moved since: the room is not drawn)
-    std::vector<std::pair<uintptr_t, std::array<float, 3>>> roomLamps;
+    // every lamp of the room's kept solve the GPU draws, with its position then, or (its colour alone) the signature of what its
+    // share reads: one changed since (moved, a tube's intensity), the room is not drawn
+    struct RoomLamp {
+        uintptr_t light;
+        float pos[3];
+        uint64_t geo;
+        bool colourOnly;
+    };
+    std::vector<RoomLamp> roomLamps;
 };
 struct KeptMapGpu { // DEFAULT pool (made again after a device reset)
     int w = 0, h = 0, accW = 0, accH = 0, layoutW = 0, layoutH = 0;
@@ -203,7 +211,12 @@ class Engine {
 
     // ---- GPU room lamps: a kept room solve drawn over a map (between Begin and End) ----
     static bool UploadKept(IDirect3DDevice9* dev, const KeptMapData& d, KeptMapGpu& g);
-    // laws / lawOk: per range of parts (a lamp without a law adds nothing); game: the game's own map (the restores' source)
+    // laws / lawOk: per range of parts (0: no law, adds nothing; 1 the GPU's law; 2 the lamp's colour alone, rt_lamp_model.h
+    // KeptAdd's law = that colour); game: the game's own map (the restores' source)
+    // Room 0's kept lamps (Real-time outdoor lamps, between its Accumulate and Compose): their parts (TexelVertex as `parts`
+    // above, at their texels' places in a w x h map) added into the current sum; laws / lawOk per range (lawOk 2: the colour alone)
+    bool AddKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, const std::vector<std::pair<UINT, UINT>>& ranges, const GpuLampLaw::Lamp* laws,
+                      const char* lawOk, float thr, int w, int h, std::string& err);
     // out: w x h, the room's own map (at most the working map's size: its top-left corner; a blurred wall atlas exactly)
     bool RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLampLaw::Lamp* laws, const char* lawOk, float thr, IDirect3DBaseTexture9* game,
                      IDirect3DTexture9* out, int w, int h, std::string& err);
@@ -223,6 +236,8 @@ class Engine {
     void Quad(IDirect3DDevice9* dev, int w, int h, float u1 = 1.0f, float v1 = 1.0f);
     void TexelTarget(IDirect3DDevice9* dev, int w, int h);
     void Blocks(IDirect3DDevice9* dev, const Map& m);
+    bool DrawKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, const std::vector<std::pair<UINT, UINT>>& ranges, const GpuLampLaw::Lamp* laws,
+                       const char* lawOk, float thr, int w, int h);
 
     DeviceCalls c_;
     bool ready_ = false;

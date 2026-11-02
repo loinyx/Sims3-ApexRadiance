@@ -235,6 +235,21 @@ struct LampRead {
     float a1[3] = {}, a2[3] = {}, o1 = 1.0f, o2 = 1.0f, S[3] = {};
     float areaShare = 1.0f; // an area light (9, 10): the share of the ground it faces (TerrainBakeRule)
 };
+// What a TubeLight's share reads (FUN_006bd100, its evaluation 0x006BFA70's colour: min(Cmax, k2 x range +0x130 x intensity
+// +0x10 / (k1 d^2)) to the capsule from +0x120 to +0x170 of radius +0x1A0, times its colour +0xE0; dumpbin 02/11): the raw
+// values. POD (SEH)
+bool ReadTubeShare(uintptr_t L, uint32_t out[10]) {
+    __try {
+        const BYTE* p = reinterpret_cast<const BYTE*>(L);
+        std::memcpy(out, p + 0x10, 4);
+        std::memcpy(out + 1, p + 0x120, 16); // (+0x120 .. +0x12C, and +0x130)
+        std::memcpy(out + 5, p + 0x170, 12);
+        std::memcpy(out + 8, p + 0x1A0, 4);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 bool ReadLamp(uintptr_t L, LampRead& r) {
     if (!L) return false;
     __try {
@@ -372,6 +387,7 @@ struct Cover {
     bool full = false;
     DWORD at = 0;
     std::unordered_set<uintptr_t> lamps;
+    std::set<std::pair<int, uintptr_t>> kept0; // (GPU room lamps) (story, lamp): a lamp room 0's kept parts draw there
 };
 std::mutex g_coverMx;
 Cover g_cover;
@@ -409,6 +425,15 @@ std::map<const void*, ExportBackoff> g_exportBackoff; // render thread: room -> 
 std::atomic<uintptr_t> g_switchOn{0}; // a GPU lamp switched on (LampMarkFilter, light tree thread; the log on the render thread)
 
 // ---- the maps (render thread) ----
+// (GPU room lamps) a lamp of room 0's list kept as a kept room's: its law when kept, and what tells a move (its place; a tube's
+// share signature)
+struct KeptInfo {
+    uintptr_t light = 0;
+    bool colourOnly = false;
+    uint64_t geo = 0;
+    float pos[3] = {};
+    GpuLampLaw::Lamp law;
+};
 struct Slot {
     int story = 0, m = 0, cls = 0;
     uintptr_t mgr = 0; // 0: a map of the active lot; else of a lot next to it (its story manager), relit with the active lot's lamp posts
@@ -453,6 +478,13 @@ struct Slot {
     bool underExact = false, underDirty = false;
     std::shared_ptr<struct UnderJob> uJob;
     bool dynCurrent = false;        // the mask buffer holds the under-floor share with "all" left to the shader
+    // (GPU room lamps, developer) the lamps of room 0's list it does not draw that are kept as a kept room's (outdoor_delta.h
+    // Room0Export::kept0): their parts (MANAGED, at their texels' places, by lamp), and each one's law now
+    IDirect3DVertexBuffer9* kvb = nullptr;
+    std::vector<std::pair<UINT, UINT>> kRanges;
+    std::vector<KeptInfo> kLamps;
+    std::vector<GpuLampLaw::Lamp> kLaws;
+    std::vector<char> kOk;
 };
 struct Ask {
     DWORD at = 0;
@@ -549,6 +581,7 @@ void ReleaseSlot(Slot& s) {
     if (s.dyn) s.dyn->Release(), s.dyn = nullptr;
     if (s.dynNext) s.dynNext->Release(), s.dynNext = nullptr;
     if (s.preblur) s.preblur->Release(), s.preblur = nullptr;
+    if (s.kvb) s.kvb->Release(), s.kvb = nullptr;
     if (s.game) s.game->Release(), s.game = nullptr;
     s.map = RtLampGpu::Map{};
 }
@@ -789,6 +822,9 @@ struct Prepared {
     std::vector<uint32_t> px; // the blocks' texels before the blur (w x h)
     std::vector<float> under;  // the floor mask's under-floor share (exact) and its sums
     std::vector<double> uA, uU;
+    std::vector<RtLampGpu::TexelVertex> kv; // (GPU room lamps) room 0's kept lamps' parts, by lamp
+    std::vector<std::pair<UINT, UINT>> kRanges;
+    std::vector<KeptInfo> kLamps;
 };
 struct Job {
     const void* room = nullptr;
@@ -858,6 +894,34 @@ void PrepareJob(Job& j) {
             cx += tv.p[0], cy += tv.p[1], cz += tv.p[2];
             p.v.push_back(tv);
         }
+        // (GPU room lamps) the lamps of its list kept as a kept room's, out of the base: each part at its texel's place (the
+        // place's last write only: the sum is one per place), with the sample's world position and normal as when kept
+        if (!ex.kept0.empty()) {
+            std::unordered_map<uint32_t, uint32_t> lastAt;
+            for (uint32_t i = 0; i < ex.texels.size(); i++)
+                if (ex.texels[i].map == m) lastAt[static_cast<uint32_t>(ex.texels[i].y) << 16 | ex.texels[i].x] = i;
+            for (const OutdoorDelta::Room0Export::KeptLamp0& kl : ex.kept0) {
+                const UINT first = static_cast<UINT>(p.kv.size());
+                for (const OutdoorDelta::Room0Export::KeptPart0& kp : kl.parts) {
+                    if (kp.texel >= ex.texels.size()) continue;
+                    const OutdoorDelta::Room0Export::Texel& t = ex.texels[kp.texel];
+                    const auto at = lastAt.find(static_cast<uint32_t>(t.y) << 16 | t.x);
+                    if (t.map != m || at == lastAt.end() || at->second != kp.texel) continue;
+                    RtLampGpu::TexelVertex v{};
+                    v.x = t.x, v.y = t.y, v.w = 1.0f;
+                    for (int k = 0; k < 3; k++) v.p[k] = t.pos[k], v.n[k] = t.nrm[k];
+                    v.p[3] = kp.bits, v.n[3] = kp.mult;
+                    v.base[0] = kp.A, v.base[1] = kp.B, v.base[2] = kp.thrScale;
+                    p.kv.push_back(v);
+                }
+                if (p.kv.size() == first) continue;
+                p.kRanges.emplace_back(first, static_cast<UINT>(p.kv.size()) - first);
+                KeptInfo ki;
+                ki.light = kl.light, ki.colourOnly = kl.colourOnly, ki.geo = kl.geo, ki.law = kl.law;
+                std::memcpy(ki.pos, kl.pos, sizeof ki.pos);
+                p.kLamps.push_back(ki);
+            }
+        }
         if (p.v.empty()) {
             p.why = "no texel of the kept solve in it";
             continue;
@@ -917,6 +981,8 @@ bool UploadSlot(IDirect3DDevice9* dev, Slot& s, const Job& j, Prepared& p) {
     if (s.dyn) s.dyn->Release(), s.dyn = nullptr;
     if (s.dynNext) s.dynNext->Release(), s.dynNext = nullptr;
     if (s.preblur) s.preblur->Release(), s.preblur = nullptr;
+    if (s.kvb) s.kvb->Release(), s.kvb = nullptr;
+    s.kRanges.clear(), s.kLamps.clear();
     s.masked.clear(), s.maskedPos.clear(), s.gated.clear(), s.under.clear(), s.uA.clear(), s.uU.clear(), s.uSnap.clear(), s.uIds.clear();
     s.underSig = 0, s.underExact = false, s.underDirty = false, s.uJob.reset();
     s.dynCurrent = false;
@@ -947,6 +1013,9 @@ bool UploadSlot(IDirect3DDevice9* dev, Slot& s, const Job& j, Prepared& p) {
         return false;
     };
     if (!RtLampGpu::Engine::MakeVb(dev, p.v.data(), static_cast<UINT>(p.v.size()), &s.vb)) return retryLater("its texel buffer could not be made");
+    if (!p.kv.empty() && !RtLampGpu::Engine::MakeVb(dev, p.kv.data(), static_cast<UINT>(p.kv.size()), &s.kvb)) return retryLater("its kept lamps' parts could not be made");
+    s.kRanges = std::move(p.kRanges), s.kLamps = std::move(p.kLamps);
+    p.kv = {};
     s.map.w = static_cast<int>(d.Width), s.map.h = static_cast<int>(d.Height);
     s.map.vb = s.vb;
     s.map.count = static_cast<UINT>(p.v.size());
@@ -1945,7 +2014,29 @@ void Frame(IDirect3DDevice9* dev) {
             if (Slot* sp = g_slots[(g_rr + si) % nSlots].get(); sp->masked.empty() == (pass < 2) && (sp->mgr != 0) == (pass % 2 == 1)) order.push_back(sp);
     for (Slot* sp : order) {
         Slot& s = *sp;
-        if (!s.ok || !s.game) continue;
+        // GPU room lamps (developer): a map of the active lot without room-0 texels that kept rooms wrote gets a copy of its own
+        // (the game's map with those rooms over it), bound by the same swap
+        const bool roomsOnly = !s.used && !s.mgr && s.built;
+        const uint64_t roomsSig = s.mgr ? 0 : GpuRoomLamps::Sig(dev, rns[s.story].mgr, s.cls, s.m);
+        if (roomsOnly) {
+            if (!roomsSig) {
+                if (s.copy) s.copy->Release(), s.copy = nullptr;
+                if (s.game) s.game->Release(), s.game = nullptr;
+                s.relit = false;
+                continue;
+            }
+            if (!s.game) {
+                uintptr_t setAt = 0;
+                IDirect3DTexture9* tex = OwnMap(s.room, s.cls, kSetIdx[s.m], setAt);
+                D3DSURFACE_DESC d{};
+                if (!tex || FAILED(tex->GetLevelDesc(0, &d)) || d.Format != D3DFMT_A8R8G8B8 || tex->GetLevelCount() != 1) continue;
+                s.game = tex;
+                tex->AddRef();
+                s.map.w = static_cast<int>(d.Width), s.map.h = static_cast<int>(d.Height);
+                s.relit = false;
+            }
+        } else if (!s.ok || !s.game)
+            continue;
         // its story's lamps of the bake (the floor mask's under-floor share): the active lot's story, or a lot next to it's
         static const NbBake s_noBake;
         const auto nkIt = s.mgr ? g_nbBake.find(s.mgr) : g_nbBake.end();
@@ -1958,6 +2049,7 @@ void Frame(IDirect3DDevice9* dev) {
         std::vector<RtLampModel::Lamp> mine;
         std::vector<const GpuLamp*> mineRef;
         for (const GpuLamp& g : lamps) {
+            if (roomsOnly) break;
             // (a lot next to it: the posts only, as many times as the active lot lists them, as its gather took them)
             int mult = s.mgr ? 0 : g.mult[s.story];
             if (s.mgr && g.post)
@@ -1996,10 +2088,30 @@ void Frame(IDirect3DDevice9* dev) {
         Mix(sig, &params, 8), Mix(sig, &g_meshGen, 4), Mix(sig, &s.version, 4);
         if (!s.masked.empty()) Mix(sig, &sBakeSig, 8);
         for (const auto& l : mine) Mix(sig, &l, sizeof l);
-        // GPU room lamps (developer, gpu_room_lamps.h): the kept rooms drawn over this map and their lamps as they are now
-        if (!s.mgr) {
-            const uint64_t rooms = GpuRoomLamps::Sig(dev, rns[s.story].mgr, s.cls, s.m);
-            Mix(sig, &rooms, sizeof rooms);
+        // GPU room lamps (developer, gpu_room_lamps.h): the kept rooms drawn over this map and their lamps as they are now, and room
+        // 0's kept lamps' laws now (one moved, or a tube whose share changed: its law when kept, the light its solve gave)
+        Mix(sig, &roomsSig, sizeof roomsSig);
+        s.kLaws.resize(s.kLamps.size());
+        s.kOk.assign(s.kLamps.size(), 0);
+        for (size_t l = 0; l < s.kLamps.size(); l++) {
+            const KeptInfo& k = s.kLamps[l];
+            int type = 0, reg = -1;
+            if (!k.colourOnly) {
+                GpuLampLaw::Lamp now;
+                if (WorldLaw(k.light, g_lotId, false, now, type, reg)) {
+                    const bool moved = std::fabs(now.pos[0] - k.pos[0]) > 1e-4f || std::fabs(now.pos[1] - k.pos[1]) > 1e-4f || std::fabs(now.pos[2] - k.pos[2]) > 1e-4f;
+                    s.kLaws[l] = moved ? k.law : now, s.kOk[l] = 1;
+                }
+            } else {
+                float colour[3] = {};
+                uint64_t geo = 0;
+                if (ColourLaw(k.light, g_lotId, colour, geo)) {
+                    s.kLaws[l] = k.law, s.kOk[l] = 2;
+                    if (geo == k.geo) std::memcpy(s.kLaws[l].colour, colour, sizeof colour);
+                }
+            }
+            Mix(sig, &s.kOk[l], 1);
+            if (s.kOk[l]) Mix(sig, &s.kLaws[l], sizeof s.kLaws[l]);
         }
         // the under-floor share from a worker (exact, UnderShare's sums): once no lamp is dragged, and (14/10) while one is,
         // in place of the render thread's UnderDelta below (up to 152 ms of a drag's relight; 26.8 ms in one frame): the last
@@ -2091,7 +2203,7 @@ void Frame(IDirect3DDevice9* dev) {
         }
         // the outdoor scale beside it (a device with two render targets). None: the draws read the copy as before, the light
         // past 1 cut
-        if (!s.scale && g_mrt > 0 &&
+        if (!s.scale && g_mrt > 0 && !roomsOnly &&
             (FAILED(dev->CreateTexture(s.map.w, s.map.h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &s.scale, nullptr)) || !s.scale))
             s.scale = nullptr;
         if (!s.preblur && s.map.blur) { // after a device reset
@@ -2185,7 +2297,7 @@ void Frame(IDirect3DDevice9* dev) {
         std::string err;
         bool ok = true;
         // batches of the atlas's lamps (their shadows rendered unless the atlas holds them already)
-        for (size_t b = 0; ok && (b < mine.size() || b == 0); b += RtLampGpu::kAtlasLamps) {
+        for (size_t b = 0; !roomsOnly && ok && (b < mine.size() || b == 0); b += RtLampGpu::kAtlasLamps) {
             const int n = static_cast<int>(std::min<size_t>(RtLampGpu::kAtlasLamps, mine.size() - std::min(b, mine.size())));
             float pos[RtLampGpu::kAtlasLamps][3] = {};
             uint64_t key = 1469598103934665603ull;
@@ -2205,7 +2317,10 @@ void Frame(IDirect3DDevice9* dev) {
             ok = ok && g_eng->Accumulate(dev, s.map, mine.data() + std::min(b, mine.size()), n, p, b == 0, err);
             if (mine.empty()) break;
         }
-        ok = ok && g_eng->Compose(dev, s.map, s.game, s.copy, p, err, s.scale);
+        // (GPU room lamps) room 0's kept lamps added to the sum before the compose
+        if (!roomsOnly && ok && s.kvb && !s.kRanges.empty())
+            ok = g_eng->AddKeptParts(dev, s.kvb, s.kRanges, s.kLaws.data(), s.kOk.data(), s.thr, s.map.w, s.map.h, err);
+        ok = ok && (roomsOnly ? g_eng->CopyTexture(dev, s.game, s.copy, s.map.w, s.map.h, err) : g_eng->Compose(dev, s.map, s.game, s.copy, p, err, s.scale));
         if (ok && !s.mgr) GpuRoomLamps::ComposeOver(dev, *g_eng, rns[s.story].mgr, s.cls, s.m, s.game, s.copy, s.map.w, s.map.h);
         s.scaled = ok && s.scale;
         if (!ok) {
@@ -2280,6 +2395,10 @@ void Frame(IDirect3DDevice9* dev) {
         g_cover.at = GetTickCount();
         g_cover.lamps.clear();
         g_cover.lamps.insert(covered.begin(), covered.end());
+        g_cover.kept0.clear();
+        for (const auto& s : g_slots)
+            if (!s->mgr && s->used && s->ok && s->relit)
+                for (const KeptInfo& k : s->kLamps) g_cover.kept0.insert({s->story, k.light});
     }
     // the coverage, logged when it changes (lamp edits mark no room only while every story is covered)
     if (static_cast<int>(full) != g_coverLogged) {
@@ -2542,7 +2661,21 @@ bool CoversLamp(const void* room0, uintptr_t light) {
     const uintptr_t tracker = TrackerOfRoom(room0, story, id, cls, mgr);
     if (!tracker || id != 0) return false;
     std::lock_guard<std::mutex> lk(g_coverMx);
-    return g_cover.tracker == tracker && g_cover.full && GetTickCount() - g_cover.at < kCoverFreshMs && g_cover.lamps.count(light);
+    return g_cover.tracker == tracker && g_cover.full && GetTickCount() - g_cover.at < kCoverFreshMs &&
+           (g_cover.lamps.count(light) || g_cover.kept0.count({story, light}));
+}
+bool ColourLaw(uintptr_t light, uint64_t lot, float colour[3], uint64_t& geo) {
+    LampRead r;
+    if (!ReadLamp(light, r) || r.f.type != 6 || r.f.lot == 0 || r.f.lot != lot || !(r.f.flags & 0x01)) return false;
+    uint32_t g[10] = {};
+    if (!ReadTubeShare(light, g)) return false;
+    geo = 1469598103934665603ull;
+    Mix(geo, g, sizeof g);
+    for (int k = 0; k < 3; k++) {
+        if (!std::isfinite(r.colour[k])) return false;
+        colour[k] = r.colour[k];
+    }
+    return true;
 }
 bool HandlesLamp(uintptr_t tl, uintptr_t light, int room) {
     if (!g_on.load(std::memory_order_relaxed) || room != 0 || !light || !tl) return false;

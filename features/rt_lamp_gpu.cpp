@@ -1010,6 +1010,52 @@ bool FloatBlend(IDirect3DDevice9* dev) {
     return ok;
 }
 } // namespace
+// Each range's parts (one lamp) added at their places of the bound target (w x h): mult x fade(law x A) x B, the law the
+// GPU's or (lawOk 2) the lamp's colour alone
+bool Engine::DrawKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, const std::vector<std::pair<UINT, UINT>>& ranges, const GpuLampLaw::Lamp* laws,
+                           const char* lawOk, float thr, int w, int h) {
+    dev->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+    dev->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, FALSE);
+    dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
+    dev->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
+    dev->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
+    c_.SetPixelShader(dev, ps_[kAccKeptPs]);
+    dev->SetVertexDeclaration(texelDecl_);
+    dev->SetStreamSource(0, vb, 0, sizeof(TexelVertex));
+    dev->SetStreamSource(1, zeros_, 0, sizeof(TexelDyn));
+    TexelTarget(dev, w, h);
+    float c[97][4] = {};
+    c[96][0] = 1.0f, c[96][1] = thr;
+    bool ok = true;
+    for (size_t l = 0; ok && l < ranges.size(); l++) {
+        if (!lawOk[l] || !ranges[l].second) continue;
+        float rows[5][4];
+        GpuLampLaw::Rows(laws[l], rows);
+        for (int r = 0; r < 5; r++) std::memcpy(c[r * 16], rows[r], sizeof rows[r]);
+        c[96][2] = lawOk[l] == 2 ? 1.0f : 0.0f;
+        c_.SetPsConst(dev, 0, &c[0][0], 97);
+        ok = SUCCEEDED(c_.DrawPrimitive(dev, D3DPT_POINTLIST, ranges[l].first, ranges[l].second));
+        stats_.accDraws++;
+    }
+    dev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+    dev->SetStreamSource(1, nullptr, 0, 0);
+    c_.SetVertexShader(dev, nullptr);
+    return ok;
+}
+bool Engine::AddKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, const std::vector<std::pair<UINT, UINT>>& ranges, const GpuLampLaw::Lamp* laws,
+                          const char* lawOk, float thr, int w, int h, std::string& err) {
+    if (!ready_ || !vb || !acc_[accCur_] || w > scratchW_ || h > scratchH_) return err = "no sum to add the kept parts to", false;
+    if (blendOk_ < 0) blendOk_ = FloatBlend(dev) ? 1 : 0;
+    if (!blendOk_) return err = "the device cannot add into an A32B32G32R32F target", false;
+    UINT most = 0;
+    for (const auto& r : ranges) most = std::max(most, r.first + r.second);
+    if (!EnsureZeros(dev, most)) return err = "the zero stream could not be created", false;
+    if (!Target(dev, acc_[accCur_], w, h)) return err = "the sum could not be targeted", false;
+    c_.SetDepthStencil(dev, nullptr);
+    PassStates(dev);
+    if (!DrawKeptParts(dev, vb, ranges, laws, lawOk, thr, w, h)) return err = "the kept parts' draw failed", false;
+    return true;
+}
 // 1. the sum: base-less, every lamp's parts added at their texels' places in the sum's layout; 2. the texels composed into the
 // map; 3. class-2 walls: composed into the layout over the blocks before the blur, blurred the game's way (BlurWalls: the rows
 // lit beyond an edge in the blur, an edge with none along the wall only) and their rows into the map; 4. the tile-edge copies
@@ -1049,26 +1095,7 @@ bool Engine::RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLa
     // 1. the sum
     if (!Target(dev, acc_[0], k.accW, k.accH)) return fail("the sum could not be targeted");
     dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 1.0f, 0);
-    if (k.parts) {
-        dev->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-        dev->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, FALSE);
-        dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
-        dev->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
-        dev->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
-        c_.SetPixelShader(dev, ps_[kAccKeptPs]);
-        float c[97][4] = {};
-        c[96][0] = 1.0f, c[96][1] = thr;
-        for (size_t l = 0; l < k.ranges.size(); l++) {
-            if (!lawOk[l] || !k.ranges[l].second) continue;
-            float rows[5][4];
-            GpuLampLaw::Rows(laws[l], rows);
-            for (int r = 0; r < 5; r++) std::memcpy(c[r * 16], rows[r], sizeof rows[r]);
-            c_.SetPsConst(dev, 0, &c[0][0], 97);
-            if (!points(k.parts, k.ranges[l].first, k.ranges[l].second, k.accW, k.accH)) return fail("the sum's draw failed");
-            stats_.accDraws++;
-        }
-        dev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
-    }
+    if (k.parts && !DrawKeptParts(dev, k.parts, k.ranges, laws, lawOk, thr, k.accW, k.accH)) return fail("the sum's draw failed");
     accCur_ = 0;
     // 2. the texels into the map
     const float d99[4] = {0, 0, 1.0f / static_cast<float>(scratchW_), 1.0f / static_cast<float>(scratchH_)};

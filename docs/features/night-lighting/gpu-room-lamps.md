@@ -73,7 +73,20 @@ lamp's position, not on its colour or intensity.
    with no urgency (as a GPU edit's tail sends), so their normalisation (+0x160), ambient (+0x110, +0x650) and light list
    follow the lamp as a solve sets them; each is kept again as usual, and the GPU draws their kept solve until then (the
    light changes only where the normalisation or the ambient did). A drag's or a slider's edits make one settle per lamp.
-10. A lamp moved (its law's position differs from the one its parts were kept with): the rooms holding it are not drawn, so
+10. Room 0's entries of indoor lamps (its list takes them through openings): a room 0 solve of the active lot also captures,
+   as a kept room's, each lamp of its list Real-time outdoor lamps does not draw (`BuildKept0`). A lamp whose light is all in
+   room 0's own sum (not an exit lamp, whose part is also in a ground texel's alpha; no part in the floor mask's two copies)
+   leaves the base Real-time outdoor lamps relights from, and its parts are added back into that map's sum on the GPU, with
+   its law now, before the compose (`AddKeptParts`). A delta that changes such a lamp puts it back in the base. Room 0 then
+   counts as drawing the lamp for an edit (`CoversLamp`); the other lamps of room 0 still take the solves.
+11. Maps without room-0 texels (an objects map, some ceilings): Real-time outdoor lamps' slot for that map gets a copy of its
+   own while kept rooms of it are drawn (the game's map, those rooms over it), bound by the same swap.
+12. Lights without a GPU law: a TubeLight (type 6) is kept with its colour as its law. Its evaluation `0x006BFA70` is its
+   colour (+0xE0) times a share (`0x006BD100`: min(Cmax, k2 x range x intensity / (k1 d^2)) to its capsule, times a facing
+   term) that its colour does not change, so A over its colour and the GPU's KeptAdd with its colour now are exact for a
+   switch or a colour edit. Its share's inputs (intensity, ends, radius, range) are kept as a signature: a change of one is
+   drawn as a move (the room is left as the game's) and its edit takes the solves.
+13. A lamp moved (its law's position differs from the one its parts were kept with): the rooms holding it are not drawn, so
    they show the game's texels, until their solve is kept again. Moves take the game's path (their rooms are solved).
 
 ## Settings
@@ -104,9 +117,13 @@ lamp's position, not on its colour or intensity.
 - The tile-edge copies are found by a dry run of the game's own copy (`0x0069EFC0`) on tagged texels before the finalize,
   after which the maps are put back and the finalize copies them as always. That the copies write only the map they are
   given is UNVERIFIED (`0x006A9DE0` / `0x006A9A50` not read in full); the dry run snapshots that map only.
-- Drawn only where Real-time outdoor lamps relights the story map (the active lot, the class each story shows, maps that
-  hold room-0 texels): a kept room of a story, class or map it does not relight stays the game's, and its lamps' edits take
-  the room solves.
+- Drawn only where Real-time outdoor lamps relights the story (the active lot, the class each story shows): a kept room of a
+  story or class it does not relight stays the game's, and its lamps' edits take the room solves.
+- In room 0, an exit lamp (its light also in a ground texel's alpha) and a lamp with a part in the floor mask stay in the
+  base: their edits take the solves (`a room 0 Real-time outdoor lamps does not draw it in`). A room-0 kept lamp that moved
+  is drawn with its law when kept (the light room 0's solve gave) until that solve. Area lights (9, 10), window lights (7, 8)
+  and shaded lamps whose shade the GPU law does not describe have no law here: they stay in the bases (UNVERIFIED which of
+  them the user's lots hold).
 - Until the settle's solve (2 s after the lamp's last edit taken, then the solve's own time) a room keeps the normalisation
   and ambient of its last solve: a room whose only lamp is switched off shows the lit room's ambient for that long. A switch
   on after the settle's solves is not taken (the rooms gathered again without the lamp): it takes the room solves.
@@ -152,6 +169,20 @@ lamp's position, not on its colour or intensity.
   `CopyAtPS` from the game's map; the map targets take the room's own map size. Buffers are DEFAULT and dropped at a device
   reset (made again on use). `LevelLightShare`'s `FinalizeHook` calls `OutdoorDelta::RoomFinalized` after the game's
   finalize on any thread.
+- **Room 0's kept lamps**: `Capture::keep0Lights` (set at room 0's solve start: the lot lamps of its list with a law and not
+  drawn by Real-time outdoor lamps); the probe's hooks run for them (`OnEvalOut` and the rest take `keep0` as `probe`);
+  `BuildKept0` after the solve (`KeptPartsOf`, shared with `KeepEnd`) into `Record::kept0`; `BaseHash` and `ExportRoom0`
+  take their parts out of the base; `Room0Export::kept0` (A, B and the threshold scale as floats, the law when kept);
+  `PrepareJob` makes one point per part at its texel's place (each place's last write), world position and normal;
+  `Slot::kvb` (MANAGED); every frame each one's law now (moved: its law when kept) goes into the map's signature, and
+  `Engine::AddKeptParts` adds them into the current sum (blend one, one) between `Accumulate` and `Compose`. Coverage:
+  `Cover::kept0` (story, lamp) for `CoversLamp`.
+- **Maps without room-0 texels**: a slot with no room-0 texel (`used` false) of the active lot takes the game's own map
+  (`OwnMap`), a copy (`CopyTexture` of the game's map), then `ComposeOver`, while `GpuRoomLamps::Sig` has rooms for it; its
+  copy goes when none is left.
+- **Lights without a GPU law**: `RtOutdoorLamps::ColourLaw` (type 6, of the lot, alive): its colour +0xE0 and a signature of
+  +0x10, +0x120..+0x130, +0x170..+0x17C and +0x1A0 (`ReadTubeShare`). `KeptLamp::colourOnly`; `AccKeptPS` takes the colour
+  as its law when c96.z is 1 (lawOk 2). `LawOfLight` / `LawNow` / `LawAt` in `outdoor_delta.cpp`.
 - **Edits**: `LampMarkFilter`'s `MarkDecideImpl`, after Real-time outdoor lamps' own branch, computes the edit's kind as that
   branch does (0 a value or a switch) and asks `OutdoorDelta::TakesLampEdit`: `LevelLightShare::LotRooms` (stories -4 to 7:
   room 0 and the rooms the lighting tiles name), each room's list (+0xC8..+0xCC); a room 0 listing it needs
@@ -165,7 +196,8 @@ lamp's position, not on its colour or intensity.
   (from the mark to the relight of every room's maps); `Lamp L: its edit was not shown in every room within 5000 ms`;
   `<kind>: lamp L left to the room solves (story S room R: why)` (no kept solve of its class, a wall texel the GPU does not
   blur, its kept solve has the lamp in its base, a map of it not drawn on the GPU, a room 0 Real-time outdoor lamps does not
-  draw it in); `switch on: lamp L left to the room solves (its rooms changed since it was switched off)`; `settle: lamp L, R
+  draw it in (an exit lamp, or a part in its floor mask)`, `a light without a GPU law whose intensity or shape changed`);
+  `switch on: lamp L left to the room solves (its rooms changed since it was switched off)`; `settle: lamp L, R
   rooms sent to their solve 2 s after its last edit`; `Story S room R class
   C: not kept (its class was C0 when its solve started)`.
 - **GPU logs**: `Story S room R class C <map> GPU self-check: N texels, P% within 2/255 (alpha within A/255) of the texels the
@@ -183,13 +215,16 @@ lamp's position, not on its colour or intensity.
   an edit, weight-0 texels, the alpha floor, a roofless texel's hue and alpha). `tools/rt_lamps_test` draws a synthetic kept
   room on a floor (copies, restores; its own map 48x40 under a 64x64 working map, copies from past the corner) and a class-2
   wall atlas (three blocks, rows beyond above, below, both, none) with the production passes on a Direct3D 9 device and
-  compares every texel of the own map with `KeptAdd` + `KeptTexel` + the pack + `BlurBlock`; a wall atlas of another size and
-  a map larger than the working map are refused.
+  compares every texel of the own map with `KeptAdd` + `KeptTexel` + the pack + `BlurBlock`, one of its lamps a light with its
+  colour alone; a wall atlas of another size and a map larger than the working map are refused. Room 0: two kept lamps (one
+  its colour alone) added by `AddKeptParts` between `Accumulate` and `ComposePS`, against `KeptAdd` + `PackInput` + the pack.
 - **In game** (2026-11-02, stage 2a): final self-check 61 room solves, 207,425 texels, 100.00% within 2/255, alpha within
   1/255, at most 2.6 ms; 23 solves not checked (no free tag range, fixed since). Stage 2b (09:50-09:52): GPU self-check 148
   maps, 273,754 texels, 100.00% within 2/255 (alpha within 1/255), all of them wall atlases: floors and ceilings were refused
   (own map 256x256 under a 512x256 working map, and a class-0 solve kept as class 2 with 64x64 maps; both fixed since). The
-  own-map size rule, the edits and the moves have not run in game yet (UNVERIFIED).
+  own-map size rule, the edits and the moves have not run in game yet (UNVERIFIED). Round 2 (10:28): GPU self-checks wall
+  atlas 137, floor 121, ceiling 136 maps, all 100%; no edit taken (indoor lamps listed in room 0, and maps with no room-0
+  texels; both handled since, UNVERIFIED in game).
 
 ## See also
 

@@ -154,6 +154,25 @@ struct MapGeo {
     uintptr_t tex = 0;
     uint32_t pitch = 0, w = 0, h = 0;
 };
+// (GPU room lamps, kept captures: KeepEnd for a room > 0, BuildKept0 for room 0's lamps Real-time outdoor lamps does not draw)
+// One part of a texel: A, B and the threshold scale as halves, the lamp's entries, the bits (kKeptEarly 1, kKeptNoB 2,
+// kKeptFade 4; enum below)
+struct KeptPart {
+    uint32_t texel = 0;
+    uint16_t a = 0, b = 0, thrScale = 0; // halves
+    uint8_t mult = 1, bits = 0;
+};
+// A light's kept parts: its law when kept (a law of the GPU's, or, colourOnly, its colour alone: a light whose evaluation is
+// its colour x a share that its colour does not change, TubeLight; geo then the signature of what the share reads)
+struct KeptLamp {
+    uintptr_t light = 0;
+    int type = 0;
+    float pos[3] = {}; // (stage 2b) where it was (its law's position): moved since, its parts no longer hold
+    bool colourOnly = false;
+    uint64_t geo = 0;
+    GpuLampLaw::Lamp law;
+    std::vector<KeptPart, ApexMem::HighAllocator<KeptPart>> parts; // by texel, ascending
+};
 struct Record {
     uint32_t version = 0; // (Real-time outdoor lamps) changes whenever the kept parts or texels change
     // (Real-time outdoor lamps) the texels without the drawn lamps' parts: its hash, and a version that changes only with it
@@ -183,6 +202,9 @@ struct Record {
     std::vector<BlockRec> blocks;
     std::vector<uint32_t, ApexMem::HighAllocator<uint32_t>> preblur;
     std::vector<DrawnSum, ApexMem::HighAllocator<DrawnSum>> drawnSum; // by texel, while lamps are collapsed (else empty)
+    // (GPU room lamps) the lamps of its list Real-time outdoor lamps does not draw, kept as a kept room's (BuildKept0): their
+    // parts leave the base it relights from and the GPU adds them back (ExportRoom0); a delta that changes one drops it
+    std::vector<KeptLamp> kept0;
     DWORD used = 0;
     size_t bytes = 0;
     uint8_t gone = 0; // (left_lot_release) liveness sweeps in a row that found no loaded lot holding its story manager
@@ -197,6 +219,7 @@ size_t BytesOf(const Record& r) {
     size_t b = sizeof(Record) + r.samples.capacity() + r.texels.capacity() * sizeof(TexelRec) + r.batches.capacity() * sizeof(BatchRec) +
                r.blocks.capacity() * sizeof(BlockRec) + r.preblur.capacity() * 4 + r.drawnSum.capacity() * sizeof(DrawnSum);
     for (const LampRec& l : r.lamps) b += sizeof(LampRec) + l.parts.capacity() * sizeof(Contrib);
+    for (const KeptLamp& l : r.kept0) b += sizeof(KeptLamp) + l.parts.capacity() * sizeof(KeptPart);
     return b;
 }
 // A record's buffers at their exact size (BytesOf counts capacity, and growth leaves up to half a buffer unused). A buffer
@@ -278,7 +301,8 @@ uint64_t BaseHash(const Record& r) {
         b[i * 5 + 4] -= d.all;
     }
     for (const LampRec& l : r.lamps) {
-        if (!l.drawn) {
+        const bool k0 = std::any_of(r.kept0.begin(), r.kept0.end(), [&](const KeptLamp& k) { return k.light == l.light; });
+        if (!l.drawn && !k0) {
             kept.push_back(l.light);
             continue;
         }
@@ -634,6 +658,8 @@ struct Capture {
     bool directional = false;
     bool probe = false; // a room other than room 0, for the room lamp probe: compared at its end and dropped
     bool keep = false;  // (GPU room lamps stage 1) that capture is kept at its end (KeepEnd)
+    bool keep0 = false; // (GPU room lamps) a room 0's: the lights of keep0Lights are captured as a kept room's (BuildKept0)
+    std::unordered_set<uintptr_t> keep0Lights;
     struct ProbeHook {
         uint32_t texel;
         uintptr_t light;
@@ -1022,8 +1048,10 @@ Delta ComputeDelta(BYTE* room, const RoomRead& rr, Record& r, const char*& why, 
         l->mult = c.mult;
         l->sig = c.now.sig;
         l->type = c.now.type;
+        std::erase_if(r.kept0, [&](const KeptLamp& k) { return k.light == l->light; }); // (its parts changed: back in the base)
     }
     std::erase_if(r.lamps, [](const LampRec& l) { return l.mult <= 0; });
+    std::erase_if(r.kept0, [&](const KeptLamp& k) { return std::none_of(r.lamps.begin(), r.lamps.end(), [&](const LampRec& l) { return l.light == k.light; }); });
     // the texels: composed and packed as the solve packs them; the lamps under an upper floor's plane (the floor mask's
     // gate) take the whole list, so every gated texel is composed again
     plan.dirtyBlock.assign(r.blocks.size(), 0);
@@ -1941,17 +1969,6 @@ void ProbeEnd(const BYTE* room) {
 // Per texel and lamp the GPU draws: part = mult x fade(law x A) x B (RtLampModel::KeptAdd), A the colour Apex's tests left
 // before the soft light cut over the lamp's law, B the game's 2D wall x 3D share. The texel's base is its sum less those
 // parts. Light tree thread only (kept, recomposed and cleared there).
-struct KeptPart {
-    uint32_t texel = 0;
-    uint16_t a = 0, b = 0, thrScale = 0; // halves
-    uint8_t mult = 1, bits = 0;          // kKeptEarly, kKeptNoB, kKeptFade
-};
-struct KeptLamp {
-    uintptr_t light = 0;
-    int type = 0;
-    float pos[3] = {}; // (stage 2b) where it was (its law's position): moved since, its parts no longer hold
-    std::vector<KeptPart, ApexMem::HighAllocator<KeptPart>> parts; // by texel, ascending
-};
 struct KeptRoom {
     uintptr_t room = 0, mgr = 0;
     uint64_t lot = 0;
@@ -2000,6 +2017,97 @@ void ClearKept() {
     g_keptBytes = 0;
     g_keptFull = false;
 }
+// The law a light is kept with (any thread): the GPU's law (RtOutdoorLamps::WorldLaw), else its colour alone
+// (RtOutdoorLamps::ColourLaw: a TubeLight, whose evaluation 0x006BFA70 is its colour +0xE0 x a share its colour does not
+// change); false: it has neither (its light stays in the base)
+bool LawOfLight(uintptr_t light, uint64_t lot, KeptLamp& kl) {
+    int type = 0, reg = -1;
+    kl.light = light;
+    if (RtOutdoorLamps::WorldLaw(light, lot, false, kl.law, type, reg)) {
+        kl.type = type, kl.colourOnly = false, kl.geo = 0;
+        std::memcpy(kl.pos, kl.law.pos, sizeof kl.pos);
+        return true;
+    }
+    float colour[3] = {};
+    uint64_t geo = 0;
+    if (!RtOutdoorLamps::ColourLaw(light, lot, colour, geo)) return false;
+    kl.law = GpuLampLaw::Lamp{};
+    std::memcpy(kl.law.colour, colour, sizeof colour);
+    kl.type = 6, kl.colourOnly = true, kl.geo = geo;
+    return true;
+}
+// A kept lamp's law now (false: none now, it adds nothing); moved: its place, or (its colour alone) what its share reads (the
+// intensity, the tube's ends and radius, the range), is not the one its parts were kept with
+bool LawNow(const KeptLamp& kl, uint64_t lot, GpuLampLaw::Lamp& law, bool& moved) {
+    KeptLamp now;
+    moved = false;
+    if (!LawOfLight(kl.light, lot, now) || now.colourOnly != kl.colourOnly) return false;
+    law = now.law;
+    moved = kl.colourOnly ? now.geo != kl.geo
+                          : std::fabs(now.pos[0] - kl.pos[0]) > 1e-4f || std::fabs(now.pos[1] - kl.pos[1]) > 1e-4f || std::fabs(now.pos[2] - kl.pos[2]) > 1e-4f;
+    return true;
+}
+// The law at a sample (position, then normal at +4): the GPU's, or the colour alone
+void LawAt(const GpuLampLaw::Lamp& law, bool colourOnly, const float* s, float out[3]) {
+    if (colourOnly) std::memcpy(out, law.colour, sizeof law.colour);
+    else GpuLampLaw::Eval(law, s, s + 4, 0.0f, out);
+}
+// A light's parts from a capture's hooks: A = the colour before the soft light cut over its law there (r + g + b), B = its
+// part of the solve (lr: its parts, null when none) over its colour after the soft light cut (0 when the game never tested it).
+// gotSum: n zeros (left so). Returns the parts kept
+long KeptPartsOf(KeptLamp& kl, const std::vector<const Capture::ProbeHook*>& hs, const LampRec* lr, const uint8_t* samples, size_t n, std::vector<float>& gotSum,
+                 long& noB) {
+    if (lr)
+        for (const Contrib& p : lr->parts)
+            if (p.texel < n) gotSum[p.texel] = (p.rgb[2] + p.rgb[1]) + p.rgb[0];
+    kl.parts.reserve(hs.size());
+    for (const Capture::ProbeHook* h : hs) {
+        const int mult = std::max<int>(1, h->evals);
+        const float pre = h->preSum / static_cast<float>(mult);
+        if (!(pre > 0.0f) || h->texel >= n) continue;
+        const float* s = reinterpret_cast<const float*>(samples + static_cast<size_t>(h->texel) * 0x30);
+        float lw[3];
+        LawAt(kl.law, kl.colourOnly, s, lw);
+        const float ls = (lw[2] + lw[1]) + lw[0];
+        const float hs3 = (h->rgb[2] + h->rgb[1]) + h->rgb[0];
+        KeptPart p;
+        p.texel = h->texel;
+        p.a = ToHalf(ls > 1e-9f ? std::min(pre / ls, 60000.0f) : 0.0f);
+        p.b = ToHalf(hs3 > 0.0f ? std::clamp(gotSum[h->texel] / hs3, 0.0f, 1.0f) : 0.0f);
+        p.thrScale = ToHalf(h->thrScale);
+        p.mult = static_cast<uint8_t>(std::min(mult, 255));
+        p.bits = static_cast<uint8_t>(h->kbits | (hs3 > 0.0f ? 0 : kKeptNoB));
+        noB += hs3 > 0.0f ? 0 : 1;
+        kl.parts.push_back(p);
+    }
+    if (lr)
+        for (const Contrib& p : lr->parts)
+            if (p.texel < n) gotSum[p.texel] = 0.0f;
+    ShrinkExact(kl.parts);
+    return static_cast<long>(kl.parts.size());
+}
+// Room 0's lamps Real-time outdoor lamps does not draw (indoor lamps its list takes through openings), kept as a kept room's
+// (GPU room lamps): each one whose light is all in the room's own sum (no exit lamp, whose part is also in a ground texel's
+// alpha; no part of the floor mask's two copies). Their parts leave Real-time outdoor lamps' base, and the GPU adds them back
+// (ExportRoom0); the others stay in the base (their edits take the solves)
+void BuildKept0(Capture& c, Record& r) {
+    const size_t n = r.texels.size();
+    std::unordered_map<uintptr_t, std::vector<const Capture::ProbeHook*>> hooks;
+    for (const Capture::ProbeHook& h : c.probeHook)
+        if (h.texel < n && c.keep0Lights.count(h.light)) hooks[h.light].push_back(&h);
+    std::vector<float> gotSum(n, 0.0f);
+    long noB = 0;
+    static const std::vector<const Capture::ProbeHook*> s_none;
+    for (const LampRec& l : r.lamps) {
+        if (!c.keep0Lights.count(l.light) || l.drawn || l.exit || l.collapsed || l.mult <= 0) continue;
+        if (std::any_of(l.parts.begin(), l.parts.end(), [](const Contrib& p) { return p.vis != 0 || p.all != 0; })) continue;
+        KeptLamp kl;
+        if (!LawOfLight(l.light, r.lot, kl)) continue;
+        const auto it = hooks.find(l.light);
+        KeptPartsOf(kl, it != hooks.end() ? it->second : s_none, &l, r.samples.data(), n, gotSum, noB);
+        r.kept0.push_back(std::move(kl));
+    }
+}
 // The kept solve recomposed from what was kept, with the lamps' laws as they are now, against the solve's own sum (before the
 // tone): the share within 2/255 and the worst texels (the log)
 void KeptFinalCheck(const KeptRoom& k, const std::vector<float>& sum, const LARGE_INTEGER& t0);
@@ -2012,8 +2120,8 @@ void KeptSelfCheck(const KeptRoom& k) {
     std::vector<char> lawOk(k.lamps.size(), 0);
     int lost = 0;
     for (size_t li = 0; li < k.lamps.size(); li++) {
-        int type = 0, reg = -1;
-        lawOk[li] = RtOutdoorLamps::WorldLaw(k.lamps[li].light, k.lot, false, laws[li], type, reg) ? 1 : 0;
+        bool moved = false;
+        lawOk[li] = LawNow(k.lamps[li], k.lot, laws[li], moved) ? 1 : 0;
         if (!lawOk[li]) {
             lost++;
             continue;
@@ -2022,7 +2130,7 @@ void KeptSelfCheck(const KeptRoom& k) {
             if (p.texel >= n) continue;
             const float* s = reinterpret_cast<const float*>(k.samples.data() + static_cast<size_t>(p.texel) * 0x30);
             float law[3];
-            GpuLampLaw::Eval(laws[li], s, s + 4, 0.0f, law);
+            LawAt(laws[li], k.lamps[li].colourOnly, s, law);
             RtLampModel::KeptAdd(law, FromHalf(p.a), FromHalf(p.b), FromHalf(p.thrScale), static_cast<float>(p.mult), (p.bits & kKeptEarly) != 0,
                                  (p.bits & kKeptFade) != 0, k.thr, &sum[static_cast<size_t>(p.texel) * 3]);
         }
@@ -2059,7 +2167,7 @@ void KeptSelfCheck(const KeptRoom& k) {
             const auto it = std::lower_bound(parts.begin(), parts.end(), i, [](const KeptPart& p, uint32_t x) { return p.texel < x; });
             if (it == parts.end() || it->texel != i) continue;
             float law[3];
-            GpuLampLaw::Eval(laws[li], s, s + 4, 0.0f, law);
+            LawAt(laws[li], k.lamps[li].colourOnly, s, law);
             const float m = (law[2] + law[1] + law[0]) * FromHalf(it->a) * FromHalf(it->b) * static_cast<float>(it->mult);
             if (m > best)
                 best = m, lamp = std::format(", lamp {:08X} x{} A {:.4f} B {:.4f} law ({:.4f} {:.4f} {:.4f}) bits {}", k.lamps[li].light, static_cast<int>(it->mult),
@@ -2347,47 +2455,17 @@ void KeepEnd(const BYTE* room) {
             if (h.texel < n) hooks[h.light].push_back(&h);
         std::vector<float> gotSum(n, 0.0f);
         for (const auto& [light, hs] : hooks) {
-            GpuLampLaw::Lamp law;
-            int type = 0, reg = -1;
-            if (!RtOutdoorLamps::WorldLaw(light, r.lot, false, law, type, reg)) { // (not drawn: its light stays in the base)
+            KeptLamp kl;
+            if (!LawOfLight(light, r.lot, kl)) { // (not drawn: its light stays in the base)
                 k->baked.push_back(light);
                 continue;
             }
             const LampRec* lr = got.count(light) ? got[light] : nullptr;
             if (lr)
                 for (const Contrib& p : lr->parts)
-                    if (p.texel < n) {
+                    if (p.texel < n)
                         for (int q = 0; q < 3; q++) k->base[static_cast<size_t>(p.texel) * 3 + q] -= p.rgb[q];
-                        gotSum[p.texel] = (p.rgb[2] + p.rgb[1]) + p.rgb[0];
-                    }
-            KeptLamp kl;
-            kl.light = light, kl.type = type;
-            std::memcpy(kl.pos, law.pos, sizeof kl.pos);
-            kl.parts.reserve(hs.size());
-            for (const Capture::ProbeHook* h : hs) {
-                const int mult = std::max<int>(1, h->evals);
-                const float pre = h->preSum / static_cast<float>(mult);
-                if (!(pre > 0.0f)) continue;
-                const float* s = reinterpret_cast<const float*>(r.samples.data() + static_cast<size_t>(h->texel) * 0x30);
-                float lw[3];
-                GpuLampLaw::Eval(law, s, s + 4, 0.0f, lw);
-                const float ls = (lw[2] + lw[1]) + lw[0];
-                const float hs3 = (h->rgb[2] + h->rgb[1]) + h->rgb[0];
-                KeptPart p;
-                p.texel = h->texel;
-                p.a = ToHalf(ls > 1e-9f ? std::min(pre / ls, 60000.0f) : 0.0f);
-                p.b = ToHalf(hs3 > 0.0f ? std::clamp(gotSum[h->texel] / hs3, 0.0f, 1.0f) : 0.0f);
-                p.thrScale = ToHalf(h->thrScale);
-                p.mult = static_cast<uint8_t>(std::min(mult, 255));
-                p.bits = static_cast<uint8_t>(h->kbits | (hs3 > 0.0f ? 0 : kKeptNoB));
-                noB += hs3 > 0.0f ? 0 : 1;
-                kl.parts.push_back(p);
-            }
-            if (lr)
-                for (const Contrib& p : lr->parts)
-                    if (p.texel < n) gotSum[p.texel] = 0.0f;
-            parts += static_cast<long>(kl.parts.size());
-            ShrinkExact(kl.parts);
+            parts += KeptPartsOf(kl, hs, lr, r.samples.data(), n, gotSum, noB);
             k->lamps.push_back(std::move(kl));
         }
         // (stage 2a) the tail, when the solve's end saw every texel's pack input and final texel
@@ -2526,6 +2604,14 @@ void SolveStart(unsigned char* room) {
         }
         c.startSigs.push_back(now.sig);
     }
+    // GPU room lamps (developer): the lot lamps of its list Real-time outdoor lamps does not draw (indoor lamps through openings)
+    // are captured as a kept room's, so that the GPU can draw them from their parts (BuildKept0)
+    if (g_capture.load(std::memory_order_relaxed) && !baseOnly)
+        for (const ListLight& l : c.startList) {
+            KeptLamp kl;
+            if (!DrawnLight(l.light, rr.lot) && LawOfLight(l.light, rr.lot, kl)) c.keep0Lights.insert(l.light);
+        }
+    c.keep0 = !c.keep0Lights.empty();
     // a self-check: the full solve's texels are compared with what the delta wrote
     bool check = false;
     {
@@ -2806,6 +2892,7 @@ void SolveEnd(unsigned char* room) {
         r.used = GetTickCount();
         r.version = g_version.fetch_add(1, std::memory_order_relaxed) + 1;
         r.baseVersion = r.version;
+        if (c.keep0) HookGuard::Run("OutdoorDelta room 0 kept lamps", [&] { BuildKept0(c, r); });
         if (RtOutdoorLamps::Watching()) r.baseHash = BaseHash(r);
         ShrinkRecord(r); // (outside g_mx: the copies take a while on a large room)
         const uint64_t key = KeyOf(room, r.cls);
@@ -2974,7 +3061,7 @@ void TapEnd() {
 }
 void OnEvalOut(uintptr_t light, const float* colour) {
     SampleState& s = g_s;
-    if (!s.on || s.tap != 0 || !g_cap.probe || !colour) return;
+    if (!s.on || s.tap != 0 || !(g_cap.probe || g_cap.keep0) || !colour) return;
     if (Acc* a = AccFor(light)) {
         for (int i = 0; i < 3; i++) a->hook[i] += colour[i], a->wall[i] += colour[i]; // (as passed until its wall test says otherwise)
         const bool noted = s.pathLight == light; // (no path noted: the threshold dropped it before, or it is not a roofed room's)
@@ -2997,7 +3084,7 @@ void OnEvalOut(uintptr_t light, const float* colour) {
 }
 void OnWallTest(bool passed, float t) {
     SampleState& s = g_s;
-    if (!s.on || s.tap != 0 || !g_cap.probe || !s.lastLight) return;
+    if (!s.on || s.tap != 0 || !(g_cap.probe || g_cap.keep0) || !s.lastLight) return;
     const float share = passed ? std::clamp(t, 0.0f, 1.0f) : 0.0f;
     if (Acc* a = AccFor(s.lastLight))
         for (int i = 0; i < 3; i++) a->wall[i] -= s.last[i] * (1.0f - share);
@@ -3005,7 +3092,7 @@ void OnWallTest(bool passed, float t) {
 }
 ProbeEval* ProbeEvalBegin(uintptr_t light, const float* c0, int set) {
     SampleState& s = g_s;
-    if (!s.on || s.tap != 0 || !g_cap.probe || !c0) return nullptr;
+    if (!s.on || s.tap != 0 || !(g_cap.probe || g_cap.keep0) || !c0) return nullptr;
     s.cur = ProbeEval{};
     s.cur.light = light;
     s.cur.set = static_cast<uint8_t>(std::clamp(set, 0, 255));
@@ -3014,13 +3101,13 @@ ProbeEval* ProbeEvalBegin(uintptr_t light, const float* c0, int set) {
 }
 void OnEvalPath(uintptr_t light, int path, const float* colour) {
     SampleState& s = g_s;
-    if (!s.on || s.tap != 0 || !g_cap.probe || !colour) return;
+    if (!s.on || s.tap != 0 || !(g_cap.probe || g_cap.keep0) || !colour) return;
     s.pathLight = light, s.path = std::clamp(path, 0, 7);
     for (int i = 0; i < 3; i++) s.pre[i] = colour[i];
 }
 void OnWallTestRaw(const float* from, bool ok, float t) {
     SampleState& s = g_s;
-    if (!s.on || s.tap != 0 || !g_cap.probe || !s.lastLight || !from) return;
+    if (!s.on || s.tap != 0 || !(g_cap.probe || g_cap.keep0) || !s.lastLight || !from) return;
     if (Acc* a = AccFor(s.lastLight)) {
         for (int i = 0; i < 3; i++) a->from[i] = from[i];
         a->rawT = t, a->raw = ok ? 1 : 2;
@@ -3117,14 +3204,14 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
             for (int q = 0; q < 3; q++) p.rgb[q] = a.rgb[q];
             p.vis = s.masked ? ToHalf(a.vis) : 0;
             p.all = s.masked ? ToHalf(a.all) : 0;
-            if (c.probe) {
+            if (c.probe || (c.keep0 && c.keep0Lights.count(a.light))) {
                 const bool lit = a.hook[0] != 0.0f || a.hook[1] != 0.0f || a.hook[2] != 0.0f;
                 const ProbeEval* ev = a.evals ? &s.accEv[i] : nullptr;
                 const bool apex = ev && (ev->set || ev->cut); // a lamp of another room or story, or one the floor cut stopped
                 // (an evaluation the game lit and Apex left dark is kept too, at most kProbeZeroMax a solve)
                 const bool zero = !lit && apex && std::max({a.c0[0], a.c0[1], a.c0[2]}) >= 1.0f / 255.0f && c.probeZero < kProbeZeroMax;
                 // (kept captures) every evaluation lit before the soft light cut down to kKeepFloor of its threshold, dark or not
-                const bool keep = c.keep && a.evals && a.preSum / static_cast<float>(a.evals) >= kKeepFloor * r.thr * a.thrScale;
+                const bool keep = (c.keep || c.keep0) && a.evals && a.preSum / static_cast<float>(a.evals) >= kKeepFloor * r.thr * a.thrScale;
                 if (lit || zero || keep) {
                     c.probeZero += zero ? 1 : 0;
                     uint32_t evIdx = UINT32_MAX;
@@ -3194,6 +3281,10 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on) {
     LevelLightShare::LotRooms(tracker, rooms);
     std::vector<std::pair<const void*, uint32_t>> kept; // the rooms (id > 0) listing it, with their kept solve's version
     std::vector<std::pair<int, int>> ids;               // the same rooms: (story, id)
+    // a light without a GPU law (a tube): its share now (an intensity or shape edit changes it: such an edit takes the solves)
+    float colourNow[3] = {};
+    uint64_t geoNow = 0;
+    bool haveGeo = false, geoRead = false;
     std::vector<int> stories;
     uintptr_t raw[1024];
     const auto refuse = [&](const RoomRead& rr, const char* why) {
@@ -3206,8 +3297,14 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on) {
         if (n <= 0 || std::find(raw, raw + n, light) == raw + n) continue;
         RoomRead rr;
         if (!ReadRoom(static_cast<const BYTE*>(room), rr)) return false;
+        if (!geoRead) haveGeo = RtOutdoorLamps::ColourLaw(light, rr.lot, colourNow, geoNow), geoRead = true;
         if (rr.id == 0) {
-            if (!RtOutdoorLamps::CoversLamp(room, light)) return refuse(rr, "a room 0 Real-time outdoor lamps does not draw it in");
+            if (!RtOutdoorLamps::CoversLamp(room, light)) return refuse(rr, "a room 0 Real-time outdoor lamps does not draw it in (an exit lamp, or a part in its floor mask)");
+            // (a tube kept there with another share than now: drawn as its solve gave it, so its edit is not shown)
+            std::lock_guard<std::recursive_mutex> lk(g_mx);
+            if (const auto it = g_records.find(KeyOf(room, rr.cls)); it != g_records.end())
+                for (const KeptLamp& k0 : it->second->kept0)
+                    if (k0.light == light && k0.colourOnly && (!haveGeo || k0.geo != geoNow)) return refuse(rr, "a light without a GPU law whose intensity or shape changed");
             continue;
         }
         std::shared_ptr<const KeptRoom> k;
@@ -3218,6 +3315,8 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on) {
         if (!k) return refuse(rr, "no kept solve of its class");
         if (!k->editable) return refuse(rr, k->tailWhy ? k->tailWhy : "a wall texel the GPU does not blur");
         if (std::find(k->baked.begin(), k->baked.end(), light) != k->baked.end()) return refuse(rr, "its kept solve has the lamp in its base");
+        for (const KeptLamp& kl : k->lamps)
+            if (kl.light == light && kl.colourOnly && (!haveGeo || kl.geo != geoNow)) return refuse(rr, "a light without a GPU law whose intensity or shape changed");
         if (!GpuRoomLamps::Drawn(room, k->version, k->maps)) return refuse(rr, "a map of it not drawn on the GPU");
         kept.emplace_back(room, k->version);
         ids.emplace_back(rr.story, rr.id);
@@ -3318,7 +3417,8 @@ bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu:
             v.base[0] = FromHalf(p.a), v.base[1] = FromHalf(p.b), v.base[2] = FromHalf(p.thrScale);
             d.parts.push_back(v);
         }
-        if (d.parts.size() > first) d.lamps.push_back(l.light), d.ranges.emplace_back(first, static_cast<UINT>(d.parts.size()) - first);
+        if (d.parts.size() > first)
+            d.lamps.push_back(l.light), d.colourOnly.push_back(l.colourOnly ? 1 : 0), d.ranges.emplace_back(first, static_cast<UINT>(d.parts.size()) - first);
     }
     // a texel's compose point at (x, y) of its target (RtLampModel::KeptTexel's inputs)
     const auto texel = [&](uint32_t i, int x, int y) {
@@ -3349,7 +3449,7 @@ bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu:
     const auto placeOf = [](int x, int y) { return static_cast<uint32_t>(y) << 16 | static_cast<uint32_t>(x); };
     const bool blurred = m == 0 && k.cls == 2;
     d.blur = blurred;
-    for (const KeptLamp& l : k.lamps) d.roomLamps.emplace_back(l.light, std::array<float, 3>{l.pos[0], l.pos[1], l.pos[2]});
+    for (const KeptLamp& l : k.lamps) d.roomLamps.push_back(RtLampGpu::KeptMapData::RoomLamp{l.light, {l.pos[0], l.pos[1], l.pos[2]}, l.geo, l.colourOnly});
     // every last write at its own place (a copy's source is taken as composed; a place a copy overwrites is drawn over after)
     if (!blurred)
         for (const auto& [key, i] : lastAt) {
@@ -3675,8 +3775,9 @@ bool ExportRoom0(const void* room, int cls, Room0Export& out) {
         for (const LampRec& l : r.lamps) {
             out.lamps++;
             out.kept.push_back(l.light);
-            if (!l.drawn) continue;
-            out.drawn.push_back(l.light);
+            const bool k0 = std::any_of(r.kept0.begin(), r.kept0.end(), [&](const KeptLamp& k) { return k.light == l.light; });
+            if (!l.drawn && !k0) continue;
+            if (l.drawn) out.drawn.push_back(l.light);
             for (const Contrib& p : l.parts) {
                 if (p.texel >= out.texels.size()) continue;
                 Room0Export::Texel& e = out.texels[p.texel];
@@ -3684,6 +3785,15 @@ bool ExportRoom0(const void* room, int cls, Room0Export& out) {
                 e.vis -= FromHalf(p.vis);
                 e.all -= FromHalf(p.all);
             }
+        }
+        for (const KeptLamp& k : r.kept0) {
+            Room0Export::KeptLamp0 e;
+            e.light = k.light, e.colourOnly = k.colourOnly, e.geo = k.geo, e.law = k.law;
+            std::memcpy(e.pos, k.pos, sizeof e.pos);
+            e.parts.reserve(k.parts.size());
+            for (const KeptPart& p : k.parts)
+                e.parts.push_back(Room0Export::KeptPart0{p.texel, FromHalf(p.a), FromHalf(p.b), FromHalf(p.thrScale), p.mult, static_cast<uint8_t>(p.bits & (kKeptEarly | kKeptFade))});
+            out.kept0.push_back(std::move(e));
         }
         for (const BlockRec& b : r.blocks) out.blocks.push_back(Room0Export::Block{b.x0, b.y0, b.x1, b.y1, b.ok, b.off});
         out.preblur.assign(r.preblur.begin(), r.preblur.end());

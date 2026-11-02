@@ -1921,7 +1921,9 @@ bool KeptGpuCheck() {
                 const float A = 0.3f + 1.5f * U(rng), B = U(rng) < 0.2f ? 0.0f : U(rng), ts = U(rng) < 0.3f ? 0.5f + 0.5f * U(rng) : 1.0f;
                 const int mult = U(rng) < 0.2f ? 2 : 1, bits = (U(rng) < 0.3f ? 1 : 0) | (U(rng) < 0.8f ? 4 : 0);
                 float law[3];
-                GpuLampLaw::Eval(laws[l], tx[i].pos, tx[i].nrm, 0.0f, law);
+                // (lamp 2: a light with no GPU law, its colour alone: KeptAdd's law is its colour, lawOk 2)
+                if (l == 2) std::memcpy(law, laws[l].colour, sizeof law);
+                else GpuLampLaw::Eval(laws[l], tx[i].pos, tx[i].nrm, 0.0f, law);
                 // (the kept halves, as BuildKeptMap gives them)
                 const float a = OutdoorDeltaModel::FromHalf(OutdoorDeltaModel::ToHalf(A)), b = OutdoorDeltaModel::FromHalf(OutdoorDeltaModel::ToHalf(B));
                 const float s = OutdoorDeltaModel::FromHalf(OutdoorDeltaModel::ToHalf(ts));
@@ -2053,7 +2055,7 @@ bool KeptGpuCheck() {
         g_dev->CreateTexture(ow, oh, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &out, nullptr);
         RtLampGpu::KeptMapGpu g;
         bool ok = game && out && RtLampGpu::Engine::UploadKept(g_dev, d, g);
-        const char lawOk[nLamps] = {1, 1, 1, 1, 1};
+        const char lawOk[nLamps] = {1, 1, 2, 1, 1};
         std::vector<uint32_t> got;
         g_dev->BeginScene();
         if (ok && eng.Begin(g_dev)) {
@@ -2096,6 +2098,104 @@ bool KeptGpuCheck() {
     return true;
 }
 
+// ---------------------------------------------------------------- 6. GPU room lamps: room 0's kept lamps (AddKeptParts)
+// Room-0 texels relit by Real-time outdoor lamps' passes with no lamp of its own (Accumulate with none), the kept parts of
+// lamps it does not draw added to the sum (AddKeptParts: one with a GPU law, one with its colour alone), then ComposePS, against
+// the CPU: PackInput(base + the KeptAdd parts, alpha), the dither, the game's pack. Texels no part reaches keep their base.
+bool Room0KeptCheck() {
+    std::printf("\n[GPU room lamps] room 0's kept lamps added to Real-time outdoor lamps' sum against KeptAdd + PackInput on the CPU\n");
+    std::mt19937 rng(77);
+    std::uniform_real_distribution<float> U(0.0f, 1.0f);
+    const int w = 64, h = 32, nk = 2;
+    const float thr = 3.0f / 255.0f;
+    GpuLampLaw::Lamp laws[nk];
+    for (GpuLampLaw::Lamp& L : laws) {
+        L.pos[0] = 16.0f * U(rng), L.pos[1] = 1.0f + U(rng), L.pos[2] = 8.0f * U(rng), L.W = 3.0f + 4.0f * U(rng);
+        for (float& c : L.colour) c = 0.3f + 0.7f * U(rng);
+        GpuLampLaw::NoCone(L);
+    }
+    const char lawOk[nk] = {1, 2}; // (the second: its colour alone)
+    std::vector<RtLampGpu::TexelVertex> verts, parts;
+    std::vector<std::pair<UINT, UINT>> ranges(nk);
+    std::vector<uint32_t> want(static_cast<size_t>(w) * h, 0);
+    std::vector<float> S(static_cast<size_t>(w) * h * 3);
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            RtLampGpu::TexelVertex v{};
+            v.x = static_cast<float>(x), v.y = static_cast<float>(y), v.w = 1.0f;
+            v.p[0] = x * 0.25f, v.p[1] = 0.0f, v.p[2] = y * 0.25f, v.n[1] = 1.0f;
+            v.n[3] = U(rng) * 0.5f; // the record's alpha
+            for (int c = 0; c < 3; c++) v.base[c] = U(rng) < 0.3f ? 1.2f * U(rng) : 0.2f * U(rng), S[(static_cast<size_t>(y) * w + x) * 3 + c] = v.base[c];
+            v.base[3] = (x + y) % 3 ? RoomMapDither::Offset(x, y) / 255.0f : 0.0f;
+            verts.push_back(v);
+        }
+    for (int l = 0; l < nk; l++) {
+        ranges[l].first = static_cast<UINT>(parts.size());
+        for (int i = 0; i < w * h; i++) {
+            if ((i + l) % 4 == 0) continue;
+            const RtLampGpu::TexelVertex& t = verts[i];
+            RtLampGpu::TexelVertex v{};
+            v.x = t.x, v.y = t.y, v.w = 1.0f;
+            for (int c = 0; c < 3; c++) v.p[c] = t.p[c], v.n[c] = t.n[c];
+            const float A = OutdoorDeltaModel::FromHalf(OutdoorDeltaModel::ToHalf(0.2f + U(rng))), B = OutdoorDeltaModel::FromHalf(OutdoorDeltaModel::ToHalf(U(rng)));
+            const int bits = (U(rng) < 0.2f ? 1 : 0) | (U(rng) < 0.8f ? 4 : 0), mult = U(rng) < 0.2f ? 2 : 1;
+            v.p[3] = static_cast<float>(bits), v.n[3] = static_cast<float>(mult), v.base[0] = A, v.base[1] = B, v.base[2] = 1.0f;
+            parts.push_back(v);
+            float law[3];
+            if (lawOk[l] == 2) std::memcpy(law, laws[l].colour, sizeof law);
+            else GpuLampLaw::Eval(laws[l], t.p, t.n, 0.0f, law);
+            RtLampModel::KeptAdd(law, A, B, 1.0f, static_cast<float>(mult), bits & 1, (bits & 4) != 0, thr, &S[static_cast<size_t>(i) * 3]);
+        }
+        ranges[l].second = static_cast<UINT>(parts.size()) - ranges[l].first;
+    }
+    for (int i = 0; i < w * h; i++) {
+        float c[4];
+        OutdoorDeltaModel::PackInput(&S[static_cast<size_t>(i) * 3], verts[i].n[3], c);
+        if (verts[i].base[3] != 0.0f) OutdoorDeltaModel::Dither(c, verts[i].base[3]);
+        want[i] = OutdoorDeltaModel::PackModel(c);
+    }
+    RtLampGpu::Engine eng(RtLampGpu::PlainCalls());
+    std::string err;
+    RtLampProxy::Mesh empty;
+    if (!eng.Init(g_dev, g_shaders, 64, err) || !eng.SetProxy(g_dev, empty, err)) {
+        Check(false, "room-0 kept engine: " + err);
+        return false;
+    }
+    RtLampGpu::Map m;
+    m.w = w, m.h = h, m.count = static_cast<UINT>(verts.size());
+    IDirect3DVertexBuffer9* pvb = nullptr;
+    IDirect3DTexture9* out = nullptr;
+    bool ok = RtLampGpu::Engine::MakeVb(g_dev, verts.data(), m.count, &m.vb) && RtLampGpu::Engine::MakeVb(g_dev, parts.data(), static_cast<UINT>(parts.size()), &pvb) &&
+              SUCCEEDED(g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &out, nullptr));
+    RtLampGpu::Params p;
+    p.thr = thr;
+    std::vector<uint32_t> got;
+    g_dev->BeginScene();
+    if (ok && eng.Begin(g_dev)) {
+        ok = eng.Accumulate(g_dev, m, nullptr, 0, p, true, err) && eng.AddKeptParts(g_dev, pvb, ranges, laws, lawOk, thr, w, h, err) &&
+             eng.Compose(g_dev, m, nullptr, out, p, err);
+        eng.End(g_dev);
+    } else
+        ok = false;
+    g_dev->EndScene();
+    ok = ok && RtLampGpu::Engine::ReadTexture(g_dev, out, w, h, got);
+    if (m.vb) m.vb->Release();
+    if (pvb) pvb->Release();
+    if (out) out->Release();
+    Check(ok, "room-0 kept parts on the GPU: " + err);
+    if (!ok) return false;
+    long within1 = 0, maxDiff = 0;
+    for (int i = 0; i < w * h; i++) {
+        const int d = OutdoorDeltaModel::MaxLevelDiff(want[i], got[i]);
+        within1 += d <= 1;
+        maxDiff = std::max<long>(maxDiff, d);
+    }
+    std::printf("  %d texels, %zu kept parts of 2 lamps (one its colour alone): %.2f%% within 1/255, largest difference %ld/255\n", w * h, parts.size(),
+                100.0 * within1 / (w * h), maxDiff);
+    Check(within1 >= (w * h) * 999 / 1000 && maxDiff <= 2, "room-0 kept parts: the GPU's texels within 1/255 of the CPU's (99.9%), none past 2/255");
+    return true;
+}
+
 int main(int argc, char** argv) {
     std::vector<std::string> worlds;
     int maxLamps = 12;
@@ -2123,6 +2223,7 @@ int main(int argc, char** argv) {
     SplitCheck();
     RoomLampsCheck();
     KeptGpuCheck();
+    Room0KeptCheck();
 #ifdef RT_OBJECT_SHAPES
     ObjectParityCheck();
 #endif

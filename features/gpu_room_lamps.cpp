@@ -40,7 +40,8 @@ struct Entry {
     std::vector<GpuLampLaw::Lamp> laws;
     std::vector<char> lawOk;
     std::vector<std::pair<uint32_t, uint32_t>> expect; // (y << 16 | x, the game's texel) for the self-check
-    std::vector<std::pair<uintptr_t, std::array<float, 3>>> roomLamps;
+    std::vector<RtLampGpu::KeptMapData::RoomLamp> roomLamps;
+    std::vector<char> colourOnly; // per lamp of `lamps`: its law is its colour alone (a TubeLight)
     LARGE_INTEGER relitAt{};
 };
 std::map<std::tuple<const void*, int, int>, Entry> g_entries; // (room, class, map); render thread
@@ -183,6 +184,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                 if (RtLampGpu::Engine::UploadKept(dev, d, e.gpu)) {
                     e.ok = true;
                     e.lamps = std::move(d.lamps);
+                    e.colourOnly = std::move(d.colourOnly);
                     e.expect = std::move(d.expect);
                     e.roomLamps = std::move(d.roomLamps);
                     g_bytes += e.gpu.bytes;
@@ -194,11 +196,15 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
         int type = 0, reg = -1;
         // a lamp moved since its parts were kept (their shares follow its place): the room is left as the game's until its solve
         // is kept again (moves take the game's path)
+        // (a tube, its colour alone: its intensity, ends or radius changed, which its parts' share holds)
         bool moved = false;
-        for (const auto& [light, pos] : e.roomLamps) {
+        for (const auto& rl : e.roomLamps) {
             GpuLampLaw::Lamp now;
-            if (RtOutdoorLamps::WorldLaw(light, e.lot, false, now, type, reg) &&
-                (std::fabs(now.pos[0] - pos[0]) > kMoved || std::fabs(now.pos[1] - pos[1]) > kMoved || std::fabs(now.pos[2] - pos[2]) > kMoved))
+            float colour[3] = {};
+            uint64_t geo = 0;
+            if (rl.colourOnly) moved = moved || (RtOutdoorLamps::ColourLaw(rl.light, e.lot, colour, geo) && geo != rl.geo);
+            else if (RtOutdoorLamps::WorldLaw(rl.light, e.lot, false, now, type, reg) &&
+                     (std::fabs(now.pos[0] - rl.pos[0]) > kMoved || std::fabs(now.pos[1] - rl.pos[1]) > kMoved || std::fabs(now.pos[2] - rl.pos[2]) > kMoved))
                 moved = true;
         }
         if (moved && !e.moved) Undrawn(r.room);
@@ -209,7 +215,15 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
         any = true;
         e.laws.resize(e.lamps.size());
         e.lawOk.assign(e.lamps.size(), 0);
-        for (size_t l = 0; l < e.lamps.size(); l++) e.lawOk[l] = RtOutdoorLamps::WorldLaw(e.lamps[l], e.lot, false, e.laws[l], type, reg) ? 1 : 0;
+        for (size_t l = 0; l < e.lamps.size(); l++) {
+            float colour[3] = {};
+            uint64_t geo = 0;
+            if (l < e.colourOnly.size() && e.colourOnly[l]) {
+                e.laws[l] = GpuLampLaw::Lamp{};
+                if (RtOutdoorLamps::ColourLaw(e.lamps[l], e.lot, colour, geo)) std::memcpy(e.laws[l].colour, colour, sizeof colour), e.lawOk[l] = 2;
+            } else
+                e.lawOk[l] = RtOutdoorLamps::WorldLaw(e.lamps[l], e.lot, false, e.laws[l], type, reg) ? 1 : 0;
+        }
         Mix(sig, e.lawOk.data(), e.lawOk.size());
         for (size_t l = 0; l < e.lamps.size(); l++)
             if (e.lawOk[l]) Mix(sig, &e.laws[l], sizeof e.laws[l]);

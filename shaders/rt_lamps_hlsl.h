@@ -484,8 +484,8 @@ float4 ComposeRlgPS(TexelIn i, float2 vpos : VPOS) : COLOR0 {
 R"RAW(// ---------------------------------------------------------------- GPU room lamps (gpu_room_lamps.cpp): kept room solves
 // Every operation mirrors rt_lamp_model.h KeptAdd / KeptTexel: keep them in step.
 // AccKeptPS     one point per (kept texel, lamp) at the texel's place in the sum's layout (A32B32G32R32F, added: blend one,
-//               one); the lamp in gPos[0] .. gSpill[0], gA.y the room's threshold. p = (sample position, bits: 1 the early-out,
-//               4 the soft light cut ran), n = (sample normal, mult), base = (A, B, thrScale, 0): mult x fade(law x A) x B
+//               one); the lamp in gPos[0] .. gSpill[0], gA.y the room's threshold, gA.z 1: the law is the
+//               lamp's colour alone (gCol[0], a TubeLight). p = (sample position, bits: 1 the early-out, 4 the soft light cut ran), n = (sample normal, mult), base = (A, B, thrScale, 0): mult x fade(law x A) x B
 // ComposeKeptPS one point per kept texel at its place in the map (or in the wall layout): KeptTexel on base + the sum, packed
 //               as the game's pack. p = (base rgb, dither), n = (ramp x ambient rgb, ramp; a roofless texel: its alpha),
 //               base = (norm, k, the alpha floor, roofed 0/1), mask.xy = its place in the sum's layout (gD.zw: 1 / its size)
@@ -493,7 +493,7 @@ R"RAW(// ---------------------------------------------------------------- GPU ro
 // BlockKeptPS   a blurred wall block from the layout into the map: tc0 = the layout pixel, tc1 = (its first and last rows in the
 //               layout, rows beyond above 0/1, below 0/1): an edge row with nothing beyond it from the rows-only chain (sSrc2)
 float4 AccKeptPS(TexelIn i) : COLOR0 {
-    const float3 law = Law(ReadLamp(0), i.p.xyz, i.n.xyz, 0.0);
+    const float3 law = gA.z > 0.5 ? gCol[0].rgb : Law(ReadLamp(0), i.p.xyz, i.n.xyz, 0.0); // (gA.z: the colour alone, a TubeLight)
     float3 c = law * i.base.x;
     const float thr = gA.y;
     const float cs = (c.b + c.g) + c.r;
