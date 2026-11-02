@@ -191,6 +191,17 @@ lamp's position, not on its colour or intensity.
    (width up to 4096, point sampled), a header per room, 2 rows per record, 7 per rectangle or disc blocker. Its decoder
    `Occlude` walks the rows as the shader will and is `RoomLightTests::occlude` bit for bit (70,912 of 70,912 samples of the
    dump 20261102-135710, `tools/room_lamp_3d_replay`).
+18. Physical model, stage 3a (02/11, the GPU side only; nothing in the game calls it yet): `Engine::RelightKeptPhys` is
+   `RelightKept` with the sum drawn from the lamps instead of the parts. Each kept texel is a phys point (lot position and
+   normal for the law and the cube shadow, world position for the 3D test, bits + 16 x room slot, bit 8 = its batch ran the 3D
+   test). Per batch of 4 lamps, `T3dPS` runs the game's 3D test (`Occlude3D`, the port of `quadT`/`discT`/`occlude` over the
+   blocker table, in world space as the records; records and blockers walked as one sequence in two nested loops of 255, past
+   ps_3_0's loop limit), then `AccPhysPS` adds mult x fade(law x shadow share x T3D, dropped under 0.01) for any law kind (point,
+   spot, shaded, street, tube, area). The 3D test is a pass of its own: inside the lamp loop it exceeds ps_3_0's 32 temporary
+   registers. The compose, class-2 blur, tile-edge copies and restores are `RelightKept`'s own (`ComposeKept`). Furniture stays
+   out of the cube map: its soft shadows are the game's 3D test, evaluated analytically. `rt_lamps_test` `PhysKeptCheck`:
+   Occlude3D within 0.00003 of `RoomLightTests::occlude` at 12,952 tested point x lamp pairs (98.4% bit for bit), shadow shares
+   within 2/255 of the reference at 97.4-100% per lamp, 5,472 relit texels 0/255 from the CPU (floor and blurred wall atlas).
 
 ## Settings
 

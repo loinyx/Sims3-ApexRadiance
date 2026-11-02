@@ -623,4 +623,162 @@ ComposeOut ComposeK0PS(TexelIn i, float2 vpos : VPOS) {
     o.k = (sm > 1.0 ? Rne(saturate(log2(sm) / 3.0) * 255.0) / 255.0 : 0.0).xxxx;
     return o;
 }
+)RAW"
+R"RAW(// ---------------------------------------------------------------- physical indoor lamps (rt_lamp_gpu.cpp RelightKeptPhys)
+// The game's 3D (furniture) test, room_light_tests.h occlude / quadT / discT, over the blocker table (rt_lamp_blockers.h: point
+// sampled A32B32G32R32F, row i at (i % width, i / width)): the same operations in the same order (sums (z + y) + x, the
+// reciprocal with one Newton step, the 0.01 stop), with the constants the game holds (RoomLightTests K_* defaults).
+sampler2D sBlk : register(s4);
+float4 gK : register(c103); // the blocker table: width, 1 / width, 1 / height, 0
+float4 BlkRow(float i) {
+    const float y = floor((i + 0.5) * gK.y);
+    return tex2Dlod(sBlk, float4((i - y * gK.x + 0.5) * gK.y, (y + 0.5) * gK.z, 0, 0));
+}
+float GDot(float3 a, float3 b) {
+    const float3 p = a * b;
+    return (p.z + p.y) + p.x;
+}
+// 0x0069B4C0: plane (A, N) against the segment B -> C (direction D, inv = 1 / D.N); o = X - A written as soon as t >= 0
+bool SegPlane(float3 A, float3 N, float3 B, float3 C, float3 D, float inv, inout float3 o) {
+    const float t = (0.0 - GDot(B - A, N)) * inv;
+    const float3 X = D * t + B;
+    const bool on = !(0.0 > t);
+    if (on) o = X - A;
+    return on && !(0.0 > GDot(C - X, D));
+}
+float SoftOp(float c, float h) { return saturate(1.0 - ((max(-c, c) - h) + 0.15) * 2.0); }
+float SoftDisc(float3 v, float R) { return min(max(0.0, ((GDot(v, v) - R) + 0.0625) * 4.0), 1.0); }
+// One blocker (its 7 rows from b) on the segment p1 -> p2: quadT (kind 0) or discT (kind 1), one plane or two (r1.w != 0)
+float BlockerT(float b, float3 p1, float3 p2) {
+    const float4 r2 = BlkRow(b + 2);
+    const float3 d = p2 - p1;
+    const float dn = GDot(r2.xyz, d);
+    float t = 1.0;
+    [branch] if (!(1e-4 > max(-dn, dn))) {
+        const float r = 1.0 / dn;
+        const float inv = (2.0 - r * dn) * r;
+        const float4 r0 = BlkRow(b), r1 = BlkRow(b + 1);
+        float3 v1 = BlkRow(b + 5).xyz, v2 = BlkRow(b + 6).xyz; // (the "miss" offsets a plane the segment never reaches leaves)
+        const bool two = r1.w != 0;
+        const bool h1 = SegPlane(r0.xyz, r2.xyz, p1, p2, d, inv, v1);
+        bool h2 = false;
+        if (two) h2 = SegPlane(r1.xyz, r2.xyz, p1, p2, d, inv, v2);
+        [branch] if (h1 || h2) {
+            [branch] if (r0.w < 0.5) {
+                const float4 r3 = BlkRow(b + 3), r4 = BlkRow(b + 4);
+                t = 1.0 - SoftOp(GDot(r4.xyz, v1), r3.w) * SoftOp(GDot(r3.xyz, v1), r2.w);
+                if (two) t = (1.0 - SoftOp(GDot(r4.xyz, v2), BlkRow(b + 5).w) * SoftOp(GDot(r3.xyz, v2), r4.w)) * t;
+            } else
+                t = two ? SoftDisc(v2, r2.w) * SoftDisc(v1, r2.w) : SoftDisc(v1, r2.w);
+        }
+    }
+    return t;
+}
+// 0x0069D910: the product of the transmissions of the blockers of every record whose sphere the line a -> b passes, from the
+// room's header row h. Records and their blockers are walked as one sequence: a ps_3_0 loop runs at most 255 times, so two
+// nested loops give 65025 steps (a record or a blocker each)
+float Occlude3D(float3 a, float3 b, float h) {
+    const float4 head = BlkRow(h);
+    const float len2 = GDot(b - a, b - a);
+    float T = 1.0, rec = 0.0, blk = 0.0, nb = -1.0, first = 0.0;
+    bool done = !(head.y > 0.5);
+    [loop] for (int o = 0; o < 255; o++) {
+        if (done) break;
+        [loop] for (int k = 0; k < 255; k++) {
+            if (done) break;
+            if (nb < 0) { // a record: the broad phase (the infinite line against its sphere)
+                const float row = head.x + 2.0 * rec;
+                const float4 c = BlkRow(row);
+                const float3 ca = c.xyz - a, d = b - a;
+                const float s = GDot(ca, d);
+                const float3 q = s * (d / len2) - ca;
+                if (GDot(q, q) - c.w < 0) {
+                    const float4 ix = BlkRow(row + 1);
+                    first = ix.x;
+                    nb = ix.y;
+                    blk = 0;
+                }
+                if (!(nb > 0.5)) {
+                    rec += 1;
+                    nb = -1;
+                }
+            } else {
+                T = T * BlockerT(first + blk * 7.0, a, b);
+                blk += 1;
+                if (0.01 >= T) done = true;
+                if (blk >= nb) {
+                    rec += 1;
+                    nb = -1;
+                }
+            }
+            if (rec >= head.y) done = true;
+        }
+    }
+    return T;
+}
+// A lamp's law of any kind (an area light's, a tube's or the GPU's)
+float3 LawAt(LampRegs L, float3 p, float3 n, float reach) {
+    float3 c;
+    [branch] if (L.off.y < -1.5) c = AreaLaw(L, p);
+    else [branch] if (L.off.y < -0.5) c = TubeLaw(L, p, n);
+    else c = Law(L, p, n, reach);
+    return c;
+}
+// T3dPS: the 3D test of the batch's lamps 0 .. 3 (gA.x of them; 1 past them) from the lamp (+0x120: gW3) to each phys point
+// (base.xyz), both in world space as the game's records, as AccPhysPS takes it (a pass of its own: inside AccPhysPS's lamp
+// loop the walk exceeds ps_3_0's temporary registers)
+float4 gW3[4] : register(c104);
+float4 T3dPS(TexelIn i) : COLOR0 {
+    const float head = TableAt(16, SlotOf(i.p.w)).x;
+    const bool tested = BitsOf(i.p.w) >= 8.0 && head >= 0;
+    float4 r = 1.0;
+    [loop] for (int j = 0; j < 4; j++) {
+        float t = 1.0;
+        [branch] if (tested && j < (int)gA.x) t = Occlude3D(gW3[j].xyz, i.base.xyz, head);
+        r = float4(r.yzw, t); // (no indexable temporaries: after the 4 turns r = lamps 0 .. 3)
+    }
+    return r;
+}
+sampler2D sT3 : register(s5);
+// AccPhysPS: one point per kept texel at its place in the sum's layout: p = (lot position, bits + 16 x its room slot; bit 8:
+// the texel's batch ran the game's 3D test), n = the lot normal, base.xyz = its world position (T3dPS). Each lamp of the batch (at most 4; the room table's column l:
+// x = mult, 0 not lit there; y = 1 the reach share applies) adds mult x fade(law x share), share = the cube shadow share
+// (Shadow) and, on a tested texel, x its 3D test (T3dPS's output for the batch: sT3), the product dropped under 0.01 as the
+// game drops it
+float4 AccPhys(TexelIn i, float2 vpos, int kSearch, int kEmit, int kWalk) {
+    float4 sum = gE.x > 0.5 ? float4(0, 0, 0, 0) : tex2Dlod(sAcc, float4((vpos + 0.5) * gD.zw, 0, 0));
+    const float3 P = i.p.xyz;
+    const float3 N = normalize(i.n.xyz);
+    const float slot = SlotOf(i.p.w);
+    const bool tested = BitsOf(i.p.w) >= 8.0;
+    float4 T3 = tested ? tex2Dlod(sT3, float4((vpos + 0.5) * gD.zw, 0, 0)) : 1.0; // (lamp l in T3.x at its turn)
+    const float wallReach0 = gA.w > 0.5 ? Sat((0.5 - abs(N.y)) * 1e4) : 0.0;
+    const int count = (int)gA.x;
+    const float thr = gA.y;
+    [loop] for (int l = 0; l < 4; l++) {
+        const LampRegs lamp = ReadLamp(l);
+        const float t3 = T3.x;
+        T3 = T3.yzwx;
+        const float4 t = TableAt(l, slot);
+        const float3 law = LawAt(lamp, P, N, wallReach0 * t.y);
+        [branch] if (l < count && t.x != 0 && (law.r + law.g + law.b) > 0) {
+            float sh = Shadow(lamp, P, N, kSearch, kEmit, kWalk);
+            if (tested) {
+                const float prod = sh * t3;
+                sh = 0.01 > prod ? 0.0 : prod;
+            }
+            float3 c = law * sh;
+            const float cs = (c.b + c.g) + c.r;
+            if (!(cs >= thr)) c = 0;
+            else if (gA.z > 0.5 && cs < 2.0 * thr) {
+                const float x = (cs - thr) / thr;
+                c *= x * x * (3.0 - 2.0 * x);
+            }
+            sum.rgb += t.x * c;
+        }
+    }
+    return sum;
+}
+float4 AccPhysPS(TexelIn i, float2 vpos : VPOS) : COLOR0 { return AccPhys(i, vpos, 24, 16, 16); }
+float4 AccPhysFastPS(TexelIn i, float2 vpos : VPOS) : COLOR0 { return AccPhys(i, vpos, 8, 4, 8); }
 )RAW";

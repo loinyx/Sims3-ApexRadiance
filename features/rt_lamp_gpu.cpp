@@ -56,7 +56,7 @@ const char* EntryOf(ShaderId id) {
     static const char* const kNames[kShaderCount] = {"ShadowVS", "TexelVS",   "ShadowPS",  "AccPS",        "ComposePS",    "CopyPS",
                                                      "BlurRowPS", "BlurColPS", "BlockPS",   "AccFastPS",    "AccRlgPS",     "AccRlgFastPS",
                                                      "ComposeRlgPS", "AccKeptPS", "ComposeKeptPS", "CopyAtPS", "BlockKeptPS",
-                                                     "AccKept0PS", "AccKept0XPS", "ComposeK0PS"};
+                                                     "AccKept0PS", "AccKept0XPS", "ComposeK0PS", "AccPhysPS", "AccPhysFastPS", "T3dPS"};
     return id >= 0 && id < kShaderCount ? kNames[id] : "";
 }
 bool IsVertex(ShaderId id) { return id == kShadowVs || id == kTexelVs; }
@@ -131,6 +131,10 @@ void Engine::ReleaseDefault() {
     tileRows_ = 0;
     Rel(table_);
     tableRows_ = 0;
+    Rel(blk_);
+    blkW_ = blkH_ = 0;
+    Rel(t3_);
+    t3W_ = t3H_ = 0;
     Rel(saved_); // (a state block is a device object: made again after a reset)
 }
 void Engine::ReleaseAll() {
@@ -156,6 +160,7 @@ size_t Engine::DefaultBytes() const {
     if (atlas_) b += static_cast<size_t>(6 * face_) * kAtlasLamps * face_ * ((atlasFmt_ == D3DFMT_G32R32F ? 8 : 4) + 4); // the atlas + D24X8
     if (acc_[0]) b += static_cast<size_t>(scratchW_) * scratchH_ * 16 * 2;
     if (scratch_[0]) b += static_cast<size_t>(scratchW_) * scratchH_ * 4 * 5;
+    b += static_cast<size_t>(blkW_) * blkH_ * 16 + static_cast<size_t>(t3W_) * t3H_ * 16;
     return b;
 }
 
@@ -812,13 +817,42 @@ bool Engine::SetTable(IDirect3DDevice9* dev, const float* rgba, int rows, std::s
     tableRows_ = tableCap_;
     return true;
 }
-bool Engine::AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, int n, const Params& p, bool first, std::string& err) {
+bool Engine::SetBlockers(IDirect3DDevice9* dev, const BlockerTable& t, std::string& err) {
+    const int w = t.Width(), h = t.Height();
+    if (!blk_ || blkW_ != w || blkH_ != h) {
+        Rel(blk_);
+        blkW_ = blkH_ = 0;
+        if (FAILED(dev->CreateTexture(w, h, 1, 0, D3DFMT_A32B32G32R32F, D3DPOOL_DEFAULT, &blk_, nullptr)) || !blk_) {
+            blk_ = nullptr;
+            return err = std::format("the {}x{} blocker table could not be created", w, h), false;
+        }
+        blkW_ = w, blkH_ = h;
+    }
+    IDirect3DTexture9* sys = nullptr;
+    if (FAILED(dev->CreateTexture(w, h, 1, 0, D3DFMT_A32B32G32R32F, D3DPOOL_SYSTEMMEM, &sys, nullptr)) || !sys) return err = "the blocker table's copy could not be created", false;
+    D3DLOCKED_RECT lr{};
+    bool ok = SUCCEEDED(sys->LockRect(0, &lr, nullptr, 0)) && lr.pBits;
+    if (ok) {
+        for (int y = 0; y < h; y++) {
+            float* dst = reinterpret_cast<float*>(static_cast<BYTE*>(lr.pBits) + static_cast<size_t>(lr.Pitch) * y);
+            const size_t at = static_cast<size_t>(y) * w, n = std::min<size_t>(w, t.rows.size() > at ? t.rows.size() - at : 0);
+            if (n) std::memcpy(dst, t.rows.data() + at, n * sizeof(BlockerTable::Row));
+            std::memset(dst + n * 4, 0, (w - n) * sizeof(BlockerTable::Row));
+        }
+        sys->UnlockRect(0);
+        ok = SUCCEEDED(dev->UpdateTexture(sys, blk_));
+    }
+    sys->Release();
+    return ok || (err = "the blocker table could not be uploaded", false);
+}
+bool Engine::AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, int n, const Params& p, bool first, std::string& err,
+                           bool phys, const float (*t3From)[3]) {
     if (!ready_ || !m.vb || !m.count || m.w <= 0 || m.h <= 0) {
         err = "nothing to relight";
         return false;
     }
-    if (!tiles_ || !table_) {
-        err = "the kept shadow atlas or the room table is missing";
+    if (!tiles_ || !table_ || (phys && (!blk_ || !t3From))) {
+        err = "the kept shadow atlas, the room table or the blocker table is missing";
         return false;
     }
     if (!EnsureScratch(dev, m.w, m.h, err)) return false;
@@ -826,9 +860,19 @@ bool Engine::AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampMode
         err = "the zero stream could not be created";
         return false;
     }
-    n = std::clamp(n, 0, kAtlasLamps);
+    n = std::clamp(n, 0, phys ? kPhysBatch : kAtlasLamps);
+    if (phys && (!t3_ || t3W_ != scratchW_ || t3H_ != scratchH_)) { // (the batch's 3D tests: as large as the sums)
+        Rel(t3_);
+        t3W_ = t3H_ = 0;
+        if (FAILED(dev->CreateTexture(scratchW_, scratchH_, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A32B32G32R32F, D3DPOOL_DEFAULT, &t3_, nullptr)) || !t3_) {
+            t3_ = nullptr;
+            err = std::format("the {}x{} A32B32G32R32F 3D tests could not be created", scratchW_, scratchH_);
+            return false;
+        }
+        t3W_ = scratchW_, t3H_ = scratchH_;
+    }
     const int dst = first ? 0 : 1 - accCur_;
-    if (!Target(dev, acc_[dst], m.w, m.h)) {
+    if (!Target(dev, phys ? t3_ : acc_[dst], m.w, m.h)) {
         err = "the sum could not be targeted";
         return false;
     }
@@ -855,15 +899,35 @@ bool Engine::AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampMode
     PointSampler(dev, 0);
     PointSampler(dev, 1);
     PointSampler(dev, 2);
+    if (phys) {
+        float k[5][4] = {{static_cast<float>(blkW_), 1.0f / static_cast<float>(blkW_), 1.0f / static_cast<float>(blkH_), 0.0f}};
+        for (int i = 0; i < n; i++) std::memcpy(k[1 + i], t3From[i], 3 * sizeof(float));
+        c_.SetPsConst(dev, 103, &k[0][0], 5);
+        c_.SetTexture(dev, 4, blk_);
+        PointSampler(dev, 4);
+    }
     dev->SetVertexDeclaration(texelDecl_);
     dev->SetStreamSource(0, m.vb, 0, sizeof(TexelVertex));
     dev->SetStreamSource(1, m.dyn ? m.dyn : zeros_, 0, sizeof(TexelDyn));
     TexelTarget(dev, m.w, m.h);
-    c_.SetPixelShader(dev, ps_[p.fast ? kAccRlgFastPs : kAccRlgPs]);
-    const HRESULT hr = c_.DrawPrimitive(dev, D3DPT_POINTLIST, 0, m.count);
+    HRESULT hr = S_OK;
+    if (phys) { // the batch's 3D tests first (T3dPS), then the lamps over them
+        c_.SetPixelShader(dev, ps_[kT3dPs]);
+        hr = c_.DrawPrimitive(dev, D3DPT_POINTLIST, 0, m.count);
+        IDirect3DSurface9* s = Surf(acc_[dst]);
+        if (!s || FAILED(c_.SetRenderTarget(dev, 0, s))) hr = E_FAIL;
+        if (s) s->Release();
+        const D3DVIEWPORT9 vp{0, 0, static_cast<DWORD>(m.w), static_cast<DWORD>(m.h), 0.0f, 1.0f};
+        c_.SetViewport(dev, &vp);
+        c_.SetTexture(dev, 5, t3_);
+        PointSampler(dev, 5);
+    }
+    c_.SetPixelShader(dev, ps_[phys ? (p.fast ? kAccPhysFastPs : kAccPhysPs) : (p.fast ? kAccRlgFastPs : kAccRlgPs)]);
+    if (SUCCEEDED(hr)) hr = c_.DrawPrimitive(dev, D3DPT_POINTLIST, 0, m.count);
     c_.SetTexture(dev, 0, nullptr);
     c_.SetTexture(dev, 1, nullptr);
     c_.SetTexture(dev, 2, nullptr);
+    if (phys) c_.SetTexture(dev, 4, nullptr), c_.SetTexture(dev, 5, nullptr);
     dev->SetStreamSource(1, nullptr, 0, 0);
     c_.SetVertexShader(dev, nullptr);
     stats_.accDraws++;
@@ -979,9 +1043,9 @@ bool Engine::ReadFloat4(IDirect3DDevice9* dev, IDirect3DTexture9* t, int w, int 
 
 // ---- GPU room lamps ----
 void KeptMapGpu::Release() {
-    for (IDirect3DVertexBuffer9** v : {&parts, &texels, &walls, &copies, &restores}) Rel(*v);
+    for (IDirect3DVertexBuffer9** v : {&parts, &texels, &walls, &copies, &restores, &phys}) Rel(*v);
     Rel(layout);
-    nTexels = nWalls = nCopies = nRestores = 0;
+    nTexels = nWalls = nCopies = nRestores = nPhys = 0;
     bytes = 0;
 }
 bool Engine::UploadKept(IDirect3DDevice9* dev, const KeptMapData& d, KeptMapGpu& g) {
@@ -995,7 +1059,7 @@ bool Engine::UploadKept(IDirect3DDevice9* dev, const KeptMapData& d, KeptMapGpu&
     };
     UINT parts = 0;
     bool ok = vb(d.parts, g.parts, parts) && vb(d.texels, g.texels, g.nTexels) && vb(d.wallTexels, g.walls, g.nWalls) && vb(d.copies, g.copies, g.nCopies) &&
-              vb(d.restores, g.restores, g.nRestores);
+              vb(d.restores, g.restores, g.nRestores) && vb(d.phys, g.phys, g.nPhys);
     if (ok && !d.layout.empty()) {
         ok = d.layout.size() == static_cast<size_t>(d.layoutW) * d.layoutH && MakePreblur(dev, d.layoutW, d.layoutH, d.layout.data(), &g.layout, true);
         g.bytes += d.layout.size() * 4;
@@ -1073,20 +1137,66 @@ bool Engine::AddKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, con
 // lit beyond an edge in the blur, an edge with none along the wall only) and their rows into the map; 4. the tile-edge copies
 // (their source texel composed again at the copy's place), and the kept texels a copy of an unkept texel overwrote back from
 // the game's map. out is w x h: the room's own map, the working map's top-left corner (texels past it fall outside the viewport)
-bool Engine::RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLampLaw::Lamp* laws, const char* lawOk, float thr, IDirect3DBaseTexture9* game,
-                         IDirect3DTexture9* out, int w, int h, std::string& err) {
-    if (!ready_ || !out || w <= 0 || h <= 0 || w > k.w || h > k.h || (k.blur && (w != k.w || h != k.h)) || k.accW <= 0 || k.accH <= 0)
-        return err = "nothing to relight", false;
-    if (blendOk_ < 0) blendOk_ = FloatBlend(dev) ? 1 : 0;
-    if (!blendOk_) return err = "the device cannot add into an A32B32G32R32F target", false;
+// (KeptReady: the checks and buffers RelightKept and RelightKeptPhys share)
+bool Engine::KeptReady(IDirect3DDevice9* dev, const KeptMapGpu& k, int w, int h, std::string& err) {
+    if (!ready_ || w <= 0 || h <= 0 || w > k.w || h > k.h || (k.blur && (w != k.w || h != k.h)) || k.accW <= 0 || k.accH <= 0) return err = "nothing to relight", false;
     if (!EnsureScratch(dev, std::max(k.accW, k.layoutW), std::max(k.accH, k.layoutH), err)) return false;
-    UINT most = std::max({k.nTexels, k.nWalls, k.nCopies, k.nRestores});
+    UINT most = std::max({k.nTexels, k.nWalls, k.nCopies, k.nRestores, k.nPhys});
     for (const auto& r : k.ranges) most = std::max(most, r.first + r.second);
     if (!EnsureZeros(dev, most)) return err = "the zero stream could not be created", false;
+    return true;
+}
+bool Engine::RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLampLaw::Lamp* laws, const char* lawOk, float thr, IDirect3DBaseTexture9* game,
+                         IDirect3DTexture9* out, int w, int h, std::string& err) {
+    if (!out) return err = "nothing to relight", false;
+    if (!KeptReady(dev, k, w, h, err)) return false;
+    if (blendOk_ < 0) blendOk_ = FloatBlend(dev) ? 1 : 0;
+    if (!blendOk_) return err = "the device cannot add into an A32B32G32R32F target", false;
+    c_.SetDepthStencil(dev, nullptr);
+    PassStates(dev);
+    // 1. the sum
+    if (!Target(dev, acc_[0], k.accW, k.accH)) return err = "the sum could not be targeted", false;
+    dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 1.0f, 0);
+    if (k.parts && !DrawKeptParts(dev, k.parts, k.ranges, laws, lawOk, thr, k.accW, k.accH)) return err = "the sum's draw failed", false;
+    accCur_ = 0;
+    return ComposeKept(dev, k, game, out, w, h, err);
+}
+bool Engine::RelightKeptPhys(IDirect3DDevice9* dev, const KeptMapGpu& k, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,
+                             const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err) {
+    if (!out) return err = "nothing to relight", false;
+    if (!KeptReady(dev, k, w, h, err)) return false;
+    if (!tiles_ || !blk_) return err = "the kept shadow atlas or the blocker table is missing", false;
+    if (rooms.empty()) return err = "no room table", false;
+    // 1. the sum: every lamp at the phys points, kPhysBatch a draw (the room table's lamp columns are the batch's lamps)
+    Map m;
+    m.w = k.accW, m.h = k.accH, m.vb = k.phys, m.count = k.nPhys;
+    std::vector<float> table(rooms.size() * kTableCols * 4);
+    bool first = true;
+    for (int b = 0; k.phys && b < n; b += kPhysBatch) {
+        const int nb = std::min(kPhysBatch, n - b);
+        std::fill(table.begin(), table.end(), 0.0f);
+        for (size_t r = 0; r < rooms.size(); r++) {
+            float* row = &table[r * kTableCols * 4];
+            for (int i = 0; i < nb && static_cast<size_t>(b + i) < rooms[r].lamp.size(); i++) row[i * 4] = rooms[r].lamp[b + i][0], row[i * 4 + 1] = rooms[r].lamp[b + i][1];
+            row[16 * 4] = rooms[r].header;
+        }
+        if (!SetTable(dev, table.data(), static_cast<int>(rooms.size()), err) || !AccumulateRlg(dev, m, lamps + b, tiles + b, nb, p, first, err, true, world + b)) return false;
+        first = false;
+    }
+    if (first) { // (no lamp: the sum is 0)
+        if (!Target(dev, acc_[0], k.accW, k.accH)) return err = "the sum could not be targeted", false;
+        dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 1.0f, 0);
+        accCur_ = 0;
+    }
+    return ComposeKept(dev, k, game, out, w, h, err);
+}
+// Steps 2 to 4 of RelightKept over the current sum
+bool Engine::ComposeKept(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err) {
     c_.SetDepthStencil(dev, nullptr);
     PassStates(dev);
     PointSampler(dev, 0);
     PointSampler(dev, 1);
+    IDirect3DTexture9* const sum = acc_[accCur_];
     const auto points = [&](IDirect3DVertexBuffer9* vb, UINT first, UINT n, int tw, int th) {
         dev->SetVertexDeclaration(texelDecl_);
         dev->SetStreamSource(0, vb, 0, sizeof(TexelVertex));
@@ -1104,17 +1214,12 @@ bool Engine::RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLa
         err = why;
         return false;
     };
-    // 1. the sum
-    if (!Target(dev, acc_[0], k.accW, k.accH)) return fail("the sum could not be targeted");
-    dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 1.0f, 0);
-    if (k.parts && !DrawKeptParts(dev, k.parts, k.ranges, laws, lawOk, thr, k.accW, k.accH)) return fail("the sum's draw failed");
-    accCur_ = 0;
     // 2. the texels into the map
     const float d99[4] = {0, 0, 1.0f / static_cast<float>(scratchW_), 1.0f / static_cast<float>(scratchH_)};
     c_.SetPsConst(dev, 99, d99, 1);
     if (k.texels) {
         if (!Target(dev, out, w, h)) return fail("the relit map could not be targeted");
-        c_.SetTexture(dev, 1, acc_[0]);
+        c_.SetTexture(dev, 1, sum);
         c_.SetPixelShader(dev, ps_[kComposeKeptPs]);
         if (!points(k.texels, 0, k.nTexels, w, h)) return fail("the texels' draw failed");
         stats_.composeDraws++;
@@ -1127,7 +1232,7 @@ bool Engine::RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLa
         c_.SetTexture(dev, 0, k.layout);
         Quad(dev, k.layoutW, k.layoutH);
         c_.SetTexture(dev, 0, nullptr);
-        c_.SetTexture(dev, 1, acc_[0]);
+        c_.SetTexture(dev, 1, sum);
         c_.SetPsConst(dev, 99, d99, 1);
         c_.SetPixelShader(dev, ps_[kComposeKeptPs]);
         if (!points(k.walls, 0, k.nWalls, k.layoutW, k.layoutH)) return fail("the wall texels' draw failed");
@@ -1180,7 +1285,7 @@ bool Engine::RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLa
     // too: the game copies within the working map before its commit), then the texels the game's copies left as the game's
     if (k.copies) {
         if (!Target(dev, out, w, h)) return fail("the relit map could not be targeted");
-        c_.SetTexture(dev, 1, acc_[0]);
+        c_.SetTexture(dev, 1, sum);
         c_.SetPsConst(dev, 99, d99, 1);
         c_.SetPixelShader(dev, ps_[kComposeKeptPs]);
         if (!points(k.copies, 0, k.nCopies, w, h)) return fail("the tile-edge copies' draw failed");
@@ -1198,9 +1303,11 @@ bool Engine::RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLa
     return true;
 }
 
-bool Engine::ReadSum(IDirect3DDevice9* dev, int w, int h, std::vector<float>& out) {
-    if (!acc_[accCur_]) return false;
-    IDirect3DSurface9* src = Surf(acc_[accCur_]);
+bool Engine::ReadT3(IDirect3DDevice9* dev, int w, int h, std::vector<float>& out) { return ReadSumOf(dev, t3_, w, h, out); }
+bool Engine::ReadSum(IDirect3DDevice9* dev, int w, int h, std::vector<float>& out) { return ReadSumOf(dev, acc_[accCur_], w, h, out); }
+bool Engine::ReadSumOf(IDirect3DDevice9* dev, IDirect3DTexture9* t, int w, int h, std::vector<float>& out) {
+    if (!t) return false;
+    IDirect3DSurface9* src = Surf(t);
     IDirect3DSurface9* sys = nullptr;
     bool ok = src && SUCCEEDED(dev->CreateOffscreenPlainSurface(scratchW_, scratchH_, D3DFMT_A32B32G32R32F, D3DPOOL_SYSTEMMEM, &sys, nullptr)) && sys &&
               SUCCEEDED(dev->GetRenderTargetData(src, sys));

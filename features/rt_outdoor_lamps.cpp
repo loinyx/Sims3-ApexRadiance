@@ -124,8 +124,9 @@ ShaderCache::Id AddRtLampShader(int i) {
 const ShaderCache::Id kRtLampShaderIds[RtLampGpu::kShaderCount] = {
     AddRtLampShader(0), AddRtLampShader(1), AddRtLampShader(2), AddRtLampShader(3), AddRtLampShader(4), AddRtLampShader(5), AddRtLampShader(6),
     AddRtLampShader(7), AddRtLampShader(8), AddRtLampShader(9), AddRtLampShader(10), AddRtLampShader(11), AddRtLampShader(12), AddRtLampShader(13),
-    AddRtLampShader(14), AddRtLampShader(15), AddRtLampShader(16), AddRtLampShader(17), AddRtLampShader(18), AddRtLampShader(19)};
-static_assert(RtLampGpu::kShaderCount == 20, "kRtLampShaderIds lists every RtLampGpu::ShaderId");
+    AddRtLampShader(14), AddRtLampShader(15), AddRtLampShader(16), AddRtLampShader(17), AddRtLampShader(18), AddRtLampShader(19), AddRtLampShader(20),
+    AddRtLampShader(21), AddRtLampShader(22)};
+static_assert(RtLampGpu::kShaderCount == 23, "kRtLampShaderIds lists every RtLampGpu::ShaderId");
 void CompileAll() {
     for (int i = 0; i < RtLampGpu::kShaderCount; i++) {
         std::string err;
