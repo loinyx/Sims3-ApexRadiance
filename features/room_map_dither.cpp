@@ -13,10 +13,14 @@
 // Threads: the solve runs on the light tree thread or the render thread; the thunk reads only the caller's registers, the
 // map descriptor and the room's roofless flag (under SEH) and keeps no state. ebx is the room ("mov ebx,ecx" at 0x006A31E8,
 // unchanged up to the call; the solve reads [ebx+18h] at 0x006A333B). VERIFIED (capstone, Steam 1.67.2).
+//   GPU room lamps stage 2a (developer, OutdoorDelta::NotePack): the pack input before the clamp, "movaps [esp+60h],xmm0;
+//   movss [esp+6Ch],xmm1" at 0x006A34B2 (rgb, then alpha), read at the caller's esp before its "push eax" (0x006A34CE):
+//   the thunk's esp + 8. VERIFIED (dumpbin, 01/11); checked at Start (else no pack input is given).
 //
 // Part of Apex Radiance. Credits: @loinyx
 
 #include "room_map_dither.h"
+#include "outdoor_delta.h"
 #include "game_addresses.h"
 #include "memory_patch.h"
 #include "apex_log.h"
@@ -46,7 +50,7 @@ std::atomic<bool> g_running{false};
 std::atomic<bool> g_on{true};
 std::atomic<long long> c_texels{0}, c_skipped{0}, c_floored{0};
 bool g_roomInEbx = false; // the solve keeps its room in ebx (checked at Start); else no alpha floor
-constexpr float kRoofedAlphaMin = 5.0f / 255.0f; // the smoothed read's "beyond a wall" mark is alpha < 4/255
+bool g_inputOk = false;   // the pack input before the clamp is at the caller's [esp+60h] (checked at Start)
 std::string g_why;
 
 using Pack_t = void(__fastcall*)(void* out, void* edx, const float* c); // = thiscall ret 4
@@ -78,7 +82,7 @@ bool RoofedRoom(uintptr_t room) {
     }
 }
 
-void __stdcall DitherPack(DWORD* out, const float* colour, uintptr_t frame, uintptr_t texel, uintptr_t room) {
+void __stdcall DitherPack(DWORD* out, const float* colour, uintptr_t frame, uintptr_t texel, uintptr_t room, uintptr_t callerEsp) {
     alignas(16) float c[4];
     std::memcpy(c, colour, sizeof c);
     // A roofed room's texel keeps an ambient weight of at least 5/255: the smoothed read tells the texels beyond a wall
@@ -90,7 +94,13 @@ void __stdcall DitherPack(DWORD* out, const float* colour, uintptr_t frame, uint
         c_floored.fetch_add(1, std::memory_order_relaxed);
     }
     unsigned x = 0, y = 0;
-    if (g_on.load(std::memory_order_relaxed) && TexelXY(frame, texel, x, y)) {
+    const bool on = g_on.load(std::memory_order_relaxed), capture = OutdoorDelta::RoomLampCapture();
+    const bool xy = (on || capture) && TexelXY(frame, texel, x, y);
+    // GPU room lamps stage 2a (developer): the texel's pack input, read by the light tree thread's kept capture only
+    if (capture)
+        OutdoorDelta::NotePack(reinterpret_cast<const void*>(room), xy, x, y, g_inputOk ? reinterpret_cast<const float*>(callerEsp + 0x60) : nullptr, on && xy,
+                               g_roomInEbx);
+    if (on && xy) {
         const float d = Offset(x, y) / 255.0f;
         for (int i = 0; i < 3; i++) {
             const float v = c[i] + d;
@@ -103,10 +113,13 @@ void __stdcall DitherPack(DWORD* out, const float* colour, uintptr_t frame, uint
 }
 
 // thiscall(ecx = out, [esp+4] = colour) ret 4, with the caller's ebp (its frame), edi (the texel) and ebx (the room: the
-// solve's this, kept in ebx from 0x006A31E8 to the call) as they are at the call
+// solve's this, kept in ebx from 0x006A31E8 to the call) as they are at the call, and the caller's esp before it pushed the
+// colour (the pack input's frame)
 __declspec(naked) void PackThunk() {
     __asm {
         mov eax, [esp + 4]
+        lea edx, [esp + 8]
+        push edx
         push ebx
         push edi
         push ebp
@@ -149,6 +162,8 @@ bool Start(std::string& error) {
                                             0x55, 0x10, 0x03, 0x38}) &&
                         CodeIs(kSolveFn, {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0});
     g_roomInEbx = CodeIs(kSolveFn + 0x18, {0x8B, 0xD9}); // mov ebx,ecx: the room the thunk reads (only the alpha floor needs it)
+    // movaps [esp+60h],xmm0; movss [esp+6Ch],xmm1 (0x006A34B2), push eax (0x006A34CE): the pack input the thunk can read
+    g_inputOk = CodeIs(kPackCall - 0x29, {0x0F, 0x29, 0x44, 0x24, 0x60, 0xF3, 0x0F, 0x11, 0x4C, 0x24, 0x6C}) && CodeIs(kPackCall - 0xD, {0x50});
     const bool packOk = CodeIs(kPack, {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0, 0xB8, 0x01, 0x00, 0x00, 0x00}) && CodeIs(kPack + 0x16, {0xF3, 0x0F, 0x10, 0x05, k255b[0], k255b[1], k255b[2], k255b[3]}) &&
                         CodeIs(kPack + 0x5A, {0xF3, 0x0F, 0x10, 0x05, magicb[0], magicb[1], magicb[2], magicb[3]}); // Steam: 0x00FA312C, 0x00FE774C
     float k255 = 0.0f, magic = 0.0f;

@@ -7389,7 +7389,8 @@ void BlurWalls(BYTE* room) {
             const GhostRows& g = ghosts[j];
             const int n = r.x1 - r.x0 + 1;
             const bool fits = g.n == n && g.x0 == r.x0 && g.px.size() == static_cast<size_t>(n) * 4;
-            g_blockViews[j] = OutdoorDelta::WallBlockView{r.x0, r.y0, r.x1, r.y1, before[j].empty() ? nullptr : before[j].data(), fits && (g.filled[0] >= n || g.filled[1] >= n)};
+            g_blockViews[j] = OutdoorDelta::WallBlockView{r.x0, r.y0, r.x1, r.y1, before[j].empty() ? nullptr : before[j].data(), fits && (g.filled[0] >= n || g.filled[1] >= n),
+                                                            fits ? g.px.data() : nullptr, fits && g.filled[0] >= n, fits && g.filled[1] >= n};
         }
         HookGuard::Run("OutdoorDelta wall blocks", [&] { OutdoorDelta::NoteWallBlur(room, g_blockViews, jobs, passes); });
     }

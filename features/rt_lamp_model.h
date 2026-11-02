@@ -79,6 +79,27 @@ inline void KeptAdd(const float law[3], float A, float B, float thrScale, float 
     Fade(c, fade ? thr * thrScale : thr, fade);
     for (int i = 0; i < 3; i++) out[i] += mult * c[i] * B;
 }
+// GPU room lamps, stage 2a (outdoor_delta.cpp KeptFinalCheck): the colour the game's pack 0x0060CD10 takes for a kept texel
+// whose sum is now R. S and p: the solve's sum there and its pack input before the clamp (FUN_006a31d0 [esp+60h]); norm: the
+// room's +0x160 the solve toned it with. Roofed: the solve's tail (gpu_lamp_law.h IndoorTexel) with the ramp x ambient and the
+// ramp p gives back at S (IndoorSplit); false when it cannot (the weight 0 there: the ambient is left out). Roofless: the hue
+// kept and min 1 (PackInput) with p's alpha (the floor mask's or the exit light's, as the solve left it). Then min(., 1) as
+// the solve's minps, RoomMapDither's roofed alpha floor (alphaMin, 0: none) and dither (in colour units, 0: none).
+inline bool KeptTexel(const float R[3], const float S[3], const float p[4], float norm, float k, bool roofed, float alphaMin, float dither, float out[4]) {
+    bool split = true;
+    if (roofed) {
+        float xs[3], x[3], rampAmb[3] = {}, ramp = 0.0f;
+        for (int i = 0; i < 3; i++) xs[i] = norm * S[i], x[i] = norm * std::max(R[i], 0.0f);
+        split = GpuLampLaw::IndoorSplit(xs, p, k, rampAmb, ramp);
+        if (!split) rampAmb[0] = rampAmb[1] = rampAmb[2] = ramp = 0.0f;
+        GpuLampLaw::IndoorTexel(x, rampAmb, ramp, k, out);
+        for (int i = 0; i < 4; i++) out[i] = std::isfinite(out[i]) ? std::clamp(out[i], 0.0f, 1.0f) : 0.0f;
+        if (out[3] < alphaMin) out[3] = alphaMin;
+    } else
+        OutdoorDeltaModel::PackInput(R, p[3], out);
+    if (dither != 0.0f) OutdoorDeltaModel::Dither(out, dither);
+    return split;
+}
 // What one GPU lamp adds to a texel at p (normal n) with shadow share vis: mult x fade(law x vis)
 inline void Add(const Lamp& L, const float p[3], const float n[3], float vis, bool reachOn, float thr, bool fade, float out[3]) {
     float law[3];

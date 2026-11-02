@@ -142,6 +142,10 @@ struct BlockRec {
     int x0 = 0, y0 = 0, x1 = -1, y1 = -1;
     uint32_t off = 0; // into preblur
     bool ok = false;
+    // (GPU room lamps stage 2a, kept captures) the block's texels are in preblur (ok, or one with rows beyond its edges), and
+    // those rows: 2 above, then 2 below, from ghostOff (above / below: which BlurWalls took)
+    bool have = false, above = false, below = false;
+    uint32_t ghostOff = 0;
 };
 struct MapGeo {
     bool used = false;
@@ -599,6 +603,23 @@ struct SampleState {
 };
 SampleState g_s; // light tree thread only
 
+// (GPU room lamps stage 2a) per kept texel: what the solve's tail took (RoomMapDither's pack thunk, NotePack) and what its place
+// holds when the solve ends (BeforeFinalize: the class-2 wall blur and the tile-edge copies done)
+enum : uint8_t { kTailDither = 1, kTailFloor = 2 };
+constexpr uint32_t kNoSrc = UINT32_MAX;
+struct KeptTail {
+    float p[4] = {};    // the pack input before the clamp (FUN_006a31d0 [esp+60h])
+    float norm = 1.0f;  // +0x160 as the texel was toned
+    uint32_t final = 0; // what its place holds when the solve ends
+    uint32_t src = 0;   // the texel whose packed value (blurred, for a class-2 wall) ends there; kNoSrc: a copy of a texel no capture holds
+    uint8_t bits = 0, seen = 0;
+};
+// A tile-edge copy of a kept texel (src) to a place no kept texel holds, and what that place holds when the solve ends
+struct KeptCopy {
+    uint8_t map = 0;
+    uint16_t x = 0, y = 0;
+    uint32_t src = 0, final = 0;
+};
 struct Capture {
     bool active = false, ok = false;
     const BYTE* room = nullptr;
@@ -635,8 +656,19 @@ struct Capture {
     std::unordered_map<uint64_t, uint32_t> checkOld;
     long cmpN = 0, cmpOver1 = 0, cmpAt1 = 0;
     int cmpMax = 0;
+    // (GPU room lamps stage 2a, kept captures) the texels' tails, the tile-edge copies to other places, why the tail is not kept
+    std::vector<KeptTail, ApexMem::HighAllocator<KeptTail>> tail;
+    std::vector<KeptCopy> copies;
+    const char* tailWhy = nullptr;
+    bool finals = false, roofed = false;
+    long killed = 0;    // kept texels a copy of a texel no capture holds overwrote
+    float toneK = 0.0f; // the roofed tail's k ([0x011D0BA0])
+    float amb[3] = {}, ambPass[3] = {}; // +0x110 and the pass's +0x650 at the solve's end (the log; the GPU's compose)
 };
 Capture g_cap; // light tree thread only
+// (GPU room lamps stage 2a) the kept capture's texel whose pack comes next (SampleEnd -> NotePack, light tree thread)
+thread_local const void* t_packRoom = nullptr;
+thread_local uint32_t t_packTexel = 0;
 
 void Fail(const char* why) {
     if (!g_cap.ok) return;
@@ -668,6 +700,7 @@ void FlushPending() {
     }
 }
 void DropCapture() {
+    t_packRoom = nullptr;
     g_cap = Capture{};
     g_s = SampleState{};
 }
@@ -1889,6 +1922,17 @@ struct KeptRoom {
     std::vector<TexelRec, ApexMem::HighAllocator<TexelRec>> texels; // the capture's: map, place, the solve's sum, the packed texel
     std::vector<float, ApexMem::HighAllocator<float>> base;         // 3 per texel
     std::vector<KeptLamp> lamps;
+    // (stage 2a) the tail: per texel (tail, empty when tailWhy), the tile-edge copies to other places, the class-2 wall blocks
+    // before the blur (with the rows beyond their edges), the roofed tail's k and the room's ambients at the solve's end
+    std::vector<KeptTail, ApexMem::HighAllocator<KeptTail>> tail;
+    std::vector<KeptCopy> copies;
+    std::vector<BlockRec> blocks;
+    std::vector<uint32_t, ApexMem::HighAllocator<uint32_t>> preblur;
+    uint32_t passes = 0;
+    bool wallsOk = true, roofed = false;
+    const char* tailWhy = nullptr;
+    long killed = 0;
+    float toneK = 0.0f, amb[3] = {}, ambPass[3] = {};
     size_t bytes = 0;
 };
 std::unordered_map<uint64_t, std::unique_ptr<KeptRoom>> g_kept;
@@ -1897,7 +1941,8 @@ bool g_keptFull = false; // (the log: once per crossing of the budget)
 std::atomic<int> g_keptLines{0};
 bool KeptLog() { return g_keptLines.fetch_add(1, std::memory_order_relaxed) < 2000; }
 size_t KeptBytes(const KeptRoom& k) {
-    size_t b = sizeof(KeptRoom) + k.samples.capacity() + k.texels.capacity() * sizeof(TexelRec) + k.base.capacity() * sizeof(float);
+    size_t b = sizeof(KeptRoom) + k.samples.capacity() + k.texels.capacity() * sizeof(TexelRec) + k.base.capacity() * sizeof(float) +
+               k.tail.capacity() * sizeof(KeptTail) + k.copies.capacity() * sizeof(KeptCopy) + k.blocks.capacity() * sizeof(BlockRec) + k.preblur.capacity() * 4;
     for (const KeptLamp& l : k.lamps) b += sizeof(KeptLamp) + l.parts.capacity() * sizeof(KeptPart);
     return b;
 }
@@ -1908,7 +1953,10 @@ void ClearKept() {
 }
 // The kept solve recomposed from what was kept, with the lamps' laws as they are now, against the solve's own sum (before the
 // tone): the share within 2/255 and the worst texels (the log)
+void KeptFinalCheck(const KeptRoom& k, const std::vector<float>& sum, const LARGE_INTEGER& t0);
 void KeptSelfCheck(const KeptRoom& k) {
+    LARGE_INTEGER t0{};
+    QueryPerformanceCounter(&t0);
     const size_t n = k.texels.size();
     std::vector<float> sum(k.base.begin(), k.base.end());
     std::vector<GpuLampLaw::Lamp> laws(k.lamps.size());
@@ -1973,6 +2021,253 @@ void KeptSelfCheck(const KeptRoom& k) {
     LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} self-check: {} texels lit, {:.2f}% within 2/255 of the solve's sum recomposed from the kept "
                          "parts ({} lamps without a law now){}",
                          k.story, k.id, k.cls, lit, lit ? 100.0 * static_cast<double>(within) / static_cast<double>(lit) : 100.0, lost, w));
+    KeptFinalCheck(k, sum, t0);
+}
+// ---- GPU room lamps, stage 2a: the kept texels' tail, to the texel the game leaves in the map ----
+// The roofed tail's k (FUN_006a31d0 +0x1D0: "mov ecx,0x011D0BA0" (Steam 1.67.2), +0x1DD: "call 0x00F626F0" (mov eax,ecx; ret),
+// +0x1F1: "movss xmm0,[eax]"; dumpbin 01/11): the float at that immediate. POD (SEH)
+bool ReadToneK(float& k) {
+    const uintptr_t f = GameAddr::Get(GameAddr::Id::WallSolve);
+    if (!f) return false;
+    __try {
+        const BYTE* p = reinterpret_cast<const BYTE*>(f + 0x1D0);
+        if (p[0] != 0xB9 || p[0xD] != 0xE8 || p[0x21] != 0xF3 || p[0x22] != 0x0F || p[0x23] != 0x10 || p[0x24] != 0x00) return false;
+        const BYTE* q = reinterpret_cast<const BYTE*>(f + 0x1D0 + 0xD + 5 + *reinterpret_cast<const int32_t*>(p + 0xE));
+        if (q[0] != 0x8B || q[1] != 0xC1 || q[2] != 0xC3) return false;
+        k = *reinterpret_cast<const float*>(*reinterpret_cast<const uintptr_t*>(p + 1));
+        return k == k && k > -1e30f && k < 1e30f;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+// The finalize's class-2 step (FUN_006a0e00: FUN_006a8ca0(classEntry), then FUN_0069efc0(room, bits, classEntry) for the
+// floor and ceiling maps): 1 = it copies at this class, 0 = not, -1 = unreadable. POD (SEH)
+using MapEdges_t = char(__thiscall*)(void* classEntry);
+using EdgeCopy_t = void(__thiscall*)(void* room, uintptr_t bits, void* classEntry);
+int MapEdgesTry(const BYTE* room, void*& entry) {
+    const uintptr_t edges = GameAddr::Get(GameAddr::Id::MapEdges);
+    if (!edges || !GameAddr::Get(GameAddr::Id::EdgeCopy)) return -1;
+    __try {
+        entry = reinterpret_cast<void*>(*reinterpret_cast<const uintptr_t*>(room + 4) + static_cast<uintptr_t>(*reinterpret_cast<const int*>(room + 0xF4)) * 64);
+        return reinterpret_cast<MapEdges_t>(edges)(entry) ? 1 : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return -1;
+    }
+}
+bool EdgeCopyTry(BYTE* room, uintptr_t bits, void* entry) {
+    __try {
+        reinterpret_cast<EdgeCopy_t>(GameAddr::Get(GameAddr::Id::EdgeCopy))(room, bits, entry);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool ReadMap(const Desc& d, uint32_t* out) {
+    for (uint32_t y = 0; y < d.h; y++)
+        if (!CopyBytes(out + static_cast<size_t>(y) * d.w, reinterpret_cast<const void*>(d.base + static_cast<uintptr_t>(d.pitch) * y), static_cast<size_t>(d.w) * 4)) return false;
+    return true;
+}
+// The tile-edge copies of map m (1 floor, 2 ceiling) followed by a dry run: each kept place holds a unique tag while the
+// game's own copy runs, so each place the copy wrote names the place it came from; then the whole map is put back as it was
+// and the finalize copies it for real. The copies are plain texel copies within the map (docs/engine/room-light-maps.md;
+// UNVERIFIED beyond 0x0069efc0's loop: 0x006a9de0 / 0x006a9a50 were not read in full).
+bool TagCopies(BYTE* room, int m, const Desc& d, void* entry, const std::unordered_map<uint64_t, uint32_t>& last) {
+    Capture& c = g_cap;
+    Record& r = *c.rec;
+    uintptr_t bits = 0;
+    if (!CopyBytes(&bits, room + kMapDesc[m], sizeof bits) || bits != d.base) return c.tailWhy = "a tile-edge copy into a map of no known lock", false;
+    const size_t w = d.w, cells = w * d.h;
+    std::vector<uint32_t> tagAt(cells, kNoSrc), placeOf, srcOf;
+    for (const auto& [key, i] : last)
+        if (static_cast<int>(key >> 32) == m) {
+            const size_t place = static_cast<size_t>(r.texels[i].y) * w + r.texels[i].x;
+            tagAt[place] = static_cast<uint32_t>(placeOf.size());
+            placeOf.push_back(static_cast<uint32_t>(place));
+            srcOf.push_back(i);
+        }
+    if (placeOf.empty()) return true;
+    std::vector<uint32_t> before(cells), after(cells);
+    if (!ReadMap(d, before.data())) return c.tailWhy = "a map could not be read before the tile-edge copies", false;
+    // a tag range no other place of the map holds (such a value would be read back as a copy of a kept texel)
+    uint32_t tag = 0;
+    for (const uint32_t b : {0x5A000000u, 0x3C000000u, 0x96000000u, 0xC3000000u, 0x27000000u, 0xE1000000u}) {
+        bool clash = false;
+        for (size_t i = 0; i < cells && !clash; i++) clash = tagAt[i] == kNoSrc && before[i] - b < placeOf.size();
+        if (!clash) {
+            tag = b;
+            break;
+        }
+    }
+    if (!tag) return c.tailWhy = "no free tag range to follow the tile-edge copies", false;
+    // (nothing allocates from the tags to the map put back)
+    for (size_t k = 0; k < placeOf.size(); k++) WriteTexel(d.base + static_cast<uintptr_t>(d.pitch) * (placeOf[k] / w) + static_cast<uintptr_t>(placeOf[k] % w) * 4, tag + static_cast<uint32_t>(k));
+    const bool ran = EdgeCopyTry(room, bits, entry);
+    const bool read = ReadMap(d, after.data());
+    if (!WriteRows(d, 0, 0, static_cast<int>(w), static_cast<int>(d.h), before.data())) return c.tailWhy = "a map could not be put back after the tile-edge copies", false;
+    if (!ran || !read) return c.tailWhy = "the tile-edge copies could not be followed", false;
+    std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> moved; // kept place -> (its new source texel, the value it ends with)
+    for (size_t i = 0; i < cells; i++) {
+        const uint32_t was = tagAt[i] != kNoSrc ? tag + tagAt[i] : before[i];
+        if (after[i] == was) continue;
+        const uint32_t k = after[i] - tag;
+        const bool kept = k < placeOf.size();
+        if (tagAt[i] != kNoSrc) moved[static_cast<uint32_t>(i)] = kept ? std::make_pair(srcOf[k], before[placeOf[k]]) : std::make_pair(kNoSrc, after[i]);
+        else if (kept) c.copies.push_back(KeptCopy{static_cast<uint8_t>(m), static_cast<uint16_t>(i % w), static_cast<uint16_t>(i / w), srcOf[k], before[placeOf[k]]});
+    }
+    for (size_t i = 0; i < r.texels.size(); i++) {
+        const TexelRec& t = r.texels[i];
+        if (t.map != m) continue;
+        const auto it = moved.find(static_cast<uint32_t>(static_cast<size_t>(t.y) * w + t.x));
+        if (it == moved.end()) continue;
+        c.tail[i].src = it->second.first, c.tail[i].final = it->second.second;
+        c.killed += it->second.first == kNoSrc ? 1 : 0;
+    }
+    return true;
+}
+// Before the finalize: what each kept texel's place holds (the class-2 walls blurred; the floor and ceiling as packed) and,
+// at class 2, the tile-edge copies the finalize is about to make (light tree thread)
+void KeepFinals(BYTE* room) {
+    Capture& c = g_cap;
+    Record& r = *c.rec;
+    const size_t n = r.texels.size();
+    if (c.tailWhy) return;
+    if (c.tail.size() != n || std::any_of(c.tail.begin(), c.tail.end(), [](const KeptTail& t) { return !t.seen; })) {
+        c.tailWhy = "a texel packed without its pack input (Smooth light maps' pack hook)";
+        return;
+    }
+    RoomRead rr;
+    if (!ReadRoom(room, rr)) return void(c.tailWhy = "the room could not be read");
+    c.roofed = !rr.outdoor;
+    if (c.roofed && !ReadToneK(c.toneK)) return void(c.tailWhy = "the roofed tail's k could not be read");
+    CopyBytes(c.amb, room + 0x110, sizeof c.amb), CopyBytes(c.ambPass, room + 0x650, sizeof c.ambPass);
+    try {
+        std::unordered_map<uint64_t, uint32_t> last; // place -> its last write
+        last.reserve(n);
+        for (uint32_t i = 0; i < n; i++) last[TexelKey(r.texels[i].map, r.texels[i].x, r.texels[i].y)] = i;
+        Desc d[4];
+        bool have[4] = {};
+        for (size_t i = 0; i < n; i++) {
+            const TexelRec& t = r.texels[i];
+            if (!have[t.map] && !(have[t.map] = ReadDesc(room, t.map, d[t.map]))) return void(c.tailWhy = "a map is not locked at the solve's end");
+            if (t.x >= d[t.map].w || t.y >= d[t.map].h ||
+                !ReadTexel(d[t.map].base + static_cast<uintptr_t>(d[t.map].pitch) * t.y + static_cast<uintptr_t>(t.x) * 4, c.tail[i].final))
+                return void(c.tailWhy = "a texel could not be read at the solve's end");
+            c.tail[i].src = last[TexelKey(t.map, t.x, t.y)];
+        }
+        void* entry = nullptr;
+        const int edges = rr.cls == 2 && (have[1] || have[2]) ? MapEdgesTry(room, entry) : 0;
+        if (edges < 0) return void(c.tailWhy = "the finalize's tile-edge step could not be read");
+        for (const int m : {1, 2})
+            if (edges > 0 && have[m] && !TagCopies(room, m, d[m], entry, last)) return;
+        c.finals = true;
+    } catch (...) {
+        c.tailWhy = "no memory";
+    }
+}
+// Every kept texel's final texel recomposed from its recomposed sum (KeptSelfCheck's): the solve's tail (RtLampModel::
+// KeptTexel), the game's pack, the class-2 wall blur (BlurBlock over the blocks before the blur, with the rows beyond their
+// edges, in BlurWalls' order) and the tile-edge copies, against what its place held when the solve ended (the log)
+void KeptFinalCheck(const KeptRoom& k, const std::vector<float>& sum, const LARGE_INTEGER& t0) {
+    const size_t n = k.texels.size();
+    if (k.tailWhy || k.tail.size() != n) {
+        LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} final self-check: not run ({})", k.story, k.id, k.cls, k.tailWhy ? k.tailWhy : "no tail kept"));
+        return;
+    }
+    // each texel packed again (before the blur)
+    std::vector<uint32_t> fin(n);
+    long noSplit = 0;
+    for (size_t i = 0; i < n; i++) {
+        const KeptTail& t = k.tail[i];
+        const TexelRec& x = k.texels[i];
+        float c[4];
+        noSplit += RtLampModel::KeptTexel(&sum[i * 3], x.t.S, t.p, t.norm, k.toneK, k.roofed, (t.bits & kTailFloor) ? RoomMapDither::kRoofedAlphaMin : 0.0f,
+                                          (t.bits & kTailDither) ? RoomMapDither::Offset(x.x, x.y) / 255.0f : 0.0f, c)
+                       ? 0
+                       : 1;
+        fin[i] = PackGame(c, 0, 0, false);
+    }
+    // the class-2 walls blurred again; a wall texel of no block BlurWalls blurred (or walls the game's own blur did) is not
+    // recomposed
+    std::vector<uint32_t> out(fin);
+    std::vector<uint8_t> lost(n, 0);
+    long wallLost = 0;
+    if (k.cls == 2) {
+        std::unordered_map<uint32_t, uint32_t> at; // wall place -> its last write
+        for (uint32_t i = 0; i < n; i++)
+            if (k.texels[i].map == 0 && k.tail[i].src == i) at[static_cast<uint32_t>(k.texels[i].y) << 16 | k.texels[i].x] = i, lost[i] = 1;
+        if (k.passes && k.wallsOk) {
+            std::vector<uint32_t> blk, ext;
+            for (const BlockRec& b : k.blocks) {
+                if (!b.have) continue;
+                const int w = b.x1 - b.x0 + 1, rows = b.y1 - b.y0 + 1, top = b.above ? 2 : 0, total = top + rows + (b.below ? 2 : 0);
+                blk.assign(k.preblur.begin() + b.off, k.preblur.begin() + b.off + static_cast<size_t>(w) * rows);
+                for (int y = 0; y < rows; y++)
+                    for (int x = 0; x < w; x++)
+                        if (const auto it = at.find(static_cast<uint32_t>(b.y0 + y) << 16 | static_cast<uint32_t>(b.x0 + x)); it != at.end()) blk[static_cast<size_t>(y) * w + x] = fin[it->second];
+                ext.assign(static_cast<size_t>(total) * w, 0);
+                if (b.above) std::copy_n(k.preblur.begin() + b.ghostOff, static_cast<size_t>(w) * 2, ext.begin());
+                std::copy(blk.begin(), blk.end(), ext.begin() + static_cast<size_t>(top) * w);
+                if (b.below) std::copy_n(k.preblur.begin() + b.ghostOff + static_cast<size_t>(w) * 2, static_cast<size_t>(w) * 2, ext.begin() + static_cast<size_t>(top + rows) * w);
+                BlurBlock(ext.data(), blk.data(), w, rows, b.above, b.below, k.passes);
+                for (int y = 0; y < rows; y++)
+                    for (int x = 0; x < w; x++)
+                        if (const auto it = at.find(static_cast<uint32_t>(b.y0 + y) << 16 | static_cast<uint32_t>(b.x0 + x)); it != at.end())
+                            out[it->second] = ext[static_cast<size_t>(top + y) * w + x], lost[it->second] = 0;
+            }
+        }
+        for (const auto& [place, i] : at) wallLost += lost[i];
+    }
+    // against the game's
+    long N = 0, within = 0, killed = 0;
+    int alphaMax = 0;
+    std::vector<std::pair<int, int64_t>> worst; // (levels, texel; -1 - copy), the worst three
+    const auto compare = [&](uint32_t game, uint32_t src, int64_t who) {
+        N++;
+        int d = 0;
+        for (int s = 0; s < 24; s += 8) d = std::max(d, std::abs(static_cast<int>((game >> s) & 0xFFu) - static_cast<int>((out[src] >> s) & 0xFFu)));
+        alphaMax = std::max(alphaMax, std::abs(static_cast<int>(game >> 24) - static_cast<int>(out[src] >> 24)));
+        within += d <= 2;
+        if (d > 2 && (worst.size() < 3 || d > worst.back().first)) {
+            worst.emplace_back(d, who);
+            std::sort(worst.begin(), worst.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+            if (worst.size() > 3) worst.pop_back();
+        }
+    };
+    for (size_t i = 0; i < n; i++) {
+        const uint32_t s = k.tail[i].src;
+        if (s == kNoSrc) killed++;
+        else if (!lost[s]) compare(k.tail[i].final, s, static_cast<int64_t>(i));
+    }
+    for (size_t j = 0; j < k.copies.size(); j++)
+        if (!lost[k.copies[j].src]) compare(k.copies[j].final, k.copies[j].src, -1 - static_cast<int64_t>(j));
+    std::string w;
+    for (const auto& [d, who] : worst) {
+        const uint32_t s = who >= 0 ? k.tail[static_cast<size_t>(who)].src : k.copies[static_cast<size_t>(-1 - who)].src;
+        const TexelRec& t = k.texels[s];
+        const KeptTail& tl = k.tail[s];
+        const float* R = &sum[static_cast<size_t>(s) * 3];
+        float xs[3], x[3], tone[3], rampAmb[3] = {}, ramp = 0.0f;
+        for (int q = 0; q < 3; q++) xs[q] = tl.norm * t.t.S[q], x[q] = tl.norm * std::max(R[q], 0.0f);
+        GpuLampLaw::Tone(x, tone);
+        const bool split = k.roofed && GpuLampLaw::IndoorSplit(xs, tl.p, k.toneK, rampAmb, ramp);
+        const int gx = who >= 0 ? k.texels[static_cast<size_t>(who)].x : k.copies[static_cast<size_t>(-1 - who)].x;
+        const int gy = who >= 0 ? k.texels[static_cast<size_t>(who)].y : k.copies[static_cast<size_t>(-1 - who)].y;
+        const uint32_t game = who >= 0 ? k.tail[static_cast<size_t>(who)].final : k.copies[static_cast<size_t>(-1 - who)].final;
+        w += std::format("; {} levels at {} ({}, {}){}{}: sum ({:.4f} {:.4f} {:.4f}) solve's ({:.4f} {:.4f} {:.4f}) toned ({:.4f} {:.4f} {:.4f}) ramp {:.4f} "
+                         "ramp x ambient ({:.4f} {:.4f} {:.4f}){} dither {:+.2f} pack input ({:.4f} {:.4f} {:.4f} {:.4f}) packed game {:08X} recomposed {:08X}, "
+                         "final game {:08X} recomposed {:08X}",
+                         d, kMapName[t.map & 3], gx, gy, s != static_cast<uint32_t>(who) ? std::format(" (copy of ({}, {}))", t.x, t.y) : "",
+                         t.map == 0 && k.cls == 2 ? " (blurred)" : "", R[0], R[1], R[2], t.t.S[0], t.t.S[1], t.t.S[2], tone[0], tone[1], tone[2], ramp, rampAmb[0],
+                         rampAmb[1], rampAmb[2], k.roofed && !split ? " (not read back)" : "", (tl.bits & kTailDither) ? RoomMapDither::Offset(t.x, t.y) : 0.0f, tl.p[0],
+                         tl.p[1], tl.p[2], tl.p[3], t.packed, fin[s], game, out[s]);
+    }
+    LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} final self-check: {} texels, {:.2f}% within 2/255 (alpha within {}/255){}; {} room (norm {:.4f}, "
+                         "k {:.4f}, ambient ({:.3f} {:.3f} {:.3f}), pass ambient ({:.3f} {:.3f} {:.3f})), {} tile-edge copies to other places, {} texels a copy of a "
+                         "texel no capture holds overwrote, {} wall texels not blurred again, {} roofed texels whose ramp could not be read back; {:.1f} ms with the "
+                         "sum's check",
+                         k.story, k.id, k.cls, N, N ? 100.0 * static_cast<double>(within) / static_cast<double>(N) : 100.0, alphaMax, w, k.roofed ? "roofed" : "roofless",
+                         n ? k.tail[0].norm : 0.0f, k.toneK, k.amb[0], k.amb[1], k.amb[2], k.ambPass[0], k.ambPass[1], k.ambPass[2], k.copies.size(), killed,
+                         wallLost, noSplit, MsSince(t0)));
 }
 void KeepEnd(const BYTE* room) {
     Capture& c = g_cap;
@@ -2041,6 +2336,14 @@ void KeepEnd(const BYTE* room) {
             parts += static_cast<long>(kl.parts.size());
             ShrinkExact(kl.parts);
             k->lamps.push_back(std::move(kl));
+        }
+        // (stage 2a) the tail, when the solve's end saw every texel's pack input and final texel
+        k->tailWhy = c.tailWhy ? c.tailWhy : !c.finals ? "the solve's end was not seen" : c.tail.size() != n ? "a texel without its tail" : nullptr;
+        if (!k->tailWhy) {
+            k->tail = std::move(c.tail), k->copies = std::move(c.copies), k->blocks = std::move(r.blocks), k->preblur = std::move(r.preblur);
+            k->passes = r.passes, k->wallsOk = r.wallsOk, k->roofed = c.roofed, k->killed = c.killed, k->toneK = c.toneK;
+            std::memcpy(k->amb, c.amb, sizeof k->amb), std::memcpy(k->ambPass, c.ambPass, sizeof k->ambPass);
+            ShrinkExact(k->tail), ShrinkExact(k->copies), ShrinkExact(k->blocks), ShrinkExact(k->preblur);
         }
         // the capture's texels and samples move into the kept room (the capture is dropped next)
         k->samples = std::move(r.samples);
@@ -2733,6 +3036,7 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
     try {
         r.texels.push_back(t);
         r.samples.insert(r.samples.end(), raw, raw + 0x30);
+        if (c.keep) c.tail.emplace_back(); // (NotePack fills it)
         for (int i = 0; i < s.n; i++) {
             const Acc& a = s.acc[i];
             Contrib p;
@@ -2774,11 +3078,26 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
         return Fail("no memory");
     }
     c.pending = static_cast<int>(texel);
+    if (c.keep) t_packRoom = room, t_packTexel = texel;
     if ((texel & 4095) == 0 && BytesOf(r) > kMaxRecordBytes) Fail("a room too large to keep");
 }
 
 void BeforeFinalize(unsigned char* room) {
-    if (g_cap.active && g_cap.room == room) FlushPending();
+    if (!g_cap.active || g_cap.room != room) return;
+    FlushPending();
+    if (g_cap.keep && g_cap.ok) KeepFinals(room);
+}
+void NotePack(const void* room, bool xy, unsigned x, unsigned y, const float* input, bool dithered, bool alphaFloor) {
+    if (!room || t_packRoom != room) return; // (another thread's pack, or no kept capture's texel pending)
+    t_packRoom = nullptr;
+    Capture& c = g_cap;
+    if (!c.active || !c.keep || c.room != room || !c.rec || c.tailWhy || t_packTexel >= c.tail.size() || t_packTexel >= c.rec->texels.size()) return;
+    const TexelRec& t = c.rec->texels[t_packTexel];
+    KeptTail& k = c.tail[t_packTexel];
+    if (!input) c.tailWhy = "the pack input is not known (the solve's code differs)";
+    else if (!xy || t.x != x || t.y != y) c.tailWhy = "a texel packed at another place";
+    else if (!CopyBytes(k.p, input, sizeof k.p) || !CopyBytes(&k.norm, static_cast<const BYTE*>(room) + 0x160, sizeof k.norm)) c.tailWhy = "a pack input could not be read";
+    else k.bits = static_cast<uint8_t>((dithered ? kTailDither : 0) | (alphaFloor ? kTailFloor : 0)), k.seen = 1;
 }
 
 void NoteWallBlur(const unsigned char* room, const WallBlockView* blocks, int count, uint32_t passes) {
@@ -2794,9 +3113,16 @@ void NoteWallBlur(const unsigned char* room, const WallBlockView* blocks, int co
         BlockRec b;
         b.x0 = v.x0, b.y0 = v.y0, b.x1 = v.x1, b.y1 = v.y1;
         b.ok = v.before && !v.ghosts && v.x1 >= v.x0 && v.y1 >= v.y0;
-        if (b.ok) {
+        // (a kept capture: also a block with rows lit beyond its edges, and those rows)
+        b.have = b.ok || (g_cap.keep && v.before && v.x1 >= v.x0 && v.y1 >= v.y0);
+        if (b.have) {
             b.off = static_cast<uint32_t>(r.preblur.size());
             r.preblur.insert(r.preblur.end(), v.before, v.before + static_cast<size_t>(v.x1 - v.x0 + 1) * (v.y1 - v.y0 + 1));
+            if (g_cap.keep && v.ghost && (v.above || v.below)) {
+                b.above = v.above, b.below = v.below;
+                b.ghostOff = static_cast<uint32_t>(r.preblur.size());
+                r.preblur.insert(r.preblur.end(), v.ghost, v.ghost + static_cast<size_t>(v.x1 - v.x0 + 1) * 4);
+            }
         }
         r.blocks.push_back(b);
     }

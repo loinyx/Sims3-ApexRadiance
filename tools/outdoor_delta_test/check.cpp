@@ -574,6 +574,60 @@ int main() {
         RtLampModel::KeptAdd(law, a, b, 1.0f, 2.0f, false, true, thr, x);
         Check(std::fabs((h[0] + h[1] + h[2]) - (x[0] + x[1] + x[2])) <= 1e-3f * (x[0] + x[1] + x[2]), "kept part: half-float A and B within 1e-3");
     }
+    { // GPU room lamps, stage 2a: a kept texel's tail recomposed (RtLampModel::KeptTexel) against the solve's tail on the sum
+        // the game's tail (FUN_006a31d0): x = norm S, toned, alpha = ramp x weight, + alpha x ambient when the pass adds it,
+        // min 1, the roofed alpha floor, the dither, the pack
+        const float k = 0.62f, floorA = 5.0f / 255.0f;
+        const auto game = [&](const float S[3], float norm, float ramp, const float amb[3], bool addAmb, float d, float p[4]) {
+            float x[3], c[3];
+            for (int i = 0; i < 3; i++) x[i] = norm * S[i];
+            GpuLampLaw::Tone(x, c);
+            const float a = ramp * GpuLampLaw::Weight(c, k);
+            for (int i = 0; i < 3; i++) p[i] = c[i] + (addAmb ? a * amb[i] : 0.0f);
+            p[3] = a;
+            float q[4] = {std::min(p[0], 1.0f), std::min(p[1], 1.0f), std::min(p[2], 1.0f), std::min(p[3], 1.0f)};
+            if (q[3] < floorA) q[3] = floorA;
+            Dither(q, d);
+            return PackModel(q);
+        };
+        std::mt19937 rng2(77);
+        std::uniform_real_distribution<float> U2(0.0f, 1.0f);
+        long same = 0, edited = 0, editedOk = 0, n = 20000, unsplit = 0, unsplitOk = 0;
+        for (long t = 0; t < n; t++) {
+            float S[3], R[3], amb[3], p[4], q[4], c[4];
+            const float scale = U2(rng2) < 0.2f ? 4.0f : 0.6f;
+            for (int i = 0; i < 3; i++) S[i] = scale * U2(rng2) * U2(rng2), amb[i] = 0.3f * U2(rng2);
+            const float norm = 0.5f + U2(rng2), ramp = 0.6f + 0.4f * U2(rng2), d = RoomMapDither::Offset(t % 97, t % 89) / 255.0f;
+            const bool addAmb = (t & 1) != 0;
+            const uint32_t g = game(S, norm, ramp, amb, addAmb, d, p);
+            const bool split = RtLampModel::KeptTexel(S, S, p, norm, k, true, floorA, d, c);
+            same += MaxLevelDiff(PackModel(c), g) <= 1;
+            if (!split) {
+                unsplit++;
+                unsplitOk += MaxLevelDiff(PackModel(c), g) <= 1;
+                continue;
+            }
+            // a lamp edit: the sum moves (brighter or darker), the ramp and ambient read back from the solve's input
+            for (int i = 0; i < 3; i++) R[i] = std::max(S[i] + (U2(rng2) - 0.5f) * 0.4f, 0.0f);
+            const uint32_t ge = game(R, norm, ramp, amb, addAmb, d, q);
+            RtLampModel::KeptTexel(R, S, p, norm, k, true, floorA, d, c);
+            edited++;
+            editedOk += MaxLevelDiff(PackModel(c), ge) <= 1;
+        }
+        std::printf("  kept tail: %ld of %ld texels within 1/255 at their own sum (%ld without the ramp read back), %ld of %ld after an edit\n", same, n, unsplit, editedOk, edited);
+        Check(same == n, "kept tail: the solve's own sum packs back to the game's texel within 1/255");
+        Check(unsplit > 0 && unsplitOk == unsplit, "kept tail: a texel of weight 0 (no ramp read back) packs back too");
+        Check(editedOk == edited, "kept tail: an edited sum takes the game's tail with the ramp and ambient read back");
+        // the alpha floor and a dark roofed texel
+        const float zero[3] = {}, pz[4] = {0.0f, 0.0f, 0.0f, 0.001f};
+        float c[4];
+        RtLampModel::KeptTexel(zero, zero, pz, 1.0f, k, true, floorA, 0.0f, c);
+        Check(c[3] == floorA && c[0] == 0.0f, "kept tail: the roofed alpha floor");
+        // roofless: the hue kept past 1, min 1, the solve's alpha
+        const float Sr[3] = {1.6f, 0.4f, 0.2f}, pr[4] = {1.0f, 0.25f, 0.125f, 0.37f};
+        RtLampModel::KeptTexel(Sr, Sr, pr, 1.0f, k, false, floorA, 0.0f, c);
+        Check(c[0] == 1.0f && std::fabs(c[1] - 0.25f) < 1e-6f && std::fabs(c[2] - 0.125f) < 1e-6f && c[3] == 0.37f, "kept tail: a roofless texel keeps its hue and the solve's alpha");
+    }
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

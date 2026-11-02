@@ -44,6 +44,10 @@ void SetRoomLampCapture(bool on);
 bool RoomLampCapture();
 // The room solve hooks record for the probe or the kept captures (either is on)
 bool RoomHooks();
+// GPU room lamps stage 2a (RoomMapDither's pack thunk, any thread; only the light tree thread's kept capture takes it): the
+// texel the solve packs next at (x, y) of its map (xy: known), its pack input before the clamp (null: not known), whether the
+// dither and the roofed alpha floor apply to it
+void NotePack(const void* room, bool xy, unsigned x, unsigned y, const float* input, bool dithered, bool alphaFloor);
 
 // ---- the direct path (light tree thread; LevelLightShare's hooks) ----
 // The lamp entry update of story tl's room 0 (LevelLightShare::HoldLampMark, a lamp that moved or changed a value in the same
@@ -127,6 +131,8 @@ struct WallBlockView {
     int x0, y0, x1, y1;
     const uint32_t* before; // (x1 - x0 + 1) x (y1 - y0 + 1), null when not copied
     bool ghosts;
+    const uint32_t* ghost; // those rows, 4 of x1 - x0 + 1: 2 above the top row, then 2 below the bottom one (null: none)
+    bool above, below;     // which of them BlurWalls takes
 };
 void NoteWallBlur(const unsigned char* room, const WallBlockView* blocks, int count, uint32_t passes);
 void NoteGameBlur(const unsigned char* room); // the game's own blur ran (Apex's could not): walls cannot be blurred again

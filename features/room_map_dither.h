@@ -22,6 +22,10 @@ void SetEnabled(bool on);
 bool Enabled();
 std::string Status();
 
+// A roofed room's texel keeps an ambient weight (alpha) of at least this (the pack's thunk, room_map_dither.cpp): the smoothed
+// read's "beyond a wall" mark is alpha < 4/255
+constexpr float kRoofedAlphaMin = 5.0f / 255.0f;
+
 // The offset (in 8-bit levels, -0.5 .. 0.5) at a texel of a map: interleaved gradient noise (Jimenez 2014), a blue-noise-like
 // pattern from the position alone
 inline float Offset(unsigned x, unsigned y) {
