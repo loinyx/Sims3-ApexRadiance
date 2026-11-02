@@ -55,7 +55,7 @@ struct Entry {
     std::vector<char> physReach; // per lamp: the realistic reach share applies on the room's wall texels (outdoor walls)
     std::vector<RtLampModel::Lamp> lotLaws;
     std::vector<std::array<float, 3>> world;
-    RtLampGpu::BlockerTable blockers;
+    std::shared_ptr<const RtLampGpu::BlockerTable> blockers; // (its kept room's, shared by the room's maps)
     float blkHeader = -1.0f;
     float xf[16] = {};
     // (physical, stage 4) the solve's lamps out of its base (their rows: mult x norm scale, reach, the room they were registered
@@ -280,8 +280,10 @@ void LogEdits() {
 uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
     if (!OutdoorDelta::RoomLampCapture()) {
         if (!g_entries.empty()) ReleaseAll();
+        OutdoorDelta::SolveTouched(nullptr); // (the game's maps again: the rooms with lamp edits taken since their solve)
         return 0;
     }
+    if (!OutdoorDelta::RoomLampPhysical()) OutdoorDelta::SolveTouched(nullptr); // (the replica model: the physical edits' rooms solved)
     LogEdits();
     OutdoorDelta::KeptRooms(mgr, cls, g_refs);
     // this map's entries whose kept solve went or was kept again
@@ -291,6 +293,8 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
         const bool here = e.mgr == mgr && e.cls == cls && e.m == m;
         if (here && std::none_of(g_refs.begin(), g_refs.end(), [&](const OutdoorDelta::KeptRef& r) { return r.room == room && r.version == e.version; })) {
             Drop(e, room);
+            if (e.physical && std::none_of(g_refs.begin(), g_refs.end(), [&](const OutdoorDelta::KeptRef& r) { return r.room == room; }))
+                OutdoorDelta::SolveTouched(room); // (no kept solve of it any more: its game's map, which a lamp edit taken may lack)
             it = g_entries.erase(it);
         } else
             ++it;
@@ -319,6 +323,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                     if (LogAllowed())
                         LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: physical: the lot's space could not be read (left as the game's)", d.story, r.id, cls,
                                              kMapName[m]));
+                    OutdoorDelta::SolveTouched(r.room);
                 } else if (RtLampGpu::Engine::UploadKept(dev, d, e.gpu)) {
                     e.physMult = std::move(d.physMult);
                     e.physReach = std::move(d.physReach);
@@ -342,8 +347,11 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                         e.lamps.clear();
                     }
                     g_bytes += e.gpu.bytes;
-                } else if (LogAllowed())
-                    LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: its buffers could not be made (left as the game's)", d.story, r.id, cls, kMapName[m]));
+                } else {
+                    if (LogAllowed())
+                        LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: its buffers could not be made (left as the game's)", d.story, r.id, cls, kMapName[m]));
+                    if (d.physical) OutdoorDelta::SolveTouched(r.room);
+                }
             }
         }
         if (!e.ok) continue;
@@ -523,7 +531,7 @@ void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
             if (LogAllowed())
                 LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: kept for a {}x{} map, the map is {}x{} (left as the game's)", e.story, e.id, e.cls, kMapName[m],
                                      e.gpu.w, e.gpu.h, w, h));
-            if (e.physical) NoteCover(e.story, "a map not of the kept size");
+            if (e.physical) NoteCover(e.story, "a map not of the kept size"), OutdoorDelta::SolveTouched(room);
             Drop(e, room);
             continue;
         }
@@ -534,8 +542,10 @@ void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
             if (LogAllowed()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: not drawn ({})", e.story, e.id, e.cls, kMapName[m], err));
             if (e.physical) {
                 NoteCover(e.story, err);
-                // (stage 4: its lamps' edits may have been taken without its solve, which the game's map then lacks)
+                // (stage 4: its lamps' edits may have been taken without its solve, which the game's map then lacks; the rooms of
+                // earlier ones relit since: OutdoorDelta's touched rooms)
                 if (!e.editHits.empty()) LevelLightShare::QueueRoomAgain(room);
+                else OutdoorDelta::SolveTouched(room);
             }
             Drop(e, room);
             continue;
@@ -546,6 +556,7 @@ void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
             QueryPerformanceCounter(&c1);
             g_costMaps++, g_costRound += MsSince(c0, c1);
             if (!e.editHits.empty()) {
+                OutdoorDelta::NoteTouched(room); // (it shows an edited lamp its game's map may lack, until its next solve)
                 std::lock_guard<std::mutex> lk(g_editMx);
                 for (PhysEdit& pe : g_physEdits)
                     if (std::find(e.editHits.begin(), e.editHits.end(), pe.light) != e.editHits.end()) {

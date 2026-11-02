@@ -17,7 +17,8 @@
 // CPU DXT1 / DXT5 encoders, by the resource lookup cache's write epochs (features/resource_cache.h) on the writable
 // package database's direct record write, and by the Frame Profiler and the object lookup index (features/object_index.h)
 // on the object-by-ID lookup, and by the scene node budget (features/scene_budget.h) on the scene node destructor, AddNode
-// and the holder teardown. Thread-safe (Install / Remove serialise on one mutex; Next is lock-free).
+// and the holder teardown, and by the room light queue and the lamp mark filter (features/lamp_mark_filter.h) on the light object
+// removal. Thread-safe (Install / Remove serialise on one mutex; Next is lock-free).
 #include <atomic>
 #include <cstdint>
 #include <string>
@@ -55,7 +56,7 @@ enum class Site : int {
 };
 // lower = outer. FastDxt: the DXT sites only; ResourceCache: the DpfWriteDirect site only; ObjectIndex: the ObjectById
 // site only; SceneBudget: the three scene node sites only (features/scene_budget.h).
-enum class Layer : int { FrameProfiler, FastDxt, ResourceCache, ObjectIndex, SceneBudget, LevelLightShare, FastCas, FastCrc, ScriptMath, ObjectIdMap, RoomLightQueue, LotObjectThrottle, ProbeNeutral, RenderObjectMap, TreeLightRig, Count };
+enum class Layer : int { FrameProfiler, FastDxt, ResourceCache, ObjectIndex, SceneBudget, LevelLightShare, FastCas, FastCrc, ScriptMath, ObjectIdMap, RoomLightQueue, LotObjectThrottle, ProbeNeutral, RenderObjectMap, TreeLightRig, LampMarkFilter, Count };
 
 // Installs `hook` as `layer` of `site` (true when installed, or already installed). error: why not.
 bool Install(Site site, Layer layer, void* hook, std::string* error);

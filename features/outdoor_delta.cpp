@@ -251,7 +251,7 @@ struct Record {
     // (physical indoor lamps) kept by the physical model: its lamps' normK and reach, and room 0's 3D test records as its solve
     // started (blkHeader < 0: none read)
     bool phys = false;
-    RtLampGpu::BlockerTable blk;
+    std::shared_ptr<const RtLampGpu::BlockerTable> blk;
     float blkHeader = -1.0f;
     DWORD used = 0;
     size_t bytes = 0;
@@ -266,7 +266,7 @@ uint64_t KeyOf(const void* room, int cls) { return (static_cast<uint64_t>(reinte
 size_t BytesOf(const Record& r) {
     size_t b = sizeof(Record) + r.samples.capacity() + r.texels.capacity() * sizeof(TexelRec) + r.batches.capacity() * sizeof(BatchRec) +
                r.blocks.capacity() * sizeof(BlockRec) + r.preblur.capacity() * 4 + r.drawnSum.capacity() * sizeof(DrawnSum) +
-               r.blk.rows.capacity() * sizeof(RtLampGpu::BlockerTable::Row);
+               (r.blk ? r.blk->rows.capacity() * sizeof(RtLampGpu::BlockerTable::Row) : 0);
     for (const LampRec& l : r.lamps) b += sizeof(LampRec) + l.parts.capacity() * sizeof(Contrib);
     for (const KeptLamp& l : r.kept0) b += sizeof(KeptLamp) + l.parts.capacity() * sizeof(KeptPart) + l.mask.capacity() * sizeof(KeptLamp::Mask);
     return b;
@@ -2260,6 +2260,8 @@ struct KeptRoom {
     // and no part), and the room's 3D test records as its solve started (RoomGeoKey's read); not drawn yet (KeptRooms)
     bool physical = false;
     RoomLightTests::Room tests;
+    std::shared_ptr<const RtLampGpu::BlockerTable> blk; // (tests as the GPU's blocker table, and its records' header row)
+    float blkHeader = -1.0f;
     // (stage 4) the directional maps: per sample its texel and position, the lights the GPU does not draw summed (basisBase, 16
     // per sample), every other light of the list with its part and its share of the game's step (NaN: not a multiple), the
     // texels at the solve's end, the set they went to; basisWhy: not usable (kNoBasis: the room writes none); basisId: the
@@ -2301,6 +2303,7 @@ size_t KeptBytes(const KeptRoom& k) {
     for (const KeptRoom::BasisLamp& l : k.basisLamps) b += sizeof l + (l.c.capacity() + l.pass.capacity()) * 4;
     b += k.tests.walls.capacity() * sizeof(RoomLightTests::Wall) + k.tests.idx2d.capacity() * 4 + k.tests.rec.capacity() * sizeof(RoomLightTests::Record);
     for (const RoomLightTests::Record& r : k.tests.rec) b += r.b.capacity() * sizeof(RoomLightTests::Blocker);
+    if (k.blk) b += sizeof(RtLampGpu::BlockerTable) + k.blk->rows.capacity() * sizeof(RtLampGpu::BlockerTable::Row);
     return b;
 }
 void ClearKept() {
@@ -2957,7 +2960,12 @@ void KeepEnd(const BYTE* room) {
         k->physical = c.phys;
         k->outdoor = rr.outdoor;
         if (!CopyBytes(&k->norm, room + 0x160, sizeof k->norm) || !std::isfinite(k->norm)) k->norm = 1.0f;
-        if (c.phys) k->tests = std::move(c.tests);
+        if (c.phys) { // (its blocker table once, shared by its maps' entries: in its bytes)
+            k->tests = std::move(c.tests);
+            auto blk = std::make_shared<RtLampGpu::BlockerTable>();
+            k->blkHeader = static_cast<float>(blk->Append(k->tests));
+            k->blk = std::move(blk);
+        }
         k->samples = std::move(r.samples);
         k->texels = std::move(r.texels);
         ShrinkExact(k->samples), ShrinkExact(k->texels);
@@ -3115,10 +3123,15 @@ void SolveStart(unsigned char* room) {
     // test records as the solve starts: UNVERIFIED that room 0's records are the outdoor objects its batches test)
     c.phys = g_capture.load(std::memory_order_relaxed) && g_physical.load(std::memory_order_relaxed) && !baseOnly;
     r.phys = c.phys;
+    r.blk.reset(), r.blkHeader = -1.0f;
     if (c.phys) {
         RoomLightTests::Room t;
         std::string why;
-        if (ReadRoomTests(room, t, why, true)) r.blkHeader = static_cast<float>(r.blk.Append(t));
+        if (ReadRoomTests(room, t, why, true)) {
+            auto blk = std::make_shared<RtLampGpu::BlockerTable>();
+            r.blkHeader = static_cast<float>(blk->Append(t));
+            r.blk = std::move(blk);
+        }
         else if (KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room 0 class {}: its 3D test records could not be read ({}): its lamps drawn without them", rr.story, rr.cls, why));
     }
     c.keep0 = g_capture.load(std::memory_order_relaxed) && !c.phys && !c.keep0Lights.empty();
@@ -3964,7 +3977,66 @@ uint32_t LotLamps(std::vector<LotLamp>& out, std::vector<uintptr_t>* gone) {
     if (gone) *gone = g_lotGone;
     return g_lotLampsVer;
 }
+bool InLotLamps(uintptr_t tracker, uintptr_t light, bool& known) {
+    std::lock_guard<std::mutex> lk(g_lotLampsMx);
+    known = tracker && tracker == g_lotLampsTracker && g_lotLampsVer != 0;
+    return known && std::any_of(g_lotLamps.begin(), g_lotLamps.end(), [&](const LotLamp& l) { return l.light == light; });
+}
+void NoteLightObjectRemoved() {
+    if (g_capture.load(std::memory_order_relaxed) && g_physical.load(std::memory_order_relaxed)) g_lotLampsDirty.store(true, std::memory_order_relaxed);
+}
+namespace {
+// (physical) the rooms whose game's maps lack a lamp edit taken without their solve (phys_lamp_pick.h TouchedRooms): noted by
+// TakesLampEditPhys and by the maps that drew an edited lamp (NoteTouched), forgotten at the room's next solve's end
+// (RoomFinalized); sent to their solve when their maps fall back to the game's (SolveTouched)
+std::mutex g_touchedMx;
+PhysLampPick::TouchedRooms g_touched;
+bool TouchedKey(const void* room, PhysLampPick::TouchedRooms::Key& k) {
+    RoomRead rr;
+    const uintptr_t tracker = room ? RtOutdoorLamps::TrackerOf(room) : 0;
+    if (!tracker || !ReadRoom(static_cast<const BYTE*>(room), rr)) return false;
+    k = {tracker, rr.story, rr.id};
+    return true;
+}
+} // namespace
+void NoteTouched(const void* room) {
+    PhysLampPick::TouchedRooms::Key k;
+    if (!TouchedKey(room, k)) return;
+    std::lock_guard<std::mutex> lk(g_touchedMx);
+    g_touched.Note(k);
+}
+void SolveTouched(const void* room) {
+    std::vector<PhysLampPick::TouchedRooms::Key> due;
+    PhysLampPick::TouchedRooms::Key k;
+    {
+        std::lock_guard<std::mutex> lk(g_touchedMx);
+        if (g_touched.rooms.empty()) return;
+    }
+    const bool one = room && TouchedKey(room, k);
+    if (room && !one) return;
+    {
+        std::lock_guard<std::mutex> lk(g_touchedMx);
+        if (!one) due = g_touched.TakeAll();
+        else if (g_touched.Take(k)) due.push_back(k);
+    }
+    int sent = 0;
+    for (const auto& [tracker, story, id] : due)
+        if (LevelLightShare::TrackerLive(tracker))
+            if (void* r = id ? LevelLightShare::RoomOf(tracker, story, id) : LevelLightShare::Room0Of(tracker, story)) sent += LevelLightShare::QueueRoomAgain(r) ? 1 : 0;
+    if (!due.empty() && KeptLog())
+        LOG_INFO(std::format("[GpuRoomLamps] physical: {} rooms shown from the game's maps again with a lamp edit taken since their solve: {} sent to their solve",
+                             due.size(), sent));
+}
 void RoomFinalized(const void* room, bool gather) {
+    bool touched = false; // (its maps hold its lamps as they are now)
+    {
+        std::lock_guard<std::mutex> lk(g_touchedMx);
+        touched = !g_touched.rooms.empty();
+    }
+    if (PhysLampPick::TouchedRooms::Key key; touched && TouchedKey(room, key)) {
+        std::lock_guard<std::mutex> lk(g_touchedMx);
+        g_touched.Solved(key);
+    }
     // (physical, stage 4) the room's kept physical copy stays drawn while its geometry is the same: off the light tree thread
     // until a solve here keeps it again (sent by SettleDue); on it until this solve's KeepEnd replaces it (SolveEnd drops it if
     // none does), so a settle's solve shows no frame of the game's texels between the two
@@ -4651,6 +4723,10 @@ void StartPhysBasis(std::map<uintptr_t, BasisEdit>&& edits) {
     for (auto& [light, e] : job->edits) e.rooms.clear(); // (the rooms its reach meets, below; not the rooms listing it)
     job->lot = RtOutdoorLamps::KeptLot(job->gen);
     job->radius = Penumbra::Radius();
+    // (the registry read again now: the game's step below is called with each lamp's light, never one deleted since the last
+    // snapshot, whose light may be freed)
+    g_lotLampsDirty.store(true, std::memory_order_relaxed);
+    RefreshLotLamps();
     std::vector<LotLamp> lot;
     std::vector<uintptr_t> gone;
     LotLamps(lot, &gone);
@@ -4929,6 +5005,10 @@ bool TakesLampEditPhys(uintptr_t tl, uintptr_t light, const char* kind, bool set
     g_lastPhysEdit.store(GetTickCount() | 1, std::memory_order_relaxed);
     g_lotLampsDirty.store(true, std::memory_order_relaxed); // (its room or story as registered now, for the maps' rows)
     GpuRoomLamps::NotePhysEdit(light, kind);
+    {
+        std::lock_guard<std::mutex> lk(g_touchedMx);
+        g_touched.NoteEdit(tracker, story, o.ids, o.reg);
+    }
     const bool move = std::strncmp(kind, "move", 4) == 0;
     QueueBasis(light, kind, std::strcmp(kind, "switch off") == 0, move, o.basisRooms);
     // (a new lamp no room lists yet settles its own room; one a room lists already, first seen since the filter started, adds
@@ -5252,7 +5332,7 @@ bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu:
             d.phys.push_back(v);
             for (int q = 0; q < 3; q++) d.physBox[q] = std::min(d.physBox[q], s[q]), d.physBox[3 + q] = std::max(d.physBox[3 + q], s[q]);
         }
-        d.blkHeader = static_cast<float>(d.blockers.Append(k.tests));
+        d.blockers = k.blk, d.blkHeader = k.blkHeader;
         for (const KeptLamp& l : k.lamps)
             d.lamps.push_back(l.light), d.physMult.push_back(static_cast<float>(l.mult) * l.normK), d.physReach.push_back(l.reach), d.physHome.push_back(l.home);
         d.physBaked = k.baked, d.physNorm = k.norm, d.physOutdoor = k.outdoor;
@@ -5687,7 +5767,7 @@ bool ExportRoom0(const void* room, int cls, Room0Export& out, bool physical) {
     }
     if (physical && KeptLog())
         LOG_INFO(std::format("[GpuRoomLamps] Story {} room 0: base without {} lot lamps (physical; 3D test {})", out.story, out.phys.size(),
-                             out.blkHeader < 0.0f ? std::string("records not read") : std::format("{} rows", out.blockers.rows.size())));
+                             out.blkHeader < 0.0f || !out.blockers ? std::string("records not read") : std::format("{} rows", out.blockers->rows.size())));
     return true;
 }
 

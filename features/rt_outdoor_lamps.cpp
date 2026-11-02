@@ -610,6 +610,7 @@ RtLampProxy::Mesh g_mesh;
 uint32_t g_meshGen = 0;
 std::shared_ptr<const Proxy> g_openUsed; // (physical indoor lamps) the proxy whose open-top build is the kept atlas's occluders
 std::atomic<uint32_t> g_openGen{0};      // its generation (0: none uploaded)
+DWORD g_openFailAt = 0;                  // (its last upload failed then)
 uint64_t g_atlasKey = 0;
 uint64_t g_lastParams = 0;
 DWORD g_frame = 0, g_lastFrame = 0;
@@ -751,6 +752,7 @@ struct Job;
 std::vector<std::shared_ptr<Job>> g_jobs; // render thread: the stories whose maps are being prepared (a worker thread each, one at a time)
 void DropAll(IDirect3DDevice9* dev, const char* why, bool requeue = true) {
     PublishNeighbours(0, {}, requeue); // (their maps are the game's again: their gathers take the posts back)
+    if (requeue) OutdoorDelta::SolveTouched(nullptr); // (and the rooms with physical lamp edits taken since their solve go to one)
     g_jobs.clear(); // (a job still running finishes on its own)
     g_swap.clear();
     g_swapLo = ~uintptr_t{0}, g_swapHi = 0;
@@ -938,7 +940,7 @@ void PrepareJob(Job& j) {
     j.phys = ex.physical;
     if (j.phys) {
         j.physLights = std::move(ex.phys), j.physRow = std::move(ex.physRow), j.blkHeader = ex.blkHeader;
-        j.blk = std::make_shared<const RtLampGpu::BlockerTable>(std::move(ex.blockers));
+        j.blk = ex.blockers ? std::move(ex.blockers) : std::make_shared<const RtLampGpu::BlockerTable>(); // (no records read: none)
     }
     j.version = ex.version, j.thr = ex.thr, j.dither = ex.dither;
     j.kept = std::move(ex.kept), j.drawn = std::move(ex.drawn);
@@ -1369,6 +1371,7 @@ void Frame(IDirect3DDevice9* dev) {
     // what makes the option do nothing now, logged once each
     if (!g_option.load(std::memory_order_relaxed)) {
         PublishNeighbours(0, {}); // (before any slot: a lot next to it may be listed with none built yet)
+        OutdoorDelta::SolveTouched(nullptr);
         if (!g_slots.empty()) {
             // the game's room-0 maps may lack lamp edits the GPU stood in for (OutdoorDelta left their deltas out): each
             // story's room 0 is solved again
@@ -1385,6 +1388,7 @@ void Frame(IDirect3DDevice9* dev) {
     }
     const auto off = [&](const std::string& why) {
         PublishNeighbours(0, {});
+        OutdoorDelta::SolveTouched(nullptr);
         if (!g_slots.empty()) DropAll(dev, why.c_str());
         g_on.store(false);
         g_watch.store(false);
@@ -1439,7 +1443,7 @@ void Frame(IDirect3DDevice9* dev) {
             return off("its shaders could not be made (tried " + std::to_string(g_makeFails) + " of 5 times): " + why);
         }
         g_eng = std::move(eng);
-        g_openUsed.reset(), g_openGen.store(0); // (a new engine: no kept atlas occluders yet)
+        g_openUsed.reset(), g_openGen.store(0), g_openFailAt = 0; // (a new engine: no kept atlas occluders yet)
         LOG_INFO("[RtOutdoorLamps] Shaders made: cube shadow maps 6 x 256^2 per lamp, 16 lamps an atlas");
     }
     // the active lot
@@ -1519,12 +1523,13 @@ void Frame(IDirect3DDevice9* dev) {
         }
     }
     // (physical indoor lamps) the kept shadow tiles' occluders: the same lot with open tops over rooms open to above
-    if (OutdoorDelta::RoomLampPhysical() && proxy != g_openUsed) {
+    // (an upload that failed is tried again 5 s later)
+    if (OutdoorDelta::RoomLampPhysical() && proxy != g_openUsed && (!g_openFailAt || GetTickCount() - g_openFailAt >= 5000)) {
         RtLampProxy::Mesh open;
         RtLampProxy::Build(proxy->lot, open, true);
         std::string err;
-        g_openUsed = proxy;
         const bool up = g_eng->SetProxy(dev, open, err, true);
+        g_openUsed = up ? proxy : nullptr, g_openFailAt = up ? 0 : GetTickCount() | 1;
         g_openGen.store(up ? proxy->gen : 0);
         LOG_INFO(up ? std::format("[RtOutdoorLamps] Physical indoor lamps' occluders: {} triangles with open tops, generation {}", open.tris.size(), proxy->gen)
                     : "[RtOutdoorLamps] Physical indoor lamps' occluders could not be uploaded: " + err);
@@ -1668,8 +1673,10 @@ void Frame(IDirect3DDevice9* dev) {
                 else if (const auto nk = g_nbBake.find(mgr); nk != g_nbBake.end()) j->bake = nk->second.bake, j->bakeKeys = nk->second.keys;
                 j->base = rn.lotBase;
                 j->phys = physReady && !physRefused, j->physLater = wantPhys && !physReady;
-                if (wantPhys && !j->phys)
+                if (wantPhys && !j->phys) { // (its lamps back in its base: a lamp edit taken since its solve sends it to one)
                     PhysNote(room, S, physRefused ? "its physical draw failed" : !g_eng || !g_eng->PhysReady() ? "the physical shaders are missing" : "no occluders with open tops yet");
+                    OutdoorDelta::SolveTouched(room);
+                }
                 g_jobs.push_back(j);
                 StartJob(j);
                 g_why.build++;
@@ -2567,7 +2574,7 @@ void Frame(IDirect3DDevice9* dev) {
                 if (s.pOk[l]) pl.push_back(s.pLaws[l]), pw.push_back(s.pWorld[l]), prow.push_back(s.qRow[l]), plights.push_back(s.qLights[l]);
             RtLampGpu::Map pm;
             pm.w = s.map.w, pm.h = s.map.h, pm.vb = s.pvb, pm.count = s.nPhys;
-            ok = s.pBlk && g_eng->SetBlockers(dev, *s.pBlk, err) &&
+            ok = g_eng->SetBlockers(dev, s.pBlk, err) &&
                  GpuRoomLamps::PhysPasses(dev, *g_eng, plights.data(), pl.data(), static_cast<int>(pl.size()), kFar, err, [&](int f, int c, const int* tiles, bool) {
                      RtLampGpu::Engine::PhysRoom room;
                      room.header = s.pHeader;
@@ -2777,7 +2784,7 @@ void OnPresent(IDirect3DDevice9* dev) {
         DropAll(dev, "lighting restart", false); // the paced restart owns room scheduling
         g_on.store(false);
         g_proxyUsed.reset();
-        g_openUsed.reset(), g_openGen.store(0);
+        g_openUsed.reset(), g_openGen.store(0), g_openFailAt = 0;
         {
             std::lock_guard<std::mutex> lock(g_proxyMx);
             g_proxyEpoch.fetch_add(1, std::memory_order_relaxed);
@@ -2830,7 +2837,7 @@ void OnWorldChanged() {
     PublishNeighbours(0, {}, false);
     DropAll(g_dev, "the world changed");
     g_proxyUsed.reset();
-    g_openUsed.reset(), g_openGen.store(0);
+    g_openUsed.reset(), g_openGen.store(0), g_openFailAt = 0;
     {
         std::lock_guard<std::mutex> lk(g_proxyMx);
         g_proxyEpoch.fetch_add(1, std::memory_order_relaxed);

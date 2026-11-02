@@ -39,9 +39,10 @@ void SetDrawDark(bool dark);
 void RigsAgainIn(unsigned ms);
 bool RigRefreshPending(); // render thread: scheduled room-object refresh not yet dispatched
 bool IsDarkRoomLight(const float* colour, const float* dir);
-// Light tree thread: on while LevelLightShare runs the game's ambient step on a room only to read its result (the room's
-// fields are put back after): the base is added as usual, but not remembered as what the room holds
-void SetAmbientProbe(bool on);
+// On while LevelLightShare runs the game's ambient step on a room only to read its result (the room's fields are put back
+// after): the base is added as usual, but not remembered as what the room holds. Per thread (a solve on another thread notes
+// its base meanwhile); returns the thread's previous value, which the probe puts back
+bool SetAmbientProbe(bool on);
 // Light tree thread (physical indoor lamps, S8): a lit indoor room's ambient (+0x110, +0x120) taken again from its lamps now by
 // the game's ambient step with Rooms at Night's base, without a solve; norm: the normalisation that step gives (the room keeps
 // its own until its solve). False (why): left as its solve set it

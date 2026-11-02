@@ -135,6 +135,7 @@ void Engine::ReleaseDefault() {
     tableRows_ = 0;
     Rel(blk_);
     blkW_ = blkH_ = 0;
+    blkBound_.reset();
     Rel(t3_);
     t3W_ = t3H_ = 0;
     Rel(x_);
@@ -151,6 +152,8 @@ void Engine::ReleaseAll() {
     Rel(proxy_);
     Rel(tileProxy_);
     tileProxyTris_ = 0;
+    tileProxySet_ = false;
+    Rel(blkSys_);
     Rel(zeros_);
     Rel(tableSys_);
     tableCap_ = 0;
@@ -176,6 +179,7 @@ bool Engine::SetProxy(IDirect3DDevice9* dev, const RtLampProxy::Mesh& mesh, std:
     size_t& count = tiles ? tileProxyTris_ : proxyTris_;
     Rel(vb);
     count = 0;
+    if (tiles) tileProxySet_ = true;
     if (mesh.tris.empty()) return true;
     // each vertex: its position and its triangle's normal (the shadow keeps how far the surface's plane passes from the lamp)
     const UINT bytes = static_cast<UINT>(mesh.tris.size() * 3 * 24);
@@ -743,7 +747,7 @@ bool Engine::EnsureTiles(IDirect3DDevice9* dev, int rows, std::string& err) {
     return true;
 }
 bool Engine::RenderShadowTile(IDirect3DDevice9* dev, const float pos[3], int tile, float farDist, std::string& err) {
-    return RenderShadowTileRanges(dev, pos, tile, farDist, {{0u, static_cast<UINT>(tileProxy_ ? tileProxyTris_ : proxyTris_)}}, err);
+    return RenderShadowTileRanges(dev, pos, tile, farDist, {{0u, static_cast<UINT>(tileProxySet_ ? tileProxyTris_ : proxyTris_)}}, err);
 }
 bool Engine::RenderShadowTileRanges(IDirect3DDevice9* dev, const float pos[3], int tile, float farDist, const std::vector<std::pair<UINT, UINT>>& ranges, std::string& err) {
     if (!ready_ || !tiles_ || !tilesDepth_ || tile < 0 || tile >= tileRows_) {
@@ -764,9 +768,9 @@ bool Engine::RenderShadowTileRanges(IDirect3DDevice9* dev, const float pos[3], i
     const D3DVIEWPORT9 row{0, static_cast<DWORD>(tile * face_), static_cast<DWORD>(6 * face_), static_cast<DWORD>(face_), 0.0f, 1.0f};
     c_.SetViewport(dev, &row);
     dev->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0xFFFFFFFF, 1.0f, 0);
-    // (the tiles' own occluders when set: physical indoor lamps' proxy with open tops; else the outdoor one)
-    IDirect3DVertexBuffer9* const vb = tileProxy_ ? tileProxy_ : proxy_;
-    const size_t tris = tileProxy_ ? tileProxyTris_ : proxyTris_;
+    // (the tiles' own occluders once set: physical indoor lamps' proxy with open tops, none when it is empty; else the outdoor one)
+    IDirect3DVertexBuffer9* const vb = tileProxySet_ ? tileProxy_ : proxy_;
+    const size_t tris = tileProxySet_ ? tileProxyTris_ : proxyTris_;
     if (vb && tris) {
         dev->SetRenderState(D3DRS_ZENABLE, TRUE);
         dev->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
@@ -832,9 +836,11 @@ bool Engine::SetTable(IDirect3DDevice9* dev, const float* rgba, int rows, std::s
     return true;
 }
 bool Engine::SetBlockers(IDirect3DDevice9* dev, const BlockerTable& t, std::string& err) {
-    const int w = t.Width(), h = t.Height();
+    blkBound_.reset();
+    const int w = BlockerTable::kMaxWidth, h = BlockerTable::TexHeight(t.rows.size(), blk_ ? blkH_ : 0);
     if (!blk_ || blkW_ != w || blkH_ != h) {
         Rel(blk_);
+        Rel(blkSys_);
         blkW_ = blkH_ = 0;
         if (FAILED(dev->CreateTexture(w, h, 1, 0, D3DFMT_A32B32G32R32F, D3DPOOL_DEFAULT, &blk_, nullptr)) || !blk_) {
             blk_ = nullptr;
@@ -842,10 +848,12 @@ bool Engine::SetBlockers(IDirect3DDevice9* dev, const BlockerTable& t, std::stri
         }
         blkW_ = w, blkH_ = h;
     }
-    IDirect3DTexture9* sys = nullptr;
-    if (FAILED(dev->CreateTexture(w, h, 1, 0, D3DFMT_A32B32G32R32F, D3DPOOL_SYSTEMMEM, &sys, nullptr)) || !sys) return err = "the blocker table's copy could not be created", false;
+    if (!blkSys_ && (FAILED(dev->CreateTexture(w, h, 1, 0, D3DFMT_A32B32G32R32F, D3DPOOL_SYSTEMMEM, &blkSys_, nullptr)) || !blkSys_)) {
+        blkSys_ = nullptr;
+        return err = "the blocker table's copy could not be created", false;
+    }
     D3DLOCKED_RECT lr{};
-    bool ok = SUCCEEDED(sys->LockRect(0, &lr, nullptr, 0)) && lr.pBits;
+    bool ok = SUCCEEDED(blkSys_->LockRect(0, &lr, nullptr, 0)) && lr.pBits;
     if (ok) {
         for (int y = 0; y < h; y++) {
             float* dst = reinterpret_cast<float*>(static_cast<BYTE*>(lr.pBits) + static_cast<size_t>(lr.Pitch) * y);
@@ -853,11 +861,17 @@ bool Engine::SetBlockers(IDirect3DDevice9* dev, const BlockerTable& t, std::stri
             if (n) std::memcpy(dst, t.rows.data() + at, n * sizeof(BlockerTable::Row));
             std::memset(dst + n * 4, 0, (w - n) * sizeof(BlockerTable::Row));
         }
-        sys->UnlockRect(0);
-        ok = SUCCEEDED(dev->UpdateTexture(sys, blk_));
+        blkSys_->UnlockRect(0);
+        ok = SUCCEEDED(dev->UpdateTexture(blkSys_, blk_));
     }
-    sys->Release();
     return ok || (err = "the blocker table could not be uploaded", false);
+}
+bool Engine::SetBlockers(IDirect3DDevice9* dev, const std::shared_ptr<const BlockerTable>& t, std::string& err) {
+    if (!t) return err = "no blocker table", false;
+    if (blk_ && t == blkBound_) return true; // (bound already: a room's maps, a relight round after another)
+    if (!SetBlockers(dev, *t, err)) return false;
+    blkBound_ = t;
+    return true;
 }
 bool Engine::AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, int n, const Params& p, bool first, std::string& err,
                            bool phys, const float (*t3From)[3], bool physX) {

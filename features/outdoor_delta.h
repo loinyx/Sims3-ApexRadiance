@@ -20,6 +20,7 @@
 // Off (Lamp lighting: Classic, or Instant on a device that cannot run it): nothing here runs and every solve is the game's.
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 #include "gpu_lamp_law.h"
@@ -88,6 +89,17 @@ struct LotLamp {
     bool operator==(const LotLamp&) const = default;
 };
 uint32_t LotLamps(std::vector<LotLamp>& out, std::vector<uintptr_t>* gone = nullptr);
+// (LampMarkFilter's occluder mark) whether the snapshot is of the lot `tracker` (known) and holds `light`
+bool InLotLamps(uintptr_t tracker, uintptr_t light, bool& known);
+// (any thread) an object left a story's light maps (EntryChain LightObjectRemove): the snapshot is read again after the next
+// room update, not up to 250 ms later (a deleted lamp's light may be freed)
+void NoteLightObjectRemoved();
+// (physical, render thread) the rooms whose game's maps lack a lamp edit taken without their solve (phys_lamp_pick.h
+// TouchedRooms; noted by TakesLampEditPhys, forgotten at the room's next solve's end): NoteTouched adds a room whose map drew
+// an edited lamp; SolveTouched(room) sends that room to its solve if it is one (its map is the game's again), nullptr every
+// such room (the GPU's maps all went: capture or Real-time outdoor lamps off, another active lot)
+void NoteTouched(const void* room);
+void SolveTouched(const void* room);
 // (physical indoor lamps, stage 4; LampMarkFilter's lamp entry update, light tree thread) an edit of `light` (kind "value",
 // "switch on", "switch off", "move" (within its room), "move to another room", "move to another story" or "new" (first seen;
 // settles only when no room lists it yet); a literal) of a story 0 .. 7 of the active lot when every story 0 .. 7 draws the
@@ -259,7 +271,7 @@ struct Room0Export {
     bool physical = false;
     const char* physWhy = nullptr;
     std::vector<std::array<float, 3>> physRow;
-    RtLampGpu::BlockerTable blockers;
+    std::shared_ptr<const RtLampGpu::BlockerTable> blockers; // (the record's own: one for every export of its solve)
     float blkHeader = -1.0f;
     int lamps = 0;                // lights kept
     // (GPU room lamps, developer) the lamps of its list Real-time outdoor lamps does not draw, kept as a kept room's: their parts

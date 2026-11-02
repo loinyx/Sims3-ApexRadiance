@@ -32,6 +32,7 @@
 #include "object_light_bridge.h"
 #include "room_ambient_policy.h"
 #include "s3ss_detect.h"
+#include <utility>
 #include <windows.h>
 #include <cmath>
 #include <cstring>
@@ -61,7 +62,7 @@ DWORD g_orig[kSites] = {}; // what each read pointed to when Apex started
 std::vector<MemPatch::PatchLocation> g_patches;
 bool g_ready = false, g_patched = false;
 bool g_on = false;
-bool g_probe = false; // SetAmbientProbe (light tree thread)
+thread_local bool t_probe = false; // SetAmbientProbe (this thread's ambient step is a probe's)
 float g_light = 1.0f, g_blue = 1.0f;
 // Furniture (30/09, a second study): its unlit-room light is the game's [NoLight] rig lights (CustomLightRigging.ini,
 // three fixed lights FUN_006bb3e0 adds to room-mode rigs, x0.21 in the captured rooms) plus the fill light (FUN_006b7e70,
@@ -236,7 +237,7 @@ template <int Which> float* __fastcall BaseHook(BYTE* room, void*, float* out, c
     int slot = 0;
     float ce[4];
     if (!AddBase(room, r, slot, ce)) return r;
-    if (g_probe) { // only read (LevelLightShare's atrium targets, RetakeAmbient): the room's fields are put back
+    if (t_probe) { // only read (LevelLightShare's atrium targets, RetakeAmbient): the room's fields are put back
         t_probeSlot = slot;
         std::memcpy(t_probeCe, ce, sizeof t_probeCe);
         return r;
@@ -706,7 +707,7 @@ void SetNightLevel(float level) { g_night = level; }
 void SetDrawDark(bool dark) { g_drawDark = dark; }
 void RigsAgainIn(unsigned ms) { g_rigAgainAt = (GetTickCount() + ms) | 1; }
 bool RigRefreshPending() { return g_rigAgainAt != 0; }
-void SetAmbientProbe(bool on) { g_probe = on; }
+bool SetAmbientProbe(bool on) { return std::exchange(t_probe, on); }
 // (S8) A lit room's ambient taken again after a lamp edit taken without its solve (physical indoor lamps): the game's ambient
 // step run on it now (LevelLightShare::ProbeRoomAmbient, Rooms at Night's base added) gives +0x110 and +0x120 as the room's
 // next solve would, its normalisation aside (+0x160 stays until that solve). Only while the room holds what BaseHook (or
@@ -751,6 +752,13 @@ bool RetakeAmbient(unsigned char* room, float& norm, const char*& why) {
     t_probeSlot = -1;
     if (!LevelLightShare::ProbeRoomAmbient(room, own, second, norm)) return why = "the game's ambient step could not run on it", false;
     if (t_probeSlot < 0) return why = "the game's ambient step added no base", false;
+    // (a solve of the room on another thread meanwhile: its values stay; shortcut: a solve's ambient step that ran inside the
+    // probe's window is put back by the probe's restore, as before; its next solve gives it again)
+    float after[2][4];
+    int stateAfter = 0;
+    if (!ReadPair(room, after, stateAfter) || stateAfter != state || RoomAmbientPolicy::SolverOwnsAmbient(stateAfter) || !Near(after[0], cur[0], 0.0f) ||
+        !Near(after[1], cur[1], 0.0f))
+        return why = "being solved", false;
     if (!WritePair(room, own, second)) return why = "not written", false;
     std::memcpy(rec.res[0], own, sizeof own), std::memcpy(rec.res[1], second, sizeof second);
     std::memcpy(rec.ce, t_probeCe, sizeof t_probeCe);

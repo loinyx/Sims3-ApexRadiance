@@ -39,8 +39,11 @@
 #include "room_ambient_policy.h"
 #include "drag_lite.h"
 #include "dev_switches.h"
+#include "entry_chain.h"
+#include "phys_lamp_pick.h"
 #include <windows.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -324,13 +327,22 @@ int StoryOfTl(uintptr_t tl) { // POD (SEH)
     }
 }
 std::atomic<long> g_occPhysMove{0}, g_occPhysNew{0};
-bool OwnObjectEditTaken(uintptr_t tl, float x, float z) {
+// An occluder is the lamp's own object only with evidence: its point lies by the lamp's head and moved as the head did since both
+// were last seen (PhysLampPick::OwnObjectStep; an object moved near a lamp with an edit going on, or near an animated lamp,
+// keeps its mark), and a new lamp is one absent from the lot's registry snapshot (PhysLampPick::NewLampEvidence; an old lamp
+// whose entry never updated is not new). Each occluder entry's last point (OccDecideImpl).
+// UNVERIFIED: that a lamp object's point lies within kOwnNearM of its light's head (a lamp further off keeps its mark: a solve)
+constexpr float kOwnStepM = 0.05f, kOwnNearM = 0.5f;
+std::unordered_map<uintptr_t, std::array<float, 2>> g_occPoint; // (under g_mx) occluder entry -> its point (x, z) at its last mark
+bool OwnObjectEditTaken(uintptr_t tl, float x, float z, bool hadPoint, const float occWas[2]) {
     const bool physical = OutdoorDelta::RoomLampPhysical();
+    const float occNow[2] = {x, z};
     struct Pending { uintptr_t light; bool wasOn, moved; };
     Pending pend[8];
     int np = 0;
     {
         std::lock_guard<std::mutex> lk(g_mx);
+        const DWORD tick = GetTickCount();
         for (const auto& [key, was] : g_sig) {
             if (key.tl != tl || !was.entry || np >= static_cast<int>(std::size(pend))) continue;
             const float dx = was.pos[0] - x, dz = was.pos[2] - z;
@@ -341,11 +353,15 @@ bool OwnObjectEditTaken(uintptr_t tl, float x, float z) {
             bool on = false;
             float pos[3] = {}, editable[5] = {};
             if (!Signature(was.entry, key.light, was.room, h, type, on, pos, editable) || h == was.sig || !((type >= 3 && type <= 6) || type == 11)) continue;
+            if (!PhysLampPick::OwnObjectStep(hadPoint, occWas, occNow, was.pos, pos, kOwnStepM, kOwnNearM)) continue;
             const float mx = pos[0] - was.pos[0], my = pos[1] - was.pos[1], mz = pos[2] - was.pos[2];
             const float m2 = mx * mx + my * my + mz * mz;
-            if (physical) { // (its object moved with it: its point near where the lamp was or is now)
+            if (physical) { // (its object moved with it: its point near where the lamp was or is now; an edit MarkDecideImpl takes)
                 const float nx = pos[0] - x, nz = pos[2] - z;
                 if (!wasClose && nx * nx + nz * nz > kOwnObjectM * kOwnObjectM) continue;
+                const bool editing = was.editUntil && static_cast<int32_t>(tick - was.editUntil) < 0;
+                const bool valueChanged = std::memcmp(was.editable, editable, sizeof editable) != 0 || was.on != on;
+                if (PhysLampPick::EditKind(false, m2, kMoveMin, valueChanged, true, editing) < 0) continue;
             } else if (m2 > kMoveMin * kMoveMin)
                 continue;
             pend[np++] = Pending{key.light, was.on, m2 > 1e-6f};
@@ -361,13 +377,17 @@ bool OwnObjectEditTaken(uintptr_t tl, float x, float z) {
     if (!physical || np) return false;
     std::vector<LevelLightShare::RegisteredLight> reg;
     const int story = StoryOfTl(tl);
-    if (!LevelLightShare::RegisteredLights(TrackerOf(tl), reg)) return false;
+    const uintptr_t tracker = TrackerOf(tl);
+    if (!LevelLightShare::RegisteredLights(tracker, reg)) return false;
     for (const LevelLightShare::RegisteredLight& r : reg) {
         if (r.story != story || !NewLampAt(r.light, x, z)) continue;
+        bool seen = false, known = false;
         {
             std::lock_guard<std::mutex> lk(g_mx);
-            if (g_sig.count(Key{tl, r.light})) continue;
+            seen = g_sig.count(Key{tl, r.light}) != 0;
         }
+        const bool inSnapshot = !seen && OutdoorDelta::InLotLamps(tracker, r.light, known);
+        if (!PhysLampPick::NewLampEvidence(seen, known, inSnapshot)) continue;
         if (OutdoorDelta::TakesLampEditPhys(tl, r.light, "new", false, true)) {
             g_occPhysNew.fetch_add(1, std::memory_order_relaxed);
             return true;
@@ -375,11 +395,30 @@ bool OwnObjectEditTaken(uintptr_t tl, float x, float z) {
     }
     return false;
 }
+// (physical indoor lamps) an object out of a story's light maps (0x006C7610, the object removal whose marks 0x006C75A1 makes):
+// the lot's lamp snapshot is read again after the next room update, not up to 250 ms later, so the GPU stops drawing a deleted
+// lamp, whose light may be freed. UNVERIFIED that the registry no longer holds it by then (else the 250 ms read takes it)
+bool g_removeOn = false;
+void __fastcall RemovalHook(uint8_t* level, void* edx, uint32_t idLo, uint32_t idHi) {
+    using Fn = void(__fastcall*)(uint8_t*, void*, uint32_t, uint32_t);
+    reinterpret_cast<Fn>(EntryChain::Next(EntryChain::Site::LightObjectRemove, EntryChain::Layer::LampMarkFilter))(level, edx, idLo, idHi);
+    OutdoorDelta::NoteLightObjectRemoved();
+}
 // true = mark the room (the game's call)
 bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
     if (OutdoorDelta::RoomLampCapture()) {
-        float x = 0.0f, z = 0.0f;
-        if (OccluderPoint(entry, x, z) && OwnObjectEditTaken(tl, x, z)) {
+        float x = 0.0f, z = 0.0f, was[2] = {};
+        bool had = false;
+        const bool read = OccluderPoint(entry, x, z);
+        if (read) {
+            std::lock_guard<std::mutex> lk(g_mx);
+            if (g_occPoint.size() > 65536) g_occPoint.clear();
+            const auto [it, fresh] = g_occPoint.try_emplace(entry, std::array<float, 2>{x, z});
+            had = !fresh;
+            was[0] = it->second[0], was[1] = it->second[1];
+            it->second = {x, z};
+        }
+        if (read && OwnObjectEditTaken(tl, x, z, had, was)) {
             const long n = g_occDropped.fetch_add(1, std::memory_order_relaxed) + 1;
             if (n <= 3 || (n & (n - 1)) == 0)
                 LOG_INFO(std::format("[LampMarkFilter] Occluder mark of room {} dropped: the object of a lamp whose edit the GPU room lamps take ({} so far)", room, n));
@@ -525,11 +564,11 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             if (const auto it = g_sig.find(Key{tl, light}); it != g_sig.end()) {
                 const LampState& was = it->second;
                 const float dx = pos[0] - was.pos[0], dy = pos[1] - was.pos[1], dz = pos[2] - was.pos[2];
-                const bool moved = dx * dx + dy * dy + dz * dz > kMoveMin * kMoveMin;
                 const bool valueChanged = std::memcmp(was.editable, editable, sizeof editable) != 0 || was.on != on;
-                kind = was.room != room ? 2 : moved ? 1 : valueChanged ? 0 : -1;
-                // (physical: a drag step under kMoveMin is a move too, the GPU draws the lamp where it is; the game's path marked its room)
-                if (kind == -1 && OutdoorDelta::RoomLampPhysical() && dx * dx + dy * dy + dz * dz > 1e-6f) kind = 1;
+                // (physical: a drag step under kMoveMin is a move too while the drag goes on, the GPU draws the lamp where it is; an
+                // animated lamp's wobble takes the game's path below)
+                const bool editing = was.editUntil && static_cast<int32_t>(GetTickCount() - was.editUntil) < 0;
+                kind = PhysLampPick::EditKind(was.room != room, dx * dx + dy * dy + dz * dz, kMoveMin, valueChanged, OutdoorDelta::RoomLampPhysical(), editing);
                 known = true, wasOn = was.on;
                 playerEdit = std::memcmp(was.editable, editable, sizeof editable) != 0;
                 settle = was.on != on || was.editable[3] != editable[3]; // (physical: a switch or an intensity change)
@@ -559,7 +598,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
                     was.on = on;
                     was.room = room;
                     was.sig = h;
-                    was.editUntil = 0;
+                    was.editUntil = physical && kind >= 1 ? (GetTickCount() + kEditHoldMs) | 1 : 0; // (physical: a drag's next steps)
                 }
             }
             if (kind == 2) t_leftTaken = true; // (MarkDecide drops the mark of the room it left)
@@ -950,6 +989,11 @@ bool Install(std::string& why) {
         g_flagsCounted = all;
     }
     FlushInstructionCache(GetCurrentProcess(), nullptr, 0);
+    if (GameAddr::Have({GameAddr::Id::LightObjectRemove})) {
+        std::string err;
+        g_removeOn = EntryChain::Install(EntryChain::Site::LightObjectRemove, EntryChain::Layer::LampMarkFilter, reinterpret_cast<void*>(&RemovalHook), &err);
+        if (!g_removeOn) LOG_WARNING("[LampMarkFilter] The object removal is not followed (a deleted lamp leaves the GPU's lamps within 250 ms): " + err);
+    }
     g_installed = true;
     LOG_INFO(std::format("[LampMarkFilter] Installed: a lamp marks its rooms changed only when it changed{}", g_flagsCounted ? " (message counters on)" : ""));
     return true;
@@ -957,12 +1001,14 @@ bool Install(std::string& why) {
 
 void Uninstall() {
     if (!g_installed) return;
+    if (g_removeOn) EntryChain::Remove(EntryChain::Site::LightObjectRemove, EntryChain::Layer::LampMarkFilter), g_removeOn = false;
     MemPatch::RestoreAll(g_patches);
     g_patches.clear();
     FlushInstructionCache(GetCurrentProcess(), nullptr, 0);
     g_installed = false;
     std::lock_guard<std::mutex> lk(g_mx);
     g_sig.clear(); // lamps freed while it was out would leave stale keys
+    g_occPoint.clear();
     g_lampStory.clear();
     g_lotDue.clear();
     g_editRefresh.store(false, std::memory_order_relaxed);

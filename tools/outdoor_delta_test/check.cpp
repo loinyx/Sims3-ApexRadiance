@@ -1175,6 +1175,49 @@ void PhysPickChecks() {
         ok = ok && gone == std::vector<uintptr_t>{4, 5, 6};
         Check(ok, "physical pick: the lamps gone from the registry (deleted), back when seen again, bounded");
     }
+    // the rooms an edit taken without their solve leaves stale in the game's maps: the rooms listing it, its own and every room 0;
+    // forgotten at their solve, each sent once on a fallback, all on a full drop
+    {
+        TouchedRooms t;
+        t.NoteEdit(7, 1, {{1, 3}, {2, 5}}, 4);
+        bool ok = t.rooms.size() == 2 + 1 + 8 && t.rooms.count({7, 1, 3}) && t.rooms.count({7, 2, 5}) && t.rooms.count({7, 1, 4}) && t.rooms.count({7, 0, 0}) &&
+                  t.rooms.count({7, 7, 0});
+        t.NoteEdit(7, 1, {{1, 3}}, -1); // (the same rooms again: once each)
+        ok = ok && t.rooms.size() == 11;
+        t.Solved({7, 1, 3});
+        ok = ok && !t.Take({7, 1, 3}) && t.Take({7, 2, 5}) && !t.Take({7, 2, 5});
+        const auto all = t.TakeAll();
+        ok = ok && all.size() == 9 && t.rooms.empty() && t.TakeAll().empty();
+        Check(ok, "physical edits: the rooms stale in the game's maps until their solve, sent once on a fallback");
+    }
+    // a step under 10 cm is a move only within an edit going on (a drag); an animated lamp's wobble is none
+    {
+        const float m = 0.10f;
+        bool ok = EditKind(true, 0.0f, m, false, true, false) == 2 && EditKind(false, 0.2f * 0.2f, m, false, true, false) == 1 &&
+                  EditKind(false, 0.0f, m, true, true, false) == 0 && EditKind(false, 0.0f, m, false, true, true) == -1;
+        ok = ok && EditKind(false, 0.03f * 0.03f, m, false, true, true) == 1;   // (a slow drag's step)
+        ok = ok && EditKind(false, 0.03f * 0.03f, m, false, true, false) == -1; // (a wobble: the game's path)
+        ok = ok && EditKind(false, 0.03f * 0.03f, m, true, true, false) == 0;   // (a wobble with a value change: the value)
+        ok = ok && EditKind(false, 0.03f * 0.03f, m, false, false, true) == -1; // (the replica model: never)
+        ok = ok && EditKind(false, std::nanf(""), m, false, true, true) == -1;
+        Check(ok, "physical edits: a step under 10 cm is a move only while a drag goes on");
+    }
+    // the occluder mark: a new lamp only with the registry snapshot's evidence; an occluder is the lamp's own object only by the
+    // head and moving with it
+    {
+        bool ok = NewLampEvidence(false, true, false) && !NewLampEvidence(true, true, false) && !NewLampEvidence(false, false, false) &&
+                  !NewLampEvidence(false, true, true);
+        const float lw[3] = {2.0f, 1.5f, 3.0f}, ln[3] = {2.4f, 1.5f, 3.3f}, still[3] = {2.0f, 1.5f, 3.0f};
+        const float ow[2] = {2.1f, 3.0f}, on[2] = {2.5f, 3.3f}, sofaW[2] = {1.6f, 3.0f}, sofaN[2] = {2.2f, 3.1f};
+        ok = ok && OwnObjectStep(true, ow, on, lw, ln, 0.05f, 0.5f);             // (its object, moved with it)
+        ok = ok && !OwnObjectStep(true, sofaW, sofaN, lw, ln, 0.05f, 0.5f);      // (another object moved the other way, ending by the lamp)
+        ok = ok && !OwnObjectStep(true, sofaW, sofaN, still, still, 0.05f, 0.5f); // (a sofa moved by a lamp whose value changes)
+        ok = ok && OwnObjectStep(true, ow, ow, still, still, 0.05f, 0.5f);       // (a switch: neither moved)
+        const float far[2] = {2.7f, 3.0f}; // (0.7 m from the head)
+        ok = ok && OwnObjectStep(false, ow, ow, still, still, 0.05f, 0.5f) && !OwnObjectStep(false, far, far, still, still, 0.05f, 0.5f);
+        ok = ok && !OwnObjectStep(true, far, far, still, still, 0.05f, 0.5f); // (beyond the head's 0.5 m: not its object)
+        Check(ok, "physical edits: an occluder mark is dropped only for a new lamp's or the lamp's own object");
+    }
     // the edit: every story 0 .. 7 drawn, every room > 0 a kept physical solve drawn without the lamp in its base
     {
         std::vector<RoomFact> rooms(4);
@@ -1283,8 +1326,8 @@ void BlockerTableChecks() {
     wide.rows.resize(5000);
     int tx = 0, ty = 0;
     wide.Texel(4097, tx, ty);
-    Check(wide.Width() == 4096 && wide.Height() == 2 && tx == 1 && ty == 1 && table.Width() == static_cast<int>(std::min<size_t>(table.rows.size(), 4096)),
-          "blocker table: row i sits at texel (i % width, i / width), width at most 4096");
+    Check(wide.Width() == 4096 && wide.Height() == 2 && tx == 1 && ty == 1 && table.Width() == 4096,
+          "blocker table: row i sits at texel (i % 4096, i / 4096)");
     long n = 0, same = 0, shaded = 0;
     for (int s = 0; s < 200000; s++) {
         const size_t r = static_cast<size_t>(P(rng) * static_cast<float>(rooms.size())) % rooms.size();
@@ -1298,6 +1341,15 @@ void BlockerTableChecks() {
     std::printf("blocker table: %zu rows (%d blockers, %d of another vtable left out); occlude from the rows %ld / %ld identical (%ld shaded)\n", table.rows.size(),
                 blockers, table.skipped, same, n, shaded);
     Check(same == n && shaded > n / 10, "blocker table: occlude from the rows is RoomLightTests::occlude bit for bit");
+    // its texture: always kMaxWidth wide (the check above), only taller
+    {
+        using RtLampGpu::BlockerTable;
+        const int w = BlockerTable::kMaxWidth;
+        bool ok = BlockerTable{}.Height() == 1;
+        ok = ok && BlockerTable::TexHeight(0, 0) == 1 && BlockerTable::TexHeight(1, 0) == 1 && BlockerTable::TexHeight(w, 0) == 1 &&
+             BlockerTable::TexHeight(w + 1, 0) == 2 && BlockerTable::TexHeight(5, 3) == 3 && BlockerTable::TexHeight(3 * w + 1, 3) == 4;
+        Check(ok, "blocker table: its texture is 4096 wide and grows only in height");
+    }
 }
 
 int main() {

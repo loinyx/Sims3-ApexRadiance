@@ -1,7 +1,7 @@
 #pragma once
 // GPU room lamps, physical model (docs/features/night-lighting/gpu-room-lamps.md): a receiving room's furniture blockers (the
 // game's 3D test, room_light_tests.h) packed as float4 rows for an A32B32G32R32F texture read with point filtering in ps_3_0,
-// row i at texel (i % Width(), i / Width()), Width() <= kMaxWidth. Every value is the game's float as read (the room ids and
+// row i at texel (i % kMaxWidth, i / kMaxWidth). Every value is the game's float as read (the room ids and
 // counts are integers below 2^24, exact as floats). Pure: no game access, no device; the decoder here walks the rows as the
 // shader will and gives RoomLightTests::occlude's answer bit for bit (tools/outdoor_delta_test, tools/room_lamp_3d_replay).
 //
@@ -36,9 +36,12 @@ struct BlockerTable {
     std::vector<Row> rows;
     int skipped = 0; // blockers of another vtable left out
 
-    int Width() const { return rows.empty() ? 1 : static_cast<int>(std::min<size_t>(rows.size(), kMaxWidth)); }
+    // (the texture is always kMaxWidth wide and only grows in height: one texture serves every room's table, made again only
+    // for a taller one)
+    int Width() const { return kMaxWidth; }
     int Height() const { return rows.empty() ? 1 : static_cast<int>((rows.size() + kMaxWidth - 1) / kMaxWidth); }
-    void Texel(int row, int& x, int& y) const { x = row % Width(), y = row / Width(); }
+    static int TexHeight(size_t rows, int have) { return std::max({have, 1, static_cast<int>((rows + kMaxWidth - 1) / kMaxWidth)}); }
+    void Texel(int row, int& x, int& y) const { x = row % kMaxWidth, y = row / kMaxWidth; }
 
     int Append(const RoomLightTests::Room& room) {
         using namespace RoomLightTests;

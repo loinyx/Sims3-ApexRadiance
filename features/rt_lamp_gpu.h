@@ -15,6 +15,7 @@
 #include <d3d9.h>
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 #include "rt_lamp_blockers.h"
@@ -146,7 +147,7 @@ struct KeptMapData {
     bool physical = false;
     std::vector<float> physMult;
     std::vector<char> physReach; // per lamp: 1 the realistic reach share applies on the room's wall texels
-    BlockerTable blockers;
+    std::shared_ptr<const BlockerTable> blockers; // (the kept room's own, one for its maps)
     float blkHeader = -1.0f;
     // (physical, stage 4: the lot's lamps drawn by reach, phys_lamp_pick.h) per lamp of `lamps` the room it was registered in;
     // the lights in the solve's base (never drawn); the room's normalisation and roofless flag (a fresh lamp's row); the map's
@@ -189,7 +190,7 @@ class Engine {
     int Face() const { return face_; }
 
     // The proxy (lot space); false when it has no triangle. tiles: the kept atlas's own occluders instead (physical indoor lamps:
-    // RtLampProxy::Build with open tops); RenderShadowTile* use them when set, else the proxy
+    // RtLampProxy::Build with open tops); RenderShadowTile* use them once set (an empty set: no occluder), else the proxy
     bool SetProxy(IDirect3DDevice9* dev, const RtLampProxy::Mesh& mesh, std::string& err, bool tiles = false);
     size_t ProxyTris() const { return proxyTris_; }
     // Lamps 0 .. n - 1 (n <= kAtlasLamps; lot space) into the atlas tiles
@@ -231,8 +232,10 @@ class Engine {
     bool AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, int n, const Params& p, bool first, std::string& err,
                        bool phys = false, const float (*t3From)[3] = nullptr, bool physX = false);
     // Physical indoor lamps: the receiving rooms' furniture blockers (rt_lamp_blockers.h) into a DEFAULT A32B32G32R32F texture
-    // (written from a SYSTEMMEM copy) that AccPhysPS reads
+    // (written from a SYSTEMMEM copy) that AccPhysPS reads; kMaxWidth wide, made again only for a taller table. The shared form
+    // holds the table and uploads nothing while the same one is bound
     bool SetBlockers(IDirect3DDevice9* dev, const BlockerTable& t, std::string& err);
+    bool SetBlockers(IDirect3DDevice9* dev, const std::shared_ptr<const BlockerTable>& t, std::string& err);
     // The map composed into out (raw and toned texels; the class-2 wall blur as Compose)
     bool ComposeRlg(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, std::string& err);
     // A map's sum kept between relights (A32B32G32R32F, w x h): the next AccumulateRlg(first = false) adds to `from`; the sum
@@ -314,6 +317,7 @@ class Engine {
     size_t proxyTris_ = 0;
     IDirect3DVertexBuffer9* tileProxy_ = nullptr; // MANAGED (SetProxy tiles)
     size_t tileProxyTris_ = 0;
+    bool tileProxySet_ = false; // (SetProxy tiles ran: an empty open-top build leaves no occluder, never the outdoor proxy)
     IDirect3DTexture9* atlas_ = nullptr;      // G16R16F (or G32R32F) render target
     D3DFORMAT atlasFmt_ = D3DFMT_UNKNOWN;
     IDirect3DSurface9* atlasDepth_ = nullptr; // D24X8
@@ -331,7 +335,9 @@ class Engine {
     IDirect3DTexture9* tableSys_ = nullptr;   // its SYSTEMMEM copy
     int tableRows_ = 0, tableCap_ = 0;
     IDirect3DTexture9* blk_ = nullptr;        // the blocker table (DEFAULT A32B32G32R32F blkW_ x blkH_)
+    IDirect3DTexture9* blkSys_ = nullptr;     // its SYSTEMMEM copy (the same size)
     int blkW_ = 0, blkH_ = 0;
+    std::shared_ptr<const BlockerTable> blkBound_; // the table blk_ holds (the shared SetBlockers; null: unknown)
     IDirect3DTexture9* t3_ = nullptr;         // a physical batch's 3D tests (DEFAULT A32B32G32R32F, the sums' size)
     int t3W_ = 0, t3H_ = 0;
     IDirect3DTexture9* x_ = nullptr;          // room 0's physical second sum (DEFAULT A32B32G32R32F, the sums' size; AccumulatePhys)

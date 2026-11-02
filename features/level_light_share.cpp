@@ -2107,7 +2107,7 @@ bool ProbeAmbient(BYTE* room, float thr, RoomAmbient& a, float* second = nullptr
     float norm = 0.0f, ownThr = 0.0f;
     bool taken = false, ok = false;
     const AmbientRerun rerun = t_ambientRerun;
-    UnlitRooms::SetAmbientProbe(true);
+    const bool wasProbe = UnlitRooms::SetAmbientProbe(true);
     t_ambientRerun = AmbientRerun::Probe;
     __try {
         const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(room);
@@ -2130,7 +2130,7 @@ bool ProbeAmbient(BYTE* room, float thr, RoomAmbient& a, float* second = nullptr
         ok = false;
     }
     t_ambientRerun = rerun;
-    UnlitRooms::SetAmbientProbe(false);
+    UnlitRooms::SetAmbientProbe(wasProbe);
     if (!taken) return false;
     __try {
         std::memcpy(room + 0x110, saved, sizeof saved);

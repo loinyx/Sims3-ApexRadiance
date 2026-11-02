@@ -2778,6 +2778,60 @@ bool PhysKeptCheck() {
             if (!ok) break;
         }
     }
+    // (review fixes) a shared blocker table is uploaded once while bound and again after another one; an empty open-top proxy
+    // leaves the tiles without occluders (never the outdoor proxy). Lamp 0, then the scene as it was
+    if (ok) {
+        const auto pass = [&](bool tested, std::vector<float>& out) {
+            std::vector<float> rows(rooms.size() * RtLampGpu::Engine::kTableCols * 4, 0.0f);
+            for (size_t r = 0; r < rooms.size(); r++) {
+                rows[r * RtLampGpu::Engine::kTableCols * 4] = 1.0f, rows[r * RtLampGpu::Engine::kTableCols * 4 + 1] = rooms[r].lamp[0][1];
+                rows[(r * RtLampGpu::Engine::kTableCols + 16) * 4] = rooms[r].header;
+            }
+            RtLampGpu::Params pd = prm;
+            pd.thr = 0.0f, pd.fade = false;
+            RtLampGpu::Map dm;
+            dm.w = w, dm.h = h, dm.vb = tested ? pvb : uvb, dm.count = count;
+            g_dev->BeginScene();
+            eng.Begin(g_dev);
+            bool k = eng.SetTable(g_dev, rows.data(), static_cast<int>(rooms.size()), err) &&
+                     eng.AccumulateRlg(g_dev, dm, &lamps[0], &tiles[0], 1, pd, true, err, true, reinterpret_cast<const float (*)[3]>(world[0].data()));
+            eng.End(g_dev);
+            g_dev->EndScene();
+            return k && (tested ? eng.ReadT3(g_dev, w, h, out) : eng.ReadSum(g_dev, w, h, out));
+        };
+        const auto shared = std::make_shared<const RtLampGpu::BlockerTable>(table), none = std::make_shared<const RtLampGpu::BlockerTable>();
+        std::vector<float> a1, a2, b, a3;
+        bool k = eng.SetBlockers(g_dev, shared, err) && pass(true, a1) && eng.SetBlockers(g_dev, shared, err) && pass(true, a2) && eng.SetBlockers(g_dev, none, err) &&
+                 pass(true, b) && eng.SetBlockers(g_dev, shared, err) && pass(true, a3);
+        bool same = k, open = k, shadedBefore = false;
+        for (uint32_t i = 0; k && i < count; i++)
+            if (tx[i].tested) {
+                same = same && a1[i * 4] == t3gpu[0][i * 4] && a2[i * 4] == t3gpu[0][i * 4] && a3[i * 4] == t3gpu[0][i * 4];
+                open = open && b[i * 4] == 1.0f;
+            }
+        Check(same && open, "physical: a shared blocker table is bound once and uploaded again after another: " + err);
+        std::vector<float> clear;
+        g_dev->BeginScene();
+        k = eng.SetProxy(g_dev, mesh, err) && eng.SetProxy(g_dev, RtLampProxy::Mesh{}, err, true) && eng.Begin(g_dev);
+        if (k) k = eng.RenderShadowTile(g_dev, lamps[0].law.pos, 0, 64.0f, err), eng.End(g_dev);
+        g_dev->EndScene();
+        k = k && pass(false, clear);
+        bool whole = k;
+        for (uint32_t i = 0; k && i < count; i++) {
+            float law[3];
+            GpuLampLaw::Eval(lamps[0].law, tx[i].pos, tx[i].nrm, GpuLampLaw::WallReach(tx[i].nrm, prm.reachOn) * rooms[tx[i].slot].lamp[0][1], law);
+            const float ls = (law[2] + law[1]) + law[0];
+            if (!(ls > 1e-4f)) continue;
+            const float was = ((lawSh[0][i * 4 + 2] + lawSh[0][i * 4 + 1]) + lawSh[0][i * 4]) / ls, now = ((clear[i * 4 + 2] + clear[i * 4 + 1]) + clear[i * 4]) / ls;
+            shadedBefore = shadedBefore || was < 0.5f;
+            whole = whole && now > 0.99f;
+        }
+        Check(whole && shadedBefore, "physical: an empty open-top proxy leaves the tiles without occluders, not the outdoor proxy's: " + err);
+        g_dev->BeginScene();
+        ok = eng.SetProxy(g_dev, RtLampProxy::Mesh{}, err) && eng.SetProxy(g_dev, mesh, err, true) && eng.Begin(g_dev);
+        if (ok) ok = eng.RenderShadowTile(g_dev, lamps[0].law.pos, 0, 64.0f, err) && eng.SetBlockers(g_dev, table, err), eng.End(g_dev);
+        g_dev->EndScene();
+    }
     if (pvb) pvb->Release();
     if (uvb) uvb->Release();
     Check(ok, "physical: the per-lamp passes: " + err);

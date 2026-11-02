@@ -8,6 +8,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <set>
+#include <tuple>
+#include <utility>
 #include <vector>
 #include "gpu_lamp_law.h"
 #include "inner_retry.h"
@@ -131,6 +134,53 @@ inline const char* EditRefusal(const std::vector<RoomFact>& rooms, int& at) {
     }
     at = -1;
     return any ? nullptr : "no story of the lot found";
+}
+
+// The rooms (tracker, story, id) whose game's maps lack a lamp edit taken without their solve: the rooms listing the lamp, its
+// own room and every room 0 of stories 0 .. 7 (each draws the lot's lamps by reach), and any map that drew the lamp since. A
+// room's next solve forgets it (Solved); a room whose map falls back to the game's is sent to its solve (Take, TakeAll)
+struct TouchedRooms {
+    using Key = std::tuple<uintptr_t, int, int>;
+    std::set<Key> rooms;
+    void Note(const Key& k) {
+        if (rooms.size() < 4096) rooms.insert(k);
+    }
+    void NoteEdit(uintptr_t tracker, int story, const std::vector<std::pair<int, int>>& listing, int reg) {
+        for (const auto& [s, id] : listing) Note({tracker, s, id});
+        if (reg > 0) Note({tracker, story, reg});
+        for (int s = 0; s <= 7; s++) Note({tracker, s, 0});
+    }
+    void Solved(const Key& k) { rooms.erase(k); }
+    bool Take(const Key& k) { return rooms.erase(k) != 0; }
+    std::vector<Key> TakeAll() {
+        std::vector<Key> all(rooms.begin(), rooms.end());
+        rooms.clear();
+        return all;
+    }
+};
+
+// (LampMarkFilter) a light entry's update as an edit: -1 none, 0 a value, 1 a move, 2 into another room. A move is moveMin or
+// more; physically a shorter step is one only while an edit of the lamp goes on (a slow drag's steps), never an animated
+// lamp's wobble (which would keep the fast shadows and rewrite the directional maps at every update)
+inline int EditKind(bool otherRoom, float d2, float moveMin, bool valueChanged, bool physical, bool editing) {
+    if (otherRoom) return 2;
+    if (d2 > moveMin * moveMin) return 1;
+    if (valueChanged) return 0;
+    return physical && editing && d2 > 1e-6f ? 1 : -1;
+}
+// (LampMarkFilter, an occluder mark) a light new to the lot: no update of it seen yet, and absent from the lot's registry
+// snapshot (OutdoorDelta::LotLamps, read every 250 ms) while that snapshot is of its lot. A lamp already in it is an old one
+// whose entry never updated: its neighbours' marks stay the game's
+inline bool NewLampEvidence(bool seen, bool snapshotOfLot, bool inSnapshot) { return !seen && snapshotOfLot && !inSnapshot; }
+// (LampMarkFilter, an occluder mark) the occluder is the lamp's own object: its point (x, z) lies within nearM of the lamp's head
+// now (horizontally), and moved as the head did since both were last seen (within tol), when its point was seen before. An
+// object moved near a lamp, or a still one next to a lamp whose values change, is not
+inline bool OwnObjectStep(bool hadPoint, const float occWas[2], const float occNow[2], const float lampWas[3], const float lampNow[3], float tol, float nearM) {
+    const float nx = occNow[0] - lampNow[0], nz = occNow[1] - lampNow[2];
+    if (!(nx * nx + nz * nz <= nearM * nearM)) return false;
+    if (!hadPoint) return true;
+    const float dx = (occNow[0] - occWas[0]) - (lampNow[0] - lampWas[0]), dz = (occNow[1] - occWas[1]) - (lampNow[2] - lampWas[2]);
+    return dx * dx + dz * dz <= tol * tol;
 }
 
 } // namespace PhysLampPick

@@ -300,6 +300,20 @@ lamp's position, not on its colour or intensity.
    whose solve had none on: the colour alone until the settle's solve gathers it). The settle stays for the normalisation (`+0x160`) and what the base holds (a stairwell's bounce and fill). Log `physical <kind>:
    ambient taken again in N of M rooms in X ms, no room solved (K with another normalisation from their solve); story S room
    R: why` (once a second during a drag). `outdoor_delta_test` 93 checks, `rt_lamps_test` 73.
+26. Physical model, review fixes (02/11): a room whose map falls back to the game's after a lamp edit taken without its solve
+   is sent to one (`OutdoorDelta::SolveTouched`, `PhysLampPick::TouchedRooms`): the rooms listing the lamp, its own room, every
+   room 0 of stories 0 to 7 and every map that drew it are noted at the edit and forgotten at their next solve's end; a failed
+   physical draw (rooms > 0 or room 0, including more than 64 lamps), a kept solve dropped, capture or Real-time outdoor lamps
+   off, the replica model and another active lot send them (`physical: N rooms shown from the game's maps again ...`). A step
+   under 10 cm is a move only while a drag goes on (`PhysLampPick::EditKind`): an animated lamp's wobble takes the game's path.
+   An occluder mark is dropped only for the lamp's own object (its point within 0.5 m of the head and moved with it,
+   `OwnObjectStep`; UNVERIFIED that every lamp object lies that close) or a new lamp absent from the registry snapshot
+   (`NewLampEvidence`). The blocker table is built once per kept room or room-0 record (in their bytes) and its texture is
+   4096 wide, only taller, uploaded only when another table is bound. An object removal (`0x006C7610`) reads the lamp snapshot
+   again after the next room update, and the directional maps' job reads it again before calling the game's step. The ambient
+   probe flag is per thread; `RetakeAmbient` writes nothing when the room's state or ambient changed during the probe. An
+   empty open-top proxy leaves the tiles without occluders, and a failed upload is tried again 5 s later.
+   `outdoor_delta_test` 97 checks, `rt_lamps_test` 75.
 
 ## Settings
 
