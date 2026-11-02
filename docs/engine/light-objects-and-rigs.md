@@ -73,6 +73,11 @@ to 0, the other two to the half extents +0x1A0) and `dir` is the normalised dire
 point, in the light's axes. There is no `N.L` term. An area light therefore lights only the side its third axis points
 away from. Apex's per-pixel lamps take that facing as the light's cone
 ([objects-and-rigs.md](../features/night-lighting/objects-and-rigs.md#per-pixel-patch)).
+TubeLight room law (`0x006BFA70` over `0x006BD100`, dumpbin 02/11): `E = colour x max(0, N.l) x min(k2 x range x intensity /
+(k1 x d^2), cap)`, the facing after the cap, where `d` and `l` go to the nearest point of the segment from the position
+(+0x120) to the end +0x170 (the end when (end - pos) . (p - pos) exceeds the square of +0x1A0, its length). The normal's w
+wraps N.l as for the bare bulb (`N.l (1 - w) + w`; 0 in the room solves). Tubes of the test lot: a 1 m segment straight up,
+k2 x range x intensity / k1 = 3.375 (fitted from probe dumps; GPU room lamps, `gpu-room-lamps.md` item 12).
 
 Light vtable functions used by the engine and Apex:
 

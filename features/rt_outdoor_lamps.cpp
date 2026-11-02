@@ -235,9 +235,10 @@ struct LampRead {
     float axis4[3] = {}, off4 = 0.0f, scale4 = 0.0f;
     float a1[3] = {}, a2[3] = {}, o1 = 1.0f, o2 = 1.0f, S[3] = {};
     float areaShare = 1.0f; // an area light (9, 10): the share of the ground it faces (TerrainBakeRule)
+    float tubeEnd[3] = {}, tubeLen = 0.0f; // a TubeLight (6): its end B +0x170 and its length +0x1A0 (GpuLampLaw::Tube)
 };
 // What a TubeLight's share reads (FUN_006bd100, its evaluation 0x006BFA70's colour: min(Cmax, k2 x range +0x130 x intensity
-// +0x10 / (k1 d^2)) to the capsule from +0x120 to +0x170 of radius +0x1A0, times its colour +0xE0; dumpbin 02/11): the raw
+// +0x10 / (k1 d^2)) to the segment from +0x120 to +0x170 of length +0x1A0, times its colour +0xE0; dumpbin 02/11): the raw
 // values. POD (SEH)
 bool ReadTubeShare(uintptr_t L, uint32_t out[10]) {
     __try {
@@ -280,6 +281,9 @@ bool ReadLamp(uintptr_t L, LampRead& r) {
             r.o1 = *reinterpret_cast<const float*>(p + 0x174);
             r.o2 = *reinterpret_cast<const float*>(p + 0x170);
             r.f.unmodelled = !RtLampModel::ShadedModelled(r.a1, r.a2, r.o1, r.o2);
+        } else if (r.f.type == 6) {
+            for (int i = 0; i < 3; i++) r.tubeEnd[i] = reinterpret_cast<const float*>(p + 0x170)[i];
+            r.tubeLen = *reinterpret_cast<const float*>(p + 0x1A0);
         } else if (TerrainBakeRule::AreaType(r.f.type)) {
             r.areaShare = TerrainBakeRule::AreaGroundShare(*reinterpret_cast<const float*>(p + TerrainBakeRule::kAreaAxisYOffset));
         }
@@ -344,6 +348,11 @@ void ToLaw(const LampRead& r, const GameConsts& g, const Xform& xf, bool reachOn
             DirToLot(xf, r.a1, a1);
             GpuLampLaw::ShadedCone(L, a1, g.s5, r.o1, g.s5, r.o2, r.S);
         }
+    } else if (r.f.type == 6) { // (a tube: its segment, GpuLampLaw::Tube)
+        float b[3], s[3];
+        ToLot(xf, r.tubeEnd, b);
+        for (int i = 0; i < 3; i++) s[i] = b[i] - L.pos[i];
+        GpuLampLaw::TubeShape(L, s, r.tubeLen);
     }
     L.r0sq = 1e30f, L.invR2 = 0.0f;
     if (reachOn) {
@@ -1103,7 +1112,11 @@ RtLampGpu::DeviceCalls DeviceCallsOfGame() { return GameCalls(); }
 bool WorldLaw(uintptr_t light, uint64_t lot, bool reachOn, GpuLampLaw::Lamp& out, int& type, int& regRoom) {
     LampRead r;
     if (!ReadLamp(light, r)) return false;
-    const bool cls = r.f.type == 3 || r.f.type == 4 || r.f.type == 5 || r.f.type == 11;
+    // (a tube: a segment the law reads, else its colour alone, ColourLaw; Real-time outdoor lamps' own draw takes no tube, Drawn)
+    const float* e = r.tubeEnd;
+    const float s2 = (e[0] - r.pos[0]) * (e[0] - r.pos[0]) + (e[1] - r.pos[1]) * (e[1] - r.pos[1]) + (e[2] - r.pos[2]) * (e[2] - r.pos[2]);
+    const bool tube = r.f.type == 6 && std::isfinite(s2) && s2 > 1e-6f && std::isfinite(r.tubeLen) && r.tubeLen >= 0.0f && r.tubeLen < 1e3f;
+    const bool cls = r.f.type == 3 || r.f.type == 4 || r.f.type == 5 || r.f.type == 11 || tube;
     if (!cls || r.f.unmodelled || r.f.lot == 0 || r.f.lot != lot || !(r.f.flags & 0x01)) return false;
     Xform id{};
     for (int k = 0; k < 4; k++) id.r[k][k] = 1.0f;
@@ -2142,7 +2155,7 @@ void Frame(IDirect3DDevice9* dev) {
             if (!k.colourOnly) {
                 GpuLampLaw::Lamp now;
                 if (WorldLaw(k.light, g_lotId, false, now, type, reg)) {
-                    const bool moved = std::fabs(now.pos[0] - k.pos[0]) > 1e-4f || std::fabs(now.pos[1] - k.pos[1]) > 1e-4f || std::fabs(now.pos[2] - k.pos[2]) > 1e-4f;
+                    const bool moved = GpuLampLaw::Moved(now, k.law, 1e-4f); // (a tube: its end too)
                     s.kLaws[l] = moved ? k.law : now, s.kOk[l] = 1;
                 }
             } else {

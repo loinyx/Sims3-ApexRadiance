@@ -2257,8 +2257,8 @@ void ClearKept() {
     g_keptBytes = 0;
     g_keptFull = false;
 }
-// The law a light is kept with (any thread): the GPU's law (RtOutdoorLamps::WorldLaw), else its colour alone
-// (RtOutdoorLamps::ColourLaw: a TubeLight, whose evaluation 0x006BFA70 is its colour +0xE0 x a share its colour does not
+// The law a light is kept with (any thread): the GPU's law (RtOutdoorLamps::WorldLaw; a TubeLight's: GpuLampLaw::Tube), else its
+// colour alone (RtOutdoorLamps::ColourLaw: a TubeLight without a segment, whose evaluation 0x006BFA70 is its colour +0xE0 x a share its colour does not
 // change); false: it has neither (its light stays in the base)
 bool LawOfLight(uintptr_t light, uint64_t lot, KeptLamp& kl) {
     int type = 0, reg = -1;
@@ -2284,7 +2284,7 @@ bool LawNow(const KeptLamp& kl, uint64_t lot, GpuLampLaw::Lamp& law, bool& moved
     if (!LawOfLight(kl.light, lot, now) || now.colourOnly != kl.colourOnly) return false;
     law = now.law;
     moved = kl.colourOnly ? now.geo != kl.geo && (now.law.colour[0] + now.law.colour[1] + now.law.colour[2]) > 0.0f
-                          : std::fabs(now.pos[0] - kl.pos[0]) > 1e-4f || std::fabs(now.pos[1] - kl.pos[1]) > 1e-4f || std::fabs(now.pos[2] - kl.pos[2]) > 1e-4f;
+                          : GpuLampLaw::Moved(now.law, kl.law, 1e-4f);
     return true;
 }
 // The law at a sample (position, then normal at +4): the GPU's, or the colour alone
@@ -2715,7 +2715,7 @@ void CarryOff(KeptRoom& k, uint64_t key) {
         if (!lampWhy) {
             KeptLamp now;
             if (!LawOfLight(kl->light, k.lot, now) || now.colourOnly != kl->colourOnly) lampWhy = "it has no law now";
-            else if (kl->colourOnly ? now.geo != kl->geo : std::fabs(now.pos[0] - kl->pos[0]) > 1e-4f || std::fabs(now.pos[1] - kl->pos[1]) > 1e-4f || std::fabs(now.pos[2] - kl->pos[2]) > 1e-4f)
+            else if (kl->colourOnly ? now.geo != kl->geo : GpuLampLaw::Moved(now.law, kl->law, 1e-4f))
                 lampWhy = "it moved or its shape changed";
         }
         auto& rooms = g_takenOff[kl->light];

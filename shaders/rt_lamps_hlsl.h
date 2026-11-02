@@ -146,6 +146,22 @@ float3 Law(LampRegs L, float3 p, float3 n, float wallReach) {
     const float3 S = L.spill.xyz;
     return (S - S * t + t) * s * L.col.xyz;
 }
+// gpu_lamp_law.h Tube (a TubeLight; sc2 = gOff.y = kTube): its light from the segment A (pos) .. A + axis, len^2 = axis.w; no reach (the
+// kept parts draw it with none)
+float3 TubeLaw(LampRegs L, float3 p, float3 n) {
+    const float3 v = p - L.pos.xyz, s = L.axis.xyz;
+    const float t = dot(s, v);
+    const float3 e = 0.0 > t ? v : (t > L.axis.w ? v - s : v - (t / dot(s, s)) * s);
+    const float d2 = max(dot(e, e), 1e-4);
+    const float inv = rsqrt(d2);
+    const float facing = max(-dot(n, e) * inv, 0.0);
+    return min((inv * inv) * L.pos.w, L.col.w) * facing * L.col.xyz;
+}
+// A kept part's law (lamp 0): the colour alone (gA.z 1), a tube's or the GPU's
+float3 KeptLaw(float3 p, float3 n) {
+    const LampRegs L = ReadLamp(0);
+    return gA.z > 0.5 ? gCol[0].rgb : L.off.y < -0.5 ? TubeLaw(L, p, n) : Law(L, p, n, 0.0);
+}
 
 // The atlas along direction d from lamp tile k (m): x = the nearest surface's distance, y = how far its plane passes from the
 // lamp; dc = the direction of that texel's centre (the receiver's own depth is taken along it, so a surface and its own
@@ -485,7 +501,7 @@ R"RAW(// ---------------------------------------------------------------- GPU ro
 // Every operation mirrors rt_lamp_model.h KeptAdd / KeptTexel: keep them in step.
 // AccKeptPS     one point per (kept texel, lamp) at the texel's place in the sum's layout (A32B32G32R32F, added: blend one,
 //               one); the lamp in gPos[0] .. gSpill[0], gA.y the room's threshold, gA.z 1: the law is the
-//               lamp's colour alone (gCol[0], a TubeLight). p = (sample position, bits: 1 the early-out, 4 the soft light cut ran), n = (sample normal, mult), base = (A, B, thrScale, 0): mult x fade(law x A) x B
+//               lamp's colour alone (gCol[0], a TubeLight without a segment; KeptLaw). p = (sample position, bits: 1 the early-out, 4 the soft light cut ran), n = (sample normal, mult), base = (A, B, thrScale, 0): mult x fade(law x A) x B
 // ComposeKeptPS one point per kept texel at its place in the map (or in the wall layout): KeptTexel on base + the sum, packed
 //               as the game's pack. p = (base rgb, dither), n = (ramp x ambient rgb, ramp; a roofless texel: its alpha),
 //               base = (norm, k, the alpha floor, roofed 0/1), mask.xy = its place in the sum's layout (gD.zw: 1 / its size)
@@ -493,7 +509,7 @@ R"RAW(// ---------------------------------------------------------------- GPU ro
 // BlockKeptPS   a blurred wall block from the layout into the map: tc0 = the layout pixel, tc1 = (its first and last rows in the
 //               layout, rows beyond above 0/1, below 0/1): an edge row with nothing beyond it from the rows-only chain (sSrc2)
 float4 AccKeptPS(TexelIn i) : COLOR0 {
-    const float3 law = gA.z > 0.5 ? gCol[0].rgb : Law(ReadLamp(0), i.p.xyz, i.n.xyz, 0.0); // (gA.z: the colour alone, a TubeLight)
+    const float3 law = KeptLaw(i.p.xyz, i.n.xyz);
     float3 c = law * i.base.x;
     const float thr = gA.y;
     const float cs = (c.b + c.g) + c.r;
@@ -544,7 +560,7 @@ R"RAW(// ---------------------------------------------------------------- GPU ro
 //              light left in the base) takes ExitAlpha(mask.z + its y) as its alpha
 sampler2D sAcc2 : register(s3);
 float3 KeptLight(TexelIn i) {
-    const float3 law = gA.z > 0.5 ? gCol[0].rgb : Law(ReadLamp(0), i.p.xyz, i.n.xyz, 0.0);
+    const float3 law = KeptLaw(i.p.xyz, i.n.xyz);
     float3 c = law * i.base.x;
     const float thr = gA.y;
     const float cs = (c.b + c.g) + c.r;
@@ -559,7 +575,7 @@ float3 KeptLight(TexelIn i) {
 }
 float KeptWrapLum(TexelIn i) {
     const float3 toL = normalize(gPos[0].xyz - i.p.xyz);
-    return Lum3(gA.z > 0.5 ? gCol[0].rgb : Law(ReadLamp(0), i.p.xyz, toL, 0.0));
+    return Lum3(KeptLaw(i.p.xyz, toL));
 }
 float4 AccKept0PS(TexelIn i) : COLOR0 { return float4(KeptLight(i), i.mask.x != 0 ? KeptWrapLum(i) * i.mask.x : 0.0); }
 float4 AccKept0XPS(TexelIn i) : COLOR0 { return float4(i.mask.y != 0 ? KeptWrapLum(i) * i.mask.y : 0.0, i.mask.z > 0.5 ? Lum3(KeptLight(i)) : 0.0, 0, 0); }

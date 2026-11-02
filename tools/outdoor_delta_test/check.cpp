@@ -11,6 +11,7 @@
 #include <cstring>
 #include <random>
 #include <vector>
+#include <xmmintrin.h>
 #include "features/outdoor_delta_model.h"
 #include "features/rt_lamp_model.h"
 #include "features/room_lamp_move.h"
@@ -709,6 +710,89 @@ void OpenAboveChecks() {
     Check(open == std::vector<int>{2}, "open to above: a room floored above but along one wall keeps its ceiling");
 }
 
+// ---- A TubeLight's law (gpu_lamp_law.h Tube) against the game's code: 0x006BFA70 over 0x006BD100 as dumpbin gives them (Steam
+// 1.67.2, read 02/11), instruction by instruction with the same SSE approximations (rsqrtps + 2 Newton steps, rcpps + 1) ----
+namespace GameTube {
+inline float Rsqrt2(float d2) { // 0x006BD181 .. 0x006BD1D9
+    const float y0 = _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(d2)));
+    const float y1 = (1.0f - y0 * y0 * d2) * (0.5f * y0) + y0;
+    return (1.0f - y1 * y1 * d2) * (0.5f * y1) + y1;
+}
+// the light at p (normal n, w 0) of a tube from A to B of length len (+0x1A0), range x intensity ri, colour E
+void Eval(const float A[3], const float B[3], float len, float ri, const float E[3], float k1, float k2, float cmax, const float p[3], const float n[3], float out[3]) {
+    const float s[3] = {B[0] - A[0], B[1] - A[1], B[2] - A[2]}, v[3] = {p[0] - A[0], p[1] - A[1], p[2] - A[2]};
+    const float t = (s[2] * v[2] + s[1] * v[1]) + s[0] * v[0];
+    float e[3];
+    if (0.0f > t) std::memcpy(e, v, sizeof e);
+    else if (t > len * len)
+        for (int i = 0; i < 3; i++) e[i] = p[i] - B[i];
+    else {
+        const float ss = (s[2] * s[2] + s[1] * s[1]) + s[0] * s[0];
+        for (int i = 0; i < 3; i++) e[i] = v[i] - t * s[i] / ss;
+    }
+    const float d2 = (e[2] * e[2] + e[1] * e[1]) + e[0] * e[0];
+    const float y = Rsqrt2(d2), d = d2 == 0.0f ? 0.0f : y * d2;
+    const float x = d * d * k1, r = _mm_cvtss_f32(_mm_rcp_ss(_mm_set_ss(x))), inv = (2.0f - x * r) * r;
+    float val = k2 * (ri * inv);
+    if (val > cmax) val = cmax;
+    float dir[3];
+    for (int i = 0; i < 3; i++) dir[i] = y * e[i];
+    const float dot = ((0.0f - dir[2]) * n[2] + (0.0f - dir[1]) * n[1]) + (0.0f - dir[0]) * n[0];
+    const float f = std::max(dot * 1.0f + 0.0f, 0.0f);
+    for (int i = 0; i < 3; i++) out[i] = f * (val * E[i]);
+}
+} // namespace GameTube
+void TubeChecks() {
+    std::mt19937 rng(606);
+    std::uniform_real_distribution<float> U(0.0f, 1.0f);
+    const float k1 = 1.0f, k2 = 0.075f, cmax = 2.0f;
+    long n = 0, within = 0, lit = 0;
+    float worst = 0.0f;
+    for (int lamp = 0; lamp < 400; lamp++) {
+        const float A[3] = {10.0f * U(rng), 1.0f + 2.0f * U(rng), 10.0f * U(rng)};
+        float dirv[3] = {U(rng) - 0.5f, U(rng) - 0.5f, U(rng) - 0.5f};
+        const float dl = std::sqrt(dirv[0] * dirv[0] + dirv[1] * dirv[1] + dirv[2] * dirv[2]) + 1e-6f, size = lamp % 4 ? 0.3f + 1.7f * U(rng) : 1.0f;
+        const float B[3] = {A[0] + dirv[0] / dl * size, A[1] + dirv[1] / dl * size, A[2] + dirv[2] / dl * size};
+        const float len = size * (lamp % 5 == 0 ? 0.9f : 1.0f), ri = (10.0f + 90.0f * U(rng)) * (0.5f + 1.5f * U(rng));
+        const float E[3] = {U(rng), U(rng), U(rng)};
+        GpuLampLaw::Lamp L;
+        std::memcpy(L.pos, A, sizeof A);
+        L.W = k2 * ri / k1, L.cmax = cmax;
+        std::memcpy(L.colour, E, sizeof E);
+        const float s[3] = {B[0] - A[0], B[1] - A[1], B[2] - A[2]};
+        GpuLampLaw::TubeShape(L, s, len);
+        for (int j = 0; j < 500; j++) {
+            const float p[3] = {A[0] + 8.0f * (U(rng) - 0.5f), A[1] + 4.0f * (U(rng) - 0.5f), A[2] + 8.0f * (U(rng) - 0.5f)};
+            float nv[3] = {U(rng) - 0.5f, U(rng) - 0.5f, U(rng) - 0.5f};
+            const float nl = std::sqrt(nv[0] * nv[0] + nv[1] * nv[1] + nv[2] * nv[2]) + 1e-6f;
+            for (float& c : nv) c /= nl;
+            float game[3], law[3];
+            GameTube::Eval(A, B, len, ri, E, k1, k2, cmax, p, nv, game);
+            GpuLampLaw::Eval(L, p, nv, 0.0f, law);
+            if (!std::isfinite(game[0]) || game[0] + game[1] + game[2] > 1e30f) continue; // (a point on the segment)
+            const float dmax = std::max({std::fabs(game[0] - law[0]), std::fabs(game[1] - law[1]), std::fabs(game[2] - law[2])});
+            const float rel = dmax / std::max({game[0], game[1], game[2], 1e-3f});
+            n++, lit += game[0] + game[1] + game[2] > 0.0f;
+            within += dmax <= 2.0f / 255.0f && rel < 1e-3f;
+            worst = std::max(worst, rel);
+        }
+    }
+    std::printf("tube law vs the game's code: %ld points (%ld lit), %ld within 2/255 and 1e-3 relative, worst relative %.2g\n", n, lit, within, worst);
+    Check(n > 150000 && lit > n / 4 && within == n, "TubeLight: the law is the game's evaluation (0x006BFA70) at every point");
+    // the shaders read it as a tube from the off row's y (gOff.y), a move of its end alone is a move, its law is the game's (A x 1)
+    GpuLampLaw::Lamp a;
+    const float s[3] = {0.0f, 1.0f, 0.0f}, s2[3] = {0.0f, 0.0f, 1.0f}, p[3] = {0.1f, 0.0f, 0.0f}, wall[3] = {-1.0f, 0.0f, 0.0f};
+    GpuLampLaw::TubeShape(a, s, 1.0f);
+    GpuLampLaw::Lamp b = a;
+    float rows[5][4];
+    GpuLampLaw::Rows(a, rows);
+    GpuLampLaw::TubeShape(b, s2, 1.0f);
+    GpuLampLaw::Lamp bulb;
+    Check(rows[3][1] == GpuLampLaw::kTube && rows[2][3] == 1.0f && GpuLampLaw::IsTube(a) && !GpuLampLaw::IsTube(bulb), "TubeLight: its rows carry the tube mark and len^2");
+    Check(GpuLampLaw::Moved(a, b, 1e-4f) && !GpuLampLaw::Moved(a, a, 1e-4f) && GpuLampLaw::Moved(a, bulb, 1e-4f), "TubeLight: a turn about its position is a move");
+    Check(RoomLampMove::GameOverLaw(a, p, wall) == 1.0f, "TubeLight: its law has no mount floor (GameOverLaw 1)");
+}
+
 int main() {
     std::mt19937 rng(20261013);
     std::uniform_real_distribution<float> U(0.0f, 1.0f);
@@ -1000,6 +1084,7 @@ int main() {
         Check(raised > 0 && back, "moved lamps: the law x GameOverLaw x the mount factor is the law (a wall texel the law raises)");
         Check(floorOne && farOne, "moved lamps: GameOverLaw is 1 where the law raises nothing");
     }
+    TubeChecks();
     BasisChecks();
     OpenAboveChecks();
     std::printf("%d checks, %d failures\n", checks, failures);

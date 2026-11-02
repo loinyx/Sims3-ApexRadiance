@@ -66,12 +66,12 @@ bool HandlesLamp(uintptr_t treeLevel, uintptr_t light, int room);
 // room lamps: an indoor lamp's edit skips the solves only when every room 0 listing it is covered so)
 bool CoversLamp(const void* room0, uintptr_t light);
 // Any thread: the law the GPU draws `light` with, in world space (the lamp classes 3, 4, 5 and 11 of lot `lot`, alive, a
-// shade the law describes); false for any other light. regRoom = the room it is registered in (0 outdoors). For the
+// shade the law describes; a TubeLight 6 with a segment, GpuLampLaw::Tube, which only the kept rooms draw); false for any other light. regRoom = the room it is registered in (0 outdoors). For the
 // developer's room lamp probe (OutdoorDelta::SetRoomProbe)
 bool WorldLaw(uintptr_t light, uint64_t lot, bool reachOn, GpuLampLaw::Lamp& out, int& type, int& regRoom);
-// Any thread (GPU room lamps): a lamp of lot `lot` with no GPU law whose evaluation is its colour (+0xE0) times a share its
+// Any thread (GPU room lamps): a lamp of lot `lot` WorldLaw gives no law (a tube without a segment) whose evaluation is its colour (+0xE0) times a share its
 // colour does not change: a TubeLight (type 6, 0x006BFA70). colour: that colour now; geo: a signature of what the share reads
-// (intensity, the tube's ends and radius, range): an edit that changes it is not a colour edit. False for any other light
+// (intensity, the tube's ends and length, range): an edit that changes it is not a colour edit. False for any other light
 bool ColourLaw(uintptr_t light, uint64_t lot, float colour[3], uint64_t& geo);
 // Any thread: the story tracker of the lot this path draws when `room` belongs to it (else 0; for the room lamp probe's
 // occluders, LevelLightShare::ExportLotProxy)

@@ -41,7 +41,7 @@ struct Entry {
     std::vector<char> lawOk;
     std::vector<std::pair<uint32_t, uint32_t>> expect; // (y << 16 | x, the game's texel) for the self-check
     std::vector<RtLampGpu::KeptMapData::RoomLamp> roomLamps;
-    std::vector<char> colourOnly; // per lamp of `lamps`: its law is its colour alone (a TubeLight)
+    std::vector<char> colourOnly; // per lamp of `lamps`: its law is its colour alone (a TubeLight without a segment)
     LARGE_INTEGER relitAt{};
     uint32_t relitFrame = 0;
 };
@@ -230,7 +230,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
             // (switched off, its colour 0: a switch, whatever its share's inputs read then)
             if (rl.colourOnly ? RtOutdoorLamps::ColourLaw(rl.light, e.lot, colour, geo) && geo != rl.geo && colour[0] + colour[1] + colour[2] > 0.0f
                               : RtOutdoorLamps::WorldLaw(rl.light, e.lot, false, now, type, reg) &&
-                                    (std::fabs(now.pos[0] - rl.pos[0]) > kMoved || std::fabs(now.pos[1] - rl.pos[1]) > kMoved || std::fabs(now.pos[2] - rl.pos[2]) > kMoved))
+                                    GpuLampLaw::Moved(now, rl.law, kMoved))
                 movedLamps.push_back(&rl);
         }
         const bool moved = !movedLamps.empty();

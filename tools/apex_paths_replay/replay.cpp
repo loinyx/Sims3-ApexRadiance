@@ -642,6 +642,8 @@ int main(int argc, char** argv) {
     Fin mMove0{"move worker, room 0 (inner lamps)"}, mMove0T{"move worker, room 0, T lines (lit)"}, mMove0Ev{"move worker, room 0, with a recorded evaluation"},
         mMove0NoEv{"move worker, room 0, its record dropped"};
     std::map<std::string, long> m0Out;
+    Fin fLaw{"T/Z: dumped law x GameOverLaw vs the game's evaluation"}, fLawTube{"T/Z: the same, TubeLights (GpuLampLaw::Tube)"};
+    long lawElsewhere = 0;
     int mvUnknown = 0, mvKey = -1, mvRoom = -1;
     float mvL[3] = {};
     std::vector<int> mvList;
@@ -729,6 +731,21 @@ int main(int argc, char** argv) {
         const char flags[2] = {static_cast<char>(s.f0), static_cast<char>(s.f1)};
         g_ctx.flags = flags;
         g_line = s.line;
+        if (s.tag == 'T' || s.tag == 'Z') { // the GPU law (the LIGHT line's, the lamp at that place) against the game's evaluation per entry
+            const auto lawIt = g_laws.find(s.light);
+            if (lawIt != g_laws.end()) {
+                const GpuLampLaw::Lamp& lw = lawIt->second;
+                if (std::fabs(lw.pos[0] - s.L[0]) + std::fabs(lw.pos[1] - s.L[1]) + std::fabs(lw.pos[2] - s.L[2]) > 1e-3f) lawElsewhere++;
+                else {
+                    float game[3], law[3];
+                    for (int i = 0; i < 3; i++) game[i] = s.hasEv ? s.ev.c0[i] : s.c0[i] / static_cast<float>(std::max(s.evals, 1));
+                    GpuLampLaw::Eval(lw, s.p, s.n, 0.0f, law);
+                    const float gol = RoomLampMove::GameOverLaw(lw, s.p, s.n);
+                    for (float& v : law) v *= gol;
+                    (GpuLampLaw::IsTube(lw) ? fLawTube : fLaw).Add(game, law, s.line);
+                }
+            }
+        }
         if (s.tag == 'M') { // (room 0) the floor mask's copies: the no-walls one is the law's luminance (N.l ignored), the walls-tested one x the game's wall test
             const auto lawIt = g_laws.find(s.light);
             if (!s.lawOk || lawIt == g_laws.end()) {
@@ -995,6 +1012,8 @@ int main(int argc, char** argv) {
     std::printf("\nthe move worker in room 0 (GPU room lamps stage 3b) at the recorded positions vs the measured part; out of its scope:\n");
     for (const auto& [why, n] : m0Out) std::printf("  %-60s %7ld\n", why.c_str(), n);
     for (const Fin* x : {&mMove0, &mMove0T, &mMove0Ev, &mMove0NoEv}) x->Print();
+    std::printf("\nthe GPU law at the recorded texels vs the game's evaluation (the lamp dumped at another place: %ld lines):\n", lawElsewhere);
+    for (const Fin* x : {&fLaw, &fLawTube}) x->Print();
     std::printf("\nIndoorShadow's other-room wall tests with the dumped walls (segments replayed %ld, left to the recorded answer %ld):\n", g_segReplayed, g_segRecorded);
     for (const Cmp* c : {&cSegKeep, &cSegPassed}) c->Print();
     std::printf("\nthe opening's outdoor total from the dumped fills (TF fills %ld, lights without a dumped law %ld):\n", tfFills, tfNoLaw);

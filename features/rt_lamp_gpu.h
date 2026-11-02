@@ -115,7 +115,7 @@ struct KeptMapData {
     int w = 0, h = 0, accW = 0, accH = 0;
     std::vector<TexelVertex> parts, texels, wallTexels, copies, restores;
     std::vector<uintptr_t> lamps;               // the lamp of each range of parts
-    std::vector<char> colourOnly;               // its law is its colour alone (a TubeLight)
+    std::vector<char> colourOnly;               // its law is its colour alone (a TubeLight without a segment)
     std::vector<std::pair<UINT, UINT>> ranges;  // first, count
     int layoutW = 0, layoutH = 0;
     std::vector<uint32_t> layout;               // the class-2 blocks before the blur with their rows beyond, layoutW x layoutH

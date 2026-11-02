@@ -10,6 +10,7 @@
 // street-lamp class), the spot (FUN_006bffb0) and the shaded lamp (FUN_006be1c0) times their cone blends
 // (docs/engine/light-objects-and-rigs.md, lamp_shape.h), and on outdoor wall texels Apex's realistic reach share
 // (lamp_reach.h). Every factor after that (walls, slabs, openings, the soft light cut, a lamp listed twice) is in vis.
+// A TubeLight (type 6, 0x006BFA70 over 0x006BD100, read 02/11 with dumpbin) has its own law (Tube below).
 #include "fast_math.h"
 #include <algorithm>
 #include <cmath>
@@ -43,9 +44,47 @@ inline float MountedNdl(float ndl, float plane, float ny) {
     return std::max(ndl, kMountFloor * wall * front * Sat(1.0f - plane * (1.0f / kMountReach)));
 }
 
+// A TubeLight (type 6): its evaluation 0x006BFA70 is E0 x min(Cmax, k2 x range x intensity.x / (k1 d^2)) x max(0, N.l)
+// (0x006BD100; the facing after the cap, [0x0107A538] = 1 and the normal's w taken as 0 as for the bare bulb), d and l to the
+// nearest point of the segment from its position A (+0x120) to its end B (+0x170): A when (B - A) . (p - A) < 0, B when it is
+// over len^2 (len +0x1A0, its length), else A + the projection. The law keeps it as a lamp with axis = B - A, sc1 = len^2 and
+// sc2 = kTube (no cone, no spill; reach from A, as ReachShare). No MountedNdl: LightEvalHook raises a wall texel near A after
+// the game's evaluation (in A), so the law is the game's evaluation itself (RoomLampMove::GameOverLaw 1).
+// Checked against the probe's hook colours of every TubeLight of dumps 135710 and 145922 (78048 texels, all within 2/255).
+constexpr float kTube = -1.0f;
+inline bool IsTube(const Lamp& L) { return L.sc2 < -0.5f; }
+inline void TubeShape(Lamp& L, const float s[3], float len) {
+    for (int i = 0; i < 3; i++) L.axis[i] = s[i], L.spill[i] = 0.0f;
+    L.sc1 = len * len, L.off1 = 0.0f, L.sc2 = kTube, L.off2 = 0.0f;
+}
+// Its place (and a tube's end) differs by more than eps from b's: a move
+inline bool Moved(const Lamp& a, const Lamp& b, float eps) {
+    bool m = IsTube(a) != IsTube(b);
+    for (int i = 0; i < 3; i++) m = m || std::fabs(a.pos[i] - b.pos[i]) > eps || (IsTube(a) && std::fabs(a.axis[i] - b.axis[i]) > eps);
+    return m || (IsTube(a) && std::fabs(a.sc1 - b.sc1) > eps);
+}
+inline void Tube(const Lamp& L, const float p[3], const float n[3], float wallReach, float out[3]) {
+    const float v[3] = {p[0] - L.pos[0], p[1] - L.pos[1], p[2] - L.pos[2]};
+    const float t = (L.axis[2] * v[2] + L.axis[1] * v[1]) + L.axis[0] * v[0];
+    const float k = t / ((L.axis[2] * L.axis[2] + L.axis[1] * L.axis[1]) + L.axis[0] * L.axis[0]);
+    float e[3];
+    for (int i = 0; i < 3; i++) e[i] = 0.0f > t ? v[i] : t > L.sc1 ? v[i] - L.axis[i] : v[i] - k * L.axis[i];
+    const float d2 = std::max(e[0] * e[0] + e[1] * e[1] + e[2] * e[2], 1e-4f);
+    const float inv = 1.0f / ApexMath::Sqrt(d2);
+    const float facing = std::max(-(n[0] * e[0] + n[1] * e[1] + n[2] * e[2]) * inv, 0.0f);
+    const float f = std::min((inv * inv) * L.W, L.cmax) * facing;
+    const float a2 = std::max(v[0] * v[0] + v[1] * v[1] + v[2] * v[2], 1e-4f), q = a2 * L.invR2;
+    float win = Sat(1.0f - q * q);
+    win *= win;
+    float share = std::min(win * ((1.0f / a2) * L.r0sq), 1.0f);
+    share = (share - 1.0f) * wallReach + 1.0f;
+    for (int c = 0; c < 3; c++) out[c] = f * share * L.colour[c];
+}
+
 // The lamp's light at a point of normal n, as the shader computes it (the same operations in the same order).
 // wallReach: the reach share's weight (1 on an outdoor wall pixel with the reach on, 0 otherwise).
 inline void Eval(const Lamp& L, const float p[3], const float n[3], float wallReach, float out[3]) {
+    if (IsTube(L)) return Tube(L, p, n, wallReach, out);
     float l[3] = {L.pos[0] - p[0], L.pos[1] - p[1], L.pos[2] - p[2]};
     const float plane = n[0] * l[0] + n[1] * l[1] + n[2] * l[2];
     const float d2 = std::max(l[0] * l[0] + l[1] * l[1] + l[2] * l[2], 1e-4f);

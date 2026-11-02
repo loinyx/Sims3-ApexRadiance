@@ -1872,6 +1872,10 @@ bool KeptGpuCheck() {
         for (float& c : L.colour) c = 0.4f + 0.6f * U(rng);
         GpuLampLaw::NoCone(L);
     }
+    { // (lamp 3: a TubeLight, its segment 1.3 m along x and up: KeptLaw's TubeLaw)
+        const float s[3] = {1.2f, 0.5f, 0.0f};
+        GpuLampLaw::TubeShape(laws[3], s, 1.3f);
+    }
     const auto packCpu = [](float c[4]) { return OutdoorDeltaModel::PackModel(c); };
     long n = 0, within1 = 0, maxDiff = 0, untouchedBad = 0;
     for (const int m : {1, 0}) { // a floor (copies, restores) and a class-2 wall atlas (blocks before the blur)
@@ -2313,8 +2317,12 @@ bool Room0KeptXCheck() {
                       RtLampGpu::Engine::MakeVb(g_dev, parts.data(), static_cast<UINT>(parts.size()), &pvb) &&
                       SUCCEEDED(g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &out, nullptr));
     long n = 0, exact = 0, maxDiff = 0, alphaLit = 0, alphaMax = 0;
-    for (int round = 0; made && round < 3; round++) {
+    for (int round = 0; made && round < 4; round++) {
         GpuLampLaw::Lamp laws[nk] = {kept[0], kept[1]};
+        if (round == 3) { // (the first a TubeLight standing 1 m tall: KeptLaw's TubeLaw, KeptWrapLum toward its position)
+            const float s[3] = {0.0f, 1.0f, 0.0f};
+            GpuLampLaw::TubeShape(laws[0], s, 1.0f);
+        }
         if (round == 1)
             for (GpuLampLaw::Lamp& L : laws) L.colour[0] *= 0.4f, L.colour[2] *= 1.7f, L.W *= 0.6f;
         if (round == 2) laws[0].colour[0] = laws[0].colour[1] = laws[0].colour[2] = 0.0f; // (switched off)
@@ -2365,7 +2373,7 @@ bool Room0KeptXCheck() {
     if (pvb) pvb->Release();
     if (out) out->Release();
     Check(made, "room-0 kept exit/mask buffers could not be made");
-    std::printf("  %ld texels over 3 rounds of laws (as kept, changed, one lamp off), %zu kept points of 2 exit lamps (one its colour alone): %.2f%% exact, "
+    std::printf("  %ld texels over 4 rounds of laws (as kept, changed, one lamp off, one a TubeLight), %zu kept points of 2 exit lamps (one its colour alone): %.2f%% exact, "
                 "largest difference %ld/255; %ld masked or exit ground texels with an alpha (up to %ld/255)\n",
                 n, parts.size(), n ? 100.0 * exact / n : 100.0, maxDiff, alphaLit, alphaMax);
     Check(n > 0 && maxDiff == 0, "room-0 kept exit/mask parts: the GPU's texels are the CPU's (0/255)");

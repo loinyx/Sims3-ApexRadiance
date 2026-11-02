@@ -227,7 +227,7 @@ struct Room0Export {
     };
     struct KeptLamp0 {
         uintptr_t light = 0;
-        bool colourOnly = false; // its law is its colour alone (a TubeLight)
+        bool colourOnly = false; // its law is its colour alone (a TubeLight without a segment)
         uint64_t geo = 0;        // (colourOnly) the signature of what its share reads
         float pos[3] = {};       // where it was
         GpuLampLaw::Lamp law;    // its law when kept
