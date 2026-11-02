@@ -13,6 +13,7 @@
 #include <vector>
 #include "features/outdoor_delta_model.h"
 #include "features/rt_lamp_model.h"
+#include "features/room_lamp_move.h"
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
 // map dither (its relight passes 0), but the compose shader keeps the input, so the harness still checks it
 namespace RoomMapDither {
@@ -768,6 +769,29 @@ int main() {
         const float Sr[3] = {1.6f, 0.4f, 0.2f}, pr[4] = {1.0f, 0.25f, 0.125f, 0.37f};
         RtLampModel::KeptTexel(Sr, Sr, pr, 1.0f, k, false, floorA, 0.0f, c);
         Check(c[0] == 1.0f && std::fabs(c[1] - 0.25f) < 1e-6f && std::fabs(c[2] - 0.125f) < 1e-6f && c[3] == 0.37f, "kept tail: a roofless texel keeps its hue and the solve's alpha");
+    }
+    { // (GPU room lamps stage 3b) a moved lamp's A is over the game's evaluation: x GameOverLaw it is over the law, which raises a
+      // wall texel's N.l itself (MountedNdl): law x GameOverLaw x the hook's MountFactor gives the law back (no cap, under 8x), a
+      // floor texel and a wall far from the lamp take 1
+        GpuLampLaw::Lamp L;
+        L.pos[0] = 0.15f, L.pos[1] = 1.6f, L.pos[2] = 0.0f, L.W = 2.0f, L.cmax = 1e6f;
+        L.colour[0] = 1.0f, L.colour[1] = 0.8f, L.colour[2] = 0.6f;
+        const float wall[3] = {1.0f, 0.0f, 0.0f}, up[3] = {0.0f, 1.0f, 0.0f};
+        bool back = true, floorOne = true, farOne = true;
+        long raised = 0;
+        for (int i = 0; i < 200; i++) {
+            const float p[3] = {0.0f, 0.2f + 0.015f * i, -1.5f + 0.015f * i};
+            float law[3];
+            GpuLampLaw::Eval(L, p, wall, 0.0f, law);
+            const float gol = RoomLampMove::GameOverLaw(L, p, wall), mf = RoomLampMove::MountFactor(p, wall, L.pos);
+            raised += gol < 1.0f ? 1 : 0;
+            if (mf < 8.0f) back = back && std::fabs(law[0] * gol * mf - law[0]) <= 1e-4f * law[0];
+            floorOne = floorOne && RoomLampMove::GameOverLaw(L, p, up) == 1.0f;
+            const float far[3] = {-0.5f, p[1], p[2]};
+            farOne = farOne && RoomLampMove::GameOverLaw(L, far, wall) == 1.0f;
+        }
+        Check(raised > 0 && back, "moved lamps: the law x GameOverLaw x the mount factor is the law (a wall texel the law raises)");
+        Check(floorOne && farOne, "moved lamps: GameOverLaw is 1 where the law raises nothing");
     }
     BasisChecks();
     std::printf("%d checks, %d failures\n", checks, failures);

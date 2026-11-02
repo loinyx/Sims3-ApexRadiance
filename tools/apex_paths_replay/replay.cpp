@@ -195,6 +195,7 @@ struct DumpRoom {
     bool indoor = false, yard = false, openings = false;
     std::vector<XCross> cross;
     std::vector<uintptr_t> same, lower, inner, innerUp;
+    std::map<uint32_t, float> innerNorm; // (XN) an inner lamp's source room normalisation (InnerNormScale)
     std::map<std::string, uint64_t> gridRole;
     std::map<int, uint64_t> floorStory;
     r3d::Room r3;
@@ -406,6 +407,8 @@ int main(int argc, char** argv) {
             R.level = I(t[2]), R.indoor = I(t[6]) != 0, R.yard = I(t[8]) != 0, R.openings = I(t[10]) != 0;
         } else if (k == "XC" && n >= 12) {
             R.cross.push_back({H(t[1]), I(t[3]), I(t[5]), H(t[7]), I(t[9]) != 0, F(t[11])});
+        } else if (k == "XN" && n >= 6) {
+            R.innerNorm[H(t[1])] = F(t[5]);
         } else if ((k == "XS" || k == "XL" || k == "XI" || k == "XU") && n >= 2) {
             (k == "XS" ? R.same : k == "XL" ? R.lower : k == "XI" ? R.inner : R.innerUp).push_back(H(t[1]));
         } else if ((k == "GRIDHASH" || k == "GRIDREF") && n >= 5) {
@@ -636,6 +639,9 @@ int main(int argc, char** argv) {
     long noCrossLevel = 0, crossLevels = 0, noInfo = 0;
     Fin mMoveOwn{"move worker, own lamps"}, mMoveForeign{"move worker, plain lamps of other rooms"}, mMoveT{"move worker, T lines (lit)"};
     long mvOut = 0, mvDayReach = 0, mvCut = 0;
+    Fin mMove0{"move worker, room 0 (inner lamps)"}, mMove0T{"move worker, room 0, T lines (lit)"}, mMove0Ev{"move worker, room 0, with a recorded evaluation"},
+        mMove0NoEv{"move worker, room 0, its record dropped"};
+    std::map<std::string, long> m0Out;
     int mvUnknown = 0, mvKey = -1, mvRoom = -1;
     float mvL[3] = {};
     std::vector<int> mvList;
@@ -911,6 +917,40 @@ int main(int argc, char** argv) {
         if (R.id == 0) { // (room 0) its lamps carried outdoors apart; out of the move worker's scope
             ((s.paths & 8) ? m0Other : s.hasEv && s.ev.set == 1 ? m0Inner : m0Own).Add(s.got, model, s.line);
             mvOut++;
+            // (GPU room lamps stage 3b) the move worker's room-0 part (room_lamp_move.h Part0At with the production InnerPassAt, at
+            // the recorded position) drawn as the GPU draws it (KeptAdd), the game's evaluation standing for the law; out of its
+            // scope (what LevelLightShare::Room0MovePath refuses, or what the dump lacks) counted by reason
+            const uintptr_t l = s.light;
+            const char* why0 = nullptr;
+            float reach = 1.0f;
+            const auto nk = R.innerNorm.find(s.light);
+            if (!R.hasInfo) why0 = "room 0 without Apex's record";
+            else if (!std::binary_search(info.inner.begin(), info.inner.end(), l)) why0 = "not a lamp of the record's inner list";
+            else if (std::binary_search(info.innerUp.begin(), info.innerUp.end(), l)) why0 = "a lamp of the story above (innerUp)";
+            else if (nk == R.innerNorm.end() || nk->second < 0.0f) why0 = "no source normalisation dumped (XN)";
+            else if (std::fabs(s.n[1]) < 0.5f && R.A("reach") != 0.0f) {
+                if (s.hasEv) reach = s.ev.reach; // (the lamp's range x intensity is not dumped: ReachShare's own answer)
+                else why0 = "a wall texel with realistic reach and no recorded evaluation";
+            }
+            if (why0) {
+                m0Out[why0]++;
+                continue;
+            }
+            const float ev = static_cast<float>(std::max(s.evals, 1));
+            float law[3];
+            for (int i = 0; i < 3; i++) law[i] = s.hasEv ? s.ev.c0[i] : s.c0[i] / ev;
+            float A = 0.0f, B = 0.0f, out[3] = {};
+            const bool spread = R.A("softOpeningEdges", 1) != 0.0f;
+            const auto pass = [&] {
+                GridWhy why{};
+                return InnerPassAt(info.innerGrid[0].get(), info.innerGrid[1].get(), s.L, s.p, spread, why);
+            };
+            if (RoomLampMove::Part0At(R.r3, s.f1 != 0, s.L, s.p, s.n, (law[2] + law[1]) + law[0], g_ctx.thr, reach, InnerLight::NormScale(nk->second, 1.0f, true), pass, A, B,
+                                      &mvUnknown))
+                RtLampModel::KeptAdd(law, A, B, 1.0f, ev, true, g_ctx.fade, g_ctx.thr, out);
+            mMove0.Add(s.got, out, s.line);
+            if (s.tag == 'T') mMove0T.Add(s.got, out, s.line);
+            (s.hasEv ? mMove0Ev : mMove0NoEv).Add(s.got, out, s.line);
             continue;
         }
         mAll.Add(s.got, model, s.line);
@@ -952,6 +992,9 @@ int main(int argc, char** argv) {
                 "daytime or reach factor: %ld, with the floor cut: %ld; unknown blocker vtables: %d):\n",
                 mvOut, mvDayReach, mvCut, mvUnknown);
     for (const Fin* x : {&mMoveOwn, &mMoveForeign, &mMoveT}) x->Print();
+    std::printf("\nthe move worker in room 0 (GPU room lamps stage 3b) at the recorded positions vs the measured part; out of its scope:\n");
+    for (const auto& [why, n] : m0Out) std::printf("  %-60s %7ld\n", why.c_str(), n);
+    for (const Fin* x : {&mMove0, &mMove0T, &mMove0Ev, &mMove0NoEv}) x->Print();
     std::printf("\nIndoorShadow's other-room wall tests with the dumped walls (segments replayed %ld, left to the recorded answer %ld):\n", g_segReplayed, g_segRecorded);
     for (const Cmp* c : {&cSegKeep, &cSegPassed}) c->Print();
     std::printf("\nthe opening's outdoor total from the dumped fills (TF fills %ld, lights without a dumped law %ld):\n", tfFills, tfNoLaw);

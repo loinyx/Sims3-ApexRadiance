@@ -12,6 +12,7 @@
 #include <vector>
 #include "fast_math.h"
 #include "gpu_lamp_law.h"
+#include "lamp_reach.h"
 #include "room_light_tests.h"
 
 namespace RoomLampMove {
@@ -35,6 +36,49 @@ inline void PartAt(const RoomLightTests::Room& r, bool built, const std::vector<
     const RoomLightTests::V Lv{L[0], L[1], L[2]}, pv{p[0], p[1], p[2]};
     A = MountFactor(p, n, L);
     B = RoomLightTests::GameShare(r, built, list, f0, f1, Lv, Lv, pv, unknownVt);
+}
+// The game's evaluation over the GPU law at a texel (p, n), for what the law adds of its own: on a wall texel the law raises N.l to
+// MountedNdl's floor (gpu_lamp_law.h Eval) where the game's evaluation does not (LightEvalHook raises it after, MountFactor), so
+// an A over the game's evaluation is taken over the law as A x this: min(N.l W / d^2, Cmax) / min(raised W / d^2, Cmax); 1 where
+// the law raises nothing. (Until stage 3b the moved parts' A was MountFactor over the law itself: such a wall texel took the
+// raise twice.)
+inline float GameOverLaw(const GpuLampLaw::Lamp& L, const float* p, const float* n) {
+    float l[3] = {L.pos[0] - p[0], L.pos[1] - p[1], L.pos[2] - p[2]};
+    const float plane = n[0] * l[0] + n[1] * l[1] + n[2] * l[2];
+    const float d2 = std::max(l[0] * l[0] + l[1] * l[1] + l[2] * l[2], 1e-4f);
+    const float inv = 1.0f / ApexMath::Sqrt(d2);
+    for (float& v : l) v *= inv;
+    const float ndl = GpuLampLaw::Sat(n[0] * l[0] + n[1] * l[1] + n[2] * l[2]), raised = GpuLampLaw::MountedNdl(ndl, plane, n[1]);
+    if (!(raised > ndl)) return 1.0f;
+    const float law = std::min(raised * (inv * inv) * L.W, L.cmax);
+    return law > 0.0f ? std::min(ndl * (inv * inv) * L.W, L.cmax) / law : 1.0f;
+}
+// (stage 3b) Realistic lamp reach's share of a lamp at L (w: range x intensity) on a texel (p, n), as LevelLightShare's
+// ReachShareImpl gives it in room 0's solve (wall texels only; 1 with the option off)
+inline float ReachAt(bool on, float w, const float* L, const float* p, const float* n) {
+    if (!on || !(ApexMath::Fabs(n[1]) < 0.5f)) return 1.0f;
+    float r0, R;
+    LampReach::Radii(w, r0, R);
+    const float dx = p[0] - L[0], dy = p[1] - L[1], dz = p[2] - L[2];
+    return LampReach::Share(ApexMath::Sqrt(dx * dx + dy * dy + dz * dz), r0, R);
+}
+// (stage 3b) Room 0's part of a lamp its record takes through an opening of its own story (LightEvalHook in room 0's solve: no
+// floor cut, no daytime curve, then InnerShadow), at a texel (p, n) for the lamp at L, from copies. A over the game's evaluation
+// (gameSum: its r + g + b there; the law x GameOverLaw stands for it): MountFactor x reach (ReachAt); the threshold early-out on
+// that colour returns false (no part); then pass x normK where pass > 0 (pass(): InnerPass at L, LevelLightShare::Room0PassAt,
+// asked only past the early-out). B: the game's wall test is skipped for such a lamp (GameWallTest), so its 3D test alone when
+// f1, the product dropped under K_DROP
+template <class Pass>
+inline bool Part0At(const RoomLightTests::Room& r, bool f1, const float* L, const float* p, const float* n, float gameSum, float thr, float reach, float normK,
+                    Pass&& pass, float& A, float& B, int* unknownVt) {
+    A = MountFactor(p, n, L) * reach;
+    if (thr > gameSum * A) return false;
+    const float ps = pass();
+    A *= ps > 0.0f ? ps * normK : 0.0f;
+    const RoomLightTests::V Lv{L[0], L[1], L[2]}, pv{p[0], p[1], p[2]};
+    static const std::vector<int> s_none;
+    B = RoomLightTests::GameShare(r, false, s_none, false, f1, Lv, Lv, pv, unknownVt);
+    return true;
 }
 
 } // namespace RoomLampMove

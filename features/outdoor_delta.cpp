@@ -3790,6 +3790,18 @@ struct MoveJob {
     uint8_t mult = 1, bits = 0;
     uintptr_t tracker = 0;
     LARGE_INTEGER at{};
+    // (stage 3b) a room 0 whose kept record holds the lamp (Record::kept0; k is null then): the record's key and version, its
+    // samples and batches (copied: the worker reads no record), its threshold and room 0's path of the lamp
+    struct Room0 {
+        uint64_t key = 0;
+        uint32_t version = 0;
+        int story = 0, cls = 0;
+        float thr = 0.0f;
+        std::vector<uint8_t> samples;
+        std::vector<BatchRec> batches;
+        LevelLightShare::Room0Path path;
+    };
+    std::shared_ptr<const Room0> r0;
 };
 std::mutex g_moveMx;
 std::condition_variable g_moveCv;
@@ -3847,6 +3859,76 @@ bool ReadRoomTests(const BYTE* room, RoomLightTests::Room& r, std::string& why, 
     }
     return true;
 }
+// (stage 3b, the move worker) a room-0 job: the lamp's parts at every texel of the record's copy where its law at the new place
+// is lit (room_lamp_move.h Part0At: InnerShadow's path; kept as a capture keeps them, lit before the soft light cut down to
+// kKeepFloor of the threshold), put in the record's kept lamp with that law under a new version (Real-time outdoor lamps
+// exports it again, ExportRoom0) while the record is the one copied (else dropped: solved or changed meanwhile)
+void MoveRoom0(const MoveJob& job, const LARGE_INTEGER& t0) {
+    const MoveJob::Room0& z = *job.r0;
+    const size_t n = z.samples.size() / 0x30;
+    KeptLamp kl = job.lamp;
+    const float* L = kl.law.pos;
+    int unknown = 0;
+    long lit = 0;
+    for (const BatchRec& b : z.batches) {
+        const bool f1 = b.flags[1] != 0;
+        for (uint32_t i = 0; i < b.count && b.first + i < n; i++) {
+            const uint32_t t = b.first + i;
+            const float* s = reinterpret_cast<const float*>(z.samples.data() + static_cast<size_t>(t) * 0x30);
+            float lw[3];
+            LawAt(kl.law, false, s, lw);
+            const float sum = (lw[2] + lw[1]) + lw[0];
+            if (!(sum > 0.0f)) continue;
+            lit++;
+            const float gol = RoomLampMove::GameOverLaw(kl.law, s, s + 4);
+            float A = 0.0f, B = 0.0f;
+            if (!RoomLampMove::Part0At(job.tests, f1, L, s, s + 4, sum * gol, z.thr, RoomLampMove::ReachAt(z.path.reach, z.path.reachW, L, s, s + 4), z.path.normK,
+                                       [&] { return LevelLightShare::Room0PassAt(z.path, L, s); }, A, B, &unknown))
+                continue;
+            A *= gol;
+            if (!(sum * A >= kKeepFloor * z.thr)) continue;
+            KeptPart p;
+            p.texel = t, p.a = ToHalf(std::min(A, 60000.0f)), p.b = ToHalf(std::clamp(B, 0.0f, 1.0f)), p.thrScale = ToHalf(1.0f), p.mult = job.mult, p.bits = job.bits;
+            kl.parts.push_back(p);
+        }
+    }
+    ShrinkExact(kl.parts);
+    const size_t parts = kl.parts.size();
+    LARGE_INTEGER t1{}, f{};
+    QueryPerformanceCounter(&t1);
+    QueryPerformanceFrequency(&f);
+    const double ms = 1000.0 * static_cast<double>(t1.QuadPart - t0.QuadPart) / static_cast<double>(f.QuadPart);
+    const double since = 1000.0 * static_cast<double>(t1.QuadPart - job.at.QuadPart) / static_cast<double>(f.QuadPart);
+    if (unknown) { // (ReadRoomTests refuses them: not reached)
+        c_moveFailed.fetch_add(1, std::memory_order_relaxed);
+        const bool queued = LevelLightShare::QueueRoom0(job.tracker, z.story);
+        if (KeptLog())
+            LOG_INFO(std::format("[GpuRoomLamps] move: lamp {:08X} story {} room 0: left to the room solve ({} rays met a 3D blocker the copy does not know){}", kl.light, z.story,
+                                 unknown, queued ? "" : " (the room queue refused it)"));
+        return;
+    }
+    uint32_t version = 0;
+    {
+        std::lock_guard<std::recursive_mutex> lk(g_mx);
+        const auto it = g_records.find(z.key);
+        if (it != g_records.end() && it->second->version == z.version)
+            for (KeptLamp& k0 : it->second->kept0)
+                if (k0.light == kl.light) {
+                    kl.exit = k0.exit, kl.carried = k0.carried;
+                    k0 = std::move(kl);
+                    Record& r = *it->second;
+                    version = r.version = g_version.fetch_add(1, std::memory_order_relaxed) + 1;
+                    r.baseVersion = r.version; // (its export changed: Real-time outdoor lamps builds its slots again)
+                    break;
+                }
+    }
+    (version ? c_moveDone : c_moveStale).fetch_add(1, std::memory_order_relaxed);
+    if (KeptLog())
+        LOG_INFO(std::format("[GpuRoomLamps] move: lamp {:08X} story {} room 0 class {}: {} texels x 1 lamp recomputed ({} lit, {} parts) in {:.1f} ms on the move worker, "
+                             "{:.1f} ms after the move; {}",
+                             job.lamp.light, z.story, z.cls, n, lit, parts, ms, since,
+                             version ? std::format("kept as version {}", version) : std::string("dropped (room 0 was solved or changed meanwhile)")));
+}
 void MoveWorker() {
     for (;;) {
         MoveJob job;
@@ -3858,6 +3940,10 @@ void MoveWorker() {
         }
         LARGE_INTEGER t0{}, t1{}, f{};
         QueryPerformanceCounter(&t0);
+        if (job.r0) {
+            MoveRoom0(job, t0);
+            continue;
+        }
         const KeptRoom& k = *job.k;
         const size_t n = k.texels.size();
         KeptLamp kl = job.lamp;
@@ -3880,6 +3966,7 @@ void MoveWorker() {
                 if (!((lw[2] + lw[1]) + lw[0] > 0.0f)) continue;
                 float A = 1.0f, B = 0.0f;
                 RoomLampMove::PartAt(job.tests, built, list, f0, f1, kl.law.pos, s, s + 4, A, B, &unknown);
+                A *= RoomLampMove::GameOverLaw(kl.law, s, s + 4); // (A is over the game's evaluation; KeptAdd's law raises N.l itself)
                 lit++;
                 KeptPart p;
                 p.texel = t, p.a = ToHalf(std::min(A, 60000.0f)), p.b = ToHalf(std::clamp(B, 0.0f, 1.0f)), p.thrScale = ToHalf(1.0f), p.mult = job.mult, p.bits = job.bits;
@@ -3975,6 +4062,50 @@ const char* MoveJobFor(const void* room, const RoomRead& rr, const std::shared_p
     if (!any) fade = LevelLightShare::SoftLightCutOn();
     job.bits = static_cast<uint8_t>((kind == 1 ? kKeptEarly : 0) | (fade ? kKeptFade : 0));
     job.k = k, job.tracker = tracker;
+    QueryPerformanceCounter(&job.at);
+    return nullptr;
+}
+bool RecordOfRoom(const Record& r, const RoomRead& now); // below
+// (stage 3b) A move of `light` in a room 0 that lists it (light tree thread): its job (a copy of the kept record's samples and
+// batches, room 0's path, its tests), or why it is left to the game's path. Only a lamp the record keeps (kept0) with no floor
+// mask part, taken by room 0 through an opening of its own story (LevelLightShare::Room0MovePath), while the lot's geometry is
+// that of the record's solve
+const char* MoveJobFor0(const void* room, const RoomRead& rr, uintptr_t light, uintptr_t tracker, MoveJob& job, std::string& why) {
+    if (!LawOfLight(light, rr.lot, job.lamp)) return "a lamp without a law now";
+    if (job.lamp.colourOnly) return "a light without a GPU law (its share follows its place)";
+    auto z = std::make_shared<MoveJob::Room0>();
+    const char* path = nullptr;
+    if (!LevelLightShare::Room0MovePath(room, light, z->path, path)) return path;
+    bool fade = false;
+    {
+        std::lock_guard<std::recursive_mutex> lk(g_mx);
+        const auto it = g_records.find(KeyOf(room, rr.cls));
+        if (it == g_records.end() || !RecordOfRoom(*it->second, rr)) return "no kept record of room 0's class";
+        const Record& r = *it->second;
+        if (r.stale || r.baseOnly) return "room 0's kept record waits for its solve";
+        const auto k0 = std::find_if(r.kept0.begin(), r.kept0.end(), [&](const KeptLamp& k) { return k.light == light; });
+        if (k0 == r.kept0.end()) return "room 0's kept record does not hold its parts";
+        if (!k0->mask.empty()) return "it has floor mask parts in room 0 (not redone for a move)";
+        if (!r.geo || LevelLightShare::LotGeometryKey(room) != r.geo) return "the lot's geometry changed since room 0's solve";
+        try {
+            z->samples.assign(r.samples.begin(), r.samples.end());
+            z->batches = r.batches;
+        } catch (...) {
+            return "no memory for the copy";
+        }
+        z->key = KeyOf(room, rr.cls), z->version = r.version, z->story = r.story, z->cls = r.cls, z->thr = r.thr;
+        // the soft light cut as room 0's kept parts were kept (none kept: as it is now)
+        bool any = false;
+        for (const KeptLamp& l : r.kept0)
+            for (const KeptPart& p : l.parts) any = true, fade = fade || (p.bits & kKeptFade);
+        if (!any) fade = LevelLightShare::SoftLightCutOn();
+    }
+    if (!ReadRoomTests(static_cast<const BYTE*>(room), job.tests, why)) return why.c_str();
+    uintptr_t raw[1024];
+    const int n = ReadList(static_cast<const BYTE*>(room), raw, static_cast<int>(std::size(raw)));
+    job.mult = static_cast<uint8_t>(std::clamp<long long>(std::count(raw, raw + std::max(n, 0), light), 1, 255));
+    job.bits = static_cast<uint8_t>(kKeptEarly | (fade ? kKeptFade : 0));
+    job.r0 = std::move(z), job.tracker = tracker;
     QueryPerformanceCounter(&job.at);
     return nullptr;
 }
@@ -4197,8 +4328,13 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move
         if (!ReadRoom(static_cast<const BYTE*>(room), rr)) return false;
         if (!geoRead) haveGeo = RtOutdoorLamps::ColourLaw(light, rr.lot, colourNow, geoNow), geoRead = true;
         if (rr.id == 0) {
-            if (move) return refuse(rr, "a room 0 lists it (its parts there are not redone for a move)");
             if (!RtOutdoorLamps::CoversLamp(room, light)) return refuse(rr, "a room 0 Real-time outdoor lamps does not draw it in (no law, or a floor mask part where its law is dark)");
+            if (move) { // (stage 3b) its parts there redone on the move worker
+                MoveJob job;
+                if (const char* why = MoveJobFor0(room, rr, light, tracker, job, moveWhy)) return refuse(rr, why);
+                jobs.emplace_back(KeyOf(room, rr.cls), std::move(job));
+                continue;
+            }
             // (a tube kept there with another share than now: drawn as its solve gave it, so its edit is not shown)
             std::lock_guard<std::recursive_mutex> lk(g_mx);
             if (const auto it = g_records.find(KeyOf(room, rr.cls)); it != g_records.end())

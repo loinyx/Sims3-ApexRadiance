@@ -4,6 +4,7 @@
 #include "ground_lamp_shadow.h"
 #include "liveness_prune.h"
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -402,6 +403,19 @@ void LotRooms(uintptr_t tracker, std::vector<void*>& out);
 // -1 (why) an outdoor lamp, one of the record's inner, opening or cross lamps, a roofless room, or a lamp under the room's
 // story floor
 int MovePath(const void* room, uintptr_t light, const float* lp, const char*& why);
+// (GPU room lamps stage 3b) room 0's path of a lamp it takes through an opening of its own story (InnerShadow), copied for the
+// move worker (room_lamp_move.h Part0At): its story's grids (InnerPass's), the map's half texel, soft_opening_edges, the norm
+// scale (InnerNormScale, read now), Realistic lamp reach and the lamp's range x intensity (ReachShare)
+struct Room0Path {
+    std::shared_ptr<const void> g0, g1; // (StoryGrid, immutable once built)
+    float aa = 0.0f, normK = 1.0f, reachW = 0.0f;
+    bool spread = false, reach = false;
+};
+// Light tree thread: false (why) when room 0 takes the lamp another way (not a lamp of its record's inner list, one of the
+// story above, no record, steady_indoor_light off)
+bool Room0MovePath(const void* room0, uintptr_t light, Room0Path& out, const char*& why);
+// Any thread: InnerPass of a lamp at lampW to pointW from the copy
+float Room0PassAt(const Room0Path& p, const float* lampW, const float* pointW);
 // Room 0 of a story sent to its solve (urgent, whatever its kept parts say)
 bool QueueRoom0(uintptr_t tracker, int story);
 // After a room update: room 0 of story L changed by a lamp edit the delta took (its mark dropped); the rooms that take its

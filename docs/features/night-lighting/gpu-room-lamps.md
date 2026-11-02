@@ -5,7 +5,7 @@ room 0 is kept, split into the light the GPU will not draw and, per texel and lo
 Apex's tests and the game's tests let through, with the room's tail (tone, ambient, dither, pack, wall blur, tile-edge
 copies). The kept rooms are drawn on the GPU over Real-time outdoor lamps' copy of each story map with the lot lamps as they
 are now, so a lamp's colour, intensity or switch shows in the frame of the edit, and such an edit solves no room until a settle 2 s
-after it when every room listing the lamp is drawn so. The four directional maps objects and Sims read follow such an edit at the end of the same room update: the edited lamp's part of each directional sample is computed again with the game's own step and the room's samples are packed again into the game's maps. A lamp moved within its room is relit the same way once a worker thread has redone its parts there from a copy of the game's tests (only for lamps whose light reaches those rooms by the plain path). With [the room lamp
+after it when every room listing the lamp is drawn so. The four directional maps objects and Sims read follow such an edit at the end of the same room update: the edited lamp's part of each directional sample is computed again with the game's own step and the room's samples are packed again into the game's maps. A lamp moved within its room is relit the same way once a worker thread has redone its parts there from a copy of the game's tests (only for lamps whose light reaches those rooms by the plain path, and room 0 through openings of the lamp's own story). With [the room lamp
 probe](gpu-room-lamps-probe.md) on too, each kept solve is recomposed on the CPU and on the GPU and compared with the game's.
 
 ## Status
@@ -116,6 +116,18 @@ lamp's position, not on its colour or intensity.
    each step is taken this way (the next step's job replaces the last one's): the light follows in the worker's steps, each
    drawn from complete parts of one place. The settle solves the rooms 2 s after the drag's last move. Anything else (a room
    0 listing it, a move into another room, a refusal above) takes the game's path, logged.
+   Room 0 (stage 3b): a room 0 listing the lamp no longer refuses the move when its kept record holds the lamp (kept0) with no
+   floor mask part, the lamp is one of its record's inner lamps of its own story (not innerUp, `LevelLightShare::Room0MovePath`),
+   steady_indoor_light is on and the lot's geometry key is its solve's. The edit copies the record's samples and batches, room
+   0's 3D tests, the story's grids InnerPass reads, the map's half texel, the norm scale (InnerNormScale, read now) and the
+   reach inputs; the worker gives every texel where the law at the new place is lit and past the threshold early-out a part
+   (`room_lamp_move.h Part0At`): A = MountFactor x the reach share (wall texels) x InnerPass (`InnerPassAt`, the production
+   grid walk) x the norm scale, B = the 3D test alone (the game's wall test is skipped for such a lamp), kept as a capture keeps
+   them (down to kKeepFloor of the threshold), and puts them in the record's kept lamp with the new law under a new version
+   (dropped when the record changed meanwhile); Real-time outdoor lamps exports it again (after a drag: its uploads wait for
+   the lamp to be still). An exit lamp's ground alpha follows from its parts (the exit texels are marked by the solve for every
+   lamp). Every A is over the game's evaluation, and is taken over the law x `GameOverLaw` (the law raises a wall texel's N.l
+   itself; until stage 3b a moved part on such a texel took the raise twice).
 14. Switch on after the settle: a room kept again while a lamp is switched off by a taken edit (the settle's solve, or any
    solve) holds none of the lamp's parts. Its new kept solve takes them from its earlier kept solve (the one the switch off
    was taken with, `CarryOff`) when the texels are the same places with the same samples, the room's geometry key is the same
@@ -187,8 +199,11 @@ lamp's position, not on its colour or intensity.
   compared); that the key now stays the same between two solves of an unchanged room is UNVERIFIED in game.
 - A kept texel a tile-edge copy of another room's texel overwrote keeps the game's value: after an edit taken, such a strip
   one texel wide at a tile edge can lag until the rooms are solved (UNVERIFIED in game).
-- A moved lamp's parts are redone only for the plain path (see 13); its light through openings, between stories and in
-  room 0 is not, so such moves take the solves. A is MountedNdl's factor over the law at the new place: the game's evaluation
+- A moved lamp's parts are redone only for the plain path and room 0's own-story inner path (see 13); its light through
+  other openings and between stories (innerUp, cross lamps, floor mask parts) is not, so such moves take the solves. A room 0
+  is not solved by the settle: a moved lamp's light there stays drawn from the worker's parts (the light tree thread's lists
+  and InnerNormScale as at the move; that the room 0 lists stay the same is UNVERIFIED), and the roofed rooms whose opening
+  outdoor total (OpeningOutdoorTotal) includes the lamp keep their kept entry cut until their own solve, as for a switch. A is MountedNdl's factor over the game's evaluation at the new place (x GameOverLaw over the law): the game's evaluation
   there is the law to 99.5% (the probe), so the kept capture's A (the game's colour over the law) and a moved lamp's differ
   where they differ. The room's light lists are read as the edit sees them: that a move within the room changes no list is
   UNVERIFIED, as is that the lamp object's own 3D records change only after the edit (the move compares them with the kept
@@ -319,7 +334,7 @@ lamp's position, not on its colour or intensity.
   `movedFrom`): `[GpuRoomLamps] move: lamp L story S room R class C: N texels x 1 lamp recomputed (lit, parts) in X ms on the
   move worker, Y ms after the move; kept as version V | dropped (the room was solved or kept again meanwhile)`, then the edit
   line `move: lamp L, 1 rooms on stories S, no room solved, relit in N ms (...)` from that landing to the first relight
-  with its parts; `move: lamp L left to the room solves (story S room R: why)` (a room 0 lists it, an outdoor lamp, the lamp
+  with its parts; `move: lamp L left to the room solves (story S room R: why)` (room 0: a lamp not of its own story's inner list, floor mask parts, no kept record holding it, the lot's geometry changed; an outdoor lamp, the lamp
   under the room's story floor, a roofless room, through openings or from another story, a light without a GPU law, the
   lot's geometry, the room's walls or its 3D blockers changed since its solve, a 3D blocker of a kind the copy does not know, ...). The game's tests' constants are read
   once from the game (`RoomLightTests::kConstAt`).

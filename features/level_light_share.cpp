@@ -5444,17 +5444,22 @@ bool GridWallHitHard(const StoryGrid& g, const float* A, const float* B, float c
         }
     return false;
 }
-// A lamp to a point (world) of a roofless room: its story's walls, and the story above's for a ray that high. lampW gets the
-// lamp's position as the game passes it to its wall test (vfunc+0x24, bit for bit)
-float YardPassImpl(const StoryGrid* g0, const StoryGrid* g1, void* light, const float* pointW, float* lampW, GridWhy& why) {
-    const PartTimer timer(kTpYard);
-    LampPos(light, lampW);
+// A lamp at lampW to a point (world) of a roofless room: its story's walls, and the story above's for a ray that high (the
+// grids alone: any thread, GPU room lamps' move worker too)
+float YardPassAt(const StoryGrid* g0, const StoryGrid* g1, const float* lampW, const float* pointW, GridWhy& why) {
     float A[3], B[3];
     ToLocal(g0->xf, lampW, A);
     ToLocal(g0->xf, pointW, B);
     float pass = GridPassImpl(*g0, A, B, why);
     if (pass > 0.0f && g1 && std::max(A[1], B[1]) > g1->minFoot - kGridSoft) pass *= GridPassImpl(*g1, A, B, why, g1->plane);
     return pass;
+}
+// A lamp to a point (world) of a roofless room, as above. lampW gets the lamp's position as the game passes it to its wall test
+// (vfunc+0x24, bit for bit)
+float YardPassImpl(const StoryGrid* g0, const StoryGrid* g1, void* light, const float* pointW, float* lampW, GridWhy& why) {
+    const PartTimer timer(kTpYard);
+    LampPos(light, lampW);
+    return YardPassAt(g0, g1, lampW, pointW, why);
 }
 std::atomic<long> g_gridFaults{0};
 float YardPass(const StoryGrid* g0, const StoryGrid* g1, void* light, const float* pointW, float* lampW, GridWhy& why) {
@@ -12008,6 +12013,18 @@ float InnerPass(const RoomInfo& info, void* light, const float* pointW, float* l
     }
     alignas(16) float lw[4] = {};
     return pass * YardPass(info.innerGrid[0].get(), nullptr, light, pointW, lw, why);
+}
+// (GPU room lamps stage 3b, a lamp moved) InnerPass of a lamp at lampW that is not one of info.innerUp, from its grids (g0, g1:
+// info.innerGrid) alone: any thread, no game memory (with steady_indoor_light off InnerPass reads the screen's mesh set: such a
+// move is refused, Room0MovePath); spread: soft_opening_edges as read on the light tree thread. Validated against the room lamp
+// probe's room-0 texels by tools/apex_paths_replay ("move worker, room 0")
+float InnerPassAt(const StoryGrid* g0, const StoryGrid* g1, const float* lampW, const float* pointW, bool spread, GridWhy& why) {
+    if (!g0) return 0.0f;
+    const float prev = t_gridMinSpread;
+    if (spread) t_gridMinSpread = kInnerSoftSpread;
+    const float pass = YardPassAt(g0, g1, lampW, pointW, why);
+    t_gridMinSpread = prev;
+    return pass;
 }
 
 // The walls of the stories between a lamp's story and the point's (an F7 capture: a ground post lit the tower's
@@ -18882,6 +18899,39 @@ int MovePath(const void* room, uintptr_t light, const float* lp, const char*& wh
     if (FindInner(*info, light) || FindSame(*info, light) || FindCross(*info, light))
         return why = "it reaches the room through openings or from another story (Apex's paths not redone)", -1;
     return 1;
+}
+namespace {
+float ReachWOf(uintptr_t light) { // POD (SEH): range x intensity, as ReachShareImpl reads them (0: unread)
+    __try {
+        return *reinterpret_cast<const float*>(light + 0x130) * *reinterpret_cast<const float*>(light + 0x10);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0.0f;
+    }
+}
+} // namespace
+bool Room0MovePath(const void* room0, uintptr_t light, Room0Path& out, const char*& why) {
+    BYTE* r = static_cast<BYTE*>(const_cast<void*>(room0));
+    out = Room0Path{};
+    if (!RoomOutdoorFlag(r)) return why = "room 0 solved as a roofed room", false;
+    const RoomInfo* info = SolveInfo(r);
+    if (!info) return why = "room 0 without Apex's record", false;
+    if (!FindInner(*info, light)) return why = "room 0 takes it from another story or through another path than its own story's openings", false;
+    if (std::binary_search(info->innerUp.begin(), info->innerUp.end(), light)) return why = "room 0 takes it from the story above (its way down is not redone)", false;
+    if (kMemoryOptimizationsEnabled && !DevSwitches::SteadyIndoorLight()) return why = "steady_indoor_light off (InnerPass reads the screen's mesh set)", false;
+    out.g0 = info->innerGrid[0], out.g1 = info->innerGrid[1];
+    out.aa = MapHalfTexelSafe(r), out.spread = DevSwitches::SoftOpeningEdges();
+    // (room 0 is solved as outdoor: InnerNormScaleAt's recipient is 1 and it notes nothing)
+    out.normK = InnerNormScaleAt(*info, reinterpret_cast<void*>(light), r);
+    out.reach = g_reachOn.load(std::memory_order_relaxed), out.reachW = ReachWOf(light);
+    return true;
+}
+float Room0PassAt(const Room0Path& p, const float* lampW, const float* pointW) {
+    const float prevAA = t_mapAA;
+    t_mapAA = p.aa;
+    GridWhy why{};
+    const float pass = InnerPassAt(static_cast<const StoryGrid*>(p.g0.get()), static_cast<const StoryGrid*>(p.g1.get()), lampW, pointW, p.spread, why);
+    t_mapAA = prevAA;
+    return pass;
 }
 void LotRooms(uintptr_t tracker, std::vector<void*>& out) {
     out.clear();
