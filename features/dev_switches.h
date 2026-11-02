@@ -59,6 +59,8 @@
 //                         reflect: albedo x the mean light its texels took in its last solve (stairwell_bounce.h RoomFill)
 //   lot_build_share       the load stages of every streaming lot share one build budget per frame (lot_build_share.h); off = each
 //                         lot keeps its own 20 / 35 ms slice (6 ms while the camera moves)
+//   open_rooms_above      room 0 of a story takes the lamps of the story below's double-height rooms (no floor placed over them, their
+//                         walls built up): the upper half of their walls is lit (open_rooms_above.h, LevelLightShare ShareRoomZeroFromBelow)
 #include <atomic>
 
 namespace DevSwitches {
@@ -134,6 +136,7 @@ inline std::atomic<bool> borrowedLightAdapt{false};
 inline std::atomic<bool> softSlabEdges{false};
 inline std::atomic<bool> roomFill{false};
 inline std::atomic<bool> lotBuildShare{false};
+inline std::atomic<bool> openRoomsAbove{false};
 
 void Load(); // init thread, before the features start; logs the values
 
@@ -167,5 +170,6 @@ inline bool BorrowedLightAdapt() { return kCompiled ? borrowedLightAdapt.load(st
 inline bool SoftSlabEdges() { return kCompiled ? softSlabEdges.load(std::memory_order_relaxed) : kShipped; }
 inline bool RoomFill() { return kCompiled ? roomFill.load(std::memory_order_relaxed) : kShipped; }
 inline bool LotBuildShare() { return kCompiled ? lotBuildShare.load(std::memory_order_relaxed) : kShipped; }
+inline bool OpenRoomsAbove() { return kCompiled ? openRoomsAbove.load(std::memory_order_relaxed) : kShipped; }
 
 } // namespace DevSwitches

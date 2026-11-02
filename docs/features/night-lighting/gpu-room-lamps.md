@@ -118,7 +118,10 @@ lamp's position, not on its colour or intensity.
    0 listing it, a move into another room, a refusal above) takes the game's path, logged.
    Room 0 (stage 3b): a room 0 listing the lamp no longer refuses the move when its kept record holds the lamp (kept0) with no
    floor mask part, the lamp is one of its record's inner lamps of its own story (not innerUp, `LevelLightShare::Room0MovePath`),
-   steady_indoor_light is on and the lot's geometry key is its solve's. The edit copies the record's samples and batches, room
+   steady_indoor_light is on and the lot's geometry key is its solve's. A lamp of a double-height room of the story below
+   (level light share, *Double-height rooms*: in room 0's `cross`, not an inner lamp) is refused there ("room 0 takes it from
+   another story ..."), so a drag of such a lamp takes the game's path; its value and switch edits are drawn from its kept0
+   parts like any lamp Real-time outdoor lamps does not draw (its floor and wall tests do not depend on its colour). The edit copies the record's samples and batches, room
    0's 3D tests, the story's grids InnerPass reads, the map's half texel, the norm scale (InnerNormScale, read now) and the
    reach inputs; the worker gives every texel where the law at the new place is lit and past the threshold early-out a part
    (`room_lamp_move.h Part0At`): A = MountFactor x the reach share (wall texels) x InnerPass (`InnerPassAt`, the production

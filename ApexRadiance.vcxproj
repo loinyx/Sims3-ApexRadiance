@@ -288,6 +288,7 @@
     <ClInclude Include="framework\high_alloc.h" />
     <ClInclude Include="shaders\rt_lamps_hlsl.h" />
     <ClInclude Include="features\lamp_visibility.h" />
+    <ClInclude Include="features\open_rooms_above.h" />
     <ClInclude Include="features\wall_openings.h" />
     <ClInclude Include="features\inner_retry.h" />
     <ClInclude Include="features\cut_close_hold.h" />

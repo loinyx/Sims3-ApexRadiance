@@ -98,6 +98,7 @@ follows the setting named on its page.
 | `soft_slab_edges` | Shipped | Penumbra of a 0.25 m lamp disc at a floor opening's edge | [stairwells.md](features/night-lighting/stairwells.md) |
 | `room_fill` | Shipped | Rooms lit only from another story take back their own reflected light | [stairwells.md](features/night-lighting/stairwells.md) |
 | `lot_build_share` | Shipped | The load stages of every streaming lot share one build budget per frame | [lot-streaming.md](features/performance/lot-streaming.md#shared-lot-build-time) |
+| `open_rooms_above` | Shipped | Room 0 of a story takes the lamps of the story below's double-height rooms (the upper half of their walls) | [level-light-share.md](features/night-lighting/level-light-share.md#double-height-rooms) |
 
 
 ---

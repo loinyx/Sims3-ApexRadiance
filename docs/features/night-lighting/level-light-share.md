@@ -75,6 +75,10 @@ test. The light solve itself, lamp ranges and attenuation are the game's.
     world's street lamps, on every story, with the weight the post has on its own lot. A post placed, moved or switched
     reaches them as it is let go, solved first and shown with the stories of its own lot; a post deleted leaves their light
     lists at once.
+11. **Double-height rooms** (in development). A roofed room with no floor ever placed over it whose walls go up
+    through the story above is one space two stories tall, but the upper half of its walls belongs to room 0 of that
+    story. Room 0 now takes the lamps of such a room, so the walls no longer go dark at the story line
+    ([Double-height rooms](#double-height-rooms)).
 
 Stairwells, stairs and arches have their own pages: [Light through stairwells](stairwells.md) (the lamp's own walls,
 soft slab edges, bounce light and partial adaptation), [Stairs on the directional maps](stairs.md) and
@@ -199,6 +203,11 @@ patch.
 - Outdoor walls drawn below their light base (gables, a garage's eave band beside a house on a foundation, sloped
   foundation faces) are lit from their drawn foot, 5 cm to 3.2 m below the base ([walls.md](walls.md)); unverified in
   game, as are lamps that now test those lower samples.
+- Double-height rooms: only room 0 of the story right above takes their lamps (not its rooms, not further stories), and
+  a room counts only with walls of the story above on three quarters of its outline: a single-storey room under its roof
+  leaves its gable's inner face dark, as before. A taller wall standing on the outline of a room that does count is lit up
+  to its top: no roof is known. Room 0 is solved as an outdoor room: whether its map and the lamp room's meet at the line without a step
+  (outdoor and indoor response) is unverified. Not yet checked in game.
 - Steam 1.67.2 only. The optional parts (detail boost, ambient merge, normalisation guard, directional-map guard,
   seamless walls) each install only when their bytes match and otherwise leave the game's behaviour.
 
@@ -573,6 +582,39 @@ Group coordination:
   groups with the solver's area and normalisation rule, writing the merged colour and its sampler copy together.
 - Caches are forgotten only for removed lots or lots whose story managers changed; other lots keep their groups. Only on
   the light tree thread (the lot impostor's synchronous solve goes through the same CALL).
+
+### Double-height rooms
+
+A capture of lot `C49C001BCF2DEA20` (2026-11-02): story 2's rooms 5 and 7 have no floor placed over them on story 3 (the
+bare `40000000` key, or never built) and their walls go up through story 3. On story 3 that space has no floor, so it
+is room 0, and the upper half of the walls takes room 0's light list. That list never held the red lamps of rooms 5
+and 7 (part 4 lights only rooms with id > 0, and its openings are removed floors only), so room 0's map there was black
+and the walls cut off hard at the story line while their lower half was red.
+
+- **Which rooms** (`OpenAbove::Classify`, [`open_rooms_above.h`](../../../features/open_rooms_above.h)): a roofed room of
+  story S - 1 (roofless rooms' lamps are outdoor lamps already) with no floor placed on story S over at least half of its
+  quadrants (`PlacedFloorAt`), and at least three quarters of its outline (tile edges to another room) carrying a wall of
+  story S or leading into another such room. A room that keeps its ceiling has the bare key only along its walls and
+  around the floor's edge, so the rule is per room: the 2026-09-29 rejection of the bare key as a per-quadrant opening
+  stands, and `RemovedFloorKey`, `ReadOpenings` and the F8 *openings* count are unchanged. The wall rule leaves out a
+  single-storey room under its roof: with no walls on story S along its eaves and no roof known to the lighting, its lamps
+  would light the walls of story S beside it above the roof line.
+- **Gather** (`ShareRoomZeroFromBelow`, after the outdoor share's record of room 0): the lamps of those rooms (the game's
+  checks of `FUN_006c7820`, a wrapped class, at most 64) go into room 0's list, each recorded first in its `cross` (not
+  outdoor) with the rooms in `openBelow`. `NoteDeps` sends room 0 when a lamp of those rooms changes, and room 0 joins the
+  rooms near openings that gather again (`NoteIndoorRoom`).
+- **Per point** (`IndoorShadow`, `IndoorPassImpl`): the ray must cross story S's floor plane in a quadrant of such a
+  room's open top (`OpenQuadrant`), pass the lamp room's walls (the game's test) and, from that crossing to the point,
+  stay over open tops but for its last 0.3 m (`PassStage::BeyondOpenTop`): the point lies in that space or on a wall around
+  it. The game's wall test of room 0 runs from where the ray enters story S, and the receiving story's wall veto
+  (`indoor_lamp_walls`) applies. The lamp is scaled by its room's normalisation (room 0 has none, as for
+  *Indoor light through openings*) and takes no *Realistic lamp reach*. Rows of a ghost solve under story S's plane over
+  an open top are not slab rows.
+- **Diagnostics:** the log line `[LevelLightShare] Story S room 0 takes N lamps of story S - 1 through M floorless
+  quadrants over rooms open to above: ids` (once per change) and the same line in the F8 lot rows.
+- Developer switch `open_rooms_above` (shipped on). Offline: `tools/outdoor_delta_test` classifies the captured F8 maps
+  (story 3 over story 2: rooms 5, 6 and 7 open, 304 floorless quadrants over room 5 at tile granularity; story 2: the 40
+  stairwell openings unchanged, rooms 1 to 4 under their floor closed).
 
 ### Lamps under a story's floor
 

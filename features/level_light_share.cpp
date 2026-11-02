@@ -132,6 +132,7 @@
 #include "stairwell_bounce.h"
 #include "penumbra.h"
 #include "liveness_prune.h"
+#include "open_rooms_above.h"
 #include "apex_memory.h"
 #include <windows.h>
 #include <intrin.h>
@@ -507,6 +508,9 @@ struct RoomInfo {
     // 4. (development builds, indoor_lamp_walls): the grids of the stories the borrowed lamps stand on, for their own story's walls
     // with real heights and openings between the lamp and the floor opening (IndoorPassImpl; null = not asked)
     std::shared_ptr<const StoryGrid> lampGrid[8];
+    // room 0 (ShareRoomZeroFromBelow): the rooms of the story below open to it (OpenAbove::Classify), ascending; its `cross`
+    // entries that are not outdoor are their lamps, each through a quadrant of their open top (OpenQuadrant)
+    std::vector<int> openBelow;
 };
 std::unordered_map<uintptr_t, RoomInfo> g_rooms;
 uint32_t g_roomsGen = 1; // light tree thread: bumped whenever entries of g_rooms may be erased (SolveInfo's cache)
@@ -1031,6 +1035,7 @@ void RecordRoom(BYTE* room, uintptr_t mgr, uintptr_t tracker, int roomLevel) {
     info.innerGrid[0].reset(), info.innerGrid[1].reset(), info.upGrid[0].reset(), info.upGrid[1].reset();
     info.indoor = false;
     info.cross.clear();
+    info.openBelow.clear();
     for (int floor = 0; floor <= 7; floor++) {
         if (floor == roomLevel) continue;
         const uintptr_t tl = TreeLevel(tracker, floor);
@@ -7784,6 +7789,118 @@ void ShareIndoorLights(BYTE* treeLevel, BYTE* room) {
     if (!info) NoteIndoorRoom(tracker, S, id, false);
 }
 
+// ---- Double-height rooms: room 0 takes the lamps of the story below through their open tops (open_rooms_above) ----
+// A capture (lot C49C001BCF2DEA20, 2026-11-02): story 2's rooms 5 and 7 have no floor placed over them on story 3 (the bare
+// 40000000 key or never built) and their walls go up through story 3, whose room 0 they are. Room 0's list never took
+// their red lamps (only room 0's and the street lamps), so its map there was black and the walls cut off hard at the story
+// line (67.3) while the lower half was red. Room 0 of story S now takes the lamps of story S - 1's rooms open to above
+// (OpenAbove::Classify; the rule of ReadOpenings, a removed floor, is not changed): recorded in its `cross` (not outdoor)
+// before each goes in, and tested per point by IndoorShadow: the ray up through one of their open tops (OpenQuadrant),
+// past the lamp room's walls, then over open tops to the point (IndoorPassImpl). Developer switch open_rooms_above.
+// POD (SEH): the roofed rooms of story S - 1 and whether a floor is placed on story S, per quadrant (w x h x 4)
+bool ReadOpenTopCells(uintptr_t mgrBelow, uintptr_t levelS, int w, int h, int* rooms, uint8_t* placed) {
+    __try {
+        for (int iz = 0; iz < h; iz++)
+            for (int ix = 0; ix < w; ix++) {
+                const uintptr_t tile = LightTile(mgrBelow, ix, iz);
+                for (int q = 0; q < 4; q++) {
+                    const size_t i = (static_cast<size_t>(iz) * w + ix) * 4 + q;
+                    rooms[i] = tile ? TileRoom(tile, q) : 0;
+                    placed[i] = PlacedFloorAt(levelS, ix, iz, q) ? 1 : 0;
+                }
+            }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_faults.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+}
+struct ZeroBelowNote {
+    int lamps = 0, quads = 0;
+    std::vector<int> rooms;
+    bool operator==(const ZeroBelowNote&) const = default;
+};
+std::mutex g_zeroBelowMx;
+std::unordered_map<uintptr_t, ZeroBelowNote> g_zeroBelow; // story manager -> its room 0's last take (F8, the log line once per change)
+std::atomic<long> g_zeroBelowAdded{0};
+void ShareRoomZeroFromBelow(BYTE* treeLevel, BYTE* room) {
+    if (*reinterpret_cast<const int*>(room + 0xC) != 0 || !g_indoorReady || !kAddRoomLight) return;
+    const uintptr_t key = reinterpret_cast<uintptr_t>(room), rmgr = *reinterpret_cast<const uintptr_t*>(room);
+    if (!rmgr) return;
+    const int S = *reinterpret_cast<const int*>(rmgr + 0x88);
+    const int level = *reinterpret_cast<const int*>(treeLevel + 0x1A0);
+    const uintptr_t tracker = *reinterpret_cast<const uintptr_t*>(treeLevel + 4);
+    if (S < 1 || S > 7 || level < -4 || level > 7 || !tracker || TreeLevel(tracker, level) != reinterpret_cast<uintptr_t>(treeLevel) || StoryManager(tracker, S) != rmgr)
+        return;
+    const auto rec = g_rooms.find(key);
+    if (rec == g_rooms.end() || rec->second.mgr != rmgr || rec->second.id != 0 || rec->second.indoor) return; // (RecordRoom's)
+    RoomInfo& info = rec->second;
+    // what an earlier gather of this room took (a record left from it): its lamps left the list the game just built
+    info.cross.erase(std::remove_if(info.cross.begin(), info.cross.end(), [](const Cross& c) { return !c.outdoor; }), info.cross.end());
+    info.openBelow.clear();
+    ZeroBelowNote note;
+    const uintptr_t mgrBelow = StoryManager(tracker, S - 1), levelS = LevelFor(rmgr);
+    int w = 0, h = 0;
+    std::shared_ptr<const StoryGrid> grid;
+    std::vector<int> rooms;
+    std::vector<uint8_t> placed;
+    if (g_indoorOn.load(std::memory_order_relaxed) && DevSwitches::OpenRoomsAbove() && mgrBelow && levelS && LevelManager(levelS) == rmgr &&
+        ReadGridSize(mgrBelow, w, h) && w > 0 && h > 0 && w <= 1024 && h <= 1024 && (grid = info.grid[0] ? info.grid[0] : EnsureStoryGrid(rmgr)) && grid->w == w && grid->h == h) {
+        rooms.assign(static_cast<size_t>(w) * h * 4, 0);
+        placed.assign(rooms.size(), 1);
+        if (ReadOpenTopCells(mgrBelow, levelS, w, h, rooms.data(), placed.data())) {
+            int roofless[256];
+            const int nr = RooflessRoomIds(mgrBelow, roofless, static_cast<int>(std::size(roofless)));
+            for (int& r : rooms)
+                if (r > 0 && std::find(roofless, roofless + nr, r) != roofless + nr) r = 0; // (a yard's lamps are outdoor lamps already)
+            const auto at = [&](int x, int z, int q) { return (static_cast<size_t>(z) * w + x) * 4 + q; };
+            OpenAbove::Classify(
+                w, h, [&](int x, int z, int q) { return rooms[at(x, z, q)]; }, [&](int x, int z, int q) { return placed[at(x, z, q)] != 0; },
+                [&](int x, int Z) { return GridZL(*grid, x, Z) >= 0; }, [&](int X, int z) { return GridXL(*grid, X, z) >= 0; }, note.rooms);
+            for (size_t i = 0; i < rooms.size(); i++)
+                note.quads += !placed[i] && std::binary_search(note.rooms.begin(), note.rooms.end(), rooms[i]) ? 1 : 0;
+        }
+    }
+    if (!note.rooms.empty()) {
+        g_gatherThread = ThreadId();
+        NoteDeps(tracker, S - 1, note.rooms, S, 0); // (a lamp edit of those rooms sends this room 0: AfterChangedWalk)
+        info.openBelow = note.rooms;
+        uintptr_t taken[64];
+        int n = 0;
+        WalkRegistry(TreeLevel(tracker, S - 1), [&](uintptr_t entry) {
+            const int home = *reinterpret_cast<const int*>(entry + 0x1C);
+            const uintptr_t light = *reinterpret_cast<const uintptr_t*>(entry + 0x24);
+            if (n >= 64 || !light || !std::binary_search(note.rooms.begin(), note.rooms.end(), home) || !EvalWrapped(light) || !GameTakesLight(entry, light) ||
+                InList(room, light) || std::find(taken, taken + n, light) != taken + n)
+                return;
+            const Cross x{light, S - 1, home, levelS};
+            info.cross.insert(std::upper_bound(info.cross.begin(), info.cross.end(), x), x); // recorded before it goes in
+            reinterpret_cast<AddRoomLight_t>(kAddRoomLight)(room, reinterpret_cast<void*>(light));
+            taken[n++] = light;
+        });
+        note.lamps = n;
+        g_zeroBelowAdded.fetch_add(n, std::memory_order_relaxed);
+        // the walls of the lamps' story and of this one, for the stretches on either side of the open top (indoor_lamp_walls)
+        if (n && DevSwitches::IndoorLampWalls()) info.lampGrid[S - 1] = EnsureStoryGrid(mgrBelow), info.lampGrid[S] = grid;
+    }
+    NoteIndoorRoom(tracker, S, 0, note.lamps > 0); // (gathered again with the rooms near openings: QueueOpeningRooms)
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lk(g_zeroBelowMx);
+        const auto it = g_zeroBelow.find(rmgr);
+        if (note.rooms.empty() && it == g_zeroBelow.end()) return;
+        changed = it == g_zeroBelow.end() || !(it->second == note);
+        if (note.rooms.empty()) g_zeroBelow.erase(it);
+        else if (g_zeroBelow.size() < 4096) g_zeroBelow[rmgr] = note;
+    }
+    if (changed) {
+        std::string ids;
+        for (const int r : note.rooms) ids += std::format(" {}", r);
+        LOG_INFO(std::format("[LevelLightShare] Story {} room 0 takes {} lamps of story {} through {} floorless quadrants over rooms open to above:{}", S, note.lamps,
+                             S - 1, note.quads, ids.empty() ? " none" : ids));
+    }
+}
+
 // Rooms of a lot near a stair opening (receivers on both sides), plus the rooms that took lamps before: they gather again
 void QueueOpeningRooms(uintptr_t tracker, std::vector<std::pair<int, int>>* sent = nullptr) {
     std::vector<std::pair<int, int>> todo;
@@ -9048,6 +9165,7 @@ void __fastcall OutdoorGather(BYTE* treeLevel, void*, BYTE* room) {
         NoteRoomStructure(room);
         ShareOutdoorLights(treeLevel, room);
         ShareIndoorLights(treeLevel, room);
+        ShareRoomZeroFromBelow(treeLevel, room); // (room 0) after the outdoor share's record (RecordRoom), which it adds to
         ShareRooflessLights(treeLevel, room); // after the indoor share, which starts the room's record again
         ShareRoofedOpenings(treeLevel, room); // (roofed rooms) after it too: it adds to the indoor share's record
         ShareInnerLamps(treeLevel, room);     // (every room) last: it adds to every record above
@@ -9287,6 +9405,7 @@ enum class PassStage : int {
     OutsideStory = 13,       // the crossing outside the story
     NoRoomBelow = 14,        // no indoor room under the crossing
     FloorThere = 15,         // a floor at the crossing
+    BeyondOpenTop = 16,      // room 0 taking a lamp of the story below: the point beyond the open top of the lamp's room
     ExteriorWall = 21,       // IndoorPassImpl: a story's exterior walls (directional maps)
     SegmentStory = 22,       // no manager for the segment's story
     SegmentTile = 23,        // no tile under the segment's middle
@@ -9327,6 +9446,7 @@ const char* PassStageName(int stage) {
     case PassStage::OutsideStory: return "outside_story";
     case PassStage::NoRoomBelow: return "no_room_below";
     case PassStage::FloorThere: return "floor_there";
+    case PassStage::BeyondOpenTop: return "beyond_open_top";
     case PassStage::ExteriorWall: return "exterior_wall";
     case PassStage::SegmentStory: return "segment_story";
     case PassStage::SegmentTile: return "segment_tile";
@@ -11403,7 +11523,7 @@ bool BasisStepImpl(const float* pos, uintptr_t light, float* acc16) {
 }
 void BasisLightBody(BYTE* room, const float* pos, void* light, float* acc) {
     if (g_installed.load(std::memory_order_relaxed) && g_indoorReady && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
-        if (const RoomInfo* info = SolveInfo(room); info && info->indoor && FindCross(*info, reinterpret_cast<uintptr_t>(light)) &&
+        if (const RoomInfo* info = SolveInfo(room); info && (info->indoor || info->id == 0) && FindCross(*info, reinterpret_cast<uintptr_t>(light)) &&
                                                      !FindCross(*info, reinterpret_cast<uintptr_t>(light))->outdoor) {
             const SolveCtx prev = g_ctx;
             if (++g_pointGen == 0) g_pointGen = 1;
@@ -12365,6 +12485,13 @@ void CrossFloorShadow(const RoomInfo& info, void* light, const float* sample, fl
 // 4.: a lamp of another story reaches the point only through openings in every intervening floor, and
 // past the walls of its own room (from the lamp to where the ray crosses that floor). Share of the light, 0 = none;
 // why: PassWhy::Floor when a floor is in the way.
+// An opening of a story's floor at quadrant (ix, iz, q) over room `below` of the story under it: a removed floor over an
+// indoor room (the rule of ReadOpenings); for room 0 (ShareRoomZeroFromBelow) only no placed floor over a room open to above
+bool OpenQuadrant(const RoomInfo& info, uintptr_t level, int below, int ix, int iz, int q) {
+    if (below <= 0) return false;
+    if (info.id != 0) return FloorAt(level, ix, iz, q) == 0;
+    return std::binary_search(info.openBelow.begin(), info.openBelow.end(), below) && !PlacedFloorAt(level, ix, iz, q);
+}
 float IndoorBoundaryPass(const RoomInfo& info, uintptr_t floorLevel, int B, const float* P, const float* Q, float& crossing, PassWhy& why) {
     const auto blocked = [&why, B](PassWhy reason, PassStage stage) {
         why = reason;
@@ -12435,7 +12562,7 @@ float IndoorBoundaryPass(const RoomInfo& info, uintptr_t floorLevel, int B, cons
                 if (!tb || ApexMath::Fabs(*reinterpret_cast<const float*>(tb + 0x78) - h) > 0.01f) return 0;
                 const int jq = Quadrant(px - jx, pz - jz);
                 const uintptr_t bl = mgrBelow ? LightTile(mgrBelow, jx, jz) : 0;
-                return bl && TileRoom(bl, jq) > 0 && FloorAt(floorLevel, jx, jz, jq) == 0 ? 1 : 0;
+                return bl && OpenQuadrant(info, floorLevel, TileRoom(bl, jq), jx, jz, jq) ? 1 : 0;
             };
             const float share = Penumbra::PenumbraShare(x, z, t, kSlabLampRadius, [&](float px, float pz) { return open(px, pz) != 0; });
             if (share <= 0.0f) return !below || TileRoom(below, q) <= 0 ? blocked(PassWhy::Floor, PassStage::NoRoomBelow) : blocked(PassWhy::Floor, PassStage::FloorThere);
@@ -12444,7 +12571,7 @@ float IndoorBoundaryPass(const RoomInfo& info, uintptr_t floorLevel, int B, cons
             return share;
         }
         if (!below || TileRoom(below, q) <= 0) return blocked(PassWhy::Floor, PassStage::NoRoomBelow);
-        if (FloorAt(floorLevel, ix, iz, q) != 0) return blocked(PassWhy::Floor, PassStage::FloorThere);
+        if (!OpenQuadrant(info, floorLevel, TileRoom(below, q), ix, iz, q)) return blocked(PassWhy::Floor, PassStage::FloorThere);
         break;
     }
     crossing = t;
@@ -12484,7 +12611,12 @@ float IndoorPassImpl(const RoomInfo& info, const Cross& c, void* light, const fl
         if(tile&&level&&LevelManager(level)==manager){
             const float plane=*reinterpret_cast<const float*>(tile+0x78);
             const bool beyond=c.floor<info.level?localSample[1]<plane-.01f:localSample[1]>plane+.01f;
-            if(ApexMath::IsFinite(plane)&&beyond&&FloorAt(level,x,z,Quadrant(localSample[0]-x,localSample[2]-z))!=0)return blocked(PassWhy::Floor,PassStage::UnderSlab,boundary);
+            const int q=Quadrant(localSample[0]-x,localSample[2]-z);
+            // (room 0 over a room open to above: no slab there, the row continues that room's wall)
+            const uintptr_t under=info.id==0?StoryManager(info.tracker,boundary-1):0;
+            const uintptr_t underTile=under?LightTile(under,x,z):0;
+            const bool slab=info.id!=0?FloorAt(level,x,z,q)!=0:!(underTile&&OpenQuadrant(info,level,TileRoom(underTile,q),x,z,q));
+            if(ApexMath::IsFinite(plane)&&beyond&&slab)return blocked(PassWhy::Floor,PassStage::UnderSlab,boundary);
         }
     }
     const bool nativeWalls=g_ctx.flags && g_ctx.flags[0];
@@ -12516,6 +12648,21 @@ float IndoorPassImpl(const RoomInfo& info, const Cross& c, void* light, const fl
     // containing the ray's endpoint when it is outside the recipient's story.
     // A native batch can omit its own wall test. That exemption does not cover
     // borrowed lamps: their source, intermediate and recipient segments still need walls.
+    // Room 0 taking a lamp of the story below (ShareRoomZeroFromBelow): from where the ray comes up through a room's open top
+    // to the point, it stays over open tops (OpenQuadrant) but for its last kOpenTopFace: the point lies in that space or on a
+    // wall around it. Walls of this story farther off are no wall of that space (open_rooms_above.h: no roof is known)
+    if (info.id == 0 && previous > 0.0f && currentStory == info.level) {
+        constexpr float kOpenTopFace = 0.3f, kOpenTopStep = 0.25f; // m
+        const uintptr_t under = StoryManager(info.tracker, info.level - 1);
+        const float ax = localLamp[0] + previous * (localSample[0] - localLamp[0]), az = localLamp[2] + previous * (localSample[2] - localLamp[2]);
+        const float dx = localSample[0] - ax, dz = localSample[2] - az, len = ApexMath::Sqrt(dx * dx + dz * dz);
+        for (float d = 0.0f; d < len - kOpenTopFace; d += kOpenTopStep) {
+            const float x = ax + dx * (d / len), z = az + dz * (d / len);
+            const int ix = static_cast<int>(ApexMath::Floor(x)), iz = static_cast<int>(ApexMath::Floor(z)), q = Quadrant(x - ix, z - iz);
+            const uintptr_t tile = under ? LightTile(under, ix, iz) : 0;
+            if (!tile || !OpenQuadrant(info, c.level, TileRoom(tile, q), ix, iz, q)) return blocked(PassWhy::Floor, PassStage::BeyondOpenTop, info.level);
+        }
+    }
     if (currentStory != info.level || g_ctx.basis || !nativeWalls) raySegments[count++] = RaySegment{currentStory, previous, 1.0f};
     if (t_pe) { // (the room lamp probe) the slabs' share and the segments to test
         t_pe->p8[1] = slabShare, t_pe->p8[2] = 1.0f;
@@ -13150,9 +13297,12 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
         g_ctx.yardLight = 0;  // and so does a lamp's skipped wall test (light through doors and windows)
         // outdoor light through openings: a roofed room's lamp of room 0 lights its walls by the same law as the outside walls
         const bool openLamp = g_ctx.info->openings && FindSame(*g_ctx.info, reinterpret_cast<uintptr_t>(light));
+        // room 0: a lamp of a double-height room of the story below (ShareRoomZeroFromBelow), an indoor lamp with no reach law
+        const Cross* openTop = !g_ctx.info->indoor && !g_ctx.info->openBelow.empty() ? FindCross(*g_ctx.info, reinterpret_cast<uintptr_t>(light)) : nullptr;
+        if (openTop && openTop->outdoor) openTop = nullptr;
         // Realistic lamp reach: outdoor wall texels only (floors, lot grass and the directional maps keep the game's law,
         // which the ground atlas matches); before the threshold below, so far lamps are also dropped sooner
-        if (g_reachOn.load(std::memory_order_relaxed) && (!g_ctx.info->indoor || openLamp) && !g_ctx.basis && normal && ApexMath::Fabs(normal[1]) < 0.5f &&
+        if (g_reachOn.load(std::memory_order_relaxed) && ((!g_ctx.info->indoor && !openTop) || openLamp) && !g_ctx.basis && normal && ApexMath::Fabs(normal[1]) < 0.5f &&
             (colour[0] > 0.0f || colour[1] > 0.0f || colour[2] > 0.0f)) {
             const float m = ReachShare(light, sample);
             for (int i = 0; i < 4; i++) colour[i] *= m;
@@ -13168,8 +13318,8 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
         const ApexCycles timed;
         if (t_odSample && OutdoorDelta::RoomHooks()) { // (the room lamp probe) which of Apex's paths this lamp takes, and its colour before it
             const bool yardSame = g_ctx.info->yard && FindSame(*g_ctx.info, reinterpret_cast<uintptr_t>(light));
-            const Cross* pc = innerLamp || openLamp || yardSame || !g_ctx.info->indoor ? nullptr : FindCross(*g_ctx.info, reinterpret_cast<uintptr_t>(light));
-            const int path = innerLamp ? 1 : openLamp || yardSame ? 2 : !g_ctx.info->indoor || (pc && pc->outdoor) ? 3 : pc ? 4 : 0;
+            const Cross* pc = innerLamp || openLamp || yardSame ? nullptr : !g_ctx.info->indoor ? openTop : FindCross(*g_ctx.info, reinterpret_cast<uintptr_t>(light));
+            const int path = innerLamp ? 1 : openLamp || yardSame ? 2 : pc && !pc->outdoor ? 4 : !g_ctx.info->indoor || pc ? 3 : 0;
             OutdoorDelta::OnEvalPath(reinterpret_cast<uintptr_t>(light), path, colour);
         }
         if (innerLamp) InnerShadow(*g_ctx.info, light, sample, colour); // a lamp of a roofed room through an opening (indoor light through openings)
@@ -13218,7 +13368,14 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
                 if (t_pe) t_pe->p7[4] = gain, t_pe->p7[5] = total, t_pe->p7[6] = cut, t_pe->p7[7] = k, t_pe->p7[9] = fadeOnExit.thrScale; // (the room lamp probe)
             }
         }
-        else if (!g_ctx.info->indoor) CrossFloorShadow(*g_ctx.info, light, sample, colour);
+        else if (openTop) {
+            IndoorShadow(*g_ctx.info, light, sample, colour);
+            // the room it shines out of draws it x its normalisation (room+0x160); room 0 has none (InnerShadow's rule)
+            const uintptr_t mgrL = StoryManager(g_ctx.info->tracker, openTop->floor);
+            const BYTE* src = mgrL ? static_cast<const BYTE*>(RoomByIdCached(reinterpret_cast<void*>(mgrL), openTop->room)) : nullptr;
+            if (const float k = src ? InnerLight::NormScale(RoomNormOf(src), 1.0f, true) : 1.0f; k != 1.0f)
+                for (int i = 0; i < 4; i++) colour[i] *= k;
+        } else if (!g_ctx.info->indoor) CrossFloorShadow(*g_ctx.info, light, sample, colour);
         else if (const Cross* c = FindCross(*g_ctx.info, reinterpret_cast<uintptr_t>(light)); c && c->outdoor)
             CrossFloorShadow(*g_ctx.info, light, sample, colour); // a roofless room taking an outdoor lamp of another story
         else IndoorShadow(*g_ctx.info, light, sample, colour);
@@ -14771,6 +14928,15 @@ std::string IndoorDiagText() {
                                 stale ? std::format(" ({} other floor(s) with a stale copy naming this story, ignored)", stale) : std::string(), r.lightW, r.lightH, r.tiles,
                                 r.indoorQuads, r.floorW, r.floorH, r.floorQuads, r.openings, r.lowest);
             rows += std::format("    objects naming story {} through the lot (newest first): {}\n", st, FloorsNaming(mgr));
+            {
+                std::lock_guard<std::mutex> lk(g_zeroBelowMx);
+                if (const auto it = g_zeroBelow.find(mgr); it != g_zeroBelow.end()) {
+                    std::string ids;
+                    for (const int id : it->second.rooms) ids += std::format(" {}", id);
+                    rows += std::format("    room 0 takes {} lamps of story {} through {} floorless quadrants over rooms open to above:{}\n", it->second.lamps, st - 1,
+                                        it->second.quads, ids);
+                }
+            }
         }
         if (!rooms) continue; // lots without indoor rooms (parks, empty lots) are left out
         shown++;

@@ -14,6 +14,8 @@
 #include "features/outdoor_delta_model.h"
 #include "features/rt_lamp_model.h"
 #include "features/room_lamp_move.h"
+#include "features/open_rooms_above.h"
+#include <string>
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
 // map dither (its relight passes 0), but the compose shader keeps the input, so the harness still checks it
 namespace RoomMapDither {
@@ -502,6 +504,211 @@ void BasisChecks() {
     Check(BasisPartNow(std::nanf(""), 1, dark, out) && out[0] == 0.0f && !BasisPartNow(std::nanf(""), 1, step, out), "directional maps: an unknown share is refused only where the step is lit");
 }
 
+// ---- Rooms open to the story above (features/open_rooms_above.h) ----
+// Lot C49C001BCF2DEA20 (F8, 2026-11-02 14:30:47): stories 1, 2 and 3 as the F8 prints them, rooms | floor per tile ('.' room 0,
+// a base-36 room id, 'L' a lamp registered there: its room is taken from the tiles around it; floor '0' never built, '-'
+// removed, 'a' the bare 40000000, '#' placed, '*' mixed: counted as placed). One room per tile: the F8 prints quadrant 0's.
+// Story 2's stairwell (40 removed quadrants) is the house of the 2026-09-29 test ("what an opening is").
+const char* const kLotC49C[3][40] = {
+    {
+        "..............................|000000000000000000000000000000",
+        "..............................|000000000000000000000000000000",
+        "..............................|00000000000000000000aa00000000",
+        "....................L.........|0000000000000000000a**a0000000",
+        "....................88........|000000000000000000a*##*a000000",
+        "...................8L88.......|00000000000000000a*####*a00000",
+        "..................888888......|0000000000000000a*######*aaaa0",
+        ".................8888888L.....|000000000000000a*###########a0",
+        "................L8888L8L......|000000000000000a*###########a0",
+        ".................88888L.......|000000000aaaaaaaa*##########a0",
+        "..........L11333338L8L........|000000000a##################a0",
+        ".........LL1133333L8L.........|000000000a##################a0",
+        ".........LL113333333..........|000000000a##########aaaaaaaaa0",
+        ".........LL1133L3333..........|000000000a##########a000000000",
+        "..........1L133333L3..........|000000000a#########*a000000000",
+        "..........11133L333L..........|000000aaaa########*a0000000000",
+        ".......444L2222L22............|000000a###########a00000000000",
+        "..........L222222LL...........|000000aa##########a00000000000",
+        "..........L2222222............|0000000a##########aaaaaaa00000",
+        ".........LL22L222LL...........|0000000a################a00000",
+        ".........LL2222222.L..........|0000000a################a00000",
+        "...........22222222L22........|00000000aaa#############a00000",
+        "...........2222222222LL.......|0000000000a#############a00000",
+        "...........2222222L222........|0000000000a#############a00000",
+        "...........22222222222........|0000000000a#############a00000",
+        "..........LL222222222LL.......|0000000000a#############a00000",
+        "...........222222L2222........|0000000000a#############a00000",
+        "..........LL2222222222........|0000000000a#############a00000",
+        "...........2222222222LL.......|0000000000a#############a00000",
+        "..........LL222L222222........|0000000000a#############a00000",
+        "...........2222222222LL.......|0000000000a#############a00000",
+        "...........2222222222LL.......|0000000000a#############a00000",
+        "...........2222222222L........|0000000000a#############a00000",
+        "...............2222222........|00000000000aaaa*########a00000",
+        "................LL2222........|000000000000000a*####*aaa00000",
+        ".................L2L2.........|0000000000000000a*##*a00000000",
+        "..................22L.........|00000000000000000a**a000000000",
+        "..............................|000000000000000000aa0000000000",
+        "..............................|000000000000000000000000000000",
+        "..............................|000000000000000000000000000000",
+    },
+    {
+        "..............................|000000000000000000000000000000",
+        "..............................|000000000000000000000000000000",
+        "..............................|00000000000000000000aa00000000",
+        "..............................|0000000000000000000aaaa0000000",
+        "..............................|000000000000000000aaaaaa000000",
+        "..............................|00000000000000000aaaaaaaa00000",
+        "..............................|0000000000000000aaaaaaaaaa0000",
+        ".......................L......|000000000000000aaaaaaaaaaa0000",
+        "........................L.....|000000000000000aaaaaaaaaa00000",
+        "..............................|000000000aaaaaaaaaaaaaaa000000",
+        "..........555555Lc..L.........|000000000a########*aaaa0000000",
+        ".........LL55555ccc..L........|000000000a#########*aa00000000",
+        ".........LL55555cccLL.........|000000000a##########a000000000",
+        ".........LL55555cccc..........|000000000a##########a000000000",
+        "..........55555LccLc..........|000000000a#########*a000000000",
+        "..........555555cLcL..........|000000aaaa########*a0000000000",
+        "..........5555555L............|000000a###########a00000000000",
+        "..........5555555LL...........|000000a###########a00000000000",
+        "..........55555555............|000000a###########a00000000000",
+        "..........55L5555LL...........|00000000aa########a00000000000",
+        "..........555555L5............|000000000a########aaaaa0000000",
+        "...........7777.L.............|000000000aa###########a0000000",
+        "...........777LL..............|0000000000a###########a0000000",
+        "...........777LL..............|0000000000a###########a0000000",
+        "...........L777...............|0000000000a--#########a0000000",
+        "..........LL77LL..............|0000000000a--#########a0000000",
+        "...........7777...............|0000000000a--#########a0000000",
+        "..........LL77LL..............|0000000000a--#########a0000000",
+        "...........7777...............|0000000000a--#########a0000000",
+        "..........LL77LL..............|0000000000a###########a0000000",
+        "...........7777666L...........|0000000000a###########a0000000",
+        "...........77776666L..........|0000000000a###########a0000000",
+        "...........7LL766666L.........|0000000000a###########a0000000",
+        "...............666666L........|00000000000aaaa*######a0000000",
+        "................6666L6........|000000000000000a*####*a0000000",
+        ".................6666L........|0000000000000000a*##*a00000000",
+        "..................66..........|00000000000000000a**a000000000",
+        "..............................|000000000000000000aa0000000000",
+        "..............................|000000000000000000000000000000",
+        "..............................|000000000000000000000000000000",
+    },
+    {
+        "..............................|000000000000000000000000000000",
+        "..............................|000000000000000000000000000000",
+        "..............................|000000000000000000000000000000",
+        "..............................|000000000000000000000000000000",
+        "..............................|000000000000000000000000000000",
+        "..............................|000000000000000000000000000000",
+        "..............................|000000000000000000000000000000",
+        "..............................|000000000000000000000000000000",
+        "..............................|000000000000000000000000000000",
+        "..............................|000000000000000aaaa00000000000",
+        ".................a............|0000000000aa00aa###a0000000000",
+        "..............................|0000000000aa00aa####a000000000",
+        ".................LL...........|0000000000aaaaaa####a000000000",
+        "..............................|0000000000aaaaaa####a000000000",
+        ".................LL...........|0000000000aaaaaa###*a000000000",
+        "..............................|0000000000aaaaaa##*a0000000000",
+        "..............................|0000000000aa00aaaaa00000000000",
+        ".................LL...........|0000000000a000aaaaa00000000000",
+        "..............................|0000000000000aaaaaa00000000000",
+        ".................LL...........|000000000000aaaaaaa00000000000",
+        "..............................|0000000000aaaaaaaaa00000000000",
+        "..............................|0000000000aaaaa000000000000000",
+        "..............................|0000000000aaaaa000000000000000",
+        "..............................|0000000000aaaaa000000000000000",
+        "..............................|0000000000aaaaa000000000000000",
+        "..............LL..............|0000000000aaaaaa00000000000000",
+        "..............................|0000000000aaaaaa00000000000000",
+        "..............LL..............|0000000000aaaaaa00000000000000",
+        "..............................|0000000000aaaaaa00000000000000",
+        "..............LL..............|0000000000aaaaaaaaa00000000000",
+        "..................L...........|0000000000aaaaa##*aa0000000000",
+        "...................L..........|0000000000aaaaa#*aaaa000000000",
+        "....................L.........|0000000000aaaaa*aaaaaa00000000",
+        ".....................L........|00000000000000aaaaaaaaa0000000",
+        "..............................|0000000000000000aaaaaaa0000000",
+        "..............................|00000000000000000aaaaa00000000",
+        "..............................|00000000000000000aaaa000000000",
+        "..............................|000000000000000000aa0000000000",
+        "..............................|000000000000000000000000000000",
+        "..............................|000000000000000000000000000000",
+    },
+};
+struct StoryCells {
+    std::vector<int> room;  // per tile
+    std::vector<char> floor; // per tile
+};
+StoryCells ReadStory(const char* const* rows) {
+    StoryCells s;
+    s.room.assign(40 * 30, 0), s.floor.assign(40 * 30, '0');
+    const auto id = [](char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'z' ? c - 'a' + 10 : 0; };
+    for (int z = 0; z < 40; z++)
+        for (int x = 0; x < 30; x++) s.room[z * 30 + x] = rows[z][x] == 'L' ? -1 : id(rows[z][x]), s.floor[z * 30 + x] = rows[z][31 + x];
+    for (int z = 0; z < 40; z++) // a lamp's tile: the room most of its 8 neighbours have
+        for (int x = 0; x < 30; x++) {
+            if (s.room[z * 30 + x] >= 0) continue;
+            int votes[64] = {}, best = 0;
+            for (int dz = -1; dz <= 1; dz++)
+                for (int dx = -1; dx <= 1; dx++)
+                    if (x + dx >= 0 && x + dx < 30 && z + dz >= 0 && z + dz < 40 && rows[z + dz][x + dx] != 'L') votes[id(rows[z + dz][x + dx])]++;
+            for (int r = 1; r < 64; r++) best = votes[r] > votes[best] ? r : best;
+            s.room[z * 30 + x] = best;
+        }
+    return s;
+}
+// story B over story B - 1: the rooms open to above (walls of story B assumed on every edge: the F8 maps have none), their
+// floorless quadrants, and the openings of ReadOpenings (a removed floor over an indoor room)
+void OpenOver(const StoryCells& below, const StoryCells& b, std::vector<int>& open, int& quads, int& removed) {
+    const auto placed = [&](int x, int z, int) { const char f = b.floor[z * 30 + x]; return f == '#' || f == 'F' || f == '*'; };
+    OpenAbove::Classify(30, 40, [&](int x, int z, int) { return below.room[z * 30 + x]; }, placed, [](int, int) { return true; }, [](int, int) { return true; }, open);
+    quads = removed = 0;
+    for (int i = 0; i < 40 * 30; i++) {
+        quads += !placed(i % 30, i / 30, 0) && std::binary_search(open.begin(), open.end(), below.room[i]) ? 4 : 0;
+        removed += below.room[i] > 0 && b.floor[i] == '-' ? 4 : 0;
+    }
+}
+int OpenQuadsOf(const StoryCells& below, const StoryCells& b, int room) {
+    int n = 0;
+    for (int i = 0; i < 40 * 30; i++) n += below.room[i] == room && !(b.floor[i] == '#' || b.floor[i] == 'F' || b.floor[i] == '*') ? 4 : 0;
+    return n;
+}
+void OpenAboveChecks() {
+    const StoryCells s1 = ReadStory(kLotC49C[0]), s2 = ReadStory(kLotC49C[1]), s3 = ReadStory(kLotC49C[2]);
+    std::vector<int> open2, open3;
+    int quads2 = 0, removed2 = 0, quads3 = 0, removed3 = 0;
+    OpenOver(s1, s2, open2, quads2, removed2);
+    OpenOver(s2, s3, open3, quads3, removed3);
+    const auto has = [](const std::vector<int>& v, int r) { return std::binary_search(v.begin(), v.end(), r); };
+    std::string o2, o3;
+    for (int r : open2) o2 += " " + std::to_string(r);
+    for (int r : open3) o3 += " " + std::to_string(r);
+    std::printf("open to above, lot C49C: story 2 over story 1: rooms%s, %d floorless quadrants (removed-floor openings %d); story 3 over story 2: "
+                "rooms%s, %d quadrants (room 5: %d, room 7: %d; removed %d)\n",
+                o2.c_str(), quads2, removed2, o3.c_str(), quads3, OpenQuadsOf(s2, s3, 5), OpenQuadsOf(s2, s3, 7), removed3);
+    Check(removed2 == 40 && removed3 == 0, "open to above: the removed-floor openings (ReadOpenings) are unchanged: 40 on story 2, none on story 3");
+    Check(has(open3, 5) && has(open3, 7), "open to above: story 2's rooms 5 and 7 (the red lamps) are open to story 3");
+    Check(OpenQuadsOf(s2, s3, 5) >= 230 && OpenQuadsOf(s2, s3, 5) <= 320, "open to above: 230-320 floorless quadrants over room 5 (whole tiles here: the F8 map has one room per tile)");
+    Check(!has(open3, 12) && !has(open2, 1) && !has(open2, 2) && !has(open2, 3) && !has(open2, 4),
+          "open to above: no room with a floor placed over it (story 2's room 12, story 1's rooms 1 to 4: their ceiling's bare ring stays closed)");
+    // the walls: a 3 x 3 room (1) at x 1..3, z 1..3 of a 6 x 6 grid with no floor over it, and a 3 x 3 neighbour (2) at x 4..5
+    const auto room = [](int x, int z, int) { return z >= 1 && z <= 3 ? x >= 1 && x <= 3 ? 1 : x >= 4 ? 2 : 0 : 0; };
+    const auto bare = [](int, int, int) { return false; };
+    std::vector<int> open;
+    OpenAbove::Classify(6, 6, room, bare, [](int, int) { return true; }, [](int, int) { return true; }, open);
+    Check(open == std::vector<int>{1, 2}, "open to above: rooms walled all round on the story above are open");
+    OpenAbove::Classify(6, 6, room, bare, [](int, int Z) { return Z == 1; }, [](int, int) { return false; }, open);
+    Check(open.empty(), "open to above: a single-storey room under its roof (a wall above along one side only) stays closed");
+    // walls round both, none between them: one space two rooms wide
+    OpenAbove::Classify(6, 6, room, bare, [](int, int Z) { return Z == 1 || Z == 4; }, [](int X, int) { return X == 1 || X == 6; }, open);
+    Check(open == std::vector<int>{1, 2}, "open to above: two rooms open to above with no wall between them on the story above");
+    // room 1 floored above but for a row along one wall (6 of its 9 tiles): it keeps its ceiling
+    OpenAbove::Classify(6, 6, room, [](int x, int z, int) { return x <= 3 && z >= 2; }, [](int, int) { return true; }, [](int, int) { return true; }, open);
+    Check(open == std::vector<int>{2}, "open to above: a room floored above but along one wall keeps its ceiling");
+}
+
 int main() {
     std::mt19937 rng(20261013);
     std::uniform_real_distribution<float> U(0.0f, 1.0f);
@@ -794,6 +1001,7 @@ int main() {
         Check(floorOne && farOne, "moved lamps: GameOverLaw is 1 where the law raises nothing");
     }
     BasisChecks();
+    OpenAboveChecks();
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }
