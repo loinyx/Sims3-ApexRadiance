@@ -254,13 +254,31 @@ lamp's position, not on its colour or intensity.
    the room to its solve. Still the game's: a move into another room, a new lamp, a deleted lamp (stage 4, part 2).
    Also fixed: `AddKeptParts` set the batch's lamp constants back after its draws (ComposeK0PS's `MaskAll` read the last kept
    lamp's law: 118 of 512 masked texels within 1/255 before, 512 after). `rt_lamps_test` 69 checks, `outdoor_delta_test` 83.
+23. Physical model, stage 4, part 2 (02/11): moves into another room, new and deleted lamps. `FUN_006c7ba0` marks the room a
+   lamp left at 0x006C7CCA, right before its mark of the new room at 0x006C7CD6 (GameAddr `LampLeftMarkCall`, `3B 46 1C 74 09 8B
+   4E 14 50 E8` +9, unique in `TS3W.exe`). `LeftThunk` holds that mark until the new room's `MarkDecide`, which drops it when
+   `TakesLampEditPhys` takes the move ("move to another room": the rooms listing the lamp and its new room settle) and makes it
+   otherwise. A move into room 0 stays the game's (Real-time outdoor lamps draws room 0's lamps from room 0's light list, which
+   only its gather fills); room 0 now draws a lamp that left room 0 with a fresh row (it was out of its base as a batch lamp). A
+   lamp first seen in a room > 0 (new, or moved in from another story) is taken the same way, with the mark of room 0 its new light entry "left" (its
+   constructor sets entry+0x1C to 0 at 0x006C8061) ("new" settles its room only
+   when no room lists it yet; "move to another story" settles). A lamp of a basement is refused. A deleted lamp keeps the game's
+   object removal marks (0x006C75A1 in `FUN_006c7550`, from `FUN_006c7610`, for its light and occluder entries: its room's light
+   list holds the removed light until that room gathers again, and its object's 3D blockers are gone); the snapshot notes it
+   gone (`PhysLampPick::NoteGone`) and no kept list draws it again. The occluder entry of a moved or new lamp's object still
+   marks the room under it (0x006C7939, its 3D blockers). After an outdoor lamp's move or colour edit, `RtOutdoorLamps::
+   AfterRoomUpdate` no longer sends the rooms that take room 0's lamps when every story draws the edited lamps
+   (`OutdoorDelta::PhysCoversLamp`); a switch or an intensity change still sends them (their bases' normalisation and ambient).
+   Fresh rows: room 0 takes a roofed room's lamp of the story above at that room's norm scale, and a fresh lamp of a roofed room
+   of story 0 or 1 is an exit lamp of story 0's room 0 (its alpha only on texels its solve marked as exit ground); the reach share
+   of a fresh lamp stays approximate (the openings and open-top tests read the gather's lists). `outdoor_delta_test` 86 checks.
 
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Keep indoor lamps for GPU | `gpuRoomLampsCapture` | bool | off | | Developer only, with Lamp lighting: Instant. Keeps each room solve of the active lot and draws its lamps on the GPU; colour, intensity and switch edits of lamps drawn in every room listing them solve no room at once (the directional maps objects read are written again at the end of the room update) (their rooms are solved 2 s after the last edit); with the probe on, logs the self-checks |
-| Indoor lamp model | `roomLampModel` | enum | replica | replica, physical | Developer only, shown with Keep indoor lamps for GPU on. Replica: everything above. Physical: see 16 to 22; rooms > 0 and room 0 drawn from the lot lamps' laws by reach; value, switch and in-room move edits solve no room (a switch or an intensity change settles its rooms 2 s later). A change drops the kept rooms and sends the active lot's rooms to their solve |
+| Indoor lamp model | `roomLampModel` | enum | replica | replica, physical | Developer only, shown with Keep indoor lamps for GPU on. Replica: everything above. Physical: see 16 to 23; rooms > 0 and room 0 drawn from the lot lamps' laws by reach; value, switch and move edits and new lamps solve no room (a switch, an intensity change, a move into another room or a new lamp settles its rooms 2 s later; a move into room 0 and a deleted lamp take the game's solves). A change drops the kept rooms and sends the active lot's rooms to their solve |
 
 ## Limitations
 
@@ -338,7 +356,10 @@ lamp's position, not on its colour or intensity.
   solved, M maps relit in N ms (frames +k)` / `physical <kind>: lamp L left to the room solves (why)`, every 10 s with edits `physical lamp
   edits in the last 10 s: T taken, R left to the room solves; S room solves of the lot within 3 s of an edit taken outside the
   settle, Z settle or resend solves; physical relights M maps, X ms CPU (largest frame Y ms)`, `Story S room R: solved off the
-  light tree thread, its kept physical copy stays drawn (the same geometry); sent to one solve here`; with the probe,
+  light tree thread, its kept physical copy stays drawn (the same geometry); sent to one solve here`, `physical: lamp L left the
+  lot's registry (deleted, or moved to a basement or off the lot): no map draws it now; its rooms take the game's object removal
+  marks`, `[LampMarkFilter] physical move to another room: lamp L left to the room solves (into room 0: ...)`, `[RtOutdoorLamps]
+  physical: the rooms that take room 0's lamps not sent after the edit of N lamps (every story draws them from their laws)`; with the probe,
   `... physical vs the game's last solve: N texels, P% within 2/255, mean M levels, X% brighter > 8 levels, Y% darker > 8
   levels`; `not kept (the 192 MB budget: ...)`, `not kept (no memory)`, `not kept (why)`; with
   the probe on, `Story S room R class C self-check: N texels lit, P% within 2/255 of the solve's sum recomposed from the kept

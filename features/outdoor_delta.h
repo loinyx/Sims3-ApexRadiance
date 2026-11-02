@@ -78,7 +78,8 @@ void RoomFinalized(const void* room, bool gather = true);
 // (physical indoor lamps, stage 4) the active lot's registered lights for the render thread (gpu_room_lamps.cpp,
 // rt_outdoor_lamps.cpp): walked on the light tree thread after a room update (LevelLightShare::RegisteredLights), at most every
 // 250 ms and at once after a lamp edit taken; each with its story, the room it is registered in, that room's normalisation and
-// roofless flag (a room 0: outdoor). Returns the snapshot's version (0: none yet)
+// roofless flag (a room 0: outdoor). Returns the snapshot's version (0: none yet). gone: the lot's lamps that left the registry
+// since they were seen (deleted, or moved to a basement or off the lot; PhysLampPick::NoteGone), never drawn from a kept list
 struct LotLamp {
     uintptr_t light = 0;
     int story = 0, home = 0;
@@ -86,15 +87,19 @@ struct LotLamp {
     bool homeOutdoor = false;
     bool operator==(const LotLamp&) const = default;
 };
-uint32_t LotLamps(std::vector<LotLamp>& out);
+uint32_t LotLamps(std::vector<LotLamp>& out, std::vector<uintptr_t>* gone = nullptr);
 // (physical indoor lamps, stage 4; LampMarkFilter's lamp entry update, light tree thread) an edit of `light` (kind "value",
-// "switch on", "switch off" or "move": a move within its room; a literal) of the active lot when every story 0 .. 7 draws the
+// "switch on", "switch off", "move" (within its room), "move to another room", "move to another story" or "new" (first seen;
+// settles only when no room lists it yet); a literal) of a story 0 .. 7 of the active lot when every story 0 .. 7 draws the
 // lot's lamps from their laws now (phys_lamp_pick.h EditRefusal: each room > 0 a kept physical solve of the class it shows,
 // drawn on every map, the lamp not in its base; each room 0 drawn physically): true = the edit marks no room, the maps its
 // reach meets are relit from its law. settle: a switch or an intensity change (the rooms' normalisation, ambient and bounce in
 // their bases change): the rooms listing it and its own room are solved once 2 s after its last edit, with no urgency; a
 // colour or a move solves nothing. dry: only whether it would be taken now (no log, nothing noted)
 bool TakesLampEditPhys(uintptr_t tl, uintptr_t light, const char* kind, bool settle, bool dry = false);
+// (light tree thread) whether every story 0 .. 7 of the active lot (tracker) draws `light` from its law now, as
+// TakesLampEditPhys finds it (RtOutdoorLamps::AfterRoomUpdate: an outdoor lamp's edit then sends no room that takes it)
+bool PhysCoversLamp(uintptr_t tracker, uintptr_t light);
 // GPU room lamps stage 2b (LampMarkFilter's lamp entry update, light tree thread): a value or switch edit of `light` (wasOn,
 // on: before and after) that every room of its lot listing it draws on the GPU (a room > 0: its kept solve of the class it
 // shows, every texel drawn, the lamp not in its base; a room 0: Real-time outdoor lamps draws it). True: the edit marks no

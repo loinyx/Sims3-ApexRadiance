@@ -146,6 +146,7 @@ std::atomic<DWORD> g_physMoveAt{0};
 // (stage 4) the active lot's registered lights this round (OutdoorDelta::LotLamps) and where each is (light -> index)
 std::vector<OutdoorDelta::LotLamp> g_lot;
 std::unordered_map<uintptr_t, size_t> g_lotAt;
+std::vector<uintptr_t> g_lotGone; // (the lot's lamps that left its registry: a kept list holding one no longer draws it)
 // (stage 4) the physical relights' CPU cost since TakeRelightCost (maps, ms, the largest round's ms) and this round's
 int g_costMaps = 0;
 double g_costMs = 0.0, g_costWorst = 0.0, g_costRound = 0.0;
@@ -357,6 +358,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                 Mix(es, &light, sizeof light), Mix(es, &lotLaw, sizeof lotLaw), Mix(es, &reach, 1);
             };
             for (size_t l = 0; l < e.listed.size(); l++) {
+                if (std::find(g_lotGone.begin(), g_lotGone.end(), e.listed[l]) != g_lotGone.end()) continue; // (deleted: its light may be freed)
                 float mult = l < e.listedMult.size() ? e.listedMult[l] : 1.0f;
                 char reach = l < e.listedReach.size() ? e.listedReach[l] : 0;
                 if (const auto at = g_lotAt.find(e.listed[l]); at != g_lotAt.end() && l < e.listedHome.size() && g_lot[at->second].home != e.listedHome[l])
@@ -564,9 +566,9 @@ void BeginFrame() {
     // (physical, stage 4) the round's lot lamps, its relights' cost, and the edits whose maps are all relit (none relit in the last
     // 2 rounds, at least one relit; or none in 2 s: logged as such)
     g_costWorst = std::max(g_costWorst, g_costRound), g_costMs += g_costRound, g_costRound = 0.0;
-    g_lot.clear(), g_lotAt.clear();
+    g_lot.clear(), g_lotAt.clear(), g_lotGone.clear();
     if (OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical()) {
-        OutdoorDelta::LotLamps(g_lot);
+        OutdoorDelta::LotLamps(g_lot, &g_lotGone);
         for (size_t i = 0; i < g_lot.size(); i++) g_lotAt.emplace(g_lot[i].light, i);
     }
     std::vector<PhysEdit> done;

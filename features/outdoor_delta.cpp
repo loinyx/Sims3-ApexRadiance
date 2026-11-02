@@ -3893,6 +3893,8 @@ constexpr DWORD kLotLampsMs = 250;
 std::mutex g_lotLampsMx;
 std::vector<LotLamp> g_lotLamps;
 uint32_t g_lotLampsVer = 0;
+std::vector<uintptr_t> g_lotGone;    // (under g_lotLampsMx) PhysLampPick::NoteGone
+uintptr_t g_lotLampsTracker = 0;     // (light tree thread) the lot of the last snapshot
 DWORD g_lotLampsAt = 0; // (light tree thread)
 std::atomic<bool> g_lotLampsDirty{false};
 } // namespace
@@ -3918,11 +3920,30 @@ void RefreshLotLamps() {
         out.push_back(l);
     }
     std::lock_guard<std::mutex> lk(g_lotLampsMx);
-    if (out != g_lotLamps) g_lotLamps.swap(out), g_lotLampsVer++;
+    if (out == g_lotLamps) return;
+    // (a lamp deleted: the object removal marks its rooms, 0x006C75A1 for its light and occluder entries, which stay the game's:
+    // its room's light list holds the removed light until that room gathers again, and its object's 3D blockers are gone. A kept
+    // list holding it no longer draws it from here on)
+    std::vector<uintptr_t> before, seen;
+    if (tracker == g_lotLampsTracker)
+        for (const LotLamp& l : g_lotLamps) before.push_back(l.light);
+    else
+        g_lotGone.clear();
+    for (const LotLamp& l : out) seen.push_back(l.light);
+    if (KeptLog())
+        for (const uintptr_t l : before)
+            if (std::find(seen.begin(), seen.end(), l) == seen.end())
+                LOG_INFO(std::format("[GpuRoomLamps] physical: lamp {:08X} left the lot's registry (deleted, or moved to a basement or off the lot): no map draws it now; its rooms "
+                                     "take the game's object removal marks",
+                                     l));
+    PhysLampPick::NoteGone(before, seen, g_lotGone);
+    g_lotLampsTracker = tracker;
+    g_lotLamps.swap(out), g_lotLampsVer++;
 }
-uint32_t LotLamps(std::vector<LotLamp>& out) {
+uint32_t LotLamps(std::vector<LotLamp>& out, std::vector<uintptr_t>* gone) {
     std::lock_guard<std::mutex> lk(g_lotLampsMx);
     out = g_lotLamps;
+    if (gone) *gone = g_lotGone;
     return g_lotLampsVer;
 }
 void RoomFinalized(const void* room, bool gather) {
@@ -4497,30 +4518,30 @@ void BasisDue() {
     }
 }
 
-bool TakesLampEditPhys(uintptr_t tl, uintptr_t light, const char* kind, bool settle, bool dry) {
-    if (!g_capture.load(std::memory_order_relaxed) || !g_physical.load(std::memory_order_relaxed) || !tl || !light) return false;
-    const auto refuse = [&](const std::string& why) {
-        if (dry) return false;
-        c_physRefused.fetch_add(1, std::memory_order_relaxed);
-        if (KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] physical {}: lamp {:08X} left to the room solves ({})", kind, light, why));
-        return false;
-    };
-    const uintptr_t tracker = TlTracker(tl);
-    if (!tracker || tracker != RtOutdoorLamps::ActiveTracker()) return refuse("not a lamp of the active lot");
+namespace {
+// (physical, stage 4) whether every story 0 .. 7 of the lot draws `light` from its law now (phys_lamp_pick.h EditRefusal): empty,
+// or why not. Also the rooms > 0 listing it (their (story, id) and directional maps), whether any room lists it and the room it
+// is registered in
+struct PhysCover {
+    std::vector<std::pair<int, int>> ids;
+    std::vector<BasisRoomRef> basisRooms;
+    bool listed = false;
+    int reg = -1;
+};
+std::string PhysCoverWhy(uintptr_t tracker, uintptr_t light, PhysCover& o) {
     std::vector<void*> rooms;
     LevelLightShare::LotRooms(tracker, rooms);
     std::vector<PhysLampPick::RoomFact> facts;
-    std::vector<std::pair<int, int>> ids;  // the rooms > 0 listing it: (story, id), the settle's
-    std::vector<BasisRoomRef> basisRooms; // (stage 4) the same rooms, for their directional maps
     uint64_t lot = 0;
     uintptr_t raw[1024];
     for (void* room : rooms) {
         RoomRead rr;
-        if (!ReadRoom(static_cast<const BYTE*>(room), rr)) return refuse("a room of the lot could not be read");
+        if (!ReadRoom(static_cast<const BYTE*>(room), rr)) return "a room of the lot could not be read";
         PhysLampPick::RoomFact f;
         f.story = rr.story, f.id = rr.id;
         const int n = ReadList(static_cast<const BYTE*>(room), raw, static_cast<int>(std::size(raw)));
         f.lists = n > 0 && std::find(raw, raw + n, light) != raw + n;
+        o.listed = o.listed || f.lists;
         if (rr.story >= 0 && rr.story <= 7) {
             lot = rr.lot;
             if (rr.id == 0) f.drawn = RtOutdoorLamps::PhysCoversRoom0(room);
@@ -4533,34 +4554,59 @@ bool TakesLampEditPhys(uintptr_t tl, uintptr_t light, const char* kind, bool set
                 f.kept = k && k->physical;
                 f.drawn = f.kept && (!k->maps || GpuRoomLamps::Drawn(room, k->version, k->maps));
                 f.baked = f.kept && std::find(k->baked.begin(), k->baked.end(), light) != k->baked.end();
-                if (f.lists) ids.emplace_back(rr.story, rr.id), basisRooms.push_back(BasisRoomRef{KeyOf(room, rr.cls), rr.story, rr.id});
+                if (f.lists) o.ids.emplace_back(rr.story, rr.id), o.basisRooms.push_back(BasisRoomRef{KeyOf(room, rr.cls), rr.story, rr.id});
             }
         }
         facts.push_back(f);
     }
     GpuLampLaw::Lamp law;
-    int type = 0, reg = -1;
-    if (!RtOutdoorLamps::WorldLaw(light, lot, false, law, type, reg)) return refuse("no GPU law (not a lamp the GPU draws)");
+    int type = 0;
+    if (!RtOutdoorLamps::WorldLaw(light, lot, false, law, type, o.reg)) return "no GPU law (not a lamp the GPU draws)";
     int at = -1;
-    if (const char* why = PhysLampPick::EditRefusal(facts, at))
-        return refuse(at >= 0 ? std::format("story {} room {}: {}", facts[at].story, facts[at].id, why) : std::string(why));
+    if (const char* why = PhysLampPick::EditRefusal(facts, at)) return at >= 0 ? std::format("story {} room {}: {}", facts[at].story, facts[at].id, why) : std::string(why);
+    return {};
+}
+} // namespace
+bool TakesLampEditPhys(uintptr_t tl, uintptr_t light, const char* kind, bool settle, bool dry) {
+    if (!g_capture.load(std::memory_order_relaxed) || !g_physical.load(std::memory_order_relaxed) || !tl || !light) return false;
+    const auto refuse = [&](const std::string& why) {
+        if (dry) return false;
+        c_physRefused.fetch_add(1, std::memory_order_relaxed);
+        if (KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] physical {}: lamp {:08X} left to the room solves ({})", kind, light, why));
+        return false;
+    };
+    const uintptr_t tracker = TlTracker(tl);
+    if (!tracker || tracker != RtOutdoorLamps::ActiveTracker()) return refuse("not a lamp of the active lot");
+    // (a lamp of a basement: its rooms keep the game's solves and gather it only when marked)
+    int story = -99;
+    if (!CopyBytes(&story, reinterpret_cast<const void*>(tl + 0x1A0), sizeof story) || story < 0 || story > 7) return refuse("a lamp of a basement (its rooms keep the game's solves)");
+    PhysCover o;
+    if (const std::string why = PhysCoverWhy(tracker, light, o); !why.empty()) return refuse(why);
     if (dry) return true;
     c_physTaken.fetch_add(1, std::memory_order_relaxed);
     g_lastPhysEdit.store(GetTickCount() | 1, std::memory_order_relaxed);
     g_lotLampsDirty.store(true, std::memory_order_relaxed); // (its room or story as registered now, for the maps' rows)
     GpuRoomLamps::NotePhysEdit(light, kind);
-    const bool move = std::strcmp(kind, "move") == 0;
-    QueueBasis(light, kind, std::strcmp(kind, "switch off") == 0, move, basisRooms);
+    const bool move = std::strncmp(kind, "move", 4) == 0;
+    QueueBasis(light, kind, std::strcmp(kind, "switch off") == 0, move, o.basisRooms);
+    // (a new lamp no room lists yet settles its own room; one a room lists already, first seen since the filter started, adds
+    // nothing new to their bases)
+    if (std::strcmp(kind, "new") == 0) settle = settle && !o.listed;
     if (settle) { // (its own room too: its normalisation and ambient take the lamp's light)
-        int story = -99;
-        if (reg > 0 && CopyBytes(&story, reinterpret_cast<const void*>(tl + 0x1A0), sizeof story) && std::find(ids.begin(), ids.end(), std::make_pair(story, reg)) == ids.end())
-            ids.emplace_back(story, reg);
+        if (o.reg > 0 && std::find(o.ids.begin(), o.ids.end(), std::make_pair(story, o.reg)) == o.ids.end()) o.ids.emplace_back(story, o.reg);
         Settle& s = g_settle[light];
         s.tracker = tracker, s.at = GetTickCount();
-        for (const auto& id : ids)
+        for (const auto& id : o.ids)
             if (std::find(s.rooms.begin(), s.rooms.end(), id) == s.rooms.end()) s.rooms.push_back(id);
+    } else if (const auto it = g_settle.find(light); it != g_settle.end()) {
+        it->second.at = GetTickCount(); // (a drag's later steps: a lamp dragged into another room settles once the drag is over)
     }
     return true;
+}
+bool PhysCoversLamp(uintptr_t tracker, uintptr_t light) {
+    if (!g_capture.load(std::memory_order_relaxed) || !g_physical.load(std::memory_order_relaxed) || !tracker || !light || tracker != RtOutdoorLamps::ActiveTracker()) return false;
+    PhysCover o;
+    return PhysCoverWhy(tracker, light, o).empty();
 }
 bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move, bool dry) {
     if (!g_capture.load(std::memory_order_relaxed) || !tl || !light || (dry && move)) return false;

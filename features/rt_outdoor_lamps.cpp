@@ -97,6 +97,7 @@ std::atomic<bool> g_option{false}, g_on{false}, g_watch{false};
 bool g_restartRequested = false;
 std::atomic<uint32_t> g_proxyEpoch{1};
 std::atomic<long> c_relights{0}, c_mapsRelit{0}, c_tiles{0}, c_edits{0}, c_editsRefused{0}, c_sends{0}, c_binds{0}, c_proxyBuilds{0};
+std::atomic<long> c_physUnsent{0}; // (physical indoor lamps) edits whose room-0 dependents were not sent (AfterRoomUpdate)
 std::atomic<float> g_lastMs{0.0f}, g_lastGpuMs{-1.0f}, g_lastEditMs{-1.0f};
 std::string g_inactive;             // render thread: why the option does nothing now ("" = active)
 std::string g_inactiveLogged;       // the last reason logged
@@ -436,6 +437,7 @@ std::vector<EditNote> g_edits;                  // edits not yet shown (under g_
 struct SendDue {
     DWORD at = 0;                 // the last edit
     bool moved = false;           // one of them moved a lamp
+    bool settle = false;          // one of them switched a lamp or changed its intensity
     std::vector<uintptr_t> lamps; // the lamps edited (the roofed rooms that saw a door of one are sent)
 };
 std::map<std::pair<uintptr_t, int>, SendDue> g_sendDue;
@@ -2321,17 +2323,23 @@ void Frame(IDirect3DDevice9* dev) {
             // the lamps its solve did not list (moved here, switched on, new) with fresh rows; never one the base holds (listed, not
             // out of it) nor an outdoor lamp the batches above draw
             std::vector<OutdoorDelta::LotLamp> lot;
-            OutdoorDelta::LotLamps(lot);
+            std::vector<uintptr_t> gone;
+            OutdoorDelta::LotLamps(lot, &gone);
             s.qLights.clear(), s.qRow.clear();
-            std::vector<uintptr_t> cand(s.pLights);
-            std::vector<std::array<float, 3>> candRow(s.pRow);
+            std::vector<uintptr_t> cand;
+            std::vector<std::array<float, 3>> candRow;
+            for (size_t l = 0; l < s.pLights.size() && l < s.pRow.size(); l++) // (a lamp deleted since: its light may be freed)
+                if (std::find(gone.begin(), gone.end(), s.pLights[l]) == gone.end()) cand.push_back(s.pLights[l]), candRow.push_back(s.pRow[l]);
             for (const OutdoorDelta::LotLamp& L : lot) {
-                if (s.kept.count(L.light) || std::find(cand.begin(), cand.end(), L.light) != cand.end()) continue;
+                // (a lamp this map's batches drew, out of room 0 since: out of the base too, drawn fresh here now)
+                if ((s.kept.count(L.light) && !s.drawn.count(L.light)) || std::find(s.pLights.begin(), s.pLights.end(), L.light) != s.pLights.end()) continue;
                 LampRead r;
                 if (!ReadLamp(L.light, r) || RtLampModel::Drawn(r.f, g_lotId)) continue;
-                // shortcut: a fresh lamp is not an exit lamp here (the exit ground's alpha takes it at room 0's next solve)
+                // shortcut: a fresh exit lamp's light reaches the exit ground's alpha only on the texels room 0's solve marked (bit 4,
+                // set when it kept an exit lamp); its next solve marks them
                 cand.push_back(L.light);
-                candRow.push_back({PhysLampPick::NormKFresh(L.story, L.home, L.homeNorm, s.story, 0, 1.0f, true), PhysLampPick::ReachFresh(L.homeOutdoor, true) ? 1.0f : 0.0f, 0.0f});
+                candRow.push_back({PhysLampPick::NormKFresh(L.story, L.home, L.homeNorm, s.story, 0, 1.0f, true, L.homeOutdoor), PhysLampPick::ReachFresh(L.homeOutdoor, true) ? 1.0f : 0.0f,
+                                   PhysLampPick::ExitFresh(s.story, L.story, L.home, L.homeOutdoor) ? 1.0f : 0.0f});
             }
             PhysLampPick::Box box;
             std::memcpy(box.lo, s.pBox, sizeof box.lo), std::memcpy(box.hi, s.pBox + 3, sizeof box.hi);
@@ -2973,7 +2981,7 @@ bool HandlesLamp(uintptr_t tl, uintptr_t light, int room) {
     if (!handled && g_cover.lamps.count(light)) c_editsRefused.fetch_add(1, std::memory_order_relaxed);
     return handled;
 }
-void NoteLampEdit(uintptr_t tl, uintptr_t light, int kind) {
+void NoteLampEdit(uintptr_t tl, uintptr_t light, int kind, bool settle) {
     int story = -99;
     const uintptr_t tracker = TrackerOfTl(tl, story);
     if (!tracker) return;
@@ -2988,6 +2996,7 @@ void NoteLampEdit(uintptr_t tl, uintptr_t light, int kind) {
             SendDue& d = g_sendDue[{tracker, story}];
             d.at = GetTickCount() | 1;
             d.moved = d.moved || kind != 0;
+            d.settle = d.settle || settle;
             if (std::find(d.lamps.begin(), d.lamps.end(), light) == d.lamps.end() && d.lamps.size() < 64) d.lamps.push_back(light);
         }
     }
@@ -3014,6 +3023,7 @@ void AfterRoomUpdate(const void* tl) {
     const DWORD now = GetTickCount();
     struct Due {
         unsigned mask = 0;
+        bool settle = false;
         std::vector<uintptr_t> lamps;
     };
     std::map<uintptr_t, Due> due;
@@ -3027,12 +3037,26 @@ void AfterRoomUpdate(const void* tl) {
             }
             Due& d = due[it->first.first];
             d.mask |= 1u << it->first.second;
+            d.settle = d.settle || it->second.settle;
             for (uintptr_t l : it->second.lamps)
                 if (std::find(d.lamps.begin(), d.lamps.end(), l) == d.lamps.end()) d.lamps.push_back(l);
             it = g_sendDue.erase(it);
         }
     }
-    for (const auto& [tracker, d] : due) c_sends.fetch_add(LevelLightShare::SendRoom0DependentsTail(tracker, d.mask, &d.lamps), std::memory_order_relaxed);
+    for (const auto& [tracker, d] : due) {
+        // (physical indoor lamps, stage 4) every story 0 .. 7 of the active lot draws the edited lamps from their laws in every room
+        // > 0 (OutdoorDelta::PhysCoversLamp): a move or a colour change sends none of those rooms. A switch or an intensity change
+        // still sends them, as an indoor lamp's settle (their normalisation, ambient and bounce in their bases take its light)
+        if (!d.settle && !d.lamps.empty() && d.lamps.size() < 64 && OutdoorDelta::RoomLampPhysical() &&
+            std::all_of(d.lamps.begin(), d.lamps.end(), [tracker](uintptr_t l) { return OutdoorDelta::PhysCoversLamp(tracker, l); })) {
+            c_physUnsent.fetch_add(1, std::memory_order_relaxed);
+            if (LogAllowed())
+                LOG_INFO(std::format("[RtOutdoorLamps] physical: the rooms that take room 0's lamps not sent after the edit of {} lamps (every story draws them from their laws)",
+                                     d.lamps.size()));
+            continue;
+        }
+        c_sends.fetch_add(LevelLightShare::SendRoom0DependentsTail(tracker, d.mask, &d.lamps), std::memory_order_relaxed);
+    }
 }
 void NoteRoomSolved(const void* room, bool gather) {
     if (!g_watch.load(std::memory_order_relaxed) || !room) return;
@@ -3107,10 +3131,10 @@ std::string Status() {
     }
     return std::format("{} | lot {:08X}: {} maps ({} relit and bound in place of the game's, {} usable), {} lamps drawn on the GPU, every story covered: {} | relights {} "
                        "({} maps, {} shadow tiles), last {:.2f} ms CPU, GPU {} ms | lamp edits taken {} (refused while not covered {}), last edit relit {} ms after it, "
-                       "rooms sent after edits {} | room 0s sent to gather a lamp they lost {} | occluders read {} | copies bound {} times | its own cost {:.3f} ms a frame{}",
+                       "rooms sent after edits {} (edits whose rooms the physical model drew instead {}) | room 0s sent to gather a lamp they lost {} | occluders read {} | copies bound {} times | its own cost {:.3f} ms a frame{}",
                        st, static_cast<uint32_t>(g_lotId), g_slots.size(), relit, ok, lamps, full ? "yes" : "no", c_relights.load(), c_mapsRelit.load(), c_tiles.load(),
                        g_lastMs.load(), g_lastGpuMs.load() >= 0.0f ? std::format("{:.2f}", g_lastGpuMs.load()) : std::string("-"), c_edits.load(), c_editsRefused.load(),
-                       g_lastEditMs.load() >= 0.0f ? std::format("{:.1f}", g_lastEditMs.load()) : std::string("-"), c_sends.load(), c_repairs.load(), c_proxyBuilds.load(), binds,
+                       g_lastEditMs.load() >= 0.0f ? std::format("{:.1f}", g_lastEditMs.load()) : std::string("-"), c_sends.load(), c_physUnsent.load(), c_repairs.load(), c_proxyBuilds.load(), binds,
                        g_frameMsSum, g_budgetOut ? " | the lot's kept parts overflow the memory budget" : "");
 }
 

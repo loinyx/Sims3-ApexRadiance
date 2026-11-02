@@ -60,16 +60,35 @@ inline Use UseOf(uintptr_t light, const std::vector<uintptr_t>& listed, const st
 }
 // A fresh lamp's norm scale in a room (outdoor_delta.cpp NormKOf's lookup without the record's innerSrc, which holds only
 // lamps it gathered): a lamp registered in another room of the same story shines at that room's normalisation against this
-// one's; else 1
-inline float NormKFresh(int lampStory, int lampHome, float homeNorm, int roomStory, int roomId, float hereNorm, bool hereOutdoor) {
-    if (lampStory != roomStory || lampHome <= 0 || lampHome == roomId || !std::isfinite(homeNorm) || !std::isfinite(hereNorm)) return 1.0f;
+// one's; room 0 also takes a lamp of a roofed room of the story above at that room's (the record's innerUp, InnerShadow's
+// source of a lamp shining down out of the story above); else 1. (Whether the lamp is in sight through an opening is the
+// lamp's shadow tile's: the gather's own test only leaves out lamps it cannot see.)
+inline float NormKFresh(int lampStory, int lampHome, float homeNorm, int roomStory, int roomId, float hereNorm, bool hereOutdoor, bool homeOutdoor = true) {
+    const bool up = roomId == 0 && lampStory == roomStory + 1 && !homeOutdoor;
+    if ((lampStory != roomStory && !up) || lampHome <= 0 || (!up && lampHome == roomId) || !std::isfinite(homeNorm) || !std::isfinite(hereNorm)) return 1.0f;
     return InnerLight::NormScale(homeNorm, hereNorm, hereOutdoor);
 }
 // A fresh lamp's realistic reach share (LevelLightShare::ReachAppliesIn without the record's sets): an outdoor room takes it
 // from every lamp, a roofed room from an outdoor lamp (one through its openings)
-// shortcut: the openings and open-top tests of ReachAppliesIn are not read for a lamp the solve did not gather; its next solve
-// (the settle of a switch, or any later one) gives the exact row
+// shortcut: ReachAppliesIn's openings test (FindSame) and open-top test (FindCross) read the lists the room's gather made, which
+// hold no lamp it did not gather (a roofed room with no opening in sight of an outdoor lamp, or a roofless room over a
+// double-height room lighting a lamp below, gets the reach here); the room's next solve (a switch's settle, a move into another
+// room's settle, or any later one) gives the exact row. Upgrade: run the gather's per-lamp tests for a fresh lamp on the light
+// tree thread
 inline bool ReachFresh(bool lampOutdoor, bool roomOutdoor) { return roomOutdoor || lampOutdoor; }
+// A fresh lamp's exit row in room 0 (LevelLightShare::ExitLampOf: room 0 of story 0, a lamp of its record's inner list): a lamp
+// of a roofed room of story 0 or 1 (InnerShadow's lamps of the story and of the one above; the exit sum takes the lamp's shadow,
+// so one out of sight adds nothing there either)
+inline bool ExitFresh(int roomStory, int lampStory, int lampHome, bool homeOutdoor) { return roomStory == 0 && lampHome > 0 && !homeOutdoor && (lampStory == 0 || lampStory == 1); }
+// The lamps of the last registry snapshot that are not in this one (deleted, or moved to a basement or off the lot) join
+// `gone`: a kept solve listing one no longer draws it (its light may be freed); one seen again leaves it (a new light at a freed
+// address). At most `max`, the oldest dropped
+inline void NoteGone(const std::vector<uintptr_t>& before, const std::vector<uintptr_t>& now, std::vector<uintptr_t>& gone, size_t max = 256) {
+    std::erase_if(gone, [&](uintptr_t l) { return std::find(now.begin(), now.end(), l) != now.end(); });
+    for (const uintptr_t l : before)
+        if (std::find(now.begin(), now.end(), l) == now.end() && std::find(gone.begin(), gone.end(), l) == gone.end()) gone.push_back(l);
+    if (gone.size() > max) gone.erase(gone.begin(), gone.end() - static_cast<std::ptrdiff_t>(max));
+}
 
 // ---- a lamp edit without the room solves ----
 // One room of the lot as the edit finds it (story -4 .. 7)

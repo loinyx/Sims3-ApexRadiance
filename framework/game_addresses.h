@@ -353,6 +353,7 @@ enum class Id : uint16_t {
     PackMagic,          // float 0x00FE774C (12582912.0) at +0x5A
     // lamp mark filter (features/lamp_mark_filter.cpp)
     OccMarkCall,        // 0x006C7939: the occluder's call of FUN_006c7160 in FUN_006c78e0
+    LampLeftMarkCall,   // 0x006C7CCA: FUN_006c7ba0's call of FUN_006c7160 for the room a lamp left (before LampMarkCall)
     EntryFlag,          // FUN_006c4cf0(objId): flags every light and occluder entry of an object
     EntryFlagCall0, EntryFlagCall1, EntryFlagCall2, EntryFlagCall3, EntryFlagCall4, // its 5 callers, by address (development build counters)
     Count

@@ -360,6 +360,7 @@ constexpr Info kInfo[] = {
     {"PackConst255", 0x00FA312C},
     {"PackMagic", 0x00FE774C},
     {"OccMarkCall", 0x006C7939},
+    {"LampLeftMarkCall", 0x006C7CCA},
     {"EntryFlag", 0x006C4CF0},
     {"EntryFlagCall0", 0x006B0A8D},
     {"EntryFlagCall1", 0x006B0B33},
@@ -761,6 +762,7 @@ const Entry kTable[] = {
     {Id::PackConst255, K::Deref, W::Image, Id::TexelPack, 0x1A, {NOSIG, NOSIG}},
     {Id::PackMagic, K::Deref, W::Image, Id::TexelPack, 0x5E, {NOSIG, NOSIG}},
     {Id::OccMarkCall, K::Sig, W::Text, None, 0, {{"8B 4E 14 50 89 46 1C E8", 7, M::At}, NOSIG}},
+    {Id::LampLeftMarkCall, K::Sig, W::Text, None, 0, {{"3B 46 1C 74 09 8B 4E 14 50 E8", 9, M::At}, NOSIG}},
     {Id::EntryFlag, K::LowestOf2, W::Text, None, 0, {{"8B 44 24 08 8B 54 24 04 50 52 68 ?? ?? ?? ?? E8 ?? ?? ?? ?? C2 08 00", 0, M::At}, NOSIG}},
     {Id::EntryFlagCall0, K::CallersOf, W::Text, Id::EntryFlag, 5, {NOSIG, NOSIG}},
 };

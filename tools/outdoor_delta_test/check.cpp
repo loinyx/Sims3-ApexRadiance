@@ -1060,6 +1060,28 @@ void PhysPickChecks() {
         Check(NormKFresh(1, 5, 2.0f, 0, 3, 1.0f, false) == 1.0f && NormKFresh(0, 3, 2.0f, 0, 3, 1.0f, false) == 1.0f && NormKFresh(0, 0, 2.0f, 0, 3, 1.0f, false) == 1.0f,
               "physical pick: a lamp of another story, of this room or outdoors: norm scale 1");
         Check(ReachFresh(false, true) && ReachFresh(true, false) && !ReachFresh(false, false), "physical pick: the reach share of a fresh lamp (outdoor room, or an outdoor lamp)");
+        // room 0 takes a roofed room's lamp of the story above at that room's normalisation (innerUp); not a roofless room's, not
+        // two stories up, not a room > 0
+        Check(NormKFresh(2, 5, 2.0f, 1, 0, 1.0f, true, false) == InnerLight::NormScale(2.0f, 1.0f, true) && NormKFresh(2, 5, 2.0f, 1, 0, 1.0f, true, true) == 1.0f &&
+                  NormKFresh(3, 5, 2.0f, 1, 0, 1.0f, true, false) == 1.0f && NormKFresh(2, 5, 2.0f, 1, 3, 1.0f, false, false) == 1.0f &&
+                  NormKFresh(0, 5, 2.0f, 0, 3, 1.0f, false, false) == NormKFresh(0, 5, 2.0f, 0, 3, 1.0f, false),
+              "physical pick: room 0 takes a lamp of the story above at its room's norm scale (else as before)");
+        Check(ExitFresh(0, 0, 4, false) && ExitFresh(0, 1, 4, false) && !ExitFresh(1, 1, 4, false) && !ExitFresh(0, 2, 4, false) && !ExitFresh(0, 0, 0, true) &&
+                  !ExitFresh(0, 0, 4, true),
+              "physical pick: a fresh exit lamp of room 0 (story 0; a roofed room's lamp of story 0 or 1)");
+    }
+    // a lamp that left the registry is gone (no kept list draws it); one seen again is not; at most `max`, the oldest dropped
+    {
+        std::vector<uintptr_t> gone;
+        NoteGone({1, 2, 3}, {1, 3, 4}, gone);
+        bool ok = gone == std::vector<uintptr_t>{2};
+        NoteGone({1, 3, 4}, {1, 3, 4}, gone);
+        ok = ok && gone == std::vector<uintptr_t>{2};
+        NoteGone({1, 3, 4}, {2, 4}, gone); // (2 a new light at a freed address)
+        ok = ok && gone == std::vector<uintptr_t>{1, 3};
+        NoteGone({1, 3, 4, 5, 6}, {}, gone, 3);
+        ok = ok && gone == std::vector<uintptr_t>{4, 5, 6};
+        Check(ok, "physical pick: the lamps gone from the registry (deleted), back when seen again, bounded");
     }
     // the edit: every story 0 .. 7 drawn, every room > 0 a kept physical solve drawn without the lamp in its base
     {

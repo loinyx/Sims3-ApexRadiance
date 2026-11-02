@@ -526,6 +526,7 @@ All 55 ids resolve to the fixed Steam address with the table's own rules (offlin
 | 0x006A330C | texel address code | room_map_dither | bytes checked | TexelAddrSite | InRange(WallSolve, 0x400) `8B 45 0C 0F B7 56 22 0F AF 50 04 0F B7 4E 20 8D 3C 8A 8B 55 10 03 38` | 1 |
 | 0x00FA312C / 0x00FE774C | the pack's 255.0 and 12582912.0 | room_map_dither | data checked | PackConst255 / PackMagic | Deref(TexelPack, 0x1A / 0x5E) | - |
 | 0x006C7939 | the occluder's room mark call | lamp_mark_filter | call redirected | OccMarkCall | `8B 4E 14 50 89 46 1C E8` +7 | 1 |
+| 0x006C7CCA | the mark of the room a lamp left | lamp_mark_filter (physical indoor lamps) | call redirected | LampLeftMarkCall | `3B 46 1C 74 09 8B 4E 14 50 E8` +9 | 1 |
 | 0x006C4CF0 / 0x006B0A8D, 0x006B0B33, 0x006B0BFA, 0x006B0C9A, 0x006B0D26 | entry flag function / its five callers | lamp_mark_filter (developer counters) | calls redirected | EntryFlag / EntryFlagCall0..4 | LowestOf2 `8B 44 24 08 8B 54 24 04 50 52 68 ?? ?? ?? ?? E8 ?? ?? ?? ?? C2 08 00`; CallersOf(EntryFlag, 5) | 2 / 5 |
 
 Already resolved before the port (only their Steam-only gate was removed): BatchSamples (0x01158AC8, outdoor_delta),

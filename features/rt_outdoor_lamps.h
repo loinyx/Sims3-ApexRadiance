@@ -89,9 +89,10 @@ bool CoversRoom(const void* room);
 bool PhysCoversRoom0(const void* room0);
 // Any thread: the active lot's tracker (the one whose occluders are wanted), 0 none
 uintptr_t ActiveTracker();
-// An edit of such a lamp (kind 0 a value or a switch, 1 a move): timed until every story shows it; the rooms that take room
-// 0's lamps are sent after the room update
-void NoteLampEdit(uintptr_t treeLevel, uintptr_t light, int kind);
+// An edit of such a lamp (kind 0 a value or a switch, 1 a move; settle: a switch or an intensity change): timed until every
+// story shows it; the rooms that take room 0's lamps are sent after the room update (with the physical model, only after a
+// switch or an intensity change when every story draws the lamp from its law)
+void NoteLampEdit(uintptr_t treeLevel, uintptr_t light, int kind, bool settle);
 void AfterRoomUpdate(const void* treeLevel);
 // A GPU lamp switched on: its edit took the usual path (its stories gather it again); the log follows the stories that draw it
 void NoteSwitchOn(uintptr_t treeLevel, uintptr_t light);
