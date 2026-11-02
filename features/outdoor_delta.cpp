@@ -207,6 +207,7 @@ struct Record {
     uint64_t lot = 0;
     uint32_t gen = 0;
     uint64_t physics = 0, geo = 0;
+    uint64_t geoParts[3] = {}; // (GPU room lamps) RoomGeoKey's parts at the probe's start
     bool dither = false;
     float thr = 0.0f;
     uint8_t wallMode = 0;
@@ -1523,6 +1524,7 @@ void SetNeighbourLots(const uint64_t* lots, int n) {
 // A room other than room 0 is captured with the same hooks (each light's part of its sum, before the roofed rooms' tone), then
 // each lot lamp's part is compared, texel by texel, with the law the GPU draws it with and no shadow: what the GPU would have
 // to reproduce. Nothing of it is kept.
+bool ReadRoomTests(const BYTE* room, RoomLightTests::Room& r, std::string& why, bool anyBlocker = false);
 namespace {
 std::atomic<int> g_probeLines{0};
 constexpr int kProbeLines = 2000; // (a session's log: every room of a few lots, with their lamps)
@@ -1531,17 +1533,61 @@ bool ProbeLog() {
     if (n == kProbeLines) LOG_INFO("[RoomLampProbe] Line limit reached: later probes are not logged");
     return n < kProbeLines;
 }
-// (GPU room lamps) the lot's geometry key mixed with the room's 3D blocker records (room+0x40..+0x44, 64 bytes each); 0: not read
-uint64_t RoomGeoKey(const BYTE* room) {
-    uint64_t geo = LevelLightShare::LotGeometryKey(room);
-    uintptr_t rb[2] = {};
-    if (geo && CopyBytes(rb, room + 0x40, sizeof rb) && rb[0] && rb[1] >= rb[0] && (rb[1] - rb[0]) % 64 == 0 && rb[1] - rb[0] <= 512 * 64) {
-        std::vector<uint8_t> recs(rb[1] - rb[0]);
-        if (!recs.empty() && !CopyBytes(recs.data(), reinterpret_cast<const void*>(rb[0]), recs.size())) return 0;
-        for (const uint8_t b : recs) geo = (geo ^ b) * 1099511628211ull;
-        return geo | 1;
+// (GPU room lamps: CarryOff, the move path) the lot's geometry key mixed with what the game's tests read of the room
+// (room_light_tests.h): the walls' fields the 2D test reads, its default wall list and wall mode, each 3D record's centre and
+// squared radii, and each blocker's vtable and the fields its transmission reads. Never the records' raw bytes: their blocker
+// vectors are made again by every gather (a carry refused at every solve, 2026-11-02). parts (optional): the lot's key, the
+// walls', the 3D blockers'. 0: not read
+uint64_t RoomGeoKey(const BYTE* room, uint64_t parts[3] = nullptr) {
+    uint64_t p[3] = {LevelLightShare::LotGeometryKey(room), 1469598103934665603ull, 1469598103934665603ull};
+    if (parts) std::fill_n(parts, 3, 0ull);
+    RoomLightTests::Room t;
+    std::string why;
+    if (!p[0] || !ReadRoomTests(room, t, why, true)) return 0;
+    const auto mix = [&](uint64_t& h, const void* src, size_t n) {
+        for (size_t i = 0; i < n; i++) h = (h ^ static_cast<const uint8_t*>(src)[i]) * 1099511628211ull;
+    };
+    const auto mixAt = [&](uint64_t& h, const float* f, int off, int n) { mix(h, f + off / 4, static_cast<size_t>(n) * 4); };
+    const uint32_t nw = static_cast<uint32_t>(t.walls.size()), ni = static_cast<uint32_t>(t.idx2d.size()), nr = static_cast<uint32_t>(t.rec.size());
+    mix(p[1], &t.mode, sizeof t.mode), mix(p[1], &nw, 4), mix(p[1], &ni, 4);
+    mix(p[1], t.idx2d.data(), t.idx2d.size() * 4);
+    for (const RoomLightTests::Wall& w : t.walls) {
+        for (const int off : {0x40, 0x60, 0x70, 0x90, 0xA0, 0xC0, 0xD0}) mixAt(p[1], w.f, off, 3); // the three segments, the normal
+        mixAt(p[1], w.f, 0xE0, 3);                                                                  // its length, the junction counts
+        const uint32_t bits = w.u(0xEC) & 3u;
+        mix(p[1], &bits, 4);
     }
-    return rb[0] == 0 && rb[1] == 0 ? geo : 0;
+    mix(p[2], &nr, 4);
+    for (const RoomLightTests::Record& rc : t.rec) {
+        mix(p[2], &rc.c, sizeof rc.c), mix(p[2], &rc.r2, 4), mix(p[2], &rc.cull2, 4);
+        const uint32_t nb = static_cast<uint32_t>(rc.b.size());
+        mix(p[2], &nb, 4);
+        for (const RoomLightTests::Blocker& k : rc.b) {
+            mix(p[2], &k.vt, 4);
+            const uint8_t two = k.f[4] != 0.0f; // (+0x10: any non-zero value selects the two-plane form)
+            if (k.vt == RoomLightTests::kQuadVt) {
+                mix(p[2], &two, 1);
+                for (const int off : {0x70, 0x80, 0x90, 0xA0, 0xB0, 0xE0, 0xF0}) mixAt(p[2], k.f, off, 3);
+                mixAt(p[2], k.f, 0xD0, 4);
+            } else if (k.vt == RoomLightTests::kDiscVt) {
+                mix(p[2], &two, 1);
+                for (const int off : {0x20, 0x30, 0x40, 0x80, 0x90}) mixAt(p[2], k.f, off, 3);
+                mixAt(p[2], k.f, 0x70, 1);
+            } else
+                mix(p[2], k.f, sizeof k.f); // (a kind the copy does not know: all of what it may read; the move path refuses it anyway)
+        }
+    }
+    if (parts) std::copy_n(p, 3, parts);
+    uint64_t geo = p[0];
+    mix(geo, &p[1], 8), mix(geo, &p[2], 8);
+    return geo | 1;
+}
+// Why a room's key differs from the one kept with its solve (parts as RoomGeoKey gives them)
+const char* GeoChanged(const uint64_t was[3], const uint64_t now[3]) {
+    return !now[0] || !was[0] ? "the room's walls or 3D blockers could not be read"
+           : was[0] != now[0] ? "the lot's geometry changed"
+           : was[1] != now[1] ? "the room's walls changed"
+                              : "the room's 3D blockers changed";
 }
 void ProbeStart(unsigned char* room, const RoomRead& rr) {
     const char* refuse = !LevelLightShare::DeltaReady() ? "the room solve hooks are not in"
@@ -1563,10 +1609,10 @@ void ProbeStart(unsigned char* room, const RoomRead& rr) {
     r.mgr = rr.mgr, r.story = rr.story, r.lot = rr.lot, r.cls = rr.cls;
     r.thr = rr.thr, r.wallMode = rr.wallMode;
     CopyBytes(&c.normStart, room + 0x160, sizeof c.normStart);
-    // (GPU room lamps, CarryOff) the lot's geometry key and the room's 3D blocker records (room+0x40..+0x44, 64 bytes each) as
-    // the solve starts: the parts of a lamp kept by an earlier solve still hold while both are the same (UNVERIFIED that a moved
-    // object always changes its record)
-    if (c.keep) r.geo = RoomGeoKey(room);
+    // (GPU room lamps, CarryOff) the lot's geometry key and what the game's tests read of the room as the solve starts: the
+    // parts of a lamp kept by an earlier solve still hold while it is the same (UNVERIFIED that a moved object always changes
+    // its record's blockers)
+    if (c.keep) r.geo = RoomGeoKey(room, r.geoParts);
 }
 inline float Max3(const float* c) { return std::max({c[0], c[1], c[2]}); }
 // The probe's dump (one file a session in the Apex Radiance folder): each probed room's 3D blockers as the game's 3D test
@@ -2050,7 +2096,8 @@ struct KeptRoom {
     const char* tailWhy = nullptr;
     long killed = 0;
     float toneK = 0.0f, amb[3] = {}, ambPass[3] = {};
-    uint64_t geo = 0; // the lot's geometry key and the room's 3D blockers at its solve's start (CarryOff; 0: not read)
+    uint64_t geo = 0; // RoomGeoKey at its solve's start (CarryOff, the move path; 0: not read)
+    uint64_t geoParts[3] = {};
     // (stage 3) the solve's batches (their samples' range and test switches), and for a copy a lamp move made (MoveWorker) the
     // version whose drawing it continues until the GPU drew it
     std::vector<BatchRec> batches;
@@ -2550,7 +2597,7 @@ void CarryOff(KeptRoom& k, uint64_t key) {
     }
     if (off.empty()) return;
     const char* why = nullptr;
-    if (!k.geo || old->geo != k.geo) why = "the lot's geometry or the room's 3D blockers changed";
+    if (!k.geo || old->geo != k.geo) why = GeoChanged(old->geoParts, k.geoParts);
     else if (old->texels.size() != k.texels.size() || old->samples.size() != k.samples.size() ||
              std::memcmp(old->samples.data(), k.samples.data(), k.samples.size()) != 0 ||
              !std::equal(old->texels.begin(), old->texels.end(), k.texels.begin(), [](const TexelRec& a, const TexelRec& b) { return a.x == b.x && a.y == b.y && a.map == b.map; }))
@@ -2731,6 +2778,7 @@ void KeepEnd(const BYTE* room) {
         return;
     }
     k->geo = r.geo;
+    std::copy_n(r.geoParts, 3, k->geoParts);
     const uint64_t key = KeyOf(room, rr.cls);
     k->version = g_keptVersion.fetch_add(1, std::memory_order_relaxed) + 1;
     k->basisId = k->version;
@@ -3651,8 +3699,8 @@ void ReadTestConsts() {
 }
 // The room's walls (+0x30..+0x34, 0x100 bytes each), its default 2D list (+0x78..+0x7C), its wall mode (+0x639) and its 3D
 // records (+0x40..+0x44, 64 bytes: the centre, then r2 at +0x10, the blockers' vector at +0x30) with their blockers (0x100
-// bytes), as the room lamp probe dumps them. False (why): unreadable, or a blocker the copy does not know
-bool ReadRoomTests(const BYTE* room, RoomLightTests::Room& r, std::string& why) {
+// bytes), as the room lamp probe dumps them. False (why): unreadable, or a blocker the copy does not know (unless anyBlocker)
+bool ReadRoomTests(const BYTE* room, RoomLightTests::Room& r, std::string& why, bool anyBlocker) {
     uintptr_t wv[2] = {}, i2[2] = {}, rb[2] = {};
     uint8_t mode = 0;
     if (!CopyBytes(&mode, room + 0x639, 1) || !CopyBytes(wv, room + 0x30, sizeof wv) || !CopyBytes(i2, room + 0x78, sizeof i2) || !CopyBytes(rb, room + 0x40, sizeof rb))
@@ -3673,7 +3721,7 @@ bool ReadRoomTests(const BYTE* room, RoomLightTests::Room& r, std::string& why) 
     for (size_t i = 0; i < nr; i++) {
         float rec[16] = {};
         if (!CopyBytes(rec, reinterpret_cast<const void*>(rb[0] + i * 64), 64)) return why = "a 3D record could not be read", false;
-        r.rec[i].c = {rec[0], rec[1], rec[2]}, r.rec[i].r2 = rec[4];
+        r.rec[i].c = {rec[0], rec[1], rec[2]}, r.rec[i].r2 = rec[4], r.rec[i].cull2 = rec[8];
         uintptr_t bl[2] = {};
         std::memcpy(bl, &rec[12], sizeof bl);
         const size_t nb = count(bl, 4, 64);
@@ -3685,7 +3733,7 @@ bool ReadRoomTests(const BYTE* room, RoomLightTests::Room& r, std::string& why) 
             if (!CopyBytes(&b, reinterpret_cast<const void*>(bl[0] + j * 4), 4) || !b || !CopyBytes(&k.vt, reinterpret_cast<const void*>(b), 4) ||
                 !CopyBytes(k.f, reinterpret_cast<const void*>(b), sizeof k.f))
                 return why = "a 3D blocker could not be read", false;
-            if (k.vt != RoomLightTests::kQuadVt && k.vt != RoomLightTests::kDiscVt) return why = std::format("a 3D blocker of a kind the copy does not know (vtable {:08X})", k.vt), false;
+            if (!anyBlocker && k.vt != RoomLightTests::kQuadVt && k.vt != RoomLightTests::kDiscVt) return why = std::format("a 3D blocker of a kind the copy does not know (vtable {:08X})", k.vt), false;
         }
     }
     return true;
@@ -3790,7 +3838,8 @@ const char* MoveJobFor(const void* room, const RoomRead& rr, const std::shared_p
     const char* path = nullptr;
     const int kind = LevelLightShare::MovePath(room, light, job.lamp.law.pos, path);
     if (kind < 0) return path;
-    if (!k->geo || RoomGeoKey(static_cast<const BYTE*>(room)) != k->geo) return "the lot's geometry or the room's 3D blockers changed since its solve";
+    uint64_t geoNow[3] = {};
+    if (!k->geo || RoomGeoKey(static_cast<const BYTE*>(room), geoNow) != k->geo) return GeoChanged(k->geoParts, geoNow);
     if (k->batches.empty()) return "its kept solve has no batches";
     if (!ReadRoomTests(static_cast<const BYTE*>(room), job.tests, why)) return why.c_str();
     uintptr_t raw[1024];

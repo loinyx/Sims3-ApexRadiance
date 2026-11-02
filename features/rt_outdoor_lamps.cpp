@@ -86,6 +86,7 @@ std::atomic<long> g_lowLampLifted{0};
 constexpr int kMaxNeighbours = 4;
 constexpr float kNeighbourReach = 20.0f; // m
 constexpr double kFrameCpuMs = 2.0;      // a frame's relight work stops starting maps past this (the rest next frame)
+constexpr double kEditFrameCpuMs = 8.0;  // (GPU room lamps) the maps of a lamp edit taken: relit in one frame up to this
 constexpr double kFrameWork = 1.0e6;     // ... or past this many units (texel x lamp: 7 exact, 1 dragged; about 2 ns of GPU each, tools/rt_lamps_test)
 
 // The GPU relight follows the bake this build makes: the lamp's ball of Shadow softness (Penumbra::Radius), Smooth light
@@ -2033,15 +2034,20 @@ void Frame(IDirect3DDevice9* dev) {
         for (size_t si = 0; si < nSlots; si++)
             if (Slot* sp = g_slots[(g_rr + si) % nSlots].get(); sp->masked.empty() == (pass < 2) && (sp->mgr != 0) == (pass % 2 == 1)) order.push_back(sp);
     // GPU room lamps (developer): each active-lot map's kept rooms and their lamps now; the maps whose kept rooms changed (a lamp
-    // edit the GPU took) go first, so an edit's maps are not left behind the frame budget by the other maps
+    // edit the GPU took) or whose room-0 kept lamps hold a lamp of an edit not yet shown go first, and past the frame budget up
+    // to kEditFrameCpuMs, so an edit shows in all its maps in the round of its frame
     GpuRoomLamps::BeginFrame();
     std::unordered_map<const Slot*, uint64_t> roomsSigs;
     for (const auto& sp : g_slots)
         if (!sp->mgr && sp->built) roomsSigs[sp.get()] = GpuRoomLamps::Sig(dev, rns[sp->story].mgr, sp->cls, sp->m);
-    std::stable_partition(order.begin(), order.end(), [&](const Slot* sp) {
-        const auto it = roomsSigs.find(sp);
-        return it != roomsSigs.end() && it->second != sp->roomsRelit;
-    });
+    std::unordered_set<const Slot*> edited;
+    for (const auto& sp : g_slots) {
+        const auto it = roomsSigs.find(sp.get());
+        if ((it != roomsSigs.end() && it->second != sp->roomsRelit) ||
+            std::any_of(sp->kLamps.begin(), sp->kLamps.end(), [](const KeptInfo& k) { return GpuRoomLamps::EditPending(k.light); }))
+            edited.insert(sp.get());
+    }
+    std::stable_partition(order.begin(), order.end(), [&](const Slot* sp) { return edited.count(sp) != 0; });
     for (Slot* sp : order) {
         Slot& s = *sp;
         // GPU room lamps (developer): a map of the active lot without room-0 texels that kept rooms wrote gets a copy of its own
@@ -2208,7 +2214,8 @@ void Frame(IDirect3DDevice9* dev) {
         LARGE_INTEGER tn{};
         QueryPerformanceCounter(&tn);
         const double units = static_cast<double>(s.map.count) * static_cast<double>(std::max<size_t>(mine.size(), 1)) * (dragging ? 1.0 : 7.0);
-        if (relit > 0 && (Ms(t0, tn) > kFrameCpuMs || work + units > kFrameWork)) {
+        const bool editFits = edited.count(sp) && Ms(t0, tn) < kEditFrameCpuMs;
+        if (relit > 0 && !editFits && (Ms(t0, tn) > kFrameCpuMs || work + units > kFrameWork)) {
             left++; // (it keeps its last copy and stays dirty until its turn)
             continue;
         }

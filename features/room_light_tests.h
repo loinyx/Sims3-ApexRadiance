@@ -64,6 +64,7 @@ struct Record {
     V c;
     float r2;
     std::vector<Blocker> b;
+    float cull2 = 0.0f; // record+0x20: the per-batch list's cull radius^2 (the tests here read all records)
 };
 struct Wall {
     float f[64];

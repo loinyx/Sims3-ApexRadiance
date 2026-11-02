@@ -101,8 +101,8 @@ lamp's position, not on its colour or intensity.
    A move within its room (stage 3) is taken without solves when every room listing the lamp is a kept room (no room 0)
    drawn on the GPU where a copy of the tests can redo its parts (`LevelLightShare::MovePath`): a lamp with a GPU law (not a
    tube), not an outdoor lamp, not under the room's story floor (`LampOverOwnFloor`: then `OwnFloorBlocksAt` cuts no
-   point), not one of the room record's inner, opening or cross lamps, in a roofed room or one without a record, and the lot's
-   geometry key and the room's 3D records are those of its kept solve. On the light tree thread the edit copies what the
+   point), not one of the room record's inner, opening or cross lamps, in a roofed room or one without a record, and the room's
+   geometry key (`RoomGeoKey`, see 14) is that of its kept solve. On the light tree thread the edit copies what the
    game's tests read of each such room (its walls, default wall list and wall mode, its 3D records and their blockers; a
    blocker of another kind than the soft rectangle or disc refuses the move) and queues one job per room for the move worker
    (one thread; a later move of the same lamp replaces a job not started). The worker gives every kept texel where the lamp's
@@ -118,9 +118,14 @@ lamp's position, not on its colour or intensity.
    0 listing it, a move into another room, a refusal above) takes the game's path, logged.
 14. Switch on after the settle: a room kept again while a lamp is switched off by a taken edit (the settle's solve, or any
    solve) holds none of the lamp's parts. Its new kept solve takes them from its earlier kept solve (the one the switch off
-   was taken with, `CarryOff`) when the texels are the same places with the same samples, the lot's geometry key and the
-   room's 3D blocker records are the same as at that solve's start, and the lamp has not moved (a tube: what its share reads
-   is the same). The switch on is then taken and drawn from them in the frame; anything else drops them, and the switch on
+   was taken with, `CarryOff`) when the texels are the same places with the same samples, the room's geometry key is the same
+   as at that solve's start, and the lamp has not moved (a tube: what its share reads is the same). The key (`RoomGeoKey`) is
+   the lot's geometry key with what the game's tests read of the room: each wall's three segments, normal, length, junction
+   counts and test bits (+0x40 to +0xEC), the default wall list and wall mode, each 3D record's centre and squared radii
+   (+0x00, +0x10, +0x20), and each blocker's vtable and the fields its transmission reads (a rectangle: +0x10, +0x70, +0x80,
+   +0x90, +0xA0, +0xB0, +0xD0, +0xE0, +0xF0; a disc: +0x10, +0x20, +0x30, +0x40, +0x70, +0x80, +0x90; another kind: its first
+   0x100 bytes). The records' raw bytes, keyed until 2026-11-02, changed at every solve (their blocker vectors are made again
+   by the gather; the lot's key did not change), so no part was ever carried. The switch on is then taken and drawn from them in the frame; anything else drops them, and the switch on
    takes the solves.
 15. Directional maps (stage 4): the four maps objects and Sims read (`FUN_006a09f0`, one sample a tile) are written only by
    the room solves. A kept solve also keeps, per directional sample, its texel and position and each light's part of its
@@ -178,7 +183,8 @@ lamp's position, not on its colour or intensity.
   ambient of the solve without the lamp until its own settle; it takes the room solves when a room was not kept again on the
   light tree thread, its layout or geometry changed, or the lamp moved. Room 0 carries nothing: a room 0 solved again while
   the lamp is off no longer draws it, and its switch on takes the solves. That an object moved in the room always changes
-  its 3D blocker records is UNVERIFIED (only those records and the lot's geometry key are compared).
+  the fields its 3D blockers' tests read is UNVERIFIED (only those fields, the room's walls and the lot's geometry key are
+  compared); that the key now stays the same between two solves of an unchanged room is UNVERIFIED in game.
 - A kept texel a tile-edge copy of another room's texel overwrote keeps the game's value: after an edit taken, such a strip
   one texel wide at a tile edge can lag until the rooms are solved (UNVERIFIED in game).
 - A moved lamp's parts are redone only for the plain path (see 13); its light through openings, between stories and in
@@ -272,23 +278,30 @@ lamp's position, not on its colour or intensity.
 - **Carried parts** (`CarryOff`, from `KeepEnd` on the light tree thread): `RoomFinalized` keeps the kept solves it drops in
   `g_finalized` (the last finalize's); the room's next kept solve takes each lamp of its earlier one listed in `g_takenOff`
   with (room, that version) and absent from the new solve, when `KeptRoom::geo` (at the solve's start, `ProbeStart`:
-  `LotGeometryKey` mixed with the bytes of the room's 3D records room+0x40..+0x44) is the same and non-zero, the texels'
+  `RoomGeoKey`, read with `ReadRoomTests`, kept with its three parts) is the same and non-zero, the texels'
   (x, y, map) and the 0x30 samples are equal, and `LawOfLight` gives the same position (a tube: the same signature). The lamp
   is copied with `carried` set and its `g_takenOff` entry moves to the new version.
-- **Edit logs**: `[GpuRoomLamps] switch on|switch off|value: lamp L, R rooms on stories S, no room solved, relit in N ms`
-  (from the mark to the relight of every room's maps); `Lamp L: its edit was not shown in every room within 5000 ms`;
+- **Edit logs**: `[GpuRoomLamps] switch on|switch off|value: lamp L, R rooms on stories S, no room solved, relit in N ms (wall
+  atlas X ms +F, floor ...)` (from the mark to the first relight of every map of its rooms holding its parts, then per map
+  kind that time and the relight round it came in, +0 the edit's own; a map without its parts changes nothing and is not
+  waited for: until 2026-11-02 it was, and a switch shown in 2 frames was logged as `relit in 502.2 ms` when an unrelated
+  solve of the room replaced its kept solve; `(no kept map of its rooms holds its parts)` when none does); `Lamp L: its edit
+  was not shown in every room within 5000 ms (...), shown so far (...)`. The maps of an edit taken (their kept rooms' signature
+  changed, or room 0's kept lamps hold the lamp of an edit not yet shown) are relit first in Real-time outdoor lamps' round
+  and past its 2 ms frame budget up to 8 ms (`kEditFrameCpuMs`); the throttle of relights made only for game writes
+  (`kGameWriteGapMs`) never applies to them (their signature changed);
   `<kind>: lamp L left to the room solves (story S room R: why)` (no kept solve of its class, a wall texel the GPU does not
   blur, its kept solve has the lamp in its base, a map of it not drawn on the GPU, a room 0 Real-time outdoor lamps does not
   draw it in (no law, or a floor mask part where its law is dark)`, `a light without a GPU law whose intensity or shape
   changed`); `switch on: lamp L left to the room solves (its rooms changed since it was switched off)`; `switch on: lamp L
   drawn from its parts carried into N of its R rooms' later kept solves`; `Story S room R class C: switched-off lamps' parts
-  carried from its last kept solve: L, ...[; not carried: L (the lot's geometry or the room's 3D blockers changed | its
+  carried from its last kept solve: L, ...[; not carried: L (the lot's geometry changed | the room's walls changed | the
+  room's 3D blockers changed | the room's walls or 3D blockers could not be read | its
   texels or samples changed | it has no law now | it moved or its shape changed), ...]`; `Story S room 0 class C: K lamps
   kept for the GPU (E exit lamps, M with floor mask parts: P parts)[; left in the base (a floor mask part where its law is
   dark): L, ...]`; `settle: lamp L, R
   rooms sent to their solve 2 s after its last edit[, N sent for another lamp just before][, N refused by the room queue
-  (already waiting for their gather, or gone)]` (each room once for the lamps due together); the edit line ends with the
-  relight round each map kind of its rooms was shown in (`frames: wall atlas +0, floor +1 ...`); a tube switched off (its lit
+  (already waiting for their gather, or gone)]` (each room once for the lamps due together); a tube switched off (its lit
   bit clear or its intensity 0) counts as a switch, not a change of its share; `Story S room R class
   C: not kept (its class was C0 when its solve started)`.
 - **GPU logs**: `Story S room R class C <map> GPU self-check: N texels, P% within 2/255 (alpha within A/255) of the texels the
@@ -304,10 +317,10 @@ lamp's position, not on its colour or intensity.
 - **Lamp moves** (`outdoor_delta.cpp`: `MoveJobFor`, `ReadRoomTests`, `QueueMove`, `MoveWorker`; `KeptRoom::batches` and
   `movedFrom`): `[GpuRoomLamps] move: lamp L story S room R class C: N texels x 1 lamp recomputed (lit, parts) in X ms on the
   move worker, Y ms after the move; kept as version V | dropped (the room was solved or kept again meanwhile)`, then the edit
-  line `move: lamp L, 1 rooms on stories S, no room solved, relit in N ms (frames: ...)` from that landing to the first relight
+  line `move: lamp L, 1 rooms on stories S, no room solved, relit in N ms (...)` from that landing to the first relight
   with its parts; `move: lamp L left to the room solves (story S room R: why)` (a room 0 lists it, an outdoor lamp, the lamp
   under the room's story floor, a roofless room, through openings or from another story, a light without a GPU law, the
-  geometry or 3D blockers changed, a 3D blocker of a kind the copy does not know, ...). The game's tests' constants are read
+  lot's geometry, the room's walls or its 3D blockers changed since its solve, a 3D blocker of a kind the copy does not know, ...). The game's tests' constants are read
   once from the game (`RoomLightTests::kConstAt`).
 - **Directional maps** (stage 4, verified with dumpbin on Steam 1.67.2): state 7 of the solve calls `FUN_006a3b80` on
   room+0x540, which calls `FUN_006a09f0` (this = room, the pass); it lays the samples into the vector `[0x01158AC8,

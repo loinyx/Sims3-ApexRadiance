@@ -42,5 +42,7 @@ bool Drawn(const void* room, uint32_t version, unsigned maps);
 // Any thread: a lamp edit the GPU took (kind "value", "switch on" or "switch off": a literal), logged once every one of its
 // rooms was relit after it
 void NoteEdit(uintptr_t light, const char* kind, const std::vector<const void*>& rooms, const std::string& stories);
+// Any thread: an edit of that lamp taken and not yet shown in every map of its rooms holding its parts (its maps go first)
+bool EditPending(uintptr_t light);
 
 } // namespace GpuRoomLamps

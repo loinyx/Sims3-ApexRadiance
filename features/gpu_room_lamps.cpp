@@ -68,6 +68,8 @@ struct Edit {
     LARGE_INTEGER at{};
     DWORD tick = 0;
     uint32_t frame = 0;
+    // each map of its rooms that holds its parts: its first relight after the edit (time, relight round)
+    std::map<std::tuple<const void*, int, int>, std::pair<LARGE_INTEGER, uint32_t>> shown;
 };
 std::mutex g_editMx;
 std::vector<Edit> g_edits;
@@ -122,7 +124,9 @@ void SelfCheck(IDirect3DDevice9* dev, const Entry& e, IDirect3DTexture9* out, in
         LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {} GPU self-check: {} texels, {:.2f}% within 2/255 (alpha within {}/255) of the texels the game left{}",
                              e.story, e.id, e.cls, kMapName[e.m], n, n ? 100.0 * static_cast<double>(within) / static_cast<double>(n) : 100.0, alphaMax, ws));
 }
-// The edits taken whose rooms are all relit since (render thread)
+// The edits taken whose rooms' maps holding the lamp's parts are all relit since (render thread). A map without its parts is
+// not waited for: nothing of it changes, and its signature does not either (it waited for the room's next kept solve, which
+// logged a switch shown in 2 frames as "relit in 502 ms", 2026-11-02)
 void LogEdits() {
     std::vector<Edit> done;
     {
@@ -130,9 +134,13 @@ void LogEdits() {
         if (g_edits.empty()) return;
         for (auto it = g_edits.begin(); it != g_edits.end();) {
             bool relit = true;
-            for (const void* room : it->rooms)
-                for (const auto& [key, e] : g_entries)
-                    if (std::get<0>(key) == room && e.ok && e.relitAt.QuadPart <= it->at.QuadPart) relit = false;
+            for (const auto& [key, e] : g_entries) {
+                if (!e.ok || std::find(it->rooms.begin(), it->rooms.end(), std::get<0>(key)) == it->rooms.end() ||
+                    std::find(e.lamps.begin(), e.lamps.end(), it->light) == e.lamps.end())
+                    continue;
+                if (e.relitAt.QuadPart > it->at.QuadPart) it->shown.try_emplace(key, e.relitAt, e.relitFrame);
+                else relit = false;
+            }
             if (relit || GetTickCount() - it->tick > kEditWaitMs) {
                 if (!relit) it->kind = nullptr; // (logged as not shown)
                 done.push_back(std::move(*it));
@@ -141,25 +149,28 @@ void LogEdits() {
                 ++it;
         }
     }
-    LARGE_INTEGER now{};
-    QueryPerformanceCounter(&now);
     for (const Edit& e : done) {
         if (!LogAllowed()) continue;
-        // the frame each map kind of its rooms was shown in, after the edit's (+0: the frame of the edit)
-        std::string frames;
+        // per map kind of its rooms holding its parts: when it was shown after the edit, and in which relight round (+0: the round
+        // of the edit's frame)
+        std::string kinds;
+        double all = 0.0;
         for (int m = 0; m < 4; m++) {
-            int last = -1;
-            for (const auto& [key, en] : g_entries)
-                if (en.m == m && en.ok && std::find(e.rooms.begin(), e.rooms.end(), std::get<0>(key)) != e.rooms.end())
-                    last = std::max(last, static_cast<int>(en.relitFrame - e.frame));
-            if (last >= 0) frames += std::format("{}{} +{}", frames.empty() ? " (frames:" : ",", kMapName[m], last);
+            double ms = -1.0;
+            int rounds = 0;
+            for (const auto& [key, s] : e.shown)
+                if (std::get<2>(key) == m) ms = std::max(ms, MsSince(e.at, s.first)), rounds = std::max(rounds, static_cast<int>(s.second - e.frame));
+            if (ms < 0.0) continue;
+            kinds += std::format("{}{} {:.1f} ms +{}", kinds.empty() ? " (" : ", ", kMapName[m], ms, rounds);
+            all = std::max(all, ms);
         }
-        if (!frames.empty()) frames += ")";
+        kinds += kinds.empty() ? " (no kept map of its rooms holds its parts)" : ")";
         if (!e.kind)
-            LOG_INFO(std::format("[GpuRoomLamps] Lamp {:08X}: its edit was not shown in every room within {} ms (rooms on stories {})", e.light, kEditWaitMs, e.stories));
+            LOG_INFO(std::format("[GpuRoomLamps] Lamp {:08X}: its edit was not shown in every room within {} ms (rooms on stories {}), shown so far{}", e.light, kEditWaitMs,
+                                 e.stories, kinds));
         else
-            LOG_INFO(std::format("[GpuRoomLamps] {}: lamp {:08X}, {} rooms on stories {}, no room solved, relit in {:.1f} ms{}", e.kind, e.light, e.rooms.size(), e.stories,
-                                 MsSince(e.at, now), frames));
+            LOG_INFO(std::format("[GpuRoomLamps] {}: lamp {:08X}, {} rooms on stories {}, no room solved, relit in {:.1f} ms{}", e.kind, e.light, e.rooms.size(), e.stories, all,
+                                 kinds));
     }
 }
 
@@ -289,6 +300,10 @@ void ReleaseAll() {
 }
 
 void BeginFrame() { g_frame.fetch_add(1, std::memory_order_relaxed); }
+bool EditPending(uintptr_t light) {
+    std::lock_guard<std::mutex> lk(g_editMx);
+    return std::any_of(g_edits.begin(), g_edits.end(), [&](const Edit& e) { return e.light == light; });
+}
 bool Drawn(const void* room, uint32_t version, unsigned maps) {
     std::lock_guard<std::mutex> lk(g_drawnMx);
     const auto it = g_drawn.find(room);
