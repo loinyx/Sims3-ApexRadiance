@@ -1851,6 +1851,233 @@ void Probe(const Scene& sc) {
     }
     for (const auto& [k, n] : tally) std::printf("  %s: %d lamps\n", k.c_str(), n);
 }
+// ---------------------------------------------------------------- 5. GPU room lamps: kept room solves (RelightKept)
+// A synthetic kept room on two 64 x 64 maps, drawn by the production passes (AccKeptPS, ComposeKeptPS, CopyAtPS, the wall
+// blur, BlockKeptPS) over a game map, against the CPU: base + RtLampModel::KeptAdd of every part, RtLampModel::KeptTexel
+// (roofed and roofless texels, the ramp and ambient read back from the pack input with IndoorSplit, the alpha floor, the
+// dither), the game's pack, BlurBlock with the rows beyond the blocks' edges, the tile-edge copies and the texels a copy of an
+// unkept texel overwrote (the game's). Every texel of the map is compared; the others must stay the game's.
+bool KeptGpuCheck() {
+    std::printf("\n[GPU room lamps] kept texels relit on the GPU against KeptAdd + KeptTexel + the pack, the blur and the copies on the CPU\n");
+    std::mt19937 rng(9001);
+    std::uniform_real_distribution<float> U(0.0f, 1.0f);
+    const int w = 64, h = 64, nLamps = 5;
+    const float thr = 3.0f / 255.0f, k = 0.62f, floorA = 5.0f / 255.0f;
+    GpuLampLaw::Lamp laws[nLamps];
+    for (GpuLampLaw::Lamp& L : laws) {
+        L.pos[0] = 32.0f * U(rng), L.pos[1] = 1.0f + 2.0f * U(rng), L.pos[2] = 32.0f * U(rng);
+        L.W = 2.0f + 6.0f * U(rng);
+        for (float& c : L.colour) c = 0.4f + 0.6f * U(rng);
+        GpuLampLaw::NoCone(L);
+    }
+    const auto packCpu = [](float c[4]) { return OutdoorDeltaModel::PackModel(c); };
+    long n = 0, within1 = 0, maxDiff = 0, untouchedBad = 0;
+    for (const int m : {1, 0}) { // a floor (copies, restores) and a class-2 wall atlas (blocks before the blur)
+        RtLampGpu::KeptMapData d;
+        d.w = w, d.h = h, d.thr = thr;
+        std::vector<uint32_t> gamePx(static_cast<size_t>(w) * h);
+        for (uint32_t& v : gamePx) v = static_cast<uint32_t>(rng());
+        // kept texels at distinct places (every other one on the floor; the wall texels inside blocks)
+        struct Tx {
+            int x, y;
+            float pos[3], nrm[3], base[3], S[3], p[4], norm, dither;
+            bool roofed, floorOn;
+            uint32_t cpu;
+        };
+        std::vector<Tx> tx;
+        struct Blk {
+            int x0, y0, x1, y1;
+            bool above, below;
+        };
+        const std::vector<Blk> blocks = m == 0 ? std::vector<Blk>{{2, 4, 21, 10, true, true}, {30, 20, 45, 32, false, false}, {5, 40, 15, 50, true, false}} : std::vector<Blk>{};
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                bool in = m == 1 ? (x + y) % 2 == 0 : false;
+                for (const Blk& b : blocks) in = in || (x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1 && (x * 7 + y * 3) % 5 != 0);
+                if (!in) continue;
+                Tx t{};
+                t.x = x, t.y = y;
+                t.pos[0] = x * 0.5f, t.pos[1] = m == 0 ? 0.2f + 0.04f * y : 0.0f, t.pos[2] = y * 0.5f;
+                t.nrm[0] = 0, t.nrm[1] = m == 0 ? 0.0f : 1.0f, t.nrm[2] = m == 0 ? 1.0f : 0.0f;
+                for (float& b : t.base) b = 0.15f * U(rng) * U(rng);
+                t.roofed = (x / 8 + y / 8) % 3 != 0;
+                t.floorOn = U(rng) < 0.8f;
+                t.norm = 0.6f + U(rng);
+                t.dither = (y % 4 == 3) ? 0.0f : RoomMapDither::Offset(x, y) / 255.0f;
+                tx.push_back(t);
+            }
+        const uint32_t count = static_cast<uint32_t>(tx.size());
+        d.accW = static_cast<int>(std::min<uint32_t>(count, 1024)), d.accH = static_cast<int>((count + d.accW - 1) / d.accW);
+        // the parts, by lamp: the solve's sum S = base + the parts with the lamps as they were (the CPU's KeptAdd)
+        std::vector<float> R(static_cast<size_t>(count) * 3);
+        for (uint32_t i = 0; i < count; i++)
+            for (int q = 0; q < 3; q++) R[i * 3 + q] = tx[i].base[q];
+        for (int l = 0; l < nLamps; l++) {
+            const UINT first = static_cast<UINT>(d.parts.size());
+            for (uint32_t i = 0; i < count; i++) {
+                if ((i + static_cast<uint32_t>(l)) % 3 == 0) continue;
+                const float A = 0.3f + 1.5f * U(rng), B = U(rng) < 0.2f ? 0.0f : U(rng), ts = U(rng) < 0.3f ? 0.5f + 0.5f * U(rng) : 1.0f;
+                const int mult = U(rng) < 0.2f ? 2 : 1, bits = (U(rng) < 0.3f ? 1 : 0) | (U(rng) < 0.8f ? 4 : 0);
+                float law[3];
+                GpuLampLaw::Eval(laws[l], tx[i].pos, tx[i].nrm, 0.0f, law);
+                // (the kept halves, as BuildKeptMap gives them)
+                const float a = OutdoorDeltaModel::FromHalf(OutdoorDeltaModel::ToHalf(A)), b = OutdoorDeltaModel::FromHalf(OutdoorDeltaModel::ToHalf(B));
+                const float s = OutdoorDeltaModel::FromHalf(OutdoorDeltaModel::ToHalf(ts));
+                RtLampModel::KeptAdd(law, a, b, s, static_cast<float>(mult), bits & 1, (bits & 4) != 0, thr, &R[i * 3]);
+                RtLampGpu::TexelVertex v{};
+                v.x = static_cast<float>(i % d.accW), v.y = static_cast<float>(i / d.accW), v.w = 1.0f;
+                for (int q = 0; q < 3; q++) v.p[q] = tx[i].pos[q], v.n[q] = tx[i].nrm[q];
+                v.p[3] = static_cast<float>(bits), v.n[3] = static_cast<float>(mult);
+                v.base[0] = a, v.base[1] = b, v.base[2] = s;
+                d.parts.push_back(v);
+            }
+            d.lamps.push_back(static_cast<uintptr_t>(l + 1));
+            d.ranges.emplace_back(first, static_cast<UINT>(d.parts.size()) - first);
+        }
+        // the solve's tail at its own sum (R here: the lamps as kept); the GPU's texel takes what IndoorSplit reads back
+        std::vector<uint32_t> cpuPacked(count);
+        const auto vertexOf = [&](uint32_t i, int x, int y) {
+            Tx& t = tx[i];
+            RtLampGpu::TexelVertex v{};
+            v.x = static_cast<float>(x), v.y = static_cast<float>(y), v.w = 1.0f;
+            for (int q = 0; q < 3; q++) v.p[q] = t.base[q];
+            v.p[3] = t.dither;
+            if (t.roofed) {
+                float xs[3], rampAmb[3] = {}, ramp = 0.0f;
+                for (int q = 0; q < 3; q++) xs[q] = t.norm * t.S[q];
+                if (!GpuLampLaw::IndoorSplit(xs, t.p, k, rampAmb, ramp)) rampAmb[0] = rampAmb[1] = rampAmb[2] = ramp = 0.0f;
+                for (int q = 0; q < 3; q++) v.n[q] = rampAmb[q];
+                v.n[3] = ramp;
+            } else
+                v.n[3] = t.p[3];
+            v.base[0] = t.norm, v.base[1] = k, v.base[2] = t.floorOn ? floorA : 0.0f, v.base[3] = t.roofed ? 1.0f : 0.0f;
+            v.mask[0] = static_cast<float>(i % d.accW), v.mask[1] = static_cast<float>(i / d.accW);
+            return v;
+        };
+        for (uint32_t i = 0; i < count; i++) {
+            Tx& t = tx[i];
+            // the solve as it was: its sum a little off the recomposed one (lamps edited since), its pack input from the game's tail
+            for (int q = 0; q < 3; q++) t.S[q] = std::max(R[i * 3 + q] * (0.7f + 0.6f * U(rng)), 0.0f);
+            if (t.roofed) {
+                float x[3], c[3];
+                for (int q = 0; q < 3; q++) x[q] = t.norm * t.S[q];
+                GpuLampLaw::Tone(x, c);
+                const float a = (0.6f + 0.4f * U(rng)) * GpuLampLaw::Weight(c, k);
+                const float amb[3] = {0.3f * U(rng), 0.3f * U(rng), 0.3f * U(rng)};
+                for (int q = 0; q < 3; q++) t.p[q] = c[q] + (i % 2 ? a * amb[q] : 0.0f);
+                t.p[3] = a;
+            } else {
+                for (int q = 0; q < 3; q++) t.p[q] = std::min(t.S[q], 1.0f);
+                t.p[3] = U(rng);
+            }
+            float c[4];
+            RtLampModel::KeptTexel(&R[i * 3], t.S, t.p, t.norm, k, t.roofed, t.floorOn ? floorA : 0.0f, t.dither, c);
+            cpuPacked[i] = packCpu(c);
+        }
+        std::vector<uint32_t> expect = gamePx;
+        if (m == 1) {
+            for (uint32_t i = 0; i < count; i++) {
+                d.texels.push_back(vertexOf(i, tx[i].x, tx[i].y));
+                expect[static_cast<size_t>(tx[i].y) * w + tx[i].x] = cpuPacked[i];
+            }
+            // tile-edge copies: kept texels to the places to their right (sources as composed), every 7th kept place back to the game's
+            for (uint32_t i = 0; i < count; i += 5) {
+                const Tx& t = tx[i];
+                if (t.x + 1 >= w) continue;
+                RtLampGpu::TexelVertex v{};
+                v.x = static_cast<float>(t.x + 1), v.y = static_cast<float>(t.y), v.w = 1.0f, v.mask[0] = static_cast<float>(t.x), v.mask[1] = static_cast<float>(t.y);
+                d.copies.push_back(v);
+                expect[static_cast<size_t>(t.y) * w + t.x + 1] = cpuPacked[i];
+            }
+            for (uint32_t i = 3; i < count; i += 7) {
+                const Tx& t = tx[i];
+                RtLampGpu::TexelVertex v{};
+                v.x = v.mask[0] = static_cast<float>(t.x), v.y = v.mask[1] = static_cast<float>(t.y), v.w = 1.0f;
+                d.restores.push_back(v);
+                expect[static_cast<size_t>(t.y) * w + t.x] = gamePx[static_cast<size_t>(t.y) * w + t.x];
+            }
+        } else {
+            // the blocks before the blur (the solve's texels, the rest of the block as it was) with the rows beyond, in a layout
+            d.passes = 2, d.layoutW = w;
+            std::vector<uint32_t> at(static_cast<size_t>(w) * h, UINT32_MAX);
+            for (uint32_t i = 0; i < count; i++) at[static_cast<size_t>(tx[i].y) * w + tx[i].x] = i;
+            int ly = 0;
+            for (const Blk& b : blocks) ly += (b.above ? 2 : 0) + (b.y1 - b.y0 + 1) + (b.below ? 2 : 0);
+            d.layoutH = ly;
+            d.layout.assign(static_cast<size_t>(d.layoutW) * d.layoutH, 0);
+            ly = 0;
+            for (const Blk& b : blocks) {
+                const int bw = b.x1 - b.x0 + 1, rows = b.y1 - b.y0 + 1, top = b.above ? 2 : 0, total = top + rows + (b.below ? 2 : 0);
+                std::vector<uint32_t> ext(static_cast<size_t>(total) * bw), before(static_cast<size_t>(rows) * bw);
+                for (uint32_t& v : ext) v = static_cast<uint32_t>(rng()); // (rows beyond, and the block's unkept texels)
+                for (int y = 0; y < total; y++)
+                    for (int x = 0; x < bw; x++) d.layout[static_cast<size_t>(ly + y) * d.layoutW + x] = ext[static_cast<size_t>(y) * bw + x];
+                for (int y = 0; y < rows; y++)
+                    for (int x = 0; x < bw; x++) {
+                        const uint32_t i = at[static_cast<size_t>(b.y0 + y) * w + b.x0 + x];
+                        if (i != UINT32_MAX) {
+                            ext[static_cast<size_t>(top + y) * bw + x] = cpuPacked[i];
+                            d.wallTexels.push_back(vertexOf(i, x, ly + top + y));
+                        }
+                        before[static_cast<size_t>(y) * bw + x] = ext[static_cast<size_t>(top + y) * bw + x];
+                    }
+                OutdoorDeltaModel::BlurBlock(ext.data(), before.data(), bw, rows, b.above, b.below, d.passes);
+                for (int y = 0; y < rows; y++)
+                    for (int x = 0; x < bw; x++) expect[static_cast<size_t>(b.y0 + y) * w + b.x0 + x] = ext[static_cast<size_t>(top + y) * bw + x];
+                d.extRects.push_back(RtLampGpu::Block{0, ly, bw - 1, ly + total - 1});
+                d.outs.push_back(RtLampGpu::KeptBlockOut{b.x0, b.y0, b.x1, b.y1, 0, ly + top, ly + top + rows - 1, b.above, b.below});
+                ly += total;
+            }
+        }
+        // the GPU
+        RtLampGpu::Engine eng(RtLampGpu::PlainCalls());
+        std::string err;
+        RtLampProxy::Mesh empty;
+        if (!eng.Init(g_dev, g_shaders, 64, err) || !eng.SetProxy(g_dev, empty, err)) {
+            Check(false, "kept engine: " + err);
+            return false;
+        }
+        IDirect3DTexture9 *game = nullptr, *out = nullptr;
+        RtLampGpu::Engine::MakePreblur(g_dev, w, h, gamePx.data(), &game);
+        g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &out, nullptr);
+        RtLampGpu::KeptMapGpu g;
+        bool ok = game && out && RtLampGpu::Engine::UploadKept(g_dev, d, g);
+        const char lawOk[nLamps] = {1, 1, 1, 1, 1};
+        std::vector<uint32_t> got;
+        g_dev->BeginScene();
+        if (ok && eng.Begin(g_dev)) {
+            ok = eng.CopyTexture(g_dev, game, out, w, h, err) && eng.RelightKept(g_dev, g, laws, lawOk, thr, game, out, err);
+            eng.End(g_dev);
+        } else
+            ok = false;
+        g_dev->EndScene();
+        ok = ok && RtLampGpu::Engine::ReadTexture(g_dev, out, w, h, got);
+        g.Release();
+        if (game) game->Release();
+        if (out) out->Release();
+        Check(ok, "kept relight on the GPU: " + err);
+        if (!ok) return false;
+        std::vector<uint8_t> touched(static_cast<size_t>(w) * h, 0);
+        for (const Tx& t : tx) touched[static_cast<size_t>(t.y) * w + t.x] = 1;
+        for (size_t i = 0; i < expect.size(); i++) {
+            if (expect[i] == gamePx[i] && !touched[i]) {
+                untouchedBad += got[i] != gamePx[i];
+                continue;
+            }
+            const int dl = OutdoorDeltaModel::MaxLevelDiff(expect[i], got[i]);
+            n++;
+            within1 += dl <= 1;
+            maxDiff = std::max<long>(maxDiff, dl);
+        }
+        std::printf("  %s: %u kept texels, %zu parts, %zu copies, %zu restores, %zu blocks\n", m == 0 ? "class-2 wall atlas" : "floor", count, d.parts.size(), d.copies.size(),
+                    d.restores.size(), d.outs.size());
+    }
+    std::printf("  %ld texels compared: %.2f%% within 1/255, largest difference %ld/255; texels left as the game's changed: %ld\n", n, n ? 100.0 * within1 / n : 100.0, maxDiff, untouchedBad);
+    Check(n > 0 && within1 >= static_cast<long>(0.999 * n) && maxDiff <= 2, "kept relight: the GPU's texels within 1/255 of the CPU's (99.9%), none past 2/255");
+    Check(untouchedBad == 0, "kept relight: a texel no kept room holds changed");
+    return true;
+}
+
 int main(int argc, char** argv) {
     std::vector<std::string> worlds;
     int maxLamps = 12;
@@ -1877,6 +2104,7 @@ int main(int argc, char** argv) {
     if (!MakeShaders()) return 1;
     SplitCheck();
     RoomLampsCheck();
+    KeptGpuCheck();
 #ifdef RT_OBJECT_SHAPES
     ObjectParityCheck();
 #endif

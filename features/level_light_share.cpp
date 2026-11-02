@@ -7505,6 +7505,9 @@ void __fastcall FinalizeHook(BYTE* room) {
     }
     reinterpret_cast<Finalize_t>(kFinalize)(room);
     if (!room) return;
+    // GPU room lamps (developer): the room's texels in its maps were written again, its kept solve no longer holds them (any
+    // thread; a solve kept below is kept again by SolveEnd)
+    if (OutdoorDelta::RoomLampCapture()) HookGuard::Run("OutdoorDelta room finalized", [room] { OutdoorDelta::RoomFinalized(room); });
     // Quick outdoor lamp edits: the solve's parts are kept (or the delta's record closed), the maps now unlocked
     if (OutdoorDelta::Enabled() && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
         HookGuard::Run("OutdoorDelta solve end", [room] { OutdoorDelta::SolveEnd(room); });

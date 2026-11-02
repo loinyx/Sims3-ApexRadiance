@@ -25,6 +25,7 @@
 #include "rt_lamp_model.h"
 #include "rt_outdoor_lamps.h"
 #include "rt_lamp_proxy.h"
+#include "rt_lamp_gpu.h"
 #include "level_light_share.h"
 #include "room_light_queue.h"
 #include "room_map_dither.h"
@@ -1914,10 +1915,12 @@ struct KeptLamp {
     std::vector<KeptPart, ApexMem::HighAllocator<KeptPart>> parts; // by texel, ascending
 };
 struct KeptRoom {
-    uintptr_t room = 0;
+    uintptr_t room = 0, mgr = 0;
     uint64_t lot = 0;
     int story = 0, id = 0, cls = 0;
     float thr = 0.0f;
+    uint32_t version = 0;                  // (stage 2b) g_keptVersion when it was kept
+    uint32_t mapW[4] = {}, mapH[4] = {};   // the maps the solve wrote (0: none)
     std::vector<uint8_t, ApexMem::HighAllocator<uint8_t>> samples; // the capture's: 0x30 per texel
     std::vector<TexelRec, ApexMem::HighAllocator<TexelRec>> texels; // the capture's: map, place, the solve's sum, the packed texel
     std::vector<float, ApexMem::HighAllocator<float>> base;         // 3 per texel
@@ -1935,7 +1938,11 @@ struct KeptRoom {
     float toneK = 0.0f, amb[3] = {}, ambPass[3] = {};
     size_t bytes = 0;
 };
-std::unordered_map<uint64_t, std::unique_ptr<KeptRoom>> g_kept;
+// (stage 2b) g_kept and g_keptBytes: the light tree thread changes them, the render thread reads them (gpu_room_lamps.cpp) and
+// any thread's finalize drops a room (RoomFinalized); a kept room never changes once kept
+std::mutex g_keptMx;
+std::unordered_map<uint64_t, std::shared_ptr<const KeptRoom>> g_kept;
+std::atomic<uint32_t> g_keptVersion{0};
 size_t g_keptBytes = 0;
 bool g_keptFull = false; // (the log: once per crossing of the budget)
 std::atomic<int> g_keptLines{0};
@@ -1947,6 +1954,7 @@ size_t KeptBytes(const KeptRoom& k) {
     return b;
 }
 void ClearKept() {
+    std::lock_guard<std::mutex> lk(g_keptMx);
     g_kept.clear();
     g_keptBytes = 0;
     g_keptFull = false;
@@ -2067,7 +2075,7 @@ bool ReadMap(const Desc& d, uint32_t* out) {
         if (!CopyBytes(out + static_cast<size_t>(y) * d.w, reinterpret_cast<const void*>(d.base + static_cast<uintptr_t>(d.pitch) * y), static_cast<size_t>(d.w) * 4)) return false;
     return true;
 }
-// The tile-edge copies of map m (1 floor, 2 ceiling) followed by a dry run: each kept place holds a unique tag while the
+// The tile-edge copies of map m (1 floor, 2 ceiling) followed by a dry run: every place holds its own index while the
 // game's own copy runs, so each place the copy wrote names the place it came from; then the whole map is put back as it was
 // and the finalize copies it for real. The copies are plain texel copies within the map (docs/engine/room-light-maps.md;
 // UNVERIFIED beyond 0x0069efc0's loop: 0x006a9de0 / 0x006a9a50 were not read in full).
@@ -2077,42 +2085,31 @@ bool TagCopies(BYTE* room, int m, const Desc& d, void* entry, const std::unorder
     uintptr_t bits = 0;
     if (!CopyBytes(&bits, room + kMapDesc[m], sizeof bits) || bits != d.base) return c.tailWhy = "a tile-edge copy into a map of no known lock", false;
     const size_t w = d.w, cells = w * d.h;
-    std::vector<uint32_t> tagAt(cells, kNoSrc), placeOf, srcOf;
+    // the kept places of this map: their texel (the last write)
+    std::vector<uint32_t> srcAt(cells, kNoSrc);
+    bool any = false;
     for (const auto& [key, i] : last)
-        if (static_cast<int>(key >> 32) == m) {
-            const size_t place = static_cast<size_t>(r.texels[i].y) * w + r.texels[i].x;
-            tagAt[place] = static_cast<uint32_t>(placeOf.size());
-            placeOf.push_back(static_cast<uint32_t>(place));
-            srcOf.push_back(i);
-        }
-    if (placeOf.empty()) return true;
-    std::vector<uint32_t> before(cells), after(cells);
+        if (static_cast<int>(key >> 32) == m) srcAt[static_cast<size_t>(r.texels[i].y) * w + r.texels[i].x] = i, any = true;
+    if (!any) return true;
+    // every place holds its own index while the copy runs (a map holds at most 8192 x 8192 places: no two tags alike, and no
+    // value the map held can pass for one; 23 rooms had no free range when only the kept places were tagged: black texels of
+    // every alpha); each place the copy wrote then names the place it came from
+    std::vector<uint32_t> before(cells), after(cells), tags(cells);
     if (!ReadMap(d, before.data())) return c.tailWhy = "a map could not be read before the tile-edge copies", false;
-    // a tag range no other place of the map holds (such a value would be read back as a copy of a kept texel)
-    uint32_t tag = 0;
-    for (const uint32_t b : {0x5A000000u, 0x3C000000u, 0x96000000u, 0xC3000000u, 0x27000000u, 0xE1000000u}) {
-        bool clash = false;
-        for (size_t i = 0; i < cells && !clash; i++) clash = tagAt[i] == kNoSrc && before[i] - b < placeOf.size();
-        if (!clash) {
-            tag = b;
-            break;
-        }
-    }
-    if (!tag) return c.tailWhy = "no free tag range to follow the tile-edge copies", false;
+    for (size_t i = 0; i < cells; i++) tags[i] = static_cast<uint32_t>(i);
     // (nothing allocates from the tags to the map put back)
-    for (size_t k = 0; k < placeOf.size(); k++) WriteTexel(d.base + static_cast<uintptr_t>(d.pitch) * (placeOf[k] / w) + static_cast<uintptr_t>(placeOf[k] % w) * 4, tag + static_cast<uint32_t>(k));
-    const bool ran = EdgeCopyTry(room, bits, entry);
-    const bool read = ReadMap(d, after.data());
+    const bool tagged = WriteRows(d, 0, 0, static_cast<int>(w), static_cast<int>(d.h), tags.data());
+    const bool ran = tagged && EdgeCopyTry(room, bits, entry);
+    const bool read = ran && ReadMap(d, after.data());
     if (!WriteRows(d, 0, 0, static_cast<int>(w), static_cast<int>(d.h), before.data())) return c.tailWhy = "a map could not be put back after the tile-edge copies", false;
-    if (!ran || !read) return c.tailWhy = "the tile-edge copies could not be followed", false;
+    if (!read) return c.tailWhy = "the tile-edge copies could not be followed", false;
     std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> moved; // kept place -> (its new source texel, the value it ends with)
     for (size_t i = 0; i < cells; i++) {
-        const uint32_t was = tagAt[i] != kNoSrc ? tag + tagAt[i] : before[i];
-        if (after[i] == was) continue;
-        const uint32_t k = after[i] - tag;
-        const bool kept = k < placeOf.size();
-        if (tagAt[i] != kNoSrc) moved[static_cast<uint32_t>(i)] = kept ? std::make_pair(srcOf[k], before[placeOf[k]]) : std::make_pair(kNoSrc, after[i]);
-        else if (kept) c.copies.push_back(KeptCopy{static_cast<uint8_t>(m), static_cast<uint16_t>(i % w), static_cast<uint16_t>(i / w), srcOf[k], before[placeOf[k]]});
+        const uint32_t from = after[i];
+        if (from == i) continue;
+        if (from >= cells) return c.tailWhy = "a tile-edge copy wrote a value that is no place of its map", false;
+        if (srcAt[i] != kNoSrc) moved[static_cast<uint32_t>(i)] = std::make_pair(srcAt[from], before[from]); // (kNoSrc: from a place no capture holds)
+        else if (srcAt[from] != kNoSrc) c.copies.push_back(KeptCopy{static_cast<uint8_t>(m), static_cast<uint16_t>(i % w), static_cast<uint16_t>(i / w), srcAt[from], before[from]});
     }
     for (size_t i = 0; i < r.texels.size(); i++) {
         const TexelRec& t = r.texels[i];
@@ -2280,12 +2277,16 @@ void KeepEnd(const BYTE* room) {
         return;
     }
     // the rooms of another lot (the active lot changed) go first
-    for (auto it = g_kept.begin(); it != g_kept.end();)
-        if (it->second->lot != r.lot) g_keptBytes -= std::min(g_keptBytes, it->second->bytes), it = g_kept.erase(it);
-        else ++it;
+    {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        for (auto it = g_kept.begin(); it != g_kept.end();)
+            if (it->second->lot != r.lot) g_keptBytes -= std::min(g_keptBytes, it->second->bytes), it = g_kept.erase(it);
+            else ++it;
+    }
     const size_t n = r.texels.size();
-    auto k = std::make_unique<KeptRoom>();
-    k->room = reinterpret_cast<uintptr_t>(room), k->lot = r.lot, k->story = rr.story, k->id = rr.id, k->cls = rr.cls, k->thr = r.thr;
+    auto k = std::make_shared<KeptRoom>();
+    k->room = reinterpret_cast<uintptr_t>(room), k->mgr = rr.mgr, k->lot = r.lot, k->story = rr.story, k->id = rr.id, k->cls = rr.cls, k->thr = r.thr;
+    for (int m = 0; m < 4; m++) k->mapW[m] = r.maps[m].used ? r.maps[m].w : 0, k->mapH[m] = r.maps[m].used ? r.maps[m].h : 0;
     long parts = 0, noB = 0;
     try {
         k->base.resize(n * 3);
@@ -2354,27 +2355,34 @@ void KeepEnd(const BYTE* room) {
         return;
     }
     k->bytes = KeptBytes(*k);
+    k->version = g_keptVersion.fetch_add(1, std::memory_order_relaxed) + 1;
     const uint64_t key = KeyOf(room, rr.cls);
-    const auto old = g_kept.find(key);
-    const size_t oldBytes = old != g_kept.end() ? old->second->bytes : 0;
-    const size_t after = g_keptBytes - std::min(g_keptBytes, oldBytes) + k->bytes;
     const auto mb = [](size_t b) { return static_cast<double>(b) / (1024.0 * 1024.0); };
-    if (after > kMaxKeptBytes) { // (the room's earlier kept solve, if any, goes: it no longer holds what its maps hold)
-        if (old != g_kept.end()) g_keptBytes -= std::min(g_keptBytes, oldBytes), g_kept.erase(old);
-        if (!g_keptFull && KeptLog())
-            LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: not kept (the {:.0f} MB budget: {:.1f} MB kept in {} rooms, this one {:.1f} MB)", rr.story, rr.id, rr.cls,
-                                 mb(kMaxKeptBytes), mb(g_keptBytes), g_kept.size(), mb(k->bytes)));
-        g_keptFull = true;
-        return;
+    std::shared_ptr<const KeptRoom> kept;
+    size_t rooms = 0, total = 0;
+    {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        const auto old = g_kept.find(key);
+        const size_t oldBytes = old != g_kept.end() ? old->second->bytes : 0;
+        const size_t after = g_keptBytes - std::min(g_keptBytes, oldBytes) + k->bytes;
+        if (after > kMaxKeptBytes) { // (the room's earlier kept solve, if any, goes: it no longer holds what its maps hold)
+            if (old != g_kept.end()) g_keptBytes -= std::min(g_keptBytes, oldBytes), g_kept.erase(old);
+            if (!g_keptFull && KeptLog())
+                LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: not kept (the {:.0f} MB budget: {:.1f} MB kept in {} rooms, this one {:.1f} MB)", rr.story, rr.id,
+                                     rr.cls, mb(kMaxKeptBytes), mb(g_keptBytes), g_kept.size(), mb(k->bytes)));
+            g_keptFull = true;
+            return;
+        }
+        g_keptFull = false;
+        g_keptBytes = after;
+        kept = g_kept[key] = std::move(k);
+        rooms = g_kept.size(), total = g_keptBytes;
     }
-    g_keptFull = false;
-    g_keptBytes = after;
-    const KeptRoom& kept = *(g_kept[key] = std::move(k));
     if (KeptLog())
         LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: kept {} texels, {} drawn lamps, {} parts ({} never tested by the game), {:.1f} MB; {} rooms kept, "
                              "{:.1f} MB of {:.0f} MB",
-                             kept.story, kept.id, kept.cls, kept.texels.size(), kept.lamps.size(), parts, noB, mb(kept.bytes), g_kept.size(), mb(g_keptBytes), mb(kMaxKeptBytes)));
-    if (g_probe.load(std::memory_order_relaxed)) KeptSelfCheck(kept);
+                             kept->story, kept->id, kept->cls, kept->texels.size(), kept->lamps.size(), parts, noB, mb(kept->bytes), rooms, mb(total), mb(kMaxKeptBytes)));
+    if (g_probe.load(std::memory_order_relaxed)) KeptSelfCheck(*kept);
 }
 } // namespace
 
@@ -3086,6 +3094,146 @@ void BeforeFinalize(unsigned char* room) {
     if (!g_cap.active || g_cap.room != room) return;
     FlushPending();
     if (g_cap.keep && g_cap.ok) KeepFinals(room);
+}
+void RoomFinalized(const void* room) {
+    std::lock_guard<std::mutex> lk(g_keptMx);
+    for (auto it = g_kept.begin(); it != g_kept.end();)
+        if (it->second->room == reinterpret_cast<uintptr_t>(room)) g_keptBytes -= std::min(g_keptBytes, it->second->bytes), it = g_kept.erase(it);
+        else ++it;
+}
+void KeptRooms(uintptr_t mgr, int cls, std::vector<KeptRef>& out) {
+    out.clear();
+    std::lock_guard<std::mutex> lk(g_keptMx);
+    for (const auto& [key, k] : g_kept)
+        if (k->mgr == mgr && k->cls == cls && !k->tailWhy && k->tail.size() == k->texels.size())
+            out.push_back(KeptRef{reinterpret_cast<const void*>(k->room), k->id, k->version});
+}
+// What the GPU draws of map m of a kept room (render thread; the kept room is never changed once kept, so it is read without
+// the lock): rt_lamp_gpu.h KeptMapData
+bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu::KeptMapData& d, std::string& why) {
+    std::shared_ptr<const KeptRoom> kp;
+    {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        const auto it = g_kept.find(KeyOf(room, cls));
+        if (it == g_kept.end() || it->second->version != version) return why = "no longer kept", false;
+        kp = it->second;
+    }
+    const KeptRoom& k = *kp;
+    const size_t n = k.texels.size();
+    if (k.tailWhy || k.tail.size() != n || m < 0 || m > 3) return why = "no tail kept", false;
+    d = RtLampGpu::KeptMapData{};
+    d.story = k.story, d.id = k.id, d.cls = k.cls, d.m = m, d.lot = k.lot, d.thr = k.thr, d.w = static_cast<int>(k.mapW[m]), d.h = static_cast<int>(k.mapH[m]);
+    // the map's texels: their place in the sum's layout, and the last write of each place
+    std::vector<uint32_t> local(n, kNoSrc);
+    std::unordered_map<uint32_t, uint32_t> lastAt; // y << 16 | x -> texel
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < n; i++)
+        if (k.texels[i].map == m) local[i] = count++, lastAt[static_cast<uint32_t>(k.texels[i].y) << 16 | k.texels[i].x] = i;
+    if (!count || d.w <= 0 || d.h <= 0) return why = "no texel in that map", false;
+    d.accW = static_cast<int>(std::min<uint32_t>(count, 1024)), d.accH = static_cast<int>((count + static_cast<uint32_t>(d.accW) - 1) / static_cast<uint32_t>(d.accW));
+    if (d.accH > 8192) return why = "too many texels", false;
+    const auto accX = [&](uint32_t i) { return static_cast<float>(local[i] % static_cast<uint32_t>(d.accW)); };
+    const auto accY = [&](uint32_t i) { return static_cast<float>(local[i] / static_cast<uint32_t>(d.accW)); };
+    const auto sample = [&](uint32_t i) { return reinterpret_cast<const float*>(k.samples.data() + static_cast<size_t>(i) * 0x30); };
+    // the parts, by lamp
+    for (const KeptLamp& l : k.lamps) {
+        const UINT first = static_cast<UINT>(d.parts.size());
+        for (const KeptPart& p : l.parts) {
+            if (p.texel >= n || local[p.texel] == kNoSrc) continue;
+            const float* s = sample(p.texel);
+            RtLampGpu::TexelVertex v{};
+            v.x = accX(p.texel), v.y = accY(p.texel), v.w = 1.0f;
+            for (int q = 0; q < 3; q++) v.p[q] = s[q], v.n[q] = s[4 + q];
+            v.p[3] = static_cast<float>(p.bits & (kKeptEarly | kKeptFade));
+            v.n[3] = static_cast<float>(p.mult);
+            v.base[0] = FromHalf(p.a), v.base[1] = FromHalf(p.b), v.base[2] = FromHalf(p.thrScale);
+            d.parts.push_back(v);
+        }
+        if (d.parts.size() > first) d.lamps.push_back(l.light), d.ranges.emplace_back(first, static_cast<UINT>(d.parts.size()) - first);
+    }
+    // a texel's compose point at (x, y) of its target (RtLampModel::KeptTexel's inputs)
+    const auto texel = [&](uint32_t i, int x, int y) {
+        const TexelRec& t = k.texels[i];
+        const KeptTail& tl = k.tail[i];
+        RtLampGpu::TexelVertex v{};
+        v.x = static_cast<float>(x), v.y = static_cast<float>(y), v.w = 1.0f;
+        for (int q = 0; q < 3; q++) v.p[q] = k.base[static_cast<size_t>(i) * 3 + q];
+        v.p[3] = (tl.bits & kTailDither) ? RoomMapDither::Offset(t.x, t.y) / 255.0f : 0.0f;
+        if (k.roofed) {
+            float xs[3], rampAmb[3] = {}, ramp = 0.0f;
+            for (int q = 0; q < 3; q++) xs[q] = tl.norm * t.t.S[q];
+            if (!GpuLampLaw::IndoorSplit(xs, tl.p, k.toneK, rampAmb, ramp)) rampAmb[0] = rampAmb[1] = rampAmb[2] = ramp = 0.0f;
+            for (int q = 0; q < 3; q++) v.n[q] = rampAmb[q];
+            v.n[3] = ramp;
+        } else
+            v.n[3] = tl.p[3];
+        v.base[0] = tl.norm, v.base[1] = k.toneK, v.base[2] = (tl.bits & kTailFloor) ? RoomMapDither::kRoofedAlphaMin : 0.0f, v.base[3] = k.roofed ? 1.0f : 0.0f;
+        v.mask[0] = accX(i), v.mask[1] = accY(i);
+        return v;
+    };
+    const auto copyPoint = [](int x, int y, int sx, int sy) {
+        RtLampGpu::TexelVertex v{};
+        v.x = static_cast<float>(x), v.y = static_cast<float>(y), v.w = 1.0f;
+        v.mask[0] = static_cast<float>(sx), v.mask[1] = static_cast<float>(sy);
+        return v;
+    };
+    const auto placeOf = [&](int x, int y) { return static_cast<uint32_t>(y) * static_cast<uint32_t>(d.w) + static_cast<uint32_t>(x); };
+    const bool blurred = m == 0 && k.cls == 2;
+    // every last write at its own place (a copy's source is taken as composed; a place a copy overwrites is drawn over after)
+    if (!blurred)
+        for (const auto& [key, i] : lastAt) {
+            const TexelRec& t = k.texels[i];
+            d.texels.push_back(texel(i, t.x, t.y));
+            const uint32_t src = k.tail[i].src;
+            if (src == kNoSrc) d.restores.push_back(copyPoint(t.x, t.y, t.x, t.y)); // (a copy of a texel no capture holds: the game's)
+            else {
+                if (src != i) d.copies.push_back(copyPoint(t.x, t.y, k.texels[src].x, k.texels[src].y));
+                d.expect.emplace_back(placeOf(t.x, t.y), k.tail[i].final);
+            }
+        }
+    for (const KeptCopy& c : k.copies)
+        if (c.map == m && c.src < n) {
+            d.copies.push_back(copyPoint(c.x, c.y, k.texels[c.src].x, k.texels[c.src].y));
+            d.expect.emplace_back(placeOf(c.x, c.y), c.final);
+        }
+    // class-2 walls: each block BlurWalls blurred, with its rows beyond, side by side in the layout (the game's own blur: none drawn)
+    if (blurred && k.passes && k.wallsOk) {
+        d.layoutW = d.w;
+        int lx = 0, ly = 0, shelf = 0;
+        std::vector<std::pair<int, int>> at(k.blocks.size(), {-1, -1});
+        for (size_t j = 0; j < k.blocks.size(); j++) {
+            const BlockRec& b = k.blocks[j];
+            const int bw = b.x1 - b.x0 + 1, eh = (b.above ? 2 : 0) + (b.y1 - b.y0 + 1) + (b.below ? 2 : 0);
+            if (!b.have || bw > d.layoutW) continue;
+            if (lx + bw > d.layoutW) lx = 0, ly += shelf, shelf = 0;
+            at[j] = {lx, ly};
+            lx += bw, shelf = std::max(shelf, eh);
+        }
+        d.layoutH = ly + shelf;
+        if (d.layoutH > 8192) return why = "too many wall blocks for the layout", false;
+        d.layout.assign(static_cast<size_t>(d.layoutW) * std::max(d.layoutH, 1), 0);
+        for (size_t j = 0; j < k.blocks.size(); j++) {
+            if (at[j].first < 0) continue;
+            const BlockRec& b = k.blocks[j];
+            const int bw = b.x1 - b.x0 + 1, rows = b.y1 - b.y0 + 1, top = b.above ? 2 : 0, eh = top + rows + (b.below ? 2 : 0);
+            const auto [bx, by] = at[j];
+            const auto row = [&](int ly2, const uint32_t* src) { std::copy_n(src, bw, d.layout.begin() + static_cast<size_t>(ly2) * d.layoutW + bx); };
+            if (b.above) row(by, &k.preblur[b.ghostOff]), row(by + 1, &k.preblur[b.ghostOff + static_cast<size_t>(bw)]);
+            for (int y = 0; y < rows; y++) row(by + top + y, &k.preblur[b.off + static_cast<size_t>(y) * bw]);
+            if (b.below) row(by + top + rows, &k.preblur[b.ghostOff + static_cast<size_t>(bw) * 2]), row(by + top + rows + 1, &k.preblur[b.ghostOff + static_cast<size_t>(bw) * 3]);
+            d.extRects.push_back(RtLampGpu::Block{bx, by, bx + bw - 1, by + eh - 1});
+            d.outs.push_back(RtLampGpu::KeptBlockOut{b.x0, b.y0, b.x1, b.y1, bx, by + top, by + top + rows - 1, b.above, b.below});
+            for (int y = b.y0; y <= b.y1; y++)
+                for (int x = b.x0; x <= b.x1; x++)
+                    if (const auto it = lastAt.find(static_cast<uint32_t>(y) << 16 | static_cast<uint32_t>(x)); it != lastAt.end()) {
+                        d.wallTexels.push_back(texel(it->second, bx + x - b.x0, by + top + y - b.y0));
+                        d.expect.emplace_back(placeOf(x, y), k.tail[it->second].final);
+                    }
+        }
+        d.passes = k.passes;
+    }
+    if (d.texels.empty() && d.wallTexels.empty()) return why = "no texel drawn in that map", false;
+    return true;
 }
 void NotePack(const void* room, bool xy, unsigned x, unsigned y, const float* input, bool dithered, bool alphaFloor) {
     if (!room || t_packRoom != room) return; // (another thread's pack, or no kept capture's texel pending)

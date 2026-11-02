@@ -53,7 +53,9 @@ DeviceCalls PlainCalls() {
 }
 
 const char* EntryOf(ShaderId id) {
-    static const char* const kNames[kShaderCount] = {"ShadowVS", "TexelVS", "ShadowPS", "AccPS", "ComposePS", "CopyPS", "BlurRowPS", "BlurColPS", "BlockPS", "AccFastPS", "AccRlgPS", "AccRlgFastPS", "ComposeRlgPS"};
+    static const char* const kNames[kShaderCount] = {"ShadowVS", "TexelVS",   "ShadowPS",  "AccPS",        "ComposePS",    "CopyPS",
+                                                     "BlurRowPS", "BlurColPS", "BlockPS",   "AccFastPS",    "AccRlgPS",     "AccRlgFastPS",
+                                                     "ComposeRlgPS", "AccKeptPS", "ComposeKeptPS", "CopyAtPS", "BlockKeptPS"};
     return id >= 0 && id < kShaderCount ? kNames[id] : "";
 }
 bool IsVertex(ShaderId id) { return id == kShadowVs || id == kTexelVs; }
@@ -966,6 +968,194 @@ bool Engine::ReadFloat4(IDirect3DDevice9* dev, IDirect3DTexture9* t, int w, int 
     if (sys) sys->Release();
     if (src) src->Release();
     return ok;
+}
+
+// ---- GPU room lamps ----
+void KeptMapGpu::Release() {
+    for (IDirect3DVertexBuffer9** v : {&parts, &texels, &walls, &copies, &restores}) Rel(*v);
+    Rel(layout);
+    nTexels = nWalls = nCopies = nRestores = 0;
+    bytes = 0;
+}
+bool Engine::UploadKept(IDirect3DDevice9* dev, const KeptMapData& d, KeptMapGpu& g) {
+    g.Release();
+    g.w = d.w, g.h = d.h, g.accW = d.accW, g.accH = d.accH, g.layoutW = d.layoutW, g.layoutH = d.layoutH;
+    g.ranges = d.ranges, g.extRects = d.extRects, g.outs = d.outs, g.passes = d.passes;
+    const auto vb = [&](const std::vector<TexelVertex>& v, IDirect3DVertexBuffer9*& out, UINT& n) {
+        n = static_cast<UINT>(v.size());
+        g.bytes += v.size() * sizeof(TexelVertex);
+        return v.empty() || MakeVb(dev, v.data(), n, &out, true);
+    };
+    UINT parts = 0;
+    bool ok = vb(d.parts, g.parts, parts) && vb(d.texels, g.texels, g.nTexels) && vb(d.wallTexels, g.walls, g.nWalls) && vb(d.copies, g.copies, g.nCopies) &&
+              vb(d.restores, g.restores, g.nRestores);
+    if (ok && !d.layout.empty()) {
+        ok = d.layout.size() == static_cast<size_t>(d.layoutW) * d.layoutH && MakePreblur(dev, d.layoutW, d.layoutH, d.layout.data(), &g.layout, true);
+        g.bytes += d.layout.size() * 4;
+    }
+    if (!ok) g.Release();
+    return ok;
+}
+namespace {
+// The device adds into an A32B32G32R32F target (post-pixel-shader blending)
+bool FloatBlend(IDirect3DDevice9* dev) {
+    IDirect3D9* d3d = nullptr;
+    D3DDEVICE_CREATION_PARAMETERS cp{};
+    D3DDISPLAYMODE dm{};
+    if (FAILED(dev->GetDirect3D(&d3d)) || !d3d) return false;
+    const bool ok = SUCCEEDED(dev->GetCreationParameters(&cp)) && SUCCEEDED(dev->GetDisplayMode(0, &dm)) &&
+                    d3d->CheckDeviceFormat(cp.AdapterOrdinal, cp.DeviceType, dm.Format, D3DUSAGE_RENDERTARGET | D3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING, D3DRTYPE_TEXTURE,
+                                           D3DFMT_A32B32G32R32F) == D3D_OK;
+    d3d->Release();
+    return ok;
+}
+} // namespace
+// 1. the sum: base-less, every lamp's parts added at their texels' places in the sum's layout; 2. the texels composed into the
+// map; 3. class-2 walls: composed into the layout over the blocks before the blur, blurred the game's way (BlurWalls: the rows
+// lit beyond an edge in the blur, an edge with none along the wall only) and their rows into the map; 4. the tile-edge copies
+// from the composed map, and the kept texels a copy of an unkept texel overwrote back from the game's map
+bool Engine::RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLampLaw::Lamp* laws, const char* lawOk, float thr, IDirect3DBaseTexture9* game,
+                         IDirect3DTexture9* out, std::string& err) {
+    if (!ready_ || !out || k.w <= 0 || k.h <= 0 || k.accW <= 0 || k.accH <= 0) return err = "nothing to relight", false;
+    if (blendOk_ < 0) blendOk_ = FloatBlend(dev) ? 1 : 0;
+    if (!blendOk_) return err = "the device cannot add into an A32B32G32R32F target", false;
+    if (!EnsureScratch(dev, std::max({k.w, k.accW, k.layoutW}), std::max({k.h, k.accH, k.layoutH}), err)) return false;
+    UINT most = std::max({k.nTexels, k.nWalls, k.nCopies, k.nRestores});
+    for (const auto& r : k.ranges) most = std::max(most, r.first + r.second);
+    if (!EnsureZeros(dev, most)) return err = "the zero stream could not be created", false;
+    c_.SetDepthStencil(dev, nullptr);
+    PassStates(dev);
+    PointSampler(dev, 0);
+    PointSampler(dev, 1);
+    const auto points = [&](IDirect3DVertexBuffer9* vb, UINT first, UINT n, int tw, int th) {
+        dev->SetVertexDeclaration(texelDecl_);
+        dev->SetStreamSource(0, vb, 0, sizeof(TexelVertex));
+        dev->SetStreamSource(1, zeros_, 0, sizeof(TexelDyn));
+        TexelTarget(dev, tw, th);
+        const HRESULT hr = c_.DrawPrimitive(dev, D3DPT_POINTLIST, first, n);
+        dev->SetStreamSource(1, nullptr, 0, 0);
+        c_.SetVertexShader(dev, nullptr);
+        return SUCCEEDED(hr);
+    };
+    const auto fail = [&](const char* why) {
+        dev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+        c_.SetTexture(dev, 0, nullptr);
+        c_.SetTexture(dev, 1, nullptr);
+        err = why;
+        return false;
+    };
+    // 1. the sum
+    if (!Target(dev, acc_[0], k.accW, k.accH)) return fail("the sum could not be targeted");
+    dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 1.0f, 0);
+    if (k.parts) {
+        dev->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+        dev->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, FALSE);
+        dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
+        dev->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
+        dev->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
+        c_.SetPixelShader(dev, ps_[kAccKeptPs]);
+        float c[97][4] = {};
+        c[96][0] = 1.0f, c[96][1] = thr;
+        for (size_t l = 0; l < k.ranges.size(); l++) {
+            if (!lawOk[l] || !k.ranges[l].second) continue;
+            float rows[5][4];
+            GpuLampLaw::Rows(laws[l], rows);
+            for (int r = 0; r < 5; r++) std::memcpy(c[r * 16], rows[r], sizeof rows[r]);
+            c_.SetPsConst(dev, 0, &c[0][0], 97);
+            if (!points(k.parts, k.ranges[l].first, k.ranges[l].second, k.accW, k.accH)) return fail("the sum's draw failed");
+            stats_.accDraws++;
+        }
+        dev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+    }
+    accCur_ = 0;
+    // 2. the texels into the map
+    const float d99[4] = {0, 0, 1.0f / static_cast<float>(scratchW_), 1.0f / static_cast<float>(scratchH_)};
+    c_.SetPsConst(dev, 99, d99, 1);
+    if (k.texels) {
+        if (!Target(dev, out, k.w, k.h)) return fail("the relit map could not be targeted");
+        c_.SetTexture(dev, 1, acc_[0]);
+        c_.SetPixelShader(dev, ps_[kComposeKeptPs]);
+        if (!points(k.texels, 0, k.nTexels, k.w, k.h)) return fail("the texels' draw failed");
+        stats_.composeDraws++;
+    }
+    // 3. the class-2 walls
+    if (k.walls && k.layout && !k.outs.empty()) {
+        if (!Target(dev, scratch_[0], k.layoutW, k.layoutH)) return fail("the wall layout could not be targeted");
+        c_.SetTexture(dev, 1, nullptr);
+        c_.SetPixelShader(dev, ps_[kCopyPs]);
+        c_.SetTexture(dev, 0, k.layout);
+        Quad(dev, k.layoutW, k.layoutH);
+        c_.SetTexture(dev, 0, nullptr);
+        c_.SetTexture(dev, 1, acc_[0]);
+        c_.SetPsConst(dev, 99, d99, 1);
+        c_.SetPixelShader(dev, ps_[kComposeKeptPs]);
+        if (!points(k.walls, 0, k.nWalls, k.layoutW, k.layoutH)) return fail("the wall texels' draw failed");
+        c_.SetTexture(dev, 1, nullptr);
+        Map ext;
+        ext.blocks = k.extRects;
+        const float inv[4] = {1.0f / static_cast<float>(scratchW_), 1.0f / static_cast<float>(scratchH_), 0, 0};
+        c_.SetPsConst(dev, 0, inv, 1);
+        const auto pass = [&](IDirect3DTexture9* src, IDirect3DTexture9* dst, ShaderId ps) {
+            if (!Target(dev, dst, k.layoutW, k.layoutH)) return false;
+            c_.SetPixelShader(dev, ps_[ps]);
+            c_.SetTexture(dev, 0, src);
+            Blocks(dev, ext);
+            c_.SetTexture(dev, 0, nullptr);
+            return true;
+        };
+        IDirect3DTexture9* rows = scratch_[0];
+        for (UINT p = 0; p < k.passes; p++) {
+            IDirect3DTexture9* dst = scratch_[1 + (p & 1)];
+            if (!pass(rows, dst, kBlurRowPs)) return fail("a blur pass could not be targeted");
+            rows = dst;
+        }
+        IDirect3DTexture9* full = scratch_[0];
+        for (UINT p = 0; p < k.passes; p++) {
+            if (!pass(full, scratch_[3], kBlurRowPs) || !pass(scratch_[3], scratch_[4], kBlurColPs)) return fail("a blur pass could not be targeted");
+            full = scratch_[4];
+        }
+        if (!Target(dev, out, k.w, k.h)) return fail("the relit map could not be targeted");
+        std::vector<QuadV> v;
+        v.reserve(k.outs.size() * 6);
+        for (const KeptBlockOut& b : k.outs) {
+            const float dx = static_cast<float>(b.lx - b.x0), dy = static_cast<float>(b.ly0 - b.y0);
+            const float r[4] = {static_cast<float>(b.ly0), static_cast<float>(b.ly1), b.above ? 1.0f : 0.0f, b.below ? 1.0f : 0.0f};
+            const float x0 = static_cast<float>(b.x0) - 0.5f, y0 = static_cast<float>(b.y0) - 0.5f, x1 = static_cast<float>(b.x1) + 0.5f, y1 = static_cast<float>(b.y1) + 0.5f;
+            const auto P = [&](float x, float y) { v.push_back(QuadV{x, y, 0, 1, x + 0.5f + dx, y + 0.5f + dy, {r[0], r[1], r[2], r[3]}}); };
+            P(x0, y0), P(x1, y0), P(x0, y1), P(x1, y0), P(x1, y1), P(x0, y1);
+        }
+        c_.SetPixelShader(dev, ps_[kBlockKeptPs]);
+        c_.SetTexture(dev, 0, full);
+        c_.SetTexture(dev, 1, rows);
+        dev->SetFVF(kQuadFvf);
+        for (size_t at = 0; at < v.size(); at += 3 * 60000)
+            dev->DrawPrimitiveUP(D3DPT_TRIANGLELIST, static_cast<UINT>(std::min<size_t>((v.size() - at) / 3, 60000)), v.data() + at, sizeof(QuadV));
+        c_.SetTexture(dev, 0, nullptr);
+        c_.SetTexture(dev, 1, nullptr);
+        stats_.blurDraws++;
+    }
+    c_.SetTexture(dev, 1, nullptr);
+    // 4. the tile-edge copies (their sources as composed, before any copy), then the texels the game's copies left as the game's
+    if (k.copies) {
+        if (!CopyTexture(dev, out, scratch_[0], k.w, k.h, err)) return fail("the map could not be copied for its tile-edge copies");
+        if (!Target(dev, out, k.w, k.h)) return fail("the relit map could not be targeted");
+        const float inv[4] = {1.0f / static_cast<float>(scratchW_), 1.0f / static_cast<float>(scratchH_), 0, 0};
+        c_.SetPsConst(dev, 0, inv, 1);
+        c_.SetPixelShader(dev, ps_[kCopyAtPs]);
+        c_.SetTexture(dev, 0, scratch_[0]);
+        if (!points(k.copies, 0, k.nCopies, k.w, k.h)) return fail("the tile-edge copies' draw failed");
+        c_.SetTexture(dev, 0, nullptr);
+    }
+    if (k.restores && game) {
+        if (!Target(dev, out, k.w, k.h)) return fail("the relit map could not be targeted");
+        const float inv[4] = {1.0f / static_cast<float>(k.w), 1.0f / static_cast<float>(k.h), 0, 0};
+        c_.SetPsConst(dev, 0, inv, 1);
+        c_.SetPixelShader(dev, ps_[kCopyAtPs]);
+        c_.SetTexture(dev, 0, game);
+        if (!points(k.restores, 0, k.nRestores, k.w, k.h)) return fail("the restores' draw failed");
+        c_.SetTexture(dev, 0, nullptr);
+    }
+    return true;
 }
 
 bool Engine::ReadSum(IDirect3DDevice9* dev, int w, int h, std::vector<float>& out) {

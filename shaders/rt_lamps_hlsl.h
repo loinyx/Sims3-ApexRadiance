@@ -480,4 +480,57 @@ float4 ComposeRlgPS(TexelIn i, float2 vpos : VPOS) : COLOR0 {
     if (i.base.w != 0) c.rgb = clamp(c.rgb + i.base.w, 0.0, 1.0);
     return float4(Rne(c.r * 255.0), Rne(c.g * 255.0), Rne(c.b * 255.0), Rne(c.a * 255.0)) / 255.0;
 }
+)RAW"
+R"RAW(// ---------------------------------------------------------------- GPU room lamps (gpu_room_lamps.cpp): kept room solves
+// Every operation mirrors rt_lamp_model.h KeptAdd / KeptTexel: keep them in step.
+// AccKeptPS     one point per (kept texel, lamp) at the texel's place in the sum's layout (A32B32G32R32F, added: blend one,
+//               one); the lamp in gPos[0] .. gSpill[0], gA.y the room's threshold. p = (sample position, bits: 1 the early-out,
+//               4 the soft light cut ran), n = (sample normal, mult), base = (A, B, thrScale, 0): mult x fade(law x A) x B
+// ComposeKeptPS one point per kept texel at its place in the map (or in the wall layout): KeptTexel on base + the sum, packed
+//               as the game's pack. p = (base rgb, dither), n = (ramp x ambient rgb, ramp; a roofless texel: its alpha),
+//               base = (norm, k, the alpha floor, roofed 0/1), mask.xy = its place in the sum's layout (gD.zw: 1 / its size)
+// CopyAtPS      one point per place: sSrc's texel at mask.xy (gM.xy: 1 / sSrc's size)
+// BlockKeptPS   a blurred wall block from the layout into the map: tc0 = the layout pixel, tc1 = (its first and last rows in the
+//               layout, rows beyond above 0/1, below 0/1): an edge row with nothing beyond it from the rows-only chain (sSrc2)
+float4 AccKeptPS(TexelIn i) : COLOR0 {
+    const float3 law = Law(ReadLamp(0), i.p.xyz, i.n.xyz, 0.0);
+    float3 c = law * i.base.x;
+    const float thr = gA.y;
+    const float cs = (c.b + c.g) + c.r;
+    const bool early = fmod(i.p.w, 2.0) >= 1.0, fade = fmod(floor(i.p.w / 4.0), 2.0) >= 1.0;
+    const float t = fade ? thr * i.base.z : thr;
+    if ((early && thr > cs) || !(cs >= t)) c = 0;
+    else if (fade && cs < 2.0 * t) {
+        const float x = (cs - t) / t;
+        c *= x * x * (3.0 - 2.0 * x);
+    }
+    return float4(i.n.w * c * i.base.y, 0);
+}
+float4 ComposeKeptPS(TexelIn i) : COLOR0 {
+    const float4 acc = tex2Dlod(sAcc, float4((i.mask.xy + 0.5) * gD.zw, 0, 0));
+    const float3 R = i.p.rgb + acc.rgb;
+    float4 c;
+    if (i.base.w > 0.5) {
+        const float3 t = ToneRlg(i.base.x * max(R, 0.0));
+        const float w = 1.0 - Sat(i.base.y * ((t.b + t.g) + t.r));
+        const float3 rgb = t + w * i.n.rgb;
+        const float a = w * i.n.w;
+        c = float4(saturate(Fin(rgb.r)), saturate(Fin(rgb.g)), saturate(Fin(rgb.b)), saturate(Fin(a)));
+        if (c.a < i.base.z) c.a = i.base.z;
+    } else {
+        float3 s = max(float3(Fin(R.r), Fin(R.g), Fin(R.b)), 0.0);
+        const float sm = max(s.r, max(s.g, s.b));
+        if (sm > 1.0) s /= sm;
+        c = float4(min(s, 1.0), min(max(Fin(i.n.w), 0.0), 1.0));
+    }
+    if (i.p.w != 0) c.rgb = clamp(c.rgb + i.p.w, 0.0, 1.0);
+    return float4(Rne(c.r * 255.0), Rne(c.g * 255.0), Rne(c.b * 255.0), Rne(c.a * 255.0)) / 255.0;
+}
+float4 CopyAtPS(TexelIn i) : COLOR0 { return tex2Dlod(sSrc, float4((i.mask.xy + 0.5) * gM.xy, 0, 0)); }
+float4 BlockKeptPS(float2 pix : TEXCOORD0, float4 rect : TEXCOORD1) : COLOR0 {
+    const float2 p = floor(pix);
+    const float2 uv = (p + 0.5) * gM.xy;
+    const bool edge = (p.y <= rect.x + 0.5 && rect.z < 0.5) || (p.y >= rect.y - 0.5 && rect.w < 0.5);
+    return edge ? tex2Dlod(sSrc2, float4(uv, 0, 0)) : tex2Dlod(sSrc, float4(uv, 0, 0));
+}
 )RAW";

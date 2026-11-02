@@ -125,6 +125,7 @@
     <ClCompile Include="features\frame_profiler.cpp" />
     <ClCompile Include="features\level_light_share.cpp" />
     <ClCompile Include="features\outdoor_delta.cpp" />
+    <ClCompile Include="features\gpu_room_lamps.cpp" />
     <ClCompile Include="features\rt_outdoor_lamps.cpp" />
     <ClCompile Include="features\rt_lamp_gpu.cpp" />
     <ClCompile Include="features\ground_shade_gpu.cpp" />
@@ -276,6 +277,7 @@
     <ClInclude Include="features\outdoor_delta.h" />
     <ClInclude Include="features\outdoor_delta_model.h" />
     <ClInclude Include="features\rt_outdoor_lamps.h" />
+    <ClInclude Include="features\gpu_room_lamps.h" />
     <ClInclude Include="features\rt_lamp_gpu.h" />
     <ClInclude Include="features\ground_shade_gpu.h" />
     <ClInclude Include="features\rt_lamp_model.h" />

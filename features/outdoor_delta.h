@@ -22,6 +22,10 @@
 #include <string>
 #include <vector>
 
+namespace RtLampGpu {
+struct KeptMapData;
+}
+
 namespace OutdoorDelta {
 
 // Render thread, every frame: on = Lamp lighting is Instant and its parts (LevelLightShare's solve hooks) are in
@@ -48,6 +52,18 @@ bool RoomHooks();
 // texel the solve packs next at (x, y) of its map (xy: known), its pack input before the clamp (null: not known), whether the
 // dither and the roofed alpha floor apply to it
 void NotePack(const void* room, bool xy, unsigned x, unsigned y, const float* input, bool dithered, bool alphaFloor);
+// GPU room lamps stage 2b (gpu_room_lamps.cpp, render thread): the kept solves of story manager mgr's rooms at class cls (with
+// their tail), and what the GPU draws of map m of one of them (false: not that version any more, or nothing drawn in that map)
+struct KeptRef {
+    const void* room;
+    int id;
+    uint32_t version;
+};
+void KeptRooms(uintptr_t mgr, int cls, std::vector<KeptRef>& out);
+bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu::KeptMapData& out, std::string& why);
+// Any thread (LevelLightShare's FinalizeHook, after the game's finalize): the room's texels in its maps were written again, so
+// its kept solves no longer hold them (a solve kept on the light tree thread is kept again right after)
+void RoomFinalized(const void* room);
 
 // ---- the direct path (light tree thread; LevelLightShare's hooks) ----
 // The lamp entry update of story tl's room 0 (LevelLightShare::HoldLampMark, a lamp that moved or changed a value in the same

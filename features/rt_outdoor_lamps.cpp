@@ -17,6 +17,7 @@
 #include "rt_outdoor_lamps.h"
 #include "terrain_bake_rule.h"
 #include "rt_lamp_gpu.h"
+#include "gpu_room_lamps.h"
 #include "platform.h"
 #include "rt_lamp_model.h"
 #include "rt_lamp_proxy.h"
@@ -121,8 +122,9 @@ ShaderCache::Id AddRtLampShader(int i) {
 }
 const ShaderCache::Id kRtLampShaderIds[RtLampGpu::kShaderCount] = {
     AddRtLampShader(0), AddRtLampShader(1), AddRtLampShader(2), AddRtLampShader(3), AddRtLampShader(4), AddRtLampShader(5), AddRtLampShader(6),
-    AddRtLampShader(7), AddRtLampShader(8), AddRtLampShader(9), AddRtLampShader(10), AddRtLampShader(11), AddRtLampShader(12)};
-static_assert(RtLampGpu::kShaderCount == 13, "kRtLampShaderIds lists every RtLampGpu::ShaderId");
+    AddRtLampShader(7), AddRtLampShader(8), AddRtLampShader(9), AddRtLampShader(10), AddRtLampShader(11), AddRtLampShader(12), AddRtLampShader(13),
+    AddRtLampShader(14), AddRtLampShader(15), AddRtLampShader(16)};
+static_assert(RtLampGpu::kShaderCount == 17, "kRtLampShaderIds lists every RtLampGpu::ShaderId");
 void CompileAll() {
     for (int i = 0; i < RtLampGpu::kShaderCount; i++) {
         std::string err;
@@ -652,6 +654,7 @@ void DropAll(IDirect3DDevice9* dev, const char* why, bool requeue = true) {
     g_swapLo = ~uintptr_t{0}, g_swapHi = 0;
     g_swapSig = 0;
     OutdoorDelta::PinRooms(nullptr, 0); // (no relit map stands for a kept room any more: the budget pins none)
+    GpuRoomLamps::ReleaseAll();
     if (g_slots.empty() && !g_eng) return;
     UnbindCopies(dev);
     const size_t n = g_slots.size();
@@ -1055,6 +1058,7 @@ void OnPreReset(IDirect3DDevice9* dev) {
         s->relit = false; // (14/10: its preblur texture is a MANAGED one: kept, and the slot stays built; only the copy is made again)
     }
     if (g_eng) g_eng->ReleaseDefault();
+    GpuRoomLamps::ReleaseAll(); // (their buffers are DEFAULT: made again on use)
     for (IDirect3DQuery9** q : {&g_qDisjoint, &g_qFreq, &g_qBegin, &g_qEnd})
         if (*q) (*q)->Release(), *q = nullptr;
     g_qPending = false;
@@ -1992,6 +1996,11 @@ void Frame(IDirect3DDevice9* dev) {
         Mix(sig, &params, 8), Mix(sig, &g_meshGen, 4), Mix(sig, &s.version, 4);
         if (!s.masked.empty()) Mix(sig, &sBakeSig, 8);
         for (const auto& l : mine) Mix(sig, &l, sizeof l);
+        // GPU room lamps (developer, gpu_room_lamps.h): the kept rooms drawn over this map and their lamps as they are now
+        if (!s.mgr) {
+            const uint64_t rooms = GpuRoomLamps::Sig(dev, rns[s.story].mgr, s.cls, s.m);
+            Mix(sig, &rooms, sizeof rooms);
+        }
         // the under-floor share from a worker (exact, UnderShare's sums): once no lamp is dragged, and (14/10) while one is,
         // in place of the render thread's UnderDelta below (up to 152 ms of a drag's relight; 26.8 ms in one frame): the last
         // share is kept until the worker's arrives, and a share of an earlier bake is taken during a drag (it follows the drag
@@ -2197,6 +2206,7 @@ void Frame(IDirect3DDevice9* dev) {
             if (mine.empty()) break;
         }
         ok = ok && g_eng->Compose(dev, s.map, s.game, s.copy, p, err, s.scale);
+        if (ok && !s.mgr) GpuRoomLamps::ComposeOver(dev, *g_eng, rns[s.story].mgr, s.cls, s.m, s.game, s.copy, s.map.w, s.map.h);
         s.scaled = ok && s.scale;
         if (!ok) {
             s.relit = false;

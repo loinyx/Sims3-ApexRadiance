@@ -40,7 +40,10 @@ struct DeviceCalls {
 DeviceCalls PlainCalls(); // the device's own methods (the harness)
 
 // The shader objects (made by the caller: the game from its shader cache, the harness with D3DCompile)
-enum ShaderId { kShadowVs, kTexelVs, kShadowPs, kAccPs, kComposePs, kCopyPs, kBlurRowPs, kBlurColPs, kBlockPs, kAccFastPs, kAccRlgPs, kAccRlgFastPs, kComposeRlgPs, kShaderCount };
+enum ShaderId {
+    kShadowVs, kTexelVs, kShadowPs, kAccPs, kComposePs, kCopyPs, kBlurRowPs, kBlurColPs, kBlockPs, kAccFastPs, kAccRlgPs, kAccRlgFastPs, kComposeRlgPs,
+    kAccKeptPs, kComposeKeptPs, kCopyAtPs, kBlockKeptPs, kShaderCount
+};
 const char* EntryOf(ShaderId id);
 bool IsVertex(ShaderId id);
 
@@ -85,6 +88,46 @@ struct Map {
     UINT passes = 0;
     std::vector<Block> blocks;
     IDirect3DTexture9* preblur = nullptr; // DEFAULT, w x h: the blocks' texels before the blur as the solve left them
+};
+
+// ---- GPU room lamps (developer, gpu_room_lamps.cpp): one kept room solve's texels of one map (OutdoorDelta::BuildKeptMap) ----
+// Every point is a TexelVertex at its target texel (t.xy):
+//   parts (AccKeptPS, into the sum's layout: the map's kept texel j at (j % accW, j / accW)): p = (sample position, bits: 1
+//   the early-out, 4 the soft light cut), n = (sample normal, mult), base = (A, B, thrScale, 0); grouped by lamp (ranges)
+//   texels / wallTexels (ComposeKeptPS, into the map / the class-2 wall layout): p = (base rgb, dither), n = (ramp x ambient,
+//   ramp; a roofless texel: its alpha), base = (norm, k, the alpha floor, roofed 0/1), mask.xy = its place in the sum's layout
+//   copies / restores (CopyAtPS, into the map): mask.xy = the place the texel comes from (the composed map / the game's map)
+struct KeptBlockOut {
+    int x0, y0, x1, y1; // the block in the map
+    int lx, ly0, ly1;   // its rows in the layout (x0 at lx)
+    bool above, below;  // the rows lit beyond that edge are in the layout
+};
+struct KeptMapData {
+    int story = 0, id = 0, cls = 0, m = 0;
+    uint64_t lot = 0;
+    float thr = 0.0f;
+    int w = 0, h = 0, accW = 0, accH = 0;
+    std::vector<TexelVertex> parts, texels, wallTexels, copies, restores;
+    std::vector<uintptr_t> lamps;               // the lamp of each range of parts
+    std::vector<std::pair<UINT, UINT>> ranges;  // first, count
+    int layoutW = 0, layoutH = 0;
+    std::vector<uint32_t> layout;               // the class-2 blocks before the blur with their rows beyond, layoutW x layoutH
+    std::vector<Block> extRects;                // each block with its rows beyond, in the layout
+    std::vector<KeptBlockOut> outs;
+    UINT passes = 0;
+    std::vector<std::pair<uint32_t, uint32_t>> expect; // (y x w + x, the texel the game left there) for the self-check
+};
+struct KeptMapGpu { // DEFAULT pool (made again after a device reset)
+    int w = 0, h = 0, accW = 0, accH = 0, layoutW = 0, layoutH = 0;
+    IDirect3DVertexBuffer9 *parts = nullptr, *texels = nullptr, *walls = nullptr, *copies = nullptr, *restores = nullptr;
+    UINT nTexels = 0, nWalls = 0, nCopies = 0, nRestores = 0;
+    std::vector<std::pair<UINT, UINT>> ranges;
+    IDirect3DTexture9* layout = nullptr;
+    std::vector<Block> extRects;
+    std::vector<KeptBlockOut> outs;
+    UINT passes = 0;
+    size_t bytes = 0;
+    void Release();
 };
 
 struct Stats {
@@ -152,6 +195,12 @@ class Engine {
     // An A32B32G32R32F render target read back (4 floats per texel, r g b a); waits for the GPU
     static bool ReadFloat4(IDirect3DDevice9* dev, IDirect3DTexture9* t, int w, int h, std::vector<float>& out);
 
+    // ---- GPU room lamps: a kept room solve drawn over a map (between Begin and End) ----
+    static bool UploadKept(IDirect3DDevice9* dev, const KeptMapData& d, KeptMapGpu& g);
+    // laws / lawOk: per range of parts (a lamp without a law adds nothing); game: the game's own map (the restores' source)
+    bool RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLampLaw::Lamp* laws, const char* lawOk, float thr, IDirect3DBaseTexture9* game,
+                     IDirect3DTexture9* out, std::string& err);
+
     // The state of the device around a series of passes (render targets, depth, every state a state block holds)
     bool Begin(IDirect3DDevice9* dev); // false: no state block could be made, nothing was changed (End is not called)
     void End(IDirect3DDevice9* dev);
@@ -193,6 +242,7 @@ class Engine {
     IDirect3DTexture9* table_ = nullptr;      // DEFAULT A32B32G32R32F kTableCols x tableRows_
     IDirect3DTexture9* tableSys_ = nullptr;   // its SYSTEMMEM copy
     int tableRows_ = 0, tableCap_ = 0;
+    int blendOk_ = -1; // the device adds into an A32B32G32R32F target (RelightKept; -1 not asked yet)
     bool ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, ShaderId ps, std::string& err,
                      IDirect3DTexture9* scale = nullptr);
     IDirect3DStateBlock9* saved_ = nullptr;
