@@ -26,6 +26,7 @@
 #include <cmath>
 #include <cstdint>
 #include <vector>
+#include "open_rooms_above.h"
 
 namespace RtLampProxy {
 
@@ -53,7 +54,8 @@ struct Story {
     std::vector<float> floorY;   // per tile (iz * w + ix), kNoFloor = none
     std::vector<uint8_t> roofed; // per tile: bit q = quadrant q under a roof or a ceiling
     std::vector<float> ceil;     // per tile: the roof's height (floor + 3)
-    std::vector<uint8_t> placed; // per tile: bit q = quadrant q holds a placed floor (stories 1 and up)
+    std::vector<uint8_t> placed; // per tile: bit q = quadrant q holds a placed floor (stories 1 and up; empty = not read)
+    std::vector<int32_t> room;   // per tile, 4: the quadrants' room ids (empty = not known; Build's open tops)
     float plane = kNoFloor;      // the story's lowest floor (a placed quadrant with no tile floor stands at it)
 };
 struct Lot {
@@ -76,6 +78,7 @@ struct Mesh {
     std::vector<Tri> tris;
     float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
     int walls = 0, wallTris = 0, openings = 0, roofTris = 0, slabTris = 0;
+    int openTops = 0; // roofed quadrants left without their ceiling (Build ceilingsOpen: OpenTops)
     // the uniform grid over x / z (1 m cells) the reference walks
     int gx0 = 0, gz0 = 0, gw = 0, gh = 0;
     std::vector<uint32_t> cellStart, cellTris; // CSR: cell c holds cellTris[cellStart[c] .. cellStart[c + 1])
@@ -336,7 +339,41 @@ inline void CeilingsUnderAbove(const Story& s, const Story* above, std::vector<f
         if (lowered) ++*lowered;
     }
 }
-// ceilingsOpen: no slab over a roofed quadrant of the story below (GPU lamps for every room, which lights ceilings)
+// A roofed room of story s open to the story above (OpenAbove::Classify, the rule room 0 takes the lamps below by: no floor
+// placed over half of it, its walls going up through that story) is one space two stories tall: its roofed quadrants with no
+// floor placed over them lose their ceiling at floor + 3 m (02/11, lot C49C: story 2's rooms 5, 6 and 7 under story 3 cut
+// their lamps' light at the story line). Room ids or placed floors not read: nothing opens. Returns the quadrants opened.
+inline int OpenTops(Story& s, const Story& above) {
+    const int w = s.w, h = s.h;
+    const size_t nt = static_cast<size_t>(w) * h;
+    if (w <= 0 || h <= 0 || above.w != w || above.h != h || s.room.size() != 4 * nt || s.roofed.size() != nt || above.placed.size() != nt) return 0;
+    std::vector<uint8_t> wz(static_cast<size_t>(h + 1) * w, 0), wx(static_cast<size_t>(w + 1) * h, 0); // the story above's walls on tile sides
+    for (const Edge& e : above.edges) {
+        const int x0 = static_cast<int>(std::lround(e.x0)), z0 = static_cast<int>(std::lround(e.z0));
+        const int x1 = static_cast<int>(std::lround(e.x1)), z1 = static_cast<int>(std::lround(e.z1));
+        const int xl = std::min(x0, x1), zl = std::min(z0, z1);
+        if (z0 == z1 && std::abs(x1 - x0) == 1 && z0 >= 0 && z0 <= h && xl >= 0 && xl < w) wz[static_cast<size_t>(z0) * w + xl] = 1;
+        if (x0 == x1 && std::abs(z1 - z0) == 1 && x0 >= 0 && x0 <= w && zl >= 0 && zl < h) wx[static_cast<size_t>(zl) * (w + 1) + x0] = 1;
+    }
+    const auto at = [&](int x, int z) { return static_cast<size_t>(z) * w + x; };
+    // (a roofless room's lamps are outdoor lamps already: room 0 for the rule, as ShareRoomZeroFromBelow)
+    const auto roomAt = [&](int x, int z, int q) { return ((s.roofed[at(x, z)] >> q) & 1u) ? s.room[4 * at(x, z) + q] : 0; };
+    std::vector<int> open;
+    OpenAbove::Classify(
+        w, h, roomAt, [&](int x, int z, int q) { return PlacedQ(above, x, z, q); }, [&](int x, int Z) { return wz[static_cast<size_t>(Z) * w + x] != 0; },
+        [&](int X, int z) { return wx[static_cast<size_t>(z) * (w + 1) + X] != 0; }, open);
+    int opened = 0;
+    for (int z = 0; z < h && !open.empty(); z++)
+        for (int x = 0; x < w; x++)
+            for (int q = 0; q < 4; q++)
+                if (!PlacedQ(above, x, z, q) && std::binary_search(open.begin(), open.end(), roomAt(x, z, q))) {
+                    s.roofed[at(x, z)] &= static_cast<uint8_t>(~(1u << q));
+                    opened++;
+                }
+    return opened;
+}
+// ceilingsOpen (GPU lamps for every room, which light ceilings): no slab over a roofed quadrant of the story below, and no
+// ceiling over a room open to the story above (OpenTops)
 inline void Build(const Lot& lot, Mesh& m, bool ceilingsOpen = false) {
     m = Mesh{};
     // (each story's ceilings taken down to the floor of the story above where it is lower: see CeilingsUnderAbove)
@@ -348,6 +385,7 @@ inline void Build(const Lot& lot, Mesh& m, bool ceilingsOpen = false) {
             if (a.story == s.story + 1) above = &a;
         fixed.push_back(s);
         CeilingsUnderAbove(s, above, fixed.back().ceil);
+        if (ceilingsOpen && above) m.openTops += OpenTops(fixed.back(), *above);
     }
     for (const Story& s : fixed) {
         m.curStory = static_cast<int8_t>(std::clamp(s.story, -8, 8));

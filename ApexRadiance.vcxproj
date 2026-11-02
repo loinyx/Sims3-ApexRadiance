@@ -284,6 +284,7 @@
     <ClInclude Include="features\ground_shade_gpu.h" />
     <ClInclude Include="features\rt_lamp_model.h" />
     <ClInclude Include="features\rt_lamp_proxy.h" />
+    <ClInclude Include="features\rt_lamp_blockers.h" />
     <ClInclude Include="features\gpu_lamp_law.h" />
     <ClInclude Include="framework\high_alloc.h" />
     <ClInclude Include="shaders\rt_lamps_hlsl.h" />

@@ -16,6 +16,8 @@
 
 // the tests themselves: the production header (features/room_light_tests.h)
 #include "features/room_light_tests.h"
+#include "features/rt_lamp_blockers.h"
+#include "features/rt_lamp_blockers.h"
 using namespace RoomLightTests;
 
 static float lum(const float* c) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; }
@@ -153,6 +155,17 @@ int main(int argc, char** argv) {
     printf("\nflags[1] = 0 samples (lit): %d, measured 3D exactly 1: %d, replay would shade (<0.98): %d\n", f1zero, f1zeroOpen, f1zeroWould);
     d3.print("3D transmission got/wall where flags[1] = 1 (a = L, b = p, all records; exact = 5e-4)", S);
     if (unk) printf("unknown blocker vtables hit: %d\n", unk);
+
+    // ---- the same 3D test from the physical model's blocker table (features/rt_lamp_blockers.h): bit for bit ----
+    RtLampGpu::BlockerTable table; std::vector<int> headers;
+    for (const Room& r : rooms) headers.push_back(table.Append(r));
+    size_t same = 0, shaded = 0; float worst = 0.0f;
+    for (size_t i = 0; i < S.size(); ++i) {
+        const float got = table.Occlude(headers[S[i].room], S[i].L, S[i].p);
+        same += memcmp(&got, &T3[i], 4) == 0; shaded += T3[i] < 1.0f; worst = std::max(worst, fabsf(got - T3[i]));
+    }
+    printf("\n3D test from the blocker table: %zu rows (%d blockers of another vtable left out), %zu / %zu samples identical to occlude (%zu shaded), worst %.3g\n",
+           table.rows.size(), table.skipped, same, S.size(), shaded, worst);
 
     // ---- combined: got = hook x wall_t x 3D_T, where Apex kept the game's wall answer ----
     Stat comb; int skipped = 0;

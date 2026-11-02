@@ -19175,7 +19175,8 @@ bool ExportLotProxy(uintptr_t tracker, RtLampProxy::Lot& out, std::string& why) 
         }
         float plane = 0.0f;
         st.plane = ReadStoryPlane(mgr, plane) ? plane : RtLampProxy::kNoFloor;
-        if (S >= 1 && !PlacedNibbles(mgr, g.w, g.h, st.placed)) st.placed.assign(nt, 0); // (no slab read: the story's slabs are left out)
+        if (S >= 1) PlacedNibbles(mgr, g.w, g.h, st.placed); // (not read: empty, the story's slabs are left out and no room below opens to it)
+        if (g.quad.size() == 4 * nt) st.room = g.quad; // (the open tops of a ceilingsOpen build: RtLampProxy::OpenTops)
         if (!haveXf) {
             std::memcpy(out.worldToLot, g.xf.r, sizeof out.worldToLot);
             haveXf = true;

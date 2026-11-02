@@ -16,6 +16,8 @@
 #include "features/rt_lamp_model.h"
 #include "features/room_lamp_move.h"
 #include "features/open_rooms_above.h"
+#include "features/rt_lamp_proxy.h"
+#include "features/rt_lamp_blockers.h"
 #include <string>
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
 // map dither (its relight passes 0), but the compose shader keeps the input, so the harness still checks it
@@ -900,6 +902,186 @@ void AreaChecks() {
     Check(RoomLampMove::GameOverLaw(a, at, wall) == 1.0f && RoomLampMove::GameOverLaw(disc, at, wall) == 1.0f, "area light: its law has no mount floor (GameOverLaw 1)");
 }
 
+// ---- The physical model's occluder proxy (RtLampProxy::Build ceilingsOpen, OpenTops) over the F8 maps of lot C49C: story 2's
+// rooms (all roofed: the snapshot's room +0x18 is 0 for each) under story 3, its walls on every tile side ----
+void ProxyOpenTopsChecks() {
+    const StoryCells s2 = ReadStory(kLotC49C[1]), s3 = ReadStory(kLotC49C[2]);
+    const auto isPlaced = [&](size_t t) { const char f = s3.floor[t]; return f == '#' || f == 'F' || f == '*'; };
+    RtLampProxy::Lot lot;
+    RtLampProxy::Story a, b;
+    a.story = 2, b.story = 3;
+    a.w = b.w = 30, a.h = b.h = 40;
+    const size_t nt = 30 * 40;
+    a.floorY.assign(nt, RtLampProxy::kNoFloor), a.ceil.assign(nt, RtLampProxy::kNoFloor), a.roofed.assign(nt, 0), a.room.assign(4 * nt, 0);
+    b.floorY.assign(nt, RtLampProxy::kNoFloor), b.ceil.assign(nt, RtLampProxy::kNoFloor), b.roofed.assign(nt, 0), b.placed.assign(nt, 0);
+    a.plane = 3.99f, b.plane = 6.99f;
+    for (size_t t = 0; t < nt; t++) {
+        if (s2.room[t] > 0) {
+            a.floorY[t] = 3.99f, a.ceil[t] = 6.99f, a.roofed[t] = 0xF;
+            for (int q = 0; q < 4; q++) a.room[4 * t + q] = s2.room[t];
+        }
+        if (isPlaced(t)) b.placed[t] = 0xF;
+    }
+    const auto edge = [&](float x0, float z0, float x1, float z1) {
+        RtLampProxy::Edge e;
+        e.x0 = x0, e.z0 = z0, e.x1 = x1, e.z1 = z1, e.foot = e.base = 6.99f, e.topL = e.topM = e.topR = 9.99f;
+        b.edges.push_back(e);
+    };
+    for (int Z = 0; Z <= 40; Z++)
+        for (int x = 0; x < 30; x++) edge(static_cast<float>(x), static_cast<float>(Z), static_cast<float>(x + 1), static_cast<float>(Z));
+    for (int z = 0; z < 40; z++)
+        for (int X = 0; X <= 30; X++) edge(static_cast<float>(X), static_cast<float>(z), static_cast<float>(X), static_cast<float>(z + 1));
+    lot.stories = {a, b};
+    RtLampProxy::Mesh before, after, noIds;
+    RtLampProxy::Build(lot, before, false);
+    RtLampProxy::Build(lot, after, true);
+    // roof triangles over each room of story 2 (the tile under the triangle's centroid)
+    const auto roofsOver = [&](const RtLampProxy::Mesh& m, int room) {
+        int n = 0;
+        for (size_t i = 0; i < m.tris.size(); i++) {
+            if (m.kind[i] != RtLampProxy::Mesh::kRoof) continue;
+            const RtLampProxy::Tri& t = m.tris[i];
+            const int x = static_cast<int>(std::floor((t.v[0][0] + t.v[1][0] + t.v[2][0]) / 3.0f));
+            const int z = static_cast<int>(std::floor((t.v[0][2] + t.v[1][2] + t.v[2][2]) / 3.0f));
+            n += s2.room[z * 30 + x] == room ? 1 : 0;
+        }
+        return n;
+    };
+    const auto bareQuads = [&](int room) {
+        int n = 0;
+        for (size_t t = 0; t < nt; t++) n += s2.room[t] == room && !isPlaced(t) ? 4 : 0;
+        return n;
+    };
+    const auto tilesOf = [&](int room) { return static_cast<int>(std::count(s2.room.begin(), s2.room.end(), room)); };
+    std::vector<int> open;
+    int quads = 0, removed = 0;
+    OpenOver(s2, s3, open, quads, removed);
+    std::printf("physical proxy, lot C49C story 2 under story 3: roof triangles over rooms 5 / 6 / 7 / 12 today %d / %d / %d / %d, with open tops %d / %d / %d / %d; "
+                "quadrants opened %d (open to above %d)\n",
+                roofsOver(before, 5), roofsOver(before, 6), roofsOver(before, 7), roofsOver(before, 12), roofsOver(after, 5), roofsOver(after, 6), roofsOver(after, 7),
+                roofsOver(after, 12), after.openTops, quads);
+    Check(tilesOf(5) > 0 && roofsOver(before, 5) == 4 * tilesOf(5) && roofsOver(before, 7) == 4 * tilesOf(7),
+          "physical proxy: today a roofed ceiling at floor + 3 covers every quadrant of story 2's rooms 5 and 7 (open to story 3)");
+    bool openOk = !open.empty();
+    for (int r = 1; r < 64; r++) {
+        const bool isOpen = std::binary_search(open.begin(), open.end(), r);
+        openOk &= roofsOver(after, r) == 4 * tilesOf(r) - (isOpen ? bareQuads(r) : 0);
+    }
+    Check(openOk && after.openTops == quads && quads > 0, "physical proxy: ceilingsOpen drops the ceiling exactly over the floorless quadrants of rooms open to above");
+    Check(tilesOf(12) > 0 && roofsOver(after, 12) == 4 * tilesOf(12), "physical proxy: a room with a floor placed over it (story 2's room 12) keeps its ceiling");
+    // a ray from a lamp 1.5 m over room 5's floor up to 1 m over its ceiling line, inside one floorless tile
+    int tile = -1;
+    for (size_t t = 0; t < nt && tile < 0; t++)
+        if (s2.room[t] == 5 && !isPlaced(t)) tile = static_cast<int>(t);
+    const float x = static_cast<float>(tile % 30) + 0.3f, z = static_cast<float>(tile / 30) + 0.6f;
+    const float L[3] = {x, 5.49f, z}, P[3] = {x + 0.4f, 7.99f, z - 0.3f};
+    Check(tile >= 0 && !RtLampProxy::Clear(before, L, P) && RtLampProxy::Clear(after, L, P), "physical proxy: a lamp of room 5 reaches the walls of story 3 over it");
+    // ceilingsOpen off (the outdoor lamps' build) or a story with no room ids: nothing opens
+    lot.stories[0].room.clear();
+    RtLampProxy::Build(lot, noIds, true);
+    Check(noIds.openTops == 0 && noIds.roofTris == before.roofTris && before.openTops == 0 && before.roofTris == after.roofTris + quads,
+          "physical proxy: the outdoor lamps' build (ceilingsOpen off) and a story with no room ids keep every ceiling");
+}
+
+// ---- The furniture blocker table (rt_lamp_blockers.h): the rows give back the game's blockers, and occlude from the rows is
+// RoomLightTests::occlude bit for bit ----
+void BlockerTableChecks() {
+    using namespace RoomLightTests;
+    std::mt19937 rng(20261102);
+    std::uniform_real_distribution<float> U(-1.0f, 1.0f), P(0.0f, 1.0f);
+    const auto unit = [&]() {
+        const V v{U(rng), U(rng), U(rng)};
+        const float l = std::sqrt(dot(v, v));
+        return V{v.x / l, v.y / l, v.z / l};
+    };
+    const auto cross = [](V p, V q) { return V{p.y * q.z - p.z * q.y, p.z * q.x - p.x * q.z, p.x * q.y - p.y * q.x}; };
+    const auto put = [](RoomLightTests::Blocker& k, int off, V v) { k.f[off / 4] = v.x, k.f[off / 4 + 1] = v.y, k.f[off / 4 + 2] = v.z; };
+    std::vector<RoomLightTests::Room> rooms(6);
+    int blockers = 0, unknown = 0;
+    for (RoomLightTests::Room& room : rooms) {
+        const int recs = 3 + static_cast<int>(P(rng) * 8);
+        for (int r = 0; r < recs; r++) {
+            RoomLightTests::Record rc;
+            rc.c = {U(rng) * 2, U(rng) * 2, U(rng) * 2};
+            rc.r2 = 0.5f + P(rng) * 3;
+            const int nb = static_cast<int>(P(rng) * 5);
+            for (int i = 0; i < nb; i++) {
+                RoomLightTests::Blocker k{};
+                for (float& f : k.f) f = U(rng) * 9; // (every other field noise: the "miss" offsets among them)
+                const V c{rc.c.x + U(rng) * 0.5f, rc.c.y + U(rng) * 0.5f, rc.c.z + U(rng) * 0.5f}, N = unit();
+                const V u = cross(N, unit());
+                const float ul = std::sqrt(dot(u, u));
+                const V Uu{u.x / ul, u.y / ul, u.z / ul}, Vv = cross(N, Uu);
+                const V c2{c.x + N.x * 0.3f, c.y + N.y * 0.3f, c.z + N.z * 0.3f};
+                const float sel = P(rng);
+                k.f[4] = P(rng) < 0.5f ? 0.0f : (P(rng) < 0.5f ? 1.0f : 2.5f);
+                if (sel < 0.45f) {
+                    k.vt = kQuadVt;
+                    put(k, 0x70, c), put(k, 0x80, c2), put(k, 0x90, N), put(k, 0xA0, Uu), put(k, 0xB0, Vv);
+                    for (int j = 0; j < 4; j++) k.f[0xD0 / 4 + j] = 0.2f + P(rng);
+                } else if (sel < 0.9f) {
+                    k.vt = kDiscVt;
+                    put(k, 0x20, c), put(k, 0x30, c2), put(k, 0x40, N);
+                    k.f[0x70 / 4] = 0.05f + P(rng) * 0.5f;
+                } else {
+                    k.vt = 0x00FF0000u;
+                    unknown++;
+                }
+                rc.b.push_back(k);
+                blockers++;
+            }
+            room.rec.push_back(rc);
+        }
+    }
+    RtLampGpu::BlockerTable table;
+    std::vector<int> headers;
+    for (const RoomLightTests::Room& r : rooms) headers.push_back(table.Append(r));
+    static const int kQuadF[] = {4, 28, 29, 30, 32, 33, 34, 36, 37, 38, 40, 41, 42, 44, 45, 46, 52, 53, 54, 55, 56, 57, 58, 60, 61, 62};
+    static const int kDiscF[] = {4, 8, 9, 10, 12, 13, 14, 16, 17, 18, 28, 32, 33, 34, 36, 37, 38};
+    bool fieldsOk = true;
+    for (size_t r = 0; r < rooms.size(); r++) {
+        const auto& h = table.rows[static_cast<size_t>(headers[r])];
+        fieldsOk &= static_cast<size_t>(h.v[1]) == rooms[r].rec.size();
+        for (size_t i = 0; i < rooms[r].rec.size(); i++) {
+            const RoomLightTests::Record& rc = rooms[r].rec[i];
+            const auto& c = table.rows[static_cast<size_t>(h.v[0]) + 2 * i];
+            const auto& ix = table.rows[static_cast<size_t>(h.v[0]) + 2 * i + 1];
+            fieldsOk &= c.v[0] == rc.c.x && c.v[1] == rc.c.y && c.v[2] == rc.c.z && c.v[3] == rc.r2;
+            int j = 0;
+            for (const RoomLightTests::Blocker& k : rc.b) {
+                if (k.vt != kQuadVt && k.vt != kDiscVt) continue;
+                const RoomLightTests::Blocker back = table.BlockerAt(static_cast<int>(ix.v[0]) + j++ * RtLampGpu::BlockerTable::kBlockerRows);
+                fieldsOk &= back.vt == k.vt;
+                if (k.vt == kQuadVt)
+                    for (int f : kQuadF) fieldsOk &= std::memcmp(&back.f[f], &k.f[f], 4) == 0;
+                else
+                    for (int f : kDiscF) fieldsOk &= std::memcmp(&back.f[f], &k.f[f], 4) == 0;
+            }
+            fieldsOk &= static_cast<int>(ix.v[1]) == j;
+        }
+    }
+    Check(fieldsOk && table.skipped == unknown, "blocker table: the rows give back each record and every field the rectangle and disc tests read");
+    RtLampGpu::BlockerTable wide;
+    wide.rows.resize(5000);
+    int tx = 0, ty = 0;
+    wide.Texel(4097, tx, ty);
+    Check(wide.Width() == 4096 && wide.Height() == 2 && tx == 1 && ty == 1 && table.Width() == static_cast<int>(std::min<size_t>(table.rows.size(), 4096)),
+          "blocker table: row i sits at texel (i % width, i / width), width at most 4096");
+    long n = 0, same = 0, shaded = 0;
+    for (int s = 0; s < 200000; s++) {
+        const size_t r = static_cast<size_t>(P(rng) * static_cast<float>(rooms.size())) % rooms.size();
+        const V a{U(rng) * 3, U(rng) * 3, U(rng) * 3}, b{U(rng) * 3, U(rng) * 3, U(rng) * 3};
+        int unk = 0;
+        const float want = occlude(rooms[r], a, b, &unk), got = table.Occlude(headers[r], a, b);
+        n++;
+        same += std::memcmp(&want, &got, 4) == 0 ? 1 : 0;
+        shaded += want < 1.0f ? 1 : 0;
+    }
+    std::printf("blocker table: %zu rows (%d blockers, %d of another vtable left out); occlude from the rows %ld / %ld identical (%ld shaded)\n", table.rows.size(),
+                blockers, table.skipped, same, n, shaded);
+    Check(same == n && shaded > n / 10, "blocker table: occlude from the rows is RoomLightTests::occlude bit for bit");
+}
+
 int main() {
     std::mt19937 rng(20261013);
     std::uniform_real_distribution<float> U(0.0f, 1.0f);
@@ -1219,6 +1401,8 @@ int main() {
     AreaChecks();
     BasisChecks();
     OpenAboveChecks();
+    ProxyOpenTopsChecks();
+    BlockerTableChecks();
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

@@ -182,6 +182,15 @@ lamp's position, not on its colour or intensity.
    no caller asks it yet. Until the physical draw lands, a physical kept room is not drawn (`KeptRooms` leaves it out: its maps
    keep the game's texels, and Real-time outdoor lamps' room 0 is drawn as with the capture off) and every lamp edit listing it
    takes the room solves (`physical: drawing not implemented yet`). A solve that started under the other model is not kept.
+17. Physical model, stage 2 (02/11, nothing drawn yet): the occluders come from `RtLampProxy::Build(lot, mesh, true)`. Its
+   `OpenTops` drops the roofed quadrants (ceiling at floor + 3 m) of a room open to the story above (`OpenAbove::Classify`, the
+   rule room 0 takes the lamps below by) where no floor is placed over them; `ExportLotProxy` now carries the quadrants' room
+   ids for it. Lot C49C (F8 maps): story 2's rooms 5, 6 and 7 carried such a ceiling under story 3 (592 quadrants), which cut
+   their lamps at the story line. Real-time outdoor lamps build without `ceilingsOpen` and are unchanged. The furniture tests
+   go to the GPU as `RtLampGpu::BlockerTable` (`features/rt_lamp_blockers.h`): float4 rows for an A32B32G32R32F texture
+   (width up to 4096, point sampled), a header per room, 2 rows per record, 7 per rectangle or disc blocker. Its decoder
+   `Occlude` walks the rows as the shader will and is `RoomLightTests::occlude` bit for bit (70,912 of 70,912 samples of the
+   dump 20261102-135710, `tools/room_lamp_3d_replay`).
 
 ## Settings
 
