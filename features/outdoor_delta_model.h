@@ -249,5 +249,20 @@ inline void BasisPackInput(const float acc[16], int m, float out[4]) {
     }
     out[3] = 1.0f;
 }
+// A directional texel takes `want` only while it holds `expect` (what the room's capture or Apex's last write left there:
+// another room's solve may have written it since); true when it did
+inline bool BasisWrite(uint32_t& texel, uint32_t want, uint32_t expect) {
+    if (texel != expect) return false;
+    texel = want;
+    return true;
+}
+// (physical indoor lamps, stage 5) a lamp's directional part at a sample: its room row (mult x norm scale, as the room's maps
+// draw it) x its physical share there x the game's step called now; the share is the proxy's visibility x the game's 3D test,
+// dropped under `drop` as the game drops it (K_DROP)
+inline void BasisPartPhys(float row, float vis, float t3d, float drop, const float step[16], float out[16]) {
+    float share = vis * t3d;
+    if (drop > share || !std::isfinite(share)) share = 0.0f;
+    for (int i = 0; i < 16; i++) out[i] = row * share * step[i];
+}
 
 } // namespace OutdoorDeltaModel

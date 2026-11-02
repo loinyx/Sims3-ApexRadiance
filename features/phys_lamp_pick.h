@@ -12,6 +12,8 @@
 #include "gpu_lamp_law.h"
 #include "inner_retry.h"
 #include "outdoor_delta_model.h"
+#include "room_light_tests.h"
+#include "rt_lamp_proxy.h"
 
 namespace PhysLampPick {
 
@@ -88,6 +90,16 @@ inline void NoteGone(const std::vector<uintptr_t>& before, const std::vector<uin
     for (const uintptr_t l : before)
         if (std::find(now.begin(), now.end(), l) == now.end() && std::find(gone.begin(), gone.end(), l) == gone.end()) gone.push_back(l);
     if (gone.size() > max) gone.erase(gone.begin(), gone.end() - static_cast<std::ptrdiff_t>(max));
+}
+
+// (stage 5) a lamp's physical share at a directional sample, as the room's maps take it: the open-top proxy's visibility of the
+// lamp ball (radius R) from the sample (lot space: Ll, Pl; 16 rays, the stamp as RtLampProxy::Visibility takes it) x the game's
+// 3D test over the room's records from the lamp to the sample (world space: Lw, Pw); a blocker of another vtable counts as 1
+// in *unknown (as the GPU's blocker table leaves it out). OutdoorDeltaModel::BasisPartPhys applies the game's drop
+inline void BasisShare(const RtLampProxy::Mesh& mesh, const float Ll[3], float R, const float Pl[3], const RoomLightTests::Room& tests, const float Lw[3],
+                       const float Pw[3], std::vector<uint32_t>& stamp, uint32_t& mark, float& vis, float& t3d, int* unknown) {
+    vis = RtLampProxy::Visibility(mesh, Ll, R, Pl, 16, &stamp, &mark);
+    t3d = vis > 0.0f ? RoomLightTests::occlude(tests, {Lw[0], Lw[1], Lw[2]}, {Pw[0], Pw[1], Pw[2]}, unknown) : 1.0f;
 }
 
 // ---- a lamp edit without the room solves ----

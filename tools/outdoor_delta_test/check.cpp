@@ -507,6 +507,98 @@ void BasisChecks() {
     const float dark[16] = {};
     Check(BasisPartNow(std::nanf(""), 1, dark, out) && out[0] == 0.0f && !BasisPartNow(std::nanf(""), 1, step, out), "directional maps: an unknown share is refused only where the step is lit");
 }
+// Physical indoor lamps, stage 5 (OutdoorDelta BasisDuePhys): each law lamp's directional part is its room row x its physical
+// share (PhysLampPick::BasisShare: the proxy's visibility x the game's 3D test, dropped under K_DROP) x the game's step; the base
+// holds only the lights without a law. A room with a wall at x = 4 (lamp A behind it for x > 4) and a table top at y = 1
+// under lamp B (listed twice, norm scale 0.8); lamp C has no law (in the base). Packed against the game's own fill with those
+// shares; then the write rule: only texels still holding the expected value take the new one
+void BasisPhysChecks() {
+    using namespace RoomLightTests;
+    std::mt19937 rng(20261105);
+    std::uniform_real_distribution<float> U(0.0f, 1.0f);
+    RtLampProxy::Mesh mesh;
+    const float w0[3] = {4.0f, -1.0f, -1.0f}, w1[3] = {4.0f, 4.0f, -1.0f}, w2[3] = {4.0f, 4.0f, 9.0f}, w3[3] = {4.0f, -1.0f, 9.0f};
+    RtLampProxy::AddTri(mesh, w0, w1, w2), RtLampProxy::AddTri(mesh, w0, w2, w3);
+    RtLampProxy::BuildGrid(mesh);
+    RoomLightTests::Room tests;
+    RoomLightTests::Record rc;
+    rc.c = {6.0f, 1.0f, 2.0f}, rc.r2 = 1.0f;
+    Blocker k{};
+    k.vt = kQuadVt;
+    const auto put = [&](int off, V v) { k.f[off / 4] = v.x, k.f[off / 4 + 1] = v.y, k.f[off / 4 + 2] = v.z; };
+    put(0x70, {6.0f, 1.0f, 2.0f}), put(0x90, {0.0f, 1.0f, 0.0f}), put(0xA0, {1.0f, 0.0f, 0.0f}), put(0xB0, {0.0f, 0.0f, 1.0f});
+    for (int j = 0; j < 4; j++) k.f[0xD0 / 4 + j] = 0.5f;
+    rc.b.push_back(k);
+    tests.rec.push_back(rc);
+    std::vector<BasisLight> ls(3);
+    ls[0] = BasisLight{{2.0f, 2.2f, 4.0f}, {0.9f, 0.8f, 0.6f}};
+    ls[1] = BasisLight{{6.0f, 2.2f, 2.0f}, {0.5f, 0.7f, 1.0f}};
+    ls[1].mult = 2;
+    ls[2] = BasisLight{{1.0f, 2.0f, 7.0f}, {0.4f, 0.4f, 0.4f}};
+    ls[2].baked = true;
+    const float rows[2] = {1.0f, 2.0f * 0.8f}; // (mult x norm scale)
+    const int n = 400;
+    std::vector<uint32_t> stamp;
+    uint32_t mark = 0;
+    long ok = 0, exact = 0, wallDark = 0, tableDark = 0, dark = 0, darkRight = 0;
+    std::vector<uint32_t> want(static_cast<size_t>(n) * 4), game(static_cast<size_t>(n) * 4);
+    for (int s = 0; s < n; s++) {
+        const float p[4] = {U(rng) * 8.0f, 0.5f, U(rng) * 8.0f, 1.0f};
+        float acc[16] = {}, base[16] = {};
+        GameStep(p, ls[2], base); // (the base: the light without a law, as the capture kept it)
+        std::copy(base, base + 16, acc);
+        std::vector<BasisLight> fill = ls; // (the game's fill with the physical shares)
+        for (int j = 0; j < 2; j++) {
+            float step[16] = {}, part[16], vis = 0.0f, t3d = 0.0f;
+            int unknown = 0;
+            GameStep(p, ls[j], step);
+            PhysLampPick::BasisShare(mesh, ls[j].pos, 0.15f, p, tests, ls[j].pos, p, stamp, mark, vis, t3d, &unknown);
+            BasisPartPhys(rows[j], vis, t3d, K_DROP, step, part);
+            for (int i = 0; i < 16; i++) acc[i] += part[i];
+            const float share = vis * t3d < K_DROP ? 0.0f : vis * t3d;
+            fill[j].share = (j == 1 ? 0.8f : 1.0f) * share;
+            if (share == 0.0f) {
+                dark++;
+                darkRight += std::all_of(part, part + 16, [](float v) { return v == 0.0f; }) ? 1 : 0;
+                wallDark += j == 0 && vis == 0.0f, tableDark += j == 1 && vis > 0.0f; // (B's samples behind the wall left out)
+            }
+        }
+        float g[16];
+        GameSample(p, fill, g, nullptr, nullptr);
+        for (int m = 0; m < 4; m++) {
+            float in[4], gin[4];
+            BasisPackInput(acc, m, in), BasisPackInput(g, m, gin);
+            want[s * 4 + m] = PackModel(in), game[s * 4 + m] = PackModel(gin);
+            const int d = MaxLevelDiff(want[s * 4 + m], game[s * 4 + m]);
+            ok += d <= 1, exact += d == 0;
+        }
+    }
+    std::printf("  physical directional maps: %ld of %d texels within 1/255 of the game's fill with the physical shares (%ld exact); lamp A behind the wall at %ld "
+                "samples, lamp B under the table at %ld (%ld of %ld dark shares with a part 0)\n",
+                ok, n * 4, exact, wallDark, tableDark, darkRight, dark);
+    Check(ok == n * 4, "physical directional maps: base + row x share x step packs as the game's fill with the physical shares");
+    Check(wallDark > n / 4 && tableDark > 0 && darkRight == dark, "physical directional maps: the wall and the table top leave their samples without the lamp");
+    float step[16], part[16];
+    std::fill(step, step + 16, 0.25f);
+    BasisPartPhys(1.0f, 1.0f, 0.5f * K_DROP, K_DROP, step, part);
+    const bool dropped = std::all_of(part, part + 16, [](float v) { return v == 0.0f; });
+    BasisPartPhys(3.0f, 0.5f, 0.5f, K_DROP, step, part);
+    Check(dropped && part[0] == 3.0f * 0.25f * 0.25f, "physical directional maps: a share under the game's drop adds nothing, else row x share x step");
+    // the write rule: another solve wrote every 7th texel since the capture; two writes in turn
+    std::vector<uint32_t> tex(game), expect(game);
+    for (size_t i = 0; i < tex.size(); i += 7) tex[i] ^= 0x00010101u;
+    long took = 0, kept = 0;
+    for (int round = 0; round < 2; round++)
+        for (size_t i = 0; i < tex.size(); i++) {
+            const uint32_t w = want[i] ^ static_cast<uint32_t>(round); // (the second write another value)
+            if (BasisWrite(tex[i], w, expect[i])) expect[i] = w, took++;
+            else kept++;
+        }
+    bool rule = true;
+    for (size_t i = 0; i < tex.size(); i++) rule = rule && (i % 7 == 0 ? tex[i] == (game[i] ^ 0x00010101u) : tex[i] == (want[i] ^ 1u));
+    std::printf("  physical directional maps, the write rule: %ld writes taken, %ld texels left as another solve wrote them\n", took, kept);
+    Check(rule && took == 2 * static_cast<long>(tex.size() - (tex.size() + 6) / 7), "physical directional maps: only texels holding the capture's or the last write's value are written");
+}
 
 // ---- Rooms open to the story above (features/open_rooms_above.h) ----
 // Lot C49C001BCF2DEA20 (F8, 2026-11-02 14:30:47): stories 1, 2 and 3 as the F8 prints them, rooms | floor per tile ('.' room 0,
@@ -1526,6 +1618,7 @@ int main() {
     TubeChecks();
     AreaChecks();
     BasisChecks();
+    BasisPhysChecks();
     OpenAboveChecks();
     ProxyOpenTopsChecks();
     BlockerTableChecks();

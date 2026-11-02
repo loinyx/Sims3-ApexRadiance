@@ -23,10 +23,14 @@
 // Off: nothing of this runs and no texture is swapped (the copies are dropped, the game's maps bound again).
 #include <d3d9.h>
 #include <cstdint>
+#include <memory>
 #include <string>
 
 namespace RtLampGpu {
 struct DeviceCalls;
+}
+namespace RtLampProxy {
+struct Lot;
 }
 namespace GpuLampLaw {
 struct Lamp;
@@ -74,6 +78,9 @@ bool WorldLaw(uintptr_t light, uint64_t lot, bool reachOn, GpuLampLaw::Lamp& out
 bool LotXform(uintptr_t mgr, float out[16]);
 // Render thread: the generation of the occluders the kept shadow tiles use (physical indoor lamps' open tops), 0 none
 uint32_t KeptMeshGen();
+// Any thread (physical indoor lamps, stage 5): the lot whose open-top build (RtLampProxy::Build(lot, mesh, true)) is the kept
+// shadow tiles' occluders now, and its generation; null while none is uploaded
+std::shared_ptr<const RtLampProxy::Lot> KeptLot(uint32_t& gen);
 // Any thread (GPU room lamps): a lamp of lot `lot` WorldLaw gives no law (a tube without a segment) whose evaluation is its colour (+0xE0) times a share its
 // colour does not change: a TubeLight (type 6, 0x006BFA70). colour: that colour now; geo: a signature of what the share reads
 // (intensity, the tube's ends and length, range): an edit that changes it is not a colour edit. False for any other light

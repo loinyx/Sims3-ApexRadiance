@@ -272,6 +272,19 @@ lamp's position, not on its colour or intensity.
    Fresh rows: room 0 takes a roofed room's lamp of the story above at that room's norm scale, and a fresh lamp of a roofed room
    of story 0 or 1 is an exit lamp of story 0's room 0 (its alpha only on texels its solve marked as exit ground); the reach share
    of a fresh lamp stays approximate (the openings and open-top tests read the gather's lists). `outdoor_delta_test` 86 checks.
+24. Physical model, stage 5 (02/11): the directional maps. After a physical edit taken (value, switch, move, new, a lamp that left
+   the registry) every kept room > 0 whose directional samples the lamp's reach meets now, or whose last write drew it (before
+   any: its capture listed it), gets the parts of every lit lamp of the active lot with a law whose reach meets its samples,
+   picked as its maps pick them: row (mult x norm scale) x share x the game's step `FUN_0069f280` called now, share =
+   `RtLampProxy::Visibility` over the open-top proxy (16 rays, Shadow softness) x `RoomLightTests::occlude` over the room's 3D
+   records, dropped under 0.01 (`PhysLampPick::BasisShare`, `OutdoorDeltaModel::BasisPartPhys`); its base holds only the lights
+   without a law (`BuildBasis` puts a listed light no light map texel evaluated in the base by `LawOfLight`, as `KeepEnd`'s
+   `baked`). Steps on the light tree thread, shares on a worker, the write with stage 4's rules; a room written so is written
+   again after its next kept solve (the settle's too). The occluder mark of a lamp's object (0x006C7939) is dropped for a
+   physical move and a new lamp taken (`OwnObjectEditTaken`): the probe's dumps of 02/11 hold no 3D record of a lamp object (of
+   235 lamps listed by 77 rooms with records, 231 lie outside every record's sphere; the other 4 stand on or beside furniture).
+   A new lamp is found in the story's registry (UNVERIFIED that it is there when its object's occluder updates: the
+   `LampMarkFilter` status counts it). `outdoor_delta_test` 90 checks.
 
 ## Settings
 
@@ -506,7 +519,9 @@ lamp's position, not on its colour or intensity.
   parts: K of M texels within 1/255 (largest X/255)[; its directional maps take no edit]`; per edit taken `<kind>: lamp L
   directional maps written in N of R rooms T ms after the edit (W texels[, S left as another solve wrote them])[; not
   written: story S room R: why, ... (they follow its rooms' solves)]`; `... directional maps not written (another room's maps
-  stayed locked for 1 s; ...)`.
+  stayed locked for 1 s; ...)`. Physical (stage 5): `physical <kind>: lamp L directional maps written in N of R rooms T ms
+  after the edit (W texels[, S left ...]; K lamps' shares in M rooms in X ms on a worker[, U 3D blockers of another vtable
+  taken as 1])[; not written: ...]`, `physical: directional maps written again in N of R rooms after their kept solve; ...`.
 - **Test**: `tools/outdoor_delta_test` checks `KeptAdd` (the soft light cut and its scaled threshold, the early-out, the
   game's drop, half-float A and B) and `KeptTexel` (20000 roofed texels against the game's tail at their own sum and after
   an edit, weight-0 texels, the alpha floor, a roofless texel's hue and alpha). `tools/rt_lamps_test` draws a synthetic kept

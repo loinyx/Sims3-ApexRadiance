@@ -33,6 +33,7 @@
 #include "room_lamp_move.h"
 #include "inner_retry.h"
 #include "phys_lamp_pick.h"
+#include "penumbra.h"
 #include "lamp_mark_filter.h"
 #include "apex_log.h"
 #include "apex_paths.h"
@@ -1473,10 +1474,12 @@ bool TakeEdit(uintptr_t tl) {
 void SettleDue(); // below (GPU room lamps: the rooms of the lamp edits taken, 2 s after a lamp's last one)
 void BasisDue();  // below (GPU room lamps stage 4: the directional maps of the lamp edits taken)
 void RefreshLotLamps(); // below (physical indoor lamps: the active lot's registered lights for the render thread)
+void NotePhysBasisKept(uint64_t key); // below (physical, stage 5: a room whose directional maps were written physically, kept again)
+void QueueBasisGone(uintptr_t light); // below (physical, stage 5: a lamp that left the lot's registry)
 void AfterRoomUpdate(const void* tl) {
     SettleDue();
+    RefreshLotLamps(); // (first: the physical directional maps pick the lamps from its snapshot, a new or moved lamp included)
     BasisDue();
-    RefreshLotLamps();
     if (g_dropPending.exchange(false)) g_pending.clear();
     if (g_pending.empty() || !tl) return;
     if (!g_on.load(std::memory_order_relaxed)) { // switched off with edits taken: through the room solve
@@ -2811,10 +2814,21 @@ void BuildBasis(Capture& c, KeptRoom& k) {
     if (k.basisWhy) return;
     k.basisBase.assign(n * 16, 0.0f);
     std::unordered_map<uintptr_t, size_t> idx;
+    // (physical, stage 5) the base holds the lights without a law exactly as the maps' base does (KeepEnd's `baked`), and a light
+    // of the list no light map texel evaluated by the same rule: every lamp with a law is drawn from it (BasisDuePhys)
+    std::unordered_map<uintptr_t, bool> inBase;
+    const auto based = [&](uintptr_t light) {
+        const auto [it, fresh] = inBase.try_emplace(light, std::find(k.baked.begin(), k.baked.end(), light) != k.baked.end());
+        if (fresh && !it->second && c.phys && std::none_of(k.lamps.begin(), k.lamps.end(), [&](const KeptLamp& l) { return l.light == light; })) {
+            KeptLamp kl;
+            it->second = !LawOfLight(light, k.lot, kl) || kl.colourOnly;
+        }
+        return it->second;
+    };
     long parts = 0, known = 0;
     for (const Capture::BasisPart& p : c.basisParts) {
         if (p.sample >= n) continue;
-        if (std::find(k.baked.begin(), k.baked.end(), p.light) != k.baked.end()) {
+        if (based(p.light)) {
             for (int i = 0; i < 16; i++) k.basisBase[static_cast<size_t>(p.sample) * 16 + i] += p.c[i];
             continue;
         }
@@ -2992,6 +3006,7 @@ void KeepEnd(const BYTE* room) {
         rooms = g_kept.size(), total = g_keptBytes;
     }
     if (kept->physical) { // (no parts: nothing to recompose, so no self-check)
+        NotePhysBasisKept(key);
         if (KeptLog())
             LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: kept {} texels (physical: no parts), {:.1f} MB; {} rooms, {:.1f} MB of {:.0f}", kept->story,
                                  kept->id, kept->cls, kept->texels.size(), mb(kept->bytes), rooms, mb(total), mb(kMaxKeptBytes)));
@@ -3936,6 +3951,8 @@ void RefreshLotLamps() {
                 LOG_INFO(std::format("[GpuRoomLamps] physical: lamp {:08X} left the lot's registry (deleted, or moved to a basement or off the lot): no map draws it now; its rooms "
                                      "take the game's object removal marks",
                                      l));
+    for (const uintptr_t l : before)
+        if (std::find(seen.begin(), seen.end(), l) == seen.end()) QueueBasisGone(l);
     PhysLampPick::NoteGone(before, seen, g_lotGone);
     g_lotLampsTracker = tracker;
     g_lotLamps.swap(out), g_lotLampsVer++;
@@ -4355,6 +4372,8 @@ struct BasisNow {
     uint32_t id = 0;                                         // KeptRoom::basisId these hold for
     std::unordered_map<uintptr_t, std::vector<float>> parts; // the lamps edited since: their part now (16 per sample)
     std::vector<uint32_t> expect;                            // what each texel holds: the capture's, then Apex's last write
+    bool phys = false;                                       // (physical, stage 5) written physically: `drawn` its lamps then
+    std::vector<uintptr_t> drawn;
 };
 std::unordered_map<uint64_t, BasisNow> g_basisNow; // kept room key -> (light tree thread)
 struct BasisTexelWrite {
@@ -4382,8 +4401,7 @@ bool WriteBasisMapTry(uintptr_t set, int m, uint32_t w, uint32_t h, BasisTexelWr
         if (FAILED(tex->LockRect(0, &lr, nullptr, 0)) || !lr.pBits) return false;
         for (size_t i = 0; i < n; i++) {
             uint32_t* p = reinterpret_cast<uint32_t*>(static_cast<BYTE*>(lr.pBits) + static_cast<size_t>(lr.Pitch) * t[i].y) + t[i].x;
-            t[i].done = *p == t[i].expect ? 1 : 0;
-            if (t[i].done) *p = t[i].want;
+            t[i].done = BasisWrite(*p, t[i].want, t[i].expect) ? 1 : 0;
         }
         tex->UnlockRect(0);
         return true;
@@ -4400,9 +4418,13 @@ void QueueBasis(uintptr_t light, const char* kind, bool off, bool move, const st
     e.tick = GetTickCount();
 }
 // The lamp's part of each sample of the kept room now (into g_basisNow); null, or why not
-const char* LampBasisNow(uint64_t key, const KeptRoom& k, uintptr_t light, const BasisEdit& e) {
+BasisNow& NowOf(uint64_t key, const KeptRoom& k) {
     BasisNow& bn = g_basisNow[key];
     if (bn.id != k.basisId) bn = BasisNow{}, bn.id = k.basisId, bn.expect = k.basisGame;
+    return bn;
+}
+const char* LampBasisNow(uint64_t key, const KeptRoom& k, uintptr_t light, const BasisEdit& e) {
+    BasisNow& bn = NowOf(key, k);
     const size_t n = k.basis.size();
     const auto bl = std::find_if(k.basisLamps.begin(), k.basisLamps.end(), [&](const KeptRoom::BasisLamp& b) { return b.light == light; });
     if (e.move && DevSwitches::BasisWallFilter()) return "the walls in the directional maps (basis_wall_filter) are not redone for a move";
@@ -4421,12 +4443,26 @@ const char* LampBasisNow(uint64_t key, const KeptRoom& k, uintptr_t light, const
     bn.parts[light] = std::move(v);
     return nullptr;
 }
-// The kept room's samples packed again (its base, each lamp's part now or as kept) and written into its set
-const char* WriteBasis(uint64_t key, const KeptRoom& k, long& written, long& left) {
+// The kept room's samples' accumulators (16 each) packed and written into its set
+const char* WriteBasisAcc(uint64_t key, const KeptRoom& k, const std::vector<float>& acc, long& written, long& left) {
     const uintptr_t set = RoomSet(k.room);
     if (!set || set != k.basisSet) return "its directional set changed";
-    const BasisNow& bn = g_basisNow[key];
+    BasisNow& bn = NowOf(key, k);
     const size_t n = k.basis.size();
+    std::vector<BasisTexelWrite> t(n);
+    for (int m = 0; m < 4; m++) {
+        for (size_t i = 0; i < n; i++) t[i] = BasisTexelWrite{k.basis[i].x, k.basis[i].y, PackBasis(&acc[i * 16], m), bn.expect[i * 4 + m], 0};
+        if (!WriteBasisMapTry(set, m, k.basisW, k.basisH, t.data(), n)) return "a directional map of its set is not the captured one";
+        for (size_t i = 0; i < n; i++) {
+            if (t[i].done) bn.expect[i * 4 + m] = t[i].want;
+            (t[i].done ? written : left)++;
+        }
+    }
+    return nullptr;
+}
+// The kept room's samples packed again (its base, each lamp's part now or as kept) and written into its set
+const char* WriteBasis(uint64_t key, const KeptRoom& k, long& written, long& left) {
+    const BasisNow& bn = NowOf(key, k);
     std::vector<float> acc(k.basisBase);
     const auto add = [&](const std::vector<float>& p) {
         if (p.size() == acc.size())
@@ -4438,20 +4474,13 @@ const char* WriteBasis(uint64_t key, const KeptRoom& k, long& written, long& lef
     }
     for (const auto& [L, p] : bn.parts) // (a lamp with no part at the capture)
         if (std::none_of(k.basisLamps.begin(), k.basisLamps.end(), [&](const KeptRoom::BasisLamp& b) { return b.light == L; })) add(p);
-    std::vector<BasisTexelWrite> t(n);
-    for (int m = 0; m < 4; m++) {
-        for (size_t i = 0; i < n; i++) t[i] = BasisTexelWrite{k.basis[i].x, k.basis[i].y, PackBasis(&acc[i * 16], m), bn.expect[i * 4 + m], 0};
-        if (!WriteBasisMapTry(set, m, k.basisW, k.basisH, t.data(), n)) return "a directional map of its set is not the captured one";
-        for (size_t i = 0; i < n; i++) {
-            if (t[i].done) g_basisNow[key].expect[i * 4 + m] = t[i].want;
-            (t[i].done ? written : left)++;
-        }
-    }
-    return nullptr;
+    return WriteBasisAcc(key, k, acc, written, left);
 }
+void BasisDuePhys(); // below (physical indoor lamps, stage 5)
 void BasisDue() {
-    if (g_basisEdits.empty()) return;
     if (!g_capture.load(std::memory_order_relaxed)) return void(g_basisEdits.clear());
+    if (g_physical.load(std::memory_order_relaxed)) return BasisDuePhys();
+    if (g_basisEdits.empty()) return;
     const DWORD now = GetTickCount();
     if (!LevelLightShare::RoomMapsFree()) { // (a solve between its lock and unlock: the next update, at most 1 s)
         for (auto it = g_basisEdits.begin(); it != g_basisEdits.end();) {
@@ -4516,6 +4545,312 @@ void BasisDue() {
                              l ? std::format(", {} left as another solve wrote them", l) : std::string(),
                              why[light].empty() ? std::string() : std::format("; not written: {} (they follow its rooms' solves)", why[light])));
     }
+}
+
+// ---- physical indoor lamps, stage 5: the directional maps (docs/features/night-lighting/gpu-room-lamps.md "Physical model") ----
+// After a physical edit taken (value, switch, move, new; a lamp that left the lot's registry) every kept room > 0 whose
+// directional samples the lamp's reach meets now, or whose last write drew it (before any: its capture listed it), gets the
+// parts of every lamp of the active lot with a law whose reach meets its samples, picked as its maps pick them
+// (gpu_room_lamps.cpp: the solve's lamps out of its base with their rows, a fresh row once registered elsewhere or never
+// listed): row x share x the game's step called now, share = the open-top proxy's visibility x the game's 3D test over the
+// room's records (PhysLampPick::BasisShare), dropped under K_DROP; plus its base (the lights without a law: BuildBasis). The
+// steps run on the light tree thread when the job starts, the shares on a worker, the write at a later room update with
+// stage 4's rules (only texels holding the capture's or the last write's value, only while no solve holds the working maps).
+// A room written so is written again after its next kept solve (the settle's too): its texels do not go back to the game's.
+struct PhysBasisLamp {
+    uintptr_t light = 0;
+    float row = 1.0f, world[3] = {}, lot[3] = {};
+    std::vector<float> step;     // 16 per sample
+    std::vector<float> vis, t3d; // per sample (the worker; 0 where the step is dark)
+};
+struct PhysBasisRoom {
+    BasisRoomRef ref;
+    std::shared_ptr<const KeptRoom> k;
+    std::vector<float> lotPos; // 3 per sample
+    std::vector<PhysBasisLamp> lamps;
+    int unknown = 0;
+    bool redo = false;
+};
+struct PhysBasisJob {
+    std::map<uintptr_t, BasisEdit> edits;
+    std::map<uintptr_t, std::string> why; // lamp -> its rooms not written
+    std::vector<PhysBasisRoom> rooms;
+    std::shared_ptr<const RtLampProxy::Lot> lot;
+    uint32_t gen = 0;
+    float radius = 0.0f;
+    double workerMs = 0.0;
+    DWORD doneTick = 0;
+    const char* failed = nullptr;
+};
+std::mutex g_pbMx;
+std::condition_variable g_pbCv;
+std::unique_ptr<PhysBasisJob> g_pbIn, g_pbOut; // (under g_pbMx) the job handed to the worker, the one it finished
+bool g_pbThread = false;                        // (under g_pbMx)
+bool g_pbBusy = false;                          // (light tree thread) a job handed over, not written yet
+std::unique_ptr<PhysBasisJob> g_pbDone;         // (light tree thread) a finished job waiting for the working maps
+std::set<uint64_t> g_pbRedo;                    // (light tree thread) rooms written physically, kept again since
+void NotePhysBasisKept(uint64_t key) {
+    if (const auto it = g_basisNow.find(key); it != g_basisNow.end() && it->second.phys) g_pbRedo.insert(key);
+}
+void QueueBasisGone(uintptr_t light) {
+    if (g_physical.load(std::memory_order_relaxed)) QueueBasis(light, "gone", true, false, {});
+}
+bool StepLit(const float* s) {
+    for (int i = 0; i < 16; i++)
+        if ((i & 3) != 3 && s[i] != 0.0f) return true;
+    return false;
+}
+void PhysBasisWorker() {
+    RtLampProxy::Mesh mesh;
+    uint32_t meshGen = 0;
+    std::vector<uint32_t> stamp;
+    uint32_t mark = 0;
+    for (;;) {
+        std::unique_ptr<PhysBasisJob> job;
+        {
+            std::unique_lock<std::mutex> lk(g_pbMx);
+            g_pbCv.wait(lk, [] { return g_pbIn != nullptr; });
+            job = std::move(g_pbIn);
+        }
+        LARGE_INTEGER t0{}, t1{}, f{};
+        QueryPerformanceCounter(&t0);
+        try {
+            if (meshGen != job->gen) RtLampProxy::Build(*job->lot, mesh, true), meshGen = job->gen, stamp.clear(), mark = 0;
+            for (PhysBasisRoom& r : job->rooms) {
+                const size_t n = r.k->basis.size();
+                for (PhysBasisLamp& l : r.lamps) {
+                    l.vis.assign(n, 0.0f), l.t3d.assign(n, 0.0f);
+                    for (size_t i = 0; i < n; i++)
+                        if (StepLit(&l.step[i * 16]))
+                            PhysLampPick::BasisShare(mesh, l.lot, job->radius, &r.lotPos[i * 3], r.k->tests, l.world, r.k->basis[i].pos, stamp, mark, l.vis[i], l.t3d[i], &r.unknown);
+                }
+            }
+        } catch (...) {
+            meshGen = 0;
+            job->failed = "no memory";
+        }
+        QueryPerformanceCounter(&t1);
+        QueryPerformanceFrequency(&f);
+        job->workerMs = 1000.0 * static_cast<double>(t1.QuadPart - t0.QuadPart) / static_cast<double>(f.QuadPart);
+        std::lock_guard<std::mutex> lk(g_pbMx);
+        g_pbOut = std::move(job);
+    }
+}
+// The edits' rooms and their lamps' steps now (light tree thread), handed to the worker; or logged when no room takes them
+void LogPhysBasis(const PhysBasisJob& job, const std::map<uint64_t, std::pair<long, long>>& wrote, std::map<uint64_t, const char*>& failed);
+void StartPhysBasis(std::map<uintptr_t, BasisEdit>&& edits) {
+    auto job = std::make_unique<PhysBasisJob>();
+    job->edits = std::move(edits);
+    for (auto& [light, e] : job->edits) e.rooms.clear(); // (the rooms its reach meets, below; not the rooms listing it)
+    job->lot = RtOutdoorLamps::KeptLot(job->gen);
+    job->radius = Penumbra::Radius();
+    std::vector<LotLamp> lot;
+    std::vector<uintptr_t> gone;
+    LotLamps(lot, &gone);
+    std::unordered_map<uintptr_t, const LotLamp*> at;
+    for (const LotLamp& L : lot) at[L.light] = &L;
+    std::vector<std::pair<uint64_t, std::shared_ptr<const KeptRoom>>> kept;
+    {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        for (const auto& [key, k] : g_kept)
+            if (k->physical) kept.emplace_back(key, k);
+    }
+    const std::set<uint64_t> redo = std::move(g_pbRedo);
+    g_pbRedo.clear();
+    for (const auto& [key, kp] : kept) {
+        const KeptRoom& k = *kp;
+        if (k.basisWhy == kNoBasis) continue;
+        PhysBasisRoom r;
+        r.ref = BasisRoomRef{key, k.story, k.id}, r.k = kp, r.redo = redo.count(key) > 0;
+        const size_t n = k.basis.size();
+        PhysLampPick::Box box;
+        for (const Capture::BasisSample& s : k.basis) box.Grow(s.pos);
+        // (gpu_room_lamps.cpp's pick: never a light of the base, never one counted twice)
+        std::vector<uintptr_t> listed;
+        for (const KeptLamp& kl : k.lamps) listed.push_back(kl.light);
+        const auto pick = [&](uintptr_t light, float row) {
+            GpuLampLaw::Lamp w;
+            int type = 0, reg = -1;
+            // (a lamp switched off has a dark law: nothing, as in its maps, whatever the step reads then)
+            if (!RtOutdoorLamps::WorldLaw(light, k.lot, false, w, type, reg) || !(w.W > 0.0f) || !((w.colour[0] + w.colour[1]) + w.colour[2] > 0.0f) ||
+                !PhysLampPick::Meets(box, w.pos, PhysLampPick::Reach2(w, row, k.thr)))
+                return;
+            PhysBasisLamp& l = r.lamps.emplace_back();
+            l.light = light, l.row = row;
+            std::memcpy(l.world, w.pos, sizeof l.world);
+        };
+        const auto freshRow = [&](const LotLamp& L) { return PhysLampPick::NormKFresh(L.story, L.home, L.homeNorm, k.story, k.id, k.norm, k.outdoor); };
+        for (const KeptLamp& kl : k.lamps) {
+            if (std::find(gone.begin(), gone.end(), kl.light) != gone.end()) continue; // (deleted: its light may be freed)
+            const auto it = at.find(kl.light);
+            pick(kl.light, it != at.end() && it->second->home != kl.home ? freshRow(*it->second) : static_cast<float>(kl.mult) * kl.normK);
+        }
+        for (const LotLamp& L : lot)
+            if (PhysLampPick::UseOf(L.light, listed, k.baked) == PhysLampPick::Use::Fresh) pick(L.light, freshRow(L));
+        // the room is written when an edited lamp lights it now or lit it in its last write
+        const BasisNow& bn = NowOf(key, k);
+        std::vector<uintptr_t> touched;
+        for (auto& [light, e] : job->edits) {
+            const auto has = [&](uintptr_t l) { return l == light; };
+            const bool now = std::any_of(r.lamps.begin(), r.lamps.end(), [&](const PhysBasisLamp& l) { return l.light == light; });
+            const bool before = bn.phys ? std::any_of(bn.drawn.begin(), bn.drawn.end(), has)
+                                        : std::any_of(k.basisLamps.begin(), k.basisLamps.end(), [&](const KeptRoom::BasisLamp& b) { return b.light == light; });
+            if (now || before) e.rooms.push_back(r.ref), touched.push_back(light);
+        }
+        if (touched.empty() && !r.redo) continue;
+        const auto refuse = [&](const char* w) {
+            for (const uintptr_t light : touched) job->why[light] += std::format("{}story {} room {}: {}", job->why[light].empty() ? "" : ", ", k.story, k.id, w);
+        };
+        if (k.basisWhy) {
+            refuse(k.basisWhy);
+            continue;
+        }
+        if (!job->lot) {
+            refuse("its occluders with open tops are not uploaded yet");
+            continue;
+        }
+        float xf[16];
+        if (!RtOutdoorLamps::LotXform(k.mgr, xf)) {
+            refuse("the lot's space could not be read");
+            continue;
+        }
+        const auto toLot = [&](const float* p, float* o) {
+            for (int q = 0; q < 3; q++) o[q] = p[0] * xf[q] + p[1] * xf[4 + q] + p[2] * xf[8 + q] + xf[12 + q];
+        };
+        bool ok = true;
+        try {
+            r.lotPos.resize(n * 3);
+            for (size_t i = 0; i < n; i++) toLot(k.basis[i].pos, &r.lotPos[i * 3]);
+            for (PhysBasisLamp& l : r.lamps) {
+                toLot(l.world, l.lot);
+                l.step.assign(n * 16, 0.0f);
+                for (size_t i = 0; i < n && ok; i++) ok = LevelLightShare::BasisStep(k.basis[i].pos, l.light, &l.step[i * 16]);
+            }
+        } catch (...) {
+            refuse("no memory");
+            continue;
+        }
+        if (!ok) {
+            refuse("the game's step could not be called");
+            continue;
+        }
+        job->rooms.push_back(std::move(r));
+    }
+    if (job->rooms.empty()) { // (nothing for the worker: the edits' log now)
+        std::map<uint64_t, const char*> failed;
+        LogPhysBasis(*job, {}, failed);
+        return;
+    }
+    std::lock_guard<std::mutex> lk(g_pbMx);
+    if (!g_pbThread) {
+        g_pbThread = true;
+        std::thread(PhysBasisWorker).detach();
+    }
+    g_pbIn = std::move(job);
+    g_pbBusy = true;
+    g_pbCv.notify_one();
+}
+// The finished job's rooms packed and written (light tree thread, the working maps free)
+void WritePhysBasis(PhysBasisJob& job) {
+    std::map<uint64_t, std::pair<long, long>> wrote;
+    std::map<uint64_t, const char*> failed;
+    for (const PhysBasisRoom& r : job.rooms) {
+        const uint64_t key = r.ref.key;
+        if (job.failed) {
+            failed[key] = job.failed;
+            continue;
+        }
+        {
+            std::lock_guard<std::mutex> lk(g_keptMx);
+            const auto it = g_kept.find(key);
+            if (it == g_kept.end() || it->second != r.k) {
+                failed[key] = it == g_kept.end() ? "its kept solve was dropped" : "its solve was kept again meanwhile (written again from it)";
+                if (it != g_kept.end()) g_pbRedo.insert(key);
+                continue;
+            }
+        }
+        const KeptRoom& k = *r.k;
+        const size_t n = k.basis.size();
+        std::vector<float> acc(k.basisBase);
+        float part[16];
+        for (const PhysBasisLamp& l : r.lamps)
+            for (size_t i = 0; i < n; i++) {
+                BasisPartPhys(l.row, l.vis[i], l.t3d[i], RoomLightTests::K_DROP, &l.step[i * 16], part);
+                for (int q = 0; q < 16; q++) acc[i * 16 + q] += part[q];
+            }
+        long w = 0, left = 0;
+        if (const char* f = WriteBasisAcc(key, k, acc, w, left)) {
+            failed[key] = f;
+            continue;
+        }
+        wrote[key] = {w, left};
+        BasisNow& bn = NowOf(key, k);
+        bn.phys = true, bn.drawn.clear();
+        for (const PhysBasisLamp& l : r.lamps) bn.drawn.push_back(l.light);
+    }
+    LogPhysBasis(job, wrote, failed);
+}
+void LogPhysBasis(const PhysBasisJob& job, const std::map<uint64_t, std::pair<long, long>>& wrote, std::map<uint64_t, const char*>& failed) {
+    if (!KeptLog()) return;
+    LARGE_INTEGER t1{}, f{};
+    QueryPerformanceCounter(&t1);
+    QueryPerformanceFrequency(&f);
+    long lamps = 0, unknown = 0, redo = 0, redone = 0;
+    for (const PhysBasisRoom& r : job.rooms) {
+        lamps += static_cast<long>(r.lamps.size()), unknown += r.unknown;
+        redo += r.redo ? 1 : 0, redone += r.redo && wrote.count(r.ref.key) ? 1 : 0;
+    }
+    const std::string worker = job.rooms.empty() ? std::string()
+                                                 : std::format("; {} lamps' shares in {} rooms in {:.1f} ms on a worker{}", lamps, job.rooms.size(), job.workerMs,
+                                                               unknown ? std::format(", {} 3D blockers of another vtable taken as 1", unknown) : std::string());
+    for (const auto& [light, e] : job.edits) {
+        int done = 0;
+        long w = 0, l = 0;
+        std::string why = job.why.count(light) ? job.why.at(light) : std::string();
+        for (const BasisRoomRef& r : e.rooms) {
+            if (const auto it = wrote.find(r.key); it != wrote.end()) done++, w += it->second.first, l += it->second.second;
+            else if (const auto fw = failed.find(r.key); fw != failed.end())
+                why += std::format("{}story {} room {}: {}", why.empty() ? "" : ", ", r.story, r.id, fw->second);
+        }
+        if (e.rooms.empty()) continue;
+        LOG_INFO(std::format("[GpuRoomLamps] physical {}: lamp {:08X} directional maps written in {} of {} rooms {:.1f} ms after the edit ({} texels{}{}){}", e.kind, light,
+                             done, e.rooms.size(), 1000.0 * static_cast<double>(t1.QuadPart - e.at.QuadPart) / static_cast<double>(f.QuadPart), w,
+                             l ? std::format(", {} left as another solve wrote them", l) : std::string(), worker,
+                             why.empty() ? std::string() : std::format("; not written: {} (they follow its rooms' solves)", why)));
+    }
+    if (redo)
+        LOG_INFO(std::format("[GpuRoomLamps] physical: directional maps written again in {} of {} rooms after their kept solve{}", redone, redo, worker));
+}
+void BasisDuePhys() {
+    const DWORD now = GetTickCount();
+    if (g_pbBusy && !g_pbDone) {
+        std::lock_guard<std::mutex> lk(g_pbMx);
+        g_pbDone = std::move(g_pbOut);
+        if (g_pbDone) g_pbDone->doneTick = now;
+    }
+    if (g_pbDone) {
+        if (!LevelLightShare::RoomMapsFree()) { // (a solve between its lock and unlock: the next update, at most 1 s)
+            if (now - g_pbDone->doneTick <= 1000) return;
+            for (PhysBasisRoom& r : g_pbDone->rooms) {
+                if (r.redo) g_pbRedo.insert(r.ref.key); // (its kept solve's texels are the game's: tried again with the next job)
+                for (const auto& [light, e] : g_pbDone->edits)
+                    if (std::any_of(e.rooms.begin(), e.rooms.end(), [&](const BasisRoomRef& x) { return x.key == r.ref.key; }))
+                        g_pbDone->why[light] += std::format("{}story {} room {}: another room's maps stayed locked for 1 s", g_pbDone->why[light].empty() ? "" : ", ",
+                                                            r.ref.story, r.ref.id);
+            }
+            g_pbDone->rooms.clear();
+            std::map<uint64_t, const char*> failed;
+            LogPhysBasis(*g_pbDone, {}, failed);
+        } else
+            WritePhysBasis(*g_pbDone);
+        g_pbDone.reset();
+        g_pbBusy = false;
+    }
+    if (g_pbBusy || (g_basisEdits.empty() && g_pbRedo.empty())) return;
+    ReadTestConsts();
+    std::map<uintptr_t, BasisEdit> edits = std::move(g_basisEdits);
+    g_basisEdits.clear();
+    StartPhysBasis(std::move(edits));
 }
 
 namespace {

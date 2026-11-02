@@ -1242,6 +1242,13 @@ bool LotXform(uintptr_t mgr, float out[16]) {
     return true;
 }
 uint32_t KeptMeshGen() { return g_openGen.load(std::memory_order_relaxed); }
+std::shared_ptr<const RtLampProxy::Lot> KeptLot(uint32_t& gen) {
+    gen = g_openGen.load(std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lk(g_proxyMx);
+    // (the light tree thread may have built a newer proxy the render thread has not uploaded yet: then none)
+    if (!gen || !g_proxy || g_proxy->gen != gen) return nullptr;
+    return std::shared_ptr<const RtLampProxy::Lot>(g_proxy, &g_proxy->lot);
+}
 
 bool LowLampLift() { return TerrainBakeRule::LowLampLift(); }
 void SetLowLampLift(bool on) { TerrainBakeRule::g_lowLampLift.store(on, std::memory_order_relaxed); }
