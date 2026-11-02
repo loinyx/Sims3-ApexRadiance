@@ -539,6 +539,8 @@ int main(int argc, char** argv) {
             for (int q = 0; q < 20; q++) w[q] = H(t[18 + q]);
             static_assert(sizeof(GpuLampLaw::Lamp) == sizeof w);
             std::memcpy(&g_laws[H(t[1])], w, sizeof w);
+            GpuLampLaw::Lamp& law = g_laws[H(t[1])];
+            if (t[3] == "11" && law.cmax == 2.0f) law.cmax *= 3.33333325f; // (dumps before the street cap fix: the game scales the capped light)
         } else if (k == "M" && n >= 26) { // (room 0) a floor mask part
             Smp s;
             s.room = static_cast<int>(rooms.size()) - 1, s.line = ln, s.tag = 'M', s.light = H(t[1]);

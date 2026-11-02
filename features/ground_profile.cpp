@@ -86,7 +86,7 @@ void RoomLaw(const LampInfo& i, const float p[3], float k1, float k2, float cmax
     for (int k = 0; k < 3; k++) L.pos[k] = i.pos[k], L.colour[k] = std::isfinite(i.e0[k]) ? std::max(i.e0[k], 0.0f) : 0.0f;
     const float w = i.range * i.intensity;
     L.W = std::isfinite(w) && w > 0.0f ? k2 * w / k1 * (i.type == 11 ? street : 1.0f) : 0.0f;
-    L.cmax = cmax;
+    L.cmax = cmax * (i.type == 11 ? street : 1.0f); // the game scales the capped light: street x min(Cmax, .)
     float r[3][4];
     TerrainBakeCone::Rows(i.cone, s5, r);
     for (int k = 0; k < 3; k++) L.axis[k] = r[0][k], L.spill[k] = r[2][k];

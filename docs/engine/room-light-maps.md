@@ -183,8 +183,8 @@ street lamp was read in full):
   N·L (ground_report 5, unverified detail);
 - colour = effective colour +0xE0 (`0x006BE18C`), i.e. zero while the lamp is off; this street-lamp evaluation also
   reads `[0x01158DA8]` = 3.333 right after (`0x006BE1A1`). PASSO3 3.2 models it as `col = E0 × 3.333` for type 11, and
-  notebook 3 calls it "the ×3.333 of the ground" that the rig formula lacks. Whether it applies to every sample or only to
-  ground samples is unverified.
+  notebook 3 calls it "the ×3.333 of the ground" that the rig formula lacks. It scales the capped term (3.333 × min(Cmax, .)):
+  a room lamp probe dump (02/11) recorded a type 11 lamp at 3.98 on an opening's wall, above Cmax, matching it to 0.01.
 
 Measured runtime values (F8 16:09, "LUZ POR PIXEL"): k1 = 1, k2 = 0.075, Cmax = 2, street factor 3.333, type-5 s = 5,
 blur passes 2, blur mode 0; spot (type 4) axis ≈ (0, −1, 0), offset −0.32, scale 4.9. k2 = 0.075 is why walls look much

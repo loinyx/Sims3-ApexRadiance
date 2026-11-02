@@ -330,7 +330,7 @@ void ToLaw(const LampRead& r, const GameConsts& g, const Xform& xf, bool reachOn
     for (int i = 0; i < 3; i++) L.colour[i] = std::isfinite(r.colour[i]) ? std::max(r.colour[i], 0.0f) : 0.0f;
     const float w = r.range * r.intensity;
     L.W = std::isfinite(w) && w > 0.0f ? g.k2 * w / g.k1 * (r.f.type == 11 ? g.street : 1.0f) : 0.0f;
-    L.cmax = g.cmax;
+    L.cmax = g.cmax * (r.f.type == 11 ? g.street : 1.0f); // the game scales the capped light: street x min(Cmax, .)
     GpuLampLaw::NoCone(L);
     if (r.f.type == 4 && std::isfinite(r.scale4) && std::isfinite(r.off4)) {
         float a[3];
