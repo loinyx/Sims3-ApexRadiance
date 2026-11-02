@@ -6422,6 +6422,7 @@ struct ArchRec {
         uintptr_t nbMgr = 0; // the neighbour's story manager when it is another story's (an opening in the floor), 0 = this one
     };
     std::vector<Arch> arches;
+    mutable ArchAmbient::FrameRead ambRead; // its own ambient this present frame (ArchAmbientConsts, under g_archMx)
 };
 std::mutex g_archMx;
 std::unordered_map<uintptr_t, ArchRec> g_archRooms; // under g_archMx
@@ -6442,6 +6443,7 @@ bool ReadRoomAmbient(uintptr_t room, uintptr_t mgr, int id, float* amb) {
         std::memcpy(amb, reinterpret_cast<const void*>(room + 0x110), 3 * sizeof(float));
         return ApexMath::IsFinite(amb[0]) && ApexMath::IsFinite(amb[1]) && ApexMath::IsFinite(amb[2]);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_archFaults.fetch_add(1, std::memory_order_relaxed); // (the status's "reads failed": a fault costs far more than a read)
         return false;
     }
 }
@@ -18187,11 +18189,16 @@ int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, 
     static std::vector<const ArchRec*> matched; // (render thread, under g_archMx: kept for their capacity)
     static std::vector<ArchAmbient::Candidate> cand;
     matched.clear(), cand.clear();
+    // (S6) each room's ambient read once per present frame, not twice per floor draw (ArchAmbient::ReadOnce)
+    const uint32_t frame = g_presentFrame.load(std::memory_order_relaxed);
+    const auto ambientOf = [frame](uintptr_t key, const ArchRec& rec, float* a) {
+        return ArchAmbient::ReadOnce(rec.ambRead, frame, [&](float* to) { return ReadRoomAmbient(key, rec.mgr, rec.id, to); }, a);
+    };
     for (const auto& [key, rec] : g_archRooms) {
         // A confirmed map owner excludes other stories before reading their live ambient.
         if (drawMgr && rec.mgr != drawMgr) continue;
         float a[3];
-        if (!ReadRoomAmbient(key, rec.mgr, rec.id, a) || !SameAmbient(a, own)) continue;
+        if (!ambientOf(key, rec, a) || !SameAmbient(a, own)) continue;
         matched.push_back(&rec);
         cand.push_back(ArchAmbient::Candidate{rec.mgr, rec.tracker});
     }
@@ -18201,7 +18208,7 @@ int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, 
         float best = 1e30f, nearAmb[3] = {-1.0f, -1.0f, -1.0f};
         for (const auto& [key, rec] : g_archRooms) {
             float a[3];
-            if (!ReadRoomAmbient(key, rec.mgr, rec.id, a)) continue;
+            if (!ambientOf(key, rec, a)) continue;
             const float d = ApexMath::Fabs(a[0] - own[0]) + ApexMath::Fabs(a[1] - own[1]) + ApexMath::Fabs(a[2] - own[2]);
             if (d < best) best = d, std::memcpy(nearAmb, a, sizeof nearAmb);
         }

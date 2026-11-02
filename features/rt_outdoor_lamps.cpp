@@ -2219,6 +2219,10 @@ void Frame(IDirect3DDevice9* dev) {
         if (!sp->mgr && sp->built && GpuRoomLamps::ShowsEdit(rns[sp->story].mgr, sp->cls, sp->m)) urgent.insert(sp.get());
     const auto rank = [&](const Slot* sp) { return urgent.count(sp) ? (sp->m == 1 ? 0 : 1) : edited.count(sp) ? 2 : 3; };
     std::stable_sort(order.begin(), order.end(), [&](const Slot* a, const Slot* b) { return rank(a) < rank(b); });
+    // (S6) the lot's registered lamps for the physical room-0 maps: copied once a frame, not once a map
+    std::vector<OutdoorDelta::LotLamp> physLot;
+    std::vector<uintptr_t> physGone;
+    bool physLotRead = false;
     for (Slot* sp : order) {
         Slot& s = *sp;
         // GPU room lamps (developer): a map of the active lot without room-0 texels that kept rooms wrote gets a copy of its own
@@ -2329,9 +2333,9 @@ void Frame(IDirect3DDevice9* dev) {
             // (stage 4) every lot lamp with a law whose reach meets the map: the solve's lamps out of the base with their rows, and
             // the lamps its solve did not list (moved here, switched on, new) with fresh rows; never one the base holds (listed, not
             // out of it) nor an outdoor lamp the batches above draw
-            std::vector<OutdoorDelta::LotLamp> lot;
-            std::vector<uintptr_t> gone;
-            OutdoorDelta::LotLamps(lot, &gone);
+            if (!physLotRead) OutdoorDelta::LotLamps(physLot, &physGone), physLotRead = true;
+            const std::vector<OutdoorDelta::LotLamp>& lot = physLot;
+            const std::vector<uintptr_t>& gone = physGone;
             s.qLights.clear(), s.qRow.clear();
             std::vector<uintptr_t> cand;
             std::vector<std::array<float, 3>> candRow;

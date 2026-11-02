@@ -269,7 +269,8 @@ registered:
 - **Dispatch cost (developer build).** Every dispatch with callbacks is counted and one outermost dispatch in 16 is
   timed with the time stamp counter; every 10 s the Present hook logs `[D3D9Hooks] Dispatch cost over 10 s: N
   dispatches with callbacks a frame, X us each in the callbacks (sampled 1 in 16), about Y ms a frame; draws the
-  callbacks issued themselves: Z ms a frame in the driver`. The driver time of original draws a callback issues inside a
+  callbacks issued themselves: Z ms a frame in the driver | by method: ...`, the last part per chain (dispatches a frame,
+  sampled us each, ms a frame; the largest first). The driver time of original draws a callback issues inside a
   sampled dispatch (Night Lighting's re-issued draws, the Banding Fix's dithered re-issue, any `CallOriginalDraw*`) is
   measured apart and taken out of X, so X is the callbacks' own cost. Night Lighting's draw hook logs its own cost by
   fix the same way ([Night Lighting diagnostics](features/night-lighting/README.md#diagnostics)).

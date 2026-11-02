@@ -164,9 +164,10 @@ void Test() {
 }
 namespace Fallback {
 constexpr int kSolveAsks=3;
-struct Slot {bool used=true,built=true,ok=true,relit=true;};
+struct Slot {bool used=true,built=true,ok=true,relit=true;uintptr_t mgr=0;};
 std::vector<std::unique_ptr<Slot>> g_slots;
 std::vector<int> g_jobs;
+bool ActiveJobs() { return !g_jobs.empty(); } // (the active lot's jobs: the test's jobs are all the active lot's)
 std::atomic<bool> g_option{true},g_watch{true},g_on{true};
 bool g_restartRequested=false,g_budgetOut=false,g_proxyUsed=true;
 struct Cover {bool full=true;} g_cover;

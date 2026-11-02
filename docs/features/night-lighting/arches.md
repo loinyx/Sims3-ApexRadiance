@@ -90,6 +90,7 @@ rows. Failed block operations retain the individual-row fallback. No ambient int
 | Room match | `c4` within 2% + 1e-4 per channel; the draw's story from its room map set (manager `+0x16C` + class x 64, unverified in game), else from its directional maps (`+0x220`) |
 | Story memo | The stories of the 16 most recent room maps (`ArchAmbientConsts`, one slot per map by pointer hash), each answer checked against its retained native slot, wrapper, type and texture; a mismatch scans the manager's sets (a map is in one manager's sets only, so a confirmed entry is the manager the walk would find); a miss walks the rooms with arches (`StoryMapsInclude`). A frame's floors alternate between the stories' maps, so one remembered map often missed |
 | Segment memo | The matched rooms' 1 m cells joined into segments (quadratic in the cells) are kept for the last 8 sets of rooms while `g_archGen`, which every writer of the arch records moves under the same lock, is the same; the neighbours' ambients are still read live. The development draw cost log times the floors' arch rows |
+| Room ambient reads | Each room with arches has its own ambient read once per present frame (`ArchAmbient::ReadOnce`, `ArchRec::ambRead`), not twice per floor draw; a value the game writes during a frame is used from the next frame. A read that faults counts in the F8 "reads failed" |
 | Floor sill | 0.02 m (`kFloorSill`) |
 | Cone edge spread | 0.3 m (`kInnerSoftSpread`) |
 | Wall top tolerance | 0.05 m |

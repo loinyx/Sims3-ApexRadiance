@@ -118,6 +118,43 @@ int main() {
             }
         Check(equal && selected == n, "map-owner filtering preserves selected arch records");
     }
+    // (S6) ReadOnce: 15 rooms with arches, 21 floor draws a frame each comparing every room twice (no match), 3 frames; room 4
+    // unreadable, room 7's ambient written by the game in the middle of frame 1
+    {
+        float live[15][3];
+        for (int r = 0; r < 15; ++r) live[r][0] = 0.01f * static_cast<float>(r), live[r][1] = 0.02f, live[r][2] = 0.03f;
+        const float before7 = live[7][0];
+        FrameRead memo[15];
+        int reads = 0;
+        bool same = true, failed = true, late = true;
+        for (std::uint32_t frame = 0; frame < 3; ++frame) {
+            float seen7 = -1.0f;
+            for (int draw = 0; draw < 21; ++draw) {
+                if (frame == 1 && draw == 10) live[7][0] = 0.5f;
+                for (int pass = 0; pass < 2; ++pass)
+                    for (int r = 0; r < 15; ++r) {
+                        float a[3] = {-1.0f, -1.0f, -1.0f};
+                        const bool ok = ReadOnce(memo[r], frame, [&](float* to) {
+                            ++reads;
+                            if (r == 4) return false;
+                            to[0] = live[r][0], to[1] = live[r][1], to[2] = live[r][2];
+                            return true;
+                        }, a);
+                        if (r == 4) failed &= !ok && a[0] == -1.0f;
+                        else if (r == 7) {
+                            if (seen7 < 0.0f) seen7 = a[0];
+                            late &= ok && a[0] == seen7; // (one value through the frame)
+                        } else same &= ok && a[0] == live[r][0] && a[1] == live[r][1] && a[2] == live[r][2];
+                    }
+            }
+            if (frame < 2) late &= seen7 == before7;
+            else late &= seen7 == 0.5f;
+        }
+        Check(reads == 3 * 15, "read once per room and frame (45 reads, not 3 x 21 x 2 x 15 = 1890)");
+        Check(same, "every draw of a frame gets the room's value");
+        Check(failed, "an unreadable room stays unreadable for the frame and writes nothing");
+        Check(late, "a value the game writes during a frame is taken at the next one");
+    }
     std::printf("Arch ambient: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

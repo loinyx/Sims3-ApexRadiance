@@ -94,4 +94,20 @@ inline bool Takes(Pick pick, const Candidate& c, std::uintptr_t drawMgr) {
     return pick == Pick::Fallback || (pick == Pick::Story && c.mgr == drawMgr);
 }
 
+// A room's ambient read at most once per present frame (ArchAmbientConsts compares every room with arches at each floor
+// draw, and again when none matched: up to two live reads a room per draw, and its arch rows took 28 us a floor draw in a
+// recording; UNVERIFIED how much of it the reads were). The game writes it on the light tree thread with no counter this
+// code can see, so a value written during a frame is taken at the next one, as a draw issued a moment later would have.
+// read: the live read into its float[3], false when the room cannot be read (remembered for the frame too).
+struct FrameRead {
+    std::uint32_t frame = ~0u; // (none yet)
+    bool ok = false;
+    float amb[3] = {};
+};
+template <typename ReadFn> bool ReadOnce(FrameRead& m, std::uint32_t frame, ReadFn read, float* out) {
+    if (m.frame != frame) m.frame = frame, m.ok = read(m.amb);
+    if (m.ok) out[0] = m.amb[0], out[1] = m.amb[1], out[2] = m.amb[2];
+    return m.ok;
+}
+
 } // namespace ArchAmbient
