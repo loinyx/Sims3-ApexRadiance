@@ -143,6 +143,7 @@ struct KeptMapData {
     // scale there; the room's furniture blockers (its records' header row, blkHeader)
     bool physical = false;
     std::vector<float> physMult;
+    std::vector<char> physReach; // per lamp: 1 the realistic reach share applies on the room's wall texels
     BlockerTable blockers;
     float blkHeader = -1.0f;
 };
@@ -250,13 +251,15 @@ class Engine {
     // Physical indoor lamps: RelightKept with the sum from the map's phys points instead of its parts: every lamp (lamps[i].law in
     // lot space, its shadow in tile tiles[i] of EnsureTiles, its 3D test from world[i]; .mult unused) in batches of kPhysBatch (AccumulateRlg phys), each texel taking
     // the row of its room slot: rooms[slot].header = its records in the blocker table (SetBlockers; < 0 none), rooms[slot].lamp[i]
-    // = (mult, 0 not lit there; 1 the reach share applies). Then RelightKept's compose, blur, copies and restores
+    // = (mult, 0 not lit there; 1 the reach share applies). Then RelightKept's compose, blur, copies and restores. More lamps than
+    // the atlas holds go in several calls over the same k: first = false adds to the sum so far, compose = false stops after it
     struct PhysRoom {
         float header = -1.0f;
         std::vector<std::array<float, 2>> lamp;
     };
     bool RelightKeptPhys(IDirect3DDevice9* dev, const KeptMapGpu& k, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,
-                         const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err);
+                         const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err,
+                         bool first = true, bool compose = true);
 
     // The state of the device around a series of passes (render targets, depth, every state a state block holds)
     bool Begin(IDirect3DDevice9* dev); // false: no state block could be made, nothing was changed (End is not called)

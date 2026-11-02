@@ -2759,6 +2759,32 @@ bool PhysKeptCheck() {
         g_dev->EndScene();
         ok = ok && RtLampGpu::Engine::ReadTexture(g_dev, out, w, h, got);
         gpuMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        if (ok && m == 1) { // more lamps than the atlas holds (gpu_room_lamps.cpp RelightPhys): passes of 3 over a 3-row atlas, tiles rendered in turn
+            std::vector<uint32_t> split;
+            g_dev->BeginScene();
+            if (eng.Begin(g_dev)) {
+                ok = eng.EnsureTiles(g_dev, 3, err) && eng.CopyTexture(g_dev, game, out, w, h, err);
+                for (int g0 = 0; ok && g0 < nL; g0 += 3) {
+                    const int gn = std::min(3, nL - g0);
+                    std::vector<int> rowOf(gn);
+                    std::vector<RtLampGpu::Engine::PhysRoom> part(rooms.size());
+                    for (size_t r = 0; r < rooms.size(); r++) part[r].header = rooms[r].header, part[r].lamp.assign(rooms[r].lamp.begin() + g0, rooms[r].lamp.begin() + g0 + gn);
+                    for (int i = 0; ok && i < gn; i++) rowOf[i] = i, ok = eng.RenderShadowTile(g_dev, lamps[g0 + i].law.pos, i, 64.0f, err);
+                    ok = ok && eng.RelightKeptPhys(g_dev, g, lamps.data() + g0, rowOf.data(), reinterpret_cast<const float (*)[3]>(world.data() + g0), gn, part, prm, game, out, w,
+                                                   h, err, g0 == 0, g0 + 3 >= nL);
+                }
+                ok = ok && eng.EnsureTiles(g_dev, nL, err); // (back to a tile per lamp for the wall atlas)
+                for (int l = 0; ok && l < nL; l++) ok = eng.RenderShadowTile(g_dev, lamps[l].law.pos, l, 64.0f, err);
+                eng.End(g_dev);
+            } else
+                ok = false;
+            g_dev->EndScene();
+            ok = ok && RtLampGpu::Engine::ReadTexture(g_dev, out, w, h, split);
+            size_t same = 0;
+            for (size_t i = 0; ok && i < got.size(); i++) same += split[i] == got[i];
+            std::printf("  RelightKeptPhys in passes of 3 lamps over a 3-row atlas: %zu of %zu texels as in one pass\n", same, got.size());
+            Check(ok && same == got.size(), "physical: the passes over one sum give the one pass's map: " + err);
+        }
         g.Release();
         if (game) game->Release();
         if (out) out->Release();

@@ -193,9 +193,11 @@ struct KeptLamp {
     // (a kept room) its parts were carried from the room's earlier kept solve while it was switched off (CarryOff)
     bool carried = false;
     // (physical indoor lamps) its evaluations per texel (the list's count, LampRec::mult) and its scale in this room: a lamp
-    // registered in another room of the story shines at its own room's normalisation (InnerLight::NormScale, InnerNormScaleAt)
+    // registered in another room shines at its own room's normalisation (InnerLight::NormScale, InnerNormScaleAt); reach: the
+    // solve gives it the realistic reach share on this room's wall texels (LevelLightShare::ReachAppliesIn)
     uint8_t mult = 1;
     float normK = 1.0f;
+    bool reach = false;
 };
 struct Record {
     uint32_t version = 0; // (Real-time outdoor lamps) changes whenever the kept parts or texels change
@@ -2883,13 +2885,16 @@ void KeepEnd(const BYTE* room) {
                 int evals = 1;
                 for (const Capture::ProbeHook* h : hs) evals = std::max(evals, static_cast<int>(h->evals));
                 kl.mult = static_cast<uint8_t>(std::clamp(lr ? lr->mult : evals, 1, 255));
-                // shortcut: the lamp's room is looked up on this story only (a lamp of another story keeps 1), until S4 reads the record's innerSrc
-                if (reg > 0 && reg != rr.id && tracker)
+                // the room it shines out of as InnerShadow scales it (the record's innerSrc, any story); else a lamp registered in
+                // another room of this story
+                if (const float k = LevelLightShare::InnerNormScaleOf(room, light); k > 0.0f) kl.normK = k;
+                else if (reg > 0 && reg != rr.id && tracker)
                     if (const void* src = LevelLightShare::RoomOf(tracker, rr.story, reg)) {
                         float normSrc = 1.0f;
                         if (CopyBytes(&normSrc, static_cast<const BYTE*>(src) + 0x160, sizeof normSrc))
                             kl.normK = std::isfinite(normSrc) && std::isfinite(normHere) ? InnerLight::NormScale(normSrc, normHere, rr.outdoor) : 1.0f;
                     }
+                kl.reach = LevelLightShare::ReachAppliesIn(room, light);
             }
             if (lr)
                 for (const Contrib& p : lr->parts)
@@ -4581,7 +4586,7 @@ bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu:
             d.phys.push_back(v);
         }
         d.blkHeader = static_cast<float>(d.blockers.Append(k.tests));
-        for (const KeptLamp& l : k.lamps) d.lamps.push_back(l.light), d.physMult.push_back(static_cast<float>(l.mult) * l.normK);
+        for (const KeptLamp& l : k.lamps) d.lamps.push_back(l.light), d.physMult.push_back(static_cast<float>(l.mult) * l.normK), d.physReach.push_back(l.reach);
     }
     // a texel's compose point at (x, y) of its target (RtLampModel::KeptTexel's inputs)
     const auto texel = [&](uint32_t i, int x, int y) {

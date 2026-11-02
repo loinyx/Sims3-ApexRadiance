@@ -49,14 +49,18 @@ struct Entry {
     // world's (the game's 3D test), the furniture blockers, the lot's space
     bool physical = false;
     std::vector<float> physMult;
+    std::vector<char> physReach; // per lamp: the realistic reach share applies on the room's wall texels (outdoor walls)
     std::vector<RtLampModel::Lamp> lotLaws;
     std::vector<std::array<float, 3>> world;
     RtLampGpu::BlockerTable blockers;
     float blkHeader = -1.0f;
     float xf[16] = {};
 };
-// (physical indoor lamps) the kept shadow atlas: a tile per lamp, kept while the lamp stays put and the occluders are the same
-constexpr int kTiles = 16; // (6 x 256 by 16 x 256: within a 4096 texture limit)
+// (physical indoor lamps) the kept shadow atlas: a tile per lamp, kept while the lamp stays put and the occluders are the same.
+// Its rows grow with the most lamps a map has drawn (4 at a time, up to kTiles: 6 x 256 x 256 x (G16R16F + D24X8) = 3.1 MB a
+// row, 50 MB at 16); a map with more lamps is drawn in several passes over the same sum, its tiles rendered again in turn
+constexpr int kTiles = 16;    // (6 x 256 by 16 x 256: within a 4096 texture limit)
+constexpr int kMaxLamps = 64; // a map's lamps drawn at most (4 passes of 16 tiles: the frame's cost bounded)
 struct Tile {
     uintptr_t light = 0;
     float pos[3] = {};
@@ -64,6 +68,23 @@ struct Tile {
 };
 std::array<Tile, kTiles> g_tiles;
 uint32_t g_tileUse = 0;
+int g_tileRows = 0;
+// (physical indoor lamps) a relight round's maps per story: drawn, and why the others were not (logged when it changes, BeginFrame)
+struct Cover {
+    int drawn = 0, failed = 0;
+    std::string why;
+};
+std::map<int, Cover> g_cover;
+std::map<int, std::string> g_coverLogged;
+void NoteCover(int story, const std::string& why) {
+    Cover& c = g_cover[story];
+    if (why.empty()) {
+        c.drawn++;
+        return;
+    }
+    c.failed++;
+    if (c.why.find(why) == std::string::npos && c.why.size() < 400) c.why += (c.why.empty() ? "" : "; ") + why;
+}
 std::atomic<uint32_t> g_frame{0}; // Real-time outdoor lamps' relight rounds (BeginFrame)
 std::map<std::tuple<const void*, int, int>, Entry> g_entries; // (room, class, map); render thread
 std::vector<OutdoorDelta::KeptRef> g_refs;
@@ -252,6 +273,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                                              kMapName[m]));
                 } else if (RtLampGpu::Engine::UploadKept(dev, d, e.gpu)) {
                     e.physMult = std::move(d.physMult);
+                    e.physReach = std::move(d.physReach);
                     e.blockers = std::move(d.blockers);
                     e.blkHeader = d.blkHeader;
                     e.ok = true;
@@ -275,15 +297,16 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
             e.lawOk.assign(e.lamps.size(), 0);
             for (size_t l = 0; l < e.lamps.size(); l++) {
                 GpuLampLaw::Lamp w;
+                // (the law with its reach radii: the room table's reach column and Params::reachOn decide where they apply)
                 if (!RtOutdoorLamps::WorldLaw(e.lamps[l], e.lot, false, w, type, reg) ||
-                    !RtOutdoorLamps::WorldLaw(e.lamps[l], e.lot, false, e.lotLaws[l].law, type, reg, e.xf))
+                    !RtOutdoorLamps::WorldLaw(e.lamps[l], e.lot, true, e.lotLaws[l].law, type, reg, e.xf))
                     continue;
                 e.lawOk[l] = 1;
                 e.lotLaws[l].mult = l < e.physMult.size() ? e.physMult[l] : 1.0f;
                 std::memcpy(e.world[l].data(), w.pos, sizeof w.pos);
                 Mix(sig, &e.lotLaws[l], sizeof e.lotLaws[l]);
             }
-            Mix(sig, e.lawOk.data(), e.lawOk.size());
+            Mix(sig, e.lawOk.data(), e.lawOk.size()), Mix(sig, e.physReach.data(), e.physReach.size());
             continue;
         }
         // a lamp moved since its parts were kept (their shares follow its place): drawn with the law its parts were kept with (the
@@ -329,7 +352,8 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
 namespace {
 // (physical indoor lamps) the entry's lamps drawn from their laws over its phys points (rt_lamp_gpu.h RelightKeptPhys): a shadow
 // tile per lamp with a law (rendered unless the atlas holds it), the room's furniture blockers, one room row (mult x norm scale,
-// no reach: indoor maps). False (err) leaves the game's map
+// the reach share where the solve applies it: Params::reachOn x the lamp's flag x a wall texel). More lamps than the atlas's
+// rows: several passes over the same sum. False (err) leaves the game's map
 bool RelightPhys(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, Entry& e, const RtLampGpu::Params& base, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h,
                  std::string& err) {
     const uint32_t gen = RtOutdoorLamps::KeptMeshGen();
@@ -337,41 +361,52 @@ bool RelightPhys(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, Entry& e, const 
     std::vector<RtLampModel::Lamp> lamps;
     std::vector<std::array<float, 3>> world;
     std::vector<uintptr_t> lights;
+    std::vector<float> reach;
     for (size_t l = 0; l < e.lamps.size(); l++)
-        if (e.lawOk[l]) lamps.push_back(e.lotLaws[l]), world.push_back(e.world[l]), lights.push_back(e.lamps[l]);
+        if (e.lawOk[l])
+            lamps.push_back(e.lotLaws[l]), world.push_back(e.world[l]), lights.push_back(e.lamps[l]),
+                reach.push_back(l < e.physReach.size() && e.physReach[l] ? 1.0f : 0.0f);
     const int n = static_cast<int>(lamps.size());
-    if (n > kTiles) return err = std::format("physical: {} lamps, the shadow atlas holds {}", n, kTiles), false;
-    if (eng.TileRows() == 0) g_tiles = {}; // (made again: no tile holds a shadow)
-    if (!eng.EnsureTiles(dev, kTiles, err)) return false;
-    std::vector<int> tiles(n, -1);
-    std::array<bool, kTiles> taken{};
-    g_tileUse++;
-    for (int i = 0; i < n; i++) // (a lamp's own tile when it holds its shadow now)
-        for (int t = 0; t < kTiles; t++)
-            if (const Tile& g = g_tiles[t]; !taken[t] && g.light == lights[i] && g.gen == gen && std::memcmp(g.pos, lamps[i].law.pos, sizeof g.pos) == 0) {
-                tiles[i] = t, taken[t] = true;
-                break;
-            }
-    for (int i = 0; i < n; i++) {
-        if (tiles[i] >= 0) continue;
-        int t = -1; // the least recently used tile no lamp of this map holds
-        for (int c = 0; c < kTiles; c++)
-            if (!taken[c] && (t < 0 || g_tiles[c].used < g_tiles[t].used)) t = c;
-        Tile& g = g_tiles[t];
-        g = Tile{};
-        if (!eng.RenderShadowTile(dev, lamps[i].law.pos, t, base.farDist, err)) return false;
-        g.light = lights[i], g.gen = gen;
-        std::memcpy(g.pos, lamps[i].law.pos, sizeof g.pos);
-        tiles[i] = t, taken[t] = true;
-    }
-    for (int i = 0; i < n; i++) g_tiles[tiles[i]].used = g_tileUse;
+    if (n > kMaxLamps) return err = std::format("physical: {} lamps, at most {} are drawn", n, kMaxLamps), false;
+    const int rows = std::max(g_tileRows, std::min(kTiles, (std::max(n, 1) + 3) / 4 * 4));
+    if (eng.TileRows() != rows) g_tiles = {}; // (made again: no tile holds a shadow)
+    if (!eng.EnsureTiles(dev, rows, err)) return false;
+    g_tileRows = rows;
     if (!eng.SetBlockers(dev, e.blockers, err)) return false;
-    std::vector<RtLampGpu::Engine::PhysRoom> rooms(1);
-    rooms[0].header = e.blkHeader;
-    for (const RtLampModel::Lamp& L : lamps) rooms[0].lamp.push_back({L.mult, 0.0f});
     RtLampGpu::Params p = base;
-    p.thr = e.thr, p.reachOn = false, p.mask = false, p.maskAllGpu = false, p.keptX = false, p.debugLamp = -1;
-    return eng.RelightKeptPhys(dev, e.gpu, lamps.data(), tiles.data(), reinterpret_cast<const float (*)[3]>(world.data()), n, rooms, p, game, out, w, h, err);
+    p.thr = e.thr, p.mask = false, p.maskAllGpu = false, p.keptX = false, p.debugLamp = -1;
+    for (int g0 = 0; g0 == 0 || g0 < n; g0 += rows) { // (a pass per `rows` lamps; none: one pass, the sum 0)
+        const int gn = std::min(rows, n - g0);
+        std::vector<int> tiles(gn, -1);
+        std::array<bool, kTiles> taken{};
+        g_tileUse++;
+        for (int i = 0; i < gn; i++) // (a lamp's own tile when it holds its shadow now)
+            for (int t = 0; t < rows; t++)
+                if (const Tile& g = g_tiles[t]; !taken[t] && g.light == lights[g0 + i] && g.gen == gen && std::memcmp(g.pos, lamps[g0 + i].law.pos, sizeof g.pos) == 0) {
+                    tiles[i] = t, taken[t] = true;
+                    break;
+                }
+        for (int i = 0; i < gn; i++) {
+            if (tiles[i] >= 0) continue;
+            int t = -1; // the least recently used tile no lamp of this pass holds
+            for (int c = 0; c < rows; c++)
+                if (!taken[c] && (t < 0 || g_tiles[c].used < g_tiles[t].used)) t = c;
+            Tile& g = g_tiles[t];
+            g = Tile{};
+            if (!eng.RenderShadowTile(dev, lamps[g0 + i].law.pos, t, base.farDist, err)) return false;
+            g.light = lights[g0 + i], g.gen = gen;
+            std::memcpy(g.pos, lamps[g0 + i].law.pos, sizeof g.pos);
+            tiles[i] = t, taken[t] = true;
+        }
+        for (int i = 0; i < gn; i++) g_tiles[tiles[i]].used = g_tileUse;
+        std::vector<RtLampGpu::Engine::PhysRoom> room(1);
+        room[0].header = e.blkHeader;
+        for (int i = 0; i < gn; i++) room[0].lamp.push_back({lamps[g0 + i].mult, reach[g0 + i]});
+        if (!eng.RelightKeptPhys(dev, e.gpu, lamps.data() + g0, tiles.data(), reinterpret_cast<const float (*)[3]>(world.data() + g0), gn, room, p, game, out, w, h, err,
+                                 g0 == 0, g0 + rows >= n))
+            return false;
+    }
+    return true;
 }
 } // namespace
 
@@ -385,15 +420,18 @@ void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
             if (LogAllowed())
                 LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: kept for a {}x{} map, the map is {}x{} (left as the game's)", e.story, e.id, e.cls, kMapName[m],
                                      e.gpu.w, e.gpu.h, w, h));
+            if (e.physical) NoteCover(e.story, "a map not of the kept size");
             Drop(e, room);
             continue;
         }
         std::string err;
         if (e.physical ? !RelightPhys(dev, eng, e, p, game, out, w, h, err) : !eng.RelightKept(dev, e.gpu, e.laws.data(), e.lawOk.data(), e.thr, game, out, w, h, err)) {
             if (LogAllowed()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: not drawn ({})", e.story, e.id, e.cls, kMapName[m], err));
+            if (e.physical) NoteCover(e.story, err);
             Drop(e, room);
             continue;
         }
+        if (e.physical) NoteCover(e.story, {});
         QueryPerformanceCounter(&e.relitAt);
         e.relitFrame = g_frame.load(std::memory_order_relaxed);
         {
@@ -411,6 +449,7 @@ void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
 
 void ReleaseAll() {
     g_tiles = {};
+    g_tileRows = 0;
     for (auto& [key, e] : g_entries) e.gpu.Release();
     g_entries.clear();
     g_bytes = 0;
@@ -418,7 +457,19 @@ void ReleaseAll() {
     g_drawn.clear();
 }
 
-void BeginFrame() { g_frame.fetch_add(1, std::memory_order_relaxed); }
+void BeginFrame() {
+    g_frame.fetch_add(1, std::memory_order_relaxed);
+    // (physical indoor lamps) the last round's cover per story, when it changed (room 0 keeps its solve's light: not physical yet)
+    for (const auto& [story, c] : g_cover) {
+        std::string line = c.failed ? std::format("not covered ({} of {} maps not drawn: {})", c.failed, c.drawn + c.failed, c.why)
+                                    : std::format("every map drawn ({} maps of its rooms > 0; room 0 from its solve)", c.drawn);
+        if (std::string& was = g_coverLogged[story]; was != line) {
+            if (LogAllowed()) LOG_INFO(std::format("[GpuRoomLamps] Story {} physical: {}", story, line));
+            was = std::move(line);
+        }
+    }
+    g_cover.clear();
+}
 bool EditPending(uintptr_t light) {
     std::lock_guard<std::mutex> lk(g_editMx);
     return std::any_of(g_edits.begin(), g_edits.end(), [&](const Edit& e) { return e.light == light; });

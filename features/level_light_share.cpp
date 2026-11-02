@@ -19091,6 +19091,22 @@ bool Room0MovePath(const void* room0, uintptr_t light, Room0Path& out, const cha
     out.reach = g_reachOn.load(std::memory_order_relaxed), out.reachW = ReachWOf(light);
     return true;
 }
+float InnerNormScaleOf(const void* room, uintptr_t light) {
+    BYTE* r = static_cast<BYTE*>(const_cast<void*>(room));
+    const RoomInfo* info = room ? SolveInfo(r) : nullptr;
+    if (!info) return 0.0f;
+    const auto it = std::lower_bound(info->innerSrc.begin(), info->innerSrc.end(), std::make_pair(light, static_cast<const BYTE*>(nullptr)));
+    if (it == info->innerSrc.end() || it->first != light || !it->second) return 0.0f;
+    const bool outdoor = RoomOutdoorFlag(r);
+    return InnerLight::NormScale(RoomNormOf(it->second), outdoor ? 1.0f : RoomNormOf(r), outdoor);
+}
+bool ReachAppliesIn(const void* room, uintptr_t light) { // (LightEvalHook's reach condition, its ray-independent part)
+    const RoomInfo* info = room ? SolveInfo(static_cast<BYTE*>(const_cast<void*>(room))) : nullptr;
+    if (!info) return false;
+    const Cross* openTop = !info->indoor && !info->openBelow.empty() ? FindCross(*info, light) : nullptr;
+    if (openTop && openTop->outdoor) openTop = nullptr;
+    return (!info->indoor && !openTop) || (info->openings && FindSame(*info, light));
+}
 float Room0PassAt(const Room0Path& p, const float* lampW, const float* pointW) {
     const float prevAA = t_mapAA;
     t_mapAA = p.aa;

@@ -411,6 +411,12 @@ struct Room0Path {
     float aa = 0.0f, normK = 1.0f, reachW = 0.0f;
     bool spread = false, reach = false;
 };
+// (physical indoor lamps) Light tree thread, the room's solve: the norm scale InnerShadow gives `light` there (InnerNormScaleAt
+// from the record's innerSrc, any story; nothing noted), 0 when the record does not take it from another room; and whether
+// the solve gives it the realistic reach share on the room's wall texels (a roofless room's lamp not of a double-height room
+// below, or a room-0 lamp through a roofed room's openings; the reach option itself not read)
+float InnerNormScaleOf(const void* room, uintptr_t light);
+bool ReachAppliesIn(const void* room, uintptr_t light);
 // Light tree thread: false (why) when room 0 takes the lamp another way (not a lamp of its record's inner list, one of the
 // story above, no record, steady_indoor_light off)
 bool Room0MovePath(const void* room0, uintptr_t light, Room0Path& out, const char*& why);

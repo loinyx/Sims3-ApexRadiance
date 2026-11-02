@@ -214,6 +214,15 @@ lamp's position, not on its colour or intensity.
    compiler, the engine still runs the outdoor lamps and physical rooms keep the game's maps. Lamp edits of physical rooms
    still take the solves; room 0 is not physical yet. `rt_lamps_test` 58 checks (the tiles from the tile proxy, the engine
    without the physical shaders).
+20. Physical model, stage 3b, part 2 (02/11): a lamp's norm scale comes from the room record's `innerSrc` (InnerShadow's
+   own source room, any story; `LevelLightShare::InnerNormScaleOf`), else the same-story lookup above. The realistic reach
+   share applies where the solve applies it (`LevelLightShare::ReachAppliesIn`: a roofless room's lamps except a double-height
+   room's below, or a room-0 lamp through a roofed room's openings), on wall texels with the reach on. A map with more lamps
+   than the atlas holds is drawn in passes over one sum (`RelightKeptPhys(..., first, compose)`; at most 64 lamps). The
+   atlas grows 4 rows at a time with the most lamps a map has drawn (3.1 MB a row, G16R16F + D24X8; 50 MB at 16) instead of
+   16 rows at once. Each relight round logs per story, when it changes, `Story S physical: every map drawn (...)` or `not
+   covered (K of N maps not drawn: why)`. Room 0 is still drawn from its solve. `rt_lamps_test` 59 checks (passes of 3
+   lamps over a 3-row atlas give the one pass's map texel for texel).
 
 ## Settings
 
@@ -293,7 +302,8 @@ lamp's position, not on its colour or intensity.
 - **Logs** (`[GpuRoomLamps]`): `Story S room R class C: kept N texels, K drawn lamps, P parts (U never tested by the game),
   X MB; M rooms kept, Y MB of 192 MB`; physical: `Story S room R class C: kept N texels (physical: no parts), X MB; M rooms, Y
   MB of 192`, `Story S room 0: base without K lot lamps (physical)` (from `ExportRoom0`), `Model physical|replica: ...`, `not
-  kept (the model changed during its solve)`; `Story S room R class C <map>: not drawn (physical: ...)`; with the probe,
+  kept (the model changed during its solve)`; `Story S room R class C <map>: not drawn (physical: ...)`, `Story S physical:
+  every map drawn (N maps of its rooms > 0; room 0 from its solve)` / `not covered (K of N maps not drawn: why)`; with the probe,
   `... physical vs the game's last solve: N texels, P% within 2/255, mean M levels, X% brighter > 8 levels, Y% darker > 8
   levels`; `not kept (the 192 MB budget: ...)`, `not kept (no memory)`, `not kept (why)`; with
   the probe on, `Story S room R class C self-check: N texels lit, P% within 2/255 of the solve's sum recomposed from the kept

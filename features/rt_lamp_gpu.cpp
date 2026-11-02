@@ -1172,7 +1172,8 @@ bool Engine::RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLa
     return ComposeKept(dev, k, game, out, w, h, err);
 }
 bool Engine::RelightKeptPhys(IDirect3DDevice9* dev, const KeptMapGpu& k, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,
-                             const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err) {
+                             const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err,
+                             bool first, bool compose) {
     if (!out) return err = "nothing to relight", false;
     if (!ps_[kAccPhysPs] || !ps_[kAccPhysFastPs] || !ps_[kT3dPs]) return err = "the physical shaders are missing (not in the shader cache, no compiler)", false;
     if (!KeptReady(dev, k, w, h, err)) return false;
@@ -1182,7 +1183,6 @@ bool Engine::RelightKeptPhys(IDirect3DDevice9* dev, const KeptMapGpu& k, const R
     Map m;
     m.w = k.accW, m.h = k.accH, m.vb = k.phys, m.count = k.nPhys;
     std::vector<float> table(rooms.size() * kTableCols * 4);
-    bool first = true;
     for (int b = 0; k.phys && b < n; b += kPhysBatch) {
         const int nb = std::min(kPhysBatch, n - b);
         std::fill(table.begin(), table.end(), 0.0f);
@@ -1199,7 +1199,7 @@ bool Engine::RelightKeptPhys(IDirect3DDevice9* dev, const KeptMapGpu& k, const R
         dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 1.0f, 0);
         accCur_ = 0;
     }
-    return ComposeKept(dev, k, game, out, w, h, err);
+    return !compose || ComposeKept(dev, k, game, out, w, h, err);
 }
 // Steps 2 to 4 of RelightKept over the current sum
 bool Engine::ComposeKept(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err) {
