@@ -198,7 +198,10 @@ lamp's position, not on its colour or intensity.
   blur, its kept solve has the lamp in its base, a map of it not drawn on the GPU, a room 0 Real-time outdoor lamps does not
   draw it in (an exit lamp, or a part in its floor mask)`, `a light without a GPU law whose intensity or shape changed`);
   `switch on: lamp L left to the room solves (its rooms changed since it was switched off)`; `settle: lamp L, R
-  rooms sent to their solve 2 s after its last edit`; `Story S room R class
+  rooms sent to their solve 2 s after its last edit[, N sent for another lamp just before][, N refused by the room queue
+  (already waiting for their gather, or gone)]` (each room once for the lamps due together); the edit line ends with the
+  relight round each map kind of its rooms was shown in (`frames: wall atlas +0, floor +1 ...`); a tube switched off (its lit
+  bit clear or its intensity 0) counts as a switch, not a change of its share; `Story S room R class
   C: not kept (its class was C0 when its solve started)`.
 - **GPU logs**: `Story S room R class C <map> GPU self-check: N texels, P% within 2/255 (alpha within A/255) of the texels the
   game left` (with the probe on, once per kept solve and map, after its first relight; the texels the game left at the

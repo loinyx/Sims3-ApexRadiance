@@ -43,7 +43,9 @@ struct Entry {
     std::vector<RtLampGpu::KeptMapData::RoomLamp> roomLamps;
     std::vector<char> colourOnly; // per lamp of `lamps`: its law is its colour alone (a TubeLight)
     LARGE_INTEGER relitAt{};
+    uint32_t relitFrame = 0;
 };
+std::atomic<uint32_t> g_frame{0}; // Real-time outdoor lamps' relight rounds (BeginFrame)
 std::map<std::tuple<const void*, int, int>, Entry> g_entries; // (room, class, map); render thread
 std::vector<OutdoorDelta::KeptRef> g_refs;
 size_t g_bytes = 0;
@@ -65,6 +67,7 @@ struct Edit {
     std::string stories;
     LARGE_INTEGER at{};
     DWORD tick = 0;
+    uint32_t frame = 0;
 };
 std::mutex g_editMx;
 std::vector<Edit> g_edits;
@@ -142,11 +145,21 @@ void LogEdits() {
     QueryPerformanceCounter(&now);
     for (const Edit& e : done) {
         if (!LogAllowed()) continue;
+        // the frame each map kind of its rooms was shown in, after the edit's (+0: the frame of the edit)
+        std::string frames;
+        for (int m = 0; m < 4; m++) {
+            int last = -1;
+            for (const auto& [key, en] : g_entries)
+                if (en.m == m && en.ok && std::find(e.rooms.begin(), e.rooms.end(), std::get<0>(key)) != e.rooms.end())
+                    last = std::max(last, static_cast<int>(en.relitFrame - e.frame));
+            if (last >= 0) frames += std::format("{}{} +{}", frames.empty() ? " (frames:" : ",", kMapName[m], last);
+        }
+        if (!frames.empty()) frames += ")";
         if (!e.kind)
             LOG_INFO(std::format("[GpuRoomLamps] Lamp {:08X}: its edit was not shown in every room within {} ms (rooms on stories {})", e.light, kEditWaitMs, e.stories));
         else
-            LOG_INFO(std::format("[GpuRoomLamps] {}: lamp {:08X}, {} rooms on stories {}, no room solved, relit in {:.1f} ms", e.kind, e.light, e.rooms.size(), e.stories,
-                                 MsSince(e.at, now)));
+            LOG_INFO(std::format("[GpuRoomLamps] {}: lamp {:08X}, {} rooms on stories {}, no room solved, relit in {:.1f} ms{}", e.kind, e.light, e.rooms.size(), e.stories,
+                                 MsSince(e.at, now), frames));
     }
 }
 
@@ -202,7 +215,8 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
             GpuLampLaw::Lamp now;
             float colour[3] = {};
             uint64_t geo = 0;
-            if (rl.colourOnly) moved = moved || (RtOutdoorLamps::ColourLaw(rl.light, e.lot, colour, geo) && geo != rl.geo);
+            // (switched off, its colour 0: a switch, whatever its share's inputs read then)
+            if (rl.colourOnly) moved = moved || (RtOutdoorLamps::ColourLaw(rl.light, e.lot, colour, geo) && geo != rl.geo && colour[0] + colour[1] + colour[2] > 0.0f);
             else if (RtOutdoorLamps::WorldLaw(rl.light, e.lot, false, now, type, reg) &&
                      (std::fabs(now.pos[0] - rl.pos[0]) > kMoved || std::fabs(now.pos[1] - rl.pos[1]) > kMoved || std::fabs(now.pos[2] - rl.pos[2]) > kMoved))
                 moved = true;
@@ -250,6 +264,7 @@ void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
             continue;
         }
         QueryPerformanceCounter(&e.relitAt);
+        e.relitFrame = g_frame.load(std::memory_order_relaxed);
         {
             std::lock_guard<std::mutex> lk(g_drawnMx);
             auto& d = g_drawn[room];
@@ -271,6 +286,7 @@ void ReleaseAll() {
     g_drawn.clear();
 }
 
+void BeginFrame() { g_frame.fetch_add(1, std::memory_order_relaxed); }
 bool Drawn(const void* room, uint32_t version, unsigned maps) {
     std::lock_guard<std::mutex> lk(g_drawnMx);
     const auto it = g_drawn.find(room);
@@ -282,6 +298,7 @@ void NoteEdit(uintptr_t light, const char* kind, const std::vector<const void*>&
     e.light = light, e.kind = kind, e.rooms = rooms, e.stories = stories;
     QueryPerformanceCounter(&e.at);
     e.tick = GetTickCount();
+    e.frame = g_frame.load(std::memory_order_relaxed);
     std::lock_guard<std::mutex> lk(g_editMx);
     if (g_edits.size() < 64) g_edits.push_back(std::move(e));
 }

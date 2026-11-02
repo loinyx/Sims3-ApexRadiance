@@ -34,6 +34,8 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m);
 void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h);
 // A device reset or Real-time outdoor lamps dropping its maps: every GPU buffer goes (made again on use)
 void ReleaseAll();
+// Render thread: Real-time outdoor lamps starts a relight round (the frame count the edit log gives per map kind)
+void BeginFrame();
 // Any thread (the light tree thread's lamp edits, OutdoorDelta::TakesLampEdit): that kept solve of the room (its version) was
 // drawn on every map of `maps` (bit m) and is still (no lamp of it moved since)
 bool Drawn(const void* room, uint32_t version, unsigned maps);

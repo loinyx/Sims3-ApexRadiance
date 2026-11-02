@@ -484,6 +484,7 @@ struct Slot {
     std::vector<std::pair<UINT, UINT>> kRanges;
     std::vector<KeptInfo> kLamps;
     std::vector<GpuLampLaw::Lamp> kLaws;
+    uint64_t roomsRelit = 0; // GpuRoomLamps::Sig at its last relight
     std::vector<char> kOk;
 };
 struct Ask {
@@ -2012,12 +2013,23 @@ void Frame(IDirect3DDevice9* dev) {
     for (int pass = 0; pass < 4; pass++)
         for (size_t si = 0; si < nSlots; si++)
             if (Slot* sp = g_slots[(g_rr + si) % nSlots].get(); sp->masked.empty() == (pass < 2) && (sp->mgr != 0) == (pass % 2 == 1)) order.push_back(sp);
+    // GPU room lamps (developer): each active-lot map's kept rooms and their lamps now; the maps whose kept rooms changed (a lamp
+    // edit the GPU took) go first, so an edit's maps are not left behind the frame budget by the other maps
+    GpuRoomLamps::BeginFrame();
+    std::unordered_map<const Slot*, uint64_t> roomsSigs;
+    for (const auto& sp : g_slots)
+        if (!sp->mgr && sp->built) roomsSigs[sp.get()] = GpuRoomLamps::Sig(dev, rns[sp->story].mgr, sp->cls, sp->m);
+    std::stable_partition(order.begin(), order.end(), [&](const Slot* sp) {
+        const auto it = roomsSigs.find(sp);
+        return it != roomsSigs.end() && it->second != sp->roomsRelit;
+    });
     for (Slot* sp : order) {
         Slot& s = *sp;
         // GPU room lamps (developer): a map of the active lot without room-0 texels that kept rooms wrote gets a copy of its own
         // (the game's map with those rooms over it), bound by the same swap
         const bool roomsOnly = !s.used && !s.mgr && s.built;
-        const uint64_t roomsSig = s.mgr ? 0 : GpuRoomLamps::Sig(dev, rns[s.story].mgr, s.cls, s.m);
+        const auto rsIt = roomsSigs.find(sp);
+        const uint64_t roomsSig = rsIt != roomsSigs.end() ? rsIt->second : 0;
         if (roomsOnly) {
             if (!roomsSig) {
                 if (s.copy) s.copy->Release(), s.copy = nullptr;
@@ -2107,7 +2119,7 @@ void Frame(IDirect3DDevice9* dev) {
                 uint64_t geo = 0;
                 if (ColourLaw(k.light, g_lotId, colour, geo)) {
                     s.kLaws[l] = k.law, s.kOk[l] = 2;
-                    if (geo == k.geo) std::memcpy(s.kLaws[l].colour, colour, sizeof colour);
+                    if (geo == k.geo || colour[0] + colour[1] + colour[2] <= 0.0f) std::memcpy(s.kLaws[l].colour, colour, sizeof colour); // (off: a switch)
                 }
             }
             Mix(sig, &s.kOk[l], 1);
@@ -2339,6 +2351,7 @@ void Frame(IDirect3DDevice9* dev) {
             if ((s.fast && !dragging) || exactUnder) g_why.exact++;
         }
         s.lampsSig = lampsSig, s.paramsSig = params, s.meshGen = g_meshGen, s.relitVersion = s.version;
+        s.roomsRelit = roomsSig;
         s.relit = true;
         s.sig = sig;
         s.fast = dragging;
@@ -2671,9 +2684,11 @@ bool ColourLaw(uintptr_t light, uint64_t lot, float colour[3], uint64_t& geo) {
     if (!ReadTubeShare(light, g)) return false;
     geo = 1469598103934665603ull;
     Mix(geo, g, sizeof g);
+    // switched off (its lit bit +0x100 & 0x20 clear, or its intensity 0: the share is 0): no colour, whatever its share reads
+    const bool lit = (r.f.flags & 0x20) && r.intensity > 0.0f;
     for (int k = 0; k < 3; k++) {
         if (!std::isfinite(r.colour[k])) return false;
-        colour[k] = r.colour[k];
+        colour[k] = lit ? r.colour[k] : 0.0f;
     }
     return true;
 }

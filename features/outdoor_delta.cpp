@@ -47,6 +47,7 @@
 #include <format>
 #include <map>
 #include <memory>
+#include <tuple>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -2043,7 +2044,7 @@ bool LawNow(const KeptLamp& kl, uint64_t lot, GpuLampLaw::Lamp& law, bool& moved
     moved = false;
     if (!LawOfLight(kl.light, lot, now) || now.colourOnly != kl.colourOnly) return false;
     law = now.law;
-    moved = kl.colourOnly ? now.geo != kl.geo
+    moved = kl.colourOnly ? now.geo != kl.geo && (now.law.colour[0] + now.law.colour[1] + now.law.colour[2]) > 0.0f
                           : std::fabs(now.pos[0] - kl.pos[0]) > 1e-4f || std::fabs(now.pos[1] - kl.pos[1]) > 1e-4f || std::fabs(now.pos[2] - kl.pos[2]) > 1e-4f;
     return true;
 }
@@ -3304,7 +3305,7 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on) {
             std::lock_guard<std::recursive_mutex> lk(g_mx);
             if (const auto it = g_records.find(KeyOf(room, rr.cls)); it != g_records.end())
                 for (const KeptLamp& k0 : it->second->kept0)
-                    if (k0.light == light && k0.colourOnly && (!haveGeo || k0.geo != geoNow)) return refuse(rr, "a light without a GPU law whose intensity or shape changed");
+                    if (k0.light == light && k0.colourOnly && on && (!haveGeo || k0.geo != geoNow)) return refuse(rr, "a light without a GPU law whose intensity or shape changed");
             continue;
         }
         std::shared_ptr<const KeptRoom> k;
@@ -3316,7 +3317,7 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on) {
         if (!k->editable) return refuse(rr, k->tailWhy ? k->tailWhy : "a wall texel the GPU does not blur");
         if (std::find(k->baked.begin(), k->baked.end(), light) != k->baked.end()) return refuse(rr, "its kept solve has the lamp in its base");
         for (const KeptLamp& kl : k->lamps)
-            if (kl.light == light && kl.colourOnly && (!haveGeo || kl.geo != geoNow)) return refuse(rr, "a light without a GPU law whose intensity or shape changed");
+            if (kl.light == light && kl.colourOnly && on && (!haveGeo || kl.geo != geoNow)) return refuse(rr, "a light without a GPU law whose intensity or shape changed");
         if (!GpuRoomLamps::Drawn(room, k->version, k->maps)) return refuse(rr, "a map of it not drawn on the GPU");
         kept.emplace_back(room, k->version);
         ids.emplace_back(rr.story, rr.id);
@@ -3357,15 +3358,29 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on) {
 void SettleDue() {
     if (g_settle.empty()) return;
     const DWORD now = GetTickCount();
+    // each room once for the lamps due together (a room sent for one is already waiting for its gather for the next: the
+    // game's queue refuses it, which is not a failure)
+    std::map<std::tuple<uintptr_t, int, int>, bool> sent; // (tracker, story, id) -> the send went through
     for (auto it = g_settle.begin(); it != g_settle.end();) {
         if (now - it->second.at < kSettleMs) {
             ++it;
             continue;
         }
-        int sent = 0;
-        for (const auto& [story, id] : it->second.rooms) sent += LevelLightShare::QueueRoomId(it->second.tracker, story, id, -1) ? 1 : 0;
+        int ok = 0, before = 0, refused = 0;
+        for (const auto& [story, id] : it->second.rooms) {
+            const auto key = std::make_tuple(it->second.tracker, story, id);
+            if (const auto s = sent.find(key); s != sent.end()) {
+                before++;
+                continue;
+            }
+            const bool queued = LevelLightShare::QueueRoomId(it->second.tracker, story, id, -1);
+            sent[key] = queued;
+            (queued ? ok : refused)++;
+        }
         if (KeptLog())
-            LOG_INFO(std::format("[GpuRoomLamps] settle: lamp {:08X}, {} rooms sent to their solve {:.0f} s after its last edit", it->first, sent, kSettleMs / 1000.0));
+            LOG_INFO(std::format("[GpuRoomLamps] settle: lamp {:08X}, {} rooms sent to their solve {:.0f} s after its last edit{}{}", it->first, ok, kSettleMs / 1000.0,
+                                 before ? std::format(", {} sent for another lamp just before", before) : std::string(),
+                                 refused ? std::format(", {} refused by the room queue (already waiting for their gather, or gone)", refused) : std::string()));
         it = g_settle.erase(it);
     }
 }
