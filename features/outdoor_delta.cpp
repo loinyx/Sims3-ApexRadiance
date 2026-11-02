@@ -35,6 +35,7 @@
 #include "phys_lamp_pick.h"
 #include "penumbra.h"
 #include "lamp_mark_filter.h"
+#include "unlit_rooms.h"
 #include "apex_log.h"
 #include "apex_paths.h"
 #include "game_addresses.h"
@@ -4006,6 +4007,9 @@ struct Settle {
     DWORD at = 0;
 };
 std::unordered_map<uintptr_t, Settle> g_settle;
+// (S8, light tree thread) the rooms of the lamp edits taken whose ambient (Rooms at Night's colour and the lamps' share,
+// +0x110 / +0x120) is taken again after this room update (AmbientDue): (lot, story, id) -> the edit's kind
+std::map<std::tuple<uintptr_t, int, int>, const char*> g_ambDue;
 uintptr_t TlTracker(uintptr_t tl) { // POD (SEH)
     __try {
         return *reinterpret_cast<const uintptr_t*>(tl + 4);
@@ -4936,6 +4940,9 @@ bool TakesLampEditPhys(uintptr_t tl, uintptr_t light, const char* kind, bool set
     } else if (const auto it = g_settle.find(light); it != g_settle.end()) {
         it->second.at = GetTickCount(); // (a drag's later steps: a lamp dragged into another room settles once the drag is over)
     }
+    // (S8) every edit: the rooms listing it and its own room take their ambient again now, a settle or not
+    for (const auto& [st, id] : o.ids) g_ambDue.emplace(std::make_tuple(tracker, st, id), kind);
+    if (o.reg > 0) g_ambDue.emplace(std::make_tuple(tracker, story, o.reg), kind);
     return true;
 }
 bool PhysCoversLamp(uintptr_t tracker, uintptr_t light) {
@@ -5059,13 +5066,77 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move
         if (std::find(s.rooms.begin(), s.rooms.end(), id) == s.rooms.end()) s.rooms.push_back(id);
     return true;
 }
-// The settle (light tree thread, after each room update): a lamp edit taken leaves its rooms' normalisation (+0x160), ambient
-// (+0x110, +0x650) and light list as their last solve set them; kSettleMs after the lamp's last edit taken its rooms are sent
+// (S8, light tree thread, after each room update) The ambient of the rooms of the lamp edits taken: with the GPU drawing the lamps,
+// a room's ambient (+0x110: what its walls and floors add by the light map's alpha, the furniture fill's hue, and the ceiling
+// pass's copy that the kept compose scales by it, gpu_room_lamps.cpp) is the only part of Rooms at Night left as the last solve
+// set it. The game's ambient step is run on each room now (UnlitRooms::RetakeAmbient: the lamps' share now plus the colour), so
+// switching the last lamp off or on and any lamp edit change the room's background on the next frame without a solve. The
+// settle still solves the switch and intensity edits' rooms for their normalisation (+0x160) and what stays in the kept base (a
+// stairwell's bounce and fill); a room whose list holds a light gone from the lot's registry (a deleted lamp: its solve comes)
+// is not run
+namespace {
+DWORD g_ambLogged = 0;
+void AmbientDue() {
+    if (g_ambDue.empty()) return;
+    LARGE_INTEGER q0{}, q1{};
+    QueryPerformanceCounter(&q0);
+    std::map<uintptr_t, std::vector<uintptr_t>> reg; // (lot) its registered lights, sorted
+    int ok = 0, normed = 0;
+    std::string why;
+    const char* kind = g_ambDue.begin()->second;
+    uintptr_t raw[1024];
+    for (const auto& [key, k] : g_ambDue) {
+        const auto [tracker, story, id] = key;
+        const auto left = [&](const char* w) {
+            if (why.size() < 400) why += std::format("; story {} room {}: {}", story, id, w);
+        };
+        auto [r, fresh] = reg.try_emplace(tracker);
+        if (fresh) {
+            std::vector<LevelLightShare::RegisteredLight> lights;
+            if (LevelLightShare::RegisteredLights(tracker, lights))
+                for (const LevelLightShare::RegisteredLight& l : lights) r->second.push_back(l.light);
+            std::sort(r->second.begin(), r->second.end());
+        }
+        BYTE* room = static_cast<BYTE*>(const_cast<void*>(LevelLightShare::RoomOf(tracker, story, id)));
+        const int n = room ? ReadList(room, raw, static_cast<int>(std::size(raw))) : -1;
+        if (n <= 0) {
+            left(room ? "an empty light list (no lamp on at its solve: the colour alone until the settle's solve gathers it)" : "gone");
+            continue;
+        }
+        if (!std::all_of(raw, raw + n, [&](uintptr_t l) { return std::binary_search(r->second.begin(), r->second.end(), l); })) {
+            left("its list holds a light gone from the lot's registry");
+            continue;
+        }
+        float norm = 0.0f, normNow = 0.0f;
+        const char* w = nullptr;
+        if (!UnlitRooms::RetakeAmbient(room, norm, w)) {
+            left(w);
+            continue;
+        }
+        ok++;
+        normed += CopyBytes(&normNow, room + 0x160, sizeof normNow) && std::fabs(norm - normNow) > 1e-5f * std::fabs(normNow) ? 1 : 0;
+    }
+    QueryPerformanceCounter(&q1);
+    LARGE_INTEGER f{};
+    QueryPerformanceFrequency(&f);
+    if ((!why.empty() || GetTickCount() - g_ambLogged >= 1000) && KeptLog()) { // (a drag's steps: once a second)
+        g_ambLogged = GetTickCount();
+        LOG_INFO(std::format("[GpuRoomLamps] physical {}: ambient taken again in {} of {} rooms in {:.2f} ms, no room solved{}{}", kind, ok, g_ambDue.size(),
+                             1000.0 * static_cast<double>(q1.QuadPart - q0.QuadPart) / static_cast<double>(f.QuadPart),
+                             normed ? std::format(" ({} with another normalisation from their solve)", normed) : std::string(), why));
+    }
+    g_ambDue.clear();
+}
+} // namespace
+// The settle (light tree thread, after each room update): a lamp edit taken leaves its rooms' normalisation (+0x160), light list
+// and what their kept base holds besides the lamps (a stairwell's bounce and fill) as their last solve set them (the ambient is
+// taken again at once: AmbientDue, unless refused there); kSettleMs after the lamp's last edit taken its rooms are sent
 // to their solve once with no urgency (LevelLightShare::QueueRoomId, as a GPU edit's tail sends: no edit hold, no player
 // edit), kept again as usual meanwhile drawn from their kept solve. Room 0s are not sent (Real-time outdoor lamps draws the
 // lamp there and solves no room 0 for its edits either)
 void SettleDue() {
     const DWORD now = GetTickCount();
+    AmbientDue();
     std::vector<const void*> requeue;
     {
         std::lock_guard<std::mutex> lk(g_requeueMx);
@@ -5182,6 +5253,7 @@ bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu:
         for (const KeptLamp& l : k.lamps)
             d.lamps.push_back(l.light), d.physMult.push_back(static_cast<float>(l.mult) * l.normK), d.physReach.push_back(l.reach), d.physHome.push_back(l.home);
         d.physBaked = k.baked, d.physNorm = k.norm, d.physOutdoor = k.outdoor;
+        if (k.roofed) std::memcpy(d.physAmb, k.amb, sizeof d.physAmb);
     }
     // a texel's compose point at (x, y) of its target (RtLampModel::KeptTexel's inputs)
     const auto texel = [&](uint32_t i, int x, int y) {

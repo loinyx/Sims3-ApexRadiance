@@ -227,13 +227,20 @@ void NoteBase(BYTE* room, const float* r, int slot, const float* ce, int which) 
     rec.has[which] = true;
     rec.discardOnQueue = false; // a fresh native result must survive an older queue acknowledgement
 }
+// (S8) the base a probe run of the ambient step added last on this thread (RetakeAmbient keeps it as the room's): slot, C
+thread_local int t_probeSlot = -1;
+thread_local float t_probeCe[4] = {};
 template <int Which> float* __fastcall BaseHook(BYTE* room, void*, float* out, const float* lamp, int pow) {
     float* r = reinterpret_cast<TopUp_t>(g_topUp)(room, out, lamp, pow);
     if (!g_patched || !g_on || !room || !r) return r;
     int slot = 0;
     float ce[4];
     if (!AddBase(room, r, slot, ce)) return r;
-    if (g_probe) return r; // only read (LevelLightShare's atrium targets): the room's fields are put back
+    if (g_probe) { // only read (LevelLightShare's atrium targets, RetakeAmbient): the room's fields are put back
+        t_probeSlot = slot;
+        std::memcpy(t_probeCe, ce, sizeof t_probeCe);
+        return r;
+    }
     g_baseAdded.fetch_add(1, std::memory_order_relaxed);
     // 07/10, players' Runtime Error: the note allocates (its map) inside the game's solve: caught, then off (HookGuard)
     HookGuard::Run("UnlitRooms base note", [&] { NoteBase(room, r, slot, ce, Which); });
@@ -700,6 +707,56 @@ void SetDrawDark(bool dark) { g_drawDark = dark; }
 void RigsAgainIn(unsigned ms) { g_rigAgainAt = (GetTickCount() + ms) | 1; }
 bool RigRefreshPending() { return g_rigAgainAt != 0; }
 void SetAmbientProbe(bool on) { g_probe = on; }
+// (S8) A lit room's ambient taken again after a lamp edit taken without its solve (physical indoor lamps): the game's ambient
+// step run on it now (LevelLightShare::ProbeRoomAmbient, Rooms at Night's base added) gives +0x110 and +0x120 as the room's
+// next solve would, its normalisation aside (+0x160 stays until that solve). Only while the room holds what BaseHook (or
+// MoveBase) gave it: an atrium member's merged colour or a stairwell's share written after the solve is left to the solve.
+// The room's base record takes the new values, so MoveBase keeps moving it with the sliders.
+namespace {
+bool ReadPair(const BYTE* room, float (*cur)[4], int& state) {
+    __try {
+        std::memcpy(cur[0], room + 0x110, 16), std::memcpy(cur[1], room + 0x120, 16);
+        state = *reinterpret_cast<const int*>(room + 0xF0);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool WritePair(BYTE* room, const float* own, const float* second) {
+    __try {
+        std::memcpy(room + 0x110, own, 16), std::memcpy(room + 0x120, second, 16);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+} // namespace
+bool RetakeAmbient(unsigned char* room, float& norm, const char*& why) {
+    if (!g_patched || !g_on || !g_baseReady) return why = "Rooms at Night is off (its solve gives the game's top-up)", false;
+    // (held through the probe: MoveBase on the render thread neither sees the step's temporary values nor is undone by them)
+    std::lock_guard<std::mutex> lk(g_baseMx);
+    const auto it = g_baseRooms.find(reinterpret_cast<uintptr_t>(room));
+    uintptr_t mgr = 0;
+    int id = 0, state = 0;
+    float cur[2][4];
+    if (it == g_baseRooms.end() || !RoomKey(room, mgr, id) || it->second.mgr != mgr || it->second.id != id || !it->second.has[0] || !it->second.has[1])
+        return why = "no base noted at its solve", false;
+    BaseRec& rec = it->second;
+    if (rec.discardOnQueue) return why = "sent to its solve by Rooms at Night", false;
+    if (!ReadPair(room, cur, state)) return why = "not read", false;
+    if (RoomAmbientPolicy::SolverOwnsAmbient(state)) return why = "being solved", false;
+    if (!Near(cur[0], rec.res[0], 1e-5f) || !Near(cur[1], rec.res[1], 1e-5f))
+        return why = "its ambient is not the one its solve gave it (an atrium's colour or a stairwell's share)", false;
+    float own[4], second[4];
+    t_probeSlot = -1;
+    if (!LevelLightShare::ProbeRoomAmbient(room, own, second, norm)) return why = "the game's ambient step could not run on it", false;
+    if (t_probeSlot < 0) return why = "the game's ambient step added no base", false;
+    if (!WritePair(room, own, second)) return why = "not written", false;
+    std::memcpy(rec.res[0], own, sizeof own), std::memcpy(rec.res[1], second, sizeof second);
+    std::memcpy(rec.ce, t_probeCe, sizeof t_probeCe);
+    rec.slot = t_probeSlot;
+    return true;
+}
 // The directions of the three [NoLight] lights (normalised CustomLightRigging.ini directions; PS c0 / c3 / c2 of every
 // captured unlit room-mode furniture draw, 088-093)
 constexpr float kNoLightDir[3][3] = {{0.09535f, 0.95346f, 0.28604f}, {0.0f, 0.70711f, -0.70711f}, {-0.66667f, -0.33333f, -0.66667f}};

@@ -2138,6 +2138,97 @@ bool KeptGpuCheck() {
     return true;
 }
 
+// (S8) The kept compose with the room's ambient now (ComposeKeptPS gAmb, RtLampModel::AmbScale): roofed texels whose pass adds
+// the ambient and texels whose pass does not, composed with no scale, with a scale of exactly 1 (an unchanged ambient: the same
+// texels byte for byte) and with a moved ambient, against the CPU's KeptTexel with the same scale
+bool KeptAmbientCheck() {
+    std::printf("\n[GPU room lamps] the kept compose with the room's ambient now (Rooms at Night without a solve)\n");
+    std::mt19937 rng(4242);
+    std::uniform_real_distribution<float> U(0.0f, 1.0f);
+    const int w = 64, h = 64;
+    const float k = 0.62f, floorA = 5.0f / 255.0f;
+    RtLampGpu::KeptMapData d;
+    d.w = w, d.h = h, d.accW = w, d.accH = h;
+    const float solve[3] = {0.06f, 0.07f, 0.11f}, moved[3] = {0.021f, 0.03f, 0.19f};
+    float unit[3], scale[3];
+    RtLampModel::AmbScale(solve, solve, unit);
+    RtLampModel::AmbScale(solve, moved, scale);
+    std::vector<uint32_t> cpu(static_cast<size_t>(w) * h), cpuMoved(cpu.size());
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            float base[3], S[3], p[4], xs[3], c[3], o[4];
+            for (int q = 0; q < 3; q++) base[q] = 0.6f * U(rng) * U(rng), S[q] = base[q];
+            const float norm = 0.6f + U(rng), dither = (y % 4 == 3) ? 0.0f : RoomMapDither::Offset(x, y) / 255.0f;
+            for (int q = 0; q < 3; q++) xs[q] = norm * S[q];
+            GpuLampLaw::Tone(xs, c);
+            const float a = (0.6f + 0.4f * U(rng)) * GpuLampLaw::Weight(c, k);
+            const bool pass = (x + y) % 2 == 0; // (a ceiling pass adds the ambient; the wall and floor passes do not)
+            for (int q = 0; q < 3; q++) p[q] = c[q] + (pass ? a * solve[q] : 0.0f);
+            p[3] = a;
+            RtLampModel::KeptTexel(base, S, p, norm, k, true, floorA, dither, o, unit);
+            cpu[static_cast<size_t>(y) * w + x] = OutdoorDeltaModel::PackModel(o);
+            RtLampModel::KeptTexel(base, S, p, norm, k, true, floorA, dither, o, scale);
+            cpuMoved[static_cast<size_t>(y) * w + x] = OutdoorDeltaModel::PackModel(o);
+            RtLampGpu::TexelVertex v{};
+            v.x = static_cast<float>(x), v.y = static_cast<float>(y), v.w = 1.0f;
+            for (int q = 0; q < 3; q++) v.p[q] = base[q];
+            v.p[3] = dither;
+            float rampAmb[3] = {}, ramp = 0.0f;
+            if (!GpuLampLaw::IndoorSplit(xs, p, k, rampAmb, ramp)) rampAmb[0] = rampAmb[1] = rampAmb[2] = ramp = 0.0f;
+            for (int q = 0; q < 3; q++) v.n[q] = rampAmb[q];
+            v.n[3] = ramp;
+            v.base[0] = norm, v.base[1] = k, v.base[2] = floorA, v.base[3] = 1.0f;
+            v.mask[0] = static_cast<float>(x), v.mask[1] = static_cast<float>(y);
+            d.texels.push_back(v);
+        }
+    RtLampGpu::Engine eng(RtLampGpu::PlainCalls());
+    std::string err;
+    RtLampProxy::Mesh empty;
+    if (!eng.Init(g_dev, g_shaders, 64, err) || !eng.SetProxy(g_dev, empty, err)) {
+        Check(false, "kept ambient engine: " + err);
+        return false;
+    }
+    std::vector<uint32_t> gamePx(cpu.size(), 0);
+    IDirect3DTexture9 *game = nullptr, *out = nullptr;
+    RtLampGpu::Engine::MakePreblur(g_dev, w, h, gamePx.data(), &game);
+    g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &out, nullptr);
+    RtLampGpu::KeptMapGpu g;
+    bool ok = game && out && RtLampGpu::Engine::UploadKept(g_dev, d, g);
+    std::vector<uint32_t> got[3];
+    const float* scales[3] = {nullptr, unit, scale};
+    for (int run = 0; run < 3 && ok; run++) {
+        g_dev->BeginScene();
+        if (eng.Begin(g_dev)) {
+            ok = eng.RelightKept(g_dev, g, nullptr, nullptr, 0.0f, game, out, w, h, err, scales[run]);
+            eng.End(g_dev);
+        } else
+            ok = false;
+        g_dev->EndScene();
+        ok = ok && RtLampGpu::Engine::ReadTexture(g_dev, out, w, h, got[run]);
+    }
+    g.Release();
+    if (game) game->Release();
+    if (out) out->Release();
+    Check(ok, "kept ambient relight on the GPU: " + err);
+    if (!ok) return false;
+    long same = 0, within = 0, maxD = 0, movedWithin = 0, movedMax = 0, changed = 0;
+    for (size_t i = 0; i < cpu.size(); i++) {
+        same += got[0][i] == got[1][i];
+        const int d0 = OutdoorDeltaModel::MaxLevelDiff(cpu[i], got[1][i]), d1 = OutdoorDeltaModel::MaxLevelDiff(cpuMoved[i], got[2][i]);
+        within += d0 <= 1, maxD = std::max<long>(maxD, d0);
+        movedWithin += d1 <= 1, movedMax = std::max<long>(movedMax, d1);
+        changed += got[2][i] != got[1][i];
+    }
+    const long n = static_cast<long>(cpu.size());
+    std::printf("  %ld texels: scale 1 = no scale byte for byte %ld; vs the CPU %ld within 1/255 (largest %ld); a moved ambient: %ld changed, %ld within 1/255 of the "
+                "CPU (largest %ld)\n",
+                n, same, within, maxD, changed, movedWithin, movedMax);
+    Check(same == n, "kept ambient: an unchanged ambient (scale exactly 1) composes byte for byte as without one");
+    Check(within >= static_cast<long>(0.999 * n) && maxD <= 2, "kept ambient: the GPU's texels within 1/255 of the CPU's (99.9%), none past 2/255");
+    Check(changed > 0 && movedWithin >= static_cast<long>(0.999 * n) && movedMax <= 2, "kept ambient: a moved ambient follows the CPU within 1/255 (99.9%)");
+    return true;
+}
+
 // ---------------------------------------------------------------- 6. GPU room lamps: room 0's kept lamps (AddKeptParts)
 // Room-0 texels relit by Real-time outdoor lamps' passes with no lamp of its own (Accumulate with none), the kept parts of
 // lamps it does not draw added to the sum (AddKeptParts: one with a GPU law, one with its colour alone), then ComposePS, against
@@ -3245,6 +3336,7 @@ int main(int argc, char** argv) {
     SplitCheck();
     RoomLampsCheck();
     KeptGpuCheck();
+    KeptAmbientCheck();
     Room0KeptCheck();
     Room0KeptXCheck();
     MaskAllAfterKeptCheck();

@@ -285,13 +285,25 @@ lamp's position, not on its colour or intensity.
    235 lamps listed by 77 rooms with records, 231 lie outside every record's sphere; the other 4 stand on or beside furniture).
    A new lamp is found in the story's registry (UNVERIFIED that it is there when its object's occluder updates: the
    `LampMarkFilter` status counts it). `outdoor_delta_test` 90 checks.
+25. Physical model, S8 (02/11): Rooms at Night without a solve. The kept compose scales a roofed texel's ramp x ambient (the
+   ceiling pass's `+0x650`, read back by `IndoorSplit`) by the room's `+0x110` now over its solve's (`RtLampModel::AmbScale`,
+   `ComposeKeptPS` `gAmb`, c108): exactly 1 while the ambient is unchanged, so the texel is the one before (byte for byte), and
+   only maps holding such texels follow it. After every physical edit taken, the rooms listing the lamp and its own room run the
+   game's ambient step again on the light tree thread (`AmbientDue` -> `UnlitRooms::RetakeAmbient` ->
+   `LevelLightShare::ProbeRoomAmbient`: the lamps' share now plus Rooms at Night's colour), written to `+0x110` / `+0x120` and
+   to the room's base record (so `MoveBase` keeps moving it with the sliders). Walls, floors and the furniture fill read
+   `+0x110` live; the ceilings follow through the compose. Not run: Rooms at Night off, an atrium member or a room with a
+   stairwell's share (its ambient is not the one its solve gave it), a room being solved, a list holding a deleted lamp, an empty list (a lamp switched on in a room
+   whose solve had none on: the colour alone until the settle's solve gathers it). The settle stays for the normalisation (`+0x160`) and what the base holds (a stairwell's bounce and fill). Log `physical <kind>:
+   ambient taken again in N of M rooms in X ms, no room solved (K with another normalisation from their solve); story S room
+   R: why` (once a second during a drag). `outdoor_delta_test` 93 checks, `rt_lamps_test` 73.
 
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Keep indoor lamps for GPU | `gpuRoomLampsCapture` | bool | off | | Developer only, with Lamp lighting: Instant. Keeps each room solve of the active lot and draws its lamps on the GPU; colour, intensity and switch edits of lamps drawn in every room listing them solve no room at once (the directional maps objects read are written again at the end of the room update) (their rooms are solved 2 s after the last edit); with the probe on, logs the self-checks |
-| Indoor lamp model | `roomLampModel` | enum | replica | replica, physical | Developer only, shown with Keep indoor lamps for GPU on. Replica: everything above. Physical: see 16 to 23; rooms > 0 and room 0 drawn from the lot lamps' laws by reach; value, switch and move edits and new lamps solve no room (a switch, an intensity change, a move into another room or a new lamp settles its rooms 2 s later; a move into room 0 and a deleted lamp take the game's solves). A change drops the kept rooms and sends the active lot's rooms to their solve |
+| Indoor lamp model | `roomLampModel` | enum | replica | replica, physical | Developer only, shown with Keep indoor lamps for GPU on. Replica: everything above. Physical: see 16 to 25; rooms > 0 and room 0 drawn from the lot lamps' laws by reach; value, switch and move edits and new lamps solve no room (a switch, an intensity change, a move into another room or a new lamp settles its rooms 2 s later; a move into room 0 and a deleted lamp take the game's solves). A change drops the kept rooms and sends the active lot's rooms to their solve |
 
 ## Limitations
 
@@ -326,7 +338,8 @@ lamp's position, not on its colour or intensity.
   and shaded lamps whose shade the GPU law does not describe have no law here: they stay in the bases (UNVERIFIED which of
   them the user's lots hold).
 - Until the settle's solve (2 s after the lamp's last edit taken, then the solve's own time) a room keeps the normalisation
-  and ambient of its last solve: a room whose only lamp is switched off shows the lit room's ambient for that long. A switch
+  of its last solve (physical: its ambient is taken again at the edit, see 25; replica: also its ambient, so a room whose only
+  lamp is switched off shows the lit room's ambient for that long). A switch
   on after the settle's solves is drawn from parts carried from the room's earlier kept solve, with the normalisation and
   ambient of the solve without the lamp until its own settle; it takes the room solves when a room was not kept again on the
   light tree thread, its layout or geometry changed, or the lamp moved. Room 0 carries nothing: a room 0 solved again while

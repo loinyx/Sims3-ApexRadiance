@@ -70,6 +70,8 @@ struct Entry {
     PhysLampPick::Box box;
     uint64_t physSig = 0;
     std::vector<uintptr_t> editHits;
+    // (S8) a roofed room's ambient (+0x110) at its solve's end and the compose's scale of it now (RtLampModel::AmbScale)
+    float ambSolve[3] = {}, ambScale[3] = {1.0f, 1.0f, 1.0f};
 };
 // (physical indoor lamps) the kept shadow atlas: a tile per lamp, kept while the lamp stays put and the occluders are the same.
 // Its rows grow with the most lamps a map has drawn (4 at a time, up to kTiles: 6 x 256 x 256 x (G16R16F + D24X8) = 3.1 MB a
@@ -107,6 +109,15 @@ std::vector<OutdoorDelta::KeptRef> g_refs;
 size_t g_bytes = 0;
 std::atomic<int> g_lines{0};
 bool LogAllowed() { return g_lines.fetch_add(1, std::memory_order_relaxed) < 2000; }
+// (S8) a room's ambient now (+0x110, which Rooms at Night moves and a lamp edit taken takes again: OutdoorDelta's AmbientDue)
+bool ReadAmbient(const void* room, float* c) {
+    __try {
+        std::memcpy(c, static_cast<const BYTE*>(room) + 0x110, 3 * sizeof(float));
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 
 // The kept solves drawn: room -> (its version, the maps drawn with it); read by the light tree thread (Drawn)
 std::mutex g_drawnMx;
@@ -321,6 +332,12 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                     if (e.physical) { // (stage 4: the lamps drawn are picked each round, below)
                         e.listed = std::move(e.lamps), e.listedMult = std::move(e.physMult), e.listedReach = std::move(e.physReach);
                         e.listedHome = std::move(d.physHome), e.baked = std::move(d.physBaked), e.norm = d.physNorm, e.outdoorRoom = d.physOutdoor;
+                        // (S8: only a map with texels of a pass that adds the ambient, the ceilings', follows it: the others are not
+                        // relit while a slider moves)
+                        const auto ambOf = [](const std::vector<RtLampGpu::TexelVertex>& v) {
+                            return std::any_of(v.begin(), v.end(), [](const RtLampGpu::TexelVertex& t) { return t.base[3] > 0.5f && t.n[0] + t.n[1] + t.n[2] > 0.0f; });
+                        };
+                        if (ambOf(d.texels) || ambOf(d.wallTexels) || ambOf(d.copies)) std::memcpy(e.ambSolve, d.physAmb, sizeof e.ambSolve);
                         std::memcpy(e.box.lo, d.physBox, sizeof e.box.lo), std::memcpy(e.box.hi, d.physBox + 3, sizeof e.box.hi);
                         e.lamps.clear();
                     }
@@ -383,6 +400,10 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                         e.editHits.push_back(pe.light);
             }
             Mix(sig, &es, sizeof es);
+            // (S8) the ceiling pass's ambient follows the room's now: Rooms at Night's sliders and the lamp edits taken, no solve
+            float now[3];
+            if (ReadAmbient(r.room, now)) RtLampModel::AmbScale(e.ambSolve, now, e.ambScale);
+            Mix(sig, e.ambScale, sizeof e.ambScale);
             continue;
         }
         // a lamp moved since its parts were kept (their shares follow its place): drawn with the law its parts were kept with (the
@@ -449,7 +470,7 @@ bool RelightPhys(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, Entry& e, const 
         room[0].header = e.blkHeader;
         for (int i = 0; i < gn; i++) room[0].lamp.push_back({lamps[g0 + i].mult, reach[g0 + i], 0.0f});
         return eng.RelightKeptPhys(dev, e.gpu, lamps.data() + g0, tiles, reinterpret_cast<const float (*)[3]>(world.data() + g0), gn, room, p, game, out, w, h, err, g0 == 0,
-                                   last);
+                                   last, e.ambScale);
     });
 }
 } // namespace

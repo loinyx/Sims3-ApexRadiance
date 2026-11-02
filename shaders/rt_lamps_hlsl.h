@@ -518,10 +518,12 @@ R"RAW(// ---------------------------------------------------------------- GPU ro
 //               lamp's colour alone (gCol[0], a TubeLight without a segment; KeptLaw). p = (sample position, bits: 1 the early-out, 4 the soft light cut ran), n = (sample normal, mult), base = (A, B, thrScale, 0): mult x fade(law x A) x B
 // ComposeKeptPS one point per kept texel at its place in the map (or in the wall layout): KeptTexel on base + the sum, packed
 //               as the game's pack. p = (base rgb, dither), n = (ramp x ambient rgb, ramp; a roofless texel: its alpha),
-//               base = (norm, k, the alpha floor, roofed 0/1), mask.xy = its place in the sum's layout (gD.zw: 1 / its size)
+//               base = (norm, k, the alpha floor, roofed 0/1), mask.xy = its place in the sum's layout (gD.zw: 1 / its size);
+//               gAmb.rgb scales the ramp x ambient (RtLampModel::AmbScale: the room's ambient now over its solve's; 1 replica)
 // CopyAtPS      one point per place: sSrc's texel at mask.xy (gM.xy: 1 / sSrc's size)
 // BlockKeptPS   a blurred wall block from the layout into the map: tc0 = the layout pixel, tc1 = (its first and last rows in the
 //               layout, rows beyond above 0/1, below 0/1): an edge row with nothing beyond it from the rows-only chain (sSrc2)
+float4 gAmb : register(c108);
 float4 AccKeptPS(TexelIn i) : COLOR0 {
     const float3 law = KeptLaw(i.p.xyz, i.n.xyz);
     float3 c = law * i.base.x;
@@ -543,7 +545,7 @@ float4 ComposeKeptPS(TexelIn i) : COLOR0 {
     if (i.base.w > 0.5) {
         const float3 t = ToneRlg(i.base.x * max(R, 0.0));
         const float w = 1.0 - Sat(i.base.y * ((t.b + t.g) + t.r));
-        const float3 rgb = t + w * i.n.rgb;
+        const float3 rgb = t + w * (i.n.rgb * gAmb.rgb);
         const float a = w * i.n.w;
         c = float4(saturate(Fin(rgb.r)), saturate(Fin(rgb.g)), saturate(Fin(rgb.b)), saturate(Fin(a)));
         if (c.a < i.base.z) c.a = i.base.z;

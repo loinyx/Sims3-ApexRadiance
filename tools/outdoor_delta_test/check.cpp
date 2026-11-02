@@ -1582,6 +1582,39 @@ int main() {
         Check(same == n, "kept tail: the solve's own sum packs back to the game's texel within 1/255");
         Check(unsplit > 0 && unsplitOk == unsplit, "kept tail: a texel of weight 0 (no ramp read back) packs back too");
         Check(editedOk == edited, "kept tail: an edited sum takes the game's tail with the ramp and ambient read back");
+        // (S8) the pass's ambient scaled by the room's ambient now over its solve's (AmbScale): unchanged, the compose is the one
+        // without a scale bit for bit (so the game's texel as above); changed (Rooms at Night's sliders, a lamp edit's ambient
+        // taken again), the game's tail with the new ambient within 1/255
+        long ambSame = 0, ambExact = 0, ambMoved = 0, ambMovedOk = 0, ambN = 20000;
+        for (long t = 0; t < ambN; t++) {
+            float S[3], amb[3], now[3], scale[3], p[4], q[4], c0[4], c1[4];
+            const float sc = U2(rng2) < 0.2f ? 4.0f : 0.6f;
+            for (int i = 0; i < 3; i++) S[i] = sc * U2(rng2) * U2(rng2), amb[i] = 0.01f + 0.3f * U2(rng2);
+            const float norm = 0.5f + U2(rng2), ramp = 0.6f + 0.4f * U2(rng2), d = RoomMapDither::Offset(t % 97, t % 89) / 255.0f;
+            const bool addAmb = (t & 1) != 0;
+            const uint32_t g = game(S, norm, ramp, amb, addAmb, d, p);
+            std::memcpy(now, amb, sizeof now);
+            RtLampModel::AmbScale(amb, now, scale);
+            RtLampModel::KeptTexel(S, S, p, norm, k, true, floorA, d, c0);
+            RtLampModel::KeptTexel(S, S, p, norm, k, true, floorA, d, c1, scale);
+            ambSame += std::memcmp(c0, c1, sizeof c0) == 0 && scale[0] == 1.0f && scale[1] == 1.0f && scale[2] == 1.0f;
+            ambExact += PackModel(c1) == g;
+            for (int i = 0; i < 3; i++) now[i] = amb[i] * (0.2f + 2.3f * U2(rng2));
+            RtLampModel::AmbScale(amb, now, scale);
+            const uint32_t gn = game(S, norm, ramp, now, addAmb, d, q);
+            if (!RtLampModel::KeptTexel(S, S, p, norm, k, true, floorA, d, c1, scale)) continue;
+            ambMoved++;
+            ambMovedOk += MaxLevelDiff(PackModel(c1), gn) <= 1;
+        }
+        const float zero3[3] = {}, one3[3] = {0.2f, 0.2f, 0.2f};
+        float sc0[3];
+        RtLampModel::AmbScale(zero3, one3, sc0);
+        std::printf("  ambient now (S8): %ld of %ld texels composed bit for bit as without it (%ld the game's byte for byte), %ld of %ld within 1/255 of the game's "
+                    "tail with a moved ambient\n",
+                    ambSame, ambN, ambExact, ambMovedOk, ambMoved);
+        Check(ambSame == ambN, "kept tail: an unchanged ambient composes bit for bit as before (scale exactly 1)");
+        Check(ambMoved > 0 && ambMovedOk == ambMoved, "kept tail: a moved ambient gives the game's tail with it within 1/255");
+        Check(sc0[0] == 1.0f && sc0[1] == 1.0f && sc0[2] == 1.0f, "kept tail: a solve's ambient of 0 keeps the scale 1");
         // the alpha floor and a dark roofed texel
         const float zero[3] = {}, pz[4] = {0.0f, 0.0f, 0.0f, 0.001f};
         float c[4];

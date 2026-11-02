@@ -42,6 +42,10 @@ bool IsDarkRoomLight(const float* colour, const float* dir);
 // Light tree thread: on while LevelLightShare runs the game's ambient step on a room only to read its result (the room's
 // fields are put back after): the base is added as usual, but not remembered as what the room holds
 void SetAmbientProbe(bool on);
+// Light tree thread (physical indoor lamps, S8): a lit indoor room's ambient (+0x110, +0x120) taken again from its lamps now by
+// the game's ambient step with Rooms at Night's base, without a solve; norm: the normalisation that step gives (the room keeps
+// its own until its solve). False (why): left as its solve set it
+bool RetakeAmbient(unsigned char* room, float& norm, const char*& why);
 std::string Status();
 std::string SettingsText(); // development tools (F6): the sliders now and what they give furniture
 }

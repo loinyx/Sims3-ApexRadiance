@@ -1181,7 +1181,7 @@ bool Engine::KeptReady(IDirect3DDevice9* dev, const KeptMapGpu& k, int w, int h,
     return true;
 }
 bool Engine::RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLampLaw::Lamp* laws, const char* lawOk, float thr, IDirect3DBaseTexture9* game,
-                         IDirect3DTexture9* out, int w, int h, std::string& err) {
+                         IDirect3DTexture9* out, int w, int h, std::string& err, const float* amb) {
     if (!out) return err = "nothing to relight", false;
     if (!KeptReady(dev, k, w, h, err)) return false;
     if (blendOk_ < 0) blendOk_ = FloatBlend(dev) ? 1 : 0;
@@ -1193,11 +1193,11 @@ bool Engine::RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLa
     dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 1.0f, 0);
     if (k.parts && !DrawKeptParts(dev, k.parts, k.ranges, laws, lawOk, thr, k.accW, k.accH)) return err = "the sum's draw failed", false;
     accCur_ = 0;
-    return ComposeKept(dev, k, game, out, w, h, err);
+    return ComposeKept(dev, k, game, out, w, h, err, amb);
 }
 bool Engine::RelightKeptPhys(IDirect3DDevice9* dev, const KeptMapGpu& k, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,
                              const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err,
-                             bool first, bool compose) {
+                             bool first, bool compose, const float* amb) {
     if (!out) return err = "nothing to relight", false;
     if (!ps_[kAccPhysPs] || !ps_[kAccPhysFastPs] || !ps_[kT3dPs]) return err = "the physical shaders are missing (not in the shader cache, no compiler)", false;
     if (!KeptReady(dev, k, w, h, err)) return false;
@@ -1207,7 +1207,7 @@ bool Engine::RelightKeptPhys(IDirect3DDevice9* dev, const KeptMapGpu& k, const R
     Map m;
     m.w = k.accW, m.h = k.accH, m.vb = k.phys, m.count = k.nPhys;
     if (!PhysSum(dev, m, lamps, tiles, world, n, rooms, p, first, err, false)) return false;
-    return !compose || ComposeKept(dev, k, game, out, w, h, err);
+    return !compose || ComposeKept(dev, k, game, out, w, h, err, amb);
 }
 // The lamps at m's phys points, kPhysBatch a draw (the room table's lamp columns are the batch's lamps; x: AccPhysXPS too)
 bool Engine::PhysSum(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,
@@ -1258,7 +1258,7 @@ bool Engine::AccumulatePhys(IDirect3DDevice9* dev, const Map& m, const RtLampMod
     return PhysSum(dev, m, lamps, tiles, world, n, std::vector<PhysRoom>{room}, p, first, err, true);
 }
 // Steps 2 to 4 of RelightKept over the current sum
-bool Engine::ComposeKept(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err) {
+bool Engine::ComposeKept(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err, const float* amb) {
     c_.SetDepthStencil(dev, nullptr);
     PassStates(dev);
     PointSampler(dev, 0);
@@ -1284,6 +1284,8 @@ bool Engine::ComposeKept(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DBa
     // 2. the texels into the map
     const float d99[4] = {0, 0, 1.0f / static_cast<float>(scratchW_), 1.0f / static_cast<float>(scratchH_)};
     c_.SetPsConst(dev, 99, d99, 1);
+    const float g108[4] = {amb ? amb[0] : 1.0f, amb ? amb[1] : 1.0f, amb ? amb[2] : 1.0f, 0.0f};
+    c_.SetPsConst(dev, 108, g108, 1);
     if (k.texels) {
         if (!Target(dev, out, w, h)) return fail("the relit map could not be targeted");
         c_.SetTexture(dev, 1, sum);

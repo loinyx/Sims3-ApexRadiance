@@ -354,6 +354,10 @@ int ForEachRoom(bool (*visit)(unsigned char* room, void* ctx), void* ctx, int* q
 // Stage original room colours, then refresh connected groups after the complete traversal.
 bool StageAmbientBaseChange(unsigned char* room, const float* oldOwn, const float* newOwn, const float* oldSecond, const float* newSecond);
 bool HoldsAmbientBase(unsigned char* room, const float* own, const float* second);
+// Light tree thread (physical indoor lamps, S8): the game's ambient step (FUN_006a0f50, with Rooms at Night's base) run again on
+// an indoor room with lamps at its own threshold, its fields put back: the colours it gives +0x110 (own) and +0x120 (second),
+// 4 floats each, and the normalisation it computes. False: an outdoor room, no lamps listed, or not read
+bool ProbeRoomAmbient(unsigned char* room, float* own, float* second, float& norm);
 bool StageUnlitAmbientChange(unsigned char* room, const float* target, bool& changed);
 void ApplyAmbientBaseChanges();
 // Development build: the solve journal's notes since fromTick (GetTickCount), with their ticks (the recorder)

@@ -179,6 +179,12 @@ N, moved at once N)*.
 - Disabling the option keeps a base record until its restoring solve can be requested; recovery runs while disabled if
   work remains.
 - Status: *changes applied N, rooms given the new colour at once N, rooms topped up from their lamps solved again N*.
+- Physical indoor lamps (developer, [gpu-room-lamps.md](gpu-room-lamps.md) 25): after a lamp edit taken without a solve,
+  the lit rooms of the edit run the game's ambient step again on the light tree thread (`RetakeAmbient`: in probe mode, the
+  base added by `BaseHook`, the fields put back and the new `+0x110` / `+0x120` written with the room's base record), so
+  switching the last lamp off or on changes the background at once; the GPU's kept ceilings scale their ambient by the
+  room's `+0x110` now, so the sliders reach them without a solve too. Rooms whose ambient another step changed after the
+  solve (an atrium, a stairwell's share) wait for the settle's solve.
 
 ### Furniture
 

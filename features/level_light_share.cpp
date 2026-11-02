@@ -2100,8 +2100,9 @@ float TopThreshold() {
 enum class AmbientRerun : BYTE { None, Probe, Requote };
 thread_local AmbientRerun t_ambientRerun = AmbientRerun::None;
 // The game's ambient step on a room at the threshold thr (<= 0: the room's own), its fields put back; false when the room
-// has no light (the game's constant colour: its own solve gives it), is outdoor or could not be read
-bool ProbeAmbient(BYTE* room, float thr, RoomAmbient& a) {
+// has no light (the game's constant colour: its own solve gives it), is outdoor or could not be read. second (optional): the
+// +0x120 colour it gives
+bool ProbeAmbient(BYTE* room, float thr, RoomAmbient& a, float* second = nullptr) {
     alignas(16) BYTE saved[0x40];
     float norm = 0.0f, ownThr = 0.0f;
     bool taken = false, ok = false;
@@ -2119,6 +2120,7 @@ bool ProbeAmbient(BYTE* room, float thr, RoomAmbient& a) {
             if (thr > 0.0f) *reinterpret_cast<float*>(room + 0x63C) = thr;
             reinterpret_cast<void(__fastcall*)(void*)>(kRoomAmbientFn)(room);
             std::memcpy(a.c4, room + 0x110, sizeof a.c4);
+            if (second) std::memcpy(second, room + 0x120, 4 * sizeof(float));
             a.norm = *reinterpret_cast<const float*>(room + 0x160);
             a.base = *reinterpret_cast<const float*>(mgr + 0x98); // what state 0 puts at +0x640 (FUN_006ab110)
             ok = true;
@@ -15258,6 +15260,15 @@ std::string EndSeamRecording(bool save) {
 bool StageAmbientBaseChange(unsigned char* room, const float* oldOwn, const float* newOwn, const float* oldSecond, const float* newSecond) {
     bool changed = false;
     return StageAmbient(room, oldOwn, newOwn, oldSecond, newSecond, changed);
+}
+bool ProbeRoomAmbient(unsigned char* room, float* own, float* second, float& norm) {
+    RoomAmbient a{};
+    if (!g_installed.load(std::memory_order_relaxed) || !kRoomAmbientFn || !room || !ProbeAmbient(room, -1.0f, a, second)) return false;
+    std::memcpy(own, a.c4, sizeof a.c4);
+    norm = a.norm;
+    for (int k = 0; k < 4; k++)
+        if (!ApexMath::IsFinite(second[k])) return false;
+    return true;
 }
 bool HoldsAmbientBase(unsigned char* room, const float* ownColour, const float* second) {
     uintptr_t mgr = 0; int level = 0, id = 0;

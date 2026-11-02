@@ -106,13 +106,18 @@ inline float ExitAlpha(float E) { return E > 0.0f && std::isfinite(E) ? std::min
 // ramp p gives back at S (IndoorSplit); false when it cannot (the weight 0 there: the ambient is left out). Roofless: the hue
 // kept and min 1 (PackInput) with p's alpha (the floor mask's or the exit light's, as the solve left it). Then min(., 1) as
 // the solve's minps, RoomMapDither's roofed alpha floor (alphaMin, 0: none) and dither (in colour units, 0: none).
-inline bool KeptTexel(const float R[3], const float S[3], const float p[4], float norm, float k, bool roofed, float alphaMin, float dither, float out[4]) {
+// ambScale (physical indoor lamps, S8; null: 1): the ramp x ambient read back times the room's ambient now over the one its solve
+// left (AmbScale), so a pass's ambient follows Rooms at Night without a solve; exactly 1 when the ambient is unchanged
+inline bool KeptTexel(const float R[3], const float S[3], const float p[4], float norm, float k, bool roofed, float alphaMin, float dither, float out[4],
+                      const float* ambScale = nullptr) {
     bool split = true;
     if (roofed) {
         float xs[3], x[3], rampAmb[3] = {}, ramp = 0.0f;
         for (int i = 0; i < 3; i++) xs[i] = norm * S[i], x[i] = norm * std::max(R[i], 0.0f);
         split = GpuLampLaw::IndoorSplit(xs, p, k, rampAmb, ramp);
         if (!split) rampAmb[0] = rampAmb[1] = rampAmb[2] = ramp = 0.0f;
+        if (ambScale)
+            for (int i = 0; i < 3; i++) rampAmb[i] *= ambScale[i];
         GpuLampLaw::IndoorTexel(x, rampAmb, ramp, k, out);
         for (int i = 0; i < 4; i++) out[i] = std::isfinite(out[i]) ? std::clamp(out[i], 0.0f, 1.0f) : 0.0f;
         if (out[3] < alphaMin) out[3] = alphaMin;
@@ -120,6 +125,16 @@ inline bool KeptTexel(const float R[3], const float S[3], const float p[4], floa
         OutdoorDeltaModel::PackInput(R, p[3], out);
     if (dither != 0.0f) OutdoorDeltaModel::Dither(out, dither);
     return split;
+}
+// (S8) KeptTexel's ambScale: the room's +0x110 now over the one at its solve's end, per channel (x / x is exactly 1). The ceiling
+// pass adds the sampler's copy (+0x650), equal to +0x110 at the solve's end. shortcut: a channel the solve left at 0 (or not
+// finite) keeps 1, since its ramp x ambient read back is 0 there; upgrade by keeping the ramp and a per-texel "the pass adds the
+// ambient" flag if a room with a 0 ambient channel ever needs it
+inline void AmbScale(const float solve[3], const float now[3], float out[3]) {
+    for (int i = 0; i < 3; i++) {
+        const float s = now[i] / solve[i];
+        out[i] = solve[i] > 1e-6f && std::isfinite(s) && s >= 0.0f ? s : 1.0f;
+    }
 }
 // What one GPU lamp adds to a texel at p (normal n) with shadow share vis: mult x fade(law x vis)
 inline void Add(const Lamp& L, const float p[3], const float n[3], float vis, bool reachOn, float thr, bool fade, float out[3]) {

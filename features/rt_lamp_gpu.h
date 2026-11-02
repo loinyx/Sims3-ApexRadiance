@@ -156,6 +156,7 @@ struct KeptMapData {
     float physNorm = 1.0f;
     bool physOutdoor = false;
     float physBox[6] = {1e30f, 1e30f, 1e30f, -1e30f, -1e30f, -1e30f};
+    float physAmb[3] = {}; // (S8) a roofed room's +0x110 at its solve's end (RtLampModel::AmbScale; 0: the ambient is not followed)
 };
 struct KeptMapGpu { // DEFAULT pool (made again after a device reset)
     int w = 0, h = 0, accW = 0, accH = 0, layoutW = 0, layoutH = 0;
@@ -256,8 +257,9 @@ class Engine {
     bool AddKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, const std::vector<std::pair<UINT, UINT>>& ranges, const GpuLampLaw::Lamp* laws,
                       const char* lawOk, float thr, int w, int h, std::string& err, bool extra = false);
     // out: w x h, the room's own map (at most the working map's size: its top-left corner; a blurred wall atlas exactly)
+    // amb (null: 1): ComposeKeptPS's gAmb, the scale of the ramp x ambient (RtLampModel::AmbScale; physical rooms only)
     bool RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLampLaw::Lamp* laws, const char* lawOk, float thr, IDirect3DBaseTexture9* game,
-                     IDirect3DTexture9* out, int w, int h, std::string& err);
+                     IDirect3DTexture9* out, int w, int h, std::string& err, const float* amb = nullptr);
     // Physical indoor lamps: RelightKept with the sum from the map's phys points instead of its parts: every lamp (lamps[i].law in
     // lot space, its shadow in tile tiles[i] of EnsureTiles, its 3D test from world[i]; .mult unused) in batches of kPhysBatch (AccumulateRlg phys), each texel taking
     // the row of its room slot: rooms[slot].header = its records in the blocker table (SetBlockers; < 0 none), rooms[slot].lamp[i]
@@ -269,7 +271,7 @@ class Engine {
     };
     bool RelightKeptPhys(IDirect3DDevice9* dev, const KeptMapGpu& k, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,
                          const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err,
-                         bool first = true, bool compose = true);
+                         bool first = true, bool compose = true, const float* amb = nullptr);
     // Physical indoor lamps over room 0 (Real-time outdoor lamps' map m, before its Accumulate, which then takes first = false):
     // the lamps added to the sum as RelightKeptPhys adds them (m's points as phys points: one per place of the map), and into the
     // second sum (cleared when first; AccPhysXPS) the floor mask's "all" and "vis" of masked texels and the exit lamps' light of
@@ -295,7 +297,7 @@ class Engine {
     void TexelTarget(IDirect3DDevice9* dev, int w, int h);
     void Blocks(IDirect3DDevice9* dev, const Map& m);
     bool KeptReady(IDirect3DDevice9* dev, const KeptMapGpu& k, int w, int h, std::string& err);
-    bool ComposeKept(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err);
+    bool ComposeKept(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err, const float* amb);
     bool PhysSum(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n, const std::vector<PhysRoom>& rooms,
                  const Params& p, bool first, std::string& err, bool x);
     bool DrawKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, const std::vector<std::pair<UINT, UINT>>& ranges, const GpuLampLaw::Lamp* laws,
