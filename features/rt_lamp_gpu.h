@@ -44,7 +44,7 @@ DeviceCalls PlainCalls(); // the device's own methods (the harness)
 // The shader objects (made by the caller: the game from its shader cache, the harness with D3DCompile)
 enum ShaderId {
     kShadowVs, kTexelVs, kShadowPs, kAccPs, kComposePs, kCopyPs, kBlurRowPs, kBlurColPs, kBlockPs, kAccFastPs, kAccRlgPs, kAccRlgFastPs, kComposeRlgPs,
-    kAccKeptPs, kComposeKeptPs, kCopyAtPs, kBlockKeptPs, kAccKept0Ps, kAccKept0XPs, kComposeK0Ps, kAccPhysPs, kAccPhysFastPs, kT3dPs, kShaderCount
+    kAccKeptPs, kComposeKeptPs, kCopyAtPs, kBlockKeptPs, kAccKept0Ps, kAccKept0XPs, kComposeK0Ps, kAccPhysPs, kAccPhysFastPs, kT3dPs, kAccPhysXPs, kShaderCount
 };
 const char* EntryOf(ShaderId id);
 bool IsVertex(ShaderId id);
@@ -83,6 +83,8 @@ struct Params {
     // Compose (GPU room lamps): room 0's kept lamps were added with their floor mask and exit parts (AddKeptParts, extra): ComposeK0PS
     // with the second sum (texels: mask.z = the exit lamps' light left in the base, mask.w = 1 an exit ground texel)
     bool keptX = false;
+    // (physical indoor lamps, room 0) with keptX: the second sum is AccumulatePhys's (its floor mask "all" / "vis" and exit light)
+    bool physX = false;
     int debugLamp = -1;        // >= 0: AccPS writes that lamp's shadow share (r) and law luminance (g), -1 when it adds nothing
 };
 
@@ -218,7 +220,7 @@ class Engine {
     // space, over the blocker table of SetBlockers), then AccPhysPS)
     static constexpr int kPhysBatch = 4;
     bool AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, int n, const Params& p, bool first, std::string& err,
-                       bool phys = false, const float (*t3From)[3] = nullptr);
+                       bool phys = false, const float (*t3From)[3] = nullptr, bool physX = false);
     // Physical indoor lamps: the receiving rooms' furniture blockers (rt_lamp_blockers.h) into a DEFAULT A32B32G32R32F texture
     // (written from a SYSTEMMEM copy) that AccPhysPS reads
     bool SetBlockers(IDirect3DDevice9* dev, const BlockerTable& t, std::string& err);
@@ -251,15 +253,23 @@ class Engine {
     // Physical indoor lamps: RelightKept with the sum from the map's phys points instead of its parts: every lamp (lamps[i].law in
     // lot space, its shadow in tile tiles[i] of EnsureTiles, its 3D test from world[i]; .mult unused) in batches of kPhysBatch (AccumulateRlg phys), each texel taking
     // the row of its room slot: rooms[slot].header = its records in the blocker table (SetBlockers; < 0 none), rooms[slot].lamp[i]
-    // = (mult, 0 not lit there; 1 the reach share applies). Then RelightKept's compose, blur, copies and restores. More lamps than
+    // = (mult, 0 not lit there; 1 the reach share applies; 1 an exit lamp: room 0's exit ground alpha, AccumulatePhys). Then RelightKept's compose, blur, copies and restores. More lamps than
     // the atlas holds go in several calls over the same k: first = false adds to the sum so far, compose = false stops after it
     struct PhysRoom {
         float header = -1.0f;
-        std::vector<std::array<float, 2>> lamp;
+        std::vector<std::array<float, 3>> lamp;
     };
     bool RelightKeptPhys(IDirect3DDevice9* dev, const KeptMapGpu& k, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,
                          const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err,
                          bool first = true, bool compose = true);
+    // Physical indoor lamps over room 0 (Real-time outdoor lamps' map m, before its Accumulate, which then takes first = false):
+    // the lamps added to the sum as RelightKeptPhys adds them (m's points as phys points: one per place of the map), and into the
+    // second sum (cleared when first; AccPhysXPS) the floor mask's "all" and "vis" of masked texels and the exit lamps' light of
+    // exit ground texels, which Compose with Params::keptX and physX reads. Several calls over one sum: first = false
+    bool AccumulatePhys(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n, const PhysRoom& room,
+                        const Params& p, bool first, std::string& err);
+    // Every physical shader was made (room 0's AccPhysXPS too)
+    bool PhysReady() const { return ps_[kAccPhysPs] && ps_[kAccPhysFastPs] && ps_[kT3dPs] && ps_[kAccPhysXPs]; }
 
     // The state of the device around a series of passes (render targets, depth, every state a state block holds)
     bool Begin(IDirect3DDevice9* dev); // false: no state block could be made, nothing was changed (End is not called)
@@ -278,6 +288,8 @@ class Engine {
     void Blocks(IDirect3DDevice9* dev, const Map& m);
     bool KeptReady(IDirect3DDevice9* dev, const KeptMapGpu& k, int w, int h, std::string& err);
     bool ComposeKept(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err);
+    bool PhysSum(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n, const std::vector<PhysRoom>& rooms,
+                 const Params& p, bool first, std::string& err, bool x);
     bool DrawKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, const std::vector<std::pair<UINT, UINT>>& ranges, const GpuLampLaw::Lamp* laws,
                        const char* lawOk, float thr, int w, int h, ShaderId ps = kAccKeptPs);
 
@@ -312,6 +324,8 @@ class Engine {
     int blkW_ = 0, blkH_ = 0;
     IDirect3DTexture9* t3_ = nullptr;         // a physical batch's 3D tests (DEFAULT A32B32G32R32F, the sums' size)
     int t3W_ = 0, t3H_ = 0;
+    IDirect3DTexture9* x_ = nullptr;          // room 0's physical second sum (DEFAULT A32B32G32R32F, the sums' size; AccumulatePhys)
+    int xW_ = 0, xH_ = 0;
     bool ReadSumOf(IDirect3DDevice9* dev, IDirect3DTexture9* t, int w, int h, std::vector<float>& out);
     int blendOk_ = -1; // the device adds into an A32B32G32R32F target (RelightKept; -1 not asked yet)
     bool ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, ShaderId ps, std::string& err,

@@ -17,12 +17,16 @@
 // Render thread only. Nothing runs while the option is off (Sig returns 0 and nothing is drawn).
 #include <d3d9.h>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
 namespace RtLampGpu {
 class Engine;
 struct Params;
+}
+namespace RtLampModel {
+struct Lamp;
 }
 
 namespace GpuRoomLamps {
@@ -37,6 +41,14 @@ void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
                  const RtLampGpu::Params& p);
 // A device reset or Real-time outdoor lamps dropping its maps: every GPU buffer goes (made again on use)
 void ReleaseAll();
+// (physical indoor lamps; render thread, between the engine's Begin and End) lamps[i] (lot space) of lights[i] in passes of the
+// kept shadow atlas's rows, which kept rooms and room 0 share: each pass gets its lamps' tiles (rendered unless the atlas holds
+// them, least recently used first) and last = the final pass. False (err: no occluders with open tops, too many lamps, a tile
+// not rendered): stopped there
+bool PhysPasses(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, const uintptr_t* lights, const RtLampModel::Lamp* lamps, int n, float farDist, std::string& err,
+                const std::function<bool(int first, int count, const int* tiles, bool last)>& pass);
+// (physical indoor lamps) how a story's room 0 was drawn this round (Real-time outdoor lamps), for the per-story line BeginFrame logs
+void NoteRoom0(int story, const std::string& how);
 // Render thread: Real-time outdoor lamps starts a relight round (the frame count the edit log gives per map kind)
 void BeginFrame();
 // Any thread (the light tree thread's lamp edits, OutdoorDelta::TakesLampEdit): that kept solve of the room (its version) was

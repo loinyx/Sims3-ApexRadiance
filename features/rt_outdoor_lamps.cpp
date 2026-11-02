@@ -125,8 +125,8 @@ const ShaderCache::Id kRtLampShaderIds[RtLampGpu::kShaderCount] = {
     AddRtLampShader(0), AddRtLampShader(1), AddRtLampShader(2), AddRtLampShader(3), AddRtLampShader(4), AddRtLampShader(5), AddRtLampShader(6),
     AddRtLampShader(7), AddRtLampShader(8), AddRtLampShader(9), AddRtLampShader(10), AddRtLampShader(11), AddRtLampShader(12), AddRtLampShader(13),
     AddRtLampShader(14), AddRtLampShader(15), AddRtLampShader(16), AddRtLampShader(17), AddRtLampShader(18), AddRtLampShader(19), AddRtLampShader(20),
-    AddRtLampShader(21), AddRtLampShader(22)};
-static_assert(RtLampGpu::kShaderCount == 23, "kRtLampShaderIds lists every RtLampGpu::ShaderId");
+    AddRtLampShader(21), AddRtLampShader(22), AddRtLampShader(23)};
+static_assert(RtLampGpu::kShaderCount == 24, "kRtLampShaderIds lists every RtLampGpu::ShaderId");
 void CompileAll() {
     for (int i = 0; i < RtLampGpu::kShaderCount; i++) {
         std::string err;
@@ -453,6 +453,17 @@ struct ExportBackoff {
     int fails = 0;
 };
 std::map<const void*, ExportBackoff> g_exportBackoff; // render thread: room -> the wait after its kept solve could not be read
+// (physical indoor lamps; render thread) room -> the kept solve whose physical draw failed (prepared again with its lamps in the
+// base), and the last reason its room 0 was not drawn physically (logged when it changes)
+std::map<const void*, uint32_t> g_physRefused;
+std::map<const void*, std::string> g_physNote;
+void PhysNote(const void* room, int story, const std::string& why) {
+    if (g_physNote.size() > 64) g_physNote.clear(), g_physRefused.clear(); // (rooms of lots long left)
+    std::string& was = g_physNote[room];
+    if (was == why) return;
+    was = why;
+    if (!why.empty()) LOG_INFO(std::format("[RtOutdoorLamps] Story {} room 0: its lot lamps stay in its base ({})", story, why));
+}
 std::atomic<uintptr_t> g_switchOn{0}; // a GPU lamp switched on (LampMarkFilter, light tree thread; the log on the render thread)
 
 // ---- the maps (render thread) ----
@@ -518,6 +529,19 @@ struct Slot {
     bool kX = false; // their floor mask or exit parts too (AddKeptParts extra, ComposeK0PS)
     uint64_t roomsRelit = 0; // GpuRoomLamps::Sig at its last relight
     std::vector<char> kOk;
+    // (physical indoor lamps) the lot lamps with a law out of its base (OutdoorDelta::ExportRoom0 physical), drawn from their laws
+    // now over its phys points (DEFAULT, one per place of the map: built again after a device reset); each one's room row, room
+    // 0's 3D test records; their laws now (lot space, mult = the row's), world positions and whether they have one
+    IDirect3DVertexBuffer9* pvb = nullptr;
+    UINT nPhys = 0;
+    std::vector<uintptr_t> pLights;
+    std::vector<std::array<float, 3>> pRow;
+    std::shared_ptr<const RtLampGpu::BlockerTable> pBlk;
+    float pHeader = -1.0f;
+    std::vector<RtLampModel::Lamp> pLaws;
+    std::vector<std::array<float, 3>> pWorld;
+    std::vector<char> pOk;
+    bool physLater = false; // prepared with its lamps in the base only because the physical draw was not ready yet
 };
 struct Ask {
     DWORD at = 0;
@@ -617,6 +641,7 @@ void ReleaseSlot(Slot& s) {
     if (s.dynNext) s.dynNext->Release(), s.dynNext = nullptr;
     if (s.preblur) s.preblur->Release(), s.preblur = nullptr;
     if (s.kvb) s.kvb->Release(), s.kvb = nullptr;
+    if (s.pvb) s.pvb->Release(), s.pvb = nullptr;
     if (s.game) s.game->Release(), s.game = nullptr;
     s.map = RtLampGpu::Map{};
 }
@@ -857,6 +882,7 @@ struct Prepared {
     std::vector<uint32_t> px; // the blocks' texels before the blur (w x h)
     std::vector<float> under;  // the floor mask's under-floor share (exact) and its sums
     std::vector<double> uA, uU;
+    std::vector<RtLampGpu::TexelVertex> pv; // (physical indoor lamps) one phys point per place: its last texel's (the sum's and compose's)
     std::vector<RtLampGpu::TexelVertex> kv; // (GPU room lamps) room 0's kept lamps' parts, by lamp
     std::vector<std::pair<UINT, UINT>> kRanges;
     std::vector<KeptInfo> kLamps;
@@ -879,15 +905,29 @@ struct Job {
     std::vector<RtLampModel::BakeLamp> bake; // the story's baked lamps when it started (the under-floor share)
     std::vector<uint64_t> bakeKeys;
     float base = 0.0f;
+    // (physical indoor lamps) asked of the export (phys), and what it gave: the lamps out of the base and their rows, room 0's
+    // 3D test records; physLater: not asked only because the physical draw was not ready; physWhy: why not drawn physically
+    bool phys = false, physLater = false;
+    std::string physWhy;
+    std::vector<uintptr_t> physLights;
+    std::vector<std::array<float, 3>> physRow;
+    std::shared_ptr<const RtLampGpu::BlockerTable> blk;
+    float blkHeader = -1.0f;
 };
 void PrepareJob(Job& j) {
     const bool groundShade = LevelLightShare::GroundShadeOn();
     LARGE_INTEGER a{}, b{};
     QueryPerformanceCounter(&a);
     OutdoorDelta::Room0Export ex;
-    if (!OutdoorDelta::ExportRoom0(j.room, j.cls, ex)) {
+    if (!OutdoorDelta::ExportRoom0(j.room, j.cls, ex, j.phys)) {
         j.state.store(3);
         return;
+    }
+    if (j.phys && !ex.physical) j.physWhy = ex.physWhy ? ex.physWhy : "?";
+    j.phys = ex.physical && !ex.phys.empty(); // (none out of the base: the base is the whole solve, as without the model)
+    if (j.phys) {
+        j.physLights = std::move(ex.phys), j.physRow = std::move(ex.physRow), j.blkHeader = ex.blkHeader;
+        j.blk = std::make_shared<const RtLampGpu::BlockerTable>(std::move(ex.blockers));
     }
     j.version = ex.version, j.thr = ex.thr, j.dither = ex.dither;
     j.kept = std::move(ex.kept), j.drawn = std::move(ex.drawn);
@@ -930,6 +970,22 @@ void PrepareJob(Job& j) {
             }
             cx += tv.p[0], cy += tv.p[1], cz += tv.p[2];
             p.v.push_back(tv);
+            if (j.phys) { // (physical) lot position and normal, bits 1 masked, 2 gated, 4 exit ground, 8 tested; the world position
+                RtLampGpu::TexelVertex q{};
+                q.x = tv.x, q.y = tv.y, q.w = 1.0f;
+                for (int k = 0; k < 3; k++) q.p[k] = tv.p[k], q.n[k] = tv.n[k], q.base[k] = t.pos[k];
+                q.p[3] = static_cast<float>(t.bits & 15);
+                p.pv.push_back(q);
+            }
+        }
+        if (!p.pv.empty()) { // one point per place, its last texel's (the sum is one per place; the compose's last point wins)
+            std::unordered_map<uint32_t, size_t> last;
+            const auto placeOf = [](const RtLampGpu::TexelVertex& q) { return static_cast<uint32_t>(q.y) << 16 | static_cast<uint32_t>(q.x); };
+            for (size_t k = 0; k < p.pv.size(); k++) last[placeOf(p.pv[k])] = k;
+            size_t o = 0;
+            for (size_t k = 0; k < p.pv.size(); k++)
+                if (last[placeOf(p.pv[k])] == k) p.pv[o++] = p.pv[k];
+            p.pv.resize(o);
         }
         // (GPU room lamps) the lamps of its list kept as a kept room's, out of the base: each part at its texel's place (the
         // place's last write only: the sum is one per place), with the sample's world position and normal as when kept
@@ -1035,6 +1091,8 @@ bool UploadSlot(IDirect3DDevice9* dev, Slot& s, const Job& j, Prepared& p) {
     if (s.dynNext) s.dynNext->Release(), s.dynNext = nullptr;
     if (s.preblur) s.preblur->Release(), s.preblur = nullptr;
     if (s.kvb) s.kvb->Release(), s.kvb = nullptr;
+    if (s.pvb) s.pvb->Release(), s.pvb = nullptr;
+    s.nPhys = 0, s.pLights.clear(), s.pRow.clear(), s.pBlk.reset(), s.pHeader = -1.0f, s.physLater = j.physLater;
     s.kRanges.clear(), s.kLamps.clear(), s.kX = false;
     s.masked.clear(), s.maskedPos.clear(), s.gated.clear(), s.under.clear(), s.uA.clear(), s.uU.clear(), s.uSnap.clear(), s.uIds.clear();
     s.underSig = 0, s.underExact = false, s.underDirty = false, s.uJob.reset();
@@ -1069,6 +1127,12 @@ bool UploadSlot(IDirect3DDevice9* dev, Slot& s, const Job& j, Prepared& p) {
     if (!p.kv.empty() && !RtLampGpu::Engine::MakeVb(dev, p.kv.data(), static_cast<UINT>(p.kv.size()), &s.kvb)) return retryLater("its kept lamps' parts could not be made");
     s.kRanges = std::move(p.kRanges), s.kLamps = std::move(p.kLamps), s.kX = p.kX;
     p.kv = {};
+    if (j.phys && !p.pv.empty()) {
+        if (!RtLampGpu::Engine::MakeVb(dev, p.pv.data(), static_cast<UINT>(p.pv.size()), &s.pvb, true)) return retryLater("its physical points could not be made");
+        s.nPhys = static_cast<UINT>(p.pv.size());
+        s.pLights = j.physLights, s.pRow = j.physRow, s.pBlk = j.blk, s.pHeader = j.blkHeader;
+    }
+    p.pv = {};
     s.map.w = static_cast<int>(d.Width), s.map.h = static_cast<int>(d.Height);
     s.map.vb = s.vb;
     s.map.count = static_cast<UINT>(p.v.size());
@@ -1200,6 +1264,7 @@ void OnPreReset(IDirect3DDevice9* dev) {
         if (s->scale) s->scale->Release(), s->scale = nullptr;
         s->scaled = false;
         s->relit = false; // (14/10: its preblur texture is a MANAGED one: kept, and the slot stays built; only the copy is made again)
+        if (s->pvb) s->pvb->Release(), s->pvb = nullptr, s->built = s->ok = false; // (DEFAULT: prepared again; its base lacks their lamps)
     }
     if (g_eng) g_eng->ReleaseDefault();
     GpuRoomLamps::ReleaseAll(); // (their buffers are DEFAULT: made again on use)
@@ -1535,6 +1600,12 @@ void Frame(IDirect3DDevice9* dev) {
         // the slots of this story: built again when its kept base or its class changed (prepared on a worker thread, then
         // uploaded a map a frame; the old copies stay bound meanwhile)
         bool needs[4] = {}, need = false, covered = true;
+        // (physical indoor lamps) room 0's lot lamps with a law drawn from their laws (its kept solve without them), unless that
+        // solve's physical draw failed
+        const bool wantPhys = act && OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical();
+        const bool physReady = wantPhys && g_eng && g_eng->PhysReady() && KeptMeshGen() != 0;
+        const auto refused = g_physRefused.find(room);
+        const bool physRefused = refused != g_physRefused.end() && refused->second == ver;
         for (int m = 0; m < 4; m++) {
             Slot* slot = nullptr;
             for (auto& sl : g_slots)
@@ -1550,7 +1621,8 @@ void Frame(IDirect3DDevice9* dev) {
                 if (act) g_restartGpuPending = true;
                 continue;
             }
-            needs[m] = !(slot && slot->built && slot->version == ver && (!slot->used || OwnMap(room, cls, kSetIdx[m], setAt) == slot->game));
+            needs[m] = !(slot && slot->built && slot->version == ver && (!slot->used || OwnMap(room, cls, kSetIdx[m], setAt) == slot->game)) ||
+                       (slot && slot->physLater && physReady); // (physical indoor lamps: drawn from their laws once it can)
             need = need || needs[m];
             if (needs[m] && !(slot && (!slot->used || (slot->relit && slot->ok)))) covered = false; // (the old copy stays bound meanwhile)
             if (!act && slot && slot->built && slot->used && !slot->ok) return false; // (refused: UploadSlot's backoff leaves it unbuilt)
@@ -1575,6 +1647,9 @@ void Frame(IDirect3DDevice9* dev) {
                 if (act) j->bake = g_bakeLast[S], j->bakeKeys = g_bakeKeysLast[S];
                 else if (const auto nk = g_nbBake.find(mgr); nk != g_nbBake.end()) j->bake = nk->second.bake, j->bakeKeys = nk->second.keys;
                 j->base = rn.lotBase;
+                j->phys = physReady && !physRefused, j->physLater = wantPhys && !physReady;
+                if (wantPhys && !j->phys)
+                    PhysNote(room, S, physRefused ? "its physical draw failed" : !g_eng || !g_eng->PhysReady() ? "the physical shaders are missing" : "no occluders with open tops yet");
                 g_jobs.push_back(j);
                 StartJob(j);
                 g_why.build++;
@@ -1598,6 +1673,8 @@ void Frame(IDirect3DDevice9* dev) {
             return act || b.fails < 6;
         }
         g_exportBackoff.erase(room);
+        if (wantPhys && !job.physWhy.empty()) PhysNote(room, S, job.physWhy);
+        else if (job.phys) PhysNote(room, S, {});
         g_buildMs += job.ms;
         job.ms = 0;
         bool done = true;
@@ -2223,6 +2300,28 @@ void Frame(IDirect3DDevice9* dev) {
             Mix(sig, &s.kOk[l], 1);
             if (s.kOk[l]) Mix(sig, &s.kLaws[l], sizeof s.kLaws[l]);
         }
+        // (physical indoor lamps) room 0's lamps out of its base, each with its law now (a lamp gone or without a law adds nothing),
+        // and the kept atlas's occluders
+        if (s.pvb) {
+            const uint32_t gen = KeptMeshGen();
+            Mix(sig, &gen, sizeof gen);
+            s.pLaws.assign(s.pLights.size(), RtLampModel::Lamp{});
+            s.pWorld.assign(s.pLights.size(), {});
+            s.pOk.assign(s.pLights.size(), 0);
+            for (size_t l = 0; l < s.pLights.size(); l++) {
+                GpuLampLaw::Lamp w;
+                int type = 0, reg = -1;
+                // (the law with its reach radii: the row's reach column and Params::reachOn decide where they apply)
+                if (!WorldLaw(s.pLights[l], g_lotId, false, w, type, reg) ||
+                    !WorldLaw(s.pLights[l], g_lotId, true, s.pLaws[l].law, type, reg, &rns[s.story].xf.r[0][0]))
+                    continue;
+                s.pOk[l] = 1;
+                s.pLaws[l].mult = s.pRow[l][0];
+                std::memcpy(s.pWorld[l].data(), w.pos, sizeof w.pos);
+                Mix(sig, &s.pLaws[l], sizeof s.pLaws[l]);
+            }
+            Mix(sig, s.pOk.data(), s.pOk.size());
+        }
         // the under-floor share from a worker (exact, UnderShare's sums): once no lamp is dragged, and (14/10) while one is,
         // in place of the render thread's UnderDelta below (up to 152 ms of a drag's relight; 26.8 ms in one frame): the last
         // share is kept until the worker's arrives, and a share of an earlier bake is taken during a drag (it follows the drag
@@ -2407,6 +2506,35 @@ void Frame(IDirect3DDevice9* dev) {
         p.maskAllGpu = maskGpu;
         std::string err;
         bool ok = true;
+        // (physical indoor lamps) room 0's lamps out of its base first, from their laws (the kept atlas's tiles, room 0's 3D test
+        // records), their floor mask and exit light into the second sum; the outdoor batches then add to the sum (their constants
+        // stay bound for the compose's floor mask). Failed: this map shows the game's and the room is prepared again with its
+        // lamps in the base
+        const bool phys = !roomsOnly && s.pvb;
+        if (phys) {
+            std::vector<RtLampModel::Lamp> pl;
+            std::vector<std::array<float, 3>> pw, prow;
+            std::vector<uintptr_t> plights;
+            for (size_t l = 0; l < s.pLights.size(); l++)
+                if (s.pOk[l]) pl.push_back(s.pLaws[l]), pw.push_back(s.pWorld[l]), prow.push_back(s.pRow[l]), plights.push_back(s.pLights[l]);
+            RtLampGpu::Map pm;
+            pm.w = s.map.w, pm.h = s.map.h, pm.vb = s.pvb, pm.count = s.nPhys;
+            ok = s.pBlk && g_eng->SetBlockers(dev, *s.pBlk, err) &&
+                 GpuRoomLamps::PhysPasses(dev, *g_eng, plights.data(), pl.data(), static_cast<int>(pl.size()), kFar, err, [&](int f, int c, const int* tiles, bool) {
+                     RtLampGpu::Engine::PhysRoom room;
+                     room.header = s.pHeader;
+                     room.lamp.assign(prow.begin() + f, prow.begin() + f + c);
+                     return g_eng->AccumulatePhys(dev, pm, pl.data() + f, tiles, reinterpret_cast<const float (*)[3]>(pw.data() + f), c, room, p, f == 0, err);
+                 });
+            if (!ok) {
+                g_physRefused[s.room] = s.version;
+                PhysNote(s.room, s.story, "its physical draw failed: " + err);
+                GpuRoomLamps::NoteRoom0(s.story, "from its solve (its physical draw failed)");
+                s.relit = false, s.version = 0; // (the game's map until it is prepared again)
+                continue;
+            }
+            GpuRoomLamps::NoteRoom0(s.story, std::format("physical ({} lamps)", pl.size()));
+        }
         // batches of the atlas's lamps (their shadows rendered unless the atlas holds them already)
         for (size_t b = 0; !roomsOnly && ok && (b < mine.size() || b == 0); b += RtLampGpu::kAtlasLamps) {
             const int n = static_cast<int>(std::min<size_t>(RtLampGpu::kAtlasLamps, mine.size() - std::min(b, mine.size())));
@@ -2425,13 +2553,14 @@ void Frame(IDirect3DDevice9* dev) {
                 QueryPerformanceCounter(&ts1);
                 g_ph.shadows += Ms(ts0, ts1);
             }
-            ok = ok && g_eng->Accumulate(dev, s.map, mine.data() + std::min(b, mine.size()), n, p, b == 0, err);
+            ok = ok && g_eng->Accumulate(dev, s.map, mine.data() + std::min(b, mine.size()), n, p, b == 0 && !phys, err);
             if (mine.empty()) break;
         }
         // (GPU room lamps) room 0's kept lamps added to the sum before the compose
         if (!roomsOnly && ok && s.kvb && !s.kRanges.empty())
             ok = g_eng->AddKeptParts(dev, s.kvb, s.kRanges, s.kLaws.data(), s.kOk.data(), s.thr, s.map.w, s.map.h, err, s.kX);
-        p.keptX = !roomsOnly && s.kvb && !s.kRanges.empty() && s.kX;
+        p.keptX = (!roomsOnly && s.kvb && !s.kRanges.empty() && s.kX) || phys;
+        p.physX = phys;
         ok = ok && (roomsOnly ? g_eng->CopyTexture(dev, s.game, s.copy, s.map.w, s.map.h, err) : g_eng->Compose(dev, s.map, s.game, s.copy, p, err, s.scale));
         if (ok && !s.mgr) GpuRoomLamps::ComposeOver(dev, *g_eng, rns[s.story].mgr, s.cls, s.m, s.game, s.copy, s.map.w, s.map.h, p);
         s.scaled = ok && s.scale;

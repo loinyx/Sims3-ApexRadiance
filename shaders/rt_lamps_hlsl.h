@@ -570,7 +570,7 @@ R"RAW(// ---------------------------------------------------------------- GPU ro
 // walls-tested / no-walls luminance over its law's with N.l ignored (its A then 0), mask.z = 1 an exit lamp's part.
 // AccKept0PS   into the sum: AccKeptPS's light, a = the walls-tested luminance (the floor mask's "vis")
 // AccKept0XPS  into the second sum (cleared first): x = the no-walls luminance ("all"), y = an exit lamp's light's luminance
-// ComposeK0PS  ComposePS with the second sum (sAcc2): "all" + its x; an exit ground texel (mask.w = 1, mask.z = the exit lamps'
+// ComposeK0PS  ComposePS with the second sum (sAcc2): "all" + its x, "vis" + its z (AccPhysXPS); an exit ground texel (mask.w = 1, mask.z = the exit lamps'
 //              light left in the base) takes ExitAlpha(mask.z + its y) as its alpha
 sampler2D sAcc2 : register(s3);
 float3 KeptLight(TexelIn i) {
@@ -601,7 +601,7 @@ ComposeOut ComposeK0PS(TexelIn i, float2 vpos : VPOS) {
     const float flags = i.p.w;
     if (fmod(flags, 2.0) >= 1.0) {
         const float under = fmod(flags, 4.0) >= 2.0 ? i.dyn.y : -1.0;
-        const float vis = i.mask.x + acc.a, all = i.mask.y + (gF.x > 0.5 ? MaskAll(i.p.xyz) : i.dyn.x) + acc2.x;
+        const float vis = i.mask.x + acc.a + acc2.z, all = i.mask.y + (gF.x > 0.5 ? MaskAll(i.p.xyz) : i.dyn.x) + acc2.x;
         if (under >= 0.999) alpha = 1.0;
         else {
             float a = 0.0;
@@ -781,4 +781,51 @@ float4 AccPhys(TexelIn i, float2 vpos, int kSearch, int kEmit, int kWalk) {
 }
 float4 AccPhysPS(TexelIn i, float2 vpos : VPOS) : COLOR0 { return AccPhys(i, vpos, 24, 16, 16); }
 float4 AccPhysFastPS(TexelIn i, float2 vpos : VPOS) : COLOR0 { return AccPhys(i, vpos, 8, 4, 8); }
+// AccPhysXPS (room 0, Real-time outdoor lamps' map): the batch's lamps at the same points into the second sum (added: blend one,
+// one), as AccPhysPS takes them (the share x the 3D test, the 0.01 drop): on a masked texel (bit 1) the floor mask's luminances
+// with N.l ignored (rt_lamp_model.h AddMask: x = "all", z = "vis" with the share), on an exit ground texel (bit 4) an exit
+// lamp's light (the table's z = 1: y = its luminance, as ComposeK0PS's E). One law and one shadow per lamp
+float4 AccPhysXPS(TexelIn i, float2 vpos : VPOS) : COLOR0 {
+    const float3 P = i.p.xyz;
+    const float3 N = normalize(i.n.xyz);
+    const float slot = SlotOf(i.p.w), bits = BitsOf(i.p.w);
+    const bool masked = fmod(bits, 2.0) >= 1.0 && gE.y > 0.5;
+    const bool exitG = !masked && fmod(floor(bits / 4.0), 2.0) >= 1.0;
+    const bool tested = bits >= 8.0;
+    float4 T3 = tested ? tex2Dlod(sT3, float4((vpos + 0.5) * gD.zw, 0, 0)) : 1.0;
+    const float wallReach0 = gA.w > 0.5 ? Sat((0.5 - abs(N.y)) * 1e4) : 0.0;
+    const int count = (int)gA.x;
+    const float thr = gA.y;
+    float4 sum = 0;
+    [loop] for (int l = 0; l < 4; l++) {
+        const LampRegs lamp = ReadLamp(l);
+        const float t3 = T3.x;
+        T3 = T3.yzwx;
+        const float4 t = TableAt(l, slot);
+        const float3 law = LawAt(lamp, P, masked ? normalize(lamp.pos.xyz - P) : N, masked ? 0.0 : wallReach0 * t.y);
+        const float ls = (law.b + law.g) + law.r;
+        [branch] if (l < count && t.x != 0 && (masked ? thr <= ls : exitG && t.z > 0.5 && ls > 0)) {
+            float sh = Shadow(lamp, P, N, 24, 16, 16);
+            if (tested) {
+                const float prod = sh * t3;
+                sh = 0.01 > prod ? 0.0 : prod;
+            }
+            if (masked) {
+                const float lum = t.x * Lum3(law);
+                sum.x += lum;
+                sum.z += lum * sh;
+            } else {
+                float3 c = law * sh;
+                const float cs = (c.b + c.g) + c.r;
+                if (!(cs >= thr)) c = 0;
+                else if (gA.z > 0.5 && cs < 2.0 * thr) {
+                    const float x = (cs - thr) / thr;
+                    c *= x * x * (3.0 - 2.0 * x);
+                }
+                sum.y += Lum3(t.x * c);
+            }
+        }
+    }
+    return sum;
+}
 )RAW";

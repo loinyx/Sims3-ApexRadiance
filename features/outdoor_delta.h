@@ -18,10 +18,12 @@
 // Anything else (a first solve, another class, walls or the room changed, a light list that changed otherwise, more than a
 // few lights changed, a quick pass, a solve off the light tree thread) solves the room in full and keeps its parts again.
 // Off (Lamp lighting: Classic, or Instant on a device that cannot run it): nothing here runs and every solve is the game's.
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
 #include "gpu_lamp_law.h"
+#include "rt_lamp_blockers.h"
 
 namespace RtLampGpu {
 struct KeptMapData;
@@ -207,7 +209,8 @@ struct Room0Export {
         uint32_t packed;
         uint16_t x, y;
         uint8_t map;  // 0 wall atlas, 1 floor, 2 ceiling, 3 objects
-        uint8_t bits; // 1 masked (an outdoor floor of a story >= 1), 2 gated (over its lot base: the under-floor share applies), 4 exit ground
+        uint8_t bits; // 1 masked (an outdoor floor of a story >= 1), 2 gated (over its lot base: the under-floor share applies), 4 exit ground,
+                      // 8 (physical) its batch ran the game's 3D test
         // (GPU room lamps, bit 4: a story-0 ground texel whose alpha is the exit lamps' light, set only when a kept lamp is an
         // exit lamp) the luminance of the exit lamps' light left in the base
         float exitBase;
@@ -223,6 +226,14 @@ struct Room0Export {
     std::vector<uintptr_t> drawn; // the lights whose parts left the base
     std::vector<uintptr_t> kept;  // every light with parts kept (the others' parts stay in the base)
     std::vector<uintptr_t> phys;  // (physical) the lot lamps with a GPU law whose parts left the base
+    // (physical) the lamps of phys left the base (else why not: the solve was kept by the other model, or kept room 0 lamps);
+    // per lamp of phys its room row (mult x norm scale, 1 the realistic reach share applies, 1 an exit lamp); room 0's 3D test
+    // records as its solve started (blkHeader < 0: none read)
+    bool physical = false;
+    const char* physWhy = nullptr;
+    std::vector<std::array<float, 3>> physRow;
+    RtLampGpu::BlockerTable blockers;
+    float blkHeader = -1.0f;
     int lamps = 0;                // lights kept
     // (GPU room lamps, developer) the lamps of its list Real-time outdoor lamps does not draw, kept as a kept room's: their parts
     // are out of the base, and are added back from A and B (rt_lamp_model.h KeptAdd) with the lamp's law when kept, at the
@@ -250,8 +261,8 @@ struct Room0Export {
 };
 // 0 = nothing kept for that room and class; baseOnly: the kept solve is a lot next to the active one's (SetNeighbourLots)
 uint32_t RecordVersion(const void* room, int cls, bool* baseOnly = nullptr);
-// physical: every lot lamp with a GPU law (not drawn by Real-time outdoor lamps, not a kept0 lamp) leaves the base too (its sum,
-// floor mask vis / all and exit light), listed in out.phys (no caller asks it until the physical draw)
+// physical: every lot lamp with a GPU law (not drawn by Real-time outdoor lamps) leaves the base too (its sum, floor mask vis /
+// all and exit light), listed in out.phys with its room row (out.physical; a solve kept by the other model: none, physWhy)
 bool ExportRoom0(const void* room, int cls, Room0Export& out, bool physical = false);
 // The active lot's room 0s (render thread, once a frame): the memory budget never drops them; past kMaxPinnedBytes a new
 // solve of one is not kept instead, and their drawn lamps' parts are kept as one sum per texel. Returns how many of their

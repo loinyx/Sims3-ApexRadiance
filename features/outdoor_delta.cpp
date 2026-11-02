@@ -127,6 +127,10 @@ struct LampRec {
     // (2.15.3) a roofed room's lamp that story 0's room 0 took through an opening: its part of a ground texel is also in the
     // texel's alpha (LevelLightShare::SetIndoorLightOnGround), which a delta does not compose again
     bool exit = false;
+    // (physical indoor lamps, Record::phys) its scale in room 0 (NormKOf) and whether the solve gives it the realistic reach share
+    // there (LevelLightShare::ReachAppliesIn)
+    float normK = 1.0f;
+    bool reach = false;
     std::vector<Contrib, ApexMem::HighAllocator<Contrib>> parts; // by texel, ascending
 };
 // The collapsed drawn lamps' parts of a texel together (CollapseDrawn): the base Real-time outdoor lamps relights from is the
@@ -232,6 +236,11 @@ struct Record {
     // (GPU room lamps) the lamps of its list Real-time outdoor lamps does not draw, kept as a kept room's (BuildKept0): their
     // parts leave the base it relights from and the GPU adds them back (ExportRoom0); a delta that changes one drops it
     std::vector<KeptLamp> kept0;
+    // (physical indoor lamps) kept by the physical model: its lamps' normK and reach, and room 0's 3D test records as its solve
+    // started (blkHeader < 0: none read)
+    bool phys = false;
+    RtLampGpu::BlockerTable blk;
+    float blkHeader = -1.0f;
     DWORD used = 0;
     size_t bytes = 0;
     uint8_t gone = 0; // (left_lot_release) liveness sweeps in a row that found no loaded lot holding its story manager
@@ -244,7 +253,8 @@ bool PinnedLocked(uintptr_t room) { return std::find(g_pinned.begin(), g_pinned.
 uint64_t KeyOf(const void* room, int cls) { return (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(room)) << 2) | static_cast<uint64_t>(cls & 3); }
 size_t BytesOf(const Record& r) {
     size_t b = sizeof(Record) + r.samples.capacity() + r.texels.capacity() * sizeof(TexelRec) + r.batches.capacity() * sizeof(BatchRec) +
-               r.blocks.capacity() * sizeof(BlockRec) + r.preblur.capacity() * 4 + r.drawnSum.capacity() * sizeof(DrawnSum);
+               r.blocks.capacity() * sizeof(BlockRec) + r.preblur.capacity() * 4 + r.drawnSum.capacity() * sizeof(DrawnSum) +
+               r.blk.rows.capacity() * sizeof(RtLampGpu::BlockerTable::Row);
     for (const LampRec& l : r.lamps) b += sizeof(LampRec) + l.parts.capacity() * sizeof(Contrib);
     for (const KeptLamp& l : r.kept0) b += sizeof(KeptLamp) + l.parts.capacity() * sizeof(KeptPart) + l.mask.capacity() * sizeof(KeptLamp::Mask);
     return b;
@@ -2826,6 +2836,17 @@ void BuildBasis(Capture& c, KeptRoom& k) {
     ShrinkExact(k.basis), ShrinkExact(k.basisBase), ShrinkExact(k.basisGame);
 }
 
+// (physical indoor lamps) a lamp's scale in a room: the room it shines out of as InnerShadow scales it (the record's innerSrc, any
+// story); else a lamp registered in another room of this story (reg), at that room's normalisation against this one's
+float NormKOf(const BYTE* room, int story, int id, bool outdoor, uintptr_t light, int reg) {
+    if (const float k = LevelLightShare::InnerNormScaleOf(room, light); k > 0.0f) return k;
+    const uintptr_t tracker = reg > 0 && reg != id ? RtOutdoorLamps::TrackerOf(room) : 0;
+    const void* src = tracker ? LevelLightShare::RoomOf(tracker, story, reg) : nullptr;
+    float normSrc = 1.0f, normHere = 1.0f;
+    if (!src || !CopyBytes(&normSrc, static_cast<const BYTE*>(src) + 0x160, sizeof normSrc)) return 1.0f;
+    if (!outdoor) CopyBytes(&normHere, room + 0x160, sizeof normHere);
+    return std::isfinite(normSrc) && std::isfinite(normHere) ? InnerLight::NormScale(normSrc, normHere, outdoor) : 1.0f;
+}
 void KeepEnd(const BYTE* room) {
     Capture& c = g_cap;
     Record& r = *c.rec;
@@ -2869,9 +2890,6 @@ void KeepEnd(const BYTE* room) {
         for (const Capture::ProbeHook& h : c.probeHook)
             if (h.texel < n) hooks[h.light].push_back(&h);
         std::vector<float> gotSum(n, 0.0f);
-        float normHere = 1.0f;
-        if (c.phys && !rr.outdoor) CopyBytes(&normHere, room + 0x160, sizeof normHere);
-        const uintptr_t tracker = c.phys ? RtOutdoorLamps::TrackerOf(room) : 0;
         for (const auto& [light, hs] : hooks) {
             KeptLamp kl;
             int reg = -1;
@@ -2885,15 +2903,7 @@ void KeepEnd(const BYTE* room) {
                 int evals = 1;
                 for (const Capture::ProbeHook* h : hs) evals = std::max(evals, static_cast<int>(h->evals));
                 kl.mult = static_cast<uint8_t>(std::clamp(lr ? lr->mult : evals, 1, 255));
-                // the room it shines out of as InnerShadow scales it (the record's innerSrc, any story); else a lamp registered in
-                // another room of this story
-                if (const float k = LevelLightShare::InnerNormScaleOf(room, light); k > 0.0f) kl.normK = k;
-                else if (reg > 0 && reg != rr.id && tracker)
-                    if (const void* src = LevelLightShare::RoomOf(tracker, rr.story, reg)) {
-                        float normSrc = 1.0f;
-                        if (CopyBytes(&normSrc, static_cast<const BYTE*>(src) + 0x160, sizeof normSrc))
-                            kl.normK = std::isfinite(normSrc) && std::isfinite(normHere) ? InnerLight::NormScale(normSrc, normHere, rr.outdoor) : 1.0f;
-                    }
+                kl.normK = NormKOf(room, rr.story, rr.id, rr.outdoor, light, reg);
                 kl.reach = LevelLightShare::ReachAppliesIn(room, light);
             }
             if (lr)
@@ -3061,8 +3071,17 @@ void SolveStart(unsigned char* room) {
             KeptLamp kl;
             if (!DrawnLight(l.light, rr.lot) && LawOfLight(l.light, rr.lot, kl)) c.keep0Lights.insert(l.light);
         }
-    // (physical indoor lamps: no kept0; ExportRoom0(physical) takes every law lamp out of the base instead)
-    c.keep0 = g_capture.load(std::memory_order_relaxed) && !g_physical.load(std::memory_order_relaxed) && !c.keep0Lights.empty();
+    // (physical indoor lamps: no kept0; ExportRoom0(physical) takes every law lamp out of the base instead, drawn over room 0's 3D
+    // test records as the solve starts: UNVERIFIED that room 0's records are the outdoor objects its batches test)
+    c.phys = g_capture.load(std::memory_order_relaxed) && g_physical.load(std::memory_order_relaxed) && !baseOnly;
+    r.phys = c.phys;
+    if (c.phys) {
+        RoomLightTests::Room t;
+        std::string why;
+        if (ReadRoomTests(room, t, why, true)) r.blkHeader = static_cast<float>(r.blk.Append(t));
+        else if (KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room 0 class {}: its 3D test records could not be read ({}): its lamps drawn without them", rr.story, rr.cls, why));
+    }
+    c.keep0 = g_capture.load(std::memory_order_relaxed) && !c.phys && !c.keep0Lights.empty();
     c.probe0 = g_probe.load(std::memory_order_relaxed) && !baseOnly;
     // a self-check: the full solve's texels are compared with what the delta wrote
     bool check = false;
@@ -3347,6 +3366,16 @@ void SolveEnd(unsigned char* room) {
         r.version = g_version.fetch_add(1, std::memory_order_relaxed) + 1;
         r.baseVersion = r.version;
         if (c.keep0) HookGuard::Run("OutdoorDelta room 0 kept lamps", [&] { BuildKept0(c, r); });
+        if (c.phys) // (the solve's own rules, read while its room info stands)
+            HookGuard::Run("OutdoorDelta room 0 physical lamps", [&] {
+                for (LampRec& l : r.lamps) {
+                    KeptLamp kl;
+                    int reg = -1;
+                    if (l.drawn || !LawOfLight(l.light, r.lot, kl, &reg)) continue;
+                    l.normK = NormKOf(room, r.story, 0, true, l.light, reg);
+                    l.reach = LevelLightShare::ReachAppliesIn(room, l.light);
+                }
+            });
         if (RtOutdoorLamps::Watching()) r.baseHash = BaseHash(r);
         ShrinkRecord(r); // (outside g_mx: the copies take a while on a large room)
         const uint64_t key = KeyOf(room, r.cls);
@@ -4921,6 +4950,8 @@ bool ExportRoom0(const void* room, int cls, Room0Export& out, bool physical) {
     if (it == g_records.end() || !RecordOfRoom(*it->second, now)) return false;
     const Record& r = *it->second;
     if (r.samples.size() != r.texels.size() * 0x30) return false;
+    if (physical && !r.phys) out.physWhy = "its solve was kept by the replica model", physical = false; // (no normK, reach or 3D records)
+    out.physical = physical;
     out.version = r.baseVersion;
     out.story = r.story, out.cls = r.cls, out.lot = r.lot, out.thr = r.thr, out.dither = r.dither, out.wallsOk = r.wallsOk, out.passes = r.passes;
     for (int m = 0; m < 4; m++) out.mapUsed[m] = r.maps[m].used, out.mapW[m] = r.maps[m].w, out.mapH[m] = r.maps[m].h;
@@ -4968,7 +4999,8 @@ bool ExportRoom0(const void* room, int cls, Room0Export& out, bool physical) {
                     if (p.texel < out.texels.size()) out.texels[p.texel].exitBase += Lum3(p.rgb);
             if (!l.drawn && !k0) continue;
             if (l.drawn) out.drawn.push_back(l.light);
-            if (phys[j]) out.phys.push_back(l.light);
+            if (phys[j])
+                out.phys.push_back(l.light), out.physRow.push_back({static_cast<float>(std::max(l.mult, 1)) * l.normK, l.reach ? 1.0f : 0.0f, l.exit ? 1.0f : 0.0f});
             for (const Contrib& p : l.parts) {
                 if (p.texel >= out.texels.size()) continue;
                 Room0Export::Texel& e = out.texels[p.texel];
@@ -4990,11 +5022,18 @@ bool ExportRoom0(const void* room, int cls, Room0Export& out, bool physical) {
         }
         for (const BlockRec& b : r.blocks) out.blocks.push_back(Room0Export::Block{b.x0, b.y0, b.x1, b.y1, b.ok, b.off});
         out.preblur.assign(r.preblur.begin(), r.preblur.end());
+        if (physical) { // the texels whose batch ran the game's 3D test (bit 8), and room 0's records
+            for (const BatchRec& b : r.batches)
+                for (uint32_t j = 0; b.flags[1] && j < b.count && b.first + j < out.texels.size(); j++) out.texels[b.first + j].bits |= 8;
+            out.blockers = r.blk, out.blkHeader = r.blkHeader;
+        }
     } catch (...) {
         out = Room0Export{};
         return false;
     }
-    if (physical && KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room 0: base without {} lot lamps (physical)", out.story, out.phys.size()));
+    if (physical && KeptLog())
+        LOG_INFO(std::format("[GpuRoomLamps] Story {} room 0: base without {} lot lamps (physical; 3D test {})", out.story, out.phys.size(),
+                             out.blkHeader < 0.0f ? std::string("records not read") : std::format("{} rows", out.blockers.rows.size())));
     return true;
 }
 

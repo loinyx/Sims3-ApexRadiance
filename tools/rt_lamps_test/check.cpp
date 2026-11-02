@@ -14,7 +14,8 @@
 //     (the game's texel) and against RtLampModel::Compose; class-2 wall blocks blurred on the GPU against the game's blur
 //     (outdoor_delta_model.h BlurBlock) bit for bit.
 //  4. Physical indoor lamps (PhysKeptCheck): the game's 3D test on the GPU (T3dPS) against RoomLightTests::occlude, the kept
-//     shadow tiles against the reference, and RelightKeptPhys against the CPU's law x share x T3D, KeptTexel, pack and blur.
+//     shadow tiles against the reference, and RelightKeptPhys against the CPU's law x share x T3D, KeptTexel, pack and blur;
+//     room 0's lot lamps from their laws (Room0PhysCheck: AccumulatePhys, the floor mask and exit alpha) against the CPU.
 // Read-only: prints to stdout, writes no file. A missing D3D9 device or capture is a failure.
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -2829,6 +2830,189 @@ bool PhysKeptCheck() {
     return true;
 }
 
+// ---------------------------------------------------------------- 9. physical indoor lamps over room 0 (AccumulatePhys, AccPhysXPS)
+// Room 0's map (a floor of masked, exit ground and plain texels and an outer wall) whose lot lamps left its base, drawn as
+// Real-time outdoor lamps draws it: the lamps from their laws (a bare bulb, a spot listed twice, a shaded lamp at a norm scale, a
+// TubeLight, a rectangle area light, a street lamp; reach on two, exit on three) over the phys points, some plain texels behind a
+// table of the game's 3D test, then the outdoor batch with first = false and ComposeK0PS over the second sum. No cube occluder
+// (share 1). On the CPU: the law x the 3D test, the soft light cut, AddMask's luminances and the exit light, RtLampModel::Compose.
+// The lamps in two calls over one sum give the one call's map.
+bool Room0PhysCheck() {
+    std::printf("\n[physical indoor lamps] room 0's lot lamps from their laws (floor mask and exit alpha in the second sum) against the CPU\n");
+    std::mt19937 rng(77);
+    std::uniform_real_distribution<float> U(0.0f, 1.0f);
+    const int w = 64, h = 32;
+    const float thr = 3.0f / 255.0f;
+    const auto def = [](float x, float y, float z, int type) {
+        LampDef d;
+        d.pos[0] = x, d.pos[1] = y, d.pos[2] = z, d.type = type, d.range = 12.0f;
+        if (type == 4) d.scale = 4.9f, d.off = -0.32f;
+        return d;
+    };
+    std::vector<RtLampModel::Lamp> lamps = {ToLamp(def(4.0f, 2.5f, 3.0f, 3)), ToLamp(def(10.0f, 2.8f, 5.0f, 4)), ToLamp(def(6.0f, 1.2f, 6.0f, 5)),
+                                            ToLamp(def(3.0f, 1.5f, 5.0f, 3)), ToLamp(def(12.0f, 2.9f, 2.0f, 3)), ToLamp(def(1.0f, 3.0f, 7.0f, 11))};
+    {
+        const float s[3] = {0.0f, 0.0f, 1.0f};
+        GpuLampLaw::TubeShape(lamps[3].law, s, 1.0f);
+        const float u[3] = {1.0f, 0.0f, 0.0f}, v[3] = {0.0f, 0.0f, 1.0f}, nrm[3] = {0.0f, 1.0f, 0.0f};
+        GpuLampLaw::AreaShape(lamps[4].law, u, v, nrm, 0.3f, 0.2f, false);
+    }
+    const int nL = static_cast<int>(lamps.size());
+    // room rows: mult x norm scale, reach, exit
+    const std::vector<std::array<float, 3>> rows = {{1.0f, 0.0f, 1.0f}, {2.0f, 1.0f, 0.0f}, {0.8f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f}, {1.0f, 1.0f, 0.0f}};
+    const float kWorld[3] = {100.5f, 0.0f, 200.25f};
+    std::vector<std::array<float, 3>> world(nL);
+    for (int l = 0; l < nL; l++) {
+        lamps[l].mult = rows[l][0];
+        for (int c = 0; c < 3; c++) world[l][c] = lamps[l].law.pos[c] + kWorld[c];
+    }
+    // the 3D test: a table top over part of the floor (world space)
+    RoomLightTests::Room room0;
+    {
+        RoomLightTests::Blocker k{};
+        k.vt = RoomLightTests::kQuadVt;
+        const float A[3] = {8.0f + kWorld[0], 0.75f + kWorld[1], 4.0f + kWorld[2]}, N[3] = {0, 1, 0}, Uv[3] = {1, 0, 0}, Vv[3] = {0, 0, 1};
+        for (int c = 0; c < 3; c++)
+            k.f[0x70 / 4 + c] = A[c], k.f[0x80 / 4 + c] = A[c], k.f[0x90 / 4 + c] = N[c], k.f[0xA0 / 4 + c] = Uv[c], k.f[0xB0 / 4 + c] = Vv[c], k.f[0xE0 / 4 + c] = 7.0f,
+                                                                                                                    k.f[0xF0 / 4 + c] = -3.0f;
+        k.f[0xD0 / 4] = k.f[0xD8 / 4] = 1.2f, k.f[0xD4 / 4] = k.f[0xDC / 4] = 0.8f;
+        room0.rec.push_back({{A[0], A[1], A[2]}, 4.0f, {k}});
+    }
+    RtLampGpu::BlockerTable table;
+    RtLampGpu::Engine::PhysRoom room;
+    room.header = static_cast<float>(table.Append(room0));
+    room.lamp = rows;
+    // the texels (the map's points as rt_outdoor_lamps.cpp PrepareJob makes them) and the phys points at the same places
+    std::vector<RtLampGpu::TexelVertex> verts, phys;
+    std::vector<RtLampModel::TexelIn> in(static_cast<size_t>(w) * h);
+    std::vector<char> tested(static_cast<size_t>(w) * h, 0);
+    long nTested = 0, nShaded = 0;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            const int i = y * w + x;
+            const bool wall = y >= 28;
+            RtLampGpu::TexelVertex v{};
+            v.x = static_cast<float>(x), v.y = static_cast<float>(y), v.w = 1.0f;
+            if (wall) v.p[0] = 0.0f, v.p[1] = 0.25f + (y - 28) * 0.5f, v.p[2] = x * 0.25f, v.n[0] = 1.0f;
+            else v.p[0] = 0.5f + x * 0.25f, v.p[1] = 0.0f, v.p[2] = y * 0.25f, v.n[1] = 1.0f;
+            RtLampModel::TexelIn& t = in[i];
+            const int kind = wall ? 2 : i % 3; // 0 masked, 1 exit ground, 2 plain
+            v.n[3] = kind == 2 ? U(rng) * 0.5f : 0.0f;
+            for (int c = 0; c < 3; c++) v.base[c] = t.base[c] = U(rng) < 0.3f ? 1.2f * U(rng) : 0.2f * U(rng);
+            v.base[3] = t.dither = (x + y) % 3 ? RoomMapDither::Offset(x, y) / 255.0f : 0.0f;
+            t.alpha = v.n[3];
+            int bits = 0;
+            if (kind == 0) {
+                v.p[3] = 1.0f, t.masked = true, bits = 1;
+                t.baseAll = v.mask[1] = U(rng) < 0.3f ? 0.0f : 0.5f * U(rng);
+                t.baseVis = v.mask[0] = t.baseAll * U(rng);
+            } else if (kind == 1) {
+                t.exitGround = true, v.mask[3] = 1.0f, bits = 4;
+                t.exitBase = v.mask[2] = U(rng) < 0.5f ? 0.0f : 0.3f * U(rng);
+            } else if (!wall && x % 2 == 0)
+                tested[i] = 1, bits = 8, nTested++;
+            verts.push_back(v);
+            RtLampGpu::TexelVertex q{};
+            q.x = v.x, q.y = v.y, q.w = 1.0f;
+            for (int c = 0; c < 3; c++) q.p[c] = v.p[c], q.n[c] = v.n[c], q.base[c] = v.p[c] + kWorld[c];
+            q.p[3] = static_cast<float>(bits);
+            phys.push_back(q);
+        }
+    // the CPU
+    const bool reachOn = true;
+    std::vector<uint32_t> want(static_cast<size_t>(w) * h);
+    for (int i = 0; i < w * h; i++) {
+        const RtLampGpu::TexelVertex& v = verts[i];
+        float G[3] = {}, gVis = 0.0f, gAll = 0.0f, gExit = 0.0f;
+        for (int l = 0; l < nL; l++) {
+            const float mult = rows[l][0];
+            float law[3];
+            GpuLampLaw::Eval(lamps[l].law, v.p, v.n, GpuLampLaw::WallReach(v.n, reachOn) * rows[l][1], law);
+            float sh = 1.0f;
+            if (tested[i]) {
+                int unknown = 0;
+                const float prod = RoomLightTests::occlude(room0, {world[l][0], world[l][1], world[l][2]}, {v.p[0] + kWorld[0], v.p[1] + kWorld[1], v.p[2] + kWorld[2]}, &unknown);
+                sh = RoomLightTests::K_DROP > prod ? 0.0f : prod;
+                nShaded += prod < 1.0f;
+            }
+            if (in[i].masked) {
+                float d[3] = {lamps[l].law.pos[0] - v.p[0], lamps[l].law.pos[1] - v.p[1], lamps[l].law.pos[2] - v.p[2]}, wl[3];
+                const float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+                for (float& c : d) c /= len;
+                GpuLampLaw::Eval(lamps[l].law, v.p, d, 0.0f, wl);
+                if (thr <= (wl[2] + wl[1]) + wl[0]) {
+                    const float lum = mult * OutdoorDeltaModel::Lum3(wl);
+                    gAll += lum, gVis += lum * sh;
+                }
+            }
+            float c[3] = {law[0] * sh, law[1] * sh, law[2] * sh};
+            RtLampModel::Fade(c, thr, true);
+            for (int q = 0; q < 3; q++) G[q] += mult * c[q];
+            if (in[i].exitGround && rows[l][2] > 0.5f && (law[0] + law[1] + law[2]) > 0.0f) {
+                const float mc[3] = {mult * c[0], mult * c[1], mult * c[2]};
+                gExit += OutdoorDeltaModel::Lum3(mc);
+            }
+        }
+        want[i] = RtLampModel::Compose(in[i], G, gVis, gAll, gExit);
+    }
+    // the GPU: one call with every lamp, then two calls over one sum
+    RtLampGpu::Engine eng(RtLampGpu::PlainCalls());
+    std::string err;
+    RtLampProxy::Mesh empty;
+    bool ok = eng.Init(g_dev, g_shaders, 64, err) && eng.SetProxy(g_dev, empty, err) && eng.SetProxy(g_dev, empty, err, true);
+    RtLampGpu::Map m, pm;
+    m.w = pm.w = w, m.h = pm.h = h, m.count = pm.count = static_cast<UINT>(verts.size());
+    IDirect3DTexture9* out = nullptr;
+    ok = ok && RtLampGpu::Engine::MakeVb(g_dev, verts.data(), m.count, &m.vb) && RtLampGpu::Engine::MakeVb(g_dev, phys.data(), pm.count, &pm.vb, true) &&
+         SUCCEEDED(g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &out, nullptr));
+    std::vector<int> tiles(nL);
+    for (int l = 0; l < nL; l++) tiles[l] = l;
+    RtLampGpu::Params p;
+    p.thr = thr, p.mask = true, p.keptX = true, p.physX = true, p.reachOn = reachOn;
+    std::vector<uint32_t> got[2];
+    for (int split = 0; ok && split < 2; split++) {
+        g_dev->BeginScene();
+        if (eng.Begin(g_dev)) {
+            ok = eng.EnsureTiles(g_dev, nL, err) && eng.SetBlockers(g_dev, table, err);
+            for (int l = 0; ok && l < nL; l++) ok = eng.RenderShadowTile(g_dev, lamps[l].law.pos, l, 64.0f, err);
+            const auto wp = reinterpret_cast<const float (*)[3]>(world.data());
+            if (!split) ok = ok && eng.AccumulatePhys(g_dev, pm, lamps.data(), tiles.data(), wp, nL, room, p, true, err);
+            else {
+                RtLampGpu::Engine::PhysRoom a = room, b = room;
+                a.lamp.assign(rows.begin(), rows.begin() + 3), b.lamp.assign(rows.begin() + 3, rows.end());
+                ok = ok && eng.AccumulatePhys(g_dev, pm, lamps.data(), tiles.data(), wp, 3, a, p, true, err) &&
+                     eng.AccumulatePhys(g_dev, pm, lamps.data() + 3, tiles.data() + 3, wp + 3, nL - 3, b, p, false, err);
+            }
+            ok = ok && eng.Accumulate(g_dev, m, nullptr, 0, p, false, err) && eng.Compose(g_dev, m, nullptr, out, p, err);
+            eng.End(g_dev);
+        } else
+            ok = false;
+        g_dev->EndScene();
+        ok = ok && RtLampGpu::Engine::ReadTexture(g_dev, out, w, h, got[split]);
+    }
+    if (m.vb) m.vb->Release();
+    if (pm.vb) pm.vb->Release();
+    if (out) out->Release();
+    Check(ok, "physical room 0 on the GPU: " + err);
+    if (!ok) return false;
+    long n = 0, within1 = 0, maxDiff = 0, alphaN = 0, alphaBad = 0, alphaLit = 0, same = 0;
+    for (int i = 0; i < w * h; i++) {
+        const int d = OutdoorDeltaModel::MaxLevelDiff(want[i], got[0][i]);
+        n++, within1 += d <= 1, maxDiff = std::max<long>(maxDiff, d);
+        same += got[1][i] == got[0][i];
+        if (!in[i].masked && !in[i].exitGround) continue;
+        alphaN++, alphaBad += (want[i] >> 24) != (got[0][i] >> 24), alphaLit += (want[i] >> 24) != 0;
+    }
+    std::printf("  %ld texels, %d lamps (%ld plain texels behind the 3D test, %ld lamp pairs shaded): %.2f%% within 1/255 of the CPU, largest %ld/255; "
+                "%ld masked or exit ground texels, %ld with an alpha, %ld alphas differ; two calls over one sum: %ld of %ld texels as one\n",
+                n, nL, nTested, nShaded, n ? 100.0 * within1 / n : 100.0, maxDiff, alphaN, alphaLit, alphaBad, same, n);
+    Check(nShaded > 0, "physical room 0: the 3D test shades no texel (the scene is wrong)");
+    Check(n > 0 && within1 == n, "physical room 0: a texel more than 1/255 from the CPU's (unshadowed lamps)");
+    Check(alphaLit > 0 && alphaBad == 0, "physical room 0: the floor mask or exit alpha differs from the CPU's");
+    Check(same == n, "physical room 0: two calls over one sum differ from one");
+    return true;
+}
+
 int main(int argc, char** argv) {
     std::vector<std::string> worlds;
     int maxLamps = 12;
@@ -2859,6 +3043,7 @@ int main(int argc, char** argv) {
     Room0KeptCheck();
     Room0KeptXCheck();
     PhysKeptCheck();
+    Room0PhysCheck();
 #ifdef RT_OBJECT_SHAPES
     ObjectParityCheck();
 #endif

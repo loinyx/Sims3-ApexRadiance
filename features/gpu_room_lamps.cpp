@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <format>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <tuple>
@@ -73,6 +74,7 @@ int g_tileRows = 0;
 struct Cover {
     int drawn = 0, failed = 0;
     std::string why;
+    std::string room0; // (NoteRoom0) how room 0's lamps were drawn
 };
 std::map<int, Cover> g_cover;
 std::map<int, std::string> g_coverLogged;
@@ -356,8 +358,6 @@ namespace {
 // rows: several passes over the same sum. False (err) leaves the game's map
 bool RelightPhys(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, Entry& e, const RtLampGpu::Params& base, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h,
                  std::string& err) {
-    const uint32_t gen = RtOutdoorLamps::KeptMeshGen();
-    if (!gen) return err = "physical: no occluders with open tops uploaded", false;
     std::vector<RtLampModel::Lamp> lamps;
     std::vector<std::array<float, 3>> world;
     std::vector<uintptr_t> lights;
@@ -367,14 +367,28 @@ bool RelightPhys(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, Entry& e, const 
             lamps.push_back(e.lotLaws[l]), world.push_back(e.world[l]), lights.push_back(e.lamps[l]),
                 reach.push_back(l < e.physReach.size() && e.physReach[l] ? 1.0f : 0.0f);
     const int n = static_cast<int>(lamps.size());
+    if (!eng.SetBlockers(dev, e.blockers, err)) return false;
+    RtLampGpu::Params p = base;
+    p.thr = e.thr, p.mask = false, p.maskAllGpu = false, p.keptX = false, p.physX = false, p.debugLamp = -1;
+    return PhysPasses(dev, eng, lights.data(), lamps.data(), n, base.farDist, err, [&](int g0, int gn, const int* tiles, bool last) {
+        std::vector<RtLampGpu::Engine::PhysRoom> room(1);
+        room[0].header = e.blkHeader;
+        for (int i = 0; i < gn; i++) room[0].lamp.push_back({lamps[g0 + i].mult, reach[g0 + i], 0.0f});
+        return eng.RelightKeptPhys(dev, e.gpu, lamps.data() + g0, tiles, reinterpret_cast<const float (*)[3]>(world.data() + g0), gn, room, p, game, out, w, h, err, g0 == 0,
+                                   last);
+    });
+}
+} // namespace
+
+bool PhysPasses(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, const uintptr_t* lights, const RtLampModel::Lamp* lamps, int n, float farDist, std::string& err,
+                const std::function<bool(int first, int count, const int* tiles, bool last)>& pass) {
+    const uint32_t gen = RtOutdoorLamps::KeptMeshGen();
+    if (!gen) return err = "physical: no occluders with open tops uploaded", false;
     if (n > kMaxLamps) return err = std::format("physical: {} lamps, at most {} are drawn", n, kMaxLamps), false;
     const int rows = std::max(g_tileRows, std::min(kTiles, (std::max(n, 1) + 3) / 4 * 4));
     if (eng.TileRows() != rows) g_tiles = {}; // (made again: no tile holds a shadow)
     if (!eng.EnsureTiles(dev, rows, err)) return false;
     g_tileRows = rows;
-    if (!eng.SetBlockers(dev, e.blockers, err)) return false;
-    RtLampGpu::Params p = base;
-    p.thr = e.thr, p.mask = false, p.maskAllGpu = false, p.keptX = false, p.debugLamp = -1;
     for (int g0 = 0; g0 == 0 || g0 < n; g0 += rows) { // (a pass per `rows` lamps; none: one pass, the sum 0)
         const int gn = std::min(rows, n - g0);
         std::vector<int> tiles(gn, -1);
@@ -393,22 +407,16 @@ bool RelightPhys(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, Entry& e, const 
                 if (!taken[c] && (t < 0 || g_tiles[c].used < g_tiles[t].used)) t = c;
             Tile& g = g_tiles[t];
             g = Tile{};
-            if (!eng.RenderShadowTile(dev, lamps[g0 + i].law.pos, t, base.farDist, err)) return false;
+            if (!eng.RenderShadowTile(dev, lamps[g0 + i].law.pos, t, farDist, err)) return false;
             g.light = lights[g0 + i], g.gen = gen;
             std::memcpy(g.pos, lamps[g0 + i].law.pos, sizeof g.pos);
             tiles[i] = t, taken[t] = true;
         }
         for (int i = 0; i < gn; i++) g_tiles[tiles[i]].used = g_tileUse;
-        std::vector<RtLampGpu::Engine::PhysRoom> room(1);
-        room[0].header = e.blkHeader;
-        for (int i = 0; i < gn; i++) room[0].lamp.push_back({lamps[g0 + i].mult, reach[g0 + i]});
-        if (!eng.RelightKeptPhys(dev, e.gpu, lamps.data() + g0, tiles.data(), reinterpret_cast<const float (*)[3]>(world.data() + g0), gn, room, p, game, out, w, h, err,
-                                 g0 == 0, g0 + rows >= n))
-            return false;
+        if (!pass(g0, gn, tiles.data(), g0 + rows >= n)) return false;
     }
     return true;
 }
-} // namespace
 
 void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h,
                  const RtLampGpu::Params& p) {
@@ -459,16 +467,20 @@ void ReleaseAll() {
 
 void BeginFrame() {
     g_frame.fetch_add(1, std::memory_order_relaxed);
-    // (physical indoor lamps) the last round's cover per story, when it changed (room 0 keeps its solve's light: not physical yet)
+    // (physical indoor lamps) the last round's cover per story, when it changed (room 0: NoteRoom0)
     for (const auto& [story, c] : g_cover) {
         std::string line = c.failed ? std::format("not covered ({} of {} maps not drawn: {})", c.failed, c.drawn + c.failed, c.why)
-                                    : std::format("every map drawn ({} maps of its rooms > 0; room 0 from its solve)", c.drawn);
+                                    : std::format("every map drawn ({} maps of its rooms > 0; room 0 {})", c.drawn, c.room0.empty() ? "from its solve" : c.room0);
         if (std::string& was = g_coverLogged[story]; was != line) {
             if (LogAllowed()) LOG_INFO(std::format("[GpuRoomLamps] Story {} physical: {}", story, line));
             was = std::move(line);
         }
     }
     g_cover.clear();
+}
+void NoteRoom0(int story, const std::string& how) {
+    std::string& r = g_cover[story].room0;
+    if (r.find(how) == std::string::npos && r.size() < 200) r += (r.empty() ? "" : "; ") + how;
 }
 bool EditPending(uintptr_t light) {
     std::lock_guard<std::mutex> lk(g_editMx);

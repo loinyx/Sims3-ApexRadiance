@@ -223,13 +223,27 @@ lamp's position, not on its colour or intensity.
    16 rows at once. Each relight round logs per story, when it changes, `Story S physical: every map drawn (...)` or `not
    covered (K of N maps not drawn: why)`. Room 0 is still drawn from its solve. `rt_lamps_test` 59 checks (passes of 3
    lamps over a 3-row atlas give the one pass's map texel for texel).
+21. Physical model, stage 3b, part 3 (02/11): room 0 of the active lot is physical too. A room 0 solve kept under the physical
+   model also keeps, per lamp, its norm scale (as in 20) and reach flag, and room 0's 3D test records read as the solve starts
+   (UNVERIFIED that they are the outdoor objects its batches test; logged in `base without N lot lamps (physical; 3D test ...)`).
+   `ExportRoom0(physical)` takes every lot lamp with a law out of the base and gives its room row (mult x norm scale, reach,
+   exit) and the texels whose batch ran the 3D test. Real-time outdoor lamps draws them first over phys points of their own
+   (one per place of the map, DEFAULT; prepared again after a device reset) from their laws now, with the kept atlas's tiles
+   shared with the kept rooms (`GpuRoomLamps::PhysPasses`) and the soft furniture shadows of the game's 3D test, then its
+   outdoor batches add to the same sum. `AccPhysXPS` adds their floor mask "all" / "vis" (masked texels) and exit light (exit
+   ground texels) into a second sum (`Engine::AccumulatePhys`, one A32B32G32R32F texture of the sums' size) that
+   `ComposeK0PS` reads. No light is lost: a solve kept by the replica model, missing physical shaders or no occluders with open
+   tops yet keep the lamps in the base (`Story S room 0: its lot lamps stay in its base (why)`), and a failed physical draw
+   shows the game's map and prepares that map again with its lamps in the base. The per-story line ends `room 0 physical (N
+   lamps)`. Lamp edits still take the solves. `rt_lamps_test` 64 checks (`Room0PhysCheck`: 2048 texels 0/255 from the CPU,
+   floor mask and exit alpha exact, two calls over one sum as one).
 
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Keep indoor lamps for GPU | `gpuRoomLampsCapture` | bool | off | | Developer only, with Lamp lighting: Instant. Keeps each room solve of the active lot and draws its lamps on the GPU; colour, intensity and switch edits of lamps drawn in every room listing them solve no room at once (the directional maps objects read are written again at the end of the room update) (their rooms are solved 2 s after the last edit); with the probe on, logs the self-checks |
-| Indoor lamp model | `roomLampModel` | enum | replica | replica, physical | Developer only, shown with Keep indoor lamps for GPU on. Replica: everything above. Physical: see 16 to 19; rooms > 0 drawn from their lamps' laws, room 0 and lamp edits still the game's. A change drops the kept rooms and sends the active lot's rooms to their solve |
+| Indoor lamp model | `roomLampModel` | enum | replica | replica, physical | Developer only, shown with Keep indoor lamps for GPU on. Replica: everything above. Physical: see 16 to 21; rooms > 0 and room 0 drawn from their lamps' laws, lamp edits still the game's. A change drops the kept rooms and sends the active lot's rooms to their solve |
 
 ## Limitations
 
