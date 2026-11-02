@@ -4561,6 +4561,9 @@ void BasisDue() {
 // steps run on the light tree thread when the job starts, the shares on a worker, the write at a later room update with
 // stage 4's rules (only texels holding the capture's or the last write's value, only while no solve holds the working maps).
 // A room written so is written again after its next kept solve (the settle's too): its texels do not go back to the game's.
+// Room 0 has no directional samples to write: state 0 (0x006A18B0) sets up the directional pass (room+0x540, 0x006AA120 with
+// 1 and 0x40 at 0x006A1BAB) only past 0x006A1AE8's `cmp byte [room+0x18], 0; jne` (an outdoor room returns first), and a
+// room 0 capture that saw a directional step is never kept (SolveEnd: "a directional map") while room 0's are kept.
 struct PhysBasisLamp {
     uintptr_t light = 0;
     float row = 1.0f, world[3] = {}, lot[3] = {};

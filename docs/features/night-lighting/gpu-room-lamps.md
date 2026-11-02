@@ -284,7 +284,10 @@ lamp's position, not on its colour or intensity.
    physical move and a new lamp taken (`OwnObjectEditTaken`): the probe's dumps of 02/11 hold no 3D record of a lamp object (of
    235 lamps listed by 77 rooms with records, 231 lie outside every record's sphere; the other 4 stand on or beside furniture).
    A new lamp is found in the story's registry (UNVERIFIED that it is there when its object's occluder updates: the
-   `LampMarkFilter` status counts it). `outdoor_delta_test` 90 checks.
+   `LampMarkFilter` status counts it). `outdoor_delta_test` 90 checks. Room 0 writes no directional map: the solve's state 0
+   (`0x006A18B0`) sets up the directional pass (room+0x540, `0x006AA120` with 1 and 0x40 at `0x006A1BAB`) only for a room
+   whose outdoor byte (+0x18) is 0 (`0x006A1AE8` returns first for an outdoor room), and Quick outdoor lamp edits never keep a
+   room 0 solve that ran a directional step (none fails so), so there is no room 0 directional texel to rewrite.
 25. Physical model, S8 (02/11): Rooms at Night without a solve. The kept compose scales a roofed texel's ramp x ambient (the
    ceiling pass's `+0x650`, read back by `IndoorSplit`) by the room's `+0x110` now over its solve's (`RtLampModel::AmbScale`,
    `ComposeKeptPS` `gAmb`, c108): exactly 1 while the ambient is unchanged, so the texel is the one before (byte for byte), and
