@@ -30,6 +30,7 @@
 #include "level_light_share.h"
 #include "room_light_queue.h"
 #include "room_map_dither.h"
+#include "room_lamp_move.h"
 #include "lamp_mark_filter.h"
 #include "apex_log.h"
 #include "apex_paths.h"
@@ -42,12 +43,14 @@
 #include <windows.h>
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <cmath>
 #include <cstring>
 #include <format>
 #include <map>
 #include <memory>
 #include <tuple>
+#include <thread>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -1505,6 +1508,18 @@ bool ProbeLog() {
     if (n == kProbeLines) LOG_INFO("[RoomLampProbe] Line limit reached: later probes are not logged");
     return n < kProbeLines;
 }
+// (GPU room lamps) the lot's geometry key mixed with the room's 3D blocker records (room+0x40..+0x44, 64 bytes each); 0: not read
+uint64_t RoomGeoKey(const BYTE* room) {
+    uint64_t geo = LevelLightShare::LotGeometryKey(room);
+    uintptr_t rb[2] = {};
+    if (geo && CopyBytes(rb, room + 0x40, sizeof rb) && rb[0] && rb[1] >= rb[0] && (rb[1] - rb[0]) % 64 == 0 && rb[1] - rb[0] <= 512 * 64) {
+        std::vector<uint8_t> recs(rb[1] - rb[0]);
+        if (!recs.empty() && !CopyBytes(recs.data(), reinterpret_cast<const void*>(rb[0]), recs.size())) return 0;
+        for (const uint8_t b : recs) geo = (geo ^ b) * 1099511628211ull;
+        return geo | 1;
+    }
+    return rb[0] == 0 && rb[1] == 0 ? geo : 0;
+}
 void ProbeStart(unsigned char* room, const RoomRead& rr) {
     const char* refuse = !LevelLightShare::DeltaReady() ? "the room solve hooks are not in"
                          : RoomLightQueue::QuickPassTarget(room) > 0  ? "a quick pass"
@@ -1528,19 +1543,7 @@ void ProbeStart(unsigned char* room, const RoomRead& rr) {
     // (GPU room lamps, CarryOff) the lot's geometry key and the room's 3D blocker records (room+0x40..+0x44, 64 bytes each) as
     // the solve starts: the parts of a lamp kept by an earlier solve still hold while both are the same (UNVERIFIED that a moved
     // object always changes its record)
-    if (c.keep) {
-        r.geo = LevelLightShare::LotGeometryKey(room);
-        uintptr_t rb[2] = {};
-        if (r.geo && CopyBytes(rb, room + 0x40, sizeof rb) && rb[0] && rb[1] >= rb[0] && (rb[1] - rb[0]) % 64 == 0 && rb[1] - rb[0] <= 512 * 64) {
-            std::vector<uint8_t> recs(rb[1] - rb[0]);
-            if (recs.empty() || CopyBytes(recs.data(), reinterpret_cast<const void*>(rb[0]), recs.size())) {
-                for (const uint8_t b : recs) r.geo = (r.geo ^ b) * 1099511628211ull;
-                r.geo |= 1;
-            } else
-                r.geo = 0;
-        } else if (!(rb[0] == 0 && rb[1] == 0))
-            r.geo = 0;
-    }
+    if (c.keep) r.geo = RoomGeoKey(room);
 }
 inline float Max3(const float* c) { return std::max({c[0], c[1], c[2]}); }
 // The probe's dump (one file a session in the Apex Radiance folder): each probed room's 3D blockers as the game's 3D test
@@ -2025,6 +2028,10 @@ struct KeptRoom {
     long killed = 0;
     float toneK = 0.0f, amb[3] = {}, ambPass[3] = {};
     uint64_t geo = 0; // the lot's geometry key and the room's 3D blockers at its solve's start (CarryOff; 0: not read)
+    // (stage 3) the solve's batches (their samples' range and test switches), and for a copy a lamp move made (MoveWorker) the
+    // version whose drawing it continues until the GPU drew it
+    std::vector<BatchRec> batches;
+    uint32_t movedFrom = 0;
     size_t bytes = 0;
 };
 // (stage 2b) g_kept and g_keptBytes: the light tree thread changes them, the render thread reads them (gpu_room_lamps.cpp) and
@@ -2044,7 +2051,8 @@ std::atomic<int> g_keptLines{0};
 bool KeptLog() { return g_keptLines.fetch_add(1, std::memory_order_relaxed) < 2000; }
 size_t KeptBytes(const KeptRoom& k) {
     size_t b = sizeof(KeptRoom) + k.samples.capacity() + k.texels.capacity() * sizeof(TexelRec) + k.base.capacity() * sizeof(float) +
-               k.tail.capacity() * sizeof(KeptTail) + k.copies.capacity() * sizeof(KeptCopy) + k.blocks.capacity() * sizeof(BlockRec) + k.preblur.capacity() * 4;
+               k.tail.capacity() * sizeof(KeptTail) + k.copies.capacity() * sizeof(KeptCopy) + k.blocks.capacity() * sizeof(BlockRec) + k.preblur.capacity() * 4 +
+               k.batches.capacity() * sizeof(BatchRec);
     for (const KeptLamp& l : k.lamps) b += sizeof(KeptLamp) + l.parts.capacity() * sizeof(KeptPart);
     return b;
 }
@@ -2594,6 +2602,7 @@ void KeepEnd(const BYTE* room) {
             ShrinkExact(k->tail), ShrinkExact(k->copies), ShrinkExact(k->blocks), ShrinkExact(k->preblur);
         }
         // the capture's texels and samples move into the kept room (the capture is dropped next)
+        k->batches = r.batches;
         k->samples = std::move(r.samples);
         k->texels = std::move(r.texels);
         ShrinkExact(k->samples), ShrinkExact(k->texels);
@@ -3399,9 +3408,198 @@ uintptr_t TlTracker(uintptr_t tl) { // POD (SEH)
         return 0;
     }
 }
-bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on) {
+// ---- GPU room lamps stage 3: a lamp moved within its room (docs/features/night-lighting/gpu-room-lamps.md "Lamp moves") ----
+// TakesLampEdit (light tree thread) copies what the game's tests read of each kept room listing the lamp (its walls, default
+// wall list and wall mode, its 3D records and their blockers; room_light_tests.h) and queues one job per room; the move
+// worker (one thread) recomputes the lamp's parts at every kept texel with room_lamp_move.h (validated offline by
+// tools/apex_paths_replay at the probe's recorded positions) and puts in a copy of the kept room with those parts and the
+// lamp's law at its new place under a new version, which the GPU draws as any kept room. Until then the GPU draws the room's
+// last parts with the law they were kept with (gpu_room_lamps.cpp), never the new law over old parts.
+struct MoveJob {
+    std::shared_ptr<const KeptRoom> k;
+    KeptLamp lamp; // its law at the new place (no parts)
+    RoomLightTests::Room tests;
+    uint8_t mult = 1, bits = 0;
+    uintptr_t tracker = 0;
+    LARGE_INTEGER at{};
+};
+std::mutex g_moveMx;
+std::condition_variable g_moveCv;
+std::map<std::pair<uint64_t, uintptr_t>, MoveJob> g_moveJobs; // (kept room key, lamp) -> its latest move (a drag's later move replaces it)
+bool g_moveThread = false;
+std::atomic<long> c_moveJobs{0}, c_moveDone{0}, c_moveStale{0}, c_moveFailed{0};
+// The constants the game's tests read (once; the light tree thread, before the first job)
+void ReadTestConsts() {
+    static bool s_done = false;
+    if (s_done) return;
+    s_done = true;
+    for (const uint32_t at : RoomLightTests::kConstAt) {
+        float v = 0.0f;
+        if (CopyBytes(&v, reinterpret_cast<const void*>(static_cast<uintptr_t>(at)), sizeof v)) RoomLightTests::SetConst(at, v);
+    }
+}
+// The room's walls (+0x30..+0x34, 0x100 bytes each), its default 2D list (+0x78..+0x7C), its wall mode (+0x639) and its 3D
+// records (+0x40..+0x44, 64 bytes: the centre, then r2 at +0x10, the blockers' vector at +0x30) with their blockers (0x100
+// bytes), as the room lamp probe dumps them. False (why): unreadable, or a blocker the copy does not know
+bool ReadRoomTests(const BYTE* room, RoomLightTests::Room& r, std::string& why) {
+    uintptr_t wv[2] = {}, i2[2] = {}, rb[2] = {};
+    uint8_t mode = 0;
+    if (!CopyBytes(&mode, room + 0x639, 1) || !CopyBytes(wv, room + 0x30, sizeof wv) || !CopyBytes(i2, room + 0x78, sizeof i2) || !CopyBytes(rb, room + 0x40, sizeof rb))
+        return why = "its walls could not be read", false;
+    r.mode = mode;
+    const auto count = [](const uintptr_t* v, size_t size, size_t max) { return v[0] && v[1] >= v[0] && (v[1] - v[0]) % size == 0 ? (v[1] - v[0]) / size : v[0] == v[1] ? 0 : max + 1; };
+    const size_t nw = count(wv, 4, 1024), ni = count(i2, 4, 4096), nr = count(rb, 64, 512);
+    if (nw > 1024 || ni > 4096 || nr > 512) return why = "its walls or 3D records could not be read", false;
+    r.walls.resize(nw);
+    for (size_t i = 0; i < nw; i++) {
+        uintptr_t w = 0;
+        if (!CopyBytes(&w, reinterpret_cast<const void*>(wv[0] + i * 4), 4) || !w || !CopyBytes(r.walls[i].f, reinterpret_cast<const void*>(w), sizeof r.walls[i].f))
+            return why = "a wall could not be read", false;
+    }
+    r.idx2d.resize(ni);
+    if (ni && !CopyBytes(r.idx2d.data(), reinterpret_cast<const void*>(i2[0]), ni * 4)) return why = "its wall list could not be read", false;
+    r.rec.resize(nr);
+    for (size_t i = 0; i < nr; i++) {
+        float rec[16] = {};
+        if (!CopyBytes(rec, reinterpret_cast<const void*>(rb[0] + i * 64), 64)) return why = "a 3D record could not be read", false;
+        r.rec[i].c = {rec[0], rec[1], rec[2]}, r.rec[i].r2 = rec[4];
+        uintptr_t bl[2] = {};
+        std::memcpy(bl, &rec[12], sizeof bl);
+        const size_t nb = count(bl, 4, 64);
+        if (nb > 64) return why = "a 3D record's blockers could not be read", false;
+        r.rec[i].b.resize(nb);
+        for (size_t j = 0; j < nb; j++) {
+            uintptr_t b = 0;
+            RoomLightTests::Blocker& k = r.rec[i].b[j];
+            if (!CopyBytes(&b, reinterpret_cast<const void*>(bl[0] + j * 4), 4) || !b || !CopyBytes(&k.vt, reinterpret_cast<const void*>(b), 4) ||
+                !CopyBytes(k.f, reinterpret_cast<const void*>(b), sizeof k.f))
+                return why = "a 3D blocker could not be read", false;
+            if (k.vt != RoomLightTests::kQuadVt && k.vt != RoomLightTests::kDiscVt) return why = std::format("a 3D blocker of a kind the copy does not know (vtable {:08X})", k.vt), false;
+        }
+    }
+    return true;
+}
+void MoveWorker() {
+    for (;;) {
+        MoveJob job;
+        {
+            std::unique_lock<std::mutex> lk(g_moveMx);
+            g_moveCv.wait(lk, [] { return !g_moveJobs.empty(); });
+            job = std::move(g_moveJobs.begin()->second);
+            g_moveJobs.erase(g_moveJobs.begin());
+        }
+        LARGE_INTEGER t0{}, t1{}, f{};
+        QueryPerformanceCounter(&t0);
+        const KeptRoom& k = *job.k;
+        const size_t n = k.texels.size();
+        KeptLamp kl = job.lamp;
+        int unknown = 0;
+        long lit = 0;
+        std::vector<int> list;
+        for (const BatchRec& b : k.batches) {
+            const bool f0 = b.flags[0] != 0, f1 = b.flags[1] != 0, built = RoomLampMove::ListsBuilt(b.count, f0, f1);
+            if (built) { // (the cull ray from the batch's centroid, as the probe's dump gives it)
+                float c[3] = {};
+                for (uint32_t i = 0; i < b.count && b.first + i < n; i++)
+                    for (int q = 0; q < 3; q++) c[q] += reinterpret_cast<const float*>(k.samples.data() + static_cast<size_t>(b.first + i) * 0x30)[q] / static_cast<float>(b.count);
+                list = RoomLightTests::wallCull(job.tests, {c[0], c[1], c[2]}, {kl.law.pos[0], kl.law.pos[1], kl.law.pos[2]});
+            }
+            for (uint32_t i = 0; i < b.count && b.first + i < n; i++) {
+                const uint32_t t = b.first + i;
+                const float* s = reinterpret_cast<const float*>(k.samples.data() + static_cast<size_t>(t) * 0x30);
+                float lw[3];
+                LawAt(kl.law, false, s, lw);
+                if (!((lw[2] + lw[1]) + lw[0] > 0.0f)) continue;
+                float A = 1.0f, B = 0.0f;
+                RoomLampMove::PartAt(job.tests, built, list, f0, f1, kl.law.pos, s, s + 4, A, B, &unknown);
+                lit++;
+                KeptPart p;
+                p.texel = t, p.a = ToHalf(std::min(A, 60000.0f)), p.b = ToHalf(std::clamp(B, 0.0f, 1.0f)), p.thrScale = ToHalf(1.0f), p.mult = job.mult, p.bits = job.bits;
+                kl.parts.push_back(p);
+            }
+        }
+        std::sort(kl.parts.begin(), kl.parts.end(), [](const KeptPart& a, const KeptPart& b) { return a.texel < b.texel; });
+        ShrinkExact(kl.parts);
+        QueryPerformanceCounter(&t1);
+        QueryPerformanceFrequency(&f);
+        const double ms = 1000.0 * static_cast<double>(t1.QuadPart - t0.QuadPart) / static_cast<double>(f.QuadPart);
+        const double since = 1000.0 * static_cast<double>(t1.QuadPart - job.at.QuadPart) / static_cast<double>(f.QuadPart);
+        if (unknown) { // (ReadRoomTests refuses them: not reached)
+            c_moveFailed.fetch_add(1, std::memory_order_relaxed);
+            const bool queued = LevelLightShare::QueueRoomId(job.tracker, k.story, k.id, -1);
+            if (KeptLog())
+                LOG_INFO(std::format("[GpuRoomLamps] move: lamp {:08X} story {} room {}: left to the room solve ({} rays met a 3D blocker the copy does not know){}", kl.light, k.story,
+                                     k.id, unknown, queued ? "" : " (the room queue refused it)"));
+            continue;
+        }
+        auto nk = std::make_shared<KeptRoom>(k);
+        bool found = false;
+        for (KeptLamp& l : nk->lamps)
+            if (l.light == kl.light) l = kl, found = true;
+        if (!found) nk->lamps.push_back(kl);
+        nk->bytes = KeptBytes(*nk);
+        bool put = false;
+        uint32_t version = 0;
+        {
+            std::lock_guard<std::mutex> lk(g_keptMx);
+            const auto it = g_kept.find(KeyOf(reinterpret_cast<const void*>(k.room), k.cls));
+            if (it != g_kept.end() && it->second == job.k) {
+                version = nk->version = g_keptVersion.fetch_add(1, std::memory_order_relaxed) + 1;
+                // (the drawing this one continues: TakesLampEdit takes the next move while the GPU has not drawn it yet)
+                nk->movedFrom = GpuRoomLamps::Drawn(reinterpret_cast<const void*>(k.room), k.version, k.maps) ? k.version : k.movedFrom;
+                g_keptBytes = g_keptBytes - std::min(g_keptBytes, k.bytes) + nk->bytes;
+                it->second = nk;
+                put = true;
+            }
+        }
+        (put ? c_moveDone : c_moveStale).fetch_add(1, std::memory_order_relaxed);
+        if (put) GpuRoomLamps::NoteEdit(kl.light, "move", {reinterpret_cast<const void*>(k.room)}, std::to_string(k.story));
+        if (KeptLog())
+            LOG_INFO(std::format("[GpuRoomLamps] move: lamp {:08X} story {} room {} class {}: {} texels x 1 lamp recomputed ({} lit, {} parts) in {:.1f} ms on the move worker, "
+                                 "{:.1f} ms after the move; {}",
+                                 kl.light, k.story, k.id, k.cls, n, lit, kl.parts.size(), ms, since,
+                                 put ? std::format("kept as version {}", version) : std::string("dropped (the room was solved or kept again meanwhile)")));
+    }
+}
+void QueueMove(uint64_t key, MoveJob&& job) {
+    std::lock_guard<std::mutex> lk(g_moveMx);
+    if (!g_moveThread) {
+        g_moveThread = true;
+        std::thread(MoveWorker).detach();
+    }
+    g_moveJobs[{key, job.lamp.light}] = std::move(job);
+    c_moveJobs.fetch_add(1, std::memory_order_relaxed);
+    g_moveCv.notify_one();
+}
+// A move of `light` in kept room k (light tree thread): its job, or why it is left to the game's path
+const char* MoveJobFor(const void* room, const RoomRead& rr, const std::shared_ptr<const KeptRoom>& k, uintptr_t light, uintptr_t tracker, MoveJob& job,
+                       std::string& why) {
+    if (!LawOfLight(light, rr.lot, job.lamp)) return "a lamp without a law now";
+    if (job.lamp.colourOnly) return "a light without a GPU law (its share follows its place)";
+    const char* path = nullptr;
+    const int kind = LevelLightShare::MovePath(room, light, job.lamp.law.pos, path);
+    if (kind < 0) return path;
+    if (!k->geo || RoomGeoKey(static_cast<const BYTE*>(room)) != k->geo) return "the lot's geometry or the room's 3D blockers changed since its solve";
+    if (k->batches.empty()) return "its kept solve has no batches";
+    if (!ReadRoomTests(static_cast<const BYTE*>(room), job.tests, why)) return why.c_str();
+    uintptr_t raw[1024];
+    const int n = ReadList(static_cast<const BYTE*>(room), raw, static_cast<int>(std::size(raw)));
+    job.mult = static_cast<uint8_t>(std::clamp<long long>(std::count(raw, raw + std::max(n, 0), light), 1, 255));
+    // the soft light cut as the room's parts were kept (none kept: as it is now)
+    bool any = false, fade = false;
+    for (const KeptLamp& l : k->lamps)
+        for (const KeptPart& p : l.parts) any = true, fade = fade || (p.bits & kKeptFade);
+    if (!any) fade = LevelLightShare::SoftLightCutOn();
+    job.bits = static_cast<uint8_t>((kind == 1 ? kKeptEarly : 0) | (fade ? kKeptFade : 0));
+    job.k = k, job.tracker = tracker;
+    QueryPerformanceCounter(&job.at);
+    return nullptr;
+}
+bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move) {
     if (!g_capture.load(std::memory_order_relaxed) || !tl || !light) return false;
-    const char* kind = wasOn == on ? "value" : on ? "switch on" : "switch off";
+    const char* kind = move ? "move" : wasOn == on ? "value" : on ? "switch on" : "switch off";
+    std::vector<std::pair<uint64_t, MoveJob>> jobs; // (a move) one per kept room listing it
+    std::string moveWhy;
     const uintptr_t tracker = TlTracker(tl);
     if (!tracker) return false;
     std::vector<void*> rooms;
@@ -3427,6 +3625,7 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on) {
         if (!ReadRoom(static_cast<const BYTE*>(room), rr)) return false;
         if (!geoRead) haveGeo = RtOutdoorLamps::ColourLaw(light, rr.lot, colourNow, geoNow), geoRead = true;
         if (rr.id == 0) {
+            if (move) return refuse(rr, "a room 0 lists it (its parts there are not redone for a move)");
             if (!RtOutdoorLamps::CoversLamp(room, light)) return refuse(rr, "a room 0 Real-time outdoor lamps does not draw it in (no law, or a floor mask part where its law is dark)");
             // (a tube kept there with another share than now: drawn as its solve gave it, so its edit is not shown)
             std::lock_guard<std::recursive_mutex> lk(g_mx);
@@ -3447,7 +3646,14 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on) {
             if (kl.light == light && kl.colourOnly && on && (!haveGeo || kl.geo != geoNow)) return refuse(rr, "a light without a GPU law whose intensity or shape changed");
             carriedRooms += kl.light == light && kl.carried ? 1 : 0;
         }
-        if (!GpuRoomLamps::Drawn(room, k->version, k->maps)) return refuse(rr, "a map of it not drawn on the GPU");
+        // (a copy a lamp move made counts as drawn while the GPU still draws the one it replaced)
+        if (!GpuRoomLamps::Drawn(room, k->version, k->maps) && !(k->movedFrom && GpuRoomLamps::Drawn(room, k->movedFrom, k->maps)))
+            return refuse(rr, "a map of it not drawn on the GPU");
+        if (move) {
+            MoveJob job;
+            if (const char* why = MoveJobFor(room, rr, k, light, tracker, job, moveWhy)) return refuse(rr, why);
+            jobs.emplace_back(KeyOf(room, rr.cls), std::move(job));
+        }
         kept.emplace_back(room, k->version);
         ids.emplace_back(rr.story, rr.id);
         if (std::find(stories.begin(), stories.end(), rr.story) == stories.end()) stories.push_back(rr.story);
@@ -3473,7 +3679,11 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on) {
     for (const int s : stories) st += (st.empty() ? "" : ", ") + std::to_string(s);
     std::vector<const void*> list;
     for (const auto& [room, v] : kept) list.push_back(room);
-    GpuRoomLamps::NoteEdit(light, kind, list, st);
+    if (move) { // (the worker notes each room's edit when its parts are in)
+        ReadTestConsts();
+        for (auto& [key, job] : jobs) QueueMove(key, std::move(job));
+    } else
+        GpuRoomLamps::NoteEdit(light, kind, list, st);
     // the settle: those rooms are solved once kSettleMs after the lamp's last edit taken (a drag's edits make one settle)
     Settle& s = g_settle[light];
     s.tracker = tracker, s.at = GetTickCount();
@@ -3595,7 +3805,7 @@ bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu:
     const auto placeOf = [](int x, int y) { return static_cast<uint32_t>(y) << 16 | static_cast<uint32_t>(x); };
     const bool blurred = m == 0 && k.cls == 2;
     d.blur = blurred;
-    for (const KeptLamp& l : k.lamps) d.roomLamps.push_back(RtLampGpu::KeptMapData::RoomLamp{l.light, {l.pos[0], l.pos[1], l.pos[2]}, l.geo, l.colourOnly});
+    for (const KeptLamp& l : k.lamps) d.roomLamps.push_back(RtLampGpu::KeptMapData::RoomLamp{l.light, {l.pos[0], l.pos[1], l.pos[2]}, l.geo, l.colourOnly, l.law});
     // every last write at its own place (a copy's source is taken as composed; a place a copy overwrites is drawn over after)
     if (!blurred)
         for (const auto& [key, i] : lastAt) {

@@ -124,12 +124,13 @@ struct KeptMapData {
     UINT passes = 0;
     std::vector<std::pair<uint32_t, uint32_t>> expect; // (y << 16 | x, the texel the game left there) for the self-check
     // every lamp of the room's kept solve the GPU draws, with its position then, or (its colour alone) the signature of what its
-    // share reads: one changed since (moved, a tube's intensity), the room is not drawn
+    // share reads, and its law then: one changed since (moved, a tube's intensity) is drawn with that law (its parts' own)
     struct RoomLamp {
         uintptr_t light;
         float pos[3];
         uint64_t geo;
         bool colourOnly;
+        GpuLampLaw::Lamp law;
     };
     std::vector<RoomLamp> roomLamps;
 };

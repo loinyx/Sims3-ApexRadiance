@@ -5,7 +5,7 @@ room 0 is kept, split into the light the GPU will not draw and, per texel and lo
 Apex's tests and the game's tests let through, with the room's tail (tone, ambient, dither, pack, wall blur, tile-edge
 copies). The kept rooms are drawn on the GPU over Real-time outdoor lamps' copy of each story map with the lot lamps as they
 are now, so a lamp's colour, intensity or switch shows in the frame of the edit, and such an edit solves no room until a settle 2 s
-after it when every room listing the lamp is drawn so. With [the room lamp
+after it when every room listing the lamp is drawn so. A lamp moved within its room is relit the same way once a worker thread has redone its parts there from a copy of the game's tests (only for lamps whose light reaches those rooms by the plain path). With [the room lamp
 probe](gpu-room-lamps-probe.md) on too, each kept solve is recomposed on the CPU and on the GPU and compared with the game's.
 
 ## Status
@@ -16,7 +16,7 @@ probe](gpu-room-lamps-probe.md) on too, each kept solve is recomposed on the CPU
 | Default | Off |
 | Menu | Developer > Compare lighting paths > Keep indoor lamps for GPU (with Lamp lighting: Instant) |
 | Configuration | `gpuRoomLampsCapture` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
-| Source | [`features/outdoor_delta.cpp`](../../../features/outdoor_delta.cpp) (`KeepEnd`, `KeptSelfCheck`, `KeepFinals`, `KeptFinalCheck`, `BuildKeptMap`, `RoomFinalized`), [`features/rt_lamp_model.h`](../../../features/rt_lamp_model.h) (`KeptAdd`, `KeptTexel`), [`features/gpu_room_lamps.cpp`](../../../features/gpu_room_lamps.cpp), [`features/rt_lamp_gpu.cpp`](../../../features/rt_lamp_gpu.cpp) (`RelightKept`), [`shaders/rt_lamps_hlsl.h`](../../../shaders/rt_lamps_hlsl.h) (`AccKeptPS`, `ComposeKeptPS`, `CopyAtPS`, `BlockKeptPS`), [`features/room_map_dither.cpp`](../../../features/room_map_dither.cpp) (the pack input), [`features/level_light_share.cpp`](../../../features/level_light_share.cpp) (`LightEvalHook`, `FinalizeHook`, `LotRooms`), [`features/lamp_mark_filter.cpp`](../../../features/lamp_mark_filter.cpp) (`MarkDecideImpl`) |
+| Source | [`features/outdoor_delta.cpp`](../../../features/outdoor_delta.cpp) (`KeepEnd`, `KeptSelfCheck`, `KeepFinals`, `KeptFinalCheck`, `BuildKeptMap`, `RoomFinalized`), [`features/rt_lamp_model.h`](../../../features/rt_lamp_model.h) (`KeptAdd`, `KeptTexel`), [`features/gpu_room_lamps.cpp`](../../../features/gpu_room_lamps.cpp), [`features/rt_lamp_gpu.cpp`](../../../features/rt_lamp_gpu.cpp) (`RelightKept`), [`shaders/rt_lamps_hlsl.h`](../../../shaders/rt_lamps_hlsl.h) (`AccKeptPS`, `ComposeKeptPS`, `CopyAtPS`, `BlockKeptPS`), [`features/room_map_dither.cpp`](../../../features/room_map_dither.cpp) (the pack input), [`features/level_light_share.cpp`](../../../features/level_light_share.cpp) (`LightEvalHook`, `FinalizeHook`, `LotRooms`), [`features/lamp_mark_filter.cpp`](../../../features/lamp_mark_filter.cpp) (`MarkDecideImpl`), [`features/room_lamp_move.h`](../../../features/room_lamp_move.h) and [`features/room_light_tests.h`](../../../features/room_light_tests.h) (lamp moves) |
 
 ## The problem
 
@@ -95,8 +95,27 @@ lamp's position, not on its colour or intensity.
    term) that its colour does not change, so A over its colour and the GPU's KeptAdd with its colour now are exact for a
    switch or a colour edit. Its share's inputs (intensity, ends, radius, range) are kept as a signature: a change of one is
    drawn as a move (the room is left as the game's) and its edit takes the solves.
-13. A lamp moved (its law's position differs from the one its parts were kept with): the rooms holding it are not drawn, so
-   they show the game's texels, until their solve is kept again. Moves take the game's path (their rooms are solved).
+13. A lamp moved (its law's position differs from the one its parts were kept with) is drawn in the rooms holding it with the
+   law its parts were kept with (the room's last complete parts as they were, never its law now over them; room 0 alike), until
+   a copy of the room with its parts at its new place is kept or the room is solved.
+   A move within its room (stage 3) is taken without solves when every room listing the lamp is a kept room (no room 0)
+   drawn on the GPU where a copy of the tests can redo its parts (`LevelLightShare::MovePath`): a lamp with a GPU law (not a
+   tube), not an outdoor lamp, not under the room's story floor (`LampOverOwnFloor`: then `OwnFloorBlocksAt` cuts no
+   point), not one of the room record's inner, opening or cross lamps, in a roofed room or one without a record, and the lot's
+   geometry key and the room's 3D records are those of its kept solve. On the light tree thread the edit copies what the
+   game's tests read of each such room (its walls, default wall list and wall mode, its 3D records and their blockers; a
+   blocker of another kind than the soft rectangle or disc refuses the move) and queues one job per room for the move worker
+   (one thread; a later move of the same lamp replaces a job not started). The worker gives every kept texel where the lamp's
+   law at its new place is lit a part (`room_lamp_move.h`): A = MountedNdl's factor as LightEvalHook applies it, B = the
+   game's 2D wall test from the lamp with the batch's wall list (`wallCull` from the batch centroid when the solve built the
+   lists) when the batch tests walls, times its 3D test when it tests objects, dropped under 0.01 (`room_light_tests.h`,
+   the code the offline replays run), the threshold scale 1, the entries the room's list holds now, the early-out bit with a
+   record and the soft light cut bit as the room's parts were kept. It keeps a copy of the room with those parts and the
+   lamp's law there under a new version (dropped when the room was solved or kept again meanwhile), which the GPU draws as
+   any kept room; that copy counts as drawn for the next edit while the GPU still draws the one it replaced. During a drag
+   each step is taken this way (the next step's job replaces the last one's): the light follows in the worker's steps, each
+   drawn from complete parts of one place. The settle solves the rooms 2 s after the drag's last move. Anything else (a room
+   0 listing it, a move into another room, a refusal above) takes the game's path, logged.
 14. Switch on after the settle: a room kept again while a lamp is switched off by a taken edit (the settle's solve, or any
    solve) holds none of the lamp's parts. Its new kept solve takes them from its earlier kept solve (the one the switch off
    was taken with, `CarryOff`) when the texels are the same places with the same samples, the lot's geometry key and the
@@ -151,8 +170,14 @@ lamp's position, not on its colour or intensity.
   its 3D blocker records is UNVERIFIED (only those records and the lot's geometry key are compared).
 - A kept texel a tile-edge copy of another room's texel overwrote keeps the game's value: after an edit taken, such a strip
   one texel wide at a tile edge can lag until the rooms are solved (UNVERIFIED in game).
-- A lamp moved is not drawn from parts kept at its old place: its rooms show the game's texels until their solve is kept
-  again (no instant move until stage 3).
+- A moved lamp's parts are redone only for the plain path (see 13); its light through openings, between stories and in
+  room 0 is not, so such moves take the solves. A is MountedNdl's factor over the law at the new place: the game's evaluation
+  there is the law to 99.5% (the probe), so the kept capture's A (the game's colour over the law) and a moved lamp's differ
+  where they differ. The room's light lists are read as the edit sees them: that a move within the room changes no list is
+  UNVERIFIED, as is that the lamp object's own 3D records change only after the edit (the move compares them with the kept
+  solve's at the edit; the settle's solve takes them in either way). The lamp's occluder marks are dropped as Real-time
+  outdoor lamps drops them for a move. A switch on after a moved copy was kept takes the solves (its rooms' versions
+  changed). A copy is a whole kept room (about 0.5 MB) made per job landed; the 192 MB budget is not checked for it.
 - The sum is added with post-pixel-shader blending into an A32B32G32R32F target; a device without it draws nothing (logged).
 - Each part is a 80-byte point in a DEFAULT vertex buffer (estimated, not measured: 0.5 to 6 MB of video memory a room).
 
@@ -255,6 +280,14 @@ lamp's position, not on its colour or intensity.
   recomposed), then the room (norm, k, ambient +0x110, pass ambient +0x650), the copies to other places, the texels
   overwritten by copies of texels no capture holds, the wall texels not blurred again, the roofed texels without a ramp
   read back and the time of both checks; or `final self-check: not run (why)`.
+- **Lamp moves** (`outdoor_delta.cpp`: `MoveJobFor`, `ReadRoomTests`, `QueueMove`, `MoveWorker`; `KeptRoom::batches` and
+  `movedFrom`): `[GpuRoomLamps] move: lamp L story S room R class C: N texels x 1 lamp recomputed (lit, parts) in X ms on the
+  move worker, Y ms after the move; kept as version V | dropped (the room was solved or kept again meanwhile)`, then the edit
+  line `move: lamp L, 1 rooms on stories S, no room solved, relit in N ms (frames: ...)` from that landing to the first relight
+  with its parts; `move: lamp L left to the room solves (story S room R: why)` (a room 0 lists it, an outdoor lamp, the lamp
+  under the room's story floor, a roofless room, through openings or from another story, a light without a GPU law, the
+  geometry or 3D blockers changed, a 3D blocker of a kind the copy does not know, ...). The game's tests' constants are read
+  once from the game (`RoomLightTests::kConstAt`).
 - **Test**: `tools/outdoor_delta_test` checks `KeptAdd` (the soft light cut and its scaled threshold, the early-out, the
   game's drop, half-float A and B) and `KeptTexel` (20000 roofed texels against the game's tail at their own sum and after
   an edit, weight-0 texels, the alpha floor, a roofless texel's hue and alpha). `tools/rt_lamps_test` draws a synthetic kept
@@ -267,6 +300,11 @@ lamp's position, not on its colour or intensity.
   parts (one its colour alone), the laws as kept, dimmed and recoloured, and one switched off, through `AddKeptParts(extra)`
   and `ComposeK0PS` against `KeptAdd`, `KeptWrapLum` and `RtLampModel::Compose` with the exit light: 6144 texels, all exact
   (0/255).
+  A moved lamp (`KeptGpuCheck`, lamp 4): its parts from `RoomLampMove::PartAt` at its new place behind a wall and over a
+  disc blocker, drawn on the GPU against the CPU: 0/255. Offline, `tools/apex_paths_replay` runs `PartAt` with the game's
+  evaluation as the law and `KeptAdd` at every recorded texel of the plain path (`RoomLampProbe-20261101-165037`): own lamps
+  72,534 lines, 55,139 lit, 100.00% within 2/255 of the measured part; the 28,044 lines of other rooms' lamps are all out of
+  its scope (floor cut, openings, between stories). `tools/room_lamp_3d_replay` runs the same `room_light_tests.h`.
 - **In game** (2026-11-02, stage 2a): final self-check 61 room solves, 207,425 texels, 100.00% within 2/255, alpha within
   1/255, at most 2.6 ms; 23 solves not checked (no free tag range, fixed since). Stage 2b (09:50-09:52): GPU self-check 148
   maps, 273,754 texels, 100.00% within 2/255 (alpha within 1/255), all of them wall atlases: floors and ceilings were refused

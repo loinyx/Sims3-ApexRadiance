@@ -36,6 +36,7 @@
 #include "features/rt_lamp_proxy.h"
 #include "features/rt_lamp_model.h"
 #include "features/rt_lamp_gpu.h"
+#include "features/room_lamp_move.h"
 #include "features/rt_outdoor_lamps.h"
 #include "features/lamp_reach.h"
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
@@ -1910,6 +1911,25 @@ bool KeptGpuCheck() {
             }
         const uint32_t count = static_cast<uint32_t>(tx.size());
         d.accW = static_cast<int>(std::min<uint32_t>(count, 1024)), d.accH = static_cast<int>((count + d.accW - 1) / d.accW);
+        // (stage 3) lamp 4 moved to (6, 2.6, 18): a wall across x = 10 (its hard and cull segments) and a disc of radius 1 at y = 2.3
+        // under it, for the game's 2D and 3D tests of the move worker (room_lamp_move.h)
+        laws[4].pos[0] = 6.0f, laws[4].pos[1] = 2.6f, laws[4].pos[2] = 18.0f;
+        RoomLightTests::Room mvRoom;
+        {
+            RoomLightTests::Wall wall{};
+            const float seg[6] = {10.0f, 0.0f, 0.0f, 0.0f, 0.0f, 32.0f}; // P, then E 0x20 bytes on
+            for (const int base : {0x40, 0xA0}) wall.f[base / 4] = seg[0], wall.f[base / 4 + 1] = seg[1], wall.f[base / 4 + 2] = seg[2], wall.f[base / 4 + 8] = seg[3], wall.f[base / 4 + 9] = seg[4], wall.f[base / 4 + 10] = seg[5];
+            mvRoom.walls.push_back(wall);
+            mvRoom.idx2d = {0};
+            RoomLightTests::Record rec{{6.0f, 2.3f, 18.0f}, 4.0f, {}};
+            RoomLightTests::Blocker disc{};
+            disc.vt = RoomLightTests::kDiscVt;
+            disc.f[0x20 / 4] = 6.0f, disc.f[0x20 / 4 + 1] = 2.3f, disc.f[0x20 / 4 + 2] = 18.0f, disc.f[0x40 / 4 + 1] = 1.0f, disc.f[0x70 / 4] = 1.0f;
+            rec.b.push_back(disc);
+            mvRoom.rec.push_back(rec);
+        }
+        long mvParts = 0, mvShaded = 0, mvDark = 0;
+        int mvUnknown = 0;
         // the parts, by lamp: the solve's sum S = base + the parts with the lamps as they were (the CPU's KeptAdd)
         std::vector<float> R(static_cast<size_t>(count) * 3);
         for (uint32_t i = 0; i < count; i++)
@@ -1918,8 +1938,14 @@ bool KeptGpuCheck() {
             const UINT first = static_cast<UINT>(d.parts.size());
             for (uint32_t i = 0; i < count; i++) {
                 if ((i + static_cast<uint32_t>(l)) % 3 == 0) continue;
-                const float A = 0.3f + 1.5f * U(rng), B = U(rng) < 0.2f ? 0.0f : U(rng), ts = U(rng) < 0.3f ? 0.5f + 0.5f * U(rng) : 1.0f;
-                const int mult = U(rng) < 0.2f ? 2 : 1, bits = (U(rng) < 0.3f ? 1 : 0) | (U(rng) < 0.8f ? 4 : 0);
+                float A = 0.3f + 1.5f * U(rng), B = U(rng) < 0.2f ? 0.0f : U(rng), ts = U(rng) < 0.3f ? 0.5f + 0.5f * U(rng) : 1.0f;
+                int mult = U(rng) < 0.2f ? 2 : 1, bits = (U(rng) < 0.3f ? 1 : 0) | (U(rng) < 0.8f ? 4 : 0);
+                if (l == 4) { // (stage 3) a lamp moved: its part from the move worker's code at its new place, as OutdoorDelta keeps it
+                    const std::vector<int> list = RoomLightTests::wallCull(mvRoom, {tx[i].pos[0], tx[i].pos[1], tx[i].pos[2]}, {laws[4].pos[0], laws[4].pos[1], laws[4].pos[2]});
+                    RoomLampMove::PartAt(mvRoom, true, list, true, true, laws[4].pos, tx[i].pos, tx[i].nrm, A, B, &mvUnknown);
+                    A = std::min(A, 60000.0f), ts = 1.0f, mult = 1, bits = 1 | 4;
+                    mvParts++, mvShaded += B < 1.0f ? 1 : 0, mvDark += B == 0.0f ? 1 : 0;
+                }
                 float law[3];
                 // (lamp 2: a light with no GPU law, its colour alone: KeptAdd's law is its colour, lawOk 2)
                 if (l == 2) std::memcpy(law, laws[l].colour, sizeof law);
@@ -2091,6 +2117,8 @@ bool KeptGpuCheck() {
         }
         std::printf("  %s (kept %dx%d, own map %dx%d): %u kept texels, %zu parts, %zu copies, %zu restores, %zu blocks\n", m == 0 ? "class-2 wall atlas" : "floor", w, h,
                     ow, oh, count, d.parts.size(), d.copies.size(), d.restores.size(), d.outs.size());
+        std::printf("    the moved lamp (the move worker's parts): %ld parts, %ld shaded by the wall or the disc, %ld dark\n", mvParts, mvShaded, mvDark);
+        Check(mvParts > 0 && mvShaded > 0 && mvDark > 0 && mvUnknown == 0, "kept relight: the moved lamp's tests shade none of its parts (the scene is wrong)");
     }
     std::printf("  %ld texels compared: %.2f%% within 1/255, largest difference %ld/255; texels left as the game's changed: %ld\n", n, n ? 100.0 * within1 / n : 100.0, maxDiff, untouchedBad);
     Check(n > 0 && within1 >= static_cast<long>(0.999 * n) && maxDiff <= 2, "kept relight: the GPU's texels within 1/255 of the CPU's (99.9%), none past 2/255");

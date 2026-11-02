@@ -8,8 +8,8 @@
 //     SetTexture swap then binds: the two paths share one copy per map.
 //   - A room whose texels the game writes again (its finalize, any thread) leaves the kept rooms until its next kept solve
 //     (OutdoorDelta::RoomFinalized): the copy shows the game's texels meanwhile.
-//   - A lamp moved since a room's parts were kept: that room is left as the game's until its solve is kept again (a move
-//     takes the game's path, its rooms are solved).
+//   - A lamp moved since a room's parts were kept: drawn there with the law its parts were kept with until a copy of the room
+//     with its parts at its new place is kept (OutdoorDelta's move worker) or the room is solved.
 //   - A value or switch edit of a lamp every room listing it draws here marks no room (OutdoorDelta::TakesLampEdit): it shows
 //     in the frame, logged once every room of it was relit.
 //   - With the room lamp probe on, each kept room's map is read back once after its first relight and compared with the texels

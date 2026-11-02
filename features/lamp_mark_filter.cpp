@@ -403,8 +403,9 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
         }
     }
     // GPU room lamps (developer, gpu_room_lamps.h): a value or a switch of a lamp that every room listing it draws on the GPU
-    // (its kept solve drawn, room 0s by Real-time outdoor lamps; OutdoorDelta::TakesLampEdit) marks no room either. A move, a
-    // move into another room and any other lamp take the game's path below
+    // (its kept solve drawn, room 0s by Real-time outdoor lamps; OutdoorDelta::TakesLampEdit) marks no room either. A move within
+    // its room is taken when every room listing it is a kept room whose parts a copy of its tests can redo (the move worker,
+    // OutdoorDelta); a move into another room and any other lamp take the game's path below
     if (OutdoorDelta::RoomLampCapture()) {
         bool known = false, wasOn = false, playerEdit = false;
         int kind = -1;
@@ -420,11 +421,12 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
                 playerEdit = std::memcmp(was.editable, editable, sizeof editable) != 0;
             }
         }
-        if (known && kind == 0 && OutdoorDelta::TakesLampEdit(tl, light, wasOn, on)) {
+        if (known && (kind == 0 || kind == 1) && OutdoorDelta::TakesLampEdit(tl, light, wasOn, on, kind == 1)) {
             {
                 std::lock_guard<std::mutex> lk(g_mx);
                 if (const auto it = g_sig.find(Key{tl, light}); it != g_sig.end()) {
                     LampState& was = it->second;
+                    if (kind == 1) std::memcpy(was.pos, pos, sizeof was.pos);
                     std::memcpy(was.editable, editable, sizeof editable);
                     was.on = on;
                     was.sig = h;
@@ -432,7 +434,11 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
                 }
             }
             NoteHandledLight(light);
-            if (playerEdit) LevelLightShare::NoteGpuEdit();
+            if (playerEdit || kind == 1) LevelLightShare::NoteGpuEdit();
+            if (kind == 1) { // (as Real-time outdoor lamps' move above)
+                g_editRefresh.store(true, std::memory_order_relaxed);
+                NoteHandledEdit(tl, pos);
+            }
             g_kept.fetch_add(1, std::memory_order_relaxed);
             return false;
         }

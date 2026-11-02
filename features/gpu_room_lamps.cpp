@@ -132,7 +132,7 @@ void LogEdits() {
             bool relit = true;
             for (const void* room : it->rooms)
                 for (const auto& [key, e] : g_entries)
-                    if (std::get<0>(key) == room && e.ok && !e.moved && e.relitAt.QuadPart <= it->at.QuadPart) relit = false;
+                    if (std::get<0>(key) == room && e.ok && e.relitAt.QuadPart <= it->at.QuadPart) relit = false;
             if (relit || GetTickCount() - it->tick > kEditWaitMs) {
                 if (!relit) it->kind = nullptr; // (logged as not shown)
                 done.push_back(std::move(*it));
@@ -207,25 +207,25 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
         }
         if (!e.ok) continue;
         int type = 0, reg = -1;
-        // a lamp moved since its parts were kept (their shares follow its place): the room is left as the game's until its solve
-        // is kept again (moves take the game's path)
+        // a lamp moved since its parts were kept (their shares follow its place): drawn with the law its parts were kept with (the
+        // room's last parts as they were, never its law now over them) until a copy with its parts at its new place is kept (the
+        // move worker) or the room is solved
         // (a tube, its colour alone: its intensity, ends or radius changed, which its parts' share holds)
-        bool moved = false;
+        std::vector<const RtLampGpu::KeptMapData::RoomLamp*> movedLamps;
         for (const auto& rl : e.roomLamps) {
             GpuLampLaw::Lamp now;
             float colour[3] = {};
             uint64_t geo = 0;
             // (switched off, its colour 0: a switch, whatever its share's inputs read then)
-            if (rl.colourOnly) moved = moved || (RtOutdoorLamps::ColourLaw(rl.light, e.lot, colour, geo) && geo != rl.geo && colour[0] + colour[1] + colour[2] > 0.0f);
-            else if (RtOutdoorLamps::WorldLaw(rl.light, e.lot, false, now, type, reg) &&
-                     (std::fabs(now.pos[0] - rl.pos[0]) > kMoved || std::fabs(now.pos[1] - rl.pos[1]) > kMoved || std::fabs(now.pos[2] - rl.pos[2]) > kMoved))
-                moved = true;
+            if (rl.colourOnly ? RtOutdoorLamps::ColourLaw(rl.light, e.lot, colour, geo) && geo != rl.geo && colour[0] + colour[1] + colour[2] > 0.0f
+                              : RtOutdoorLamps::WorldLaw(rl.light, e.lot, false, now, type, reg) &&
+                                    (std::fabs(now.pos[0] - rl.pos[0]) > kMoved || std::fabs(now.pos[1] - rl.pos[1]) > kMoved || std::fabs(now.pos[2] - rl.pos[2]) > kMoved))
+                movedLamps.push_back(&rl);
         }
-        if (moved && !e.moved) Undrawn(r.room);
+        const bool moved = !movedLamps.empty();
         e.moved = moved;
         Mix(sig, &e.version, sizeof e.version);
         Mix(sig, &moved, sizeof moved);
-        if (moved) continue;
         any = true;
         e.laws.resize(e.lamps.size());
         e.lawOk.assign(e.lamps.size(), 0);
@@ -237,6 +237,8 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                 if (RtOutdoorLamps::ColourLaw(e.lamps[l], e.lot, colour, geo)) std::memcpy(e.laws[l].colour, colour, sizeof colour), e.lawOk[l] = 2;
             } else
                 e.lawOk[l] = RtOutdoorLamps::WorldLaw(e.lamps[l], e.lot, false, e.laws[l], type, reg) ? 1 : 0;
+            for (const auto* rl : movedLamps) // (its parts' own law)
+                if (rl->light == e.lamps[l] && e.lawOk[l]) e.laws[l] = rl->law;
         }
         Mix(sig, e.lawOk.data(), e.lawOk.size());
         for (size_t l = 0; l < e.lamps.size(); l++)
@@ -247,7 +249,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
 
 void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h) {
     for (auto& [key, e] : g_entries) {
-        if (!e.ok || e.moved || e.mgr != mgr || e.cls != cls || e.m != m) continue;
+        if (!e.ok || e.mgr != mgr || e.cls != cls || e.m != m) continue;
         const void* room = std::get<0>(key);
         // the room's own map holds the working map's top-left corner (smaller or as large; a blurred wall atlas exactly)
         if (w > e.gpu.w || h > e.gpu.h || (e.gpu.blur && (w != e.gpu.w || h != e.gpu.h))) {

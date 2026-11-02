@@ -41,6 +41,8 @@
 #include "features/dev_switches.h"
 #include "features/mesh_occlusion.h"
 #include "features/outdoor_delta.h"
+#include "features/rt_lamp_model.h"
+#include "features/room_lamp_move.h"
 
 // ---- what the extracted production code needs around it ----
 using BYTE = unsigned char;
@@ -531,6 +533,11 @@ int main(int argc, char** argv) {
     Fin mAll{"model got, all texel lines"}, mForeign{"model got, lamps of other rooms/stories"}, mForeignHook{"recorded hook x replayed 2D/3D, foreign"}, mForeignT{"model got, foreign, T lines (lit)"}, mForeignWall{"model got, foreign with the game's wall test run"},
         mOwn{"model got, own lamps (hook recorded)"};
     long noCrossLevel = 0, crossLevels = 0, noInfo = 0;
+    Fin mMoveOwn{"move worker, own lamps"}, mMoveForeign{"move worker, plain lamps of other rooms"}, mMoveT{"move worker, T lines (lit)"};
+    long mvOut = 0, mvDayReach = 0, mvCut = 0;
+    int mvUnknown = 0, mvKey = -1, mvRoom = -1;
+    float mvL[3] = {};
+    std::vector<int> mvList;
 
     int cur = -1;
     FakeLot lot;
@@ -746,6 +753,25 @@ int main(int argc, char** argv) {
         if (foreign) mForeignHook.Add(s.got, modelRecHook, s.line);
         if (foreign && s.tag == 'T') mForeignT.Add(s.got, model, s.line);
         if (foreign && s.raw >= 0) mForeignWall.Add(s.got, model, s.line);
+        // (GPU room lamps stage 3) the move worker's part (room_lamp_move.h PartAt, at the recorded position) drawn as the GPU draws it
+        // (KeptAdd), the game's evaluation c0 standing for the law; out of its scope (what LevelLightShare::MovePath refuses):
+        // another path than the plain one, a roofless room with a record, a lamp under the room's story floor
+        if (!(s.paths & ~1) && (!s.hasEv || s.ev.set == 0) && !(R.hasInfo && !R.indoor) && LampOverOwnFloor(room.data(), s.L)) {
+            const bool built = RoomLampMove::ListsBuilt(static_cast<uint32_t>(s.count), s.f0 != 0, s.f1 != 0);
+            if (built && (mvKey != s.batch || mvL[0] != s.L[0] || mvL[1] != s.L[1] || mvL[2] != s.L[2] || mvRoom != s.room)) {
+                mvList = r3d::wallCull(rr, Cv, Lv), mvKey = s.batch, mvRoom = s.room;
+                std::memcpy(mvL, s.L, sizeof mvL);
+            }
+            float A = 1.0f, B = 0.0f, out[3] = {};
+            RoomLampMove::PartAt(rr, built, mvList, s.f0 != 0, s.f1 != 0, s.L, s.p, s.n, A, B, &mvUnknown);
+            const float* law = s.hasEv ? s.ev.c0 : s.c0;
+            RtLampModel::KeptAdd(law, A, B, 1.0f, static_cast<float>(std::max(s.evals, 1)), g_ctx.info != nullptr, g_ctx.fade, g_ctx.thr, out);
+            (s.hasEv ? mMoveForeign : mMoveOwn).Add(s.got, out, s.line);
+            if (s.tag == 'T') mMoveT.Add(s.got, out, s.line);
+            if (s.hasEv && (s.ev.day != 1.0f || s.ev.reach != 1.0f)) mvDayReach++;
+            if (s.hasEv && s.ev.cut) mvCut++;
+        } else
+            mvOut++;
     }
     std::printf("cross lamps whose floor object is not among the dumped floors: %ld of %ld; rooms with no record: %ld; segment answers missing: %ld\n\n",
                 noCrossLevel, crossLevels, noInfo, g_segMissing);
@@ -757,5 +783,9 @@ int main(int argc, char** argv) {
     for (const Fin* x : {&fRec, &fCut, &fInner, &fOpen, &fCross}) x->Print();
     std::printf("\nthe whole chain (Apex's steps x the game's 2D wall and 3D tests) vs the measured part:\n");
     for (const Fin* x : {&mAll, &mForeign, &mForeignT, &mForeignWall, &mForeignHook, &mOwn}) x->Print();
+    std::printf("\nthe move worker (GPU room lamps stage 3) at the recorded positions vs the measured part (out of its scope: %ld lines; in scope with a\n"
+                "daytime or reach factor: %ld, with the floor cut: %ld; unknown blocker vtables: %d):\n",
+                mvOut, mvDayReach, mvCut, mvUnknown);
+    for (const Fin* x : {&mMoveOwn, &mMoveForeign, &mMoveT}) x->Print();
     return 0;
 }

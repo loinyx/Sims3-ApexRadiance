@@ -69,7 +69,10 @@ void RoomFinalized(const void* room);
 // on: before and after) that every room of its lot listing it draws on the GPU (a room > 0: its kept solve of the class it
 // shows, every texel drawn, the lamp not in its base; a room 0: Real-time outdoor lamps draws it). True: the edit marks no
 // room (the GPU shows it). A switch on is taken only while the rooms listing it keep the solves they had at its switch off
-bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on);
+// (stage 3) move: a move within its room, taken when every room listing it is a kept room (no room 0) where a copy of the
+// game's tests can redo its parts (LevelLightShare::MovePath, the same geometry, known 3D blockers): one job per room for the
+// move worker, which keeps a copy of the room with the lamp's new parts
+bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move = false);
 
 // ---- the direct path (light tree thread; LevelLightShare's hooks) ----
 // The lamp entry update of story tl's room 0 (LevelLightShare::HoldLampMark, a lamp that moved or changed a value in the same

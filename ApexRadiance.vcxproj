@@ -276,6 +276,8 @@
     <ClInclude Include="features\level_light_share.h" />
     <ClInclude Include="features\outdoor_delta.h" />
     <ClInclude Include="features\outdoor_delta_model.h" />
+    <ClInclude Include="features\room_lamp_move.h" />
+    <ClInclude Include="features\room_light_tests.h" />
     <ClInclude Include="features\rt_outdoor_lamps.h" />
     <ClInclude Include="features\gpu_room_lamps.h" />
     <ClInclude Include="features\rt_lamp_gpu.h" />

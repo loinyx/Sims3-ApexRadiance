@@ -395,6 +395,11 @@ bool QueueRoomAgain(const void* room);
 void* Room0Of(uintptr_t tracker, int story);
 // Every room of a lot (stories -4 to 7: room 0 and the rooms its lighting tiles name), any thread
 void LotRooms(uintptr_t tracker, std::vector<void*>& out);
+// (GPU room lamps, a lamp moved; the light tree thread) Apex's path for `light` at lp in `room`'s solve, when a copy can redo it
+// (room_lamp_move.h): 1 a plain lamp in a room with a record (the threshold early-out runs), 0 a plain lamp in a room without one;
+// -1 (why) an outdoor lamp, one of the record's inner, opening or cross lamps, a roofless room, or a lamp under the room's
+// story floor
+int MovePath(const void* room, uintptr_t light, const float* lp, const char*& why);
 // Room 0 of a story sent to its solve (urgent, whatever its kept parts say)
 bool QueueRoom0(uintptr_t tracker, int story);
 // After a room update: room 0 of story L changed by a lamp edit the delta took (its mark dropped); the rooms that take its

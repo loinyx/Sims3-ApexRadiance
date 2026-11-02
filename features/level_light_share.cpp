@@ -12952,6 +12952,26 @@ bool OwnFloorBlocksAt(const unsigned char* room, const float* lp, const float* s
         return false;
     }
 }
+// (GPU room lamps, a lamp moved) OwnFloorBlocksAt cuts no point for a lamp at lp: lp is not under the floor height it reads at
+// the lamp (false: under it, or not read)
+bool LampOverOwnFloor(const unsigned char* room, const float* lp) {
+    __try {
+        const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(room);
+        if (!mgr || *reinterpret_cast<const int*>(room + 0xC) == 0) return true;
+        Xform xf;
+        if (!ReadXform(mgr, xf)) return true;
+        float L[3];
+        ToLocal(xf, lp, L);
+        float h = *reinterpret_cast<const float*>(mgr + 0x98) - *reinterpret_cast<const float*>(mgr + 0xD4);
+        if (const uintptr_t lt = LightTile(mgr, static_cast<int>(ApexMath::Floor(L[0])), static_cast<int>(ApexMath::Floor(L[2])))) {
+            const float th = *reinterpret_cast<const float*>(lt + 0x78);
+            if (ApexMath::IsFinite(th) && ApexMath::Fabs(th) < 1000.0f) h = th;
+        }
+        return !(ApexMath::Fabs(h) < 1000.0f) || !(L[1] < h - 0.02f);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 bool OwnFloorBlocks(const unsigned char* room, void* light, const float* sample) {
     alignas(16) float lp[4];
     LampPos(light, lp);
@@ -18790,6 +18810,17 @@ bool QueueRoomAgain(const void* room) {
     return sent;
 }
 void* Room0Of(uintptr_t tracker, int story) { return tracker && story >= -4 && story <= 7 && kRoomById ? Room0OfTry(tracker, story) : nullptr; }
+int MovePath(const void* room, uintptr_t light, const float* lp, const char*& why) {
+    BYTE* r = static_cast<BYTE*>(const_cast<void*>(room));
+    if (OutdoorLamp(reinterpret_cast<const void*>(light))) return why = "an outdoor lamp (the daytime curve, the reach)", -1;
+    if (!LampOverOwnFloor(r, lp)) return why = "the lamp is under the room's story floor", -1;
+    const RoomInfo* info = SolveInfo(r);
+    if (!info) return 0;
+    if (!info->indoor) return why = "a roofless room (the reach, the openings' wall retest)", -1;
+    if (FindInner(*info, light) || FindSame(*info, light) || FindCross(*info, light))
+        return why = "it reaches the room through openings or from another story (Apex's paths not redone)", -1;
+    return 1;
+}
 void LotRooms(uintptr_t tracker, std::vector<void*>& out) {
     out.clear();
     if (!tracker || !kRoomById) return;
