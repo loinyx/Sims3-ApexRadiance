@@ -393,6 +393,8 @@ uint64_t PhysicsKey();
 bool QueueRoomAgain(const void* room);
 // Room 0 of a story of a lot (tracker), null when none; any thread
 void* Room0Of(uintptr_t tracker, int story);
+// Every room of a lot (stories -4 to 7: room 0 and the rooms its lighting tiles name), any thread
+void LotRooms(uintptr_t tracker, std::vector<void*>& out);
 // Room 0 of a story sent to its solve (urgent, whatever its kept parts say)
 bool QueueRoom0(uintptr_t tracker, int story);
 // After a room update: room 0 of story L changed by a lamp edit the delta took (its mark dropped); the rooms that take its

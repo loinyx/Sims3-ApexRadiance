@@ -2331,7 +2331,7 @@ const I18n::Pair kPairs[] = {
     {"Compare indoor lamps with GPU", "Sammenlign indendørslamper med GPU"},
     {"Logs how each lamp's light in the active lot's rooms differs from what the GPU would draw", "Logger, hvordan hver lampes lys i den aktive grunds rum afviger fra det, GPU'en ville tegne"},
     {"Keep indoor lamps for GPU", "Gem indendørslamper (GPU)"},
-    {"Keeps the active lot's room solves for the GPU; logs a self-check with the comparison on", "Gemmer hver rumberegning på den aktive grund til GPU’en; med sammenligningen slået til logges et selvtjek"},
+    {"Keeps the active lot's room solves and draws their lamps on the GPU; logs self-checks with the comparison on", "Gemmer hver rumberegning på den aktive grund og tegner rummenes lamper på GPU’en; med sammenligningen slået til logges selvtjek"},
     {"Tester", "Test"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Slå hver overført del fra og til i samme scene for at sammenligne billedtid og udseende. Ændringer gælder med det samme og gemmes."},
     {"Frame time", "Billedtid"},

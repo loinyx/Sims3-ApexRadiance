@@ -62,6 +62,9 @@ bool RestartIncomplete(); // terminal map fallback, rather than work still runni
 // The lamp entry update of `light` (registered in `room` of tree level `treeLevel`): true = the GPU draws it on every story
 // of its lot now, so its edit marks no room
 bool HandlesLamp(uintptr_t treeLevel, uintptr_t light, int room);
+// Any thread: `room0` is a room 0 of the active lot while every story's maps are relit, and the GPU draws `light` there (GPU
+// room lamps: an indoor lamp's edit skips the solves only when every room 0 listing it is covered so)
+bool CoversLamp(const void* room0, uintptr_t light);
 // Any thread: the law the GPU draws `light` with, in world space (the lamp classes 3, 4, 5 and 11 of lot `lot`, alive, a
 // shade the law describes); false for any other light. regRoom = the room it is registered in (0 outdoors). For the
 // developer's room lamp probe (OutdoorDelta::SetRoomProbe)

@@ -13,6 +13,7 @@
 //     BlockPS) into the output.
 // Every device call goes through DeviceCalls: the game passes Apex's CallOriginal* (its own hooks never see these draws).
 #include <d3d9.h>
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -96,7 +97,8 @@ struct Map {
 //   the early-out, 4 the soft light cut), n = (sample normal, mult), base = (A, B, thrScale, 0); grouped by lamp (ranges)
 //   texels / wallTexels (ComposeKeptPS, into the map / the class-2 wall layout): p = (base rgb, dither), n = (ramp x ambient,
 //   ramp; a roofless texel: its alpha), base = (norm, k, the alpha floor, roofed 0/1), mask.xy = its place in the sum's layout
-//   copies / restores (CopyAtPS, into the map): mask.xy = the place the texel comes from (the composed map / the game's map)
+//   copies (ComposeKeptPS, into the map): a tile-edge copy, its source texel's compose point at the copy's place
+//   restores (CopyAtPS, into the map): mask.xy = the place itself in the game's map (a copy of a texel no capture holds)
 struct KeptBlockOut {
     int x0, y0, x1, y1; // the block in the map
     int lx, ly0, ly1;   // its rows in the layout (x0 at lx)
@@ -104,6 +106,7 @@ struct KeptBlockOut {
 };
 struct KeptMapData {
     int story = 0, id = 0, cls = 0, m = 0;
+    bool blur = false; // a class-2 wall atlas: drawn only into a map of the working map's exact size
     uint64_t lot = 0;
     float thr = 0.0f;
     int w = 0, h = 0, accW = 0, accH = 0;
@@ -115,7 +118,9 @@ struct KeptMapData {
     std::vector<Block> extRects;                // each block with its rows beyond, in the layout
     std::vector<KeptBlockOut> outs;
     UINT passes = 0;
-    std::vector<std::pair<uint32_t, uint32_t>> expect; // (y x w + x, the texel the game left there) for the self-check
+    std::vector<std::pair<uint32_t, uint32_t>> expect; // (y << 16 | x, the texel the game left there) for the self-check
+    // every lamp of the room's kept solve the GPU draws, with its position then (a lamp moved since: the room is not drawn)
+    std::vector<std::pair<uintptr_t, std::array<float, 3>>> roomLamps;
 };
 struct KeptMapGpu { // DEFAULT pool (made again after a device reset)
     int w = 0, h = 0, accW = 0, accH = 0, layoutW = 0, layoutH = 0;
@@ -126,6 +131,7 @@ struct KeptMapGpu { // DEFAULT pool (made again after a device reset)
     std::vector<Block> extRects;
     std::vector<KeptBlockOut> outs;
     UINT passes = 0;
+    bool blur = false;
     size_t bytes = 0;
     void Release();
 };
@@ -198,8 +204,9 @@ class Engine {
     // ---- GPU room lamps: a kept room solve drawn over a map (between Begin and End) ----
     static bool UploadKept(IDirect3DDevice9* dev, const KeptMapData& d, KeptMapGpu& g);
     // laws / lawOk: per range of parts (a lamp without a law adds nothing); game: the game's own map (the restores' source)
+    // out: w x h, the room's own map (at most the working map's size: its top-left corner; a blurred wall atlas exactly)
     bool RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLampLaw::Lamp* laws, const char* lawOk, float thr, IDirect3DBaseTexture9* game,
-                     IDirect3DTexture9* out, std::string& err);
+                     IDirect3DTexture9* out, int w, int h, std::string& err);
 
     // The state of the device around a series of passes (render targets, depth, every state a state block holds)
     bool Begin(IDirect3DDevice9* dev); // false: no state block could be made, nothing was changed (End is not called)

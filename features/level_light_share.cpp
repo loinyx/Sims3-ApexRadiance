@@ -18784,6 +18784,18 @@ bool QueueRoomAgain(const void* room) {
     return sent;
 }
 void* Room0Of(uintptr_t tracker, int story) { return tracker && story >= -4 && story <= 7 && kRoomById ? Room0OfTry(tracker, story) : nullptr; }
+void LotRooms(uintptr_t tracker, std::vector<void*>& out) {
+    out.clear();
+    if (!tracker || !kRoomById) return;
+    RoomRef buf[1024];
+    for (int level = -4; level <= 7; level++) {
+        if (!SafeStoryManager(tracker, level)) continue;
+        if (void* r0 = Room0Of(tracker, level)) out.push_back(r0);
+        const int n = CollectStoryRooms(tracker, level, buf, 1024);
+        for (int i = 0; i < n; i++)
+            if (BYTE* room = SafeRoomById(tracker, level, buf[i].id)) out.push_back(room);
+    }
+}
 bool QueueRoomId(uintptr_t tracker, int story, int id, int urgentTier) {
     if (!tracker || story < -4 || story > 7 || id < 0 || !g_installed.load(std::memory_order_relaxed)) return false;
     // (the sends a lamp drag left out: once; with no urgency, or tier 2 while the edit's stories change together)

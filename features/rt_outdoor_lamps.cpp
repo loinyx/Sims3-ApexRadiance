@@ -2535,6 +2535,15 @@ bool CoversRoom(const void* room) {
     std::lock_guard<std::mutex> lk(g_coverMx);
     return g_cover.tracker == tracker && g_cover.full && GetTickCount() - g_cover.at < kCoverFreshMs;
 }
+bool CoversLamp(const void* room0, uintptr_t light) {
+    if (!g_on.load(std::memory_order_relaxed) || !room0 || !light) return false;
+    int story = -99, id = -1, cls = -1;
+    uintptr_t mgr = 0;
+    const uintptr_t tracker = TrackerOfRoom(room0, story, id, cls, mgr);
+    if (!tracker || id != 0) return false;
+    std::lock_guard<std::mutex> lk(g_coverMx);
+    return g_cover.tracker == tracker && g_cover.full && GetTickCount() - g_cover.at < kCoverFreshMs && g_cover.lamps.count(light);
+}
 bool HandlesLamp(uintptr_t tl, uintptr_t light, int room) {
     if (!g_on.load(std::memory_order_relaxed) || room != 0 || !light || !tl) return false;
     int story = -99;

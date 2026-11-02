@@ -2331,7 +2331,7 @@ const I18n::Pair kPairs[] = {
     {"Compare indoor lamps with GPU", "Beltéri lámpák összevetése a GPU-val"},
     {"Logs how each lamp's light in the active lot's rooms differs from what the GPU would draw", "Naplózza, hogyan tér el az aktív telek szobáiban minden lámpa fénye attól, amit a GPU rajzolna"},
     {"Keep indoor lamps for GPU", "Beltéri lámpák megőrzése (GPU)"},
-    {"Keeps the active lot's room solves for the GPU; logs a self-check with the comparison on", "Megőrzi az aktív telek minden szobájának számítását a GPU-nak; bekapcsolt összevetéssel önellenőrzést naplóz"},
+    {"Keeps the active lot's room solves and draws their lamps on the GPU; logs self-checks with the comparison on", "Megőrzi az aktív telek minden szobájának számítását, és a GPU-n rajzolja a lámpáikat; bekapcsolt összevetéssel önellenőrzéseket naplóz"},
     {"Tester", "Tesztek"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Kapcsold ki és be az egyes átvett részeket ugyanabban a jelenetben, és hasonlítsd össze a képkockaidőt és a látványt. A változások azonnal érvényesek, és mentődnek."},
     {"Frame time", "Képkockaidő"},

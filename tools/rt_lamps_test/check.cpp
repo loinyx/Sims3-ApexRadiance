@@ -1856,7 +1856,8 @@ void Probe(const Scene& sc) {
 // blur, BlockKeptPS) over a game map, against the CPU: base + RtLampModel::KeptAdd of every part, RtLampModel::KeptTexel
 // (roofed and roofless texels, the ramp and ambient read back from the pack input with IndoorSplit, the alpha floor, the
 // dither), the game's pack, BlurBlock with the rows beyond the blocks' edges, the tile-edge copies and the texels a copy of an
-// unkept texel overwrote (the game's). Every texel of the map is compared; the others must stay the game's.
+// unkept texel overwrote (the game's). The floor's own map is smaller than the working map the solve wrote (its top-left
+// corner; copies from past the corner land inside). Every texel of the own map is compared; the others must stay the game's.
 bool KeptGpuCheck() {
     std::printf("\n[GPU room lamps] kept texels relit on the GPU against KeptAdd + KeptTexel + the pack, the blur and the copies on the CPU\n");
     std::mt19937 rng(9001);
@@ -1874,7 +1875,8 @@ bool KeptGpuCheck() {
     long n = 0, within1 = 0, maxDiff = 0, untouchedBad = 0;
     for (const int m : {1, 0}) { // a floor (copies, restores) and a class-2 wall atlas (blocks before the blur)
         RtLampGpu::KeptMapData d;
-        d.w = w, d.h = h, d.thr = thr;
+        d.w = w, d.h = h, d.thr = thr, d.blur = m == 0;
+        const int ow = m == 1 ? 48 : w, oh = m == 1 ? 40 : h; // a floor's own map smaller than the working map
         std::vector<uint32_t> gamePx(static_cast<size_t>(w) * h);
         for (uint32_t& v : gamePx) v = static_cast<uint32_t>(rng());
         // kept texels at distinct places (every other one on the floor; the wall texels inside blocks)
@@ -1980,14 +1982,19 @@ bool KeptGpuCheck() {
                 d.texels.push_back(vertexOf(i, tx[i].x, tx[i].y));
                 expect[static_cast<size_t>(tx[i].y) * w + tx[i].x] = cpuPacked[i];
             }
-            // tile-edge copies: kept texels to the places to their right (sources as composed), every 7th kept place back to the game's
+            // tile-edge copies (the source composed at the copy's place): kept texels to the places to their right, and kept texels
+            // past the own map's corner to places inside it; every 7th kept place back to the game's
             for (uint32_t i = 0; i < count; i += 5) {
                 const Tx& t = tx[i];
                 if (t.x + 1 >= w) continue;
-                RtLampGpu::TexelVertex v{};
-                v.x = static_cast<float>(t.x + 1), v.y = static_cast<float>(t.y), v.w = 1.0f, v.mask[0] = static_cast<float>(t.x), v.mask[1] = static_cast<float>(t.y);
-                d.copies.push_back(v);
+                d.copies.push_back(vertexOf(i, t.x + 1, t.y));
                 expect[static_cast<size_t>(t.y) * w + t.x + 1] = cpuPacked[i];
+            }
+            for (uint32_t i = 1; i < count; i += 3) {
+                const Tx& t = tx[i];
+                if (t.x < ow || t.y >= oh) continue;
+                d.copies.push_back(vertexOf(i, t.x - 30, t.y));
+                expect[static_cast<size_t>(t.y) * w + t.x - 30] = cpuPacked[i];
             }
             for (uint32_t i = 3; i < count; i += 7) {
                 const Tx& t = tx[i];
@@ -2037,21 +2044,29 @@ bool KeptGpuCheck() {
             Check(false, "kept engine: " + err);
             return false;
         }
+        // the room's own map: the working map's top-left ow x oh (the game's commit 0x006191D0)
+        std::vector<uint32_t> own(static_cast<size_t>(ow) * oh);
+        for (int y = 0; y < oh; y++)
+            for (int x = 0; x < ow; x++) own[static_cast<size_t>(y) * ow + x] = gamePx[static_cast<size_t>(y) * w + x];
         IDirect3DTexture9 *game = nullptr, *out = nullptr;
-        RtLampGpu::Engine::MakePreblur(g_dev, w, h, gamePx.data(), &game);
-        g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &out, nullptr);
+        RtLampGpu::Engine::MakePreblur(g_dev, ow, oh, own.data(), &game);
+        g_dev->CreateTexture(ow, oh, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &out, nullptr);
         RtLampGpu::KeptMapGpu g;
         bool ok = game && out && RtLampGpu::Engine::UploadKept(g_dev, d, g);
         const char lawOk[nLamps] = {1, 1, 1, 1, 1};
         std::vector<uint32_t> got;
         g_dev->BeginScene();
         if (ok && eng.Begin(g_dev)) {
-            ok = eng.CopyTexture(g_dev, game, out, w, h, err) && eng.RelightKept(g_dev, g, laws, lawOk, thr, game, out, err);
+            std::string refusedWhy;
+            // (a blurred wall atlas is drawn only into a map of its exact size; any map larger than the working map is refused)
+            const bool refused = !eng.RelightKept(g_dev, g, laws, lawOk, thr, game, out, m == 0 ? w - 1 : w + 1, h, refusedWhy);
+            Check(refused, "kept relight: a map of another size than the rule allows was drawn");
+            ok = eng.CopyTexture(g_dev, game, out, ow, oh, err) && eng.RelightKept(g_dev, g, laws, lawOk, thr, game, out, ow, oh, err);
             eng.End(g_dev);
         } else
             ok = false;
         g_dev->EndScene();
-        ok = ok && RtLampGpu::Engine::ReadTexture(g_dev, out, w, h, got);
+        ok = ok && RtLampGpu::Engine::ReadTexture(g_dev, out, ow, oh, got);
         g.Release();
         if (game) game->Release();
         if (out) out->Release();
@@ -2060,17 +2075,20 @@ bool KeptGpuCheck() {
         std::vector<uint8_t> touched(static_cast<size_t>(w) * h, 0);
         for (const Tx& t : tx) touched[static_cast<size_t>(t.y) * w + t.x] = 1;
         for (size_t i = 0; i < expect.size(); i++) {
+            const size_t x = i % w, y = i / w;
+            if (x >= static_cast<size_t>(ow) || y >= static_cast<size_t>(oh)) continue; // (past the own map: not in it)
+            const uint32_t gv = got[y * ow + x];
             if (expect[i] == gamePx[i] && !touched[i]) {
-                untouchedBad += got[i] != gamePx[i];
+                untouchedBad += gv != gamePx[i];
                 continue;
             }
-            const int dl = OutdoorDeltaModel::MaxLevelDiff(expect[i], got[i]);
+            const int dl = OutdoorDeltaModel::MaxLevelDiff(expect[i], gv);
             n++;
             within1 += dl <= 1;
             maxDiff = std::max<long>(maxDiff, dl);
         }
-        std::printf("  %s: %u kept texels, %zu parts, %zu copies, %zu restores, %zu blocks\n", m == 0 ? "class-2 wall atlas" : "floor", count, d.parts.size(), d.copies.size(),
-                    d.restores.size(), d.outs.size());
+        std::printf("  %s (kept %dx%d, own map %dx%d): %u kept texels, %zu parts, %zu copies, %zu restores, %zu blocks\n", m == 0 ? "class-2 wall atlas" : "floor", w, h,
+                    ow, oh, count, d.parts.size(), d.copies.size(), d.restores.size(), d.outs.size());
     }
     std::printf("  %ld texels compared: %.2f%% within 1/255, largest difference %ld/255; texels left as the game's changed: %ld\n", n, n ? 100.0 * within1 / n : 100.0, maxDiff, untouchedBad);
     Check(n > 0 && within1 >= static_cast<long>(0.999 * n) && maxDiff <= 2, "kept relight: the GPU's texels within 1/255 of the CPU's (99.9%), none past 2/255");

@@ -64,6 +64,11 @@ bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu:
 // Any thread (LevelLightShare's FinalizeHook, after the game's finalize): the room's texels in its maps were written again, so
 // its kept solves no longer hold them (a solve kept on the light tree thread is kept again right after)
 void RoomFinalized(const void* room);
+// GPU room lamps stage 2b (LampMarkFilter's lamp entry update, light tree thread): a value or switch edit of `light` (wasOn,
+// on: before and after) that every room of its lot listing it draws on the GPU (a room > 0: its kept solve of the class it
+// shows, every texel drawn, the lamp not in its base; a room 0: Real-time outdoor lamps draws it). True: the edit marks no
+// room (the GPU shows it). A switch on is taken only while the rooms listing it keep the solves they had at its switch off
+bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on);
 
 // ---- the direct path (light tree thread; LevelLightShare's hooks) ----
 // The lamp entry update of story tl's room 0 (LevelLightShare::HoldLampMark, a lamp that moved or changed a value in the same

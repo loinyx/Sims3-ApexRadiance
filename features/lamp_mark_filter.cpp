@@ -28,6 +28,7 @@
 #include "build_flavor.h"
 #include "level_light_share.h"
 #include "rt_outdoor_lamps.h"
+#include "outdoor_delta.h"
 #include "recorder.h"
 #include "object_light_bridge.h"
 #include "unlit_rooms.h"
@@ -397,6 +398,41 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
                 if (playerEdit) LevelLightShare::NoteGpuEdit();
                 if (kind == 1) NoteHandledEdit(tl, pos); // (only a move carries the lamp's object along)
             }
+            g_kept.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+    }
+    // GPU room lamps (developer, gpu_room_lamps.h): a value or a switch of a lamp that every room listing it draws on the GPU
+    // (its kept solve drawn, room 0s by Real-time outdoor lamps; OutdoorDelta::TakesLampEdit) marks no room either. A move, a
+    // move into another room and any other lamp take the game's path below
+    if (OutdoorDelta::RoomLampCapture()) {
+        bool known = false, wasOn = false, playerEdit = false;
+        int kind = -1;
+        {
+            std::lock_guard<std::mutex> lk(g_mx);
+            if (const auto it = g_sig.find(Key{tl, light}); it != g_sig.end()) {
+                const LampState& was = it->second;
+                const float dx = pos[0] - was.pos[0], dy = pos[1] - was.pos[1], dz = pos[2] - was.pos[2];
+                const bool moved = dx * dx + dy * dy + dz * dz > kMoveMin * kMoveMin;
+                const bool valueChanged = std::memcmp(was.editable, editable, sizeof editable) != 0 || was.on != on;
+                kind = was.room != room ? 2 : moved ? 1 : valueChanged ? 0 : -1;
+                known = true, wasOn = was.on;
+                playerEdit = std::memcmp(was.editable, editable, sizeof editable) != 0;
+            }
+        }
+        if (known && kind == 0 && OutdoorDelta::TakesLampEdit(tl, light, wasOn, on)) {
+            {
+                std::lock_guard<std::mutex> lk(g_mx);
+                if (const auto it = g_sig.find(Key{tl, light}); it != g_sig.end()) {
+                    LampState& was = it->second;
+                    std::memcpy(was.editable, editable, sizeof editable);
+                    was.on = on;
+                    was.sig = h;
+                    was.editUntil = 0;
+                }
+            }
+            NoteHandledLight(light);
+            if (playerEdit) LevelLightShare::NoteGpuEdit();
             g_kept.fetch_add(1, std::memory_order_relaxed);
             return false;
         }

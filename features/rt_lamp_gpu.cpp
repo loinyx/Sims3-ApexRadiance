@@ -979,7 +979,7 @@ void KeptMapGpu::Release() {
 }
 bool Engine::UploadKept(IDirect3DDevice9* dev, const KeptMapData& d, KeptMapGpu& g) {
     g.Release();
-    g.w = d.w, g.h = d.h, g.accW = d.accW, g.accH = d.accH, g.layoutW = d.layoutW, g.layoutH = d.layoutH;
+    g.w = d.w, g.h = d.h, g.accW = d.accW, g.accH = d.accH, g.layoutW = d.layoutW, g.layoutH = d.layoutH, g.blur = d.blur;
     g.ranges = d.ranges, g.extRects = d.extRects, g.outs = d.outs, g.passes = d.passes;
     const auto vb = [&](const std::vector<TexelVertex>& v, IDirect3DVertexBuffer9*& out, UINT& n) {
         n = static_cast<UINT>(v.size());
@@ -1013,13 +1013,15 @@ bool FloatBlend(IDirect3DDevice9* dev) {
 // 1. the sum: base-less, every lamp's parts added at their texels' places in the sum's layout; 2. the texels composed into the
 // map; 3. class-2 walls: composed into the layout over the blocks before the blur, blurred the game's way (BlurWalls: the rows
 // lit beyond an edge in the blur, an edge with none along the wall only) and their rows into the map; 4. the tile-edge copies
-// from the composed map, and the kept texels a copy of an unkept texel overwrote back from the game's map
+// (their source texel composed again at the copy's place), and the kept texels a copy of an unkept texel overwrote back from
+// the game's map. out is w x h: the room's own map, the working map's top-left corner (texels past it fall outside the viewport)
 bool Engine::RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLampLaw::Lamp* laws, const char* lawOk, float thr, IDirect3DBaseTexture9* game,
-                         IDirect3DTexture9* out, std::string& err) {
-    if (!ready_ || !out || k.w <= 0 || k.h <= 0 || k.accW <= 0 || k.accH <= 0) return err = "nothing to relight", false;
+                         IDirect3DTexture9* out, int w, int h, std::string& err) {
+    if (!ready_ || !out || w <= 0 || h <= 0 || w > k.w || h > k.h || (k.blur && (w != k.w || h != k.h)) || k.accW <= 0 || k.accH <= 0)
+        return err = "nothing to relight", false;
     if (blendOk_ < 0) blendOk_ = FloatBlend(dev) ? 1 : 0;
     if (!blendOk_) return err = "the device cannot add into an A32B32G32R32F target", false;
-    if (!EnsureScratch(dev, std::max({k.w, k.accW, k.layoutW}), std::max({k.h, k.accH, k.layoutH}), err)) return false;
+    if (!EnsureScratch(dev, std::max(k.accW, k.layoutW), std::max(k.accH, k.layoutH), err)) return false;
     UINT most = std::max({k.nTexels, k.nWalls, k.nCopies, k.nRestores});
     for (const auto& r : k.ranges) most = std::max(most, r.first + r.second);
     if (!EnsureZeros(dev, most)) return err = "the zero stream could not be created", false;
@@ -1072,10 +1074,10 @@ bool Engine::RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLa
     const float d99[4] = {0, 0, 1.0f / static_cast<float>(scratchW_), 1.0f / static_cast<float>(scratchH_)};
     c_.SetPsConst(dev, 99, d99, 1);
     if (k.texels) {
-        if (!Target(dev, out, k.w, k.h)) return fail("the relit map could not be targeted");
+        if (!Target(dev, out, w, h)) return fail("the relit map could not be targeted");
         c_.SetTexture(dev, 1, acc_[0]);
         c_.SetPixelShader(dev, ps_[kComposeKeptPs]);
-        if (!points(k.texels, 0, k.nTexels, k.w, k.h)) return fail("the texels' draw failed");
+        if (!points(k.texels, 0, k.nTexels, w, h)) return fail("the texels' draw failed");
         stats_.composeDraws++;
     }
     // 3. the class-2 walls
@@ -1114,7 +1116,7 @@ bool Engine::RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLa
             if (!pass(full, scratch_[3], kBlurRowPs) || !pass(scratch_[3], scratch_[4], kBlurColPs)) return fail("a blur pass could not be targeted");
             full = scratch_[4];
         }
-        if (!Target(dev, out, k.w, k.h)) return fail("the relit map could not be targeted");
+        if (!Target(dev, out, w, h)) return fail("the relit map could not be targeted");
         std::vector<QuadV> v;
         v.reserve(k.outs.size() * 6);
         for (const KeptBlockOut& b : k.outs) {
@@ -1135,24 +1137,23 @@ bool Engine::RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLa
         stats_.blurDraws++;
     }
     c_.SetTexture(dev, 1, nullptr);
-    // 4. the tile-edge copies (their sources as composed, before any copy), then the texels the game's copies left as the game's
+    // 4. the tile-edge copies: each copy's source texel composed again at the copy's place (a source past the own map's corner
+    // too: the game copies within the working map before its commit), then the texels the game's copies left as the game's
     if (k.copies) {
-        if (!CopyTexture(dev, out, scratch_[0], k.w, k.h, err)) return fail("the map could not be copied for its tile-edge copies");
-        if (!Target(dev, out, k.w, k.h)) return fail("the relit map could not be targeted");
-        const float inv[4] = {1.0f / static_cast<float>(scratchW_), 1.0f / static_cast<float>(scratchH_), 0, 0};
-        c_.SetPsConst(dev, 0, inv, 1);
-        c_.SetPixelShader(dev, ps_[kCopyAtPs]);
-        c_.SetTexture(dev, 0, scratch_[0]);
-        if (!points(k.copies, 0, k.nCopies, k.w, k.h)) return fail("the tile-edge copies' draw failed");
-        c_.SetTexture(dev, 0, nullptr);
+        if (!Target(dev, out, w, h)) return fail("the relit map could not be targeted");
+        c_.SetTexture(dev, 1, acc_[0]);
+        c_.SetPsConst(dev, 99, d99, 1);
+        c_.SetPixelShader(dev, ps_[kComposeKeptPs]);
+        if (!points(k.copies, 0, k.nCopies, w, h)) return fail("the tile-edge copies' draw failed");
+        c_.SetTexture(dev, 1, nullptr);
     }
     if (k.restores && game) {
-        if (!Target(dev, out, k.w, k.h)) return fail("the relit map could not be targeted");
-        const float inv[4] = {1.0f / static_cast<float>(k.w), 1.0f / static_cast<float>(k.h), 0, 0};
+        if (!Target(dev, out, w, h)) return fail("the relit map could not be targeted");
+        const float inv[4] = {1.0f / static_cast<float>(w), 1.0f / static_cast<float>(h), 0, 0};
         c_.SetPsConst(dev, 0, inv, 1);
         c_.SetPixelShader(dev, ps_[kCopyAtPs]);
         c_.SetTexture(dev, 0, game);
-        if (!points(k.restores, 0, k.nRestores, k.w, k.h)) return fail("the restores' draw failed");
+        if (!points(k.restores, 0, k.nRestores, w, h)) return fail("the restores' draw failed");
         c_.SetTexture(dev, 0, nullptr);
     }
     return true;

@@ -2331,7 +2331,7 @@ const I18n::Pair kPairs[] = {
     {"Compare indoor lamps with GPU", "將室內燈與 GPU 對比"},
     {"Logs how each lamp's light in the active lot's rooms differs from what the GPU would draw", "在日誌中記錄目前地段各房間內每盞燈的光與 GPU 將繪製的結果有何不同"},
     {"Keep indoor lamps for GPU", "為 GPU 保留室內燈"},
-    {"Keeps the active lot's room solves for the GPU; logs a self-check with the comparison on", "為 GPU 保留使用中地塊每個房間的計算；開啟對比時，在記錄中寫入自檢"},
+    {"Keeps the active lot's room solves and draws their lamps on the GPU; logs self-checks with the comparison on", "保留使用中地塊每個房間的計算，並在 GPU 上繪製其燈光；開啟對比時，在記錄中寫入自檢"},
     {"Tester", "測試"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "在同一場景中逐一關閉再開啟每個移植的部分，比較其影格時間與外觀。變更會立即套用並儲存。"},
     {"Frame time", "影格時間"},

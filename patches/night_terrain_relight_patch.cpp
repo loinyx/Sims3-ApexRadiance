@@ -3705,7 +3705,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                                                             "Logs how each lamp's light in the active lot's rooms differs from what the GPU would draw", false))
             NotifySettingChanged();
         if (g_lampMode == kLampInstant && ApexUi::SwitchRow("Keep indoor lamps for GPU", &g_gpuRoomLampsCapture,
-                                                            "Keeps the active lot's room solves for the GPU; logs a self-check with the comparison on", false))
+                                                            "Keeps the active lot's room solves and draws their lamps on the GPU; logs self-checks with the comparison on", false))
             NotifySettingChanged();
         if (ApexUi::Checkbox("Smooth the ground light maps on the GPU (A/B: off = CPU worker)", &g_smoothMapsGpu)) NotifySettingChanged();
         ImGui::SameLine();
