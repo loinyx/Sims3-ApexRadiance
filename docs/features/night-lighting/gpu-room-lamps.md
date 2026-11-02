@@ -237,13 +237,30 @@ lamp's position, not on its colour or intensity.
    shows the game's map and prepares that map again with its lamps in the base. The per-story line ends `room 0 physical (N
    lamps)`. Lamp edits still take the solves. `rt_lamps_test` 64 checks (`Room0PhysCheck`: 2048 texels 0/255 from the CPU,
    floor mask and exit alpha exact, two calls over one sum as one).
+22. Physical model, stage 4, part 1 (02/11): lamp edits without the room solves. Each physical map draws every lamp of the active
+   lot with a GPU law whose reach (`ReachBound2` of its law at its room row, plus a tube's segment or an area light's size)
+   meets the box of its texels, not only the lamps its solve listed (`phys_lamp_pick.h`; the lot's registered lights walked on the
+   light tree thread, `OutdoorDelta::LotLamps`). Never one twice: a light in the solve's base (`baked`) is never drawn, a listed
+   lamp (its part out of the base) keeps its row, a lamp the solve did not list (moved here, switched on, new) takes a fresh row
+   (mult 1, the norm scale of its own room on the same story, the reach share in roofless rooms or for outdoor lamps). Room 0 is
+   always prepared physical and does the same, leaving out the outdoor lamps its batches draw. A value, switch or move-within-
+   its-room edit of a lamp of the active lot marks no room when every story 0 to 7 is covered (`TakesLampEditPhys`: each room >
+   0 a kept physical solve of the class it shows drawn on every map, the lamp not in its base; each room 0 drawn physically;
+   a basement listing it refuses); its object's occluder mark is dropped as before. Only a switch or an intensity change
+   settles (its listing rooms and its own room, 2 s after the last edit); colour and moves solve nothing. A move is a drag for
+   Real-time outdoor lamps (fast taps, one exact pass once still). A room solved off the light tree thread keeps drawing its kept
+   physical copy while its geometry is the same and is sent to one solve there; a light tree thread solve keeps it until its
+   own KeepEnd replaces it, so a settle shows no frame of the game's texels. A failed physical draw with an edit pending sends
+   the room to its solve. Still the game's: a move into another room, a new lamp, a deleted lamp (stage 4, part 2).
+   Also fixed: `AddKeptParts` set the batch's lamp constants back after its draws (ComposeK0PS's `MaskAll` read the last kept
+   lamp's law: 118 of 512 masked texels within 1/255 before, 512 after). `rt_lamps_test` 69 checks, `outdoor_delta_test` 83.
 
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Keep indoor lamps for GPU | `gpuRoomLampsCapture` | bool | off | | Developer only, with Lamp lighting: Instant. Keeps each room solve of the active lot and draws its lamps on the GPU; colour, intensity and switch edits of lamps drawn in every room listing them solve no room at once (the directional maps objects read are written again at the end of the room update) (their rooms are solved 2 s after the last edit); with the probe on, logs the self-checks |
-| Indoor lamp model | `roomLampModel` | enum | replica | replica, physical | Developer only, shown with Keep indoor lamps for GPU on. Replica: everything above. Physical: see 16 to 21; rooms > 0 and room 0 drawn from their lamps' laws, lamp edits still the game's. A change drops the kept rooms and sends the active lot's rooms to their solve |
+| Indoor lamp model | `roomLampModel` | enum | replica | replica, physical | Developer only, shown with Keep indoor lamps for GPU on. Replica: everything above. Physical: see 16 to 22; rooms > 0 and room 0 drawn from the lot lamps' laws by reach; value, switch and in-room move edits solve no room (a switch or an intensity change settles its rooms 2 s later). A change drops the kept rooms and sends the active lot's rooms to their solve |
 
 ## Limitations
 
@@ -317,7 +334,11 @@ lamp's position, not on its colour or intensity.
   X MB; M rooms kept, Y MB of 192 MB`; physical: `Story S room R class C: kept N texels (physical: no parts), X MB; M rooms, Y
   MB of 192`, `Story S room 0: base without K lot lamps (physical)` (from `ExportRoom0`), `Model physical|replica: ...`, `not
   kept (the model changed during its solve)`; `Story S room R class C <map>: not drawn (physical: ...)`, `Story S physical:
-  every map drawn (N maps of its rooms > 0; room 0 from its solve)` / `not covered (K of N maps not drawn: why)`; with the probe,
+  every map drawn (N maps of its rooms > 0; room 0 from its solve)` / `not covered (K of N maps not drawn: why)`; `physical <kind>: lamp L, no room
+  solved, M maps relit in N ms (frames +k)` / `physical <kind>: lamp L left to the room solves (why)`, every 10 s with edits `physical lamp
+  edits in the last 10 s: T taken, R left to the room solves; S room solves of the lot within 3 s of an edit taken outside the
+  settle, Z settle or resend solves; physical relights M maps, X ms CPU (largest frame Y ms)`, `Story S room R: solved off the
+  light tree thread, its kept physical copy stays drawn (the same geometry); sent to one solve here`; with the probe,
   `... physical vs the game's last solve: N texels, P% within 2/255, mean M levels, X% brighter > 8 levels, Y% darker > 8
   levels`; `not kept (the 192 MB budget: ...)`, `not kept (no memory)`, `not kept (why)`; with
   the probe on, `Story S room R class C self-check: N texels lit, P% within 2/255 of the solve's sum recomposed from the kept

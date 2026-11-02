@@ -18,6 +18,7 @@
 #include "features/open_rooms_above.h"
 #include "features/rt_lamp_proxy.h"
 #include "features/rt_lamp_blockers.h"
+#include "features/phys_lamp_pick.h"
 #include <string>
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
 // map dither (its relight passes 0), but the compose shader keeps the input, so the harness still checks it
@@ -985,6 +986,109 @@ void ProxyOpenTopsChecks() {
 
 // ---- The furniture blocker table (rt_lamp_blockers.h): the rows give back the game's blockers, and occlude from the rows is
 // RoomLightTests::occlude bit for bit ----
+// Physical indoor lamps, stage 4 (phys_lamp_pick.h): the lamps a kept map draws (reach over its box, never one counted twice),
+// a fresh lamp's row, and when a lamp edit marks no room
+void PhysPickChecks() {
+    using namespace PhysLampPick;
+    std::mt19937 rng(404);
+    std::uniform_real_distribution<float> U(0.0f, 1.0f);
+    const float thr = 3.0f / 255.0f;
+    // the reach: beyond it the law (any normal, any shape) is under the threshold; Meets is the box's distance against it
+    {
+        bool beyond = true, nearDrawn = true;
+        int tested = 0;
+        for (int i = 0; i < 20000; i++) {
+            GpuLampLaw::Lamp L;
+            L.pos[0] = 10.0f * U(rng), L.pos[1] = 3.0f * U(rng), L.pos[2] = 10.0f * U(rng), L.W = 0.5f + 30.0f * U(rng);
+            for (float& c : L.colour) c = U(rng);
+            GpuLampLaw::NoCone(L);
+            const int shape = i % 3;
+            if (shape == 1) {
+                const float s[3] = {U(rng) - 0.5f, U(rng), U(rng) - 0.5f};
+                GpuLampLaw::TubeShape(L, s, 0.5f + U(rng));
+            } else if (shape == 2) {
+                const float u[3] = {1, 0, 0}, v[3] = {0, 0, 1}, n[3] = {0, -1, 0};
+                GpuLampLaw::AreaShape(L, u, v, n, 0.2f + U(rng), 0.2f + U(rng), i % 2 == 0);
+            }
+            const float scale = 0.5f + 2.0f * U(rng), r2 = Reach2(L, scale, thr);
+            if (r2 <= 0.0f) continue;
+            // a point at a random distance in a random direction, a random normal
+            float d[3] = {U(rng) - 0.5f, U(rng) - 0.5f, U(rng) - 0.5f};
+            const float dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+            const float dist = std::sqrt(r2) * (0.2f + 1.6f * U(rng));
+            float p[3], n[3] = {U(rng) - 0.5f, U(rng) - 0.5f, U(rng) - 0.5f}, out[3];
+            for (int k = 0; k < 3; k++) p[k] = L.pos[k] + d[k] / dl * dist;
+            const float nl = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+            for (float& v : n) v /= nl;
+            GpuLampLaw::Eval(L, p, n, 0.0f, out);
+            const float lit = std::max(scale, 1.0f) * ((out[0] + out[1]) + out[2]);
+            Box b;
+            b.Grow(p);
+            if (!Meets(b, L.pos, r2)) beyond = beyond && lit < thr, tested++;
+            Box around; // (a box holding the lamp: always drawn)
+            around.Grow(L.pos);
+            nearDrawn = nearDrawn && Meets(around, L.pos, r2);
+        }
+        Check(tested > 1000 && beyond, "physical pick: a lamp whose reach misses a texel lights it under the threshold (bulbs, tubes, area lights)");
+        Check(nearDrawn, "physical pick: a box holding the lamp always meets its reach");
+        GpuLampLaw::Lamp off;
+        off.W = 5.0f;
+        Box b;
+        const float o[3] = {0, 0, 0};
+        b.Grow(o);
+        Check(Reach2(off, 1.0f, thr) == 0.0f && !Meets(b, o, 0.0f), "physical pick: a lamp switched off is drawn nowhere");
+        GpuLampLaw::Lamp on;
+        on.W = 5.0f, on.colour[0] = 1.0f;
+        Check(Reach2(on, 1.0f, 0.0f) < 0.0f && Meets(b, o, -1.0f) && !Meets(Box{}, o, 4.0f), "physical pick: no threshold draws it everywhere; an empty map draws none");
+        float far[3] = {0.0f, 0.0f, 3.0f};
+        Box unit;
+        const float lo[3] = {0, 0, 0}, hi[3] = {1, 1, 1};
+        unit.Grow(lo), unit.Grow(hi);
+        Check(Meets(unit, far, 4.0f) && !Meets(unit, far, 3.99f), "physical pick: Meets measures to the box's nearest point");
+    }
+    // never counted twice: the base's lights are never drawn, the listed ones with their rows, the rest fresh
+    {
+        const std::vector<uintptr_t> listed = {0x100, 0x200}, baked = {0x300, 0x200};
+        Check(UseOf(0x300, listed, baked) == Use::Base && UseOf(0x200, listed, baked) == Use::Base && UseOf(0x100, listed, baked) == Use::Listed &&
+                  UseOf(0x400, listed, baked) == Use::Fresh,
+              "physical pick: a light in the base is never drawn, a listed lamp is, a lamp the solve did not list is fresh");
+    }
+    // a fresh lamp's row: another room of the same story at its normalisation over this one's; else 1
+    {
+        Check(NormKFresh(0, 5, 2.0f, 0, 3, 1.0f, false) == InnerLight::NormScale(2.0f, 1.0f, false) && NormKFresh(0, 5, 2.0f, 0, 3, 4.0f, true) == InnerLight::NormScale(2.0f, 4.0f, true),
+              "physical pick: a lamp of another room of the story takes that room's norm scale");
+        Check(NormKFresh(1, 5, 2.0f, 0, 3, 1.0f, false) == 1.0f && NormKFresh(0, 3, 2.0f, 0, 3, 1.0f, false) == 1.0f && NormKFresh(0, 0, 2.0f, 0, 3, 1.0f, false) == 1.0f,
+              "physical pick: a lamp of another story, of this room or outdoors: norm scale 1");
+        Check(ReachFresh(false, true) && ReachFresh(true, false) && !ReachFresh(false, false), "physical pick: the reach share of a fresh lamp (outdoor room, or an outdoor lamp)");
+    }
+    // the edit: every story 0 .. 7 drawn, every room > 0 a kept physical solve drawn without the lamp in its base
+    {
+        std::vector<RoomFact> rooms(4);
+        rooms[0].story = 0, rooms[0].id = 0, rooms[0].drawn = true;
+        rooms[1].story = 0, rooms[1].id = 2, rooms[1].kept = rooms[1].drawn = true, rooms[1].lists = true;
+        rooms[2].story = 1, rooms[2].id = 0, rooms[2].drawn = true;
+        rooms[3].story = 1, rooms[3].id = 4, rooms[3].kept = rooms[3].drawn = true;
+        int at = 0;
+        Check(EditRefusal(rooms, at) == nullptr && at == -1, "physical edit: every story drawn takes the edit");
+        auto r = rooms;
+        r[2].drawn = false;
+        Check(EditRefusal(r, at) != nullptr && at == 2, "physical edit: a room 0 not drawn physically refuses it");
+        r = rooms, r[3].kept = r[3].drawn = false;
+        Check(EditRefusal(r, at) != nullptr && at == 3, "physical edit: a room with no kept physical solve refuses it (even one not listing the lamp)");
+        r = rooms, r[1].drawn = false;
+        Check(EditRefusal(r, at) != nullptr && at == 1, "physical edit: a kept solve not drawn refuses it");
+        r = rooms, r[1].baked = true;
+        Check(EditRefusal(r, at) != nullptr && at == 1, "physical edit: a solve with the lamp in its base refuses it");
+        r = rooms;
+        RoomFact basement;
+        basement.story = -1, basement.id = 1;
+        r.push_back(basement);
+        Check(EditRefusal(r, at) == nullptr, "physical edit: a basement room not listing the lamp is not needed");
+        r.back().lists = true;
+        Check(EditRefusal(r, at) != nullptr && at == 4, "physical edit: a basement room listing the lamp refuses it");
+        Check(EditRefusal({}, at) != nullptr, "physical edit: no story found refuses it");
+    }
+}
 void BlockerTableChecks() {
     using namespace RoomLightTests;
     std::mt19937 rng(20261102);
@@ -1403,6 +1507,7 @@ int main() {
     OpenAboveChecks();
     ProxyOpenTopsChecks();
     BlockerTableChecks();
+    PhysPickChecks();
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

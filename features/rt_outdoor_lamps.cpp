@@ -25,6 +25,7 @@
 #include "shader_cache.h"
 #include "outdoor_delta.h"
 #include "outdoor_delta_model.h"
+#include "phys_lamp_pick.h"
 #include "level_light_share.h"
 #include "lot_light_bridge.h"
 #include "lamp_reach.h"
@@ -419,6 +420,7 @@ struct Cover {
     DWORD at = 0;
     std::unordered_set<uintptr_t> lamps;
     std::set<std::pair<int, uintptr_t>> kept0; // (GPU room lamps) (story, lamp): a lamp room 0's kept parts draw there
+    std::set<const void*> phys0; // (physical indoor lamps) the room 0s whose maps were all relit physically (PhysCoversRoom0)
 };
 std::mutex g_coverMx;
 Cover g_cover;
@@ -541,6 +543,11 @@ struct Slot {
     std::vector<RtLampModel::Lamp> pLaws;
     std::vector<std::array<float, 3>> pWorld;
     std::vector<char> pOk;
+    // (stage 4) the lamps drawn this frame: every lot lamp with a law whose reach meets the map (phys_lamp_pick.h), those out of
+    // its base with their rows and the ones its solve did not list with fresh rows; the world box of its points
+    std::vector<uintptr_t> qLights;
+    std::vector<std::array<float, 3>> qRow;
+    float pBox[6] = {1e30f, 1e30f, 1e30f, -1e30f, -1e30f, -1e30f};
     bool physLater = false; // prepared with its lamps in the base only because the physical draw was not ready yet
 };
 struct Ask {
@@ -883,6 +890,7 @@ struct Prepared {
     std::vector<float> under;  // the floor mask's under-floor share (exact) and its sums
     std::vector<double> uA, uU;
     std::vector<RtLampGpu::TexelVertex> pv; // (physical indoor lamps) one phys point per place: its last texel's (the sum's and compose's)
+    float pBox[6] = {1e30f, 1e30f, 1e30f, -1e30f, -1e30f, -1e30f}; // (physical, stage 4) their world box (min xyz, max xyz)
     std::vector<RtLampGpu::TexelVertex> kv; // (GPU room lamps) room 0's kept lamps' parts, by lamp
     std::vector<std::pair<UINT, UINT>> kRanges;
     std::vector<KeptInfo> kLamps;
@@ -924,7 +932,8 @@ void PrepareJob(Job& j) {
         return;
     }
     if (j.phys && !ex.physical) j.physWhy = ex.physWhy ? ex.physWhy : "?";
-    j.phys = ex.physical && !ex.phys.empty(); // (none out of the base: the base is the whole solve, as without the model)
+    // (stage 4: with no lamp out of the base too: a lamp moved, switched on or new near it is drawn there from its law)
+    j.phys = ex.physical;
     if (j.phys) {
         j.physLights = std::move(ex.phys), j.physRow = std::move(ex.physRow), j.blkHeader = ex.blkHeader;
         j.blk = std::make_shared<const RtLampGpu::BlockerTable>(std::move(ex.blockers));
@@ -976,6 +985,7 @@ void PrepareJob(Job& j) {
                 for (int k = 0; k < 3; k++) q.p[k] = tv.p[k], q.n[k] = tv.n[k], q.base[k] = t.pos[k];
                 q.p[3] = static_cast<float>(t.bits & 15);
                 p.pv.push_back(q);
+                for (int k = 0; k < 3; k++) p.pBox[k] = std::min(p.pBox[k], t.pos[k]), p.pBox[3 + k] = std::max(p.pBox[3 + k], t.pos[k]);
             }
         }
         if (!p.pv.empty()) { // one point per place, its last texel's (the sum is one per place; the compose's last point wins)
@@ -1131,6 +1141,7 @@ bool UploadSlot(IDirect3DDevice9* dev, Slot& s, const Job& j, Prepared& p) {
         if (!RtLampGpu::Engine::MakeVb(dev, p.pv.data(), static_cast<UINT>(p.pv.size()), &s.pvb, true)) return retryLater("its physical points could not be made");
         s.nPhys = static_cast<UINT>(p.pv.size());
         s.pLights = j.physLights, s.pRow = j.physRow, s.pBlk = j.blk, s.pHeader = j.blkHeader;
+        std::memcpy(s.pBox, p.pBox, sizeof s.pBox);
     }
     p.pv = {};
     s.map.w = static_cast<int>(d.Width), s.map.h = static_cast<int>(d.Height);
@@ -2130,7 +2141,8 @@ void Frame(IDirect3DDevice9* dev) {
             g_lampSnap[g.light] = sn;
         }
     }
-    const bool dragging = g_lampChangedAt && nowTick - g_lampChangedAt < kDragQuietMs;
+    // (physical indoor lamps, stage 4: an indoor lamp moved without a solve is a drag too: fast taps, one exact pass once still)
+    const bool dragging = (g_lampChangedAt && nowTick - g_lampChangedAt < kDragQuietMs) || GpuRoomLamps::PhysMoveRecent(kDragQuietMs);
     LARGE_INTEGER tp2{};
     QueryPerformanceCounter(&tp2);
     const double lampsMs = Ms(tp1, tp2) - Ms(tn0, tn1); // (the lots next to it count in slotsMs)
@@ -2305,22 +2317,39 @@ void Frame(IDirect3DDevice9* dev) {
         if (s.pvb) {
             const uint32_t gen = KeptMeshGen();
             Mix(sig, &gen, sizeof gen);
-            s.pLaws.assign(s.pLights.size(), RtLampModel::Lamp{});
-            s.pWorld.assign(s.pLights.size(), {});
-            s.pOk.assign(s.pLights.size(), 0);
-            for (size_t l = 0; l < s.pLights.size(); l++) {
+            // (stage 4) every lot lamp with a law whose reach meets the map: the solve's lamps out of the base with their rows, and
+            // the lamps its solve did not list (moved here, switched on, new) with fresh rows; never one the base holds (listed, not
+            // out of it) nor an outdoor lamp the batches above draw
+            std::vector<OutdoorDelta::LotLamp> lot;
+            OutdoorDelta::LotLamps(lot);
+            s.qLights.clear(), s.qRow.clear();
+            std::vector<uintptr_t> cand(s.pLights);
+            std::vector<std::array<float, 3>> candRow(s.pRow);
+            for (const OutdoorDelta::LotLamp& L : lot) {
+                if (s.kept.count(L.light) || std::find(cand.begin(), cand.end(), L.light) != cand.end()) continue;
+                LampRead r;
+                if (!ReadLamp(L.light, r) || RtLampModel::Drawn(r.f, g_lotId)) continue;
+                // shortcut: a fresh lamp is not an exit lamp here (the exit ground's alpha takes it at room 0's next solve)
+                cand.push_back(L.light);
+                candRow.push_back({PhysLampPick::NormKFresh(L.story, L.home, L.homeNorm, s.story, 0, 1.0f, true), PhysLampPick::ReachFresh(L.homeOutdoor, true) ? 1.0f : 0.0f, 0.0f});
+            }
+            PhysLampPick::Box box;
+            std::memcpy(box.lo, s.pBox, sizeof box.lo), std::memcpy(box.hi, s.pBox + 3, sizeof box.hi);
+            s.pLaws.clear(), s.pWorld.clear(), s.pOk.clear();
+            for (size_t l = 0; l < cand.size(); l++) {
                 GpuLampLaw::Lamp w;
+                RtLampModel::Lamp lotLaw;
                 int type = 0, reg = -1;
                 // (the law with its reach radii: the row's reach column and Params::reachOn decide where they apply)
-                if (!WorldLaw(s.pLights[l], g_lotId, false, w, type, reg) ||
-                    !WorldLaw(s.pLights[l], g_lotId, true, s.pLaws[l].law, type, reg, &rns[s.story].xf.r[0][0]))
+                if (!WorldLaw(cand[l], g_lotId, false, w, type, reg) || !PhysLampPick::Meets(box, w.pos, PhysLampPick::Reach2(w, candRow[l][0], s.thr)) ||
+                    !WorldLaw(cand[l], g_lotId, true, lotLaw.law, type, reg, &rns[s.story].xf.r[0][0]))
                     continue;
-                s.pOk[l] = 1;
-                s.pLaws[l].mult = s.pRow[l][0];
-                std::memcpy(s.pWorld[l].data(), w.pos, sizeof w.pos);
-                Mix(sig, &s.pLaws[l], sizeof s.pLaws[l]);
+                lotLaw.mult = candRow[l][0];
+                s.qLights.push_back(cand[l]), s.qRow.push_back(candRow[l]), s.pLaws.push_back(lotLaw), s.pWorld.push_back({w.pos[0], w.pos[1], w.pos[2]}), s.pOk.push_back(1);
+                Mix(sig, &cand[l], sizeof cand[l]), Mix(sig, &lotLaw, sizeof lotLaw), Mix(sig, candRow[l].data(), sizeof candRow[l]);
             }
-            Mix(sig, s.pOk.data(), s.pOk.size());
+            const size_t nq = s.qLights.size();
+            Mix(sig, &nq, sizeof nq);
         }
         // the under-floor share from a worker (exact, UnderShare's sums): once no lamp is dragged, and (14/10) while one is,
         // in place of the render thread's UnderDelta below (up to 152 ms of a drag's relight; 26.8 ms in one frame): the last
@@ -2515,8 +2544,8 @@ void Frame(IDirect3DDevice9* dev) {
             std::vector<RtLampModel::Lamp> pl;
             std::vector<std::array<float, 3>> pw, prow;
             std::vector<uintptr_t> plights;
-            for (size_t l = 0; l < s.pLights.size(); l++)
-                if (s.pOk[l]) pl.push_back(s.pLaws[l]), pw.push_back(s.pWorld[l]), prow.push_back(s.pRow[l]), plights.push_back(s.pLights[l]);
+            for (size_t l = 0; l < s.qLights.size(); l++)
+                if (s.pOk[l]) pl.push_back(s.pLaws[l]), pw.push_back(s.pWorld[l]), prow.push_back(s.qRow[l]), plights.push_back(s.qLights[l]);
             RtLampGpu::Map pm;
             pm.w = s.map.w, pm.h = s.map.h, pm.vb = s.pvb, pm.count = s.nPhys;
             ok = s.pBlk && g_eng->SetBlockers(dev, *s.pBlk, err) &&
@@ -2641,6 +2670,10 @@ void Frame(IDirect3DDevice9* dev) {
         for (const auto& s : g_slots)
             if (!s->mgr && s->used && s->ok && s->relit)
                 for (const KeptInfo& k : s->kLamps) g_cover.kept0.insert({s->story, k.light});
+        g_cover.phys0.clear();
+        for (int S = 0; S <= 7; S++)
+            if (rooms[S] && std::all_of(g_slots.begin(), g_slots.end(), [&](const auto& s) { return s->mgr || s->story != S || s->room != rooms[S] || !s->used || (s->pvb && s->ok && s->relit); }))
+                g_cover.phys0.insert(rooms[S]);
     }
     // the coverage, logged when it changes (lamp edits mark no room only while every story is covered)
     if (static_cast<int>(full) != g_coverLogged) {
@@ -2897,6 +2930,12 @@ bool CoversRoom(const void* room) {
     if (!tracker || id != 0) return false;
     std::lock_guard<std::mutex> lk(g_coverMx);
     return g_cover.tracker == tracker && g_cover.full && GetTickCount() - g_cover.at < kCoverFreshMs;
+}
+uintptr_t ActiveTracker() { return g_proxyWanted.load(); }
+bool PhysCoversRoom0(const void* room0) {
+    if (!CoversRoom(room0)) return false;
+    std::lock_guard<std::mutex> lk(g_coverMx);
+    return g_cover.phys0.count(room0) != 0;
 }
 bool CoversLamp(const void* room0, uintptr_t light) {
     if (!g_on.load(std::memory_order_relaxed) || !room0 || !light) return false;

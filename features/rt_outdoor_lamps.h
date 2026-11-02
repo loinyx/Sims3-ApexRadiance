@@ -84,6 +84,11 @@ uintptr_t TrackerOf(const void* room);
 // Any thread: `room` is a room 0 of the active lot while every story's maps are relit (OutdoorDelta's lock step leaves the
 // deltas of drawn lamps out then)
 bool CoversRoom(const void* room);
+// Any thread (physical indoor lamps, stage 4): CoversRoom, and every map of that room 0 was relit physically (its lot lamps with a law
+// drawn from their laws by reach, OutdoorDelta::TakesLampEditPhys)
+bool PhysCoversRoom0(const void* room0);
+// Any thread: the active lot's tracker (the one whose occluders are wanted), 0 none
+uintptr_t ActiveTracker();
 // An edit of such a lamp (kind 0 a value or a switch, 1 a move): timed until every story shows it; the rooms that take room
 // 0's lamps are sent after the room update
 void NoteLampEdit(uintptr_t treeLevel, uintptr_t light, int kind);

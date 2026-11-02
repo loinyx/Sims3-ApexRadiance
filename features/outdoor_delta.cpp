@@ -32,6 +32,7 @@
 #include "room_map_dither.h"
 #include "room_lamp_move.h"
 #include "inner_retry.h"
+#include "phys_lamp_pick.h"
 #include "lamp_mark_filter.h"
 #include "apex_log.h"
 #include "apex_paths.h"
@@ -102,6 +103,14 @@ std::atomic<bool> g_probe{false}; // the developer's room lamp probe (SetRoomPro
 std::atomic<bool> g_capture{false}; // GPU room lamps stage 1: the active lot's room solves kept (SetRoomLampCapture)
 std::atomic<bool> g_keptClear{false}; // the kept room solves go (the capture switched off; done on the light tree thread)
 std::atomic<bool> g_physical{false}; // (physical indoor lamps) the kept rooms keep no parts (SetRoomLampPhysical)
+// (physical, stage 4) lamp edits: taken, left to the room solves, the lot's room solves begun within kEditSolveMs of one taken
+// outside the settle and the off-thread resends (target 0), the settle's and resends' solves; OnPresent logs them every 10 s
+constexpr DWORD kEditSolveMs = 3000;
+std::atomic<long> c_physTaken{0}, c_physRefused{0}, c_physEditSolves{0}, c_physSettleSolves{0};
+std::atomic<DWORD> g_lastPhysEdit{0};
+std::unordered_map<const void*, DWORD> g_physSent; // (light tree thread) room -> when the settle or a resend sent it
+// (physical, stage 4; light tree thread) the kept copies RoomFinalized held for the finalized solve's KeepEnd: (key, version)
+std::vector<std::pair<uint64_t, uint32_t>> g_heldKept;
 std::atomic<uint32_t> g_gen{1};
 std::atomic<uint32_t> g_version{1}; // Record::version's source
 std::atomic<const void*> g_deltaRoom{nullptr};
@@ -202,6 +211,7 @@ struct KeptLamp {
     uint8_t mult = 1;
     float normK = 1.0f;
     bool reach = false;
+    int home = -1; // (physical) the room it was registered in then: one registered elsewhere since takes a fresh row (phys_lamp_pick.h)
 };
 struct Record {
     uint32_t version = 0; // (Real-time outdoor lamps) changes whenever the kept parts or texels change
@@ -1462,9 +1472,11 @@ bool TakeEdit(uintptr_t tl) {
 }
 void SettleDue(); // below (GPU room lamps: the rooms of the lamp edits taken, 2 s after a lamp's last one)
 void BasisDue();  // below (GPU room lamps stage 4: the directional maps of the lamp edits taken)
+void RefreshLotLamps(); // below (physical indoor lamps: the active lot's registered lights for the render thread)
 void AfterRoomUpdate(const void* tl) {
     SettleDue();
     BasisDue();
+    RefreshLotLamps();
     if (g_dropPending.exchange(false)) g_pending.clear();
     if (g_pending.empty() || !tl) return;
     if (!g_on.load(std::memory_order_relaxed)) { // switched off with edits taken: through the room solve
@@ -2232,6 +2244,8 @@ struct KeptRoom {
     long killed = 0;
     float toneK = 0.0f, amb[3] = {}, ambPass[3] = {};
     uint64_t geo = 0; // RoomGeoKey at its solve's start (CarryOff, the move path; 0: not read)
+    float norm = 1.0f;    // (physical) its normalisation (+0x160) at its solve's end: a fresh lamp's norm scale there
+    bool outdoor = false; // (physical) a roofless room
     uint64_t geoParts[3] = {};
     // (stage 3) the solve's batches (their samples' range and test switches), and for a copy a lamp move made (MoveWorker) the
     // version whose drawing it continues until the GPU drew it
@@ -2905,6 +2919,7 @@ void KeepEnd(const BYTE* room) {
                 kl.mult = static_cast<uint8_t>(std::clamp(lr ? lr->mult : evals, 1, 255));
                 kl.normK = NormKOf(room, rr.story, rr.id, rr.outdoor, light, reg);
                 kl.reach = LevelLightShare::ReachAppliesIn(room, light);
+                kl.home = reg;
             }
             if (lr)
                 for (const Contrib& p : lr->parts)
@@ -2925,6 +2940,8 @@ void KeepEnd(const BYTE* room) {
         BuildBasis(c, *k); // (stage 4; after `baked`)
         k->batches = r.batches;
         k->physical = c.phys;
+        k->outdoor = rr.outdoor;
+        if (!CopyBytes(&k->norm, room + 0x160, sizeof k->norm) || !std::isfinite(k->norm)) k->norm = 1.0f;
         if (c.phys) k->tests = std::move(c.tests);
         k->samples = std::move(r.samples);
         k->texels = std::move(r.texels);
@@ -2995,6 +3012,13 @@ void SolveStart(unsigned char* room) {
     if (!g_on.load(std::memory_order_relaxed) || !room) return;
     RoomRead rr;
     if (!ReadRoom(room, rr)) return;
+    if (g_physical.load(std::memory_order_relaxed) && g_capture.load(std::memory_order_relaxed)) { // (stage 4: the summary's solves)
+        const DWORD now = GetTickCount(), last = g_lastPhysEdit.load(std::memory_order_relaxed);
+        const auto sent = g_physSent.find(room);
+        if (sent != g_physSent.end() && now - sent->second < 10000) c_physSettleSolves.fetch_add(1, std::memory_order_relaxed), g_physSent.erase(sent);
+        else if (last && now - last < kEditSolveMs && RtOutdoorLamps::TrackerOf(room)) c_physEditSolves.fetch_add(1, std::memory_order_relaxed);
+        if (g_physSent.size() > 256) g_physSent.clear();
+    }
     if (rr.id != 0) { // another room of a lot with a lamp edit going on: its solve time (the log)
         const DWORD now = GetTickCount();
         {
@@ -3190,6 +3214,17 @@ bool AtLockStep(unsigned char* room, bool gather) {
 
 void SolveEnd(unsigned char* room) {
     if (!room) return;
+    // (physical, stage 4) the kept copies RoomFinalized held for this solve: gone once it ends unless its KeepEnd replaced them
+    struct DropHeld {
+        ~DropHeld() {
+            if (g_heldKept.empty()) return;
+            std::lock_guard<std::mutex> lk(g_keptMx);
+            for (const auto& [key, version] : g_heldKept)
+                if (const auto it = g_kept.find(key); it != g_kept.end() && it->second->version == version)
+                    g_keptBytes -= std::min(g_keptBytes, it->second->bytes), g_kept.erase(it);
+            g_heldKept.clear();
+        }
+    } dropHeld;
     if (g_deltaRoom.load(std::memory_order_relaxed) == room) {
         g_deltaRoom.store(nullptr, std::memory_order_relaxed);
         return;
@@ -3848,7 +3883,71 @@ void BeforeFinalize(unsigned char* room) {
     if (g_cap.keep && g_cap.ok) KeepFinals(room);
     if (g_cap.keep && g_cap.ok) KeepBasisFinal(room);
 }
-void RoomFinalized(const void* room) {
+namespace {
+// (physical indoor lamps, stage 4) the rooms solved off the light tree thread whose kept physical copy stays drawn, sent to one
+// light tree thread solve by SettleDue (any thread pushes)
+std::mutex g_requeueMx;
+std::vector<const void*> g_requeue;
+// (stage 4) the active lot's registered lights (LotLamps): the light tree thread writes, the render thread reads
+constexpr DWORD kLotLampsMs = 250;
+std::mutex g_lotLampsMx;
+std::vector<LotLamp> g_lotLamps;
+uint32_t g_lotLampsVer = 0;
+DWORD g_lotLampsAt = 0; // (light tree thread)
+std::atomic<bool> g_lotLampsDirty{false};
+} // namespace
+void RefreshLotLamps() {
+    if (!g_capture.load(std::memory_order_relaxed) || !g_physical.load(std::memory_order_relaxed)) return;
+    const DWORD now = GetTickCount();
+    if (!g_lotLampsDirty.exchange(false) && now - g_lotLampsAt < kLotLampsMs) return;
+    g_lotLampsAt = now;
+    const uintptr_t tracker = RtOutdoorLamps::ActiveTracker();
+    std::vector<LevelLightShare::RegisteredLight> reg;
+    if (!tracker || !LevelLightShare::RegisteredLights(tracker, reg)) return; // (the last snapshot stays)
+    std::vector<LotLamp> out;
+    out.reserve(reg.size());
+    for (const LevelLightShare::RegisteredLight& r : reg) {
+        LotLamp l;
+        l.light = r.light, l.story = r.story, l.home = r.home, l.homeOutdoor = r.home <= 0;
+        if (r.home > 0)
+            if (const BYTE* home = static_cast<const BYTE*>(LevelLightShare::RoomOf(tracker, r.story, r.home))) {
+                BYTE flag = 0;
+                if (!CopyBytes(&l.homeNorm, home + 0x160, sizeof l.homeNorm) || !std::isfinite(l.homeNorm)) l.homeNorm = 1.0f;
+                if (CopyBytes(&flag, home + 0x18, 1)) l.homeOutdoor = flag != 0;
+            }
+        out.push_back(l);
+    }
+    std::lock_guard<std::mutex> lk(g_lotLampsMx);
+    if (out != g_lotLamps) g_lotLamps.swap(out), g_lotLampsVer++;
+}
+uint32_t LotLamps(std::vector<LotLamp>& out) {
+    std::lock_guard<std::mutex> lk(g_lotLampsMx);
+    out = g_lotLamps;
+    return g_lotLampsVer;
+}
+void RoomFinalized(const void* room, bool gather) {
+    // (physical, stage 4) the room's kept physical copy stays drawn while its geometry is the same: off the light tree thread
+    // until a solve here keeps it again (sent by SettleDue); on it until this solve's KeepEnd replaces it (SolveEnd drops it if
+    // none does), so a settle's solve shows no frame of the game's texels between the two
+    const bool keeping = !gather || (g_cap.active && g_cap.room == room && g_cap.keep);
+    if (keeping && g_physical.load(std::memory_order_relaxed)) {
+        uint64_t geo = 0;
+        std::vector<std::pair<uint64_t, uint32_t>> held;
+        {
+            std::lock_guard<std::mutex> lk(g_keptMx);
+            for (const auto& [key, k] : g_kept)
+                if (k->room == reinterpret_cast<uintptr_t>(room) && k->physical) geo = k->geo, held.emplace_back(key, k->version);
+        }
+        if (geo && RoomGeoKey(static_cast<const BYTE*>(room)) == geo) {
+            if (gather) {
+                g_heldKept = std::move(held);
+                return;
+            }
+            std::lock_guard<std::mutex> lk(g_requeueMx);
+            if (g_requeue.size() < 256 && std::find(g_requeue.begin(), g_requeue.end(), room) == g_requeue.end()) g_requeue.push_back(room);
+            return;
+        }
+    }
     std::lock_guard<std::mutex> lk(g_keptMx);
     bool first = true;
     for (auto it = g_kept.begin(); it != g_kept.end();)
@@ -4398,9 +4497,75 @@ void BasisDue() {
     }
 }
 
+bool TakesLampEditPhys(uintptr_t tl, uintptr_t light, const char* kind, bool settle, bool dry) {
+    if (!g_capture.load(std::memory_order_relaxed) || !g_physical.load(std::memory_order_relaxed) || !tl || !light) return false;
+    const auto refuse = [&](const std::string& why) {
+        if (dry) return false;
+        c_physRefused.fetch_add(1, std::memory_order_relaxed);
+        if (KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] physical {}: lamp {:08X} left to the room solves ({})", kind, light, why));
+        return false;
+    };
+    const uintptr_t tracker = TlTracker(tl);
+    if (!tracker || tracker != RtOutdoorLamps::ActiveTracker()) return refuse("not a lamp of the active lot");
+    std::vector<void*> rooms;
+    LevelLightShare::LotRooms(tracker, rooms);
+    std::vector<PhysLampPick::RoomFact> facts;
+    std::vector<std::pair<int, int>> ids;  // the rooms > 0 listing it: (story, id), the settle's
+    std::vector<BasisRoomRef> basisRooms; // (stage 4) the same rooms, for their directional maps
+    uint64_t lot = 0;
+    uintptr_t raw[1024];
+    for (void* room : rooms) {
+        RoomRead rr;
+        if (!ReadRoom(static_cast<const BYTE*>(room), rr)) return refuse("a room of the lot could not be read");
+        PhysLampPick::RoomFact f;
+        f.story = rr.story, f.id = rr.id;
+        const int n = ReadList(static_cast<const BYTE*>(room), raw, static_cast<int>(std::size(raw)));
+        f.lists = n > 0 && std::find(raw, raw + n, light) != raw + n;
+        if (rr.story >= 0 && rr.story <= 7) {
+            lot = rr.lot;
+            if (rr.id == 0) f.drawn = RtOutdoorLamps::PhysCoversRoom0(room);
+            else {
+                std::shared_ptr<const KeptRoom> k;
+                {
+                    std::lock_guard<std::mutex> lk(g_keptMx);
+                    if (const auto it = g_kept.find(KeyOf(room, rr.cls)); it != g_kept.end()) k = it->second;
+                }
+                f.kept = k && k->physical;
+                f.drawn = f.kept && (!k->maps || GpuRoomLamps::Drawn(room, k->version, k->maps));
+                f.baked = f.kept && std::find(k->baked.begin(), k->baked.end(), light) != k->baked.end();
+                if (f.lists) ids.emplace_back(rr.story, rr.id), basisRooms.push_back(BasisRoomRef{KeyOf(room, rr.cls), rr.story, rr.id});
+            }
+        }
+        facts.push_back(f);
+    }
+    GpuLampLaw::Lamp law;
+    int type = 0, reg = -1;
+    if (!RtOutdoorLamps::WorldLaw(light, lot, false, law, type, reg)) return refuse("no GPU law (not a lamp the GPU draws)");
+    int at = -1;
+    if (const char* why = PhysLampPick::EditRefusal(facts, at))
+        return refuse(at >= 0 ? std::format("story {} room {}: {}", facts[at].story, facts[at].id, why) : std::string(why));
+    if (dry) return true;
+    c_physTaken.fetch_add(1, std::memory_order_relaxed);
+    g_lastPhysEdit.store(GetTickCount() | 1, std::memory_order_relaxed);
+    g_lotLampsDirty.store(true, std::memory_order_relaxed); // (its room or story as registered now, for the maps' rows)
+    GpuRoomLamps::NotePhysEdit(light, kind);
+    const bool move = std::strcmp(kind, "move") == 0;
+    QueueBasis(light, kind, std::strcmp(kind, "switch off") == 0, move, basisRooms);
+    if (settle) { // (its own room too: its normalisation and ambient take the lamp's light)
+        int story = -99;
+        if (reg > 0 && CopyBytes(&story, reinterpret_cast<const void*>(tl + 0x1A0), sizeof story) && std::find(ids.begin(), ids.end(), std::make_pair(story, reg)) == ids.end())
+            ids.emplace_back(story, reg);
+        Settle& s = g_settle[light];
+        s.tracker = tracker, s.at = GetTickCount();
+        for (const auto& id : ids)
+            if (std::find(s.rooms.begin(), s.rooms.end(), id) == s.rooms.end()) s.rooms.push_back(id);
+    }
+    return true;
+}
 bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move, bool dry) {
     if (!g_capture.load(std::memory_order_relaxed) || !tl || !light || (dry && move)) return false;
     const char* kind = move ? "move" : wasOn == on ? "value" : on ? "switch on" : "switch off";
+    if (g_physical.load(std::memory_order_relaxed)) return TakesLampEditPhys(tl, light, kind, false, dry); // (LampMarkFilter takes a physical edit itself)
     std::vector<std::pair<uint64_t, MoveJob>> jobs; // (a move) one per kept room listing it
     std::string moveWhy;
     const uintptr_t tracker = TlTracker(tl);
@@ -4519,8 +4684,23 @@ bool TakesLampEdit(uintptr_t tl, uintptr_t light, bool wasOn, bool on, bool move
 // edit), kept again as usual meanwhile drawn from their kept solve. Room 0s are not sent (Real-time outdoor lamps draws the
 // lamp there and solves no room 0 for its edits either)
 void SettleDue() {
-    if (g_settle.empty()) return;
     const DWORD now = GetTickCount();
+    std::vector<const void*> requeue;
+    {
+        std::lock_guard<std::mutex> lk(g_requeueMx);
+        requeue.swap(g_requeue);
+    }
+    for (const void* room : requeue) { // (physical) solved off the light tree thread: one solve here (its kept copy drawn meanwhile)
+        RoomRead rr;
+        const uintptr_t tracker = RtOutdoorLamps::TrackerOf(room);
+        if (!tracker || !ReadRoom(static_cast<const BYTE*>(room), rr)) continue;
+        const bool sent = LevelLightShare::QueueRoomId(tracker, rr.story, rr.id, -1);
+        if (sent) g_physSent[room] = now | 1;
+        if (KeptLog())
+            LOG_INFO(std::format("[GpuRoomLamps] Story {} room {}: solved off the light tree thread, its kept physical copy stays drawn (the same geometry); {}", rr.story,
+                                 rr.id, sent ? "sent to one solve here" : "could not be sent to a solve here"));
+    }
+    if (g_settle.empty()) return;
     // each room once for the lamps due together (a room sent for one is already waiting for its gather for the next: the
     // game's queue refuses it, which is not a failure)
     std::map<std::tuple<uintptr_t, int, int>, bool> sent; // (tracker, story, id) -> the send went through
@@ -4538,6 +4718,8 @@ void SettleDue() {
             }
             const bool queued = LevelLightShare::QueueRoomId(it->second.tracker, story, id, -1);
             sent[key] = queued;
+            if (queued)
+                if (const void* r = LevelLightShare::RoomOf(it->second.tracker, story, id)) g_physSent[r] = now | 1;
             (queued ? ok : refused)++;
         }
         if (KeptLog())
@@ -4613,9 +4795,12 @@ bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu:
             for (int q = 0; q < 3; q++) v.p[q] = v.base[q] = s[q], v.n[q] = s[4 + q];
             v.p[3] = tested[i] ? 8.0f : 0.0f;
             d.phys.push_back(v);
+            for (int q = 0; q < 3; q++) d.physBox[q] = std::min(d.physBox[q], s[q]), d.physBox[3 + q] = std::max(d.physBox[3 + q], s[q]);
         }
         d.blkHeader = static_cast<float>(d.blockers.Append(k.tests));
-        for (const KeptLamp& l : k.lamps) d.lamps.push_back(l.light), d.physMult.push_back(static_cast<float>(l.mult) * l.normK), d.physReach.push_back(l.reach);
+        for (const KeptLamp& l : k.lamps)
+            d.lamps.push_back(l.light), d.physMult.push_back(static_cast<float>(l.mult) * l.normK), d.physReach.push_back(l.reach), d.physHome.push_back(l.home);
+        d.physBaked = k.baked, d.physNorm = k.norm, d.physOutdoor = k.outdoor;
     }
     // a texel's compose point at (x, y) of its target (RtLampModel::KeptTexel's inputs)
     const auto texel = [&](uint32_t i, int x, int y) {
@@ -4807,6 +4992,19 @@ static void SweepLeftLots(DWORD now) {
 void OnPresent() {
     const DWORD now = GetTickCount();
     HookGuard::Run("OutdoorDelta left lot sweep", [now] { SweepLeftLots(now); });
+    // (physical indoor lamps, stage 4) every 10 s with lamp edits: what they cost (solves outside the settle: target 0)
+    static DWORD s_summaryAt = 0;
+    if (now - s_summaryAt >= 10000) {
+        s_summaryAt = now;
+        const long taken = c_physTaken.exchange(0), refused = c_physRefused.exchange(0), solves = c_physEditSolves.exchange(0), settles = c_physSettleSolves.exchange(0);
+        int maps = 0;
+        double ms = 0.0, worst = 0.0;
+        GpuRoomLamps::TakeRelightCost(maps, ms, worst);
+        if (taken || refused)
+            LOG_INFO(std::format("[GpuRoomLamps] physical lamp edits in the last 10 s: {} taken, {} left to the room solves; {} room solves of the lot within {} s of an edit "
+                                 "taken outside the settle, {} settle or resend solves; physical relights {} maps, {:.1f} ms CPU (largest frame {:.2f} ms)",
+                                 taken, refused, solves, kEditSolveMs / 1000, settles, maps, ms, worst));
+    }
     std::vector<const void*> due;
     std::vector<std::pair<uint64_t, LotEdit>> done;
     {

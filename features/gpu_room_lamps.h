@@ -60,7 +60,18 @@ void NoteEdit(uintptr_t light, const char* kind, const std::vector<const void*>&
 // Any thread: an edit of that lamp taken and not yet shown in every map of its rooms holding its parts (its maps go first)
 bool EditPending(uintptr_t light);
 // Render thread, after Sig: map m of that story manager and class draws a room of an edit taken that holds the lamp's parts and
-// was not relit since the edit (Real-time outdoor lamps relights such maps first, the floor first)
+// was not relit since the edit (Real-time outdoor lamps relights such maps first, the floor first); (physical) a map whose drawn
+// lamps held or hold the lamp of a physical edit, not relit since
 bool ShowsEdit(uintptr_t mgr, int cls, int m);
+// ---- physical indoor lamps, stage 4: lamp edits without the room solves (OutdoorDelta::TakesLampEditPhys) ----
+// A physical kept map draws every lamp of the active lot with a GPU law whose reach meets its texels (OutdoorDelta::LotLamps,
+// phys_lamp_pick.h), so an edit relights exactly the maps its old or new reach meets.
+// Light tree thread: an edit taken ("value", "switch on", "switch off", "move"; a literal), logged once its maps were relit:
+// "physical <kind>: lamp L, no room solved, M maps relit in N ms (frames +k)" (a drag's steps are one edit, timed from its latest)
+void NotePhysEdit(uintptr_t light, const char* kind);
+// Any thread: a physical move taken within the last ms (Real-time outdoor lamps draws its maps with the drag's taps meanwhile)
+bool PhysMoveRecent(unsigned long ms);
+// Render thread: the physical relights since the last call (maps, CPU ms, the largest round's CPU ms; OutdoorDelta's 10 s summary)
+void TakeRelightCost(int& maps, double& ms, double& worst);
 
 } // namespace GpuRoomLamps

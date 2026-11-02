@@ -7517,7 +7517,10 @@ void __fastcall FinalizeHook(BYTE* room) {
     if (!room) return;
     // GPU room lamps (developer): the room's texels in its maps were written again, its kept solve no longer holds them (any
     // thread; a solve kept below is kept again by SolveEnd)
-    if (OutdoorDelta::RoomLampCapture()) HookGuard::Run("OutdoorDelta room finalized", [room] { OutdoorDelta::RoomFinalized(room); });
+    if (OutdoorDelta::RoomLampCapture()) {
+        const bool gather = ThreadId() == g_gatherThread.load(std::memory_order_relaxed);
+        HookGuard::Run("OutdoorDelta room finalized", [room, gather] { OutdoorDelta::RoomFinalized(room, gather); });
+    }
     // Quick outdoor lamp edits: the solve's parts are kept (or the delta's record closed), the maps now unlocked
     if (OutdoorDelta::Enabled() && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
         HookGuard::Run("OutdoorDelta solve end", [room] { OutdoorDelta::SolveEnd(room); });
@@ -19126,6 +19129,36 @@ void LotRooms(uintptr_t tracker, std::vector<void*>& out) {
         for (int i = 0; i < n; i++)
             if (BYTE* room = SafeRoomById(tracker, level, buf[i].id)) out.push_back(room);
     }
+}
+// One story's registry into lights / homes (POD, SEH): their count, -1 when it could not be read
+int WalkLightsPod(uintptr_t tl, uintptr_t* lights, int* homes, int max) {
+    int n = 0;
+    __try {
+        WalkRegistry(tl, [&](uintptr_t entry) {
+            if (n >= max) return;
+            const uintptr_t light = *reinterpret_cast<const uintptr_t*>(entry + 0x24);
+            if (!light) return;
+            lights[n] = light, homes[n] = *reinterpret_cast<const int*>(entry + 0x1C);
+            n++;
+        });
+        return n;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return -1;
+    }
+}
+bool RegisteredLights(uintptr_t tracker, std::vector<RegisteredLight>& out) {
+    out.clear();
+    if (!tracker) return false;
+    bool ok = true;
+    uintptr_t lights[1024];
+    int homes[1024];
+    for (int S = 0; S <= 7; S++) {
+        if (!SafeStoryManager(tracker, S)) continue;
+        const int n = WalkLightsPod(TreeLevel(tracker, S), lights, homes, 1024);
+        ok = ok && n >= 0;
+        for (int i = 0; i < n; i++) out.push_back(RegisteredLight{lights[i], S, homes[i]});
+    }
+    return ok;
 }
 bool QueueRoomId(uintptr_t tracker, int story, int id, int urgentTier) {
     if (!tracker || story < -4 || story > 7 || id < 0 || !g_installed.load(std::memory_order_relaxed)) return false;

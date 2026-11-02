@@ -6,7 +6,9 @@
 #include "rt_lamp_gpu.h"
 #include "rt_outdoor_lamps.h"
 #include "outdoor_delta.h"
+#include "level_light_share.h"
 #include "rt_lamp_model.h"
+#include "phys_lamp_pick.h"
 #include "apex_log.h"
 #include <windows.h>
 #include <algorithm>
@@ -56,6 +58,18 @@ struct Entry {
     RtLampGpu::BlockerTable blockers;
     float blkHeader = -1.0f;
     float xf[16] = {};
+    // (physical, stage 4) the solve's lamps out of its base (their rows: mult x norm scale, reach, the room they were registered
+    // in), the lights its base holds, the room's normalisation and roofless flag, its texels' world box; the drawn lamps' hash,
+    // and the physical edits whose lamp it drew before or draws now since its last relight
+    std::vector<uintptr_t> listed, baked;
+    std::vector<float> listedMult;
+    std::vector<char> listedReach;
+    std::vector<int> listedHome;
+    float norm = 1.0f;
+    bool outdoorRoom = false;
+    PhysLampPick::Box box;
+    uint64_t physSig = 0;
+    std::vector<uintptr_t> editHits;
 };
 // (physical indoor lamps) the kept shadow atlas: a tile per lamp, kept while the lamp stays put and the occluders are the same.
 // Its rows grow with the most lamps a map has drawn (4 at a time, up to kTiles: 6 x 256 x 256 x (G16R16F + D24X8) = 3.1 MB a
@@ -115,6 +129,26 @@ struct Edit {
 };
 std::mutex g_editMx;
 std::vector<Edit> g_edits;
+// (physical, stage 4) the lamp edits taken without solves (NotePhysEdit, light tree thread; a drag's steps are one, its latest
+// step timed), until the maps whose drawn lamps held or hold it were relit (render thread): logged with the maps relit, the time
+// from the latest step to the last of them and its relight round
+struct PhysEdit {
+    uintptr_t light = 0;
+    const char* kind = "";
+    LARGE_INTEGER at{}, lastAt{};
+    DWORD tick = 0;
+    uint32_t frame = 0, lastFrame = 0;
+    int steps = 0, maps = 0;
+    std::vector<std::tuple<const void*, int, int>> relit;
+};
+std::vector<PhysEdit> g_physEdits; // (under g_editMx)
+std::atomic<DWORD> g_physMoveAt{0};
+// (stage 4) the active lot's registered lights this round (OutdoorDelta::LotLamps) and where each is (light -> index)
+std::vector<OutdoorDelta::LotLamp> g_lot;
+std::unordered_map<uintptr_t, size_t> g_lotAt;
+// (stage 4) the physical relights' CPU cost since TakeRelightCost (maps, ms, the largest round's ms) and this round's
+int g_costMaps = 0;
+double g_costMs = 0.0, g_costWorst = 0.0, g_costRound = 0.0;
 
 void Drop(Entry& e, const void* room) {
     g_bytes -= std::min(g_bytes, e.gpu.bytes);
@@ -283,6 +317,12 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                     e.colourOnly = std::move(d.colourOnly);
                     e.expect = std::move(d.expect);
                     e.roomLamps = std::move(d.roomLamps);
+                    if (e.physical) { // (stage 4: the lamps drawn are picked each round, below)
+                        e.listed = std::move(e.lamps), e.listedMult = std::move(e.physMult), e.listedReach = std::move(e.physReach);
+                        e.listedHome = std::move(d.physHome), e.baked = std::move(d.physBaked), e.norm = d.physNorm, e.outdoorRoom = d.physOutdoor;
+                        std::memcpy(e.box.lo, d.physBox, sizeof e.box.lo), std::memcpy(e.box.hi, d.physBox + 3, sizeof e.box.hi);
+                        e.lamps.clear();
+                    }
                     g_bytes += e.gpu.bytes;
                 } else if (LogAllowed())
                     LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: its buffers could not be made (left as the game's)", d.story, r.id, cls, kMapName[m]));
@@ -290,25 +330,57 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
         }
         if (!e.ok) continue;
         int type = 0, reg = -1;
-        if (e.physical) { // (every lamp with its law now: a lamp gone or without a law adds nothing; no parts, so no move rule)
+        if (e.physical) { // (no parts, so no move rule: every lamp drawn with its law now; a lamp gone or without a law adds nothing)
             const uint32_t gen = RtOutdoorLamps::KeptMeshGen();
             Mix(sig, &e.version, sizeof e.version), Mix(sig, &gen, sizeof gen);
             any = true;
-            e.lotLaws.assign(e.lamps.size(), RtLampModel::Lamp{});
-            e.world.assign(e.lamps.size(), {});
-            e.lawOk.assign(e.lamps.size(), 0);
-            for (size_t l = 0; l < e.lamps.size(); l++) {
+            // (stage 4) the lot's lamps whose reach meets the map: the solve's lamps out of its base with their rows (a fresh row
+            // once registered in another room), then every other lot lamp but those its base holds with a fresh row
+            // (phys_lamp_pick.h: never one counted twice, in the base and drawn)
+            const std::vector<uintptr_t> prev = std::move(e.lamps);
+            e.lamps.clear(), e.physMult.clear(), e.physReach.clear(), e.lotLaws.clear(), e.world.clear(), e.lawOk.clear();
+            uint64_t es = 1469598103934665603ull;
+            const auto fresh = [&](const OutdoorDelta::LotLamp& L, float& mult, char& reach) {
+                mult = PhysLampPick::NormKFresh(L.story, L.home, L.homeNorm, e.story, e.id, e.norm, e.outdoorRoom);
+                reach = PhysLampPick::ReachFresh(L.homeOutdoor, e.outdoorRoom) ? 1 : 0;
+            };
+            const auto draw = [&](uintptr_t light, float mult, char reach) {
                 GpuLampLaw::Lamp w;
+                RtLampModel::Lamp lotLaw;
                 // (the law with its reach radii: the room table's reach column and Params::reachOn decide where they apply)
-                if (!RtOutdoorLamps::WorldLaw(e.lamps[l], e.lot, false, w, type, reg) ||
-                    !RtOutdoorLamps::WorldLaw(e.lamps[l], e.lot, true, e.lotLaws[l].law, type, reg, e.xf))
-                    continue;
-                e.lawOk[l] = 1;
-                e.lotLaws[l].mult = l < e.physMult.size() ? e.physMult[l] : 1.0f;
-                std::memcpy(e.world[l].data(), w.pos, sizeof w.pos);
-                Mix(sig, &e.lotLaws[l], sizeof e.lotLaws[l]);
+                if (!RtOutdoorLamps::WorldLaw(light, e.lot, false, w, type, reg) || !PhysLampPick::Meets(e.box, w.pos, PhysLampPick::Reach2(w, mult, e.thr)) ||
+                    !RtOutdoorLamps::WorldLaw(light, e.lot, true, lotLaw.law, type, reg, e.xf))
+                    return;
+                lotLaw.mult = mult;
+                e.lamps.push_back(light), e.physMult.push_back(mult), e.physReach.push_back(reach), e.lotLaws.push_back(lotLaw), e.lawOk.push_back(1);
+                e.world.push_back({w.pos[0], w.pos[1], w.pos[2]});
+                Mix(es, &light, sizeof light), Mix(es, &lotLaw, sizeof lotLaw), Mix(es, &reach, 1);
+            };
+            for (size_t l = 0; l < e.listed.size(); l++) {
+                float mult = l < e.listedMult.size() ? e.listedMult[l] : 1.0f;
+                char reach = l < e.listedReach.size() ? e.listedReach[l] : 0;
+                if (const auto at = g_lotAt.find(e.listed[l]); at != g_lotAt.end() && l < e.listedHome.size() && g_lot[at->second].home != e.listedHome[l])
+                    fresh(g_lot[at->second], mult, reach);
+                draw(e.listed[l], mult, reach);
             }
-            Mix(sig, e.lawOk.data(), e.lawOk.size()), Mix(sig, e.physReach.data(), e.physReach.size());
+            for (const OutdoorDelta::LotLamp& L : g_lot) {
+                if (PhysLampPick::UseOf(L.light, e.listed, e.baked) != PhysLampPick::Use::Fresh) continue;
+                float mult = 1.0f;
+                char reach = 0;
+                fresh(L, mult, reach);
+                draw(L.light, mult, reach);
+            }
+            const size_t n = e.lamps.size();
+            Mix(es, &n, sizeof n);
+            if (es != e.physSig) { // (the physical edits whose lamp it drew or draws: their maps, the edit's log)
+                e.physSig = es;
+                std::lock_guard<std::mutex> lk(g_editMx);
+                for (const PhysEdit& pe : g_physEdits)
+                    if ((std::find(prev.begin(), prev.end(), pe.light) != prev.end() || std::find(e.lamps.begin(), e.lamps.end(), pe.light) != e.lamps.end()) &&
+                        std::find(e.editHits.begin(), e.editHits.end(), pe.light) == e.editHits.end())
+                        e.editHits.push_back(pe.light);
+            }
+            Mix(sig, &es, sizeof es);
             continue;
         }
         // a lamp moved since its parts were kept (their shares follow its place): drawn with the law its parts were kept with (the
@@ -433,13 +505,35 @@ void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
             continue;
         }
         std::string err;
+        LARGE_INTEGER c0{};
+        QueryPerformanceCounter(&c0);
         if (e.physical ? !RelightPhys(dev, eng, e, p, game, out, w, h, err) : !eng.RelightKept(dev, e.gpu, e.laws.data(), e.lawOk.data(), e.thr, game, out, w, h, err)) {
             if (LogAllowed()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: not drawn ({})", e.story, e.id, e.cls, kMapName[m], err));
-            if (e.physical) NoteCover(e.story, err);
+            if (e.physical) {
+                NoteCover(e.story, err);
+                // (stage 4: its lamps' edits may have been taken without its solve, which the game's map then lacks)
+                if (!e.editHits.empty()) LevelLightShare::QueueRoomAgain(room);
+            }
             Drop(e, room);
             continue;
         }
-        if (e.physical) NoteCover(e.story, {});
+        if (e.physical) {
+            NoteCover(e.story, {});
+            LARGE_INTEGER c1{};
+            QueryPerformanceCounter(&c1);
+            g_costMaps++, g_costRound += MsSince(c0, c1);
+            if (!e.editHits.empty()) {
+                std::lock_guard<std::mutex> lk(g_editMx);
+                for (PhysEdit& pe : g_physEdits)
+                    if (std::find(e.editHits.begin(), e.editHits.end(), pe.light) != e.editHits.end()) {
+                        const auto key = std::make_tuple(room, e.cls, m);
+                        if (std::find(pe.relit.begin(), pe.relit.end(), key) == pe.relit.end() && pe.relit.size() < 256) pe.relit.push_back(key);
+                        QueryPerformanceCounter(&pe.lastAt);
+                        pe.lastFrame = g_frame.load(std::memory_order_relaxed);
+                    }
+                e.editHits.clear();
+            }
+        }
         QueryPerformanceCounter(&e.relitAt);
         e.relitFrame = g_frame.load(std::memory_order_relaxed);
         {
@@ -467,6 +561,36 @@ void ReleaseAll() {
 
 void BeginFrame() {
     g_frame.fetch_add(1, std::memory_order_relaxed);
+    // (physical, stage 4) the round's lot lamps, its relights' cost, and the edits whose maps are all relit (none relit in the last
+    // 2 rounds, at least one relit; or none in 2 s: logged as such)
+    g_costWorst = std::max(g_costWorst, g_costRound), g_costMs += g_costRound, g_costRound = 0.0;
+    g_lot.clear(), g_lotAt.clear();
+    if (OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical()) {
+        OutdoorDelta::LotLamps(g_lot);
+        for (size_t i = 0; i < g_lot.size(); i++) g_lotAt.emplace(g_lot[i].light, i);
+    }
+    std::vector<PhysEdit> done;
+    {
+        const uint32_t frame = g_frame.load(std::memory_order_relaxed);
+        std::lock_guard<std::mutex> lk(g_editMx);
+        for (auto it = g_physEdits.begin(); it != g_physEdits.end();) {
+            const bool waiting = std::any_of(g_entries.begin(), g_entries.end(), [&](const auto& kv) {
+                return kv.second.ok && std::find(kv.second.editHits.begin(), kv.second.editHits.end(), it->light) != kv.second.editHits.end();
+            });
+            const bool shown = !it->relit.empty() && !waiting && frame - it->lastFrame >= 2;
+            if (shown || (!waiting && it->relit.empty() && GetTickCount() - it->tick > 2000) || GetTickCount() - it->tick > kEditWaitMs) {
+                done.push_back(std::move(*it));
+                it = g_physEdits.erase(it);
+            } else
+                ++it;
+        }
+    }
+    for (const PhysEdit& pe : done)
+        if (LogAllowed())
+            LOG_INFO(pe.relit.empty() ? std::format("[GpuRoomLamps] physical {}: lamp {:08X}, no room solved, no map relit (its reach meets no kept map drawn)", pe.kind, pe.light)
+                                      : std::format("[GpuRoomLamps] physical {}: lamp {:08X}, no room solved, {} maps relit in {:.1f} ms (frames +{}){}", pe.kind, pe.light,
+                                                    pe.relit.size(), MsSince(pe.at, pe.lastAt), pe.lastFrame - pe.frame,
+                                                    pe.steps > 1 ? std::format(", {} steps", pe.steps) : std::string()));
     // (physical indoor lamps) the last round's cover per story, when it changed (room 0: NoteRoom0)
     for (const auto& [story, c] : g_cover) {
         std::string line = c.failed ? std::format("not covered ({} of {} maps not drawn: {})", c.failed, c.drawn + c.failed, c.why)
@@ -488,6 +612,8 @@ bool EditPending(uintptr_t light) {
 }
 bool ShowsEdit(uintptr_t mgr, int cls, int m) {
     std::lock_guard<std::mutex> lk(g_editMx);
+    for (const auto& [key, e] : g_entries) // (physical, stage 4: a map whose drawn lamps held or hold an edit's lamp)
+        if (e.ok && e.physical && e.mgr == mgr && e.cls == cls && e.m == m && !e.editHits.empty()) return true;
     for (const Edit& ed : g_edits)
         for (const auto& [key, e] : g_entries)
             if (e.ok && e.mgr == mgr && e.cls == cls && e.m == m && e.relitAt.QuadPart <= ed.at.QuadPart &&
@@ -510,6 +636,29 @@ void NoteEdit(uintptr_t light, const char* kind, const std::vector<const void*>&
     e.frame = g_frame.load(std::memory_order_relaxed);
     std::lock_guard<std::mutex> lk(g_editMx);
     if (g_edits.size() < 64) g_edits.push_back(std::move(e));
+}
+
+void NotePhysEdit(uintptr_t light, const char* kind) {
+    if (std::strcmp(kind, "move") == 0) g_physMoveAt.store(GetTickCount() | 1, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lk(g_editMx);
+    auto it = std::find_if(g_physEdits.begin(), g_physEdits.end(), [&](const PhysEdit& pe) { return pe.light == light; });
+    if (it == g_physEdits.end()) {
+        if (g_physEdits.size() >= 64) return;
+        it = g_physEdits.insert(g_physEdits.end(), PhysEdit{});
+        it->light = light;
+    }
+    it->kind = kind, it->steps++;
+    QueryPerformanceCounter(&it->at);
+    it->tick = GetTickCount();
+    it->frame = g_frame.load(std::memory_order_relaxed);
+}
+bool PhysMoveRecent(unsigned long ms) {
+    const DWORD at = g_physMoveAt.load(std::memory_order_relaxed);
+    return at && GetTickCount() - at < ms;
+}
+void TakeRelightCost(int& maps, double& ms, double& worst) {
+    maps = g_costMaps, ms = g_costMs, worst = g_costWorst;
+    g_costMaps = 0, g_costMs = g_costWorst = 0.0;
 }
 
 } // namespace GpuRoomLamps

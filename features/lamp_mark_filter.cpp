@@ -451,7 +451,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
     // its room is taken when every room listing it is a kept room whose parts a copy of its tests can redo (the move worker,
     // OutdoorDelta); a move into another room and any other lamp take the game's path below
     if (OutdoorDelta::RoomLampCapture()) {
-        bool known = false, wasOn = false, playerEdit = false;
+        bool known = false, wasOn = false, playerEdit = false, settle = false;
         int kind = -1;
         {
             std::lock_guard<std::mutex> lk(g_mx);
@@ -461,11 +461,18 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
                 const bool moved = dx * dx + dy * dy + dz * dz > kMoveMin * kMoveMin;
                 const bool valueChanged = std::memcmp(was.editable, editable, sizeof editable) != 0 || was.on != on;
                 kind = was.room != room ? 2 : moved ? 1 : valueChanged ? 0 : -1;
+                // (physical: a drag step under kMoveMin is a move too, the GPU draws the lamp where it is; the game's path marked its room)
+                if (kind == -1 && OutdoorDelta::RoomLampPhysical() && dx * dx + dy * dy + dz * dz > 1e-6f) kind = 1;
                 known = true, wasOn = was.on;
                 playerEdit = std::memcmp(was.editable, editable, sizeof editable) != 0;
+                settle = was.on != on || was.editable[3] != editable[3]; // (physical: a switch or an intensity change)
             }
         }
-        if (known && (kind == 0 || kind == 1) && OutdoorDelta::TakesLampEdit(tl, light, wasOn, on, kind == 1)) {
+        // (physical indoor lamps, stage 4: every story draws the lot's lamps from their laws by reach, so any room's maps show it;
+        // only a switch or an intensity change settles its rooms, OutdoorDelta::TakesLampEditPhys)
+        const char* physKind = kind == 1 ? "move" : wasOn == on ? "value" : on ? "switch on" : "switch off";
+        if (known && (kind == 0 || kind == 1) &&
+            (OutdoorDelta::RoomLampPhysical() ? OutdoorDelta::TakesLampEditPhys(tl, light, physKind, settle) : OutdoorDelta::TakesLampEdit(tl, light, wasOn, on, kind == 1))) {
             {
                 std::lock_guard<std::mutex> lk(g_mx);
                 if (const auto it = g_sig.find(Key{tl, light}); it != g_sig.end()) {

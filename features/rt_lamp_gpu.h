@@ -148,6 +148,14 @@ struct KeptMapData {
     std::vector<char> physReach; // per lamp: 1 the realistic reach share applies on the room's wall texels
     BlockerTable blockers;
     float blkHeader = -1.0f;
+    // (physical, stage 4: the lot's lamps drawn by reach, phys_lamp_pick.h) per lamp of `lamps` the room it was registered in;
+    // the lights in the solve's base (never drawn); the room's normalisation and roofless flag (a fresh lamp's row); the map's
+    // texels' world box (min xyz, max xyz)
+    std::vector<int> physHome;
+    std::vector<uintptr_t> physBaked;
+    float physNorm = 1.0f;
+    bool physOutdoor = false;
+    float physBox[6] = {1e30f, 1e30f, 1e30f, -1e30f, -1e30f, -1e30f};
 };
 struct KeptMapGpu { // DEFAULT pool (made again after a device reset)
     int w = 0, h = 0, accW = 0, accH = 0, layoutW = 0, layoutH = 0;
@@ -325,6 +333,7 @@ class Engine {
     IDirect3DTexture9* t3_ = nullptr;         // a physical batch's 3D tests (DEFAULT A32B32G32R32F, the sums' size)
     int t3W_ = 0, t3H_ = 0;
     IDirect3DTexture9* x_ = nullptr;          // room 0's physical second sum (DEFAULT A32B32G32R32F, the sums' size; AccumulatePhys)
+    float accC_[97][4] = {};                  // the last Accumulate's lamp constants c0..c96 (Compose's MaskAll reads them after AddKeptParts)
     int xW_ = 0, xH_ = 0;
     bool ReadSumOf(IDirect3DDevice9* dev, IDirect3DTexture9* t, int w, int h, std::vector<float>& out);
     int blendOk_ = -1; // the device adds into an A32B32G32R32F target (RelightKept; -1 not asked yet)

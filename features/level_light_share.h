@@ -398,6 +398,14 @@ void* Room0Of(uintptr_t tracker, int story);
 void* RoomOf(uintptr_t tracker, int story, int id);
 // Every room of a lot (stories -4 to 7: room 0 and the rooms its lighting tiles name), any thread
 void LotRooms(uintptr_t tracker, std::vector<void*>& out);
+// (physical indoor lamps; light tree thread) every light registered on stories 0 .. 7 of a lot (each story's registry, as the
+// game's gather walks it): the light, its story and the room it is registered in (0 outdoors). False when a registry could not
+// be read (out holds what was)
+struct RegisteredLight {
+    uintptr_t light = 0;
+    int story = 0, home = 0;
+};
+bool RegisteredLights(uintptr_t tracker, std::vector<RegisteredLight>& out);
 // (GPU room lamps, a lamp moved; the light tree thread) Apex's path for `light` at lp in `room`'s solve, when a copy can redo it
 // (room_lamp_move.h): 1 a plain lamp in a room with a record (the threshold early-out runs), 0 a plain lamp in a room without one;
 // -1 (why) an outdoor lamp, one of the record's inner, opening or cross lamps, a roofless room, or a lamp under the room's

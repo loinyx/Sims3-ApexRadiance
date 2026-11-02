@@ -489,6 +489,7 @@ bool Engine::Accumulate(IDirect3DDevice9* dev, const Map& m, const RtLampModel::
     c[99][0] = 1.0f / p.farDist, c[99][1] = p.farDist, c[99][2] = 1.0f / static_cast<float>(scratchW_), c[99][3] = 1.0f / static_cast<float>(scratchH_);
     c[100][0] = first ? 1.0f : 0.0f, c[100][1] = p.mask ? 1.0f : 0.0f, c[100][2] = p.nearBlocker, c[100][3] = static_cast<float>(p.debugLamp);
     c_.SetPsConst(dev, 0, &c[0][0], 101);
+    std::memcpy(accC_, c, sizeof accC_);
     c_.SetTexture(dev, 0, atlas_);
     c_.SetTexture(dev, 1, first ? nullptr : acc_[accCur_]);
     PointSampler(dev, 0);
@@ -1153,13 +1154,17 @@ bool Engine::AddKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, con
     if (!Target(dev, acc_[accCur_], w, h)) return err = "the sum could not be targeted", false;
     c_.SetDepthStencil(dev, nullptr);
     PassStates(dev);
-    if (!DrawKeptParts(dev, vb, ranges, laws, lawOk, thr, w, h, extra ? kAccKept0Ps : kAccKeptPs)) return err = "the kept parts' draw failed", false;
-    if (!extra) return true;
+    // (each kept lamp's draw sets c0..c96: the batch's are set again after them, which Compose's MaskAll reads with
+    // Params::maskAllGpu; it read the last kept lamp's law instead)
+    const auto restore = [&] { c_.SetPsConst(dev, 0, &accC_[0][0], 97); };
+    if (!DrawKeptParts(dev, vb, ranges, laws, lawOk, thr, w, h, extra ? kAccKept0Ps : kAccKeptPs)) return restore(), err = "the kept parts' draw failed", false;
+    if (!extra) return restore(), true;
     // the floor mask's "all" and the exit light into the other sum (free after the last Accumulate; Compose with keptX reads it)
-    if (!Target(dev, acc_[1 - accCur_], w, h)) return err = "the second sum could not be targeted", false;
+    if (!Target(dev, acc_[1 - accCur_], w, h)) return restore(), err = "the second sum could not be targeted", false;
     dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 1.0f, 0);
-    if (!DrawKeptParts(dev, vb, ranges, laws, lawOk, thr, w, h, kAccKept0XPs)) return err = "the kept parts' second draw failed", false;
-    return true;
+    const bool ok = DrawKeptParts(dev, vb, ranges, laws, lawOk, thr, w, h, kAccKept0XPs);
+    restore();
+    return ok ? true : (err = "the kept parts' second draw failed", false);
 }
 // 1. the sum: base-less, every lamp's parts added at their texels' places in the sum's layout; 2. the texels composed into the
 // map; 3. class-2 walls: composed into the layout over the blocks before the blur, blurred the game's way (BlurWalls: the rows
