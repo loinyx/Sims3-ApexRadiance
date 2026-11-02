@@ -94,6 +94,8 @@ give.
   `GT` per tile diagonals, flags and ceiling, `GE` edges, `GO` openings; floats as their bits) and per story the tiles' floor
   height and quadrant rooms (`FT`) and the floor object's quadrant keys (`FK`) under `FLOORHASH H story K`. A block already in
   the file is written as `GRIDREF` / `FLOORREF` with its hash.
+- **Every light of a room**: `LIGHT <light> type T vt <vtable> xM colour r g b at x y z drawn 0|1` for each light of the probed room's
+  list, and for a light the GPU does not draw up to about 600 `N <light> p .. n .. hook .. wall .. got ..` lines (its lit texels).
 - **Sample layout**: the batch sample's position at +0x00 and normal at +0x10, world space, as `ExportRoom0` reads them.
 - **Test**: `tools/outdoor_delta_test` checks `ProbeClassify`'s five classes.
 

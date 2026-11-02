@@ -1901,6 +1901,39 @@ void ProbeEnd(const BYTE* room) {
                          rr.story, rr.id, rr.cls, kind, n, drawn, list.size(), lit ? 100.0 * static_cast<double>(within) / static_cast<double>(lit) : 100.0, lit, shadowed,
                          unheld, MsSince(t0)));
     for (const std::string& row : rows) LOG_INFO(row);
+    // (the dump) every light of the room's list: type, colour, position, whether the GPU draws it; for a light it does not draw,
+    // a sample of its lit texels (the colour before the game's tests, after its wall test, and its part)
+    for (const ListLight& li : list) {
+        int32_t type = -1;
+        uintptr_t vt = 0;
+        float col[3] = {}, pos[3] = {};
+        CopyBytes(&type, reinterpret_cast<const void*>(li.light + 0xB0), sizeof type);
+        CopyBytes(&vt, reinterpret_cast<const void*>(li.light), sizeof vt);
+        CopyBytes(col, reinterpret_cast<const void*>(li.light + 0xE0), sizeof col);
+        CopyBytes(pos, reinterpret_cast<const void*>(li.light + 0x120), sizeof pos);
+        GpuLampLaw::Lamp law;
+        int lawType = 0, reg = -1;
+        const bool drawnLight = RtOutdoorLamps::WorldLaw(li.light, r.lot, false, law, lawType, reg);
+        dumpTexels += std::format("LIGHT {:08X} type {} vt {:08X} x{} colour {:.3f} {:.3f} {:.3f} at {:.3f} {:.3f} {:.3f} drawn {}\n", li.light, type, vt, li.mult, col[0],
+                                  col[1], col[2], pos[0], pos[1], pos[2], drawnLight ? 1 : 0);
+        const auto hk = hooks.find(li.light);
+        if (drawnLight || hk == hooks.end()) continue;
+        const auto pt = parts.find(li.light);
+        const size_t step = hk->second.size() / 600 + 1;
+        for (size_t j = 0; j < hk->second.size(); j += step) {
+            const Capture::ProbeHook& h = *hk->second[j];
+            if (Max3(h.rgb) < kLevel) continue;
+            float g[3] = {};
+            if (pt != parts.end()) {
+                const auto& ps = pt->second->parts;
+                const auto at = std::lower_bound(ps.begin(), ps.end(), h.texel, [](const Contrib& c, uint32_t t) { return c.texel < t; });
+                if (at != ps.end() && at->texel == h.texel) std::memcpy(g, at->rgb, sizeof g);
+            }
+            const float* s = reinterpret_cast<const float*>(r.samples.data() + static_cast<size_t>(h.texel) * 0x30);
+            dumpTexels += std::format("N {:08X} p {:.4f} {:.4f} {:.4f} n {:.3f} {:.3f} {:.3f} hook {:.5f} {:.5f} {:.5f} wall {:.5f} {:.5f} {:.5f} got {:.5f} {:.5f} {:.5f}\n",
+                                      li.light, s[0], s[1], s[2], s[4], s[5], s[6], h.rgb[0], h.rgb[1], h.rgb[2], h.wall[0], h.wall[1], h.wall[2], g[0], g[1], g[2]);
+        }
+    }
     ProbeDump(room, rr, dumpTexels);
 }
 
