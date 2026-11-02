@@ -174,12 +174,21 @@ lamp's position, not on its colour or intensity.
    now; a move's share is 1, the plain path's) and its samples are packed and written into the game's own textures of
    the set [room+8] (only texels that still hold what the capture or Apex's last write left). A switched-off lamp's part is
    carried into the room's next kept solve with its other parts (`CarryOff`), so its switch on is written too.
+16. Physical model, stage 1 (`roomLampModel` physical, 02/11): a kept room keeps its base (the sum less the measured parts of
+   every lamp with a GPU law, as above; a light whose law is its colour alone stays in the base), its tail, samples, batches,
+   directional samples and the room's 3D test records as its solve started (`ReadRoomTests`, read with `RoomGeoKey`:
+   `KeptRoom::tests`), and lists its lamps with their laws but builds no part. Room 0 builds no kept lamps;
+   `ExportRoom0(physical)` takes every such lot lamp out of its base (its sum, floor mask vis and all, exit light; `phys`), but
+   no caller asks it yet. Until the physical draw lands, a physical kept room is not drawn (`KeptRooms` leaves it out: its maps
+   keep the game's texels, and Real-time outdoor lamps' room 0 is drawn as with the capture off) and every lamp edit listing it
+   takes the room solves (`physical: drawing not implemented yet`). A solve that started under the other model is not kept.
 
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Keep indoor lamps for GPU | `gpuRoomLampsCapture` | bool | off | | Developer only, with Lamp lighting: Instant. Keeps each room solve of the active lot and draws its lamps on the GPU; colour, intensity and switch edits of lamps drawn in every room listing them solve no room at once (the directional maps objects read are written again at the end of the room update) (their rooms are solved 2 s after the last edit); with the probe on, logs the self-checks |
+| Indoor lamp model | `roomLampModel` | enum | replica | replica, physical | Developer only, shown with Keep indoor lamps for GPU on. Replica: everything above. Physical (stage 1 of the physical model): see 16; nothing is drawn from it yet. A change drops the kept rooms and sends the active lot's rooms to their solve |
 
 ## Limitations
 
@@ -250,7 +259,9 @@ lamp's position, not on its colour or intensity.
 ## Technical reference
 
 - **Logs** (`[GpuRoomLamps]`): `Story S room R class C: kept N texels, K drawn lamps, P parts (U never tested by the game),
-  X MB; M rooms kept, Y MB of 192 MB`; `not kept (the 192 MB budget: ...)`, `not kept (no memory)`, `not kept (why)`; with
+  X MB; M rooms kept, Y MB of 192 MB`; physical: `Story S room R class C: kept N texels (physical: no parts), X MB; M rooms, Y
+  MB of 192`, `Story S room 0: base without K lot lamps (physical)` (from `ExportRoom0`), `Model physical|replica: ...`, `not
+  kept (the model changed during its solve)`; `not kept (the 192 MB budget: ...)`, `not kept (no memory)`, `not kept (why)`; with
   the probe on, `Story S room R class C self-check: N texels lit, P% within 2/255 of the solve's sum recomposed from the kept
   parts (L lamps without a law now)`, then up to three of the worst texels: position, map, the solve's sum and the
   recomposed one, and the texel's largest kept part (lamp, entries, A, B, the law there, bits: 1 early-out, 2 never tested,

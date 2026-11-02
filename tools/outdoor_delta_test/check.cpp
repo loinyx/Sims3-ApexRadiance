@@ -1037,6 +1037,30 @@ int main() {
             lamps.push_back(L);
         }
         Record rec = Capture(room, lamps);
+        { // physical indoor lamps, stage 1: the base is the sum less the measured parts of every lamp with a GPU law (KeepEnd,
+          // ExportRoom0(physical)); here lamps 7 and 8 have none and stay in it
+            std::vector<Totals> base = rec.t, baked;
+            for (size_t li = 0; li < 7; li++)
+                for (const Contrib& p : rec.parts[li]) Remove(base[p.texel], p);
+            std::vector<Lamp> rest(lamps.begin() + 7, lamps.end());
+            FullSolve(room, rest, &baked);
+            float worst = 0.0f, worstMask = 0.0f, back = 0.0f;
+            std::vector<Totals> sum = base;
+            for (size_t li = 0; li < 7; li++)
+                for (const Contrib& p : rec.parts[li]) Add(sum[p.texel], p);
+            for (size_t i = 0; i < base.size(); i++) {
+                for (int q = 0; q < 3; q++) {
+                    worst = std::max(worst, std::fabs(base[i].S[q] - baked[i].S[q]));
+                    back = std::max(back, std::fabs(sum[i].S[q] - rec.t[i].S[q]));
+                }
+                worstMask = std::max({worstMask, std::fabs(base[i].vis - baked[i].vis), std::fabs(base[i].all - baked[i].all)});
+            }
+            std::printf("physical base: %zu texels, largest difference from the solve of the lamps without a law %.2e (mask %.2e), base + parts vs sum %.2e\n",
+                        base.size(), worst, worstMask, back);
+            Check(worst <= 1e-5f, "physical base: the sum less every law lamp's parts is the light of the lamps without a law");
+            Check(worstMask <= 2e-3f, "physical base: the floor mask's vis and all less every law lamp's parts (halves) likewise");
+            Check(back <= 1e-6f, "physical base: base + the law lamps' parts gives the solve's sum back");
+        }
         Diff total;
         long evaluated = 0, written = 0, steps = 0, full = 0;
         auto step = [&](size_t li) {

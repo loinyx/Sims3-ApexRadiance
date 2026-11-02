@@ -201,6 +201,7 @@ int g_lampMode = kLampInstant; // (14/10: Instant by default; a saved lampLighti
 bool g_outdoorDeltaCheck = false; // the delta's self-check (developer)
 bool g_roomLampProbe = false;     // the room lamp probe against the GPU's law (developer)
 bool g_gpuRoomLampsCapture = false; // GPU room lamps stage 1: the active lot's room solves kept for the GPU (developer)
+int g_roomLampModel = 0;            // (physical indoor lamps) 0 replica, 1 physical: what the kept rooms keep (OutdoorDelta::SetRoomLampPhysical; developer)
 float g_sidewalkClear = 0.5f;
 float g_lampTint = 1.0f;
 bool g_fenceGround = true;
@@ -2436,6 +2437,12 @@ class NightTerrainRelightPatch : public ApexPatch {
             RegisterBoolSetting(&g_gpuRoomLampsCapture, "gpuRoomLampsCapture", false,
                 "Developer: each solve of the active lot's rooms other than room 0 is kept for the GPU (the light without the lot's lamps, and each "
                 "lamp's share per texel), within a memory budget. With roomLampProbe on too, each kept solve is recomposed and compared. Nothing is drawn.");
+        if (!kPublicBuild) // developer only
+            RegisterNamedEnumSetting(&g_roomLampModel, "roomLampModel", 0,
+                "Developer, with gpuRoomLampsCapture and Lamp lighting instant: replica keeps each lamp's share per texel as the room's solve gave it; "
+                "physical keeps the light without the lot's lamps and the room's tests, for the GPU to draw each lamp with its shadows (not drawn yet: "
+                "the game's light stays shown). A change sends the active lot's rooms to their solve.",
+                {"replica", "physical"});
         if (!kPublicBuild) // developer A/B only; the public build always has soft lot edges
             RegisterBoolSetting(&g_softLotEdges, "bordaSuaveLote", true,
                 "Developer: within 3 m of a lot edge, lot grass fades its lamp light to the ground light the world grass shows "
@@ -2904,9 +2911,12 @@ class NightTerrainRelightPatch : public ApexPatch {
                         LOG_INFO(std::format("[RoomLampProbe] {} rooms of the active lot sent to their solve", sent));
                     }
                 }
-                if (const bool keep = rtOn && kDevToolsBuild && !kPublicBuild && g_gpuRoomLampsCapture; keep != OutdoorDelta::RoomLampCapture()) {
+                const bool keep = rtOn && kDevToolsBuild && !kPublicBuild && g_gpuRoomLampsCapture;
+                const bool modelChanged = keep && (g_roomLampModel == 1) != OutdoorDelta::RoomLampPhysical();
+                OutdoorDelta::SetRoomLampPhysical(g_roomLampModel == 1); // (before the capture: a solve kept next takes it)
+                if (keep != OutdoorDelta::RoomLampCapture() || modelChanged) {
                     OutdoorDelta::SetRoomLampCapture(keep);
-                    if (keep) { // every room of the active lot is solved once, so each solve is kept
+                    if (keep) { // every room of the active lot is solved once, so each solve is kept (a model change: kept again)
                         uintptr_t trackers[4];
                         const int n = LevelLightShare::ActiveLotTrackers(trackers, 4);
                         int sent = 0;
@@ -3173,6 +3183,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_outdoorDeltaCheck = false;
         g_roomLampProbe = false;
         g_gpuRoomLampsCapture = false;
+        g_roomLampModel = 0;
         g_lampTint = 1.0f;
         g_lotTintOwn = false;
         g_lotLampTint = 1.0f;
@@ -3707,6 +3718,12 @@ class NightTerrainRelightPatch : public ApexPatch {
         if (g_lampMode == kLampInstant && ApexUi::SwitchRow("Keep indoor lamps for GPU", &g_gpuRoomLampsCapture,
                                                             "Keeps the active lot's room solves and draws their lamps on the GPU; logs self-checks with the comparison on", false))
             NotifySettingChanged();
+        if (g_lampMode == kLampInstant && g_gpuRoomLampsCapture) {
+            static const char* const kModels[] = {"Replica", "Physical"};
+            if (ApexUi::SegmentedRow("Indoor lamp model", "Replica: each solve's lamp shares. Physical: lamps with shadows (not drawn yet)",
+                                     "##RoomLampModel", &g_roomLampModel, kModels, 2, nullptr, nullptr, 0))
+                NotifySettingChanged();
+        }
         if (ApexUi::Checkbox("Smooth the ground light maps on the GPU (A/B: off = CPU worker)", &g_smoothMapsGpu)) NotifySettingChanged();
         ImGui::SameLine();
         if (ApexUi::TextButton("Compare GPU vs CPU (one chunk)")) LightmapSmooth::RequestCompare();

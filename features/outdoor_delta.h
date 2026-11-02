@@ -47,6 +47,11 @@ bool RoomProbe();
 // budget. With the probe on too, each kept solve is recomposed from what was kept and compared with the solve (the log)
 void SetRoomLampCapture(bool on);
 bool RoomLampCapture();
+// (physical indoor lamps, stage 1) the kept rooms' model: replica (per-lamp parts, as above) or physical (the base without
+// every lot lamp with a GPU law, the tail, samples, batches and the room's 3D test records; no parts, no room-0 kept lamps).
+// A change drops the kept rooms; the caller sends the lot to its solves. Physical rooms are not drawn yet (the game's texels)
+void SetRoomLampPhysical(bool on);
+bool RoomLampPhysical();
 // The room solve hooks record for the probe or the kept captures (either is on)
 bool RoomHooks();
 // GPU room lamps stage 2a (RoomMapDither's pack thunk, any thread; only the light tree thread's kept capture takes it): the
@@ -216,6 +221,7 @@ struct Room0Export {
     std::vector<uint32_t> preblur;
     std::vector<uintptr_t> drawn; // the lights whose parts left the base
     std::vector<uintptr_t> kept;  // every light with parts kept (the others' parts stay in the base)
+    std::vector<uintptr_t> phys;  // (physical) the lot lamps with a GPU law whose parts left the base
     int lamps = 0;                // lights kept
     // (GPU room lamps, developer) the lamps of its list Real-time outdoor lamps does not draw, kept as a kept room's: their parts
     // are out of the base, and are added back from A and B (rt_lamp_model.h KeptAdd) with the lamp's law when kept, at the
@@ -243,7 +249,9 @@ struct Room0Export {
 };
 // 0 = nothing kept for that room and class; baseOnly: the kept solve is a lot next to the active one's (SetNeighbourLots)
 uint32_t RecordVersion(const void* room, int cls, bool* baseOnly = nullptr);
-bool ExportRoom0(const void* room, int cls, Room0Export& out);
+// physical: every lot lamp with a GPU law (not drawn by Real-time outdoor lamps, not a kept0 lamp) leaves the base too (its sum,
+// floor mask vis / all and exit light), listed in out.phys (no caller asks it until the physical draw)
+bool ExportRoom0(const void* room, int cls, Room0Export& out, bool physical = false);
 // The active lot's room 0s (render thread, once a frame): the memory budget never drops them; past kMaxPinnedBytes a new
 // solve of one is not kept instead, and their drawn lamps' parts are kept as one sum per texel. Returns how many of their
 // solves the budget has not kept so far (logged with their sizes)
