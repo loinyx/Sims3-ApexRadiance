@@ -49,6 +49,7 @@
 #include "terrain_chunk_relight.h"
 #include "terrain_stamps.h"
 #include "room_map_padding.h"
+#include "object_caster_probe.h"
 #include "level_light_share.h"
 #include "ground_lamp_shadow.h"
 #include "ground_shade_gpu.h"
@@ -10078,6 +10079,19 @@ void UpdateHooks() {
                 }
             return D3D9Hooks::HookAction::Continue;
         });
+        // (object caster probe, while a Recording runs with the physical model) the rig-lit object draws, before the bridge
+        D3D9Hooks::RegisterDrawIndexedPrimitive(kHookName,
+            [](D3D9Hooks::DeviceContext& ctx, D3DPRIMITIVETYPE, INT bvi, UINT minV, UINT numV, UINT start, UINT prims) {
+                if (!g_hookFailed && g_curVsIsObject && g_curVsInfo && g_curVs && ObjectCasterProbe::Wanted()) try {
+                        const int wk = g_curVsInfo->patched.worldK;
+                        float w[12];
+                        const bool onLot = wk >= 0 && SUCCEEDED(ctx.device->GetVertexShaderConstantF(static_cast<UINT>(wk), w, 3)) && FindFloorLot(&w[0], &w[8]);
+                        ObjectCasterProbe::OnObjectDraw(ctx.device, g_curVs, wk, onLot, bvi, minV, numV, start, prims);
+                    } catch (...) {
+                    }
+                return D3D9Hooks::HookAction::Continue;
+            },
+            D3D9Hooks::Priority::Early);
         D3D9Hooks::RegisterDrawIndexedPrimitive(kHookName,
             [](D3D9Hooks::DeviceContext& ctx, D3DPRIMITIVETYPE type, INT bvi, UINT minV, UINT numV, UINT start, UINT prims) {
                 if (g_hookFailed) return D3D9Hooks::HookAction::Continue;
@@ -10390,6 +10404,7 @@ void CrossLotTick(DWORD now) {
 void OnPresent() {
     if (DevSwitches::kCompiled) MeasureMemory(); // development builds (memory_owners)
     PumpSolidMeshes();
+    ObjectCasterProbe::OnPresent();
     ReleaseIdleMaskTextures(); // (left_lot_release, every 10 s)
     FenceGroupsGone();
     CrossLotTick(GetTickCount());
