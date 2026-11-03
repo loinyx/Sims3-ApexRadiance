@@ -75,6 +75,7 @@ struct Params {
     float thr = 2.0f * 3.0f / 255.0f;
     bool fade = true, reachOn = true, mask = false;
     float radius = 0.15f;      // the lamp ball (Shadow softness)
+    float edgeR = 0.0f;        // (physical) furniture blockers' edges: 0 the game's band, > 0 true size, a lamp ball this wide (BlockerTable::Occlude)
     float aa = 0.0f;           // the map's half texel at the receiver (m; 0.75 texel)
     float normalOffset = 0.5f; // shadow texels (at the face centre)
     float biasM = 0.02f, biasTexels = 0.3f;

@@ -929,7 +929,7 @@ bool Engine::AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampMode
     PointSampler(dev, 1);
     PointSampler(dev, 2);
     if (phys) {
-        float k[5][4] = {{static_cast<float>(blkW_), 1.0f / static_cast<float>(blkW_), 1.0f / static_cast<float>(blkH_), 0.0f}};
+        float k[5][4] = {{static_cast<float>(blkW_), 1.0f / static_cast<float>(blkW_), 1.0f / static_cast<float>(blkH_), p.edgeR}};
         for (int i = 0; i < n; i++) std::memcpy(k[1 + i], t3From[i], 3 * sizeof(float));
         c_.SetPsConst(dev, 103, &k[0][0], 5);
         c_.SetTexture(dev, 4, blk_);

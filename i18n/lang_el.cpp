@@ -2338,6 +2338,8 @@ const I18n::Pair kPairs[] = {
     {"Physical", "Φυσικό"},
     {"Sharper floor light", "Πιο καθαρό φως στο πάτωμα"},
     {"Floors drawn at twice the detail: light through doors and windows without steps", "Τα πατώματα σχεδιάζονται με διπλή λεπτομέρεια: φως από πόρτες και παράθυρα χωρίς σκαλοπάτια"},
+    {"True-size furniture shadows", "Σκιές επίπλων σε πραγματικό μέγεθος"},
+    {"Furniture shadows of their real size, soft as the lamp. Off: the game's larger, rounder shadows", "Σκιές επίπλων στο πραγματικό τους μέγεθος, απαλές όσο η λάμπα. Ανενεργό: οι μεγαλύτερες, πιο στρογγυλές σκιές του παιχνιδιού"},
     {"Tester", "Δοκιμές"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Απενεργοποίησε και ενεργοποίησε κάθε μεταφερμένο μέρος στην ίδια σκηνή για να συγκρίνεις τον χρόνο καρέ και την εμφάνιση. Οι αλλαγές ισχύουν αμέσως και αποθηκεύονται."},
     {"Frame time", "Χρόνος καρέ"},

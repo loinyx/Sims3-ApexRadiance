@@ -2338,6 +2338,8 @@ const I18n::Pair kPairs[] = {
     {"Physical", "Fysikaalinen"},
     {"Sharper floor light", "Terävämpi lattiavalo"},
     {"Floors drawn at twice the detail: light through doors and windows without steps", "Lattiat piirretään kaksinkertaisella tarkkuudella: valo ovista ja ikkunoista ilman portaita"},
+    {"True-size furniture shadows", "Huonekalujen varjot oikeassa koossa"},
+    {"Furniture shadows of their real size, soft as the lamp. Off: the game's larger, rounder shadows", "Huonekalujen varjot oikeassa koossaan, pehmeät kuin lamppu. Pois: pelin suuremmat, pyöreämmät varjot"},
     {"Tester", "Testit"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Kytke jokainen siirretty osa pois ja päälle samassa näkymässä ja vertaa ruutuaikaa ja ulkoasua. Muutokset tulevat voimaan heti ja tallentuvat."},
     {"Frame time", "Ruutuaika"},

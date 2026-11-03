@@ -662,6 +662,12 @@ bool SegPlane(float3 A, float3 N, float3 B, float3 C, float3 D, float inv, inout
 }
 float SoftOp(float c, float h) { return saturate(1.0 - ((max(-c, c) - h) + 0.15) * 2.0); }
 float SoftDisc(float3 v, float R) { return min(max(0.0, ((GDot(v, v) - R) + 0.0625) * 4.0), 1.0); }
+// (gK.w > 0: true-size edges, rt_lamp_blockers.h EdgeW / EdgeOp) the edge at the real extent, as wide as the lamp ball seen past it
+float EdgeW(float3 X, float3 p1, float3 p2) {
+    const float3 d = p2 - p1, r = p2 - X;
+    return max(gK.w * saturate(sqrt(dot(r, r) / max(dot(d, d), 1e-8))), 1e-3);
+}
+float EdgeOp(float c, float h, float w) { return saturate((h - abs(c)) / (2.0 * w) + 0.5); }
 // One blocker (its 7 rows from b) on the segment p1 -> p2: quadT (kind 0) or discT (kind 1), one plane or two (r1.w != 0)
 float BlockerT(float b, float3 p1, float3 p2) {
     const float4 r2 = BlkRow(b + 2);
@@ -677,7 +683,18 @@ float BlockerT(float b, float3 p1, float3 p2) {
         const bool h1 = SegPlane(r0.xyz, r2.xyz, p1, p2, d, inv, v1);
         bool h2 = false;
         if (two) h2 = SegPlane(r1.xyz, r2.xyz, p1, p2, d, inv, v2);
-        [branch] if (h1 || h2) {
+        [branch] if ((h1 || h2) && gK.w > 0) {
+            const float w1 = EdgeW(r0.xyz + v1, p1, p2), w2 = EdgeW(r1.xyz + v2, p1, p2);
+            [branch] if (r0.w < 0.5) {
+                const float4 r3 = BlkRow(b + 3), r4 = BlkRow(b + 4);
+                t = 1.0 - EdgeOp(GDot(r4.xyz, v1), r3.w, w1) * EdgeOp(GDot(r3.xyz, v1), r2.w, w1);
+                if (two) t = (1.0 - EdgeOp(GDot(r4.xyz, v2), BlkRow(b + 5).w, w2) * EdgeOp(GDot(r3.xyz, v2), r4.w, w2)) * t;
+            } else {
+                const float rd = sqrt(max(r2.w, 0.0));
+                t = 1.0 - EdgeOp(sqrt(GDot(v1, v1)), rd, w1);
+                if (two) t = (1.0 - EdgeOp(sqrt(GDot(v2, v2)), rd, w2)) * t;
+            }
+        } else [branch] if (h1 || h2) {
             [branch] if (r0.w < 0.5) {
                 const float4 r3 = BlkRow(b + 3), r4 = BlkRow(b + 4);
                 t = 1.0 - SoftOp(GDot(r4.xyz, v1), r3.w) * SoftOp(GDot(r3.xyz, v1), r2.w);

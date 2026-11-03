@@ -1457,6 +1457,9 @@ void SetHiFloors(bool on) {
     LOG_INFO(on ? "[GpuRoomLamps] Sharper floors: the physical rooms' floor maps drawn at twice their size" : "[GpuRoomLamps] Sharper floors off");
 }
 bool HiFloors() { return g_hiFloors.load(std::memory_order_relaxed); }
+std::atomic<bool> g_trueEdges{true};
+void SetTrueFurnitureEdges(bool on) { g_trueEdges.store(on, std::memory_order_relaxed); } // (the relight rules take it: the maps relit)
+bool TrueFurnitureEdges() { return g_trueEdges.load(std::memory_order_relaxed); }
 bool RoomHooks() { return g_probe.load(std::memory_order_relaxed) || g_capture.load(std::memory_order_relaxed); }
 void SetSelfCheck(bool on) {
     if (g_check.exchange(on) == on) return;

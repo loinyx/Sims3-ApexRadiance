@@ -2338,6 +2338,8 @@ const I18n::Pair kPairs[] = {
     {"Physical", "物理"},
     {"Sharper floor light", "更清晰的地面光照"},
     {"Floors drawn at twice the detail: light through doors and windows without steps", "地面以兩倍精度繪製：從門窗透出的光不再有台階"},
+    {"True-size furniture shadows", "真實尺寸的家具陰影"},
+    {"Furniture shadows of their real size, soft as the lamp. Off: the game's larger, rounder shadows", "家具陰影保持真實尺寸，柔和程度取決於燈。關閉：遊戲原本更大、更圓的陰影"},
     {"Tester", "測試"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "在同一場景中逐一關閉再開啟每個移植的部分，比較其影格時間與外觀。變更會立即套用並儲存。"},
     {"Frame time", "影格時間"},

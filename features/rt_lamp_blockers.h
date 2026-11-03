@@ -27,6 +27,47 @@
 
 namespace RtLampGpu {
 
+// (physical, true-size furniture shadows: Params::edgeR) a blocker's edge at its real extent h, as wide as a lamp ball of radius
+// edgeR seen from the receiver p2 past the blocker's plane point X = A + v (0 at contact, edgeR at the lamp). The game's band
+// starts 0.15 m inside the extent and fades 0.35 m outside it at any distance, so a small table casts a round blob 2-3x its size
+// on the floor (13:45 F8 of 03/11). The shader's EdgeW / EdgeOp are the same operations
+inline float EdgeW(RoomLightTests::V A, RoomLightTests::V v, RoomLightTests::V p1, RoomLightTests::V p2, float edgeR) {
+    using namespace RoomLightTests;
+    const V x = {A.x + v.x, A.y + v.y, A.z + v.z}, d = sub(p2, p1), r = sub(p2, x);
+    const float f = std::sqrt(dot(r, r) / std::max(dot(d, d), 1e-8f));
+    return std::max(edgeR * clamp01(f), 1e-3f);
+}
+inline float EdgeOp(float c, float h, float w) { return RoomLightTests::clamp01((h - std::fabs(c)) / (2.0f * w) + 0.5f); }
+// quadT / discT with true-size edges (the same hits and "miss" offsets as the game's)
+inline float QuadEdgeT(const RoomLightTests::Blocker& k, RoomLightTests::V p1, RoomLightTests::V p2, float edgeR) {
+    using namespace RoomLightTests;
+    const V U = k.v(0xA0), Vv = k.v(0xB0);
+    const float* h = &k.f[0xD0 / 4];
+    if (k.f[4] != K_ZERO) {
+        V v1 = k.v(0xE0), v2 = k.v(0xF0);
+        if (!hit2(p1, p2, k.v(0x90), k.v(0x70), k.v(0x80), &v1, &v2)) return 1.0f;
+        const float w1 = EdgeW(k.v(0x70), v1, p1, p2, edgeR), w2 = EdgeW(k.v(0x80), v2, p1, p2, edgeR);
+        return (1.0f - EdgeOp(dot(Vv, v2), h[3], w2) * EdgeOp(dot(U, v2), h[2], w2)) * (1.0f - EdgeOp(dot(Vv, v1), h[1], w1) * EdgeOp(dot(U, v1), h[0], w1));
+    }
+    V v;
+    if (!hit1(p1, p2, k.v(0x90), k.v(0x70), &v)) return 1.0f;
+    const float w = EdgeW(k.v(0x70), v, p1, p2, edgeR);
+    return 1.0f - EdgeOp(dot(Vv, v), h[1], w) * EdgeOp(dot(U, v), h[0], w);
+}
+inline float DiscEdgeT(const RoomLightTests::Blocker& k, RoomLightTests::V p1, RoomLightTests::V p2, float edgeR) {
+    using namespace RoomLightTests;
+    const float r = std::sqrt(std::max(k.f[0x70 / 4], 0.0f));
+    const auto t = [&](V A, V v) { return 1.0f - EdgeOp(std::sqrt(dot(v, v)), r, EdgeW(A, v, p1, p2, edgeR)); };
+    if (k.f[4] != K_ZERO) {
+        V v1 = k.v(0x80), v2 = k.v(0x90);
+        if (!hit2(p1, p2, k.v(0x40), k.v(0x20), k.v(0x30), &v1, &v2)) return 1.0f;
+        return t(k.v(0x30), v2) * t(k.v(0x20), v1);
+    }
+    V v;
+    if (!hit1(p1, p2, k.v(0x40), k.v(0x20), &v)) return 1.0f;
+    return t(k.v(0x20), v);
+}
+
 struct BlockerTable {
     static constexpr int kMaxWidth = 4096;
     static constexpr int kBlockerRows = 7;
@@ -108,8 +149,8 @@ struct BlockerTable {
         return k;
     }
 
-    // RoomLightTests::occlude from the rows of the room at `header`, in its order (the shader's walk)
-    float Occlude(int header, RoomLightTests::V a, RoomLightTests::V b) const {
+    // RoomLightTests::occlude from the rows of the room at `header`, in its order (the shader's walk); edgeR > 0: true-size edges
+    float Occlude(int header, RoomLightTests::V a, RoomLightTests::V b, float edgeR = 0.0f) const {
         using namespace RoomLightTests;
         V d = sub(b, a);
         float len2 = dot(d, d);
@@ -128,7 +169,8 @@ struct BlockerTable {
             const V ra = {a.x - ix.v[2], a.y, a.z - ix.v[3]}, rb = {b.x - ix.v[2], b.y, b.z - ix.v[3]};
             for (int i = 0; i < n; i++) {
                 const Blocker k = BlockerAt(first + i * kBlockerRows);
-                const float t = k.vt == kQuadVt ? quadT(k, ra, rb) : discT(k, ra, rb);
+                const float t = edgeR > 0.0f ? (k.vt == kQuadVt ? QuadEdgeT(k, ra, rb, edgeR) : DiscEdgeT(k, ra, rb, edgeR))
+                                             : (k.vt == kQuadVt ? quadT(k, ra, rb) : discT(k, ra, rb));
                 T = T * t;
                 if (K_STOP >= T) return T;
             }

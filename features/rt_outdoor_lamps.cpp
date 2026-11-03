@@ -1574,8 +1574,9 @@ void Frame(IDirect3DDevice9* dev) {
     const bool fade = LevelLightShare::SoftLightCutOn();
     const float radius = Penumbra::Radius();
     const bool coneSpill = LevelLightShare::BakeConeSpillOn();
+    const float edgeR = OutdoorDelta::TrueFurnitureEdges() ? radius : 0.0f; // (physical: the furniture blockers' true-size edges)
     uint64_t params = 1469598103934665603ull;
-    Mix(params, &gc, sizeof gc), Mix(params, &reachOn, 1), Mix(params, &fade, 1), Mix(params, &radius, 4), Mix(params, &coneSpill, 1);
+    Mix(params, &gc, sizeof gc), Mix(params, &reachOn, 1), Mix(params, &fade, 1), Mix(params, &radius, 4), Mix(params, &coneSpill, 1), Mix(params, &edgeR, 4);
     const bool paramsChanged = params != g_lastParams;
     g_lastParams = params;
     // ---- each story's room 0: its maps of the class it shows, from its kept solve of that class ----
@@ -2612,6 +2613,7 @@ void Frame(IDirect3DDevice9* dev) {
         p.thr = s.thr, p.fade = fade, p.reachOn = reachOn, p.mask = !s.masked.empty(), p.radius = radius, p.aa = Penumbra::g_on.load(std::memory_order_relaxed) ? LevelLightShare::MapHalfTexelOf(s.room) : 0.0f, p.farDist = kFar;
         p.fast = dragging;
         p.maskAllGpu = maskGpu;
+        p.edgeR = edgeR;
         std::string err;
         bool ok = true;
         // (physical indoor lamps) room 0's lamps out of its base first, from their laws (the kept atlas's tiles, room 0's 3D test
@@ -2674,7 +2676,7 @@ void Frame(IDirect3DDevice9* dev) {
         uint64_t partKey = 0;
         if (roomsOnly) {
             partKey = 1469598103934665603ull;
-            const float pf[] = {p.thr, p.radius, p.aa, p.normalOffset, p.biasM, p.biasTexels, p.nearBlocker, p.farDist};
+            const float pf[] = {p.thr, p.radius, p.aa, p.normalOffset, p.biasM, p.biasTexels, p.nearBlocker, p.farDist, p.edgeR};
             const bool pb[] = {p.fade, p.reachOn, p.mask, p.fast, p.maskAllGpu, p.keptX, p.physX};
             Mix(partKey, pf, sizeof pf), Mix(partKey, pb, sizeof pb), Mix(partKey, &p.debugLamp, sizeof p.debugLamp), Mix(partKey, &s.copy, sizeof s.copy);
             Mix(partKey, &s.game, sizeof s.game), Mix(partKey, &s.map.w, sizeof s.map.w), Mix(partKey, &s.map.h, sizeof s.map.h), Mix(partKey, &s.version, sizeof s.version);
@@ -2707,7 +2709,7 @@ void Frame(IDirect3DDevice9* dev) {
                 // (the overlay holds the rooms' own sub-texels, never the game's map: drawn in full again only when the rules
                 // RelightPhys reads change, not on every full relight of the copy)
                 uint64_t hiRules = 1469598103934665603ull;
-                const float hf[] = {p.radius, p.aa, p.normalOffset, p.biasM, p.biasTexels, p.nearBlocker, p.farDist};
+                const float hf[] = {p.radius, p.aa, p.normalOffset, p.biasM, p.biasTexels, p.nearBlocker, p.farDist, p.edgeR};
                 const bool hb[] = {p.fade, p.reachOn, p.fast};
                 Mix(hiRules, hf, sizeof hf), Mix(hiRules, hb, sizeof hb);
                 s.hiOk = GpuRoomLamps::ComposeHi(dev, *g_eng, rns[s.story].mgr, s.cls, s.m, s.copy, s.map.w, s.map.h, s.hiOver, fresh || s.hiRules != hiRules, s.hi, p);

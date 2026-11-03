@@ -2338,6 +2338,8 @@ const I18n::Pair kPairs[] = {
     {"Physical", "Fysisk"},
     {"Sharper floor light", "Skarpare ljus på golvet"},
     {"Floors drawn at twice the detail: light through doors and windows without steps", "Golv ritade med dubbel detalj: ljus genom dörrar och fönster utan trappsteg"},
+    {"True-size furniture shadows", "Möbelskuggor i verklig storlek"},
+    {"Furniture shadows of their real size, soft as the lamp. Off: the game's larger, rounder shadows", "Möbelskuggor i sin verkliga storlek, mjuka som lampan. Av: spelets större, rundare skuggor"},
     {"Tester", "Tester"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Slå av och på varje överförd del i samma scen för att jämföra bildrutetid och utseende. Ändringar gäller direkt och sparas."},
     {"Frame time", "Bildrutetid"},

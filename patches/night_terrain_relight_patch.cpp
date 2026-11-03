@@ -203,6 +203,7 @@ bool g_roomLampProbe = false;     // the room lamp probe against the GPU's law (
 bool g_gpuRoomLampsCapture = false; // GPU room lamps stage 1: the active lot's room solves kept for the GPU (developer)
 int g_roomLampModel = 0;            // (physical indoor lamps) 0 replica, 1 physical: what the kept rooms keep (OutdoorDelta::SetRoomLampPhysical; developer)
 bool g_roomLampSharpFloors = false; // (physical indoor lamps) the rooms' floor maps drawn at twice their size (OutdoorDelta::SetHiFloors; developer)
+bool g_roomLampTrueShadows = true;  // (physical indoor lamps) furniture shadows of true size (OutdoorDelta::SetTrueFurnitureEdges; developer)
 float g_sidewalkClear = 0.5f;
 float g_lampTint = 1.0f;
 bool g_fenceGround = true;
@@ -2447,6 +2448,10 @@ class NightTerrainRelightPatch : public ApexPatch {
             RegisterBoolSetting(&g_roomLampSharpFloors, "roomLampSharpFloors", false,
                 "Developer, with the physical model: the kept rooms' floor maps are drawn at twice their size, each sub-texel lit from the "
                 "lamps at its own place, so light through doors and windows has no 25 cm steps (2 render targets at twice a floor map's size per story).");
+        if (!kPublicBuild) // developer only
+            RegisterBoolSetting(&g_roomLampTrueShadows, "roomLampTrueShadows", true,
+                "Developer, with the physical model: the furniture's light blockers keep their real size, their edges as soft as the lamp seen past them "
+                "(off: the game's band, 0.15 m inside to 0.35 m outside each blocker at any distance, a small table's shadow a blob 2-3 times its size).");
         if (!kPublicBuild) // developer A/B only; the public build always has soft lot edges
             RegisterBoolSetting(&g_softLotEdges, "bordaSuaveLote", true,
                 "Developer: within 3 m of a lot edge, lot grass fades its lamp light to the ground light the world grass shows "
@@ -2920,6 +2925,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                 const bool modelChanged = keep && ((g_roomLampModel == 1) != OutdoorDelta::RoomLampPhysical() || sharp != OutdoorDelta::HiFloors());
                 OutdoorDelta::SetRoomLampPhysical(g_roomLampModel == 1); // (before the capture: a solve kept next takes it)
                 OutdoorDelta::SetHiFloors(sharp);
+                OutdoorDelta::SetTrueFurnitureEdges(g_roomLampTrueShadows);
                 if (keep != OutdoorDelta::RoomLampCapture() || modelChanged) {
                     OutdoorDelta::SetRoomLampCapture(keep);
                     if (keep) { // every room of the active lot is solved once, so each solve is kept (a model change: kept again)
@@ -3191,6 +3197,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_gpuRoomLampsCapture = false;
         g_roomLampModel = 0;
         g_roomLampSharpFloors = false;
+        g_roomLampTrueShadows = true;
         g_lampTint = 1.0f;
         g_lotTintOwn = false;
         g_lotLampTint = 1.0f;
@@ -3732,6 +3739,9 @@ class NightTerrainRelightPatch : public ApexPatch {
                 NotifySettingChanged();
             if (g_roomLampModel == 1 && ApexUi::SwitchRow("Sharper floor light", &g_roomLampSharpFloors,
                                                           "Floors drawn at twice the detail: light through doors and windows without steps", false))
+                NotifySettingChanged();
+            if (g_roomLampModel == 1 && ApexUi::SwitchRow("True-size furniture shadows", &g_roomLampTrueShadows,
+                                                          "Furniture shadows of their real size, soft as the lamp. Off: the game's larger, rounder shadows", true))
                 NotifySettingChanged();
         }
         if (ApexUi::Checkbox("Smooth the ground light maps on the GPU (A/B: off = CPU worker)", &g_smoothMapsGpu)) NotifySettingChanged();

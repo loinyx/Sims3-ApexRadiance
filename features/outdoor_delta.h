@@ -61,6 +61,9 @@ bool RoomLampPhysical();
 // 2x in rt_outdoor_lamps.cpp). A change drops the kept rooms like a model change
 void SetHiFloors(bool on);
 bool HiFloors();
+// (physical) furniture shadows of true size: the blockers' edges at their real extent, as soft as the lamp ball (RtLampGpu::Params::edgeR)
+void SetTrueFurnitureEdges(bool on);
+bool TrueFurnitureEdges();
 // The room solve hooks record for the probe or the kept captures (either is on)
 bool RoomHooks();
 // GPU room lamps stage 2a (RoomMapDither's pack thunk, any thread; only the light tree thread's kept capture takes it): the

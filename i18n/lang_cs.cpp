@@ -2338,6 +2338,8 @@ const I18n::Pair kPairs[] = {
     {"Physical", "Fyzikální"},
     {"Sharper floor light", "Ostřejší světlo na podlaze"},
     {"Floors drawn at twice the detail: light through doors and windows without steps", "Podlahy vykreslené s dvojnásobným detailem: světlo dveřmi a okny bez schodů"},
+    {"True-size furniture shadows", "Stíny nábytku ve skutečné velikosti"},
+    {"Furniture shadows of their real size, soft as the lamp. Off: the game's larger, rounder shadows", "Stíny nábytku ve skutečné velikosti, měkké podle lampy. Vypnuto: větší a kulatější stíny hry"},
     {"Tester", "Testy"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Vypínej a zapínej každou přenesenou část ve stejné scéně a porovnej dobu snímku a vzhled. Změny platí hned a ukládají se."},
     {"Frame time", "Doba snímku"},

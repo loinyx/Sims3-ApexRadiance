@@ -1580,6 +1580,30 @@ void BlockerTableChecks() {
         bool same = true;
         for (float x = -2.0f; x <= 2.0f; x += 0.05f) same = same && std::fabs(kept.Occlude(hk, lamp, V{x, 0.0f, 0.1f}) - live.Occlude(h, lamp, V{x, 0.0f, 0.1f})) < 1e-4f;
         Check(same, "blocker offset: a kept table moved by its record's offset shades exactly as the table kept at its new place");
+        // (true-size edges, Params::edgeR) a 0.8 m square table top at 0.75 m under a lamp at 1.33 m: its floor shadow ends where the
+        // top's edge projects (0.4 x 1.33 / 0.58 = 0.92 m), soft over the lamp ball's width there; the game's band shades to ~1.7 m
+        {
+            RoomLightTests::Room sq;
+            RoomLightTests::Record rc;
+            rc.c = {0.0f, 0.75f, 0.0f}, rc.r2 = 1.0f;
+            RoomLightTests::Blocker k{};
+            k.vt = RoomLightTests::kQuadVt;
+            put(k, 0x70, V{0.0f, 0.75f, 0.0f}), put(k, 0x90, V{0.0f, 1.0f, 0.0f}), put(k, 0xA0, V{1.0f, 0.0f, 0.0f}), put(k, 0xB0, V{0.0f, 0.0f, 1.0f});
+            for (int i = 0; i < 4; i++) k.f[0xD0 / 4 + i] = 0.4f;
+            rc.b.push_back(k);
+            sq.rec.push_back(rc);
+            RtLampGpu::BlockerTable t;
+            const int hs = t.Append(sq);
+            const V top{0.0f, 1.33f, 0.0f};
+            const float r = 0.15f, in = t.Occlude(hs, top, V{0.5f, 0.0f, 0.0f}, r), edge = t.Occlude(hs, top, V{0.92f, 0.0f, 0.0f}, r),
+                        out = t.Occlude(hs, top, V{1.3f, 0.0f, 0.0f}, r), game = t.Occlude(hs, top, V{1.3f, 0.0f, 0.0f});
+            Check(in < 0.01f && std::fabs(edge - 0.5f) < 0.1f && out > 0.999f && game < 0.9f,
+                  "true-size edges: a square table's floor shadow ends at its top's projected edge, half shaded there; the game's band shades past it");
+            const V onFloor{0.95f, 0.0f, 0.0f}; // (a disc of the same table as the offset test's: its edge at its radius, soft as the ball)
+            Check(live.Occlude(h, lamp, V{1.0f, 0.0f, 0.1f}, r) < 0.01f && live.Occlude(h, lamp, V{2.5f, 0.0f, 0.1f}, r) == 1.0f &&
+                      t.Occlude(hs, top, onFloor, 0.0f) == t.Occlude(hs, top, onFloor),
+                  "true-size edges: a disc table shades under it and not far off; edgeR 0 is the game's test");
+        }
     }
     RtLampGpu::BlockerTable wide;
     wide.rows.resize(5000);

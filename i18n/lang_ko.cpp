@@ -2338,6 +2338,8 @@ const I18n::Pair kPairs[] = {
     {"Physical", "물리"},
     {"Sharper floor light", "더 선명한 바닥 조명"},
     {"Floors drawn at twice the detail: light through doors and windows without steps", "바닥을 두 배 디테일로 그림: 문과 창문으로 들어오는 빛에 계단 현상 없음"},
+    {"True-size furniture shadows", "실제 크기의 가구 그림자"},
+    {"Furniture shadows of their real size, soft as the lamp. Off: the game's larger, rounder shadows", "가구 그림자를 실제 크기로, 램프만큼 부드럽게. 끄기: 게임의 더 크고 둥근 그림자"},
     {"Tester", "테스트"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "같은 장면에서 이식한 각 부분을 끄고 켜서 프레임 시간과 모습을 비교하세요. 변경은 바로 적용되고 저장돼요."},
     {"Frame time", "프레임 시간"},

@@ -2338,6 +2338,8 @@ const I18n::Pair kPairs[] = {
     {"Physical", "Fizikai"},
     {"Sharper floor light", "Élesebb padlófény"},
     {"Floors drawn at twice the detail: light through doors and windows without steps", "A padló kétszeres részletességgel rajzolva: fény az ajtókon és ablakokon lépcsők nélkül"},
+    {"True-size furniture shadows", "Valódi méretű bútorárnyékok"},
+    {"Furniture shadows of their real size, soft as the lamp. Off: the game's larger, rounder shadows", "A bútorok árnyéka valódi méretben, a lámpához illően lágyan. Ki: a játék nagyobb, kerekebb árnyékai"},
     {"Tester", "Tesztek"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Kapcsold ki és be az egyes átvett részeket ugyanabban a jelenetben, és hasonlítsd össze a képkockaidőt és a látványt. A változások azonnal érvényesek, és mentődnek."},
     {"Frame time", "Képkockaidő"},

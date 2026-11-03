@@ -2338,6 +2338,8 @@ const I18n::Pair kPairs[] = {
     {"Physical", "แบบกายภาพ"},
     {"Sharper floor light", "แสงบนพื้นคมชัดขึ้น"},
     {"Floors drawn at twice the detail: light through doors and windows without steps", "วาดพื้นด้วยรายละเอียดสองเท่า: แสงผ่านประตูและหน้าต่างโดยไม่เป็นขั้น"},
+    {"True-size furniture shadows", "เงาเฟอร์นิเจอร์ขนาดจริง"},
+    {"Furniture shadows of their real size, soft as the lamp. Off: the game's larger, rounder shadows", "เงาเฟอร์นิเจอร์ตามขนาดจริง นุ่มตามโคมไฟ ปิด: เงาของเกมที่ใหญ่และกลมกว่า"},
     {"Tester", "การทดสอบ"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "ปิดและเปิดแต่ละส่วนที่พอร์ตมาในฉากเดียวกันเพื่อเทียบเวลาเฟรมและรูปลักษณ์ การเปลี่ยนแปลงมีผลทันทีและถูกบันทึก"},
     {"Frame time", "เวลาเฟรม"},
