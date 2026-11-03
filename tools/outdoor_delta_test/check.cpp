@@ -1349,6 +1349,12 @@ void PhysPickChecks() {
         PhysLampPick::SubTexelPos(s, none, -0.25f, 0.25f, o);
         ok = ok && near(1, 2, 1);
         Check(ok, "sharper floors: a sub-texel steps toward its same-plane neighbours, takes an edge's step from the other side, never a wall's or a far texel's");
+        const float l[8] = {0.75f, 2, 1, 0, 0, 1, 0, 0}, u[8] = {1, 2, 0.75f, 0, 0, 1, 0, 0};
+        const float* inside[4] = {r, l, d, u};
+        const float* byWall[4] = {r, wall, d, u};
+        Check(std::fabs(PhysLampPick::SubTexelFootprint(s, inside, 0.25f) - 0.0625f) < 1e-6f && PhysLampPick::SubTexelFootprint(s, byWall, 0.25f) == 0.0f &&
+                  PhysLampPick::SubTexelFootprint(s, all, 0.25f) == 0.0f,
+              "sharper floors: a sub-texel's shadow footprint is a quarter texel inside a floor, none by a wall or at an edge");
     }
     {
         const auto at = [](uint32_t x, uint32_t y) { return y << 16 | x; };

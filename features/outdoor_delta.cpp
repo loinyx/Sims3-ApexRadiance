@@ -5735,6 +5735,9 @@ bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu:
             const float* s = sample(i);
             const int x = k.texels[i].x, y = k.texels[i].y;
             const float* nb[4] = {at(x + 1, y), at(x - 1, y), at(x, y + 1), at(x, y - 1)};
+            // (the sub-texel's own footprint, a quarter texel each side: its shadow is the footprint's mean, so an edge sharper than
+            // a sub-texel, a door jamb's near the door, does not step; mask.w, AccPhys)
+            const float foot = PhysLampPick::SubTexelFootprint(s, nb, 0.25f);
             for (int q = 0; q < 4; q++) {
                 RtLampGpu::TexelVertex v{};
                 v.x = 2.0f * accX(i) + static_cast<float>(q & 1), v.y = 2.0f * accY(i) + static_cast<float>(q >> 1), v.w = 1.0f;
@@ -5742,6 +5745,7 @@ bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu:
                 std::memcpy(v.base, v.p, 3 * sizeof(float));
                 for (int c = 0; c < 3; c++) v.n[c] = s[4 + c];
                 v.p[3] = tested[i] ? 8.0f : 0.0f;
+                v.mask[3] = foot;
                 d.physHi.push_back(v);
             }
         }

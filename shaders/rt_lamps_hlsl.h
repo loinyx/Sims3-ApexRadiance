@@ -216,7 +216,10 @@ float Recv(float3 N, float3 dc, float planeD, float dr) {
 // 5 cm over a hanging lamp, the wall a sconce is mounted on) bounds the light and shades nothing on the lamp's side of it;
 // a point behind it (its centre ray blocked by such a surface) sees none of the lamp.
 // kSearch, kEmit, kWalk: 24, 16, 16 (AccPS); 8, 4, 8 while a lamp is dragged (AccFastPS, then AccPS again on release)
-float Shadow(LampRegs lamp, float3 P, float3 N, int kSearch, int kEmit, int kWalk) {
+// fr (m, 0 none: a sharper floor's sub-texel, PhysLampPick::SubTexelFootprint): the receiver's footprint half width; the share is
+// the footprint's mean (the emitter widened by it as seen through the blockers), so a shadow edge sharper than the map's texel (a
+// door jamb's near the door) does not step from texel to texel
+float Shadow(LampRegs lamp, float3 P, float3 N, int kSearch, int kEmit, int kWalk, float fr) {
     const float k = lamp.misc.x;
     const float3 L = lamp.pos.xyz;
     const float R = gB.x;
@@ -239,7 +242,7 @@ float Shadow(LampRegs lamp, float3 P, float3 N, int kSearch, int kEmit, int kWal
     const float2 c0 = Stored(k, dir, dc);
     const bool behindNear = c0.x < Recv(N, dc, planeD, dr) - bias && (c0.x < nearM || c0.y < R); // behind a surface the lamp touches
     const float dmin = max(min(gE.z, dr * 0.5), nearM);
-    const float searchA = min(R * max(dr - dmin, 0.0) / (dr * dmin), 0.6) + texelA;
+    const float searchA = min(R * max(dr - dmin, 0.0) / (dr * dmin), 0.6) + texelA + fr / dr;
     float bSum = 0, bN = 0;
     [loop] for (int s = 0; s <= kSearch; s++) {
         const float r = s == kSearch ? 0.0 : sqrt((s + 0.5) / kSearch) * searchA; // (the last: the centre)
@@ -260,10 +263,16 @@ float Shadow(LampRegs lamp, float3 P, float3 N, int kSearch, int kEmit, int kWal
     if (bN > 0.5) {
         float emit = 0, seen = 0;
         const float zEnd = dr - max(2.0 * texelW, 0.05); // (the point's own surface is not walked into)
+        // (fr) the footprint seen through the blockers' mean distance zb is a disc fr zb / (dr - zb) wide at the lamp: the emitter
+        // disc widened by it (in quadrature) gives the footprint's mean share without a receiver point per tap
+        const float zb = bSum / bN;
+        const float fe = fr * zb / max(dr - zb, 0.05);
+        const float Re = fr > 0.0 ? min(sqrt(R * R + fe * fe), R + 0.5) : R;
         [loop] for (int j = 0; j < kEmit; j++) {
-            const float rho = R * sqrt((j + 0.5) / kEmit);
+            const float ring = sqrt((j + 0.5) / kEmit);
+            const float rho = R * ring;
             const float a = j * 2.39996323;
-            const float3 o = (t1 * cos(a) + t2 * sin(a)) * rho;
+            const float3 o = (t1 * cos(a) + t2 * sin(a)) * (Re * ring);
             float3 dq;
             const float2 sq = Stored(k, o, dq);
             const bool valid = sq.x >= rho; // the lamp's centre sees this point of its ball
@@ -314,7 +323,7 @@ R"RAW(float4 Acc(TexelIn i, float2 vpos, int kSearch, int kEmit, int kWalk) {
         }
         const bool maskOn = masked && thr <= (wrapped.b + wrapped.g) + wrapped.r;
         if (l < count && !inner && ((law.r + law.g + law.b) > 0 || maskOn)) {
-            const float sh = ground ? 1.0 : Shadow(lamp, P, N, kSearch, kEmit, kWalk);
+            const float sh = ground ? 1.0 : Shadow(lamp, P, N, kSearch, kEmit, kWalk, 0.0);
             if (abs(gE.w - l) < 0.5) dbg = float4(sh, Lum3(law), 0, 1); // debug: the share alone
             float3 c = law * sh;
             const float cs = (c.b + c.g) + c.r;
@@ -454,7 +463,7 @@ float4 AccRlg(TexelIn i, float2 vpos, int kSearch, int kEmit, int kWalk) {
         }
         const bool maskOn = masked && thr <= (wrapped.b + wrapped.g) + wrapped.r;
         if (l < count && t.x != 0 && ((law.r + law.g + law.b) > 0 || maskOn)) { // (t.x < 0: a lamp taken out of a kept sum)
-            const float sh = Shadow(lamp, P, N, kSearch, kEmit, kWalk);
+            const float sh = Shadow(lamp, P, N, kSearch, kEmit, kWalk, 0.0);
             float3 c = law * sh;
             const float cs = (c.b + c.g) + c.r;
             if (!(cs >= thr)) c = 0;
@@ -769,7 +778,7 @@ float4 AccPhys(TexelIn i, float2 vpos, int kSearch, int kEmit, int kWalk, bool a
         const float4 t = TableAt(l, slot);
         const float3 law = LawAt(lamp, P, N, wallReach0 * t.y);
         [branch] if (l < count && t.x != 0 && (law.r + law.g + law.b) > 0) {
-            float sh = Shadow(lamp, atMask ? i.mask.xyz : P, N, kSearch, kEmit, kWalk); // (gF.y: a room's points, RtLampProxy::IntoRoom)
+            float sh = Shadow(lamp, atMask ? i.mask.xyz : P, N, kSearch, kEmit, kWalk, i.mask.w); // (gF.y: a room's points, RtLampProxy::IntoRoom)
             if (tested) {
                 const float prod = sh * t3;
                 sh = 0.01 > prod ? 0.0 : prod;
@@ -816,7 +825,7 @@ float4 AccPhysXPS(TexelIn i, float2 vpos : VPOS) : COLOR0 {
         const float3 law = LawAt(lamp, P, masked ? normalize(lamp.pos.xyz - P) : N, masked ? 0.0 : wallReach0 * t.y);
         const float ls = (law.b + law.g) + law.r;
         [branch] if (l < count && t.x != 0 && (masked ? thr <= ls : exitG && t.z > 0.5 && ls > 0)) {
-            float sh = Shadow(lamp, P, N, 24, 16, 16);
+            float sh = Shadow(lamp, P, N, 24, 16, 16, 0.0);
             if (tested) {
                 const float prod = sh * t3;
                 sh = 0.01 > prod ? 0.0 : prod;

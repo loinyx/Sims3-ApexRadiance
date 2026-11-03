@@ -265,19 +265,32 @@ inline bool WritesDisjoint(int w, int h, const std::vector<const std::vector<uin
 // s[4..6]) along the steps to its neighbours nb = {right, left, down, up} (null: none). A neighbour counts on the same plane only
 // (normals within ~8 degrees, within 1 cm of the plane, at most 0.6 m away: never across a wall or a step); an edge texel takes the
 // other side's step, a texel with neither keeps its own sample along that axis.
+inline bool SamePlane(const float* s, const float* q) {
+    if (!q) return false;
+    const float d[3] = {q[0] - s[0], q[1] - s[1], q[2] - s[2]};
+    const float nn = s[4] * q[4] + s[5] * q[5] + s[6] * q[6], plane = s[4] * d[0] + s[5] * d[1] + s[6] * d[2];
+    return nn > 0.99f && std::fabs(plane) <= 0.01f && d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= 0.36f;
+}
 inline void SubTexelPos(const float* s, const float* const nb[4], float fx, float fy, float out[3]) {
-    const auto same = [&](const float* q) {
-        if (!q) return false;
-        const float d[3] = {q[0] - s[0], q[1] - s[1], q[2] - s[2]};
-        const float nn = s[4] * q[4] + s[5] * q[5] + s[6] * q[6], plane = s[4] * d[0] + s[5] * d[1] + s[6] * d[2];
-        return nn > 0.99f && std::fabs(plane) <= 0.01f && d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= 0.36f;
-    };
+    const auto same = [&](const float* q) { return SamePlane(s, q); };
     const auto step = [&](const float* fwd, const float* back, float st[3]) {
         for (int k = 0; k < 3; k++) st[k] = same(fwd) ? fwd[k] - s[k] : same(back) ? s[k] - back[k] : 0.0f;
     };
     float sx[3], sy[3];
     step(nb[0], nb[1], sx), step(nb[2], nb[3], sy);
     for (int k = 0; k < 3; k++) out[k] = s[k] + fx * sx[k] + fy * sy[k];
+}
+// (sharper floors) The half width (m) of a sub-texel's footprint the shadow is averaged over (AccPhys: mask.w), frac of the texel
+// step: only where all 4 neighbours lie on the texel's plane, so a footprint never reaches past a wall or a step (a texel by a wall
+// keeps its point sample: the wall's side would darken it); 0 elsewhere
+inline float SubTexelFootprint(const float* s, const float* const nb[4], float frac) {
+    float m = 1e30f;
+    for (int i = 0; i < 4; i++) {
+        if (!SamePlane(s, nb[i])) return 0.0f;
+        const float d[3] = {nb[i][0] - s[0], nb[i][1] - s[1], nb[i][2] - s[2]};
+        m = std::min(m, std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]));
+    }
+    return frac * m;
 }
 
 } // namespace PhysLampPick
