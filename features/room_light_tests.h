@@ -68,7 +68,38 @@ struct Record {
     // its first blocker's address in the game: its object's first occluder shape (0x0069E3F0 pushes the object's lighting
     // record's shapes, +0x40..+0x44, into the record's blockers), which names the object (OccMove::shape); 0 unknown
     uintptr_t shape = 0;
+    // (a copy only: a table dragged with its lamp ahead of its solve) the record drawn moved by (off[0], 0, off[1]): `c` moved
+    // with it, its blockers tested on the segment moved back (occlude; RtLampGpu::BlockerTable::Offset)
+    float off[2] = {0.0f, 0.0f};
 };
+// The fields of a record the tests read, as one key: its centre and squared radii, each blocker's vtable, two-plane flag and the
+// fields its transmission reads (RoomGeoKey's blockers part). Never the raw bytes: they hold the game's own state (the gather
+// AddRefs each shape) and the vectors' addresses
+inline uint64_t RecordKey(const Record& rc) {
+    uint64_t h = 1469598103934665603ull;
+    const auto mix = [&](const void* src, size_t n) {
+        for (size_t i = 0; i < n; i++) h = (h ^ static_cast<const uint8_t*>(src)[i]) * 1099511628211ull;
+    };
+    const auto mixAt = [&](const float* f, int off, int n) { mix(f + off / 4, static_cast<size_t>(n) * 4); };
+    mix(&rc.c, sizeof rc.c), mix(&rc.r2, 4), mix(&rc.cull2, 4);
+    const uint32_t nb = static_cast<uint32_t>(rc.b.size());
+    mix(&nb, 4);
+    for (const Blocker& k : rc.b) {
+        mix(&k.vt, 4);
+        const uint8_t two = k.f[4] != 0.0f; // (+0x10: any non-zero value selects the two-plane form)
+        if (k.vt == kQuadVt) {
+            mix(&two, 1);
+            for (const int off : {0x70, 0x80, 0x90, 0xA0, 0xB0, 0xE0, 0xF0}) mixAt(k.f, off, 3);
+            mixAt(k.f, 0xD0, 4);
+        } else if (k.vt == kDiscVt) {
+            mix(&two, 1);
+            for (const int off : {0x20, 0x30, 0x40, 0x80, 0x90}) mixAt(k.f, off, 3);
+            mixAt(k.f, 0x70, 1);
+        } else
+            mix(k.f, sizeof k.f); // (a kind the copy does not know: all of what it may read)
+    }
+    return h;
+}
 // A lamp at `lamp` standing on the blocker: a level top (a disc or rectangle facing up or down: a table's, not a sofa's back), the
 // lamp over it inside its edge and at most kOnTopM above it (a ceiling lamp or sconce over the furniture stands higher). Not the
 // record's sphere: the sofa's (r 1.69 m, three upright quads) held the table lamp 1.2 m off it, and its shadow was carried along
@@ -182,10 +213,11 @@ inline float occlude(const Room& r, V a, V b, int* unknownVt) {
         float s = dot(ca, d);
         V q = sub({s * dn.x, s * dn.y, s * dn.z}, ca);
         if (!(dot(q, q) - rc.r2 < 0.0f)) continue; // broad phase: infinite line vs sphere
+        const V ra = {a.x - rc.off[0], a.y, a.z - rc.off[1]}, rb = {b.x - rc.off[0], b.y, b.z - rc.off[1]};
         for (const Blocker& k : rc.b) {
             float t;
-            if (k.vt == kQuadVt) t = quadT(k, a, b);
-            else if (k.vt == kDiscVt) t = discT(k, a, b);
+            if (k.vt == kQuadVt) t = quadT(k, ra, rb);
+            else if (k.vt == kDiscVt) t = discT(k, ra, rb);
             else {
                 ++*unknownVt;
                 t = 1.0f;

@@ -468,12 +468,13 @@ bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
             std::lock_guard<std::mutex> lk(g_mx);
             if (g_occPoint.size() > 65536) g_occPoint.clear();
             const auto [it, fresh] = g_occPoint.try_emplace(entry, OccPoint{x, z, id});
-            // (an entry made again at a freed one's address is another object, or the same one placed anew: no move. 03/11 14:36:
-            // 148 entries made again at once read as moves of 1 to 229 m, one by a lamp's head; a lamp dragged alone took its table)
-            had = !fresh && it->second.id == id;
+            // (an entry made again at a freed one's address holds another object id: no move for the carry. 03/11 14:36: 148 entries
+            // made again at once read as moves of 1 to 229 m. `had` stays the address's, as before: its far jump keeps its mark)
+            had = !fresh;
             was[0] = it->second.x, was[1] = it->second.z;
+            const bool sameObject = had && it->second.id == id;
             it->second = {x, z, id};
-            if (had) t_occPt[2] = std::sqrt((x - was[0]) * (x - was[0]) + (z - was[1]) * (z - was[1]));
+            if (sameObject) t_occPt[2] = std::sqrt((x - was[0]) * (x - was[0]) + (z - was[1]) * (z - was[1]));
             if (t_occPt[2] > 0.01f) g_occMoves[g_occMoveAt++ % std::size(g_occMoves)] = {entry, GetTickCount(), x, z, shape};
         }
         if (read && OwnObjectEditTaken(tl, x, z, had, was)) {

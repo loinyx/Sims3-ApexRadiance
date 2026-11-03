@@ -1668,23 +1668,8 @@ uint64_t RoomGeoKey(const BYTE* room, uint64_t parts[3] = nullptr, RoomLightTest
     }
     mix(p[2], &nr, 4);
     for (const RoomLightTests::Record& rc : t.rec) {
-        mix(p[2], &rc.c, sizeof rc.c), mix(p[2], &rc.r2, 4), mix(p[2], &rc.cull2, 4);
-        const uint32_t nb = static_cast<uint32_t>(rc.b.size());
-        mix(p[2], &nb, 4);
-        for (const RoomLightTests::Blocker& k : rc.b) {
-            mix(p[2], &k.vt, 4);
-            const uint8_t two = k.f[4] != 0.0f; // (+0x10: any non-zero value selects the two-plane form)
-            if (k.vt == RoomLightTests::kQuadVt) {
-                mix(p[2], &two, 1);
-                for (const int off : {0x70, 0x80, 0x90, 0xA0, 0xB0, 0xE0, 0xF0}) mixAt(p[2], k.f, off, 3);
-                mixAt(p[2], k.f, 0xD0, 4);
-            } else if (k.vt == RoomLightTests::kDiscVt) {
-                mix(p[2], &two, 1);
-                for (const int off : {0x20, 0x30, 0x40, 0x80, 0x90}) mixAt(p[2], k.f, off, 3);
-                mixAt(p[2], k.f, 0x70, 1);
-            } else
-                mix(p[2], k.f, sizeof k.f); // (a kind the copy does not know: all of what it may read; the move path refuses it anyway)
-        }
+        const uint64_t rk = RoomLightTests::RecordKey(rc); // (a blocker of a kind the copy does not know: all of it; the move path refuses it)
+        mix(p[2], &rk, 8);
     }
     if (parts) std::copy_n(p, 3, parts);
     if (tests) *tests = std::move(t);
@@ -4655,7 +4640,11 @@ struct BasisNow {
     std::vector<uint32_t> expect;                            // what each texel holds: the capture's, then Apex's last write
     bool phys = false;                                       // (physical, stage 5) written physically: `drawn` its lamps then
     std::vector<uintptr_t> drawn;
+    std::vector<std::array<float, 3>> drawnAt; // (physical) where its last write drew each lamp of `drawn` (world)
+    std::shared_ptr<const RoomLightTests::Room> drawnTests; // (physical) the 3D records it traced over when carried (a table drag); null: its solve's
     std::vector<uint32_t> carry; // (physical) Apex's last write, put back over the kept solve's texels (WritePhysCarry); empty: none
+    size_t carryStale = 0;       // (its log) samples of `carry` left to the solve, and the ms CarryStale took
+    double carryMs = 0.0;
 };
 std::unordered_map<uint64_t, BasisNow> g_basisNow; // kept room key -> (light tree thread)
 struct BasisTexelWrite {
@@ -4866,6 +4855,8 @@ struct PhysBasisRoom {
     std::shared_ptr<const KeptRoom> k;
     std::vector<float> lotPos; // 3 per sample
     std::vector<PhysBasisLamp> lamps;
+    std::shared_ptr<const RoomLightTests::Room> tests; // (a table dragged with its lamp) its solve's records with the carried ones moved; null: k->tests
+    uint64_t offKey = 0;                               // the carried offsets' hash (0: none)
     int unknown = 0;
     size_t traced = 0; // (the worker) samples traced, the others' shares kept from the last job
     bool redo = false;
@@ -4888,6 +4879,8 @@ bool g_pbThread = false;                        // (under g_pbMx)
 bool g_pbBusy = false;                          // (light tree thread) a job handed over, not written yet
 std::unique_ptr<PhysBasisJob> g_pbDone;         // (light tree thread) a finished job waiting for the working maps
 std::set<uint64_t> g_pbRedo;                    // (light tree thread) rooms written physically, kept again since
+// (light tree thread) per kept room: its solve (basisId) and the records carried since, (record, dx, dz) (StartPhysBasis)
+std::unordered_map<uint64_t, std::pair<uint32_t, std::vector<std::array<float, 3>>>> g_basisCarried;
 // The solve wrote its own levels (about 2x the physical ones in the 03/11 stairwell), drawn until the redo's write lands a worker
 // trace later: the stairs flashed for 1 to 3 frames on each solve during a drag (video of 03/11). Apex's last write goes back at
 // the end of this room update instead (WritePhysCarry) when the solve sampled the same texels; the redo still refines it
@@ -4904,24 +4897,42 @@ void NotePhysBasisKept(uint64_t key, const KeptRoom* prev, const KeptRoom& k) {
     CarryBasis(last.data(), prev->basisGame.data(), k.basisGame.data(), last.size());
     // ... except where a record that moved, came or went between the solves may shade a sample from a lamp: there the last write
     // held the old table's shadow, left on furniture and stairs at its old place after the drop (15:25 of 03/11); the new solve's
-    // value until the redo. shortcut: lamps the room's solves did not list (drawn fresh) are not tested; test bn.drawn's laws
-    // if a recording shows a stale shadow from one
-    if (prev->roomGeo != k.roomGeo || !prev->roomGeo) {
+    // value until the redo. Each lamp is tested along its way between the solves and from where the last write drew it (a lamp
+    // the solves did not list, or one that left the room during the drag, included)
+    size_t staleN = 0;
+    double staleMs = 0.0;
+    if (prev->roomGeo != k.roomGeo || !prev->roomGeo || bn.drawnTests) {
+        LARGE_INTEGER t0{}, t1{}, f{};
+        QueryPerformanceCounter(&t0);
         std::vector<std::array<float, 6>> lamps;
-        const auto add = [&](const KeptLamp& a, const KeptLamp* b) { lamps.push_back({a.pos[0], a.pos[1], a.pos[2], b ? b->pos[0] : a.pos[0], b ? b->pos[1] : a.pos[1], b ? b->pos[2] : a.pos[2]}); };
+        const auto seg = [&](const float* a, const float* b) { lamps.push_back({a[0], a[1], a[2], b[0], b[1], b[2]}); };
+        const auto in = [](const std::vector<KeptLamp>& v, uintptr_t light) {
+            const auto it = std::find_if(v.begin(), v.end(), [&](const KeptLamp& x) { return x.light == light; });
+            return it != v.end() ? &*it : nullptr;
+        };
         for (const KeptLamp& kl : prev->lamps) {
-            const auto it = std::find_if(k.lamps.begin(), k.lamps.end(), [&](const KeptLamp& x) { return x.light == kl.light; });
-            add(kl, it != k.lamps.end() ? &*it : nullptr);
+            const KeptLamp* b = in(k.lamps, kl.light);
+            seg(kl.pos, b ? b->pos : kl.pos);
         }
         for (const KeptLamp& kl : k.lamps)
-            if (std::none_of(prev->lamps.begin(), prev->lamps.end(), [&](const KeptLamp& x) { return x.light == kl.light; })) add(kl, nullptr);
-        const std::vector<char> stale = PhysLampPick::CarryStale(prev->tests, k.tests, lamps, k.basis.size(), [&](size_t i) { return k.basis[i].pos; });
+            if (!in(prev->lamps, kl.light)) seg(kl.pos, kl.pos);
+        for (size_t d = 0; d < bn.drawn.size() && d < bn.drawnAt.size(); d++) {
+            const KeptLamp* b = in(k.lamps, bn.drawn[d]);
+            seg(bn.drawnAt[d].data(), b ? b->pos : bn.drawnAt[d].data());
+        }
+        const std::vector<char> stale =
+            PhysLampPick::CarryStale(bn.drawnTests ? *bn.drawnTests : prev->tests, k.tests, lamps, k.basis.size(), [&](size_t i) { return k.basis[i].pos; });
         for (size_t i = 0; i < stale.size(); i++)
-            if (stale[i]) std::copy_n(&k.basisGame[i * 4], 4, &last[i * 4]);
+            if (stale[i]) std::copy_n(&k.basisGame[i * 4], 4, &last[i * 4]), staleN++;
+        QueryPerformanceCounter(&t1), QueryPerformanceFrequency(&f);
+        staleMs = 1000.0 * static_cast<double>(t1.QuadPart - t0.QuadPart) / static_cast<double>(f.QuadPart);
     }
     std::vector<uintptr_t> drawn = std::move(bn.drawn);
+    std::vector<std::array<float, 3>> drawnAt = std::move(bn.drawnAt);
+    std::shared_ptr<const RoomLightTests::Room> drawnTests = std::move(bn.drawnTests);
     BasisNow& now = NowOf(key, k); // (the new solve's capture expected)
-    now.phys = true, now.drawn = std::move(drawn), now.carry = std::move(last);
+    now.phys = true, now.drawn = std::move(drawn), now.drawnAt = std::move(drawnAt), now.drawnTests = std::move(drawnTests), now.carry = std::move(last);
+    now.carryStale = staleN, now.carryMs = staleMs;
 }
 // (light tree thread, the working maps free) the carried writes into their rooms' sets, before any redo's
 void WritePhysCarry() {
@@ -4938,8 +4949,10 @@ void WritePhysCarry() {
         long written = 0, left = 0;
         const char* why = WriteBasisTexels(key, *k, [&](size_t i, int m) { return carry[i * 4 + m]; }, written, left);
         if (why ? KeptLog() : TraceLine()) // (one per solve during a drag: the verbose trace's budget)
-            LOG_INFO(std::format("[GpuRoomLamps] physical: story {} room {}: its last directional write put back over its kept solve{}", k->story, k->id,
-                                 why ? std::format(" failed ({})", why) : std::format(" ({} texels, {} left as another solve wrote them)", written, left)));
+            LOG_INFO(std::format("[GpuRoomLamps] physical: story {} room {}: its last directional write put back over its kept solve{}; {} of {} samples left to the solve "
+                                 "(furniture moved, {:.2f} ms)",
+                                 k->story, k->id, why ? std::format(" failed ({})", why) : std::format(" ({} texels, {} left as another solve wrote them)", written, left),
+                                 bn.carryStale, k->basis.size(), bn.carryMs));
     }
 }
 void QueueBasisGone(uintptr_t light) {
@@ -4962,6 +4975,7 @@ void PhysBasisWorker() {
         uint32_t gen = 0;
         float radius = 0.0f;
         std::vector<float> lotPos; // (the samples in the lot's space: the same lot transform)
+        uint64_t offKey = 0;       // (the same carried table)
         std::unordered_map<uintptr_t, PhysLampPick::ShareCache> lamps;
     };
     constexpr size_t kShareBytes = 24u << 20;
@@ -4981,13 +4995,14 @@ void PhysBasisWorker() {
             for (PhysBasisRoom& r : job->rooms) {
                 const size_t n = r.k->basis.size();
                 RoomShares& rs = shares[r.ref.key];
-                const bool same = rs.k.lock() == r.k && rs.gen == job->gen && rs.radius == job->radius && rs.lotPos == r.lotPos;
-                if (!same) rs.lamps.clear(), rs.k = r.k, rs.gen = job->gen, rs.radius = job->radius, rs.lotPos = r.lotPos;
+                const bool same = rs.k.lock() == r.k && rs.gen == job->gen && rs.radius == job->radius && rs.lotPos == r.lotPos && rs.offKey == r.offKey;
+                if (!same) rs.lamps.clear(), rs.k = r.k, rs.gen = job->gen, rs.radius = job->radius, rs.lotPos = r.lotPos, rs.offKey = r.offKey;
+                const RoomLightTests::Room& tests = r.tests ? *r.tests : r.k->tests;
                 std::unordered_map<uintptr_t, PhysLampPick::ShareCache> keep; // (only the room's lamps now: one gone frees its shares)
                 for (PhysBasisLamp& l : r.lamps) {
                     PhysLampPick::ShareCache& c = keep[l.light] = std::move(rs.lamps[l.light]);
                     r.traced += PhysLampPick::BasisSharesCached(
-                        c, same, n, [&](size_t i) { return StepLit(&l.step[i * 16]); }, mesh, l.lot, job->radius, r.lotPos.data(), r.k->tests, l.world,
+                        c, same, n, [&](size_t i) { return StepLit(&l.step[i * 16]); }, mesh, l.lot, job->radius, r.lotPos.data(), tests, l.world,
                         [&](size_t i) { return r.k->basis[i].pos; }, stamp, mark, l.vis, l.t3d, &r.unknown);
                 }
                 rs.lamps = std::move(keep);
@@ -5064,6 +5079,38 @@ void StartPhysBasis(std::map<uintptr_t, BasisEdit>&& edits) {
         }
         for (const LotLamp& L : lot)
             if (PhysLampPick::UseOf(L.light, listed, k.baked) == PhysLampPick::Use::Fresh) pick(L.light, freshRow(L));
+        // A table dragged with its lamp moves its record here too, by gpu_room_lamps.cpp's rule (the record a listed lamp stood on
+        // at the solve, its own object moved lately, the lamp kept its height), kept until the next solve: without it the furniture
+        // and stairs took the table's shadow from where the solve read it for the whole drag
+        try {
+            if (g_basisCarried.size() > 4096) g_basisCarried.clear();
+            auto& carried = g_basisCarried[key];
+            if (carried.first != k.basisId) carried = {k.basisId, {}};
+            for (const KeptLamp& kl : k.lamps) {
+                const auto l = std::find_if(r.lamps.begin(), r.lamps.end(), [&](const PhysBasisLamp& x) { return x.light == kl.light; });
+                if (l == r.lamps.end()) continue;
+                const float dx = l->world[0] - kl.pos[0], dy = l->world[1] - kl.pos[1], dz = l->world[2] - kl.pos[2];
+                if (dx * dx + dz * dz < 1e-8f || std::fabs(dy) > 0.02f) continue;
+                for (size_t i = 0; i < k.tests.rec.size(); i++) {
+                    if (!RoomLightTests::StandsOn(k.tests.rec[i], kl.pos) || !LampMarkFilter::ShapeMoved(k.tests.rec[i].shape)) continue;
+                    const auto o = std::find_if(carried.second.begin(), carried.second.end(), [&](const std::array<float, 3>& c) { return c[0] == static_cast<float>(i); });
+                    if (o == carried.second.end()) carried.second.push_back({static_cast<float>(i), dx, dz});
+                    else (*o)[1] = dx, (*o)[2] = dz;
+                }
+            }
+            if (!carried.second.empty()) {
+                auto t = std::make_shared<RoomLightTests::Room>(k.tests);
+                uint64_t h = 1469598103934665603ull;
+                for (const auto& c : carried.second) {
+                    RoomLightTests::Record& rc = t->rec[static_cast<size_t>(c[0])];
+                    rc.c.x += c[1], rc.c.z += c[2], rc.off[0] = c[1], rc.off[1] = c[2];
+                    for (size_t b = 0; b < sizeof c; b++) h = (h ^ reinterpret_cast<const uint8_t*>(c.data())[b]) * 1099511628211ull;
+                }
+                r.tests = std::move(t), r.offKey = h | 1;
+            }
+        } catch (...) {
+            r.tests.reset(), r.offKey = 0;
+        }
         // the room is written when an edited lamp lights it now or lit it in its last write
         const BasisNow& bn = NowOf(key, k);
         std::vector<uintptr_t> touched;
@@ -5172,8 +5219,8 @@ void WritePhysBasis(PhysBasisJob& job) {
         }
         wrote[key] = {w, left};
         BasisNow& bn = NowOf(key, k);
-        bn.phys = true, bn.drawn.clear(), bn.carry.clear();
-        for (const PhysBasisLamp& l : r.lamps) bn.drawn.push_back(l.light);
+        bn.phys = true, bn.drawn.clear(), bn.drawnAt.clear(), bn.carry.clear(), bn.drawnTests = r.tests;
+        for (const PhysBasisLamp& l : r.lamps) bn.drawn.push_back(l.light), bn.drawnAt.push_back({l.world[0], l.world[1], l.world[2]});
     }
     LogPhysBasis(job, wrote, failed);
 }

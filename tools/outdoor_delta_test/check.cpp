@@ -1397,6 +1397,33 @@ void PhysPickChecks() {
                                 dark = PhysLampPick::CarryStale(was, still, {}, 4, at);
         Check(s.size() == 4 && s[0] && s[1] && !s[2] && !s[3] && std::count(none.begin(), none.end(), 1) == 0 && std::count(dark.begin(), dark.end(), 1) == 0,
               "carried write: samples a moved table shades, old place or new, take the solve's value; stairs above and far floor keep the carry");
+        // (RecordKey) the game's own state in a blocker's bytes (+0x04, a reference count the gather raises) and the vectors'
+        // addresses change nothing: an unchanged room keeps the whole carry
+        RoomLightTests::Room again = now;
+        for (RoomLightTests::Record& rc : again.rec) rc.b[0].f[1] = 7.0f, rc.shape = 0x1234;
+        const std::vector<char> refs = PhysLampPick::CarryStale(now, again, lamps, 4, at);
+        Check(std::count(refs.begin(), refs.end(), 1) == 0 && RoomLightTests::RecordKey(now.rec[1]) == RoomLightTests::RecordKey(again.rec[1]) &&
+                  RoomLightTests::RecordKey(now.rec[0]) != RoomLightTests::RecordKey(now.rec[1]),
+              "carried write: records alike in what the test reads count as the same, whatever else their bytes hold");
+        // (Record::off, the directional maps' table carry) the table read at x = 0 carried +2 m shades as the table read at x = 2,
+        // and nothing at its old place; the carried copy's write is stale where it shaded once the solve reads the table at x = 3
+        RoomLightTests::Room carried, at2;
+        carried.rec = {disc(0.0f)}, at2.rec = {disc(2.0f)};
+        carried.rec[0].c.x += 2.0f, carried.rec[0].off[0] = 2.0f;
+        int unknown = 0;
+        bool alike = true;
+        for (float x = -1.0f; x <= 5.0f; x += 0.05f) {
+            const RoomLightTests::V lamp{2.0f, 1.34f, 0.0f}, p{x, 0.0f, 0.1f};
+            alike = alike && std::fabs(RoomLightTests::occlude(carried, lamp, p, &unknown) - RoomLightTests::occlude(at2, lamp, p, &unknown)) < 1e-4f;
+        }
+        RoomLightTests::Room at3;
+        at3.rec = {disc(3.0f)};
+        const std::vector<std::array<float, 6>> drag = {{2.0f, 1.34f, 0.0f, 3.0f, 1.34f, 0.0f}};
+        const float under[][3] = {{2.0f, 0.0f, 0.1f}, {3.0f, 0.0f, 0.1f}, {-3.0f, 0.0f, 0.1f}};
+        const std::vector<char> c = PhysLampPick::CarryStale(carried, at3, drag, 3, [&](size_t i) { return under[i]; });
+        Check(alike && RoomLightTests::occlude(carried, {2.0f, 1.34f, 0.0f}, {2.0f, 0.0f, 0.1f}, &unknown) < 0.01f &&
+                  RoomLightTests::occlude(carried, {2.0f, 1.34f, 0.0f}, {0.0f, 0.0f, 0.1f}, &unknown) == 1.0f && c[0] && c[1] && !c[2],
+              "directional table carry: the solve's table moved by its offset shades as the table read there; its write is stale under it");
     }
     {
         // a floor texel at (1, 2, 1) with 0.25 m steps; samples: position at 0..2, normal at 4..6

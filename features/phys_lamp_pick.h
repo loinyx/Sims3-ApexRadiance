@@ -248,9 +248,10 @@ struct OccMove {
     float x = 0.0f, z = 0.0f;
     uintptr_t shape = 0;
 };
-// The object whose first occluder shape is `shape` moved lately (a record's own object: the table, never the lamp standing on
-// it, which has no occluder entry). Only its identity tells a table dragged with its lamp from the lamp dragged alone over it:
-// the one entry that moves either way lies by the lamp's head (03/11 recordings 11:47 to 15:25)
+// The object whose first occluder shape is `shape` moved lately (a record's own object: the table). Its identity, not its place,
+// tells a table dragged with its lamp from the lamp dragged alone over it: in the table drags of 03/11 (recordings 11:47 to
+// 15:25, all table drags) one entry moved, by the lamp's head. UNVERIFIED in the game: that the moving entry's shape is the table
+// record's first blocker, and that a lamp dragged alone moves no entry with that shape ([CarryTable] and the 'O' journal lines)
 inline bool ShapeMoved(const OccMove* m, int n, uintptr_t shape, uint32_t now, uint32_t withinMs) {
     for (int i = 0; i < n && shape; i++)
         if (m[i].entry && m[i].shape == shape && now - m[i].at <= withinMs) return true;
@@ -264,17 +265,15 @@ inline bool ShapeMoved(const OccMove* m, int n, uintptr_t shape, uint32_t now, u
 template <class Pos>
 std::vector<char> CarryStale(const RoomLightTests::Room& was, const RoomLightTests::Room& now, const std::vector<std::array<float, 6>>& lamps, size_t n, Pos pos) {
     using RoomLightTests::Record;
-    const auto same = [](const Record& a, const Record& b) {
-        if (std::memcmp(&a.c, &b.c, sizeof a.c) || a.r2 != b.r2 || a.b.size() != b.b.size()) return false;
-        for (size_t i = 0; i < a.b.size(); i++)
-            if (a.b[i].vt != b.b[i].vt || std::memcmp(a.b[i].f, b.b[i].f, sizeof a.b[i].f)) return false;
-        return true;
-    };
+    // (alike: the fields the test reads, RecordKey; the raw bytes hold the game's own state)
+    std::vector<uint64_t> kw, kn;
+    for (const Record& r : was.rec) kw.push_back(RoomLightTests::RecordKey(r));
+    for (const Record& r : now.rec) kn.push_back(RoomLightTests::RecordKey(r));
     RoomLightTests::Room gone, came;
-    for (const Record& r : was.rec)
-        if (std::none_of(now.rec.begin(), now.rec.end(), [&](const Record& o) { return same(r, o); })) gone.rec.push_back(r);
-    for (const Record& r : now.rec)
-        if (std::none_of(was.rec.begin(), was.rec.end(), [&](const Record& o) { return same(r, o); })) came.rec.push_back(r);
+    for (size_t i = 0; i < was.rec.size(); i++)
+        if (std::find(kn.begin(), kn.end(), kw[i]) == kn.end()) gone.rec.push_back(was.rec[i]);
+    for (size_t i = 0; i < now.rec.size(); i++)
+        if (std::find(kw.begin(), kw.end(), kn[i]) == kw.end()) came.rec.push_back(now.rec[i]);
     std::vector<char> out(n, 0);
     if (gone.rec.empty() && came.rec.empty()) return out;
     int unknown = 0;

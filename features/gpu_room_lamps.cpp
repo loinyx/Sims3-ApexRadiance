@@ -443,7 +443,8 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
             // moved lately (LampMarkFilter::ShapeMoved: the occluder entry of the record's first shape) and the lamp kept its height:
             // a table dragged with its lamp. A lamp dragged alone leaves its table where it is, still casting its shadow; nothing else
             // moves the record. The offset stays where the drag left it until the next solve reads the room again. Identity, not
-            // place: the one entry that moves in either drag is the table's, by the lamp's head (03/11 recordings 11:47 to 15:25)
+            // place: in a table drag the one entry that moves lies by the lamp's head (03/11 recordings 11:47 to 15:25, all table
+            // drags); UNVERIFIED that its shape is the record's (PhysLampPick::ShapeMoved; the [CarryTable] line names both)
             if (e.blockers != e.blkOut) e.blkBase = e.blockers, e.blkOut.reset(), e.carried.clear(), e.offHash = 0; // (a solve's table)
             if (e.blkBase && e.blkHeader >= 0.0f) {
                 const RtLampGpu::BlockerTable& t = *e.blkBase;
@@ -459,23 +460,27 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                     // (the carry's decisions, a line a second while they happen)
                     static long s_moved = 0, s_carried = 0, s_kept = 0;
                     static DWORD s_logAt = 0;
+                    static uintptr_t s_shape = 0; // (the last decided record's first blocker: the 'O' journal lines' shape when carried)
                     s_moved++;
+                    bool first = false; // (the first carry and the first left in place are logged at once)
                     for (int i = 0; i < recs; i++) {
                         if (!t.StandsOn(header, i, rl.pos)) continue;
-                        if (!LampMarkFilter::ShapeMoved(t.ShapeOf(header, i))) {
-                            s_kept++;
+                        s_shape = t.ShapeOf(header, i);
+                        if (!LampMarkFilter::ShapeMoved(s_shape)) {
+                            first = first || !s_kept++;
                             continue;
                         }
-                        s_carried++;
+                        first = first || !s_carried++;
                         const auto o = std::find_if(off.begin(), off.end(), [&](const std::array<float, 3>& k) { return k[0] == static_cast<float>(i); });
                         if (o == off.end()) off.push_back({static_cast<float>(i), dx, dz});
                         else (*o)[1] = dx, (*o)[2] = dz;
                     }
-                    if (const DWORD tick = GetTickCount(); tick - s_logAt >= 1000) {
+                    if (const DWORD tick = GetTickCount(); first || tick - s_logAt >= 1000) {
                         s_logAt = tick;
                         if (LogAllowed())
-                            LOG_INFO(std::format("[CarryTable] story {} room {}: lamp moved from its solve's place {} times: its table carried {}, left in place {}", e.story,
-                                                 e.id, s_moved, s_carried, s_kept));
+                            LOG_INFO(std::format("[CarryTable] story {} room {}: lamp {:08X} moved from its solve's place {} times: its table carried {}, left in place {} "
+                                                 "(last record's shape {:08X})",
+                                                 e.story, e.id, rl.light, s_moved, s_carried, s_kept, s_shape));
                     }
                 }
                 uint64_t oh = 0;
