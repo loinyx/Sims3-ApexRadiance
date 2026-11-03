@@ -19,6 +19,7 @@
 #include "features/rt_lamp_proxy.h"
 #include "features/rt_lamp_blockers.h"
 #include "features/phys_lamp_pick.h"
+#include "features/object_casters_math.h"
 #include <string>
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
 // map dither (its relight passes 0), but the compose shader keeps the input, so the harness still checks it
@@ -1317,6 +1318,24 @@ void PhysPickChecks() {
         Check(PhysLampPick::ListLen(nullptr, nullptr, 8) == 0 && PhysLampPick::ListLen(v, v + 3, 8) == 3 && PhysLampPick::ListLen(nullptr, v, 8) == -1 &&
                   PhysLampPick::ListLen(v + 2, v, 8) == -1 && PhysLampPick::ListLen(v, v + 4, 3) == -1,
               "physical pick: a room with no light buffer reads as an empty list; broken or too long bounds stay unreadable");
+    }
+    {
+        using namespace ObjectCastersMath;
+        const int16_t s[4] = {300, -150, 75, 100}; // (short4 xyz / w: the object vertex shaders' decode)
+        float p[3], w[3], l[3];
+        DecodeShort4(s, p);
+        const float rows[12] = {0, 0, 1, 10, 0, 1, 0, 2, -1, 0, 0, 5}; // (a quarter turn about y, then (10, 2, 5))
+        ApplyRows(rows, p, w);
+        const float xf[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -8, -1, -4, 1}; // (world -> lot: a shift)
+        ApplyXf(xf, w, l);
+        float vp[4][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 0.5f, 0}, {0, 0, 1, 0}};
+        const float front[3] = {0.2f, -0.3f, 2.0f}, side[3] = {5.0f, 0.0f, 2.0f}, behind[3] = {0.0f, 0.0f, -2.0f};
+        const float c[3] = {1, 1, 1}, lo[3] = {0, 0, 0}, hi[3] = {1, 2, 1}, head[3] = {0.5f, 2.01f, 0.5f}, above[3] = {0.5f, 2.5f, 0.5f};
+        Check(p[0] == 3.0f && p[1] == -1.5f && p[2] == 0.75f && w[0] == 10.75f && w[1] == 0.5f && w[2] == 2.0f && l[0] == 2.75f && l[1] == -0.5f && l[2] == -2.0f &&
+                  Half(0x3C00) == 1.0f && Half(0xC000) == -2.0f && Half(0x3800) == 0.5f && InView(vp, front) && !InView(vp, side) && !InView(vp, behind) &&
+                  Covers(c, 0.25f, front) == false && Covers(c, 4.0f, front) && Holds(lo, hi, head) && !Holds(lo, hi, above),
+              "object casters: short4 positions decoded xyz / w, world rows and the lot transform applied, half floats, the camera's view, a record holding a "
+              "caster, a box holding its own lamp's head");
     }
     {
         const auto at = [](uint32_t x, uint32_t y) { return y << 16 | x; };

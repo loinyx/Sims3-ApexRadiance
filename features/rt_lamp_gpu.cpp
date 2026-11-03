@@ -57,11 +57,14 @@ const char* EntryOf(ShaderId id) {
                                                      "BlurRowPS", "BlurColPS", "BlockPS",   "AccFastPS",    "AccRlgPS",     "AccRlgFastPS",
                                                      "ComposeRlgPS", "AccKeptPS", "ComposeKeptPS", "CopyAtPS", "BlockKeptPS",
                                                      "AccKept0PS", "AccKept0XPS", "ComposeK0PS", "AccPhysPS", "AccPhysFastPS", "T3dPS", "AccPhysXPS",
-                                                     "AccPhysInPS", "AccPhysInFastPS"};
+                                                     "AccPhysInPS", "AccPhysInFastPS", "CasterVS", "CasterAlphaPS"};
     return id >= 0 && id < kShaderCount ? kNames[id] : "";
 }
-bool IsVertex(ShaderId id) { return id == kShadowVs || id == kTexelVs; }
-bool IsPhysical(ShaderId id) { return id == kAccPhysPs || id == kAccPhysFastPs || id == kT3dPs || id == kAccPhysXPs || id == kAccPhysInPs || id == kAccPhysInFastPs; }
+bool IsVertex(ShaderId id) { return id == kShadowVs || id == kTexelVs || id == kCasterVs; }
+bool IsPhysical(ShaderId id) {
+    return id == kAccPhysPs || id == kAccPhysFastPs || id == kT3dPs || id == kAccPhysXPs || id == kAccPhysInPs || id == kAccPhysInFastPs || id == kCasterVs ||
+           id == kCasterAlphaPs;
+}
 
 void FaceTexel(const float d[3], int face, int& f, int& x, int& y) {
     const float ax = std::fabs(d[0]), ay = std::fabs(d[1]), az = std::fabs(d[2]);
@@ -104,6 +107,7 @@ bool Engine::Init(IDirect3DDevice9* dev, void* const* shaders, int face, std::st
     }
     vs_->AddRef();
     texelVs_->AddRef();
+    if ((casterVs_ = static_cast<IDirect3DVertexShader9*>(shaders[kCasterVs]))) casterVs_->AddRef();
     const D3DVERTEXELEMENT9 texel[] = {{0, 0, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
                                        {0, 16, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
                                        {0, 32, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},
@@ -118,6 +122,10 @@ bool Engine::Init(IDirect3DDevice9* dev, void* const* shaders, int face, std::st
         ReleaseAll();
         return false;
     }
+    const D3DVERTEXELEMENT9 caster[] = {{0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+                                        {0, 12, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_NORMAL, 0},
+                                        {0, 24, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0}, D3DDECL_END()};
+    if (casterVs_ && FAILED(dev->CreateVertexDeclaration(caster, &casterDecl_))) casterDecl_ = nullptr; // (optional: Real shapes stay off)
     ready_ = true;
     return true;
 }
@@ -147,6 +155,8 @@ void Engine::ReleaseAll() {
     ReleaseDefault();
     Rel(vs_);
     Rel(texelVs_);
+    Rel(casterVs_);
+    Rel(casterDecl_);
     for (auto*& p : ps_) Rel(p);
     Rel(texelDecl_);
     Rel(shadowDecl_);
@@ -799,6 +809,63 @@ bool Engine::RenderShadowTileRanges(IDirect3DDevice9* dev, const float pos[3], i
         }
         stats_.shadowTiles += 6;
     }
+    c_.SetDepthStencil(dev, nullptr);
+    return true;
+}
+bool Engine::RenderCasters(IDirect3DDevice9* dev, const float pos[3], int tile, float farDist, IDirect3DVertexBuffer9* vb, const std::vector<CasterDraw>& draws,
+                           std::string& err) {
+    if (!ready_ || !tiles_ || !tilesDepth_ || tile < 0 || tile >= tileRows_ || !CastersReady() || !vb) {
+        err = "the kept shadow atlas or the caster shaders are not ready";
+        return false;
+    }
+    if (draws.empty()) return true;
+    IDirect3DSurface9* s = Surf(tiles_);
+    if (!s) {
+        err = "the kept shadow atlas has no surface";
+        return false;
+    }
+    c_.SetRenderTarget(dev, 0, s);
+    s->Release();
+    for (DWORD i = 1; i < 4; i++) c_.SetRenderTarget(dev, i, nullptr);
+    c_.SetDepthStencil(dev, tilesDepth_); // (the proxy's depth of this tile stays: the nearest of both is kept)
+    PassStates(dev);
+    dev->SetRenderState(D3DRS_ZENABLE, TRUE);
+    dev->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
+    dev->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+    dev->SetVertexDeclaration(casterDecl_);
+    dev->SetStreamSource(0, vb, 0, sizeof(CasterVertex));
+    c_.SetVertexShader(dev, casterVs_);
+    const float A = farDist / (farDist - kNear), B = -kNear * farDist / (farDist - kNear);
+    const float proj[4] = {A, B, 0, 0};
+    c_.SetVsConst(dev, 4, proj, 1);
+    const float lamp[4] = {pos[0], pos[1], pos[2], 1.0f / farDist};
+    c_.SetVsConst(dev, 3, lamp, 1);
+    const float cut[4] = {0.5f, 0, 0, 0};
+    c_.SetPsConst(dev, 0, cut, 1);
+    dev->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+    dev->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+    dev->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR);
+    dev->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP);
+    dev->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_WRAP);
+    for (int f = 0; f < 6; f++) {
+        float rows[3][4];
+        for (int r = 0; r < 3; r++) rows[r][0] = kFaces[f][r][0], rows[r][1] = kFaces[f][r][1], rows[r][2] = kFaces[f][r][2], rows[r][3] = 0.0f;
+        c_.SetVsConst(dev, 0, &rows[0][0], 3);
+        const D3DVIEWPORT9 vp{static_cast<DWORD>(f * face_), static_cast<DWORD>(tile * face_), static_cast<DWORD>(face_), static_cast<DWORD>(face_), 0.0f, 1.0f};
+        c_.SetViewport(dev, &vp);
+        IDirect3DBaseTexture9* bound = reinterpret_cast<IDirect3DBaseTexture9*>(1);
+        for (const CasterDraw& d : draws) {
+            if (!d.tris) continue;
+            if (d.tex != bound) {
+                c_.SetPixelShader(dev, d.tex ? ps_[kCasterAlphaPs] : ps_[kShadowPs]);
+                c_.SetTexture(dev, 0, d.tex);
+                bound = d.tex;
+            }
+            c_.DrawPrimitive(dev, D3DPT_TRIANGLELIST, d.first * 3, d.tris);
+            stats_.shadowDraws++;
+        }
+    }
+    c_.SetTexture(dev, 0, nullptr);
     c_.SetDepthStencil(dev, nullptr);
     return true;
 }

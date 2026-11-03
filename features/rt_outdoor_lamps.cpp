@@ -17,6 +17,7 @@
 #include "rt_outdoor_lamps.h"
 #include "terrain_bake_rule.h"
 #include "rt_lamp_gpu.h"
+#include "object_casters.h"
 #include "gpu_room_lamps.h"
 #include "platform.h"
 #include "rt_lamp_model.h"
@@ -127,8 +128,8 @@ const ShaderCache::Id kRtLampShaderIds[RtLampGpu::kShaderCount] = {
     AddRtLampShader(0), AddRtLampShader(1), AddRtLampShader(2), AddRtLampShader(3), AddRtLampShader(4), AddRtLampShader(5), AddRtLampShader(6),
     AddRtLampShader(7), AddRtLampShader(8), AddRtLampShader(9), AddRtLampShader(10), AddRtLampShader(11), AddRtLampShader(12), AddRtLampShader(13),
     AddRtLampShader(14), AddRtLampShader(15), AddRtLampShader(16), AddRtLampShader(17), AddRtLampShader(18), AddRtLampShader(19), AddRtLampShader(20),
-    AddRtLampShader(21), AddRtLampShader(22), AddRtLampShader(23), AddRtLampShader(24), AddRtLampShader(25)};
-static_assert(RtLampGpu::kShaderCount == 26, "kRtLampShaderIds lists every RtLampGpu::ShaderId");
+    AddRtLampShader(21), AddRtLampShader(22), AddRtLampShader(23), AddRtLampShader(24), AddRtLampShader(25), AddRtLampShader(26), AddRtLampShader(27)};
+static_assert(RtLampGpu::kShaderCount == 28, "kRtLampShaderIds lists every RtLampGpu::ShaderId");
 void CompileAll() {
     for (int i = 0; i < RtLampGpu::kShaderCount; i++) {
         std::string err;
@@ -1303,6 +1304,7 @@ void OnPreReset(IDirect3DDevice9* dev) {
         if (s->pvb) s->pvb->Release(), s->pvb = nullptr, s->built = s->ok = false; // (DEFAULT: prepared again; its base lacks their lamps)
     }
     if (g_eng) g_eng->ReleaseDefault();
+    ObjectCasters::OnDeviceLost();
     GpuRoomLamps::ReleaseAll(); // (their buffers are DEFAULT: made again on use)
     for (IDirect3DQuery9** q : {&g_qDisjoint, &g_qFreq, &g_qBegin, &g_qEnd})
         if (*q) (*q)->Release(), *q = nullptr;
@@ -2354,8 +2356,8 @@ void Frame(IDirect3DDevice9* dev) {
         // (physical indoor lamps) room 0's lamps out of its base, each with its law now (a lamp gone or without a law adds nothing),
         // and the kept atlas's occluders
         if (s.pvb) {
-            const uint32_t gen = KeptMeshGen();
-            Mix(sig, &gen, sizeof gen);
+            const uint32_t gen = KeptMeshGen(), casters = ObjectCasters::Gen();
+            Mix(sig, &gen, sizeof gen), Mix(sig, &casters, sizeof casters);
             // (stage 4) every lot lamp with a law whose reach meets the map: the solve's lamps out of the base with their rows, and
             // the lamps its solve did not list (moved here, switched on, new) with fresh rows; never one the base holds (listed, not
             // out of it) nor an outdoor lamp the batches above draw
@@ -2606,7 +2608,7 @@ void Frame(IDirect3DDevice9* dev) {
                 if (s.pOk[l]) pl.push_back(s.pLaws[l]), pw.push_back(s.pWorld[l]), prow.push_back(s.qRow[l]), plights.push_back(s.qLights[l]);
             RtLampGpu::Map pm;
             pm.w = s.map.w, pm.h = s.map.h, pm.vb = s.pvb, pm.count = s.nPhys;
-            ok = g_eng->SetBlockers(dev, s.pBlk, err) &&
+            ok = g_eng->SetBlockers(dev, ObjectCasters::Filter(s.pBlk), err) &&
                  GpuRoomLamps::PhysPasses(dev, *g_eng, plights.data(), pl.data(), static_cast<int>(pl.size()), kFar, err, [&](int f, int c, const int* tiles, bool) {
                      RtLampGpu::Engine::PhysRoom room;
                      room.header = s.pHeader;
@@ -2845,6 +2847,7 @@ void OnPresent(IDirect3DDevice9* dev) {
         for (KeptList& list : g_keptList) list = KeptList{};
         g_budgetOut = false;
         if (g_eng) g_eng->ReleaseDefault();
+        ObjectCasters::OnDeviceLost();
         LOG_INFO("[RtOutdoorLamps] Lighting restart: maps, pending jobs and shadow targets discarded");
     }
     if (dev && g_ps3 < 0) { // (read once, also while off: the menu says when Instant cannot run here)

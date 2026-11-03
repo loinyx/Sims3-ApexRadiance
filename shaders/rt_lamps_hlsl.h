@@ -58,6 +58,28 @@ ShadowOut ShadowVS(float3 p : POSITION, float3 n : NORMAL) {
     return o;
 }
 float4 ShadowPS(float4 d : TEXCOORD0) : COLOR0 { return float4(length(d.xyz), d.w, 0, 0); }
+// CasterVS / CasterAlphaPS (physical indoor lamps, Real shapes): the objects' own meshes (lot space, a flat normal per
+// triangle and the diffuse uv) into a tile as ShadowVS / ShadowPS; foliage keeps only the texels its alpha test keeps
+struct CasterOut {
+    float4 pos : POSITION;
+    float4 d : TEXCOORD0;
+    float2 uv : TEXCOORD1;
+};
+CasterOut CasterVS(float3 p : POSITION, float3 n : NORMAL, float2 uv : TEXCOORD0) {
+    CasterOut o;
+    const float3 v = p - sLamp.xyz;
+    const float z = dot(v, sFaceF.xyz);
+    o.pos = float4(dot(v, sFaceR.xyz), dot(v, sFaceU.xyz), sProj.x * z + sProj.y, z);
+    o.d = float4(v * sLamp.w, abs(dot(n, v)) * sLamp.w);
+    o.uv = uv;
+    return o;
+}
+sampler2D sCasterTex : register(s0);
+float4 gCasterRef : register(c0); // x = the cut on the diffuse alpha (0.5: the game's own alpha test reads its shader's output)
+float4 CasterAlphaPS(float4 d : TEXCOORD0, float2 uv : TEXCOORD1) : COLOR0 {
+    clip(tex2D(sCasterTex, uv).a - gCasterRef.x);
+    return float4(length(d.xyz), d.w, 0, 0);
+}
 
 )RAW"
 R"RAW(// ---------------------------------------------------------------- relight
