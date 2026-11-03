@@ -2893,7 +2893,7 @@ void KeepEnd(const BYTE* room) {
         // (a lot made active solves its rooms at class 0 and shows them at class 2 meanwhile: a room no lamp lists was solved
         // again only by an edit's fallback, 11 s after it in the 21:18 log of 02/11, refusing every physical edit until then;
         // a room gone to class 0, its lot no longer lit at the high quality, keeps nothing worth a solve)
-        if (rr.cls != 0) NoteUnkept(room);
+        if (rr.cls != 0 && c.phys) NoteUnkept(room); // (Replica refuses no edit for a room it does not list: no load spike)
         return;
     }
     if (c.phys != g_physical.load(std::memory_order_relaxed)) { // (the model changed during its solve: the next solve keeps it)
