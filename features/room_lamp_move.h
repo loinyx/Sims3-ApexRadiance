@@ -37,11 +37,10 @@ inline void PartAt(const RoomLightTests::Room& r, bool built, const std::vector<
     A = MountFactor(p, n, L);
     B = RoomLightTests::GameShare(r, built, list, f0, f1, Lv, Lv, pv, unknownVt);
 }
-// The game's evaluation over the GPU law at a texel (p, n), for what the law adds of its own: on a wall texel the law raises N.l to
-// MountedNdl's floor (gpu_lamp_law.h Eval) where the game's evaluation does not (LightEvalHook raises it after, MountFactor), so
-// an A over the game's evaluation is taken over the law as A x this: min(N.l W / d^2, Cmax) / min(raised W / d^2, Cmax); 1 where
-// the law raises nothing. (Until stage 3b the moved parts' A was MountFactor over the law itself: such a wall texel took the
-// raise twice.) A tube's and an area light's law is the game's evaluation (gpu_lamp_law.h Tube, Area): 1.
+// The game's evaluation over the GPU law at a texel (p, n), for what the law adds of its own: on a wall texel near the lamp the law
+// scales the game's evaluation by the hook's raise (gpu_lamp_law.h MountScale) where the game's evaluation does not (LightEvalHook
+// raises it after, MountFactor), so an A over the game's evaluation is taken over the law as A x 1 / that scale; 1 where the law
+// raises nothing. A tube's and an area light's law is the game's evaluation (gpu_lamp_law.h Tube, Area): 1.
 inline float GameOverLaw(const GpuLampLaw::Lamp& L, const float* p, const float* n) {
     if (GpuLampLaw::Kind(L)) return 1.0f;
     float l[3] = {L.pos[0] - p[0], L.pos[1] - p[1], L.pos[2] - p[2]};
@@ -49,10 +48,7 @@ inline float GameOverLaw(const GpuLampLaw::Lamp& L, const float* p, const float*
     const float d2 = std::max(l[0] * l[0] + l[1] * l[1] + l[2] * l[2], 1e-4f);
     const float inv = 1.0f / ApexMath::Sqrt(d2);
     for (float& v : l) v *= inv;
-    const float ndl = GpuLampLaw::Sat(n[0] * l[0] + n[1] * l[1] + n[2] * l[2]), raised = GpuLampLaw::MountedNdl(ndl, plane, n[1]);
-    if (!(raised > ndl)) return 1.0f;
-    const float law = std::min(raised * (inv * inv) * L.W, L.cmax);
-    return law > 0.0f ? std::min(ndl * (inv * inv) * L.W, L.cmax) / law : 1.0f;
+    return 1.0f / GpuLampLaw::MountScale(GpuLampLaw::Sat(n[0] * l[0] + n[1] * l[1] + n[2] * l[2]), plane, n[1]);
 }
 // (stage 3b) Realistic lamp reach's share of a lamp at L (w: range x intensity) on a texel (p, n), as LevelLightShare's
 // ReachShareImpl gives it in room 0's solve (wall texels only; 1 with the option off)

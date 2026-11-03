@@ -128,10 +128,12 @@ float3 Law(LampRegs L, float3 p, float3 n, float wallReach) {
     const float d2 = max(dot(l, l), 1e-4);
     const float inv = rsqrt(d2);
     l *= inv;
-    // (gpu_lamp_law.h MountedNdl) a lamp within 0.4 m in front of a wall lights that wall at N.l 0.5 x (1 - plane / 0.4) at least
+    // (gpu_lamp_law.h MountedNdl, MountScale) a lamp within 0.4 m in front of a wall lights that wall at N.l 0.5 x (1 - plane / 0.4) at
+    // least, raised after the Cmax cut as the game's hook does (at most 8x, none where N.l is 0)
     const float mount = 0.5 * Sat((0.5 - abs(n.y)) * 1e4) * Sat(plane * 1e4) * Sat(1.0 - plane * 2.5);
-    const float ndl = max(Sat(dot(n, l)), mount);
-    const float f = min(ndl * (inv * inv) * L.pos.w, L.col.w);
+    const float ndl = Sat(dot(n, l)), raised = max(ndl, mount);
+    const float k = raised > ndl && ndl > 1e-3 ? min(raised / ndl, 8.0) : 1.0;
+    const float f = min(ndl * (inv * inv) * L.pos.w, L.col.w) * k;
     const float al = dot(L.axis.xyz, l);
     const float t1 = (al + L.off.x) * -L.axis.w, t2 = (al - L.off.z) * L.off.y;
     const float tsel = t1 > 0 ? t1 : t2;
@@ -747,7 +749,7 @@ sampler2D sT3 : register(s5);
 // x = mult, 0 not lit there; y = 1 the reach share applies) adds mult x fade(law x share), share = the cube shadow share
 // (Shadow) and, on a tested texel, x its 3D test (T3dPS's output for the batch: sT3), the product dropped under 0.01 as the
 // game drops it
-float4 AccPhys(TexelIn i, float2 vpos, int kSearch, int kEmit, int kWalk) {
+float4 AccPhys(TexelIn i, float2 vpos, int kSearch, int kEmit, int kWalk, bool atMask) {
     float4 sum = gE.x > 0.5 ? float4(0, 0, 0, 0) : tex2Dlod(sAcc, float4((vpos + 0.5) * gD.zw, 0, 0));
     const float3 P = i.p.xyz;
     const float3 N = normalize(i.n.xyz);
@@ -764,7 +766,7 @@ float4 AccPhys(TexelIn i, float2 vpos, int kSearch, int kEmit, int kWalk) {
         const float4 t = TableAt(l, slot);
         const float3 law = LawAt(lamp, P, N, wallReach0 * t.y);
         [branch] if (l < count && t.x != 0 && (law.r + law.g + law.b) > 0) {
-            float sh = Shadow(lamp, P, N, kSearch, kEmit, kWalk);
+            float sh = Shadow(lamp, atMask ? i.mask.xyz : P, N, kSearch, kEmit, kWalk); // (gF.y: a room's points, RtLampProxy::IntoRoom)
             if (tested) {
                 const float prod = sh * t3;
                 sh = 0.01 > prod ? 0.0 : prod;
@@ -781,8 +783,12 @@ float4 AccPhys(TexelIn i, float2 vpos, int kSearch, int kEmit, int kWalk) {
     }
     return sum;
 }
-float4 AccPhysPS(TexelIn i, float2 vpos : VPOS) : COLOR0 { return AccPhys(i, vpos, 24, 16, 16); }
-float4 AccPhysFastPS(TexelIn i, float2 vpos : VPOS) : COLOR0 { return AccPhys(i, vpos, 8, 4, 8); }
+float4 AccPhysPS(TexelIn i, float2 vpos : VPOS) : COLOR0 { return AccPhys(i, vpos, 24, 16, 16, false); }
+float4 AccPhysFastPS(TexelIn i, float2 vpos : VPOS) : COLOR0 { return AccPhys(i, vpos, 8, 4, 8, false); }
+// AccPhysInPS: a room's phys points, the shadow looked up at mask.xyz (RtLampProxy::IntoRoom: a texel past its room's diagonal wall
+// taken inside the room; Params::shadowAtMask)
+float4 AccPhysInPS(TexelIn i, float2 vpos : VPOS) : COLOR0 { return AccPhys(i, vpos, 24, 16, 16, true); }
+float4 AccPhysInFastPS(TexelIn i, float2 vpos : VPOS) : COLOR0 { return AccPhys(i, vpos, 8, 4, 8, true); }
 // AccPhysXPS (room 0, Real-time outdoor lamps' map): the batch's lamps at the same points into the second sum (added: blend one,
 // one), as AccPhysPS takes them (the share x the 3D test, the 0.01 drop): on a masked texel (bit 1) the floor mask's luminances
 // with N.l ignored (rt_lamp_model.h AddMask: x = "all", z = "vis" with the share), on an exit ground texel (bit 4) an exit

@@ -44,6 +44,13 @@ inline float MountedNdl(float ndl, float plane, float ny) {
     const float wall = Sat((0.5f - std::fabs(ny)) * 1e4f), front = Sat(plane * 1e4f);
     return std::max(ndl, kMountFloor * wall * front * Sat(1.0f - plane * (1.0f / kMountReach)));
 }
+// The colour's scale for that raise as LightEvalHook makes it (level_light_share.cpp): after the game's evaluation, Cmax cut
+// included, raised / N.l at most 8, none where N.l is 0 (the game's colour is). Raising N.l before the cut instead held a sconce's
+// wall at Cmax where the game's goes over it (2.0 against 2.7 at 0.3 m, the scene of 03/11)
+inline float MountScale(float ndl, float plane, float ny) {
+    const float raised = MountedNdl(ndl, plane, ny);
+    return raised > ndl && ndl > 1e-3f ? std::min(raised / ndl, 8.0f) : 1.0f;
+}
 
 // A TubeLight (type 6): its evaluation 0x006BFA70 is E0 x min(Cmax, k2 x range x intensity.x / (k1 d^2)) x max(0, N.l)
 // (0x006BD100; the facing after the cap, [0x0107A538] = 1 and the normal's w taken as 0 as for the bare bulb), d and l to the
@@ -124,8 +131,8 @@ inline void Eval(const Lamp& L, const float p[3], const float n[3], float wallRe
     const float d2 = std::max(l[0] * l[0] + l[1] * l[1] + l[2] * l[2], 1e-4f);
     const float inv = 1.0f / ApexMath::Sqrt(d2);
     for (float& v : l) v *= inv;
-    const float ndl = MountedNdl(Sat(n[0] * l[0] + n[1] * l[1] + n[2] * l[2]), plane, n[1]);
-    const float f = std::min(ndl * (inv * inv) * L.W, L.cmax);
+    const float ndl = Sat(n[0] * l[0] + n[1] * l[1] + n[2] * l[2]);
+    const float f = std::min(ndl * (inv * inv) * L.W, L.cmax) * MountScale(ndl, plane, n[1]);
     const float al = L.axis[0] * l[0] + L.axis[1] * l[1] + L.axis[2] * l[2];
     const float t1 = (al + L.off1) * -L.sc1, t2 = (al - L.off2) * L.sc2;
     const float tsel = t1 > 0.0f ? t1 : t2;
