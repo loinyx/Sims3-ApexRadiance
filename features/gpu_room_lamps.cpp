@@ -69,6 +69,11 @@ struct Entry {
     bool outdoorRoom = false;
     PhysLampPick::Box box;
     uint64_t physSig = 0;
+    // (its lamp list as last built: rebuilt when the round's lot lamps or the occluders' generation changed; never cached while a
+    // lamp it lists is out of the lot's snapshot, which LotRoundSig does not read)
+    bool physCached = false;
+    uint64_t physLot = 0;
+    uint32_t physGen = 0;
     std::vector<uintptr_t> editHits;
     // (S8) a roofed room's ambient (+0x110) at its solve's end and the compose's scale of it now (RtLampModel::AmbScale)
     float ambSolve[3] = {}, ambScale[3] = {1.0f, 1.0f, 1.0f};
@@ -165,6 +170,11 @@ struct LotLaw {
     GpuLampLaw::Lamp w;
 };
 std::vector<LotLaw> g_lotLaw;
+// (this round) the lot's lamps as every physical entry's pick reads them: each lamp's row inputs, its laws (world, and with its
+// reach radii) and the lamps gone. Unchanged: an entry's last lamp list stands (3.7 ms a frame rebuilding them with nothing
+// edited, the 23:37 log of 02/11)
+uint64_t g_lotSig = 0, g_lotSigLot = 0;
+bool g_lotSigRead = false;
 std::vector<uintptr_t> g_lotGone; // (the lot's lamps that left its registry: a kept list holding one no longer draws it)
 // (stage 4) the physical relights' CPU cost since TakeRelightCost (maps, ms, the largest round's ms) and this round's
 int g_costMaps = 0;
@@ -179,6 +189,27 @@ void Drop(Entry& e, const void* room) {
 void Mix(uint64_t& h, const void* p, size_t n) {
     const auto* b = static_cast<const unsigned char*>(p);
     for (size_t i = 0; i < n; i++) h = (h ^ b[i]) * 1099511628211ull;
+}
+uint64_t LotRoundSig(uint64_t lot) {
+    if (g_lotSigRead && g_lotSigLot == lot) return g_lotSig;
+    uint64_t h = 1469598103934665603ull;
+    for (size_t i = 0; i < g_lot.size(); i++) {
+        const OutdoorDelta::LotLamp& L = g_lot[i];
+        LotLaw& c = g_lotLaw[i];
+        int type = 0, reg = -1;
+        if (!c.state || c.lot != lot) c.lot = lot, c.state = RtOutdoorLamps::WorldLaw(L.light, lot, false, c.w, type, reg) ? 1 : 2;
+        GpuLampLaw::Lamp reach{};
+        const bool hasReach = c.state == 1 && RtOutdoorLamps::WorldLaw(L.light, lot, true, reach, type, reg);
+        Mix(h, &L.light, sizeof L.light), Mix(h, &L.story, sizeof L.story), Mix(h, &L.home, sizeof L.home), Mix(h, &L.homeNorm, sizeof L.homeNorm);
+        Mix(h, &L.homeOutdoor, 1), Mix(h, &c.state, 1), Mix(h, &hasReach, 1);
+        if (c.state == 1) Mix(h, &c.w, sizeof c.w);
+        if (hasReach) Mix(h, &reach, sizeof reach);
+    }
+    for (uintptr_t g : g_lotGone) Mix(h, &g, sizeof g);
+    const size_t n = g_lot.size();
+    Mix(h, &n, sizeof n);
+    g_lotSig = h, g_lotSigLot = lot, g_lotSigRead = true;
+    return h;
 }
 double MsSince(const LARGE_INTEGER& t0, const LARGE_INTEGER& t1) {
     LARGE_INTEGER f{};
@@ -369,6 +400,18 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
             const uint32_t gen = RtOutdoorLamps::KeptMeshGen();
             Mix(sig, &e.version, sizeof e.version), Mix(sig, &gen, sizeof gen);
             any = true;
+            // (S8) the ceiling pass's ambient follows the room's now: Rooms at Night's sliders and the lamp edits taken, no solve
+            const auto ambient = [&] {
+                float now[3];
+                if (ReadAmbient(r.room, now)) RtLampModel::AmbScale(e.ambSolve, now, e.ambScale);
+                Mix(sig, e.ambScale, sizeof e.ambScale);
+            };
+            const uint64_t lotNow = LotRoundSig(e.lot);
+            if (e.physCached && e.physLot == lotNow && e.physGen == gen) { // (its lamp list as last built: the same signature)
+                Mix(sig, &e.physSig, sizeof e.physSig);
+                ambient();
+                continue;
+            }
             // (stage 4) the lot's lamps whose reach meets the map: the solve's lamps out of its base with their rows (a fresh row
             // once registered in another room), then every other lot lamp but those its base holds with a fresh row
             // (phys_lamp_pick.h: never one counted twice, in the base and drawn)
@@ -427,10 +470,10 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                         e.editHits.push_back(pe.light);
             }
             Mix(sig, &es, sizeof es);
-            // (S8) the ceiling pass's ambient follows the room's now: Rooms at Night's sliders and the lamp edits taken, no solve
-            float now[3];
-            if (ReadAmbient(r.room, now)) RtLampModel::AmbScale(e.ambSolve, now, e.ambScale);
-            Mix(sig, e.ambScale, sizeof e.ambScale);
+            e.physSig = es;
+            e.physLot = lotNow, e.physGen = gen;
+            e.physCached = std::all_of(e.listed.begin(), e.listed.end(), [](uintptr_t l) { return g_lotAt.count(l) != 0; });
+            ambient();
             continue;
         }
         // a lamp moved since its parts were kept (their shares follow its place): drawn with the law its parts were kept with (the
@@ -623,6 +666,7 @@ void BeginFrame() {
         for (size_t i = 0; i < g_lot.size(); i++) g_lotAt.emplace(g_lot[i].light, i);
     }
     g_lotLaw.assign(g_lot.size(), LotLaw{});
+    g_lotSigRead = false;
     std::vector<PhysEdit> done;
     {
         const uint32_t frame = g_frame.load(std::memory_order_relaxed);
