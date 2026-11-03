@@ -160,8 +160,13 @@ struct RoomFact {
     bool kept = false;   // (id > 0) a kept physical solve of the class it shows
     bool drawn = false;  // that solve drawn on every map it wrote (room 0: drawn physically, every story covered)
     bool baked = false;  // that solve has the lamp's light in its base
-    bool geoSame = true; // its walls and 3D blockers as its solve read them (furniture dragged with a lamp on it: not)
 };
+// A kept room's 3D blockers key from RoomGeoKey's parts (the lot's, the walls', the 3D blockers'): the blockers' part alone, 0
+// when unread. The lot's part changes with any door or cut of the lot, and the walls' part (the default wall list, the wall
+// mode) changed between a room's solve and the next edit with nothing moved (story 0 room 13 of 03/11: every physical edit
+// refused); a moved piece of furniture changes its record's blockers. A differing key sends the room to a solve (the edit is
+// still taken: its blocker table is the old one until then)
+inline uint64_t BlockersKey(const uint64_t parts[3]) { return parts[0] ? parts[2] | 1 : 0; }
 // Null when every story 0 .. 7 draws the lamp from its law now (the edit marks no room); else why not, `at` the room
 inline const char* EditRefusal(const std::vector<RoomFact>& rooms, int& at) {
     bool any = false;
@@ -178,7 +183,6 @@ inline const char* EditRefusal(const std::vector<RoomFact>& rooms, int& at) {
         }
         if (!f.kept) return "no kept physical solve of the class it shows";
         if (!f.drawn) return "a map of its kept solve not drawn on the GPU";
-        if (!f.geoSame) return "its walls or 3D blockers changed since its solve (its solve takes them again)";
         if (f.baked) return "its kept solve has the lamp in its base";
     }
     at = -1;

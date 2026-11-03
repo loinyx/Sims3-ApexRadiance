@@ -1362,8 +1362,12 @@ void PhysPickChecks() {
         Check(EditRefusal(r, at) != nullptr && at == 1, "physical edit: a kept solve not drawn refuses it");
         r = rooms, r[1].baked = true;
         Check(EditRefusal(r, at) != nullptr && at == 1, "physical edit: a solve with the lamp in its base refuses it");
-        r = rooms, r[3].geoSame = false;
-        Check(EditRefusal(r, at) != nullptr && at == 3, "physical edit: a room whose 3D blockers moved since its solve (furniture dragged with the lamp) refuses it");
+        {
+            const uint64_t was[3] = {11, 22, 33}, door[3] = {12, 23, 33}, moved[3] = {11, 22, 34}, unread[3] = {0, 0, 0};
+            Check(PhysLampPick::BlockersKey(was) == PhysLampPick::BlockersKey(door) && PhysLampPick::BlockersKey(was) != PhysLampPick::BlockersKey(moved) &&
+                      PhysLampPick::BlockersKey(unread) == 0 && PhysLampPick::BlockersKey(was) != 0,
+                  "physical edit: a room's blockers key follows its 3D blockers alone (a door of the lot or its wall list leaves it; a moved table does not)");
+        }
         r = rooms;
         RoomFact basement;
         basement.story = -1, basement.id = 1;

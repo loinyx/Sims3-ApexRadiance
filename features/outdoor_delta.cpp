@@ -249,7 +249,7 @@ struct Record {
     uint32_t gen = 0;
     uint64_t physics = 0, geo = 0;
     uint64_t geoParts[3] = {}; // (GPU room lamps) RoomGeoKey's parts at the probe's start
-    uint64_t roomGeo = 0;      // (physical) RoomGeoKey at the solve's start (geo is the lot's geometry key there; 0: not read)
+    uint64_t roomGeo = 0;      // (physical) its 3D blockers' key at the solve's start (PhysLampPick::BlockersKey; 0: not read)
     bool dither = false;
     float thr = 0.0f;
     uint8_t wallMode = 0;
@@ -2266,7 +2266,7 @@ struct KeptRoom {
     long killed = 0;
     float toneK = 0.0f, amb[3] = {}, ambPass[3] = {};
     uint64_t geo = 0; // RoomGeoKey at its solve's start (CarryOff, the move path; 0: not read)
-    uint64_t roomGeo = 0; // (physical) RoomGeoKey at its solve's start (PhysCoverWhy; 0: not read)
+    uint64_t roomGeo = 0; // (physical) its 3D blockers' key at its solve's start (PhysCoverWhy; 0: not read)
     float norm = 1.0f;    // (physical) its normalisation (+0x160) at its solve's end: a fresh lamp's norm scale there
     bool outdoor = false; // (physical) a roofless room
     uint64_t geoParts[3] = {};
@@ -3205,7 +3205,8 @@ void SolveStart(unsigned char* room) {
     // test records as the solve starts: UNVERIFIED that room 0's records are the outdoor objects its batches test)
     c.phys = g_capture.load(std::memory_order_relaxed) && g_physical.load(std::memory_order_relaxed) && !baseOnly;
     r.phys = c.phys;
-    r.roomGeo = c.phys ? RoomGeoKey(room) : 0;
+    uint64_t geoParts[3] = {};
+    r.roomGeo = c.phys && RoomGeoKey(room, geoParts) ? PhysLampPick::BlockersKey(geoParts) : 0;
     r.blk.reset(), r.blkHeader = -1.0f;
     if (c.phys) {
         RoomLightTests::Room t;
@@ -5126,11 +5127,12 @@ std::string PhysCoverWhy(uintptr_t tracker, uintptr_t light, PhysCover& o) {
                 f.drawn = f.kept && (!k->maps || GpuRoomLamps::Drawn(room, k->version, k->maps));
                 f.baked = f.kept && std::find(k->baked.begin(), k->baked.end(), light) != k->baked.end();
                 // (an object moved in the room, its occluder mark dropped as the lamp's own: the nightstand a lamp stands on, dragged
-                // with it, kept its old blockers in the GPU's 3D test; the room's records follow the object before its solve)
-                // (roomGeo, not geo: a kept solve's geo is the lot's geometry key, never equal to RoomGeoKey, so every physical
-                // edit was refused, 0 taken in the 01:01 log of 03/11)
-                f.geoSame = !f.kept || (k->roomGeo && RoomGeoKey(static_cast<const BYTE*>(room)) == k->roomGeo);
-                if (!f.geoSame) NoteUnkept(room); // (a room no edited lamp marks is solved again with its blockers now, 3 a minute at most)
+                // with it, kept its old blockers in the GPU's 3D test; the room's records follow the object before its solve). Its
+                // solve takes them again, 3 a minute at most; the edit is taken meanwhile (refused, every edit of 03/11 went to the solves)
+                if (f.kept && k->roomGeo) {
+                    uint64_t now[3] = {};
+                    if (RoomGeoKey(static_cast<const BYTE*>(room), now) && PhysLampPick::BlockersKey(now) != k->roomGeo) NoteUnkept(room);
+                }
                 if (f.lists) o.ids.emplace_back(rr.story, rr.id), o.basisRooms.push_back(BasisRoomRef{KeyOf(room, rr.cls), rr.story, rr.id});
             }
         }
