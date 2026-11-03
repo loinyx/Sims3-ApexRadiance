@@ -325,6 +325,35 @@ lamp's position, not on its colour or intensity.
    `CeilingsUnderAbove` put a ceiling 0.75 m over story 1's rooms 2 and 8 (35 tiles; the probe: 24-27% of room 8's texels
    the game lit shaded by the occluders only), the square patches and the diagonal checkerboard on their floors. This also
    applies to Real-time outdoor lamps' occluders. `outdoor_delta_test` 98 checks, `rt_lamps_test` 75.
+28. Physical model, second game test fixes (02/11):
+   - Empty light lists: `ReadList` (outdoor_delta.cpp) read a room with no list buffer as unreadable too, so such a room was
+     never kept and every edit of its lot was refused (0 of 423 taken). The length rule is `PhysLampPick::ListLen`, with its
+     own checks.
+   - Open tops: the open-tops build (`RtLampProxy::OpenTops`) opened nothing in game (`0 quadrants opened`). The story
+     above's real walls never reach the open-above rule's three quarters of a double-height room's outline under a sloped
+     roof, and a floor hole was never opened. A roofed quadrant under a removed floor of the story above
+     (`OpenUnderRemoved`, `Story::removed` from `ReadPlacedBits`) now loses its ceiling, and so does a room open by the
+     floor rule with a wall of its own on the story above, one with no floor placed beyond it (`OpenAbove::Classify`'s
+     `ownWalls`, off for the room-0 light rule). The occluders line counts the opened quadrants.
+   - Relit copies: Real-time outdoor lamps binds a relit DEFAULT copy in place of the game's map, an objects map too, and
+     three lookups keyed by the bound map missed it: Smooth indoor light's directional maps (`RoomMapPadding::NoteDraw`,
+     `BasisFor`: modular furniture such as curtains fell back to the per-object rig and showed light steps), the floor
+     map's wall mask (`FloorWallMaskTexture`) and the arch ambient memo (`ArchRowsForImpl`). Each now maps a copy back
+     with `RtOutdoorLamps::GameMapOf`.
+   - Unkept rooms: a lot made active solves its rooms at class 0 and shows them at class 2, so a room no lamp lists stayed
+     unkept until an edit's fallback reached it. `KeepEnd` notes such a room, or one whose solve saw the model change, and
+     `OutdoorDelta::SolveUnkept` sends it to a solve again from the render thread, at most 3 times a minute per room.
+   - Loose samples: a sample outside the solve's batch vector failed the capture. In a physical capture of a room above 0
+     it is a batch of its own when it comes between two batches; inside a batch it still fails, and room 0 and the replica
+     model stay strict.
+   - Registry snapshot: a lot no longer lit at the high quality unregisters its lamps, and every lamp was taken as gone.
+     `RefreshLotLamps` keeps the last snapshot until the lot is active again.
+   - Replay lists: the outdoor delta's replay points a room's light list at its one-lamp copy during a batch solve on the
+     light tree thread. Real-time outdoor lamps' `ReadList` reads such a list as unreadable (`LevelLightShare::IsReplayList`),
+     so the kept list stands in for that frame.
+   - Cost: each lot lamp is read once a round for every physical map, a physical map keeps its lamp list while the lot's
+     lamps stay the same, and every edit taken refreshes the per-pixel object lamps in its frame.
+   `outdoor_delta_test` 101 checks, `rt_lamps_test` 75.
 
 ## Settings
 
