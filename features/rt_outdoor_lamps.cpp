@@ -1531,7 +1531,8 @@ void Frame(IDirect3DDevice9* dev) {
         const bool up = g_eng->SetProxy(dev, open, err, true);
         g_openUsed = up ? proxy : nullptr, g_openFailAt = up ? 0 : GetTickCount() | 1;
         g_openGen.store(up ? proxy->gen : 0);
-        LOG_INFO(up ? std::format("[RtOutdoorLamps] Physical indoor lamps' occluders: {} triangles with open tops, generation {}", open.tris.size(), proxy->gen)
+        LOG_INFO(up ? std::format("[RtOutdoorLamps] Physical indoor lamps' occluders: {} triangles with open tops ({} quadrants opened), generation {}", open.tris.size(),
+                                 open.openTops, proxy->gen)
                     : "[RtOutdoorLamps] Physical indoor lamps' occluders could not be uploaded: " + err);
     }
     // the rules every relit texel follows (a change relights every map)

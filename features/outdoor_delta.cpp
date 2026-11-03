@@ -450,9 +450,8 @@ int ReadList(const BYTE* room, uintptr_t* out, int max) {
     __try {
         const uintptr_t* b = *reinterpret_cast<const uintptr_t* const*>(room + 0xC8);
         const uintptr_t* e = *reinterpret_cast<const uintptr_t* const*>(room + 0xCC);
-        if (!b || e < b || e - b > max) return -1;
-        int n = 0;
-        for (const uintptr_t* p = b; p < e; p++) out[n++] = *p;
+        const int n = PhysLampPick::ListLen(b, e, max);
+        for (int i = 0; i < n; i++) out[i] = b[i];
         return n;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return -1;

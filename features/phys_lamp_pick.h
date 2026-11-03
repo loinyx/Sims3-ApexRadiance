@@ -199,5 +199,11 @@ inline bool OwnObjectStep(bool hadPoint, const float occWas[2], const float occN
     const float dx = (occNow[0] - occWas[0]) - (lampNow[0] - lampWas[0]), dz = (occNow[1] - occWas[1]) - (lampNow[2] - lampWas[2]);
     return dx * dx + dz * dz <= tol * tol;
 }
+// A room's light list length from its vector's bounds (room+0xC8, +0xCC), -1 when unreadable. A room no lamp ever lit holds no
+// buffer (both null): an empty list, which a kept physical solve needs read (else every edit is refused, 2026-11-02 20:50 log)
+inline int ListLen(const uintptr_t* b, const uintptr_t* e, int max) {
+    if (!b) return e ? -1 : 0;
+    return e < b || e - b > max ? -1 : static_cast<int>(e - b);
+}
 
 } // namespace PhysLampPick

@@ -1199,6 +1199,12 @@ void PhysPickChecks() {
         ok = ok && now == std::vector<L>{{7, 1}} && missing.empty();
         Check(ok, "physical pick: a lamp the registry drops for a moment is carried for its grace, then gone; another lot carries none");
     }
+    {
+        uintptr_t v[4] = {};
+        Check(PhysLampPick::ListLen(nullptr, nullptr, 8) == 0 && PhysLampPick::ListLen(v, v + 3, 8) == 3 && PhysLampPick::ListLen(nullptr, v, 8) == -1 &&
+                  PhysLampPick::ListLen(v + 2, v, 8) == -1 && PhysLampPick::ListLen(v, v + 4, 3) == -1,
+              "physical pick: a room with no light buffer reads as an empty list; broken or too long bounds stay unreadable");
+    }
     // the rooms an edit taken without their solve leaves stale in the game's maps: the rooms listing it, its own and every room 0;
     // forgotten at their solve, each sent once on a fallback, all on a full drop
     {
