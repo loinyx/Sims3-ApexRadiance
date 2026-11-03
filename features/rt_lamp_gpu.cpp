@@ -1291,8 +1291,10 @@ bool Engine::PhysSum(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lam
         std::fill(table.begin(), table.end(), 0.0f);
         for (size_t r = 0; r < rooms.size(); r++) {
             float* row = &table[r * kTableCols * 4];
-            for (int i = 0; i < nb && static_cast<size_t>(b + i) < rooms[r].lamp.size(); i++)
+            for (int i = 0; i < nb && static_cast<size_t>(b + i) < rooms[r].lamp.size(); i++) {
                 for (int c = 0; c < 3; c++) row[i * 4 + c] = rooms[r].lamp[b + i][c];
+                row[i * 4 + 3] = static_cast<size_t>(b + i) < rooms[r].fill.size() ? rooms[r].fill[b + i] : 0.0f;
+            }
             row[16 * 4] = rooms[r].header;
         }
         if (!SetTable(dev, table.data(), static_cast<int>(rooms.size()), err) || !AccumulateRlg(dev, m, lamps + b, tiles + b, nb, p, first, err, true, world + b, x)) return false;

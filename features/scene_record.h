@@ -156,14 +156,15 @@ inline bool Read(std::FILE* f, Scene& s, std::string& why) {
 }
 
 // ---- the comparison (shared by the tool and its checks) ----
-// The GPU's term of one lamp at one texel (AccPhysPS): vis = the cube shadow's share, t3d = the 3D test (1 untested)
-inline void GpuTerm(const Lamp& L, const RoomHead& h, const Texel& t, float vis, float t3d, bool useReach, float out[3]) {
+// The GPU's term of one lamp at one texel (AccPhysPS): vis = the cube shadow's share, t3d = the raw 3D test (1 untested), fill =
+// the lamp's furniture fill floor (RtLampGpu::FurnitureFill; 0: the game's own term, which Compare scores)
+inline void GpuTerm(const Lamp& L, const RoomHead& h, const Texel& t, float vis, float t3d, bool useReach, float out[3], float fill = 0.0f) {
     const bool wall = std::fabs(t.n[1]) < 0.5f;
     float law[3];
     GpuLampLaw::Eval(L.law, t.p, t.n, h.reachOn && L.reach && wall && useReach ? 1.0f : 0.0f, law);
     float sh = vis;
     if (t.tested) {
-        const float prod = vis * t3d;
+        const float prod = vis * RtLampGpu::FurnitureFill(t3d, fill);
         sh = RoomLightTests::K_DROP > prod ? 0.0f : prod;
     }
     float c[3] = {law[0] * sh, law[1] * sh, law[2] * sh};
@@ -210,6 +211,7 @@ struct Stats {
     uint32_t worstTexel = 0;
     uint64_t worstLight = 0;
     float ratio = 0.0f; // the median game / GPU ratio of the summed channels where both are lit (Compare's call alone)
+    long filled = 0;    // of n, the texels the GPU lifts by a lamp's furniture fill (its own table's shadow; not in the score)
 };
 // One room's lamps against the game's parts; mesh = the lot's occluders with open tops (null: the cube shadow taken as 1,
 // in game), lot = its space. Texels with neither a game part nor a GPU term over 0 are not counted
@@ -228,6 +230,7 @@ inline void Compare(const Room& r, const RtLampProxy::Mesh* mesh, const RtLampPr
             if (p.texel < r.texels.size()) std::memcpy(&game[p.texel * 3], p.rgb, sizeof p.rgb);
         float Ll[3] = {L.law.pos[0], L.law.pos[1], L.law.pos[2]};
         if (lot) RtLampProxy::ToLot(*lot, L.law.pos, Ll);
+        const float fill = haveBlk ? blk.FillOf(static_cast<int>(r.h.blkHeader), L.law.pos) : 0.0f;
         for (size_t i = 0; i < r.texels.size(); i++) {
             const Texel& t = r.texels[i];
             float lawOnly[3];
@@ -242,8 +245,9 @@ inline void Compare(const Room& r, const RtLampProxy::Mesh* mesh, const RtLampPr
                 vis = RtLampProxy::Visibility(*mesh, Ll, r.h.radius, Pl, visSamples, &stamp, &mark);
             }
             const float t3d = haveBlk && t.tested && vis > 0.0f
-                                  ? RtLampGpu::FurnitureFill(blk.Occlude(static_cast<int>(r.h.blkHeader), {L.law.pos[0], L.law.pos[1], L.law.pos[2]}, {t.p[0], t.p[1], t.p[2]}))
+                                  ? blk.Occlude(static_cast<int>(r.h.blkHeader), {L.law.pos[0], L.law.pos[1], L.law.pos[2]}, {t.p[0], t.p[1], t.p[2]})
                                   : 1.0f;
+            s.filled += t.tested && fill > 0.0f && t3d < 1.0f;
             float gpu[3], noT3d[3], noVis[3], noReach[3];
             GpuTerm(L, r.h, t, vis, t3d, true, gpu);
             GpuTerm(L, r.h, t, vis, 1.0f, true, noT3d);

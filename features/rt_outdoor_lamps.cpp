@@ -2636,6 +2636,7 @@ void Frame(IDirect3DDevice9* dev) {
                      RtLampGpu::Engine::PhysRoom room;
                      room.header = s.pHeader;
                      room.lamp.assign(prow.begin() + f, prow.begin() + f + c);
+                     for (int i = 0; i < c; i++) room.fill.push_back(s.pBlk ? s.pBlk->FillOf(static_cast<int>(s.pHeader), pw[f + i].data()) : 0.0f);
                      return g_eng->AccumulatePhys(dev, pm, pl.data() + f, tiles, reinterpret_cast<const float (*)[3]>(pw.data() + f), c, room, p, f == 0, err);
                  });
             if (!ok) {

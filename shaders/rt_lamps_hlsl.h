@@ -771,20 +771,26 @@ float4 T3dPS(TexelIn i) : COLOR0 {
         r = float4(r.yzw, t); // (no indexable temporaries: after the 4 turns r = lamps 0 .. 3)
     }
     return r;
+// A tested texel's 3D tests of the batch's lamps 0 .. 3 (sT3) lifted by their furniture fills (the room table's columns' w):
+// RtLampGpu::FurnitureFill, taken before the lamp loop (inside it a live fill exceeds ps_3_0's temporary registers)
+float4 FillT3(float2 vpos, float slot) {
+    const float4 f = float4(TableAt(0, slot).w, TableAt(1, slot).w, TableAt(2, slot).w, TableAt(3, slot).w);
+    return f + (1.0 - f) * tex2Dlod(sT3, float4((vpos + 0.5) * gD.zw, 0, 0));
+}
 }
 sampler2D sT3 : register(s5);
 // AccPhysPS: one point per kept texel at its place in the sum's layout: p = (lot position, bits + 16 x its room slot; bit 8:
 // the texel's batch ran the game's 3D test), n = the lot normal, base.xyz = its world position (T3dPS). Each lamp of the batch (at most 4; the room table's column l:
-// x = mult, 0 not lit there; y = 1 the reach share applies) adds mult x fade(law x share), share = the cube shadow share
-// (Shadow) and, on a tested texel, x its 3D test (T3dPS's output for the batch: sT3), the product dropped under 0.01 as the
-// game drops it
+// x = mult, 0 not lit there; y = 1 the reach share applies; w = the furniture fill's floor) adds mult x fade(law x share), share =
+// the cube shadow share (Shadow) and, on a tested texel, x its 3D test (T3dPS's output for the batch: sT3) lifted to at least w
+// (RtLampGpu::FurnitureFill), the product dropped under 0.01 as the game drops it
 float4 AccPhys(TexelIn i, float2 vpos, int kSearch, int kEmit, int kWalk, bool atMask) {
     float4 sum = gE.x > 0.5 ? float4(0, 0, 0, 0) : tex2Dlod(sAcc, float4((vpos + 0.5) * gD.zw, 0, 0));
     const float3 P = i.p.xyz;
     const float3 N = normalize(i.n.xyz);
     const float slot = SlotOf(i.p.w);
     const bool tested = BitsOf(i.p.w) >= 8.0;
-    float4 T3 = tested ? tex2Dlod(sT3, float4((vpos + 0.5) * gD.zw, 0, 0)) : 1.0; // (lamp l in T3.x at its turn)
+    float4 T3 = tested ? FillT3(vpos, slot) : 1.0; // (lamp l in T3.x at its turn)
     const float wallReach0 = gA.w > 0.5 ? Sat((0.5 - abs(N.y)) * 1e4) : 0.0;
     const int count = (int)gA.x;
     const float thr = gA.y;
@@ -797,7 +803,7 @@ float4 AccPhys(TexelIn i, float2 vpos, int kSearch, int kEmit, int kWalk, bool a
         [branch] if (l < count && t.x != 0 && (law.r + law.g + law.b) > 0) {
             float sh = Shadow(lamp, atMask ? i.mask.xyz : P, N, kSearch, kEmit, kWalk, i.mask.w); // (gF.y: a room's points, RtLampProxy::IntoRoom)
             if (tested) {
-                const float prod = sh * (0.35 + 0.65 * t3); // (RtLampGpu::FurnitureFill: the room's bounce under furniture)
+                const float prod = sh * t3; // (t3 with its furniture fill: FillT3)
                 sh = 0.01 > prod ? 0.0 : prod;
             }
             float3 c = law * sh;
@@ -829,7 +835,7 @@ float4 AccPhysXPS(TexelIn i, float2 vpos : VPOS) : COLOR0 {
     const bool masked = fmod(bits, 2.0) >= 1.0 && gE.y > 0.5;
     const bool exitG = !masked && fmod(floor(bits / 4.0), 2.0) >= 1.0;
     const bool tested = bits >= 8.0;
-    float4 T3 = tested ? tex2Dlod(sT3, float4((vpos + 0.5) * gD.zw, 0, 0)) : 1.0;
+    float4 T3 = tested ? FillT3(vpos, slot) : 1.0;
     const float wallReach0 = gA.w > 0.5 ? Sat((0.5 - abs(N.y)) * 1e4) : 0.0;
     const int count = (int)gA.x;
     const float thr = gA.y;
@@ -844,7 +850,7 @@ float4 AccPhysXPS(TexelIn i, float2 vpos : VPOS) : COLOR0 {
         [branch] if (l < count && t.x != 0 && (masked ? thr <= ls : exitG && t.z > 0.5 && ls > 0)) {
             float sh = Shadow(lamp, P, N, 24, 16, 16, 0.0);
             if (tested) {
-                const float prod = sh * t3;
+                const float prod = sh * t3; // (t3 with its furniture fill: FillT3)
                 sh = 0.01 > prod ? 0.0 : prod;
             }
             if (masked) {

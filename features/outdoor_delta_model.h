@@ -264,7 +264,8 @@ inline void CarryBasis(uint32_t* last, const uint32_t* prevGame, const uint32_t*
 }
 // (physical indoor lamps, stage 5) a lamp's directional part at a sample: its room row (mult x norm scale, as the room's maps
 // draw it) x its physical share there x the game's step called now; the share is the proxy's visibility x the game's 3D test,
-// dropped under `drop` as the game drops it (K_DROP)
+// dropped under `drop` as the game drops it (K_DROP). The raw 3D test, no furniture fill (RtLampGpu::FurnitureFill): a still
+// lamp's parts are the game's levels (BasisPartNow), so a fill here alone would light objects under a table only while it moves
 inline void BasisPartPhys(float row, float vis, float t3d, float drop, const float step[16], float out[16]) {
     float share = vis * t3d;
     if (drop > share || !std::isfinite(share)) share = 0.0f;

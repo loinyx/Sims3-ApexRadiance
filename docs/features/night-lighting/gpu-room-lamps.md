@@ -196,7 +196,8 @@ lamp's position, not on its colour or intensity.
    normal for the law and the cube shadow, world position for the 3D test, bits + 16 x room slot, bit 8 = its batch ran the 3D
    test). Per batch of 4 lamps, `T3dPS` runs the game's 3D test (`Occlude3D`, the port of `quadT`/`discT`/`occlude` over the
    blocker table, in world space as the records; records and blockers walked as one sequence in two nested loops of 255, past
-   ps_3_0's loop limit), then `AccPhysPS` adds mult x fade(law x shadow share x T3D, dropped under 0.01) for any law kind (point,
+   ps_3_0's loop limit), then `AccPhysPS` adds mult x fade(law x shadow share x T3D, dropped under 0.01; T3D lifted by the
+   furniture fill since 03/11, see 31) for any law kind (point,
    spot, shaded, street, tube, area). The 3D test is a pass of its own: inside the lamp loop it exceeds ps_3_0's 32 temporary
    registers. The compose, class-2 blur, tile-edge copies and restores are `RelightKept`'s own (`ComposeKept`). Furniture stays
    out of the cube map: its soft shadows are the game's 3D test, evaluated analytically. `rt_lamps_test` `PhysKeptCheck`:
@@ -371,6 +372,17 @@ lamp's position, not on its colour or intensity.
    size to every reader (wall masks, tiles, uv scales); only the floor's B-spline read takes the sharper map's own size.
    A restore keeps the game's texel through the upsample. Cost: 4 phys points per floor texel in a floor map's relight, and
    2 x (2w x 2h x 4) bytes of render targets per floor map (2 MB for a 512 x 256 map).
+31. Physical model, 03/11 fixes:
+   - Furniture fill: the game's point-light test leaves the floor under a lamp's own table near black (14:35 capture). A lamp
+     standing on a top of its room's records (`BlockerTable::FillOf`, `RoomLightTests::StandsOn`; not a dropped one) keeps
+     at least 15% of its light under furniture (`RtLampGpu::FurnitureFill` = fill + (1 - fill) x T3D, the room table's column
+     w, in `AccPhysPS` and `AccPhysXPS`); every other lamp keeps the game's 3D test, so the soft furniture shadows of ceiling
+     lamps are unchanged. 15% is an estimate (floor albedo about 0.3 x about half the sky open under a table), unverified
+     in game. The directional maps keep the game's dark (`BasisPartPhys`). `scene_replay` and `[GpuOracle]` score the game's
+     term and report the share of texels the fill lifts apart.
+   - Street lamps on upper walls: room 0's export keeps the parts of lamps of no lot or another lot (unreadable lots left
+     out) apart from the base (`Room0Export::Texel::worldBase`), and `PrepareJob` takes them off the base of an upper wall of
+     a double-height room (bit 8, `RtLampModel::ComposeBase`); every other texel keeps its base.
 
 ## Settings
 

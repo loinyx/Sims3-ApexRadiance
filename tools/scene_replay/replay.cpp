@@ -137,7 +137,7 @@ static void Detail(const Room& r, const RtLampProxy::Mesh* mesh, const RtLampPro
                 RtLampProxy::IntoRoom(*lot, r.h.story, r.h.id, Pl);
                 vis = RtLampProxy::Visibility(*mesh, Ll, r.h.radius, Pl, samples);
             }
-            const float t3d = r.h.blkHeader >= 0.0f && !r.blk.empty() && t.tested ? RtLampGpu::FurnitureFill(blk.Occlude(static_cast<int>(r.h.blkHeader), {L.law.pos[0], L.law.pos[1], L.law.pos[2]}, {t.p[0], t.p[1], t.p[2]})) : 1.0f;
+            const float t3d = r.h.blkHeader >= 0.0f && !r.blk.empty() && t.tested ? blk.Occlude(static_cast<int>(r.h.blkHeader), {L.law.pos[0], L.law.pos[1], L.law.pos[2]}, {t.p[0], t.p[1], t.p[2]}) : 1.0f;
             Miss m{0.0f, i, {}, {}, vis, t3d};
             std::memcpy(m.g, &game[i * 3], sizeof m.g);
             GpuTerm(L, r.h, t, vis, t3d, true, m.gpu);
@@ -250,7 +250,7 @@ int main(int argc, char** argv) {
             if (r.h.story == detailStory && r.h.id == detailId) Detail(r, mesh, lot, samples);
             Stats s;
             Compare(r, mesh, lot, s, samples);
-            fileStats.n += s.n, fileStats.within += s.within;
+            fileStats.n += s.n, fileStats.within += s.within, fileStats.filled += s.filled;
             for (int t = 0; t < kTags; t++) fileStats.tags[t] += s.tags[t];
             for (int m = 0; m < 4; m++) fileStats.mapN[m] += s.mapN[m], fileStats.mapWithin[m] += s.mapWithin[m];
             int top = kOk;
@@ -267,7 +267,7 @@ int main(int argc, char** argv) {
         regressions += worse;
         std::printf("%s: %zu room solves, %ld lamp texels, %.2f%% within 2/255%s\n", key.c_str(), sc.rooms.size(), fileStats.n, pct,
                     b == base.end() ? "" : std::format(" (baseline {:.2f}%{})", b->second, worse ? ", REGRESSION" : "").c_str());
-        all.n += fileStats.n, all.within += fileStats.within;
+        all.n += fileStats.n, all.within += fileStats.within, all.filled += fileStats.filled;
         for (int t = 0; t < kTags; t++) all.tags[t] += fileStats.tags[t];
         for (int m = 0; m < 4; m++) all.mapN[m] += fileStats.mapN[m], all.mapWithin[m] += fileStats.mapWithin[m];
     }
@@ -282,6 +282,7 @@ int main(int argc, char** argv) {
     std::printf("misses by likely cause: %s\n", tags.empty() ? "none" : tags.c_str());
     std::sort(rooms.begin(), rooms.end(), [](const RoomLine& a, const RoomLine& b) { return a.within < b.within; });
     std::set<std::string> shown; // (each room once, at its worst solve)
+    std::printf("furniture fill (a lamp's own table, not in the score): lifts %.2f%% of the lamp texels\n", pct(all.filled, all.n));
     for (size_t i = 0; i < rooms.size() && shown.size() < 8 && rooms[i].within < 100.0; i++)
         if (shown.insert(rooms[i].name).second)
             std::printf("  worst: %s: %.1f%% of %ld (mostly %s)\n", rooms[i].name.c_str(), rooms[i].within, rooms[i].n, TagName(rooms[i].tag));

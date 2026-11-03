@@ -2988,9 +2988,10 @@ void SceneWriteRoom(const KeptRoom& k, const Record& r) {
         for (int t = SceneRecord::kShadow3D; t < SceneRecord::kTags; t++)
             if (st.tags[t] > st.tags[top]) top = t;
         if (st.n)
-            LOG_INFO(std::format("[GpuOracle] story {} room {} class {}: within2 {:.1f}% of {} lamp texels{}; max err {:.3f} (lamp {:08X} texel {}), most misses {}", k.story,
-                                 k.id, k.cls, 100.0 * static_cast<double>(st.within) / static_cast<double>(st.n), st.n, surf, st.worst,
-                                 static_cast<uint32_t>(st.worstLight), st.worstTexel, st.within == st.n ? "none" : SceneRecord::TagName(top)));
+            LOG_INFO(std::format("[GpuOracle] story {} room {} class {}: within2 {:.1f}% of {} lamp texels{}; max err {:.3f} (lamp {:08X} texel {}), most misses {}; "
+                                 "furniture fill lifts {}",
+                                 k.story, k.id, k.cls, 100.0 * static_cast<double>(st.within) / static_cast<double>(st.n), st.n, surf, st.worst,
+                                 static_cast<uint32_t>(st.worstLight), st.worstTexel, st.within == st.n ? "none" : SceneRecord::TagName(top), st.filled));
     }
     uint32_t gen = 0;
     const std::shared_ptr<const RtLampProxy::Lot> lot = RtOutdoorLamps::KeptLot(gen);

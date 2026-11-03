@@ -2669,10 +2669,12 @@ bool PhysKeptCheck() {
         GpuLampLaw::AreaShape(lamps[5].law, u, v, nrm, 0.3f, 0.2f, false);
     }
     // the room table: room A (lamp of room B x its norm scale 0.8, no reach), room 0 (reach on its outer walls; none for the tube)
+    // (the shaded lamp stands on furniture in room A: its 3D test takes the furniture fill there)
     std::vector<RtLampGpu::Engine::PhysRoom> rooms(2);
     for (int l = 0; l < nL; l++) {
         rooms[0].lamp.push_back({l == 6 ? 0.8f : 1.0f, 0.0f});
         rooms[1].lamp.push_back({1.0f, l == 4 ? 0.0f : 1.0f});
+        rooms[0].fill.push_back(l == 2 ? RtLampGpu::kFurnitureFill : 0.0f), rooms[1].fill.push_back(0.0f);
     }
     // room A's 3D test records
     RoomLightTests::Room roomA;
@@ -2896,7 +2898,7 @@ bool PhysKeptCheck() {
             if (mult == 0.0f || !((law[0] + law[1] + law[2]) > 0.0f)) continue;
             float sh = vis1 && refClear[l][i] ? 1.0f : shareOf(l, i);
             if (t.tested) {
-                const float prod = sh * RtLampGpu::FurnitureFill(RoomLightTests::occlude(roomA, {world[l][0], world[l][1], world[l][2]}, worldOf(t), &unknown));
+                const float prod = sh * RtLampGpu::FurnitureFill(RoomLightTests::occlude(roomA, {world[l][0], world[l][1], world[l][2]}, worldOf(t), &unknown), rooms[t.slot].fill[l]);
                 sh = RoomLightTests::K_DROP > prod ? 0.0f : prod;
             }
             float c[3] = {law[0] * sh, law[1] * sh, law[2] * sh};
@@ -3008,7 +3010,9 @@ bool PhysKeptCheck() {
                     const int gn = std::min(3, nL - g0);
                     std::vector<int> rowOf(gn);
                     std::vector<RtLampGpu::Engine::PhysRoom> part(rooms.size());
-                    for (size_t r = 0; r < rooms.size(); r++) part[r].header = rooms[r].header, part[r].lamp.assign(rooms[r].lamp.begin() + g0, rooms[r].lamp.begin() + g0 + gn);
+                    for (size_t r = 0; r < rooms.size(); r++)
+                        part[r].header = rooms[r].header, part[r].lamp.assign(rooms[r].lamp.begin() + g0, rooms[r].lamp.begin() + g0 + gn),
+                        part[r].fill.assign(rooms[r].fill.begin() + g0, rooms[r].fill.begin() + g0 + gn);
                     for (int i = 0; ok && i < gn; i++) rowOf[i] = i, ok = eng.RenderShadowTile(g_dev, lamps[g0 + i].law.pos, i, 64.0f, err);
                     ok = ok && eng.RelightKeptPhys(g_dev, g, lamps.data() + g0, rowOf.data(), reinterpret_cast<const float (*)[3]>(world.data() + g0), gn, part, prm, game, out, w,
                                                    h, err, g0 == 0, g0 + 3 >= nL);
@@ -3080,6 +3084,7 @@ bool PhysKeptCheck() {
             pl.push_back(all[l]), pt[i] = i;
             pw.push_back({all[l].law.pos[0] + kWorld[0], all[l].law.pos[1] + kWorld[1], all[l].law.pos[2] + kWorld[2]});
             pr[0].lamp.push_back(rowA[l]), pr[1].lamp.push_back(row0[l]);
+            pr[0].fill.push_back(l < nL ? rooms[0].fill[l] : 0.0f), pr[1].fill.push_back(0.0f);
         }
         RtLampGpu::KeptMapData dk = d;
         std::vector<uint32_t> gamePx(static_cast<size_t>(w) * h, 0xFF000000u), got;
@@ -3143,7 +3148,7 @@ bool PhysKeptCheck() {
                 }
                 if (t.tested) {
                     const RoomLightTests::V from{all[l].law.pos[0] + kWorld[0], all[l].law.pos[1] + kWorld[1], all[l].law.pos[2] + kWorld[2]};
-                    const float prod = sh * RtLampGpu::FurnitureFill(RoomLightTests::occlude(roomA, from, worldOf(t), &unknown));
+                    const float prod = sh * RtLampGpu::FurnitureFill(RoomLightTests::occlude(roomA, from, worldOf(t), &unknown), t.slot == 0 && static_cast<int>(l) < nL ? rooms[0].fill[l] : 0.0f);
                     sh = RoomLightTests::K_DROP > prod ? 0.0f : prod;
                 }
                 float cl[3] = {law[0] * sh, law[1] * sh, law[2] * sh};
@@ -3232,6 +3237,7 @@ bool Room0PhysCheck() {
     RtLampGpu::Engine::PhysRoom room;
     room.header = static_cast<float>(table.Append(room0));
     room.lamp = rows;
+    room.fill = {RtLampGpu::kFurnitureFill, 0.0f, RtLampGpu::kFurnitureFill, 0.0f, 0.0f, 0.0f}; // (two exit lamps standing on furniture)
     // the texels (the map's points as rt_outdoor_lamps.cpp PrepareJob makes them) and the phys points at the same places
     std::vector<RtLampGpu::TexelVertex> verts, phys;
     std::vector<RtLampModel::TexelIn> in(static_cast<size_t>(w) * h);
@@ -3259,8 +3265,8 @@ bool Room0PhysCheck() {
             } else if (kind == 1) {
                 t.exitGround = true, v.mask[3] = 1.0f, bits = 4;
                 t.exitBase = v.mask[2] = U(rng) < 0.5f ? 0.0f : 0.3f * U(rng);
-            } else if (!wall && x % 2 == 0)
-                tested[i] = 1, bits = 8, nTested++;
+            }
+            if (!wall && x % 2 == 0) tested[i] = 1, bits |= 8, nTested++; // (masked and exit ground texels too: AccPhysXPS's 3D test)
             verts.push_back(v);
             RtLampGpu::TexelVertex q{};
             q.x = v.x, q.y = v.y, q.w = 1.0f;
@@ -3281,7 +3287,8 @@ bool Room0PhysCheck() {
             float sh = 1.0f;
             if (tested[i]) {
                 int unknown = 0;
-                const float prod = RtLampGpu::FurnitureFill(RoomLightTests::occlude(room0, {world[l][0], world[l][1], world[l][2]}, {v.p[0] + kWorld[0], v.p[1] + kWorld[1], v.p[2] + kWorld[2]}, &unknown));
+                const float prod = RtLampGpu::FurnitureFill(
+                    RoomLightTests::occlude(room0, {world[l][0], world[l][1], world[l][2]}, {v.p[0] + kWorld[0], v.p[1] + kWorld[1], v.p[2] + kWorld[2]}, &unknown), room.fill[l]);
                 sh = RoomLightTests::K_DROP > prod ? 0.0f : prod;
                 nShaded += prod < 1.0f;
             }
@@ -3330,6 +3337,7 @@ bool Room0PhysCheck() {
             else {
                 RtLampGpu::Engine::PhysRoom a = room, b = room;
                 a.lamp.assign(rows.begin(), rows.begin() + 3), b.lamp.assign(rows.begin() + 3, rows.end());
+                a.fill.assign(room.fill.begin(), room.fill.begin() + 3), b.fill.assign(room.fill.begin() + 3, room.fill.end());
                 ok = ok && eng.AccumulatePhys(g_dev, pm, lamps.data(), tiles.data(), wp, 3, a, p, true, err) &&
                      eng.AccumulatePhys(g_dev, pm, lamps.data() + 3, tiles.data() + 3, wp + 3, nL - 3, b, p, false, err);
             }
@@ -3353,7 +3361,7 @@ bool Room0PhysCheck() {
         if (!in[i].masked && !in[i].exitGround) continue;
         alphaN++, alphaBad += (want[i] >> 24) != (got[0][i] >> 24), alphaLit += (want[i] >> 24) != 0;
     }
-    std::printf("  %ld texels, %d lamps (%ld plain texels behind the 3D test, %ld lamp pairs shaded): %.2f%% within 1/255 of the CPU, largest %ld/255; "
+    std::printf("  %ld texels, %d lamps (%ld floor texels behind the 3D test, masked and exit ground among them, %ld lamp pairs shaded): %.2f%% within 1/255 of the CPU, largest %ld/255; "
                 "%ld masked or exit ground texels, %ld with an alpha, %ld alphas differ; two calls over one sum: %ld of %ld texels as one\n",
                 n, nL, nTested, nShaded, n ? 100.0 * within1 / n : 100.0, maxDiff, alphaN, alphaLit, alphaBad, same, n);
     Check(nShaded > 0, "physical room 0: the 3D test shades no texel (the scene is wrong)");

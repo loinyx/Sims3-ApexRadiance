@@ -35,6 +35,9 @@ the share within 2/255 per scene and per surface, the misses by likely cause and
 `shadow3D` (right without the 3D test), `opening` (right without the cube shadow), `reach`, `norm` (one factor off),
 `position` (lit where the law has nothing) and `unknown`.
 
+The score is against the game's own term: the furniture fill the GPU adds under a lamp's own table
+(`RtLampGpu::FurnitureFill`) is not in it, and the report and the `[GpuOracle]` line give the share of lamp texels it lifts.
+
 With `-Baseline`, a scene whose share falls more than 0.5 points under its baseline value fails the run (exit 1);
 `-UpdateBaseline` writes the current values.
 

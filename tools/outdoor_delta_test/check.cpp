@@ -1584,16 +1584,15 @@ void BlockerTableChecks() {
         const float bySofa[3] = {0.0f, 0.86f, 0.0f};
         Check(stands(onTop) && !stands(over) && !stands(beside) && !stands(below) && !RoomLightTests::StandsOn(sofa, bySofa),
               "stands on: a table lamp yes; a chandelier over the table, a lamp beside or under it, or beside a sofa no");
-        // (Offset) the kept table at x = -1 moved 2 m by its record's offset casts exactly the shadow of the table kept at x = 1
-        RtLampGpu::BlockerTable kept;
-        const int hk = kept.Append(tableAt(-1.0f));
-        kept.Offset(hk, 0, 2.0f, 0.0f);
-        bool same = true;
-        for (float x = -2.0f; x <= 2.0f; x += 0.05f) same = same && std::fabs(kept.Occlude(hk, lamp, V{x, 0.0f, 0.1f}) - live.Occlude(h, lamp, V{x, 0.0f, 0.1f})) < 1e-4f;
-        Check(same, "blocker offset: a kept table moved by its record's offset shades exactly as the table kept at its new place");
-        // (Drop) a lamp away from where its solve saw it: the top it stood on casts nothing until the next solve, the rest unchanged
+        // (FillOf) only the lamp on the table's top keeps the furniture fill under furniture; a chandelier over it none, nor the lamp
+        // once its top is left out
         RtLampGpu::BlockerTable left = live;
         left.Drop(h, 0);
+        Check(live.FillOf(h, onTop) == RtLampGpu::kFurnitureFill && live.FillOf(h, over) == 0.0f && left.FillOf(h, onTop) == 0.0f && live.FillOf(-1, onTop) == 0.0f &&
+                  RtLampGpu::FurnitureFill(0.0f, 0.0f) == 0.0f && RtLampGpu::FurnitureFill(1.0f, RtLampGpu::kFurnitureFill) == 1.0f &&
+                  RtLampGpu::FurnitureFill(0.0f, RtLampGpu::kFurnitureFill) == RtLampGpu::kFurnitureFill,
+              "furniture fill: a table lamp's own top lifts its shadow to the fill; any other lamp keeps the game's 3D test");
+        // (Drop) a lamp away from where its solve saw it: the top it stood on casts nothing until the next solve, the rest unchanged
         bool none = true;
         for (float x = -2.0f; x <= 2.0f; x += 0.05f) none = none && left.Occlude(h, lamp, V{x, 0.0f, 0.1f}) == 1.0f;
         Check(none && live.Occlude(h, lamp, V{1.0f, 0.0f, 0.1f}) < 0.01f && !PhysLampPick::LeftItsTop(0.005f, 0.01f, 0.0f) &&

@@ -643,7 +643,10 @@ bool RelightPhys(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, Entry& e, const 
     return PhysPasses(dev, eng, lights.data(), lamps.data(), n, base.farDist, err, [&](int g0, int gn, const int* tiles, bool last) {
         std::vector<RtLampGpu::Engine::PhysRoom> room(1);
         room[0].header = e.blkHeader;
-        for (int i = 0; i < gn; i++) room[0].lamp.push_back({lamps[g0 + i].mult, reach[g0 + i], 0.0f});
+        for (int i = 0; i < gn; i++) {
+            room[0].lamp.push_back({lamps[g0 + i].mult, reach[g0 + i], 0.0f});
+            room[0].fill.push_back(e.blockers ? e.blockers->FillOf(static_cast<int>(e.blkHeader), world[g0 + i].data()) : 0.0f);
+        }
         if (hiOut)
             return eng.RelightKeptPhysHi(dev, e.gpu, lamps.data() + g0, tiles, reinterpret_cast<const float (*)[3]>(world.data() + g0), gn, room, p, hiOut, 2 * w, 2 * h, err,
                                          g0 == 0, last, e.ambScale);

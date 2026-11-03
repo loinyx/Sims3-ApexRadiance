@@ -27,9 +27,13 @@
 
 namespace RtLampGpu {
 
-// The physical model's 3D test (furniture) as AccPhysPS takes it: light bounced off the room keeps 35% under furniture, the
-// game's point-light test left the floor under a lamp's own table near black (14:35 capture of 03/11). The shader has the same numbers
-inline float FurnitureFill(float t) { return 0.35f + 0.65f * t; }
+// The physical model's 3D test (furniture) as AccPhysPS and AccPhysXPS take it: t lifted to at least `fill`, the lamp's room
+// table column w (BlockerTable::FillOf). A lamp standing on furniture keeps kFurnitureFill of its light under it (the game's
+// point-light test left the floor under a lamp's own table near black in a side-table capture); every other lamp 0, its
+// furniture shadows the game's. UNVERIFIED in game: 0.15 is an estimate (floor albedo about 0.3 x about half the sky open
+// under a table); the directional maps keep the game's dark (BasisPartPhys). tools/rt_lamps_test checks the shader against this
+constexpr float kFurnitureFill = 0.15f;
+inline float FurnitureFill(float t, float fill) { return fill + (1.0f - fill) * t; }
 
 // (physical, true-size furniture shadows: Params::edgeR) a blocker's edge at its real extent h, as wide as a lamp ball of radius
 // edgeR seen from the receiver p2 past the blocker's plane point X = A + v (0 at contact, edgeR at the lamp). The game's band
@@ -126,6 +130,22 @@ struct BlockerTable {
 
     // (physical) record r of the room at `header` drawn moved by (dx, 0, dz): a piece of furniture dragged with the lamp standing on
     // it, ahead of the solve that reads its records again (video of 03/11: the side table's shadow left behind, on the side away
+    // A lamp at `lamp` (world) stands on a top of record r of the room at `header` (RoomLightTests::StandsOn)
+    bool StandsOn(int header, int r, const float lamp[3]) const {
+        const Row& ix = rows[static_cast<size_t>(static_cast<int>(rows[static_cast<size_t>(header)].v[0]) + 2 * r + 1)];
+        for (int k = 0; k < static_cast<int>(ix.v[1]); k++)
+            if (RoomLightTests::StandsOn(BlockerAt(static_cast<int>(ix.v[0]) + k * kBlockerRows), lamp)) return true;
+        return false;
+    }
+    // FurnitureFill's floor for a lamp at `lamp`: kFurnitureFill when it stands on a record of the room at `header` that is not
+    // left out (its own table), else 0
+    float FillOf(int header, const float lamp[3]) const {
+        if (header < 0 || static_cast<size_t>(header) >= rows.size()) return 0.0f;
+        const int firstRec = static_cast<int>(rows[static_cast<size_t>(header)].v[0]), recs = static_cast<int>(rows[static_cast<size_t>(header)].v[1]);
+        for (int r = 0; r < recs; r++)
+            if (rows[static_cast<size_t>(firstRec + 2 * r)].v[3] >= 0.0f && StandsOn(header, r, lamp)) return kFurnitureFill;
+        return 0.0f;
+    }
     // from the drag). Its sphere moves; its record's index row carries the offset (z, w; Append writes 0) for the blocker tests,
     // which test the segment moved back. Once per record of a fresh copy (the centre is moved in place)
     void Offset(int header, int r, float dx, float dz) {

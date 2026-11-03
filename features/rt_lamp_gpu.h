@@ -280,6 +280,7 @@ class Engine {
     struct PhysRoom {
         float header = -1.0f;
         std::vector<std::array<float, 3>> lamp;
+        std::vector<float> fill; // lamp i's furniture fill floor (RtLampGpu::FurnitureFill, BlockerTable::FillOf; none: 0)
     };
     bool RelightKeptPhys(IDirect3DDevice9* dev, const KeptMapGpu& k, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,
                          const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err,
