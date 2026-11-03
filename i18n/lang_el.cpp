@@ -2333,7 +2333,7 @@ const I18n::Pair kPairs[] = {
     {"Keep indoor lamps for GPU", "Εσωτερικοί λαμπτήρες για GPU"},
     {"Keeps the active lot's room solves and draws their lamps on the GPU; logs self-checks with the comparison on", "Κρατά κάθε υπολογισμό δωματίου του ενεργού οικοπέδου και σχεδιάζει τους λαμπτήρες τους στην GPU· με τη σύγκριση ενεργή, καταγράφει αυτοελέγχους"},
     {"Indoor lamp model", "Μοντέλο εσωτερικών λαμπτήρων"},
-    {"Replica: each solve's lamp shares. Physical: lamps with shadows (not drawn yet)", "Αντίγραφο: τα μερίδια λαμπτήρων κάθε υπολογισμού. Φυσικό: λαμπτήρες με σκιές (δεν σχεδιάζονται ακόμα)"},
+    {"Replica: each solve's lamp shares. Physical: lamps with shadows", "Αντίγραφο: τα μερίδια λαμπτήρων κάθε υπολογισμού. Φυσικό: λαμπτήρες με σκιές"},
     {"Replica", "Αντίγραφο"},
     {"Physical", "Φυσικό"},
     {"Tester", "Δοκιμές"},

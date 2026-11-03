@@ -2333,7 +2333,7 @@ const I18n::Pair kPairs[] = {
     {"Keep indoor lamps for GPU", "Сохранять комнатные лампы (GPU)"},
     {"Keeps the active lot's room solves and draws their lamps on the GPU; logs self-checks with the comparison on", "Сохраняет каждый расчёт комнаты активного участка и рисует их лампы на GPU; при включённом сравнении пишет самопроверки в лог"},
     {"Indoor lamp model", "Модель комнатных ламп"},
-    {"Replica: each solve's lamp shares. Physical: lamps with shadows (not drawn yet)", "Копия: доли ламп из каждого расчёта. Физическая: лампы с тенями (пока не рисуются)"},
+    {"Replica: each solve's lamp shares. Physical: lamps with shadows", "Копия: доли ламп из каждого расчёта. Физическая: лампы с тенями"},
     {"Replica", "Копия"},
     {"Physical", "Физическая"},
     {"Tester", "Тесты"},

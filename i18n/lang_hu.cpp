@@ -2333,7 +2333,7 @@ const I18n::Pair kPairs[] = {
     {"Keep indoor lamps for GPU", "Beltéri lámpák megőrzése (GPU)"},
     {"Keeps the active lot's room solves and draws their lamps on the GPU; logs self-checks with the comparison on", "Megőrzi az aktív telek minden szobájának számítását, és a GPU-n rajzolja a lámpáikat; bekapcsolt összevetéssel önellenőrzéseket naplóz"},
     {"Indoor lamp model", "Beltéri lámpák modellje"},
-    {"Replica: each solve's lamp shares. Physical: lamps with shadows (not drawn yet)", "Másolat: minden számítás lámparészei. Fizikai: árnyékos lámpák (még nincs rajzolva)"},
+    {"Replica: each solve's lamp shares. Physical: lamps with shadows", "Másolat: minden számítás lámparészei. Fizikai: árnyékos lámpák"},
     {"Replica", "Másolat"},
     {"Physical", "Fizikai"},
     {"Tester", "Tesztek"},

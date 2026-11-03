@@ -2333,7 +2333,7 @@ const I18n::Pair kPairs[] = {
     {"Keep indoor lamps for GPU", "為 GPU 保留室內燈"},
     {"Keeps the active lot's room solves and draws their lamps on the GPU; logs self-checks with the comparison on", "保留使用中地塊每個房間的計算，並在 GPU 上繪製其燈光；開啟對比時，在記錄中寫入自檢"},
     {"Indoor lamp model", "室內燈光模型"},
-    {"Replica: each solve's lamp shares. Physical: lamps with shadows (not drawn yet)", "複製：每次計算中各燈的份額。物理：帶陰影的燈光（尚未繪製）"},
+    {"Replica: each solve's lamp shares. Physical: lamps with shadows", "複製：每次計算中各燈的份額。物理：帶陰影的燈光"},
     {"Replica", "複製"},
     {"Physical", "物理"},
     {"Tester", "測試"},

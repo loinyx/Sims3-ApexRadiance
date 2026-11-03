@@ -246,7 +246,7 @@ const I18n::Entry kDevBuildExtra[] = {
 {"Keep indoor lamps for GPU", "Guardar luzes internas (GPU)", "Guardar luces interiores (GPU)", "Garder lampes intérieures (GPU)"},
 {"Keeps the active lot's room solves and draws their lamps on the GPU; logs self-checks with the comparison on", "Guarda cada cálculo de cômodo do lote ativo e desenha as luzes dele na GPU; com a comparação ligada, registra autoverificações no log", "Guarda cada cálculo de habitación del solar activo y dibuja sus lámparas en la GPU; con la comparación activada, anota autocomprobaciones en el registro", "Garde chaque calcul de pièce du terrain actif et dessine ses lampes sur le GPU ; avec la comparaison activée, note des autovérifications dans le journal"},
 {"Indoor lamp model", "Modelo das luzes internas", "Modelo de luces interiores", "Modèle des lampes intérieures"},
-{"Replica: each solve's lamp shares. Physical: lamps with shadows (not drawn yet)", "Réplica: a parte de cada lâmpada em cada cálculo. Física: lâmpadas com sombras (ainda não desenhadas)", "Réplica: la parte de cada lámpara en cada cálculo. Física: lámparas con sombras (aún no se dibujan)", "Réplique : la part de chaque lampe de chaque calcul. Physique : lampes avec ombres (pas encore dessinées)"},
+{"Replica: each solve's lamp shares. Physical: lamps with shadows", "Réplica: a parte de cada lâmpada em cada cálculo. Física: lâmpadas com sombras", "Réplica: la parte de cada lámpara en cada cálculo. Física: lámparas con sombras", "Réplique : la part de chaque lampe de chaque calcul. Physique : lampes avec ombres"},
 {"Replica", "Réplica", "Réplica", "Réplique"},
 {"Physical", "Física", "Física", "Physique"},
 {"Tester", "Testes", "Pruebas", "Tests"},

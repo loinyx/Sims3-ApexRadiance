@@ -2333,7 +2333,7 @@ const I18n::Pair kPairs[] = {
     {"Keep indoor lamps for GPU", "Behåll inomhuslampor (GPU)"},
     {"Keeps the active lot's room solves and draws their lamps on the GPU; logs self-checks with the comparison on", "Behåller varje rumsberäkning på den aktiva tomten och ritar rummens lampor på GPU:n; med jämförelsen på loggas självkontroller"},
     {"Indoor lamp model", "Modell för inomhuslampor"},
-    {"Replica: each solve's lamp shares. Physical: lamps with shadows (not drawn yet)", "Kopia: lampandelar från varje beräkning. Fysisk: lampor med skuggor (ritas inte än)"},
+    {"Replica: each solve's lamp shares. Physical: lamps with shadows", "Kopia: lampandelar från varje beräkning. Fysisk: lampor med skuggor"},
     {"Replica", "Kopia"},
     {"Physical", "Fysisk"},
     {"Tester", "Tester"},

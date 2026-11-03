@@ -2436,12 +2436,11 @@ class NightTerrainRelightPatch : public ApexPatch {
         if (!kPublicBuild) // developer only
             RegisterBoolSetting(&g_gpuRoomLampsCapture, "gpuRoomLampsCapture", false,
                 "Developer: each solve of the active lot's rooms other than room 0 is kept for the GPU (the light without the lot's lamps, and each "
-                "lamp's share per texel), within a memory budget. With roomLampProbe on too, each kept solve is recomposed and compared. Nothing is drawn.");
+                "lamp's share per texel), within a memory budget. With roomLampProbe on too, each kept solve is recomposed and compared. The kept solves' maps are drawn on the GPU.");
         if (!kPublicBuild) // developer only
             RegisterNamedEnumSetting(&g_roomLampModel, "roomLampModel", 0,
                 "Developer, with gpuRoomLampsCapture and Lamp lighting instant: replica keeps each lamp's share per texel as the room's solve gave it; "
-                "physical keeps the light without the lot's lamps and the room's tests, for the GPU to draw each lamp with its shadows (not drawn yet: "
-                "the game's light stays shown). A change sends the active lot's rooms to their solve.",
+                "physical keeps the light without the lot's lamps and the room's tests, for the GPU to draw each lamp with its shadows. A change sends the active lot's rooms to their solve.",
                 {"replica", "physical"});
         if (!kPublicBuild) // developer A/B only; the public build always has soft lot edges
             RegisterBoolSetting(&g_softLotEdges, "bordaSuaveLote", true,
@@ -3720,7 +3719,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             NotifySettingChanged();
         if (g_lampMode == kLampInstant && g_gpuRoomLampsCapture) {
             static const char* const kModels[] = {"Replica", "Physical"};
-            if (ApexUi::SegmentedRow("Indoor lamp model", "Replica: each solve's lamp shares. Physical: lamps with shadows (not drawn yet)",
+            if (ApexUi::SegmentedRow("Indoor lamp model", "Replica: each solve's lamp shares. Physical: lamps with shadows",
                                      "##RoomLampModel", &g_roomLampModel, kModels, 2, nullptr, nullptr, 0))
                 NotifySettingChanged();
         }
