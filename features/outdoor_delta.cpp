@@ -4214,7 +4214,9 @@ void RoomFinalized(const void* room, bool gather) {
             for (const auto& [key, k] : g_kept)
                 if (k->room == reinterpret_cast<uintptr_t>(room) && k->physical) geo = k->geo, held.emplace_back(key, k->version);
         }
-        if (geo && RoomGeoKey(static_cast<const BYTE*>(room)) == geo) {
+        // (a solve about to run: held whatever its key reads now, as its KeepEnd replaces them or SolveEnd drops them; the key also
+        // takes the lot's doors, so a door a Sim opened dropped the room's copy and showed the game's texels until it was kept again)
+        if (geo && (gather || RoomGeoKey(static_cast<const BYTE*>(room)) == geo)) {
             if (gather) {
                 g_heldKept = std::move(held);
                 return;

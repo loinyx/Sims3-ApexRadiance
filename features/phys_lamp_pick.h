@@ -214,12 +214,16 @@ struct TouchedRooms {
 
 // (LampMarkFilter) a light entry's update as an edit: -1 none, 0 a value, 1 a move, 2 into another room. A move is moveMin or
 // more; physically a shorter step is one only while an edit of the lamp goes on (a slow drag's steps), never an animated
-// lamp's wobble (which would keep the fast shadows and rewrite the directional maps at every update)
-inline int EditKind(bool otherRoom, float d2, float moveMin, bool valueChanged, bool physical, bool editing) {
+// lamp's wobble (which would keep the fast shadows and rewrite the directional maps at every update). Physically, an update
+// that changed the light's signature in place (sigChanged: a rotation, or its entry's flags as a drag starts or the lamp is
+// put down) is a value: the GPU draws its law as it is now, where the game's path solved the lamp's rooms, then the rooms of
+// other stories taking it (09:23 log of 03/11: its own rooms re-solved 45 times in a drag, other objects and stairs flickering)
+inline int EditKind(bool otherRoom, float d2, float moveMin, bool valueChanged, bool physical, bool editing, bool sigChanged = false) {
     if (otherRoom) return 2;
     if (d2 > moveMin * moveMin) return 1;
     if (valueChanged) return 0;
-    return physical && editing && d2 > 1e-6f ? 1 : -1;
+    if (physical && editing && d2 > 1e-6f) return 1;
+    return physical && sigChanged && d2 <= 1e-6f ? 0 : -1;
 }
 // (LampMarkFilter, an occluder mark) a light new to the lot: no update of it seen yet, and absent from the lot's registry
 // snapshot (OutdoorDelta::LotLamps, read every 250 ms) while that snapshot is of its lot. A lamp already in it is an old one

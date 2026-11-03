@@ -1339,7 +1339,11 @@ void PhysPickChecks() {
         ok = ok && EditKind(false, 0.03f * 0.03f, m, true, true, false) == 0;   // (a wobble with a value change: the value)
         ok = ok && EditKind(false, 0.03f * 0.03f, m, false, false, true) == -1; // (the replica model: never)
         ok = ok && EditKind(false, std::nanf(""), m, false, true, true) == -1;
-        Check(ok, "physical edits: a step under 10 cm is a move only while a drag goes on");
+        // (a signature change in place, as a drag starts or the lamp is put down: a value physically, the game's path otherwise)
+        ok = ok && EditKind(false, 0.0f, m, false, true, true, true) == 0 && EditKind(false, 0.0f, m, false, true, false, true) == 0;
+        ok = ok && EditKind(false, 0.0f, m, false, false, true, true) == -1 && EditKind(false, 0.03f * 0.03f, m, false, true, false, true) == -1;
+        ok = ok && EditKind(false, std::nanf(""), m, false, true, true, true) == -1;
+        Check(ok, "physical edits: a step under 10 cm is a move only while a drag goes on; a change in place is a value");
     }
     // the occluder mark: a new lamp only with the registry snapshot's evidence; an occluder is the lamp's own object only by the
     // head and moving with it

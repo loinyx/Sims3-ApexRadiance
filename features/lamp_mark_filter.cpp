@@ -361,7 +361,7 @@ bool OwnObjectEditTaken(uintptr_t tl, float x, float z, bool hadPoint, const flo
                 if (!wasClose && nx * nx + nz * nz > kOwnObjectM * kOwnObjectM) continue;
                 const bool editing = was.editUntil && static_cast<int32_t>(tick - was.editUntil) < 0;
                 const bool valueChanged = std::memcmp(was.editable, editable, sizeof editable) != 0 || was.on != on;
-                if (PhysLampPick::EditKind(false, m2, kMoveMin, valueChanged, true, editing) < 0) continue;
+                if (PhysLampPick::EditKind(false, m2, kMoveMin, valueChanged, true, editing, true) < 0) continue; // (h differs: above)
             } else if (m2 > kMoveMin * kMoveMin)
                 continue;
             pend[np++] = Pending{key.light, was.on, m2 > 1e-6f};
@@ -568,7 +568,8 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
                 // (physical: a drag step under kMoveMin is a move too while the drag goes on, the GPU draws the lamp where it is; an
                 // animated lamp's wobble takes the game's path below)
                 const bool editing = was.editUntil && static_cast<int32_t>(GetTickCount() - was.editUntil) < 0;
-                kind = PhysLampPick::EditKind(was.room != room, dx * dx + dy * dy + dz * dz, kMoveMin, valueChanged, OutdoorDelta::RoomLampPhysical(), editing);
+                kind = PhysLampPick::EditKind(was.room != room, dx * dx + dy * dy + dz * dz, kMoveMin, valueChanged, OutdoorDelta::RoomLampPhysical(), editing,
+                                              was.sig != h);
                 known = true, wasOn = was.on;
                 playerEdit = std::memcmp(was.editable, editable, sizeof editable) != 0;
                 settle = was.on != on || was.editable[3] != editable[3]; // (physical: a switch or an intensity change)
