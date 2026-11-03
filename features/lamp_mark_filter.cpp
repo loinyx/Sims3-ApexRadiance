@@ -808,7 +808,9 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
         if (edit) was.editUntil = (tick + kEditHoldMs) | 1;
         else if (!same && was.editUntil && static_cast<int32_t>(tick - was.editUntil) < 0) {
             edit = true;
-            DragLite::NoteLampStep("lamp entry: a step of the same edit");
+            // (a step of a drag the GPU takes is no game move: it kept the drag on the Classic hold until the release)
+            DragLite::NoteLampStep("lamp entry: a step of the same edit", DragLite::StepKind::Move,
+                                   !(OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical() && LampMarkFilter::HandledLately(light, 1500)));
         }
         was.sig = h;
     }
