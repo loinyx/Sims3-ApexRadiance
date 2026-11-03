@@ -970,6 +970,7 @@ bool LampEditRecent() {
     const unsigned long edit = LampMarkFilter::EditLastTick();
     return LevelLightShare::LampDragging() || (edit && GetTickCount() - edit < kEditWindowMs);
 }
+bool LawOfLight(uintptr_t light, uint64_t lot, KeptLamp& kl, int* regRoom); // below
 Delta ComputeDelta(BYTE* room, const RoomRead& rr, Record& r, const char*& why, Plan& plan) {
     if (r.baseOnly) { // (no light's part to take out or to skip as drawn)
         why = kWhyBaseOnly;
@@ -1014,6 +1015,22 @@ Delta ComputeDelta(BYTE* room, const RoomRead& rr, Record& r, const char*& why, 
             allDrawn = allDrawn && now;
         }
         if (allDrawn) {
+            for (const Changed& c : changed) plan.lights.push_back(c.light);
+            c_gpuSkips.fetch_add(1, std::memory_order_relaxed);
+            return Delta::Ok;
+        }
+    }
+    // (physical indoor lamps) a room 0 drawn physically takes every lamp with a GPU law out of its base and draws it from its law,
+    // exit ground included (ExportRoom0): such lamps changing leave nothing to solve. The full solve below wrote the game's room-0
+    // maps over the GPU's at every indoor lamp edit (11:47 recording, 03/11: story 0 room 0 "solved in full (a lamp shining out of
+    // a room onto the ground changed)" at each drag; the stairs and objects reading those maps flickered)
+    if (r.phys && RtOutdoorLamps::PhysCoversRoom0(room)) {
+        bool allLaw = true;
+        for (const Changed& c : changed) {
+            KeptLamp kl;
+            allLaw = allLaw && (c.rec < 0 || !r.lamps[static_cast<size_t>(c.rec)].drawn) && LawOfLight(c.light, r.lot, kl, nullptr) && !kl.colourOnly;
+        }
+        if (allLaw) {
             for (const Changed& c : changed) plan.lights.push_back(c.light);
             c_gpuSkips.fetch_add(1, std::memory_order_relaxed);
             return Delta::Ok;
