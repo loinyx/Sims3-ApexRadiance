@@ -531,7 +531,7 @@ the wall family ([walls.md](walls.md)).
 
 - Status: `Objects: Active | light classes: 9/9 | lights boosted on objects: N | objects opened to lamps (stairs,
   railings...): N | in fenced areas: N`; `Street lamps on lots: ... outdoor objects: N` (draws).
-- Log: `[ObjectLightBridge] Installed`, `[RigTracker] Installed`, and the batched `Shaders at their first draw` lines.
+- Log: `[ObjectLightBridge] Installed`, `[RigTracker] Installed`, and the `[LotLightBridge] <kind>: shader <address> patched` lines (or `refused by D3D`, `does not have the expected pattern`).
 - F7: `LotLightBridge::DescribeDraw()` adds a `mod:` line per draw (shape, rig mode, per-pixel lamps and strengths, the
   object position, the lamps used of N in reach with position, 1/R², colour and distance, the game's rig PS c0..c13 and
   the VS vertex lights, the ground share and height gate; for a class-10 draw not replaced, the reason). F7 on two pieces

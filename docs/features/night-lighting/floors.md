@@ -244,7 +244,7 @@ Developer status *Street lamps on lots*: counters `floors: N` (`DrawFloor`) and 
 (`DrawFloorAtlas`), and `ground lamp shade on floors: N draws with their lot, M without it`. F7 on a floor shows the
 `mod:` line (the floor kind, the atlas weight and the ground lamp shade: the lot, its ground height, or why there is
 none) and PS size. Log kinds `Floor` and `Outdoor floor` in
-`[LotLightBridge] Shaders at their first draw`; in developer mode refused shaders are saved to
+`[LotLightBridge] <kind>: shader <address> patched` (or `refused by D3D`, `does not have the expected pattern`); in developer mode refused shaders are saved to
 `Apex Radiance\ShadersRecusados`.
 
 ## Rejected approaches

@@ -58,7 +58,7 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
    a class-10 draw not replaced, the reason (refused PS, option off, indoor rig, no ground atlas). F7 on piece A, then
    piece B, lists the registers that changed.
 6. Developer status: `Objects: Active | light classes: 9/9 | ...`; log `[ObjectLightBridge] Installed`, `[RigTracker]
-   Installed` and `Shaders at their first draw` lines. Refused shaders appear in `Apex Radiance\ShadersRecusados`; the
+   Installed` and `[LotLightBridge] <kind>: shader <address> patched` lines. Refused shaders appear in `Apex Radiance\ShadersRecusados`; the
    census false colour shows lamp-lit candidates no fix claimed in magenta.
 7. Indoors with the light-between-stories directional maps active: place a chair below a wall painting. **Expected:** the
    painting does not darken; check walls, floors and stairs nearby for directional-map artefacts.

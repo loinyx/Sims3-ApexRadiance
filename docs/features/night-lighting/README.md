@@ -498,8 +498,8 @@ only DXVK's.
 ### Diagnostics
 
 - `ApexRadiance_LOG.txt`: `[NightTerrainRelight] Installed (...)`, `[LotLightBridge] Active` (lot pass created) or
-  `Failed: ...`, and the batched line `[LotLightBridge] Shaders at their first draw: <kind>: ...` (some kinds still log
-  Portuguese words).
+  `Failed: ...`, and one line per shader at its first draw: `[LotLightBridge] <kind>: shader <address> patched`, `refused by D3D`
+  or `does not have the expected pattern`.
 - Developer mode: `ShadersRecusados\<fix>_PS_<hash>.bin` holds every shader a pattern patch refused (max 300 per session).
 - Ctrl+Shift+F7 over a pixel: `ApexRadiance_LightProbe.txt` lists the draws covering it; the `mod:` line
   (`LotLightBridge::DescribeDraw`) says whether the mod redrew it and with which class.
