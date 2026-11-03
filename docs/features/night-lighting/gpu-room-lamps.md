@@ -386,6 +386,12 @@ lamp's position, not on its colour or intensity.
   given is UNVERIFIED (`0x006A9DE0` / `0x006A9A50` not read in full); the dry run snapshots that map only.
 - Drawn only where Real-time outdoor lamps relights the story (the active lot, the class each story shows): a kept room of a
   story or class it does not relight stays the game's, and its lamps' edits take the room solves.
+- Basements (stories -4 .. -1) keep the game's solves: a basement lamp's edit, and an edit a basement room lists, take the
+  room solves. A room's maps are drawn over its story's copy, which Real-time outdoor lamps builds from room 0's kept solve
+  for stories 0 .. 7 only (its story-indexed state, the outdoor lamps' relight of room 0 and the terrain bake); covering a
+  basement needs those copies for negative stories, the basement stories in the occluders (`ExportLotProxy`), its lamps in
+  the registry snapshot (`RegisteredLights`) and the story 0 floor openings over it. No basement room with an id above 0 was
+  ever solved in the game tests' logs or probe dumps (only story -1's room 0, 03/11), so none of it could be checked.
 - In room 0, a lamp with a floor mask part where its law is dark stays in the base (its edits take the solves). A kept lamp's
   floor mask part is its share of the law's luminance with no threshold drop: exact for a switch or the law as kept, a lamp
   dimmed near the room's threshold keeps a part the copies would drop. A ground texel's exit light is the kept lamps' light
