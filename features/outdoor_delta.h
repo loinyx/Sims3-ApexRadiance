@@ -92,6 +92,10 @@ struct LotLamp {
 uint32_t LotLamps(std::vector<LotLamp>& out, std::vector<uintptr_t>* gone = nullptr);
 // (LampMarkFilter's occluder mark) whether the snapshot is of the lot `tracker` (known) and holds `light`
 bool InLotLamps(uintptr_t tracker, uintptr_t light, bool& known);
+// (LampMarkFilter's occluder mark, light tree thread) a lamp stood on furniture of its kept physical room at its solve (a
+// record whose sphere held its place, its centre below): its object's mark still solves the room, whose solve reads the
+// furniture's records again (a table dragged with it; gpu_room_lamps moves the record until then)
+bool StandsOnFurniture(uintptr_t tracker, int story, int room, uintptr_t light);
 // (any thread) an object left a story's light maps (EntryChain LightObjectRemove): the snapshot is read again after the next
 // room update, not up to 250 ms later (a deleted lamp's light may be freed)
 void NoteLightObjectRemoved();

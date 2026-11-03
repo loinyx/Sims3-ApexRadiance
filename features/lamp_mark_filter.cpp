@@ -334,10 +334,11 @@ std::atomic<long> g_occPhysMove{0}, g_occPhysNew{0};
 // UNVERIFIED: that a lamp object's point lies within kOwnNearM of its light's head (a lamp further off keeps its mark: a solve)
 constexpr float kOwnStepM = 0.05f, kOwnNearM = 0.5f;
 std::unordered_map<uintptr_t, std::array<float, 2>> g_occPoint; // (under g_mx) occluder entry -> its point (x, z) at its last mark
+thread_local bool t_onFurniture = false; // (OccDecideImpl) the occluder moved with a lamp standing on furniture: its mark solves the room
 bool OwnObjectEditTaken(uintptr_t tl, float x, float z, bool hadPoint, const float occWas[2]) {
     const bool physical = OutdoorDelta::RoomLampPhysical();
     const float occNow[2] = {x, z};
-    struct Pending { uintptr_t light; bool wasOn, moved; };
+    struct Pending { uintptr_t light; bool wasOn, moved; int room; };
     Pending pend[8];
     int np = 0;
     {
@@ -364,10 +365,15 @@ bool OwnObjectEditTaken(uintptr_t tl, float x, float z, bool hadPoint, const flo
                 if (PhysLampPick::EditKind(false, m2, kMoveMin, valueChanged, true, editing, true) < 0) continue; // (h differs: above)
             } else if (m2 > kMoveMin * kMoveMin)
                 continue;
-            pend[np++] = Pending{key.light, was.on, m2 > 1e-6f};
+            pend[np++] = Pending{key.light, was.on, m2 > 1e-6f, was.room};
         }
     }
     for (int i = 0; i < np; i++) { // (its lit bit is rewritten only by its own update: an edit of a lamp off is taken as a switch on)
+        // (a lamp on a table: its mark solves the room, which reads the table's records again where it was dragged with it)
+        if (physical && OutdoorDelta::StandsOnFurniture(TrackerOf(tl), StoryOfTl(tl), pend[i].room, pend[i].light)) {
+            t_onFurniture = true;
+            continue;
+        }
         if (physical ? OutdoorDelta::TakesLampEditPhys(tl, pend[i].light, pend[i].moved ? "move" : "value", false, true)
                      : OutdoorDelta::TakesLampEdit(tl, pend[i].light, pend[i].wasOn, !pend[i].wasOn, false, true)) {
             if (pend[i].moved) g_occPhysMove.fetch_add(1, std::memory_order_relaxed);
@@ -404,13 +410,34 @@ void __fastcall RemovalHook(uint8_t* level, void* edx, uint32_t idLo, uint32_t i
     reinterpret_cast<Fn>(EntryChain::Next(EntryChain::Site::LightObjectRemove, EntryChain::Layer::LampMarkFilter))(level, edx, idLo, idHi);
     OutdoorDelta::NoteLightObjectRemoved();
 }
+// An occluder's point is in its lot's space (the moving occluder at (20.00 24.10) under a lamp at (849.07 1233.74) in the world,
+// the recording of 03/11), the lamps' positions in the world's: taken to the world (the lot's rows, mgr+0xE0, a lot turning about
+// y only) before the own-object tests compare them. Until then they never matched: each occluder mark of a dragged lamp's object
+// solved its room (121 in that recording) and the solves' maps showed between the GPU's
+uintptr_t ManagerOf(const void* room) { // POD (SEH)
+    __try {
+        return *static_cast<const uintptr_t*>(room);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+bool OccToWorld(uintptr_t tl, float& x, float& z) {
+    const uintptr_t tracker = TrackerOf(tl);
+    const void* r0 = tracker ? LevelLightShare::Room0Of(tracker, StoryOfTl(tl)) : nullptr;
+    float xf[16];
+    if (!r0 || !RtOutdoorLamps::LotXform(ManagerOf(r0), xf)) return false;
+    const float lx = x - xf[12], lz = z - xf[14]; // (the rows' inverse: their transpose; y's terms are 0 for a lot turning about y)
+    x = lx * xf[0] + lz * xf[2], z = lx * xf[8] + lz * xf[10];
+    return std::isfinite(x) && std::isfinite(z);
+}
 // true = mark the room (the game's call)
 thread_local float t_occPt[3] = {}; // (OccDecide's journal) the occluder's point and its move since its last mark
 bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
+    t_onFurniture = false;
     if (OutdoorDelta::RoomLampCapture()) {
         float x = 0.0f, z = 0.0f, was[2] = {};
         bool had = false;
-        const bool read = OccluderPoint(entry, x, z);
+        const bool read = OccluderPoint(entry, x, z) && OccToWorld(tl, x, z);
         t_occPt[0] = x, t_occPt[1] = z, t_occPt[2] = 0.0f;
         if (read) {
             std::lock_guard<std::mutex> lk(g_mx);
@@ -434,7 +461,7 @@ bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
     const DWORD now = GetTickCount();
     if (now - last > kOwnObjectMs || !g_on.load(std::memory_order_relaxed)) return true;
     float x = 0.0f, z = 0.0f;
-    if (!OccluderPoint(entry, x, z)) return true;
+    if (t_onFurniture || !OccluderPoint(entry, x, z) || !OccToWorld(tl, x, z)) return true;
     bool own = false;
     {
         std::lock_guard<std::mutex> lk(g_mx);

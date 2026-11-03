@@ -4084,6 +4084,22 @@ bool InLotLamps(uintptr_t tracker, uintptr_t light, bool& known) {
     known = tracker && tracker == g_lotLampsTracker && g_lotLampsVer != 0;
     return known && std::any_of(g_lotLamps.begin(), g_lotLamps.end(), [&](const LotLamp& l) { return l.light == light; });
 }
+bool StandsOnFurniture(uintptr_t tracker, int story, int room, uintptr_t light) {
+    void* r = tracker && room > 0 ? LevelLightShare::RoomOf(tracker, story, room) : nullptr;
+    RoomRead rr;
+    if (!r || !ReadRoom(static_cast<const BYTE*>(r), rr)) return false;
+    std::shared_ptr<const KeptRoom> k;
+    {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        if (const auto it = g_kept.find(KeyOf(r, rr.cls)); it != g_kept.end()) k = it->second;
+    }
+    if (!k || !k->physical) return false;
+    const auto kl = std::find_if(k->lamps.begin(), k->lamps.end(), [&](const KeptLamp& l) { return l.light == light; }); // (where it stood at the solve)
+    return kl != k->lamps.end() && std::any_of(k->tests.rec.begin(), k->tests.rec.end(), [&](const RoomLightTests::Record& rc) {
+               const float dx = kl->pos[0] - rc.c.x, dz = kl->pos[2] - rc.c.z;
+               return dx * dx + dz * dz < rc.r2 && rc.c.y < kl->pos[1];
+           });
+}
 void NoteLightObjectRemoved() {
     if (g_capture.load(std::memory_order_relaxed) && g_physical.load(std::memory_order_relaxed)) g_lotLampsDirty.store(true, std::memory_order_relaxed);
 }
