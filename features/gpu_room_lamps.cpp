@@ -157,6 +157,14 @@ std::atomic<DWORD> g_physMoveAt{0};
 // (stage 4) the active lot's registered lights this round (OutdoorDelta::LotLamps) and where each is (light -> index)
 std::vector<OutdoorDelta::LotLamp> g_lot;
 std::unordered_map<uintptr_t, size_t> g_lotAt;
+// (per g_lot lamp, this round) its world law read once: every physical entry of every map asks each lot lamp whether its reach
+// meets the entry's box, which read the lamp again per entry (entries x lamps reads a frame, with nothing edited)
+struct LotLaw {
+    uint64_t lot = 0;
+    char state = 0; // 0 not read, 1 read, 2 no law
+    GpuLampLaw::Lamp w;
+};
+std::vector<LotLaw> g_lotLaw;
 std::vector<uintptr_t> g_lotGone; // (the lot's lamps that left its registry: a kept list holding one no longer draws it)
 // (stage 4) the physical relights' CPU cost since TakeRelightCost (maps, ms, the largest round's ms) and this round's
 int g_costMaps = 0;
@@ -371,11 +379,20 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                 mult = PhysLampPick::NormKFresh(L.story, L.home, L.homeNorm, e.story, e.id, e.norm, e.outdoorRoom);
                 reach = PhysLampPick::ReachFresh(L.homeOutdoor, e.outdoorRoom) ? 1 : 0;
             };
-            const auto draw = [&](uintptr_t light, float mult, char reach) {
+            // (at: its index in g_lot, whose world law is read once a round; none: read here)
+            const auto worldOf = [&](uintptr_t light, size_t at, GpuLampLaw::Lamp& w) {
+                if (at >= g_lotLaw.size()) return RtOutdoorLamps::WorldLaw(light, e.lot, false, w, type, reg);
+                LotLaw& c = g_lotLaw[at];
+                if (!c.state || c.lot != e.lot) c.lot = e.lot, c.state = RtOutdoorLamps::WorldLaw(light, e.lot, false, c.w, type, reg) ? 1 : 2;
+                if (c.state != 1) return false;
+                w = c.w;
+                return true;
+            };
+            const auto draw = [&](uintptr_t light, size_t at, float mult, char reach) {
                 GpuLampLaw::Lamp w;
                 RtLampModel::Lamp lotLaw;
                 // (the law with its reach radii: the room table's reach column and Params::reachOn decide where they apply)
-                if (!RtOutdoorLamps::WorldLaw(light, e.lot, false, w, type, reg) || !PhysLampPick::Meets(e.box, w.pos, PhysLampPick::Reach2(w, mult, e.thr)) ||
+                if (!worldOf(light, at, w) || !PhysLampPick::Meets(e.box, w.pos, PhysLampPick::Reach2(w, mult, e.thr)) ||
                     !RtOutdoorLamps::WorldLaw(light, e.lot, true, lotLaw.law, type, reg, e.xf))
                     return;
                 lotLaw.mult = mult;
@@ -387,16 +404,17 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                 if (std::find(g_lotGone.begin(), g_lotGone.end(), e.listed[l]) != g_lotGone.end()) continue; // (deleted: its light may be freed)
                 float mult = l < e.listedMult.size() ? e.listedMult[l] : 1.0f;
                 char reach = l < e.listedReach.size() ? e.listedReach[l] : 0;
-                if (const auto at = g_lotAt.find(e.listed[l]); at != g_lotAt.end() && l < e.listedHome.size() && g_lot[at->second].home != e.listedHome[l])
-                    fresh(g_lot[at->second], mult, reach);
-                draw(e.listed[l], mult, reach);
+                const auto at = g_lotAt.find(e.listed[l]);
+                if (at != g_lotAt.end() && l < e.listedHome.size() && g_lot[at->second].home != e.listedHome[l]) fresh(g_lot[at->second], mult, reach);
+                draw(e.listed[l], at != g_lotAt.end() ? at->second : SIZE_MAX, mult, reach);
             }
-            for (const OutdoorDelta::LotLamp& L : g_lot) {
+            for (size_t i = 0; i < g_lot.size(); i++) {
+                const OutdoorDelta::LotLamp& L = g_lot[i];
                 if (PhysLampPick::UseOf(L.light, e.listed, e.baked) != PhysLampPick::Use::Fresh) continue;
                 float mult = 1.0f;
                 char reach = 0;
                 fresh(L, mult, reach);
-                draw(L.light, mult, reach);
+                draw(L.light, i, mult, reach);
             }
             const size_t n = e.lamps.size();
             Mix(es, &n, sizeof n);
@@ -604,6 +622,7 @@ void BeginFrame() {
         OutdoorDelta::LotLamps(g_lot, &g_lotGone);
         for (size_t i = 0; i < g_lot.size(); i++) g_lotAt.emplace(g_lot[i].light, i);
     }
+    g_lotLaw.assign(g_lot.size(), LotLaw{});
     std::vector<PhysEdit> done;
     {
         const uint32_t frame = g_frame.load(std::memory_order_relaxed);

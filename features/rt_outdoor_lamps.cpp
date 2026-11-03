@@ -560,6 +560,13 @@ struct Ask {
 std::vector<std::unique_ptr<Slot>> g_slots;
 uintptr_t g_tracker = 0;
 uint64_t g_lotId = 0;
+// (physical indoor lamps, render thread) a lot lamp as each room-0 map's pick reads it, once a round (Frame clears it): every
+// story's maps read every lot lamp again, with nothing edited
+struct LampNow {
+    bool read = false, drawn = false, law = false;
+    GpuLampLaw::Lamp w;
+};
+std::unordered_map<uintptr_t, LampNow> g_lampNow;
 // A completed native solve with no remaining send is an explicit fallback, not queued GPU work.
 bool RestartSolveTerminal(const Ask& ask, int state, bool budgetOut) {
     return (state == 4 || state == 5) && (budgetOut || (ask.count >= kSolveAsks && ask.logged));
@@ -2210,6 +2217,7 @@ void Frame(IDirect3DDevice9* dev) {
     // edit the GPU took) or whose room-0 kept lamps hold a lamp of an edit not yet shown go first, and past the frame budget up
     // to kEditFrameCpuMs, so an edit shows in all its maps in the round of its frame
     GpuRoomLamps::BeginFrame();
+    g_lampNow.clear();
     std::unordered_map<const Slot*, uint64_t> roomsSigs;
     for (const auto& sp : g_slots)
         if (!sp->mgr && sp->built) roomsSigs[sp.get()] = GpuRoomLamps::Sig(dev, rns[sp->story].mgr, sp->cls, sp->m);
@@ -2352,8 +2360,15 @@ void Frame(IDirect3DDevice9* dev) {
             for (const OutdoorDelta::LotLamp& L : lot) {
                 // (a lamp this map's batches drew, out of room 0 since: out of the base too, drawn fresh here now)
                 if ((s.kept.count(L.light) && !s.drawn.count(L.light)) || std::find(s.pLights.begin(), s.pLights.end(), L.light) != s.pLights.end()) continue;
-                LampRead r;
-                if (!ReadLamp(L.light, r) || RtLampModel::Drawn(r.f, g_lotId)) continue;
+                auto [now, first] = g_lampNow.try_emplace(L.light);
+                if (first) {
+                    LampRead r;
+                    int type = 0, reg = -1;
+                    now->second.read = ReadLamp(L.light, r);
+                    now->second.drawn = now->second.read && RtLampModel::Drawn(r.f, g_lotId);
+                    now->second.law = now->second.read && WorldLaw(L.light, g_lotId, false, now->second.w, type, reg);
+                }
+                if (!now->second.read || now->second.drawn) continue;
                 // shortcut: a fresh exit lamp's light reaches the exit ground's alpha only on the texels room 0's solve marked (bit 4,
                 // set when it kept an exit lamp); its next solve marks them
                 cand.push_back(L.light);
@@ -2368,7 +2383,9 @@ void Frame(IDirect3DDevice9* dev) {
                 RtLampModel::Lamp lotLaw;
                 int type = 0, reg = -1;
                 // (the law with its reach radii: the row's reach column and Params::reachOn decide where they apply)
-                if (!WorldLaw(cand[l], g_lotId, false, w, type, reg) || !PhysLampPick::Meets(box, w.pos, PhysLampPick::Reach2(w, candRow[l][0], s.thr)) ||
+                const auto now = g_lampNow.find(cand[l]);
+                const bool law = now != g_lampNow.end() ? (w = now->second.w, now->second.law) : WorldLaw(cand[l], g_lotId, false, w, type, reg);
+                if (!law || !PhysLampPick::Meets(box, w.pos, PhysLampPick::Reach2(w, candRow[l][0], s.thr)) ||
                     !WorldLaw(cand[l], g_lotId, true, lotLaw.law, type, reg, &rns[s.story].xf.r[0][0]))
                     continue;
                 lotLaw.mult = candRow[l][0];
