@@ -862,9 +862,10 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
                                  g_autoSelfOn.load(), g_autoDuskOn.load(), LevelLightShare::QuietMarks()));
     }
     if (same) {
-        // off: every mark goes through (the values are still followed), but in the physical mode, where the game's solve it starts
-        // finishes mid-drag over the GPU's maps (16:25 recording of 03/11: 36 such marks of the dragged lamp's rooms)
-        if (PhysLampPick::MarkUnchanged(g_on.load(std::memory_order_relaxed), OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical())) {
+        // off: every mark goes through (the values are still followed), but not a lamp the physical mode's GPU took lately (its drag),
+        // whose solve finishes mid-drag over the GPU's maps (16:25 recording of 03/11: 36 such marks of the dragged lamp's rooms)
+        if (PhysLampPick::MarkUnchanged(g_on.load(std::memory_order_relaxed),
+                                        OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical() && LampMarkFilter::HandledLately(light, 1500))) {
             g_off.fetch_add(1, std::memory_order_relaxed);
             return true;
         }

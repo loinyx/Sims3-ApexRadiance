@@ -8493,7 +8493,9 @@ void BeforeRoomUpdate(BYTE* tl) {
         // the rooms a lamp's move left waiting (never lit by it): once the lamps are quiet, at the scheduler's own pace
         if (!g_editWaits.empty()) {
             const DWORD edit = g_lampEditAt.load(std::memory_order_relaxed);
-            const bool quiet = !edit || now - edit >= kAuditQuietMs;
+            // (a GPU-taken drag notes no lamp edit here: quiet once its tail window, AfterChangedWalk's 600 ms, is over too)
+            const DWORD gpu = g_gpuEditAt.load(std::memory_order_relaxed);
+            const bool quiet = (!edit || now - edit >= kAuditQuietMs) && (!gpu || now - gpu >= 600);
             std::vector<DepKey> go;
             std::erase_if(g_editWaits, [&](const EditWait& w) {
                 if (now - w.at > 10000) return true; // its lot is gone
@@ -8843,6 +8845,9 @@ void AfterChangedWalk(BYTE* tl) {
         ~TailRestore() { t_tailSend = prev; }
     } tailRestore{t_tailSend};
     if (gpuTail) t_tailSend = true;
+    // (physical) a GPU edit's tail sends no other room mid-drag: every kept room draws the moved lamp from its law, and these solves
+    // finished over the GPU's maps (16:25 recording of 03/11: 138 sends). They wait in g_editWaits for the edit to be quiet instead
+    const bool fanout = PhysLampPick::TailFanout(gpuTail, OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical());
     bool room0Changed = false; // its lamps really changed (LampChange below): this story's roofless rooms mask with them
     bool lampAddedOrRemoved = false; // a room's lamps were added or removed (LampChange 2): an edit for the edit hold
     const auto noteOf = [&](int id) -> const LampMarkNote* {
@@ -8955,7 +8960,8 @@ void AfterChangedWalk(BYTE* tl) {
         sameL.erase(std::unique(sameL.begin(), sameL.end()), sameL.end());
         std::erase_if(kept, [&](const std::pair<int, int>& p) { return in(now, p); });
         std::erase_if(later, [&](const std::pair<int, int>& p) { return in(now, p) || in(kept, p); });
-        if (!later.empty()) { // value changes: the first one goes now, the rest of the burst waits (FlushDepWaits)
+        // value changes: the first one goes now, the rest of the burst waits (FlushDepWaits); a physical GPU edit's tail parks them below
+        if (!later.empty() && fanout) {
             const DWORD tick = GetTickCount();
             if (g_depWait.size() > 8192) g_depWait.clear();
             if (g_depSentAt.size() > 8192) g_depSentAt.clear();
@@ -9017,11 +9023,20 @@ void AfterChangedWalk(BYTE* tl) {
         for (const auto& [S, r] : now)
             if ((S != L || sameStory(S, r)) && QueueRoom(tracker, S, r, false, tier, false)) g_indoorQueued.fetch_add(1, std::memory_order_relaxed);
     }
-    // (physical) a GPU edit's tail sends no other room: every kept room draws the moved lamp from its law, and these solves finished
-    // mid-drag over the GPU's maps (16:25 recording of 03/11: 138 sends). A lamp added or removed ("now" above) still goes
-    if (!PhysLampPick::TailFanout(gpuTail, OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical())) return;
     const DragLite::WhyScope fanoutWhy(DragLite::Why::Fanout);
     const DWORD waitAt = GetTickCount();
+    const auto park = [&](const DepKey& dk) { // (sent once when the lamps are quiet, below the scheduler's g_editWaits)
+        const auto w = std::find_if(g_editWaits.begin(), g_editWaits.end(), [&](const EditWait& e) { return e.key == dk; });
+        if (w != g_editWaits.end()) w->at = waitAt;
+        else if (g_editWaits.size() < 1024) g_editWaits.push_back(EditWait{dk, waitAt});
+        g_editWaited.fetch_add(1, std::memory_order_relaxed);
+    };
+    if (!fanout) { // (a physical GPU edit's tail: every room waits, "now" above still goes)
+        for (const auto* v : {&kept, &later})
+            for (const auto& p : *v)
+                if (p.first != L || sameStory(p.first, p.second)) park(DepKey{tracker, p.first, p.second});
+        return;
+    }
     for (const auto& p : kept) {
         if (p.first == L && !sameStory(p.first, p.second)) continue;
         // a moved lamp: an indoor room it never lit waits until the lamps are quiet (its light does not change while the
@@ -9030,10 +9045,7 @@ void AfterChangedWalk(BYTE* tl) {
         // (a roofed room taking this story's outdoor lamps through its doors: as an outdoor room, sent at once)
         const bool outdoorDep = p.second == 0 || (g_indoorReady && RooflessRoom(StoryManager(tracker, p.first), p.second)) || (p.first == L && sameStory(p.first, p.second));
         if (!outdoorDep && !std::binary_search(atOnce.begin(), atOnce.end(), p) && !LitByAny(dk, movedLights.data(), movedLights.size())) {
-            const auto w = std::find_if(g_editWaits.begin(), g_editWaits.end(), [&](const EditWait& e) { return e.key == dk; });
-            if (w != g_editWaits.end()) w->at = waitAt;
-            else if (g_editWaits.size() < 1024) g_editWaits.push_back(EditWait{dk, waitAt});
-            g_editWaited.fetch_add(1, std::memory_order_relaxed);
+            park(dk);
             continue;
         }
         if (QueueRoom(tracker, p.first, p.second, true, tier, std::binary_search(soonRooms.begin(), soonRooms.end(), p)))

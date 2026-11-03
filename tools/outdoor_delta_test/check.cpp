@@ -1686,10 +1686,11 @@ void BlockerTableChecks() {
         Check(PhysLampPick::CarryOf(stands(below), false) == 0 && PhysLampPick::CarryOf(stands(onTop), true) == 2 &&
                   PhysLampPick::CarryOf(stands(onTop), false) == 1 && PhysLampPick::CarryOf(stands(over), true) == 0,
               "carry: a lamp on the floor stands on no record; on its table the table is carried when it moved, else left in place");
-        // (MarkUnchanged, TailFanout) the physical mode drops an unchanged lamp's mark and a GPU edit's fan-out; Classic keeps both
+        // (MarkUnchanged, TailFanout) the physical mode drops the unchanged mark of a lamp its GPU took lately and parks a GPU
+        // edit's fan-out until quiet; Classic, other lamps and other walks keep both
         Check(PhysLampPick::MarkUnchanged(false, false) && !PhysLampPick::MarkUnchanged(false, true) && !PhysLampPick::MarkUnchanged(true, false) &&
                   PhysLampPick::TailFanout(true, false) && PhysLampPick::TailFanout(false, true) && !PhysLampPick::TailFanout(true, true),
-              "drag flicker: physical drops an unchanged lamp's mark and a GPU edit's fan-out; Classic and other walks keep them");
+              "drag flicker: physical drops a dragged lamp's unchanged mark and parks a GPU edit's fan-out; Classic and other walks keep them");
         // (FillOf) only the lamp on the table's top keeps the furniture fill under furniture; a chandelier over it none. A carried
         // table keeps it for its lamp where both are drawn now, not where they were
         RtLampGpu::BlockerTable carried = live;

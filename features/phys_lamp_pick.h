@@ -263,9 +263,9 @@ inline bool ShapeMoved(const OccMove* m, int n, uintptr_t shape, uint32_t now, u
 inline int CarryOf(bool standsOn, bool shapeMoved) { return !standsOn ? 0 : shapeMoved ? 2 : 1; }
 // Physical capture mode, while a drag goes on (16:25 recording of 03/11: the game's solves finished mid-drag wrote over the GPU's
 // maps, 1199 times). MarkUnchanged: the game's mark of a lamp whose signature did not change goes through only while the filter is
-// off and outside the physical mode (same values, same gather). TailFanout: the walk's sends of other rooms for a GPU edit's tail,
-// never in the physical mode (every kept room draws the lot's lamps from their laws by reach)
-inline bool MarkUnchanged(bool filterOn, bool physical) { return !filterOn && !physical; }
+// off, unless the physical mode's GPU took that lamp lately (physDrag; same values, same gather). TailFanout: the walk's sends of
+// other rooms for a GPU edit's tail go at once only outside the physical mode; in it they wait for the edit to be quiet
+inline bool MarkUnchanged(bool filterOn, bool physDrag) { return !filterOn && !physDrag; }
 inline bool TailFanout(bool gpuTail, bool physical) { return !(gpuTail && physical); }
 // (WritePhysCarry) the samples whose 3D test may differ between two solves of a room (`was`, `now`), from the records one holds
 // and the other does not hold alike (moved, come or gone: a table dragged with its lamp). The last write was traced over `was`'s
