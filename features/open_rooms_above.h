@@ -23,8 +23,13 @@ constexpr int kMaxId = 4096; // room ids at or above it are never open (the per-
 //    story B or lead into another room open by the floor rule: its walls go up through story B. A single-storey room
 //    under its roof has no walls on B along its eaves, and the lighting side knows no roof: such a room stays closed, or
 //    its lamps would light the walls of story B beside it above the roof line.
+// ownWalls (the physical model's open tops): a room open by the floor rule is also open when story B has a wall of its own
+// on its outline, one with no floor placed beyond it on B (a gable or the upper half of a wall going up through B). A
+// double-height room under a sloped roof has those only along its gables (02/11, lot C49C: story 2's rooms 5, 6 and 7 under
+// story 3, 15 / 3 / 12 such walls of outlines 48 / 28 / 46); a single-storey wing has walls of B only where a floored room
+// of B stands beside it (story 1's room 8: none of its own, 5 beside floored rooms): it stays closed.
 template <class RoomAt, class Placed, class WallZ, class WallX>
-void Classify(int w, int h, RoomAt roomAt, Placed placed, WallZ wallZ, WallX wallX, std::vector<int>& open) {
+void Classify(int w, int h, RoomAt roomAt, Placed placed, WallZ wallZ, WallX wallX, std::vector<int>& open, bool ownWalls = false) {
     open.clear();
     if (w <= 0 || h <= 0) return;
     const auto room = [&](int x, int z, int q) {
@@ -38,7 +43,7 @@ void Classify(int w, int h, RoomAt roomAt, Placed placed, WallZ wallZ, WallX wal
             for (int q = 0; q < 4; q++)
                 if (const int r = room(x, z, q); r > top) top = r;
     if (!top) return;
-    std::vector<int> quads(static_cast<size_t>(top) + 1, 0), bare(quads), edges(quads), walled(quads);
+    std::vector<int> quads(static_cast<size_t>(top) + 1, 0), bare(quads), edges(quads), walled(quads), own(quads);
     for (int z = 0; z < h; z++)
         for (int x = 0; x < w; x++)
             for (int q = 0; q < 4; q++)
@@ -47,21 +52,27 @@ void Classify(int w, int h, RoomAt roomAt, Placed placed, WallZ wallZ, WallX wal
                     if (!placed(x, z, q)) bare[static_cast<size_t>(r)]++;
                 }
     const auto floorOpen = [&](int r) { return r > 0 && bare[static_cast<size_t>(r)] * 2 >= quads[static_cast<size_t>(r)]; };
-    const auto edge = [&](int a, int b, bool wall) { // the two quadrants facing each other across one tile edge
+    // the two quadrants facing each other across one tile edge (aFloor / bFloor: a floor placed on B over a's / b's quadrant)
+    const auto edge = [&](int a, int b, bool wall, bool aFloor, bool bFloor) {
         if (a == b) return;
         for (const int side : {a, b}) {
             if (!floorOpen(side)) continue;
             const int other = side == a ? b : a;
             edges[static_cast<size_t>(side)]++;
             if (wall || floorOpen(other)) walled[static_cast<size_t>(side)]++;
+            if (wall && !(side == a ? bFloor : aFloor)) own[static_cast<size_t>(side)]++;
         }
     };
+    // (outside the grid: no floor)
+    const auto floorAt = [&](int x, int z, int q) { return x >= 0 && z >= 0 && x < w && z < h && placed(x, z, q); };
     for (int Z = 0; Z <= h; Z++)
-        for (int x = 0; x < w; x++) edge(room(x, Z - 1, 2), room(x, Z, 0), wallZ(x, Z));
+        for (int x = 0; x < w; x++) edge(room(x, Z - 1, 2), room(x, Z, 0), wallZ(x, Z), floorAt(x, Z - 1, 2), floorAt(x, Z, 0));
     for (int z = 0; z < h; z++)
-        for (int X = 0; X <= w; X++) edge(room(X - 1, z, 1), room(X, z, 3), wallX(X, z));
-    for (int r = 1; r <= top; r++)
-        if (floorOpen(r) && edges[static_cast<size_t>(r)] > 0 && walled[static_cast<size_t>(r)] * 4 >= edges[static_cast<size_t>(r)] * 3) open.push_back(r);
+        for (int X = 0; X <= w; X++) edge(room(X - 1, z, 1), room(X, z, 3), wallX(X, z), floorAt(X - 1, z, 1), floorAt(X, z, 3));
+    for (int r = 1; r <= top; r++) {
+        const size_t i = static_cast<size_t>(r);
+        if (floorOpen(r) && edges[i] > 0 && (walled[i] * 4 >= edges[i] * 3 || (ownWalls && own[i] > 0))) open.push_back(r);
+    }
 }
 
 } // namespace OpenAbove

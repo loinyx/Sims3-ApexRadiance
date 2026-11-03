@@ -1074,6 +1074,37 @@ void ProxyOpenTopsChecks() {
     RtLampProxy::Build(lot, noIds, true);
     Check(noIds.openTops == 0 && noIds.roofTris == before.roofTris && before.openTops == 0 && before.roofTris == after.roofTris + quads,
           "physical proxy: the outdoor lamps' build (ceilingsOpen off) and a story with no room ids keep every ceiling");
+    // the walls stories 2 and 3 really have (the probe's grids of 02/11 21:02, runs of tile edges: x, Z, length along x;
+    // X, z, length along z): story 2's rooms 5, 6 and 7 stand under a sloped roof with story 3's walls on part of their
+    // outlines only, and story 1's room 8 is a single-storey wing beside story 2's floored rooms
+    {
+        struct Run { int a, b, n; };
+        const auto walls = [](std::vector<Run> z, std::vector<Run> x) {
+            std::vector<uint8_t> wz(41 * 30, 0), wx(40 * 31, 0);
+            for (const Run& r : z)
+                for (int i = 0; i < r.n; i++) wz[r.b * 30 + r.a + i] = 1;
+            for (const Run& r : x)
+                for (int i = 0; i < r.n; i++) wx[(r.b + i) * 31 + r.a] = 1;
+            return std::make_pair(wz, wx);
+        };
+        const auto w3 = walls({{10, 10, 8}, {17, 11, 1}, {10, 21, 8}, {11, 33, 4}}, {{15, 21, 12}, {17, 10, 1}, {18, 10, 11}});
+        const auto w2 = walls({{10, 10, 8}, {18, 11, 1}, {19, 12, 1}, {16, 16, 2}, {7, 19, 3}, {10, 21, 8}, {15, 30, 3}, {11, 33, 4}},
+                              {{7, 16, 3}, {10, 10, 11}, {11, 21, 12}, {15, 21, 12}, {16, 10, 6}, {18, 10, 1}, {18, 16, 5}, {19, 11, 1}, {20, 12, 2}});
+        const StoryCells s1 = ReadStory(kLotC49C[0]);
+        const auto over = [&](const StoryCells& lo, const StoryCells& up, const std::pair<std::vector<uint8_t>, std::vector<uint8_t>>& w, bool own) {
+            std::vector<int> o;
+            OpenAbove::Classify(
+                30, 40, [&](int x, int z, int) { return lo.room[z * 30 + x]; },
+                [&](int x, int z, int) { const char f = up.floor[z * 30 + x]; return f == '#' || f == 'F' || f == '*'; },
+                [&](int x, int Z) { return w.first[Z * 30 + x] != 0; }, [&](int X, int z) { return w.second[z * 31 + X] != 0; }, o, own);
+            return o;
+        };
+        const auto has = [](const std::vector<int>& v, int r) { return std::binary_search(v.begin(), v.end(), r); };
+        const std::vector<int> wallsOnly = over(s2, s3, w3, false), own3 = over(s2, s3, w3, true), own2 = over(s1, s2, w2, true);
+        Check(!has(wallsOnly, 5) && !has(wallsOnly, 7) && has(own3, 5) && has(own3, 6) && has(own3, 7) && !has(own3, 12) && !has(own2, 8),
+              "open to above with its own walls: story 2's rooms 5, 6, 7 under a sloped roof open (closed by the 3/4 walls rule with story 3's real walls); "
+              "story 1's room 8, a wing beside floored rooms, and room 12 under a floor stay closed");
+    }
     // story 2's removed floor (the '-' hole, 40 quadrants) over story 1's roofed room 2: its ceiling opens under the hole only,
     // with or without room ids
     {

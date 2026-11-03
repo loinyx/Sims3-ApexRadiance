@@ -343,9 +343,10 @@ inline void CeilingsUnderAbove(const Story& s, const Story* above, std::vector<f
 // A roofed room of story s open to the story above (OpenAbove::Classify, the rule room 0 takes the lamps below by: no floor
 // placed over half of it, its walls going up through that story) is one space two stories tall: its roofed quadrants with no
 // floor placed over them lose their ceiling at floor + 3 m (02/11, lot C49C: story 2's rooms 5, 6 and 7 under story 3 cut
-// their lamps' light at the story line). Room ids or placed floors not read: nothing opens. A roofed quadrant under a removed
-// floor of the story above (the game's opening between stories, ReadOpenings) loses its ceiling too (02/11, lot C49C: story
-// 1's ceiling at 3.99 m closed story 2's 40-quadrant floor hole, so a lamp above it lit story 1 only through a small spot).
+// their lamps' light at the story line), here with ownWalls: also a room under a sloped roof with a wall of its own on B. Room
+// ids or placed floors not read: nothing opens. A roofed quadrant under a removed floor of the story above (the game's opening
+// between stories, ReadOpenings) loses its ceiling too (02/11, lot C49C: story 1's ceiling at 3.99 m closed story 2's
+// 40-quadrant floor hole, so a lamp above it lit story 1 only through a small spot).
 // Returns the quadrants opened.
 inline int OpenUnderRemoved(Story& s, const Story& above) {
     int opened = 0;
@@ -373,7 +374,7 @@ inline int OpenTops(Story& s, const Story& above) {
     std::vector<int> open;
     OpenAbove::Classify(
         w, h, roomAt, [&](int x, int z, int q) { return PlacedQ(above, x, z, q); }, [&](int x, int Z) { return wz[static_cast<size_t>(Z) * w + x] != 0; },
-        [&](int X, int z) { return wx[static_cast<size_t>(z) * (w + 1) + X] != 0; }, open);
+        [&](int X, int z) { return wx[static_cast<size_t>(z) * (w + 1) + X] != 0; }, open, true);
     int opened = 0;
     for (int z = 0; z < h && !open.empty(); z++)
         for (int x = 0; x < w; x++)
