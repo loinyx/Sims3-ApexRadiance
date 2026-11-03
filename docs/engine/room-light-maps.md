@@ -373,6 +373,14 @@ solve).
   when the stair wall masks matched their story.
 - **Resolutions.** The directional maps are 64 x 64 at 1 texel per metre, sampled 0.5 m above the floor; the floor
   light map is 4 texels per metre.
+- **Floor maps at diagonal walls.** A class-2 floor map lays its tiles out 4 x 4 texels each from column 0, a power of
+  two wide (`FloorWallMaskFor`: width = pow2(4 x grid width), the map that wide or twice it). The half tiles a diagonal
+  wall cuts are not laid out by tile: their texels follow in the split tiles' atlas, from that power of two on, in short
+  strips rotated with the diagonal (03/11 14:36 scene, story 1 room 8: main texels at columns 68-95, its half tiles' at
+  128-240 in rows 1-10; steps of 0.24-0.25 m along a strip, 0.36 m or several metres across a strip's end). Each texel
+  keeps the solve's own sample point, so a map neighbour there is not always a world neighbour: a 4 x 4 read (Apex's
+  smooth light maps) mixes other half tiles' light; the game reads them with its bilinear filter. The code that packs
+  the strips was not traced (UNVERIFIED: the strip length and order; read from the solve's samples only).
 - **Ambients.** `+0x110` is the ambient the floor and wall shaders draw (`c4`), `+0x120` the copy objects use, and
   `+0x650` the ambient sampler's copy. Rooms without a lamp of their own can hold exactly the same ambient.
 

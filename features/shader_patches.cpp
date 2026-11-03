@@ -3576,6 +3576,16 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb, 
                                  Op(kRcp, 2), Dst(kTemp, A, 0x1), Src(kTemp, A, X),
                                  Op(kMul, 3), Dst(kTemp, Acc), Src(kTemp, Acc), Src(kTemp, A, X),
                                  Op(kCmp, 4), Dst(kTemp, r.L), Neg(Src(kTemp, A, W)), Src(kTemp, Acc), Src(kTemp, r.L)}); // the own side's read
+        // the split tiles' atlas (u >= cM.y: a diagonal wall's half tiles in short rotated strips, 03/11): the 4 x 4 taps reach other
+        // half tiles' strips (light far from the pixel, the diamonds along a diagonal wall); there the game's bilinear read
+        if (wallMask)
+            body.insert(body.end(), {
+            Op(kMul, 3), Dst(kTemp, Fr, 0x1), Src(r.uvType, r.uvNum, X), Src(kConst, cS, X),
+            Op(kAdd, 3), Dst(kTemp, Fr, 0x1), Src(kTemp, Fr, X), Neg(Src(kConst, cM, Y)),
+            Op(kCmp, 4), Dst(kTemp, Fr, 0x1), Src(kTemp, Fr, X), Src(kConst, cG, Z), Src(kConst, cG, W),
+            Op(kTexld, 3), Dst(kTemp, R), Src(r.uvType, r.uvNum), Src(kSampler, r.S),
+            Op(kAdd, 3), Dst(kTemp, R), Src(kTemp, R), Neg(Src(kTemp, r.L)),
+            Op(kMad, 4), Dst(kTemp, r.L), Src(kTemp, Fr, X), Src(kTemp, R), Src(kTemp, r.L)});
     }
     // (development builds, arch_ambient) the neighbours' ambient near the room's arches, right after the read (ps_3_0 only;
     // a copy that cannot hold it is made without it)

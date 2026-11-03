@@ -359,9 +359,21 @@ inline float SubTexelFootprint(const float* s, const float* const nb[4], float f
 // (sharper floors) A floor texel's 4 sub-texel positions (out[q]: x step q & 1, y step q >> 1, a quarter texel each way) and its
 // footprint (SubTexelFootprint), over the neighbours at(x, y) gives (its sample; null: none). `at` holds one room's texels only, so
 // a texel of the room past a wall, a diagonal wall's other half tile included, is never a neighbour
+// The split tiles' atlas (a diagonal wall's half tiles, u past the tile columns) packs each half tile's texels in short rotated
+// strips: a map neighbour across a strip's end lies on the plane but 1.4-1.5 steps away, another half tile's (03/11 14:36 scene,
+// story 1 room 8: steps 0.24-0.25 m, 0.36 m across). A neighbour farther than 1.25 times the nearest on the plane is none
 template <class At>
 inline float SubTexels(const float* s, int x, int y, At&& at, float out[4][3]) {
-    const float* const nb[4] = {at(x + 1, y), at(x - 1, y), at(x, y + 1), at(x, y - 1)};
+    const float* nb[4] = {at(x + 1, y), at(x - 1, y), at(x, y + 1), at(x, y - 1)};
+    float d2[4], nearest = 1e30f;
+    for (int i = 0; i < 4; i++) {
+        d2[i] = 1e30f;
+        if (!SamePlane(s, nb[i])) continue;
+        const float d[3] = {nb[i][0] - s[0], nb[i][1] - s[1], nb[i][2] - s[2]};
+        nearest = std::min(nearest, d2[i] = d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    }
+    for (int i = 0; i < 4; i++)
+        if (d2[i] > 1.5625f * nearest) nb[i] = nullptr; // (1.25 squared)
     for (int q = 0; q < 4; q++) SubTexelPos(s, nb, (q & 1) ? 0.25f : -0.25f, (q >> 1) ? 0.25f : -0.25f, out[q]);
     return SubTexelFootprint(s, nb, 0.25f);
 }

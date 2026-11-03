@@ -6662,15 +6662,20 @@ IDirect3DTexture9* WallMaskTexture(IDirect3DDevice9* dev, DWORD basisSampler) {
 }
 // (Smooth light maps' floor read) the story's wall mask for the floor map `map` of size (w, h), and the read's constant: (1 /
 // texels per tile, the first texel column of the split tiles, 1 = on, 1 / 64); nullptr when its story or layout is not known
+bool MapSize(IDirect3DBaseTexture9* t, float out[4]); // below
 IDirect3DTexture9* FloorWallMaskTexture(IDirect3DDevice9* dev, IDirect3DBaseTexture9* map, const float size[4], float k[4]) {
     if (!DevSwitches::BasisWallFilter() || !map) return nullptr;
     const uintptr_t key = reinterpret_cast<uintptr_t>(RtOutdoorLamps::GameMapOf(map)); // (a relit copy: its game map's story)
+    // (a sharper floor copy is read at its own size: the layout is the game map's, its texel units scaled by the ratio)
+    float game[4];
+    const float* g = MapSize(map, game) ? game : size;
+    const float s = g[0] > 0.0f ? size[0] / g[0] : 1.0f;
     float perTile = 0.0f, split = 0.0f;
     IDirect3DTexture9* tex = WallMaskTextureFor(dev, key, [&](uint32_t known, uint32_t& gen, uint8_t* px) {
-        return LevelLightShare::FloorWallMaskFor(key, static_cast<int>(size[0]), static_cast<int>(size[1]), known, gen, px, perTile, split);
+        return LevelLightShare::FloorWallMaskFor(key, static_cast<int>(g[0]), static_cast<int>(g[1]), known, gen, px, perTile, split);
     });
     if (!tex) return nullptr;
-    k[0] = 1.0f / perTile, k[1] = split, k[2] = 1.0f, k[3] = 1.0f / 64.0f;
+    k[0] = 1.0f / (perTile * s), k[1] = split * s, k[2] = 1.0f, k[3] = 1.0f / 64.0f;
     return tex;
 }
 // Binds the mask at `sampler` (point filter, clamp, linear read: no sRGB decode) for one draw and puts the stage back after it

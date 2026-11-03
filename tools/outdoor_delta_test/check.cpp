@@ -1467,6 +1467,18 @@ void PhysPickChecks() {
         Check(ok, "sharper floors: room 0's sub-texels by a diagonal wall take its own texels only (no footprint there), and stay on its side");
     }
     {
+        // the split tiles' atlas: a half tile's strip (0.25 m steps along x) ends at x = 2; its map neighbour x = 3 starts another half
+        // tile's strip 0.36 m on, same plane (14:36 scene): not a neighbour, so the sub-texels of x = 2 take the step from x = 1
+        std::array<float, 8> t[4];
+        for (int x = 0; x < 3; x++) t[x] = {x * 0.25f, 0, 0, 0, 0, 1, 0, 0};
+        t[3] = {0.5f + 0.36f, 0, 0, 0, 0, 1, 0, 0};
+        const auto at = [&](int x, int y) -> const float* { return y == 0 && x >= 0 && x < 4 ? t[x].data() : nullptr; };
+        float sub[4][3];
+        const float fp = PhysLampPick::SubTexels(t[2].data(), 2, 0, at, sub);
+        Check(fp == 0.0f && std::fabs(sub[1][0] - (0.5f + 0.0625f)) < 1e-5f && std::fabs(sub[0][0] - (0.5f - 0.0625f)) < 1e-5f,
+              "sharper floors: a split-atlas strip's end takes no step toward the next strip's texel (1.4 steps away), only its own strip's");
+    }
+    {
         const auto at = [](uint32_t x, uint32_t y) { return y << 16 | x; };
         const std::vector<uint32_t> a = {at(0, 0), at(1, 0), at(1, 0)}, b = {at(2, 0), at(0, 1)}, c = {at(1, 0)}, past = {at(9, 9), at(0, 1)}, far = {at(9, 9)};
         Check(PhysLampPick::WritesDisjoint(4, 4, {&a, &b}) && !PhysLampPick::WritesDisjoint(4, 4, {&a, &b, &c}) &&

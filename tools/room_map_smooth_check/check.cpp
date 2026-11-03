@@ -292,7 +292,8 @@ void CheckPatch(const std::vector<DWORD>& code, Gpu& gpu, PatchStats& st, const 
         if (ShaderPatches::PatchRoomMapSmooth(w, wp, false, true)) {
             st.walls++;
             const std::string wd = Disasm(w);
-            Check(!wd.empty() && CountOf(wd, "texld") == CountOf(after, "texld") + 1, "the walls copy disassembles, with one texld more than the copy");
+            Check(!wd.empty() && CountOf(wd, "texld") == CountOf(after, "texld") + 2,
+                  "the walls copy disassembles, with two texld more than the copy (the wall mask, the split atlas's bilinear read)");
             Check(wp.maskSampler >= 0 && wp.maskConst >= 0 && wp.sizeConst == p.sizeConst && wp.bandConst == p.bandConst, "the walls copy's sampler and constants");
             if (gpu.dev && gpu.CapsAllow(wp)) {
                 const bool made = gpu.AcceptsPs(w);
@@ -585,6 +586,20 @@ struct TileWalls {
     bool xm = false, xp = false, zm = false, zp = false;
 };
 void RefWalls(const std::vector<DWORD>& map, int W, int H, float cx, float cy, const std::vector<TileWalls>& walls, int tiles, int n, float split, float out[4]) {
+    if (cx >= split) { // (the split tiles' atlas: the game's bilinear read)
+        const float bx = cx - 0.5f, by = cy - 0.5f;
+        const int x0 = static_cast<int>(std::floor(bx)), y0 = static_cast<int>(std::floor(by));
+        const float gx = bx - static_cast<float>(x0), gy = by - static_cast<float>(y0);
+        for (int c = 0; c < 4; c++) out[c] = 0.0f;
+        for (int j = 0; j < 2; j++)
+            for (int i = 0; i < 2; i++) {
+                const DWORD v = map[static_cast<size_t>(std::clamp(y0 + j, 0, H - 1)) * W + std::clamp(x0 + i, 0, W - 1)];
+                const float wt = (i ? gx : 1.0f - gx) * (j ? gy : 1.0f - gy);
+                out[0] += wt * static_cast<float>((v >> 16) & 0xFF), out[1] += wt * static_cast<float>((v >> 8) & 0xFF);
+                out[2] += wt * static_cast<float>(v & 0xFF), out[3] += wt * static_cast<float>(v >> 24);
+            }
+        return;
+    }
     Reference(map, W, H, cx, cy, 0, H - 1, out); // (the read without walls: kept where the pixel's own texel is a bright one)
     const float px = cx - 0.5f, py = cy - 0.5f;
     const int ix = static_cast<int>(std::floor(px)), iy = static_cast<int>(std::floor(py));
