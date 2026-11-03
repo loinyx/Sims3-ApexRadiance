@@ -1568,7 +1568,7 @@ void BlockerTableChecks() {
         const float under = live.Occlude(h, lamp, V{1.0f, 0.0f, 0.1f}), old = live.Occlude(h, lamp, V{-1.0f, 0.0f, 0.1f}); // (where it stood: its shadow there)
         Check(under < 0.5f && old == 1.0f && under == RoomLightTests::occlude(moved, lamp, V{1.0f, 0.0f, 0.1f}, &unk),
               "blocker table: a table kept at its new place shades the floor under it and no longer under the old one");
-        // (CarryBlockers, StandsOnFurniture) a lamp on the table's top stands on it; a chandelier over it or a lamp beside it does not
+        // (the drag's dropped top, StandsOnFurniture) a lamp on the table's top stands on it; a chandelier over it or a lamp beside it does not
         const float onTop[3] = {1.0f, 1.34f, 0.0f}, over[3] = {1.0f, 2.5f, 0.0f}, beside[3] = {2.2f, 1.34f, 0.0f}, below[3] = {1.0f, 0.3f, 0.0f};
         const auto stands = [&](const float* p) { return RoomLightTests::StandsOn(moved.rec[0], p); };
         // (13:56 scene, record 23) a sofa: three upright or tilted rectangles in a sphere of r 1.69 m whose centre is 1.2 m off the lamp
@@ -1863,13 +1863,13 @@ int main() {
         Check(total.max <= 1, "delta vs full solve: no texel more than 1/255 off");
         Check(total.at1 <= total.n / 1000, "delta vs full solve: at most 1 texel in 1000 off by 1/255");
         Check(evaluated * 5 < full, "delta: far fewer evaluations than solving every light again");
+    }
     // (RtLampModel::ComposeBase) an upper wall of a double-height room loses the street lamps' light, never under 0; any other texel
     // keeps the solve's base
     Check(std::fabs(RtLampModel::ComposeBase(0.5f, 0.2f, true) - 0.3f) < 1e-6f && RtLampModel::ComposeBase(0.1f, 0.2f, true) == 0.0f &&
               RtLampModel::ComposeBase(0.5f, 0.2f, false) == 0.5f && RtLampModel::ComposeBase(-1e-6f, 0.2f, false) == -1e-6f &&
               RtLampModel::ComposeBase(std::nanf(""), 0.0f, true) == 0.0f,
           "room-0 base: street lamps off an upper wall only, clamped there; any other texel's base as the solve gave it");
-    }
     { // GPU room lamps, stage 1: a kept part recomposed (RtLampModel::KeptAdd)
         const float thr = 3.0f / 255.0f, law[3] = {0.04f, 0.03f, 0.02f}; // r + g + b = 0.09
         float o[3] = {};

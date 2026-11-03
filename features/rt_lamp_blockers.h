@@ -128,8 +128,8 @@ struct BlockerTable {
         return header;
     }
 
-    // (physical) record r of the room at `header` drawn moved by (dx, 0, dz): a piece of furniture dragged with the lamp standing on
-    // it, ahead of the solve that reads its records again (video of 03/11: the side table's shadow left behind, on the side away
+    // Record r of the room at `header` left out (its sphere's r^2 < 0: the broad phase of Occlude and Occlude3D never meets it)
+    void Drop(int header, int r) { rows[static_cast<size_t>(static_cast<int>(rows[static_cast<size_t>(header)].v[0]) + 2 * r)].v[3] = -1.0f; }
     // A lamp at `lamp` (world) stands on a top of record r of the room at `header` (RoomLightTests::StandsOn)
     bool StandsOn(int header, int r, const float lamp[3]) const {
         const Row& ix = rows[static_cast<size_t>(static_cast<int>(rows[static_cast<size_t>(header)].v[0]) + 2 * r + 1)];
@@ -146,17 +146,6 @@ struct BlockerTable {
             if (rows[static_cast<size_t>(firstRec + 2 * r)].v[3] >= 0.0f && StandsOn(header, r, lamp)) return kFurnitureFill;
         return 0.0f;
     }
-    // from the drag). Its sphere moves; its record's index row carries the offset (z, w; Append writes 0) for the blocker tests,
-    // which test the segment moved back. Once per record of a fresh copy (the centre is moved in place)
-    void Offset(int header, int r, float dx, float dz) {
-        const int firstRec = static_cast<int>(rows[static_cast<size_t>(header)].v[0]);
-        Row& c = rows[static_cast<size_t>(firstRec + 2 * r)];
-        Row& ix = rows[static_cast<size_t>(firstRec + 2 * r + 1)];
-        c.v[0] += dx, c.v[2] += dz;
-        ix.v[2] = dx, ix.v[3] = dz;
-    }
-    // Record r of the room at `header` left out (its sphere's r^2 < 0: the broad phase of Occlude and Occlude3D never meets it)
-    void Drop(int header, int r) { rows[static_cast<size_t>(static_cast<int>(rows[static_cast<size_t>(header)].v[0]) + 2 * r)].v[3] = -1.0f; }
     // The blocker at `row` back in the game's layout (only the fields its test reads; the rest 0)
     RoomLightTests::Blocker BlockerAt(int row) const {
         RoomLightTests::Blocker k{};
@@ -192,11 +181,10 @@ struct BlockerTable {
             V q = sub({s * dn.x, s * dn.y, s * dn.z}, ca);
             if (!(dot(q, q) - c.v[3] < 0.0f)) continue; // broad phase: infinite line vs sphere
             const int first = static_cast<int>(ix.v[0]), n = static_cast<int>(ix.v[1]);
-            const V ra = {a.x - ix.v[2], a.y, a.z - ix.v[3]}, rb = {b.x - ix.v[2], b.y, b.z - ix.v[3]};
             for (int i = 0; i < n; i++) {
                 const Blocker k = BlockerAt(first + i * kBlockerRows);
-                const float t = edgeR > 0.0f ? (k.vt == kQuadVt ? QuadEdgeT(k, ra, rb, edgeR) : DiscEdgeT(k, ra, rb, edgeR))
-                                             : (k.vt == kQuadVt ? quadT(k, ra, rb) : discT(k, ra, rb));
+                const float t = edgeR > 0.0f ? (k.vt == kQuadVt ? QuadEdgeT(k, a, b, edgeR) : DiscEdgeT(k, a, b, edgeR))
+                                             : (k.vt == kQuadVt ? quadT(k, a, b) : discT(k, a, b));
                 T = T * t;
                 if (K_STOP >= T) return T;
             }

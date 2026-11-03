@@ -58,10 +58,10 @@ struct Entry {
     std::vector<std::array<float, 3>> world;
     std::shared_ptr<const RtLampGpu::BlockerTable> blockers; // (its kept room's, shared by the room's maps)
     float blkHeader = -1.0f;
-    // (CarryBlockers) the table before the records' offsets, the copy drawn with them, and the offsets' hash (0: none)
+    // (a lamp away from its top) the table before its dropped records, the copy drawn without them, and their hash (0: none)
     std::shared_ptr<const RtLampGpu::BlockerTable> blkBase, blkOut;
     uint64_t offHash = 0;
-    std::vector<std::array<float, 3>> carried; // (record, dx, dz) since its solve: kept until the next one
+    std::vector<int> carried; // the dropped records since its solve: kept until the next one
     float xf[16] = {};
     // (physical, stage 4) the solve's lamps out of its base (their rows: mult x norm scale, reach, the room they were registered
     // in), the lights its base holds, the room's normalisation and roofless flag, its texels' world box; the drawn lamps' hash,
@@ -447,15 +447,8 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
             if (e.blockers != e.blkOut) e.blkBase = e.blockers, e.blkOut.reset(), e.carried.clear(), e.offHash = 0; // (a solve's table)
             if (e.blkBase && e.blkHeader >= 0.0f) {
                 const RtLampGpu::BlockerTable& t = *e.blkBase;
-                const auto& head = t.rows[static_cast<size_t>(e.blkHeader)];
-                const int firstRec = static_cast<int>(head.v[0]), recs = static_cast<int>(head.v[1]);
-                std::vector<std::array<float, 3>>& off = e.carried;
-                const auto onTop = [&](int i, const float p[3]) {
-                    const auto& ix = t.rows[static_cast<size_t>(firstRec + 2 * i + 1)];
-                    for (int k = 0; k < static_cast<int>(ix.v[1]); k++)
-                        if (RoomLightTests::StandsOn(t.BlockerAt(static_cast<int>(ix.v[0]) + k * RtLampGpu::BlockerTable::kBlockerRows), p)) return true;
-                    return false;
-                };
+                const int header = static_cast<int>(e.blkHeader), recs = static_cast<int>(t.rows[static_cast<size_t>(header)].v[1]);
+                std::vector<int>& off = e.carried;
                 for (const auto& rl : e.roomLamps) {
                     if (rl.colourOnly) continue;
                     GpuLampLaw::Lamp now;
@@ -470,16 +463,16 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                     s_moved++;
                     bool any = false;
                     for (int i = 0; i < recs; i++) {
-                        if (!onTop(i, rl.pos)) continue;
+                        if (!t.StandsOn(header, i, rl.pos)) continue;
                         any = true;
-                        if (std::find_if(off.begin(), off.end(), [&](const std::array<float, 3>& k) { return k[0] == static_cast<float>(i); }) == off.end())
-                            off.push_back({static_cast<float>(i), 0.0f, 0.0f});
+                        if (std::find(off.begin(), off.end(), i) == off.end()) off.push_back(i);
                     }
                     (any ? s_dropped : s_noTop)++;
                     if (const DWORD tick = GetTickCount(); tick - s_logAt >= 1000) {
                         s_logAt = tick;
-                        LOG_INFO(std::format("[CarryTable] story {} room {}: lamp away from its solve's place {} times: its top left out {}, on no top {}", e.story,
-                                             e.id, s_moved, s_dropped, s_noTop));
+                        if (LogAllowed())
+                            LOG_INFO(std::format("[DropTable] story {} room {}: lamp away from its solve's place {} times: its top left out {}, on no top {}", e.story,
+                                                 e.id, s_moved, s_dropped, s_noTop));
                     }
                 }
                 uint64_t oh = 0;
@@ -499,7 +492,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                     else
                         try {
                             auto moved = std::make_shared<RtLampGpu::BlockerTable>(t);
-                            for (const auto& o : off) moved->Drop(static_cast<int>(e.blkHeader), static_cast<int>(o[0]));
+                            for (const int o : off) moved->Drop(header, o);
                             e.blkOut = moved, e.blockers = std::move(moved);
                         } catch (...) {
                             e.offHash = 0, e.blockers = e.blkBase, e.blkOut.reset();

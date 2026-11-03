@@ -712,7 +712,6 @@ float Occlude3D(float3 a, float3 b, float h) {
     const float4 head = BlkRow(h);
     const float len2 = GDot(b - a, b - a);
     float T = 1.0, rec = 0.0, blk = 0.0, nb = -1.0, first = 0.0;
-    float3 sh = float3(0, 0, 0); // (the record's offset: a dragged table ahead of its solve, BlockerTable::Offset)
     bool done = !(head.y > 0.5);
     [loop] for (int o = 0; o < 255; o++) {
         if (done) break;
@@ -729,14 +728,13 @@ float Occlude3D(float3 a, float3 b, float h) {
                     first = ix.x;
                     nb = ix.y;
                     blk = 0;
-                    sh = float3(ix.z, 0, ix.w);
                 }
                 if (!(nb > 0.5)) {
                     rec += 1;
                     nb = -1;
                 }
             } else {
-                T = T * BlockerT(first + blk * 7.0, a - sh, b - sh);
+                T = T * BlockerT(first + blk * 7.0, a, b);
                 blk += 1;
                 if (0.01 >= T) done = true;
                 if (blk >= nb) {
@@ -771,14 +769,14 @@ float4 T3dPS(TexelIn i) : COLOR0 {
         r = float4(r.yzw, t); // (no indexable temporaries: after the 4 turns r = lamps 0 .. 3)
     }
     return r;
+}
+sampler2D sT3 : register(s5);
 // A tested texel's 3D tests of the batch's lamps 0 .. 3 (sT3) lifted by their furniture fills (the room table's columns' w):
 // RtLampGpu::FurnitureFill, taken before the lamp loop (inside it a live fill exceeds ps_3_0's temporary registers)
 float4 FillT3(float2 vpos, float slot) {
     const float4 f = float4(TableAt(0, slot).w, TableAt(1, slot).w, TableAt(2, slot).w, TableAt(3, slot).w);
     return f + (1.0 - f) * tex2Dlod(sT3, float4((vpos + 0.5) * gD.zw, 0, 0));
 }
-}
-sampler2D sT3 : register(s5);
 // AccPhysPS: one point per kept texel at its place in the sum's layout: p = (lot position, bits + 16 x its room slot; bit 8:
 // the texel's batch ran the game's 3D test), n = the lot normal, base.xyz = its world position (T3dPS). Each lamp of the batch (at most 4; the room table's column l:
 // x = mult, 0 not lit there; y = 1 the reach share applies; w = the furniture fill's floor) adds mult x fade(law x share), share =
