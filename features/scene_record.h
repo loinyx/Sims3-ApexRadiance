@@ -242,7 +242,7 @@ inline void Compare(const Room& r, const RtLampProxy::Mesh* mesh, const RtLampPr
                 vis = RtLampProxy::Visibility(*mesh, Ll, r.h.radius, Pl, visSamples, &stamp, &mark);
             }
             const float t3d = haveBlk && t.tested && vis > 0.0f
-                                  ? blk.Occlude(static_cast<int>(r.h.blkHeader), {L.law.pos[0], L.law.pos[1], L.law.pos[2]}, {t.p[0], t.p[1], t.p[2]})
+                                  ? RtLampGpu::FurnitureFill(blk.Occlude(static_cast<int>(r.h.blkHeader), {L.law.pos[0], L.law.pos[1], L.law.pos[2]}, {t.p[0], t.p[1], t.p[2]}))
                                   : 1.0f;
             float gpu[3], noT3d[3], noVis[3], noReach[3];
             GpuTerm(L, r.h, t, vis, t3d, true, gpu);

@@ -797,7 +797,7 @@ float4 AccPhys(TexelIn i, float2 vpos, int kSearch, int kEmit, int kWalk, bool a
         [branch] if (l < count && t.x != 0 && (law.r + law.g + law.b) > 0) {
             float sh = Shadow(lamp, atMask ? i.mask.xyz : P, N, kSearch, kEmit, kWalk, i.mask.w); // (gF.y: a room's points, RtLampProxy::IntoRoom)
             if (tested) {
-                const float prod = sh * t3;
+                const float prod = sh * (0.35 + 0.65 * t3); // (RtLampGpu::FurnitureFill: the room's bounce under furniture)
                 sh = 0.01 > prod ? 0.0 : prod;
             }
             float3 c = law * sh;

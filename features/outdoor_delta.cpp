@@ -4894,7 +4894,8 @@ void NotePhysBasisKept(uint64_t key, const KeptRoom* prev, const KeptRoom& k) {
     if (it == g_basisNow.end() || !it->second.phys) return;
     g_pbRedo.insert(key);
     BasisNow& bn = it->second;
-    if (!prev || bn.id != prev->basisId || prev->basisSet != k.basisSet || !SameBasisSamples(*prev, k)) return;
+    // (furniture moved between the solves, a table dropped with its lamp: the last write holds its old shadow, the new solve is truer)
+    if (!prev || bn.id != prev->basisId || prev->basisSet != k.basisSet || !SameBasisSamples(*prev, k) || prev->roomGeo != k.roomGeo) return;
     std::vector<uint32_t> last = bn.carry.empty() ? std::move(bn.expect) : std::move(bn.carry); // (one not written yet: carried on)
     if (last.size() != k.basisGame.size()) return;
     CarryBasis(last.data(), prev->basisGame.data(), k.basisGame.data(), last.size());

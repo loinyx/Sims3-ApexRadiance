@@ -137,7 +137,7 @@ static void Detail(const Room& r, const RtLampProxy::Mesh* mesh, const RtLampPro
                 RtLampProxy::IntoRoom(*lot, r.h.story, r.h.id, Pl);
                 vis = RtLampProxy::Visibility(*mesh, Ll, r.h.radius, Pl, samples);
             }
-            const float t3d = r.h.blkHeader >= 0.0f && !r.blk.empty() && t.tested ? blk.Occlude(static_cast<int>(r.h.blkHeader), {L.law.pos[0], L.law.pos[1], L.law.pos[2]}, {t.p[0], t.p[1], t.p[2]}) : 1.0f;
+            const float t3d = r.h.blkHeader >= 0.0f && !r.blk.empty() && t.tested ? RtLampGpu::FurnitureFill(blk.Occlude(static_cast<int>(r.h.blkHeader), {L.law.pos[0], L.law.pos[1], L.law.pos[2]}, {t.p[0], t.p[1], t.p[2]})) : 1.0f;
             Miss m{0.0f, i, {}, {}, vis, t3d};
             std::memcpy(m.g, &game[i * 3], sizeof m.g);
             GpuTerm(L, r.h, t, vis, t3d, true, m.gpu);

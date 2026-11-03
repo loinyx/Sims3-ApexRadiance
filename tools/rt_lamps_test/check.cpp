@@ -2896,7 +2896,7 @@ bool PhysKeptCheck() {
             if (mult == 0.0f || !((law[0] + law[1] + law[2]) > 0.0f)) continue;
             float sh = vis1 && refClear[l][i] ? 1.0f : shareOf(l, i);
             if (t.tested) {
-                const float prod = sh * RoomLightTests::occlude(roomA, {world[l][0], world[l][1], world[l][2]}, worldOf(t), &unknown);
+                const float prod = sh * RtLampGpu::FurnitureFill(RoomLightTests::occlude(roomA, {world[l][0], world[l][1], world[l][2]}, worldOf(t), &unknown));
                 sh = RoomLightTests::K_DROP > prod ? 0.0f : prod;
             }
             float c[3] = {law[0] * sh, law[1] * sh, law[2] * sh};
@@ -3143,7 +3143,7 @@ bool PhysKeptCheck() {
                 }
                 if (t.tested) {
                     const RoomLightTests::V from{all[l].law.pos[0] + kWorld[0], all[l].law.pos[1] + kWorld[1], all[l].law.pos[2] + kWorld[2]};
-                    const float prod = sh * RoomLightTests::occlude(roomA, from, worldOf(t), &unknown);
+                    const float prod = sh * RtLampGpu::FurnitureFill(RoomLightTests::occlude(roomA, from, worldOf(t), &unknown));
                     sh = RoomLightTests::K_DROP > prod ? 0.0f : prod;
                 }
                 float cl[3] = {law[0] * sh, law[1] * sh, law[2] * sh};
@@ -3281,7 +3281,7 @@ bool Room0PhysCheck() {
             float sh = 1.0f;
             if (tested[i]) {
                 int unknown = 0;
-                const float prod = RoomLightTests::occlude(room0, {world[l][0], world[l][1], world[l][2]}, {v.p[0] + kWorld[0], v.p[1] + kWorld[1], v.p[2] + kWorld[2]}, &unknown);
+                const float prod = RtLampGpu::FurnitureFill(RoomLightTests::occlude(room0, {world[l][0], world[l][1], world[l][2]}, {v.p[0] + kWorld[0], v.p[1] + kWorld[1], v.p[2] + kWorld[2]}, &unknown));
                 sh = RoomLightTests::K_DROP > prod ? 0.0f : prod;
                 nShaded += prod < 1.0f;
             }

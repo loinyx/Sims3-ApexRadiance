@@ -27,6 +27,10 @@
 
 namespace RtLampGpu {
 
+// The physical model's 3D test (furniture) as AccPhysPS takes it: light bounced off the room keeps 35% under furniture, the
+// game's point-light test left the floor under a lamp's own table near black (14:35 capture of 03/11). The shader has the same numbers
+inline float FurnitureFill(float t) { return 0.35f + 0.65f * t; }
+
 // (physical, true-size furniture shadows: Params::edgeR) a blocker's edge at its real extent h, as wide as a lamp ball of radius
 // edgeR seen from the receiver p2 past the blocker's plane point X = A + v (0 at contact, edgeR at the lamp). The game's band
 // starts 0.15 m inside the extent and fades 0.35 m outside it at any distance, so a small table casts a round blob 2-3x its size
