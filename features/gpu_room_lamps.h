@@ -56,6 +56,9 @@ void BeginFrame();
 // Any thread (the light tree thread's lamp edits, OutdoorDelta::TakesLampEdit): that kept solve of the room (its version) was
 // drawn on every map of `maps` (bit m) and is still (no lamp of it moved since)
 bool Drawn(const void* room, uint32_t version, unsigned maps);
+// Any thread (physical model): every map of `maps` has been drawn on the GPU since the room's maps were last dropped, at any
+// version. A physical relight draws every lamp from its law, so a solve kept again but not relit yet shows the lamp next frame
+bool DrawnAny(const void* room, unsigned maps);
 // Any thread: a lamp edit the GPU took (kind "value", "switch on" or "switch off": a literal), logged once every one of its
 // rooms was relit after it
 void NoteEdit(uintptr_t light, const char* kind, const std::vector<const void*>& rooms, const std::string& stories);

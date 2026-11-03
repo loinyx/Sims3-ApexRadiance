@@ -5124,7 +5124,7 @@ std::string PhysCoverWhy(uintptr_t tracker, uintptr_t light, PhysCover& o) {
                     if (const auto it = g_kept.find(KeyOf(room, rr.cls)); it != g_kept.end()) k = it->second;
                 }
                 f.kept = k && k->physical;
-                f.drawn = f.kept && (!k->maps || GpuRoomLamps::Drawn(room, k->version, k->maps));
+                f.drawn = f.kept && (!k->maps || GpuRoomLamps::DrawnAny(room, k->maps)); // (kept again, relit next frame: 42 refusals of 03/11)
                 f.baked = f.kept && std::find(k->baked.begin(), k->baked.end(), light) != k->baked.end();
                 // (an object moved in the room, its occluder mark dropped as the lamp's own: the nightstand a lamp stands on, dragged
                 // with it, kept its old blockers in the GPU's 3D test; the room's records follow the object before its solve). Its

@@ -137,9 +137,10 @@ bool ReadAmbient(const void* room, float* c) {
 // The kept solves drawn: room -> (its version, the maps drawn with it); read by the light tree thread (Drawn)
 std::mutex g_drawnMx;
 std::unordered_map<const void*, std::pair<uint32_t, unsigned>> g_drawn;
+std::unordered_map<const void*, unsigned> g_drawnAny; // (DrawnAny) room -> the maps drawn at any version since its last drop
 void Undrawn(const void* room) {
     std::lock_guard<std::mutex> lk(g_drawnMx);
-    g_drawn.erase(room);
+    g_drawn.erase(room), g_drawnAny.erase(room);
 }
 // The lamp edits taken (NoteEdit, light tree thread), until every room of theirs is relit after them (render thread)
 struct Edit {
@@ -681,6 +682,7 @@ bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
             auto& d = g_drawn[room];
             if (d.first != e.version) d = {e.version, 0u};
             d.second |= 1u << m;
+            g_drawnAny[room] |= 1u << m;
         }
         if (!e.checked && !e.expect.empty() && OutdoorDelta::RoomProbe()) { // (a move's copy has none: no read-back stall)
             e.checked = true;
@@ -711,7 +713,7 @@ void ReleaseAll() {
     g_copies.clear();
     g_bytes = 0;
     std::lock_guard<std::mutex> lk(g_drawnMx);
-    g_drawn.clear();
+    g_drawn.clear(), g_drawnAny.clear();
 }
 
 void BeginFrame() {
@@ -783,6 +785,11 @@ bool Drawn(const void* room, uint32_t version, unsigned maps) {
     std::lock_guard<std::mutex> lk(g_drawnMx);
     const auto it = g_drawn.find(room);
     return it != g_drawn.end() && it->second.first == version && (it->second.second & maps) == maps;
+}
+bool DrawnAny(const void* room, unsigned maps) {
+    std::lock_guard<std::mutex> lk(g_drawnMx);
+    const auto it = g_drawnAny.find(room);
+    return it != g_drawnAny.end() && (it->second & maps) == maps;
 }
 
 void NoteEdit(uintptr_t light, const char* kind, const std::vector<const void*>& rooms, const std::string& stories) {
