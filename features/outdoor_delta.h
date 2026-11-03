@@ -20,6 +20,7 @@
 // Off (Lamp lighting: Classic, or Instant on a device that cannot run it): nothing here runs and every solve is the game's.
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -225,6 +226,12 @@ struct WallBlockView {
 };
 void NoteWallBlur(const unsigned char* room, const WallBlockView* blocks, int count, uint32_t passes);
 void NoteGameBlur(const unsigned char* room); // the game's own blur ran (Apex's could not): walls cannot be blurred again
+
+// ---- Lighting scene recordings (scene_record.h, tools/scene_replay; Recorder) ----
+// Opens the recording at `temp` (render thread, the Recording capture's start); SceneEnd closes it and moves it to `to` (empty:
+// dropped), returning the room solves written
+bool SceneBegin(const std::filesystem::path& temp);
+long SceneEnd(const std::filesystem::path& to);
 
 // ---- a changed light alone (LevelLightShare::ReplayBatch, light tree thread) ----
 bool Replaying();

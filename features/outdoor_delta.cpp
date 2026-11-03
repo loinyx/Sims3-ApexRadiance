@@ -34,6 +34,8 @@
 #include "inner_retry.h"
 #include "phys_lamp_pick.h"
 #include "penumbra.h"
+#include "apex_util.h"
+#include "scene_record.h"
 #include "lamp_mark_filter.h"
 #include "unlit_rooms.h"
 #include "apex_log.h"
@@ -52,6 +54,7 @@
 #include <cmath>
 #include <cstring>
 #include <format>
+#include <filesystem>
 #include <map>
 #include <set>
 #include <memory>
@@ -110,6 +113,20 @@ std::atomic<bool> g_physical{false}; // (physical indoor lamps) the kept rooms k
 constexpr DWORD kEditSolveMs = 3000;
 std::atomic<long> c_physTaken{0}, c_physRefused{0}, c_physEditSolves{0}, c_physSettleSolves{0};
 std::atomic<DWORD> g_lastPhysEdit{0};
+// (health) the physical edits refused in the summary's 10 s, by reason (the room's story and id left out)
+std::mutex g_refuseMx;
+std::map<std::string, long> g_refuseWhy;
+// Lighting scene recordings (scene_record.h): while a Recording capture runs, each physical room solve kept is written with
+// the game's part of each of its lamps (KeepEnd); a lamp edit taken on the GPU sends its rooms to a solve once edits rest
+// 400 ms, and the recording's start sends every kept physical room of the lot, so each step has the game's answer
+std::mutex g_sceneMx;
+std::FILE* g_sceneFile = nullptr; // (under g_sceneMx)
+std::filesystem::path g_scenePath;
+uint32_t g_sceneGen = 0;
+long g_sceneRooms = 0;
+std::atomic<bool> g_sceneOn{false}, g_sceneAll{false};
+DWORD g_sceneEditSeen = 0; // (render thread) the last taken edit whose rooms went to a solve
+constexpr long kSceneMaxBytes = 1L << 30; // shortcut: a recording stops growing at 1 GB, raise it if long sessions need more
 std::unordered_map<const void*, DWORD> g_physSent; // (light tree thread) room -> when the settle or a resend sent it
 // (physical, stage 4; light tree thread) the kept copies RoomFinalized held for the finalized solve's KeepEnd: (key, version)
 std::vector<std::pair<uint64_t, uint32_t>> g_heldKept;
@@ -2881,6 +2898,64 @@ float NormKOf(const BYTE* room, int story, int id, bool outdoor, uintptr_t light
     if (!outdoor) CopyBytes(&normHere, room + 0x160, sizeof normHere);
     return std::isfinite(normSrc) && std::isfinite(normHere) ? InnerLight::NormScale(normSrc, normHere, outdoor) : 1.0f;
 }
+// (scene recordings) a physical room solve just kept, with the game's parts of its listed lamps (light tree thread)
+void SceneWriteRoom(const KeptRoom& k, const Record& r) {
+    if (!g_sceneOn.load(std::memory_order_relaxed)) return;
+    SceneRecord::Room s;
+    s.h.tick = GetTickCount(), s.h.lot = k.lot, s.h.story = k.story, s.h.id = k.id, s.h.cls = k.cls, s.h.thr = k.thr, s.h.norm = k.norm;
+    s.h.radius = Penumbra::Radius(), s.h.fade = LevelLightShare::SoftLightCutOn(), s.h.reachOn = LevelLightShare::RealisticReachActive(), s.h.outdoor = k.outdoor;
+    if (k.blk) s.blk = k.blk->rows, s.h.blkHeader = k.blkHeader;
+    const size_t n = k.texels.size();
+    if (k.samples.size() < n * 0x30) return;
+    std::vector<uint8_t> tested(n, 0);
+    for (const BatchRec& b : k.batches)
+        for (uint32_t j = 0; j < b.count && b.first + j < n; j++) tested[b.first + j] = b.flags[1] != 0;
+    s.texels.resize(n);
+    for (size_t i = 0; i < n; i++) {
+        const float* p = reinterpret_cast<const float*>(k.samples.data() + i * 0x30);
+        SceneRecord::Texel& t = s.texels[i];
+        std::memcpy(t.p, p, sizeof t.p), std::memcpy(t.n, p + 4, sizeof t.n);
+        t.x = k.texels[i].x, t.y = k.texels[i].y, t.map = k.texels[i].map, t.tested = tested[i], t.pad[0] = t.pad[1] = 0;
+    }
+    std::unordered_map<uintptr_t, const LampRec*> got;
+    for (const LampRec& l : r.lamps) got[l.light] = &l;
+    for (const KeptLamp& kl : k.lamps) {
+        const auto it = got.find(kl.light);
+        if (kl.colourOnly || it == got.end() || it->second->collapsed) continue; // (no part of its own: nothing to compare)
+        SceneRecord::Lamp L;
+        L.light = kl.light, L.law = kl.law, L.type = kl.type, L.row = static_cast<float>(std::max<int>(kl.mult, 1)) * kl.normK, L.reach = kl.reach ? 1 : 0;
+        std::vector<SceneRecord::Part> parts;
+        for (const Contrib& p : it->second->parts)
+            if (p.texel < n) parts.push_back({p.texel, {p.rgb[0], p.rgb[1], p.rgb[2]}});
+        s.lamps.push_back(L), s.parts.push_back(std::move(parts));
+    }
+    // (the oracle's line: without the cube shadow, which only tools/scene_replay traces; bounded, the light tree thread waits)
+    size_t work = 0;
+    for (const auto& p : s.parts) work += n + p.size();
+    if (work <= 2000000) {
+        SceneRecord::Stats st;
+        SceneRecord::Compare(s, nullptr, nullptr, st);
+        static const char* const kSurf[4] = {"wall", "floor", "ceiling", "objects"};
+        std::string surf;
+        for (int m = 0; m < 4; m++)
+            if (st.mapN[m]) surf += std::format(", {} {:.1f}%", kSurf[m], 100.0 * static_cast<double>(st.mapWithin[m]) / static_cast<double>(st.mapN[m]));
+        int top = SceneRecord::kUnknown;
+        for (int t = SceneRecord::kShadow3D; t < SceneRecord::kTags; t++)
+            if (st.tags[t] > st.tags[top]) top = t;
+        if (st.n)
+            LOG_INFO(std::format("[GpuOracle] story {} room {} class {}: within2 {:.1f}% of {} lamp texels{}; max err {:.3f} (lamp {:08X} texel {}), most misses {}", k.story,
+                                 k.id, k.cls, 100.0 * static_cast<double>(st.within) / static_cast<double>(st.n), st.n, surf, st.worst,
+                                 static_cast<uint32_t>(st.worstLight), st.worstTexel, st.within == st.n ? "none" : SceneRecord::TagName(top)));
+    }
+    uint32_t gen = 0;
+    const std::shared_ptr<const RtLampProxy::Lot> lot = RtOutdoorLamps::KeptLot(gen);
+    std::lock_guard<std::mutex> lk(g_sceneMx);
+    if (!g_sceneFile || std::ftell(g_sceneFile) > kSceneMaxBytes) return;
+    if (lot && gen != g_sceneGen) SceneRecord::WriteLot(g_sceneFile, gen, *lot), g_sceneGen = gen;
+    s.h.lotGen = g_sceneGen;
+    SceneRecord::WriteRoom(g_sceneFile, s);
+    g_sceneRooms++;
+}
 void KeepEnd(const BYTE* room) {
     Capture& c = g_cap;
     Record& r = *c.rec;
@@ -3022,6 +3097,7 @@ void KeepEnd(const BYTE* room) {
     }
     if (kept->physical) { // (no parts: nothing to recompose, so no self-check)
         NotePhysBasisKept(key);
+        HookGuard::Run("OutdoorDelta scene recording", [&] { SceneWriteRoom(*kept, r); });
         if (KeptLog())
             LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: kept {} texels (physical: no parts), {:.1f} MB; {} rooms, {:.1f} MB of {:.0f}", kept->story,
                                  kept->id, kept->cls, kept->texels.size(), mb(kept->bytes), rooms, mb(total), mb(kMaxKeptBytes)));
@@ -5074,6 +5150,12 @@ bool TakesLampEditPhys(uintptr_t tl, uintptr_t light, const char* kind, bool set
         if (dry) return false;
         c_physRefused.fetch_add(1, std::memory_order_relaxed);
         if (KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] physical {}: lamp {:08X} left to the room solves ({})", kind, light, why));
+        {
+            std::string cls = why; // (the reason without the room it names)
+            if (cls.rfind("story ", 0) == 0) cls = cls.substr(std::min(cls.size(), cls.find(": ") == std::string::npos ? 0 : cls.find(": ") + 2));
+            std::lock_guard<std::mutex> lk(g_refuseMx);
+            if (g_refuseWhy.size() < 64 || g_refuseWhy.count(cls)) g_refuseWhy[cls]++;
+        }
         return false;
     };
     const uintptr_t tracker = TlTracker(tl);
@@ -5608,6 +5690,58 @@ static void SweepLeftLots(DWORD now) {
                          static_cast<double>(bytes) / (1 << 20), static_cast<double>(g_bytes.load()) / (1 << 20), left));
 }
 
+// ---- Lighting scene recordings (scene_record.h) ----
+bool SceneBegin(const std::filesystem::path& temp) {
+    std::lock_guard<std::mutex> lk(g_sceneMx);
+    if (g_sceneFile) std::fclose(g_sceneFile), g_sceneFile = nullptr;
+    if (_wfopen_s(&g_sceneFile, temp.c_str(), L"wb") || !g_sceneFile) return g_sceneFile = nullptr, false;
+    SceneRecord::WriteHead(g_sceneFile);
+    g_scenePath = temp, g_sceneGen = 0, g_sceneRooms = 0;
+    g_sceneOn.store(true), g_sceneAll.store(true); // (every kept physical room of the lot solved once: the first step)
+    g_sceneEditSeen = g_lastPhysEdit.load(std::memory_order_relaxed);
+    LOG_INFO(RoomLampPhysical() ? "[SceneRecord] Recording the physical rooms' solves with the game's parts of their lamps"
+                                : "[SceneRecord] Recording, but the physical indoor lamp model is off: no room will be written");
+    return true;
+}
+long SceneEnd(const std::filesystem::path& to) {
+    std::lock_guard<std::mutex> lk(g_sceneMx);
+    g_sceneOn.store(false), g_sceneAll.store(false);
+    if (!g_sceneFile) return 0;
+    std::fclose(g_sceneFile), g_sceneFile = nullptr;
+    std::error_code ec;
+    const long rooms = g_sceneRooms;
+    if (to.empty() || !rooms) std::filesystem::remove(g_scenePath, ec);
+    else {
+        std::filesystem::rename(g_scenePath, to, ec);
+        if (ec) std::filesystem::copy_file(g_scenePath, to, std::filesystem::copy_options::overwrite_existing, ec), std::filesystem::remove(g_scenePath, ec);
+        LOG_INFO(std::format("[SceneRecord] Saved {} room solves to {}", rooms, ApexUtil::ToUtf8(to.filename().wstring())));
+    }
+    return to.empty() ? 0 : rooms;
+}
+// Render thread: the rooms a recording needs solved (the lot's kept physical rooms at its start; an edit's rooms once edits rest)
+void SceneTick() {
+    if (!g_sceneOn.load(std::memory_order_relaxed)) return;
+    if (g_sceneAll.exchange(false)) {
+        std::vector<std::tuple<uint64_t, int, int>> rooms;
+        {
+            std::lock_guard<std::mutex> lk(g_keptMx);
+            for (const auto& [key, k] : g_kept)
+                if (k->physical) rooms.emplace_back(k->lot, k->story, k->id);
+        }
+        const uintptr_t tracker = RtOutdoorLamps::ActiveTracker();
+        int sent = 0;
+        if (tracker && LevelLightShare::TrackerLive(tracker))
+            for (const auto& [lot, story, id] : rooms)
+                if (void* r = id ? LevelLightShare::RoomOf(tracker, story, id) : LevelLightShare::Room0Of(tracker, story)) sent += LevelLightShare::QueueRoomAgain(r) ? 1 : 0;
+        LOG_INFO(std::format("[SceneRecord] {} kept physical rooms sent to a solve for the recording's first step", sent));
+    }
+    const DWORD last = g_lastPhysEdit.load(std::memory_order_relaxed);
+    if (last && last != g_sceneEditSeen && GetTickCount() - last >= 400) {
+        g_sceneEditSeen = last;
+        SolveTouched(nullptr); // (the rooms of the edits taken since their solve: the game's answer at the lamps' new state)
+    }
+}
+
 void OnPresent() {
     const DWORD now = GetTickCount();
     HookGuard::Run("OutdoorDelta left lot sweep", [now] { SweepLeftLots(now); });
@@ -5623,7 +5757,22 @@ void OnPresent() {
             LOG_INFO(std::format("[GpuRoomLamps] physical lamp edits in the last 10 s: {} taken, {} left to the room solves; {} room solves of the lot within {} s of an edit "
                                  "taken outside the settle, {} settle or resend solves; physical relights {} maps, {:.1f} ms CPU (largest frame {:.2f} ms)",
                                  taken, refused, solves, kEditSolveMs / 1000, settles, maps, ms, worst));
+        std::map<std::string, long> why;
+        {
+            std::lock_guard<std::mutex> lk(g_refuseMx);
+            why.swap(g_refuseWhy);
+        }
+        if (refused * 10 > taken + refused) { // (health: more than 10% of the edits went to the game's solves)
+            std::vector<std::pair<long, std::string>> top;
+            for (auto& [w, k] : why) top.emplace_back(k, w);
+            std::sort(top.begin(), top.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+            std::string list;
+            for (size_t i = 0; i < top.size() && i < 3; i++) list += std::format("{}{} x {}", i ? "; " : "", top[i].first, top[i].second);
+            LOG_WARNING(std::format("[Health] physical edits refused: {} of {} in 10 s ({:.0f}%); top reasons: {}", refused, taken + refused,
+                                    100.0 * static_cast<double>(refused) / static_cast<double>(taken + refused), list));
+        }
     }
+    HookGuard::Run("OutdoorDelta scene tick", SceneTick);
     std::vector<const void*> due;
     std::vector<std::pair<uint64_t, LotEdit>> done;
     {

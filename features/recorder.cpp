@@ -31,6 +31,7 @@
 #include "screen_watch.h"
 #include "apex_memory.h"
 #include "dev_switches.h"
+#include "outdoor_delta.h"
 #include <windows.h>
 #include <algorithm>
 #include <atomic>
@@ -106,6 +107,7 @@ std::vector<GroundShown> g_ground;
 // ground notes, lamp edits and the settings copy are given back; before, they stayed until the next recording started.
 // Nothing reads them between recordings (Note and the trackers only add while one runs).
 void ReleaseBuffers() {
+    OutdoorDelta::SceneEnd({}); // (a cancelled recording drops its scene; after a save it was already moved: nothing left)
     if (!DevSwitches::ReleaseDebugBuffers() || g_on) return;
     using namespace ApexMemory::Est;
     uint64_t bytes = Vec(g_lines, [](const Line& l) { return Str(l.text); }) + Vec(g_views, [](const ViewSnap& v) { return Tree(v.stories); }) + Vec(g_ground) +
@@ -552,6 +554,7 @@ void Start() {
         if (in) g_settingsAtStart.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     }
     LotLightBridge::FurnitureTraceReset(); // every object is written once again at its first draw
+    OutdoorDelta::SceneBegin(Dir() / L"Lighting scene.tmp"); // (the physical rooms' solves, for tools/scene_replay)
     // every room once, as it is now (30/09: these lines used to be dropped, so a recording showed rooms only once they changed)
     for (auto& line : LevelLightShare::TraceRooms(true))
         if (g_roomNotes < kMaxRoomNotes) {
@@ -595,6 +598,7 @@ void Stop() {
     for (auto& l : logLines) all.emplace_back(l.first, "[log] " + l.second);
     std::stable_sort(all.begin(), all.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
     const std::filesystem::path folder = Captures::NewFolder("Recording");
+    OutdoorDelta::SceneEnd(folder / L"Lighting scene.apexscene");
     const std::string name = ApexUtil::ToUtf8(folder.filename().wstring());
     std::ostringstream out;
     {

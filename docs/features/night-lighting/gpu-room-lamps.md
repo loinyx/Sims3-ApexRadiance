@@ -354,6 +354,12 @@ lamp's position, not on its colour or intensity.
    - Cost: each lot lamp is read once a round for every physical map, a physical map keeps its lamp list while the lot's
      lamps stay the same, and every edit taken refreshes the per-pixel object lamps in its frame.
    `outdoor_delta_test` 101 checks, `rt_lamps_test` 75.
+29. Lighting scene recordings (03/11): a Recording capture also records the physical rooms' solves with the game's part of
+   each lamp, sending the lot's kept physical rooms and each taken edit's rooms to a solve (`OutdoorDelta::SceneBegin`,
+   `SceneTick`, `SceneWriteRoom`; format `scene_record.h`), and logs a `[GpuOracle]` line per solve.
+   `tools/scene_replay` replays every recorded solve through the current GPU term against the game's parts, and
+   `tools/apex_health.py` sums up a log; the game warns (`[Health]`) when over 10% of the physical edits in 10 s are
+   refused. See [dev-tools-scene-replay.md](../../validation/dev-tools-scene-replay.md).
 
 ## Settings
 
