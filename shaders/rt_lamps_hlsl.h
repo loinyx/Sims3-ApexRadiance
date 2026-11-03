@@ -685,6 +685,7 @@ float Occlude3D(float3 a, float3 b, float h) {
     const float4 head = BlkRow(h);
     const float len2 = GDot(b - a, b - a);
     float T = 1.0, rec = 0.0, blk = 0.0, nb = -1.0, first = 0.0;
+    float3 sh = float3(0, 0, 0); // (the record's offset: a dragged table ahead of its solve, BlockerTable::Offset)
     bool done = !(head.y > 0.5);
     [loop] for (int o = 0; o < 255; o++) {
         if (done) break;
@@ -693,21 +694,22 @@ float Occlude3D(float3 a, float3 b, float h) {
             if (nb < 0) { // a record: the broad phase (the infinite line against its sphere)
                 const float row = head.x + 2.0 * rec;
                 const float4 c = BlkRow(row);
-                const float3 ca = c.xyz - a, d = b - a;
+                const float4 ix = BlkRow(row + 1);
+                const float3 ca = c.xyz + float3(ix.z, 0, ix.w) - a, d = b - a;
                 const float s = GDot(ca, d);
                 const float3 q = s * (d / len2) - ca;
                 if (GDot(q, q) - c.w < 0) {
-                    const float4 ix = BlkRow(row + 1);
                     first = ix.x;
                     nb = ix.y;
                     blk = 0;
+                    sh = float3(ix.z, 0, ix.w);
                 }
                 if (!(nb > 0.5)) {
                     rec += 1;
                     nb = -1;
                 }
             } else {
-                T = T * BlockerT(first + blk * 7.0, a, b);
+                T = T * BlockerT(first + blk * 7.0, a - sh, b - sh);
                 blk += 1;
                 if (0.01 >= T) done = true;
                 if (blk >= nb) {

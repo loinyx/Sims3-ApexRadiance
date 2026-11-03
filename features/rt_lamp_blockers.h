@@ -79,6 +79,14 @@ struct BlockerTable {
         return header;
     }
 
+    // (physical) record r of the room at `header` drawn moved by (dx, 0, dz): a piece of furniture dragged with the lamp standing on
+    // it, ahead of the solve that reads its records again (video of 03/11: the side table's shadow left behind, on the side away
+    // from the drag). Its record's index row carries the offset (z, w; Append writes 0); the walk tests the segment moved back
+    void Offset(int header, int r, float dx, float dz) {
+        const int firstRec = static_cast<int>(rows[static_cast<size_t>(header)].v[0]);
+        Row& ix = rows[static_cast<size_t>(firstRec + 2 * r + 1)];
+        ix.v[2] = dx, ix.v[3] = dz;
+    }
     // The blocker at `row` back in the game's layout (only the fields its test reads; the rest 0)
     RoomLightTests::Blocker BlockerAt(int row) const {
         RoomLightTests::Blocker k{};
@@ -109,14 +117,15 @@ struct BlockerTable {
         for (int r = 0; r < recs; r++) {
             const Row& c = rows[static_cast<size_t>(firstRec + 2 * r)];
             const Row& ix = rows[static_cast<size_t>(firstRec + 2 * r + 1)];
-            V ca = sub({c.v[0], c.v[1], c.v[2]}, a);
+            V ca = sub({c.v[0] + ix.v[2], c.v[1], c.v[2] + ix.v[3]}, a); // (the record moved by its offset, Offset)
             float s = dot(ca, d);
             V q = sub({s * dn.x, s * dn.y, s * dn.z}, ca);
             if (!(dot(q, q) - c.v[3] < 0.0f)) continue; // broad phase: infinite line vs sphere
             const int first = static_cast<int>(ix.v[0]), n = static_cast<int>(ix.v[1]);
+            const V ra = {a.x - ix.v[2], a.y, a.z - ix.v[3]}, rb = {b.x - ix.v[2], b.y, b.z - ix.v[3]};
             for (int i = 0; i < n; i++) {
                 const Blocker k = BlockerAt(first + i * kBlockerRows);
-                const float t = k.vt == kQuadVt ? quadT(k, a, b) : discT(k, a, b);
+                const float t = k.vt == kQuadVt ? quadT(k, ra, rb) : discT(k, ra, rb);
                 T = T * t;
                 if (K_STOP >= T) return T;
             }

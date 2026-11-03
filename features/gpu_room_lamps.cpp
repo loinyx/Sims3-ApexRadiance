@@ -58,6 +58,9 @@ struct Entry {
     std::shared_ptr<const RtLampGpu::BlockerTable> blockers; // (its kept room's, shared by the room's maps)
     float blkHeader = -1.0f;
     uint32_t blkGen = 0; // (OutdoorDelta::LiveBlockers) the generation of the furniture blockers read again since its solve (0: its solve's)
+    // (CarryBlockers) the table before the records' offsets, the copy drawn with them, and the offsets' hash (0: none)
+    std::shared_ptr<const RtLampGpu::BlockerTable> blkBase, blkOut;
+    uint64_t offHash = 0;
     float xf[16] = {};
     // (physical, stage 4) the solve's lamps out of its base (their rows: mult x norm scale, reach, the room they were registered
     // in), the lights its base holds, the room's normalisation and roofless flag, its texels' world box; the drawn lamps' hash,
@@ -423,7 +426,54 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
             const uint32_t gen = RtOutdoorLamps::KeptMeshGen();
             if (OutdoorDelta::LiveBlockers(r.room, cls, e.version, e.blkGen, e.blockers, e.blkHeader) && OutdoorDelta::TraceLine()) // (a table moved with its lamp: this round)
                 LOG_INFO(std::format("[LiveBlk] story {} room {} class {}: the GPU took its furniture read again (generation {}), relit this round", e.story, e.id, cls, e.blkGen));
-            Mix(sig, &e.version, sizeof e.version), Mix(sig, &gen, sizeof gen), Mix(sig, &e.blkGen, sizeof e.blkGen);
+            // (03/11 recording: the side table's record stays where the room's last solve read it while its lamp moves with it, its
+            // shadow left behind on the side away from the drag; each solve then reads it under the lamp again) a record a kept lamp
+            // stood on (its sphere round the lamp's place then, its centre below the lamp) moves with the lamp until the next solve,
+            // while the lamp keeps its height (on the same top). shortcut: a lamp slid alone across its table moves the table's
+            // shadow too until that solve; learn from consecutive solves whether the record followed if that shows
+            if (e.blockers != e.blkOut) e.blkBase = e.blockers; // (a solve's or LiveBlockers' table: the base)
+            if (e.blkBase && e.blkHeader >= 0.0f) {
+                const RtLampGpu::BlockerTable& t = *e.blkBase;
+                const auto& head = t.rows[static_cast<size_t>(e.blkHeader)];
+                const int firstRec = static_cast<int>(head.v[0]), recs = static_cast<int>(head.v[1]);
+                std::vector<std::array<float, 3>> off; // (record, dx, dz)
+                for (const auto& rl : e.roomLamps) {
+                    if (rl.colourOnly) continue;
+                    GpuLampLaw::Lamp now;
+                    const auto at = g_lotAt.find(rl.light);
+                    if (at != g_lotAt.end() && at->second < g_lotLaw.size()) {
+                        LotLaw& c = g_lotLaw[at->second];
+                        if (!c.state || c.lot != e.lot) c.lot = e.lot, c.state = RtOutdoorLamps::WorldLaw(rl.light, e.lot, false, c.w, type, reg) ? 1 : 2;
+                        if (c.state != 1) continue;
+                        now = c.w;
+                    } else if (!RtOutdoorLamps::WorldLaw(rl.light, e.lot, false, now, type, reg))
+                        continue;
+                    const float dx = now.pos[0] - rl.pos[0], dz = now.pos[2] - rl.pos[2];
+                    if (dx * dx + dz * dz < 1e-4f || std::fabs(now.pos[1] - rl.pos[1]) > 0.02f) continue;
+                    for (int i = 0; i < recs; i++) {
+                        const auto& c = t.rows[static_cast<size_t>(firstRec + 2 * i)];
+                        const float cx = rl.pos[0] - c.v[0], cz = rl.pos[2] - c.v[2];
+                        if (cx * cx + cz * cz < c.v[3] && c.v[1] < rl.pos[1] &&
+                            std::none_of(off.begin(), off.end(), [&](const std::array<float, 3>& o) { return o[0] == static_cast<float>(i); }))
+                            off.push_back({static_cast<float>(i), dx, dz});
+                    }
+                }
+                uint64_t oh = 0;
+                if (!off.empty()) oh = 1469598103934665603ull, Mix(oh, off.data(), off.size() * sizeof off[0]);
+                if (oh != e.offHash) {
+                    e.offHash = oh;
+                    if (!oh) e.blockers = e.blkBase, e.blkOut.reset();
+                    else
+                        try {
+                            auto moved = std::make_shared<RtLampGpu::BlockerTable>(t);
+                            for (const auto& o : off) moved->Offset(static_cast<int>(e.blkHeader), static_cast<int>(o[0]), o[1], o[2]);
+                            e.blkOut = moved, e.blockers = std::move(moved);
+                        } catch (...) {
+                            e.offHash = 0, e.blockers = e.blkBase, e.blkOut.reset();
+                        }
+                }
+            }
+            Mix(sig, &e.version, sizeof e.version), Mix(sig, &gen, sizeof gen), Mix(sig, &e.blkGen, sizeof e.blkGen), Mix(sig, &e.offHash, sizeof e.offHash);
             any = true;
             // (S8) the ceiling pass's ambient follows the room's now: Rooms at Night's sliders and the lamp edits taken, no solve
             const auto ambient = [&] {
@@ -432,7 +482,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                 Mix(sig, e.ambScale, sizeof e.ambScale);
                 // (what its draw reads beside the round's rules: its kept solve, the occluders, its lamps' laws and rows, the ambient)
                 uint64_t k = 1469598103934665603ull;
-                Mix(k, &e.version, sizeof e.version), Mix(k, &gen, sizeof gen), Mix(k, &e.blkGen, sizeof e.blkGen), Mix(k, &e.physSig, sizeof e.physSig),
+                Mix(k, &e.version, sizeof e.version), Mix(k, &gen, sizeof gen), Mix(k, &e.blkGen, sizeof e.blkGen), Mix(k, &e.offHash, sizeof e.offHash), Mix(k, &e.physSig, sizeof e.physSig),
                     Mix(k, e.ambScale, sizeof e.ambScale);
                 e.drawKey = k;
             };

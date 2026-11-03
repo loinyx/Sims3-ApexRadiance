@@ -1505,6 +1505,13 @@ void BlockerTableChecks() {
         const float under = live.Occlude(h, lamp, V{1.0f, 0.0f, 0.1f}), old = live.Occlude(h, lamp, V{-1.0f, 0.0f, 0.1f}); // (where it stood: its shadow there)
         Check(under < 0.5f && old == 1.0f && under == RoomLightTests::occlude(moved, lamp, V{1.0f, 0.0f, 0.1f}, &unk),
               "live blockers: a table dragged with its lamp shades the floor under its new place and no longer under the old one");
+        // (Offset) the kept table at x = -1 moved 2 m by its record's offset casts exactly the shadow of the table kept at x = 1
+        RtLampGpu::BlockerTable kept;
+        const int hk = kept.Append(tableAt(-1.0f));
+        kept.Offset(hk, 0, 2.0f, 0.0f);
+        bool same = true;
+        for (float x = -2.0f; x <= 2.0f; x += 0.05f) same = same && std::fabs(kept.Occlude(hk, lamp, V{x, 0.0f, 0.1f}) - live.Occlude(h, lamp, V{x, 0.0f, 0.1f})) < 1e-4f;
+        Check(same, "blocker offset: a kept table moved by its record's offset shades exactly as the table kept at its new place");
     }
     RtLampGpu::BlockerTable wide;
     wide.rows.resize(5000);
