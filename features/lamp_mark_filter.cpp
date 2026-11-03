@@ -747,7 +747,10 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
         same = was.sig == h;
         const float dx = pos[0] - was.pos[0], dy = pos[1] - was.pos[1], dz = pos[2] - was.pos[2];
         const bool moved = dx * dx + dy * dy + dz * dz > kMoveMin * kMoveMin; // NaN: not a move
-        if (moved) DragLite::NoteLampStep("lamp entry: moved"); // (a lamp drag, drag_lite.h)
+        // (a lamp drag, drag_lite.h; a refused step of a drag the GPU otherwise takes does not re-arm the Classic rules)
+        if (moved)
+            DragLite::NoteLampStep("lamp entry: moved", DragLite::StepKind::Move,
+                                   !(OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical() && LampMarkFilter::HandledLately(light, 1500)));
         stayed = was.room == room;
         pure = was.on == on && stayed;
         if (was.on != on || moved || was.room != room) { // the player sees this: its lot lights again (OnPresent)

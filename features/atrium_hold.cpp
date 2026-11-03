@@ -486,6 +486,10 @@ HoldResult UpdateEditHold() {
                 g_capHit.store(false, std::memory_order_relaxed);
                 g_holdTogether.store(TogetherNow(), std::memory_order_relaxed);
                 g_editHolds.fetch_add(1, std::memory_order_relaxed);
+            } else if (g_holdTogether.load(std::memory_order_relaxed) && !TogetherNow()) {
+                // (one-way) a drag the GPU takes leaves "all floors together" 750 ms after its last refused step: latched, the
+                // whole drag and its release showed a frozen mid-drag map for up to 5 s, then snapped back (10:06 recording, 03/11)
+                g_holdTogether.store(false, std::memory_order_relaxed);
             }
             g_holdLatest = last;
             holding = true;
@@ -620,7 +624,8 @@ void OnPresent(IDirect3DDevice9* dev) {
         for (auto& [tex, m] : g_maps) {
             if (!m.held || m.gameLocks != 0) continue;
             if (m.sw) { // the edit hold decides (its own timeouts); kMapMaxMs only bounds a map through a very long drag
-                if (editing && now - m.heldAt < kMapMaxMs) continue;
+                // (an own-story map is released once the hold no longer runs together: nothing writes it again to free it)
+                if (editing && now - m.heldAt < kMapMaxMs && !(m.room && !HoldsOwnStory() && LevelLightShare::OnEditStory(m.room))) continue;
                 // 2.13.1: its room has not ended a solve since its mark: what is on screen stays until it has
                 if (trailing && m.room && now - m.heldAt < kMapMaxMs && LevelLightShare::EditRoomWaiting(m.room)) {
                     if (!m.trail) trailMaps++;
