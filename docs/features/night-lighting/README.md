@@ -69,7 +69,6 @@ atlas** that any surface knowing its world position can sample. Each sub-part be
 | Roads | Roads and sidewalks read the smoothed terrain light | [roads.md](roads.md) |
 | Snow | Snowy lot pass, floors, sills, stair tops and fence tops get lamp light | [snow.md](snow.md) |
 | Objects and rigs | Per-pixel lamps on outdoor objects, bake-matched falloff, rig boosts | [objects-and-rigs.md](objects-and-rigs.md) |
-| Object shadows | Physical indoor lamps: furniture shadows from the objects' own meshes (developer) | [object-shadows.md](object-shadows.md) |
 | Smooth light maps | Room lamp light without texel steps, bands or rings | [room-map-smoothing.md](room-map-smoothing.md) |
 | Fences | Fences, railings and stairs read the ground light | [fences.md](fences.md) |
 | Foliage | Bushes and trees keep lamp light in moon shadow | [foliage.md](foliage.md) |

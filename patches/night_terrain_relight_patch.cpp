@@ -62,7 +62,6 @@
 #include "lighting_restart_policy.h"
 #include "lot_lighting_motion.h"
 #include "outdoor_delta.h"
-#include "object_casters.h"
 #include "rt_outdoor_lamps.h"
 #include "terrain_stamps.h"
 #include "terrain_bake_cone.h"
@@ -203,7 +202,6 @@ bool g_outdoorDeltaCheck = false; // the delta's self-check (developer)
 bool g_roomLampProbe = false;     // the room lamp probe against the GPU's law (developer)
 bool g_gpuRoomLampsCapture = false; // GPU room lamps stage 1: the active lot's room solves kept for the GPU (developer)
 int g_roomLampModel = 0;            // (physical indoor lamps) 0 replica, 1 physical: what the kept rooms keep (OutdoorDelta::SetRoomLampPhysical; developer)
-int g_roomLampObjShadows = 0;       // (physical indoor lamps) 0 the game's 3D-test shapes, 1 the objects' own meshes (ObjectCasters; developer)
 float g_sidewalkClear = 0.5f;
 float g_lampTint = 1.0f;
 bool g_fenceGround = true;
@@ -2444,11 +2442,6 @@ class NightTerrainRelightPatch : public ApexPatch {
                 "Developer, with gpuRoomLampsCapture and Lamp lighting instant: replica keeps each lamp's share per texel as the room's solve gave it; "
                 "physical keeps the light without the lot's lamps and the room's tests, for the GPU to draw each lamp with its shadows. A change sends the active lot's rooms to their solve.",
                 {"replica", "physical"});
-        if (!kPublicBuild) // developer only
-            RegisterNamedEnumSetting(&g_roomLampObjShadows, "roomLampObjectShadows", 0,
-                "Developer, with roomLampModel physical: game shades lamps with the game's simple 3D shapes of furniture and objects; real draws "
-                "the objects' own meshes into the lamps' shadow maps (plants with their leaves) and leaves those shapes out.",
-                {"game", "real"});
         if (!kPublicBuild) // developer A/B only; the public build always has soft lot edges
             RegisterBoolSetting(&g_softLotEdges, "bordaSuaveLote", true,
                 "Developer: within 3 m of a lot edge, lot grass fades its lamp light to the ground light the world grass shows "
@@ -2920,7 +2913,6 @@ class NightTerrainRelightPatch : public ApexPatch {
                 const bool keep = rtOn && kDevToolsBuild && !kPublicBuild && g_gpuRoomLampsCapture;
                 const bool modelChanged = keep && (g_roomLampModel == 1) != OutdoorDelta::RoomLampPhysical();
                 OutdoorDelta::SetRoomLampPhysical(g_roomLampModel == 1); // (before the capture: a solve kept next takes it)
-                ObjectCasters::SetRealShapes(keep && g_roomLampModel == 1 && g_roomLampObjShadows == 1);
                 if (keep != OutdoorDelta::RoomLampCapture() || modelChanged) {
                     OutdoorDelta::SetRoomLampCapture(keep);
                     if (keep) { // every room of the active lot is solved once, so each solve is kept (a model change: kept again)
@@ -3191,7 +3183,6 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_roomLampProbe = false;
         g_gpuRoomLampsCapture = false;
         g_roomLampModel = 0;
-        g_roomLampObjShadows = 0;
         g_lampTint = 1.0f;
         g_lotTintOwn = false;
         g_lotLampTint = 1.0f;
@@ -3730,10 +3721,6 @@ class NightTerrainRelightPatch : public ApexPatch {
             static const char* const kModels[] = {"Replica", "Physical"};
             if (ApexUi::SegmentedRow("Indoor lamp model", "Replica: each solve's lamp shares. Physical: lamps with shadows",
                                      "##RoomLampModel", &g_roomLampModel, kModels, 2, nullptr, nullptr, 0))
-                NotifySettingChanged();
-            static const char* const kShapes[] = {"Game shapes", "Real shapes"};
-            if (g_roomLampModel == 1 && ApexUi::SegmentedRow("Object shadows", "Game shapes: the game's simple shapes. Real shapes: the objects' own meshes",
-                                                             "##RoomLampObjShadows", &g_roomLampObjShadows, kShapes, 2, nullptr, nullptr, 0))
                 NotifySettingChanged();
         }
         if (ApexUi::Checkbox("Smooth the ground light maps on the GPU (A/B: off = CPU worker)", &g_smoothMapsGpu)) NotifySettingChanged();
