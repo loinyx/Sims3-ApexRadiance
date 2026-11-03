@@ -1681,6 +1681,15 @@ void BlockerTableChecks() {
         const float bySofa[3] = {0.0f, 0.86f, 0.0f};
         Check(stands(onTop) && !stands(over) && !stands(beside) && !stands(below) && !RoomLightTests::StandsOn(sofa, bySofa),
               "stands on: a table lamp yes; a chandelier over the table, a lamp beside or under it, or beside a sofa no");
+        // ([CarryTable], CarryOf) the 16:25 recording of 03/11: the lamp stood on the floor, 0.54 m up, under no top (no record
+        // decided, the log's "shape 00000000"); on its table it is carried only while the table's own entry moved
+        Check(PhysLampPick::CarryOf(stands(below), false) == 0 && PhysLampPick::CarryOf(stands(onTop), true) == 2 &&
+                  PhysLampPick::CarryOf(stands(onTop), false) == 1 && PhysLampPick::CarryOf(stands(over), true) == 0,
+              "carry: a lamp on the floor stands on no record; on its table the table is carried when it moved, else left in place");
+        // (MarkUnchanged, TailFanout) the physical mode drops an unchanged lamp's mark and a GPU edit's fan-out; Classic keeps both
+        Check(PhysLampPick::MarkUnchanged(false, false) && !PhysLampPick::MarkUnchanged(false, true) && !PhysLampPick::MarkUnchanged(true, false) &&
+                  PhysLampPick::TailFanout(true, false) && PhysLampPick::TailFanout(false, true) && !PhysLampPick::TailFanout(true, true),
+              "drag flicker: physical drops an unchanged lamp's mark and a GPU edit's fan-out; Classic and other walks keep them");
         // (FillOf) only the lamp on the table's top keeps the furniture fill under furniture; a chandelier over it none. A carried
         // table keeps it for its lamp where both are drawn now, not where they were
         RtLampGpu::BlockerTable carried = live;

@@ -112,6 +112,7 @@
 #include "terrain_lighting_policy.h"
 #include "outdoor_delta.h"
 #include "outdoor_delta_model.h"
+#include "phys_lamp_pick.h"
 #include "room_map_dither.h"
 #include "rt_outdoor_lamps.h"
 #include "rt_lamp_proxy.h"
@@ -9016,6 +9017,9 @@ void AfterChangedWalk(BYTE* tl) {
         for (const auto& [S, r] : now)
             if ((S != L || sameStory(S, r)) && QueueRoom(tracker, S, r, false, tier, false)) g_indoorQueued.fetch_add(1, std::memory_order_relaxed);
     }
+    // (physical) a GPU edit's tail sends no other room: every kept room draws the moved lamp from its law, and these solves finished
+    // mid-drag over the GPU's maps (16:25 recording of 03/11: 138 sends). A lamp added or removed ("now" above) still goes
+    if (!PhysLampPick::TailFanout(gpuTail, OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical())) return;
     const DragLite::WhyScope fanoutWhy(DragLite::Why::Fanout);
     const DWORD waitAt = GetTickCount();
     for (const auto& p : kept) {

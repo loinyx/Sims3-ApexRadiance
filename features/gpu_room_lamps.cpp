@@ -458,15 +458,19 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                     const float dx = now.pos[0] - rl.pos[0], dy = now.pos[1] - rl.pos[1], dz = now.pos[2] - rl.pos[2];
                     if (dx * dx + dz * dz < 1e-8f || std::fabs(dy) > 0.02f) continue;
                     // (the carry's decisions, a line a second while they happen)
-                    static long s_moved = 0, s_carried = 0, s_kept = 0;
+                    static long s_moved = 0, s_carried = 0, s_kept = 0, s_none = 0;
                     static DWORD s_logAt = 0;
-                    static uintptr_t s_shape = 0; // (the last decided record's first blocker: the 'O' journal lines' shape when carried)
                     s_moved++;
-                    bool first = false; // (the first carry and the first left in place are logged at once)
+                    bool first = false; // (the first carry, left in place and no record are logged at once)
+                    int rec = -1, kind = 0; // (this move's last decided record and PhysLampPick::CarryOf; 0: it stands on no record)
+                    uintptr_t shape = 0; // (that record's first blocker: the 'O' journal lines' shape when carried)
                     for (int i = 0; i < recs; i++) {
-                        if (!t.StandsOn(header, i, rl.pos)) continue;
-                        s_shape = t.ShapeOf(header, i);
-                        if (!LampMarkFilter::ShapeMoved(s_shape)) {
+                        const bool on = t.StandsOn(header, i, rl.pos);
+                        const uintptr_t s = on ? t.ShapeOf(header, i) : 0;
+                        const int k = PhysLampPick::CarryOf(on, on && LampMarkFilter::ShapeMoved(s));
+                        if (!k) continue;
+                        rec = i, kind = k, shape = s;
+                        if (k == 1) {
                             first = first || !s_kept++;
                             continue;
                         }
@@ -475,12 +479,16 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                         if (o == off.end()) off.push_back({static_cast<float>(i), dx, dz});
                         else (*o)[1] = dx, (*o)[2] = dz;
                     }
+                    if (!kind) first = first || !s_none++;
                     if (const DWORD tick = GetTickCount(); first || tick - s_logAt >= 1000) {
                         s_logAt = tick;
                         if (LogAllowed())
-                            LOG_INFO(std::format("[CarryTable] story {} room {}: lamp {:08X} moved from its solve's place {} times: its table carried {}, left in place {} "
-                                                 "(last record's shape {:08X})",
-                                                 e.story, e.id, rl.light, s_moved, s_carried, s_kept, s_shape));
+                            LOG_INFO(std::format("[CarryTable] story {} room {}: lamp {:08X} moved from its solve's place {} times: its table carried {}, left in place {}, "
+                                                 "on no record {} (this move: {})",
+                                                 e.story, e.id, rl.light, s_moved, s_carried, s_kept, s_none,
+                                                 !kind ? std::string("it stands on no record")
+                                                       : std::format("record {} with shape {:08X} {}", rec, shape,
+                                                                     kind == 2 ? "carried, its object moved" : "left in place, its object did not move")));
                     }
                 }
                 uint64_t oh = 0;
