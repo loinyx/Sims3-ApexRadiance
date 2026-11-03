@@ -222,9 +222,12 @@ int main(int argc, char** argv) {
     std::vector<RoomLine> rooms;
     int regressions = 0;
     for (const fs::path& file : files) {
+        // (every capture is 'Lighting scene.apexscene': a scene is named by its capture folder and the folder above it, a session's
+        // recordings nested in it)
+        const std::string key = (file.parent_path().parent_path().filename() / file.parent_path().filename()).generic_string();
         std::FILE* f = nullptr;
         if (_wfopen_s(&f, file.c_str(), L"rb") || !f) {
-            std::printf("%s: could not be opened\n", file.filename().string().c_str());
+            std::printf("%s: could not be opened\n", key.c_str());
             continue;
         }
         Scene sc;
@@ -232,7 +235,7 @@ int main(int argc, char** argv) {
         const bool ok = Read(f, sc, why);
         std::fclose(f);
         if (!ok) {
-            std::printf("%s: %s\n", file.filename().string().c_str(), why.c_str());
+            std::printf("%s: %s\n", key.c_str(), why.c_str());
             continue;
         }
         Stats fileStats;
@@ -257,10 +260,9 @@ int main(int argc, char** argv) {
             for (int t = 1; t < kTags; t++)
                 if (s.tags[t] > s.tags[top] || top == kOk) top = s.tags[t] ? t : top;
             if (s.n)
-                rooms.push_back({std::format("{} story {} room {} class {}", file.stem().string(), r.h.story, r.h.id, r.h.cls), 100.0 * s.within / s.n, s.n, top});
+                rooms.push_back({std::format("{} story {} room {} class {}", key, r.h.story, r.h.id, r.h.cls), 100.0 * s.within / s.n, s.n, top});
         }
         const double pct = fileStats.n ? 100.0 * fileStats.within / fileStats.n : 100.0;
-        const std::string key = file.filename().string();
         now[key] = pct;
         const auto b = base.find(key);
         const bool worse = b != base.end() && pct < b->second - drop;
@@ -280,9 +282,9 @@ int main(int argc, char** argv) {
         if (all.tags[t]) tags += std::format("{}{} {:.1f}%", tags.empty() ? "" : ", ", TagName(t), pct(all.tags[t], all.n));
     std::printf("all: %.2f%% within 2/255 of %ld lamp texels; by surface: %s\n", pct(all.within, all.n), all.n, maps.c_str());
     std::printf("misses by likely cause: %s\n", tags.empty() ? "none" : tags.c_str());
+    std::printf("furniture fill (a lamp's own table, not in the score): lifts %.2f%% of the lamp texels\n", pct(all.filled, all.n));
     std::sort(rooms.begin(), rooms.end(), [](const RoomLine& a, const RoomLine& b) { return a.within < b.within; });
     std::set<std::string> shown; // (each room once, at its worst solve)
-    std::printf("furniture fill (a lamp's own table, not in the score): lifts %.2f%% of the lamp texels\n", pct(all.filled, all.n));
     for (size_t i = 0; i < rooms.size() && shown.size() < 8 && rooms[i].within < 100.0; i++)
         if (shown.insert(rooms[i].name).second)
             std::printf("  worst: %s: %.1f%% of %ld (mostly %s)\n", rooms[i].name.c_str(), rooms[i].within, rooms[i].n, TagName(rooms[i].tag));

@@ -39,7 +39,8 @@ The score is against the game's own term: the furniture fill the GPU adds under 
 (`RtLampGpu::FurnitureFill`) is not in it, and the report and the `[GpuOracle]` line give the share of lamp texels it lifts.
 
 With `-Baseline`, a scene whose share falls more than 0.5 points under its baseline value fails the run (exit 1);
-`-UpdateBaseline` writes the current values.
+`-UpdateBaseline` writes the current values. A scene is named by its capture folder and the folder above it (every
+capture's file has the same name); an older baseline keyed by file name is written again once.
 
 ## Health report
 
