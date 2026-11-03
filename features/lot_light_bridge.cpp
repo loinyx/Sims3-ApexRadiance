@@ -3654,6 +3654,25 @@ bool ReadExitLamp(uintptr_t L, float out[8], LampCone& cone) { // POD only (SEH)
     }
 }
 
+// A light's room id (light+8, valid with flag 0x04 at +0x100); false for room 0 or an unknown room. POD only (SEH)
+bool ReadLightRoom(uintptr_t L, int& room) {
+    __try {
+        if (!(*reinterpret_cast<const BYTE*>(L + 0x100) & 0x04)) return false;
+        room = *reinterpret_cast<const int*>(L + 0x08);
+        return room > 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+// The room id of a rig (rig+0x1E0); 0 when unreadable. POD only (SEH)
+int RigRoom(uintptr_t rig) {
+    __try {
+        return rig ? *reinterpret_cast<const int*>(rig + 0x1E0) : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+
 // Every lit outdoor lamp (pos, radius, colour), in enumeration order: what SelectLamps picks from. Rebuilt with the lot
 // lamp tracking in one pass over the enumeration (ReadEnumeratedLamps, every 20 frames); a rebuild that changes it starts
 // a new generation of the SelectLamps memo.
@@ -3664,6 +3683,13 @@ std::vector<LampCone> g_allCones; // the cone of each lamp of g_allLamps, at the
 std::vector<std::array<float, 8>> g_exitLampRows;
 std::vector<LampCone> g_exitCones;
 std::vector<uintptr_t> g_exitList; // LevelLightShare::ExitLamps at the last rebuild
+// (03/11) every lit indoor lamp (rows as g_exitLampRows, cone.light 0: tested by the outside walls and slabs) with its room id
+// (light+8) and light: an indoor stair (its group's rig in a roofed room) takes its own room's lamps (PickFenceLampsImpl)
+std::vector<std::array<float, 8>> g_indoorLampRows;
+std::vector<LampCone> g_indoorCones;
+std::vector<int> g_indoorRoom;
+std::vector<uintptr_t> g_indoorLight;
+uint32_t g_stairIndoorGroups = 0, g_stairIndoorLamps = 0;
 uint32_t g_lampMemoGen = 1; // generation of the SelectLamps memo (see LampMemo); 0 marks an empty entry
 
 // ---- Changes of outdoor lot lamps (Build mode, lamps switching by themselves) and the snapshot of what the terrain
@@ -4009,6 +4035,7 @@ void ReadEnumeratedLamps(bool rebuildAll) {
         previousExitCones.swap(g_exitCones);
         g_exitCones.clear();
         LevelLightShare::ExitLamps(g_exitList);
+        g_indoorLampRows.clear(), g_indoorCones.clear(), g_indoorRoom.clear(), g_indoorLight.clear();
     }
     g_lotLampCur.clear();
     for (uintptr_t L : g_enumLights) {
@@ -4018,9 +4045,16 @@ void ReadEnumeratedLamps(bool rebuildAll) {
             if (ReadLamp(L, v.data(), cone)) {
                 g_allLamps.push_back(v);
                 g_allCones.push_back(cone);
-            } else if (!g_exitList.empty() && std::binary_search(g_exitList.begin(), g_exitList.end(), L) && g_exitLampRows.size() < 256 && ReadExitLamp(L, v.data(), cone)) {
-                g_exitLampRows.push_back(v);
-                g_exitCones.push_back(cone);
+            } else {
+                if (!g_exitList.empty() && std::binary_search(g_exitList.begin(), g_exitList.end(), L) && g_exitLampRows.size() < 256 && ReadExitLamp(L, v.data(), cone)) {
+                    g_exitLampRows.push_back(v);
+                    g_exitCones.push_back(cone);
+                }
+                int room = 0;
+                if (g_indoorLampRows.size() < 256 && ReadLightRoom(L, room) && ReadExitLamp(L, v.data(), cone)) {
+                    cone.light = 0;
+                    g_indoorLampRows.push_back(v), g_indoorCones.push_back(cone), g_indoorRoom.push_back(room), g_indoorLight.push_back(L);
+                }
             }
         }
         LotLampState s;
@@ -5287,7 +5321,10 @@ std::string ReachLawText(bool reach, bool refused, bool placed, float scale, con
 // The lamps of an instanced group (fences, stairs, railings) around its centre, into rows 1 .. 4N of lamps (pos, 1/R^2;
 // colour, spill; the two cones) and, with the reach law, rows 1 + 4N .. 2 + 4N (r0^2); lampTop: the highest atlas lamp head
 // around; share: the share of the atlas lamps' light the group sees. Returns the lamps placed.
-int PickFenceLampsImpl(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share) {
+// indoorRoom > 0 (03/11, an indoor stair: its group's rig in that roofed room): the room's own lamps take the first slots,
+// picked from the lamps of that room id on the stair's story band, so the game's stairs stop going dark indoors and both
+// halves of a wide stair (two groups) take the same lamps
+int PickFenceLampsImpl(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, int indoorRoom = 0) {
     constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
     constexpr unsigned kLampRows = 1 + 4 * N;
     int used = 0;
@@ -5309,10 +5346,9 @@ int PickFenceLampsImpl(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
     // lamp could be seen that no piece sees. The first point is the piece nearest the lamp instead; the centre only
     // when no piece was read.)
     const float mid[3] = {g.x, g.y + 0.5f, g.z}, endA[3] = {g.a[0], g.a[1] + 0.5f, g.a[2]}, endB[3] = {g.b[0], g.b[1] + 0.5f, g.b[2]};
-    for (int k = 0; k < n; k++) { // (every lamp: the ground share counts those past the N slots too)
-        const float* pr = g_lampData[k];
-        const float* col = g_lampData[16 + k];
-        float piece[3] = {mid[0], mid[1], mid[2]}, best = 3.0e38f;
+    const auto nearestPiece = [&](const float* pr, float piece[3]) {
+        piece[0] = mid[0], piece[1] = mid[1], piece[2] = mid[2];
+        float best = 3.0e38f;
         for (unsigned i = 0; i < g.pieces && i < kGroupPieces; i++) {
             const float* q = g.piece[i];
             const float dx = q[0] - pr[0], dy = q[1] + 0.5f - pr[1], dz = q[2] - pr[2], d = dx * dx + dy * dy + dz * dz;
@@ -5321,27 +5357,15 @@ int PickFenceLampsImpl(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
                 piece[0] = q[0], piece[1] = q[1] + 0.5f, piece[2] = q[2];
             }
         }
-        float v = PickedLampVisibility(k, pr, piece);
-        if (v < 1.0f) v = std::max(v, PickedLampVisibility(k, pr, endA));
-        if (v < 1.0f) v = std::max(v, PickedLampVisibility(k, pr, endB));
-        { // its weight at the nearest piece, as PickObjectLamps weighs an object's ground share
-            const float r = pr[3] > 0.1f ? pr[3] : 0.1f, dx = pr[0] - piece[0], dy = pr[1] - piece[1], dz = pr[2] - piece[2];
-            const float w = (col[0] * 0.2126f + col[1] * 0.7152f + col[2] * 0.0722f) * LampConeAt(g_lampCone[k], pr, piece) / (1.0f + (dx * dx + dy * dy + dz * dz) / (r * r));
-            groundShare.Add(w, v < 0.01f ? 0.0f : v, !g_lampCone[k].light);
-        }
-        if (used >= static_cast<int>(N)) continue;
-        if (v < 0.01f) { // under 1% left: the slot goes to the next lamp
-            g_fenceLampsLeftOut++;
-            continue;
-        }
-        if (v < 1.0f) g_fenceLampsDimmed++;
+    };
+    // a lamp into the next slot (v: the share of it the group sees)
+    const auto place = [&](const float* pr, const float* col, const LampCone& cone, float v) {
         const float r = pr[3] > 0.1f ? pr[3] : 0.1f;
         lamps[1 + 2 * used][0] = pr[0];
         lamps[1 + 2 * used][1] = pr[1];
         lamps[1 + 2 * used][2] = pr[2];
         lamps[1 + 2 * used][3] = 1.0f / (r * r);
         // its cones (07/10): the fence face 47 deg or more off a sconce's axis takes only its spill, as in the game
-        const LampCone& cone = g_lampCone[k];
         float colourScale = v;
         if (reachLaw) { // the outdoor walls' law (lamp_reach.h): R, r0^2 and the game's weight of this lamp
             float r0, R;
@@ -5361,6 +5385,56 @@ int PickFenceLampsImpl(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
             LOG_INFO(std::format("[LotLightBridge] Fence/stairs: per-pixel lamps follow their cones (first: the lamp at ({:.1f} {:.1f} {:.1f}), spill {:.3f})", pr[0], pr[1], pr[2], cone.spill));
         }
         used++;
+    };
+    // (indoor stair) its room's lamps first, nearest first: the ones on the stair's story band (head 0.5 m under its lowest
+    // piece to 3.5 m over it: the same room id on another story is another room) within its reach
+    uintptr_t placedIndoor[ShaderPatches::kObjectPixelLamps] = {};
+    if (indoorRoom > 0) {
+        std::pair<float, size_t> cand[64];
+        int nc = 0;
+        for (size_t i = 0; i < g_indoorLampRows.size() && nc < 64; i++) {
+            const auto& v = g_indoorLampRows[i];
+            if (g_indoorRoom[i] != indoorRoom || v[1] < g.minY - 0.5f || v[1] > g.minY + 3.5f) continue;
+            const float dx = v[0] - g.x, dz = v[2] - g.z, score = ApexMath::Sqrt(dx * dx + dz * dz) - v[3];
+            if (score <= 40.0f + std::min(g.ext, 60.0f)) cand[nc++] = {score, i};
+        }
+        std::sort(cand, cand + nc);
+        for (int c = 0; c < nc && used < static_cast<int>(N); c++) {
+            const size_t i = cand[c].second;
+            const float* pr = g_indoorLampRows[i].data();
+            float piece[3];
+            nearestPiece(pr, piece);
+            float v = LampConeVisibility(g_indoorCones[i], pr, piece, 0.2f);
+            if (v < 1.0f) v = std::max({v, LampConeVisibility(g_indoorCones[i], pr, endA, 0.2f), LampConeVisibility(g_indoorCones[i], pr, endB, 0.2f)});
+            if (v < 0.01f) continue;
+            placedIndoor[used] = g_indoorLight[i];
+            place(pr, pr + 4, g_indoorCones[i], v);
+            g_stairIndoorLamps++;
+        }
+        g_stairIndoorGroups++;
+    }
+    for (int k = 0; k < n; k++) { // (every lamp: the ground share counts those past the N slots too)
+        const float* pr = g_lampData[k];
+        const float* col = g_lampData[16 + k];
+        float piece[3];
+        nearestPiece(pr, piece);
+        float v = PickedLampVisibility(k, pr, piece);
+        if (v < 1.0f) v = std::max(v, PickedLampVisibility(k, pr, endA));
+        if (v < 1.0f) v = std::max(v, PickedLampVisibility(k, pr, endB));
+        { // its weight at the nearest piece, as PickObjectLamps weighs an object's ground share
+            const float r = pr[3] > 0.1f ? pr[3] : 0.1f, dx = pr[0] - piece[0], dy = pr[1] - piece[1], dz = pr[2] - piece[2];
+            const float w = (col[0] * 0.2126f + col[1] * 0.7152f + col[2] * 0.0722f) * LampConeAt(g_lampCone[k], pr, piece) / (1.0f + (dx * dx + dy * dy + dz * dz) / (r * r));
+            groundShare.Add(w, v < 0.01f ? 0.0f : v, !g_lampCone[k].light);
+        }
+        if (used >= static_cast<int>(N)) continue;
+        // (an exit lamp the indoor pass placed already)
+        if (g_lampCone[k].light && std::find(placedIndoor, placedIndoor + N, g_lampCone[k].light) != placedIndoor + N) continue;
+        if (v < 0.01f) { // under 1% left: the slot goes to the next lamp
+            g_fenceLampsLeftOut++;
+            continue;
+        }
+        if (v < 1.0f) g_fenceLampsDimmed++;
+        place(pr, col, g_lampCone[k], v);
     }
     share = groundShare.Value();
     return used;
@@ -5390,7 +5464,9 @@ int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
 bool g_drawCostTimed = false; // the current draw is timed: UpdateHooks' draw calls add their driver time
 int64_t g_fencePickTicks = 0;
 uint32_t g_fencePickCalls = 0;
-int PickFenceLamps(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share) {
+int PickFenceLamps(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, int indoorRoom = 0) {
+    // shortcut: an indoor stair is picked afresh every draw (the memo does not key the room's lamps); key them if stairs show in the cost log
+    if (indoorRoom > 0) return PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share, indoorRoom);
     if (kPublicBuild || !g_drawCostTimed) return PickFenceLampsMemo(g, reachLaw, lamps, lampTop, share);
     LARGE_INTEGER a, b;
     QueryPerformanceCounter(&a);
@@ -5501,7 +5577,9 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
         for (unsigned k = 0; k < N; k++) lamps[2 + 2 * k][3] = lamps[1 + 2 * N + 2 * k][3] = lamps[2 + 2 * N + 2 * k][3] = 1.0f; // no cone
         if (g) {
             float lampTop = -1e9f, share = 0.0f;
-            used = PickFenceLamps(*g, reachLaw, lamps, lampTop, share);
+            // (03/11) a group whose rig is in a roofed room (an indoor stair or railing) also takes that room's own lamps
+            const int indoorRoom = RigTracker::CurrentMode() == 0 ? RigRoom(RigTracker::CurrentRig()) : 0;
+            used = PickFenceLamps(*g, reachLaw, lamps, lampTop, share, indoorRoom);
             lamps[0][1] = TerrainLightingPolicy::SurfaceLampGain(g_night.load(std::memory_order_relaxed), g_objPixelLampStrength.load(std::memory_order_relaxed)) *
                           std::max(g_fenceStrength.load(std::memory_order_relaxed), 0.0f);
             // Upper architectural runs use the same gain as adjacent loose pieces.
@@ -10242,6 +10320,7 @@ void OnWorldChanged() {
     g_exitLampRows.clear();
     g_exitCones.clear();
     g_exitList.clear();
+    g_indoorLampRows.clear(), g_indoorCones.clear(), g_indoorRoom.clear(), g_indoorLight.clear();
     ReleaseLotMasks(); // (2.15.3: with the chunks' shades, whose texels are made again only where a lot changes)
     g_groupCentres.clear();
     g_centreBusy.clear();
@@ -10830,6 +10909,7 @@ std::string Status() {
     s += std::format(" | buildings block light: objects and windows {} lamps left out, {} dimmed at a slab's edge; fences {} left out, {} dimmed; "
                      "ground light faded above the lamp heads: {} draws",
                      g_objLampsLeftOut, g_objLampsDimmed, g_fenceLampsLeftOut, g_fenceLampsDimmed, g_objGroundGated);
+    s += std::format(" | indoor stairs: {} group draws took {} lamps of their room", g_stairIndoorGroups, g_stairIndoorLamps);
     s += std::format(" | lamps by the outdoor walls' law (realistic reach): objects {}, fences {}, windows {} draws; first law kept (no room in the shader) {}",
                      g_reachObjDraws, g_reachFenceDraws, g_reachWindowDraws, g_reachLawRefused);
     s += std::format(" | ground lamp shade on floors: {} draws with their lot, {} without it (as before); on fences/stairs: {} draws with their lot, {} without it",
