@@ -5230,6 +5230,9 @@ std::string PhysCoverWhy(uintptr_t tracker, uintptr_t light, PhysCover& o) {
                     if (const auto it = g_kept.find(KeyOf(room, rr.cls)); it != g_kept.end()) k = it->second;
                 }
                 f.kept = k && k->physical;
+                // (a room solved before its lot became active was never kept, and nothing else sends it again: every edit of the
+                // 11:59 log of 03/11 was refused for it; SolveUnkept's 3 sends a minute bound this)
+                if (!f.kept && rr.cls > 0 && rr.cls <= 2 && rr.lot == ActiveLot()) NoteUnkept(room);
                 f.drawn = f.kept && (!k->maps || GpuRoomLamps::DrawnAny(room, k->maps)); // (kept again, relit next frame: 42 refusals of 03/11)
                 f.baked = f.kept && std::find(k->baked.begin(), k->baked.end(), light) != k->baked.end();
                 // (an object moved in the room, its occluder mark dropped as the lamp's own: the side table a lamp stands on, dragged
