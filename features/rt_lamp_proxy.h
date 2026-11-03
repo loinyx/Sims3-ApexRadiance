@@ -175,8 +175,8 @@ inline float OpeningHead(const Opening& o, float u) {
 }
 // One wall with its opening as a hole. The top is piecewise linear through u = 0, 0.5, 1 and the head through its profile:
 // every span is cut at those knots so each quad is exact.
-inline void AddWall(Mesh& m, const Edge& e) {
-    const float foot = e.foot - kFootExt;
+inline void AddWall(Mesh& m, const Edge& e, float footExt = kFootExt) {
+    const float foot = e.foot - footExt;
     std::vector<float> knots = {0.0f, 0.5f, 1.0f};
     if (e.open) {
         const float u0 = std::clamp(e.o.u0, 0.0f, 1.0f), u1 = std::clamp(e.o.u1, 0.0f, 1.0f);
@@ -451,7 +451,9 @@ inline void Build(const Lot& lot, Mesh& m, bool ceilingsOpen = false) {
     for (const Story& s : fixed) {
         m.curStory = static_cast<int8_t>(std::clamp(s.story, -8, 8));
         m.curKind = Mesh::kWall;
-        for (const Edge& e : s.edges) AddWall(m, e);
+        // (open tops: an upper story's wall stops at its foot; reaching under it, it shaded the ceiling of the story below past
+        // the wall's line, which the game lights: the scene of 03/11, ceiling rows at a story's floor line)
+        for (const Edge& e : s.edges) AddWall(m, e, ceilingsOpen && s.story > 0 ? 0.0f : kFootExt);
         m.curKind = Mesh::kRoof;
         AddRoofs(m, s);
         m.curKind = Mesh::kSlab;
