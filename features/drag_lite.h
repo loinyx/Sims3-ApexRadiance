@@ -77,6 +77,8 @@ bool ClassicHolding();
 // The latest drag is of a lamp the game solves (a move within kStillMs): with Instant, its edit takes the Classic rules
 // (AtriumHold's "show all floors together" too). Classic: true. Any thread
 bool ClassicRulesForDrag();
+// The latest move was of a lamp the GPU draws (a drag the GPU takes, after any refused step). Any thread
+bool LastMoveGpu();
 // fastOwnRelight: the lamps' own rooms of the current edit still wait (render thread writes, any thread reads)
 bool OwnRoomsWaiting();
 // The priority call while ClassicHolding: true = this room waits for the release (an edit's room of any tier, or any room

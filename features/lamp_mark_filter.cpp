@@ -370,7 +370,7 @@ bool OwnObjectEditTaken(uintptr_t tl, float x, float z, bool hadPoint, const flo
     }
     for (int i = 0; i < np; i++) { // (its lit bit is rewritten only by its own update: an edit of a lamp off is taken as a switch on)
         // (a lamp on a table: its mark solves the room, which reads the table's records again where it was dragged with it)
-        if (physical && OutdoorDelta::StandsOnFurniture(TrackerOf(tl), StoryOfTl(tl), pend[i].room, pend[i].light)) {
+        if (physical && pend[i].moved && OutdoorDelta::StandsOnFurniture(TrackerOf(tl), StoryOfTl(tl), pend[i].room, pend[i].light)) {
             t_onFurniture = true;
             continue;
         }
@@ -414,18 +414,16 @@ void __fastcall RemovalHook(uint8_t* level, void* edx, uint32_t idLo, uint32_t i
 // the recording of 03/11), the lamps' positions in the world's: taken to the world (the lot's rows, mgr+0xE0, a lot turning about
 // y only) before the own-object tests compare them. Until then they never matched: each occluder mark of a dragged lamp's object
 // solved its room (121 in that recording) and the solves' maps showed between the GPU's
-uintptr_t ManagerOf(const void* room) { // POD (SEH)
+uintptr_t ManagerOf(uintptr_t tl) { // POD (SEH)
     __try {
-        return *static_cast<const uintptr_t*>(room);
+        return tl ? *reinterpret_cast<const uintptr_t*>(tl) : 0; // (tl+0: its story's manager)
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return 0;
     }
 }
 bool OccToWorld(uintptr_t tl, float& x, float& z) {
-    const uintptr_t tracker = TrackerOf(tl);
-    const void* r0 = tracker ? LevelLightShare::Room0Of(tracker, StoryOfTl(tl)) : nullptr;
     float xf[16];
-    if (!r0 || !RtOutdoorLamps::LotXform(ManagerOf(r0), xf)) return false;
+    if (!RtOutdoorLamps::LotXform(ManagerOf(tl), xf)) return false;
     const float lx = x - xf[12], lz = z - xf[14]; // (the rows' inverse: their transpose; y's terms are 0 for a lot turning about y)
     x = lx * xf[0] + lz * xf[2], z = lx * xf[8] + lz * xf[10];
     return std::isfinite(x) && std::isfinite(z);
@@ -434,10 +432,12 @@ bool OccToWorld(uintptr_t tl, float& x, float& z) {
 thread_local float t_occPt[3] = {}; // (OccDecide's journal) the occluder's point and its move since its last mark
 bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
     t_onFurniture = false;
-    if (OutdoorDelta::RoomLampCapture()) {
-        float x = 0.0f, z = 0.0f, was[2] = {};
+    const bool capture = OutdoorDelta::RoomLampCapture();
+    float x = 0.0f, z = 0.0f;
+    const bool read = capture && OccluderPoint(entry, x, z) && OccToWorld(tl, x, z);
+    if (capture) {
+        float was[2] = {};
         bool had = false;
-        const bool read = OccluderPoint(entry, x, z) && OccToWorld(tl, x, z);
         t_occPt[0] = x, t_occPt[1] = z, t_occPt[2] = 0.0f;
         if (read) {
             std::lock_guard<std::mutex> lk(g_mx);
@@ -460,8 +460,7 @@ bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
     g_occMarks.fetch_add(1, std::memory_order_relaxed);
     const DWORD now = GetTickCount();
     if (now - last > kOwnObjectMs || !g_on.load(std::memory_order_relaxed)) return true;
-    float x = 0.0f, z = 0.0f;
-    if (t_onFurniture || !OccluderPoint(entry, x, z) || !OccToWorld(tl, x, z)) return true;
+    if (t_onFurniture || !(capture ? read : OccluderPoint(entry, x, z) && OccToWorld(tl, x, z))) return true;
     bool own = false;
     {
         std::lock_guard<std::mutex> lk(g_mx);
@@ -738,6 +737,8 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
         LampState& was = it->second;
         was.entry = entry;
         const DWORD tick = GetTickCount();
+        // (a step of a drag the GPU takes, refused or not, is no game move: it would re-arm the Classic hold until the release)
+        const auto gameMove = [light] { return !(OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical() && LampMarkFilter::HandledLately(light, 1500)); };
         if (std::memcmp(was.editable, editable, sizeof editable) != 0) {
             std::memcpy(was.editable, editable, sizeof editable);
             g_editRefresh.store(true, std::memory_order_relaxed);
@@ -747,10 +748,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
         same = was.sig == h;
         const float dx = pos[0] - was.pos[0], dy = pos[1] - was.pos[1], dz = pos[2] - was.pos[2];
         const bool moved = dx * dx + dy * dy + dz * dz > kMoveMin * kMoveMin; // NaN: not a move
-        // (a lamp drag, drag_lite.h; a refused step of a drag the GPU otherwise takes does not re-arm the Classic rules)
-        if (moved)
-            DragLite::NoteLampStep("lamp entry: moved", DragLite::StepKind::Move,
-                                   !(OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical() && LampMarkFilter::HandledLately(light, 1500)));
+        if (moved) DragLite::NoteLampStep("lamp entry: moved", DragLite::StepKind::Move, gameMove()); // (a lamp drag, drag_lite.h)
         stayed = was.room == room;
         pure = was.on == on && stayed;
         if (was.on != on || moved || was.room != room) { // the player sees this: its lot lights again (OnPresent)
@@ -808,9 +806,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
         if (edit) was.editUntil = (tick + kEditHoldMs) | 1;
         else if (!same && was.editUntil && static_cast<int32_t>(tick - was.editUntil) < 0) {
             edit = true;
-            // (a step of a drag the GPU takes is no game move: it kept the drag on the Classic hold until the release)
-            DragLite::NoteLampStep("lamp entry: a step of the same edit", DragLite::StepKind::Move,
-                                   !(OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical() && LampMarkFilter::HandledLately(light, 1500)));
+            DragLite::NoteLampStep("lamp entry: a step of the same edit", DragLite::StepKind::Move, gameMove());
         }
         was.sig = h;
     }

@@ -18844,16 +18844,8 @@ float UnderFloorShareAt(const unsigned char* room, const float* sample) {
     return room0 ? UnderFloorShare(room0, sample, base) : -1.0f;
 }
 bool ListAllWrapped(const unsigned char* room) { return room && AllEvalWrapped(room); }
-BYTE* RoomOfLevelTry(uintptr_t tl, int id) { // POD (SEH)
-    __try {
-        void* mgr = *reinterpret_cast<void* const*>(tl);
-        return mgr ? static_cast<BYTE*>(reinterpret_cast<RoomById_t>(kRoomById)(mgr, id)) : nullptr;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return nullptr;
-    }
-}
 void JournalMark(uintptr_t tl, int id, char event, uintptr_t what, const float* pt) {
-    if (BYTE* room = tl && kRoomById ? RoomOfLevelTry(tl, id) : nullptr) NoteSolve(room, event, what, nullptr, pt);
+    if (BYTE* room = tl && kRoomById ? static_cast<BYTE*>(RoomOfTreeLevel(reinterpret_cast<const BYTE*>(tl), id)) : nullptr) NoteSolve(room, event, what, nullptr, pt);
 }
 bool IsReplayList(const void* begin) { return begin && reinterpret_cast<uintptr_t>(begin) == g_replayListAt.load(); }
 

@@ -486,16 +486,16 @@ HoldResult UpdateEditHold() {
                 g_capHit.store(false, std::memory_order_relaxed);
                 g_holdTogether.store(TogetherNow(), std::memory_order_relaxed);
                 g_editHolds.fetch_add(1, std::memory_order_relaxed);
-            } else if (g_holdTogether.load(std::memory_order_relaxed) && !TogetherNow()) {
-                // (one-way) a drag the GPU takes leaves "all floors together" 750 ms after its last refused step: latched, the
-                // whole drag and its release showed a frozen mid-drag map for up to 5 s, then snapped back (10:06 recording, 03/11)
-                g_holdTogether.store(false, std::memory_order_relaxed);
             }
             g_holdLatest = last;
             holding = true;
             g_editHolding.store(true, std::memory_order_relaxed);
         }
     }
+    // (one-way) a drag the GPU takes leaves "all floors together" 750 ms after its last refused step, edits or not: latched, the
+    // whole drag and its release showed a frozen mid-drag map for up to 5 s, then snapped back (10:06 recording, 03/11)
+    if (holding && g_holdTogether.load(std::memory_order_relaxed) && !TogetherNow() && DragLite::LastMoveGpu())
+        g_holdTogether.store(false, std::memory_order_relaxed);
     if (const unsigned long sw = LampMarkFilter::SwitchLastTick(); sw && sw != g_switchSeen.load(std::memory_order_relaxed)) {
         g_switchSeen.store(sw, std::memory_order_relaxed);
         if (holding && now - sw < 1000) g_holdHasSwitch.store(true, std::memory_order_relaxed);

@@ -130,6 +130,7 @@ bool ClassicReleaseOn() {
     return TesterToggles::classicAfterRelease.load(std::memory_order_relaxed) && (g_classic.load(std::memory_order_relaxed) || FastOwn());
 }
 bool ClassicRulesForDrag() { return ClassicLighting() || (FastOwn() && Within(g_lastGameMove, kStillMs)); }
+bool LastMoveGpu() { return g_lastMove.load(std::memory_order_relaxed) != g_lastGameMove.load(std::memory_order_relaxed); }
 bool OwnRoomsWaiting() { return g_ownWaiting.load(std::memory_order_relaxed); }
 bool ClassicHolding() {
     if (!ClassicReleaseOn() || LetGo()) return false;
