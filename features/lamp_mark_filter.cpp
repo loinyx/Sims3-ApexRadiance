@@ -334,11 +334,14 @@ std::atomic<long> g_occPhysMove{0}, g_occPhysNew{0};
 // UNVERIFIED: that a lamp object's point lies within kOwnNearM of its light's head (a lamp further off keeps its mark: a solve)
 constexpr float kOwnStepM = 0.05f, kOwnNearM = 0.5f;
 std::unordered_map<uintptr_t, std::array<float, 2>> g_occPoint; // (under g_mx) occluder entry -> its point (x, z) at its last mark
+PhysLampPick::OccMove g_occMoves[32]; // (under g_mx) the latest occluder moves, a ring (FurnitureMovedWith)
+int g_occMoveAt = 0;
+constexpr DWORD kFurnitureMoveMs = 600; constexpr float kFurnitureNearM = 1.0f;
 thread_local bool t_onFurniture = false; // (OccDecideImpl) the occluder moved with a lamp standing on furniture: its mark solves the room
 bool OwnObjectEditTaken(uintptr_t tl, float x, float z, bool hadPoint, const float occWas[2]) {
     const bool physical = OutdoorDelta::RoomLampPhysical();
     const float occNow[2] = {x, z};
-    struct Pending { uintptr_t light; bool wasOn, moved; int room; };
+    struct Pending { uintptr_t light; bool wasOn, moved; int room; float x, z; };
     Pending pend[8];
     int np = 0;
     {
@@ -365,12 +368,13 @@ bool OwnObjectEditTaken(uintptr_t tl, float x, float z, bool hadPoint, const flo
                 if (PhysLampPick::EditKind(false, m2, kMoveMin, valueChanged, true, editing, true) < 0) continue; // (h differs: above)
             } else if (m2 > kMoveMin * kMoveMin)
                 continue;
-            pend[np++] = Pending{key.light, was.on, m2 > 1e-6f, was.room};
+            pend[np++] = Pending{key.light, was.on, m2 > 1e-6f, was.room, pos[0], pos[2]};
         }
     }
     for (int i = 0; i < np; i++) { // (its lit bit is rewritten only by its own update: an edit of a lamp off is taken as a switch on)
         // (a lamp on a table: its mark solves the room, which reads the table's records again where it was dragged with it)
-        if (physical && pend[i].moved && OutdoorDelta::StandsOnFurniture(TrackerOf(tl), StoryOfTl(tl), pend[i].room, pend[i].light)) {
+        if (physical && pend[i].moved && LampMarkFilter::FurnitureMovedWith(pend[i].x, pend[i].z) &&
+            OutdoorDelta::StandsOnFurniture(TrackerOf(tl), StoryOfTl(tl), pend[i].room, pend[i].light)) {
             t_onFurniture = true;
             continue;
         }
@@ -447,6 +451,7 @@ bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
             was[0] = it->second[0], was[1] = it->second[1];
             it->second = {x, z};
             if (had) t_occPt[2] = std::sqrt((x - was[0]) * (x - was[0]) + (z - was[1]) * (z - was[1]));
+            if (t_occPt[2] > 0.01f) g_occMoves[g_occMoveAt++ % std::size(g_occMoves)] = {entry, GetTickCount(), x, z};
         }
         if (read && OwnObjectEditTaken(tl, x, z, had, was)) {
             const long n = g_occDropped.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -1158,6 +1163,10 @@ void EndDeferMarks(bool replay, uintptr_t entry) {
     t_deferred.clear();
 }
 long DeferredMarksDropped() { return g_deferredDropped.load(std::memory_order_relaxed); }
+bool FurnitureMovedWith(float x, float z) {
+    std::lock_guard<std::mutex> lk(g_mx);
+    return PhysLampPick::FurnitureMovedWith(g_occMoves, static_cast<int>(std::size(g_occMoves)), x, z, GetTickCount(), kFurnitureMoveMs, kFurnitureNearM);
+}
 bool HandledLately(uintptr_t light, unsigned long withinMs) {
     if (!light) return false;
     const DWORD now = GetTickCount();

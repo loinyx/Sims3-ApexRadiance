@@ -41,6 +41,8 @@ void SetEnabled(bool on);
 bool Enabled();
 // Any thread: an edit of that light was taken by the GPU (Lamp lighting: Instant, Real-time outdoor lamps) within withinMs
 bool HandledLately(uintptr_t light, unsigned long withinMs);
+// Any thread: the furniture under a lamp head at world (x, z) moved with it lately (PhysLampPick::FurnitureMovedWith)
+bool FurnitureMovedWith(float x, float z);
 // The calling thread's room marks from lamp entry updates are kept back from BeginDeferMarks to the matching
 // EndDeferMarks, then made as the game makes them (replay) or, for the marks of `entry`, dropped (its update changed
 // nothing the rooms read: LevelLightShare's window activation recheck); marks of other entries always go through. Nests;

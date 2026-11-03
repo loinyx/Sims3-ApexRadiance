@@ -1348,6 +1348,18 @@ void PhysPickChecks() {
               "physical pick: a room with no light buffer reads as an empty list; broken or too long bounds stay unreadable");
     }
     {
+        using PhysLampPick::OccMove;
+        const OccMove lampAlone[] = {{0x10, 1000, 5.0f, 5.0f}, {0x10, 1100, 5.1f, 5.0f}};
+        const OccMove tableToo[] = {{0x10, 1000, 5.0f, 5.0f}, {0x20, 1010, 5.05f, 4.9f}};
+        const OccMove stale[] = {{0x10, 100, 5.0f, 5.0f}, {0x20, 110, 5.0f, 5.0f}};
+        const OccMove far[] = {{0x10, 1000, 5.0f, 5.0f}, {0x20, 1010, 9.0f, 5.0f}};
+        Check(!PhysLampPick::FurnitureMovedWith(lampAlone, 2, 5.1f, 5.0f, 1200, 600, 1.0f) &&
+                  PhysLampPick::FurnitureMovedWith(tableToo, 2, 5.05f, 5.0f, 1200, 600, 1.0f) &&
+                  !PhysLampPick::FurnitureMovedWith(stale, 2, 5.0f, 5.0f, 1200, 600, 1.0f) &&
+                  !PhysLampPick::FurnitureMovedWith(far, 2, 5.0f, 5.0f, 1200, 600, 1.0f),
+              "physical pick: a lamp dragged alone carries no furniture; a table moved with it does; old or far moves do not count");
+    }
+    {
         // a floor texel at (1, 2, 1) with 0.25 m steps; samples: position at 0..2, normal at 4..6
         const float s[8] = {1, 2, 1, 0, 0, 1, 0, 0}, r[8] = {1.25f, 2, 1, 0, 0, 1, 0, 0}, d[8] = {1, 2, 1.25f, 0, 0, 1, 0, 0};
         const float wall[8] = {0.75f, 2.2f, 1, 0, 1, 0, 0, 0}, step[8] = {1, 2, 0.75f, 0, 0, 1, 0, 0}, far[8] = {1, 2, 1.75f, 0, 0, 1, 0, 0};

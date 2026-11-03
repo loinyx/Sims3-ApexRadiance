@@ -239,6 +239,24 @@ inline bool OwnObjectStep(bool hadPoint, const float occWas[2], const float occN
     const float dx = (occNow[0] - occWas[0]) - (lampNow[0] - lampWas[0]), dz = (occNow[1] - occWas[1]) - (lampNow[2] - lampWas[2]);
     return dx * dx + dz * dz <= tol * tol;
 }
+// (LampMarkFilter) an occluder entry whose point moved at a mark: where it is now (world x, z) and when
+struct OccMove {
+    uintptr_t entry = 0;
+    uint32_t at = 0;
+    float x = 0.0f, z = 0.0f;
+};
+// A lamp's furniture moved with it: two objects beside its head moved lately. Dragging a table moves the table's object and the
+// lamp's own; a lamp dragged alone across its table moves only its own (03/11: its table's shadow was carried off the table)
+inline bool FurnitureMovedWith(const OccMove* m, int n, float lx, float lz, uint32_t now, uint32_t withinMs, float nearM) {
+    uintptr_t first = 0;
+    for (int i = 0; i < n; i++) {
+        const float dx = m[i].x - lx, dz = m[i].z - lz;
+        if (!m[i].entry || now - m[i].at > withinMs || dx * dx + dz * dz > nearM * nearM) continue;
+        if (!first) first = m[i].entry;
+        else if (m[i].entry != first) return true;
+    }
+    return false;
+}
 // A room's light list length from its vector's bounds (room+0xC8, +0xCC), -1 when unreadable. A room no lamp ever lit holds no
 // buffer (both null): an empty list, which a kept physical solve needs read (else every edit is refused, 2026-11-02 20:50 log)
 inline int ListLen(const uintptr_t* b, const uintptr_t* e, int max) {

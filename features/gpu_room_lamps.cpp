@@ -9,6 +9,7 @@
 #include "level_light_share.h"
 #include "rt_lamp_model.h"
 #include "phys_lamp_pick.h"
+#include "lamp_mark_filter.h"
 #include "apex_log.h"
 #include <windows.h>
 #include <algorithm>
@@ -60,6 +61,7 @@ struct Entry {
     // (CarryBlockers) the table before the records' offsets, the copy drawn with them, and the offsets' hash (0: none)
     std::shared_ptr<const RtLampGpu::BlockerTable> blkBase, blkOut;
     uint64_t offHash = 0;
+    std::vector<std::array<float, 3>> carried; // (record, dx, dz) since its solve: kept until the next one
     float xf[16] = {};
     // (physical, stage 4) the solve's lamps out of its base (their rows: mult x norm scale, reach, the room they were registered
     // in), the lights its base holds, the room's normalisation and roofless flag, its texels' world box; the drawn lamps' hash,
@@ -439,27 +441,30 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
             };
             // (03/11 recording: the side table's record stays where the room's last solve read it while its lamp moves with it, its
             // shadow left behind on the side away from the drag; each solve then reads it under the lamp again) a record a kept lamp
-            // stood on (RoomLightTests::StandsOn) moves with the lamp until the next solve, while the lamp keeps its height (on the
-            // same top). shortcut: a lamp slid alone across its table moves the table's shadow too until that solve; learn from
-            // consecutive solves whether the record followed if that shows
-            if (e.blockers != e.blkOut) e.blkBase = e.blockers; // (a solve's table: the base)
+            // stood on (RoomLightTests::StandsOn) moves with the lamp until the next solve while the lamp keeps its height and the
+            // furniture moved with it (LampMarkFilter::FurnitureMovedWith: a lamp dragged alone across its table carried the table's
+            // shadow off it, a second round shadow beside the table). The offset stays where the drag left it until that solve
+            if (e.blockers != e.blkOut) e.blkBase = e.blockers, e.blkOut.reset(), e.carried.clear(), e.offHash = 0; // (a solve's table)
             if (e.blkBase && e.blkHeader >= 0.0f) {
                 const RtLampGpu::BlockerTable& t = *e.blkBase;
                 const auto& head = t.rows[static_cast<size_t>(e.blkHeader)];
                 const int firstRec = static_cast<int>(head.v[0]), recs = static_cast<int>(head.v[1]);
-                std::vector<std::array<float, 3>> off; // (record, dx, dz)
+                std::vector<std::array<float, 3>>& off = e.carried;
                 for (const auto& rl : e.roomLamps) {
                     if (rl.colourOnly) continue;
                     GpuLampLaw::Lamp now;
                     const auto at = g_lotAt.find(rl.light);
                     if (!worldOf(rl.light, at != g_lotAt.end() ? at->second : SIZE_MAX, now)) continue;
                     const float dx = now.pos[0] - rl.pos[0], dz = now.pos[2] - rl.pos[2];
-                    if (dx * dx + dz * dz < 1e-4f || std::fabs(now.pos[1] - rl.pos[1]) > 0.02f) continue;
+                    if (dx * dx + dz * dz < 1e-4f || std::fabs(now.pos[1] - rl.pos[1]) > 0.02f ||
+                        !LampMarkFilter::FurnitureMovedWith(now.pos[0], now.pos[2]))
+                        continue;
                     for (int i = 0; i < recs; i++) {
                         const auto& c = t.rows[static_cast<size_t>(firstRec + 2 * i)];
-                        if (RoomLightTests::StandsOn(c.v[0], c.v[1], c.v[2], c.v[3], rl.pos) &&
-                            std::none_of(off.begin(), off.end(), [&](const std::array<float, 3>& o) { return o[0] == static_cast<float>(i); }))
-                            off.push_back({static_cast<float>(i), dx, dz});
+                        if (!RoomLightTests::StandsOn(c.v[0], c.v[1], c.v[2], c.v[3], rl.pos)) continue;
+                        const auto o = std::find_if(off.begin(), off.end(), [&](const std::array<float, 3>& k) { return k[0] == static_cast<float>(i); });
+                        if (o == off.end()) off.push_back({static_cast<float>(i), dx, dz});
+                        else (*o)[1] = dx, (*o)[2] = dz;
                     }
                 }
                 uint64_t oh = 0;
