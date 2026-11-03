@@ -389,6 +389,7 @@ bool ReplayBatch(unsigned char* room, const unsigned char* samples, int count, c
 float UnderFloorShareAt(const unsigned char* room, const float* sample);
 std::string FirstUnwrappedLight(const unsigned char* room); // the first light of the room's list whose evaluation is not wrapped (the log)
 bool ListAllWrapped(const unsigned char* room);             // every light of the room's list has its evaluation wrapped
+bool IsReplayList(const void* begin);                       // a room's list points at an outdoor delta replay's one-lamp list now (light tree thread): not the room's
 // The geometry the room's solve depends on, as one key: every story's grid stamp, cut cells, the wall tops and floor edits,
 // and each story's room 0 walls, wall blocks and 3D blockers; 0 when unreadable. Any thread.
 uint64_t LotGeometryKey(const void* room);

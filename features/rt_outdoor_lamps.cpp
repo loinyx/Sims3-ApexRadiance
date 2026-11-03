@@ -227,7 +227,8 @@ int ReadList(const BYTE* room, uintptr_t* out, int max) {
     __try {
         const uintptr_t* b = *reinterpret_cast<const uintptr_t* const*>(room + 0xC8);
         const uintptr_t* e = *reinterpret_cast<const uintptr_t* const*>(room + 0xCC);
-        if (!b || e < b || e - b > max) return -1;
+        // (an outdoor delta replay points the list at its one-lamp copy for a moment: not the room's, the kept list stands in)
+        if (!b || e < b || e - b > max || LevelLightShare::IsReplayList(b)) return -1;
         int n = 0;
         for (const uintptr_t* p = b; p < e; p++) out[n++] = *p;
         return n;

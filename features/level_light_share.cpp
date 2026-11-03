@@ -18471,6 +18471,7 @@ struct ReplayDesc {
     int pitch;
 };
 thread_local uintptr_t t_replayLights[16];
+std::atomic<uintptr_t> g_replayListAt{0}; // (IsReplayList) the replay's one-lamp list while a room's list points at it
 // The game's batch solve over `samples` with the room's light list holding only `light` (mult times) and the batch vector
 // the solve's callers pass (kBatchSamples) on those samples; both put back after. POD only (SEH)
 bool ReplayCall(BYTE* room, const BYTE* samples, int count, char* flags, int mult) {
@@ -18482,6 +18483,7 @@ bool ReplayCall(BYTE* room, const BYTE* samples, int count, char* flags, int mul
         const uintptr_t vb = vec[0], ve = vec[1], lb = list[0], le = list[1];
         vec[0] = reinterpret_cast<uintptr_t>(samples);
         vec[1] = reinterpret_cast<uintptr_t>(samples) + static_cast<uintptr_t>(count) * 0x30;
+        g_replayListAt.store(reinterpret_cast<uintptr_t>(t_replayLights)); // (before the swap: readers on the render thread)
         list[0] = reinterpret_cast<uintptr_t>(t_replayLights);
         list[1] = reinterpret_cast<uintptr_t>(t_replayLights + mult);
         __try {
@@ -18491,6 +18493,7 @@ bool ReplayCall(BYTE* room, const BYTE* samples, int count, char* flags, int mul
         } __finally {
             list[0] = lb, list[1] = le;
             vec[0] = vb, vec[1] = ve;
+            g_replayListAt.store(0);
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         g_faults.fetch_add(1, std::memory_order_relaxed);
@@ -18789,6 +18792,7 @@ float UnderFloorShareAt(const unsigned char* room, const float* sample) {
     return room0 ? UnderFloorShare(room0, sample, base) : -1.0f;
 }
 bool ListAllWrapped(const unsigned char* room) { return room && AllEvalWrapped(room); }
+bool IsReplayList(const void* begin) { return begin && reinterpret_cast<uintptr_t>(begin) == g_replayListAt.load(); }
 
 // ---- The room lamp probe's dump (outdoor_delta.h ProbeRoomText; light tree thread) ----
 namespace {
