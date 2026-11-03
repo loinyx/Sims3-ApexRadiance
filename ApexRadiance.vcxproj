@@ -145,7 +145,6 @@
     <ClCompile Include="features\lot_object_throttle.cpp" />
     <ClCompile Include="features\lot_active_threshold.cpp" />
     <ClCompile Include="features\lot_visibility_override.cpp" />
-    <ClCompile Include="features\object_caster_probe.cpp" />
     <ClCompile Include="features\room_map_padding.cpp" />
     <ClCompile Include="features\unlit_rooms.cpp" />
     <ClCompile Include="features\probe_neutral.cpp" />
@@ -303,7 +302,6 @@
     <ClInclude Include="features\penumbra.h" />
     <ClInclude Include="features\lamp_reach.h" />
     <ClInclude Include="features\lamp_cap_shadow.h" />
-    <ClInclude Include="features\object_caster_probe.h" />
     <ClInclude Include="features\rig_cut.h" />
     <ClInclude Include="features\wall_heights.h" />
     <ClInclude Include="features\light_diag.h" />
