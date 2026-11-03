@@ -361,13 +361,19 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
             if (OutdoorDelta::BuildKeptMap(r.room, cls, r.version, m, d, why)) { // (else nothing of it in this map: an entry that draws nothing)
                 e.story = d.story, e.lot = d.lot, e.thr = d.thr, e.physical = d.physical;
                 const bool space = !d.physical || RtOutdoorLamps::LotXform(mgr, e.xf);
-                if (space && d.physical) // (the points to the lot's space; base keeps the world position)
+                // (the points to the lot's space; base keeps the world position; mask.xyz = where the shadow is looked up: a texel past
+                // its room's diagonal wall inside the room, RtLampProxy::IntoRoom)
+                // shortcut: the lot's room ids as this entry is built; a lot edit since leaves them until the entry is made again
+                uint32_t lotGen = 0;
+                const std::shared_ptr<const RtLampProxy::Lot> lot = space && d.physical ? RtOutdoorLamps::KeptLot(lotGen) : nullptr;
+                if (space && d.physical)
                     for (RtLampGpu::TexelVertex& v : d.phys) {
                         float p[3], n[3];
                         for (int k = 0; k < 3; k++)
                             p[k] = v.base[0] * e.xf[k] + v.base[1] * e.xf[4 + k] + v.base[2] * e.xf[8 + k] + e.xf[12 + k],
                             n[k] = v.n[0] * e.xf[k] + v.n[1] * e.xf[4 + k] + v.n[2] * e.xf[8 + k];
-                        std::memcpy(v.p, p, sizeof p), std::memcpy(v.n, n, sizeof n);
+                        std::memcpy(v.p, p, sizeof p), std::memcpy(v.n, n, sizeof n), std::memcpy(v.mask, p, sizeof p);
+                        if (lot) RtLampProxy::IntoRoom(*lot, d.story, r.id, v.mask);
                     }
                 if (!space) {
                     if (LogAllowed())
@@ -553,7 +559,7 @@ bool RelightPhys(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, Entry& e, const 
     const int n = static_cast<int>(lamps.size());
     if (!eng.SetBlockers(dev, e.blockers, err)) return false;
     RtLampGpu::Params p = base;
-    p.thr = e.thr, p.mask = false, p.maskAllGpu = false, p.keptX = false, p.physX = false, p.debugLamp = -1;
+    p.thr = e.thr, p.mask = false, p.maskAllGpu = false, p.keptX = false, p.physX = false, p.debugLamp = -1, p.shadowAtMask = true;
     return PhysPasses(dev, eng, lights.data(), lamps.data(), n, base.farDist, err, [&](int g0, int gn, const int* tiles, bool last) {
         std::vector<RtLampGpu::Engine::PhysRoom> room(1);
         room[0].header = e.blkHeader;

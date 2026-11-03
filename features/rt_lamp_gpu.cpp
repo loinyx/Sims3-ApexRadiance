@@ -56,11 +56,12 @@ const char* EntryOf(ShaderId id) {
     static const char* const kNames[kShaderCount] = {"ShadowVS", "TexelVS",   "ShadowPS",  "AccPS",        "ComposePS",    "CopyPS",
                                                      "BlurRowPS", "BlurColPS", "BlockPS",   "AccFastPS",    "AccRlgPS",     "AccRlgFastPS",
                                                      "ComposeRlgPS", "AccKeptPS", "ComposeKeptPS", "CopyAtPS", "BlockKeptPS",
-                                                     "AccKept0PS", "AccKept0XPS", "ComposeK0PS", "AccPhysPS", "AccPhysFastPS", "T3dPS", "AccPhysXPS"};
+                                                     "AccKept0PS", "AccKept0XPS", "ComposeK0PS", "AccPhysPS", "AccPhysFastPS", "T3dPS", "AccPhysXPS",
+                                                     "AccPhysInPS", "AccPhysInFastPS"};
     return id >= 0 && id < kShaderCount ? kNames[id] : "";
 }
 bool IsVertex(ShaderId id) { return id == kShadowVs || id == kTexelVs; }
-bool IsPhysical(ShaderId id) { return id == kAccPhysPs || id == kAccPhysFastPs || id == kT3dPs || id == kAccPhysXPs; }
+bool IsPhysical(ShaderId id) { return id == kAccPhysPs || id == kAccPhysFastPs || id == kT3dPs || id == kAccPhysXPs || id == kAccPhysInPs || id == kAccPhysInFastPs; }
 
 void FaceTexel(const float d[3], int face, int& f, int& x, int& y) {
     const float ax = std::fabs(d[0]), ay = std::fabs(d[1]), az = std::fabs(d[2]);
@@ -950,7 +951,7 @@ bool Engine::AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampMode
         c_.SetTexture(dev, 5, t3_);
         PointSampler(dev, 5);
     }
-    c_.SetPixelShader(dev, ps_[phys ? (p.fast ? kAccPhysFastPs : kAccPhysPs) : (p.fast ? kAccRlgFastPs : kAccRlgPs)]);
+    c_.SetPixelShader(dev, ps_[phys ? (p.shadowAtMask ? (p.fast ? kAccPhysInFastPs : kAccPhysInPs) : (p.fast ? kAccPhysFastPs : kAccPhysPs)) : (p.fast ? kAccRlgFastPs : kAccRlgPs)]);
     if (SUCCEEDED(hr)) hr = c_.DrawPrimitive(dev, D3DPT_POINTLIST, 0, m.count);
     if (SUCCEEDED(hr) && phys && physX) { // (room 0) the batch's floor mask and exit light added into the second sum
         IDirect3DSurface9* s = x_ ? Surf(x_) : nullptr;
@@ -1213,7 +1214,7 @@ bool Engine::RelightKeptPhys(IDirect3DDevice9* dev, const KeptMapGpu& k, const R
                              const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err,
                              bool first, bool compose, const float* amb) {
     if (!out) return err = "nothing to relight", false;
-    if (!ps_[kAccPhysPs] || !ps_[kAccPhysFastPs] || !ps_[kT3dPs]) return err = "the physical shaders are missing (not in the shader cache, no compiler)", false;
+    if (!PhysReady()) return err = "the physical shaders are missing (not in the shader cache, no compiler)", false;
     if (!KeptReady(dev, k, w, h, err)) return false;
     if (!tiles_ || !blk_) return err = "the kept shadow atlas or the blocker table is missing", false;
     if (rooms.empty()) return err = "no room table", false;

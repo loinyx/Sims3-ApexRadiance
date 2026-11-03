@@ -12,6 +12,8 @@
 #include <fstream>
 #include <iomanip>
 #include <map>
+#include <set>
+#include <tuple>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -93,6 +95,79 @@ static void SelfTest() {
           "scene file: a lot and two rooms read back as written");
 }
 
+// --detail story:id: each lamp of that room's solves alone (its tags, the median game / GPU ratio where both are lit)
+static void Detail(const Room& r, const RtLampProxy::Mesh* mesh, const RtLampProxy::Lot* lot, int samples) {
+    std::printf("story %d room %d class %d, tick %u: %u texels, %zu lamps, thr %.4f, norm %.3f, reach %d, outdoor %d\n", r.h.story, r.h.id, r.h.cls, r.h.tick,
+                r.h.texels, r.lamps.size(), r.h.thr, r.h.norm, r.h.reachOn, r.h.outdoor);
+    for (size_t l = 0; l < r.lamps.size(); l++) {
+        Room one = r;
+        one.lamps = {r.lamps[l]}, one.parts = {r.parts[l]};
+        Stats s;
+        Compare(one, mesh, lot, s, samples);
+        if (!s.n) continue;
+        std::string tags;
+        for (int t = 1; t < kTags; t++)
+            if (s.tags[t]) tags += std::format(" {} {}", TagName(t), s.tags[t]);
+        const Lamp& L = r.lamps[l];
+        static std::set<std::tuple<uint64_t, float, float, float>> s_seen; // (one report per lamp and place)
+        if (!s_seen.insert({L.light, L.law.pos[0], L.law.pos[1], L.law.pos[2]}).second) continue;
+        std::printf("  lamp %llX type %d row %.3f reach %d pos (%.2f %.2f %.2f) W %.3f cmax %.3f: %ld texels, %.1f%% within, ratio game/GPU %.3f;%s\n",
+                    static_cast<unsigned long long>(L.light), L.type, L.row, L.reach, L.law.pos[0], L.law.pos[1], L.law.pos[2], L.law.W, L.law.cmax, s.n,
+                    100.0 * s.within / s.n, s.ratio, tags.c_str());
+        // its worst texels: where, the game's part, the GPU's term and its shares
+        struct Miss {
+            float d;
+            uint32_t i;
+            float g[3], gpu[3], vis, t3d;
+        };
+        std::vector<Miss> miss;
+        std::vector<float> game(r.texels.size() * 3, 0.0f);
+        for (const Part& p : r.parts[l])
+            if (p.texel < r.texels.size()) std::memcpy(&game[p.texel * 3], p.rgb, sizeof p.rgb);
+        RtLampGpu::BlockerTable blk;
+        blk.rows = r.blk;
+        float Ll[3] = {L.law.pos[0], L.law.pos[1], L.law.pos[2]};
+        if (lot) RtLampProxy::ToLot(*lot, L.law.pos, Ll);
+        for (uint32_t i = 0; i < r.texels.size(); i++) {
+            const Texel& t = r.texels[i];
+            float vis = 1.0f;
+            if (mesh && lot) {
+                float Pl[3];
+                RtLampProxy::ToLot(*lot, t.p, Pl);
+                RtLampProxy::IntoRoom(*lot, r.h.story, r.h.id, Pl);
+                vis = RtLampProxy::Visibility(*mesh, Ll, r.h.radius, Pl, samples);
+            }
+            const float t3d = r.h.blkHeader >= 0.0f && !r.blk.empty() && t.tested ? blk.Occlude(static_cast<int>(r.h.blkHeader), {L.law.pos[0], L.law.pos[1], L.law.pos[2]}, {t.p[0], t.p[1], t.p[2]}) : 1.0f;
+            Miss m{0.0f, i, {}, {}, vis, t3d};
+            std::memcpy(m.g, &game[i * 3], sizeof m.g);
+            GpuTerm(L, r.h, t, vis, t3d, true, m.gpu);
+            m.d = MaxDiff(m.g, m.gpu);
+            if (m.d > kWithin) miss.push_back(m);
+        }
+        std::sort(miss.begin(), miss.end(), [](const Miss& a, const Miss& b) { return a.d > b.d; });
+        for (size_t k = 0; k < miss.size() && k < 6; k++) {
+            const Miss& m = miss[k];
+            const Texel& t = r.texels[m.i];
+            const float dx = t.p[0] - L.law.pos[0], dy = t.p[1] - L.law.pos[1], dz = t.p[2] - L.law.pos[2];
+            std::printf("    map %d (%u,%u) p (%.2f %.2f %.2f) n (%.2f %.2f %.2f) d %.2f tested %d: game (%.3f %.3f %.3f) GPU (%.3f %.3f %.3f) vis %.2f t3d %.2f\n",
+                        t.map, t.x, t.y, t.p[0], t.p[1], t.p[2], t.n[0], t.n[1], t.n[2], std::sqrt(dx * dx + dy * dy + dz * dz), t.tested, m.g[0], m.g[1], m.g[2],
+                        m.gpu[0], m.gpu[1], m.gpu[2], m.vis, m.t3d);
+            if (mesh && lot && m.vis < 0.5f) { // the occluder the lamp's centre meets first (lot space)
+                float Pl[3], tHit = 0.0f;
+                RtLampProxy::ToLot(*lot, t.p, Pl);
+                RtLampProxy::IntoRoom(*lot, r.h.story, r.h.id, Pl);
+                const int hit = RtLampProxy::FirstHit(*mesh, Ll, Pl, 0.01f, 0.01f, tHit);
+                if (hit >= 0) {
+                    const RtLampProxy::Tri& tr = mesh->tris[static_cast<size_t>(hit)];
+                    std::printf("      first hit at t %.3f: kind %d story %d, tri (%.2f %.2f %.2f) (%.2f %.2f %.2f) (%.2f %.2f %.2f); lamp lot (%.2f %.2f %.2f) texel lot (%.2f %.2f %.2f)\n",
+                                tHit, mesh->kind[static_cast<size_t>(hit)], mesh->story[static_cast<size_t>(hit)], tr.v[0][0], tr.v[0][1], tr.v[0][2], tr.v[1][0],
+                                tr.v[1][1], tr.v[1][2], tr.v[2][0], tr.v[2][1], tr.v[2][2], Ll[0], Ll[1], Ll[2], Pl[0], Pl[1], Pl[2]);
+                }
+            }
+        }
+    }
+}
+
 struct RoomLine {
     std::string name;
     double within;
@@ -105,6 +180,7 @@ int main(int argc, char** argv) {
     bool update = false, self = false;
     double drop = 0.5;
     int samples = 16;
+    int detailStory = -99, detailId = -1;
     for (int i = 1; i < argc; i++) {
         const std::string a = argv[i];
         if (a == "--baseline" && i + 1 < argc) baseline = argv[++i];
@@ -112,6 +188,7 @@ int main(int argc, char** argv) {
         else if (a == "--drop" && i + 1 < argc) drop = std::atof(argv[++i]);
         else if (a == "--samples" && i + 1 < argc) samples = std::max(1, std::atoi(argv[++i]));
         else if (a == "--selftest") self = true;
+        else if (a == "--detail" && i + 1 < argc) sscanf_s(argv[++i], "%d:%d", &detailStory, &detailId);
         else inputs.emplace_back(a);
     }
     SelfTest();
@@ -170,6 +247,7 @@ int main(int argc, char** argv) {
                 if (fresh) RtLampProxy::Build(*lot, it->second, true);
                 mesh = &it->second;
             }
+            if (r.h.story == detailStory && r.h.id == detailId) Detail(r, mesh, lot, samples);
             Stats s;
             Compare(r, mesh, lot, s, samples);
             fileStats.n += s.n, fileStats.within += s.within;
@@ -203,8 +281,10 @@ int main(int argc, char** argv) {
     std::printf("all: %.2f%% within 2/255 of %ld lamp texels; by surface: %s\n", pct(all.within, all.n), all.n, maps.c_str());
     std::printf("misses by likely cause: %s\n", tags.empty() ? "none" : tags.c_str());
     std::sort(rooms.begin(), rooms.end(), [](const RoomLine& a, const RoomLine& b) { return a.within < b.within; });
-    for (size_t i = 0; i < rooms.size() && i < 5 && rooms[i].within < 100.0; i++)
-        std::printf("  worst: %s: %.1f%% of %ld (mostly %s)\n", rooms[i].name.c_str(), rooms[i].within, rooms[i].n, TagName(rooms[i].tag));
+    std::set<std::string> shown; // (each room once, at its worst solve)
+    for (size_t i = 0; i < rooms.size() && shown.size() < 8 && rooms[i].within < 100.0; i++)
+        if (shown.insert(rooms[i].name).second)
+            std::printf("  worst: %s: %.1f%% of %ld (mostly %s)\n", rooms[i].name.c_str(), rooms[i].within, rooms[i].n, TagName(rooms[i].tag));
     if (update && !baseline.empty()) {
         std::ofstream out(baseline);
         for (const auto& [name, v] : now) out << std::quoted(name) << ' ' << v << '\n';

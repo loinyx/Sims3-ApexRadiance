@@ -45,7 +45,8 @@ DeviceCalls PlainCalls(); // the device's own methods (the harness)
 // The shader objects (made by the caller: the game from its shader cache, the harness with D3DCompile)
 enum ShaderId {
     kShadowVs, kTexelVs, kShadowPs, kAccPs, kComposePs, kCopyPs, kBlurRowPs, kBlurColPs, kBlockPs, kAccFastPs, kAccRlgPs, kAccRlgFastPs, kComposeRlgPs,
-    kAccKeptPs, kComposeKeptPs, kCopyAtPs, kBlockKeptPs, kAccKept0Ps, kAccKept0XPs, kComposeK0Ps, kAccPhysPs, kAccPhysFastPs, kT3dPs, kAccPhysXPs, kShaderCount
+    kAccKeptPs, kComposeKeptPs, kCopyAtPs, kBlockKeptPs, kAccKept0Ps, kAccKept0XPs, kComposeK0Ps, kAccPhysPs, kAccPhysFastPs, kT3dPs, kAccPhysXPs,
+    kAccPhysInPs, kAccPhysInFastPs, kShaderCount
 };
 const char* EntryOf(ShaderId id);
 bool IsVertex(ShaderId id);
@@ -80,6 +81,7 @@ struct Params {
     float nearBlocker = 0.3f;  // m: the nearest blocker the penumbra search considers
     float farDist = 64.0f;
     bool fast = false;         // AccFastPS: fewer shadow taps (a lamp being dragged)
+    bool shadowAtMask = false; // AccPhys: the shadow looked up at the points' mask.xyz (a room's phys points, RtLampProxy::IntoRoom)
     bool maskAllGpu = false;   // Compose: the floor mask's "all" of the GPU lamps from the last Accumulate's lamps (its only batch), not dyn.x
     // Compose (GPU room lamps): room 0's kept lamps were added with their floor mask and exit parts (AddKeptParts, extra): ComposeK0PS
     // with the second sum (texels: mask.z = the exit lamps' light left in the base, mask.w = 1 an exit ground texel)
@@ -282,7 +284,7 @@ class Engine {
     bool AccumulatePhys(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n, const PhysRoom& room,
                         const Params& p, bool first, std::string& err);
     // Every physical shader was made (room 0's AccPhysXPS too)
-    bool PhysReady() const { return ps_[kAccPhysPs] && ps_[kAccPhysFastPs] && ps_[kT3dPs] && ps_[kAccPhysXPs]; }
+    bool PhysReady() const { return ps_[kAccPhysPs] && ps_[kAccPhysFastPs] && ps_[kT3dPs] && ps_[kAccPhysXPs] && ps_[kAccPhysInPs] && ps_[kAccPhysInFastPs]; }
 
     // The state of the device around a series of passes (render targets, depth, every state a state block holds)
     bool Begin(IDirect3DDevice9* dev); // false: no state block could be made, nothing was changed (End is not called)

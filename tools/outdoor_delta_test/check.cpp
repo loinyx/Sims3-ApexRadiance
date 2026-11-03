@@ -1288,6 +1288,19 @@ void PhysPickChecks() {
         ok = ok && now == std::vector<L>{{7, 1}} && missing.empty();
         Check(ok, "physical pick: a lamp the registry drops for a moment is carried for its grace, then gone; another lot carries none");
     }
+    { // a room's texel past its own diagonal wall is shadow-tested inside the room (RtLampProxy::IntoRoom)
+        RtLampProxy::Lot lot;
+        RtLampProxy::Story st;
+        st.story = 1, st.w = 2, st.h = 1, st.room = {8, 0, 0, 8, 0, 0, 0, 0};
+        lot.stories.push_back(st);
+        float out[3] = {0.8f, 1.0f, 0.3f}, in[3] = {0.5f, 1.0f, 0.1f}, far[3] = {1.5f, 1.0f, 0.5f};
+        const bool moved = RtLampProxy::IntoRoom(lot, 1, 8, out);
+        const float fx = out[0], fz = out[2];
+        const int q = std::fabs(fx - 0.5f) <= std::fabs(fz - 0.5f) ? (fz > 0.5f ? 2 : 0) : (fx > 0.5f ? 1 : 3);
+        Check(moved && (q == 0 || q == 3) && out[1] == 1.0f && std::hypot(out[0] - 0.8f, out[2] - 0.3f) < 0.3f && !RtLampProxy::IntoRoom(lot, 1, 8, in) &&
+                  !RtLampProxy::IntoRoom(lot, 1, 8, far) && !RtLampProxy::IntoRoom(lot, 2, 8, in),
+              "physical shadow: a room's texel past its diagonal wall is looked up just inside the room; one inside, in a tile without the room or another story, is not moved");
+    }
     {
         uintptr_t v[4] = {};
         Check(PhysLampPick::ListLen(nullptr, nullptr, 8) == 0 && PhysLampPick::ListLen(v, v + 3, 8) == 3 && PhysLampPick::ListLen(nullptr, v, 8) == -1 &&

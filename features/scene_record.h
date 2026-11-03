@@ -209,6 +209,7 @@ struct Stats {
     float worst = 0.0f;
     uint32_t worstTexel = 0;
     uint64_t worstLight = 0;
+    float ratio = 0.0f; // the median game / GPU ratio of the summed channels where both are lit (Compare's call alone)
 };
 // One room's lamps against the game's parts; mesh = the lot's occluders with open tops (null: the cube shadow taken as 1,
 // in game), lot = its space. Texels with neither a game part nor a GPU term over 0 are not counted
@@ -219,6 +220,7 @@ inline void Compare(const Room& r, const RtLampProxy::Mesh* mesh, const RtLampPr
     std::vector<uint32_t> stamp;
     uint32_t mark = 0;
     std::vector<float> game(r.texels.size() * 3);
+    std::vector<float> ratios;
     for (size_t l = 0; l < r.lamps.size(); l++) {
         const Lamp& L = r.lamps[l];
         std::fill(game.begin(), game.end(), 0.0f);
@@ -236,6 +238,7 @@ inline void Compare(const Room& r, const RtLampProxy::Mesh* mesh, const RtLampPr
             if (mesh && lot) {
                 float Pl[3];
                 RtLampProxy::ToLot(*lot, t.p, Pl);
+                RtLampProxy::IntoRoom(*lot, r.h.story, r.h.id, Pl); // (as the GPU's shadow lookup: gpu_room_lamps.cpp)
                 vis = RtLampProxy::Visibility(*mesh, Ll, r.h.radius, Pl, visSamples, &stamp, &mark);
             }
             const float t3d = haveBlk && t.tested && vis > 0.0f
@@ -249,7 +252,12 @@ inline void Compare(const Room& r, const RtLampProxy::Mesh* mesh, const RtLampPr
             const int tag = TagOf(g, gpu, noT3d, noVis, noReach, lawOnly);
             s.n++, s.within += tag == kOk, s.tags[tag]++, s.mapN[t.map & 3]++, s.mapWithin[t.map & 3] += tag == kOk;
             if (const float d = MaxDiff(g, gpu); d > s.worst) s.worst = d, s.worstTexel = static_cast<uint32_t>(i), s.worstLight = L.light;
+            if (const float gs = g[0] + g[1] + g[2], ps = gpu[0] + gpu[1] + gpu[2]; gs > kWithin && ps > kWithin) ratios.push_back(gs / ps);
         }
+    }
+    if (!ratios.empty()) {
+        std::nth_element(ratios.begin(), ratios.begin() + ratios.size() / 2, ratios.end());
+        s.ratio = ratios[ratios.size() / 2];
     }
 }
 

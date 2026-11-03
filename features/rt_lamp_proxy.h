@@ -72,6 +72,46 @@ inline void ToLot(const Lot& l, const float w[3], float out[3]) {
 inline void DirToLot(const Lot& l, const float w[3], float out[3]) {
     for (int k = 0; k < 3; k++) out[k] = w[0] * l.worldToLot[0][k] + w[1] * l.worldToLot[1][k] + w[2] * l.worldToLot[2][k];
 }
+// A room's texel the game samples just past its own diagonal wall (a half tile's texel, its centre over the wall line; the game's
+// tests light it, the shadow mesh's wall shaded it: a dark band along the room's diagonal walls, 1:8 of the scene of 03/11) is
+// taken for the shadow test kInset inside the nearest quadrant of its room in the same tile (lot space, P's height kept). False:
+// it lies in its room, its tile holds no quadrant of the room, the ids are not known, or it is over kNear from that quadrant
+inline bool IntoRoom(const Lot& lot, int story, int id, float P[3]) {
+    constexpr float kInset = 0.03f, kNear = 0.5f;
+    const Story* s = nullptr;
+    for (const Story& st : lot.stories)
+        if (st.story == story) s = &st;
+    if (!s || id <= 0) return false;
+    const float fx0 = std::floor(P[0]), fz0 = std::floor(P[2]);
+    const int ix = static_cast<int>(fx0), iz = static_cast<int>(fz0);
+    if (ix < 0 || iz < 0 || ix >= s->w || iz >= s->h || s->room.size() != 4 * static_cast<size_t>(s->w) * s->h) return false;
+    const int32_t* q = &s->room[4 * (static_cast<size_t>(iz) * s->w + ix)];
+    const float fx = P[0] - fx0, fz = P[2] - fz0;
+    const int at = std::fabs(fx - 0.5f) <= std::fabs(fz - 0.5f) ? (fz > 0.5f ? 2 : 0) : (fx > 0.5f ? 1 : 3); // (LampVis::Quadrant)
+    if (q[at] == id) return false;
+    const float corners[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}}; // quadrant k: corners k, k + 1 and the centre (QuadrantCorners)
+    float best = kNear * kNear, bx = 0, bz = 0;
+    for (int k = 0; k < 4; k++) {
+        if (q[k] != id) continue;
+        const float t[3][2] = {{corners[k][0], corners[k][1]}, {corners[(k + 1) & 3][0], corners[(k + 1) & 3][1]}, {0.5f, 0.5f}};
+        const float cx = (t[0][0] + t[1][0] + t[2][0]) / 3.0f, cz = (t[0][1] + t[1][1] + t[2][1]) / 3.0f;
+        for (int e = 0; e < 3; e++) { // the nearest point of each side (P is outside the triangle)
+            const float* a = t[e];
+            const float* b = t[(e + 1) % 3];
+            const float dx = b[0] - a[0], dz = b[1] - a[1];
+            const float u = std::clamp(((fx - a[0]) * dx + (fz - a[1]) * dz) / (dx * dx + dz * dz), 0.0f, 1.0f);
+            const float nx = a[0] + u * dx, nz = a[1] + u * dz;
+            const float d2 = (fx - nx) * (fx - nx) + (fz - nz) * (fz - nz);
+            if (d2 < best) {
+                const float ix2 = cx - nx, iz2 = cz - nz, il = std::sqrt(ix2 * ix2 + iz2 * iz2);
+                best = d2, bx = nx + ix2 / il * kInset, bz = nz + iz2 / il * kInset;
+            }
+        }
+    }
+    if (!(best < kNear * kNear)) return false;
+    P[0] = fx0 + bx, P[2] = fz0 + bz;
+    return true;
+}
 
 struct Tri {
     float v[3][3];

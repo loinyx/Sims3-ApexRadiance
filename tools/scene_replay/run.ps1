@@ -3,7 +3,8 @@ param(
     [string[]]$Scenes = @((Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Electronic Arts\The Sims 3\Apex Radiance\Captures')),
     [string]$Baseline = '',
     [switch]$UpdateBaseline,
-    [switch]$SelfTest
+    [switch]$SelfTest,
+    [string]$Detail = ''
 )
 # Lighting scene replay (features/scene_record.h, docs/development/scene-replay.md): compiles replay.cpp against the production
 # headers and runs it over the recorded scenes (every .apexscene under -Scenes). Read-only: writes the compiler outputs to
@@ -21,6 +22,7 @@ try {
     if ($SelfTest) { $runArgs += '--selftest' }
     if ($Baseline) { $runArgs += @('--baseline', $Baseline) }
     if ($UpdateBaseline) { $runArgs += '--update-baseline' }
+    if ($Detail) { $runArgs += @('--detail', $Detail) }
     & './scene_replay.exe' @runArgs @Scenes
     if ($LASTEXITCODE -ne 0) { throw 'Scene replay found a regression or a failed self-test' }
 } finally { Pop-Location }
