@@ -264,5 +264,25 @@ inline void BasisPartPhys(float row, float vis, float t3d, float drop, const flo
     if (drop > share || !std::isfinite(share)) share = 0.0f;
     for (int i = 0; i < 16; i++) out[i] = row * share * step[i];
 }
+// (physical) a lamp's directional parts over a room's n samples added to acc. A lamp where it stood at the room's kept solve
+// (`still`, pass: its kept shares, mult) takes the game's part (BasisPartNow: the game's levels exactly, a value edit
+// included); a moved one the physical part x scale (the game's over the physical levels when it last stood still, 1 unknown).
+// Furniture lit by these maps showed the physical levels (0.74x the game's in story 1 room 2, [BasisRatio] of 03/11) until a
+// game solve wrote its own, then the physical again: objects brighter for a few seconds after each edit. game / phys: the
+// still lamp's summed levels both ways (the next move's scale)
+inline void BasisLampAdd(bool still, const float* pass, int mult, float row, const float* vis, const float* t3d, float drop, const float* step, size_t n, float scale,
+                         float* acc, double& game, double& phys) {
+    float p[16], g[16];
+    for (size_t i = 0; i < n; i++) {
+        BasisPartPhys(row, vis[i], t3d[i], drop, &step[i * 16], p);
+        if (still && BasisPartNow(pass[i], mult, &step[i * 16], g)) {
+            for (int q = 0; q < 16; q++) {
+                acc[i * 16 + q] += g[q];
+                if ((q & 3) != 3) game += g[q], phys += p[q];
+            }
+        } else
+            for (int q = 0; q < 16; q++) acc[i * 16 + q] += p[q] * scale;
+    }
+}
 
 } // namespace OutdoorDeltaModel

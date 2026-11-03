@@ -5063,12 +5063,22 @@ void WritePhysBasis(PhysBasisJob& job) {
         const KeptRoom& k = *r.k;
         const size_t n = k.basis.size();
         std::vector<float> acc(k.basisBase);
-        float part[16];
-        for (const PhysBasisLamp& l : r.lamps)
-            for (size_t i = 0; i < n; i++) {
-                BasisPartPhys(l.row, l.vis[i], l.t3d[i], RoomLightTests::K_DROP, &l.step[i * 16], part);
-                for (int q = 0; q < 16; q++) acc[i * 16 + q] += part[q];
-            }
+        // (light tree thread) per kept room and lamp, the game's over the physical levels when it last stood still
+        static std::unordered_map<uint64_t, std::unordered_map<uintptr_t, float>> s_scale;
+        if (s_scale.size() > 4096) s_scale.clear();
+        auto& scales = s_scale[key];
+        for (const PhysBasisLamp& l : r.lamps) {
+            const auto bl = std::find_if(k.basisLamps.begin(), k.basisLamps.end(), [&](const KeptRoom::BasisLamp& b) { return b.light == l.light; });
+            const auto kl = std::find_if(k.lamps.begin(), k.lamps.end(), [&](const KeptLamp& x) { return x.light == l.light; });
+            const float dx = kl != k.lamps.end() ? l.world[0] - kl->pos[0] : 1.0f, dy = kl != k.lamps.end() ? l.world[1] - kl->pos[1] : 0.0f,
+                        dz = kl != k.lamps.end() ? l.world[2] - kl->pos[2] : 0.0f;
+            const bool still = bl != k.basisLamps.end() && bl->pass.size() == n && dx * dx + dy * dy + dz * dz < 0.005f * 0.005f;
+            const auto sc = scales.find(l.light);
+            double game = 0.0, phys = 0.0;
+            BasisLampAdd(still, still ? bl->pass.data() : nullptr, still ? bl->mult : 1, l.row, l.vis.data(), l.t3d.data(), RoomLightTests::K_DROP, l.step.data(), n,
+                         sc != scales.end() ? sc->second : 1.0f, acc.data(), game, phys);
+            if (still && phys > 1e-6) scales[l.light] = static_cast<float>(std::clamp(game / phys, 0.25, 4.0));
+        }
         long w = 0, left = 0;
         if (const char* f = WriteBasisAcc(key, k, acc, w, left)) {
             failed[key] = f;

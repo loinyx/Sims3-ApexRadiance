@@ -584,6 +584,17 @@ void BasisPhysChecks() {
     const bool dropped = std::all_of(part, part + 16, [](float v) { return v == 0.0f; });
     BasisPartPhys(3.0f, 0.5f, 0.5f, K_DROP, step, part);
     Check(dropped && part[0] == 3.0f * 0.25f * 0.25f, "physical directional maps: a share under the game's drop adds nothing, else row x share x step");
+    { // a still lamp takes the game's levels (its kept pass), a moved one the physical part x the scale learnt while still
+        float st[32], acc[32] = {}, acc2[32] = {};
+        std::fill(st, st + 32, 0.25f);
+        const float pass[2] = {0.8f, 0.6f}, vis[2] = {0.5f, 0.5f}, t3d[2] = {1.0f, 1.0f};
+        double game = 0.0, phys = 0.0;
+        BasisLampAdd(true, pass, 1, 1.0f, vis, t3d, K_DROP, st, 2, 1.0f, acc, game, phys);
+        const float scale = static_cast<float>(game / phys);
+        BasisLampAdd(false, nullptr, 1, 1.0f, vis, t3d, K_DROP, st, 2, scale, acc2, game, phys);
+        Check(acc[0] == 0.8f * 0.25f && acc[16] == 0.6f * 0.25f && std::fabs(scale - 1.4f) < 1e-5f && std::fabs(acc2[0] - 0.5f * 0.25f * scale) < 1e-6f,
+              "physical directional maps: a still lamp writes the game's levels, a moved one the physical part at the game's scale");
+    }
     { // the shares kept between writes: lamp A still, then moved, then with fewer samples lit, as traced afresh
         std::vector<float> P(static_cast<size_t>(n) * 3);
         for (float& v : P) v = U(rng) * 8.0f;
