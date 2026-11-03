@@ -4136,7 +4136,7 @@ bool StandsOnFurniture(uintptr_t tracker, int story, int room, uintptr_t light) 
     if (!k || !k->physical) return false;
     const auto kl = std::find_if(k->lamps.begin(), k->lamps.end(), [&](const KeptLamp& l) { return l.light == light; }); // (where it stood at the solve)
     return kl != k->lamps.end() && std::any_of(k->tests.rec.begin(), k->tests.rec.end(), [&](const RoomLightTests::Record& rc) {
-               return RoomLightTests::StandsOn(rc.c.x, rc.c.y, rc.c.z, rc.r2, kl->pos);
+               return RoomLightTests::StandsOn(rc, kl->pos);
            });
 }
 void NoteLightObjectRemoved() {

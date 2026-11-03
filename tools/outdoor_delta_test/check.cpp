@@ -1349,15 +1349,14 @@ void PhysPickChecks() {
     }
     {
         using PhysLampPick::OccMove;
-        const OccMove lampAlone[] = {{0x10, 1000, 5.0f, 5.0f}, {0x10, 1100, 5.1f, 5.0f}};
-        const OccMove tableToo[] = {{0x10, 1000, 5.0f, 5.0f}, {0x20, 1010, 5.05f, 4.9f}};
+        // (03/11 13:56 recording) a table dragged with its lamp moves one occluder entry, 57B1E040, along with the head
+        const OccMove tableDrag[] = {{0x57B1E040, 1000, 854.55f, 1237.48f}, {0x57B1E040, 1100, 854.43f, 1237.63f}};
         const OccMove stale[] = {{0x10, 100, 5.0f, 5.0f}, {0x20, 110, 5.0f, 5.0f}};
-        const OccMove far[] = {{0x10, 1000, 5.0f, 5.0f}, {0x20, 1010, 9.0f, 5.0f}};
-        Check(!PhysLampPick::FurnitureMovedWith(lampAlone, 2, 5.1f, 5.0f, 1200, 600, 1.0f) &&
-                  PhysLampPick::FurnitureMovedWith(tableToo, 2, 5.05f, 5.0f, 1200, 600, 1.0f) &&
+        const OccMove far[] = {{0x10, 100, 5.0f, 5.0f}, {0x20, 1010, 9.0f, 5.0f}};
+        Check(PhysLampPick::FurnitureMovedWith(tableDrag, 2, 854.43f, 1237.63f, 1200, 600, 1.0f) &&
                   !PhysLampPick::FurnitureMovedWith(stale, 2, 5.0f, 5.0f, 1200, 600, 1.0f) &&
                   !PhysLampPick::FurnitureMovedWith(far, 2, 5.0f, 5.0f, 1200, 600, 1.0f),
-              "physical pick: a lamp dragged alone carries no furniture; a table moved with it does; old or far moves do not count");
+              "physical pick: a table dragged with its lamp (one occluder entry moving) carries its furniture; old or far moves do not count");
     }
     {
         // a floor texel at (1, 2, 1) with 0.25 m steps; samples: position at 0..2, normal at 4..6
@@ -1571,8 +1570,20 @@ void BlockerTableChecks() {
               "blocker table: a table kept at its new place shades the floor under it and no longer under the old one");
         // (CarryBlockers, StandsOnFurniture) a lamp on the table's top stands on it; a chandelier over it or a lamp beside it does not
         const float onTop[3] = {1.0f, 1.34f, 0.0f}, over[3] = {1.0f, 2.5f, 0.0f}, beside[3] = {2.2f, 1.34f, 0.0f}, below[3] = {1.0f, 0.3f, 0.0f};
-        const auto stands = [&](const float* p) { return RoomLightTests::StandsOn(1.0f, 0.77f, 0.0f, 1.0f, p); };
-        Check(stands(onTop) && !stands(over) && !stands(beside) && !stands(below),"stands on: a table lamp yes; a chandelier over the table, a lamp beside or under it no");
+        const auto stands = [&](const float* p) { return RoomLightTests::StandsOn(moved.rec[0], p); };
+        // (13:56 scene, record 23) a sofa: three upright or tilted rectangles in a sphere of r 1.69 m whose centre is 1.2 m off the lamp
+        RoomLightTests::Record sofa;
+        sofa.c = {-0.87f, 0.0f, -0.82f}, sofa.r2 = 1.69f * 1.69f;
+        for (const V n : {V{0.87f, 0.0f, -0.5f}, V{0.39f, -0.62f, 0.68f}, V{0.5f, 0.0f, 0.87f}}) {
+            RoomLightTests::Blocker k{};
+            k.vt = kQuadVt;
+            put(k, 0x70, sofa.c), put(k, 0x90, n), put(k, 0xA0, V{-n.z, 0.0f, n.x}), put(k, 0xB0, V{0.0f, 1.0f, 0.0f});
+            k.f[0xD0 / 4] = k.f[0xD8 / 4] = 1.28f, k.f[0xD4 / 4] = k.f[0xDC / 4] = 0.61f;
+            sofa.b.push_back(k);
+        }
+        const float bySofa[3] = {0.0f, 0.86f, 0.0f};
+        Check(stands(onTop) && !stands(over) && !stands(beside) && !stands(below) && !RoomLightTests::StandsOn(sofa, bySofa),
+              "stands on: a table lamp yes; a chandelier over the table, a lamp beside or under it, or beside a sofa no");
         // (Offset) the kept table at x = -1 moved 2 m by its record's offset casts exactly the shadow of the table kept at x = 1
         RtLampGpu::BlockerTable kept;
         const int hk = kept.Append(tableAt(-1.0f));

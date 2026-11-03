@@ -245,15 +245,13 @@ struct OccMove {
     uint32_t at = 0;
     float x = 0.0f, z = 0.0f;
 };
-// A lamp's furniture moved with it: two objects beside its head moved lately. Dragging a table moves the table's object and the
-// lamp's own; a lamp dragged alone across its table moves only its own (03/11: its table's shadow was carried off the table)
+// A lamp's furniture moved with it: an occluder beside its head moved lately. Dragging a table with its lamp moves one occluder
+// entry, never two (03/11 recordings 11:47 and 13:56: 57B1E040, then 9D2D0970 after the drop); asking for two never carried the
+// table, and its shadow stayed where the last solve read it while the floor under the dragged table lit up
 inline bool FurnitureMovedWith(const OccMove* m, int n, float lx, float lz, uint32_t now, uint32_t withinMs, float nearM) {
-    uintptr_t first = 0;
     for (int i = 0; i < n; i++) {
         const float dx = m[i].x - lx, dz = m[i].z - lz;
-        if (!m[i].entry || now - m[i].at > withinMs || dx * dx + dz * dz > nearM * nearM) continue;
-        if (!first) first = m[i].entry;
-        else if (m[i].entry != first) return true;
+        if (m[i].entry && now - m[i].at <= withinMs && dx * dx + dz * dz <= nearM * nearM) return true;
     }
     return false;
 }

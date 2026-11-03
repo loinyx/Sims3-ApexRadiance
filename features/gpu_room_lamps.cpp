@@ -440,16 +440,24 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                 return true;
             };
             // (03/11 recording: the side table's record stays where the room's last solve read it while its lamp moves with it, its
-            // shadow left behind on the side away from the drag; each solve then reads it under the lamp again) a record a kept lamp
-            // stood on (RoomLightTests::StandsOn) moves with the lamp until the next solve while the lamp keeps its height and the
-            // furniture moved with it (LampMarkFilter::FurnitureMovedWith: a lamp dragged alone across its table carried the table's
-            // shadow off it, a second round shadow beside the table). The offset stays where the drag left it until that solve
+            // shadow left behind on the side away from the drag; each solve then reads it under the lamp again) a record whose top a
+            // kept lamp stood on (RoomLightTests::StandsOn) moves with the lamp until the next solve while the lamp keeps its height
+            // and an occluder moved by its head (LampMarkFilter::FurnitureMovedWith). A lamp now on another record's top left its own
+            // (lifted onto the next table): that record stays. The offset stays where the drag left it until that solve.
+            // shortcut: a lamp moved alone between two places on one top carries that top until the drop's solve; tell it from a
+            // table drag by the occluder entry's object if a recording of one shows it
             if (e.blockers != e.blkOut) e.blkBase = e.blockers, e.blkOut.reset(), e.carried.clear(), e.offHash = 0; // (a solve's table)
             if (e.blkBase && e.blkHeader >= 0.0f) {
                 const RtLampGpu::BlockerTable& t = *e.blkBase;
                 const auto& head = t.rows[static_cast<size_t>(e.blkHeader)];
                 const int firstRec = static_cast<int>(head.v[0]), recs = static_cast<int>(head.v[1]);
                 std::vector<std::array<float, 3>>& off = e.carried;
+                const auto onTop = [&](int i, const float p[3]) {
+                    const auto& ix = t.rows[static_cast<size_t>(firstRec + 2 * i + 1)];
+                    for (int k = 0; k < static_cast<int>(ix.v[1]); k++)
+                        if (RoomLightTests::StandsOn(t.BlockerAt(static_cast<int>(ix.v[0]) + k * RtLampGpu::BlockerTable::kBlockerRows), p)) return true;
+                    return false;
+                };
                 for (const auto& rl : e.roomLamps) {
                     if (rl.colourOnly) continue;
                     GpuLampLaw::Lamp now;
@@ -459,12 +467,17 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                     if (dx * dx + dz * dz < 1e-4f || std::fabs(now.pos[1] - rl.pos[1]) > 0.02f ||
                         !LampMarkFilter::FurnitureMovedWith(now.pos[0], now.pos[2]))
                         continue;
+                    bool elsewhere = false;
+                    for (int i = 0; i < recs && !elsewhere; i++) elsewhere = onTop(i, now.pos) && !onTop(i, rl.pos);
                     for (int i = 0; i < recs; i++) {
-                        const auto& c = t.rows[static_cast<size_t>(firstRec + 2 * i)];
-                        if (!RoomLightTests::StandsOn(c.v[0], c.v[1], c.v[2], c.v[3], rl.pos)) continue;
+                        if (!onTop(i, rl.pos)) continue;
                         const auto o = std::find_if(off.begin(), off.end(), [&](const std::array<float, 3>& k) { return k[0] == static_cast<float>(i); });
-                        if (o == off.end()) off.push_back({static_cast<float>(i), dx, dz});
-                        else (*o)[1] = dx, (*o)[2] = dz;
+                        if (elsewhere) {
+                            if (o != off.end()) off.erase(o);
+                        } else if (o == off.end())
+                            off.push_back({static_cast<float>(i), dx, dz});
+                        else
+                            (*o)[1] = dx, (*o)[2] = dz;
                     }
                 }
                 uint64_t oh = 0;

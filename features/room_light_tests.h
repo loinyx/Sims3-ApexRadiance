@@ -66,13 +66,21 @@ struct Record {
     std::vector<Blocker> b;
     float cull2 = 0.0f; // record+0x20: the per-batch list's cull radius^2 (the tests here read all records)
 };
-// A lamp at `lamp` standing on the record (centre c, radius^2 r2): over its footprint, above its centre and at most kOnTopM over its
-// sphere's top (a ceiling lamp or sconce over the furniture stands higher). UNVERIFIED: kOnTopM against real table lamps and low
-// chandeliers; the sphere's top overestimates a box's, so a very low chandelier over a large table can still pass
-constexpr float kOnTopM = 0.6f;
-inline bool StandsOn(float cx, float cy, float cz, float r2, const float lamp[3]) {
-    const float dx = lamp[0] - cx, dz = lamp[2] - cz, up = lamp[1] - cy;
-    return dx * dx + dz * dz < r2 && up > 0.0f && up < std::sqrt(r2) + kOnTopM;
+// A lamp at `lamp` standing on the blocker: a level top (a disc or rectangle facing up or down: a table's, not a sofa's back), the
+// lamp over it inside its edge and at most kOnTopM above it (a ceiling lamp or sconce over the furniture stands higher). Not the
+// record's sphere: the sofa's (r 1.69 m, three upright quads) held the table lamp 1.2 m off it, and its shadow was carried along
+// (03/11 13:56 scene). UNVERIFIED: kOnTopM against taller table lamps (this one's head is 0.57 m over its top) and low chandeliers
+constexpr float kOnTopM = 1.0f;
+inline bool StandsOn(const Blocker& k, const float lamp[3]) {
+    const bool disc = k.vt == kDiscVt;
+    if (!disc && k.vt != kQuadVt) return false;
+    const V c = k.v(disc ? 0x20 : 0x70), d{lamp[0] - c.x, lamp[1] - c.y, lamp[2] - c.z};
+    if (std::fabs(k.v(disc ? 0x40 : 0x90).y) < 0.95f || !(d.y > 0.0f && d.y < kOnTopM)) return false;
+    if (disc) return d.x * d.x + d.z * d.z < k.f[0x70 / 4];
+    return std::fabs(dot(d, k.v(0xA0))) < k.f[0xD0 / 4] && std::fabs(dot(d, k.v(0xB0))) < k.f[0xD4 / 4];
+}
+inline bool StandsOn(const Record& rc, const float lamp[3]) {
+    return std::any_of(rc.b.begin(), rc.b.end(), [&](const Blocker& k) { return StandsOn(k, lamp); });
 }
 struct Wall {
     float f[64];
