@@ -546,7 +546,7 @@ std::atomic<DWORD> g_relightAllAt{0}; // a whole-world relight is due at this ti
 std::mutex g_relightWhyMx;
 std::string g_relightWhy; // the reasons merged into it
 
-void NoteSolve(BYTE* room, char event, uintptr_t caller = 0); // development build: the solve journal of the F8 diag
+void NoteSolve(BYTE* room, char event, uintptr_t caller = 0, const uintptr_t* chain = nullptr, const float* pt = nullptr); // development build: the solve journal of the F8 diag
 
 // ---- Lamp edits first ----
 // Lamps must update at once when anything changes (moved, switched, recoloured, removed), practically instantly,
@@ -788,7 +788,13 @@ bool QueueRoom(uintptr_t tracker, int level, int id, bool defer = false, int urg
     alignas(16) BYTE out[16] = {};
     reinterpret_cast<SetInsert_t>(kSetInsert)(reinterpret_cast<void*>(tl + 0x28), out, &id, 0);
     if (urgentSoon) GatherSoon(room);
-    if (Recorder::Verbose()) NoteSolve(room, 'Q');
+    if (Recorder::Verbose()) { // (who sent it: QueueRoom's callers, 3 deep, for the solve journal)
+        void* fr[3] = {};
+        const USHORT nf = CaptureStackBackTrace(1, 3, fr, nullptr);
+        uintptr_t chain[3] = {};
+        for (USHORT i = 0; i < nf; i++) chain[i] = reinterpret_cast<uintptr_t>(fr[i]);
+        NoteSolve(room, 'Q', 0, chain);
+    }
     return true;
 }
 
@@ -2501,7 +2507,9 @@ struct SolveNote {
     bool gather, boosted, merged;
     float norm, c4[3], wallBase;
     long moved, ghostWalls, odd;
-    uintptr_t caller; // 'I' / 'F': the return address of the invalidate (who restarted the room)
+    uintptr_t caller; // 'I' / 'F': the return address of the invalidate (who restarted the room); 'M' / 'L': the light; 'O' / 'o': the occluder entry
+    uintptr_t chain[3]; // 'Q': QueueRoom's callers
+    float pt[3];        // 'O' / 'o': the occluder's point (x, z) and how far it moved since its last mark
 };
 std::mutex g_journalMx;
 constexpr size_t kJournal = 4096;
@@ -7455,9 +7463,11 @@ void __fastcall WallBlurHook(BYTE* room) {
 
 // Development build: one note per solve step of a room that takes or gives light through an opening or is merged
 // with another story's room (a lot's other rooms are left out)
-void NoteSolve(BYTE* room, char event, uintptr_t caller) {
+void NoteSolve(BYTE* room, char event, uintptr_t caller, const uintptr_t* chain, const float* pt) {
     SolveNote n{};
     n.caller = caller;
+    if (chain) std::copy_n(chain, 3, n.chain);
+    if (pt) std::copy_n(pt, 3, n.pt);
     if (!ReadSolveNote(room, n)) return;
     n.tick = GetTickCount();
     n.room = reinterpret_cast<uintptr_t>(room);
@@ -7619,7 +7629,15 @@ std::vector<std::pair<DWORD, std::string>> JournalLinesSince(DWORD fromTick) {
         std::string s = std::format("{} {} room {} story {} | class {}/{} st {} | lights {} ({}) | {}{} | c4 ({:.3f} {:.3f} {:.3f}) | lot {:08X} cam {} flag {}",
                                     n.gather ? 'G' : 'O', n.event, n.id, n.level, n.cls, n.shown, n.state, n.lights, n.cross, n.boosted ? 'B' : '-',
                                     n.merged ? 'M' : '-', n.c4[0], n.c4[1], n.c4[2], n.lot, n.cam, n.flag19);
-        if (n.caller) s += std::format(" | caller {:08X}", n.caller);
+        if (n.event == 'M' || n.event == 'L') s += std::format(" | {} of lamp {:08X}", n.event == 'M' ? "the game's mark, let through" : "the room it left, marked", n.caller);
+        else if (n.event == 'O' || n.event == 'o')
+            s += std::format(" | occluder {:08X} at ({:.2f} {:.2f}) moved {:.2f} m: {}", n.caller, n.pt[0], n.pt[1], n.pt[2], n.event == 'O' ? "its mark let through" : "its mark dropped");
+        else if (n.event == 'Q') {
+            s += " | from";
+            for (const uintptr_t c : n.chain)
+                if (c) s += " " + RoomSolveCauses::CallerText(c);
+        } else if (n.caller)
+            s += " | caller " + RoomSolveCauses::CallerText(n.caller);
         out.emplace_back(n.tick, std::move(s));
     }
     return out;
@@ -18798,6 +18816,17 @@ float UnderFloorShareAt(const unsigned char* room, const float* sample) {
     return room0 ? UnderFloorShare(room0, sample, base) : -1.0f;
 }
 bool ListAllWrapped(const unsigned char* room) { return room && AllEvalWrapped(room); }
+BYTE* RoomOfLevelTry(uintptr_t tl, int id) { // POD (SEH)
+    __try {
+        void* mgr = *reinterpret_cast<void* const*>(tl);
+        return mgr ? static_cast<BYTE*>(reinterpret_cast<RoomById_t>(kRoomById)(mgr, id)) : nullptr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+}
+void JournalMark(uintptr_t tl, int id, char event, uintptr_t what, const float* pt) {
+    if (BYTE* room = tl && kRoomById ? RoomOfLevelTry(tl, id) : nullptr) NoteSolve(room, event, what, nullptr, pt);
+}
 bool IsReplayList(const void* begin) { return begin && reinterpret_cast<uintptr_t>(begin) == g_replayListAt.load(); }
 
 // ---- The room lamp probe's dump (outdoor_delta.h ProbeRoomText; light tree thread) ----

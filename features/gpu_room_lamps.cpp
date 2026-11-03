@@ -421,7 +421,8 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
         int type = 0, reg = -1;
         if (e.physical) { // (no parts, so no move rule: every lamp drawn with its law now; a lamp gone or without a law adds nothing)
             const uint32_t gen = RtOutdoorLamps::KeptMeshGen();
-            OutdoorDelta::LiveBlockers(r.room, cls, e.version, e.blkGen, e.blockers, e.blkHeader); // (a table moved with its lamp: this round)
+            if (OutdoorDelta::LiveBlockers(r.room, cls, e.version, e.blkGen, e.blockers, e.blkHeader) && OutdoorDelta::TraceLine()) // (a table moved with its lamp: this round)
+                LOG_INFO(std::format("[LiveBlk] story {} room {} class {}: the GPU took its furniture read again (generation {}), relit this round", e.story, e.id, cls, e.blkGen));
             Mix(sig, &e.version, sizeof e.version), Mix(sig, &gen, sizeof gen), Mix(sig, &e.blkGen, sizeof e.blkGen);
             any = true;
             // (S8) the ceiling pass's ambient follows the room's now: Rooms at Night's sliders and the lamp edits taken, no solve

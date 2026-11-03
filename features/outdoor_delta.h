@@ -106,6 +106,8 @@ void SolveTouched(const void* room);
 void SolveUnkept();
 // (render thread) a kept physical room's furniture blockers read again since its solve (a table dragged with the lamp on it moves
 // its 3D record before any solve): true and the newer table when its generation is past `gen` for kept solve `version`
+// Development build / a recording: a drag trace line may be written now (60 every 10 s at most)
+bool TraceLine();
 bool LiveBlockers(const void* room, int cls, uint32_t version, uint32_t& gen, std::shared_ptr<const RtLampGpu::BlockerTable>& blk, float& header);
 // (physical indoor lamps, stage 4; LampMarkFilter's lamp entry update, light tree thread) an edit of `light` (kind "value",
 // "switch on", "switch off", "move" (within its room), "move to another room", "move to another story" or "new" (first seen;

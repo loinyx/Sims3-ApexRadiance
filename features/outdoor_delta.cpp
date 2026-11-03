@@ -33,6 +33,7 @@
 #include "room_lamp_move.h"
 #include "inner_retry.h"
 #include "phys_lamp_pick.h"
+#include "recorder.h"
 #include "penumbra.h"
 #include "apex_util.h"
 #include "scene_record.h"
@@ -4144,6 +4145,15 @@ void NoteUnkept(const void* room) { // (light tree thread, KeepEnd)
     std::lock_guard<std::mutex> lk(g_touchedMx);
     if (g_unkept.size() < 1024) g_unkept.insert(k), g_unkeptAny.store(true, std::memory_order_relaxed);
 }
+bool TraceLine() {
+    static std::atomic<DWORD> s_window{0};
+    static std::atomic<int> s_n{0};
+    if (!Recorder::Verbose() || !g_physical.load(std::memory_order_relaxed)) return false;
+    const DWORD now = GetTickCount();
+    DWORD w = s_window.load(std::memory_order_relaxed);
+    if (now - w > 10000 && s_window.compare_exchange_strong(w, now)) s_n.store(0, std::memory_order_relaxed);
+    return s_n.fetch_add(1, std::memory_order_relaxed) < 60;
+}
 bool LiveBlockers(const void* room, int cls, uint32_t version, uint32_t& gen, std::shared_ptr<const RtLampGpu::BlockerTable>& blk, float& header) {
     std::lock_guard<std::mutex> lk(g_liveBlkMx);
     const auto it = g_liveBlk.find(KeyOf(room, cls));
@@ -4693,14 +4703,21 @@ const char* WriteBasisAcc(uint64_t key, const KeptRoom& k, const std::vector<flo
     BasisNow& bn = NowOf(key, k);
     const size_t n = k.basis.size();
     std::vector<BasisTexelWrite> t(n);
+    const long left0 = left;
+    double sumNew = 0.0, sumGame = 0.0; // (evidence, 03/11: furniture brighter for seconds after an edit) RGB levels written vs the solve's
+    const auto rgb = [](uint32_t c) { return static_cast<double>(((c >> 16) & 0xFF) + ((c >> 8) & 0xFF) + (c & 0xFF)); };
     for (int m = 0; m < 4; m++) {
         for (size_t i = 0; i < n; i++) t[i] = BasisTexelWrite{k.basis[i].x, k.basis[i].y, PackBasis(&acc[i * 16], m), bn.expect[i * 4 + m], 0};
         if (!WriteBasisMapTry(set, m, k.basisW, k.basisH, t.data(), n)) return "a directional map of its set is not the captured one";
         for (size_t i = 0; i < n; i++) {
             if (t[i].done) bn.expect[i * 4 + m] = t[i].want;
             (t[i].done ? written : left)++;
+            if (i * 4 + m < k.basisGame.size()) sumNew += rgb(t[i].want), sumGame += rgb(k.basisGame[i * 4 + m]);
         }
     }
+    if (TraceLine())
+        LOG_INFO(std::format("[BasisRatio] story {} room {}: directional maps written at {:.2f}x the levels of its game solve ({} texels, {} left as another solve wrote them)",
+                             k.story, k.id, sumGame > 0.0 ? sumNew / sumGame : 0.0, n * 4, left - left0));
     return nullptr;
 }
 // The kept room's samples packed again (its base, each lamp's part now or as kept) and written into its set
@@ -5172,9 +5189,22 @@ std::string PhysCoverWhy(uintptr_t tracker, uintptr_t light, PhysCover& o) {
                 if (f.kept && k->roomGeo) {
                     uint64_t now[3] = {};
                     RoomLightTests::Room t;
-                    if (RoomGeoKey(static_cast<const BYTE*>(room), now, &t) && PhysLampPick::BlockersKey(now) != k->roomGeo &&
-                        !NoteLiveBlockers(static_cast<const BYTE*>(room), rr.cls, k->version, PhysLampPick::BlockersKey(now), t))
-                        NoteUnkept(room);
+                    const bool read = RoomGeoKey(static_cast<const BYTE*>(room), now, &t) != 0;
+                    const bool moved = read && PhysLampPick::BlockersKey(now) != k->roomGeo;
+                    const bool taken = moved && NoteLiveBlockers(static_cast<const BYTE*>(room), rr.cls, k->version, PhysLampPick::BlockersKey(now), t);
+                    if (moved && !taken) NoteUnkept(room);
+                    if (f.lists && TraceLine()) { // (evidence, 03/11: do the room's 3D records follow a dragged table before its solve?)
+                        float most = 0.0f;
+                        size_t at = 0;
+                        for (size_t i = 0; read && i < t.rec.size() && i < k->tests.rec.size(); i++) {
+                            const RoomLightTests::V a = t.rec[i].c, b = k->tests.rec[i].c;
+                            const float d = std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z));
+                            if (d > most) most = d, at = i;
+                        }
+                        LOG_INFO(std::format("[LiveBlk] lamp {:08X} story {} room {}: furniture {} ({} records now, {} at its solve; largest centre move {:.2f} m, record {}){}",
+                                             light, rr.story, rr.id, !read ? "not read" : moved ? "changed since its solve" : "as at its solve", t.rec.size(),
+                                             k->tests.rec.size(), most, at, moved ? (taken ? ": read again for the GPU" : ": not taken, its solve asked") : ""));
+                    }
                 }
                 if (f.lists) o.ids.emplace_back(rr.story, rr.id), o.basisRooms.push_back(BasisRoomRef{KeyOf(room, rr.cls), rr.story, rr.id});
             }

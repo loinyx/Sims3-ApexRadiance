@@ -405,11 +405,13 @@ void __fastcall RemovalHook(uint8_t* level, void* edx, uint32_t idLo, uint32_t i
     OutdoorDelta::NoteLightObjectRemoved();
 }
 // true = mark the room (the game's call)
+thread_local float t_occPt[3] = {}; // (OccDecide's journal) the occluder's point and its move since its last mark
 bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
     if (OutdoorDelta::RoomLampCapture()) {
         float x = 0.0f, z = 0.0f, was[2] = {};
         bool had = false;
         const bool read = OccluderPoint(entry, x, z);
+        t_occPt[0] = x, t_occPt[1] = z, t_occPt[2] = 0.0f;
         if (read) {
             std::lock_guard<std::mutex> lk(g_mx);
             if (g_occPoint.size() > 65536) g_occPoint.clear();
@@ -417,6 +419,7 @@ bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
             had = !fresh;
             was[0] = it->second[0], was[1] = it->second[1];
             it->second = {x, z};
+            if (had) t_occPt[2] = std::sqrt((x - was[0]) * (x - was[0]) + (z - was[1]) * (z - was[1]));
         }
         if (read && OwnObjectEditTaken(tl, x, z, had, was)) {
             const long n = g_occDropped.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -449,7 +452,10 @@ bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
 }
 bool __cdecl OccDecide(uintptr_t tl, int room, uintptr_t entry) {
     if (!g_handledAt.load(std::memory_order_relaxed) && !OutdoorDelta::RoomLampCapture()) return true; // (Classic: the game's mark, nothing else)
-    return HookGuard::Run("LampMarkFilter occluder mark", true, [=] { return OccDecideImpl(tl, room, entry); });
+    t_occPt[0] = t_occPt[1] = t_occPt[2] = 0.0f;
+    const bool mark = HookGuard::Run("LampMarkFilter occluder mark", true, [=] { return OccDecideImpl(tl, room, entry); });
+    if (Recorder::Verbose() && OutdoorDelta::RoomLampPhysical()) LevelLightShare::JournalMark(tl, room, mark ? 'O' : 'o', entry, t_occPt);
+    return mark;
 }
 
 // The lot of a story tree level (tl+4: its tracker, as level_light_share reads it); 0 when unreadable
@@ -820,6 +826,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
 bool __cdecl MarkDecide(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
     t_leftTaken = false;
     const bool mark = HookGuard::Run("LampMarkFilter room mark", true, [=] { return MarkDecideImpl(tl, room, entry, light); });
+    if (mark && Recorder::Verbose() && OutdoorDelta::RoomLampPhysical()) LevelLightShare::JournalMark(tl, room, 'M', light);
     if (t_left.light) { // (physical) the room the lamp left: dropped when its move was taken, else the game's mark now
         const LeftMark left = t_left;
         t_left = LeftMark{};
@@ -827,6 +834,7 @@ bool __cdecl MarkDecide(uintptr_t tl, int room, uintptr_t entry, uintptr_t light
         else {
             reinterpret_cast<void(__thiscall*)(void*, int)>(g_markTarget)(reinterpret_cast<void*>(left.tl), left.room);
             g_leftMade.fetch_add(1, std::memory_order_relaxed);
+            if (Recorder::Verbose()) LevelLightShare::JournalMark(left.tl, left.room, 'L', light);
         }
     }
     t_leftTaken = false;
