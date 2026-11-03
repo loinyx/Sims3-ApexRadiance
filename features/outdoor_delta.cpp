@@ -6158,7 +6158,7 @@ bool ExportRoom0(const void* room, int cls, Room0Export& out, bool physical) {
                 for (const Contrib& p : l.parts)
                     if (p.texel < out.texels.size()) out.texels[p.texel].exitBase += Lum3(p.rgb);
             if (!l.drawn && !k0) {
-                if (physical && LightLotOf(l.light) != r.lot) // (a street lamp: left in the base, noted for the upper walls of open rooms)
+                if (const uint64_t lot = physical ? LightLotOf(l.light) : r.lot; lot != r.lot && lot != ~0ull) // (a street lamp: left in the base, noted for the upper walls of open rooms; unreadable: left)
                     for (const Contrib& p : l.parts)
                         if (p.texel < out.texels.size())
                             for (int k = 0; k < 3; k++) out.texels[p.texel].worldBase[k] += p.rgb[k];

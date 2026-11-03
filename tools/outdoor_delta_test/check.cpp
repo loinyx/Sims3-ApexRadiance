@@ -1864,6 +1864,12 @@ int main() {
         Check(total.max <= 1, "delta vs full solve: no texel more than 1/255 off");
         Check(total.at1 <= total.n / 1000, "delta vs full solve: at most 1 texel in 1000 off by 1/255");
         Check(evaluated * 5 < full, "delta: far fewer evaluations than solving every light again");
+    // (RtLampModel::ComposeBase) an upper wall of a double-height room loses the street lamps' light, never under 0; any other texel
+    // keeps the solve's base
+    Check(std::fabs(RtLampModel::ComposeBase(0.5f, 0.2f, true) - 0.3f) < 1e-6f && RtLampModel::ComposeBase(0.1f, 0.2f, true) == 0.0f &&
+              RtLampModel::ComposeBase(0.5f, 0.2f, false) == 0.5f && RtLampModel::ComposeBase(-1e-6f, 0.2f, false) == -1e-6f &&
+              RtLampModel::ComposeBase(std::nanf(""), 0.0f, true) == 0.0f,
+          "room-0 base: street lamps off an upper wall only, clamped there; any other texel's base as the solve gave it");
     }
     { // GPU room lamps, stage 1: a kept part recomposed (RtLampModel::KeptAdd)
         const float thr = 3.0f / 255.0f, law[3] = {0.04f, 0.03f, 0.02f}; // r + g + b = 0.09

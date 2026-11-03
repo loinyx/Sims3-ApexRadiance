@@ -100,6 +100,10 @@ inline float KeptWrapLum(const GpuLampLaw::Lamp& l, bool colourOnly, const float
 // The ground alpha an exit lamp's light gives a story-0 ground texel (LevelLightShare SolveGroundTexel): E = the luminance of
 // the exit lamps' light there, min(E, 254 / 255), 0 when none (a texel under a floor tile is not one: it keeps alpha 0)
 inline float ExitAlpha(float E) { return E > 0.0f && std::isfinite(E) ? std::min(E, 254.0f / 255.0f) : 0.0f; }
+// (rt_outdoor_lamps.cpp PrepareJob) a room-0 texel's base under the GPU sum: an upper wall of a double-height room (inner, bit 8)
+// without the street lamps' light the solve left in it (world), never under 0; any other texel the solve's base as it is; not
+// finite: 0
+inline float ComposeBase(float base, float world, bool inner) { return !std::isfinite(base) ? 0.0f : inner ? std::max(base - world, 0.0f) : base; }
 // GPU room lamps, stage 2a (outdoor_delta.cpp KeptFinalCheck): the colour the game's pack 0x0060CD10 takes for a kept texel
 // whose sum is now R. S and p: the solve's sum there and its pack input before the clamp (FUN_006a31d0 [esp+60h]); norm: the
 // room's +0x160 the solve toned it with. Roofed: the solve's tail (gpu_lamp_law.h IndoorTexel) with the ramp x ambient and the
