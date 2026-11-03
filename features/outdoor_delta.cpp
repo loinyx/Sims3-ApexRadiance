@@ -3630,7 +3630,9 @@ bool Sample(const unsigned char* room) {
     s.visLum = s.allLum = 0.0f;
     return true;
 }
-bool KeepsGround() { return g_cap.active && g_cap.ok && (g_cap.keep0 || g_cap.probe0); }
+// (physical: room 0's exit ground is always drawn from its lamps, ExportRoom0; without the marks, outside a probe, no indoor
+// lamp lit the lot ground through an opening)
+bool KeepsGround() { return g_cap.active && g_cap.ok && (g_cap.keep0 || g_cap.probe0 || g_cap.phys); }
 void ExitGround(bool on) {
     if (g_s.on) g_s.exitGround = on;
 }
@@ -5793,7 +5795,9 @@ bool ExportRoom0(const void* room, int cls, Room0Export& out, bool physical) {
                 phys[j] = !l.drawn && std::none_of(r.kept0.begin(), r.kept0.end(), [&](const KeptLamp& k) { return k.light == l.light; }) && LawOfLight(l.light, r.lot, kl) &&
                           !kl.colourOnly;
             }
-        bool exits = std::any_of(r.kept0.begin(), r.kept0.end(), [](const KeptLamp& k) { return k.exit; });
+        // (physical: always, so a fresh exit lamp, or one its solve did not take as one, lights the ground through the openings
+        // its shadow tile sees; 02/11: lot C49C's solves kept no exit part, so no indoor lamp ever lit its ground)
+        bool exits = physical || std::any_of(r.kept0.begin(), r.kept0.end(), [](const KeptLamp& k) { return k.exit; });
         for (size_t j = 0; j < r.lamps.size(); j++) exits = exits || (phys[j] && r.lamps[j].exit);
         if (exits)
             for (size_t i = 0; i < r.texels.size(); i++)

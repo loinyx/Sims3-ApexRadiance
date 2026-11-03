@@ -2362,8 +2362,14 @@ void Frame(IDirect3DDevice9* dev) {
             s.qLights.clear(), s.qRow.clear();
             std::vector<uintptr_t> cand;
             std::vector<std::array<float, 3>> candRow;
-            for (size_t l = 0; l < s.pLights.size() && l < s.pRow.size(); l++) // (a lamp deleted since: its light may be freed)
-                if (std::find(gone.begin(), gone.end(), s.pLights[l]) == gone.end()) cand.push_back(s.pLights[l]), candRow.push_back(s.pRow[l]);
+            for (size_t l = 0; l < s.pLights.size() && l < s.pRow.size(); l++) { // (a lamp deleted since: its light may be freed)
+                if (std::find(gone.begin(), gone.end(), s.pLights[l]) != gone.end()) continue;
+                cand.push_back(s.pLights[l]), candRow.push_back(s.pRow[l]);
+                // (an indoor lamp the solve did not take as an exit lamp lights the ground too where its shadow tile sees it: the
+                // exit ground is drawn from the lamps, ExportRoom0)
+                const auto L = std::find_if(lot.begin(), lot.end(), [&](const OutdoorDelta::LotLamp& o) { return o.light == s.pLights[l]; });
+                if (L != lot.end() && PhysLampPick::ExitFresh(s.story, L->story, L->home, L->homeOutdoor)) candRow.back()[2] = 1.0f;
+            }
             for (const OutdoorDelta::LotLamp& L : lot) {
                 // (a lamp this map's batches drew, out of room 0 since: out of the base too, drawn fresh here now)
                 if ((s.kept.count(L.light) && !s.drawn.count(L.light)) || std::find(s.pLights.begin(), s.pLights.end(), L.light) != s.pLights.end()) continue;
@@ -2376,8 +2382,6 @@ void Frame(IDirect3DDevice9* dev) {
                     now->second.law = now->second.read && WorldLaw(L.light, g_lotId, false, now->second.w, type, reg);
                 }
                 if (!now->second.read || now->second.drawn) continue;
-                // shortcut: a fresh exit lamp's light reaches the exit ground's alpha only on the texels room 0's solve marked (bit 4,
-                // set when it kept an exit lamp); its next solve marks them
                 cand.push_back(L.light);
                 candRow.push_back({PhysLampPick::NormKFresh(L.story, L.home, L.homeNorm, s.story, 0, 1.0f, true, L.homeOutdoor), PhysLampPick::ReachFresh(L.homeOutdoor, true) ? 1.0f : 0.0f,
                                    PhysLampPick::ExitFresh(s.story, L.story, L.home, L.homeOutdoor) ? 1.0f : 0.0f});
