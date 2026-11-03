@@ -268,7 +268,28 @@ struct DoorRule {
         return c.opened;
     }
 };
+// A window cut on a diagonal wall opens that diagonal (03/11: it opened the edge along x at its low corner instead), and two
+// windows side by side along the diagonal lose their shared jamb
+void DiagonalCutChecks() {
+    Builder b(12, 12);
+    GridEdge e;
+    e.foot = 0.0f, e.base = 0.0f, e.topL = e.topM = e.topR = 3.0f, e.faces = 1;
+    const auto diag = [&](int x, int z, int k) {
+        b.g.edges.push_back(e);
+        return b.g.dg[2 * (static_cast<size_t>(z) * b.g.w + x) + k] = static_cast<int32_t>(b.g.edges.size() - 1);
+    };
+    const int32_t up0 = diag(3, 3, 0), up1 = diag(4, 4, 0), down = diag(6, 3, 1), axis = b.Wall(true, 3, 3);
+    std::vector<std::pair<uint32_t, CutRec>> cuts;
+    CutRec w;
+    w.kind = kCutWindow;
+    cuts.emplace_back(EdgeKey(3, 3, 4, 4), w), cuts.emplace_back(EdgeKey(4, 4, 5, 5), w), cuts.emplace_back(EdgeKey(6, 4, 7, 3), w);
+    PlaceGridOpenings(b.g, cuts, true, {}, [](const CutRec&, GridOpening&) {});
+    const auto& E = b.g.edges;
+    Check(E[up0].open && E[up1].open && E[down].open && !E[axis].open, "a diagonal window opens its diagonal wall, not the edge along x at its corner");
+    Check(b.g.openings[E[up0].open - 1].u1 == 1.0f && b.g.openings[E[up1].open - 1].u0 == 0.0f, "two diagonal windows in a row share no jamb");
+}
 void DoorRuleChecks() {
+    DiagonalCutChecks();
     Check(CutOpensForLamps(kCutArch, true) && CutOpensForLamps(kCutWindow, true), "doors block light: arches and windows stay open");
     Check(!CutOpensForLamps(kCutDoor, true) && !CutOpensForLamps(kCutGate, true) && !CutOpensForLamps(kCutUnknown, true), "doors, gates and unknown cuts close");
     Check(CutOpensForLamps(kCutDoor, false) && CutOpensForLamps(kCutUnknown, false), "option off: every cut is open (as before)");

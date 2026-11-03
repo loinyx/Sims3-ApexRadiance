@@ -4228,7 +4228,12 @@ void PlaceGridOpenings(StoryGrid& g, const std::vector<std::pair<uint32_t, CutRe
         const int x0 = static_cast<int8_t>(key & 0xFF), z0 = static_cast<int8_t>(key >> 8 & 0xFF), x1 = static_cast<int8_t>(key >> 16 & 0xFF),
                   z1 = static_cast<int8_t>(key >> 24 & 0xFF);
         const bool alongZ = x0 == x1; // (EdgeKey keeps the low corner first)
-        const int32_t idx = alongZ ? GridXL(g, x0, z0) : GridZL(g, x0, z0);
+        // a diagonal cut is on its tile's diagonal (dg: 0 for (x, z)-(x+1, z+1), 1 for (x, z+1)-(x+1, z)); taken as the edge along
+        // x at z0 until 03/11, its window opened another wall or none and the diagonal wall stayed whole
+        const bool diag = !alongZ && z0 != z1;
+        const int dk = z1 > z0 ? 0 : 1, dz = std::min(z0, z1);
+        const int32_t idx = diag ? (x0 >= 0 && dz >= 0 && x0 < g.w && dz < g.h ? g.dg[2 * (static_cast<size_t>(dz) * g.w + x0) + dk] : -1)
+                            : alongZ ? GridXL(g, x0, z0) : GridZL(g, x0, z0);
         if (idx < 0 || g.openings.size() >= 65535) {
             g.cutsNoWall++;
             continue;
@@ -4255,8 +4260,9 @@ void PlaceGridOpenings(StoryGrid& g, const std::vector<std::pair<uint32_t, CutRe
                 g.paneSized++;
             }
         o.glass = rec.kind == kCutWindow || !CutOpensForLamps(rec.kind, doorsBlock) ? WallOpenings::kWindowPass : 1.0f; // (open here: a window, or a glazed door)
-        if (alongZ ? openKeys.count(EdgeKey(x0, z0 - 1, x0, z0)) : openKeys.count(EdgeKey(x0 - 1, z0, x0, z0))) o.u0 = 0.0f;
-        if (alongZ ? openKeys.count(EdgeKey(x0, z1, x0, z1 + 1)) : openKeys.count(EdgeKey(x1, z0, x1 + 1, z0))) o.u1 = 1.0f;
+        const int sz = diag ? z1 - z0 : 0; // (a diagonal's neighbours along its line)
+        if (alongZ ? openKeys.count(EdgeKey(x0, z0 - 1, x0, z0)) : openKeys.count(EdgeKey(x0 - 1, z0 - sz, x0, z0))) o.u0 = 0.0f;
+        if (alongZ ? openKeys.count(EdgeKey(x0, z1, x0, z1 + 1)) : openKeys.count(EdgeKey(x1, z1, x1 + 1, z1 + sz))) o.u1 = 1.0f;
         g.edges[static_cast<size_t>(idx)].open = static_cast<uint16_t>(g.openings.size() + 1);
         g.openings.push_back(o);
         g.cutsOnWall++;
