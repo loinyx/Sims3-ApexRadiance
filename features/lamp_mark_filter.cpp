@@ -604,10 +604,10 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             if (kind == 2) t_leftTaken = true; // (MarkDecide drops the mark of the room it left)
             NoteHandledLight(light);
             if (playerEdit || kind >= 1) LevelLightShare::NoteGpuEdit();
-            if (kind >= 1) { // (as Real-time outdoor lamps' move above)
-                g_editRefresh.store(true, std::memory_order_relaxed);
-                NoteHandledEdit(tl, pos);
-            }
+            // (a value or a switch taken too: no solve follows it now, so the per-pixel object lamps read the list in its frame, not
+            // at their 20-frame refresh)
+            g_editRefresh.store(true, std::memory_order_relaxed);
+            if (kind >= 1) NoteHandledEdit(tl, pos); // (as Real-time outdoor lamps' move above)
             g_kept.fetch_add(1, std::memory_order_relaxed);
             return false;
         }
