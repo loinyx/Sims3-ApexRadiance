@@ -7473,11 +7473,16 @@ int SetInWall(const float (&m)[5][4], float sizeU, float sizeV, float uv[2]) {
 
 // Why an object draw keeps the game's rig instead of the smooth room light (logged with the draw cost while recording):
 // outdoor rig mode, smooth off or no shader info, ps_2_x, no room map with known directional maps, patch or scale failed,
-// set in a wall; [6] = drawn smooth
-std::atomic<long> g_indoorWhy[7]{};
+// set in a wall; [6] = drawn smooth; [7] = no rig (RigTracker knows none for the draw). g_indoorWhyLast: the last 10 s
+// window (the Lighting snapshot), over g_indoorWhyFrames frames
+constexpr int kIndoorWhy = 8;
+std::atomic<long> g_indoorWhy[kIndoorWhy]{};
+long g_indoorWhyLast[kIndoorWhy] = {};
+uint32_t g_indoorWhyFrames = 0;
+std::atomic<int> g_indoorScaleLogged{0};
 template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn draw) {
     const auto keep = [](int why) { g_indoorWhy[why].fetch_add(1, std::memory_order_relaxed); return false; };
-    if (RigMode() != 0) return keep(0);
+    if (const int mode = RigMode(); mode != 0) return keep(mode < 0 ? 7 : 0);
     if (!g_indoorSmooth.load(std::memory_order_relaxed) || !g_curVsInfo) return keep(1);
     IDirect3DTexture9* basis[4] = {};
     IDirect3DBaseTexture9* lightMap = nullptr; // held until the scale is read
@@ -7533,6 +7538,14 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     float size[4], oldSize[4] = {};
     const bool scaled = p.ps && IndoorBasisScale(dev, p.indoor, lightMap, basis[0], size);
     const uintptr_t lightMapPtr = reinterpret_cast<uintptr_t>(lightMap);
+    if (!scaled && g_indoorScaleLogged.fetch_add(1, std::memory_order_relaxed) < 8) { // (which shaders, and why: the first few)
+        float b[4] = {}, lm[4] = {};
+        const bool bs = MapSizeThisFrame(basis[0], b), ls = MapSizeThisFrame(lightMap, lm);
+        LOG_INFO(std::format("[IndoorWhy] shader {:08X} keeps the game's rig: {}", reinterpret_cast<uintptr_t>(g_curPs),
+                             !p.ps ? std::string("the smooth room light patch does not apply")
+                             : !bs || !ls ? std::string("a map's size is not known this frame")
+                                          : std::format("directional maps of {:.0f} x {:.0f} (only 64 x 64 is known), room map {:.0f} x {:.0f}", b[0], b[1], lm[0], lm[1])));
+    }
     lightMap->Release();
     if (!scaled) return keep(4);
     // A door or window set in its wall spans two rooms: the smooth read (a B-spline over 4 texels, +-2 m) mixed the room
@@ -9742,12 +9755,14 @@ void LogDrawCost() {
     }
     g_archRowsTicks = 0, g_archRowsCalls = 0, g_fencePickTicks = 0, g_fencePickCalls = 0;
     {
-        long w[7];
-        for (int i = 0; i < 7; i++) w[i] = g_indoorWhy[i].exchange(0, std::memory_order_relaxed);
+        long w[kIndoorWhy];
+        for (int i = 0; i < kIndoorWhy; i++) w[i] = g_indoorWhy[i].exchange(0, std::memory_order_relaxed);
+        std::copy(std::begin(w), std::end(w), std::begin(g_indoorWhyLast));
+        g_indoorWhyFrames = frames;
         if (Recorder::Active())
-            LOG_INFO(std::format("[IndoorWhy] object draws: {} smooth room light; on the game's rig: outdoor rig {}, smooth off or no shader info {}, ps_2_x {}, "
+            LOG_INFO(std::format("[IndoorWhy] object draws: {} smooth room light; on the game's rig: no rig {}, outdoor rig {}, smooth off or no shader info {}, ps_2_x {}, "
                                  "no room map with known directional maps {}, patch or scale failed {}, set in a wall {}",
-                                 w[6], w[0], w[1], w[2], w[3], w[4], w[5]));
+                                 w[6], w[7], w[0], w[1], w[2], w[3], w[4], w[5]));
     }
     LOG_INFO(std::format("[LotLightBridge] Draw cost by fix over {} frames (1 draw in 16 timed, the fixes' own time): {:.3f} ms a frame in all, {:.3f} ms a frame "
                          "in the driver for the game draws the fixes made; {}{}",
@@ -10300,6 +10315,17 @@ std::string RoomMapSmoothStatus() {
                        "point filter {} | draws with the arch copy {}, with the copy without arches {} | floor draws read off the walls {} | object floor reads off the walls {} (story or layout not known {})",
                        g_roomMapSmooth.load() ? "on" : "off", g_roomMapPs.size(), g_roomWallDrawn.load(), g_roomFloorDrawn.load(), g_roomCapsRefused.load(),
                        g_roomUnknownVs.load(), g_roomBandsOff.load(), g_roomPointFilter.load(), g_archCopyDraws.load(), g_archPlainDraws.load(), g_roomFloorWallDraws.load(), g_roomReadOn.load(), g_roomReadOff.load());
+}
+
+std::string IndoorWhyText() {
+    const long* w = g_indoorWhyLast;
+    if (!g_indoorWhyFrames) return "\n==== INDOOR OBJECT LIGHT ====\n(not measured yet: the draw cost window is 10 s)\n";
+    const double f = static_cast<double>(g_indoorWhyFrames);
+    return std::format("\n==== INDOOR OBJECT LIGHT (object draws a frame over the last {} frames) ====\n"
+                       "smooth room light {:.1f} (against a wall, through the wall mask: {} draws in all)\n"
+                       "on the game's rig: no rig {:.1f}, outdoor rig {:.1f}, smooth off or no shader info {:.1f}, ps_2_x {:.1f}, no room map with known "
+                       "directional maps {:.1f}, patch or scale failed {:.1f}, set in a wall {:.1f}\n",
+                       g_indoorWhyFrames, w[6] / f, g_indoorWallsSmooth.load(), w[7] / f, w[0] / f, w[1] / f, w[2] / f, w[3] / f, w[4] / f, w[5] / f);
 }
 
 std::string IndoorSmoothStatus() {

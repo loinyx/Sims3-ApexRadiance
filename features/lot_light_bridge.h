@@ -150,6 +150,9 @@ void SetGroundBrightness(float ground, float roads, float lotLamps); // lotLamps
 // objects get them per pixel instead of one light per object). Live.
 void SetIndoorSmooth(bool on);
 std::string IndoorSmoothStatus();
+// The Lighting snapshot's section: why indoor object draws took the smooth room light or kept the game's rig (the last 10 s
+// window of the draw cost). Render thread.
+std::string IndoorWhyText();
 // Smooth light maps (2.12.4): the room-lit shaders (InteriorFloor, InteriorWall and their siblings) read the room light map
 // as a cubic B-spline (render thread; per draw, no relight)
 void SetSmoothRoomMaps(bool on);

@@ -15,6 +15,7 @@
 #include "d3d9_hooks.h"
 #include "apex_paths.h"
 #include "level_light_share.h"
+#include "lot_light_bridge.h"
 #include "daylight_probe.h"
 #include "night_level.h"
 #include "apex_memory.h"
@@ -304,6 +305,7 @@ void WriteDiag() {
     }
     out << LevelLightShare::DiagText();
     out << PixelLampDiag(index);
+    out << LotLightBridge::IndoorWhyText();
     out << DaylightProbe::SnapshotText(lightMgr, g_lights); // development builds with daylight_log only
     out << memory;                                             // development builds with memory_owners only (taken above)
     ApexMemory::RequestNow();                                  // (every owner measured again at its next chance, for the next one)
