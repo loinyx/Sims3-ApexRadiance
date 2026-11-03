@@ -1427,7 +1427,7 @@ void ReportCaptureCard() {
         }
         const int secs = Recorder::SecondsRecorded();
         const std::string recDesc =
-            I18n::Trf("Records lighting for up to 20 seconds while you reproduce the problem. Key: {}",
+            I18n::Trf("Records lighting for up to 60 seconds while you reproduce the problem. Key: {}",
                       CaptureKey(Hotkeys::Action::Recorder));
         if (row("Record a few seconds", recDesc, secs >= 0 ? "Stop##Rec" : "Start##Rec", IconId::Activity, secs >= 0 ? ApexUi::ButtonKind::Primary : ApexUi::ButtonKind::Secondary)) {
             Recorder::RequestToggle();

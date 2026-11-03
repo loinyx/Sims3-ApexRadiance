@@ -1,6 +1,6 @@
 #pragma once
 // Records a few seconds of what the lighting does, with the clock time on every line (its shortcut starts, again stops;
-// it stops by itself after 20 s). Writes Captures\<date time> Recording\Recording.txt (features/captures.h). Both builds.
+// it stops by itself after 60 s). Writes Captures\<date time> Recording\Recording.txt (features/captures.h). Both builds.
 #include "build_flavor.h"
 #include <cstdint>
 #include <string>

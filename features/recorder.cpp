@@ -47,7 +47,7 @@
 
 namespace {
 
-constexpr DWORD kMaxMs = 20000, kStatusEveryMs = 100;
+constexpr DWORD kMaxMs = 60000, kStatusEveryMs = 100;
 bool g_on = false, g_keyWasDown = false;
 std::atomic<bool> g_stopRequest{false}, g_cancelRequest{false};
 DWORD g_startTick = 0, g_lastStatus = 0;
@@ -65,7 +65,7 @@ constexpr size_t kMaxNotes = 40000;
 // [room] lines have their own cap (30/09, F6 capture: a Brightness drag filled the shared cap with [furniture] lines in 4 s
 // and the room tracer stopped before the room that went wrong)
 size_t g_roomNotes = 0;
-constexpr size_t kMaxRoomNotes = 20000;
+constexpr size_t kMaxRoomNotes = 60000;
 std::atomic<bool> g_toggleRequest{false}; // the Report a problem page asked to start / stop
 std::string g_saved; // the file just written (the on-screen note)
 DWORD g_savedAt = 0;
@@ -562,7 +562,7 @@ void Start() {
             g_lines.push_back({g_startTick, std::move(line)});
         }
     Status(g_startTick);
-    LOG_INFO("[Recorder] Recording started (its shortcut again to stop; stops by itself after 20 s)");
+    LOG_INFO("[Recorder] Recording started (its shortcut again to stop; stops by itself after 60 s)");
 }
 
 void Stop() {

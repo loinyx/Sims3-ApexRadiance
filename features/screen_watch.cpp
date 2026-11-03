@@ -16,7 +16,7 @@ constexpr float kRows[ScreenWatch::kColumn] = {-0.075f, -0.0375f, -0.0185f, -0.0
 constexpr float kGridXAt[ScreenWatch::kGridX] = {0.10f, 0.26f, 0.42f, 0.58f, 0.74f, 0.90f};
 constexpr float kGridYAt[ScreenWatch::kGridY] = {0.18f, 0.38f, 0.58f, 0.78f};
 constexpr int kRing = 4;             // copies in flight (read back once the GPU has done them)
-constexpr size_t kMaxSamples = 4000; // 20 s at 200 fps
+constexpr size_t kMaxSamples = 12000; // 60 s at 200 fps
 
 struct Slot {
     IDirect3DSurface9* rt = nullptr;

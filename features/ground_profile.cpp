@@ -345,7 +345,7 @@ struct WatchState {
     float dir[2] = {1, 0};
     std::vector<WatchRow> rows;
 } g_watch;
-constexpr size_t kWatchRows = 4000; // 20 s at 200 fps (ScreenWatch's samples)
+constexpr size_t kWatchRows = 12000; // 60 s at 200 fps (ScreenWatch's samples)
 } // namespace
 
 void WatchBegin(POINT mouse, int bbWidth, int bbHeight) {
