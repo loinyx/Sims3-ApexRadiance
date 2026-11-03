@@ -293,6 +293,18 @@ bool OccluderPoint(uintptr_t entry, float& x, float& z) { // POD (SEH)
         return false;
     }
 }
+// An occluder entry's object (FUN_006c6090 makes the entry: +0x08 its 64-bit id, the tl+0xD4 map's key; +0x20 its lighting
+// record, whose shapes +0x40..+0x44 the room's 3D gather 0x0069E3F0 pushes into the object's record: shape = the first). POD (SEH)
+void OccluderObject(uintptr_t entry, uint64_t& id, uintptr_t& shape) {
+    __try {
+        id = *reinterpret_cast<const uint64_t*>(entry + 0x08);
+        const uintptr_t info = *reinterpret_cast<const uintptr_t*>(entry + 0x20);
+        const uintptr_t* b = info ? *reinterpret_cast<uintptr_t* const*>(info + 0x40) : nullptr;
+        shape = b && b != *reinterpret_cast<uintptr_t* const*>(info + 0x44) ? *b : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        id = 0, shape = 0;
+    }
+}
 // GPU room lamps (developer): FUN_006c7250 updates the occluder entries (tl+0xD4, the NewOccluder entries flagged with the
 // light entries by FUN_006c4cf0) before the light entries (tl+0x90; dumpbin 2026-11-02), so a lamp's switch or value edit
 // marks the room under its object here before LampMarkFilter takes the edit itself; the game then gathers that room and the
@@ -333,7 +345,11 @@ std::atomic<long> g_occPhysMove{0}, g_occPhysNew{0};
 // whose entry never updated is not new). Each occluder entry's last point (OccDecideImpl).
 // UNVERIFIED: that a lamp object's point lies within kOwnNearM of its light's head (a lamp further off keeps its mark: a solve)
 constexpr float kOwnStepM = 0.05f, kOwnNearM = 0.5f;
-std::unordered_map<uintptr_t, std::array<float, 2>> g_occPoint; // (under g_mx) occluder entry -> its point (x, z) at its last mark
+struct OccPoint {
+    float x, z;
+    uint64_t id;
+};
+std::unordered_map<uintptr_t, OccPoint> g_occPoint; // (under g_mx) occluder entry -> its point (x, z) and object at its last mark
 PhysLampPick::OccMove g_occMoves[32]; // (under g_mx) the latest occluder moves, a ring (FurnitureMovedWith)
 int g_occMoveAt = 0;
 constexpr DWORD kFurnitureMoveMs = 600; constexpr float kFurnitureNearM = 1.0f;
@@ -434,6 +450,7 @@ bool OccToWorld(uintptr_t tl, float& x, float& z) {
 }
 // true = mark the room (the game's call)
 thread_local float t_occPt[3] = {}; // (OccDecide's journal) the occluder's point and its move since its last mark
+thread_local uintptr_t t_occObj[3] = {}; // (OccDecide's journal) its object's id (low, high) and first shape
 bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
     t_onFurniture = false;
     const bool capture = OutdoorDelta::RoomLampCapture();
@@ -442,16 +459,22 @@ bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
     if (capture) {
         float was[2] = {};
         bool had = false;
+        uint64_t id = 0;
+        uintptr_t shape = 0;
+        OccluderObject(entry, id, shape);
         t_occPt[0] = x, t_occPt[1] = z, t_occPt[2] = 0.0f;
+        t_occObj[0] = static_cast<uintptr_t>(id), t_occObj[1] = static_cast<uintptr_t>(id >> 32), t_occObj[2] = shape;
         if (read) {
             std::lock_guard<std::mutex> lk(g_mx);
             if (g_occPoint.size() > 65536) g_occPoint.clear();
-            const auto [it, fresh] = g_occPoint.try_emplace(entry, std::array<float, 2>{x, z});
-            had = !fresh;
-            was[0] = it->second[0], was[1] = it->second[1];
-            it->second = {x, z};
+            const auto [it, fresh] = g_occPoint.try_emplace(entry, OccPoint{x, z, id});
+            // (an entry made again at a freed one's address is another object, or the same one placed anew: no move. 03/11 14:36:
+            // 148 entries made again at once read as moves of 1 to 229 m, one by a lamp's head; a lamp dragged alone took its table)
+            had = !fresh && it->second.id == id;
+            was[0] = it->second.x, was[1] = it->second.z;
+            it->second = {x, z, id};
             if (had) t_occPt[2] = std::sqrt((x - was[0]) * (x - was[0]) + (z - was[1]) * (z - was[1]));
-            if (t_occPt[2] > 0.01f) g_occMoves[g_occMoveAt++ % std::size(g_occMoves)] = {entry, GetTickCount(), x, z};
+            if (t_occPt[2] > 0.01f) g_occMoves[g_occMoveAt++ % std::size(g_occMoves)] = {entry, GetTickCount(), x, z, shape};
         }
         if (read && OwnObjectEditTaken(tl, x, z, had, was)) {
             const long n = g_occDropped.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -484,8 +507,9 @@ bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
 bool __cdecl OccDecide(uintptr_t tl, int room, uintptr_t entry) {
     if (!g_handledAt.load(std::memory_order_relaxed) && !OutdoorDelta::RoomLampCapture()) return true; // (Classic: the game's mark, nothing else)
     t_occPt[0] = t_occPt[1] = t_occPt[2] = 0.0f;
+    t_occObj[0] = t_occObj[1] = t_occObj[2] = 0;
     const bool mark = HookGuard::Run("LampMarkFilter occluder mark", true, [=] { return OccDecideImpl(tl, room, entry); });
-    if (Recorder::Verbose() && OutdoorDelta::RoomLampPhysical()) LevelLightShare::JournalMark(tl, room, mark ? 'O' : 'o', entry, t_occPt);
+    if (Recorder::Verbose() && OutdoorDelta::RoomLampPhysical()) LevelLightShare::JournalMark(tl, room, mark ? 'O' : 'o', entry, t_occPt, t_occObj);
     return mark;
 }
 
@@ -1166,6 +1190,10 @@ long DeferredMarksDropped() { return g_deferredDropped.load(std::memory_order_re
 bool FurnitureMovedWith(float x, float z) {
     std::lock_guard<std::mutex> lk(g_mx);
     return PhysLampPick::FurnitureMovedWith(g_occMoves, static_cast<int>(std::size(g_occMoves)), x, z, GetTickCount(), kFurnitureMoveMs, kFurnitureNearM);
+}
+bool ShapeMoved(uintptr_t shape) {
+    std::lock_guard<std::mutex> lk(g_mx);
+    return PhysLampPick::ShapeMoved(g_occMoves, static_cast<int>(std::size(g_occMoves)), shape, GetTickCount(), kFurnitureMoveMs);
 }
 bool HandledLately(uintptr_t light, unsigned long withinMs) {
     if (!light) return false;

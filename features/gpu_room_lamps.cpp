@@ -58,10 +58,10 @@ struct Entry {
     std::vector<std::array<float, 3>> world;
     std::shared_ptr<const RtLampGpu::BlockerTable> blockers; // (its kept room's, shared by the room's maps)
     float blkHeader = -1.0f;
-    // (a lamp away from its top) the table before its dropped records, the copy drawn without them, and their hash (0: none)
+    // (a table dragged with its lamp) the table before the records' offsets, the copy drawn with them, and their hash (0: none)
     std::shared_ptr<const RtLampGpu::BlockerTable> blkBase, blkOut;
     uint64_t offHash = 0;
-    std::vector<int> carried; // the dropped records since its solve: kept until the next one
+    std::vector<std::array<float, 3>> carried; // (record, dx, dz) since its solve: kept until the next one
     float xf[16] = {};
     // (physical, stage 4) the solve's lamps out of its base (their rows: mult x norm scale, reach, the room they were registered
     // in), the lights its base holds, the room's normalisation and roofless flag, its texels' world box; the drawn lamps' hash,
@@ -439,40 +439,43 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                 w = c.w;
                 return true;
             };
-            // A record whose top a kept lamp stood on (RoomLightTests::StandsOn) is left out while the lamp is away from where that
-            // solve saw it, until the next solve reads the room again. Kept, it threw a wrong ball: dragging the table left its top
-            // behind (a round shadow on the far side, 13:55 video of 03/11); carried with the lamp, a lamp dragged alone took its
-            // table's ~1 m disc shadow along around it (14:2x test). One occluder entry moves either way (the 11:47 and 13:56
-            // recordings), so nothing tells the two drags apart; a top the lamp no longer stands on casts nothing for the drag
+            // A record whose top a kept lamp stood on at its solve (RoomLightTests::StandsOn) moves with the lamp while its own object
+            // moved lately (LampMarkFilter::ShapeMoved: the occluder entry of the record's first shape) and the lamp kept its height:
+            // a table dragged with its lamp. A lamp dragged alone leaves its table where it is, still casting its shadow; nothing else
+            // moves the record. The offset stays where the drag left it until the next solve reads the room again. Identity, not
+            // place: the one entry that moves in either drag is the table's, by the lamp's head (03/11 recordings 11:47 to 15:25)
             if (e.blockers != e.blkOut) e.blkBase = e.blockers, e.blkOut.reset(), e.carried.clear(), e.offHash = 0; // (a solve's table)
             if (e.blkBase && e.blkHeader >= 0.0f) {
                 const RtLampGpu::BlockerTable& t = *e.blkBase;
                 const int header = static_cast<int>(e.blkHeader), recs = static_cast<int>(t.rows[static_cast<size_t>(header)].v[1]);
-                std::vector<int>& off = e.carried;
+                std::vector<std::array<float, 3>>& off = e.carried;
                 for (const auto& rl : e.roomLamps) {
                     if (rl.colourOnly) continue;
                     GpuLampLaw::Lamp now;
                     const auto at = g_lotAt.find(rl.light);
                     if (!worldOf(rl.light, at != g_lotAt.end() ? at->second : SIZE_MAX, now)) continue;
                     const float dx = now.pos[0] - rl.pos[0], dy = now.pos[1] - rl.pos[1], dz = now.pos[2] - rl.pos[2];
-                    const bool away = PhysLampPick::LeftItsTop(dx, dy, dz);
-                    // (the drop's decisions, a line a second while they happen)
-                    static long s_moved = 0, s_dropped = 0, s_noTop = 0;
+                    if (dx * dx + dz * dz < 1e-8f || std::fabs(dy) > 0.02f) continue;
+                    // (the carry's decisions, a line a second while they happen)
+                    static long s_moved = 0, s_carried = 0, s_kept = 0;
                     static DWORD s_logAt = 0;
-                    if (!away) continue;
                     s_moved++;
-                    bool any = false;
                     for (int i = 0; i < recs; i++) {
                         if (!t.StandsOn(header, i, rl.pos)) continue;
-                        any = true;
-                        if (std::find(off.begin(), off.end(), i) == off.end()) off.push_back(i);
+                        if (!LampMarkFilter::ShapeMoved(t.ShapeOf(header, i))) {
+                            s_kept++;
+                            continue;
+                        }
+                        s_carried++;
+                        const auto o = std::find_if(off.begin(), off.end(), [&](const std::array<float, 3>& k) { return k[0] == static_cast<float>(i); });
+                        if (o == off.end()) off.push_back({static_cast<float>(i), dx, dz});
+                        else (*o)[1] = dx, (*o)[2] = dz;
                     }
-                    (any ? s_dropped : s_noTop)++;
                     if (const DWORD tick = GetTickCount(); tick - s_logAt >= 1000) {
                         s_logAt = tick;
                         if (LogAllowed())
-                            LOG_INFO(std::format("[DropTable] story {} room {}: lamp away from its solve's place {} times: its top left out {}, on no top {}", e.story,
-                                                 e.id, s_moved, s_dropped, s_noTop));
+                            LOG_INFO(std::format("[CarryTable] story {} room {}: lamp moved from its solve's place {} times: its table carried {}, left in place {}", e.story,
+                                                 e.id, s_moved, s_carried, s_kept));
                     }
                 }
                 uint64_t oh = 0;
@@ -492,7 +495,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                     else
                         try {
                             auto moved = std::make_shared<RtLampGpu::BlockerTable>(t);
-                            for (const int o : off) moved->Drop(header, o);
+                            for (const auto& o : off) moved->Offset(header, static_cast<int>(o[0]), o[1], o[2]);
                             e.blkOut = moved, e.blockers = std::move(moved);
                         } catch (...) {
                             e.offHash = 0, e.blockers = e.blkBase, e.blkOut.reset();

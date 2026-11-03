@@ -712,6 +712,7 @@ float Occlude3D(float3 a, float3 b, float h) {
     const float4 head = BlkRow(h);
     const float len2 = GDot(b - a, b - a);
     float T = 1.0, rec = 0.0, blk = 0.0, nb = -1.0, first = 0.0;
+    float3 sh = float3(0, 0, 0); // (the record's offset: a table dragged with its lamp ahead of its solve, BlockerTable::Offset)
     bool done = !(head.y > 0.5);
     [loop] for (int o = 0; o < 255; o++) {
         if (done) break;
@@ -728,13 +729,14 @@ float Occlude3D(float3 a, float3 b, float h) {
                     first = ix.x;
                     nb = ix.y;
                     blk = 0;
+                    sh = float3(ix.z, 0, ix.w);
                 }
                 if (!(nb > 0.5)) {
                     rec += 1;
                     nb = -1;
                 }
             } else {
-                T = T * BlockerT(first + blk * 7.0, a, b);
+                T = T * BlockerT(first + blk * 7.0, a - sh, b - sh);
                 blk += 1;
                 if (0.01 >= T) done = true;
                 if (blk >= nb) {

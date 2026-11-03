@@ -394,7 +394,7 @@ std::string FirstUnwrappedLight(const unsigned char* room); // the first light o
 bool ListAllWrapped(const unsigned char* room);             // every light of the room's list has its evaluation wrapped
 // Development build / a recording: a room mark the lamp mark filter let through ('M' a lamp's, 'L' the room a lamp left), or an
 // occluder's ('O' let through, 'o' dropped; pt: its point x, z and how far it moved), in the solve journal (what: light / entry)
-void JournalMark(uintptr_t treeLevel, int roomId, char event, uintptr_t what, const float* pt = nullptr);
+void JournalMark(uintptr_t treeLevel, int roomId, char event, uintptr_t what, const float* pt = nullptr, const uintptr_t* obj = nullptr);
 bool IsReplayList(const void* begin);                       // a room's list points at an outdoor delta replay's one-lamp list now (light tree thread): not the room's
 // The geometry the room's solve depends on, as one key: every story's grid stamp, cut cells, the wall tops and floor edits,
 // and each story's room 0 walls, wall blocks and 3D blockers; 0 when unreadable. Any thread.

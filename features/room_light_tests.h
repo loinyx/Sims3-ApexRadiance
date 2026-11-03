@@ -65,6 +65,9 @@ struct Record {
     float r2;
     std::vector<Blocker> b;
     float cull2 = 0.0f; // record+0x20: the per-batch list's cull radius^2 (the tests here read all records)
+    // its first blocker's address in the game: its object's first occluder shape (0x0069E3F0 pushes the object's lighting
+    // record's shapes, +0x40..+0x44, into the record's blockers), which names the object (OccMove::shape); 0 unknown
+    uintptr_t shape = 0;
 };
 // A lamp at `lamp` standing on the blocker: a level top (a disc or rectangle facing up or down: a table's, not a sofa's back), the
 // lamp over it inside its edge and at most kOnTopM above it (a ceiling lamp or sconce over the furniture stands higher). Not the

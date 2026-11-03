@@ -6,8 +6,8 @@
 // shader will and gives RoomLightTests::occlude's answer bit for bit (tools/outdoor_delta_test, tools/room_lamp_3d_replay).
 //
 // Append(room) adds, from its returned header row:
-//   header (first record row, records, 0, 0)
-//   each record, 2 rows: (centre.xyz, r^2), (first blocker row, blockers, 0, 0)
+//   header (first record row, records, its first record's index in `shapes`, 0)
+//   each record, 2 rows: (centre.xyz, r^2), (first blocker row, blockers, its offset dx, dz: 0 as read, Offset)
 //   each blocker, kBlockerRows rows (rectangle 0x00FF3118 | disc 0x00FF3C24):
 //     0 (A1 +0x70 | c1 +0x20 .xyz, kind: 0 rectangle, 1 disc)
 //     1 (A2 +0x80 | c2 +0x30 .xyz, +0x10 as read: != 0 selects the two-plane form)
@@ -83,7 +83,8 @@ struct BlockerTable {
         float v[4];
     };
     std::vector<Row> rows;
-    int skipped = 0; // blockers of another vtable left out
+    std::vector<uintptr_t> shapes; // each record's Record::shape in Append's order (a room's first at its header row's z)
+    int skipped = 0;               // blockers of another vtable left out
 
     // (the texture is always kMaxWidth wide and only grows in height: one texture serves every room's table, made again only
     // for a taller one)
@@ -96,10 +97,11 @@ struct BlockerTable {
         using namespace RoomLightTests;
         const int header = static_cast<int>(rows.size());
         const int firstRec = header + 1;
-        rows.push_back({{static_cast<float>(firstRec), static_cast<float>(room.rec.size()), 0.0f, 0.0f}});
+        rows.push_back({{static_cast<float>(firstRec), static_cast<float>(room.rec.size()), static_cast<float>(shapes.size()), 0.0f}});
         rows.resize(rows.size() + 2 * room.rec.size());
         for (size_t r = 0; r < room.rec.size(); r++) {
             const Record& rc = room.rec[r];
+            shapes.push_back(rc.shape);
             const int first = static_cast<int>(rows.size());
             int n = 0;
             for (const Blocker& k : rc.b) {
@@ -128,22 +130,36 @@ struct BlockerTable {
         return header;
     }
 
-    // Record r of the room at `header` left out (its sphere's r^2 < 0: the broad phase of Occlude and Occlude3D never meets it)
-    void Drop(int header, int r) { rows[static_cast<size_t>(static_cast<int>(rows[static_cast<size_t>(header)].v[0]) + 2 * r)].v[3] = -1.0f; }
-    // A lamp at `lamp` (world) stands on a top of record r of the room at `header` (RoomLightTests::StandsOn)
+    // (physical) record r of the room at `header` drawn moved by (dx, 0, dz) from where its solve read it: a table dragged with
+    // the lamp standing on it, ahead of the solve that reads it again. Its sphere moves; its index row carries the offset (z, w;
+    // Append writes 0), and the blocker tests take the segment moved back. Once per record of a fresh copy
+    void Offset(int header, int r, float dx, float dz) {
+        const int firstRec = static_cast<int>(rows[static_cast<size_t>(header)].v[0]);
+        Row& c = rows[static_cast<size_t>(firstRec + 2 * r)];
+        Row& ix = rows[static_cast<size_t>(firstRec + 2 * r + 1)];
+        c.v[0] += dx, c.v[2] += dz;
+        ix.v[2] = dx, ix.v[3] = dz;
+    }
+    // Record r's object's first occluder shape (Record::shape; 0 unknown)
+    uintptr_t ShapeOf(int header, int r) const {
+        const size_t i = static_cast<size_t>(rows[static_cast<size_t>(header)].v[2]) + static_cast<size_t>(r);
+        return i < shapes.size() ? shapes[i] : 0;
+    }
+    // A lamp at `lamp` (world) stands on a top of record r of the room at `header` where it is drawn (RoomLightTests::StandsOn)
     bool StandsOn(int header, int r, const float lamp[3]) const {
         const Row& ix = rows[static_cast<size_t>(static_cast<int>(rows[static_cast<size_t>(header)].v[0]) + 2 * r + 1)];
+        const float at[3] = {lamp[0] - ix.v[2], lamp[1], lamp[2] - ix.v[3]};
         for (int k = 0; k < static_cast<int>(ix.v[1]); k++)
-            if (RoomLightTests::StandsOn(BlockerAt(static_cast<int>(ix.v[0]) + k * kBlockerRows), lamp)) return true;
+            if (RoomLightTests::StandsOn(BlockerAt(static_cast<int>(ix.v[0]) + k * kBlockerRows), at)) return true;
         return false;
     }
-    // FurnitureFill's floor for a lamp at `lamp`: kFurnitureFill when it stands on a record of the room at `header` that is not
-    // left out (its own table), else 0
+    // FurnitureFill's floor for a lamp at `lamp`: kFurnitureFill when it stands on a record of the room at `header` (its own
+    // table), else 0
     float FillOf(int header, const float lamp[3]) const {
         if (header < 0 || static_cast<size_t>(header) >= rows.size()) return 0.0f;
-        const int firstRec = static_cast<int>(rows[static_cast<size_t>(header)].v[0]), recs = static_cast<int>(rows[static_cast<size_t>(header)].v[1]);
+        const int recs = static_cast<int>(rows[static_cast<size_t>(header)].v[1]);
         for (int r = 0; r < recs; r++)
-            if (rows[static_cast<size_t>(firstRec + 2 * r)].v[3] >= 0.0f && StandsOn(header, r, lamp)) return kFurnitureFill;
+            if (StandsOn(header, r, lamp)) return kFurnitureFill;
         return 0.0f;
     }
     // The blocker at `row` back in the game's layout (only the fields its test reads; the rest 0)
@@ -181,10 +197,11 @@ struct BlockerTable {
             V q = sub({s * dn.x, s * dn.y, s * dn.z}, ca);
             if (!(dot(q, q) - c.v[3] < 0.0f)) continue; // broad phase: infinite line vs sphere
             const int first = static_cast<int>(ix.v[0]), n = static_cast<int>(ix.v[1]);
+            const V ra = {a.x - ix.v[2], a.y, a.z - ix.v[3]}, rb = {b.x - ix.v[2], b.y, b.z - ix.v[3]};
             for (int i = 0; i < n; i++) {
                 const Blocker k = BlockerAt(first + i * kBlockerRows);
-                const float t = edgeR > 0.0f ? (k.vt == kQuadVt ? QuadEdgeT(k, a, b, edgeR) : DiscEdgeT(k, a, b, edgeR))
-                                             : (k.vt == kQuadVt ? quadT(k, a, b) : discT(k, a, b));
+                const float t = edgeR > 0.0f ? (k.vt == kQuadVt ? QuadEdgeT(k, ra, rb, edgeR) : DiscEdgeT(k, ra, rb, edgeR))
+                                             : (k.vt == kQuadVt ? quadT(k, ra, rb) : discT(k, ra, rb));
                 T = T * t;
                 if (K_STOP >= T) return T;
             }

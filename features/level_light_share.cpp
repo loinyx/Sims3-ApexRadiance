@@ -2508,7 +2508,7 @@ struct SolveNote {
     float norm, c4[3], wallBase;
     long moved, ghostWalls, odd;
     uintptr_t caller; // 'I' / 'F': the return address of the invalidate (who restarted the room); 'M' / 'L': the light; 'O' / 'o': the occluder entry
-    uintptr_t chain[3]; // 'Q': QueueRoom's callers
+    uintptr_t chain[3]; // 'Q': QueueRoom's callers; 'O' / 'o': the occluder's object id (low, high) and its first shape
     float pt[3];        // 'O' / 'o': the occluder's point (x, z) and how far it moved since its last mark
 };
 std::mutex g_journalMx;
@@ -7657,7 +7657,8 @@ std::vector<std::pair<DWORD, std::string>> JournalLinesSince(DWORD fromTick) {
                                     n.merged ? 'M' : '-', n.c4[0], n.c4[1], n.c4[2], n.lot, n.cam, n.flag19);
         if (n.event == 'M' || n.event == 'L') s += std::format(" | {} of lamp {:08X}", n.event == 'M' ? "the game's mark, let through" : "the room it left, marked", n.caller);
         else if (n.event == 'O' || n.event == 'o')
-            s += std::format(" | occluder {:08X} at ({:.2f} {:.2f}) moved {:.2f} m: {}", n.caller, n.pt[0], n.pt[1], n.pt[2], n.event == 'O' ? "its mark let through" : "its mark dropped");
+            s += std::format(" | occluder {:08X} (object {:08X}{:08X}, shape {:08X}) at ({:.2f} {:.2f}) moved {:.2f} m: {}", n.caller, n.chain[1], n.chain[0], n.chain[2], n.pt[0],
+                             n.pt[1], n.pt[2], n.event == 'O' ? "its mark let through" : "its mark dropped");
         else if (n.event == 'Q') {
             s += " | from";
             for (const uintptr_t c : n.chain)
@@ -18868,8 +18869,8 @@ float UnderFloorShareAt(const unsigned char* room, const float* sample) {
     return room0 ? UnderFloorShare(room0, sample, base) : -1.0f;
 }
 bool ListAllWrapped(const unsigned char* room) { return room && AllEvalWrapped(room); }
-void JournalMark(uintptr_t tl, int id, char event, uintptr_t what, const float* pt) {
-    if (BYTE* room = tl && kRoomById ? static_cast<BYTE*>(RoomOfTreeLevel(reinterpret_cast<const BYTE*>(tl), id)) : nullptr) NoteSolve(room, event, what, nullptr, pt);
+void JournalMark(uintptr_t tl, int id, char event, uintptr_t what, const float* pt, const uintptr_t* obj) {
+    if (BYTE* room = tl && kRoomById ? static_cast<BYTE*>(RoomOfTreeLevel(reinterpret_cast<const BYTE*>(tl), id)) : nullptr) NoteSolve(room, event, what, obj, pt);
 }
 bool IsReplayList(const void* begin) { return begin && reinterpret_cast<uintptr_t>(begin) == g_replayListAt.load(); }
 

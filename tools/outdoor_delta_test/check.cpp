@@ -1357,6 +1357,46 @@ void PhysPickChecks() {
                   !PhysLampPick::FurnitureMovedWith(stale, 2, 5.0f, 5.0f, 1200, 600, 1.0f) &&
                   !PhysLampPick::FurnitureMovedWith(far, 2, 5.0f, 5.0f, 1200, 600, 1.0f),
               "physical pick: a table dragged with its lamp (one occluder entry moving) carries its furniture; old or far moves do not count");
+        // (ShapeMoved, the carry's decision) the table's record names its object by its first blocker (0x5000): the table dragged
+        // moves an entry with that shape, so its record is carried. The lamp dragged alone moves no entry of the table: an entry of
+        // another object by the head (made again at a freed address, 14:36 of 03/11, now no move at all) or an old move of the
+        // table leaves it in place; an unknown shape never carries
+        const OccMove table[] = {{0x57B1E040, 1100, 854.43f, 1237.63f, 0x5000}};
+        const OccMove other[] = {{0x3B1B6390, 1100, 846.82f, 1235.04f, 0x7000}, {0x57B1E040, 400, 854.43f, 1237.63f, 0x5000}};
+        Check(PhysLampPick::ShapeMoved(table, 1, 0x5000, 1200, 600) && !PhysLampPick::ShapeMoved(other, 2, 0x5000, 1200, 600) &&
+                  !PhysLampPick::ShapeMoved(table, 1, 0, 1200, 600) && !PhysLampPick::ShapeMoved(other, 2, 0, 1200, 600),
+              "table drag: the record moves only when its own object's entry moved lately; a lamp dragged alone leaves its table in place");
+        RoomLightTests::Room a, b;
+        a.rec.resize(2), b.rec.resize(1);
+        a.rec[0].shape = 0x10, a.rec[1].shape = 0x20, b.rec[0].shape = 0x5000;
+        RtLampGpu::BlockerTable t;
+        const int ha = t.Append(a), hb = t.Append(b);
+        Check(t.ShapeOf(ha, 1) == 0x20 && t.ShapeOf(hb, 0) == 0x5000 && t.ShapeOf(hb, 3) == 0, "blocker table: each room's records keep their objects' first shapes");
+    }
+    {
+        // (CarryStale, WritePhysCarry) a side table's top (a disc at 0.77 m) dragged from x = 0 to x = 2 with its lamp on it (head at
+        // 1.34 m): the floor under its old place, and under its new one, takes the new solve's value; the stairs (a sample above the
+        // lamp) and the floor far behind keep the last write. Unchanged records leave every sample to the carry
+        const auto disc = [](float x) {
+            RoomLightTests::Record rc;
+            rc.c = {x, 0.77f, 0.0f}, rc.r2 = 1.0f;
+            RoomLightTests::Blocker k{};
+            k.vt = RoomLightTests::kDiscVt;
+            const float c[3] = {x, 0.77f, 0.0f}, n[3] = {0.0f, 1.0f, 0.0f};
+            std::memcpy(&k.f[0x20 / 4], c, 12), std::memcpy(&k.f[0x40 / 4], n, 12);
+            k.f[0x70 / 4] = 0.357f * 0.357f;
+            rc.b.push_back(k);
+            return rc;
+        };
+        RoomLightTests::Room was, now, still;
+        was.rec = {disc(0.0f), disc(-4.0f)}, now.rec = {disc(-4.0f), disc(2.0f)};
+        const std::vector<std::array<float, 6>> lamps = {{0.0f, 1.34f, 0.0f, 2.0f, 1.34f, 0.0f}};
+        const float samples[][3] = {{0.0f, 0.0f, 0.1f}, {2.0f, 0.0f, 0.1f}, {1.0f, 2.6f, 0.0f}, {8.0f, 0.0f, 6.0f}};
+        const auto at = [&](size_t i) { return samples[i]; };
+        const std::vector<char> s = PhysLampPick::CarryStale(was, now, lamps, 4, at), none = PhysLampPick::CarryStale(now, now, lamps, 4, at),
+                                dark = PhysLampPick::CarryStale(was, still, {}, 4, at);
+        Check(s.size() == 4 && s[0] && s[1] && !s[2] && !s[3] && std::count(none.begin(), none.end(), 1) == 0 && std::count(dark.begin(), dark.end(), 1) == 0,
+              "carried write: samples a moved table shades, old place or new, take the solve's value; stairs above and far floor keep the carry");
     }
     {
         // a floor texel at (1, 2, 1) with 0.25 m steps; samples: position at 0..2, normal at 4..6
@@ -1602,20 +1642,29 @@ void BlockerTableChecks() {
         const float bySofa[3] = {0.0f, 0.86f, 0.0f};
         Check(stands(onTop) && !stands(over) && !stands(beside) && !stands(below) && !RoomLightTests::StandsOn(sofa, bySofa),
               "stands on: a table lamp yes; a chandelier over the table, a lamp beside or under it, or beside a sofa no");
-        // (FillOf) only the lamp on the table's top keeps the furniture fill under furniture; a chandelier over it none, nor the lamp
-        // once its top is left out
-        RtLampGpu::BlockerTable left = live;
-        left.Drop(h, 0);
-        Check(live.FillOf(h, onTop) == RtLampGpu::kFurnitureFill && live.FillOf(h, over) == 0.0f && left.FillOf(h, onTop) == 0.0f && live.FillOf(-1, onTop) == 0.0f &&
-                  RtLampGpu::FurnitureFill(0.0f, 0.0f) == 0.0f && RtLampGpu::FurnitureFill(1.0f, RtLampGpu::kFurnitureFill) == 1.0f &&
-                  RtLampGpu::FurnitureFill(0.0f, RtLampGpu::kFurnitureFill) == RtLampGpu::kFurnitureFill,
-              "furniture fill: a table lamp's own top lifts its shadow to the fill; any other lamp keeps the game's 3D test");
-        // (Drop) a lamp away from where its solve saw it: the top it stood on casts nothing until the next solve, the rest unchanged
-        bool none = true;
-        for (float x = -2.0f; x <= 2.0f; x += 0.05f) none = none && left.Occlude(h, lamp, V{x, 0.0f, 0.1f}) == 1.0f;
-        Check(none && live.Occlude(h, lamp, V{1.0f, 0.0f, 0.1f}) < 0.01f && !PhysLampPick::LeftItsTop(0.005f, 0.01f, 0.0f) &&
-                  PhysLampPick::LeftItsTop(0.02f, 0.0f, 0.0f) && PhysLampPick::LeftItsTop(0.0f, 0.05f, 0.0f),
-              "lamp left its top: the top it stood on is left out (no shadow anywhere); a lamp still in place keeps it");
+        // (FillOf) only the lamp on the table's top keeps the furniture fill under furniture; a chandelier over it none. A carried
+        // table keeps it for its lamp where both are drawn now, not where they were
+        RtLampGpu::BlockerTable carried = live;
+        carried.Offset(h, 0, 2.0f, 0.0f);
+        const float onCarried[3] = {3.0f, 1.34f, 0.0f};
+        Check(live.FillOf(h, onTop) == RtLampGpu::kFurnitureFill && live.FillOf(h, over) == 0.0f && live.FillOf(-1, onTop) == 0.0f &&
+                  carried.FillOf(h, onCarried) == RtLampGpu::kFurnitureFill && carried.FillOf(h, onTop) == 0.0f && RtLampGpu::FurnitureFill(0.0f, 0.0f) == 0.0f &&
+                  RtLampGpu::FurnitureFill(1.0f, RtLampGpu::kFurnitureFill) == 1.0f && RtLampGpu::FurnitureFill(0.0f, RtLampGpu::kFurnitureFill) == RtLampGpu::kFurnitureFill,
+              "furniture fill: a table lamp's own top lifts its shadow to the fill, carried or not; any other lamp keeps the game's 3D test");
+        // (Offset, the table drag) the table of a solve at x = 1 carried by the lamp's move (+2 m) shades exactly as the table read at
+        // x = 3, the edged test too; the copy it came from is unchanged
+        {
+            RtLampGpu::BlockerTable at3;
+            const int h3 = at3.Append(tableAt(3.0f));
+            const V lamp3{3.0f, 1.34f, 0.0f};
+            bool same = true;
+            for (float x = 0.0f; x <= 6.0f; x += 0.05f)
+                for (const float edge : {0.0f, 0.1f})
+                    same = same && std::fabs(carried.Occlude(h, lamp3, V{x, 0.0f, 0.1f}, edge) - at3.Occlude(h3, lamp3, V{x, 0.0f, 0.1f}, edge)) < 1e-4f;
+            Check(same && carried.Occlude(h, lamp3, V{3.0f, 0.0f, 0.1f}) < 0.01f && carried.Occlude(h, lamp3, V{1.0f, 0.0f, 0.1f}) == 1.0f &&
+                      live.Occlude(h, lamp, V{1.0f, 0.0f, 0.1f}) < 0.01f,
+                  "table drag: the solve's table carried by its lamp's move shades as the table read at its new place; none left at the old one");
+        }
         // (true-size edges, Params::edgeR) a 0.8 m square table top at 0.75 m under a lamp at 1.33 m: its floor shadow ends where the
         // top's edge projects (0.4 x 1.33 / 0.58 = 0.92 m), soft over the lamp ball's width there; the game's band shades to ~1.7 m
         {

@@ -4371,6 +4371,7 @@ bool ReadRoomTests(const BYTE* room, RoomLightTests::Room& r, std::string& why, 
             if (!CopyBytes(&b, reinterpret_cast<const void*>(bl[0] + j * 4), 4) || !b || !CopyBytes(&k.vt, reinterpret_cast<const void*>(b), 4) ||
                 !CopyBytes(k.f, reinterpret_cast<const void*>(b), sizeof k.f))
                 return why = "a 3D blocker could not be read", false;
+            if (!j) r.rec[i].shape = b;
             if (!anyBlocker && k.vt != RoomLightTests::kQuadVt && k.vt != RoomLightTests::kDiscVt) return why = std::format("a 3D blocker of a kind the copy does not know (vtable {:08X})", k.vt), false;
         }
     }
@@ -4901,6 +4902,23 @@ void NotePhysBasisKept(uint64_t key, const KeptRoom* prev, const KeptRoom& k) {
     std::vector<uint32_t> last = bn.carry.empty() ? std::move(bn.expect) : std::move(bn.carry); // (one not written yet: carried on)
     if (last.size() != k.basisGame.size()) return;
     CarryBasis(last.data(), prev->basisGame.data(), k.basisGame.data(), last.size());
+    // ... except where a record that moved, came or went between the solves may shade a sample from a lamp: there the last write
+    // held the old table's shadow, left on furniture and stairs at its old place after the drop (15:25 of 03/11); the new solve's
+    // value until the redo. shortcut: lamps the room's solves did not list (drawn fresh) are not tested; test bn.drawn's laws
+    // if a recording shows a stale shadow from one
+    if (prev->roomGeo != k.roomGeo || !prev->roomGeo) {
+        std::vector<std::array<float, 6>> lamps;
+        const auto add = [&](const KeptLamp& a, const KeptLamp* b) { lamps.push_back({a.pos[0], a.pos[1], a.pos[2], b ? b->pos[0] : a.pos[0], b ? b->pos[1] : a.pos[1], b ? b->pos[2] : a.pos[2]}); };
+        for (const KeptLamp& kl : prev->lamps) {
+            const auto it = std::find_if(k.lamps.begin(), k.lamps.end(), [&](const KeptLamp& x) { return x.light == kl.light; });
+            add(kl, it != k.lamps.end() ? &*it : nullptr);
+        }
+        for (const KeptLamp& kl : k.lamps)
+            if (std::none_of(prev->lamps.begin(), prev->lamps.end(), [&](const KeptLamp& x) { return x.light == kl.light; })) add(kl, nullptr);
+        const std::vector<char> stale = PhysLampPick::CarryStale(prev->tests, k.tests, lamps, k.basis.size(), [&](size_t i) { return k.basis[i].pos; });
+        for (size_t i = 0; i < stale.size(); i++)
+            if (stale[i]) std::copy_n(&k.basisGame[i * 4], 4, &last[i * 4]);
+    }
     std::vector<uintptr_t> drawn = std::move(bn.drawn);
     BasisNow& now = NowOf(key, k); // (the new solve's capture expected)
     now.phys = true, now.drawn = std::move(drawn), now.carry = std::move(last);

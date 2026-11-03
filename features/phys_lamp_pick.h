@@ -6,6 +6,7 @@
 //   - Never twice: a light in the solve's base (`baked`: no law when kept) is never drawn; a listed lamp's measured part left the
 //     base, so it is drawn; a lamp the solve did not list has nothing in the base, so it is drawn too.
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -239,14 +240,59 @@ inline bool OwnObjectStep(bool hadPoint, const float occWas[2], const float occN
     const float dx = (occNow[0] - occWas[0]) - (lampNow[0] - lampWas[0]), dz = (occNow[1] - occWas[1]) - (lampNow[2] - lampWas[2]);
     return dx * dx + dz * dz <= tol * tol;
 }
-// (LampMarkFilter) an occluder entry whose point moved at a mark: where it is now (world x, z) and when
+// (LampMarkFilter) an occluder entry whose point moved at a mark: where it is now (world x, z), when, and its object's first
+// occluder shape (entry+0x20 -> +0x40: the first blocker of the object's 3D record in its room, Record::shape; 0 none)
 struct OccMove {
     uintptr_t entry = 0;
     uint32_t at = 0;
     float x = 0.0f, z = 0.0f;
+    uintptr_t shape = 0;
 };
-// A lamp away from where its room's solve saw it (dx, dy, dz: now minus then): 1 cm across or 2 cm up or down
-inline bool LeftItsTop(float dx, float dy, float dz) { return dx * dx + dz * dz >= 1e-4f || std::fabs(dy) > 0.02f; }
+// The object whose first occluder shape is `shape` moved lately (a record's own object: the table, never the lamp standing on
+// it, which has no occluder entry). Only its identity tells a table dragged with its lamp from the lamp dragged alone over it:
+// the one entry that moves either way lies by the lamp's head (03/11 recordings 11:47 to 15:25)
+inline bool ShapeMoved(const OccMove* m, int n, uintptr_t shape, uint32_t now, uint32_t withinMs) {
+    for (int i = 0; i < n && shape; i++)
+        if (m[i].entry && m[i].shape == shape && now - m[i].at <= withinMs) return true;
+    return false;
+}
+// (WritePhysCarry) the samples whose 3D test may differ between two solves of a room (`was`, `now`), from the records one holds
+// and the other does not hold alike (moved, come or gone: a table dragged with its lamp). The last write was traced over `was`'s
+// records with each lamp somewhere between where the two solves saw it (x, y, z then, x, y, z now): a sample a gone record
+// shades from any of 5 points of that way, or a come one from the lamp now, has a wrong furniture shadow in that write. The
+// game's own test (RoomLightTests::occlude: its soft bands too), so a table top never counts against stairs above its lamp
+template <class Pos>
+std::vector<char> CarryStale(const RoomLightTests::Room& was, const RoomLightTests::Room& now, const std::vector<std::array<float, 6>>& lamps, size_t n, Pos pos) {
+    using RoomLightTests::Record;
+    const auto same = [](const Record& a, const Record& b) {
+        if (std::memcmp(&a.c, &b.c, sizeof a.c) || a.r2 != b.r2 || a.b.size() != b.b.size()) return false;
+        for (size_t i = 0; i < a.b.size(); i++)
+            if (a.b[i].vt != b.b[i].vt || std::memcmp(a.b[i].f, b.b[i].f, sizeof a.b[i].f)) return false;
+        return true;
+    };
+    RoomLightTests::Room gone, came;
+    for (const Record& r : was.rec)
+        if (std::none_of(now.rec.begin(), now.rec.end(), [&](const Record& o) { return same(r, o); })) gone.rec.push_back(r);
+    for (const Record& r : now.rec)
+        if (std::none_of(was.rec.begin(), was.rec.end(), [&](const Record& o) { return same(r, o); })) came.rec.push_back(r);
+    std::vector<char> out(n, 0);
+    if (gone.rec.empty() && came.rec.empty()) return out;
+    int unknown = 0;
+    for (size_t i = 0; i < n && !lamps.empty(); i++) {
+        const float* p = pos(i);
+        const RoomLightTests::V s{p[0], p[1], p[2]};
+        for (size_t l = 0; l < lamps.size() && !out[i]; l++) {
+            const auto& L = lamps[l];
+            const RoomLightTests::V to{L[3], L[4], L[5]};
+            out[i] = !came.rec.empty() && RoomLightTests::occlude(came, to, s, &unknown) < 1.0f;
+            for (int k = 0; k <= 4 && !out[i] && !gone.rec.empty(); k++) {
+                const float f = 0.25f * static_cast<float>(k);
+                out[i] = RoomLightTests::occlude(gone, {L[0] + f * (L[3] - L[0]), L[1] + f * (L[4] - L[1]), L[2] + f * (L[5] - L[2])}, s, &unknown) < 1.0f;
+            }
+        }
+    }
+    return out;
+}
 // A lamp's furniture moved with it: an occluder beside its head moved lately. Dragging a table with its lamp moves one occluder
 // entry, never two (03/11 recordings 11:47 and 13:56: 57B1E040, then 9D2D0970 after the drop); asking for two never carried the
 // table, and its shadow stayed where the last solve read it while the floor under the dragged table lit up

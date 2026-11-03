@@ -2727,7 +2727,14 @@ bool PhysKeptCheck() {
         for (int c = 0; c < 3; c++) world[l][c] = lamps[l].law.pos[c] + kWorld[c];
     const auto worldOf = [&](const Tx& t) { return RoomLightTests::V{t.pos[0] + kWorld[0], t.pos[1] + kWorld[1], t.pos[2] + kWorld[2]}; };
     RtLampGpu::BlockerTable table;
-    rooms[0].header = static_cast<float>(table.Append(roomA));
+    // (BlockerTable::Offset, a table dragged with its lamp) the table top appended where a solve read it, 0.4 m off, and carried
+    // back by its record's offset: Occlude3D tests the segment moved back as RoomLightTests::occlude tests roomA
+    RoomLightTests::Room read = roomA;
+    read.rec[1].c.x -= 0.4f, read.rec[1].c.z += 0.3f;
+    for (RoomLightTests::Blocker& k : read.rec[1].b)
+        for (const int off : {0x70, 0x80}) k.f[off / 4] -= 0.4f, k.f[off / 4 + 2] += 0.3f;
+    rooms[0].header = static_cast<float>(table.Append(read));
+    table.Offset(static_cast<int>(rooms[0].header), 1, 0.4f, -0.3f);
     // the phys points (the sum's layout = the map's: texel i at (i % w, i / w))
     RtLampGpu::KeptMapData d;
     d.w = w, d.h = h, d.accW = w, d.accH = h;
