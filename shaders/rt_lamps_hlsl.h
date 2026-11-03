@@ -704,11 +704,11 @@ float Occlude3D(float3 a, float3 b, float h) {
             if (nb < 0) { // a record: the broad phase (the infinite line against its sphere)
                 const float row = head.x + 2.0 * rec;
                 const float4 c = BlkRow(row);
-                const float4 ix = BlkRow(row + 1);
-                const float3 ca = c.xyz + float3(ix.z, 0, ix.w) - a, d = b - a;
+                const float3 ca = c.xyz - a, d = b - a;
                 const float s = GDot(ca, d);
                 const float3 q = s * (d / len2) - ca;
                 if (GDot(q, q) - c.w < 0) {
+                    const float4 ix = BlkRow(row + 1);
                     first = ix.x;
                     nb = ix.y;
                     blk = 0;

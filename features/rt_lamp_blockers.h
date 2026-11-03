@@ -81,10 +81,13 @@ struct BlockerTable {
 
     // (physical) record r of the room at `header` drawn moved by (dx, 0, dz): a piece of furniture dragged with the lamp standing on
     // it, ahead of the solve that reads its records again (video of 03/11: the side table's shadow left behind, on the side away
-    // from the drag). Its record's index row carries the offset (z, w; Append writes 0); the walk tests the segment moved back
+    // from the drag). Its sphere moves; its record's index row carries the offset (z, w; Append writes 0) for the blocker tests,
+    // which test the segment moved back. Once per record of a fresh copy (the centre is moved in place)
     void Offset(int header, int r, float dx, float dz) {
         const int firstRec = static_cast<int>(rows[static_cast<size_t>(header)].v[0]);
+        Row& c = rows[static_cast<size_t>(firstRec + 2 * r)];
         Row& ix = rows[static_cast<size_t>(firstRec + 2 * r + 1)];
+        c.v[0] += dx, c.v[2] += dz;
         ix.v[2] = dx, ix.v[3] = dz;
     }
     // The blocker at `row` back in the game's layout (only the fields its test reads; the rest 0)
@@ -117,7 +120,7 @@ struct BlockerTable {
         for (int r = 0; r < recs; r++) {
             const Row& c = rows[static_cast<size_t>(firstRec + 2 * r)];
             const Row& ix = rows[static_cast<size_t>(firstRec + 2 * r + 1)];
-            V ca = sub({c.v[0] + ix.v[2], c.v[1], c.v[2] + ix.v[3]}, a); // (the record moved by its offset, Offset)
+            V ca = sub({c.v[0], c.v[1], c.v[2]}, a);
             float s = dot(ca, d);
             V q = sub({s * dn.x, s * dn.y, s * dn.z}, ca);
             if (!(dot(q, q) - c.v[3] < 0.0f)) continue; // broad phase: infinite line vs sphere
