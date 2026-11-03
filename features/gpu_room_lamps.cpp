@@ -9,7 +9,6 @@
 #include "level_light_share.h"
 #include "rt_lamp_model.h"
 #include "phys_lamp_pick.h"
-#include "object_casters.h"
 #include "apex_log.h"
 #include <windows.h>
 #include <algorithm>
@@ -97,12 +96,11 @@ std::map<std::tuple<uintptr_t, int, int>, CopyState> g_copies; // (mgr, cls, m)
 // Its rows grow with the most lamps a map has drawn (4 at a time, up to kTiles: 6 x 256 x 256 x (G16R16F + D24X8) = 3.1 MB a
 // row, 50 MB at 16); a map with more lamps is drawn in several passes over the same sum, its tiles rendered again in turn
 constexpr int kTiles = 16;    // (6 x 256 by 16 x 256: within a 4096 texture limit)
-constexpr int kMaxLamps = 64;
-constexpr float kCasterReach = 15.0f; // m: an object moved further from a lamp leaves its tile as it is (shortcut: the lamp's own reach, when it is known here) // a map's lamps drawn at most (4 passes of 16 tiles: the frame's cost bounded)
+constexpr int kMaxLamps = 64; // a map's lamps drawn at most (4 passes of 16 tiles: the frame's cost bounded)
 struct Tile {
     uintptr_t light = 0;
     float pos[3] = {};
-    uint32_t gen = 0, used = 0, casterGen = 0; // (casterGen: ObjectCasters::Gen its objects were drawn at, 0 none)
+    uint32_t gen = 0, used = 0;
 };
 std::array<Tile, kTiles> g_tiles;
 uint32_t g_tileUse = 0;
@@ -476,8 +474,6 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                 }
             }
             Mix(sig, &e.version, sizeof e.version), Mix(sig, &gen, sizeof gen), Mix(sig, &e.blkGen, sizeof e.blkGen), Mix(sig, &e.offHash, sizeof e.offHash);
-            const uint32_t casters = ObjectCasters::Gen(); // (Real shapes: an object appeared, moved or went)
-            Mix(sig, &casters, sizeof casters);
             any = true;
             // (S8) the ceiling pass's ambient follows the room's now: Rooms at Night's sliders and the lamp edits taken, no solve
             const auto ambient = [&] {
@@ -616,8 +612,7 @@ bool RelightPhys(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, Entry& e, const 
             lamps.push_back(e.lotLaws[l]), world.push_back(e.world[l]), lights.push_back(e.lamps[l]),
                 reach.push_back(l < e.physReach.size() && e.physReach[l] ? 1.0f : 0.0f);
     const int n = static_cast<int>(lamps.size());
-    ObjectCasters::SetLotXf(e.xf);
-    if (!eng.SetBlockers(dev, ObjectCasters::Filter(e.blockers), err)) return false;
+    if (!eng.SetBlockers(dev, e.blockers, err)) return false;
     RtLampGpu::Params p = base;
     p.thr = e.thr, p.mask = false, p.maskAllGpu = false, p.keptX = false, p.physX = false, p.debugLamp = -1, p.shadowAtMask = true;
     return PhysPasses(dev, eng, lights.data(), lamps.data(), n, base.farDist, err, [&](int g0, int gn, const int* tiles, bool last) {
@@ -632,7 +627,7 @@ bool RelightPhys(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, Entry& e, const 
 
 bool PhysPasses(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, const uintptr_t* lights, const RtLampModel::Lamp* lamps, int n, float farDist, std::string& err,
                 const std::function<bool(int first, int count, const int* tiles, bool last)>& pass) {
-    const uint32_t gen = RtOutdoorLamps::KeptMeshGen(), casters = ObjectCasters::Gen();
+    const uint32_t gen = RtOutdoorLamps::KeptMeshGen();
     if (!gen) return err = "physical: no occluders with open tops uploaded", false;
     if (n > kMaxLamps) return err = std::format("physical: {} lamps, at most {} are drawn", n, kMaxLamps), false;
     const int rows = std::max(g_tileRows, std::min(kTiles, (std::max(n, 1) + 3) / 4 * 4));
@@ -646,9 +641,7 @@ bool PhysPasses(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, const uintptr_t* 
         g_tileUse++;
         for (int i = 0; i < gn; i++) // (a lamp's own tile when it holds its shadow now)
             for (int t = 0; t < rows; t++)
-                if (Tile& g = g_tiles[t]; !taken[t] && g.light == lights[g0 + i] && g.gen == gen && std::memcmp(g.pos, lamps[g0 + i].law.pos, sizeof g.pos) == 0 &&
-                                          (g.casterGen == casters || (casters && g.casterGen && !ObjectCasters::ChangedNear(g.casterGen, g.pos, kCasterReach)))) {
-                    g.casterGen = casters; // (no object changed within its reach: the tile holds its shadow)
+                if (const Tile& g = g_tiles[t]; !taken[t] && g.light == lights[g0 + i] && g.gen == gen && std::memcmp(g.pos, lamps[g0 + i].law.pos, sizeof g.pos) == 0) {
                     tiles[i] = t, taken[t] = true;
                     break;
                 }
@@ -659,8 +652,8 @@ bool PhysPasses(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, const uintptr_t* 
                 if (!taken[c] && (t < 0 || g_tiles[c].used < g_tiles[t].used)) t = c;
             Tile& g = g_tiles[t];
             g = Tile{};
-            if (!eng.RenderShadowTile(dev, lamps[g0 + i].law.pos, t, farDist, err) || !ObjectCasters::DrawIntoTile(dev, eng, lamps[g0 + i].law.pos, t, farDist, err)) return false;
-            g.light = lights[g0 + i], g.gen = gen, g.casterGen = casters;
+            if (!eng.RenderShadowTile(dev, lamps[g0 + i].law.pos, t, farDist, err)) return false;
+            g.light = lights[g0 + i], g.gen = gen;
             std::memcpy(g.pos, lamps[g0 + i].law.pos, sizeof g.pos);
             tiles[i] = t, taken[t] = true;
         }

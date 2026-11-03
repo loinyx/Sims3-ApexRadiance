@@ -46,12 +46,11 @@ DeviceCalls PlainCalls(); // the device's own methods (the harness)
 enum ShaderId {
     kShadowVs, kTexelVs, kShadowPs, kAccPs, kComposePs, kCopyPs, kBlurRowPs, kBlurColPs, kBlockPs, kAccFastPs, kAccRlgPs, kAccRlgFastPs, kComposeRlgPs,
     kAccKeptPs, kComposeKeptPs, kCopyAtPs, kBlockKeptPs, kAccKept0Ps, kAccKept0XPs, kComposeK0Ps, kAccPhysPs, kAccPhysFastPs, kT3dPs, kAccPhysXPs,
-    kAccPhysInPs, kAccPhysInFastPs, kCasterVs, kCasterAlphaPs, kShaderCount
+    kAccPhysInPs, kAccPhysInFastPs, kShaderCount
 };
 const char* EntryOf(ShaderId id);
 bool IsVertex(ShaderId id);
-// The physical indoor lamps' shaders: optional (Init without them; RelightKeptPhys then refuses and the game's map stays;
-// without the caster pair the objects' own meshes stay out of the tiles, ObjectCasters)
+// The physical indoor lamps' shaders: optional (Init without them; RelightKeptPhys then refuses and the game's map stays)
 bool IsPhysical(ShaderId id);
 
 #pragma pack(push, 1)
@@ -65,11 +64,8 @@ struct TexelVertex {
 struct TexelDyn {
     float v[4]; // the GPU lamps' luminance with no walls, under (-1 none)
 };
-struct CasterVertex { // (Real shapes) an object's triangle corner in lot space, its triangle's normal, its diffuse uv
-    float p[3], n[3], uv[2];
-};
 #pragma pack(pop)
-static_assert(sizeof(TexelVertex) == 80 && sizeof(TexelDyn) == 16 && sizeof(CasterVertex) == 32);
+static_assert(sizeof(TexelVertex) == 80 && sizeof(TexelDyn) == 16);
 
 struct Block {
     int x0, y0, x1, y1;
@@ -228,14 +224,6 @@ class Engine {
     bool RenderShadowTile(IDirect3DDevice9* dev, const float pos[3], int tile, float farDist, std::string& err);
     // The same from the proxy's triangle ranges [first, first + count) only (the object shapes that hold the lamp left out)
     bool RenderShadowTileRanges(IDirect3DDevice9* dev, const float pos[3], int tile, float farDist, const std::vector<std::pair<UINT, UINT>>& ranges, std::string& err);
-    // Physical indoor lamps, Real shapes (object_casters.h): objects' meshes (CasterVertex triangle lists, lot space) added into
-    // tile `tile` after RenderShadowTile (no clear); tex: an alpha-tested draw's diffuse texture (null: opaque)
-    struct CasterDraw {
-        UINT first = 0, tris = 0;
-        IDirect3DBaseTexture9* tex = nullptr;
-    };
-    bool RenderCasters(IDirect3DDevice9* dev, const float pos[3], int tile, float farDist, IDirect3DVertexBuffer9* vb, const std::vector<CasterDraw>& draws, std::string& err);
-    bool CastersReady() const { return casterVs_ && ps_[kCasterAlphaPs] && casterDecl_; }
     // The room table (A32B32G32R32F, kTableCols x rows; DEFAULT, written from a SYSTEMMEM copy) for the next draws
     static constexpr int kTableCols = 18;
     bool SetTable(IDirect3DDevice9* dev, const float* rgba, int rows, std::string& err);
@@ -327,8 +315,6 @@ class Engine {
     IDirect3DPixelShader9* ps_[kShaderCount] = {};
     IDirect3DVertexDeclaration9* texelDecl_ = nullptr;
     IDirect3DVertexDeclaration9* shadowDecl_ = nullptr;
-    IDirect3DVertexShader9* casterVs_ = nullptr; // (optional: Real shapes)
-    IDirect3DVertexDeclaration9* casterDecl_ = nullptr;
     IDirect3DVertexBuffer9* proxy_ = nullptr; // MANAGED
     size_t proxyTris_ = 0;
     IDirect3DVertexBuffer9* tileProxy_ = nullptr; // MANAGED (SetProxy tiles)
