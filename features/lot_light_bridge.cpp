@@ -7455,8 +7455,14 @@ bool SetInWall(const float (&m)[5][4], float sizeU, float sizeV) {
     return ApexMath::Fabs(u - std::round(u)) < 0.12f || ApexMath::Fabs(v - std::round(v)) < 0.12f;
 }
 
+// Why an object draw keeps the game's rig instead of the smooth room light (logged with the draw cost while recording):
+// outdoor rig mode, smooth off or no shader info, ps_2_x, no room map with known directional maps, patch or scale failed,
+// set in a wall; [6] = drawn smooth
+std::atomic<long> g_indoorWhy[7]{};
 template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn draw) {
-    if (!g_indoorSmooth.load(std::memory_order_relaxed) || !g_curVsInfo || RigMode() != 0) return false;
+    const auto keep = [](int why) { g_indoorWhy[why].fetch_add(1, std::memory_order_relaxed); return false; };
+    if (RigMode() != 0) return keep(0);
+    if (!g_indoorSmooth.load(std::memory_order_relaxed) || !g_curVsInfo) return keep(1);
     IDirect3DTexture9* basis[4] = {};
     IDirect3DBaseTexture9* lightMap = nullptr; // held until the scale is read
     int lmS = -1;
@@ -7470,7 +7476,7 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     }
     // (2.15.3) not ps_3_0: PatchIndoorBasis refuses it whatever the sampler, so the draw always stays the game's; the scan's
     // texture reads (up to 8 GetTexture + Release a draw) are skipped
-    if (facts && !facts->ps3) return false;
+    if (facts && !facts->ps3) return keep(2);
     const unsigned declared = facts && facts->declared ? facts->declared & 0xFFu : 0xFFu;
     const int first = facts ? facts->lastLm : -1;
     const auto tryS = [&](DWORD s) {
@@ -7486,7 +7492,7 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     for (DWORD s = 0; s < 8 && lmS < 0; s++)
         if ((declared & (1u << s)) && static_cast<int>(s) != first) tryS(s);
     if (facts && lmS >= 0) facts->lastLm = static_cast<int8_t>(lmS);
-    if (lmS < 0) return false; // no room light map with known directional maps (other lots, low lighting quality)
+    if (lmS < 0) return keep(3); // no room light map with known directional maps (other lots, low lighting quality)
     const bool capToFloorMap = !LevelLightShare::BasisFloorGuardReady();
     // Separate cache entries: live disable/re-enable must never reuse the unguarded variant.
     const int shaderVariant = lmS + (capToFloorMap ? 0 : 8);
@@ -7498,7 +7504,7 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     const bool scaled = p.ps && IndoorBasisScale(dev, p.indoor, lightMap, basis[0], size);
     const uintptr_t lightMapPtr = reinterpret_cast<uintptr_t>(lightMap);
     lightMap->Release();
-    if (!scaled) return false;
+    if (!scaled) return keep(4);
     // A door or window set in its wall spans two rooms: the smooth read (a B-spline over 4 texels, +-2 m) mixed the room
     // behind the wall into the faces on this side (F7 capture, 07/10: a sconce's room at ~41% on the dark room's door frame).
     // The game's rig (one room, the camera's side) lights it, as before Apex.
@@ -7507,7 +7513,7 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
         if (SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(wk), &wm[0][0], 5)) && SetInWall(wm, size[0], size[1])) {
             if (g_doorsKept.fetch_add(1, std::memory_order_relaxed) == 0 && !g_doorsLogged.exchange(true))
                 LOG_INFO("[LotLightBridge] Indoor smooth light: doors and windows set in a wall keep the game's room light");
-            return false;
+            return keep(5);
         }
     } else if (g_doorsNoWorld.fetch_add(1, std::memory_order_relaxed) == 0 && !g_doorsNoWorldLogged.exchange(true))
         LOG_INFO("[LotLightBridge] Indoor smooth light: an object shader with no world triple (doors in it cannot be told apart)");
@@ -7555,6 +7561,7 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     g_traceA = TraceA{lightMapPtr, reinterpret_cast<uintptr_t>(basis[0]), size[0], size[1]};
     g_inOwnCall = false;
     ApexUtil::CountOne(g_indoorDrawn);
+    g_indoorWhy[6].fetch_add(1, std::memory_order_relaxed);
     return true;
 }
 
@@ -9695,6 +9702,14 @@ void LogDrawCost() {
         for (uint32_t& w : g_fenceMissWhy) w = 0;
     }
     g_archRowsTicks = 0, g_archRowsCalls = 0, g_fencePickTicks = 0, g_fencePickCalls = 0;
+    {
+        long w[7];
+        for (int i = 0; i < 7; i++) w[i] = g_indoorWhy[i].exchange(0, std::memory_order_relaxed);
+        if (Recorder::Active())
+            LOG_INFO(std::format("[IndoorWhy] object draws: {} smooth room light; on the game's rig: outdoor rig {}, smooth off or no shader info {}, ps_2_x {}, "
+                                 "no room map with known directional maps {}, patch or scale failed {}, set in a wall {}",
+                                 w[6], w[0], w[1], w[2], w[3], w[4], w[5]));
+    }
     LOG_INFO(std::format("[LotLightBridge] Draw cost by fix over {} frames (1 draw in 16 timed, the fixes' own time): {:.3f} ms a frame in all, {:.3f} ms a frame "
                          "in the driver for the game draws the fixes made; {}{}",
                          frames, own, driver, text, arch));

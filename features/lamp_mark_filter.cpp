@@ -493,6 +493,11 @@ uintptr_t TrackerOf(uintptr_t tl) {
         return 0;
     }
 }
+// An edit taken without its room's solve: the game gathers a room-mode rig again only when that room's light update reaches
+// it, so the furniture of the lamp's room (and of the room it left) would keep its old rig light until a solve
+void NoteRigRoom(uintptr_t tl, int room) {
+    if (const uintptr_t tracker = TrackerOf(tl)) ObjectLightBridge::RegatherRigsOfRoom(tracker, StoryOfTl(tl), room);
+}
 
 // Marks deferred by BeginDeferMarks on this thread (LevelLightShare's window activation recheck): kept back, then made as
 // the game makes them (EndDeferMarks) only when the entry's update changed what the room's gather reads
@@ -580,6 +585,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
                 NoteHandledLight(light);
                 if (playerEdit) LevelLightShare::NoteGpuEdit();
                 if (kind == 1) NoteHandledEdit(tl, pos); // (only a move carries the lamp's object along)
+                NoteRigRoom(tl, room);
             }
             g_kept.fetch_add(1, std::memory_order_relaxed);
             return false;
@@ -622,10 +628,12 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
                                      light, n));
         } else if (known && (kind == 0 || kind == 1 || (kind == 2 && physical)) &&
                    (physical ? OutdoorDelta::TakesLampEditPhys(tl, light, physKind, settle || kind == 2) : OutdoorDelta::TakesLampEdit(tl, light, wasOn, on, kind == 1))) {
+            int leftRoom = -1;
             {
                 std::lock_guard<std::mutex> lk(g_mx);
                 if (const auto it = g_sig.find(Key{tl, light}); it != g_sig.end()) {
                     LampState& was = it->second;
+                    if (was.room != room) leftRoom = was.room;
                     was.entry = entry;
                     if (kind >= 1) std::memcpy(was.pos, pos, sizeof was.pos);
                     std::memcpy(was.editable, editable, sizeof editable);
@@ -642,6 +650,8 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             // at their 20-frame refresh)
             g_editRefresh.store(true, std::memory_order_relaxed);
             if (kind >= 1) NoteHandledEdit(tl, pos); // (as Real-time outdoor lamps' move above)
+            NoteRigRoom(tl, room);
+            if (leftRoom >= 0) NoteRigRoom(tl, leftRoom);
             g_kept.fetch_add(1, std::memory_order_relaxed);
             return false;
         }
@@ -675,6 +685,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             }
             g_first.fetch_add(1, std::memory_order_relaxed);
             g_physFirst.fetch_add(1, std::memory_order_relaxed);
+            NoteRigRoom(tl, room);
             g_editRefresh.store(true, std::memory_order_relaxed);
             // (a new light entry starts in room 0, entry+0x1C = 0 in its constructor at 0x006C8061: its first update also marks room
             // 0 as the room it left, which MarkDecide drops with this mark)

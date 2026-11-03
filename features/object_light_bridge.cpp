@@ -37,6 +37,7 @@
 #include <cstring>
 #include <format>
 #include <iterator>
+#include <tuple>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -397,9 +398,23 @@ void RegatherCrossRigs() {
 
 // The room-mode rigs of the rooms whose outdoor lamps through openings changed (LevelLightShare::TakeOpeningRigRooms): the
 // game marks a room-mode rig only for a lamp of its own room, so they gather again here (render thread)
+// (and those of the rooms of a lamp edit taken without their solve: RegatherRigsOfRoom, drained here once a frame)
+std::mutex g_editRigMx;
+std::vector<std::tuple<uintptr_t, int, int>> g_editRigRooms; // (under g_editRigMx) tracker, story, room id
+std::atomic<bool> g_editRigAny{false};
 void RegatherOpeningRooms() {
     std::vector<const void*> rooms;
     LevelLightShare::TakeOpeningRigRooms(rooms);
+    if (g_editRigAny.exchange(false, std::memory_order_relaxed)) {
+        std::vector<std::tuple<uintptr_t, int, int>> due;
+        {
+            std::lock_guard<std::mutex> lk(g_editRigMx);
+            due.swap(g_editRigRooms);
+        }
+        for (const auto& [tracker, story, id] : due)
+            if (LevelLightShare::TrackerLive(tracker))
+                if (const void* r = id ? LevelLightShare::RoomOf(tracker, story, id) : LevelLightShare::Room0Of(tracker, story)) rooms.push_back(r);
+    }
     if (rooms.empty()) return;
     std::sort(rooms.begin(), rooms.end());
     std::vector<BYTE*> rigs;
@@ -1174,6 +1189,12 @@ void OnPresent() {
 void SetAllObjects(bool on) { g_forceAll = on; }
 
 void RequestRigRefresh() { g_refreshRequested = true; }
+void RegatherRigsOfRoom(uintptr_t tracker, int story, int id) {
+    std::lock_guard<std::mutex> lk(g_editRigMx);
+    const std::tuple<uintptr_t, int, int> k{tracker, story, id};
+    if (g_editRigRooms.size() < 64 && std::find(g_editRigRooms.begin(), g_editRigRooms.end(), k) == g_editRigRooms.end()) g_editRigRooms.push_back(k);
+    g_editRigAny.store(true, std::memory_order_relaxed);
+}
 bool RigRefreshPending() { return g_refreshRequested.load(); }
 
 std::string RigOpeningNote(uintptr_t rig) {
