@@ -1476,6 +1476,7 @@ void BasisDue();  // below (GPU room lamps stage 4: the directional maps of the 
 void RefreshLotLamps(); // below (physical indoor lamps: the active lot's registered lights for the render thread)
 void NotePhysBasisKept(uint64_t key); // below (physical, stage 5: a room whose directional maps were written physically, kept again)
 void QueueBasisGone(uintptr_t light); // below (physical, stage 5: a lamp that left the lot's registry)
+void NoteUnkept(const void* room);     // below (SolveUnkept)
 void AfterRoomUpdate(const void* tl) {
     SettleDue();
     RefreshLotLamps(); // (first: the physical directional maps pick the lamps from its snapshot, a new or moved lamp included)
@@ -2889,11 +2890,15 @@ void KeepEnd(const BYTE* room) {
     // class 2, 02/11)
     if (c.ok && rr.cls != r.cls) {
         if (KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: not kept (its class was {} when its solve started)", rr.story, rr.id, rr.cls, r.cls));
+        // (a lot made active solves its rooms at class 0 and shows them at class 2 meanwhile: a room no lamp lists was solved
+        // again only by an edit's fallback, 11 s after it in the 21:18 log of 02/11, refusing every physical edit until then;
+        // a room gone to class 0, its lot no longer lit at the high quality, keeps nothing worth a solve)
+        if (rr.cls != 0) NoteUnkept(room);
         return;
     }
     if (c.phys != g_physical.load(std::memory_order_relaxed)) { // (the model changed during its solve: the next solve keeps it)
         if (KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: not kept (the model changed during its solve)", rr.story, rr.id, rr.cls));
-        return;
+        return NoteUnkept(room);
     }
     if (!c.ok || r.samples.size() != r.texels.size() * 0x30) {
         if (KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: not kept ({})", rr.story, rr.id, rr.cls, c.ok ? "the samples do not match the texels" : c.why ? c.why : "?"));
@@ -3786,15 +3791,20 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
         g.tex = SlotTexture(rr.cls, m);
         if (!g.tex) return Fail("a map's texture is not known");
     }
-    // the batch: the vector the solve's callers pass (rows lit beyond a wall's edges are another vector: not kept)
+    // the batch: the vector the solve's callers pass (rows lit beyond a wall's edges are another vector: not kept, but in a
+    // physical capture of a room > 0, which keeps no parts and redoes no batch, a batch of its own between two batches (the 21:19
+    // log of 02/11: 4 rooms of a lot never kept, so every physical edit of that lot was refused). One inside a batch would break
+    // that batch's span (its sphere, the dump's batchOf): not kept. Room 0's batches feed the outdoor delta's in-solve redo: strict
     uintptr_t vb = 0, ve = 0;
     const uintptr_t sp = reinterpret_cast<uintptr_t>(sample);
-    if (!ReadBatchVec(vb, ve) || sp < vb || sp >= ve || (sp - vb) % 0x30) return Fail("a sample outside the solve's batch");
-    const uint32_t index = static_cast<uint32_t>((sp - vb) / 0x30);
+    const bool loose = !ReadBatchVec(vb, ve) || sp < vb || sp >= ve || (sp - vb) % 0x30;
+    if (loose && (!c.phys || rr.id == 0 || (!r.batches.empty() && r.texels.size() - r.batches.back().first < r.batches.back().count)))
+        return Fail("a sample outside the solve's batch");
+    const uint32_t index = loose ? 0 : static_cast<uint32_t>((sp - vb) / 0x30);
     if (index == 0) {
         BatchRec b;
         b.first = static_cast<uint32_t>(r.texels.size());
-        b.count = static_cast<uint32_t>((ve - vb) / 0x30);
+        b.count = loose ? 1u : static_cast<uint32_t>((ve - vb) / 0x30);
         if (!flags || !CopyBytes(b.flags, flags, 2)) return Fail("the batch's switches could not be read");
         try {
             r.batches.push_back(b);
@@ -3934,8 +3944,12 @@ void RefreshLotLamps() {
     if (!g_lotLampsDirty.exchange(false) && now - g_lotLampsAt < kLotLampsMs) return;
     g_lotLampsAt = now;
     const uintptr_t tracker = RtOutdoorLamps::ActiveTracker();
+    // (a lot no longer lit at the high quality unregisters its lamps: 175 "left" at once in the 21:19 log of 02/11 as the camera
+    // moved off it, each rewriting the directional maps; the last snapshot stays until it is active again)
+    uintptr_t active[4];
+    const int na = std::max(LevelLightShare::ActiveLotTrackers(active, 4), 0);
     std::vector<LevelLightShare::RegisteredLight> reg;
-    if (!tracker || !LevelLightShare::RegisteredLights(tracker, reg)) return; // (the last snapshot stays)
+    if (!tracker || std::find(active, active + na, tracker) == active + na || !LevelLightShare::RegisteredLights(tracker, reg)) return; // (the last snapshot stays)
     std::vector<LotLamp> out;
     out.reserve(reg.size());
     for (const LevelLightShare::RegisteredLight& r : reg) {
@@ -4009,6 +4023,25 @@ void NoteTouched(const void* room) {
     if (!TouchedKey(room, k)) return;
     std::lock_guard<std::mutex> lk(g_touchedMx);
     g_touched.Note(k);
+}
+std::set<PhysLampPick::TouchedRooms::Key> g_unkept; // (under g_touchedMx) SolveUnkept
+std::atomic<bool> g_unkeptAny{false};
+void NoteUnkept(const void* room) { // (light tree thread, KeepEnd)
+    PhysLampPick::TouchedRooms::Key k;
+    if (!TouchedKey(room, k)) return;
+    std::lock_guard<std::mutex> lk(g_touchedMx);
+    if (g_unkept.size() < 1024) g_unkept.insert(k), g_unkeptAny.store(true, std::memory_order_relaxed);
+}
+void SolveUnkept() {
+    if (!g_unkeptAny.exchange(false, std::memory_order_relaxed)) return;
+    std::set<PhysLampPick::TouchedRooms::Key> due;
+    {
+        std::lock_guard<std::mutex> lk(g_touchedMx);
+        due.swap(g_unkept);
+    }
+    for (const auto& [tracker, story, id] : due)
+        if (LevelLightShare::TrackerLive(tracker))
+            if (void* r = id ? LevelLightShare::RoomOf(tracker, story, id) : LevelLightShare::Room0Of(tracker, story)) LevelLightShare::QueueRoomAgain(r);
 }
 void SolveTouched(const void* room) {
     std::vector<PhysLampPick::TouchedRooms::Key> due;

@@ -284,6 +284,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
         return 0;
     }
     if (!OutdoorDelta::RoomLampPhysical()) OutdoorDelta::SolveTouched(nullptr); // (the replica model: the physical edits' rooms solved)
+    OutdoorDelta::SolveUnkept();
     LogEdits();
     OutdoorDelta::KeptRooms(mgr, cls, g_refs);
     // this map's entries whose kept solve went or was kept again
