@@ -6604,7 +6604,16 @@ struct AmbMapTex {
 };
 std::unordered_map<uintptr_t, AmbMapTex> g_ambMapTex;
 std::atomic<long> g_ambFillDraws{0};
+// (render thread, DrawIndoorObject) the indoor objects' story mask for one directional map and frame
+struct IndoorMaskMemo {
+    IDirect3DTexture9* basis = nullptr;
+    uint32_t frame = 0;
+    uintptr_t key = 0;
+    IDirect3DTexture9* mask = nullptr;
+};
+IndoorMaskMemo g_indoorMask;
 void ReleaseWallMasks() {
+    g_indoorMask = {}; // (its mask is one of these)
     for (auto& [k, m] : g_wallMaskTex)
         if (m.tex) m.tex->Release();
     g_wallMaskTex.clear();
@@ -7001,23 +7010,24 @@ std::atomic<bool> g_roomMapSmooth{true};
 struct RoomMapSizeMemo {
     IDirect3DBaseTexture9* tex = nullptr;
     uint32_t frame = 0;
-    float size[4] = {};
+    float size[4] = {}, real[4] = {}; // (MapSize, MapSizeReal)
 };
 RoomMapSizeMemo g_roomMapSizes[64]; // render thread; valid for g_roomMapFrame only (OnPresent counts frames)
 uint32_t g_roomMapFrame = 1;
 // MapSize through g_roomMapSizes: one level description per bound map and frame (a story's maps are bound for many draws;
 // kept for this frame only, so a map freed and made again at the same address is read again next frame). (2.15.3) Shared by
-// the room map reads and the indoor objects' basis scale, which read two sizes per draw.
-bool MapSizeThisFrame(IDirect3DBaseTexture9* t, float out[4]) {
+// the room map reads and the indoor objects' basis scale, which read two sizes per draw. real: MapSizeReal's too (may be out)
+bool MapSizeThisFrame(IDirect3DBaseTexture9* t, float out[4], float real[4] = nullptr) {
     if (!t) return false;
     RoomMapSizeMemo& m = g_roomMapSizes[(reinterpret_cast<uintptr_t>(t) >> 4) & (std::size(g_roomMapSizes) - 1)];
-    if (m.tex == t && m.frame == g_roomMapFrame) {
-        std::memcpy(out, m.size, sizeof m.size);
-        return true;
+    if (m.tex != t || m.frame != g_roomMapFrame) {
+        if (!MapSize(t, out)) return false;
+        m.tex = t, m.frame = g_roomMapFrame;
+        std::memcpy(m.size, out, sizeof m.size);
+        if (!MapSizeReal(t, m.real)) std::memcpy(m.real, m.size, sizeof m.real);
     }
-    if (!MapSize(t, out)) return false;
-    m.tex = t, m.frame = g_roomMapFrame;
-    std::memcpy(m.size, out, sizeof m.size);
+    std::memcpy(out, m.size, sizeof m.size);
+    if (real) std::memcpy(real, m.real, sizeof m.real);
     return true;
 }
 std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_roomMapSmoothPs, g_basisRoomPs;
@@ -7083,8 +7093,7 @@ bool RoomMapConsts(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& p, 
     // (the bound map for this draw: the device holds it, no reference of ours)
     IDirect3DBaseTexture9* const map = D3D9Hooks::BoundTexture(dev, p.sampler);
     bool haveSize = false;
-    if (map) haveSize = MapSizeThisFrame(map, size);
-    if (haveSize && floor) haveSize = MapSizeReal(map, size); // (a sharper floor copy: its B-spline steps at its own texels)
+    if (map) haveSize = MapSizeThisFrame(map, size, floor ? size : nullptr); // (a sharper floor copy: its B-spline steps at its own texels)
     if (!haveSize) return false;
     float S = 65536.0f; // floors: one block
     if (wall) {
@@ -7481,7 +7490,7 @@ long g_indoorWhyLast[kIndoorWhy] = {};
 uint32_t g_indoorWhyFrames = 0;
 std::atomic<int> g_indoorScaleLogged{0};
 template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn draw) {
-    const auto keep = [](int why) { g_indoorWhy[why].fetch_add(1, std::memory_order_relaxed); return false; };
+    const auto keep = [](int why) { ApexUtil::CountOne(g_indoorWhy[why]); return false; };
     if (const int mode = RigMode(); mode != 0) return keep(mode < 0 ? 7 : 0);
     if (!g_indoorSmooth.load(std::memory_order_relaxed) || !g_curVsInfo) return keep(1);
     IDirect3DTexture9* basis[4] = {};
@@ -7519,8 +7528,13 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     const int shaderVariant = lmS + (capToFloorMap ? 0 : 8);
     // (basis_wall_filter) the story's wall mask known: the copy whose smooth read never crosses a wall of the pixel's tile
     // (PatchIndoorBasis wallMask), so an object against a wall takes its own room's light per pixel; else the plain copy
-    const uintptr_t maskKey = reinterpret_cast<uintptr_t>(RtOutdoorLamps::GameMapOf(basis[0])); // (a relit copy: its game map's story)
-    IDirect3DTexture9* wallMask = WallMaskTextureOf(dev, maskKey);
+    // (draw cost) one lookup per story map and frame: every object on a story binds the same basis[0]
+    if (g_indoorMask.basis != basis[0] || g_indoorMask.frame != g_roomMapFrame) {
+        const uintptr_t key = reinterpret_cast<uintptr_t>(RtOutdoorLamps::GameMapOf(basis[0])); // (a relit copy: its game map's story)
+        g_indoorMask = {basis[0], g_roomMapFrame, key, WallMaskTextureOf(dev, key)};
+    }
+    const uintptr_t maskKey = g_indoorMask.key;
+    IDirect3DTexture9* wallMask = g_indoorMask.mask;
     PatchedPs* pick = nullptr;
     if (wallMask) {
         pick = &PatchedFor(dev, g_indoorPs[shaderVariant + 16], "Indoor object (smooth room light, walls)",
@@ -7538,7 +7552,7 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     float size[4], oldSize[4] = {};
     const bool scaled = p.ps && IndoorBasisScale(dev, p.indoor, lightMap, basis[0], size);
     const uintptr_t lightMapPtr = reinterpret_cast<uintptr_t>(lightMap);
-    if (!scaled && g_indoorScaleLogged.fetch_add(1, std::memory_order_relaxed) < 8) { // (which shaders, and why: the first few)
+    if (!scaled && g_indoorScaleLogged.load(std::memory_order_relaxed) < 8 && g_indoorScaleLogged.fetch_add(1, std::memory_order_relaxed) < 8) { // (which shaders, and why: the first few)
         float b[4] = {}, lm[4] = {};
         const bool bs = MapSizeThisFrame(basis[0], b), ls = MapSizeThisFrame(lightMap, lm);
         LOG_INFO(std::format("[IndoorWhy] shader {:08X} keeps the game's rig: {}", reinterpret_cast<uintptr_t>(g_curPs),
@@ -7613,7 +7627,7 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     g_traceA = TraceA{lightMapPtr, reinterpret_cast<uintptr_t>(basis[0]), size[0], size[1]};
     g_inOwnCall = false;
     ApexUtil::CountOne(g_indoorDrawn);
-    g_indoorWhy[6].fetch_add(1, std::memory_order_relaxed);
+    ApexUtil::CountOne(g_indoorWhy[6]);
     return true;
 }
 
