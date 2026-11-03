@@ -6650,7 +6650,7 @@ IDirect3DTexture9* WallMaskTexture(IDirect3DDevice9* dev, DWORD basisSampler) {
 // texels per tile, the first texel column of the split tiles, 1 = on, 1 / 64); nullptr when its story or layout is not known
 IDirect3DTexture9* FloorWallMaskTexture(IDirect3DDevice9* dev, IDirect3DBaseTexture9* map, const float size[4], float k[4]) {
     if (!DevSwitches::BasisWallFilter() || !map) return nullptr;
-    const uintptr_t key = reinterpret_cast<uintptr_t>(map);
+    const uintptr_t key = reinterpret_cast<uintptr_t>(RtOutdoorLamps::GameMapOf(map)); // (a relit copy: its game map's story)
     float perTile = 0.0f, split = 0.0f;
     IDirect3DTexture9* tex = WallMaskTextureFor(dev, key, [&](uint32_t known, uint32_t& gen, uint8_t* px) {
         return LevelLightShare::FloorWallMaskFor(key, static_cast<int>(size[0]), static_cast<int>(size[1]), known, gen, px, perTile, split);
