@@ -287,6 +287,23 @@ void DiagonalCutChecks() {
     const auto& E = b.g.edges;
     Check(E[up0].open && E[up1].open && E[down].open && !E[axis].open, "a diagonal window opens its diagonal wall, not the edge along x at its corner");
     Check(b.g.openings[E[up0].open - 1].u1 == 1.0f && b.g.openings[E[up1].open - 1].u0 == 0.0f, "two diagonal windows in a row share no jamb");
+    // (03/11 log: 96 posts 'its key is not one side edge of a cell') a diagonal cut post is taken; a longer span is not
+    Check(CutKeyOnCell(1, 1) && CutKeyOnCell(1, -1) && CutKeyOnCell(0, 1) && CutKeyOnCell(-1, 0) && !CutKeyOnCell(2, 0) && !CutKeyOnCell(1, 2) && !CutKeyOnCell(0, 0),
+          "a cut post spans one side or the diagonal of a cell");
+    // a diagonal window's light and a glass door's pane on its diagonal are found there (not on the edge along x at its corner)
+    GlassLight onDiag{4.5f, 1.2f, 4.5f, 0.2f, 0.4f, 0.2f}, offDiag{4.5f, 1.2f, 4.0f, 0.0f, 0.0f, 0.0f};
+    Check(WindowLightIn(b.g, EdgeKey(4, 4, 5, 5), {onDiag}) == 1 && WindowLightIn(b.g, EdgeKey(4, 4, 5, 5), {offDiag}) == 0,
+          "a diagonal window's light is looked for on its diagonal");
+    PaneShapes panes;
+    WindowPanes(b.g, {{EdgeKey(4, 4, 5, 5), w}}, {onDiag}, panes);
+    const auto p = panes.find(EdgeKey(4, 4, 5, 5));
+    Check(p != panes.end() && std::fabs(p->second.u0 - 0.3f) < 0.02f && std::fabs(p->second.u1 - 0.7f) < 0.02f && std::fabs(p->second.sill - 0.8f) < 0.01f,
+          "a diagonal window takes its pane's shape along the diagonal (u from the cell's low corner, over sqrt 2)");
+    CutRec door;
+    door.kind = kCutDoor;
+    std::unordered_set<uint32_t> glazed;
+    GlazedCuts(b.g, {{EdgeKey(6, 4, 7, 3), door}}, {GlassLight{6.5f, 1.0f, 3.5f}}, glazed);
+    Check(glazed.count(EdgeKey(6, 4, 7, 3)) == 1, "a glass door in a diagonal wall is found on its diagonal");
 }
 void DoorRuleChecks() {
     DiagonalCutChecks();

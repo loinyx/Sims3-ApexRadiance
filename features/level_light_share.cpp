@@ -3498,6 +3498,9 @@ uint32_t EdgeKey(int x0, int z0, int x1, int z1) {
     return static_cast<uint32_t>(static_cast<uint8_t>(x0)) | static_cast<uint32_t>(static_cast<uint8_t>(z0)) << 8 |
            static_cast<uint32_t>(static_cast<uint8_t>(x1)) << 16 | static_cast<uint32_t>(static_cast<uint8_t>(z1)) << 24;
 }
+// A cut post's key spans one side of a cell (03/11: a cell's diagonal too, a window or door in a diagonal wall; until then those
+// posts were rejected and no diagonal wall ever opened for lamp light)
+bool CutKeyOnCell(int dx, int dz) { return std::abs(dx) + std::abs(dz) == 1 || (std::abs(dx) == 1 && std::abs(dz) == 1); }
 // At 0x00B0D860 (Add) and 0x00B0DD0F (Remove), the same 15 bytes: 8B 16 | 50 | 8B 42 1C | 68 B4 7E 25 06 | 8B CE | FF D0 =
 // mov edx,[esi]; push eax (the payload); mov eax,[edx+1Ch]; push 6257EB4h; mov ecx,esi; call eax (the message bus,
 // thiscall(bus, id, payload, 0, 0) ret 10h). The 5-byte push at +6 becomes a call of the thunk, which notes the payload and
@@ -3573,8 +3576,8 @@ void NoteCutoutPostImpl(int add, const uintptr_t* siteEsp, uintptr_t frame, uint
     const int story = r.key[2];
     const char* const reject = !read                ? "payload unreadable"
                                : r.postLot == 0     ? "the post carries no lot id"
-                               : std::abs(r.key[3] - r.key[0]) + std::abs(r.key[4] - r.key[1]) != 1 || r.key[5] != story
-                                   ? "its key is not one side edge of a cell"
+                               : !CutKeyOnCell(r.key[3] - r.key[0], r.key[4] - r.key[1]) || r.key[5] != story
+                                   ? "its key is not one side edge or the diagonal of a cell"
                                    : nullptr;
     const bool cut = add && (r.tgi[0] | r.tgi[1] | r.tgi[2] | r.tgi[3]);
     const bool dev = !kPublicBuild;
@@ -3921,6 +3924,28 @@ struct StoryGrid {
 };
 int32_t GridZL(const StoryGrid& g, int x, int Z) { return x >= 0 && x < g.w && Z >= 0 && Z <= g.h ? g.zl[static_cast<size_t>(Z) * g.w + x] : -1; }
 int32_t GridXL(const StoryGrid& g, int X, int z) { return X >= 0 && X <= g.w && z >= 0 && z < g.h ? g.xl[static_cast<size_t>(z) * (g.w + 1) + X] : -1; }
+// A cut's wall edge on the grid (EdgeKey, the low corner first): a side of a cell, or a cell's diagonal (dg: 0 for
+// (x, z)-(x+1, z+1), 1 for (x, z+1)-(x+1, z)); -1 none
+int32_t CutEdge(const StoryGrid& g, uint32_t key) {
+    const int x0 = static_cast<int8_t>(key & 0xFF), z0 = static_cast<int8_t>(key >> 8 & 0xFF), x1 = static_cast<int8_t>(key >> 16 & 0xFF),
+              z1 = static_cast<int8_t>(key >> 24 & 0xFF);
+    if (x0 == x1) return GridXL(g, x0, z0);
+    if (z0 == z1) return GridZL(g, x0, z0);
+    const int dk = z1 > z0 ? 0 : 1, dz = std::min(z0, z1);
+    return x0 >= 0 && dz >= 0 && x0 < g.w && dz < g.h ? g.dg[2 * (static_cast<size_t>(dz) * g.w + x0) + dk] : -1;
+}
+// A point (lot x, z) against a cut's edge: its distance from the edge's line, its place along it from the low end, the edge's
+// length (1, or sqrt 2 on a diagonal) and a box's half size e (ex, ez) along it
+struct CutPlace {
+    float across = 0, along = 0, len = 1, e = 0;
+};
+CutPlace CutPlaceOf(uint32_t key, float x, float z, float ex = 0.0f, float ez = 0.0f) {
+    const int x0 = static_cast<int8_t>(key & 0xFF), z0 = static_cast<int8_t>(key >> 8 & 0xFF), x1 = static_cast<int8_t>(key >> 16 & 0xFF),
+              z1 = static_cast<int8_t>(key >> 24 & 0xFF);
+    const float dx = static_cast<float>(x1 - x0), dz = static_cast<float>(z1 - z0), len = std::sqrt(dx * dx + dz * dz);
+    const float px = x - static_cast<float>(x0), pz = z - static_cast<float>(z0);
+    return {std::fabs(px * dz - pz * dx) / len, (px * dx + pz * dz) / len, len, (ex * std::fabs(dx) + ez * std::fabs(dz)) / len};
+}
 // The grid's zlNear / xlNear (see StoryGrid), once its edges are final
 void NoteNearEdges(StoryGrid& g) {
     g.zlNear.assign(g.zl.size(), 0);
@@ -4083,26 +4108,22 @@ void WindowPanes(const StoryGrid& g, const std::vector<std::pair<uint32_t, CutRe
     out.clear();
     for (const auto& [key, rec] : cuts) {
         if (rec.kind != kCutWindow) continue;
-        const int x0 = static_cast<int8_t>(key & 0xFF), z0 = static_cast<int8_t>(key >> 8 & 0xFF), x1 = static_cast<int8_t>(key >> 16 & 0xFF),
-                  z1 = static_cast<int8_t>(key >> 24 & 0xFF);
-        const bool alongZ = x0 == x1;
-        const int32_t idx = alongZ ? GridXL(g, x0, z0) : GridZL(g, x0, z0);
+        const int32_t idx = CutEdge(g, key);
         if (idx < 0) continue;
         const float base = g.edges[static_cast<size_t>(idx)].base;
-        const float line = static_cast<float>(alongZ ? x0 : z0), a = static_cast<float>(alongZ ? z0 : x0), b = static_cast<float>(alongZ ? z1 : x1);
-        float lo = 1e9f, hi = -1e9f, bottom = 1e9f, top = -1e9f;
+        float lo = 1e9f, hi = -1e9f, bottom = 1e9f, top = -1e9f, len = 1.0f;
         for (const GlassLight& l : lights) {
-            const float e = alongZ ? l.ez : l.ex;
-            if (!(e > 0.0f && l.ey > 0.0f)) continue;
-            const float across = alongZ ? l.x : l.z, along = alongZ ? l.z : l.x;
-            if (ApexMath::Fabs(across - line) > kGlassWallNear || l.y < base || l.y > base + kStoryWallH) continue;
-            const float p0 = std::max(along - e, a), p1 = std::min(along + e, b);
+            const CutPlace c = CutPlaceOf(key, l.x, l.z, l.ex, l.ez);
+            len = c.len;
+            if (!(c.e > 0.0f && l.ey > 0.0f)) continue;
+            if (c.across > kGlassWallNear || l.y < base || l.y > base + kStoryWallH) continue;
+            const float p0 = std::max(c.along - c.e, 0.0f), p1 = std::min(c.along + c.e, c.len);
             if (!(p1 - p0 > kPaneOverlap)) continue;
             lo = std::min(lo, p0), hi = std::max(hi, p1), bottom = std::min(bottom, l.y - l.ey), top = std::max(top, l.y + l.ey);
         }
         if (!(hi > lo)) continue;
         WallOpenings::MaskShape m;
-        m.u0 = std::clamp(lo - a, 0.0f, 1.0f), m.u1 = std::clamp(hi - a, 0.0f, 1.0f);
+        m.u0 = std::clamp(lo / len, 0.0f, 1.0f), m.u1 = std::clamp(hi / len, 0.0f, 1.0f);
         m.sill = std::max(bottom - base, 0.0f);
         const float head = std::min(top - base, kPaneHeadMax);
         if (m.sill > kPaneSillMax || head < m.sill + kPaneMinH || m.u1 - m.u0 < kPaneMinW) continue;
@@ -4116,19 +4137,15 @@ void WindowPanes(const StoryGrid& g, const std::vector<std::pair<uint32_t, CutRe
 // lights centred in its middle cell only (in game: (26,20)..(26,23), its end cells sized u 0.25..1 and 0..0.75 from a pane
 // over them): a centre test alone left those end cells out at each camera turn ('windows 6 -> 4').
 int WindowLightIn(const StoryGrid& g, uint32_t key, const std::vector<GlassLight>& lights) {
-    const int x0 = static_cast<int8_t>(key & 0xFF), z0 = static_cast<int8_t>(key >> 8 & 0xFF), x1 = static_cast<int8_t>(key >> 16 & 0xFF),
-              z1 = static_cast<int8_t>(key >> 24 & 0xFF);
-    const bool alongZ = x0 == x1;
-    const int32_t idx = alongZ ? GridXL(g, x0, z0) : GridZL(g, x0, z0);
+    const int32_t idx = CutEdge(g, key);
     if (idx < 0) return 0;
     const float base = g.edges[static_cast<size_t>(idx)].base;
-    const float line = static_cast<float>(alongZ ? x0 : z0), a = static_cast<float>(alongZ ? z0 : x0), b = static_cast<float>(alongZ ? z1 : x1);
     int how = 0;
     for (const GlassLight& l : lights) {
-        const float across = alongZ ? l.x : l.z, along = alongZ ? l.z : l.x, e = alongZ ? l.ez : l.ex;
-        if (ApexMath::Fabs(across - line) > kGlassWallNear || l.y < base || l.y > base + kStoryWallH) continue;
-        if (along >= a - kGlassAlong && along <= b + kGlassAlong) return 1;
-        if (e > 0.0f && std::min(along + e, b) - std::max(along - e, a) > kPaneOverlap) how = 2;
+        const CutPlace c = CutPlaceOf(key, l.x, l.z, l.ex, l.ez);
+        if (c.across > kGlassWallNear || l.y < base || l.y > base + kStoryWallH) continue;
+        if (c.along >= -kGlassAlong && c.along <= c.len + kGlassAlong) return 1;
+        if (c.e > 0.0f && std::min(c.along + c.e, c.len) - std::max(c.along - c.e, 0.0f) > kPaneOverlap) how = 2;
     }
     return how;
 }
@@ -4146,8 +4163,7 @@ std::vector<std::pair<uint32_t, CutRec>> KeepBuiltWindows(const StoryGrid& g, co
         const auto& [key, rec] = kv;
         const int x0 = static_cast<int8_t>(key & 0xFF), z0 = static_cast<int8_t>(key >> 8 & 0xFF), x1 = static_cast<int8_t>(key >> 16 & 0xFF),
                   z1 = static_cast<int8_t>(key >> 24 & 0xFF);
-        const bool alongZ = x0 == x1;
-        const int32_t idx = alongZ ? GridXL(g, x0, z0) : GridZL(g, x0, z0);
+        const int32_t idx = CutEdge(g, key);
         if (rec.kind != kCutWindow || !rec.closed || idx < 0) {
             keep.push_back(kv);
             continue;
@@ -4189,18 +4205,14 @@ void GlazedCuts(const StoryGrid& g, const std::vector<std::pair<uint32_t, CutRec
     if (lights.empty()) return;
     for (const auto& [key, rec] : cuts) {
         if (rec.kind == kCutWindow || rec.kind == kCutArch) continue;
-        const int x0 = static_cast<int8_t>(key & 0xFF), z0 = static_cast<int8_t>(key >> 8 & 0xFF), x1 = static_cast<int8_t>(key >> 16 & 0xFF),
-                  z1 = static_cast<int8_t>(key >> 24 & 0xFF);
-        const bool alongZ = x0 == x1;
-        const int32_t idx = alongZ ? GridXL(g, x0, z0) : GridZL(g, x0, z0);
+        const int32_t idx = CutEdge(g, key);
         if (idx < 0) continue;
         GridOpening o;
         OpeningDefaults(rec.kind, o);
         const float base = g.edges[static_cast<size_t>(idx)].base, lo = base + o.sill - 0.05f, hi = base + o.head[WallOpenings::kProfile / 2] + 0.05f;
-        const float line = static_cast<float>(alongZ ? x0 : z0), a = static_cast<float>(alongZ ? z0 : x0) - kGlassAlong, b = static_cast<float>(alongZ ? z1 : x1) + kGlassAlong;
         for (const GlassLight& l : lights) {
-            const float across = alongZ ? l.x : l.z, along = alongZ ? l.z : l.x;
-            if (ApexMath::Fabs(across - line) <= kGlassWallNear && along >= a && along <= b && l.y >= lo && l.y <= hi) {
+            const CutPlace c = CutPlaceOf(key, l.x, l.z);
+            if (c.across <= kGlassWallNear && c.along >= -kGlassAlong && c.along <= c.len + kGlassAlong && l.y >= lo && l.y <= hi) {
                 out.insert(key);
                 break;
             }
@@ -4239,9 +4251,7 @@ void PlaceGridOpenings(StoryGrid& g, const std::vector<std::pair<uint32_t, CutRe
         // a diagonal cut is on its tile's diagonal (dg: 0 for (x, z)-(x+1, z+1), 1 for (x, z+1)-(x+1, z)); taken as the edge along
         // x at z0 until 03/11, its window opened another wall or none and the diagonal wall stayed whole
         const bool diag = !alongZ && z0 != z1;
-        const int dk = z1 > z0 ? 0 : 1, dz = std::min(z0, z1);
-        const int32_t idx = diag ? (x0 >= 0 && dz >= 0 && x0 < g.w && dz < g.h ? g.dg[2 * (static_cast<size_t>(dz) * g.w + x0) + dk] : -1)
-                            : alongZ ? GridXL(g, x0, z0) : GridZL(g, x0, z0);
+        const int32_t idx = CutEdge(g, key);
         if (idx < 0 || g.openings.size() >= 65535) {
             g.cutsNoWall++;
             continue;
