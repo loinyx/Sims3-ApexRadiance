@@ -494,6 +494,12 @@ struct Slot {
     // (sharper floors, a floor map) DEFAULT render targets at twice the map's size: what the draws read instead of the copy while
     // hiOk (the copy upsampled, the physical rooms' sub-texels over it), and the rooms' sub-texels kept between relights
     IDirect3DTexture9 *hi = nullptr, *hiOver = nullptr;
+    // (physical) room 0's own floor at twice the size: composed into hiRoom0 (DEFAULT render target), its places copied into hi;
+    // its sub-texels' compose points, phys points and places (DEFAULT, Prepared::vHi)
+    IDirect3DTexture9* hiRoom0 = nullptr;
+    IDirect3DVertexBuffer9 *vbHi = nullptr, *pvbHi = nullptr, *placesHi = nullptr;
+    UINT nHi = 0;
+    bool hiLogged = false; // its room-0 sharper floor's failure was logged
     bool hiOk = false;
     uint64_t hiRules = 0; // the rules the overlay's sub-texels were drawn with
     IDirect3DVertexBuffer9 *vb = nullptr, *dyn = nullptr;
@@ -660,7 +666,13 @@ void Inactive(const std::string& why) {
 void ReleaseHi(Slot& s) {
     if (s.hi) s.hi->Release(), s.hi = nullptr;
     if (s.hiOver) s.hiOver->Release(), s.hiOver = nullptr;
+    if (s.hiRoom0) s.hiRoom0->Release(), s.hiRoom0 = nullptr;
     s.hiOk = false;
+}
+void ReleaseHiPoints(Slot& s) {
+    for (IDirect3DVertexBuffer9** vb : {&s.vbHi, &s.pvbHi, &s.placesHi})
+        if (*vb) (*vb)->Release(), *vb = nullptr;
+    s.nHi = 0;
 }
 void ReleaseSlot(Slot& s) {
     if (s.watch >= 0) g_watchTex[s.watch].store(nullptr), s.watch = -1;
@@ -675,6 +687,7 @@ void ReleaseSlot(Slot& s) {
     if (s.preblur) s.preblur->Release(), s.preblur = nullptr;
     if (s.kvb) s.kvb->Release(), s.kvb = nullptr;
     if (s.pvb) s.pvb->Release(), s.pvb = nullptr;
+    ReleaseHiPoints(s);
     if (s.game) s.game->Release(), s.game = nullptr;
     s.map = RtLampGpu::Map{};
 }
@@ -917,12 +930,16 @@ struct Prepared {
     std::vector<float> under;  // the floor mask's under-floor share (exact) and its sums
     std::vector<double> uA, uU;
     std::vector<RtLampGpu::TexelVertex> pv; // (physical indoor lamps) one phys point per place: its last texel's (the sum's and compose's)
+    // (physical, sharper floors) room 0's floor at twice the map's size: each unmasked floor texel's 4 sub-texels, their compose
+    // points, phys points and places (CopyAtPS) in the 2w x 2h map (rooms > 0: OutdoorDelta::BuildKeptMap's physHi)
+    std::vector<RtLampGpu::TexelVertex> vHi, pvHi, placesHi;
     float pBox[6] = {1e30f, 1e30f, 1e30f, -1e30f, -1e30f, -1e30f}; // (physical, stage 4) their world box (min xyz, max xyz)
     std::vector<RtLampGpu::TexelVertex> kv; // (GPU room lamps) room 0's kept lamps' parts, by lamp
     std::vector<std::pair<UINT, UINT>> kRanges;
     std::vector<KeptInfo> kLamps;
     bool kX = false;
 };
+constexpr size_t kHiRoom0Texels = 16384; // (sharper floors) room 0's floor texels a map takes at most: 4 x 3 points of 80 B, 15 MB
 struct Job {
     const void* room = nullptr;
     int story = 0, cls = 0;
@@ -982,6 +999,14 @@ void PrepareJob(Job& j) {
             continue;
         }
         double cx = 0, cy = 0, cz = 0;
+        // (physical, sharper floors) room 0's unmasked floor texels: their compose and phys points, lot and world samples (position,
+        // then the normal at [4..6]: PhysLampPick::SubTexels)
+        struct HiSrc {
+            RtLampGpu::TexelVertex v, q;
+            float lot[8], world[8];
+        };
+        std::vector<HiSrc> hiSrc;
+        const bool hi = m == 1 && j.phys && !p.blur && OutdoorDelta::HiFloors() && 2 * p.w <= 4096 && 2 * p.h <= 4096;
         for (const OutdoorDelta::Room0Export::Texel& t : ex.texels) {
             if (t.map != m) continue;
             RtLampGpu::TexelVertex tv{};
@@ -1021,6 +1046,42 @@ void PrepareJob(Job& j) {
                 q.p[3] = static_cast<float>(t.bits & 15);
                 p.pv.push_back(q);
                 for (int k = 0; k < 3; k++) p.pBox[k] = std::min(p.pBox[k], t.pos[k]), p.pBox[3 + k] = std::max(p.pBox[3 + k], t.pos[k]);
+                if (hi && !(t.bits & 1) && tv.n[1] > 0.9f) {
+                    HiSrc h{tv, q, {tv.p[0], tv.p[1], tv.p[2], 0, tv.n[0], tv.n[1], tv.n[2], 0}, {}};
+                    const float wl = std::sqrt(t.nrm[0] * t.nrm[0] + t.nrm[1] * t.nrm[1] + t.nrm[2] * t.nrm[2]);
+                    for (int k = 0; k < 3; k++) h.world[k] = t.pos[k], h.world[4 + k] = wl > 1e-6f ? t.nrm[k] / wl : 0.0f;
+                    hiSrc.push_back(h);
+                }
+            }
+        }
+        // (physical, sharper floors) each of those texels' 4 sub-texels at their own places on the floor (the room's own texels as
+        // neighbours only: never across a wall, a diagonal wall's half tiles included), the shadow their footprint's mean (mask.w)
+        // shortcut: a map with more than kHiRoom0Texels such texels keeps the game's texels (memory), bound them by reach if it matters
+        if (!hiSrc.empty() && hiSrc.size() <= kHiRoom0Texels) {
+            std::unordered_map<uint32_t, size_t> at;
+            for (size_t k = 0; k < hiSrc.size(); k++) at[static_cast<uint32_t>(hiSrc[k].v.y) << 16 | static_cast<uint32_t>(hiSrc[k].v.x)] = k;
+            const auto look = [&](bool world) {
+                return [&, world](int x, int y) -> const float* {
+                    if (x < 0 || y < 0) return nullptr;
+                    const auto it = at.find(static_cast<uint32_t>(y) << 16 | static_cast<uint32_t>(x));
+                    return it == at.end() ? nullptr : world ? hiSrc[it->second].world : hiSrc[it->second].lot;
+                };
+            };
+            for (const auto& [place, k] : at) {
+                const HiSrc& h = hiSrc[k];
+                const int x = static_cast<int>(h.v.x), y = static_cast<int>(h.v.y);
+                float lot[4][3], world[4][3];
+                const float foot = PhysLampPick::SubTexels(h.lot, x, y, look(false), lot);
+                PhysLampPick::SubTexels(h.world, x, y, look(true), world);
+                for (int q = 0; q < 4; q++) {
+                    const float sx = static_cast<float>(2 * x + (q & 1)), sy = static_cast<float>(2 * y + (q >> 1));
+                    RtLampGpu::TexelVertex c = h.v, ph = h.q, pl{};
+                    c.x = ph.x = pl.x = sx, c.y = ph.y = pl.y = sy, pl.w = 1.0f;
+                    std::memcpy(c.p, lot[q], sizeof lot[q]), std::memcpy(ph.p, lot[q], sizeof lot[q]), std::memcpy(ph.base, world[q], sizeof world[q]);
+                    ph.mask[3] = foot;
+                    pl.mask[0] = sx, pl.mask[1] = sy;
+                    p.vHi.push_back(c), p.pvHi.push_back(ph), p.placesHi.push_back(pl);
+                }
             }
         }
         if (!p.pv.empty()) { // one point per place, its last texel's (the sum is one per place; the compose's last point wins)
@@ -1137,6 +1198,7 @@ bool UploadSlot(IDirect3DDevice9* dev, Slot& s, const Job& j, Prepared& p) {
     if (s.preblur) s.preblur->Release(), s.preblur = nullptr;
     if (s.kvb) s.kvb->Release(), s.kvb = nullptr;
     if (s.pvb) s.pvb->Release(), s.pvb = nullptr;
+    ReleaseHiPoints(s);
     s.nPhys = 0, s.pLights.clear(), s.pRow.clear(), s.pBlk.reset(), s.pHeader = -1.0f, s.physLater = j.physLater;
     s.kRanges.clear(), s.kLamps.clear(), s.kX = false;
     s.masked.clear(), s.maskedPos.clear(), s.gated.clear(), s.under.clear(), s.uA.clear(), s.uU.clear(), s.uSnap.clear(), s.uIds.clear();
@@ -1177,8 +1239,15 @@ bool UploadSlot(IDirect3DDevice9* dev, Slot& s, const Job& j, Prepared& p) {
         s.nPhys = static_cast<UINT>(p.pv.size());
         s.pLights = j.physLights, s.pRow = j.physRow, s.pBlk = j.blk, s.pHeader = j.blkHeader;
         std::memcpy(s.pBox, p.pBox, sizeof s.pBox);
+        // (sharper floors) room 0's floor sub-texels; not made: the copy's upsample stands for them, as with the option off
+        const UINT nHi = static_cast<UINT>(p.vHi.size());
+        if (nHi && (!RtLampGpu::Engine::MakeVb(dev, p.vHi.data(), nHi, &s.vbHi, true) || !RtLampGpu::Engine::MakeVb(dev, p.pvHi.data(), nHi, &s.pvbHi, true) ||
+                    !RtLampGpu::Engine::MakeVb(dev, p.placesHi.data(), nHi, &s.placesHi, true)))
+            ReleaseHiPoints(s);
+        else
+            s.nHi = nHi;
     }
-    p.pv = {};
+    p.pv = {}, p.vHi = {}, p.pvHi = {}, p.placesHi = {};
     s.map.w = static_cast<int>(d.Width), s.map.h = static_cast<int>(d.Height);
     s.map.vb = s.vb;
     s.map.count = static_cast<UINT>(p.v.size());
@@ -1321,6 +1390,7 @@ void OnPreReset(IDirect3DDevice9* dev) {
         s->scaled = false;
         s->relit = false; // (14/10: its preblur texture is a MANAGED one: kept, and the slot stays built; only the copy is made again)
         if (s->pvb) s->pvb->Release(), s->pvb = nullptr, s->built = s->ok = false; // (DEFAULT: prepared again; its base lacks their lamps)
+        ReleaseHiPoints(*s);
     }
     if (g_eng) g_eng->ReleaseDefault();
     GpuRoomLamps::ReleaseAll(); // (their buffers are DEFAULT: made again on use)
@@ -2623,22 +2693,51 @@ void Frame(IDirect3DDevice9* dev) {
         // stay bound for the compose's floor mask). Failed: this map shows the game's and the room is prepared again with its
         // lamps in the base
         const bool phys = !roomsOnly && s.pvb;
+        std::vector<RtLampModel::Lamp> pl;
+        std::vector<std::array<float, 3>> pw, prow;
+        std::vector<uintptr_t> plights;
+        // (the sums at a map's points: its own, or room 0's floor at the sharper size)
+        const auto physSums = [&](const RtLampGpu::Map& pm, std::string& e) {
+            return g_eng->SetBlockers(dev, s.pBlk, e) &&
+                   GpuRoomLamps::PhysPasses(dev, *g_eng, plights.data(), pl.data(), static_cast<int>(pl.size()), kFar, e, [&](int f, int c, const int* tiles, bool) {
+                       RtLampGpu::Engine::PhysRoom room;
+                       room.header = s.pHeader;
+                       room.lamp.assign(prow.begin() + f, prow.begin() + f + c);
+                       for (int i = 0; i < c; i++) room.fill.push_back(s.pBlk ? s.pBlk->FillOf(static_cast<int>(s.pHeader), pw[f + i].data()) : 0.0f);
+                       return g_eng->AccumulatePhys(dev, pm, pl.data() + f, tiles, reinterpret_cast<const float (*)[3]>(pw.data() + f), c, room, p, f == 0, e);
+                   });
+        };
+        // batches of the atlas's lamps (their shadows rendered unless the atlas holds them already)
+        const auto outdoorSums = [&](const RtLampGpu::Map& tm, std::string& e) {
+            bool r = true;
+            for (size_t b = 0; r && (b < mine.size() || b == 0); b += RtLampGpu::kAtlasLamps) {
+                const int n = static_cast<int>(std::min<size_t>(RtLampGpu::kAtlasLamps, mine.size() - std::min(b, mine.size())));
+                float pos[RtLampGpu::kAtlasLamps][3] = {};
+                uint64_t key = 1469598103934665603ull;
+                Mix(key, &g_meshGen, 4), Mix(key, &radius, 4);
+                for (int k = 0; k < n; k++) {
+                    for (int c = 0; c < 3; c++) pos[k][c] = mine[b + k].law.pos[c];
+                    Mix(key, pos[k], 12);
+                }
+                if (n > 0 && key != g_atlasKey) {
+                    LARGE_INTEGER ts0{}, ts1{};
+                    QueryPerformanceCounter(&ts0);
+                    r = g_eng->RenderShadows(dev, pos, n, kFar, e);
+                    g_atlasKey = r ? key : 0;
+                    QueryPerformanceCounter(&ts1);
+                    g_ph.shadows += Ms(ts0, ts1);
+                }
+                r = r && g_eng->Accumulate(dev, tm, mine.data() + std::min(b, mine.size()), n, p, b == 0 && !phys, e);
+                if (mine.empty()) break;
+            }
+            return r;
+        };
         if (phys) {
-            std::vector<RtLampModel::Lamp> pl;
-            std::vector<std::array<float, 3>> pw, prow;
-            std::vector<uintptr_t> plights;
             for (size_t l = 0; l < s.qLights.size(); l++)
                 if (s.pOk[l]) pl.push_back(s.pLaws[l]), pw.push_back(s.pWorld[l]), prow.push_back(s.qRow[l]), plights.push_back(s.qLights[l]);
             RtLampGpu::Map pm;
             pm.w = s.map.w, pm.h = s.map.h, pm.vb = s.pvb, pm.count = s.nPhys;
-            ok = g_eng->SetBlockers(dev, s.pBlk, err) &&
-                 GpuRoomLamps::PhysPasses(dev, *g_eng, plights.data(), pl.data(), static_cast<int>(pl.size()), kFar, err, [&](int f, int c, const int* tiles, bool) {
-                     RtLampGpu::Engine::PhysRoom room;
-                     room.header = s.pHeader;
-                     room.lamp.assign(prow.begin() + f, prow.begin() + f + c);
-                     for (int i = 0; i < c; i++) room.fill.push_back(s.pBlk ? s.pBlk->FillOf(static_cast<int>(s.pHeader), pw[f + i].data()) : 0.0f);
-                     return g_eng->AccumulatePhys(dev, pm, pl.data() + f, tiles, reinterpret_cast<const float (*)[3]>(pw.data() + f), c, room, p, f == 0, err);
-                 });
+            ok = physSums(pm, err);
             if (!ok) {
                 g_physRefused[s.room] = s.version;
                 PhysNote(s.room, s.story, "its physical draw failed: " + err);
@@ -2648,27 +2747,7 @@ void Frame(IDirect3DDevice9* dev) {
             }
             GpuRoomLamps::NoteRoom0(s.story, std::format("physical ({} lamps)", pl.size()));
         }
-        // batches of the atlas's lamps (their shadows rendered unless the atlas holds them already)
-        for (size_t b = 0; !roomsOnly && ok && (b < mine.size() || b == 0); b += RtLampGpu::kAtlasLamps) {
-            const int n = static_cast<int>(std::min<size_t>(RtLampGpu::kAtlasLamps, mine.size() - std::min(b, mine.size())));
-            float pos[RtLampGpu::kAtlasLamps][3] = {};
-            uint64_t key = 1469598103934665603ull;
-            Mix(key, &g_meshGen, 4), Mix(key, &radius, 4);
-            for (int k = 0; k < n; k++) {
-                for (int c = 0; c < 3; c++) pos[k][c] = mine[b + k].law.pos[c];
-                Mix(key, pos[k], 12);
-            }
-            if (n > 0 && key != g_atlasKey) {
-                LARGE_INTEGER ts0{}, ts1{};
-                QueryPerformanceCounter(&ts0);
-                ok = g_eng->RenderShadows(dev, pos, n, kFar, err);
-                g_atlasKey = ok ? key : 0;
-                QueryPerformanceCounter(&ts1);
-                g_ph.shadows += Ms(ts0, ts1);
-            }
-            ok = ok && g_eng->Accumulate(dev, s.map, mine.data() + std::min(b, mine.size()), n, p, b == 0 && !phys, err);
-            if (mine.empty()) break;
-        }
+        if (!roomsOnly && ok) ok = outdoorSums(s.map, err);
         // (GPU room lamps) room 0's kept lamps added to the sum before the compose
         if (!roomsOnly && ok && s.kvb && !s.kRanges.empty())
             ok = g_eng->AddKeptParts(dev, s.kvb, s.kRanges, s.kLaws.data(), s.kOk.data(), s.thr, s.map.w, s.map.h, err, s.kX);
@@ -2715,8 +2794,25 @@ void Frame(IDirect3DDevice9* dev) {
                 const float hf[] = {p.radius, p.aa, p.normalOffset, p.biasM, p.biasTexels, p.nearBlocker, p.farDist, p.edgeR};
                 const bool hb[] = {p.fade, p.reachOn, p.fast};
                 Mix(hiRules, hf, sizeof hf), Mix(hiRules, hb, sizeof hb);
-                s.hiOk = GpuRoomLamps::ComposeHi(dev, *g_eng, rns[s.story].mgr, s.cls, s.m, s.copy, s.map.w, s.map.h, s.hiOver, fresh || s.hiRules != hiRules, s.hi, p);
+                const int rooms = GpuRoomLamps::ComposeHi(dev, *g_eng, rns[s.story].mgr, s.cls, s.m, s.copy, s.map.w, s.map.h, s.hiOver, fresh || s.hiRules != hiRules, s.hi, p);
                 s.hiRules = hiRules;
+                // room 0's own floor at that size too (physical, no kept parts: their points are the game's texels'): its sums at the
+                // sub-texels, composed into hiRoom0, its places copied over the upsampled copy
+                bool own = false;
+                if (rooms >= 0 && phys && s.vbHi && s.kRanges.empty() && make(s.hiRoom0)) {
+                    RtLampGpu::Map hm;
+                    hm.w = w2, hm.h = h2, hm.vb = s.vbHi, hm.count = s.nHi;
+                    RtLampGpu::Map hp = hm;
+                    hp.vb = s.pvbHi;
+                    RtLampGpu::KeptMapGpu places;
+                    places.placesHi = s.placesHi, places.nPlacesHi = s.nHi;
+                    std::string e;
+                    own = physSums(hp, e) && outdoorSums(hm, e) && g_eng->Compose(dev, hm, nullptr, s.hiRoom0, p, e) &&
+                          g_eng->CopyPlaces(dev, places, s.hiRoom0, s.hi, w2, h2, e);
+                    if (!own && !s.hiLogged)
+                        s.hiLogged = true, LOG_INFO(std::format("[RtOutdoorLamps] Story {} floor map: room 0's sharper floor not drawn ({})", s.story, e));
+                }
+                s.hiOk = rooms > 0 || own;
             } else
                 ReleaseHi(s);
         } else if (s.hi && !OutdoorDelta::HiFloors())

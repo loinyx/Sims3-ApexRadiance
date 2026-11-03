@@ -311,5 +311,14 @@ inline float SubTexelFootprint(const float* s, const float* const nb[4], float f
     }
     return frac * m;
 }
+// (sharper floors) A floor texel's 4 sub-texel positions (out[q]: x step q & 1, y step q >> 1, a quarter texel each way) and its
+// footprint (SubTexelFootprint), over the neighbours at(x, y) gives (its sample; null: none). `at` holds one room's texels only, so
+// a texel of the room past a wall, a diagonal wall's other half tile included, is never a neighbour
+template <class At>
+inline float SubTexels(const float* s, int x, int y, At&& at, float out[4][3]) {
+    const float* const nb[4] = {at(x + 1, y), at(x - 1, y), at(x, y + 1), at(x, y - 1)};
+    for (int q = 0; q < 4; q++) SubTexelPos(s, nb, (q & 1) ? 0.25f : -0.25f, (q >> 1) ? 0.25f : -0.25f, out[q]);
+    return SubTexelFootprint(s, nb, 0.25f);
+}
 
 } // namespace PhysLampPick

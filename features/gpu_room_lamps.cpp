@@ -783,8 +783,8 @@ bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
     return true;
 }
 
-bool ComposeHi(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DTexture9* copy, int w, int h,
-               IDirect3DTexture9* over, bool redrawAll, IDirect3DTexture9* hi, const RtLampGpu::Params& p) {
+int ComposeHi(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DTexture9* copy, int w, int h,
+              IDirect3DTexture9* over, bool redrawAll, IDirect3DTexture9* hi, const RtLampGpu::Params& p) {
     std::string err;
     const auto mine = [&](const Entry& e) { return e.ok && e.physical && e.mgr == mgr && e.cls == cls && e.m == m && e.gpu.physHi && e.drawnKey; };
     // each room drawn into the copy since its sub-texels were: drawn again into the overlay (all of them after a full relight)
@@ -799,14 +799,14 @@ bool ComposeHi(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int
         e.hiKey = e.drawnKey;
     }
     // the copy at twice its size, each room's sub-texels over it
-    if (!eng.Upsample(dev, copy, hi, 2 * w, 2 * h, err)) return false;
+    if (!eng.Upsample(dev, copy, hi, 2 * w, 2 * h, err)) return -1;
     int rooms = 0; // (none: the copy is read as before)
     for (auto& [key, e] : g_entries)
         if (mine(e) && e.hiKey == e.drawnKey) {
-            if (!eng.CopyPlaces(dev, e.gpu, over, hi, 2 * w, 2 * h, err)) return false;
+            if (!eng.CopyPlaces(dev, e.gpu, over, hi, 2 * w, 2 * h, err)) return -1;
             rooms++;
         }
-    return rooms > 0;
+    return rooms;
 }
 
 void ReleaseAll() {

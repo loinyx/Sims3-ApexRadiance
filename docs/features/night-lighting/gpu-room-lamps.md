@@ -372,6 +372,13 @@ lamp's position, not on its colour or intensity.
    size to every reader (wall masks, tiles, uv scales); only the floor's B-spline read takes the sharper map's own size.
    A restore keeps the game's texel through the upsample. Cost: 4 phys points per floor texel in a floor map's relight, and
    2 x (2w x 2h x 4) bytes of render targets per floor map (2 MB for a 512 x 256 map).
+   Room 0's floor (decks and ground outside, 03/11 15:23 F8: the light through the diagonal V wall's glass doors came out in
+   25 cm diamonds) takes the same: the map job gives each unmasked room-0 floor texel 4 sub-texels (`PhysLampPick::SubTexels`
+   over room 0's own texels only, so never across a wall or a diagonal wall's other half tile), their phys points carry the
+   footprint mean (`AccPhysXPS` reads mask.w too: the exit ground's light), and the slot runs room 0's sums at those points,
+   composes them into a third render target and copies their places over the sharper map. A map with more than 16384 such
+   texels, or room 0 with kept (Replica) parts, keeps the upsampled copy. Cost: 3 points of 80 B per sub-texel (15 MB of
+   DEFAULT buffers at the cap) and room 0's floor sums again at 4 times its points in a floor map's relight.
 31. Physical model, 03/11 fixes:
    - Furniture fill: the game's point-light test leaves the floor under a lamp's own table near black (14:35 capture). A lamp
      standing on a top of its room's records (`BlockerTable::FillOf`, `RoomLightTests::StandsOn`; not a dropped one) keeps

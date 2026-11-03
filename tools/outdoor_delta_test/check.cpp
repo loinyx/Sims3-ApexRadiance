@@ -1382,6 +1382,24 @@ void PhysPickChecks() {
               "sharper floors: a sub-texel's shadow footprint is a quarter texel inside a floor, none by a wall or at an edge");
     }
     {
+        // room 0's floor on one side of a diagonal wall (texels x > y of an 8 x 8 grid, 0.25 m apart), the half tiles past it (x <= y) on
+        // the same plane: its own texels as neighbours only, a texel by the diagonal takes no footprint and its sub-texels stay on its side
+        std::vector<std::array<float, 8>> grid(64);
+        for (int y = 0; y < 8; y++)
+            for (int x = 0; x < 8; x++) grid[y * 8 + x] = {(x + 0.5f) * 0.25f, 0, (y + 0.5f) * 0.25f, 0, 0, 1, 0, 0};
+        const auto own = [&](int x, int y) -> const float* { return x >= 0 && y >= 0 && x < 8 && y < 8 && x > y ? grid[y * 8 + x].data() : nullptr; };
+        const auto both = [&](int x, int y) -> const float* { return x >= 0 && y >= 0 && x < 8 && y < 8 ? grid[y * 8 + x].data() : nullptr; };
+        float sub[4][3];
+        bool ok = PhysLampPick::SubTexels(grid[2 * 8 + 3].data(), 3, 2, own, sub) == 0.0f && PhysLampPick::SubTexels(grid[2 * 8 + 3].data(), 3, 2, both, sub) > 0.0f &&
+                  PhysLampPick::SubTexels(grid[2 * 8 + 5].data(), 5, 2, own, sub) > 0.0f;
+        for (int y = 0; y < 8; y++)
+            for (int x = y + 1; x < 8; x++) {
+                PhysLampPick::SubTexels(grid[y * 8 + x].data(), x, y, own, sub);
+                for (const auto& q : sub) ok = ok && q[0] > q[2];
+            }
+        Check(ok, "sharper floors: room 0's sub-texels by a diagonal wall take its own texels only (no footprint there), and stay on its side");
+    }
+    {
         const auto at = [](uint32_t x, uint32_t y) { return y << 16 | x; };
         const std::vector<uint32_t> a = {at(0, 0), at(1, 0), at(1, 0)}, b = {at(2, 0), at(0, 1)}, c = {at(1, 0)}, past = {at(9, 9), at(0, 1)}, far = {at(9, 9)};
         Check(PhysLampPick::WritesDisjoint(4, 4, {&a, &b}) && !PhysLampPick::WritesDisjoint(4, 4, {&a, &b, &c}) &&

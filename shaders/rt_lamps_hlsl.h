@@ -846,7 +846,7 @@ float4 AccPhysXPS(TexelIn i, float2 vpos : VPOS) : COLOR0 {
         const float3 law = LawAt(lamp, P, masked ? normalize(lamp.pos.xyz - P) : N, masked ? 0.0 : wallReach0 * t.y);
         const float ls = (law.b + law.g) + law.r;
         [branch] if (l < count && t.x != 0 && (masked ? thr <= ls : exitG && t.z > 0.5 && ls > 0)) {
-            float sh = Shadow(lamp, P, N, 24, 16, 16, 0.0);
+            float sh = Shadow(lamp, P, N, 24, 16, 16, i.mask.w); // (mask.w: room 0's sharper floor sub-texel footprint, else 0)
             if (tested) {
                 const float prod = sh * t3; // (t3 with its furniture fill: FillT3)
                 sh = 0.01 > prod ? 0.0 : prod;
