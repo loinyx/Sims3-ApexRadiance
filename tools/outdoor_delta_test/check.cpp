@@ -1074,6 +1074,31 @@ void ProxyOpenTopsChecks() {
     RtLampProxy::Build(lot, noIds, true);
     Check(noIds.openTops == 0 && noIds.roofTris == before.roofTris && before.openTops == 0 && before.roofTris == after.roofTris + quads,
           "physical proxy: the outdoor lamps' build (ceilingsOpen off) and a story with no room ids keep every ceiling");
+    // story 2's removed floor (the '-' hole, 40 quadrants) over story 1's roofed room 2: its ceiling opens under the hole only,
+    // with or without room ids
+    {
+        const StoryCells s1 = ReadStory(kLotC49C[0]);
+        RtLampProxy::Story lo, up;
+        lo.story = 1, up.story = 2, lo.w = up.w = 30, lo.h = up.h = 40;
+        lo.floorY.assign(nt, RtLampProxy::kNoFloor), lo.ceil.assign(nt, RtLampProxy::kNoFloor), lo.roofed.assign(nt, 0);
+        up.floorY.assign(nt, RtLampProxy::kNoFloor), up.ceil.assign(nt, RtLampProxy::kNoFloor), up.roofed.assign(nt, 0), up.placed.assign(nt, 0), up.removed.assign(nt, 0);
+        int holes = 0, holeTile = -1;
+        for (size_t t = 0; t < nt; t++) {
+            if (s1.room[t] > 0) lo.floorY[t] = 0.99f, lo.ceil[t] = 3.99f, lo.roofed[t] = 0xF;
+            if (s2.floor[t] == '#' || s2.floor[t] == 'F' || s2.floor[t] == '*') up.placed[t] = 0xF, up.floorY[t] = 3.99f;
+            if (s2.floor[t] == '-') up.removed[t] = 0xF, holes += lo.roofed[t] ? 4 : 0, holeTile = holeTile < 0 && lo.roofed[t] ? static_cast<int>(t) : holeTile;
+        }
+        RtLampProxy::Lot two;
+        two.stories = {lo, up};
+        RtLampProxy::Mesh shut, opened;
+        RtLampProxy::Build(two, shut, false);
+        RtLampProxy::Build(two, opened, true);
+        const float hx = static_cast<float>(holeTile % 30) + 0.5f, hz = static_cast<float>(holeTile / 30) + 0.5f;
+        const float La[3] = {hx + 0.2f, 5.49f, hz}, Pb[3] = {hx - 0.2f, 1.49f, hz + 0.1f};
+        Check(holes == 40 && opened.openTops == 40 && opened.roofTris == shut.roofTris - 40 && holeTile >= 0 && !RtLampProxy::Clear(shut, La, Pb) &&
+                  RtLampProxy::Clear(opened, La, Pb),
+              "physical proxy: a removed floor of the story above (40 quadrants) opens the roofed ceiling under it, and a lamp above lights the room below through it");
+    }
 }
 
 // ---- The furniture blocker table (rt_lamp_blockers.h): the rows give back the game's blockers, and occlude from the rows is

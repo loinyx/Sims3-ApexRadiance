@@ -10648,14 +10648,17 @@ bool ReadFloorHead(uintptr_t mgr, uintptr_t level, FloorSnapKey& key) {
 }
 // POD only (SEH): the placed quadrants of the grid, as PlacedFloorAt tells them (not the air next to walls, a removed floor
 // or never-built space)
-bool ReadPlacedBits(uintptr_t data, int w, int d, uint8_t* bits) {
+bool ReadPlacedBits(uintptr_t data, int w, int d, uint8_t* bits, uint8_t* removed = nullptr) { // (removed: RemovedFloorKey's, the same layout)
     __try {
         const int n = w * d;
         std::memset(bits, 0, static_cast<size_t>(n + 1) / 2);
+        if (removed) std::memset(removed, 0, static_cast<size_t>(n + 1) / 2);
         for (int i = 0; i < n; i++) {
             const uint32_t* key = reinterpret_cast<const uint32_t*>(data + static_cast<size_t>(i) * 40 + 8);
-            for (int q = 0; q < 4; q++, key += 2)
+            for (int q = 0; q < 4; q++, key += 2) {
                 if (!(key[0] == 0xFFFFFFF8u && key[1] == 0xFFFFFFFFu) && !(key[0] & 0x40000000u)) bits[i >> 1] |= static_cast<uint8_t>(1u << ((i & 1) * 4 + q));
+                if (removed && RemovedFloorKey(key)) removed[i >> 1] |= static_cast<uint8_t>(1u << ((i & 1) * 4 + q));
+            }
         }
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -18729,16 +18732,18 @@ void* RoomOfTry(uintptr_t tracker, int story, int id = 0) { // POD (SEH)
         return nullptr;
     }
 }
-// The placed quadrants of a story (stories 1 and up) as FloorSnap reads them, into tile nibbles; false when unreadable
-bool PlacedNibbles(uintptr_t mgr, int w, int h, std::vector<uint8_t>& out) {
+// The placed and the removed-floor quadrants of a story (stories 1 and up) as FloorSnap reads them, into tile nibbles; false
+// when unreadable
+bool PlacedNibbles(uintptr_t mgr, int w, int h, std::vector<uint8_t>& out, std::vector<uint8_t>& removedOut) {
     const uintptr_t level = LevelFor(mgr);
     if (!level || LevelManager(level) != mgr) return false;
     FloorSnapKey key;
     if (!ReadFloorHead(mgr, level, key) || key.w != w || key.d != h) return false;
-    std::vector<uint8_t> bits(static_cast<size_t>(w * h + 1) / 2);
-    if (!ReadPlacedBits(key.data, w, h, bits.data())) return false;
-    out.assign(static_cast<size_t>(w) * h, 0);
-    for (size_t i = 0; i < out.size(); i++) out[i] = static_cast<uint8_t>((bits[i / 2] >> ((i & 1) * 4)) & 0xF);
+    std::vector<uint8_t> bits(static_cast<size_t>(w * h + 1) / 2), removed(bits.size());
+    if (!ReadPlacedBits(key.data, w, h, bits.data(), removed.data())) return false;
+    out.assign(static_cast<size_t>(w) * h, 0), removedOut.assign(out.size(), 0);
+    for (size_t i = 0; i < out.size(); i++)
+        out[i] = static_cast<uint8_t>((bits[i / 2] >> ((i & 1) * 4)) & 0xF), removedOut[i] = static_cast<uint8_t>((removed[i / 2] >> ((i & 1) * 4)) & 0xF);
     return true;
 }
 void GridEdgeTo(const StoryGrid& g, int32_t idx, float x0, float z0, float x1, float z1, RtLampProxy::Story& st) {
@@ -19250,7 +19255,7 @@ bool ExportLotProxy(uintptr_t tracker, RtLampProxy::Lot& out, std::string& why) 
         }
         float plane = 0.0f;
         st.plane = ReadStoryPlane(mgr, plane) ? plane : RtLampProxy::kNoFloor;
-        if (S >= 1) PlacedNibbles(mgr, g.w, g.h, st.placed); // (not read: empty, the story's slabs are left out and no room below opens to it)
+        if (S >= 1) PlacedNibbles(mgr, g.w, g.h, st.placed, st.removed); // (not read: empty, the story's slabs are left out and no room below opens to it)
         if (g.quad.size() == 4 * nt) st.room = g.quad; // (the open tops of a ceilingsOpen build: RtLampProxy::OpenTops)
         if (!haveXf) {
             std::memcpy(out.worldToLot, g.xf.r, sizeof out.worldToLot);

@@ -55,6 +55,7 @@ struct Story {
     std::vector<uint8_t> roofed; // per tile: bit q = quadrant q under a roof or a ceiling
     std::vector<float> ceil;     // per tile: the roof's height (floor + 3)
     std::vector<uint8_t> placed; // per tile: bit q = quadrant q holds a placed floor (stories 1 and up; empty = not read)
+    std::vector<uint8_t> removed; // per tile: bit q = quadrant q's floor was removed, an opening (RemovedFloorKey; as placed)
     std::vector<int32_t> room;   // per tile, 4: the quadrants' room ids (empty = not known; Build's open tops)
     float plane = kNoFloor;      // the story's lowest floor (a placed quadrant with no tile floor stands at it)
 };
@@ -342,11 +343,22 @@ inline void CeilingsUnderAbove(const Story& s, const Story* above, std::vector<f
 // A roofed room of story s open to the story above (OpenAbove::Classify, the rule room 0 takes the lamps below by: no floor
 // placed over half of it, its walls going up through that story) is one space two stories tall: its roofed quadrants with no
 // floor placed over them lose their ceiling at floor + 3 m (02/11, lot C49C: story 2's rooms 5, 6 and 7 under story 3 cut
-// their lamps' light at the story line). Room ids or placed floors not read: nothing opens. Returns the quadrants opened.
+// their lamps' light at the story line). Room ids or placed floors not read: nothing opens. A roofed quadrant under a removed
+// floor of the story above (the game's opening between stories, ReadOpenings) loses its ceiling too (02/11, lot C49C: story
+// 1's ceiling at 3.99 m closed story 2's 40-quadrant floor hole, so a lamp above it lit story 1 only through a small spot).
+// Returns the quadrants opened.
+inline int OpenUnderRemoved(Story& s, const Story& above) {
+    int opened = 0;
+    for (size_t t = 0; t < s.roofed.size() && t < above.removed.size(); t++)
+        for (int q = 0; q < 4; q++)
+            if (((s.roofed[t] & above.removed[t]) >> q) & 1u) s.roofed[t] &= static_cast<uint8_t>(~(1u << q)), opened++;
+    return opened;
+}
 inline int OpenTops(Story& s, const Story& above) {
     const int w = s.w, h = s.h;
     const size_t nt = static_cast<size_t>(w) * h;
-    if (w <= 0 || h <= 0 || above.w != w || above.h != h || s.room.size() != 4 * nt || s.roofed.size() != nt || above.placed.size() != nt) return 0;
+    if (w <= 0 || h <= 0 || above.w != w || above.h != h || s.roofed.size() != nt) return 0;
+    if (s.room.size() != 4 * nt || above.placed.size() != nt) return OpenUnderRemoved(s, above);
     std::vector<uint8_t> wz(static_cast<size_t>(h + 1) * w, 0), wx(static_cast<size_t>(w + 1) * h, 0); // the story above's walls on tile sides
     for (const Edge& e : above.edges) {
         const int x0 = static_cast<int>(std::lround(e.x0)), z0 = static_cast<int>(std::lround(e.z0));
@@ -370,7 +382,7 @@ inline int OpenTops(Story& s, const Story& above) {
                     s.roofed[at(x, z)] &= static_cast<uint8_t>(~(1u << q));
                     opened++;
                 }
-    return opened;
+    return opened + OpenUnderRemoved(s, above); // (after the rule: a hole's quadrants still count as their room's)
 }
 // ceilingsOpen (GPU lamps for every room, which light ceilings): no slab over a roofed quadrant of the story below, and no
 // ceiling over a room open to the story above (OpenTops)
