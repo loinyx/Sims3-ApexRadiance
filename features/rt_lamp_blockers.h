@@ -131,6 +131,8 @@ struct BlockerTable {
         c.v[0] += dx, c.v[2] += dz;
         ix.v[2] = dx, ix.v[3] = dz;
     }
+    // Record r of the room at `header` left out (its sphere's r^2 < 0: the broad phase of Occlude and Occlude3D never meets it)
+    void Drop(int header, int r) { rows[static_cast<size_t>(static_cast<int>(rows[static_cast<size_t>(header)].v[0]) + 2 * r)].v[3] = -1.0f; }
     // The blocker at `row` back in the game's layout (only the fields its test reads; the rest 0)
     RoomLightTests::Blocker BlockerAt(int row) const {
         RoomLightTests::Blocker k{};

@@ -1591,6 +1591,14 @@ void BlockerTableChecks() {
         bool same = true;
         for (float x = -2.0f; x <= 2.0f; x += 0.05f) same = same && std::fabs(kept.Occlude(hk, lamp, V{x, 0.0f, 0.1f}) - live.Occlude(h, lamp, V{x, 0.0f, 0.1f})) < 1e-4f;
         Check(same, "blocker offset: a kept table moved by its record's offset shades exactly as the table kept at its new place");
+        // (Drop) a lamp away from where its solve saw it: the top it stood on casts nothing until the next solve, the rest unchanged
+        RtLampGpu::BlockerTable left = live;
+        left.Drop(h, 0);
+        bool none = true;
+        for (float x = -2.0f; x <= 2.0f; x += 0.05f) none = none && left.Occlude(h, lamp, V{x, 0.0f, 0.1f}) == 1.0f;
+        Check(none && live.Occlude(h, lamp, V{1.0f, 0.0f, 0.1f}) < 0.01f && !PhysLampPick::LeftItsTop(0.005f, 0.01f, 0.0f) &&
+                  PhysLampPick::LeftItsTop(0.02f, 0.0f, 0.0f) && PhysLampPick::LeftItsTop(0.0f, 0.05f, 0.0f),
+              "lamp left its top: the top it stood on is left out (no shadow anywhere); a lamp still in place keeps it");
         // (true-size edges, Params::edgeR) a 0.8 m square table top at 0.75 m under a lamp at 1.33 m: its floor shadow ends where the
         // top's edge projects (0.4 x 1.33 / 0.58 = 0.92 m), soft over the lamp ball's width there; the game's band shades to ~1.7 m
         {

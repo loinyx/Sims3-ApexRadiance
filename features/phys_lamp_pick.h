@@ -245,6 +245,8 @@ struct OccMove {
     uint32_t at = 0;
     float x = 0.0f, z = 0.0f;
 };
+// A lamp away from where its room's solve saw it (dx, dy, dz: now minus then): 1 cm across or 2 cm up or down
+inline bool LeftItsTop(float dx, float dy, float dz) { return dx * dx + dz * dz >= 1e-4f || std::fabs(dy) > 0.02f; }
 // A lamp's furniture moved with it: an occluder beside its head moved lately. Dragging a table with its lamp moves one occluder
 // entry, never two (03/11 recordings 11:47 and 13:56: 57B1E040, then 9D2D0970 after the drop); asking for two never carried the
 // table, and its shadow stayed where the last solve read it while the floor under the dragged table lit up
