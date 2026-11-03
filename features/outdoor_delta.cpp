@@ -4694,6 +4694,7 @@ struct PhysBasisRoom {
     std::vector<float> lotPos; // 3 per sample
     std::vector<PhysBasisLamp> lamps;
     int unknown = 0;
+    size_t traced = 0; // (the worker) samples traced, the others' shares kept from the last job
     bool redo = false;
 };
 struct PhysBasisJob {
@@ -4730,6 +4731,17 @@ void PhysBasisWorker() {
     uint32_t meshGen = 0;
     std::vector<uint32_t> stamp;
     uint32_t mark = 0;
+    // each room's lamps' shares from the last job (PhysLampPick::BasisSharesCached), valid while its kept solve, the proxy and the
+    // radius stay; dropped past kShareBytes (32-bit address space)
+    struct RoomShares {
+        std::weak_ptr<const KeptRoom> k;
+        uint32_t gen = 0;
+        float radius = 0.0f;
+        std::vector<float> lotPos; // (the samples in the lot's space: the same lot transform)
+        std::unordered_map<uintptr_t, PhysLampPick::ShareCache> lamps;
+    };
+    constexpr size_t kShareBytes = 24u << 20;
+    std::unordered_map<uint64_t, RoomShares> shares;
     for (;;) {
         std::unique_ptr<PhysBasisJob> job;
         {
@@ -4741,17 +4753,29 @@ void PhysBasisWorker() {
         QueryPerformanceCounter(&t0);
         try {
             if (meshGen != job->gen) RtLampProxy::Build(*job->lot, mesh, true), meshGen = job->gen, stamp.clear(), mark = 0;
+            size_t bytes = 0;
             for (PhysBasisRoom& r : job->rooms) {
                 const size_t n = r.k->basis.size();
+                RoomShares& rs = shares[r.ref.key];
+                const bool same = rs.k.lock() == r.k && rs.gen == job->gen && rs.radius == job->radius && rs.lotPos == r.lotPos;
+                if (!same) rs.lamps.clear(), rs.k = r.k, rs.gen = job->gen, rs.radius = job->radius, rs.lotPos = r.lotPos;
+                std::unordered_map<uintptr_t, PhysLampPick::ShareCache> keep; // (only the room's lamps now: one gone frees its shares)
                 for (PhysBasisLamp& l : r.lamps) {
-                    l.vis.assign(n, 0.0f), l.t3d.assign(n, 0.0f);
-                    for (size_t i = 0; i < n; i++)
-                        if (StepLit(&l.step[i * 16]))
-                            PhysLampPick::BasisShare(mesh, l.lot, job->radius, &r.lotPos[i * 3], r.k->tests, l.world, r.k->basis[i].pos, stamp, mark, l.vis[i], l.t3d[i], &r.unknown);
+                    PhysLampPick::ShareCache& c = keep[l.light] = std::move(rs.lamps[l.light]);
+                    r.traced += PhysLampPick::BasisSharesCached(
+                        c, same, n, [&](size_t i) { return StepLit(&l.step[i * 16]); }, mesh, l.lot, job->radius, r.lotPos.data(), r.k->tests, l.world,
+                        [&](size_t i) { return r.k->basis[i].pos; }, stamp, mark, l.vis, l.t3d, &r.unknown);
                 }
+                rs.lamps = std::move(keep);
             }
+            for (const auto& [key, rs] : shares) {
+                bytes += rs.lotPos.size() * sizeof(float);
+                for (const auto& [light, c] : rs.lamps) bytes += c.done.size() * (2 * sizeof(float) + 1);
+            }
+            if (bytes > kShareBytes) shares.clear();
         } catch (...) {
             meshGen = 0;
+            shares.clear();
             job->failed = "no memory";
         }
         QueryPerformanceCounter(&t1);
@@ -4925,12 +4949,14 @@ void LogPhysBasis(const PhysBasisJob& job, const std::map<uint64_t, std::pair<lo
     QueryPerformanceCounter(&t1);
     QueryPerformanceFrequency(&f);
     long lamps = 0, unknown = 0, redo = 0, redone = 0;
+    size_t traced = 0, lit = 0; // (lit: every lamp's samples)
     for (const PhysBasisRoom& r : job.rooms) {
-        lamps += static_cast<long>(r.lamps.size()), unknown += r.unknown;
+        lamps += static_cast<long>(r.lamps.size()), unknown += r.unknown, traced += r.traced;
+        for (const PhysBasisLamp& l : r.lamps) lit += l.vis.size();
         redo += r.redo ? 1 : 0, redone += r.redo && wrote.count(r.ref.key) ? 1 : 0;
     }
     const std::string worker = job.rooms.empty() ? std::string()
-                                                 : std::format("; {} lamps' shares in {} rooms in {:.1f} ms on a worker{}", lamps, job.rooms.size(), job.workerMs,
+                                                 : std::format("; {} lamps' shares in {} rooms in {:.1f} ms on a worker ({} of {} samples traced, the others kept){}", lamps, job.rooms.size(), job.workerMs, traced, lit,
                                                                unknown ? std::format(", {} 3D blockers of another vtable taken as 1", unknown) : std::string());
     for (const auto& [light, e] : job.edits) {
         int done = 0;

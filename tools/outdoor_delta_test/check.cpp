@@ -584,6 +584,29 @@ void BasisPhysChecks() {
     const bool dropped = std::all_of(part, part + 16, [](float v) { return v == 0.0f; });
     BasisPartPhys(3.0f, 0.5f, 0.5f, K_DROP, step, part);
     Check(dropped && part[0] == 3.0f * 0.25f * 0.25f, "physical directional maps: a share under the game's drop adds nothing, else row x share x step");
+    { // the shares kept between writes: lamp A still, then moved, then with fewer samples lit, as traced afresh
+        std::vector<float> P(static_cast<size_t>(n) * 3);
+        for (float& v : P) v = U(rng) * 8.0f;
+        for (int s = 0; s < n; s++) P[s * 3 + 1] = 0.5f;
+        const auto pw = [&](size_t i) { return &P[i * 3]; };
+        PhysLampPick::ShareCache c;
+        std::vector<float> vis, t3d, fv, ft;
+        bool same = true;
+        size_t traced[4] = {};
+        float L[3] = {ls[0].pos[0], ls[0].pos[1], ls[0].pos[2]};
+        for (int round = 0; round < 4; round++) {
+            if (round == 2) L[0] += 0.5f; // (moved)
+            const auto lit = [&](size_t i) { return round == 3 ? i % 3 != 0 : true; }; // (a value edit darkens some steps)
+            int unknown = 0;
+            traced[round] = PhysLampPick::BasisSharesCached(c, round != 0, n, lit, mesh, L, 0.15f, P.data(), tests, L, pw, stamp, mark, vis, t3d, &unknown);
+            fv.assign(n, 0.0f), ft.assign(n, 0.0f);
+            for (int i = 0; i < n; i++)
+                if (lit(i)) PhysLampPick::BasisShare(mesh, L, 0.15f, &P[i * 3], tests, L, &P[i * 3], stamp, mark, fv[i], ft[i], &unknown);
+            same = same && std::memcmp(vis.data(), fv.data(), n * sizeof(float)) == 0 && std::memcmp(t3d.data(), ft.data(), n * sizeof(float)) == 0;
+        }
+        Check(same && traced[0] == static_cast<size_t>(n) && traced[1] == 0 && traced[2] == static_cast<size_t>(n) && traced[3] == 0,
+              "physical directional maps: a lamp's kept shares equal its shares traced afresh; only a moved lamp is traced again");
+    }
     // the write rule: another solve wrote every 7th texel since the capture; two writes in turn
     std::vector<uint32_t> tex(game), expect(game);
     for (size_t i = 0; i < tex.size(); i += 7) tex[i] ^= 0x00010101u;

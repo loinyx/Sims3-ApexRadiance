@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <map>
 #include <set>
 #include <tuple>
@@ -120,6 +121,32 @@ inline void BasisShare(const RtLampProxy::Mesh& mesh, const float Ll[3], float R
                        const float Pw[3], std::vector<uint32_t>& stamp, uint32_t& mark, float& vis, float& t3d, int* unknown) {
     vis = RtLampProxy::Visibility(mesh, Ll, R, Pl, 16, &stamp, &mark);
     t3d = vis > 0.0f ? RoomLightTests::occlude(tests, {Lw[0], Lw[1], Lw[2]}, {Pw[0], Pw[1], Pw[2]}, unknown) : 1.0f;
+}
+// A lamp's BasisShare over a room's samples, kept between the directional maps' writes: a sample's share depends only on the
+// lamp's position, the room's samples and records and the proxy (`same`: the same kept room, proxy and radius), so a lamp that
+// did not move reuses it and only a moved or edited lamp is traced again (an edit 2 lamps of ~200, the 21:18 log of 02/11:
+// ~520 ms for every lamp). Writes vis / t3d as BasisShare over every lit sample (0 elsewhere); returns the samples traced
+struct ShareCache {
+    float Ll[3] = {}, Lw[3] = {};
+    std::vector<float> vis, t3d;
+    std::vector<uint8_t> done;
+};
+template <class Lit, class PwAt>
+inline size_t BasisSharesCached(ShareCache& c, bool same, size_t n, Lit&& lit, const RtLampProxy::Mesh& mesh, const float Ll[3], float R, const float* Pl,
+                                const RoomLightTests::Room& tests, const float Lw[3], PwAt&& pw, std::vector<uint32_t>& stamp, uint32_t& mark, std::vector<float>& vis,
+                                std::vector<float>& t3d, int* unknown) {
+    if (!same || c.done.size() != n || std::memcmp(c.Ll, Ll, sizeof c.Ll) || std::memcmp(c.Lw, Lw, sizeof c.Lw)) {
+        std::memcpy(c.Ll, Ll, sizeof c.Ll), std::memcpy(c.Lw, Lw, sizeof c.Lw);
+        c.vis.assign(n, 0.0f), c.t3d.assign(n, 0.0f), c.done.assign(n, 0);
+    }
+    size_t traced = 0;
+    vis.assign(n, 0.0f), t3d.assign(n, 0.0f);
+    for (size_t i = 0; i < n; i++) {
+        if (!lit(i)) continue;
+        if (!c.done[i]) BasisShare(mesh, Ll, R, &Pl[i * 3], tests, Lw, pw(i), stamp, mark, c.vis[i], c.t3d[i], unknown), c.done[i] = 1, traced++;
+        vis[i] = c.vis[i], t3d[i] = c.t3d[i];
+    }
+    return traced;
 }
 
 // ---- a lamp edit without the room solves ----
