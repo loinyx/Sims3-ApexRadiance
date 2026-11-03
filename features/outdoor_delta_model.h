@@ -256,6 +256,12 @@ inline bool BasisWrite(uint32_t& texel, uint32_t want, uint32_t expect) {
     texel = want;
     return true;
 }
+// (physical) Apex's last write (`last`, 4 per sample) carried over the room's next kept solve of the same samples: a texel Apex
+// wrote keeps its value; one still expecting the earlier solve's (another room's solve wrote it) takes the new solve's (no change)
+inline void CarryBasis(uint32_t* last, const uint32_t* prevGame, const uint32_t* game, size_t n) {
+    for (size_t i = 0; i < n; i++)
+        if (last[i] == prevGame[i]) last[i] = game[i];
+}
 // (physical indoor lamps, stage 5) a lamp's directional part at a sample: its room row (mult x norm scale, as the room's maps
 // draw it) x its physical share there x the game's step called now; the share is the proxy's visibility x the game's 3D test,
 // dropped under `drop` as the game drops it (K_DROP)

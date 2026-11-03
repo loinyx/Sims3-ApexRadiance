@@ -632,6 +632,20 @@ void BasisPhysChecks() {
     for (size_t i = 0; i < tex.size(); i++) rule = rule && (i % 7 == 0 ? tex[i] == (game[i] ^ 0x00010101u) : tex[i] == (want[i] ^ 1u));
     std::printf("  physical directional maps, the write rule: %ld writes taken, %ld texels left as another solve wrote them\n", took, kept);
     Check(rule && took == 2 * static_cast<long>(tex.size() - (tex.size() + 6) / 7), "physical directional maps: only texels holding the capture's or the last write's value are written");
+    // the carry: the room's solve kept again (its levels in every texel), another room's solve writing every 11th since; Apex's
+    // last write goes back over it
+    std::vector<uint32_t> game2(game), last(expect);
+    for (uint32_t& g : game2) g ^= 0x00020202u;
+    std::vector<uint32_t> tex2(game2);
+    for (size_t i = 0; i < tex2.size(); i += 11) tex2[i] ^= 0x00040404u;
+    CarryBasis(last.data(), game.data(), game2.data(), last.size());
+    bool carried = true;
+    for (size_t i = 0; i < tex2.size(); i++) {
+        carried = carried && BasisWrite(tex2[i], last[i], game2[i]) == (i % 11 != 0);
+        const bool apex = i % 7 != 0 && (want[i] ^ 1u) != game[i]; // (a write of the solve's own value changed nothing)
+        carried = carried && tex2[i] == (i % 11 == 0 ? game2[i] ^ 0x00040404u : apex ? want[i] ^ 1u : game2[i]);
+    }
+    Check(carried, "physical directional maps: a kept solve's texels take Apex's last write again, never a texel Apex did not write or another solve wrote since");
 }
 
 // ---- Rooms open to the story above (features/open_rooms_above.h) ----
