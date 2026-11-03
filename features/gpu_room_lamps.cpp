@@ -57,7 +57,6 @@ struct Entry {
     std::vector<std::array<float, 3>> world;
     std::shared_ptr<const RtLampGpu::BlockerTable> blockers; // (its kept room's, shared by the room's maps)
     float blkHeader = -1.0f;
-    uint32_t blkGen = 0; // (OutdoorDelta::LiveBlockers) the generation of the furniture blockers read again since its solve (0: its solve's)
     // (CarryBlockers) the table before the records' offsets, the copy drawn with them, and the offsets' hash (0: none)
     std::shared_ptr<const RtLampGpu::BlockerTable> blkBase, blkOut;
     uint64_t offHash = 0;
@@ -143,10 +142,12 @@ bool ReadAmbient(const void* room, float* c) {
 // The kept solves drawn: room -> (its version, the maps drawn with it); read by the light tree thread (Drawn)
 std::mutex g_drawnMx;
 std::unordered_map<const void*, std::pair<uint32_t, unsigned>> g_drawn;
-std::unordered_map<const void*, unsigned> g_drawnAny; // (DrawnAny) room -> the maps drawn at any version since its last drop
-void Undrawn(const void* room) {
+std::unordered_map<const void*, unsigned> g_drawnAny; // (DrawnAny) room -> the maps drawn at any version since their last drop
+// Map m of the room no longer drawn (only that map: another map's bit may already be its new version's)
+void Undrawn(const void* room, int m, bool rekept) {
     std::lock_guard<std::mutex> lk(g_drawnMx);
-    g_drawn.erase(room), g_drawnAny.erase(room);
+    if (const auto it = g_drawn.find(room); it != g_drawn.end() && !(it->second.second &= ~(1u << m))) g_drawn.erase(it);
+    if (const auto it = g_drawnAny.find(room); it != g_drawnAny.end() && !rekept && !(it->second &= ~(1u << m))) g_drawnAny.erase(it); // (kept again: DrawnAny)
 }
 // The lamp edits taken (NoteEdit, light tree thread), until every room of theirs is relit after them (render thread)
 struct Edit {
@@ -197,11 +198,11 @@ std::vector<uintptr_t> g_lotGone; // (the lot's lamps that left its registry: a 
 int g_costMaps = 0;
 double g_costMs = 0.0, g_costWorst = 0.0, g_costRound = 0.0;
 
-void Drop(Entry& e, const void* room) {
+void Drop(Entry& e, const void* room, bool rekept = false) {
     g_bytes -= std::min(g_bytes, e.gpu.bytes);
     e.gpu.Release();
     e.ok = false;
-    Undrawn(room);
+    Undrawn(room, e.m, rekept);
 }
 void Mix(uint64_t& h, const void* p, size_t n) {
     const auto* b = static_cast<const unsigned char*>(p);
@@ -349,9 +350,9 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
         const void* room = std::get<0>(it->first);
         const bool here = e.mgr == mgr && e.cls == cls && e.m == m;
         if (here && std::none_of(g_refs.begin(), g_refs.end(), [&](const OutdoorDelta::KeptRef& r) { return r.room == room && r.version == e.version; })) {
-            Drop(e, room);
-            if (e.physical && std::none_of(g_refs.begin(), g_refs.end(), [&](const OutdoorDelta::KeptRef& r) { return r.room == room; }))
-                OutdoorDelta::SolveTouched(room); // (no kept solve of it any more: its game's map, which a lamp edit taken may lack)
+            const bool gone = std::none_of(g_refs.begin(), g_refs.end(), [&](const OutdoorDelta::KeptRef& r) { return r.room == room; });
+            Drop(e, room, !gone);
+            if (e.physical && gone) OutdoorDelta::SolveTouched(room); // (no kept solve of it any more: its game's map, which a lamp edit taken may lack)
             it = g_entries.erase(it);
         } else
             ++it;
@@ -427,14 +428,21 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
         int type = 0, reg = -1;
         if (e.physical) { // (no parts, so no move rule: every lamp drawn with its law now; a lamp gone or without a law adds nothing)
             const uint32_t gen = RtOutdoorLamps::KeptMeshGen();
-            if (OutdoorDelta::LiveBlockers(r.room, cls, e.version, e.blkGen, e.blockers, e.blkHeader) && OutdoorDelta::TraceLine()) // (a table moved with its lamp: this round)
-                LOG_INFO(std::format("[LiveBlk] story {} room {} class {}: the GPU took its furniture read again (generation {}), relit this round", e.story, e.id, cls, e.blkGen));
+            // (at: its index in g_lot, whose world law is read once a round; none: read here)
+            const auto worldOf = [&](uintptr_t light, size_t at, GpuLampLaw::Lamp& w) {
+                if (at >= g_lotLaw.size()) return RtOutdoorLamps::WorldLaw(light, e.lot, false, w, type, reg);
+                LotLaw& c = g_lotLaw[at];
+                if (!c.state || c.lot != e.lot) c.lot = e.lot, c.state = RtOutdoorLamps::WorldLaw(light, e.lot, false, c.w, type, reg) ? 1 : 2;
+                if (c.state != 1) return false;
+                w = c.w;
+                return true;
+            };
             // (03/11 recording: the side table's record stays where the room's last solve read it while its lamp moves with it, its
             // shadow left behind on the side away from the drag; each solve then reads it under the lamp again) a record a kept lamp
-            // stood on (its sphere round the lamp's place then, its centre below the lamp) moves with the lamp until the next solve,
-            // while the lamp keeps its height (on the same top). shortcut: a lamp slid alone across its table moves the table's
-            // shadow too until that solve; learn from consecutive solves whether the record followed if that shows
-            if (e.blockers != e.blkOut) e.blkBase = e.blockers; // (a solve's or LiveBlockers' table: the base)
+            // stood on (RoomLightTests::StandsOn) moves with the lamp until the next solve, while the lamp keeps its height (on the
+            // same top). shortcut: a lamp slid alone across its table moves the table's shadow too until that solve; learn from
+            // consecutive solves whether the record followed if that shows
+            if (e.blockers != e.blkOut) e.blkBase = e.blockers; // (a solve's table: the base)
             if (e.blkBase && e.blkHeader >= 0.0f) {
                 const RtLampGpu::BlockerTable& t = *e.blkBase;
                 const auto& head = t.rows[static_cast<size_t>(e.blkHeader)];
@@ -444,19 +452,12 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                     if (rl.colourOnly) continue;
                     GpuLampLaw::Lamp now;
                     const auto at = g_lotAt.find(rl.light);
-                    if (at != g_lotAt.end() && at->second < g_lotLaw.size()) {
-                        LotLaw& c = g_lotLaw[at->second];
-                        if (!c.state || c.lot != e.lot) c.lot = e.lot, c.state = RtOutdoorLamps::WorldLaw(rl.light, e.lot, false, c.w, type, reg) ? 1 : 2;
-                        if (c.state != 1) continue;
-                        now = c.w;
-                    } else if (!RtOutdoorLamps::WorldLaw(rl.light, e.lot, false, now, type, reg))
-                        continue;
+                    if (!worldOf(rl.light, at != g_lotAt.end() ? at->second : SIZE_MAX, now)) continue;
                     const float dx = now.pos[0] - rl.pos[0], dz = now.pos[2] - rl.pos[2];
                     if (dx * dx + dz * dz < 1e-4f || std::fabs(now.pos[1] - rl.pos[1]) > 0.02f) continue;
                     for (int i = 0; i < recs; i++) {
                         const auto& c = t.rows[static_cast<size_t>(firstRec + 2 * i)];
-                        const float cx = rl.pos[0] - c.v[0], cz = rl.pos[2] - c.v[2];
-                        if (cx * cx + cz * cz < c.v[3] && c.v[1] < rl.pos[1] &&
+                        if (RoomLightTests::StandsOn(c.v[0], c.v[1], c.v[2], c.v[3], rl.pos) &&
                             std::none_of(off.begin(), off.end(), [&](const std::array<float, 3>& o) { return o[0] == static_cast<float>(i); }))
                             off.push_back({static_cast<float>(i), dx, dz});
                     }
@@ -465,7 +466,16 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                 if (!off.empty()) oh = 1469598103934665603ull, Mix(oh, off.data(), off.size() * sizeof off[0]);
                 if (oh != e.offHash) {
                     e.offHash = oh;
+                    const auto sibling = [&]() -> const Entry* { // (the room's maps share one moved table: SetBlockers binds it once)
+                        for (int k = 0; k < 4; k++)
+                            if (const auto s = g_entries.find(std::make_tuple(r.room, cls, k));
+                                s != g_entries.end() && &s->second != &e && s->second.blkOut && s->second.blkBase == e.blkBase && s->second.offHash == oh)
+                                return &s->second;
+                        return nullptr;
+                    };
                     if (!oh) e.blockers = e.blkBase, e.blkOut.reset();
+                    else if (const Entry* sib = sibling())
+                        e.blkOut = e.blockers = sib->blkOut;
                     else
                         try {
                             auto moved = std::make_shared<RtLampGpu::BlockerTable>(t);
@@ -476,7 +486,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                         }
                 }
             }
-            Mix(sig, &e.version, sizeof e.version), Mix(sig, &gen, sizeof gen), Mix(sig, &e.blkGen, sizeof e.blkGen), Mix(sig, &e.offHash, sizeof e.offHash);
+            Mix(sig, &e.version, sizeof e.version), Mix(sig, &gen, sizeof gen), Mix(sig, &e.offHash, sizeof e.offHash);
             any = true;
             // (S8) the ceiling pass's ambient follows the room's now: Rooms at Night's sliders and the lamp edits taken, no solve
             const auto ambient = [&] {
@@ -485,7 +495,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                 Mix(sig, e.ambScale, sizeof e.ambScale);
                 // (what its draw reads beside the round's rules: its kept solve, the occluders, its lamps' laws and rows, the ambient)
                 uint64_t k = 1469598103934665603ull;
-                Mix(k, &e.version, sizeof e.version), Mix(k, &gen, sizeof gen), Mix(k, &e.blkGen, sizeof e.blkGen), Mix(k, &e.offHash, sizeof e.offHash), Mix(k, &e.physSig, sizeof e.physSig),
+                Mix(k, &e.version, sizeof e.version), Mix(k, &gen, sizeof gen), Mix(k, &e.offHash, sizeof e.offHash), Mix(k, &e.physSig, sizeof e.physSig),
                     Mix(k, e.ambScale, sizeof e.ambScale);
                 e.drawKey = k;
             };
@@ -504,15 +514,6 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
             const auto fresh = [&](const OutdoorDelta::LotLamp& L, float& mult, char& reach) {
                 mult = PhysLampPick::NormKFresh(L.story, L.home, L.homeNorm, e.story, e.id, e.norm, e.outdoorRoom);
                 reach = PhysLampPick::ReachFresh(L.homeOutdoor, e.outdoorRoom, e.id == 0 && L.story + 1 == e.story && RtOutdoorLamps::RoomOpenAbove(L.story, L.home)) ? 1 : 0;
-            };
-            // (at: its index in g_lot, whose world law is read once a round; none: read here)
-            const auto worldOf = [&](uintptr_t light, size_t at, GpuLampLaw::Lamp& w) {
-                if (at >= g_lotLaw.size()) return RtOutdoorLamps::WorldLaw(light, e.lot, false, w, type, reg);
-                LotLaw& c = g_lotLaw[at];
-                if (!c.state || c.lot != e.lot) c.lot = e.lot, c.state = RtOutdoorLamps::WorldLaw(light, e.lot, false, c.w, type, reg) ? 1 : 2;
-                if (c.state != 1) return false;
-                w = c.w;
-                return true;
             };
             const auto draw = [&](uintptr_t light, size_t at, float mult, char reach) {
                 GpuLampLaw::Lamp w;
@@ -766,7 +767,7 @@ bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
     return true;
 }
 
-bool ComposeHi(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* copy, int w, int h,
+bool ComposeHi(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DTexture9* copy, int w, int h,
                IDirect3DTexture9* over, bool redrawAll, IDirect3DTexture9* hi, const RtLampGpu::Params& p) {
     std::string err;
     const auto mine = [&](const Entry& e) { return e.ok && e.physical && e.mgr == mgr && e.cls == cls && e.m == m && e.gpu.physHi && e.drawnKey; };
@@ -775,7 +776,7 @@ bool ComposeHi(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int
         if (!mine(e)) continue;
         if (!redrawAll && e.hiKey == e.drawnKey) continue;
         e.hiKey = 0;
-        if (!RelightPhys(dev, eng, e, p, game, copy, w, h, err, over)) {
+        if (!RelightPhys(dev, eng, e, p, nullptr, copy, w, h, err, over)) {
             if (LogAllowed()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: its sharper floor not drawn ({})", e.story, e.id, e.cls, kMapName[m], err));
             continue;
         }

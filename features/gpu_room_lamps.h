@@ -44,7 +44,7 @@ bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
 // (sharper floors, after ComposeOver into copy) hi (2w x 2h) = copy upsampled, each physical room's floor sub-texels over it from
 // over (2w x 2h, kept between relights: a room's sub-texels are drawn into it again when its draw changed, all of them when
 // redrawAll). False: hi is not complete or holds no room's (the caller shows the copy)
-bool ComposeHi(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* copy, int w, int h,
+bool ComposeHi(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DTexture9* copy, int w, int h,
                IDirect3DTexture9* over, bool redrawAll, IDirect3DTexture9* hi, const RtLampGpu::Params& p);
 // A device reset or Real-time outdoor lamps dropping its maps: every GPU buffer goes (made again on use)
 void ReleaseAll();
@@ -61,8 +61,9 @@ void BeginFrame();
 // Any thread (the light tree thread's lamp edits, OutdoorDelta::TakesLampEdit): that kept solve of the room (its version) was
 // drawn on every map of `maps` (bit m) and is still (no lamp of it moved since)
 bool Drawn(const void* room, uint32_t version, unsigned maps);
-// Any thread (physical model): every map of `maps` has been drawn on the GPU since the room's maps were last dropped, at any
-// version. A physical relight draws every lamp from its law, so a solve kept again but not relit yet shows the lamp next frame
+// Any thread (physical model): every map of `maps` has been drawn on the GPU since it was last dropped for a reason other than
+// its room kept again, at any version. A physical relight draws every lamp from its law, so a solve kept again but not relit yet
+// shows the lamp next frame
 bool DrawnAny(const void* room, unsigned maps);
 // Any thread: a lamp edit the GPU took (kind "value", "switch on" or "switch off": a literal), logged once every one of its
 // rooms was relit after it

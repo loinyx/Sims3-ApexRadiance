@@ -66,6 +66,14 @@ struct Record {
     std::vector<Blocker> b;
     float cull2 = 0.0f; // record+0x20: the per-batch list's cull radius^2 (the tests here read all records)
 };
+// A lamp at `lamp` standing on the record (centre c, radius^2 r2): over its footprint, above its centre and at most kOnTopM over its
+// sphere's top (a ceiling lamp or sconce over the furniture stands higher). UNVERIFIED: kOnTopM against real table lamps and low
+// chandeliers; the sphere's top overestimates a box's, so a very low chandelier over a large table can still pass
+constexpr float kOnTopM = 0.6f;
+inline bool StandsOn(float cx, float cy, float cz, float r2, const float lamp[3]) {
+    const float dx = lamp[0] - cx, dz = lamp[2] - cz, up = lamp[1] - cy;
+    return dx * dx + dz * dz < r2 && up > 0.0f && up < std::sqrt(r2) + kOnTopM;
+}
 struct Wall {
     float f[64];
     uint32_t u(int off) const {

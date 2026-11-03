@@ -495,6 +495,7 @@ struct Slot {
     // hiOk (the copy upsampled, the physical rooms' sub-texels over it), and the rooms' sub-texels kept between relights
     IDirect3DTexture9 *hi = nullptr, *hiOver = nullptr;
     bool hiOk = false;
+    uint64_t hiRules = 0; // the rules the overlay's sub-texels were drawn with
     IDirect3DVertexBuffer9 *vb = nullptr, *dyn = nullptr;
     IDirect3DVertexBuffer9* dynNext = nullptr; // the other floor mask buffer: a write fills the one the last draws did not read
     IDirect3DTexture9* preblur = nullptr;
@@ -2703,7 +2704,14 @@ void Frame(IDirect3DDevice9* dev) {
                 if (fresh)
                     LOG_INFO(std::format("[RtOutdoorLamps] Story {} floor map: sharper copy {}x{} ({:.1f} MB with its overlay)", s.story, w2, h2,
                                          2.0 * w2 * h2 * 4 / (1024.0 * 1024.0)));
-                s.hiOk = GpuRoomLamps::ComposeHi(dev, *g_eng, rns[s.story].mgr, s.cls, s.m, s.game, s.copy, s.map.w, s.map.h, s.hiOver, fresh || !partial, s.hi, p);
+                // (the overlay holds the rooms' own sub-texels, never the game's map: drawn in full again only when the rules
+                // RelightPhys reads change, not on every full relight of the copy)
+                uint64_t hiRules = 1469598103934665603ull;
+                const float hf[] = {p.radius, p.aa, p.normalOffset, p.biasM, p.biasTexels, p.nearBlocker, p.farDist};
+                const bool hb[] = {p.fade, p.reachOn, p.fast};
+                Mix(hiRules, hf, sizeof hf), Mix(hiRules, hb, sizeof hb);
+                s.hiOk = GpuRoomLamps::ComposeHi(dev, *g_eng, rns[s.story].mgr, s.cls, s.m, s.copy, s.map.w, s.map.h, s.hiOver, fresh || s.hiRules != hiRules, s.hi, p);
+                s.hiRules = hiRules;
             } else
                 ReleaseHi(s);
         } else if (s.hi && !OutdoorDelta::HiFloors())

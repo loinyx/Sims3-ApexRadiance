@@ -96,8 +96,8 @@ struct LotLamp {
 uint32_t LotLamps(std::vector<LotLamp>& out, std::vector<uintptr_t>* gone = nullptr);
 // (LampMarkFilter's occluder mark) whether the snapshot is of the lot `tracker` (known) and holds `light`
 bool InLotLamps(uintptr_t tracker, uintptr_t light, bool& known);
-// (LampMarkFilter's occluder mark, light tree thread) a lamp stood on furniture of its kept physical room at its solve (a
-// record whose sphere held its place, its centre below): its object's mark still solves the room, whose solve reads the
+// (LampMarkFilter's occluder mark, light tree thread) a lamp stood on furniture of its kept physical room at its solve
+// (RoomLightTests::StandsOn): its object's mark still solves the room, whose solve reads the
 // furniture's records again (a table dragged with it; gpu_room_lamps moves the record until then)
 bool StandsOnFurniture(uintptr_t tracker, int story, int room, uintptr_t light);
 // (any thread) an object left a story's light maps (EntryChain LightObjectRemove): the snapshot is read again after the next
@@ -112,11 +112,8 @@ void SolveTouched(const void* room);
 // (render thread) the rooms a solve left unkept for a passing reason (its class or the model changed meanwhile: nothing else
 // sends a room with no lamp to its solve again, and one unkept room refuses every physical edit of the lot) go to their solve
 void SolveUnkept();
-// (render thread) a kept physical room's furniture blockers read again since its solve (a table dragged with the lamp on it moves
-// its 3D record before any solve): true and the newer table when its generation is past `gen` for kept solve `version`
 // Development build / a recording: a drag trace line may be written now (60 every 10 s at most)
 bool TraceLine();
-bool LiveBlockers(const void* room, int cls, uint32_t version, uint32_t& gen, std::shared_ptr<const RtLampGpu::BlockerTable>& blk, float& header);
 // (physical indoor lamps, stage 4; LampMarkFilter's lamp entry update, light tree thread) an edit of `light` (kind "value",
 // "switch on", "switch off", "move" (within its room), "move to another room", "move to another story" or "new" (first seen;
 // settles only when no room lists it yet); a literal) of a story 0 .. 7 of the active lot when every story 0 .. 7 draws the

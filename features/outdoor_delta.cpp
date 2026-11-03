@@ -2341,6 +2341,7 @@ std::vector<std::shared_ptr<const KeptRoom>> g_finalized;
 // listing it then; its switch on is taken only while they are the same (CarryOff moves a room's entry to its next kept solve)
 std::unordered_map<uintptr_t, std::vector<std::pair<const void*, uint32_t>>> g_takenOff;
 bool g_keptFull = false; // (the log: once per crossing of the budget)
+std::unordered_map<uint64_t, size_t> g_keptRefused; // (under g_keptMx) key -> bytes of its solve the budget refused (PhysCoverWhy sends it again once it fits)
 std::atomic<int> g_keptLines{0};
 bool KeptLog() { return g_keptLines.fetch_add(1, std::memory_order_relaxed) < 2000; }
 size_t KeptBytes(const KeptRoom& k) {
@@ -2360,6 +2361,7 @@ void ClearKept() {
     g_finalized.clear();
     g_keptBytes = 0;
     g_keptFull = false;
+    g_keptRefused.clear();
 }
 // The law a light is kept with (any thread): the GPU's law (RtOutdoorLamps::WorldLaw; a TubeLight's: GpuLampLaw::Tube), else its
 // colour alone (RtOutdoorLamps::ColourLaw: a TubeLight without a segment, whose evaluation 0x006BFA70 is its colour +0xE0 x a share its colour does not
@@ -3121,11 +3123,13 @@ void KeepEnd(const BYTE* room) {
             if (!g_keptFull && KeptLog())
                 LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: not kept (the {:.0f} MB budget: {:.1f} MB kept in {} rooms, this one {:.1f} MB)", rr.story, rr.id,
                                      rr.cls, mb(kMaxKeptBytes), mb(g_keptBytes), g_kept.size(), mb(k->bytes)));
+            if (g_keptRefused.size() < 1024) g_keptRefused[key] = k->bytes;
             g_keptFull = true;
             return;
         }
         g_keptFull = false;
         g_keptBytes = after;
+        g_keptRefused.erase(key);
         kept = g_kept[key] = std::move(k);
         rooms = g_kept.size(), total = g_keptBytes;
     }
@@ -4129,8 +4133,7 @@ bool StandsOnFurniture(uintptr_t tracker, int story, int room, uintptr_t light) 
     if (!k || !k->physical) return false;
     const auto kl = std::find_if(k->lamps.begin(), k->lamps.end(), [&](const KeptLamp& l) { return l.light == light; }); // (where it stood at the solve)
     return kl != k->lamps.end() && std::any_of(k->tests.rec.begin(), k->tests.rec.end(), [&](const RoomLightTests::Record& rc) {
-               const float dx = kl->pos[0] - rc.c.x, dz = kl->pos[2] - rc.c.z;
-               return dx * dx + dz * dz < rc.r2 && rc.c.y < kl->pos[1];
+               return RoomLightTests::StandsOn(rc.c.x, rc.c.y, rc.c.z, rc.r2, kl->pos);
            });
 }
 void NoteLightObjectRemoved() {
@@ -4156,36 +4159,6 @@ void NoteTouched(const void* room) {
     std::lock_guard<std::mutex> lk(g_touchedMx);
     g_touched.Note(k);
 }
-// (physical) the furniture blockers of kept rooms read again since their solve (LiveBlockers): kept room key -> its solve's version,
-// the records' key, a generation and the table
-struct LiveBlk {
-    uint32_t version = 0, gen = 0;
-    uint64_t key = 0;
-    std::shared_ptr<const RtLampGpu::BlockerTable> blk;
-    float header = -1.0f;
-};
-std::mutex g_liveBlkMx;
-std::unordered_map<uint64_t, LiveBlk> g_liveBlk; // (under g_liveBlkMx)
-std::atomic<uint32_t> g_liveBlkGen{0};
-// (light tree thread, an edit's cover test) a kept physical room whose 3D records moved (blockersKey: PhysLampPick::BlockersKey of
-// the records `t` now) gets them as its GPU blocker table at once; false: not taken (no memory)
-bool NoteLiveBlockers(const BYTE* room, int cls, uint32_t version, uint64_t blockersKey, const RoomLightTests::Room& t) {
-    const uint64_t k = KeyOf(room, cls);
-    {
-        std::lock_guard<std::mutex> lk(g_liveBlkMx);
-        if (const auto it = g_liveBlk.find(k); it != g_liveBlk.end() && it->second.version == version && it->second.key == blockersKey) return true; // (read already)
-    }
-    try {
-        auto blk = std::make_shared<RtLampGpu::BlockerTable>();
-        const float header = static_cast<float>(blk->Append(t));
-        std::lock_guard<std::mutex> lk(g_liveBlkMx);
-        if (g_liveBlk.size() > 4096) g_liveBlk.clear();
-        g_liveBlk[k] = LiveBlk{version, g_liveBlkGen.fetch_add(1, std::memory_order_relaxed) + 1, blockersKey, std::move(blk), header};
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
 std::set<PhysLampPick::TouchedRooms::Key> g_unkept; // (under g_touchedMx) SolveUnkept
 std::atomic<bool> g_unkeptAny{false};
 void NoteUnkept(const void* room) { // (light tree thread, KeepEnd)
@@ -4202,13 +4175,6 @@ bool TraceLine() {
     DWORD w = s_window.load(std::memory_order_relaxed);
     if (now - w > 10000 && s_window.compare_exchange_strong(w, now)) s_n.store(0, std::memory_order_relaxed);
     return s_n.fetch_add(1, std::memory_order_relaxed) < 60;
-}
-bool LiveBlockers(const void* room, int cls, uint32_t version, uint32_t& gen, std::shared_ptr<const RtLampGpu::BlockerTable>& blk, float& header) {
-    std::lock_guard<std::mutex> lk(g_liveBlkMx);
-    const auto it = g_liveBlk.find(KeyOf(room, cls));
-    if (it == g_liveBlk.end() || it->second.version != version || it->second.gen == gen) return false;
-    gen = it->second.gen, blk = it->second.blk, header = it->second.header;
-    return true;
 }
 void SolveUnkept() {
     if (!g_unkeptAny.exchange(false, std::memory_order_relaxed)) return;
@@ -4756,6 +4722,7 @@ const char* WriteBasisTexels(uint64_t key, const KeptRoom& k, const Want& want, 
     std::vector<BasisTexelWrite> t(n);
     const long left0 = left;
     double sumNew = 0.0, sumGame = 0.0; // (evidence, 03/11: furniture brighter for seconds after an edit) RGB levels written vs the solve's
+    const bool trace = Recorder::Verbose(); // (the sums feed only the [BasisRatio] trace line)
     const auto rgb = [](uint32_t c) { return static_cast<double>(((c >> 16) & 0xFF) + ((c >> 8) & 0xFF) + (c & 0xFF)); };
     for (int m = 0; m < 4; m++) {
         for (size_t i = 0; i < n; i++) t[i] = BasisTexelWrite{k.basis[i].x, k.basis[i].y, want(i, m), bn.expect[i * 4 + m], 0};
@@ -4763,10 +4730,10 @@ const char* WriteBasisTexels(uint64_t key, const KeptRoom& k, const Want& want, 
         for (size_t i = 0; i < n; i++) {
             if (t[i].done) bn.expect[i * 4 + m] = t[i].want;
             (t[i].done ? written : left)++;
-            if (i * 4 + m < k.basisGame.size()) sumNew += rgb(t[i].want), sumGame += rgb(k.basisGame[i * 4 + m]);
+            if (trace && i * 4 + m < k.basisGame.size()) sumNew += rgb(t[i].want), sumGame += rgb(k.basisGame[i * 4 + m]);
         }
     }
-    if (TraceLine())
+    if (trace && TraceLine())
         LOG_INFO(std::format("[BasisRatio] story {} room {}: directional maps written at {:.2f}x the levels of its game solve ({} texels, {} left as another solve wrote them)",
                              k.story, k.id, sumGame > 0.0 ? sumNew / sumGame : 0.0, n * 4, left - left0));
     return nullptr;
@@ -5273,41 +5240,28 @@ std::string PhysCoverWhy(uintptr_t tracker, uintptr_t light, PhysCover& o) {
             if (rr.id == 0) f.drawn = RtOutdoorLamps::PhysCoversRoom0(room);
             else {
                 std::shared_ptr<const KeptRoom> k;
+                bool fits = true;
                 {
                     std::lock_guard<std::mutex> lk(g_keptMx);
-                    if (const auto it = g_kept.find(KeyOf(room, rr.cls)); it != g_kept.end()) k = it->second;
+                    const uint64_t key = KeyOf(room, rr.cls);
+                    if (const auto it = g_kept.find(key); it != g_kept.end()) k = it->second;
+                    // (a solve the budget refused is refused again while the budget holds: 3 full solves a minute for nothing)
+                    if (const auto it = g_keptRefused.find(key); it != g_keptRefused.end()) fits = g_keptBytes + it->second <= kMaxKeptBytes;
                 }
                 f.kept = k && k->physical;
                 // (a room solved before its lot became active was never kept, and nothing else sends it again: every edit of the
                 // 11:59 log of 03/11 was refused for it; SolveUnkept's 3 sends a minute bound this)
-                if (!f.kept && rr.cls > 0 && rr.cls <= 2 && rr.lot == ActiveLot()) NoteUnkept(room);
+                if (!f.kept && fits && rr.cls > 0 && rr.cls <= 2 && rr.lot == ActiveLot()) NoteUnkept(room);
                 // (kept again, relit next frame: 42 refusals of 03/11; a fresh keep's maps are drawn by the next relight, so its first
                 // second counts as drawn: refused steps 70-150 ms after a keep held the 11:59 drag of 03/11)
                 f.drawn = f.kept && (!k->maps || GpuRoomLamps::DrawnAny(room, k->maps) || GetTickCount() - k->keptAt < 1000);
                 f.baked = f.kept && std::find(k->baked.begin(), k->baked.end(), light) != k->baked.end();
                 // (an object moved in the room, its occluder mark dropped as the lamp's own: the side table a lamp stands on, dragged
-                // with it, kept its old blockers in the GPU's 3D test, its shadow left behind (video of 03/11); the room's records follow
-                // the object before its solve). Its records now are the GPU's blocker table at once; its solve (3 a minute at most) only
-                // when they cannot be taken. The edit is taken (refused, every edit of 03/11 went to the solves)
+                // with it, kept its old blockers in the GPU's 3D test; the room's records follow the object before its solve). Its
+                // solve takes them again, 3 a minute at most; the edit is taken meanwhile (refused, every edit of 03/11 went to the solves)
                 if (f.kept && k->roomGeo) {
                     uint64_t now[3] = {};
-                    RoomLightTests::Room t;
-                    const bool read = RoomGeoKey(static_cast<const BYTE*>(room), now, &t) != 0;
-                    const bool moved = read && PhysLampPick::BlockersKey(now) != k->roomGeo;
-                    const bool taken = moved && NoteLiveBlockers(static_cast<const BYTE*>(room), rr.cls, k->version, PhysLampPick::BlockersKey(now), t);
-                    if (moved && !taken) NoteUnkept(room);
-                    if (f.lists && TraceLine()) { // (evidence, 03/11: do the room's 3D records follow a dragged table before its solve?)
-                        float most = 0.0f;
-                        size_t at = 0;
-                        for (size_t i = 0; read && i < t.rec.size() && i < k->tests.rec.size(); i++) {
-                            const RoomLightTests::V a = t.rec[i].c, b = k->tests.rec[i].c;
-                            const float d = std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z));
-                            if (d > most) most = d, at = i;
-                        }
-                        LOG_INFO(std::format("[LiveBlk] lamp {:08X} story {} room {}: furniture {} ({} records now, {} at its solve; largest centre move {:.2f} m, record {}){}",
-                                             light, rr.story, rr.id, !read ? "not read" : moved ? "changed since its solve" : "as at its solve", t.rec.size(),
-                                             k->tests.rec.size(), most, at, moved ? (taken ? ": read again for the GPU" : ": not taken, its solve asked") : ""));
-                    }
+                    if (RoomGeoKey(static_cast<const BYTE*>(room), now) && PhysLampPick::BlockersKey(now) != k->roomGeo) NoteUnkept(room);
                 }
                 if (f.lists) o.ids.emplace_back(rr.story, rr.id), o.basisRooms.push_back(BasisRoomRef{KeyOf(room, rr.cls), rr.story, rr.id});
             }

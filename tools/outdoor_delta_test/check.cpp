@@ -1535,8 +1535,8 @@ void BlockerTableChecks() {
     }
     Check(fieldsOk && table.skipped == unknown, "blocker table: the rows give back each record and every field the rectangle and disc tests read");
     {
-        // (LiveBlockers) a side table's top (a disc 0.36 m wide, 0.77 m up) dragged 1 m with its lamp: the table read again from the
-        // moved records shades the floor under its new place, as a fresh keep's would, and no longer the old one
+        // a side table's top (a disc 0.36 m wide, 0.77 m up) kept at its new place 1 m away: it shades the floor under that place,
+        // as a fresh keep's would, and no longer the old one
         const auto tableAt = [&](float x) {
             RoomLightTests::Room room;
             RoomLightTests::Record rc;
@@ -1556,7 +1556,11 @@ void BlockerTableChecks() {
         int unk = 0;
         const float under = live.Occlude(h, lamp, V{1.0f, 0.0f, 0.1f}), old = live.Occlude(h, lamp, V{-1.0f, 0.0f, 0.1f}); // (where it stood: its shadow there)
         Check(under < 0.5f && old == 1.0f && under == RoomLightTests::occlude(moved, lamp, V{1.0f, 0.0f, 0.1f}, &unk),
-              "live blockers: a table dragged with its lamp shades the floor under its new place and no longer under the old one");
+              "blocker table: a table kept at its new place shades the floor under it and no longer under the old one");
+        // (CarryBlockers, StandsOnFurniture) a lamp on the table's top stands on it; a chandelier over it or a lamp beside it does not
+        const float onTop[3] = {1.0f, 1.34f, 0.0f}, over[3] = {1.0f, 2.5f, 0.0f}, beside[3] = {2.2f, 1.34f, 0.0f}, below[3] = {1.0f, 0.3f, 0.0f};
+        const auto stands = [&](const float* p) { return RoomLightTests::StandsOn(1.0f, 0.77f, 0.0f, 1.0f, p); };
+        Check(stands(onTop) && !stands(over) && !stands(beside) && !stands(below),"stands on: a table lamp yes; a chandelier over the table, a lamp beside or under it no");
         // (Offset) the kept table at x = -1 moved 2 m by its record's offset casts exactly the shadow of the table kept at x = 1
         RtLampGpu::BlockerTable kept;
         const int hk = kept.Append(tableAt(-1.0f));

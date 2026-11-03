@@ -261,16 +261,17 @@ inline bool WritesDisjoint(int w, int h, const std::vector<const std::vector<uin
         }
     return true;
 }
-// (sharper floors) A kept texel's sub-texel position, (fx, fy) texel steps from its own sample s (position at s[0..2], normal at
-// s[4..6]) along the steps to its neighbours nb = {right, left, down, up} (null: none). A neighbour counts on the same plane only
-// (normals within ~8 degrees, within 1 cm of the plane, at most 0.6 m away: never across a wall or a step); an edge texel takes the
-// other side's step, a texel with neither keeps its own sample along that axis.
+// (sharper floors) q (a neighbour's sample; null: none) on s's plane: normals within ~8 degrees, within 1 cm of it, at most 0.6 m
+// away (never across a wall or a step). A sample: position at [0..2], normal at [4..6]
 inline bool SamePlane(const float* s, const float* q) {
     if (!q) return false;
     const float d[3] = {q[0] - s[0], q[1] - s[1], q[2] - s[2]};
     const float nn = s[4] * q[4] + s[5] * q[5] + s[6] * q[6], plane = s[4] * d[0] + s[5] * d[1] + s[6] * d[2];
     return nn > 0.99f && std::fabs(plane) <= 0.01f && d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= 0.36f;
 }
+// (sharper floors) A kept texel's sub-texel position, (fx, fy) texel steps from its own sample s along the steps to its neighbours
+// nb = {right, left, down, up} (null: none) on its plane (SamePlane); an edge texel takes the other side's step, a texel with
+// neither keeps its own sample along that axis
 inline void SubTexelPos(const float* s, const float* const nb[4], float fx, float fy, float out[3]) {
     const auto same = [&](const float* q) { return SamePlane(s, q); };
     const auto step = [&](const float* fwd, const float* back, float st[3]) {
