@@ -464,11 +464,26 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                     const auto at = g_lotAt.find(rl.light);
                     if (!worldOf(rl.light, at != g_lotAt.end() ? at->second : SIZE_MAX, now)) continue;
                     const float dx = now.pos[0] - rl.pos[0], dz = now.pos[2] - rl.pos[2];
-                    if (dx * dx + dz * dz < 1e-4f || std::fabs(now.pos[1] - rl.pos[1]) > 0.02f ||
-                        !LampMarkFilter::FurnitureMovedWith(now.pos[0], now.pos[2]))
-                        continue;
-                    bool elsewhere = false;
+                    if (dx * dx + dz * dz < 1e-4f) continue;
+                    // (the carry's decisions, a line a second while they happen: the 03/11 14:20 test showed no change and no evidence)
+                    static long s_moved = 0, s_height = 0, s_noFurniture = 0, s_noTop = 0, s_carried = 0;
+                    static DWORD s_logAt = 0;
+                    s_moved++;
+                    const auto note = [&](long& n) {
+                        n++;
+                        if (const DWORD tick = GetTickCount(); tick - s_logAt >= 1000) {
+                            s_logAt = tick;
+                            LOG_INFO(std::format("[CarryTable] story {} room {}: lamp moved {} steps: height changed {}, no furniture move seen {}, on no top {}, "
+                                                 "carried {}",
+                                                 e.story, e.id, s_moved, s_height, s_noFurniture, s_noTop, s_carried));
+                        }
+                    };
+                    if (std::fabs(now.pos[1] - rl.pos[1]) > 0.02f) { note(s_height); continue; }
+                    if (!LampMarkFilter::FurnitureMovedWith(now.pos[0], now.pos[2])) { note(s_noFurniture); continue; }
+                    bool elsewhere = false, any = false;
                     for (int i = 0; i < recs && !elsewhere; i++) elsewhere = onTop(i, now.pos) && !onTop(i, rl.pos);
+                    for (int i = 0; i < recs; i++) any = any || onTop(i, rl.pos);
+                    note(any ? s_carried : s_noTop);
                     for (int i = 0; i < recs; i++) {
                         if (!onTop(i, rl.pos)) continue;
                         const auto o = std::find_if(off.begin(), off.end(), [&](const std::array<float, 3>& k) { return k[0] == static_cast<float>(i); });
