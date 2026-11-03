@@ -2271,6 +2271,7 @@ struct KeptRoom {
     int story = 0, id = 0, cls = 0;
     float thr = 0.0f;
     uint32_t version = 0;                  // (stage 2b) g_keptVersion when it was kept
+    DWORD keptAt = 0;                      // GetTickCount when its solve was kept (PhysCoverWhy's grace before its maps are drawn)
     unsigned maps = 0;                     // the maps it wrote texels into (bit m)
     bool editable = false;                 // the GPU draws every texel it wrote (no wall left to the game's blur)
     std::vector<uintptr_t> baked;          // lights it lit that the GPU does not draw (their light stays in the base)
@@ -3099,6 +3100,7 @@ void KeepEnd(const BYTE* room) {
     k->basisId = k->version;
     if (!k->physical) HookGuard::Run("OutdoorDelta carry switched-off lamps", [&] { CarryOff(*k, key); }); // (physical: no parts to carry)
     k->bytes = KeptBytes(*k);
+    k->keptAt = GetTickCount();
     const auto mb = [](size_t b) { return static_cast<double>(b) / (1024.0 * 1024.0); };
     std::shared_ptr<const KeptRoom> kept;
     size_t rooms = 0, total = 0;
@@ -5233,7 +5235,9 @@ std::string PhysCoverWhy(uintptr_t tracker, uintptr_t light, PhysCover& o) {
                 // (a room solved before its lot became active was never kept, and nothing else sends it again: every edit of the
                 // 11:59 log of 03/11 was refused for it; SolveUnkept's 3 sends a minute bound this)
                 if (!f.kept && rr.cls > 0 && rr.cls <= 2 && rr.lot == ActiveLot()) NoteUnkept(room);
-                f.drawn = f.kept && (!k->maps || GpuRoomLamps::DrawnAny(room, k->maps)); // (kept again, relit next frame: 42 refusals of 03/11)
+                // (kept again, relit next frame: 42 refusals of 03/11; a fresh keep's maps are drawn by the next relight, so its first
+                // second counts as drawn: refused steps 70-150 ms after a keep held the 11:59 drag of 03/11)
+                f.drawn = f.kept && (!k->maps || GpuRoomLamps::DrawnAny(room, k->maps) || GetTickCount() - k->keptAt < 1000);
                 f.baked = f.kept && std::find(k->baked.begin(), k->baked.end(), light) != k->baked.end();
                 // (an object moved in the room, its occluder mark dropped as the lamp's own: the side table a lamp stands on, dragged
                 // with it, kept its old blockers in the GPU's 3D test, its shadow left behind (video of 03/11); the room's records follow
