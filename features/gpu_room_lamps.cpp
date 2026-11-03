@@ -77,7 +77,17 @@ struct Entry {
     std::vector<uintptr_t> editHits;
     // (S8) a roofed room's ambient (+0x110) at its solve's end and the compose's scale of it now (RtLampModel::AmbScale)
     float ambSolve[3] = {}, ambScale[3] = {1.0f, 1.0f, 1.0f};
+    // (physical, ComposeOver's partial relight) the places its compose writes in the map (y << 16 | x: texels, block rows, copies,
+    // restores), what it is drawn from now (Sig) and what its last draw into the copy was drawn from
+    std::vector<uint32_t> writes;
+    uint64_t drawKey = 0, drawnKey = 0;
 };
+// (ComposeOver) a rooms-only copy's entries as last drawn in full: their set, and whether no two of them write the same place
+struct CopyState {
+    uint64_t set = 0;
+    bool disjoint = false, valid = false;
+};
+std::map<std::tuple<uintptr_t, int, int>, CopyState> g_copies; // (mgr, cls, m)
 // (physical indoor lamps) the kept shadow atlas: a tile per lamp, kept while the lamp stays put and the occluders are the same.
 // Its rows grow with the most lamps a map has drawn (4 at a time, up to kTiles: 6 x 256 x 256 x (G16R16F + D24X8) = 3.1 MB a
 // row, 50 MB at 16); a map with more lamps is drawn in several passes over the same sum, its tiles rendered again in turn
@@ -365,6 +375,11 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                                              kMapName[m]));
                     OutdoorDelta::SolveTouched(r.room);
                 } else if (RtLampGpu::Engine::UploadKept(dev, d, e.gpu)) {
+                    for (const auto* v : {&d.texels, &d.copies, &d.restores})
+                        for (const RtLampGpu::TexelVertex& t : *v) e.writes.push_back(static_cast<uint32_t>(t.y) << 16 | static_cast<uint32_t>(t.x));
+                    for (const RtLampGpu::KeptBlockOut& b : d.outs)
+                        for (int y = b.y0; y <= b.y1; y++)
+                            for (int x = b.x0; x <= b.x1; x++) e.writes.push_back(static_cast<uint32_t>(y) << 16 | static_cast<uint32_t>(x));
                     e.physMult = std::move(d.physMult);
                     e.physReach = std::move(d.physReach);
                     e.blockers = std::move(d.blockers);
@@ -405,6 +420,10 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                 float now[3];
                 if (ReadAmbient(r.room, now)) RtLampModel::AmbScale(e.ambSolve, now, e.ambScale);
                 Mix(sig, e.ambScale, sizeof e.ambScale);
+                // (what its draw reads beside the round's rules: its kept solve, the occluders, its lamps' laws and rows, the ambient)
+                uint64_t k = 1469598103934665603ull;
+                Mix(k, &e.version, sizeof e.version), Mix(k, &gen, sizeof gen), Mix(k, &e.physSig, sizeof e.physSig), Mix(k, e.ambScale, sizeof e.ambScale);
+                e.drawKey = k;
             };
             const uint64_t lotNow = LotRoundSig(e.lot);
             if (e.physCached && e.physLot == lotNow && e.physGen == gen) { // (its lamp list as last built: the same signature)
@@ -583,10 +602,25 @@ bool PhysPasses(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, const uintptr_t* 
     return true;
 }
 
-void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h,
-                 const RtLampGpu::Params& p) {
+bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h,
+                 const RtLampGpu::Params& p, bool partial) {
+    // the copy's entries now: a partial relight needs the set its last full draw had, all physical (drawKey) and no two writing
+    // the same place (a room's compose reads only its own sum and the game's map, never the copy: its places come out as a full
+    // draw over the game's copy would leave them)
+    uint64_t set = 1469598103934665603ull;
+    bool allPhys = true;
+    for (const auto& [key, e] : g_entries)
+        if (e.mgr == mgr && e.cls == cls && e.m == m) {
+            const void* room = std::get<0>(key);
+            Mix(set, &room, sizeof room), Mix(set, &e.version, sizeof e.version), Mix(set, &e.ok, sizeof e.ok);
+            allPhys = allPhys && (!e.ok || e.physical);
+        }
+    CopyState& cs = g_copies[{mgr, cls, m}];
+    if (partial && !(cs.valid && cs.disjoint && cs.set == set && allPhys)) return false;
+    bool drewAll = true;
     for (auto& [key, e] : g_entries) {
         if (!e.ok || e.mgr != mgr || e.cls != cls || e.m != m) continue;
+        if (partial && e.drawnKey == e.drawKey) continue; // (its places hold its last draw, from the same inputs)
         const void* room = std::get<0>(key);
         // the room's own map holds the working map's top-left corner (smaller or as large; a blurred wall atlas exactly)
         if (w > e.gpu.w || h > e.gpu.h || (e.gpu.blur && (w != e.gpu.w || h != e.gpu.h))) {
@@ -595,6 +629,8 @@ void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
                                      e.gpu.w, e.gpu.h, w, h));
             if (e.physical) NoteCover(e.story, "a map not of the kept size"), OutdoorDelta::SolveTouched(room);
             Drop(e, room);
+            if (partial) return false; // (the full draw puts the game's map back under it)
+            drewAll = false;
             continue;
         }
         std::string err;
@@ -610,6 +646,8 @@ void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
                 else OutdoorDelta::SolveTouched(room);
             }
             Drop(e, room);
+            if (partial) return false; // (its places may hold part of this draw: the full draw puts the game's map back under it)
+            drewAll = false;
             continue;
         }
         if (e.physical) {
@@ -642,7 +680,21 @@ void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
             e.checked = true;
             SelfCheck(dev, e, out, w, h);
         }
+        e.drawnKey = e.drawKey;
     }
+    if (partial) return true;
+    // (a full draw: the set it leaves, a room dropped by it out of it; the places checked again only for another set)
+    uint64_t now = 1469598103934665603ull;
+    std::vector<const std::vector<uint32_t>*> writes;
+    for (const auto& [key, e] : g_entries)
+        if (e.mgr == mgr && e.cls == cls && e.m == m) {
+            const void* room = std::get<0>(key);
+            Mix(now, &room, sizeof room), Mix(now, &e.version, sizeof e.version), Mix(now, &e.ok, sizeof e.ok);
+            if (e.ok) writes.push_back(&e.writes);
+        }
+    if (!cs.valid || cs.set != now) cs.disjoint = PhysLampPick::WritesDisjoint(w, h, writes);
+    cs.set = now, cs.valid = drewAll;
+    return true;
 }
 
 void ReleaseAll() {
@@ -650,6 +702,7 @@ void ReleaseAll() {
     g_tileRows = 0;
     for (auto& [key, e] : g_entries) e.gpu.Release();
     g_entries.clear();
+    g_copies.clear();
     g_bytes = 0;
     std::lock_guard<std::mutex> lk(g_drawnMx);
     g_drawn.clear();

@@ -36,9 +36,11 @@ namespace GpuRoomLamps {
 uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m);
 // After Real-time outdoor lamps composed that map's copy (out, w x h; between the engine's Begin and End): the kept rooms over
 // it. A room that cannot be drawn is logged and left as the game's. p: room 0's relight rules (physical rooms take its softness,
-// fade and drag taps)
-void ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h,
-                 const RtLampGpu::Params& p);
+// fade and drag taps). partial (a rooms-only copy kept from its last draw, the game's map and the rules unchanged): only the rooms
+// whose draw inputs changed are drawn again; false when that cannot give what a full draw would (the caller then copies the
+// game's map and draws in full)
+bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h,
+                 const RtLampGpu::Params& p, bool partial = false);
 // A device reset or Real-time outdoor lamps dropping its maps: every GPU buffer goes (made again on use)
 void ReleaseAll();
 // (physical indoor lamps; render thread, between the engine's Begin and End) lamps[i] (lot space) of lights[i] in passes of the

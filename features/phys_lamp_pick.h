@@ -235,4 +235,20 @@ inline int ListLen(const uintptr_t* b, const uintptr_t* e, int max) {
     return e < b || e - b > max ? -1 : static_cast<int>(e - b);
 }
 
+// (GpuRoomLamps::ComposeOver's partial relight) no place (y << 16 | x) within w x h is written by two of the sets: a set drawn
+// again alone then leaves the map as drawing them all would (a place past the map is never written: the viewport cuts it)
+inline bool WritesDisjoint(int w, int h, const std::vector<const std::vector<uint32_t>*>& sets) {
+    if (w <= 0 || h <= 0 || sets.size() >= 0xFFFF) return false;
+    std::vector<uint16_t> owner(static_cast<size_t>(w) * h, 0);
+    for (size_t i = 0; i < sets.size(); i++)
+        for (const uint32_t at : *sets[i]) {
+            const uint32_t x = at & 0xFFFFu, y = at >> 16;
+            if (x >= static_cast<uint32_t>(w) || y >= static_cast<uint32_t>(h)) continue;
+            uint16_t& o = owner[static_cast<size_t>(y) * w + x];
+            if (o && o != i + 1) return false;
+            o = static_cast<uint16_t>(i + 1);
+        }
+    return true;
+}
+
 } // namespace PhysLampPick

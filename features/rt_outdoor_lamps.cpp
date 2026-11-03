@@ -533,6 +533,7 @@ struct Slot {
     std::vector<GpuLampLaw::Lamp> kLaws;
     bool kX = false; // their floor mask or exit parts too (AddKeptParts extra, ComposeK0PS)
     uint64_t roomsRelit = 0; // GpuRoomLamps::Sig at its last relight
+    uint64_t partKey = 0;    // (rooms only) the rules and copy its last relight drew with: a relight with the same draws only the rooms that changed
     std::vector<char> kOk;
     // (physical indoor lamps) the lot lamps with a law out of its base (OutdoorDelta::ExportRoom0 physical), drawn from their laws
     // now over its phys points (DEFAULT, one per place of the map: built again after a device reset); each one's room row, room
@@ -596,6 +597,7 @@ std::vector<int> g_roundStories;
 // What made maps relit, and the frame's own cost, over the last 10 s (the self-measure line; render thread)
 struct Why {
     long first = 0, lamp = 0, base = 0, params = 0, occluders = 0, gameWrite = 0, exact = 0, build = 0, writeGap = 0;
+    long partial = 0; // (rooms-only copies relit by their changed rooms alone)
     long relights = 0;
     double frameMs = 0, frameMax = 0;
     double nbMs = 0, loopMs = 0; // of frameMs: the lots next to it, the relight loop (its checks of every map included)
@@ -652,6 +654,7 @@ void Inactive(const std::string& why) {
 void ReleaseSlot(Slot& s) {
     if (s.watch >= 0) g_watchTex[s.watch].store(nullptr), s.watch = -1;
     if (s.copy) s.copy->Release(), s.copy = nullptr;
+    s.partKey = 0;
     if (s.scale) s.scale->Release(), s.scale = nullptr;
     s.scaled = false;
     if (s.vb) s.vb->Release(), s.vb = nullptr;
@@ -1291,6 +1294,7 @@ void OnPreReset(IDirect3DDevice9* dev) {
     UnbindCopies(dev);
     for (auto& s : g_slots) {
         if (s->copy) s->copy->Release(), s->copy = nullptr;
+        s->partKey = 0;
         if (s->scale) s->scale->Release(), s->scale = nullptr;
         s->scaled = false;
         s->relit = false; // (14/10: its preblur texture is a MANAGED one: kept, and the slot stays built; only the copy is made again)
@@ -1349,10 +1353,10 @@ void OnEndScene(IDirect3DDevice9* dev) {
             LOG_INFO(std::format("[RtOutdoorLamps] Cost over {:.0f} s: {:.3f} ms a frame on average (largest {:.2f} ms) on the render thread; {} relights, maps relit "
                                  "because: first {}, a lamp within reach changed {}, the kept base changed {}, the game wrote the map {}, exact after a drag {}, "
                                  "options {}, occluders {}; {} relights for repeated game writes moved later; {} story maps prepared ({:.1f} ms on a worker thread); "
-                                 "of a frame: the lots next to it {:.3f} ms, the maps' checks and relights {:.3f} ms{}",
+                                 "of a frame: the lots next to it {:.3f} ms, the maps' checks and relights {:.3f} ms; {} rooms-only relights drew only their changed rooms{}",
                                  (now - w.since) / 1000.0, w.frames ? w.frameMs / static_cast<double>(w.frames) : 0.0, w.frameMax, w.relights, w.first, w.lamp,
                                  w.base, w.gameWrite, w.exact, w.params, w.occluders, w.writeGap, w.build, g_buildMs,
-                                 w.frames ? w.nbMs / static_cast<double>(w.frames) : 0.0, w.frames ? w.loopMs / static_cast<double>(w.frames) : 0.0,
+                                 w.frames ? w.nbMs / static_cast<double>(w.frames) : 0.0, w.frames ? w.loopMs / static_cast<double>(w.frames) : 0.0, w.partial,
                                  g_inactive.empty() ? std::string() : " | inactive: " + g_inactive));
         }
         g_why = Why{};
@@ -1747,6 +1751,7 @@ void Frame(IDirect3DDevice9* dev) {
                 slot->game = tex;
                 if (tex) tex->AddRef();
                 if (slot->copy) slot->copy->Release(), slot->copy = nullptr;
+                slot->partKey = 0;
                 if (slot->scale) slot->scale->Release(), slot->scale = nullptr;
                 slot->scaled = false;
                 slot->relit = false;
@@ -2250,6 +2255,7 @@ void Frame(IDirect3DDevice9* dev) {
         if (roomsOnly) {
             if (!roomsSig) {
                 if (s.copy) s.copy->Release(), s.copy = nullptr;
+                s.partKey = 0;
                 if (s.game) s.game->Release(), s.game = nullptr;
                 s.relit = false;
                 continue;
@@ -2635,8 +2641,24 @@ void Frame(IDirect3DDevice9* dev) {
             ok = g_eng->AddKeptParts(dev, s.kvb, s.kRanges, s.kLaws.data(), s.kOk.data(), s.thr, s.map.w, s.map.h, err, s.kX);
         p.keptX = (!roomsOnly && s.kvb && !s.kRanges.empty() && s.kX) || phys;
         p.physX = phys;
-        ok = ok && (roomsOnly ? g_eng->CopyTexture(dev, s.game, s.copy, s.map.w, s.map.h, err) : g_eng->Compose(dev, s.map, s.game, s.copy, p, err, s.scale));
-        if (ok && !s.mgr) GpuRoomLamps::ComposeOver(dev, *g_eng, rns[s.story].mgr, s.cls, s.m, s.game, s.copy, s.map.w, s.map.h, p);
+        // (rooms only) the copy as its last relight left it, the game's map not written since and the same rules: only the rooms
+        // whose draws changed are drawn again over it (GpuRoomLamps::ComposeOver: identical to a full draw, else it refuses)
+        uint64_t partKey = 0;
+        if (roomsOnly) {
+            partKey = 1469598103934665603ull;
+            const float pf[] = {p.thr, p.radius, p.aa, p.normalOffset, p.biasM, p.biasTexels, p.nearBlocker, p.farDist};
+            const bool pb[] = {p.fade, p.reachOn, p.mask, p.fast, p.maskAllGpu, p.keptX, p.physX};
+            Mix(partKey, pf, sizeof pf), Mix(partKey, pb, sizeof pb), Mix(partKey, &p.debugLamp, sizeof p.debugLamp), Mix(partKey, &s.copy, sizeof s.copy);
+            Mix(partKey, &s.game, sizeof s.game), Mix(partKey, &s.map.w, sizeof s.map.w), Mix(partKey, &s.map.h, sizeof s.map.h), Mix(partKey, &s.version, sizeof s.version);
+        }
+        const bool partial = roomsOnly && ok && s.relit && s.partKey == partKey && !s.pendingWrite &&
+                             GpuRoomLamps::ComposeOver(dev, *g_eng, rns[s.story].mgr, s.cls, s.m, s.game, s.copy, s.map.w, s.map.h, p, true);
+        if (!partial) {
+            ok = ok && (roomsOnly ? g_eng->CopyTexture(dev, s.game, s.copy, s.map.w, s.map.h, err) : g_eng->Compose(dev, s.map, s.game, s.copy, p, err, s.scale));
+            if (ok && !s.mgr) GpuRoomLamps::ComposeOver(dev, *g_eng, rns[s.story].mgr, s.cls, s.m, s.game, s.copy, s.map.w, s.map.h, p);
+        } else
+            g_why.partial++;
+        s.partKey = ok ? partKey : 0;
         s.scaled = ok && s.scale;
         if (!ok) {
             s.relit = false;
