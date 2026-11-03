@@ -7110,7 +7110,7 @@ int ArchRowsForImpl(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& ro
     float own[4] = {};
     if (FAILED(dev->GetPixelShaderConstantF(static_cast<UINT>(room.ambConst), own, 1))) return 0;
     // the room light map (its identity only): its story tells rooms with the same ambient apart
-    const uintptr_t mapTex = reinterpret_cast<uintptr_t>(D3D9Hooks::BoundTexture(dev, room.sampler));
+    const uintptr_t mapTex = reinterpret_cast<uintptr_t>(RtOutdoorLamps::GameMapOf(D3D9Hooks::BoundTexture(dev, room.sampler))); // (a relit copy: its game map)
     return LevelLightShare::ArchAmbientConsts(own, mapTex, basisTex, rows, static_cast<int>(ShaderPatches::kArchCells));
 }
 // (arch_ambient) The arch copy of a room-map copy just made: none where it has no arch block (ps_2_x, no ambient constant),

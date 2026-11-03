@@ -4039,9 +4039,17 @@ void SolveUnkept() {
         std::lock_guard<std::mutex> lk(g_touchedMx);
         due.swap(g_unkept);
     }
-    for (const auto& [tracker, story, id] : due)
+    // (a room whose class changes during every solve would be sent again forever: 3 sends a minute at most)
+    static std::map<PhysLampPick::TouchedRooms::Key, std::pair<DWORD, int>> s_sent; // (render thread) key -> (window start, sends)
+    const DWORD now = GetTickCount();
+    if (s_sent.size() > 4096) s_sent.clear();
+    for (const auto& [tracker, story, id] : due) {
+        auto& [at, n] = s_sent[{tracker, story, id}];
+        if (now - at >= 60000) at = now, n = 0;
+        if (++n > 3) continue;
         if (LevelLightShare::TrackerLive(tracker))
             if (void* r = id ? LevelLightShare::RoomOf(tracker, story, id) : LevelLightShare::Room0Of(tracker, story)) LevelLightShare::QueueRoomAgain(r);
+    }
 }
 void SolveTouched(const void* room) {
     std::vector<PhysLampPick::TouchedRooms::Key> due;
