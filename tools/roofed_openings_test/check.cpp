@@ -304,6 +304,30 @@ void DiagonalCutChecks() {
     std::unordered_set<uint32_t> glazed;
     GlazedCuts(b.g, {{EdgeKey(6, 4, 7, 3), door}}, {GlassLight{6.5f, 1.0f, 3.5f}}, glazed);
     Check(glazed.count(EdgeKey(6, 4, 7, 3)) == 1, "a glass door in a diagonal wall is found on its diagonal");
+    // a roofed room whose only openings are in diagonal walls: cell (5, 5) split by dg 0 (room 48 on quadrants 2, 3), cell
+    // (7, 5) by dg 1 (room 48 on quadrants 3, 0), the yard (room 0) beyond; both doors are listed, from either side
+    Builder r(12, 12);
+    const auto split = [&](int x, int z, int k, std::array<int, 4> q) {
+        const size_t ti = static_cast<size_t>(z) * r.g.w + x;
+        for (int i = 0; i < 4; i++) r.g.quad[4 * ti + i] = q[static_cast<size_t>(i)];
+        r.g.flags[ti] |= 0xF0;
+        r.g.edges.push_back(e);
+        r.g.dg[2 * ti + k] = static_cast<int32_t>(r.g.edges.size() - 1);
+    };
+    split(5, 5, 0, {0, 0, 48, 48}), split(7, 5, 1, {48, 0, 0, 48});
+    PlaceGridOpenings(r.g, {{EdgeKey(5, 5, 6, 6), door}, {EdgeKey(7, 6, 8, 5), door}}, false, {}, [](const CutRec&, GridOpening&) {});
+    YardOutline o;
+    std::vector<RoofedDoor> rd;
+    RoofedDoors(r.g, 48, nullptr, 0, o, rd);
+    Check(rd.size() == 2 && rd[0].key == EdgeKey(5, 5, 6, 6) && rd[1].key == EdgeKey(7, 6, 8, 5) && rd[1].ax == 7.0f && rd[1].az == 6.0f,
+          "a roofed room's doors in diagonal walls are listed (low-x end first)");
+    std::vector<InnerDoor> in;
+    InnerDoors(r.g, 0, nullptr, 0, in, 8);
+    Check(in.size() == 2 && in[0].from == 48 && in[1].from == 48, "room 0 sees the roofed room's lamps through its diagonal doors");
+    YardOutline o2;
+    std::vector<RoofedDoor> none;
+    RoofedDoors(r.g, 0, nullptr, 0, o2, none);
+    Check(none.empty(), "room 0 lists no roofed doors of its own");
 }
 void DoorRuleChecks() {
     DiagonalCutChecks();

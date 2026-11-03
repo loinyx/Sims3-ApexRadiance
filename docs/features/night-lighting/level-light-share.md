@@ -702,7 +702,10 @@ half wall and the objects in them.
   product's kind (`+0xD0`: door, window, gate, arch).
 - **Lot id:** a cut is filed under the post's own lot id (`g_cuts`, per lot id and story). That id is the posting lot's
   `+0x48/+0x4C` (`0x00B0D792`), the one the game routes the message by (`0x00C52AA0`). A post with no lot id, with an
-  unreadable payload or with a key that is not one side edge of a cell is rejected. The table outlives switching Night
+  unreadable payload or with a key that is neither one side edge nor the diagonal of a cell is rejected (a diagonal key, a
+  window or door in a diagonal wall, is taken since 03/11: `CutEdge` gives the grid's side edge or `dg` diagonal, and
+  `CutPlaceOf` a light's distance from it and place along it, over sqrt 2 on a diagonal; `RoofedDoors`, `InnerDoors` and
+  their requeues take the diagonal doors too, while the outside walls' copy keeps a diagonal wall whole). The table outlives switching Night
   Lights off and on (`UninstallCutoutCapture` keeps it; only a new world's lots replace it): the game posts a lot's cuts only
   when it loads, so a cleared table closed every arch and door to light until the save was loaded again. A cut made while
   Night Lights is off is missed until its lot loads again. The lot's story manager

@@ -4686,13 +4686,12 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
             if (listed++ >= 8) break;
             const int x0 = static_cast<int8_t>(key & 0xFF), z0 = static_cast<int8_t>(key >> 8 & 0xFF), x1 = static_cast<int8_t>(key >> 16 & 0xFF),
                       z1 = static_cast<int8_t>(key >> 24 & 0xFF);
-            const bool alongZ = x0 == x1;
-            const int32_t idx = alongZ ? GridXL(*g, x0, z0) : GridZL(*g, x0, z0);
+            const int32_t idx = CutEdge(*g, key);
             const float base = idx >= 0 ? g->edges[static_cast<size_t>(idx)].base : 0.0f;
-            const float line = static_cast<float>(alongZ ? x0 : z0), mid = 0.5f * static_cast<float>(alongZ ? z0 + z1 : x0 + x1);
             float best = 1e9f, bAcross = 0, bAlong = 0, bUp = 0;
             for (const GlassLight& l : glassLights) {
-                const float across = (alongZ ? l.x : l.z) - line, along = (alongZ ? l.z : l.x) - mid, up = l.y - base;
+                const CutPlace c = CutPlaceOf(key, l.x, l.z);
+                const float across = c.across, along = c.along - 0.5f * c.len, up = l.y - base;
                 const float d = across * across + along * along + 0.25f * up * up;
                 if (d < best) best = d, bAcross = across, bAlong = along, bUp = up;
             }
@@ -5699,7 +5698,7 @@ struct RoofedDoor {
     float ax = 0, az = 0, bx = 0, bz = 0; // its ends in lot space, the low end first (GridOpening's u runs from it)
 };
 // Room `id`'s outline on the grid (box, edges) and its doors: the outline edges with an opening whose other side is room 0
-// or a roofless room of the story (diagonal walls carry no opening: outline only)
+// or a roofless room of the story, a cell's diagonal included
 void RoofedDoors(const StoryGrid& g, int id, const int* roofless, int nr, YardOutline& o, std::vector<RoofedDoor>& doors) {
     const auto room = [&](int x, int z, int q) { return x >= 0 && z >= 0 && x < g.w && z < g.h ? g.quad[4 * (static_cast<size_t>(z) * g.w + x) + q] : -1; };
     const auto outdoor = [&](int other) { return other == 0 || (other > 0 && std::find(roofless, roofless + nr, other) != roofless + nr); };
@@ -5723,8 +5722,12 @@ void RoofedDoors(const StoryGrid& g, int id, const int* roofless, int nr, YardOu
             if (q[2] == id && room(ix, iz + 1, 0) != id) edge(GridZL(g, ix, iz + 1), room(ix, iz + 1, 0), ix, iz + 1, ix + 1, iz + 1);
             if (q[1] == id && room(ix + 1, iz, 3) != id) edge(GridXL(g, ix + 1, iz), room(ix + 1, iz, 3), ix + 1, iz, ix + 1, iz + 1);
             if (q[3] == id && room(ix - 1, iz, 1) != id) edge(GridXL(g, ix, iz), room(ix - 1, iz, 1), ix, iz, ix, iz + 1);
-            if ((q[1] == id) != (q[2] == id) || (q[3] == id) != (q[0] == id)) o.boundary.push_back(g.dg[2 * ti]);
-            if ((q[0] == id) != (q[1] == id) || (q[2] == id) != (q[3] == id)) o.boundary.push_back(g.dg[2 * ti + 1]);
+            // a diagonal wall splitting the cell: dg 0 (ix, iz)-(ix+1, iz+1) between quadrants {0, 1} and {2, 3}, dg 1
+            // (ix, iz+1)-(ix+1, iz) between {3, 0} and {1, 2}
+            if (q[0] == q[1] && q[2] == q[3] && (q[0] == id) != (q[2] == id)) edge(g.dg[2 * ti], q[0] == id ? q[2] : q[0], ix, iz, ix + 1, iz + 1);
+            else if ((q[1] == id) != (q[2] == id) || (q[3] == id) != (q[0] == id)) o.boundary.push_back(g.dg[2 * ti]);
+            if (q[3] == q[0] && q[1] == q[2] && (q[0] == id) != (q[1] == id)) edge(g.dg[2 * ti + 1], q[0] == id ? q[1] : q[0], ix, iz + 1, ix + 1, iz);
+            else if ((q[0] == id) != (q[1] == id) || (q[2] == id) != (q[3] == id)) o.boundary.push_back(g.dg[2 * ti + 1]);
         }
 }
 // The doors' identity (cell edges and kinds), to see whether they changed since the room's last gather; 0 = none
@@ -5764,8 +5767,8 @@ float SegDist2(float px, float pz, const RoofedDoor& d) {
 }
 // Indoor light through openings: the openings on room `id`'s outline (room 0, a roofless or a roofed room) into the story's
 // roofed rooms (id > 0, not roofless, not `id`): through them the lamps of those rooms reach it. `from` = the roofed room on
-// the other side. Only an opening the grid keeps open counts (a door while doors block light is a whole wall); diagonal walls
-// carry no opening. At most `max`.
+// the other side. Only an opening the grid keeps open counts (a door while doors block light is a whole wall), a cell's
+// diagonal included. At most `max`.
 struct InnerDoor {
     RoofedDoor d;
     int from = 0;
@@ -5787,6 +5790,9 @@ void InnerDoors(const StoryGrid& g, int id, const int* roofless, int nr, std::ve
             if (q[2] == id) edge(GridZL(g, ix, iz + 1), room(ix, iz + 1, 0), ix, iz + 1, ix + 1, iz + 1);
             if (q[1] == id) edge(GridXL(g, ix + 1, iz), room(ix + 1, iz, 3), ix + 1, iz, ix + 1, iz + 1);
             if (q[3] == id) edge(GridXL(g, ix, iz), room(ix - 1, iz, 1), ix, iz, ix, iz + 1);
+            const size_t ti = static_cast<size_t>(iz) * g.w + ix; // (a diagonal wall splitting the cell, as RoofedDoors)
+            if (q[0] == q[1] && q[2] == q[3] && (q[0] == id) != (q[2] == id)) edge(g.dg[2 * ti], q[0] == id ? q[2] : q[0], ix, iz, ix + 1, iz + 1);
+            if (q[3] == q[0] && q[1] == q[2] && (q[0] == id) != (q[1] == id)) edge(g.dg[2 * ti + 1], q[0] == id ? q[1] : q[0], ix, iz + 1, ix + 1, iz);
         }
 }
 // Their identity (cell edges and the rooms behind them), to see whether they changed since the last gather; 0 = none
@@ -6178,6 +6184,9 @@ int RequeueRoofedDoors(uintptr_t tracker, int S) {
     for (int z = 0; z < g.h; z++)
         for (int X = 0; X <= g.w; X++)
             if (const int32_t idx = GridXL(g, X, z); idx >= 0 && g.edges[static_cast<size_t>(idx)].open) add(X - 1, z, 1), add(X, z, 3);
+    for (size_t i = 0; i < g.dg.size(); i++) // (a cell's diagonal: the rooms on both its sides)
+        if (g.dg[i] >= 0 && g.edges[static_cast<size_t>(g.dg[i])].open)
+            for (int q = 0; q < 4; q++) add(static_cast<int>(i / 2 % g.w), static_cast<int>(i / 2 / g.w), q);
     const std::vector<RoofedRec> recs = RoofedRecsOf(mgr);
     for (const RoofedRec& r : recs)
         if (std::find(ids.begin(), ids.end(), r.id) == ids.end()) ids.push_back(r.id);
@@ -6779,6 +6788,9 @@ int RequeueInnerDoors(uintptr_t tracker, int S) {
     for (int z = 0; z < g.h; z++)
         for (int X = 0; X <= g.w; X++)
             if (const int32_t idx = GridXL(g, X, z); idx >= 0 && g.edges[static_cast<size_t>(idx)].open) add(X - 1, z, 1), add(X, z, 3);
+    for (size_t i = 0; i < g.dg.size(); i++) // (a cell's diagonal: the rooms on both its sides)
+        if (g.dg[i] >= 0 && g.edges[static_cast<size_t>(g.dg[i])].open)
+            for (int q = 0; q < 4; q++) add(static_cast<int>(i / 2 % g.w), static_cast<int>(i / 2 / g.w), q);
     {
         std::lock_guard<std::mutex> lk(g_innerMx);
         for (const InnerRec& r : g_innerRecs)
@@ -10474,6 +10486,8 @@ void FillWallPatches(const StoryGrid& g, StoryWallCopy& c) {
         ToLocal(g.xf, wb, B);
         const bool alongX = ApexMath::Fabs(A[2] - B[2]) < 0.1f, alongZ = ApexMath::Fabs(A[0] - B[0]) < 0.1f;
         if (alongX == alongZ) { // a diagonal (or a point)
+            // shortcut: a diagonal wall's copy stays whole, its openings unseen by the rig and ground tests through it; upgrade
+            // when diagonal openings matter there (the grid, the proxy mesh and the door lists already take them)
             c.skipped++;
             continue;
         }
