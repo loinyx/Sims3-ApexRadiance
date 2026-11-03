@@ -1467,6 +1467,30 @@ void BlockerTableChecks() {
         }
     }
     Check(fieldsOk && table.skipped == unknown, "blocker table: the rows give back each record and every field the rectangle and disc tests read");
+    {
+        // (LiveBlockers) a side table's top (a disc 0.36 m wide, 0.77 m up) dragged 1 m with its lamp: the table read again from the
+        // moved records shades the floor under its new place, as a fresh keep's would, and no longer the old one
+        const auto tableAt = [&](float x) {
+            RoomLightTests::Room room;
+            RoomLightTests::Record rc;
+            rc.c = {x, 0.77f, 0.0f}, rc.r2 = 1.0f;
+            RoomLightTests::Blocker k{};
+            k.vt = kDiscVt;
+            put(k, 0x20, V{x, 0.77f, 0.0f}), put(k, 0x30, V{x, 0.79f, 0.0f}), put(k, 0x40, V{0.0f, 1.0f, 0.0f});
+            k.f[0x70 / 4] = 0.357f * 0.357f;
+            rc.b.push_back(k);
+            room.rec.push_back(rc);
+            return room;
+        };
+        const RoomLightTests::Room moved = tableAt(1.0f);
+        RtLampGpu::BlockerTable live;
+        const int h = live.Append(moved);
+        const V lamp{1.0f, 1.34f, 0.0f};
+        int unk = 0;
+        const float under = live.Occlude(h, lamp, V{1.0f, 0.0f, 0.1f}), old = live.Occlude(h, lamp, V{-1.0f, 0.0f, 0.1f}); // (where it stood: its shadow there)
+        Check(under < 0.5f && old == 1.0f && under == RoomLightTests::occlude(moved, lamp, V{1.0f, 0.0f, 0.1f}, &unk),
+              "live blockers: a table dragged with its lamp shades the floor under its new place and no longer under the old one");
+    }
     RtLampGpu::BlockerTable wide;
     wide.rows.resize(5000);
     int tx = 0, ty = 0;

@@ -104,6 +104,9 @@ void SolveTouched(const void* room);
 // (render thread) the rooms a solve left unkept for a passing reason (its class or the model changed meanwhile: nothing else
 // sends a room with no lamp to its solve again, and one unkept room refuses every physical edit of the lot) go to their solve
 void SolveUnkept();
+// (render thread) a kept physical room's furniture blockers read again since its solve (a table dragged with the lamp on it moves
+// its 3D record before any solve): true and the newer table when its generation is past `gen` for kept solve `version`
+bool LiveBlockers(const void* room, int cls, uint32_t version, uint32_t& gen, std::shared_ptr<const RtLampGpu::BlockerTable>& blk, float& header);
 // (physical indoor lamps, stage 4; LampMarkFilter's lamp entry update, light tree thread) an edit of `light` (kind "value",
 // "switch on", "switch off", "move" (within its room), "move to another room", "move to another story" or "new" (first seen;
 // settles only when no room lists it yet); a literal) of a story 0 .. 7 of the active lot when every story 0 .. 7 draws the

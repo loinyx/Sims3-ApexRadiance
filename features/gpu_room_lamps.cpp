@@ -57,6 +57,7 @@ struct Entry {
     std::vector<std::array<float, 3>> world;
     std::shared_ptr<const RtLampGpu::BlockerTable> blockers; // (its kept room's, shared by the room's maps)
     float blkHeader = -1.0f;
+    uint32_t blkGen = 0; // (OutdoorDelta::LiveBlockers) the generation of the furniture blockers read again since its solve (0: its solve's)
     float xf[16] = {};
     // (physical, stage 4) the solve's lamps out of its base (their rows: mult x norm scale, reach, the room they were registered
     // in), the lights its base holds, the room's normalisation and roofless flag, its texels' world box; the drawn lamps' hash,
@@ -420,7 +421,8 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
         int type = 0, reg = -1;
         if (e.physical) { // (no parts, so no move rule: every lamp drawn with its law now; a lamp gone or without a law adds nothing)
             const uint32_t gen = RtOutdoorLamps::KeptMeshGen();
-            Mix(sig, &e.version, sizeof e.version), Mix(sig, &gen, sizeof gen);
+            OutdoorDelta::LiveBlockers(r.room, cls, e.version, e.blkGen, e.blockers, e.blkHeader); // (a table moved with its lamp: this round)
+            Mix(sig, &e.version, sizeof e.version), Mix(sig, &gen, sizeof gen), Mix(sig, &e.blkGen, sizeof e.blkGen);
             any = true;
             // (S8) the ceiling pass's ambient follows the room's now: Rooms at Night's sliders and the lamp edits taken, no solve
             const auto ambient = [&] {
@@ -429,7 +431,8 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                 Mix(sig, e.ambScale, sizeof e.ambScale);
                 // (what its draw reads beside the round's rules: its kept solve, the occluders, its lamps' laws and rows, the ambient)
                 uint64_t k = 1469598103934665603ull;
-                Mix(k, &e.version, sizeof e.version), Mix(k, &gen, sizeof gen), Mix(k, &e.physSig, sizeof e.physSig), Mix(k, e.ambScale, sizeof e.ambScale);
+                Mix(k, &e.version, sizeof e.version), Mix(k, &gen, sizeof gen), Mix(k, &e.blkGen, sizeof e.blkGen), Mix(k, &e.physSig, sizeof e.physSig),
+                    Mix(k, e.ambScale, sizeof e.ambScale);
                 e.drawKey = k;
             };
             const uint64_t lotNow = LotRoundSig(e.lot);
