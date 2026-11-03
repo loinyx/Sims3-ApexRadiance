@@ -548,6 +548,14 @@ bool DrawnLight(uintptr_t L, uint64_t roomLot) {
     }
     return RtLampModel::Drawn(f, roomLot);
 }
+uint64_t LightLotOf(uintptr_t L) { // POD (SEH): the light's lot, 0 none (a street lamp); ~0 unreadable
+    __try {
+        const BYTE* p = reinterpret_cast<const BYTE*>(L);
+        return *reinterpret_cast<const uint32_t*>(p + 0xC0) | static_cast<uint64_t>(*reinterpret_cast<const uint32_t*>(p + 0xC4)) << 32;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return ~0ull;
+    }
+}
 struct Desc {
     uintptr_t base = 0;
     uint32_t pitch = 0, w = 0, h = 0;
@@ -6119,6 +6127,7 @@ bool ExportRoom0(const void* room, int cls, Room0Export& out, bool physical) {
             e.x = t.x, e.y = t.y, e.map = t.map;
             e.bits = static_cast<uint8_t>(((t.bits & kMasked) ? 1 : 0) | ((t.bits & kGated) ? 2 : 0));
             e.exitBase = 0.0f;
+            e.worldBase[0] = e.worldBase[1] = e.worldBase[2] = 0.0f;
         }
         // (GPU room lamps) a kept exit lamp: the exit ground texels' alpha is drawn from the exit lamps' light (bit 4), those left
         // in the base giving exitBase
@@ -6146,7 +6155,13 @@ bool ExportRoom0(const void* room, int cls, Room0Export& out, bool physical) {
             if (exits && l.exit && !k0)
                 for (const Contrib& p : l.parts)
                     if (p.texel < out.texels.size()) out.texels[p.texel].exitBase += Lum3(p.rgb);
-            if (!l.drawn && !k0) continue;
+            if (!l.drawn && !k0) {
+                if (physical && LightLotOf(l.light) != r.lot) // (a street lamp: left in the base, noted for the upper walls of open rooms)
+                    for (const Contrib& p : l.parts)
+                        if (p.texel < out.texels.size())
+                            for (int k = 0; k < 3; k++) out.texels[p.texel].worldBase[k] += p.rgb[k];
+                continue;
+            }
             if (l.drawn) out.drawn.push_back(l.light);
             if (phys[j])
                 out.phys.push_back(l.light), out.physRow.push_back({static_cast<float>(std::max(l.mult, 1)) * l.normK, l.reach ? 1.0f : 0.0f, l.exit ? 1.0f : 0.0f});

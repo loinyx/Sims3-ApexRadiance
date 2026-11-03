@@ -276,6 +276,9 @@ struct Room0Export {
         // (GPU room lamps, bit 4: a story-0 ground texel whose alpha is the exit lamps' light, set only when a kept lamp is an
         // exit lamp) the luminance of the exit lamps' light left in the base
         float exitBase;
+        // (physical) the light of lamps of no lot or another lot (street lamps) left in the base: an upper wall of a double-height
+        // room takes it out (Real-time outdoor lamps' bit 8)
+        float worldBase[3];
     };
     std::vector<Texel> texels;
     struct Block {

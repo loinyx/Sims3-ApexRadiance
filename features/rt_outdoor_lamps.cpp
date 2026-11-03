@@ -1001,7 +1001,10 @@ void PrepareJob(Job& j) {
             // (physical) a wall of a double-height room's upper half is that room's, not outdoors: no outdoor lamp (AccPS bit 8)
             else if (j.open && RtLampProxy::OverOpenBelow(j.open->lot, j.openRooms, j.story, tv.p, tv.n)) tv.p[3] += 8.0f;
             tv.n[3] = static_cast<float>(t.packed >> 24) / 255.0f;
-            for (int k = 0; k < 3; k++) tv.base[k] = std::isfinite(t.base[k]) ? t.base[k] : 0.0f;
+            // (bit 8) the street lamps the game's room-0 solve left in its base are no light of the room below either (14:33 F8, 03/11:
+            // the upper half beige from them, the lower half its room's red)
+            const bool inner = tv.p[3] >= 8.0f;
+            for (int k = 0; k < 3; k++) tv.base[k] = std::isfinite(t.base[k]) ? std::max(t.base[k] - (inner ? t.worldBase[k] : 0.0f), 0.0f) : 0.0f;
             tv.base[3] = ex.dither ? RoomMapDither::Offset(t.x, t.y) / 255.0f : 0.0f;
             tv.mask[0] = t.vis, tv.mask[1] = t.all;
             if (t.bits & 4) tv.mask[2] = t.exitBase, tv.mask[3] = 1.0f; // (GPU room lamps) an exit ground texel: ComposeK0PS
