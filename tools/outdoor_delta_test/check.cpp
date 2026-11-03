@@ -1124,9 +1124,11 @@ void ProxyOpenTopsChecks() {
         };
         const auto has = [](const std::vector<int>& v, int r) { return std::binary_search(v.begin(), v.end(), r); };
         const std::vector<int> wallsOnly = over(s2, s3, w3, false), own3 = over(s2, s3, w3, true), own2 = over(s1, s2, w2, true);
-        Check(!has(wallsOnly, 5) && !has(wallsOnly, 7) && has(own3, 5) && has(own3, 6) && has(own3, 7) && !has(own3, 12) && !has(own2, 8),
-              "open to above with its own walls: story 2's rooms 5, 6, 7 under a sloped roof open (closed by the 3/4 walls rule with story 3's real walls); "
-              "story 1's room 8, a wing beside floored rooms, and room 12 under a floor stay closed");
+        // (room 6's walls of story 3 all stand on its floored part, as an upper room's outer wall flush over a single-storey
+        // part would: without the roof's height the two cannot be told apart, so it stays closed, as the game draws it)
+        Check(!has(wallsOnly, 5) && !has(wallsOnly, 7) && has(own3, 5) && !has(own3, 6) && has(own3, 7) && !has(own3, 12) && !has(own2, 8),
+              "open to above with its own walls: story 2's rooms 5 and 7 under a sloped roof open (closed by the 3/4 walls rule with story 3's real walls); "
+              "room 6, whose upper walls stand on its floored part, story 1's room 8, a wing beside floored rooms, and room 12 under a floor stay closed");
     }
     // story 2's removed floor (the '-' hole, 40 quadrants) over story 1's roofed room 2: its ceiling opens under the hole only,
     // with or without room ids
@@ -1283,6 +1285,13 @@ void PhysPickChecks() {
         Check(PhysLampPick::ListLen(nullptr, nullptr, 8) == 0 && PhysLampPick::ListLen(v, v + 3, 8) == 3 && PhysLampPick::ListLen(nullptr, v, 8) == -1 &&
                   PhysLampPick::ListLen(v + 2, v, 8) == -1 && PhysLampPick::ListLen(v, v + 4, 3) == -1,
               "physical pick: a room with no light buffer reads as an empty list; broken or too long bounds stay unreadable");
+    }
+    {
+        const auto at = [](uint32_t x, uint32_t y) { return y << 16 | x; };
+        const std::vector<uint32_t> a = {at(0, 0), at(1, 0), at(1, 0)}, b = {at(2, 0), at(0, 1)}, c = {at(1, 0)}, past = {at(9, 9), at(0, 1)}, far = {at(9, 9)};
+        Check(PhysLampPick::WritesDisjoint(4, 4, {&a, &b}) && !PhysLampPick::WritesDisjoint(4, 4, {&a, &b, &c}) &&
+                  !PhysLampPick::WritesDisjoint(4, 4, {&b, &past}) && PhysLampPick::WritesDisjoint(4, 4, {&a, &far}),
+              "partial relight: rooms whose places never meet are disjoint (a room writing its own place twice too); a shared place is told, a place past the map is not written");
     }
     // the rooms an edit taken without their solve leaves stale in the game's maps: the rooms listing it, its own and every room 0;
     // forgotten at their solve, each sent once on a fallback, all on a full drop

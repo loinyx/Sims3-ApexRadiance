@@ -24,10 +24,12 @@ constexpr int kMaxId = 4096; // room ids at or above it are never open (the per-
 //    under its roof has no walls on B along its eaves, and the lighting side knows no roof: such a room stays closed, or
 //    its lamps would light the walls of story B beside it above the roof line.
 // ownWalls (the physical model's open tops): a room open by the floor rule is also open when story B has a wall of its own
-// on its outline, one with no floor placed beyond it on B (a gable or the upper half of a wall going up through B). A
-// double-height room under a sloped roof has those only along its gables (02/11, lot C49C: story 2's rooms 5, 6 and 7 under
-// story 3, 15 / 3 / 12 such walls of outlines 48 / 28 / 46); a single-storey wing has walls of B only where a floored room
-// of B stands beside it (story 1's room 8: none of its own, 5 beside floored rooms): it stays closed.
+// on its outline, one with no floor placed on B on either side of it (a gable or the upper half of a wall going up through
+// B; a wall with a floor on its own side stands on the room's single-storey part, its outer face above that roof). A
+// double-height room under a sloped roof has those only along its gables (02/11, lot C49C: story 2's rooms 5 and 7 under
+// story 3); a single-storey wing has walls of B only where a floored room of B stands beside it (story 1's room 8: none of
+// its own, 5 beside floored rooms): it stays closed. shortcut: the roof's height is not read, so a room whose upper walls
+// all stand on its floored part (C49C's room 6) stays closed even if it is two storeys tall; read the roof to open it.
 template <class RoomAt, class Placed, class WallZ, class WallX>
 void Classify(int w, int h, RoomAt roomAt, Placed placed, WallZ wallZ, WallX wallX, std::vector<int>& open, bool ownWalls = false) {
     open.clear();
@@ -60,7 +62,7 @@ void Classify(int w, int h, RoomAt roomAt, Placed placed, WallZ wallZ, WallX wal
             const int other = side == a ? b : a;
             edges[static_cast<size_t>(side)]++;
             if (wall || floorOpen(other)) walled[static_cast<size_t>(side)]++;
-            if (wall && !(side == a ? bFloor : aFloor)) own[static_cast<size_t>(side)]++;
+            if (wall && !aFloor && !bFloor) own[static_cast<size_t>(side)]++; // (over the open part: no floor on either side)
         }
     };
     // (outside the grid: no floor)
