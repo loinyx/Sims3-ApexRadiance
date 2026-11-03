@@ -14,6 +14,7 @@
 #include "room_map_padding.h"
 #include "apex_log.h"
 #include "d3d9_hooks.h"
+#include "rt_outdoor_lamps.h"
 #include "shader_patches.h"
 #include <windows.h>
 #include <array>
@@ -144,6 +145,9 @@ void NoteDraw(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps) {
         if (!(declared & (1u << s))) continue;
         IDirect3DBaseTexture9* t = nullptr;
         if (FAILED(D3D9Hooks::GetBoundTexture(dev, s, &t)) || !t) continue;
+        // Real-time outdoor lamps binds a relit DEFAULT copy in place of the game's map (an objects map too, GPU room lamps):
+        // the set is kept under the game's map, which RoomMapLike knows
+        if (auto* g = static_cast<IDirect3DBaseTexture9*>(const_cast<void*>(RtOutdoorLamps::GameMapOf(t))); g != t) t->Release(), t = g, t->AddRef();
         int dir = -1;
         for (int k = 0; k < 4; k++)
             if (dirs[k] == static_cast<int>(s)) dir = k;
@@ -206,7 +210,7 @@ void OnPresent() {
 
 bool BasisFor(IDirect3DTexture9* lightMap, IDirect3DTexture9* out[4]) {
     if (!g_enabled) return false;
-    const auto it = g_basisOf.find(lightMap);
+    const auto it = g_basisOf.find(static_cast<IDirect3DTexture9*>(const_cast<void*>(RtOutdoorLamps::GameMapOf(lightMap))));
     if (it == g_basisOf.end()) return false;
     it->second.lastSeen = g_frame; // still in use (objects of this story are drawn)
     for (int k = 0; k < 4; k++) out[k] = it->second.tex[k];
