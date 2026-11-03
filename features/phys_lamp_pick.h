@@ -157,6 +157,7 @@ struct RoomFact {
     bool kept = false;   // (id > 0) a kept physical solve of the class it shows
     bool drawn = false;  // that solve drawn on every map it wrote (room 0: drawn physically, every story covered)
     bool baked = false;  // that solve has the lamp's light in its base
+    bool geoSame = true; // its walls and 3D blockers as its solve read them (furniture dragged with a lamp on it: not)
 };
 // Null when every story 0 .. 7 draws the lamp from its law now (the edit marks no room); else why not, `at` the room
 inline const char* EditRefusal(const std::vector<RoomFact>& rooms, int& at) {
@@ -174,6 +175,7 @@ inline const char* EditRefusal(const std::vector<RoomFact>& rooms, int& at) {
         }
         if (!f.kept) return "no kept physical solve of the class it shows";
         if (!f.drawn) return "a map of its kept solve not drawn on the GPU";
+        if (!f.geoSame) return "its walls or 3D blockers changed since its solve (its solve takes them again)";
         if (f.baked) return "its kept solve has the lamp in its base";
     }
     at = -1;

@@ -5044,6 +5044,9 @@ std::string PhysCoverWhy(uintptr_t tracker, uintptr_t light, PhysCover& o) {
                 f.kept = k && k->physical;
                 f.drawn = f.kept && (!k->maps || GpuRoomLamps::Drawn(room, k->version, k->maps));
                 f.baked = f.kept && std::find(k->baked.begin(), k->baked.end(), light) != k->baked.end();
+                // (an object moved in the room, its occluder mark dropped as the lamp's own: the nightstand a lamp stands on, dragged
+                // with it, kept its old blockers in the GPU's 3D test; the room's records follow the object before its solve)
+                f.geoSame = !f.kept || (k->geo && RoomGeoKey(static_cast<const BYTE*>(room)) == k->geo);
                 if (f.lists) o.ids.emplace_back(rr.story, rr.id), o.basisRooms.push_back(BasisRoomRef{KeyOf(room, rr.cls), rr.story, rr.id});
             }
         }
