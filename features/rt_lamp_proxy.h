@@ -224,6 +224,26 @@ inline bool PlacedQ(const Story& s, int ix, int iz, int q) {
     const size_t t = static_cast<size_t>(iz) * s.w + ix;
     return t < s.placed.size() && ((s.placed[t] >> q) & 1u);
 }
+// A room-0 texel of `story` (lot space P, normal N) facing into a room of the story below that the open-top build opened to this
+// story (Mesh::openRooms, sorted): one space two stories tall, so the texel is that room's wall, not an outdoor one (03/11, lot C49C:
+// the upper half of a double-height room's walls took the street lamps through the windows as room 0, the lower half not). Its
+// quadrant is taken kStep along the normal; no floor may be placed there on this story
+inline bool OverOpenBelow(const Lot& lot, const std::vector<std::pair<int, int>>& openRooms, int story, const float P[3], const float N[3]) {
+    constexpr float kStep = 0.25f;
+    const Story *below = nullptr, *here = nullptr;
+    for (const Story& s : lot.stories) {
+        if (s.story == story - 1) below = &s;
+        if (s.story == story) here = &s;
+    }
+    if (!below || !here || openRooms.empty() || below->room.size() != 4 * static_cast<size_t>(below->w) * below->h) return false;
+    const float x = P[0] + N[0] * kStep, z = P[2] + N[2] * kStep, fx0 = std::floor(x), fz0 = std::floor(z);
+    const int ix = static_cast<int>(fx0), iz = static_cast<int>(fz0);
+    if (!(ix >= 0 && iz >= 0 && ix < below->w && iz < below->h)) return false;
+    const float fx = x - fx0, fz = z - fz0;
+    const int q = std::fabs(fx - 0.5f) <= std::fabs(fz - 0.5f) ? (fz > 0.5f ? 2 : 0) : (fx > 0.5f ? 1 : 3); // (LampVis::Quadrant)
+    const int id = below->room[4 * (static_cast<size_t>(iz) * below->w + ix) + q];
+    return id > 0 && std::binary_search(openRooms.begin(), openRooms.end(), std::make_pair(story - 1, id)) && !PlacedQ(*here, ix, iz, q);
+}
 inline void AddSlabSide(Mesh& m, const float a[3], const float b[3], float top, float bottom) {
     const float p0[3] = {a[0], bottom, a[2]}, p1[3] = {b[0], bottom, b[2]}, p2[3] = {b[0], top, b[2]}, p3[3] = {a[0], top, a[2]};
     AddTri(m, p0, p1, p2);

@@ -1299,6 +1299,21 @@ void PhysPickChecks() {
         ok = ok && now == std::vector<L>{{7, 1}} && missing.empty();
         Check(ok, "physical pick: a lamp the registry drops for a moment is carried for its grace, then gone; another lot carries none");
     }
+    { // a room-0 wall facing into a room of the story below opened to it is that room's (RtLampProxy::OverOpenBelow)
+        RtLampProxy::Lot lot;
+        RtLampProxy::Story below, here;
+        below.story = 1, here.story = 2, below.w = here.w = 3, below.h = here.h = 1;
+        below.room = {0, 0, 0, 0, 5, 5, 5, 5, 7, 7, 7, 7}; // tiles x 0 (room 0), 1 (room 5, open), 2 (room 7, not open)
+        here.placed = {0, 0, 0};
+        lot.stories = {below, here};
+        const std::vector<std::pair<int, int>> open = {{1, 5}};
+        const float wall[3] = {1.0f, 4.0f, 0.5f}, in[3] = {1, 0, 0}, out[3] = {-1, 0, 0}, wall2[3] = {2.0f, 4.0f, 0.5f}, into7[3] = {1, 0, 0};
+        bool ok = RtLampProxy::OverOpenBelow(lot, open, 2, wall, in) && !RtLampProxy::OverOpenBelow(lot, open, 2, wall, out) &&
+                  !RtLampProxy::OverOpenBelow(lot, open, 2, wall2, into7) && !RtLampProxy::OverOpenBelow(lot, open, 1, wall, in);
+        lot.stories[1].placed = {0, 0xF, 0}; // (a floor placed over room 5 on story 2: no longer one space)
+        ok = ok && !RtLampProxy::OverOpenBelow(lot, open, 2, wall, in);
+        Check(ok, "double-height room: a room-0 wall of the story above facing into the open room below is that room's; its outer face, a closed room or a floored quadrant is not");
+    }
     { // a room's texel past its own diagonal wall is shadow-tested inside the room (RtLampProxy::IntoRoom)
         RtLampProxy::Lot lot;
         RtLampProxy::Story st;

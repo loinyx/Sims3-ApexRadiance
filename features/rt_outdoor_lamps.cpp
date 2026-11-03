@@ -947,6 +947,10 @@ struct Job {
     std::vector<std::array<float, 3>> physRow;
     std::shared_ptr<const RtLampGpu::BlockerTable> blk;
     float blkHeader = -1.0f;
+    // (physical indoor lamps) the open-top build's lot and its open rooms when the job started: room 0 texels inside a room open
+    // below take no outdoor lamp (RtLampProxy::OverOpenBelow, bit 8 of the texel flags)
+    std::shared_ptr<const Proxy> open;
+    std::vector<std::pair<int, int>> openRooms;
 };
 void PrepareJob(Job& j) {
     const bool groundShade = LevelLightShare::GroundShadeOn();
@@ -993,6 +997,8 @@ void PrepareJob(Job& j) {
             float own[3] = {0.0f, tv.p[1], 0.0f};
             if (j.lot > 0) ToLot(j.rn.xf, t.pos, own);
             if (groundShade && j.story == 0 && !(t.bits & 1) && tv.n[1] > 0.9f && std::fabs(own[1]) < 1.0f) tv.p[3] += 4.0f;
+            // (physical) a wall of a double-height room's upper half is that room's, not outdoors: no outdoor lamp (AccPS bit 8)
+            else if (j.open && RtLampProxy::OverOpenBelow(j.open->lot, j.openRooms, j.story, tv.p, tv.n)) tv.p[3] += 8.0f;
             tv.n[3] = static_cast<float>(t.packed >> 24) / 255.0f;
             for (int k = 0; k < 3; k++) tv.base[k] = std::isfinite(t.base[k]) ? t.base[k] : 0.0f;
             tv.base[3] = ex.dither ? RoomMapDither::Offset(t.x, t.y) / 255.0f : 0.0f;
@@ -1700,6 +1706,7 @@ void Frame(IDirect3DDevice9* dev) {
                 else if (const auto nk = g_nbBake.find(mgr); nk != g_nbBake.end()) j->bake = nk->second.bake, j->bakeKeys = nk->second.keys;
                 j->base = rn.lotBase;
                 j->phys = physReady && !physRefused, j->physLater = wantPhys && !physReady;
+                if (act && S >= 1 && OutdoorDelta::RoomLampPhysical() && g_openUsed) j->open = g_openUsed, j->openRooms = g_openRooms;
                 if (wantPhys && !j->phys) { // (its lamps back in its base: a lamp edit taken since its solve sends it to one)
                     PhysNote(room, S, physRefused ? "its physical draw failed" : !g_eng || !g_eng->PhysReady() ? "the physical shaders are missing" : "no occluders with open tops yet");
                     OutdoorDelta::SolveTouched(room);
