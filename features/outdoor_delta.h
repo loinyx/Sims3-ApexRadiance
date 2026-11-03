@@ -57,6 +57,10 @@ bool RoomLampCapture();
 // gpu_room_lamps.cpp); room 0 and lamp edits still take the game's path
 void SetRoomLampPhysical(bool on);
 bool RoomLampPhysical();
+// (physical, sharper floors) the physical rooms' floor maps also drawn at twice their size (BuildKeptMap's sub-texels; the copy at
+// 2x in rt_outdoor_lamps.cpp). A change drops the kept rooms like a model change
+void SetHiFloors(bool on);
+bool HiFloors();
 // The room solve hooks record for the probe or the kept captures (either is on)
 bool RoomHooks();
 // GPU room lamps stage 2a (RoomMapDither's pack thunk, any thread; only the light tree thread's kept capture takes it): the

@@ -160,11 +160,17 @@ struct KeptMapData {
     bool physOutdoor = false;
     float physBox[6] = {1e30f, 1e30f, 1e30f, -1e30f, -1e30f, -1e30f};
     float physAmb[3] = {}; // (S8) a roofed room's +0x110 at its solve's end (RtLampModel::AmbScale; 0: the ambient is not followed)
+    // (physical, sharper floors: OutdoorDelta::HiFloors) the floor map at twice its size: 4 phys points per kept texel at its sub-texel
+    // places (PhysLampPick::SubTexelPos) into a 2 accW x 2 accH sum; texelsHi = the compose points (texels and tile-edge copies) of
+    // each sub-texel into the 2w x 2h map; placesHi = one point per such sub-texel (mask.xy = its own place: CopyAtPS)
+    std::vector<TexelVertex> physHi, texelsHi, placesHi;
 };
 struct KeptMapGpu { // DEFAULT pool (made again after a device reset)
     int w = 0, h = 0, accW = 0, accH = 0, layoutW = 0, layoutH = 0;
     IDirect3DVertexBuffer9 *parts = nullptr, *texels = nullptr, *walls = nullptr, *copies = nullptr, *restores = nullptr, *phys = nullptr;
     UINT nTexels = 0, nWalls = 0, nCopies = 0, nRestores = 0, nPhys = 0;
+    IDirect3DVertexBuffer9 *physHi = nullptr, *texelsHi = nullptr, *placesHi = nullptr; // (sharper floors: KeptMapData)
+    UINT nPhysHi = 0, nTexelsHi = 0, nPlacesHi = 0;
     std::vector<std::pair<UINT, UINT>> ranges;
     IDirect3DTexture9* layout = nullptr;
     std::vector<Block> extRects;
@@ -277,6 +283,14 @@ class Engine {
     bool RelightKeptPhys(IDirect3DDevice9* dev, const KeptMapGpu& k, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,
                          const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err,
                          bool first = true, bool compose = true, const float* amb = nullptr);
+    // (sharper floors) RelightKeptPhys over k's sub-texels (physHi into a 2 accW x 2 accH sum) composed into out, a 2w x 2h map
+    // (texelsHi; no restore, wall or blur: a floor map has none drawn this way)
+    bool RelightKeptPhysHi(IDirect3DDevice9* dev, const KeptMapGpu& k, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,
+                           const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DTexture9* out, int w2, int h2, std::string& err, bool first, bool compose,
+                           const float* amb);
+    // (sharper floors) src's bilinear upsample into dst (w2 x h2); k's sub-texels' places (placesHi) copied from over into dst
+    bool Upsample(IDirect3DDevice9* dev, IDirect3DTexture9* src, IDirect3DTexture9* dst, int w2, int h2, std::string& err);
+    bool CopyPlaces(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DTexture9* over, IDirect3DTexture9* dst, int w2, int h2, std::string& err);
     // Physical indoor lamps over room 0 (Real-time outdoor lamps' map m, before its Accumulate, which then takes first = false):
     // the lamps added to the sum as RelightKeptPhys adds them (m's points as phys points: one per place of the map), and into the
     // second sum (cleared when first; AccPhysXPS) the floor mask's "all" and "vis" of masked texels and the exit lamps' light of

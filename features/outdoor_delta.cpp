@@ -1450,6 +1450,13 @@ void SetRoomLampPhysical(bool on) {
                 : "[GpuRoomLamps] Model replica: kept rooms keep each lamp's parts");
 }
 bool RoomLampPhysical() { return g_physical.load(std::memory_order_relaxed); }
+std::atomic<bool> g_hiFloors{false};
+void SetHiFloors(bool on) {
+    if (g_hiFloors.exchange(on) == on) return;
+    g_keptClear.store(true); // (each room is kept again at its next solve, with or without its floor's sub-texels)
+    LOG_INFO(on ? "[GpuRoomLamps] Sharper floors: the physical rooms' floor maps drawn at twice their size" : "[GpuRoomLamps] Sharper floors off");
+}
+bool HiFloors() { return g_hiFloors.load(std::memory_order_relaxed); }
 bool RoomHooks() { return g_probe.load(std::memory_order_relaxed) || g_capture.load(std::memory_order_relaxed); }
 void SetSelfCheck(bool on) {
     if (g_check.exchange(on) == on) return;
@@ -5703,6 +5710,48 @@ bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu:
                     }
         }
         d.passes = k.passes;
+    }
+    // (sharper floors) the floor map at twice its size: each kept texel's 4 sub-texels, their phys points at their own places on
+    // the floor (PhysLampPick::SubTexelPos over the neighbours the solve wrote), composed at their own places of the 2w x 2h map
+    // with the texel's base; a place no capture holds (a restore) keeps the game's texel through the upsample
+    if (k.physical && m == 1 && !blurred && HiFloors() && 2 * d.accH <= 4096) {
+        std::vector<uint8_t> tested(n, 0);
+        for (const BatchRec& b : k.batches)
+            for (uint32_t j = 0; j < b.count && b.first + j < n; j++) tested[b.first + j] = b.flags[1] != 0;
+        const auto at = [&](int x, int y) -> const float* {
+            if (x < 0 || y < 0) return nullptr;
+            const auto it = lastAt.find(static_cast<uint32_t>(y) << 16 | static_cast<uint32_t>(x));
+            return it == lastAt.end() ? nullptr : sample(it->second);
+        };
+        for (uint32_t i = 0; i < n; i++) {
+            if (local[i] == kNoSrc) continue;
+            const float* s = sample(i);
+            const int x = k.texels[i].x, y = k.texels[i].y;
+            const float* nb[4] = {at(x + 1, y), at(x - 1, y), at(x, y + 1), at(x, y - 1)};
+            for (int q = 0; q < 4; q++) {
+                RtLampGpu::TexelVertex v{};
+                v.x = 2.0f * accX(i) + static_cast<float>(q & 1), v.y = 2.0f * accY(i) + static_cast<float>(q >> 1), v.w = 1.0f;
+                PhysLampPick::SubTexelPos(s, nb, (q & 1) ? 0.25f : -0.25f, (q >> 1) ? 0.25f : -0.25f, v.p);
+                std::memcpy(v.base, v.p, 3 * sizeof(float));
+                for (int c = 0; c < 3; c++) v.n[c] = s[4 + c];
+                v.p[3] = tested[i] ? 8.0f : 0.0f;
+                d.physHi.push_back(v);
+            }
+        }
+        const auto sub = [&](uint32_t src, int x, int y) {
+            for (int q = 0; q < 4; q++) {
+                RtLampGpu::TexelVertex v = texel(src, 2 * x + (q & 1), 2 * y + (q >> 1));
+                v.mask[0] = 2.0f * accX(src) + static_cast<float>(q & 1), v.mask[1] = 2.0f * accY(src) + static_cast<float>(q >> 1);
+                d.texelsHi.push_back(v);
+                d.placesHi.push_back(copyPoint(2 * x + (q & 1), 2 * y + (q >> 1), 2 * x + (q & 1), 2 * y + (q >> 1)));
+            }
+        };
+        for (const auto& [key, i] : lastAt) // (as above: every last write, then the copies over them)
+            if (k.tail[i].src != kNoSrc) sub(i, k.texels[i].x, k.texels[i].y);
+        for (const auto& [key, i] : lastAt)
+            if (const uint32_t src = k.tail[i].src; src != kNoSrc && src != i && local[src] != kNoSrc) sub(src, k.texels[i].x, k.texels[i].y);
+        for (const KeptCopy& c : k.copies)
+            if (c.map == m && c.src < n && local[c.src] != kNoSrc) sub(c.src, c.x, c.y);
     }
     if (k.moveCopy) d.expect.clear();
     if (d.texels.empty() && d.wallTexels.empty()) return why = "no texel drawn in that map", false;

@@ -491,6 +491,10 @@ struct Slot {
     IDirect3DTexture9* copy = nullptr; // DEFAULT render target: what the draws read instead
     IDirect3DTexture9* scale = nullptr; // DEFAULT render target: each texel's outdoor scale (ScaleOf; a blurred atlas's not blurred)
     bool scaled = false;                // the last relight wrote it
+    // (sharper floors, a floor map) DEFAULT render targets at twice the map's size: what the draws read instead of the copy while
+    // hiOk (the copy upsampled, the physical rooms' sub-texels over it), and the rooms' sub-texels kept between relights
+    IDirect3DTexture9 *hi = nullptr, *hiOver = nullptr;
+    bool hiOk = false;
     IDirect3DVertexBuffer9 *vb = nullptr, *dyn = nullptr;
     IDirect3DVertexBuffer9* dynNext = nullptr; // the other floor mask buffer: a write fills the one the last draws did not read
     IDirect3DTexture9* preblur = nullptr;
@@ -652,9 +656,15 @@ void Inactive(const std::string& why) {
     }
 }
 
+void ReleaseHi(Slot& s) {
+    if (s.hi) s.hi->Release(), s.hi = nullptr;
+    if (s.hiOver) s.hiOver->Release(), s.hiOver = nullptr;
+    s.hiOk = false;
+}
 void ReleaseSlot(Slot& s) {
     if (s.watch >= 0) g_watchTex[s.watch].store(nullptr), s.watch = -1;
     if (s.copy) s.copy->Release(), s.copy = nullptr;
+    ReleaseHi(s);
     s.partKey = 0;
     if (s.scale) s.scale->Release(), s.scale = nullptr;
     s.scaled = false;
@@ -674,7 +684,7 @@ void UnbindCopies(IDirect3DDevice9* dev) {
         IDirect3DBaseTexture9* t = nullptr;
         if (FAILED(dev->GetTexture(st, &t)) || !t) continue;
         for (const auto& s : g_slots)
-            if (s->copy && t == s->copy) D3D9Hooks::CallOriginalSetTexture(dev, st, s->game);
+            if ((s->copy && t == s->copy) || (s->hi && t == s->hi)) D3D9Hooks::CallOriginalSetTexture(dev, st, s->game);
         t->Release();
     }
 }
@@ -1290,12 +1300,13 @@ HRESULT SwapCopy(IDirect3DDevice9* dev, DWORD stage, IDirect3DBaseTexture9* t, b
     Slot* s = it->second;
     s->binds++;
     swapped = true;
-    return D3D9Hooks::CallOriginalSetTexture(dev, stage, s->copy);
+    return D3D9Hooks::CallOriginalSetTexture(dev, stage, s->hiOk && s->hi ? s->hi : s->copy);
 }
 void OnPreReset(IDirect3DDevice9* dev) {
     UnbindCopies(dev);
     for (auto& s : g_slots) {
         if (s->copy) s->copy->Release(), s->copy = nullptr;
+        ReleaseHi(*s);
         s->partKey = 0;
         if (s->scale) s->scale->Release(), s->scale = nullptr;
         s->scaled = false;
@@ -1754,6 +1765,7 @@ void Frame(IDirect3DDevice9* dev) {
                 slot->game = tex;
                 if (tex) tex->AddRef();
                 if (slot->copy) slot->copy->Release(), slot->copy = nullptr;
+                ReleaseHi(*slot);
                 slot->partKey = 0;
                 if (slot->scale) slot->scale->Release(), slot->scale = nullptr;
                 slot->scaled = false;
@@ -2258,6 +2270,7 @@ void Frame(IDirect3DDevice9* dev) {
         if (roomsOnly) {
             if (!roomsSig) {
                 if (s.copy) s.copy->Release(), s.copy = nullptr;
+                ReleaseHi(s);
                 s.partKey = 0;
                 if (s.game) s.game->Release(), s.game = nullptr;
                 s.relit = false;
@@ -2667,6 +2680,27 @@ void Frame(IDirect3DDevice9* dev) {
             g_why.partial++;
         s.partKey = ok ? partKey : 0;
         s.scaled = ok && s.scale;
+        // (sharper floors) the physical rooms' floor at twice the map's size, read instead of the copy while it holds any room's
+        s.hiOk = false;
+        if (ok && !s.mgr && s.m == 1 && OutdoorDelta::HiFloors() && OutdoorDelta::RoomLampPhysical()) {
+            const int w2 = 2 * s.map.w, h2 = 2 * s.map.h;
+            bool fresh = false;
+            const auto make = [&](IDirect3DTexture9*& t) {
+                if (t) return true;
+                fresh = true;
+                if (SUCCEEDED(dev->CreateTexture(w2, h2, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &t, nullptr)) && t) return true;
+                t = nullptr;
+                return false;
+            };
+            if (make(s.hi) && make(s.hiOver)) {
+                if (fresh)
+                    LOG_INFO(std::format("[RtOutdoorLamps] Story {} floor map: sharper copy {}x{} ({:.1f} MB with its overlay)", s.story, w2, h2,
+                                         2.0 * w2 * h2 * 4 / (1024.0 * 1024.0)));
+                s.hiOk = GpuRoomLamps::ComposeHi(dev, *g_eng, rns[s.story].mgr, s.cls, s.m, s.game, s.copy, s.map.w, s.map.h, s.hiOver, fresh || !partial, s.hi, p);
+            } else
+                ReleaseHi(s);
+        } else if (s.hi && !OutdoorDelta::HiFloors())
+            ReleaseHi(s);
         if (!ok) {
             s.relit = false;
             failNote = std::format("story {} {}: {}", s.story, kMapName[s.m], err);
@@ -3152,13 +3186,13 @@ void NoteUnlock(const void* texture) {
 IDirect3DTexture9* ScaleOf(const void* texture) {
     if (!texture || !g_on.load(std::memory_order_relaxed)) return nullptr;
     for (const auto& s : g_slots)
-        if (s->copy == texture) return s->relit && s->scaled ? s->scale : nullptr;
+        if (s->copy == texture || (s->hi && s->hi == texture)) return s->relit && s->scaled ? s->scale : nullptr;
     return nullptr;
 }
 const void* GameMapOf(const void* texture) {
     if (!texture || !g_on.load(std::memory_order_relaxed)) return texture;
     for (const auto& s : g_slots)
-        if (s->copy == texture) return s->game;
+        if (s->copy == texture || (s->hi && s->hi == texture)) return s->game;
     return texture;
 }
 

@@ -2336,6 +2336,8 @@ const I18n::Pair kPairs[] = {
     {"Replica: each solve's lamp shares. Physical: lamps with shadows", "复制：每次计算中各灯的份额。物理：带阴影的灯光"},
     {"Replica", "复制"},
     {"Physical", "物理"},
+    {"Sharper floor light", "更清晰的地面光照"},
+    {"Floors drawn at twice the detail: light through doors and windows without steps", "地面以两倍精度绘制：从门窗透出的光不再有台阶"},
     {"Tester", "测试"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "在同一场景中逐一关闭再开启每个移植部分，比较其帧时间和效果。更改立即生效并会保存。"},
     {"Frame time", "帧时间"},

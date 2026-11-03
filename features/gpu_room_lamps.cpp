@@ -85,6 +85,8 @@ struct Entry {
     // restores), what it is drawn from now (Sig) and what its last draw into the copy was drawn from
     std::vector<uint32_t> writes;
     uint64_t drawKey = 0, drawnKey = 0;
+    // (sharper floors, ComposeHi) the draw its sub-texels in the overlay were last drawn from (0: none there)
+    uint64_t hiKey = 0;
 };
 // (ComposeOver) a rooms-only copy's entries as last drawn in full: their set, and whether no two of them write the same place
 struct CopyState {
@@ -372,14 +374,15 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                 uint32_t lotGen = 0;
                 const std::shared_ptr<const RtLampProxy::Lot> lot = space && d.physical ? RtOutdoorLamps::KeptLot(lotGen) : nullptr;
                 if (space && d.physical)
-                    for (RtLampGpu::TexelVertex& v : d.phys) {
-                        float p[3], n[3];
-                        for (int k = 0; k < 3; k++)
-                            p[k] = v.base[0] * e.xf[k] + v.base[1] * e.xf[4 + k] + v.base[2] * e.xf[8 + k] + e.xf[12 + k],
-                            n[k] = v.n[0] * e.xf[k] + v.n[1] * e.xf[4 + k] + v.n[2] * e.xf[8 + k];
-                        std::memcpy(v.p, p, sizeof p), std::memcpy(v.n, n, sizeof n), std::memcpy(v.mask, p, sizeof p);
-                        if (lot) RtLampProxy::IntoRoom(*lot, d.story, r.id, v.mask);
-                    }
+                    for (auto* pts : {&d.phys, &d.physHi})
+                        for (RtLampGpu::TexelVertex& v : *pts) {
+                            float p[3], n[3];
+                            for (int k = 0; k < 3; k++)
+                                p[k] = v.base[0] * e.xf[k] + v.base[1] * e.xf[4 + k] + v.base[2] * e.xf[8 + k] + e.xf[12 + k],
+                                n[k] = v.n[0] * e.xf[k] + v.n[1] * e.xf[4 + k] + v.n[2] * e.xf[8 + k];
+                            std::memcpy(v.p, p, sizeof p), std::memcpy(v.n, n, sizeof n), std::memcpy(v.mask, p, sizeof p);
+                            if (lot) RtLampProxy::IntoRoom(*lot, d.story, r.id, v.mask);
+                        }
                 if (!space) {
                     if (LogAllowed())
                         LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: physical: the lot's space could not be read (left as the game's)", d.story, r.id, cls,
@@ -601,8 +604,9 @@ namespace {
 // tile per lamp with a law (rendered unless the atlas holds it), the room's furniture blockers, one room row (mult x norm scale,
 // the reach share where the solve applies it: Params::reachOn x the lamp's flag x a wall texel). More lamps than the atlas's
 // rows: several passes over the same sum. False (err) leaves the game's map
+// hiOut (sharper floors): the entry's sub-texels into that 2w x 2h overlay instead (RelightKeptPhysHi)
 bool RelightPhys(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, Entry& e, const RtLampGpu::Params& base, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h,
-                 std::string& err) {
+                 std::string& err, IDirect3DTexture9* hiOut = nullptr) {
     std::vector<RtLampModel::Lamp> lamps;
     std::vector<std::array<float, 3>> world;
     std::vector<uintptr_t> lights;
@@ -619,6 +623,9 @@ bool RelightPhys(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, Entry& e, const 
         std::vector<RtLampGpu::Engine::PhysRoom> room(1);
         room[0].header = e.blkHeader;
         for (int i = 0; i < gn; i++) room[0].lamp.push_back({lamps[g0 + i].mult, reach[g0 + i], 0.0f});
+        if (hiOut)
+            return eng.RelightKeptPhysHi(dev, e.gpu, lamps.data() + g0, tiles, reinterpret_cast<const float (*)[3]>(world.data() + g0), gn, room, p, hiOut, 2 * w, 2 * h, err,
+                                         g0 == 0, last, e.ambScale);
         return eng.RelightKeptPhys(dev, e.gpu, lamps.data() + g0, tiles, reinterpret_cast<const float (*)[3]>(world.data() + g0), gn, room, p, game, out, w, h, err, g0 == 0,
                                    last, e.ambScale);
     });
@@ -757,6 +764,32 @@ bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
     if (!cs.valid || cs.set != now) cs.disjoint = PhysLampPick::WritesDisjoint(w, h, writes);
     cs.set = now, cs.valid = drewAll;
     return true;
+}
+
+bool ComposeHi(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* copy, int w, int h,
+               IDirect3DTexture9* over, bool redrawAll, IDirect3DTexture9* hi, const RtLampGpu::Params& p) {
+    std::string err;
+    const auto mine = [&](const Entry& e) { return e.ok && e.physical && e.mgr == mgr && e.cls == cls && e.m == m && e.gpu.physHi && e.drawnKey; };
+    // each room drawn into the copy since its sub-texels were: drawn again into the overlay (all of them after a full relight)
+    for (auto& [key, e] : g_entries) {
+        if (!mine(e)) continue;
+        if (!redrawAll && e.hiKey == e.drawnKey) continue;
+        e.hiKey = 0;
+        if (!RelightPhys(dev, eng, e, p, game, copy, w, h, err, over)) {
+            if (LogAllowed()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: its sharper floor not drawn ({})", e.story, e.id, e.cls, kMapName[m], err));
+            continue;
+        }
+        e.hiKey = e.drawnKey;
+    }
+    // the copy at twice its size, each room's sub-texels over it
+    if (!eng.Upsample(dev, copy, hi, 2 * w, 2 * h, err)) return false;
+    int rooms = 0; // (none: the copy is read as before)
+    for (auto& [key, e] : g_entries)
+        if (mine(e) && e.hiKey == e.drawnKey) {
+            if (!eng.CopyPlaces(dev, e.gpu, over, hi, 2 * w, 2 * h, err)) return false;
+            rooms++;
+        }
+    return rooms > 0;
 }
 
 void ReleaseAll() {

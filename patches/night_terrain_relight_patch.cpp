@@ -202,6 +202,7 @@ bool g_outdoorDeltaCheck = false; // the delta's self-check (developer)
 bool g_roomLampProbe = false;     // the room lamp probe against the GPU's law (developer)
 bool g_gpuRoomLampsCapture = false; // GPU room lamps stage 1: the active lot's room solves kept for the GPU (developer)
 int g_roomLampModel = 0;            // (physical indoor lamps) 0 replica, 1 physical: what the kept rooms keep (OutdoorDelta::SetRoomLampPhysical; developer)
+bool g_roomLampSharpFloors = false; // (physical indoor lamps) the rooms' floor maps drawn at twice their size (OutdoorDelta::SetHiFloors; developer)
 float g_sidewalkClear = 0.5f;
 float g_lampTint = 1.0f;
 bool g_fenceGround = true;
@@ -2442,6 +2443,10 @@ class NightTerrainRelightPatch : public ApexPatch {
                 "Developer, with gpuRoomLampsCapture and Lamp lighting instant: replica keeps each lamp's share per texel as the room's solve gave it; "
                 "physical keeps the light without the lot's lamps and the room's tests, for the GPU to draw each lamp with its shadows. A change sends the active lot's rooms to their solve.",
                 {"replica", "physical"});
+        if (!kPublicBuild) // developer only
+            RegisterBoolSetting(&g_roomLampSharpFloors, "roomLampSharpFloors", false,
+                "Developer, with the physical model: the kept rooms' floor maps are drawn at twice their size, each sub-texel lit from the "
+                "lamps at its own place, so light through doors and windows has no 25 cm steps (2 render targets at twice a floor map's size per story).");
         if (!kPublicBuild) // developer A/B only; the public build always has soft lot edges
             RegisterBoolSetting(&g_softLotEdges, "bordaSuaveLote", true,
                 "Developer: within 3 m of a lot edge, lot grass fades its lamp light to the ground light the world grass shows "
@@ -2911,8 +2916,10 @@ class NightTerrainRelightPatch : public ApexPatch {
                     }
                 }
                 const bool keep = rtOn && kDevToolsBuild && !kPublicBuild && g_gpuRoomLampsCapture;
-                const bool modelChanged = keep && (g_roomLampModel == 1) != OutdoorDelta::RoomLampPhysical();
+                const bool sharp = g_roomLampModel == 1 && g_roomLampSharpFloors;
+                const bool modelChanged = keep && ((g_roomLampModel == 1) != OutdoorDelta::RoomLampPhysical() || sharp != OutdoorDelta::HiFloors());
                 OutdoorDelta::SetRoomLampPhysical(g_roomLampModel == 1); // (before the capture: a solve kept next takes it)
+                OutdoorDelta::SetHiFloors(sharp);
                 if (keep != OutdoorDelta::RoomLampCapture() || modelChanged) {
                     OutdoorDelta::SetRoomLampCapture(keep);
                     if (keep) { // every room of the active lot is solved once, so each solve is kept (a model change: kept again)
@@ -3183,6 +3190,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_roomLampProbe = false;
         g_gpuRoomLampsCapture = false;
         g_roomLampModel = 0;
+        g_roomLampSharpFloors = false;
         g_lampTint = 1.0f;
         g_lotTintOwn = false;
         g_lotLampTint = 1.0f;
@@ -3721,6 +3729,9 @@ class NightTerrainRelightPatch : public ApexPatch {
             static const char* const kModels[] = {"Replica", "Physical"};
             if (ApexUi::SegmentedRow("Indoor lamp model", "Replica: each solve's lamp shares. Physical: lamps with shadows",
                                      "##RoomLampModel", &g_roomLampModel, kModels, 2, nullptr, nullptr, 0))
+                NotifySettingChanged();
+            if (g_roomLampModel == 1 && ApexUi::SwitchRow("Sharper floor light", &g_roomLampSharpFloors,
+                                                          "Floors drawn at twice the detail: light through doors and windows without steps", false))
                 NotifySettingChanged();
         }
         if (ApexUi::Checkbox("Smooth the ground light maps on the GPU (A/B: off = CPU worker)", &g_smoothMapsGpu)) NotifySettingChanged();

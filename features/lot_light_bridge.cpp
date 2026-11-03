@@ -7045,8 +7045,8 @@ std::map<int, std::unordered_map<IDirect3DPixelShader9*, PatchedPs>> g_indoorPs;
 std::atomic<bool> g_indoorSmooth{true};
 std::atomic<int> g_basisSmoothDrawn{0}, g_indoorDrawn{0};
 
-// (w, h, 1/w, 1/h) of a bound map, for the smooth reads' size constant; false when it is not a 2D texture
-bool MapSize(IDirect3DBaseTexture9* t, float out[4]) {
+// (w, h, 1/w, 1/h) of a bound map as it is; false when it is not a 2D texture
+bool MapSizeReal(IDirect3DBaseTexture9* t, float out[4]) {
     D3DSURFACE_DESC d{};
     if (!t || t->GetType() != D3DRTYPE_TEXTURE || FAILED(static_cast<IDirect3DTexture9*>(t)->GetLevelDesc(0, &d)) || !d.Width || !d.Height) return false;
     out[0] = static_cast<float>(d.Width);
@@ -7054,6 +7054,13 @@ bool MapSize(IDirect3DBaseTexture9* t, float out[4]) {
     out[2] = 1.0f / out[0];
     out[3] = 1.0f / out[1];
     return true;
+}
+// (w, h, 1/w, 1/h) of a bound map, for the smooth reads' size constant: a relit copy's the game map's (a sharper floor copy is
+// twice its size; its tiles, wall masks and uv scales stay the game map's: only the room map read's B-spline steps take its own
+// size, DrawWithRoomMap); false when it is not a 2D texture
+bool MapSize(IDirect3DBaseTexture9* t, float out[4]) {
+    auto* const g = static_cast<IDirect3DBaseTexture9*>(const_cast<void*>(RtOutdoorLamps::GameMapOf(t)));
+    return MapSizeReal(g && g != t ? g : t, out);
 }
 
 // ---- Smooth light maps (2.12.4, docs/features/night-lighting/room-map-smoothing.md): the room light map read of the
@@ -7150,6 +7157,7 @@ bool RoomMapConsts(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& p, 
     IDirect3DBaseTexture9* const map = D3D9Hooks::BoundTexture(dev, p.sampler);
     bool haveSize = false;
     if (map) haveSize = MapSizeThisFrame(map, size);
+    if (haveSize && floor) haveSize = MapSizeReal(map, size); // (a sharper floor copy: its B-spline steps at its own texels)
     if (!haveSize) return false;
     float S = 65536.0f; // floors: one block
     if (wall) {

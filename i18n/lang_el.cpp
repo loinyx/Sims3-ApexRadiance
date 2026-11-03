@@ -2336,6 +2336,8 @@ const I18n::Pair kPairs[] = {
     {"Replica: each solve's lamp shares. Physical: lamps with shadows", "Αντίγραφο: τα μερίδια λαμπτήρων κάθε υπολογισμού. Φυσικό: λαμπτήρες με σκιές"},
     {"Replica", "Αντίγραφο"},
     {"Physical", "Φυσικό"},
+    {"Sharper floor light", "Πιο καθαρό φως στο πάτωμα"},
+    {"Floors drawn at twice the detail: light through doors and windows without steps", "Τα πατώματα σχεδιάζονται με διπλή λεπτομέρεια: φως από πόρτες και παράθυρα χωρίς σκαλοπάτια"},
     {"Tester", "Δοκιμές"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Απενεργοποίησε και ενεργοποίησε κάθε μεταφερμένο μέρος στην ίδια σκηνή για να συγκρίνεις τον χρόνο καρέ και την εμφάνιση. Οι αλλαγές ισχύουν αμέσως και αποθηκεύονται."},
     {"Frame time", "Χρόνος καρέ"},

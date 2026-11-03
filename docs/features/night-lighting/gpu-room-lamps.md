@@ -360,6 +360,17 @@ lamp's position, not on its colour or intensity.
    `tools/scene_replay` replays every recorded solve through the current GPU term against the game's parts, and
    `tools/apex_health.py` sums up a log; the game warns (`[Health]`) when over 10% of the physical edits in 10 s are
    refused. See [dev-tools-scene-replay.md](../../validation/dev-tools-scene-replay.md).
+30. Sharper floors (03/11, developer, off by default): a class-2 floor map holds 4 texels a metre, so the light of a lamp
+   through a door or a window reached the floor beyond in 25 cm steps (the shadow tile, about 2 cm a texel at 3 m, is not the
+   limit). With *Sharper floor light* on, `BuildKeptMap` adds each physical floor texel's 4 sub-texels: phys points at their
+   own places on the floor (`PhysLampPick::SubTexelPos`: a step toward a same-plane neighbour the solve wrote, never across a
+   wall or a step) and compose points at their places of a map twice the size. Real-time outdoor lamps keeps two more render
+   targets per floor map at twice its size: an overlay the rooms' sub-texels are drawn into when their draw changes
+   (`Engine::RelightKeptPhysHi`), and the map the draws read instead of the copy (`GpuRoomLamps::ComposeHi`: the copy
+   upsampled, the rooms' sub-texels over it), bound only while it holds a room's. `MapSize` gives a relit copy's game map
+   size to every reader (wall masks, tiles, uv scales); only the floor's B-spline read takes the sharper map's own size.
+   A restore keeps the game's texel through the upsample. Cost: 4 phys points per floor texel in a floor map's relight, and
+   2 x (2w x 2h x 4) bytes of render targets per floor map (2 MB for a 512 x 256 map).
 
 ## Settings
 
@@ -367,6 +378,7 @@ lamp's position, not on its colour or intensity.
 |---|---|---|---|---|---|
 | Keep indoor lamps for GPU | `gpuRoomLampsCapture` | bool | off | | Developer only, with Lamp lighting: Instant. Keeps each room solve of the active lot and draws its lamps on the GPU; colour, intensity and switch edits of lamps drawn in every room listing them solve no room at once (the directional maps objects read are written again at the end of the room update) (their rooms are solved 2 s after the last edit); with the probe on, logs the self-checks |
 | Indoor lamp model | `roomLampModel` | enum | replica | replica, physical | Developer only, shown with Keep indoor lamps for GPU on. Replica: everything above. Physical: see 16 to 25; rooms > 0 and room 0 drawn from the lot lamps' laws by reach; value, switch and move edits and new lamps solve no room (a switch, an intensity change, a move into another room or a new lamp settles its rooms 2 s later; a move into room 0 and a deleted lamp take the game's solves). A change drops the kept rooms and sends the active lot's rooms to their solve |
+| Sharper floor light | `roomLampSharpFloors` | bool | off | | Developer only, shown with the physical model. Floor maps drawn at twice their size (30); a change drops the kept rooms and sends the active lot's rooms to their solve |
 
 ## Limitations
 

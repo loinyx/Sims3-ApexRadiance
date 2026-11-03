@@ -41,6 +41,11 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m);
 // game's map and draws in full)
 bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h,
                  const RtLampGpu::Params& p, bool partial = false);
+// (sharper floors, after ComposeOver into copy) hi (2w x 2h) = copy upsampled, each physical room's floor sub-texels over it from
+// over (2w x 2h, kept between relights: a room's sub-texels are drawn into it again when its draw changed, all of them when
+// redrawAll). False: hi is not complete or holds no room's (the caller shows the copy)
+bool ComposeHi(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* copy, int w, int h,
+               IDirect3DTexture9* over, bool redrawAll, IDirect3DTexture9* hi, const RtLampGpu::Params& p);
 // A device reset or Real-time outdoor lamps dropping its maps: every GPU buffer goes (made again on use)
 void ReleaseAll();
 // (physical indoor lamps; render thread, between the engine's Begin and End) lamps[i] (lot space) of lights[i] in passes of the

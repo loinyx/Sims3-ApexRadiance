@@ -1088,9 +1088,9 @@ bool Engine::ReadFloat4(IDirect3DDevice9* dev, IDirect3DTexture9* t, int w, int 
 
 // ---- GPU room lamps ----
 void KeptMapGpu::Release() {
-    for (IDirect3DVertexBuffer9** v : {&parts, &texels, &walls, &copies, &restores, &phys}) Rel(*v);
+    for (IDirect3DVertexBuffer9** v : {&parts, &texels, &walls, &copies, &restores, &phys, &physHi, &texelsHi, &placesHi}) Rel(*v);
     Rel(layout);
-    nTexels = nWalls = nCopies = nRestores = nPhys = 0;
+    nTexels = nWalls = nCopies = nRestores = nPhys = nPhysHi = nTexelsHi = nPlacesHi = 0;
     bytes = 0;
 }
 bool Engine::UploadKept(IDirect3DDevice9* dev, const KeptMapData& d, KeptMapGpu& g) {
@@ -1104,7 +1104,8 @@ bool Engine::UploadKept(IDirect3DDevice9* dev, const KeptMapData& d, KeptMapGpu&
     };
     UINT parts = 0;
     bool ok = vb(d.parts, g.parts, parts) && vb(d.texels, g.texels, g.nTexels) && vb(d.wallTexels, g.walls, g.nWalls) && vb(d.copies, g.copies, g.nCopies) &&
-              vb(d.restores, g.restores, g.nRestores) && vb(d.phys, g.phys, g.nPhys);
+              vb(d.restores, g.restores, g.nRestores) && vb(d.phys, g.phys, g.nPhys) && vb(d.physHi, g.physHi, g.nPhysHi) &&
+              vb(d.texelsHi, g.texelsHi, g.nTexelsHi) && vb(d.placesHi, g.placesHi, g.nPlacesHi);
     if (ok && !d.layout.empty()) {
         ok = d.layout.size() == static_cast<size_t>(d.layoutW) * d.layoutH && MakePreblur(dev, d.layoutW, d.layoutH, d.layout.data(), &g.layout, true);
         g.bytes += d.layout.size() * 4;
@@ -1223,6 +1224,63 @@ bool Engine::RelightKeptPhys(IDirect3DDevice9* dev, const KeptMapGpu& k, const R
     m.w = k.accW, m.h = k.accH, m.vb = k.phys, m.count = k.nPhys;
     if (!PhysSum(dev, m, lamps, tiles, world, n, rooms, p, first, err, false)) return false;
     return !compose || ComposeKept(dev, k, game, out, w, h, err, amb);
+}
+// (sharper floors) RelightKeptPhys over k's sub-texels, composed into a 2w x 2h map (rt_lamp_gpu.h)
+bool Engine::RelightKeptPhysHi(IDirect3DDevice9* dev, const KeptMapGpu& k, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,
+                               const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DTexture9* out, int w2, int h2, std::string& err, bool first, bool compose,
+                               const float* amb) {
+    if (!out || !k.physHi || !k.texelsHi) return err = "no sub-texels", false;
+    if (!PhysReady()) return err = "the physical shaders are missing (not in the shader cache, no compiler)", false;
+    if (!ready_ || w2 <= 0 || h2 <= 0 || k.accW <= 0 || k.accH <= 0) return err = "nothing to relight", false;
+    if (!tiles_ || !blk_) return err = "the kept shadow atlas or the blocker table is missing", false;
+    if (rooms.empty()) return err = "no room table", false;
+    if (!EnsureScratch(dev, 2 * k.accW, 2 * k.accH, err)) return false;
+    if (!EnsureZeros(dev, std::max(k.nPhysHi, k.nTexelsHi))) return err = "the zero stream could not be created", false;
+    Map m;
+    m.w = 2 * k.accW, m.h = 2 * k.accH, m.vb = k.physHi, m.count = k.nPhysHi;
+    if (!PhysSum(dev, m, lamps, tiles, world, n, rooms, p, first, err, false)) return false;
+    if (!compose) return true;
+    KeptMapGpu v; // (a view of k's sub-texels for ComposeKept's step 2; not released)
+    v.texels = k.texelsHi, v.nTexels = k.nTexelsHi;
+    return ComposeKept(dev, v, nullptr, out, w2, h2, err, amb);
+}
+bool Engine::Upsample(IDirect3DDevice9* dev, IDirect3DTexture9* src, IDirect3DTexture9* dst, int w2, int h2, std::string& err) {
+    if (!ready_ || !src || !dst || w2 <= 0 || h2 <= 0) return err = "nothing to upsample", false;
+    c_.SetDepthStencil(dev, nullptr);
+    PassStates(dev);
+    PointSampler(dev, 0);
+    dev->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+    dev->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+    c_.SetVertexShader(dev, nullptr);
+    if (!Target(dev, dst, w2, h2)) return err = "the sharper map could not be targeted", false;
+    c_.SetPixelShader(dev, ps_[kCopyPs]);
+    c_.SetTexture(dev, 0, src);
+    Quad(dev, w2, h2);
+    c_.SetTexture(dev, 0, nullptr);
+    PointSampler(dev, 0);
+    return true;
+}
+bool Engine::CopyPlaces(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DTexture9* over, IDirect3DTexture9* dst, int w2, int h2, std::string& err) {
+    if (!k.placesHi || !k.nPlacesHi) return true;
+    if (!ready_ || !over || !dst || w2 <= 0 || h2 <= 0) return err = "nothing to copy", false;
+    if (!EnsureZeros(dev, k.nPlacesHi)) return err = "the zero stream could not be created", false;
+    c_.SetDepthStencil(dev, nullptr);
+    PassStates(dev);
+    PointSampler(dev, 0);
+    if (!Target(dev, dst, w2, h2)) return err = "the sharper map could not be targeted", false;
+    const float inv[4] = {1.0f / static_cast<float>(w2), 1.0f / static_cast<float>(h2), 0, 0};
+    c_.SetPsConst(dev, 0, inv, 1);
+    c_.SetPixelShader(dev, ps_[kCopyAtPs]);
+    c_.SetTexture(dev, 0, over);
+    dev->SetVertexDeclaration(texelDecl_);
+    dev->SetStreamSource(0, k.placesHi, 0, sizeof(TexelVertex));
+    dev->SetStreamSource(1, zeros_, 0, sizeof(TexelDyn));
+    TexelTarget(dev, w2, h2);
+    const HRESULT hr = c_.DrawPrimitive(dev, D3DPT_POINTLIST, 0, k.nPlacesHi);
+    dev->SetStreamSource(1, nullptr, 0, 0);
+    c_.SetVertexShader(dev, nullptr);
+    c_.SetTexture(dev, 0, nullptr);
+    return SUCCEEDED(hr) ? true : (err = "the sharper places' draw failed", false);
 }
 // The lamps at m's phys points, kPhysBatch a draw (the room table's lamp columns are the batch's lamps; x: AccPhysXPS too)
 bool Engine::PhysSum(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,

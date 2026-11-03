@@ -2336,6 +2336,8 @@ const I18n::Pair kPairs[] = {
     {"Replica: each solve's lamp shares. Physical: lamps with shadows", "Másolat: minden számítás lámparészei. Fizikai: árnyékos lámpák"},
     {"Replica", "Másolat"},
     {"Physical", "Fizikai"},
+    {"Sharper floor light", "Élesebb padlófény"},
+    {"Floors drawn at twice the detail: light through doors and windows without steps", "A padló kétszeres részletességgel rajzolva: fény az ajtókon és ablakokon lépcsők nélkül"},
     {"Tester", "Tesztek"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Kapcsold ki és be az egyes átvett részeket ugyanabban a jelenetben, és hasonlítsd össze a képkockaidőt és a látványt. A változások azonnal érvényesek, és mentődnek."},
     {"Frame time", "Képkockaidő"},

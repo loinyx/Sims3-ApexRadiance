@@ -2336,6 +2336,8 @@ const I18n::Pair kPairs[] = {
     {"Replica: each solve's lamp shares. Physical: lamps with shadows", "Replika: podíly lamp z každého výpočtu. Fyzikální: lampy se stíny"},
     {"Replica", "Replika"},
     {"Physical", "Fyzikální"},
+    {"Sharper floor light", "Ostřejší světlo na podlaze"},
+    {"Floors drawn at twice the detail: light through doors and windows without steps", "Podlahy vykreslené s dvojnásobným detailem: světlo dveřmi a okny bez schodů"},
     {"Tester", "Testy"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Vypínej a zapínej každou přenesenou část ve stejné scéně a porovnej dobu snímku a vzhled. Změny platí hned a ukládají se."},
     {"Frame time", "Doba snímku"},

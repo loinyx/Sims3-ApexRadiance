@@ -1319,6 +1319,23 @@ void PhysPickChecks() {
               "physical pick: a room with no light buffer reads as an empty list; broken or too long bounds stay unreadable");
     }
     {
+        // a floor texel at (1, 2, 1) with 0.25 m steps; samples: position at 0..2, normal at 4..6
+        const float s[8] = {1, 2, 1, 0, 0, 1, 0, 0}, r[8] = {1.25f, 2, 1, 0, 0, 1, 0, 0}, d[8] = {1, 2, 1.25f, 0, 0, 1, 0, 0};
+        const float wall[8] = {0.75f, 2.2f, 1, 0, 1, 0, 0, 0}, step[8] = {1, 2, 0.75f, 0, 0, 1, 0, 0}, far[8] = {1, 2, 1.75f, 0, 0, 1, 0, 0};
+        float o[3];
+        const auto near = [&](float x, float y, float z) { return std::fabs(o[0] - x) < 1e-5f && std::fabs(o[1] - y) < 1e-5f && std::fabs(o[2] - z) < 1e-5f; };
+        const float* all[4] = {r, nullptr, d, nullptr};
+        PhysLampPick::SubTexelPos(s, all, 0.25f, -0.25f, o);
+        bool ok = near(1.0625f, 2, 0.9375f);
+        const float* edge[4] = {nullptr, wall, nullptr, step}; // (left is a wall's texel: another plane; up is on the plane: its step taken back)
+        PhysLampPick::SubTexelPos(s, edge, 0.25f, 0.25f, o);
+        ok = ok && near(1, 2, 1.0625f);
+        const float* none[4] = {nullptr, nullptr, far, nullptr}; // (0.75 m away: not a neighbour)
+        PhysLampPick::SubTexelPos(s, none, -0.25f, 0.25f, o);
+        ok = ok && near(1, 2, 1);
+        Check(ok, "sharper floors: a sub-texel steps toward its same-plane neighbours, takes an edge's step from the other side, never a wall's or a far texel's");
+    }
+    {
         const auto at = [](uint32_t x, uint32_t y) { return y << 16 | x; };
         const std::vector<uint32_t> a = {at(0, 0), at(1, 0), at(1, 0)}, b = {at(2, 0), at(0, 1)}, c = {at(1, 0)}, past = {at(9, 9), at(0, 1)}, far = {at(9, 9)};
         Check(PhysLampPick::WritesDisjoint(4, 4, {&a, &b}) && !PhysLampPick::WritesDisjoint(4, 4, {&a, &b, &c}) &&

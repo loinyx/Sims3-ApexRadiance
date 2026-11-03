@@ -2336,6 +2336,8 @@ const I18n::Pair kPairs[] = {
     {"Replica: each solve's lamp shares. Physical: lamps with shadows", "Replica: la parte di ogni lampada di ogni calcolo. Fisico: lampade con ombre"},
     {"Replica", "Replica"},
     {"Physical", "Fisico"},
+    {"Sharper floor light", "Luce del pavimento più nitida"},
+    {"Floors drawn at twice the detail: light through doors and windows without steps", "Pavimenti disegnati con il doppio del dettaglio: luce da porte e finestre senza gradini"},
     {"Tester", "Test"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Spegni e riaccendi ogni parte portata nella stessa scena per confrontarne il tempo per fotogramma e l'aspetto. Le modifiche si applicano subito e vengono salvate."},
     {"Frame time", "Tempo per fotogramma"},

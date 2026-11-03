@@ -2336,6 +2336,8 @@ const I18n::Pair kPairs[] = {
     {"Replica: each solve's lamp shares. Physical: lamps with shadows", "Replica: het lampaandeel van elke berekening. Fysiek: lampen met schaduwen"},
     {"Replica", "Replica"},
     {"Physical", "Fysiek"},
+    {"Sharper floor light", "Scherper vloerlicht"},
+    {"Floors drawn at twice the detail: light through doors and windows without steps", "Vloeren met dubbele detail getekend: licht door deuren en ramen zonder trapjes"},
     {"Tester", "Tests"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Zet elk overgezet onderdeel in dezelfde scène uit en aan om de frametijd en het uiterlijk te vergelijken. Wijzigingen gelden meteen en worden opgeslagen."},
     {"Frame time", "Frametijd"},

@@ -249,6 +249,8 @@ const I18n::Entry kDevBuildExtra[] = {
 {"Replica: each solve's lamp shares. Physical: lamps with shadows", "Réplica: a parte de cada lâmpada em cada cálculo. Física: lâmpadas com sombras", "Réplica: la parte de cada lámpara en cada cálculo. Física: lámparas con sombras", "Réplique : la part de chaque lampe de chaque calcul. Physique : lampes avec ombres"},
 {"Replica", "Réplica", "Réplica", "Réplique"},
 {"Physical", "Física", "Física", "Physique"},
+{"Sharper floor light", "Luz do chão mais nítida", "Luz del suelo más nítida", "Lumière du sol plus nette"},
+{"Floors drawn at twice the detail: light through doors and windows without steps", "Chão desenhado com o dobro de detalhe: luz pelas portas e janelas sem degraus", "Suelo dibujado con el doble de detalle: luz por puertas y ventanas sin escalones", "Sol dessiné avec deux fois plus de détail : lumière par les portes et fenêtres sans marches"},
 {"Tester", "Testes", "Pruebas", "Tests"},
 {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Desligue e ligue cada parte portada na mesma cena para comparar o tempo de quadro e o visual. As mudanças valem na hora e são salvas.", "Apaga y enciende cada parte portada en la misma escena para comparar su tiempo de fotograma y su aspecto. Los cambios se aplican al instante y se guardan.", "Désactivez puis réactivez chaque partie portée dans la même scène pour comparer son temps d’image et son rendu. Les changements s’appliquent aussitôt et sont enregistrés."},
 {"Frame time", "Tempo de quadro", "Tiempo de fotograma", "Temps d’image"},

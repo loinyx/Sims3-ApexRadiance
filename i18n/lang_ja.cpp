@@ -2336,6 +2336,8 @@ const I18n::Pair kPairs[] = {
     {"Replica: each solve's lamp shares. Physical: lamps with shadows", "レプリカ：各計算のランプの寄与。物理：影付きのランプ"},
     {"Replica", "レプリカ"},
     {"Physical", "物理"},
+    {"Sharper floor light", "床の光をより鮮明に"},
+    {"Floors drawn at twice the detail: light through doors and windows without steps", "床を2倍の精細さで描画：ドアや窓からの光に段差が出ません"},
     {"Tester", "テスト"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "移植した各部分を同じシーンでオフ・オンにして、フレーム時間と見た目を比べます。変更はすぐに適用され、保存されます。"},
     {"Frame time", "フレーム時間"},
