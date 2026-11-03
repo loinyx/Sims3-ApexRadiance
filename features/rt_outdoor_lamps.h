@@ -78,6 +78,7 @@ bool WorldLaw(uintptr_t light, uint64_t lot, bool reachOn, GpuLampLaw::Lamp& out
 bool LotXform(uintptr_t mgr, float out[16]);
 // Render thread: the generation of the occluders the kept shadow tiles use (physical indoor lamps' open tops), 0 none
 uint32_t KeptMeshGen();
+bool RoomOpenAbove(int story, int room); // (render thread) the physical occluders opened that room's ceiling to the story above
 // Any thread (physical indoor lamps, stage 5): the lot whose open-top build (RtLampProxy::Build(lot, mesh, true)) is the kept
 // shadow tiles' occluders now, and its generation; null while none is uploaded
 std::shared_ptr<const RtLampProxy::Lot> KeptLot(uint32_t& gen);

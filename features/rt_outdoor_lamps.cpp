@@ -620,6 +620,7 @@ RtLampProxy::Mesh g_mesh;
 uint32_t g_meshGen = 0;
 std::shared_ptr<const Proxy> g_openUsed; // (physical indoor lamps) the proxy whose open-top build is the kept atlas's occluders
 std::atomic<uint32_t> g_openGen{0};      // its generation (0: none uploaded)
+std::vector<std::pair<int, int>> g_openRooms; // (render thread) the uploaded open-top build's openRooms (RoomOpenAbove)
 DWORD g_openFailAt = 0;                  // (its last upload failed then)
 uint64_t g_atlasKey = 0;
 uint64_t g_lastParams = 0;
@@ -1255,6 +1256,7 @@ bool LotXform(uintptr_t mgr, float out[16]) {
     return true;
 }
 uint32_t KeptMeshGen() { return g_openGen.load(std::memory_order_relaxed); }
+bool RoomOpenAbove(int story, int room) { return std::binary_search(g_openRooms.begin(), g_openRooms.end(), std::make_pair(story, room)); }
 std::shared_ptr<const RtLampProxy::Lot> KeptLot(uint32_t& gen) {
     gen = g_openGen.load(std::memory_order_relaxed);
     std::lock_guard<std::mutex> lk(g_proxyMx);
@@ -1543,6 +1545,7 @@ void Frame(IDirect3DDevice9* dev) {
         const bool up = g_eng->SetProxy(dev, open, err, true);
         g_openUsed = up ? proxy : nullptr, g_openFailAt = up ? 0 : GetTickCount() | 1;
         g_openGen.store(up ? proxy->gen : 0);
+        if (up) g_openRooms = std::move(open.openRooms);
         LOG_INFO(up ? std::format("[RtOutdoorLamps] Physical indoor lamps' occluders: {} triangles with open tops ({} quadrants opened), generation {}", open.tris.size(),
                                  open.openTops, proxy->gen)
                     : "[RtOutdoorLamps] Physical indoor lamps' occluders could not be uploaded: " + err);
@@ -2383,7 +2386,7 @@ void Frame(IDirect3DDevice9* dev) {
                 }
                 if (!now->second.read || now->second.drawn) continue;
                 cand.push_back(L.light);
-                candRow.push_back({PhysLampPick::NormKFresh(L.story, L.home, L.homeNorm, s.story, 0, 1.0f, true, L.homeOutdoor), PhysLampPick::ReachFresh(L.homeOutdoor, true) ? 1.0f : 0.0f,
+                candRow.push_back({PhysLampPick::NormKFresh(L.story, L.home, L.homeNorm, s.story, 0, 1.0f, true, L.homeOutdoor), PhysLampPick::ReachFresh(L.homeOutdoor, true, L.story + 1 == s.story && RoomOpenAbove(L.story, L.home)) ? 1.0f : 0.0f,
                                    PhysLampPick::ExitFresh(s.story, L.story, L.home, L.homeOutdoor) ? 1.0f : 0.0f});
             }
             PhysLampPick::Box box;

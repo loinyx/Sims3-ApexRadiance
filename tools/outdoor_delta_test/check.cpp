@@ -1084,6 +1084,12 @@ void ProxyOpenTopsChecks() {
         openOk &= roofsOver(after, r) == 4 * tilesOf(r) - (isOpen ? bareQuads(r) : 0);
     }
     Check(openOk && after.openTops == quads && quads > 0, "physical proxy: ceilingsOpen drops the ceiling exactly over the floorless quadrants of rooms open to above");
+    {
+        std::vector<std::pair<int, int>> want;
+        for (int r : open) want.emplace_back(a.story, r);
+        Check(after.openRooms == want && before.openRooms.empty() && std::binary_search(want.begin(), want.end(), std::make_pair(a.story, 5)),
+              "physical proxy: the open-top build lists the rooms it opened (story 2's room 5: its lamps light story 3's room 0 without the reach share)");
+    }
     Check(tilesOf(12) > 0 && roofsOver(after, 12) == 4 * tilesOf(12), "physical proxy: a room with a floor placed over it (story 2's room 12) keeps its ceiling");
     // a ray from a lamp 1.5 m over room 5's floor up to 1 m over its ceiling line, inside one floorless tile
     int tile = -1;
@@ -1233,6 +1239,8 @@ void PhysPickChecks() {
         Check(NormKFresh(1, 5, 2.0f, 0, 3, 1.0f, false) == 1.0f && NormKFresh(0, 3, 2.0f, 0, 3, 1.0f, false) == 1.0f && NormKFresh(0, 0, 2.0f, 0, 3, 1.0f, false) == 1.0f,
               "physical pick: a lamp of another story, of this room or outdoors: norm scale 1");
         Check(ReachFresh(false, true) && ReachFresh(true, false) && !ReachFresh(false, false), "physical pick: the reach share of a fresh lamp (outdoor room, or an outdoor lamp)");
+        Check(!ReachFresh(false, true, true) && ReachFresh(true, true, true) && !ReachFresh(false, false, true),
+              "physical pick: no reach share for a lamp of a room open into this room 0 (one space), an outdoor lamp keeps it");
         // room 0 takes a roofed room's lamp of the story above at that room's normalisation (innerUp); not a roofless room's, not
         // two stories up, not a room > 0
         Check(NormKFresh(2, 5, 2.0f, 1, 0, 1.0f, true, false) == InnerLight::NormScale(2.0f, 1.0f, true) && NormKFresh(2, 5, 2.0f, 1, 0, 1.0f, true, true) == 1.0f &&

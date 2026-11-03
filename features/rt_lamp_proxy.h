@@ -25,6 +25,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <utility>
 #include <vector>
 #include "open_rooms_above.h"
 
@@ -80,6 +81,7 @@ struct Mesh {
     float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
     int walls = 0, wallTris = 0, openings = 0, roofTris = 0, slabTris = 0;
     int openTops = 0; // roofed quadrants left without their ceiling (Build ceilingsOpen: OpenTops)
+    std::vector<std::pair<int, int>> openRooms; // (story, room) rooms open to the story above by OpenTops' room rule, sorted
     // the uniform grid over x / z (1 m cells) the reference walks
     int gx0 = 0, gz0 = 0, gw = 0, gh = 0;
     std::vector<uint32_t> cellStart, cellTris; // CSR: cell c holds cellTris[cellStart[c] .. cellStart[c + 1])
@@ -355,7 +357,7 @@ inline int OpenUnderRemoved(Story& s, const Story& above) {
             if (((s.roofed[t] & above.removed[t]) >> q) & 1u) s.roofed[t] &= static_cast<uint8_t>(~(1u << q)), opened++;
     return opened;
 }
-inline int OpenTops(Story& s, const Story& above) {
+inline int OpenTops(Story& s, const Story& above, std::vector<int>* rooms = nullptr) { // (rooms: the room rule's open rooms)
     const int w = s.w, h = s.h;
     const size_t nt = static_cast<size_t>(w) * h;
     if (w <= 0 || h <= 0 || above.w != w || above.h != h || s.roofed.size() != nt) return 0;
@@ -375,6 +377,7 @@ inline int OpenTops(Story& s, const Story& above) {
     OpenAbove::Classify(
         w, h, roomAt, [&](int x, int z, int q) { return PlacedQ(above, x, z, q); }, [&](int x, int Z) { return wz[static_cast<size_t>(Z) * w + x] != 0; },
         [&](int X, int z) { return wx[static_cast<size_t>(z) * (w + 1) + X] != 0; }, open, true);
+    if (rooms) *rooms = open;
     int opened = 0;
     for (int z = 0; z < h && !open.empty(); z++)
         for (int x = 0; x < w; x++)
@@ -398,8 +401,13 @@ inline void Build(const Lot& lot, Mesh& m, bool ceilingsOpen = false) {
             if (a.story == s.story + 1) above = &a;
         fixed.push_back(s);
         CeilingsUnderAbove(s, above, fixed.back().ceil);
-        if (ceilingsOpen && above) m.openTops += OpenTops(fixed.back(), *above);
+        if (ceilingsOpen && above) {
+            std::vector<int> rooms;
+            m.openTops += OpenTops(fixed.back(), *above, &rooms);
+            for (int r : rooms) m.openRooms.emplace_back(s.story, r);
+        }
     }
+    std::sort(m.openRooms.begin(), m.openRooms.end());
     for (const Story& s : fixed) {
         m.curStory = static_cast<int8_t>(std::clamp(s.story, -8, 8));
         m.curKind = Mesh::kWall;

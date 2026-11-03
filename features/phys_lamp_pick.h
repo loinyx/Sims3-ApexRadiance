@@ -82,7 +82,10 @@ inline float NormKFresh(int lampStory, int lampHome, float homeNorm, int roomSto
 // double-height room lighting a lamp below, gets the reach here); the room's next solve (a switch's settle, a move into another
 // room's settle, or any later one) gives the exact row. Upgrade: run the gather's per-lamp tests for a fresh lamp on the light
 // tree thread
-inline bool ReachFresh(bool lampOutdoor, bool roomOutdoor) { return roomOutdoor || lampOutdoor; }
+// fromOpenBelow: the lamp's home is a roofed room the open-top build opened into this room (room 0 of the story above), one
+// space with it: no reach there, as ReachAppliesIn's open-top test leaves a cross lamp out (03/11, lot C49C: a red tube of story
+// 2 room 5 lit the upper half of its own wall at 36% of the lower, a hard step at the story line)
+inline bool ReachFresh(bool lampOutdoor, bool roomOutdoor, bool fromOpenBelow = false) { return lampOutdoor || (roomOutdoor && !fromOpenBelow); }
 // A fresh lamp's exit row in room 0 (LevelLightShare::ExitLampOf: room 0 of story 0, a lamp of its record's inner list): a lamp
 // of a roofed room of story 0 or 1 (InnerShadow's lamps of the story and of the one above; the exit sum takes the lamp's shadow,
 // so one out of sight adds nothing there either)

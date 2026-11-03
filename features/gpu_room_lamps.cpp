@@ -439,7 +439,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
             uint64_t es = 1469598103934665603ull;
             const auto fresh = [&](const OutdoorDelta::LotLamp& L, float& mult, char& reach) {
                 mult = PhysLampPick::NormKFresh(L.story, L.home, L.homeNorm, e.story, e.id, e.norm, e.outdoorRoom);
-                reach = PhysLampPick::ReachFresh(L.homeOutdoor, e.outdoorRoom) ? 1 : 0;
+                reach = PhysLampPick::ReachFresh(L.homeOutdoor, e.outdoorRoom, e.id == 0 && L.story + 1 == e.story && RtOutdoorLamps::RoomOpenAbove(L.story, L.home)) ? 1 : 0;
             };
             // (at: its index in g_lot, whose world law is read once a round; none: read here)
             const auto worldOf = [&](uintptr_t light, size_t at, GpuLampLaw::Lamp& w) {
