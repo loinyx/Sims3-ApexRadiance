@@ -247,6 +247,7 @@ struct IndoorBasisPatch {
                               // the cube is then multiplied by (1, 1, 1 = unchanged; MUST be set), -1 = no cube
     int uvUsage = -1, uvIndex = -1; // the semantic of the room light map uv input (-1: not a declared input)
     int diffuseConst = -1;    // set per draw: the 4 rig colours the diffuse chain reads instead of c4..c7 (lamps at 0)
+    int maskSampler = -1;     // wallMask: bind the story's wall mask here (as BasisSmoothPatch's), -1 = none
 };
 // The two VS constants whose dp4 with the position writes .x and .y of the output with that semantic (the room light map
 // uv: uv.x = dot(pos, cX), uv.y = dot(pos, cY)); false when the uv is not made that way
@@ -291,7 +292,9 @@ bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out, const BasisS
 // Whether the vertex shader passes the world height in its TEXCOORD2.w ("mov oN.w, rX.y" after "mov oM.zw, rX.xyxz", oN the
 // TEXCOORD2 output): the stair VSs (22EA00C8, 23C16560)
 bool VsPassesWorldY(const std::vector<DWORD>& vs);
-bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& out, bool capToFloorMap = true);
+// wallMask: the smooth read never crosses a wall of the pixel's own texel (each tap of the B-spline clamped to that texel's
+// centre on a walled side, as if the texels beyond were its own), so an object against or in a wall takes its own side's light.
+bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& out, bool capToFloorMap = true, bool wallMask = false);
 // Smooth light maps (2.12.4): the room light map read of the room-lit pixel shaders. The pattern (docs/features/night-
 // lighting/room-map-smoothing.md; offline over every precomp pixel shader it matches InteriorFloor, InteriorWall and their
 // siblings that read the same room map, nothing else): a plain "texld rL, <TEXCOORD1>, sM" (t1 in ps_2_0, the v# declared

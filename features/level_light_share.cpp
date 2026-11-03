@@ -4870,6 +4870,7 @@ struct WallMaskRec {
     // (development builds, stair_room_fill) per tile the room whose ambient its objects take as their fill: an index into
     // `rooms` (the quadrants' most common room id), 255 = none; read on the render thread (AmbientMapFor)
     std::array<uint8_t, 64 * 64> roomIdx{};
+    std::array<uint8_t, 64 * 64> open{}; // per tile its sides with an opening light passes (1 -x, 2 +x, 4 -z, 8 +z; OpeningNear)
     std::vector<std::pair<uintptr_t, int>> rooms; // (room, id)
     uintptr_t mgr = 0;
     int w = 0, h = 0; // the story grid's tiles (FloorWallMaskFor: the floor maps' layout)
@@ -4894,6 +4895,9 @@ void NoteWallMask(uintptr_t mgr, const StoryGrid& g) {
             p[1] = blocks(GridXL(g, i + 1, j)) ? 255 : 0;
             p[0] = blocks(GridZL(g, i, j)) ? 255 : 0;
             p[3] = blocks(GridZL(g, i, j + 1)) ? 255 : 0;
+            const auto opens = [&](int32_t idx) { return idx >= 0 && static_cast<size_t>(idx) < g.edges.size() && g.edges[static_cast<size_t>(idx)].open != 0; };
+            m->open[static_cast<size_t>(j) * 64 + i] = static_cast<uint8_t>((opens(GridXL(g, i, j)) ? 1 : 0) | (opens(GridXL(g, i + 1, j)) ? 2 : 0) |
+                                                                            (opens(GridZL(g, i, j)) ? 4 : 0) | (opens(GridZL(g, i, j + 1)) ? 8 : 0));
         }
     m->mgr = mgr;
     m->w = g.w, m->h = g.h;
@@ -4922,7 +4926,7 @@ void NoteWallMask(uintptr_t mgr, const StoryGrid& g) {
             }
     std::lock_guard<std::mutex> lk(g_wallMaskMx);
     const auto it = g_wallMasks.find(mgr);
-    if (it != g_wallMasks.end() && it->second->px == m->px && it->second->roomIdx == m->roomIdx && it->second->rooms == m->rooms && it->second->w == m->w &&
+    if (it != g_wallMasks.end() && it->second->px == m->px && it->second->open == m->open && it->second->roomIdx == m->roomIdx && it->second->rooms == m->rooms && it->second->w == m->w &&
         it->second->h == m->h)
         return;
     m->gen = g_wallMaskGen.fetch_add(1, std::memory_order_relaxed);
@@ -17978,6 +17982,30 @@ bool WallMaskFor(uintptr_t basisTex, uint32_t knownGen, uint32_t& gen, uint8_t* 
     gen = it->second->gen;
     if (gen != knownGen && px) std::memcpy(px, it->second->px.data(), it->second->px.size());
     return true;
+}
+bool OpeningNear(uintptr_t basisTex, float u, float v, float tol) {
+    if (!DevSwitches::BasisWallFilter() || !basisTex) return true;
+    std::lock_guard<std::mutex> lk(g_wallMaskMx);
+    const uintptr_t mgr = StoryOfBasisTexLocked(basisTex);
+    const auto it = mgr ? g_wallMasks.find(mgr) : g_wallMasks.end();
+    if (it == g_wallMasks.end()) return true;
+    const WallMaskRec& m = *it->second;
+    // a side as a segment (x0, z0) .. (x1, z1) in tiles: within tol of the point
+    const auto within = [&](float x0, float z0, float x1, float z1) {
+        const float dx = u - std::clamp(u, x0, x1), dz = v - std::clamp(v, z0, z1);
+        return dx * dx + dz * dz <= tol * tol;
+    };
+    const int i0 = static_cast<int>(ApexMath::Floor(u)), j0 = static_cast<int>(ApexMath::Floor(v));
+    for (int j = j0 - 1; j <= j0 + 1; j++)
+        for (int i = i0 - 1; i <= i0 + 1; i++) {
+            if (i < 0 || j < 0 || i >= 64 || j >= 64) continue;
+            const uint8_t o = m.open[static_cast<size_t>(j) * 64 + i];
+            const float x = static_cast<float>(i), z = static_cast<float>(j);
+            if (((o & 1) && within(x, z, x, z + 1)) || ((o & 2) && within(x + 1, z, x + 1, z + 1)) || ((o & 4) && within(x, z, x + 1, z)) ||
+                ((o & 8) && within(x, z + 1, x + 1, z + 1)))
+                return true;
+        }
+    return false;
 }
 // (development builds, stair_room_fill) The story's ambient per tile for the draw whose directional maps are basisTex: each
 // tile the ambient (+0x110, the colour floors and walls take as map.a x ambient) of its room, (0, 0, 0, 0) where none.

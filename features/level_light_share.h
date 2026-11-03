@@ -191,6 +191,9 @@ std::string ArchAmbientStatus();
 // walled) of the story whose directional maps include the D3D texture basisTex (render thread). gen = the mask's version;
 // px (16384 bytes) is written when it differs from knownGen. False: no mask known for that story.
 bool WallMaskFor(uintptr_t basisTex, uint32_t knownGen, uint32_t& gen, uint8_t* px);
+// (basis_wall_filter) Whether a side of a tile with an opening light passes (a door or window not closed to lamps) lies within
+// tol tiles of the point (u, v), in the same mask's tiles; true when no mask is known for that story. Render thread.
+bool OpeningNear(uintptr_t basisTex, float u, float v, float tol);
 // (basis_wall_filter) The same mask for a floor or ceiling map (D3D texture floorTex, w x h texels) of a story's room maps, when
 // its layout is the class-2 one: perTile texels per tile from the lot's origin (4, 8 with Light detail High), the lot's
 // width x perTile rounded up to a power of two, and the split tiles' atlas from splitU (that width, when the map is twice it).

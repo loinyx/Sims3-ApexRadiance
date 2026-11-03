@@ -3081,12 +3081,15 @@ bool AnalyzeRigPs(const std::vector<DWORD>& t, RigPsInfo& out) {
     return out.rigLights || out.cubeWeightConst >= 0;
 }
 
-bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& out, bool capToFloorMap) {
+bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& out, bool capToFloorMap, bool wallMask) {
+    out.maskSampler = -1;
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto ins = Parse(t);
     if (ins.empty()) return false;
     const Usage u = Scan(t, ins);
-    if (u.maxTemp + 14 >= 32 || u.maxConst + 12 >= 224 || u.maxSampler < 0 || u.maxSampler + 4 > 15 || !u.afterLastSamplerDcl) return false;
+    if (u.maxTemp + (wallMask ? 16 : 14) >= 32 || u.maxConst + (wallMask ? 13 : 12) >= 224 || u.maxSampler < 0 || u.maxSampler + (wallMask ? 5 : 4) > 15 ||
+        !u.afterLastSamplerDcl)
+        return false;
     int nrm = -1, lm = -1;
     for (size_t i = 0; i < ins.size(); i++) {
         const Ins& x = ins[i];
@@ -3207,9 +3210,35 @@ bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& 
                          Op(kDef, 5), Dst(kConst, cD), F(0.8944f), F(0.4472f), F(-0.8944f), F(0.0f),
                          Op(kDef, 5), Dst(kConst, cS + 11), F(kBasisCap), F(0.0f), F(0.0f), F(0.0f)}});
     std::vector<DWORD> dcl;
-    for (DWORD s = 0; s < 4; s++) dcl.insert(dcl.end(), {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E + s)});
+    for (DWORD s = 0; s < (wallMask ? 5u : 4u); s++) dcl.insert(dcl.end(), {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E + s)});
     edits.push_back({u.afterLastSamplerDcl, dcl});
-    std::vector<DWORD> body = BicubicSetup(uvT, uvN, cS, cK, cH, T);
+    // (wallMask) O.xy = the centre of the pixel's own texel (in texels), M = its walls (r -x, g +x, b -z, a +z: the maps' layout);
+    // before the taps become uvs, each tap coordinate is kept on the texel's side of a wall it has: the B-spline reads the
+    // texel's own value where the texels beyond the wall were (no light from the next room; smooth up to the wall). A tap two
+    // texels off stays as it was (its weight is at most 1/48 there). cW = (1e4, 0, 0, 0)
+    std::vector<DWORD> walls, clampTaps;
+    if (wallMask) {
+        const DWORD O = T + 14, M = T + 15, cW = cS + 12, A = T + 3, B = T + 4;
+        out.maskSampler = static_cast<int>(E + 4);
+        edits.push_back({1, {Op(kDef, 5), Dst(kConst, cW), F(1e4f), F(0.0f), F(0.0f), F(0.0f)}});
+        walls = {Op(kMul, 3), Dst(kTemp, O, 0x3), Src(uvT, uvN), Src(kConst, cS, Sw(0, 1, 0, 1)), // texels
+                 Op(kFrc, 2), Dst(kTemp, M, 0x3), Src(kTemp, O),
+                 Op(kAdd, 3), Dst(kTemp, O, 0x3), Src(kTemp, O), Neg(Src(kTemp, M)),
+                 Op(kAdd, 3), Dst(kTemp, O, 0x3), Src(kTemp, O), Src(kConst, cK, Sw(2, 2, 2, 2)), // its centre (+0.5)
+                 Op(kMul, 3), Dst(kTemp, M, 0x3), Src(kTemp, O), Src(kConst, cS, Sw(2, 3, 2, 3)),
+                 Op(kMov, 2), Dst(kTemp, M, 0xC), Src(kConst, cK, Sw(3, 3, 3, 3)),
+                 Op(kTexld, 3), Dst(kTemp, M), Src(kTemp, M), Src(kSampler, E + 4)};
+        clampTaps = {// A.xy = the lowest tap coordinate (the centre where walled on the - side, else far below), A.zw = the highest
+                     Op(kMad, 4), Dst(kTemp, A, 0x3), Src(kTemp, M, Sw(0, 2, 0, 2)), Src(kConst, cW, Sw(0, 0, 0, 0)), Src(kTemp, O, Sw(0, 1, 0, 1)),
+                     Op(kAdd, 3), Dst(kTemp, A, 0x3), Src(kTemp, A), Neg(Src(kConst, cW, Sw(0, 0, 0, 0))),
+                     Op(kMad, 4), Dst(kTemp, A, 0xC), Neg(Src(kTemp, M, Sw(1, 3, 1, 3))), Src(kConst, cW, Sw(0, 0, 0, 0)), Src(kTemp, O, Sw(0, 1, 0, 1)),
+                     Op(kAdd, 3), Dst(kTemp, A, 0xC), Src(kTemp, A), Src(kConst, cW, Sw(0, 0, 0, 0)),
+                     Op(kMax, 3), Dst(kTemp, B, 0xF), Src(kTemp, B), Src(kTemp, A, Sw(0, 1, 0, 1)),
+                     Op(kMin, 3), Dst(kTemp, B, 0xF), Src(kTemp, B), Src(kTemp, A, Sw(2, 3, 2, 3))};
+    }
+    std::vector<DWORD> body = walls;
+    const std::vector<DWORD> setup = BicubicSetup(uvT, uvN, cS, cK, cH, T, clampTaps);
+    body.insert(body.end(), setup.begin(), setup.end());
     // weights from the world normal: +X, -X, +Z, -Z, as the basis-reading shaders compute them
     body.insert(body.end(), {
         Op(kDp2add, 4), Dst(kTemp, Wn, 0x1, true), Src(kTemp, N, Sw(0, 1, 0, 1)), Src(kConst, cD, Sw(0, 1, 0, 1)), Src(kConst, cD, Sw(3, 3, 3, 3)),

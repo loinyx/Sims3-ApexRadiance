@@ -6638,13 +6638,18 @@ template <typename Fetch> IDirect3DTexture9* WallMaskTextureFor(IDirect3DDevice9
     }
     return m.tex;
 }
+// the story's wall mask for its directional map `key` (a D3D texture), nullptr when not known
+IDirect3DTexture9* WallMaskTextureOf(IDirect3DDevice9* dev, uintptr_t key) {
+    if (!DevSwitches::BasisWallFilter() || !key) return nullptr;
+    return WallMaskTextureFor(dev, key, [key](uint32_t known, uint32_t& gen, uint8_t* px) { return LevelLightShare::WallMaskFor(key, known, gen, px); });
+}
 IDirect3DTexture9* WallMaskTexture(IDirect3DDevice9* dev, DWORD basisSampler) {
     if (!DevSwitches::BasisWallFilter()) return nullptr;
     IDirect3DBaseTexture9* b = nullptr;
     if (FAILED(D3D9Hooks::GetBoundTexture(dev, basisSampler, &b)) || !b) return nullptr;
     const uintptr_t key = reinterpret_cast<uintptr_t>(b);
     b->Release();
-    return WallMaskTextureFor(dev, key, [key](uint32_t known, uint32_t& gen, uint8_t* px) { return LevelLightShare::WallMaskFor(key, known, gen, px); });
+    return WallMaskTextureOf(dev, key);
 }
 // (Smooth light maps' floor read) the story's wall mask for the floor map `map` of size (w, h), and the read's constant: (1 /
 // texels per tile, the first texel column of the split tiles, 1 = on, 1 / 64); nullptr when its story or layout is not known
@@ -6963,7 +6968,7 @@ template <typename DrawFn> bool DrawWindowOutdoor(IDirect3DDevice9* dev, DrawFn 
 // are replaced by the basis light, its unlit-room lights kept (diffuseConst, 30/09), its specular kept, its per-object
 // vertex lights zeroed), found from the room light map the draw binds; the basis read has its own scale (IndoorBasisScale). ----
 std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_basisSmoothPs;
-std::map<int, std::unordered_map<IDirect3DPixelShader9*, PatchedPs>> g_indoorPs; // sampler 0..7, +8 for guarded maps without floor cap
+std::map<int, std::unordered_map<IDirect3DPixelShader9*, PatchedPs>> g_indoorPs; // sampler 0..7, +8 for guarded maps without floor cap, +16 with the wall mask
 std::atomic<bool> g_indoorSmooth{true};
 std::atomic<int> g_basisSmoothDrawn{0}, g_indoorDrawn{0};
 
@@ -7446,20 +7451,24 @@ bool IndoorBasisScale(IDirect3DDevice9* dev, const ShaderPatches::IndoorBasisPat
 }
 
 std::atomic<long> g_doorsKept{0}, g_doorsNoWorld{0}; // indoor smooth light: objects set in a wall left to the game's rig / no world triple
+std::atomic<long> g_indoorWallsSmooth{0}; // objects against a wall drawn smooth through the wall mask (the rig before)
 std::atomic<bool> g_doorsLogged{false}, g_doorsNoWorldLogged{false};
 // An object set in a wall (DrawIndoorObject): unscaled, turned about y only, and its tile's centre (origin + (X - Z) / 2) on an
-// outside wall's line, or on a tile edge of the room map along one axis (uv rows 3..4 after the world triple, 0..1 over the
-// map, x its size: 1 texel per metre; F7 capture: c195 / c196, the door's centre at texel (12.99, 20.99))
-bool SetInWall(const float (&m)[5][4], float sizeU, float sizeV) {
+// outside wall's line (1), or on a tile edge of the room map along one axis (2; uv rows 3..4 after the world triple, 0..1 over
+// the map, x its size: 1 texel per metre; F7 capture: c195 / c196, the door's centre at texel (12.99, 20.99)); 0: neither.
+// uv = that centre in texels (2 only). Most objects have their origin at a tile's centre, not its corner, so a curtain or a
+// cupboard against a wall lands here too (a curtain of 02/11: origin at texel (22.5, 26.5), the centre taken at (22.0, 26.0)).
+int SetInWall(const float (&m)[5][4], float sizeU, float sizeV, float uv[2]) {
     const float xx = m[0][0], xz = m[2][0], zx = m[0][2], zz = m[2][2];
     const float lx = ApexMath::Sqrt(xx * xx + xz * xz), lz = ApexMath::Sqrt(zx * zx + zz * zz);
-    if (!(lx > 0.9f && lx < 1.1f && lz > 0.9f && lz < 1.1f) || ApexMath::Fabs(m[1][0]) + ApexMath::Fabs(m[1][2]) > 0.05f) return false;
+    if (!(lx > 0.9f && lx < 1.1f && lz > 0.9f && lz < 1.1f) || ApexMath::Fabs(m[1][0]) + ApexMath::Fabs(m[1][2]) > 0.05f) return 0;
     const float c[3] = {m[0][3] + 0.5f * (xx - zx), m[1][3], m[2][3] + 0.5f * (xz - zz)};
-    if (LevelLightShare::OnWallLine(c, xx / lx, xz / lx, 0.15f) || LevelLightShare::OnWallLine(c, zx / lz, zz / lz, 0.15f)) return true;
+    if (LevelLightShare::OnWallLine(c, xx / lx, xz / lx, 0.15f) || LevelLightShare::OnWallLine(c, zx / lz, zz / lz, 0.15f)) return 1;
     const float u = (m[3][0] * c[0] + m[3][1] * c[1] + m[3][2] * c[2] + m[3][3]) * sizeU;
     const float v = (m[4][0] * c[0] + m[4][1] * c[1] + m[4][2] * c[2] + m[4][3]) * sizeV;
-    if (!ApexMath::IsFinite(u) || !ApexMath::IsFinite(v) || u < -1.0f || v < -1.0f || u > sizeU + 1.0f || v > sizeV + 1.0f) return false;
-    return ApexMath::Fabs(u - std::round(u)) < 0.12f || ApexMath::Fabs(v - std::round(v)) < 0.12f;
+    if (!ApexMath::IsFinite(u) || !ApexMath::IsFinite(v) || u < -1.0f || v < -1.0f || u > sizeU + 1.0f || v > sizeV + 1.0f) return 0;
+    uv[0] = u, uv[1] = v;
+    return ApexMath::Fabs(u - std::round(u)) < 0.12f || ApexMath::Fabs(v - std::round(v)) < 0.12f ? 2 : 0;
 }
 
 // Why an object draw keeps the game's rig instead of the smooth room light (logged with the draw cost while recording):
@@ -7503,10 +7512,24 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     const bool capToFloorMap = !LevelLightShare::BasisFloorGuardReady();
     // Separate cache entries: live disable/re-enable must never reuse the unguarded variant.
     const int shaderVariant = lmS + (capToFloorMap ? 0 : 8);
-    PatchedPs& p = PatchedFor(dev, g_indoorPs[shaderVariant], "Indoor object (smooth room light)",
-                              [lmS, capToFloorMap](std::vector<DWORD>& t, PatchedPs& pp) {
-                                  return ShaderPatches::PatchIndoorBasis(t, static_cast<DWORD>(lmS), pp.indoor, capToFloorMap);
-                              });
+    // (basis_wall_filter) the story's wall mask known: the copy whose smooth read never crosses a wall of the pixel's tile
+    // (PatchIndoorBasis wallMask), so an object against a wall takes its own room's light per pixel; else the plain copy
+    const uintptr_t maskKey = reinterpret_cast<uintptr_t>(RtOutdoorLamps::GameMapOf(basis[0])); // (a relit copy: its game map's story)
+    IDirect3DTexture9* wallMask = WallMaskTextureOf(dev, maskKey);
+    PatchedPs* pick = nullptr;
+    if (wallMask) {
+        pick = &PatchedFor(dev, g_indoorPs[shaderVariant + 16], "Indoor object (smooth room light, walls)",
+                           [lmS, capToFloorMap](std::vector<DWORD>& t, PatchedPs& pp) {
+                               return ShaderPatches::PatchIndoorBasis(t, static_cast<DWORD>(lmS), pp.indoor, capToFloorMap, true);
+                           }, true);
+        if (!pick->ps || pick->indoor.maskSampler < 0) pick = nullptr, wallMask = nullptr;
+    }
+    if (!pick)
+        pick = &PatchedFor(dev, g_indoorPs[shaderVariant], "Indoor object (smooth room light)",
+                           [lmS, capToFloorMap](std::vector<DWORD>& t, PatchedPs& pp) {
+                               return ShaderPatches::PatchIndoorBasis(t, static_cast<DWORD>(lmS), pp.indoor, capToFloorMap);
+                           });
+    PatchedPs& p = *pick;
     float size[4], oldSize[4] = {};
     const bool scaled = p.ps && IndoorBasisScale(dev, p.indoor, lightMap, basis[0], size);
     const uintptr_t lightMapPtr = reinterpret_cast<uintptr_t>(lightMap);
@@ -7514,10 +7537,17 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     if (!scaled) return keep(4);
     // A door or window set in its wall spans two rooms: the smooth read (a B-spline over 4 texels, +-2 m) mixed the room
     // behind the wall into the faces on this side (F7 capture, 07/10: a sconce's room at ~41% on the dark room's door frame).
-    // The game's rig (one room, the camera's side) lights it, as before Apex.
+    // The game's rig (one room, the camera's side) lights it, as before Apex. With the wall mask the read keeps to the pixel's
+    // side of every wall, so only an object at an opening light passes through stays on the rig (on an outside wall's line it
+    // does not: the texels outside the house add nothing to the smooth read)
     if (const int wk = g_curVsInfo->patched.worldK; wk >= 0) {
-        float wm[5][4];
-        if (SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(wk), &wm[0][0], 5)) && SetInWall(wm, size[0], size[1])) {
+        float wm[5][4], uv[2] = {};
+        int inWall = SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(wk), &wm[0][0], 5)) ? SetInWall(wm, size[0], size[1], uv) : 0;
+        if (inWall && wallMask && (inWall == 1 || !LevelLightShare::OpeningNear(maskKey, uv[0], uv[1], 0.12f))) {
+            inWall = 0;
+            ApexUtil::CountOne(g_indoorWallsSmooth);
+        }
+        if (inWall) {
             if (g_doorsKept.fetch_add(1, std::memory_order_relaxed) == 0 && !g_doorsLogged.exchange(true))
                 LOG_INFO("[LotLightBridge] Indoor smooth light: doors and windows set in a wall keep the game's room light");
             return keep(5);
@@ -7548,6 +7578,8 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     {
         SamplerBind b0(dev, p.indoor.firstSampler, basis[0]), b1(dev, p.indoor.firstSampler + 1, basis[1]);
         SamplerBind b2(dev, p.indoor.firstSampler + 2, basis[2]), b3(dev, p.indoor.firstSampler + 3, basis[3]);
+        std::optional<WallMaskBind> maskBind;
+        if (wallMask) maskBind.emplace(dev, static_cast<DWORD>(p.indoor.maskSampler), wallMask);
         SetPsConst(dev, p.indoor.strengthConst, strength, 1);
         SetPsConst(dev, p.indoor.sizeConst, size, 1);
         if (p.indoor.diffuseConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.diffuseConst), &unlit[0][0], 4);
@@ -10271,8 +10303,9 @@ std::string RoomMapSmoothStatus() {
 }
 
 std::string IndoorSmoothStatus() {
-    return std::format("{} | smooth stairs / instanced draws: {} | indoor objects: {} (map scale from the vertex shader {}, from the map size {})", g_indoorSmooth.load() ? "on" : "off",
-                       g_basisSmoothDrawn.load(), g_indoorDrawn.load(), g_indoorUvFromVs.load(), g_indoorUvFallback.load());
+    return std::format("{} | smooth stairs / instanced draws: {} | indoor objects: {} (map scale from the vertex shader {}, from the map size {}; against a wall, through the wall mask {})",
+                       g_indoorSmooth.load() ? "on" : "off", g_basisSmoothDrawn.load(), g_indoorDrawn.load(), g_indoorUvFromVs.load(), g_indoorUvFallback.load(),
+                       g_indoorWallsSmooth.load());
 }
 
 void SetGroundBrightness(float ground, float roads, float lotLamps) {
