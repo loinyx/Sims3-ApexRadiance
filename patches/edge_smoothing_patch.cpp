@@ -62,14 +62,16 @@ static const float kStep[STEPS] = { STEP_SIZES };
 float Luma(float2 uv) { return dot(tex2Dlod(sColor, float4(uv, 0, 0)).rgb, float3(0.299, 0.587, 0.114)); }
 
 // Contrast-adaptive sharpening of one pixel from its 4 neighbours (after AMD FidelityFX CAS, MIT): less where the
-// neighbourhood is already contrasty or near black / white, so no halos
+// neighbourhood is already contrasty or near black / white, so no halos. Nothing on a flat area: the Banding Fix grain (2 levels)
+// came out 5x stronger there, and the shadows looked noisy and coarse (05/11)
+float Textured(float3 mn, float3 mx) { float3 d = mx - mn; return smoothstep(3.0 / 255.0, 8.0 / 255.0, max(d.r, max(d.g, d.b))); }
 float3 Sharpen(float3 c, float3 n, float3 s, float3 w, float3 e, float amount)
 {
     float3 mn = min(c, min(min(n, s), min(w, e)));
     float3 mx = max(c, max(max(n, s), max(w, e)));
     float3 amp = sqrt(saturate(min(mn, 1.0 - mx) / max(mx, 1e-4)));
     float3 wgt = amp * (-1.0 / lerp(8.0, 5.0, amount));
-    return saturate((c + (n + s + w + e) * wgt) / (1.0 + 4.0 * wgt));
+    return lerp(c, saturate((c + (n + s + w + e) * wgt) / (1.0 + 4.0 * wgt)), Textured(mn, mx));
 }
 
 // A pixel FXAA leaves as it is: sharpened when asked
@@ -256,7 +258,8 @@ float4 SmaaBlendPS(float2 uv : TEXCOORD0) : COLOR0
             float3 mn = min(c.rgb, min(min(n, s), min(w, e))), mx = max(c.rgb, max(max(n, s), max(w, e)));
             float3 amp = sqrt(saturate(min(mn, 1.0 - mx) / max(mx, 1e-4)));
             float3 wgt = amp * (-1.0 / lerp(8.0, 5.0, cParams.y)); // after AMD FidelityFX CAS (MIT)
-            c.rgb = saturate((c.rgb + (n + s + w + e) * wgt) / (1.0 + 4.0 * wgt));
+            float3 d = mx - mn; // (flat areas left alone: Sharpen above)
+            c.rgb = lerp(c.rgb, saturate((c.rgb + (n + s + w + e) * wgt) / (1.0 + 4.0 * wgt)), smoothstep(3.0 / 255.0, 8.0 / 255.0, max(d.r, max(d.g, d.b))));
         }
         if (blended && cParams.w > 0.5) c.rgb = lerp(c.rgb, float3(1, 0, 0), 0.6); // debug: the pixels SMAA blended
     }
@@ -373,11 +376,11 @@ const ShaderCache::Id kFxaaDepthId[kFxaaLevels] = {AddFxaa(0, "EdgeSmoothing FXA
 const ShaderCache::Id kDepthLogId = AddDepthLog();
 
 struct Params {
-    int method = 1;           // 0 FXAA, 1 SMAA
+    int method = 0;           // 0 FXAA, 1 SMAA
     int quality = 1;          // FXAA: 0 fast, 1 balanced, 2 high
     int smaaQuality = 2;      // SMAA: 0 low, 1 medium, 2 high, 3 ultra, 4 extreme
-    float subpix = 0.5f;      // sub-pixel smoothing (thin lines, texture detail): 0 = off, 1 = soft
-    float sensitivity = 0.125f; // edge threshold: lower = more edges smoothed
+    float subpix = 1.0f;      // sub-pixel smoothing (thin lines, texture detail): 0 = off, 1 = soft
+    float sensitivity = 0.063f; // edge threshold: lower = more edges smoothed
     bool depthEdges = true;   // also find object edges in the scene depth (fainter edges of objects smoothed)
     float sharpen = 0.0f;     // texture sharpening of the pixels the smoothing left alone, 0..1 (0 = off)
     bool debugView = false;
@@ -1041,7 +1044,7 @@ void RestartEffects(IDirect3DDevice9* dev) {
 class EdgeSmoothingPatch : public ApexPatch {
   public:
     EdgeSmoothingPatch() : ApexPatch("EdgeSmoothing", nullptr) {
-        RegisterEnumSetting(&g.p.method, "metodo", 1, "SMAA: smoother long edges and sharp textures (3 passes). FXAA: lighter, a little blurrier.",
+        RegisterEnumSetting(&g.p.method, "metodo", 0, "SMAA: smoother long edges and sharp textures (3 passes). FXAA: lighter, a little blurrier.",
                             {"FXAA", "SMAA"});
         RegisterEnumSetting(&g.p.smaaQuality, "qualidadeSmaa", 2,
                             "SMAA: the reference presets, and Extreme. High and above also handle diagonals and corners; Ultra catches fainter edges "
@@ -1050,9 +1053,9 @@ class EdgeSmoothingPatch : public ApexPatch {
         RegisterEnumSetting(&g.p.quality, "qualidade", 1,
                             "FXAA: how far each edge is followed. Higher = smoother long, nearly straight edges, costs a little more.",
                             {"Fast", "Balanced", "High", "Extreme"});
-        RegisterFloatSetting(&g.p.subpix, "suavidade", SettingWidget::Slider, 0.5f, 0.0f, 1.0f,
+        RegisterFloatSetting(&g.p.subpix, "suavidade", SettingWidget::Slider, 1.0f, 0.0f, 1.0f,
                              "Also smooths thin lines and sub-pixel detail. Higher = smoother, but textures get slightly softer.");
-        RegisterFloatSetting(&g.p.sensitivity, "sensibilidade", SettingWidget::Slider, 0.125f, 0.063f, 0.333f,
+        RegisterFloatSetting(&g.p.sensitivity, "sensibilidade", SettingWidget::Slider, 0.063f, 0.063f, 0.333f,
                              "Minimum contrast for an edge to be smoothed. Lower = catches more edges (also in dark night scenes).");
         RegisterBoolSetting(&g.p.depthEdges, "depthEdges", true,
                             "Also finds the edges of objects from the scene depth, so edges with little contrast (walls against walls of the same colour, "

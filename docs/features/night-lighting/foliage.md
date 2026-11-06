@@ -198,11 +198,11 @@ mask is built on the GPU, or off the render thread on the CPU ([lot-light-pass.m
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Lamps light objects | `postesNosObjetos` | bool | on | | Turns on the rig boost, the moon-shadow replacement, the wrap-light vertex shaders and the winter leaf-shadow patch. Live |
-| Brightness (Objects card) | `forcaNosObjetos` | float | 75% | 25 to 300% | Scales the rig boost that fills the per-instance lamp colours. On the reach law (below) the rig's outdoor lamps take no boost: their colours follow the walls' brightness x *Seamless light brightness* |
+| Brightness (Objects card) | `forcaNosObjetos` | float | 100% | 25 to 300% | Scales the rig boost that fills the per-instance lamp colours. On the reach law (below) the rig's outdoor lamps take no boost: their colours follow the walls' brightness x *Seamless light brightness* |
 | No setting | | | | | Per-vertex lamps: at night, on rigs on the reach law (`LotLightBridge::ObjectReachLawScale` >= 0), which needs *Lamps light objects*, *Doors and windows stay lit*, *Seamless light on pieces*, *Realistic lamp reach* and *Outdoor light between floors* (the reach law runs in `LevelLightShare`). Crown shade: the crowns are noted only in those draws, so it needs the same reach law, and also *Walls shade lamp light near the ground* |
 
-There is no foliage-specific strength. The Lighting balance styles set `forcaNosObjetos` to 67.5% (Subtle), 75% (Soft,
-the default) or 100% (Natural). The night level is the game's `lightMgr+0xF0`, passed by `LotLightBridge::SetNightLevel`.
+There is no foliage-specific strength. The Lighting balance styles set `forcaNosObjetos` to 67.5% (Subtle), 75% (Soft)
+or 100% (Natural, the default). The night level is the game's `lightMgr+0xF0`, passed by `LotLightBridge::SetNightLevel`.
 
 ## Compatibility and interactions
 

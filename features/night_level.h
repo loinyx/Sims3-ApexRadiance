@@ -139,6 +139,20 @@ inline bool ReadSmoothNight(uintptr_t lightMgr, float& x) {
     }
 }
 
+// The sine of the sun's height (sky+0x6B4); false when unreadable (the lamp terms then have the level alone)
+inline bool ReadSunSine(uintptr_t lightMgr, float& s) {
+    __try {
+        const uintptr_t back = *reinterpret_cast<const uintptr_t*>(lightMgr + 0xD0);
+        if (back < 0x10000 + 0x210) return false;
+        const uintptr_t sky = back - 0x210;
+        if (*reinterpret_cast<const uintptr_t*>(sky + 0x1F4) != lightMgr) return false;
+        s = *reinterpret_cast<const float*>(sky + 0x6B4);
+        return std::isfinite(s);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 inline bool ReadF0(uintptr_t lightMgr, float& f0) {
     __try {
         f0 = *reinterpret_cast<const float*>(lightMgr + 0xF0);

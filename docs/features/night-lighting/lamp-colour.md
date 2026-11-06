@@ -41,9 +41,9 @@ lamp-lit surface then reads the corrected colour with no further change.
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| (not in the menu) | `luzDasLampadasNatural` | float | 1.0 | 0 to 1 | Street lamps (and lot lamps without their own colour): 0 = the game's pink, 1 = warm white |
-| (not in the menu) | `corPropriaNoLote` | bool | off | | Lot lamps use `corDasLampadasDoLote` instead of the street lamp colour |
-| (not in the menu) | `corDasLampadasDoLote` | float | 1.0 | 0 to 1 | Lot lamp colour when `corPropriaNoLote` is on |
+| (not in the menu) | `luzDasLampadasNatural` | float | 0.25 | 0 to 1 | Street lamps (and lot lamps without their own colour): 0 = the game's pink, 1 = warm white |
+| (not in the menu) | `corPropriaNoLote` | bool | on | | Lot lamps use `corDasLampadasDoLote` instead of the street lamp colour |
+| (not in the menu) | `corDasLampadasDoLote` | float | 0 | 0 to 1 | Lot lamp colour when `corPropriaNoLote` is on |
 
 Values are clamped to 0 to 1 by `SetLampTint`. A change applied while the game runs (for example a profile import) is
 taken once no menu slider is held: tracked stock lamps are re-coloured, the terrain light is rebuilt once and the lots'

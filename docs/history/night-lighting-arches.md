@@ -135,3 +135,46 @@ in one manager's sets only, so a confirmed entry is the manager the walk would f
 Repeated floor draws re-scanned map ownership. The direct slot shortcut now revalidates all identities before
 reuse, while room ambients remain live. Room-map constants span a small block containing two unchanged middle rows;
 batched reads and writes retain those rows exactly and restore them after each draw. No shader equation changes.
+
+### 2026-11-05: a seam on the floor at doorways
+
+**Context:** a kitchen lit through a window and a door showed cut strips of red on a grey floor, a straight line in the doorway, and furniture
+shadows that stopped on it.
+
+**Findings:** the light fell where the geometry says: the strips and the grey corridor are a wall's shadow, with the island cutting a little
+of it. Four defects sat around it. The arch blend assumed 4 texels a metre, so with Light detail High and Sharper floors every arch sat at
+2 or 4 times its place and the blend never reached the doorway. Each room tested only its own furniture. The game's tone halves light at
+mean 0.01, which made more light show darker in 39 of 803 pairs. The GPU path charged no glass: two panes came out 1.71 times too strong.
+
+**Outcome:** `arch_lot_position`, `cross_room_shadows`, `tone_soft`, `glass_share`, and the bounce (`room_bounce`), on by default after the
+replays came out continuous; results are on the [validation page](../validation/night-lighting-arches.md). A pane share taken before
+the soft cut was rejected: it turned faint light past two panes black, and a typical point fell about 5.6 times. A lampless room's bounce
+batch read stale constants and would have refused the relight; it is fixed and has a check. The scene replay keeps own-room records, so its
+score still compares with the game; scene files moved to version 2, and version 1 reads with no glazed flags.
+
+**Open:** a lift of the room base across a wide opening is not implemented. The rooms' own ambients differ (0.0119 and 0.0322 on this lot)
+and past 1.5 m each room returns to its own.
+
+### 2026-11-05: the tone between two rooms past 1.5 m
+
+**Context:** rooms of ambient 0.0288 and 0.0116 through a 2.66 m arch showed the floor falling about 2.5 times inside 1.5 m. The two values are
+the rooms' `c4`, not two pixels of one room: on the arch's line itself there is no step.
+
+**Findings:** a longer blend alone was not enough. Keeping the bounce at 1.5 m would have stacked blend and bounce past the neighbour's level, and a
+blend at 1.5 m with a bounce cut out to 3.3 m left a dark band beside the arch. A long blend could also run past the room's next arch (a 1.41
+times step), and a room without arches holding the same ambient took it through a wall. A different fall curve took about 15% off the lift for
+more ALU and was rejected: the lift grows with the length.
+
+**Outcome:** `arch_reach`: `ArchAmbient::Reach`, `HeldReach` and `ArchTwin`; numbers are on the
+[validation page](../validation/night-lighting-arches.md). None of it has been seen in game.
+
+### 2026-11-06: the reflection's line on an arch
+
+**Context:** an F7 pair on the arch of rooms 3 and 8 showed a line with the ambients equal to 5 digits: top face 0.405 against 0.016. The two floors bind
+different reflection cubes, and the floor adds its reflection after the map, where the ambient's blend never reaches it.
+
+**Findings:** review of the first version: `RoomSpecCube` gave the draw a pointer read from a room that can be stale, so it now asks the texture's type under
+SEH, as `ProbeNeutral` does. The choice of the room moved to `ArchAmbient::TakeCube`, which has a test. Rooms with no arch had no story in their record, so the
+capture line named story 0 for them.
+
+**Outcome:** the arch copy reads the neighbour's cube under the arch's weight; numbers are on the [validation page](../validation/night-lighting-arches.md). Not seen in game.

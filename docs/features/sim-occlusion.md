@@ -8,7 +8,7 @@ from looking dirty under the scene shade while furniture and rooms keep their fu
 
 | | |
 |---|---|
-| Availability | Released in 2.6.0; on by default since 2.7.0 (Sims 40%, hair 0%, at most 11%) |
+| Availability | Released in 2.6.0; on by default since 2.7.0 (Sims 28%, hair 0%, at most 11%) |
 | Default | On (with Ambient Occlusion) |
 | Menu | Image > Ambient Occlusion > *Sim Occlusion* card |
 | Configuration | `[patches.AmbientOcclusion]` in `ApexRadiance.toml` (shared with Ambient Occlusion) |
@@ -43,7 +43,7 @@ Custom content that uses the standard Sim materials is covered automatically. Cu
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Sim Occlusion (card switch) | `simControls` | bool | on | | Enables the Sim controls. Off hides them and releases the mask resources |
-| Sim intensity | `simStrength` | float | 40% | 0 to 100% | Shade on body, face and clothes. 0% removes it, 100% keeps the scene shade |
+| Sim intensity | `simStrength` | float | 28% | 0 to 100% | Shade on body, face and clothes. 0% removes it, 100% keeps the scene shade |
 | Hair intensity | `hairStrength` | float | 0% | 0 to 100% | Shade on recognised hair, independent of the body |
 | Maximum darkening | `simMaxShade` | float | 11% | 0 to 100% | Caps the shade added to Sims and hair, before the light protection of the composite |
 | Transparent hair | `transparentHair` | bool | on | | Also adjusts recognised transparent hair strands. Blended body layers always follow Sim intensity |

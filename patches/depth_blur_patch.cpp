@@ -283,13 +283,13 @@ const ShaderCache::Id kBlurPsId[4] = {AddShader("DepthBlur BlurPS (Low, TAPS 4)"
 static_assert(kQualityTaps[0] == 4 && kQualityTaps[1] == 6 && kQualityTaps[2] == 8 && kQualityTaps[3] == 12, "kBlurPsId lists the TAPS of kQualityTaps");
 
 struct Params {
-    bool autoFocus = false;   // Auto (follows what the camera looks at) or Fixed (the original start/range curve)
+    bool autoFocus = true;    // Auto (follows what the camera looks at) or Fixed (the original start/range curve)
     float amount = 1.000000000f;     // max blur radius = amount x 1% of the screen height
     int sharpArea = 2;       // Auto: 0 Small, 1 Medium, 2 Large
     float focusSpeed = 0.100000001f; // Auto: easing time constant tau (s)
     bool glowLights = true;  // near-white taps weigh a little more
-    float start = 0.318108052f;    // Fixed
-    float range = 0.287828237f;     // Fixed
+    float start = 0.348320156f;    // Fixed
+    float range = 0.061324112f;     // Fixed
     float strength = 1.000000000f;   // multiplies the blur amount (both modes)
     float spread = 0.800000012f;     // legacy "tamanho" (the old Gaussian spread); kept so old configs load, no longer used
     float farPlane = 1000.000000000f; // Fixed

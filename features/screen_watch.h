@@ -5,7 +5,8 @@
 // at the line between two floors measures both stories at once, and a grid of 6 x 4 over the whole screen. They are copied
 // before the Apex menu and notices are drawn (the first recording measured the menu's own pixels). The
 // recorder writes the samples ("Screen pixels.csv") and, for every lamp edit, when each point began to change, when it
-// settled and whether it went the wrong way first (Recording.txt, "Light updates").
+// settled and whether it went the wrong way first (Recording.txt, "Light updates"). A frame without a chosen lamp copies
+// only the column and the grid. In developer mode it also feeds the recording's video (capture_video.h).
 #include "ground_profile.h"
 #include <d3d9.h>
 #include <string>
@@ -18,6 +19,10 @@ constexpr int kGrid = kColumn + kGridX * kGridY; // then the ground points aroun
 constexpr int kPoints = kGrid + GroundProfile::kWatchPoints;
 struct Sample {
     unsigned long tick; // GetTickCount of the frame the pixels were copied in
+    float frameMs;      // the longest frame since the last sample (a frame can pass without one when the ring is full)
+    int videoFrame;     // this frame's index in Video.mjpeg, -1 when it is not there
+    bool mirrored;      // the camera vote picked the water reflection's copy this frame
+    bool ground;        // the ground points were read this frame
     unsigned char rgb[kPoints][3];
 };
 // Render thread, every Present: starts with a recording, samples, stops with it
@@ -30,6 +35,8 @@ int Width();
 int Height();
 bool ColumnAtCentre(); // the mouse was over the Apex menu or outside the game when the recording started
 bool Watching();
+// Render thread: the back-buffer pixel under the mouse; true when it is the screen's centre, as ColumnAtCentre
+bool MouseOrCentre(IDirect3DDevice9* dev, POINT& pixel);
 // Releases the device objects (device lost / reset)
 void Release();
 }

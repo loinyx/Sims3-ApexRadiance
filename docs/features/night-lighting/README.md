@@ -61,6 +61,8 @@ atlas** that any surface knowing its world position can sample. Each sub-part be
 | Level light share | Outdoor and indoor lamps light every story, with the game's wall test | [level-light-share.md](level-light-share.md) |
 | Real-time outdoor lamps (Lamp lighting: Instant) | The active lot's outdoor lamps drawn on the GPU into every story's outside maps, with shadows | [rt-outdoor-lamps.md](rt-outdoor-lamps.md) |
 | Quick outdoor lamp edits (with Instant) | Room 0 of every story brought up to date from each lamp's kept part | [outdoor-lamp-delta.md](outdoor-lamp-delta.md) |
+| Room lamp probe (developer) | Each room solve's lamp light compared with the law the GPU would draw it with, before indoor lamps move to the GPU | [gpu-room-lamps-probe.md](gpu-room-lamps-probe.md) |
+| GPU room lamps (Lamp lighting: Instant, Steam 1.67.2) | Each room solve of the active lot kept and its lamps drawn on the GPU, so an indoor lamp edit shows with no wait for the solve | [gpu-room-lamps.md](gpu-room-lamps.md) |
 | Lamp drags | The room solves a dragged lamp causes kept to its own rooms; the rest sent once it stops, spread over frames | [lamp-drags.md](lamp-drags.md) |
 | Walls | Exterior walls get a configurable lamp gain, also by day | [walls.md](walls.md) |
 | Floors | Outdoor floors read the world atlas | [floors.md](floors.md) |
@@ -99,23 +101,23 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 | Ground > Game fixes > Smooth ground light | `mapaDeLuzSuavizado` | bool | on | | Smoothed chunk maps and the world atlas ([world-atlas](world-atlas-and-smoothed-maps.md)) |
 | Ground > Game fixes > Update at dusk | `automaticoAoAnoitecer` | bool | on | | Rebuild the terrain light at the settled day and night endpoints |
 | Ground > Game fixes > Delay after dusk | `atrasoSegundos` | float | 2.0 s | 0.5 to 10 s | Wait before the endpoint rebuild (none while Build mode editing) |
-| Outside > Brightness > Ground light | `luzNoChao` | float | 100% | 25 to 300% | Lamp light on every ground: terrain, roads, sidewalks, lot grass, floors and snow, all from the same terrain light (every lamp enters the terrain bake and the lot's own map at its full colour). 100% is the Soft balance of the four controls it replaced (`brilhoNoChao` x `forcaDasLampadasDoLote`, read from old configs); needs *Street lamps light lots* |
+| Outside > Brightness > Ground light | `luzNoChao` | float | 90% | 25 to 300% | Lamp light on every ground: terrain, roads, sidewalks, lot grass, floors and snow, all from the same terrain light (every lamp enters the terrain bake and the lot's own map at its full colour). 100% is the Soft balance of the four controls it replaced (`brilhoNoChao` x `forcaDasLampadasDoLote`, read from old configs); needs *Street lamps light lots* |
 | Objects > Lamps light objects | `postesNosObjetos` | bool | on | | Rig lamp boost and moon-shadow fix ([objects-and-rigs](objects-and-rigs.md), [foliage](foliage.md)) |
-| Objects > Brightness | `forcaNosObjetos` | float | 75% | 25 to 300% | Strength of the ground light floor on outdoor objects (*Doors and windows stay lit*) and of the rig lamp boost. With *Realistic lamp reach* (and *Doors and windows stay lit* and *Seamless light on pieces* on) the lamps on objects follow the walls' brightness x *Seamless light brightness* instead (`LotLightBridge::ObjectReachLawScale`, `ObjectLightBridge` `ReachLawRec`) |
+| Objects > Brightness | `forcaNosObjetos` | float | 100% | 25 to 300% | Strength of the ground light floor on outdoor objects (*Doors and windows stay lit*) and of the rig lamp boost. With *Realistic lamp reach* (and *Doors and windows stay lit* and *Seamless light on pieces* on) the lamps on objects follow the walls' brightness x *Seamless light brightness* instead (`LotLightBridge::ObjectReachLawScale`, `ObjectLightBridge` `ReachLawRec`) |
 | Objects > Game fixes > Light stairs, railings, columns | `lampadasEmTodosObjetos` | bool | on | | Objects the game leaves without lamp light; applies when a world loads ("Reload save" badge) |
 | Objects > Buildings block lamp light on trees and objects | `paredesBloqueiamLuzNosObjetos` | bool | on | | Outdoor objects, windows and fences drop per-pixel lamps with an outside wall or, for a lamp below them, a placed floor of an upper story in between (a lamp seen past a slab's edge is dimmed), their ground light is scaled by the unblocked share, and trees, bushes and rig objects behind a building take no garden lamp ([level-light-share](level-light-share.md)); was *Stories > Buildings block light on objects*. Developer > Tester: *Buildings block light on trees and objects* is its rig sub-part |
 | Objects > Game fixes > Doors and windows stay lit | `objetosDeForaComLuzDoChao` | bool | on | | Outdoor rig objects get at least the ground light (`RigTracker`); needs the ground light |
 | Objects > Game fixes > Windows take outdoor light | `janelasLuzDeFora` | bool | on | | The outer side of room-lit windows takes the outdoor light; see [objects-and-rigs.md](objects-and-rigs.md) |
 | Objects > Game fixes > Seamless light on pieces | `luzPorPixelNosObjetos` | bool | on | | Per-pixel world lamps on outdoor rig objects; needs the ground light |
-| Objects > Game fixes > Seamless light brightness | `forcaLuzPorPixelNosObjetos` | float | 75% | 25 to 300% | Strength of those per-pixel lamps; with *Realistic lamp reach* a trim over the walls' brightness (75% = x1) |
+| Objects > Game fixes > Seamless light brightness | `forcaLuzPorPixelNosObjetos` | float | 100% | 25 to 300% | Strength of those per-pixel lamps; with *Realistic lamp reach* a trim over the walls' brightness (75% = x1) |
 | Objects > Game fixes > Fences and stairs catch light | `cercasComLuzDoChao` | bool | on | | Fences, railings, stairs and their snow read the atlas ([fences](fences.md), [snow](snow.md)); needs the ground light |
-| Objects > Game fixes > Fence brightness | `forcaNasCercas` | float | 75% | 25 to 200% | Strength on fences, railings, stairs and their snow |
+| Objects > Game fixes > Fence brightness | `forcaNasCercas` | float | 100% | 25 to 200% | Strength on fences, railings, stairs and their snow |
 | Objects > Game fixes > Smooth indoor light | `bordasDosMapasDeLuz` | bool | on | | Indoor objects and stairs read the room's directional light maps smoothly (see *Smooth indoor light*) |
 | Buildings > Lamps light walls | `paredesComLuz` | bool | on | | Exterior wall lamp gain by day and night; off keeps the native draw ([walls](walls.md)) |
-| Buildings > Brightness (walls) | `forcaNasParedes` | float | 30% | 25 to 400% | Wall lamp RGB multiplier (`SetWallGain` clamps 0.25 to 8) |
+| Buildings > Brightness (walls) | `forcaNasParedes` | float | 56% | 25 to 400% | Wall lamp RGB multiplier (`SetWallGain` clamps 0.25 to 8) |
 | Overview > Lighting balance > Realistic lamp reach | `alcanceRealistaDasLampadas` | bool | on | | Lamp light on outside walls fades with distance like the ground ([walls](walls.md); relights rooms); outdoor objects, fences and windows then take the same law and the walls' scale, the two per-pixel sliders becoming trims over their 75% default ([objects](objects-and-rigs.md#realistic-reach-on-objects-fences-and-windows)) |
 | Buildings > Lamps light roofs | `telhadosComLuz` | bool | on | | Roof lamp pass ([roofs](roofs.md)) |
-| Buildings > Brightness (roofs) | `forcaNosTelhados` | float | 45% | 5 to 200% | Roof lamp strength |
+| Buildings > Brightness (roofs) | `forcaNosTelhados` | float | 60% | 5 to 200% | Roof lamp strength |
 | Buildings > Light detail > Detail | `detalheDaLuz` | enum | Game | Game, High | High doubles the game's lighting texels per metre on walls and floors (`features/light_detail.cpp`: texels per tile `0x00FF36AC` {1, 2, 4} -> {2, 4, 8}, wall atlases `0x00FF36DC` / `0x00FF36E8` doubled per LOD class). Written once at startup before any lot is lit, Steam 1.67.2 only, left alone when another mod changed those tables; a change takes effect after a restart. Rooms take about four times longer to solve and their maps use four times the memory |
 | Rooms at Night > Adjust the background light | `comodosEscurosSemLuz` | bool | on | | Rooms with lamps off keep the light set below ([unlit-rooms](unlit-rooms.md)) |
 | Rooms at Night > Brightness | `luzQueSobraNosComodos` | float | 20% | 10 to 80% | How much of the game's unlit-room light stays |
@@ -124,6 +126,7 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 | Rooms at Night > Indoor light through openings | `luzInternaPelasAberturas` | bool | on | | Lit rooms shine through their arches and windows onto the garden, the terraces, the outside walls and the objects outside, and into a roofed room next door, only through those openings; one opening only ([level-light-share](level-light-share.md)) |
 | Rooms at Night > Indoor light adds to the ground | `luzInternaSomaNoChao` | bool | on | | The light lit rooms send through their openings onto the lot ground (lot pass and snowy lots; not the outdoor floors) adds to the outdoor lamps' light there instead of the brighter of the two, and the outside walls' shade of the outdoor lamps leaves it whole (story 0's room-0 floor texels keep its luminance in their alpha, [level-light-share](level-light-share.md#indoor-light-on-the-ground)); needs *Indoor light through openings* and *Walls block light on floors*; a change relights every room |
 | Rooms at Night > Doors block light | `portasBloqueiamLuz` | bool | on | | Doors and gates count as closed for lamp light (the game keeps them closed except while they open); arches, windows and doors with glass let it through. Applies to *Light through doors and windows* and both *light through openings* options; a change lights again only the stories with doors ([level-light-share](level-light-share.md)) |
+| Rooms at Night > Light bounces between rooms | `luzRefletidaEntreComodos` | bool | on | | The light a lit room sends through its arches into the rooms joined to it (physical rooms; [arches.md](arches.md)) |
 | Rooms at Night > Shadow softness | `suavidadeDasSombras` | float | 0.15 (15 cm) | 0.02 .. 0.5 | A lamp's size in metres: light through an opening, past a wall's end or top and a balcony's edge keeps a sharp edge next to it and a softer one farther behind; at least 1.5 texels on the lighting maps ([level-light-share](level-light-share.md)); Tester sub-part *Soft edges from the lamp's size* |
 | Rooms at Night > Game fixes > Smooth light maps | `mapasDosComodosSuaves` | bool | on | | Room light maps read as a B-spline, their texels dithered and lamps faded at the light cut; relights every room when changed ([room-map-smoothing](room-map-smoothing.md)); the three parts are Tester sub-parts only |
 | Stories > Outdoor light between floors | `luzExternaEntreAndares` | bool | on | | Outdoor lamps light every story ([level-light-share](level-light-share.md)) |
@@ -135,13 +138,15 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 | Stories > Game fixes > Every floor in full detail | `todosOsAndaresEmDetalhe` | bool | on | | Every floor of the active lot solved in full detail |
 | Performance > Lamp lighting > Lamp updates | `lampLightingMode` | string | `"instant"` | `"classic"`, `"instant"` | Instant: [Real-time outdoor lamps](rt-outdoor-lamps.md) on the parts of [Quick outdoor lamp edits](outdoor-lamp-delta.md); Classic: every room solved by the game, a dragged lamp's rooms once after the release ([lamp-drags](lamp-drags.md)) and an edit's stories shown together. A saved value is kept; a file without the key starts on Instant. Instant on a device that cannot run it shows a warning and works as Classic |
 | Developer > Compare lighting paths > Check quick lamp edits | `outdoorLampDeltaCheck` | bool | off | | Developer only, with Instant: each room 0 a delta brought up to date is solved in full again and compared ([outdoor-lamp-delta](outdoor-lamp-delta.md)) |
+| Developer > Compare lighting paths > Compare indoor lamps with GPU | `roomLampProbe` | bool | off | | Developer only, with Instant: each solve of the active lot's rooms other than room 0 is compared with the GPU's lamp law and logged ([gpu-room-lamps-probe](gpu-room-lamps-probe.md)) |
+| Developer > Compare lighting paths > Keep indoor lamps for GPU | `gpuRoomLamps` | bool | on | | The switch is developer only; players always have it with Instant: each solve of the active lot's rooms other than room 0 is kept for the GPU (base and each lot lamp's share per texel, 192 MB budget); with the probe on, recomposed and compared ([gpu-room-lamps](gpu-room-lamps.md)) |
 | Water & Snow > Lamp Glow (card switch) | `lagosRefletemLampadas` | bool | on | | Pond lamp pass ([water](water.md)) |
 | Water & Snow > Lamp Glow > Glow brightness | `brilhoNaAgua` | float | 40% | 10 to 40% | Lamp glow and sparkles on ponds |
-| Water & Snow > Water Reflections > Reflection brightness | `reflexoNoLago` | float | 156% | 0 to 300% (slider from 5%) | Shore reflection; needs Depth Blur ([../reflections.md](../reflections.md)) |
+| Water & Snow > Water Reflections > Reflection brightness | `reflexoNoLago` | float | 100% | 0 to 300% (slider from 5%) | Shore reflection; needs Depth Blur ([../reflections.md](../reflections.md)) |
 | Water & Snow > Snow > Sidewalk visibility | `calcadaComNevePisada` | float | 50% | 0 to 100% | Sidewalk concrete showing through trodden snow; needs *Street lamps light lots* ([roads](roads.md)) |
-| Individual options | `luzDasLampadasNatural` | float | 1.0 | 0 to 1 | Stock lamp colour: 0 pink (game), 1 warm white; applied on release ([lamp-colour](lamp-colour.md)) |
-| Individual options | `corPropriaNoLote` | bool | off | | Lot lamps get their own colour |
-| Individual options | `corDasLampadasDoLote` | float | 1.0 | 0 to 1 | That lot lamp colour |
+| Individual options | `luzDasLampadasNatural` | float | 0.25 | 0 to 1 | Stock lamp colour: 0 pink (game), 1 warm white; applied on release ([lamp-colour](lamp-colour.md)) |
+| Individual options | `corPropriaNoLote` | bool | on | | Lot lamps get their own colour |
+| Individual options | `corDasLampadasDoLote` | float | 0 | 0 to 1 | That lot lamp colour |
 | Individual options | `luar` | float | 0 (1.0 until 2.15.1, 0.277 in 2.15.1 and 2.15.2) | 0 to 2 | Moonlight at night (see *Brightness controls*); 0 in the Performance, Balanced and Quality presets too (1.817 until 2.15.1, 0.277 in 2.15.1 and 2.15.2); saved profiles keep the value they hold |
 | Individual options | `postesAcesosNoCalculo` | bool | on | | Street lamps count as lit in lot light solves (0x6BE18C); reinstall |
 | Individual options | `qualidadeAltaEmTodosOsLotes` | bool | off | | Experimental: every lot at the active lot's quality; reinstall; lots loaded afterwards |
@@ -156,17 +161,17 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 
 Notes:
 
-- **Lighting balance** (Lighting > Overview): *Subtle*, *Soft*, *Natural* and *Custom* set nine brightness values at
-  once (order: ground, roads, street lamps, lot lamps, objects, pieces, fences, walls, roofs). Water, moonlight, lamp
+- **Lighting balance** (Lighting > Overview): *Subtle*, *Soft*, *Natural* and *Custom* set six brightness values at
+  once. Water, moonlight, lamp
   colours and room background light are not part of a style. *Custom* is shown selected when the values match no
   style. *Undo choice* restores the previous values. The same card holds *Realistic lamp reach* (`kStyles` and
   `DrawLightingBalance` in `night_terrain_relight_patch.cpp`).
 
-  | Style | Ground | Roads | Street | Lot | Objects | Pieces | Fences | Walls | Roofs |
-  |---|---|---|---|---|---|---|---|---|---|
-  | Subtle | 0.675 | 1.0 | 0.72 | 0.72 | 0.675 | 0.675 | 0.675 | 0.27 | 0.405 |
-  | Soft (defaults) | 0.75 | 1.0 | 0.8 | 0.8 | 0.75 | 0.75 | 0.75 | 0.30 | 0.45 |
-  | Natural | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 0.56 | 0.6 |
+  | Style | Ground | Objects | Pieces | Fences | Walls | Roofs |
+  |---|---|---|---|---|---|---|
+  | Subtle | 0.81 | 0.675 | 0.675 | 0.675 | 0.27 | 0.405 |
+  | Soft | 1.0 | 0.75 | 0.75 | 0.75 | 0.30 | 0.45 |
+  | Natural (defaults) | 0.8966 | 1.0 | 1.0 | 1.0 | 0.56 | 0.6 |
 
 - **Dependencies** (`BeginDisabled`): `groundLight = g_bridge && g_smoothMaps` gates the Objects > Game fixes options
   from *Doors and windows stay lit* to *Fence brightness* (they read the world atlas, which exists only with both on; a button turns both on). Ground and road
@@ -494,8 +499,8 @@ only DXVK's.
 ### Diagnostics
 
 - `ApexRadiance_LOG.txt`: `[NightTerrainRelight] Installed (...)`, `[LotLightBridge] Active` (lot pass created) or
-  `Failed: ...`, and the batched line `[LotLightBridge] Shaders at their first draw: <kind>: ...` (some kinds still log
-  Portuguese words).
+  `Failed: ...`, and one line per shader at its first draw: `[LotLightBridge] <kind>: shader <address> patched`, `refused by D3D`
+  or `does not have the expected pattern` (with its `PS_<hash>`, the same across sessions).
 - Developer mode: `ShadersRecusados\<fix>_PS_<hash>.bin` holds every shader a pattern patch refused (max 300 per session).
 - Ctrl+Shift+F7 over a pixel: `ApexRadiance_LightProbe.txt` lists the draws covering it; the `mod:` line
   (`LotLightBridge::DescribeDraw`) says whether the mod redrew it and with which class.

@@ -80,7 +80,7 @@ std::atomic<int> g_wallBloomPreserved{0},g_wallBloomFallback{0};
 std::atomic<float> g_wallGain{1},g_groundGain{1},g_roadGain{1},g_lotMapGain{1},g_night{1};
 std::atomic<int> g_wallDrawn{0},g_groundGainDraws{0},g_lotDrawn{0},g_lotMissing{0},g_edgeMatched{0},g_edgeUnmatched{0};
 std::atomic<bool> g_softEdges{false},g_wallEnabled{true};
-bool g_inOwnCall=false,g_lotRectMiss=false,g_haveLastEdgeRect=false;
+bool g_inOwnCall=false,g_lotRectMiss=false,g_haveLastEdgeRect=false,g_offScreenTarget=false;
 std::string g_objDrawInfo;
 FakeShader nativePs{1},replacementPs{2};
 FakeShader* g_curPs=&nativePs;

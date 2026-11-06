@@ -359,6 +359,11 @@ at +n" = the target of the CALL there, "dword at +n" = the value there.
 | SceneHolderTeardown | 0x006E4DE0 | Sig | `53 55 56 57 8B F9 8B 4F 2C 85 C9 74 ?? E8 ?? ?? ?? ?? 8B 77 2C 85 F6 74` +0<br>alt: `8B 4F 2C 85 C9 74 ?? E8 ?? ?? ?? ?? 8B 77 2C 85 F6 74 ?? 8B CE E8` -6 | matches 1 / 1 (sigcheck.pl 2026-09-29: 158 of 158 ok) |
 | SwarmDrawableVtable | 0x00FFC248 | Sig, dword | `81 4E 44 10 00 00 02 C7 06 ?? ?? ?? ?? C7 86 10 02 00 00 00 00 00 00 C7 86 14 02 00 00 00 00 00 00 C7 46 40 01 00 00 00` +9 | matches 1 (.text scan; sigcheck.pl not run) |
 | SceneModelFurVtable | 0x00FF9B50 | Sig, dword | `88 86 DC 02 00 00 88 86 DD 02 00 00 C7 06 ?? ?? ?? ?? F3 0F 11 86 D8 02 00 00 8B C6 5E C2 08 00` +14 | matches 1 (.text scan; sigcheck.pl not run) |
+| SceneModelVtable | 0x00FF97F8 | Sig, dword | `8D 8E 10 02 00 00 C7 06 ?? ?? ?? ?? E8 ?? ?? ?? ?? F3 0F 10 05 ?? ?? ?? ?? 33 C0 89 86 88 02 00 00` +8 | matches 1 (.text scan; sigcheck.pl not run) |
+| SceneModelSubVtable1 | 0x00FF99D8 | Sig, dword | `68 ?? ?? ?? ?? 8D 8E 10 02 00 00 C7 06 ?? ?? ?? ?? C7 86 D0 02 00 00` +13 | not re-scanned with the push's address masked (a miss leaves that class an ordinary node) |
+| SceneModelSubVtable2 | 0x0105F390 | Sig, dword | `88 86 D0 02 00 00 89 86 D4 02 00 00 66 89 86 E0 02 00 00 C7 06 ?? ?? ?? ?? 8B C6 5E C2 08 00` +21 | matches 1 (.text scan; sigcheck.pl not run) |
+| SceneModelSubVtable3 | 0x0108AF90 | Sig, dword | `C7 06 ?? ?? ?? ?? C7 86 D0 02 00 00 FF FF FF FF 8B C6 5E C3` +2 | matches 1 (.text scan; sigcheck.pl not run) |
+| SceneModelSubVtable4 | 0x010760E8 | Sig, dword | `C7 03 ?? ?? ?? ?? C7 83 D0 02 00 00 ?? ?? ?? ?? EB 02 33 DB` +2 | matches 1 (.text scan; sigcheck.pl not run) |
 | ObjectTreeWalk | 0x00C60D30 | Sig | `53 8B 5C 24 08 55 8B 6C 24 10 56 8B F1 8B CB 33 C0 0B CD 74 ?? 8B 96 A0 00 00 00 2B 96 9C 00 00 00 57 33 FF C1 FA 02` +0<br>alt: `8B 44 24 0C 52 50 E8 ?? ?? ?? ?? 8B F0 85 F6 74 14 8B 16 8B 42 40 8B CE FF D0 83 F8 01` call at +6 (inside ObjectById) | matches 1 / 1 |
 | ObjectTreeSearch | 0x00C5FA60 | Sig | `53 55 56 8B 74 24 10 85 F6 0F 84 ?? ?? ?? ?? 8B 46 48 8B 5C 24 14 3B C3 8B 6C 24 18 75 ?? 8B 4E 4C 3B CD 74` +0<br>alt: `8B 04 B8 51 55 53 50 E8 ?? ?? ?? ?? 83 C4 10 85 C0 75` call at +7 (inside the walk) | matches 1 / 1 (sigcheck.pl 2026-09-29, after merging v1.4.0 and C6 / C8: 153 of 153 ok) |
 | WorldManagerPtr | 0x011ECBC4 | Sig (dword) | store in FUN_00c6cf80 at 0x00C6D0CC: `8D 8D 9C 00 00 00 89 2D ?? ?? ?? ?? E8` dword at +8<br>alt: clear in FUN_00c6b500 at 0x00C6B507: `51 53 56 33 DB 8B F1 89 1D ?? ?? ?? ?? 8B 8E 6C 01 00 00` dword at +9 | matches 1 / 1 |
@@ -526,6 +531,7 @@ All 55 ids resolve to the fixed Steam address with the table's own rules (offlin
 | 0x006A330C | texel address code | room_map_dither | bytes checked | TexelAddrSite | InRange(WallSolve, 0x400) `8B 45 0C 0F B7 56 22 0F AF 50 04 0F B7 4E 20 8D 3C 8A 8B 55 10 03 38` | 1 |
 | 0x00FA312C / 0x00FE774C | the pack's 255.0 and 12582912.0 | room_map_dither | data checked | PackConst255 / PackMagic | Deref(TexelPack, 0x1A / 0x5E) | - |
 | 0x006C7939 | the occluder's room mark call | lamp_mark_filter | call redirected | OccMarkCall | `8B 4E 14 50 89 46 1C E8` +7 | 1 |
+| 0x006C7CCA | the mark of the room a lamp left | lamp_mark_filter (physical indoor lamps) | call redirected | LampLeftMarkCall | `3B 46 1C 74 09 8B 4E 14 50 E8` +9 | 1 |
 | 0x006C4CF0 / 0x006B0A8D, 0x006B0B33, 0x006B0BFA, 0x006B0C9A, 0x006B0D26 | entry flag function / its five callers | lamp_mark_filter (developer counters) | calls redirected | EntryFlag / EntryFlagCall0..4 | LowestOf2 `8B 44 24 08 8B 54 24 04 50 52 68 ?? ?? ?? ?? E8 ?? ?? ?? ?? C2 08 00`; CallersOf(EntryFlag, 5) | 2 / 5 |
 
 Already resolved before the port (only their Steam-only gate was removed): BatchSamples (0x01158AC8, outdoor_delta),
@@ -541,6 +547,8 @@ time log and the light diag's globals.
 
 Still Steam-only, by design:
 
+- [GPU room lamps](../features/night-lighting/gpu-room-lamps.md): the 3D blockers' vtables and the test constants are fixed Steam
+  addresses, so the capture stays off on other builds, whose rooms keep the game's solves.
 - Exact byte checks that pin Steam's rel32s or register allocation (`kBatchPushesSteam`, the `call edx` before
   LightEvalReturn, the finalize's call offsets, the light detail origin call's target): other builds check what the patch
   needs instead.

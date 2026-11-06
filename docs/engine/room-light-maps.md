@@ -183,8 +183,8 @@ street lamp was read in full):
   N·L (ground_report 5, unverified detail);
 - colour = effective colour +0xE0 (`0x006BE18C`), i.e. zero while the lamp is off; this street-lamp evaluation also
   reads `[0x01158DA8]` = 3.333 right after (`0x006BE1A1`). PASSO3 3.2 models it as `col = E0 × 3.333` for type 11, and
-  notebook 3 calls it "the ×3.333 of the ground" that the rig formula lacks. Whether it applies to every sample or only to
-  ground samples is unverified.
+  notebook 3 calls it "the ×3.333 of the ground" that the rig formula lacks. It scales the capped term (3.333 × min(Cmax, .)):
+  a room lamp probe dump (02/11) recorded a type 11 lamp at 3.98 on an opening's wall, above Cmax, matching it to 0.01.
 
 Measured runtime values (F8 16:09, "LUZ POR PIXEL"): k1 = 1, k2 = 0.075, Cmax = 2, street factor 3.333, type-5 s = 5,
 blur passes 2, blur mode 0; spot (type 4) axis ≈ (0, −1, 0), offset −0.32, scale 4.9. k2 = 0.075 is why walls look much
@@ -368,11 +368,26 @@ solve).
   at `[ebp+8]` and the current sample's offset at `[esp+0Ch]` (read in the native disassembly).
 - **Floor switch.** When the camera changes stories, the game invalidates rooms from the caller `0x006C7451` and solves
   the shown story again at class 2 (the most detailed).
-- **Map sets.** A manager's room light maps are at `+0x16C` + class x 64, four maps each (*unverified* in game). Its
+- **Map sets.** A manager's room light maps are at `+0x16C` + class x 64, three classes of four maps each (the teardown
+  at `0x006A805A` frees exactly these; *unverified* in game). `+0x230` onward is the room hash, not a map set. Its
   directional basis maps are at `+0x220` with the same layout; the texture is the wrapper's `+0x30`, confirmed in game
   when the stair wall masks matched their story.
 - **Resolutions.** The directional maps are 64 x 64 at 1 texel per metre, sampled 0.5 m above the floor; the floor
   light map is 4 texels per metre.
+- **Floor maps at diagonal walls.** A class-2 floor map lays its tiles out 4 x 4 texels each from column 0, a power of
+  two wide (`FloorWallMaskFor`: width = pow2(4 x grid width), the map that wide or twice it). The half tiles a diagonal
+  wall cuts are not laid out by tile: their texels follow in the split tiles' atlas, from that power of two on, in short
+  strips rotated with the diagonal (03/11 14:36 scene, story 1 room 8: main texels at columns 68-95, its half tiles' at
+  128-240 in rows 1-10; steps of 0.24-0.25 m along a strip, 0.36 m or several metres across a strip's end). Each texel
+  keeps the solve's own sample point, so a map neighbour there is not always a world neighbour: a 4 x 4 read (Apex's
+  smooth light maps) mixes other half tiles' light; the game reads them with its bilinear filter. The code that packs
+  the strips was not traced (UNVERIFIED: the strip length and order; read from the solve's samples only).
+  Whole tiles go there too: `0x006A7E5E` passes `0x006A4FA0` (a neighbour tile holds a diagonal) to the origin builder `0x006AA480`, which then
+  gives all four quadrants an atlas block (8 x 8 and a border at 8 texels a tile, pitch 10, from column pow2 + 1, row 1). Rooms read them through
+  the floor mesh's origins. **Outdoor floors do not:** their VS writes the map's uv from the position (`VS_30E66550`: `o3.xy = 0.5 v0.xy x c12`,
+  c12 = 1/64), so they always read the tile columns. There such a tile holds only a 2-texel border fill (at 4 texels a tile that is the whole tile;
+  at 8 it leaves a 4 x 4 hole: M8 of the 05/11 23-40-21 capture, room 8's 7 whole atlas tiles, 25.0% of the places alpha 0), and a half tile's room-0
+  triangle reads the other half's texels. `PhysLampPick::AddFloorGridTwins` relights those whole tiles at their columns.
 - **Ambients.** `+0x110` is the ambient the floor and wall shaders draw (`c4`), `+0x120` the copy objects use, and
   `+0x650` the ambient sampler's copy. Rooms without a lamp of their own can hold exactly the same ambient.
 

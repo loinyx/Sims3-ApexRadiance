@@ -73,6 +73,18 @@ to 0, the other two to the half extents +0x1A0) and `dir` is the normalised dire
 point, in the light's axes. There is no `N.L` term. An area light therefore lights only the side its third axis points
 away from. Apex's per-pixel lamps take that facing as the light's cone
 ([objects-and-rigs.md](../features/night-lighting/objects-and-rigs.md#per-pixel-patch)).
+Read again 02/11 with dumpbin: L = (U.v, V.v, N.v) for v = position (+0x120) - point, U +0x170, V +0x190, N +0x180 (dots summed
+(z + y) + x; the vector's w lane is stack garbage that no sum reads); the nearest point holds L's first two lanes within
++-(+0x1A0, +0x1A4) (rectangle) or, for the disc (`0x006BD7C0`), scales them to length +0x1A4 when x^2 + y^2 exceeds +0x1A0,
+and its third lane is 0. `d` is `sqrtps`, 1 / (k1 d^2) one `rcpps` Newton step, `dir` `rsqrtps` with two; the cap comes
+before the facing, as for the tube. At d = 0 (a point on the area) the evaluation is NaN, and the luminance gate of
+`0x0069FD60` (`ja` on an unordered compare) lets it into the room's sum. GPU room lamps keep this law exactly
+(`GpuLampLaw::Area`, `gpu-room-lamps.md` item 12).
+TubeLight room law (`0x006BFA70` over `0x006BD100`, dumpbin 02/11): `E = colour x max(0, N.l) x min(k2 x range x intensity /
+(k1 x d^2), cap)`, the facing after the cap, where `d` and `l` go to the nearest point of the segment from the position
+(+0x120) to the end +0x170 (the end when (end - pos) . (p - pos) exceeds the square of +0x1A0, its length). The normal's w
+wraps N.l as for the bare bulb (`N.l (1 - w) + w`; 0 in the room solves). Tubes of the test lot: a 1 m segment straight up,
+k2 x range x intensity / k1 = 3.375 (fitted from probe dumps; GPU room lamps, `gpu-room-lamps.md` item 12).
 
 Light vtable functions used by the engine and Apex:
 
@@ -285,6 +297,8 @@ only the light manager's probe queue, not impostors or thumbnails.
 | What the override changes for a capture | only the sun / moon parameter (`0x00C11970` reads it at `0x00C1487C`), the sun direction and the keyframed sky colours (`0x00C14860`); the smooth night `sky+0x780`, the level `+0xF0`, `+0xF4`, the clock and the sun times keep their live values; restored right after the capture (`0x006AE605`) | Verified in the bytes |
 | Why | the exterior probe is captured again at the next hour whose sky colour differs by 0.15 and blended toward it (state at lightMgr+0xB0..+0xC4) | Verified in the bytes; the keyframe channel unverified |
 | Lot impostors | the impostor pump `0x00AD97E0` updates the light manager with argument 0 (`0x00AD9847`), skipping the probe queue and the override; the impostor material binds albedo, AO, water, detail and holiday light textures and is lit when drawn; rebuilt on content changes | Pump verified; the material and the rebuild trigger inferred |
+
+Room probes (2026-11 static reading): a roofed room's LightProbeProxy is at room+0x154, the pool's probe it holds at proxy+8, given out by camera rating (`0x006B02D0`). The draw binds that probe's cubes once it is ready (`0x006AD3DC`: +0x2C95, then `0x006B42C0`: specular +0x2C5C), else the default (`0x006B2F30`). A capture is queued when |clock - last| reaches the period (`0x006B3100`: +0x2B44 clock, +0x2C6C last, +0x2C70 period). Four things re-arm one: the period itself (`0x006AEA60`); a solve (`0x69F5F0` -> `0x6AC8A0` -> `0x006B1CA0(2.0)`, which sets last so it falls due 2 s later); the pool handing a probe to a room (`0x006B04D5`, the same call); and Apex's `ReflectionDue` after a lamp edit (`outdoor_delta.cpp`). The log's `[ProbeNeutral] Reflection cube` line says which one it saw, and the room. So a room's cube changes with the camera and the clock as well as its lamps, and two rooms joined by an arch can hold very different cubes ([arches](../features/night-lighting/arches.md)).
 
 Changing the hour the probes take would remove the exterior probe's blend between sky keyframes (visible jumps), so
 Apex leaves the queue alone. A future-hour exterior capture keeps the live lamps (a small mismatch, softened at night by

@@ -45,7 +45,7 @@ light as the ground next to them.
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| Ground light (Outside > Brightness) | `luzNoChao` | float | 100% | 25 to 300% | Road lamp brightness, the same as every other ground ([README](README.md)). Needs *Street lamps light lots* |
+| Ground light (Outside > Brightness) | `luzNoChao` | float | 90% | 25 to 300% | Road lamp brightness, the same as every other ground ([README](README.md)). Needs *Street lamps light lots* |
 | Sidewalk visibility (Snow card) | `calcadaComNevePisada` | float | 50% | 0 to 100% | How much sidewalk concrete shows through snow; 0% keeps the game's look. Needs *Street lamps light lots* (`SetSidewalkClear` clamps 0 to 1) |
 
 Roads also depend on *Street lamps light lots* (`luzDoPosteNaGramaDoLote`, the dispatch gate) and use *Smooth ground

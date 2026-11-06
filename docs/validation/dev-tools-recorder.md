@@ -3,7 +3,7 @@
 The feature is described in [features/dev-tools/recorder.md](../features/dev-tools/recorder.md). It must:
 
 - Start and stop exactly once per request, whether it comes from the menu, the shortcut or both in the same frame.
-- Stop by itself after 20 seconds and save one capture folder.
+- Stop by itself after 60 seconds and save one capture folder.
 - Save nothing when cancelled, even when the deadline is due in the same frame.
 
 ## Automated tests
@@ -17,13 +17,14 @@ The feature is described in [features/dev-tools/recorder.md](../features/dev-too
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-05 | `1f76e83` with the 3.0.0 working tree, before the release commit | `recorder_check` | 16 recording request, cancel, settle and auto-save scenarios passed | None |
 | Not recorded | PR #2 | `recorder_check` | Prints "10 recording request/cancel/auto-save scenarios passed using production bodies" when it passes | None |
 
 ## In-game test plan
 
 1. Night Lights on, indoors. Press the Recorder shortcut (`X`, `6` or `F6`). **Expected:** the notice "Recording N s ·
    press <key> to stop" with a red pulsing icon.
-2. Switch floors and back, then wait. **Expected:** the recording stops by itself at 20 s; notice "Recording saved.
+2. Switch floors and back, then wait. **Expected:** the recording stops by itself at 60 s; notice "Recording saved.
    Open Report a problem to find your files".
 3. Open the folder. **Expected:** `Recording.txt` with `[solve]`, `[status]`, `[room]` and `[furniture]` lines in time
    order and the settings at the end; `Wall seams.csv` with the header row and wall samples near the floor lines.

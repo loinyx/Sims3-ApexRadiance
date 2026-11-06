@@ -18,6 +18,7 @@
 #endif
 #include "picture.h"
 #include "picture_output.h"
+#include "capture_burst.h"
 #include "cube_lut.h"
 #include <filesystem>
 #include <fstream>
@@ -1813,7 +1814,7 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
             std::string msg;
             if (ShaderCache::CreatePixelShader(dev, kAdaptPsId, &gpu.adaptPs, &msg) == ShaderCache::Result::CompileFailed) LOG_ERROR("[Picture] AdaptPS failed to compile: " + msg);
         }
-        if (fAuto && gpu.adaptPs) {
+        if (fAuto && gpu.adaptPs && !CaptureBurst::ViewFrame()) { // (a capture's flat colours would stay in the adapted value for seconds)
             IDirect3DSurface9* rt0 = nullptr;
             dev->GetRenderTarget(0, &rt0);
             const int next = gpu.adaptCur ^ 1;

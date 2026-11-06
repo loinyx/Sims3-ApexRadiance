@@ -23,10 +23,17 @@
 // Off: nothing of this runs and no texture is swapped (the copies are dropped, the game's maps bound again).
 #include <d3d9.h>
 #include <cstdint>
+#include <memory>
 #include <string>
 
 namespace RtLampGpu {
 struct DeviceCalls;
+}
+namespace RtLampProxy {
+struct Lot;
+}
+namespace GpuLampLaw {
+struct Lamp;
 }
 
 namespace RtOutdoorLamps {
@@ -59,12 +66,41 @@ bool RestartIncomplete(); // terminal map fallback, rather than work still runni
 // The lamp entry update of `light` (registered in `room` of tree level `treeLevel`): true = the GPU draws it on every story
 // of its lot now, so its edit marks no room
 bool HandlesLamp(uintptr_t treeLevel, uintptr_t light, int room);
+// Any thread: `room0` is a room 0 of the active lot while every story's maps are relit, and the GPU draws `light` there (GPU
+// room lamps: an indoor lamp's edit skips the solves only when every room 0 listing it is covered so)
+bool CoversLamp(const void* room0, uintptr_t light);
+// Any thread: the law the GPU draws `light` with, in world space (the lamp classes 3, 4, 5 and 11 of lot `lot`, alive, a
+// shade the law describes; a TubeLight 6 with a segment, GpuLampLaw::Tube, and the area lights 9 and 10, GpuLampLaw::Area, which only the kept rooms draw); false for any other light. regRoom = the room it is registered in (0 outdoors). For the
+// developer's room lamp probe (OutdoorDelta::SetRoomProbe)
+// lotXf (16 floats, LotXform): the law in that lot space instead (physical indoor lamps' shadow tiles)
+bool WorldLaw(uintptr_t light, uint64_t lot, bool reachOn, GpuLampLaw::Lamp& out, int& type, int& regRoom, const float* lotXf = nullptr);
+// Any thread: a story manager's lot space (its +0xE0 row-major 4x4: world row vector x it = lot), false when unreadable
+bool LotXform(uintptr_t mgr, float out[16]);
+// Render thread: the generation of the occluders the kept shadow tiles use (physical indoor lamps' open tops), 0 none
+uint32_t KeptMeshGen();
+bool RoomOpenAbove(int story, int room); // (render thread) the physical occluders opened that room's ceiling to the story above
+// Any thread (physical indoor lamps, stage 5): the lot whose open-top build (RtLampProxy::Build(lot, mesh, true)) is the kept
+// shadow tiles' occluders now, and its generation; null while none is uploaded
+std::shared_ptr<const RtLampProxy::Lot> KeptLot(uint32_t& gen);
+// Any thread (GPU room lamps): a lamp of lot `lot` WorldLaw gives no law (a tube without a segment) whose evaluation is its colour (+0xE0) times a share its
+// colour does not change: a TubeLight (type 6, 0x006BFA70). colour: that colour now; geo: a signature of what the share reads
+// (intensity, the tube's ends and length, range): an edit that changes it is not a colour edit. False for any other light
+bool ColourLaw(uintptr_t light, uint64_t lot, float colour[3], uint64_t& geo);
+// Any thread: the story tracker of the lot this path draws when `room` belongs to it (else 0; for the room lamp probe's
+// occluders, LevelLightShare::ExportLotProxy)
+uintptr_t TrackerOf(const void* room);
 // Any thread: `room` is a room 0 of the active lot while every story's maps are relit (OutdoorDelta's lock step leaves the
 // deltas of drawn lamps out then)
 bool CoversRoom(const void* room);
-// An edit of such a lamp (kind 0 a value or a switch, 1 a move): timed until every story shows it; the rooms that take room
-// 0's lamps are sent after the room update
-void NoteLampEdit(uintptr_t treeLevel, uintptr_t light, int kind);
+// Any thread (physical indoor lamps, stage 4): CoversRoom, and every map of that room 0 was relit physically (its lot lamps with a law
+// drawn from their laws by reach, OutdoorDelta::TakesLampEditPhys)
+bool PhysCoversRoom0(const void* room0);
+// Any thread: the active lot's tracker (the one whose occluders are wanted), 0 none
+uintptr_t ActiveTracker();
+// An edit of such a lamp (kind 0 a value or a switch, 1 a move; settle: a switch or an intensity change): timed until every
+// story shows it; the rooms that take room 0's lamps are sent after the room update (with the physical model, only after a
+// switch or an intensity change when every story draws the lamp from its law)
+void NoteLampEdit(uintptr_t treeLevel, uintptr_t light, int kind, bool settle);
 void AfterRoomUpdate(const void* treeLevel);
 // A GPU lamp switched on: its edit took the usual path (its stories gather it again); the log follows the stories that draw it
 void NoteSwitchOn(uintptr_t treeLevel, uintptr_t light);

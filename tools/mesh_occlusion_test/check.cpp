@@ -4,6 +4,8 @@
 #undef main
 #include "features/mesh_occlusion.h"
 #include "features/mesh_budget_policy.h"
+#include "features/stair_set.h"
+#include "features/half_float.h"
 #include "build_flavor.h"
 #include "features/dev_switches.h"
 #include <wrl/client.h>
@@ -90,6 +92,37 @@ void Collect(IDirect3DDevice9* dev,bool gap,bool index32=false,bool badIndex=fal
     Reset();PumpSolidMeshes();Check(!Blocked(p,q)&&g_solidGroups.empty(),"floor/world reset drops old geometry");
     dev->SetStreamSourceFreq(0,1);dev->SetStreamSourceFreq(1,1);
 }
+// steady_indoor_light on a lot with a floor hole: a group is read once for the stair set, nothing reaches the mesh set
+void StairCollect(IDirect3DDevice9* dev,IDirect3DPixelShader9* ps){
+    RtLampProxy::Lot lot;lot.stories.resize(2);
+    for(int s=0;s<2;++s){lot.stories[s].story=s;lot.stories[s].w=lot.stories[s].h=32;lot.stories[s].plane=3.0f*s;}
+    lot.stories[1].removed.assign(32*32,0);lot.stories[1].removed[20*32+10]=15;
+    const auto published=generation.load();
+    ComPtr<IDirect3DVertexBuffer9> vb,instances;ComPtr<IDirect3DIndexBuffer9> ib;ComPtr<IDirect3DVertexDeclaration9> declaration;
+    const float quad[][4]={{0,0,0,1},{1,0,0,1},{1,0,1,1},{0,0,1,1}};const float placement[8]={10,2,20,1,1,0,0,1};const uint16_t ids[]={0,1,2,0,2,3};void* data=nullptr;
+    dev->CreateVertexBuffer(sizeof quad,0,0,D3DPOOL_MANAGED,vb.GetAddressOf(),nullptr);vb->Lock(0,0,&data,0);std::memcpy(data,quad,sizeof quad);vb->Unlock();
+    dev->CreateVertexBuffer(32,0,0,D3DPOOL_MANAGED,instances.GetAddressOf(),nullptr);instances->Lock(0,0,&data,0);std::memcpy(data,placement,32);instances->Unlock();
+    dev->CreateIndexBuffer(sizeof ids,0,D3DFMT_INDEX16,D3DPOOL_MANAGED,ib.GetAddressOf(),nullptr);ib->Lock(0,0,&data,0);std::memcpy(data,ids,sizeof ids);ib->Unlock();
+    const D3DVERTEXELEMENT9 elements[]={{0,0,D3DDECLTYPE_FLOAT4,D3DDECLMETHOD_DEFAULT,D3DDECLUSAGE_POSITION,0},{1,0,D3DDECLTYPE_FLOAT4,D3DDECLMETHOD_DEFAULT,D3DDECLUSAGE_POSITION,1},{1,16,D3DDECLTYPE_FLOAT4,D3DDECLMETHOD_DEFAULT,D3DDECLUSAGE_POSITION,2},D3DDECL_END()};
+    dev->CreateVertexDeclaration(elements,declaration.GetAddressOf());dev->SetVertexDeclaration(declaration.Get());
+    dev->SetStreamSource(0,vb.Get(),0,16);dev->SetStreamSource(1,instances.Get(),0,32);dev->SetIndices(ib.Get());
+    dev->SetStreamSourceFreq(0,D3DSTREAMSOURCE_INDEXEDDATA|1);dev->SetStreamSourceFreq(1,D3DSTREAMSOURCE_INSTANCEDATA|1);
+    dev->SetRenderState(D3DRS_ALPHABLENDENABLE,FALSE);dev->SetRenderState(D3DRS_ALPHATESTENABLE,FALSE);dev->SetRenderState(D3DRS_ZWRITEENABLE,TRUE);
+    g_curPs=ps;auto& set=StairSet::g_set;
+    const auto note=[&]{g_solidNextScan=0;g_solidScanning=false;PumpSolidMeshes();Check(g_solidReadBudget==1,"stair set: a read slot while it is wanted");NoteSolidMesh(dev,D3DPT_TRIANGLELIST,0,0,4,0,2,true);};
+    set.Begin(lot,7);note();
+    Check(set.Groups()==1&&set.Tris()==2,"stair set: the group over the hole is kept");
+    note();
+    Check(set.Groups()==1,"stair set: a group is read once per lot, not every five seconds");
+    Check(g_solidGroups.empty()&&g_solidTriangles==0&&!snapshot.load()&&generation.load()==published,"stair set: no mesh set, no publish, so no solve");
+    set.Begin(lot,8);note();
+    Check(set.Gen()==8&&set.Groups()==1&&set.Tris()==2,"stair set: a new geometry generation reads the groups again");
+    for(uint32_t i=0;i<StairSet::kMaxUploads;++i)set.Uploaded(0);
+    PumpSolidMeshes();Check(g_solidReadBudget==0,"stair set: no scan frames once no upload is left");
+    set.Clear();PumpSolidMeshes();
+    Check(g_solidReadBudget==0,"stair set: no reads once it is not wanted");
+    g_curPs=nullptr;dev->SetStreamSourceFreq(0,1);dev->SetStreamSourceFreq(1,1);
+}
 int main(int argc,char** argv){
     if(argc<3)return 2;
     // Built with /DAPEX_DEVELOPMENT_BUILD_FLAVOR the development switches are on: the same checks then cover their paths.
@@ -126,6 +159,7 @@ int main(int argc,char** argv){
         // no indoor pass reads the mesh set: nothing is read in the draw hooks and nothing is published
         PumpSolidMeshes();PumpSolidMeshes();
         Check(g_solidReadBudget==0&&g_solidGroups.empty()&&g_solidTriangles==0&&!snapshot.load(),"steady_indoor_light: no buffer reads, no mesh set");
+        StairCollect(gpu.dev,opaque.Get());
     }else{
     g_curPs=opaque.Get();Collect(gpu.dev,false);Collect(gpu.dev,true);Collect(gpu.dev,true,true);Collect(gpu.dev,false,false,true);Collect(gpu.dev,false,false,false,true);
     Collect(gpu.dev,false,false,false,false,false,true);Collect(gpu.dev,true,false,false,false,true,true);
@@ -136,6 +170,7 @@ int main(int argc,char** argv){
 
         DevSwitches::steadyIndoorLight=true;PumpSolidMeshes();PumpSolidMeshes();
         Check(g_solidReadBudget==0&&g_solidGroups.empty()&&g_solidLastPublished.empty()&&!snapshot.load(),"steady_indoor_light switched on: mesh set dropped, no reads");
+        StairCollect(gpu.dev,opaque.Get());
         DevSwitches::steadyIndoorLight=false;PumpSolidMeshes();
         Check(g_solidReadBudget==1,"steady_indoor_light switched off: discovery starts over");
     }

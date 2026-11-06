@@ -8,11 +8,13 @@
 |---|---|---|---|
 | `tools/profile_package_test/` | Package parsing, CRC, paths, collisions, rollback and production import/export backend | See harness sources | Windows, TOML headers |
 | `tools/developer_mode_check/` | Public build ignores Development and remains in normal mode | See harness sources | Windows, C++20 |
+| `tools/settings_migration_test/` | The one-time move to the new lighting defaults | `run.ps1` | MSVC x86 |
 
 ## Latest results
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-05 | `1f76e83` with the 3.0.0 working tree | `settings_migration_test` | 30 passed; `ApexLightingDefaults::Apply` on 75 real tomls of older versions | MSVC x86 |
 | 2026-10-09 | 7ddaa214 (release source) | Production package/backend fixture | 3,869 checks passed | Windows files |
 | 2026-10-09 | 7ddaa214 | Public developer-mode fixture | Passed | Win32 public |
 
@@ -34,5 +36,6 @@ The test-build gameplay check was completed before release preparation. No detai
 - Native dialog overwrite confirmation and ZIP transfer on a separate computer.
 - Extended preset switching and all language layouts.
 - Preset shortcuts (2.12.2): steps 4 to 6 in game.
+- The look shared by the three built-in presets (3.0.0), on a fresh install: not seen in game.
 
 Release provenance: the combined code was independently reviewed at `7ddaa214a6678cdbc0c9554082c779ffc485fa13`. Subsequent documentation-only edits do not change these code paths. The published release tag records the final source commit.

@@ -63,6 +63,14 @@
 //   not by a slot's content: another module that swaps the update or draw slot for its own stub (a profiler, a crash
 //   logger) leaves the vtable as it is, and a slot compare would then miss every such node. The Swarm drawable is queued
 //   again by its own update every frame and fur models are few, so the budget is unchanged for ordinary nodes.
+//   Models (issue #56): the update 0x006F7B40 is also the only writer of the part count (+0x19C = the current LOD's count
+//   + 1) and of the draw entries' part indices, while the LOD slot (handle +0x210, slot +8) can change before it runs:
+//   0x006DC5B0 swaps the slot, and 0x006F5400 calls it outside the update and only then queues the node. The draw 0x006F6250
+//   indexes the current LOD's part array (+0x40) with that count (0x006F6734) and those indices (0x006F696E) and has no
+//   bounds check, so a model that waits with a shorter LOD in its slot reads past the array and calls a getter on what
+//   follows it (0x006F673C, 0x006F6B5B). VERIFIED in the disassembly; that the reported crashes come from the deferral is
+//   INFERRED. A model is updated past the budget only in that state, so ordinary LOD changes still wait. Its classes are told
+//   by vtable, as above, and an unresolved one just stays an ordinary node.
 //   The rule: camera still -> the game's drain; camera moving -> the budgeted copy; once a node waited maxDeferMs the budget
 //   grows every frame (x2, x4 ... x64, doubling every kGrowStepMs) instead of the whole backlog at once (05/10: the forced full
 //   drain was a single long frame in the middle of a camera move); a node waited kHardFactor x maxDeferMs -> the game's drain
@@ -165,6 +173,8 @@ std::atomic<bool> g_stopped{false}; // a safety check failed: the game's drain f
 uintptr_t g_drainFn = 0;
 uintptr_t g_swarmVtable = 0; // 0x00FFC248: nodes whose update must not wait (see "Draw state" above)
 uintptr_t g_furVtable = 0;   // 0x00FF9B50: same
+uintptr_t g_modelVtables[5] = {}; // the other classes with the model update and handle: wait unless ModelOutgrewLod
+constexpr uint32_t kModelPartCount = 0x19C, kModelLodSlot = 0x218, kLodPartCount = 0x44; // node +0x19C, handle +0x210 slot +8, LOD +0x44 (0x006C93D0)
 FnBounds g_bounds = nullptr;   // 0x006FB4B0
 FnSpatial g_spatial = nullptr; // 0x006FAD70
 std::atomic<DWORD> g_drainThread{0};
@@ -481,12 +491,22 @@ void UpdateTail(Link* local, uint32_t* counter, float* bounds) {
     *counter += 1;
 }
 
+// A model whose last update counted more parts than its current LOD has (see "Models" in the header comment). The slot's low
+// bits mark a handle that is not a loaded LOD (0x006DB810), which the draw skips.
+bool ModelOutgrewLod(const uint8_t* node) {
+    const uintptr_t lod = *reinterpret_cast<const uintptr_t*>(node + kModelLodSlot);
+    return lod && !(lod & 3) && *reinterpret_cast<const uint32_t*>(lod + kLodPartCount) + 1 < *reinterpret_cast<const uint32_t*>(node + kModelPartCount);
+}
+
 // True when the node's draw this frame depends on its update (see "Draw state" in the header comment); reads only, and an
 // unreadable node is left to the development checks (no C++ objects here: SEH)
 bool MustNotWait(const uint8_t* node) {
     __try {
         const uintptr_t vtable = *reinterpret_cast<const uintptr_t*>(node);
-        return vtable == g_swarmVtable || vtable == g_furVtable;
+        if (vtable == g_swarmVtable || vtable == g_furVtable) return true;
+        for (const uintptr_t model : g_modelVtables)
+            if (vtable == model) return ModelOutgrewLod(node);
+        return false;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -775,6 +795,11 @@ bool Start(std::string* error) {
     g_drainFn = drain;
     g_swarmVtable = swarmVtable;
     g_furVtable = furVtable;
+    g_modelVtables[0] = GameAddr::Get(GameAddr::Id::SceneModelVtable);
+    g_modelVtables[1] = GameAddr::Get(GameAddr::Id::SceneModelSubVtable1);
+    g_modelVtables[2] = GameAddr::Get(GameAddr::Id::SceneModelSubVtable2);
+    g_modelVtables[3] = GameAddr::Get(GameAddr::Id::SceneModelSubVtable3);
+    g_modelVtables[4] = GameAddr::Get(GameAddr::Id::SceneModelSubVtable4);
     g_bounds = reinterpret_cast<FnBounds>(bounds);
     g_spatial = reinterpret_cast<FnSpatial>(spatial);
     LotLightingMotion::SampleCameraMoving(); // parses the camera position now (Start's thread), not in the first frame

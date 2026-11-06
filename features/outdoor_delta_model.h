@@ -16,6 +16,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
+#include <tuple>
 
 namespace OutdoorDeltaModel {
 
@@ -193,6 +195,120 @@ inline float ReachBound2(float W, float esum, float spill, float thr, float marg
     const float s = std::isfinite(spill) ? std::max(spill, 1.0f) : 1.0f;
     const float d2 = margin * W * esum * s / thr;
     return std::isfinite(d2) ? d2 : -1.0f;
+}
+
+// The room lamp probe (OutdoorDelta::SetRoomProbe): one lamp's part of a texel as the solve gave it (g) against the GPU's law
+// unshadowed (m). Unlit = both under half a level; Match = within 2 levels; Dark = the solve gave under a level (a test the law
+// has no shadow for shaded it); Extra = the law gives under a level; Strength = both lit, a different amount
+enum class ProbeClass { Unlit, Match, Dark, Extra, Strength };
+inline ProbeClass ProbeClassify(const float g[3], const float m[3]) {
+    constexpr float kLevel = 1.0f / 255.0f;
+    const float gm = std::max({g[0], g[1], g[2]}), mm = std::max({m[0], m[1], m[2]});
+    if (gm < 0.5f * kLevel && mm < 0.5f * kLevel) return ProbeClass::Unlit;
+    if (std::max({std::fabs(g[0] - m[0]), std::fabs(g[1] - m[1]), std::fabs(g[2] - m[2])}) <= 2.0f * kLevel) return ProbeClass::Match;
+    if (gm < kLevel) return ProbeClass::Dark;
+    if (mm < kLevel) return ProbeClass::Extra;
+    return ProbeClass::Strength;
+}
+
+// ---- GPU room lamps stage 4: the directional maps (FUN_006a09f0; docs/features/night-lighting/gpu-room-lamps.md) ----
+// A sample's accumulator is 16 floats, map i's r, g, b, w at 4i: zero, then FUN_0069f280 (the game's step) adds each light of
+// the room's list. A light's part (the accumulator after it less before) is kept with its share of the step called again
+// there: part = pass x step. False when the step is dark there or the part is not such a multiple (Apex's tests did more
+// than scale it); pass is then NaN.
+inline bool BasisPass(const float part[16], const float step[16], float& pass) {
+    pass = std::nanf("");
+    float ss = 0.0f, ps = 0.0f, top = 0.0f;
+    for (int i = 0; i < 16; i++) {
+        if ((i & 3) == 3) continue; // (w is not packed)
+        ss += step[i] * step[i], ps += part[i] * step[i], top = std::max({top, std::fabs(step[i]), std::fabs(part[i])});
+    }
+    if (!(ss > 1e-24f) || !std::isfinite(ss) || !std::isfinite(ps)) return false;
+    const float p = ps / ss;
+    for (int i = 0; i < 16; i++)
+        if ((i & 3) != 3 && !(std::fabs(part[i] - p * step[i]) <= 2e-6f + 1e-4f * top)) return false; // (the game's acc += rounds)
+    pass = p;
+    return true;
+}
+// A lamp's part again from the step now: pass x step (mult: how often the list holds it). False when the step is lit and
+// the pass is not known
+inline bool BasisPartNow(float pass, int mult, const float step[16], float out[16]) {
+    bool lit = false;
+    for (int i = 0; i < 16; i++) lit = lit || ((i & 3) != 3 && step[i] != 0.0f);
+    if (!lit) {
+        std::fill(out, out + 16, 0.0f);
+        return true;
+    }
+    if (!std::isfinite(pass)) return false;
+    for (int i = 0; i < 16; i++) out[i] = pass * static_cast<float>(mult) * step[i];
+    return true;
+}
+// Map m's pack input of an accumulator: r, g, b in [0, 1], alpha 1 (0x006A0C93..0x006A0CB6), then the game's pack 0x0060CD10
+inline void BasisPackInput(const float acc[16], int m, float out[4]) {
+    for (int i = 0; i < 3; i++) {
+        const float v = acc[4 * m + i];
+        out[i] = std::isfinite(v) ? std::clamp(v, 0.0f, 1.0f) : 0.0f;
+    }
+    out[3] = 1.0f;
+}
+// A directional texel takes `want` only while it holds `expect` (what the room's capture or Apex's last write left there:
+// another room's solve may have written it since) or `game`, the room's own kept solve's value: any solve of the story copies
+// the class's whole working set back, so a sibling room's solve put that value over Apex's write, and the room was left at the
+// game's light until its own next solve (furniture flicker, "392 left" right after room 3's keep, 03/11). True when written
+inline bool BasisWrite(uint32_t& texel, uint32_t want, uint32_t expect, uint32_t game) {
+    if (texel != expect && texel != game) return false;
+    texel = want;
+    return true;
+}
+// (physical) Apex's last write (`last`, 4 per sample) carried over the room's next kept solve of the same samples: a texel Apex
+// wrote keeps its value; one still expecting the earlier solve's (another room's solve wrote it) takes the new solve's (no change)
+inline void CarryBasis(uint32_t* last, const uint32_t* prevGame, const uint32_t* game, size_t n) {
+    for (size_t i = 0; i < n; i++)
+        if (last[i] == prevGame[i]) last[i] = game[i];
+}
+// (physical indoor lamps, stage 5) a lamp's directional part at a sample: its room row (mult x norm scale, as the room's maps
+// draw it) x its physical share there x the game's step called now; the share is dropped under `drop` as the game drops it
+// (K_DROP). No furniture fill (RtLampGpu::FurnitureFill): a still lamp's parts are the game's levels (BasisPartNow), so a fill
+// here alone would light objects under a table only while it moves
+inline void BasisPartPhys(float row, float share, float drop, const float step[16], float out[16]) {
+    if (drop > share || !std::isfinite(share)) share = 0.0f;
+    for (int i = 0; i < 16; i++) out[i] = row * share * step[i];
+}
+// (physical) a lamp's directional parts over a room's n samples added to acc. A lamp where it stood at the room's kept solve
+// (`still`, pass: its kept shares, mult) takes the game's part (BasisPartNow: the game's levels exactly, a value edit
+// included); a moved one the physical part x scale (the game's over the physical levels when it last stood still, 1 unknown).
+// The moved part has the walls' share (vis) and no 3D test: the game's step takes no room, so its directional maps hold no
+// furniture shadow, and with one the counters behind the island read 22 during a drag and 36.6 once the solve landed, the lamp
+// in the same place (23:07 video of 03/11): the furniture's tone must already be the solve's while the lamp moves. game / phys:
+// the still lamp's summed levels both ways (the next move's scale). pane (null: 1): the glass the lamp's light crosses to each sample, after
+// the drop as the room's maps take it
+inline void BasisLampAdd(bool still, const float* pass, int mult, float row, const float* vis, float drop, const float* step, size_t n, float scale,
+                         float* acc, double& game, double& phys, const float* pane = nullptr) {
+    float p[16], g[16];
+    for (size_t i = 0; i < n; i++) {
+        BasisPartPhys(pane ? row * pane[i] : row, vis[i], drop, &step[i * 16], p);
+        if (still && BasisPartNow(pass[i], mult, &step[i * 16], g)) {
+            for (int q = 0; q < 16; q++) {
+                acc[i * 16 + q] += g[q];
+                if ((q & 3) != 3) game += g[q], phys += p[q];
+            }
+        } else
+            for (int q = 0; q < 16; q++) acc[i * 16 + q] += p[q] * scale;
+    }
+}
+
+// The room whose reflection comes now among those owed, (lot, story, id) (outdoor_delta.cpp ReflectionTurn), owed.end() for none:
+// at a step one every 100 ms, in turn; 120 ms after the last edit (over the turn, and steps come under 105 ms apart at p90) without a
+// step too, the lamp's own room first, but never twice running (ownLast): edits 120-220 ms apart (a slider, a slow drag) leave only
+// such turns, and the other rooms would wait for the drop. next counts only the rooms' turns, or the own room's would skip some
+template <class Owed> typename Owed::iterator ReflectionPick(Owed& owed, size_t& next, bool& ownLast, bool step, uint32_t sinceEdit, uint32_t sinceTurn, int story, int own) {
+    const bool still = sinceEdit >= 120;
+    if (owed.empty() || (!step && !still) || sinceTurn < 100) return owed.end();
+    if (still && !ownLast)
+        for (auto r = owed.begin(); r != owed.end(); ++r)
+            if (std::get<1>(*r) == story && std::get<2>(*r) == own) return ownLast = true, r;
+    ownLast = false;
+    return std::next(owed.begin(), next++ % owed.size());
 }
 
 } // namespace OutdoorDeltaModel

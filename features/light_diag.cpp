@@ -15,8 +15,11 @@
 #include "d3d9_hooks.h"
 #include "apex_paths.h"
 #include "level_light_share.h"
+#include "lot_light_bridge.h"
 #include "daylight_probe.h"
 #include "night_level.h"
+#include "dev_switches.h"
+#include "terrain_lighting_policy.h"
 #include "apex_memory.h"
 #include "captures.h"
 #include "ui/i18n.h"
@@ -89,8 +92,8 @@ std::string DayNightText(uintptr_t lightMgr) {
     if (weather)
         t += std::format(" (weather set {:.2f} / {:.2f}{})", Rd<float>(weather + 0x9EC + 0x10), Rd<float>(weather + 0x9EC + 0x14),
                          Rd<BYTE>(weather + 0xB04) ? ", debug set on" : "");
-    t += std::format("; light manager level {:.2f} (manmade {:.2f}); Apex level {:.3f} ({}); Build mode gate: {}", f0, f4, apex,
-                     smooth ? "smooth dusk" : "the light manager's", !hooked ? "not installed" : (NightLevel::Holding() ? "keeping the season's sun times" : "idle"));
+    t += std::format("; light manager level {:.2f} (manmade {:.2f}); Apex level {:.3f} ({}), lamps {:.3f}; Build mode gate: {}", f0, f4, apex,
+                     smooth ? "smooth dusk" : "the light manager's", DevSwitches::SunLampLevel() ? TerrainLightingPolicy::LampLevel(apex, sunY) : apex, !hooked ? "not installed" : (NightLevel::Holding() ? "keeping the season's sun times" : "idle"));
     std::string warn;
     if (sunDeg < -20.0f && x < 0.2f) warn += " the sky counts day with the sun 20 degrees under the horizon;";
     if (sunDeg > 10.0f && x > 0.8f) warn += " the sky counts night with the sun 10 degrees over the horizon;";
@@ -205,7 +208,7 @@ std::string PixelLampDiag(const std::unordered_map<uintptr_t, size_t>& index) {
     return o;
 }
 
-void WriteDiag() {
+void WriteDiag(const std::filesystem::path& into = {}) {
     const uintptr_t root = Rd<uintptr_t>(g_rootPtrAddr);
     const uintptr_t lightMgr = root ? Rd<uintptr_t>(root + 0x1C0) : 0;
     if (!lightMgr) {
@@ -214,7 +217,7 @@ void WriteDiag() {
         return;
     }
     // its own folder in Captures\ (never overwritten), with the log and settings (features/captures.h)
-    const std::filesystem::path folder = Captures::NewFolder("Lighting snapshot");
+    const std::filesystem::path folder = into.empty() ? Captures::NewFolder("Lighting snapshot") : into;
     // (memory_owners) measured before the snapshot's own text is built, so its section shows what the game holds, not this report
     const std::string memory = ApexMemory::ReportText();
     std::ostringstream out;
@@ -304,6 +307,7 @@ void WriteDiag() {
     }
     out << LevelLightShare::DiagText();
     out << PixelLampDiag(index);
+    out << LotLightBridge::IndoorWhyText();
     out << DaylightProbe::SnapshotText(lightMgr, g_lights); // development builds with daylight_log only
     out << memory;                                             // development builds with memory_owners only (taken above)
     ApexMemory::RequestNow();                                  // (every owner measured again at its next chance, for the next one)
@@ -311,7 +315,7 @@ void WriteDiag() {
     g_status = std::format("Saved: {} lights, {} lot stories, {} rooms", g_lights.size(), managers, rooms);
     LOG_INFO("[LightDiag] " + g_status);
     Captures::WriteText(folder / L"Lighting snapshot.txt", out.str());
-    Captures::Finish(folder, std::format("a snapshot of every light and room ({} lights, {} lot stories, {} rooms)", g_lights.size(), managers, rooms), Captures::CaptureKind::LightingSnapshot);
+    if (into.empty()) Captures::Finish(folder, std::format("a snapshot of every light and room ({} lights, {} lot stories, {} rooms)", g_lights.size(), managers, rooms), Captures::CaptureKind::LightingSnapshot);
 }
 
 } // namespace
@@ -327,6 +331,9 @@ bool Init() {
     return true;
 }
 void RequestDump() { g_requested = true; }
+void WriteInto(const std::filesystem::path& folder) {
+    if (g_rootPtrAddr) WriteDiag(folder);
+}
 void OnPresent() {
     if (!g_rootPtrAddr) return;
     const bool pressed = Hotkeys::Take(Hotkeys::Action::Diagnostics); // Ctrl+Shift+B, 5 or F8 by preset

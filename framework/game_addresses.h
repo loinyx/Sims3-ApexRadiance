@@ -211,6 +211,12 @@ enum class Id : uint16_t {
     SceneHolderTeardown,      // FUN_006e4de0 thiscall(): the pending holder's teardown (SetOwner(0) + Release of every node, list left as it is)
     SwarmDrawableVtable,      // 0x00FFC248: the Swarm effect renderer drawable; its node update (+0x48, FUN_00722190) rebuilds its bucket draw lists
     SceneModelFurVtable,      // 0x00FF9B50: SceneModelFur; its draw (+0x18, FUN_006fa0b0) reads the model handle's current LOD (+0x210, slot +8) without a NULL check
+    // The other classes with the model update and handle (not in the group: a miss only leaves that class an ordinary node)
+    SceneModelVtable,         // 0x00FF97F8: SceneModel; update +0x48 FUN_006f7b40, draw +0x18 FUN_006f6250 (no bounds check on the LOD's part array)
+    SceneModelSubVtable1,     // 0x00FF99D8: update FUN_006f8d60 (calls FUN_006f7b40), draw FUN_006f83b0 (calls FUN_006f6250)
+    SceneModelSubVtable2,     // 0x0105F390: same update and draw as SceneModel
+    SceneModelSubVtable3,     // 0x0108AF90: same update; draw FUN_00d6fbf0 tail-jumps to FUN_006f6250
+    SceneModelSubVtable4,     // 0x010760E8: same update and draw as 0x00FF99D8
     // ---- Object lookup index (features/object_index.cpp; group "ObjectIndex" = ObjectById + these two) ----
     ObjectTreeWalk,           // FUN_00c60d30 thiscall(idLo, idHi, int* visited), ret 0xC: walks the root vector [this+0x9C, this+0xA0)
     ObjectTreeSearch,         // FUN_00c5fa60 cdecl(node, idLo, idHi, int* visited): recursive depth-first search (id at +0x48/+0x4C)
@@ -297,6 +303,7 @@ enum class Id : uint16_t {
     LotBuildBudgetLoad, // 0x00AEA6D8 in FUN_00aea680 (a lot's per-frame build slice): "mov eax,[0x011ECBC4]" right after its budget [esp+14h] (20 / 35 ms) is set
     ProbeDiffuseWrite,  // 0x006B4720 thiscall(lightProbe), ret: writes the new diffuse cube (+0x2C60, or +0x2C50 when not double-buffered)
     ProbeSpecularWrite, // 0x006B4B10 thiscall(lightProbe, rt), ret 4, al: writes the new specular cube and its mips (+0x2C64 / +0x2C5C)
+    ProbeAllStages,     // 0x011D0D04 byte: not 0, a light probe's capture runs its 7 stages in one frame, not one a frame (read at 0x006B56F0)
     // ---- Formerly Steam-only addresses (2.13.2 EA port; docs/engine/game-versions.md "Formerly Steam-only addresses") ----
     // light law constants read by the light evaluations (outdoor_delta, rt_outdoor_lamps, light_diag)
     LampK1,             // float 0x011D0A60 ("mov ecx, imm32" before the pow call in the light evaluations)
@@ -306,6 +313,10 @@ enum class Id : uint16_t {
     ConeScale5,         // float[4] 0x011D11A0: the type-5 cone sharpness FUN_006bc940 reads (object_light_bridge, lot_light_bridge)
     RigCutFlagged,      // float 0x01158D64: the rig light cut for a rig with +8 set (FUN_006bb270, after RigGatherReturn)
     RigCut,             // float 0x01158D60: the cut otherwise
+    LightObjectAttach,  // FUN_006b1430 thiscall(manager; idLo, idHi, ResourceKey*), ret 0xC: an object's lighting record from its LITE (object_legs)
+    LightObjectMove,    // FUN_006b09c0 thiscall(manager; idLo, idHi, float4x4*, a, b, c), ret 0x18: its lights and blockers to the object's matrix (object_legs)
+    CounterConfig,      // float[4] 0x011D0410: CounterLightingConfig (2, 0.85, 1, 1) of a lot with +0x288 set (FUN_006a7700; lot_light_bridge writes .y)
+    CounterConfigFlags, // dword 0x011D0430: bit 2 = CounterConfig was set
     SolveTimeByClass,   // float[3] 0x011D1200: the game's cumulative room solve time per LOD class (ms)
     MapSlots,           // 0x011D0460: the per-class room map slots (FUN_006a4640: shl eax,4; add eax,imm32)
     MapLocker,          // 0x011D0508: the room that holds the class's working maps locked (FUN_006a4660: mov [imm32],eax)
@@ -353,6 +364,7 @@ enum class Id : uint16_t {
     PackMagic,          // float 0x00FE774C (12582912.0) at +0x5A
     // lamp mark filter (features/lamp_mark_filter.cpp)
     OccMarkCall,        // 0x006C7939: the occluder's call of FUN_006c7160 in FUN_006c78e0
+    LampLeftMarkCall,   // 0x006C7CCA: FUN_006c7ba0's call of FUN_006c7160 for the room a lamp left (before LampMarkCall)
     EntryFlag,          // FUN_006c4cf0(objId): flags every light and occluder entry of an object
     EntryFlagCall0, EntryFlagCall1, EntryFlagCall2, EntryFlagCall3, EntryFlagCall4, // its 5 callers, by address (development build counters)
     Count

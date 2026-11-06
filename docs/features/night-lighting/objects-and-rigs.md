@@ -9,7 +9,7 @@ shadows. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Released (present since 2.1.0, the first version in this repository). Daytime response of the per-pixel terms: Released in 2.6.0. Walls blocking per-pixel lamps outdoors, indoor objects lit by lamps of another story, furniture keeping its light until its room changes at a lamp switch, and the game's own lighting in full daylight: Released in 2.7.0. Lighting corrections: Released in 2.12.1. The outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and the ground-light height gate: Released in 2.12.3. *Buildings block lamp light on trees and objects* on rigs (trees, bushes, rig objects), indoor and outdoor lamps through openings on objects, a lamp through an arch on objects inside it, disabled lamps no longer lighting objects: Released in 2.13.0. The reach law's lamp sum held under 1 by its brightest channel, loose outdoor objects (gates) at the fences' lamp scale, ceiling lamps of the story below kept off the furniture above: Released in 2.15.3. Loose architectural objects follow the walls' lamp gain; elevated structures avoid the ground lamp pool: Released in 2.15.4. The window pass without outdoor light inside the house plan, window parts and furniture reading the light maps on their own side of a wall: Released in 2.17.1. Released in 2.18.0: objects whose vertex lights join the rig chain before the sky. |
+| Availability | Released (present since 2.1.0, the first version in this repository). Daytime response of the per-pixel terms: Released in 2.6.0. Walls blocking per-pixel lamps outdoors, indoor objects lit by lamps of another story, furniture keeping its light until its room changes at a lamp switch, and the game's own lighting in full daylight: Released in 2.7.0. Lighting corrections: Released in 2.12.1. The outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and the ground-light height gate: Released in 2.12.3. *Buildings block lamp light on trees and objects* on rigs (trees, bushes, rig objects), indoor and outdoor lamps through openings on objects, a lamp through an arch on objects inside it, disabled lamps no longer lighting objects: Released in 2.13.0. The reach law's lamp sum held under 1 by its brightest channel, loose outdoor objects (gates) at the fences' lamp scale, ceiling lamps of the story below kept off the furniture above: Released in 2.15.3. Loose architectural objects follow the walls' lamp gain; elevated structures avoid the ground lamp pool: Released in 2.15.4. The window pass without outdoor light inside the house plan, window parts and furniture reading the light maps on their own side of a wall: Released in 2.17.1. Released in 2.18.0: objects whose vertex lights join the rig chain before the sky. Released in 3.0.0: furniture lamp gain, curtains and furniture along walls on smooth room light, a lamp's parts unlit by their own bulb, off-screen portraits drawn the game's way, glossy indoor furniture on smooth room light. |
 | Default | On (all switches), Brightness 75%, Seamless light brightness 75% (the Soft light style) |
 | Menu | Lighting > Outside > *Objects* card (Lighting > Game fixes > Objects holds the stairs, doors, windows, pieces, fences and indoor rows); *Realistic lamp reach* on Lighting > Overview |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -62,12 +62,12 @@ above every lamp head around takes no ground light: it fades over the first 1.5 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Objects > Lamps light objects | `postesNosObjetos` | bool | on | | Installs `ObjectLightBridge` (rig boost, cap, rig opening, fenced-yard gather) and turns on the moon-shadow and foliage fixes (`LotLightBridge::SetObjectShadowFix`) |
-| Objects > Brightness | `forcaNosObjetos` | float | 75% | 25 to 300% | The ground light floor on patched objects (*Doors and windows stay lit*); also scales the rig boost and raises the rig cap to `cap x max(1, s)`. A change re-gathers all rigs (`FUN_006b58f0`). With *Realistic lamp reach* on (and *Doors and windows stay lit* and *Seamless light on pieces*), the lamps on objects follow the walls' brightness x *Seamless light brightness* instead: the rigs' outdoor lamps take the reach law (`ReachLawRec`, no boost) and the per-pixel lamps the walls' scale (`LotLightBridge::ObjectReachLawScale`) |
+| Objects > Brightness | `forcaNosObjetos` | float | 100% | 25 to 300% | The ground light floor on patched objects (*Doors and windows stay lit*); also scales the rig boost and raises the rig cap to `cap x max(1, s)`. A change re-gathers all rigs (`FUN_006b58f0`). With *Realistic lamp reach* on (and *Doors and windows stay lit* and *Seamless light on pieces*), the lamps on objects follow the walls' brightness x *Seamless light brightness* instead: the rigs' outdoor lamps take the reach law (`ReachLawRec`, no boost) and the per-pixel lamps the walls' scale (`LotLightBridge::ObjectReachLawScale`) |
 | Objects > Game fixes > Light stairs, railings, columns | `lampadasEmTodosObjetos` | bool | on | | Opens rigs the game created closed to lamps; applies to rigs created afterwards (world load; the row carries a reload badge). Also gates the fenced-yard gather |
 | Objects > Game fixes > Doors and windows stay lit | `objetosDeForaComLuzDoChao` | bool | on | | Installs `RigTracker` and enables the per-pixel object patch (`DrawObjectLamp`). Disabled unless *Street lamps light lots* and *Smooth ground light* are on (the fold offers a button to turn them on) |
 | Objects > Game fixes > Windows take outdoor light | `janelasLuzDeFora` | bool | on | | Faces of a room-lit window part that look out of the house take the outdoor ground light and per-pixel lamps (`DrawWindowOutdoor`, `PatchWindowOutdoor`); outdoor objects also pass the wall they sit in (0.75 m instead of 0.2 m). Needs *Doors and windows stay lit*. Released in 2.7.2; see *Windows lit by the room* below |
 | Objects > Game fixes > Seamless light on pieces | `luzPorPixelNosObjetos` | bool | on | | Per-pixel world lamps on objects (and on fences). Off: the lamp blocks are zero and only the ground term remains |
-| Objects > Game fixes > Seamless light brightness | `forcaLuzPorPixelNosObjetos` | float | 75% | 25 to 300% | Strength of the per-pixel lamps (`cS.y`); with *Realistic lamp reach* on, a trim over the outdoor walls' scale (75% = the walls' light, see *Realistic reach on objects, fences and windows*) |
+| Objects > Game fixes > Seamless light brightness | `forcaLuzPorPixelNosObjetos` | float | 100% | 25 to 300% | Strength of the per-pixel lamps (`cS.y`); with *Realistic lamp reach* on, a trim over the outdoor walls' scale (75% = the walls' light, see *Realistic reach on objects, fences and windows*) |
 
 All apply live. Every frame the Present hook calls `ObjectLightBridge::SetStrength(forcaNosObjetos)`,
 `SetAllObjects(lampadasEmTodosObjetos)`, `LotLightBridge::SetObjectPixelLamps(objetosDeForaComLuzDoChao &&
@@ -91,6 +91,10 @@ forcaLuzPorPixelNosObjetos)`. The *Fences and stairs catch light* rows of the sa
   floor branch handles it ([floors.md](floors.md)).
 
 ## Limitations
+
+- The furniture lamp gain (`TerrainLightingPolicy::kFurnitureLampGain`, 2 at full night, weighted by the night level, with
+  *Smooth indoor light* on) is an estimate. It also writes the game's `CounterLightingConfig.y`; whether the Counters shader
+  reads that copy is not confirmed.
 
 - Final release-build gameplay confirmation is pending; offline checks do not establish identical material appearance or frame-time cost.
 
@@ -464,6 +468,19 @@ the tile centre, origin + (local X - local Z) / 2, when an outside wall along on
 point (`LevelLightShare::OnWallLine`); every other object keeps its origin. After it both orientations got the same 6 lamps
 and ground share 0.3717; what still differs is the model (its two faces use other parts of the texture).
 
+### Furniture lamp gain
+
+The directional maps hold the rig's colour, about 0.35 of the room law floors and walls show, so a cabinet beside a lit wall read a
+fifth of it. At the object draw (`DrawIndoorObject`'s strength) the basis light is multiplied by `FurnitureLampGain(night)`, 1 by day
+and 2 at full night, and the same factor goes to `CounterLightingConfig.y`. The gain stays out of the maps: they clamp at 1 and Sims
+read them. The patched shader clamps the lit result at 1. It applies in Classic and Instant alike and needs *Smooth indoor light*.
+
+### Off-screen portraits
+
+The household photo draws with a render target smaller than the back buffer, with no lamp placed. `DrawObjectLamp` zeroed the rig
+there with no lamp to replace it, which took the Sim's hair light. Such a draw (`g_offScreenTarget`, from the SetRenderTarget hook)
+is left to the game's own path.
+
 ### Furniture during a lamp switch
 
 At a switch the game updates the rigs of the lamp's room at once (about 0.05 s after the switch), while the room's walls
@@ -527,11 +544,20 @@ TEXCOORD2, lamps in c0..cN, falloff `saturate(w/d²)`) need nothing. `2BE88B48` 
 shadow, inverted chain, COLOR0 in a mad) and `2E255A58` (308 instructions, flow control) stay vanilla. `PS_2A74E378` is
 the wall family ([walls.md](walls.md)).
 
+Glossy indoor furniture takes the smooth room read through a second search of the diffuse chain, in `shader_patches.cpp`, run only where the
+first one finds nothing, so shaders accepted before keep their bytes. It takes the four light steps when the specular chain is interleaved
+with them (`PS_2B16EE0F`) or a `dp3_sat` into another register comes before each step (`PS_25F66827`).
+
+Refused outdoors and left as they are: object shaders with no rig lamp chain to hook (Sim-style normal maps, snow, per-object light map,
+6-point lights) and those with every input register used; giving them ground light is a new look, so it needs a capture. Indoors: vertex-lit
+shaders with no rig chain. Moon-shadow shaders with no shadow fade have nothing to patch, and the terrain daylight patch is pinned to the
+one shader it was studied on. Each refusal logs its `PS_<hash>`.
+
 ### Diagnostics (developer mode)
 
 - Status: `Objects: Active | light classes: 9/9 | lights boosted on objects: N | objects opened to lamps (stairs,
   railings...): N | in fenced areas: N`; `Street lamps on lots: ... outdoor objects: N` (draws).
-- Log: `[ObjectLightBridge] Installed`, `[RigTracker] Installed`, and the batched `Shaders at their first draw` lines.
+- Log: `[ObjectLightBridge] Installed`, `[RigTracker] Installed`, and the `[LotLightBridge] <kind>: shader <address> patched` lines (or `refused by D3D`, `does not have the expected pattern`).
 - F7: `LotLightBridge::DescribeDraw()` adds a `mod:` line per draw (shape, rig mode, per-pixel lamps and strengths, the
   object position, the lamps used of N in reach with position, 1/R², colour and distance, the game's rig PS c0..c13 and
   the VS vertex lights, the ground share and height gate; for a class-10 draw not replaced, the reason). F7 on two pieces

@@ -18,7 +18,6 @@ constexpr ShaderId kWorldMultiLightPs = {756, 0xEC3141ABu}; // summer multi-pass
 // output * (1 + c5.x * (c6.x - 1)) (c5.x = wetness ~0.037, c6.x = 0.5: about 2% darker). Same vertex shaders, samplers and c0..c4.
 constexpr ShaderId kLotLightRainPs = {608, 0xA8E5F9F8u};
 constexpr ShaderId kWorldMultiLightRainPs = {796, 0xCB0A4C22u};
-constexpr size_t kWetTailBytes = 40; // what the rain variants add to the dry shader's size
 // Structural ids (shader_structure.h): the dry body of each pass, so that any weather variant of it is recognised.
 // Checked offline (tools/shader_structure_test) over the 8011 pixel shaders of Shaders_Win32.precomp: each matches
 // exactly its dry shader and its rain variant above.

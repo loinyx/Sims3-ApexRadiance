@@ -905,3 +905,21 @@ the grass, sidewalks and roads beside them: patios were up to 45% brighter than 
 **Outcome:** the throttle is removed: the maps are relit at every move, still within the 2 ms a frame. Floor maps count
 each lamp once (`91af563`).
 
+
+### 2026-11-02: the upper half of a double-height room's walls dark
+
+**Context:** lot `C49C001BCF2DEA20`, the 2026-09-29 test house: the red lamps of story 2's rooms 5 and 7 lit the lower
+half of their walls and nothing above the story line (67.3), a hard cut. Capture session 14-30-46: story 3's room 0 listed
+only room 0's and the street lamps; the light capture's pixel (y 67.70, story 3) read a map of zeros; the log kept story 3
+room 0's solve with its largest texel 0.
+
+**Finding:** no floor was ever placed over rooms 5 and 7 on story 3 (the bare `40000000` key or never built), so on story 3
+that space is room 0, and no part of the share took an indoor lamp of the story below into a room 0: part 4 gathers for
+rooms with id > 0, and its openings are removed floors only. Counting the bare key per quadrant was rejected on
+2026-09-29 (200 false openings along the walls of rooms that keep their ceiling); per room it separates the two: story 2's
+rooms 1 to 4 have a floor over them, rooms 5, 6 and 7 have none over most of their quadrants.
+
+**Outcome:** room 0 of a story takes the lamps of the story below's rooms open to above (no floor placed over half of
+them, walls of the story above on three quarters of their outline), each tested per point through their open tops
+([Double-height rooms](../features/night-lighting/level-light-share.md#double-height-rooms)); developer switch
+`open_rooms_above`. The removed-floor openings are unchanged. Not yet checked in game.

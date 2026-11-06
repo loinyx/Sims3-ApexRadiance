@@ -188,7 +188,6 @@ bool g_blankWhite = false;
 IDirect3DTexture9* g_blackTex = nullptr;
 IDirect3DTexture9* g_whiteTex = nullptr;
 
-std::filesystem::path OutDir() { return std::filesystem::path(ApexPaths::ApexDirectory()); }
 
 // Every capture gets its own folder in Captures\ ("<date time> Light capture", features/captures.h: the report, the
 // textures and shaders, the log and settings), so a capture never overwrites another one; nothing is deleted by itself.
@@ -196,9 +195,21 @@ std::filesystem::path g_capDir; // the capture being written (empty: none yet)
 bool g_wantCamera = false;      // PostScene's camera asked for while a capture runs (GroundProfile)
 std::string g_capName;
 
+// CaptureInto, SaveMap: the capture this goes into (its folder counts as saving meanwhile, and it gets no Finish of its own)
+std::filesystem::path g_into;
+std::wstring g_intoSub;
+
 std::filesystem::path CapDir() { return g_capDir.empty() ? Captures::Root() : g_capDir; }
+std::filesystem::path PngOwner() { return g_into.empty() ? CapDir() : g_into; }
 
 void StartCaptureFolder() {
+    if (!g_into.empty()) {
+        g_capDir = g_into / g_intoSub;
+        g_capName = ApexUtil::ToUtf8(g_intoSub);
+        std::error_code ec;
+        std::filesystem::create_directories(g_capDir, ec);
+        return;
+    }
     const bool automatic = g_captureWhy.rfind("automatic", 0) == 0;
     g_capDir = Captures::NewFolder(automatic ? "Light capture (automatic)" : "Light capture");
     g_capName = ApexUtil::ToUtf8(g_capDir.filename().wstring());
@@ -482,9 +493,9 @@ std::string DumpTexture(IDirect3DDevice9* dev, IDirect3DBaseTexture9* base, cons
     std::filesystem::create_directories(CapDir(), dirError);
     const std::string file = std::format("{}_{}x{}_{}.png", name, d.Width, d.Height, FmtStr(d.Format));
     // lossless PNG on the capture writer thread (07/10: the BMPs were ~121 MB each); the same 8-bit pixels the BMP had
-    Captures::WritePngAsync(CapDir(), CapDir() / file, std::move(bgr), d.Width, d.Height, 3);
+    Captures::WritePngAsync(PngOwner(), CapDir() / file, std::move(bgr), d.Width, d.Height, 3);
     fileOut = file;
-    if (hasAlpha) Captures::WritePngAsync(CapDir(), CapDir() / (file.substr(0, file.size() - 4) + "_alpha.png"), std::move(grey), d.Width, d.Height, 1);
+    if (hasAlpha) Captures::WritePngAsync(PngOwner(), CapDir() / (file.substr(0, file.size() - 4) + "_alpha.png"), std::move(grey), d.Width, d.Height, 1);
     const double n = static_cast<double>(d.Width) * d.Height;
     return std::format("salva {}; media RGBA=({:.3f} {:.3f} {:.3f} {:.3f}) min=({:.3f} {:.3f} {:.3f}) max=({:.3f} {:.3f} {:.3f} {:.3f}){}", file, sum[0] / n, sum[1] / n,
         sum[2] / n, sum[3] / n, mn[0], mn[1], mn[2], mx[0], mx[1], mx[2], mx[3], scale < 1.0f ? std::format(" (imagem escalada por 1/{:.2f})", peak) : "");
@@ -1136,8 +1147,32 @@ void FinishCapture(IDirect3DDevice9* dev) {
     g_status = std::format("Measured: {} draws cover pixel ({}, {}), {} textures saved in Captures\\{}.", covering, g_pixel.x, g_pixel.y, g_textures.size(), g_capName);
     LOG_INFO("[LightProbe] " + g_status);
     Recorder::Note(std::format("[probe] {} ({})", g_capName, g_captureWhy));
+    if (!g_into.empty()) {
+        g_into.clear();
+        return;
+    }
     Captures::Finish(g_capDir, std::format("a light capture of the pixel ({}, {}) under the mouse: the {} draws that paint it and their textures ({})", g_pixel.x,
                                            g_pixel.y, covering, g_captureWhy), Captures::CaptureKind::LightCapture);
+}
+
+// The next frame's draws over the pixel are recorded (back buffer pixels)
+void StartCapture(IDirect3DDevice9* dev, POINT pixel, const std::string& why) {
+    IDirect3DSurface9* bb = nullptr;
+    D3DSURFACE_DESC bd{};
+    if (SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb) {
+        bb->GetDesc(&bd);
+        bb->Release();
+    }
+    g_bbWidth = bd.Width;
+    g_bbHeight = bd.Height;
+    g_pixel = pixel;
+    g_captureWhy = why;
+    ReleaseDraws();
+    RegisterHooks();
+    if (!g_wantCamera) PostScene::WantCamera(true), g_wantCamera = true; // (the ground profile's view-projection)
+    g_state = State::Armed;
+    g_status = std::format("Measuring pixel ({}, {})...", g_pixel.x, g_pixel.y);
+    LOG_INFO("[LightProbe] Capture requested: " + g_status + " (" + why + ")");
 }
 
 } // namespace
@@ -1171,6 +1206,7 @@ void OnPresent(IDirect3DDevice9* dev) {
             g_state = State::Idle; // no memory for the capture: skip it
         }
     }
+    if (g_state == State::Idle) g_into.clear(); // (a capture that ended early must not send the next one to that folder)
     if (DevSwitches::ReleaseDebugBuffers() && g_state == State::Idle && !g_watch.on) ReleaseCaptureBuffers();
     if (DevSwitches::kCompiled) MeasureMemory(); // development builds (memory_owners)
 
@@ -1178,24 +1214,6 @@ void OnPresent(IDirect3DDevice9* dev) {
     const bool pressed = Hotkeys::Take(Hotkeys::Action::Probe);
     const uint64_t click = g_aimClick.exchange(0);
     if (pressed && g_state != State::Idle) LOG_INFO("[LightProbe] Its shortcut while a capture is still running: ignored");
-    const auto start = [&](POINT pixel, const std::string& why) {
-        IDirect3DSurface9* bb = nullptr;
-        D3DSURFACE_DESC bd{};
-        if (SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb) {
-            bb->GetDesc(&bd);
-            bb->Release();
-        }
-        g_bbWidth = bd.Width;
-        g_bbHeight = bd.Height;
-        g_pixel = pixel;
-        g_captureWhy = why;
-        ReleaseDraws();
-        RegisterHooks();
-        if (!g_wantCamera) PostScene::WantCamera(true), g_wantCamera = true; // (the ground profile's view-projection)
-        g_state = State::Armed;
-        g_status = std::format("Measuring pixel ({}, {})...", g_pixel.x, g_pixel.y);
-        LOG_INFO("[LightProbe] Capture requested: " + g_status + " (" + why + ")");
-    };
     const DWORD now = GetTickCount();
     if ((pressed || click) && g_state == State::Idle) {
         IDirect3DSurface9* bb = nullptr;
@@ -1220,7 +1238,7 @@ void OnPresent(IDirect3DDevice9* dev) {
         pixel.x = std::clamp<LONG>(static_cast<LONG>(static_cast<double>(p.x) * bd.Width / cw), 0, static_cast<LONG>(bd.Width) - 1);
         pixel.y = std::clamp<LONG>(static_cast<LONG>(static_cast<double>(p.y) * bd.Height / ch), 0, static_cast<LONG>(bd.Height) - 1);
         const bool guided = g_aiming.exchange(false) || click != 0;
-        start(pixel, guided ? "guided one-shot capture under the mouse" : "requested by the shortcut");
+        StartCapture(dev, pixel, guided ? "guided one-shot capture under the mouse" : "requested by the shortcut");
         Captures::Notify(I18n::Tr("Capturing the light under the mouse\xE2\x80\xA6"), 3, Captures::NoteKind::Probe);
         // (one capture: the automatic re-measures 1 s and 3 s after each floor change are off; they filled sessions with
         // captures nobody asked for, and each one relit the lot)
@@ -1253,8 +1271,27 @@ void OnPresent(IDirect3DDevice9* dev) {
         const std::string why = g_watch.due.front().second;
         g_watch.due.erase(g_watch.due.begin());
         g_watch.left--;
-        start(g_watch.pixel, why);
+        StartCapture(dev, g_watch.pixel, why);
     }
+}
+
+bool CaptureInto(IDirect3DDevice9* dev, const std::filesystem::path& folder, const char* sub, POINT pixel, const std::string& why) {
+    if (g_state != State::Idle || g_aiming.load() || !g_into.empty()) return false;
+    g_into = folder;
+    g_intoSub = std::filesystem::path(sub).wstring();
+    g_watch = Watch{};
+    StartCapture(dev, pixel, why);
+    return true;
+}
+
+std::string SaveMap(IDirect3DDevice9* dev, IDirect3DBaseTexture9* tex, const std::filesystem::path& folder, const std::string& name) {
+    if (g_state != State::Idle || !g_into.empty()) return name + ": a light capture was running, not saved";
+    g_into = folder;
+    g_capDir = folder / L"Maps";
+    std::string file;
+    const std::string stats = DumpTexture(dev, tex, name, file);
+    g_into.clear();
+    return std::format("{} {}: {}", name, TexDesc(tex), stats);
 }
 
 void RenderUI() {

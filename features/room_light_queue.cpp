@@ -325,6 +325,8 @@ float __fastcall PriorityHook(BYTE* room) {
     // its state and its invalidations and is picked once the gap ends, so the scheduler and the drain re-solve the same rooms
     // at most every 400 ms instead of on every step of the drag
     if (room && p > 0.0f && DragLite::HoldRepick(room)) return 0.0f;
+    // (physical drag, drag_lite.h) before Prioritise, which raises a stranded room of another story from 0 to 1
+    if (room && HookGuard::Run("RoomLightQueue GPU drag hold", false, [room] { return DragLite::HoldGpuDrawn(room); })) return p > 0.0f ? 0.0f : p;
     // (development builds, restart_settle) a room restarted again and again while the lots settle is picked once its restarts
     // stop (restart_settle.h); a lamp edit's rooms are never held
     if (room && p > 0.0f && DevSwitches::RestartSettle() && LevelLightShare::LampUrgency(room) <= 1.0f &&

@@ -120,9 +120,9 @@ subroutines or `ret`, use relative constant addressing or have no free register 
   is written once at the end.
 - The copy is ps_2_x (`0xFFFF0201`): the grain does not fit the 64 arithmetic slots of some ps_2_0 shaders.
 - `AddScreenPosVs(vs, k)` redirects every `oPos` write to a free temp and writes it to both `oPos` and `oTk`
-  (vs_1_1 and vs_2_x only; vs_3_0 pairs with ps_3_0).
-- At vertex shader creation the copy for k = 7 (the usual value) is made; copies for other k are made at the first
-  draw. Both copies are bound at the draw. A ps_2_x copy without a matching vertex copy is not used (counted as
+  (vs_1_1 and vs_2_x only; vs_3_0 pairs with ps_3_0), last: a game write to `oTk` is dead, as the pixel copy took k unused
+  (9 of the 22 saved vs_2_0 write `oT7`; they counted as "could not carry the position" until 3.0.0). The copies are made
+  at the first draw. Both copies are bound at the draw. A ps_2_x copy without a matching vertex copy is not used (counted as
   "vertex shader" in the coverage).
 
 **Creation and caching.** `CreatePixelShader` and `CreateVertexShader` callbacks run after every other callback

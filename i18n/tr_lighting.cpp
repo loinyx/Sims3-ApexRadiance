@@ -164,6 +164,8 @@ const I18n::Entry kEntries[] = {
      "Portas fechadas barram a luz das lâmpadas; janelas, arcos e portas de vidro a deixam passar",
      "Las puertas cerradas detienen la luz de las lámparas; las ventanas, los arcos y las puertas de vidrio la dejan pasar",
      "Les portes fermées arrêtent la lumière des lampes ; les fenêtres, les arches et les portes vitrées la laissent passer"},
+    {"Light bounces between rooms", "A luz rebate entre cômodos", "La luz rebota entre habitaciones", "La lumière rebondit entre les pièces"},
+    {"A lit room softly lights the next room through an arch", "Um cômodo aceso ilumina de leve o cômodo vizinho pelo arco", "Una habitación iluminada ilumina suavemente la contigua a través de un arco", "Une pièce éclairée éclaire doucement la pièce voisine à travers une arche"},
     {"Smooth light maps", "Mapas de luz suaves", "Mapas de luz suaves", "Cartes de lumière lissées"},
     {"Lamp light in rooms without blocks, bands or rings; floors blend across arches", "Luz das lâmpadas nos cômodos sem blocos, faixas ou anéis; pisos se misturam pelos arcos",
      "Luz de las lámparas en las habitaciones sin bloques, bandas ni anillos; los suelos se funden a través de los arcos",

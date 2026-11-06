@@ -47,7 +47,7 @@ void DrawWaterCard();     // Water tab: lamp glow on ponds (not the shore reflec
 void DrawSnowCard();      // Snow tab
 
 // ---- menu: Water & Snow page, Water tab (Water Reflections card) ----
-// Shore reflection strength (reflexoNoLago, 0..3, default 1.56; 0 = off). It is drawn in the lake pass of Night Lighting,
+// Shore reflection strength (reflexoNoLago, 0..3, default 1; 0 = off). It is drawn in the lake pass of Night Lighting,
 // which reads the scene depth of Depth Blur. Set saves the config like any Night Lighting option.
 float ShoreReflection();
 void SetShoreReflection(float strength);

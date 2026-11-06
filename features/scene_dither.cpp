@@ -54,7 +54,6 @@ namespace {
 constexpr const char* kHookName = "SceneDither";
 constexpr auto kAfterEveryone = static_cast<D3D9Hooks::Priority>(1000); // after Last: every observer has seen the draw
 constexpr size_t kMaxShaderTokens = 16384;                              // 64 KB
-constexpr int kUsualTexcoord = 7;                                       // the texture coordinate most ps_2_x copies use
 
 std::atomic<bool> g_on{false};
 thread_local bool t_own = false; // our own creations pass through

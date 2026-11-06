@@ -81,6 +81,9 @@ inline bool SameRgb(const float* a, const float* b) {
     return true;
 }
 inline bool SolverOwnsAmbient(int state) { return state >= 1 && state <= 3; }
+// The solve's ambient step runs in state 3 only; a room marked (1) or gathered (2) keeps its last ambient until then, so a
+// lamp edit's retake may still write it (a dragged lamp's rooms wait in 1-2 for the whole drag: their fill froze, 03/11)
+inline bool AmbientStepRunning(int state) { return state == 3; }
 inline bool AmbientUpdateDue(std::uint32_t now, std::uint32_t last) {
     return !last || static_cast<std::uint32_t>(now - last) >= 3000;
 }

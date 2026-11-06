@@ -1,5 +1,6 @@
 #include "developer_settings.h"
 #include "apex_config.h"
+#include "apex_lighting_defaults.h"
 #include "apex_version.h"
 #include "apex_log.h"
 #include "apex_paths.h"
@@ -222,6 +223,21 @@ void DoMigrate() {
     LOG_INFO("[Config] " + note);
 }
 
+// A config of an older build takes the new lighting defaults once (apex_lighting_defaults.h); a new one is only stamped.
+void MoveLightingDefaults() {
+    std::lock_guard<std::mutex> lock(g_fileLock);
+    toml::table root;
+    std::string err;
+    if (!ParseFile(ApexPaths::ConfigFile(), root, &err)) return; // unreadable: nothing is written, the next start tries again
+    if (root["meta"]["lighting_defaults"].value_or(int64_t{0}) >= ApexLightingDefaults::kRevision) return;
+    std::string moved;
+    for (const std::string& key : ApexLightingDefaults::Apply(root)) moved += (moved.empty() ? "" : ", ") + key;
+    if (!root["meta"].as_table()) root.insert_or_assign("meta", toml::table{});
+    root["meta"].as_table()->insert_or_assign("lighting_defaults", ApexLightingDefaults::kRevision);
+    if (!ApexUtil::WriteFileAtomic(ApexPaths::ConfigFile(), Serialize(root), &err)) LOG_ERROR("[Config] Lighting defaults not saved: " + err);
+    else if (!moved.empty()) LOG_INFO("[Config] New lighting defaults taken: " + moved);
+}
+
 // ---- key chords ----
 struct NamedKey {
     UINT vk;
@@ -310,6 +326,7 @@ void EnsureMigrated() {
     std::call_once(g_migrateOnce, [] {
         try {
             DoMigrate();
+            MoveLightingDefaults();
         } catch (const std::exception& e) {
             SetNote(std::string("migration failed: ") + e.what());
             LOG_ERROR("[Config] Migration failed: " + std::string(e.what()));

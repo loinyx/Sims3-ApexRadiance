@@ -23,6 +23,8 @@ It must:
 | same, `run.ps1` (`check.cpp`, since `91af563`) | Shape A2: a fixture pixel shader whose scaled vertex lights join the rig chain before the sky takes `PatchObjectLampPs`; drawn on the GPU, a black ground leaves the game's light, a ground over the vertex lights replaces them (0.5, not 0.4: they stay in the max), a ground under them leaves them | `run.ps1 -Captures <dir> -OutDir <dir>` | Native D3D9 GPU |
 | Scratch test008 checks | The uncapped indoor-object variant (`PatchIndoorBasis` without `kBasisCap`) over captured pixel shaders | Scratch | d3dcompiler, captures |
 
+| `tools/shader_refusals_test/` | Hand-built bytecode of the shaders refused before: a vertex shader writing its own TEXCOORDk, the two glossy shapes of the indoor diffuse chain | `run.ps1` | MSVC x86 |
+
 The harnesses only read captures and print results; they do not attach to the game or install files.
 
 ## Latest results
@@ -32,6 +34,7 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-05 | `1f76e83` with the 3.0.0 working tree | `shader_refusals_test`; the saved `ShadersRecusados` run through the patches | 11 passed; 13 of 25 glossy indoor shaders patched, all 22 saved `vs_2_0` pass at every texture coordinate, and native D3D9 accepted every new copy (26 pixel, 45 vertex). Glossy indoor furniture on the smooth room light has not been judged in game | Native D3D9 |
 | 2026-10-23 | `4802ed9` (ASI SHA-256 `FC2D565C0F003F0DD9DF2BC56DFC5F047CA6FCDAC508B2DA66A83D032258ECFB`) | Standard Release x86 build; `tools/terrain_lighting_test/run_resource_checks.ps1`; `tools/terrain_lighting_test/run.ps1 -Captures <folder>` | Build: 0 warnings. Resource paths: 14,637 checks, 0 failures, including 826 object-draw checks and 388 realistic-reach checks. Terrain suite: 1,303,085 checks; 2 failures: required terrain captures are absent, and the synthetic reach-law case at `w=144.5` differs from the wall-law reference by up to 179/255; the `w=85` case differs by at most 1/255. The reach-law source is unchanged from 2.15.3 | MSBuild x86 / fake D3D9 / native D3D9 GPU |
 | 2026-10-23 | `40f351e` | `tools/development/check.ps1 -Suite Smoke` and `-Suite Lighting`; developer, public and standard Release x86 builds | Passed; the builds compiled. No harness run covers the hue clamp of the reach law, the gates' lamp scale or the rig records of lamps under a room's floor | CPU harness |
 | 2026-10-22 | `b863bce` | None: no harness covers the area lights' cones in `ReadLamp` | Not run | not run in game yet |
@@ -58,7 +61,7 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
    a class-10 draw not replaced, the reason (refused PS, option off, indoor rig, no ground atlas). F7 on piece A, then
    piece B, lists the registers that changed.
 6. Developer status: `Objects: Active | light classes: 9/9 | ...`; log `[ObjectLightBridge] Installed`, `[RigTracker]
-   Installed` and `Shaders at their first draw` lines. Refused shaders appear in `Apex Radiance\ShadersRecusados`; the
+   Installed` and `[LotLightBridge] <kind>: shader <address> patched` lines. Refused shaders appear in `Apex Radiance\ShadersRecusados`; the
    census false colour shows lamp-lit candidates no fix claimed in magenta.
 7. Indoors with the light-between-stories directional maps active: place a chair below a wall painting. **Expected:** the
    painting does not darken; check walls, floors and stairs nearby for directional-map artefacts.

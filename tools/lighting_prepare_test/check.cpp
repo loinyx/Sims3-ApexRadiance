@@ -64,7 +64,7 @@ void MapChecks() {
     alignas(4) unsigned char manager[0x300] = {}, wrappers[16][0x40] = {};
     const auto mgr = reinterpret_cast<uintptr_t>(manager);
     auto set = [](uintptr_t p, uintptr_t v) { *reinterpret_cast<uintptr_t*>(p) = v; };
-    for (int c = 0; c < 4; ++c) for (int i = 0; i < 4; ++i) {
+    for (int c = 0; c < 3; ++c) for (int i = 0; i < 4; ++i) {
         const int k = c * 4 + i;
         const auto address = mgr + 0x16C + c * 64 + i * 4;
         const auto wrapper = reinterpret_cast<uintptr_t>(wrappers[k]);
@@ -79,7 +79,7 @@ void MapChecks() {
         set(wrapper + 0x30, 0x1000u + k);
         set(address, 0); assert(!StoryMapSlotMatches(slot, 0x1000u + k));
         // The same texture moves to another native slot; the old shortcut must fail.
-        const auto moved = mgr + 0x16C + ((c + 1) % 4) * 64 + i * 4;
+        const auto moved = mgr + 0x16C + ((c + 1) % 3) * 64 + i * 4;
         set(moved, wrapper); assert(!StoryMapSlotMatches(slot, 0x1000u + k));
         assert(StoryMapsInclude(mgr, 0x1000u + k, slot) && slot.address == moved);
         set(moved, 0);
@@ -97,7 +97,7 @@ void MapChecks() {
     assert(!StoryMapsInclude(reinterpret_cast<uintptr_t>(inaccessible), 123, invalid));
     assert(!invalid.address && !invalid.wrapper);
     assert(VirtualFree(inaccessible, 0, MEM_RELEASE));
-    std::cout << "16 native slots: replacement, relocation, type, texture and unreadable memory passed\n";
+    std::cout << "12 native slots: replacement, relocation, type, texture and unreadable memory passed\n";
 }
 void BlurChecks() {
     unsigned cases = 0;

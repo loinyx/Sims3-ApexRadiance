@@ -29,6 +29,8 @@
 #include "memory_patch.h"
 #include "apex_log.h"
 #include "hook_guard.h"
+#include "gpu_room_lamps.h"
+#include "drag_lite.h"
 #include <windows.h>
 #include <intrin.h>
 #include <algorithm>
@@ -37,6 +39,7 @@
 #include <cstring>
 #include <format>
 #include <iterator>
+#include <tuple>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -200,9 +203,10 @@ int CrossCandidates(BYTE* rig, BYTE* room, const LightVector* list, uintptr_t* l
         const int own = *reinterpret_cast<const int*>(rig + 0x1E0);
         const float* centre = reinterpret_cast<const float*>(rig + 0x140);
         if (!list->begin || list->end < list->begin || list->end - list->begin > 4096) return 0;
+        const uintptr_t dragged = GpuRoomLamps::PhysDragLight(DragLite::kStillMs);
         for (const uintptr_t* p = list->begin; p < list->end && n < kCrossMax; p++) {
             const uintptr_t light = *p;
-            if (!light) continue;
+            if (!light || light == dragged) continue; // (the room's classes of it are its last gather's: below)
             const int id = *reinterpret_cast<const int*>(light + 8);
             if (id == own || id < 0 || (id == 0 && !kRigLightTest)) continue;
             if (id == 0 && std::find(lamps, lamps + n, light) != lamps + n) continue; // (story 0's room 0 lamps are in the list twice)
@@ -224,6 +228,25 @@ int CrossCandidates(BYTE* rig, BYTE* room, const LightVector* list, uintptr_t* l
             open[n] = throughOpening;
             n++;
         }
+        // (physical) a lamp being dragged on the room's story, listed or not: no gather runs during the drag, so a room it comes into
+        // has no class of it and its furniture stayed dark until the room's solve after the drop (the fridge, 04/11). Its share
+        // past the walls from where it is now, as the furniture's own visibility reads it
+        if (dragged && n < kCrossMax) {
+            const int id = *reinterpret_cast<const int*>(dragged + 8);
+            const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(room);
+            const float* head = reinterpret_cast<const float*>(dragged + 0x120);
+            const float dx = head[0] - centre[0], dy = head[1] - centre[1], dz = head[2] - centre[2];
+            // (a lamp now registered in the rig's own room, not listed yet: the game's gather walks the list, so it has not got it either;
+            // furniture went from no lamp to 5.09 at the room's solve, capture of 05/11)
+            const bool gathered = id == own && std::find(list->begin, list->end, dragged) != list->end;
+            if (id > 0 && !gathered && mgr && *reinterpret_cast<const int*>(dragged + 0xD0) == *reinterpret_cast<const int*>(mgr + 0x88) && kRigLightTest &&
+                dx * dx + dy * dy + dz * dz < kCrossRangeM * kCrossRangeM) {
+                const float share = LevelLightShare::LampVisibilityShared(head, centre);
+                // (of the rig's own room: the game's gather of that lamp alone, the record its solve's gather will give, not the openings' law:
+                // metal, lit only by these records, showed another tone until the solve, 05/11)
+                if (share >= kCrossReachMin) lamps[n] = dragged, ids[n] = id, shares[n] = share, open[n] = id != own, nearby = true, n++;
+            }
+        }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return 0;
     }
@@ -233,6 +256,8 @@ int CrossCandidates(BYTE* rig, BYTE* room, const LightVector* list, uintptr_t* l
 bool RigLightTestAsRoom(BYTE* rig, uintptr_t light, int id) {
     bool kept = false;
     __try {
+        // (the game's own-light exclusion, 0x6BB33F, which 0x6BB270 lacks: a lamp's shade lit by its own bulb swung with every step of a drag)
+        if (*reinterpret_cast<const int*>(light + 0xB4) == *reinterpret_cast<const int*>(rig + 0x1E4)) return false;
         int& room = *reinterpret_cast<int*>(rig + 0x1E0);
         const int saved = room;
         room = id;
@@ -397,9 +422,23 @@ void RegatherCrossRigs() {
 
 // The room-mode rigs of the rooms whose outdoor lamps through openings changed (LevelLightShare::TakeOpeningRigRooms): the
 // game marks a room-mode rig only for a lamp of its own room, so they gather again here (render thread)
+// (and those of the rooms of a lamp edit taken without their solve: RegatherRigsOfRoom, drained here once a frame)
+std::mutex g_editRigMx;
+std::vector<std::tuple<uintptr_t, int, int>> g_editRigRooms; // (under g_editRigMx) tracker, story, room id
+std::atomic<bool> g_editRigAny{false};
 void RegatherOpeningRooms() {
     std::vector<const void*> rooms;
     LevelLightShare::TakeOpeningRigRooms(rooms);
+    if (g_editRigAny.exchange(false, std::memory_order_relaxed)) {
+        std::vector<std::tuple<uintptr_t, int, int>> due;
+        {
+            std::lock_guard<std::mutex> lk(g_editRigMx);
+            due.swap(g_editRigRooms);
+        }
+        for (const auto& [tracker, story, id] : due)
+            if (LevelLightShare::TrackerLive(tracker))
+                if (const void* r = id ? LevelLightShare::RoomOf(tracker, story, id) : LevelLightShare::Room0Of(tracker, story)) rooms.push_back(r);
+    }
     if (rooms.empty()) return;
     std::sort(rooms.begin(), rooms.end());
     std::vector<BYTE*> rigs;
@@ -1174,6 +1213,12 @@ void OnPresent() {
 void SetAllObjects(bool on) { g_forceAll = on; }
 
 void RequestRigRefresh() { g_refreshRequested = true; }
+void RegatherRigsOfRoom(uintptr_t tracker, int story, int id) {
+    std::lock_guard<std::mutex> lk(g_editRigMx);
+    const std::tuple<uintptr_t, int, int> k{tracker, story, id};
+    if (g_editRigRooms.size() < 64 && std::find(g_editRigRooms.begin(), g_editRigRooms.end(), k) == g_editRigRooms.end()) g_editRigRooms.push_back(k);
+    g_editRigAny.store(true, std::memory_order_relaxed);
+}
 bool RigRefreshPending() { return g_refreshRequested.load(); }
 
 std::string RigOpeningNote(uintptr_t rig) {
@@ -1188,6 +1233,17 @@ std::string RigOpeningNote(uintptr_t rig) {
     std::string s = std::format(" | outdoor lamps through the room's openings at the rig's last gather ({:.1f} s ago):", (GetTickCount() - n.tick) / 1000.0);
     for (int i = 0; i < n.n; i++) s += std::format(" L{:08X} share {:.2f} {}", n.light[i], n.share[i], n.kept[i] ? "kept" : "under the cut");
     return s;
+}
+
+bool RigBox(uintptr_t rig, float centre[3], float half[3]) {
+    const float* pos = reinterpret_cast<const float*>(rig + 0x140);
+    if (!RigBoxExtents(pos, half)) return false;
+    __try {
+        centre[0] = pos[0], centre[1] = pos[1], centre[2] = pos[2];
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
 }
 
 const void* RigRoom(uintptr_t rig) {

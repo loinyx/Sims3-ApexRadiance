@@ -160,6 +160,7 @@ int ForEachRoom(bool (*visit)(unsigned char*, void*), void* ctx, int* queued, vo
     return static_cast<int>(Fixture::rooms.size());
 }
 bool StageAmbientBaseChange(unsigned char*, const float*, const float*, const float*, const float*) { return Fixture::stageBase; }
+bool ProbeRoomAmbient(unsigned char*, float*, float*, float&) { return false; } // (RetakeAmbient: not exercised here)
 bool HoldsAmbientBase(unsigned char*, const float*, const float*) { return Fixture::holdsBase; }
 bool StageUnlitAmbientChange(unsigned char*, const float*, bool& changed) { changed = Fixture::stageUnlit; return Fixture::stageUnlit; }
 void ApplyAmbientBaseChanges() { ++Fixture::applyGroups; }
